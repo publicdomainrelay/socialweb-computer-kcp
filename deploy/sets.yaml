@@ -278,6 +278,7 @@ sets:
             for: Ready
         files:
           - path: market-network/10-rbac.yaml
+          - path: apps/repo-pds/components-rbac.yaml
       - name: pds@market-network
         workspace: root:app
         files:

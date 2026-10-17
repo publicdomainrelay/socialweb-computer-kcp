@@ -34,6 +34,8 @@ type Set struct {
 	Scope   string  `json:"scope,omitempty"`
 	Phases  []Phase `json:"phases"`
 	Base    string  `json:"-"`
+
+	BaseCluster string `json:"-"`
 }
 
 const ScopeKcp = "kcp"

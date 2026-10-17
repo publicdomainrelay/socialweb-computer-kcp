@@ -27,6 +27,7 @@ import (
 	swcv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/deploy"
 	denov1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/internal/denokcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/tsbundle"
 )
 
@@ -170,6 +171,12 @@ func (s Set) RenderText(p Phase, values any) (string, []Text, error) {
 	}
 	if _, set := data["ServiceSuffix"]; !set {
 		data["ServiceSuffix"] = ServiceSuffix(ws)
+	}
+	if _, set := data["BaseCluster"]; !set {
+		data["BaseCluster"] = s.BaseCluster
+		if s.BaseCluster == "" {
+			data["BaseCluster"] = kcp.RootWorkspace
+		}
 	}
 	var out []Text
 	var entries map[string]tsbundle.EntrySpec

@@ -52,6 +52,7 @@ type networks struct {
 	mu      sync.Mutex
 	applied map[string]int64
 	pkiPEM  []byte
+	peers   string
 }
 
 func newNetworks(ctl *Controller) *networks {
@@ -429,6 +430,13 @@ func (n *networks) reconcile(ctx context.Context, u *unstructured.Unstructured) 
 	}
 	wg.Wait()
 	st.Apps = apps
+	var names []string
+	for _, a := range o.Spec.Apps {
+		names = append(names, a.Name)
+	}
+	if err := n.grantPeers(ctx, names); err != nil {
+		log.Warn("granting the child applications reads of each other's MarketIdentity objects", "err", err.Error())
+	}
 	allReady := true
 	for i, a := range apps {
 		if k := o.Spec.Apps[i].Kind; k == v1alpha1.ApplicationKindMarketRequester || k == v1alpha1.ApplicationKindSshGateway {

@@ -7,10 +7,13 @@ import (
 	"strings"
 	"time"
 
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/client-go/kubernetes"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 )
@@ -122,4 +125,86 @@ func (n *networks) stopAppPods(ctx context.Context, name string) error {
 			return ctx.Err()
 		}
 	}
+}
+
+const PeerReadRole = "market-network-peers"
+
+func (n *networks) grantPeers(ctx context.Context, names []string) error {
+	ri, err := n.ctl.client(n.ctl.c.workspace(), WorkspaceGVR)
+	if err != nil {
+		return err
+	}
+	ids := map[string]string{}
+	for _, name := range names {
+		u, err := ri.Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			continue
+		}
+		if id, _, _ := unstructured.NestedString(u.Object, "spec", "cluster"); id != "" {
+			ids[name] = id
+		}
+	}
+	key := fmt.Sprint(ids)
+	if n.peers == key {
+		return nil
+	}
+	for name := range ids {
+		var groups []rbacv1.Subject
+		for other, id := range ids {
+			if other != name {
+				groups = append(groups, rbacv1.Subject{Kind: rbacv1.GroupKind, APIGroup: rbacv1.GroupName, Name: "system:cluster:" + id})
+			}
+		}
+		slices.SortFunc(groups, func(a, b rbacv1.Subject) int { return strings.Compare(a.Name, b.Name) })
+		cs, err := kubernetes.NewForConfig(clusterConfig(n.ctl.restCfg, n.appWorkspace(name)))
+		if err != nil {
+			return err
+		}
+		role := &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: PeerReadRole}, Rules: []rbacv1.PolicyRule{{
+			APIGroups: []string{v1alpha1.GroupName}, Resources: []string{"marketidentities"}, Verbs: []string{"get", "list"}}}}
+		if err := upsertClusterRole(ctx, cs, role); err != nil {
+			return fmt.Errorf("the peer read role in %s: %w", n.appWorkspace(name), err)
+		}
+		for _, b := range []*rbacv1.ClusterRoleBinding{
+			{ObjectMeta: metav1.ObjectMeta{Name: PeerReadRole}, Subjects: groups,
+				RoleRef: rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: PeerReadRole}},
+			{ObjectMeta: metav1.ObjectMeta{Name: PeerReadRole + "-access"}, Subjects: groups,
+				RoleRef: rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "system:kcp:workspace:access"}},
+		} {
+			if err := upsertClusterRoleBinding(ctx, cs, b); err != nil {
+				return fmt.Errorf("the peer read binding %s in %s: %w", b.Name, n.appWorkspace(name), err)
+			}
+		}
+	}
+	n.peers = key
+	n.ctl.c.log().Info("every child application may read the MarketIdentity objects of the others", "workspaces", key)
+	return nil
+}
+
+func upsertClusterRole(ctx context.Context, cs kubernetes.Interface, want *rbacv1.ClusterRole) error {
+	cur, err := cs.RbacV1().ClusterRoles().Get(ctx, want.Name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		_, err = cs.RbacV1().ClusterRoles().Create(ctx, want, metav1.CreateOptions{FieldManager: FieldManager})
+		return err
+	}
+	if err != nil {
+		return err
+	}
+	cur.Rules = want.Rules
+	_, err = cs.RbacV1().ClusterRoles().Update(ctx, cur, metav1.UpdateOptions{FieldManager: FieldManager})
+	return err
+}
+
+func upsertClusterRoleBinding(ctx context.Context, cs kubernetes.Interface, want *rbacv1.ClusterRoleBinding) error {
+	cur, err := cs.RbacV1().ClusterRoleBindings().Get(ctx, want.Name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		_, err = cs.RbacV1().ClusterRoleBindings().Create(ctx, want, metav1.CreateOptions{FieldManager: FieldManager})
+		return err
+	}
+	if err != nil {
+		return err
+	}
+	cur.Subjects = want.Subjects
+	_, err = cs.RbacV1().ClusterRoleBindings().Update(ctx, cur, metav1.UpdateOptions{FieldManager: FieldManager})
+	return err
 }

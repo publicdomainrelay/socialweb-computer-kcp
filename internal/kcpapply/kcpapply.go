@@ -169,6 +169,13 @@ func (a *Applier) Apply(ctx context.Context, set manifests.Set, values any) (Rep
 		set.Base = a.opts.Base
 	}
 	rep := Report{DryRun: a.opts.DryRun}
+	if set.BaseCluster == "" && set.Scope != manifests.ScopeKcp && set.Base != "" && set.Base != "root" {
+		id, err := a.ClusterOf(ctx, set.Base)
+		if err != nil {
+			return rep, fmt.Errorf("kcpapply: set %s: the logical cluster of %s: %w", set.Name, set.Base, err)
+		}
+		set.BaseCluster = id
+	}
 	for _, p := range set.Phases {
 		pr, err := a.applyPhase(ctx, set, p, values)
 		rep.Phases = append(rep.Phases, pr)
@@ -213,6 +220,26 @@ func (a *Applier) applyPhase(ctx context.Context, set manifests.Set, p manifests
 		}
 	}
 	return pr, nil
+}
+
+func (a *Applier) ClusterOf(ctx context.Context, path string) (string, error) {
+	i := strings.LastIndex(path, ":")
+	if i < 0 {
+		return path, nil
+	}
+	dyn, err := dynamic.NewForConfig(a.ForWorkspace(path[:i]))
+	if err != nil {
+		return "", err
+	}
+	u, err := dyn.Resource(tenancyv1alpha1.SchemeGroupVersion.WithResource("workspaces")).Get(ctx, path[i+1:], metav1.GetOptions{})
+	if err != nil {
+		return "", err
+	}
+	id, _, _ := unstructured.NestedString(u.Object, "spec", "cluster")
+	if id == "" {
+		return "", fmt.Errorf("the workspace %s names no logical cluster yet", path)
+	}
+	return id, nil
 }
 
 func (a *Applier) ApplyObjects(ctx context.Context, workspace string, objs []manifests.Object) ([]Change, error) {
