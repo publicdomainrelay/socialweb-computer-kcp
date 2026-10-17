@@ -245,10 +245,13 @@ func Run(ctx context.Context, c Config, m hostsvc.Manager) error {
 
 func RunChild(ctx context.Context, c Config, l devinstance.Layout, deno denoruntime.Config, m hostsvc.Manager) error {
 	c.StateDir = l.StateDir
+	if err := os.MkdirAll(l.KcpDir(), 0o700); err != nil {
+		return err
+	}
 	if c.RootName == "" {
 		c.RootName = appctl.ChildRootName
 	}
-	c.log().Info("a gateway child application of a market network starts: its own kcp from the network's bootstrap layer, sets, root vault, members",
+	c.log().Info("a gateway child application of a market network starts: its workspace of the network's kcp, sets, root vault, members",
 		"state", c.StateDir, "instance", l.ID, "root", c.RootName)
 	return run(ctx, c, l, &deno, nil, m)
 }
@@ -291,7 +294,19 @@ func run(ctx context.Context, c Config, l devinstance.Layout, deno *denoruntime.
 type gateway struct {
 	c   Config
 	l   devinstance.Layout
+	kcp devinstance.Layout
+	ws  string
 	reg *listeners
+}
+
+func (g *gateway) adopt(rec devinstance.Record) {
+	g.kcp, g.ws = g.l, rec.BaseWorkspace
+	if rec.SharedKcp != "" {
+		g.kcp = devinstance.Layout{StateDir: rec.SharedKcp}
+	}
+	if g.ws == "" {
+		g.ws = appctl.DefaultWorkspace
+	}
 }
 
 func clusterConfig(base *rest.Config, ws string) *rest.Config {
@@ -302,11 +317,12 @@ func clusterConfig(base *rest.Config, ws string) *rest.Config {
 
 func (g *gateway) before(ctx context.Context, rec devinstance.Record) error {
 	started := time.Now()
+	g.adopt(rec)
 	restCfg, err := kcpserver.FrontRestConfig(rec.AdminKubeconfig)
 	if err != nil {
 		return err
 	}
-	ap, err := kcpapply.New(restCfg, kcpapply.Options{WaitTimeout: ApplyTimeout, Log: g.c.Log})
+	ap, err := kcpapply.New(restCfg, kcpapply.Options{WaitTimeout: ApplyTimeout, Base: g.ws, Log: g.c.Log})
 	if err != nil {
 		return err
 	}
@@ -330,7 +346,7 @@ func (g *gateway) before(ctx context.Context, rec devinstance.Record) error {
 	if err := writeMemberKubeconfig(g.activeSlotRoot(), rec.KcpURL, g.memberKubeconfig()); err != nil {
 		return err
 	}
-	if err := applyRoot(ctx, restCfg, g.rootName(), g.c.Spec); err != nil {
+	if err := applyRoot(ctx, restCfg, g.ws, g.rootName(), g.c.Spec); err != nil {
 		return err
 	}
 	g.c.log().Info("the sets and the Gateway root object are applied", "sets", Sets, "profile", g.c.Spec.Profile,
@@ -347,8 +363,8 @@ func (g *gateway) rootName() string {
 	return appctl.GatewayRootName
 }
 
-func applyRoot(ctx context.Context, restCfg *rest.Config, name string, spec v1alpha1.GatewaySpec) error {
-	dc, err := dynamic.NewForConfig(clusterConfig(restCfg, appctl.DefaultWorkspace))
+func applyRoot(ctx context.Context, restCfg *rest.Config, ws, name string, spec v1alpha1.GatewaySpec) error {
+	dc, err := dynamic.NewForConfig(clusterConfig(restCfg, ws))
 	if err != nil {
 		return err
 	}
@@ -377,7 +393,7 @@ func (g *gateway) rootVault(ctx context.Context, rec devinstance.Record) (vaultm
 	if err != nil {
 		return vaultmain.RootAccess{}, err
 	}
-	dc, err := dynamic.NewForConfig(clusterConfig(restCfg, appctl.DefaultWorkspace))
+	dc, err := dynamic.NewForConfig(clusterConfig(restCfg, g.ws))
 	if err != nil {
 		return vaultmain.RootAccess{}, err
 	}
@@ -437,14 +453,14 @@ func (g *gateway) applyRoot(ctx context.Context, rec devinstance.Record, vcfg va
 }
 
 func (g *gateway) activeSlotRoot() string {
-	s, err := kcpserver.ReadSlots(g.l.SlotsFile())
+	s, err := kcpserver.ReadSlots(g.kcp.SlotsFile())
 	if err != nil || s.Active == "" {
-		return g.l.SlotRoot(table.SlotA)
+		return g.kcp.SlotRoot(table.SlotA)
 	}
 	if r, ok := s.Slots[s.Active]; ok && r.Root != "" {
 		return r.Root
 	}
-	return g.l.SlotRoot(s.Active)
+	return g.kcp.SlotRoot(s.Active)
 }
 
 type member struct {
@@ -465,7 +481,7 @@ func (g *gateway) members(ctx context.Context, rec devinstance.Record) error {
 	if err := g.defaults(env, rec, cert, key); err != nil {
 		return err
 	}
-	vcfg := vaultmain.Config{KCPKubeconfig: rec.AdminKubeconfig, KCPRootDir: g.activeSlotRoot(), Workspace: appctl.DefaultWorkspace,
+	vcfg := vaultmain.Config{KCPKubeconfig: rec.AdminKubeconfig, KCPRootDir: g.activeSlotRoot(), Workspace: g.ws,
 		Server:  vaultlayout.RootServerName,
 		TLSCert: cert, TLSKey: key}
 	access, err := g.applyRoot(ctx, rec, vcfg)

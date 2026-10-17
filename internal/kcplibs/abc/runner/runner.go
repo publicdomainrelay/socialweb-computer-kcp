@@ -26,6 +26,8 @@ const (
 type PodRequest struct {
 	Name string
 
+	Service string
+
 	LogicalCluster string
 
 	DenoJSON string

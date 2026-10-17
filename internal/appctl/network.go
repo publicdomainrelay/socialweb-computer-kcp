@@ -48,11 +48,10 @@ var networkServices = []service{
 }
 
 type networks struct {
-	ctl        *Controller
-	mu         sync.Mutex
-	applied    map[string]int64
-	frontMoved sync.Map
-	pkiPEM     []byte
+	ctl     *Controller
+	mu      sync.Mutex
+	applied map[string]int64
+	pkiPEM  []byte
 }
 
 func newNetworks(ctl *Controller) *networks {
@@ -154,7 +153,7 @@ func (n *networks) services(ctx context.Context) (serviceReport, error) {
 const (
 	ConditionServicesReady  = "ServicesReady"
 	ConditionVerifierPassed = "VerifierPassed"
-	ConditionOwnKcp         = "OwnKcp"
+	ConditionOneKcp         = "OneKcp"
 )
 
 func setCondition(conds *[]metav1.Condition, gen int64, t string, ok bool, reason, msg string) {
@@ -165,32 +164,27 @@ func setCondition(conds *[]metav1.Condition, gen int64, t string, ok bool, reaso
 	meta.SetStatusCondition(conds, metav1.Condition{Type: t, Status: s, Reason: reason, Message: msg, ObservedGeneration: gen})
 }
 
-func (n *networks) ownKcp(apps []v1alpha1.NetworkAppStatus) []string {
+func (n *networks) oneKcp(apps []v1alpha1.NetworkAppStatus) []string {
 	front, _, _ := strings.Cut(strings.TrimSuffix(n.ctl.restCfg.Host, "/"), "/clusters/")
-	fronts := map[string]string{front: "the network"}
-	roots := map[string]string{n.ctl.c.Layout.KcpDir(): "the network"}
-	var shared []string
+	workspaces := map[string]string{n.ctl.c.workspace(): "the network"}
+	var wrong []string
 	for _, a := range apps {
 		if a.KcpUrl == "" {
 			continue
 		}
-		if a.KcpRoot == "" {
-			shared = append(shared, a.Name+" reports no kcp root")
+		if f, _, _ := strings.Cut(strings.TrimSuffix(a.KcpUrl, "/"), "/clusters/"); f != front {
+			wrong = append(wrong, fmt.Sprintf("%s reports the kcp %s, not the network's %s", a.Name, f, front))
+		}
+		if a.Workspace == "" {
+			wrong = append(wrong, a.Name+" reports no workspace")
 			continue
 		}
-		f, _, _ := strings.Cut(strings.TrimSuffix(a.KcpUrl, "/"), "/clusters/")
-		if other, ok := fronts[f]; ok {
-			shared = append(shared, fmt.Sprintf("%s shares the kcp front %s with %s", a.Name, f, other))
+		if other, ok := workspaces[a.Workspace]; ok {
+			wrong = append(wrong, fmt.Sprintf("%s shares the workspace %s with %s", a.Name, a.Workspace, other))
 		}
-		if other, ok := roots[a.KcpRoot]; ok || strings.HasPrefix(a.KcpRoot, n.ctl.c.Layout.KcpDir()+string(filepath.Separator)) {
-			if other == "" {
-				other = "the network"
-			}
-			shared = append(shared, fmt.Sprintf("%s shares the kcp root %s with %s", a.Name, a.KcpRoot, other))
-		}
-		fronts[f], roots[a.KcpRoot] = a.Name, a.Name
+		workspaces[a.Workspace] = a.Name
 	}
-	return shared
+	return wrong
 }
 
 func portFrom(address string) (string, error) {
@@ -454,20 +448,20 @@ func (n *networks) reconcile(ctx context.Context, u *unstructured.Unstructured) 
 	default:
 		setCondition(&st.Conditions, o.Generation, ConditionVerifierPassed, false, "Phase"+rep.verifier, "alice/verifier is "+rep.verifier)
 	}
-	if shared := n.ownKcp(apps); len(shared) > 0 {
-		setCondition(&st.Conditions, o.Generation, ConditionOwnKcp, false, "Shared", strings.Join(shared, "; "))
+	if wrong := n.oneKcp(apps); len(wrong) > 0 {
+		setCondition(&st.Conditions, o.Generation, ConditionOneKcp, false, "Apart", strings.Join(wrong, "; "))
 	} else {
-		setCondition(&st.Conditions, o.Generation, ConditionOwnKcp, true, "Distinct", "the network and every child report their own kcp front and kcp root")
+		setCondition(&st.Conditions, o.Generation, ConditionOneKcp, true, "Workspaces", "every child application runs in its own workspace of the network's kcp")
 	}
 	if !allReady {
 		return write(v1alpha1.ApplicationPhaseProvisioning, "the network's services are ready; waiting for its child applications")
 	}
-	for _, t := range []string{ConditionServicesReady, ConditionVerifierPassed, ConditionOwnKcp} {
+	for _, t := range []string{ConditionServicesReady, ConditionVerifierPassed, ConditionOneKcp} {
 		if c := meta.FindStatusCondition(st.Conditions, t); c == nil || c.Status != metav1.ConditionTrue {
 			return write(v1alpha1.ApplicationPhaseProvisioning, "the child applications are ready; waiting for condition "+t)
 		}
 	}
-	return write(v1alpha1.ApplicationPhaseReady, fmt.Sprintf("%d service(s) and %d child application(s), each with its own kcp, are ready", len(rep.components), len(apps)))
+	return write(v1alpha1.ApplicationPhaseReady, fmt.Sprintf("%d service(s) and %d child application(s), each in its own workspace of one kcp, are ready", len(rep.components), len(apps)))
 }
 
 func (n *networks) ensureApp(ctx context.Context, app v1alpha1.NetworkApp, value v1alpha1.MarketNetworkValue, pdsURL, aliceURL string, bidderDids []string) v1alpha1.NetworkAppStatus {
@@ -504,12 +498,7 @@ func (n *networks) ensureApp(ctx context.Context, app v1alpha1.NetworkApp, value
 	if err != nil {
 		return fail(err)
 	}
-	out.KcpUrl = rec.KcpURL
-	for _, u := range rec.Units {
-		if strings.HasPrefix(u.Role, "kcp-") {
-			out.KcpRoot = filepath.Join(c.layout.KcpDir(), "slot-"+strings.TrimPrefix(u.Role, "kcp-"))
-		}
-	}
+	out.KcpUrl, out.Workspace = rec.KcpURL, rec.BaseWorkspace
 	meta := metav1.ObjectMeta{Name: ChildRootName}
 	var root any
 	switch app.Kind {
@@ -540,7 +529,7 @@ func (n *networks) ensureApp(ctx context.Context, app v1alpha1.NetworkApp, value
 	}
 	if root != nil {
 		if err := applyRoot(ctx, rec, app.Kind, root); err != nil {
-			return fail(fmt.Errorf("applying the root object into %s's own kcp: %w", c.id, err))
+			return fail(fmt.Errorf("applying the root object into %s's workspace %s: %w", c.id, rec.BaseWorkspace, err))
 		}
 	}
 	rs, found, err := readRoot(ctx, rec, app.Kind)

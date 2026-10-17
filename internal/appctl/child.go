@@ -24,7 +24,6 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/assets"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap/table"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostos"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostprocess"
@@ -54,6 +53,9 @@ type child struct {
 func (n *networks) child(app v1alpha1.NetworkApp) (child, error) {
 	if !appName.MatchString(app.Name) {
 		return child{}, fmt.Errorf("apps[].name %q is not a DNS label", app.Name)
+	}
+	if err := checkAppName(app.Name); err != nil {
+		return child{}, err
 	}
 	id := n.ctl.c.Layout.ID + "-" + app.Name
 	l, err := devinstance.NewLayout(id, filepath.Join(n.ctl.c.Layout.StateDir, AppsDir), filepath.Join(n.ctl.c.Layout.RuntimeDir, AppsDir))
@@ -146,7 +148,7 @@ func (n *networks) coreLive(ctx context.Context, c child) bool {
 
 func (n *networks) placeChild(ctx context.Context, c child, gw *devinstance.GatewayChild) (devinstance.Record, error) {
 	var rec devinstance.Record
-	if devinstance.ReadJSON(c.layout.Record, &rec) == nil && rec.Ready && n.coreLive(ctx, c) && sameSpec(rec.Gateway, gw) {
+	if devinstance.ReadJSON(c.layout.Record, &rec) == nil && rec.Ready && rec.SharedKcp != "" && n.coreLive(ctx, c) && sameSpec(rec.Gateway, gw) {
 		return rec, nil
 	}
 	parent, err := n.ctl.c.Record()
@@ -157,6 +159,9 @@ func (n *networks) placeChild(ctx context.Context, c child, gw *devinstance.Gate
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			return rec, err
 		}
+	}
+	if err := n.ensureAppWorkspace(ctx, c.app.Name); err != nil {
+		return rec, err
 	}
 	if err := devinstance.EnsureChildWorkspace(ctx, n.ctl.c.Kubeconfig, c.id, devinstance.ChildWorkspaceReady); err != nil {
 		return rec, err
@@ -174,7 +179,8 @@ func (n *networks) placeChild(ctx context.Context, c child, gw *devinstance.Gate
 		rec = devinstance.Record{Created: time.Now().UTC()}
 	}
 	rec.Layout, rec.Profile, rec.Backend, rec.Devsup = c.layout, bootstrap.ProfileQuick, hostsvc.BackendProc, parent.Devsup
-	rec.Executables, rec.SourceRoot, rec.BaseWorkspace = parent.Executables, parent.SourceRoot, ""
+	rec.Executables, rec.SourceRoot, rec.BaseWorkspace = parent.Executables, parent.SourceRoot, n.appWorkspace(c.app.Name)
+	rec.SharedKcp, rec.AdminKubeconfig, rec.KcpURL, rec.KineURL, rec.Units = parent.Layout.StateDir, parent.AdminKubeconfig, parent.KcpURL, "", nil
 	rec.OpenBao, rec.Host, rec.Worktree = nil, false, ""
 	if rec.VM, err = ChildVM(c.app, c.layout, parent); err != nil {
 		return rec, err
@@ -187,20 +193,11 @@ func (n *networks) placeChild(ctx context.Context, c child, gw *devinstance.Gate
 		return rec, err
 	}
 	exe := parent.Executables["socialweb-computer"].Path
-	bcfg := bootstrap.Config{Layout: c.layout, KcpPath: rec.Executables["kcp"].Path, KinePath: rec.Executables["kine"].Path,
-		Exe: exe, ReadyTimeout: n.ctl.c.ReadyTimeout, Log: n.ctl.c.log().With("child", c.id)}
-	if u := rec.Unit(table.RoleFront); u != nil && u.Port > 0 && !n.moved(c.id) {
-		bcfg.FrontAddress = fmt.Sprintf("127.0.0.1:%d", u.Port)
-	}
+	bcfg := bootstrap.Config{Layout: c.layout, Exe: exe, ReadyTimeout: n.ctl.c.ReadyTimeout, Log: n.ctl.c.log().With("child", c.id)}
 	started := time.Now()
 	if err := bootstrap.Ensure(ctx, remote, bcfg, &rec); err != nil {
-		devinstance.WriteJSON(c.layout.Record, rec)
-		if bcfg.FrontAddress != "" {
-			n.frontMoved.Store(c.id, true)
-		}
 		return rec, fmt.Errorf("the bootstrap layer of %s: %w", c.id, err)
 	}
-	n.frontMoved.Delete(c.id)
 	if err := devinstance.WriteJSON(c.layout.Record, rec); err != nil {
 		return rec, err
 	}
@@ -217,8 +214,8 @@ func (n *networks) placeChild(ctx context.Context, c child, gw *devinstance.Gate
 		return rec, err
 	}
 	devinstance.ReadJSON(c.layout.Record, &rec)
-	n.ctl.c.log().Info("a child application runs its own kcp", "child", c.id, "kind", c.app.Kind, "kcp", rec.KcpURL,
-		"workspace", devinstance.ChildWorkspace(c.id), "seconds", time.Since(started).Seconds())
+	n.ctl.c.log().Info("a child application runs in its workspace of the network's kcp", "child", c.id, "kind", c.app.Kind, "kcp", rec.KcpURL,
+		"workspace", rec.BaseWorkspace, "seconds", time.Since(started).Seconds())
 	return rec, nil
 }
 
@@ -255,7 +252,11 @@ func childClient(rec devinstance.Record, kind v1alpha1.ApplicationKind) (dynamic
 	if err != nil {
 		return nil, err
 	}
-	dc, err := dynamic.NewForConfig(clusterConfig(restCfg, DefaultWorkspace))
+	ws := rec.BaseWorkspace
+	if ws == "" {
+		ws = DefaultWorkspace
+	}
+	dc, err := dynamic.NewForConfig(clusterConfig(restCfg, ws))
 	if err != nil {
 		return nil, err
 	}
@@ -302,7 +303,7 @@ func readRoot(ctx context.Context, rec devinstance.Record, kind v1alpha1.Applica
 	return st, true, nil
 }
 
-const StoppedMessage = "stopped: its kcp, kine and core are down; its state dir is kept and clearing spec.apps[].stopped starts them again from it"
+const StoppedMessage = "stopped: its core and its DenoPods are down; its workspace and state dir are kept and clearing spec.apps[].stopped starts them again from it"
 
 func (n *networks) liveUnits(ctx context.Context, c child) ([]hostsvc.UnitStatus, error) {
 	units, err := devinstance.ChildUnits(ctx, n.ctl.c.Manager, c.id)
@@ -328,6 +329,9 @@ func (n *networks) stopChild(ctx context.Context, c child) error {
 		return nil
 	}
 	log := n.ctl.c.log().With("child", c.id)
+	if err := n.stopAppPods(ctx, c.app.Name); err != nil {
+		return err
+	}
 	if err := devinstance.DeleteChildWorkspace(ctx, n.ctl.c.Kubeconfig, c.id); err != nil {
 		return err
 	}
@@ -378,7 +382,7 @@ func (n *networks) teardownChild(ctx context.Context, c child) error {
 					break
 				}
 				if time.Now().After(deadline) {
-					log.Warn("the child's root object did not go within the timeout; its kcp is taken down anyway", "kind", kind)
+					log.Warn("the child's root object did not go within the timeout; its workspace is deleted anyway", "kind", kind)
 					break
 				}
 				if !sleep(ctx, ChildPoll) {
@@ -386,6 +390,9 @@ func (n *networks) teardownChild(ctx context.Context, c child) error {
 				}
 			}
 		}
+	}
+	if err := n.deleteAppWorkspace(ctx, c.app.Name); err != nil {
+		log.Warn("the child's workspace did not go; its core is stopped anyway", "workspace", n.appWorkspace(c.app.Name), "err", err.Error())
 	}
 	if err := devinstance.DeleteChildWorkspace(ctx, n.ctl.c.Kubeconfig, c.id); err != nil {
 		return err
@@ -413,6 +420,6 @@ func (n *networks) teardownChild(ctx context.Context, c child) error {
 		log.Warn("stopped processes of the child its units left behind", "pids", fmt.Sprint(pids))
 	}
 	err := errors.Join(assets.RemoveTree(c.layout.StateDir), assets.RemoveTree(c.layout.RuntimeDir))
-	log.Info("a child application is gone: its root object, its kcp and its state", "err", fmt.Sprint(err))
+	log.Info("a child application is gone: its root object, its workspace, its core and its state", "err", fmt.Sprint(err))
 	return err
 }

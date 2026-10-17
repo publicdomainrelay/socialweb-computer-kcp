@@ -404,6 +404,10 @@ func Ensure(ctx context.Context, m hostsvc.Manager, cfg Config, rec *devinstance
 	if len(rec.StandIns) > 0 {
 		return ensureStandIns(ctx, m, cfg, rec)
 	}
+	if rec.SharedKcp != "" {
+		rec.Ready, rec.Updated = true, time.Now().UTC()
+		return nil
+	}
 	l := cfg.Layout
 	log := cfg.log()
 	app, err := cfg.App(rec)

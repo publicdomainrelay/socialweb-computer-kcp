@@ -110,10 +110,9 @@ func (n *Network) waitIdentity(ctx context.Context, i int, want vmIdentity, time
 }
 
 func (n *Network) issuerURLs(i int) []string {
-	r := n.h.As(context.Background(), "sh", "-c", `cat "$1"/denokcp/runs/pod-*/std*.txt 2>/dev/null; true`, "sh", n.bidderDir(i))
 	seen := map[string]bool{}
 	var out []string
-	for _, m := range issuerURLPattern.FindAllStringSubmatch(r.Stdout, -1) {
+	for _, m := range issuerURLPattern.FindAllStringSubmatch(n.appRunLogs(n.bidderName(i)), -1) {
 		if !seen[m[1]] {
 			seen[m[1]] = true
 			out = append(out, m[1])

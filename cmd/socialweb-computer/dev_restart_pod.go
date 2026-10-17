@@ -24,6 +24,7 @@ import (
 	denov1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/internal/denokcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/denoruntime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/tsbundle"
 )
@@ -97,6 +98,7 @@ func (a *app) resolvePodTarget(ctx context.Context, l devinstance.Layout, rec de
 		return t, fmt.Errorf("%q is not [<app>/][<workspace>:]<denopod>", target)
 	}
 	var comps []apiComponent
+	base := ""
 	if rec.Profile == bootstrap.ProfileMarketNetwork && rec.AdminKubeconfig != "" {
 		n, err := appctl.ReadNetwork(ctx, rec.AdminKubeconfig)
 		if err != nil {
@@ -124,7 +126,7 @@ func (a *app) resolvePodTarget(ctx context.Context, l devinstance.Layout, rec de
 				if err := devinstance.ReadJSON(cl.Record, &crec); err != nil {
 					return t, fmt.Errorf("network child %s (instance %s) has no record: %w", app, ap.Instance, err)
 				}
-				t.Instance, t.kubeconfig, t.stateDir = ap.Instance, crec.AdminKubeconfig, crec.Layout.StateDir
+				t.Instance, t.kubeconfig, t.stateDir, base = ap.Instance, crec.AdminKubeconfig, crec.Layout.StateDir, crec.BaseWorkspace
 				for _, c := range ap.Components {
 					comps = append(comps, apiComponent{c.Kind, c.Name, c.Workspace})
 				}
@@ -137,7 +139,7 @@ func (a *app) resolvePodTarget(ctx context.Context, l devinstance.Layout, rec de
 		return t, fmt.Errorf("instance %s is not a market network; name the DenoPod as [<workspace>:]<denopod>", l.ID)
 	}
 	if ws != "" {
-		t.Workspace = ws
+		t.Workspace = manifests.Rebase(base, ws)
 		return t, nil
 	}
 	found := podComponents(comps, "", name)

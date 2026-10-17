@@ -207,22 +207,26 @@ func SummaryOf(c *v1alpha1.ComputeContract) *ContractSummary {
 }
 
 type Kcp struct {
-	rest *rest.Config
-	dyn  dynamic.Interface
+	rest      *rest.Config
+	dyn       dynamic.Interface
+	workspace string
 }
 
-func OpenKcp(kubeconfig string) (*Kcp, error) {
+func OpenKcp(kubeconfig, workspace string) (*Kcp, error) {
 	cfg, err := kcpserver.FrontRestConfig(kubeconfig)
 	if err != nil {
 		return nil, err
 	}
+	if workspace == "" {
+		workspace = appctl.DefaultWorkspace
+	}
 	root := rest.CopyConfig(cfg)
-	root.Host = strings.TrimSuffix(cfg.Host, "/") + "/clusters/" + appctl.DefaultWorkspace
+	root.Host = strings.TrimSuffix(cfg.Host, "/") + "/clusters/" + workspace
 	dc, err := dynamic.NewForConfig(root)
 	if err != nil {
 		return nil, err
 	}
-	return &Kcp{rest: cfg, dyn: dc}, nil
+	return &Kcp{rest: cfg, dyn: dc, workspace: workspace}, nil
 }
 
 func fromUnstructured(u *unstructured.Unstructured, into any) error {
@@ -389,7 +393,7 @@ func (k *Kcp) Identities() (*kcpclient.MarketIdentities, error) {
 	if err != nil {
 		return nil, err
 	}
-	return c.MarketIdentities(appctl.DefaultWorkspace)
+	return c.MarketIdentities(k.workspace)
 }
 
 func (k *Kcp) WaitIdentityObject(ctx context.Context, timeout time.Duration) error {

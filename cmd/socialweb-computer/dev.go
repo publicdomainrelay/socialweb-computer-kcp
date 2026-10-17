@@ -354,7 +354,7 @@ func bringUp(ctx context.Context, a *app, vals clicfg.Values, host bool) (upRepo
 	}
 	composes := profile == bootstrap.ProfileMarketNetwork
 	if composes && (host || parent != "") {
-		return upReport{}, a.fail(exitRefused, "%s: --profile %s is an application of its own whose children get their own kcp; it neither nests under a parent nor is a dev host", verb, profile)
+		return upReport{}, a.fail(exitRefused, "%s: --profile %s is an application of its own whose children are workspaces of its kcp; it neither nests under a parent nor is a dev host", verb, profile)
 	}
 	var networkOverlay []byte
 	if f := vals.String("app-values"); f != "" {
@@ -934,9 +934,11 @@ func runDevCore(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 		return a.fail(exitRefused, "internal dev-core: ready-timeout: %v", err)
 	}
 	os.Setenv(denoruntime.WatchListEnv, "false")
-	deno, err := a.coreDenoRuntime(vals, rec, timeout)
-	if err != nil {
-		return a.fail(exitFailed, "internal dev-core: %v", err)
+	var deno denoruntime.Config
+	if rec.SharedKcp == "" {
+		if deno, err = a.coreDenoRuntime(vals, rec, timeout); err != nil {
+			return a.fail(exitFailed, "internal dev-core: %v", err)
+		}
 	}
 	if rec.Profile == bootstrap.ProfileMarketNetwork && rec.OpenBao == nil {
 		deno.OpenBaoFrom = appctl.NetworkOpenBao(rec.AdminKubeconfig, rec.BaseWorkspace)

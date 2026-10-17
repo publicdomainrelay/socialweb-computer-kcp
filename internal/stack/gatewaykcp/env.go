@@ -11,7 +11,6 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/deploy"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/appctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostprocess"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/pgunit"
 )
@@ -99,7 +98,7 @@ func (g *gateway) defaults(e *env, rec devinstance.Record, cert, key string) err
 	}
 	e.dflt("SOCIALWEB_GATEWAY_PLC_URL", DefaultPLC)
 	e.set("SOCIALWEB_CLUSTERPROVIDER_UNIT_PREFIX", g.l.Names().HostProcessPrefix())
-	e.set("SOCIALWEB_CLUSTERPROVIDER_HOSTPROCESS_WORKSPACE", hostprocess.DefaultWorkspace)
+	e.set("SOCIALWEB_CLUSTERPROVIDER_HOSTPROCESS_WORKSPACE", g.ws)
 	e.set("SOCIALWEB_CLUSTERPROVIDER_MOUNT_CONTEXT", kcpclient.ShardAdminContext)
 	e.dflt("SOCIALWEB_CLUSTERPROVIDER_STATE_DIR", filepath.Join(state, "clusterprovider"))
 	e.dflt("SOCIALWEB_CLUSTERPROVIDER_VAULT_STATE_DIR", state)

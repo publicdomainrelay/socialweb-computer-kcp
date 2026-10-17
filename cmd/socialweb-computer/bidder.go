@@ -327,7 +327,7 @@ func (r *bidderRun) inNetwork(ctx context.Context) int {
 		if err := request.AddToNetwork(ctx, netRec.AdminKubeconfig, app); err != nil {
 			return r.a.fail(exitFailed, "run bidder: %v", err)
 		}
-		r.log("the market network places the bidder's own kcp", "network", r.network, "name", name, "computeVMHandle", appctl.KcpHandle(app))
+		r.log("the market network places the bidder in its workspace of the network's kcp", "network", r.network, "name", name, "computeVMHandle", appctl.KcpHandle(app))
 	case cur.Message == appctl.StoppedMessage:
 		if err := request.SetStopped(ctx, netRec.AdminKubeconfig, name, false); err != nil {
 			return r.a.fail(exitFailed, "run bidder: %v", err)

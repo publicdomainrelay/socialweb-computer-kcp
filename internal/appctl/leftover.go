@@ -9,11 +9,6 @@ import (
 	"time"
 )
 
-func (n *networks) moved(id string) bool {
-	_, ok := n.frontMoved.Load(id)
-	return ok
-}
-
 func processesUnder(dir string) []int {
 	entries, err := os.ReadDir("/proc")
 	if err != nil {

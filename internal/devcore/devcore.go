@@ -128,7 +128,7 @@ func Run(ctx context.Context, cfg Config, m hostsvc.Manager) error {
 		}
 	}
 	go logcap.Keep(ctx, LogCapConfig(l, log))
-	if cfg.DenoRuntime != nil {
+	if cfg.DenoRuntime != nil && rec.SharedKcp == "" {
 		go denoruntime.Supervise(ctx, *cfg.DenoRuntime)
 	}
 	if len(rec.StandIns) == 0 && rec.AdminKubeconfig != "" {
@@ -149,12 +149,14 @@ func Run(ctx context.Context, cfg Config, m hostsvc.Manager) error {
 			ac.TTLReport = tc.Report
 			go ttlctl.Supervise(ctx, tc)
 		}
-		if sc, err := StoreMaintConfig(bcfg, rec, log); err != nil {
-			log.Warn("the store maintenance does not start", "err", err.Error())
-		} else {
-			mon := storemaint.New(sc)
-			ac.StoreUsage = mon.Usage
-			go mon.Run(ctx)
+		if rec.SharedKcp == "" {
+			if sc, err := StoreMaintConfig(bcfg, rec, log); err != nil {
+				log.Warn("the store maintenance does not start", "err", err.Error())
+			} else {
+				mon := storemaint.New(sc)
+				ac.StoreUsage = mon.Usage
+				go mon.Run(ctx)
+			}
 		}
 		go appctl.Supervise(ctx, ac)
 	}

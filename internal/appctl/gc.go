@@ -103,7 +103,7 @@ func (ctl *Controller) gcWorkspaces(ctx context.Context) []string {
 	}
 	for _, w := range list.Items {
 		name := w.GetName()
-		if name == providerWS || name == denoProviderWS || w.GetDeletionTimestamp() != nil {
+		if _, app := w.GetLabels()[AppWorkspaceLabel]; app || name == providerWS || name == denoProviderWS || w.GetDeletionTimestamp() != nil {
 			continue
 		}
 		if phase, _, _ := unstructured.NestedString(w.Object, "status", "phase"); phase != "Ready" {

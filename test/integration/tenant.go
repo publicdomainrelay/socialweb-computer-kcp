@@ -171,7 +171,7 @@ func (n *Network) openTenant(gw, name string) (*Tenant, error) {
 	if err != nil {
 		return nil, err
 	}
-	kc, err := n.read(filepath.Join(gw, "kcp", "admin.kubeconfig"))
+	kc, err := n.read(n.Up.AdminKubeconfig)
 	if err != nil {
 		return nil, err
 	}

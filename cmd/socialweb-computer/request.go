@@ -253,7 +253,7 @@ func (r *requestRun) childRecord(netLayout devinstance.Layout, instance string) 
 
 func (r *requestRun) start(ctx context.Context, fresh bool) error {
 	started := time.Now()
-	var kubeconfig string
+	var kubeconfig, workspace string
 	switch r.inv.Mode {
 	case request.ModeNetwork:
 		netLayout, netRec, err := r.networkLayout()
@@ -269,7 +269,7 @@ func (r *requestRun) start(ctx context.Context, fresh bool) error {
 		} else if err := request.SetStopped(ctx, netRec.AdminKubeconfig, r.inv.Name, false); err != nil {
 			return err
 		}
-		r.log("the market network places the invocation's kcp", "network", r.inv.Network)
+		r.log("the market network places the invocation in its workspace of the network's kcp", "network", r.inv.Network)
 		app, err := request.WaitNetworkApp(ctx, netRec.AdminKubeconfig, r.inv.Name, r.networkTimeout, func(a v1alpha1.NetworkAppStatus) bool {
 			return a.Instance != "" && a.KcpUrl != "" && a.Message != appctl.StoppedMessage && a.Phase != v1alpha1.ApplicationPhasePending
 		}, func(a v1alpha1.NetworkAppStatus) {
@@ -284,7 +284,7 @@ func (r *requestRun) start(ctx context.Context, fresh bool) error {
 			return err
 		}
 		r.inv.Instance, r.summary.Instance, r.summary.KcpURL = app.Instance, app.Instance, rec.KcpURL
-		kubeconfig = rec.AdminKubeconfig
+		kubeconfig, workspace = rec.AdminKubeconfig, rec.BaseWorkspace
 	default:
 		vals := r.vals.With("instance", r.inv.Name).With("profile", bootstrap.ProfileQuick).
 			With("state-dir", request.Dir(r.stateRoot, r.inv.Name))
@@ -296,7 +296,7 @@ func (r *requestRun) start(ctx context.Context, fresh bool) error {
 		r.inv.Instance, r.summary.Instance, r.summary.KcpURL = up.Instance, up.Instance, up.KcpURL
 		kubeconfig = up.AdminKubeconfig
 	}
-	k, err := request.OpenKcp(kubeconfig)
+	k, err := request.OpenKcp(kubeconfig, workspace)
 	if err != nil {
 		return err
 	}
@@ -308,7 +308,7 @@ func (r *requestRun) start(ctx context.Context, fresh bool) error {
 	}
 	r.summary.KcpColdSeconds = time.Since(started).Seconds()
 	r.summary.KcpRunning = true
-	r.log("the invocation's own kcp runs", "kcp", r.summary.KcpURL, "instance", r.inv.Instance, "coldSeconds", r.summary.KcpColdSeconds)
+	r.log("the invocation's kcp runs", "kcp", r.summary.KcpURL, "workspace", workspace, "instance", r.inv.Instance, "coldSeconds", r.summary.KcpColdSeconds)
 	return request.WriteInvocation(r.inv)
 }
 

@@ -179,7 +179,7 @@ func (r *gatewaySshRun) inNetwork(ctx context.Context) int {
 		if err := request.AddToNetwork(ctx, netRec.AdminKubeconfig, app); err != nil {
 			return r.a.fail(exitFailed, "run gateway ssh: %v", err)
 		}
-		r.log("the market network places the ssh gateway's own kcp", "network", r.network, "name", name)
+		r.log("the market network places the ssh gateway in its workspace of the network's kcp", "network", r.network, "name", name)
 	case cur.Message == appctl.StoppedMessage:
 		if err := request.SetStopped(ctx, netRec.AdminKubeconfig, name, false); err != nil {
 			return r.a.fail(exitFailed, "run gateway ssh: %v", err)

@@ -26,7 +26,7 @@ const HostProcessApplyTimeout = time.Minute
 
 func Mirrors(bcfg bootstrap.Config, l devinstance.Layout) []hostprocess.Mirror {
 	var rec devinstance.Record
-	if err := devinstance.ReadJSON(l.Record, &rec); err != nil {
+	if err := devinstance.ReadJSON(l.Record, &rec); err != nil || rec.SharedKcp != "" {
 		return nil
 	}
 	app, err := bcfg.App(&rec)

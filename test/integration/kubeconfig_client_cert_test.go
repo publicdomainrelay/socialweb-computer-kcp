@@ -187,7 +187,7 @@ func TestKubeconfigClientCertificateWithoutCredentialHelper(t *testing.T) {
 	}
 
 	gwDir := n.GatewayDir()
-	r := n.h.As(ctx, "grep", "-rl", "-e", "PRIVATE KEY", "-e", "client-key-data", filepath.Join(gwDir, "logs"), filepath.Join(gwDir, "denokcp", "runs"))
+	r := n.h.As(ctx, "grep", "-rl", "-e", "PRIVATE KEY", "-e", "client-key-data", filepath.Join(gwDir, "logs"), n.runsDir())
 	if r.Code > 1 {
 		t.Fatalf("the leak scan failed: exit %d: %s", r.Code, r.Tail(3))
 	}

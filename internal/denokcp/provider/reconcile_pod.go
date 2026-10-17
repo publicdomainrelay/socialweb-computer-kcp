@@ -243,6 +243,7 @@ func (p *Provider) podRequest(ctx context.Context, ref Ref, tmpl *v1alpha1.DenoP
 	}
 	req := runner.PodRequest{
 		Name:           ref.Name,
+		Service:        p.serviceResolver().Name(ctx, ref.Name, ref.Namespace, ref.LogicalCluster),
 		LogicalCluster: ref.LogicalCluster,
 		DenoJSON:       string(tmpl.DenoJSON.Raw),
 		DenoLock:       tmpl.DenoLock,

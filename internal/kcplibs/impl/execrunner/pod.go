@@ -22,6 +22,8 @@ const DefaultResultFile = "result.json"
 
 const PortFileName = "port-bound-to"
 
+const PodFile = "service.txt"
+
 type PodOptions struct {
 	DenoBin string
 
@@ -82,7 +84,7 @@ func NewPod(opts PodOptions) (*Pod, error) {
 }
 
 func (p *Pod) Start(_ context.Context, req runner.PodRequest) (string, error) {
-	files := map[string][]byte{"main.ts": []byte(req.Script)}
+	files := map[string][]byte{"main.ts": []byte(req.Script), PodFile: []byte(req.Service + "\n")}
 	if req.DenoJSON != "" {
 		files["deno.json"] = []byte(req.DenoJSON)
 	}

@@ -227,6 +227,7 @@ type Record struct {
 	Profile         string                `json:"profile"`
 	Backend         hostsvc.Backend       `json:"backend"`
 	BaseWorkspace   string                `json:"baseWorkspace"`
+	SharedKcp       string                `json:"sharedKcp,omitempty"`
 	Created         time.Time             `json:"created"`
 	Updated         time.Time             `json:"updated"`
 	Devsup          Devsup                `json:"devsup"`

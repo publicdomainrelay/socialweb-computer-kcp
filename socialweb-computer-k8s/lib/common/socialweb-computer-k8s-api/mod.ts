@@ -505,7 +505,7 @@ export interface NetworkAppStatus {
   kind: ApplicationKind;
   instance?: string;
   kcpUrl?: string;
-  kcpRoot?: string;
+  workspace?: string;
   phase?: ApplicationPhase;
   message?: string;
   did?: string;
@@ -935,7 +935,7 @@ export const MARKET_NETWORK_RESOURCE: ApiResource = {
   listKind: "MarketNetworkList",
   plural: "marketnetworks",
   singular: "marketnetwork",
-  schema: "v1alpha1-9.marketnetworks.socialweb.computer",
+  schema: "v1alpha1-10.marketnetworks.socialweb.computer",
   export: "applications",
 };
 
@@ -3033,9 +3033,6 @@ const SHAPES: Readonly<Record<ApiTypeName, Shape>> = {
       "instance": {
         "type": "string"
       },
-      "kcpRoot": {
-        "type": "string"
-      },
       "kcpUrl": {
         "type": "string"
       },
@@ -3056,6 +3053,9 @@ const SHAPES: Readonly<Record<ApiTypeName, Shape>> = {
       },
       "phase": {
         "ref": "ApplicationPhase"
+      },
+      "workspace": {
+        "type": "string"
       }
     },
     "required": [

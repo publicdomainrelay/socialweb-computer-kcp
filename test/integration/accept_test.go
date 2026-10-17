@@ -32,19 +32,29 @@ func (n *Network) bidderDir(i int) string {
 	return filepath.Join(n.StateDir, "apps", "dev", fmt.Sprintf("%s-bidder-%d", n.Instance, i+1))
 }
 
+func (n *Network) runsDir() string { return filepath.Join(n.StateDir, "denokcp", "runs") }
+
+func (n *Network) appRunLogs(app string) string {
+	r := n.h.As(context.Background(), "sh", "-c", `for d in "$1"/pod-*; do
+  grep -q -s -F -- ".default.app.$2.svc." "$d/service.txt" && cat "$d"/std*.txt 2>/dev/null
+done; true`, "sh", n.runsDir(), app)
+	return r.Stdout
+}
+
 func (n *Network) bidderProcess(i int) (int, string, error) {
-	r := n.h.As(context.Background(), "sh", "-c", `for d in "$1"/denokcp/runs/pod-*; do
+	r := n.h.As(context.Background(), "sh", "-c", `for d in "$1"/pod-*; do
   [ -e "$d/done.json" ] && continue
+  grep -q -s -x -F -- "bidder.default.app.$2.svc.kcp.local" "$d/service.txt" || continue
   grep -q -s -F '"bidder ready"' "$d/stdout.txt" "$d/stderr.txt" || continue
   pid=$(sed -n 's/.*"pid":\([0-9]*\).*/\1/p' "$d/state.json")
   [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && echo "$pid $d"
-done; true`, "sh", n.bidderDir(i))
+done; true`, "sh", n.runsDir(), n.bidderName(i))
 	if r.Err != nil {
 		return 0, "", r.Err
 	}
 	lines := strings.Fields(strings.TrimSpace(r.Stdout))
 	if len(lines) != 2 {
-		return 0, "", fmt.Errorf("want one live bidder run under %s, found %q", n.bidderDir(i), r.Stdout)
+		return 0, "", fmt.Errorf("want one live run of %s's bidder under %s, found %q", n.bidderName(i), n.runsDir(), r.Stdout)
 	}
 	pid, err := strconv.Atoi(lines[0])
 	return pid, lines[1], err
@@ -198,9 +208,9 @@ func TestAcceptOfAnEndedContractStartsNoVM(t *testing.T) {
 	if len(accepts) == 0 {
 		t.Fatalf("no Won Bid names its accept:%s", describeBids(bids))
 	}
-	bidderRuns := filepath.Join(n.bidderDir(0), "denokcp", "runs", "pod-*", "std*.txt")
+	bidderLogs := n.appRunLogs(n.bidderName(0))
 	for _, a := range accepts {
-		if n.grepGlob(a, bidderRuns) == 0 {
+		if !strings.Contains(bidderLogs, a) {
 			t.Fatalf("the bidder never logged the accept %s; the replay cannot deliver it again", a)
 		}
 	}
@@ -289,7 +299,7 @@ func TestAcceptSurvivesABidderRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	name := "rb" + randHex(3)
-	requesterLogs := filepath.Join(n.StateDir, "apps", "dev", "*", "denokcp", "runs", "pod-*", "std*.txt")
+	requesterLogs := filepath.Join(n.runsDir(), "pod-*", "std*.txt")
 	p := n.Start("run-request", acceptRequestTimeout, "run", "request", "--network", n.Instance, "--name", name, "--exec", "true",
 		"--contract-timeout", "4m", "--network-timeout", "2m", "--state-dir", n.StateRoot)
 	deadline := time.Now().Add(3 * time.Minute)

@@ -5,7 +5,6 @@ package integration
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -36,8 +35,7 @@ const (
 )
 
 func (n *Network) bidderClient(i int) (dynamic.Interface, error) {
-	dir := filepath.Join(n.StateDir, "apps", "dev", fmt.Sprintf("%s-bidder-%d", n.Instance, i+1))
-	kc, err := n.read(filepath.Join(dir, "kcp", "admin.kubeconfig"))
+	kc, err := n.read(n.Up.AdminKubeconfig)
 	if err != nil {
 		return nil, err
 	}
@@ -45,7 +43,7 @@ func (n *Network) bidderClient(i int) (dynamic.Interface, error) {
 	if err != nil {
 		return nil, err
 	}
-	cfg.Host = strings.TrimSuffix(strings.SplitN(cfg.Host, "/clusters/", 2)[0], "/") + "/clusters/root"
+	cfg.Host = strings.TrimSuffix(strings.SplitN(cfg.Host, "/clusters/", 2)[0], "/") + "/clusters/root:" + n.bidderName(i)
 	cfg.Timeout = 15 * time.Second
 	return dynamic.NewForConfig(cfg)
 }

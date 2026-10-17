@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-9.marketnetworks.socialweb.computer
+  name: v1alpha1-10.marketnetworks.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -242,7 +242,7 @@ spec:
                       type: string
                     kcpUrl:
                       type: string
-                    kcpRoot:
+                    workspace:
                       type: string
                     phase:
                       type: string

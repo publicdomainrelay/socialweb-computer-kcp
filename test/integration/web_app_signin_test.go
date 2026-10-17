@@ -441,7 +441,7 @@ func TestWebAppSignInThroughThePluginKeepsTheCookieAcrossARestartAndIssuesACerti
 	}
 
 	gwDir := n.GatewayDir()
-	dirs := []string{filepath.Join(gwDir, "logs"), filepath.Join(gwDir, "denokcp", "runs")}
+	dirs := []string{filepath.Join(gwDir, "logs"), n.runsDir()}
 	r := n.h.AsInput(ctx, []byte(web.token+"\n"), append([]string{"grep", "-rlF", "-f", "-"}, dirs...)...)
 	if r.Code > 1 {
 		t.Fatalf("the leak scan of the cookie token failed: exit %d: %s", r.Code, r.Tail(3))
@@ -456,8 +456,7 @@ func TestWebAppSignInThroughThePluginKeepsTheCookieAcrossARestartAndIssuesACerti
 	if strings.TrimSpace(r.Stdout) != "" {
 		t.Errorf("a refresh token, a DPoP private key or a client key is in: %s", r.Stdout)
 	}
-	kcpKubeconfig := filepath.Join(gwDir, "kcp", "admin.kubeconfig")
-	kcpRaw, err := n.read(kcpKubeconfig)
+	kcpRaw, err := n.read(n.Up.AdminKubeconfig)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -467,8 +466,8 @@ func TestWebAppSignInThroughThePluginKeepsTheCookieAcrossARestartAndIssuesACerti
 	}
 	kcpBase := strings.TrimSuffix(strings.SplitN(kcpRest.Host, "/clusters/", 2)[0], "/")
 	scanned := map[string]int{}
-	for _, scan := range []struct{ ws, kind string }{{"root:app", "denopods"}, {"root:app", "marketidentities"}, {tn.Home, "nodeclaims"}, {tn.Home, "computecontracts"}} {
-		r := n.h.As(ctx, "env", "PATH="+bin, kubectlBinary, "--kubeconfig", kcpKubeconfig, "--server", kcpBase+"/clusters/"+scan.ws,
+	for _, scan := range []struct{ ws, kind string }{{"root:gateway:app", "denopods"}, {"root:gateway:app", "marketidentities"}, {tn.Home, "nodeclaims"}, {tn.Home, "computecontracts"}} {
+		r := n.h.As(ctx, "env", "PATH="+bin, kubectlBinary, "--kubeconfig", n.Up.AdminKubeconfig, "--server", kcpBase+"/clusters/"+scan.ws,
 			"get", scan.kind, "-A", "-o", "yaml")
 		scanned[scan.kind] = len(r.Stdout)
 		for _, secret := range []string{web.token, `"refresh_token"`, "dpopPrivate", "PRIVATE KEY", "client-key-data"} {

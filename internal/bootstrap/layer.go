@@ -193,6 +193,10 @@ func (c Config) CoreSpec(rec *devinstance.Record) (hostsvc.UnitSpec, error) {
 		p := c.Params(table.Dev(c.Layout.Short, table.StoreSqlite))
 		return p.Spec(table.Entry{Kind: table.KindCore, Role: table.RoleCore, Unit: c.Layout.CoreUnit(), After: units, Wants: units}, "")
 	}
+	if rec.SharedKcp != "" {
+		p := c.Params(table.Dev(c.Layout.Short, table.StoreSqlite))
+		return p.Spec(table.Entry{Kind: table.KindCore, Role: table.RoleCore, Unit: c.Layout.CoreUnit()}, "")
+	}
 	app, err := c.App(rec)
 	if err != nil {
 		return hostsvc.UnitSpec{}, err

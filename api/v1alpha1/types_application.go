@@ -568,7 +568,7 @@ type NetworkAppStatus struct {
 
 	KcpUrl string `json:"kcpUrl,omitempty"`
 
-	KcpRoot string `json:"kcpRoot,omitempty"`
+	Workspace string `json:"workspace,omitempty"`
 
 	Phase ApplicationPhase `json:"phase,omitempty"`
 
