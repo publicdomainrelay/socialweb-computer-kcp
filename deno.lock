@@ -2019,11 +2019,13 @@
       },
       "ts/atproto-market/lib/atproto-record-kcp": {
         "dependencies": [
+          "jsr:@publicdomainrelay/atproto-event-streams-client@0",
           "jsr:@publicdomainrelay/atproto-repo-abc@0",
           "jsr:@publicdomainrelay/kcp-client-abc@0",
           "jsr:@publicdomainrelay/kcp-client-common@0",
           "jsr:@publicdomainrelay/logger@0",
-          "jsr:@publicdomainrelay/socialweb-computer-k8s-api@0"
+          "jsr:@publicdomainrelay/socialweb-computer-k8s-api@0",
+          "npm:@atproto/identity@0.5"
         ]
       },
       "ts/atproto-market/lib/atproto-session-custody-openbao": {
