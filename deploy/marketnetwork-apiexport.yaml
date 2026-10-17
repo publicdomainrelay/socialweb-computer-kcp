@@ -11,7 +11,7 @@ spec:
         crd: {}
     - group: socialweb.computer
       name: marketbidders
-      schema: v1alpha1-11.marketbidders.socialweb.computer
+      schema: v1alpha1-12.marketbidders.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer

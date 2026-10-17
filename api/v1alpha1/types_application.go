@@ -401,6 +401,8 @@ type MarketBidderSpec struct {
 	Options []ApplicationOption `json:"options,omitempty"`
 
 	Quota *ApplicationQuota `json:"quota,omitempty"`
+
+	Operator string `json:"operator,omitempty"`
 }
 
 type MarketRequester struct {

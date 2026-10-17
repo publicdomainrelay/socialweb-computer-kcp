@@ -4,6 +4,7 @@ export const ANNOTATION_TTL_AFTER_FINISHED = "socialweb.computer/ttl-after-finis
 export const FINALIZER_ATPROTO_IDENTITY = "atprotoidentity.socialweb.computer/revocation";
 export const CONDITION_REFERENCES_RESOLVED = "ReferencesResolved";
 export const FINALIZER_ATPROTO_RECORD = "atprotorecord.socialweb.computer/repo";
+export const CONDITION_VERIFIED = "Verified";
 export const CONDITION_TEARDOWN_BLOCKED = "TeardownBlocked";
 export const CONDITION_TENANT_PATH_SHUT = "TenantPathShut";
 export const CONDITION_REACHABLE = "Reachable";
@@ -55,6 +56,9 @@ export type MarketIdentityPhase = typeof MARKET_IDENTITY_PHASES[number];
 
 export const PENDING_ACTION_KINDS = ["scanQr", "visitUrl", "approveAssociation", "signInAgain"] as const;
 export type PendingActionKind = typeof PENDING_ACTION_KINDS[number];
+
+export const MISSING_REFERENCE_POLICYS = ["Keep", "Delete"] as const;
+export type MissingReferencePolicy = typeof MISSING_REFERENCE_POLICYS[number];
 
 export const ATPROTO_RECORD_PHASES = ["Pending", "Applied", "Failed"] as const;
 export type AtprotoRecordPhase = typeof ATPROTO_RECORD_PHASES[number];
@@ -338,6 +342,7 @@ export interface MarketIdentitySpec {
   associateWith?: string;
   approvedAssociations?: string[];
   rejectedAssociations?: string[];
+  associationWatch?: string;
   keysRef?: VaultRef;
   sessionRef?: VaultRef;
 }
@@ -382,6 +387,7 @@ export interface AtprotoRecordSpec {
   collection: string;
   rkey: string;
   record: Record<string, unknown>;
+  onMissingReference?: MissingReferencePolicy;
 }
 
 export interface AtprotoRecordStatus {
@@ -392,6 +398,64 @@ export interface AtprotoRecordStatus {
   cid?: string;
   message?: string;
   conditions?: Condition[];
+}
+
+export interface AtprotoRecordWatch {
+  apiVersion?: string;
+  kind?: string;
+  metadata?: ObjectMeta;
+  spec?: AtprotoRecordWatchSpec;
+  status?: AtprotoRecordWatchStatus;
+}
+
+export interface AtprotoRecordWatchSpec {
+  repo: string;
+  collection: string;
+  match?: AtprotoRecordMatch[];
+  source: AtprotoRecordWatchSource;
+}
+
+export interface AtprotoRecordMatch {
+  fieldPath: string;
+  value?: string;
+  valueFrom?: AtprotoValueFrom;
+}
+
+export interface AtprotoValueFrom {
+  kind?: string;
+  resource?: string;
+  apiVersion?: string;
+  name: string;
+  fieldPath: string;
+  workspace?: string;
+  namespace?: string;
+}
+
+export interface AtprotoRecordWatchSource {
+  relayUrls?: string[];
+  jetstreamUrls?: string[];
+}
+
+export interface AtprotoRecordWatchStatus {
+  observedGeneration?: number;
+  records?: WatchedRecord[];
+  cursors?: AtprotoRecordWatchCursor[];
+  message?: string;
+  conditions?: Condition[];
+}
+
+export interface WatchedRecord {
+  did: string;
+  handle?: string;
+  uri: string;
+  cid?: string;
+  value: Record<string, unknown>;
+  verifiedAt: string;
+}
+
+export interface AtprotoRecordWatchCursor {
+  source: string;
+  cursor: number;
 }
 
 export interface MarketNetwork {
@@ -574,6 +638,7 @@ export interface MarketBidderSpec {
   signingKeyRotation?: number;
   options?: ApplicationOption[];
   quota?: ApplicationQuota;
+  operator?: string;
 }
 
 export interface ApplicationIdentity {
@@ -913,7 +978,7 @@ export const MARKET_IDENTITY_RESOURCE: ApiResource = {
   listKind: "MarketIdentityList",
   plural: "marketidentities",
   singular: "marketidentity",
-  schema: "v1alpha1-1.marketidentities.socialweb.computer",
+  schema: "v1alpha1-2.marketidentities.socialweb.computer",
   export: "marketidentities",
 };
 
@@ -924,7 +989,18 @@ export const ATPROTO_RECORD_RESOURCE: ApiResource = {
   listKind: "AtprotoRecordList",
   plural: "atprotorecords",
   singular: "atprotorecord",
-  schema: "v1alpha1-1.atprotorecords.socialweb.computer",
+  schema: "v1alpha1-2.atprotorecords.socialweb.computer",
+  export: "marketidentities",
+};
+
+export const ATPROTO_RECORD_WATCH_RESOURCE: ApiResource = {
+  group: "socialweb.computer",
+  version: "v1alpha1",
+  kind: "AtprotoRecordWatch",
+  listKind: "AtprotoRecordWatchList",
+  plural: "atprotorecordwatches",
+  singular: "atprotorecordwatch",
+  schema: "v1alpha1-1.atprotorecordwatches.socialweb.computer",
   export: "marketidentities",
 };
 
@@ -946,7 +1022,7 @@ export const MARKET_BIDDER_RESOURCE: ApiResource = {
   listKind: "MarketBidderList",
   plural: "marketbidders",
   singular: "marketbidder",
-  schema: "v1alpha1-11.marketbidders.socialweb.computer",
+  schema: "v1alpha1-12.marketbidders.socialweb.computer",
   export: "applications",
 };
 
@@ -994,7 +1070,7 @@ export const SSH_GATEWAY_RESOURCE: ApiResource = {
   export: "applications",
 };
 
-export const API_RESOURCES: readonly ApiResource[] = [CLUSTER_RESOURCE, NODE_RESOURCE, NODE_CLAIM_RESOURCE, CLUSTER_LINK_RESOURCE, CLUSTER_CLIENT_CERTIFICATE_RESOURCE, ATPROTO_IDENTITY_RESOURCE, MARKET_IDENTITY_RESOURCE, ATPROTO_RECORD_RESOURCE, MARKET_NETWORK_RESOURCE, MARKET_BIDDER_RESOURCE, MARKET_REQUESTER_RESOURCE, COMPUTE_CONTRACT_RESOURCE, GATEWAY_RESOURCE, SSH_GATEWAY_RESOURCE];
+export const API_RESOURCES: readonly ApiResource[] = [CLUSTER_RESOURCE, NODE_RESOURCE, NODE_CLAIM_RESOURCE, CLUSTER_LINK_RESOURCE, CLUSTER_CLIENT_CERTIFICATE_RESOURCE, ATPROTO_IDENTITY_RESOURCE, MARKET_IDENTITY_RESOURCE, ATPROTO_RECORD_RESOURCE, ATPROTO_RECORD_WATCH_RESOURCE, MARKET_NETWORK_RESOURCE, MARKET_BIDDER_RESOURCE, MARKET_REQUESTER_RESOURCE, COMPUTE_CONTRACT_RESOURCE, GATEWAY_RESOURCE, SSH_GATEWAY_RESOURCE];
 
 export type ApiTypeName =
   | "ApplicationComponent"
@@ -1010,9 +1086,16 @@ export type ApiTypeName =
   | "AtprotoIdentitySpec"
   | "AtprotoIdentityStatus"
   | "AtprotoRecord"
+  | "AtprotoRecordMatch"
   | "AtprotoRecordPhase"
   | "AtprotoRecordSpec"
   | "AtprotoRecordStatus"
+  | "AtprotoRecordWatch"
+  | "AtprotoRecordWatchCursor"
+  | "AtprotoRecordWatchSource"
+  | "AtprotoRecordWatchSpec"
+  | "AtprotoRecordWatchStatus"
+  | "AtprotoValueFrom"
   | "Cluster"
   | "ClusterClientCertificate"
   | "ClusterClientCertificateSpec"
@@ -1077,6 +1160,7 @@ export type ApiTypeName =
   | "MarketRequester"
   | "MarketRequesterSpec"
   | "MarketStreamStatus"
+  | "MissingReferencePolicy"
   | "NetworkApp"
   | "NetworkAppStatus"
   | "NetworkHost"
@@ -1105,7 +1189,8 @@ export type ApiTypeName =
   | "StoreUsage"
   | "TTLDeleted"
   | "TTLStatus"
-  | "VaultRef";
+  | "VaultRef"
+  | "WatchedRecord";
 
 type Shape =
   | { type: "string"; enum?: readonly string[] }
@@ -1491,6 +1576,23 @@ const SHAPES: Readonly<Record<ApiTypeName, Shape>> = {
     "required": [],
     "type": "object"
   },
+  "AtprotoRecordMatch": {
+    "properties": {
+      "fieldPath": {
+        "type": "string"
+      },
+      "value": {
+        "type": "string"
+      },
+      "valueFrom": {
+        "ref": "AtprotoValueFrom"
+      }
+    },
+    "required": [
+      "fieldPath"
+    ],
+    "type": "object"
+  },
   "AtprotoRecordPhase": {
     "enum": [
       "Pending",
@@ -1503,6 +1605,9 @@ const SHAPES: Readonly<Record<ApiTypeName, Shape>> = {
     "properties": {
       "collection": {
         "type": "string"
+      },
+      "onMissingReference": {
+        "ref": "MissingReferencePolicy"
       },
       "record": {
         "open": true,
@@ -1551,6 +1656,145 @@ const SHAPES: Readonly<Record<ApiTypeName, Shape>> = {
       }
     },
     "required": [],
+    "type": "object"
+  },
+  "AtprotoRecordWatch": {
+    "properties": {
+      "apiVersion": {
+        "type": "string"
+      },
+      "kind": {
+        "type": "string"
+      },
+      "metadata": {
+        "ref": "ObjectMeta"
+      },
+      "spec": {
+        "ref": "AtprotoRecordWatchSpec"
+      },
+      "status": {
+        "ref": "AtprotoRecordWatchStatus"
+      }
+    },
+    "required": [],
+    "type": "object"
+  },
+  "AtprotoRecordWatchCursor": {
+    "properties": {
+      "cursor": {
+        "type": "integer"
+      },
+      "source": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "source",
+      "cursor"
+    ],
+    "type": "object"
+  },
+  "AtprotoRecordWatchSource": {
+    "properties": {
+      "jetstreamUrls": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "relayUrls": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      }
+    },
+    "required": [],
+    "type": "object"
+  },
+  "AtprotoRecordWatchSpec": {
+    "properties": {
+      "collection": {
+        "type": "string"
+      },
+      "match": {
+        "items": {
+          "ref": "AtprotoRecordMatch"
+        },
+        "type": "array"
+      },
+      "repo": {
+        "type": "string"
+      },
+      "source": {
+        "ref": "AtprotoRecordWatchSource"
+      }
+    },
+    "required": [
+      "repo",
+      "collection",
+      "source"
+    ],
+    "type": "object"
+  },
+  "AtprotoRecordWatchStatus": {
+    "properties": {
+      "conditions": {
+        "items": {
+          "ref": "Condition"
+        },
+        "type": "array"
+      },
+      "cursors": {
+        "items": {
+          "ref": "AtprotoRecordWatchCursor"
+        },
+        "type": "array"
+      },
+      "message": {
+        "type": "string"
+      },
+      "observedGeneration": {
+        "type": "integer"
+      },
+      "records": {
+        "items": {
+          "ref": "WatchedRecord"
+        },
+        "type": "array"
+      }
+    },
+    "required": [],
+    "type": "object"
+  },
+  "AtprotoValueFrom": {
+    "properties": {
+      "apiVersion": {
+        "type": "string"
+      },
+      "fieldPath": {
+        "type": "string"
+      },
+      "kind": {
+        "type": "string"
+      },
+      "name": {
+        "type": "string"
+      },
+      "namespace": {
+        "type": "string"
+      },
+      "resource": {
+        "type": "string"
+      },
+      "workspace": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "name",
+      "fieldPath"
+    ],
     "type": "object"
   },
   "Cluster": {
@@ -2474,6 +2718,9 @@ const SHAPES: Readonly<Record<ApiTypeName, Shape>> = {
       "network": {
         "ref": "MarketNetworkValue"
       },
+      "operator": {
+        "type": "string"
+      },
       "options": {
         "items": {
           "ref": "ApplicationOption"
@@ -2612,6 +2859,9 @@ const SHAPES: Readonly<Record<ApiTypeName, Shape>> = {
       },
       "association": {
         "ref": "AssociationMode"
+      },
+      "associationWatch": {
+        "type": "string"
       },
       "handle": {
         "type": "string"
@@ -2972,6 +3222,13 @@ const SHAPES: Readonly<Record<ApiTypeName, Shape>> = {
       "source"
     ],
     "type": "object"
+  },
+  "MissingReferencePolicy": {
+    "enum": [
+      "Keep",
+      "Delete"
+    ],
+    "type": "string"
   },
   "NetworkApp": {
     "properties": {
@@ -3705,6 +3962,36 @@ const SHAPES: Readonly<Record<ApiTypeName, Shape>> = {
     "required": [
       "mount",
       "path"
+    ],
+    "type": "object"
+  },
+  "WatchedRecord": {
+    "properties": {
+      "cid": {
+        "type": "string"
+      },
+      "did": {
+        "type": "string"
+      },
+      "handle": {
+        "type": "string"
+      },
+      "uri": {
+        "type": "string"
+      },
+      "value": {
+        "open": true,
+        "type": "object"
+      },
+      "verifiedAt": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "did",
+      "uri",
+      "value",
+      "verifiedAt"
     ],
     "type": "object"
   }
@@ -4592,6 +4879,24 @@ export function parseAtprotoRecordSpec(value: unknown): AtprotoRecordSpec {
   return value;
 }
 
+export function validateMissingReferencePolicy(value: unknown): ApiIssue[] {
+  return validate("MissingReferencePolicy", value);
+}
+
+export function isMissingReferencePolicy(value: unknown): value is MissingReferencePolicy {
+  return validate("MissingReferencePolicy", value).length === 0;
+}
+
+export function assertMissingReferencePolicy(value: unknown): asserts value is MissingReferencePolicy {
+  const issues = validate("MissingReferencePolicy", value);
+  if (issues.length > 0) throw new ApiValidationError("MissingReferencePolicy", issues);
+}
+
+export function parseMissingReferencePolicy(value: unknown): MissingReferencePolicy {
+  assertMissingReferencePolicy(value);
+  return value;
+}
+
 export function validateAtprotoRecordStatus(value: unknown): ApiIssue[] {
   return validate("AtprotoRecordStatus", value);
 }
@@ -4625,6 +4930,150 @@ export function assertAtprotoRecordPhase(value: unknown): asserts value is Atpro
 
 export function parseAtprotoRecordPhase(value: unknown): AtprotoRecordPhase {
   assertAtprotoRecordPhase(value);
+  return value;
+}
+
+export function validateAtprotoRecordWatch(value: unknown): ApiIssue[] {
+  return validate("AtprotoRecordWatch", value);
+}
+
+export function isAtprotoRecordWatch(value: unknown): value is AtprotoRecordWatch {
+  return validate("AtprotoRecordWatch", value).length === 0;
+}
+
+export function assertAtprotoRecordWatch(value: unknown): asserts value is AtprotoRecordWatch {
+  const issues = validate("AtprotoRecordWatch", value);
+  if (issues.length > 0) throw new ApiValidationError("AtprotoRecordWatch", issues);
+}
+
+export function parseAtprotoRecordWatch(value: unknown): AtprotoRecordWatch {
+  assertAtprotoRecordWatch(value);
+  return value;
+}
+
+export function validateAtprotoRecordWatchSpec(value: unknown): ApiIssue[] {
+  return validate("AtprotoRecordWatchSpec", value);
+}
+
+export function isAtprotoRecordWatchSpec(value: unknown): value is AtprotoRecordWatchSpec {
+  return validate("AtprotoRecordWatchSpec", value).length === 0;
+}
+
+export function assertAtprotoRecordWatchSpec(value: unknown): asserts value is AtprotoRecordWatchSpec {
+  const issues = validate("AtprotoRecordWatchSpec", value);
+  if (issues.length > 0) throw new ApiValidationError("AtprotoRecordWatchSpec", issues);
+}
+
+export function parseAtprotoRecordWatchSpec(value: unknown): AtprotoRecordWatchSpec {
+  assertAtprotoRecordWatchSpec(value);
+  return value;
+}
+
+export function validateAtprotoRecordMatch(value: unknown): ApiIssue[] {
+  return validate("AtprotoRecordMatch", value);
+}
+
+export function isAtprotoRecordMatch(value: unknown): value is AtprotoRecordMatch {
+  return validate("AtprotoRecordMatch", value).length === 0;
+}
+
+export function assertAtprotoRecordMatch(value: unknown): asserts value is AtprotoRecordMatch {
+  const issues = validate("AtprotoRecordMatch", value);
+  if (issues.length > 0) throw new ApiValidationError("AtprotoRecordMatch", issues);
+}
+
+export function parseAtprotoRecordMatch(value: unknown): AtprotoRecordMatch {
+  assertAtprotoRecordMatch(value);
+  return value;
+}
+
+export function validateAtprotoValueFrom(value: unknown): ApiIssue[] {
+  return validate("AtprotoValueFrom", value);
+}
+
+export function isAtprotoValueFrom(value: unknown): value is AtprotoValueFrom {
+  return validate("AtprotoValueFrom", value).length === 0;
+}
+
+export function assertAtprotoValueFrom(value: unknown): asserts value is AtprotoValueFrom {
+  const issues = validate("AtprotoValueFrom", value);
+  if (issues.length > 0) throw new ApiValidationError("AtprotoValueFrom", issues);
+}
+
+export function parseAtprotoValueFrom(value: unknown): AtprotoValueFrom {
+  assertAtprotoValueFrom(value);
+  return value;
+}
+
+export function validateAtprotoRecordWatchSource(value: unknown): ApiIssue[] {
+  return validate("AtprotoRecordWatchSource", value);
+}
+
+export function isAtprotoRecordWatchSource(value: unknown): value is AtprotoRecordWatchSource {
+  return validate("AtprotoRecordWatchSource", value).length === 0;
+}
+
+export function assertAtprotoRecordWatchSource(value: unknown): asserts value is AtprotoRecordWatchSource {
+  const issues = validate("AtprotoRecordWatchSource", value);
+  if (issues.length > 0) throw new ApiValidationError("AtprotoRecordWatchSource", issues);
+}
+
+export function parseAtprotoRecordWatchSource(value: unknown): AtprotoRecordWatchSource {
+  assertAtprotoRecordWatchSource(value);
+  return value;
+}
+
+export function validateAtprotoRecordWatchStatus(value: unknown): ApiIssue[] {
+  return validate("AtprotoRecordWatchStatus", value);
+}
+
+export function isAtprotoRecordWatchStatus(value: unknown): value is AtprotoRecordWatchStatus {
+  return validate("AtprotoRecordWatchStatus", value).length === 0;
+}
+
+export function assertAtprotoRecordWatchStatus(value: unknown): asserts value is AtprotoRecordWatchStatus {
+  const issues = validate("AtprotoRecordWatchStatus", value);
+  if (issues.length > 0) throw new ApiValidationError("AtprotoRecordWatchStatus", issues);
+}
+
+export function parseAtprotoRecordWatchStatus(value: unknown): AtprotoRecordWatchStatus {
+  assertAtprotoRecordWatchStatus(value);
+  return value;
+}
+
+export function validateWatchedRecord(value: unknown): ApiIssue[] {
+  return validate("WatchedRecord", value);
+}
+
+export function isWatchedRecord(value: unknown): value is WatchedRecord {
+  return validate("WatchedRecord", value).length === 0;
+}
+
+export function assertWatchedRecord(value: unknown): asserts value is WatchedRecord {
+  const issues = validate("WatchedRecord", value);
+  if (issues.length > 0) throw new ApiValidationError("WatchedRecord", issues);
+}
+
+export function parseWatchedRecord(value: unknown): WatchedRecord {
+  assertWatchedRecord(value);
+  return value;
+}
+
+export function validateAtprotoRecordWatchCursor(value: unknown): ApiIssue[] {
+  return validate("AtprotoRecordWatchCursor", value);
+}
+
+export function isAtprotoRecordWatchCursor(value: unknown): value is AtprotoRecordWatchCursor {
+  return validate("AtprotoRecordWatchCursor", value).length === 0;
+}
+
+export function assertAtprotoRecordWatchCursor(value: unknown): asserts value is AtprotoRecordWatchCursor {
+  const issues = validate("AtprotoRecordWatchCursor", value);
+  if (issues.length > 0) throw new ApiValidationError("AtprotoRecordWatchCursor", issues);
+}
+
+export function parseAtprotoRecordWatchCursor(value: unknown): AtprotoRecordWatchCursor {
+  assertAtprotoRecordWatchCursor(value);
   return value;
 }
 

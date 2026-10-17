@@ -29,7 +29,17 @@ type AtprotoRecordSpec struct {
 	Rkey string `json:"rkey"`
 
 	Record json.RawMessage `json:"record"`
+
+	OnMissingReference MissingReferencePolicy `json:"onMissingReference,omitempty"`
 }
+
+type MissingReferencePolicy string
+
+const (
+	MissingReferenceKeep MissingReferencePolicy = "Keep"
+
+	MissingReferenceDelete MissingReferencePolicy = "Delete"
+)
 
 type AtprotoRecordPhase string
 

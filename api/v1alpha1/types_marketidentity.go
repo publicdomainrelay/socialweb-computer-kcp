@@ -62,6 +62,8 @@ type MarketIdentitySpec struct {
 
 	RejectedAssociations []string `json:"rejectedAssociations,omitempty"`
 
+	AssociationWatch string `json:"associationWatch,omitempty"`
+
 	KeysRef *VaultRef `json:"keysRef,omitempty"`
 
 	SessionRef *VaultRef `json:"sessionRef,omitempty"`

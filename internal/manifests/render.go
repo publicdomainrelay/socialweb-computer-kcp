@@ -67,6 +67,7 @@ var typedKinds = map[schema.GroupVersionKind]func() any{
 	{Group: "deno.computer", Version: "v1alpha1", Kind: "OpenBao"}:                                   func() any { return &denov1alpha1.OpenBao{} },
 	{Group: "socialweb.computer", Version: "v1alpha1", Kind: "OpenBaoServer"}:                        func() any { return &swcv1alpha1.OpenBaoServer{} },
 	{Group: "socialweb.computer", Version: "v1alpha1", Kind: "AtprotoRecord"}:                        func() any { return &swcv1alpha1.AtprotoRecord{} },
+	{Group: "socialweb.computer", Version: "v1alpha1", Kind: "AtprotoRecordWatch"}:                   func() any { return &swcv1alpha1.AtprotoRecordWatch{} },
 	{Group: "socialweb.computer", Version: "v1alpha1", Kind: "HostProcess"}:                          func() any { return &swcv1alpha1.HostProcess{} },
 }
 

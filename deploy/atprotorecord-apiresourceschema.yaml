@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-1.atprotorecords.socialweb.computer
+  name: v1alpha1-2.atprotorecords.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -37,6 +37,11 @@ spec:
               record:
                 type: object
                 x-kubernetes-preserve-unknown-fields: true
+              onMissingReference:
+                type: string
+                enum:
+                  - Keep
+                  - Delete
             required:
               - repo
               - collection
