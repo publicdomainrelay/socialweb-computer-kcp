@@ -192,6 +192,7 @@ sets:
         files:
           - path: marketidentity-apiresourceschema.yaml
           - path: atprotorecord-apiresourceschema.yaml
+          - path: atprotorecordwatch-apiresourceschema.yaml
           - path: marketidentity-apiexport.yaml
         after:
           - kind: APIExport
@@ -232,6 +233,7 @@ sets:
         files:
           - path: marketidentity-apiresourceschema.yaml
           - path: atprotorecord-apiresourceschema.yaml
+          - path: atprotorecordwatch-apiresourceschema.yaml
           - path: marketidentity-apiexport.yaml
         after:
           - kind: APIExport
@@ -274,6 +276,18 @@ sets:
             for: Ready
         files:
           - path: market-network/10-rbac.yaml
+      - name: association-watch@market-network
+        workspace: root
+        files:
+          - path: apps/repo-pds/association-watch.market-network.yaml
+      - name: association-watch@prod-qr
+        workspace: root
+        files:
+          - path: apps/repo-pds/association-watch.prod.yaml
+      - name: association-watch@dev-local
+        workspace: root
+        files:
+          - path: apps/repo-pds/association-watch.market-network.yaml
       - name: pds@market-network
         workspace: root:app
         files:
@@ -360,6 +374,7 @@ sets:
         files:
           - path: marketidentity-apiresourceschema.yaml
           - path: atprotorecord-apiresourceschema.yaml
+          - path: atprotorecordwatch-apiresourceschema.yaml
           - path: marketidentity-apiexport.yaml
           - path: computecontract-apiresourceschema.yaml
           - path: computecontract-apiexport.yaml
@@ -392,6 +407,14 @@ sets:
         files:
           - path: apps/gateway/market-network.values.yaml
             template: denopods/service.yaml
+      - name: association-watch@prod
+        workspace: root:app
+        files:
+          - path: apps/repo-pds/association-watch.prod.yaml
+      - name: association-watch@market-network
+        workspace: root:app
+        files:
+          - path: apps/repo-pds/association-watch.market-network.yaml
       - name: pds@prod
         workspace: root:app
         files:
@@ -424,6 +447,7 @@ sets:
           - path: computecontract-apiexport.yaml
           - path: marketidentity-apiresourceschema.yaml
           - path: atprotorecord-apiresourceschema.yaml
+          - path: atprotorecordwatch-apiresourceschema.yaml
           - path: marketidentity-apiexport.yaml
         after:
           - kind: APIExport

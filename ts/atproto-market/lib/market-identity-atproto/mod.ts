@@ -17,6 +17,7 @@ import type {
   MarketIdentityPhase,
   MarketIdentityStatus,
   VaultRef,
+  WatchedRecord,
 } from "@publicdomainrelay/market-identity-abc";
 import {
   associationQrUrl,
@@ -46,7 +47,7 @@ export interface MarketIdentityReconcilerOptions {
   associationRecordTimeoutMs?: number;
   autoRefreshThresholdMs?: number;
   oauthClientId?: string;
-  localRepo?: { open(repoKeyHex: string): Promise<AssociatingRepo>; qrParam: string };
+  localRepo?: { open(repoKeyHex: string): Promise<AssociatingRepo>; qrParam: string; service?: string };
   oauthBrowser?: { open(): Promise<BrowserOAuthClient> };
   now?: () => Date;
 }
@@ -374,10 +375,47 @@ export function startMarketIdentityReconciler(opts: MarketIdentityReconcilerOpti
     }
   }
 
+  function claimRef(keys: VaultRef): VaultRef {
+    return { mount: keys.mount, path: keys.path.replace(/\/keys$/, "") + "/claim" };
+  }
+
+  async function claimNonce(ref: VaultRef): Promise<string> {
+    const held = await vault.read(ref);
+    if (typeof held?.nonce === "string" && held.nonce) return held.nonce;
+    const fresh = nonce();
+    await vault.write(ref, { nonce: fresh, createdAt: now().toISOString() });
+    return fresh;
+  }
+
+  async function watchedClaims(watchName: string): Promise<{ verified: boolean; records: WatchedRecord[] } | null> {
+    const w = await opts.prompt.associationWatch?.(watchName).catch((err) => {
+      logger.warn("market_identity_association_watch_read_failed", { name, watch: watchName, error: String(err) });
+      return null;
+    });
+    if (!w) return null;
+    const verified = (w.status?.conditions ?? []).some((c) => c.type === "Verified" && c.status === "True");
+    const records = (w.status?.records ?? []).filter((r) => r.value?.challenge === r.did)
+      .sort((a, b) => a.verifiedAt.localeCompare(b.verifiedAt));
+    return { verified, records };
+  }
+
   async function localRepoFlow(obj: MarketIdentity, refs: { keys: VaultRef }): Promise<void> {
     if (!opts.localRepo) throw new TerminalIdentityError("mode localRepo needs a local repo opener in this component");
-    const repo = await opts.localRepo.open(await repoKeyHex(refs.keys));
-    const hold = async (associations: string[]) => {
+    const localRepo = opts.localRepo;
+    const repo = await localRepo.open(await repoKeyHex(refs.keys));
+    const watchName = obj.spec?.associationWatch;
+    const claim = claimRef(refs.keys);
+    const settle = async (want: (recorded: string[]) => boolean, what: string): Promise<string[]> => {
+      const deadline = Date.now() + (opts.associationRecordTimeoutMs ?? DEFAULT_ASSOCIATION_RECORD_TIMEOUT_MS);
+      let recorded = await repo.associations();
+      while (!want(recorded) && Date.now() < deadline) {
+        await sleep(Math.min(watchMs, 250));
+        recorded = await repo.associations();
+      }
+      if (!want(recorded)) throw new TerminalIdentityError(what);
+      return recorded;
+    };
+    const hold = async (associations: string[]): Promise<void> => {
       markReady({ did: repo.did, repo });
       await publish(
         { phase: "Ready", did: repo.did, associations: associations.length ? associations : undefined },
@@ -385,65 +423,107 @@ export function startMarketIdentityReconciler(opts: MarketIdentityReconcilerOpti
           type: CONDITION_ASSOCIATED,
           status: associations.length ? "True" : "False",
           reason: associations.length ? "Associated" : "AssociationSkipped",
+          message: associations.length ? `associated with ${associations.join(", ")}` : "",
         }],
       );
-      await untilAborted(new Promise<never>(() => {}));
+      if (!watchName || !associations.length || !opts.prompt.answerAssociation) return await untilAborted(new Promise<never>(() => {}));
+      while (true) {
+        await sleep(Math.max(watchMs, 1_000));
+        const claims = await watchedClaims(watchName);
+        if (!claims?.verified) continue;
+        const live = new Set(claims.records.map((r) => r.did));
+        const gone = associations.filter((d) => !live.has(d));
+        if (!gone.length) continue;
+        for (const d of gone) await opts.prompt.answerAssociation(name, d, "revoke");
+        logger.info("market_identity_association_revoked", { name, revoked: gone, watch: watchName });
+        await publish(
+          { phase: "Ready", did: repo.did },
+          [{ type: CONDITION_ASSOCIATED, status: "False", reason: "Revoked", message: `the association record of ${gone.join(", ")} is gone from its repo (AtprotoRecordWatch ${watchName})` }],
+        );
+        await settle((recorded) => !recorded.some((d) => gone.includes(d)), `the association with ${gone.join(", ")} was revoked but its record stayed in the repo`);
+        return;
+      }
     };
     if (obj.spec?.association === "Skip") return await hold([]);
-    const existing = await repo.associations();
-    if (existing.length) return await hold(existing);
-
-    await publish(
-      { phase: "AwaitingScan", did: repo.did, pendingAction: { kind: "scanQr", url: associationQrUrl(opts.qrOrigin, opts.localRepo.qrParam, repo.did) } },
-      [{ type: CONDITION_ASSOCIATED, status: "False", reason: "AwaitingScan" }],
-    );
-    let polling = true;
-    const recordedElsewhere = (async () => {
-      while (polling && !signal.aborted) {
-        await sleep(Math.max(watchMs, 1_000)).catch(() => {});
-        const recorded = await repo.associations().catch(() => [] as string[]);
-        if (recorded.length) return recorded;
-      }
-      return new Promise<string[]>(() => {});
-    })();
-    const first = await untilAborted(Promise.race([repo.associateCalled, recordedElsewhere])).finally(() => polling = false);
-    if (Array.isArray(first)) {
-      logger.info("market_identity_association_recorded", { name, associations: first });
-      return await hold(first);
-    }
-    const callerDid = first;
-    const callerHandle = await resolveHandle(callerDid);
-    let asked = false;
     while (true) {
-      const fresh = await prompt.get(name);
-      if (!fresh?.spec) throw new TerminalIdentityError(`marketidentity ${name} disappeared during an association`);
-      generation = fresh.metadata?.generation as number | undefined;
-      const decision = decideAssociation(fresh.spec, callerDid, callerHandle);
-      if (decision === "approve") {
-        repo.approveAssociation();
-        logger.info("market_identity_association_approved", { name, callerDid });
-        const deadline = Date.now() + (opts.associationRecordTimeoutMs ?? DEFAULT_ASSOCIATION_RECORD_TIMEOUT_MS);
-        let recorded = await repo.associations();
-        while (!recorded.includes(callerDid) && Date.now() < deadline) {
-          await sleep(Math.min(watchMs, 100));
-          recorded = await repo.associations();
+      const existing = await repo.associations();
+      if (existing.length) {
+        await hold(existing);
+        continue;
+      }
+      const claimNonceValue = watchName ? await claimNonce(claim) : "";
+      const url = associationQrUrl(opts.qrOrigin, localRepo.qrParam, repo.did) +
+        (claimNonceValue ? `&n=${claimNonceValue}${localRepo.service ? `&s=${localRepo.service}` : ""}` : "");
+      const revoked = (status.conditions ?? []).some((c) => c.type === CONDITION_ASSOCIATED && c.reason === "Revoked");
+      await publish(
+        { phase: "AwaitingScan", did: repo.did, pendingAction: { kind: "scanQr", url } },
+        [{
+          type: CONDITION_ASSOCIATED,
+          status: "False",
+          reason: revoked ? "Revoked" : "AwaitingScan",
+          message: watchName
+            ? `waiting for an operator's ${BADGE_BLUE_KEYS_NSID} record {keyId: ${repo.did}, challenge: <operator DID>${localRepo.service ? `, service: ${localRepo.service}` : ""}, nonce: <n of the pendingAction url>} (AtprotoRecordWatch ${watchName})`
+            : "waiting for the association scan",
+        }],
+      );
+      let polling = true;
+      const recordedElsewhere = (async (): Promise<string[] | { claimedBy: string }> => {
+        while (polling && !signal.aborted) {
+          await sleep(Math.max(watchMs, 1_000)).catch(() => {});
+          const recorded = await repo.associations().catch(() => [] as string[]);
+          if (recorded.length) return recorded;
+          if (!watchName || !opts.prompt.answerAssociation) continue;
+          const fresh = await opts.prompt.get(name).catch(() => null);
+          if (!fresh?.spec || fresh.spec.approvedAssociations?.length) continue;
+          const claims = await watchedClaims(watchName);
+          const hit = claims?.records.find((r) =>
+            !fresh.spec!.rejectedAssociations?.includes(r.did) &&
+            (r.value?.nonce === claimNonceValue || decideAssociation(fresh.spec!, r.did, r.handle) === "approve")
+          );
+          if (hit) return { claimedBy: hit.did };
         }
-        if (!recorded.includes(callerDid)) throw new TerminalIdentityError(`association with ${callerDid} was approved but no association record appeared`);
-        return await hold(recorded);
+        return new Promise<never>(() => {});
+      })();
+      const first = await untilAborted(Promise.race([repo.associateCalled, recordedElsewhere])).finally(() => polling = false);
+      if (Array.isArray(first)) {
+        logger.info("market_identity_association_recorded", { name, associations: first });
+        continue;
       }
-      if (decision === "reject") {
-        repo.rejectAssociation(new Error(`association with ${callerDid} rejected by spec.rejectedAssociations`));
-        logger.info("market_identity_association_rejected", { name, callerDid });
-        throw new TerminalIdentityError(`association with ${callerHandle ?? callerDid} (${callerDid}) was rejected`);
+      if (typeof first === "object") {
+        await opts.prompt.answerAssociation!(name, first.claimedBy, "approve");
+        await vault.remove(claim);
+        logger.info("market_identity_association_claimed", { name, operator: first.claimedBy, watch: watchName });
+        await settle((recorded) => recorded.includes(first.claimedBy), `the claim of ${first.claimedBy} was approved but no association record appeared in the repo`);
+        continue;
       }
-      if (!asked) {
-        asked = true;
-        await publish(
-          { phase: "AwaitingApproval", did: repo.did, pendingAction: { kind: "approveAssociation", callerDid, handle: callerHandle } },
-          [{ type: CONDITION_ASSOCIATED, status: "False", reason: "AwaitingApproval", message: `${callerHandle ?? callerDid} asks to associate` }],
-        );
+      const callerDid = first;
+      const callerHandle = await resolveHandle(callerDid);
+      let asked = false;
+      while (true) {
+        const fresh = await prompt.get(name);
+        if (!fresh?.spec) throw new TerminalIdentityError(`marketidentity ${name} disappeared during an association`);
+        generation = fresh.metadata?.generation as number | undefined;
+        const decision = decideAssociation(fresh.spec, callerDid, callerHandle);
+        if (decision === "approve") {
+          repo.approveAssociation();
+          logger.info("market_identity_association_approved", { name, callerDid });
+          await settle((recorded) => recorded.includes(callerDid), `association with ${callerDid} was approved but no association record appeared`);
+          break;
+        }
+        if (decision === "reject") {
+          repo.rejectAssociation(new Error(`association with ${callerDid} rejected by spec.rejectedAssociations`));
+          logger.info("market_identity_association_rejected", { name, callerDid });
+          throw new TerminalIdentityError(`association with ${callerHandle ?? callerDid} (${callerDid}) was rejected`);
+        }
+        if (!asked) {
+          asked = true;
+          await publish(
+            { phase: "AwaitingApproval", did: repo.did, pendingAction: { kind: "approveAssociation", callerDid, handle: callerHandle } },
+            [{ type: CONDITION_ASSOCIATED, status: "False", reason: "AwaitingApproval", message: `${callerHandle ?? callerDid} asks to associate` }],
+          );
+        }
+        await sleep(watchMs);
       }
-      await sleep(watchMs);
     }
   }
 
@@ -492,7 +572,7 @@ export function startMarketIdentityReconciler(opts: MarketIdentityReconcilerOpti
         markLost();
         const phase: MarketIdentityPhase = "Failed";
         try {
-          await publish({ phase, did: status.did, message });
+          await publish({ phase, did: status.did ?? obj?.status?.did, message });
         } catch (writeErr) {
           logger.error("market_identity_status_write_failed", { name, error: String(writeErr) });
         }

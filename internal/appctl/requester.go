@@ -144,8 +144,12 @@ func IdentitySpecOf(id v1alpha1.ApplicationIdentity) v1alpha1.MarketIdentitySpec
 	if s.Association == "" {
 		s.Association = v1alpha1.AssociationRequireApproval
 	}
+	return s
+}
+
+func OperatorWatched(s v1alpha1.MarketIdentitySpec, operator string) v1alpha1.MarketIdentitySpec {
 	if s.Mode == v1alpha1.MarketIdentityModeLocalRepo && s.Association != v1alpha1.AssociationSkip {
-		s.AssociateWith = id.Handle
+		s.AssociateWith, s.AssociationWatch = operator, AssociationWatch
 	}
 	return s
 }

@@ -1,4 +1,5 @@
 import type {
+  AtprotoRecordWatch,
   MarketIdentity,
   MarketIdentityPendingAction,
   MarketIdentitySpec,
@@ -8,9 +9,11 @@ import type {
 export interface IdentityPrompt {
   get(name: string): Promise<MarketIdentity | null>;
   writeStatus(name: string, status: MarketIdentityStatus): Promise<void>;
+  answerAssociation?(name: string, callerDid: string, answer: AssociationAnswer): Promise<void>;
+  associationWatch?(name: string): Promise<AtprotoRecordWatch | null>;
 }
 
-export type AssociationAnswer = "approve" | "reject";
+export type AssociationAnswer = "approve" | "reject" | "revoke";
 
 export interface IdentityAnswers {
   answerAssociation(name: string, callerDid: string, answer: AssociationAnswer): Promise<void>;
@@ -67,7 +70,7 @@ export function specWithAnswer(spec: MarketIdentitySpec, callerDid: string, answ
   const approved = (spec.approvedAssociations ?? []).filter((d) => d !== callerDid);
   const rejected = (spec.rejectedAssociations ?? []).filter((d) => d !== callerDid);
   if (answer === "approve") approved.push(callerDid);
-  else rejected.push(callerDid);
+  else if (answer === "reject") rejected.push(callerDid);
   return {
     ...spec,
     approvedAssociations: approved.length ? approved : undefined,

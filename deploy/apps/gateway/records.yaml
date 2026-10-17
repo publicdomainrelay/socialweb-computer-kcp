@@ -6,6 +6,7 @@ spec:
   repo: pds
   collection: com.publicdomainrelay.temp.badgeBlueKeys
   rkey: association
+  onMissingReference: Delete
   record:
     challenge: {valueFrom: {kind: MarketIdentity, name: requester, fieldPath: "spec.approvedAssociations[0]"}}
     keyId: {valueFrom: {kind: MarketIdentity, name: requester, fieldPath: status.did}}

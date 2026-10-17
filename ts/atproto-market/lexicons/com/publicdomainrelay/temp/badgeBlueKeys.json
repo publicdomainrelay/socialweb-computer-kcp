@@ -27,6 +27,10 @@
             "type": "string",
             "description": "Service scope for this key association."
           },
+          "nonce": {
+            "type": "string",
+            "description": "The single-use claim nonce the associated DID shows to its admin; the first verified record that carries it associates its author."
+          },
           "createdAt": {
             "type": "string",
             "format": "datetime"

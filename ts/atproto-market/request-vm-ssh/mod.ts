@@ -268,6 +268,7 @@ let statusRepoDid = "";
     oauthClientId: o.oauthSessionClientId,
     localRepo: {
       qrParam: "plc",
+      service: "requester_associate",
       open: async (repoKeyHex: string) => {
         if (o.repoPdsUrl) {
           const did = await repoPdsDid(o.repoPdsUrl);

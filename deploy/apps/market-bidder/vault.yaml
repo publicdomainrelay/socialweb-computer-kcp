@@ -88,6 +88,10 @@ rules:
     resources: ["marketidentities/status"]
     verbs: ["get", "patch", "update"]
   - apiGroups: ["socialweb.computer"]
+    resources: ["atprotorecordwatches"]
+    resourceNames: ["association"]
+    verbs: ["get"]
+  - apiGroups: ["socialweb.computer"]
     resources: ["marketbidders", "marketbidders/status"]
     verbs: ["get", "patch"]
 ---

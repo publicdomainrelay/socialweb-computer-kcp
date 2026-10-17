@@ -31,6 +31,11 @@ type Main = {
    * Service scope for this key association.
    */
   service?: string
+
+  /**
+   * The single-use claim nonce the associated DID shows to its admin; the first verified record that carries it associates its author.
+   */
+  nonce?: string
   createdAt: l.DatetimeString
 }
 
@@ -45,6 +50,7 @@ const main = /*#__PURE__*/ l.record<'any', Main>(
     name: /*#__PURE__*/ l.optional(/*#__PURE__*/ l.string()),
     challenge: /*#__PURE__*/ l.string({ format: 'did' }),
     service: /*#__PURE__*/ l.optional(/*#__PURE__*/ l.string()),
+    nonce: /*#__PURE__*/ l.optional(/*#__PURE__*/ l.string()),
     createdAt: /*#__PURE__*/ l.string({ format: 'datetime' }),
   }),
 )
