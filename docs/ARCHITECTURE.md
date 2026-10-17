@@ -3844,6 +3844,34 @@ because it bounds a mechanism the rest of this document leans on.
   Bob, not the bidder DID). The pds writes the canonical association shape {challenge: operator, keyId:
   the application's DID} for every service; the policy context and the MarketIdentity read it first and
   the old inverted shape second.
+- **The market network runs its applications in one kcp (plan 0019, opened 2026-10-17).** User decision
+  2026-10-17: Q1 is amended by profile (section 0). Each child application of a MarketNetwork is the
+  workspace `root:<app>` of the network's kcp (type universal, label `apps.socialweb.computer/application`),
+  its components in `root:<app>:app`; the network's own services stay in root:global, root:relay,
+  root:alice and root:bob. One manifest set serves both shapes: `kcpapply.Options.Base` rebases every phase
+  and wait workspace of a set under the application's workspace (`root` -> base, `root:x` -> `<base>:x`),
+  except the API provider workspaces `root:*-provider` and the sets with `scope: kcp` (provider,
+  permission-inventory, denoruntime, dev-host, market-network); file contents are never rewritten, so a
+  manifest names in-app services as `<name>.default.{{.ServiceSuffix}}` (the suffix of the phase workspace)
+  and the logical cluster of its base as `{{.BaseCluster}}`. The child's record carries `sharedKcp` (the
+  network's state dir), the network's admin kubeconfig and kcp URL and `baseWorkspace root:<app>`; the
+  bootstrap layer places no kcp, kine or front for it, and its core (still a HostProcess in
+  `root:dev:<instance>`) runs no deno runtime and no store maintenance: the network's one deno runtime runs
+  every DenoPod of the kcp and writes every run directory under `<network state>/denokcp/runs/` (each names
+  its pod in `service.txt`). Condition OneKcp replaces OwnKcp. Workspace RBAC (kcp: a service account of
+  another workspace is the user `system:kcp:serviceaccount:<logical cluster>:<namespace>:<name>`, and it
+  also needs the non-resource verb `access` on `/` in the target workspace): the app's own pds account
+  reads its `root:app` DenoPods through `deploy/apps/repo-pds/components-rbac.yaml`, and the composer
+  grants every child's pds account get/list on the MarketIdentity objects of the other children
+  (ClusterRole `market-network-peers` in both workspaces of each child), so an AtprotoRecord `valueFrom`
+  with `workspace: root:<other>` resolves (403 elsewhere, the record stays Pending). Prod keeps a kcp per
+  application and runs the same sets with base root.
+  Open: the web app's account and home workspaces (`root:<account>:<home>`, the tenant clusters) still sit
+  at the root of the network's kcp, not under root:gateway (kcpclient, the clusterprovider registry,
+  sweepkcp and the tenant credential paths take `root` as their base); the composer still copies the
+  network value and the bidder DIDs onto the root objects (no record carries them); the per-child core
+  holds the network's admin kubeconfig (the shared kcp isolates components by workspace RBAC, not the
+  cores); the DNS table of the one deno runtime holds every workspace's names.
 ## 15. Settled decisions, and the defects they closed
 
 Not gaps. Each entry was open once, and each says what settled it and what the settlement was - and,
