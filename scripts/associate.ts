@@ -1,11 +1,11 @@
 import { parseArgs } from "jsr:@std/cli@1/parse-args";
 
 const args = parseArgs(Deno.args, {
-  string: ["creds", "account", "sessions", "pds", "url", "ca", "did", "service"],
+  string: ["creds", "account", "sessions", "pds", "url", "ca", "did", "service", "nonce"],
   boolean: ["delete"],
 });
 const fail = (msg: string): never => {
-  console.error(`claim-association: ${msg}`);
+  console.error(`associate: ${msg}`);
   Deno.exit(2);
 };
 const COLLECTION = "com.publicdomainrelay.temp.badgeBlueKeys";
@@ -32,8 +32,8 @@ if (args.sessions) {
 const claim = new URLSearchParams((args.url ?? "").split("#")[1] ?? "");
 const did = args.did ?? claim.get("bdr") ?? claim.get("plc") ?? fail("--url (the MarketIdentity status.pendingAction.url) or --did is required");
 const service = args.service ?? claim.get("s") ?? fail("the url names no s=<service>; pass --service");
-const nonce = claim.get("n");
-if (!args.delete && !nonce) fail("the url names no n=<nonce>");
+const nonce = args.nonce ?? claim.get("n");
+if (!args.delete && !nonce) fail("the url names no n=<nonce>; pass --nonce");
 
 const client = args.ca ? Deno.createHttpClient({ caCerts: [await Deno.readTextFile(args.ca)] }) : undefined;
 async function xrpc(method: string, nsid: string, body?: unknown, token?: string): Promise<Record<string, unknown>> {
