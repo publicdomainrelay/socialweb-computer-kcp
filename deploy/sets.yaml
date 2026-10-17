@@ -350,7 +350,7 @@ sets:
             template: denopods/service.yaml
 
   - name: gateway
-    summary: the components of a Gateway application in its own kcp - the root:app workspace, the MarketIdentity schema bound there (one MarketIdentity per web app account) and, per profile, the socialweb-computer-k8s web app DenoPod rendered from deploy/apps/gateway/<profile>.values.yaml, the requester's own PDS DenoPod pds (deploy/apps/repo-pds; its repo holds every market record the requester writes, associated once with spec.operator; plan 0018) and the requester DenoPod (a phase named <component>@<profile> belongs to that profile only); its root vault is the OpenBaoServer root-vault the app controller declares; applied by internal/appctl
+    summary: the components of a Gateway application in its own kcp - the root:app workspace, the MarketIdentity schema bound there (one MarketIdentity per web app account) and, per profile, the socialweb-computer-k8s web app DenoPod rendered from deploy/apps/gateway/<profile>.values.yaml, the requester's own PDS DenoPod pds (deploy/apps/repo-pds; its repo holds every market record the requester writes, associated once by the operator's claim record that its AtprotoRecordWatch association verifies; plan 0018) and the requester DenoPod (a phase named <component>@<profile> belongs to that profile only); its root vault is the OpenBaoServer root-vault the app controller declares; applied by internal/appctl
     values: Gateway
     phases:
       - name: workspace

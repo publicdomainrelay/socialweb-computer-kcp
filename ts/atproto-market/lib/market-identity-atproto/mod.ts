@@ -428,7 +428,7 @@ export function startMarketIdentityReconciler(opts: MarketIdentityReconcilerOpti
       );
       if (!watchName || !associations.length || !opts.prompt.answerAssociation) return await untilAborted(new Promise<never>(() => {}));
       while (true) {
-        await sleep(Math.max(watchMs, 1_000));
+        await sleep(Math.max(watchMs, 5_000));
         const claims = await watchedClaims(watchName);
         if (!claims?.verified) continue;
         const live = new Set(claims.records.map((r) => r.did));
