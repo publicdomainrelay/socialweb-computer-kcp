@@ -234,7 +234,11 @@ func (ctl *Controller) runStatus(runID string) map[string]any {
 	if runID == "" {
 		return nil
 	}
-	b, err := os.ReadFile(filepath.Join(denoruntime.RunsDir(ctl.c.Layout.StateDir), runID, "status.json"))
+	state := ctl.c.Layout.StateDir
+	if rec, err := ctl.c.Record(); err == nil && rec.SharedKcp != "" {
+		state = rec.SharedKcp
+	}
+	b, err := os.ReadFile(filepath.Join(denoruntime.RunsDir(state), runID, "status.json"))
 	if err != nil {
 		return nil
 	}

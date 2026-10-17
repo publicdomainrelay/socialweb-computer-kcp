@@ -127,6 +127,9 @@ func (a *app) resolvePodTarget(ctx context.Context, l devinstance.Layout, rec de
 					return t, fmt.Errorf("network child %s (instance %s) has no record: %w", app, ap.Instance, err)
 				}
 				t.Instance, t.kubeconfig, t.stateDir, base = ap.Instance, crec.AdminKubeconfig, crec.Layout.StateDir, crec.BaseWorkspace
+				if crec.SharedKcp != "" {
+					t.stateDir = crec.SharedKcp
+				}
 				for _, c := range ap.Components {
 					comps = append(comps, apiComponent{c.Kind, c.Name, c.Workspace})
 				}
