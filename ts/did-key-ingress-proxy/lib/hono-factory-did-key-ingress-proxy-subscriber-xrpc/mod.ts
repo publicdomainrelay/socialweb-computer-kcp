@@ -1,3 +1,4 @@
+import { RELAYED_RESPONSE_HEADERS } from "@publicdomainrelay/did-key-ingress-proxy-common";
 import type { RelayRequest } from "@publicdomainrelay/did-key-ingress-proxy-common";
 import type { RelayRequestResult } from "@publicdomainrelay/did-key-ingress-proxy-subscriber-xrpc";
 
@@ -26,6 +27,7 @@ export function createSubscriberFactory(opts: SubscriberFactoryOptions): Subscri
       if (!["GET", "HEAD"].includes(req.method) && req.body != null) {
         init.body = typeof req.body === "string" ? req.body : JSON.stringify(req.body);
       }
+      if (!["GET", "HEAD"].includes(req.method) && typeof req.rawBody === "string") init.body = req.rawBody;
 
       const res = await opts.app.fetch(new Request(url, init));
       const contentType = res.headers.get("content-type") ?? "application/json";
@@ -33,7 +35,12 @@ export function createSubscriberFactory(opts: SubscriberFactoryOptions): Subscri
         ? await res.json().catch(() => null)
         : await res.text();
 
-      return { status: res.status, body, contentType };
+      const headers: Record<string, string> = {};
+      for (const name of RELAYED_RESPONSE_HEADERS) {
+        const v = res.headers.get(name);
+        if (v !== null) headers[name] = v;
+      }
+      return { status: res.status, body, contentType, ...(Object.keys(headers).length ? { headers } : {}) };
     },
   };
 }

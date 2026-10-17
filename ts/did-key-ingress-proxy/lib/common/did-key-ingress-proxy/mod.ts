@@ -17,6 +17,7 @@ export interface RelayRequestFrame {
   path: string;
   params: Record<string, string>;
   body: unknown;
+  rawBody?: string;
   headers: Record<string, string>;
 }
 
@@ -24,6 +25,7 @@ export interface RelayResponse {
   status: number;
   body: unknown;
   contentType?: string;
+  headers?: Record<string, string>;
 }
 
 export interface RelayRequest {
@@ -32,8 +34,11 @@ export interface RelayRequest {
   path: string;
   params: Record<string, string>;
   body: unknown;
+  rawBody?: string;
   headers: Record<string, string>;
 }
+
+export const RELAYED_RESPONSE_HEADERS = ["dpop-nonce", "www-authenticate", "location", "cache-control", "retry-after"];
 
 export function inferFrameType(frame: unknown): string {
   if (typeof frame === "object" && frame !== null) {

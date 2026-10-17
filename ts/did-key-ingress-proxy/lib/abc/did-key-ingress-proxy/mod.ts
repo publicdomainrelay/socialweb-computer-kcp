@@ -52,13 +52,14 @@ export class RelayState {
     status: number,
     body: unknown,
     contentType?: string,
+    headers?: Record<string, string>,
   ): void {
     const pending = this.pendingRequests.get(requestId);
     if (!pending) return;
     clearTimeout(pending.timer);
     this.pendingRequests.delete(requestId);
     this.lastResponseAt.set(pending.subdomain, Date.now());
-    pending.resolve({ status, body, contentType });
+    pending.resolve({ status, body, contentType, ...(headers ? { headers } : {}) });
   }
 
   dispatchRequest(

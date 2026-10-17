@@ -17,7 +17,7 @@ export interface SubscriberOptions {
   synthetic?: boolean;
   handleRequest?: (
     req: RelayRequest,
-  ) => Promise<{ status: number; body: unknown; contentType: string }>;
+  ) => Promise<{ status: number; body: unknown; contentType: string; headers?: Record<string, string> }>;
   /**
    * When set, inbound relay subscriptions for the tunnel NSID open a TCP
    * connection to this target and pipe bytes full-duplex over the relay

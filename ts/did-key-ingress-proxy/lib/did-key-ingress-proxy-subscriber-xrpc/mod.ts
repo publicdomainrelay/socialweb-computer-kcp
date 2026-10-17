@@ -20,6 +20,7 @@ export interface RelayRequestResult {
   status: number;
   body: unknown;
   contentType: string;
+  headers?: Record<string, string>;
 }
 
 function encodeBase64(bytes: Uint8Array): string {
@@ -220,6 +221,7 @@ export async function createSubscriber(
             path: msg.path as string,
             params: (msg.params as Record<string, string>) ?? {},
             body: msg.body,
+            ...(typeof msg.rawBody === "string" ? { rawBody: msg.rawBody } : {}),
             headers: (msg.headers as Record<string, string>) ?? {},
           };
           opts.handleRequest(req).then(
@@ -231,6 +233,7 @@ export async function createSubscriber(
                   status: result.status,
                   body: result.body,
                   contentType: result.contentType,
+                  ...(result.headers ? { headers: result.headers } : {}),
                 }));
               }
             },

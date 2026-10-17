@@ -9,6 +9,7 @@ import {
   didToSubdomain,
   SUBSCRIBE_NSID,
   GET_NONCE_NSID,
+  RELAYED_RESPONSE_HEADERS,
 } from "@publicdomainrelay/did-key-ingress-proxy-common";
 import { RelayState } from "@publicdomainrelay/did-key-ingress-proxy-abc";
 import {
@@ -248,7 +249,7 @@ export function createRelayFactory(opts: RelayFactoryOptions) {
               case "response": {
                 const requestId = msg.requestId as string | undefined;
                 if (!requestId) return;
-                state.handleResponse(requestId, msg.status as number, msg.body, msg.contentType as string | undefined);
+                state.handleResponse(requestId, msg.status as number, msg.body, msg.contentType as string | undefined, msg.headers as Record<string, string> | undefined);
                 break;
               }
               case "subscriptionOpen":
@@ -395,8 +396,10 @@ export function createRelayFactory(opts: RelayFactoryOptions) {
         const path = new URL(c.req.url).pathname;
 
         let body: unknown = undefined;
+        let rawBody: string | undefined = undefined;
         if (!["GET", "HEAD"].includes(c.req.method)) {
-          try { body = await c.req.json(); } catch { body = null; }
+          rawBody = await c.req.text().catch(() => "");
+          try { body = JSON.parse(rawBody); } catch { body = null; }
         }
 
         const params = Object.fromEntries(new URL(c.req.url).searchParams.entries());
@@ -410,6 +413,7 @@ export function createRelayFactory(opts: RelayFactoryOptions) {
           path,
           params,
           body,
+          ...(rawBody !== undefined ? { rawBody } : {}),
           headers,
         });
 
@@ -427,7 +431,11 @@ export function createRelayFactory(opts: RelayFactoryOptions) {
 
         const ct = result.contentType ?? "application/json";
         const responseBody = typeof result.body === "string" ? result.body : JSON.stringify(result.body);
-        return new Response(responseBody, { status: result.status, headers: { "content-type": ct } });
+        const out = new Headers({ "content-type": ct });
+        for (const [k, v] of Object.entries(result.headers ?? {})) {
+          if (RELAYED_RESPONSE_HEADERS.includes(k.toLowerCase())) out.set(k, v);
+        }
+        return new Response(responseBody, { status: result.status, headers: out });
       });
     },
   });
