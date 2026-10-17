@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-11.marketbidders.socialweb.computer
+  name: v1alpha1-12.marketbidders.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -154,6 +154,8 @@ spec:
                   denoRuns:
                     type: integer
                     format: int32
+              operator:
+                type: string
             required:
               - profile
               - identity

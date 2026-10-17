@@ -39,12 +39,18 @@ var APIResources = []APIResource{
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
 	{Kind: "AtprotoIdentity", Plural: "atprotoidentities", Revision: 1, Export: "atprotoidentities", Object: AtprotoIdentity{}},
-	{Kind: "MarketIdentity", Plural: "marketidentities", Revision: 1, Export: "marketidentities", Object: MarketIdentity{}},
-	{Kind: "AtprotoRecord", Plural: "atprotorecords", Revision: 1, Export: "marketidentities", Object: AtprotoRecord{}, PrinterColumns: []PrinterColumn{
+	{Kind: "MarketIdentity", Plural: "marketidentities", Revision: 2, Export: "marketidentities", Object: MarketIdentity{}},
+	{Kind: "AtprotoRecord", Plural: "atprotorecords", Revision: 2, Export: "marketidentities", Object: AtprotoRecord{}, PrinterColumns: []PrinterColumn{
 		{Name: "Repo", Type: "string", JSONPath: ".spec.repo"},
 		{Name: "Collection", Type: "string", JSONPath: ".spec.collection"},
 		{Name: "Rkey", Type: "string", JSONPath: ".spec.rkey"},
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
+		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
+	}},
+	{Kind: "AtprotoRecordWatch", Plural: "atprotorecordwatches", Revision: 1, Export: "marketidentities", Object: AtprotoRecordWatch{}, PrinterColumns: []PrinterColumn{
+		{Name: "Repo", Type: "string", JSONPath: ".spec.repo"},
+		{Name: "Collection", Type: "string", JSONPath: ".spec.collection"},
+		{Name: "Message", Type: "string", JSONPath: ".status.message"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
 	{Kind: "ComputeVM", Plural: "computevms", Revision: 3, Export: "computevms", Object: ComputeVM{}, PrinterColumns: []PrinterColumn{
@@ -98,7 +104,7 @@ var APIResources = []APIResource{
 		{Name: "PLC", Type: "string", JSONPath: ".status.network.plcDirectoryUrl"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "MarketBidder", Plural: "marketbidders", Revision: 11, Export: "applications", Object: MarketBidder{}, PrinterColumns: []PrinterColumn{
+	{Kind: "MarketBidder", Plural: "marketbidders", Revision: 12, Export: "applications", Object: MarketBidder{}, PrinterColumns: []PrinterColumn{
 		{Name: "Profile", Type: "string", JSONPath: ".spec.profile"},
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "DID", Type: "string", JSONPath: ".status.did"},
