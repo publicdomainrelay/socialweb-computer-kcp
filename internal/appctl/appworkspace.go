@@ -129,47 +129,65 @@ func (n *networks) stopAppPods(ctx context.Context, name string) error {
 
 const PeerReadRole = "market-network-peers"
 
-func (n *networks) grantPeers(ctx context.Context, names []string) error {
-	ri, err := n.ctl.client(n.ctl.c.workspace(), WorkspaceGVR)
+func (n *networks) clusterOf(ctx context.Context, parent, name string) string {
+	ri, err := n.ctl.client(parent, WorkspaceGVR)
 	if err != nil {
-		return err
+		return ""
 	}
-	ids := map[string]string{}
+	u, err := ri.Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return ""
+	}
+	id, _, _ := unstructured.NestedString(u.Object, "spec", "cluster")
+	return id
+}
+
+func (n *networks) grantPeers(ctx context.Context, names []string) error {
+	ids := map[string]map[string]string{}
 	for _, name := range names {
-		u, err := ri.Get(ctx, name, metav1.GetOptions{})
-		if err != nil {
-			continue
+		ws := n.appWorkspace(name)
+		own := map[string]string{}
+		if id := n.clusterOf(ctx, n.ctl.c.workspace(), name); id != "" {
+			own[ws] = id
 		}
-		if id, _, _ := unstructured.NestedString(u.Object, "spec", "cluster"); id != "" {
-			ids[name] = id
+		if id := n.clusterOf(ctx, ws, ComponentWorkspace); id != "" {
+			own[ws+":"+ComponentWorkspace] = id
+		}
+		if len(own) > 0 {
+			ids[name] = own
 		}
 	}
 	key := fmt.Sprint(ids)
 	if n.peers == key {
 		return nil
 	}
-	for name := range ids {
+	role := &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: PeerReadRole}, Rules: []rbacv1.PolicyRule{
+		{NonResourceURLs: []string{"/"}, Verbs: []string{"access"}},
+		{APIGroups: []string{v1alpha1.GroupName}, Resources: []string{"marketidentities"}, Verbs: []string{"get", "list"}}}}
+	for name, own := range ids {
 		var readers []rbacv1.Subject
-		for other, id := range ids {
-			if other != name {
+		for other, theirs := range ids {
+			if other == name {
+				continue
+			}
+			for _, id := range theirs {
 				readers = append(readers, rbacv1.Subject{Kind: rbacv1.UserKind, APIGroup: rbacv1.GroupName, Name: ForeignAccount(id, "default", PdsComponent)})
 			}
 		}
 		slices.SortFunc(readers, func(a, b rbacv1.Subject) int { return strings.Compare(a.Name, b.Name) })
-		cs, err := kubernetes.NewForConfig(clusterConfig(n.ctl.restCfg, n.appWorkspace(name)))
-		if err != nil {
-			return err
-		}
-		role := &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: PeerReadRole}, Rules: []rbacv1.PolicyRule{
-			{NonResourceURLs: []string{"/"}, Verbs: []string{"access"}},
-			{APIGroups: []string{v1alpha1.GroupName}, Resources: []string{"marketidentities"}, Verbs: []string{"get", "list"}}}}
-		if err := upsertClusterRole(ctx, cs, role); err != nil {
-			return fmt.Errorf("the peer read role in %s: %w", n.appWorkspace(name), err)
-		}
-		b := &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: PeerReadRole}, Subjects: readers,
-			RoleRef: rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: PeerReadRole}}
-		if err := upsertClusterRoleBinding(ctx, cs, b); err != nil {
-			return fmt.Errorf("the peer read binding in %s: %w", n.appWorkspace(name), err)
+		for ws := range own {
+			cs, err := kubernetes.NewForConfig(clusterConfig(n.ctl.restCfg, ws))
+			if err != nil {
+				return err
+			}
+			if err := upsertClusterRole(ctx, cs, role); err != nil {
+				return fmt.Errorf("the peer read role in %s: %w", ws, err)
+			}
+			b := &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: PeerReadRole}, Subjects: readers,
+				RoleRef: rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: PeerReadRole}}
+			if err := upsertClusterRoleBinding(ctx, cs, b); err != nil {
+				return fmt.Errorf("the peer read binding in %s: %w", ws, err)
+			}
 		}
 	}
 	n.peers = key
