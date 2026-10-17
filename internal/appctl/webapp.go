@@ -29,8 +29,8 @@ const (
 
 var WorkspaceGVR = schema.GroupVersionResource{Group: "tenancy.kcp.io", Version: "v1alpha1", Resource: "workspaces"}
 
-func WebAppAccountRef() string {
-	return DefaultWorkspace + ":" + ComponentWorkspace + "/" + WebAppAccountNS + "/" + WebAppAccount
+func WebAppAccountRef(workspace string) string {
+	return workspace + ":" + ComponentWorkspace + "/" + WebAppAccountNS + "/" + WebAppAccount
 }
 
 func ForeignAccount(cluster, namespace, name string) string {

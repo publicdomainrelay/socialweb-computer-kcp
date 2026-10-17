@@ -3,6 +3,8 @@ kind: ClusterRole
 metadata:
   name: pds-components
 rules:
+  - nonResourceURLs: ["/"]
+    verbs: ["access"]
   - apiGroups: ["deno.computer"]
     resources: ["denopods"]
     verbs: ["get", "list", "watch"]
@@ -16,17 +18,5 @@ roleRef:
   kind: ClusterRole
   name: pds-components
 subjects:
-  - kind: Group
-    name: "system:cluster:{{.BaseCluster}}"
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: pds-components-access
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: system:kcp:workspace:access
-subjects:
-  - kind: Group
-    name: "system:cluster:{{.BaseCluster}}"
+  - kind: User
+    name: "system:kcp:serviceaccount:{{.BaseCluster}}:default:pds"

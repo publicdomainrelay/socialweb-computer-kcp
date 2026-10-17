@@ -90,7 +90,7 @@ func (g *gateway) defaults(e *env, rec devinstance.Record, cert, key string) err
 	state := g.c.StateDir
 	e.set("SOCIALWEB_KCP_HOST", rec.KcpURL)
 	e.set("SOCIALWEB_KCP_KUBECONFIG", g.memberKubeconfig())
-	e.set("SOCIALWEB_GATEWAY_NODECLAIM_AGENT", appctl.WebAppAccountRef())
+	e.set("SOCIALWEB_GATEWAY_NODECLAIM_AGENT", appctl.WebAppAccountRef(g.ws))
 	e.dflt("SOCIALWEB_GATEWAY_ADDR", DefaultAddress)
 	e.dflt("SOCIALWEB_GATEWAY_AUDIENCES", DefaultAudience)
 	if n := g.c.Spec.Network; n != nil && n.PlcDirectoryUrl != "" {

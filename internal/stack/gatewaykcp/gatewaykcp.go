@@ -490,7 +490,7 @@ func (g *gateway) members(ctx context.Context, rec devinstance.Record) error {
 	}
 	log.Info("the root vault holds the root layout", "address", access.Address)
 	if g.c.BootstrapCluster != "" {
-		if err := bootstrapCluster(ctx, g.memberKubeconfig(), g.c.BootstrapAccountDID, g.c.BootstrapCluster, log); err != nil {
+		if err := bootstrapCluster(ctx, g.memberKubeconfig(), g.ws, g.c.BootstrapAccountDID, g.c.BootstrapCluster, log); err != nil {
 			return err
 		}
 	}

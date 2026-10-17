@@ -76,7 +76,7 @@ func waitReady(ctx context.Context, ri dynamic.ResourceInterface, name string) e
 	})
 }
 
-func bootstrapCluster(ctx context.Context, kubeconfig, did, cluster string, log *slog.Logger) error {
+func bootstrapCluster(ctx context.Context, kubeconfig, base, did, cluster string, log *slog.Logger) error {
 	if did == "" {
 		did = DefaultBootstrapDID
 	}
@@ -127,7 +127,7 @@ func bootstrapCluster(ctx context.Context, kubeconfig, did, cluster string, log 
 	if err := retry(ctx, "cluster", func() error { return ssa(ctx, home.Resource(clusterGVR), obj) }); err != nil {
 		return err
 	}
-	agent, err := kcpclient.ParseServiceAccountRef(appctl.WebAppAccountRef())
+	agent, err := kcpclient.ParseServiceAccountRef(appctl.WebAppAccountRef(base))
 	if err != nil {
 		return err
 	}
@@ -143,5 +143,5 @@ func bootstrapCluster(ctx context.Context, kubeconfig, did, cluster string, log 
 }
 
 func BootstrapCluster(ctx context.Context, kubeconfig, did, cluster string, log *slog.Logger) error {
-	return bootstrapCluster(ctx, kubeconfig, did, cluster, log)
+	return bootstrapCluster(ctx, kubeconfig, appctl.DefaultWorkspace, did, cluster, log)
 }
