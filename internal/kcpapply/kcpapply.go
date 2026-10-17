@@ -56,6 +56,7 @@ type Options struct {
 	WaitTimeout  time.Duration
 	Poll         time.Duration
 	FieldManager string
+	Base         string
 	Labels       map[string]string
 	Log          *slog.Logger
 }
@@ -164,6 +165,9 @@ func (a *Applier) ForWorkspace(path string) *rest.Config {
 }
 
 func (a *Applier) Apply(ctx context.Context, set manifests.Set, values any) (Report, error) {
+	if set.Base == "" {
+		set.Base = a.opts.Base
+	}
 	rep := Report{DryRun: a.opts.DryRun}
 	for _, p := range set.Phases {
 		pr, err := a.applyPhase(ctx, set, p, values)

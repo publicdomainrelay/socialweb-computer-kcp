@@ -10,5 +10,5 @@ permissions:
   net: true
   env: [PORT, PORT_FILE, LISTENERS_FILE, STATUS_FILE]
 probe:
-  host: policy-engine.default.app.svc.kcp.local
+  host: policy-engine.default.{{.ServiceSuffix}}
   path: /health

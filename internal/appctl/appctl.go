@@ -137,8 +137,8 @@ func (ctl *Controller) client(ws string, gvr schema.GroupVersionResource) (dynam
 	return dc.Resource(gvr), nil
 }
 
-func applySet(ctx context.Context, restCfg *rest.Config, log *slog.Logger) error {
-	ap, err := kcpapply.New(restCfg, kcpapply.Options{WaitTimeout: ApplyTimeout, Log: log})
+func applySet(ctx context.Context, restCfg *rest.Config, base string, log *slog.Logger) error {
+	ap, err := kcpapply.New(restCfg, kcpapply.Options{WaitTimeout: ApplyTimeout, Base: base, Log: log})
 	if err != nil {
 		return err
 	}
@@ -176,7 +176,7 @@ func Run(ctx context.Context, c Config) error {
 	}
 	log := c.log()
 	for {
-		err := applySet(ctx, ctl.restCfg, log)
+		err := applySet(ctx, ctl.restCfg, c.workspace(), log)
 		if err == nil {
 			break
 		}

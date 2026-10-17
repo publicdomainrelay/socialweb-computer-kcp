@@ -19,5 +19,5 @@ permissions:
   sys: [hostname]
   read: [{{.Guest.Read}}]
 probe:
-  host: guest-kcp.default.app.svc.kcp.local
+  host: guest-kcp.default.{{.ServiceSuffix}}
   path: /v1/identity/oidc/.well-known/openid-configuration

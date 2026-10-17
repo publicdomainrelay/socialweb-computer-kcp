@@ -18,5 +18,5 @@ permissions:
   sys: [hostname]
   read: [{{.Pds.Read}}]
 probe:
-  host: pds.default.app.svc.kcp.local
+  host: pds.default.{{.ServiceSuffix}}
   path: /xrpc/_health

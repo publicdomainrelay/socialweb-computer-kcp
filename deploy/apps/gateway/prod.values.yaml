@@ -15,5 +15,5 @@ permissions:
   sys: [hostname]
   read: ["{{.StateDir}}"{{.ExtraRead}}]
 probe:
-  host: socialweb-computer-k8s.default.app.svc.kcp.local
+  host: socialweb-computer-k8s.default.{{.ServiceSuffix}}
   path: /healthz

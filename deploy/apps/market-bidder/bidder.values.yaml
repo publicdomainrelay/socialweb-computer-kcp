@@ -5,7 +5,7 @@ memory: 1536Mi
 serviceAccount: deno-runner
 tls: trust
 trust: [{{.Trust}}]
-args: ["--market-identity-name", "bidder", "--market-identity-kcp-server", "{{.Kcp.Server}}", "--market-identity-kcp-workspace", "{{.Kcp.Workspace}}", "--identity-vault-openbao-server", "{{.Vault.Server}}", "--identity-vault-openbao-client", "{{.Vault.Client}}", "--identity-vault-kcp-server", "{{.Vault.KcpServer}}", "--state-dir", "{{.StateDir}}", "--repo-pds-url", "http://pds.default.app.svc.kcp.local", "--serve-port", "0", "--plc-directory-url", "{{.PlcDirectoryUrl}}", "--ingress-proxy-host", "{{.IngressProxyHost}}", "--policy", "{{.Policy}}", "--policy-engine-url", "http://policy-engine.default.app.svc.kcp.local"{{.ProviderArgs}}{{.ExtraArgs}}]
+args: ["--market-identity-name", "bidder", "--market-identity-kcp-server", "{{.Kcp.Server}}", "--market-identity-kcp-workspace", "{{.Kcp.Workspace}}", "--identity-vault-openbao-server", "{{.Vault.Server}}", "--identity-vault-openbao-client", "{{.Vault.Client}}", "--identity-vault-kcp-server", "{{.Vault.KcpServer}}", "--state-dir", "{{.StateDir}}", "--repo-pds-url", "http://pds.default.{{.ServiceSuffix}}", "--serve-port", "0", "--plc-directory-url", "{{.PlcDirectoryUrl}}", "--ingress-proxy-host", "{{.IngressProxyHost}}", "--policy", "{{.Policy}}", "--policy-engine-url", "http://policy-engine.default.{{.ServiceSuffix}}"{{.ProviderArgs}}{{.ExtraArgs}}]
 projected:
   - {name: kcp-token, serviceAccountToken: {name: bidder, workspace: "{{.Kcp.Workspace}}"}}
   - {name: kcp-ca, kcpCA: {}}
@@ -19,5 +19,5 @@ permissions:
   sys: [hostname]
   read: [{{.Read}}]
 probe:
-  host: bidder.default.app.svc.kcp.local
+  host: bidder.default.{{.ServiceSuffix}}
   path: /oauth-client-metadata.json

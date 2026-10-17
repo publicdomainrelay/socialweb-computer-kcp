@@ -4,7 +4,7 @@ stateDir: "{{.StateDir}}"
 memory: 1Gi
 serviceAccount: deno-runner
 tls: none
-args: ["--port", "0", "--pds-state-path", "{{.StateDir}}/pds", "--market-identity-kcp-workspace", "{{.Kcp.Workspace}}", "--compute-contract-kcp-workspace", "{{.Kcp.Workspace}}", "--identity-vault-openbao-server", "{{.Vault.Server}}", "--identity-vault-openbao-client", "{{.Vault.Client}}", "--identity-vault-kcp-workspace", "{{.Kcp.Workspace}}", "--policy-engine-url", "http://policy-engine.default.app.svc.kcp.local"{{.ExtraArgs}}]
+args: ["--port", "0", "--pds-state-path", "{{.StateDir}}/pds", "--market-identity-kcp-workspace", "{{.Kcp.Workspace}}", "--compute-contract-kcp-workspace", "{{.Kcp.Workspace}}", "--identity-vault-openbao-server", "{{.Vault.Server}}", "--identity-vault-openbao-client", "{{.Vault.Client}}", "--identity-vault-kcp-workspace", "{{.Kcp.Workspace}}", "--policy-engine-url", "http://policy-engine.default.{{.ServiceSuffix}}"{{.ExtraArgs}}]
 projected:
   - {name: kcp-token, serviceAccountToken: {name: requester, workspace: "{{.Kcp.Workspace}}"}}
   - {name: kcp-ca, kcpCA: {}}
@@ -16,5 +16,5 @@ permissions:
   env: [SERVE_PORT, PORT, PORT_FILE, LISTENERS_FILE, STATUS_FILE, PATH, HOME, BUNDLED_ACTIONS_DIR]
   sys: [hostname]
 probe:
-  host: requester.default.app.svc.kcp.local
+  host: requester.default.{{.ServiceSuffix}}
   path: /xrpc/_health

@@ -195,7 +195,7 @@ func (c Config) workspace() string {
 }
 
 func applySets(ctx context.Context, c Config, restCfg *rest.Config) error {
-	ap, err := kcpapply.New(restCfg, kcpapply.Options{WaitTimeout: c.ApplyTimeout, Log: c.log()})
+	ap, err := kcpapply.New(restCfg, kcpapply.Options{WaitTimeout: c.ApplyTimeout, Base: c.workspace(), Log: c.log()})
 	if err != nil {
 		return err
 	}

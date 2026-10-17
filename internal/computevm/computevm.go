@@ -142,7 +142,7 @@ func New(ctx context.Context, c Config) (*Controller, error) {
 }
 
 func applySets(ctx context.Context, c Config, restCfg *rest.Config) error {
-	ap, err := kcpapply.New(restCfg, kcpapply.Options{WaitTimeout: ApplyTimeout, Log: c.log()})
+	ap, err := kcpapply.New(restCfg, kcpapply.Options{WaitTimeout: ApplyTimeout, Base: c.Workspace, Log: c.log()})
 	if err != nil {
 		return err
 	}

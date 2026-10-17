@@ -4,7 +4,7 @@ stateDir: "{{.Requester.StateDir}}"
 memory: 1Gi
 tls: {{.TLS}}
 trust: {{.Trust}}
-args: ["--port", "0", "--serve-addr", "127.0.0.1", "--compute-contract-kcp-server", "{{.KcpServer}}", "--compute-contract-kcp-workspace", "{{.IdentityWorkspace}}", "--identity-vault-kcp-server", "{{.KcpServer}}", "--identity-vault-kcp-workspace", "{{.GatewayWorkspace}}", "--identity-vault-openbao-server", "{{.Requester.Vault.Server}}", "--identity-vault-openbao-client", "{{.Requester.Vault.Client}}", "--identity-vault-mount", "requester", "--market-identity-kcp-server", "{{.KcpServer}}", "--market-identity-kcp-workspace", "{{.IdentityWorkspace}}", "--repo-pds-url", "http://pds.default.app.svc.kcp.local", "--skip-rbac"{{.Requester.ExtraArgs}}]
+args: ["--port", "0", "--serve-addr", "127.0.0.1", "--compute-contract-kcp-server", "{{.KcpServer}}", "--compute-contract-kcp-workspace", "{{.IdentityWorkspace}}", "--identity-vault-kcp-server", "{{.KcpServer}}", "--identity-vault-kcp-workspace", "{{.GatewayWorkspace}}", "--identity-vault-openbao-server", "{{.Requester.Vault.Server}}", "--identity-vault-openbao-client", "{{.Requester.Vault.Client}}", "--identity-vault-mount", "requester", "--market-identity-kcp-server", "{{.KcpServer}}", "--market-identity-kcp-workspace", "{{.IdentityWorkspace}}", "--repo-pds-url", "http://pds.default.{{.ServiceSuffix}}", "--skip-rbac"{{.Requester.ExtraArgs}}]
 projected:
   - {name: kcp-token, serviceAccountToken: {name: requester}}
   - {name: kcp-ca, kcpCA: {}}
@@ -15,5 +15,5 @@ projected:
   sys: [hostname]
   read: ["{{.Requester.StateDir}}"{{.Requester.ExtraRead}}]
 probe:
-  host: requester.default.app.svc.kcp.local
+  host: requester.default.{{.ServiceSuffix}}
   path: /xrpc/_health

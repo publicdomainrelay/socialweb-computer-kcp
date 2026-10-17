@@ -15,5 +15,5 @@ permissions:
   sys: [hostname]
   read: ["{{.StateDir}}"{{.ExtraRead}}]
 probe:
-  host: ssh-gateway.default.app.svc.kcp.local
+  host: ssh-gateway.default.{{.ServiceSuffix}}
   path: /healthz

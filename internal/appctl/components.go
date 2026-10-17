@@ -53,7 +53,7 @@ func (ctl *Controller) applyProfile(ctx context.Context, setName, profile, owner
 	if err != nil {
 		return nil, err
 	}
-	ap, err := kcpapply.New(ctl.restCfg, kcpapply.Options{WaitTimeout: ApplyTimeout, FieldManager: FieldManager,
+	ap, err := kcpapply.New(ctl.restCfg, kcpapply.Options{WaitTimeout: ApplyTimeout, FieldManager: FieldManager, Base: ctl.c.workspace(),
 		Labels: map[string]string{OwnerLabel: owner}, Log: ctl.c.log()})
 	if err != nil {
 		return nil, err

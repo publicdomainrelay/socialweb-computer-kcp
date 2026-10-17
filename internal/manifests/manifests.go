@@ -10,6 +10,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/deploy"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
 )
 
 const IndexPath = "sets.yaml"
@@ -30,7 +31,35 @@ type Set struct {
 	Name    string  `json:"name"`
 	Summary string  `json:"summary"`
 	Values  string  `json:"values"`
+	Scope   string  `json:"scope,omitempty"`
 	Phases  []Phase `json:"phases"`
+	Base    string  `json:"-"`
+}
+
+const ScopeKcp = "kcp"
+
+const SharedWorkspaceSuffix = "-provider"
+
+func Rebase(base, ws string) string {
+	if base == "" || base == kcp.RootWorkspace {
+		return ws
+	}
+	if ws == kcp.RootWorkspace {
+		return base
+	}
+	rest, ok := strings.CutPrefix(ws, kcp.RootWorkspace+":")
+	if !ok {
+		return ws
+	}
+	first, _, _ := strings.Cut(rest, ":")
+	if strings.HasSuffix(first, SharedWorkspaceSuffix) {
+		return ws
+	}
+	return base + ":" + rest
+}
+
+func ServiceSuffix(ws string) string {
+	return strings.TrimPrefix(kcp.ServiceFQDN("x", "default", ws, kcp.DefaultServiceDomain), "x.default.")
 }
 
 type Phase struct {
@@ -109,6 +138,9 @@ func (ix Index) validate() error {
 			add("set %q is unnamed or named twice", s.Name)
 		}
 		sets[s.Name] = true
+		if s.Scope != "" && s.Scope != ScopeKcp {
+			add("set %s: scope %q is not %s", s.Name, s.Scope, ScopeKcp)
+		}
 		vt, ok := valueTypes[s.Values]
 		if !ok {
 			add("set %s: values %q is no values type (%s)", s.Name, s.Values, strings.Join(ValueTypeNames(), ", "))

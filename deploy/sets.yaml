@@ -1,5 +1,6 @@
 sets:
   - name: provider
+    scope: kcp
     summary: the socialweb provider workspace, its schemas and exports, and the account and cluster WorkspaceTypes (was install-provider.sh)
     values: None
     phases:
@@ -37,6 +38,7 @@ sets:
             for: IdentityValid
 
   - name: permission-inventory
+    scope: kcp
     summary: the four provider ServiceAccounts, then their ClusterRoles and bindings named to the live provider cluster (was apply-permission-inventory.sh)
     values: PermissionInventory
     phases:
@@ -61,6 +63,7 @@ sets:
             exceptKinds: [ServiceAccount]
 
   - name: denoruntime
+    scope: kcp
     summary: the deno provider workspace, the DenoPod, DenoRun, DenoJob, OpenBao and policy schemas and exports, and the workflow and denoruntime WorkspaceTypes (was denokcp/install-provider.sh)
     values: None
     phases:
@@ -160,6 +163,7 @@ sets:
             for: Ready
 
   - name: dev-host
+    scope: kcp
     summary: the dev-instances and dev-instance WorkspaceTypes and the root:dev workspace of a dev host, whose root:dev:<instance> workspaces hold each child instance's HostProcess objects (plan 0006 M4-DEV-PARENT-KCP); needs the hostprocesses set
     values: None
     phases:
@@ -524,6 +528,7 @@ sets:
             template: denopods/service.yaml
 
   - name: market-network
+    scope: kcp
     summary: the shared services of a MarketNetwork application - its OpenBaoServer network (the PKI the deno runtime issues the services' certificates from, through a client that holds only that policy), PLC, relay, dispatcher and its TLS front, two PDSes and the verifier - applied by its reconciler (internal/appctl); the bidders are child applications with their own kcp; needs denoruntime and a running deno provider
     values: MarketNetwork
     phases:
