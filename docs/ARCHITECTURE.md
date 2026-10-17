@@ -3805,34 +3805,63 @@ because it bounds a mechanism the rest of this document leans on.
   pds DenoPod keeps a record Pending with condition ReferencesResolved False, reason MissingReference,
   naming each missing or unreadable (404, 403) reference, writes it once all resolve, rewrites it when a
   referenced value changes, reports uri and cid, and deletes it with the object (finalizer
-  atprotorecord.socialweb.computer/repo). The association: the operator scans
-  `<qrOrigin>/#bdr=<bidder DID>`, the frontend calls associateConfirm through the operator's PDS, the pds
-  DenoPod decides with the MarketIdentity spec (associateWith is the bidder's handle, so the operator
-  account is approved at once) and records the approval in `spec.approvedAssociations`; the declared
-  record `association` (challenge from `spec.approvedAssociations[0]`, keyId from `status.did`) then
-  resolves and is written, the call answers, and the frontend writes one record into the operator's repo
-  (one createRecord, 3 points, once per bidder DID).
+  atprotorecord.socialweb.computer/repo). The association is dynamic (see "The operator comes from the
+  event stream" below): no operator is configured; the operator writes one claim record into its own repo
+  (one putRecord, 3 points, once per bidder DID) and the application learns it from the event stream.
   The requester's policy reads the bidder's own repo for the operator (`resolveOperatorDid`). In a market
-  network the bidder's core plays the operator's browser once with the bidder account on the bob PDS.
+  network the bidder's core plays the operator's atproto client once with the bidder account on the bob
+  PDS: it reads the nonce from the MarketIdentity status and writes the claim record, nothing else.
   The gateway requester side (M2): before, the gateway's requester DenoPod carried every ComputeContract
   with the OAuth session of its spec.ownerDid account (accounts mode, the atproto auth mount), so every
   rfp, compute.vm, accept and rbac record of every node went into alice's bsky.social repo, and a gateway
   with no web app session for alice failed every claim. Now the gateway set renders the same `pds` DenoPod
-  in root:app for the MarketIdentity `requester` (mode localRepo, associateWith = Gateway `spec.operator`);
+  in root:app for the MarketIdentity `requester` (mode localRepo, AtprotoRecordWatch `association`);
   the core writes its key once at `requester/identity/requester/keys` of the root vault. The requester
   DenoPod writes and reads only through `--repo-pds-url http://pds.default.app.svc.kcp.local` and answers
   bids and events on a callback DID of its own key; spec.ownerDid stays the account of a contract for the
   per-account limits, and the orphan scan reads the one repo. People still sign in to the web app through
-  the atproto auth mount; only the identity that posts RFPs changed. The operator scans
-  `<qrOrigin>/#plc=<requester DID>` once (the Gateway status message names the link while it waits); the
-  frontend calls associateConfirm through the operator's PDS and writes one record into the operator's
-  repo. In a market network the gateway's core does that with the tenant cluster's owner account on the
-  alice PDS. A requester_associate record has the shape {challenge: operator, keyId: requester}.
+  the atproto auth mount; only the identity that posts RFPs changed. The operator claims the requester DID
+  once with the nonce of `<qrOrigin>/#plc=<requester DID>&n=<nonce>&s=requester_associate` (the Gateway
+  status message names the link while it waits). In a market network the gateway's core writes that claim
+  with the tenant cluster's owner account on the alice PDS (the owner sessions file). A requester_associate
+  record has the shape {challenge: operator, keyId: requester}.
   Open: the readings of the live proof; whether prod requesters find the
   new bidder DID through the relay index or need it in the Gateway's bidderDids (the operator's vouches name
   Bob, not the bidder DID). The pds writes the canonical association shape {challenge: operator, keyId:
   the application's DID} for every service; the policy context and the MarketIdentity read it first and
   the old inverted shape second.
+- **The operator comes from the event stream, not from the config (plan 0018 M4-DYNAMIC-ASSOCIATION,
+  opened 2026-10-17).** Neither the Gateway spec nor the MarketBidder spec names an operator; `operator`
+  (handle or DID) is an optional allow-list on both. Records are public and a new DID is visible on
+  plc.directory, so a claim also carries a nonce: random, single-use, kept in the application's OpenBao
+  (`identity/<name>/claim`), shown only in the MarketIdentity status `pendingAction.url`
+  (`<qrOrigin>/#bdr|plc=<DID>&n=<nonce>&s=<service>`, admin-only kcp status). The operator writes, from
+  any atproto client, one `com.publicdomainrelay.temp.badgeBlueKeys` record in its own repo:
+  {keyId: the application's DID, challenge: the operator's DID, service: bidder_associate |
+  requester_associate, nonce, createdAt}. The kind AtprotoRecordWatch (export marketidentities) is the
+  mirror of AtprotoRecord: spec {repo, collection, match: [{fieldPath, value | valueFrom}], source:
+  {relayUrls, jetstreamUrls}}, status {records: [{did, handle, uri, cid, value, verifiedAt}], cursors:
+  [{source, cursor}], conditions: Verified}. The pds DenoPod reconciles the watches whose spec.repo is pds:
+  it subscribes to every source with the collection filter (relay subscribeRepos with a client-side
+  filter, Jetstream `wantedCollections`), takes each event only as a trigger, and fetches the record with
+  com.atproto.repo.getRecord from the author's PDS (from its DID document); only a fetched record that
+  matches enters status. A delete event, a refetch that finds nothing (404, RecordNotFound,
+  RepoNotFound) or a record that no longer matches removes it; a fetch error keeps it. On a start the
+  pds re-verifies every entry of status (Verified False, reason Reverifying, until done), resumes each
+  source from its cursor, and re-verifies every 5 minutes. `deploy/apps/repo-pds/association-watch.<profile>.yaml`
+  declares `association`: keyId equals valueFrom MarketIdentity status.did, service equals the
+  application's service; the market network source is the network value's relayUrls and firehoseUrls,
+  prod adds two public Jetstream instances (the profile file, not code). The MarketIdentity reconciler
+  (mode localRepo, `spec.associationWatch`) waits on the watch: the first verified record whose author
+  is its challenge and that carries the current nonce (or whose author is the allow-listed operator)
+  wins; it is written to `spec.approvedAssociations` and the nonce is deleted. Then the identity is
+  locked: a later claim needs an admin patch of `spec.approvedAssociations`. The association record
+  (`onMissingReference: Delete`) follows `approvedAssociations[0]`. Revocation: once the watch is
+  Verified and no record of an associated DID is left, the reconciler removes that DID from
+  `spec.approvedAssociations` (condition Associated False, reason Revoked), the association record leaves
+  the repo, and a fresh nonce is shown. A restart keeps the association because the watch re-verifies
+  the operator's record. The associateConfirm call stays a fast path for an allow-listed operator.
+  Open: the did-key-associator QR page (qr.fedfork.com) does not yet copy `n` into the record it writes.
 ## 15. Settled decisions, and the defects they closed
 
 Not gaps. Each entry was open once, and each says what settled it and what the settlement was - and,

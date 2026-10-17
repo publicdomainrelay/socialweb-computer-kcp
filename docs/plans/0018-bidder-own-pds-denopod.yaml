@@ -156,3 +156,30 @@ items:
       and releases its finalizer. When the pds DenoPod is not running, the core releases the finalizers itself.
     done_when: "dev down of a market network with a bidder and a gateway leaves no AtprotoRecord object and no stuck workspace."
     status: todo
+  - id: M4-DYNAMIC-ASSOCIATION
+    title: "An application learns its operator from the atproto event stream, not from its config"
+    depends_on: [M1-BIDDER-OWN-PDS, M2-GATEWAY-REQUESTER-OWN-PDS]
+    decision: >
+      docs/ARCHITECTURE.md section 14 "The operator comes from the event stream". The kind
+      AtprotoRecordWatch (spec {repo, collection, match [{fieldPath, value | valueFrom}], source {relayUrls,
+      jetstreamUrls}}, status {records, cursors, conditions Verified}) is reconciled by the pds DenoPod: events
+      are triggers, getRecord from the author's PDS verifies, a delete or a failed refetch removes, a start
+      re-verifies and resumes from the cursors. deploy/apps/repo-pds/association-watch.<profile>.yaml declares
+      association (keyId = MarketIdentity status.did, service = the application's service; source = network
+      relayUrls and firehoseUrls, prod adds Jetstream). The MarketIdentity reconciler shows a single-use nonce
+      from the application's OpenBao only in status.pendingAction.url; the first verified claim record with
+      that nonce (or from the optional spec.operator allow-list) is written to spec.approvedAssociations,
+      the nonce is deleted, and the identity is locked. The association AtprotoRecord has
+      onMissingReference Delete.
+    done_when: "on a market network whose Gateway and MarketBidder specs name no operator, the operators associate by writing one badgeBlueKeys record with the nonce from the MarketIdentity status, the watch lists it as verified, the association AtprotoRecord is Applied, and a tenant cluster gets a node through RFP, bid, accept and cloud-init."
+    status: todo
+  - id: ACC18-NO-OPERATOR-IN-CONFIG
+    title: "No operator in the Gateway or MarketBidder spec, in the market network and in prod"
+    depends_on: [M4-DYNAMIC-ASSOCIATION]
+    done_when: "the prod Gateway and the hat-8 MarketBidder run with no spec.operator; each is associated by one claim record that the operator writes with the nonce of its pendingAction url, read from the public Jetstream."
+    status: todo
+  - id: ACC18-REVOCATION
+    title: "Deleting the operator's claim record revokes the association; a restart keeps it by re-verifying"
+    depends_on: [M4-DYNAMIC-ASSOCIATION]
+    done_when: "deleting the operator's badgeBlueKeys record removes it from the watch status, removes the DID from spec.approvedAssociations, sets condition Associated False reason Revoked, removes the association record from the application's repo and shows a new nonce; a restart of the core with the record in place keeps the association (the watch re-verifies it, Verified True) with no operator in any config."
+    status: todo

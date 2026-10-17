@@ -347,7 +347,7 @@ func (ctl *Controller) reconcileGateway(ctx context.Context, u *unstructured.Uns
 		if id, err := ctl.identityIn(ctx, ws, RequesterIdentity); err == nil {
 			st.Did = id.Status.Did
 			if a := id.Status.PendingAction; a != nil && id.Status.Phase == v1alpha1.MarketIdentityPhaseAwaitingScan {
-				awaitingOperator = "waiting for the operator account to associate the requester's repo " + id.Status.Did + ": " + a.Url
+				awaitingOperator = "waiting for the operator's claim record (badgeBlueKeys keyId " + id.Status.Did + " with the nonce n of " + a.Url + ")"
 			}
 			if m := o.Spec.MarketNetwork; o.Spec.Profile == ProfileGatewayNetwork && m != nil && m.OwnerSessionsFile != "" {
 				if err := ctl.associateGatewayOperator(ctx, id, m.OwnerSessionsFile, o.Spec.Network); err != nil {
