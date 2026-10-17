@@ -46,10 +46,37 @@ spec:
         console.log(JSON.stringify({ event: "dispatcher_tls_refused", host, path: url.pathname }));
         return new Response("not a dispatcher name", { status: 404 });
       }
-      if ((req.headers.get("upgrade") ?? "").toLowerCase() === "websocket") {
-        return new Response("websocket is served on the plain dispatcher port", { status: 501 });
-      }
       const target = `http://${host}:${upstreamPort}${url.pathname}${url.search}`;
+      if ((req.headers.get("upgrade") ?? "").toLowerCase() === "websocket") {
+        const { socket, response } = Deno.upgradeWebSocket(req);
+        const up = new WebSocket(target.replace(/^http:/, "ws:"));
+        socket.binaryType = "arraybuffer";
+        up.binaryType = "arraybuffer";
+        const queued: (string | ArrayBuffer)[] = [];
+        const shut = (w: WebSocket) => {
+          if (w.readyState === WebSocket.OPEN || w.readyState === WebSocket.CONNECTING) w.close();
+        };
+        const close = () => {
+          shut(socket);
+          shut(up);
+        };
+        up.onopen = () => {
+          for (const m of queued.splice(0)) up.send(m);
+          console.log(JSON.stringify({ event: "dispatcher_tls_websocket", host, path: url.pathname }));
+        };
+        up.onmessage = (e) => {
+          if (socket.readyState === WebSocket.OPEN) socket.send(e.data);
+        };
+        socket.onmessage = (e) => {
+          if (up.readyState === WebSocket.OPEN) up.send(e.data);
+          else queued.push(e.data);
+        };
+        up.onclose = close;
+        up.onerror = close;
+        socket.onclose = close;
+        socket.onerror = close;
+        return response;
+      }
       const headers = new Headers(req.headers);
       headers.delete("host");
       try {

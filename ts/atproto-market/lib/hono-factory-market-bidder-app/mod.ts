@@ -536,7 +536,8 @@ export function createMarketBidderApp(spec: MarketBidderAppSpec, ports: MarketBi
     let agent: unknown;
     if (ready.repo && repoAgent) {
       agent = repoAgent;
-      pdsHostname = new URL(ingressUrlOf(keypair.did(), network.ingressProxyHost)).host + (splitHostPort(network.ingressProxyHost).port ? `:${splitHostPort(network.ingressProxyHost).port}` : "");
+      const crawlPort = guestTlsPortOf(network) ?? splitHostPort(network.ingressProxyHost).port;
+      pdsHostname = new URL(ingressUrlOf(keypair.did(), network.ingressProxyHost)).hostname + (crawlPort ? `:${crawlPort}` : "");
     } else {
       agent = createDelegatingAgent(ready.did, () => handle.agent());
       ownPlcDid = await registerKeypairPlcDid({ keypair, attestationDid: attestationKp.did(), plcDirectoryUrl: network.plcDirectoryUrl, logger });

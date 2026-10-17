@@ -4,6 +4,7 @@ stateDir: "{{.StateDir}}/relay-relay"
 memory: 512Mi
 serviceAccount: deno-runner
 tls: serve
+trust: ["{{.GuestTLSDir}}/ca.crt"]
 args: ["--port", "0", "--hostname", "127.0.0.1", "--kv-path", "{{.StateDir}}/relay-relay/kv.sqlite3"]
 env:
   PORT: "0"
