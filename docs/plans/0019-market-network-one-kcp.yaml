@@ -1,0 +1,103 @@
+plan: "0019"
+title: "The market network runs its applications in one kcp, each application in its own workspace"
+status: doing
+note: >
+  Branch task/one-kcp-network on GitHub origin, built on task/own-pds (the AtprotoRecord kind, the repo
+  PDS DenoPod, the valueFrom references). Rebase on it often.
+source: >
+  2026-10-17 user decision (docs/research/2026-10-11-vm-lifecycle/user-decisions.md, last line): Q1 is
+  amended, by profile. A market network profile (dev, CI, soak) runs its applications (PLC, relay,
+  Alice's requester or gateway, Bob's bidder, their repo PDS DenoPods) in ONE kcp, each application in its
+  own workspace, found by service name, as in the deno-kcp market example
+  (deno-kcp/deploy/examples/atproto/market: root:global, root:relay, root:alice, root:bob). The prod
+  profiles keep a strict kcp per application. Applications still talk only over the atproto market
+  protocol.
+principle: >
+  One manifest set per application, two shapes. In prod the set is applied into the application's own kcp
+  (root object in root, components in root:app). In a market network the same set is applied into the
+  application's workspace of the network's kcp (root object in root:<app>, components in root:<app>:app):
+  the applier rebases every phase workspace under the application's workspace and leaves the API provider
+  workspaces (root:*-provider) and the sets of scope kcp shared. Service names come from the phase
+  workspace ({{.ServiceSuffix}}). The shared kcp is composition and isolation (workspaces, and the
+  workspace RBAC of each component's own account); it is never a data channel: at run time the
+  applications still reach each other only over the atproto market protocol.
+state_rules:
+  - Read AGENTS.md first. status is one of todo, doing, done, blocked. The lead flips statuses.
+items:
+  - id: M0-REBASED-SETS
+    title: "One manifest set applies into an application's workspace of any kcp"
+    depends_on: []
+    decision: >
+      kcpapply.Options.Base names the application's workspace; manifests.Rebase maps a phase or wait
+      workspace root to the base and root:<x> to <base>:<x>, except root:<x>-provider (the API providers of
+      the kcp: socialweb-provider, deno-provider). A set with scope kcp in deploy/sets.yaml (provider,
+      permission-inventory, denoruntime, dev-host, market-network) is never rebased. Every apply site of an
+      application passes its workspace (appctl components and the applications set, the HostProcess
+      supervisor, the ComputeVM controller, the gateway's sets); with base root nothing changes. The
+      renderer gives every file the value ServiceSuffix, the service-name suffix of the phase workspace
+      (app.svc.kcp.local in prod, app.<app>.svc.kcp.local in a network), and no manifest names
+      `.default.app.svc.kcp.local` any more.
+    files: ["internal/manifests", "internal/kcpapply", "deploy/sets.yaml", "deploy/apps"]
+    done_when: "the market-bidder, market-requester and gateway sets apply unchanged into root (prod) and into root:<app> (network); grep finds no hard-coded .default.app.svc.kcp.local under deploy/apps."
+    status: todo
+  - id: M1-CHILD-IN-WORKSPACE
+    title: "A network child application is a workspace of the network's kcp, not a kcp of its own"
+    depends_on: [M0-REBASED-SETS]
+    decision: >
+      The MarketNetwork reconciler creates the workspace root:<app name> (type universal, label
+      apps.socialweb.computer/application; names global, relay, alice, bob, dev, app and *-provider are
+      refused) and places the child's core as before (a HostProcess in root:dev:<instance>, through the
+      network's dev host). The child's record says sharedKcp (the network's state dir), its
+      adminKubeconfig and kcpURL are the network's, its baseWorkspace is root:<app>; the bootstrap layer
+      places no kcp, kine or front for it, its core runs no deno runtime (the network's deno runtime runs
+      every DenoPod of the kcp, through the denoruntime export) and no store maintenance, and mirrors no
+      bootstrap unit. Its controllers (application, HostProcess, OpenBaoServer, Postgres, ComputeVM, TTL)
+      run scoped to root:<app>. The composer applies the root object into root:<app> and reads its status
+      there; NetworkAppStatus reports kcpUrl and workspace; condition OneKcp (replacing OwnKcp) holds when
+      every child reports the network's kcp and a workspace of its own. Stopping a child (run request
+      release) deletes its DenoPods and its core and keeps its workspace and state dir; removing it deletes
+      the root object, then the workspace, then the core. The per-child kcp path of the market network
+      profile is removed; prod (run bidder, install gateway, run request without --network) is unchanged.
+    files: ["internal/appctl/child.go", "internal/appctl/appworkspace.go", "internal/appctl/network.go", "internal/bootstrap", "internal/devcore", "internal/devinstance"]
+    done_when: "on a fresh droplet dev up --profile market-network --bidders 1 --with-gateway is Ready with OneKcp True; kubectl get workspaces shows root:global, root:relay, root:alice, root:bob, root:bidder-1(:app), root:gateway(:app); no child kine or kcp process runs."
+    status: todo
+  - id: M2-GATEWAY-IN-WORKSPACE
+    title: "The gateway child runs in root:gateway"
+    depends_on: [M1-CHILD-IN-WORKSPACE]
+    decision: >
+      The gateway's core applies its sets with base root:gateway (provider and permission-inventory are
+      scope kcp), its Gateway root object, root vault and tenant HostProcesses live in root:gateway, and
+      its members read the network's kcp slot (admin.kubeconfig, member token) through the record's
+      sharedKcp. Open: the account and home workspaces of the web app (root:<account>:<home>) still sit at
+      the root of the kcp; nesting them under root:gateway needs a base workspace in kcpclient, the
+      clusterprovider registry, sweepkcp and the tenant credential paths.
+    files: ["internal/stack/gatewaykcp"]
+    done_when: "a tenant cluster of the network's gateway gets a node as a market RFP VM from bidder-1 (RFP -> bid -> accept -> cloud-init guest -> Ready node)."
+    status: todo
+  - id: M3-CROSS-WORKSPACE-REFS
+    title: "Cross-application values are valueFrom references that name a workspace"
+    depends_on: [M1-CHILD-IN-WORKSPACE]
+    decision: >
+      An AtprotoRecord valueFrom may set workspace (another application's workspace of the same kcp); the
+      pds DenoPod reads it with its own projected token through /clusters/<workspace>. The composer grants
+      the read in the target workspace (ClusterRole get on the named resource, bound to the reading
+      application's account). Values the composer fills today (the bidder DIDs on a requester, the
+      network value) stay composer-filled where no record carries them; prod resolves the same refs inside
+      its one kcp or the composer fills them.
+    files: ["internal/appctl", "deploy/apps"]
+    done_when: "a record in one application's workspace resolves a reference into another's on the market network, and the same record without workspace resolves in prod."
+    status: todo
+  - id: M4-PROOF
+    title: "Live proof and dev up time"
+    depends_on: [M1-CHILD-IN-WORKSPACE, M2-GATEWAY-IN-WORKSPACE]
+    decision: >
+      On a dev-work droplet: dev up before (own kcp per child) and after (one kcp), run request --network
+      end to end, the tenant node, dev down leaves nothing. The readings go to docs/ARCHITECTURE.md
+      section 15 when the item closes.
+    done_when: "the readings are in section 15; dev up time before and after is recorded."
+    status: todo
+  - id: ACC19-ONE-KCP
+    title: "Acceptance: a market network is one kcp"
+    depends_on: [M4-PROOF]
+    done_when: "dev up, run request --network and the integration tests (test/integration) pass on the one-kcp network; prod profiles still run a kcp per application."
+    status: todo

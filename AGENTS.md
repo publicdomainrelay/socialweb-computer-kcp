@@ -105,10 +105,16 @@ These rules come from the org-root CLAUDE.md. They apply to all TypeScript here.
 
 ## The kcp paradigm, port 0, and the RFP flow
 
-- kcp is part of each application, not infrastructure. An application instance is its own kcp, a
-  manifest set and a profile. State is kcp objects. Components are DenoPods and HostProcesses
-  reconciled from those objects. Applications talk only over the atproto market protocol, never by
-  sharing a kcp. Only the virtual Kubernetes clusters project uses kcp in the traditional way.
+- kcp is part of each application, not infrastructure. An application instance is a kcp of its own (or,
+  in a market network, a workspace of the network's one kcp), a manifest set and a profile. State is kcp
+  objects. Components are DenoPods and HostProcesses reconciled from those objects. Only the virtual
+  Kubernetes clusters project uses kcp in the traditional way.
+- Which kcp, by profile: a prod profile (the gateway, `run bidder`, `run request` without `--network`)
+  runs a strict kcp per application. The market network profile (dev, CI, soak) runs every application
+  in one kcp, each in its own workspace `root:<app>` (components in `root:<app>:app`), from the same
+  manifest set: the applier rebases the set's workspaces under the application's workspace. Either way
+  applications talk only over the atproto market protocol; the shared kcp is composition and isolation,
+  never a data channel. Write service names in manifests as `<name>.default.{{.ServiceSuffix}}`.
 - Port 0 behind the edge: every listener binds port 0 and reports its bound address into the status of
   its kcp object. Peers find it by service name through kcp. Only the stable public entry points
   (caddy on 443, an application's front) keep a known address.

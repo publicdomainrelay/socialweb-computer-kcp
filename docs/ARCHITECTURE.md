@@ -23,8 +23,10 @@ the traditional way. This section states the principle and the rules that follow
 - **Modes = profiles over one manifest set.** A bidder in OAuth QR mode against a real account has no
   PDS pod; a bidder in the market network has its own PDS pod.
 - **Composition = applying manifest sets, or nesting instances as workspaces** (a parent's workspace
-  holds a child instance's HostProcess objects; the child keeps its own kcp).
-- **Applications talk to each other only over the atproto market protocol**, never by sharing a kcp.
+  holds a child instance's HostProcess objects; in a market network the child application itself is a
+  workspace of the parent's kcp).
+- **Applications talk to each other only over the atproto market protocol.** A shared kcp (the market
+  network profile) is composition and isolation, never a data channel.
 - **The market network** (`deploy/market-network`) is the seed of this model and the vehicle
   for parallel workstreams: each workstream's live tests run in its own market network, brought up in its own
   git worktree of this repository; the shared real bidder
@@ -56,11 +58,20 @@ only), `install`, the host contract, and the bootstrap layer that runs an instan
 - **One root object per application** in its own kcp - MarketBidder, MarketRequester, Gateway,
   MarketNetwork. Its spec carries the application's options and profile; the
   core renders the profile into owned children, and a profile switch deletes what the new profile omits.
-- **Strict kcp per application, inside a market network too.** The market network is itself an application,
-  MarketNetwork: its kcp runs the shared atproto services (PLC, relay, dispatchers, PDSes, the QR relay)
-  and holds each child application's bootstrap layer as HostProcess objects, so every bidder, gateway and
-  requester invocation in the market network runs its own kcp. Children learn the network only from values the
-  composer copies onto their root objects; the DNS shim resolves only its own application's names.
+- **Which kcp, by profile (user decision 2026-10-17, amending the strict rule of 2026-10-12).** The prod
+  profiles keep a strict kcp per application: the gateway on its host, a bidder handle on its host, a
+  `run request` without `--network`. The market network profile (dev, CI, soak) runs every application in
+  ONE kcp, each application in its own workspace, as in the deno-kcp market example: the network's own
+  services in root:global (PLC), root:relay (relay, dispatchers), root:alice and root:bob (PDSes), and each
+  child application (a bidder, the gateway, a requester invocation, an ssh gateway) in root:<app>, its
+  components in root:<app>:app. One manifest set serves both shapes: in prod it is applied into the
+  application's own kcp root; in the network the applier rebases every phase workspace under root:<app>
+  (kcpapply.Options.Base; root:*-provider and the sets of scope kcp stay shared) and service names come
+  from the phase workspace (`<name>.default.{{.ServiceSuffix}}`). The child keeps its own core (the
+  network's dev host places it, as a HostProcess in root:dev:<instance>), scoped to its workspace, with no
+  kcp, kine or deno runtime of its own: the network's one deno runtime runs every DenoPod. Children learn
+  the network from values the composer copies onto their root objects and from valueFrom references that
+  name another workspace of the same kcp (plan 0019).
 - **Every CLI option stays, kcp-native.** Each hono-bidder and request-vm-ssh option becomes a root-object
   field or a profile (only legacy guest transports are removed). Sign-in is an object, MarketIdentity:
   the URL to visit, the association to approve and an expired session are
