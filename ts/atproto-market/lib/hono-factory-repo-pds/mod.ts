@@ -9,7 +9,7 @@ import { createKcpIdentityPrompt } from "@publicdomainrelay/identity-prompt-kcp"
 import { createOpenBaoIdentityVault } from "@publicdomainrelay/market-identity-vault-openbao";
 import { createOpenBaoServerResolver } from "@publicdomainrelay/openbao-server-kcp";
 import { createKcpRestClient } from "@publicdomainrelay/kcp-client-rest";
-import { startAtprotoRecordReconciler } from "@publicdomainrelay/atproto-record-kcp";
+import { startAtprotoRecordReconciler, startAtprotoRecordWatchReconciler } from "@publicdomainrelay/atproto-record-kcp";
 import type { AtprotoRecordReconciler } from "@publicdomainrelay/atproto-record-kcp";
 import { installMarketNetworkFetch } from "@publicdomainrelay/market-network-fetch";
 import type { MarketNetwork } from "@publicdomainrelay/market-network-common";
@@ -38,6 +38,7 @@ export function createRepoPdsApp(spec: RepoPdsSpec, ports: { logger: StructuredL
   const { logger } = ports;
   let pds: LocalPDSAgent | undefined;
   let records: AtprotoRecordReconciler | undefined;
+  let watches: AtprotoRecordReconciler | undefined;
   const caCert = spec.kcp.caFile ? Deno.readTextFileSync(spec.kcp.caFile) : undefined;
   const prompt = createKcpIdentityPrompt({ server: spec.kcp.server, workspace: spec.kcp.workspace, tokenFile: spec.kcp.tokenFile, caCert });
   const kcp = createKcpRestClient({ server: spec.kcp.server, tokenFile: spec.kcp.tokenFile, caFile: spec.kcp.caFile });
@@ -136,6 +137,7 @@ export function createRepoPdsApp(spec: RepoPdsSpec, ports: { logger: StructuredL
         onAssociate,
       });
       records = startAtprotoRecordReconciler({ kcp, workspace: spec.kcp.workspace, repoName: REPO_PDS_NAME, did: pds.did, repo: pds.repoApi, logger });
+      watches = startAtprotoRecordWatchReconciler({ kcp, workspace: spec.kcp.workspace, repoName: REPO_PDS_NAME, plcDirectoryUrl: spec.network.plcDirectoryUrl, logger });
       await pds.beginServe();
       const status = { did: pds.did, ingressHost: pds.relay.ingressHost ?? "", servePort: serve.tcpPort, keyDid: keypair.did() };
       if (spec.reports.statusFile) {
@@ -147,6 +149,7 @@ export function createRepoPdsApp(spec: RepoPdsSpec, ports: { logger: StructuredL
     },
     async shutdown() {
       records?.stop();
+      watches?.stop();
       pds?.stop();
     },
   };

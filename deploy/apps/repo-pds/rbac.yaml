@@ -21,6 +21,12 @@ rules:
   - apiGroups: ["socialweb.computer"]
     resources: ["atprotorecords/status"]
     verbs: ["get", "patch", "update"]
+  - apiGroups: ["socialweb.computer"]
+    resources: ["atprotorecordwatches"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["socialweb.computer"]
+    resources: ["atprotorecordwatches/status"]
+    verbs: ["get", "patch", "update"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

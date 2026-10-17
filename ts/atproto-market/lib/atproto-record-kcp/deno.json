@@ -4,6 +4,8 @@
   "license": "Unlicense",
   "exports": "./mod.ts",
   "imports": {
+    "@atproto/identity": "npm:@atproto/identity@^0.5.0",
+    "@publicdomainrelay/atproto-event-streams-client": "jsr:@publicdomainrelay/atproto-event-streams-client@^0",
     "@publicdomainrelay/kcp-client-abc": "jsr:@publicdomainrelay/kcp-client-abc@^0",
     "@publicdomainrelay/kcp-client-common": "jsr:@publicdomainrelay/kcp-client-common@^0",
     "@publicdomainrelay/atproto-repo-abc": "jsr:@publicdomainrelay/atproto-repo-abc@^0",
