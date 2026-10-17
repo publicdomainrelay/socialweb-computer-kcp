@@ -169,7 +169,7 @@ Build script options:
 
 ## Run a market network on one host
 
-A market network is one instance, profile `market-network`, in its own kcp. It runs the shared atproto services (fake PLC, relay, PDSes) and composes child applications, each with its own kcp: one bidder per `--bidders`, and, with `--with-gateway`, one gateway.
+A market network is one instance, profile `market-network`, with one kcp. It runs the shared atproto services (fake PLC in `root:global`, relay and dispatchers in `root:relay`, PDSes in `root:alice` and `root:bob`) and composes child applications, each in its own workspace of that kcp: one bidder per `--bidders` (`root:bidder-<n>`), with `--with-gateway` one gateway (`root:gateway`), and one workspace per `run request --network` invocation. A child's components are DenoPods in `root:<app>:app`. A production bidder or gateway runs the same manifest set in a kcp of its own.
 
 ```bash
 socialweb-computer dev up --instance mn1 --profile market-network --bidders 1 --with-gateway --vm-host-backend systemd-user
@@ -544,7 +544,7 @@ The deploy inputs (gateway.env, gateway-spec.yaml) live on the orphan branch `sw
 
 ## Inspect the kcp of an application
 
-Every application has its own kcp. A kcp admin kubeconfig's server URL ends in `/clusters/<workspace>`; swap the workspace to walk the kcp. Define two helpers:
+A production application has its own kcp; the applications of a market network share the network's kcp, one workspace each (`root:<app>`). A kcp admin kubeconfig's server URL ends in `/clusters/<workspace>`; swap the workspace to walk the kcp. Define two helpers:
 
 ```bash
 kc() { local k=$1 ws=$2; shift 2; local b; b=$(kubectl --kubeconfig $k config view -o jsonpath='{.clusters[0].cluster.server}' | sed 's#/clusters/.*##'); kubectl --kubeconfig $k --server "$b/clusters/$ws" "$@"; }
@@ -562,7 +562,7 @@ kc $K root api-resources --api-group=socialweb.computer    # the kinds this laye
 ```
 
 - `dev env` prints the network's kcp kubeconfig and ports.
-- A child application's kcp is under the network's state dir, in `apps/`.
+- A child application of a market network has no kcp of its own: walk `root:<app>` of the network's kcp. Its state (component state dirs, its OpenBao) is under the network's state dir, in `apps/`; the run directories of every DenoPod of the network are under `<network state>/denokcp/runs/`, and each names its pod in `service.txt`.
 - A production bidder's kcp is under `/var/lib/socialweb-computer/swc-bidder/handles/<hash>/kcp`, and a production gateway's kcp is under its state dir (default `/var/lib/socialweb-computer/socialweb/kcp`). A claim lives in the cluster's workspace: `kc $K root:<acct>:<cluster> get nodeclaims`.
 - A production host has no `kubectl`; use the gateway's embedded k3s: `K3S=$(find /var/lib/socialweb-computer/socialweb/runtime -name k3s -type f | head -1); $K3S kubectl ...`.
 
