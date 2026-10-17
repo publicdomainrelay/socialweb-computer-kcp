@@ -150,9 +150,7 @@ func RootVaultSpec(g v1alpha1.GatewaySpec) (v1alpha1.OpenBaoServerSpec, error) {
 }
 
 func GatewayRequesterIdentity(g v1alpha1.GatewaySpec) v1alpha1.MarketIdentitySpec {
-	s := IdentitySpecOf(v1alpha1.ApplicationIdentity{Mode: v1alpha1.MarketIdentityModeLocalRepo})
-	s.AssociateWith = g.Operator
-	return s
+	return OperatorWatched(IdentitySpecOf(v1alpha1.ApplicationIdentity{Mode: v1alpha1.MarketIdentityModeLocalRepo}), g.Operator)
 }
 
 func sameSpec(a, b any) bool {
@@ -339,15 +337,11 @@ func (ctl *Controller) reconcileGateway(ctx context.Context, u *unstructured.Uns
 		}
 		webAppReady = len(pods) > 0
 		var components []v1alpha1.ApplicationListener
-		pdsAddress := ""
 		for i := range pods {
 			v := podViewOf(ws, &pods[i])
 			st.Components = append(st.Components, v.component())
 			components = append(components, v.Listeners...)
 			webAppReady = webAppReady && v.Ready && len(v.Listeners) > 0
-			if v.Name == PdsComponent && v.Ready {
-				pdsAddress = v.Address
-			}
 		}
 		st.Listeners = append(st.Listeners, components...)
 		if id, err := ctl.identityIn(ctx, ws, RequesterIdentity); err == nil {
@@ -356,7 +350,7 @@ func (ctl *Controller) reconcileGateway(ctx context.Context, u *unstructured.Uns
 				awaitingOperator = "waiting for the operator account to associate the requester's repo " + id.Status.Did + ": " + a.Url
 			}
 			if m := o.Spec.MarketNetwork; o.Spec.Profile == ProfileGatewayNetwork && m != nil && m.OwnerSessionsFile != "" {
-				if err := ctl.associateGatewayOperator(ctx, id, pdsAddress, m.OwnerSessionsFile, o.Spec.Network); err != nil {
+				if err := ctl.associateGatewayOperator(ctx, id, m.OwnerSessionsFile, o.Spec.Network); err != nil {
 					ctl.c.log().Warn("associating the requester's DID with the market network operator account", "err", err.Error())
 				}
 			}
@@ -384,15 +378,19 @@ func GatewayPds(v manifests.Gateway, stateDir string, n *v1alpha1.MarketNetworkV
 	p := manifests.RepoPds{StateDir: stateDir, Identity: RequesterIdentity, KcpServer: v.KcpServer, KcpWorkspace: v.IdentityWorkspace,
 		VaultServer: v.Requester.Vault.Server, VaultClient: PdsVaultClient, VaultKcpServer: v.KcpServer + "/clusters/" + v.GatewayWorkspace,
 		VaultMount: RequesterVaultMount, VaultMountClient: RequesterVaultClient, VaultWorkspace: v.GatewayWorkspace}
+	p.AssociateService = RequesterAssociate
 	extra := []string{"--associate-service-id", RequesterAssociate}
 	var ca string
+	var err error
 	if n != nil {
 		p.PlcDirectoryUrl, p.IngressProxyHost, ca = n.PlcDirectoryUrl, n.IngressProxyHost, n.CaBundleRef
+		if p.WatchRelayUrls, err = listFragment(append(append([]string{}, n.RelayUrls...), n.FirehoseUrls...)...); err != nil {
+			return p, err
+		}
 		if hosts := NetworkHostsArg(n.Hosts); hosts != "" {
 			extra = append(extra, "--network-hosts", hosts)
 		}
 	}
-	var err error
 	if p.Trust, err = listFragment(ca); err != nil {
 		return p, err
 	}

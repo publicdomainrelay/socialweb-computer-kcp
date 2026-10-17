@@ -490,6 +490,7 @@ export function createMarketBidderApp(spec: MarketBidderAppSpec, ports: MarketBi
       oauthClientId: id.oauth?.sessionClientId,
       localRepo: {
         qrParam: "bdr",
+        service: BIDDER_ASSOC_SERVICE,
         open: async () => {
           const did = await repoPdsDid(repo.url);
           repoAgent = createRepoPdsAgent({ pdsUrl: repo.url, did, keypair: keypair! });

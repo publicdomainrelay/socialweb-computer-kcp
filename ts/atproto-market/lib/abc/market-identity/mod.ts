@@ -16,6 +16,7 @@ export type {
   MarketIdentityStatus,
   PendingActionKind,
   VaultRef,
+  WatchedRecord,
 } from "@publicdomainrelay/socialweb-computer-k8s-api";
 
 export {

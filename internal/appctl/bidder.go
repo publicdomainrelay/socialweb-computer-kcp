@@ -193,8 +193,11 @@ func BidderPds(v manifests.MarketBidder, stateDir string, n *v1alpha1.MarketNetw
 	p := manifests.RepoPds{StateDir: stateDir, Identity: BidderIdentity, KcpServer: v.Kcp.Server, KcpWorkspace: v.Kcp.Workspace,
 		VaultServer: v.Vault.Server, VaultClient: PdsVaultClient, VaultKcpServer: v.Vault.KcpServer, VaultMount: BidderVaultClient,
 		VaultMountClient: BidderVaultClient, VaultWorkspace: v.Kcp.Workspace,
-		PlcDirectoryUrl: n.PlcDirectoryUrl, IngressProxyHost: n.IngressProxyHost, Trust: v.Trust, Read: v.Read}
+		PlcDirectoryUrl: n.PlcDirectoryUrl, IngressProxyHost: n.IngressProxyHost, Trust: v.Trust, Read: v.Read, AssociateService: BidderAssociate}
 	var err error
+	if p.WatchRelayUrls, err = listFragment(append(append([]string{}, n.RelayUrls...), n.FirehoseUrls...)...); err != nil {
+		return p, err
+	}
 	if hosts := NetworkHostsArg(n.Hosts); hosts != "" {
 		p.ExtraArgs, err = fragment([]string{"--network-hosts", hosts})
 	}
@@ -282,7 +285,7 @@ func (ctl *Controller) reconcileBidder(ctx context.Context, u *unstructured.Unst
 			st.Message = err.Error()
 			return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
 		}
-		if err := ctl.ensureIdentity(ctx, BidderIdentity, o.Spec.Identity); err != nil {
+		if err := ctl.ensureIdentitySpec(ctx, ctl.c.workspace(), BidderIdentity, OperatorWatched(IdentitySpecOf(o.Spec.Identity), o.Spec.Operator)); err != nil {
 			st.Message = "its MarketIdentity: " + err.Error()
 			return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
 		}
@@ -327,15 +330,11 @@ func (ctl *Controller) reconcileBidder(ctx context.Context, u *unstructured.Unst
 		return err
 	}
 	allReady := len(pods) > 0
-	pdsAddress := ""
 	for i := range pods {
 		v := podViewOf(ws, &pods[i])
 		st.Components = append(st.Components, v.component())
 		st.Listeners = append(st.Listeners, v.Listeners...)
 		allReady = allReady && v.Ready
-		if v.Name == PdsComponent && v.Ready {
-			pdsAddress = v.Address
-		}
 		if v.Name == BidderComponent {
 			if did, _ := ctl.runStatus(v.RunID)["did"].(string); did != "" {
 				st.Did = did
@@ -346,7 +345,7 @@ func (ctl *Controller) reconcileBidder(ctx context.Context, u *unstructured.Unst
 		st.Components = append(st.Components, ctl.guestComponents(ctx)...)
 	}
 	if o.Spec.Profile == BidderProfileNetwork {
-		if err := ctl.associateNetworkOperator(ctx, o.Spec, pdsAddress); err != nil {
+		if err := ctl.associateNetworkOperator(ctx, o.Spec); err != nil {
 			ctl.c.log().Warn("associating the bidder's DID with the market network operator account", "err", err.Error())
 		}
 	}

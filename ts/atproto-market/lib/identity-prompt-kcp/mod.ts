@@ -1,5 +1,6 @@
 import type { MarketIdentityStatus } from "@publicdomainrelay/socialweb-computer-k8s-api";
-import { assertMarketIdentityStatus, MARKET_IDENTITY_RESOURCE, parseMarketIdentity } from "@publicdomainrelay/socialweb-computer-k8s-api";
+import type { AtprotoRecordWatch } from "@publicdomainrelay/socialweb-computer-k8s-api";
+import { assertMarketIdentityStatus, ATPROTO_RECORD_WATCH_RESOURCE, MARKET_IDENTITY_RESOURCE, parseMarketIdentity } from "@publicdomainrelay/socialweb-computer-k8s-api";
 import type { IdentityAnswers, IdentityPrompt } from "@publicdomainrelay/identity-prompt-abc";
 import { refuseSecretMaterial, specWithAnswer } from "@publicdomainrelay/identity-prompt-abc";
 import { type KcpClient, kcpResourceClient } from "@publicdomainrelay/kcp-client-abc";
@@ -20,7 +21,7 @@ export interface KcpIdentityPromptOptions {
 
 const DEFAULT_CONFLICT_RETRIES = 5;
 
-export function createKcpIdentityPrompt(opts: KcpIdentityPromptOptions): IdentityPrompt & IdentityAnswers {
+export function createKcpIdentityPrompt(opts: KcpIdentityPromptOptions): IdentityPrompt & Required<Pick<IdentityPrompt, "associationWatch">> & IdentityAnswers {
   const kcp = opts.kcp ??
     createKcpRestClient(
       { server: opts.server, token: opts.token, tokenFile: opts.tokenFile, caCert: opts.caCert },
@@ -30,6 +31,7 @@ export function createKcpIdentityPrompt(opts: KcpIdentityPromptOptions): Identit
 
   return {
     get: (name) => identities.get(name),
+    associationWatch: async (name) => await kcp.get({ resource: ATPROTO_RECORD_WATCH_RESOURCE, workspace: opts.workspace }, name) as AtprotoRecordWatch | null,
     async writeStatus(name, status: MarketIdentityStatus) {
       refuseSecretMaterial(name, "status", status);
       assertMarketIdentityStatus(status);

@@ -65,6 +65,8 @@ type RepoPds struct {
 	VaultWorkspace   string `json:",omitempty"`
 	PlcDirectoryUrl  string `json:",omitempty"`
 	IngressProxyHost string `json:",omitempty"`
+	AssociateService string `json:",omitempty"`
+	WatchRelayUrls   string
 	Trust            string
 	Read             string
 	ExtraArgs        string

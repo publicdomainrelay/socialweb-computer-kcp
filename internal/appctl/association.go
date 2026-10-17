@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -23,6 +24,7 @@ const (
 	AssociateConfirmNSID = "com.publicdomainrelay.temp.requester.associateConfirm"
 	BadgeBlueKeysNSID    = "com.publicdomainrelay.temp.badgeBlueKeys"
 	BidderAssociate      = "bidder_associate"
+	AssociationWatch     = "association"
 )
 
 func xrpcCall(ctx context.Context, method, rawURL, caFile, bearer string, body any) (map[string]any, error) {
@@ -70,26 +72,48 @@ func xrpcCall(ctx context.Context, method, rawURL, caFile, bearer string, body a
 	return out, nil
 }
 
-func (ctl *Controller) associateNetworkOperator(ctx context.Context, spec v1alpha1.MarketBidderSpec, pdsAddress string) error {
+func (ctl *Controller) associateNetworkOperator(ctx context.Context, spec v1alpha1.MarketBidderSpec) error {
 	id, err := ctl.bidderIdentity(ctx)
-	if err != nil || id.Status.Phase != v1alpha1.MarketIdentityPhaseAwaitingScan || id.Status.Did == "" || pdsAddress == "" {
+	if err != nil || !claimOpen(id) || spec.Identity.Handle == "" {
 		return err
 	}
 	password, _, err := ctl.bidderPassword(ctx)
 	if err != nil {
 		return err
 	}
-	operator, err := associateOperator(ctx, id.Status.Did, pdsAddress, spec.Identity.PdsUrl, spec.Network.CaBundleRef,
-		spec.Identity.Handle, password, BidderAssociate, "bidder-")
-	if err != nil {
+	operator, err := writeClaim(ctx, id, spec.Identity.PdsUrl, spec.Network.CaBundleRef, spec.Identity.Handle, password, "bidder-")
+	if err != nil || operator == "" {
 		return err
 	}
-	ctl.c.log().Info("the market network operator account associated the bidder's own DID", "operator", operator,
+	ctl.c.log().Info("the market network operator account wrote its claim record naming the bidder's own DID", "operator", operator,
 		"handle", spec.Identity.Handle, "bidderDid", id.Status.Did)
 	return nil
 }
 
-func associateOperator(ctx context.Context, did, pdsAddress, operatorPds, ca, identifier, password, service, namePrefix string) (string, error) {
+func claimOpen(id *v1alpha1.MarketIdentity) bool {
+	if id == nil || id.Status.Phase != v1alpha1.MarketIdentityPhaseAwaitingScan || id.Status.Did == "" || id.Status.PendingAction == nil {
+		return false
+	}
+	for _, c := range id.Status.Conditions {
+		if c.Type == v1alpha1.ConditionAssociated && c.Reason == "Revoked" {
+			return false
+		}
+	}
+	return true
+}
+
+func claimOf(rawURL string) (nonce, service string) {
+	_, frag, _ := strings.Cut(rawURL, "#")
+	q, _ := url.ParseQuery(frag)
+	return q.Get("n"), q.Get("s")
+}
+
+func writeClaim(ctx context.Context, id *v1alpha1.MarketIdentity, operatorPds, ca, identifier, password, namePrefix string) (string, error) {
+	nonce, service := claimOf(id.Status.PendingAction.Url)
+	if nonce == "" || service == "" {
+		return "", nil
+	}
+	did := id.Status.Did
 	pds := strings.TrimSuffix(operatorPds, "/")
 	sess, err := xrpcCall(ctx, http.MethodPost, pds+"/xrpc/com.atproto.server.createSession", ca, "",
 		map[string]string{"identifier": identifier, "password": password})
@@ -98,19 +122,10 @@ func associateOperator(ctx context.Context, did, pdsAddress, operatorPds, ca, id
 	}
 	operator, _ := sess["did"].(string)
 	access, _ := sess["accessJwt"].(string)
-	q := url.Values{"aud": {did}, "lxm": {AssociateConfirmNSID}}
-	sa, err := xrpcCall(ctx, http.MethodGet, pds+"/xrpc/com.atproto.server.getServiceAuth?"+q.Encode(), ca, access, nil)
-	if err != nil {
-		return "", err
-	}
-	token, _ := sa["token"].(string)
-	if _, err := xrpcCall(ctx, http.MethodPost, "http://"+pdsAddress+"/xrpc/"+AssociateConfirmNSID, "", token, map[string]any{}); err != nil {
-		return "", err
-	}
-	rec := map[string]any{"$type": BadgeBlueKeysNSID, "keyId": did, "challenge": operator, "service": service,
+	rec := map[string]any{"$type": BadgeBlueKeysNSID, "keyId": did, "challenge": operator, "service": service, "nonce": nonce,
 		"name": namePrefix + did[len(did)-8:], "createdAt": time.Now().UTC().Format(time.RFC3339)}
-	if _, err := xrpcCall(ctx, http.MethodPost, pds+"/xrpc/com.atproto.repo.createRecord", ca, access,
-		map[string]any{"repo": operator, "collection": BadgeBlueKeysNSID, "record": rec}); err != nil {
+	if _, err := xrpcCall(ctx, http.MethodPost, pds+"/xrpc/com.atproto.repo.putRecord", ca, access,
+		map[string]any{"repo": operator, "collection": BadgeBlueKeysNSID, "rkey": service + "-" + strings.ReplaceAll(did, ":", "-"), "record": rec}); err != nil {
 		return "", err
 	}
 	return operator, nil
@@ -132,8 +147,8 @@ func (ctl *Controller) identityIn(ctx context.Context, ws, name string) (*v1alph
 	return &id, nil
 }
 
-func (ctl *Controller) associateGatewayOperator(ctx context.Context, id *v1alpha1.MarketIdentity, pdsAddress, sessionsFile string, n *v1alpha1.MarketNetworkValue) error {
-	if id.Status.Phase != v1alpha1.MarketIdentityPhaseAwaitingScan || id.Status.Did == "" || pdsAddress == "" || n == nil {
+func (ctl *Controller) associateGatewayOperator(ctx context.Context, id *v1alpha1.MarketIdentity, sessionsFile string, n *v1alpha1.MarketNetworkValue) error {
+	if !claimOpen(id) || n == nil {
 		return nil
 	}
 	b, err := os.ReadFile(sessionsFile)
@@ -144,15 +159,20 @@ func (ctl *Controller) associateGatewayOperator(ctx context.Context, id *v1alpha
 	if err := json.Unmarshal(b, &sessions); err != nil {
 		return fmt.Errorf("the owner sessions file %s: %w", sessionsFile, err)
 	}
-	s, ok := sessions[id.Spec.AssociateWith]
-	if !ok {
-		return fmt.Errorf("the owner sessions file %s holds no session of the operator %q", sessionsFile, id.Spec.AssociateWith)
+	owners := make([]string, 0, len(sessions))
+	for did := range sessions {
+		owners = append(owners, did)
 	}
-	operator, err := associateOperator(ctx, id.Status.Did, pdsAddress, s.Service, n.CaBundleRef, s.Identifier, s.Password, RequesterAssociate, "requester-")
-	if err != nil {
+	if len(owners) == 0 {
+		return fmt.Errorf("the owner sessions file %s holds no session", sessionsFile)
+	}
+	slices.Sort(owners)
+	s := sessions[owners[0]]
+	operator, err := writeClaim(ctx, id, s.Service, n.CaBundleRef, s.Identifier, s.Password, "requester-")
+	if err != nil || operator == "" {
 		return err
 	}
-	ctl.c.log().Info("the market network operator account associated the gateway requester's own DID", "operator", operator,
+	ctl.c.log().Info("the market network operator account wrote its claim record naming the gateway requester's own DID", "operator", operator,
 		"handle", s.Identifier, "requesterDid", id.Status.Did)
 	return nil
 }

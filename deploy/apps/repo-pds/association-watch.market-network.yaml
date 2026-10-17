@@ -1,0 +1,12 @@
+apiVersion: socialweb.computer/v1alpha1
+kind: AtprotoRecordWatch
+metadata:
+  name: association
+spec:
+  repo: pds
+  collection: com.publicdomainrelay.temp.badgeBlueKeys
+  match:
+    - {fieldPath: keyId, valueFrom: {kind: MarketIdentity, name: "{{.Pds.Identity}}", fieldPath: status.did}}
+    - {fieldPath: service, value: "{{.Pds.AssociateService}}"}
+  source:
+    relayUrls: [{{.Pds.WatchRelayUrls}}]
