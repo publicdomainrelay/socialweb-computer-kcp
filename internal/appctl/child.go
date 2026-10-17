@@ -391,6 +391,11 @@ func (n *networks) teardownChild(ctx context.Context, c child) error {
 			}
 		}
 	}
+	if rec.Gateway != nil {
+		if err := n.deleteAccountWorkspaces(ctx); err != nil {
+			log.Warn("the gateway's account workspaces did not go; its workspace is deleted anyway", "err", err.Error())
+		}
+	}
 	if err := n.deleteAppWorkspace(ctx, c.app.Name); err != nil {
 		log.Warn("the child's workspace did not go; its core is stopped anyway", "workspace", n.appWorkspace(c.app.Name), "err", err.Error())
 	}

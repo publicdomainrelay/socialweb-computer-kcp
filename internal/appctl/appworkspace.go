@@ -96,6 +96,41 @@ func (n *networks) deleteAppWorkspace(ctx context.Context, name string) error {
 	}
 }
 
+func (n *networks) deleteAccountWorkspaces(ctx context.Context) error {
+	ri, err := n.ctl.client(n.ctl.c.workspace(), WorkspaceGVR)
+	if err != nil {
+		return err
+	}
+	deadline := time.Now().Add(ChildDeleteTimeout)
+	for {
+		list, err := ri.List(ctx, metav1.ListOptions{})
+		if err != nil {
+			return err
+		}
+		left := 0
+		for _, w := range list.Items {
+			if t, _, _ := unstructured.NestedString(w.Object, "spec", "type", "name"); t != accountWorkspaceType {
+				continue
+			}
+			left++
+			if w.GetDeletionTimestamp() == nil {
+				if err := ri.Delete(ctx, w.GetName(), metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+					return err
+				}
+			}
+		}
+		if left == 0 {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("%d account workspace(s) are still there %s after their delete", left, ChildDeleteTimeout)
+		}
+		if !sleep(ctx, ChildPoll) {
+			return ctx.Err()
+		}
+	}
+}
+
 func (n *networks) stopAppPods(ctx context.Context, name string) error {
 	ws := n.appWorkspace(name) + ":" + ComponentWorkspace
 	ri, err := n.ctl.client(ws, DenoPodGVR)
