@@ -142,117 +142,7 @@ func TestWebAppSignInThroughThePluginKeepsTheCookieAcrossARestartAndIssuesACerti
 	tn := n.Tenant(t, "tenant", tenantReady)
 	waitOwnerGrant(t, n, tn)
 	acct := n.OwnerAccount(t)
-
-	gwApp, ok := n.App("gateway")
-	if !ok {
-		t.Fatal("the market network has no gateway app")
-	}
-	webFront, pdsName := "", ""
-	for _, l := range gwApp.Listeners {
-		if l.Name == "web-app-front" {
-			webFront = l.Address
-		}
-	}
-	pdsURL, err := url.Parse(acct.pds)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, h := range n.Up.Network.Status.Network.Hosts {
-		if h.Address == pdsURL.Host {
-			pdsName = h.Name
-		}
-	}
-	if webFront == "" || pdsName == "" {
-		t.Fatalf("the gateway app reports no web-app-front listener (%q) or the network names no host for the PDS %s (%q)", webFront, pdsURL.Host, pdsName)
-	}
-
-	podDir := n.podServing(t, pdsURL.Port())
-	leafCrt, err := n.read(filepath.Join(podDir, "tls.crt"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	leafKey, err := n.read(filepath.Join(podDir, "tls.key"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	leaf, err := tls.X509KeyPair(leafCrt, leafKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	startTLSForwarder(t, front, leaf, func() string { return webFront })
-
-	bundle, err := n.read(n.Up.Network.Status.Network.CaBundleRef)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pool := x509.NewCertPool()
-	if !pool.AppendCertsFromPEM(bundle) {
-		t.Fatal("the network CA bundle does not parse")
-	}
-	web := &webSession{t: t, origin: origin, client: &http.Client{Timeout: 30 * time.Second,
-		Transport:     &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}},
-		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
-
-	work := t.TempDir()
-	creds := filepath.Join(work, "owner.creds")
-	if err := os.WriteFile(creds, []byte(fmt.Sprintf("export OWNER_ATPROTO_HANDLE=%s\nexport OWNER_ATPROTO_PASSWORD=%s\n", acct.identifier, acct.password)), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cookies := filepath.Join(work, "cookies.json")
-	denoBin, err := exec.LookPath("deno")
-	if err != nil {
-		home, _ := os.UserHomeDir()
-		denoBin = filepath.Join(home, ".deno", "bin", "deno")
-	}
-	signCtx, cancel := context.WithTimeout(ctx, signInTimeout)
-	defer cancel()
-	signStarted := time.Now()
-	cmd := exec.CommandContext(signCtx, denoBin, "run", "-A", "--no-lock", filepath.Join(n.h.Repo, "scripts", "oauth-signin.ts"),
-		"--creds", creds, "--account", "OWNER", "--url", origin+"/", "--out", filepath.Join(n.Logs, "oauth-signin"),
-		"--cookie-file", cookies, "--sign-in-as", acct.DID, "--chrome-arg=--ignore-certificate-errors",
-		"--chrome-arg=--host-resolver-rules=MAP "+pdsName+":443 "+pdsURL.Host)
-	signOut, err := cmd.CombinedOutput()
-	if err != nil {
-		lines := strings.Split(strings.TrimSpace(string(signOut)), "\n")
-		if len(lines) > 6 {
-			lines = lines[len(lines)-6:]
-		}
-		t.Fatalf("scripts/oauth-signin.ts: %v\n%s", err, strings.Join(lines, "\n"))
-	}
-	t.Logf("signed the owner %s in through the web app and the PDS in %.1fs (screenshots %s)", acct.DID, time.Since(signStarted).Seconds(), filepath.Join(n.Logs, "oauth-signin"))
-	raw, err := os.ReadFile(cookies)
-	if err != nil {
-		t.Fatal(err)
-	}
-	os.Remove(cookies)
-	var jar []struct {
-		Name, Value      string
-		HTTPOnly, Secure bool
-		SameSite         string
-	}
-	if err := json.Unmarshal(raw, &jar); err != nil {
-		t.Fatal(err)
-	}
-	for _, c := range jar {
-		if c.Name == webSessionCookie {
-			web.token = c.Value
-			if !c.HTTPOnly || !c.Secure || c.SameSite != "Strict" {
-				t.Errorf("the session cookie attributes: httpOnly %t secure %t sameSite %q, want true true Strict", c.HTTPOnly, c.Secure, c.SameSite)
-			}
-		}
-	}
-	if web.token == "" {
-		t.Fatalf("the sign-in left no %s cookie", webSessionCookie)
-	}
-	if code, did := web.did(); code != http.StatusOK || did != acct.DID {
-		t.Fatalf("GET /session after the sign-in: %d, did %q, want 200 and %s", code, did, acct.DID)
-	}
-	if code, _, body := web.do(http.MethodPost, "/api/clusters/list", map[string]any{}); code != http.StatusOK || !strings.Contains(string(body), `"tenant"`) {
-		t.Fatalf("the cluster list through the cookie: %d %.200s", code, body)
-	}
-	if code, _, _ := (&webSession{t: t, origin: origin, client: web.client}).do(http.MethodGet, "/session", nil); code != http.StatusUnauthorized {
-		t.Fatalf("GET /session with no cookie: %d, want 401", code)
-	}
+	web := n.webSignIn(t, front, origin, acct)
 
 	core := tn.Kube.CoreV1()
 	if _, err := core.Namespaces().Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: nsServer}}, metav1.CreateOptions{}); err != nil {
@@ -481,4 +371,120 @@ func TestWebAppSignInThroughThePluginKeepsTheCookieAcrossARestartAndIssuesACerti
 		t.Fatalf("the object scan read too little: %v", scanned)
 	}
 	t.Logf("scanned the kcp objects for secrets (bytes by kind): %v", scanned)
+}
+
+func (n *Network) webFront() string {
+	gw, _ := n.App("gateway")
+	for _, l := range gw.Listeners {
+		if l.Name == "web-app-front" {
+			return l.Address
+		}
+	}
+	return ""
+}
+
+func (n *Network) webSignIn(t testing.TB, front net.Listener, origin string, acct *pdsAccount) *webSession {
+	t.Helper()
+	webFront, pdsName := n.webFront(), ""
+	pdsURL, err := url.Parse(acct.pds)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, h := range n.Up.Network.Status.Network.Hosts {
+		if h.Address == pdsURL.Host {
+			pdsName = h.Name
+		}
+	}
+	if webFront == "" || pdsName == "" {
+		t.Fatalf("the gateway app reports no web-app-front listener (%q) or the network names no host for the PDS %s (%q)", webFront, pdsURL.Host, pdsName)
+	}
+
+	podDir := n.podServing(t, pdsURL.Port())
+	leafCrt, err := n.read(filepath.Join(podDir, "tls.crt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	leafKey, err := n.read(filepath.Join(podDir, "tls.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf, err := tls.X509KeyPair(leafCrt, leafKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	startTLSForwarder(t, front, leaf, n.webFront)
+
+	bundle, err := n.read(n.Up.Network.Status.Network.CaBundleRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(bundle) {
+		t.Fatal("the network CA bundle does not parse")
+	}
+	web := &webSession{t: t, origin: origin, client: &http.Client{Timeout: 30 * time.Second,
+		Transport:     &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}},
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
+
+	work := t.TempDir()
+	creds := filepath.Join(work, "owner.creds")
+	if err := os.WriteFile(creds, []byte(fmt.Sprintf("export OWNER_ATPROTO_HANDLE=%s\nexport OWNER_ATPROTO_PASSWORD=%s\n", acct.identifier, acct.password)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cookies := filepath.Join(work, "cookies.json")
+	denoBin, err := exec.LookPath("deno")
+	if err != nil {
+		home, _ := os.UserHomeDir()
+		denoBin = filepath.Join(home, ".deno", "bin", "deno")
+	}
+	signCtx, cancel := context.WithTimeout(context.Background(), signInTimeout)
+	defer cancel()
+	signStarted := time.Now()
+	cmd := exec.CommandContext(signCtx, denoBin, "run", "-A", "--no-lock", filepath.Join(n.h.Repo, "scripts", "oauth-signin.ts"),
+		"--creds", creds, "--account", "OWNER", "--url", origin+"/", "--out", filepath.Join(n.Logs, "oauth-signin"),
+		"--cookie-file", cookies, "--sign-in-as", acct.DID, "--chrome-arg=--ignore-certificate-errors",
+		"--chrome-arg=--host-resolver-rules=MAP "+pdsName+":443 "+pdsURL.Host)
+	signOut, err := cmd.CombinedOutput()
+	if err != nil {
+		lines := strings.Split(strings.TrimSpace(string(signOut)), "\n")
+		if len(lines) > 6 {
+			lines = lines[len(lines)-6:]
+		}
+		t.Fatalf("scripts/oauth-signin.ts: %v\n%s", err, strings.Join(lines, "\n"))
+	}
+	t.Logf("signed the owner %s in through the web app and the PDS in %.1fs (screenshots %s)", acct.DID, time.Since(signStarted).Seconds(), filepath.Join(n.Logs, "oauth-signin"))
+	raw, err := os.ReadFile(cookies)
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Remove(cookies)
+	var jar []struct {
+		Name, Value      string
+		HTTPOnly, Secure bool
+		SameSite         string
+	}
+	if err := json.Unmarshal(raw, &jar); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range jar {
+		if c.Name == webSessionCookie {
+			web.token = c.Value
+			if !c.HTTPOnly || !c.Secure || c.SameSite != "Strict" {
+				t.Errorf("the session cookie attributes: httpOnly %t secure %t sameSite %q, want true true Strict", c.HTTPOnly, c.Secure, c.SameSite)
+			}
+		}
+	}
+	if web.token == "" {
+		t.Fatalf("the sign-in left no %s cookie", webSessionCookie)
+	}
+	if code, did := web.did(); code != http.StatusOK || did != acct.DID {
+		t.Fatalf("GET /session after the sign-in: %d, did %q, want 200 and %s", code, did, acct.DID)
+	}
+	if code, _, body := web.do(http.MethodPost, "/api/clusters/list", map[string]any{}); code != http.StatusOK || !strings.Contains(string(body), `"tenant"`) {
+		t.Fatalf("the cluster list through the cookie: %d %.200s", code, body)
+	}
+	if code, _, _ := (&webSession{t: t, origin: origin, client: web.client}).do(http.MethodGet, "/session", nil); code != http.StatusUnauthorized {
+		t.Fatalf("GET /session with no cookie: %d, want 401", code)
+	}
+	return web
 }
