@@ -27,20 +27,24 @@ A bare Ubuntu 24.04 or Fedora host needs these OS packages and settings for the 
 | `curl`, to install the binary and fetch the guest image | `curl` | `curl` |
 | `/usr/share/zoneinfo`, for the embedded postgres of the gateway | `tzdata` | `tzdata` |
 | `jq`, used by the examples below (optional) | `jq` | `jq` |
+| `machinectl`, to log in as the VM account (optional; or use `ssh`) | `systemd-container` | `systemd-container` |
 
 As root, once:
 
 ```bash
-apt-get install -y uidmap openssh-client curl tzdata jq
+apt-get install -y uidmap openssh-client curl tzdata jq systemd-container
 useradd -m -s /bin/bash -G kvm -K SUB_UID_COUNT=0 -K SUB_GID_COUNT=0 test-0001
 usermod --add-subuids 100000-1148575 --add-subgids 100000-1148575 test-0001
+install -d -m 0700 -o test-0001 -g test-0001 ~test-0001/.ssh
+install -m 0600 -o test-0001 -g test-0001 ~/.ssh/authorized_keys ~test-0001/.ssh/
 loginctl enable-linger test-0001
 sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 echo kernel.apparmor_restrict_unprivileged_userns=0 > /etc/sysctl.d/60-socialweb.conf
 ```
 
 - `-K SUB_UID_COUNT=0 -K SUB_GID_COUNT=0` stops `useradd` from adding its own 65536-id range; the account must have exactly one range in each file. `100000-1148575` is 16 VM slots.
-- Linger keeps the account's `systemd --user` manager running. Log in as the account with `ssh test-0001@<host>` or `machinectl shell test-0001@`; `sudo -u` and `runuser` do not create the `/run/user/<uid>` session that `XDG_RUNTIME_DIR` names.
+- Linger keeps the account's `systemd --user` manager running. Log in as the account with `ssh test-0001@<host>` (the two `install` lines give it root's `authorized_keys`) or, as root on the host, `machinectl shell test-0001@`; `sudo -u` and `runuser` do not create the `/run/user/<uid>` session that `XDG_RUNTIME_DIR` names.
+- On a cloud host's first boot, an unattended upgrade can hold the apt lock for a few minutes; `apt-get` then stops with `Could not get lock`. Wait and run it again.
 - The `sysctl` lets the embedded pasta create a user namespace on Ubuntu 24.04 and newer, where AppArmor restricts it. On a host that has no such sysctl, skip those two lines. A production bidder loads an AppArmor profile through `install bidder` instead.
 - `/dev/kvm` is read-write for the `kvm` group; `/dev/net/tun` is open on current kernels, otherwise run `modprobe tun`.
 - The account's cgroup delegation (`cpu memory pids` in `user@<uid>.service`) is the default on Ubuntu 24.04; `dev up` names it if the host lacks it.
@@ -73,10 +77,11 @@ curl -fLO --progress-bar "$BUCKET/releases/$V/binaries/socialweb-computer-$ARCH"
 curl -fLO --progress-bar "$BUCKET/releases/$V/binaries/SHA256SUMS"
 grep " socialweb-computer-$ARCH\$" SHA256SUMS | sha256sum -c -
 mkdir -p ~/.local/bin && install -m 0755 "socialweb-computer-$ARCH" ~/.local/bin/socialweb-computer
+export PATH="$HOME/.local/bin:$PATH"
 socialweb-computer version
 ```
 
-If `~/.local/bin` is not on your PATH, add it, or install to `/usr/local/bin` instead.
+Run it as the account that runs the binary; for the market network below that is the VM account (`test-0001`). Ubuntu's `~/.profile` puts `~/.local/bin` on PATH only when it exists at login, so the `export` covers the shell that created it; a later login has it. On another distribution, add it to PATH yourself, or install to `/usr/local/bin` instead.
 
 `socialweb-computer version` prints the build, the commit and the sha256 of every asset in the binary. The release tag is in `binaries/release.json` and `manifest.json`.
 
