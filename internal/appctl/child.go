@@ -365,7 +365,13 @@ func (n *networks) stopChild(ctx context.Context, c child) error {
 func (n *networks) teardownChild(ctx context.Context, c child) error {
 	log := n.ctl.c.log().With("child", c.id)
 	var rec devinstance.Record
-	if devinstance.ReadJSON(c.layout.Record, &rec) == nil && rec.AdminKubeconfig != "" && n.coreLive(ctx, c) {
+	recErr := devinstance.ReadJSON(c.layout.Record, &rec)
+	if rec.Gateway != nil {
+		if err := n.deleteAccountWorkspaces(ctx); err != nil {
+			log.Warn("the gateway's account workspaces did not go; its workspace is deleted anyway", "err", err.Error())
+		}
+	}
+	if recErr == nil && rec.AdminKubeconfig != "" && n.coreLive(ctx, c) {
 		for _, kind := range []v1alpha1.ApplicationKind{v1alpha1.ApplicationKindMarketBidder, v1alpha1.ApplicationKindMarketRequester, v1alpha1.ApplicationKindGateway,
 			v1alpha1.ApplicationKindSshGateway} {
 			ri, err := childClient(rec, kind)
@@ -389,11 +395,6 @@ func (n *networks) teardownChild(ctx context.Context, c child) error {
 					return ctx.Err()
 				}
 			}
-		}
-	}
-	if rec.Gateway != nil {
-		if err := n.deleteAccountWorkspaces(ctx); err != nil {
-			log.Warn("the gateway's account workspaces did not go; its workspace is deleted anyway", "err", err.Error())
 		}
 	}
 	if err := n.deleteAppWorkspace(ctx, c.app.Name); err != nil {
