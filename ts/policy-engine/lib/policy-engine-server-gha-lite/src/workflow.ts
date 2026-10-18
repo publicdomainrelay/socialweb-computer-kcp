@@ -908,6 +908,8 @@ return (${transformed});
     const source = await Deno.readTextFile(join(actionPath, main));
     const result = await runActionInWorker({
       source,
+      // ponytail: a TypeScript action main still leaves one DENO_DIR gen/blob emit per run; ship it as bundled JavaScript to avoid that
+      typescript: /\.[cm]?tsx?$/.test(main),
       env,
       allowNet: this.sandbox.netOnly, // net granted in net-only mode
       cache: JSON.stringify(this.ctx.cache),

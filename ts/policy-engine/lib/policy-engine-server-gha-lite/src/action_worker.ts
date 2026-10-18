@@ -143,6 +143,7 @@ const FOOTER = `
  */
 export function runActionInWorker(opts: {
   source: string;
+  typescript?: boolean;
   env: Record<string, string>;
   allowNet: boolean;
   /** Incoming cache JSON, seeded into the GITHUB_CACHE command file. */
@@ -168,7 +169,7 @@ export function runActionInWorker(opts: {
     "// @ts-nocheck\n" + buildShim(env, opts.cache, opts.event) + "\n" + opts.source + "\n" +
     FOOTER;
   const blobUrl = URL.createObjectURL(
-    new Blob([moduleSource], { type: "text/typescript" }),
+    new Blob([moduleSource], { type: opts.typescript ? "text/typescript" : "text/javascript" }),
   );
   const worker = new Worker(blobUrl, {
     type: "module",
