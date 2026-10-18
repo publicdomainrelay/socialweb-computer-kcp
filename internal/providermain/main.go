@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -434,17 +435,46 @@ func vaultStoreDSN(units *clusterprovider.UnitsHost) func(cluster string) (strin
 	}
 }
 
+const TenantClientReuse = 5 * time.Minute
+
+type cachedTenant struct {
+	of     string
+	minted time.Time
+	client kubernetes.Interface
+}
+
 func tenantClients(registry clusterprovider.Clusters, mint func(context.Context, clusterprovider.Ref, *v1alpha1.Cluster) (*rest.Config, error)) func(context.Context, string) (kubernetes.Interface, error) {
+	var mu sync.Mutex
+	clients := map[string]cachedTenant{}
 	return func(ctx context.Context, cluster string) (kubernetes.Interface, error) {
 		ref, cl, err := tenantCluster(ctx, registry, cluster)
 		if err != nil {
 			return nil, err
 		}
+		of := string(cl.UID) + "/" + cl.Status.Instance
+		mu.Lock()
+		for k, c := range clients {
+			if time.Since(c.minted) >= TenantClientReuse {
+				delete(clients, k)
+			}
+		}
+		c, ok := clients[cluster]
+		mu.Unlock()
+		if ok && c.of == of {
+			return c.client, nil
+		}
 		cfg, err := mint(ctx, ref, cl)
 		if err != nil {
 			return nil, err
 		}
-		return kubernetes.NewForConfig(kcpserver.Throughput(cfg))
+		client, err := kubernetes.NewForConfig(kcpserver.Throughput(cfg))
+		if err != nil {
+			return nil, err
+		}
+		mu.Lock()
+		clients[cluster] = cachedTenant{of: of, minted: time.Now(), client: client}
+		mu.Unlock()
+		return client, nil
 	}
 }
 
