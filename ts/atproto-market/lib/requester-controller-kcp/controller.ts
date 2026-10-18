@@ -41,6 +41,7 @@ export interface RequesterController {
   start(): void;
   stop(): Promise<void>;
   active(): string[];
+  stats(): Record<string, number>;
 }
 
 const DEFAULT_RESYNC_MS = 30_000;
@@ -301,6 +302,9 @@ export function createRequesterController(opts: RequesterControllerOptions): Req
     },
     active() {
       return [...runners.keys()];
+    },
+    stats() {
+      return { known: known.length, runners: runners.size, waiting: waiting.size, finished: finished.size, ...scanner?.stats() };
     },
   };
 }

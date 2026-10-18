@@ -386,4 +386,8 @@ Deno.addSignalListener("SIGTERM", shutdown);
 
 controller.start();
 logger.info("requester_controller_started", { maxConcurrent: o.maxConcurrent, perAccountMax: o.perAccountMax });
+setInterval(async () => {
+  const pds = await pdsProvider.pdsFor(undefined);
+  logger.info("requester_memory", { ...Deno.memoryUsage(), pendingBids: pds.pendingBids.size, ...controller.stats() });
+}, o.memoryLogMs as number);
 await new Promise<never>(() => {});

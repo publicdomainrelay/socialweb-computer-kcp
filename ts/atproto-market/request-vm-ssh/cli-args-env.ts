@@ -155,6 +155,11 @@ export default {
       description: "How often the controller looks for finished contracts whose records are due for removal",
       default: 600000,
     },
+    "memory-log-ms": {
+      type: "number" as const,
+      description: "How often the requester logs its V8 heap and the sizes of its per-contract maps (requester_memory)",
+      default: 60000,
+    },
     "market-root-name": {
       type: "string" as const,
       description: "Name of the MarketRequester root object in the ComputeContract's kcp workspace; the requester writes its loop counters to its status.market",

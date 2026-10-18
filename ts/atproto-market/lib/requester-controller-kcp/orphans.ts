@@ -26,6 +26,7 @@ export interface OrphanScannerOptions {
 export interface OrphanScanner {
   due(): boolean;
   scan(contracts: ComputeContract[], stateOf: (c: ComputeContract) => ContractState | null): Promise<void>;
+  stats(): Record<string, number>;
 }
 
 export function createOrphanScanner(opts: OrphanScannerOptions): OrphanScanner {
@@ -47,6 +48,9 @@ export function createOrphanScanner(opts: OrphanScannerOptions): OrphanScanner {
   }
 
   return {
+    stats() {
+      return { settledVms: settledVms.size, unclaimedVms: unclaimedSince.size, owners: knownOwners.size };
+    },
     due() {
       const elapsed = now() - lastScan;
       return !scanning && (elapsed >= opts.intervalMs || (unclaimedSince.size > 0 && elapsed >= 30_000));
