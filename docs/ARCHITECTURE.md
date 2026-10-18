@@ -3983,7 +3983,7 @@ refutation.
   1206 to 1454 (Bids +104 and Events, which end by their TTLs; the gateway's own kinds are flat). Not settled in the window and not
   part of these two series: the gateway requester DenoPod RSS (restarted at 03:48Z for (4)) and the web app DenoPod RSS (179 to
   243 MB); the gateway requester's connections to the dispatcher are a sawtooth (50 to 750, 2200 in the burst after a restart)
-  that the fetch pool drains, and an unread body on a non-2xx getRecord no longer holds one (63fbacc4). Also found: on a fresh
+  that the fetch pool drains, and an unread body on a non-2xx getRecord no longer holds one (ed00b815). Also found: on a fresh
   droplet the `socialweb-computer-k8s-downloads` asset stages to tree baf256f7 (the socialweb-meshd binaries differ by 240
   bytes), not the pinned 01030c9a, so a droplet's dev build needs that pin changed in its own checkout. ACC13-BOUNDED's gateway
   kcp and OpenBao parts hold on this reading.
