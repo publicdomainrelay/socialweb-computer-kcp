@@ -60,6 +60,8 @@ export function createATProtoEventStreamsClient(opts: {
     if (stored !== undefined) opts.log?.info?.("event_stream_resume", { source, stored, from: from ?? null });
     return from;
   };
+  const liveOf = (kind: StreamKind, source: string): number | undefined =>
+    resumeCursor(kind, opts.cursorStore?.load(source), { subscribeReposEvents: 0, jetstreamMicros: 0 });
   const sources = () => [
     ...relays.map((r) => ({ kind: "relay" as const, name: streamSource("relay", r.url), stream: r })),
     ...jetstreams.map((j) => ({ kind: "jetstream" as const, name: streamSource("jetstream", j.url), stream: j })),
@@ -112,7 +114,7 @@ export function createATProtoEventStreamsClient(opts: {
     for (const { kind, name, stream } of sources()) {
       const w = stream.watch({
         wantedCollections: wo.wantedCollections,
-        cursor: resumeOf(kind, name),
+        cursor: liveOf(kind, name),
         onEvent,
         onProgress: progressOf(name),
         log: wo.log,
