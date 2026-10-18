@@ -91,6 +91,7 @@ export function createRequesterController(opts: RequesterControllerOptions): Req
       scanOwners: opts.scanOwners ?? (() => []),
       graceMs: opts.unclaimedGraceMs ?? DEFAULT_UNCLAIMED_GRACE_MS,
       intervalMs: opts.orphanScanIntervalMs ?? DEFAULT_ORPHAN_SCAN_INTERVAL_MS,
+      retentionMs: opts.recordRetentionMs ?? DEFAULT_RECORD_RETENTION_MS,
     })
     : null;
   const retentionMs = opts.recordRetentionMs ?? DEFAULT_RECORD_RETENTION_MS;

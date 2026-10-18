@@ -2472,6 +2472,47 @@ export async function listVmRecords(pds: Pick<RequesterPDS, "did">, opts: { plcU
   }));
 }
 
+export interface OwnVmRecordSet {
+  vm: VmRecordView;
+  rfps: string[];
+  accepts: string[];
+}
+
+export interface OwnContractRecords {
+  sets: OwnVmRecordSet[];
+  eventsByReceipt: Map<string, string[]>;
+}
+
+export async function listOwnContractRecords(pds: Pick<RequesterPDS, "did">, opts: { plcUrl?: string } = {}): Promise<OwnContractRecords> {
+  const own = await ownRecords(pds, opts.plcUrl);
+  const [vms, rfps, accepts, events] = await Promise.all([COMPUTE_VM_NSID, RFP_NSID, ACCEPT_NSID, EVENT_NSID].map((c) => own.list(c)));
+  const sets = new Map<string, OwnVmRecordSet>();
+  for (const r of vms) {
+    sets.set(r.uri, { vm: { uri: r.uri, vmName: String(r.value.role ?? ""), createdAt: String(r.value.createdAt ?? "") }, rfps: [], accepts: [] });
+  }
+  const setOfRfp = new Map<string, OwnVmRecordSet>();
+  for (const r of rfps) {
+    const payload = refOf(r.value.payload).uri ?? "";
+    let set = sets.get(payload);
+    if (!set) {
+      set = { vm: { uri: payload, vmName: "", createdAt: String(r.value.createdAt ?? "") }, rfps: [], accepts: [] };
+      sets.set(payload || r.uri, set);
+    }
+    set.rfps.push(r.uri);
+    setOfRfp.set(r.uri, set);
+  }
+  for (const r of accepts) setOfRfp.get(refOf(r.value.rfp).uri ?? "")?.accepts.push(r.uri);
+  const eventsByReceipt = new Map<string, string[]>();
+  for (const r of events) {
+    const receipt = refOf(r.value.receipt).uri;
+    if (!receipt) continue;
+    const list = eventsByReceipt.get(receipt) ?? [];
+    list.push(r.uri, ...(refOf(r.value.payload).uri ? [refOf(r.value.payload).uri!] : []));
+    eventsByReceipt.set(receipt, list);
+  }
+  return { sets: [...sets.values()], eventsByReceipt };
+}
+
 export interface FoundVmContract {
   state: ContractState;
   deleteSubmitted: boolean;
