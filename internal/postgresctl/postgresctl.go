@@ -27,6 +27,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostprocess"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/logcap"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/pgunit"
 )
 
@@ -109,6 +110,10 @@ func (ct *Controller) SocketDir(name string) string {
 	return filepath.Join(ct.c.SocketRoot, ChildPrefix+name)
 }
 
+func (ct *Controller) logFile(name string) string {
+	return filepath.Join(ct.c.LogDir, ChildPrefix+name+".log")
+}
+
 func (ct *Controller) DataDir(o v1alpha1.Postgres) string {
 	if o.Spec.DataDir != "" {
 		return o.Spec.DataDir
@@ -148,7 +153,7 @@ func (ct *Controller) childSpec(o v1alpha1.Postgres, in pgunit.Install, s pgunit
 		spec.Env = append(spec.Env, v1alpha1.HostProcessEnv{Name: k, Value: v})
 	}
 	if ct.c.LogDir != "" {
-		f := filepath.Join(ct.c.LogDir, ChildPrefix+o.Name+".log")
+		f := ct.logFile(o.Name)
 		spec.Output = &v1alpha1.HostProcessOutput{Stdout: f, Stderr: f, CapBytes: OutputCap}
 	}
 	return spec, nil
@@ -239,7 +244,12 @@ func (ct *Controller) finalize(ctx context.Context, cur *unstructured.Unstructur
 		if o.Spec.DataDir == "" {
 			os.Remove(filepath.Dir(data))
 		}
-		ct.c.log().Info("data directory removed (spec.deleteData)", "postgres", o.Name, "dataDir", data)
+		if ct.c.LogDir != "" {
+			f := ct.logFile(o.Name)
+			os.Remove(f)
+			os.Remove(f + logcap.OldSuffix)
+		}
+		ct.c.log().Info("data directory and log removed (spec.deleteData)", "postgres", o.Name, "dataDir", data)
 	}
 	os.Remove(ct.SocketDir(o.Name))
 	fin := slices.DeleteFunc(cur.GetFinalizers(), func(f string) bool { return f == Finalizer })
