@@ -28,7 +28,7 @@ var ResourceQuotaGVR = schema.GroupVersionResource{Version: "v1", Resource: "res
 
 var QuotaDefaults = struct {
 	Bids, ComputeVMs, ComputeContracts, NodeClaims, PolicyWorkflowRuns, DenoRuns int64
-}{Bids: 20000, ComputeVMs: 64, ComputeContracts: 1024, NodeClaims: 64, PolicyWorkflowRuns: 500, DenoRuns: 200}
+}{Bids: 10000, ComputeVMs: 64, ComputeContracts: 1024, NodeClaims: 64, PolicyWorkflowRuns: 500, DenoRuns: 200}
 
 type quotaEntry struct {
 	component string

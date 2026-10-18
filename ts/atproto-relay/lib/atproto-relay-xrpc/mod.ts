@@ -12,7 +12,7 @@ import type {
   CollectionIndex,
 } from "@publicdomainrelay/atproto-relay-abc";
 
-const MAX_BACKLOG = 50000;
+const MAX_BACKLOG = 10000;
 const MAX_BACKLOG_BYTES = 64 * 1024 * 1024;
 
 export function createRelaySequencer(maxBacklog?: number): RelaySequencer {

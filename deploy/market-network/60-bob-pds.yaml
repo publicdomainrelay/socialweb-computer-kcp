@@ -2,7 +2,7 @@ name: pds
 entry: hono-pds
 edge: "a market network front: it binds port 0 once and keeps that port across a core restart (ports.json)"
 stateDir: "{{.StateDir}}/bob-pds"
-memory: 512Mi
+memory: 2Gi
 serviceAccount: deno-runner
 tls: serve
 args: ["--port", "{{.Ports.BobPds}}", "--hostname", "127.0.0.1", "--kv-path", "{{.StateDir}}/bob-pds/kv.sqlite3"]

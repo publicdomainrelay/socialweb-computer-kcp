@@ -2,7 +2,7 @@ name: relay
 entry: hono-atproto-relay
 edge: "a market network front: it binds port 0 once and keeps that port across a core restart (ports.json)"
 stateDir: "{{.StateDir}}/relay-relay"
-memory: 512Mi
+memory: 1Gi
 serviceAccount: deno-runner
 tls: serve
 trust: ["{{.GuestTLSDir}}/ca.crt"]
