@@ -380,6 +380,16 @@ export function createNodeClaimMapper(opts: NodeClaimMapperOptions): NodeClaimMa
       return;
     }
     const finished = !contract || contract.status?.phase === "Released" || contract.status?.phase === "Failed";
+    if (!finished && contract?.status?.phase === "Releasing") {
+      await replaceStatus(claim, {
+        ...claim.status,
+        phase: "Failed",
+        message: `the claim was deleted; the release of its VM is still retrying on ComputeContract ${name}`,
+      });
+      await opts.store.removeFinalizer(claim).catch((err) => log("node_claim_finalizer_release_failed", { claim: key, error: String(err) }));
+      log("node_claim_released_release_retrying", { claim: key, contract: name });
+      return;
+    }
     if (!finished) return;
     const state = contract ? stateOfContract(contract) : null;
     const confirmed = !contract || contract.status?.phase === "Released" || state?.receipt === undefined;
@@ -430,6 +440,17 @@ export function createNodeClaimMapper(opts: NodeClaimMapperOptions): NodeClaimMa
       } catch (err) {
         log("node_claim_pass_failed", { claim: key, error: String(err) });
       }
+    }
+    const live = new Set(claims.map(nodeClaimKey));
+    for (const [name, c] of byName) {
+      const owner = c.metadata?.annotations?.[NODE_CLAIM_ANNOTATION];
+      if (!owner || live.has(owner)) continue;
+      if (c.status?.phase !== "Released" && c.status?.phase !== "Failed") continue;
+      await opts.contracts.delete(name).catch((err) => {
+        if (!isNotFound(err)) log("node_claim_contract_delete_failed", { claim: owner, error: String(err) });
+      });
+      await opts.vault.remove(bundleRef(name)).catch((err) => log("node_claim_bundle_remove_failed", { claim: owner, error: String(err) }));
+      log("node_claim_orphan_contract_removed", { claim: owner, contract: name, phase: c.status?.phase });
     }
   }
 
