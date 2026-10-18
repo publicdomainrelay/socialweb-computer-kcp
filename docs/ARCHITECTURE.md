@@ -3873,84 +3873,15 @@ because it bounds a mechanism the rest of this document leans on.
   the repo, and a fresh nonce is shown. A restart keeps the association because the watch re-verifies
   the operator's record. The associateConfirm call stays a fast path for an allow-listed operator.
   Open: the did-key-associator QR page (qr.fedfork.com) does not yet copy `n` into the record it writes.
-- **The market network runs its applications in one kcp (plan 0019, opened 2026-10-17).** User decision
-  2026-10-17: Q1 is amended by profile (section 0). Each child application of a MarketNetwork is the
-  workspace `root:<app>` of the network's kcp (type universal, label `apps.socialweb.computer/application`),
-  its components in `root:<app>:app`; the network's own services stay in root:global, root:relay,
-  root:alice and root:bob. One manifest set serves both shapes: `kcpapply.Options.Base` rebases every phase
-  and wait workspace of a set under the application's workspace (`root` -> base, `root:x` -> `<base>:x`),
-  except the API provider workspaces `root:*-provider` and the sets with `scope: kcp` (provider,
-  permission-inventory, denoruntime, dev-host, market-network); file contents are never rewritten, so a
-  manifest names in-app services as `<name>.default.{{.ServiceSuffix}}` (the suffix of the phase workspace)
-  and the logical cluster of its base as `{{.BaseCluster}}`. The child's record carries `sharedKcp` (the
-  network's state dir), the network's admin kubeconfig and kcp URL and `baseWorkspace root:<app>`; the
-  bootstrap layer places no kcp, kine or front for it, and its core (still a HostProcess in
-  `root:dev:<instance>`) runs no deno runtime and no store maintenance: the network's one deno runtime runs
-  every DenoPod of the kcp and writes every run directory under `<network state>/denokcp/runs/` (each names
-  its pod in `service.txt`). Condition OneKcp replaces OwnKcp. Workspace RBAC (kcp: a service account of
-  another workspace is the user `system:kcp:serviceaccount:<logical cluster>:<namespace>:<name>`, and it
-  also needs the non-resource verb `access` on `/` in the target workspace): the app's own pds account
-  reads its `root:app` DenoPods through `deploy/apps/repo-pds/components-rbac.yaml`, and the composer
-  grants every child's pds account get/list on the MarketIdentity objects of the other children
-  (ClusterRole `market-network-peers` in both workspaces of each child), so an AtprotoRecord `valueFrom`
-  with `workspace: root:<other>` resolves (403 elsewhere, the record stays Pending). Prod keeps a kcp per
-  application and runs the same sets with base root.
-  A DenoPod restart (a crash, a kill, a spec change) gives the pod a new run, so
-  the network's fronts (plc, relay, dispatcher, dispatcher-tls, alice and bob pds) are edges
-  (`deno.computer/edge`, the one case a service may name its port): each binds port 0 once, the network
-  records the ports in `<network state>/network/ports.json`, renders them as `{{.Ports.*}}`, restarts a
-  front that came back elsewhere (`deno.computer/restart`) and holds ServicesReady until every front is
-  back on its port; the network value copied onto the children therefore stays valid. The PLC directory
-  keeps its operation log in its state dir (`hono-plc --state-path`), so no DID is lost to a restart. In
-  an application, peers inside it are reached by service name per connection (`<name>.default.{{.ServiceSuffix}}`).
-  The gateway child's teardown deletes the account workspaces (they sit at the root of the kcp) before
-  its own workspace, so the clusterprovider releases its tenant members (dev down 130 s -> 60 s).
-  Open: the web app's account and home workspaces (`root:<account>:<home>`, the tenant clusters) still sit
-  at the root of the network's kcp, not under root:gateway (kcpclient, the clusterprovider registry,
-  sweepkcp and the tenant credential paths take `root` as their base); the composer still copies the
-  network value and the bidder DIDs onto the root objects (no record carries them); the per-child core
-  holds the network's admin kubeconfig (the shared kcp isolates components by workspace RBAC, not the
-  cores); the DNS table of the one deno runtime holds every workspace's names.
-  A core restart adopts the DenoPods (plan 0019 M3C, 2026-10-18). A run (DenoPod, DenoRun or PolicyEngine
-  process) belongs to no unit of the core: the execrunner drops SWC_UNIT, SWC_DEVSUP and INVOCATION_ID
-  from its env, and devsup counts a child outside a unit's process group as a member only while it
-  carries that unit's attribution, so devsup's stop of the core spares the runs (dev down still kills
-  them by SWC_INSTANCE). Under systemd-user (the prod gateway and bidder units, KillMode=control-group)
-  the deno runtime starts or adopts the delegated unit `<prefix>denopods-<key>.service` (a `sleep
-  infinity` holder in socialweb.slice) and clones every run into its `pod-<run>` cgroup (memory.max there
-  when the pod sets a limit), so the core unit's cgroup kill spares the runs and uninstall stops them
-  with the other units; measured on a droplet, a child placed there from another user unit outlives
-  that unit's stop. The deno runtime no longer reaps at start: the provider observes each named run
-  from `runs/<id>/state.json` (pid and start ticks against pid reuse; a probe reads the run's env from
-  /proc), the 2 s requeue of a running pod is the exit poll, and the runs sweep stops a live run that no
-  object names once it is a runs-keep period (1 min) old. `dev restart core` snapshots the live runs
-  before the stop and 10 s after ready: unitsUnchanged holds only when every run kept its pid
-  (runsChanged lists the rest). Readings (dev-adopt-1, 1 bidder and the gateway, 13 DenoPods): before,
-  every core restart replaced every DenoPod (the start reap; twice in 4 s on the runner worker's swap
-  leg on main). After, `dev restart core` 2.06 s and `--binary` 2.03 s in the middle of a
-  `run request`: 13 and 15 runs, every pid and runID unchanged, bidder-1 DenoPods restarts 0 from dev up;
-  9/9 `run request --network` rc 0 across both restarts; the web app answered 921 of 921 polls of
-  /api/clusters/list (401 without a cookie, never a connection error); a `kill -9` DenoPod ran again in
-  3 s under the new core; a DenoPod deleted (finalizer stripped) while the core was stopped then killed
-  had its orphan run stopped 63 s later by the sweep; dev down left no process. Stated limits: an adopted
-  run that exits has no exit code (the old core held the wait), so it fails and restarts under its
-  restart policy, and an OOM kill of an adopted run reads as a plain failure.
-  A PDS pod restart keeps every account and session (plan 0019 M3D, 2026-10-18). Before: hono-pds kept
-  only repo blocks in its KV; the account store, the per-user signing keys and the OAuth tokens were
-  in-memory maps (and a PDS without --private-key-hex made a new service key per start), so a restart of
-  alice's PDS logged the web app's owner out (getServiceAuth 401 invalid_token for 3 min on the runner
-  worker's swap leg). Now, with --kv-path, the PDS keeps its service key, accounts (password hash and
-  salt), per-user signing keys and OAuth tokens (with their expiry) in that KV (a StateStore contract in
-  atproto-repo-abc; DenoKvStorage keys under ["state"]) and restores accounts and signers before it
-  answers; session JWTs are stateless and verify again under the kept key. A restarted front also comes
-  back on its port now: the first apply of the network's services rendered `{{.Ports.*}}` as 0, so a
-  `dev restart alice:pds` bound a new port, was restarted onto its kept port and bound port 0 again; the
-  network applies the set again once ports.json is recorded, holding ServicesReady until then. Reading
-  (dev-adopt-1, 1 bidder and the gateway, dev up 78.6 s): `dev restart <net> alice:pds` (pid 220017 ->
-  223847, new run, same port); the same web app cookie answered GET /session 200 and
-  /api/clusters/list 200 (tenant Ready) after it, the owner's and a fresh did:plc account's old
-  sessions got getServiceAuth tokens, and createSession with the owner's password answered 200; the new
-  PDS logged "accounts restored from the state store { accounts: 3 }".
+- **The market network runs its applications in one kcp: what is left (plan 0019).** The design as built and
+  its readings are in section 15, "The market network is one kcp (plan 0019, 2026-10-18)". Open: the web
+  app's account and home workspaces (`root:<account>:<home>`, the tenant clusters) still sit at the root of
+  the network's kcp, not under root:gateway (kcpclient, the clusterprovider registry, sweepkcp and the
+  tenant credential paths take `root` as their base); the composer still copies the network value and the
+  bidder DIDs onto the root objects (no record carries them); the per-child core holds the network's admin
+  kubeconfig (the shared kcp isolates components by workspace RBAC, not the cores); the DNS table of the one
+  deno runtime holds every workspace's names. ACC19-ONE-KCP (the integration tests on the one-kcp network)
+  is open.
 
 - **The requester retries the release with the same signed event (plan 0020, opened 2026-10-17).**
   Before: one non-2xx answer to the direct submitEvent of a vm.delete (a 404 from the
@@ -9113,6 +9044,144 @@ a process that is frozen for more than 10 s and then continues publishes a secon
 Bid that another process answered; the ComputeVM controllers of two processes of one handle (a
 contract with two processes was not run); and the retention of one process deleting a shared record that
 another process still caches, once every Bid that names it is older than the Bid TTL (24 h by default).
+
+### The market network is one kcp (plan 0019, 2026-10-18)
+
+User decision 2026-10-17: Q1 is amended by profile (section 0). Each child application of a MarketNetwork is the
+workspace `root:<app>` of the network's kcp (type universal, label `apps.socialweb.computer/application`),
+its components in `root:<app>:app`; the network's own services stay in root:global, root:relay,
+root:alice and root:bob. One manifest set serves both shapes: `kcpapply.Options.Base` rebases every phase
+and wait workspace of a set under the application's workspace (`root` -> base, `root:x` -> `<base>:x`),
+except the API provider workspaces `root:*-provider` and the sets with `scope: kcp` (provider,
+permission-inventory, denoruntime, dev-host, market-network); file contents are never rewritten, so a
+manifest names in-app services as `<name>.default.{{.ServiceSuffix}}` (the suffix of the phase workspace)
+and the logical cluster of its base as `{{.BaseCluster}}`. The child's record carries `sharedKcp` (the
+network's state dir), the network's admin kubeconfig and kcp URL and `baseWorkspace root:<app>`; the
+bootstrap layer places no kcp, kine or front for it, and its core (still a HostProcess in
+`root:dev:<instance>`) runs no deno runtime and no store maintenance: the network's one deno runtime runs
+every DenoPod of the kcp and writes every run directory under `<network state>/denokcp/runs/` (each names
+its pod in `service.txt`). Condition OneKcp replaces OwnKcp. Workspace RBAC (kcp: a service account of
+another workspace is the user `system:kcp:serviceaccount:<logical cluster>:<namespace>:<name>`, and it
+also needs the non-resource verb `access` on `/` in the target workspace): the app's own pds account
+reads its `root:app` DenoPods through `deploy/apps/repo-pds/components-rbac.yaml`, and the composer
+grants every child's pds account get/list on the MarketIdentity objects of the other children
+(ClusterRole `market-network-peers` in both workspaces of each child), so an AtprotoRecord `valueFrom`
+with `workspace: root:<other>` resolves (403 elsewhere, the record stays Pending). Prod keeps a kcp per
+application and runs the same sets with base root.
+
+A DenoPod restart (a crash, a kill, a spec change) gives the pod a new run, so the network's fronts (plc, relay, dispatcher, dispatcher-tls, alice and bob pds) are edges
+(`deno.computer/edge`, the one case a service may name its port): each binds port 0 once, the network
+records the ports in `<network state>/network/ports.json`, renders them as `{{.Ports.*}}`, restarts a
+front that came back elsewhere (`deno.computer/restart`) and holds ServicesReady until every front is
+back on its port; the network value copied onto the children therefore stays valid. The PLC directory
+keeps its operation log in its state dir (`hono-plc --state-path`), so no DID is lost to a restart. In
+an application, peers inside it are reached by service name per connection (`<name>.default.{{.ServiceSuffix}}`).
+The gateway child's teardown deletes the account workspaces (they sit at the root of the kcp) before
+its own workspace, so the clusterprovider releases its tenant members (dev down 130 s -> 60 s).
+
+A core restart adopts the DenoPods (plan 0019 M3C, 2026-10-18). A run (DenoPod, DenoRun or PolicyEngine
+process) belongs to no unit of the core: the execrunner drops SWC_UNIT, SWC_DEVSUP and INVOCATION_ID
+from its env, and devsup counts a child outside a unit's process group as a member only while it
+carries that unit's attribution, so devsup's stop of the core spares the runs (dev down still kills
+them by SWC_INSTANCE). Under systemd-user (the prod gateway and bidder units, KillMode=control-group)
+the deno runtime starts or adopts the delegated unit `<prefix>denopods-<key>.service` (a `sleep
+infinity` holder in socialweb.slice) and clones every run into its `pod-<run>` cgroup (memory.max there
+when the pod sets a limit), so the core unit's cgroup kill spares the runs and uninstall stops them
+with the other units; measured on a droplet, a child placed there from another user unit outlives
+that unit's stop. The deno runtime no longer reaps at start: the provider observes each named run
+from `runs/<id>/state.json` (pid and start ticks against pid reuse; a probe reads the run's env from
+/proc), the 2 s requeue of a running pod is the exit poll, and the runs sweep stops a live run that no
+object names once it is a runs-keep period (1 min) old. `dev restart core` snapshots the live runs
+before the stop and 10 s after ready: unitsUnchanged holds only when every run kept its pid
+(runsChanged lists the rest). Readings (dev-adopt-1, 1 bidder and the gateway, 13 DenoPods): before,
+every core restart replaced every DenoPod (the start reap; twice in 4 s on the runner worker's swap
+leg on main). After, `dev restart core` 2.06 s and `--binary` 2.03 s in the middle of a
+`run request`: 13 and 15 runs, every pid and runID unchanged, bidder-1 DenoPods restarts 0 from dev up;
+9/9 `run request --network` rc 0 across both restarts; the web app answered 921 of 921 polls of
+/api/clusters/list (401 without a cookie, never a connection error); a `kill -9` DenoPod ran again in
+3 s under the new core; a DenoPod deleted (finalizer stripped) while the core was stopped then killed
+had its orphan run stopped 63 s later by the sweep; dev down left no process. Stated limits: an adopted
+run that exits has no exit code (the old core held the wait), so it fails and restarts under its
+restart policy, and an OOM kill of an adopted run reads as a plain failure.
+
+A PDS pod restart keeps every account and session (plan 0019 M3D, 2026-10-18). Before: hono-pds kept
+only repo blocks in its KV; the account store, the per-user signing keys and the OAuth tokens were
+in-memory maps (and a PDS without --private-key-hex made a new service key per start), so a restart of
+alice's PDS logged the web app's owner out (getServiceAuth 401 invalid_token for 3 min on the runner
+worker's swap leg). Now, with --kv-path, the PDS keeps its service key, accounts (password hash and
+salt), per-user signing keys and OAuth tokens (with their expiry) in that KV (a StateStore contract in
+atproto-repo-abc; DenoKvStorage keys under ["state"]) and restores accounts and signers before it
+answers; session JWTs are stateless and verify again under the kept key. A restarted front also comes
+back on its port now: the first apply of the network's services rendered `{{.Ports.*}}` as 0, so a
+`dev restart alice:pds` bound a new port, was restarted onto its kept port and bound port 0 again; the
+network applies the set again once ports.json is recorded, holding ServicesReady until then. Reading
+(dev-adopt-1, 1 bidder and the gateway, dev up 78.6 s): `dev restart <net> alice:pds` (pid 220017 ->
+223847, new run, same port); the same web app cookie answered GET /session 200 and
+/api/clusters/list 200 (tenant Ready) after it, the owner's and a fresh did:plc account's old
+sessions got getServiceAuth tokens, and createSession with the owner's password answered 200; the new
+PDS logged "accounts restored from the state store { accounts: 3 }".
+
+The teardown of a gateway child deletes its account workspaces first, while its root object and the web
+app still run (2026-10-18, 499b454d). Before, the network deleted the Gateway root object first: its
+components (the web app and the requester) stopped, and then the account workspace was deleted, so the
+tenant's NodeClaim kept its finalizer `nodeclaim.socialweb.computer/release` (the web app owns it) and
+the account workspace stayed Deleting until devsup stopped the kcp ("the MarketNetwork was not gone
+within 2m0s"). Now the web app releases the NodeClaim through the RFP flow and the clusterprovider
+tears the cluster down before the root object goes.
+
+Readings, before (each child application has its own kcp) and after (one kcp), 1 bidder and the gateway:
+
+| Reading | Before: own kcp per child | After: one kcp |
+|---|---|---|
+| dev up to Ready (runner worker) | 89 to 98 s | 76 to 92 s |
+| kcp and kine memory of the network | 1895 MiB | 797 MiB |
+| requester kcp start in `run request --network` | 17.1 s | 3 to 6 s |
+| dev down | 130 s (account workspaces deleted after the child's own) | 56 to 80 s |
+| `dev restart core` | every DenoPod replaced (twice in 4 s on the runner worker's swap leg) | 2.06 s, `--binary` 2.03 s, every run kept its pid (M3C) |
+| restart of alice's PDS | the web app's owner logged out (getServiceAuth 401 for 3 min) | accounts and sessions kept (M3D) |
+
+Confirmed on rc13 and main (dev-final-1, DigitalOcean c-48, sfo2, 2026-10-18, `dev up --profile
+market-network --bidders 1 --with-gateway`, firecracker guests under systemd-user): dev up 81.1, 81.9,
+81.6, 81.8 and 80.1 s to Ready, each with "7 service(s) and 2 child application(s), each in its own
+workspace of one kcp, are ready"; kcp 700 to 730 MiB and the network's kine 65 MiB resident after dev up
+(765 and 797 MiB); `run request --network --exec 'uname -r'` 63 s, exit 0, requester kcp start 4.04 s,
+released with vm.delete 200. dev down with no node rented: 62.2 s (rc13) and 56.1 s (main), the
+MarketNetwork deleted, `remaining` empty. dev down with a tenant node rented from bidder-1 (a pod whose
+PID 1 ignores SIGTERM, so the guest stop takes its 90 s bound of `vmStop.graceSeconds`): before 499b454d
+130.0 and 124.3 s, the account workspace Deleting for 2 minutes with the NodeClaim's release finalizer
+held, the MarketNetwork not gone; after 122.7 s, the account workspace gone 25 s after its delete, the
+MarketNetwork deleted, `remaining` empty.
+
+### The pds DenoPod, the gateway's association and the teardown of records (plan 0018, 2026-10-18)
+
+Readings on dev-final-1 (DigitalOcean c-48, rc13 and main), one market network with 1 bidder under
+`bidder-tangled-vouch` (`dev up --app-values` with `bidder: {policy: bidder-tangled-vouch}`) and the gateway.
+
+- M0-SHARED-PDS-DENOPOD. The bidder's DenoPod `pds` in `root:bidder-1:app` is Running with
+  `status.listeners` tcp 127.0.0.1:<port> and relay https://did-key-<key>.relay.localhost. An
+  AtprotoRecord `probe-delete` (repo pds, collection computer.socialweb.temp.probe, rkey probe1) in
+  `root:bidder-1`: getRecord on the pds listener answered RecordNotFound before, the record with the
+  object's status uri and cid once Applied, and RecordNotFound again after `kubectl delete`; the object
+  was gone 4.6 s after the delete, and the pds logged `atproto_record_applied` and `atproto_record_deleted`.
+- ACC18-GATEWAY-ASSOCIATION-ONCE. Alice's operator account repo holds one badgeBlueKeys record per
+  gateway requester DID (rkey `requester_associate-<requester DID>`), and the gateway core logged its claim
+  write once. After a restart of the gateway core (its HostProcess killed, generation 1 -> 2, a new pid)
+  the record, its cid, the repo rev and the count of claim writes are unchanged, and the Gateway status
+  did is the same. Before 36f3d0cb the bidder under bidder-tangled-vouch declined every RFP of the gateway
+  ("rejected by scope filter"): bob, its operator, vouched nobody in the network. Now the network
+  declares both directions: in the gateway's `root:gateway:app` the gateway operator's vouch for each
+  bidder operator (`operator-vouch-<bidder app>`), and in each bidder's workspace the bidder operator's
+  vouch for each gateway operator (`operator-vouch-<gateway app>`), which the bidder core writes with the
+  operator account it signs in as. The bidder logs the operator it reads from the association record:
+  `operator resolved from the association record {did: <requester DID>, operatorDid: <alice's operator
+  account>, uri: at://<requester DID>/com.publicdomainrelay.temp.badgeBlueKeys/association}`, the scope
+  filter accepted, the bid won, and the tenant node was Ready 42 s after the pod was applied.
+- M3-RECORDS-BEFORE-PDS-STOPS. Read every 0.5 s with kubectl while dev down ran: the MarketBidder status
+  "2 AtprotoRecord(s) leaving the repo before the pds DenoPod stops", the records gone in 1 to 6 s, then
+  "4 component(s) stopping"; the same order on the Gateway in `root:gateway:app`; then each child's
+  workspace Deleting and gone in 7 to 12 s. No AtprotoRecord object was left. With a rented tenant node the
+  account workspace stayed Deleting until devsup stopped the kcp; that was the teardown order of the
+  gateway child, fixed in 499b454d (section 15, "The market network is one kcp").
 
 ## 16. Vocabulary
 

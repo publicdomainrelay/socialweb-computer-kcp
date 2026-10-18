@@ -274,6 +274,11 @@ one AtprotoRecord `operator-vouch-<bidder app>` (`spec.repo: operator`,
 `sh.tangled.graph.vouch`, rkey and subject the bidder operator's DID from its
 MarketIdentity `approvedAssociations`), and the gateway writes it into the owner
 account's repo through `owner-sessions.json` (status Applied with the uri).
+The other direction is declared too: in each bidder's workspace one AtprotoRecord
+`operator-vouch-<gateway app>` (the bidder operator's vouch for the gateway
+operator), which the bidder core writes into its operator account's repo, so a
+bidder under `bidder-tangled-vouch` (`dev up --app-values` with
+`bidder: {policy: bidder-tangled-vouch}`) bids on the gateway's RFPs.
 
 ### Point an installed bidder account at the network
 
