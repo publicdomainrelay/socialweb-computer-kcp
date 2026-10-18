@@ -48,7 +48,7 @@ go build -tags release with the go.mod toolchain, CGO_ENABLED=0, -trimpath, -bui
 GOPROXY=off. Its caches are content-addressed, so a warm build gives the same bytes as a clean one:
   cache/blobs     the zstd blob of an asset, by the sha256 of its versions.json entry, stage-assets.sh,
                   assetpack and the zstd version (downloaded kinds), or of its tar stream (built kinds)
-  cache/meshd     socialweb-meshd per arch, by the sha256 of rust/ and the rustc, cargo, cc, ar versions
+  cache/meshd     socialweb-meshd per arch, by the sha256 of rust/ (with the zig it pins) and the rustc and cargo versions
   cache/cargo-target, cache/gocache   the cargo target dir and the go build cache
   cache/closure   the TypeScript closure, by the git trees of ts/, socialweb-computer-k8s/, deno.json,
                   deno.lock, deploy/ts-entries.yaml and the Go packages of socialweb-tsbundle, the last

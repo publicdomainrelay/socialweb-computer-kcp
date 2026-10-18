@@ -60,7 +60,7 @@ set -euxo pipefail
 export DEBIAN_FRONTEND=noninteractive
 apt_opts="-o DPkg::Lock::Timeout=600"
 apt-get $apt_opts update -qq
-apt-get $apt_opts install -y -qq uidmap rsync zstd acl jq curl unzip xz-utils dbus-user-session git build-essential clang gnupg binutils passt podman iproute2 util-linux
+apt-get $apt_opts install -y -qq uidmap rsync zstd acl jq curl unzip xz-utils dbus-user-session git build-essential gnupg binutils passt podman iproute2 util-linux
 modprobe tun
 echo tun >/etc/modules-load.d/tun.conf
 printf 'kernel.apparmor_restrict_unprivileged_userns=0\nuser.max_user_namespaces=1000000\n' >/etc/sysctl.d/60-swc.conf

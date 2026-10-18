@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+for a do
+  shift
+  case "$a" in
+    --target=*-unknown-linux-musl) a="${a#--target=}"; set -- "$@" -target "${a%%-*}-linux-musl" -mcpu=baseline ;;
+    --target=*) echo "zig/cc: unknown $a" >&2; exit 1 ;;
+    *) set -- "$@" "$a" ;;
+  esac
+done
+exec /mnt/zig/zig cc "$@"
