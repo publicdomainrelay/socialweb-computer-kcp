@@ -26,8 +26,24 @@ var appRE = regexp.MustCompile(`/apps/[^/]+/([a-z0-9-]+)(?:/|\s|$)`)
 var podRE = regexp.MustCompile(`/(?:components|network/state)/([a-z0-9-]+(?:/[a-z0-9-]+)?)`)
 
 type procSum struct {
-	N     int   `json:"n"`
-	RssKB int64 `json:"rssKB"`
+	N       int   `json:"n"`
+	RssKB   int64 `json:"rssKB"`
+	Sockets int   `json:"sockets"`
+}
+
+func socketCount(pid int) int {
+	dir := fmt.Sprintf("/proc/%d/fd", pid)
+	fds, err := os.ReadDir(dir)
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, fd := range fds {
+		if l, err := os.Readlink(filepath.Join(dir, fd.Name())); err == nil && strings.HasPrefix(l, "socket:") {
+			n++
+		}
+	}
+	return n
 }
 
 func kv(path string) map[string]int64 {
@@ -158,6 +174,7 @@ func procSample() map[string]procSum {
 		s := out[key]
 		s.N++
 		s.RssKB += pages * int64(os.Getpagesize()) / 1024
+		s.Sockets += socketCount(pid)
 		out[key] = s
 	}
 	return out
@@ -260,7 +277,8 @@ func runSample(args []string) int {
 		at := time.Now()
 		s := map[string]any{"ts": at.UTC().Format(time.RFC3339), "elapsedSec": int(at.Sub(started).Seconds()), "host": hostSample(),
 			"procs": procSample(), "disk": diskSample(t.layout.StateDir), "status": statusSample(ctx, *binary, *instance, *stateDir),
-			"kv": kvSample(t.layout.StateDir), "pds": pdsSample(ctx, *binary, *instance, *stateDir)}
+			"kv": kvSample(t.layout.StateDir), "pds": pdsSample(ctx, *binary, *instance, *stateDir),
+			"kine": kineSample(t.layout.StateDir)}
 		s["sampleSec"] = time.Since(at).Seconds()
 		line, _ := json.Marshal(s)
 		f, err := os.OpenFile(*outPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)

@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"os/exec"
@@ -78,6 +79,61 @@ func kvSample(stateDir string) map[string]any {
 			db.Close()
 		}
 		out[rel] = entry
+	}
+	return out
+}
+
+func kineKey(name string) (resource, cluster string) {
+	seg := strings.Split(strings.TrimPrefix(name, "/registry/"), "/")
+	if len(seg) >= 3 && strings.Contains(seg[0], ".") {
+		return seg[0] + "/" + seg[1], seg[2]
+	}
+	if len(seg) >= 2 {
+		return seg[0], seg[1]
+	}
+	return name, ""
+}
+
+func kineSample(stateDir string) map[string]any {
+	out := map[string]any{}
+	for app, dir := range childStateDirs(stateDir) {
+		filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if d.IsDir() && d.Name() == "apps" && app == "network" {
+				return fs.SkipDir
+			}
+			if d.IsDir() || !strings.HasSuffix(p, ".db") {
+				return nil
+			}
+			db, err := sql.Open("sqlite", "file:"+p+"?mode=ro&_pragma=busy_timeout(5000)")
+			if err != nil {
+				return nil
+			}
+			defer db.Close()
+			rows, err := db.Query("select name from kine where id in (select max(id) from kine group by name) and deleted = 0")
+			if err != nil {
+				return nil
+			}
+			defer rows.Close()
+			resources := map[string]int{}
+			clusters := map[string]bool{}
+			total := 0
+			for rows.Next() {
+				var name string
+				if rows.Scan(&name) != nil {
+					continue
+				}
+				r, c := kineKey(name)
+				resources[r]++
+				clusters[c] = true
+				total++
+			}
+			rel, _ := filepath.Rel(stateDir, p)
+			out[rel] = map[string]any{"live": total, "clusters": len(clusters), "resources": resources}
+			return nil
+		})
 	}
 	return out
 }
