@@ -3747,20 +3747,62 @@ because it bounds a mechanism the rest of this document leans on.
   - The hono-pds block store, the requester's vm.delete and market.event records, the requester's orphan records, the bidder's
     bid record cap, the requester heap and the gateway requester's retention are closed (section 15, "hono-pds collects
     unreachable blocks" and "The requester's orphan records, the bidder's bid sweep, the requester heap and the gateway
-    requester's retention"). Left open from the dev-bound-1 reading (2026-10-18):
-  - The gateway's requester DenoPod RSS rose from 227 to 550 MB in 90 minutes (698 MB at most, +283 MB an hour) while its V8
-    heapUsed stayed flat at about 45 MB and its external memory at about 7 MB, with 0 to 2 ComputeContracts live: native memory,
-    not the V8 heap. Most of it came as one step (195 to 433 MB at 08:15Z). That pod opens a dedicated firehose connection for
-    every contract watch (82 connections in 90 minutes); a heap and allocator profile of that pod under the soak is the next
-    reading. The soak requester's DenoPod RSS read +21.6 MB an hour (410 to 472 MB) with its heap flat, and the bidder's pds
-    DenoPod +28.8 MB an hour; neither is past the fit rule by much, and both need a longer window.
-  - The relay backlog fell to 10000 frames, and bob-pds and the relay got larger limits in the market network set; none was re-read.
-  - The dev backend sets no cgroup limit, so the soak cannot show that a memory breach restarts one pod; ACC13-NO-HOST-OOM needs
-    the same soak on a systemd-user backend.
+    requester's retention"). Left open from the dev-bound-1 reading and the second 3 h soak on dev-soak-2 (2026-10-18, section 15,
+    "Plan 0013 M4-SOAK-READING: second 3 h soak, systemd-user"); each is named with its slope over 20:35Z to 23:36Z:
+  - Requester native memory follows its connections to the dispatcher. Both requester DenoPods keep their V8 heap flat (soak
+    requester heapUsed 85 to 92 MB, gateway requester 41 to 57 MB) while their anonymous memory climbs inside one run: the soak
+    requester +767, +1976 and +2281 MB an hour in three runs of 35 to 48 minutes (68 MB at a start, 2021 MB at most), the
+    gateway requester +345 and +388 MB an hour (212 to 874 MB). The open sockets of each are bursts of ESTAB connections to the
+    dispatcher (`relay.localhost`, the ingress proxy that carries `submitRfp` and the other bidder calls): the soak requester up to
+    27491 fds, the gateway requester up to 17251, against 20 to 1100 between bursts (the dispatcher held 8298 ESTAB at 21:05Z).
+    The fitted window slope (+249 and +62 MB an hour) reads flat only because a chaos restart reset each pod every 49 minutes;
+    no DenoPod limit holds them on the dev backend. The next reading is which call opens a new connection per request (the
+    `withDeadline` of `submitRfp` does not abort its fetch) and whether the bursts end when the call is bounded.
+  - A bidder's pds DenoPod grows until its limit. The installed bidder's pds (512Mi) was OOM-killed by its pod cgroup at
+    20:22:17Z, 21:43:43Z and 23:08:22Z, 81 to 85 minutes per run (anon-rss 496 to 499 MB each time), and restarted alone; the
+    market network's bidder-1 pds read +67 to +151 MB an hour in each run. The repo it serves is flat (records and kv file below).
+  - The network's alice-pds and bob-pds hold more sockets each hour: 118 to 294 and 127 to 293 (+59 an hour), with their RSS
+    flat (+2 MB an hour); since plan 0018 they serve only identity and the verifier.
+  - The gateway repo keeps com.fedproxy.rbac records of deleted clusters (`secrets.<cluster>-node1`): 7 to 20 in the window
+    (+5.3 an hour), 20 of 258 cluster cycles (cycles 19, 30, 36, 37, 40, 41, 48 and 53 of the lanes).
+  - The gateway's logs directory keeps `pg-<cluster>.log` of every cluster ever made: 259 files after 258 cycles.
+  - The network's DENO_DIR `gen/blob` grows: 39 to 109 MB (+23.6 MB an hour), 113 emitted blob modules of about 1 MB, 23 an hour.
+  - The repo kv files still creep with their record counts flat: the soak requester's 56.0 to 64.7 MB (+4.0 MB an hour), the
+    installed bidder's 35.4 to 44.2 (+3.0), bidder-1's 39.5 to 42.7 (+1.2); the gateway's is flat at 6.3.
+  - The web app's node claim index kept one ConfigMap per home ever created (201 at 22:33Z, +55 an hour in the network kine);
+    closed on main after rc17 by 6768644f, not re-read.
+  - The pod cgroup of an exited DenoPod is left: `release` writes `cgroup.kill` and removes the directory at once, before the killed
+    processes are reaped, so every restart leaves an empty `pod-<run id>` cgroup (62 after the 60-restart breach). Only a core
+    start clears them (`removeIdlePodCgroups`), so the count read 1 to 5 in the window with two installed core restarts.
+  - A DenoPod spec change (its args or `resources.memory`) does not restart the running pod; only `deno.computer/restart` does.
+  - An installed bidder takes no `bid-ttl-sec` from its config.json: the app values reach only a market network's children, so the
+    second bidder ran with the 86400 s default until a unit drop-in passed `-- --bid-ttl-sec 1800` to `run bidder` (19:27Z).
+  - `status.restartReasons` of the installed pds read `OOMKilled: 1` after three kernel OOM kills of its pod cgroup; the other two
+    counted as `Restarting`.
+  - The gateway root's gc scan reports one orphan: the MarketIdentity `root:gateway:app/requester` has no owner.
+  - The relay backlog fell to 10000 frames and the relay got 1Gi: the relay RSS read 253 to 316 MB (414 at most, +15 MB an hour,
+    flat by the fit rule).
   - Deleting a tenant cluster takes more than 4 minutes in some cycles under 8 lanes (the driver's 4-minute wait timed out 30
     times; the clusters were gone later; the gateway core logged "a step of deleting this cluster has not completed" 67 times).
   - Every status write logs `Warning: unknown field "status.store"` (1063 of 3000 lines of the network core log): some root kind
     lacks `status.store` in its schema.
+
+- **A market network's children cannot run under the systemd-user backend (plan 0013 ACC13-NO-HOST-OOM, read on dev-soak-2,
+  2026-10-18).** `dev up` refuses `--host-backend systemd-user` (`bringUp` in `cmd/socialweb-computer/dev.go`: "dev places every
+  unit under devsup (proc); systemd-user is for install"), and a child core of a market network sets
+  `denoruntime.Config.EnforceMemory` only when its record's backend is systemd-user (`cmd/socialweb-computer/denoruntime.go`),
+  which a dev record never is. So no DenoPod of a market network gets a pod cgroup or a `memory.max`; only the VM units go to the
+  user manager (`--vm-host-backend systemd-user`). `run bidder --host-backend systemd-user` runs only for an account that
+  `install bidder` made (`bidder.CheckAccount`). The second soak therefore read the breach on a second bidder made with
+  `install bidder` and pointed at the network with `--market-network-file`. The change that closes it lets `dev up` place its
+  children's cores as user units (Delegate=yes, OOMPolicy=continue) and carries the backend into the child records.
+- **kcpapply refuses an object that `kubectl patch` touched (observed on dev-soak-2, 2026-10-18; not yet called a defect).** A
+  `kubectl patch` of the installed bidder's OpenBaoServer `bidder` (the tidy interval) and of its DenoPod `bidder` (the memory
+  breach) added the field manager `kubectl-patch`. The next apply of the MarketBidder's components stopped at phase `vault` with
+  "the object was applied by kubectl and is never adopted; apply into a fresh instance: OpenBaoServer bidder is managed by
+  kubectl-patch", and the root stayed Provisioning from 19:27Z until the `kubectl-patch` entry was removed from
+  `metadata.managedFields` (19:30Z); then every component applied and the root read Ready. A patch under another field manager
+  (`soak tidy` uses `soak-tidy`) is adopted.
 
 - **The object-count quota defaults were retuned by the soak (plan 0013 M2-QUOTAS, 2026-10-18).** `appctl.QuotaDefaults` is
   Bids 10000 (was 20000), ComputeVMs 64, ComputeContracts 1024 on a gateway and 64 on a requester, NodeClaims 64 per home
@@ -3926,6 +3968,100 @@ can outlive the work that closed it, and why one whose subject has been deleted 
 questions for hours without anyone stopping on it. The measurements stay with the entries rather than
 being tidied away, because a number without its condition is how the 332-second boot outlived its own
 refutation.
+
+- **Plan 0013 M4-SOAK-READING: second 3 h soak, systemd-user (2026-10-18, fitted 20:35Z to 23:36Z; ACC13-NO-HOST-OOM holds, M3-DISK-RETENTION,
+  M3-PDS-RECORD-RETENTION, M4-SOAK-READING and ACC13-BOUNDED do not).** Host: droplet dev-soak-2 (c-48, 48 vCPU, 94 GB, Ubuntu 24.04,
+  sfo2), a dev build of v0.0.0-rc17 (fdf71e31). Two backends ran side by side, and every row below says which:
+  - `[proc]`: the market network `soak2`, `dev up --profile market-network --bidders 1 --with-gateway --vm-host-backend
+    systemd-user` as test-0001, app values `bid-ttl-sec` 1800 on the bidder and `record-retention-sec` 900 on the gateway. Its
+    cores, kcp, kine, OpenBao, postgres and DenoPods run under devsup with no cgroup limit (`dev up` cannot place them under
+    systemd-user, section 14); only bidder-1's VM units are user units.
+  - `[sd]`: a second bidder `bidsd.bob.test`, made with `install bidder --allow-dev-binary` for the system account swc-bidder and
+    pointed at the network (config.json `profile` market-network and `market-network-file` the network's MarketNetwork status;
+    a unit drop-in adds `-- --bid-ttl-sec 1800`). It is the prod shape: the `socialweb-computer-bidder@` unit (Delegate=yes,
+    OOMPolicy=continue), kcp, kine, the front and OpenBao as user units with MemoryMax, each DenoPod in its own `pod-<run id>`
+    cgroup with `memory.max`, VM units in its user manager. It won 29 of the 60 VM contracts alive at 22:20Z (bidder-1 31).
+  Load (the `test/soak` driver as user units, 18:55Z to 23:36Z): 1.1 RFP/s, a VM contract every 40 s on 3 lanes held 20 s,
+  contract TTL 40 minutes, requester retention 900 s scanned every 60 s, 4 tenant lanes (create a cluster, a pod scales a node out
+  through the RFP flow and in, delete the cluster). OpenBao tidy at 15 minutes on every server (`soak tidy` every 10 minutes for
+  the network's, a patch for the installed bidder's); the other sweeps at their defaults, which are the first soak's (bidder
+  record sweep 10 minutes, storemaint 5 minutes, run dirs every minute with a 1 h keep, guest images every 10 minutes). In the
+  window: 11948 RFPs, 263 VM contracts (247 released, 17 failed `no_bids` around chaos), 165 tenant cycles (4 cut by the driver's
+  stop, none failed). Chaos (a root unit): a `dev restart` every 7 minutes over seven network DenoPods (25 in the window, all
+  rc 0), `kill -9` of the bidder DenoPods of both bidders every 42 minutes (4 each), `kill -9` of a core every 42 minutes
+  (bidder-1's once, the gateway's twice, the installed core twice; systemd restarted the installed core). Sampled every minute:
+  `soak sample`, `ss` and `ps` per pid, `smaps_rollup`, threads and fds of the requester and pds DenoPods, the installed
+  bidder's unit and pod cgroups, objects and repo records; the state dir broken down by subdirectory every 10 minutes. Fit:
+  least squares after warm-up (1 h after the installed bidder settled at 19:32Z), flat when |slope x window| <= max(2 x residual
+  sd, 5 % of the mean).
+  Memory breach (ACC13-NO-HOST-OOM), 19:18:58Z: the installed bidder's DenoPod `bidder` limit was set from 1536Mi to 96Mi with a
+  `deno.computer/restart` (a spec change alone does not restart a pod). The pod was OOM-killed 60 times in 120 s
+  (`status.restartReasons` `OOMKilled: 60`; kernel "Memory cgroup out of memory ... memory.oom.group set"), then the limit went
+  back. 16 of the 18 swc-bidder processes kept their pids (the core, kcp, kine, the front, OpenBao and its plugin, the other three
+  pods); only the bidder pod's two were replaced. MemAvailable read 82.9 GB before, 83.9 during and 84.8 after. Under load the
+  installed pds DenoPod (512Mi) breached by itself three times (20:22Z, 21:43Z, 23:08Z) and was restarted alone each time. No
+  global OOM in the run, swap 0, MemAvailable at least 76.5 GB, the host vmstat `oom_kill` counter counted only those pod cgroup
+  kills (189 killed tasks, 3 per OOM kill of a pod). No quota was hit (0 refused creates); the M2-QUOTAS reading (a 10-Bid quota declined the 11th RFP with reason
+  capacity) and the first soak's Bid quota hit stand for the quota clause.
+
+| series (window 20:35Z to 23:36Z) | start | end | max | slope per hour | plateau |
+| --- | --- | --- | --- | --- | --- |
+| [proc] network kcp RSS (MB) | 1691 | 1732 | 1839 | +21.0 | yes |
+| [proc] network kine RSS | 448 | 421 | 584 | -7.5 | yes |
+| [proc] network core / OpenBao | 95 / 119 | 98 / 120 | 100 / 121 | +0.7 / +0.4 | yes |
+| [proc] tenant clusters' postgres (under the network) | 2434 | 2872 | 2881 | -26.9 | yes |
+| [proc] relay / dispatcher DenoPods | 253 / 636 | 316 / 646 | 414 / 804 | +15.1 / +16.6 | yes |
+| [proc] alice-pds / bob-pds / PLC DenoPods | 139 / 137 / 140 | 146 / 143 / 140 | 147 / 144 / 147 | +2.4 / +2.2 / +0.1 | NO / yes / yes |
+| [proc] alice-pds / bob-pds sockets | 127 / 118 | 293 / 294 | 293 / 295 | +58.6 / +59.1 | NO (section 14) |
+| [proc] bidder-1 core | 139 | 75 | 224 | +2.7 | yes |
+| [proc] bidder-1 bidder / guest-kcp / policy-engine DenoPods | 252 / 154 / 116 | 229 / 149 / 118 | 330 / 164 / 119 | -7.1 / +0.2 / -0.2 | yes |
+| [proc] bidder-1 pds DenoPod | 325 | 273 | 338 | +1.7 | yes by the fit; +67 to +151 per run (section 14) |
+| [proc] gateway core / web app / pds DenoPods | 94 / 234 / 199 | 97 / 243 / 193 | 102 / 244 / 207 | +0.5 / +6.4 / -0.1 | yes |
+| [proc] gateway OpenBao (root and tenant vaults) | 704 | 706 | 712 | -8.8 | yes |
+| [proc] gateway requester DenoPod | 417 | 679 | 978 | +62.4 | NO: +345 / +388 per run, heap flat (section 14) |
+| [proc] soak requester DenoPod | 355 | 1552 | 2157 | +249 | NO: up to +2281 per run, heap 85 to 92 MB (section 14) |
+| [sd] installed kcp / kine / core / front / OpenBao RSS | 1066 / 85 / 85 / 39 / 120 | 1011 / 84 / 132 / 39 / 125 | 1116 / 158 / 230 / 40 / 126 | +2.1 / +1.6 / +4.6 / +0.0 / +1.5 | yes |
+| [sd] installed bidder / guest-kcp pod RSS | 232 / 158 | 303 / 159 | 327 / 161 | -1.5 / +0.8 | yes |
+| [sd] installed pds pod RSS | 267 | 270 | 531 | -17.3 | NO: OOM at 512Mi every 81 to 85 minutes |
+| [sd] installed kcp unit memory.current (with page cache) | 1225 | 1363 | 1500 | +65.2 | NO; its RSS is flat (row above) |
+| [sd] empty pod cgroups | 4 | 3 | 5 | -0.0 | yes; 62 after the breach, cleared only by a core start (section 14) |
+| [proc] network kine live keys | 6245 | 6344 | 6546 | +50.4 | yes |
+| [proc] network kine.db (MB) | 105 | 98 | 142 | +1.6 | yes |
+| [proc] Bids (bidder-1) / ComputeContracts (soak requester) | 2379 / 2701 | 2306 / 2702 | 2590 / 2940 | +1.6 / -3.7 | yes |
+| [proc] ComputeVMs / HostProcesses / NodeClaims | 4 / 109 / 3 | 3 / 117 / 4 | 6 / 120 / 4 | -0.2 / -1.4 / -0.1 | yes |
+| [proc] core/v1 objects (the node claim index ConfigMaps) | 291 | 454 | 454 | +54.7 | NO (fixed on main, 6768644f) |
+| [sd] installed Bids / gc objects | 2381 / 2396 | 2303 / 2329 | 2612 / 2630 | -2.0 / -1.1 | yes |
+| [sd] installed kine rows / file (MB) | 8001 / 60.4 | 6150 / 45.2 | 8087 / 61.4 | -128 / -1.3 | yes |
+| [proc] OpenBao storage bidder-1 / gateway (MB) | 17.1 / 17.0 | 17.3 / 17.0 | 17.6 / 17.1 | +0.1 / -0.0 | yes |
+| [sd] installed OpenBao storage (MB) | 16.6 | 17.3 | 17.5 | +0.1 | yes |
+| [proc] state dir total (MB) | 12168 | 12115 | 17193 | -144 | yes |
+| [proc] bidder-1 VM work dirs / gateway tenant cluster dirs | 7792 / 1318 | 7467 / 1392 | 12594 / 1393 | -227 / -10.2 | yes |
+| [proc] network DENO_DIR (gen/blob) | 211 | 282 | 282 | +24.3 | NO (section 14) |
+| [proc] network / gateway / bidder-1 logs dirs | 20.6 / 10.2 / 5.0 | 53.4 / 28.7 / 11.5 | 53.4 / 28.7 / 11.5 | +11.0 / +6.1 / +2.6 | NO: below the 64 MiB rotation caps; the gateway's keeps a pg log per cluster |
+| [sd] installed stateDir (status) | 8237 | 5437 | 12440 | +34.3 | yes |
+| [sd] installed kcp dir (audit logs) | 317 | 486 | 572 | +60.1 | bounded: reached maxbackup 4 x 100 MB, 572 then 486 |
+| [proc] soak requester repo kv (MB) / compute.vm / market.rfp | 56.0 / 1164 / 1167 | 64.7 / 1033 / 1039 | 64.7 / 1280 / 1253 | +4.0 / -12.3 / -7.1 | kv NO; records yes |
+| [proc] soak requester repo market.accept / market.event / vm.delete | 25 / 25 / 22 | 25 / 25 / 25 | 28 / 28 / 28 | -0.7 / -0.8 / +0.1 | yes |
+| [proc] bidder-1 repo kv (MB) / market.bid / market.event / market.receipt | 39.5 / 2854 / 135 / 49 | 42.7 / 2513 / 99 / 35 | 42.7 / 3067 / 170 / 60 | +1.2 / -7.4 / -4.3 / -1.7 | kv NO; records yes |
+| [sd] installed repo kv (MB) / market.bid / market.event / market.receipt | 35.4 / 2794 / 120 / 42 | 44.2 / 2766 / 136 / 47 | 44.2 / 3015 / 153 / 53 | +3.0 / +24.2 / +4.8 / +1.7 | kv NO; records yes |
+| [proc] gateway repo kv (MB) / compute.vm / market.accept | 6.2 / 16 / 16 | 6.3 / 17 / 17 | 6.3 / 20 / 20 | +0.1 / -0.4 / -0.1 | yes |
+| [proc] gateway repo com.fedproxy.rbac | 7 | 20 | 21 | +5.3 | NO: records of deleted clusters (section 14) |
+| host MemAvailable (MB) | 80127 | 77722 | 84193 | -293 | yes |
+| host load average 1 min / swap used | 16.6 / 0 | 15.8 / 0 | 25.2 / 0 | -0.1 / 0 | yes |
+| host journal (MB) | 44.4 | 77.0 | 77.0 | +11.2 | NO; the host's SystemMaxUse pool bounds it |
+
+  Root status after the driver stopped (23:36Z): bidder-1 2286 objects, the soak requester 2676, the installed bidder 2329, each
+  with `orphanTotal` 0 and `stuckTotal` 0; the gateway 18 objects with one orphan (the MarketIdentity `root:gateway:app/requester`,
+  section 14) and 0 stuck. The TTL controller had deleted 3773 objects in bidder-1, 9867 in the soak requester and 437 Bids in the
+  installed bidder (whose older Bids were annotated to 1800 s at 19:32Z).
+  Done_when read: ACC13-NO-HOST-OOM holds (the breach above, three more breaches under load, each restarting only its pod; the
+  host never short of memory). ACC13-BOUNDED and M4-SOAK-READING do not hold: the requester DenoPods' native memory, the pds
+  DenoPods' memory, the network PDS sockets, the node claim index ConfigMaps, the gateway repo's rbac records, the DENO_DIR
+  `gen/blob` and the repo kv files keep growing (section 14). M3-DISK-RETENTION does not hold: the state dir totals are flat in
+  both backends, but by subdirectory `gen/blob` (+23.6 MB an hour), the per-cluster pg logs (one per cycle) and the repo kv files
+  (+1.2 to +4.0 MB an hour) keep growing, and the logs dirs have not reached their caps yet. M3-PDS-RECORD-RETENTION does not hold
+  for the gateway repo (20 rbac records of deleted clusters after about 12000 RFP-only, 263 VM and 165 tenant node contracts); the
+  soak requester's, bidder-1's and the installed bidder's repos hold only live and retained records.
 
 - **The gateway kcp memory and the gateway OpenBao storage under tenant cluster churn (plan 0013 ACC13-BOUNDED, 2026-10-18).**
   Both were open in section 14 after M4-SOAK-READING (below): kcp 599 to 1134 MB in 3 h, OpenBao storage 17 KB per cluster cycle.

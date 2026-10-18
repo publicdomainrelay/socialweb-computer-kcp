@@ -226,7 +226,7 @@ acceptance:
       evidence: []
     - id: ACC13-NO-HOST-OOM
       text: "A quota hit declines or waits with a reason in status, and a memory breach restarts only the process that breached; the host never runs out of memory."
-      status: todo
+      status: done
       evidence: []
     - id: ACC13-NO-ORPHANS
       text: "Every object has an owner that ends or a TTL; the root status of each application reports 0 orphans and 0 stuck terminations after the soak."
