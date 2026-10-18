@@ -303,7 +303,7 @@ func (ctl *Controller) reconcileGateway(ctx context.Context, u *unstructured.Uns
 				st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "its workspace: "+err.Error()
 				return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
 			}
-			if err := ctl.ensureIdentitySpec(ctx, ws, RequesterIdentity, GatewayRequesterIdentity(o.Spec)); err != nil {
+			if err := ctl.ensureIdentitySpec(ctx, ws, owner, RequesterIdentity, GatewayRequesterIdentity(o.Spec)); err != nil {
 				st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "the requester's MarketIdentity: "+err.Error()
 				return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
 			}

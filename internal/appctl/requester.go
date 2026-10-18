@@ -162,16 +162,16 @@ func OperatorWatched(s v1alpha1.MarketIdentitySpec, operator string) v1alpha1.Ma
 	return s
 }
 
-func (ctl *Controller) ensureIdentity(ctx context.Context, name string, id v1alpha1.ApplicationIdentity) error {
-	return ctl.ensureIdentitySpec(ctx, ctl.c.workspace(), name, IdentitySpecOf(id))
+func (ctl *Controller) ensureIdentity(ctx context.Context, owner, name string, id v1alpha1.ApplicationIdentity) error {
+	return ctl.ensureIdentitySpec(ctx, ctl.c.workspace(), owner, name, IdentitySpecOf(id))
 }
 
-func (ctl *Controller) ensureIdentitySpec(ctx context.Context, ws, name string, spec v1alpha1.MarketIdentitySpec) error {
+func (ctl *Controller) ensureIdentitySpec(ctx context.Context, ws, owner, name string, spec v1alpha1.MarketIdentitySpec) error {
 	ri, err := ctl.client(ws, MarketIdentityGVR)
 	if err != nil {
 		return err
 	}
-	u, err := toUnstructured(&v1alpha1.MarketIdentity{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: spec}, "MarketIdentity")
+	u, err := toUnstructured(&v1alpha1.MarketIdentity{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{OwnerLabel: owner}}, Spec: spec}, "MarketIdentity")
 	if err != nil {
 		return err
 	}
@@ -289,7 +289,7 @@ func (ctl *Controller) reconcileRequester(ctx context.Context, u *unstructured.U
 			st.Message = err.Error()
 			return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
 		}
-		if err := ctl.ensureIdentity(ctx, RequesterIdentity, o.Spec.Identity); err != nil {
+		if err := ctl.ensureIdentity(ctx, owner, RequesterIdentity, o.Spec.Identity); err != nil {
 			st.Message = "its MarketIdentity: " + err.Error()
 			return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
 		}

@@ -285,7 +285,7 @@ func (ctl *Controller) reconcileBidder(ctx context.Context, u *unstructured.Unst
 			st.Message = err.Error()
 			return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
 		}
-		if err := ctl.ensureIdentitySpec(ctx, ctl.c.workspace(), BidderIdentity, OperatorWatched(IdentitySpecOf(o.Spec.Identity), o.Spec.Operator)); err != nil {
+		if err := ctl.ensureIdentitySpec(ctx, ctl.c.workspace(), owner, BidderIdentity, OperatorWatched(IdentitySpecOf(o.Spec.Identity), o.Spec.Operator)); err != nil {
 			st.Message = "its MarketIdentity: " + err.Error()
 			return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
 		}
