@@ -347,7 +347,7 @@ func runLoad(args []string) int {
 				if !sleepCtx(run, time.Duration(lane)*20*time.Second) {
 					return
 				}
-				tenantLane(run, lane, gateway, grec.Gateway.BootstrapAccountDID, &c, *tenantHold, func(m string) {
+				tenantLane(run, lane, gateway, grec.Gateway.BootstrapAccountDID, grec.BaseWorkspace, grec.AdminKubeconfig, &c, *tenantHold, func(m string) {
 					fmt.Println(`{"event":"` + strings.ReplaceAll(m, `"`, `'`) + `"}`)
 				})
 			}(lane)

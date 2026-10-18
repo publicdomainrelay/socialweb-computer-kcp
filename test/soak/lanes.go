@@ -70,15 +70,14 @@ func deleteTenantCluster(ctx context.Context, adminKubeconfig, did, name string)
 	return nil
 }
 
-func tenantLane(ctx context.Context, lane int, gatewayDir, did string, c *counters, hold time.Duration, logf func(string)) {
+func tenantLane(ctx context.Context, lane int, gatewayDir, did, base, admin string, c *counters, hold time.Duration, logf func(string)) {
 	members := filepath.Join(gatewayDir, "kcp", gatewaykcp.MemberKubeconfig)
-	admin := filepath.Join(gatewayDir, "kcp", "admin.kubeconfig")
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
 	bad := 0
 	for seq := 0; ctx.Err() == nil; seq++ {
 		name := fmt.Sprintf("l%dc%d", lane, seq)
 		c.tenantCycles.Add(1)
-		err := tenantRound(ctx, members, did, name, gatewayDir, hold, c, quiet)
+		err := tenantRound(ctx, members, base, did, name, gatewayDir, hold, c, quiet)
 		if derr := deleteTenantCluster(context.WithoutCancel(ctx), admin, did, name); derr != nil {
 			logf(fmt.Sprintf("lane %d: delete %s: %v", lane, name, derr))
 		} else {
@@ -99,8 +98,8 @@ func tenantLane(ctx context.Context, lane int, gatewayDir, did string, c *counte
 	}
 }
 
-func tenantRound(ctx context.Context, members, did, name, gatewayDir string, hold time.Duration, c *counters, log *slog.Logger) error {
-	if err := gatewaykcp.BootstrapCluster(ctx, members, did, name, log); err != nil {
+func tenantRound(ctx context.Context, members, base, did, name, gatewayDir string, hold time.Duration, c *counters, log *slog.Logger) error {
+	if err := gatewaykcp.BootstrapCluster(ctx, members, base, did, name, log); err != nil {
 		return err
 	}
 	c.clustersCreated.Add(1)

@@ -142,6 +142,9 @@ func bootstrapCluster(ctx context.Context, kubeconfig, base, did, cluster string
 	return nil
 }
 
-func BootstrapCluster(ctx context.Context, kubeconfig, did, cluster string, log *slog.Logger) error {
-	return bootstrapCluster(ctx, kubeconfig, appctl.DefaultWorkspace, did, cluster, log)
+func BootstrapCluster(ctx context.Context, kubeconfig, base, did, cluster string, log *slog.Logger) error {
+	if base == "" {
+		base = appctl.DefaultWorkspace
+	}
+	return bootstrapCluster(ctx, kubeconfig, base, did, cluster, log)
 }
