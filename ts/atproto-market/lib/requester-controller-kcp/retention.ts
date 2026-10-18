@@ -1,6 +1,7 @@
 import type { StructuredLoggerInterface } from "@publicdomainrelay/logger";
 import type { ContractState } from "@publicdomainrelay/compute-request-abc";
 import type { AccountPdsProvider } from "@publicdomainrelay/requester-controller-abc";
+import type { RequesterPDS } from "@publicdomainrelay/requester-abc";
 import type { ComputeContract } from "@publicdomainrelay/socialweb-computer-k8s-api";
 
 export const DEFAULT_RECORD_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
@@ -39,6 +40,23 @@ function atUriParts(uri: string | undefined): { did: string; collection: string;
   return m ? { did: m[1], collection: m[2], rkey: m[3] } : undefined;
 }
 
+export function removeContractRecords(pds: RequesterPDS, state: ContractState | null | undefined): Promise<void> {
+  return removeOwnRecords(pds, [state?.rfp?.uri, state?.payload?.uri, state?.accept?.uri, state?.release?.payload.uri, state?.release?.event.uri, state?.submitEventRef]);
+}
+
+export async function removeOwnRecords(pds: RequesterPDS, uris: Array<string | undefined>): Promise<void> {
+  const repoDid = (pds as unknown as { oauthSession?: { userDid?: string } }).oauthSession?.userDid ?? pds.did;
+  for (const uri of uris) {
+    const at = atUriParts(uri);
+    if (!at || at.did !== repoDid || !pds.deleteRepoRecord) continue;
+    try {
+      await pds.deleteRepoRecord(at.collection, at.rkey);
+    } catch (err) {
+      if (!/404|not ?found|RecordNotFound/i.test(String(err))) throw err;
+    }
+  }
+}
+
 export function createRecordRetention(opts: RecordRetentionOptions): RecordRetention {
   const now = opts.now ?? Date.now;
   const intervalMs = opts.intervalMs ?? DEFAULT_RECORD_RETENTION_SCAN_MS;
@@ -56,16 +74,7 @@ export function createRecordRetention(opts: RecordRetentionOptions): RecordReten
       }
       return false;
     }
-    const refs = [state?.rfp?.uri, state?.payload?.uri, state?.accept?.uri, state?.release?.payload.uri, state?.release?.event.uri, state?.submitEventRef];
-    for (const uri of refs) {
-      const at = atUriParts(uri);
-      if (!at || at.did !== pds.did) continue;
-      try {
-        await pds.deleteRepoRecord(at.collection, at.rkey);
-      } catch (err) {
-        if (!/404|not ?found|RecordNotFound/i.test(String(err))) throw err;
-      }
-    }
+    await removeContractRecords(pds, state);
     return true;
   }
 

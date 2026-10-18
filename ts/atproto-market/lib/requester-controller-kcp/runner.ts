@@ -5,6 +5,7 @@ import type { StructuredLoggerInterface } from "@publicdomainrelay/logger";
 import {
   awaitComputeHostKeys,
   awaitComputeTermination,
+  ComputeRequestFailed,
   type ComputeRequestHandle,
   type ComputeRequestOptions,
   findVmContract,
@@ -46,6 +47,7 @@ import {
   type NodeClaimGrant,
   parseComputeContract,
 } from "@publicdomainrelay/socialweb-computer-k8s-api";
+import { removeContractRecords } from "./retention.ts";
 
 export interface RunnerEnvironment {
   kcp: KcpClient;
@@ -550,6 +552,7 @@ export function startContractRunner(
         },
       } as unknown as ComputeRequestOptions, handlers);
     } catch (err) {
+      if (err instanceof ComputeRequestFailed) state = err.state;
       failedStep(err);
       await writeStatus("Failed", `the contract flow threw: ${err instanceof Error ? err.message : String(err)}`);
       return;
@@ -568,6 +571,7 @@ export function startContractRunner(
         await handle.dispose();
         stepTo("atCapacity");
         await writeStatus("Pending", atCapacity);
+        await removeContractRecords(pds, state).catch((err) => logger.warn("requester_round_records_removal_failed", { error: String(err) }));
         return;
       }
       const why = preparation?.explainEnd(state, { error: state.error, grantFailed: aborted() !== undefined }) ??

@@ -949,6 +949,12 @@ export function createRepoReceiptFinder(idResolver: IdResolver): ReceiptFinder {
   };
 }
 
+export class ComputeRequestFailed extends Error {
+  constructor(readonly state: ContractState, readonly reason: unknown) {
+    super(reason instanceof Error ? reason.message : String(reason));
+  }
+}
+
 export interface ComputeRequestHandle {
   state: ContractState;
   capabilities: GuestCapability[];
@@ -2103,7 +2109,7 @@ runcmd:
     ended = true;
     watch.close();
     await disposeAll(capabilities, log);
-    throw err;
+    throw new ComputeRequestFailed(structuredClone(state), err);
   }
 }
 
