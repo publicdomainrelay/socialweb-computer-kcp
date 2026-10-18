@@ -214,6 +214,27 @@ items:
     files: ["internal/appctl/quota.go", "internal/appctl/gc.go", "internal/kcpclient/feed.go", "internal/gateway/feed.go", "internal/ttlctl/ttlctl.go"]
     done_when: "a worker allocation is visible in the feed, counted by quota, and collected with its pod and HostProcess when its object is deleted."
     status: todo
+  - id: M13-DEPLOY-APPS-ONE-KCP
+    title: "Worker objects follow the deploy/apps layout and compose in one kcp as well as in strict per-app kcps"
+    depends_on: [M2-WORKERINSTANCE-KIND, M4-BIDDER-CONTROLLER, M6-IROH-DIALER]
+    decision: >
+      Scopes are fixed and written down here so both profiles come from the same manifest set.
+      WorkerInstance is a cluster-scoped kind bound by the bidder set and created in the bidder's
+      compute-provider-kcp-workspace, the same workspace ComputeVM uses, so in a market network the
+      applier's rebase puts it in root:<app> with no per-profile code. The generated DenoPod and the
+      iroh forward HostProcess live in the bidder's component workspace (root:app, rebased to
+      root:<app>:app) with namespace default and an ownerRef to the WorkerInstance; the shared
+      root:deno-provider watches every bound workspace through the APIExport virtual workspace
+      endpoints, so one deno provider serves workers in all apps of one kcp. The bidder values gain
+      the iroh asset path the controller hands to the HostProcess (the ssh-gateway values already
+      carry IrohDial; the bidder values do not), and the worker provider is enabled through the
+      existing compute-provider-deno-worker option in deploy/apps/option-map.yaml so dev up's
+      app-values overlay and a profile's values file select it the same way. Nothing worker-shaped is
+      added to deploy/apps as a fixed component: the only new long-lived processes are per
+      allocation and rendered from the CRD, exactly as a ComputeVM's units are.
+    files: ["deploy/sets.yaml", "deploy/apps/market-bidder/bidder.values.yaml", "deploy/apps/market-bidder/", "deploy/apps/option-map.yaml", "internal/appctl/bidder.go", "internal/denokcp/provider/watch.go"]
+    done_when: "the same set applies unchanged in a strict bidder kcp and in a market network: WorkerInstance in the bidder workspace, its DenoPod and HostProcess under the app workspace, both reconciled by the one deno provider, with the iroh path supplied by values in both profiles."
+    status: todo
   - id: ACC21-REQUESTER-WORKER
     title: "A market network allocation: one worker, one execute, one release"
     depends_on: [M10-CLI-WORKER, M12-QUOTA-GC-FEED-TTL]
@@ -233,6 +254,17 @@ items:
       reports permissions with net true and every other capability false or absent, the worker host's
       own permission object has the same shape, and an execute that tries to read a file fails inside
       the Worker.
+    status: todo
+  - id: ACC21-ONE-KCP
+    title: "The full stack runs in one kcp: gateway and bidder as workspaces of a market network"
+    depends_on: [M13-DEPLOY-APPS-ONE-KCP, ACC21-REQUESTER-WORKER]
+    done_when: >
+      dev up --profile market-network with one bidder and a gateway runs one kcp and one core. The
+      bidder child's WorkerInstance is in its rebased workspace, the worker's DenoPod and iroh
+      HostProcess are in that app's component workspace, the gateway's worker ComputeContract is in
+      its own app workspace, and the single deno provider reconciles the worker pod. A release from
+      either side removes the allocation without leaving a DenoPod, HostProcess or WorkerInstance in
+      any workspace, and dev down leaves nothing behind.
     status: todo
   - id: ACC21-GATEWAY-WORKER
     title: "The gateway web app allocates and releases a worker for a signed-in account"
