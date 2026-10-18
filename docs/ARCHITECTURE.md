@@ -3995,7 +3995,9 @@ refutation.
   243 MB); the gateway requester's connections to the dispatcher are a sawtooth (50 to 750, 2200 in the burst after a restart)
   that the fetch pool drains, and an unread body on a non-2xx getRecord no longer holds one (ed00b815). Also found: on a fresh
   droplet the `socialweb-computer-k8s-downloads` asset stages to tree baf256f7 (the socialweb-meshd binaries differ by 240
-  bytes), not the pinned 01030c9a, so a droplet's dev build needs that pin changed in its own checkout. ACC13-BOUNDED's gateway
+  bytes), not the pinned 01030c9a, so a droplet's dev build needs that pin changed in its own checkout. Cause: ring's C was
+  compiled by the host clang (Fedora 22.1.8, Ubuntu 18.1.3). Closed by 13473a6b: rust/build.sh compiles it with the zig cc and
+  zig ar of a zig it pins by sha256; the tree is acb85490 on Fedora 44 and on Ubuntu 24.04. ACC13-BOUNDED's gateway
   kcp and OpenBao parts hold on this reading.
 
 - **hono-pds collects unreachable blocks, and the requester's retention removes the vm.delete and market.event records (plan
