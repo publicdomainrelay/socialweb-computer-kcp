@@ -56,7 +56,7 @@ func (n networkView) dids() []string {
 func kvSample(stateDir string) map[string]any {
 	out := map[string]any{}
 	var paths []string
-	for _, pat := range []string{"network/state/*/kv.sqlite3", "apps/dev/*/components/*/pds", "apps/dev/*/components/*/*/kv.sqlite3"} {
+	for _, pat := range []string{"network/state/*/kv.sqlite3", "apps/dev/*/components/*/pds", "apps/dev/*/components/*/*/kv.sqlite3", "apps/dev/*/components/pds/repo.sqlite3"} {
 		m, _ := filepath.Glob(filepath.Join(stateDir, pat))
 		paths = append(paths, m...)
 	}
@@ -170,10 +170,14 @@ func pdsSample(ctx context.Context, binary, instance, stateDir string) map[strin
 		}
 	}
 	for _, a := range nv.Network.Status.Apps {
+		repo := ""
 		for _, l := range a.Listeners {
-			if l.Component == "requester" && l.Name == "tcp" {
-				targets = append(targets, target{name: a.Name + "/repo", base: "http://" + l.Address, did: a.Did})
+			if l.Name == "tcp" && (l.Component == "pds" || (l.Component == "requester" && repo == "")) {
+				repo = l.Address
 			}
+		}
+		if repo != "" {
+			targets = append(targets, target{name: a.Name + "/repo", base: "http://" + repo, did: a.Did})
 		}
 	}
 	for _, tg := range targets {
