@@ -505,6 +505,11 @@
       "description": "run bidder: JSON arguments of bidder-policy (the hono-bidder policy-args option); a --policy-args after -- wins",
       "env": "SOCIALWEB_BIDDER_POLICY_ARGS"
     },
+    "bidder-options": {
+      "type": "string",
+      "description": "run bidder: hono-bidder options, written as after -- (for example \"--bid-ttl-sec 1800 --offering-refresh-sec 60\"), each an options entry of market-bidder in deploy/apps/option-map.yaml; they become MarketBidder spec.options and so the bidder DenoPod's argv. Set it in config.json of an installed bidder; an option after -- wins. Values are split on spaces: a value with a space goes in its own key (bidder-policy-args)",
+      "env": "SOCIALWEB_BIDDER_OPTIONS"
+    },
     "gateway-spec-file": {
       "type": "string",
       "description": "serve gateway kcp: a YAML GatewaySpec (network, bidderDids, options of the socialweb-computer-k8s web app, marketNetwork values, webAppFront) the Gateway root object is applied with; its profile is gateway-profile, and the PLC, the web app's gateway-audience and kcp-public-host default to SOCIALWEB_GATEWAY_PLC_URL, SOCIALWEB_GATEWAY_AUDIENCES and SOCIALWEB_GATEWAY_KCP_PUBLIC_HOST; webAppFront, the edge entry point caddy proxies to, defaults to 127.0.0.1:8788 in profile prod and 127.0.0.1:0 otherwise",

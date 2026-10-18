@@ -35,7 +35,7 @@ import (
 const bidderIdentityWait = 5 * time.Minute
 
 var bidderOptions = slices.Concat([]string{backendOpt, "profile", "network", "name", "instance", "state-dir", "fg", "ready-timeout",
-	"network-timeout", "market-network-file", "bidder-policy", "bidder-policy-args", "kcp-path", "kine-path", "deno-path", "bao-path", "openbao-plugin-dir", "asset-cache", "unit-prefix", "kcp-front-address", "guest-image-release-base"},
+	"network-timeout", "market-network-file", "bidder-policy", "bidder-policy-args", "bidder-options", "kcp-path", "kine-path", "deno-path", "bao-path", "openbao-plugin-dir", "asset-cache", "unit-prefix", "kcp-front-address", "guest-image-release-base"},
 	devVMOptions, devOnly(tsbundle.SourceRootOption))
 
 type bidderRun struct {
@@ -132,6 +132,22 @@ func (r *bidderRun) passthrough(args []string) error {
 	return nil
 }
 
+func (r *bidderRun) configOptions(words string) error {
+	parsed, err := appctl.ParseAppArgs(appctl.BidderApp, strings.Fields(words))
+	if err != nil {
+		return err
+	}
+	for _, p := range parsed {
+		if p.To != appctl.MapToOptions {
+			return fmt.Errorf("--%s maps to %s; bidder-options carries only the options entries of %s", p.Name, p.To, appctl.OptionMapPath)
+		}
+		if !slices.ContainsFunc(r.options, func(o v1alpha1.ApplicationOption) bool { return o.Name == p.Name }) {
+			r.options = append(r.options, v1alpha1.ApplicationOption{Name: p.Name, Value: p.Value})
+		}
+	}
+	return nil
+}
+
 func runBidder(ctx context.Context, a *app, vals clicfg.Values, rest []string) int {
 	pos, pass := splitWords(rest)
 	if len(pos) > 0 {
@@ -157,6 +173,9 @@ func runBidder(ctx context.Context, a *app, vals clicfg.Values, rest []string) i
 	}
 	if err := r.passthrough(pass); err != nil {
 		return a.fail(exitRefused, "run bidder: %v", err)
+	}
+	if err := r.configOptions(vals.String("bidder-options")); err != nil {
+		return a.fail(exitRefused, "run bidder: bidder-options: %v", err)
 	}
 	if r.policy == "" {
 		r.policy = vals.String("bidder-policy")
