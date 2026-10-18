@@ -33,7 +33,7 @@ done
 die() { echo "ci-runner-install: $*" >&2; exit 1; }
 say() { echo "ci-runner-install: $*" >&2; }
 
-for tool in sudo jq curl git useradd loginctl zstd /usr/bin/gitlab-runner /usr/bin/google-chrome /usr/local/bin/kubectl; do
+for tool in sudo jq curl xz unshare git useradd loginctl zstd /usr/bin/gitlab-runner /usr/bin/google-chrome /usr/local/bin/kubectl; do
   command -v "$tool" >/dev/null 2>&1 || die "$tool is required"
 done
 sudo -n true 2>/dev/null || die "needs sudo -n (run as an administrator of this host)"
