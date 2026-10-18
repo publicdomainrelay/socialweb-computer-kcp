@@ -117,7 +117,7 @@ A binary installed from this bucket needs no image flag at all: it looks for the
 
 ## The RFP flow
 
-A requester rents a VM by running the RFP flow. The requester posts a `compute.vm` record and a signed `market.rfp`; bidders bid; the requester accepts the winning bid; the winning bidder boots the guest from cloud-init `user_data` that installs the guest agent (sshd, the tunnel subscriber, and the client that reaches the guest). The requester reaches the guest only through the relay, over an SSH `ProxyCommand` on the websocket tunnel. The relay is the registry.
+A requester rents a VM by running the RFP flow. The requester posts a `compute.vm` record and a signed `market.rfp`; bidders bid; the requester accepts the winning bid; the winning bidder boots the guest from cloud-init `user_data` that installs the guest agent (sshd, the tunnel subscriber, and the client that reaches the guest). The guest reports an iroh ticket for its sshd with its on-network event; the requester's ssh dials that ticket (`socialweb-computer internal iroh-dial`, `dumbpipe connect`, as the `ProxyCommand`) and checks the host keys the guest reported. The market records go through the relay.
 
 ```
 requester --market.rfp--> relay/PDS <--bid-- bidder (own kcp: MarketBidder, Bid, ComputeVM)

@@ -265,7 +265,7 @@ A prod deployment does not preserve anything.
   first time in a worktree, about 6.5 s after). Later TypeScript changes: `--sync-only`, then `dev restart`.
 - One network for the whole item: `dev up` once (80 to 95 s, mostly waiting, about one core), then every
   proof is a `run request --network <instance>` (80 to 90 s each, 35 s of it the requester's own kcp).
-  `dev down` costs 20 s. Do not `dev up` per proof.
+  `dev down` costs 60 to 80 s (one-kcp network with a gateway). Do not `dev up` per proof.
 - A held guest burns one host core for as long as it lives (an idle firecracker vCPU does not halt), so
   release a `--hold` invocation as soon as you have read it.
 - Take a live slot before `dev up` and release it after `dev down`:
