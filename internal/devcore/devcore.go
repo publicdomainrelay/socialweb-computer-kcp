@@ -24,6 +24,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/denoruntime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/storemaint"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/ttlctl"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/versions"
 )
 
 const CheckInterval = 5 * time.Second
@@ -118,6 +119,9 @@ func Run(ctx context.Context, cfg Config, m hostsvc.Manager) error {
 		return fmt.Errorf("devcore: reading %s: %w", l.Record, err)
 	}
 	err = ensure(ctx, m, bcfg, l, &rec, &core, log)
+	if err == nil && cfg.Application != nil && rec.Backend == hostsvc.BackendSystemdUser && rec.SharedKcp == "" {
+		err = rollDrifted(ctx, m, bcfg, cfg, l, &rec, &core, log)
+	}
 	lk.Close()
 	if err != nil {
 		return err
@@ -258,6 +262,26 @@ func ensure(ctx context.Context, m hostsvc.Manager, bcfg bootstrap.Config, l dev
 	}
 	log.Info("core holds the instance", "generation", core.Generation, "adoptions", core.Adoptions)
 	return nil
+}
+
+func rollDrifted(ctx context.Context, m hostsvc.Manager, bcfg bootstrap.Config, cfg Config, l devinstance.Layout, rec *devinstance.Record,
+	core *devinstance.Core, log *slog.Logger) error {
+	compat, err := versions.KcpCompatRecords()
+	if err != nil {
+		return err
+	}
+	d, rep, err := bootstrap.RollDrifted(ctx, m, bootstrap.InstallParams(*cfg.Application, l.StateDir),
+		bootstrap.InstalledRoll{Compat: compat, ReadyTimeout: cfg.ReadyTimeout, Log: log})
+	if err != nil {
+		log.Error("the running kcp slot differs from what this binary renders and was not rolled; it keeps its old argv",
+			"unit", d.Unit, "argvChanged", d.ArgvChanged, "exeChanged", d.ExeChanged, "refused", d.Refused, "err", err.Error())
+		return nil
+	}
+	if rep == nil {
+		return nil
+	}
+	log.Info("the kcp slot rolled to this binary's argv", "from", rep.Roll.From, "to", rep.Roll.To, "unit", d.Unit)
+	return ensure(ctx, m, bcfg, l, rec, core, log)
 }
 
 var ErrNotReady = errors.New("devcore: the core did not record this generation in time")
