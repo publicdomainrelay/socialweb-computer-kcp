@@ -35,6 +35,7 @@ type SqliteResult struct {
 	Before, After SqliteReading
 	PagesFreed    int64
 	Checkpointed  bool
+	Converted     bool
 }
 
 func autoVacuumName(mode int64) string {
@@ -70,7 +71,7 @@ func pragmaInt(ctx context.Context, db *sql.DB, name string) (int64, error) {
 	return v, nil
 }
 
-func readSqlite(ctx context.Context, db *sql.DB, path string) (SqliteReading, error) {
+func readSqlite(ctx context.Context, db *sql.DB, path, table string) (SqliteReading, error) {
 	var r SqliteReading
 	mode, err := pragmaInt(ctx, db, "auto_vacuum")
 	if err != nil {
@@ -86,8 +87,8 @@ func readSqlite(ctx context.Context, db *sql.DB, path string) (SqliteReading, er
 	if r.FreePages, err = pragmaInt(ctx, db, "freelist_count"); err != nil {
 		return r, err
 	}
-	if err := db.QueryRowContext(ctx, "SELECT count(*) FROM kine").Scan(&r.Rows); err != nil {
-		return r, fmt.Errorf("storemaint: counting the kine rows of %s: %w", path, err)
+	if err := db.QueryRowContext(ctx, "SELECT count(*) FROM "+table).Scan(&r.Rows); err != nil {
+		return r, fmt.Errorf("storemaint: counting the %s rows of %s: %w", table, path, err)
 	}
 	if fi, err := os.Stat(path); err == nil {
 		r.FileBytes = fi.Size()
@@ -104,22 +105,36 @@ func ReadSqlite(ctx context.Context, path string) (SqliteReading, error) {
 		return SqliteReading{}, err
 	}
 	defer db.Close()
-	return readSqlite(ctx, db, path)
+	return readSqlite(ctx, db, path, "kine")
 }
 
 func MaintainSqlite(ctx context.Context, path string) (SqliteResult, error) {
-	var res SqliteResult
 	db, err := openSqlite(path)
 	if err != nil {
-		return res, err
+		return SqliteResult{}, err
 	}
 	defer db.Close()
-	if res.Before, err = readSqlite(ctx, db, path); err != nil {
+	return maintain(ctx, db, path, "kine", false)
+}
+
+func maintain(ctx context.Context, db *sql.DB, path, table string, convert bool) (SqliteResult, error) {
+	var res SqliteResult
+	var err error
+	if res.Before, err = readSqlite(ctx, db, path, table); err != nil {
 		return res, err
 	}
 	res.After = res.Before
 	if res.Before.AutoVacuum != AutoVacuumIncremental {
-		return res, nil
+		if !convert {
+			return res, nil
+		}
+		if _, err := db.ExecContext(ctx, "PRAGMA auto_vacuum=INCREMENTAL"); err != nil {
+			return res, fmt.Errorf("storemaint: setting auto_vacuum on %s: %w", path, err)
+		}
+		if _, err := db.ExecContext(ctx, "VACUUM"); err != nil {
+			return res, fmt.Errorf("storemaint: converting %s to incremental auto_vacuum: %w", path, err)
+		}
+		res.Converted = true
 	}
 	for left := res.Before.FreePages; left > 0; {
 		if _, err := db.ExecContext(ctx, fmt.Sprintf("PRAGMA incremental_vacuum(%d)", VacuumChunkPages)); err != nil {
@@ -138,8 +153,12 @@ func MaintainSqlite(ctx context.Context, path string) (SqliteResult, error) {
 	if err := db.QueryRowContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)").Scan(&busy, &logFrames, &checkpointed); err == nil {
 		res.Checkpointed = busy == 0
 	}
-	if res.After, err = readSqlite(ctx, db, path); err != nil {
+	if res.After, err = readSqlite(ctx, db, path, table); err != nil {
 		return res, err
+	}
+	if res.Converted {
+		res.PagesFreed = res.Before.PageCount - res.After.PageCount
+		return res, nil
 	}
 	res.PagesFreed = res.Before.FreePages - res.After.FreePages
 	return res, nil

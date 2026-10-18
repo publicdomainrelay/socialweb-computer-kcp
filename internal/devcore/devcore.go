@@ -132,6 +132,8 @@ func Run(ctx context.Context, cfg Config, m hostsvc.Manager) error {
 		}
 	}
 	go logcap.Keep(ctx, LogCapConfig(l, log))
+	go storemaint.KeepDenoKv(ctx, storemaint.DenoKvConfig{Dirs: []string{filepath.Join(l.StateDir, appctl.ComponentsDir),
+		filepath.Join(l.StateDir, appctl.NetworkServiceState)}, Log: log})
 	if cfg.DenoRuntime != nil && rec.SharedKcp == "" {
 		deno := *cfg.DenoRuntime
 		deno.Units, deno.RunsUnit = m, l.Names().DenoPods()
