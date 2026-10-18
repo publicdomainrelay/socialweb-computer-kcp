@@ -3738,13 +3738,6 @@ because it bounds a mechanism the rest of this document leans on.
   (the templates are rendered by `install`, which no agent runs here) is read at the prod deploy.
 - **Open after the 3 h soak (plan 0013 M4-SOAK-READING, 2026-10-18; the readings are in section 15).** Each is a series that
   kept growing, with its measurement and the smallest fix named.
-  - Gateway kcp memory grows with every tenant cluster made and deleted: 599 to 1134 MB in 3 h at 75 cycles an hour, 827 to 1740
-    MB in the 8 h run; the bidder, requester and network kcp are flat. The home workspaces are deleted (4 workspaces under root at
-    the end), so the growth is inside kcp (informers or per-logical-cluster caches). Instrument: the gateway kcp RSS per 1000
-    cycles on a gateway that only makes and deletes clusters. If the slope stays, the slot limit (3 GiB) restarts the slot at
-    about 12 h at that rate, and the roll must carry it.
-  - The gateway OpenBao storage grows 17 KB per cluster cycle (17.7 to 21.2 MB in 3 h) with tidy every 15 minutes: a per-cluster
-    record the root vault keeps after the cluster is gone (read which mount with `bao list` on the gateway root vault).
   - hono-pds never deletes a block: every superseded MST node, record block and commit stays in the kv file (bob 628 MB, a
     requester's repo 505 MB after 3 h). The fix is a mark and sweep from the head of each repo; Deno KV lists values with keys, so
     it needs a key-only block index first. It matters for the market network and for a `run request` repo; prod uses real PDSes.
@@ -3923,6 +3916,77 @@ can outlive the work that closed it, and why one whose subject has been deleted 
 questions for hours without anyone stopping on it. The measurements stay with the entries rather than
 being tidied away, because a number without its condition is how the 332-second boot outlived its own
 refutation.
+
+- **The gateway kcp memory and the gateway OpenBao storage under tenant cluster churn (plan 0013 ACC13-BOUNDED, 2026-10-18).**
+  Both were open in section 14 after M4-SOAK-READING (below): kcp 599 to 1134 MB in 3 h, OpenBao storage 17 KB per cluster cycle.
+  Host: droplet dev-churn-1 (c-32, sfo2), account test-0001, `dev up --profile market-network --bidders 1 --with-gateway`, the soak
+  driver's tenant lanes (6 lanes: create a cluster, Ready, a pod scales a node out through the RFP flow and in again, delete the
+  cluster, wait until it is gone), samples every minute (`soak sample`, `ss` per pid, `/proc` RSS and fds per pid, kcp heap
+  profiles from `/debug/pprof/heap`, the root vault listed with a root token generated from its unseal keys).
+  Causes, each fixed on main:
+  (1) The kcp memory was not the churn. kcp v0.33.0 (`pkg/server/localproxy.go`) proxies a request for a mounted workspace
+  through a new `http.Transport` per request unless `--mount-proxy-client-cert-file` is set, and that transport never closes its
+  keep-alive connection. The cluster provider's `MountStatus` probe (`GET /clusters/<mount>/version`, every pass, about 25 a
+  minute per cluster) therefore left one kcp connection, and one pair on the cluster's apiserver front, per probe; a long-lived
+  cluster (the soak's bootstrap cluster, prod's `canary`) grew without bound, and prod ran out of ephemeral ports (112939
+  loopback connections). Every slot root now holds a self-signed client pair and `kcpserver` passes both mount proxy flags, so
+  kcp uses one shared transport (90 s idle timeout); `CheckArgv` refuses an argv without them (c883e72d). Read side by side on
+  the droplet with no churn and one tenant cluster: the main build's kcp went from 48 to 220 established connections in 9
+  minutes, its fds from 386 to 687 sockets and its RSS from 720 to 738 MB in 10 minutes (108 MB an hour, the soak's slope), and the
+  tenant front reached 1260 sockets in 20 minutes; the fixed kcp held 17 to 27.
+  (2) The apiserver front closes a connection pair after 5 minutes with no bytes either way, so a client that leaks silent
+  keep-alive connections cannot exhaust the host again (d116cb41; a client-go HTTP/2 connection pings every 30 s, so this does
+  not cut those).
+  (3) The gateway core minted a new tenant client certificate about once a second (the node observer and the node reconcile),
+  and client-go keeps one transport per distinct certificate for the life of the process: 90 open connections to the tenant
+  front and 3 TLS handshakes a second. A tenant client is kept per cluster for 5 minutes, keyed by Cluster UID and instance
+  (755e8bea): 2 connections after. Every `openbao.Client` and vault admin client also built its own transport with no idle
+  timeout (63 core connections per cluster vault); they close an idle connection after 90 s (47134c70).
+  (4) The OpenBao storage: the requester runner writes `contracts/<name>/secrets-key` into its vault mount for every contract
+  (in the gateway, the root vault's `requester/` KV mount, one entry per node a tenant cluster ever rented, metadata and
+  versions) and nothing removed it. Every 5 minutes the requester controller now lists `contracts/` and removes the key of a
+  name that is no ComputeContract, runner or waiting contract (96a9b60d); its first pass removed 6. The per-cluster vault
+  directories (`openbaoservers/c-<key>-bao`) and data directories are purged with the cluster (read: only the live clusters'
+  directories exist after 122 deletions). Tidy (token and lease) covers what is left: 3 token accessors and 2 cert login leases.
+  (5) An upgrade did not apply a new kcp argv: the core adopted the running slot, so prod ran slot a from Oct 12 without the
+  mount proxy flags after rc15 until a hand `units roll kcp`. An installed core now compares the active slot's `/proc` cmdline
+  and executable with the slot spec it renders and the kcp asset link, and on a difference runs the installed roll under the
+  roll lock (an executable change checks the kcp compat records first), then adopts the new slot; a refusal is logged with
+  the `CheckArgv` reason (558cba23). Read on droplet dev-churn-2: `install gateway` with a9fdef3d, `upgrade` to 8b96e1ca, the
+  core logged `argvChanged` with the refusal and rolled a to b in 12 s, slot b runs with both flags, and a second core restart
+  adopted b without a roll.
+  Readings after the fixes, fitted 03:05Z to 04:18Z (73 minutes after 15 minutes of warm-up; 128 clusters created and 122
+  deleted since 02:46Z, 0 failed; the same fit rule as M4-SOAK-READING):
+
+| series | start | end | max | slope per hour | plateau |
+| --- | --- | --- | --- | --- | --- |
+| kcp RSS (MB) | 913 | 999 | 999 | +48.5 | NO |
+| kcp RSS, 03:35Z to 04:18Z (MB) | 974 | 999 | 999 | +33.3 | yes |
+| kcp in-use heap, pprof (MB) | 349 | 337 | 351 | (3 profiles) | yes |
+| kcp established connections | 27 | 23 | 27 | +0.3 | yes |
+| kcp socket fds | 164 | 160 | 166 | -0.2 | yes |
+| tenant front (bootstrap cluster) established | 8 | 6 | 8 | +0.4 | yes |
+| tenant front socket fds | 26 | 24 | 28 | -0.2 | yes |
+| lane cluster fronts established (6 clusters) | 136 | 208 | 214 | +0.2 | yes |
+| gateway core RSS (MB) | 94 | 102 | 114 | +5.3 | yes |
+| gateway core socket fds | 279 | 162 | 402 | +1.7 | yes |
+| OpenBao processes established | 450 | 413 | 511 | -2.7 | yes |
+| gateway openbaoservers dir (KB) | 17648 | 17712 | 17736 | -3.3 | yes |
+| kcp logical clusters | 26 | 26 | 28 | +0.0 | yes |
+| kcp workspaces | 29 | 31 | 33 | -0.2 | yes |
+| kcp APIBindings | 97 | 97 | 103 | +0.1 | yes |
+| Clusters / ClusterLinks / HostProcesses | 7 / 10 / 138 | 7 / 14 / 160 | 7 / 14 / 160 | +0.0 / -0.2 / +1.5 | yes |
+
+  The root vault's file storage read 129 files and 104.8 KB at 02:50Z and 118 files and 90.9 KB at 04:18Z; its KV entries were the
+  6 live contracts' keys, 5 live bundles and the identity and kcp entries. The kcp RSS climbs toward a steady state while its live
+  heap stays at 340 to 350 MB (the Go runtime keeps freed pages); the last 44 minutes are flat. The network kine's live keys rose
+  1206 to 1454 (Bids +104 and Events, which end by their TTLs; the gateway's own kinds are flat). Not settled in the window and not
+  part of these two series: the gateway requester DenoPod RSS (restarted at 03:48Z for (4)) and the web app DenoPod RSS (179 to
+  243 MB); the gateway requester's connections to the dispatcher are a sawtooth (50 to 750, 2200 in the burst after a restart)
+  that the fetch pool drains, and an unread body on a non-2xx getRecord no longer holds one (63fbacc4). Also found: on a fresh
+  droplet the `socialweb-computer-k8s-downloads` asset stages to tree baf256f7 (the socialweb-meshd binaries differ by 240
+  bytes), not the pinned 01030c9a, so a droplet's dev build needs that pin changed in its own checkout. ACC13-BOUNDED's gateway
+  kcp and OpenBao parts hold on this reading.
 
 - **Plan 0013 M4-SOAK-READING: a 3 h accelerated soak of a market network with a gateway, read on a DigitalOcean c-32 droplet
   (2026-10-17 22:12:48Z to 2026-10-18 01:13Z; M4 stays `doing`, ACC13-NO-ORPHANS is `done`).** Host: droplet dev-soak (c-32,
