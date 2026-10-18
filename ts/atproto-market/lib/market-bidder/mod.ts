@@ -16,6 +16,9 @@ import type {
 import type { Logger } from "@publicdomainrelay/market-common";
 import {
   DEFAULT_MARKET_SERVICE_ID,
+  HEARTBEAT_INTERVAL_MS,
+  HEARTBEAT_NSID,
+  HEARTBEAT_RKEY,
 } from "@publicdomainrelay/market-common";
 import { OAuthSessionExpiredError } from "@publicdomainrelay/atproto-helpers";
 import {
@@ -314,6 +317,7 @@ export async function createMarketBidder(config: MarketBidderConfig): Promise<Ma
   }
   const idResolver = atproto.idResolver;
   let offeringRefresher: OfferingRefreshHandle | null = null;
+  let heartbeat: OfferingRefreshHandle | null = null;
 
   const selfVouchResolver: VouchResolver = createTangledGraphVouchResolver({
     listRecords: async (_repo, coll) => {
@@ -785,6 +789,26 @@ export async function createMarketBidder(config: MarketBidderConfig): Promise<Ma
         return;
       }
       const { rkey: offeringRkey, createdAt: offeringCreatedAt } = offeringResult;
+      const offeringUri = `at://${atproto.did}/${OFFERING_NSID}/${offeringRkey}`;
+      const beat = async () => {
+        try {
+          await atproto.updateRecord(HEARTBEAT_NSID, HEARTBEAT_RKEY, {
+            $type: HEARTBEAT_NSID,
+            offering: offeringUri,
+            createdAt: new Date().toISOString(),
+          });
+        } catch (err) {
+          if (err instanceof OAuthSessionExpiredError) {
+            onSessionExpired?.(err);
+            return;
+          }
+          log("warn", "bidder heartbeat failed", { error: String(err) });
+        }
+      };
+      await beat();
+      heartbeat?.stop();
+      heartbeat = startOfferingRefresh({ intervalMs: HEARTBEAT_INTERVAL_MS, refresh: beat, log });
+      logger.info("bidder heartbeat started", { intervalMs: HEARTBEAT_INTERVAL_MS, uri: `at://${atproto.did}/${HEARTBEAT_NSID}/${HEARTBEAT_RKEY}`, offering: offeringUri });
       if (offeringRefreshMs && offeringRkey) {
         offeringRefresher = startOfferingRefresh({
           intervalMs: offeringRefreshMs,
@@ -822,6 +846,7 @@ export async function createMarketBidder(config: MarketBidderConfig): Promise<Ma
     eventStreams?.close();
     bidLoop.close();
     offeringRefresher?.stop();
+    heartbeat?.stop();
     activeContracts.clear();
     for (const p of providers ?? []) {
       p.teardown?.().catch(() => {});

@@ -1,0 +1,27 @@
+{
+  "lexicon": 1,
+  "id": "com.publicdomainrelay.temp.market.heartbeat",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "A bidder's liveness. The bidder rewrites this one record (rkey self) in its own repo every 60 s. A requester treats the bidder as online while createdAt is at most 5 min old, and leaves it out of discovery otherwise.",
+      "key": "literal:self",
+      "record": {
+        "type": "object",
+        "required": ["offering", "createdAt"],
+        "properties": {
+          "offering": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "AT-URI of the bidder's com.publicdomainrelay.temp.market.offering record that this heartbeat keeps live."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime",
+            "description": "Time of this heartbeat write."
+          }
+        }
+      }
+    }
+  }
+}

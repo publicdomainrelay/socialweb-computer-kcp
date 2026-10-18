@@ -49,7 +49,7 @@ import type { GuestIdentityGrants } from "@publicdomainrelay/guest-identity-abc"
 import { FEDPROXY_RBAC_NSID } from "@publicdomainrelay/fedproxy-rbac-common";
 import { oauthClientMetadata } from "@publicdomainrelay/atproto-oauth-helpers";
 import { createBadgeBlueKeysRecord, loadOrGenerateKeypair } from "@publicdomainrelay/market-atproto";
-import { OFFERING_NSID } from "@publicdomainrelay/market-common";
+import { HEARTBEAT_NSID, OFFERING_NSID } from "@publicdomainrelay/market-common";
 import { BID_NSID, BIDS_FREE_NSID, COMPUTE_CONFIG_WIF_SIMPLE_NSID } from "@publicdomainrelay/market-lexicons";
 import { DEFAULT_BID_WRITE_RESERVE, PdsWriteBudget } from "@publicdomainrelay/pds-write-budget-abc";
 import { installPdsWriteObserver } from "@publicdomainrelay/pds-write-budget-fetch";
@@ -267,7 +267,7 @@ export function createMarketBidderApp(spec: MarketBidderAppSpec, ports: MarketBi
   const writeBudget = new PdsWriteBudget({
     reserve: spec.market.bidWriteReserve ?? DEFAULT_BID_WRITE_RESERVE,
     bidCollections: [BID_NSID, BIDS_FREE_NSID, COMPUTE_CONFIG_WIF_SIMPLE_NSID],
-    sweepCollections: [OFFERING_NSID],
+    sweepCollections: [OFFERING_NSID, HEARTBEAT_NSID],
   });
 
   async function marketLoop(): Promise<MarketLoopTally | undefined> {

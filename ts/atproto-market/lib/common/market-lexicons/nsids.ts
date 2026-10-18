@@ -15,6 +15,7 @@ export const ACCEPT_NSID = "com.publicdomainrelay.temp.market.accept";
 export const RECEIPT_NSID = "com.publicdomainrelay.temp.market.receipt";
 export const EVENT_NSID = "com.publicdomainrelay.temp.market.event";
 export const OFFERING_NSID = "com.publicdomainrelay.temp.market.offering";
+export const HEARTBEAT_NSID = "com.publicdomainrelay.temp.market.heartbeat";
 // network.attested.* -- shared attestation vocabulary (replaces the former
 // com.publicdomainrelay.temp.market.attestation record + #inline/#signatures defs).
 export const NETWORK_ATTESTED_SIGNATURE_NSID = "network.attested.signature";

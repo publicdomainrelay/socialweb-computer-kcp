@@ -4,6 +4,10 @@ export { $nsid as EVENT_NSID } from "../market-lexicons/com/publicdomainrelay/te
 export { $nsid as RECEIPT_NSID } from "../market-lexicons/com/publicdomainrelay/temp/market/receipt.ts";
 export { $nsid as RFP_NSID } from "../market-lexicons/com/publicdomainrelay/temp/market/rfp.ts";
 export { $nsid as OFFERING_NSID } from "../market-lexicons/com/publicdomainrelay/temp/market/offering.ts";
+export { $nsid as HEARTBEAT_NSID } from "../market-lexicons/com/publicdomainrelay/temp/market/heartbeat.ts";
+export const HEARTBEAT_RKEY = "self";
+export const HEARTBEAT_INTERVAL_MS = 60_000;
+export const HEARTBEAT_TTL_MS = 300_000;
 
 export { $nsid as COMPUTE_VM_NSID } from "../market-lexicons/com/publicdomainrelay/temp/compute/vm.ts";
 export { $nsid as COMPUTE_EVENTS_VM_DELETE_NSID } from "../market-lexicons/com/publicdomainrelay/temp/compute/events/vm/delete.ts";
