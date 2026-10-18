@@ -14,6 +14,7 @@ export interface RecordRetentionOptions {
   retentionMs: number;
   intervalMs?: number;
   annotate(name: string, annotations: Record<string, string>): Promise<void>;
+  running?(name: string): boolean;
   now?: () => number;
 }
 
@@ -55,7 +56,7 @@ export function createRecordRetention(opts: RecordRetentionOptions): RecordReten
       }
       return false;
     }
-    const refs = [state?.rfp?.uri, state?.payload?.uri, state?.accept?.uri];
+    const refs = [state?.rfp?.uri, state?.payload?.uri, state?.accept?.uri, state?.release?.payload.uri, state?.release?.event.uri, state?.submitEventRef];
     for (const uri of refs) {
       const at = atUriParts(uri);
       if (!at || at.did !== pds.did) continue;
@@ -80,6 +81,7 @@ export function createRecordRetention(opts: RecordRetentionOptions): RecordReten
         const name = contract.metadata?.name;
         if (!name || contract.metadata?.annotations?.[RECORDS_REMOVED_ANNOTATION]) continue;
         if (contract.status?.phase !== "Released" && contract.status?.phase !== "Failed") continue;
+        if (opts.running?.(name)) continue;
         const finished = finishedAtOf(contract);
         if (finished === undefined || now() - finished < opts.retentionMs) continue;
         try {

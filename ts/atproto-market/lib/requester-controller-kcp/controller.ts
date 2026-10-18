@@ -101,6 +101,7 @@ export function createRequesterController(opts: RequesterControllerOptions): Req
       annotate: async (name, annotations) => {
         await contracts.patch(name, { type: "merge", body: { metadata: { annotations } } });
       },
+      running: (name) => runners.has(name),
     })
     : null;
   let known: ComputeContract[] = [];
