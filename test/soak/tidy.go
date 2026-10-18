@@ -28,17 +28,17 @@ func runTidy(args []string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	kubeconfigs := map[string]string{"network": t.record.AdminKubeconfig}
+	kubeconfigs := map[string][2]string{"network": {t.record.AdminKubeconfig, workspaceOf(t.record)}}
 	apps, _ := filepath.Glob(filepath.Join(t.layout.StateDir, appctl.AppsDir, "*", "*", "instance.json"))
 	for _, a := range apps {
 		dir := filepath.Base(filepath.Dir(a))
 		rec, err := t.childRecord(dir)
 		if err == nil {
-			kubeconfigs[dir] = rec.AdminKubeconfig
+			kubeconfigs[dir] = [2]string{rec.AdminKubeconfig, workspaceOf(rec)}
 		}
 	}
 	for name, kc := range kubeconfigs {
-		dyn, err := clientOf(kc)
+		dyn, err := clientOf(kc[0], kc[1])
 		if err != nil {
 			fmt.Fprintln(os.Stderr, name, err)
 			continue

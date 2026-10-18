@@ -61,13 +61,20 @@ func (t *target) childRecord(instance string) (devinstance.Record, error) {
 	return rec, devinstance.ReadJSON(cl.Record, &rec)
 }
 
-func clientOf(kubeconfig string) (dynamic.Interface, error) {
+func workspaceOf(rec devinstance.Record) string {
+	if rec.BaseWorkspace != "" {
+		return rec.BaseWorkspace
+	}
+	return appctl.DefaultWorkspace
+}
+
+func clientOf(kubeconfig, ws string) (dynamic.Interface, error) {
 	cfg, err := kcpserver.FrontRestConfig(kubeconfig)
 	if err != nil {
 		return nil, err
 	}
 	c := rest.CopyConfig(cfg)
-	c.Host = strings.TrimSuffix(cfg.Host, "/") + "/clusters/" + appctl.DefaultWorkspace
+	c.Host = strings.TrimSuffix(cfg.Host, "/") + "/clusters/" + ws
 	c.Timeout = 30 * time.Second
 	c.QPS, c.Burst = 200, 400
 	return dynamic.NewForConfig(c)
@@ -178,7 +185,7 @@ func runLoad(args []string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	dyn, err := clientOf(rec.AdminKubeconfig)
+	dyn, err := clientOf(rec.AdminKubeconfig, workspaceOf(rec))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
