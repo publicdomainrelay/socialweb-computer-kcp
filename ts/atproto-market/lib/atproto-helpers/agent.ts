@@ -261,7 +261,10 @@ export async function createATProto(opts: CreateATProtoOpts): Promise<ATProto> {
     try {
       const url = `${relayUrl.replace(/\/+$/, "")}/xrpc/com.atproto.sync.listReposByCollection?collection=${encodeURIComponent(collection)}`;
       const res = await fetch(url);
-      if (!res.ok) return [];
+      if (!res.ok) {
+        await res.body?.cancel();
+        return [];
+      }
       const data = await res.json() as { repos?: Array<{ did: string }> };
       return [...new Set((data.repos ?? []).map((r) => r.did).filter(Boolean))];
     } catch {
@@ -523,7 +526,10 @@ export function createRepoPdsAgent(opts: RepoPdsAgentOpts): RepoPdsAgent {
     async getRecord(repo: string, collection: string, rkey: string) {
       const params = new URLSearchParams({ repo, collection, rkey });
       const res = await retryingFetch(`${base}/xrpc/com.atproto.repo.getRecord?${params}`);
-      if (!res.ok) return null;
+      if (!res.ok) {
+        await res.body?.cancel();
+        return null;
+      }
       const data = await res.json() as { uri: string; cid?: string; value: Record<string, unknown> };
       return { uri: data.uri, cid: data.cid ?? "", value: data.value };
     },
@@ -840,7 +846,10 @@ export async function createOAuthAgent(opts: CreateOAuthAgentOpts): Promise<OAut
       const res = await s.fetchHandler(
         `${s.server.issuer}/xrpc/com.atproto.repo.getRecord?repo=${encodeURIComponent(repo)}&collection=${encodeURIComponent(collection)}&rkey=${encodeURIComponent(rkey)}`,
       );
-      if (!res.ok) return null;
+      if (!res.ok) {
+        await res.body?.cancel();
+        return null;
+      }
       const data = await res.json() as { uri: string; cid?: string; value: Record<string, unknown> };
       return { uri: data.uri, cid: data.cid ?? "", value: data.value };
     },
@@ -1380,7 +1389,10 @@ export async function createOAuthAgentFromSession(
         await refreshLock(() => refreshTokens());
         res = await doCall();
       }
-      if (!res.ok) return null;
+      if (!res.ok) {
+        await res.body?.cancel();
+        return null;
+      }
       const data = await res.json() as { uri: string; cid?: string; value: Record<string, unknown> };
       return { uri: data.uri, cid: data.cid ?? "", value: data.value };
     },

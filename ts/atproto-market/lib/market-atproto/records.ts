@@ -254,7 +254,10 @@ export function createRecordResolver(idResolver: IdResolver, own?: OwnRepo): Rec
       if (!pds) throw new Error(`no pds endpoint for ${repo}`);
       const url = `${pds}/xrpc/com.atproto.repo.getRecord?repo=${repo}&collection=${collection}&rkey=${rkey}`;
       const res = await publicGet(url);
-      if (!res.ok) throw new Error(`getRecord failed: ${res.status}`);
+      if (!res.ok) {
+        await res.body?.cancel();
+        throw new Error(`getRecord failed: ${res.status}`);
+      }
       const data = await res.json() as { uri: string; cid?: string; value: T };
       return { ...data.value, _uri: data.uri, _cid: data.cid ?? ref.cid } as Resolved<T>;
     },
