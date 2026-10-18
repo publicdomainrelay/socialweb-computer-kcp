@@ -1,6 +1,6 @@
 plan: "0018"
 title: "An application owns its PDS: the PDS is a DenoPod in the application's own kcp and its records are kcp objects"
-status: doing
+status: done
 note: >
   Shared branch: task/own-pds on GitHub origin. The shared pieces (the AtprotoRecord kind, the repo-pds
   DenoPod manifest set deploy/apps/repo-pds, the hono-repo-pds entry and its record reconciler, the
@@ -56,7 +56,7 @@ items:
       spec.approvedAssociations[0], keyId from status.did of MarketIdentity bidder).
     files: ["api/v1alpha1/types_atprotorecord.go", "deploy/apps/repo-pds", "ts/atproto-market/hono-repo-pds", "ts/atproto-market/lib/hono-factory-repo-pds", "ts/atproto-market/lib/atproto-record-kcp"]
     done_when: "a market network bidder runs with the pds DenoPod; deleting an AtprotoRecord object deletes its record from the repo; the pds DenoPod reports its listeners in its status."
-    status: doing
+    status: done
   - id: M1-BIDDER-OWN-PDS
     title: "Bob's bidder writes its market records to its own PDS DenoPod"
     depends_on: [M0-SHARED-PDS-DENOPOD]
@@ -134,7 +134,7 @@ items:
     title: "Alice associates the gateway requester DID once"
     depends_on: [M2-GATEWAY-REQUESTER-OWN-PDS]
     done_when: "one association write to alice's repo per requester DID; a restart does not ask again; a bidder under bidder-tangled-vouch resolves alice as the requester's operator from the association record."
-    status: todo
+    status: done
   - id: M3-OPERATED-BIDDER-DISCOVERY
     title: "A requester finds the bidders its vouched operators operate"
     depends_on: [M1-BIDDER-OWN-PDS, M2-GATEWAY-REQUESTER-OWN-PDS]
@@ -155,7 +155,7 @@ items:
       stop their DenoPods only when none is left; the running pds DenoPod removes each record from the repo
       and releases its finalizer. When the pds DenoPod is not running, the core releases the finalizers itself.
     done_when: "dev down of a market network with a bidder and a gateway leaves no AtprotoRecord object and no stuck workspace."
-    status: todo
+    status: done
   - id: M4-DYNAMIC-ASSOCIATION
     title: "An application learns its operator from the atproto event stream, not from its config"
     depends_on: [M1-BIDDER-OWN-PDS, M2-GATEWAY-REQUESTER-OWN-PDS]

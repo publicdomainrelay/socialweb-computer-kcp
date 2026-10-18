@@ -143,7 +143,7 @@ items:
       end to end, the tenant node, dev down leaves nothing. The readings go to docs/ARCHITECTURE.md
       section 15 when the item closes.
     done_when: "the readings are in section 15; dev up time before and after is recorded."
-    status: todo
+    status: done
   - id: ACC19-ONE-KCP
     title: "Acceptance: a market network is one kcp"
     depends_on: [M4-PROOF]
