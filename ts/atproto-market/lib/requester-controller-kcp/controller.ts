@@ -81,6 +81,7 @@ export function createRequesterController(opts: RequesterControllerOptions): Req
   const runners = new Map<string, ContractRunner>();
   const waiting = new Map<string, ComputeContract>();
   const finished = new Set<string>();
+  const seenAt = new Map<string, number>();
   const stopping = new AbortController();
   const scanner = opts.orphanScan
     ? createOrphanScanner({
@@ -194,6 +195,7 @@ export function createRequesterController(opts: RequesterControllerOptions): Req
   function observe(contract: ComputeContract): void {
     const name = contract.metadata?.name;
     if (!name || !contract.spec) return;
+    seenAt.set(name, Date.now());
     const runner = runners.get(name);
     if (runner) {
       runner.update(contract);
@@ -212,16 +214,19 @@ export function createRequesterController(opts: RequesterControllerOptions): Req
   }
 
   async function resync(): Promise<string> {
+    const listedAt = Date.now();
     const out = await contracts.list();
-    known = out.items;
     const present = new Set<string>();
     for (const contract of out.items) {
       const name = contract.metadata?.name;
       if (name) present.add(name);
       observe(contract);
     }
-    for (const name of [...runners.keys()]) if (!present.has(name)) forget(name);
-    for (const name of [...finished]) if (!present.has(name)) finished.delete(name);
+    const gone = (name: string) => !present.has(name) && (seenAt.get(name) ?? 0) < listedAt;
+    known = [...out.items, ...known.filter((c) => !present.has(c.metadata?.name ?? "") && !gone(c.metadata?.name ?? ""))];
+    for (const name of [...runners.keys()]) if (gone(name)) forget(name);
+    for (const name of [...finished]) if (gone(name)) finished.delete(name);
+    for (const name of [...seenAt.keys()]) if (gone(name)) seenAt.delete(name);
     if (Date.now() - lastKeySweep >= CONTRACT_KEY_SWEEP_MS) {
       lastKeySweep = Date.now();
       void sweepContractKeys(present).catch((err) => logger.warn("requester_contract_key_sweep_failed", { error: String(err) }));
