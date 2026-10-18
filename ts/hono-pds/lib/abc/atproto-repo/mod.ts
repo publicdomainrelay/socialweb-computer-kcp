@@ -7,6 +7,7 @@ export type {
   BlockStore,
   RepoStore,
   Storage,
+  StateStore,
   CommitOp,
   CommitEvent,
   SequencedFrame,

@@ -125,9 +125,14 @@ items:
       hono-pds keeps only repo blocks in its KV (--kv-path); without --private-key-hex it makes a new
       service key per start, and the account store (accounts, password hashes), the per-user signing keys
       and the OAuth tokens are in-memory maps, so a PDS pod restart logs every session out (the web app's
-      getServiceAuth answers 401 invalid_token). hono-pds keeps its service key, accounts, password hashes,
-      per-user signing keys and OAuth tokens in its KV.
-    files: ["ts/hono-pds"]
+      getServiceAuth answers 401 invalid_token). With --kv-path, hono-pds keeps its service key, accounts
+      (password hash and salt), per-user signing keys (did:key or the did:plc rotation key) and OAuth tokens
+      (with their expiry) in that KV through a StateStore contract (atproto-repo-abc, DenoKvStorage keys
+      under ["state"]), and restores the accounts and signers before it answers a request; session JWTs are
+      stateless and verify again under the kept key. A restarted front must also come back on its port: the
+      network applies its service set again once ports.json is recorded (the first apply rendered port 0),
+      holding ServicesReady until then.
+    files: ["ts/hono-pds", "internal/appctl/network.go"]
     done_when: "a hono-pds pod restart keeps every account, session and DID signing key; the web app's cluster list answers through the same cookie across it."
     status: todo
   - id: M4-PROOF

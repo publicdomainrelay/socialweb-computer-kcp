@@ -3,7 +3,7 @@ import { cors } from "@hono/hono/cors";
 import { upgradeWebSocket } from "@hono/hono/deno";
 import { registerErrorMiddleware } from "@publicdomainrelay/hono-error-middleware";
 import { createLogger, type LoggerInterface } from "@publicdomainrelay/logger";
-import type { Storage, Signer, Did, Sequencer, RepoApi } from "@publicdomainrelay/atproto-repo-abc";
+import type { Storage, StateStore, Signer, Did, Sequencer, RepoApi } from "@publicdomainrelay/atproto-repo-abc";
 import { XrpcError } from "@publicdomainrelay/atproto-repo-abc";
 import { Repo } from "@publicdomainrelay/atproto-repo-deno";
 import { signServiceAuth, verifyServiceAuthToken, xrpcLxmFromPath } from "@publicdomainrelay/atproto-repo-deno";
@@ -17,7 +17,7 @@ import { FirehoseSequencer } from "./sequencer.ts";
 import { createSubscribeHandler } from "./subscribe.ts";
 // OAuth server
 import {
-  createMemoryTokenStore,
+  createTokenStore,
   createSessionInjector,
   createDpopVerifier,
   createDpopNonceStore,
@@ -37,6 +37,7 @@ import { DPOP_NONCE_HEADER, DPoP_AUTH_SCHEME, DPoP_HEADER } from "@publicdomainr
 
 export interface RepoFactoryOptions {
   storage: Storage;
+  state?: StateStore;
   signer: Signer;
   did?: Did;
   sequencer?: Sequencer;
@@ -143,10 +144,19 @@ export function createRepoFactory(opts: RepoFactoryOptions): RepoFactory {
   const sequencer = opts.sequencer ?? new FirehoseSequencer();
   const log = opts.log ?? createLogger("pds");
 
-  const accountStore: AccountStore = createAccountStore(did, opts.signer, (opts.publicKeyDid ?? opts.signer.did()) as Did);
+  const accountStore: AccountStore = createAccountStore(did, opts.signer, (opts.publicKeyDid ?? opts.signer.did()) as Did, opts.state);
   const userSigners = new Map<string, Signer>();
+  const restored = accountStore.restore().then((list) => {
+    for (const a of list) userSigners.set(a.did, a.signer);
+    if (list.length > 0) log.info("accounts restored from the state store", { accounts: list.length });
+  });
 
   const app = new Hono();
+
+  app.use("*", async (_c, next) => {
+    await restored;
+    await next();
+  });
 
   app.use("*", cors());
 
@@ -314,6 +324,7 @@ export function createRepoFactory(opts: RepoFactoryOptions): RepoFactory {
     try {
       let didOverride: Did | undefined;
       let signerOverride: Signer | undefined;
+      let signingKeyHex: string | undefined;
       // did:plc path: if plcDirectoryUrl configured, create PLC DID
       if (plcDirectoryUrl) {
         const { Secp256k1Keypair } = await import("@atproto/crypto");
@@ -348,12 +359,13 @@ export function createRepoFactory(opts: RepoFactoryOptions): RepoFactory {
           );
         }
         didOverride = plcDid;
+        signingKeyHex = Array.from(await kp.export(), (b) => b.toString(16).padStart(2, "0")).join("");
         signerOverride = {
           did: () => plcDid,
           sign: (bytes: Uint8Array) => kp.sign(bytes),
         };
       }
-      const result = await accountStore.createAccount({ handle, email, password, didOverride, signerOverride });
+      const result = await accountStore.createAccount({ handle, email, password, didOverride, signerOverride, signingKeyHex });
       userSigners.set(result.did, result.signer);
       // Bootstrap an empty repo for the new account
       await repo.applyWrites(result.did, []);
@@ -546,7 +558,7 @@ export function createRepoFactory(opts: RepoFactoryOptions): RepoFactory {
   let sessionInjector: SessionInjector | undefined;
 
   if (opts.oauthServer?.enabled) {
-    const tokenStore: TokenStore = createMemoryTokenStore(opts.signer);
+    const tokenStore: TokenStore = createTokenStore(opts.signer, opts.state);
     const dpopVerifier: DpopVerifier = createDpopVerifier();
     const dpopNonceStore: DpopNonceStore = createDpopNonceStore();
     const authCodeStore: AuthorizationCodeStore = createMemoryAuthorizationCodeStore();

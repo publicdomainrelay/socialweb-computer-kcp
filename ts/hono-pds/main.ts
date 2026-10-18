@@ -23,16 +23,24 @@ export interface CreateFromEnvOptions {
 
 export async function createFromEnv(opts?: CreateFromEnvOptions): Promise<RepoFactory> {
   const lg = opts?.log ?? defaultLog;
+  const storage = await DenoKvStorage.create(opts?.kvPath || undefined);
+  const state = opts?.kvPath ? storage : undefined;
+  const savedKeyHex = state ? await state.getState<string>(["service-key"]) : null;
   let kp: Secp256k1Keypair;
   if (opts?.keyHex) {
     kp = await Secp256k1Keypair.import(opts.keyHex);
+  } else if (savedKeyHex) {
+    kp = await Secp256k1Keypair.import(savedKeyHex, { exportable: true });
+    lg("info", "Loaded the service keypair from the state store", { did: kp.did() });
   } else {
-    kp = await Secp256k1Keypair.create();
-    lg("warn", "Generated new keypair", { did: kp.did() });
+    kp = await Secp256k1Keypair.create({ exportable: true });
+    if (state) {
+      await state.setState(["service-key"], Array.from(await kp.export(), (b) => b.toString(16).padStart(2, "0")).join(""));
+    }
+    lg("warn", "Generated new keypair", { did: kp.did(), kept: Boolean(state) });
   }
 
   const signer = signerFromKeypair(kp);
-  const storage = await DenoKvStorage.create(opts?.kvPath || undefined);
 
   const didWebServices: Array<{ id: string; type: string }> = [];
   if (opts?.didWebServicesStr) {
@@ -50,6 +58,7 @@ export async function createFromEnv(opts?: CreateFromEnvOptions): Promise<RepoFa
 
   return createRepoFactory({
     storage,
+    state,
     signer,
     didWebServices: didWebServices.length > 0 ? didWebServices : undefined,
     publicHostname: opts?.publicHostname,

@@ -61,10 +61,12 @@ type networks struct {
 	peers   string
 
 	rebinding map[string]time.Time
+
+	appliedPorts map[string]manifests.NetworkPorts
 }
 
 func newNetworks(ctl *Controller) *networks {
-	return &networks{ctl: ctl, applied: map[string]int64{}, rebinding: map[string]time.Time{}}
+	return &networks{ctl: ctl, applied: map[string]int64{}, rebinding: map[string]time.Time{}, appliedPorts: map[string]manifests.NetworkPorts{}}
 }
 
 func (n *networks) values(spec v1alpha1.MarketNetworkSpec) (manifests.MarketNetwork, error) {
@@ -125,7 +127,10 @@ func (n *networks) holdPorts(ctx context.Context, views map[string]podView) (str
 	path := filepath.Join(NetworkStateDir(n.ctl.c.Layout.StateDir), NetworkPortsFile)
 	var recorded manifests.NetworkPorts
 	if devinstance.ReadJSON(path, &recorded) != nil {
-		return "", devinstance.WriteJSON(path, live)
+		if err := devinstance.WriteJSON(path, live); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("recorded the ports the network's fronts keep %+v; the services are applied again so their specs name them", live), nil
 	}
 	if live == recorded {
 		return "", nil
@@ -443,7 +448,9 @@ func (n *networks) reconcile(ctx context.Context, u *unstructured.Unstructured) 
 	if o.Spec.Profile != NetworkProfile {
 		return write(v1alpha1.ApplicationPhaseFailed, fmt.Sprintf("profile %q: the built MarketNetwork profile is %s", o.Spec.Profile, NetworkProfile))
 	}
-	if n.applied[string(o.UID)] != o.Generation || n.ctl.lostComponent(ctx, owner) != "" {
+	var kept manifests.NetworkPorts
+	devinstance.ReadJSON(filepath.Join(NetworkStateDir(n.ctl.c.Layout.StateDir), NetworkPortsFile), &kept)
+	if n.applied[string(o.UID)] != o.Generation || n.appliedPorts[string(o.UID)] != kept || n.ctl.lostComponent(ctx, owner) != "" {
 		values, err := n.values(o.Spec)
 		if err != nil {
 			return write(v1alpha1.ApplicationPhaseFailed, err.Error())
@@ -452,8 +459,8 @@ func (n *networks) reconcile(ctx context.Context, u *unstructured.Unstructured) 
 		if err := n.applyServices(ctx, owner, &values); err != nil {
 			return write(v1alpha1.ApplicationPhaseProvisioning, "the network's services: "+err.Error())
 		}
-		n.applied[string(o.UID)] = o.Generation
-		log.Info("applied the network's services", "set", NetworkSet)
+		n.applied[string(o.UID)], n.appliedPorts[string(o.UID)] = o.Generation, values.Ports
+		log.Info("applied the network's services", "set", NetworkSet, "ports", fmt.Sprintf("%+v", values.Ports))
 	}
 	rep, err := n.services(ctx)
 	if err != nil {

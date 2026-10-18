@@ -215,8 +215,9 @@ A prod deployment does not preserve anything.
   runs the network). It restarts that one DenoPod through its kcp object, waits until it is Running
   with its listeners reported, and prints the old and new pid and run directory (`stdout.txt` and
   `stderr.txt` are the pod's log). Then rerun `run request`. Do not `dev down`/`dev up` for a
-  TypeScript change, and do not rebuild the binary for one. The PLC directory and the PDSes keep
-  their state in memory: do not `dev restart` plc or a PDS (it empties them); `dev down`/`dev up` instead.
+  TypeScript change, and do not rebuild the binary for one. The PLC directory keeps its operation
+  log and the network's PDSes their accounts, keys and sessions on disk (`--state-path`, `--kv-path`), so
+  `dev restart` of plc or a PDS keeps them.
 - The release binary (prod only; the lead builds it): `scripts/build-socialweb-computer.sh` without
   `--dev` builds one commit once per linux release platform from a clean checkout (every asset
   staged and checked against its pin, the closure, `-tags release`). Each step is keyed by its

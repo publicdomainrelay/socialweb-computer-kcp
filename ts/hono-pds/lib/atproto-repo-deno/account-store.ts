@@ -1,4 +1,4 @@
-import type { Did, Signer } from "@publicdomainrelay/atproto-repo-abc";
+import type { Did, Signer, StateStore } from "@publicdomainrelay/atproto-repo-abc";
 import { base64Encode, utf8Encode } from "@publicdomainrelay/atproto-repo-common";
 
 function b64url(bytes: Uint8Array): string {
@@ -42,7 +42,9 @@ export interface AccountStore {
     password?: string;
     didOverride?: Did;
     signerOverride?: Signer;
+    signingKeyHex?: string;
   }): Promise<{ accessJwt: string; refreshJwt: string; handle: string; did: Did; signer: Signer }>;
+  restore(): Promise<Array<{ did: Did; signer: Signer }>>;
   getAccount(handleOrDid: string): AccountRecord | undefined;
   validatePassword(handleOrDid: string, password: string): Promise<boolean>;
   createSessionTokens(did: Did, handle: string): Promise<{
@@ -53,7 +55,27 @@ export interface AccountStore {
   validateRefreshJwt(token: string): Promise<{ did: Did; handle: string } | null>;
 }
 
-function createAccountStore(pdsDid: Did, pdsSigner: Signer, pdsKeyDid: Did = pdsSigner.did()): AccountStore {
+interface PersistedAccount {
+  record: AccountRecord;
+  signingKeyHex?: string;
+}
+
+function toHex(bytes: Uint8Array): string {
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function signerFromHex(did: Did, hex: string): Promise<Signer> {
+  const { Secp256k1Keypair } = await import("@atproto/crypto");
+  const kp = await Secp256k1Keypair.import(hex, { exportable: true });
+  return { did: () => did, sign: (bytes: Uint8Array) => kp.sign(bytes) };
+}
+
+function createAccountStore(
+  pdsDid: Did,
+  pdsSigner: Signer,
+  pdsKeyDid: Did = pdsSigner.did(),
+  state?: StateStore,
+): AccountStore {
   const accounts = new Map<string, AccountRecord>();
 
   async function hashPassword(password: string): Promise<{ hash: string; salt: string }> {
@@ -112,6 +134,7 @@ function createAccountStore(pdsDid: Did, pdsSigner: Signer, pdsKeyDid: Did = pds
 
       let did: Did;
       let signer: Signer;
+      let signingKeyHex = opts.signingKeyHex;
 
       if (opts.signerOverride) {
         signer = opts.signerOverride;
@@ -120,15 +143,28 @@ function createAccountStore(pdsDid: Did, pdsSigner: Signer, pdsKeyDid: Did = pds
         const { Secp256k1Keypair } = await import("@atproto/crypto");
         const kp = await Secp256k1Keypair.create({ exportable: true });
         did = kp.did();
+        signingKeyHex = toHex(await kp.export());
         signer = {
           did: () => did,
           sign: (bytes: Uint8Array) => kp.sign(bytes),
         };
       }
 
-      accounts.set(handle, { did, handle, passwordHash, passwordSalt, email: opts.email, createdAt: Date.now() });
+      const record: AccountRecord = { did, handle, passwordHash, passwordSalt, email: opts.email, createdAt: Date.now() };
+      if (state) await state.setState(["accounts", handle], { record, signingKeyHex } satisfies PersistedAccount);
+      accounts.set(handle, record);
       const tokens = await this.createSessionTokens(did, handle);
       return { ...tokens, handle, did, signer };
+    },
+
+    async restore() {
+      if (!state) return [];
+      const out: Array<{ did: Did; signer: Signer }> = [];
+      for (const p of await state.listState<PersistedAccount>(["accounts"])) {
+        accounts.set(p.record.handle, p.record);
+        if (p.signingKeyHex) out.push({ did: p.record.did, signer: await signerFromHex(p.record.did, p.signingKeyHex) });
+      }
+      return out;
     },
 
     getAccount(handleOrDid: string) {

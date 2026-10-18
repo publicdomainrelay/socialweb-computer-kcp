@@ -56,7 +56,7 @@
     },
     "kv-path": {
       "type": "string",
-      "description": "Deno KV store path; unset keeps Deno's default location under DENO_DIR",
+      "description": "Deno KV store path; the PDS keeps its repos, service key, accounts, user signing keys and OAuth tokens there, so a restart keeps every account and session; unset keeps repos only, at Deno's default location under DENO_DIR",
       "env": "PDS_KV_PATH"
     },
     "write-limit-file": {

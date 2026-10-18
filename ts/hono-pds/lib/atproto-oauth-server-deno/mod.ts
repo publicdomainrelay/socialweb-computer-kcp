@@ -1,6 +1,6 @@
 // Deno implementations of the OAuth server ABC interfaces.
 // I/O layer: crypto.subtle, timers. Depends on abc + common only.
-import type { Signer } from "@publicdomainrelay/atproto-repo-abc";
+import type { Signer, StateStore } from "@publicdomainrelay/atproto-repo-abc";
 import { base64Encode, utf8Encode } from "@publicdomainrelay/atproto-repo-common";
 import { b64url, computeJkt } from "@publicdomainrelay/oauth-server-common";
 import type {
@@ -53,15 +53,38 @@ function b64urlToStandard(b64urlStr: string): string {
   return s;
 }
 
-// ── MemoryTokenStore ──────────────────────────────────────────────────────────
+// ── TokenStore ──────────────────────────────────────────────────────────
 
 interface StoredToken {
   claims: Record<string, unknown>;
   type: "access" | "refresh";
 }
 
-export function createMemoryTokenStore(signer: Signer): TokenStore {
-  const tokens = new Map<string, StoredToken>();
+interface TokenMap {
+  get(jti: string): Promise<StoredToken | undefined>;
+  set(jti: string, token: StoredToken, expiresIn: number): Promise<void>;
+  delete(jti: string): Promise<void>;
+}
+
+function memoryTokens(): TokenMap {
+  const m = new Map<string, StoredToken>();
+  return {
+    get: (jti) => Promise.resolve(m.get(jti)),
+    set: (jti, token) => Promise.resolve(void m.set(jti, token)),
+    delete: (jti) => Promise.resolve(void m.delete(jti)),
+  };
+}
+
+function stateTokens(state: StateStore): TokenMap {
+  return {
+    get: async (jti) => (await state.getState<StoredToken>(["oauth-tokens", jti])) ?? undefined,
+    set: (jti, token, expiresIn) => state.setState(["oauth-tokens", jti], token, expiresIn * 1000),
+    delete: (jti) => state.deleteState(["oauth-tokens", jti]),
+  };
+}
+
+export function createTokenStore(signer: Signer, state?: StateStore): TokenStore {
+  const tokens = state ? stateTokens(state) : memoryTokens();
 
   async function makeToken(
     params: IssueTokenParams,
@@ -81,7 +104,7 @@ export function createMemoryTokenStore(signer: Signer): TokenStore {
       jti,
     };
     const token = await signJwt(signer, payload, type === "access" ? "at+jwt" : "refresh+jwt");
-    tokens.set(jti, { claims: payload, type });
+    await tokens.set(jti, { claims: payload, type }, expiresIn);
     return token;
   }
 
@@ -97,7 +120,7 @@ export function createMemoryTokenStore(signer: Signer): TokenStore {
       if (!payload || !payload.jti || payload.jti === "undefined") return null;
       if (payload.exp && Math.floor(Date.now() / 1000) > (payload.exp as number)) return null;
 
-      const stored = tokens.get(payload.jti as string);
+      const stored = await tokens.get(payload.jti as string);
       if (!stored || stored.type !== "access") return null;
       // Verify JWT signature (the stored claims ARE the payload)
       // Re-sign and compare — the signatures match iff the token was signed by us
@@ -118,14 +141,14 @@ export function createMemoryTokenStore(signer: Signer): TokenStore {
       if (!payload || !payload.jti) return null;
       if (payload.exp && Math.floor(Date.now() / 1000) > (payload.exp as number)) return null;
 
-      const stored = tokens.get(payload.jti as string);
+      const stored = await tokens.get(payload.jti as string);
       if (!stored || stored.type !== "refresh") return null;
 
       const expected = await signJwt(signer, stored.claims, "refresh+jwt");
       if (expected !== refreshToken) return null;
 
       // Revoke old tokens
-      tokens.delete(payload.jti as string);
+      await tokens.delete(payload.jti as string);
 
       // Issue new pair with same claims
       const userDid = stored.claims.sub as string;
@@ -137,7 +160,7 @@ export function createMemoryTokenStore(signer: Signer): TokenStore {
 
     async revoke(token: string): Promise<void> {
       const payload = decodeB64UrlPayload(token);
-      if (payload?.jti) tokens.delete(payload.jti as string);
+      if (payload?.jti) await tokens.delete(payload.jti as string);
     },
   };
 }

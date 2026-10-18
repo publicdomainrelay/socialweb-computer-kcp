@@ -3934,9 +3934,23 @@ because it bounds a mechanism the rest of this document leans on.
   3 s under the new core; a DenoPod deleted (finalizer stripped) while the core was stopped then killed
   had its orphan run stopped 63 s later by the sweep; dev down left no process. Stated limits: an adopted
   run that exits has no exit code (the old core held the wait), so it fails and restarts under its
-  restart policy, and an OOM kill of an adopted run reads as a plain failure; hono-pds keeps accounts,
-  user signing keys, its service key and OAuth tokens in memory, so a real PDS pod restart still logs
-  every session out (plan 0019 M3D).
+  restart policy, and an OOM kill of an adopted run reads as a plain failure.
+  A PDS pod restart keeps every account and session (plan 0019 M3D, 2026-10-18). Before: hono-pds kept
+  only repo blocks in its KV; the account store, the per-user signing keys and the OAuth tokens were
+  in-memory maps (and a PDS without --private-key-hex made a new service key per start), so a restart of
+  alice's PDS logged the web app's owner out (getServiceAuth 401 invalid_token for 3 min on the runner
+  worker's swap leg). Now, with --kv-path, the PDS keeps its service key, accounts (password hash and
+  salt), per-user signing keys and OAuth tokens (with their expiry) in that KV (a StateStore contract in
+  atproto-repo-abc; DenoKvStorage keys under ["state"]) and restores accounts and signers before it
+  answers; session JWTs are stateless and verify again under the kept key. A restarted front also comes
+  back on its port now: the first apply of the network's services rendered `{{.Ports.*}}` as 0, so a
+  `dev restart alice:pds` bound a new port, was restarted onto its kept port and bound port 0 again; the
+  network applies the set again once ports.json is recorded, holding ServicesReady until then. Reading
+  (dev-adopt-1, 1 bidder and the gateway, dev up 78.6 s): `dev restart <net> alice:pds` (pid 220017 ->
+  223847, new run, same port); the same web app cookie answered GET /session 200 and
+  /api/clusters/list 200 (tenant Ready) after it, the owner's and a fresh did:plc account's old
+  sessions got getServiceAuth tokens, and createSession with the owner's password answered 200; the new
+  PDS logged "accounts restored from the state store { accounts: 3 }".
 
 - **The requester retries the release with the same signed event (plan 0020, opened 2026-10-17).**
   Before: one non-2xx answer to the direct submitEvent of a vm.delete (a 404 from the

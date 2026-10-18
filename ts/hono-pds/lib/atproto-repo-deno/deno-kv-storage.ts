@@ -1,6 +1,6 @@
-import type { Storage, Cid, Did, Tid, Bytes } from "@publicdomainrelay/atproto-repo-abc";
+import type { Storage, StateStore, Cid, Did, Tid, Bytes } from "@publicdomainrelay/atproto-repo-abc";
 
-export class DenoKvStorage implements Storage {
+export class DenoKvStorage implements Storage, StateStore {
   private kv: Deno.Kv;
 
   private constructor(kv: Deno.Kv) {
@@ -42,6 +42,25 @@ export class DenoKvStorage implements Storage {
 
   async setHead(did: Did, head: { commit: Cid; rev: Tid }): Promise<void> {
     await this.kv.set(["heads", did], head);
+  }
+
+  async getState<T>(key: string[]): Promise<T | null> {
+    const result = await this.kv.get<T>(["state", ...key]);
+    return result.value ?? null;
+  }
+
+  async setState(key: string[], value: unknown, expireInMs?: number): Promise<void> {
+    await this.kv.set(["state", ...key], value, expireInMs ? { expireIn: expireInMs } : undefined);
+  }
+
+  async deleteState(key: string[]): Promise<void> {
+    await this.kv.delete(["state", ...key]);
+  }
+
+  async listState<T>(prefix: string[]): Promise<T[]> {
+    const out: T[] = [];
+    for await (const entry of this.kv.list<T>({ prefix: ["state", ...prefix] })) out.push(entry.value);
+    return out;
   }
 
   close(): void {

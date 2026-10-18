@@ -28,6 +28,13 @@ export interface RepoStore {
 
 export interface Storage extends BlockStore, RepoStore {}
 
+export interface StateStore {
+  getState<T>(key: string[]): Promise<T | null>;
+  setState(key: string[], value: unknown, expireInMs?: number): Promise<void>;
+  deleteState(key: string[]): Promise<void>;
+  listState<T>(prefix: string[]): Promise<T[]>;
+}
+
 export interface CommitOp {
   action: "create" | "update" | "delete";
   path: string;
