@@ -203,7 +203,7 @@ func killAndRemove(dir string) {
 	}
 }
 
-func removeSettledPodCgroups() {
+func removeSettledPodCgroups(named func(string) bool) {
 	podBase.mu.Lock()
 	base := podBase.path
 	podBase.mu.Unlock()
@@ -217,7 +217,7 @@ func removeSettledPodCgroups() {
 	settled := time.Now().Add(-podCgroupSettle)
 	for _, e := range entries {
 		id, ok := strings.CutPrefix(e.Name(), podCgroupPrefix)
-		if !e.IsDir() || !ok || !IsRunID(id) {
+		if !e.IsDir() || !ok || !IsRunID(id) || named(id) {
 			continue
 		}
 		stamp := id[strings.Index(id, "-")+1 : strings.LastIndex(id, "-")]
@@ -288,6 +288,30 @@ func (l *limiter) oomKilled() bool {
 		}
 	}
 	return false
+}
+
+func oomKilledLimit(id string, holder Holder) uint64 {
+	podBase.mu.Lock()
+	base := podBase.path
+	podBase.mu.Unlock()
+	if base == "" && holder != nil {
+		if pid, err := holder(); err == nil {
+			base, _ = cgroupDirOf(strconv.Itoa(pid))
+		}
+	}
+	if base == "" {
+		return 0
+	}
+	l := &limiter{dir: filepath.Join(base, podCgroupPrefix+id)}
+	if !l.oomKilled() {
+		return 0
+	}
+	body, err := os.ReadFile(filepath.Join(l.dir, "memory.max"))
+	if err != nil {
+		return 0
+	}
+	limit, _ := strconv.ParseUint(strings.TrimSpace(string(body)), 10, 64)
+	return limit
 }
 
 func (l *limiter) release() {

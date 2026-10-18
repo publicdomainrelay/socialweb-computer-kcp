@@ -30,7 +30,7 @@ func (p *Pod) Sweep(named func(string) bool, before time.Time) []string {
 	for _, id := range removed {
 		removePodCgroup(id)
 	}
-	removeSettledPodCgroups()
+	removeSettledPodCgroups(named)
 	return removed
 }
 

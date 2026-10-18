@@ -24,4 +24,6 @@ func ReleaseCgroups() {}
 
 func removePodCgroup(string) {}
 
-func removeSettledPodCgroups() {}
+func removeSettledPodCgroups(func(string) bool) {}
+
+func oomKilledLimit(string, Holder) uint64 { return 0 }

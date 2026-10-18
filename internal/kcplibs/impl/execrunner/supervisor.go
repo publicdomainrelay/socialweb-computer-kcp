@@ -258,6 +258,21 @@ func writeDone(run *process, doneFile string) {
 	_ = os.WriteFile(filepath.Join(run.dir, doneFile), body, 0o644)
 }
 
+func (s *supervisor) recordAdoptedOOMKill(run *process) {
+	if run.cmd != nil || s.doneFile == "" {
+		return
+	}
+	if _, err := os.Stat(filepath.Join(run.dir, s.doneFile)); err == nil {
+		return
+	}
+	limit := oomKilledLimit(filepath.Base(run.dir), s.holder)
+	if limit == 0 {
+		return
+	}
+	run.exitCode, run.oomKilled, run.memoryLimit = 137, true, limit
+	writeDone(run, s.doneFile)
+}
+
 func writeState(run *process) error {
 	body, err := json.Marshal(runState{PID: run.pid, Started: run.started.Format(time.RFC3339Nano), Ticks: run.ticks, Stopped: run.stopped.Load()})
 	if err != nil {

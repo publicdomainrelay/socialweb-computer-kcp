@@ -132,6 +132,7 @@ func (p *Pod) Observe(_ context.Context, runID string) (runner.PodStatus, error)
 	if run.stopped.Load() {
 		return runner.PodStatus{State: runner.StateFailed, Message: "the deno process was stopped"}, nil
 	}
+	p.sup.recordAdoptedOOMKill(run)
 	status, err := p.result(run)
 	if err == nil {
 		p.classify(run, &status)
