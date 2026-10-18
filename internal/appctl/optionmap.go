@@ -23,6 +23,7 @@ const (
 	MapToNetwork   = "network."
 	MapToContract  = "contract."
 	MapToCLI       = "cli"
+	MapToRequester = "requester"
 	LegacyRemoval  = "legacy-transport"
 	maxOptionValue = 4096
 )
@@ -55,7 +56,7 @@ func LoadOptionMap() (OptionMap, error) {
 	for _, a := range m.Apps {
 		for _, o := range a.Options {
 			switch {
-			case o.To == MapToOptions, o.To == MapToProfile, o.To == MapToState, o.To == MapToListener, o.To == MapToCLI,
+			case o.To == MapToOptions, o.To == MapToRequester, o.To == MapToProfile, o.To == MapToState, o.To == MapToListener, o.To == MapToCLI,
 				strings.HasPrefix(o.To, MapToSpec), strings.HasPrefix(o.To, MapToNetwork), strings.HasPrefix(o.To, MapToContract):
 			case o.To == MapToRemoved:
 				if o.Reason != LegacyRemoval {
@@ -80,6 +81,14 @@ func (m OptionMap) app(name string) (AppOptions, bool) {
 }
 
 func OptionArgs(app string, opts []v1alpha1.ApplicationOption) ([]string, error) {
+	return optionArgs(app, MapToOptions, opts)
+}
+
+func RequesterOptionArgs(app string, opts []v1alpha1.ApplicationOption) ([]string, error) {
+	return optionArgs(app, MapToRequester, opts)
+}
+
+func optionArgs(app, want string, opts []v1alpha1.ApplicationOption) ([]string, error) {
 	if len(opts) == 0 {
 		return nil, nil
 	}
@@ -97,7 +106,11 @@ func OptionArgs(app string, opts []v1alpha1.ApplicationOption) ([]string, error)
 		if i < 0 {
 			return nil, fmt.Errorf("appctl: %s has no option --%s (%s)", a.Entry, o.Name, OptionMapPath)
 		}
-		if to := a.Options[i].To; to != MapToOptions {
+		switch to := a.Options[i].To; to {
+		case want:
+		case MapToOptions, MapToRequester:
+			continue
+		default:
 			return nil, fmt.Errorf("appctl: --%s of %s is not an options entry: it maps to %s", o.Name, a.Entry, to)
 		}
 		if len(o.Value) > maxOptionValue {

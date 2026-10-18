@@ -486,6 +486,11 @@ func GatewayValues(o v1alpha1.Gateway, workspace, stateDir, requesterStateDir st
 		return manifests.Gateway{}, err
 	}
 	extra = append(extra, opts...)
+	ropts, err := RequesterOptionArgs(GatewayApp, o.Spec.Options)
+	if err != nil {
+		return manifests.Gateway{}, err
+	}
+	requesterExtra = append(requesterExtra, ropts...)
 	if w.DownloadsDir != "" {
 		if !filepath.IsAbs(w.DownloadsDir) {
 			return manifests.Gateway{}, fmt.Errorf("appctl: the %s downloads dir %q is not absolute", WebAppComponent, w.DownloadsDir)
