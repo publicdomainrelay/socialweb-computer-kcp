@@ -81,10 +81,12 @@ func WithClientCertificate(cert tls.Certificate) Option {
 func (c *Client) tlsConfig() *tls.Config {
 	if c.tls == nil {
 		c.tls = &tls.Config{MinVersion: tls.VersionTLS12}
-		c.http = &http.Client{Transport: &http.Transport{TLSClientConfig: c.tls}}
+		c.http = &http.Client{Transport: &http.Transport{TLSClientConfig: c.tls, IdleConnTimeout: IdleConnTimeout}}
 	}
 	return c.tls
 }
+
+const IdleConnTimeout = 90 * time.Second
 
 func New(addr, token string, opts ...Option) *Client {
 	c := &Client{

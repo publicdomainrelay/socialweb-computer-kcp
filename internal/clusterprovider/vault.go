@@ -60,7 +60,7 @@ type vaultAdmin struct {
 func newVaultAdmin(addr, token string, pool *x509.CertPool) *vaultAdmin {
 	httpClient := http.DefaultClient
 	if pool != nil {
-		httpClient = &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{
+		httpClient = &http.Client{Transport: &http.Transport{IdleConnTimeout: openbao.IdleConnTimeout, TLSClientConfig: &tls.Config{
 			RootCAs:    pool,
 			MinVersion: tls.VersionTLS12,
 		}}}

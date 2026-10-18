@@ -220,7 +220,7 @@ func (c ClientCertificate) tlsClient() (*http.Client, error) {
 	if !pool.AppendCertsFromPEM(c.ServerCAPEM) {
 		return nil, errors.New("vaultcert: the vault server CA carries no CERTIFICATE PEM block")
 	}
-	return &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{
+	return &http.Client{Transport: &http.Transport{IdleConnTimeout: openbao.IdleConnTimeout, TLSClientConfig: &tls.Config{
 		RootCAs:      pool,
 		Certificates: []tls.Certificate{pair},
 		MinVersion:   tls.VersionTLS12,
@@ -241,7 +241,7 @@ func newRawClient(addr, token string, hc *http.Client) *rawClient {
 }
 
 func adminHTTPClient(pool *x509.CertPool) *http.Client {
-	return &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{
+	return &http.Client{Transport: &http.Transport{IdleConnTimeout: openbao.IdleConnTimeout, TLSClientConfig: &tls.Config{
 		RootCAs:    pool,
 		MinVersion: tls.VersionTLS12,
 	}}}
