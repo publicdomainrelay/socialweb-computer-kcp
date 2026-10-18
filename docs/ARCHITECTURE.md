@@ -3738,12 +3738,22 @@ because it bounds a mechanism the rest of this document leans on.
   (the templates are rendered by `install`, which no agent runs here) is read at the prod deploy.
 - **Open after the 3 h soak (plan 0013 M4-SOAK-READING, 2026-10-18; the readings are in section 15).** Each is a series that
   kept growing, with its measurement and the smallest fix named.
-  - hono-pds never deletes a block: every superseded MST node, record block and commit stays in the kv file (bob 628 MB, a
-    requester's repo 505 MB after 3 h). The fix is a mark and sweep from the head of each repo; Deno KV lists values with keys, so
-    it needs a key-only block index first. It matters for the market network and for a `run request` repo; prod uses real PDSes.
-  - The requester keeps the vm.delete and market.event records of every VM contract (86 an hour at 90 contracts an hour):
-    `requester-controller-kcp/retention.ts` removes rfp, payload and accept only. The refs to add are `state.release.payload`,
-    `state.release.event` and `state.submitEventRef`; prove it with a short run on a market network before it lands.
+  - The hono-pds block store and the requester's vm.delete and market.event records are closed (section 15, "hono-pds collects
+    unreachable blocks"). Left open from that reading (dev-gc-1, 2026-10-18):
+  - The requester leaves the compute.vm and market.rfp records of about 1.5 % of its contracts: 177 of about 1300 compute.vm
+    records were older than an hour and no ComputeContract object names them (+110 an hour at 3960 RFP-only contracts an hour).
+    The contract object went (TTL 40 minutes) without the retention pass removing its refs; the run logs were rotated before the
+    cause was read. The orphan scanner (`orphans.ts`) already finds these records unclaimed and settled; the smallest fix is to
+    remove a settled, unclaimed compute.vm record older than the retention window there, with the rfp that names it.
+  - The bidder removes at most 100 due market.bid records a pass (`DEFAULT_BID_RETENTION_DELETES`, every 10 minutes, set for the
+    hosted PDS write budget), 600 an hour, while one bidder bids on 3960 RFPs an hour, so its repo grows (8000 to 10500 market.bid
+    records and its repo.sqlite3 at +17 MB an hour). The quota also shows it: with the default `bid-ttl-sec` of 24 h the 10000
+    Bid quota was hit after 2.5 h at 1.1 RFP/s and every later RFP was declined (13 VM contracts failed) until the Bids got a
+    1800 s TTL. A soak sets `bid-ttl-sec` on the bidder app (the 3 h soak used 1800 s).
+  - The requester DenoPod ran out of V8 heap after 3 h 6 min (792 MB, "Ineffective mark-compacts near heap limit") with about
+    2800 ComputeContracts; the provider restarted it and it resumed. Its heap per contract is the M2-QUOTAS figure (0.23 MB).
+  - The gateway's requester keeps its records for the default 7-day retention (no option maps `record-retention-sec` for the
+    gateway app), so its repo grows by 30 contracts an hour inside a soak and is bounded only at 7 days.
   - The relay backlog fell to 10000 frames, and bob-pds and the relay got larger limits in the market network set; none was re-read.
   - The dev backend sets no cgroup limit, so the soak cannot show that a memory breach restarts one pod; ACC13-NO-HOST-OOM needs
     the same soak on a systemd-user backend.
@@ -3987,6 +3997,47 @@ refutation.
   droplet the `socialweb-computer-k8s-downloads` asset stages to tree baf256f7 (the socialweb-meshd binaries differ by 240
   bytes), not the pinned 01030c9a, so a droplet's dev build needs that pin changed in its own checkout. ACC13-BOUNDED's gateway
   kcp and OpenBao parts hold on this reading.
+
+- **hono-pds collects unreachable blocks, and the requester's retention removes the vm.delete and market.event records (plan
+  0013 M3-DISK-RETENTION and M3-PDS-RECORD-RETENTION, 2026-10-18, commits 508d79fc and 58d5bc38).** Before: the 3 h soak read
+  the bob PDS kv file at +213 MB an hour and the requester repo at +171 MB an hour, because `DenoKvStorage` never deleted a
+  block, and the requester's compute.events.vm.delete and market.event records at +86 an hour each, because `retention.ts`
+  removed rfp, payload and accept only. The change: `DenoKvStorage.put` writes a key-only index entry (`["blockidx", cid]`, time
+  and size) beside each block; `Repo` runs a mark and sweep at most every 5 minutes after a write: it marks each head's commit,
+  every MST node and every record CID the nodes name, and removes each indexed block outside that set that was written more
+  than 10 minutes ago. A firehose frame carries its own blocks and `getRepo` serves only the head, so older revisions are not
+  kept; the 10 minutes cover a write in flight. Each delete checks the index entry's versionstamp, so a block written again
+  during the sweep stays; the first pass indexes the blocks of a store written before the index. The factory logs
+  `repo_block_gc` (blocks, bytes, removed, kv file bytes before and after, pass ms). This covers every repo built on
+  `createRepoFactory`: hono-pds, the requester's repo, each application's pds DenoPod (hono-repo-pds) and the ssh app PDS. The
+  requester's retention also removes `state.release.payload`, `state.release.event` and `state.submitEventRef` (refs in its own
+  repo only) and skips a contract whose runner is running, so a release that is still retrying keeps the event plan 0020
+  resends. Reading on droplet dev-gc-1 (c-32, sfo2): one `dev up --profile market-network --bidders 1 --with-gateway`, the
+  `test/soak` driver at 1.1 RFP/s, a VM contract every 40 s (3 lanes), 2 tenant lanes, contract TTL 40 minutes, requester
+  retention 900 s scanned every 60 s, sampled every minute, fitted from 03:50Z (one hour of warm-up) to 06:04Z with the
+  section 15 soak rule. Since plan 0018 the bidder's and the gateway's repos are their pds DenoPods'
+  `components/pds/repo.sqlite3`, so the network's bob-pds and alice-pds kv files are idle (0.2 and 0.4 MB, flat). Load to
+  06:04Z: 12869 RFPs, 254 VM contracts (239 released), 86 tenant cluster cycles with a node out and in through the RFP flow, and
+  two `run request --network` runs that reached the guest. Readings:
+
+| series | start | end | max | slope per hour | plateau |
+| --- | --- | --- | --- | --- | --- |
+| requester repo kv file (MB) | 64.6 | 66.2 | 66.2 | +0.8 | yes |
+| requester repo: compute.events.vm.delete | 24 | 21 | 25 | -10.1 | bounded, 18 to 25 (the fit reads a step down as NO) |
+| requester repo: market.event | 24 | 22 | 26 | -8.9 | bounded, 19 to 26 (as above) |
+| requester repo: market.accept | 25 | 22 | 26 | -6.8 | bounded, 19 to 26 (as above) |
+| requester repo: compute.vm | 1097 | 1307 | 1454 | +111 | NO (orphans, section 14) |
+| bidder repo kv file (MB) | 43.0 | 80.9 | 80.9 | +17.5 | NO (live market.bid, section 14) |
+| gateway repo kv file (MB) | 5.9 | 9.2 | 9.2 | +1.5 | NO (7-day retention, section 14) |
+| state dir total (MB) | 11472 | 7889 | 13629 | -2533 | yes |
+
+  The requester's last pass: 28306 blocks (20.0 MB) kept, 3621 of them reachable from the head, 9772 blocks (7.2 MB) removed, kv
+  file 66.2 MB before and after, 6.8 s. The bidder's: 22612 kept (18.7 MB), 16532 reachable, 2284 (1.6 MB) removed, 2.4 s. The
+  kv file does not shrink: SQLite reuses the freed pages, so the file stays at its high-water mark, about 3.5 times the kept
+  bytes. A local check of 6 rounds of 300 creates and 300 deletes of 20 KB records read the file flat at 20.6 MB from round 2 on,
+  with every record readable after a reopen. No `repo_block_gc_failed` line and no missing block in 3 h 30 min. The 125
+  hono-pds tests pass. The soak driver was ported to the one-kcp network (5d72f50d) and samples each application's repo
+  PDS (8718ddc2).
 
 - **Plan 0013 M4-SOAK-READING: a 3 h accelerated soak of a market network with a gateway, read on a DigitalOcean c-32 droplet
   (2026-10-17 22:12:48Z to 2026-10-18 01:13Z; M4 stays `doing`, ACC13-NO-ORPHANS is `done`).** Host: droplet dev-soak (c-32,
