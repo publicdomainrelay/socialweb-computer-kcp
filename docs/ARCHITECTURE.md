@@ -9296,8 +9296,11 @@ protocol):
   event it wrote and retries only what is missing, with a delay that doubles from 5 s up to 300 s. The
   `vm.hostKeys` payload is kept across retries the same way. The writer in `onAccept` and the bidder's
   `/v1/on-network` route are gone; the kcp provider points its guests at its own route.
-- Bid retention deletes at most 100 Bids per pass, scans every page first so that it knows which records live
-  Bids name, and stops at the first 429. `bidder_associate` has the fixed rkey `bidder_associate`, and the
+- Bid retention deletes every due Bid each pass (every 10 minutes), in `applyWrites` batches of 100 deletes, and a
+  pass ends after 5 minutes (`DEFAULT_BID_RETENTION_PASS_MS`) rather than after a count, so deletes keep up with
+  bids at any rate (changed 2026-10-18: the cap of 100 deletes a pass was set for the bsky.social write budget,
+  and since plan 0018 the bidder's records are in its own repo PDS DenoPod). It scans every page (oldest
+  first) before it deletes so that it knows which records live Bids name, and stops at the first 429. `bidder_associate` has the fixed rkey `bidder_associate`, and the
   `badge.blue.keys` record is read before it is created.
 - The market network's bob PDS limits repo writes while the file named by `PDS_WRITE_LIMIT_FILE`
   (`<state>/bob-pds/write-limit.json`, `{"points":N,"windowSec":S}`) exists; delete the file to switch it off.

@@ -188,8 +188,9 @@ items:
     title: Own market records are removed when they are no longer needed
     depends_on: [M1-PDS-POINT-READS, "0009:M2-BID-KIND"]
     decision: >
-      The bidder deletes its own market.bid record when its Bid is Lost or Expired and its TTL passes; the
-      requester deletes its own RFP and accept records after the contract is Released and a retention time
+      The bidder deletes its own market.bid record when its Bid is Lost or Expired and its TTL passes, every
+      due record each pass in applyWrites batches with a time bound per pass, not a count cap (changed
+      2026-10-18, since plan 0018 the records are in the bidder's own repo PDS); the requester deletes its own RFP and accept records after the contract is Released and a retention time
       (default 7 d) passes, keeping what a later vm.delete answer or receipt check needs. No application ever
       deletes a record of another DID. Decided by Claude, user may veto.
     files: ["ts/atproto-market/lib/market-bidder", "ts/atproto-market/lib/requester-xrpc"]
