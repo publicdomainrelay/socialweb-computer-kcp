@@ -408,6 +408,8 @@ func main() {
 		os.Exit(runTidy(os.Args[2:]))
 	case "inspect":
 		os.Exit(runInspect(os.Args[2:]))
+	case "orphans":
+		os.Exit(runOrphans(os.Args[2:]))
 	}
 	fmt.Fprintln(os.Stderr, "usage: soak load|sample [flags]")
 	os.Exit(2)
