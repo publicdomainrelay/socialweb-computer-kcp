@@ -39,7 +39,7 @@ items:
       `.default.app.svc.kcp.local` any more.
     files: ["internal/manifests", "internal/kcpapply", "deploy/sets.yaml", "deploy/apps"]
     done_when: "the market-bidder, market-requester and gateway sets apply unchanged into root (prod) and into root:<app> (network); grep finds no hard-coded .default.app.svc.kcp.local under deploy/apps."
-    status: todo
+    status: done
   - id: M1-CHILD-IN-WORKSPACE
     title: "A network child application is a workspace of the network's kcp, not a kcp of its own"
     depends_on: [M0-REBASED-SETS]
