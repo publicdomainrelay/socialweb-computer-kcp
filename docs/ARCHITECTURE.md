@@ -3738,22 +3738,16 @@ because it bounds a mechanism the rest of this document leans on.
   (the templates are rendered by `install`, which no agent runs here) is read at the prod deploy.
 - **Open after the 3 h soak (plan 0013 M4-SOAK-READING, 2026-10-18; the readings are in section 15).** Each is a series that
   kept growing, with its measurement and the smallest fix named.
-  - The hono-pds block store and the requester's vm.delete and market.event records are closed (section 15, "hono-pds collects
-    unreachable blocks"). Left open from that reading (dev-gc-1, 2026-10-18):
-  - The requester leaves the compute.vm and market.rfp records of about 1.5 % of its contracts: 177 of about 1300 compute.vm
-    records were older than an hour and no ComputeContract object names them (+110 an hour at 3960 RFP-only contracts an hour).
-    The contract object went (TTL 40 minutes) without the retention pass removing its refs; the run logs were rotated before the
-    cause was read. The orphan scanner (`orphans.ts`) already finds these records unclaimed and settled; the smallest fix is to
-    remove a settled, unclaimed compute.vm record older than the retention window there, with the rfp that names it.
-  - The bidder removes at most 100 due market.bid records a pass (`DEFAULT_BID_RETENTION_DELETES`, every 10 minutes, set for the
-    hosted PDS write budget), 600 an hour, while one bidder bids on 3960 RFPs an hour, so its repo grows (8000 to 10500 market.bid
-    records and its repo.sqlite3 at +17 MB an hour). The quota also shows it: with the default `bid-ttl-sec` of 24 h the 10000
-    Bid quota was hit after 2.5 h at 1.1 RFP/s and every later RFP was declined (13 VM contracts failed) until the Bids got a
-    1800 s TTL. A soak sets `bid-ttl-sec` on the bidder app (the 3 h soak used 1800 s).
-  - The requester DenoPod ran out of V8 heap after 3 h 6 min (792 MB, "Ineffective mark-compacts near heap limit") with about
-    2800 ComputeContracts; the provider restarted it and it resumed. Its heap per contract is the M2-QUOTAS figure (0.23 MB).
-  - The gateway's requester keeps its records for the default 7-day retention (no option maps `record-retention-sec` for the
-    gateway app), so its repo grows by 30 contracts an hour inside a soak and is bounded only at 7 days.
+  - The hono-pds block store, the requester's vm.delete and market.event records, the requester's orphan records, the bidder's
+    bid record cap, the requester heap and the gateway requester's retention are closed (section 15, "hono-pds collects
+    unreachable blocks" and "The requester's orphan records, the bidder's bid sweep, the requester heap and the gateway
+    requester's retention"). Left open from the dev-bound-1 reading (2026-10-18):
+  - The gateway's requester DenoPod RSS rose from 227 to 550 MB in 90 minutes (698 MB at most, +283 MB an hour) while its V8
+    heapUsed stayed flat at about 45 MB and its external memory at about 7 MB, with 0 to 2 ComputeContracts live: native memory,
+    not the V8 heap. Most of it came as one step (195 to 433 MB at 08:15Z). That pod opens a dedicated firehose connection for
+    every contract watch (82 connections in 90 minutes); a heap and allocator profile of that pod under the soak is the next
+    reading. The soak requester's DenoPod RSS read +21.6 MB an hour (410 to 472 MB) with its heap flat, and the bidder's pds
+    DenoPod +28.8 MB an hour; neither is past the fit rule by much, and both need a longer window.
   - The relay backlog fell to 10000 frames, and bob-pds and the relay got larger limits in the market network set; none was re-read.
   - The dev backend sets no cgroup limit, so the soak cannot show that a memory breach restarts one pod; ACC13-NO-HOST-OOM needs
     the same soak on a systemd-user backend.
@@ -3999,6 +3993,65 @@ refutation.
   compiled by the host clang (Fedora 22.1.8, Ubuntu 18.1.3). Closed by 13473a6b: rust/build.sh compiles it with the zig cc and
   zig ar of a zig it pins by sha256; the tree is acb85490 on Fedora 44 and on Ubuntu 24.04. ACC13-BOUNDED's gateway
   kcp and OpenBao parts hold on this reading.
+
+- **The requester's orphan records, the bidder's bid sweep, the requester heap and the gateway requester's retention (plan 0013
+  M3-PDS-RECORD-RETENTION and M3-DISK-RETENTION, 2026-10-18, commits 8dad7806, b517683f, 1be95509, feccd06d, a60721ac,
+  efa7e5cd).** The four series that section 14 kept open after dev-gc-1. Causes and changes:
+  (1) Orphan records. Every 30 s the controller's resync lists the ComputeContracts and called `forget()` on every runner whose
+  name the list lacked. A contract created while the list was in flight had already been launched from the watch, so it was taken
+  for deleted: the runner set deleted and released, skipped every later status write and ended with "the contract was released
+  before a VM was held", and the object kept no `status.contract`. Its compute.vm and market.rfp were named by nothing, so
+  retention never removed them. That is one orphan per resync under load (45 in 50 minutes on dev-bound-1 before the fix, +110
+  an hour on dev-gc-1). A name that `observe()` saw at or after the list began is no longer forgotten (8dad7806). The same pass
+  found that the gateway's requester, whose records are in its application's repo PDS since plan 0018, compared each ref with the
+  local requester PDS's DID and removed nothing at any retention; refs are matched with the DID that `deleteRepoRecord` writes
+  to. A request that throws now hands its state to the runner (`ComputeRequestFailed`), and an at-capacity round removes its rfp
+  and compute.vm before the next round (b517683f). As a backstop, the orphan scan removes a settled compute.vm that no
+  ComputeContract claims once it is older than the record retention, with the rfp, accept and events that name it. It reads one
+  listing per pass, stops after 60 s, logs `requester_orphan_records_removed`, and covers a deleted NodeClaim's contract
+  (1be95509).
+  (2) Bid sweep. The cap of 100 deletes a pass was set for the bsky.social write budget, which no longer applies since plan 0018.
+  The sweep now deletes every due record each pass in `applyWrites` batches of 100, with a 5-minute bound per pass, and lists
+  every page (oldest first) until that bound (feccd06d).
+  (3) Requester heap. `createATProtoEventStreamsClient` pushed each dedicated watcher's stream watchers into the client's
+  `watchers` list and never took them out on close. Every contract watch after the first batch stayed reachable with its
+  `openContractWatch` closure (a60721ac). The unfixed requester (network "bound", same host) read heapUsed 266 MB at 06:59Z,
+  326 MB at 07:09Z and 368 MB at 07:19Z, with its ComputeContracts flat at 2640: about +300 MB an hour, which reaches the
+  792 MB limit in about 2 h. The fixed one reads flat (below).
+  (4) Gateway retention. A Gateway spec option mapped `to: requester` in `deploy/apps/option-map.yaml` goes to the gateway's
+  requester DenoPod. `record-retention-sec` is the first such option; the prod default of 7 days stays (efa7e5cd).
+  The requester also logs `requester_memory` every minute (its V8 heap and the sizes of its per-contract maps), and the soak
+  driver gained `orphans` and `release`.
+  Reading on droplet dev-bound-1 (c-48, sfo2): one `dev up --profile market-network --bidders 1 --with-gateway
+  --vm-host-backend systemd-user`, with app values setting the bidder's `bid-ttl-sec` 1800 and the gateway's
+  `record-retention-sec` 900. The `test/soak` driver ran at 1.1 RFP/s, a VM contract every 40 s (3 lanes), 2 tenant lanes,
+  contract TTL 40 minutes, requester retention 900 s scanned every 60 s, sampled every minute. The requesters were restarted at
+  07:00Z and 07:22Z onto the DID and resync fixes, and the fit runs from 07:40Z to 09:10Z (the section 15 soak rule). Load from
+  06:30Z to 09:10Z: 10559 RFPs, 239 VM contracts (237 released, 1 failed), 79 tenant cluster cycles (2 failed while the gateway
+  requester restarted). `run request --network` reached the guest at 06:30Z and at 09:10Z. After the resync fix no contract
+  ended "released before a VM was held"; the backstop's 39 removals were the orphans written before it. Readings:
+
+| series | start | end | max | slope per hour | plateau |
+| --- | --- | --- | --- | --- | --- |
+| requester repo kv file (MB) | 63.2 | 63.2 | 63.2 | +0.0 | yes |
+| requester repo: compute.vm | 1019 | 1039 | 1044 | +15.1 | yes |
+| requester repo: market.rfp | 1020 | 1031 | 1042 | +14.3 | yes |
+| requester repo: market.accept / market.event / vm.delete | 25 / 25 / 24 | 24 / 24 / 23 | 25 / 25 / 24 | +0.0 | yes |
+| requester DenoPod heapUsed (MB) | 101 | 98.8 | 119 | +2.2 | yes |
+| requester ComputeContracts (controller) | 2701 | 2701 | 2702 | -0.2 | yes |
+| requester DenoPod RSS (MB) | 410 | 454 | 472 | +21.6 | NO (heap flat; section 14) |
+| bidder repo kv file (MB) | 48.7 | 51.5 | 51.5 | +1.5 | yes |
+| bidder repo: market.bid | 2491 | 2457 | 3040 | -25.4 | yes |
+| bidder repo: market.event / market.receipt | 177 / 62 | 196 / 68 | 251 / 88 | +6.7 / +0.2 | yes |
+| bidder DenoPod RSS (MB) | 351 | 323 | 354 | -2.5 | yes |
+| bidder pds DenoPod RSS (MB) | 312 | 389 | 454 | +28.8 | NO (section 14) |
+| gateway repo kv file (MB) | 5.5 | 5.5 | 5.5 | +0.0 | yes |
+| gateway repo: compute.vm / market.rfp / market.accept | 6 | 10 | 10 | +0.3 | yes |
+| gateway requester DenoPod RSS (MB) | 227 | 550 | 698 | +283 | NO (native, heap flat at 45 MB; section 14) |
+| state dir total (MB) | 5354 | 13662 | 13662 | +568 | yes |
+
+  The bidder's sweep deleted about 680 market.bid records and 125 to 160 trail records each pass (scanned about 3050), so Bids
+  stay at bid rate times TTL. The repo kv files sit at their SQLite high-water marks (section 15, hono-pds entry).
 
 - **hono-pds collects unreachable blocks, and the requester's retention removes the vm.delete and market.event records (plan
   0013 M3-DISK-RETENTION and M3-PDS-RECORD-RETENTION, 2026-10-18, commits 508d79fc and 58d5bc38).** Before: the 3 h soak read
