@@ -3473,6 +3473,12 @@ decision taken, a defect closed, a measurement recorded - is in section 15 inste
 separated deliberately: a work list padded with history reads as complete, which is how a bullet that was
 already closed, or one whose subject the design has since deleted, survives re-reading.
 
+- **Which bidders get a direct submitRfp (no plan attached; user, 2026-10-18).** A requester posts its
+  market.rfp record, and relay/firehose watchers see it; the direct `submitRfp` XRPC is only a faster path and
+  the path to bidders that do not watch the firehose. There is no recipient cap and no fill order today. A
+  future policy-engine plan decides which bidders get a direct submitRfp and in what priority; plan 0017 no
+  longer carries a cap (its M2 was removed).
+
 On 2026-09-24 this section listed eleven open items and the batch closed every one of them. Ten went to
 section 15 with their before-and-after readings; the eleventh, REL-7, closed by an experiment whose
 answer split a narrower window out of it, and that window was PASTA-1, now closed in section 15 with the

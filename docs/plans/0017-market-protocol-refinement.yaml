@@ -1,6 +1,6 @@
 plan: "0017"
-title: "The market protocol is refined: stale bidders leave the index and an RFP goes to a bounded set of bidders"
-status: todo
+title: "The market protocol is refined: stale bidders leave the index"
+status: doing
 queued: >
   Opened by the lead 2026-10-16 at the user's request. The user said to start this plan with a note that
   some market protocol stuff needs refining. The market protocol (RFP, bid, accept, cloud-init records and
@@ -51,47 +51,33 @@ items:
     files: ["docs/plans/0017-market-protocol-refinement.yaml", "docs/ARCHITECTURE.md"]
     done_when: "the user has answered the three points and the answers are written into M1 and M2 as their decision."
     risks: ["The lead decides nothing here: a wrong protocol rule is expensive to undo once bidders publish it."]
-    status: todo
+    status: done
     evidence:
   - id: M1-STALE-BIDDER-RECORDS
     title: "Bidder records for bidders that are not online are disposed of from indexing"
     depends_on: [M0-USER-REFINES-THE-PROTOCOL]
     decision: >
-      Not decided; set by M0. Intent: a requester's bidder discovery (relay listReposByCollection of
-      com.publicdomainrelay.temp.market.offering, the offering watch, and the cached lists in
-      ts/atproto-market/lib/compute-request-xrpc) keeps only bidders with current liveness evidence, and
-      the offering records of bidders that are gone are removed from what the requester indexes, and
-      from the relay index where this repository operates the relay (relay.mini-cloud-0002). The
-      discovery cost per contract (443 DID documents and 443 offering lists on a cold cache) falls to
-      the number of live bidders.
+      Decided by the user 2026-10-18 (M0 point 1): a bidder is online while its heartbeat is fresh. Each bidder
+      rewrites one signed heartbeat record in its OWN repo PDS (plan 0018, so it costs no bsky.social write
+      budget) every 60 s; a requester drops from discovery any bidder whose newest heartbeat is older than
+      5 min. Requesters read heartbeats from the firehose / relay (an AtprotoRecordWatch-style watch, plan 0018
+      M4) and by getRecord for a bidder found by vouch or listing. Applies to every discovery source (relay
+      listReposByCollection of market.offering, the offering watch, vouched-operator discovery, listed
+      bidders). The heartbeat's NSID and shape are new: the lead proposes them in the lexicons with this item.
     files: ["ts/atproto-market/lib/compute-request-xrpc", "ts/atproto-market/lib/market-bidder", "lexicons"]
     done_when: "on prod, the requester's bidder_discovery count equals the number of bidders that answer, and a bidder that is stopped leaves the requester's discovery within the TTL M0 sets."
     risks: ["A bidder behind a slow link is dropped as offline; the deadline is M0's decision."]
     status: todo
     evidence:
-  - id: M2-RFP-RECIPIENT-CAP
-    title: "An RFP goes to at most 100 bidders, filled in a fixed documented order"
-    depends_on: [M0-USER-REFINES-THE-PROTOCOL]
-    decision: >
-      Not decided; set by M0. Intent: the requester posts the RFP to at most N bidders (100 to start, an
-      option of the requester with that default), filled in the order M0 sets. The order is one function
-      with one input list and one output list, so a future plan replaces it with a policy-engine decision
-      about which bidders to go to (the policy engine pod exists, plan 0009 M3-POLICY-ENGINE-POD) and
-      touches nothing else. The contract status records how many bidders were found, how many were
-      addressed and why the rest were not.
-    files: ["ts/atproto-market/lib/compute-request-xrpc", "api/v1alpha1/types_computecontract.go"]
-    done_when: "with 443 discovered bidders a contract posts the RFP to exactly the cap, the requests per contract fall by the same factor, and the contract still finds its vouched bidder."
-    risks: ["The capped set misses the only bidder able to serve the request; the order puts vouched and listed bidders first for that reason."]
-    status: todo
-    evidence:
 acceptance:
   checks:
-    - id: ACC17-BOUNDED-FANOUT
+    - id: ACC17-STALE-BIDDERS-DROPPED
       text: >
-        On prod, one contract makes at most a few hundred PDS and bidder requests instead of about 890,
-        holds at most the cap in outbound bidder connections, and a stopped bidder is gone from the
-        requester's discovery within the TTL.
+        On prod, the requester's bidder_discovery count equals the number of bidders with a fresh heartbeat,
+        and a stopped bidder is gone from the requester's discovery within 5 min (the heartbeat TTL).
       status: todo
       evidence: []
 decided:
   - "Opened by the lead at the user's request 2026-10-16. The cap of 100 is the user's number ('100 or something'); the policy engine choosing which bidders get the RFP is a future plan."
+
+  - "2026-10-18 the user answered M0: (1) online = a heartbeat record in the bidder's own repo every 60 s, TTL 5 min. (2)+(3) no RFP recipient cap and no fill order in this plan: tabled as an open item with no plan attached (ARCHITECTURE section 14). Relay/firehose watchers already see created rfp records, so submitRfp over XRPC is only a direct-speed path and the path for bidders that do not watch the firehose; a future policy-engine plan decides which bidders get submitRfp and in what priority. M2-RFP-RECIPIENT-CAP and ACC17-BOUNDED-FANOUT are removed."
