@@ -32,8 +32,15 @@ type operatorOf struct {
 }
 
 func (n *networks) declareOperatorVouches(ctx context.Context, apps []v1alpha1.NetworkApp) {
-	var operators []operatorOf
-	var gateways []string
+	var bidderOps, gatewayOps []operatorOf
+	var bidders, gateways []string
+	operator := func(ws, name, app string) (operatorOf, bool) {
+		id, err := n.ctl.identityIn(ctx, ws, name)
+		if err != nil || len(id.Spec.ApprovedAssociations) == 0 {
+			return operatorOf{}, false
+		}
+		return operatorOf{app: app, did: id.Spec.ApprovedAssociations[0], at: id.CreationTimestamp.UTC().Format("2006-01-02T15:04:05Z")}, true
+	}
 	for _, app := range apps {
 		if app.Stopped {
 			continue
@@ -48,22 +55,29 @@ func (n *networks) declareOperatorVouches(ctx context.Context, apps []v1alpha1.N
 		}
 		switch app.Kind {
 		case v1alpha1.ApplicationKindMarketBidder:
-			id, err := n.ctl.identityIn(ctx, rec.BaseWorkspace, BidderIdentity)
-			if err == nil && len(id.Spec.ApprovedAssociations) > 0 {
-				operators = append(operators, operatorOf{app: app.Name, did: id.Spec.ApprovedAssociations[0],
-					at: id.CreationTimestamp.UTC().Format("2006-01-02T15:04:05Z")})
+			bidders = append(bidders, rec.BaseWorkspace)
+			if op, ok := operator(rec.BaseWorkspace, BidderIdentity, app.Name); ok {
+				bidderOps = append(bidderOps, op)
 			}
 		case v1alpha1.ApplicationKindGateway:
-			gateways = append(gateways, rec.BaseWorkspace+":"+ComponentWorkspace)
-		}
-	}
-	for _, ws := range gateways {
-		for _, op := range operators {
-			if err := n.ctl.applyOperatorVouch(ctx, ws, op); err != nil {
-				n.ctl.c.log().Warn("declaring the gateway operator's vouch for a bidder's operator", "workspace", ws, "bidder", op.app, "err", err.Error())
+			ws := rec.BaseWorkspace + ":" + ComponentWorkspace
+			gateways = append(gateways, ws)
+			if op, ok := operator(ws, RequesterIdentity, app.Name); ok {
+				gatewayOps = append(gatewayOps, op)
 			}
 		}
 	}
+	declare := func(workspaces []string, ops []operatorOf, what string) {
+		for _, ws := range workspaces {
+			for _, op := range ops {
+				if err := n.ctl.applyOperatorVouch(ctx, ws, op); err != nil {
+					n.ctl.c.log().Warn(what, "workspace", ws, "app", op.app, "err", err.Error())
+				}
+			}
+		}
+	}
+	declare(gateways, bidderOps, "declaring the gateway operator's vouch for a bidder's operator")
+	declare(bidders, gatewayOps, "declaring the bidder operator's vouch for a gateway's operator")
 }
 
 func (ctl *Controller) applyOperatorVouch(ctx context.Context, ws string, op operatorOf) error {
@@ -95,7 +109,27 @@ func (ctl *Controller) applyOperatorVouch(ctx context.Context, ws string, op ope
 }
 
 // ponytail: the operator's records are written and kept, never deleted when their object goes; the market network's PDS goes with the network, so add a finalizer when an operator repo outlives one.
-func (ctl *Controller) reconcileOperatorRecords(ctx context.Context, ws, sessionsFile string, n *v1alpha1.MarketNetworkValue) error {
+func firstOwnerSession(sessionsFile string) (ownerSession, error) {
+	b, err := os.ReadFile(sessionsFile)
+	if err != nil {
+		return ownerSession{}, err
+	}
+	var sessions map[string]ownerSession
+	if err := json.Unmarshal(b, &sessions); err != nil {
+		return ownerSession{}, fmt.Errorf("the owner sessions file %s: %w", sessionsFile, err)
+	}
+	owners := make([]string, 0, len(sessions))
+	for did := range sessions {
+		owners = append(owners, did)
+	}
+	if len(owners) == 0 {
+		return ownerSession{}, fmt.Errorf("the owner sessions file %s holds no session", sessionsFile)
+	}
+	slices.Sort(owners)
+	return sessions[owners[0]], nil
+}
+
+func (ctl *Controller) reconcileOperatorRecords(ctx context.Context, ws string, n *v1alpha1.MarketNetworkValue, login func() (ownerSession, error)) error {
 	if n == nil {
 		return nil
 	}
@@ -124,23 +158,10 @@ func (ctl *Controller) reconcileOperatorRecords(ctx context.Context, ws, session
 	if len(held) == 0 {
 		return nil
 	}
-	b, err := os.ReadFile(sessionsFile)
+	s, err := login()
 	if err != nil {
 		return err
 	}
-	var sessions map[string]ownerSession
-	if err := json.Unmarshal(b, &sessions); err != nil {
-		return fmt.Errorf("the owner sessions file %s: %w", sessionsFile, err)
-	}
-	owners := make([]string, 0, len(sessions))
-	for did := range sessions {
-		owners = append(owners, did)
-	}
-	if len(owners) == 0 {
-		return fmt.Errorf("the owner sessions file %s holds no session", sessionsFile)
-	}
-	slices.Sort(owners)
-	s := sessions[owners[0]]
 	pds := strings.TrimSuffix(s.Service, "/")
 	sess, err := xrpcCall(ctx, http.MethodPost, pds+"/xrpc/com.atproto.server.createSession", n.CaBundleRef, "",
 		map[string]string{"identifier": s.Identifier, "password": s.Password})

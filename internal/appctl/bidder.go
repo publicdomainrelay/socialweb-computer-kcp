@@ -348,6 +348,12 @@ func (ctl *Controller) reconcileBidder(ctx context.Context, u *unstructured.Unst
 		if err := ctl.associateNetworkOperator(ctx, o.Spec); err != nil {
 			ctl.c.log().Warn("associating the bidder's DID with the market network operator account", "err", err.Error())
 		}
+		if err := ctl.reconcileOperatorRecords(ctx, ctl.c.workspace(), o.Spec.Network, func() (ownerSession, error) {
+			password, _, err := ctl.bidderPassword(ctx)
+			return ownerSession{Service: o.Spec.Identity.PdsUrl, Identifier: o.Spec.Identity.Handle, Password: password}, err
+		}); err != nil {
+			ctl.c.log().Warn("writing the declared records of the market network operator account", "err", err.Error())
+		}
 	}
 	switch {
 	case allReady && st.Did != "":

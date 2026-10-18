@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"slices"
 	"strings"
 	"time"
 
@@ -158,23 +157,10 @@ func (ctl *Controller) associateGatewayOperator(ctx context.Context, id *v1alpha
 	if !claimOpen(id) || n == nil {
 		return nil
 	}
-	b, err := os.ReadFile(sessionsFile)
+	s, err := firstOwnerSession(sessionsFile)
 	if err != nil {
 		return err
 	}
-	var sessions map[string]ownerSession
-	if err := json.Unmarshal(b, &sessions); err != nil {
-		return fmt.Errorf("the owner sessions file %s: %w", sessionsFile, err)
-	}
-	owners := make([]string, 0, len(sessions))
-	for did := range sessions {
-		owners = append(owners, did)
-	}
-	if len(owners) == 0 {
-		return fmt.Errorf("the owner sessions file %s holds no session", sessionsFile)
-	}
-	slices.Sort(owners)
-	s := sessions[owners[0]]
 	operator, err := writeClaim(ctx, id, s.Service, n.CaBundleRef, s.Identifier, s.Password, "requester-")
 	if err != nil || operator == "" {
 		return err

@@ -354,6 +354,7 @@ export async function createMarketBidder(config: MarketBidderConfig): Promise<Ma
         // Canonical: {challenge: operator, keyId: associated} -- the subject is
         // the associated party; the challenge is its operator.
         if (v.keyId === bidderDid && typeof v.challenge === "string" && v.challenge.startsWith("did:")) {
+          logger.info("operator resolved from the association record", { did: bidderDid, operatorDid: v.challenge, uri: rec.uri });
           return v.challenge;
         }
       }
