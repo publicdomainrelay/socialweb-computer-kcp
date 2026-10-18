@@ -13,6 +13,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterprovider"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/materialiser"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/portallocator"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/scaledriver"
@@ -45,6 +46,8 @@ type Deps struct {
 	InstallTenant func(ctx context.Context, cluster string, cfg *rest.Config) error
 
 	MountChild clusterprovider.MountChildWriter
+
+	Homes *kcpclient.Client
 
 	Links *linkRecorder
 
@@ -84,6 +87,9 @@ type Provider struct {
 	host materialiser.Host
 
 	links *linkRecorder
+
+	homes   *kcpclient.Client
+	sweptAt time.Time
 
 	newInstance func() string
 	log         *slog.Logger
@@ -148,6 +154,10 @@ func (p *Provider) finishDelete(ctx context.Context, ref clusterprovider.Ref, ke
 	}
 	if err := p.registry.RemoveFinalizer(ctx, ref); err != nil {
 		return err
+	}
+	if _, err := p.homes.DropAgentHome(ctx, ref.Home); err != nil {
+		p.log.Warn("cluster provider: removing the node claim index entry of a deleted cluster did not complete; the sweep retries",
+			"cluster", ref.Name, "key", key, "home", ref.Home, "error", err.Error())
 	}
 	p.log.Info("cluster provider: the deleted cluster is gone: ports and subnet released, finalizer removed",
 		"cluster", ref.Name, "key", key, "home", ref.Home)
@@ -241,6 +251,7 @@ func Build(cfg Config, d Deps, log *slog.Logger) (*Provider, error) {
 		nodes:       d.NodeHosts,
 		host:        d.Host,
 		links:       d.Links,
+		homes:       d.Homes,
 		newInstance: d.NewInstance,
 		log:         log,
 	}
@@ -369,6 +380,7 @@ func (p *Provider) passAll(ctx context.Context) {
 		return
 	}
 	p.provider.Reclaim(refs)
+	p.sweepHomes(ctx, refs)
 	for _, ref := range refs {
 		key, err := ref.Key()
 		if err != nil {
@@ -385,6 +397,29 @@ func (p *Provider) passAll(ctx context.Context) {
 			defer p.release(key)
 			p.runOne(ctx, ref)
 		}(ref, key)
+	}
+}
+
+const HomeSweepEvery = time.Minute
+
+func (p *Provider) sweepHomes(ctx context.Context, refs []clusterprovider.Ref) {
+	if p.homes == nil || time.Since(p.sweptAt) < HomeSweepEvery {
+		return
+	}
+	p.sweptAt = time.Now()
+	live := make(map[string]bool, len(refs))
+	for _, ref := range refs {
+		if key, err := ref.Key(); err == nil {
+			live[key] = true
+		}
+	}
+	dropped, err := p.homes.SweepAgentHomes(ctx, live)
+	if len(dropped) > 0 {
+		p.log.Info("cluster provider: removed node claim index entries whose cluster is gone",
+			"removed", len(dropped), "live", len(live), "keys", dropped)
+	}
+	if err != nil {
+		p.log.Warn("cluster provider: the node claim index sweep did not complete", "error", err.Error())
 	}
 }
 

@@ -227,7 +227,7 @@ func buildDeps(ctx context.Context, cfg Config, log *slog.Logger) (Deps, error) 
 		return Deps{}, err
 	}
 
-	linkClient, err := kcpclient.New(kcpclient.Options{Host: cfg.KCPHost, RestConfig: restCfg})
+	linkClient, err := kcpclient.New(kcpclient.Options{Host: cfg.KCPHost, RestConfig: restCfg, NodeClaimAgent: cfg.NodeClaimAgent})
 	if err != nil {
 		return Deps{}, err
 	}
@@ -397,6 +397,8 @@ func buildDeps(ctx context.Context, cfg Config, log *slog.Logger) (Deps, error) 
 		NodeScale:   scaleDriver,
 
 		MountChild: mountChild,
+
+		Homes: linkClient,
 
 		InstallTenant: tenantAddOns(cfg, log),
 	}

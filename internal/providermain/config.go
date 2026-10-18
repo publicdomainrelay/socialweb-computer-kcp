@@ -83,6 +83,8 @@ const (
 	envBao = "SOCIALWEB_CLUSTERPROVIDER_BAO"
 
 	envPgDump = "SOCIALWEB_CLUSTERPROVIDER_PG_DUMP"
+
+	envNodeClaimAgent = "SOCIALWEB_GATEWAY_NODECLAIM_AGENT"
 )
 
 const DefaultESOManifestDir = "/opt/socialweb/deploy/eso"
@@ -157,6 +159,8 @@ type Config struct {
 	Bao string
 
 	PgDump string
+
+	NodeClaimAgent *kcpclient.ServiceAccountRef
 
 	DatastoreHasRow bool
 
@@ -383,6 +387,9 @@ func loadFor(get func(string) string, inv foldmain.Invocation) (Config, error) {
 	}
 
 	var err error
+	if cfg.NodeClaimAgent, err = kcpclient.ParseServiceAccountRef(strings.TrimSpace(get(envNodeClaimAgent))); err != nil {
+		return Config{}, fmt.Errorf("%s: %w", envNodeClaimAgent, err)
+	}
 	if cfg.MarketReleaseTimeout, err = optionalDuration(get, envMarketReleaseTimeout); err != nil {
 		return Config{}, err
 	}

@@ -3,12 +3,14 @@ package kcpclient
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
 
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
@@ -127,4 +129,79 @@ func (c *Client) grantAgentHome(ctx context.Context, home string) error {
 
 func (c *Client) GrantAgentHome(ctx context.Context, home string) error {
 	return c.grantAgentHome(ctx, home)
+}
+
+func (c *Client) DropAgentHome(ctx context.Context, home string) (bool, error) {
+	if c == nil || c.agent == nil {
+		return false, nil
+	}
+	key, err := ClusterKey(home)
+	if err != nil {
+		return false, err
+	}
+	i := strings.LastIndex(home, ":")
+	_, err = c.readWorkspace(ctx, home[:i], home[i+1:])
+	switch {
+	case apierrors.IsNotFound(err):
+	case err != nil:
+		return false, fmt.Errorf("kcpclient: the home workspace %s: %w", home, err)
+	default:
+		cl, err := c.readCluster(ctx, home, home[i+1:])
+		if err == nil && cl.DeletionTimestamp == nil {
+			return false, nil
+		}
+		if err != nil && !apierrors.IsNotFound(err) {
+			return false, fmt.Errorf("kcpclient: the cluster of %s: %w", home, err)
+		}
+		claims, err := c.ListNodeClaims(ctx, home)
+		if err != nil && !apierrors.IsNotFound(err) {
+			return false, err
+		}
+		if len(claims) > 0 {
+			return false, nil
+		}
+	}
+	core, err := c.coreResource(c.agent.ref.Workspace)
+	if err != nil {
+		return false, err
+	}
+	err = core.Delete().Namespace(c.agent.ref.Namespace).Resource("configmaps").Name(key).Do(ctx).Error()
+	if err != nil && !apierrors.IsNotFound(err) {
+		return false, fmt.Errorf("kcpclient: the node claim index entry %s in %s: %w", key, c.agent.ref.Workspace, err)
+	}
+	return true, nil
+}
+
+func (c *Client) SweepAgentHomes(ctx context.Context, live map[string]bool) ([]string, error) {
+	if c == nil || c.agent == nil {
+		return nil, nil
+	}
+	core, err := c.coreResource(c.agent.ref.Workspace)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := core.Get().Namespace(c.agent.ref.Namespace).Resource("configmaps").
+		Param("labelSelector", NodeClaimHomeLabel+"=true").DoRaw(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("kcpclient: list the node claim index in %s: %w", c.agent.ref.Workspace, err)
+	}
+	var list corev1.ConfigMapList
+	if err := json.Unmarshal(raw, &list); err != nil {
+		return nil, err
+	}
+	var dropped []string
+	var errs []error
+	for _, cm := range list.Items {
+		if live[cm.Name] {
+			continue
+		}
+		ok, err := c.DropAgentHome(ctx, cm.Data[NodeClaimHomeKey])
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", cm.Name, err))
+		}
+		if ok {
+			dropped = append(dropped, cm.Name)
+		}
+	}
+	return dropped, errors.Join(errs...)
 }
