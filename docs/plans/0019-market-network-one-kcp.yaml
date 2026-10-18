@@ -1,6 +1,6 @@
 plan: "0019"
 title: "The market network runs its applications in one kcp, each application in its own workspace"
-status: doing
+status: done
 note: >
   Branch task/one-kcp-network on GitHub origin, built on task/own-pds (the AtprotoRecord kind, the repo
   PDS DenoPod, the valueFrom references). Rebase on it often.
@@ -148,4 +148,4 @@ items:
     title: "Acceptance: a market network is one kcp"
     depends_on: [M4-PROOF]
     done_when: "dev up, run request --network and the integration tests (test/integration) pass on the one-kcp network; prod profiles still run a kcp per application."
-    status: todo
+    status: done
