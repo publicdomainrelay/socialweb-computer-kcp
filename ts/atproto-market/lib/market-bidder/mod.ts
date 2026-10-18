@@ -220,6 +220,9 @@ export async function createMarketBidder(config: MarketBidderConfig): Promise<Ma
       intervalMs: config.bidRetentionScanMs,
       sharedUris: atproto.sharedRecordUris,
       deleteRecord: atproto.deleteRecord,
+      deleteRecords: async (records) => {
+        await atproto.applyWrites(atproto.did, records.map((r) => ({ action: "delete" as const, ...r })));
+      },
       listOwnBidRecords,
       listOwnRecords,
     },
