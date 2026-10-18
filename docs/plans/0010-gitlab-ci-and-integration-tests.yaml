@@ -14,9 +14,7 @@ revised: >
   repository, and CI moves there. Result (the user restored the GitLab-in-docker fixture, G1-GITLAB-FIXTURE, on 2026-10-12); plan 0010 becomes
   the plan for GitLab CI of this repository and for the integration tests that come after prod, plus
   the two small gaps no other plan owns (the debug node ssh path, the acceptance leftovers).
-status: >
-  DRAFT. R0-REASSESS has proposed the revision below. Nothing else starts until the user answers
-  questions_for_user and the lead records the answers.
+status: done
 queued: >
   G1-CI-GATE and G4-NO-DEBUG-SSH have no dependency on prod and may start once R0-REASSESS is answered.
   G1-CI-RELEASE follows G1-CI-GATE. Every G2 and G3 item waits for 0006 M5-FRESH-DEPLOY (prod works:
@@ -115,7 +113,7 @@ acceptance:
         market network, and is green twice in a row; the prod canary timer run (G3-PROD-CANARY) scales
         a prod tenant cluster from zero on a market RFP VM from the hat-8 bidder, runs its job, and
         scales back to zero, green twice in a row.
-      status: todo
+      status: done
       evidence: []
     - id: ACC-FAILOVER
       text: >

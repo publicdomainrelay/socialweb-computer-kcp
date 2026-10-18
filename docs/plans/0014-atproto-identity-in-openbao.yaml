@@ -254,7 +254,7 @@ items:
     files: ["test/integration/web_app_signin_test.go", "test/integration/web_app_session_test.go", "test/integration/kubeconfig_client_cert_test.go"]
     done_when: "the tests pass on the harness and in the 0010 G3-CI-INTEGRATION pipeline."
     risks: []
-    status: doing
+    status: done
     evidence:
 dropped_items:
   - id: M2-BIDDER-IDENTITY-BAO
