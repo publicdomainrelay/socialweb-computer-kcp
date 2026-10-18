@@ -55,7 +55,7 @@
   },
   "files": [
     {"path": "deploy/denokcp/denojob-apiresourceschema.yaml", "upstream": "deploy/denojob-apiresourceschema.yaml", "sha256": "6d1e78c5257031f6ccb452c879dc9cde2608430be443360d0b8248d698aebe3c"},
-    {"path": "deploy/denokcp/denopod-apiresourceschema.yaml", "upstream": "deploy/denopod-apiresourceschema.yaml", "sha256": "6c2f8d35a0f9a63d7a308774fbf3d4060624ce2ba6049aaedbb4ca6c323488a0", "adapted": "revision v1alpha1-5: status.listeners, every listener the pod reported (name, kind tcp|unix|relay, address); revision v1alpha1-7: spec.resources.memory and status.restartReasons"},
+    {"path": "deploy/denokcp/denopod-apiresourceschema.yaml", "upstream": "deploy/denopod-apiresourceschema.yaml", "sha256": "6c2f8d35a0f9a63d7a308774fbf3d4060624ce2ba6049aaedbb4ca6c323488a0", "adapted": "revision v1alpha1-5: status.listeners, every listener the pod reported (name, kind tcp|unix|relay, address); revision v1alpha1-7: spec.resources.memory and status.restartReasons; revision v1alpha1-8: status.runGeneration, the generation the run was started from"},
     {"path": "deploy/denokcp/denorun-apiresourceschema.yaml", "upstream": "deploy/denorun-apiresourceschema.yaml", "sha256": "d5b2eb7b737fad528c03f7c49c5c15c228cb8c5e70088956c39b570e7a3c86b5"},
     {"path": "deploy/denokcp/denoruntime-apiexport.yaml", "upstream": "deploy/denoruntime-apiexport.yaml", "sha256": "acba18dee2de5437eeba862e9bb794de4ef999ff79473c495929b29f0fff8ab0", "adapted": "names the DenoPod schema revision v1alpha1-5 that carries status.listeners"},
     {"path": "deploy/denokcp/openbao-apiresourceschema.yaml", "upstream": "deploy/openbao-apiresourceschema.yaml", "sha256": "9738f720dd01d763b0482c73acc08f144e97620164c98ead9b747e585d680392"},

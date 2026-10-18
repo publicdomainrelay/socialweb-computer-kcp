@@ -37,13 +37,14 @@ func (r *Registry) WritePodFinalizer(ctx context.Context, ref Ref, finalizers []
 
 func podStatusPatch(st v1alpha1.DenoPodStatus) ([]byte, error) {
 	status := map[string]any{
-		"phase":    string(st.Phase),
-		"runID":    st.RunID,
-		"restarts": st.Restarts,
-		"message":  st.Message,
-		"exitCode": st.ExitCode,
-		"ready":    st.Ready,
-		"address":  st.Address,
+		"phase":         string(st.Phase),
+		"runID":         st.RunID,
+		"runGeneration": st.RunGeneration,
+		"restarts":      st.Restarts,
+		"message":       st.Message,
+		"exitCode":      st.ExitCode,
+		"ready":         st.Ready,
+		"address":       st.Address,
 	}
 	if st.StartTime != nil {
 		status["startTime"] = st.StartTime

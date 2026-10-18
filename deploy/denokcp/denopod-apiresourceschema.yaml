@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-7.denopods.deno.computer
+  name: v1alpha1-8.denopods.deno.computer
 spec:
   group: deno.computer
   names:
@@ -134,6 +134,9 @@ spec:
                   - Failed
               runID:
                 type: string
+              runGeneration:
+                type: integer
+                format: int64
               restarts:
                 type: integer
                 format: int32

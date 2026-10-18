@@ -3,6 +3,7 @@ package denopod
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"time"
 
@@ -66,6 +67,8 @@ type Result struct {
 	Phase v1alpha1.DenoPodPhase
 
 	RunID string
+
+	RunGeneration int64
 
 	Restarts int32
 
@@ -153,6 +156,7 @@ func carry(st v1alpha1.DenoPodStatus) Result {
 	return Result{
 		Phase:          st.Phase,
 		RunID:          st.RunID,
+		RunGeneration:  st.RunGeneration,
 		Restarts:       st.Restarts,
 		RestartReasons: maps.Clone(st.RestartReasons),
 		StartTime:      st.StartTime,
@@ -235,6 +239,7 @@ func (r *Reconciler) start(o Observed, res Result) Result {
 	}
 	res.Phase = v1alpha1.DenoPodRunning
 	res.RunID = ""
+	res.RunGeneration = o.Pod.Generation
 	res.Ops = append(res.Ops, OpStartRun)
 	res.Ready = false
 	setCondition(&res, o.Pod.Generation, metav1.ConditionFalse, v1alpha1.ConditionReady,
@@ -269,6 +274,14 @@ func (r *Reconciler) running(o Observed, res Result) Result {
 
 	if o.LivenessFailed {
 		return r.restart(o, res, "LivenessProbeFailed", "the liveness probe failed; restarting the deno process")
+	}
+
+	if res.RunGeneration == 0 {
+		res.RunGeneration = o.Pod.Generation
+	}
+	if res.RunGeneration != o.Pod.Generation {
+		return r.restart(o, res, v1alpha1.ReasonSpecChanged, fmt.Sprintf(
+			"the spec changed (generation %d; the run was started from generation %d); replacing the deno process", o.Pod.Generation, res.RunGeneration))
 	}
 
 	if want := requestedRestart(o.Pod); want != "" && want != honouredRestart(res.Conditions) {

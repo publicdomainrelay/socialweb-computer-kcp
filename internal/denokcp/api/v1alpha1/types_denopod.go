@@ -112,6 +112,8 @@ type DenoPodStatus struct {
 
 	RunID string `json:"runID,omitempty"`
 
+	RunGeneration int64 `json:"runGeneration,omitempty"`
+
 	Restarts int32 `json:"restarts,omitempty"`
 
 	RestartReasons map[string]int32 `json:"restartReasons,omitempty"`
@@ -150,6 +152,8 @@ const AnnotationEdge = "deno.computer/edge"
 const AnnotationRestart = "deno.computer/restart"
 
 const ReasonRestartRequested = "RestartRequested"
+
+const ReasonSpecChanged = "SpecChanged"
 
 const ReasonFixedPortBehindTheEdge = "FixedPortBehindTheEdge"
 

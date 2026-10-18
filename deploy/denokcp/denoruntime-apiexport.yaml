@@ -6,7 +6,7 @@ spec:
   resources:
     - group: deno.computer
       name: denopods
-      schema: v1alpha1-7.denopods.deno.computer
+      schema: v1alpha1-8.denopods.deno.computer
       storage:
         crd: {}
     - group: deno.computer

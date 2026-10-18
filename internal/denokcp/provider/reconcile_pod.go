@@ -98,6 +98,7 @@ func (p *Provider) reconcilePod(ctx context.Context, ref Ref, pod *v1alpha1.Deno
 	}
 	status := v1alpha1.DenoPodStatus{
 		RunID:          runID,
+		RunGeneration:  res.RunGeneration,
 		Restarts:       res.Restarts,
 		RestartReasons: res.RestartReasons,
 		StartTime:      res.StartTime,
