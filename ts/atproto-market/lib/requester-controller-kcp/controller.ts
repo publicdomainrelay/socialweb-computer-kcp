@@ -45,6 +45,8 @@ export interface RequesterController {
 
 const DEFAULT_RESYNC_MS = 30_000;
 
+export const CONTRACT_KEY_SWEEP_MS = 5 * 60_000;
+
 const WATCH_RETRY_MS = 2_000;
 
 function pause(ms: number, signal: AbortSignal): Promise<void> {
@@ -105,6 +107,17 @@ export function createRequesterController(opts: RequesterControllerOptions): Req
   let retentionTimer: ReturnType<typeof setInterval> | undefined;
   let reconciling: Promise<void> = Promise.resolve();
   let started = false;
+  let lastKeySweep = Number.NEGATIVE_INFINITY;
+
+  async function sweepContractKeys(present: Set<string>): Promise<void> {
+    const dirs = await opts.vault.list({ mount: opts.vaultMount, path: "contracts" });
+    for (const dir of dirs) {
+      const name = dir.replace(/\/+$/, "");
+      if (!name || present.has(name) || runners.has(name) || waiting.has(name)) continue;
+      await opts.vault.remove({ mount: opts.vaultMount, path: `contracts/${name}/secrets-key` });
+      logger.info("requester_contract_key_removed", { contract: name, reason: "the ComputeContract is gone" });
+    }
+  }
 
   function report(): void {
     opts.loop?.contractsActive(admission.running);
@@ -207,6 +220,10 @@ export function createRequesterController(opts: RequesterControllerOptions): Req
     }
     for (const name of [...runners.keys()]) if (!present.has(name)) forget(name);
     for (const name of [...finished]) if (!present.has(name)) finished.delete(name);
+    if (Date.now() - lastKeySweep >= CONTRACT_KEY_SWEEP_MS) {
+      lastKeySweep = Date.now();
+      void sweepContractKeys(present).catch((err) => logger.warn("requester_contract_key_sweep_failed", { error: String(err) }));
+    }
     if (scanner?.due()) {
       void scanner.scan(known, stateOf).catch((err) => logger.warn("requester_orphan_scan_failed", { error: String(err) }));
     }
