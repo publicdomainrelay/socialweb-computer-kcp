@@ -112,6 +112,11 @@
       "type": "string",
       "description": "File the repo's DID and ingress host are written to as JSON once it is ready",
       "env": "STATUS_FILE"
+    },
+    "memory-log-ms": {
+      "type": "number",
+      "description": "How often the pds logs its process memory (pds_memory)",
+      "default": 60000
     }
   }
 }

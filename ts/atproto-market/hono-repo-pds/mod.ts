@@ -36,3 +36,4 @@ try {
   logger.error("repo_pds_start_failed", { error: err instanceof Error ? err.message : String(err) });
   Deno.exit(1);
 }
+setInterval(() => logger.info("pds_memory", { ...Deno.memoryUsage() }), o.memoryLogMs as number);
