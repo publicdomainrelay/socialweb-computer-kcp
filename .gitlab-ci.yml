@@ -76,8 +76,9 @@ integration:
     - export SOCIALWEB_IT_GUEST_IMAGE="$published/guest-image/firecracker-x86_64"
     - export SOCIALWEB_IT_PUBLISH="/var/tmp/swcci/bin-$CI_JOB_ID" SOCIALWEB_IT_ARTIFACTS="$CI_PROJECT_DIR/it-artifacts"
     - deno run -A --no-config --no-lock scripts/ci-seed-downloads.ts "$published/binaries"
-    - timeout -k 30 5280 go test -tags integration -count=1 -v -timeout 87m ./test/integration/ 2>&1 | tee "$TMPDIR/it.log"
-    - grep -E '^(--- |ok|FAIL)' "$TMPDIR/it.log"
+    - mkdir -p "$SOCIALWEB_IT_ARTIFACTS"
+    - timeout -k 30 5280 go test -tags integration -count=1 -v -timeout 87m ./test/integration/ 2>&1 | tee "$SOCIALWEB_IT_ARTIFACTS/go-test.log" | { grep --line-buffered -E '^(--- |ok|FAIL|panic:)|^ +[a-z_]+_test\.go:[0-9]+:' || true; }
+    - grep -E '^(--- |ok|FAIL)' "$SOCIALWEB_IT_ARTIFACTS/go-test.log"
   after_script:
     - |
       bin="/var/tmp/swcci/bin-$CI_JOB_ID/bin/socialweb-computer"

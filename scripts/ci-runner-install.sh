@@ -159,7 +159,7 @@ else
     '  shell = "bash"' \
     "  builds_dir = \"$home/builds\"" \
     "  cache_dir = \"$home/cache\"" \
-    '  output_limit = 16384' |
+    '  output_limit = 65536' |
     as_account bash -c 'umask 077; cat >"$1"' _ "$config"
   unset runner_token resp
   say "registered runner $runner_id to $project_path (tag $tag, locked, shell executor)"
