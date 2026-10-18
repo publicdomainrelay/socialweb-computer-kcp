@@ -345,6 +345,8 @@ func (c *Client) waitForWorkspaceReady(ctx context.Context, parent, name string)
 	for {
 		ws, err := c.readWorkspace(ctx, parent, name)
 		switch {
+		case err == nil && ws.DeletionTimestamp != nil:
+			return fmt.Errorf("kcpclient: workspace %s is being deleted; ask again once it is gone", path)
 		case err == nil && ws.Status.Phase == corev1alpha1.LogicalClusterPhaseReady:
 			return nil
 		case err == nil:

@@ -155,12 +155,17 @@ func (p *Provider) finishDelete(ctx context.Context, ref clusterprovider.Ref, ke
 	if err := p.registry.RemoveFinalizer(ctx, ref); err != nil {
 		return err
 	}
-	if _, err := p.homes.DropAgentHome(ctx, ref.Home); err != nil {
-		p.log.Warn("cluster provider: removing the node claim index entry of a deleted cluster did not complete; the sweep retries",
-			"cluster", ref.Name, "key", key, "home", ref.Home, "error", err.Error())
+	homeRemoved := false
+	if p.homes != nil {
+		ok, err := p.homes.RemoveHome(ctx, ref.Home)
+		if err != nil {
+			p.log.Warn("cluster provider: removing the home workspace of a deleted cluster did not complete; the sweep retries",
+				"cluster", ref.Name, "key", key, "home", ref.Home, "error", err.Error())
+		}
+		homeRemoved = ok
 	}
 	p.log.Info("cluster provider: the deleted cluster is gone: ports and subnet released, finalizer removed",
-		"cluster", ref.Name, "key", key, "home", ref.Home)
+		"cluster", ref.Name, "key", key, "home", ref.Home, "homeRemoved", homeRemoved)
 	return nil
 }
 
@@ -400,7 +405,11 @@ func (p *Provider) passAll(ctx context.Context) {
 	}
 }
 
-const HomeSweepEvery = time.Minute
+const (
+	HomeSweepEvery = time.Minute
+
+	EmptyHomeGrace = 10 * time.Minute
+)
 
 func (p *Provider) sweepHomes(ctx context.Context, refs []clusterprovider.Ref) {
 	if p.homes == nil || time.Since(p.sweptAt) < HomeSweepEvery {
@@ -420,6 +429,14 @@ func (p *Provider) sweepHomes(ctx context.Context, refs []clusterprovider.Ref) {
 	}
 	if err != nil {
 		p.log.Warn("cluster provider: the node claim index sweep did not complete", "error", err.Error())
+	}
+	removed, err := p.homes.SweepHomes(ctx, live, EmptyHomeGrace)
+	if len(removed) > 0 {
+		p.log.Info("cluster provider: removed home workspaces that hold no cluster and no node claim",
+			"removed", len(removed), "live", len(live), "homes", removed, "grace", EmptyHomeGrace.String())
+	}
+	if err != nil {
+		p.log.Warn("cluster provider: the empty home workspace sweep did not complete", "error", err.Error())
 	}
 }
 
