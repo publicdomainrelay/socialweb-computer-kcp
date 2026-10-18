@@ -65,6 +65,13 @@ export function createATProtoEventStreamsClient(opts: {
     ...jetstreams.map((j) => ({ kind: "jetstream" as const, name: streamSource("jetstream", j.url), stream: j })),
   ];
   const watchers: ATProtoEventStreamWatcher[] = [];
+  const forget = (list: ATProtoEventStreamWatcher[]) => {
+    for (const w of list) {
+      try { w.close(); } catch { /* ignore */ }
+      const i = watchers.indexOf(w);
+      if (i >= 0) watchers.splice(i, 1);
+    }
+  };
 
   // Batching: all watch() calls in the same synchronous block share one set
   // of underlying connections. Each registration specifies its own wantedCollections;
@@ -117,9 +124,9 @@ export function createATProtoEventStreamsClient(opts: {
     return {
       close() {
         clearInterval(purgeTimer);
-        for (const w of dedicated) {
-          try { w.close(); } catch { /* ignore */ }
-        }
+        forget(dedicated);
+        dedicated.length = 0;
+        seen.clear();
       },
     };
   }
@@ -162,9 +169,7 @@ export function createATProtoEventStreamsClient(opts: {
     // Called when last registration closes.
     function teardown(): void {
       clearInterval(purgeTimer);
-      for (const w of sharedWatchers) {
-        try { w.close(); } catch { /* ignore */ }
-      }
+      forget(sharedWatchers);
       sharedWatchers.length = 0;
       started = false;
     }
