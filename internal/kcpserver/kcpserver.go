@@ -80,7 +80,7 @@ func SlotArgv(c SlotConfig) ([]string, error) {
 		EventTTLFlag,
 		"--audit-policy-file=" + filepath.Join(c.Root, "audit-policy.yaml"),
 		"--audit-log-path=" + filepath.Join(c.Root, "audit.log"),
-		"--audit-log-maxsize=100", "--audit-log-maxage=0", "--audit-log-maxbackup=0",
+		"--audit-log-maxsize=100", "--audit-log-maxage=1", "--audit-log-maxbackup=4",
 	}
 	if c.Shape == ShapeBlueGreen {
 		argv = append(argv, LeaderElection)
