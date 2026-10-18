@@ -9391,6 +9391,34 @@ postgres                     "initdb: error: cannot be run as root" -- fatal
   RFP to every relay-discovered bidder stays 443 requests of bsky.social per contract, so a fan-out cap is
   the next lever and a market decision. Not read: the prod gateway, which the lead deploys.
 
+- **A bidder is online while its heartbeat is fresh; a requester drops every other discovered DID (plan
+  0017 M1-STALE-BIDDER-RECORDS, 2026-10-18).** Before: an offering record stayed in the relay index after
+  its bidder was gone, and the requester sent a submitRfp to every DID it found (prod: 448 per contract).
+  Now: the bidder (`market-bidder`) rewrites one record `com.publicdomainrelay.temp.market.heartbeat`
+  (key `literal:self`, `{offering: at-uri of its offering, createdAt}`) in its own repo PDS (plan 0018)
+  right after its offering is ensured and then every 60 s (write class `sweep`). `compute-request-xrpc`
+  keeps, per DID, the heartbeat time and the time it was read, process-wide: a DID is fresh while
+  `createdAt` is at most 5 min old (a `createdAt` more than 60 s in the future counts as none); a DID that
+  is not fresh is read again by `getRecord` from its PDS (5 s timeout, all DIDs at once) at most once per
+  60 s; a heartbeat event on the event streams triggers that `getRecord` at once (15 s debounce), the way
+  an AtprotoRecordWatch verifies. The filter applies to the union of every source (relay
+  `listReposByCollection`, the offering watch, vouched and operated DIDs, `bidderDids`) after the deny list;
+  the scope prewarm takes only fresh DIDs. `bidder_discovery` logs `found`, `fresh`, `stale` and
+  `heartbeatTtlMs`; `total` is `fresh`, the DIDs that get a direct submitRfp. The market.rfp record is
+  posted as before, so a bidder that watches the firehose still sees it. The market network relay
+  (`hono-atproto-relay`) is a plain atproto relay and does not filter its `listReposByCollection`; the prod
+  relay relay.mini-cloud-0002 is not in this repository. Readings (droplet dev-hb-1, market network with 2
+  bidders and the gateway): run request `found 2, fresh 2, stale 0`, RFP to both, exec ok; bidder-2
+  stopped (MarketNetwork `spec.apps[].stopped`) at 22:55:32: a new run request 43 s later `found 2, fresh
+  1, stale 1` and one submitting_rfp (bidder-1), exec ok; the gateway's requester at +33 s still `fresh 2`
+  (its cached heartbeat was inside the TTL), at +5 min 39 s `fresh 1, stale 3` (the 2 vouched operator
+  accounts have no heartbeat) and one submitting_rfp, node 3 Ready. Restart: the gateway read bidder-2
+  stale at 23:19:54, bidder-2 started at 23:19:59 and wrote its first heartbeat at 23:20:20, and the
+  gateway's next contract at 23:20:26 had `fresh 2` (the event path; the 60 s re-read was not due) and
+  posted to both. Bidder-1's repo over 33 idle minutes with the heartbeat: repo_block_gc live blocks 148
+  and 62389 bytes from the third pass on, about 37 blocks removed per 5 min pass, `repo.sqlite3` 344064
+  bytes and its WAL 4165352 bytes unchanged for the last 23 minutes.
+
 - **kubectl uses a client certificate and nothing else; the exec-plugin path is deleted (plans 0015 M3-DOCS,
   M4-INTEGRATION-TEST, M5-RETIRE-EXEC-PLUGIN and 0014 M3-RETIRE-EXEC-PLUGIN, 2026-10-16).** Caddy and
   kcp's mount proxy both end TLS, so a client certificate never reaches k3s, and k3s checks no CRL; the
