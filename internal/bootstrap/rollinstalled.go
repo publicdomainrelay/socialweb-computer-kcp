@@ -107,7 +107,7 @@ func RollInstalled(ctx context.Context, m hostsvc.Manager, p Params, o Installed
 		return out, err
 	}
 	for _, slot := range app.Slots {
-		if err := kcpserver.WriteAuditPolicy(p.SlotRoot(slot)); err != nil {
+		if err := kcpserver.WriteSlotFiles(p.SlotRoot(slot)); err != nil {
 			return out, err
 		}
 	}

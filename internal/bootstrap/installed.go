@@ -132,7 +132,7 @@ func StartLayer(ctx context.Context, m hostsvc.Manager, p Params) ([]Placed, err
 			}
 		}
 		if e.Kind == table.KindSlot {
-			if err := kcpserver.WriteAuditPolicy(p.SlotRoot(e.Slot)); err != nil {
+			if err := kcpserver.WriteSlotFiles(p.SlotRoot(e.Slot)); err != nil {
 				return out, err
 			}
 		}

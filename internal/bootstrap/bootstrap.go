@@ -498,7 +498,7 @@ func Ensure(ctx context.Context, m hostsvc.Manager, cfg Config, rec *devinstance
 	if err != nil {
 		return err
 	}
-	if err := kcpserver.WriteAuditPolicy(root); err != nil {
+	if err := kcpserver.WriteSlotFiles(root); err != nil {
 		return err
 	}
 	if err := writeSlotEnv(p, slotSpec); err != nil {
@@ -656,7 +656,7 @@ func Roll(ctx context.Context, m hostsvc.Manager, cfg Config, rec *devinstance.R
 		return kcpserver.RollReport{}, err
 	}
 	for _, slot := range kcpserver.SlotNames(kcpserver.ShapeBlueGreen) {
-		if err := kcpserver.WriteAuditPolicy(l.SlotRoot(slot)); err != nil {
+		if err := kcpserver.WriteSlotFiles(l.SlotRoot(slot)); err != nil {
 			return kcpserver.RollReport{}, err
 		}
 	}

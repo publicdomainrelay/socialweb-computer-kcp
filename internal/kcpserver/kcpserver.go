@@ -2,11 +2,17 @@ package kcpserver
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"net/http"
 	"net/url"
 	"os"
@@ -34,6 +40,13 @@ const EventTTLFlag = "--event-ttl=" + EventTTL
 const ShardAdminUser = "shard-admin"
 
 const ShardBaseURLFlag = "--shard-base-url="
+
+const MountProxyCertFlag = "--mount-proxy-client-cert-file="
+
+const (
+	MountProxyCertName = "mount-proxy-client.crt"
+	MountProxyKeyName  = "mount-proxy-client.key"
+)
 
 const AuditPolicy = `apiVersion: audit.k8s.io/v1
 kind: Policy
@@ -81,6 +94,8 @@ func SlotArgv(c SlotConfig) ([]string, error) {
 		"--audit-policy-file=" + filepath.Join(c.Root, "audit-policy.yaml"),
 		"--audit-log-path=" + filepath.Join(c.Root, "audit.log"),
 		"--audit-log-maxsize=100", "--audit-log-maxage=1", "--audit-log-maxbackup=4",
+		MountProxyCertFlag + filepath.Join(c.Root, MountProxyCertName),
+		"--mount-proxy-client-key-file=" + filepath.Join(c.Root, MountProxyKeyName),
 	}
 	if c.Shape == ShapeBlueGreen {
 		argv = append(argv, LeaderElection)
@@ -117,6 +132,9 @@ func CheckArgv(argv []string, shape Shape) error {
 	if !has("--secure-port=0") {
 		return errors.New("kcpserver: kcp refused on a fixed port: behind the edge every listener binds port 0")
 	}
+	if !hasPrefix(MountProxyCertFlag) {
+		return fmt.Errorf("kcpserver: kcp refused without %s: kcp then proxies every request to a mounted workspace through a new transport and never closes its connection", MountProxyCertFlag)
+	}
 	if !hasPrefix(ShardBaseURLFlag) {
 		return fmt.Errorf("kcpserver: kcp refused without %s<front>: a slot that advertises its own port is cut by the next swap", ShardBaseURLFlag)
 	}
@@ -135,11 +153,46 @@ func CheckArgv(argv []string, shape Shape) error {
 	return nil
 }
 
-func WriteAuditPolicy(root string) error {
+func WriteSlotFiles(root string) error {
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(root, "audit-policy.yaml"), []byte(AuditPolicy), 0o600)
+	if err := os.WriteFile(filepath.Join(root, "audit-policy.yaml"), []byte(AuditPolicy), 0o600); err != nil {
+		return err
+	}
+	return writeMountProxyClient(root)
+}
+
+func writeMountProxyClient(root string) error {
+	certPath, keyPath := filepath.Join(root, MountProxyCertName), filepath.Join(root, MountProxyKeyName)
+	if _, err := tls.LoadX509KeyPair(certPath, keyPath); err == nil {
+		return nil
+	}
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(now.UnixNano()),
+		Subject:      pkix.Name{CommonName: "kcp-mount-proxy"},
+		NotBefore:    now.Add(-time.Hour),
+		NotAfter:     now.AddDate(20, 0, 0),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		return err
+	}
+	keyDER, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}), 0o600); err != nil {
+		return err
+	}
+	return os.WriteFile(certPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o600)
 }
 
 const SlotMemoryMax = 3 << 30
