@@ -25,6 +25,10 @@ import {
   COMPUTE_EVENTS_VM_HOST_KEYS_NSID,
   COMPUTE_VM_NSID,
   EVENT_NSID,
+  HEARTBEAT_INTERVAL_MS,
+  HEARTBEAT_NSID,
+  HEARTBEAT_RKEY,
+  HEARTBEAT_TTL_MS,
   OFFERING_NSID,
   RECEIPT_NSID,
   RELAYS_NSID,
@@ -399,6 +403,71 @@ function wireTrustInvalidation(
 }
 
 const trustInvalidationWired = new WeakSet<object>();
+
+const HEARTBEAT_READ_TIMEOUT_MS = 5_000;
+const HEARTBEAT_MAX_SKEW_MS = 60_000;
+const HEARTBEAT_EVENT_DEBOUNCE_MS = 15_000;
+const heartbeats = new Map<string, { atMs: number; checkedAtMs: number }>();
+const heartbeatWatchWired = new WeakSet<object>();
+
+async function readHeartbeat(idResolver: IdResolver, did: string): Promise<number> {
+  const checkedAtMs = Date.now();
+  let atMs = 0;
+  try {
+    const pdsUrl = await pdsUrlOf(idResolver, did);
+    if (pdsUrl) {
+      const res = await fetch(
+        `${pdsUrl}/xrpc/com.atproto.repo.getRecord?repo=${encodeURIComponent(did)}&collection=${HEARTBEAT_NSID}&rkey=${HEARTBEAT_RKEY}`,
+        { signal: AbortSignal.timeout(HEARTBEAT_READ_TIMEOUT_MS) },
+      );
+      if (res.ok) {
+        const data = await res.json() as { value?: { createdAt?: unknown } };
+        const t = Date.parse(String(data.value?.createdAt ?? ""));
+        if (Number.isFinite(t) && t <= checkedAtMs + HEARTBEAT_MAX_SKEW_MS) atMs = t;
+      } else {
+        await res.body?.cancel();
+      }
+    }
+  } catch {
+    atMs = 0;
+  }
+  heartbeats.set(did, { atMs, checkedAtMs });
+  return atMs;
+}
+
+function heartbeatFresh(atMs: number, now: number): boolean {
+  return now - atMs <= HEARTBEAT_TTL_MS;
+}
+
+export async function freshBidderDids(idResolver: IdResolver, dids: string[]): Promise<string[]> {
+  const now = Date.now();
+  const fresh = await Promise.all(dids.map(async (did) => {
+    const held = heartbeats.get(did);
+    if (held && (heartbeatFresh(held.atMs, now) || now - held.checkedAtMs < HEARTBEAT_INTERVAL_MS)) {
+      return heartbeatFresh(held.atMs, now);
+    }
+    return heartbeatFresh(await readHeartbeat(idResolver, did), now);
+  }));
+  return dids.filter((_, i) => fresh[i]);
+}
+
+function wireHeartbeatWatch(eventStreams: EventStreamsClient | undefined, idResolver: IdResolver, log: FlowLog): void {
+  if (!eventStreams || heartbeatWatchWired.has(eventStreams)) return;
+  heartbeatWatchWired.add(eventStreams);
+  eventStreams.watch({
+    wantedCollections: [HEARTBEAT_NSID],
+    onEvent: (e) => {
+      if (e.operation === "delete") {
+        heartbeats.set(e.did, { atMs: 0, checkedAtMs: Date.now() });
+        return;
+      }
+      const held = heartbeats.get(e.did);
+      if (held && Date.now() - held.checkedAtMs < HEARTBEAT_EVENT_DEBOUNCE_MS) return;
+      void readHeartbeat(idResolver, e.did);
+    },
+  });
+  log("heartbeat_watch_wired", { collection: HEARTBEAT_NSID, ttlMs: HEARTBEAT_TTL_MS });
+}
 
 const POLICY_LIST_MEMO_MS = 15_000;
 
@@ -1048,6 +1117,7 @@ export async function requestCompute(
   const scopeRefresher = opts.scopeRefresher;
   wireTrustInvalidation(opts.eventStreams, scopeCache, scopeRefresher, log);
   const idResolver = sharedIdResolver(opts.plcUrl);
+  wireHeartbeatWatch(opts.eventStreams, idResolver, log);
   const resolveRecord = opts.recordResolver ?? createIdRecordResolver(idResolver);
   const verifyReceipt = opts.receiptVerifier ?? createReceiptVerifier(resolveRecord);
   const findReceipt = opts.receiptFinder ?? createRepoReceiptFinder(idResolver);
@@ -1504,9 +1574,15 @@ runcmd:
       new Set([...relayDids, ...watcherDids, ...vouchedDids, ...operatedDids, ...extraBidderDids]),
     );
     const deniedSet = new Set(denyBidderDids);
-    const filteredBidderDids = bidderDids.filter((d) => !deniedSet.has(d));
+    const foundBidderDids = bidderDids.filter((d) => !deniedSet.has(d));
+    const filteredBidderDids = await freshBidderDids(idResolver, foundBidderDids);
+    const freshSet = new Set(filteredBidderDids);
     log("bidder_discovery", {
       total: filteredBidderDids.length,
+      found: foundBidderDids.length,
+      fresh: filteredBidderDids.length,
+      stale: foundBidderDids.length - filteredBidderDids.length,
+      heartbeatTtlMs: HEARTBEAT_TTL_MS,
       relay: relayDids.length,
       watch: watcherDids.length,
       vouched: vouchedDids.length,
@@ -1516,7 +1592,7 @@ runcmd:
     });
 
     const prewarmDids = [...new Set([...vouchedDids, ...operatedDids, ...extraBidderDids])]
-      .filter((d) => !deniedSet.has(d));
+      .filter((d) => freshSet.has(d));
     if (scopeCache && prewarmDids.length > 0) {
       const startedAt = Date.now();
       log("scope_prewarm", { candidates: prewarmDids.length, discovered: filteredBidderDids.length });
