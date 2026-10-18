@@ -741,6 +741,19 @@ export async function diff(
   return [...newCids].filter((c) => !oldCids.has(c));
 }
 
+export async function collectReachable(store: BlockStore, root: Cid, into: Set<Cid>): Promise<void> {
+  if (into.has(root)) return;
+  into.add(root);
+  const bytes = await store.get(root);
+  if (!bytes) return;
+  const data = decodeNodeData(bytes);
+  if (data.l !== null) await collectReachable(store, data.l, into);
+  for (const e of data.e) {
+    into.add(e.v);
+    if (e.t !== null) await collectReachable(store, e.t, into);
+  }
+}
+
 export function createMst(store: BlockStore, sha256Fn: Hasher, root?: Cid | null): Mst {
   return new Mst(store, root ?? null, sha256Fn);
 }

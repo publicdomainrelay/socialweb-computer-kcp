@@ -2,13 +2,13 @@ import type {
   Bytes, Cid, Did, Tid, Hasher,
   Signer, Storage,
   WriteOp, CommitEvent, CommitOp,
-  RepoApi,
+  RepoApi, BlockSweepReport,
 } from "@publicdomainrelay/atproto-repo-abc";
 import { XrpcError } from "@publicdomainrelay/atproto-repo-abc";
 import { encode as cborEncode, decode as cborDecode, cidLink } from "@publicdomainrelay/atproto-repo-common";
 import { cidFromDigest } from "@publicdomainrelay/atproto-repo-common";
 import { nextTid } from "@publicdomainrelay/atproto-repo-common";
-import { createMst } from "@publicdomainrelay/atproto-repo-abc";
+import { createMst, collectReachable } from "@publicdomainrelay/atproto-repo-abc";
 import type { Mst } from "@publicdomainrelay/atproto-repo-abc";
 import { concat } from "@publicdomainrelay/atproto-repo-common";
 import { drislEncode, drislDecode, drislCidLink } from "@publicdomainrelay/atproto-repo-common";
@@ -81,17 +81,66 @@ async function getMstRoot(store: Storage, commitCid: Cid): Promise<Cid | null> {
   return commit.data;
 }
 
+export interface RepoGcOptions {
+  everyMs?: number;
+  keepMs?: number;
+  report?(data: Record<string, unknown>): void;
+}
+
+export interface RepoGcReport extends BlockSweepReport {
+  heads: number;
+  live: number;
+  keepMs: number;
+  ms: number;
+}
+
+const DEFAULT_GC_EVERY_MS = 5 * 60 * 1000;
+const DEFAULT_GC_KEEP_MS = 10 * 60 * 1000;
+
 export class Repo implements RepoApi {
   #store: Storage;
   #signer: Signer;
   #did: Did;
   #writeQueue = new Map<Did, Promise<void>>();
   #snapshots = new Map<Did, { root: Cid; mst: Promise<Mst> }>();
+  #gc: RepoGcOptions;
+  #gcAt = Date.now();
+  #gcRunning = false;
 
-  constructor(store: Storage, signer: Signer, did?: Did) {
+  constructor(store: Storage, signer: Signer, did?: Did, gc: RepoGcOptions = {}) {
     this.#store = store;
     this.#signer = signer;
     this.#did = did ?? signer.did();
+    this.#gc = gc;
+  }
+
+  async collectGarbage(keepMs: number = this.#gc.keepMs ?? DEFAULT_GC_KEEP_MS): Promise<RepoGcReport | null> {
+    const store = this.#store;
+    if (!store.listHeads || !store.sweepBlocks) return null;
+    const started = Date.now();
+    const writtenBefore = started - keepMs;
+    const heads = await store.listHeads();
+    const live = new Set<Cid>();
+    for (const head of heads) {
+      live.add(head.commit);
+      const root = await getMstRoot(store, head.commit);
+      if (root) await collectReachable(store, root, live);
+    }
+    const swept = await store.sweepBlocks(live, writtenBefore);
+    return { ...swept, heads: heads.length, live: live.size, keepMs, ms: Date.now() - started };
+  }
+
+  #maybeCollectGarbage(): void {
+    if (this.#gcRunning || !this.#store.sweepBlocks) return;
+    if (Date.now() - this.#gcAt < (this.#gc.everyMs ?? DEFAULT_GC_EVERY_MS)) return;
+    this.#gcRunning = true;
+    this.collectGarbage().then(
+      (r) => r && this.#gc.report?.({ ...r }),
+      (err) => this.#gc.report?.({ error: err instanceof Error ? err.message : String(err) }),
+    ).finally(() => {
+      this.#gcRunning = false;
+      this.#gcAt = Date.now();
+    });
   }
 
   get did(): Did {
@@ -207,7 +256,7 @@ export class Repo implements RepoApi {
     const result = prior.then(() => this.#applyWritesLocked(_did, writes));
     // The queued tail must never be a rejected promise, or one failed write
     // would fail every write chained behind it.
-    const tail = result.then(() => {}, () => {});
+    const tail = result.then(() => this.#maybeCollectGarbage(), () => {});
     this.#writeQueue.set(_did, tail);
     void tail.then(() => {
       if (this.#writeQueue.get(_did) === tail) this.#writeQueue.delete(_did);

@@ -139,10 +139,12 @@ async function buildPlcGenesis(
 }
 
 export function createRepoFactory(opts: RepoFactoryOptions): RepoFactory {
-  const repo = new Repo(opts.storage, opts.signer, opts.did);
+  const log = opts.log ?? createLogger("pds");
+  const repo = new Repo(opts.storage, opts.signer, opts.did, {
+    report: (data) => data.error ? log.warn("repo_block_gc_failed", data) : log.info("repo_block_gc", data),
+  });
   const did = opts.did ?? opts.signer.did();
   const sequencer = opts.sequencer ?? new FirehoseSequencer();
-  const log = opts.log ?? createLogger("pds");
 
   const accountStore: AccountStore = createAccountStore(did, opts.signer, (opts.publicKeyDid ?? opts.signer.did()) as Did, opts.state);
   const userSigners = new Map<string, Signer>();

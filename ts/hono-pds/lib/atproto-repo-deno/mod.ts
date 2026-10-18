@@ -13,6 +13,7 @@ export { signServiceAuth, verifyServiceAuthToken, xrpcLxmFromPath } from "./serv
 export type { ServiceAuthOptions, VerifyServiceAuthOptions } from "./service-auth.ts";
 
 export { Repo } from "./repo.ts";
+export type { RepoGcOptions, RepoGcReport } from "./repo.ts";
 export { createAccountStore } from "./account-store.ts";
 export type { AccountStore, AccountRecord } from "./account-store.ts";
 export { exportCar, importCar } from "./car.ts";

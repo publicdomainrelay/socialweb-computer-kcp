@@ -26,7 +26,19 @@ export interface RepoStore {
   setHead(did: Did, head: { commit: Cid; rev: Tid }): Promise<void>;
 }
 
-export interface Storage extends BlockStore, RepoStore {}
+export interface BlockSweepReport {
+  blocks: number;
+  bytes: number;
+  removedBlocks: number;
+  removedBytes: number;
+  fileBytesBefore?: number;
+  fileBytesAfter?: number;
+}
+
+export interface Storage extends BlockStore, RepoStore {
+  listHeads?(): Promise<{ commit: Cid; rev: Tid }[]>;
+  sweepBlocks?(live: Set<Cid>, writtenBefore: number): Promise<BlockSweepReport>;
+}
 
 export interface StateStore {
   getState<T>(key: string[]): Promise<T | null>;

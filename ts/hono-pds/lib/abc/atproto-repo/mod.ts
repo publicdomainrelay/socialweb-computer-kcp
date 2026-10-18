@@ -7,6 +7,7 @@ export type {
   BlockStore,
   RepoStore,
   Storage,
+  BlockSweepReport,
   StateStore,
   CommitOp,
   CommitEvent,
@@ -18,4 +19,4 @@ export type {
 } from "./contracts.ts";
 export { XrpcError, XrpcErrorNames } from "./contracts.ts";
 
-export { Mst, diff, createMst } from "./mst.ts";
+export { Mst, diff, createMst, collectReachable } from "./mst.ts";
