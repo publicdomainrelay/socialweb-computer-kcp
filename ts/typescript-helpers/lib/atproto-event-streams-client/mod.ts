@@ -50,7 +50,9 @@ export function createATProtoEventStreamsClient(opts: {
   log?: LoggerInterface;
 }): ATProtoEventStreamsClient {
   const { relays, jetstreams, dedupWindowMs = 15_000 } = opts;
+  const latest = new Map<string, number>();
   const progressOf = (source: string) => (progress: FirehoseProgress) => {
+    latest.set(source, Math.max(latest.get(source) ?? 0, progress.cursor));
     opts.cursorStore?.save(source, progress);
     opts.onProgress?.(source, progress);
   };
@@ -61,7 +63,7 @@ export function createATProtoEventStreamsClient(opts: {
     return from;
   };
   const liveOf = (kind: StreamKind, source: string): number | undefined =>
-    resumeCursor(kind, opts.cursorStore?.load(source), { subscribeReposEvents: 0, jetstreamMicros: 0 });
+    resumeCursor(kind, latest.get(source) ?? opts.cursorStore?.load(source), { subscribeReposEvents: 0, jetstreamMicros: 0 });
   const sources = () => [
     ...relays.map((r) => ({ kind: "relay" as const, name: streamSource("relay", r.url), stream: r })),
     ...jetstreams.map((j) => ({ kind: "jetstream" as const, name: streamSource("jetstream", j.url), stream: j })),
@@ -163,7 +165,8 @@ export function createATProtoEventStreamsClient(opts: {
     };
 
     for (const { kind, name, stream } of sources()) {
-      const w = stream.watch({ wantedCollections: allCollections, cursor: resumeOf(kind, name), onEvent, onProgress: progressOf(name) });
+      const cursor = latest.has(name) ? liveOf(kind, name) : resumeOf(kind, name);
+      const w = stream.watch({ wantedCollections: allCollections, cursor, onEvent, onProgress: progressOf(name) });
       sharedWatchers.push(w);
       watchers.push(w);
     }
