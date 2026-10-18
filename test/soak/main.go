@@ -184,6 +184,12 @@ func runLoad(args []string) int {
 		return 1
 	}
 	contracts := dyn.Resource(appctl.ComputeContractGVR)
+	for deadline := time.Now().Add(3 * time.Minute); ; {
+		if _, err := contracts.List(ctx, metav1.ListOptions{Limit: 1}); err == nil || time.Now().After(deadline) {
+			break
+		}
+		sleepCtx(ctx, 2*time.Second)
+	}
 	fmt.Println(`{"event":"requester ready","instance":"` + app.Instance + `"}`)
 
 	started := time.Now()
@@ -205,7 +211,9 @@ func runLoad(args []string) int {
 		case apierrors.IsForbidden(err) || apierrors.IsInvalid(err) && strings.Contains(err.Error(), "quota"):
 			c.refused.Add(1)
 		default:
-			c.rfpFailed.Add(1)
+			if c.rfpFailed.Add(1)%20 == 1 {
+				fmt.Fprintln(os.Stderr, "create:", err)
+			}
 		}
 		return false
 	}
@@ -387,6 +395,8 @@ func main() {
 		os.Exit(runLoad(os.Args[2:]))
 	case "sample":
 		os.Exit(runSample(os.Args[2:]))
+	case "hammer":
+		os.Exit(runHammer(os.Args[2:]))
 	case "tidy":
 		os.Exit(runTidy(os.Args[2:]))
 	case "inspect":

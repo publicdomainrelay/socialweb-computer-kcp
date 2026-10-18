@@ -3555,7 +3555,7 @@ being true, which is a fact about the design rather than a question left in it, 
 because it bounds a mechanism the rest of this document leans on.
 
 - **The kcp store keeps a bounded history by mechanism; the plateau reading is open (plan 0013
-  M3-STORE-COMPACTION, closes with M4-SOAK-READING, on 2026-10-15).** Four mechanisms, each read live on
+  M3-STORE-COMPACTION, plateau read by M4-SOAK-READING on 2026-10-18).** Four mechanisms, each read live on
   hat-8 (test-0001, own `dev up` instances, no VM):
   - Compaction stays the apiserver's. kine compacts to the revision the apiserver wrote, and never within
     its last 1000 revisions (`compactIter`, kine v0.17.1), so a quiet store keeps a deleted object's rows
@@ -3604,7 +3604,7 @@ because it bounds a mechanism the rest of this document leans on.
     covered because its core also runs `devcore.Run`.
 
 - **Disk use of a long-running instance is bounded by rule; the soak reading is open (plan 0013
-  M3-DISK-RETENTION, closes with M4-SOAK-READING).** The rules, by owner:
+  M3-DISK-RETENTION; the 2026-10-18 soak found the kcp audit logs and the PDS kv files unbounded, see the open items below).** The rules, by owner:
   - Run directories (`<state>/denokcp/runs/<pod|engine>-<id>`). The deno-kcp provider removes the
     run directory of a DenoPod, DenoRun or PolicyEngine when it removes the object's finalizer. Once a
     minute it sweeps the directories that no DenoPod, DenoRun or PolicyEngine status names and whose
@@ -3736,15 +3736,34 @@ because it bounds a mechanism the rest of this document leans on.
   templates set `continue`. `bootstrap.ProcSpecs` for the quick and prodlike tables lists a nonzero
   `MemoryMax` on every unit except the core. Open: a breach inside an installed bidder or gateway core
   (the templates are rendered by `install`, which no agent runs here) is read at the prod deploy.
-- **The object-count quota defaults are provisional until the soak (plan 0013 M2-QUOTAS, closes with
-  M4-SOAK-READING, on 2026-10-15).** `appctl.QuotaDefaults` sizes the quotas from the plan's numbers, not
-  from a reading: Bids 20000 (the soak sends 50000 RFPs in about 24 h and a finished Bid lives 24 h, so a
-  bidder that bids on every RFP would reach 20000 in about 10 h at that rate and then declines), ComputeVMs
-  64 (four times the 16 VM slots of one account, so finished VMs awaiting release never fill it), ComputeContracts
-  1024 on a gateway and 64 on a requester, NodeClaims 64 per home workspace, DenoRuns 200 and
-  PolicyWorkflowRuns 500 per application workspace. The root's `spec.quota` overrides each (`-1` removes the
-  limit). M4-SOAK-READING retunes them from the plateau it reads; until then a quota hit is a finding, not
-  a fault.
+- **Open after the 3 h soak (plan 0013 M4-SOAK-READING, 2026-10-18; the readings are in section 15).** Each is a series that
+  kept growing, with its measurement and the smallest fix named.
+  - Gateway kcp memory grows with every tenant cluster made and deleted: 599 to 1134 MB in 3 h at 75 cycles an hour, 827 to 1740
+    MB in the 8 h run; the bidder, requester and network kcp are flat. The home workspaces are deleted (4 workspaces under root at
+    the end), so the growth is inside kcp (informers or per-logical-cluster caches). Instrument: the gateway kcp RSS per 1000
+    cycles on a gateway that only makes and deletes clusters. If the slope stays, the slot limit (3 GiB) restarts the slot at
+    about 12 h at that rate, and the roll must carry it.
+  - The gateway OpenBao storage grows 17 KB per cluster cycle (17.7 to 21.2 MB in 3 h) with tidy every 15 minutes: a per-cluster
+    record the root vault keeps after the cluster is gone (read which mount with `bao list` on the gateway root vault).
+  - hono-pds never deletes a block: every superseded MST node, record block and commit stays in the kv file (bob 628 MB, a
+    requester's repo 505 MB after 3 h). The fix is a mark and sweep from the head of each repo; Deno KV lists values with keys, so
+    it needs a key-only block index first. It matters for the market network and for a `run request` repo; prod uses real PDSes.
+  - The requester keeps the vm.delete and market.event records of every VM contract (86 an hour at 90 contracts an hour):
+    `requester-controller-kcp/retention.ts` removes rfp, payload and accept only. The refs to add are `state.release.payload`,
+    `state.release.event` and `state.submitEventRef`; prove it with a short run on a market network before it lands.
+  - The relay backlog fell to 10000 frames, and bob-pds and the relay got larger limits in the market network set; none was re-read.
+  - The dev backend sets no cgroup limit, so the soak cannot show that a memory breach restarts one pod; ACC13-NO-HOST-OOM needs
+    the same soak on a systemd-user backend.
+  - Deleting a tenant cluster takes more than 4 minutes in some cycles under 8 lanes (the driver's 4-minute wait timed out 30
+    times; the clusters were gone later; the gateway core logged "a step of deleting this cluster has not completed" 67 times).
+  - Every status write logs `Warning: unknown field "status.store"` (1063 of 3000 lines of the network core log): some root kind
+    lacks `status.store` in its schema.
+
+- **The object-count quota defaults were retuned by the soak (plan 0013 M2-QUOTAS, 2026-10-18).** `appctl.QuotaDefaults` is
+  Bids 10000 (was 20000), ComputeVMs 64, ComputeContracts 1024 on a gateway and 64 on a requester, NodeClaims 64 per home
+  workspace, DenoRuns 200 and PolicyWorkflowRuns 500 per application workspace. 10000 Bids put the bidder kcp at about 2.1 GiB of
+  its 3 GiB limit (0.14 to 0.15 MB of RSS per Bid on a base of 610 to 680 MB); the others are unchanged because the soak read no
+  figure above them (section 15, M4-SOAK-READING). The root's `spec.quota` overrides each (`-1` removes the limit).
 
 - **The bidder's kcp wait on the hot path: the prod reading is open (plan 0009 ACC9-LATENCY, 2026-10-17).**
   The cuts and the readings on dev-linux-1 are in section 15 (M4-LATENCY-READINGS item 10): the kcp wait
@@ -3904,6 +3923,183 @@ can outlive the work that closed it, and why one whose subject has been deleted 
 questions for hours without anyone stopping on it. The measurements stay with the entries rather than
 being tidied away, because a number without its condition is how the 332-second boot outlived its own
 refutation.
+
+- **Plan 0013 M4-SOAK-READING: a 3 h accelerated soak of a market network with a gateway, read on a DigitalOcean c-32 droplet
+  (2026-10-17 22:12:48Z to 2026-10-18 01:13Z; M4 stays `doing`, ACC13-NO-ORPHANS is `done`).** Host: droplet dev-soak (c-32,
+  32 vCPU, 64 GB, Ubuntu 24.04, sfo3, /dev/kvm), account test-0001, a dev build of the tree, one `dev up --profile market-network
+  --bidders 1 --with-gateway` plus a long-lived MarketRequester child (`soakreq`) that the driver `test/soak` (Go: `load`, `sample`,
+  `tidy`, `inspect`, `hammer`) adds to the network and feeds with ComputeContract objects. The driver and the sampler ran as user
+  units on the droplet; the sampler wrote one JSON line per 5 minutes to `/var/tmp/soak-data/samples.jsonl` (not `/var/tmp/soak`,
+  which the dev build mirrors over). Accelerated settings (the user changed the item to 3 h on 2026-10-17): Bid TTL 1800 s plus the
+  300 s bid window (a Bid lives about 35 minutes, so it turned over 5 times), ComputeContract TTL 40 minutes, requester record
+  retention 900 s scanned every 60 s, the bidder's record sweep every 10 minutes, storemaint every 5 minutes, run directories swept
+  every minute with a 1 h keep, guest images collected every 10 minutes. OpenBao tidy: the default interval is 6 h, so at 23:12:52Z
+  `soak tidy` set `spec.tidy.interval` (token and lease tidy) and `spec.declared.pkiTidy[].interval` (pki auto-tidy) to 15 minutes on
+  every OpenBaoServer of the network, the three applications and the tenant vaults; the bidder's server status read `lastRunAt`
+  23:12:53Z and runs every 15 minutes after. kcp store backups are written only on a kcp roll, and a market network never rolls a
+  one-slot kcp, so M1-BACKUP-RETENTION was not exercised here.
+  Load over the three hours: 11909 RFP-only contracts (a ComputeContract annotated `socialweb.computer/rfp-only` stops after its RFP
+  is submitted; the bidder still bids), 270 VM contracts (263 held and released, 7 failed with `no_bids` or a `vm.delete` 404 across
+  bidder restarts), 226 tenant cluster cycles (the driver makes a cluster, a pod scales a node out through the RFP flow, the node
+  scales in, the driver deletes the cluster; 8 lanes). That is 12.4k RFPs and about 500 contracts, above the item's counts scaled to 3 h
+  (6250 RFPs, 250 contracts). Phase 1 (22:12:48Z to 22:13:48Z): 0.6 RFP/s, one tenant lane, a VM contract every 40 s (3 lanes). Phase 2
+  (22:13:48Z to the stop at 01:14Z): 1.1 RFP/s and 8 tenant lanes, which is per hour 3970 RFP-only contracts, 90 VM contracts and 75
+  cluster cycles. Chaos: 25 DenoPod restarts through `dev restart` (5 each of bidder, guest-kcp, gateway requester, gateway web app and
+  requester), then at 01:09Z `kill -9` of the bidder DenoPods and at 01:11Z `kill -9` of the bidder core and the gateway core; each came
+  back (the provider placed the pods again, the network placed the cores again and read Ready). `dev restart core` was not used: see the
+  limit below. Host: vmstat idle 55 % on average (25 to 80 %), memory used 18 GB on average (24 GB at most), MemAvailable at least 38 GB,
+  load average 17 (31 at most), no swap, oom_kill 0.
+  Fit: least squares over the samples from 23:12:48Z (one hour of warm-up, longer than a Bid lives); a series is flat when
+  |slope x window| <= max(2 x residual standard deviation, 5 % of its mean). The record rows are fitted from 00:20Z, after the two
+  retention fixes below. The tenant clusters' processes (k3s, kine, postgres and OpenBao of each cluster) are counted under the
+  network's application; the driver keeps about 8 clusters at a time, so those rows are noise around a lane count, and the state dir
+  total is dominated by the VM work dirs that come and go, which is why it reads flat while its parts below do not. Readings:
+
+| series | start | end | max | slope per hour | plateau |
+| --- | --- | --- | --- | --- | --- |
+| bidder application, all processes (RSS MB) | 1941 | 1999 | 2117 | +30.3 | yes |
+| bidder kcp | 989 | 995 | 1080 | +10.2 | yes |
+| bidder kine | 91 | 106 | 136 | +10.2 | yes |
+| bidder DenoPod | 249 | 278 | 324 | +2.3 | yes |
+| guest-kcp DenoPod | 154 | 152 | 157 | -1.8 | yes |
+| bidder core | 157 | 163 | 297 | +9.2 | yes |
+| bidder OpenBao | 127 | 131 | 132 | +2.5 | yes |
+| requester application, all processes | 2122 | 2243 | 2454 | +58.2 | yes |
+| requester kcp | 959 | 1036 | 1054 | +48.2 | NO |
+| requester DenoPod | 619 | 698 | 932 | +42.5 | yes |
+| requester core | 167 | 128 | 219 | -34.9 | NO |
+| gateway application, all processes | 3390 | 3641 | 3936 | +94.2 | yes |
+| gateway kcp | 943 | 1108 | 1134 | +104.1 | NO |
+| gateway requester DenoPod | 499 | 352 | 636 | -70.0 | yes |
+| gateway web app DenoPod | 226 | 237 | 243 | +7.7 | yes |
+| gateway core | 272 | 300 | 379 | +9.1 | yes |
+| gateway OpenBao (root vault and tenant vaults) | 861 | 963 | 1078 | +21.2 | yes |
+| gateway postgres | 221 | 259 | 259 | +8.6 | yes |
+| network kcp | 659 | 656 | 660 | -1.0 | yes |
+| network core | 110 | 112 | 115 | +0.9 | yes |
+| bob PDS DenoPod | 744 | 779 | 845 | +22.6 | yes |
+| alice PDS DenoPod | 185 | 213 | 254 | +18.5 | NO |
+| relay DenoPod | 429 | 718 | 781 | +139.3 | NO |
+| PLC DenoPod | 137 | 137 | 138 | -0.0 | yes |
+| dispatcher DenoPod | 158 | 161 | 162 | +2.0 | yes |
+| network OpenBao | 121 | 122 | 122 | +0.7 | yes |
+| Bid objects (bidder kcp) | 2398 | 2353 | 2405 | -28.5 | yes |
+| ComputeContract objects (requester kcp) | 2702 | 2686 | 2715 | -10.2 | yes |
+| ComputeVM objects | 4 | 5 | 9 | +0.4 | yes |
+| bidder gc scan: objects | 2426 | 2388 | 2455 | -25.9 | yes |
+| requester gc scan: objects | 2711 | 2696 | 2723 | -9.7 | yes |
+| gateway gc scan: objects | 96 | 93 | 120 | -5.3 | yes |
+| bidder kine rows | 6438 | 6741 | 8492 | +177.1 | yes |
+| bidder kine file bytes | 42188800 | 43956907 | 54951936 | +1002092.0 | yes |
+| requester kine rows | 6832 | 6908 | 7684 | +33.5 | yes |
+| requester kine file bytes | 41483605 | 42893995 | 47624192 | +812285.6 | yes |
+| gateway kine rows | 3157 | 3217 | 4435 | +34.1 | yes |
+| gateway kine file bytes | 19934549 | 19554304 | 27082752 | -343698.2 | yes |
+| bidder OpenBao storage (MB) | 18 | 19 | 19 | +0.2 | yes |
+| gateway OpenBao storage (MB) | 19 | 21 | 22 | +1.2 | NO |
+| requester OpenBao storage (MB) | 0 | 0 | 0 | +0.0 | yes |
+| network OpenBao storage (MB) | 1 | 1 | 1 | +0.0 | yes |
+| state dir total (MB) | 18561 | 27695 | 41607 | +4484.5 | yes |
+| bidder VM work dirs (MB) | 8856 | 11669 | 25682 | +980.4 | yes |
+| gateway kcp dir, audit logs (MB) | 3291 | 7891 | 8435 | +2812.8 | NO |
+| bidder kcp dir, audit logs (MB) | 302 | 607 | 650 | +187.5 | NO |
+| requester kcp dir, audit logs (MB) | 201 | 393 | 414 | +117.9 | NO |
+| network kcp dir, audit logs (MB) | 149 | 324 | 346 | +106.8 | NO |
+| gateway tenant cluster dirs (MB) | 1648 | 1926 | 2239 | +58.5 | yes |
+| bob PDS kv file (MB) | 224 | 585 | 628 | +222.2 | NO |
+| requester repo kv file (MB) | 173 | 470 | 505 | +182.8 | NO |
+| relay kv file (MB) | 0 | 0 | 0 | +0.0 | yes |
+| host MemAvailable (MB) | 49129 | 45789 | 54093 | -1396.9 | yes |
+| host load average 1 min | 17 | 17 | 31 | -0.2 | yes |
+| host oom_kill counter | 0 | 0 | 0 | +0.0 | yes |
+| host swap used (MB) | 0 | 0 | 0 | +0.0 | yes |
+
+  Records in the PDS repositories (counts by collection, fitted from 00:20Z):
+
+| series | start | end | max | slope per hour | plateau |
+| --- | --- | --- | --- | --- | --- |
+| bob repo: compute.config.wif.simple | 2552 | 2527 | 2788 | -31.2 | yes |
+| bob repo: compute.events.vm.hostKeys | 98 | 99 | 115 | +5.5 | yes |
+| bob repo: compute.events.vm.onNetwork | 197 | 199 | 231 | +9.2 | yes |
+| bob repo: compute.events.vm.terminated | 97 | 96 | 110 | +1.6 | yes |
+| bob repo: market.bid | 2540 | 2485 | 2782 | -60.3 | yes |
+| bob repo: market.bids.free | 2552 | 2512 | 2793 | -55.5 | yes |
+| bob repo: market.event | 378 | 384 | 450 | +16.9 | yes |
+| bob repo: market.receipt | 100 | 101 | 116 | +4.4 | yes |
+| requester repo: compute.events.vm.delete | 195 | 260 | 264 | +86.4 | NO |
+| requester repo: compute.vm | 1917 | 1910 | 1939 | -7.9 | yes |
+| requester repo: market.accept | 116 | 115 | 118 | -0.5 | yes |
+| requester repo: market.event | 195 | 260 | 264 | +86.4 | NO |
+| requester repo: market.rfp | 1905 | 1900 | 1931 | -4.8 | yes |
+
+  Seven defects the soak found and the tree now fixes, each proven by a short run on the droplet, in the order found.
+  (1) hono-pds loaded and rehashed its whole record tree on every read and write (`collectBlocks` serialised and stored every MST
+  node on each `set`, `getRecord` and `listRecords` rebuilt the tree, `diff` walked two whole trees), so at 1000 bids its heap hit the
+  512 Mi limit, it restarted on a new port and the relay lost it. Bench of 4000 records: write 117 ms to 4.4 ms, getRecord 79 ms to
+  0.1 ms. Nodes loaded from the store or already put are marked persisted and skipped, a repo keeps its latest tree for reads, and a
+  write forks it. This is the only change to `ts/hono-pds/lib/abc/atproto-repo/mst.ts`; the need is that the soak could not run a PDS at 0.6
+  RFP/s without it; the 125 hono-pds tests pass. (2) The relay deno was at 25 GB after 30 minutes: hono-pds sends a commit frame as
+  JSON with `blocks` as an object with one key per byte, a requester's compute.vm record carries the whole cloud-init user_data so a
+  frame is about 4 MB of JSON, the relay kept 50000 parsed frames and stringified each again for each of 40 subscribers, and a closed
+  `subscribeRepos` socket left its live subscription collecting every later frame. No subscriber reads `blocks` (they read the ops and
+  fetch the record by key), so the relay forwards a frame with empty blocks and ends the live loop of a closed socket, and both
+  sequencers also stop at 64 MiB; relay RSS after the change: 115 MB at 9 minutes against 2137 MB. (3) The ingress proxy closed a
+  subscriber after any single request went 30 s without an answer, so one slow `submitRfp` evicted the bidder's websocket (89
+  reconnects in 9 minutes, a third of the RFPs answered 404, 20 % of VM contracts failed); it now evicts only a subscriber that
+  answered nothing in the window (0 `ws_close` in the bidder pod afterwards). (4) A bidder pod killed one second after an accept
+  left the ComputeVM running with no owner and the Won Bid with no `status.computeVM`; the ComputeVM controller now binds the two
+  by the `socialweb.computer/accept` annotation (the gc scan then read 0 in 32 of 38 samples and 1 or 2 ComputeVMs without an owner
+  in the other 6, once for three samples in a row around 23:10Z, and 0 after the driver stopped). (5) The bidder removed bids,
+  payloads and bid configs but never the receipt, event and vm event records of an ended contract, which grew by 130 receipts and 500
+  events an hour; the sweep now removes a receipt older than the record TTL whose bid record is gone, and every event whose receipt
+  is not live, with its payload (the bidder repo went to a sawtooth of 90 to 110 receipts and 370 to 450 events). (6) The requester's
+  record retention removed 50 contracts' records a pass, below 100 contracts a minute, and a contract object deleted by its TTL is
+  never swept; with 500 a pass the repo went from 2553 to 1874 compute.vm records and stayed there. (7) kcp's audit log keeps every
+  rotated file (`--audit-log-maxbackup=0`, `--audit-log-maxage=0`): the gateway slot wrote 100 MB every two minutes under cluster
+  churn and held 8.4 GB after 3 h (35 GB after 8 h in the earlier run), and the other slots 330 to 650 MB; `kcpserver` now passes
+  maxage 1 and maxbackup 4. Proof on a fresh `dev up --profile quick` instance with the change: 5.49 million requests from 64
+  clients rotated the log about 40 times and the directory held the current file plus four of 100 MB, 488 MB in all. That fix is
+  read on one quick kcp, not on the soak.
+
+  What did not plateau, each a section 14 item: the kcp audit logs above (fixed, not re-read in a soak), the hono-pds kv files (the
+  store never deletes a block: bob 628 MB and the requester's repo 505 MB after 3 h, +213 and +171 MB an hour), the gateway kcp RSS
+  (599 to 1134 MB in 3 h, 827 to 1740 MB in 7 h of the earlier run, 100 to 130 MB an hour at 75 cluster cycles an hour, about 2 MB per
+  cluster made and deleted; the slot limit is 3 GiB), the gateway OpenBao storage (17.7 to 21.2 MB, 1.2 MB an hour with tidy every 15
+  minutes, 17 KB per cluster cycle), the requester's vm.delete and market.event records (kept for ever, +86 an hour at 90 VM contracts
+  an hour), and the relay and alice-pds RSS inside the window (the relay stepped from 430 to 720 MB at 00:55Z while its backlog filled;
+  bob-pds peaked at 845 MB, above its 512 Mi limit, which the dev backend does not enforce). After the reading the market network set
+  raises bob-pds to 2Gi and the relay to 1Gi, and the relay backlog cap falls from 50000 to 10000 frames; those three are numbers
+  from this reading, not re-read.
+  Readings for plan 0018 (each application's repo PDS becomes its own DenoPod): the PDS DenoPod is single-threaded and is the first
+  ceiling. At 1.1 RFP/s the bob-pds process used 14 % of one core in the first hour and 36 to 43 % after, against the bidder DenoPod
+  at 4 to 6 %, the requester at 11 to 20 %, the relay at 3 to 10 %, the network core at 148 to 244 % (cluster churn), the gateway
+  core at 93 to 114 %, the bidder core at 72 to 93 % and the kcp processes together at 161 to 205 %. A probe every 6 s from the droplet
+  (a new TLS connection each time; `describeServer`, `listRecords` with limit 1 and `getRecord`, 1577 of each) read p50 46 to 51 ms
+  and p95 54 ms in the first hour and 134 to 166 ms after, maximum 7.4 s. The bidder's `status.market.rfpToBid` over its last 256
+  RFPs read p50 0.2 to 0.36 s and p95 0.3 to 14.8 s, and `kcpWait` p95 27 to 34 ms. An earlier pass on the same tree at 2.7 RFP/s with 13
+  tenant lanes put the bob-pds main thread at 85 % and `rfpToBid` p95 at 54 s, and the bidder could not answer a `submitRfp` within
+  the requester's 10 s, so the rate one bidder and one hono-pds sustain on this host is about 2 RFP/s (1.1 was held for the readings
+  above). ComputeVMs peaked at 12 of the 16 VM slots.
+  Limit found, not a product defect: `dev restart core` on a market-network instance restarts every network DenoPod on a new port
+  and empties the PLC, so the children lose their relay and every DID; the first chaos step that restarted the network core ended
+  that run at 22:02Z (after 8 h of healthy readings, which are kept). The soak therefore restarts pods and kills the child cores.
+  M2-QUOTAS retune from the plateaus: per Bid the bidder kcp holds 0.14 to 0.15 MB of RSS and the store 10 to 15 KB and 2 rows
+  (base 610 to 680 MB), per ComputeContract the requester kcp holds 0.13 MB and the requester DenoPod 0.23 MB. At the 3 GiB kcp limit
+  20000 Bids would be 3.4 GiB, so `QuotaDefaults.Bids` is 10000 (about 2.1 GiB). ComputeVMs 64, ComputeContracts 1024 and 64 and
+  NodeClaims 64 stay: the peaks read were 12 ComputeVMs, 5715 contracts in a requester whose quota the driver raised, and 1 NodeClaim
+  per cluster. DenoRuns and PolicyWorkflowRuns stayed at 0 in the soak and stay at 200 and 500, unread. No quota hit happened in the soak;
+  the earlier M2-QUOTAS reading (a quota of 10 Bids declined the 11th RFP, kcp RSS unmoved) stands.
+  Done_when read: ACC13-NO-ORPHANS holds (at 01:18Z, after the driver stopped: bidder 2061 objects, requester 2435, gateway 20, each
+  with `orphanTotal` 0 and `stuckTotal` 0). ACC13-NO-HOST-OOM holds for its last clause only: the host never ran out of memory
+  (MemAvailable at least 38 GB, oom_kill 0 in 3 h and in 8 h); the DenoPods ran under the dev backend, which sets the V8 heap flag
+  and no cgroup limit, so a memory breach was not re-read, and no quota was hit. ACC13-BOUNDED does not hold (the unflat series
+  above), M4-SOAK-READING does not hold, M3-DISK-RETENTION's reading is contradicted (the kcp audit logs and the PDS kv files are
+  state that never ends), and M3-PDS-RECORD-RETENTION holds for the bidder repo (every collection flat after the fixes) and not
+  for the requester repo (vm.delete and market.event stay). M3-STORE-COMPACTION holds for the sqlite stores (the bidder kine file 40
+  to 59 MB and 6.4k to 8.5k rows, flat while 2400 Bids turned over; the gateway store flat in 3 h; in the 8 h run the gateway store
+  went from 1428 to 3660 rows) and is unread for the gateway postgres, which a market network does not run (the tenant clusters'
+  postgres is the one in the rows above). The archived 14:01Z to 22:02Z run (8 h, 8 to 13 lanes, 0.6 to 2.7 RFP/s, before fixes
+  4 to 7) shows the same shape: bidder, requester and network kcp flat (1.0, 1.05 and 0.65 GB), the gateway kcp at 1.76 GB and rising.
 
 - **Plan 0016 ACC16-TIMING and ACC16-NO-REGRESSION: createCluster to Ready was waiting on the kcp client rate limit, not on the CPU (2026-10-17 UTC).**
   Host: a DigitalOcean s-4vcpu-8gb droplet (4 vCPU, 8 GB, Ubuntu 24.04, sfo2) shaped like the prod gateway, one market

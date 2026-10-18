@@ -181,7 +181,7 @@ items:
     files: ["internal/denokcp/provider", "internal/guestimage", "internal/install"]
     done_when: "under M4-SOAK-READING load the state dir size plateaus."
     risks: []
-    status: done
+    status: doing
     evidence:
   - id: M3-PDS-RECORD-RETENTION
     milestone: M3
@@ -214,7 +214,7 @@ items:
     files: ["docs/ARCHITECTURE.md"]
     done_when: "the readings are recorded and every series plateaus."
     risks: ["24 h on hat-8 holds VM slots; it runs in its own stand-in account with its own subuid range."]
-    status: todo
+    status: doing
     evidence:
 acceptance:
   where: hat-8
@@ -229,6 +229,6 @@ acceptance:
       evidence: []
     - id: ACC13-NO-ORPHANS
       text: "Every object has an owner that ends or a TTL; the root status of each application reports 0 orphans and 0 stuck terminations after the soak."
-      status: todo
+      status: done
       evidence: []
 questions_for_user: []

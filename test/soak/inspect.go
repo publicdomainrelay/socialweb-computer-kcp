@@ -21,6 +21,8 @@ func runInspect(args []string) int {
 	stateDir := fs.String("state-dir", "/var/tmp/swcit/soak", "state dir of the instance")
 	app := fs.String("app", "soak-bidder-1", "child instance")
 	resource := fs.String("resource", "computevms", "resource of group socialweb.computer")
+	group := fs.String("group", "socialweb.computer", "API group")
+	path := fs.String("path", "root", "logical cluster path")
 	name := fs.String("name", "", "print this object whole")
 	onlyUnowned := fs.Bool("unowned", true, "list only objects with no ownerReferences")
 	fs.Parse(args)
@@ -34,12 +36,12 @@ func runInspect(args []string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	dyn, err := clientOf(rec.AdminKubeconfig)
+	dyn, err := pathClient(rec.AdminKubeconfig, *path)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	list, err := dyn.Resource(schema.GroupVersionResource{Group: "socialweb.computer", Version: "v1alpha1", Resource: *resource}).List(context.Background(), metav1.ListOptions{})
+	list, err := dyn.Resource(schema.GroupVersionResource{Group: *group, Version: "v1alpha1", Resource: *resource}).List(context.Background(), metav1.ListOptions{})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
