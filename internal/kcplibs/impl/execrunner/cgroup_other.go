@@ -23,3 +23,5 @@ func (*limiter) release() {}
 func ReleaseCgroups() {}
 
 func removePodCgroup(string) {}
+
+func removeSettledPodCgroups() {}

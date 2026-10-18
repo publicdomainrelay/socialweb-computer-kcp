@@ -29,6 +29,10 @@ const (
 	removeAttempts = 40
 
 	removeRetryDelay = 25 * time.Millisecond
+
+	podCgroupSettle = time.Minute
+
+	runIDTimeLayout = "20060102T150405.000000000"
 )
 
 type cgroupBase struct {
@@ -184,15 +188,43 @@ func killPodCgroups(base string) {
 	}
 	for _, e := range entries {
 		if e.IsDir() && strings.HasPrefix(e.Name(), podCgroupPrefix) {
-			dir := filepath.Join(base, e.Name())
-			for attempt := 0; attempt < removeAttempts; attempt++ {
-				_ = os.WriteFile(filepath.Join(dir, "cgroup.kill"), []byte("1"), 0o644)
-				if err := os.Remove(dir); err == nil || errors.Is(err, os.ErrNotExist) {
-					break
-				}
-				time.Sleep(removeRetryDelay)
-			}
+			killAndRemove(filepath.Join(base, e.Name()))
 		}
+	}
+}
+
+func killAndRemove(dir string) {
+	_ = os.WriteFile(filepath.Join(dir, "cgroup.kill"), []byte("1"), 0o644)
+	for attempt := 0; attempt < removeAttempts; attempt++ {
+		if err := os.Remove(dir); err == nil || errors.Is(err, os.ErrNotExist) {
+			return
+		}
+		time.Sleep(removeRetryDelay)
+	}
+}
+
+func removeSettledPodCgroups() {
+	podBase.mu.Lock()
+	base := podBase.path
+	podBase.mu.Unlock()
+	if base == "" {
+		return
+	}
+	entries, err := os.ReadDir(base)
+	if err != nil {
+		return
+	}
+	settled := time.Now().Add(-podCgroupSettle)
+	for _, e := range entries {
+		id, ok := strings.CutPrefix(e.Name(), podCgroupPrefix)
+		if !e.IsDir() || !ok || !IsRunID(id) {
+			continue
+		}
+		stamp := id[strings.Index(id, "-")+1 : strings.LastIndex(id, "-")]
+		if at, err := time.Parse(runIDTimeLayout, stamp); err != nil || at.After(settled) {
+			continue
+		}
+		_ = os.Remove(filepath.Join(base, e.Name()))
 	}
 }
 
@@ -263,6 +295,5 @@ func (l *limiter) release() {
 		return
 	}
 	l.started()
-	_ = os.WriteFile(filepath.Join(l.dir, "cgroup.kill"), []byte("1"), 0o644)
-	_ = os.Remove(l.dir)
+	killAndRemove(l.dir)
 }
