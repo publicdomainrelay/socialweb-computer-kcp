@@ -380,7 +380,8 @@ export function createNodeClaimMapper(opts: NodeClaimMapperOptions): NodeClaimMa
       return;
     }
     const finished = !contract || contract.status?.phase === "Released" || contract.status?.phase === "Failed";
-    if (!finished && contract?.status?.phase === "Releasing") {
+    const abandoned = claim.status.phase === "Failed" || claim.status.phase === "Lost";
+    if (!finished && abandoned && contract?.status?.phase === "Releasing") {
       await replaceStatus(claim, {
         ...claim.status,
         phase: "Failed",
