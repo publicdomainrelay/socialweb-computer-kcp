@@ -19,6 +19,8 @@ import (
 
 const DefaultDialTimeout = 5 * time.Second
 
+const DefaultIdleTimeout = 5 * time.Minute
+
 var ErrCurrentBackend = errors.New("apiserverfront: refusing to drain the current backend")
 
 type Status struct {
@@ -28,6 +30,7 @@ type Status struct {
 	Open         map[string]int `json:"open"`
 	Accepted     int64          `json:"accepted"`
 	DialFailures int64          `json:"dialFailures"`
+	IdleClosed   int64          `json:"idleClosed"`
 	Inherited    bool           `json:"inherited"`
 	PID          int            `json:"pid"`
 	SwitchedAt   time.Time      `json:"switchedAt,omitzero"`
@@ -45,6 +48,7 @@ type State struct {
 type Options struct {
 	StatePath   string
 	DialTimeout time.Duration
+	IdleTimeout time.Duration
 	Inherited   bool
 	Holds       map[string]*Held
 	FDStore     string
@@ -94,6 +98,7 @@ type Front struct {
 	holds    map[string]*Held
 	accepted atomic.Int64
 	failures atomic.Int64
+	idle     atomic.Int64
 	wg       sync.WaitGroup
 }
 
@@ -115,6 +120,9 @@ func ValidBackend(addr string) error {
 func New(ln net.Listener, o Options) (*Front, error) {
 	if o.DialTimeout <= 0 {
 		o.DialTimeout = DefaultDialTimeout
+	}
+	if o.IdleTimeout <= 0 {
+		o.IdleTimeout = DefaultIdleTimeout
 	}
 	log := o.Log
 	if log == nil {
@@ -286,8 +294,35 @@ func (f *Front) handle(c net.Conn) {
 	f.conns[p] = struct{}{}
 	f.mu.Unlock()
 	done := make(chan struct{}, 2)
+	var last atomic.Int64
+	last.Store(time.Now().UnixNano())
+	var idled atomic.Bool
+	idle := f.o.IdleTimeout
 	pipe := func(dst, src net.Conn) {
-		io.Copy(dst, src)
+		buf := make([]byte, 32<<10)
+		for {
+			src.SetReadDeadline(time.Now().Add(idle))
+			n, err := src.Read(buf)
+			if n > 0 {
+				last.Store(time.Now().UnixNano())
+				if _, werr := dst.Write(buf[:n]); werr != nil {
+					break
+				}
+			}
+			if err == nil {
+				continue
+			}
+			var ne net.Error
+			if errors.As(err, &ne) && ne.Timeout() && !idled.Load() {
+				if time.Since(time.Unix(0, last.Load())) < idle {
+					continue
+				}
+				idled.Store(true)
+				c.Close()
+				s.Close()
+			}
+			break
+		}
 		if tc, ok := dst.(*net.TCPConn); ok {
 			tc.CloseWrite()
 		}
@@ -297,6 +332,9 @@ func (f *Front) handle(c net.Conn) {
 	go pipe(c, s)
 	<-done
 	<-done
+	if idled.Load() {
+		f.idle.Add(1)
+	}
 	c.Close()
 	s.Close()
 	f.mu.Lock()
@@ -377,6 +415,6 @@ func (f *Front) Status() Status {
 		}
 	}
 	return Status{Address: f.ln.Addr().String(), Backend: f.state.Backend, Generation: f.state.Generation, Open: open,
-		Accepted: f.accepted.Load(), DialFailures: f.failures.Load(), Inherited: f.o.Inherited, PID: os.Getpid(),
+		Accepted: f.accepted.Load(), DialFailures: f.failures.Load(), IdleClosed: f.idle.Load(), Inherited: f.o.Inherited, PID: os.Getpid(),
 		SwitchedAt: f.state.SwitchedAt, Holds: holds}
 }
