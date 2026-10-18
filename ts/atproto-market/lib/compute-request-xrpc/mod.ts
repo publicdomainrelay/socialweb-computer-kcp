@@ -2557,11 +2557,20 @@ export interface OwnVmRecordSet {
 export interface OwnContractRecords {
   sets: OwnVmRecordSet[];
   eventsByReceipt: Map<string, string[]>;
+  rbac: Array<{ uri: string; vmKey: string }>;
+}
+
+export function rbacVmKey(vmName: string): string {
+  return rbacRecordKey("", vmName).slice(1);
 }
 
 export async function listOwnContractRecords(pds: Pick<RequesterPDS, "did">, opts: { plcUrl?: string } = {}): Promise<OwnContractRecords> {
   const own = await ownRecords(pds, opts.plcUrl);
-  const [vms, rfps, accepts, events] = await Promise.all([COMPUTE_VM_NSID, RFP_NSID, ACCEPT_NSID, EVENT_NSID].map((c) => own.list(c)));
+  const [vms, rfps, accepts, events, rbacs] = await Promise.all([COMPUTE_VM_NSID, RFP_NSID, ACCEPT_NSID, EVENT_NSID, FEDPROXY_RBAC_NSID].map((c) => own.list(c)));
+  const rbac = rbacs.map((r) => {
+    const rkey = r.uri.slice(r.uri.lastIndexOf("/") + 1);
+    return { uri: r.uri, vmKey: rkey.slice(rkey.indexOf(".") + 1) };
+  });
   const sets = new Map<string, OwnVmRecordSet>();
   for (const r of vms) {
     sets.set(r.uri, { vm: { uri: r.uri, vmName: String(r.value.role ?? ""), createdAt: String(r.value.createdAt ?? "") }, rfps: [], accepts: [] });
@@ -2586,7 +2595,7 @@ export async function listOwnContractRecords(pds: Pick<RequesterPDS, "did">, opt
     list.push(r.uri, ...(refOf(r.value.payload).uri ? [refOf(r.value.payload).uri!] : []));
     eventsByReceipt.set(receipt, list);
   }
-  return { sets: [...sets.values()], eventsByReceipt };
+  return { sets: [...sets.values()], eventsByReceipt, rbac };
 }
 
 export interface FoundVmContract {

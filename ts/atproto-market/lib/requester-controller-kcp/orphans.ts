@@ -1,4 +1,4 @@
-import { findVmContract, listOwnContractRecords, releaseCompute } from "@publicdomainrelay/compute-request-xrpc";
+import { findVmContract, listOwnContractRecords, rbacVmKey, releaseCompute } from "@publicdomainrelay/compute-request-xrpc";
 import { isTerminated } from "@publicdomainrelay/compute-request-abc";
 import type { ContractState } from "@publicdomainrelay/compute-request-abc";
 import type { StructuredLoggerInterface } from "@publicdomainrelay/logger";
@@ -79,7 +79,16 @@ export function createOrphanScanner(opts: OrphanScannerOptions): OrphanScanner {
         let bounded = false;
         for (const owner of opts.pds.accounts ? knownOwners : [""]) {
           const pds = await opts.pds.pdsFor(owner);
-          const { sets, eventsByReceipt } = await listOwnContractRecords(pds as never, { plcUrl: opts.plcUrl });
+          const { sets, eventsByReceipt, rbac } = await listOwnContractRecords(pds as never, { plcUrl: opts.plcUrl });
+          const rbacByVm = new Map<string, string[]>();
+          for (const r of rbac) rbacByVm.set(r.vmKey, [...(rbacByVm.get(r.vmKey) ?? []), r.uri]);
+          const removeRbac = async (vmKeys: string[]) => {
+            const uris = vmKeys.flatMap((k) => rbacByVm.get(k) ?? []);
+            if (uris.length === 0 || !pds.deleteRepoRecord) return;
+            await removeOwnRecords(pds, uris);
+            for (const k of vmKeys) rbacByVm.delete(k);
+            opts.logger.info("requester_orphan_rbac_removed", { owner, uris });
+          };
           const listed = new Set(sets.map((s) => s.vm.uri));
           for (const uri of settledVms.keys()) if (!listed.has(uri)) settledVms.delete(uri);
           for (const uri of unclaimedSince.keys()) if (!listed.has(uri)) unclaimedSince.delete(uri);
@@ -133,6 +142,7 @@ export function createOrphanScanner(opts: OrphanScannerOptions): OrphanScanner {
                 continue;
               }
             }
+            if (settledVms.has(vm.uri) && vm.vmName) await removeRbac([rbacVmKey(vm.vmName)]);
             if (!due || now() >= removalDeadline) continue;
             const events = eventsByReceipt.get(settledVms.get(vm.uri) ?? "") ?? [];
             await removeOwnRecords(pds, [vm.uri, ...rfps, ...accepts, ...events]);
@@ -140,6 +150,8 @@ export function createOrphanScanner(opts: OrphanScannerOptions): OrphanScanner {
             removed++;
             opts.logger.info("requester_orphan_records_removed", { owner, vmUri: vm.uri, rfps, accepts, events: events.length, accepted: true, createdAt: vm.createdAt });
           }
+          const live = new Set([...sets.map((s) => s.vm.vmName), ...contracts.map((c) => c.spec?.vmName ?? "")].filter((n) => n).map(rbacVmKey));
+          if (now() < removalDeadline) await removeRbac([...rbacByVm.keys()].filter((k) => !live.has(k)));
         }
         if (bounded) opts.logger.info("requester_orphan_scan_bounded", { lookups, next: "the next scan continues" });
         opts.logger.info("requester_orphan_scan", { owners: knownOwners.size, contracts: contracts.length, lookups, waiting, settled: settledVms.size, removed, retentionMs });
