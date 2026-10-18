@@ -1,0 +1,245 @@
+plan: "0021"
+title: "Deno sandbox workers allocated through the market: ComputeContract carries a worker payload, the bidder runs one net-only DenoPod per worker, and the requester and the gateway reach it over iroh"
+status: todo
+source: >
+  2026-10-17: exploration of the bidder's existing worker provider. The bidder can serve a
+  com.publicdomainrelay.temp.compute.deno.workerManifest RFP today (ts/atproto-market/lib/
+  market-bidder-worker), but it runs the worker as an in-process Deno Worker inside the hono-bidder
+  DenoPod: no memory or CPU isolation, a 30 s execute timeout that does not terminate the worker, no
+  reconciliation, no termination path (the provider's own comment records the missing worker.delete
+  lexicon), and no object either the requester kcp or the gateway kcp can track. Permissions are taken
+  from the manifest unchanged; the permission policy checks key names only and the bidder's permission
+  mode default leaves no check at all. No kcp CRD exists for a worker on either side.
+principle: >
+  A worker allocation is a ComputeContract with a worker payload, exactly as a VM allocation is a
+  ComputeContract with a VM payload. The requester side keeps one contract object per allocation, so
+  phases, bidder selection, bids, receipt, quota, GC, TTL and the feed are the ones already built. The
+  bidder side gains one socialweb.computer kind, WorkerInstance, one per allocation, and the bidder's
+  Go core turns each into one DenoPod that runs the worker host; one pod per allocation is the
+  isolation boundary. The allocation runs with permissions.net true and nothing else, enforced at
+  three layers: the CRD schema cannot express any other capability, the bidder controller refuses a
+  manifest that asks for any other capability, and the worker host builds the Worker's permission
+  object explicitly with net true and every other capability false, so no capability is inherited.
+  The requester reaches a running worker the way it reaches a guest: the bidder's iroh dialer
+  HostProcess publishes a dumbpipe ticket on the allocation, and the requester dials it. Reachability
+  is reported by a worker.onNetwork event and release is a worker.delete event, mirroring vm.onNetwork
+  and vm.delete.
+state_rules:
+  - Read AGENTS.md first. status is one of todo, doing, done, blocked. The lead flips statuses.
+  - No new worker transport may run anything the RFP flow does not provision; the worker host is a
+    DenoPod built from the WorkerInstance object, never a hand-started process.
+  - The worker DenoPod carries permissions.net true only. A manifest permission object that names any
+    other capability is refused before a DenoPod exists.
+items:
+  - id: M1-CONTRACT-WORKER-PAYLOAD
+    title: "ComputeContract carries a worker payload and worker status, and the generated API gains it"
+    depends_on: []
+    decision: >
+      api/v1alpha1/types_computecontract.go gains ComputeContractSpec.Worker (*ComputeContractWorker)
+      with Manifest RecordRef (uri, cid), Network *ComputeContractWorkerNetwork {Allow bool, Hosts
+      []string}, and Memory string; nil means the contract is a VM contract, so every existing field
+      and phase keeps its meaning. ComputeContractStatus gains Worker *ComputeContractWorkerStatus
+      {InstanceURI, ExecuteAddress, PodName, InstancePhase, Conditions}. The contract state machine is
+      unchanged: requested, rfp_submitted, winner_selected, accepted, receipt, network, released, plus
+      the existing outcomes. Bump the resources.go revision for ComputeContract and run
+      go generate ./api/... so the APIResourceSchema, the export and the TypeScript wire types carry
+      the fields. The option map gains the worker fields so run request's passthrough can set them.
+    files: ["api/v1alpha1/types_computecontract.go", "api/v1alpha1/resources.go", "deploy/apps/option-map.yaml", "socialweb-computer-k8s/lib/common/socialweb-computer-k8s-api/"]
+    done_when: "go generate ./api/... produces a ComputeContract schema whose spec has worker.manifest, worker.network and worker.memory, and deno task check passes."
+    status: todo
+  - id: M2-WORKERINSTANCE-KIND
+    title: "WorkerInstance, a socialweb.computer kind the bidder core reconciles into one DenoPod"
+    depends_on: []
+    decision: >
+      New kind WorkerInstance (plural workerinstances) in api/v1alpha1, registered in resources.go under
+      a new APIExport workers, applied by the bidder manifest set and bound in the bidder's workspace
+      beside computevms and hostprocesses. Spec: Manifest RecordRef, RequesterDid string, ContractURI
+      string, Network ComputeContractWorkerNetwork (required), Memory string. Status: ObservedGeneration,
+      Phase (Pending, Running, Failed, Released), PodName, Address, InstanceURI, Conditions. Apigen
+      generates the schema, the export, the revision lock and the TypeScript types. The kind is written
+      by the bidder's TypeScript worker provider through the kcp client the bidder already has for
+      ComputeVM (ts/hono-compute-provider/lib/compute-provider-kcp).
+    files: ["api/v1alpha1/types_workerinstance.go", "api/v1alpha1/resources.go", "deploy/sets.yaml", "deploy/workerinstance-apiresourceschema.yaml", "deploy/workers-apiexport.yaml", "ts/atproto-market/lib/market-bidder-worker/mod.ts"]
+    done_when: "go generate ./api/... emits the WorkerInstance schema and export, and the bidder workspace binds workers beside computevms."
+    status: todo
+  - id: M3-NET-ONLY-SCHEMA
+    title: "The worker allocation can express net access and no other capability"
+    depends_on: [M1-CONTRACT-WORKER-PAYLOAD, M2-WORKERINSTANCE-KIND]
+    decision: >
+      ComputeContractWorkerNetwork has exactly two fields, Allow bool and Hosts []string; there is no
+      field for read, write, env, run, ffi, sys or import, and apigen emits additionalProperties
+      closed on the generated schema, so a client cannot write any other capability into the contract
+      or into WorkerInstance. The Go and TypeScript wire types are the single source: a second
+      capability cannot arrive without a schema revision. A pure function in a new package
+      internal/workeraccess (and its TypeScript twin in ts/deno-worker-sandbox/lib/common/
+      compute-deno-common) decides whether a manifest's permission object is net-only: every key must
+      be net with value true (or a host list) and every other capability must be absent or false. That
+      function is the one the controller and the provider call; it is the only place the rule lives.
+    files: ["api/v1alpha1/types_workerinstance.go", "internal/workeraccess/", "ts/deno-worker-sandbox/lib/common/compute-deno-common/"]
+    done_when: "the generated schemas have no path to grant read, write, env, run, ffi, sys or import, and workeraccess denies a manifest that sets any of them."
+    status: todo
+  - id: M4-BIDDER-CONTROLLER
+    title: "The bidder core runs one DenoPod per WorkerInstance and reports its address"
+    depends_on: [M2-WORKERINSTANCE-KIND, M3-NET-ONLY-SCHEMA]
+    decision: >
+      New Go package internal/workerinstance modeled on internal/computevm: a reconcile loop that
+      fetches each WorkerInstance, adds a finalizer, enforces workeraccess against the manifest record
+      it reads from the bidder PDS, and renders one DenoPod in the bidder's app workspace with an
+      ownerRef to the WorkerInstance. The DenoPod runs the worker-host entry (M5), restartPolicy Never,
+      resources.memory from spec, a TCP probe, and a permissions object built in Go with net true and
+      every other capability explicitly false; it never copies permissions from the manifest. The pod's
+      reported listener address is written to WorkerInstance.status.address and phase Running; a pod
+      that exits is Failed; a WorkerInstance with a deletion timestamp deletes its pod, waits until it
+      is gone, writes phase Released and drops the finalizer. It is wired into the bidder core beside
+      internal/computevm and into the bidder's kcp client.
+    files: ["internal/workerinstance/", "internal/stack/bidder/core.go", "internal/kcpclient/"]
+    done_when: "a WorkerInstance applied in a bidder workspace becomes one DenoPod with permissions net true only, whose listener address appears in its status; deleting it removes the pod and ends Released."
+    status: todo
+  - id: M5-WORKER-HOST-ENTRY
+    title: "A worker host entry that fetches the manifest over net and builds a net-only Worker"
+    depends_on: [M3-NET-ONLY-SCHEMA]
+    decision: >
+      New TypeScript workspace package and deploy entry worker-host (ts/deno-worker-sandbox/lib/
+      worker-host, entry in deploy/ts-entries.yaml, values file named by the controller). It takes the
+      manifest uri, requester DID and its own port, fetches the workerManifest record from the PDS over
+      net, verifies its cid, then builds the permission object explicitly: net true with the hosts the
+      allocation names, and read, write, env, run, ffi, sys and import false. It starts one persistent
+      Worker with createPersistentDenoWorker, serves POST /execute with a JSON request and response,
+      verifies a compute service auth JWT on every call (verifyComputeServiceAuth in
+      ts/deno-worker-sandbox/lib/compute-deno-atproto/service-auth.ts, which has no caller today),
+      reports its bound port on 0 through the DenoPod listener channel, and stops the Worker on
+      SIGTERM. The execute timeout terminates the Worker instead of leaving it running.
+    files: ["ts/deno-worker-sandbox/lib/worker-host/", "deploy/ts-entries.yaml", "ts/deno-worker-sandbox/lib/compute-deno-atproto/service-auth.ts"]
+    done_when: "a worker host pod answers an authenticated execute call over its reported port, refuses an unauthenticated one, and a timed-out execute terminates its Worker."
+    status: todo
+  - id: M6-IROH-DIALER
+    title: "The bidder exposes the worker over iroh and publishes the dumbpipe ticket"
+    depends_on: [M4-BIDDER-CONTROLLER]
+    decision: >
+      The bidder gains a way to serve one local TCP address over iroh and print its dumbpipe ticket.
+      The existing internal iroh-dial HostProcess (deploy/apps/ssh-gateway/iroh-dial.yaml) is the
+      pattern; this item adds the forwarding form it needs (serve a target address, report the ticket
+      on its unix socket) or a sibling internal iroh-forward if the dial direction does not fit. The
+      controller starts one HostProcess per WorkerInstance in the bidder's app workspace with an
+      ownerRef, pointing at that worker pod's reported address, and writes the ticket to
+      WorkerInstance.status.executeAddress once it is reported. A worker whose ticket never arrives
+      stays Pending with the last reason. Deleting the WorkerInstance deletes the HostProcess with it.
+    files: ["internal/irohdial/", "internal/workerinstance/", "deploy/apps/market-bidder/"]
+    done_when: "a running worker has an iroh:// ticket in WorkerInstance.status.executeAddress and a dumbpipe connect to it reaches the worker host's execute port."
+    status: todo
+  - id: M7-WORKER-PROVIDER-REWORK
+    title: "The bidder's worker provider creates WorkerInstance objects and enforces net-only always"
+    depends_on: [M2-WORKERINSTANCE-KIND, M6-IROH-DIALER]
+    decision: >
+      ts/atproto-market/lib/market-bidder-worker stops calling the instance runner directly. On accept
+      it registers the manifest record, writes the workerInstance provenance record as today, creates
+      one WorkerInstance object through the bidder kcp client, and records the object's name on the
+      contract. The pre-bid permission gate is always on: the deny-all mode no longer means no check,
+      and a manifest that is not net-only is refused with a signed bid failure reason. The provider
+      serves the worker.delete event (M8) by deleting the WorkerInstance and reports worker.terminated
+      when its status is Released. Two worker allocations stay two WorkerInstances and two pods.
+    files: ["ts/atproto-market/lib/market-bidder-worker/mod.ts", "ts/atproto-market/lib/hono-factory-market-bidder-app/mod.ts", "ts/hono-compute-provider/lib/compute-provider-kcp/"]
+    done_when: "an accepted worker RFP creates one WorkerInstance per allocation, a non-net-only manifest is refused before bidding, and worker.delete removes the object and its pod."
+    status: todo
+  - id: M8-WORKER-EVENTS
+    title: "worker.onNetwork, worker.delete and worker.terminated records, mirroring the vm ones"
+    depends_on: [M6-IROH-DIALER]
+    decision: >
+      Add three lexicons and NSID constants beside the vm ones: compute.events.worker.onNetwork
+      {contract, receipt, address}, compute.events.worker.delete {contract, instance}, and
+      compute.events.worker.terminated {contract, instance, reason}. The bidder publishes onNetwork
+      inside a market.event bound to the receipt once the ticket is in status, publishes terminated
+      when the instance is Released, and serves submitEvent. The requester's release path sends the
+      worker.delete event and records the same single-event, retry-until-acknowledged behavior plan
+      0020 gave the vm.delete. The worker receipt gains a submitEvent service so these events have a
+      destination; today it is bid:null, payload:null and nothing serves it.
+    files: ["ts/atproto-market/lexicons/com/publicdomainrelay/temp/compute/events/", "ts/atproto-market/lib/common/market-common/constants.ts", "ts/atproto-market/lib/market-bidder-worker/mod.ts", "ts/atproto-market/lib/compute-request-xrpc/mod.ts"]
+    done_when: "a worker allocation emits exactly one onNetwork and one terminated event, and a release sends one worker.delete that the bidder acknowledges."
+    status: todo
+  - id: M9-REQUESTER-WORKER-RUNNER
+    title: "The requester controller drives a worker contract without ssh"
+    depends_on: [M1-CONTRACT-WORKER-PAYLOAD, M8-WORKER-EVENTS]
+    decision: >
+      requester-controller-kcp's runner selects the worker flow when the contract has spec.worker: the
+      payload for the RFP is the workerManifest record the caller supplies (the payloadFactory seam
+      compute-request-xrpc already has), appliesTo uses the workerManifest NSID, and the wait after
+      receipt is worker.onNetwork instead of the iroh-guest check; the contract reaches Held when the
+      execute address is present and no hostKeys step exists. The controller watches worker contracts
+      through the same computecontracts resource. On completion it releases with worker.delete and ends
+      Released when the terminated event arrives. The execute call is a POST over a dumbpipe connection
+      to the ticket, with a compute service auth JWT signed by the requester; there is no ssh step.
+    files: ["ts/atproto-market/lib/requester-controller-kcp/runner.ts", "ts/atproto-market/lib/requester-controller-kcp/controller.ts", "ts/atproto-market/lib/compute-request-xrpc/mod.ts", "ts/atproto-market/lib/abc/requester/mod.ts"]
+    done_when: "a worker contract goes requested to Held with an execute address and to Released after one worker.delete, with no ssh attempt."
+    status: todo
+  - id: M10-CLI-WORKER
+    title: "run request allocates workers through the option map"
+    depends_on: [M9-REQUESTER-WORKER-RUNNER]
+    decision: >
+      The market-requester option map gains worker options mapped to contract.worker fields: the
+      manifest uri and cid, the network allowance and hosts, the memory, and an execute command run
+      over the connection. cmd/socialweb-computer/request.go sets them on the same ComputeContract it
+      creates today and keeps --hold meaning the allocation stays until released. The summary prints
+      the execute address instead of an ssh target; --skip-ssh is meaningless for a worker contract
+      and is refused with the existing exit 2 refusal path.
+    files: ["cmd/socialweb-computer/request.go", "deploy/apps/option-map.yaml", "internal/stack/request/request.go"]
+    done_when: "run request with worker options creates one worker contract, prints its execute address, runs the command, and releases the allocation."
+    status: todo
+  - id: M11-GATEWAY-WORKER-XRPC
+    title: "The gateway web app allocates workers through its own XRPC, not through a new object kind"
+    depends_on: [M1-CONTRACT-WORKER-PAYLOAD, M9-REQUESTER-WORKER-RUNNER]
+    decision: >
+      The gateway xrpc server implements the worker requests the gateway lexicons already declare
+      (requestComputeWorkerEphemeral and requestComputeWorkerPersistent) by creating a ComputeContract
+      with a worker payload in the requester's contract workspace, under the caller's DID, through the
+      same service-auth path createCluster uses. The procedures answer with the contract's name and
+      workspace rather than a receipt; the lexicons get a revision that says so, since a receipt cannot
+      exist before bids. The web app's existing contract resource and RBAC carry the objects, the
+      existing quota counts them, and the requester DenoPod already bound in the gateway set picks the
+      contract up. The account admission limit and the gateway quota keep counting contracts, so a
+      worker allocation is counted once per allocation like a VM contract.
+    files: ["internal/xrpcserver/", "internal/gateway/", "ts/atproto-market/lexicons/com/publicdomainrelay/temp/gateway/", "socialweb-computer-k8s/"]
+    done_when: "a signed gateway request creates a worker ComputeContract in root:app for that DID and the requester drives it to Held; a second allocation creates a second contract."
+    status: todo
+  - id: M12-QUOTA-GC-FEED-TTL
+    title: "Worker allocations are counted, collected, streamed and expired like the VM ones"
+    depends_on: [M2-WORKERINSTANCE-KIND, M11-GATEWAY-WORKER-XRPC]
+    decision: >
+      Quota: the bidder workspace gains count/workerinstances, the gateway keeps its contract quota.
+      GC: workerinstances joins gcKinds and the finalizer map; a WorkerInstance with no owner is
+      reported like a NodeClaim and its pod and HostProcess are deleted with it. Feed: the gateway's
+      cluster feed adds a worker event kind and internal/kcpclient watches workerinstances so a web
+      app can show an allocation's phase and address. TTL: ttlctl gains WorkerInstance so a stranded
+      allocation is expired. No new namespace: objects live in the bidder's app workspace beside
+      ComputeVM.
+    files: ["internal/appctl/quota.go", "internal/appctl/gc.go", "internal/kcpclient/feed.go", "internal/gateway/feed.go", "internal/ttlctl/ttlctl.go"]
+    done_when: "a worker allocation is visible in the feed, counted by quota, and collected with its pod and HostProcess when its object is deleted."
+    status: todo
+  - id: ACC21-REQUESTER-WORKER
+    title: "A market network allocation: one worker, one execute, one release"
+    depends_on: [M10-CLI-WORKER, M12-QUOTA-GC-FEED-TTL]
+    done_when: >
+      On a market network with one bidder: run request with worker options holds a worker contract;
+      the summary shows the worker's iroh ticket; the returned execute result matches the manifest's
+      answer; the contract reaches Held then Released on release; the bidder's WorkerInstance is
+      Released and its DenoPod and iroh HostProcess are gone; the bidder's kcp holds no WorkerInstance
+      for it. The bidder log shows one worker registered and one terminated.
+    status: todo
+  - id: ACC21-NET-ONLY
+    title: "A manifest that asks for more than net is refused, and a granted worker shows net only"
+    depends_on: [M4-BIDDER-CONTROLLER, M5-WORKER-HOST-ENTRY, M7-WORKER-PROVIDER-REWORK]
+    done_when: >
+      A manifest naming read, write, env, run, ffi, sys or import is refused before a bid (no contract
+      reaches Held and the bidder logs the refusal). For an accepted allocation, the DenoPod spec
+      reports permissions with net true and every other capability false or absent, the worker host's
+      own permission object has the same shape, and an execute that tries to read a file fails inside
+      the Worker.
+    status: todo
+  - id: ACC21-GATEWAY-WORKER
+    title: "The gateway web app allocates and releases a worker for a signed-in account"
+    depends_on: [M11-GATEWAY-WORKER-XRPC, M12-QUOTA-GC-FEED-TTL]
+    done_when: >
+      A signed-in account calls the gateway's persistent worker request with service auth; one
+      ComputeContract with a worker payload exists in root:app under that DID; the feed shows it
+      Pending, then Held with an address; a release ends it Released and the bidder's WorkerInstance
+      and pod are gone; the account's contract quota counts it once.
+    status: todo
