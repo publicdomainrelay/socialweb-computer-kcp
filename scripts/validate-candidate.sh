@@ -90,9 +90,9 @@ lane_c() {
     sleep 30
     echo "== after: unit, slot, replacement line"
     ssh -i "$key" -o BatchMode=yes "root@$ip" "S=/var/lib/socialweb-computer/$acct
-      systemctl --user -M $acct@ is-active socialweb-computer-bidder@$short.test.service 2>/dev/null || systemctl --user -M $acct@ list-units 'socialweb-computer-bidder@*' --no-legend | awk '{print \$1,\$3,\$4}'
+      systemctl --user -M $acct@ is-active socialweb-computer-bidder@vc-$short.test.service 2>/dev/null
       jq -r '.active' \$S/kcp/kcp-slots.json 2>/dev/null
-      journalctl --user -M $acct@ --since '-15 min' --no-pager 2>/dev/null | grep -c 'runs other assets'"
+      journalctl --since '-20 min' --no-pager 2>/dev/null | grep -c 'runs other assets'"
   } >> "$out/c.log" 2>&1
   local rc=1
   if grep -qE 'socialweb-computer-bidder@.*(active|running)' "$out/c.log" && grep -qE '^[1-9][0-9]*$' <(tail -1 <(sed -n '/== after: unit, slot, replacement line/,$p' "$out/c.log")); then rc=0; fi
