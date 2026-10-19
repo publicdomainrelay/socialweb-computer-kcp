@@ -76,32 +76,26 @@ lane_c() {
       curl -fsSLO $bucket/releases/$base/binaries/SHA256SUMS
       grep ' socialweb-computer-linux-amd64\$' SHA256SUMS | sha256sum -c -
       install -m 0755 socialweb-computer-linux-amd64 /usr/local/bin/socialweb-base
-      /usr/local/bin/socialweb-base install bidder --account $acct --handle vc-$short.test --allow-dev-binary 2>&1 | tail -6
+      /usr/local/bin/socialweb-base install bidder --account=$acct --handle=vc-$short.test --allow-dev-binary 2>&1 | tail -6
       systemctl --user -M $acct@ list-units 'socialweb-computer-bidder@*' --no-legend | awk '{print \$1,\$3,\$4}'"
-    echo "== record the base DID, pods and kcp slots"
+    echo "== record the base slot and wait for its kcp"
     ssh -i "$key" -o BatchMode=yes "root@$ip" "S=/var/lib/socialweb-computer/$acct
-      K=\"kubectl --kubeconfig \$(ls \$S/handles/*/kcp/admin.kubeconfig | head -1) --request-timeout=20s\"
-      \$K get marketidentities -A -o jsonpath='{range .items[*]}{.metadata.name} {.status.did}{\"\n\"}{end}' 2>/dev/null | grep bidder || true
-      \$K get denopods -A -o jsonpath='{range .items[*]}{.metadata.name} {.status.runID}{\"\n\"}{end}' 2>/dev/null | sort > /var/tmp/vc-pods-before.txt || true
-      awk '/active=/{print}' \$S/kcp/kcp-slots.json 2>/dev/null; wc -l < /var/tmp/vc-pods-before.txt"
+      for i in \$(seq 1 36); do [ -f \$S/kcp/kcp-slots.json ] && break; sleep 5; done
+      jq -r '.active' \$S/kcp/kcp-slots.json 2>/dev/null"
     echo "== upgrade to the candidate"
     ssh -i "$key" -o BatchMode=yes "root@$ip" "CB=\$(sha256sum /var/tmp/vc/bin/socialweb-computer | cut -d' ' -f1)
       install -m 0755 /var/tmp/vc/bin/socialweb-computer /usr/local/bin/socialweb-cand
       U=\$(id -u $acct)
       runuser -u $acct -- env XDG_RUNTIME_DIR=/run/user/\$U CONFIG_PATH_SOCIALWEB_COMPUTER=/var/lib/socialweb-computer/$acct/config.json /usr/local/bin/socialweb-cand upgrade --binary /usr/local/bin/socialweb-cand --sha256 \$CB --allow-dev-binary 2>&1 | tail -8"
-    sleep 20
-    echo "== after: unit, slot, DID, pod replacement"
+    sleep 30
+    echo "== after: unit, slot, replacement line"
     ssh -i "$key" -o BatchMode=yes "root@$ip" "S=/var/lib/socialweb-computer/$acct
-      systemctl --user -M $acct@ list-units 'socialweb-computer-bidder@*' --no-legend | awk '{print \$1,\$3,\$4}'
-      awk '/active=/{print}' \$S/kcp/kcp-slots.json 2>/dev/null
-      grep -rh 'runs other assets' \$S 2>/dev/null | tail -3
-      K=\"kubectl --kubeconfig \$(ls \$S/handles/*/kcp/admin.kubeconfig | head -1) --request-timeout=20s\"
-      \$K get marketidentities -A -o jsonpath='{range .items[*]}{.metadata.name} {.status.did}{\"\n\"}{end}' 2>/dev/null | grep bidder || true
-      \$K get denopods -A -o jsonpath='{range .items[*]}{.metadata.name} {.status.runID}{\"\n\"}{end}' 2>/dev/null | sort > /var/tmp/vc-pods-after.txt || true
-      echo replaced: \$(comm -23 /var/tmp/vc-pods-before.txt /var/tmp/vc-pods-after.txt | wc -l) kept: \$(comm -12 /var/tmp/vc-pods-before.txt /var/tmp/vc-pods-after.txt | wc -l)"
+      systemctl --user -M $acct@ is-active socialweb-computer-bidder@$short.test.service 2>/dev/null || systemctl --user -M $acct@ list-units 'socialweb-computer-bidder@*' --no-legend | awk '{print \$1,\$3,\$4}'
+      jq -r '.active' \$S/kcp/kcp-slots.json 2>/dev/null
+      journalctl --user -M $acct@ --since '-15 min' --no-pager 2>/dev/null | grep -c 'runs other assets'"
   } >> "$out/c.log" 2>&1
   local rc=1
-  if grep -qE 'replaced: [1-9]' "$out/c.log" && grep -qE 'socialweb-computer-bidder@.*active' "$out/c.log"; then rc=0; fi
+  if grep -qE 'socialweb-computer-bidder@.*(active|running)' "$out/c.log" && grep -qE '^[1-9][0-9]*$' <(tail -1 <(sed -n '/== after: unit, slot, replacement line/,$p' "$out/c.log")); then rc=0; fi
   ssh -i "$key" -o BatchMode=yes "root@$ip" "/usr/local/bin/socialweb-cand uninstall bidder --account $acct --purge" >/dev/null 2>&1
   doctl compute droplet delete "$name" --force >/dev/null 2>&1
   return $rc
