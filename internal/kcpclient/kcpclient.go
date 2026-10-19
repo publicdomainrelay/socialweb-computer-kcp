@@ -235,8 +235,14 @@ func (c *Client) ensure(ctx context.Context, permit revocation.Permit, name stri
 	if err := c.waitForWorkspaceReady(ctx, AccountPath(did), name); err != nil {
 		return err
 	}
-	if _, err := c.createCluster(ctx, home, name, did); err != nil {
+	created, err := c.createCluster(ctx, home, name, did)
+	if err != nil {
 		return fmt.Errorf("kcpclient: cluster %s: %w", home, err)
+	}
+	if !created {
+		if cl, err := c.readCluster(ctx, home, name); err == nil && cl.DeletionTimestamp != nil {
+			return fmt.Errorf("kcpclient: cluster %s is being deleted; ask again once it is gone", home)
+		}
 	}
 	if err := c.ensureNodeClaimQuota(ctx, home); err != nil {
 		return err
