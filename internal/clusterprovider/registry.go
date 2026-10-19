@@ -100,7 +100,7 @@ func (r *Registry) Refs(ctx context.Context) ([]Ref, error) {
 		for _, home := range homes {
 			ref := Ref{Account: path, Home: path + ":" + home}
 			list, err := r.listClusters(ctx, ref.Home)
-			if apierrors.IsNotFound(err) || (err != nil && deleting[home]) {
+			if apierrors.IsNotFound(err) || (err != nil && (deleting[home] || r.goneOrDeleting(ctx, path, home))) {
 				continue
 			}
 			if err != nil {
@@ -283,6 +283,16 @@ func (r *Registry) workspaces(ctx context.Context, logicalCluster string) ([]str
 		}
 	}
 	return out, deleting, nil
+}
+
+func (r *Registry) goneOrDeleting(ctx context.Context, parent, name string) bool {
+	c, err := r.resource(parent, tenancyResource)
+	if err != nil {
+		return false
+	}
+	var ws kcpv1alpha1.Workspace
+	err = c.Get().Resource("workspaces").Name(name).Do(ctx).Into(&ws)
+	return apierrors.IsNotFound(err) || (err == nil && ws.DeletionTimestamp != nil)
 }
 
 func (r *Registry) clusters(ctx context.Context, logicalCluster string) (rest.Interface, error) {
