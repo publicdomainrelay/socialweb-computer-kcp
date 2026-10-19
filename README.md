@@ -6,24 +6,40 @@ One binary, `socialweb-computer`, runs every part of the software. Each running 
 
 ```mermaid
 flowchart TD
-  bin["socialweb-computer process"] --> kcp["its own kcp"]
-  kcp --> objs["objects: ComputeVM, ComputeContract, NodeClaim,<br/>DenoPod, HostProcess, OpenBaoServer, MarketIdentity"]
+  bin["socialweb-computer process<br/>(the core)"] --> kcp
 
-  subgraph gw["gateway"]
-    gkcp["kcp for the gateway"]
-    gkcp --> gdp["DenoPods<br/>pds, requester, socialweb-computer-k8s"]
-    gkcp --> ghp["HostProcesses<br/>kcp slot + kine, front, postgres, OpenBao,<br/>tenant cluster fronts"]
+  subgraph kcp["kcp of one application instance"]
+    direction TB
+    wsRoot["workspace: root"]
+    wsApp["workspace: root:app"]
+    wsAcct["workspace: root:ACCOUNT"]
+    wsHome["workspace: root:ACCOUNT:CLUSTER"]
+    wsRoot --> wsApp
+    wsRoot --> wsAcct --> wsHome
+
+    subgraph app["root:app (the application's own components)"]
+      gdp["DenoPods<br/>pds, requester, socialweb-computer-k8s"]
+      ghp["HostProcesses<br/>kcp slot + kine, front, postgres, OpenBao"]
+    end
+
+    subgraph home["root:ACCOUNT:CLUSTER (a tenant cluster)"]
+      cl["Cluster object + NodeClaims"]
+      cp["control plane HostProcesses<br/>k3s server, kine, fronts<br/>a k3s control plane, not a kcp"]
+      nodes["k3s Nodes"]
+      cl --> cp --> nodes
+    end
   end
 
-  subgraph bd["bidder"]
-    bkcp["kcp for the bidder"]
-    bkcp --> bdp["DenoPods<br/>bidder, pds, guest-kcp, policy-engine"]
-    bkcp --> bhp["HostProcesses<br/>kcp slot + kine, front, OpenBao,<br/>VM units (firecracker)"]
+  subgraph bidder["the same shape, profile bidder (its own kcp)"]
+    bdp["DenoPods<br/>bidder, pds, guest-kcp, policy-engine"]
+    bhp["HostProcesses<br/>kcp slot + kine, front, OpenBao, VM units"]
   end
 
-  profile["profile: requester | bidder | gateway | market network"] -.-> bin
-  kcp -.-> gkcp
-  kcp -.-> bkcp
+  nodes -->|each node is| vm["a VM rented on the market<br/>(firecracker, scale to zero)"]
+  vm -->|provisioned by| bhp
+  profile["profile chooses the set: requester | bidder | gateway | market network"] -.-> bin
+  note["no kcp inside a kcp: an instance is one kcp and its workspaces.<br/>In a market network every child application shares that one kcp,<br/>one workspace each; in prod every application has its own kcp."]
+  kcp -.-> note
 ```
 
 - Design and decisions: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
