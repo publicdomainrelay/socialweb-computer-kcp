@@ -1,6 +1,6 @@
 plan: "0017"
 title: "The market protocol is refined: stale bidders leave the index"
-status: doing
+status: done
 queued: >
   Opened by the lead 2026-10-16 at the user's request. The user said to start this plan with a note that
   some market protocol stuff needs refining. The market protocol (RFP, bid, accept, cloud-init records and
@@ -67,7 +67,7 @@ items:
     files: ["ts/atproto-market/lib/compute-request-xrpc", "ts/atproto-market/lib/market-bidder", "lexicons"]
     done_when: "on prod, the requester's bidder_discovery count equals the number of bidders that answer, and a bidder that is stopped leaves the requester's discovery within the TTL M0 sets."
     risks: ["A bidder behind a slow link is dropped as offline; the deadline is M0's decision."]
-    status: todo
+    status: done
     evidence:
 acceptance:
   checks:
@@ -75,7 +75,7 @@ acceptance:
       text: >
         On prod, the requester's bidder_discovery count equals the number of bidders with a fresh heartbeat,
         and a stopped bidder is gone from the requester's discovery within 5 min (the heartbeat TTL).
-      status: todo
+      status: done
       evidence: []
 decided:
   - "Opened by the lead at the user's request 2026-10-16. The cap of 100 is the user's number ('100 or something'); the policy engine choosing which bidders get the RFP is a future plan."
