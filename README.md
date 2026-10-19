@@ -8,6 +8,43 @@ One binary, `socialweb-computer`, runs every part of the software. Each running 
 - Working rules for this repository: [`AGENTS.md`](AGENTS.md)
 - Plans and their status: [`docs/plans/`](docs/plans/), [`NEXT.yaml`](NEXT.yaml)
 
+## Pieces, and where each starts
+
+| Piece | Use it with | Section |
+| --- | --- | --- |
+| The gateway we host, as a public service | `https://k8s.socialweb.computer` | [Use the hosted gateway](#use-the-hosted-gateway-public-service) |
+| A tenant cluster of that gateway | the web app, or XRPC (`goat`) | [Manage a tenant cluster over XRPC](#manage-a-tenant-cluster-over-xrpc) |
+| Your own gateway | `scripts/deploy.sh` on a host you own | [Run the gateway and its web app](#run-the-gateway-and-its-web-app) |
+| A bidder | `install bidder` (release binary) | [Run and install a bidder](#run-and-install-a-bidder) |
+| A market network on one host | `dev up --profile market-network` | [Run a market network on one host](#run-a-market-network-on-one-host) |
+| One VM through the RFP flow | `run request` | [Rent a VM through the RFP flow](#rent-a-vm-through-the-rfp-flow) |
+| The whole thing from source | `scripts/build-socialweb-computer.sh` | [Build the socialweb-computer binary](#build-the-socialweb-computer-binary) |
+| A release to production | `scripts/deploy.sh` | [Deploy a release to production](#deploy-a-release-to-production) |
+
+## Use the hosted gateway (public service)
+
+`https://k8s.socialweb.computer` is our production gateway: a public service, no account with us, no API key.
+
+```bash
+# 1. open it and sign in with your own atproto account (Bluesky handle and password)
+open https://k8s.socialweb.computer
+
+# 2. or do the same steps over XRPC; goat is the Bluesky CLI
+go install github.com/bluesky-social/goat@latest
+GOAT_USERNAME=<your handle> GOAT_PASSWORD=<your password> goat account login
+GW=https://k8s.socialweb.computer AUD=did:web:k8s.socialweb.computer N=com.publicdomainrelay.temp.cluster
+call() { local m=$1 nsid=$N.$2; shift 2; goat xrpc $m $GW $nsid "$@" "Authorization:Bearer $(goat account service-auth --aud $AUD --lxm $nsid)"; }
+call procedure createCluster name=demo                       # create if missing, start the control plane
+call procedure getKubeconfig name=demo ttlSeconds:=28800 | jq -r .kubeconfig > demo.kubeconfig; chmod 600 demo.kubeconfig
+KUBECONFIG=demo.kubeconfig kubectl get ns
+call procedure deleteCluster name=demo
+```
+
+- In the web app, "Create cluster" and "Download kubeconfig" do the same two steps; the kubeconfig there is the file to keep.
+- The nodes of the cluster are VMs rented on the market from the bidders the gateway trusts; a cluster with no pods holds no VMs (scale to zero).
+- The cluster API is atproto XRPC with your own account's service token: `aud` is the gateway DID, `lxm` the method. See [Manage a tenant cluster over XRPC](#manage-a-tenant-cluster-over-xrpc).
+- This is our production instance. It is disposable by design: a deploy may delete every cluster, as [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) states.
+
 ## Prerequisites
 
 - A 64-bit Linux host with `/dev/kvm`, systemd 253 or newer (Ubuntu 24.04 ships 255), cgroup v2 and `/dev/net/tun`.
@@ -213,7 +250,7 @@ socialweb-computer dev down --instance mn1
 
 ## Rent a VM through the RFP flow
 
-`run request` posts a `compute.vm` record and a signed `market.rfp`, waits for bids, accepts one, boots the guest, opens an SSH session over the relay, and deletes the VM. Pass `--network` to use a running market network.
+`run request` posts a `compute.vm` record and a signed `market.rfp`, waits for bids, accepts one, boots the guest, opens an SSH session to the guest's iroh ticket, and deletes the VM. Pass `--network` to use a running market network (see [Run a market network on one host](#run-a-market-network-on-one-host)); run it as that network's VM account.
 
 A secrets bundle is a JSON array of `{ "path": "/abs/path", "value": ... }`. The secrets are written only into the invocation's own OpenBao; the guest fetches them at boot, and they never enter a kcp object, an argument, a log, or a record.
 
@@ -238,7 +275,7 @@ socialweb-computer run request release <name>
 | `--skip-ssh` | Do not open an SSH session once the guest is on the network. |
 | `--contract-timeout` | How long to wait for the guest's `onNetwork` and host keys, and for a release. Default `3m`. |
 
-SSH runs with `StrictHostKeyChecking=yes` against the host keys the guest reported (the guest's `vm.hostKeys`) and reaches the guest only through the relay.
+SSH runs with `StrictHostKeyChecking=yes` against the host keys the guest reported (the guest's `vm.hostKeys`), through a `ProxyCommand` that dials the guest's iroh ticket. The market records travel through the relay; the guest is reached only over iroh.
 
 ## Run and install a bidder
 
@@ -253,13 +290,27 @@ socialweb-computer run bidder --host-backend proc --profile market-network --net
   --guest-image-source file:///var/lib/socialweb-computer/guest-image --vm-host-backend systemd-user
 ```
 
-Install a bidder on a host (one explicit root step), then it runs as its own account, `swc-bidder`. A first install puts the binary you invoke at `<state-dir>/bin/current/socialweb-computer`:
+Install a bidder on a host (one explicit root step), then it runs as its own account, `swc-bidder`. Copy-paste, from the bucket:
 
 ```bash
-HANDLE=bobvmbuilder.bsky.social
-sudo /var/tmp/swc/bin/socialweb-computer install bidder --handle "$HANDLE" --adopt-account --allow-dev-binary \
-  --guest-image-source file:///var/lib/socialweb-computer/guest-image
+HANDLE=<your atproto handle>
+V=$(curl -fsSL https://api.github.com/repos/publicdomainrelay/socialweb-computer-kcp/tags | jq -r ".[].name" | grep "^v" | sort -V | tail -1)
+B=https://socialweb-computer-kcp.sfo3.digitaloceanspaces.com/releases/$V/binaries
+curl -fsSLO "$B/socialweb-computer-linux-amd64" && curl -fsSLO "$B/SHA256SUMS"
+grep " socialweb-computer-linux-amd64$" SHA256SUMS | sha256sum -c -
+sudo install -m 0755 socialweb-computer-linux-amd64 /usr/local/bin/socialweb-computer
+sudo socialweb-computer install bidder --handle "$HANDLE"
 ```
+
+Then associate the bidder's own DID with that account once; the link comes from the bidder's identity status:
+
+```bash
+K=$(sudo ls /var/lib/socialweb-computer/swc-bidder/handles/*/kcp/admin.kubeconfig | head -1)
+U=$(sudo kubectl --kubeconfig "$K" get marketidentity bidder -o jsonpath='{.status.pendingAction.url}')
+deno run -A --no-lock scripts/associate.ts --creds ~/.bobvmbuilder_bsky_social_source --account BOB --url "$U"
+```
+
+A binary built from a working tree needs `--allow-dev-binary` on the install; a release binary does not.
 
 `--allow-dev-binary` accepts a binary built from a working tree. A release binary needs no such flag.
 
@@ -293,7 +344,7 @@ sudo runuser -u swc-bidder -- env XDG_RUNTIME_DIR=/run/user/$(id -u swc-bidder) 
 - A production bidder gates which RFPs it answers with `bidder-policy` in its `config.json`, which the unit passes through `CONFIG_PATH_SOCIALWEB_COMPUTER`. Unset, the policy is this repository's default, `open` (`internal/appctl/bidder.go`), so a production bidder must name `tangled-vouch` there; `install bidder` does not write that key.
 - Other hono-bidder options go in `bidder-options` of the same `config.json`, written as they would be after `--`: `"bidder-options": "--bid-ttl-sec 1800 --offering-refresh-sec 60"`. Each must be an `options` entry of `market-bidder` in [`deploy/apps/option-map.yaml`](deploy/apps/option-map.yaml); the core puts them in MarketBidder `spec.options`, so they reach the bidder DenoPod's argv, and a changed value replaces the running bidder pod. An option after `--` on the unit's command line wins. Values are split on spaces; `bidder-policy-args` takes a value with spaces. Restart the unit (`systemctl --user restart 'socialweb-computer-bidder@<handle>.service'` as the account) after an edit.
 - The guest image is pinned by sha256 in [`internal/versions/versions.json`](internal/versions/versions.json); the bidder verifies every file against that pin.
-- A production bidder uses the `prod-qr` profile. It has its own PDS, the DenoPod `pds` in its own kcp, and writes every market record there, never to the handle's own repo. The handle's account is written once: the QR code associates the bidder's DID with it. See [Sign in with OAuth](#sign-in-with-oauth).
+- A production bidder runs profile `prod-qr`: it has its own PDS, the DenoPod `pds` in its own kcp, and writes every market record there, never to the handle's own repo. The handle's account is written exactly once, by the association record above; `associate.ts --delete` revokes it. A bidder publishes a heartbeat every 60 s and requesters keep only bidders fresh within 5 min, so a stopped bidder stops receiving RFPs.
 
 `install bidder` options:
 
