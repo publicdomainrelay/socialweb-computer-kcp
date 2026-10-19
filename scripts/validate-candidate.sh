@@ -29,7 +29,7 @@ lane_a() {
   local ok=1
   for i in $(seq 1 60); do
     read -r run status concl < <(cd "$root" && gh run list --limit 40 --json headSha,databaseId,status,conclusion \
-      --jq ".[]|select(.headSha==\"$sha\")|select(.status==\"completed\")|\"\(.databaseId) \(.status) \(.conclusion)\"" | head -1)
+      --jq ".[]|select(.headSha|startswith(\"$sha\"))|select(.status==\"completed\")|\"\(.databaseId) \(.status) \(.conclusion)\"" | head -1)
     [ -n "${run:-}" ] && break
     sleep 30
   done
@@ -47,9 +47,9 @@ lane_b() {
     "setsid nohup bash /var/tmp/m4-run.sh origin/main $pattern $img vc-$short 1 > /var/tmp/vc-$short-b.log 2>&1 < /dev/null & echo started"
   for i in $(seq 1 120); do
     sleep 30
-    if ssh -i "$key" -o BatchMode=yes "root@$runners" "grep -qE '^(ok|FAIL|PASS)' <(tail -3 /var/tmp/vc-$short-b.log) 2>/dev/null || grep -qE '\\-\\-\\- (PASS|FAIL)|^(ok|FAIL)' /var/tmp/vc-$short-b.log"; then
-      ssh -i "$key" -o BatchMode=yes "root@$runners" "grep -E '^--- (PASS|FAIL)|^(ok|FAIL)|panic' /var/tmp/vc-$short-b.log" | tee -a "$out/b.log"
-      ssh -i "$key" -o BatchMode=yes "root@$runners" "grep -q '^FAIL' /var/tmp/vc-$short-b.log" && return 1
+    if ssh -i "$key" -o BatchMode=yes "root@$runners" "grep -qE '^(ok|FAIL)[[:space:]]' /var/tmp/vc-$short-b.log"; then
+      ssh -i "$key" -o BatchMode=yes "root@$runners" "grep -E '^--- (PASS|FAIL)|^(ok|FAIL)[[:space:]]|panic:' /var/tmp/vc-$short-b.log" | tee -a "$out/b.log"
+      if ssh -i "$key" -o BatchMode=yes "root@$runners" "grep -qE '^FAIL[[:space:]]' /var/tmp/vc-$short-b.log"; then return 1; fi
       return 0
     fi
   done
