@@ -649,7 +649,14 @@ flowchart TD
   gh --> canary["nightly canary<br/>throwaway DID"]
 ```
 
-> Warning: a production deployment preserves nothing. Losing sessions, VMs, clusters, claims, or receipts during a deploy is acceptable, so deploy fresh.
+Two deploy shapes, and they differ:
+
+| Shape | What happens | What survives |
+| --- | --- | --- |
+| A routine deploy of an installed gateway (`scripts/deploy.sh`) | `upgrade --binary --sha256`, then `install gateway` again; the core adopts its DenoPods, rolls the kcp slot only when kcp's argv or binary changed | The state dir and its kcp objects, every OpenBao (repo keys, sessions), the requester's and bidder's DIDs, their association records, web app sessions, and the running DenoPods. Verified on prod: the web session survived rc8 to rc9, and the requester DID and Bob's bidder DID and association survived rc11 to rc21 with no new claim |
+| A fresh deploy (`install gateway` on an empty host, or a lost or purged state dir) | First install, new keys generated | Nothing; the requester gets a new DID and needs one association write again (`associate.ts` or the QR page), the same for a bidder |
+
+The policy is still "nothing is guaranteed": a change may deliberately wipe state, and there is no migration or backward compatibility to plan for. Losing sessions, VMs, clusters, claims or receipts is acceptable; what exists, this table says.
 
 ```bash
 # 1. confirm the commit's run is green on GitHub (.github/workflows/ci.yml)

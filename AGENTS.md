@@ -156,10 +156,16 @@ Write no tests, except integration tests, and write those only once the system w
 
 ## Prod deployments
 
-A prod deployment does not preserve anything.
+A prod deployment guarantees nothing; the routine path preserves most things.
 
+- The routine deploy (`scripts/deploy.sh` on an installed gateway) upgrades in place: state dir, kcp
+  objects, OpenBao contents, the requester's and bidder's DIDs, association records, web sessions and
+  adopted DenoPods all survive (read on prod: web session across rc8 to rc9, DIDs and association
+  across rc11 to rc21). A fresh install, or a lost or purged state dir, preserves nothing and needs
+  one association per identity again.
 - Losing sessions, VMs, clusters, claims, receipts or any other prod state during a deploy is
-  acceptable. Do not plan migration, carry-over or rollback for them. Deploy fresh.
+  acceptable. Do not plan migration, carry-over or rollback for a change of shape. Deploy fresh when
+  the shape changed.
 - The atproto credentials of the two prod accounts are on the deploy host, owner-only (mode 0600):
   `~/.aliceoa_bsky_social_source` (requester account alice; exports `ALICE_ATPROTO_HANDLE`,
   `ALICE_ATPROTO_PASSWORD`) and `~/.bobvmbuilder_bsky_social_source` (bidder account bobvmbuilder;
