@@ -47,6 +47,25 @@ flowchart TD
 
 - [License](#license)
 
+## Quick paths
+
+```bash
+# 1. use the gateway we host: sign in, create a cluster, get a kubeconfig
+open https://k8s.socialweb.computer
+
+# 2. rent one VM through the RFP flow, on a host you prepared
+socialweb-computer dev up --instance mn1 --profile market-network --bidders 1
+echo '[{"path":"/root/x","value":"hello"}]' > secrets.json
+socialweb-computer run request --network mn1 --secrets secrets.json --exec 'cat /root/x'
+socialweb-computer dev down --instance mn1
+
+# 3. install a bidder from the newest release (see the bidder section for the association)
+V=$(curl -fsSL https://api.github.com/repos/publicdomainrelay/socialweb-computer-kcp/tags | jq -r ".[].name" | grep "^v" | sort -V | tail -1)
+curl -fsSLO "https://socialweb-computer-kcp.sfo3.digitaloceanspaces.com/releases/$V/binaries/socialweb-computer-linux-amd64"
+sudo install -m 0755 socialweb-computer-linux-amd64 /usr/local/bin/socialweb-computer
+sudo socialweb-computer install bidder --handle <your atproto handle>
+```
+
 ## Pieces, and where each starts
 | Piece | Use it with | Section |
 | --- | --- | --- |
@@ -292,6 +311,9 @@ echo kernel.apparmor_restrict_unprivileged_userns=0 > /etc/sysctl.d/60-socialweb
 | apt lock on a cloud first boot | an unattended upgrade can hold it for minutes; rerun `apt-get` |
 
 ### Install a release binary
+
+- Long form: [docs/host-setup.md](docs/host-setup.md) (host setup and the guest image).
+
 Tagged releases publish the Linux binaries and the guest image to the public bucket; no credentials.
 
 | Path | Holds |
@@ -326,6 +348,9 @@ socialweb-computer version
 | PATH | run as the account that runs the binary; `~/.local/bin` joins PATH at the next login |
 
 ### Run and install a bidder
+
+- Long form: [docs/bidder.md](docs/bidder.md) (every flag, the unit, the guest-image resolution).
+
 A bidder runs as its own application. Inside a market network it is a child; on a host it is an installed core. Its records live in its own PDS DenoPod, never in your repo.
 
 ```bash
@@ -367,6 +392,8 @@ sudo runuser -u swc-bidder -- env XDG_RUNTIME_DIR=/run/user/$(id -u swc-bidder) 
 | Broken unit | `install` refuses when `bin/current` is not the binary you invoked; run `upgrade --binary --sha256` first, then `install` again |
 
 ### Run the gateway and its web app
+
+- Long form: [docs/gateway.md](docs/gateway.md) (deploy.sh environment, web app, caddy sites).
 A development gateway is a child of a market network: start the network with `--with-gateway`.
 
 A production gateway is built as a release, shipped, and installed or upgraded with `scripts/deploy.sh`, which also writes the caddy sites.
@@ -559,6 +586,8 @@ Each integration test takes VM slots of that account and brings up its own marke
 ## Operate and release
 
 ### Deploy a release to production
+
+- Long form: [docs/deploy.md](docs/deploy.md) (build, acceptance, rollback, canary, host items).
 ```mermaid
 flowchart TD
   tag["git tag v*"] --> gh["GitHub CI<br/>gate, binaries, guest image"]
@@ -627,6 +656,8 @@ cd ../did-key-associator && SSH_KEY=~/.ssh/id_ed25519_no_password scripts/deploy
 The deploy inputs (gateway.env, gateway-spec.yaml) live on the orphan branch `swc-deploy`, in the worktree `~/.tmp/deploy`. The credential files `~/.aliceoa_bsky_social_source` and `~/.bobvmbuilder_bsky_social_source` are mode 0600; never print, log, or commit their values.
 
 ### Sign in with OAuth
+
+- Long form: [docs/oauth.md](docs/oauth.md) (every option, per-mode notes, recovery).
 The script drives headless Chrome through the page, the PDS password and "Authorize"; it reads credentials from the file, never the command line, and writes step screenshots to `~/.tmp/oauth-signin/<ts>/`.
 
 ```bash
@@ -651,6 +682,8 @@ deno run -A --no-lock scripts/oauth-signin.ts --creds ~/.bobvmbuilder_bsky_socia
 | `--cookie-file` | write the browser cookies (0600) |
 
 ### Inspect the kcp of an application
+
+- Long form: [docs/inspect.md](docs/inspect.md).
 
 ```mermaid
 flowchart TD
