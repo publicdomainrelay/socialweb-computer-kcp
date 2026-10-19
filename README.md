@@ -53,6 +53,12 @@ flowchart TD
     r_root --> rqcomp
   end
 
+  subgraph mn["market network instance · one kcp"]
+    mn_root["MarketNetwork"]
+    mn_ws["one workspace per child app<br/>plc · relay · pds · bidder-N · gateway · request-N"]
+    mn_root --> mn_ws
+  end
+
   r_id -.->|"rfp · accept"| market
   g_id -.->|"rfp · accept"| market
   b_id -.->|"heartbeat · bid · receipt"| market
