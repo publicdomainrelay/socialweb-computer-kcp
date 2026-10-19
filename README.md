@@ -8,9 +8,22 @@ One binary, `socialweb-computer`, runs every part of the software. Each running 
 flowchart TD
   bin["socialweb-computer process"] --> kcp["its own kcp"]
   kcp --> objs["objects: ComputeVM, ComputeContract, NodeClaim,<br/>DenoPod, HostProcess, OpenBaoServer, MarketIdentity"]
-  objs -->|reconciled| pods["DenoPods (deno, port 0)"]
-  objs -->|reconciled| hosts["HostProcesses (systemd-user units)"]
+
+  subgraph gw["gateway"]
+    gkcp["kcp for the gateway"]
+    gkcp --> gdp["DenoPods<br/>pds, requester, socialweb-computer-k8s"]
+    gkcp --> ghp["HostProcesses<br/>kcp slot + kine, front, postgres, OpenBao,<br/>tenant cluster fronts"]
+  end
+
+  subgraph bd["bidder"]
+    bkcp["kcp for the bidder"]
+    bkcp --> bdp["DenoPods<br/>bidder, pds, guest-kcp, policy-engine"]
+    bkcp --> bhp["HostProcesses<br/>kcp slot + kine, front, OpenBao,<br/>VM units (firecracker)"]
+  end
+
   profile["profile: requester | bidder | gateway | market network"] -.-> bin
+  kcp -.-> gkcp
+  kcp -.-> bkcp
 ```
 
 - Design and decisions: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
