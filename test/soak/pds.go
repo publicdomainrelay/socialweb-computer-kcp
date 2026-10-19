@@ -154,7 +154,8 @@ func pdsSample(ctx context.Context, binary, instance, stateDir string) map[strin
 	pool := x509.NewCertPool()
 	pool.AppendCertsFromPEM(ca)
 	client := &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}}
-	get := func(base, path string, into any) error {
+	defer client.CloseIdleConnections()
+	get :=func(base, path string, into any) error {
 		resp, err := client.Get(base + path)
 		if err != nil {
 			return err
