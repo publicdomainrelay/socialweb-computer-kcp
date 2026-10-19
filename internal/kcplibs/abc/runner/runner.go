@@ -50,6 +50,8 @@ type PodRequest struct {
 }
 
 type PodStatus struct {
+	Assets string
+
 	State State
 
 	ExitCode int32

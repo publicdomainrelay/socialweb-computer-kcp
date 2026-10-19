@@ -28,25 +28,35 @@ func (p *Provider) reconcilePod(ctx context.Context, ref Ref, pod *v1alpha1.Deno
 		if err != nil {
 			return 0, false, fmt.Errorf("provider: observe pod run %s for %s: %w", pod.Status.RunID, ref.Name, err)
 		}
-		state := denopod.ExecutionExited
-		if st.State == runner.StateRunning {
-			state = denopod.ExecutionRunning
-			bound := servicenames.BoundListeners(pod.Spec.Env["SERVICE_ARGS"], pod.Spec.Env["SERVICE_ENV"], st.BoundPort, st.Listeners)
-			address = listeners.Primary(bound)
-			reported = statusListeners(bound)
+		if p.opts.Assets != "" && st.Assets != "" && st.Assets != p.opts.Assets {
+			p.opts.Log.Info("the deno process runs other assets than this build embeds; replacing it", "denopod", ref.Name, "run", st.Assets, "assets", p.opts.Assets)
+			if err := p.opts.PodRunner.Stop(ctx, pod.Status.RunID); err != nil {
+				return 0, false, err
+			}
+			if address != "" || pod.Status.Address != "" || len(pod.Status.Listeners) > 0 {
+				p.publishListeners(ctx, ref, "", nil)
+			}
+		} else {
+			state := denopod.ExecutionExited
+			if st.State == runner.StateRunning {
+				state = denopod.ExecutionRunning
+				bound := servicenames.BoundListeners(pod.Spec.Env["SERVICE_ARGS"], pod.Spec.Env["SERVICE_ENV"], st.BoundPort, st.Listeners)
+				address = listeners.Primary(bound)
+				reported = statusListeners(bound)
+			}
+			if address != pod.Status.Address || !slices.Equal(reported, pod.Status.Listeners) {
+				p.publishListeners(ctx, ref, address, reported)
+			}
+			o.Execution = &denopod.ExecutionObservation{
+				RunID:    pod.Status.RunID,
+				State:    state,
+				ExitCode: exitCodePtr(st.ExitCode),
+				Message:  st.Message,
+				Reason:   st.Reason,
+				Outputs:  st.Outputs,
+			}
+			p.observeProbes(ctx, ref, pod, &o)
 		}
-		if address != pod.Status.Address || !slices.Equal(reported, pod.Status.Listeners) {
-			p.publishListeners(ctx, ref, address, reported)
-		}
-		o.Execution = &denopod.ExecutionObservation{
-			RunID:    pod.Status.RunID,
-			State:    state,
-			ExitCode: exitCodePtr(st.ExitCode),
-			Message:  st.Message,
-			Reason:   st.Reason,
-			Outputs:  st.Outputs,
-		}
-		p.observeProbes(ctx, ref, pod, &o)
 	}
 	res, err := p.opts.PodDecider.Reconcile(ctx, o)
 	if err != nil {

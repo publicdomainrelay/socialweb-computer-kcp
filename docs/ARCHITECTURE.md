@@ -3468,6 +3468,14 @@ A change must not break any of these. Each exists because something failed.
 
 ## 14. Open architectural gaps
 
+- **An upgrade does not restart the DenoPods that run the old assets (fix in, prod reading pending).**
+  2026-10-19: after deploying rc19 the gateway's requester still logged the rc17 `bidder_discovery` shape; a core
+  restart adopts every running DenoPod (plan 0019 M3C), and a binary upgrade changes neither the spec generation
+  nor the `deno.computer/restart` annotation, so pods keep running the previous build's TypeScript. Fix in this
+  commit: each run records the TypeScript tree it started from (`SOCIALWEB_TS_ROOT` in its `state.json`), and the
+  provider replaces a run whose tree differs from the one the core embeds (a release build's `Closure.Key` is the
+  tree sha). Pending: the prod reading of the replacement line on the next deploy.
+
 These are the things the architecture does not yet answer, and this list is the work. What is settled - a
 decision taken, a defect closed, a measurement recorded - is in section 15 instead, and the two are
 separated deliberately: a work list padded with history reads as complete, which is how a bullet that was

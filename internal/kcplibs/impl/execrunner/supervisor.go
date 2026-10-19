@@ -22,6 +22,8 @@ type runState struct {
 	Ticks uint64 `json:"ticks"`
 
 	Stopped bool `json:"stopped"`
+
+	Assets string `json:"assets,omitempty"`
 }
 
 type process struct {
@@ -44,6 +46,8 @@ type process struct {
 	exitCode int32
 
 	env map[string]string
+
+	assets string
 
 	memoryLimit uint64
 
@@ -170,6 +174,7 @@ func (s *supervisor) start(entry processSpec) (string, error) {
 		ticks:   startTicks(cmd.Process.Pid),
 		started: time.Now(),
 		env:     entry.envMap,
+		assets:  envValue(entry.env, "SOCIALWEB_TS_ROOT"),
 
 		memoryLimit: entry.memoryLimit,
 	}
@@ -274,7 +279,7 @@ func (s *supervisor) recordAdoptedOOMKill(run *process) {
 }
 
 func writeState(run *process) error {
-	body, err := json.Marshal(runState{PID: run.pid, Started: run.started.Format(time.RFC3339Nano), Ticks: run.ticks, Stopped: run.stopped.Load()})
+	body, err := json.Marshal(runState{PID: run.pid, Started: run.started.Format(time.RFC3339Nano), Ticks: run.ticks, Stopped: run.stopped.Load(), Assets: run.assets})
 	if err != nil {
 		return fmt.Errorf("execrunner: encode the run state: %w", err)
 	}
@@ -282,6 +287,16 @@ func writeState(run *process) error {
 		return fmt.Errorf("execrunner: write the run state: %w", err)
 	}
 	return nil
+}
+
+func envValue(env []string, key string) string {
+	prefix := key + "="
+	for i := len(env) - 1; i >= 0; i-- {
+		if strings.HasPrefix(env[i], prefix) {
+			return strings.TrimPrefix(env[i], prefix)
+		}
+	}
+	return ""
 }
 
 func (s *supervisor) lookup(id string) (*process, bool) {
@@ -318,7 +333,7 @@ func (s *supervisor) recover(id string) (*process, error) {
 			started = parsed
 		}
 	}
-	recovered := &process{dir: dir, pid: state.PID, ticks: state.Ticks, started: started}
+	recovered := &process{dir: dir, pid: state.PID, ticks: state.Ticks, started: started, assets: state.Assets}
 	recovered.stopped.Store(state.Stopped)
 	return recovered, nil
 }

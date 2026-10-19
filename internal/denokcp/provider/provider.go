@@ -74,6 +74,8 @@ type Reader interface {
 var _ Reader = (*Registry)(nil)
 
 type Options struct {
+	Assets string
+
 	Registry Instances
 
 	Reader Reader

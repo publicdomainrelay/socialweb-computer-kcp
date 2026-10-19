@@ -127,16 +127,17 @@ func (p *Pod) Observe(_ context.Context, runID string) (runner.PodStatus, error)
 			_ = p.sup.stop(runID)
 			return runner.PodStatus{State: runner.StateFailed, Message: "the deno process exceeded the runner timeout"}, nil
 		}
-		return runner.PodStatus{State: runner.StateRunning, BoundPort: boundPort(run.dir), Listeners: reportedListeners(run.dir)}, nil
+		return runner.PodStatus{Assets: run.assets, State: runner.StateRunning, BoundPort: boundPort(run.dir), Listeners: reportedListeners(run.dir)}, nil
 	}
 	if run.stopped.Load() {
-		return runner.PodStatus{State: runner.StateFailed, Message: "the deno process was stopped"}, nil
+		return runner.PodStatus{Assets: run.assets, State: runner.StateFailed, Message: "the deno process was stopped"}, nil
 	}
 	p.sup.recordAdoptedOOMKill(run)
 	status, err := p.result(run)
 	if err == nil {
 		p.classify(run, &status)
 	}
+	status.Assets = run.assets
 	return status, err
 }
 
