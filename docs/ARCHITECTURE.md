@@ -3753,12 +3753,6 @@ because it bounds a mechanism the rest of this document leans on.
     limit are closed (section 15, "The contract watch's getRecord bursts", read on gl-runner-1 after this soak). Left from that
     reading: the soak requester's DenoPod RSS read +75.6 MB an hour (300 to 362 MB) with its fds flat and its heapUsed at 75 to
     119 MB while its ComputeContracts still rose (2441 to 2702); it needs a window past the contract TTL.
-  - The gateway repo keeps com.fedproxy.rbac records of deleted clusters (`secrets.<cluster>-node1`): 7 to 20 in the window
-    (+5.3 an hour), 20 of 258 cluster cycles (cycles 19, 30, 36, 37, 40, 41, 48 and 53 of the lanes).
-  - The gateway's logs directory keeps `pg-<cluster>.log` of every cluster ever made: 259 files after 258 cycles.
-  - The network's DENO_DIR `gen/blob` grows: 39 to 109 MB (+23.6 MB an hour), 113 emitted blob modules of about 1 MB, 23 an hour.
-  - The repo kv files still creep with their record counts flat: the soak requester's 56.0 to 64.7 MB (+4.0 MB an hour), the
-    installed bidder's 35.4 to 44.2 (+3.0), bidder-1's 39.5 to 42.7 (+1.2); the gateway's is flat at 6.3.
   - The web app's node claim index kept one ConfigMap per home ever created (201 at 22:33Z, +55 an hour in the network kine);
     closed on main after rc17 by 6768644f, not re-read.
   - The pod cgroup of an exited DenoPod is left: `release` writes `cgroup.kill` and removes the directory at once, before the killed
@@ -4026,6 +4020,45 @@ refutation.
   about 2.5 hours at 1.1 bids a second and stopped at about 47 MB (the 00:15Z to 01:16Z rows, load running to 01:16Z: 16895
   RFPs, 382 VM contracts released, 132 tenant cycles). Heap snapshots (`node:v8` `writeHeapSnapshot`) raise the pod's
   RSS by about 140 MB that it keeps (glibc), so a reading that takes one must not be fitted across it.
+
+- **The four disk and record series of the second soak plateau (plan 0013 M3-DISK-RETENTION, M3-PDS-RECORD-RETENTION, 2026-10-19).**
+  The second soak (below) left four series growing; each had one cause:
+  - DENO_DIR `gen/blob` (+23.6 MB an hour): the bidder's scope gate (`--policy open`) runs the gha-lite workflow, whose node
+    action (`dist/index.js`, 300 KB) ran from a `text/typescript` blob URL with a new uuid. Deno transpiled it and cached a 1 MB
+    emit under `gen/blob` per run; the scope cache's 5 minute positive TTL times two requesters is 24 runs an hour.
+    `runActionInWorker` now makes a `text/javascript` blob unless the action main ends in `.ts`, so a JavaScript action
+    emits nothing (6daeb0f4).
+  - One `pg-<cluster>.log` per cluster ever made: nothing removed it. A Postgres deleted with `spec.deleteData` (every tenant
+    cluster's) now removes `pg-<name>.log` and its rotated `.1` with its data directory (33d370c6).
+  - The repo kv files (+1.2 to +4.0 MB an hour): deno kv makes its sqlite file with `auto_vacuum` none, so the file keeps its
+    high-water size. Every core now runs `storemaint.KeepDenoKv` over its `components` dir and the network state dir: a deno kv
+    database (sqlite magic plus the `kv` and `data_version` tables) is converted once (`PRAGMA auto_vacuum=INCREMENTAL`,
+    `VACUUM`), then `incremental_vacuum` and a `wal_checkpoint(TRUNCATE)` run every 5 minutes (9db73adb, eb5a164c). It runs in
+    the core process, never in the deno process, because two sqlite libraries in one process break each other's posix locks.
+    A conversion under a deno kv writer at about 14000 writes a second gave no writer error and a clean `integrity_check`.
+  - com.fedproxy.rbac records of deleted clusters: only `releaseCompute` deleted them, and only for the capabilities it was given;
+    the orphan scan's unclaimed release passes none, and a flow that throws after the accept or a contract deleted while its
+    requester is down never releases. The requester's orphan scan now lists the rbac records too and removes those of a VM that
+    is settled with no contract, and those whose VM no compute.vm record and no ComputeContract names (b1299ba9).
+  Reading: droplet dev-disk-1 (c-32, sfo2), `dev up --profile market-network --bidders 1 --with-gateway --vm-host-backend
+  systemd-user`, app values `bid-ttl-sec` 1800 and `record-retention-sec` 900, the `test/soak` load of the second soak
+  (1.1 RFP/s, a VM contract every 40 s on 3 lanes held 20 s, contract TTL 40 minutes, retention 900 s, 4 tenant lanes) from
+  00:00Z, chaos every 7 minutes (`dev restart` over six DenoPods, `kill -9` of the gateway core every 42 minutes), `du` and
+  sqlite pragmas every 5 minutes, fitted 01:05Z to 02:11Z (14 samples) with the second soak's fit rule. In the window: 4356 RFPs,
+  99 VM contracts, 58 tenant cycles (118 in all, none failed).
+
+| series (window 01:05Z to 02:11Z) | start | end | max | slope per hour | plateau |
+| --- | --- | --- | --- | --- | --- |
+| network DENO_DIR `gen` (MB); `gen/blob` files | 9.72; 0 | 9.92; 0 | 9.92; 0 | +0.20; 0 | yes |
+| gateway `pg-*.log` files (116 removed with their clusters) | 5 | 5 | 5 | -0.1 | yes |
+| soak requester repo kv + wal (MB) / rows | 62.4 / 59528 | 67.7 / 70444 | 80.3 / 113080 | +3.0 / +6519 | yes; the file follows the rows |
+| bidder-1 repo kv + wal (MB) / rows | 40.1 / 44094 | 48.4 / 52674 | 59.2 / 67100 | +2.0 / +1465 | yes |
+| gateway repo kv + wal (MB) | 4.3 | 1.6 | 6.4 | +1.5 | yes |
+| repo kv free pages after a pass | 0 | 0 to 4787 | 4787 | | freed every 5 minutes |
+| gateway repo com.fedproxy.rbac | 2 | 4 | 5 | +0.8 | yes: the live clusters; the scan removed 6 left by chaos |
+
+  The bidder-1 repo file fell from 55.0 to 34.3 MB when its Bid records passed their TTL (00:50Z to 00:55Z), which the old file
+  never did. The logs dirs still grow below their 64 MiB rotation caps; the network PDS and relay kv files were flat before.
 
 - **Plan 0013 M4-SOAK-READING: second 3 h soak, systemd-user (2026-10-18, fitted 20:35Z to 23:36Z; ACC13-NO-HOST-OOM holds, M3-DISK-RETENTION,
   M3-PDS-RECORD-RETENTION, M4-SOAK-READING and ACC13-BOUNDED do not).** Host: droplet dev-soak-2 (c-48, 48 vCPU, 94 GB, Ubuntu 24.04,
