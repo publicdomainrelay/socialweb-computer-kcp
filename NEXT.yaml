@@ -848,6 +848,13 @@ limits:
       it is not written rather than written wrong. See `docs/plans/0002` section 4.4.
 
 paused_2026_10_19:
+  - id: RC21-VERIFIED
+    text: >
+      rc21 (231a9154) is deployed to prod: gateway and Bob's bidder, contract rc21-proof-1 passed in
+      569 s with zero operator writes, canary green in 158 s, heartbeat filter live (found 450,
+      fresh 1, stale 449). The README install of rc21 from the bucket passed on a fresh host: dev up
+      87 s, run request 93 s, dev down 108 s, nothing left. What is missing is the GitLab double
+      green (see GITLAB-RC21) and a bucket re-check for any later release.
   - id: SOAK-3
     text: >
       Plan 0013 third soak was paused at 06:28Z on 2026-10-19 with the fit window 2 h 43 min in.
