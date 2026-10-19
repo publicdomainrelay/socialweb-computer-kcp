@@ -6,41 +6,62 @@ One binary, `socialweb-computer`, runs every part of the software. Each running 
 
 ```mermaid
 flowchart TD
-  bin["socialweb-computer process<br/>(the core)"] --> kcp
+  market["atproto market<br/>records in each app's own repo PDS · relay / firehose"]
 
-  subgraph kcp["kcp of one application instance"]
-    direction TB
-    wsRoot["workspace: root"]
-    wsApp["workspace: root:app"]
-    wsAcct["workspace: root:ACCOUNT"]
-    wsHome["workspace: root:ACCOUNT:CLUSTER"]
-    wsRoot --> wsApp
-    wsRoot --> wsAcct --> wsHome
-
-    subgraph app["root:app (the application's own components)"]
-      gdp["DenoPods<br/>pds, requester, socialweb-computer-k8s"]
-      ghp["HostProcesses<br/>kcp slot + kine, front, postgres, OpenBao"]
+  subgraph gw["gateway instance · its kcp"]
+    g_root["Gateway"]
+    subgraph gwstate["state CRDs"]
+      g_cl["Cluster · ClusterLink · ClusterClientCertificate"]
+      g_nc["NodeClaim · ComputeContract · ComputeVM · GuestIdentityGrant"]
+      g_id["MarketIdentity · AtprotoRecord · AtprotoRecordWatch"]
+      g_infra["OpenBaoServer · Postgres"]
     end
-
-    subgraph home["root:ACCOUNT:CLUSTER (a tenant cluster)"]
-      cl["Cluster object + NodeClaims"]
-      cp["control plane HostProcesses<br/>k3s server, kine, fronts<br/>a k3s control plane, not a kcp"]
-      nodes["k3s Nodes"]
-      cl --> cp --> nodes
+    subgraph gwcomp["components"]
+      g_dp["DenoPods<br/>pds · requester · web app"]
+      g_hp["HostProcesses<br/>kcp slot + kine · front · postgres · OpenBao · cluster fronts"]
     end
+    g_root --> gwstate
+    g_root --> gwcomp
   end
 
-  subgraph bidder["the same shape, profile bidder (its own kcp)"]
-    bdp["DenoPods<br/>bidder, pds, guest-kcp, policy-engine"]
-    bhp["HostProcesses<br/>kcp slot + kine, front, OpenBao, VM units"]
+  subgraph bd["bidder instance · its kcp"]
+    b_root["MarketBidder"]
+    subgraph bdstate["state CRDs"]
+      b_bid["Bid · ComputeContract · ComputeVM"]
+      b_id["MarketIdentity · AtprotoRecord · AtprotoRecordWatch"]
+      b_infra["OpenBaoServer"]
+    end
+    subgraph bdcomp["components"]
+      b_dp["DenoPods<br/>bidder · pds · guest-kcp · policy-engine"]
+      b_hp["HostProcesses<br/>kcp slot + kine · front · OpenBao · VM units"]
+    end
+    b_root --> bdstate
+    b_root --> bdcomp
   end
 
-  nodes -->|each node is| vm["a VM rented on the market<br/>(firecracker, scale to zero)"]
-  vm -->|provisioned by| bhp
-  profile["profile chooses the set: requester | bidder | gateway | market network"] -.-> bin
-  note["no kcp inside a kcp: an instance is one kcp and its workspaces.<br/>In a market network every child application shares that one kcp,<br/>one workspace each; in prod every application has its own kcp."]
-  kcp -.-> note
+  subgraph rq["requester instance · its kcp (one per run request)"]
+    r_root["MarketRequester"]
+    subgraph rqstate["state CRDs"]
+      r_cc["ComputeContract · ComputeVM"]
+      r_id["MarketIdentity · AtprotoRecord · AtprotoRecordWatch"]
+    end
+    subgraph rqcomp["components"]
+      r_dp["DenoPod: request-vm-ssh"]
+      r_hp["HostProcesses<br/>kcp slot + kine · front · OpenBao"]
+    end
+    r_root --> rqstate
+    r_root --> rqcomp
+  end
+
+  r_id -.->|"rfp · accept"| market
+  g_id -.->|"rfp · accept"| market
+  b_id -.->|"heartbeat · bid · receipt"| market
+  g_nc -.->|"NodeClaim, rented"| market
+  b_bid -->|"won, boots"| vm["guest VM<br/>firecracker · scale to zero"]
+  b_hp -->|runs| vm
 ```
+
+One instance is one kcp and its workspaces; there is no kcp inside a kcp. A market network is one kcp with a workspace per child application; prod gives every application its own kcp. A tenant cluster's control plane is k3s, not a kcp.
 
 - Design and decisions: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 - Working rules for this repository: [`AGENTS.md`](AGENTS.md)
