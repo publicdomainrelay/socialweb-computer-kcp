@@ -3468,6 +3468,12 @@ A change must not break any of these. Each exists because something failed.
 
 ## 14. Open architectural gaps
 
+- **A retired kcp slot's audit logs are never removed (fixed 2026-10-19).** Prod's state dir held 62 GB, 46 GB of
+  it `kcp/slot-a/audit-*.log` from the slot that rc14's roll retired; the rotation caps only bound the active slot.
+  A roll now removes the retired slot's audit logs. The remaining prod series worth watching: `deno/` 6 GB and
+  `ts/` 4.2 GB of per-closure trees that old builds seeded and nothing prunes; 26,645 exited `denokcp/runs` dirs
+  (2.4 MB of inodes, no disk). Both are bounded by upgrade count, not by load.
+
 - **An upgrade does not restart the DenoPods that run the old assets (fix in, prod reading pending).**
   2026-10-19: after deploying rc19 the gateway's requester still logged the rc17 `bidder_discovery` shape; a core
   restart adopts every running DenoPod (plan 0019 M3C), and a binary upgrade changes neither the spec generation

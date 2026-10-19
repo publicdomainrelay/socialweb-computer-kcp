@@ -15,6 +15,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpstore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/versions"
+	"strings"
 )
 
 type InstalledRoll struct {
@@ -212,8 +213,32 @@ func RollInstalled(ctx context.Context, m hostsvc.Manager, p Params, o Installed
 		} else {
 			out.Boot = enable
 		}
+		pruneInactiveAuditLogs(p.SlotRoot(rep.From), log)
 	}
 	return out, rerr
+}
+
+// pruneInactiveAuditLogs removes the audit logs of a slot that has just been
+// retired. They are the largest files a slot holds (100 MiB each, rotated), and
+// an upgrade that is rolled back and forth otherwise leaves every generation's
+// logs on disk.
+func pruneInactiveAuditLogs(root string, log *slog.Logger) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return
+	}
+	removed := 0
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasPrefix(e.Name(), "audit-") || !strings.HasSuffix(e.Name(), ".log") {
+			continue
+		}
+		if err := os.Remove(filepath.Join(root, e.Name())); err == nil {
+			removed++
+		}
+	}
+	if removed > 0 {
+		log.Info("removed the audit logs of the retired kcp slot", "slotRoot", root, "files", removed)
+	}
 }
 
 func writePrivate(path string, b []byte) error {
