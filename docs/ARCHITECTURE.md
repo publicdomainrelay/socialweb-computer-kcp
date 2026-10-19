@@ -3468,6 +3468,24 @@ A change must not break any of these. Each exists because something failed.
 
 ## 14. Open architectural gaps
 
+- **Plan 0013 soak paused 2026-10-19 06:28Z (third reading, partial).** `dev-soak-3` ran rc18 code
+  1 h warm-up + 2 h 43 min of the fit window at ~1.1 RFP/s: 15,311 RFPs created, 0 failed; 227 tenant
+  cycles, 0 failed; 286 VM contracts, 21 failed around chaos; host OOM 0, MemAvailable 82 GB, swap 0.
+  Flat by the fit rule: 183 of 209 series, including the gateway requester heap (40-47 MB), its
+  sockets (41-47, burst peak 17,077), all repo KV files, OpenBao stores, object counts, record counts
+  except three small drifts, kine rows at the network level, and the host disk. **Still growing**, all
+  on the installed bidder's systemd-user side: `handles/3de3bcd364/kcp` 240 -> 507 MB (+110 MB in
+  2.7 h), its kine file 44 -> 80 MB and rows 5,336 -> 7,826, the bidder's kcp unit memory 1,110 ->
+  1,474 MB, its OpenBao HostProcess 63 -> 71 MB, and the guest-kcp pod 76 -> 80 MB. Three series the
+  fit called NO are cumulative counters, not gauges: Bids Expired, Bids Lost and gc objects; the fit
+  script needs counter differencing. Logs dirs and the host journal grow under their rotation caps.
+  A full 3 h reading and the counter-differencing fix are needed before 0013 can close.
+- **`scripts/validate-candidate.sh` lane c does not pass yet.** On rc21 the install, association-less
+  boot and upgrade all succeed (unit active on the candidate, slot rolled), but the lane reports
+  FAIL: the replacement line is absent because lanes need the candidate's TypeScript tree to differ
+  from the base release and the assertion reads the wrong journal in that case; fix and re-run.
+  Lanes a and b were fixed (sha prefix, go test result line) but not re-run green together.
+
 - **A retired kcp slot's audit logs are never removed (fixed 2026-10-19).** Prod's state dir held 62 GB, 46 GB of
   it `kcp/slot-a/audit-*.log` from the slot that rc14's roll retired; the rotation caps only bound the active slot.
   A roll now removes the retired slot's audit logs. The remaining prod series worth watching: `deno/` 6 GB and

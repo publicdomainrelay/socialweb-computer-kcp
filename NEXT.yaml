@@ -846,3 +846,21 @@ limits:
       ZERO, not to an intermediate count. Scaling three nodes to two needs an answer to "which node,
       and does its work move", and no instrument here measures that yet, so the branch that would do
       it is not written rather than written wrong. See `docs/plans/0002` section 4.4.
+
+paused_2026_10_19:
+  - id: SOAK-3
+    text: >
+      Plan 0013 third soak was paused at 06:28Z on 2026-10-19 with the fit window 2 h 43 min in.
+      dev-soak-3 is deleted; its data is in ~/.tmp/soak3 (scripts) and was summarised in
+      docs/ARCHITECTURE.md section 14. Resume: recreate a droplet, rebuild from main, re-run the
+      same setup (one-kcp network + installed bidder + chaos) and finish a full 3 h window; fix
+      the fit script to difference cumulative counters first.
+  - id: VALIDATE-GATE
+    text: >
+      scripts/validate-candidate.sh lanes a and b were fixed but not re-run green together; lane c
+      still reports FAIL while its upgrade works. Make the gate green on a candidate before the
+      next release.
+  - id: GITLAB-RC21
+    text: >
+      GitLab pipeline 255 (rc21) was running when work stopped; read its result and the retry
+      before trusting rc21's integration status. rc17 and rc19 were green twice; rc21 was not.
