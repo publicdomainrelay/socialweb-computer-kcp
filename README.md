@@ -5,7 +5,7 @@ socialweb-computer-kcp serves virtual Kubernetes clusters. A tenant cluster's k3
 One binary, `socialweb-computer`, runs every part of the software. Each running application is a separate instance with its own kcp control plane, a manifest set, and a profile: a requester (`run request`), a bidder, the gateway, a market network, or a local development instance. Application state lives in that instance's kcp as objects such as `ComputeVM`, `ComputeContract`, `NodeClaim`, `DenoPod`, and `HostProcess`.
 
 ```mermaid
-flowchart LR
+flowchart TD
   bin["socialweb-computer process"] --> kcp["its own kcp"]
   kcp --> objs["objects: ComputeVM, ComputeContract, NodeClaim,<br/>DenoPod, HostProcess, OpenBaoServer, MarketIdentity"]
   objs -->|reconciled| pods["DenoPods (deno, port 0)"]
@@ -115,7 +115,7 @@ call procedure deleteCluster name=demo
 - This is our production instance. It is disposable by design: a deploy may delete every cluster, as [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) states.
 
 ```mermaid
-flowchart LR
+flowchart TD
   you["you, an atproto account"] -->|"sign in (OAuth)"| web["web app<br/>k8s.socialweb.computer"]
   you -->|"kubectl + your kubeconfig"| front["kcp front<br/>kcp.socialweb.computer"]
   web --> gw["gateway"]
@@ -386,7 +386,7 @@ deno run -A --no-lock scripts/associate.ts --creds ~/.bobvmbuilder_bsky_social_s
 A binary built from a working tree needs `--allow-dev-binary` on the install; a release binary does not.
 
 ```mermaid
-flowchart LR
+flowchart TD
   rel["release binary<br/>(bucket)"] --> inst["install bidder<br/>account swc-bidder"]
   inst --> unit["socialweb-computer-bidder@handle"]
   unit --> kcp["bidder kcp"]
@@ -481,7 +481,7 @@ After a fresh deploy the requester account has no web app session, so cluster cl
 
 ### Run a market network on one host
 ```mermaid
-flowchart TB
+flowchart TD
   subgraph net["market network = one kcp"]
     global["root:global<br/>plc"]
     relay["root:relay<br/>relay, dispatchers"]
@@ -639,7 +639,7 @@ Each integration test takes VM slots of that account and brings up its own marke
 
 ### Deploy a release to production
 ```mermaid
-flowchart LR
+flowchart TD
   tag["git tag v*"] --> gh["GitHub CI<br/>gate, binaries, guest image"]
   gh -->|"publish"| bucket["Spaces bucket<br/>releases/tag"]
   bucket --> deploy["scripts/deploy.sh"]
