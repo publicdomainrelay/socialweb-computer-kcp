@@ -174,7 +174,7 @@ func (s *supervisor) start(entry processSpec) (string, error) {
 		ticks:   startTicks(cmd.Process.Pid),
 		started: time.Now(),
 		env:     entry.envMap,
-		assets:  envValue(entry.env, "SOCIALWEB_TS_ROOT"),
+		assets:  envValue(entry.env, "SOCIALWEB_TS_KEY"),
 
 		memoryLimit: entry.memoryLimit,
 	}
