@@ -4,6 +4,15 @@ socialweb-computer-kcp serves virtual Kubernetes clusters. A tenant cluster's k3
 
 One binary, `socialweb-computer`, runs every part of the software. Each running application is a separate instance with its own kcp control plane, a manifest set, and a profile: a requester (`run request`), a bidder, the gateway, a market network, or a local development instance. Application state lives in that instance's kcp as objects such as `ComputeVM`, `ComputeContract`, `NodeClaim`, `DenoPod`, and `HostProcess`.
 
+```mermaid
+flowchart LR
+  bin["socialweb-computer process"] --> kcp["its own kcp"]
+  kcp --> objs["objects: ComputeVM, ComputeContract, NodeClaim,<br/>DenoPod, HostProcess, OpenBaoServer, MarketIdentity"]
+  objs -->|reconciled| pods["DenoPods (deno, port 0)"]
+  objs -->|reconciled| hosts["HostProcesses (systemd-user units)"]
+  profile["profile: requester | bidder | gateway | market network"] -.-> bin
+```
+
 - Design and decisions: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 - Working rules for this repository: [`AGENTS.md`](AGENTS.md)
 - Plans and their status: [`docs/plans/`](docs/plans/), [`NEXT.yaml`](NEXT.yaml)
@@ -44,6 +53,17 @@ call procedure deleteCluster name=demo
 - The nodes of the cluster are VMs rented on the market from the bidders the gateway trusts; a cluster with no pods holds no VMs (scale to zero).
 - The cluster API is atproto XRPC with your own account's service token: `aud` is the gateway DID, `lxm` the method. See [Manage a tenant cluster over XRPC](#manage-a-tenant-cluster-over-xrpc).
 - This is our production instance. It is disposable by design: a deploy may delete every cluster, as [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) states.
+
+```mermaid
+flowchart LR
+  you["you, an atproto account"] -->|"sign in (OAuth)"| web["web app<br/>k8s.socialweb.computer"]
+  you -->|"kubectl + your kubeconfig"| front["kcp front<br/>kcp.socialweb.computer"]
+  web --> gw["gateway"]
+  gw -->|NodeClaim| market["market: bidders"]
+  market -->|"boots VM"| vm["VM node"]
+  vm --> k3s["your k3s cluster"]
+  front --> k3s
+```
 
 ## Prerequisites
 
@@ -154,6 +174,21 @@ A binary installed from this bucket needs no image flag at all: it looks for the
 
 ## The RFP flow
 
+```mermaid
+sequenceDiagram
+  participant R as requester
+  participant Relay as relay / firehose
+  participant B as bidder
+  participant G as guest (VM)
+  R->>Relay: compute.vm + signed market.rfp
+  Relay->>B: rfp event (bidders with fresh heartbeat)
+  B-->>R: bid (own repo) + direct submitBid
+  R->>B: accept
+  B->>G: boot from cloud-init user_data
+  G-->>R: onNetwork event + iroh ticket + host keys
+  R->>G: ssh over iroh ProxyCommand
+```
+
 A requester rents a VM by running the RFP flow. The requester posts a `compute.vm` record and a signed `market.rfp`; bidders bid; the requester accepts the winning bid; the winning bidder boots the guest from cloud-init `user_data` that installs the guest agent (sshd, the tunnel subscriber, and the client that reaches the guest). The guest reports an iroh ticket for its sshd with its on-network event; the requester's ssh dials that ticket (`socialweb-computer internal iroh-dial`, `dumbpipe connect`, as the `ProxyCommand`) and checks the host keys the guest reported. The market records go through the relay.
 
 ```
@@ -210,6 +245,23 @@ Build script options:
 | `--no-cache` | With `--verify-reproducible`, build both from scratch. |
 
 ## Run a market network on one host
+
+```mermaid
+flowchart TB
+  subgraph net["market network = one kcp"]
+    global["root:global<br/>plc"]
+    relay["root:relay<br/>relay, dispatchers"]
+    alice["root:alice<br/>pds"]
+    bob["root:bob<br/>pds"]
+    b1["root:bidder-1<br/>bidder, pds, guest-kcp"]
+    gw["root:gateway<br/>web app, requester, pds"]
+    req["root:request-N<br/>requester"]
+  end
+  req -->|rfp| relay
+  relay --> b1
+  b1 -->|bids| req
+  gw -->|NodeClaim| b1
+```
 
 A market network is one instance, profile `market-network`, with one kcp. It runs the shared atproto services (fake PLC in `root:global`, relay and dispatchers in `root:relay`, PDSes in `root:alice` and `root:bob`) and composes child applications, each in its own workspace of that kcp: one bidder per `--bidders` (`root:bidder-<n>`), with `--with-gateway` one gateway (`root:gateway`), and one workspace per `run request --network` invocation. A child's components are DenoPods in `root:<app>:app`. A production bidder or gateway runs the same manifest set in a kcp of its own.
 
@@ -311,6 +363,17 @@ deno run -A --no-lock scripts/associate.ts --creds ~/.bobvmbuilder_bsky_social_s
 ```
 
 A binary built from a working tree needs `--allow-dev-binary` on the install; a release binary does not.
+
+```mermaid
+flowchart LR
+  rel["release binary<br/>(bucket)"] --> inst["install bidder<br/>account swc-bidder"]
+  inst --> unit["socialweb-computer-bidder@handle"]
+  unit --> kcp["bidder kcp"]
+  kcp --> pods["bidder, pds, guest-kcp, policy-engine"]
+  assoc["associate.ts: one badgeBlueKeys record<br/>in your account's repo"] --> watch["watch verifies it"]
+  watch --> kcp
+  pods -->|"heartbeat 60 s"| disc["requesters keep it fresh 5 min"]
+```
 
 `--allow-dev-binary` accepts a binary built from a working tree. A release binary needs no such flag.
 
@@ -550,6 +613,17 @@ Check the result with `kubectl get marketidentity bidder -o jsonpath='{.status.p
 Symptoms: a gateway log line `no oauth session stored for did:...` means the web app user must sign in. A bidder log line `ScopeMissingError` means the OAuth client scope must be deployed to qr.fedfork.com (a separate host) and the bidder re-signed.
 
 ## Deploy a release to production
+
+```mermaid
+flowchart LR
+  tag["git tag v*"] --> gh["GitHub CI<br/>gate, binaries, guest image"]
+  gh -->|"publish"| bucket["Spaces bucket<br/>releases/tag"]
+  bucket --> deploy["scripts/deploy.sh"]
+  deploy --> gw["gateway host"]
+  deploy --> bidder["bidder host"]
+  gh --> gl["GitLab suite<br/>13 integration tests"]
+  gh --> canary["nightly canary<br/>throwaway DID"]
+```
 
 > Warning: a production deployment preserves nothing. Losing sessions, VMs, clusters, claims, or receipts during a deploy is acceptable, so deploy fresh.
 
