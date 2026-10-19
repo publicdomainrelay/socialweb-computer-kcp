@@ -17,6 +17,29 @@ flowchart LR
 - Working rules for this repository: [`AGENTS.md`](AGENTS.md)
 - Plans and their status: [`docs/plans/`](docs/plans/), [`NEXT.yaml`](NEXT.yaml)
 
+## Contents
+
+- [Pieces, and where each starts](#pieces-and-where-each-starts)
+- [Use the hosted gateway (public service)](#use-the-hosted-gateway-public-service)
+- [Prerequisites](#prerequisites)
+  - [Prepare a bare host](#prepare-a-bare-host)
+- [Install a release binary](#install-a-release-binary)
+- [The RFP flow](#the-rfp-flow)
+- [Build the socialweb-computer binary](#build-the-socialweb-computer-binary)
+- [Run a market network on one host](#run-a-market-network-on-one-host)
+- [Rent a VM through the RFP flow](#rent-a-vm-through-the-rfp-flow)
+- [Run and install a bidder](#run-and-install-a-bidder)
+- [Run the gateway and its web app](#run-the-gateway-and-its-web-app)
+- [Manage a tenant cluster over XRPC](#manage-a-tenant-cluster-over-xrpc)
+  - [Create a cluster and get a kubeconfig with goat](#create-a-cluster-and-get-a-kubeconfig-with-goat)
+  - [Watch cluster state with subscribeClusters](#watch-cluster-state-with-subscribeclusters)
+  - [Apply objects and run Jobs without a kubeconfig](#apply-objects-and-run-jobs-without-a-kubeconfig)
+- [Sign in with OAuth](#sign-in-with-oauth)
+- [Deploy a release to production](#deploy-a-release-to-production)
+- [Inspect the kcp of an application](#inspect-the-kcp-of-an-application)
+- [Run the integration tests](#run-the-integration-tests)
+- [License](#license)
+
 ## Pieces, and where each starts
 
 | Piece | Use it with | Section |
