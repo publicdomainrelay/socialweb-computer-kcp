@@ -83,14 +83,14 @@ func NewRegistry(opts RegistryOptions) (*Registry, error) {
 }
 
 func (r *Registry) Refs(ctx context.Context) ([]Ref, error) {
-	accounts, err := r.workspaces(ctx, kcpclient.RootWorkspace)
+	accounts, _, err := r.workspaces(ctx, kcpclient.RootWorkspace)
 	if err != nil {
 		return nil, err
 	}
 	var out []Ref
 	for _, account := range accounts {
 		path := kcpclient.RootWorkspace + ":" + account
-		homes, err := r.workspaces(ctx, path)
+		homes, deleting, err := r.workspaces(ctx, path)
 		if apierrors.IsNotFound(err) {
 			continue
 		}
@@ -100,7 +100,7 @@ func (r *Registry) Refs(ctx context.Context) ([]Ref, error) {
 		for _, home := range homes {
 			ref := Ref{Account: path, Home: path + ":" + home}
 			list, err := r.listClusters(ctx, ref.Home)
-			if apierrors.IsNotFound(err) {
+			if apierrors.IsNotFound(err) || (err != nil && deleting[home]) {
 				continue
 			}
 			if err != nil {
@@ -265,22 +265,24 @@ func (r *Registry) IdentityState(ctx context.Context, ref Ref) (v1alpha1.Identit
 	return "", nil
 }
 
-func (r *Registry) workspaces(ctx context.Context, logicalCluster string) ([]string, error) {
+func (r *Registry) workspaces(ctx context.Context, logicalCluster string) ([]string, map[string]bool, error) {
 	c, err := r.resource(logicalCluster, tenancyResource)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var list kcpv1alpha1.WorkspaceList
 	if err := c.Get().Resource("workspaces").Do(ctx).Into(&list); err != nil {
-		return nil, fmt.Errorf("clusterprovider: list workspaces in %s: %w", logicalCluster, err)
+		return nil, nil, fmt.Errorf("clusterprovider: list workspaces in %s: %w", logicalCluster, err)
 	}
 	var out []string
+	deleting := map[string]bool{}
 	for i := range list.Items {
 		if list.Items[i].Spec.Mount == nil {
 			out = append(out, list.Items[i].Name)
+			deleting[list.Items[i].Name] = list.Items[i].DeletionTimestamp != nil
 		}
 	}
-	return out, nil
+	return out, deleting, nil
 }
 
 func (r *Registry) clusters(ctx context.Context, logicalCluster string) (rest.Interface, error) {
