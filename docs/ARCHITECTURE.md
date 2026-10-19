@@ -3753,8 +3753,6 @@ because it bounds a mechanism the rest of this document leans on.
     limit are closed (section 15, "The contract watch's getRecord bursts", read on gl-runner-1 after this soak). Left from that
     reading: the soak requester's DenoPod RSS read +75.6 MB an hour (300 to 362 MB) with its fds flat and its heapUsed at 75 to
     119 MB while its ComputeContracts still rose (2441 to 2702); it needs a window past the contract TTL.
-  - The network's alice-pds and bob-pds hold more sockets each hour: 118 to 294 and 127 to 293 (+59 an hour), with their RSS
-    flat (+2 MB an hour); since plan 0018 they serve only identity and the verifier.
   - The gateway repo keeps com.fedproxy.rbac records of deleted clusters (`secrets.<cluster>-node1`): 7 to 20 in the window
     (+5.3 an hour), 20 of 258 cluster cycles (cycles 19, 30, 36, 37, 40, 41, 48 and 53 of the lanes).
   - The gateway's logs directory keeps `pg-<cluster>.log` of every cluster ever made: 259 files after 258 cycles.
@@ -3769,9 +3767,6 @@ because it bounds a mechanism the rest of this document leans on.
   - A DenoPod spec change (its args or `resources.memory`) does not restart the running pod; only `deno.computer/restart` does.
   - An installed bidder takes no `bid-ttl-sec` from its config.json: the app values reach only a market network's children, so the
     second bidder ran with the 86400 s default until a unit drop-in passed `-- --bid-ttl-sec 1800` to `run bidder` (19:27Z).
-  - `status.restartReasons` of the installed pds read `OOMKilled: 1` after three kernel OOM kills of its pod cgroup; the other two
-    counted as `Restarting`.
-  - The gateway root's gc scan reports one orphan: the MarketIdentity `root:gateway:app/requester` has no owner.
   - The relay backlog fell to 10000 frames and the relay got 1Gi: the relay RSS read 253 to 316 MB (414 at most, +15 MB an hour,
     flat by the fit rule).
   - Deleting a tenant cluster takes more than 4 minutes in some cycles under 8 lanes (the driver's 4-minute wait timed out 30
@@ -3960,6 +3955,34 @@ can outlive the work that closed it, and why one whose subject has been deleted 
 questions for hours without anyone stopping on it. The measurements stay with the entries rather than
 being tidied away, because a number without its condition is how the 332-second boot outlived its own
 refutation.
+
+- **The pds sockets, the gateway's orphan MarketIdentity and the uncounted OOM kills of the second soak (2026-10-19, read on
+  dev-sock-1, c-32, a one-kcp market network with the gateway under `soak load` at 1.1 RFP/s, 3 VM lanes and 4 tenant lanes, plus
+  a bidder made with `install bidder --allow-dev-binary` and pointed at the network).** Three items of section 14 closed:
+  - alice-pds and bob-pds did not leak; `soak sample` did (099ec6c5). `ss -tanp` per pid each minute, with the peer of each socket
+    resolved to its process: with no sampler both held 16 to 20 ESTAB sockets (the cores' clients, the relay, the dispatcher); with
+    the old `soak sample --every 1m` the sampler's own process held 1 more inbound keep-alive per PDS each minute (10 after 10
+    minutes, 00:10Z to 00:20Z: alice 6 to 15, bob 18 to 28). `pdsSample` built a new `http.Transport` per sample and never closed
+    it, and a Deno.serve listener keeps an idle keep-alive connection while its client does. With `CloseIdleConnections` the
+    series stayed flat for 63 minutes under the load (00:21Z to 01:23Z: alice 4 to 8, mean 5.6; bob 16 to 19, mean 17.8). The
+    second soak's +59 an hour is that sampler; the steps down at its core kills were the cores' own pooled connections.
+  - The orphan `root:gateway:app/requester` was a report without an owner link, not a leak (55682b85). The Gateway controller
+    wrote that MarketIdentity into `root:app` with no label, and `adoptChildren` adopts only in the root's own workspace; the
+    object lives as long as the `app` workspace, which carries the Gateway's owner reference. Every MarketIdentity that appctl
+    writes now carries `apps.socialweb.computer/root`. Removing the label by hand brought back the soak's reading (orphanTotal 1,
+    example `root:gateway:app/requester`); a gateway core restart wrote the label again and the next scan read 0. The Gateway's
+    status read orphanTotal 0 in all 62 per-minute samples of the churn run (80 tenant cluster cycles, 121 VM contracts).
+    ACC13-NO-ORPHANS stands. bidder-1's scan caught a ComputeVM between its create and its adoption 9 times (a new name each
+    time, none left at the end).
+  - An OOM kill of an adopted run now counts (a0e475c2). The pods of an installed core live in its runs unit and outlive a core
+    restart; the new core adopts each run without a wait goroutine, so no done.json was written and the kill counted as
+    `Restarting`. In the second soak the installed pds run of 19:11:45Z, adopted at the 19:27Z core restart, died at 20:22Z
+    (`Restarting`), the run of 20:22Z, adopted at the 21:22Z kill, died at 21:43Z (`Restarting`), and only the run of 21:43Z died
+    in the core that started it (`OOMKilled`). Observe now reads `oom_kill` and `memory.max` of an adopted run's pod cgroup and
+    writes done.json, and the settled-cgroup sweep keeps the cgroup of a run that a DenoPod still names. Six forced kills
+    (`memory.max` of the run's pod cgroup set to 8M) on the installed bidder, four of them after a `kill -9` of its core: the
+    kernel logged 6 `oom-kill` events in `pod-pod-*` cgroups, and `restartReasons` read pds `OOMKilled: 4`, guest-kcp
+    `OOMKilled: 1`, policy-engine `OOMKilled: 1`.
 
 - **The contract watch's getRecord bursts: the gateway requester's native RSS and the pds DenoPod's growth (plan 0013
   M4-SOAK-READING, 2026-10-18, commits fdeb7697, b97422d3, 9b600a20).** Before: the gateway requester DenoPod's RSS rose 227 to
