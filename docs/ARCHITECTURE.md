@@ -3749,18 +3749,10 @@ because it bounds a mechanism the rest of this document leans on.
     unreachable blocks" and "The requester's orphan records, the bidder's bid sweep, the requester heap and the gateway
     requester's retention"). Left open from the dev-bound-1 reading and the second 3 h soak on dev-soak-2 (2026-10-18, section 15,
     "Plan 0013 M4-SOAK-READING: second 3 h soak, systemd-user"); each is named with its slope over 20:35Z to 23:36Z:
-  - Requester native memory follows its connections to the dispatcher. Both requester DenoPods keep their V8 heap flat (soak
-    requester heapUsed 85 to 92 MB, gateway requester 41 to 57 MB) while their anonymous memory climbs inside one run: the soak
-    requester +767, +1976 and +2281 MB an hour in three runs of 35 to 48 minutes (68 MB at a start, 2021 MB at most), the
-    gateway requester +345 and +388 MB an hour (212 to 874 MB). The open sockets of each are bursts of ESTAB connections to the
-    dispatcher (`relay.localhost`, the ingress proxy that carries `submitRfp` and the other bidder calls): the soak requester up to
-    27491 fds, the gateway requester up to 17251, against 20 to 1100 between bursts (the dispatcher held 8298 ESTAB at 21:05Z).
-    The fitted window slope (+249 and +62 MB an hour) reads flat only because a chaos restart reset each pod every 49 minutes;
-    no DenoPod limit holds them on the dev backend. The next reading is which call opens a new connection per request (the
-    `withDeadline` of `submitRfp` does not abort its fetch) and whether the bursts end when the call is bounded.
-  - A bidder's pds DenoPod grows until its limit. The installed bidder's pds (512Mi) was OOM-killed by its pod cgroup at
-    20:22:17Z, 21:43:43Z and 23:08:22Z, 81 to 85 minutes per run (anon-rss 496 to 499 MB each time), and restarted alone; the
-    market network's bidder-1 pds read +67 to +151 MB an hour in each run. The repo it serves is flat (records and kv file below).
+  - Requester native memory (the bursts of ESTAB connections to the dispatcher) and the bidder's pds DenoPod growing to its
+    limit are closed (section 15, "The contract watch's getRecord bursts", read on gl-runner-1 after this soak). Left from that
+    reading: the soak requester's DenoPod RSS read +75.6 MB an hour (300 to 362 MB) with its fds flat and its heapUsed at 75 to
+    119 MB while its ComputeContracts still rose (2441 to 2702); it needs a window past the contract TTL.
   - The network's alice-pds and bob-pds hold more sockets each hour: 118 to 294 and 127 to 293 (+59 an hour), with their RSS
     flat (+2 MB an hour); since plan 0018 they serve only identity and the verifier.
   - The gateway repo keeps com.fedproxy.rbac records of deleted clusters (`secrets.<cluster>-node1`): 7 to 20 in the window
@@ -3968,6 +3960,49 @@ can outlive the work that closed it, and why one whose subject has been deleted 
 questions for hours without anyone stopping on it. The measurements stay with the entries rather than
 being tidied away, because a number without its condition is how the 332-second boot outlived its own
 refutation.
+
+- **The contract watch's getRecord bursts: the gateway requester's native RSS and the pds DenoPod's growth (plan 0013
+  M4-SOAK-READING, 2026-10-18, commits fdeb7697, b97422d3, 9b600a20).** Before: the gateway requester DenoPod's RSS rose 227 to
+  550 MB in 90 minutes with its heap flat at 45 MB, and in the second soak an installed bidder's pds DenoPod (512Mi) was
+  OOM-killed at 496 to 499 MB anon 81 to 85 minutes into each run (the next entry). Cause: `openContractWatch` opens a dedicated relay watch per contract
+  and calls getRecord on every bid, market.event and receipt the watch sees, before it can tell whether the record is its own.
+  A dedicated watch started 1000 events back from the stored cursor (`resumeCursor`'s overlap), and a requester with no stored
+  cursor (the gateway's) started with no cursor, which this relay answers with its whole backlog (10000 frames). So each new
+  contract replayed hundreds of records and fetched each one at once: 830 concurrent getRecord calls per contract on the soak
+  requester and 300 to 700 on the gateway requester (a fetch wrapper's in-flight peak, every 10 s). Each call took its own
+  keep-alive connection to the network dispatcher (`ss`: 850 to 900 ESTABLISHED, idle about 60 s, reaped after 90 s, a sawtooth).
+  The bidder's pds DenoPod served all of them through its ingress. The heap stayed small and the RSS was native: the requester's
+  connection buffers and the glibc main arena (`[heap]` in smaps, which a burst raises and never returns). The change: a
+  dedicated watch starts at the newest cursor that any watch of this process has seen, or the stored cursor with no overlap, and
+  the shared stream, once it is set up again after a teardown, starts there too. The 1000-event overlap stays for the first
+  connect after a restart. After the change the fetch peak is 4 to 9 in flight, apart from one burst at the start of each process
+  (the first replay). hono-repo-pds logs `pds_memory` every minute (`--memory-log-ms`). Reading on droplet gl-runner-1 (48 vCPU,
+  94 GB), account test-0001: one `dev up --profile market-network --bidders 1 --with-gateway --vm-host-backend systemd-user`,
+  the app values of dev-bound-1 (bid TTL 1800 s, gateway retention 900 s), `test/soak load` at 1.1 RFP/s, a VM contract every
+  40 s (3 lanes), 2 tenant lanes, contract TTL 40 minutes. Load from 20:59Z to 23:22Z: 9371 RFPs, 211 VM contracts held and
+  released, 74 tenant cluster cycles, 0 failed. /proc was sampled every minute. Before is 21:00Z to 21:37Z (the pds to 21:10Z,
+  before a heap snapshot raised its RSS by 140 MB). After is 22:20Z to 23:22Z (the requesters were restarted onto the change at
+  22:14Z and the pds at 21:41Z). The fit is the section 15 soak rule:
+
+| series | before (start, end, slope per hour) | after (start, end, max, slope per hour) | after plateau |
+| --- | --- | --- | --- |
+| gateway requester RSS (MB) | 147, 168, +29.8 | 146, 154, 155, +6.4 | yes |
+| gateway requester heapUsed / external (MB) | 38 to 46 / 6.8 | 42 to 43 / 6.8, flat | yes |
+| gateway requester fds | 42, 337, +334 | 45, 42, 48, -1.2 | yes |
+| soak requester fds | 185, 893, +850 | 41, 43, 49, +0.1 | yes |
+| bidder pds RSS (MB) | 172, 227 in 11 minutes, +322 | 218, 252, 252, +18.8 | yes |
+| bidder pds heapUsed (MB) | 36 to 60 | 46 to 76, +2.3 | yes |
+| bidder pds external (MB) | 6.5 to 8.7 | 19, 38, 38, +18.2 | NO (the firehose backlog filling, below) |
+| bidder pds fds | 30 to 33 | 30, 30, 34, +0.5 | yes |
+| bidder pds RSS, 00:15Z to 01:16Z (MB) | | 227, 273, 275, +11.3 | yes |
+| bidder pds external / brk heap, 00:15Z to 01:16Z (MB) | | 46.5 to 46.9, +0.3 / 79 to 81, +1.0 | yes |
+| gateway requester RSS, 00:15Z to 01:16Z (MB) | | 146, 155, 155, +5.2 | yes |
+
+  The pds external rise is the hono-pds `FirehoseSequencer` backlog: a heap snapshot shows each retained Uint8Array as a
+  backlog frame's `blocks`. The backlog is bounded at 10000 frames or 64 MiB of blocks, about 5 KB a frame here, so it fills in
+  about 2.5 hours at 1.1 bids a second and stopped at about 47 MB (the 00:15Z to 01:16Z rows, load running to 01:16Z: 16895
+  RFPs, 382 VM contracts released, 132 tenant cycles). Heap snapshots (`node:v8` `writeHeapSnapshot`) raise the pod's
+  RSS by about 140 MB that it keeps (glibc), so a reading that takes one must not be fitted across it.
 
 - **Plan 0013 M4-SOAK-READING: second 3 h soak, systemd-user (2026-10-18, fitted 20:35Z to 23:36Z; ACC13-NO-HOST-OOM holds, M3-DISK-RETENTION,
   M3-PDS-RECORD-RETENTION, M4-SOAK-READING and ACC13-BOUNDED do not).** Host: droplet dev-soak-2 (c-48, 48 vCPU, 94 GB, Ubuntu 24.04,
