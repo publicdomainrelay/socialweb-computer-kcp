@@ -9780,6 +9780,39 @@ Readings on dev-final-1 (DigitalOcean c-48, rc13 and main), one market network w
   account workspace stayed Deleting until devsup stopped the kcp; that was the teardown order of the
   gateway child, fixed in 499b454d (section 15, "The market network is one kcp").
 
+### A deleted cluster's home workspace goes (2026-10-19)
+
+Before: deleteCluster deleted only the Cluster object. The teardown (reap, which deletes the NodeClaims and
+waits for the web app to release them; links; store; finishDelete) removed the Cluster finalizer and the
+node claim index entry, and the home workspace `root:<account>:<cluster>` with its APIBindings, RBAC,
+quota and mount child stayed, empty, for ever. A market network lost them at dev down; prod never did.
+
+Now finishDelete calls `kcpclient.RemoveHome` after the finalizer: it deletes the home only when its
+Cluster is NotFound and it holds no NodeClaim, drops the index entry, then deletes the workspace. The
+clusterprovider sweep (every minute, beside the index sweep) removes any home of type cluster under an
+account that is older than 10 minutes (`EmptyHomeGrace`) and holds no Cluster and no NodeClaim. The
+account workspace stays: it is the user's account. createCluster for a name whose Cluster or home is
+being deleted answers 503 ClusterUnavailable ("being deleted; ask again once it is gone") instead of 200
+for the cluster that is going. kcp answers 504 to a read of a home right after its delete, so the cluster
+list re-reads that home and skips it when it is gone or Deleting.
+
+Readings on dev-home-1 (DigitalOcean c-16), one market network with 1 bidder and the gateway, 35 min of two
+lanes through the gateway XRPC: one creates a cluster, schedules a pod (one NodeClaim, Running, with the
+web app's release finalizer) and calls deleteCluster; the other creates and deletes empty clusters and,
+every third cycle, calls createCluster again right after deleteCluster.
+- 59 deleteCluster cycles, 23 with a rented node. In every cycle the NodeClaims were gone (2.7 s median,
+  3.9 s max) and the Cluster was gone before the home was Deleting; the home was gone 17.5 s median, 22.4 s
+  max after deleteCluster. 0 NodeClaims at the moment the home turned Deleting; 0 firecracker processes after.
+- 139 census samples of `kubectl get workspaces` under the account: home workspaces with a Cluster equal
+  listClusters in 138 (one sample raced a delete), at most 1 home Deleting at a time, none Deleting longer
+  than 3 min; at the end 1 home (the bootstrap cluster tenant) for 1 live cluster.
+- A home workspace written by hand without a Cluster was removed by the sweep 11 min 11 s later.
+- 12 createCluster-after-deleteCluster cycles: 503 for 15 to 21 s (8 to 11 tries) until the old home was
+  gone, then a new cluster Ready in about 26 s.
+- 71 finishDelete lines with homeRemoved true, 0 RemoveHome warnings, 0 cluster-list errors (before the
+  re-read, with only the Deleting flag of the list: 12 "list clusters in root:<account>:<home>: ... 504"
+  warnings in 25 cycles).
+
 ## 16. Vocabulary
 
 | | |
