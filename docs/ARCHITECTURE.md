@@ -3785,14 +3785,11 @@ because it bounds a mechanism the rest of this document leans on.
   `install bidder` made (`bidder.CheckAccount`). The second soak therefore read the breach on a second bidder made with
   `install bidder` and pointed at the network with `--market-network-file`. The change that closes it lets `dev up` place its
   children's cores as user units (Delegate=yes, OOMPolicy=continue) and carries the backend into the child records.
-- **kcpapply refuses an object that `kubectl patch` touched (observed on dev-soak-2, 2026-10-18; not yet called a defect).** A
-  `kubectl patch` of the installed bidder's OpenBaoServer `bidder` (the tidy interval) and of its DenoPod `bidder` (the memory
-  breach) added the field manager `kubectl-patch`. The next apply of the MarketBidder's components stopped at phase `vault` with
-  "the object was applied by kubectl and is never adopted; apply into a fresh instance: OpenBaoServer bidder is managed by
-  kubectl-patch", and the root stayed Provisioning from 19:27Z until the `kubectl-patch` entry was removed from
-  `metadata.managedFields` (19:30Z); then every component applied and the root read Ready. A patch under another field manager
-  (`soak tidy` uses `soak-tidy`) is adopted.
-
+- **kcpapply refuses an object that `kubectl patch` touched (fixed 2026-10-19).** It refused after a bare
+  `kubectl annotate deno.computer/restart=...`, which is how an operator restarts one DenoPod: prod's gateway
+  apply failed ("the object was applied by kubectl and is never adopted") and the web app went 502 until the
+  kubectl managed-fields entries were cleared by hand. A foreign manager whose ownership is confined to
+  annotations and labels is now tolerated; one that owns spec or status is still refused.
 - **The object-count quota defaults were retuned by the soak (plan 0013 M2-QUOTAS, 2026-10-18).** `appctl.QuotaDefaults` is
   Bids 10000 (was 20000), ComputeVMs 64, ComputeContracts 1024 on a gateway and 64 on a requester, NodeClaims 64 per home
   workspace, DenoRuns 200 and PolicyWorkflowRuns 500 per application workspace. 10000 Bids put the bidder kcp at about 2.1 GiB of

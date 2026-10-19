@@ -556,11 +556,40 @@ func number(v any) (float64, bool) {
 
 func refuseKubectl(u *unstructured.Unstructured) error {
 	for _, m := range u.GetManagedFields() {
-		if strings.HasPrefix(m.Manager, "kubectl") {
+		if strings.HasPrefix(m.Manager, "kubectl") && !annotationsOnly(m) {
 			return fmt.Errorf("%w: %s %s is managed by %s", ErrKubectlManaged, u.GetKind(), u.GetName(), m.Manager)
 		}
 	}
 	return nil
+}
+
+// annotationsOnly reports whether a field manager's ownership is confined to
+// annotations: a kubectl annotate writes nothing else, and a restart request or
+// an operator's note must not lock the object out of its own applier.
+func annotationsOnly(m metav1.ManagedFieldsEntry) bool {
+	if m.FieldsV1 == nil || len(m.FieldsV1.Raw) == 0 {
+		return false
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(m.FieldsV1.Raw, &fields); err != nil {
+		return false
+	}
+	allowed := map[string]bool{"f:metadata": true, "f:apiVersion": true, "f:kind": true}
+	for k := range fields {
+		if !allowed[k] {
+			return false
+		}
+	}
+	meta, ok := fields["f:metadata"].(map[string]any)
+	if !ok {
+		return false
+	}
+	for k := range meta {
+		if k != "f:annotations" && k != "f:labels" {
+			return false
+		}
+	}
+	return true
 }
 
 func owners(u *unstructured.Unstructured) map[string][]string {
