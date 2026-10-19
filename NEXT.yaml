@@ -862,5 +862,7 @@ paused_2026_10_19:
       next release.
   - id: GITLAB-RC21
     text: >
-      GitLab pipeline 255 (rc21) was running when work stopped; read its result and the retry
-      before trusting rc21's integration status. rc17 and rc19 were green twice; rc21 was not.
+      GitLab pipeline 255 (rc21) was running (job 635, ~20 min in) when gl-runner-1 was deleted at
+      teardown, so that job is lost, not failed. rc17 and rc19 were green twice; rc21 has no
+      integration reading. Recreate the runner (scripts/dev-droplet.sh + scripts/ci-runner-install.sh,
+      tunnel unit gl-runner-1-tunnel.service on hat-10) and run rc21 twice.
