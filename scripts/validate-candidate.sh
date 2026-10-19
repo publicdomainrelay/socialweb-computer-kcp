@@ -76,7 +76,7 @@ lane_c() {
       curl -fsSLO $bucket/releases/$base/binaries/SHA256SUMS
       grep ' socialweb-computer-linux-amd64\$' SHA256SUMS | sha256sum -c -
       install -m 0755 socialweb-computer-linux-amd64 /usr/local/bin/socialweb-base
-      /usr/local/bin/socialweb-base install bidder --account $acct --allow-dev-binary 2>&1 | tail -6
+      /usr/local/bin/socialweb-base install bidder --account $acct --handle vc-$short.test --allow-dev-binary 2>&1 | tail -6
       systemctl --user -M $acct@ list-units 'socialweb-computer-bidder@*' --no-legend | awk '{print \$1,\$3,\$4}'"
     echo "== record the base DID, pods and kcp slots"
     ssh -i "$key" -o BatchMode=yes "root@$ip" "S=/var/lib/socialweb-computer/$acct
