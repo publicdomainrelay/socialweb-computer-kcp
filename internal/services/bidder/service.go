@@ -159,6 +159,8 @@ type Service struct {
 
 	contracts sync.Map
 
+	releaseApplied sync.Map
+
 	verifiedBids sync.Map
 
 	acceptMu sync.Mutex

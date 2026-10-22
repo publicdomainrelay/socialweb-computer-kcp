@@ -22,7 +22,6 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/ingress"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
 )
 
@@ -226,26 +225,16 @@ func (s *Service) handleSubmitEvent(w http.ResponseWriter, r *http.Request) {
 		writeXRPCError(w, status, authCode(status), "invalid service-auth token")
 		return
 	}
-	if s.records == nil || s.vms == nil {
-		writeXRPCError(w, http.StatusServiceUnavailable, "Unavailable", "the bidder has no market record or ComputeVM store")
+	if s.records == nil || s.vms == nil || s.syncController == nil {
+		writeXRPCError(w, http.StatusServiceUnavailable, "Unavailable", "the bidder is not ready to accept events")
 		return
 	}
-	resolved, err := s.records.Resolve(r.Context(), market.RecordRef{URI: body.URI, CID: body.CID})
+	event, err := market.ParseEvent(body.Record)
 	if err != nil {
 		writeXRPCError(w, http.StatusBadRequest, "InvalidRequest", err.Error())
 		return
 	}
-	event, err := market.ParseEvent(resolved.Value)
-	if err != nil {
-		writeXRPCError(w, http.StatusBadRequest, "InvalidRequest", err.Error())
-		return
-	}
-	if err := s.verifyRecord(r.Context(), resolved); err != nil {
-		writeXRPCError(w, http.StatusBadRequest, "InvalidRequest", err.Error())
-		return
-	}
-	payloadNSID := market.NSIDFromURI(event.Payload.URI)
-	if payloadNSID != market.ComputeEventsVMDeleteNSID {
+	if market.NSIDFromURI(event.Payload.URI) != market.ComputeEventsVMDeleteNSID {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 		return
 	}
@@ -254,51 +243,30 @@ func (s *Service) handleSubmitEvent(w http.ResponseWriter, r *http.Request) {
 			"eventUri": terminated.EventUri, "payloadUri": terminated.PayloadUri})
 		return
 	}
-	info, found := s.contractForReceipt(r.Context(), event.Receipt.URI)
-	if !found {
-		writeXRPCError(w, http.StatusBadRequest, "InvalidRequest", "unknown receipt")
+	info, vm, found, err := s.localContractForReceipt(r.Context(), event.Receipt.URI)
+	if err != nil {
+		s.log.Warn("looking up the contract of the event failed", "receipt", event.Receipt.URI, "err", err)
+		writeXRPCError(w, http.StatusServiceUnavailable, "Unavailable", "the contract could not be looked up: "+err.Error())
 		return
 	}
-	if info.acceptAuthor != "" && info.acceptAuthor != issuer {
+	if found && info.acceptAuthor != "" && info.acceptAuthor != issuer {
 		writeXRPCError(w, http.StatusForbidden, "Forbidden", "not the accept author")
 		return
 	}
-	unlock := s.lockAccept(info.acceptURI)
-	defer unlock()
-	if terminated, ok := s.bidTerminatedByReceipt(r.Context(), event.Receipt.URI); ok {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "alreadyTerminated": true, "reason": terminated.Reason,
-			"eventUri": terminated.EventUri, "payloadUri": terminated.PayloadUri})
-		return
-	}
-	now := s.cfg.Now().UTC()
-	var releaseBid *v1alpha1.Bid
-	if s.bids != nil {
-		if bid, err := s.bids.Get(r.Context(), info.bidName); err == nil {
-			releaseBid = bid
-		}
-	}
-	request := &v1alpha1.RecordRef{URI: event.Payload.URI, CID: event.Payload.CID}
-	eventRef := &v1alpha1.RecordRef{URI: body.URI, CID: body.CID}
-	observedAt := now.Format(time.RFC3339)
-	if info.computeVM != "" {
-		if _, err := s.ensureTerminationSync(r.Context(), info, "deleted_on_request", observedAt, request); err != nil {
-			s.log.Warn("recording the termination on request failed", "computevm", info.computeVM, "err", err)
-			s.markBidReleasing(r.Context(), releaseBid, info, "ReleaseFailed", statusError(err))
-			writeXRPCError(w, http.StatusInternalServerError, "InternalError", "the termination event could not be queued: "+statusError(err))
+	if found && vm != nil && vm.UID != "" {
+		request := &v1alpha1.RecordRef{URI: event.Payload.URI, CID: event.Payload.CID}
+		if err := s.ensureInboundTerminationSync(r.Context(), vm, request, issuer, body.URI, body.CID, body.Record); err != nil {
+			s.log.Warn("recording the termination intent failed", "receipt", event.Receipt.URI, "err", err)
+			writeXRPCError(w, http.StatusServiceUnavailable, "Unavailable", "the termination intent could not be recorded: "+err.Error())
 			return
 		}
-		annotations := map[string]string{
-			computevm.ReleaseRequestedAnnotation: observedAt,
-			computevm.ReleaseRequestAnnotation:   request.URI + "#" + request.CID,
-		}
-		if err := s.vms.PatchAnnotations(r.Context(), info.computeVM, annotations); err != nil {
-			s.log.Warn("marking the ComputeVM for release failed", "computevm", info.computeVM, "err", err)
-			s.markBidReleasing(r.Context(), releaseBid, info, "ReleaseFailed", statusError(err))
-			writeXRPCError(w, http.StatusInternalServerError, "InternalError", "the release could not be requested: "+statusError(err))
+	} else {
+		if err := s.ensureReleaseSync(r.Context(), event.Receipt.URI, issuer, body.URI, body.CID, body.Record); err != nil {
+			s.log.Warn("recording the release intent failed", "receipt", event.Receipt.URI, "err", err)
+			writeXRPCError(w, http.StatusServiceUnavailable, "Unavailable", "the release intent could not be recorded: "+err.Error())
 			return
 		}
 	}
-	s.markBidReleaseRequested(r.Context(), releaseBid, info, request, eventRef, observedAt)
 	s.kickStateSync()
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
@@ -624,18 +592,26 @@ func (s *Service) bidForAccept(ctx context.Context, accept *market.Accept) (*v1a
 	return nil, fmt.Errorf("no bid of this bidder matches %s", accept.Bid.URI)
 }
 
-func (s *Service) contractForReceipt(ctx context.Context, receiptURI string) (contractInfo, bool) {
+func (s *Service) localContractForReceipt(ctx context.Context, receiptURI string) (contractInfo, *v1alpha1.ComputeVM, bool, error) {
+	if s.vms == nil {
+		return contractInfo{}, nil, false, errors.New("the bidder has no ComputeVM store")
+	}
+	var cached contractInfo
 	if value, ok := s.contracts.Load(receiptURI); ok {
 		if info, isInfo := value.(contractInfo); isInfo {
-			return info, true
+			cached = info
 		}
-	}
-	if s.vms == nil {
-		return contractInfo{}, false
 	}
 	list, err := s.vms.List(ctx)
 	if err != nil {
-		return contractInfo{}, false
+		return contractInfo{}, nil, false, err
+	}
+	if cached.computeVM != "" {
+		for i := range list {
+			if list[i].Name == cached.computeVM {
+				return cached, &list[i], true, nil
+			}
+		}
 	}
 	for i := range list {
 		vm := &list[i]
@@ -644,52 +620,12 @@ func (s *Service) contractForReceipt(ctx context.Context, receiptURI string) (co
 			continue
 		}
 		info := contractInfo{computeVM: vm.Name, receiptURI: contract.ReceiptUri, receiptCID: contract.ReceiptCid,
-			acceptURI: contract.AcceptUri, acceptCID: contract.AcceptCid, acceptAuthor: vm.Spec.Requester.Did}
+			acceptURI: contract.AcceptUri, acceptCID: contract.AcceptCid, acceptAuthor: vm.Spec.Requester.Did,
+			bidName: cached.bidName, submitEventURL: contract.SubmitEventUrl}
 		s.contracts.Store(receiptURI, info)
-		return info, true
+		return info, vm, true, nil
 	}
-	return s.contractForReceiptOfUnboundVM(ctx, receiptURI)
-}
-
-func (s *Service) contractForReceiptOfUnboundVM(ctx context.Context, receiptURI string) (contractInfo, bool) {
-	if s.records == nil || s.vms == nil || s.did == "" {
-		return contractInfo{}, false
-	}
-	if market.ATURIAuthority(receiptURI) != s.did {
-		return contractInfo{}, false
-	}
-	resolved, err := s.records.Resolve(ctx, market.RecordRef{URI: receiptURI})
-	if err != nil {
-		return contractInfo{}, false
-	}
-	receipt, err := market.ParseReceipt(resolved.Value)
-	if err != nil {
-		return contractInfo{}, false
-	}
-	acceptKey := computevm.AcceptRef{URI: receipt.Accept.URI, CID: receipt.Accept.CID}.Key()
-	if acceptKey == "" {
-		return contractInfo{}, false
-	}
-	info := contractInfo{receiptURI: receiptURI, receiptCID: resolved.CID,
-		acceptURI: receipt.Accept.URI, acceptCID: receipt.Accept.CID,
-		acceptAuthor: market.ATURIAuthority(receipt.Accept.URI)}
-	list, err := s.vms.List(ctx)
-	if err != nil {
-		return contractInfo{}, false
-	}
-	for i := range list {
-		vm := &list[i]
-		if computevm.AcceptKeyOf(vm) != acceptKey {
-			continue
-		}
-		if vm.DeletionTimestamp != nil || computevm.Ended(vm) {
-			continue
-		}
-		info.computeVM = vm.Name
-		break
-	}
-	s.contracts.Store(receiptURI, info)
-	return info, true
+	return contractInfo{}, nil, false, nil
 }
 
 func (s *Service) bidTerminatedByReceipt(ctx context.Context, receiptURI string) (*v1alpha1.BidTerminated, bool) {

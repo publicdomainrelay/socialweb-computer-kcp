@@ -30,10 +30,22 @@ const (
 
 	ProvisionSyncAdapter = "compute.provision"
 
+	ReleaseSyncAdapter = "compute.release"
+
 	provisionSyncPrefix = "accept-"
+
+	releaseSyncPrefix = "release-"
 
 	stateSyncPollInterval = 500 * time.Millisecond
 )
+
+type marketEventRequest struct {
+	URI string `json:"uri"`
+
+	CID string `json:"cid"`
+
+	Record map[string]any `json:"record"`
+}
 
 type marketEventPayload struct {
 	Collection string `json:"collection"`
@@ -50,6 +62,10 @@ type marketEventPayload struct {
 	PayloadRKey string `json:"payloadRKey"`
 
 	EventRKey string `json:"eventRKey"`
+
+	RequestEvent *marketEventRequest `json:"requestEvent,omitempty"`
+
+	RequesterDID string `json:"requesterDid,omitempty"`
 }
 
 func decodeMarketEventPayload(raw json.RawMessage) (marketEventPayload, map[string]any, error) {
@@ -147,7 +163,46 @@ func recordObservedAt(record map[string]any) string {
 	return ""
 }
 
+func verifyInboundDeleteEvent(ctx context.Context, service *Service, event marketEventRequest, receiptURI, receiptCID, requesterDID string) (*market.Event, error) {
+	if service == nil || service.records == nil {
+		return nil, errors.New("bidder: the inbound event verifier is not configured")
+	}
+	uri := strings.TrimSpace(event.URI)
+	if uri == "" || event.Record == nil {
+		return nil, errors.New("bidder: the inbound event is empty")
+	}
+	parsed, err := market.ParseEvent(event.Record)
+	if err != nil {
+		return nil, fmt.Errorf("bidder: the inbound event is invalid: %w", err)
+	}
+	if market.NSIDFromURI(parsed.Payload.URI) != market.ComputeEventsVMDeleteNSID {
+		return nil, errors.New("bidder: the inbound event is not a vm delete")
+	}
+	if err := service.verifyRecord(ctx, market.ResolvedRecord{URI: uri, CID: event.CID, Value: event.Record}); err != nil {
+		return nil, fmt.Errorf("bidder: the inbound event is not signed: %w", err)
+	}
+	if market.ATURIAuthority(uri) != requesterDID {
+		return nil, errors.New("bidder: the inbound event is not from the requester")
+	}
+	if parsed.Receipt.URI != receiptURI || parsed.Receipt.CID != receiptCID {
+		return nil, errors.New("bidder: the inbound event names another receipt")
+	}
+	payloadResolved, err := service.records.Resolve(ctx, market.RecordRef{URI: parsed.Payload.URI, CID: parsed.Payload.CID})
+	if err != nil {
+		return nil, fmt.Errorf("bidder: resolving the inbound event payload: %w", err)
+	}
+	if kind, _ := payloadResolved.Value["$type"].(string); kind != market.ComputeEventsVMDeleteNSID {
+		return nil, errors.New("bidder: the inbound event payload is not a vm delete")
+	}
+	if err := service.verifyRecord(ctx, payloadResolved); err != nil {
+		return nil, fmt.Errorf("bidder: the inbound event payload is not signed: %w", err)
+	}
+	return parsed, nil
+}
+
 type marketEventAdapter struct {
+	service *Service
+
 	records RecordStore
 
 	did string
@@ -215,6 +270,11 @@ func (a *marketEventAdapter) Apply(ctx context.Context, request statesync.Reques
 	if err != nil {
 		return statesync.Observation{}, err
 	}
+	if payload.RequestEvent != nil {
+		if err := a.applyInboundEvent(ctx, request, payload); err != nil {
+			return statesync.Observation{}, err
+		}
+	}
 	payloadRKey, eventRKey := payload.recordKeys(request.Key)
 	record := unsignedRecord(payload.Record)
 	signed, err := market.SignRecord(record, a.did, a.attestation)
@@ -248,6 +308,57 @@ func (a *marketEventAdapter) Apply(ctx context.Context, request statesync.Reques
 	return a.Observe(ctx, request)
 }
 
+func (a *marketEventAdapter) applyInboundEvent(ctx context.Context, request statesync.Request, payload marketEventPayload) error {
+	service := a.service
+	if service == nil || service.vms == nil || service.bids == nil {
+		return errors.New("bidder: the inbound event adapter is not configured")
+	}
+	event, err := verifyInboundDeleteEvent(ctx, service, *payload.RequestEvent, payload.Receipt.URI, payload.Receipt.CID, payload.RequesterDID)
+	if err != nil {
+		return err
+	}
+	if request.Source == nil || strings.TrimSpace(request.Source.Name) == "" {
+		return errors.New("bidder: the inbound event names no ComputeVM")
+	}
+	vm, err := service.vms.Get(ctx, request.Source.Name)
+	if err != nil {
+		return err
+	}
+	if vm == nil {
+		a.logf().Warn("the ComputeVM of an inbound delete event is gone", "computevm", request.Source.Name)
+		return nil
+	}
+	if vm.Spec.Requester.Did != "" && vm.Spec.Requester.Did != payload.RequesterDID {
+		return errors.New("bidder: the inbound event is not from the contract requester")
+	}
+	observedAt := service.nowUTC().Format(time.RFC3339)
+	annotations := map[string]string{
+		computevm.ReleaseRequestedAnnotation: observedAt,
+		computevm.ReleaseRequestAnnotation:   event.Payload.URI + "#" + event.Payload.CID,
+	}
+	if err := service.vms.PatchAnnotations(ctx, vm.Name, annotations); err != nil {
+		return fmt.Errorf("bidder: recording the release request on the ComputeVM: %w", err)
+	}
+	bid, err := service.bidForVM(ctx, vm)
+	if err != nil {
+		return err
+	}
+	info := contractInfo{computeVM: vm.Name, receiptURI: payload.Receipt.URI, receiptCID: payload.Receipt.CID,
+		acceptAuthor: payload.RequesterDID}
+	if contract := vm.Spec.Contract; contract != nil {
+		info.acceptURI, info.acceptCID = contract.AcceptUri, contract.AcceptCid
+		info.submitEventURL = contract.SubmitEventUrl
+	}
+	if bid != nil {
+		info.bidName = bid.Name
+	}
+	service.markBidReleaseRequested(ctx, bid, info,
+		&v1alpha1.RecordRef{URI: event.Payload.URI, CID: event.Payload.CID},
+		&v1alpha1.RecordRef{URI: payload.RequestEvent.URI, CID: payload.RequestEvent.CID},
+		observedAt)
+	return nil
+}
+
 func (a *marketEventAdapter) Delete(ctx context.Context, request statesync.Request) error {
 	payload, _, err := decodeMarketEventPayload(request.Payload)
 	if err != nil {
@@ -273,12 +384,16 @@ func (s *Service) startStateSync() error {
 		return errors.New("bidder: the component has no kcp clients")
 	}
 	registry := statesync.NewRegistry()
-	adapter := &marketEventAdapter{records: s.records, did: s.did, attestation: s.attestation, call: s.callService, log: s.log}
+	adapter := &marketEventAdapter{service: s, records: s.records, did: s.did, attestation: s.attestation, call: s.callService, log: s.log}
 	if err := registry.Register(adapter); err != nil {
 		return err
 	}
 	provision := &provisionAdapter{service: s, log: s.log}
 	if err := registry.Register(provision); err != nil {
+		return err
+	}
+	release := &releaseAdapter{service: s}
+	if err := registry.Register(release); err != nil {
 		return err
 	}
 	kick := make(chan struct{}, 1)
@@ -451,9 +566,6 @@ func (s *Service) ensureTerminationSync(ctx context.Context, info contractInfo, 
 	}
 	if contract := vm.Spec.Contract; contract == nil || contract.ReceiptUri == "" || contract.SubmitEventUrl == "" {
 		submitEventURL := info.submitEventURL
-		if submitEventURL == "" {
-			submitEventURL = s.publicURL()
-		}
 		vm = vm.DeepCopy()
 		if vm.Spec.Contract == nil {
 			vm.Spec.Contract = &v1alpha1.ComputeVMContract{}
@@ -641,6 +753,186 @@ func (s *Service) ensureProvisionSync(ctx context.Context, payload provisionPayl
 	return name, nil
 }
 
+func (s *Service) ensureInboundTerminationSync(ctx context.Context, vm *v1alpha1.ComputeVM, request *v1alpha1.RecordRef, requesterDID, eventURI, eventCID string, record map[string]any) error {
+	if vm == nil || vm.UID == "" {
+		return errors.New("bidder: an inbound termination StateSync needs a ComputeVM")
+	}
+	observedAt := s.nowUTC().Format(time.RFC3339)
+	object, err := computevm.TerminationStateSync(vm, s.cfg.Workspace, "deleted_on_request", observedAt, request)
+	if err != nil {
+		return err
+	}
+	spec, ok := object.Object["spec"].(map[string]any)
+	if !ok {
+		return errors.New("bidder: the termination StateSync has no spec")
+	}
+	payloadMap, ok := spec["payload"].(map[string]any)
+	if !ok {
+		return errors.New("bidder: the termination StateSync has no payload")
+	}
+	payloadMap["requestEvent"] = map[string]any{"uri": eventURI, "cid": eventCID, "record": record}
+	payloadMap["requesterDid"] = requesterDID
+	dyn, err := s.syncDynamic(s.cfg.Workspace)
+	if err != nil {
+		return err
+	}
+	name := object.GetName()
+	if _, err := dyn.Resource(statesync.StateSyncGVR).Create(ctx, object, metav1.CreateOptions{}); err != nil {
+		if !apierrors.IsAlreadyExists(err) {
+			return fmt.Errorf("bidder: creating the termination StateSync %s: %w", name, err)
+		}
+	} else {
+		s.log.Info("a termination StateSync is created", "computevm", vm.Name, "statesync", name)
+	}
+	return nil
+}
+
+type releasePayload struct {
+	ReceiptURI string `json:"receiptUri"`
+
+	RequesterDID string `json:"requesterDid"`
+
+	Event marketEventRequest `json:"event"`
+}
+
+func decodeReleasePayload(raw json.RawMessage) (releasePayload, error) {
+	var payload releasePayload
+	if len(raw) == 0 {
+		return payload, errors.New("bidder: the release payload is empty")
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return payload, fmt.Errorf("bidder: the release payload is not JSON: %w", err)
+	}
+	switch {
+	case strings.TrimSpace(payload.ReceiptURI) == "":
+		return payload, errors.New("bidder: the release payload names no receipt")
+	case strings.TrimSpace(payload.RequesterDID) == "":
+		return payload, errors.New("bidder: the release payload names no requester")
+	case strings.TrimSpace(payload.Event.URI) == "" || payload.Event.Record == nil:
+		return payload, errors.New("bidder: the release payload names no event")
+	}
+	return payload, nil
+}
+
+func releaseSyncName(receiptURI, eventURI string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(receiptURI) + "\x00" + strings.TrimSpace(eventURI)))
+	return releaseSyncPrefix + hex.EncodeToString(sum[:8])
+}
+
+func releaseAppliedKey(payload releasePayload) string {
+	return "release:" + payload.ReceiptURI + "#" + payload.Event.URI
+}
+
+func (s *Service) ensureReleaseSync(ctx context.Context, receiptURI, requesterDID, eventURI, eventCID string, record map[string]any) error {
+	payload := releasePayload{ReceiptURI: receiptURI, RequesterDID: requesterDID}
+	payload.Event.URI, payload.Event.CID, payload.Event.Record = eventURI, eventCID, record
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	var stored map[string]any
+	if err := json.Unmarshal(raw, &stored); err != nil {
+		return err
+	}
+	name := releaseSyncName(receiptURI, eventURI)
+	object := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": v1alpha1.GroupVersion.String(),
+		"kind":       "StateSync",
+		"metadata": map[string]any{
+			"name": name,
+			"labels": map[string]any{
+				"statesync.socialweb.computer/adapter": ReleaseSyncAdapter,
+			},
+		},
+		"spec": map[string]any{
+			"source":         map[string]any{"workspace": s.cfg.Workspace},
+			"sink":           map[string]any{"adapter": ReleaseSyncAdapter},
+			"direction":      string(v1alpha1.StateSyncDirectionOutbound),
+			"payload":        stored,
+			"idempotencyKey": "release:" + receiptURI + "#" + eventURI,
+			"conflictPolicy": string(v1alpha1.StateSyncConflictSourceWins),
+			"deletionPolicy": string(v1alpha1.StateSyncDeletionRetain),
+		},
+	}}
+	dyn, err := s.syncDynamic(s.cfg.Workspace)
+	if err != nil {
+		return err
+	}
+	if _, err := dyn.Resource(statesync.StateSyncGVR).Create(ctx, object, metav1.CreateOptions{}); err != nil {
+		if !apierrors.IsAlreadyExists(err) {
+			return fmt.Errorf("bidder: creating the release StateSync %s: %w", name, err)
+		}
+	} else {
+		s.log.Info("a release StateSync is created", "receipt", receiptURI, "statesync", name)
+	}
+	return nil
+}
+
+func (s *Service) vmForAccept(ctx context.Context, acceptURI, acceptCID string) (*v1alpha1.ComputeVM, error) {
+	if s.vms == nil {
+		return nil, errors.New("bidder: the ComputeVM store is not configured")
+	}
+	key := computevm.AcceptRef{URI: acceptURI, CID: acceptCID}.Key()
+	if key == "" {
+		return nil, nil
+	}
+	list, err := s.vms.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range list {
+		if computevm.AcceptKeyOf(&list[i]) != key {
+			continue
+		}
+		if list[i].DeletionTimestamp != nil || computevm.Ended(&list[i]) {
+			continue
+		}
+		return &list[i], nil
+	}
+	return nil, nil
+}
+
+func (s *Service) bidForVM(ctx context.Context, vm *v1alpha1.ComputeVM) (*v1alpha1.Bid, error) {
+	if s.bids == nil || vm == nil {
+		return nil, nil
+	}
+	bids, err := s.bids.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range bids {
+		if vm.Name != "" && bids[i].Status.ComputeVM == vm.Name {
+			return &bids[i], nil
+		}
+	}
+	if contract := vm.Spec.Contract; contract != nil {
+		for i := range bids {
+			accept := bids[i].Status.Accept
+			if accept != nil && accept.Uri == contract.AcceptUri && accept.Cid == contract.AcceptCid {
+				return &bids[i], nil
+			}
+		}
+	}
+	return nil, nil
+}
+
+func (s *Service) bidForAcceptStatus(ctx context.Context, acceptURI, acceptCID string) (*v1alpha1.Bid, error) {
+	if s.bids == nil {
+		return nil, errors.New("bidder: the bidder has no Bid store")
+	}
+	bids, err := s.bids.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range bids {
+		accept := bids[i].Status.Accept
+		if accept != nil && accept.Uri == acceptURI && accept.Cid == acceptCID {
+			return &bids[i], nil
+		}
+	}
+	return nil, nil
+}
+
 type provisionAdapter struct {
 	service *Service
 
@@ -657,21 +949,7 @@ func (a *provisionAdapter) logf() *slog.Logger {
 }
 
 func (s *Service) bidForAcceptIntent(ctx context.Context, payload provisionPayload) (*v1alpha1.Bid, error) {
-	if s.bids == nil {
-		return nil, errors.New("bidder: the bidder has no Bid store")
-	}
-	bids, err := s.bids.List(ctx)
-	if err != nil {
-		return nil, err
-	}
-	for i := range bids {
-		accept := bids[i].Status.Accept
-		if accept == nil || accept.Uri != payload.Accept.URI || accept.Cid != payload.Accept.CID {
-			continue
-		}
-		return &bids[i], nil
-	}
-	return nil, nil
+	return s.bidForAcceptStatus(ctx, payload.Accept.URI, payload.Accept.CID)
 }
 
 func (a *provisionAdapter) findVM(ctx context.Context, payload provisionPayload, bid *v1alpha1.Bid) (*v1alpha1.ComputeVM, error) {
@@ -1001,5 +1279,148 @@ func (a *provisionAdapter) Apply(ctx context.Context, request statesync.Request)
 }
 
 func (a *provisionAdapter) Delete(ctx context.Context, request statesync.Request) error {
+	return nil
+}
+
+type releaseAdapter struct {
+	service *Service
+}
+
+func (a *releaseAdapter) Name() string { return ReleaseSyncAdapter }
+
+func releaseSettledObservation(payload releasePayload, request statesync.Request, ref string) statesync.Observation {
+	if ref == "" {
+		ref = "released:" + payload.ReceiptURI
+	}
+	return statesync.Observation{
+		Exists: true,
+		Ref:    ref,
+		Hash:   provisionPayloadHash(request.Payload),
+		At:     time.Now().UTC().Format(time.RFC3339),
+	}
+}
+
+func (a *releaseAdapter) Observe(ctx context.Context, request statesync.Request) (statesync.Observation, error) {
+	payload, err := decodeReleasePayload(request.Payload)
+	if err != nil {
+		return statesync.Observation{}, err
+	}
+	service := a.service
+	if service == nil || service.records == nil || service.vms == nil || service.did == "" {
+		return statesync.Observation{}, errors.New("bidder: the release adapter is not configured")
+	}
+	if _, ok := service.releaseApplied.Load(releaseAppliedKey(payload)); ok {
+		return releaseSettledObservation(payload, request, ""), nil
+	}
+	if market.ATURIAuthority(payload.ReceiptURI) != service.did {
+		return statesync.Observation{Exists: false}, nil
+	}
+	resolved, err := service.records.Resolve(ctx, market.RecordRef{URI: payload.ReceiptURI})
+	if err != nil {
+		if errors.Is(err, market.ErrNotFound) {
+			return statesync.Observation{Exists: false}, nil
+		}
+		return statesync.Observation{}, err
+	}
+	receipt, err := market.ParseReceipt(resolved.Value)
+	if err != nil {
+		return statesync.Observation{}, err
+	}
+	vm, err := service.vmForAccept(ctx, receipt.Accept.URI, receipt.Accept.CID)
+	if err != nil {
+		return statesync.Observation{}, err
+	}
+	if vm != nil {
+		if computevm.ReleaseRequested(vm) {
+			return releaseSettledObservation(payload, request, vm.Name), nil
+		}
+		return statesync.Observation{Exists: false}, nil
+	}
+	bid, err := service.bidForAcceptStatus(ctx, receipt.Accept.URI, receipt.Accept.CID)
+	if err != nil {
+		return statesync.Observation{}, err
+	}
+	if bid != nil && bid.Status.Terminated != nil && bid.Status.Terminated.ReceiptUri == payload.ReceiptURI {
+		return releaseSettledObservation(payload, request, ""), nil
+	}
+	return statesync.Observation{Exists: false}, nil
+}
+
+func (a *releaseAdapter) Apply(ctx context.Context, request statesync.Request) (statesync.Observation, error) {
+	service := a.service
+	if service == nil || service.records == nil || service.vms == nil || service.did == "" {
+		return statesync.Observation{}, errors.New("bidder: the release adapter is not configured")
+	}
+	payload, err := decodeReleasePayload(request.Payload)
+	if err != nil {
+		return statesync.Observation{}, err
+	}
+	if market.ATURIAuthority(payload.ReceiptURI) != service.did {
+		return statesync.Observation{}, errors.New("bidder: the release intent names another bidder's receipt")
+	}
+	resolved, err := service.records.Resolve(ctx, market.RecordRef{URI: payload.ReceiptURI})
+	if err != nil {
+		return statesync.Observation{}, fmt.Errorf("bidder: resolving the receipt of the release intent: %w", err)
+	}
+	receipt, err := market.ParseReceipt(resolved.Value)
+	if err != nil {
+		return statesync.Observation{}, fmt.Errorf("bidder: the receipt of the release intent is invalid: %w", err)
+	}
+	if market.ATURIAuthority(receipt.Accept.URI) != payload.RequesterDID {
+		return statesync.Observation{}, errors.New("bidder: the release intent is not from the accept author")
+	}
+	event, err := verifyInboundDeleteEvent(ctx, service, payload.Event, payload.ReceiptURI, resolved.CID, payload.RequesterDID)
+	if err != nil {
+		return statesync.Observation{}, err
+	}
+	requestRef := &v1alpha1.RecordRef{URI: event.Payload.URI, CID: event.Payload.CID}
+	eventRef := &v1alpha1.RecordRef{URI: payload.Event.URI, CID: payload.Event.CID}
+	observedAt := service.nowUTC().Format(time.RFC3339)
+	info := contractInfo{receiptURI: payload.ReceiptURI, receiptCID: resolved.CID,
+		acceptURI: receipt.Accept.URI, acceptCID: receipt.Accept.CID, acceptAuthor: payload.RequesterDID,
+		submitEventURL: service.submitEventURL(ctx, receipt.SubmitEvent)}
+	vm, err := service.vmForAccept(ctx, receipt.Accept.URI, receipt.Accept.CID)
+	if err != nil {
+		return statesync.Observation{}, err
+	}
+	if vm == nil {
+		bid, err := service.bidForAcceptStatus(ctx, receipt.Accept.URI, receipt.Accept.CID)
+		if err != nil {
+			return statesync.Observation{}, err
+		}
+		if bid == nil {
+			return statesync.Observation{}, errors.New("bidder: the release intent names no known contract")
+		}
+		info.bidName = bid.Name
+		service.markBidReleaseRequested(ctx, bid, info, requestRef, eventRef, observedAt)
+		service.contracts.Store(payload.ReceiptURI, info)
+		service.releaseApplied.Store(releaseAppliedKey(payload), true)
+		return releaseSettledObservation(payload, request, ""), nil
+	}
+	info.computeVM = vm.Name
+	annotations := map[string]string{
+		computevm.ReleaseRequestedAnnotation: observedAt,
+		computevm.ReleaseRequestAnnotation:   requestRef.URI + "#" + requestRef.CID,
+	}
+	if err := service.vms.PatchAnnotations(ctx, vm.Name, annotations); err != nil {
+		return statesync.Observation{}, fmt.Errorf("bidder: recording the release request on the ComputeVM: %w", err)
+	}
+	bid, err := service.bidForVM(ctx, vm)
+	if err != nil {
+		return statesync.Observation{}, err
+	}
+	if bid != nil {
+		info.bidName = bid.Name
+	}
+	service.markBidReleaseRequested(ctx, bid, info, requestRef, eventRef, observedAt)
+	service.contracts.Store(payload.ReceiptURI, info)
+	if _, err := service.ensureTerminationSync(ctx, info, "deleted_on_request", observedAt, requestRef); err != nil {
+		return statesync.Observation{}, err
+	}
+	service.releaseApplied.Store(releaseAppliedKey(payload), true)
+	return releaseSettledObservation(payload, request, vm.Name), nil
+}
+
+func (a *releaseAdapter) Delete(ctx context.Context, request statesync.Request) error {
 	return nil
 }
