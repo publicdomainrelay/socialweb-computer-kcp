@@ -144,6 +144,14 @@ func (p *HTTPPLCSubmitter) UpdateService(ctx context.Context, did syntax.DID, se
 	if err != nil {
 		return fmt.Errorf("pds: the PLC service endpoint is invalid: %w", err)
 	}
+	var doc plc.DIDDocument
+	if err := p.getJSON(ctx, p.baseURL+"/"+did.String(), &doc); err == nil {
+		for _, service := range doc.Service {
+			if service.ID == "#atproto_pds" && service.ServiceEndpoint == endpoint {
+				return nil
+			}
+		}
+	}
 	var ops []plc.Operation
 	if err := p.getJSON(ctx, p.baseURL+"/"+did.String()+"/log", &ops); err != nil {
 		return err

@@ -302,6 +302,9 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	s.mu.Unlock()
 
 	success = true
+	if cfg.RequireIngress && cfg.PublicBaseURL != "" && cfg.Mode == atpds.ModeFull && submitter != nil {
+		go s.syncServiceEndpoints(ctx, accountStore, submitter, cfg.PublicBaseURL)
+	}
 	select {
 	case <-ctx.Done():
 	case <-stopCh:
@@ -311,6 +314,24 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	s.stopCh = nil
 	s.mu.Unlock()
 	return nil
+}
+
+func (s *Service) syncServiceEndpoints(ctx context.Context, store *atpds.Store, submitter atpds.PLCSubmitter, publicURL string) {
+	if store == nil || submitter == nil || strings.TrimSpace(publicURL) == "" {
+		return
+	}
+	dids, err := store.ListDIDs(ctx)
+	if err != nil {
+		return
+	}
+	for _, did := range dids {
+		if !strings.HasPrefix(string(did), "did:plc:") {
+			continue
+		}
+		if err := submitter.UpdateService(ctx, did, publicURL); err != nil && s.cfg.Deps.Log != nil {
+			s.cfg.Deps.Log.Warn("syncing the PDS service endpoint", "did", did.String(), "err", err.Error())
+		}
+	}
 }
 
 func (s *Service) oauthConfig(ctx context.Context, cfg Config, baseURL string, credentials component.CredentialResolver) (*atpds.OAuthConfig, error) {

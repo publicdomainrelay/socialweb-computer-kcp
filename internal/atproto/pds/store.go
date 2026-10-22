@@ -257,6 +257,27 @@ func (s *Store) GetAccount(ctx context.Context, did syntax.DID) (*Account, error
 	return acct, nil
 }
 
+func (s *Store) ListDIDs(ctx context.Context) ([]syntax.DID, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT did FROM pds_accounts ORDER BY did`)
+	if err != nil {
+		return nil, fmt.Errorf("pds: listing account DIDs: %w", err)
+	}
+	defer rows.Close()
+	var out []syntax.DID
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return nil, fmt.Errorf("pds: reading an account DID: %w", err)
+		}
+		did, err := syntax.ParseDID(raw)
+		if err != nil {
+			continue
+		}
+		out = append(out, did)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) GetAccountByIdentifier(ctx context.Context, identifier string) (*Account, error) {
 	identifier = strings.TrimSpace(identifier)
 	row := s.db.QueryRowContext(ctx,

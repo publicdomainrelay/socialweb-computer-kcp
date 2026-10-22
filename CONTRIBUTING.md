@@ -4,8 +4,8 @@ Read [AGENTS.md](AGENTS.md) first: working rules, edit discipline, live-run conv
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) holds decisions and invariants; plans and backlog live in
 [docs/plans/](docs/plans/) and [NEXT.yaml](NEXT.yaml).
 
-Work in a plain git worktree or branch. Commit small logical commits. Do not push. Live work runs as
-the VM account (`test-0001`) from a dev build and a mirror that account can read.
+Work in a plain git worktree or branch. Commit small logical commits and push as you go. Live work
+runs as the VM account (`test-0001`) from a dev build and a mirror that account can read.
 
 Commands marked "variables carry over" use values set in the block above them.
 
