@@ -189,10 +189,6 @@ func (s *Service) handleSubmitBid(w http.ResponseWriter, r *http.Request) {
 		writeXRPCError(w, http.StatusBadRequest, "InvalidRequest", err.Error())
 		return
 	}
-	if err := s.verifyRecord(r.Context(), market.ResolvedRecord{URI: body.URI, CID: body.CID, Value: body.Record}); err != nil {
-		writeXRPCError(w, http.StatusBadRequest, "InvalidRequest", err.Error())
-		return
-	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
