@@ -39,6 +39,7 @@ const (
 	EnvArtifacts  = "SOCIALWEB_IT_ARTIFACTS"
 	EnvRunRoot    = "SOCIALWEB_IT_RUN_ROOT"
 	EnvLiveSlot   = "SOCIALWEB_IT_LIVE_SLOT"
+	EnvDumbpipe   = "SOCIALWEB_IT_DUMBPIPE"
 
 	liveSlotWait = 30 * time.Minute
 	liveSlotBeat = 10 * time.Minute
@@ -46,6 +47,8 @@ const (
 	defaultRunRoot    = "/var/tmp/swcit"
 	defaultAccount    = "test-0001"
 	defaultGuestImage = "file:///var/lib/socialweb-computer/guest-image"
+
+	defaultDumbpipe = "/usr/local/bin/dumbpipe"
 
 	buildTimeout   = 15 * time.Minute
 	upTimeout      = 4 * time.Minute
@@ -100,6 +103,21 @@ func envOr(name, def string) string {
 		return v
 	}
 	return def
+}
+
+func dumbpipePath(t testing.TB) string {
+	t.Helper()
+	if v := os.Getenv(EnvDumbpipe); v != "" {
+		return v
+	}
+	if st, err := os.Stat(defaultDumbpipe); err == nil && st.Mode().IsRegular() && st.Mode().Perm()&0o111 != 0 {
+		return defaultDumbpipe
+	}
+	if path, err := exec.LookPath("dumbpipe"); err == nil {
+		return path
+	}
+	t.Fatalf("no dumbpipe executable: set %s, install %s, or put dumbpipe on PATH; the ssh gateway reaches guests over iroh only", EnvDumbpipe, defaultDumbpipe)
+	return ""
 }
 
 func randHex(n int) string {
@@ -348,6 +366,8 @@ type NetworkOptions struct {
 	WithGateway bool
 	UpTimeout   time.Duration
 
+	Dumbpipe string
+
 	GatewayOptions map[string]string
 }
 
@@ -446,6 +466,9 @@ func StartNetwork(t testing.TB, opts NetworkOptions) *Network {
 		"--ready-timeout", "90s", "--network-timeout", opts.UpTimeout.String(), "--state-dir", n.StateRoot}
 	if opts.WithGateway {
 		args = append(args, "--with-gateway")
+	}
+	if opts.Dumbpipe != "" {
+		args = append(args, "--dumbpipe-path", opts.Dumbpipe)
 	}
 	r := n.Run("dev-up", opts.UpTimeout+30*time.Second, args...)
 	if r.Err != nil {

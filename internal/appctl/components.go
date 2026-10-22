@@ -259,7 +259,11 @@ func serviceNameFor(kind, name string) string {
 }
 
 func serviceDesired(ws, kind, name string, protocol exposurev1alpha1.ServiceProtocol, handler string, suspend bool) desiredComponent {
-	return desiredComponent{Kind: ComponentKindService, Name: serviceNameFor(kind, name), Spec: exposurev1alpha1.ServiceSpec{
+	return serviceDesiredNamed(ws, kind, name, serviceNameFor(kind, name), protocol, handler, suspend)
+}
+
+func serviceDesiredNamed(ws, kind, name, serviceName string, protocol exposurev1alpha1.ServiceProtocol, handler string, suspend bool) desiredComponent {
+	return desiredComponent{Kind: ComponentKindService, Name: serviceName, Spec: exposurev1alpha1.ServiceSpec{
 		TargetRef: exposurev1alpha1.ServiceTargetRef{Workspace: ws, Kind: kind, Name: name},
 		Protocol:  protocol,
 		Handler:   handler,
@@ -269,8 +273,13 @@ func serviceDesired(ws, kind, name string, protocol exposurev1alpha1.ServiceProt
 
 func exposureDesired(kind, name, suffix string, mode exposurev1alpha1.ExposureMode, hostname, path, ingressRef string,
 	tls exposurev1alpha1.ExposureTLS, suspend bool) desiredComponent {
-	return desiredComponent{Kind: ComponentKindExposure, Name: serviceNameFor(kind, name) + suffix, Spec: exposurev1alpha1.ExposureSpec{
-		ServiceRef: serviceNameFor(kind, name),
+	return exposureDesiredForService(serviceNameFor(kind, name), suffix, mode, hostname, path, ingressRef, tls, suspend)
+}
+
+func exposureDesiredForService(serviceName, suffix string, mode exposurev1alpha1.ExposureMode, hostname, path, ingressRef string,
+	tls exposurev1alpha1.ExposureTLS, suspend bool) desiredComponent {
+	return desiredComponent{Kind: ComponentKindExposure, Name: serviceName + suffix, Spec: exposurev1alpha1.ExposureSpec{
+		ServiceRef: serviceName,
 		Mode:       mode,
 		Hostname:   hostname,
 		Path:       path,
@@ -344,9 +353,11 @@ func pdsExposures(ws, name string, network *v1alpha1.MarketNetworkValue, hostnam
 }
 
 func sshExposures(ws, name string, suspend bool) []desiredComponent {
+	serviceName := serviceNameFor(ComponentKindSshServer, name) + "-ssh"
 	return []desiredComponent{
-		serviceDesired(ws, ComponentKindSshServer, name, exposurev1alpha1.ServiceProtocolSSH, "ssh", suspend),
-		localExposure(ComponentKindSshServer, name, exposurev1alpha1.ExposureTLS{}, suspend),
+		serviceDesiredNamed(ws, ComponentKindSshServer, name, serviceName, exposurev1alpha1.ServiceProtocolSSH, "ssh", suspend),
+		exposureDesiredForService(serviceName, ExposureLocalSuffix, exposurev1alpha1.ExposureModeLocal, "", "", "",
+			exposurev1alpha1.ExposureTLS{}, suspend),
 	}
 }
 
@@ -664,6 +675,7 @@ func (ctl *Controller) ComponentPassIn(ctx context.Context, ws, owner string) (C
 	pass := ComponentPass{AllReady: len(views) > 0}
 	for _, v := range views {
 		if isExposureKind(v.Kind) {
+			pass.Listeners = append(pass.Listeners, v.Listeners()...)
 			continue
 		}
 		pass.Components = append(pass.Components, v.ApplicationComponent())

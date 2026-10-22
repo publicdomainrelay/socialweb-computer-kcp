@@ -78,7 +78,7 @@ var (
 
 func SharedNetwork(t testing.TB, opts NetworkOptions) *Network {
 	t.Helper()
-	key := fmt.Sprintf("b%d-gw%t", opts.Bidders, opts.WithGateway)
+	key := fmt.Sprintf("b%d-gw%t-d%s", opts.Bidders, opts.WithGateway, opts.Dumbpipe)
 	sharedMu.Lock()
 	e, ok := sharedNets[key]
 	if !ok {

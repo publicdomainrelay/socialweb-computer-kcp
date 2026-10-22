@@ -135,7 +135,7 @@ var APIResources = []APIResource{
 	{Kind: "Bidder", Plural: "bidders", Revision: 3, Export: "applications", Object: Bidder{}, PrinterColumns: componentPrinterColumns},
 	{Kind: "GuestControlPlane", Plural: "guestcontrolplanes", Revision: 1, Export: "applications", Object: GuestControlPlane{}, PrinterColumns: componentPrinterColumns},
 	{Kind: "Pds", Plural: "pds", Revision: 2, Export: "applications", Object: Pds{}, PrinterColumns: componentPrinterColumns},
-	{Kind: "Requester", Plural: "requesters", Revision: 4, Export: "applications", Object: Requester{}, PrinterColumns: componentPrinterColumns},
+	{Kind: "Requester", Plural: "requesters", Revision: 5, Export: "applications", Object: Requester{}, PrinterColumns: componentPrinterColumns},
 	{Kind: "GatewayAPI", Plural: "gatewayapis", Revision: 2, Export: "applications", Object: GatewayAPI{}, PrinterColumns: componentPrinterColumns},
 	{Kind: "SshServer", Plural: "sshservers", Revision: 2, Export: "applications", Object: SshServer{}, PrinterColumns: componentPrinterColumns},
 	{Kind: "Plc", Plural: "plcs", Revision: 1, Export: "applications", Object: Plc{}, PrinterColumns: componentPrinterColumns},

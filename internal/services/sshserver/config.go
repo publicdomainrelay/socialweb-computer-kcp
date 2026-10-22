@@ -2,7 +2,8 @@ package sshserver
 
 import (
 	"context"
-	"encoding/json"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -10,7 +11,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -201,34 +201,7 @@ type Config struct {
 	Log *slog.Logger
 }
 
-type OwnerSession struct {
-	Service string `json:"service"`
-
-	Identifier string `json:"identifier"`
-
-	Password string `json:"password"`
-}
-
-func loadOwnerSessions(path string) (map[string]OwnerSession, string, string, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, "", "", fmt.Errorf("sshserver: the owner sessions file %s: %w", path, err)
-	}
-	sessions := map[string]OwnerSession{}
-	if err := json.Unmarshal(raw, &sessions); err != nil {
-		return nil, "", "", fmt.Errorf("sshserver: the owner sessions file %s: %w", path, err)
-	}
-	if len(sessions) == 0 {
-		return nil, "", "", fmt.Errorf("sshserver: the owner sessions file %s names no account", path)
-	}
-	dids := make([]string, 0, len(sessions))
-	for did := range sessions {
-		dids = append(dids, did)
-	}
-	sort.Strings(dids)
-	did := dids[0]
-	return sessions, did, sessions[did].Identifier, nil
-}
+type OwnerSession = sshtransport.OwnerSession
 
 func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, error) {
 	var decoded v1alpha1.SshServerSpec
@@ -268,7 +241,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		cfg.StateDir = decoded.Storage.DataDir
 	}
 	if decoded.OwnerSessionsFile != "" {
-		sessions, did, handle, err := loadOwnerSessions(decoded.OwnerSessionsFile)
+		sessions, did, handle, err := sshtransport.LoadOwnerSessions(decoded.OwnerSessionsFile)
 		if err != nil {
 			return Config{}, err
 		}
@@ -404,8 +377,11 @@ func (c *Config) defaults() {
 			c.HostKeyPath = filepath.Join(c.StateDir, "ssh_host_ed25519_key")
 		}
 	}
+	if tlsConfig := networkTLSConfig(c.Network.CaBundleRef); tlsConfig != nil {
+		c.Deps.TLS = tlsConfig
+	}
 	if c.Directory == nil && c.Network.PlcDirectoryUrl != "" && c.Deps.Handlers != nil {
-		c.Directory = directoryFor(c.Network.PlcDirectoryUrl, c.Deps, c.DirectoryKeys, c.DirectoryTTL)
+		c.Directory = directoryFor(*c, c.Network.PlcDirectoryUrl, c.DirectoryKeys, c.DirectoryTTL)
 	}
 	if len(c.TrustedHosts) == 0 {
 		c.TrustedHosts = networkTrustedHosts(c.Network, c.Hostnames, c.PublicHostname)
@@ -450,7 +426,7 @@ func Register(runtime *component.Runtime) error {
 	return runtime.Register(Kind, Factory)
 }
 
-func directoryFor(raw string, deps component.Deps, capacity int, ttl time.Duration) identity.Directory {
+func directoryFor(cfg Config, raw string, capacity int, ttl time.Duration) identity.Directory {
 	base := identity.DefaultDirectory()
 	raw = strings.TrimRight(raw, "/")
 	if raw == "" || raw == strings.TrimRight(identity.DefaultPLCURL, "/") {
@@ -462,7 +438,7 @@ func directoryFor(raw string, deps component.Deps, capacity int, ttl time.Durati
 	}
 	inner := cached.Inner
 	if directory, ok := inner.(*identity.BaseDirectory); ok {
-		client := serviceHTTPClient(deps, 30*time.Second)
+		client := serviceHTTPClient(cfg, 30*time.Second)
 		inner = &identity.BaseDirectory{
 			PLCURL:                 raw,
 			PLCLimiter:             directory.PLCLimiter,
@@ -497,18 +473,70 @@ func (t handlerAwareRoundTripper) RoundTrip(req *http.Request) (*http.Response, 
 	return external.RoundTrip(req)
 }
 
-func serviceHTTPClient(deps component.Deps, timeout time.Duration) *http.Client {
+func serviceHTTPClient(cfg Config, timeout time.Duration) *http.Client {
 	var external http.RoundTripper = http.DefaultTransport
 	if transport, err := networkdial.NewHTTPTransportWithOptions(networkdial.DialOptions{
-		Hosts:          deps.Hosts,
-		TLSConfig:      deps.TLS,
+		Hosts:          networkHostsResolver(cfg.Network, cfg.Deps.Hosts),
+		TLSConfig:      cfg.Deps.TLS,
 		AllowSystemDNS: true,
 	}); err == nil {
 		external = transport
 	}
 	return &http.Client{
 		Timeout:   timeout,
-		Transport: handlerAwareRoundTripper{handlers: deps.Handlers, external: external},
+		Transport: handlerAwareRoundTripper{handlers: cfg.Deps.Handlers, external: external},
+	}
+}
+
+type chainedHosts []networkdial.Resolver
+
+func (c chainedHosts) Address(hostport string) (string, bool) {
+	for _, resolver := range c {
+		if resolver == nil {
+			continue
+		}
+		if address, ok := resolver.Address(hostport); ok {
+			return address, true
+		}
+	}
+	return "", false
+}
+
+func networkTLSConfig(caBundleRef string) *tls.Config {
+	raw := strings.TrimSpace(caBundleRef)
+	if raw == "" {
+		return nil
+	}
+	data, err := os.ReadFile(raw)
+	if err != nil {
+		return nil
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(data) {
+		return nil
+	}
+	return &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
+}
+
+func networkHostsResolver(network v1alpha1.MarketNetworkValue, fallback networkdial.Resolver) networkdial.Resolver {
+	entries := make([]networkdial.Host, 0, len(network.Hosts))
+	for _, host := range network.Hosts {
+		entries = append(entries, networkdial.Host{Name: host.Name, Address: host.Address})
+	}
+	resolvers := make([]networkdial.Resolver, 0, 2)
+	if mapped, err := networkdial.NewHostMap(entries); err == nil && mapped.Len() > 0 {
+		resolvers = append(resolvers, mapped)
+	}
+	if fallback != nil {
+		resolvers = append(resolvers, fallback)
+	}
+	switch len(resolvers) {
+	case 0:
+		return nil
+	case 1:
+		return resolvers[0]
+	default:
+		return chainedHosts(resolvers)
 	}
 }
 

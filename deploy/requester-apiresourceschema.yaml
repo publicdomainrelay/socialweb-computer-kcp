@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-4.requesters.socialweb.computer
+  name: v1alpha1-5.requesters.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -190,6 +190,10 @@ spec:
               mode:
                 type: string
               guestSSHKeysFile:
+                type: string
+              ownerSessionsFile:
+                type: string
+              irohSocket:
                 type: string
               acceptCopies:
                 type: integer

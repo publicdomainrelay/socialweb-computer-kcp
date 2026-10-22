@@ -218,11 +218,13 @@ With `--network`, the market network places the bidder under its own devsup, so 
 
 `run gateway ssh --network` adds an `SshGateway` entry to `spec.apps[]`, places
 its own kcp, and copies the network value and the bidders' DIDs onto its root
-object. Its kcp holds an OpenBaoServer (OAuth sessions, the requester key), the
+object. Its kcp holds an OpenBaoServer (OAuth sessions and web sessions), the
 iroh dialer HostProcess (`socialweb-computer internal iroh-dial` on a unix socket
 in the gateway's state dir, the only process that runs `dumbpipe connect`) and
-the `hono-socialweb-computer-ssh` DenoPod. Both listeners bind port 0;
-`run gateway ssh` prints them (`.ssh`, `.listeners`).
+the in-process `Requester` and `SshServer` components. The gateway declares two
+local Exposures for the `SshServer`: one serves `ssh` and one serves its HTTP
+keys API. Both bind port 0; `run gateway ssh` prints the local ssh Exposure
+address in `.ssh` and every local endpoint in `.listeners`.
 
 ```bash
 socialweb-computer run gateway ssh --host-backend proc --network mn1 --name sshgw \
@@ -234,9 +236,20 @@ The market network must be brought up with dumbpipe (`--dumbpipe-path` or
 `SOCIALWEB_DUMBPIPE_PATH` in a dev build). The owner sessions file is a
 market-network seam: a JSON object keyed by account DID of
 `{service, identifier, password}`, used in place of a deposited OAuth session.
-The account must have a `badgeBlueKeys` `requester_associate` record for the ssh
-key. Every session rents its guest through the RFP flow and releases it
-(vm.delete) when the command exits.
+The requester signs in to that PDS with the session, writes its RFP records
+there, and mints service-auth tokens through it; it publishes the badgeBlueKeys
+record that binds its own signing key. The same credentials authenticate the
+keys API: `POST /keys` with HTTP basic auth (`identifier` and `password`) adds
+the key the account may use at the ssh door. The account must have a
+`badgeBlueKeys` `requester_associate` record for the ssh key.
+
+Every ssh connection rents its guest through the RFP flow and releases it
+(vm.delete) when the command exits. A connection that sends `LC_SESSION=<name>`
+holds the guest under that name, reuses it for later connections of the same
+account, and releases it after five idle minutes or when the requester stops;
+that is what lets a connection resume after `dev restart
+<gateway>/ssh-server` without a second RFP. A connection that does not send
+`LC_SESSION` keeps the one-shot rent-and-release behavior.
 
 ### Add a cluster gateway
 

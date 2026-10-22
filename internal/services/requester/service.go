@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -65,6 +66,8 @@ type Service struct {
 
 	oauth *OAuthSession
 
+	ownerServiceAuth ServiceAuthSource
+
 	market MarketClient
 
 	contracts ContractStore
@@ -118,6 +121,10 @@ type Service struct {
 	secretsMu sync.Mutex
 
 	secrets map[string]*secretsState
+
+	heldMu sync.Mutex
+
+	heldSessions map[string]*heldSession
 }
 
 type scopeEntry struct {
@@ -148,6 +155,7 @@ func New(cfg Config) (*Service, error) {
 		bidders:       map[string]Bidder{},
 		scopeCache:    map[string]scopeEntry{},
 		secrets:       map[string]*secretsState{},
+		heldSessions:  map[string]*heldSession{},
 	}, nil
 }
 
@@ -276,6 +284,11 @@ func (s *Service) setup(ctx context.Context) error {
 		}
 		s.cfg.AttestationKey = s.cfg.RepoKey
 	}
+	if len(s.cfg.OwnerSessions) > 0 {
+		if err := s.authenticateOwnerSession(ctx); err != nil {
+			return err
+		}
+	}
 	s.signer = market.NewSigner(s.cfg.AttestationKey, s.cfg.MarketDID)
 	remote := market.NewHTTPReader(s.directory)
 	remote.Client = s.cfg.HTTPClient
@@ -289,10 +302,17 @@ func (s *Service) setup(ctx context.Context) error {
 	} else {
 		s.repo = s.cfg.Repo
 	}
+	if len(s.cfg.OwnerSessions) > 0 {
+		if err := s.bindSignerKey(ctx); err != nil {
+			return err
+		}
+	}
 	if s.cfg.Market == nil {
 		var serviceAuth ServiceAuthSource
 		if s.oauth != nil {
 			serviceAuth = s.oauth
+		} else if s.ownerServiceAuth != nil {
+			serviceAuth = s.ownerServiceAuth
 		}
 		s.market = &HTTPMarket{
 			Directory:      s.directory,
@@ -337,6 +357,106 @@ func (s *Service) setup(ctx context.Context) error {
 		Log:       s.log,
 		Now:       s.cfg.Now,
 	}
+	return nil
+}
+
+const ownerSessionSigningService = "market_requester"
+
+func (s *Service) authenticateOwnerSession(ctx context.Context) error {
+	session, ok := s.cfg.OwnerSessions[s.cfg.RepoDID]
+	if !ok {
+		return fmt.Errorf("requester: the owner sessions file names no account %s", s.cfg.RepoDID)
+	}
+	did, err := syntax.ParseDID(s.cfg.RepoDID)
+	if err != nil {
+		return fmt.Errorf("requester: owner DID: %w", err)
+	}
+	pds, err := pdsclient.NewRemote(pdsclient.RemoteConfig{
+		BaseURL:    session.Service,
+		DID:        did,
+		HTTPClient: s.cfg.HTTPClient,
+		Timeout:    DefaultHTTPTimeout,
+	})
+	if err != nil {
+		return fmt.Errorf("requester: the owner PDS %s: %w", session.Service, err)
+	}
+	opened, err := pds.CreateSession(ctx, session.Identifier, session.Password)
+	if err != nil {
+		return fmt.Errorf("requester: the owner session of %s: %w", s.cfg.RepoDID, err)
+	}
+	s.cfg.PDSAccessToken = opened.AccessJWT
+	s.cfg.PDSURL = session.Service
+	s.ownerServiceAuth = ownerSessionServiceAuth{
+		pdsURL:      session.Service,
+		accessToken: opened.AccessJWT,
+		client:      s.cfg.HTTPClient,
+	}
+	return nil
+}
+
+type ownerSessionServiceAuth struct {
+	pdsURL string
+
+	accessToken string
+
+	client *http.Client
+}
+
+func (a ownerSessionServiceAuth) ServiceAuth(ctx context.Context, audience, lxm string) (string, error) {
+	query := url.Values{"aud": {audience}}
+	if lxm != "" {
+		query.Set("lxm", lxm)
+	}
+	target := strings.TrimRight(a.pdsURL, "/") + "/xrpc/com.atproto.server.getServiceAuth?" + query.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+a.accessToken)
+	req.Header.Set("Accept", "application/json")
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("requester: getServiceAuth: %w", err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return "", fmt.Errorf("requester: getServiceAuth answered HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+	}
+	var out struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return "", fmt.Errorf("requester: decoding getServiceAuth: %w", err)
+	}
+	if out.Token == "" {
+		return "", errors.New("requester: getServiceAuth returned no token")
+	}
+	return out.Token, nil
+}
+
+func (s *Service) bindSignerKey(ctx context.Context) error {
+	if s.repo == nil || s.signer == nil {
+		return errors.New("requester: the signer binding has no repo or signer")
+	}
+	key, err := s.signer.PublicDID()
+	if err != nil {
+		return fmt.Errorf("requester: the signer key: %w", err)
+	}
+	record := market.BuildBadgeBlueKeysRecord(market.BadgeBlueKeysRecordOptions{
+		DID:       s.cfg.RepoDID,
+		KeyID:     key,
+		Service:   ownerSessionSigningService,
+		CreatedAt: s.nowISO(),
+	})
+	rkey := market.BadgeBlueKeysRkey(s.cfg.RepoDID, key)
+	if _, err := s.repo.PutRecord(ctx, s.cfg.RepoDID, market.BadgeBlueKeysNSID, rkey, record); err != nil {
+		return fmt.Errorf("requester: publishing the signer key binding: %w", err)
+	}
+	s.log.Info("requester_signer_key_bound", "did", s.cfg.RepoDID, "key", key, "rkey", rkey)
 	return nil
 }
 
@@ -675,6 +795,7 @@ func (s *Service) shutdown(ctx context.Context) {
 	case <-wait:
 	case <-ctx.Done():
 	}
+	s.releaseAllHeldSessions("shutdown")
 	if s.ownsRepo {
 		if closer, ok := s.repo.(io.Closer); ok {
 			_ = closer.Close()

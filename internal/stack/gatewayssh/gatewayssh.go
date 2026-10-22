@@ -129,9 +129,13 @@ func (k *Kcp) WaitReady(ctx context.Context, timeout time.Duration, progress fun
 
 func SshListener(ls []v1alpha1.ApplicationListener) string {
 	for _, l := range ls {
-		if l.Name == "ssh" {
+		if !strings.HasSuffix(l.Component, "-ssh-local") || l.Address == "" {
+			continue
+		}
+		if strings.Contains(l.Address, "://") {
 			return l.Address
 		}
+		return "ssh://" + l.Address
 	}
 	return ""
 }

@@ -68,6 +68,7 @@ func (ctl *Controller) componentSnapshot(ctx context.Context, owner string) (com
 	snap := componentSnapshot{Views: views}
 	for _, v := range views {
 		if isExposureKind(v.Kind) {
+			snap.Listeners = append(snap.Listeners, v.Listeners()...)
 			continue
 		}
 		snap.Components = append(snap.Components, v.ApplicationComponent())

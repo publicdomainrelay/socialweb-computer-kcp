@@ -23,6 +23,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/sshtransport"
 )
 
 const Kind = "Requester"
@@ -81,6 +82,8 @@ const (
 	DefaultShutdownTimeout = 30 * time.Second
 
 	DefaultSessionCap = time.Hour
+
+	DefaultSessionIdle = 5 * time.Minute
 
 	DefaultDirectoryTTL = 60 * time.Second
 
@@ -230,6 +233,10 @@ type Config struct {
 
 	GuestKeyDir string
 
+	OwnerSessionsFile string
+
+	OwnerSessions map[string]sshtransport.OwnerSession
+
 	IrohSocket string
 
 	DumbpipePath string
@@ -245,6 +252,8 @@ type Config struct {
 	ReleaseBound time.Duration
 
 	SessionCap time.Duration
+
+	SessionIdle time.Duration
 
 	ShutdownTimeout time.Duration
 
@@ -329,6 +338,30 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 	if cfg.IdentityMode == IdentityModeOAuth {
 		cfg.RepoDID = cfg.DID
 		cfg.MarketDID = cfg.DID
+	}
+	if decoded.OwnerSessionsFile != "" {
+		if cfg.IdentityMode == IdentityModeOAuth {
+			return Config{}, errors.New("requester: ownerSessionsFile and the oauth identity mode exclude each other")
+		}
+		sessions, did, handle, err := sshtransport.LoadOwnerSessions(decoded.OwnerSessionsFile)
+		if err != nil {
+			return Config{}, err
+		}
+		session := sessions[did]
+		if strings.TrimSpace(session.Service) == "" {
+			return Config{}, fmt.Errorf("requester: the owner session of %s names no service", did)
+		}
+		cfg.OwnerSessionsFile = decoded.OwnerSessionsFile
+		cfg.OwnerSessions = sessions
+		cfg.DID = did
+		cfg.Handle = handle
+		cfg.RepoDID = did
+		cfg.MarketDID = did
+		cfg.PDSURL = session.Service
+		cfg.IdentityMode = IdentityModeCallback
+	}
+	if decoded.IrohSocket != "" {
+		cfg.IrohSocket = strings.TrimSpace(decoded.IrohSocket)
 	}
 	if decoded.AcceptCopies > 1 {
 		cfg.AcceptCopies = int(decoded.AcceptCopies)
@@ -551,6 +584,9 @@ func (c *Config) defaults() {
 	}
 	if c.SessionCap <= 0 {
 		c.SessionCap = DefaultSessionCap
+	}
+	if c.SessionIdle <= 0 {
+		c.SessionIdle = DefaultSessionIdle
 	}
 	if c.ShutdownTimeout <= 0 {
 		c.ShutdownTimeout = DefaultShutdownTimeout

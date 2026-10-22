@@ -329,6 +329,10 @@ type RequesterSpec struct {
 
 	GuestSSHKeysFile string `json:"guestSSHKeysFile,omitempty"`
 
+	OwnerSessionsFile string `json:"ownerSessionsFile,omitempty"`
+
+	IrohSocket string `json:"irohSocket,omitempty"`
+
 	AcceptCopies int32 `json:"acceptCopies,omitempty"`
 }
 

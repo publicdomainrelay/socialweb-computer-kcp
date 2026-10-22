@@ -318,7 +318,7 @@ func (s *Service) authorizer() (sshtransport.KeyAuthorizer, error) {
 		trusted = append(trusted, internalHosts(s.cfg.Deps)...)
 		records = &sshtransport.HTTPRecordSource{
 			TrustedHosts: trusted,
-			Client:       serviceHTTPClient(s.cfg.Deps, 30*time.Second),
+			Client:       serviceHTTPClient(s.cfg, 30*time.Second),
 		}
 	}
 	return sshtransport.NewPDSKeyAuthorizer(sshtransport.KeyAuthorizerOptions{
@@ -360,30 +360,48 @@ func (s *Service) authenticator() sshtransport.Authenticator {
 	if s.cfg.Auth != nil {
 		return s.cfg.Auth
 	}
-	if s.cfg.SignIn == nil {
+	var auths multiAuth
+	if s.cfg.SignIn != nil {
+		auth, err := coreapi.NewRequestAuth(coreapi.RequestAuthOptions{
+			SignIn:       s.cfg.SignIn,
+			PublicOrigin: s.cfg.PublicOrigin,
+			CookieName:   s.cfg.SessionCookie,
+			Log:          s.log,
+		})
+		if err != nil {
+			s.log.Warn("sshserver_auth_failed", "err", err)
+		} else {
+			auths = append(auths, auth)
+		}
+	}
+	if sessions := ownerSessionsFrom(s.cfg.OwnerSessions); len(sessions) > 0 {
+		auths = append(auths, ownerSessionAuth{sessions: sessions})
+	}
+	if len(auths) == 0 {
 		return denyAuth{}
 	}
-	auth, err := coreapi.NewRequestAuth(coreapi.RequestAuthOptions{
-		SignIn:       s.cfg.SignIn,
-		PublicOrigin: s.cfg.PublicOrigin,
-		CookieName:   s.cfg.SessionCookie,
-		Log:          s.log,
-	})
-	if err != nil {
-		s.log.Warn("sshserver_auth_failed", "err", err)
-		return denyAuth{}
-	}
-	return auth
+	return auths
 }
 
 func (s *Service) agents() sshtransport.AgentProvider {
 	if s.cfg.Agents != nil {
 		return s.cfg.Agents
 	}
+	var providers combinedAgents
 	if s.cfg.SignIn != nil {
-		return signInAgents{signIn: s.cfg.SignIn}
+		providers = append(providers, signInAgents{signIn: s.cfg.SignIn})
 	}
-	return unavailableAgents{}
+	if sessions := ownerSessionsFrom(s.cfg.OwnerSessions); len(sessions) > 0 {
+		providers = append(providers, &ownerSessionAgents{
+			sessions: sessions,
+			client:   serviceHTTPClient(s.cfg, ownerSessionRequestTimeout),
+			log:      s.log,
+		})
+	}
+	if len(providers) == 0 {
+		return unavailableAgents{}
+	}
+	return providers
 }
 
 func (s *Service) cocorePairing() (*sshtransport.CocorePairing, error) {
@@ -403,7 +421,7 @@ func (s *Service) cocorePairing() (*sshtransport.CocorePairing, error) {
 		KeyName:    s.cfg.CocoreKeyName,
 		ReturnURL:  s.cfg.CocoreReturnURL,
 		TTL:        s.cfg.CocoreTTL,
-		Client:     serviceHTTPClient(s.cfg.Deps, 30*time.Second),
+		Client:     serviceHTTPClient(s.cfg, 30*time.Second),
 		Log:        s.log,
 	})
 }

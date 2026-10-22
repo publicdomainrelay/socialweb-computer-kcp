@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestseed"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/sshtransport"
 )
 
@@ -48,6 +50,13 @@ func (s *Service) RunCommand(ctx context.Context, account sshtransport.Authorize
 		return errors.New("requester: the session has no command io")
 	}
 	lc := lcEnv(env)
+	if name := strings.TrimSpace(lc["LC_SESSION"]); name != "" {
+		return s.runHeldCommand(ctx, account, name, command, lc, io)
+	}
+	return s.runTransientCommand(ctx, account, command, lc, io)
+}
+
+func (s *Service) sessionPolicy(lc map[string]string) (string, map[string]string, bool, error) {
 	policyName := strings.TrimSpace(lc["LC_POLICY"])
 	if policyName == "" {
 		policyName = s.cfg.PolicyWorkflow
@@ -62,9 +71,7 @@ func (s *Service) RunCommand(ctx context.Context, account sshtransport.Authorize
 	if raw := strings.TrimSpace(lc["LC_POLICY_ARGS"]); raw != "" {
 		parsed, err := parsePolicyArgs(raw)
 		if err != nil {
-			io.WriteErr([]byte("provisioning failed: LC_POLICY_ARGS " + err.Error() + "\n"))
-			io.Exit(1)
-			return err
+			return "", nil, false, fmt.Errorf("LC_POLICY_ARGS: %w", err)
 		}
 		policyArgs = parsed
 	}
@@ -72,6 +79,16 @@ func (s *Service) RunCommand(ctx context.Context, account sshtransport.Authorize
 		if _, ok := policyArgs[key]; !ok {
 			policyArgs[key] = value
 		}
+	}
+	return policyName, policyArgs, usePolicy, nil
+}
+
+func (s *Service) runTransientCommand(ctx context.Context, account sshtransport.AuthorizedAccount, command string, lc map[string]string, io sshtransport.CommandIO) error {
+	policyName, policyArgs, usePolicy, err := s.sessionPolicy(lc)
+	if err != nil {
+		io.WriteErr([]byte("provisioning failed: " + err.Error() + "\n"))
+		io.Exit(1)
+		return err
 	}
 	vmName := strings.TrimSpace(lc["LC_VM_NAME"])
 	if vmName == "" {
@@ -131,6 +148,218 @@ func (s *Service) RunCommand(ctx context.Context, account sshtransport.Authorize
 	return nil
 }
 
+type heldSession struct {
+	mu sync.Mutex
+
+	vmName string
+
+	privateKeyPath string
+
+	target *SessionTarget
+
+	timer *time.Timer
+
+	generation uint64
+}
+
+func (s *Service) heldSession(key string) *heldSession {
+	s.heldMu.Lock()
+	defer s.heldMu.Unlock()
+	held := s.heldSessions[key]
+	if held == nil {
+		held = &heldSession{}
+		s.heldSessions[key] = held
+	}
+	return held
+}
+
+func (s *Service) armHeldSession(key string, held *heldSession) {
+	held.mu.Lock()
+	if held.timer != nil {
+		held.timer.Stop()
+	}
+	held.generation++
+	generation := held.generation
+	held.timer = time.AfterFunc(s.cfg.SessionIdle, func() {
+		s.releaseHeldSession(key, held, generation, "idle")
+	})
+	held.mu.Unlock()
+}
+
+func (s *Service) releaseHeldSession(key string, held *heldSession, generation uint64, reason string) {
+	held.mu.Lock()
+	if generation != 0 && generation != held.generation {
+		held.mu.Unlock()
+		return
+	}
+	if held.timer != nil {
+		held.timer.Stop()
+		held.timer = nil
+	}
+	held.generation++
+	s.heldMu.Lock()
+	if s.heldSessions[key] == held {
+		delete(s.heldSessions, key)
+	}
+	s.heldMu.Unlock()
+	target := held.target
+	privateKeyPath := held.privateKeyPath
+	held.target = nil
+	held.privateKeyPath = ""
+	held.mu.Unlock()
+	if target != nil {
+		releaseCtx, cancel := context.WithTimeout(context.Background(), s.cfg.ReleaseTimeout)
+		if err := s.releaseSession(releaseCtx, target); err != nil {
+			s.log.Warn("requester_held_session_release_failed", "vm", target.VMName, "reason", reason, "err", err)
+		} else {
+			s.log.Info("requester_held_session_released", "vm", target.VMName, "reason", reason)
+		}
+		cancel()
+	}
+	_ = sshtransport.RemoveGuestKeypair(privateKeyPath)
+}
+
+func (s *Service) releaseAllHeldSessions(reason string) {
+	s.heldMu.Lock()
+	keys := make([]string, 0, len(s.heldSessions))
+	held := make([]*heldSession, 0, len(s.heldSessions))
+	for key, session := range s.heldSessions {
+		keys = append(keys, key)
+		held = append(held, session)
+	}
+	s.heldMu.Unlock()
+	for i := range keys {
+		s.releaseHeldSession(keys[i], held[i], 0, reason)
+	}
+}
+
+func (s *Service) runHeldCommand(ctx context.Context, account sshtransport.AuthorizedAccount, name, command string, lc map[string]string, io sshtransport.CommandIO) error {
+	policyName, policyArgs, usePolicy, err := s.sessionPolicy(lc)
+	if err != nil {
+		io.WriteErr([]byte("provisioning failed: " + err.Error() + "\n"))
+		io.Exit(1)
+		return err
+	}
+	vmName := strings.TrimSpace(lc["LC_VM_NAME"])
+	if vmName == "" {
+		vmName = s.generatedVMName()
+	}
+	if !vmNamePattern.MatchString(vmName) {
+		err := fmt.Errorf("LC_VM_NAME %q is not a DNS-label-shaped name", vmName)
+		io.WriteErr([]byte("provisioning failed: " + err.Error() + "\n"))
+		io.Exit(1)
+		return err
+	}
+	command = renderExecCommand(command, lc)
+	sessionCtx, cancel := context.WithTimeout(ctx, s.cfg.SessionCap)
+	defer cancel()
+	ctx = sessionCtx
+	provider, err := sshtransport.NewGuestSessionProvider(s.guestDialer(), s.log)
+	if err != nil {
+		io.WriteErr([]byte("guest session failed: " + err.Error() + "\n"))
+		io.Exit(1)
+		return err
+	}
+	provision := func() (*SessionTarget, string, error) {
+		publicKey, privateKeyPath, err := sshtransport.GenerateGuestKeypair(s.cfg.GuestKeyDir, vmName)
+		if err != nil {
+			return nil, "", err
+		}
+		target, err := s.provisionSession(ctx, vmName, policyName, policyArgs, publicKey, usePolicy)
+		if err != nil {
+			_ = sshtransport.RemoveGuestKeypair(privateKeyPath)
+			return nil, "", err
+		}
+		return target, privateKeyPath, nil
+	}
+	key := account.DID + "\x00" + name
+	held := s.heldSession(key)
+	held.mu.Lock()
+	if held.timer != nil {
+		held.timer.Stop()
+		held.timer = nil
+	}
+	reused := held.target != nil
+	target, privateKeyPath := held.target, held.privateKeyPath
+	fresh := target == nil
+	if target == nil {
+		target, privateKeyPath, err = provision()
+		if err != nil {
+			held.mu.Unlock()
+			io.WriteErr([]byte("provisioning failed: " + err.Error() + "\n"))
+			io.Exit(1)
+			return err
+		}
+		held.vmName, held.privateKeyPath, held.target = vmName, privateKeyPath, target
+	}
+	ready := false
+	if ticket, ticketErr := ValidateTicket(target.Address); ticketErr == nil {
+		ready = provider.PollReady(ctx, privateKeyPath, ticket, s.cfg.VMReadyTimeout, target.HostKeys)
+	}
+	if !ready && reused {
+		s.log.Warn("requester_held_session_lost", "vm", target.VMName)
+		held.target = nil
+		held.privateKeyPath = ""
+		s.releaseHeldSessionTarget(target, privateKeyPath)
+		target, privateKeyPath, err = provision()
+		if err != nil {
+			held.mu.Unlock()
+			io.WriteErr([]byte("provisioning failed: " + err.Error() + "\n"))
+			io.Exit(1)
+			return err
+		}
+		held.vmName, held.privateKeyPath, held.target = vmName, privateKeyPath, target
+		fresh = true
+		ticket, ticketErr := ValidateTicket(target.Address)
+		if ticketErr != nil {
+			held.mu.Unlock()
+			io.WriteErr([]byte("guest session failed: " + ticketErr.Error() + "\n"))
+			io.Exit(1)
+			return ticketErr
+		}
+		ready = provider.PollReady(ctx, privateKeyPath, ticket, s.cfg.VMReadyTimeout, target.HostKeys)
+	}
+	if !ready {
+		if fresh {
+			held.target = nil
+			held.privateKeyPath = ""
+			s.releaseHeldSessionTarget(target, privateKeyPath)
+		}
+		held.mu.Unlock()
+		io.WriteErr([]byte("guest session failed: the guest ssh did not answer\n"))
+		io.Exit(1)
+		return errors.New("the guest ssh did not answer")
+	}
+	ticket, err := ValidateTicket(target.Address)
+	if err != nil {
+		if fresh {
+			held.target = nil
+			held.privateKeyPath = ""
+			s.releaseHeldSessionTarget(target, privateKeyPath)
+		}
+		held.mu.Unlock()
+		io.WriteErr([]byte("guest session failed: " + err.Error() + "\n"))
+		io.Exit(1)
+		return err
+	}
+	code := provider.RunSession(ctx, privateKeyPath, ticket, command, io, target.HostKeys)
+	held.mu.Unlock()
+	s.armHeldSession(key, held)
+	io.Exit(code)
+	return nil
+}
+
+func (s *Service) releaseHeldSessionTarget(target *SessionTarget, privateKeyPath string) {
+	if target != nil {
+		releaseCtx, cancel := context.WithTimeout(context.Background(), s.cfg.ReleaseTimeout)
+		if err := s.releaseSession(releaseCtx, target); err != nil {
+			s.log.Warn("requester_held_session_release_failed", "vm", target.VMName, "err", err)
+		}
+		cancel()
+	}
+	_ = sshtransport.RemoveGuestKeypair(privateKeyPath)
+}
+
 func (s *Service) guestDialer() sshtransport.Dialer {
 	if s.cfg.IrohSocket != "" {
 		return sshtransport.UnixSocketDialer{Socket: s.cfg.IrohSocket, Log: s.log}
@@ -147,6 +376,12 @@ func (s *Service) provisionSession(ctx context.Context, vmName, policyName strin
 	if s.cfg.GuestUserData != "" {
 		userData = s.cfg.GuestUserData
 	}
+	var err error
+	userData, err = guestseed.WithIrohTransport(userData, []string{publicKey}, s.cfg.GuestHostAliases)
+	if err != nil {
+		return nil, fmt.Errorf("the guest iroh transport: %w", err)
+	}
+	userData = withGuestCACerts(userData, s.cfg.GuestCAPEM)
 	payload, err := s.repo.CreateRecord(ctx, s.cfg.RepoDID, market.ComputeVMNSID, map[string]any{
 		"$type":     market.ComputeVMNSID,
 		"role":      vmName,

@@ -59,26 +59,26 @@ func (r *gatewaySshRun) passthrough(args []string) error {
 	var nv v1alpha1.MarketNetworkValue
 	nvSet := false
 	for _, p := range parsed {
-		if r.network != "" && strings.HasPrefix(p.To, appctl.MapToNetwork) {
-			return fmt.Errorf("--%s maps to %s, which the market network sets for its child applications", p.Name, p.To)
-		}
-		switch {
-		case p.To == appctl.MapToOptions:
-			r.options = append(r.options, v1alpha1.ApplicationOption{Name: p.Name, Value: p.Value})
-		case p.To == "spec.ownerSessionsFile":
+		switch p.Name {
+		case "test-owner-sessions-file":
 			r.ownerSessions = p.Value
-		case p.To == "spec.bidderDids":
+			continue
+		case "bidder-dids":
 			r.bidderDids = append(r.bidderDids, splitList(p.Value)...)
-		case strings.HasPrefix(p.To, appctl.MapToNetwork):
+			continue
+		case "plc-directory-url", "ingress-proxy-host", "relay-url", "network-hosts":
+			if r.network != "" {
+				return fmt.Errorf("--%s is set by the market network for its child applications", p.Name)
+			}
 			nvSet = true
-			switch p.To {
-			case "network.plcDirectoryUrl":
+			switch p.Name {
+			case "plc-directory-url":
 				nv.PlcDirectoryUrl = p.Value
-			case "network.ingressProxyHost":
+			case "ingress-proxy-host":
 				nv.IngressProxyHost = p.Value
-			case "network.relayUrls":
+			case "relay-url":
 				nv.RelayUrls = splitList(p.Value)
-			case "network.hosts":
+			case "network-hosts":
 				for _, h := range splitList(p.Value) {
 					name, addr, ok := strings.Cut(h, "=")
 					if !ok {
@@ -87,9 +87,13 @@ func (r *gatewaySshRun) passthrough(args []string) error {
 					nv.Hosts = append(nv.Hosts, v1alpha1.NetworkHost{Name: name, Address: addr})
 				}
 			}
-		default:
-			return fmt.Errorf("--%s maps to %s, which run gateway ssh does not take", p.Name, p.To)
+			continue
 		}
+		if p.To == appctl.MapToOptions {
+			r.options = append(r.options, v1alpha1.ApplicationOption{Name: p.Name, Value: p.Value})
+			continue
+		}
+		return fmt.Errorf("--%s maps to %s, which run gateway ssh does not take", p.Name, p.To)
 	}
 	if nvSet {
 		r.value = &nv

@@ -227,6 +227,25 @@ func (ctl *Controller) sshRequesterIdentity(ctx context.Context, owner string, o
 	return componentIdentity(id, handle), nil
 }
 
+func sshGatewayIrohSocket(stateRoot string) string {
+	return filepath.Join(ComponentCRStateDir(stateRoot, ComponentKindSshServer, SshServerComponent), SshGatewayIrohSocket)
+}
+
+func sshServerExposuresReady(snap componentSnapshot, desired []desiredComponent) bool {
+	prefix := serviceNameFor(ComponentKindSshServer, SshServerComponent)
+	found := false
+	for _, d := range desired {
+		if d.Kind != ComponentKindExposure || !strings.HasPrefix(d.Name, prefix) {
+			continue
+		}
+		found = true
+		if !snap.ready(d.Kind, d.Name) {
+			return false
+		}
+	}
+	return found
+}
+
 func sshGatewayDesired(o v1alpha1.SshGateway, ident *v1alpha1.ComponentIdentity, ws, stateRoot string) []desiredComponent {
 	suspend := o.Spec.Suspend
 	network := o.Spec.Network
@@ -237,16 +256,18 @@ func sshGatewayDesired(o v1alpha1.SshGateway, ident *v1alpha1.ComponentIdentity,
 	}
 	mode, publicOrigin, oauthClientID, oauthRedirectURI, guestSSHKeysFile := requesterComponentFields(o.Spec.Options, v1alpha1.MarketIdentityModeLocalRepo)
 	requester := desiredComponent{Kind: ComponentKindRequester, Name: RequesterComponent, Spec: v1alpha1.RequesterSpec{
-		ComponentSpec:    NewComponentSpec(ComponentCRStateDir(stateRoot, ComponentKindRequester, RequesterComponent), network, suspend),
-		Identity:         ident,
-		PolicyEngineRef:  ComponentRefFor(ComponentKindPolicyEngine, PolicyEngineComponent),
-		Hostnames:        hostnames,
-		Mode:             mode,
-		PublicOrigin:     publicOrigin,
-		OAuthClientID:    oauthClientID,
-		OAuthRedirectURI: oauthRedirectURI,
-		GuestSSHKeysFile: guestSSHKeysFile,
-		AcceptCopies:     int32(optionInt(o.Spec.Options, "accept-copies")),
+		ComponentSpec:     NewComponentSpec(ComponentCRStateDir(stateRoot, ComponentKindRequester, RequesterComponent), network, suspend),
+		Identity:          ident,
+		PolicyEngineRef:   ComponentRefFor(ComponentKindPolicyEngine, PolicyEngineComponent),
+		Hostnames:         hostnames,
+		Mode:              mode,
+		PublicOrigin:      publicOrigin,
+		OAuthClientID:     oauthClientID,
+		OAuthRedirectURI:  oauthRedirectURI,
+		GuestSSHKeysFile:  guestSSHKeysFile,
+		OwnerSessionsFile: o.Spec.OwnerSessionsFile,
+		IrohSocket:        sshGatewayIrohSocket(stateRoot),
+		AcceptCopies:      int32(optionInt(o.Spec.Options, "accept-copies")),
 	}}
 	sshServer := desiredComponent{Kind: ComponentKindSshServer, Name: SshServerComponent, Spec: v1alpha1.SshServerSpec{
 		ComponentSpec:     NewComponentSpec(ComponentCRStateDir(stateRoot, ComponentKindSshServer, SshServerComponent), network, suspend),
@@ -258,6 +279,7 @@ func sshGatewayDesired(o v1alpha1.SshGateway, ident *v1alpha1.ComponentIdentity,
 	}}
 	out := []desiredComponent{policyEngineDesired(suspend), requester, sshServer}
 	out = append(out, httpServiceExposures(ws, ComponentKindRequester, RequesterComponent, "http", network, hostnames, false, true, suspend)...)
+	out = append(out, httpServiceExposures(ws, ComponentKindSshServer, SshServerComponent, "http", network, hostnames, true, false, suspend)...)
 	out = append(out, sshExposures(ws, SshServerComponent, suspend)...)
 	return out
 }
@@ -373,7 +395,7 @@ func (ctl *Controller) reconcileSshGateway(ctx context.Context, u *unstructured.
 		dialer = dialer || (h.GetName() == SshGatewayIrohDial && running)
 	}
 	switch {
-	case snap.complete(desired) && dialer && ident.Did != "":
+	case snap.complete(desired) && sshServerExposuresReady(snap, desired) && dialer && ident.Did != "":
 		st = ready(st, "the ssh gateway listens, its iroh dialer runs and its owner identity is known")
 	case ident.Did == "":
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for the owner's atproto identity"
