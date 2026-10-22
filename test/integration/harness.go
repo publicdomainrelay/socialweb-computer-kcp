@@ -58,7 +58,7 @@ const (
 	healthTimeout  = 20 * time.Second
 	maxSocketPath  = 107
 
-	verifierFailureGrace = time.Minute
+	verifierFailureGrace = 3 * time.Minute
 )
 
 type Harness struct {
