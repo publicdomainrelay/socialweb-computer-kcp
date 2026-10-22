@@ -7,9 +7,11 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -171,6 +173,20 @@ func (r *listeners) components(_ string, ls []v1alpha1.ApplicationListener) {
 		if l.Component == appctl.WebAppComponent && l.Address != "" {
 			r.webApp = l.Address
 		}
+	}
+	if r.webApp != "" {
+		return
+	}
+	for _, l := range ls {
+		if !strings.HasPrefix(l.Component, "svc-gatewayapi-") || !strings.HasSuffix(l.Component, "-local") || l.Address == "" {
+			continue
+		}
+		address := l.Address
+		if u, err := url.Parse(address); err == nil && u.Host != "" {
+			address = u.Host
+		}
+		r.webApp = address
+		return
 	}
 }
 
