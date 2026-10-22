@@ -207,7 +207,7 @@ func isLinkTargetKind(kind string) bool {
 			return true
 		}
 	}
-	return strings.EqualFold(kind, "OpenBaoServer")
+	return false
 }
 
 func specRefs(spec any) []specRef {

@@ -32,8 +32,6 @@ import (
 
 var componentLinkGVR = schema.GroupVersionResource{Group: "exposure.socialweb.computer", Version: "v1alpha1", Resource: "componentlinks"}
 
-const openBaoServerKind = "OpenBaoServer"
-
 func TestComponentLinkRegistryEnforcesWorkspaceAccess(t *testing.T) {
 	reg := component.NewHandlerRegistry()
 	defer reg.Close()
@@ -402,12 +400,6 @@ func componentLinksSettled(workspace string, links []exposurev1alpha1.ComponentL
 		if link.Status.ObservedGeneration != 0 && link.Generation != 0 && link.Status.ObservedGeneration != link.Generation {
 			return false, fmt.Sprintf("the ComponentLink %s observed generation %d of %d",
 				link.Name, link.Status.ObservedGeneration, link.Generation)
-		}
-		if strings.EqualFold(link.Spec.To.Kind, openBaoServerKind) {
-			if link.Status.Phase == exposurev1alpha1.ComponentLinkFailed {
-				return false, fmt.Sprintf("the ComponentLink %s to an OpenBaoServer is Failed: %s", link.Name, link.Status.Message)
-			}
-			continue
 		}
 		if !link.Status.Ready || link.Status.Phase != exposurev1alpha1.ComponentLinkReady {
 			return false, fmt.Sprintf("the ComponentLink %s is %s ready=%t: %s",
