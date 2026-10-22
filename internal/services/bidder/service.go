@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/identity"
-	"github.com/bluesky-social/indigo/atproto/syntax"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -767,31 +766,12 @@ func (s *Service) publicURL() string {
 	return s.listeningURL()
 }
 
-func (s *Service) submitEventURL(ctx context.Context, ref string) string {
+func (s *Service) submitEventURL(_ context.Context, ref string) string {
 	ref = strings.TrimSpace(ref)
-	if ref == "" {
-		return ""
-	}
 	if strings.HasPrefix(ref, "http://") || strings.HasPrefix(ref, "https://") {
 		return ref
 	}
-	did, fragment, found := strings.Cut(ref, "#")
-	if !found || strings.TrimSpace(fragment) == "" || s.dir == nil {
-		return ""
-	}
-	parsed, err := syntax.ParseDID(did)
-	if err != nil {
-		return ""
-	}
-	ident, err := s.dir.LookupDID(ctx, parsed)
-	if err != nil || ident == nil {
-		return ""
-	}
-	service, ok := ident.Services[fragment]
-	if !ok {
-		return ""
-	}
-	return strings.TrimRight(strings.TrimSpace(service.URL), "/")
+	return ""
 }
 
 func (s *Service) offeringEndpoint() string {
