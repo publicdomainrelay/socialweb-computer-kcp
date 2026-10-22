@@ -535,7 +535,8 @@ func ready(status v1alpha1.ApplicationStatus, msg string) v1alpha1.ApplicationSt
 	return status
 }
 
-func bidderDesired(o v1alpha1.MarketBidder, id *v1alpha1.MarketIdentity, ws, stateRoot string, bidderDIDs []string, pdsHandle, pdsPublicURL string) ([]desiredComponent, error) {
+func bidderDesired(o v1alpha1.MarketBidder, id *v1alpha1.MarketIdentity, ws, stateRoot string, bidderDIDs []string, pdsHandle, pdsPublicURL string,
+	ingress *v1alpha1.IngressConfig, requireIngress bool, ingressRef *v1alpha1.ComponentRef) ([]desiredComponent, error) {
 	suspend := o.Spec.Suspend
 	network := o.Spec.Network
 	ident := componentIdentity(id, o.Spec.Identity.Handle)
@@ -544,7 +545,7 @@ func bidderDesired(o v1alpha1.MarketBidder, id *v1alpha1.MarketIdentity, ws, sta
 	if ident.Handle != "" {
 		hostnames = []string{ident.Handle}
 	}
-	pdsSpec, err := appPdsSpec(stateRoot, network, pdsHandle, vault, hostnames, suspend, pdsPublicURL)
+	pdsSpec, err := appPdsSpec(stateRoot, network, pdsHandle, vault, hostnames, suspend, pdsPublicURL, requireIngress, ingressRef)
 	if err != nil {
 		return nil, err
 	}
@@ -588,7 +589,7 @@ func bidderDesired(o v1alpha1.MarketBidder, id *v1alpha1.MarketIdentity, ws, sta
 	out := []desiredComponent{pds, policyEngineDesired(suspend), guest, bidder}
 	out = append(out, httpServiceExposures(ws, ComponentKindBidder, BidderComponent, "market", network, hostnames, false, true, suspend)...)
 	out = append(out, httpServiceExposures(ws, ComponentKindGuestControlPlane, GuestComponent, "http", network, hostnames, false, true, suspend)...)
-	out = append(out, pdsExposures(ws, PdsComponent, network, hostnames, suspend)...)
+	out = append(out, pdsExposures(ws, PdsComponent, network, hostnames, suspend, ingress)...)
 	return out, nil
 }
 
@@ -648,10 +649,11 @@ func (ctl *Controller) reconcileBidder(ctx context.Context, u *unstructured.Unst
 	}
 	stateRoot := ctl.c.Layout.StateDir
 	pdsAccountHandle := pdsHandle(ctl.c.workspace(), "bidder", o.Spec.Identity.Handle)
-	pdsPublicURL := ctl.pdsPublicURL(ctx, ctl.c.workspace(), PdsComponent)
+	requireIngress, ingressRef, ingressConfig, ingressErr := pdsAppIngress(o.Spec.Ingress, o.Spec.Network, o.Spec.Profile == BidderProfileProdQr)
+	pdsPublicURL, _ := ctl.pdsPublicURLFor(ctx, ctl.c.workspace(), PdsComponent, requireIngress)
 	if o.Spec.Suspend {
 		id, _ := ctl.identityIn(ctx, ctl.c.workspace(), BidderIdentity)
-		desired, err := bidderDesired(o, id, ctl.c.workspace(), stateRoot, bidderDIDs, pdsAccountHandle, pdsPublicURL)
+		desired, err := bidderDesired(o, id, ctl.c.workspace(), stateRoot, bidderDIDs, pdsAccountHandle, pdsPublicURL, ingressConfig, requireIngress, ingressRef)
 		if err != nil {
 			st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
 			return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
@@ -706,12 +708,20 @@ func (ctl *Controller) reconcileBidder(ctx context.Context, u *unstructured.Unst
 	if err != nil {
 		return err
 	}
-	desired, err := bidderDesired(o, id, ctl.c.workspace(), stateRoot, bidderDIDs, pdsAccountHandle, pdsPublicURL)
+	desired, err := bidderDesired(o, id, ctl.c.workspace(), stateRoot, bidderDIDs, pdsAccountHandle, pdsPublicURL, ingressConfig, requireIngress, ingressRef)
 	if err != nil {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
 		return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
 	}
-	if err := ctl.ensureDesired(ctx, u, pdsComponentSet(desired)); err != nil {
+	first := pdsApplySet(desired, PdsComponent, componentRefName(ingressRef))
+	if requireIngress && pdsPublicURL == "" {
+		if applied, err := ctl.pdsPublicURLApplied(ctx, ctl.c.workspace(), PdsComponent); err != nil {
+			return err
+		} else if applied {
+			first = withoutPds(first)
+		}
+	}
+	if err := ctl.ensureDesired(ctx, u, first); err != nil {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, err.Error()
 		return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
 	}
@@ -724,13 +734,37 @@ func (ctl *Controller) reconcileBidder(ctx context.Context, u *unstructured.Unst
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for the bidder's app Pds to be ready"
 		return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
 	}
-	pdsPublicURL = ctl.pdsPublicURL(ctx, ctl.c.workspace(), PdsComponent)
+	if requireIngress {
+		if ingressErr != nil {
+			setPdsIngressCondition(&st, o.Generation, true, ingressErr)
+			st.Components, st.Listeners = snap.Components, snap.Listeners
+			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "the bidder's app Pds ingress: "+ingressErr.Error()
+			return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
+		}
+		if err := ctl.pdsIngressReady(snap, PdsComponent, ingressRef); err != nil {
+			setPdsIngressCondition(&st, o.Generation, true, err)
+			st.Components, st.Listeners = snap.Components, snap.Listeners
+			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for the bidder's app Pds ingress: "+err.Error()
+			return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
+		}
+		pdsPublicURL, err = ctl.pdsIngressURL(ctx, ctl.c.workspace(), PdsComponent)
+		if err != nil {
+			setPdsIngressCondition(&st, o.Generation, true, err)
+			st.Components, st.Listeners = snap.Components, snap.Listeners
+			st.Phase, st.Message = pdsIngressPhase(err), "the bidder's app Pds ingress: "+err.Error()
+			return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
+		}
+		setPdsIngressCondition(&st, o.Generation, true, nil)
+	} else {
+		pdsPublicURL, _ = ctl.pdsPublicURLFor(ctx, ctl.c.workspace(), PdsComponent, false)
+		setPdsIngressCondition(&st, o.Generation, false, nil)
+	}
 	if pdsPublicURL == "" {
 		st.Components, st.Listeners = snap.Components, snap.Listeners
-		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for the bidder's app Pds exposure"
+		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for the bidder's app Pds public URL"
 		return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
 	}
-	if desired, err = bidderDesired(o, id, ctl.c.workspace(), stateRoot, bidderDIDs, pdsAccountHandle, pdsPublicURL); err != nil {
+	if desired, err = bidderDesired(o, id, ctl.c.workspace(), stateRoot, bidderDIDs, pdsAccountHandle, pdsPublicURL, ingressConfig, requireIngress, ingressRef); err != nil {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
 		return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
 	}
@@ -760,7 +794,7 @@ func (ctl *Controller) reconcileBidder(ctx context.Context, u *unstructured.Unst
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "its app Pds account: "+err.Error()
 		return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
 	}
-	ctl.ensureAppPdsStatus(ctx, pdsAccountHandle, sess, o.Spec.Network != nil)
+	ctl.ensureAppPdsStatus(ctx, pdsAccountHandle, sess, BidderVaultServer+":"+pdsSessionPath("bidder"), o.Spec.Network != nil)
 	if err := ctl.recordPdsIdentity(ctx, ctl.c.workspace(), BidderIdentity, pdsAccountHandle, endpoint, sess.Did, o.Spec.Identity.Association); err != nil {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "its app Pds identity: "+err.Error()
 		return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
@@ -768,7 +802,7 @@ func (ctl *Controller) reconcileBidder(ctx context.Context, u *unstructured.Unst
 	if id, err = ctl.identityIn(ctx, ctl.c.workspace(), BidderIdentity); err != nil {
 		return err
 	}
-	if desired, err = bidderDesired(o, id, ctl.c.workspace(), stateRoot, bidderDIDs, pdsAccountHandle, pdsPublicURL); err != nil {
+	if desired, err = bidderDesired(o, id, ctl.c.workspace(), stateRoot, bidderDIDs, pdsAccountHandle, pdsPublicURL, ingressConfig, requireIngress, ingressRef); err != nil {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
 		return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
 	}

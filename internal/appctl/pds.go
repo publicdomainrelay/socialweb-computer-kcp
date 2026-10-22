@@ -125,17 +125,6 @@ func (ctl *Controller) pdsApplied(ctx context.Context, owner string) (bool, erro
 	return view.Status.ObservedGeneration >= view.Generation, nil
 }
 
-func (ctl *Controller) pdsPublicURL(ctx context.Context, ws, name string) string {
-	if url := ctl.pdsExposureURLOf(ctx, ws, name, ExposureIngressSuffix); url != "" {
-		return url
-	}
-	return ctl.pdsExposureURLOf(ctx, ws, name, ExposureLocalSuffix)
-}
-
-func (ctl *Controller) pdsExposureURL(ctx context.Context, ws, name string) string {
-	return ctl.pdsExposureURLOf(ctx, ws, name, ExposureIngressSuffix)
-}
-
 func (ctl *Controller) pdsExposureURLOf(ctx context.Context, ws, name, suffix string) string {
 	key := ws + "/" + name + suffix
 	ri, err := ctl.client(ws, ExposureGVR)
@@ -163,7 +152,7 @@ func (ctl *Controller) pdsExposureURLOf(ctx context.Context, ws, name, suffix st
 }
 
 func appPdsSpec(stateRoot string, network *v1alpha1.MarketNetworkValue, handle string, vault *v1alpha1.ComponentRef,
-	hostnames []string, suspend bool, publicURL string) (v1alpha1.PdsSpec, error) {
+	hostnames []string, suspend bool, publicURL string, requireIngress bool, ingressRef *v1alpha1.ComponentRef) (v1alpha1.PdsSpec, error) {
 	plcURL := ""
 	if network != nil {
 		plcURL = strings.TrimSpace(network.PlcDirectoryUrl)
@@ -178,10 +167,22 @@ func appPdsSpec(stateRoot string, network *v1alpha1.MarketNetworkValue, handle s
 	if err := os.MkdirAll(filepath.Join(stateDir, pdsRepoKeyDir), 0o700); err != nil {
 		return v1alpha1.PdsSpec{}, fmt.Errorf("appctl: the app-owned Pds repo key directory: %w", err)
 	}
-	if strings.TrimSpace(publicURL) == "" {
+	publicURL = strings.TrimRight(strings.TrimSpace(publicURL), "/")
+	if publicURL == "" && !requireIngress {
 		publicURL = appPdsFallbackURL(network, hostnames)
 	}
-	publicURL = strings.TrimRight(strings.TrimSpace(publicURL), "/")
+	stableHost := ""
+	if publicURL != "" {
+		base, host, ok := schemeHostURL(publicURL)
+		if !ok {
+			return v1alpha1.PdsSpec{}, fmt.Errorf("appctl: the app-owned Pds public URL %q is not a scheme, host and optional port", publicURL)
+		}
+		publicURL, stableHost = base, host
+	}
+	var oauth *v1alpha1.PdsOAuth
+	if publicURL != "" || !requireIngress {
+		oauth = &v1alpha1.PdsOAuth{Issuer: publicURL, AllowLocalhostClients: true}
+	}
 	return v1alpha1.PdsSpec{
 		ComponentSpec:     NewComponentSpec(stateDir, network, suspend),
 		Identity:          &v1alpha1.ComponentIdentity{Handle: handle},
@@ -190,10 +191,14 @@ func appPdsSpec(stateRoot string, network *v1alpha1.MarketNetworkValue, handle s
 		Mode:              v1alpha1.PdsModeFull,
 		PlcURL:            plcURL,
 		PublicBaseURL:     publicURL,
+		RequireIngress:    requireIngress,
+		IngressRef:        ingressRef,
+		PublicURL:         publicURL,
+		StableHost:        stableHost,
 		RepoKeyPath:       filepath.Join(stateDir, pdsRepoKeyDir),
 		SessionSecretPath: filepath.Join(stateDir, pdsSessionSecretFile),
 		RotationKeyPath:   filepath.Join(stateDir, pdsRotationKeyFile),
-		OAuth:             &v1alpha1.PdsOAuth{Issuer: publicURL, AllowLocalhostClients: true},
+		OAuth:             oauth,
 	}, nil
 }
 

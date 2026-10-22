@@ -40,6 +40,11 @@ type Config struct {
 	ServiceDID    string
 	AlsoKnownAs   []string
 
+	RequireIngress bool
+	IngressRef     *v1alpha1.ComponentRef
+	PublicURL      string
+	StableHost     string
+
 	ServeHost    string
 	ServePort    int
 	HealthPath   string
@@ -139,6 +144,10 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		}
 	}
 	cfg.PublicBaseURL = strings.TrimRight(strings.TrimSpace(decoded.PublicBaseURL), "/")
+	cfg.RequireIngress = decoded.RequireIngress
+	cfg.IngressRef = decoded.IngressRef
+	cfg.PublicURL = strings.TrimRight(strings.TrimSpace(decoded.PublicURL), "/")
+	cfg.StableHost = strings.TrimSpace(decoded.StableHost)
 	cfg.PLCURL = strings.TrimRight(strings.TrimSpace(decoded.PlcURL), "/")
 	if cfg.PLCURL == "" && decoded.Network != nil {
 		cfg.PLCURL = strings.TrimRight(strings.TrimSpace(decoded.Network.PlcDirectoryUrl), "/")

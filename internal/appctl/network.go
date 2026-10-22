@@ -272,17 +272,19 @@ func portFromValue(address string) string {
 }
 
 func networkPds(stateRoot string, value v1alpha1.MarketNetworkValue, lease component.PortLease, name, handle, host string,
-	vault *v1alpha1.ComponentRef, suspend bool) desiredComponent {
+	vault *v1alpha1.ComponentRef, publicURL string, suspend bool) desiredComponent {
 	stateDir := ComponentCRStateDir(NetworkStateDir(stateRoot), ComponentKindPds, name)
 	port := leasePort(lease)
-	publicURL := "http://" + host + ":" + strconv.Itoa(int(port))
-	for _, h := range value.Hosts {
-		if h.Name != host || h.Address == "" {
-			continue
+	publicURL = strings.TrimRight(strings.TrimSpace(publicURL), "/")
+	stableHost := ""
+	if publicURL != "" {
+		if base, stable, ok := schemeHostURL(publicURL); ok {
+			publicURL, stableHost = base, stable
 		}
-		if p, err := portFrom(h.Address); err == nil {
-			publicURL = "http://" + host + ":" + p
-		}
+	}
+	var oauth *v1alpha1.PdsOAuth
+	if publicURL != "" {
+		oauth = &v1alpha1.PdsOAuth{Issuer: publicURL, AllowLocalhostClients: true}
 	}
 	return desiredComponent{Kind: ComponentKindPds, Name: name, Spec: v1alpha1.PdsSpec{
 		ComponentSpec:     NewComponentSpec(stateDir, &value, suspend),
@@ -293,16 +295,20 @@ func networkPds(stateRoot string, value v1alpha1.MarketNetworkValue, lease compo
 		Mode:              v1alpha1.PdsModeFull,
 		PlcURL:            value.PlcDirectoryUrl,
 		PublicBaseURL:     publicURL,
+		RequireIngress:    true,
+		IngressRef:        ComponentRefFor(ComponentKindIngressProxy, NetworkIngressName),
+		PublicURL:         publicURL,
+		StableHost:        stableHost,
 		RepoKeyPath:       filepath.Join(stateDir, pdsRepoKeyDir),
 		SessionSecretPath: filepath.Join(stateDir, pdsSessionSecretFile),
 		RotationKeyPath:   filepath.Join(stateDir, pdsRotationKeyFile),
 		AllowExplicitDID:  false,
-		OAuth:             &v1alpha1.PdsOAuth{Issuer: publicURL, AllowLocalhostClients: true},
+		OAuth:             oauth,
 	}}
 }
 
 func networkDesired(o v1alpha1.MarketNetwork, ws, stateRoot string, leases map[string]component.PortLease,
-	value v1alpha1.MarketNetworkValue) []desiredComponent {
+	value v1alpha1.MarketNetworkValue, alicePublicURL, bobPublicURL string) []desiredComponent {
 	suspend := o.Spec.Suspend
 	guestDir := filepath.Join(NetworkStateDir(stateRoot), GuestTLSDir)
 	plc := desiredComponent{Kind: ComponentKindPlc, Name: NetworkPLCName, Spec: v1alpha1.PlcSpec{
@@ -336,8 +342,8 @@ func networkDesired(o v1alpha1.MarketNetwork, ws, stateRoot string, leases map[s
 		Serve:         componentServe("", leasePort(leases[NetworkPortDispatcher])),
 	}}
 	vault := ComponentRefFor("OpenBaoServer", NetworkVaultServer)
-	alice := networkPds(stateRoot, value, leases[NetworkPortAlicePds], NetworkAlicePdsName, "alice.test", NetworkAlicePdsHost, vault, suspend)
-	bob := networkPds(stateRoot, value, leases[NetworkPortBobPds], NetworkBobPdsName, "bob.test", NetworkBobPdsHost, vault, suspend)
+	alice := networkPds(stateRoot, value, leases[NetworkPortAlicePds], NetworkAlicePdsName, "alice.test", NetworkAlicePdsHost, vault, alicePublicURL, suspend)
+	bob := networkPds(stateRoot, value, leases[NetworkPortBobPds], NetworkBobPdsName, "bob.test", NetworkBobPdsHost, vault, bobPublicURL, suspend)
 	out := []desiredComponent{policyEngineDesired(suspend), plc, relay, ingress, dispatcher, alice, bob}
 	out = append(out, httpServiceExposures(ws, ComponentKindPlc, NetworkPLCName, "http", &value, []string{NetworkPlcHost}, true, true, suspend)...)
 	out = append(out, httpServiceExposures(ws, ComponentKindRelay, NetworkRelayName, "http", &value, []string{NetworkRelayHost}, true, true, suspend)...)
@@ -570,16 +576,51 @@ func (n *networks) reconcile(ctx context.Context, u *unstructured.Unstructured) 
 	if n.value != nil && n.valueUID == string(o.UID) {
 		value = *n.value
 	}
+	value.Ingress = o.Spec.Ingress
+	if err := networkIngressSelection(o.Spec.Ingress); err != nil {
+		setPdsIngressConditionNamed(&st.Conditions, o.Generation, NetworkAlicePdsName, true, err)
+		setPdsIngressConditionNamed(&st.Conditions, o.Generation, NetworkBobPdsName, true, err)
+		return write(v1alpha1.ApplicationPhaseFailed, "the network Pds ingress: "+err.Error())
+	}
 	for _, name := range []string{NetworkAlicePdsName, NetworkBobPdsName} {
 		stateDir := ComponentCRStateDir(NetworkStateDir(stateRoot), ComponentKindPds, name)
 		if err := ensurePDSKeyFiles(stateDir); err != nil {
 			return write(v1alpha1.ApplicationPhaseFailed, "the "+name+" PDS keys: "+err.Error())
 		}
 	}
-	desired := networkDesired(o, n.ctl.c.workspace(), stateRoot, leases, value)
+	ws := n.ctl.c.workspace()
+	alicePublicURL, aliceIngressErr := n.ctl.pdsPublicURLFor(ctx, ws, NetworkAlicePdsName, true)
+	bobPublicURL, bobIngressErr := n.ctl.pdsPublicURLFor(ctx, ws, NetworkBobPdsName, true)
+	for _, item := range []struct {
+		name string
+		err  error
+	}{{NetworkAlicePdsName, aliceIngressErr}, {NetworkBobPdsName, bobIngressErr}} {
+		if item.err == nil || pdsIngressReason(item.err) == PdsIngressReasonNotReady {
+			continue
+		}
+		setPdsIngressConditionNamed(&st.Conditions, o.Generation, item.name, true, item.err)
+		return write(v1alpha1.ApplicationPhaseFailed, "the "+item.name+" PDS ingress: "+item.err.Error())
+	}
+	setPdsIngressConditionNamed(&st.Conditions, o.Generation, NetworkAlicePdsName, true, aliceIngressErr)
+	setPdsIngressConditionNamed(&st.Conditions, o.Generation, NetworkBobPdsName, true, bobIngressErr)
+	desired := networkDesired(o, n.ctl.c.workspace(), stateRoot, leases, value, alicePublicURL, bobPublicURL)
 	n.ctl.ensureRelayStatus(ctx, ComponentKey(ComponentKindRelay, NetworkRelayName))
 	if o.Spec.Suspend {
-		if err := n.ctl.ensureDesired(ctx, u, desired); err != nil {
+		suspendDesired := desired
+		if alicePublicURL == "" || bobPublicURL == "" {
+			appliedAlice, err := n.ctl.pdsPublicURLApplied(ctx, ws, NetworkAlicePdsName)
+			if err != nil {
+				return err
+			}
+			appliedBob, err := n.ctl.pdsPublicURLApplied(ctx, ws, NetworkBobPdsName)
+			if err != nil {
+				return err
+			}
+			if appliedAlice && appliedBob {
+				suspendDesired = withoutPdsNamed(desired, NetworkAlicePdsName, NetworkBobPdsName)
+			}
+		}
+		if err := n.ctl.ensureDesired(ctx, u, suspendDesired); err != nil {
 			return write(v1alpha1.ApplicationPhaseProvisioning, err.Error())
 		}
 		_ = n.ctl.pruneDesired(ctx, owner, desired)
@@ -596,7 +637,21 @@ func (n *networks) reconcile(ctx context.Context, u *unstructured.Unstructured) 
 		setCondition(&st.Conditions, o.Generation, ConditionVerifierPassed, false, "Suspended", "the network is suspended")
 		return write(v1alpha1.ApplicationPhasePending, "suspended")
 	}
-	if err := n.ctl.ensureDesired(ctx, u, desired); err != nil {
+	applyDesired := desired
+	if alicePublicURL == "" || bobPublicURL == "" {
+		appliedAlice, err := n.ctl.pdsPublicURLApplied(ctx, ws, NetworkAlicePdsName)
+		if err != nil {
+			return err
+		}
+		appliedBob, err := n.ctl.pdsPublicURLApplied(ctx, ws, NetworkBobPdsName)
+		if err != nil {
+			return err
+		}
+		if appliedAlice && appliedBob {
+			applyDesired = withoutPdsNamed(desired, NetworkAlicePdsName, NetworkBobPdsName)
+		}
+	}
+	if err := n.ctl.ensureDesired(ctx, u, applyDesired); err != nil {
 		return write(v1alpha1.ApplicationPhaseProvisioning, err.Error())
 	}
 	if err := n.ctl.pruneDesired(ctx, owner, desired); err != nil {
@@ -617,6 +672,9 @@ func (n *networks) reconcile(ctx context.Context, u *unstructured.Unstructured) 
 		setCondition(&st.Conditions, o.Generation, ConditionServicesReady, false, "Waiting", strings.Join(waiting, "; "))
 		return write(v1alpha1.ApplicationPhaseProvisioning, "waiting for the network's components to report ready")
 	}
+	if alicePublicURL == "" || bobPublicURL == "" {
+		return write(v1alpha1.ApplicationPhaseProvisioning, "waiting for the network's PDS ingress URLs")
+	}
 	published, err := networkValueFromExposures(snap, bundle)
 	if err != nil {
 		if n.value == nil || n.valueUID != string(o.UID) {
@@ -624,17 +682,21 @@ func (n *networks) reconcile(ctx context.Context, u *unstructured.Unstructured) 
 			return write(v1alpha1.ApplicationPhaseProvisioning, "the network's Exposure endpoints: "+err.Error())
 		}
 		published = *n.value
-	} else if n.value == nil || n.valueUID != string(o.UID) || !sameSpec(*n.value, published) {
-		n.value = &published
-		n.valueUID = string(o.UID)
-		desired = networkDesired(o, n.ctl.c.workspace(), stateRoot, leases, published)
-		if err := n.ctl.ensureDesired(ctx, u, desired); err != nil {
-			return write(v1alpha1.ApplicationPhaseProvisioning, err.Error())
-		}
-		if err := n.ctl.pruneDesired(ctx, owner, desired); err != nil {
-			return err
+	} else {
+		published.Ingress = o.Spec.Ingress
+		if n.value == nil || n.valueUID != string(o.UID) || !sameSpec(*n.value, published) {
+			n.value = &published
+			n.valueUID = string(o.UID)
+			desired = networkDesired(o, n.ctl.c.workspace(), stateRoot, leases, published, alicePublicURL, bobPublicURL)
+			if err := n.ctl.ensureDesired(ctx, u, desired); err != nil {
+				return write(v1alpha1.ApplicationPhaseProvisioning, err.Error())
+			}
+			if err := n.ctl.pruneDesired(ctx, owner, desired); err != nil {
+				return err
+			}
 		}
 	}
+	published.Ingress = o.Spec.Ingress
 	st.Network = &published
 	pdsURL, _ := exposureURL(snap, serviceNameFor(ComponentKindPds, NetworkBobPdsName)+ExposureLocalSuffix)
 	aliceURL, _ := exposureURL(snap, serviceNameFor(ComponentKindPds, NetworkAlicePdsName)+ExposureLocalSuffix)

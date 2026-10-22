@@ -65,7 +65,26 @@ func New(cfg Config) (*Service, error) {
 	cfg.Mode = mode
 	cfg.StateDir = strings.TrimSpace(cfg.StateDir)
 	cfg.PublicBaseURL = strings.TrimRight(strings.TrimSpace(cfg.PublicBaseURL), "/")
+	if cfg.RequireIngress && cfg.PublicBaseURL != "" {
+		if err := publicEndpoint(cfg.PublicBaseURL); err != nil {
+			return nil, err
+		}
+	}
 	return &Service{cfg: cfg}, nil
+}
+
+func publicEndpoint(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return fmt.Errorf("pds: the ingress public URL %q is not a scheme, host and optional port", raw)
+	}
+	if !strings.EqualFold(u.Scheme, "https") {
+		return fmt.Errorf("pds: the ingress public URL %q must be https", raw)
+	}
+	if u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("pds: the ingress public URL %q must carry no userinfo, path, query or fragment", raw)
+	}
+	return nil
 }
 
 func (s *Service) Start(ctx context.Context, deps component.Deps) error {

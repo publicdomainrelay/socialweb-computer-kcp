@@ -244,7 +244,8 @@ func (ctl *Controller) vaultRefs(ctx context.Context, server, clientName string)
 	return "", st, v1alpha1.OpenBaoServerClientRefs{}, fmt.Errorf("the OpenBaoServer %s reports no client %s yet", server, clientName)
 }
 
-func requesterDesired(o v1alpha1.MarketRequester, id *v1alpha1.MarketIdentity, ws, stateRoot, pdsHandle, pdsPublicURL string) ([]desiredComponent, error) {
+func requesterDesired(o v1alpha1.MarketRequester, id *v1alpha1.MarketIdentity, ws, stateRoot, pdsHandle, pdsPublicURL string,
+	ingress *v1alpha1.IngressConfig, requireIngress bool, ingressRef *v1alpha1.ComponentRef) ([]desiredComponent, error) {
 	suspend := o.Spec.Suspend
 	network := o.Spec.Network
 	ident := componentIdentity(id, o.Spec.Identity.Handle)
@@ -270,7 +271,7 @@ func requesterDesired(o v1alpha1.MarketRequester, id *v1alpha1.MarketIdentity, w
 	}
 	out := []desiredComponent{policyEngineDesired(suspend)}
 	if local {
-		pdsSpec, err := appPdsSpec(stateRoot, network, pdsHandle, vault, hostnames, suspend, pdsPublicURL)
+		pdsSpec, err := appPdsSpec(stateRoot, network, pdsHandle, vault, hostnames, suspend, pdsPublicURL, requireIngress, ingressRef)
 		if err != nil {
 			return nil, err
 		}
@@ -281,7 +282,7 @@ func requesterDesired(o v1alpha1.MarketRequester, id *v1alpha1.MarketIdentity, w
 	out = append(out, desiredComponent{Kind: ComponentKindRequester, Name: RequesterComponent, Spec: requesterSpec})
 	out = append(out, httpServiceExposures(ws, ComponentKindRequester, RequesterComponent, "http", network, hostnames, false, true, suspend)...)
 	if local {
-		out = append(out, pdsExposures(ws, PdsComponent, network, hostnames, suspend)...)
+		out = append(out, pdsExposures(ws, PdsComponent, network, hostnames, suspend, ingress)...)
 	}
 	return out, nil
 }
@@ -317,10 +318,11 @@ func (ctl *Controller) reconcileRequester(ctx context.Context, u *unstructured.U
 	}
 	stateRoot := ctl.c.Layout.StateDir
 	pdsAccountHandle := pdsHandle(ctl.c.workspace(), "requester", o.Spec.Identity.Handle)
-	pdsPublicURL := ctl.pdsPublicURL(ctx, ctl.c.workspace(), PdsComponent)
+	requireIngress, ingressRef, ingressConfig, ingressErr := pdsAppIngress(o.Spec.Ingress, o.Spec.Network, o.Spec.Profile == RequesterProfileDefault)
+	pdsPublicURL, _ := ctl.pdsPublicURLFor(ctx, ctl.c.workspace(), PdsComponent, requireIngress)
 	if o.Spec.Suspend {
 		id, _ := ctl.identityIn(ctx, ctl.c.workspace(), RequesterIdentity)
-		desired, err := requesterDesired(o, id, ctl.c.workspace(), stateRoot, pdsAccountHandle, pdsPublicURL)
+		desired, err := requesterDesired(o, id, ctl.c.workspace(), stateRoot, pdsAccountHandle, pdsPublicURL, ingressConfig, requireIngress, ingressRef)
 		if err != nil {
 			st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
 			return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
@@ -367,7 +369,7 @@ func (ctl *Controller) reconcileRequester(ctx context.Context, u *unstructured.U
 	if err != nil {
 		return err
 	}
-	desired, err := requesterDesired(o, id, ctl.c.workspace(), stateRoot, pdsAccountHandle, pdsPublicURL)
+	desired, err := requesterDesired(o, id, ctl.c.workspace(), stateRoot, pdsAccountHandle, pdsPublicURL, ingressConfig, requireIngress, ingressRef)
 	if err != nil {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
 		return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
@@ -375,7 +377,15 @@ func (ctl *Controller) reconcileRequester(ctx context.Context, u *unstructured.U
 	allDesired := desired
 	pds, hasPds := desiredPds(desired)
 	if hasPds {
-		if err := ctl.ensureDesired(ctx, u, pdsComponentSet(desired)); err != nil {
+		first := pdsApplySet(desired, PdsComponent, componentRefName(ingressRef))
+		if requireIngress && pdsPublicURL == "" {
+			if applied, err := ctl.pdsPublicURLApplied(ctx, ctl.c.workspace(), PdsComponent); err != nil {
+				return err
+			} else if applied {
+				first = withoutPds(first)
+			}
+		}
+		if err := ctl.ensureDesired(ctx, u, first); err != nil {
 			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, err.Error()
 			return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
 		}
@@ -388,13 +398,37 @@ func (ctl *Controller) reconcileRequester(ctx context.Context, u *unstructured.U
 			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for the requester's app Pds to be ready"
 			return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
 		}
-		pdsPublicURL = ctl.pdsPublicURL(ctx, ctl.c.workspace(), PdsComponent)
+		if requireIngress {
+			if ingressErr != nil {
+				setPdsIngressCondition(&st, o.Generation, true, ingressErr)
+				st.Components, st.Listeners = snap.Components, snap.Listeners
+				st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "the app Pds ingress: "+ingressErr.Error()
+				return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
+			}
+			if err := ctl.pdsIngressReady(snap, PdsComponent, ingressRef); err != nil {
+				setPdsIngressCondition(&st, o.Generation, true, err)
+				st.Components, st.Listeners = snap.Components, snap.Listeners
+				st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for the app Pds ingress: "+err.Error()
+				return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
+			}
+			pdsPublicURL, err = ctl.pdsIngressURL(ctx, ctl.c.workspace(), PdsComponent)
+			if err != nil {
+				setPdsIngressCondition(&st, o.Generation, true, err)
+				st.Components, st.Listeners = snap.Components, snap.Listeners
+				st.Phase, st.Message = pdsIngressPhase(err), "the app Pds ingress: "+err.Error()
+				return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
+			}
+			setPdsIngressCondition(&st, o.Generation, true, nil)
+		} else {
+			pdsPublicURL, _ = ctl.pdsPublicURLFor(ctx, ctl.c.workspace(), PdsComponent, false)
+			setPdsIngressCondition(&st, o.Generation, false, nil)
+		}
 		if pdsPublicURL == "" {
 			st.Components, st.Listeners = snap.Components, snap.Listeners
-			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for the app Pds exposure"
+			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for the app Pds public URL"
 			return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
 		}
-		if desired, err = requesterDesired(o, id, ctl.c.workspace(), stateRoot, pdsAccountHandle, pdsPublicURL); err != nil {
+		if desired, err = requesterDesired(o, id, ctl.c.workspace(), stateRoot, pdsAccountHandle, pdsPublicURL, ingressConfig, requireIngress, ingressRef); err != nil {
 			st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
 			return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
 		}
@@ -425,7 +459,7 @@ func (ctl *Controller) reconcileRequester(ctx context.Context, u *unstructured.U
 			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "its app Pds account: "+err.Error()
 			return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
 		}
-		ctl.ensureAppPdsStatus(ctx, pdsAccountHandle, sess, o.Spec.Network != nil)
+		ctl.ensureAppPdsStatus(ctx, pdsAccountHandle, sess, RequesterVaultServer+":"+pdsSessionPath("requester"), o.Spec.Network != nil)
 		changed, err := ctl.syncRequesterRepoKey(stateRoot, sess.Did)
 		if err != nil {
 			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "its app Pds signing key: "+err.Error()
@@ -444,7 +478,7 @@ func (ctl *Controller) reconcileRequester(ctx context.Context, u *unstructured.U
 		if id, err = ctl.identityIn(ctx, ctl.c.workspace(), RequesterIdentity); err != nil {
 			return err
 		}
-		if desired, err = requesterDesired(o, id, ctl.c.workspace(), stateRoot, pdsAccountHandle, pdsPublicURL); err != nil {
+		if desired, err = requesterDesired(o, id, ctl.c.workspace(), stateRoot, pdsAccountHandle, pdsPublicURL, ingressConfig, requireIngress, ingressRef); err != nil {
 			st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
 			return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
 		}
