@@ -73,10 +73,7 @@ func (s *Service) routes() *http.ServeMux {
 	mux.HandleFunc("GET "+HealthPath, func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	})
-	mux.HandleFunc("GET "+OAuthMetadataPath, func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{"client_name": "Compute Provider (bidder)"})
-	})
-	mux.HandleFunc("GET /oauth-client-metadata.json", s.oauthClientMetadata)
+	mux.HandleFunc("GET "+OAuthMetadataPath, s.oauthClientMetadata)
 	mux.HandleFunc("GET /oauth/callback/{identity}", s.oauthCallback)
 	return mux
 }
