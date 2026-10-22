@@ -204,6 +204,11 @@ func (g *Guest) OIDCToken(ctx context.Context, role, vaultToken string) Reply {
 		g.log.Warn("the guest OIDC token exchange failed", "role", role, "err", err.Error())
 		return jsonReply(502, map[string]any{"errors": []string{err.Error()}})
 	}
+	if reply.OK() {
+		if err := g.refreshOIDCDocument(ctx, "keys", &g.keys, g.identity.Keys); err == nil {
+			g.log.Info("the guest OIDC keys are published after a token exchange", "role", role)
+		}
+	}
 	g.log.Info("guest OIDC token", "role", role, "status", reply.Status)
 	return normalized(reply)
 }
@@ -342,10 +347,24 @@ func (g *Guest) serveOIDCDocument(ctx context.Context, name string, cache *oidcC
 		g.log.Warn("the guest OIDC document fetch failed", "document", name, "err", err.Error())
 		return jsonReply(502, map[string]any{"errors": []string{err.Error()}})
 	}
-	if reply.OK() {
+	if reply.OK() && (name != "keys" || oidcKeysPublished(reply)) {
 		cache.put(normalized(reply))
 	}
+	if name == "keys" && !oidcKeysPublished(reply) {
+		g.log.Warn("the guest OIDC keys document is empty; retrying in the background", "document", name)
+		return jsonReply(502, map[string]any{"errors": []string{"no OIDC key is published yet"}})
+	}
 	return normalized(reply)
+}
+
+func oidcKeysPublished(reply Reply) bool {
+	var doc struct {
+		Keys []json.RawMessage `json:"keys"`
+	}
+	if err := json.Unmarshal(reply.Body, &doc); err != nil {
+		return false
+	}
+	return len(doc.Keys) > 0
 }
 
 func (g *Guest) refreshOIDCDocuments() {
@@ -392,6 +411,11 @@ func (g *Guest) refreshOIDCDocument(ctx context.Context, name string, cache *oid
 	}
 	if !reply.OK() {
 		err := fmt.Errorf("the guest OIDC %s document returned HTTP %d", name, reply.Status)
+		g.oidcRefreshWarning(name, cache, err)
+		return err
+	}
+	if name == "keys" && !oidcKeysPublished(reply) {
+		err := errors.New("the guest OIDC keys document is empty")
 		g.oidcRefreshWarning(name, cache, err)
 		return err
 	}
