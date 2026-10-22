@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -379,8 +380,18 @@ func setReady(status *v1alpha1.MarketIdentityStatus, generation int64, ready boo
 }
 
 func setAssociated(status *v1alpha1.MarketIdentityStatus, generation int64, spec v1alpha1.MarketIdentitySpec) {
+	for _, did := range spec.ApprovedAssociations {
+		if did == "" || slices.Contains(status.Associations, did) {
+			continue
+		}
+		status.Associations = append(status.Associations, did)
+	}
 	if spec.Association == v1alpha1.AssociationSkip {
 		meta.SetStatusCondition(&status.Conditions, metav1.Condition{Type: v1alpha1.ConditionAssociated, Status: metav1.ConditionTrue, Reason: "AssociationSkipped", Message: "the association is skipped", ObservedGeneration: generation})
+		return
+	}
+	if len(status.Associations) > 0 {
+		meta.SetStatusCondition(&status.Conditions, metav1.Condition{Type: v1alpha1.ConditionAssociated, Status: metav1.ConditionTrue, Reason: "Associated", Message: "the operator association is approved", ObservedGeneration: generation})
 		return
 	}
 	meta.SetStatusCondition(&status.Conditions, metav1.Condition{Type: v1alpha1.ConditionAssociated, Status: metav1.ConditionFalse, Reason: "AwaitingAssociation", Message: "the PDS is ready; the association is pending", ObservedGeneration: generation})

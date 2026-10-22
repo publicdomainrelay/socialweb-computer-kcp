@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 
@@ -364,12 +365,22 @@ func (ctl *Controller) recordPdsIdentity(ctx context.Context, ws, name, handle, 
 		if pdsURL != "" {
 			st.PdsUrl = pdsURL
 		}
+		approved, _, _ := unstructured.NestedStringSlice(u.Object, "spec", "approvedAssociations")
+		for _, did := range approved {
+			if did != "" && !slices.Contains(st.Associations, did) {
+				st.Associations = append(st.Associations, did)
+			}
+		}
 		meta.SetStatusCondition(&st.Conditions, metav1.Condition{Type: "Ready", Status: metav1.ConditionTrue,
 			Reason: "Ready", Message: "the app PDS account is signed in", ObservedGeneration: generation})
-		if association == v1alpha1.AssociationSkip {
+		switch {
+		case association == v1alpha1.AssociationSkip:
 			meta.SetStatusCondition(&st.Conditions, metav1.Condition{Type: v1alpha1.ConditionAssociated, Status: metav1.ConditionTrue,
 				Reason: "AssociationSkipped", Message: "the association is skipped", ObservedGeneration: generation})
-		} else {
+		case len(st.Associations) > 0:
+			meta.SetStatusCondition(&st.Conditions, metav1.Condition{Type: v1alpha1.ConditionAssociated, Status: metav1.ConditionTrue,
+				Reason: "Associated", Message: "the operator association is approved", ObservedGeneration: generation})
+		default:
 			meta.SetStatusCondition(&st.Conditions, metav1.Condition{Type: v1alpha1.ConditionAssociated, Status: metav1.ConditionFalse,
 				Reason: "AwaitingAssociation", Message: "the PDS is ready; the association is pending", ObservedGeneration: generation})
 		}
