@@ -131,76 +131,18 @@ func (s *Service) handleSubmitRFP(w http.ResponseWriter, r *http.Request) {
 		writeXRPCError(w, status, authCode(status), "invalid service-auth token")
 		return
 	}
-	if s.records == nil {
-		writeXRPCError(w, http.StatusServiceUnavailable, "Unavailable", "the bidder has no market record store")
+	if s.bids == nil || s.records == nil || s.attestation == nil || s.did == "" {
+		writeXRPCError(w, http.StatusServiceUnavailable, "Unavailable", "the bidder is not ready to bid")
 		return
 	}
-	resolved, err := s.records.Resolve(r.Context(), market.RecordRef{URI: body.RFPURI, CID: body.RFPCID})
+	bid, err := s.enqueueBid(r.Context(), body.RFPURI, body.RFPCID, issuer)
 	if err != nil {
-		writeXRPCError(w, http.StatusBadRequest, "InvalidRequest", err.Error())
-		return
-	}
-	rfp, err := market.ParseRFP(resolved.Value)
-	if err != nil {
-		writeXRPCError(w, http.StatusBadRequest, "InvalidRequest", err.Error())
-		return
-	}
-	if err := s.verifyRecord(r.Context(), resolved); err != nil {
-		writeXRPCError(w, http.StatusBadRequest, "InvalidRequest", err.Error())
-		return
-	}
-	if scope := s.policy.Scope(r.Context(), PolicyInput{SelfDid: s.did, CounterpartyDid: issuer}); !scope.Allow {
-		s.log.Info("the scope policy declined the RFP", "rfp", body.RFPURI, "reason", scope.Reason)
-		writeJSON(w, http.StatusForbidden, map[string]any{"ok": false, "error": "scope filter declined"})
-		return
-	}
-	decision := s.policy.EvaluatePolicies(r.Context(), rfp.Policies, PolicyInput{
-		Perspective:      PolicyPerspectiveBidder,
-		SelfDid:          s.did,
-		SubjectDid:       s.did,
-		CounterpartyDid:  issuer,
-		RootRequesterDid: issuer,
-		RFP:              &PolicyStrongRef{URI: body.RFPURI, CID: body.RFPCID},
-		Mode:             PolicyModeFull,
-	})
-	if !decision.Allow {
-		s.log.Warn("policy rejected the RFP", "rfp", body.RFPURI, "reason", decision.Reason, "run", decision.Run)
-		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": policyError(decision), "violations": decision.Violations})
-		return
-	}
-	bid, created, err := s.createBid(r.Context(), rfp, resolved, body.RFPURI, body.RFPCID, issuer)
-	if err != nil {
-		s.log.Warn("creating the bid failed", "rfp", body.RFPURI, "err", err)
+		s.log.Warn("recording the bid intent failed", "rfp", body.RFPURI, "err", err)
 		writeXRPCError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
-	if !created {
-		response := map[string]any{"ok": true, "duplicate": true}
-		s.attachBidResponse(r.Context(), response, bid)
-		writeJSON(w, http.StatusOK, response)
-		return
-	}
-	response := map[string]any{"ok": true}
-	s.attachBidResponse(r.Context(), response, bid)
-	if rfp.SubmitBid != "" {
-		response["submitBid"] = rfp.SubmitBid
-	}
-	writeJSON(w, http.StatusOK, response)
-}
-
-func (s *Service) attachBidResponse(ctx context.Context, response map[string]any, bid *v1alpha1.Bid) {
-	if bid == nil || bid.Status.Bid == nil {
-		return
-	}
-	ref := bid.Status.Bid
-	response["bidUri"] = ref.Uri
-	response["bidCid"] = ref.Cid
-	record, err := s.records.GetRecord(ctx, s.did, market.BidNSID, lastSegment(ref.Uri))
-	if err != nil {
-		s.log.Warn("reading the published bid record failed", "bid", ref.Uri, "err", err)
-		return
-	}
-	response["bid"] = map[string]any{"uri": ref.Uri, "cid": ref.Cid, "record": record.Value}
+	s.kickBids()
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "name": bid.Name, "phase": string(v1alpha1.BidPhaseDeciding)})
 }
 
 func (s *Service) handleSubmitBid(w http.ResponseWriter, r *http.Request) {
@@ -250,135 +192,19 @@ func (s *Service) handleSubmitAccept(w http.ResponseWriter, r *http.Request) {
 		writeXRPCError(w, status, authCode(status), "invalid service-auth token")
 		return
 	}
-	unlock := s.lockAccept(body.AcceptURI)
-	defer unlock()
-	if s.records == nil || s.bids == nil || s.vms == nil {
+	if s.records == nil || s.bids == nil || s.vms == nil || s.syncController == nil {
 		writeXRPCError(w, http.StatusServiceUnavailable, "Unavailable", "the bidder is not ready to accept")
 		return
 	}
-	resolved, err := s.records.Resolve(r.Context(), market.RecordRef{URI: body.AcceptURI, CID: body.AcceptCID})
-	if err != nil {
-		writeXRPCError(w, http.StatusBadRequest, "InvalidRequest", err.Error())
-		return
-	}
-	accept, err := market.ParseAccept(resolved.Value)
-	if err != nil {
-		writeXRPCError(w, http.StatusBadRequest, "InvalidRequest", err.Error())
-		return
-	}
-	if err := s.verifyRecord(r.Context(), resolved); err != nil {
-		writeXRPCError(w, http.StatusBadRequest, "InvalidRequest", err.Error())
-		return
-	}
-	if scope := s.policy.Scope(r.Context(), PolicyInput{SelfDid: s.did, CounterpartyDid: issuer}); !scope.Allow {
-		writeXRPCError(w, http.StatusForbidden, "Forbidden", "the scope policy declined the accept")
-		return
-	}
-	if existing, found := s.contractForAccept(r.Context(), body.AcceptURI, body.AcceptCID); found {
-		writeJSON(w, http.StatusOK, map[string]any{"id": lastSegment(existing.receiptURI), "uri": existing.receiptURI,
-			"cid": existing.receiptCID, "submitEvent": accept.SubmitEvent, "alreadyAccepted": true})
-		return
-	}
-	bid, err := s.bidForAccept(r.Context(), accept)
-	if err != nil {
-		writeXRPCError(w, http.StatusBadRequest, "InvalidRequest", err.Error())
-		return
-	}
-	if bid.Spec.Requester != "" && bid.Spec.Requester != issuer {
-		writeXRPCError(w, http.StatusForbidden, "Forbidden", "not the requester that opened the contract")
-		return
-	}
-	if terminated := bid.Status.Terminated; terminated != nil {
-		if bid.Status.Accept == nil || bid.Status.Accept.Uri != body.AcceptURI || bid.Status.Accept.Cid != body.AcceptCID {
-			writeXRPCError(w, http.StatusBadRequest, "InvalidRequest", "the bid's contract was released")
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "alreadyAccepted": true, "terminated": true,
-			"id": lastSegment(terminated.ReceiptUri), "uri": terminated.ReceiptUri, "cid": terminated.ReceiptCid,
-			"submitEvent": accept.SubmitEvent})
-		return
-	}
-	now := s.cfg.Now().UTC()
-	if bidExpired(bid, now) || bid.Status.Phase == v1alpha1.BidPhaseExpired {
-		if bid.Status.Phase == v1alpha1.BidPhaseDeciding || bid.Status.Phase == v1alpha1.BidPhasePublished {
-			s.expireBid(r.Context(), bid, now)
-		}
-		writeXRPCError(w, http.StatusBadRequest, "InvalidRequest", "the bid has expired")
-		return
-	}
-	rfpResolved, err := s.records.Resolve(r.Context(), market.RecordRef{URI: accept.RFP.URI, CID: accept.RFP.CID})
-	if err != nil {
-		writeXRPCError(w, http.StatusBadRequest, "InvalidRequest", "the accepted RFP does not resolve: "+err.Error())
-		return
-	}
-	rfp, err := market.ParseRFP(rfpResolved.Value)
-	if err != nil {
-		writeXRPCError(w, http.StatusBadRequest, "InvalidRequest", err.Error())
-		return
-	}
-	payloadResolved, err := s.records.Resolve(r.Context(), market.RecordRef{URI: rfp.Payload.URI, CID: rfp.Payload.CID})
-	if err != nil {
-		writeXRPCError(w, http.StatusBadRequest, "InvalidRequest", "the RFP payload does not resolve: "+err.Error())
-		return
-	}
-	bidResolved, err := s.records.Resolve(r.Context(), market.RecordRef{URI: accept.Bid.URI, CID: accept.Bid.CID})
-	if err != nil {
-		writeXRPCError(w, http.StatusBadRequest, "InvalidRequest", "the accepted bid does not resolve: "+err.Error())
-		return
-	}
-	parsedBid, err := market.ParseBid(bidResolved.Value)
-	if err != nil {
-		writeXRPCError(w, http.StatusBadRequest, "InvalidRequest", err.Error())
-		return
-	}
-	if parsedBid.Config == nil {
-		writeXRPCError(w, http.StatusBadRequest, "InvalidRequest", "the bid names no bid config")
-		return
-	}
-	configResolved, err := s.records.Resolve(r.Context(), market.RecordRef{URI: parsedBid.Config.URI, CID: parsedBid.Config.CID})
-	if err != nil {
-		writeXRPCError(w, http.StatusBadRequest, "InvalidRequest", "the bid config does not resolve: "+err.Error())
-		return
-	}
-	receiptURI, receiptCID, err := s.createReceipt(r.Context(), market.ReceiptRefs{
-		RFP:         market.RecordRef{URI: accept.RFP.URI, CID: accept.RFP.CID},
-		Bid:         market.RecordRef{URI: accept.Bid.URI, CID: accept.Bid.CID},
-		Accept:      market.RecordRef{URI: body.AcceptURI, CID: body.AcceptCID},
-		Payload:     &market.RecordRef{URI: rfp.Payload.URI, CID: rfp.Payload.CID},
-		SubmitEvent: accept.SubmitEvent,
-	}, resolved, issuer)
-	if err != nil {
-		writeXRPCError(w, http.StatusInternalServerError, "InternalError", "the receipt could not be written: "+err.Error())
-		return
-	}
-	statusValue := cloneBidStatus(bid.Status)
-	statusValue.Accept = &v1alpha1.BidRecordRef{Uri: body.AcceptURI, Cid: body.AcceptCID}
-	statusValue.Timings.AcceptedAt = now.Format(time.RFC3339)
-	statusValue.Phase = v1alpha1.BidPhaseWon
-	statusValue.ComputeVM = ""
-	setBidCondition(&statusValue, bid.Generation, v1alpha1.BidConditionComplete, metav1.ConditionTrue, "ContractAccepted", "the guest contract is accepted")
-	if err := s.bids.PatchStatus(r.Context(), bid.Name, statusValue); err != nil {
-		s.log.Warn("updating the bid after accept failed", "bid", bid.Name, "err", err)
-	}
-	payload := provisionPayload{
-		BidName:      bid.Name,
-		RequesterDID: issuer,
-		SubmitEvent:  accept.SubmitEvent,
-	}
+	payload := provisionPayload{RequesterDID: issuer}
 	payload.Accept.URI, payload.Accept.CID = body.AcceptURI, body.AcceptCID
-	payload.Bid.URI, payload.Bid.CID = accept.Bid.URI, accept.Bid.CID
-	payload.RFP.URI, payload.RFP.CID = accept.RFP.URI, accept.RFP.CID
-	payload.Payload.URI, payload.Payload.CID = rfp.Payload.URI, rfp.Payload.CID
-	payload.Payload.Value = payloadResolved.Value
-	payload.Receipt.URI, payload.Receipt.CID = receiptURI, receiptCID
-	payload.BidConfig.URI, payload.BidConfig.CID = parsedBid.Config.URI, parsedBid.Config.CID
-	payload.BidConfig.Value = configResolved.Value
-	if _, err := s.ensureProvisionSync(r.Context(), bid, payload); err != nil {
+	name, err := s.ensureProvisionSync(r.Context(), payload)
+	if err != nil {
 		writeXRPCError(w, http.StatusInternalServerError, "InternalError", "the provisioning intent could not be recorded: "+err.Error())
 		return
 	}
 	s.kickStateSync()
-	writeJSON(w, http.StatusOK, map[string]any{"id": lastSegment(receiptURI), "uri": receiptURI, "cid": receiptCID, "submitEvent": accept.SubmitEvent})
+	writeJSON(w, http.StatusAccepted, map[string]any{"ok": true, "id": name, "acceptUri": body.AcceptURI, "acceptCid": body.AcceptCID})
 }
 
 func (s *Service) handleSubmitEvent(w http.ResponseWriter, r *http.Request) {
@@ -498,15 +324,6 @@ func authCode(status int) string {
 	return "Unauthorized"
 }
 
-func policyError(decision PolicyDecision) string {
-	for _, violation := range decision.Violations {
-		if strings.Contains(strings.ToLower(violation), "sandbox-denied") {
-			return "policy sandbox denied"
-		}
-	}
-	return "policy rejected"
-}
-
 func lastSegment(uri string) string {
 	if i := strings.LastIndexByte(uri, '/'); i >= 0 {
 		return uri[i+1:]
@@ -519,63 +336,75 @@ func bidName(did, rfpURI, rfpCID string) string {
 	return "bid-" + hex.EncodeToString(sum[:])[:20]
 }
 
-func (s *Service) createBid(ctx context.Context, rfp *market.RFP, resolved market.ResolvedRecord, rfpURI, rfpCID, issuer string) (*v1alpha1.Bid, bool, error) {
+func (s *Service) enqueueBid(ctx context.Context, rfpURI, rfpCID, issuer string) (*v1alpha1.Bid, error) {
 	if s.bids == nil {
-		return nil, false, errors.New("the bidder has no Bid store")
+		return nil, errors.New("the bidder has no Bid store")
 	}
 	if s.did == "" {
-		return nil, false, errors.New("the bidder has no DID")
+		return nil, errors.New("the bidder has no DID")
 	}
 	now := s.cfg.Now().UTC()
 	name := bidName(s.did, rfpURI, rfpCID)
 	existing, err := s.bids.Get(ctx, name)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 	if existing != nil {
-		return existing, false, nil
+		if existing.Status.Phase == "" {
+			status := decidingBidStatus(now, s.cfg.ComponentName)
+			if err := s.bids.PatchStatus(ctx, name, status); err != nil {
+				return nil, err
+			}
+			existing.Status = status
+		}
+		return existing, nil
 	}
-	attached := make([]v1alpha1.BidRecordRef, 0, len(rfp.Policies))
-	for _, p := range rfp.Policies {
-		attached = append(attached, v1alpha1.BidRecordRef{Uri: p.URI, Cid: p.CID})
-	}
-	payloadNSID := market.NSIDFromURI(rfp.Payload.URI)
 	bid := &v1alpha1.Bid{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
 		Spec: v1alpha1.BidSpec{
-			Rfp:         v1alpha1.BidRecordRef{Uri: rfpURI, Cid: rfpCID},
-			Requester:   issuer,
-			PayloadNsid: payloadNSID,
-			Offer:       v1alpha1.BidOffer{Kind: "free", Cost: 0},
-			Provider:    "kcp",
-			Policy:      v1alpha1.BidPolicy{Attached: attached, Verdict: "allow"},
-			ExpiresAt:   now.Add(DefaultBidTTL).Format(time.RFC3339),
+			Rfp:       v1alpha1.BidRecordRef{Uri: rfpURI, Cid: rfpCID},
+			Requester: issuer,
+			ExpiresAt: now.Add(DefaultBidTTL).Format(time.RFC3339),
 		},
 	}
 	if err := s.bids.Create(ctx, bid); err != nil {
 		if isAlreadyExists(err) {
 			again, getErr := s.bids.Get(ctx, name)
-			return again, false, getErr
+			if getErr != nil {
+				return nil, getErr
+			}
+			if again != nil && again.Status.Phase == "" {
+				status := decidingBidStatus(now, s.cfg.ComponentName)
+				if err := s.bids.PatchStatus(ctx, name, status); err != nil {
+					return nil, err
+				}
+				again.Status = status
+			}
+			return again, nil
 		}
-		return nil, false, err
+		return nil, err
 	}
-	status := v1alpha1.BidStatus{
-		Phase:     v1alpha1.BidPhaseDeciding,
-		ClaimedBy: s.cfg.ComponentName,
-		Timings:   v1alpha1.BidTimings{RfpSeenAt: now.Format(time.RFC3339), DecidedAt: now.Format(time.RFC3339)},
-	}
+	status := decidingBidStatus(now, s.cfg.ComponentName)
 	if err := s.bids.PatchStatus(ctx, name, status); err != nil {
-		s.log.Warn("recording the bid decision failed", "bid", name, "err", err)
+		return nil, err
 	}
 	bid.Status = status
-	if err := s.publishBidRecord(ctx, bid, rfp, now, false); err != nil {
-		return bid, true, err
+	return bid, nil
+}
+
+func decidingBidStatus(now time.Time, claimedBy string) v1alpha1.BidStatus {
+	return v1alpha1.BidStatus{
+		Phase:     v1alpha1.BidPhaseDeciding,
+		ClaimedBy: claimedBy,
+		Timings:   v1alpha1.BidTimings{RfpSeenAt: now.Format(time.RFC3339)},
 	}
-	return bid, true, nil
 }
 
 func (s *Service) submitBid(ctx context.Context, endpoint string, ref market.StrongRef) {
-	if !isAbsoluteURL(endpoint) {
+	raw := strings.TrimSpace(endpoint)
+	endpoint = s.submitEventURL(ctx, raw)
+	if endpoint == "" {
+		s.log.Warn("submitting the bid failed: the endpoint does not resolve", "url", raw, "bid", ref.URI)
 		return
 	}
 	record, err := s.records.GetRecord(ctx, market.ATURIAuthority(ref.URI), market.NSIDFromURI(ref.URI), lastSegment(ref.URI))
@@ -793,46 +622,6 @@ func (s *Service) bidForAccept(ctx context.Context, accept *market.Accept) (*v1a
 		return bid, nil
 	}
 	return nil, fmt.Errorf("no bid of this bidder matches %s", accept.Bid.URI)
-}
-
-func (s *Service) contractForAccept(ctx context.Context, acceptURI, acceptCID string) (contractInfo, bool) {
-	if found, ok := s.contractForAcceptMemory(acceptURI, acceptCID); ok {
-		return found, true
-	}
-	if s.vms == nil {
-		return contractInfo{}, false
-	}
-	list, err := s.vms.List(ctx)
-	if err != nil {
-		return contractInfo{}, false
-	}
-	for i := range list {
-		vm := &list[i]
-		contract := vm.Spec.Contract
-		if contract == nil || contract.AcceptUri != acceptURI || contract.AcceptCid != acceptCID {
-			continue
-		}
-		info := contractInfo{computeVM: vm.Name, receiptURI: contract.ReceiptUri, receiptCID: contract.ReceiptCid,
-			acceptURI: acceptURI, acceptCID: acceptCID, acceptAuthor: vm.Spec.Requester.Did}
-		s.contracts.Store(info.receiptURI, info)
-		return info, true
-	}
-	return contractInfo{}, false
-}
-
-func (s *Service) contractForAcceptMemory(acceptURI, acceptCID string) (contractInfo, bool) {
-	var found contractInfo
-	ok := false
-	s.contracts.Range(func(key, value any) bool {
-		info, isInfo := value.(contractInfo)
-		if !isInfo || info.acceptURI != acceptURI || info.acceptCID != acceptCID {
-			return true
-		}
-		found = info
-		ok = true
-		return false
-	})
-	return found, ok
 }
 
 func (s *Service) contractForReceipt(ctx context.Context, receiptURI string) (contractInfo, bool) {

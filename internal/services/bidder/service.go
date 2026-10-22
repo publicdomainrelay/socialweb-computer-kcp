@@ -155,6 +155,8 @@ type Service struct {
 
 	syncKick chan struct{}
 
+	bidKick chan struct{}
+
 	contracts sync.Map
 
 	verifiedBids sync.Map
@@ -810,6 +812,9 @@ func (s *Service) offeringEndpoint() string {
 }
 
 func (s *Service) startLoops(ctx context.Context) {
+	if s.bidKick == nil {
+		s.bidKick = make(chan struct{}, 1)
+	}
 	if s.loop != nil {
 		s.wg.Add(1)
 		go func() {
@@ -842,6 +847,16 @@ func (s *Service) startLoops(ctx context.Context) {
 		defer s.wg.Done()
 		s.reconcileBidsLoop(ctx)
 	}()
+}
+
+func (s *Service) kickBids() {
+	if s.bidKick == nil {
+		return
+	}
+	select {
+	case s.bidKick <- struct{}{}:
+	default:
+	}
 }
 
 func (s *Service) bindBadgeBlueKeys(ctx context.Context) {

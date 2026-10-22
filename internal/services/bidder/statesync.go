@@ -547,32 +547,10 @@ type provisionRef struct {
 	CID string `json:"cid"`
 }
 
-type provisionRecord struct {
-	URI string `json:"uri"`
-
-	CID string `json:"cid"`
-
-	Value map[string]any `json:"value,omitempty"`
-}
-
 type provisionPayload struct {
-	BidName string `json:"bidName"`
-
 	Accept provisionRef `json:"accept"`
 
-	Bid provisionRef `json:"bid"`
-
-	RFP provisionRef `json:"rfp"`
-
-	Payload provisionRecord `json:"payload"`
-
 	RequesterDID string `json:"requesterDid"`
-
-	Receipt provisionRef `json:"receipt"`
-
-	SubmitEvent string `json:"submitEvent,omitempty"`
-
-	BidConfig provisionRecord `json:"bidConfig"`
 }
 
 func decodeProvisionPayload(raw json.RawMessage) (provisionPayload, error) {
@@ -584,18 +562,8 @@ func decodeProvisionPayload(raw json.RawMessage) (provisionPayload, error) {
 		return payload, fmt.Errorf("bidder: the provision payload is not JSON: %w", err)
 	}
 	switch {
-	case strings.TrimSpace(payload.BidName) == "":
-		return payload, errors.New("bidder: the provision payload names no bid")
 	case payload.Accept.URI == "" || payload.Accept.CID == "":
 		return payload, errors.New("bidder: the provision payload names no accept")
-	case payload.Bid.URI == "" || payload.Bid.CID == "":
-		return payload, errors.New("bidder: the provision payload names no accepted bid")
-	case payload.RFP.URI == "" || payload.RFP.CID == "":
-		return payload, errors.New("bidder: the provision payload names no RFP")
-	case payload.Payload.URI == "" || payload.Payload.CID == "":
-		return payload, errors.New("bidder: the provision payload names no VM payload")
-	case payload.Receipt.URI == "" || payload.Receipt.CID == "":
-		return payload, errors.New("bidder: the provision payload names no receipt")
 	case strings.TrimSpace(payload.RequesterDID) == "":
 		return payload, errors.New("bidder: the provision payload names no requester")
 	}
@@ -616,10 +584,18 @@ func (payload provisionPayload) acceptKey() string {
 	return computevm.AcceptRef{URI: payload.Accept.URI, CID: payload.Accept.CID}.Key()
 }
 
-func (s *Service) ensureProvisionSync(ctx context.Context, bid *v1alpha1.Bid, payload provisionPayload) (string, error) {
-	if bid == nil {
-		return "", errors.New("bidder: a provision StateSync needs a Bid")
+func provisionBidHintKey(payload provisionPayload) string {
+	return "bid:" + payload.acceptKey()
+}
+
+func (s *Service) nowUTC() time.Time {
+	if s.cfg.Now != nil {
+		return s.cfg.Now().UTC()
 	}
+	return time.Now().UTC()
+}
+
+func (s *Service) ensureProvisionSync(ctx context.Context, payload provisionPayload) (string, error) {
 	if payload.acceptKey() == "" {
 		return "", errors.New("bidder: a provision StateSync needs an accept")
 	}
@@ -632,36 +608,17 @@ func (s *Service) ensureProvisionSync(ctx context.Context, bid *v1alpha1.Bid, pa
 		return "", err
 	}
 	name := provisionSyncName(payload.Accept.URI)
-	metadata := map[string]any{
-		"name": name,
-		"labels": map[string]any{
-			"statesync.socialweb.computer/adapter": ProvisionSyncAdapter,
-		},
-	}
-	if bid.UID != "" {
-		metadata["ownerReferences"] = []any{map[string]any{
-			"apiVersion": v1alpha1.GroupVersion.String(),
-			"kind":       "Bid",
-			"name":       bid.Name,
-			"uid":        string(bid.UID),
-		}}
-	}
-	source := map[string]any{
-		"workspace":  s.cfg.Workspace,
-		"apiVersion": v1alpha1.GroupVersion.String(),
-		"kind":       "Bid",
-		"name":       bid.Name,
-		"uid":        string(bid.UID),
-	}
-	if bid.Generation > 0 {
-		source["generation"] = bid.Generation
-	}
 	object := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": v1alpha1.GroupVersion.String(),
 		"kind":       "StateSync",
-		"metadata":   metadata,
+		"metadata": map[string]any{
+			"name": name,
+			"labels": map[string]any{
+				"statesync.socialweb.computer/adapter": ProvisionSyncAdapter,
+			},
+		},
 		"spec": map[string]any{
-			"source":         source,
+			"source":         map[string]any{"workspace": s.cfg.Workspace},
 			"sink":           map[string]any{"adapter": ProvisionSyncAdapter},
 			"direction":      string(v1alpha1.StateSyncDirectionOutbound),
 			"payload":        stored,
@@ -679,7 +636,7 @@ func (s *Service) ensureProvisionSync(ctx context.Context, bid *v1alpha1.Bid, pa
 			return "", fmt.Errorf("bidder: creating the provision StateSync %s: %w", name, err)
 		}
 	} else {
-		s.log.Info("a provision StateSync is created", "bid", bid.Name, "accept", payload.Accept.URI, "statesync", name)
+		s.log.Info("a provision StateSync is created", "accept", payload.Accept.URI, "statesync", name)
 	}
 	return name, nil
 }
@@ -699,24 +656,36 @@ func (a *provisionAdapter) logf() *slog.Logger {
 	return a.log
 }
 
-func (a *provisionAdapter) findVM(ctx context.Context, payload provisionPayload) (*v1alpha1.ComputeVM, error) {
+func (s *Service) bidForAcceptIntent(ctx context.Context, payload provisionPayload) (*v1alpha1.Bid, error) {
+	if s.bids == nil {
+		return nil, errors.New("bidder: the bidder has no Bid store")
+	}
+	bids, err := s.bids.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range bids {
+		accept := bids[i].Status.Accept
+		if accept == nil || accept.Uri != payload.Accept.URI || accept.Cid != payload.Accept.CID {
+			continue
+		}
+		return &bids[i], nil
+	}
+	return nil, nil
+}
+
+func (a *provisionAdapter) findVM(ctx context.Context, payload provisionPayload, bid *v1alpha1.Bid) (*v1alpha1.ComputeVM, error) {
 	service := a.service
 	if service == nil || service.vms == nil {
 		return nil, errors.New("bidder: the provision adapter has no ComputeVM store")
 	}
-	if service.bids != nil {
-		bid, err := service.bids.Get(ctx, payload.BidName)
+	if bid != nil && bid.Status.ComputeVM != "" {
+		vm, err := service.vms.Get(ctx, bid.Status.ComputeVM)
 		if err != nil {
 			return nil, err
 		}
-		if bid != nil && bid.Status.ComputeVM != "" {
-			vm, err := service.vms.Get(ctx, bid.Status.ComputeVM)
-			if err != nil {
-				return nil, err
-			}
-			if vm != nil {
-				return vm, nil
-			}
+		if vm != nil {
+			return vm, nil
 		}
 	}
 	key := payload.acceptKey()
@@ -732,12 +701,61 @@ func (a *provisionAdapter) findVM(ctx context.Context, payload provisionPayload)
 	return nil, nil
 }
 
-func contractBound(vm *v1alpha1.ComputeVM, receipt provisionRef) bool {
+func contractMatchesAccept(vm *v1alpha1.ComputeVM, payload provisionPayload) bool {
 	if vm == nil || vm.Spec.Contract == nil {
 		return false
 	}
 	contract := vm.Spec.Contract
-	return contract.ReceiptUri == receipt.URI && contract.ReceiptCid == receipt.CID
+	return contract.AcceptUri == payload.Accept.URI && contract.AcceptCid == payload.Accept.CID && contract.ReceiptUri != ""
+}
+
+func provisionObservation(vm *v1alpha1.ComputeVM, payload provisionPayload, request statesync.Request, at time.Time) statesync.Observation {
+	observation := statesync.Observation{
+		Exists: true,
+		Ref:    vm.Name,
+		CID:    string(vm.UID),
+		Hash:   provisionPayloadHash(request.Payload),
+		At:     at.Format(time.RFC3339),
+		Meta: map[string]string{
+			"computevm": vm.Name,
+			"acceptUri": payload.Accept.URI,
+			"acceptCid": payload.Accept.CID,
+		},
+	}
+	if contract := vm.Spec.Contract; contract != nil {
+		observation.Meta["receiptUri"] = contract.ReceiptUri
+		observation.Meta["receiptCid"] = contract.ReceiptCid
+	}
+	return observation
+}
+
+func provisionSettledObservation(ref string, payload provisionPayload, request statesync.Request) statesync.Observation {
+	return statesync.Observation{
+		Exists: true,
+		Ref:    ref,
+		Hash:   provisionPayloadHash(request.Payload),
+		At:     time.Now().UTC().Format(time.RFC3339),
+		Meta: map[string]string{
+			"acceptUri": payload.Accept.URI,
+			"acceptCid": payload.Accept.CID,
+		},
+	}
+}
+
+func (a *provisionAdapter) bidForIntent(ctx context.Context, payload provisionPayload) (*v1alpha1.Bid, error) {
+	service := a.service
+	if value, ok := service.contracts.Load(provisionBidHintKey(payload)); ok {
+		if info, isInfo := value.(contractInfo); isInfo && info.bidName != "" {
+			bid, err := service.bids.Get(ctx, info.bidName)
+			if err != nil {
+				return nil, err
+			}
+			if bid != nil {
+				return bid, nil
+			}
+		}
+	}
+	return service.bidForAcceptIntent(ctx, payload)
 }
 
 func (a *provisionAdapter) Observe(ctx context.Context, request statesync.Request) (statesync.Observation, error) {
@@ -745,44 +763,34 @@ func (a *provisionAdapter) Observe(ctx context.Context, request statesync.Reques
 	if err != nil {
 		return statesync.Observation{}, err
 	}
+	service := a.service
+	if service == nil || service.vms == nil {
+		return statesync.Observation{}, errors.New("bidder: the provision adapter has no ComputeVM store")
+	}
 	var bid *v1alpha1.Bid
-	if a.service != nil && a.service.bids != nil {
-		var err error
-		bid, err = a.service.bids.Get(ctx, payload.BidName)
+	if service.bids != nil {
+		bid, err = a.bidForIntent(ctx, payload)
 		if err != nil {
 			return statesync.Observation{}, err
 		}
-		if bid != nil && bid.Status.Terminated != nil {
-			return statesync.Observation{Exists: true, Ref: "terminated:" + payload.Receipt.URI,
-				Hash: provisionPayloadHash(request.Payload), At: time.Now().UTC().Format(time.RFC3339)}, nil
-		}
 	}
-	vm, err := a.findVM(ctx, payload)
+	if bid != nil && bid.Status.Terminated != nil {
+		return provisionSettledObservation("terminated:"+bid.Status.Terminated.ReceiptUri, payload, request), nil
+	}
+	vm, err := a.findVM(ctx, payload, bid)
 	if err != nil {
 		return statesync.Observation{}, err
 	}
 	if vm == nil {
 		if bid != nil && bid.Status.ComputeVM != "" {
-			return statesync.Observation{Exists: true, Ref: "released:" + bid.Status.ComputeVM,
-				Hash: provisionPayloadHash(request.Payload), At: time.Now().UTC().Format(time.RFC3339)}, nil
+			return provisionSettledObservation("released:"+bid.Status.ComputeVM, payload, request), nil
 		}
 		return statesync.Observation{Exists: false}, nil
 	}
-	if !contractBound(vm, payload.Receipt) {
+	if !contractMatchesAccept(vm, payload) {
 		return statesync.Observation{Exists: false}, nil
 	}
-	return statesync.Observation{
-		Exists: true,
-		Ref:    vm.Name,
-		CID:    string(vm.UID),
-		Hash:   provisionPayloadHash(request.Payload),
-		At:     time.Now().UTC().Format(time.RFC3339),
-		Meta: map[string]string{
-			"computevm":  vm.Name,
-			"receiptUri": payload.Receipt.URI,
-			"receiptCid": payload.Receipt.CID,
-		},
-	}, nil
+	return provisionObservation(vm, payload, request, time.Now().UTC()), nil
 }
 
 func (a *provisionAdapter) Apply(ctx context.Context, request statesync.Request) (statesync.Observation, error) {
@@ -790,36 +798,146 @@ func (a *provisionAdapter) Apply(ctx context.Context, request statesync.Request)
 	if service == nil || service.provider == nil {
 		return statesync.Observation{}, errors.New("bidder: the provision adapter has no compute provider")
 	}
+	if service.records == nil || service.vms == nil || service.attestation == nil || service.did == "" {
+		return statesync.Observation{}, errors.New("bidder: the provision adapter is not ready")
+	}
 	payload, err := decodeProvisionPayload(request.Payload)
 	if err != nil {
 		return statesync.Observation{}, err
 	}
-	submitEventURL := service.submitEventURL(ctx, payload.SubmitEvent)
+	unlock := service.lockAccept(payload.Accept.URI)
+	defer unlock()
+
+	acceptResolved, err := service.records.Resolve(ctx, market.RecordRef{URI: payload.Accept.URI, CID: payload.Accept.CID})
+	if err != nil {
+		return statesync.Observation{}, fmt.Errorf("bidder: resolving the accept: %w", err)
+	}
+	accept, err := market.ParseAccept(acceptResolved.Value)
+	if err != nil {
+		return statesync.Observation{}, fmt.Errorf("bidder: the accept is invalid: %w", err)
+	}
+	if err := service.verifyRecord(ctx, acceptResolved); err != nil {
+		return statesync.Observation{}, fmt.Errorf("bidder: the accept is not signed by its author: %w", err)
+	}
+	if scope := service.policy.Scope(ctx, PolicyInput{SelfDid: service.did, CounterpartyDid: payload.RequesterDID}); !scope.Allow {
+		a.logf().Info("the scope policy declined the accept", "accept", payload.Accept.URI, "reason", scope.Reason)
+		return statesync.Observation{}, errors.New("bidder: the scope policy declined the accept: " + scope.Reason)
+	}
+	bid, err := service.bidForAccept(ctx, accept)
+	if err != nil {
+		return statesync.Observation{}, fmt.Errorf("bidder: finding the bid of the accept: %w", err)
+	}
+	if bid.Spec.Requester != "" && bid.Spec.Requester != payload.RequesterDID {
+		return statesync.Observation{}, errors.New("bidder: the accept is not from the requester that opened the contract")
+	}
+	if terminated := bid.Status.Terminated; terminated != nil {
+		if bid.Status.Accept == nil || bid.Status.Accept.Uri != payload.Accept.URI || bid.Status.Accept.Cid != payload.Accept.CID {
+			return statesync.Observation{}, errors.New("bidder: the bid's contract was released")
+		}
+		return provisionSettledObservation("terminated:"+terminated.ReceiptUri, payload, request), nil
+	}
+	if bid.Status.Phase == v1alpha1.BidPhaseFailed {
+		return statesync.Observation{}, errors.New("bidder: the bid failed: " + bid.Status.Message)
+	}
+	now := service.nowUTC()
+	if bidExpired(bid, now) || bid.Status.Phase == v1alpha1.BidPhaseExpired {
+		if bid.Status.Phase == v1alpha1.BidPhaseDeciding || bid.Status.Phase == v1alpha1.BidPhasePublished {
+			service.expireBid(ctx, bid, now)
+		}
+		return statesync.Observation{}, errors.New("bidder: the bid has expired")
+	}
+
+	rfpResolved, err := service.records.Resolve(ctx, market.RecordRef{URI: accept.RFP.URI, CID: accept.RFP.CID})
+	if err != nil {
+		return statesync.Observation{}, fmt.Errorf("bidder: resolving the accepted RFP: %w", err)
+	}
+	rfp, err := market.ParseRFP(rfpResolved.Value)
+	if err != nil {
+		return statesync.Observation{}, fmt.Errorf("bidder: the accepted RFP is invalid: %w", err)
+	}
+	if err := service.verifyRecord(ctx, rfpResolved); err != nil {
+		return statesync.Observation{}, fmt.Errorf("bidder: the accepted RFP is not signed by its author: %w", err)
+	}
+	decision := service.policy.EvaluatePolicies(ctx, rfp.Policies, PolicyInput{
+		Perspective:      PolicyPerspectiveBidder,
+		SelfDid:          service.did,
+		SubjectDid:       service.did,
+		CounterpartyDid:  payload.RequesterDID,
+		RootRequesterDid: payload.RequesterDID,
+		RFP:              &PolicyStrongRef{URI: accept.RFP.URI, CID: accept.RFP.CID},
+		Mode:             PolicyModeFull,
+	})
+	if !decision.Allow {
+		a.logf().Warn("policy rejected the accept", "accept", payload.Accept.URI, "reason", decision.Reason, "run", decision.Run)
+		return statesync.Observation{}, errors.New("bidder: the policy rejected the accept: " + decision.Reason)
+	}
+	payloadResolved, err := service.records.Resolve(ctx, market.RecordRef{URI: rfp.Payload.URI, CID: rfp.Payload.CID})
+	if err != nil {
+		return statesync.Observation{}, fmt.Errorf("bidder: resolving the RFP payload: %w", err)
+	}
+	bidResolved, err := service.records.Resolve(ctx, market.RecordRef{URI: accept.Bid.URI, CID: accept.Bid.CID})
+	if err != nil {
+		return statesync.Observation{}, fmt.Errorf("bidder: resolving the accepted bid: %w", err)
+	}
+	parsedBid, err := market.ParseBid(bidResolved.Value)
+	if err != nil {
+		return statesync.Observation{}, fmt.Errorf("bidder: the accepted bid is invalid: %w", err)
+	}
+	if parsedBid.Config == nil {
+		return statesync.Observation{}, errors.New("bidder: the accepted bid names no bid config")
+	}
+	configResolved, err := service.records.Resolve(ctx, market.RecordRef{URI: parsedBid.Config.URI, CID: parsedBid.Config.CID})
+	if err != nil {
+		return statesync.Observation{}, fmt.Errorf("bidder: resolving the bid config: %w", err)
+	}
+	submitEventURL := service.submitEventURL(ctx, accept.SubmitEvent)
+	if strings.TrimSpace(accept.SubmitEvent) != "" && submitEventURL == "" {
+		a.logf().Warn("the accept's submitEvent does not resolve; the firehose carries the event", "accept", payload.Accept.URI, "submitEvent", accept.SubmitEvent)
+	}
+	receiptURI, receiptCID, err := service.createReceipt(ctx, market.ReceiptRefs{
+		RFP:         market.RecordRef{URI: accept.RFP.URI, CID: accept.RFP.CID},
+		Bid:         market.RecordRef{URI: accept.Bid.URI, CID: accept.Bid.CID},
+		Accept:      market.RecordRef{URI: payload.Accept.URI, CID: payload.Accept.CID},
+		Payload:     &market.RecordRef{URI: rfp.Payload.URI, CID: rfp.Payload.CID},
+		SubmitEvent: accept.SubmitEvent,
+	}, acceptResolved, payload.RequesterDID)
+	if err != nil {
+		return statesync.Observation{}, fmt.Errorf("bidder: writing the receipt: %w", err)
+	}
+	status := cloneBidStatus(bid.Status)
+	if status.Accept == nil || status.Accept.Uri != payload.Accept.URI || status.Accept.Cid != payload.Accept.CID {
+		status.Accept = &v1alpha1.BidRecordRef{Uri: payload.Accept.URI, Cid: payload.Accept.CID}
+		if status.Timings.AcceptedAt == "" {
+			status.Timings.AcceptedAt = now.Format(time.RFC3339)
+		}
+		status.Phase = v1alpha1.BidPhaseWon
+		setBidCondition(&status, bid.Generation, v1alpha1.BidConditionComplete, metav1.ConditionTrue, "ContractAccepted", "the guest contract is accepted")
+		if err := service.bids.PatchStatus(ctx, bid.Name, status); err != nil {
+			return statesync.Observation{}, fmt.Errorf("bidder: recording the accepted contract: %w", err)
+		}
+		bid.Status = status
+	}
 	result, err := service.provider.Provision(ctx, ProvisionRequest{
-		RFPURI:         payload.RFP.URI,
-		RFPCID:         payload.RFP.CID,
-		VMURI:          payload.Payload.URI,
-		VMCID:          payload.Payload.CID,
+		RFPURI:         accept.RFP.URI,
+		RFPCID:         accept.RFP.CID,
+		VMURI:          rfp.Payload.URI,
+		VMCID:          rfp.Payload.CID,
 		AcceptURI:      payload.Accept.URI,
 		AcceptCID:      payload.Accept.CID,
-		BidURI:         payload.Bid.URI,
-		BidCID:         payload.Bid.CID,
+		BidURI:         accept.Bid.URI,
+		BidCID:         accept.Bid.CID,
 		RequesterDID:   payload.RequesterDID,
 		SubmitEventURL: submitEventURL,
-		VMPayload:      market.ResolvedRecord{URI: payload.Payload.URI, CID: payload.Payload.CID, Value: payload.Payload.Value},
-		BidConfig:      market.StrongRef{URI: payload.BidConfig.URI, CID: payload.BidConfig.CID},
-		BidConfigValue: payload.BidConfig.Value,
+		VMPayload:      payloadResolved,
+		BidConfig:      market.StrongRef{URI: parsedBid.Config.URI, CID: parsedBid.Config.CID},
+		BidConfigValue: configResolved.Value,
 	})
 	if err != nil {
 		return statesync.Observation{}, err
 	}
-	now := time.Now().UTC()
-	if service.cfg.Now != nil {
-		now = service.cfg.Now().UTC()
-	}
 	contract := v1alpha1.ComputeVMContract{
-		ReceiptUri:     payload.Receipt.URI,
-		ReceiptCid:     payload.Receipt.CID,
+		ReceiptUri:     receiptURI,
+		ReceiptCid:     receiptCID,
 		AcceptUri:      payload.Accept.URI,
 		AcceptCid:      payload.Accept.CID,
 		SubmitEventUrl: submitEventURL,
@@ -829,34 +947,35 @@ func (a *provisionAdapter) Apply(ctx context.Context, request statesync.Request)
 		return statesync.Observation{}, err
 	}
 	info := contractInfo{
-		bidName:        payload.BidName,
+		bidName:        bid.Name,
 		computeVM:      result.Name,
-		receiptURI:     payload.Receipt.URI,
-		receiptCID:     payload.Receipt.CID,
+		receiptURI:     receiptURI,
+		receiptCID:     receiptCID,
 		acceptURI:      payload.Accept.URI,
 		acceptCID:      payload.Accept.CID,
 		acceptAuthor:   payload.RequesterDID,
 		submitEventURL: submitEventURL,
 	}
-	service.contracts.Store(payload.Receipt.URI, info)
+	service.contracts.Store(receiptURI, info)
+	service.contracts.Store(provisionBidHintKey(payload), info)
 	if service.bids != nil {
-		bid, err := service.bids.Get(ctx, payload.BidName)
+		current, err := service.bids.Get(ctx, bid.Name)
 		if err != nil {
 			return statesync.Observation{}, err
 		}
-		if bid != nil {
-			if bid.Status.ComputeVM != result.Name {
-				status := cloneBidStatus(bid.Status)
+		if current != nil {
+			if current.Status.ComputeVM != result.Name {
+				status := cloneBidStatus(current.Status)
 				status.ComputeVM = result.Name
 				status.Phase = v1alpha1.BidPhaseWon
 				if status.Timings.AcceptedAt == "" {
 					status.Timings.AcceptedAt = now.Format(time.RFC3339)
 				}
-				if err := service.bids.PatchStatus(ctx, bid.Name, status); err != nil {
+				if err := service.bids.PatchStatus(ctx, current.Name, status); err != nil {
 					return statesync.Observation{}, err
 				}
 			}
-			if terminated := bid.Status.Terminated; terminated != nil {
+			if terminated := current.Status.Terminated; terminated != nil {
 				annotations := map[string]string{
 					computevm.ReleaseRequestedAnnotation: terminated.At,
 					computevm.ReleaseRequestAnnotation:   terminated.PayloadUri + "#" + terminated.PayloadCid,
@@ -873,7 +992,7 @@ func (a *provisionAdapter) Apply(ctx context.Context, request statesync.Request)
 					observedAt = now.Format(time.RFC3339)
 				}
 				if _, err := service.ensureTerminationSync(ctx, info, "deleted_on_request", observedAt, requestRef); err != nil {
-					a.logf().Warn("resuming the termination of a released accept failed", "bid", payload.BidName, "err", err.Error())
+					a.logf().Warn("resuming the termination of a released accept failed", "bid", bid.Name, "err", err.Error())
 				}
 			}
 		}

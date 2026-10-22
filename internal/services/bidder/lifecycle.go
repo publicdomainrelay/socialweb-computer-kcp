@@ -37,6 +37,8 @@ func (s *Service) reconcileBidsLoop(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-s.bidKick:
+			s.reconcileBids(ctx)
 		case <-ticker.C:
 			s.reconcileBids(ctx)
 		}
@@ -77,6 +79,18 @@ func (s *Service) reconcileBid(ctx context.Context, bid *v1alpha1.Bid, now time.
 		s.expireBid(ctx, bid, now)
 		return
 	}
+	var rfp *market.RFP
+	if bid.Status.Phase == v1alpha1.BidPhaseDeciding {
+		if bid.Spec.PayloadNsid == "" || bid.Spec.Policy.Verdict != "allow" {
+			rfp = s.validateBid(ctx, bid, now)
+			if rfp == nil {
+				return
+			}
+			s.applyBidSpec(ctx, bid, rfp, now)
+		} else {
+			rfp = s.rfpForBid(ctx, bid)
+		}
+	}
 	if bid.Status.Phase == v1alpha1.BidPhasePublished {
 		if _, ok := s.verifiedBids.Load(bid.Name); ok {
 			return
@@ -97,11 +111,97 @@ func (s *Service) reconcileBid(ctx context.Context, bid *v1alpha1.Bid, now time.
 	if s.records == nil || s.attestation == nil || s.did == "" {
 		return
 	}
-	rfp := s.rfpForBid(ctx, bid)
+	if rfp == nil {
+		rfp = s.rfpForBid(ctx, bid)
+	}
 	if err := s.publishBidRecord(ctx, bid, rfp, now, true); err != nil {
 		if ctx.Err() == nil {
 			s.log.Warn("resuming the bid publish failed", "bid", bid.Name, "err", err)
 		}
+	}
+}
+
+func (s *Service) validateBid(ctx context.Context, bid *v1alpha1.Bid, now time.Time) *market.RFP {
+	if s.records == nil || s.attestation == nil || s.did == "" {
+		return nil
+	}
+	resolved, err := s.records.Resolve(ctx, market.RecordRef{URI: bid.Spec.Rfp.Uri, CID: bid.Spec.Rfp.Cid})
+	if err != nil {
+		if ctx.Err() == nil {
+			s.log.Warn("resolving the RFP of a bid failed", "bid", bid.Name, "err", err)
+		}
+		return nil
+	}
+	rfp, err := market.ParseRFP(resolved.Value)
+	if err != nil {
+		s.failBid(ctx, bid, "InvalidRFP", err.Error(), now)
+		return nil
+	}
+	if err := s.verifyRecord(ctx, resolved); err != nil {
+		s.failBid(ctx, bid, "InvalidSignature", err.Error(), now)
+		return nil
+	}
+	if scope := s.policy.Scope(ctx, PolicyInput{SelfDid: s.did, CounterpartyDid: bid.Spec.Requester}); !scope.Allow {
+		s.failBid(ctx, bid, "ScopeDenied", scope.Reason, now)
+		return nil
+	}
+	decision := s.policy.EvaluatePolicies(ctx, rfp.Policies, PolicyInput{
+		Perspective:      PolicyPerspectiveBidder,
+		SelfDid:          s.did,
+		SubjectDid:       s.did,
+		CounterpartyDid:  bid.Spec.Requester,
+		RootRequesterDid: bid.Spec.Requester,
+		RFP:              &PolicyStrongRef{URI: bid.Spec.Rfp.Uri, CID: bid.Spec.Rfp.Cid},
+		Mode:             PolicyModeFull,
+	})
+	if !decision.Allow {
+		s.failBid(ctx, bid, "PolicyRejected", decision.Reason, now)
+		return nil
+	}
+	return rfp
+}
+
+func (s *Service) applyBidSpec(ctx context.Context, bid *v1alpha1.Bid, rfp *market.RFP, now time.Time) {
+	attached := make([]v1alpha1.BidRecordRef, 0, len(rfp.Policies))
+	for _, policy := range rfp.Policies {
+		attached = append(attached, v1alpha1.BidRecordRef{Uri: policy.URI, Cid: policy.CID})
+	}
+	spec := bid.Spec
+	spec.PayloadNsid = market.NSIDFromURI(rfp.Payload.URI)
+	spec.Policy = v1alpha1.BidPolicy{Attached: attached, Verdict: "allow"}
+	if spec.Offer.Kind == "" {
+		spec.Offer = v1alpha1.BidOffer{Kind: "free"}
+	}
+	if spec.Provider == "" {
+		spec.Provider = "kcp"
+	}
+	spec.ExpiresAt = now.Add(DefaultBidTTL).Format(time.RFC3339)
+	if err := s.bids.PatchSpec(ctx, bid.Name, spec); err != nil {
+		if ctx.Err() == nil {
+			s.log.Warn("recording the bid decision failed", "bid", bid.Name, "err", err)
+		}
+		return
+	}
+	bid.Spec = spec
+	status := cloneBidStatus(bid.Status)
+	if status.Timings.DecidedAt == "" {
+		status.Timings.DecidedAt = now.Format(time.RFC3339)
+	}
+	s.applyBidStatus(ctx, bid, status)
+}
+
+func (s *Service) failBid(ctx context.Context, bid *v1alpha1.Bid, reason, message string, now time.Time) {
+	if bid.Status.Phase == v1alpha1.BidPhaseFailed {
+		return
+	}
+	message = statusError(errors.New(message))
+	status := cloneBidStatus(bid.Status)
+	status.Phase = v1alpha1.BidPhaseFailed
+	status.Message = message
+	status.Timings.FinishedAt = now.Format(time.RFC3339)
+	setBidCondition(&status, bid.Generation, v1alpha1.BidConditionFailed, metav1.ConditionTrue, reason, message)
+	if s.applyBidStatus(ctx, bid, status) {
+		s.log.Info("a bid failed", "bid", bid.Name, "reason", reason, "message", message)
 	}
 }
 
@@ -421,6 +521,7 @@ func (s *Service) completeBidRelease(ctx context.Context, bid *v1alpha1.Bid, inf
 		s.log.Info("a released bid is marked terminated", "bid", bid.Name, "computevm", info.computeVM)
 	}
 	s.contracts.Delete(info.receiptURI)
+	s.contracts.Delete(provisionBidHintKey(provisionPayload{Accept: provisionRef{URI: info.acceptURI, CID: info.acceptCID}}))
 }
 
 func (s *Service) terminationAck(ctx context.Context, name string) (*v1alpha1.ComputeVMTermination, bool) {

@@ -105,6 +105,17 @@ func (b *KCPBids) List(ctx context.Context) ([]v1alpha1.Bid, error) {
 	return b.Res.List(ctx, b.Cluster)
 }
 
+func (b *KCPBids) PatchSpec(ctx context.Context, name string, spec v1alpha1.BidSpec) error {
+	if b == nil || b.Res == nil {
+		return errors.New("bidder: the Bid store is not configured")
+	}
+	patch, err := json.Marshal(map[string]any{"spec": spec})
+	if err != nil {
+		return err
+	}
+	return b.Res.PatchMerge(ctx, b.Cluster, name, patch)
+}
+
 func (b *KCPBids) PatchStatus(ctx context.Context, name string, status v1alpha1.BidStatus) error {
 	if b == nil || b.Res == nil {
 		return errors.New("bidder: the Bid store is not configured")

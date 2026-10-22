@@ -48,6 +48,8 @@ type BidStore interface {
 
 	List(ctx context.Context) ([]v1alpha1.Bid, error)
 
+	PatchSpec(ctx context.Context, name string, spec v1alpha1.BidSpec) error
+
 	PatchStatus(ctx context.Context, name string, status v1alpha1.BidStatus) error
 }
 
