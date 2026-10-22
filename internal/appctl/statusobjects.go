@@ -21,7 +21,13 @@ func (ctl *Controller) ensureAppPdsStatus(ctx context.Context, handle string, se
 	}
 	ws := ctl.c.workspace()
 	pdsRef := ComponentKey(ComponentKindPds, PdsComponent)
-	authRef := &v1alpha1.RepoRef{Kind: "Vault", Name: "openbao:" + strings.Trim(strings.TrimSpace(sessionPath), "/")}
+	authPath := strings.TrimSpace(sessionPath)
+	if strings.HasPrefix(authPath, "openbao:") {
+		authPath = strings.TrimPrefix(authPath, "openbao:")
+	} else if _, rest, ok := strings.Cut(authPath, ":"); ok {
+		authPath = rest
+	}
+	authRef := &v1alpha1.RepoRef{Kind: "Vault", Name: "openbao:" + strings.Trim(authPath, "/")}
 	ctl.ensureStatusObject(ctx, ws, statusstate.AtprotoRepoGVR, "AtprotoRepo",
 		statusObjectName("repo", sess.Did), v1alpha1.AtprotoRepoSpec{DID: sess.Did, PdsRef: &v1alpha1.RepoRef{Kind: ComponentKindPds, Name: PdsComponent}, AuthRef: authRef})
 	accountName := statusObjectName("account", handle)
