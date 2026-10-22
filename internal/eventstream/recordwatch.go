@@ -5,11 +5,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 	"reflect"
 	"strings"
 	"time"
 
+	"github.com/bluesky-social/indigo/atproto/syntax"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -18,6 +21,8 @@ import (
 	"k8s.io/client-go/dynamic"
 
 	eventsapi "github.com/johnandersen777/socialweb-computer-kcp/api/events/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 )
 
 const (
@@ -29,6 +34,11 @@ const (
 
 	EventStreamNamePrefix = "watch-"
 	maxEventStreamName    = 253
+
+	RecordWatchConditionVerified = v1alpha1.ConditionVerified
+
+	watchVerifyInterval = 5 * time.Minute
+	watchVerifyRetry    = 30 * time.Second
 )
 
 func EventStreamNameForWatch(name string) string {
@@ -125,14 +135,17 @@ func (c *Controller) reconcileRecordWatch(ctx context.Context, dyn dynamic.Inter
 			condition(RecordWatchConditionReady, false, "InvalidSpec", err.Error(), u.GetGeneration()),
 			condition(RecordWatchConditionProgressing, false, "InvalidSpec", err.Error(), u.GetGeneration()),
 			condition(RecordWatchConditionFailed, true, "InvalidSpec", err.Error(), u.GetGeneration()),
+			condition(RecordWatchConditionVerified, false, "InvalidSpec", err.Error(), u.GetGeneration()),
 		})
 		return err
 	}
-	if _, err := c.resolveMatches(ctx, dyn, spec); err != nil {
+	matches, err := c.resolveMatches(ctx, dyn, spec)
+	if err != nil {
 		c.writeRecordWatchConditions(ctx, dyn, name, []metav1.Condition{
 			condition(RecordWatchConditionReady, false, "MatchPending", err.Error(), u.GetGeneration()),
 			condition(RecordWatchConditionProgressing, true, "MatchPending", err.Error(), u.GetGeneration()),
 			condition(RecordWatchConditionFailed, false, "NoError", err.Error(), u.GetGeneration()),
+			condition(RecordWatchConditionVerified, false, "MatchPending", err.Error(), u.GetGeneration()),
 		})
 		return err
 	}
@@ -144,16 +157,152 @@ func (c *Controller) reconcileRecordWatch(ctx context.Context, dyn dynamic.Inter
 				condition(RecordWatchConditionReady, false, "ReconcileFailed", err.Error(), u.GetGeneration()),
 				condition(RecordWatchConditionProgressing, false, "ReconcileFailed", err.Error(), u.GetGeneration()),
 				condition(RecordWatchConditionFailed, true, "ReconcileFailed", err.Error(), u.GetGeneration()),
+				condition(RecordWatchConditionVerified, false, "ReconcileFailed", err.Error(), u.GetGeneration()),
 			})
 			return err
 		}
 	}
 	c.gcStaleEventStreams(ctx, dyn, name, wanted)
+	verified, verifyMessage := c.verifyWatchRecords(ctx, dyn, name, u.GetGeneration(), status, matches)
 	conditions, err := c.watchConditions(ctx, dyn, plans, u.GetGeneration())
 	if err != nil {
 		return err
 	}
+	streamReady := false
+	if ready := meta.FindStatusCondition(conditions, RecordWatchConditionReady); ready != nil && ready.Status == metav1.ConditionTrue {
+		streamReady = true
+	}
+	verifyReason := "Verified"
+	if verified && streamReady {
+		verifyReason = "Verified"
+	} else if !streamReady {
+		verified = false
+		verifyReason = "StreamNotReady"
+		verifyMessage = "the EventStreams are starting"
+	} else {
+		verifyReason = "VerifyFailed"
+	}
+	conditions = append(conditions, condition(RecordWatchConditionVerified, verified, verifyReason, verifyMessage, u.GetGeneration()))
 	return c.writeRecordWatchConditions(ctx, dyn, name, conditions)
+}
+
+func (c *Controller) verifyWatchRecords(ctx context.Context, dyn dynamic.Interface, name string, generation int64,
+	status recordWatchStatus, matches []resolvedMatch) (bool, string) {
+	key := name + "/" + fmt.Sprint(generation)
+	c.mu.Lock()
+	next, seen := c.verifyAt[key]
+	c.verifyAt[key] = time.Now().Add(watchVerifyInterval)
+	c.mu.Unlock()
+	if seen && time.Now().Before(next) {
+		if existing := meta.FindStatusCondition(status.Conditions, RecordWatchConditionVerified); existing != nil {
+			return existing.Status == metav1.ConditionTrue, existing.Message
+		}
+		return true, "the watched records are verified"
+	}
+	records := make([]watchedRecord, 0, len(status.Records))
+	var problems []string
+	changed := false
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	for _, record := range status.Records {
+		uri, err := syntax.ParseATURI(strings.TrimSpace(record.Uri))
+		if err != nil {
+			changed = true
+			continue
+		}
+		did, err := syntax.ParseDID(strings.TrimSpace(record.Did))
+		if err != nil || uri.Authority().String() != did.String() {
+			changed = true
+			continue
+		}
+		pds, err := c.authorPDS(ctx, did)
+		if err != nil {
+			problems = append(problems, record.Uri+": "+err.Error())
+			records = append(records, record)
+			continue
+		}
+		fetched, err := pds.GetRecord(ctx, pdsclient.RepoPath{Repo: did, Collection: uri.Collection(), Rkey: uri.RecordKey()}, nil)
+		if err != nil {
+			var xe *pdsclient.XRPCError
+			if errors.As(err, &xe) && (xe.Code == "RecordNotFound" || xe.Code == "RepoNotFound" || xe.StatusCode == http.StatusNotFound) {
+				changed = true
+				continue
+			}
+			problems = append(problems, record.Uri+": "+err.Error())
+			records = append(records, record)
+			continue
+		}
+		if fetched.URI.String() != record.Uri || !matchesRecord(fetched.Value, matches) {
+			changed = true
+			continue
+		}
+		if record.Cid == fetched.CID.String() && reflect.DeepEqual(record.Value, fetched.Value) {
+			records = append(records, record)
+			continue
+		}
+		changed = true
+		record.Cid = fetched.CID.String()
+		record.Value = fetched.Value
+		record.VerifiedAt = now
+		records = append(records, record)
+	}
+	if changed {
+		if err := c.writeWatchRecords(ctx, dyn, name, records); err != nil {
+			c.log.Warn("writing the re-verified AtprotoRecordWatch records", "name", name, "err", err.Error())
+		}
+	}
+	if len(problems) > 0 {
+		c.mu.Lock()
+		c.verifyAt[key] = time.Now().Add(watchVerifyRetry)
+		c.mu.Unlock()
+		return false, "the watched records could not be verified: " + strings.Join(problems, "; ")
+	}
+	return true, fmt.Sprintf("%d watched record(s) verified from their author PDS", len(records))
+}
+
+func (c *Controller) writeWatchRecords(ctx context.Context, dyn dynamic.Interface, name string, records []watchedRecord) error {
+	ri := dyn.Resource(RecordWatchGVR)
+	for range 5 {
+		current, err := ri.Get(ctx, name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if current.GetDeletionTimestamp() != nil {
+			return nil
+		}
+		statusMap, _, _ := unstructured.NestedMap(current.Object, "status")
+		var status recordWatchStatus
+		if len(statusMap) > 0 {
+			raw, err := json.Marshal(statusMap)
+			if err != nil {
+				return err
+			}
+			if err := json.Unmarshal(raw, &status); err != nil {
+				return err
+			}
+		}
+		if reflect.DeepEqual(status.Records, records) {
+			return nil
+		}
+		status.Records = records
+		raw, err := json.Marshal(status)
+		if err != nil {
+			return err
+		}
+		object := map[string]any{}
+		if err := json.Unmarshal(raw, &object); err != nil {
+			return err
+		}
+		current.Object["status"] = object
+		if _, err := ri.UpdateStatus(ctx, current, metav1.UpdateOptions{FieldManager: FieldManager}); err == nil {
+			return nil
+		} else if !apierrors.IsConflict(err) {
+			return err
+		}
+	}
+	return fmt.Errorf("eventstream: the re-verified status of AtprotoRecordWatch %s stayed in conflict", name)
 }
 
 func (c *Controller) ensureWatchEventStream(ctx context.Context, dyn dynamic.Interface, name string, plan watchSourcePlan, status recordWatchStatus) error {

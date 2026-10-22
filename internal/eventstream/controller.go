@@ -77,6 +77,7 @@ type Controller struct {
 	mu       sync.Mutex
 	streams  map[string]*streamRuntime
 	pdsCache map[syntax.DID]pdsclient.PDS
+	verifyAt map[string]time.Time
 }
 
 type streamRuntime struct {
@@ -156,6 +157,7 @@ func New(opts Options) (*Controller, error) {
 		directory: directory,
 		http:      httpClient,
 		pdsCache:  map[syntax.DID]pdsclient.PDS{},
+		verifyAt:  map[string]time.Time{},
 	}, nil
 }
 

@@ -2,6 +2,7 @@ package identitycontroller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 
@@ -38,6 +40,16 @@ const (
 )
 
 var MarketIdentityGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "marketidentities"}
+
+var RecordWatchGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "atprotorecordwatches"}
+
+const (
+	ConditionVerified = v1alpha1.ConditionVerified
+
+	ReasonRevoked = "Revoked"
+
+	specPatchAttempts = 5
+)
 
 type DynamicFactory func(workspace string) (dynamic.Interface, error)
 
@@ -192,7 +204,11 @@ func (c *Controller) reconcile(ctx context.Context, dyn dynamic.Interface, u *un
 		c.write(ctx, dyn, u.GetName(), status)
 		return
 	}
+	if id.Spec.Mode == v1alpha1.MarketIdentityModeLocalRepo {
+		c.reconcileVerifiedAssociation(ctx, dyn, &id, generation, &status)
+	}
 	if did != "" && status.ObservedGeneration >= generation && status.Phase != "" && status.Phase != v1alpha1.MarketIdentityPhasePending {
+		c.write(ctx, dyn, u.GetName(), status)
 		return
 	}
 	switch id.Spec.Mode {
@@ -243,6 +259,131 @@ func (c *Controller) reconcileLocalRepo(ctx context.Context, dyn dynamic.Interfa
 	setReady(&status, generation, true, "Ready", "the PDS at "+endpoint+" reports "+did)
 	setAssociated(&status, generation, id.Spec)
 	c.write(ctx, dyn, id.GetName(), status)
+}
+
+func (c *Controller) reconcileVerifiedAssociation(ctx context.Context, dyn dynamic.Interface, id *v1alpha1.MarketIdentity,
+	generation int64, status *v1alpha1.MarketIdentityStatus) {
+	if id.Spec.Association == v1alpha1.AssociationSkip {
+		return
+	}
+	watchName := strings.TrimSpace(id.Spec.AssociationWatch)
+	if watchName == "" {
+		return
+	}
+	subject := strings.TrimSpace(status.Did)
+	if subject == "" {
+		return
+	}
+	u, err := dyn.Resource(RecordWatchGVR).Get(ctx, watchName, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return
+	}
+	if err != nil {
+		c.log.Warn("reading the association watch", "workspace", c.workspace, "name", watchName, "err", err.Error())
+		return
+	}
+	var watchObject v1alpha1.AtprotoRecordWatch
+	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &watchObject); err != nil {
+		c.log.Warn("decoding the association watch", "workspace", c.workspace, "name", watchName, "err", err.Error())
+		return
+	}
+	verified := false
+	if condition := meta.FindStatusCondition(watchObject.Status.Conditions, ConditionVerified); condition != nil {
+		verified = condition.Status == metav1.ConditionTrue
+	}
+	if !verified {
+		return
+	}
+	approved := map[string]bool{}
+	for _, record := range watchObject.Status.Records {
+		did := associationClaimDid(record, subject)
+		if did == "" {
+			continue
+		}
+		if operator := strings.TrimSpace(id.Spec.AssociateWith); strings.HasPrefix(operator, "did:") && did != operator {
+			continue
+		}
+		approved[did] = true
+	}
+	next := make([]string, 0, len(id.Spec.ApprovedAssociations)+len(approved))
+	for _, did := range id.Spec.ApprovedAssociations {
+		if approved[did] {
+			next = append(next, did)
+			delete(approved, did)
+		}
+	}
+	fresh := make([]string, 0, len(approved))
+	for did := range approved {
+		fresh = append(fresh, did)
+	}
+	slices.Sort(fresh)
+	next = append(next, fresh...)
+	removed := len(next) < len(id.Spec.ApprovedAssociations)
+	if !slices.Equal(next, id.Spec.ApprovedAssociations) {
+		if err := c.patchApprovedAssociations(ctx, dyn, id.Name, next); err != nil {
+			c.log.Warn("writing the approved associations", "workspace", c.workspace, "name", id.Name, "err", err.Error())
+			return
+		}
+		id.Spec.ApprovedAssociations = next
+	}
+	status.Associations = append([]string(nil), next...)
+	if removed {
+		message := "the operator's verified claim record is gone"
+		meta.SetStatusCondition(&status.Conditions, metav1.Condition{Type: v1alpha1.ConditionAssociated, Status: metav1.ConditionFalse,
+			Reason: ReasonRevoked, Message: message, ObservedGeneration: generation})
+		return
+	}
+	setAssociated(status, generation, id.Spec)
+}
+
+func associationClaimDid(record v1alpha1.WatchedRecord, subject string) string {
+	var value struct {
+		Challenge string `json:"challenge"`
+		KeyID     string `json:"keyId"`
+	}
+	if err := json.Unmarshal(record.Value, &value); err != nil {
+		return ""
+	}
+	challenge := strings.TrimSpace(value.Challenge)
+	keyID := strings.TrimSpace(value.KeyID)
+	switch {
+	case strings.HasPrefix(challenge, "did:") && keyID == subject && record.Did == challenge:
+		return challenge
+	case strings.HasPrefix(keyID, "did:") && challenge == subject && record.Did == subject:
+		return keyID
+	}
+	return ""
+}
+
+func (c *Controller) patchApprovedAssociations(ctx context.Context, dyn dynamic.Interface, name string, approved []string) error {
+	if approved == nil {
+		approved = []string{}
+	}
+	ri := dyn.Resource(MarketIdentityGVR)
+	for range specPatchAttempts {
+		current, err := ri.Get(ctx, name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		body, err := json.Marshal([]map[string]any{
+			{"op": "test", "path": "/metadata/resourceVersion", "value": current.GetResourceVersion()},
+			{"op": "add", "path": "/spec/approvedAssociations", "value": approved},
+		})
+		if err != nil {
+			return err
+		}
+		_, err = ri.Patch(ctx, name, types.JSONPatchType, body, metav1.PatchOptions{FieldManager: FieldManager})
+		if err == nil {
+			return nil
+		}
+		if !apierrors.IsConflict(err) && !apierrors.IsInvalid(err) {
+			return err
+		}
+	}
+	return fmt.Errorf("the approved associations of MarketIdentity %s stayed in conflict", name)
 }
 
 func (c *Controller) reconcileSignedIn(ctx context.Context, dyn dynamic.Interface, id *v1alpha1.MarketIdentity, generation int64, status v1alpha1.MarketIdentityStatus, did string) {
@@ -392,6 +533,11 @@ func setAssociated(status *v1alpha1.MarketIdentityStatus, generation int64, spec
 	}
 	if len(status.Associations) > 0 {
 		meta.SetStatusCondition(&status.Conditions, metav1.Condition{Type: v1alpha1.ConditionAssociated, Status: metav1.ConditionTrue, Reason: "Associated", Message: "the operator association is approved", ObservedGeneration: generation})
+		return
+	}
+	if revoked := meta.FindStatusCondition(status.Conditions, v1alpha1.ConditionAssociated); revoked != nil && revoked.Reason == ReasonRevoked {
+		meta.SetStatusCondition(&status.Conditions, metav1.Condition{Type: v1alpha1.ConditionAssociated, Status: metav1.ConditionFalse,
+			Reason: ReasonRevoked, Message: revoked.Message, ObservedGeneration: generation})
 		return
 	}
 	meta.SetStatusCondition(&status.Conditions, metav1.Condition{Type: v1alpha1.ConditionAssociated, Status: metav1.ConditionFalse, Reason: "AwaitingAssociation", Message: "the PDS is ready; the association is pending", ObservedGeneration: generation})

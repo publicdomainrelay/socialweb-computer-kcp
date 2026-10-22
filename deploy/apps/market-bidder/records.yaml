@@ -3,6 +3,9 @@ kind: AtprotoRecord
 metadata:
   name: association
 spec:
+  repoRef:
+    kind: Pds
+    name: pds
   repo: pds
   collection: com.publicdomainrelay.temp.badgeBlueKeys
   rkey: association

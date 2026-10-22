@@ -79,10 +79,8 @@ func (ctl *Controller) writeClaim(ctx context.Context, id *v1alpha1.MarketIdenti
 	rkey := syntax.RecordKey(service + "-" + strings.ReplaceAll(didText, ":", "-"))
 	path := pdsclient.RepoPath{Repo: operator, Collection: syntax.NSID(BadgeBlueKeysNSID), Rkey: rkey}
 	if held, err := pds.GetRecord(ctx, path, nil); err == nil {
-		var value struct {
-			Nonce string `json:"nonce"`
-		}
-		if json.Unmarshal(held.Value, &value) == nil && value.Nonce == nonce {
+		var value map[string]any
+		if json.Unmarshal(held.Value, &value) == nil && heldClaimMatches(value, nonce, operator.String(), didText) {
 			return "", nil
 		}
 	}
@@ -95,6 +93,18 @@ func (ctl *Controller) writeClaim(ctx context.Context, id *v1alpha1.MarketIdenti
 		return "", err
 	}
 	return operator.String(), nil
+}
+
+func heldClaimMatches(value map[string]any, nonce, operator, subject string) bool {
+	if value == nil {
+		return false
+	}
+	if got, _ := value["nonce"].(string); got != "" && got == nonce {
+		return true
+	}
+	challenge, _ := value["challenge"].(string)
+	keyID, _ := value["keyId"].(string)
+	return challenge == operator && keyID == subject || challenge == subject && keyID == operator
 }
 
 func (ctl *Controller) identityIn(ctx context.Context, ws, name string) (*v1alpha1.MarketIdentity, error) {

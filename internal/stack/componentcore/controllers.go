@@ -24,6 +24,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/apiserverfront"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/appctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/recordcontroller"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/childapplication"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/credentials"
@@ -357,6 +358,15 @@ func (c *Core) buildControllers() {
 		}}); err != nil {
 		log.Warn("the AtprotoRepo controller is not registered", "err", err.Error())
 	}
+	if recordCtl, err := recordcontroller.New(recordcontroller.Options{Resolver: repoResolver,
+		Dynamic: recordcontroller.DynamicFactory(cfg.DynamicFactory), Log: log, AddFinalizer: true}); err != nil {
+		log.Warn("the AtprotoRecord controller is not wired", "err", err.Error())
+	} else if err := runtime.add(controllerEntry{gvr: recordcontroller.AtprotoRecordGVR,
+		reconcile: func(ctx context.Context, dyn dynamic.Interface, workspace string, u *unstructured.Unstructured) error {
+			return recordCtl.Reconcile(ctx, dyn, workspace, u)
+		}}); err != nil {
+		log.Warn("the AtprotoRecord controller is not registered", "err", err.Error())
+	}
 	if mp, err := marketpresence.NewController(marketpresence.Options{Workspaces: cfg.Workspaces, Dynamic: marketpresence.DynamicFactory(cfg.DynamicFactory),
 		HTTPClient: handlers.Client(), Log: log}); err != nil {
 		log.Warn("the market presence controller is not wired", "err", err.Error())
@@ -381,11 +391,17 @@ func (c *Core) buildControllers() {
 	if c.eventHandlers == nil {
 		c.eventHandlers = eventstream.NewHandlerRegistry()
 	}
-	if es, err := eventstream.New(eventstream.Options{Workspace: base, Dynamic: eventstream.DynamicFactory(cfg.DynamicFactory),
-		Resolver: resolver, Handlers: c.eventHandlers, Log: log}); err != nil {
-		log.Warn("the event stream controller is not wired", "err", err.Error())
-	} else {
-		c.runners = append(c.runners, controllerRunner{name: "eventstream", run: es.Run})
+	for _, workspace := range cfg.Workspaces {
+		workspace = strings.TrimSpace(workspace)
+		if workspace == "" {
+			continue
+		}
+		if es, err := eventstream.New(eventstream.Options{Workspace: workspace, Dynamic: eventstream.DynamicFactory(cfg.DynamicFactory),
+			Resolver: resolver, Handlers: c.eventHandlers, Log: log}); err != nil {
+			log.Warn("the event stream controller is not wired", "workspace", workspace, "err", err.Error())
+		} else {
+			c.runners = append(c.runners, controllerRunner{name: "eventstream@" + workspace, run: es.Run})
+		}
 	}
 }
 
