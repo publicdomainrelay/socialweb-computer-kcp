@@ -320,8 +320,8 @@
         "linux/arm64": {"kind": "go", "module": "cmd/openbao-plugin-auth-atproto", "package": ".", "sha256": "e5de7599440868d5af6aaddea3c09ad50e3ac3b6562e4046008183588bd5156b", "members": {"openbao-plugin-auth-atproto": "openbao-plugin-auth-atproto"}}
       },
       "platforms": {
-        "linux/amd64": {"treeSha256": "de327a163afbd969a964730fe83df6d70ea15135664bc2cf4c4fc0885edde353", "rawBytes": 16425086, "zstdBytes": 5165103},
-        "linux/arm64": {"treeSha256": "879c59e1653c12fd60b3c5779520ccc40b9822e99c0912f28bd07977c650247c", "rawBytes": 15335550, "zstdBytes": 4590602}
+        "linux/amd64": {"treeSha256": "de327a163afbd969a964730fe83df6d70ea15135664bc2cf4c4fc0885edde353", "rawBytes": 16425086, "zstdBytes": 5155802},
+        "linux/arm64": {"treeSha256": "879c59e1653c12fd60b3c5779520ccc40b9822e99c0912f28bd07977c650247c", "rawBytes": 15335550, "zstdBytes": 4588048}
       }
     },
     "openbao-plugin-auth-sshsig": {

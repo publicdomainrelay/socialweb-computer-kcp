@@ -6,20 +6,18 @@ build_root="$HOME/.tmp/socialweb-computer-build"
 rev="HEAD"
 platforms=()
 dev=0
-verify=0
-nocache=0
+update_pins=0
 publish=""
 sync_only=0
 
 usage() {
   cat >&2 <<EOF
-usage: $0 [--platform linux/amd64|linux/arm64]... [--commit REV] [--build-root DIR]
-       $0 --verify-reproducible [--no-cache] [--platform P]... [--commit REV] [--build-root DIR]
+usage: $0 [--platform linux/amd64|linux/arm64]... [--commit REV] [--build-root DIR] [--update-pins]
        $0 --dev [--platform P]... [--build-root DIR] [--publish DIR [--sync-only]]
 
 --dev builds ONE socialweb-computer of the working tree of this checkout (uncommitted changes
 included) for the host platform (or each --platform), for live runs while iterating. It reuses the
-build root's go, asset and deno caches, skips the clean checkouts and the second build, and is not
+build root's go, asset and deno caches, skips the clean checkout, and is not
 reproducible: 'socialweb-computer version' says "dev build, not reproducible" with the commit and the
 tree's dirty state. It embeds every pinned asset (staged once per versions.json under
 dev/assets/<goos>_<goarch>/<asset>-<sha256 of its versions.json entry>; the assets built from
@@ -46,24 +44,22 @@ GOPROXY=off. Its caches are content-addressed, so a warm build gives the same by
   cache/cargo-target, cache/gocache   the cargo target dir and the go build cache
 A step whose key did not change is not run again.
 
---verify-reproducible (plan 0006 ACC6-REPRO; the release-reproducible CI job on main) builds the
-commit twice, from two clean checkouts, and refuses to publish a platform whose two builds differ by
-one byte. It uses the keyed caches, so it rebuilds only what changed. --no-cache builds both from
-scratch, in parallel: an empty go build cache, cargo target dir and no blob or meshd cache; it
-proves the caches give the bytes a clean build gives. Every mode refuses
-to publish when release/<commit> already holds a binary of a platform that differs from this build.
+--update-pins stages the assets built from this repository (fetch kind go or script) and writes their
+new tree and binary pins into versions.json in the clean checkout and in the working repository. Pins
+of downloaded assets are never changed; an upstream change still fails the build. make uses it by
+default; CI runs make check-pins and fails when versions.json differs from HEAD.
 
   --platform    a release platform; repeat for more (default: every release platform)
   --commit      the commit to build (default HEAD of this checkout; uncommitted changes are not built)
   --build-root  checkouts, caches and outputs, all kept between builds (default \$HOME/.tmp/socialweb-computer-build)
 
 Layout under the build root:
-  src/<n>                       the clean checkout of build n (1; 2 with --verify-reproducible)
+  src/<n>                       the clean checkout of build n
   cache/                        pinned downloads (assets, gomod) and the build caches above
-  work/<n>/                     the staging of build n (and its empty caches with --verify-reproducible)
-  out/<commit>/<n>/<goos>_<goarch>  build n: socialweb-computer, its sha256, build.json, version.json
-  release/<commit>              socialweb-computer-<goos>-<goarch>, SHA256SUMS, release.json (and
-                                reproducible.json with --verify-reproducible), version-<goos>-<goarch>.{json,txt}
+  work/<n>/                     the staging of build n
+  out/<commit>/<n>/<goos>_<goarch>  socialweb-computer, its sha256, build.json, version.json
+  release/<commit>              socialweb-computer-<goos>-<goarch>, SHA256SUMS, release.json,
+                                version-<goos>-<goarch>.{json,txt}
 
 The binary and its sha256 are what socialweb-computer install and upgrade --binary --sha256 take.
 Every phase prints a "timing" line. CONTAINER=podman selects podman for the swc-userns-stage build
@@ -78,8 +74,7 @@ while [ $# -gt 0 ]; do
     --commit) rev="$2"; shift 2 ;;
     --build-root) build_root="$2"; shift 2 ;;
     --dev) dev=1; shift ;;
-    --verify-reproducible) verify=1; shift ;;
-    --no-cache) nocache=1; shift ;;
+    --update-pins) update_pins=1; shift ;;
     --publish) publish="$2"; shift 2 ;;
     --sync-only) sync_only=1; shift ;;
     -h|--help) usage ;;
@@ -112,7 +107,7 @@ esac
 versions="$root/internal/versions/versions.json"
 
 if [ "$dev" = 1 ]; then
-  [ "$verify" = 0 ] && [ "$nocache" = 0 ] || die "--verify-reproducible and --no-cache do not go with --dev"
+  [ "$update_pins" = 0 ] || die "--update-pins does not go with --dev; run make pins first"
   exec "$root/scripts/build-socialweb-computer-dev.sh" "$root" "$build_root" "$publish" "$sync_only" "${platforms[@]}"
 fi
 if [ -n "$publish" ] || [ "$sync_only" = 1 ]; then
@@ -192,8 +187,7 @@ wait_all() {
 }
 
 mode="cached"
-[ "$verify" = 0 ] || mode="verify-reproducible"
-[ "$nocache" = 0 ] || mode="$mode no-cache"
+[ "$update_pins" = 0 ] || mode="update-pins"
 say "commit $commit, platforms ${platforms[*]}, go $have_go, mode $mode, build root $build_root"
 
 t="$(now)"
@@ -235,18 +229,11 @@ stage_deno_embedded() {
 build_once() {
   local n="$1" tree="$build_root/src/$1" work="$build_root/work/$1" plat goos goarch key out started t
   local stage_cache=() jobs_n
-  if [ "$nocache" = 1 ]; then
-    export GOCACHE="$work/gocache"
-    export CARGO_TARGET_DIR="$work/cargo-target"
-    chmod -R u+w "$work" 2>/dev/null || true
-    rm -rf "$work"
-  else
-    export CARGO_TARGET_DIR="$cache/cargo-target"
-    export MESHD_CACHE="$cache/meshd"
-    stage_cache=(--blob-cache "$cache/blobs")
-    chmod -R u+w "$work" 2>/dev/null || true
-    rm -rf "$work"
-  fi
+  export CARGO_TARGET_DIR="$cache/cargo-target"
+  export MESHD_CACHE="$cache/meshd"
+  stage_cache=(--blob-cache "$cache/blobs")
+  chmod -R u+w "$work" 2>/dev/null || true
+  rm -rf "$work"
   mkdir -p "$GOCACHE" "$CARGO_TARGET_DIR"
   if [ "$n" != 1 ]; then
     t="$(now)"
@@ -257,8 +244,13 @@ build_once() {
   t="$(now)"
   local stage_args=() p
   for p in "${platforms[@]}"; do stage_args+=(--platform "$p"); done
+  [ "$update_pins" = 0 ] || stage_args+=(--update-pins)
   say "build $n: stage assets"
   (cd "$tree" && ./scripts/stage-assets.sh --cache "$cache/assets" "${stage_cache[@]}" "${stage_args[@]}")
+  if [ "$update_pins" = 1 ]; then
+    cp -f "$tree/internal/versions/versions.json" "$root/internal/versions/versions.json"
+    say "pins written to $root/internal/versions/versions.json"
+  fi
   timing "build $n: stage assets" "$t"
 
   t="$(now)"
@@ -295,55 +287,19 @@ build_once() {
     jobs_n=$((jobs_n + 1))
   done
   wait_all "build $n: go build" "$jobs_n"
-  [ -z "$(git -C "$tree" status --porcelain)" ] || die "build $n left $tree dirty"
+  local dirty
+  dirty="$(git -C "$tree" status --porcelain)"
+  if [ "$update_pins" = 1 ]; then
+    dirty="$(printf '%s\n' "$dirty" | grep -v ' internal/versions/versions.json$' || true)"
+  fi
+  [ -z "$dirty" ] || die "build $n left $tree dirty: $dirty"
 }
 
 t="$(now)"
-if [ "$verify" = 1 ] && [ "$nocache" = 1 ]; then
-  (build_once 1 2>&1 | sed -u 's/^/[build 1] /' >&2) &
-  (build_once 2 2>&1 | sed -u 's/^/[build 2] /' >&2) &
-  wait_all "a clean build" 2
-elif [ "$verify" = 1 ]; then
-  build_once 1
-  build_once 2
-else
-  build_once 1
-fi
+build_once 1
 timing "builds" "$t"
 
 release="$build_root/release/$commit"
-failed=0
-records=()
-for plat in "${platforms[@]}"; do
-  key="${plat/\//_}"
-  name="socialweb-computer-${plat/\//-}"
-  a="$build_root/out/$commit/1/$key"
-  sa="$(sha_of "$a/socialweb-computer")"
-  if [ -f "$release/SHA256SUMS" ]; then
-    prior="$(awk -v n="$name" '$2 == n { print $1 }' "$release/SHA256SUMS")"
-    if [ -n "$prior" ] && [ "$prior" != "$sa" ]; then
-      say "MISMATCH $plat: release/$commit holds $prior from an earlier build, this build made $sa"
-      failed=1
-    fi
-  fi
-  if [ "$verify" = 1 ]; then
-    b="$build_root/out/$commit/2/$key"
-    sb="$(sha_of "$b/socialweb-computer")"
-    records+=("$(jq -n --arg p "$plat" --arg sa "$sa" --arg sb "$sb" --slurpfile ja "$a/build.json" --slurpfile jb "$b/build.json" \
-      '{platform: $p, identical: ($sa == $sb), sha256: (if $sa == $sb then $sa else null end), builds: [$ja[0], $jb[0]]}')")
-    if [ "$sa" != "$sb" ]; then
-      say "NOT REPRODUCIBLE $plat: build 1 $sa, build 2 $sb ($a, $b)"
-      failed=1
-    else
-      say "reproducible $plat sha256 $sa"
-    fi
-  fi
-done
-if [ "$failed" = 1 ]; then
-  rm -rf "$release"
-  die "refusing to publish release/$commit"
-fi
-
 rm -rf "$release"
 mkdir -p "$release"
 for plat in "${platforms[@]}"; do
@@ -358,10 +314,6 @@ for plat in "${platforms[@]}"; do
 done
 jq -n --arg commit "$commit" --arg mode "$mode" --slurpfile builds <(for plat in "${platforms[@]}"; do cat "$build_root/out/$commit/1/${plat/\//_}/build.json"; done) \
   '{commit: $commit, mode: $mode, builds: $builds}' >"$release/release.json"
-if [ "$verify" = 1 ]; then
-  printf '%s\n' "${records[@]}" | jq -s --arg commit "$commit" '{commit: $commit, platforms: .}' >"$release/reproducible.json"
-  jq -c '.platforms[] | {platform, identical, sha256}' "$release/reproducible.json" >&2
-fi
 timing "total" "$started_all"
 say "timings:"
 cat "$timings" >&2

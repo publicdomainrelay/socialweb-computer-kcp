@@ -6,17 +6,20 @@ versions="$root/internal/versions/versions.json"
 blobs="$root/internal/assets/blobs"
 cache=""
 print_pins=0
+update_pins=0
 blob_cache=""
 jobs=6
 platforms=()
 only=()
 
 usage() {
-  echo "usage: $0 [--platform linux/amd64|linux/arm64]... [--asset NAME]... [--cache DIR] [--blobs DIR] [--blob-cache DIR] [--jobs N] [--print-pins]" >&2
+  echo "usage: $0 [--platform linux/amd64|linux/arm64]... [--asset NAME]... [--cache DIR] [--blobs DIR] [--blob-cache DIR] [--jobs N] [--print-pins|--update-pins]" >&2
   echo "  downloads every pinned asset of versions.json, verifies its sha256 (and the upstream signature" >&2
   echo "  where one is published), repacks it as internal/assets/blobs/<goos>_<goarch>/<asset>.tar.zst and" >&2
   echo "  checks the unpacked tree against its treeSha256 pin. --print-pins prints the measured pins and" >&2
-  echo "  stages even when a tree pin is missing or differs, so versions.json can be updated. --cache keeps" >&2
+  echo "  stages even when a tree pin differs. --update-pins does the same for the assets built from this" >&2
+  echo "  repository (fetch kind go or script) and writes their new pins into versions.json; pins of" >&2
+  echo "  downloaded assets are never changed. --cache keeps" >&2
   echo "  the downloads (keyed by sha256) in DIR instead of internal/assets/blobs/.cache. --blobs writes" >&2
   echo "  <goos>_<goarch>/<asset>.tar.zst under DIR instead of internal/assets/blobs (the --dev build's cache)." >&2
   echo "  --blob-cache keeps every zstd blob in DIR: a downloaded asset (kind file, oci, debs) by the sha256 of" >&2
@@ -36,12 +39,14 @@ while [ $# -gt 0 ]; do
     --blob-cache) blob_cache="$2"; shift 2 ;;
     --jobs) jobs="$2"; shift 2 ;;
     --print-pins) print_pins=1; shift ;;
+    --update-pins) update_pins=1; shift ;;
     -h|--help) usage ;;
     *) usage ;;
   esac
 done
+[ "$print_pins" = 0 ] || [ "$update_pins" = 0 ] || { echo "stage-assets: --print-pins and --update-pins are exclusive" >&2; exit 2; }
 
-for tool in curl jq gpg ar tar zstd sha256sum unzip go xz; do
+for tool in curl jq gpg ar tar zstd sha256sum unzip go xz cmp python3; do
   command -v "$tool" >/dev/null 2>&1 || { echo "stage-assets: $tool is required on the build host" >&2; exit 2; }
 done
 
@@ -53,6 +58,11 @@ cache="${cache:-$blobs/.cache}"
 mkdir -p "$cache" "$blobs/.work"
 work="$(mktemp -d "$blobs/.work/run.XXXXXX")"
 trap 'chmod -R u+w "$work" 2>/dev/null; rm -rf "$work"' EXIT
+pins_dir=""
+if [ "$update_pins" = 1 ]; then
+  pins_dir="$work/pins"
+  mkdir -p "$pins_dir"
+fi
 
 die() { echo "stage-assets: $*" >&2; exit 1; }
 say() { echo "stage-assets: $*" >&2; }
@@ -195,8 +205,8 @@ stage_script() {
   mkdir -p "$x/u"
   "$script" --out "$x/u" >&2
   out="$x/u/$(echo "$spec" | jq -r '.members | keys[0]')"
-  if [ -n "$want" ]; then
-    [ "$(sha_of "$out")" = "$want" ] || die "$script built $(sha_of "$out"), pinned $want"
+  if [ -n "$want" ] && [ "$(sha_of "$out")" != "$want" ]; then
+    [ "$update_pins" = 1 ] || die "$script built $(sha_of "$out"), pinned $want"
   fi
   copy_members "$x/u" "$tree" "$(echo "$spec" | jq -c .members)"
 }
@@ -213,7 +223,7 @@ stage_go() {
   say "$module $pkg $plat binary sha256 $(sha_of "$out")"
   if [ -n "$want" ] && [ "$(sha_of "$out")" != "$want" ]; then
     echo "stage-assets: $module $pkg $plat built $(sha_of "$out"), pinned $want" >&2
-    [ "$print_pins" = 1 ] || die "$module $pkg $plat: sha256 differs from the pin"
+    [ "$print_pins" = 1 ] || [ "$update_pins" = 1 ] || die "$module $pkg $plat: sha256 differs from the pin"
   fi
   copy_members "$x/u" "$tree" "$(echo "$spec" | jq -c .members)"
 }
@@ -358,11 +368,12 @@ cache_put() {
 }
 
 stage_one() {
-  local plat="$1" asset="$2" started="$SECONDS" pdir spec kind x tree digest raw zbytes pin in_key="" out_key how
+  local plat="$1" asset="$2" started="$SECONDS" pdir spec kind x tree digest raw zbytes pin in_key="" out_key how owned=0 member="" binary=""
   pdir="$blobs/${plat/\//_}"
   spec="$(jq -c --arg a "$asset" --arg p "$plat" '.assets[$a].fetch[$p]' "$versions")"
   [ "$spec" != "null" ] || die "$asset has no fetch spec for $plat"
   kind="$(echo "$spec" | jq -r .kind)"
+  case "$kind" in go|script) owned=1 ;; esac
   pin="$(jq -r --arg a "$asset" --arg p "$plat" '.assets[$a].platforms[$p].treeSha256 // ""' "$versions")"
   x="$work/$asset-${plat/\//_}"
   tree="$x/tree"
@@ -394,7 +405,9 @@ stage_one() {
   raw="$(find "$tree" -type f -printf '%s\n' | awk '{s+=$1} END{print s+0}')"
   if [ "$pin" != "$digest" ]; then
     echo "stage-assets: $asset $plat unpacks to tree $digest, versions.json pins '${pin}'" >&2
-    [ "$print_pins" = 1 ] || return 1
+    if [ "$print_pins" != 1 ] && ! { [ "$update_pins" = 1 ] && [ "$owned" = 1 ]; }; then
+      return 1
+    fi
   fi
   how="packed"
   if [ -n "$blob_cache" ]; then
@@ -415,6 +428,16 @@ stage_one() {
     jq -cn --arg a "$asset" --arg p "$plat" --arg d "$digest" --argjson r "$raw" --argjson z "$zbytes" \
       '{asset:$a, platform:$p, treeSha256:$d, rawBytes:$r, zstdBytes:$z}'
   fi
+  if [ "$update_pins" = 1 ] && [ "$owned" = 1 ]; then
+    if jq -e --arg a "$asset" --arg p "$plat" '.assets[$a].fetch[$p].sha256 != null' "$versions" >/dev/null; then
+      member="$(echo "$spec" | jq -r '.members | keys[0]')"
+      binary="$(sha_of "$x/u/$member")"
+    fi
+    jq -cn --arg a "$asset" --arg p "$plat" --arg d "$digest" --argjson r "$raw" --argjson z "$zbytes" --arg b "$binary" \
+      '{asset:$a, platform:$p, treeSha256:$d, rawBytes:$r, zstdBytes:$z, binarySha256:$b} | if $b == "" then del(.binarySha256) else . end' \
+      >"$pins_dir/${asset}-${plat/\//_}.json"
+  fi
+  rm -f "$pdir/$asset.tar.zst"
   mv -f "$x/blob" "$pdir/$asset.tar.zst"
   chmod -R u+w "$x" && rm -rf "$x"
   say "ok $plat $asset tree $digest raw $raw zstd $zbytes, $how ($((SECONDS - started))s)"
@@ -459,4 +482,6 @@ done
 while [ "$running" -gt 0 ]; do
   reap
 done
-exit "$failed"
+[ "$failed" = 0 ] || exit "$failed"
+[ "$update_pins" = 0 ] || python3 "$root/scripts/update-pins.py" "$versions" "$pins_dir"
+exit 0

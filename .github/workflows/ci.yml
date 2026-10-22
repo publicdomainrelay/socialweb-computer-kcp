@@ -34,10 +34,9 @@ jobs:
           timeout -k 10 2400 deploy/check.sh --fast
           test -z "$(git status --porcelain)"
 
-  release-reproducible:
-    if: github.ref == 'refs/heads/main'
+  pins:
     runs-on: [self-hosted, linux, x64, socialweb-computer-kcp]
-    timeout-minutes: 60
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
         with:
@@ -45,15 +44,13 @@ jobs:
           fetch-tags: true
       - uses: ./.github/actions/toolchain
       - uses: ./.github/actions/containers
-      - name: release-reproducible
+      - name: pins
         run: |
           set -euo pipefail
-          timeout -k 10 3480 scripts/build-socialweb-computer.sh --verify-reproducible --build-root "$CI_STATE/release-build-$GITHUB_RUN_ID-$GITHUB_JOB"
-          rel="$CI_STATE/release-build-$GITHUB_RUN_ID-$GITHUB_JOB/release/$GITHUB_SHA"
-          want="$(jq -r '.assets.deno.version' internal/versions/versions.json)"
-          jq -e --arg v "$want" '(.builds | length) > 0 and all(.builds[]; .denoEmbedded.version == $v and (.denoEmbedded.zips | keys | sort) == ["linux/amd64","linux/arm64"])' "$rel/release.json"
+          timeout -k 10 2580 make check-pins BUILD_ROOT="$CI_STATE/pins-$GITHUB_RUN_ID-$GITHUB_JOB"
 
   binaries:
+    needs: pins
     if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main'
     runs-on: [self-hosted, linux, x64, socialweb-computer-kcp]
     timeout-minutes: 90
