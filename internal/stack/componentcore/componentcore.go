@@ -17,8 +17,8 @@ import (
 	"k8s.io/client-go/rest"
 
 	"github.com/bluesky-social/indigo/atproto/identity"
-	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/appctl"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauthclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/credentials"
@@ -347,10 +347,8 @@ func (c *Core) runIdentity(ctx context.Context) {
 		if store, err := newIdentityVaultStore(c.store, workspace, c.cfg.CredentialClient, c.cfg.CredentialServer); err == nil {
 			vault = store
 		}
-		oauth := identitycontroller.OAuthOptions{Directory: identity.DefaultDirectory(), HTTPClient: &http.Client{Timeout: 20 * time.Second}}
-		if vault != nil {
-			oauth.StateRef = &v1alpha1.VaultRef{Mount: c.cfg.CredentialClient, Path: "identity/oauth-state"}
-		}
+		oauth := identitycontroller.OAuthOptions{Directory: identity.DefaultDirectory(), HTTPClient: &http.Client{Timeout: 20 * time.Second},
+			States: &oauthclient.MemoryStateStore{}}
 		ctl, err := identitycontroller.New(identitycontroller.Options{Workspace: workspace, Dynamic: identitycontroller.DynamicFactory(c.cfg.DynamicFactory),
 			Endpoints: c.pdsEndpoint, Resolver: &pdsclient.Resolver{Handlers: c.handlers, Timeout: 10 * time.Second},
 			Vault: vault, OAuth: oauth, Log: log.With("workspace", workspace)})
