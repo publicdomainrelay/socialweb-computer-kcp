@@ -126,8 +126,6 @@ type Provider struct {
 
 	mu sync.Mutex
 
-	readySatisfied map[string]bool
-
 	nodeBackoff map[string]NodeBackoff
 }
 
@@ -140,6 +138,12 @@ type NodeBackoff struct {
 }
 
 const ReasonMarketProvisionsFailing = "MarketProvisionsFailing"
+
+const (
+	conditionTenantBootstrapped = "TenantBootstrapped"
+
+	reasonTenantBootstrapped = "TenantBootstrapped"
+)
 
 func (p *Provider) SetNodeBackoff(cluster string, b NodeBackoff) {
 	p.mu.Lock()
@@ -235,7 +239,7 @@ func New(opts Options) (*Provider, error) {
 	if (opts.Tenant != nil) != (opts.GrantPath != "") {
 		return nil, ErrNoBootstrap
 	}
-	p := &Provider{opts: opts, readySatisfied: map[string]bool{}}
+	p := &Provider{opts: opts}
 	if opts.Tenant != nil && opts.OnReady == nil {
 		p.opts.OnReady = p.Bootstrap
 	}
@@ -324,8 +328,12 @@ func (p *Provider) reconcile(ctx context.Context, ref Ref, with func(*materialis
 	if !p.opts.WriteStatus {
 		return pass, nil
 	}
-	bootstrapping := res.Phase == readyPhase && p.opts.OnReady != nil && !p.readyDone(o.Cluster.Name)
+	done := tenantBootstrapDone(cl)
+	bootstrapping := res.Phase == readyPhase && p.opts.OnReady != nil && !done
 	status := statusOf(cl, res)
+	if done {
+		meta.SetStatusCondition(&status.Conditions, tenantBootstrapped(cl))
+	}
 	if bootstrapping {
 		status.Phase = v1alpha1.ClusterInitializing
 	}
@@ -355,7 +363,7 @@ func (p *Provider) reconcile(ctx context.Context, ref Ref, with func(*materialis
 			pass.Err = err
 			return pass, err
 		}
-		p.markReadyDone(o.Cluster.Name)
+		meta.SetStatusCondition(&after.Status.Conditions, tenantBootstrapped(cl))
 		if err := p.opts.Registry.WriteStatus(ctx, ref, after.Status); err != nil {
 			pass.Err = err
 			return pass, err
@@ -376,19 +384,28 @@ func (p *Provider) addressMount(ctx context.Context, ref Ref, url string) error 
 	return nil
 }
 
-func (p *Provider) readyDone(cluster string) bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.readySatisfied[cluster]
+func tenantBootstrapped(cl *v1alpha1.Cluster) metav1.Condition {
+	return metav1.Condition{
+		Type:               conditionTenantBootstrapped,
+		Status:             metav1.ConditionTrue,
+		Reason:             reasonTenantBootstrapped,
+		Message:            fmt.Sprintf("cluster uid %s generation %d bootstrapped", cl.UID, cl.Generation),
+		ObservedGeneration: cl.Generation,
+	}
 }
 
-func (p *Provider) markReadyDone(cluster string) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.readySatisfied == nil {
-		p.readySatisfied = map[string]bool{}
+func tenantBootstrapDone(cl *v1alpha1.Cluster) bool {
+	want := tenantBootstrapped(cl)
+	for i := range cl.Status.Conditions {
+		held := cl.Status.Conditions[i]
+		if held.Type != want.Type || held.Status != want.Status {
+			continue
+		}
+		if held.ObservedGeneration == want.ObservedGeneration && held.Message == want.Message {
+			return true
+		}
 	}
-	p.readySatisfied[cluster] = true
+	return false
 }
 
 func (p *Provider) reportNodeExpiry(ctx context.Context, ref Ref, cl *v1alpha1.Cluster) error {
