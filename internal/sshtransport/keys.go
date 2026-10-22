@@ -1,7 +1,7 @@
 package sshtransport
 
 import (
-	"crypto/rand"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -197,7 +197,7 @@ func (k *Keys) create(w http.ResponseWriter, r *http.Request) {
 	if runes := []rune(name); len(runes) > MaxKeyNameLength {
 		name = string(runes[:MaxKeyNameLength])
 	}
-	rkey := newTID()
+	rkey := keyRkey(who.DID, parsed)
 	record := map[string]any{
 		"$type":     BadgeBlueKeysNSID,
 		"keyId":     parsed.algo + " " + parsed.key,
@@ -206,9 +206,17 @@ func (k *Keys) create(w http.ResponseWriter, r *http.Request) {
 		"service":   RequesterAssociateService,
 		"createdAt": time.Now().UTC().Format(time.RFC3339Nano),
 	}
-	if _, err := k.opts.Agents.AgentFor(who).CreateRecord(r.Context(), who.DID, BadgeBlueKeysNSID, rkey, record); err != nil {
-		k.failed(w, who.DID, "register the key", err)
-		return
+	agent := k.opts.Agents.AgentFor(who)
+	if _, err := agent.CreateRecord(r.Context(), who.DID, BadgeBlueKeysNSID, rkey, record); err != nil {
+		if !recordAlreadyExists(err) {
+			k.failed(w, who.DID, "register the key", err)
+			return
+		}
+		writes := []gatewayapi.Write{{Action: "update", Collection: BadgeBlueKeysNSID, Rkey: rkey, Record: record}}
+		if err := agent.ApplyWrites(r.Context(), who.DID, writes); err != nil {
+			k.failed(w, who.DID, "register the key", err)
+			return
+		}
 	}
 	k.log.Info("keys_registered", "did", who.DID, "rkey", rkey)
 	writeSSHJSON(w, http.StatusOK, map[string]any{"rkey": rkey})
@@ -238,29 +246,23 @@ func (k *Keys) failed(w http.ResponseWriter, did, action string, err error) {
 	writeSSHJSON(w, http.StatusBadGateway, map[string]any{"error": "could not " + action + ": " + err.Error()})
 }
 
-func newTID() string {
-	n := uint64(time.Now().UnixMilli())*1000 + cryptoUint64(1000)
+func keyRkey(did string, parsed parsedPublicKey) string {
+	digest := sha256.Sum256([]byte("sshtransport/badge-blue-key/v1\x00" + did + "\x00" + parsed.algo + " " + parsed.key))
+	value := uint64(0)
+	for _, b := range digest[:8] {
+		value = value<<8 | uint64(b)
+	}
 	out := make([]byte, 13)
-	for i := 12; i >= 0; i-- {
-		out[i] = tidAlphabet[n&31]
-		n >>= 5
+	for i := len(out) - 1; i >= 0; i-- {
+		out[i] = tidAlphabet[value&31]
+		value >>= 5
 	}
 	return string(out)
 }
 
-func cryptoUint64(max uint64) uint64 {
-	if max == 0 {
-		return 0
-	}
-	var raw [8]byte
-	if _, err := rand.Read(raw[:]); err != nil {
-		return uint64(time.Now().UnixNano()) % max
-	}
-	n := uint64(0)
-	for _, b := range raw {
-		n = n<<8 | uint64(b)
-	}
-	return n % max
+func recordAlreadyExists(err error) bool {
+	text := strings.ToLower(err.Error())
+	return strings.Contains(text, "recordalreadyexists") || strings.Contains(text, "record already exists")
 }
 
 func stringOf(value any) string {
