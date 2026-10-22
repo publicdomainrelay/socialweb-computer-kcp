@@ -454,6 +454,12 @@ func (r *requestRun) ssh(ctx context.Context, c *v1alpha1.ComputeContract) (int,
 		interactive = true
 	}
 	code, err := s.Run(held, t, r.exec, interactive, os.Stdin, r.a.stdout, r.a.stderr)
+	if err != nil {
+		if cause := context.Cause(held); cause != nil && ctx.Err() == nil {
+			r.log("ssh session ended because the contract left Held", "err", cause)
+			return 0, nil
+		}
+	}
 	r.log("ssh session ended", "exit", code)
 	return code, err
 }
