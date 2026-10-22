@@ -14,6 +14,7 @@ import (
 
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/appctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clientcert"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gateway"
@@ -55,8 +56,12 @@ func gatewayServerFor(deps component.Deps, workspace string, certs *clientcert.I
 	if restConfig == nil || restConfig.Host == "" {
 		return server, nil
 	}
+	agent := deps.NodeClaimAgent
+	if agent == nil {
+		agent, _ = kcpclient.ParseServiceAccountRef(appctl.WebAppAccountRef(workspace))
+	}
 	opts := kcpclient.Options{Host: restConfig.Host, RestConfig: restConfig, PublicHost: publicHost,
-		NodeClaimAgent: deps.NodeClaimAgent, RecordWorkspaceOwner: true}
+		NodeClaimAgent: agent, RecordWorkspaceOwner: true}
 	if certs != nil {
 		opts.Kubeconfigs = certs
 	}
