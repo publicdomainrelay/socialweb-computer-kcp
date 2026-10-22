@@ -413,7 +413,7 @@ items:
     track: records
     parallel_with: [W2-RECORD, W2-IDENTITY-REMOTE, W2-STATUS, W2-FIXTURES]
     depends_on: [W1-EVENTSTREAM]
-    status: doing
+    status: done
     evidence: []
     decision: >
       Implement AtprotoRecordWatch match evaluation and verified-record status.
