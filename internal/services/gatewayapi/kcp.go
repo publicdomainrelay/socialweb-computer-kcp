@@ -61,7 +61,7 @@ func gatewayServerFor(deps component.Deps, workspace string, certs *clientcert.I
 		agent, _ = kcpclient.ParseServiceAccountRef(appctl.WebAppAccountRef(workspace))
 	}
 	opts := kcpclient.Options{Host: restConfig.Host, RestConfig: restConfig, PublicHost: publicHost,
-		NodeClaimAgent: agent, RecordWorkspaceOwner: true}
+		HostProcessWorkspace: workspace, NodeClaimAgent: agent, RecordWorkspaceOwner: true}
 	if certs != nil {
 		opts.Kubeconfigs = certs
 	}
