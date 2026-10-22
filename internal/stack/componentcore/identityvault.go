@@ -8,7 +8,9 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/credentials"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/identitycontroller"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
 )
 
 type identityVaultStore struct {
@@ -36,6 +38,9 @@ func (s *identityVaultStore) ref(ref v1alpha1.VaultRef) component.CredentialRef 
 func (s *identityVaultStore) Get(ctx context.Context, ref v1alpha1.VaultRef) (map[string]any, error) {
 	credential, err := s.resolver.Resolve(ctx, s.ref(ref))
 	if err != nil {
+		if errors.Is(err, openbao.ErrNotFound) {
+			return nil, identitycontroller.ErrSecretNotFound
+		}
 		return nil, err
 	}
 	return credential.Data, nil
