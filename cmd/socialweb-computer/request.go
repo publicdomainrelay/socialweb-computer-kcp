@@ -434,10 +434,10 @@ func (r *requestRun) ssh(ctx context.Context, c *v1alpha1.ComputeContract) (int,
 	r.log("ssh to the guest over its iroh ticket, StrictHostKeyChecking=yes against its reported host keys", "alias", t.Alias,
 		"hostKeys", strings.Join(request.SummaryOf(c).HostKeys, ", "))
 	held, stop := r.whileHeld(ctx)
+	defer stop()
 	err = s.WaitReady(held, t, requestSSHReady, func(attempt int, msg string) {
 		r.log("ssh not ready yet", "attempt", attempt, "err", msg)
 	})
-	stop()
 	if cause := context.Cause(held); err != nil && cause != nil && ctx.Err() == nil {
 		return -1, cause
 	}
@@ -453,7 +453,7 @@ func (r *requestRun) ssh(ctx context.Context, c *v1alpha1.ComputeContract) (int,
 		}
 		interactive = true
 	}
-	code, err := s.Run(ctx, t, r.exec, interactive, os.Stdin, r.a.stdout, r.a.stderr)
+	code, err := s.Run(held, t, r.exec, interactive, os.Stdin, r.a.stdout, r.a.stderr)
 	r.log("ssh session ended", "exit", code)
 	return code, err
 }
