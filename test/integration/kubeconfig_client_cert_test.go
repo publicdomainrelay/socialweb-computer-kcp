@@ -29,7 +29,7 @@ const (
 
 func TestKubeconfigClientCertificateWithoutCredentialHelper(t *testing.T) {
 	t.Parallel()
-	n := StartNetwork(t, NetworkOptions{Bidders: 0, WithGateway: true, UpTimeout: 5 * time.Minute})
+	n := StartNetwork(t, NetworkOptions{Bidders: 1, WithGateway: true, UpTimeout: 5 * time.Minute})
 	tn := n.Tenant(t, "tenant", tenantReady)
 	waitOwnerGrant(t, n, tn)
 	ctx := context.Background()

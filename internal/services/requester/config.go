@@ -357,6 +357,9 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		cfg.Handle = handle
 		cfg.RepoDID = did
 		cfg.MarketDID = did
+		if cfg.PolicyWorkflow == "" || cfg.PolicyWorkflow == DefaultPolicyWorkflow {
+			cfg.PolicyWorkflow = "open"
+		}
 		cfg.PDSURL = session.Service
 		cfg.IdentityMode = IdentityModeCallback
 	}
