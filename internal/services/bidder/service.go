@@ -27,6 +27,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/ref"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/statesync"
 )
 
 const (
@@ -93,8 +94,6 @@ type Service struct {
 
 	mu sync.Mutex
 
-	terminationMu sync.Mutex
-
 	started bool
 
 	registered bool
@@ -148,6 +147,10 @@ type Service struct {
 	guestURL string
 
 	loop *marketLoop
+
+	syncController *statesync.Controller
+
+	syncKick chan struct{}
 
 	contracts sync.Map
 
@@ -297,6 +300,11 @@ func (s *Service) prepare(ctx context.Context) error {
 			s.log.Warn("loading the bidder attestation key failed", "err", err)
 		} else {
 			s.attestation = signer
+		}
+	}
+	if s.records != nil && s.attestation != nil && s.did != "" {
+		if err := s.startStateSync(); err != nil {
+			s.log.Warn("the bidder does not run the StateSync controller", "err", err)
 		}
 	}
 	s.provider = &ComputeProvider{
@@ -786,6 +794,16 @@ func (s *Service) startLoops(ctx context.Context) {
 		defer s.wg.Done()
 		s.reportVMs(ctx)
 	}()
+	if s.syncController != nil {
+		controller := s.syncController
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			if err := controller.Run(ctx); err != nil && ctx.Err() == nil {
+				s.log.Warn("the StateSync controller stopped", "err", err)
+			}
+		}()
+	}
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()

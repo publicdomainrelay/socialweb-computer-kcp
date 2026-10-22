@@ -37,6 +37,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/statesync"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vmruntime"
 )
 
@@ -89,6 +90,7 @@ type Controller struct {
 	servers dynamic.ResourceInterface
 	bids    dynamic.ResourceInterface
 	grants  dynamic.ResourceInterface
+	syncs   dynamic.ResourceInterface
 	kick    chan string
 
 	mu       sync.Mutex
@@ -143,7 +145,8 @@ func New(ctx context.Context, c Config) (*Controller, error) {
 		return nil, err
 	}
 	return &Controller{c: c, vms: dc.Resource(GVR), hps: dc.Resource(hostprocess.GVR),
-		servers: dc.Resource(openbaoctl.GVR), bids: dc.Resource(BidGVR), grants: dc.Resource(openbaoctl.GrantGVR), kick: make(chan string, 256),
+		servers: dc.Resource(openbaoctl.GVR), bids: dc.Resource(BidGVR), grants: dc.Resource(openbaoctl.GrantGVR),
+		syncs: dc.Resource(statesync.StateSyncGVR), kick: make(chan string, 256),
 		busy: map[string]bool{}, exits: map[string]hostsvc.UnitStatus{}, orphans: map[string]time.Time{}, foreign: map[string]bool{},
 		logins: map[string]vaultLogin{}, slice: true}, nil
 }
@@ -451,6 +454,9 @@ func (ct *Controller) fail(ctx context.Context, o v1alpha1.ComputeVM, st v1alpha
 		ct.c.log().Warn("cleaning up a failed boot", "computevm", o.Name, "err", err.Error())
 	}
 	st.Phase, st.LostReason, st.Message = v1alpha1.ComputeVMPhaseFailed, "", msg
+	if err := ct.ensureTerminationSync(ctx, o, GoneReason(""), time.Now().UTC().Format(time.RFC3339), nil); err != nil {
+		ct.c.log().Warn("creating the termination StateSync of a failed ComputeVM failed", "computevm", o.Name, "err", err.Error())
+	}
 	return ct.writeStatus(ctx, o, st)
 }
 
@@ -580,6 +586,9 @@ func (ct *Controller) observe(ctx context.Context, o v1alpha1.ComputeVM) error {
 		st.Phase, st.LostReason, st.Message = v1alpha1.ComputeVMPhaseLost, reason, msg
 		setCondition(&st, o.Generation, v1alpha1.ConditionRuntimeObserved, metav1.ConditionFalse, string(reason), msg)
 		ct.c.log().Warn("lost", "computevm", o.Name, "reason", string(reason), "detail", msg)
+		if err := ct.ensureTerminationSync(ctx, o, GoneReason(reason), time.Now().UTC().Format(time.RFC3339), nil); err != nil {
+			ct.c.log().Warn("creating the termination StateSync of a lost ComputeVM failed", "computevm", o.Name, "err", err.Error())
+		}
 		return ct.writeStatus(ctx, o, st)
 	}
 	detail := obs.Detail
@@ -679,13 +688,13 @@ func (ct *Controller) dropSlice(ctx context.Context) {
 	ct.c.log().Info("the per-handle slice is stopped: no VM unit of this handle is loaded", "slice", slice)
 }
 
-func (ct *Controller) markTermination(ctx context.Context, o v1alpha1.ComputeVM) error {
+func (ct *Controller) markTermination(ctx context.Context, o v1alpha1.ComputeVM, observedAt string) error {
 	if o.Status.Market != nil && o.Status.Market.Termination != nil {
 		return nil
 	}
 	body, err := statuspatch.Merge(map[string]any{"market": map[string]any{"termination": map[string]any{
 		"reason":     "deleted_on_request",
-		"observedAt": time.Now().UTC().Format(time.RFC3339),
+		"observedAt": observedAt,
 	}}})
 	if err != nil {
 		return err
@@ -696,37 +705,33 @@ func (ct *Controller) markTermination(ctx context.Context, o v1alpha1.ComputeVM)
 	return nil
 }
 
-func terminationPublished(o v1alpha1.ComputeVM) bool {
-	return o.Status.Market != nil && o.Status.Market.Termination != nil && o.Status.Market.Termination.PayloadUri != ""
-}
-
 func terminationReportable(o v1alpha1.ComputeVM) bool {
 	contract := o.Spec.Contract
 	return contract != nil && contract.ReceiptUri != "" && contract.ReceiptCid != ""
 }
 
-func (ct *Controller) waitTermination(ctx context.Context, name string) error {
+func (ct *Controller) waitTermination(ctx context.Context, o v1alpha1.ComputeVM) error {
 	timeout := ct.c.TerminationReportTimeout
 	if timeout <= 0 {
 		return nil
 	}
-	log := ct.c.log().With("computevm", name)
+	name := TerminationSyncName(string(o.UID))
+	log := ct.c.log().With("computevm", o.Name, "statesync", name)
 	deadline := time.Now().Add(timeout)
 	for {
-		u, err := ct.vms.Get(ctx, name, metav1.GetOptions{})
-		if apierrors.IsNotFound(err) {
-			return nil
-		}
+		u, err := ct.syncs.Get(ctx, name, metav1.GetOptions{})
 		if err == nil {
-			o, decodeErr := decode[v1alpha1.ComputeVM](u)
-			if decodeErr == nil && terminationPublished(o) {
+			phase, _, _ := unstructured.NestedString(u.Object, "status", "phase")
+			if phase == string(v1alpha1.StateSyncPhaseAcked) {
 				log.Info("the market holds the guest termination report")
 				return nil
 			}
+		} else if !apierrors.IsNotFound(err) {
+			log.Warn("reading the termination StateSync failed", "err", err.Error())
 		}
 		if !time.Now().Before(deadline) {
-			log.Warn("the vm.terminated event was not published within the timeout; dropping the finalizer without it",
-				"timeout", timeout.String(), "err", err)
+			log.Warn("the termination StateSync was not Acked within the timeout; dropping the finalizer; the running bidder adapter publishes later",
+				"timeout", timeout.String())
 			return nil
 		}
 		select {
@@ -749,8 +754,19 @@ func (ct *Controller) release(ctx context.Context, cur *unstructured.Unstructure
 			return err
 		}
 	}
+	observedAt := time.Now().UTC().Format(time.RFC3339)
+	var terminationRequest *v1alpha1.RecordRef
+	if marker := terminationMarker(&o); marker != nil {
+		if marker.ObservedAt != "" {
+			observedAt = marker.ObservedAt
+		}
+		terminationRequest = marker.Request
+	}
 	if terminationReportable(o) {
-		if err := ct.markTermination(ctx, o); err != nil {
+		if err := ct.ensureTerminationSync(ctx, o, "deleted_on_request", observedAt, terminationRequest); err != nil {
+			return err
+		}
+		if err := ct.markTermination(ctx, o, observedAt); err != nil {
 			return err
 		}
 	}
@@ -775,7 +791,7 @@ func (ct *Controller) release(ctx context.Context, cur *unstructured.Unstructure
 	ct.dropGuestLogin(ctx, o)
 	ct.dropGuestGrants(ctx, o)
 	if terminationReportable(o) {
-		if err := ct.waitTermination(ctx, o.Name); err != nil {
+		if err := ct.waitTermination(ctx, o); err != nil {
 			return err
 		}
 	}
@@ -831,7 +847,18 @@ func (ct *Controller) reconcile(ctx context.Context, name string) error {
 	ct.mu.Unlock()
 	switch o.Status.Phase {
 	case v1alpha1.ComputeVMPhaseLost, v1alpha1.ComputeVMPhaseFailed:
-		return nil
+		reason, observedAt := GoneReason(o.Status.LostReason), time.Now().UTC().Format(time.RFC3339)
+		var request *v1alpha1.RecordRef
+		if marker := terminationMarker(&o); marker != nil {
+			if marker.Reason != "" {
+				reason = marker.Reason
+			}
+			if marker.ObservedAt != "" {
+				observedAt = marker.ObservedAt
+			}
+			request = marker.Request
+		}
+		return ct.ensureTerminationSync(ctx, o, reason, observedAt, request)
 	case v1alpha1.ComputeVMPhaseRunning:
 		return ct.observe(ctx, o)
 	}

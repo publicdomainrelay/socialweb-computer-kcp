@@ -483,24 +483,18 @@ func (s *Service) handleSubmitEvent(w http.ResponseWriter, r *http.Request) {
 	var termination *v1alpha1.ComputeVMTermination
 	if info.computeVM != "" {
 		s.markBidReleasing(r.Context(), releaseBid, info, "ReleaseRequested", "the release of "+info.computeVM+" is requested")
-		var err error
-		termination, err = s.publishTermination(r.Context(), terminationPublish{
-			VMName:         info.computeVM,
-			Receipt:        market.RecordRef{URI: info.receiptURI, CID: info.receiptCID},
-			SubmitEventURL: info.submitEventURL,
-			Seed: v1alpha1.ComputeVMTermination{
-				Reason:     "deleted_on_request",
-				ObservedAt: now.Format(time.RFC3339),
-				Request:    &v1alpha1.RecordRef{URI: event.Payload.URI, CID: event.Payload.CID},
-			},
-			Override: true,
-		})
+		name, err := s.ensureTerminationSync(r.Context(), info, "deleted_on_request", now.Format(time.RFC3339),
+			&v1alpha1.RecordRef{URI: event.Payload.URI, CID: event.Payload.CID})
+		if err == nil {
+			err = s.waitTerminationSync(r.Context(), name, TerminationSyncTimeout)
+		}
 		if err != nil {
 			s.log.Warn("publishing the termination on request failed", "computevm", info.computeVM, "err", err)
 			s.markBidReleasing(r.Context(), releaseBid, info, "ReleaseFailed", statusError(err))
 			writeXRPCError(w, http.StatusInternalServerError, "InternalError", "the termination event could not be published: "+statusError(err))
 			return
 		}
+		termination = s.acknowledgedTermination(r.Context(), name)
 	}
 	if info.computeVM != "" && s.provider != nil {
 		if err := s.provider.Destroy(r.Context(), info.computeVM); err != nil {

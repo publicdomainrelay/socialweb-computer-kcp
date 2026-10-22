@@ -45,7 +45,7 @@ func (c *Controller) acknowledge(ctx context.Context, dyn dynamic.Interface, obj
 	ri := dyn.Resource(schema.GroupVersionResource{Group: groupVersion.Group, Version: groupVersion.Version, Resource: resource})
 	current, err := ri.Get(ctx, name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
-		return fmt.Errorf("statesync: the ack source %s does not exist", name)
+		return nil
 	}
 	if err != nil {
 		return err
