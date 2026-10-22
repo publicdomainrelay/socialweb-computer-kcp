@@ -514,6 +514,8 @@ type GatewaySpec struct {
 
 	Network *MarketNetworkValue `json:"network,omitempty"`
 
+	Identity ApplicationIdentity `json:"identity,omitempty"`
+
 	Comms *MarketComms `json:"comms,omitempty"`
 
 	Ingress *IngressConfig `json:"ingress,omitempty"`
@@ -570,6 +572,8 @@ type SshGatewaySpec struct {
 	Suspend bool `json:"suspend,omitempty"`
 
 	Network *MarketNetworkValue `json:"network,omitempty"`
+
+	Identity ApplicationIdentity `json:"identity,omitempty"`
 
 	Comms *MarketComms `json:"comms,omitempty"`
 

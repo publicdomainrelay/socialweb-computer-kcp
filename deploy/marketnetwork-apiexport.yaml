@@ -21,12 +21,12 @@ spec:
         crd: {}
     - group: socialweb.computer
       name: gateways
-      schema: v1alpha1-16.gateways.socialweb.computer
+      schema: v1alpha1-17.gateways.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer
       name: sshgateways
-      schema: v1alpha1-10.sshgateways.socialweb.computer
+      schema: v1alpha1-11.sshgateways.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer

@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-16.gateways.socialweb.computer
+  name: v1alpha1-17.gateways.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -142,6 +142,50 @@ spec:
                   - relayUrls
                   - firehoseUrls
                   - qrOrigin
+              identity:
+                type: object
+                properties:
+                  mode:
+                    type: string
+                    enum:
+                      - oauthQr
+                      - oauthBrowser
+                      - pdsAccount
+                      - localRepo
+                      - oauthDelegated
+                  handle:
+                    type: string
+                  pdsUrl:
+                    type: string
+                  pdsRef:
+                    type: object
+                    properties:
+                      workspace:
+                        type: string
+                      kind:
+                        type: string
+                      name:
+                        type: string
+                    required:
+                      - name
+                  sessionRef:
+                    type: object
+                    properties:
+                      workspace:
+                        type: string
+                      kind:
+                        type: string
+                      name:
+                        type: string
+                    required:
+                      - name
+                  association:
+                    type: string
+                    enum:
+                      - RequireApproval
+                      - Skip
+                required:
+                  - mode
               comms:
                 type: object
                 properties:
