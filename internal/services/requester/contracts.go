@@ -30,6 +30,12 @@ type ContractStore interface {
 
 	Get(ctx context.Context, name string) (*v1alpha1.ComputeContract, error)
 
+	Create(ctx context.Context, contract *v1alpha1.ComputeContract) error
+
+	Release(ctx context.Context, name string) error
+
+	Delete(ctx context.Context, name string) error
+
 	PatchStatus(ctx context.Context, name string, status v1alpha1.ComputeContractStatus) error
 }
 
@@ -64,6 +70,31 @@ func (c *KCPContracts) Get(ctx context.Context, name string) (*v1alpha1.ComputeC
 		return nil, nil
 	}
 	return contract, err
+}
+
+func (c *KCPContracts) Create(ctx context.Context, contract *v1alpha1.ComputeContract) error {
+	if c == nil || c.Res == nil {
+		return errors.New("requester: the contract store is not configured")
+	}
+	return c.Res.Create(ctx, c.Cluster, contract)
+}
+
+func (c *KCPContracts) Release(ctx context.Context, name string) error {
+	if c == nil || c.Res == nil {
+		return errors.New("requester: the contract store is not configured")
+	}
+	return c.Res.PatchMerge(ctx, ref.New(c.Cluster, "", name), []byte(`{"spec":{"release":true}}`))
+}
+
+func (c *KCPContracts) Delete(ctx context.Context, name string) error {
+	if c == nil || c.Res == nil {
+		return errors.New("requester: the contract store is not configured")
+	}
+	err := c.Res.Delete(ctx, ref.New(c.Cluster, "", name))
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	return err
 }
 
 func (c *KCPContracts) PatchStatus(ctx context.Context, name string, status v1alpha1.ComputeContractStatus) error {

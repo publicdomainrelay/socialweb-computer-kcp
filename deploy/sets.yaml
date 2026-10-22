@@ -426,7 +426,7 @@ sets:
         files:
           - path: market-network/10-rbac.yaml
   - name: ssh-gateway
-    summary: the components of an SshGateway application (socialweb-computer run gateway ssh) in its own kcp - its own OpenBaoServer holding the OAuth sessions and keys and the account that reads it, the iroh dialer HostProcess (internal iroh-dial, the only process that runs dumbpipe), the root:app workspace and, per profile, the hono-socialweb-computer-ssh service; applied by internal/appctl (plan 0008 M4-RUN-GATEWAY-SSH)
+    summary: the components of an SshGateway application (socialweb-computer run gateway ssh) in its own kcp - its own OpenBaoServer holding the OAuth sessions and keys and the account that reads it, the iroh dialer HostProcess (internal iroh-dial, the only process that runs dumbpipe), the ComputeContract schema bound in root (every held ssh session is a contract the requester holds), the root:app workspace and, per profile, the hono-socialweb-computer-ssh service; applied by internal/appctl (plan 0008 M4-RUN-GATEWAY-SSH)
     values: SshGateway
     phases:
       - name: vault
@@ -447,6 +447,17 @@ sets:
           - path: apps/workspace-app.yaml
         after:
           - kind: Workspace
+            for: Ready
+      - name: bindings
+        workspace: root
+        files:
+          - path: apps/gateway/computecontracts-binding.yaml
+        after:
+          - kind: APIExport
+            name: computecontracts
+            workspace: root:socialweb-provider
+            for: IdentityValid
+          - kind: APIBinding
             for: Ready
       - name: rbac
         workspace: root:app

@@ -2,12 +2,18 @@ package requester
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
+
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
@@ -155,6 +161,8 @@ type heldSession struct {
 
 	privateKeyPath string
 
+	contract string
+
 	target *SessionTarget
 
 	timer *time.Timer
@@ -202,19 +210,15 @@ func (s *Service) releaseHeldSession(key string, held *heldSession, generation u
 		delete(s.heldSessions, key)
 	}
 	s.heldMu.Unlock()
-	target := held.target
 	privateKeyPath := held.privateKeyPath
+	contract := held.contract
 	held.target = nil
 	held.privateKeyPath = ""
+	held.contract = ""
 	held.mu.Unlock()
-	if target != nil {
-		releaseCtx, cancel := context.WithTimeout(context.Background(), s.cfg.ReleaseTimeout)
-		if err := s.releaseSession(releaseCtx, target); err != nil {
-			s.log.Warn("requester_held_session_release_failed", "vm", target.VMName, "reason", reason, "err", err)
-		} else {
-			s.log.Info("requester_held_session_released", "vm", target.VMName, "reason", reason)
-		}
-		cancel()
+	if contract != "" {
+		s.releaseHeldContract(contract)
+		s.log.Info("requester_held_session_released", "contract", contract, "reason", reason)
 	}
 	_ = sshtransport.RemoveGuestKeypair(privateKeyPath)
 }
@@ -260,13 +264,19 @@ func (s *Service) runHeldCommand(ctx context.Context, account sshtransport.Autho
 		io.Exit(1)
 		return err
 	}
+	contractName := heldContractName(account.DID, name)
 	provision := func() (*SessionTarget, string, error) {
 		publicKey, privateKeyPath, err := sshtransport.GenerateGuestKeypair(s.cfg.GuestKeyDir, vmName)
 		if err != nil {
 			return nil, "", err
 		}
-		target, err := s.provisionSession(ctx, vmName, policyName, policyArgs, publicKey, usePolicy)
+		requestedPolicy := ""
+		if usePolicy {
+			requestedPolicy = policyName
+		}
+		target, err := s.provisionHeldContract(ctx, contractName, vmName, account.DID, publicKey, requestedPolicy, policyArgs)
 		if err != nil {
+			s.releaseHeldContract(contractName)
 			_ = sshtransport.RemoveGuestKeypair(privateKeyPath)
 			return nil, "", err
 		}
@@ -280,7 +290,7 @@ func (s *Service) runHeldCommand(ctx context.Context, account sshtransport.Autho
 		held.timer = nil
 	}
 	reused := held.target != nil
-	target, privateKeyPath := held.target, held.privateKeyPath
+	target, privateKeyPath, contract := held.target, held.privateKeyPath, held.contract
 	fresh := target == nil
 	if target == nil {
 		target, privateKeyPath, err = provision()
@@ -290,17 +300,19 @@ func (s *Service) runHeldCommand(ctx context.Context, account sshtransport.Autho
 			io.Exit(1)
 			return err
 		}
-		held.vmName, held.privateKeyPath, held.target = vmName, privateKeyPath, target
+		contract = contractName
+		held.vmName, held.privateKeyPath, held.target, held.contract = vmName, privateKeyPath, target, contract
 	}
 	ready := false
 	if ticket, ticketErr := ValidateTicket(target.Address); ticketErr == nil {
 		ready = provider.PollReady(ctx, privateKeyPath, ticket, s.cfg.VMReadyTimeout, target.HostKeys)
 	}
 	if !ready && reused {
-		s.log.Warn("requester_held_session_lost", "vm", target.VMName)
+		s.log.Warn("requester_held_session_lost", "contract", contract)
 		held.target = nil
 		held.privateKeyPath = ""
-		s.releaseHeldSessionTarget(target, privateKeyPath)
+		held.contract = ""
+		s.releaseHeldSessionTarget(contract, privateKeyPath)
 		target, privateKeyPath, err = provision()
 		if err != nil {
 			held.mu.Unlock()
@@ -308,7 +320,8 @@ func (s *Service) runHeldCommand(ctx context.Context, account sshtransport.Autho
 			io.Exit(1)
 			return err
 		}
-		held.vmName, held.privateKeyPath, held.target = vmName, privateKeyPath, target
+		contract = contractName
+		held.vmName, held.privateKeyPath, held.target, held.contract = vmName, privateKeyPath, target, contract
 		fresh = true
 		ticket, ticketErr := ValidateTicket(target.Address)
 		if ticketErr != nil {
@@ -323,7 +336,8 @@ func (s *Service) runHeldCommand(ctx context.Context, account sshtransport.Autho
 		if fresh {
 			held.target = nil
 			held.privateKeyPath = ""
-			s.releaseHeldSessionTarget(target, privateKeyPath)
+			held.contract = ""
+			s.releaseHeldSessionTarget(contract, privateKeyPath)
 		}
 		held.mu.Unlock()
 		io.WriteErr([]byte("guest session failed: the guest ssh did not answer\n"))
@@ -335,7 +349,8 @@ func (s *Service) runHeldCommand(ctx context.Context, account sshtransport.Autho
 		if fresh {
 			held.target = nil
 			held.privateKeyPath = ""
-			s.releaseHeldSessionTarget(target, privateKeyPath)
+			held.contract = ""
+			s.releaseHeldSessionTarget(contract, privateKeyPath)
 		}
 		held.mu.Unlock()
 		io.WriteErr([]byte("guest session failed: " + err.Error() + "\n"))
@@ -349,13 +364,147 @@ func (s *Service) runHeldCommand(ctx context.Context, account sshtransport.Autho
 	return nil
 }
 
-func (s *Service) releaseHeldSessionTarget(target *SessionTarget, privateKeyPath string) {
-	if target != nil {
-		releaseCtx, cancel := context.WithTimeout(context.Background(), s.cfg.ReleaseTimeout)
-		if err := s.releaseSession(releaseCtx, target); err != nil {
-			s.log.Warn("requester_held_session_release_failed", "vm", target.VMName, "err", err)
+func heldContractName(did, name string) string {
+	sum := sha256.Sum256([]byte(did + "\x00" + name))
+	return "ssh-" + hex.EncodeToString(sum[:10])
+}
+
+func contractTarget(contract *v1alpha1.ComputeContract) (*SessionTarget, bool, error) {
+	state := contract.Status.Contract
+	if state == nil || state.VMAddress == "" || state.HostKeys == nil || len(state.HostKeys.Keys) == 0 ||
+		state.Receipt == nil || state.Receipt.URI == "" {
+		return nil, false, nil
+	}
+	ticket, err := ValidateTicket(state.VMAddress)
+	if err != nil {
+		return nil, false, err
+	}
+	keys := make([]string, 0, len(state.HostKeys.Keys))
+	for _, key := range state.HostKeys.Keys {
+		keys = append(keys, key.Type+" "+key.PublicKey)
+	}
+	return &SessionTarget{
+		VMName:  state.VMName,
+		Address: ticket,
+		HostKeys: sshtransport.GuestHostKeys{
+			Alias: hostKeyAlias(state.Receipt.URI),
+			Keys:  keys,
+		},
+	}, true, nil
+}
+
+func (s *Service) provisionHeldContract(ctx context.Context, name, vmName, did, publicKey, policyName string, policyArgs map[string]string) (*SessionTarget, error) {
+	args := ""
+	if len(policyArgs) > 0 {
+		raw, err := json.Marshal(policyArgs)
+		if err != nil {
+			return nil, err
 		}
-		cancel()
+		args = string(raw)
+	}
+	deadline := time.Now().Add(s.cfg.BidWindow + s.cfg.ReceiptTimeout + s.cfg.VMReadyTimeout)
+	for {
+		existing, err := s.cfg.Contracts.Get(ctx, name)
+		if err != nil {
+			return nil, err
+		}
+		if existing == nil {
+			break
+		}
+		if existing.DeletionTimestamp == nil {
+			if err := s.cfg.Contracts.Delete(ctx, name); err != nil {
+				return nil, err
+			}
+		}
+		if time.Now().After(deadline) {
+			return nil, errors.New("the previous session contract was not removed in time")
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+	contract := &v1alpha1.ComputeContract{
+		TypeMeta: metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: "ComputeContract"},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Annotations: map[string]string{
+			v1alpha1.AnnotationTTLAfterFinished: "8d",
+		}},
+		Spec: v1alpha1.ComputeContractSpec{
+			VMName:            vmName,
+			SshAuthorizedKeys: []string{publicKey},
+			Policy:            policyName,
+			PolicyArgs:        args,
+			OwnerDid:          did,
+		},
+	}
+	for {
+		err := s.cfg.Contracts.Create(ctx, contract)
+		if err == nil {
+			break
+		}
+		if !apierrors.IsAlreadyExists(err) {
+			return nil, err
+		}
+		if time.Now().After(deadline) {
+			return nil, errors.New("the session contract was not created in time")
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+	return s.waitHeldContract(ctx, name, deadline)
+}
+
+func (s *Service) waitHeldContract(ctx context.Context, name string, deadline time.Time) (*SessionTarget, error) {
+	for {
+		contract, err := s.cfg.Contracts.Get(ctx, name)
+		if err != nil {
+			return nil, err
+		}
+		if contract == nil {
+			return nil, errors.New("the session contract disappeared")
+		}
+		if contract.Status.Phase == v1alpha1.ComputeContractFailed {
+			return nil, fmt.Errorf("the session contract failed: %s", contract.Status.Message)
+		}
+		if contract.Status.Phase == v1alpha1.ComputeContractReleased {
+			return nil, errors.New("the session contract was released before the guest was ready")
+		}
+		target, ready, err := contractTarget(contract)
+		if err != nil {
+			return nil, err
+		}
+		if ready {
+			return target, nil
+		}
+		if time.Now().After(deadline) {
+			return nil, errors.New("the guest did not report onNetwork and hostKeys in time")
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+}
+
+func (s *Service) releaseHeldContract(name string) {
+	if name == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.ReleaseTimeout)
+	defer cancel()
+	if err := s.cfg.Contracts.Release(ctx, name); err != nil && !apierrors.IsNotFound(err) {
+		s.log.Warn("requester_held_contract_release_failed", "contract", name, "err", err)
+	}
+}
+
+func (s *Service) releaseHeldSessionTarget(contract, privateKeyPath string) {
+	if contract != "" {
+		s.releaseHeldContract(contract)
 	}
 	_ = sshtransport.RemoveGuestKeypair(privateKeyPath)
 }
