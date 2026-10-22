@@ -360,6 +360,12 @@ func (ctl *Controller) recordPdsIdentity(ctx context.Context, ws, name, handle, 
 			}
 		}
 		generation := u.GetGeneration()
+		revoked := false
+		for _, c := range st.Conditions {
+			if c.Type == v1alpha1.ConditionAssociated && c.Reason == "Revoked" {
+				revoked = true
+			}
+		}
 		st.Did = did
 		st.Phase = v1alpha1.MarketIdentityPhaseReady
 		st.ObservedGeneration = generation
@@ -385,6 +391,9 @@ func (ctl *Controller) recordPdsIdentity(ctx context.Context, ws, name, handle, 
 		case len(st.Associations) > 0:
 			meta.SetStatusCondition(&st.Conditions, metav1.Condition{Type: v1alpha1.ConditionAssociated, Status: metav1.ConditionTrue,
 				Reason: "Associated", Message: "the operator association is approved", ObservedGeneration: generation})
+		case revoked:
+			meta.SetStatusCondition(&st.Conditions, metav1.Condition{Type: v1alpha1.ConditionAssociated, Status: metav1.ConditionFalse,
+				Reason: "Revoked", Message: "the operator's verified claim record is gone", ObservedGeneration: generation})
 		default:
 			meta.SetStatusCondition(&st.Conditions, metav1.Condition{Type: v1alpha1.ConditionAssociated, Status: metav1.ConditionFalse,
 				Reason: "AwaitingAssociation", Message: "the PDS is ready; the association is pending", ObservedGeneration: generation})
