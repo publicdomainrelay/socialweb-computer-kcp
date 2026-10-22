@@ -394,6 +394,10 @@ func (ctl *Controller) reconcileRequester(ctx context.Context, u *unstructured.U
 			st.Message = err.Error()
 			return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
 		}
+		if err := ctl.seedPdsAccountPassword(ctx, plan); err != nil {
+			st.Message = "its account password: " + err.Error()
+			return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
+		}
 		if err := ctl.ensureIdentitySpec(ctx, ctl.c.workspace(), owner, RequesterIdentity, plan.Identity); err != nil {
 			st.Message = "its MarketIdentity: " + err.Error()
 			return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
