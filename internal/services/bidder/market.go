@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
@@ -451,12 +452,13 @@ func (s *Service) handleSubmitEvent(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 		return
 	}
+	if terminated, ok := s.bidTerminatedByReceipt(r.Context(), event.Receipt.URI); ok {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "alreadyTerminated": true, "reason": terminated.Reason,
+			"eventUri": terminated.EventUri, "payloadUri": terminated.PayloadUri})
+		return
+	}
 	info, found := s.contractForReceipt(r.Context(), event.Receipt.URI)
 	if !found {
-		if terminated, ok := s.bidTerminatedByReceipt(r.Context(), event.Receipt.URI); ok {
-			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "alreadyTerminated": true, "reason": terminated.Reason})
-			return
-		}
 		writeXRPCError(w, http.StatusBadRequest, "InvalidRequest", "unknown receipt")
 		return
 	}
@@ -466,6 +468,11 @@ func (s *Service) handleSubmitEvent(w http.ResponseWriter, r *http.Request) {
 	}
 	unlock := s.lockAccept(info.acceptURI)
 	defer unlock()
+	if terminated, ok := s.bidTerminatedByReceipt(r.Context(), event.Receipt.URI); ok {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "alreadyTerminated": true, "reason": terminated.Reason,
+			"eventUri": terminated.EventUri, "payloadUri": terminated.PayloadUri})
+		return
+	}
 	now := s.cfg.Now().UTC()
 	var releaseBid *v1alpha1.Bid
 	if s.bids != nil {
@@ -473,8 +480,29 @@ func (s *Service) handleSubmitEvent(w http.ResponseWriter, r *http.Request) {
 			releaseBid = bid
 		}
 	}
-	if info.computeVM != "" && s.provider != nil {
+	var termination *v1alpha1.ComputeVMTermination
+	if info.computeVM != "" {
 		s.markBidReleasing(r.Context(), releaseBid, info, "ReleaseRequested", "the release of "+info.computeVM+" is requested")
+		var err error
+		termination, err = s.publishTermination(r.Context(), terminationPublish{
+			VMName:         info.computeVM,
+			Receipt:        market.RecordRef{URI: info.receiptURI, CID: info.receiptCID},
+			SubmitEventURL: info.submitEventURL,
+			Seed: v1alpha1.ComputeVMTermination{
+				Reason:     "deleted_on_request",
+				ObservedAt: now.Format(time.RFC3339),
+				Request:    &v1alpha1.RecordRef{URI: event.Payload.URI, CID: event.Payload.CID},
+			},
+			Override: true,
+		})
+		if err != nil {
+			s.log.Warn("publishing the termination on request failed", "computevm", info.computeVM, "err", err)
+			s.markBidReleasing(r.Context(), releaseBid, info, "ReleaseFailed", statusError(err))
+			writeXRPCError(w, http.StatusInternalServerError, "InternalError", "the termination event could not be published: "+statusError(err))
+			return
+		}
+	}
+	if info.computeVM != "" && s.provider != nil {
 		if err := s.provider.Destroy(r.Context(), info.computeVM); err != nil {
 			s.log.Warn("deleting the guest on request failed", "computevm", info.computeVM, "err", err)
 			s.markBidReleasing(r.Context(), releaseBid, info, "ReleaseFailed", statusError(err))
@@ -486,13 +514,20 @@ func (s *Service) handleSubmitEvent(w http.ResponseWriter, r *http.Request) {
 		if bid, err := s.bids.Get(r.Context(), info.bidName); err == nil && bid != nil {
 			statusValue := cloneBidStatus(bid.Status)
 			statusValue.Timings.FinishedAt = now.Format(time.RFC3339)
-			statusValue.Terminated = &v1alpha1.BidTerminated{
+			terminated := &v1alpha1.BidTerminated{
 				ReceiptUri:   info.receiptURI,
 				ReceiptCid:   info.receiptCID,
 				AcceptAuthor: info.acceptAuthor,
 				Reason:       "deleted_on_request",
 				At:           now.Format(time.RFC3339),
 			}
+			if termination != nil {
+				terminated.PayloadUri = termination.PayloadUri
+				terminated.PayloadCid = termination.PayloadCid
+				terminated.EventUri = termination.EventUri
+				terminated.EventCid = termination.EventCid
+			}
+			statusValue.Terminated = terminated
 			setBidCondition(&statusValue, bid.Generation, BidConditionReleasing, metav1.ConditionFalse, "Released", "the guest is released")
 			if err := s.bids.PatchStatus(r.Context(), bid.Name, statusValue); err != nil {
 				s.log.Warn("updating the terminated bid failed", "bid", bid.Name, "err", err)
@@ -802,7 +837,11 @@ func (s *Service) bidTerminatedByReceipt(ctx context.Context, receiptURI string)
 	}
 	for i := range bids {
 		terminated := bids[i].Status.Terminated
-		if terminated != nil && terminated.ReceiptUri == receiptURI && bids[i].Status.Phase == v1alpha1.BidPhaseLost {
+		if terminated == nil || terminated.ReceiptUri != receiptURI {
+			continue
+		}
+		condition := apimeta.FindStatusCondition(bids[i].Status.Conditions, BidConditionReleasing)
+		if condition != nil && condition.Status == metav1.ConditionFalse && condition.Reason == "Released" {
 			return terminated, true
 		}
 	}

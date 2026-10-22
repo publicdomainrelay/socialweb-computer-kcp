@@ -199,6 +199,36 @@ func (v *KCPVMs) PatchMarket(ctx context.Context, name string, patch v1alpha1.Co
 	if patch.HostKeysUri != "" {
 		owned["hostKeysUri"] = patch.HostKeysUri
 	}
+	if patch.Termination != nil {
+		termination := map[string]any{}
+		if patch.Termination.Reason != "" {
+			termination["reason"] = patch.Termination.Reason
+		}
+		if patch.Termination.ObservedAt != "" {
+			termination["observedAt"] = patch.Termination.ObservedAt
+		}
+		if patch.Termination.ExitCode != nil {
+			termination["exitCode"] = *patch.Termination.ExitCode
+		}
+		if patch.Termination.Request != nil {
+			termination["request"] = map[string]any{"uri": patch.Termination.Request.URI, "cid": patch.Termination.Request.CID}
+		}
+		if patch.Termination.PayloadUri != "" {
+			termination["payloadUri"] = patch.Termination.PayloadUri
+		}
+		if patch.Termination.PayloadCid != "" {
+			termination["payloadCid"] = patch.Termination.PayloadCid
+		}
+		if patch.Termination.EventUri != "" {
+			termination["eventUri"] = patch.Termination.EventUri
+		}
+		if patch.Termination.EventCid != "" {
+			termination["eventCid"] = patch.Termination.EventCid
+		}
+		if len(termination) > 0 {
+			owned["termination"] = termination
+		}
+	}
 	if len(owned) == 0 {
 		return nil
 	}

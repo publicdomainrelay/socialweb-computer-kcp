@@ -53,13 +53,13 @@ var APIResources = []APIResource{
 		{Name: "Message", Type: "string", JSONPath: ".status.message"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "ComputeVM", Plural: "computevms", Revision: 4, Export: "computevms", Object: ComputeVM{}, PrinterColumns: []PrinterColumn{
+	{Kind: "ComputeVM", Plural: "computevms", Revision: 5, Export: "computevms", Object: ComputeVM{}, PrinterColumns: []PrinterColumn{
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "GuestIP", Type: "string", JSONPath: ".status.network.guestIP"},
 		{Name: "Requester", Type: "string", JSONPath: ".spec.requester.did"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "Bid", Plural: "bids", Revision: 5, Export: "computevms", Object: Bid{}, PrinterColumns: []PrinterColumn{
+	{Kind: "Bid", Plural: "bids", Revision: 6, Export: "computevms", Object: Bid{}, PrinterColumns: []PrinterColumn{
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "Requester", Type: "string", JSONPath: ".spec.requester"},
 		{Name: "Verdict", Type: "string", JSONPath: ".spec.policy.verdict"},

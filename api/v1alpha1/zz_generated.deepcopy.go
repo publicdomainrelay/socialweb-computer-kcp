@@ -564,6 +564,18 @@ func (in *ComputeVMStatus) DeepCopyInto(out *ComputeVMStatus) {
 		if in.Market.HostKeys != nil {
 			market.HostKeys = append([]ComputeVMHostKey(nil), in.Market.HostKeys...)
 		}
+		if in.Market.Termination != nil {
+			termination := *in.Market.Termination
+			if in.Market.Termination.ExitCode != nil {
+				code := *in.Market.Termination.ExitCode
+				termination.ExitCode = &code
+			}
+			if in.Market.Termination.Request != nil {
+				request := *in.Market.Termination.Request
+				termination.Request = &request
+			}
+			market.Termination = &termination
+		}
 		out.Market = &market
 	}
 }

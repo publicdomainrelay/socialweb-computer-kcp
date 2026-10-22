@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-5.bids.socialweb.computer
+  name: v1alpha1-6.bids.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -143,6 +143,14 @@ spec:
                   reason:
                     type: string
                   at:
+                    type: string
+                  payloadUri:
+                    type: string
+                  payloadCid:
+                    type: string
+                  eventUri:
+                    type: string
+                  eventCid:
                     type: string
                 required:
                   - receiptUri

@@ -179,6 +179,26 @@ type ComputeVMMarket struct {
 	HostKeysUri string `json:"hostKeysUri,omitempty"`
 
 	ReportedAt string `json:"reportedAt,omitempty"`
+
+	Termination *ComputeVMTermination `json:"termination,omitempty"`
+}
+
+type ComputeVMTermination struct {
+	Reason string `json:"reason,omitempty"`
+
+	ObservedAt string `json:"observedAt,omitempty"`
+
+	ExitCode *int `json:"exitCode,omitempty"`
+
+	Request *RecordRef `json:"request,omitempty"`
+
+	PayloadUri string `json:"payloadUri,omitempty"`
+
+	PayloadCid string `json:"payloadCid,omitempty"`
+
+	EventUri string `json:"eventUri,omitempty"`
+
+	EventCid string `json:"eventCid,omitempty"`
 }
 
 type ComputeVMStatus struct {

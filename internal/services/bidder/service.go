@@ -93,6 +93,8 @@ type Service struct {
 
 	mu sync.Mutex
 
+	terminationMu sync.Mutex
+
 	started bool
 
 	registered bool

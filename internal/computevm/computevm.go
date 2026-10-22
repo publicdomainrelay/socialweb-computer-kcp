@@ -23,6 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 
@@ -32,6 +33,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostprocess"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpapply"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/statuspatch"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
@@ -52,6 +54,9 @@ const (
 	ApplyTimeout      = time.Minute
 	ImageGCEvery      = 10 * time.Minute
 	conditionReasonOK = "Observed"
+
+	DefaultTerminationReportTimeout = 90 * time.Second
+	terminationPollInterval         = 500 * time.Millisecond
 )
 
 var (
@@ -73,6 +78,8 @@ type Config struct {
 	VaultClient string
 	VaultMount  string
 	Log         *slog.Logger
+
+	TerminationReportTimeout time.Duration
 }
 
 type Controller struct {
@@ -672,6 +679,64 @@ func (ct *Controller) dropSlice(ctx context.Context) {
 	ct.c.log().Info("the per-handle slice is stopped: no VM unit of this handle is loaded", "slice", slice)
 }
 
+func (ct *Controller) markTermination(ctx context.Context, o v1alpha1.ComputeVM) error {
+	if o.Status.Market != nil && o.Status.Market.Termination != nil {
+		return nil
+	}
+	body, err := statuspatch.Merge(map[string]any{"market": map[string]any{"termination": map[string]any{
+		"reason":     "deleted_on_request",
+		"observedAt": time.Now().UTC().Format(time.RFC3339),
+	}}})
+	if err != nil {
+		return err
+	}
+	if _, err := ct.vms.Patch(ctx, o.Name, types.MergePatchType, body, metav1.PatchOptions{}, "status"); err != nil && !apierrors.IsNotFound(err) {
+		return err
+	}
+	return nil
+}
+
+func terminationPublished(o v1alpha1.ComputeVM) bool {
+	return o.Status.Market != nil && o.Status.Market.Termination != nil && o.Status.Market.Termination.PayloadUri != ""
+}
+
+func terminationReportable(o v1alpha1.ComputeVM) bool {
+	contract := o.Spec.Contract
+	return contract != nil && contract.ReceiptUri != "" && contract.ReceiptCid != ""
+}
+
+func (ct *Controller) waitTermination(ctx context.Context, name string) error {
+	timeout := ct.c.TerminationReportTimeout
+	if timeout <= 0 {
+		return nil
+	}
+	log := ct.c.log().With("computevm", name)
+	deadline := time.Now().Add(timeout)
+	for {
+		u, err := ct.vms.Get(ctx, name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		if err == nil {
+			o, decodeErr := decode[v1alpha1.ComputeVM](u)
+			if decodeErr == nil && terminationPublished(o) {
+				log.Info("the market holds the guest termination report")
+				return nil
+			}
+		}
+		if !time.Now().Before(deadline) {
+			log.Warn("the vm.terminated event was not published within the timeout; dropping the finalizer without it",
+				"timeout", timeout.String(), "err", err)
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(terminationPollInterval):
+		}
+	}
+}
+
 func (ct *Controller) release(ctx context.Context, cur *unstructured.Unstructured, o v1alpha1.ComputeVM) error {
 	if !slices.Contains(o.Finalizers, v1alpha1.FinalizerComputeVM) {
 		return nil
@@ -681,6 +746,11 @@ func (ct *Controller) release(ctx context.Context, cur *unstructured.Unstructure
 	if st.Phase != v1alpha1.ComputeVMPhaseReleasing {
 		st.Phase, st.Message = v1alpha1.ComputeVMPhaseReleasing, "graceful stop, then the work dir goes"
 		if err := ct.writeStatus(ctx, o, st); err != nil {
+			return err
+		}
+	}
+	if terminationReportable(o) {
+		if err := ct.markTermination(ctx, o); err != nil {
 			return err
 		}
 	}
@@ -704,6 +774,11 @@ func (ct *Controller) release(ctx context.Context, cur *unstructured.Unstructure
 	}
 	ct.dropGuestLogin(ctx, o)
 	ct.dropGuestGrants(ctx, o)
+	if terminationReportable(o) {
+		if err := ct.waitTermination(ctx, o.Name); err != nil {
+			return err
+		}
+	}
 	if fresh, err := ct.vms.Get(ctx, o.Name, metav1.GetOptions{}); err == nil {
 		cur = fresh
 	} else if apierrors.IsNotFound(err) {

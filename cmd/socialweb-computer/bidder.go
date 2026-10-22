@@ -525,7 +525,8 @@ func (r *bidderRun) installedCore(ctx context.Context) int {
 	}
 	unit, _ := r.a.env.LookupEnv(devsup.EnvUnit)
 	cfg := bidder.CoreConfig{StateDir: state, Prefix: prefix, Handle: r.handle, Executables: exes, Spec: spec, VM: vm,
-		ComputeVM: computevm.Config{Handle: r.handle, Runtime: rt, Manager: m, Log: r.a.log}, FrontAddress: r.vals.String("kcp-front-address"),
+		ComputeVM: computevm.Config{Handle: r.handle, Runtime: rt, Manager: m, Log: r.a.log,
+			TerminationReportTimeout: computevm.DefaultTerminationReportTimeout}, FrontAddress: r.vals.String("kcp-front-address"),
 		ReadyTimeout: r.readyTimeout, Unit: unit, Log: r.a.log}
 	if err := bidder.RunCore(ctx, cfg, m); err != nil {
 		if errors.Is(err, context.Canceled) {

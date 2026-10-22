@@ -93,6 +93,14 @@ type BidTerminated struct {
 	Reason string `json:"reason"`
 
 	At string `json:"at"`
+
+	PayloadUri string `json:"payloadUri,omitempty"`
+
+	PayloadCid string `json:"payloadCid,omitempty"`
+
+	EventUri string `json:"eventUri,omitempty"`
+
+	EventCid string `json:"eventCid,omitempty"`
 }
 
 type BidStatus struct {
