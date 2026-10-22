@@ -467,9 +467,6 @@ func StartNetwork(t testing.TB, opts NetworkOptions) *Network {
 	if opts.WithGateway {
 		args = append(args, "--with-gateway")
 	}
-	if opts.Dumbpipe != "" {
-		args = append(args, "--dumbpipe-path", opts.Dumbpipe)
-	}
 	r := n.Run("dev-up", opts.UpTimeout+30*time.Second, args...)
 	if r.Err != nil {
 		t.Fatalf("dev up: %v\n%s", r.Err, r.Tail(15))
