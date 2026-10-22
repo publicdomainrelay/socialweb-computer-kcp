@@ -300,12 +300,19 @@ func (a *marketEventAdapter) Apply(ctx context.Context, request statesync.Reques
 	}
 	if submitEventURL != "" && a.call != nil {
 		body := map[string]any{"uri": event.URI, "cid": event.CID, "record": event.Record}
-		if err := a.call(ctx, submitEventURL, market.SubmitEventNSID, market.SubmitEventNSID, body); err != nil && ctx.Err() == nil {
-			a.logf().Warn("submitting the market event failed; the records are on the PDS and the firehose carries them",
-				"event", event.URI, "err", err.Error())
+		if err := a.call(ctx, submitEventURL, market.SubmitEventNSID, market.SubmitEventNSID, body); err != nil {
+			return statesync.Observation{}, classifyDeliveryError(err)
 		}
 	}
 	return a.Observe(ctx, request)
+}
+
+func classifyDeliveryError(err error) error {
+	var callErr *serviceCallError
+	if errors.As(err, &callErr) && callErr.Status >= 400 && callErr.Status <= 499 && callErr.Status != 408 && callErr.Status != 429 {
+		return fmt.Errorf("bidder: the requester rejected the market event (HTTP %d): %w", callErr.Status, statesync.ErrRejected)
+	}
+	return err
 }
 
 func (a *marketEventAdapter) applyInboundEvent(ctx context.Context, request statesync.Request, payload marketEventPayload) error {

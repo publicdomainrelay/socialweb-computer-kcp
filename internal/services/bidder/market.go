@@ -91,6 +91,29 @@ func writeXRPCError(w http.ResponseWriter, status int, code, message string) {
 	writeJSON(w, status, map[string]any{"error": code, "message": message})
 }
 
+type serviceCallError struct {
+	Status int
+
+	Err error
+}
+
+func (e *serviceCallError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.Err != nil {
+		return e.Err.Error()
+	}
+	return fmt.Sprintf("HTTP %d", e.Status)
+}
+
+func (e *serviceCallError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
 func readSubmitBody(r *http.Request, out any) error {
 	dec := json.NewDecoder(io.LimitReader(r.Body, MaxSubmitBody+1))
 	if err := dec.Decode(out); err != nil {
@@ -419,7 +442,7 @@ func (s *Service) postXRPC(ctx context.Context, endpoint, nsid string, body any)
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("HTTP %d", resp.StatusCode)
+		return &serviceCallError{Status: resp.StatusCode, Err: fmt.Errorf("HTTP %d", resp.StatusCode)}
 	}
 	return nil
 }

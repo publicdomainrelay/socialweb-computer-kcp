@@ -13,6 +13,8 @@ import (
 
 var ErrNotFound = errors.New("statesync: the remote object does not exist")
 
+var ErrRejected = errors.New("statesync: the target rejected the update")
+
 type Request struct {
 	Key string
 

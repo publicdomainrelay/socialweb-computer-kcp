@@ -40,6 +40,8 @@ const (
 
 	DefaultBackoff = 2 * time.Second
 
+	stallRetryInterval = 5 * time.Minute
+
 	maxBackoff = 5 * time.Minute
 )
 
@@ -147,6 +149,9 @@ func (c *Controller) Reconcile(ctx context.Context, dyn dynamic.Interface, u *un
 	if err := ensureFinalizer(ctx, ri, name, Finalizer, deletionPolicyOf(obj.Spec) != v1alpha1.StateSyncDeletionRetain); err != nil {
 		return err
 	}
+	if status.Phase == v1alpha1.StateSyncPhaseFailed && status.Attempts >= maxAttempts(obj.Spec.Retry) && priorGeneration == generation {
+		return writeStatus(ctx, ri, name, &status)
+	}
 	if err := validateSpec(obj.Spec); err != nil {
 		status.Phase = v1alpha1.StateSyncPhaseFailed
 		status.LastError = err.Error()
@@ -251,9 +256,13 @@ func (c *Controller) Reconcile(ctx context.Context, dyn dynamic.Interface, u *un
 		setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionDrifted, false, "NoDrift", "there is no observation to drift")
 	}
 	if status.Phase == v1alpha1.StateSyncPhaseStalled && priorGeneration == generation {
-		setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionAcked, false, "Stalled", "the attempts are exhausted")
-		setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionStalled, true, "AttemptsExhausted", "the attempts are exhausted")
-		return writeStatus(ctx, ri, name, &status)
+		if !stallDue(status.LastAttemptAt, time.Now().UTC()) {
+			setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionAcked, false, "Stalled", "the attempts are exhausted")
+			setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionStalled, true, "AttemptsExhausted", "the attempts are exhausted")
+			return writeStatus(ctx, ri, name, &status)
+		}
+		status.Attempts = 0
+		status.Phase = v1alpha1.StateSyncPhasePending
 	}
 	status.Phase = v1alpha1.StateSyncPhaseDelivering
 	if err := writeStatus(ctx, ri, name, &status); err != nil {
@@ -337,6 +346,13 @@ func (c *Controller) fail(ctx context.Context, ri dynamic.ResourceInterface, nam
 	status.LastError = cause.Error()
 	if status.LastAttemptAt == "" {
 		status.LastAttemptAt = now()
+	}
+	if errors.Is(cause, ErrRejected) {
+		status.Attempts = retryMax
+		status.Phase = v1alpha1.StateSyncPhaseFailed
+		setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionAcked, false, "Rejected", cause.Error())
+		setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionStalled, false, "Rejected", cause.Error())
+		return writeStatus(ctx, ri, name, status)
 	}
 	if status.Attempts >= retryMax {
 		status.Phase = v1alpha1.StateSyncPhaseStalled
@@ -514,6 +530,14 @@ func attemptDue(status *v1alpha1.StateSyncStatus, retry *v1alpha1.StateSyncRetry
 		return true
 	}
 	return !time.Now().UTC().Before(at.Add(backoffFor(status.Attempts, retry)))
+}
+
+func stallDue(lastAttemptAt string, at time.Time) bool {
+	last, err := time.Parse(time.RFC3339, strings.TrimSpace(lastAttemptAt))
+	if err != nil {
+		return true
+	}
+	return !at.Before(last.Add(stallRetryInterval))
 }
 
 func hashPayload(payload json.RawMessage) string {
