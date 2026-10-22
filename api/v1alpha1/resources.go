@@ -234,6 +234,14 @@ var APIResources = []APIResource{
 		{Name: "RotationDue", Type: "boolean", JSONPath: ".status.rotationDue"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
+	{Kind: "StateSync", Plural: "statesyncs", Revision: 1, Export: "applications", Object: StateSync{}, PrinterColumns: []PrinterColumn{
+		{Name: "Adapter", Type: "string", JSONPath: ".spec.sink.adapter"},
+		{Name: "Direction", Type: "string", JSONPath: ".spec.direction"},
+		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
+		{Name: "Observed", Type: "boolean", JSONPath: ".status.observed.exists"},
+		{Name: "Key", Type: "string", JSONPath: ".spec.idempotencyKey"},
+		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
+	}},
 }
 
 var componentPrinterColumns = []PrinterColumn{

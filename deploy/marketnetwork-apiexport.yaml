@@ -154,3 +154,8 @@ spec:
       schema: v1alpha1-1.vaultcertificates.socialweb.computer
       storage:
         crd: {}
+    - group: socialweb.computer
+      name: statesyncs
+      schema: v1alpha1-1.statesyncs.socialweb.computer
+      storage:
+        crd: {}

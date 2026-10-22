@@ -88,6 +88,8 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&VaultCredentialList{},
 		&VaultCertificate{},
 		&VaultCertificateList{},
+		&StateSync{},
+		&StateSyncList{},
 	)
 	return nil
 }

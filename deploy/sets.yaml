@@ -240,6 +240,7 @@ sets:
           - path: relaystatus-apiresourceschema.yaml
           - path: vaultcredential-apiresourceschema.yaml
           - path: vaultcertificate-apiresourceschema.yaml
+          - path: statesync-apiresourceschema.yaml
           - path: marketnetwork-apiexport.yaml
         after:
           - kind: APIExport

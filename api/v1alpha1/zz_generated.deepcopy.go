@@ -2861,3 +2861,209 @@ func (in *VaultCertificateStatus) DeepCopyInto(out *VaultCertificateStatus) {
 		}
 	}
 }
+
+func (in *StateSync) DeepCopyInto(out *StateSync) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
+	in.Spec.DeepCopyInto(&out.Spec)
+	in.Status.DeepCopyInto(&out.Status)
+}
+
+func (in *StateSync) DeepCopy() *StateSync {
+	if in == nil {
+		return nil
+	}
+	out := new(StateSync)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *StateSync) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *StateSyncList) DeepCopyInto(out *StateSyncList) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ListMeta.DeepCopyInto(&out.ListMeta)
+	if in.Items != nil {
+		out.Items = make([]StateSync, len(in.Items))
+		for i := range in.Items {
+			in.Items[i].DeepCopyInto(&out.Items[i])
+		}
+	}
+}
+
+func (in *StateSyncList) DeepCopy() *StateSyncList {
+	if in == nil {
+		return nil
+	}
+	out := new(StateSyncList)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *StateSyncList) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *StateSyncSource) DeepCopyInto(out *StateSyncSource) {
+	*out = *in
+}
+
+func (in *StateSyncSource) DeepCopy() *StateSyncSource {
+	if in == nil {
+		return nil
+	}
+	out := new(StateSyncSource)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *StateSyncSink) DeepCopyInto(out *StateSyncSink) {
+	*out = *in
+}
+
+func (in *StateSyncSink) DeepCopy() *StateSyncSink {
+	if in == nil {
+		return nil
+	}
+	out := new(StateSyncSink)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *StateSyncAck) DeepCopyInto(out *StateSyncAck) {
+	*out = *in
+	if in.Paths != nil {
+		out.Paths = make([]string, len(in.Paths))
+		copy(out.Paths, in.Paths)
+	}
+}
+
+func (in *StateSyncAck) DeepCopy() *StateSyncAck {
+	if in == nil {
+		return nil
+	}
+	out := new(StateSyncAck)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *StateSyncRetry) DeepCopyInto(out *StateSyncRetry) {
+	*out = *in
+}
+
+func (in *StateSyncRetry) DeepCopy() *StateSyncRetry {
+	if in == nil {
+		return nil
+	}
+	out := new(StateSyncRetry)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *StateSyncSpec) DeepCopyInto(out *StateSyncSpec) {
+	*out = *in
+	if in.Source != nil {
+		in, out := &in.Source, &out.Source
+		*out = new(StateSyncSource)
+		**out = **in
+	}
+	out.Sink = in.Sink
+	if in.Payload != nil {
+		out.Payload = append(json.RawMessage(nil), in.Payload...)
+	}
+	if in.Ack != nil {
+		in, out := &in.Ack, &out.Ack
+		*out = new(StateSyncAck)
+		(*in).DeepCopyInto(*out)
+	}
+	if in.Retry != nil {
+		in, out := &in.Retry, &out.Retry
+		*out = new(StateSyncRetry)
+		**out = **in
+	}
+}
+
+func (in *StateSyncSpec) DeepCopy() *StateSyncSpec {
+	if in == nil {
+		return nil
+	}
+	out := new(StateSyncSpec)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *StateSyncObservation) DeepCopyInto(out *StateSyncObservation) {
+	*out = *in
+	if in.Meta != nil {
+		out.Meta = make(map[string]string, len(in.Meta))
+		for key, value := range in.Meta {
+			out.Meta[key] = value
+		}
+	}
+}
+
+func (in *StateSyncObservation) DeepCopy() *StateSyncObservation {
+	if in == nil {
+		return nil
+	}
+	out := new(StateSyncObservation)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *StateSyncAcknowledged) DeepCopyInto(out *StateSyncAcknowledged) {
+	*out = *in
+}
+
+func (in *StateSyncAcknowledged) DeepCopy() *StateSyncAcknowledged {
+	if in == nil {
+		return nil
+	}
+	out := new(StateSyncAcknowledged)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *StateSyncStatus) DeepCopyInto(out *StateSyncStatus) {
+	*out = *in
+	if in.Observed != nil {
+		in, out := &in.Observed, &out.Observed
+		*out = new(StateSyncObservation)
+		(*in).DeepCopyInto(*out)
+	}
+	if in.Acked != nil {
+		in, out := &in.Acked, &out.Acked
+		*out = new(StateSyncAcknowledged)
+		**out = **in
+	}
+	if in.Cursor != nil {
+		in, out := &in.Cursor, &out.Cursor
+		*out = new(int64)
+		**out = **in
+	}
+	if in.Conditions != nil {
+		out.Conditions = make([]metav1.Condition, len(in.Conditions))
+		for i := range in.Conditions {
+			in.Conditions[i].DeepCopyInto(&out.Conditions[i])
+		}
+	}
+}
+
+func (in *StateSyncStatus) DeepCopy() *StateSyncStatus {
+	if in == nil {
+		return nil
+	}
+	out := new(StateSyncStatus)
+	in.DeepCopyInto(out)
+	return out
+}
