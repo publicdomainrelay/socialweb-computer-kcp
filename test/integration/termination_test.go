@@ -91,16 +91,17 @@ func TestOutOfBandComputeVMDeletionPublishesTermination(t *testing.T) {
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	_ = p.Input("done\n")
-	done := make(chan struct{})
+	done := make(chan error, 1)
 	go func() {
-		p.Wait()
-		close(done)
+		done <- p.Wait().Err
 	}()
 	select {
-	case <-done:
-	case <-time.After(30 * time.Second):
-		t.Log("the held request did not exit after the out-of-band delete; dev down will stop it")
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("the held request did not end cleanly after the out-of-band delete: %v", err)
+		}
+	case <-time.After(90 * time.Second):
+		t.Fatalf("the held request did not exit after the out-of-band delete")
 	}
 }
 
