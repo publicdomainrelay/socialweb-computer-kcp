@@ -29,6 +29,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/componentcore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/storemaint"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/ttlctl"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/vaultlayout"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/versions"
 )
 
@@ -320,15 +321,19 @@ func ComponentCoreConfig(ctx context.Context, cfg Config, rec devinstance.Record
 	switch {
 	case cfg.Application != nil && cfg.Application.Role == table.RoleBidder:
 		out.CredentialClient = appctl.BidderVaultClient
+		out.CredentialServer = appctl.BidderVaultServer
 		out.VaultClient = appctl.BidderVaultClient
 	case cfg.Application != nil && cfg.Application.Role == table.RoleGateway:
 		out.CredentialClient = appctl.RequesterVaultClient
+		out.CredentialServer = vaultlayout.RootServerName
 		out.VaultClient = appctl.RequesterVaultClient
 	case strings.Contains(rec.BaseWorkspace, ":gateway"), strings.Contains(rec.BaseWorkspace, ":ssh"):
 		out.CredentialClient = appctl.RequesterVaultClient
+		out.CredentialServer = vaultlayout.RootServerName
 		out.VaultClient = appctl.RequesterVaultClient
 	case strings.Contains(rec.BaseWorkspace, ":bidder"):
 		out.CredentialClient = appctl.BidderVaultClient
+		out.CredentialServer = appctl.BidderVaultServer
 		out.VaultClient = appctl.BidderVaultClient
 	}
 	if rec.Profile == bootstrap.ProfileQuick {
