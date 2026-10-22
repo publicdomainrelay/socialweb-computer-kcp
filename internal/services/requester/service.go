@@ -230,6 +230,54 @@ func (s *Service) logicalURL() string {
 	return handlerURL(s.cfg.Workspace, Kind, s.cfg.ComponentName)
 }
 
+func (s *Service) resolveIdentity(ctx context.Context) error {
+	if s.cfg.PDSURL != "" && s.cfg.DID != "" {
+		return nil
+	}
+	ref := s.cfg.Identity.MarketIdentityRef
+	if ref == nil || ref.Name == "" || s.cfg.Deps.KCP == nil {
+		return nil
+	}
+	client, err := s.cfg.Deps.KCP.Client(s.cfg.Workspace)
+	if err != nil {
+		return fmt.Errorf("requester: kcp client for its MarketIdentity: %w", err)
+	}
+	cfg := client.RESTConfig()
+	if cfg == nil || cfg.Host == "" {
+		return errors.New("requester: the kcp client has no rest config for its MarketIdentity")
+	}
+	baseHost, _, _ := strings.Cut(strings.TrimSuffix(cfg.Host, "/"), "/clusters/")
+	cfg = rest.CopyConfig(cfg)
+	cfg.Host = baseHost + "/clusters/" + s.cfg.Workspace
+	dc, err := dynamic.NewForConfig(cfg)
+	if err != nil {
+		return fmt.Errorf("requester: reading its MarketIdentity: %w", err)
+	}
+	u, err := dc.Resource(marketIdentityGVR).Get(ctx, ref.Name, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("requester: reading its MarketIdentity %s: %w", ref.Name, err)
+	}
+	did, _, _ := unstructured.NestedString(u.Object, "status", "did")
+	pdsURL, _, _ := unstructured.NestedString(u.Object, "status", "pdsUrl")
+	handle, _, _ := unstructured.NestedString(u.Object, "status", "handle")
+	if did != "" {
+		s.cfg.DID = did
+		if s.cfg.RepoDID == "" {
+			s.cfg.RepoDID = did
+		}
+		if s.cfg.MarketDID == "" {
+			s.cfg.MarketDID = did
+		}
+	}
+	if pdsURL != "" {
+		s.cfg.PDSURL = pdsURL
+	}
+	if s.cfg.Handle == "" {
+		s.cfg.Handle = handle
+	}
+	return nil
+}
+
 func (s *Service) setup(ctx context.Context) error {
 	if s.cfg.StateDir != "" {
 		if err := os.MkdirAll(s.cfg.StateDir, 0o700); err != nil {
@@ -255,6 +303,9 @@ func (s *Service) setup(ctx context.Context) error {
 		if s.cfg.Log != nil {
 			s.log = s.cfg.Log.With("component", "requester", "did", s.cfg.DID)
 		}
+	}
+	if err := s.resolveIdentity(ctx); err != nil {
+		return err
 	}
 	if s.cfg.RepoKey == nil {
 		keyPath := s.cfg.RepoKeyPath
@@ -857,6 +908,8 @@ func (s *Service) getSecrets(w http.ResponseWriter, r *http.Request) {
 }
 
 var exposureGVR = schema.GroupVersionResource{Group: "exposure.socialweb.computer", Version: "v1alpha1", Resource: "exposures"}
+
+var marketIdentityGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "marketidentities"}
 
 func (s *Service) ingressExposureURL(ctx context.Context) (string, error) {
 	name := "svc-" + strings.ToLower(Kind) + "-" + strings.TrimSpace(s.cfg.ComponentName) + "-ingress"

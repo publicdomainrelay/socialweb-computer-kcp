@@ -202,7 +202,15 @@ func ownerIdentityOf(path string) (string, string) {
 	return dids[0], sessions[dids[0]].Identifier
 }
 
-func (ctl *Controller) sshRequesterIdentity(ctx context.Context, owner string, o v1alpha1.SshGateway) (*v1alpha1.ComponentIdentity, error) {
+func sshGatewayAccountIdentity(o v1alpha1.SshGateway) v1alpha1.ApplicationIdentity {
+	return v1alpha1.ApplicationIdentity{
+		Mode:   v1alpha1.MarketIdentityMode(optionValue(o.Spec.Options, "atproto-identity-mode")),
+		Handle: optionValue(o.Spec.Options, "app-handle"),
+		PdsUrl: optionValue(o.Spec.Options, "atproto-pds-url"),
+	}
+}
+
+func (ctl *Controller) sshRequesterIdentity(ctx context.Context, owner string, o v1alpha1.SshGateway, plan accountPlan) (*v1alpha1.ComponentIdentity, error) {
 	handle := optionValue(o.Spec.Options, "app-handle")
 	if did := optionValue(o.Spec.Options, "app-did"); did != "" {
 		return &v1alpha1.ComponentIdentity{Did: did, Handle: handle}, nil
@@ -213,8 +221,7 @@ func (ctl *Controller) sshRequesterIdentity(ctx context.Context, owner string, o
 		}
 		return &v1alpha1.ComponentIdentity{Did: did, Handle: handle}, nil
 	}
-	spec := IdentitySpecOf(v1alpha1.ApplicationIdentity{Mode: v1alpha1.MarketIdentityModeLocalRepo, Handle: handle})
-	if err := ctl.ensureIdentitySpec(ctx, ctl.c.workspace(), owner, RequesterIdentity, spec); err != nil {
+	if err := ctl.ensureIdentitySpec(ctx, ctl.c.workspace(), owner, RequesterIdentity, plan.Identity); err != nil {
 		return nil, err
 	}
 	id, err := ctl.identityIn(ctx, ctl.c.workspace(), RequesterIdentity)
@@ -246,7 +253,7 @@ func sshServerExposuresReady(snap componentSnapshot, desired []desiredComponent)
 	return found
 }
 
-func sshGatewayDesired(o v1alpha1.SshGateway, ident *v1alpha1.ComponentIdentity, ws, stateRoot string) []desiredComponent {
+func sshGatewayDesired(o v1alpha1.SshGateway, plan accountPlan, ident *v1alpha1.ComponentIdentity, ws, stateRoot string) []desiredComponent {
 	suspend := o.Spec.Suspend
 	network := o.Spec.Network
 	vault := ComponentRefFor("OpenBaoServer", SshGatewayVaultServer)
@@ -254,20 +261,28 @@ func sshGatewayDesired(o v1alpha1.SshGateway, ident *v1alpha1.ComponentIdentity,
 	if ident.Handle != "" {
 		hostnames = []string{ident.Handle}
 	}
-	mode, publicOrigin, oauthClientID, oauthRedirectURI, guestSSHKeysFile := requesterComponentFields(o.Spec.Options, v1alpha1.MarketIdentityModeLocalRepo)
+	mode, publicOrigin, oauthClientID, oauthRedirectURI, guestSSHKeysFile := requesterComponentFields(o.Spec.Options, plan.Mode)
+	var requesterPdsRef *v1alpha1.ComponentRef
+	if plan.Local {
+		requesterPdsRef = nil
+	} else {
+		requesterPdsRef = plan.PdsRef
+	}
 	requester := desiredComponent{Kind: ComponentKindRequester, Name: RequesterComponent, Spec: v1alpha1.RequesterSpec{
-		ComponentSpec:     NewComponentSpec(ComponentCRStateDir(stateRoot, ComponentKindRequester, RequesterComponent), network, suspend),
-		Identity:          ident,
-		PolicyEngineRef:   ComponentRefFor(ComponentKindPolicyEngine, PolicyEngineComponent),
-		Hostnames:         hostnames,
-		Mode:              mode,
-		PublicOrigin:      publicOrigin,
-		OAuthClientID:     oauthClientID,
-		OAuthRedirectURI:  oauthRedirectURI,
-		GuestSSHKeysFile:  guestSSHKeysFile,
-		OwnerSessionsFile: o.Spec.OwnerSessionsFile,
-		IrohSocket:        sshGatewayIrohSocket(stateRoot),
-		AcceptCopies:      int32(optionInt(o.Spec.Options, "accept-copies")),
+		ComponentSpec:      NewComponentSpec(ComponentCRStateDir(stateRoot, ComponentKindRequester, RequesterComponent), network, suspend),
+		Identity:           ident,
+		PdsRef:             requesterPdsRef,
+		PDSAccessTokenPath: plan.accessTokenPath(),
+		PolicyEngineRef:    ComponentRefFor(ComponentKindPolicyEngine, PolicyEngineComponent),
+		Hostnames:          hostnames,
+		Mode:               mode,
+		PublicOrigin:       publicOrigin,
+		OAuthClientID:      oauthClientID,
+		OAuthRedirectURI:   oauthRedirectURI,
+		GuestSSHKeysFile:   guestSSHKeysFile,
+		OwnerSessionsFile:  o.Spec.OwnerSessionsFile,
+		IrohSocket:         sshGatewayIrohSocket(stateRoot),
+		AcceptCopies:       int32(optionInt(o.Spec.Options, "accept-copies")),
 	}}
 	sshServer := desiredComponent{Kind: ComponentKindSshServer, Name: SshServerComponent, Spec: v1alpha1.SshServerSpec{
 		ComponentSpec:     NewComponentSpec(ComponentCRStateDir(stateRoot, ComponentKindSshServer, SshServerComponent), network, suspend),
@@ -319,13 +334,18 @@ func (ctl *Controller) reconcileSshGateway(ctx context.Context, u *unstructured.
 		}
 	}
 	stateRoot := ctl.c.Layout.StateDir
+	plan, err := ctl.planAccount(ctx, ctl.c.workspace(), sshGatewayAccountIdentity(o), "requester", v1alpha1.AssociationRequireApproval)
+	if err != nil {
+		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
+		return ctl.writeStatus(ctx, SshGatewayGVR, o.Name, st)
+	}
 	if o.Spec.Suspend {
-		ident, err := ctl.sshRequesterIdentity(ctx, owner, o)
+		ident, err := ctl.sshRequesterIdentity(ctx, owner, o, plan)
 		if err != nil {
 			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "the ssh requester's identity: "+err.Error()
 			return ctl.writeStatus(ctx, SshGatewayGVR, o.Name, st)
 		}
-		desired := sshGatewayDesired(o, ident, ctl.c.workspace(), stateRoot)
+		desired := sshGatewayDesired(o, plan, ident, ctl.c.workspace(), stateRoot)
 		if err := ctl.ensureDesired(ctx, u, desired); err != nil {
 			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, err.Error()
 			return ctl.writeStatus(ctx, SshGatewayGVR, o.Name, st)
@@ -363,12 +383,12 @@ func (ctl *Controller) reconcileSshGateway(ctx context.Context, u *unstructured.
 		}
 		ctl.applied[string(o.UID)] = o.Generation
 	}
-	ident, err := ctl.sshRequesterIdentity(ctx, owner, o)
+	ident, err := ctl.sshRequesterIdentity(ctx, owner, o, plan)
 	if err != nil {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "the ssh requester's identity: "+err.Error()
 		return ctl.writeStatus(ctx, SshGatewayGVR, o.Name, st)
 	}
-	desired := sshGatewayDesired(o, ident, ctl.c.workspace(), stateRoot)
+	desired := sshGatewayDesired(o, plan, ident, ctl.c.workspace(), stateRoot)
 	if err := ctl.ensureDesired(ctx, u, desired); err != nil {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, err.Error()
 		return ctl.writeStatus(ctx, SshGatewayGVR, o.Name, st)

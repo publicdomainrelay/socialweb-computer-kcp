@@ -158,8 +158,17 @@ func RootVaultSpec(g v1alpha1.GatewaySpec) (v1alpha1.OpenBaoServerSpec, error) {
 		Declared: declared, Plugins: []v1alpha1.OpenBaoPlugin{plugin}}, nil
 }
 
-func GatewayRequesterIdentity(g v1alpha1.GatewaySpec) v1alpha1.MarketIdentitySpec {
-	return OperatorWatched(IdentitySpecOf(v1alpha1.ApplicationIdentity{Mode: v1alpha1.MarketIdentityModeLocalRepo}), g.Operator)
+func GatewayRequesterIdentity(g v1alpha1.GatewaySpec) v1alpha1.ApplicationIdentity {
+	association := v1alpha1.AssociationMode("")
+	if optionValue(g.Options, "skip-association") == "true" {
+		association = v1alpha1.AssociationSkip
+	}
+	return v1alpha1.ApplicationIdentity{
+		Mode:        v1alpha1.MarketIdentityMode(optionValue(g.Options, "atproto-identity-mode")),
+		Handle:      optionValue(g.Options, "atproto-handle"),
+		PdsUrl:      optionValue(g.Options, "atproto-pds-url"),
+		Association: association,
+	}
 }
 
 func sameSpec(a, b any) bool {
@@ -246,11 +255,11 @@ func gatewayNodeMarket(o v1alpha1.Gateway, workspace string) *v1alpha1.GatewayNo
 	return out
 }
 
-func gatewayDesired(o v1alpha1.Gateway, id *v1alpha1.MarketIdentity, ws, stateRoot, downloadsDir, clusterCADir, workspace, pdsHandle, pdsPublicURL string,
+func gatewayDesired(o v1alpha1.Gateway, plan accountPlan, id *v1alpha1.MarketIdentity, ws, stateRoot, downloadsDir, clusterCADir, workspace, pdsHandle, pdsPublicURL string,
 	ingress *v1alpha1.IngressConfig, requireIngress bool, ingressRef *v1alpha1.ComponentRef) ([]desiredComponent, error) {
 	suspend := o.Spec.Suspend
 	network := o.Spec.Network
-	ident := componentIdentity(id, "")
+	ident := componentIdentity(id, o.Spec.Identity.Handle)
 	vault := ComponentRefFor("OpenBaoServer", vaultlayout.RootServerName)
 	var hostnames []string
 	if ident.Handle != "" {
@@ -287,17 +296,29 @@ func gatewayDesired(o v1alpha1.Gateway, id *v1alpha1.MarketIdentity, ws, stateRo
 	if downloadsDir != "" && (publicOrigin != "" || (tlsSpec != nil && len(hostnames) > 0)) {
 		requiredDownloads = append([]string(nil), GatewayRequiredDownloads...)
 	}
-	mode, requesterOrigin, oauthClientID, oauthRedirectURI, guestSSHKeysFile := requesterComponentFields(o.Spec.Options, v1alpha1.MarketIdentityModeLocalRepo)
-	pdsSpec, err := appPdsSpec(stateRoot, network, pdsHandle, vault, hostnames, suspend, pdsPublicURL, requireIngress, ingressRef)
-	if err != nil {
-		return nil, err
+	mode, requesterOrigin, oauthClientID, oauthRedirectURI, guestSSHKeysFile := requesterComponentFields(o.Spec.Options, plan.Mode)
+	var pds desiredComponent
+	if plan.Local {
+		pdsSpec, err := appPdsSpec(stateRoot, network, pdsHandle, vault, hostnames, suspend, pdsPublicURL, requireIngress, ingressRef)
+		if err != nil {
+			return nil, err
+		}
+		pds = desiredComponent{Kind: ComponentKindPds, Name: PdsComponent, Spec: pdsSpec}
 	}
-	pds := desiredComponent{Kind: ComponentKindPds, Name: PdsComponent, Spec: pdsSpec}
+	var requesterPdsRef *v1alpha1.ComponentRef
+	pdsAccessTokenPathValue := ""
+	if plan.Local {
+		requesterPdsRef = ComponentRefFor(ComponentKindPds, PdsComponent)
+		pdsAccessTokenPathValue = pdsAccessTokenPath("requester")
+	} else {
+		requesterPdsRef = plan.PdsRef
+		pdsAccessTokenPathValue = plan.accessTokenPath()
+	}
 	requester := desiredComponent{Kind: ComponentKindRequester, Name: RequesterComponent, Spec: v1alpha1.RequesterSpec{
 		ComponentSpec:      NewComponentSpec(ComponentCRStateDir(stateRoot, ComponentKindRequester, RequesterComponent), network, suspend),
 		Identity:           ident,
-		PdsRef:             ComponentRefFor(ComponentKindPds, PdsComponent),
-		PDSAccessTokenPath: pdsAccessTokenPath("requester"),
+		PdsRef:             requesterPdsRef,
+		PDSAccessTokenPath: pdsAccessTokenPathValue,
 		PolicyEngineRef:    ComponentRefFor(ComponentKindPolicyEngine, PolicyEngineComponent),
 		VaultRef:           vault,
 		Hostnames:          hostnames,
@@ -314,10 +335,14 @@ func gatewayDesired(o v1alpha1.Gateway, id *v1alpha1.MarketIdentity, ws, stateRo
 	if kubeconfigCAFile == "" && o.Spec.Profile != ProfileGatewayProd {
 		kubeconfigCAFile = filepath.Join(stateRoot, "tls", "tls.crt")
 	}
+	var gatewayPdsRef *v1alpha1.ComponentRef
+	if plan.Local {
+		gatewayPdsRef = ComponentRefFor(ComponentKindPds, PdsComponent)
+	}
 	gatewayAPI := desiredComponent{Kind: ComponentKindGatewayAPI, Name: GatewayAPIComponent, Spec: v1alpha1.GatewayAPISpec{
 		ComponentSpec:     gatewayBase,
 		Identity:          ident,
-		PdsRef:            ComponentRefFor(ComponentKindPds, PdsComponent),
+		PdsRef:            gatewayPdsRef,
 		RequesterRef:      ComponentRefFor(ComponentKindRequester, RequesterComponent),
 		VaultRef:          vault,
 		Hostnames:         hostnames,
@@ -331,8 +356,11 @@ func gatewayDesired(o v1alpha1.Gateway, id *v1alpha1.MarketIdentity, ws, stateRo
 		PostSignInURL:     postSignInURL,
 		NodeMarket:        gatewayNodeMarket(o, ws),
 	}}
-	out := []desiredComponent{pds, policyEngineDesired(suspend), requester, gatewayAPI}
-	out = append(out, pdsExposures(ws, PdsComponent, network, hostnames, suspend, ingress)...)
+	out := []desiredComponent{policyEngineDesired(suspend), requester, gatewayAPI}
+	if plan.Local {
+		out = append([]desiredComponent{pds}, out...)
+		out = append(out, pdsExposures(ws, PdsComponent, network, hostnames, suspend, ingress)...)
+	}
 	out = append(out, httpServiceExposures(ws, ComponentKindRequester, RequesterComponent, "http", network, hostnames, true, true, suspend)...)
 	out = append(out, httpServiceExposures(ws, ComponentKindGatewayAPI, GatewayAPIComponent, "http", network, hostnames, true, true, suspend)...)
 	return out, nil
@@ -383,6 +411,11 @@ func (ctl *Controller) reconcileGateway(ctx context.Context, u *unstructured.Uns
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, fmt.Sprintf("profile %q: want %s or %s", o.Spec.Profile, ProfileGatewayProd, ProfileGatewayNetwork)
 		return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
 	}
+	plan, err := ctl.planAccount(ctx, ws, GatewayRequesterIdentity(o.Spec), "requester", v1alpha1.AssociationRequireApproval)
+	if err != nil {
+		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
+		return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
+	}
 	vault, err := ctl.ensureRootVault(ctx, owner, o.Spec)
 	if err != nil {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "its root vault: "+err.Error()
@@ -401,7 +434,7 @@ func (ctl *Controller) reconcileGateway(ctx context.Context, u *unstructured.Uns
 	}
 	if o.Spec.Suspend {
 		id, _ := ctl.identityIn(ctx, ws, RequesterIdentity)
-		desired, err := gatewayDesired(o, id, ctl.c.workspace(), stateRoot, downloadsDir, clusterCADir, ws, pdsAccountHandle, pdsPublicURL, ingressConfig, requireIngress, ingressRef)
+		desired, err := gatewayDesired(o, plan, id, ctl.c.workspace(), stateRoot, downloadsDir, clusterCADir, ws, pdsAccountHandle, pdsPublicURL, ingressConfig, requireIngress, ingressRef)
 		if err != nil {
 			st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
 			return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
@@ -441,13 +474,15 @@ func (ctl *Controller) reconcileGateway(ctx context.Context, u *unstructured.Uns
 			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "its workspace: "+err.Error()
 			return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
 		}
-		if err := ctl.ensureIdentitySpec(ctx, ws, owner, RequesterIdentity, GatewayRequesterIdentity(o.Spec)); err != nil {
+		if err := ctl.ensureIdentitySpec(ctx, ws, owner, RequesterIdentity, OperatorWatched(plan.Identity, o.Spec.Operator)); err != nil {
 			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "the requester's MarketIdentity: "+err.Error()
 			return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
 		}
-		if err := ctl.ensureRepoKey(ctx, vaultlayout.RootServerName, RequesterVaultClient, RequesterKeysPath()); err != nil {
-			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "the requester's repo key: "+err.Error()
-			return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
+		if plan.Local {
+			if err := ctl.ensureRepoKey(ctx, vaultlayout.RootServerName, RequesterVaultClient, RequesterKeysPath()); err != nil {
+				st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "the requester's repo key: "+err.Error()
+				return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
+			}
 		}
 		ctl.applied[string(o.UID)] = o.Generation
 	}
@@ -460,7 +495,22 @@ func (ctl *Controller) reconcileGateway(ctx context.Context, u *unstructured.Uns
 	if err != nil {
 		return err
 	}
-	desired, err := gatewayDesired(o, id, ctl.c.workspace(), stateRoot, downloadsDir, clusterCADir, ws, pdsAccountHandle, pdsPublicURL, ingressConfig, requireIngress, ingressRef)
+	if !plan.Local {
+		switch id.Status.Phase {
+		case v1alpha1.MarketIdentityPhaseFailed, v1alpha1.MarketIdentityPhaseSessionExpired:
+			st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, "the requester's MarketIdentity: "+id.Status.Message
+			return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
+		case v1alpha1.MarketIdentityPhaseReady:
+		default:
+			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for the requester's existing-account MarketIdentity to sign in"
+			return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
+		}
+		if strings.TrimSpace(id.Status.Did) == "" {
+			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for the requester's existing-account MarketIdentity to report a did"
+			return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
+		}
+	}
+	desired, err := gatewayDesired(o, plan, id, ctl.c.workspace(), stateRoot, downloadsDir, clusterCADir, ws, pdsAccountHandle, pdsPublicURL, ingressConfig, requireIngress, ingressRef)
 	if err != nil {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
 		return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
@@ -520,7 +570,7 @@ func (ctl *Controller) reconcileGateway(ctx context.Context, u *unstructured.Uns
 			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for the app Pds public URL"
 			return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
 		}
-		if desired, err = gatewayDesired(o, id, ctl.c.workspace(), stateRoot, downloadsDir, clusterCADir, ws, pdsAccountHandle, pdsPublicURL, ingressConfig, requireIngress, ingressRef); err != nil {
+		if desired, err = gatewayDesired(o, plan, id, ctl.c.workspace(), stateRoot, downloadsDir, clusterCADir, ws, pdsAccountHandle, pdsPublicURL, ingressConfig, requireIngress, ingressRef); err != nil {
 			st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
 			return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
 		}
@@ -570,7 +620,7 @@ func (ctl *Controller) reconcileGateway(ctx context.Context, u *unstructured.Uns
 		if id, err = ctl.identityIn(ctx, ws, RequesterIdentity); err != nil {
 			return err
 		}
-		if desired, err = gatewayDesired(o, id, ctl.c.workspace(), stateRoot, downloadsDir, clusterCADir, ws, pdsAccountHandle, pdsPublicURL, ingressConfig, requireIngress, ingressRef); err != nil {
+		if desired, err = gatewayDesired(o, plan, id, ctl.c.workspace(), stateRoot, downloadsDir, clusterCADir, ws, pdsAccountHandle, pdsPublicURL, ingressConfig, requireIngress, ingressRef); err != nil {
 			st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
 			return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
 		}
@@ -594,6 +644,7 @@ func (ctl *Controller) reconcileGateway(ctx context.Context, u *unstructured.Uns
 	st.Components = append(st.Components, snap.Components...)
 	st.Listeners = snap.Listeners
 	st.Did = id.Status.Did
+	ctl.ensureAccountRepo(ctx, ws, RequesterIdentity, plan, id.Status.Did)
 	if a := id.Status.PendingAction; a != nil && id.Status.Phase == v1alpha1.MarketIdentityPhaseAwaitingScan {
 		awaitingOperator = "waiting for the operator's claim record (badgeBlueKeys keyId " + id.Status.Did + " with the nonce n of " + a.Url + ")"
 	}

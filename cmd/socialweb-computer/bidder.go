@@ -48,6 +48,7 @@ type bidderRun struct {
 	value          *v1alpha1.MarketNetworkValue
 	ingress        *v1alpha1.IngressConfig
 	pdsURL         string
+	identityMode   v1alpha1.MarketIdentityMode
 	readyTimeout   time.Duration
 	networkTimeout time.Duration
 }
@@ -84,10 +85,18 @@ func (r *bidderRun) passthrough(args []string) error {
 			return fmt.Errorf("--%s maps to %s, which the market network sets for its child applications", p.Name, p.To)
 		}
 		switch {
+		case p.To == appctl.MapToOptions && p.Name == "atproto-oauth":
+			r.identityMode = v1alpha1.MarketIdentityModeOAuthBrowser
+		case p.To == appctl.MapToOptions && p.Name == "atproto-oauth-qr":
+			r.identityMode = v1alpha1.MarketIdentityModeOAuthQr
 		case p.To == appctl.MapToOptions:
 			r.options = append(r.options, v1alpha1.ApplicationOption{Name: p.Name, Value: p.Value})
 		case p.To == "spec.policy":
 			r.policy = p.Value
+		case p.To == "spec.identity.mode":
+			r.identityMode = v1alpha1.MarketIdentityMode(p.Value)
+		case p.To == "spec.identity.pdsUrl":
+			r.pdsURL = p.Value
 		case p.To == "spec.identity.handle":
 			if r.handle != "" && r.handle != p.Value {
 				return fmt.Errorf("--atproto-handle %s and --handle %s name two accounts", p.Value, r.handle)
@@ -303,7 +312,7 @@ func (r *bidderRun) kcpProvider() *v1alpha1.KcpProvider {
 
 func (r *bidderRun) spec() (v1alpha1.MarketBidderSpec, error) {
 	return bidder.Spec(bidder.SpecInput{Profile: r.profile, Handle: r.handle, Policy: r.policy, Network: r.value, PdsUrl: r.pdsURL,
-		Kcp: r.kcpProvider(), Ingress: r.ingress, Options: r.options})
+		Mode: r.identityMode, Kcp: r.kcpProvider(), Ingress: r.ingress, Options: r.options})
 }
 
 func (r *bidderRun) marketNetwork() (devinstance.Layout, devinstance.Record, error) {

@@ -71,15 +71,16 @@ type SpecInput struct {
 	Policy  string
 	Network *v1alpha1.MarketNetworkValue
 	PdsUrl  string
+	Mode    v1alpha1.MarketIdentityMode
 	Kcp     *v1alpha1.KcpProvider
 	Ingress *v1alpha1.IngressConfig
 	Options []v1alpha1.ApplicationOption
 }
 
 func Spec(in SpecInput) (v1alpha1.MarketBidderSpec, error) {
-	mode, err := appctl.BidderIdentityMode(in.Profile)
-	if err != nil {
-		return v1alpha1.MarketBidderSpec{}, err
+	mode := in.Mode
+	if mode == "" {
+		mode = v1alpha1.MarketIdentityModeLocalRepo
 	}
 	if in.Profile == appctl.BidderProfileProdQr && in.Handle == "" {
 		return v1alpha1.MarketBidderSpec{}, errors.New("bidder: profile prod-qr needs --handle: the QR sign-in is refused for any other account")

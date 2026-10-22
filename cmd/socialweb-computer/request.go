@@ -127,6 +127,8 @@ func (r *requestRun) passthrough(args []string, network bool) error {
 			}
 		case p.To == "spec.identity.handle":
 			r.root.Identity.Handle = p.Value
+		case p.To == "spec.identity.pdsUrl":
+			r.root.Identity.PdsUrl = p.Value
 		case p.To == "spec.identity.association":
 			if p.Value != "false" {
 				r.root.Identity.Association = v1alpha1.AssociationSkip

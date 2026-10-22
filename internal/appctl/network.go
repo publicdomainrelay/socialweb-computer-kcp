@@ -985,11 +985,11 @@ func (n *networks) ensureApp(ctx context.Context, app v1alpha1.NetworkApp, value
 			fc = nil
 		}
 		root = &v1alpha1.MarketBidder{ObjectMeta: meta, Spec: v1alpha1.MarketBidderSpec{Profile: app.Profile, Network: &value,
-			Identity: v1alpha1.ApplicationIdentity{Mode: v1alpha1.MarketIdentityModeLocalRepo, Handle: handle, PdsUrl: pdsURL},
+			Identity: v1alpha1.ApplicationIdentity{Handle: handle, PdsUrl: pdsURL},
 			Policy:   app.Policy, Firecracker: fc, Kcp: kcp, Options: app.Options, Quota: app.Quota}}
 	case v1alpha1.ApplicationKindMarketRequester:
 		root = &v1alpha1.MarketRequester{ObjectMeta: meta, Spec: v1alpha1.MarketRequesterSpec{Profile: app.Profile, Network: &value,
-			Identity:   v1alpha1.ApplicationIdentity{Mode: v1alpha1.MarketIdentityModeLocalRepo, Association: v1alpha1.AssociationSkip},
+			Identity:   v1alpha1.ApplicationIdentity{Association: v1alpha1.AssociationSkip},
 			BidderDids: bidderDids, Options: app.Options, Quota: app.Quota}}
 	case v1alpha1.ApplicationKindSshGateway:
 		root = &v1alpha1.SshGateway{ObjectMeta: meta, Spec: v1alpha1.SshGatewaySpec{Profile: app.Profile, Network: &value,
