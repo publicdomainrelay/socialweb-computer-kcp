@@ -339,9 +339,13 @@ func (c *Core) runIdentity(ctx context.Context) {
 		}
 		seen[workspace] = true
 		workspace := workspace
+		var vault identitycontroller.SecretStore
+		if store, err := newIdentityVaultStore(c.store, workspace, c.cfg.CredentialClient, c.cfg.CredentialServer); err == nil {
+			vault = store
+		}
 		ctl, err := identitycontroller.New(identitycontroller.Options{Workspace: workspace, Dynamic: identitycontroller.DynamicFactory(c.cfg.DynamicFactory),
 			Endpoints: c.pdsEndpoint, Resolver: &pdsclient.Resolver{Handlers: c.handlers, Timeout: 10 * time.Second},
-			Log: log.With("workspace", workspace)})
+			Vault: vault, Log: log.With("workspace", workspace)})
 		if err != nil {
 			log.Warn("the MarketIdentity controller does not start", "workspace", workspace, "err", err.Error())
 			continue
