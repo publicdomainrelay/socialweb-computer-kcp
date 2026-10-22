@@ -495,10 +495,6 @@ root creates one `EventStream` per URL with sink handler `market-<role>@<workspa
 become deterministic `StateSync` inboxes keyed by `uri#cid`; duplicate delivery from both transports
 creates one object. Switching back to XRPC deletes the root's market EventStreams.
 
-Known gap: the relay handler and inboxes are wired, but the live firehose-only gate has not passed. The
-relay now backfills from cursor 0 and the bidder's handler sees the RFP frame, then fails to resolve
-the requester's `*.relay.localhost` PDS endpoint from the bidder core. Use `XRPC` until plan 0021 W3
-closes.
 
 ### Account modes
 
