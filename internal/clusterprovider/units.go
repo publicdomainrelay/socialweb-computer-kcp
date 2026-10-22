@@ -898,7 +898,7 @@ func stepNeeds(steps []procgroup.Step, i int) []int {
 	case procgroup.ComponentOpenBao, procgroup.ComponentKine:
 		names = []procgroup.Component{procgroup.ComponentApiserverFront}
 	case procgroup.ComponentK3s:
-		names = []procgroup.Component{procgroup.ComponentApiserverFront, procgroup.ComponentKine}
+		names = []procgroup.Component{procgroup.ComponentApiserverFront, procgroup.ComponentKine, procgroup.ComponentOpenBao}
 	case procgroup.ComponentCloudControllerManager, procgroup.ComponentExternalSecretsWebhook:
 		names = []procgroup.Component{procgroup.ComponentK3s}
 	case procgroup.ComponentExternalSecrets:
