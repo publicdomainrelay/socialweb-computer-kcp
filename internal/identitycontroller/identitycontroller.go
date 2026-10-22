@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -22,6 +23,7 @@ import (
 	"k8s.io/client-go/dynamic"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauthclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 )
 
@@ -69,6 +71,10 @@ type Options struct {
 	Resolver *pdsclient.Resolver
 
 	RetryAfter time.Duration
+
+	Vault SecretStore
+
+	OAuth OAuthOptions
 }
 
 type Controller struct {
@@ -85,6 +91,16 @@ type Controller struct {
 	resolver *pdsclient.Resolver
 
 	retry time.Duration
+
+	vault SecretStore
+
+	oauth OAuthOptions
+
+	states oauthclient.StateStore
+
+	qrMu sync.Mutex
+
+	qr map[string]*qrTransfer
 }
 
 func New(opts Options) (*Controller, error) {
@@ -110,7 +126,16 @@ func New(opts Options) (*Controller, error) {
 	if retry <= 0 {
 		retry = DefaultRetryAfter
 	}
-	return &Controller{workspace: opts.Workspace, dynamic: opts.Dynamic, endpoints: opts.Endpoints, log: log.With("component", "identity-controller"), http: client, resolver: resolver, retry: retry}, nil
+	states := opts.OAuth.States
+	if states == nil {
+		if opts.Vault != nil && opts.OAuth.StateRef != nil {
+			states = &VaultStateStore{Vault: opts.Vault, Ref: *opts.OAuth.StateRef}
+		} else {
+			states = &oauthclient.MemoryStateStore{}
+		}
+	}
+	return &Controller{workspace: opts.Workspace, dynamic: opts.Dynamic, endpoints: opts.Endpoints, log: log.With("component", "identity-controller"),
+		http: client, resolver: resolver, retry: retry, vault: opts.Vault, oauth: opts.OAuth, states: states, qr: map[string]*qrTransfer{}}, nil
 }
 
 func Run(ctx context.Context, opts Options) error {
@@ -207,15 +232,22 @@ func (c *Controller) reconcile(ctx context.Context, dyn dynamic.Interface, u *un
 	if id.Spec.Mode == v1alpha1.MarketIdentityModeLocalRepo {
 		c.reconcileVerifiedAssociation(ctx, dyn, &id, generation, &status)
 	}
-	if did != "" && status.ObservedGeneration >= generation && status.Phase != "" && status.Phase != v1alpha1.MarketIdentityPhasePending {
+	if id.Spec.Mode == v1alpha1.MarketIdentityModeLocalRepo && did != "" && status.ObservedGeneration >= generation &&
+		status.Phase != "" && status.Phase != v1alpha1.MarketIdentityPhasePending {
 		c.write(ctx, dyn, u.GetName(), status)
 		return
 	}
 	switch id.Spec.Mode {
 	case v1alpha1.MarketIdentityModeLocalRepo:
 		c.reconcileLocalRepo(ctx, dyn, &id, generation, status)
-	case v1alpha1.MarketIdentityModePdsAccount, v1alpha1.MarketIdentityModeOAuthBrowser, v1alpha1.MarketIdentityModeOAuthDelegated, v1alpha1.MarketIdentityModeOAuthQr:
-		c.reconcileSignedIn(ctx, dyn, &id, generation, status, did)
+	case v1alpha1.MarketIdentityModePdsAccount:
+		c.reconcilePdsAccount(ctx, dyn, &id, generation, status)
+	case v1alpha1.MarketIdentityModeOAuthBrowser:
+		c.reconcileOAuthBrowser(ctx, dyn, &id, generation, status)
+	case v1alpha1.MarketIdentityModeOAuthQr:
+		c.reconcileOAuthQr(ctx, dyn, &id, generation, status)
+	case v1alpha1.MarketIdentityModeOAuthDelegated:
+		c.reconcileOAuthDelegated(ctx, dyn, &id, generation, status)
 	case "":
 		status.Phase = v1alpha1.MarketIdentityPhasePending
 		status.ObservedGeneration = generation
@@ -255,9 +287,17 @@ func (c *Controller) reconcileLocalRepo(ctx context.Context, dyn dynamic.Interfa
 	if handle := strings.TrimSpace(id.Spec.Handle); handle != "" {
 		status.Handle = handle
 	}
+	setAssociated(&status, generation, id.Spec)
+	if id.Spec.Association != v1alpha1.AssociationSkip && !associatedTrue(&status) {
+		status.Phase = v1alpha1.MarketIdentityPhaseAwaitingApproval
+		status.Message = "the PDS is ready; waiting for the operator's verified association claim"
+		setReady(&status, generation, false, "AwaitingAssociation", status.Message)
+		c.write(ctx, dyn, id.GetName(), status)
+		return
+	}
+	status.Phase = v1alpha1.MarketIdentityPhaseReady
 	status.Message = ""
 	setReady(&status, generation, true, "Ready", "the PDS at "+endpoint+" reports "+did)
-	setAssociated(&status, generation, id.Spec)
 	c.write(ctx, dyn, id.GetName(), status)
 }
 
@@ -386,31 +426,6 @@ func (c *Controller) patchApprovedAssociations(ctx context.Context, dyn dynamic.
 	return fmt.Errorf("the approved associations of MarketIdentity %s stayed in conflict", name)
 }
 
-func (c *Controller) reconcileSignedIn(ctx context.Context, dyn dynamic.Interface, id *v1alpha1.MarketIdentity, generation int64, status v1alpha1.MarketIdentityStatus, did string) {
-	if did != "" {
-		status.Phase = v1alpha1.MarketIdentityPhaseReady
-		status.ObservedGeneration = generation
-		if handle := strings.TrimSpace(id.Spec.Handle); handle != "" {
-			status.Handle = handle
-		}
-		status.Message = ""
-		setReady(&status, generation, true, "AlreadySignedIn", "the status already records "+did)
-		c.write(ctx, dyn, id.GetName(), status)
-		return
-	}
-	status.Phase = v1alpha1.MarketIdentityPhasePending
-	status.ObservedGeneration = generation
-	message := fmt.Sprintf("mode %s signs in outside this controller; waiting for its DID", id.Spec.Mode)
-	reason := "AwaitingSignIn"
-	if id.Spec.SessionRef != nil || status.SessionRef != nil {
-		reason = "AwaitingSession"
-		message = fmt.Sprintf("mode %s holds a session ref but records no DID; this controller does not read the vault and does not invent one", id.Spec.Mode)
-	}
-	status.Message = message
-	setReady(&status, generation, false, reason, message)
-	c.write(ctx, dyn, id.GetName(), status)
-}
-
 func (c *Controller) pending(ctx context.Context, dyn dynamic.Interface, id *v1alpha1.MarketIdentity, generation int64, status v1alpha1.MarketIdentityStatus, reason, message string) {
 	status.Phase = v1alpha1.MarketIdentityPhasePending
 	status.ObservedGeneration = generation
@@ -483,9 +498,6 @@ func (c *Controller) writeStatus(ctx context.Context, dyn dynamic.Interface, nam
 		if cur.GetDeletionTimestamp() != nil {
 			return nil
 		}
-		if phase, _, _ := unstructured.NestedString(cur.Object, "status", "phase"); interactivePhase(v1alpha1.MarketIdentityPhase(phase)) {
-			return nil
-		}
 		existing, _, _ := unstructured.NestedMap(cur.Object, "status")
 		if reflect.DeepEqual(existing, m) {
 			return nil
@@ -502,16 +514,6 @@ func (c *Controller) writeStatus(ctx context.Context, dyn dynamic.Interface, nam
 	return fmt.Errorf("the status of MarketIdentity %s stayed in conflict", name)
 }
 
-func interactivePhase(phase v1alpha1.MarketIdentityPhase) bool {
-	switch phase {
-	case v1alpha1.MarketIdentityPhaseAwaitingScan, v1alpha1.MarketIdentityPhaseAwaitingAuthorization,
-		v1alpha1.MarketIdentityPhaseAwaitingApproval, v1alpha1.MarketIdentityPhaseSessionExpired,
-		v1alpha1.MarketIdentityPhaseFailed:
-		return true
-	}
-	return false
-}
-
 func setReady(status *v1alpha1.MarketIdentityStatus, generation int64, ready bool, reason, message string) {
 	value := metav1.ConditionFalse
 	if ready {
@@ -520,13 +522,21 @@ func setReady(status *v1alpha1.MarketIdentityStatus, generation int64, ready boo
 	meta.SetStatusCondition(&status.Conditions, metav1.Condition{Type: ConditionReady, Status: value, Reason: reason, Message: message, ObservedGeneration: generation})
 }
 
+func associatedTrue(status *v1alpha1.MarketIdentityStatus) bool {
+	condition := meta.FindStatusCondition(status.Conditions, v1alpha1.ConditionAssociated)
+	return condition != nil && condition.Status == metav1.ConditionTrue
+}
+
 func setAssociated(status *v1alpha1.MarketIdentityStatus, generation int64, spec v1alpha1.MarketIdentitySpec) {
+	associations := make([]string, 0, len(spec.ApprovedAssociations))
 	for _, did := range spec.ApprovedAssociations {
-		if did == "" || slices.Contains(status.Associations, did) {
+		did = strings.TrimSpace(did)
+		if did == "" || slices.Contains(associations, did) {
 			continue
 		}
-		status.Associations = append(status.Associations, did)
+		associations = append(associations, did)
 	}
+	status.Associations = associations
 	if spec.Association == v1alpha1.AssociationSkip {
 		meta.SetStatusCondition(&status.Conditions, metav1.Condition{Type: v1alpha1.ConditionAssociated, Status: metav1.ConditionTrue, Reason: "AssociationSkipped", Message: "the association is skipped", ObservedGeneration: generation})
 		return
