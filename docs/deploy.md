@@ -1,6 +1,7 @@
 # Deploying a release to production
 
-The long form of the README deploy section: the build, the acceptance step, rollback, the canary and the one-time host items. Short path in [the README](../README.md#deploy-a-release-to-production).
+The long form of the gateway deploy: the build, the acceptance step, rollback, the canary and the
+one-time host items. Short path in [CONTRIBUTING](../CONTRIBUTING.md#deploy-the-gateway).
 
 ```mermaid
 flowchart TD
@@ -17,9 +18,9 @@ Two deploy shapes, and they differ:
 
 | Shape | What happens | What survives |
 | --- | --- | --- |
-| Routine gateway deploy (`scripts/deploy.sh` on an installed gateway) | `upgrade --binary --sha256`, then `install gateway` again; the core adopts its DenoPods and rolls the kcp slot only when kcp's argv or binary changed | State dir and its kcp objects, the root OpenBao (requester repo key, sessions), the gateway requester's DID and its association record, web app sessions, running DenoPods. Read on prod: web session across rc8 to rc9, requester DID and association across rc11 to rc21 with no new claim |
-| Routine bidder upgrade (as the account: `upgrade --binary <path> --sha256 <digest>`, then the same `install bidder` again) | The bidder's core restarts on the new binary; pods are replaced only when the spec or the TypeScript tree changed | The bidder's state dir, its OpenBao (repo key), the bidder DID and handle, its association record, its pds DenoPod repo. Read on prod: Bob's bidder DID and association across rc11 to rc21 with no new claim |
-| Fresh install (`install gateway` or `install bidder` on an empty host, or a lost or purged state dir) | First install; new keys generated | Nothing. The identity gets a new DID and needs one association write again (`associate.ts` for a bidder or a requester; the web app sign-in for a gateway owner) |
+| Routine gateway deploy (`scripts/deploy.sh` on an installed gateway) | `upgrade --binary --sha256`, then `install gateway` again; the core adopts every installed and transient unit and rolls the kcp slot only when kcp's argv or binary changed | State dir and its kcp objects, the root OpenBao (requester repo key, sessions), the gateway requester's DID and its association record, web app sessions, running components. Read on prod: web session across rc8 to rc9, requester DID and association across rc11 to rc21 with no new claim |
+| Routine bidder upgrade (as the account: `upgrade --binary <path> --sha256 <digest>`, then the same `install bidder` again) | The bidder's core restarts on the new binary; components are replaced only when the spec or the TypeScript tree changed | The bidder's state dir, its OpenBao (repo key), the bidder DID and handle, its association record, its PDS repo. Read on prod: Bob's bidder DID and association across rc11 to rc21 with no new claim |
+| Fresh install (`install gateway` or `install bidder` on an empty host, or a lost or purged state dir) | First install; new keys generated | Nothing. The identity gets a new DID and needs one association write again (`scripts/associate-bidder.ts` for a bidder; the web app sign-in for a gateway owner) |
 
 The policy is still "nothing is guaranteed": a change may deliberately wipe state, and there is no migration or backward compatibility to plan for. Losing sessions, VMs, clusters, claims or receipts is acceptable; what exists, this table says.
 
@@ -72,4 +73,4 @@ The deploy inputs (gateway.env, gateway-spec.yaml) live on the orphan branch `sw
 ## See also
 
 - [The gateway and its web app](gateway.md)
-- [The preservation table](../README.md#deploy-a-release-to-production)
+- [CONTRIBUTING](../CONTRIBUTING.md#deploy-the-gateway)

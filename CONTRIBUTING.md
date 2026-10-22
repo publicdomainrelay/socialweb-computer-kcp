@@ -1,14 +1,15 @@
 # Contributing
 
-Read [AGENTS.md](AGENTS.md) first. It states the working rules, the edit disciplines and the live-run
-conventions. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) holds the decisions and the invariants;
-[docs/plans/](docs/plans/) and [NEXT.yaml](NEXT.yaml) hold the plan status and the backlog.
+Read [AGENTS.md](AGENTS.md) first: working rules, edit discipline, live-run conventions.
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) holds decisions and invariants; plans and backlog live in
+[docs/plans/](docs/plans/) and [NEXT.yaml](NEXT.yaml).
 
-Work in a plain git worktree or branch of this repository. Commit small logical commits. Do not push.
-Run live work as the VM account (`test-0001`) from a development build and a mirror that account can
-read.
+Work in a plain git worktree or branch. Commit small logical commits. Do not push. Live work runs as
+the VM account (`test-0001`) from a dev build and a mirror that account can read.
 
-## Run a development build
+Commands marked "variables carry over" use values set in the block above them.
+
+## Dev build
 
 Build the working tree, uncommitted changes included:
 
@@ -19,260 +20,401 @@ export PATH=/var/tmp/swc/bin:$PATH
 socialweb-computer version
 ```
 
-The build writes the host binary to `/var/tmp/swc/bin/socialweb-computer` and mirrors the working tree
-to `/var/tmp/swc/src`. A development binary prints `dev build, not reproducible` with its commit in
-`socialweb-computer version`.
+Artifacts:
 
-Build script options:
+| Path | Holds |
+| --- | --- |
+| `/var/tmp/swc/bin/socialweb-computer` | Host binary from `--publish`. |
+| `/var/tmp/swc/src` | Mirror of the working tree, readable by every account. |
+| `$HOME/.tmp/socialweb-computer-build/dev/<worktree>/socialweb-computer` | Host binary without `--publish`. |
+| `$HOME/.tmp/socialweb-computer-build/dev/<worktree>/<goos>_<goarch>/socialweb-computer` | Per-platform binary. |
+
+A dev binary prints `dev build, not reproducible` with its commit and dirty state.
+
+Options:
 
 | Option | Effect |
-|---|---|
-| `--dev` | Build the working tree for the host platform; this is the binary for live runs. |
-| `--publish DIR` | With `--dev`, copy the host binary to `DIR/bin/socialweb-computer` and mirror the working tree to `DIR/src`. |
-| `--sync-only` | With `--publish`, mirror the working tree again without rebuilding. |
-| `--platform P` | A release platform (`linux/amd64`, `linux/arm64`); repeat for more. Default: every release platform. |
-| `--commit REV` | The commit to build. Default `HEAD`; uncommitted changes are not built. |
-| `--build-root DIR` | Checkouts, caches, and outputs. Default `$HOME/.tmp/socialweb-computer-build`. |
-| `--update-pins` | Rebuild the assets built from this repository and write their new pins to `internal/versions/versions.json`. Downloaded assets only verify their pins. `make` passes this. |
+| --- | --- |
+| `--dev` | Build the working tree for the host platform. |
+| `--publish DIR` | Copy the host binary to `DIR/bin/socialweb-computer`, mirror the tree to `DIR/src`, and run from `DIR/src`. |
+| `--sync-only` | With `--publish`, mirror the tree again without rebuilding. |
+| `--platform P` | `linux/amd64` or `linux/arm64`; repeat for more. |
+| `--commit REV` | Commit to build. Default `HEAD`; uncommitted changes are not built. |
+| `--build-root DIR` | Checkouts, caches and outputs. Default `$HOME/.tmp/socialweb-computer-build`. |
+| `--update-pins` | Rebuild owned assets and write new pins to `internal/versions/versions.json`. `make` passes it. |
 
-## Build with make
+TypeScript-only change in a running market network:
+
+```bash
+cd "$(git rev-parse --show-toplevel)"
+scripts/build-socialweb-computer.sh --dev --publish /var/tmp/swc --sync-only
+sudo -n -u test-0001 env HOME=/home/test-0001 XDG_RUNTIME_DIR=/run/user/$(id -u test-0001) \
+  /var/tmp/swc/bin/socialweb-computer dev restart mn1 relay:relay
+```
+
+Usage: `dev restart [<instance>] [<app>/][<workspace>:][<kind>/]<component>`; replace `mn1`
+and the component with yours.
+
+## Release build
+
+`make` builds both release platforms and updates owned asset pins:
 
 ```bash
 cd "$(git rev-parse --show-toplevel)"
 make
-make pins
-make check-pins
-make dev
+C=$(git rev-parse HEAD)
+ls "$HOME/.tmp/socialweb-computer-build/release/$C"
 ```
 
-`make` builds the release binary for both linux release platforms, rebuilding the assets this
-repository owns and writing their new pins to `internal/versions/versions.json`. Downloaded assets
-still verify their existing pins and never move. Commit the pin change with the source change.
+Artifacts under `$HOME/.tmp/socialweb-computer-build/release/<commit>/`:
 
-`make pins` stages only the assets this repository owns and updates `versions.json`; it does not build
-the binary. `make check-pins` runs that and fails if `versions.json` differs from `HEAD`; CI runs it.
-`make dev` builds the working-tree binary for live runs under `/var/tmp/swc`.
+| Path | Holds |
+| --- | --- |
+| `socialweb-computer-linux-amd64` | Host binary, Linux amd64. |
+| `socialweb-computer-linux-arm64` | Host binary, Linux arm64. |
+| `SHA256SUMS` | sha256 of both binaries. |
+| `release.json` | Commit, build mode, one entry per platform. |
+| `version-linux-<arch>.json`, `.txt` | Pinned version and sha256 of every embedded asset. |
 
-Build a release binary of one commit, offline and cached by input hash:
+Build one commit and platform:
 
 ```bash
 cd "$(git rev-parse --show-toplevel)"
 C=$(git rev-parse HEAD)
 scripts/build-socialweb-computer.sh --platform linux/amd64 --commit "$C"
 B=$HOME/.tmp/socialweb-computer-build/release/$C/socialweb-computer-linux-amd64
-sha256sum "$B"
+SHA=$(sha256sum "$B" | cut -d' ' -f1)
+echo "$B $SHA"
 ```
 
-`$B` and its sha256 are what `socialweb-computer install` and
-`socialweb-computer upgrade --binary --sha256` take. CI publishes the same outputs to the public
-bucket: `releases/<tag>/` on a `v*` tag, and `main/<commit>/` with a copy at `main/latest/` on `main`.
+If `make` changed `internal/versions/versions.json`, commit it with the source change.
 
-## Prepare a bare host
+`B` and `SHA` are what `install` and `upgrade --binary --sha256` take. CI publishes the same names to
+the public bucket: `releases/<tag>/` on a `v*` tag, `main/<commit>/` and `main/latest/` on `main`.
 
-Install these as root; the commands in this document check the host and name anything missing.
-
-| Need | Ubuntu / Debian package | Fedora / RHEL package |
-|---|---|---|
-| `newuidmap` and `newgidmap`, so each VM runs in its own user namespace | `uidmap` | `shadow-utils` |
-| `ssh` and `ssh-keygen`, which the RFP flow uses | `openssh-client` | `openssh-clients` |
-| `curl`, to install the binary and fetch the guest image | `curl` | `curl` |
-| `/usr/share/zoneinfo`, for the embedded postgres of the gateway | `tzdata` | `tzdata` |
-| `jq`, used by the examples below (optional) | `jq` | `jq` |
-| `machinectl`, to log in as the VM account (optional; or use `ssh`) | `systemd-container` | `systemd-container` |
-
-As root, once:
+Copy a release to another host:
 
 ```bash
-apt-get install -y uidmap openssh-client curl tzdata jq systemd-container
-useradd -m -s /bin/bash -G kvm -K SUB_UID_COUNT=0 -K SUB_GID_COUNT=0 test-0001
-usermod --add-subuids 100000-1148575 --add-subgids 100000-1148575 test-0001
-install -d -m 0700 -o test-0001 -g test-0001 ~test-0001/.ssh
-install -m 0600 -o test-0001 -g test-0001 ~/.ssh/authorized_keys ~test-0001/.ssh/
-loginctl enable-linger test-0001
-sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-echo kernel.apparmor_restrict_unprivileged_userns=0 > /etc/sysctl.d/60-socialweb.conf
+# variables carry over: C, B
+R=$(dirname "$B")
+DEST=user@host
+scp "$B" "$R/SHA256SUMS" "$DEST:/var/tmp/"
+ssh "$DEST" 'cd /var/tmp && grep " socialweb-computer-linux-amd64$" SHA256SUMS | sha256sum -c -'
 ```
 
-| Note | Why |
+Then install or upgrade there:
+
+```bash
+# variables carry over: DEST
+SHA=$(ssh "$DEST" "awk '\$2 == \"socialweb-computer-linux-amd64\" {print \$1}' /var/tmp/SHA256SUMS")
+ssh "$DEST" 'sudo install -m 0755 /var/tmp/socialweb-computer-linux-amd64 /usr/local/bin/socialweb-computer'
+ssh "$DEST" "sudo /usr/local/bin/socialweb-computer install bidder --handle <handle>"
+```
+
+## Fresh host
+
+| Need | Ubuntu / Debian | Fedora / RHEL |
+| --- | --- | --- |
+| `newuidmap`, `newgidmap` for per-VM user namespaces | `uidmap` | `shadow-utils` |
+| `ssh`, `ssh-keygen` | `openssh-client` | `openssh-clients` |
+| `curl` | `curl` | `curl` |
+| zoneinfo for embedded postgres | `tzdata` | `tzdata` |
+| `jq` for examples | `jq` | `jq` |
+
+```bash
+# Ubuntu / Debian
+sudo apt-get update && sudo apt-get install -y uidmap openssh-client curl tzdata jq
+# Fedora / RHEL
+# sudo dnf install -y shadow-utils openssh-clients curl tzdata jq
+```
+
+Host requirements:
+
+- 64-bit Linux, `/dev/kvm`, `/dev/net/tun`, systemd 253+, cgroup v2.
+- `/dev/kvm` read-write for the `kvm` group.
+- One `/etc/subuid` and `/etc/subgid` range of `N * 65536` ids for the bidder account
+  (`install bidder --vm-slots N`, default 256).
+- A gateway host also runs Caddy with `/etc/caddy/sites/*.caddy` imported from `/etc/caddy/Caddyfile`.
+
+`install bidder` and `install gateway` create their accounts (`swc-bidder`, `socialweb`), subuid ranges,
+units and linger. Do not create them by hand for a production install. For a dev host, create the
+`test-0001` account once:
+
+```bash
+sudo useradd -m -s /bin/bash -G kvm -K SUB_UID_COUNT=0 -K SUB_GID_COUNT=0 test-0001
+sudo usermod --add-subuids 100000-1148575 --add-subgids 100000-1148575 test-0001
+sudo install -d -m 0700 -o test-0001 -g test-0001 ~test-0001/.ssh
+sudo install -m 0600 -o test-0001 -g test-0001 ~/.ssh/authorized_keys ~test-0001/.ssh/
+sudo loginctl enable-linger test-0001
+```
+
+Log in with `ssh test-0001@<host>` or `sudo machinectl shell test-0001@`. `sudo -u` and `runuser` give
+no `/run/user/<uid>` session.
+
+After an install, check the host contract as the account:
+
+```bash
+sudo runuser -u swc-bidder -- env XDG_RUNTIME_DIR=/run/user/$(id -u swc-bidder) \
+  /var/lib/socialweb-computer/swc-bidder/bin/current/socialweb-computer \
+  check-host -role bidder -state-dir /var/lib/socialweb-computer/swc-bidder
+sudo runuser -u socialweb -- env XDG_RUNTIME_DIR=/run/user/$(id -u socialweb) \
+  /var/lib/socialweb-computer/socialweb/bin/current/socialweb-computer \
+  check-host -role gateway -state-dir /var/lib/socialweb-computer/socialweb
+```
+
+## Install a release bidder
+
+From the public bucket, with no credentials:
+
+```bash
+HANDLE=<your atproto handle>
+BUCKET=https://socialweb-computer-kcp.sfo3.digitaloceanspaces.com
+V=$(curl -fsSL https://api.github.com/repos/publicdomainrelay/socialweb-computer-kcp/tags \
+  | jq -r '.[].name' | grep '^v' | sort -V | tail -1)
+ARCH=linux-$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
+mkdir -p /var/tmp/swc-release && cd /var/tmp/swc-release
+curl -fLO "$BUCKET/releases/$V/binaries/socialweb-computer-$ARCH"
+curl -fLO "$BUCKET/releases/$V/binaries/SHA256SUMS"
+grep " socialweb-computer-$ARCH$" SHA256SUMS | sha256sum -c -
+sudo install -m 0755 "socialweb-computer-$ARCH" /usr/local/bin/socialweb-computer
+sudo /usr/local/bin/socialweb-computer install bidder --handle "$HANDLE"
+```
+
+Artifacts and state:
+
+| Item | Path |
 | --- | --- |
-| `-K SUB_UID_COUNT=0 -K SUB_GID_COUNT=0` | `useradd` must not add its own 65536-id range; the account needs exactly one range in each file. `100000-1148575` is 16 VM slots |
-| `loginctl enable-linger` | keeps the account's `systemd --user` manager up; log in with `ssh test-0001@<host>` or, as root, `machinectl shell test-0001@` (`sudo -u` and `runuser` give no `/run/user/<uid>` session) |
-| the `sysctl` | lets the embedded pasta create a user namespace on Ubuntu 24.04+; skip it on hosts without AppArmor. A production bidder loads an AppArmor profile through `install bidder` |
-| `/dev/kvm`, `/dev/net/tun` | kvm is read-write for the `kvm` group; if tun is missing, `modprobe tun` |
-| cgroup delegation | `cpu memory pids` on `user@<uid>.service` is the Ubuntu 24.04 default; the commands in this document name it when missing |
-| apt lock on a cloud first boot | an unattended upgrade can hold it for minutes; rerun `apt-get` |
+| Unit | `socialweb-computer-bidder@<handle>.service` in `swc-bidder`'s user manager. |
+| State | `/var/lib/socialweb-computer/swc-bidder`. |
+| kcp admin kubeconfig | `/var/lib/socialweb-computer/swc-bidder/handles/<hash>/kcp/admin.kubeconfig` (root only). |
+| Installed binary | `<state>/bin/current/socialweb-computer`; previous at `bin/previous`. |
+| Config | `<state>/config.json`; env file `<state>/gateway.env` for a gateway. |
 
-## Run a market network on one host
+`install bidder` is idempotent. A re-run with another `--handle` adds an instance. A re-run after a
+changed config or unit restarts the core. `--dry-run` prints the step list and changes nothing.
 
-One instance, profile `market-network`, one kcp: shared services and one workspace per application,
-components in `root:<app>:app`. Production runs the same manifests in a kcp per application.
+Install a locally built release binary:
 
-Run these as the VM account on a host prepared as in [Prepare a bare host](#prepare-a-bare-host). The
-wrapper sets that account's session environment; the first `dev up` fetches and verifies the guest
-image unless `--guest-image-source` names one.
+```bash
+# variables carry over: C, B
+SHA=$(sha256sum "$B" | cut -d' ' -f1)
+sudo "$B" install bidder --handle <handle>
+```
+
+### Bidder association
+
+A fresh install creates a new DID. Association is one `badgeBlueKeys` record in the operator's repo
+plus the operator DID in `MarketIdentity.spec.approvedAssociations`. The helper reads the handle and
+password from a mode-0600 credentials file and prints neither.
+
+```bash
+HANDLE=bobvmbuilder.bsky.social
+ACCOUNT=BOB
+CREDS=$HOME/.bobvmbuilder_bsky_social_source
+STATE=/var/lib/socialweb-computer/swc-bidder
+K=$(sudo sh -c "ls $STATE/handles/*/kcp/admin.kubeconfig" | head -1)
+BIDDER_DID=$(sudo kubectl --kubeconfig "$K" get marketidentity bidder -o jsonpath='{.status.did}')
+OPERATOR_DID=$(curl -fsS "https://public.api.bsky.app/xrpc/com.atproto.identity.resolveHandle?handle=$HANDLE" | jq -r .did)
+echo "$BIDDER_DID $OPERATOR_DID"
+deno run -A --no-lock scripts/associate-bidder.ts --creds "$CREDS" --account "$ACCOUNT" --bidder-did "$BIDDER_DID"
+sudo kubectl --kubeconfig "$K" patch marketidentity bidder --type=merge \
+  -p "{\"spec\":{\"approvedAssociations\":[\"$OPERATOR_DID\"]}}"
+sudo kubectl --kubeconfig "$K" get marketidentity bidder \
+  -o jsonpath='{.status.phase}{" "}{range .status.conditions[*]}{.type}={.status} {.reason}{"\n"}{end}'
+```
+
+The bidder side declaration `AtprotoRecord/association` is rendered but its generic reconciler is not
+implemented in this Go tree. The helper writes the record once; the association above is the proof.
+
+Non-association mode: set the identity association to `Skip` and let the controller reconcile it. No
+`badgeBlueKeys` record is written.
+
+```bash
+STATE=/var/lib/socialweb-computer/swc-bidder
+K=$(sudo sh -c "ls $STATE/handles/*/kcp/admin.kubeconfig" | head -1)
+sudo kubectl --kubeconfig "$K" patch marketbidder app --type=merge \
+  -p '{"spec":{"identity":{"association":"Skip"}}}'
+sudo kubectl --kubeconfig "$K" get marketidentity bidder \
+  -o jsonpath='{.status.phase}{" "}{range .status.conditions[*]}{.type}={.status} {.reason}{"\n"}{end}'
+```
+
+### Upgrade, reinstall, uninstall
+
+Upgrade an installed bidder as its account, then install again:
+
+```bash
+C=$(git rev-parse HEAD)
+BIN=$HOME/.tmp/socialweb-computer-build/release/$C/socialweb-computer-linux-amd64
+SHA=$(sha256sum "$BIN" | cut -d' ' -f1)
+STATE=/var/lib/socialweb-computer/swc-bidder
+sudo install -d -m 0755 /var/tmp/swc-release
+sudo install -m 0755 "$BIN" /var/tmp/swc-release/socialweb-computer-${C:0:8}
+STAGED=/var/tmp/swc-release/socialweb-computer-${C:0:8}
+sudo runuser -u swc-bidder -- env XDG_RUNTIME_DIR=/run/user/$(id -u swc-bidder) \
+  CONFIG_PATH_SOCIALWEB_COMPUTER=$STATE/config.json \
+  "$STATE/bin/current/socialweb-computer" upgrade --binary "$STAGED" --sha256 "$SHA"
+sudo "$STAGED" install bidder --handle <handle>
+```
+
+Upgrade keeps the state dir, OpenBao, DID and association. `rollback` swaps `bin/current` and
+`bin/previous` and restarts the core:
+
+```bash
+sudo runuser -u swc-bidder -- env XDG_RUNTIME_DIR=/run/user/$(id -u swc-bidder) \
+  CONFIG_PATH_SOCIALWEB_COMPUTER=/var/lib/socialweb-computer/swc-bidder/config.json \
+  /var/lib/socialweb-computer/swc-bidder/bin/current/socialweb-computer rollback
+```
+
+Reinstall: run the same `install bidder` with the new binary. Completed steps are skipped; a changed
+config or unit restarts the core. If install refuses because `bin/current` is not the binary you
+invoked, run `upgrade --binary --sha256` first, then install again.
+
+Uninstall, keeping state:
+
+```bash
+sudo /var/lib/socialweb-computer/swc-bidder/bin/current/socialweb-computer uninstall bidder
+```
+
+Uninstall and purge (removes the state dir, VMs, PDS repo, OpenBao and the account install created):
+
+```bash
+sudo /var/lib/socialweb-computer/swc-bidder/bin/current/socialweb-computer uninstall bidder --purge
+```
+
+`--force` proceeds while VM units are active; each stopped VM becomes `Lost`. `--json` prints the
+result. `--account NAME` selects another account.
+
+A fresh install over an old-shape workspace must purge first: the `app` WorkspaceType name is
+immutable. Back up the state dir and Caddy sites before a purge. After a purge the DID is new and the
+association is needed again.
+
+### Dev build on a bidder host
+
+A dev binary needs `--allow-dev-binary`. Add `--adopt-account` only when install adopts an account that
+has no install record (as after a purge that kept the account). `--force` only if uninstall refuses on
+active VM units.
 
 ```bash
 cd "$(git rev-parse --show-toplevel)"
-swc() {
-  sudo -n -u test-0001 env HOME=/home/test-0001 \
-    XDG_RUNTIME_DIR=/run/user/$(id -u test-0001) \
-    DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u test-0001)/bus \
-    /var/tmp/swc/bin/socialweb-computer "$@"
-}
-# start
-swc dev up --instance mn1 --profile market-network --bidders 1 --with-gateway --vm-host-backend systemd-user
-# inspect
-swc dev status --instance mn1 | jq '.network.status.apps'
-swc status --instance mn1
-eval "$(swc dev env --instance mn1)"
-swc dev logs core --instance mn1 --tail 50
-# stop
-swc dev down --instance mn1
+HANDLE=bobvmbuilder.bsky.social
+STATE=/var/lib/socialweb-computer/swc-bidder
+scripts/build-socialweb-computer.sh --dev --publish /var/tmp/swc
+C=$(git rev-parse HEAD)
+sudo mkdir -p /var/tmp/swc-release
+sudo install -m 0755 /var/tmp/swc/bin/socialweb-computer /var/tmp/swc-release/socialweb-computer-${C:0:8}
+DEV=/var/tmp/swc-release/socialweb-computer-${C:0:8}
+SHA=$(sha256sum "$DEV" | cut -d' ' -f1)
+sudo "$DEV" uninstall bidder --purge --json
+sudo "$DEV" install bidder --handle "$HANDLE" --allow-dev-binary --adopt-account \
+  --state-dir "$STATE" --guest-image-source file:///var/lib/socialweb-computer/guest-image --dry-run
+sudo "$DEV" install bidder --handle "$HANDLE" --allow-dev-binary --adopt-account \
+  --state-dir "$STATE" --guest-image-source file:///var/lib/socialweb-computer/guest-image
 ```
 
-| Command | Prints |
-|---|---|
-| `dev status --instance mn1` | the `MarketNetwork` object, each child's roots and contracts |
-| `status --instance mn1` | market counters and contract steps |
-| `dev env --instance mn1` | exports `KUBECONFIG` and the kcp ports |
-| `dev logs core --instance mn1` | the core's log |
-| `dev down --instance mn1` | stops the network |
+If the install record and old shape are compatible, upgrade instead:
 
-`dev up` options for a market network:
+```bash
+# variables carry over: HANDLE, STATE, DEV, SHA
+sudo runuser -u swc-bidder -- env XDG_RUNTIME_DIR=/run/user/$(id -u swc-bidder) \
+  CONFIG_PATH_SOCIALWEB_COMPUTER=$STATE/config.json \
+  "$STATE/bin/current/socialweb-computer" upgrade --binary "$DEV" --sha256 "$SHA" --allow-dev-binary
+sudo "$DEV" install bidder --handle "$HANDLE" --allow-dev-binary
+```
 
-| Option | Meaning | Default |
-|---|---|---|
-| `--instance` | The instance id. | derived from the worktree |
-| `--profile` | `market-network`. | |
-| `--bidders N` | How many `MarketBidder` children to compose (`bidder-1` .. `bidder-N`). | 1 |
-| `--with-gateway` | Also compose a `Gateway` child. | |
-| `--guest-image-source` | The `file://` or `https://` base the pinned guest image is fetched from and verified against by sha256. Unset, the image of this build is downloaded from the published artifacts. | |
-| `--guest-image-release-base` | The base the published artifacts are searched under when `--guest-image-source` is unset. | the public bucket |
-| `--vm-host-backend` | The placement backend of the VM units: `systemd-user` or `proc`. | the instance's own |
-| `--app-values` | A YAML file merged over the market-network values. | |
-| `--network-timeout` | How long `dev up` waits for the network and every child to report Ready. A cold first start can need longer than the default. | `3m` |
+## Deploy the gateway
 
-## Rent a VM through the RFP flow
+`scripts/deploy.sh` installs on a fresh host or upgrades an installed gateway, ships `gateway.env` and
+the Gateway spec, writes the Caddy sites, hands over the Caddy certificates, validates Caddy and
+reloads it.
 
-`run request` posts a `compute.vm` record and a signed `market.rfp`, waits for bids, accepts one,
-boots the guest, opens an SSH session to the guest's iroh ticket, and deletes the VM. Pass `--network`
-to use a running market network; run it as that network's VM account.
-
-A secrets bundle is a JSON array of `{ "path": "/abs/path", "value": ... }`. The secrets are written
-only into the invocation's own OpenBao; the guest fetches them at boot, and they never enter a kcp
-object, an argument, a log, or a record.
+Fresh or routine gateway deploy:
 
 ```bash
 cd "$(git rev-parse --show-toplevel)"
-swc() {
-  sudo -n -u test-0001 env HOME=/home/test-0001 \
-    XDG_RUNTIME_DIR=/run/user/$(id -u test-0001) \
-    DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u test-0001)/bus \
-    /var/tmp/swc/bin/socialweb-computer "$@"
-}
-sudo -n -u test-0001 tee /var/tmp/swc-secrets.json >/dev/null <<'JSON'
-[{"path":"/root/x","value":"hello"}]
-JSON
-# one-shot: returns when the command ends and releases the VM
-swc run request --network mn1 --secrets /var/tmp/swc-secrets.json --exec 'cat /root/x'
-# or hold: the VM stays until release, here or in another shell
-swc run request --network mn1 --secrets /var/tmp/swc-secrets.json --hold --exec 'uname -a'
-# list held invocations, then release one
-swc run request list --json | jq -r '.[].name'
-NAME=$(swc run request list --json | jq -r '.[0].name')
-swc run request release "$NAME"
-# or resume it in the foreground instead of releasing
-# swc run request resume "$NAME"
+BINARY=$HOME/.tmp/socialweb-computer-build/release/$(git rev-parse HEAD)/socialweb-computer-linux-amd64
+SHA=$(sha256sum "$BINARY" | cut -d' ' -f1)
+SSH_KEY=~/.ssh/id_ed25519_no_password \
+SSH_TARGET=root@socialweb.computer SSH_PORT=1997 \
+ACCOUNT=socialweb STATE_DIR=/var/lib/socialweb-computer/socialweb \
+GATEWAY_ENV_FILE=$HOME/.tmp/deploy/gateway.env \
+GATEWAY_SPEC_FILE=$HOME/.tmp/deploy/gateway-spec.yaml \
+BINARY=$BINARY SHA256=$SHA scripts/deploy.sh
 ```
 
-`run request` options:
-
-| Option | Meaning |
-|---|---|
-| `--network` | The market network instance to run under. Unset: a standalone instance under `<state-dir>/requests`. |
-| `--name` | The invocation's name, a DNS label. Default `req-<UTC time>`. |
-| `--secrets` | The secrets bundle file. |
-| `--exec` | Run this program over SSH on the guest instead of an interactive session. |
-| `--hold` | Keep the contract when this process ends; `release` or `resume <name>` starts it again. |
-| `--skip-ssh` | Do not open an SSH session once the guest is on the network. |
-| `--contract-timeout` | How long to wait for the guest's `onNetwork` and host keys, and for a release. Default `3m`. |
-
-SSH runs with `StrictHostKeyChecking=yes` against the host keys the guest reported (the guest's
-`vm.hostKeys`), through a `ProxyCommand` that dials the guest's iroh ticket. The market records travel
-through the relay; the guest is reached only over iroh.
-
-## Run a bidder in a market network
-
-Run this while the market network is up, as its VM account:
-
-```bash
-cd "$(git rev-parse --show-toplevel)"
-swc() {
-  sudo -n -u test-0001 env HOME=/home/test-0001 \
-    XDG_RUNTIME_DIR=/run/user/$(id -u test-0001) \
-    DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u test-0001)/bus \
-    /var/tmp/swc/bin/socialweb-computer "$@"
-}
-swc run bidder --host-backend proc --profile market-network --network mn1 --handle b2.mn1.bob.test
-```
-
-An installed bidder, its unit, state, guest image and upgrade path are in the README section
-[Run and install a bidder](README.md#run-and-install-a-bidder) and [docs/bidder.md](docs/bidder.md).
-
-## Run the integration tests
-
-The integration tests are Go tests under `test/integration` with the `integration` build tag. Each
-test starts its own market network as the VM account, drives it with the `socialweb-computer` verbs,
-and tears it down. Run them as an account that may `sudo -n -u test-0001`.
-
-```bash
-cd "$(git rev-parse --show-toplevel)"
-go test -tags integration -count=1 -v -timeout 60m ./test/integration/
-# one test
-go test -tags integration -count=1 -v -timeout 60m ./test/integration/ -run TestRequestSecretsReachTheGuestThroughTheRFPFlow
-go test -tags integration -count=1 -v -timeout 60m ./test/integration/ -run TestTenantClusterScalesFromZeroOnMarketVMsAndBack
-go test -tags integration -count=1 -v -timeout 60m ./test/integration/ -run TestClusterEventsStreamFromSubscribeClusters
-go test -tags integration -count=1 -v -timeout 60m ./test/integration/ -run TestKubeconfigClientCertificateWithoutCredentialHelper
-go test -tags integration -count=1 -v -timeout 60m ./test/integration/ -run TestWebAppSignInThroughThePluginKeepsTheCookieAcrossARestartAndIssuesACertificate
-```
-
-The web sign-in test drives the gateway's API directly: it calls `POST /oauth/start`, posts the PDS
-authorization form and follows the callback to the `swc_session` cookie. It needs no browser.
+`gateway.env` and the Gateway spec are required on a fresh host; an existing host may omit them and
+keep the files in its state. The script refuses a digest mismatch. If `BINARY` is unset it builds the
+release of `HEAD`.
 
 Environment variables:
 
 | Variable | Meaning | Default |
-|---|---|---|
-| `SOCIALWEB_IT_ACCOUNT` | The VM account the tests run as. | `test-0001` |
-| `SOCIALWEB_IT_GUEST_IMAGE` | The guest image source. | `file:///var/lib/socialweb-computer/guest-image` |
-| `SOCIALWEB_IT_PUBLISH` | Where the built binary is published for the run. | |
-| `SOCIALWEB_IT_SKIP_BUILD` | Reuse the published binary instead of rebuilding. | |
-| `SOCIALWEB_IT_RUN_ROOT` | The run root. Keep it short, since a tenant cluster's front socket path must fit in 107 bytes. | `/var/tmp/swcit` |
-| `SOCIALWEB_IT_ARTIFACTS` | The directory for logs. | `~/.tmp/swc-it/<run>` |
-| `SOCIALWEB_IT_LIVE_SLOT` | A host live-slot script the run takes before it starts; `none` turns it off. | the host's script, when one is configured |
+| --- | --- | --- |
+| `BINARY` | Release binary to ship. | Build `HEAD`. |
+| `SHA256` | Published sha256 of `BINARY`. | From `SHA256SUMS` when the script builds. |
+| `SSH_KEY` | SSH key. | |
+| `SSH_TARGET` | Deploy host. | `root@socialweb.computer` |
+| `SSH_PORT` | SSH port. | `1997` |
+| `ACCOUNT` | Gateway account. | `socialweb` |
+| `STATE_DIR` | Gateway state dir. | `/var/lib/socialweb-computer/socialweb` |
+| `DOMAIN` | Base domain. | `socialweb.computer` |
+| `ORIGIN` | Web app host. | `k8s.<DOMAIN>` |
+| `KCP_ORIGIN` | kcp host. | `kcp.<DOMAIN>` |
+| `GATEWAY_ENV_FILE` | Shipped as `$STATE_DIR/gateway.env`. | |
+| `GATEWAY_SPEC_FILE` | Shipped as `/var/lib/socialweb-computer/gateway-spec-$ACCOUNT.yaml`. | |
 
-Each integration test takes VM slots of that account and brings up its own market network. Use a unique
-`SOCIALWEB_IT_RUN_ROOT` when running two at once.
+Caddy certificate handoff (inside `scripts/deploy.sh`, after the gateway answers):
 
-## Run the gate before ready
+- Reads the kcp CA from the gateway's admin kubeconfig into `/etc/caddy/socialweb-computer/kcp.crt`.
+- Copies `$STATE_DIR/tls/tls.crt` to `gateway.crt`.
+- Copies `$STATE_DIR/tls/edge-client.crt` to `edge-client.crt` and its key (root:caddy, 0640) to
+  `edge-client.key`.
+- Writes `/etc/caddy/sites/k8s.<domain>.caddy` and `/etc/caddy/sites/kcp.<domain>.caddy`, imports the
+  sites directory, adds `skip_install_trust`, runs `caddy validate` and reloads or restarts Caddy.
+
+Verify:
 
 ```bash
-cd "$(git rev-parse --show-toplevel)"
-deploy/check.sh --fast
+curl -fsS https://k8s.socialweb.computer/api/config | jq
+sudo caddy validate --config /etc/caddy/Caddyfile
+sudo systemctl status caddy --no-pager
+sudo ls -l /etc/caddy/socialweb-computer
 ```
 
-That runs gofmt, go build, apigen and its diff, go vet, the cross-OS builds and the release builds.
-The full gate before a release also runs the release closure and the live proofs this host can run:
-read [AGENTS.md](AGENTS.md) "How to verify".
+`k8s.<domain>` proxies to the web app front on `127.0.0.1:8788`. `kcp.<domain>` proxies to kcp
+`6443` without a client certificate and to the certificate front `8444` with one.
 
-## Select the PDS ingress provider
+After a fresh deploy the requester has no web app session, so cluster claims log
+`no oauth session stored`. Sign in with `scripts/oauth-signin.ts --creds <file> --account ALICE
+--url https://k8s.socialweb.computer/`.
 
-A production PDS is a public HTTPS service. Its account DID document carries an `atproto_pds`
-service entry whose `serviceEndpoint` is scheme, host and optional port only, and the PDS
-`/.well-known/did.json`, `createAccount` and `requestCrawl` use the same public host. An
-`IngressProxy` provides that public URL; the PDS itself may bind loopback or an internal port.
+Upgrade a gateway: run the same `scripts/deploy.sh` with the new `BINARY` and `SHA256`. It runs
+`upgrade --binary --sha256` as the account, then `install gateway` again with `bin/current`. A routine
+upgrade keeps state, kcp objects, OpenBao, the requester DID, association, web sessions and running
+components. A fresh install keeps nothing.
 
-Every app root selects the provider explicitly:
+Uninstall the gateway and purge its state:
+
+```bash
+sudo /var/lib/socialweb-computer/socialweb/bin/current/socialweb-computer uninstall gateway --purge
+```
+
+The deploy inputs live on the orphan branch `swc-deploy`, in the worktree `~/.tmp/deploy`.
+Credential files `~/.aliceoa_bsky_social_source` and `~/.bobvmbuilder_bsky_social_source` are mode
+0600. Never print, log or commit their values.
+
+## PDS ingress provider
+
+A production PDS is a public HTTPS service. Its account DID document carries an `atproto_pds` service
+entry whose `serviceEndpoint` is scheme, host and optional port only. The PDS `/.well-known/did.json`,
+`createAccount` and `requestCrawl` use the same public host. The PDS may bind loopback; an
+`IngressProxy` provides the public URL.
+
+Every app root selects the provider with `spec.ingress`. The production profiles (`prod-qr`,
+`market-network`, the requester default, gateway `prod`) default to `xrpc-subscription` with
+`ingressProxyHost: xrpc.fedproxy.com` and `IngressProxy/ingress`. `xrpc.fedproxy.com` gives a stable
+`https://<did-subdomain>.<host>` while the ingress identity keypair persists.
+
+XRPC subscription:
 
 ```yaml
 spec:
@@ -283,11 +425,11 @@ spec:
       name: ingress
     publicHost: example.fedproxy.com
     xrpc:
-      ingressProxyHost: example.fedproxy.com
+      ingressProxyHost: xrpc.fedproxy.com
       relayURL: https://relay.example
 ```
 
-Or, for a tunneled route:
+OpenTunnel (optional; stable route name required):
 
 ```yaml
 spec:
@@ -304,259 +446,183 @@ spec:
       proxyProtocol: v2
 ```
 
-The default is `xrpc-subscription` when `ingress.xrpc.ingressProxyHost` is set and `opentunnel` when
-`ingress.opentunnel` is set. With neither, selection fails closed. `iroh` is recognized by the API
-and rejected until a later plan. A missing provider component, command or route name is a named
-failure, and a provider that returns a different public URL on restart is a `StableHostMismatch`
-failure. There is no implicit local fallback and no `GuestTlsUrl` override.
+Selection rules:
 
-The app roots fill that selection for production profiles. `run bidder` with `prod-qr` or
-`market-network`, `run request` with its `default` profile, and a gateway with `profile: prod`
-default `spec.ingress` to provider `xrpc-subscription`, `IngressProxy/ingress`, and
-`xrpc.ingressProxyHost: xrpc.fedproxy.com`; `spec.ingress` in the root, or the matching `--ingress-*`
-options after `--` on `run bidder` and `run request`, overrides it. A gateway spec that sets
-`spec.ingress.opentunnel` selects `opentunnel`. A `MarketNetwork` publishes one
-`IngressProxy/dispatcher` selection in `status.network.ingress`; its children inherit it.
+- `xrpc-subscription` when `ingress.xrpc.ingressProxyHost` is set.
+- `opentunnel` when `ingress.opentunnel` is set.
+- Otherwise fail closed. There is no implicit local fallback and no `GuestTlsUrl` override.
+- `iroh` is recognized by the API and rejected until a later plan.
+- A missing provider, command, route name or local host is a named failure.
+- A provider that returns a different public URL on restart is `StableHostMismatch`.
+- Set `Pds.spec.requireIngress` for every production PDS. No account is created and no sign-in
+  completes while the ingress is not Ready.
+- The first public URL is persisted in `Pds.spec.publicURL` and `Pds.spec.stableHost`.
 
-Set `Pds.spec.requireIngress` for every production PDS. No account is created and no sign-in
-completes while the ingress is not Ready. The first public URL is persisted in
-`Pds.spec.publicURL` and `Pds.spec.stableHost`. See
-[the atproto DID specification](https://atproto.com/specs/did) and
-[the going-to-production guide](https://atproto.com/guides/going-to-production).
+On `run bidder` and `run request`, `--ingress-provider`, `--ingress-public-host`,
+`--ingress-xrpc-host`, `--ingress-relay-url`, `--ingress-opentunnel-command`,
+`--ingress-opentunnel-route-name`, `--ingress-opentunnel-local-host` and
+`--ingress-opentunnel-proxy-protocol` after `--` override the profile defaults. A gateway spec that
+sets `spec.ingress.opentunnel` selects OpenTunnel. A `MarketNetwork` publishes one
+`IngressProxy/dispatcher` in `status.network.ingress`; children inherit it.
 
-## Install a release build on a bidder host
+Known gap (plan 0022): standalone PDS ingress lifecycle is not complete. A standalone app's PDS
+ingress Exposure can stay `Pending` even though the root selects `xrpc-subscription`, and an account
+may be created against a loopback URL. Check `Pds.spec.publicURL`, the ingress `Exposure` and the DID
+document before trusting a standalone PDS.
 
-Build the release commit first. `make` builds both linux release platforms and updates the owned
-asset pins; commit `internal/versions/versions.json` if it changed.
+### Verify public PDS, DID and requestCrawl
 
 ```bash
-cd "$(git rev-parse --show-toplevel)"
 HANDLE=bobvmbuilder.bsky.social
-STATE=/var/lib/socialweb-computer/swc-bidder
-
-make
-C=$(git rev-parse HEAD)
-BIN=$HOME/.tmp/socialweb-computer-build/release/$C/socialweb-computer-linux-amd64
-SHA=$(sha256sum "$BIN" | cut -d' ' -f1)
-echo "$BIN $SHA"
-sudo "$BIN" install bidder --handle "$HANDLE" \
-  --guest-image-source file:///var/lib/socialweb-computer/guest-image
+DID=$(curl -fsS "https://public.api.bsky.app/xrpc/com.atproto.identity.resolveHandle?handle=$HANDLE" | jq -r .did)
+PDS=$(curl -fsS "https://plc.directory/$DID" | jq -r '.service[] | select(.id == "#atproto_pds") | .serviceEndpoint')
+HOST=${PDS#https://}; HOST=${HOST%%/*}
+echo "$DID $PDS $HOST"
+curl -fsS "$PDS/.well-known/did.json" | jq '{id, service}'
+curl -fsS "$PDS/xrpc/com.atproto.repo.listRecords?repo=$DID&collection=com.publicdomainrelay.temp.badgeBlueKeys" | jq '.records | length'
+curl -fsS -X POST "$PDS/xrpc/com.atproto.sync.requestCrawl" -H 'Content-Type: application/json' \
+  -d "{\"hostname\":\"$HOST\"}" -o /dev/null -w '%{http_code}\n'
 ```
 
-On a host without the local guest image, omit `--guest-image-source`; install resolves and verifies
-the image from the release base.
-
-Upgrade an existing release install as the account, then install again:
+`serviceEndpoint` must be HTTPS with no path. The last command returns 200; confirm the crawl in the
+PDS journal:
 
 ```bash
-cd "$(git rev-parse --show-toplevel)"
-C=$(git rev-parse HEAD)
-BIN=$HOME/.tmp/socialweb-computer-build/release/$C/socialweb-computer-linux-amd64
-SHA=$(sha256sum "$BIN" | cut -d' ' -f1)
-sudo install -m 0755 "$BIN" /var/tmp/swc-release/socialweb-computer-${C:0:8}
-STAGED=/var/tmp/swc-release/socialweb-computer-${C:0:8}
+sudo journalctl _SYSTEMD_USER_UNIT='socialweb-computer-bidder@<handle>.service' --since -5min | grep -i requestCrawl
+```
+
+## hat-9 and hat-7
+
+SSH aliases exist on the lead's workstation: `ssh hat-9`, `ssh hat-7`, `ssh socialweb.computer`.
+No credentials belong in this document; use your own SSH key.
+
+| Host | State root | Bidder DID | Association |
+| --- | --- | --- | --- |
+| this host | `/var/lib/socialweb-computer/swc-bidder` | `did:plc:vxd7pmlhw6bnpyu6wngewthn` | `Associated`, `RequireApproval` |
+| hat-9 | `/var/lib/socialweb-computer/swc-bidder` | `did:plc:cjuftobfmmmdkmblcl4h54eb` | `Associated`, `RequireApproval` |
+| hat-7 | `/var/lib/socialweb-computer/swc-bidder` | `did:plc:exjutifioeu2p7oorbdrex2o` | `AssociationSkipped`, `Skip` |
+
+The bidder state dir is root-readable only:
+
+```bash
+ssh hat-9
+sudo ls /var/lib/socialweb-computer/swc-bidder/handles
 sudo runuser -u swc-bidder -- env XDG_RUNTIME_DIR=/run/user/$(id -u swc-bidder) \
-  CONFIG_PATH_SOCIALWEB_COMPUTER=/var/lib/socialweb-computer/swc-bidder/config.json \
-  /var/lib/socialweb-computer/swc-bidder/bin/current/socialweb-computer \
-  upgrade --binary "$STAGED" --sha256 "$SHA"
-sudo "$STAGED" install bidder --handle bobvmbuilder.bsky.social
+  systemctl --user status 'socialweb-computer-bidder@<handle>.service'
 ```
 
-### Associate the bidder DID
+## Troubleshooting
 
-A fresh install gets a new DID. The association is one `badgeBlueKeys` claim record in the operator's
-repo, plus the operator DID in `spec.approvedAssociations` of the bidder's `MarketIdentity`. The
-helper reads the handle and password from the credentials file and prints neither.
+Units, logs and kcp status. The unit account for a bidder is `swc-bidder`, for a gateway `socialweb`.
 
 ```bash
-cd "$(git rev-parse --show-toplevel)"
-HANDLE=bobvmbuilder.bsky.social
-ACCOUNT=BOB
-CREDS=$HOME/.bobvmbuilder_bsky_social_source
-STATE=/var/lib/socialweb-computer/swc-bidder
-
-K=$(sudo sh -c "ls $STATE/handles/*/kcp/admin.kubeconfig" | head -1)
-BIDDER_DID=$(sudo kubectl --kubeconfig "$K" get marketidentity bidder -o jsonpath='{.status.did}')
-OPERATOR_DID=$(curl -fsS "https://public.api.bsky.app/xrpc/com.atproto.identity.resolveHandle?handle=$HANDLE" | jq -r .did)
-echo "$BIDDER_DID $OPERATOR_DID"
-deno run -A --no-lock scripts/associate-bidder.ts \
-  --creds "$CREDS" \
-  --account "$ACCOUNT" \
-  --bidder-did "$BIDDER_DID"
-sudo kubectl --kubeconfig "$K" patch marketidentity bidder --type=merge \
-  -p "{\"spec\":{\"approvedAssociations\":[\"$OPERATOR_DID\"]}}"
-sudo kubectl --kubeconfig "$K" get marketidentity bidder \
-  -o jsonpath='{.status.phase}{" "}{range .status.conditions[*]}{.type}={.status} {.reason}{"\n"}{end}'
-```
-
-### Skip the association
-
-For an installed bidder that must not write the association record, set the identity mode to `Skip`
-and let the controller reconcile it:
-
-```bash
-cd "$(git rev-parse --show-toplevel)"
-STATE=/var/lib/socialweb-computer/swc-bidder
-K=$(sudo sh -c "ls $STATE/handles/*/kcp/admin.kubeconfig" | head -1)
-sudo kubectl --kubeconfig "$K" patch marketbidder app --type=merge \
-  -p '{"spec":{"identity":{"association":"Skip"}}}'
-sudo kubectl --kubeconfig "$K" get marketidentity bidder -o jsonpath='{.status.phase}{" "}{range .status.conditions[*]}{.type}={.status} {.reason}{"\n"}{end}'
-```
-
-## Deploy a gateway to a host
-
-`scripts/deploy.sh` installs or upgrades the gateway on the target host, writes the Caddy sites,
-copies the gateway, edge-client and kcp CA certificates, validates Caddy and reloads it. The host
-must already run Caddy and have `/etc/caddy/sites` enabled from `/etc/caddy/Caddyfile`.
-
-```bash
-cd "$(git rev-parse --show-toplevel)"
-SSH_TARGET=root@socialweb.computer \
-SSH_PORT=1997 \
-ACCOUNT=socialweb \
-STATE_DIR=/var/lib/socialweb-computer/socialweb \
-GATEWAY_ENV_FILE=$HOME/.tmp/gateway.env \
-GATEWAY_SPEC_FILE=$HOME/.tmp/gateway-spec-socialweb.yaml \
-scripts/deploy.sh
-```
-
-`GATEWAY_ENV_FILE` holds the account's environment (audiences and cluster-provider options); it is
-installed as `$STATE_DIR/gateway.env`, mode 0600 and owned by `socialweb`. `GATEWAY_SPEC_FILE` is
-installed as `/var/lib/socialweb-computer/gateway-spec-$ACCOUNT.yaml`. Both are required for a fresh
-host; an existing host may omit them and keep the files already in its state. `scripts/deploy.sh`
-uses the release binary of `HEAD` (or `BINARY` and `SHA256`) and refuses a digest mismatch.
-
-The public edge is Caddy:
-
-- `k8s.<domain>` goes to `127.0.0.1:8788`, the gateway's web-app front. That front resolves to the
-  GatewayAPI local Exposure, which serves `/api`, `/session`, `/oauth`, `/xrpc` and `/downloads`.
-- `kcp.<domain>` goes to kcp `6443` without a client certificate and to the `8444` certificate front
-  with one.
-
-The web root returns 404: this tree is API-only. Start a sign-in with
-`POST https://k8s.<domain>/oauth/start` and `{"handle":"..."}`; finish it in the returned
-authorization URL. The callback sets `swc_session` on the gateway origin.
-
-A fresh install over an old `denoruntime` workspace must purge first: the `app` WorkspaceType name is
-immutable. Back up `/var/lib/socialweb-computer/<account>` and the Caddy sites before a purge. After
-any fresh install, run the Caddy certificate handoff (inside `scripts/deploy.sh`) before testing
-`kcp.<domain>`; stale edge-client or gateway certificates fail with `tls: bad certificate`.
-
-## Install a development build on a bidder host
-
-This installs a binary built from the working tree, not a release. The install and upgrade require
-`--allow-dev-binary`. The binary is not reproducible.
-
-Change `HANDLE`, `ACCOUNT` and `CREDS` for another account. `CREDS` is a mode-0600 file that exports
-`<ACCOUNT>_ATPROTO_HANDLE` and `<ACCOUNT>_ATPROTO_PASSWORD`; never put the values on a command line.
-Run the blocks in order in one shell: the later blocks use `DEV`, `SHA`, `HANDLE`, `ACCOUNT`, `CREDS`
-and `STATE` from the earlier ones.
-
-```bash
-cd "$(git rev-parse --show-toplevel)"
-HANDLE=bobvmbuilder.bsky.social
-ACCOUNT=BOB
-CREDS=$HOME/.bobvmbuilder_bsky_social_source
-STATE=/var/lib/socialweb-computer/swc-bidder
-
-scripts/build-socialweb-computer.sh --dev --publish /var/tmp/swc
-C=$(git rev-parse HEAD)
-sudo mkdir -p /var/tmp/swc-release
-sudo install -m 0755 /var/tmp/swc/bin/socialweb-computer /var/tmp/swc-release/socialweb-computer-${C:0:8}
-DEV=/var/tmp/swc-release/socialweb-computer-${C:0:8}
-SHA=$(sha256sum "$DEV" | cut -d' ' -f1)
-echo "$DEV $SHA"
-```
-
-A fresh install over an old-shape install must purge first. This removes the state dir (the bidder's
-DID, PDS repo, OpenBao state and bid history) and the install record. If install adopted an existing
-account, as on this host, purge keeps that account and `--adopt-account` is then required because the
-account has no install record. If install created the account, purge removes it and you omit
-`--adopt-account`. Add `--force` only if uninstall refuses on active VM units; each stopped VM becomes
-`Lost`.
-
-```bash
-sudo "$DEV" uninstall bidder --purge --json
-sudo "$DEV" install bidder \
-  --handle "$HANDLE" \
-  --allow-dev-binary \
-  --adopt-account \
-  --state-dir "$STATE" \
-  --guest-image-source file:///var/lib/socialweb-computer/guest-image \
-  --dry-run
-sudo "$DEV" install bidder \
-  --handle "$HANDLE" \
-  --allow-dev-binary \
-  --adopt-account \
-  --state-dir "$STATE" \
-  --guest-image-source file:///var/lib/socialweb-computer/guest-image
-```
-
-The first install invocation is a server-side dry run: it prints the computed step list and persists
-nothing. The second performs the install.
-
-The installed host guest image matches the pins in `internal/versions/versions.json`. Without a stored
-source, install searches the release base; a dev build's commit is not published, so name the local
-image as above. If `/var/lib/socialweb-computer/guest-image` does not exist on the host, omit
-`--guest-image-source` and let install resolve the image from the release base.
-
-## Associate a development bidder DID
-
-The bidder gets a new DID after a purge. The association is the same claim record and approved DID as
-the release install:
-
-```bash
-cd "$(git rev-parse --show-toplevel)"
-HANDLE=bobvmbuilder.bsky.social
-ACCOUNT=BOB
-CREDS=$HOME/.bobvmbuilder_bsky_social_source
-STATE=/var/lib/socialweb-computer/swc-bidder
-
-K=$(sudo sh -c "ls $STATE/handles/*/kcp/admin.kubeconfig" | head -1)
-BIDDER_DID=$(sudo kubectl --kubeconfig "$K" get marketidentity bidder -o jsonpath='{.status.did}')
-OPERATOR_DID=$(curl -fsS "https://public.api.bsky.app/xrpc/com.atproto.identity.resolveHandle?handle=$HANDLE" | jq -r .did)
-echo "$BIDDER_DID $OPERATOR_DID"
-deno run -A --no-lock scripts/associate-bidder.ts \
-  --creds "$CREDS" \
-  --account "$ACCOUNT" \
-  --bidder-did "$BIDDER_DID"
-sudo kubectl --kubeconfig "$K" patch marketidentity bidder --type=merge \
-  -p "{\"spec\":{\"approvedAssociations\":[\"$OPERATOR_DID\"]}}"
-sudo kubectl --kubeconfig "$K" get marketidentity bidder \
-  -o jsonpath='{.status.phase}{" "}{range .status.conditions[*]}{.type}={.status} {.reason}{"\n"}{end}'
-```
-
-After the association, check the unit and the identity:
-
-```bash
+# units as the account
 sudo runuser -u swc-bidder -- env XDG_RUNTIME_DIR=/run/user/$(id -u swc-bidder) \
-  systemctl --user status 'socialweb-computer-bidder@bobvmbuilder.bsky.social.service'
-sudo journalctl _SYSTEMD_USER_UNIT='socialweb-computer-bidder@bobvmbuilder.bsky.social.service' --since -10min
-sudo kubectl --kubeconfig "$K" get marketidentity bidder -o jsonpath='{.status.phase}{"\n"}'
+  /var/lib/socialweb-computer/swc-bidder/bin/current/socialweb-computer units list
+# bidder unit and journal (system journal: swc-bidder is a system account)
+sudo runuser -u swc-bidder -- env XDG_RUNTIME_DIR=/run/user/$(id -u swc-bidder) \
+  systemctl --user status 'socialweb-computer-bidder@<handle>.service'
+sudo journalctl _SYSTEMD_USER_UNIT='socialweb-computer-bidder@<handle>.service' --since -10min
+# gateway unit and journal
+sudo systemctl --user -M socialweb@ status socialweb-computer-gateway.service
+sudo journalctl --user -M socialweb@ -u socialweb-computer-gateway.service --since -10min
+# kcp status (there is no kubectl kcp plugin in this tree; use the admin kubeconfig)
+K=$(sudo sh -c 'ls /var/lib/socialweb-computer/swc-bidder/handles/*/kcp/admin.kubeconfig' | head -1)
+sudo kubectl --kubeconfig "$K" get --raw /readyz
+sudo kubectl --kubeconfig "$K" get workspaces,marketbidder,marketidentity,pds,exposure
+sudo kubectl --kubeconfig "$K" get marketbidder app -o jsonpath='{.status.phase}{"\n"}'
+sudo kubectl --kubeconfig "$K" get marketidentity bidder -o jsonpath='{.spec}{"\n"}{.status}{"\n"}'
+# a dev instance
+sudo -n -u test-0001 env HOME=/home/test-0001 XDG_RUNTIME_DIR=/run/user/$(id -u test-0001) \
+  /var/tmp/swc/bin/socialweb-computer dev status --instance mn1
+sudo -n -u test-0001 env HOME=/home/test-0001 XDG_RUNTIME_DIR=/run/user/$(id -u test-0001) \
+  /var/tmp/swc/bin/socialweb-computer dev logs core --instance mn1 --tail 50
+# gateway's embedded k3s on a host without kubectl
+K3S=$(sudo find /var/lib/socialweb-computer/socialweb/runtime -name k3s -type f | head -1)
+sudo "$K3S" kubectl get ns
 ```
 
-## Upgrade an installed bidder to a development build
+Paths:
 
-If the install record and the old shape are compatible, upgrade instead of purging. As the account:
+| Item | Path |
+| --- | --- |
+| Bidder state | `/var/lib/socialweb-computer/swc-bidder` |
+| Gateway state | `/var/lib/socialweb-computer/socialweb` |
+| kcp admin kubeconfig | `<state>/handles/<hash>/kcp/admin.kubeconfig` |
+| Tenant k3s kubeconfig | `<state>/.../server/cred/admin.kubeconfig` |
+| Core binary | `<state>/bin/current/socialweb-computer` |
+| Previous binary | `<state>/bin/previous/socialweb-computer` |
+
+## Dev market network
+
+Run as the VM account on a host prepared above. The first `dev up` fetches and verifies the guest
+image unless `--guest-image-source` names one.
 
 ```bash
 cd "$(git rev-parse --show-toplevel)"
-HANDLE=bobvmbuilder.bsky.social
-STATE=/var/lib/socialweb-computer/swc-bidder
-
-scripts/build-socialweb-computer.sh --dev --publish /var/tmp/swc
-C=$(git rev-parse HEAD)
-sudo mkdir -p /var/tmp/swc-release
-sudo install -m 0755 /var/tmp/swc/bin/socialweb-computer /var/tmp/swc-release/socialweb-computer-${C:0:8}
-DEV=/var/tmp/swc-release/socialweb-computer-${C:0:8}
-SHA=$(sha256sum "$DEV" | cut -d' ' -f1)
-sudo runuser -u swc-bidder -- env XDG_RUNTIME_DIR=/run/user/$(id -u swc-bidder) \
-  CONFIG_PATH_SOCIALWEB_COMPUTER=$STATE/config.json \
-  "$STATE/bin/current/socialweb-computer" \
-  upgrade --binary "$DEV" --sha256 "$SHA" --allow-dev-binary
-sudo "$DEV" install bidder --handle "$HANDLE" --allow-dev-binary
+swc() {
+  sudo -n -u test-0001 env HOME=/home/test-0001 \
+    XDG_RUNTIME_DIR=/run/user/$(id -u test-0001) \
+    DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u test-0001)/bus \
+    /var/tmp/swc/bin/socialweb-computer "$@"
+}
+swc dev up --instance mn1 --profile market-network --bidders 1 --with-gateway --vm-host-backend systemd-user
+swc dev status --instance mn1 | jq '.network.status.apps'
+swc status --instance mn1
+eval "$(swc dev env --instance mn1)"
+swc dev logs core --instance mn1 --tail 50
+swc dev down --instance mn1
 ```
 
-A core built for the Go-native shape cannot adopt a workspace whose type is the old `denoruntime`;
-the install then reports `spec.type: Invalid value: name is immutable`. Purge and install fresh, as
-above, when that happens.
+Rent a VM through the RFP flow:
+
+```bash
+# variables carry over: swc
+sudo -n -u test-0001 tee /var/tmp/swc-secrets.json >/dev/null <<'JSON'
+[{"path":"/root/x","value":"hello"}]
+JSON
+swc run request --network mn1 --secrets /var/tmp/swc-secrets.json --exec 'cat /root/x'
+swc run request list --json | jq -r '.[].name'
+swc run request release "$(swc run request list --json | jq -r '.[0].name')"
+```
+
+`run request` options: `--network`, `--name`, `--secrets`, `--exec`, `--hold`, `--skip-ssh`,
+`--contract-timeout`.
+
+Run a bidder as a child application of the market network:
+
+```bash
+# variables carry over: swc
+swc run bidder --host-backend proc --profile market-network --network mn1 --handle b2.mn1.bob.test
+```
+
+## Gate and integration tests
+
+```bash
+cd "$(git rev-parse --show-toplevel)"
+deploy/check.sh --fast
+```
+
+The full gate before a release adds the release closure and the live proofs this host can run; read
+[AGENTS.md](AGENTS.md) "How to verify".
+
+Integration tests are Go tests under `test/integration` with the `integration` build tag. Run them as
+an account that may `sudo -n -u test-0001`:
+
+```bash
+go test -tags integration -count=1 -v -timeout 60m ./test/integration/
+go test -tags integration -count=1 -v -timeout 60m ./test/integration/ -run TestRequestSecretsReachTheGuestThroughTheRFPFlow
+```
+
+Environment: `SOCIALWEB_IT_ACCOUNT`, `SOCIALWEB_IT_GUEST_IMAGE`,
+`SOCIALWEB_IT_PUBLISH`, `SOCIALWEB_IT_SKIP_BUILD`, `SOCIALWEB_IT_RUN_ROOT`,
+`SOCIALWEB_IT_ARTIFACTS`, `SOCIALWEB_IT_LIVE_SLOT`. Keep the run root short: a tenant
+cluster's front socket path must fit in 107 bytes.
+
+## See also
+
+- [README](README.md)
+- [Bidder architecture](BIDDER_ARCH.md)
+- [Gateway architecture](GATEWAY_ARCH.md)
+- [Inspect a kcp](docs/inspect.md)
+- [Host contract](docs/host-contract.md)

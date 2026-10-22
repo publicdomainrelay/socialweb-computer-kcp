@@ -1,284 +1,77 @@
 # socialweb-computer-kcp
 
-socialweb-computer-kcp serves virtual Kubernetes clusters. A tenant cluster's k3s nodes are virtual machines rented on the atproto compute market, and the nodes scale to zero while the control plane keeps serving. One atproto account can own several clusters.
+socialweb-computer-kcp serves virtual Kubernetes clusters. A tenant cluster's k3s nodes are VMs rented
+on the atproto compute market; nodes scale to zero while the control plane keeps serving. One atproto
+account can own several clusters.
 
-One binary, `socialweb-computer`, runs every part of the software. Each running application is a separate instance with its own kcp control plane, a manifest set, and a profile: a requester (`run request`), a bidder, the gateway, a market network, or a local development instance. Application state lives in that instance's kcp as objects such as `ComputeVM`, `ComputeContract`, `NodeClaim`, `DenoPod`, and `HostProcess`.
-
-```mermaid
-flowchart TD
-  market["atproto market<br/>records in each app's own repo PDS · relay / firehose"]
-
-  subgraph gw["gateway instance · its kcp"]
-    g_root["Gateway"]
-    subgraph gwstate["state CRDs"]
-      g_cl["Cluster · ClusterLink · ClusterClientCertificate"]
-      g_nc["NodeClaim · ComputeContract · ComputeVM · GuestIdentityGrant"]
-      g_id["MarketIdentity · AtprotoRecord · AtprotoRecordWatch"]
-      g_infra["OpenBaoServer · Postgres"]
-    end
-    subgraph gwcomp["components"]
-      g_dp["DenoPods<br/>pds · requester · web app"]
-      g_hp["HostProcesses<br/>kcp slot + kine · front · postgres · OpenBao · cluster fronts"]
-    end
-    g_root --> gwstate
-    g_root --> gwcomp
-  end
-
-  subgraph bd["bidder instance · its kcp"]
-    b_root["MarketBidder"]
-    subgraph bdstate["state CRDs"]
-      b_bid["Bid · ComputeContract · ComputeVM"]
-      b_id["MarketIdentity · AtprotoRecord · AtprotoRecordWatch"]
-      b_infra["OpenBaoServer"]
-    end
-    subgraph bdcomp["components"]
-      b_dp["DenoPods<br/>bidder · pds · guest-kcp · policy-engine"]
-      b_hp["HostProcesses<br/>kcp slot + kine · front · OpenBao · VM units"]
-    end
-    b_root --> bdstate
-    b_root --> bdcomp
-  end
-
-  subgraph rq["requester instance · its kcp (one per run request)"]
-    r_root["MarketRequester"]
-    subgraph rqstate["state CRDs"]
-      r_cc["ComputeContract · ComputeVM"]
-      r_id["MarketIdentity · AtprotoRecord · AtprotoRecordWatch"]
-    end
-    subgraph rqcomp["components"]
-      r_dp["DenoPod: request-vm-ssh"]
-      r_hp["HostProcesses<br/>kcp slot + kine · front · OpenBao"]
-    end
-    r_root --> rqstate
-    r_root --> rqcomp
-  end
-
-  subgraph mn["market network instance · one kcp"]
-    mn_root["MarketNetwork"]
-    mn_ws["one workspace per child app<br/>plc · relay · pds · bidder-N · gateway · request-N"]
-    mn_root --> mn_ws
-  end
-
-  r_id -.->|"rfp · accept"| market
-  g_id -.->|"rfp · accept"| market
-  b_id -.->|"heartbeat · bid · receipt"| market
-  g_nc -.->|"NodeClaim, rented"| market
-  b_bid -->|"won, boots"| vm["guest VM<br/>firecracker · scale to zero"]
-  b_hp -->|runs| vm
-```
-
-One instance is one kcp and its workspaces; there is no kcp inside a kcp. A market network is one kcp with a workspace per child application; prod gives every application its own kcp. A tenant cluster's control plane is k3s, not a kcp.
+One binary, `socialweb-computer`, runs every part. An instance is one kcp plus its workspaces: a
+requester (`run request`), a bidder, the gateway, a market network, or a local dev instance. State is
+kcp objects such as `ComputeVM`, `ComputeContract`, `NodeClaim`, and `HostProcess`.
 
 - Design and decisions: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
-- Working rules for this repository: [`AGENTS.md`](AGENTS.md)
-- Plans and their status: [`docs/plans/`](docs/plans/), [`NEXT.yaml`](NEXT.yaml)
+- Working rules: [`AGENTS.md`](AGENTS.md)
+- Plans and backlog: [`docs/plans/`](docs/plans/), [`NEXT.yaml`](NEXT.yaml)
+- Build, install, upgrade, association, ingress, troubleshooting: [`CONTRIBUTING.md`](CONTRIBUTING.md)
 
-## Contents
+## Use the hosted gateway
 
-- [Pieces, and where each starts](#pieces-and-where-each-starts)
-- **How it works**
-  - [The RFP flow](#the-rfp-flow)
-
-- **Use the hosted service**
-  - [Use the hosted gateway (public service)](#use-the-hosted-gateway-public-service)
-  - [Manage a tenant cluster over XRPC](#manage-a-tenant-cluster-over-xrpc)
-
-- **Run your own**
-  - [Prerequisites](#prerequisites)
-  - [Install a release binary](#install-a-release-binary)
-  - [Run and install a bidder](#run-and-install-a-bidder)
-  - [Run the gateway and its web app](#run-the-gateway-and-its-web-app)
-
-- **Operate and release**
-  - [Deploy a release to production](#deploy-a-release-to-production)
-  - [Sign in with OAuth](#sign-in-with-oauth)
-  - [Inspect the kcp of an application](#inspect-the-kcp-of-an-application)
-
-- **Contributing**
-  - [CONTRIBUTING.md](CONTRIBUTING.md): the development build, a local market network, the RFP flow,
-    a bidder in a market network, the integration tests, the gate, and installing a development build
-    on a bidder host
-
-- [License](#license)
-
-## Quick paths
+`https://k8s.socialweb.computer` is the production gateway. No account with us, no API key. Sign in
+with your own atproto account.
 
 ```bash
-# 1. use the gateway we host: sign in, create a cluster, get a kubeconfig
 open https://k8s.socialweb.computer
-
-# 2. install a bidder from the newest release (see the bidder section for the association)
-V=$(curl -fsSL https://api.github.com/repos/publicdomainrelay/socialweb-computer-kcp/tags | jq -r ".[].name" | grep "^v" | sort -V | tail -1)
-curl -fsSLO "https://socialweb-computer-kcp.sfo3.digitaloceanspaces.com/releases/$V/binaries/socialweb-computer-linux-amd64"
-sudo install -m 0755 socialweb-computer-linux-amd64 /usr/local/bin/socialweb-computer
-sudo socialweb-computer install bidder --handle <your atproto handle>
 ```
 
-To build from source, run a local market network, rent a VM through the RFP flow, or install a
-development build, see [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## Pieces, and where each starts
-| Piece | Use it with | Section |
-| --- | --- | --- |
-| The gateway we host, as a public service | `https://k8s.socialweb.computer` | [Use the hosted gateway](#use-the-hosted-gateway-public-service) |
-| A tenant cluster of that gateway | the web app, or XRPC (`goat`) | [Manage a tenant cluster over XRPC](#manage-a-tenant-cluster-over-xrpc) |
-| Your own gateway | `scripts/deploy.sh` on a host you own | [Run the gateway and its web app](#run-the-gateway-and-its-web-app) |
-| A bidder | `install bidder` (release binary) | [Run and install a bidder](#run-and-install-a-bidder) |
-| Development build and live runs | `scripts/build-socialweb-computer.sh --dev` | [CONTRIBUTING.md](CONTRIBUTING.md) |
-| A release to production | `scripts/deploy.sh` | [Deploy a release to production](#deploy-a-release-to-production) |
-
-## How it works
-
-### The RFP flow
-```mermaid
-sequenceDiagram
-  participant R as requester
-  participant Relay as relay / firehose
-  participant B as bidder
-  participant G as guest (VM)
-  R->>Relay: compute.vm + signed market.rfp
-  Relay->>B: rfp event (bidders with fresh heartbeat)
-  B-->>R: bid (own repo) + direct submitBid
-  R->>B: accept
-  B->>G: boot from cloud-init user_data
-  G-->>R: onNetwork event + iroh ticket + host keys
-  R->>G: ssh over iroh ProxyCommand
-```
-
-A requester rents a VM by running the RFP flow. The requester posts a `compute.vm` record and a signed `market.rfp`; bidders bid; the requester accepts the winning bid; the winning bidder boots the guest from cloud-init `user_data` that installs the guest agent (sshd, the tunnel subscriber, and the client that reaches the guest). The guest reports an iroh ticket for its sshd with its on-network event; the requester's ssh dials that ticket (`socialweb-computer internal iroh-dial`, `dumbpipe connect`, as the `ProxyCommand`) and checks the host keys the guest reported. The market records go through the relay.
-
-```
-requester --market.rfp--> relay/PDS <--bid-- bidder (own kcp: MarketBidder, Bid, ComputeVM)
-    | accept                                    | cloud-init user_data
-    v                                            v
-gateway (own kcp: Gateway, Cluster, NodeClaim)   firecracker VM = k3s node
-    tenant k3s apiserver (kine + front) <-------- node joins over the iroh link
-```
-
-Every listener behind the edge binds port 0 and reports its bound address into the status of its kcp object, and peers find each other by service name through kcp. Only the stable public entry points (caddy on 443, an application's front) keep a fixed address.
-
-## Use the hosted service
-
-### Use the hosted gateway (public service)
-`https://k8s.socialweb.computer` is our production gateway: a public service, no account with us, no API key.
+Create a cluster and download a kubeconfig over XRPC. `goat` is the Bluesky CLI.
 
 ```bash
-# 1. open it and sign in with your own atproto account (Bluesky handle and password)
-open https://k8s.socialweb.computer
-
-# 2. or do the same steps over XRPC; goat is the Bluesky CLI
 go install github.com/bluesky-social/goat@latest
 GOAT_USERNAME=<your handle> GOAT_PASSWORD=<your password> goat account login
 GW=https://k8s.socialweb.computer AUD=did:web:k8s.socialweb.computer N=com.publicdomainrelay.temp.cluster
 call() { local m=$1 nsid=$N.$2; shift 2; goat xrpc $m $GW $nsid "$@" "Authorization:Bearer $(goat account service-auth --aud $AUD --lxm $nsid)"; }
-call procedure createCluster name=demo                       # create if missing, start the control plane
-call procedure getKubeconfig name=demo ttlSeconds:=28800 | jq -r .kubeconfig > demo.kubeconfig; chmod 600 demo.kubeconfig
-KUBECONFIG=demo.kubeconfig kubectl get ns
-call procedure deleteCluster name=demo
-```
-
-- In the web app, "Create cluster" and "Download kubeconfig" do the same two steps; the kubeconfig there is the file to keep.
-- The nodes of the cluster are VMs rented on the market from the bidders the gateway trusts; a cluster with no pods holds no VMs (scale to zero).
-- The cluster API is atproto XRPC with your own account's service token: `aud` is the gateway DID, `lxm` the method. See [Manage a tenant cluster over XRPC](#manage-a-tenant-cluster-over-xrpc).
-- This is our production instance. It is disposable by design: a deploy may delete every cluster, as [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) states.
-
-```mermaid
-flowchart TD
-  you["you, an atproto account"] -->|"sign in (OAuth)"| web["web app<br/>k8s.socialweb.computer"]
-  you -->|"kubectl + your kubeconfig"| front["kcp front<br/>kcp.socialweb.computer"]
-  web --> gw["gateway"]
-  gw -->|NodeClaim| market["market: bidders"]
-  market -->|"boots VM"| vm["VM node"]
-  vm --> k3s["your k3s cluster"]
-  front --> k3s
-```
-
-### Manage a tenant cluster over XRPC
-The gateway serves the cluster API over atproto XRPC. Every method takes an atproto service JWT: `iss` is your DID, `aud` is the gateway DID, and `lxm` is the method NSID.
-
-Methods (prefix `com.publicdomainrelay.temp.cluster.`):
-
-| Method | What it does |
-|---|---|
-| `createCluster` | Create the named cluster if it is missing and leave it running, in one call. Idempotent. |
-| `getKubeconfig` | Return a kubeconfig. Creates the cluster if it is missing but does not start the control plane. |
-| `listClusters` | List the account's clusters. |
-| `controlPlaneUp` | Start the control plane. |
-| `controlPlaneDown` | Stop the control plane. |
-| `deleteCluster` | Delete the cluster. |
-| `subscribeClusters` | Stream cluster state as an event stream. |
-| `revokeIdentity` | Revoke a cluster identity. |
-
-#### Create a cluster and get a kubeconfig with goat
-
-```bash
-go install github.com/bluesky-social/goat@latest
-( . ~/.aliceoa_bsky_social_source; GOAT_USERNAME="$ALICE_ATPROTO_HANDLE" GOAT_PASSWORD="$ALICE_ATPROTO_PASSWORD" goat account login )
-GW=https://k8s.socialweb.computer AUD=did:web:k8s.socialweb.computer N=com.publicdomainrelay.temp.cluster
-call() { local m=$1 nsid=$N.$2; shift 2; goat xrpc $m $GW $nsid "$@" "Authorization:Bearer $(goat account service-auth --aud $AUD --lxm $nsid)"; }
-call procedure createCluster name=demo                       # create if missing and start the control plane (idempotent)
+call procedure createCluster name=demo
 call query listClusters | jq '.clusters[] | {name, phase, running}'
-call procedure getKubeconfig name=demo ttlSeconds:=28800 | jq -r .kubeconfig > demo.kubeconfig; chmod 600 demo.kubeconfig
+call procedure getKubeconfig name=demo ttlSeconds:=28800 | jq -r .kubeconfig > demo.kubeconfig
+chmod 600 demo.kubeconfig
 KUBECONFIG=demo.kubeconfig kubectl get ns
 call procedure controlPlaneDown name=demo; call procedure deleteCluster name=demo
 ```
 
-`goat xrpc` sends `key=value` as a JSON string and `key:=value` as a JSON number or boolean, so `ttlSeconds` and `noExpiry` take `:=`; `ttlSeconds=28800` is a string and the gateway answers `InvalidRequest`. The kubeconfig holds a client key and an x509 client certificate from the cluster's own OpenBao PKI (CN your DID, O `socialweb.computer:cluster-owners`, default 8 h, at most 24 h via `ttlSeconds`). Plain `kubectl`, no helper. Keep it `0600`, never commit it. `getKubeconfig` on a stopped cluster answers `ClusterNotRunning`: call `createCluster` or `controlPlaneUp` first. `revokeIdentity` and `deleteCluster` end every certificate at once. For a certificate that never expires, call `getKubeconfig name=demo noExpiry:=true`: it lives until you revoke it, delete the cluster, or the cluster CA expires. Cluster phases are `Unavailable`, `Initializing`, `Ready`, and `Draining`.
+`goat xrpc` sends `key=value` as a JSON string and `key:=value` as a JSON number or boolean. The
+kubeconfig holds an x509 client certificate from the cluster's OpenBao PKI (CN your DID, default 8 h,
+at most 24 h via `ttlSeconds`). Keep it `0600`. `getKubeconfig` on a stopped cluster answers
+`ClusterNotRunning`; call `createCluster` or `controlPlaneUp` first. `noExpiry:=true` never expires
+until revoked or the cluster is deleted.
 
-#### Watch cluster state with subscribeClusters
+Cluster methods (prefix `com.publicdomainrelay.temp.cluster.`): `createCluster`, `getKubeconfig`,
+`listClusters`, `controlPlaneUp`, `controlPlaneDown`, `deleteCluster`, `subscribeClusters`,
+`revokeIdentity`.
 
-`com.publicdomainrelay.temp.cluster.subscribeClusters` is an atproto event stream: a `GET` with a websocket upgrade, binary frames, each frame a DRISL-CBOR header then a DRISL-CBOR payload. Authenticate on the upgrade request with the same service JWT (`Authorization: Bearer`, `lxm` = `subscribeClusters`). The account is the token's `iss`. Pass `?name=<cluster>` to watch one cluster.
+### Watch cluster state
 
-On connect the stream sends a snapshot (one `#cluster` per cluster, one `#member` per control-plane member, one `#nodeClaim` per claim, each with `snapshot:true`), then one `#info` named `SnapshotComplete`, then live changes. There is no cursor: reconnecting starts a fresh snapshot. The token is checked once at connect, and the stream lives until the client closes, the gateway restarts, or the 1 hour stream bound is reached (`TokenExpired`). An error frame is followed by a close.
-
-| Message | Fields | Phase values |
-|---|---|---|
-| `#cluster` | name, phase, running, reason, message, server, instance, deleted | Unavailable, Initializing, Ready, Draining |
-| `#member` | cluster, member, phase, reason, message | Pending, Starting, Running, Ready, Sealed, Stopping, Stopped, Deleting, Failed, Lost |
-| `#nodeClaim` | cluster, name, nodeName, phase, message, contractPhase, outcome, bidder, fqdn, deleted | Pending, Bidding, Provisioning, Joining, Running, Failed, Released, Lost, Adopting |
-
-Error frames: `InvalidRequest`, `Unauthorized`, `TokenExpired`, `ClusterNotFound`, `IdentityRevoked`, `ClusterUnavailable`, `ConsumerTooSlow`.
-
-Decode the stream with the bundled client, or check connectivity with `websocat`:
+`subscribeClusters` is an atproto event stream: a websocket `GET`, binary frames, DRISL-CBOR header
+then payload. Authenticate on upgrade with the same service JWT. `?name=<cluster>` watches one.
 
 ```bash
+# variables carry over: GW, AUD, N
 T=$(goat account service-auth --aud $AUD --lxm $N.subscribeClusters)
-# one JSON line per event; exit 0 on --until, 2 on --fail-on, 1 on an error frame
-deno run -A --no-lock --node-modules-dir=none scripts/subscribe-clusters.ts --gateway $GW --token "$T" --name demo \
-  --until cluster=Ready --fail-on nodeClaim=Failed
-# every cluster of the account, run forever
-deno run -A --no-lock --node-modules-dir=none scripts/subscribe-clusters.ts --gateway $GW --token "$T"
-# raw connectivity check (CBOR bytes, not text)
-websocat -b -n -H="Authorization: Bearer $T" "wss://k8s.socialweb.computer/xrpc/$N.subscribeClusters?name=demo" < /dev/null | xxd
+websocat -b -n -H="Authorization: Bearer $T" \
+  "wss://k8s.socialweb.computer/xrpc/$N.subscribeClusters?name=demo" < /dev/null | xxd
 ```
 
-`subscribe-clusters.ts` options: `--token`, `--gateway` (default `https://k8s.socialweb.computer`), `--name`, `--until <type>=<phase>`, `--fail-on <type>=<phase>`.
+On connect the stream sends a snapshot (one `#cluster` per cluster, one `#member` per control-plane
+member, one `#nodeClaim` per claim, each with `snapshot:true`), then one `#info` named
+`SnapshotComplete`, then live changes. There is no cursor: reconnecting starts a fresh snapshot.
+Error frames: `InvalidRequest`, `Unauthorized`, `TokenExpired`, `ClusterNotFound`,
+`IdentityRevoked`, `ClusterUnavailable`, `ConsumerTooSlow`.
 
-#### Apply objects and run Jobs without a kubeconfig
+### Apply objects and read Jobs without a kubeconfig
 
-`computer.socialweb.k8s.kubectlApplyServerSide` (procedure) applies one object as `kubectl apply --server-side` would. `computer.socialweb.k8s.getJob` (query) reads a Job's status, its pods, and the tail of each container's log. Neither needs a kubeconfig, `socialweb-credential`, or `kubectl`. Both authenticate with the same service JWT (`aud` = gateway DID, `lxm` = the method), and the account is the token's `iss`.
-
-`kubectlApplyServerSide` inputs:
-
-| Field | Meaning |
-|---|---|
-| `cluster` | The account's cluster label. Required. |
-| `manifest` | One Kubernetes object as JSON, with `apiVersion`, `kind`, and `metadata.name`. Required. A `List` kind or `generateName` is refused. |
-| `namespace` | A namespaced object's namespace. Order: `metadata.namespace`, then this field, then `default`; both set must match. A cluster-scoped kind takes none. |
-| `name` | Optional check; must equal `metadata.name`. |
-| `fieldManager` | The server-side apply field manager. Default `socialweb-computer`. The value `kubectl` shares field ownership with `kubectl apply --server-side`. |
-| `force` | Take ownership of fields another field manager owns. Without it such a field is an `ApplyConflict`. |
-| `dryRun` | Run admission and validation and return the object without storing it. |
-
-Output: `apiVersion`, `kind`, `namespace`, `name`, `uid`, `resourceVersion`, `generation`, and `object` (as the apiserver stored it, `managedFields` included).
-
-Errors: `InvalidRequest`, `Unauthorized`, `IdentityRevoked`, `ClusterNotFound`, `ClusterNotRunning` (409, call `controlPlaneUp`), `ClusterInitializing` (429, retry), `ClusterDraining` (409), `ClusterUnavailable` (503), `KindNotFound` (400), `ApplyConflict` (409), `KubernetesError` (the apiserver's status and message).
-
-`getJob` parameters: `cluster`, `namespace`, `name`, and `tailLines` (default 100, maximum 5000, `0` returns no logs; each log is at most 64 KiB). Output: `phase` (Pending, Running, Succeeded, Failed), `active`, `succeeded`, `failed`, `conditions`, and `pods[].containers[] { state, exitCode, reason, log }`. Errors include `ObjectNotFound` (404). A Job on a cluster at zero nodes first rents a market VM for its pod.
-
-Apply a ConfigMap:
+`computer.socialweb.k8s.kubectlApplyServerSide` applies one object like `kubectl apply --server-side`.
+`computer.socialweb.k8s.getJob` reads a Job, its pods and log tails.
 
 ```bash
+# variables carry over: GW, AUD, N; cluster demo from the block above
 K=computer.socialweb.k8s
 curl -sS -X POST "$GW/xrpc/$K.kubectlApplyServerSide" \
   -H "Authorization: Bearer $(goat account service-auth --aud $AUD --lxm $K.kubectlApplyServerSide)" \
@@ -296,293 +89,70 @@ curl -sS -X POST "$GW/xrpc/$K.kubectlApplyServerSide" \
   }' | jq '{kind, namespace, name, uid, resourceVersion}'
 ```
 
-Apply a Job and poll it until it finishes:
-
 ```bash
+# variables carry over: GW, AUD, K; cluster demo
 jq -n '{cluster: "demo", manifest: {apiVersion: "batch/v1", kind: "Job",
   metadata: {name: "hello", namespace: "default"},
   spec: {backoffLimit: 0, template: {spec: {restartPolicy: "Never",
-    containers: [{name: "run", image: "docker.io/library/busybox:1.36.1", command: ["sh", "-c", "echo hello from $(uname -m)"]}]}}}}}' |
+    containers: [{name: "run", image: "docker.io/library/busybox:1.36.1", command: ["sh", "-c", "echo hello"]}]}}}}}' |
   curl -sS -X POST "$GW/xrpc/$K.kubectlApplyServerSide" -H "Content-Type: application/json" \
     -H "Authorization: Bearer $(goat account service-auth --aud $AUD --lxm $K.kubectlApplyServerSide)" -d @- | jq -c '{kind, name, uid}'
-# poll until Succeeded or Failed (each call needs a fresh token: service-auth tokens are short-lived)
 until s=$(curl -sS "$GW/xrpc/$K.getJob?cluster=demo&namespace=default&name=hello&tailLines=50" \
     -H "Authorization: Bearer $(goat account service-auth --aud $AUD --lxm $K.getJob)"); \
   echo "$s" | jq -c '{phase, active, succeeded, failed}'; echo "$s" | jq -e '.phase == "Succeeded" or .phase == "Failed"' >/dev/null; do sleep 5; done
 echo "$s" | jq -r '.pods[].containers[] | "\(.state) exit=\(.exitCode) \(.log)"'
 ```
 
+A cluster at zero nodes rents a market VM when you apply a Job or pod.
+
 ## Run your own
 
-### Prerequisites
+Install, build, upgrade, associate, uninstall, PDS ingress, and troubleshooting commands are in
+[CONTRIBUTING.md](CONTRIBUTING.md). Short map:
 
-| To | Need |
-| --- | --- |
-| run VMs | a 64-bit Linux host with `/dev/kvm`, systemd 253+, cgroup v2, `/dev/net/tun` |
-| rent VMs on the host | an account with one `/etc/subuid` and `/etc/subgid` range of `N * 65536` ids (`install bidder --vm-slots N`, default 256); one running VM holds one slot |
-| run a release binary | `curl` and `sha256sum`; the binary embeds every asset, so no checkout, Go or Deno |
-| build a release from source | Go and Deno on `PATH`, a clean checkout |
-
-The development host setup, including the `test-0001` VM account and the integration-test
-prerequisites, is in [CONTRIBUTING.md](CONTRIBUTING.md#prepare-a-bare-host).
-
-### Install a release binary
-
-- Long form: [docs/host-setup.md](docs/host-setup.md) (host setup and the guest image).
-
-Tagged releases publish the Linux binaries and the guest image to the public bucket; no credentials.
-
-| Path | Holds |
-| --- | --- |
-| `releases/<version>/binaries/socialweb-computer-linux-amd64` | The host binary, Linux amd64. |
-| `releases/<version>/binaries/socialweb-computer-linux-arm64` | The host binary, Linux arm64. |
-| `releases/<version>/binaries/SHA256SUMS` | The sha256 of both binaries. |
-| `releases/<version>/guest-image/firecracker-x86_64/` | `vmlinux`, `rootfs.ext4`, `image.json`: the guest a bidder boots. |
-| `releases/<version>/manifest.json` | Every file under the version with its size and sha256. `main/<commit>/` and `main/latest/` hold commit builds. |
-
-```bash
-BUCKET=https://socialweb-computer-kcp.sfo3.digitaloceanspaces.com
-V=$(curl -s "$BUCKET/?list-type=2&prefix=releases/&delimiter=/" \
-  | grep -o 'releases/v[^<]*' | sed 's|releases/||; s|/$||' | sort -V | tail -1)
-ARCH=linux-$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
-mkdir -p ~/.tmp/swc-release && cd ~/.tmp/swc-release
-curl -fLO --progress-bar "$BUCKET/releases/$V/binaries/socialweb-computer-$ARCH"
-curl -fLO --progress-bar "$BUCKET/releases/$V/binaries/SHA256SUMS"
-grep " socialweb-computer-$ARCH\$" SHA256SUMS | sha256sum -c -
-mkdir -p ~/.local/bin && install -m 0755 "socialweb-computer-$ARCH" ~/.local/bin/socialweb-computer
-export PATH="$HOME/.local/bin:$PATH"
-socialweb-computer version
-```
-
-| Need | Do |
-| --- | --- |
-| Pin a version | set `V=v0.0.0-rc3` before the block instead of deriving it |
-| Digest for `install`/`upgrade` | `SHA=$(grep " socialweb-computer-$ARCH\$" SHA256SUMS | cut -d' ' -f1)` |
-| Guest image on a bidder | no flag: the binary resolves its own pinned image (`releases/<its version>`, `main/<commit>`, `main/latest`), verifying every candidate. `--guest-image-source <base>` overrides it; a mismatch is refused |
-| Image placed yourself | download the three files into a directory and pass `--guest-image-source file:///var/lib/socialweb-computer/guest-image` |
-| arm64 host | only `firecracker-x86_64` is published; build one with `scripts/build-guest-image.sh` |
-| PATH | run as the account that runs the binary; `~/.local/bin` joins PATH at the next login |
-
-### Run and install a bidder
-
-- Long form: [docs/bidder.md](docs/bidder.md) (every flag, the unit, the guest-image resolution).
-
-A bidder runs as its own installed application on a host, in its own account. Its records live in its
-own PDS, never in your repo.
-
-```bash
-# installed on a host, from the release binary (see Install a release binary)
-HANDLE=<your atproto handle>
-V=$(curl -fsSL https://api.github.com/repos/publicdomainrelay/socialweb-computer-kcp/tags | jq -r ".[].name" | grep "^v" | sort -V | tail -1)
-B=https://socialweb-computer-kcp.sfo3.digitaloceanspaces.com/releases/$V/binaries
-curl -fsSLO "$B/socialweb-computer-linux-amd64" && curl -fsSLO "$B/SHA256SUMS"
-grep " socialweb-computer-linux-amd64$" SHA256SUMS | sha256sum -c -
-sudo install -m 0755 socialweb-computer-linux-amd64 /usr/local/bin/socialweb-computer
-sudo socialweb-computer install bidder --handle "$HANDLE"
-
-# associate its DID with your account once; the exact commands are in CONTRIBUTING.md
-K=$(sudo sh -c 'ls /var/lib/socialweb-computer/swc-bidder/handles/*/kcp/admin.kubeconfig' | head -1)
-BIDDER_DID=$(sudo kubectl --kubeconfig "$K" get marketidentity bidder -o jsonpath='{.status.did}')
-OPERATOR_DID=$(curl -fsS "https://public.api.bsky.app/xrpc/com.atproto.identity.resolveHandle?handle=$HANDLE" | jq -r .did)
-deno run -A --no-lock scripts/associate-bidder.ts --creds ~/.bobvmbuilder_bsky_social_source --account BOB --bidder-did "$BIDDER_DID"
-sudo kubectl --kubeconfig "$K" patch marketidentity bidder --type=merge \
-  -p "{\"spec\":{\"approvedAssociations\":[\"$OPERATOR_DID\"]}}"
-
-# upgrade it, as its account, then install again
-sudo runuser -u swc-bidder -- env XDG_RUNTIME_DIR=/run/user/$(id -u swc-bidder) \
-  CONFIG_PATH_SOCIALWEB_COMPUTER=/var/lib/socialweb-computer/swc-bidder/config.json \
-  /var/lib/socialweb-computer/swc-bidder/bin/current/socialweb-computer \
-  upgrade --binary <new binary> --sha256 <its sha256>
-```
-
-| Topic | Rule |
-| --- | --- |
-| Unit | `socialweb-computer-bidder@<handle>.service` in the account's own manager; the account is `swc-bidder` |
-| Logs | `sudo journalctl _SYSTEMD_USER_UNIT='socialweb-computer-bidder@<handle>.service'`; the account is a system account, so its logs are in the system journal |
-| State | `/var/lib/socialweb-computer/swc-bidder`; its kcp at `handles/<hash>/kcp` (root-readable only) |
-| Identity | profile `prod-qr`: own PDS, key in its own OpenBao, DID kept across restarts and upgrades; one association write, and deleting the badgeBlueKeys record revokes it |
-| Discovery | a signed heartbeat every 60 s; requesters keep only bidders fresh within 5 min, so a stopped bidder gets no direct `submitRfp` |
-| Policy | `bidder-policy` in `config.json`; unset means `open`. A production bidder names `tangled-vouch` |
-| Other options | `"bidder-options": "--bid-ttl-sec 1800"` in the same `config.json`; each must be a `market-bidder` option in `deploy/apps/option-map.yaml`; restart the unit after editing |
-| Guest image | pinned by sha256 in `internal/versions/versions.json`; the bidder verifies every file |
-| Re-install | idempotent; completed steps are skipped, and only a changed config or unit restarts the core |
-| Broken unit | `install` refuses when `bin/current` is not the binary you invoked; run `upgrade --binary --sha256` first, then `install` again |
-
-### Run the gateway and its web app
-
-- Long form: [docs/gateway.md](docs/gateway.md) (deploy.sh environment, web app, caddy sites).
-
-A production gateway is built as a release, shipped, and installed or upgraded with `scripts/deploy.sh`, which also writes the caddy sites.
-
-```bash
-BINARY=<release binary> SHA256=<its sha256> SSH_KEY=~/.ssh/id_ed25519_no_password \
-  GATEWAY_ENV_FILE=~/.tmp/deploy/gateway.env GATEWAY_SPEC_FILE=~/.tmp/deploy/gateway-spec.yaml scripts/deploy.sh
-```
-
-[Deploy a release to production](#deploy-a-release-to-production) builds that binary and computes its sha256.
-
-`scripts/deploy.sh` reads these environment variables:
-
-| Variable | Meaning | Default |
-|---|---|---|
-| `BINARY` | The release binary to ship. Unset: the script builds the current commit. | |
-| `SHA256` | The published sha256 of `BINARY`; a mismatch stops the deploy. | |
-| `SSH_KEY` | The SSH key for the deploy host. | |
-| `SSH_TARGET` | The deploy host. | `root@socialweb.computer` |
-| `SSH_PORT` | The deploy host's SSH port. | `1997` |
-| `ACCOUNT` | The account the gateway runs as. | `socialweb` |
-| `STATE_DIR` | The gateway's state directory. | `/var/lib/socialweb-computer/socialweb` |
-| `DOMAIN` | The base domain. | `socialweb.computer` |
-| `ORIGIN` | The web app's host. | `k8s.<DOMAIN>` |
-| `KCP_ORIGIN` | The kcp host. | `kcp.<DOMAIN>` |
-| `GATEWAY_ENV_FILE` | The gateway's environment file, shipped as `gateway.env`. | |
-| `GATEWAY_SPEC_FILE` | A YAML `GatewaySpec`, shipped as the Gateway spec. | |
-
-The script installs the gateway on its first run. On every later run it upgrades the gateway, then runs `install gateway` again with the new `bin/current`, which re-renders the unit files and restarts a core whose unit changed. The web app (`socialweb-computer-k8s`) serves `k8s.<domain>`, and caddy proxies the web app and the `/xrpc/computer.socialweb.k8s.*` routes to the gateway.
-
-After a fresh deploy the requester account has no web app session, so cluster claims fail with a `no oauth session stored` message. Sign in with [Sign in with OAuth](#sign-in-with-oauth) and `--url https://k8s.socialweb.computer/`.
-
-## Contributing
-
-Development is out of scope for this README. The development build, a local market network, the RFP
-flow, a bidder in a market network, the integration tests, the gate, and installing and associating a
-development build on a bidder host are in [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## Operate and release
-
-### Deploy a release to production
-
-- Long form: [docs/deploy.md](docs/deploy.md) (build, acceptance, rollback, canary, host items).
-```mermaid
-flowchart TD
-  tag["git tag v*"] --> gh["GitHub CI<br/>gate, binaries, guest image"]
-  gh -->|"publish"| bucket["Spaces bucket<br/>releases/tag"]
-  bucket --> deploy["scripts/deploy.sh"]
-  deploy --> gw["gateway host"]
-  deploy --> bidder["bidder host"]
-  gh --> gl["GitLab suite<br/>13 integration tests"]
-  gh --> canary["nightly canary<br/>throwaway DID"]
-```
-
-Two deploy shapes, and they differ:
-
-| Shape | What happens | What survives |
+| To | Command | Long form |
 | --- | --- | --- |
-| Routine gateway deploy (`scripts/deploy.sh` on an installed gateway) | `upgrade --binary --sha256`, then `install gateway` again; the core adopts its DenoPods and rolls the kcp slot only when kcp's argv or binary changed | State dir and its kcp objects, the root OpenBao (requester repo key, sessions), the gateway requester's DID and its association record, web app sessions, running DenoPods. Read on prod: web session across rc8 to rc9, requester DID and association across rc11 to rc21 with no new claim |
-| Routine bidder upgrade (as the account: `upgrade --binary <path> --sha256 <digest>`, then the same `install bidder` again) | The bidder's core restarts on the new binary; pods are replaced only when the spec or the TypeScript tree changed | The bidder's state dir, its OpenBao (repo key), the bidder DID and handle, its association record, its pds DenoPod repo. Read on prod: Bob's bidder DID and association across rc11 to rc21 with no new claim |
-| Fresh install (`install gateway` or `install bidder` on an empty host, or a lost or purged state dir) | First install; new keys generated | Nothing. The identity gets a new DID and needs one association write again (a bidder through `scripts/associate-bidder.ts`, see [CONTRIBUTING.md](CONTRIBUTING.md); the web app sign-in for a gateway owner) |
+| Install a bidder from a release | `sudo socialweb-computer install bidder --handle <handle>` | [CONTRIBUTING: release bidder](CONTRIBUTING.md#install-a-release-bidder) |
+| Associate or skip association | `scripts/associate-bidder.ts` + `kubectl patch` | [CONTRIBUTING: association](CONTRIBUTING.md#bidder-association) |
+| Upgrade a bidder | `upgrade --binary <path> --sha256 <digest>`, then `install bidder` | [CONTRIBUTING: upgrade](CONTRIBUTING.md#upgrade-reinstall-uninstall) |
+| Install or upgrade the gateway | `scripts/deploy.sh` | [CONTRIBUTING: gateway](CONTRIBUTING.md#deploy-the-gateway) |
+| Build a dev binary | `scripts/build-socialweb-computer.sh --dev --publish /var/tmp/swc` | [CONTRIBUTING: dev build](CONTRIBUTING.md#dev-build) |
+| Build a release | `make` | [CONTRIBUTING: release build](CONTRIBUTING.md#release-build) |
+| Select PDS ingress | `spec.ingress.provider` | [CONTRIBUTING: PDS ingress](CONTRIBUTING.md#pds-ingress-provider) |
+| Inspect a unit or kcp | `units list`, `journalctl`, `kubectl` admin kubeconfig | [CONTRIBUTING: troubleshooting](CONTRIBUTING.md#troubleshooting) |
 
-The policy is still "nothing is guaranteed": a change may deliberately wipe state, and there is no migration or backward compatibility to plan for. Losing sessions, VMs, clusters, claims or receipts is acceptable; what exists, this table says.
+A bidder needs a 64-bit Linux host with `/dev/kvm`, systemd 253+, cgroup v2 and `/dev/net/tun`.
+`install bidder` creates the `swc-bidder` account, its subuid/subgid range and its units. A release
+binary needs only `curl` and `sha256sum`; it embeds every asset. The gateway host must already run
+Caddy with `/etc/caddy/sites` imported.
 
-```bash
-# 1. confirm the commit's run is green on GitHub (.github/workflows/ci.yml)
-# 2. build the release: make rebuilds the owned assets and their pins
-C=$(git rev-parse HEAD)
-make
-# if make changed internal/versions/versions.json, commit it before tagging
-B=~/.tmp/socialweb-computer-build/release/$C/socialweb-computer-linux-amd64; SHA=$(sha256sum $B | cut -d' ' -f1)
-# 3. gateway (socialweb.computer): ship, install the first time or upgrade and install again after, write the caddy sites
-BINARY=$B SHA256=$SHA SSH_KEY=~/.ssh/id_ed25519_no_password \
-  GATEWAY_ENV_FILE=~/.tmp/deploy/gateway.env GATEWAY_SPEC_FILE=~/.tmp/deploy/gateway-spec.yaml scripts/deploy.sh
-# 4. bidder: stage the binary, then upgrade it as the account
-R=/var/tmp/swc-release/socialweb-computer-${C:0:8}; sudo install -m 0755 $B $R
-sudo runuser -u swc-bidder -- env XDG_RUNTIME_DIR=/run/user/$(id -u swc-bidder) \
-  CONFIG_PATH_SOCIALWEB_COMPUTER=/var/lib/socialweb-computer/swc-bidder/config.json $R upgrade --binary $R --sha256 $SHA
+## The RFP flow
+
+A requester rents a VM by posting a `compute.vm` record and a signed `market.rfp`; bidders bid; the
+requester accepts; the winner boots the guest from cloud-init `user_data`. The guest reports an iroh
+ticket and host keys; the requester's ssh dials that ticket. Market records go through the relay.
+
+```text
+requester --market.rfp--> relay/PDS <--bid-- bidder (own kcp: MarketBidder, Bid, ComputeVM)
+    | accept                                    | cloud-init user_data
+    v                                            v
+gateway (own kcp: Gateway, Cluster, NodeClaim)   firecracker VM = k3s node
+    tenant k3s apiserver (kine + front) <-------- node joins over the iroh link
 ```
 
-Verify the deployment by scaling a tenant cluster from zero and back:
+Every listener behind the edge binds port 0 and reports its address into kcp status. Only stable
+entry points (Caddy on 443, an application's front) keep a fixed address.
+
+## Inspect
 
 ```bash
-GW=https://k8s.socialweb.computer AUD=did:web:k8s.socialweb.computer K=computer.socialweb.k8s
-# apply the Job below to the canary cluster, then poll it (see Manage a tenant cluster over XRPC)
-jq -n '{cluster: "canary", manifest: {apiVersion: "batch/v1", kind: "Job",
-  metadata: {name: "scale-check", namespace: "default"},
-  spec: {backoffLimit: 0, template: {spec: {restartPolicy: "Never",
-    containers: [{name: "run", image: "docker.io/library/busybox:1.36.1", command: ["sh", "-c", "echo up"]}]}}}}}' |
-  curl -sS -X POST "$GW/xrpc/$K.kubectlApplyServerSide" -H "Content-Type: application/json" \
-    -H "Authorization: Bearer $(goat account service-auth --aud $AUD --lxm $K.kubectlApplyServerSide)" -d @- | jq -c '{kind, name}'
-curl -sS "$GW/xrpc/$K.getJob?cluster=canary&namespace=default&name=scale-check&tailLines=50" \
-  -H "Authorization: Bearer $(goat account service-auth --aud $AUD --lxm $K.getJob)" | jq -c '{phase, succeeded}'
-```
-
-A tenant cluster scales from zero when you apply a pod to it: the pod raises a `NodeClaim`, the cluster runs the RFP flow for a market VM, the node joins, and the pod runs. Deleting the pod returns the cluster to zero nodes and deletes the VM. Applying a Job on a cluster at zero nodes works the same way; poll `getJob` or watch `#nodeClaim` on `subscribeClusters`.
-
-Roll back as the account with `socialweb-computer rollback`.
-
-Once per host, or when the item changes:
-
-```bash
-# guest image on a bidder host (pinned sha256 in internal/versions/versions.json)
-scripts/build-guest-image.sh --target firecracker-x86_64 --out /var/tmp/guest-image
-sudo install -d -m 0755 /var/lib/socialweb-computer/guest-image && sudo install -m 0644 /var/tmp/guest-image/firecracker-x86_64/{vmlinux,rootfs.ext4,image.json} /var/lib/socialweb-computer/guest-image/
-# OAuth client scope on qr.fedfork.com (the did-key-associator frontend, a separate host); needed when a bidder writes a new record type
-cd ../did-key-associator && SSH_KEY=~/.ssh/id_ed25519_no_password scripts/deploy.sh --static-only
-```
-
-The deploy inputs (gateway.env, gateway-spec.yaml) live on the orphan branch `swc-deploy`, in the worktree `~/.tmp/deploy`. The credential files `~/.aliceoa_bsky_social_source` and `~/.bobvmbuilder_bsky_social_source` are mode 0600; never print, log, or commit their values.
-
-### Sign in with OAuth
-
-- Long form: [docs/oauth.md](docs/oauth.md) (every option, per-mode notes, recovery).
-The script drives headless Chrome through the page, the PDS password and "Authorize"; it reads credentials from the file, never the command line, and writes step screenshots to `~/.tmp/oauth-signin/<ts>/`.
-
-```bash
-# the gateway's web app user; needed after a fresh deploy, not after an upgrade
-# the gateway is API-only: start the sign-in with JSON, then finish the returned URL in a browser
-curl -sS -X POST -H 'Content-Type: application/json' \
-  -d '{"handle":"aliceoa.bsky.social"}' https://k8s.socialweb.computer/oauth/start
-# the bidder association is scripts/associate-bidder.ts; see CONTRIBUTING.md
-```
-
-| Symptom | Meaning |
-| --- | --- |
-| `no oauth session stored for did:...` in the gateway log | the web app user must sign in |
-| `ScopeMissingError` in a bidder log | the OAuth client scope must be deployed on qr.fedfork.com, then the bidder re-signed |
-
-| Option | Meaning |
-| --- | --- |
-| `--creds`, `--account`, `--url` | required; the credential file exports `<ACCOUNT>_ATPROTO_HANDLE` and `<ACCOUNT>_ATPROTO_PASSWORD` |
-| `--click "<pattern>"` | press the confirm button whose label matches |
-| `--out` | screenshot directory |
-| `--chrome`, `--chrome-arg` | the browser path and extra flags |
-| `--cookie-file` | write the browser cookies (0600) |
-
-### Inspect the kcp of an application
-
-- Long form: [docs/inspect.md](docs/inspect.md).
-
-```mermaid
-flowchart TD
-  state["state dir"] --> kcp["kcp/ (control plane)"]
-  kcp --> slots["slot-a active, slot-b retired"]
-  state --> runs["denokcp/runs/pod-*/stdout.txt"]
-  state --> ob["openbaoservers/*/openbao"]
-  state --> cp["clusterprovider/"]
-  state --> apps["apps/<app>/"]
-```
-
-A production application has its own kcp; market-network applications share the network's kcp, one workspace each (`root:<app>`). An admin kubeconfig's server URL ends in `/clusters/<workspace>`; swap the workspace to walk the kcp:
-
-```bash
-kc() { local k=$1 ws=$2; shift 2; local b; b=$(kubectl --kubeconfig $k config view -o jsonpath='{.clusters[0].cluster.server}' | sed 's#/clusters/.*##'); kubectl --kubeconfig $k --server "$b/clusters/$ws" "$@"; }
-tree() { local k=$1 ws=${2:-root}; echo "$ws"; for c in $(kc $k $ws get workspaces -o name 2>/dev/null | sed 's#.*/##'); do tree $k "$ws:$c"; done; }
-
-STATE=/var/tmp/swcit/<run>                 # a dev instance defaults to $HOME/.local/state/socialweb-computer
+STATE=/var/lib/socialweb-computer/socialweb
 find $STATE /var/lib/socialweb-computer -path '*kcp/admin.kubeconfig' -not -path '*slot-*' -not -path '*shared*'
-find $STATE /var/lib/socialweb-computer -path '*server/cred/admin.kubeconfig'   # tenant k3s kubeconfigs
-tree $K                                     # every workspace under the kcp whose kubeconfig is $K
-kc $K root api-resources --api-group=socialweb.computer
-kc $K root:<acct>:<cluster> get nodeclaims  # a cluster's claims live in its home workspace
 ```
 
-| Where | Path |
-| --- | --- |
-| a production gateway's kcp | its state dir, default `/var/lib/socialweb-computer/socialweb/kcp` |
-| a production bidder's kcp | `/var/lib/socialweb-computer/swc-bidder/handles/<hash>/kcp` (root only; `sudo kubectl --kubeconfig ...`) |
-| a DenoPod's log | `<state>/denokcp/runs/pod-*/stdout.txt`, `stderr.txt` (gone on restart); `service.txt` names the pod |
-| the core's log | `journalctl --user -u <unit>`, or `dev logs core --instance <id>` |
-| a host without kubectl | the gateway's embedded k3s: `K3S=$(find /var/lib/socialweb-computer/socialweb/runtime -name k3s -type f | head -1); $K3S kubectl ...` |
-| ssh to prod | `ssh -i ~/.ssh/id_ed25519_no_password -p 1997 root@socialweb.computer` |
+A production application has its own kcp. An admin kubeconfig's server URL ends in
+`/clusters/<workspace>`. Full commands: [CONTRIBUTING: troubleshooting](CONTRIBUTING.md#troubleshooting).
 
 ## License
+
 Unlicense (public domain).
