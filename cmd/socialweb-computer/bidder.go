@@ -49,6 +49,7 @@ type bidderRun struct {
 	ingress        *v1alpha1.IngressConfig
 	pdsURL         string
 	identityMode   v1alpha1.MarketIdentityMode
+	password       string
 	readyTimeout   time.Duration
 	networkTimeout time.Duration
 }
@@ -97,6 +98,8 @@ func (r *bidderRun) passthrough(args []string) error {
 			r.identityMode = v1alpha1.MarketIdentityMode(p.Value)
 		case p.To == "spec.identity.pdsUrl":
 			r.pdsURL = p.Value
+		case p.To == appctl.MapToState && p.Name == "atproto-password":
+			r.password = p.Value
 		case p.To == "spec.identity.handle":
 			if r.handle != "" && r.handle != p.Value {
 				return fmt.Errorf("--atproto-handle %s and --handle %s name two accounts", p.Value, r.handle)
@@ -193,6 +196,11 @@ func runBidder(ctx context.Context, a *app, vals clicfg.Values, rest []string) i
 	}
 	if err := r.configOptions(vals.String("bidder-options")); err != nil {
 		return a.fail(exitRefused, "run bidder: bidder-options: %v", err)
+	}
+	if r.password != "" {
+		if err := os.Setenv(appctl.EnvPdsAccountPassword, r.password); err != nil {
+			return a.fail(exitRefused, "run bidder: --atproto-password: %v", err)
+		}
 	}
 	if r.policy == "" {
 		r.policy = vals.String("bidder-policy")

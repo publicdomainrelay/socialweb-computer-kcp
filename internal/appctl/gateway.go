@@ -159,16 +159,20 @@ func RootVaultSpec(g v1alpha1.GatewaySpec) (v1alpha1.OpenBaoServerSpec, error) {
 }
 
 func GatewayRequesterIdentity(g v1alpha1.GatewaySpec) v1alpha1.ApplicationIdentity {
-	association := v1alpha1.AssociationMode("")
-	if optionValue(g.Options, "skip-association") == "true" {
-		association = v1alpha1.AssociationSkip
+	id := g.Identity
+	if id.Mode == "" {
+		id.Mode = v1alpha1.MarketIdentityMode(optionValue(g.Options, "atproto-identity-mode"))
 	}
-	return v1alpha1.ApplicationIdentity{
-		Mode:        v1alpha1.MarketIdentityMode(optionValue(g.Options, "atproto-identity-mode")),
-		Handle:      optionValue(g.Options, "atproto-handle"),
-		PdsUrl:      optionValue(g.Options, "atproto-pds-url"),
-		Association: association,
+	if id.Handle == "" {
+		id.Handle = optionValue(g.Options, "atproto-handle")
 	}
+	if id.PdsUrl == "" {
+		id.PdsUrl = optionValue(g.Options, "atproto-pds-url")
+	}
+	if id.Association == "" && optionValue(g.Options, "skip-association") == "true" {
+		id.Association = v1alpha1.AssociationSkip
+	}
+	return id
 }
 
 func sameSpec(a, b any) bool {
@@ -411,7 +415,9 @@ func (ctl *Controller) reconcileGateway(ctx context.Context, u *unstructured.Uns
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, fmt.Sprintf("profile %q: want %s or %s", o.Spec.Profile, ProfileGatewayProd, ProfileGatewayNetwork)
 		return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
 	}
-	plan, err := ctl.planAccount(ctx, ws, GatewayRequesterIdentity(o.Spec), "requester", v1alpha1.AssociationRequireApproval)
+	plan, err := ctl.planAccount(ctx, ws, GatewayRequesterIdentity(o.Spec), "requester",
+		accountVault{Server: vaultlayout.RootServerName, Client: RequesterVaultClient, Mount: RequesterVaultMount},
+		v1alpha1.AssociationRequireApproval)
 	if err != nil {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
 		return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
@@ -476,6 +482,10 @@ func (ctl *Controller) reconcileGateway(ctx context.Context, u *unstructured.Uns
 		}
 		if err := ctl.ensureIdentitySpec(ctx, ws, owner, RequesterIdentity, OperatorWatched(plan.Identity, o.Spec.Operator)); err != nil {
 			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "the requester's MarketIdentity: "+err.Error()
+			return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
+		}
+		if err := ctl.seedPdsAccountPassword(ctx, plan); err != nil {
+			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "the requester's account password: "+err.Error()
 			return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
 		}
 		if plan.Local {

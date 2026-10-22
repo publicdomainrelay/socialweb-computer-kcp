@@ -699,7 +699,9 @@ func (ctl *Controller) reconcileBidder(ctx context.Context, u *unstructured.Unst
 			return err
 		}
 	}
-	plan, err := ctl.planAccount(ctx, ctl.c.workspace(), o.Spec.Identity, "bidder", v1alpha1.AssociationRequireApproval)
+	plan, err := ctl.planAccount(ctx, ctl.c.workspace(), o.Spec.Identity, "bidder",
+		accountVault{Server: BidderVaultServer, Client: BidderVaultClient, Mount: BidderVaultClient},
+		v1alpha1.AssociationRequireApproval)
 	if err != nil {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
 		return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
@@ -758,6 +760,10 @@ func (ctl *Controller) reconcileBidder(ctx context.Context, u *unstructured.Unst
 			}
 		} else if _, _, _, err := ctl.vaultRefs(ctx, BidderVaultServer, BidderVaultClient); err != nil {
 			st.Message = "its vault: " + err.Error()
+			return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
+		}
+		if err := ctl.seedPdsAccountPassword(ctx, plan); err != nil {
+			st.Message = "its account password: " + err.Error()
 			return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
 		}
 		ctl.applied[string(o.UID)] = o.Generation

@@ -2,7 +2,12 @@ package appctl
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
+	"net/http"
+	"os"
 	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -10,9 +15,31 @@ import (
 
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/remotepds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/statusstate"
 )
+
+const EnvPdsAccountPassword = "ATPROTO_PASSWORD"
+
+var ErrMissingPdsAccountPassword = errors.New("appctl: mode pdsAccount needs the account password in " +
+	EnvPdsAccountPassword + " or --atproto-password; no password is available")
+
+type accountVault struct {
+	Server string
+
+	Client string
+
+	Mount string
+}
+
+func (v accountVault) mount(fallback string) string {
+	mount := strings.Trim(strings.TrimSpace(v.Mount), "/")
+	if mount == "" {
+		mount = fallback
+	}
+	return mount
+}
 
 type accountPlan struct {
 	Mode v1alpha1.MarketIdentityMode
@@ -32,6 +59,8 @@ type accountPlan struct {
 	KeysPath string
 
 	ComponentMode string
+
+	Vault accountVault
 }
 
 func (p accountPlan) accessTokenPath() string {
@@ -58,18 +87,30 @@ func (p accountPlan) repoRef() *v1alpha1.RepoRef {
 	if p.PdsRef != nil && p.PdsRef.Name != "" {
 		return &v1alpha1.RepoRef{Kind: p.PdsRef.Kind, Name: p.PdsRef.Name}
 	}
+	if url := strings.TrimSpace(p.PdsURL); url != "" {
+		return &v1alpha1.RepoRef{Kind: "RemotePDS", Name: deterministicPdsName(url)}
+	}
+	if url := strings.TrimSpace(p.Identity.PdsUrl); url != "" {
+		return &v1alpha1.RepoRef{Kind: "RemotePDS", Name: deterministicPdsName(url)}
+	}
 	return nil
 }
 
+func deterministicPdsName(url string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(url)))
+	return "pds-" + hex.EncodeToString(sum[:8])
+}
+
 func (ctl *Controller) planAccount(ctx context.Context, ws string, id v1alpha1.ApplicationIdentity,
-	suffix string, defaultAssociation v1alpha1.AssociationMode) (accountPlan, error) {
+	suffix string, vault accountVault, defaultAssociation v1alpha1.AssociationMode) (accountPlan, error) {
 	mode := id.Mode
 	if mode == "" {
 		mode = v1alpha1.MarketIdentityModeLocalRepo
 	}
+	mount := vault.mount(suffix)
 	sessionPath := "identity/" + suffix + "/pds-session"
 	keysPath := "identity/" + suffix + "/keys"
-	plan := accountPlan{Mode: mode, SessionPath: sessionPath, KeysPath: keysPath}
+	plan := accountPlan{Mode: mode, SessionPath: sessionPath, KeysPath: keysPath, Vault: vault}
 	switch mode {
 	case v1alpha1.MarketIdentityModeLocalRepo:
 		association := id.Association
@@ -88,8 +129,8 @@ func (ctl *Controller) planAccount(ctx context.Context, ws string, id v1alpha1.A
 	case v1alpha1.MarketIdentityModePdsAccount:
 		plan.ComponentMode = "callback"
 		plan.Identity = v1alpha1.MarketIdentitySpec{Mode: mode, Handle: id.Handle, PdsUrl: id.PdsUrl,
-			KeysRef:    &v1alpha1.VaultRef{Mount: suffix, Path: keysPath},
-			SessionRef: &v1alpha1.VaultRef{Mount: suffix, Path: sessionPath}}
+			KeysRef:    &v1alpha1.VaultRef{Mount: mount, Path: keysPath},
+			SessionRef: &v1alpha1.VaultRef{Mount: mount, Path: sessionPath}}
 		url, remote, err := ctl.resolveAccountPds(ctx, ws, id)
 		if err != nil {
 			return accountPlan{}, err
@@ -104,13 +145,16 @@ func (ctl *Controller) planAccount(ctx context.Context, ws string, id v1alpha1.A
 	case v1alpha1.MarketIdentityModeOAuthBrowser, v1alpha1.MarketIdentityModeOAuthQr, v1alpha1.MarketIdentityModeOAuthDelegated:
 		plan.ComponentMode = "oauth"
 		plan.Identity = v1alpha1.MarketIdentitySpec{Mode: mode, Handle: id.Handle, PdsUrl: id.PdsUrl,
-			SessionRef: &v1alpha1.VaultRef{Mount: suffix, Path: sessionPath}}
+			SessionRef: &v1alpha1.VaultRef{Mount: mount, Path: sessionPath}}
+		plan.PdsURL = strings.TrimSpace(id.PdsUrl)
 		if remote, err := ctl.remotePDSRef(ctx, ws, id.PdsRef); err != nil {
 			return accountPlan{}, err
 		} else if remote != nil {
 			plan.RemotePDS = remote
-			plan.PdsURL = remote.Spec.URL
 			plan.PdsRef = &v1alpha1.ComponentRef{Kind: "RemotePDS", Name: remote.Name, Did: remote.Spec.DID}
+			if plan.PdsURL == "" {
+				plan.PdsURL = remote.Spec.URL
+			}
 			if plan.Identity.PdsUrl == "" {
 				plan.Identity.PdsUrl = remote.Spec.URL
 			}
@@ -118,6 +162,45 @@ func (ctl *Controller) planAccount(ctx context.Context, ws string, id v1alpha1.A
 		return plan, nil
 	}
 	return accountPlan{}, fmt.Errorf("appctl: MarketIdentity mode %q: want one of localRepo, pdsAccount, oauthBrowser, oauthQr, oauthDelegated", mode)
+}
+
+func (ctl *Controller) seedPdsAccountPassword(ctx context.Context, plan accountPlan) error {
+	if plan.Mode != v1alpha1.MarketIdentityModePdsAccount {
+		return nil
+	}
+	password := strings.TrimSpace(os.Getenv(EnvPdsAccountPassword))
+	if password == "" {
+		return ErrMissingPdsAccountPassword
+	}
+	if plan.Identity.KeysRef == nil || strings.TrimSpace(plan.KeysPath) == "" {
+		return errors.New("appctl: mode pdsAccount names no keysRef for its password")
+	}
+	if plan.Vault.Server == "" || plan.Vault.Client == "" {
+		return errors.New("appctl: mode pdsAccount names no vault for its password")
+	}
+	client, _, c, err := ctl.vaultClient(ctx, plan.Vault.Server, plan.Vault.Client)
+	if err != nil {
+		return err
+	}
+	defer client.RevokeSelf(context.Background())
+	path := c.KVMount + "/data/" + plan.KeysPath
+	data, err := client.GetKV(ctx, path)
+	var re *openbao.ResponseError
+	if err != nil && !(errors.As(err, &re) && re.Status == http.StatusNotFound) {
+		return err
+	}
+	if data == nil {
+		data = map[string]any{}
+	}
+	if existing, _ := data["password"].(string); existing == password {
+		return nil
+	}
+	data["password"] = password
+	if err := client.PutKV(ctx, path, data); err != nil {
+		return err
+	}
+	ctl.c.log().Info("the pdsAccount password is in its OpenBao keysRef", "server", plan.Vault.Server, "path", plan.KeysPath)
+	return nil
 }
 
 func (ctl *Controller) resolveAccountPds(ctx context.Context, ws string, id v1alpha1.ApplicationIdentity) (string, *pdsv1alpha1.RemotePDS, error) {

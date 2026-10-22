@@ -351,7 +351,9 @@ func (ctl *Controller) reconcileRequester(ctx context.Context, u *unstructured.U
 			return err
 		}
 	}
-	plan, err := ctl.planAccount(ctx, ctl.c.workspace(), o.Spec.Identity, "requester", v1alpha1.AssociationRequireApproval)
+	plan, err := ctl.planAccount(ctx, ctl.c.workspace(), o.Spec.Identity, "requester",
+		accountVault{Server: RequesterVaultServer, Client: RequesterVaultClient, Mount: RequesterVaultClient},
+		v1alpha1.AssociationRequireApproval)
 	if err != nil {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
 		return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
@@ -397,6 +399,10 @@ func (ctl *Controller) reconcileRequester(ctx context.Context, u *unstructured.U
 		}
 		if _, _, err := ctl.requesterKcp(ctx, ComponentCRStateDir(stateRoot, ComponentKindRequester, RequesterComponent)); err != nil {
 			st.Message = "its vault and its kcp account: " + err.Error()
+			return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
+		}
+		if err := ctl.seedPdsAccountPassword(ctx, plan); err != nil {
+			st.Message = "its account password: " + err.Error()
 			return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
 		}
 		ctl.applied[string(o.UID)] = o.Generation

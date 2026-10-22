@@ -202,16 +202,29 @@ func ownerIdentityOf(path string) (string, string) {
 	return dids[0], sessions[dids[0]].Identifier
 }
 
-func sshGatewayAccountIdentity(o v1alpha1.SshGateway) v1alpha1.ApplicationIdentity {
-	return v1alpha1.ApplicationIdentity{
-		Mode:   v1alpha1.MarketIdentityMode(optionValue(o.Spec.Options, "atproto-identity-mode")),
-		Handle: optionValue(o.Spec.Options, "app-handle"),
-		PdsUrl: optionValue(o.Spec.Options, "atproto-pds-url"),
+func sshGatewayIdentityHandle(o v1alpha1.SshGateway) string {
+	if handle := strings.TrimSpace(o.Spec.Identity.Handle); handle != "" {
+		return handle
 	}
+	return optionValue(o.Spec.Options, "app-handle")
+}
+
+func sshGatewayAccountIdentity(o v1alpha1.SshGateway) v1alpha1.ApplicationIdentity {
+	id := o.Spec.Identity
+	if id.Mode == "" {
+		id.Mode = v1alpha1.MarketIdentityMode(optionValue(o.Spec.Options, "atproto-identity-mode"))
+	}
+	if id.Handle == "" {
+		id.Handle = optionValue(o.Spec.Options, "app-handle")
+	}
+	if id.PdsUrl == "" {
+		id.PdsUrl = optionValue(o.Spec.Options, "atproto-pds-url")
+	}
+	return id
 }
 
 func (ctl *Controller) sshRequesterIdentity(ctx context.Context, owner string, o v1alpha1.SshGateway, plan accountPlan) (*v1alpha1.ComponentIdentity, error) {
-	handle := optionValue(o.Spec.Options, "app-handle")
+	handle := sshGatewayIdentityHandle(o)
 	if did := optionValue(o.Spec.Options, "app-did"); did != "" {
 		return &v1alpha1.ComponentIdentity{Did: did, Handle: handle}, nil
 	}
@@ -334,7 +347,9 @@ func (ctl *Controller) reconcileSshGateway(ctx context.Context, u *unstructured.
 		}
 	}
 	stateRoot := ctl.c.Layout.StateDir
-	plan, err := ctl.planAccount(ctx, ctl.c.workspace(), sshGatewayAccountIdentity(o), "requester", v1alpha1.AssociationRequireApproval)
+	plan, err := ctl.planAccount(ctx, ctl.c.workspace(), sshGatewayAccountIdentity(o), "requester",
+		accountVault{Server: SshGatewayVaultServer, Client: SshGatewayVaultClient, Mount: SshGatewayVaultServer},
+		v1alpha1.AssociationRequireApproval)
 	if err != nil {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
 		return ctl.writeStatus(ctx, SshGatewayGVR, o.Name, st)
@@ -379,6 +394,10 @@ func (ctl *Controller) reconcileSshGateway(ctx context.Context, u *unstructured.
 		}
 		if _, _, err := ctl.sshGatewayKcp(ctx, stateDir); err != nil {
 			st.Message = "its vault and its kcp account: " + err.Error()
+			return ctl.writeStatus(ctx, SshGatewayGVR, o.Name, st)
+		}
+		if err := ctl.seedPdsAccountPassword(ctx, plan); err != nil {
+			st.Message = "the ssh requester's account password: " + err.Error()
 			return ctl.writeStatus(ctx, SshGatewayGVR, o.Name, st)
 		}
 		ctl.applied[string(o.UID)] = o.Generation
