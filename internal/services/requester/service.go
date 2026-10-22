@@ -49,6 +49,8 @@ const (
 	submitAcceptReceiptPoll = 250 * time.Millisecond
 
 	acceptSettleDelay = 2 * time.Second
+
+	serviceAuthTimeout = 5 * time.Second
 )
 
 type Service struct {
@@ -588,6 +590,7 @@ func (s *Service) loop(ctx context.Context) {
 	for {
 		s.reconcile(ctx)
 		s.processPendingEvents(ctx)
+		s.processBidMailboxes(ctx)
 		select {
 		case <-ctx.Done():
 			return
@@ -1022,12 +1025,9 @@ func (s *Service) submitBid(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest", "message": err.Error()})
 		return
 	}
-	if !market.VerifyRecordSignatures(r.Context(), body.Record, market.ATURIAuthority(body.URI), market.VerifyRecordOptions{
-		KeysForDID:             market.NewDirectoryKeyLister(s.directory),
-		KeyResolver:            market.DefaultKeyResolver,
-		KeyBoundByBadgeBlueKey: s.badgeBlueBinding(),
-	}) {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest", "message": "the bid carries no valid badge.blue signature"})
+	if err := s.storeBidMailbox(r.Context(), issuer, body.URI, body.CID, body.Record); err != nil {
+		s.log.Warn("requester_bid_enqueue_failed", "uri", body.URI, "err", err)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "Unavailable", "message": err.Error()})
 		return
 	}
 	s.queueBid(bid.RFP.URI, BidRecord{DID: issuer, URI: body.URI, CID: body.CID, Record: body.Record, ArrivedAt: s.now()})
@@ -1080,7 +1080,9 @@ func (s *Service) authorizeCallback(w http.ResponseWriter, r *http.Request, lxm,
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest", "message": "no callback hostname"})
 		return "", false
 	}
-	result, err := market.VerifyServiceAuth(r.Context(), s.directory, market.VerifyServiceAuthOptions{
+	ctx, cancel := context.WithTimeout(r.Context(), serviceAuthTimeout)
+	defer cancel()
+	result, err := market.VerifyServiceAuth(ctx, s.directory, market.VerifyServiceAuthOptions{
 		AuthHeader:        r.Header.Get("Authorization"),
 		Hostname:          hostname,
 		LXM:               lxm,
