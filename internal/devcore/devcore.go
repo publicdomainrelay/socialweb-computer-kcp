@@ -331,10 +331,14 @@ func ComponentCoreConfig(ctx context.Context, cfg Config, rec devinstance.Record
 		out.CredentialClient = appctl.RequesterVaultClient
 		out.CredentialServer = vaultlayout.RootServerName
 		out.VaultClient = appctl.RequesterVaultClient
-	case strings.Contains(rec.BaseWorkspace, ":bidder"):
+	case strings.Contains(rec.BaseWorkspace, ":bidder"), strings.HasPrefix(rec.BaseWorkspace, "b-"):
 		out.CredentialClient = appctl.BidderVaultClient
 		out.CredentialServer = appctl.BidderVaultServer
 		out.VaultClient = appctl.BidderVaultClient
+	case strings.HasPrefix(rec.BaseWorkspace, "r-"):
+		out.CredentialClient = appctl.RequesterVaultClient
+		out.CredentialServer = vaultlayout.RootServerName
+		out.VaultClient = appctl.RequesterVaultClient
 	}
 	if rec.Profile == bootstrap.ProfileQuick {
 		out.InstallAccount = install.AccountBidder
