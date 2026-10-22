@@ -745,8 +745,10 @@ func (a *provisionAdapter) Observe(ctx context.Context, request statesync.Reques
 	if err != nil {
 		return statesync.Observation{}, err
 	}
+	var bid *v1alpha1.Bid
 	if a.service != nil && a.service.bids != nil {
-		bid, err := a.service.bids.Get(ctx, payload.BidName)
+		var err error
+		bid, err = a.service.bids.Get(ctx, payload.BidName)
 		if err != nil {
 			return statesync.Observation{}, err
 		}
@@ -759,7 +761,14 @@ func (a *provisionAdapter) Observe(ctx context.Context, request statesync.Reques
 	if err != nil {
 		return statesync.Observation{}, err
 	}
-	if vm == nil || !contractBound(vm, payload.Receipt) {
+	if vm == nil {
+		if bid != nil && bid.Status.ComputeVM != "" {
+			return statesync.Observation{Exists: true, Ref: "released:" + bid.Status.ComputeVM,
+				Hash: provisionPayloadHash(request.Payload), At: time.Now().UTC().Format(time.RFC3339)}, nil
+		}
+		return statesync.Observation{Exists: false}, nil
+	}
+	if !contractBound(vm, payload.Receipt) {
 		return statesync.Observation{Exists: false}, nil
 	}
 	return statesync.Observation{
