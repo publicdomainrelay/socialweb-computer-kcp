@@ -108,7 +108,7 @@ func buildDeps(cfg Config) (Deps, error) {
 	}
 	resolver, err := plcresolver.New(plcresolver.Options{
 		URL:    cfg.PLCURL,
-		Client: &http.Client{Timeout: plcTimeout},
+		Client: &http.Client{Timeout: cfg.PLCTimeout},
 	})
 	if err != nil {
 		return Deps{}, fmt.Errorf("the sweep's resolver: %w", err)
@@ -136,8 +136,6 @@ func buildDeps(cfg Config) (Deps, error) {
 	}, nil
 }
 
-const plcTimeout = 10 * time.Second
-
 const ListenerName = "xrpc"
 
 func loopbackURL(raw string) bool {
@@ -160,17 +158,27 @@ func directory(cfg Config) (identity.Directory, error) {
 			"indigo's identity.DefaultDirectory() is a %T, not a *identity.CacheDirectory, so its "+
 				"revalidation window cannot be set", hardened)
 	}
-	inner := cached.Inner
-	if base, ok := inner.(*identity.BaseDirectory); ok && cfg.PLCURL != "" && cfg.PLCURL != identity.DefaultPLCURL {
-		own := &identity.BaseDirectory{PLCURL: strings.TrimSuffix(cfg.PLCURL, "/"), HTTPClient: base.HTTPClient,
-			TryAuthoritativeDNS: base.TryAuthoritativeDNS, SkipDNSDomainSuffixes: base.SkipDNSDomainSuffixes, UserAgent: base.UserAgent}
-		if loopbackURL(own.PLCURL) {
-			own.HTTPClient = http.Client{Timeout: plcTimeout}
-		}
-		inner = own
+	base, ok := cached.Inner.(*identity.BaseDirectory)
+	if !ok {
+		return nil, fmt.Errorf(
+			"indigo's identity.DefaultDirectory() wraps a %T, not a *identity.BaseDirectory, so the "+
+				"PLC, did:web and handle HTTP clients cannot be bounded", cached.Inner)
+	}
+	timeout := cfg.PLCTimeout
+	if timeout <= 0 {
+		timeout = DefaultPLCTimeout
+	}
+	if cfg.PLCURL != "" {
+		base.PLCURL = strings.TrimSuffix(cfg.PLCURL, "/")
+	}
+	base.PLCClient = &http.Client{Timeout: timeout}
+	if loopbackURL(base.PLCURL) {
+		base.HTTPClient = http.Client{Timeout: timeout}
+	} else {
+		base.HTTPClient.Timeout = timeout
 	}
 	return identity.NewCacheDirectory(
-		inner,
+		base,
 		directoryCacheCapacity,
 		cfg.DirectoryCacheTTL,
 		cfg.DirectoryCacheTTL,

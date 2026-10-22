@@ -21,7 +21,8 @@ const (
 	envShutdownTimeout = "SOCIALWEB_GATEWAY_SHUTDOWN_TIMEOUT"
 	envLogLevel        = "SOCIALWEB_GATEWAY_LOG_LEVEL"
 
-	envPLCURL = "SOCIALWEB_GATEWAY_PLC_URL"
+	envPLCURL     = "SOCIALWEB_GATEWAY_PLC_URL"
+	envPLCTimeout = "SOCIALWEB_GATEWAY_PLC_TIMEOUT"
 
 	envKCPPublicHost   = "SOCIALWEB_GATEWAY_KCP_PUBLIC_HOST"
 	envKCPPublicCAFile = "SOCIALWEB_GATEWAY_KCP_PUBLIC_CA_FILE"
@@ -34,6 +35,8 @@ const (
 )
 
 const DefaultDirectoryCacheTTL = 60 * time.Second
+
+const DefaultPLCTimeout = 10 * time.Second
 
 const DefaultShutdownTimeout = 30 * time.Second
 
@@ -49,6 +52,8 @@ type Config struct {
 	DirectoryCacheTTL time.Duration
 
 	PLCURL string
+
+	PLCTimeout time.Duration
 
 	ShutdownTimeout time.Duration
 
@@ -78,6 +83,7 @@ func load(get func(string) string) (Config, error) {
 		ClusterStateDir: strings.TrimSpace(get(envClusterStateDir)),
 
 		DirectoryCacheTTL: DefaultDirectoryCacheTTL,
+		PLCTimeout:        DefaultPLCTimeout,
 		ShutdownTimeout:   DefaultShutdownTimeout,
 		LogLevel:          slog.LevelInfo,
 	}
@@ -120,6 +126,9 @@ func load(get func(string) string) (Config, error) {
 		}
 	}
 	if cfg.DirectoryCacheTTL, err = duration(get, envDirectoryTTL, DefaultDirectoryCacheTTL); err != nil {
+		return Config{}, err
+	}
+	if cfg.PLCTimeout, err = duration(get, envPLCTimeout, DefaultPLCTimeout); err != nil {
 		return Config{}, err
 	}
 	if cfg.ShutdownTimeout, err = duration(get, envShutdownTimeout, DefaultShutdownTimeout); err != nil {

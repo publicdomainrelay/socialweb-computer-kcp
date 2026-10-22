@@ -277,9 +277,12 @@ func (s *Server) authorize(w http.ResponseWriter, req *http.Request, nsid string
 		return "", false
 	}
 
-	did, err := atprotoauth.Verify(req.Context(), token, nsid, s.opts.Audiences, s.opts.Directory)
+	ctx, cancel := context.WithTimeout(req.Context(), atprotoauth.LookupTimeout)
+	defer cancel()
+
+	did, err := atprotoauth.Verify(ctx, token, nsid, s.opts.Audiences, s.opts.Directory)
 	if err != nil {
-		if errors.Is(err, atprotoauth.ErrNoKey) {
+		if errors.Is(err, atprotoauth.ErrNoKey) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			writeError(w, nsid, s.opts.RetryAfter, gateway.ErrClusterUnavailable)
 			return "", false
 		}
