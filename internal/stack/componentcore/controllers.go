@@ -14,16 +14,19 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 
+	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/apiserverfront"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/appctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/childapplication"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/credentials"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/eventstream"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostlifecycle"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
@@ -332,9 +335,10 @@ func (c *Core) buildControllers() {
 		log.Warn("the child application controller is not wired", "err", err.Error())
 	}
 
+	secrets := coreSecretResolver(c.store, base, cfg.CredentialClient, cfg.CredentialServer)
+	caBundle := func(ref string) ([]byte, error) { return os.ReadFile(openbaoctl.FileRef(ref)) }
 	if _, err := remotepds.Register(remotePDSRegistrar{runtime: runtime}, remotepds.Options{Workspace: base,
-		Dynamic: remotepds.DynamicFactory(cfg.DynamicFactory), Log: log,
-		CABundle: func(ref string) ([]byte, error) { return os.ReadFile(openbaoctl.FileRef(ref)) }}); err != nil {
+		Dynamic: remotepds.DynamicFactory(cfg.DynamicFactory), Log: log, CABundle: caBundle, Secrets: secrets}); err != nil {
 		log.Warn("the remote pds controller is not wired", "err", err.Error())
 	}
 
@@ -342,6 +346,16 @@ func (c *Core) buildControllers() {
 	if handlers == nil {
 		handlers = component.NewHandlerRegistry()
 		c.handlers = handlers
+	}
+	repoResolver := &pdsclient.RepoResolver{Handlers: handlers, Timeout: pdsClientTimeout, Secrets: secrets,
+		RemotePDS: remotePDSSource(cfg.DynamicFactory), CABundle: caBundle}
+	if repoCtl, err := appctl.NewAtprotoRepoController(appctl.AtprotoRepoOptions{Resolver: repoResolver, Log: log}); err != nil {
+		log.Warn("the AtprotoRepo controller is not wired", "err", err.Error())
+	} else if err := runtime.add(controllerEntry{gvr: statusstate.AtprotoRepoGVR,
+		reconcile: func(ctx context.Context, dyn dynamic.Interface, workspace string, u *unstructured.Unstructured) error {
+			return repoCtl.Reconcile(ctx, dyn, workspace, u)
+		}}); err != nil {
+		log.Warn("the AtprotoRepo controller is not registered", "err", err.Error())
 	}
 	if mp, err := marketpresence.NewController(marketpresence.Options{Workspaces: cfg.Workspaces, Dynamic: marketpresence.DynamicFactory(cfg.DynamicFactory),
 		HTTPClient: handlers.Client(), Log: log}); err != nil {
@@ -356,7 +370,7 @@ func (c *Core) buildControllers() {
 		plcBaseURL = "http://" + kcp.ServiceFQDN(appctl.NetworkPLCName, "default", base, kcp.DefaultServiceDomain)
 	}
 	if ss, err := statusstate.New(statusstate.Options{Workspace: base, Dynamic: statusstate.DynamicFactory(cfg.DynamicFactory),
-		PDS: statusPDSResolver(resolver, base), Vault: openBaoMetadata(c.store, base),
+		PDS: statusPDSResolver(resolver, base), RepoResolver: repoResolver, Vault: openBaoMetadata(c.store, base),
 		PLCBaseURL: plcBaseURL, PLCHandlers: handlers,
 		RelayEndpoint: c.relayEndpoint(base), RelayHandlers: handlers, Log: log}); err != nil {
 		log.Warn("the status state controller is not wired", "err", err.Error())
@@ -483,6 +497,76 @@ func statusPDSResolver(resolver *pdsclient.Resolver, workspace string) statussta
 		}
 		return resolver.ResolveLocal(local)
 	})
+}
+
+func coreSecretResolver(store *kcpstore.Store, workspace, client, server string) pdsclient.SecretResolver {
+	if store == nil {
+		return nil
+	}
+	resolver, err := credentials.NewKCPResolver(store, workspace, client, server)
+	if err != nil {
+		return nil
+	}
+	return pdsclient.SecretResolverFunc(func(ctx context.Context, raw string) (map[string]any, error) {
+		ref, err := coreCredentialRef(raw)
+		if err != nil {
+			return nil, err
+		}
+		credential, err := resolver.Resolve(ctx, ref)
+		if err != nil {
+			return nil, err
+		}
+		return credential.Data, nil
+	})
+}
+
+func coreCredentialRef(raw string) (component.CredentialRef, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return component.CredentialRef{}, errors.New("componentcore: the secret ref is empty")
+	}
+	if path, ok := strings.CutPrefix(raw, "file:"); ok {
+		if path == "" {
+			return component.CredentialRef{}, errors.New("componentcore: the file secret ref has no path")
+		}
+		return component.CredentialRef{Mount: "file", Path: path}, nil
+	}
+	raw = strings.TrimPrefix(raw, "openbao:")
+	raw = strings.TrimPrefix(raw, "vault:")
+	server, path, ok := strings.Cut(raw, ":")
+	if !ok {
+		server = ""
+		path = raw
+	}
+	path = strings.Trim(path, "/")
+	if path == "" {
+		return component.CredentialRef{}, errors.New("componentcore: the secret ref has no path")
+	}
+	return component.CredentialRef{Server: strings.TrimSpace(server), Path: path}, nil
+}
+
+func remotePDSSource(factory DynamicFactory) pdsclient.RemotePDSSource {
+	if factory == nil {
+		return nil
+	}
+	return func(ctx context.Context, workspace, name string) (*pdsv1alpha1.RemotePDS, error) {
+		dyn, err := factory(workspace)
+		if err != nil {
+			return nil, fmt.Errorf("componentcore: the client for %s: %w", workspace, err)
+		}
+		if dyn == nil {
+			return nil, fmt.Errorf("componentcore: the client for %s is nil", workspace)
+		}
+		u, err := dyn.Resource(remotepds.RemotePDSGVR).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return nil, err
+		}
+		var object pdsv1alpha1.RemotePDS
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &object); err != nil {
+			return nil, fmt.Errorf("componentcore: decoding RemotePDS %s: %w", name, err)
+		}
+		return &object, nil
+	}
 }
 
 func openBaoMetadata(store *kcpstore.Store, workspace string) statusstate.VaultSource {

@@ -14,7 +14,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/statusstate"
 )
 
-func (ctl *Controller) ensureAppPdsStatus(ctx context.Context, handle string, sess PdsSession, plc bool) {
+func (ctl *Controller) ensureAppPdsStatus(ctx context.Context, handle string, sess PdsSession, sessionPath string, plc bool) {
 	if strings.TrimSpace(sess.Did) == "" {
 		return
 	}
@@ -31,7 +31,8 @@ func (ctl *Controller) ensureAppPdsStatus(ctx context.Context, handle string, se
 	}
 	if strings.TrimSpace(sess.AccessJWT) != "" {
 		ctl.ensureStatusObject(ctx, ws, statusstate.AtprotoSessionGVR, "AtprotoSession",
-			statusObjectName("session", handle), v1alpha1.AtprotoSessionSpec{DID: sess.Did, AccountRef: accountName, PdsRef: pdsRef})
+			statusObjectName("session", handle), v1alpha1.AtprotoSessionSpec{DID: sess.Did, AccountRef: accountName,
+				PdsRef: pdsRef, SessionID: sessionPath})
 	}
 }
 

@@ -105,11 +105,17 @@ func (c *Controller) connect(object pdsv1alpha1.RemotePDS) (pdsclient.PDS, strin
 	if err != nil {
 		return nil, "", "InvalidTLS", err
 	}
+	tokens, dpop, err := pdsclient.AuthSources(object.Spec.Auth, c.secrets)
+	if err != nil {
+		return nil, "", "InvalidAuth", err
+	}
 	endpoint := strings.TrimRight(baseURL.String(), "/")
 	pds, err := pdsclient.NewRemote(pdsclient.RemoteConfig{
 		BaseURL: endpoint,
 		DID:     did,
 		TLS:     tlsConfig,
+		Tokens:  tokens,
+		DPoP:    dpop,
 		Timeout: c.timeout,
 	})
 	if err != nil {

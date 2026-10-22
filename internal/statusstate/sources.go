@@ -2,6 +2,9 @@ package statusstate
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/syntax"
@@ -77,6 +80,93 @@ type SessionSourceFunc func(ctx context.Context, ref, did, sessionID string) (Se
 
 func (f SessionSourceFunc) SessionStatus(ctx context.Context, ref, did, sessionID string) (SessionObservation, error) {
 	return f(ctx, ref, did, sessionID)
+}
+
+func RepoBindingFor(workspace, ref, did string) pdsclient.RepoBinding {
+	binding := pdsclient.RepoBinding{Workspace: workspace, DID: strings.TrimSpace(did)}
+	ref = strings.TrimSpace(ref)
+	switch {
+	case ref == "":
+	case strings.Contains(ref, "://"):
+		binding.Kind = "url"
+		binding.Endpoint = ref
+	default:
+		if kind, name, ok := strings.Cut(ref, "/"); ok {
+			binding.Kind = strings.TrimSpace(kind)
+			binding.Name = strings.TrimSpace(name)
+		} else {
+			binding.Kind = "pds"
+			binding.Name = ref
+		}
+	}
+	return binding
+}
+
+type RepoAccountSource struct {
+	Resolver *pdsclient.RepoResolver
+
+	Workspace string
+}
+
+func (s RepoAccountSource) AccountStatus(ctx context.Context, ref, did string) (AccountObservation, error) {
+	if s.Resolver == nil {
+		return AccountObservation{}, errors.New("statusstate: no repo resolver is configured")
+	}
+	binding := RepoBindingFor(s.Workspace, ref, did)
+	resolved, err := s.Resolver.Resolve(ctx, binding)
+	if err != nil {
+		return AccountObservation{}, err
+	}
+	if resolved.Tokens != nil {
+		session, err := resolved.PDS.GetSession(ctx)
+		if err == nil {
+			if session.DID.String() != "" && session.DID.String() != did {
+				return AccountObservation{}, fmt.Errorf("statusstate: the session is for %s, not %s", session.DID.String(), did)
+			}
+			return AccountObservation{Active: session.Active}, nil
+		}
+		if !errors.Is(err, pdsclient.ErrAuthenticationRequired) {
+			return AccountObservation{}, err
+		}
+	}
+	if _, _, err := resolved.PDS.GetLatestCommit(ctx, mustDID(did)); err != nil {
+		return AccountObservation{}, err
+	}
+	return AccountObservation{Active: true}, nil
+}
+
+type RepoSessionSource struct {
+	Resolver *pdsclient.RepoResolver
+
+	Workspace string
+}
+
+func (s RepoSessionSource) SessionStatus(ctx context.Context, ref, did, sessionID string) (SessionObservation, error) {
+	if s.Resolver == nil {
+		return SessionObservation{}, errors.New("statusstate: no repo resolver is configured")
+	}
+	binding := RepoBindingFor(s.Workspace, ref, did)
+	binding.SessionRef = strings.TrimSpace(sessionID)
+	resolved, err := s.Resolver.Resolve(ctx, binding)
+	if err != nil {
+		return SessionObservation{}, err
+	}
+	session, err := resolved.PDS.GetSession(ctx)
+	if err != nil {
+		return SessionObservation{}, err
+	}
+	if session.DID.String() != "" && session.DID.String() != did {
+		return SessionObservation{}, fmt.Errorf("statusstate: the session is for %s, not %s", session.DID.String(), did)
+	}
+	return SessionObservation{Active: session.Active}, nil
+}
+
+func mustDID(raw string) syntax.DID {
+	did, err := syntax.ParseDID(strings.TrimSpace(raw))
+	if err != nil {
+		return syntax.DID(raw)
+	}
+	return did
 }
 
 type PLCClient interface {

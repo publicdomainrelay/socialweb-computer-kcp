@@ -19,6 +19,7 @@ import (
 	"k8s.io/client-go/dynamic"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 )
 
@@ -26,6 +27,8 @@ const (
 	FieldManager = "statusstate"
 
 	ConditionReady = "Ready"
+
+	ConditionInSync = "InSync"
 
 	ReasonReady = "Observed"
 
@@ -69,6 +72,8 @@ type Options struct {
 
 	PDS PDSResolver
 
+	RepoResolver *pdsclient.RepoResolver
+
 	Accounts AccountSource
 
 	Sessions SessionSource
@@ -100,6 +105,8 @@ type Controller struct {
 	dynamic DynamicFactory
 
 	pds PDSResolver
+
+	repo *pdsclient.RepoResolver
 
 	accounts AccountSource
 
@@ -151,12 +158,23 @@ func New(opts Options) (*Controller, error) {
 	if relaySource == nil && (opts.RelayEndpoint != nil || opts.RelayHandlers != nil) {
 		relaySource = NewHTTPRelayHealthSource(opts.RelayEndpoint, opts.RelayHandlers)
 	}
+	accounts := opts.Accounts
+	sessions := opts.Sessions
+	if opts.RepoResolver != nil {
+		if accounts == nil {
+			accounts = RepoAccountSource{Resolver: opts.RepoResolver, Workspace: opts.Workspace}
+		}
+		if sessions == nil {
+			sessions = RepoSessionSource{Resolver: opts.RepoResolver, Workspace: opts.Workspace}
+		}
+	}
 	return &Controller{
 		workspace: opts.Workspace,
 		dynamic:   opts.Dynamic,
 		pds:       opts.PDS,
-		accounts:  opts.Accounts,
-		sessions:  opts.Sessions,
+		repo:      opts.RepoResolver,
+		accounts:  accounts,
+		sessions:  sessions,
 		plc:       plcClient,
 		relay:     relaySource,
 		vault:     opts.Vault,
@@ -182,7 +200,6 @@ func (c *Controller) Run(ctx context.Context) error {
 		gvr       schema.GroupVersionResource
 		reconcile reconciler
 	}{
-		{AtprotoRepoGVR, c.reconcileRepo},
 		{PdsAccountGVR, c.reconcileAccount},
 		{AtprotoSessionGVR, c.reconcileSession},
 		{PlcIdentityGVR, c.reconcilePLC},

@@ -8,6 +8,8 @@ import (
 
 	"github.com/bluesky-social/indigo/atproto/repo"
 	"github.com/bluesky-social/indigo/atproto/syntax"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/dynamic"
 
@@ -43,18 +45,18 @@ func (c *Controller) reconcileRepo(ctx context.Context, dyn dynamic.Interface, u
 		c.write(ctx, dyn, AtprotoRepoGVR, u, &status)
 		return
 	}
-	if c.pds == nil {
+	if c.repo == nil && c.pds == nil {
 		setReady(&status.Conditions, generation, false, ReasonSourceUnavailable, "no PDS resolver is configured")
 		c.write(ctx, dyn, AtprotoRepoGVR, u, &status)
 		return
 	}
-	pds, err := c.pds.ResolvePDS(ctx, ref)
+	pds, err := c.resolveRepoPDS(ctx, ref, didText)
 	if err != nil {
 		setReady(&status.Conditions, generation, false, ReasonSourceError, "resolving the pdsRef: "+err.Error())
 		c.write(ctx, dyn, AtprotoRepoGVR, u, &status)
 		return
 	}
-	observation, err := observeRepo(ctx, pds, did)
+	observation, err := ObserveRepo(ctx, pds, did)
 	if err != nil {
 		setReady(&status.Conditions, generation, false, ReasonSourceError, "reading the repo: "+err.Error())
 		c.write(ctx, dyn, AtprotoRepoGVR, u, &status)
@@ -65,10 +67,34 @@ func (c *Controller) reconcileRepo(ctx context.Context, dyn dynamic.Interface, u
 	status.Seq = observation.Seq
 	status.KeyFingerprint = observation.KeyFingerprint
 	setReady(&status.Conditions, generation, true, ReasonReady, "the repo head is "+observation.Head)
+	setInSync(&status.Conditions, generation, true, ReasonReady, "the repo head is "+observation.Head)
 	c.write(ctx, dyn, AtprotoRepoGVR, u, &status)
 }
 
-func observeRepo(ctx context.Context, pds pdsclient.PDS, did syntax.DID) (RepoObservation, error) {
+func (c *Controller) resolveRepoPDS(ctx context.Context, ref, did string) (pdsclient.PDS, error) {
+	if c.repo != nil {
+		resolved, err := c.repo.Resolve(ctx, RepoBindingFor(c.workspace, ref, did))
+		if err != nil {
+			return nil, err
+		}
+		return resolved.PDS, nil
+	}
+	if c.pds == nil {
+		return nil, fmt.Errorf("statusstate: no PDS resolver is configured")
+	}
+	return c.pds.ResolvePDS(ctx, ref)
+}
+
+func setInSync(conditions *[]metav1.Condition, generation int64, ok bool, reason, message string) {
+	value := metav1.ConditionFalse
+	if ok {
+		value = metav1.ConditionTrue
+	}
+	meta.SetStatusCondition(conditions, metav1.Condition{Type: ConditionInSync, Status: value, Reason: reason,
+		Message: truncate(message), ObservedGeneration: generation})
+}
+
+func ObserveRepo(ctx context.Context, pds pdsclient.PDS, did syntax.DID) (RepoObservation, error) {
 	head, rev, err := pds.GetLatestCommit(ctx, did)
 	if err == nil {
 		out := RepoObservation{Head: head.String(), Rev: rev.String()}

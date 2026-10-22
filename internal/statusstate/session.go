@@ -52,10 +52,10 @@ func (c *Controller) observeSession(ctx context.Context, ref string, did syntax.
 	if c.sessions != nil {
 		return c.sessions.SessionStatus(ctx, ref, did.String(), sessionID)
 	}
-	if c.pds == nil || ref == "" {
+	if c.repo == nil && (c.pds == nil || ref == "") {
 		return SessionObservation{}, fmt.Errorf("no session source and no pdsRef are configured")
 	}
-	pds, err := c.pds.ResolvePDS(ctx, ref)
+	pds, err := c.resolveRepoPDS(ctx, ref, did.String())
 	if err != nil {
 		return SessionObservation{}, fmt.Errorf("resolving the pdsRef: %w", err)
 	}

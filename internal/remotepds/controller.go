@@ -16,6 +16,7 @@ import (
 	"k8s.io/client-go/dynamic"
 
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 )
 
 const (
@@ -53,6 +54,8 @@ type Options struct {
 
 	CABundle CABundleFunc
 
+	Secrets pdsclient.SecretResolver
+
 	Timeout time.Duration
 
 	RetryAfter time.Duration
@@ -68,6 +71,8 @@ type Controller struct {
 	log *slog.Logger
 
 	caBundle CABundleFunc
+
+	secrets pdsclient.SecretResolver
 
 	timeout time.Duration
 
@@ -105,6 +110,7 @@ func New(opts Options) (*Controller, error) {
 		dynamic:       opts.Dynamic,
 		log:           log.With("component", "remotepds-controller"),
 		caBundle:      opts.CABundle,
+		secrets:       opts.Secrets,
 		timeout:       timeout,
 		retry:         retry,
 		checkInterval: checkInterval,
