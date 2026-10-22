@@ -431,8 +431,20 @@ func (r *bidderRun) standalone(ctx context.Context) int {
 	if err != nil {
 		return r.a.fail(exitFailed, "run bidder: %v", err)
 	}
-	if err := k.ApplyRoot(ctx, spec); err != nil {
-		return r.a.fail(exitFailed, "run bidder: applying the MarketBidder root object: %v", err)
+	deadline := time.Now().Add(3 * time.Minute)
+	var applyErr error
+	for {
+		if applyErr = k.ApplyRoot(ctx, spec); applyErr == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			return r.a.fail(exitFailed, "run bidder: applying the MarketBidder root object: %v", applyErr)
+		}
+		select {
+		case <-ctx.Done():
+			return r.a.fail(exitFailed, "run bidder: applying the MarketBidder root object: %v", ctx.Err())
+		case <-time.After(2 * time.Second):
+		}
 	}
 	r.log("the MarketBidder root object is applied into the handle's own kcp", "instance", up.Instance, "kcp", up.KcpURL)
 	sum := bidderSummary{Profile: r.profile, Handle: r.handle, Instance: up.Instance, KcpURL: up.KcpURL}
