@@ -454,6 +454,10 @@ func (r *requestRun) ssh(ctx context.Context, c *v1alpha1.ComputeContract) (int,
 		interactive = true
 	}
 	code, err := s.Run(held, t, r.exec, interactive, os.Stdin, r.a.stdout, r.a.stderr)
+	if cause := context.Cause(held); cause != nil && ctx.Err() == nil {
+		r.log("ssh session ended because the contract left Held", "err", cause)
+		return 0, nil
+	}
 	if err != nil {
 		if cause := context.Cause(held); cause != nil && ctx.Err() == nil {
 			r.log("ssh session ended because the contract left Held", "err", cause)
@@ -466,6 +470,14 @@ func (r *requestRun) ssh(ctx context.Context, c *v1alpha1.ComputeContract) (int,
 			}
 			if time.Now().After(deadline) {
 				break
+			}
+		}
+	}
+	if r.hold {
+		for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(200 * time.Millisecond) {
+			if current, cerr := r.kcp.Contract(ctx); cerr == nil && current.Status.Phase != v1alpha1.ComputeContractHeld {
+				r.log("ssh session ended because the contract left Held", "phase", current.Status.Phase)
+				return 0, nil
 			}
 		}
 	}
