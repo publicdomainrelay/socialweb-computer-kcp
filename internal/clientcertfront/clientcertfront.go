@@ -43,14 +43,16 @@ const (
 
 	NoExpiryOrganizationalUnit = "socialweb.computer:no-expiry"
 
-	trustTTL         = 30 * time.Second
-	revokedTTL       = 2 * time.Second
-	revokedStale     = 10 * time.Minute
-	denyTTL          = 2 * time.Second
-	readHeaderLimit  = 10 * time.Second
-	shutdownTimeout  = 5 * time.Second
-	upstreamDialWait = 5 * time.Second
-	lifetimeSlack    = 5 * time.Minute
+	trustTTL            = 30 * time.Second
+	revokedTTL          = 2 * time.Second
+	revokedStale        = 10 * time.Minute
+	revokedRefresh      = 2 * time.Second
+	revokedFetchTimeout = 5 * time.Second
+	denyTTL             = 2 * time.Second
+	readHeaderLimit     = 10 * time.Second
+	shutdownTimeout     = 5 * time.Second
+	upstreamDialWait    = 5 * time.Second
+	lifetimeSlack       = 5 * time.Minute
 )
 
 var pathPattern = regexp.MustCompile(`^/clusters/root:([a-z0-9]+):([a-z0-9]([a-z0-9-]*[a-z0-9])?):clusters(/.*)?$`)
@@ -111,13 +113,15 @@ type revokedEntry struct {
 }
 
 type server struct {
-	c       Config
-	log     *slog.Logger
-	edgePin [32]byte
-	mu      sync.Mutex
-	trusts  map[string]*trust
-	revoked map[string]*revokedEntry
-	denies  map[string]time.Time
+	c          Config
+	log        *slog.Logger
+	edgePin    [32]byte
+	mu         sync.Mutex
+	trusts     map[string]*trust
+	revoked    map[string]*revokedEntry
+	refreshing map[string]bool
+	denies     map[string]time.Time
+	wake       chan struct{}
 }
 
 func Run(ctx context.Context, c Config) error {
@@ -144,7 +148,8 @@ func Run(ctx context.Context, c Config) error {
 		log = slog.New(slog.DiscardHandler)
 	}
 	s := &server{c: c, log: log.With("component", "client-cert-front"), edgePin: sha256.Sum256(edgeDER),
-		trusts: map[string]*trust{}, revoked: map[string]*revokedEntry{}, denies: map[string]time.Time{}}
+		trusts: map[string]*trust{}, revoked: map[string]*revokedEntry{}, refreshing: map[string]bool{},
+		denies: map[string]time.Time{}, wake: make(chan struct{}, 1)}
 	ln, err := net.Listen("tcp", c.Address)
 	if err != nil {
 		return fmt.Errorf("clientcertfront: listening on %s: %w", c.Address, err)
@@ -156,6 +161,7 @@ func Run(ctx context.Context, c Config) error {
 	if c.OnListen != nil {
 		c.OnListen(ln.Addr())
 	}
+	go s.refreshLoop(ctx)
 	done := make(chan error, 1)
 	go func() { done <- srv.ServeTLS(ln, "", "") }()
 	select {
@@ -335,20 +341,89 @@ func (s *server) revokedFor(ctx context.Context, dir string) (map[string]struct{
 	s.mu.Lock()
 	e := s.revoked[dir]
 	s.mu.Unlock()
-	if e != nil && time.Since(e.fetched) < revokedTTL {
+	if e != nil {
+		age := time.Since(e.fetched)
+		if age >= revokedStale {
+			s.requestRefresh()
+			return nil, errors.New("the revocation list has not refreshed for ten minutes")
+		}
+		if age >= revokedTTL {
+			s.requestRefresh()
+		}
 		return e.serials, nil
 	}
-	serials, err := clientcert.FetchRevoked(ctx, dir)
+	fctx, cancel := context.WithTimeout(ctx, revokedFetchTimeout)
+	defer cancel()
+	serials, err := clientcert.FetchRevoked(fctx, dir)
 	if err != nil {
-		if e != nil && time.Since(e.fetched) < revokedStale {
-			return e.serials, nil
-		}
 		return nil, err
 	}
 	s.mu.Lock()
 	s.revoked[dir] = &revokedEntry{serials: serials, fetched: time.Now()}
 	s.mu.Unlock()
 	return serials, nil
+}
+
+func (s *server) requestRefresh() {
+	select {
+	case s.wake <- struct{}{}:
+	default:
+	}
+}
+
+func (s *server) refreshLoop(ctx context.Context) {
+	ticker := time.NewTicker(revokedRefresh)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		case <-s.wake:
+		}
+		s.refreshStale(ctx)
+	}
+}
+
+func (s *server) refreshStale(ctx context.Context) {
+	s.mu.Lock()
+	var dirs []string
+	for dir, e := range s.revoked {
+		if time.Since(e.fetched) >= revokedTTL && !s.refreshing[dir] {
+			s.refreshing[dir] = true
+			dirs = append(dirs, dir)
+		}
+	}
+	s.mu.Unlock()
+	var wg sync.WaitGroup
+	for _, dir := range dirs {
+		wg.Add(1)
+		go func(dir string) {
+			defer wg.Done()
+			s.refresh(ctx, dir)
+		}(dir)
+	}
+	wg.Wait()
+}
+
+func (s *server) refresh(ctx context.Context, dir string) {
+	defer func() {
+		s.mu.Lock()
+		delete(s.refreshing, dir)
+		s.mu.Unlock()
+	}()
+	fctx, cancel := context.WithTimeout(ctx, revokedFetchTimeout)
+	defer cancel()
+	serials, err := clientcert.FetchRevoked(fctx, dir)
+	if err != nil {
+		if ctx.Err() == nil {
+			s.log.Warn("the revocation list refresh failed; serving the last known list", "dir", dir, "err", err.Error())
+		}
+		return
+	}
+	s.mu.Lock()
+	s.revoked[dir] = &revokedEntry{serials: serials, fetched: time.Now()}
+	s.mu.Unlock()
 }
 
 type frontState struct {
