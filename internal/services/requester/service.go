@@ -627,6 +627,12 @@ func (s *Service) reconcile(ctx context.Context) {
 			terminal = contract.Status.Contract == nil || contract.Status.Contract.Receipt == nil
 		}
 		if terminal {
+			state := contract.Status.Contract
+			if state != nil && state.Receipt != nil && state.Termination == nil && winnerDID(state) != "" {
+				terminal = false
+			}
+		}
+		if terminal {
 			s.mu.Lock()
 			s.finished[contract.Name] = true
 			s.mu.Unlock()
@@ -655,7 +661,7 @@ func (s *Service) reconcile(ctx context.Context) {
 			_, waiting := s.waiting[contract.Name]
 			s.waiting[contract.Name] = true
 			s.mu.Unlock()
-			if !waiting {
+			if !waiting && phase != v1alpha1.ComputeContractReleased {
 				s.log.Info("requester_contract_waiting", "contract", contract.Name, "reason", reason)
 				status := contract.Status
 				status.ObservedGeneration = contract.Generation

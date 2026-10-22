@@ -185,4 +185,6 @@ const (
 	ComputeContractConditionReleaseAcknowledged = "ReleaseAcknowledged"
 
 	ComputeContractConditionReleaseFailed = "ReleaseFailed"
+
+	ComputeContractConditionTerminated = "Terminated"
 )

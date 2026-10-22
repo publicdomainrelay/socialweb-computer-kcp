@@ -149,6 +149,92 @@ func parseGuestEvent(ctx context.Context, dir identity.Directory, badge func(con
 	return out, nil
 }
 
+func sameRecordRef(a, b v1alpha1.RecordRef) bool {
+	if a.URI == "" || b.URI == "" || a.URI != b.URI {
+		return false
+	}
+	return a.CID == "" || b.CID == "" || a.CID == b.CID
+}
+
+func sameTermination(a, b *v1alpha1.ContractTermination) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	return sameRecordRef(a.Event, b.Event) || sameRecordRef(a.Payload, b.Payload)
+}
+
+func terminationRecorded(state *v1alpha1.NodeClaimContract, termination *v1alpha1.ContractTermination) bool {
+	if state == nil {
+		return false
+	}
+	return sameTermination(state.Termination, termination)
+}
+
+func applyTermination(state *v1alpha1.NodeClaimContract, termination *v1alpha1.ContractTermination, now string) bool {
+	if state == nil || termination == nil || terminationRecorded(state, termination) {
+		return false
+	}
+	state.Termination = termination
+	state.Outcome = v1alpha1.ContractOutcomeReturned
+	state.Phase = v1alpha1.ContractReleased
+	if state.Timestamps == nil {
+		state.Timestamps = &v1alpha1.ContractTimestamps{}
+	}
+	if state.Timestamps.Released == "" {
+		state.Timestamps.Released = now
+	}
+	return true
+}
+
+func terminationMessage(termination *v1alpha1.ContractTermination) string {
+	if termination == nil {
+		return "the bidder ended the contract"
+	}
+	return "the bidder ended the contract: " + termination.Reason
+}
+
+func rememberGuestEvent(seen map[string]bool, uri string) {
+	if uri != "" {
+		seen[uri] = true
+	}
+}
+
+func seedGuestEventSeen(seen map[string]bool, state *v1alpha1.NodeClaimContract) {
+	if state == nil {
+		return
+	}
+	if state.Termination != nil {
+		rememberGuestEvent(seen, state.Termination.Event.URI)
+		rememberGuestEvent(seen, state.Termination.Payload.URI)
+	}
+	if state.HostKeys != nil {
+		rememberGuestEvent(seen, state.HostKeys.Event.URI)
+		rememberGuestEvent(seen, state.HostKeys.Payload.URI)
+	}
+}
+
+func guestEventSeen(seen map[string]bool, event MarketEvent) bool {
+	keys := []string{event.Event.URI, event.Payload.URI}
+	found := false
+	for _, key := range keys {
+		if key != "" && seen[key] {
+			found = true
+		}
+	}
+	for _, key := range keys {
+		rememberGuestEvent(seen, key)
+	}
+	return found
+}
+
+func guestEventRecorded(eventRef, payloadRef v1alpha1.RecordRef, parsed *GuestEvent) bool {
+	if parsed == nil {
+		return false
+	}
+	return sameRecordRef(eventRef, v1alpha1.RecordRef{URI: parsed.Event.URI, CID: parsed.Event.CID}) ||
+		sameRecordRef(payloadRef, v1alpha1.RecordRef{URI: parsed.Payload.URI, CID: parsed.Payload.CID})
+}
+
 func hostKeyLines(keys []v1alpha1.ComputeVMHostKey) []string {
 	out := make([]string, 0, len(keys))
 	for _, key := range keys {

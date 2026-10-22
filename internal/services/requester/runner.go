@@ -174,13 +174,18 @@ func (r *contractRunner) Run(ctx context.Context) {
 		r.runAdopt(ctx, contract)
 		return
 	}
+	state := r.stateCopy()
+	if contract.Status.Phase == v1alpha1.ComputeContractReleased && state != nil && state.Receipt != nil {
+		r.resumeReleased(ctx, state)
+		return
+	}
 	if contract.Spec.SecretsRef != nil && contract.Status.SecretsFetchedAt == "" {
 		if err := r.ensureSecrets(ctx, contract); err != nil {
 			r.recordFailure(ctx, r.stateCopy(), err, 1)
 			return
 		}
 	}
-	state := r.stateCopy()
+	state = r.stateCopy()
 	if state != nil && state.Receipt != nil {
 		if err := r.resumeReceipt(ctx, state); err != nil && r.svc.ctx.Err() == nil {
 			r.recordFailure(ctx, r.stateCopy(), err, 1)
@@ -619,9 +624,8 @@ func (r *contractRunner) acceptReceipt(ctx context.Context, state *v1alpha1.Node
 }
 
 func (r *contractRunner) resumeReceipt(ctx context.Context, state *v1alpha1.NodeClaimContract) error {
-	if state.Termination != nil {
-		state.Phase = v1alpha1.ContractReleased
-		r.writeStatus(ctx, v1alpha1.ComputeContractReleased, "the bidder ended the contract: "+state.Termination.Reason, state, r.currentBids(), r.currentChosen(), false, "terminated", 1)
+	if r.refreshTermination(ctx, state) {
+		r.writeStatus(ctx, v1alpha1.ComputeContractReleased, terminationMessage(state.Termination), state, r.currentBids(), r.currentChosen(), false, "terminated", 1)
 		return nil
 	}
 	bidderDID := winnerDID(state)
@@ -646,10 +650,65 @@ func (r *contractRunner) resumeReceipt(ctx context.Context, state *v1alpha1.Node
 	if state.Phase != v1alpha1.ContractNetwork && state.Phase != v1alpha1.ContractReleased {
 		state.Phase = v1alpha1.ContractReceipt
 	}
+	if state.Timestamps == nil {
+		state.Timestamps = &v1alpha1.ContractTimestamps{}
+	}
 	if state.Timestamps.Receipt == "" {
 		state.Timestamps.Receipt = r.svc.nowISO()
 	}
 	return r.runGuestAndHold(ctx, state, receiptRef.URI, bidderDID)
+}
+
+func (r *contractRunner) resumeReleased(ctx context.Context, state *v1alpha1.NodeClaimContract) {
+	terminated := r.refreshTermination(ctx, state)
+	message := "released"
+	step := "released"
+	if terminated {
+		message = terminationMessage(state.Termination)
+		step = "terminated"
+		r.log().Info("requester_contract_termination_resumed", "receipt", state.Receipt.URI, "event", state.Termination.Event.URI, "reason", state.Termination.Reason)
+	}
+	r.writeStatus(ctx, v1alpha1.ComputeContractReleased, message, state, r.currentBids(), r.currentChosen(), false, step, 1)
+}
+
+func (r *contractRunner) refreshTermination(ctx context.Context, state *v1alpha1.NodeClaimContract) bool {
+	if state == nil {
+		return false
+	}
+	if state.Termination != nil {
+		state.Phase = v1alpha1.ContractReleased
+		return true
+	}
+	if state.Receipt == nil || state.Receipt.URI == "" || r.svc.market == nil {
+		return false
+	}
+	bidderDID := winnerDID(state)
+	if bidderDID == "" {
+		return false
+	}
+	readCtx, cancel := context.WithTimeout(ctx, DefaultHTTPTimeout)
+	defer cancel()
+	events, err := r.svc.market.FindTerminations(readCtx, bidderDID, state.Receipt.URI)
+	if err != nil {
+		if ctx.Err() == nil {
+			r.log().Warn("requester_termination_resume_read_failed", "bidder", bidderDID, "receipt", state.Receipt.URI, "err", err)
+		}
+		return false
+	}
+	for _, event := range events {
+		parsed, err := parseGuestEvent(readCtx, r.svc.directory, r.svc.badgeBlueBinding(), event, state.Receipt.URI)
+		if err != nil {
+			r.log().Warn("requester_termination_resume_refused", "uri", event.Event.URI, "err", err)
+			continue
+		}
+		if parsed.Kind != market.ComputeEventsVMTerminatedNSID {
+			continue
+		}
+		applyTermination(state, parsed.Termination, r.svc.nowISO())
+		r.log().Info("requester_termination_resumed", "bidder", bidderDID, "receipt", state.Receipt.URI, "event", parsed.Event.URI, "reason", parsed.Termination.Reason)
+		return true
+	}
+	return false
 }
 
 func (r *contractRunner) verifyRecordedReceipt(ctx context.Context, state *v1alpha1.NodeClaimContract, receiptRef market.RecordRef) (bool, error) {
@@ -799,12 +858,12 @@ func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClai
 	addressDeadline := time.Now().Add(r.svc.cfg.VMReadyTimeout)
 	hostKeysDeadline := time.Now().Add(r.svc.cfg.HostKeysTimeout)
 	seen := map[string]bool{}
+	seedGuestEventSeen(seen, state)
 	emptyLogged := false
 	handle := func(event MarketEvent) bool {
-		if seen[event.Event.URI] {
+		if guestEventSeen(seen, event) {
 			return false
 		}
-		seen[event.Event.URI] = true
 		parsed, err := parseGuestEvent(ctx, r.svc.directory, r.svc.badgeBlueBinding(), event, receiptURI)
 		if err != nil {
 			r.log().Warn("requester_guest_event_refused", "uri", event.Event.URI, "err", err)
@@ -812,13 +871,20 @@ func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClai
 		}
 		switch parsed.Kind {
 		case market.ComputeEventsVMOnNetworkNSID:
-			if state.VMAddress == "" {
-				state.VMAddress = parsed.Address
-				state.Phase = v1alpha1.ContractNetwork
-				state.Timestamps.Network = r.svc.nowISO()
-				r.log().Info("requester_guest_on_network", "address", parsed.Address)
+			if state.VMAddress != "" {
+				return false
 			}
+			state.VMAddress = parsed.Address
+			state.Phase = v1alpha1.ContractNetwork
+			if state.Timestamps == nil {
+				state.Timestamps = &v1alpha1.ContractTimestamps{}
+			}
+			state.Timestamps.Network = r.svc.nowISO()
+			r.log().Info("requester_guest_on_network", "address", parsed.Address)
 		case market.ComputeEventsVMHostKeysNSID:
+			if state.HostKeys != nil && guestEventRecorded(state.HostKeys.Event, state.HostKeys.Payload, parsed) {
+				return false
+			}
 			state.HostKeys = &v1alpha1.ContractHostKeys{
 				Keys:       contractHostKeys(parsed.HostKeys),
 				ObservedAt: parsed.ObservedAt,
@@ -827,11 +893,8 @@ func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClai
 			}
 			r.log().Info("requester_guest_host_keys", "keys", len(parsed.HostKeys))
 		case market.ComputeEventsVMTerminatedNSID:
-			state.Termination = parsed.Termination
-			state.Outcome = v1alpha1.ContractOutcomeReturned
-			state.Phase = v1alpha1.ContractReleased
-			state.Timestamps.Released = r.svc.nowISO()
-			r.writeStatus(ctx, v1alpha1.ComputeContractReleased, "the bidder ended the contract: "+parsed.Termination.Reason, state, r.currentBids(), r.currentChosen(), false, "terminated", 1)
+			applyTermination(state, parsed.Termination, r.svc.nowISO())
+			r.writeStatus(ctx, v1alpha1.ComputeContractReleased, terminationMessage(parsed.Termination), state, r.currentBids(), r.currentChosen(), false, "terminated", 1)
 			return true
 		}
 		r.writeStatus(ctx, v1alpha1.ComputeContractRequesting, "the guest reported "+payloadKind(parsed.Kind), state, r.currentBids(), r.currentChosen(), false, "awaitingGuestOnNetwork", 1)
@@ -893,6 +956,23 @@ func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClai
 func (r *contractRunner) waitForRelease(ctx context.Context, state *v1alpha1.NodeClaimContract, receiptURI, bidderDID string) error {
 	events, _, closeEvents := r.svc.registerEventSink(receiptURI)
 	defer closeEvents()
+	seen := map[string]bool{}
+	seedGuestEventSeen(seen, state)
+	handle := func(event MarketEvent) bool {
+		if guestEventSeen(seen, event) {
+			return false
+		}
+		if market.NSIDFromURI(event.Payload.URI) != market.ComputeEventsVMTerminatedNSID {
+			return false
+		}
+		parsed, err := parseGuestEvent(ctx, r.svc.directory, r.svc.badgeBlueBinding(), event, receiptURI)
+		if err != nil || parsed.Kind != market.ComputeEventsVMTerminatedNSID {
+			return false
+		}
+		applyTermination(state, parsed.Termination, r.svc.nowISO())
+		r.writeStatus(ctx, v1alpha1.ComputeContractReleased, terminationMessage(parsed.Termination), state, r.currentBids(), r.currentChosen(), false, "terminated", 1)
+		return true
+	}
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
@@ -909,34 +989,18 @@ func (r *contractRunner) waitForRelease(ctx context.Context, state *v1alpha1.Nod
 		case <-r.releaseCh:
 			return r.releaseContract(ctx, state, bidderDID)
 		case event := <-events:
-			parsed, err := parseGuestEvent(ctx, r.svc.directory, r.svc.badgeBlueBinding(), event, receiptURI)
-			if err != nil {
-				continue
-			}
-			if parsed.Kind == market.ComputeEventsVMTerminatedNSID {
-				state.Termination = parsed.Termination
-				state.Outcome = v1alpha1.ContractOutcomeReturned
-				state.Phase = v1alpha1.ContractReleased
-				state.Timestamps.Released = r.svc.nowISO()
-				r.writeStatus(ctx, v1alpha1.ComputeContractReleased, "the bidder ended the contract: "+parsed.Termination.Reason, state, r.currentBids(), r.currentChosen(), false, "terminated", 1)
+			if handle(event) {
 				return nil
 			}
 		case <-ticker.C:
-			found, err := r.svc.market.FindEvents(ctx, bidderDID, receiptURI)
+			found, err := r.svc.market.FindTerminations(ctx, bidderDID, receiptURI)
 			if err != nil {
 				continue
 			}
 			for _, event := range found {
-				parsed, err := parseGuestEvent(ctx, r.svc.directory, r.svc.badgeBlueBinding(), event, receiptURI)
-				if err != nil || parsed.Kind != market.ComputeEventsVMTerminatedNSID {
-					continue
+				if handle(event) {
+					return nil
 				}
-				state.Termination = parsed.Termination
-				state.Outcome = v1alpha1.ContractOutcomeReturned
-				state.Phase = v1alpha1.ContractReleased
-				state.Timestamps.Released = r.svc.nowISO()
-				r.writeStatus(ctx, v1alpha1.ComputeContractReleased, "the bidder ended the contract: "+parsed.Termination.Reason, state, r.currentBids(), r.currentChosen(), false, "terminated", 1)
-				return nil
 			}
 		}
 	}
@@ -953,7 +1017,7 @@ func (r *contractRunner) releaseContract(ctx context.Context, state *v1alpha1.No
 		if state.Timestamps != nil && state.Timestamps.Released == "" {
 			state.Timestamps.Released = r.svc.nowISO()
 		}
-		r.writeStatus(ctx, v1alpha1.ComputeContractReleased, "the bidder ended the contract: "+state.Termination.Reason, state, r.currentBids(), r.currentChosen(), false, "terminated", 1)
+		r.writeStatus(ctx, v1alpha1.ComputeContractReleased, terminationMessage(state.Termination), state, r.currentBids(), r.currentChosen(), false, "terminated", 1)
 		r.deleteRBAC(ctx)
 		return nil
 	}
@@ -1084,8 +1148,12 @@ func (r *contractRunner) runAdopt(ctx context.Context, contract v1alpha1.Compute
 		r.writeStatus(ctx, v1alpha1.ComputeContractFailed, "adopt: the contract status holds no bidder-signed receipt", state, nil, nil, false, "adopting", 1)
 		return
 	}
-	if state.Termination != nil {
+	if r.refreshTermination(ctx, state) {
 		r.writeStatus(ctx, v1alpha1.ComputeContractReleased, "adopt: the bidder reported the guest terminated ("+state.Termination.Reason+")", state, nil, nil, false, "adopted", 1)
+		return
+	}
+	if contract.Status.Phase == v1alpha1.ComputeContractReleased {
+		r.writeStatus(ctx, v1alpha1.ComputeContractReleased, "adopt: the contract is already released", state, nil, nil, false, "adopted", 1)
 		return
 	}
 	if state.HostKeys == nil {
@@ -1158,6 +1226,9 @@ func (r *contractRunner) applyConditions(status *v1alpha1.ComputeContractStatus,
 			setCondition(status, generation, v1alpha1.ComputeContractConditionReleaseAcknowledged, metav1.ConditionTrue, "Acknowledged", message, now)
 			setCondition(status, generation, v1alpha1.ComputeContractConditionReleaseFailed, metav1.ConditionFalse, "Acknowledged", message, now)
 		}
+	}
+	if state != nil && state.Termination != nil {
+		setCondition(status, generation, v1alpha1.ComputeContractConditionTerminated, metav1.ConditionTrue, "BidderTerminated", terminationMessage(state.Termination), now)
 	}
 }
 

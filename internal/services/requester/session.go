@@ -753,10 +753,9 @@ func (s *Service) sessionGuest(ctx context.Context, receiptURI, bidderDID string
 	var hostKeys []v1alpha1.ComputeVMHostKey
 	var termination *v1alpha1.ContractTermination
 	handle := func(event MarketEvent) bool {
-		if seen[event.Event.URI] {
+		if guestEventSeen(seen, event) {
 			return false
 		}
-		seen[event.Event.URI] = true
 		parsed, err := parseGuestEvent(ctx, s.directory, s.badgeBlueBinding(), event, receiptURI)
 		if err != nil {
 			s.log.Warn("requester_session_event_refused", "uri", event.Event.URI, "err", err)
@@ -770,6 +769,9 @@ func (s *Service) sessionGuest(ctx context.Context, receiptURI, bidderDID string
 		case market.ComputeEventsVMHostKeysNSID:
 			hostKeys = parsed.HostKeys
 		case market.ComputeEventsVMTerminatedNSID:
+			if termination != nil && sameTermination(termination, parsed.Termination) {
+				return true
+			}
 			termination = parsed.Termination
 			return true
 		}

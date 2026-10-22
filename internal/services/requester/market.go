@@ -108,6 +108,8 @@ type MarketClient interface {
 	FindReceipt(ctx context.Context, bidderDID, acceptURI string) (*market.ResolvedRecord, error)
 
 	FindEvents(ctx context.Context, bidderDID, receiptURI string) ([]MarketEvent, error)
+
+	FindTerminations(ctx context.Context, bidderDID, receiptURI string) ([]MarketEvent, error)
 }
 
 type HTTPMarket struct {
@@ -419,6 +421,14 @@ func (m *HTTPMarket) FindReceipt(ctx context.Context, bidderDID, acceptURI strin
 }
 
 func (m *HTTPMarket) FindEvents(ctx context.Context, bidderDID, receiptURI string) ([]MarketEvent, error) {
+	return m.findEvents(ctx, bidderDID, receiptURI, "")
+}
+
+func (m *HTTPMarket) FindTerminations(ctx context.Context, bidderDID, receiptURI string) ([]MarketEvent, error) {
+	return m.findEvents(ctx, bidderDID, receiptURI, market.ComputeEventsVMTerminatedNSID)
+}
+
+func (m *HTTPMarket) findEvents(ctx context.Context, bidderDID, receiptURI, payloadNSID string) ([]MarketEvent, error) {
 	if m == nil || m.Reader == nil {
 		return nil, errors.New("requester: the market has no record reader")
 	}
@@ -428,29 +438,36 @@ func (m *HTTPMarket) FindEvents(ctx context.Context, bidderDID, receiptURI strin
 	}
 	out := []MarketEvent{}
 	for _, record := range records {
-		receipt, _ := record.Value["receipt"].(map[string]any)
-		if receipt == nil || stringOf(receipt["uri"]) != receiptURI {
-			continue
+		event, ok := m.receiptEvent(ctx, market.ResolvedRecord{URI: record.URI, CID: record.CID, Value: record.Value}, receiptURI, payloadNSID)
+		if ok {
+			out = append(out, *event)
 		}
-		payload, _ := record.Value["payload"].(map[string]any)
-		if payload == nil {
-			continue
-		}
-		ref := market.RecordRef{URI: stringOf(payload["uri"]), CID: stringOf(payload["cid"])}
-		if ref.URI == "" {
-			continue
-		}
-		resolved, err := m.Reader.Resolve(ctx, ref)
-		if err != nil {
-			m.log().Warn("requester_event_payload_failed", "uri", ref.URI, "err", err)
-			continue
-		}
-		out = append(out, MarketEvent{
-			Event:   market.ResolvedRecord{URI: record.URI, CID: record.CID, Value: record.Value},
-			Payload: resolved,
-		})
 	}
 	return out, nil
+}
+
+func (m *HTTPMarket) receiptEvent(ctx context.Context, record market.ResolvedRecord, receiptURI, payloadNSID string) (*MarketEvent, bool) {
+	receipt, _ := record.Value["receipt"].(map[string]any)
+	if receipt == nil || stringOf(receipt["uri"]) != receiptURI {
+		return nil, false
+	}
+	payload, _ := record.Value["payload"].(map[string]any)
+	if payload == nil {
+		return nil, false
+	}
+	ref := market.RecordRef{URI: stringOf(payload["uri"]), CID: stringOf(payload["cid"])}
+	if ref.URI == "" {
+		return nil, false
+	}
+	if payloadNSID != "" && market.NSIDFromURI(ref.URI) != payloadNSID {
+		return nil, false
+	}
+	resolved, err := m.Reader.Resolve(ctx, ref)
+	if err != nil {
+		m.log().Warn("requester_event_payload_failed", "uri", ref.URI, "err", err)
+		return nil, false
+	}
+	return &MarketEvent{Event: record, Payload: resolved}, true
 }
 
 func listAll(ctx context.Context, lister market.RecordLister, repoDID, collection string, limit int) ([]market.ListedRecord, error) {
