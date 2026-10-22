@@ -33,7 +33,7 @@ spec:
       - name: bidder-session
         rules:
           - path: bidder/data/identity/bidder/pds-session
-            capabilities: ["read"]
+            capabilities: ["create", "read", "update"]
       - name: bidder-oidc-rotate
         rules:
           - path: identity/oidc/key/guest/rotate
