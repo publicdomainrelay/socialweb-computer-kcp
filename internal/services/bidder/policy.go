@@ -408,9 +408,32 @@ func policyRunFailure(run *policyv1alpha1.PolicyWorkflowRun) string {
 		}
 	}
 	if raw, ok := run.Status.Annotations["error"]; ok && len(raw) > 0 {
+		if message := policyAnnotationMessage(raw); message != "" {
+			return message
+		}
 		return strings.TrimSpace(string(raw))
 	}
 	return "the policy run failed"
+}
+
+func policyAnnotationMessage(raw json.RawMessage) string {
+	var envelope struct {
+		Items []map[string]any `json:"items"`
+	}
+	items := []map[string]any{}
+	if err := json.Unmarshal(raw, &envelope); err == nil && len(envelope.Items) > 0 {
+		items = envelope.Items
+	} else if err := json.Unmarshal(raw, &items); err != nil {
+		return ""
+	}
+	for _, item := range items {
+		for _, key := range []string{"message", "title", "msg"} {
+			if text, ok := item[key].(string); ok && text != "" {
+				return text
+			}
+		}
+	}
+	return ""
 }
 
 func outputBool(outputs map[string]json.RawMessage, key string) (bool, bool) {

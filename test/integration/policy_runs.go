@@ -26,6 +26,7 @@ const (
 	policyEngineName     = "policy-engine"
 	policyEngineTimeout  = 2 * time.Minute
 	policyRunTimeout     = 2 * time.Minute
+	policyFailTimeout    = 30 * time.Second
 	policyPollInterval   = 250 * time.Millisecond
 	policyProcessTimeout = 60 * time.Second
 )

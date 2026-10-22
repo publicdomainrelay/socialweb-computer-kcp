@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"bytes"
 	"encoding/json"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -69,14 +70,46 @@ func RunStatusFromOutcome(outcome Outcome) policyv1alpha1.PolicyWorkflowRunStatu
 		}
 	}
 	if len(outcome.Status.Annotations) > 0 {
-		value.Annotations = make(map[string]json.RawMessage, len(outcome.Status.Annotations))
-		for key, item := range outcome.Status.Annotations {
-			if data, err := json.Marshal(item); err == nil {
-				value.Annotations[key] = data
-			}
-		}
+		value.Annotations = annotationsToAPI(outcome.Status.Annotations)
 	}
 	return value
+}
+
+func annotationsToAPI(value models.Annotations) map[string]json.RawMessage {
+	if len(value) == 0 {
+		return nil
+	}
+	out := make(map[string]json.RawMessage, len(value))
+	for key, item := range value {
+		data, err := json.Marshal(item)
+		if err != nil {
+			continue
+		}
+		trimmed := bytes.TrimSpace(data)
+		if len(trimmed) == 0 {
+			continue
+		}
+		switch trimmed[0] {
+		case '[':
+			wrapped, err := json.Marshal(map[string]json.RawMessage{"items": json.RawMessage(trimmed)})
+			if err != nil {
+				continue
+			}
+			out[key] = wrapped
+		case '{':
+			out[key] = append(json.RawMessage(nil), trimmed...)
+		default:
+			wrapped, err := json.Marshal(map[string]json.RawMessage{"value": json.RawMessage(trimmed)})
+			if err != nil {
+				continue
+			}
+			out[key] = wrapped
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func runPhase(value policyengine.Phase) policyv1alpha1.PolicyWorkflowRunPhase {

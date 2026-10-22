@@ -67,6 +67,8 @@ type Controller struct {
 
 	active map[string]*activeRun
 
+	terminal map[string]policyv1alpha1.PolicyWorkflowRunStatus
+
 	wg sync.WaitGroup
 }
 
@@ -95,10 +97,11 @@ func NewController(cfg ControllerConfig) (*Controller, error) {
 		cfg.Now = time.Now
 	}
 	return &Controller{
-		cfg:    cfg,
-		log:    cfg.Log,
-		now:    cfg.Now,
-		active: map[string]*activeRun{},
+		cfg:      cfg,
+		log:      cfg.Log,
+		now:      cfg.Now,
+		active:   map[string]*activeRun{},
+		terminal: map[string]policyv1alpha1.PolicyWorkflowRunStatus{},
 	}, nil
 }
 
@@ -225,14 +228,17 @@ func (c *Controller) reconcileRun(ctx context.Context, run *policyv1alpha1.Polic
 	seen[key] = true
 	if run.DeletionTimestamp != nil {
 		c.cancelActive(key)
+		c.forgetTerminal(key)
 		return
 	}
 	if isTerminalPhase(run.Status.Phase) {
 		c.cancelActive(key)
+		c.forgetTerminal(key)
 		c.maybeDeleteRun(ctx, run)
 		return
 	}
 	if run.Spec.Cancel {
+		c.forgetTerminal(key)
 		if !c.isActive(key) {
 			outcome := cancelledOutcome(run, policyengine.ConditionCancelled, "Cancelled", "the run was cancelled")
 			c.writeRunStatus(ctx, run, RunStatusFromOutcome(outcome))
@@ -241,11 +247,19 @@ func (c *Controller) reconcileRun(ctx context.Context, run *policyv1alpha1.Polic
 		return
 	}
 	if run.Spec.Suspend {
+		c.forgetTerminal(key)
 		if !c.isActive(key) {
 			outcome := cancelledOutcome(run, policyengine.ConditionSuspended, "Suspended", "the run is suspended")
 			c.writeRunStatus(ctx, run, RunStatusFromOutcome(outcome))
 		}
 		c.cancelActive(key)
+		return
+	}
+	if status, ok := c.terminalStatus(key); ok {
+		c.cancelActive(key)
+		if err := c.writeRunStatus(ctx, run, status); err == nil {
+			c.forgetTerminal(key)
+		}
 		return
 	}
 	if c.isActive(key) {
@@ -376,7 +390,11 @@ func (c *Controller) finalizeRun(runCtx context.Context, key string, handle *act
 		status.Phase = policyv1alpha1.PolicyWorkflowRunFailed
 		status.ExitStatus = policyv1alpha1.PolicyExitStatusFailure
 	}
-	c.writeRunStatus(ctx, current, status)
+	if err := c.writeRunStatus(ctx, current, status); err != nil {
+		c.rememberTerminal(key, status)
+	} else {
+		c.forgetTerminal(key)
+	}
 }
 
 func preserveResult(status, result policyv1alpha1.PolicyWorkflowRunStatus) policyv1alpha1.PolicyWorkflowRunStatus {
@@ -413,16 +431,21 @@ func (c *Controller) writeRunPending(ctx context.Context, run *policyv1alpha1.Po
 	c.writeRunStatus(ctx, run, value)
 }
 
-func (c *Controller) writeRunStatus(ctx context.Context, run *policyv1alpha1.PolicyWorkflowRun, value policyv1alpha1.PolicyWorkflowRunStatus) {
+func (c *Controller) writeRunStatus(ctx context.Context, run *policyv1alpha1.PolicyWorkflowRun, value policyv1alpha1.PolicyWorkflowRunStatus) error {
 	if run.DeletionTimestamp != nil {
-		return
+		return nil
 	}
 	if runStatusEqual(run.Status, value) {
-		return
+		return nil
 	}
-	if err := c.cfg.Resources.WriteRunStatus(ctx, run, value); err != nil && !kcpstore.IsNotFound(err) {
+	if err := c.cfg.Resources.WriteRunStatus(ctx, run, value); err != nil {
+		if kcpstore.IsNotFound(err) {
+			return nil
+		}
 		c.log.Warn("writing policy run status", "run", runKey(run), "err", err.Error())
+		return err
 	}
+	return nil
 }
 
 func (c *Controller) maybeDeleteRun(ctx context.Context, run *policyv1alpha1.PolicyWorkflowRun) {
@@ -619,6 +642,16 @@ func annotationsFromAPI(values map[string]json.RawMessage) models.Annotations {
 		if err := json.Unmarshal(raw, &value); err != nil {
 			continue
 		}
+		if object, ok := value.(map[string]any); ok && len(object) == 1 {
+			if items, exists := object["items"]; exists {
+				out[key] = items
+				continue
+			}
+			if single, exists := object["value"]; exists {
+				out[key] = single
+				continue
+			}
+		}
 		out[key] = value
 	}
 	return out
@@ -682,10 +715,35 @@ func (c *Controller) cancelUnseen(seen map[string]bool) {
 		delete(c.active, key)
 		handles = append(handles, handle)
 	}
+	for key := range c.terminal {
+		if seen[key] {
+			continue
+		}
+		delete(c.terminal, key)
+	}
 	c.mu.Unlock()
 	for _, handle := range handles {
 		handle.cancel()
 	}
+}
+
+func (c *Controller) rememberTerminal(key string, status policyv1alpha1.PolicyWorkflowRunStatus) {
+	c.mu.Lock()
+	c.terminal[key] = status
+	c.mu.Unlock()
+}
+
+func (c *Controller) terminalStatus(key string) (policyv1alpha1.PolicyWorkflowRunStatus, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	status, ok := c.terminal[key]
+	return status, ok
+}
+
+func (c *Controller) forgetTerminal(key string) {
+	c.mu.Lock()
+	delete(c.terminal, key)
+	c.mu.Unlock()
 }
 
 func (c *Controller) cancelAll() {

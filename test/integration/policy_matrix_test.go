@@ -268,7 +268,7 @@ func TestPolicyWorkflowRunCancellationAndDeadline(t *testing.T) {
 			TTLSecondsAfterFinished: int64Ptr(600),
 		}
 		p.createRun(t, policyRunObject(name, "", spec))
-		run := p.waitRunPhase(t, name, policyRunTimeout,
+		run := p.waitRunPhase(t, name, policyFailTimeout,
 			policyv1alpha1.PolicyWorkflowRunFailed,
 			policyv1alpha1.PolicyWorkflowRunSucceeded)
 		if run.Status.Phase != policyv1alpha1.PolicyWorkflowRunFailed {
@@ -341,7 +341,7 @@ func TestPolicyWorkflowRunFailsClosedOnRecordTypes(t *testing.T) {
 				TTLSecondsAfterFinished: int64Ptr(600),
 			}
 			p.createRun(t, policyRunObject(name, workflowName, spec))
-			run := p.waitRunPhase(t, name, policyRunTimeout,
+			run := p.waitRunPhase(t, name, policyFailTimeout,
 				policyv1alpha1.PolicyWorkflowRunFailed, policyv1alpha1.PolicyWorkflowRunSucceeded)
 			if run.Status.Phase != policyv1alpha1.PolicyWorkflowRunFailed {
 				t.Fatalf("the %s record run ended in phase %s (%s)", c.name, run.Status.Phase, describePolicyRun(run))
@@ -349,6 +349,9 @@ func TestPolicyWorkflowRunFailsClosedOnRecordTypes(t *testing.T) {
 			message := policyRunMessage(run)
 			if !strings.Contains(message, c.want) {
 				t.Fatalf("the %s record run failed without the refusal: %q", c.name, message)
+			}
+			if strings.TrimSpace(run.Status.ConsoleOutput) != "" {
+				t.Fatalf("the %s record run started the workflow before the type gate: %q", c.name, run.Status.ConsoleOutput)
 			}
 			waitNoNewPolicyProcess(t, n, baseline, 10*time.Second)
 		})
