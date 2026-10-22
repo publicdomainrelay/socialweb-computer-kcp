@@ -148,7 +148,7 @@ func (c *Controller) reconcileOAuthQr(ctx context.Context, dyn dynamic.Interface
 		return
 	}
 	if qr == nil || !time.Now().Before(qr.expires) {
-		qr, err = c.newQrState(id.Name)
+		qr, err = c.newQrState(id)
 		if err != nil {
 			c.failed(ctx, dyn, id, generation, status, "OAuthBeginFailed", err.Error())
 			return
@@ -516,8 +516,8 @@ func (c *Controller) clearQr(name string) {
 	delete(c.qr, name)
 }
 
-func (c *Controller) newQrState(name string) (*qrTransfer, error) {
-	did, signer, err := c.qrSigner()
+func (c *Controller) newQrState(id *v1alpha1.MarketIdentity) (*qrTransfer, error) {
+	did, signer, err := c.qrSigner(id)
 	if err != nil {
 		return nil, err
 	}
@@ -545,18 +545,26 @@ func (c *Controller) newQrState(name string) (*qrTransfer, error) {
 	if c.qr == nil {
 		c.qr = map[string]*qrTransfer{}
 	}
-	c.qr[name] = qr
+	c.qr[id.Name] = qr
 	c.qrMu.Unlock()
 	return qr, nil
 }
 
-func (c *Controller) qrSigner() (string, oauthclient.ServiceAuthSigner, error) {
+func (c *Controller) qrSigner(id *v1alpha1.MarketIdentity) (string, oauthclient.ServiceAuthSigner, error) {
 	if c.oauth.CLIKey != nil {
-		public, err := c.oauth.CLIKey.PublicKey()
-		if err != nil {
-			return "", nil, err
+		did := strings.TrimSpace(c.oauth.CLIDID)
+		if did == "" && id != nil {
+			if parsed, err := url.Parse(strings.TrimSpace(id.Spec.OAuthClientID)); err == nil && parsed.Hostname() != "" {
+				did = "did:web:" + strings.ToLower(parsed.Hostname())
+			}
 		}
-		did := public.DIDKey()
+		if did == "" {
+			public, err := c.oauth.CLIKey.PublicKey()
+			if err != nil {
+				return "", nil, err
+			}
+			did = public.DIDKey()
+		}
 		return did, oauthclient.KeySigner{Issuer: syntax.DID(did), Key: c.oauth.CLIKey}, nil
 	}
 	if c.oauth.QRSigner != nil && strings.TrimSpace(c.oauth.CLIDID) != "" {

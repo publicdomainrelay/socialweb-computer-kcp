@@ -352,6 +352,9 @@ func (c *Core) runIdentity(ctx context.Context) {
 			States: &oauthclient.MemoryStateStore{}}
 		if key, err := loadOAuthCLIKey(c.cfg.StateDir); err == nil {
 			oauth.CLIKey = key
+			if pub, err := key.PublicKey(); err == nil {
+				oauthcallback.SetCLIPublicKey(pub.Multibase())
+			}
 			oauth.QROrigin = strings.TrimSpace(os.Getenv("SOCIALWEB_QR_ORIGIN"))
 			if oauth.QROrigin == "" {
 				oauth.QROrigin = "https://qr.fedfork.com"
