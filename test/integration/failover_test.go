@@ -149,8 +149,26 @@ func TestAStoppedBidderIsReplacedAndReleasesItsOrphan(t *testing.T) {
 	other := 1 - winner
 	oldRFP := first.Status.Contract.RFPUri
 	oldReceipt := first.Status.Contract.ReceiptUri
-	if oldReceipt == "" {
-		t.Fatalf("claim %s has an accept but no receipt", first.Name)
+	for deadline := time.Now().Add(2 * time.Minute); oldReceipt == ""; {
+		if time.Now().After(deadline) {
+			t.Fatalf("claim %s has an accept but no receipt", first.Name)
+		}
+		time.Sleep(200 * time.Millisecond)
+		cs, err := tn.Claims(ctx)
+		if err != nil {
+			continue
+		}
+		for _, c := range cs {
+			if c.Name != first.Name {
+				continue
+			}
+			first = c
+			if c.Status.Phase == v1alpha1.NodeClaimJoining || c.Status.Phase == v1alpha1.NodeClaimRunning {
+				t.Fatalf("the node of claim %s joined (%s) before its receipt was recorded", first.Name, first.Status.Phase)
+			}
+			oldReceipt = c.Status.Contract.ReceiptUri
+			oldRFP = c.Status.Contract.RFPUri
+		}
 	}
 	for deadline := time.Now().Add(failoverVMWait); ; time.Sleep(200 * time.Millisecond) {
 		vms, err := n.BidderVMsOf(ctx, winner)
