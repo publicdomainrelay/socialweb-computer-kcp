@@ -85,21 +85,19 @@ One instance is one kcp and its workspaces; there is no kcp inside a kcp. A mark
 
 - **Run your own**
   - [Prerequisites](#prerequisites)
-    - [Prepare a bare host](#prepare-a-bare-host)
   - [Install a release binary](#install-a-release-binary)
   - [Run and install a bidder](#run-and-install-a-bidder)
   - [Run the gateway and its web app](#run-the-gateway-and-its-web-app)
-  - [Run a market network on one host](#run-a-market-network-on-one-host)
-  - [Rent a VM through the RFP flow](#rent-a-vm-through-the-rfp-flow)
-
-- **Develop from source**
-  - [Build the socialweb-computer binary](#build-the-socialweb-computer-binary)
-  - [Run the integration tests](#run-the-integration-tests)
 
 - **Operate and release**
   - [Deploy a release to production](#deploy-a-release-to-production)
   - [Sign in with OAuth](#sign-in-with-oauth)
   - [Inspect the kcp of an application](#inspect-the-kcp-of-an-application)
+
+- **Contributing**
+  - [CONTRIBUTING.md](CONTRIBUTING.md): the development build, a local market network, the RFP flow,
+    a bidder in a market network, the integration tests, the gate, and installing a development build
+    on a bidder host
 
 - [License](#license)
 
@@ -109,18 +107,15 @@ One instance is one kcp and its workspaces; there is no kcp inside a kcp. A mark
 # 1. use the gateway we host: sign in, create a cluster, get a kubeconfig
 open https://k8s.socialweb.computer
 
-# 2. rent one VM through the RFP flow, on a host you prepared
-socialweb-computer dev up --instance mn1 --profile market-network --bidders 1
-echo '[{"path":"/root/x","value":"hello"}]' > secrets.json
-socialweb-computer run request --network mn1 --secrets secrets.json --exec 'cat /root/x'
-socialweb-computer dev down --instance mn1
-
-# 3. install a bidder from the newest release (see the bidder section for the association)
+# 2. install a bidder from the newest release (see the bidder section for the association)
 V=$(curl -fsSL https://api.github.com/repos/publicdomainrelay/socialweb-computer-kcp/tags | jq -r ".[].name" | grep "^v" | sort -V | tail -1)
 curl -fsSLO "https://socialweb-computer-kcp.sfo3.digitaloceanspaces.com/releases/$V/binaries/socialweb-computer-linux-amd64"
 sudo install -m 0755 socialweb-computer-linux-amd64 /usr/local/bin/socialweb-computer
 sudo socialweb-computer install bidder --handle <your atproto handle>
 ```
+
+To build from source, run a local market network, rent a VM through the RFP flow, or install a
+development build, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Pieces, and where each starts
 | Piece | Use it with | Section |
@@ -129,9 +124,7 @@ sudo socialweb-computer install bidder --handle <your atproto handle>
 | A tenant cluster of that gateway | the web app, or XRPC (`goat`) | [Manage a tenant cluster over XRPC](#manage-a-tenant-cluster-over-xrpc) |
 | Your own gateway | `scripts/deploy.sh` on a host you own | [Run the gateway and its web app](#run-the-gateway-and-its-web-app) |
 | A bidder | `install bidder` (release binary) | [Run and install a bidder](#run-and-install-a-bidder) |
-| A market network on one host | `dev up --profile market-network` | [Run a market network on one host](#run-a-market-network-on-one-host) |
-| One VM through the RFP flow | `run request` | [Rent a VM through the RFP flow](#rent-a-vm-through-the-rfp-flow) |
-| The whole thing from source | `scripts/build-socialweb-computer.sh` | [Build the socialweb-computer binary](#build-the-socialweb-computer-binary) |
+| Development build and live runs | `scripts/build-socialweb-computer.sh --dev` | [CONTRIBUTING.md](CONTRIBUTING.md) |
 | A release to production | `scripts/deploy.sh` | [Deploy a release to production](#deploy-a-release-to-production) |
 
 ## How it works
@@ -327,44 +320,11 @@ echo "$s" | jq -r '.pods[].containers[] | "\(.state) exit=\(.exitCode) \(.log)"'
 | --- | --- |
 | run VMs | a 64-bit Linux host with `/dev/kvm`, systemd 253+, cgroup v2, `/dev/net/tun` |
 | rent VMs on the host | an account with one `/etc/subuid` and `/etc/subgid` range of `N * 65536` ids (`install bidder --vm-slots N`, default 256); one running VM holds one slot |
-| run live commands in a single-host network | the VM account (`test-0001`); its units, slots and `/dev/kvm` access belong to it |
 | run a release binary | `curl` and `sha256sum`; the binary embeds every asset, so no checkout, Go or Deno |
-| build or run scripts | Go and Deno on `PATH`, this checkout |
+| build a release from source | Go and Deno on `PATH`, a clean checkout |
 
-#### Prepare a bare host
-
-Install these as root; `dev up` and `run request` check the host and name anything missing.
-
-| Need | Ubuntu / Debian package | Fedora / RHEL package |
-|---|---|---|
-| `newuidmap` and `newgidmap`, so each VM runs in its own user namespace | `uidmap` | `shadow-utils` |
-| `ssh` and `ssh-keygen`, which `run request` runs | `openssh-client` | `openssh-clients` |
-| `curl`, to install the binary and fetch the guest image | `curl` | `curl` |
-| `/usr/share/zoneinfo`, for the embedded postgres of the gateway | `tzdata` | `tzdata` |
-| `jq`, used by the examples below (optional) | `jq` | `jq` |
-| `machinectl`, to log in as the VM account (optional; or use `ssh`) | `systemd-container` | `systemd-container` |
-
-As root, once:
-
-```bash
-apt-get install -y uidmap openssh-client curl tzdata jq systemd-container
-useradd -m -s /bin/bash -G kvm -K SUB_UID_COUNT=0 -K SUB_GID_COUNT=0 test-0001
-usermod --add-subuids 100000-1148575 --add-subgids 100000-1148575 test-0001
-install -d -m 0700 -o test-0001 -g test-0001 ~test-0001/.ssh
-install -m 0600 -o test-0001 -g test-0001 ~/.ssh/authorized_keys ~test-0001/.ssh/
-loginctl enable-linger test-0001
-sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-echo kernel.apparmor_restrict_unprivileged_userns=0 > /etc/sysctl.d/60-socialweb.conf
-```
-
-| Note | Why |
-| --- | --- |
-| `-K SUB_UID_COUNT=0 -K SUB_GID_COUNT=0` | `useradd` must not add its own 65536-id range; the account needs exactly one range in each file. `100000-1148575` is 16 VM slots |
-| `loginctl enable-linger` | keeps the account's `systemd --user` manager up; log in with `ssh test-0001@<host>` or, as root, `machinectl shell test-0001@` (`sudo -u` and `runuser` give no `/run/user/<uid>` session) |
-| the `sysctl` | lets the embedded pasta create a user namespace on Ubuntu 24.04+; skip it on hosts without AppArmor. A production bidder loads an AppArmor profile through `install bidder` |
-| `/dev/kvm`, `/dev/net/tun` | kvm is read-write for the `kvm` group; if tun is missing, `modprobe tun` |
-| cgroup delegation | `cpu memory pids` on `user@<uid>.service` is the Ubuntu 24.04 default; `dev up` names it when missing |
-| apt lock on a cloud first boot | an unattended upgrade can hold it for minutes; rerun `apt-get` |
+The development host setup, including the `test-0001` VM account and the integration-test
+prerequisites, is in [CONTRIBUTING.md](CONTRIBUTING.md#prepare-a-bare-host).
 
 ### Install a release binary
 
@@ -407,12 +367,10 @@ socialweb-computer version
 
 - Long form: [docs/bidder.md](docs/bidder.md) (every flag, the unit, the guest-image resolution).
 
-A bidder runs as its own application. Inside a market network it is a child; on a host it is an installed core. Its records live in its own PDS DenoPod, never in your repo.
+A bidder runs as its own installed application on a host, in its own account. Its records live in its
+own PDS DenoPod, never in your repo.
 
 ```bash
-# in a market network
-socialweb-computer run bidder --host-backend proc --profile market-network --network mn1 --handle b2.mn1.bob.test
-
 # installed on a host, from the release binary (see Install a release binary)
 HANDLE=<your atproto handle>
 V=$(curl -fsSL https://api.github.com/repos/publicdomainrelay/socialweb-computer-kcp/tags | jq -r ".[].name" | grep "^v" | sort -V | tail -1)
@@ -422,10 +380,10 @@ grep " socialweb-computer-linux-amd64$" SHA256SUMS | sha256sum -c -
 sudo install -m 0755 socialweb-computer-linux-amd64 /usr/local/bin/socialweb-computer
 sudo socialweb-computer install bidder --handle "$HANDLE"
 
-# associate its DID with your account once (the link comes from the identity status)
-K=$(sudo ls /var/lib/socialweb-computer/swc-bidder/handles/*/kcp/admin.kubeconfig | head -1)
+# associate its DID with your account once; the URL expires in about five minutes
+K=$(sudo sh -c 'ls /var/lib/socialweb-computer/swc-bidder/handles/*/kcp/admin.kubeconfig' | head -1)
 U=$(sudo kubectl --kubeconfig "$K" get marketidentity bidder -o jsonpath='{.status.pendingAction.url}')
-deno run -A --no-lock scripts/associate.ts --creds ~/.bobvmbuilder_bsky_social_source --account BOB --url "$U"
+deno run -A --no-lock scripts/oauth-signin.ts --creds ~/.bobvmbuilder_bsky_social_source --account BOB --url "$U" --click '^Yes, this is my bidder$'
 
 # upgrade it, as its account, then install again
 sudo runuser -u swc-bidder -- env XDG_RUNTIME_DIR=/run/user/$(id -u swc-bidder) \
@@ -439,7 +397,7 @@ sudo runuser -u swc-bidder -- env XDG_RUNTIME_DIR=/run/user/$(id -u swc-bidder) 
 | Unit | `socialweb-computer-bidder@<handle>.service` in the account's own manager; the account is `swc-bidder` |
 | Logs | `sudo journalctl _SYSTEMD_USER_UNIT='socialweb-computer-bidder@<handle>.service'`; the account is a system account, so its logs are in the system journal |
 | State | `/var/lib/socialweb-computer/swc-bidder`; its kcp at `handles/<hash>/kcp` (root-readable only) |
-| Identity | profile `prod-qr`: own PDS DenoPod, key in its own OpenBao, DID kept across restarts and upgrades; one association write, then `associate.ts --delete` revokes |
+| Identity | profile `prod-qr`: own PDS DenoPod, key in its own OpenBao, DID kept across restarts and upgrades; one association write, and deleting the badgeBlueKeys record revokes it |
 | Discovery | a signed heartbeat every 60 s; requesters keep only bidders fresh within 5 min, so a stopped bidder gets no direct `submitRfp` |
 | Policy | `bidder-policy` in `config.json`; unset means `open`. A production bidder names `tangled-vouch` |
 | Other options | `"bidder-options": "--bid-ttl-sec 1800"` in the same `config.json`; each must be a `market-bidder` option in `deploy/apps/option-map.yaml`; restart the unit after editing |
@@ -450,7 +408,6 @@ sudo runuser -u swc-bidder -- env XDG_RUNTIME_DIR=/run/user/$(id -u swc-bidder) 
 ### Run the gateway and its web app
 
 - Long form: [docs/gateway.md](docs/gateway.md) (deploy.sh environment, web app, caddy sites).
-A development gateway is a child of a market network: start the network with `--with-gateway`.
 
 A production gateway is built as a release, shipped, and installed or upgraded with `scripts/deploy.sh`, which also writes the caddy sites.
 
@@ -482,162 +439,11 @@ The script installs the gateway on its first run. On every later run it upgrades
 
 After a fresh deploy the requester account has no web app session, so cluster claims fail with a `no oauth session stored` message. Sign in with [Sign in with OAuth](#sign-in-with-oauth) and `--url https://k8s.socialweb.computer/`.
 
-### Run a market network on one host
-```mermaid
-flowchart TD
-  subgraph net["market network = one kcp"]
-    global["root:global<br/>plc"]
-    relay["root:relay<br/>relay, dispatchers"]
-    alice["root:alice<br/>pds"]
-    bob["root:bob<br/>pds"]
-    b1["root:bidder-1<br/>bidder, pds, guest-kcp"]
-    gw["root:gateway<br/>web app, requester, pds"]
-    req["root:request-N<br/>requester"]
-  end
-  req -->|rfp| relay
-  relay --> b1
-  b1 -->|bids| req
-  gw -->|NodeClaim| b1
-```
+## Contributing
 
-One instance, profile `market-network`, one kcp: shared services (`root:global` plc, `root:relay`, `root:alice`/`root:bob` pds) and one workspace per application, components in `root:<app>:app`. Production runs the same manifests in a kcp per application.
-
-```bash
-socialweb-computer dev up --instance mn1 --profile market-network --bidders 1 --with-gateway --vm-host-backend systemd-user
-```
-
-Run it as the VM account on a host prepared as in [Prepare a bare host](#prepare-a-bare-host); the first `dev up` fetches and verifies the guest image unless `--guest-image-source` names one.
-
-```bash
-socialweb-computer dev status --instance mn1 | jq '.network.status.apps'
-socialweb-computer status --instance mn1
-eval "$(socialweb-computer dev env --instance mn1)"
-socialweb-computer dev logs core --instance mn1 --tail 50
-socialweb-computer dev down --instance mn1
-```
-
-| Command | Prints |
-| --- | --- |
-| `dev status --instance mn1` | the `MarketNetwork` object, each child's roots and contracts |
-| `status --instance mn1` | market counters and contract steps |
-| `dev env --instance mn1` | exports `KUBECONFIG` and the kcp ports |
-| `dev logs core --instance mn1` | the core's log |
-| `dev down --instance mn1` | stops the network |
-
-`dev up` options for a market network:
-
-| Option | Meaning | Default |
-|---|---|---|
-| `--instance` | The instance id. | derived from the worktree |
-| `--profile` | `market-network`. | |
-| `--bidders N` | How many `MarketBidder` children to compose (`bidder-1` .. `bidder-N`). | 1 |
-| `--with-gateway` | Also compose a `Gateway` child. | |
-| `--guest-image-source` | The `file://` or `https://` base the pinned guest image is fetched from and verified against by sha256. Unset, the image of this build is downloaded from the published artifacts. | |
-| `--guest-image-release-base` | The base the published artifacts are searched under when `--guest-image-source` is unset. | the public bucket |
-| `--vm-host-backend` | The placement backend of the VM units: `systemd-user` or `proc`. | the instance's own |
-| `--app-values` | A YAML file merged over the market-network values. | |
-| `--network-timeout` | How long `dev up` waits for the network and every child to report Ready. A cold first start can need longer than the default. | `3m` |
-
-### Rent a VM through the RFP flow
-`run request` posts a `compute.vm` record and a signed `market.rfp`, waits for bids, accepts one, boots the guest, opens an SSH session to the guest's iroh ticket, and deletes the VM. Pass `--network` to use a running market network (see [Run a market network on one host](#run-a-market-network-on-one-host)); run it as that network's VM account.
-
-A secrets bundle is a JSON array of `{ "path": "/abs/path", "value": ... }`. The secrets are written only into the invocation's own OpenBao; the guest fetches them at boot, and they never enter a kcp object, an argument, a log, or a record.
-
-```bash
-echo '[{"path":"/root/x","value":"hello"}]' > secrets.json
-socialweb-computer run request --network mn1 --secrets secrets.json --exec 'cat /root/x'
-socialweb-computer run request --network mn1 --secrets secrets.json --hold --exec 'uname -a'
-socialweb-computer run request list
-socialweb-computer run request resume <name>
-socialweb-computer run request release <name>
-```
-
-`run request` options:
-
-| Option | Meaning |
-|---|---|
-| `--network` | The market network instance to run under. Unset: a standalone instance under `<state-dir>/requests`. |
-| `--name` | The invocation's name, a DNS label. Default `req-<UTC time>`. |
-| `--secrets` | The secrets bundle file. |
-| `--exec` | Run this program over SSH on the guest instead of an interactive session. |
-| `--hold` | Keep the contract when this process ends; `release` or `resume <name>` starts it again. |
-| `--skip-ssh` | Do not open an SSH session once the guest is on the network. |
-| `--contract-timeout` | How long to wait for the guest's `onNetwork` and host keys, and for a release. Default `3m`. |
-
-SSH runs with `StrictHostKeyChecking=yes` against the host keys the guest reported (the guest's `vm.hostKeys`), through a `ProxyCommand` that dials the guest's iroh ticket. The market records travel through the relay; the guest is reached only over iroh.
-
-## Develop from source
-
-### Build the socialweb-computer binary
-Build from source when you change the code. To run a published release instead, see [Install a release binary](#install-a-release-binary).
-
-Build a development binary from your working tree, uncommitted changes included. This is the binary for live runs.
-
-```bash
-scripts/build-socialweb-computer.sh --dev --publish /var/tmp/swc
-```
-
-The build writes the host binary to `/var/tmp/swc/bin/socialweb-computer`, mirrors the working tree to `/var/tmp/swc/src`, and runs the TypeScript from that mirror. Put it on your PATH and it is the `socialweb-computer` in every command below:
-
-```bash
-export PATH=/var/tmp/swc/bin:$PATH
-```
-
-A development binary prints `dev build, not reproducible` with its commit in `socialweb-computer version`.
-
-Build a release binary of one commit, offline and cached by input hash:
-
-```bash
-C=$(git rev-parse HEAD)
-scripts/build-socialweb-computer.sh --platform linux/amd64 --commit "$C"
-B=~/.tmp/socialweb-computer-build/release/$C/socialweb-computer-linux-amd64
-```
-
-`$B` and its sha256 are what `socialweb-computer install` and `socialweb-computer upgrade --binary --sha256` take.
-
-CI publishes the same outputs to the public bucket: `releases/<tag>/` on a `v*` tag, and `main/<commit>/` with a copy at `main/latest/` on `main`. See [Install a release binary](#install-a-release-binary).
-
-Build script options:
-
-| Option | Effect |
-|---|---|
-| `--dev` | Build the working tree for the host platform; this is the binary for live runs. |
-| `--publish DIR` | With `--dev`, copy the host binary to `DIR/bin/socialweb-computer` and mirror the working tree to `DIR/src`. |
-| `--sync-only` | With `--publish`, mirror the working tree again without rebuilding. |
-| `--platform P` | A release platform (`linux/amd64`, `linux/arm64`); repeat for more. Default: every release platform. |
-| `--commit REV` | The commit to build. Default `HEAD`; uncommitted changes are not built. |
-| `--build-root DIR` | Checkouts, caches, and outputs. Default `$HOME/.tmp/socialweb-computer-build`. |
-| `--verify-reproducible` | Build the commit twice from two clean checkouts and refuse a platform whose builds differ. |
-| `--no-cache` | With `--verify-reproducible`, build both from scratch. |
-
-### Run the integration tests
-The integration tests are Go tests under `test/integration` with the `integration` build tag. Each test starts its own market network as the VM account, drives it with the `socialweb-computer` verbs, and tears it down. Run them as an account that may `sudo -n -u test-0001`.
-
-```bash
-go test -tags integration -count=1 -v -timeout 60m ./test/integration/
-# or one test
-go test -tags integration -count=1 -v -timeout 60m ./test/integration/ -run TestRequestSecretsReachTheGuestThroughTheRFPFlow
-go test -tags integration -count=1 -v -timeout 60m ./test/integration/ -run TestTenantClusterScalesFromZeroOnMarketVMsAndBack
-go test -tags integration -count=1 -v -timeout 60m ./test/integration/ -run TestClusterEventsStreamFromSubscribeClusters
-go test -tags integration -count=1 -v -timeout 60m ./test/integration/ -run TestKubeconfigClientCertificateWithoutCredentialHelper
-go test -tags integration -count=1 -v -timeout 60m ./test/integration/ -run TestWebAppSignInThroughThePluginKeepsTheCookieAcrossARestartAndIssuesACertificate
-```
-
-The web app sign-in test needs `deno` and `/usr/bin/google-chrome` for the user that runs `go test`: it runs `scripts/oauth-signin.ts` against the network's gateway, which it fronts with a TLS listener of its own on a port it picks.
-
-Environment variables:
-
-| Variable | Meaning | Default |
-|---|---|---|
-| `SOCIALWEB_IT_ACCOUNT` | The VM account the tests run as. | `test-0001` |
-| `SOCIALWEB_IT_GUEST_IMAGE` | The guest image source. | `file:///var/lib/socialweb-computer/guest-image` |
-| `SOCIALWEB_IT_PUBLISH` | Where the built binary is published for the run. | |
-| `SOCIALWEB_IT_SKIP_BUILD` | Reuse the published binary instead of rebuilding. | |
-| `SOCIALWEB_IT_RUN_ROOT` | The run root. Keep it short, since a tenant cluster's front socket path must fit in 107 bytes. | `/var/tmp/swcit` |
-| `SOCIALWEB_IT_ARTIFACTS` | The directory for logs. | `~/.tmp/swc-it/<run>` |
-| `SOCIALWEB_IT_LIVE_SLOT` | A host live-slot script the run takes before it starts; `none` turns it off. | the host's script, when one is configured |
-
-Each integration test takes VM slots of that account and brings up its own market network.
+Development is out of scope for this README. The development build, a local market network, the RFP
+flow, a bidder in a market network, the integration tests, the gate, and installing and associating a
+development build on a bidder host are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Operate and release
 
@@ -661,7 +467,7 @@ Two deploy shapes, and they differ:
 | --- | --- | --- |
 | Routine gateway deploy (`scripts/deploy.sh` on an installed gateway) | `upgrade --binary --sha256`, then `install gateway` again; the core adopts its DenoPods and rolls the kcp slot only when kcp's argv or binary changed | State dir and its kcp objects, the root OpenBao (requester repo key, sessions), the gateway requester's DID and its association record, web app sessions, running DenoPods. Read on prod: web session across rc8 to rc9, requester DID and association across rc11 to rc21 with no new claim |
 | Routine bidder upgrade (as the account: `upgrade --binary <path> --sha256 <digest>`, then the same `install bidder` again) | The bidder's core restarts on the new binary; pods are replaced only when the spec or the TypeScript tree changed | The bidder's state dir, its OpenBao (repo key), the bidder DID and handle, its association record, its pds DenoPod repo. Read on prod: Bob's bidder DID and association across rc11 to rc21 with no new claim |
-| Fresh install (`install gateway` or `install bidder` on an empty host, or a lost or purged state dir) | First install; new keys generated | Nothing. The identity gets a new DID and needs one association write again (`associate.ts` for a bidder or a requester; the web app sign-in for a gateway owner) |
+| Fresh install (`install gateway` or `install bidder` on an empty host, or a lost or purged state dir) | First install; new keys generated | Nothing. The identity gets a new DID and needs one association write again (a bidder through `scripts/oauth-signin.ts`, see [CONTRIBUTING.md](CONTRIBUTING.md); the web app sign-in for a gateway owner) |
 
 The policy is still "nothing is guaranteed": a change may deliberately wipe state, and there is no migration or backward compatibility to plan for. Losing sessions, VMs, clusters, claims or receipts is acceptable; what exists, this table says.
 
@@ -719,8 +525,9 @@ The script drives headless Chrome through the page, the PDS password and "Author
 ```bash
 # the gateway's web app user; needed after a fresh deploy, not after an upgrade
 deno run -A --no-lock scripts/oauth-signin.ts --creds ~/.aliceoa_bsky_social_source --account ALICE --url https://k8s.socialweb.computer/
-# a bidder's association, when a person does it in a browser instead of associate.ts
-U=$(kubectl --kubeconfig $K get marketidentity bidder -o jsonpath='{.status.pendingAction.url}')
+# a bidder's association through its pending URL
+K=$(sudo sh -c 'ls /var/lib/socialweb-computer/swc-bidder/handles/*/kcp/admin.kubeconfig' | head -1)
+U=$(sudo kubectl --kubeconfig "$K" get marketidentity bidder -o jsonpath='{.status.pendingAction.url}')
 deno run -A --no-lock scripts/oauth-signin.ts --creds ~/.bobvmbuilder_bsky_social_source --account BOB --url "$U" --click '^Yes, this is my bidder$'
 ```
 
