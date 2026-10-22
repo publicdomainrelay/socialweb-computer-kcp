@@ -69,4 +69,6 @@ type AtprotoRecordStatus struct {
 
 const ConditionReferencesResolved = "ReferencesResolved"
 
+const ConditionRecordInSync = "InSync"
+
 const FinalizerAtprotoRecord = "atprotorecord.socialweb.computer/repo"

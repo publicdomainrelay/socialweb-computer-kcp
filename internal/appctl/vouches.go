@@ -3,14 +3,20 @@ package appctl
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
+	"reflect"
 	"slices"
+	"time"
 
 	"github.com/bluesky-social/indigo/atproto/syntax"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/dynamic"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
@@ -144,20 +150,39 @@ func (ctl *Controller) reconcileOperatorRecords(ctx context.Context, ws string, 
 	if err != nil {
 		return err
 	}
-	var held []v1alpha1.AtprotoRecord
+	var records []v1alpha1.AtprotoRecord
 	for i := range list.Items {
 		var o v1alpha1.AtprotoRecord
 		if err := fromUnstructured(&list.Items[i], &o); err != nil {
 			return err
 		}
-		if o.Spec.Repo == OperatorRepo && o.DeletionTimestamp == nil &&
-			(o.Status.Phase != v1alpha1.AtprotoRecordPhaseApplied || o.Status.ObservedGeneration != o.Generation) {
-			held = append(held, o)
+		if o.Spec.Repo == OperatorRepo && o.DeletionTimestamp == nil {
+			records = append(records, o)
 		}
 	}
-	if len(held) == 0 {
+	if len(records) == 0 {
 		return nil
 	}
+	settled := true
+	for i := range records {
+		if records[i].Status.Phase != v1alpha1.AtprotoRecordPhaseApplied || records[i].Status.ObservedGeneration != records[i].Generation {
+			settled = false
+			break
+		}
+	}
+	if settled {
+		if last, ok := ctl.observedAt[ws]; ok && time.Since(last) < OperatorRecordObserveInterval {
+			return nil
+		}
+	}
+	observedAll := false
+	defer func() {
+		if observedAll {
+			ctl.observedAt[ws] = time.Now()
+			return
+		}
+		delete(ctl.observedAt, ws)
+	}()
 	s, err := login()
 	if err != nil {
 		return err
@@ -171,28 +196,72 @@ func (ctl *Controller) reconcileOperatorRecords(ctx context.Context, ws string, 
 		return err
 	}
 	operator := sess.DID
-	for _, o := range held {
+	for _, o := range records {
 		var record map[string]any
 		if err := json.Unmarshal(o.Spec.Record, &record); err != nil {
 			return fmt.Errorf("AtprotoRecord %s: the record is not a JSON object: %w", o.Name, err)
 		}
 		path := pdsclient.RepoPath{Repo: operator, Collection: syntax.NSID(o.Spec.Collection), Rkey: syntax.RecordKey(o.Spec.Rkey)}
-		out, err := pds.PutRecord(ctx, path, o.Spec.Record, pdsclient.WriteOptions{})
+		observed, err := pds.GetRecord(ctx, path, nil)
+		absent := false
 		if err != nil {
-			return fmt.Errorf("AtprotoRecord %s: %w", o.Name, err)
+			var xe *pdsclient.XRPCError
+			if !errors.As(err, &xe) || (xe.Code != "RecordNotFound" && xe.StatusCode != http.StatusNotFound) {
+				return fmt.Errorf("AtprotoRecord %s: observing the record: %w", o.Name, err)
+			}
+			absent = true
 		}
-		uri := out.URI.String()
-		cid := out.CID.String()
-		status, err := json.Marshal(map[string]any{"status": map[string]any{"phase": v1alpha1.AtprotoRecordPhaseApplied,
-			"observedGeneration": o.Generation, "did": operator.String(), "uri": uri, "cid": cid, "message": ""}})
-		if err != nil {
+		var reason, message, uri, cid string
+		write := true
+		switch {
+		case o.Status.ObservedGeneration != o.Generation:
+			reason = "Updated"
+			message = "the spec generation changed; the spec record was written"
+		case absent:
+			reason = "Created"
+			message = "the operator PDS held no record; the spec record was written"
+		case o.Status.Phase == v1alpha1.AtprotoRecordPhaseApplied && o.Status.Cid == observed.CID.String():
+			write = false
+			reason = "InSync"
+			message = "the operator PDS record matches the spec"
+			uri = observed.URI.String()
+			cid = observed.CID.String()
+		default:
+			reason = "Repaired"
+			message = fmt.Sprintf("the operator PDS held cid %s; the spec record was written", observed.CID.String())
+		}
+		if write {
+			out, err := pds.PutRecord(ctx, path, o.Spec.Record, pdsclient.WriteOptions{})
+			if err != nil {
+				return fmt.Errorf("AtprotoRecord %s: %w", o.Name, err)
+			}
+			uri = out.URI.String()
+			cid = out.CID.String()
+			ctl.c.log().Info("the market network operator account wrote a declared record", "record", o.Name, "uri", uri,
+				"cid", cid, "collection", o.Spec.Collection, "rkey", o.Spec.Rkey, "reason", reason)
+		}
+		if err := patchOperatorRecordStatus(ctx, ri, o, operator.String(), uri, cid, reason, message); err != nil {
 			return err
 		}
-		if _, err := ri.Patch(ctx, o.Name, types.MergePatchType, status, metav1.PatchOptions{}, "status"); err != nil {
-			return err
-		}
-		ctl.c.log().Info("the market network operator account wrote a declared record", "record", o.Name, "uri", uri,
-			"collection", o.Spec.Collection, "rkey", o.Spec.Rkey)
 	}
+	observedAll = true
 	return nil
+}
+
+func patchOperatorRecordStatus(ctx context.Context, ri dynamic.ResourceInterface, o v1alpha1.AtprotoRecord, did, uri, cid, reason, message string) error {
+	conditions := append([]metav1.Condition(nil), o.Status.Conditions...)
+	meta.SetStatusCondition(&conditions, metav1.Condition{Type: v1alpha1.ConditionRecordInSync, Status: metav1.ConditionTrue,
+		Reason: reason, Message: message, ObservedGeneration: o.Generation})
+	if o.Status.Phase == v1alpha1.AtprotoRecordPhaseApplied && o.Status.ObservedGeneration == o.Generation &&
+		o.Status.Did == did && o.Status.Uri == uri && o.Status.Cid == cid && o.Status.Message == "" &&
+		reflect.DeepEqual(o.Status.Conditions, conditions) {
+		return nil
+	}
+	status, err := json.Marshal(map[string]any{"status": map[string]any{"phase": v1alpha1.AtprotoRecordPhaseApplied,
+		"observedGeneration": o.Generation, "did": did, "uri": uri, "cid": cid, "message": "", "conditions": conditions}})
+	if err != nil {
+		return err
+	}
+	_, err = ri.Patch(ctx, o.Name, types.MergePatchType, status, metav1.PatchOptions{}, "status")
+	return err
 }
