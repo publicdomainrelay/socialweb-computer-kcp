@@ -363,10 +363,56 @@ func (c *Controller) repoBindingForRef(ctx context.Context, dyn dynamic.Interfac
 		}
 		return pdsclient.RepoBinding{Workspace: refWorkspace, Kind: "RemotePDS", Name: name, DID: strings.TrimSpace(remote.Spec.DID)}, nil
 	case "", "pds", "local", "localpds", "local-pds":
+		kind := strings.TrimSpace(ref.Kind)
+		if kind == "" {
+			kind = "Pds"
+		}
+		if repo, err := localRepoBinding(ctx, dyn, workspace, kind, name); err != nil {
+			return pdsclient.RepoBinding{}, err
+		} else if repo != nil {
+			return *repo, nil
+		}
 		return pdsclient.RepoBinding{Workspace: refWorkspace, Kind: "Pds", Name: name}, nil
 	default:
 		return pdsclient.RepoBinding{Workspace: refWorkspace, Kind: ref.Kind, Name: name}, nil
 	}
+}
+
+func localRepoBinding(ctx context.Context, dyn dynamic.Interface, workspace, kind, name string) (*pdsclient.RepoBinding, error) {
+	if dyn == nil {
+		return nil, nil
+	}
+	if strings.TrimSpace(kind) == "" || strings.EqualFold(kind, "pds") {
+		kind = "Pds"
+	}
+	list, err := dyn.Resource(AtprotoRepoGVR).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) || apierrors.IsForbidden(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	for i := range list.Items {
+		var repo v1alpha1.AtprotoRepo
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(list.Items[i].Object, &repo); err != nil {
+			continue
+		}
+		if repo.Spec.PdsRef == nil || repo.Spec.PdsRef.Name != name {
+			continue
+		}
+		if !strings.EqualFold(strings.TrimSpace(repo.Spec.PdsRef.Kind), kind) {
+			continue
+		}
+		if strings.TrimSpace(repo.Spec.DID) == "" {
+			continue
+		}
+		binding := &pdsclient.RepoBinding{Workspace: workspace, Kind: kind, Name: name, DID: strings.TrimSpace(repo.Spec.DID)}
+		if repo.Spec.AuthRef != nil {
+			binding.AuthRef = strings.TrimSpace(repo.Spec.AuthRef.Name)
+		}
+		return binding, nil
+	}
+	return nil, nil
 }
 
 func (c *Controller) clientFor(dyn dynamic.Interface, workspace, target string) (dynamic.Interface, error) {
