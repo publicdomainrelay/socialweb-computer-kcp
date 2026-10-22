@@ -266,6 +266,85 @@ That runs gofmt, go build, apigen and its diff, go vet, the cross-OS builds and 
 The full gate before a release also runs the release closure and the live proofs this host can run:
 read [AGENTS.md](AGENTS.md) "How to verify".
 
+## Install a release build on a bidder host
+
+Build the release commit first. `make` builds both linux release platforms and updates the owned
+asset pins; commit `internal/versions/versions.json` if it changed.
+
+```bash
+cd "$(git rev-parse --show-toplevel)"
+HANDLE=bobvmbuilder.bsky.social
+STATE=/var/lib/socialweb-computer/swc-bidder
+
+make
+C=$(git rev-parse HEAD)
+BIN=$HOME/.tmp/socialweb-computer-build/release/$C/socialweb-computer-linux-amd64
+SHA=$(sha256sum "$BIN" | cut -d' ' -f1)
+echo "$BIN $SHA"
+sudo "$BIN" install bidder --handle "$HANDLE" \
+  --guest-image-source file:///var/lib/socialweb-computer/guest-image
+```
+
+On a host without the local guest image, omit `--guest-image-source`; install resolves and verifies
+the image from the release base.
+
+Upgrade an existing release install as the account, then install again:
+
+```bash
+cd "$(git rev-parse --show-toplevel)"
+C=$(git rev-parse HEAD)
+BIN=$HOME/.tmp/socialweb-computer-build/release/$C/socialweb-computer-linux-amd64
+SHA=$(sha256sum "$BIN" | cut -d' ' -f1)
+sudo install -m 0755 "$BIN" /var/tmp/swc-release/socialweb-computer-${C:0:8}
+STAGED=/var/tmp/swc-release/socialweb-computer-${C:0:8}
+sudo runuser -u swc-bidder -- env XDG_RUNTIME_DIR=/run/user/$(id -u swc-bidder) \
+  CONFIG_PATH_SOCIALWEB_COMPUTER=/var/lib/socialweb-computer/swc-bidder/config.json \
+  /var/lib/socialweb-computer/swc-bidder/bin/current/socialweb-computer \
+  upgrade --binary "$STAGED" --sha256 "$SHA"
+sudo "$STAGED" install bidder --handle bobvmbuilder.bsky.social
+```
+
+### Associate the bidder DID
+
+A fresh install gets a new DID. The association is one `badgeBlueKeys` claim record in the operator's
+repo, plus the operator DID in `spec.approvedAssociations` of the bidder's `MarketIdentity`. The
+helper reads the handle and password from the credentials file and prints neither.
+
+```bash
+cd "$(git rev-parse --show-toplevel)"
+HANDLE=bobvmbuilder.bsky.social
+ACCOUNT=BOB
+CREDS=$HOME/.bobvmbuilder_bsky_social_source
+STATE=/var/lib/socialweb-computer/swc-bidder
+
+K=$(sudo sh -c "ls $STATE/handles/*/kcp/admin.kubeconfig" | head -1)
+BIDDER_DID=$(sudo kubectl --kubeconfig "$K" get marketidentity bidder -o jsonpath='{.status.did}')
+OPERATOR_DID=$(curl -fsS "https://public.api.bsky.app/xrpc/com.atproto.identity.resolveHandle?handle=$HANDLE" | jq -r .did)
+echo "$BIDDER_DID $OPERATOR_DID"
+deno run -A --no-lock scripts/associate-bidder.ts \
+  --creds "$CREDS" \
+  --account "$ACCOUNT" \
+  --bidder-did "$BIDDER_DID"
+sudo kubectl --kubeconfig "$K" patch marketidentity bidder --type=merge \
+  -p "{\"spec\":{\"approvedAssociations\":[\"$OPERATOR_DID\"]}}"
+sudo kubectl --kubeconfig "$K" get marketidentity bidder \
+  -o jsonpath='{.status.phase}{" "}{range .status.conditions[*]}{.type}={.status} {.reason}{"\n"}{end}'
+```
+
+### Skip the association
+
+For an installed bidder that must not write the association record, set the identity mode to `Skip`
+and let the controller reconcile it:
+
+```bash
+cd "$(git rev-parse --show-toplevel)"
+STATE=/var/lib/socialweb-computer/swc-bidder
+K=$(sudo sh -c "ls $STATE/handles/*/kcp/admin.kubeconfig" | head -1)
+sudo kubectl --kubeconfig "$K" patch marketbidder app --type=merge \
+  -p '{"spec":{"identity":{"association":"Skip"}}}'
+sudo kubectl --kubeconfig "$K" get marketidentity bidder -o jsonpath='{.status.phase}{" "}{range .status.conditions[*]}{.type}={.status} {.reason}{"\n"}{end}'
+```
+
 ## Install a development build on a bidder host
 
 This installs a binary built from the working tree, not a release. The install and upgrade require
@@ -324,36 +403,30 @@ source, install searches the release base; a dev build's commit is not published
 image as above. If `/var/lib/socialweb-computer/guest-image` does not exist on the host, omit
 `--guest-image-source` and let install resolve the image from the release base.
 
-## Associate the bidder DID
+## Associate a development bidder DID
 
-The bidder gets a new DID after a purge. Associate it once with the account the handle belongs to. The
-pending URL expires after about five minutes, so read it immediately before the sign-in. If `U` is
-empty, wait a few seconds and read it again.
+The bidder gets a new DID after a purge. The association is the same claim record and approved DID as
+the release install:
 
 ```bash
 cd "$(git rev-parse --show-toplevel)"
+HANDLE=bobvmbuilder.bsky.social
 ACCOUNT=BOB
 CREDS=$HOME/.bobvmbuilder_bsky_social_source
 STATE=/var/lib/socialweb-computer/swc-bidder
 
 K=$(sudo sh -c "ls $STATE/handles/*/kcp/admin.kubeconfig" | head -1)
-U=$(sudo kubectl --kubeconfig "$K" get marketidentity bidder -o jsonpath='{.status.pendingAction.url}')
-echo "$U"
-deno run -A --no-lock scripts/oauth-signin.ts \
+BIDDER_DID=$(sudo kubectl --kubeconfig "$K" get marketidentity bidder -o jsonpath='{.status.did}')
+OPERATOR_DID=$(curl -fsS "https://public.api.bsky.app/xrpc/com.atproto.identity.resolveHandle?handle=$HANDLE" | jq -r .did)
+echo "$BIDDER_DID $OPERATOR_DID"
+deno run -A --no-lock scripts/associate-bidder.ts \
   --creds "$CREDS" \
   --account "$ACCOUNT" \
-  --url "$U" \
-  --click '^Yes, this is my bidder$'
-```
-
-The association page may report the old `com.publicdomainrelay.temp.badgeBlueKeys/association` record
-in the account repo. Revoke or delete that record first, then rerun the block above with a fresh URL.
-
-`scripts/associate.ts` appears in older docs but is not in this checkout. If you have it from another
-tree, the documented non-browser form is:
-
-```bash
-deno run -A --no-lock scripts/associate.ts --creds "$CREDS" --account "$ACCOUNT" --url "$U"
+  --bidder-did "$BIDDER_DID"
+sudo kubectl --kubeconfig "$K" patch marketidentity bidder --type=merge \
+  -p "{\"spec\":{\"approvedAssociations\":[\"$OPERATOR_DID\"]}}"
+sudo kubectl --kubeconfig "$K" get marketidentity bidder \
+  -o jsonpath='{.status.phase}{" "}{range .status.conditions[*]}{.type}={.status} {.reason}{"\n"}{end}'
 ```
 
 After the association, check the unit and the identity:
