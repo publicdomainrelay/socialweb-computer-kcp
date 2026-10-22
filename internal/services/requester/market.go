@@ -529,6 +529,20 @@ func containsString(values []string, want string) bool {
 	return false
 }
 
+func withoutDeniedBidders(bidders []Bidder, deny []string) []Bidder {
+	if len(deny) == 0 {
+		return bidders
+	}
+	out := bidders[:0]
+	for _, bidder := range bidders {
+		if containsString(deny, bidder.DID) {
+			continue
+		}
+		out = append(out, bidder)
+	}
+	return out
+}
+
 func payloadRef(value map[string]any) market.RecordRef {
 	ref, _ := value["payload"].(map[string]any)
 	if ref == nil {

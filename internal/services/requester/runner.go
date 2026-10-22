@@ -381,6 +381,7 @@ func (r *contractRunner) requestOnce(ctx context.Context) (bool, error) {
 	if err != nil {
 		r.log().Warn("requester_bidder_discovery_failed", "err", err)
 	}
+	bidders = withoutDeniedBidders(bidders, r.snapshot().Spec.DenyBidderDids)
 	r.svc.rememberBidders(bidders)
 	responseBids := []BidRecord{}
 	var submitWG sync.WaitGroup

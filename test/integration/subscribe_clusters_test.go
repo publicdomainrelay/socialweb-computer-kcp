@@ -208,11 +208,7 @@ func (n *Network) OwnerAccount(t testing.TB) *pdsAccount {
 
 func (a *pdsAccount) Fresh(t testing.TB) *pdsAccount {
 	t.Helper()
-	host := strings.TrimPrefix(strings.TrimPrefix(a.pds, "https://"), "http://")
-	suffix := host
-	if i := strings.Index(host, "."); i >= 0 {
-		suffix = host[i+1:]
-	}
+	suffix := "test"
 	handle := fmt.Sprintf("fresh%d.%s", time.Now().UnixNano()%1000000, suffix)
 	pw := fmt.Sprintf("pw-%d", time.Now().UnixNano())
 	out, code, err := postJSON(a.client, a.pds+"/xrpc/com.atproto.server.createAccount", "",
