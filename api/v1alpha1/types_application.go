@@ -20,6 +20,10 @@ type MarketNetworkValue struct {
 	CaBundleRef string `json:"caBundleRef,omitempty"`
 
 	Hosts []NetworkHost `json:"hosts,omitempty"`
+
+	Comms *MarketComms `json:"comms,omitempty"`
+
+	Ingress *IngressConfig `json:"ingress,omitempty"`
 }
 
 type NetworkHost struct {
@@ -67,7 +71,51 @@ type ApplicationIdentity struct {
 
 	PdsUrl string `json:"pdsUrl,omitempty"`
 
+	PdsRef *RepoRef `json:"pdsRef,omitempty"`
+
+	SessionRef *RepoRef `json:"sessionRef,omitempty"`
+
 	Association AssociationMode `json:"association,omitempty"`
+}
+
+type MarketCommsMode string
+
+const (
+	MarketCommsModeXRPC MarketCommsMode = "XRPC"
+
+	MarketCommsModeFirehose MarketCommsMode = "Firehose"
+
+	MarketCommsModeBoth MarketCommsMode = "Both"
+)
+
+type MarketComms struct {
+	Mode MarketCommsMode `json:"mode,omitempty"`
+
+	RelayUrls []string `json:"relayUrls,omitempty"`
+
+	FirehoseUrls []string `json:"firehoseUrls,omitempty"`
+}
+
+type IngressConfig struct {
+	Provider string `json:"provider,omitempty"`
+
+	IngressRef *ComponentRef `json:"ingressRef,omitempty"`
+
+	PublicHost string `json:"publicHost,omitempty"`
+
+	Xrpc *IngressXrpcConfig `json:"xrpc,omitempty"`
+
+	OpenTunnel *IngressProxyOpenTunnel `json:"opentunnel,omitempty"`
+}
+
+type IngressXrpcConfig struct {
+	IngressProxyHost string `json:"ingressProxyHost,omitempty"`
+
+	RelayURL string `json:"relayURL,omitempty"`
+
+	RelayRef *ComponentRef `json:"relayRef,omitempty"`
+
+	IdentityRef *ComponentRef `json:"identityRef,omitempty"`
 }
 
 type FirecrackerProvider struct {
@@ -390,6 +438,10 @@ type MarketBidderSpec struct {
 
 	Identity ApplicationIdentity `json:"identity"`
 
+	Comms *MarketComms `json:"comms,omitempty"`
+
+	Ingress *IngressConfig `json:"ingress,omitempty"`
+
 	Policy string `json:"policy,omitempty"`
 
 	Firecracker *FirecrackerProvider `json:"firecracker,omitempty"`
@@ -429,6 +481,10 @@ type MarketRequesterSpec struct {
 
 	Identity ApplicationIdentity `json:"identity"`
 
+	Comms *MarketComms `json:"comms,omitempty"`
+
+	Ingress *IngressConfig `json:"ingress,omitempty"`
+
 	BidderDids []string `json:"bidderDids,omitempty"`
 
 	Options []ApplicationOption `json:"options,omitempty"`
@@ -457,6 +513,10 @@ type GatewaySpec struct {
 	Suspend bool `json:"suspend,omitempty"`
 
 	Network *MarketNetworkValue `json:"network,omitempty"`
+
+	Comms *MarketComms `json:"comms,omitempty"`
+
+	Ingress *IngressConfig `json:"ingress,omitempty"`
 
 	BidderDids []string `json:"bidderDids,omitempty"`
 
@@ -511,6 +571,10 @@ type SshGatewaySpec struct {
 
 	Network *MarketNetworkValue `json:"network,omitempty"`
 
+	Comms *MarketComms `json:"comms,omitempty"`
+
+	Ingress *IngressConfig `json:"ingress,omitempty"`
+
 	BidderDids []string `json:"bidderDids,omitempty"`
 
 	Options []ApplicationOption `json:"options,omitempty"`
@@ -541,6 +605,10 @@ type MarketNetworkSpec struct {
 	Suspend bool `json:"suspend,omitempty"`
 
 	GuestLabel string `json:"guestLabel,omitempty"`
+
+	Comms *MarketComms `json:"comms,omitempty"`
+
+	Ingress *IngressConfig `json:"ingress,omitempty"`
 
 	Apps []NetworkApp `json:"apps,omitempty"`
 }

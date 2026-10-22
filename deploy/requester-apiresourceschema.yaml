@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-5.requesters.socialweb.computer
+  name: v1alpha1-6.requesters.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -71,6 +71,77 @@ spec:
                       required:
                         - name
                         - address
+                  comms:
+                    type: object
+                    properties:
+                      mode:
+                        type: string
+                        enum:
+                          - XRPC
+                          - Firehose
+                          - Both
+                      relayUrls:
+                        type: array
+                        items:
+                          type: string
+                      firehoseUrls:
+                        type: array
+                        items:
+                          type: string
+                  ingress:
+                    type: object
+                    properties:
+                      provider:
+                        type: string
+                      ingressRef:
+                        type: object
+                        properties:
+                          kind:
+                            type: string
+                          name:
+                            type: string
+                          did:
+                            type: string
+                      publicHost:
+                        type: string
+                      xrpc:
+                        type: object
+                        properties:
+                          ingressProxyHost:
+                            type: string
+                          relayURL:
+                            type: string
+                          relayRef:
+                            type: object
+                            properties:
+                              kind:
+                                type: string
+                              name:
+                                type: string
+                              did:
+                                type: string
+                          identityRef:
+                            type: object
+                            properties:
+                              kind:
+                                type: string
+                              name:
+                                type: string
+                              did:
+                                type: string
+                      opentunnel:
+                        type: object
+                        properties:
+                          command:
+                            type: array
+                            items:
+                              type: string
+                          routeName:
+                            type: string
+                          proxyProtocol:
+                            type: string
+                          localHost:
+                            type: string
                 required:
                   - plcDirectoryUrl
                   - ingressProxyHost

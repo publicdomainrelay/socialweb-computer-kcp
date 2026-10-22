@@ -22,7 +22,9 @@ type AtprotoRecordWatchList struct {
 }
 
 type AtprotoRecordWatchSpec struct {
-	Repo string `json:"repo"`
+	RepoRef *RepoRef `json:"repoRef,omitempty"`
+
+	Repo string `json:"repo,omitempty"`
 
 	Collection string `json:"collection"`
 

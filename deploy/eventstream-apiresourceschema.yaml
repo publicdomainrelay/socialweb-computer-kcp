@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-1.eventstreams.events.socialweb.computer
+  name: v1alpha1-2.eventstreams.events.socialweb.computer
 spec:
   group: events.socialweb.computer
   names:
@@ -36,6 +36,7 @@ spec:
                     enum:
                       - pds
                       - relay
+                      - jetstream
                   pdsRef:
                     type: object
                     properties:
@@ -58,6 +59,14 @@ spec:
                         type: string
                     required:
                       - name
+                  relayUrls:
+                    type: array
+                    items:
+                      type: string
+                  jetstreamUrls:
+                    type: array
+                    items:
+                      type: string
                   collections:
                     type: array
                     items:

@@ -274,6 +274,14 @@ type PdsSpec struct {
 
 	PublicBaseURL string `json:"publicBaseURL,omitempty"`
 
+	RequireIngress bool `json:"requireIngress,omitempty"`
+
+	IngressRef *ComponentRef `json:"ingressRef,omitempty"`
+
+	PublicURL string `json:"publicURL,omitempty"`
+
+	StableHost string `json:"stableHost,omitempty"`
+
 	RepoKeyPath string `json:"repoKeyPath,omitempty"`
 
 	SessionSecretPath string `json:"sessionSecretPath,omitempty"`
@@ -543,6 +551,14 @@ type IngressProxySpec struct {
 	VaultRef *ComponentRef `json:"vaultRef,omitempty"`
 
 	RelayRef *ComponentRef `json:"relayRef,omitempty"`
+
+	RelayURL string `json:"relayURL,omitempty"`
+
+	IngressProxyHost string `json:"ingressProxyHost,omitempty"`
+
+	IdentityRef *ComponentRef `json:"identityRef,omitempty"`
+
+	PublicHost string `json:"publicHost,omitempty"`
 
 	Hostnames []string `json:"hostnames,omitempty"`
 

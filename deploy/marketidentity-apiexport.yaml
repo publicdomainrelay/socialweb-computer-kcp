@@ -11,11 +11,11 @@ spec:
         crd: {}
     - group: socialweb.computer
       name: atprotorecords
-      schema: v1alpha1-2.atprotorecords.socialweb.computer
+      schema: v1alpha1-3.atprotorecords.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer
       name: atprotorecordwatches
-      schema: v1alpha1-1.atprotorecordwatches.socialweb.computer
+      schema: v1alpha1-2.atprotorecordwatches.socialweb.computer
       storage:
         crd: {}

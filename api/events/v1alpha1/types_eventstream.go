@@ -36,6 +36,10 @@ type EventStreamSource struct {
 
 	RelayRef *EventStreamRef `json:"relayRef,omitempty"`
 
+	RelayUrls []string `json:"relayUrls,omitempty"`
+
+	JetstreamUrls []string `json:"jetstreamUrls,omitempty"`
+
 	Collections []string `json:"collections,omitempty"`
 
 	DIDs []string `json:"dids,omitempty"`
@@ -47,6 +51,8 @@ const (
 	EventStreamSourcePDS EventStreamSourceKind = "pds"
 
 	EventStreamSourceRelay EventStreamSourceKind = "relay"
+
+	EventStreamSourceJetstream EventStreamSourceKind = "jetstream"
 )
 
 type EventStreamRef struct {

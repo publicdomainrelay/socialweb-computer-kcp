@@ -6,6 +6,6 @@ spec:
   resources:
     - group: events.socialweb.computer
       name: eventstreams
-      schema: v1alpha1-1.eventstreams.events.socialweb.computer
+      schema: v1alpha1-2.eventstreams.events.socialweb.computer
       storage:
         crd: {}

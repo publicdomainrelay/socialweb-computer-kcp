@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-2.atprotorecords.socialweb.computer
+  name: v1alpha1-3.atprotorecords.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -28,6 +28,17 @@ spec:
           spec:
             type: object
             properties:
+              repoRef:
+                type: object
+                properties:
+                  workspace:
+                    type: string
+                  kind:
+                    type: string
+                  name:
+                    type: string
+                required:
+                  - name
               repo:
                 type: string
               collection:
@@ -43,7 +54,6 @@ spec:
                   - Keep
                   - Delete
             required:
-              - repo
               - collection
               - rkey
               - record

@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-1.atprotorepos.socialweb.computer
+  name: v1alpha1-2.atprotorepos.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -31,10 +31,40 @@ spec:
               did:
                 type: string
               pdsRef:
-                type: string
+                type: object
+                properties:
+                  workspace:
+                    type: string
+                  kind:
+                    type: string
+                  name:
+                    type: string
+                required:
+                  - name
+              identityRef:
+                type: object
+                properties:
+                  workspace:
+                    type: string
+                  kind:
+                    type: string
+                  name:
+                    type: string
+                required:
+                  - name
+              authRef:
+                type: object
+                properties:
+                  workspace:
+                    type: string
+                  kind:
+                    type: string
+                  name:
+                    type: string
+                required:
+                  - name
             required:
               - did
-              - pdsRef
           status:
             type: object
             properties:

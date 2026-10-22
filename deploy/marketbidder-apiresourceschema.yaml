@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-14.marketbidders.socialweb.computer
+  name: v1alpha1-15.marketbidders.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -65,6 +65,77 @@ spec:
                       required:
                         - name
                         - address
+                  comms:
+                    type: object
+                    properties:
+                      mode:
+                        type: string
+                        enum:
+                          - XRPC
+                          - Firehose
+                          - Both
+                      relayUrls:
+                        type: array
+                        items:
+                          type: string
+                      firehoseUrls:
+                        type: array
+                        items:
+                          type: string
+                  ingress:
+                    type: object
+                    properties:
+                      provider:
+                        type: string
+                      ingressRef:
+                        type: object
+                        properties:
+                          kind:
+                            type: string
+                          name:
+                            type: string
+                          did:
+                            type: string
+                      publicHost:
+                        type: string
+                      xrpc:
+                        type: object
+                        properties:
+                          ingressProxyHost:
+                            type: string
+                          relayURL:
+                            type: string
+                          relayRef:
+                            type: object
+                            properties:
+                              kind:
+                                type: string
+                              name:
+                                type: string
+                              did:
+                                type: string
+                          identityRef:
+                            type: object
+                            properties:
+                              kind:
+                                type: string
+                              name:
+                                type: string
+                              did:
+                                type: string
+                      opentunnel:
+                        type: object
+                        properties:
+                          command:
+                            type: array
+                            items:
+                              type: string
+                          routeName:
+                            type: string
+                          proxyProtocol:
+                            type: string
+                          localHost:
+                            type: string
                 required:
                   - plcDirectoryUrl
                   - ingressProxyHost
@@ -86,6 +157,28 @@ spec:
                     type: string
                   pdsUrl:
                     type: string
+                  pdsRef:
+                    type: object
+                    properties:
+                      workspace:
+                        type: string
+                      kind:
+                        type: string
+                      name:
+                        type: string
+                    required:
+                      - name
+                  sessionRef:
+                    type: object
+                    properties:
+                      workspace:
+                        type: string
+                      kind:
+                        type: string
+                      name:
+                        type: string
+                    required:
+                      - name
                   association:
                     type: string
                     enum:
@@ -93,6 +186,77 @@ spec:
                       - Skip
                 required:
                   - mode
+              comms:
+                type: object
+                properties:
+                  mode:
+                    type: string
+                    enum:
+                      - XRPC
+                      - Firehose
+                      - Both
+                  relayUrls:
+                    type: array
+                    items:
+                      type: string
+                  firehoseUrls:
+                    type: array
+                    items:
+                      type: string
+              ingress:
+                type: object
+                properties:
+                  provider:
+                    type: string
+                  ingressRef:
+                    type: object
+                    properties:
+                      kind:
+                        type: string
+                      name:
+                        type: string
+                      did:
+                        type: string
+                  publicHost:
+                    type: string
+                  xrpc:
+                    type: object
+                    properties:
+                      ingressProxyHost:
+                        type: string
+                      relayURL:
+                        type: string
+                      relayRef:
+                        type: object
+                        properties:
+                          kind:
+                            type: string
+                          name:
+                            type: string
+                          did:
+                            type: string
+                      identityRef:
+                        type: object
+                        properties:
+                          kind:
+                            type: string
+                          name:
+                            type: string
+                          did:
+                            type: string
+                  opentunnel:
+                    type: object
+                    properties:
+                      command:
+                        type: array
+                        items:
+                          type: string
+                      routeName:
+                        type: string
+                      proxyProtocol:
+                        type: string
+                      localHost:
+                        type: string
               policy:
                 type: string
               firecracker:

@@ -25,7 +25,13 @@ func (c *Controller) reconcileRepo(ctx context.Context, dyn dynamic.Interface, u
 	status := obj.Status
 	status.ObservedGeneration = generation
 	didText := strings.TrimSpace(obj.Spec.DID)
-	ref := strings.TrimSpace(obj.Spec.PdsRef)
+	ref := ""
+	if obj.Spec.PdsRef != nil {
+		ref = strings.TrimSpace(obj.Spec.PdsRef.Name)
+		if kind := strings.TrimSpace(obj.Spec.PdsRef.Kind); kind != "" {
+			ref = kind + "/" + ref
+		}
+	}
 	if didText == "" || ref == "" {
 		setReady(&status.Conditions, generation, false, ReasonWaiting, "the AtprotoRepo needs a did and a pdsRef")
 		c.write(ctx, dyn, AtprotoRepoGVR, u, &status)

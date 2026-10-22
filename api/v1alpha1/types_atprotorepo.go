@@ -22,7 +22,19 @@ type AtprotoRepoList struct {
 type AtprotoRepoSpec struct {
 	DID string `json:"did"`
 
-	PdsRef string `json:"pdsRef"`
+	PdsRef *RepoRef `json:"pdsRef,omitempty"`
+
+	IdentityRef *RepoRef `json:"identityRef,omitempty"`
+
+	AuthRef *RepoRef `json:"authRef,omitempty"`
+}
+
+type RepoRef struct {
+	Workspace string `json:"workspace,omitempty"`
+
+	Kind string `json:"kind,omitempty"`
+
+	Name string `json:"name"`
 }
 
 type AtprotoRepoStatus struct {

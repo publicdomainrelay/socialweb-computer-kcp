@@ -21,7 +21,7 @@ func (ctl *Controller) ensureAppPdsStatus(ctx context.Context, handle string, se
 	ws := ctl.c.workspace()
 	pdsRef := ComponentKey(ComponentKindPds, PdsComponent)
 	ctl.ensureStatusObject(ctx, ws, statusstate.AtprotoRepoGVR, "AtprotoRepo",
-		statusObjectName("repo", sess.Did), v1alpha1.AtprotoRepoSpec{DID: sess.Did, PdsRef: pdsRef})
+		statusObjectName("repo", sess.Did), v1alpha1.AtprotoRepoSpec{DID: sess.Did, PdsRef: &v1alpha1.RepoRef{Kind: ComponentKindPds, Name: PdsComponent}})
 	accountName := statusObjectName("account", handle)
 	ctl.ensureStatusObject(ctx, ws, statusstate.PdsAccountGVR, "PdsAccount",
 		accountName, v1alpha1.PdsAccountSpec{DID: sess.Did, Handle: handle, PdsRef: pdsRef})

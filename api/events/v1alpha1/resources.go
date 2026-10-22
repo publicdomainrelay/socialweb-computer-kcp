@@ -9,7 +9,7 @@ type PrinterColumn = corev1alpha1.PrinterColumn
 type APIResource = corev1alpha1.APIResource
 
 var APIResources = []APIResource{
-	{Kind: "EventStream", Plural: "eventstreams", Revision: 1, Export: "events", Object: EventStream{}, PrinterColumns: []PrinterColumn{
+	{Kind: "EventStream", Plural: "eventstreams", Revision: 2, Export: "events", Object: EventStream{}, PrinterColumns: []PrinterColumn{
 		{Name: "Source", Type: "string", JSONPath: ".spec.source.kind"},
 		{Name: "Sink", Type: "string", JSONPath: ".spec.sink.kind"},
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
