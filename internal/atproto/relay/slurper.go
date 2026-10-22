@@ -151,6 +151,9 @@ func (r *Relay) updateHost(hostname string, f func(*HostInfo)) {
 func (s *hostSub) run() {
 	defer s.relay.wg.Done()
 	var cursor int64
+	if account, ok := s.relay.store.GetAccount(s.did); ok && account.Seq != nil {
+		cursor = *account.Seq
+	}
 	attempt := 0
 	for {
 		if s.ctx.Err() != nil {
@@ -224,9 +227,7 @@ func (s *hostSub) dial(cursor int64) (*websocket.Conn, error) {
 		scheme = "ws"
 	}
 	u := scheme + "://" + s.hostname + "/xrpc/com.atproto.sync.subscribeRepos"
-	if cursor > 0 {
-		u += "?cursor=" + strconv.FormatInt(cursor, 10)
-	}
+	u += "?cursor=" + strconv.FormatInt(cursor, 10)
 	d := websocket.Dialer{HandshakeTimeout: 5 * time.Second, TLSClientConfig: s.relay.cfg.TLSConfig, NetDialContext: s.relay.cfg.DialContext}
 	header := http.Header{}
 	header.Set("User-Agent", "socialweb-computer relay")

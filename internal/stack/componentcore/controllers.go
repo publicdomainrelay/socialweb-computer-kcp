@@ -398,7 +398,7 @@ func (c *Core) buildControllers() {
 		}
 		for _, role := range []string{"bidder", "requester"} {
 			handler, err := eventstream.NewMarketHandler(eventstream.MarketOptions{Workspace: workspace, Role: role,
-				Dynamic: eventstream.DynamicFactory(cfg.DynamicFactory), Resolver: resolver, Log: log})
+				Dynamic: eventstream.DynamicFactory(cfg.DynamicFactory), Resolver: resolver, PLCDirectoryURL: plcBaseURL, Log: log})
 			if err != nil {
 				log.Warn("the market event handler is not wired", "workspace", workspace, "role", role, "err", err.Error())
 				continue

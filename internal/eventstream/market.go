@@ -51,6 +51,8 @@ type MarketOptions struct {
 
 	Resolver *pdsclient.Resolver
 
+	PLCDirectoryURL string
+
 	Log *slog.Logger
 }
 
@@ -102,12 +104,16 @@ func NewMarketHandler(opts MarketOptions) (Handler, error) {
 		opts.Log = slog.New(slog.DiscardHandler)
 	}
 	httpClient := opts.Resolver.HTTPClient
-	if httpClient == nil && opts.Resolver.Handlers != nil {
-		httpClient = opts.Resolver.Handlers.HTTPClient()
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: 20 * time.Second}
 	}
 	httpClient = httpClientWithFallback(httpClient)
+	plcURL := strings.TrimSpace(opts.PLCDirectoryURL)
+	if plcURL == "" {
+		plcURL = "http://" + kcp.ServiceFQDN("plc", "default", opts.Workspace, kcp.DefaultServiceDomain)
+	}
 	local := &identity.BaseDirectory{
-		PLCURL:                 "http://" + kcp.ServiceFQDN("plc", "default", opts.Workspace, kcp.DefaultServiceDomain),
+		PLCURL:                 plcURL,
 		HTTPClient:             *httpClient,
 		PLCClient:              httpClient,
 		SkipHandleVerification: true,

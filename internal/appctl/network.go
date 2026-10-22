@@ -316,13 +316,17 @@ func networkDesired(o v1alpha1.MarketNetwork, ws, stateRoot string, leases map[s
 		Hostnames:     []string{NetworkPlcHost},
 		Serve:         componentServe("", leasePort(leases[NetworkPortPlc])),
 	}}
-	relay := desiredComponent{Kind: ComponentKindRelay, Name: NetworkRelayName, Spec: v1alpha1.RelaySpec{
+	relaySpec := v1alpha1.RelaySpec{
 		ComponentSpec: NewComponentSpec(ComponentCRStateDir(NetworkStateDir(stateRoot), ComponentKindRelay, NetworkRelayName), &value, suspend),
 		PdsRefs: []v1alpha1.ComponentRef{*ComponentRefFor(ComponentKindPds, NetworkAlicePdsName),
 			*ComponentRefFor(ComponentKindPds, NetworkBobPdsName), {Kind: ComponentKindPds, Name: "*"}},
 		Hostnames: []string{NetworkRelayHost},
 		Serve:     componentServe("", leasePort(leases[NetworkPortRelay])),
-	}}
+	}
+	if mode := marketCommsMode(o.Spec.Comms); mode == v1alpha1.MarketCommsModeFirehose || mode == v1alpha1.MarketCommsModeBoth {
+		relaySpec.PdsRefs = nil
+	}
+	relay := desiredComponent{Kind: ComponentKindRelay, Name: NetworkRelayName, Spec: relaySpec}
 	ingressCfg := NetworkIngressConfig(o.Spec.Ingress)
 	ingressSpec := v1alpha1.IngressProxySpec{
 		ComponentSpec: NewComponentSpec(ComponentCRStateDir(NetworkStateDir(stateRoot), ComponentKindIngressProxy, NetworkIngressName), &value, suspend),
