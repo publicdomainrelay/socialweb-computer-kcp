@@ -47,7 +47,7 @@ func (r *contractRunner) ensureSecrets(ctx context.Context, contract v1alpha1.Co
 	if err != nil {
 		return err
 	}
-	state := newSecretsState(r.name)
+	state := newSecretsState(r.name, r.svc.log)
 	state.addEntries(entries...)
 	r.svc.registerSecrets(r.name, state)
 	r.mu.Lock()

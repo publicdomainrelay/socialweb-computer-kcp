@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -42,6 +43,8 @@ type secretsState struct {
 
 	name string
 
+	log *slog.Logger
+
 	entries []secretEntry
 
 	issuer string
@@ -59,8 +62,11 @@ type secretsState struct {
 	once sync.Once
 }
 
-func newSecretsState(name string) *secretsState {
-	return &secretsState{name: name, fetched: make(chan struct{})}
+func newSecretsState(name string, log *slog.Logger) *secretsState {
+	if log == nil {
+		log = slog.New(slog.DiscardHandler)
+	}
+	return &secretsState{name: name, log: log, fetched: make(chan struct{})}
 }
 
 func (s *secretsState) install(issuer, audience, subject string, verifier *guestidentity.Verifier) {
@@ -112,27 +118,32 @@ func (s *secretsState) serve(ctx context.Context, w http.ResponseWriter, r *http
 	already := s.fetchedAt
 	s.mu.Unlock()
 	if verifier == nil || issuer == "" || audience == "" || subject == "" {
+		s.log.Warn("the secrets server is not ready", "contract", s.name)
 		http.Error(w, `{"error":"NotReady"}`, http.StatusServiceUnavailable)
 		return
 	}
 	token, err := bearerToken(r)
 	if err != nil {
+		s.log.Warn("the guest's secrets request carries no bearer token", "contract", s.name, "err", err.Error())
 		http.Error(w, `{"error":"AuthenticationRequired"}`, http.StatusUnauthorized)
 		return
 	}
 	claims, err := verifier.VerifyAudience(ctx, token, audience)
 	if err != nil {
+		s.log.Warn("the guest's secrets token is not accepted", "contract", s.name, "issuer", issuer, "err", err.Error())
 		http.Error(w, `{"error":"InvalidToken"}`, http.StatusUnauthorized)
 		return
 	}
 	got, _ := claims[cloudinit.NodeJWTUserClaim].(string)
 	if got != subject {
+		s.log.Warn("the guest's secrets token names another subject", "contract", s.name, "subject", subject)
 		http.Error(w, `{"error":"InvalidToken"}`, http.StatusUnauthorized)
 		return
 	}
 	if already == "" {
 		s.markFetched(time.Now().UTC().Format(time.RFC3339Nano))
 	}
+	s.log.Info("the guest fetched its secrets", "contract", s.name, "entries", len(entries))
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(entries)
 }
