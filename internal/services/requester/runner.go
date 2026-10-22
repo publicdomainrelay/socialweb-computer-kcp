@@ -493,20 +493,28 @@ func (r *contractRunner) requestOnce(ctx context.Context) (bool, error) {
 	state.Winner = &v1alpha1.ContractWinner{DID: winner.DID}
 	state.Bids = intPtr(len(allBids))
 	state.Timestamps.WinnerSelected = r.svc.nowISO()
+	state.AcceptPending = &v1alpha1.ContractAcceptPending{BidUri: winner.URI}
 	r.writeStatus(ctx, v1alpha1.ComputeContractRequesting, "the winner is selected; accepting", state, allBids, chosen, false, "accepting", 1)
 
-	acceptRecord, err := market.BuildAccept(market.AcceptOptions{
-		RFP:         market.RecordRef{URI: rfpURI, CID: rfpCID},
-		Bid:         market.RecordRef{URI: winner.URI, CID: winner.CID},
-		SubmitEvent: r.svc.callbackDID() + "#" + defaultComputeEventServiceID,
-		CreatedAt:   r.svc.nowISO(),
-	})
+	acceptRKey := sessionRKey("accept", r.svc.cfg.RepoDID, r.name, rfpURI, rfpCID, winner.URI, winner.CID)
+	accept, found, err := r.svc.existingSignedRecord(ctx, market.AcceptNSID, acceptRKey)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("read the market.accept record: %w", err)
 	}
-	accept, err := market.CreateSignedRecord(ctx, r.svc.repo, r.svc.cfg.RepoDID, market.AcceptNSID, acceptRecord, r.svc.signer)
-	if err != nil {
-		return false, fmt.Errorf("create the market.accept record: %w", err)
+	if !found {
+		acceptRecord, err := market.BuildAccept(market.AcceptOptions{
+			RFP:         market.RecordRef{URI: rfpURI, CID: rfpCID},
+			Bid:         market.RecordRef{URI: winner.URI, CID: winner.CID},
+			SubmitEvent: r.svc.callbackDID() + "#" + defaultComputeEventServiceID,
+			CreatedAt:   r.svc.nowISO(),
+		})
+		if err != nil {
+			return false, err
+		}
+		accept, err = market.CreateSignedRecordAt(ctx, r.svc.repo, r.svc.cfg.RepoDID, market.AcceptNSID, acceptRKey, acceptRecord, r.svc.signer)
+		if err != nil {
+			return false, fmt.Errorf("create the market.accept record: %w", err)
+		}
 	}
 	state.AcceptUri = accept.URI
 	state.Accept = &v1alpha1.RecordRef{URI: accept.URI, CID: accept.CID}
@@ -1118,22 +1126,36 @@ func (r *contractRunner) releaseEnvelope(ctx context.Context, state *v1alpha1.No
 		}
 		return ref, resolved.Value, nil
 	}
-	payloadRecord := map[string]any{
-		"$type":     market.ComputeEventsVMDeleteNSID,
-		"reason":    "released",
-		"createdAt": r.svc.nowISO(),
-	}
-	payload, err := market.CreateSignedRecord(ctx, r.svc.repo, r.svc.cfg.RepoDID, market.ComputeEventsVMDeleteNSID, payloadRecord, r.svc.signer)
+	payloadRKey := sessionRKey("delete", state.Receipt.URI)
+	payload, foundPayload, err := r.svc.existingSignedRecord(ctx, market.ComputeEventsVMDeleteNSID, payloadRKey)
 	if err != nil {
-		return market.RecordRef{}, nil, fmt.Errorf("create the destroy payload: %w", err)
+		return market.RecordRef{}, nil, fmt.Errorf("read the destroy payload: %w", err)
 	}
-	envelope, err := market.CreateEvent(ctx, r.svc.repo, r.svc.cfg.RepoDID, market.EventOptions{
-		Receipt:   market.RecordRef{URI: state.Receipt.URI, CID: state.Receipt.CID},
-		Payload:   market.RecordRef{URI: payload.URI, CID: payload.CID},
-		CreatedAt: r.svc.nowISO(),
-	}, r.svc.signer)
+	if !foundPayload {
+		payloadRecord := map[string]any{
+			"$type":     market.ComputeEventsVMDeleteNSID,
+			"reason":    "released",
+			"createdAt": r.svc.nowISO(),
+		}
+		payload, err = market.CreateSignedRecordAt(ctx, r.svc.repo, r.svc.cfg.RepoDID, market.ComputeEventsVMDeleteNSID, payloadRKey, payloadRecord, r.svc.signer)
+		if err != nil {
+			return market.RecordRef{}, nil, fmt.Errorf("create the destroy payload: %w", err)
+		}
+	}
+	eventRKey := sessionRKey("event", state.Receipt.URI)
+	envelope, foundEvent, err := r.svc.existingSignedRecord(ctx, market.EventNSID, eventRKey)
 	if err != nil {
-		return market.RecordRef{}, nil, fmt.Errorf("create the destroy event: %w", err)
+		return market.RecordRef{}, nil, fmt.Errorf("read the destroy event: %w", err)
+	}
+	if !foundEvent {
+		envelope, err = market.PutEvent(ctx, r.svc.repo, r.svc.cfg.RepoDID, eventRKey, market.EventOptions{
+			Receipt:   market.RecordRef{URI: state.Receipt.URI, CID: state.Receipt.CID},
+			Payload:   market.RecordRef{URI: payload.URI, CID: payload.CID},
+			CreatedAt: r.svc.nowISO(),
+		}, r.svc.signer)
+		if err != nil {
+			return market.RecordRef{}, nil, fmt.Errorf("create the destroy event: %w", err)
+		}
 	}
 	state.Release = &v1alpha1.ContractRelease{
 		Event:   v1alpha1.RecordRef{URI: envelope.URI, CID: envelope.CID},
