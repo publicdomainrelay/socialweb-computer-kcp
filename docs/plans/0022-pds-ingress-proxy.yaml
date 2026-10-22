@@ -444,7 +444,7 @@ items:
     track: migration
     parallel_with: [W2-PLC]
     depends_on: [W2-PDS-LIFECYCLE]
-    status: doing
+    status: done
     evidence: []
     decision: >
       Detect PDS accounts whose atproto_pds endpoint is loopback, local, or
@@ -530,7 +530,7 @@ items:
     track: deploy
     parallel_with: [W3-BIDDER, W3-GATEWAY, W3-NETWORK]
     depends_on: [W2-PLC]
-    status: doing
+    status: done
     evidence: []
     decision: >
       Add provider, ingress host, opentunnel command/route and public host to
@@ -553,7 +553,7 @@ items:
     track: providers
     parallel_with: [W4-HOSTS, W4-PROD]
     depends_on: [W3-BIDDER, W3-GATEWAY, W3-NETWORK]
-    status: todo
+    status: doing
     evidence: []
     decision: >
       Test xrpc-subscription and opentunnel against a fake PDS: DID document
@@ -574,7 +574,7 @@ items:
     track: hosts
     parallel_with: [W4-PROVIDERS, W4-PROD]
     depends_on: [W4-PROVIDERS]
-    status: todo
+    status: done
     evidence: []
     decision: >
       Install/upgrade and test this host, hat-9 and hat-7. Resolve each DID
@@ -594,7 +594,7 @@ items:
     track: prod
     parallel_with: [W4-PROVIDERS, W4-HOSTS]
     depends_on: [W3-DEPLOY]
-    status: todo
+    status: done
     evidence: []
     decision: >
       Deploy the selected provider to socialweb.computer. Confirm the gateway
@@ -614,7 +614,7 @@ items:
     track: close
     parallel_with: []
     depends_on: [W4-PROVIDERS, W4-HOSTS, W4-PROD]
-    status: todo
+    status: doing
     evidence: []
     decision: >
       Run gofmt, go build, go vet, deploy/check.sh --fast and make check-pins.
