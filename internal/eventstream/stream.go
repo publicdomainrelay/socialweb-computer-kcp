@@ -30,6 +30,7 @@ type eventStream struct {
 	once sync.Mutex
 
 	mu          sync.Mutex
+	publishMu   sync.Mutex
 	started     bool
 	cursor      int64
 	lag         int64
@@ -39,6 +40,7 @@ type eventStream struct {
 	lagging     bool
 	failed      bool
 	message     string
+	inflight    int
 
 	records      map[string]v1alpha1.WatchedRecord
 	deletes      map[string]struct{}
@@ -248,7 +250,13 @@ func (s *eventStream) handle(ctx context.Context, pds pdsclient.PDS, source stri
 	s.cursor = event.Seq
 	s.lastEventAt = &stamp
 	s.lagging = s.lag > 0
+	s.inflight++
 	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		s.inflight--
+		s.mu.Unlock()
+	}()
 	if len(ops) == 0 {
 		return
 	}
@@ -343,23 +351,37 @@ func (s *eventStream) publish(ctx context.Context) {
 	if ctx.Err() != nil {
 		return
 	}
-	status, changed := s.snapshot()
-	if changed {
-		if err := writeEventStreamStatus(ctx, s.dyn.Resource(EventStreamGVR), s.es.Name, status); err != nil && ctx.Err() == nil {
-			s.ctl.log.Warn("writing EventStream status", "name", s.es.Name, "err", err.Error())
-		} else if err == nil {
-			s.mu.Lock()
-			s.hasStatus = true
-			s.lastStatus = status
-			s.mu.Unlock()
+	s.publishMu.Lock()
+	defer s.publishMu.Unlock()
+	status, changed, settled := s.snapshot()
+	if err := s.flushWatch(ctx); err != nil {
+		if ctx.Err() == nil {
+			s.ctl.log.Warn("writing AtprotoRecordWatch status", "name", s.es.Spec.Sink.Name, "err", err.Error())
 		}
+		s.mu.Lock()
+		status.Cursor = s.lastStatus.Cursor
+		changed = !s.hasStatus || !reflect.DeepEqual(status, s.lastStatus)
+		s.mu.Unlock()
+	} else if !settled || !changed {
+		return
 	}
-	s.flushWatch(ctx)
+	if !changed {
+		return
+	}
+	if err := writeEventStreamStatus(ctx, s.dyn.Resource(EventStreamGVR), s.es.Name, status); err != nil && ctx.Err() == nil {
+		s.ctl.log.Warn("writing EventStream status", "name", s.es.Name, "err", err.Error())
+	} else if err == nil {
+		s.mu.Lock()
+		s.hasStatus = true
+		s.lastStatus = status
+		s.mu.Unlock()
+	}
 }
 
-func (s *eventStream) snapshot() (eventsv1alpha1.EventStreamStatus, bool) {
+func (s *eventStream) snapshot() (eventsv1alpha1.EventStreamStatus, bool, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	settled := s.inflight == 0
 	status := eventsv1alpha1.EventStreamStatus{
 		ObservedGeneration: s.es.Generation,
 		Phase:              s.phase,
@@ -369,9 +391,9 @@ func (s *eventStream) snapshot() (eventsv1alpha1.EventStreamStatus, bool) {
 	}
 	status.Conditions = s.conditionsLocked(append([]metav1.Condition(nil), s.lastStatus.Conditions...))
 	if s.hasStatus && reflect.DeepEqual(status, s.lastStatus) {
-		return status, false
+		return status, false, settled
 	}
-	return status, true
+	return status, true, settled
 }
 
 func (s *eventStream) conditionsLocked(conditions []metav1.Condition) []metav1.Condition {
@@ -431,11 +453,11 @@ func (s *eventStream) isFailed() bool {
 	return s.failed
 }
 
-func (s *eventStream) flushWatch(ctx context.Context) {
+func (s *eventStream) flushWatch(ctx context.Context) error {
 	s.mu.Lock()
 	if !s.watchDirty {
 		s.mu.Unlock()
-		return
+		return nil
 	}
 	records := s.records
 	deletes := s.deletes
@@ -450,9 +472,7 @@ func (s *eventStream) flushWatch(ctx context.Context) {
 	if workspace == "" {
 		workspace = s.ctl.opts.Workspace
 	}
-	err := s.writeWatchStatus(ctx, workspace, records, deletes, cursors)
-	if err != nil && ctx.Err() == nil {
-		s.ctl.log.Warn("writing AtprotoRecordWatch status", "name", s.es.Spec.Sink.Name, "err", err.Error())
+	if err := s.writeWatchStatus(ctx, workspace, records, deletes, cursors); err != nil {
 		s.mu.Lock()
 		for uri, record := range records {
 			if _, exists := s.records[uri]; !exists {
@@ -469,7 +489,9 @@ func (s *eventStream) flushWatch(ctx context.Context) {
 		}
 		s.watchDirty = true
 		s.mu.Unlock()
+		return err
 	}
+	return nil
 }
 
 func (s *eventStream) writeWatchStatus(ctx context.Context, workspace string, records map[string]v1alpha1.WatchedRecord, deletes map[string]struct{}, cursors map[string]int64) error {
