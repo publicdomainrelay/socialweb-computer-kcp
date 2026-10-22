@@ -3330,6 +3330,14 @@ dir: each guest's firecracker API socket lives in its work directory, a unix soc
 107 bytes, and under `t.TempDir()` the first run's guest died at boot, its work directory was removed,
 and the run read as a bidder that never provisioned. `apply.sh` refuses such a work root up front.
 
+### Access links, state syncs and remote vaults
+
+**A `ComponentLink` is the rule that admits a component call** (`api/exposure/v1alpha1/types_componentlink.go`, `internal/exposure/links.go`, `internal/appctl/links.go`). It is cluster-scoped and lives in the target's workspace; `spec.from` and `spec.to` name a workspace, kind and name, and an optional `handlers` list narrows it to named handlers. The handler registry denies a caller with no identity, allows a System caller, allows a call inside one workspace, and allows a cross-workspace call only through a matching link. `LinkController` compiles a valid link into the registry and reports `TargetRegistered` and `Ready`; a link whose target is not registered, is suspended or is invalid stays out of the registry. appctl generates links from the concrete component refs in an application's desired specs only: wildcard refs are skipped, and `OpenBaoServer` and `PolicyEngine` are excluded because they are not handler-registry targets.
+
+**A `StateSync` is the durable runtime outbox** (`api/v1alpha1/types_statesync.go`, `internal/statesync`). Its spec names the source, sink, direction, payload, `idempotencyKey`, conflict and deletion policies, optional ack paths, retry limits and suspend; its status carries the phase, observation, ack, cursor, attempts and conditions. Observe is the authority: the controller applies only when the observation differs, `Apply` is idempotent under the key, and the object becomes Acked only after an observation matches the desired hash. Deletion is `Retain`, `DeleteRemote` or `AckThenDelete`. The status holds refs, CIDs, hashes and metadata, never secrets or payload bytes. The bidder runs the controller with the `atproto.market.event` adapter. The ComputeVM controller creates a `vm.terminated` sync before teardown; its finalizer waits for Acked, then drops after the timeout so the sync outlives the VM. The adapter writes a deterministic payload and `market.event` rkeys. The bidder also writes the `onNetwork` and `hostKeys` report syncs.
+
+**A `RemoteOpenBao` is vault access separate from an `OpenBaoServer`'s lifecycle** (`api/v1alpha1/types_remoteopenbao.go`, `internal/vaultaccess`, `internal/remoteopenbao`). A local ref resolves through `openbaosession` and `KCPStoreSource`; a remote ref is refused unless `Resolver.RemoteEnabled` is set, uses token or AppRole auth, requires https unless the explicit insecure flag allows http, and reads its refs from files only. The controller probes `sys/health` and `sys/seal-status`, authenticates, checks the declared mounts and capabilities, and writes only status and the conditions `Reachable`, `Unsealed`, `Authenticated` and `Authorized`; it never writes the remote vault. `Component.spec.vaultRef` does not use the object yet, so local `OpenBaoServer` access remains the default.
+
 ## 13. Invariants
 
 A change must not break any of these. Each exists because something failed.
@@ -9948,6 +9956,32 @@ it. A dev build also needs Deno 2.9.3 on `PATH` for the policy engine: a release
 embedded `deno` asset, while a dev build has no embedded zip and `internal/policyengine/deno` falls back
 to `exec.LookPath("deno")`. The integration hosts hat-7 and hat-9 were prepared by hand with linger,
 `kubectl`, `/etc/rancher`, and a subuid/subgid range for three VM slots.
+
+### Links, syncs and remote vaults are objects (2026-10-21)
+
+- **ComponentLink** (`73c8798a`, `800eedc5`, `b6e17b50`, `0a687a68`). Before: the handler registry had no
+  cross-workspace rule and appctl wrote no links. Now a cross-workspace call is admitted only by a matching
+  cluster-scoped link in the target workspace; System and same-workspace calls are allowed by default.
+  appctl derives one link per concrete component ref, skips wildcard refs, and writes none to
+  `OpenBaoServer` or `PolicyEngine`, which have no handler registry entry.
+- **The first link generation wrote zero links** (`800eedc5`). Before: appctl passed each desired
+  component's spec value to `runtime.DefaultUnstructuredConverter.ToUnstructured`, which needs a pointer,
+  so `specRefs` walked an empty map and every application held zero ComponentLinks despite concrete refs.
+  After: `componentSpecMap` pointerizes the spec with `desiredSpecPtr`, and the same application holds one
+  concrete link per non-wildcard ref (for example, the bidder's link to its `Pds`). The converter accepted
+  the value silently, so the failure was a zero, not an error.
+- **StateSync** (`667819b2`, `412c7b48`, `072188f4`). Before: the ComputeVM finalizer waited on a status
+  marker written by the bidder's best-effort publication, and the report loop wrote `onNetwork` and
+  `hostKeys` directly. Now a sync is a kcp object with an idempotency key and an observation-based ack;
+  the finalizer waits for Acked, then drops after its timeout so the sync outlives the VM, and a retry
+  observes before it writes. The bidder's `atproto.market.event` adapter writes the deterministic payload
+  and `market.event` rkeys for `vm.terminated`, and the bidder also writes the `onNetwork` and `hostKeys`
+  report syncs.
+- **RemoteOpenBao** (`a905e2b2`). Before: vault access existed only through an `OpenBaoServer` the same
+  process reconciled. Now a cluster-scoped object names an external OpenBao and the controller reports its
+  health, seal, mounts and capabilities as conditions, without touching the remote vault. Remote access is
+  off unless `Resolver.RemoteEnabled` is set, http needs the explicit insecure flag, refs are files, and
+  `Component.spec.vaultRef` still resolves locally.
 
 ## 16. Vocabulary
 
