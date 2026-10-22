@@ -3469,6 +3469,16 @@ A change must not break any of these. Each exists because something failed.
     provider is an error. The component does not silently start a different provider, and an
     `ingressRef` that resolves to a component with no registrar is an error rather than another
     provider.
+35. **A `submit*` XRPC handler enqueues and returns.** The handler parses the body, writes the intent
+    durably into kcp - a `StateSync` (`api/v1alpha1/types_statesync.go`, `internal/statesync`), a
+    status field, or the requester's inbox - under an idempotency key, and answers. It resolves no DID
+    or service, calls no PDS, relay, OpenBao or VM, provisions nothing, verifies no signature and
+    delivers no event in the request path. A worker or controller
+    (`internal/services/bidder/statesync.go`, `internal/services/requester/inbox.go`) owns that work
+    and retries it under the same key. The worker calls the counterpart's `submitEvent` XRPC only when
+    the counterpart record names one: the bidder from the Accept record's `submitEvent`, the
+    requester from the bidder Receipt record's `submitEvent`; with no ref the firehose carries the
+    event. A timeout does not make a remote call a request-path operation (section 15).
 
 ## 14. Open architectural gaps
 
@@ -9982,6 +9992,35 @@ to `exec.LookPath("deno")`. The integration hosts hat-7 and hat-9 were prepared 
   health, seal, mounts and capabilities as conditions, without touching the remote vault. Remote access is
   off unless `Resolver.RemoteEnabled` is set, http needs the explicit insecure flag, refs are files, and
   `Component.spec.vaultRef` still resolves locally.
+
+### Submit handlers enqueue and return (2026-10-21, 937d287a)
+
+- **The anti-pattern, found live.** Three submit paths did remote work inside the request. The
+  bidder's `handleSubmitAccept` (`internal/services/bidder/market.go`) provisioned the guest inline on
+  a `context.WithoutCancel` with a 3-minute budget, so the accept answered only after a VM existed,
+  and a failed provisioning destroyed the guest on the request's own error path. The bidder's
+  `handleSubmitEvent` waited up to 30 s for a termination `StateSync` to be Acked and then called
+  `Destroy` inline, so a release carried the PDS/firehose write and the teardown. The requester's
+  `submitEvent` (`internal/services/requester/service.go`) resolved the event's payload from the PDS,
+  verified the envelope signature with a directory key lookup, and dispatched inline, so a callback
+  paid the requester's own PDS latency and an unreadable payload ended the call as an error. Resolving
+  an Accept's DID service `submitEvent` ref was then tried behind a 3 s `LookupDID` bound; that
+  experiment was rejected, because a bound shortens a wait but does not take the lookup out of the
+  request path.
+- **The correct flow.** The handler records durable intent in kcp and returns. `submitAccept` records
+  the Receipt intent and one `compute.provision` `StateSync` keyed `accept:<accept uri>`
+  (`internal/services/bidder/statesync.go`, `internal/statesync`); the adapter writes the Receipt to
+  the bidder's PDS, provisions the guest, binds the contract and publishes the events. The release
+  path annotates the `ComputeVM` and records the termination `StateSync` keyed
+  `terminated:<receipt uri>` (`internal/computevm/termination.go`); its adapter writes the PDS and
+  firehose record and calls the Accept record's `submitEvent` only when it names one. The requester's
+  `submitEvent` appends the event to the contract's pending events and to the inbox `StateSync` keyed
+  `inbox:<event uri>#<cid>` (`internal/services/requester/inbox.go`,
+  `internal/services/requester/contracts.go`); its worker resolves the payload, verifies the
+  signature, dispatches, and later publishes the vm.delete and calls the bidder Receipt record's
+  `submitEvent` only when it names one. With no ref the firehose carries the event and no callback is
+  sent. Every write carries an idempotency key, so a retry observes before it writes and a duplicate
+  callback is a no-op.
 
 ## 16. Vocabulary
 
