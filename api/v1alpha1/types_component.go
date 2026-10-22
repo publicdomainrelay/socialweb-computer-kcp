@@ -1,6 +1,8 @@
 package v1alpha1
 
 import (
+	"strings"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -38,6 +40,16 @@ type ComponentRef struct {
 	Name string `json:"name,omitempty"`
 
 	Did string `json:"did,omitempty"`
+}
+
+func (r *ComponentRef) VaultServer(fallback string) string {
+	if r == nil || strings.TrimSpace(r.Name) == "" {
+		return fallback
+	}
+	if strings.EqualFold(strings.TrimSpace(r.Kind), "RemoteOpenBao") {
+		return "RemoteOpenBao/" + strings.TrimSpace(r.Name)
+	}
+	return strings.TrimSpace(r.Name)
 }
 
 type ComponentIdentity struct {

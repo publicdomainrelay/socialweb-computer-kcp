@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,6 +17,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
 )
+
+var ErrRemoteVaultDisabled = errors.New("component: RemoteOpenBao vault access is disabled")
 
 type KCPClient interface {
 	Workspace() string
@@ -232,6 +235,9 @@ func NewOpenBaoVaultClientsWithSource(source openbaosession.Source, workspace st
 }
 
 func (c *OpenBaoVaultClients) Client(ctx context.Context, server string) (VaultClient, error) {
+	if strings.HasPrefix(strings.TrimSpace(server), "RemoteOpenBao/") {
+		return nil, fmt.Errorf("%w: %s", ErrRemoteVaultDisabled, server)
+	}
 	if c == nil || c.Source == nil {
 		return nil, errors.New("component: the OpenBao vault clients have no source")
 	}

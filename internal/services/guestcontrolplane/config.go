@@ -162,9 +162,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		}
 		cfg.ServePort = int(guestSpec.Serve.Port)
 	}
-	if guestSpec.VaultRef != nil && guestSpec.VaultRef.Name != "" {
-		cfg.VaultServer = guestSpec.VaultRef.Name
-	}
+	cfg.VaultServer = guestSpec.VaultRef.VaultServer(cfg.VaultServer)
 	if guestSpec.Storage != nil && guestSpec.Storage.DataDir != "" {
 		cfg.StateDir = guestSpec.Storage.DataDir
 	}

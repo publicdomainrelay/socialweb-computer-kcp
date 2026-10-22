@@ -907,7 +907,7 @@ func (s *Service) readSecretsBundle(ctx context.Context, ref v1alpha1.VaultRef) 
 	if s.cfg.VaultRef == nil || s.cfg.VaultRef.Name == "" {
 		return nil, errors.New("requester: the contract names a secrets bundle and the component names no OpenBaoServer")
 	}
-	server := s.cfg.VaultRef.Name
+	server := s.cfg.VaultRef.VaultServer("")
 	client, err := s.cfg.Deps.Vault.Client(ctx, server)
 	if err != nil {
 		return nil, fmt.Errorf("requester: the vault client: %w", err)

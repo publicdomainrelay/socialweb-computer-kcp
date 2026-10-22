@@ -45,6 +45,9 @@ func resolveVault(ctx context.Context, cfg Config, deps component.Deps) (*vaultR
 	if workspace == "" {
 		workspace = cfg.Workspace
 	}
+	if strings.EqualFold(cfg.Vault.Ref.Kind, "RemoteOpenBao") {
+		return nil, fmt.Errorf("%w: %s/%s", component.ErrRemoteVaultDisabled, workspace, cfg.Vault.Ref.Name)
+	}
 	if workspace == "" {
 		return nil, errors.New("gatewayapi: the vault ref has no workspace")
 	}

@@ -294,9 +294,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		}
 		cfg.Provider.StopGraceSeconds = bidderSpec.Kcp.StopGraceSeconds
 	}
-	if bidderSpec.VaultRef != nil && bidderSpec.VaultRef.Name != "" {
-		cfg.Provider.GuestVaultServer = bidderSpec.VaultRef.Name
-	}
+	cfg.Provider.GuestVaultServer = bidderSpec.VaultRef.VaultServer(cfg.Provider.GuestVaultServer)
 	if bidderSpec.Storage != nil && bidderSpec.Storage.DataDir != "" {
 		cfg.StateDir = bidderSpec.Storage.DataDir
 	}
