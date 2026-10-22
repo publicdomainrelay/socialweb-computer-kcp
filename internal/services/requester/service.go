@@ -239,6 +239,61 @@ func (s *Service) register(handler http.Handler) error {
 	return s.cfg.Deps.Handlers.RegisterHTTP(key, handler)
 }
 
+func (s *Service) registerPDSWithRelays(ctx context.Context) {
+	if s.cfg.Deps.KCP == nil || len(s.cfg.Network.RelayUrls) == 0 {
+		return
+	}
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+	for {
+		s.registerPDSWithRelay(ctx)
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func (s *Service) registerPDSWithRelay(ctx context.Context) {
+	client, err := s.cfg.Deps.KCP.Client(s.cfg.Workspace)
+	if err != nil {
+		return
+	}
+	restCfg := rest.CopyConfig(client.RESTConfig())
+	if restCfg == nil {
+		return
+	}
+	baseHost, _, _ := strings.Cut(strings.TrimSuffix(restCfg.Host, "/"), "/clusters/")
+	restCfg.Host = baseHost + "/clusters/" + s.cfg.Workspace
+	dyn, err := dynamic.NewForConfig(restCfg)
+	if err != nil {
+		return
+	}
+	u, err := dyn.Resource(exposureGVR).Get(ctx, "svc-pds-pds-local", metav1.GetOptions{})
+	if err != nil {
+		return
+	}
+	raw, _, _ := unstructured.NestedString(u.Object, "status", "url")
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Host == "" {
+		return
+	}
+	for _, relayURL := range s.cfg.Network.RelayUrls {
+		body := strings.NewReader(fmt.Sprintf(`{"hostname":%q}`, parsed.Host))
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+			strings.TrimRight(relayURL, "/")+"/xrpc/com.atproto.sync.requestCrawl", body)
+		if err != nil {
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+		if err == nil {
+			resp.Body.Close()
+		}
+	}
+}
+
 func (s *Service) logicalURL() string {
 	return handlerURL(s.cfg.Workspace, Kind, s.cfg.ComponentName)
 }
@@ -419,6 +474,7 @@ func (s *Service) setup(ctx context.Context) error {
 	if err := s.startStateSync(); err != nil {
 		s.log.Warn("requester_does_not_run_statesync", "err", err)
 	}
+	go s.registerPDSWithRelays(ctx)
 	if s.cfg.Contracts == nil {
 		return errors.New("requester: no ComputeContract store is configured")
 	}
