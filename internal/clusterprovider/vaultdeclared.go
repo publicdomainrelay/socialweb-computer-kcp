@@ -44,6 +44,8 @@ func clusterProviderRules() []v1alpha1.OpenBaoPolicyRule {
 func gatewayKubeconfigRules() []v1alpha1.OpenBaoPolicyRule {
 	cu := []string{"create", "update"}
 	return []v1alpha1.OpenBaoPolicyRule{
+		{Path: VaultPKIPath + "/config/ca", Capabilities: cu},
+		{Path: VaultPKIPath + "/issuer/*", Capabilities: cu},
 		{Path: VaultPKIPath + "/issue/" + VaultPKIRoleKubeconfig, Capabilities: cu},
 		{Path: VaultPKIPath + "/issue/" + VaultPKIRoleKubeconfigNoExpiry, Capabilities: cu},
 		{Path: VaultPKIPath + "/revoke", Capabilities: cu},

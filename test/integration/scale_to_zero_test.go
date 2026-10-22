@@ -255,6 +255,27 @@ func TestTenantClusterScalesFromZeroOnMarketVMsAndBack(t *testing.T) {
 		time.Sleep(time.Second)
 	}
 	receipts := map[string]bool{}
+	receiptDeadline := time.Now().Add(2 * time.Minute)
+	for {
+		fresh, err := tn.Claims(ctx)
+		if err != nil {
+			t.Fatalf("re-reading the NodeClaims for their receipts: %v", err)
+		}
+		claims = fresh
+		missing := 0
+		for _, c := range claims {
+			if c.Status.Contract.ReceiptUri == "" {
+				missing++
+			}
+		}
+		if missing == 0 {
+			break
+		}
+		if time.Now().After(receiptDeadline) {
+			t.Fatalf("%d NodeClaim(s) reached Running without a receipt in status.contract.receiptUri", missing)
+		}
+		time.Sleep(time.Second)
+	}
 	for _, c := range claims {
 		receipts[c.Status.Contract.ReceiptUri] = true
 	}

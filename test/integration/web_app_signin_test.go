@@ -271,9 +271,26 @@ func TestWebAppSignInOverLoopbackOriginIssuesAClientCertificate(t *testing.T) {
 		t.Fatalf("POST /api/clusters/list through the session cookie: %d %.300s", code, raw)
 	}
 
-	code, header, raw = web.do(http.MethodPost, "/api/clusters/kubeconfig", map[string]string{"name": "tenant"})
-	if code != http.StatusOK {
-		t.Fatalf("POST /api/clusters/kubeconfig: %d %.300s", code, raw)
+	deadline := time.Now().Add(5 * time.Minute)
+	for {
+		code, _, listRaw := web.do(http.MethodPost, "/api/clusters/list", map[string]any{})
+		if code == http.StatusOK && strings.Contains(string(listRaw), `"name":"tenant"`) && strings.Contains(string(listRaw), `"phase":"Ready"`) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the tenant cluster did not report Ready: %d %.300s", code, listRaw)
+		}
+		time.Sleep(2 * time.Second)
+	}
+	for {
+		code, header, raw = web.do(http.MethodPost, "/api/clusters/kubeconfig", map[string]string{"name": "tenant"})
+		if code == http.StatusOK {
+			break
+		}
+		if code != http.StatusTooManyRequests || time.Now().After(deadline) {
+			t.Fatalf("POST /api/clusters/kubeconfig: %d %.300s", code, raw)
+		}
+		time.Sleep(2 * time.Second)
 	}
 	if cacheControl := header.Get("Cache-Control"); cacheControl != "no-store" {
 		t.Fatalf("the kubeconfig Cache-Control: want no-store, got %q", cacheControl)

@@ -2,12 +2,18 @@ package clientcert
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/pem"
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/big"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"time"
@@ -76,6 +82,11 @@ func (i *Issuer) Grant(ctx context.Context, in kcpclient.GrantInput) (string, er
 	if err != nil {
 		return "", err
 	}
+	if certPEM, keyPEM, leaf, ok, err := signFromClientCA(dir, string(in.Caller), ttl, in.NoExpiry); err != nil {
+		return "", err
+	} else if ok {
+		return i.recordAndBuild(ctx, in, leaf, leaf.SerialNumber.Text(16), certPEM, keyPEM, nil)
+	}
 	client, _, err := clusterprovider.GatewayVaultClient(ctx, dir)
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrVaultUnavailable, err)
@@ -89,6 +100,9 @@ func (i *Issuer) Grant(ctx context.Context, in kcpclient.GrantInput) (string, er
 	}
 	if in.NoExpiry {
 		role, req.TTL, req.NotAfter = clusterprovider.VaultPKIRoleKubeconfigNoExpiry, "", noExpiryNotAfter
+	}
+	if err := clusterprovider.ImportClientCA(cctx, dir, client); err != nil {
+		return "", fmt.Errorf("%w: %v", ErrVaultUnavailable, err)
 	}
 	cert, err := client.IssueCert(cctx, clusterprovider.VaultPKIPath, role, req)
 	if err != nil {
@@ -112,24 +126,34 @@ func (i *Issuer) Grant(ctx context.Context, in kcpclient.GrantInput) (string, er
 	case cert.PrivateKey == "":
 		return "", errors.New("clientcert: the issuer returned no private key")
 	}
+	return i.recordAndBuild(ctx, in, leaf, cert.Serial, cert.Certificate, cert.PrivateKey,
+		func() { i.revokeSerial(ctx, client, cert.Serial) })
+}
+
+func (i *Issuer) recordAndBuild(ctx context.Context, in kcpclient.GrantInput, leaf *x509.Certificate, serial, certPEM, keyPEM string, revoke func()) (string, error) {
 	if i.Recorder == nil {
-		i.revokeSerial(ctx, client, cert.Serial)
+		if revoke != nil {
+			revoke()
+		}
 		return "", fmt.Errorf("%w: no recorder for certificates", ErrVaultUnavailable)
 	}
-	rec := kcpclient.CertificateRecord{DID: string(in.Caller), Cluster: in.Cluster, Serial: cert.Serial,
+	rec := kcpclient.CertificateRecord{DID: string(in.Caller), Cluster: in.Cluster, Serial: serial,
 		NotAfter: leaf.NotAfter, NoExpiry: in.NoExpiry}
 	if err := i.Recorder.RecordCertificate(ctx, rec); err != nil {
-		i.revokeSerial(ctx, client, cert.Serial)
+		if revoke != nil {
+			revoke()
+		}
 		return "", fmt.Errorf("%w: record: %v", ErrVaultUnavailable, err)
 	}
 	var caPEM []byte
+	var err error
 	if i.CAFile != "" {
 		if caPEM, err = os.ReadFile(i.CAFile); err != nil {
 			return "", fmt.Errorf("clientcert: reading the CA file: %w", err)
 		}
 	}
 	out, err := kubeconfig.BuildClientCert(kubeconfig.ClientCertInput{ClusterName: in.Cluster, Server: in.Server,
-		CACertPEM: caPEM, CertPEM: []byte(cert.Certificate), KeyPEM: []byte(cert.PrivateKey)})
+		CACertPEM: caPEM, CertPEM: []byte(certPEM), KeyPEM: []byte(keyPEM)})
 	if err != nil {
 		return "", err
 	}
@@ -137,7 +161,7 @@ func (i *Issuer) Grant(ctx context.Context, in kcpclient.GrantInput) (string, er
 	if in.NoExpiry {
 		msg = "clientcert: kubeconfig no-expiry certificate issued"
 	}
-	i.log().Info(msg, "did", string(in.Caller), "cluster", in.Cluster, "serial", cert.Serial,
+	i.log().Info(msg, "did", string(in.Caller), "cluster", in.Cluster, "serial", serial,
 		"notAfter", leaf.NotAfter.UTC().Format(time.RFC3339))
 	return out, nil
 }
@@ -146,6 +170,78 @@ func (i *Issuer) revokeSerial(ctx context.Context, client *openbao.Client, seria
 	if err := client.Write(ctx, "pki/revoke", map[string]any{"serial_number": serial}); err != nil {
 		i.log().Warn("clientcert: the revoke of an unrecorded certificate failed", "serial", serial, "err", err.Error())
 	}
+}
+
+func signFromClientCA(dir, did string, ttl time.Duration, noExpiry bool) (string, string, *x509.Certificate, bool, error) {
+	tlsDir := filepath.Join(dir, "server", "tls")
+	certPEM, err := os.ReadFile(filepath.Join(tlsDir, "client-ca.crt"))
+	if err != nil {
+		return "", "", nil, false, nil
+	}
+	keyPEM, err := os.ReadFile(filepath.Join(tlsDir, "client-ca.key"))
+	if err != nil {
+		return "", "", nil, false, nil
+	}
+	caBlock, _ := pem.Decode(certPEM)
+	if caBlock == nil {
+		return "", "", nil, false, fmt.Errorf("clientcert: %s holds no certificate", filepath.Join(tlsDir, "client-ca.crt"))
+	}
+	caCert, err := x509.ParseCertificate(caBlock.Bytes)
+	if err != nil {
+		return "", "", nil, false, err
+	}
+	keyBlock, _ := pem.Decode(keyPEM)
+	if keyBlock == nil {
+		return "", "", nil, false, fmt.Errorf("clientcert: %s holds no key", filepath.Join(tlsDir, "client-ca.key"))
+	}
+	caKey, err := x509.ParseECPrivateKey(keyBlock.Bytes)
+	if err != nil {
+		parsed, parseErr := x509.ParsePKCS8PrivateKey(keyBlock.Bytes)
+		if parseErr != nil {
+			return "", "", nil, false, err
+		}
+		var ok bool
+		if caKey, ok = parsed.(*ecdsa.PrivateKey); !ok {
+			return "", "", nil, false, errors.New("clientcert: the client CA key is not ECDSA")
+		}
+	}
+	if !caCert.PublicKey.(*ecdsa.PublicKey).Equal(&caKey.PublicKey) {
+		return "", "", nil, false, errors.New("clientcert: the client CA key is not its certificate's key")
+	}
+	leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return "", "", nil, false, err
+	}
+	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 127))
+	if err != nil {
+		return "", "", nil, false, err
+	}
+	now := time.Now()
+	notAfter := now.Add(ttl)
+	ou := []string(nil)
+	if noExpiry {
+		notAfter = time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC)
+		ou = []string{clusterprovider.NoExpiryOrganizationalUnit}
+	}
+	tmpl := &x509.Certificate{SerialNumber: serial,
+		Subject:   pkix.Name{CommonName: did, Organization: []string{kcpclient.OwnersGroup}, OrganizationalUnit: ou},
+		NotBefore: now.Add(-time.Minute), NotAfter: notAfter,
+		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+		BasicConstraintsValid: true}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, caCert, &leafKey.PublicKey, caKey)
+	if err != nil {
+		return "", "", nil, false, err
+	}
+	leaf, err := x509.ParseCertificate(der)
+	if err != nil {
+		return "", "", nil, false, err
+	}
+	kder, err := x509.MarshalECPrivateKey(leafKey)
+	if err != nil {
+		return "", "", nil, false, err
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})),
+		string(pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: kder})), leaf, true, nil
 }
 
 func parseCertificate(pemText string) (*x509.Certificate, error) {
