@@ -187,7 +187,7 @@ func (c *Client) bind(logicalCluster string, gv schema.GroupVersion, endpoint st
 }
 
 var (
-	workspaceReadyTimeout = 30 * time.Second
+	workspaceReadyTimeout = 5 * time.Minute
 	workspaceReadyPoll    = 250 * time.Millisecond
 )
 

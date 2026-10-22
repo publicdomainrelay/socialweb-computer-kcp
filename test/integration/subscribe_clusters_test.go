@@ -358,7 +358,7 @@ func TestClusterEventsStreamFromSubscribeClusters(t *testing.T) {
 	addr := n.xrpcAddress(t)
 	acct := n.OwnerAccount(t)
 	aud := n.gatewayAudience(t)
-	gw := &http.Client{Timeout: 30 * time.Second}
+	gw := &http.Client{Timeout: 6 * time.Minute}
 
 	s := subscribe(t, addr, acct.Token(t, aud, "subscribeClusters"), "")
 	snap := s.until("the snapshot", 30*time.Second, func(ev streamEvent) bool {

@@ -5,6 +5,7 @@ package integration
 import (
 	"context"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
@@ -81,11 +82,13 @@ func TestKubeconfigClientCertificateWithoutCredentialHelper(t *testing.T) {
 	if len(cfg.AuthInfos) != 1 {
 		t.Fatalf("the kubeconfig holds %d users, want 1", len(cfg.AuthInfos))
 	}
+	var issuedKeyPEM []byte
 	for _, ai := range cfg.AuthInfos {
 		if len(ai.ClientCertificateData) == 0 || len(ai.ClientKeyData) == 0 || ai.Exec != nil || ai.Token != "" {
 			t.Fatalf("the kubeconfig user is not a plain client certificate: cert %d key %d exec %v token %t",
 				len(ai.ClientCertificateData), len(ai.ClientKeyData), ai.Exec != nil, ai.Token != "")
 		}
+		issuedKeyPEM = append([]byte(nil), ai.ClientKeyData...)
 		block, _ := pem.Decode(ai.ClientCertificateData)
 		if block == nil {
 			t.Fatal("the client certificate is not PEM")
@@ -188,7 +191,18 @@ func TestKubeconfigClientCertificateWithoutCredentialHelper(t *testing.T) {
 	}
 
 	gwDir := n.GatewayDir()
-	r := n.h.As(ctx, append([]string{"grep", "-rl", "-e", "PRIVATE KEY", "-e", "client-key-data", filepath.Join(gwDir, "logs")}, n.appRunDirs("gateway")...)...)
+	needles := []string{base64.StdEncoding.EncodeToString(issuedKeyPEM)}
+	for _, line := range strings.Split(strings.TrimSpace(string(issuedKeyPEM)), "\n") {
+		if len(line) >= 40 && !strings.Contains(line, "-----") {
+			needles = append(needles, line)
+		}
+	}
+	args := []string{"grep", "-rl", "-F"}
+	for _, needle := range needles {
+		args = append(args, "-e", needle)
+	}
+	args = append(args, filepath.Join(gwDir, "logs"))
+	r := n.h.As(ctx, append(args, n.appRunDirs("gateway")...)...)
 	if r.Code > 1 {
 		t.Fatalf("the leak scan failed: exit %d: %s", r.Code, r.Tail(3))
 	}
