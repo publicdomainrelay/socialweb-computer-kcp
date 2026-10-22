@@ -1,0 +1,650 @@
+plan: "0022"
+title: "Every production PDS is publicly reachable through an IngressProxy: xrpc.fedproxy.com or opentunnel"
+status: todo
+source: >
+  Old tree: hono-pds ran with --public-hostname separate from its bind
+  hostname; that hostname was used for the did:web document, the atproto_pds
+  service endpoint in createAccount, the account PDS endpoint, and
+  requestCrawl. The old market services assumed a PDS address that peers could
+  resolve and fetch over HTTP. A local-only PDS was not usable by another
+  account.
+
+  New tree: every app owns a Pds component, but ingress Exposures for those
+  PDSes stay Pending on standalone bidder and gateway installs. pdsPublicURL
+  falls back to the local exposure, so an account can be created with a
+  loopback service endpoint. IngressProxy has xrpc-subscription, opentunnel and
+  iroh providers, but standalone apps do not create one, MarketNetwork hardcodes
+  xrpc-subscription, and there is no PDS-wide ingress planner. Production PDS
+  instances therefore are not publicly resolvable.
+principle: >
+  A PDS is a public HTTPS service. Its account DID document must contain an
+  atproto_pds service entry whose serviceEndpoint is the stable public URL of
+  that PDS. Clients and relays resolve DID -> serviceEndpoint -> PDS. The PDS
+  itself may bind loopback or an internal port; an IngressProxy provides the
+  public URL. Every PDS component created in a production app gets an
+  IngressProxy and an ingress Exposure before its account is created. The
+  provider is selected by the app root; the public hostname is persisted and
+  must not silently change.
+
+atproto_docs:
+  - url: "https://atproto.com/specs/did"
+    requirement: >
+      The service entry has id ending #atproto_pds and type
+      AtprotoPersonalDataServer. serviceEndpoint must be an HTTPS URL of the
+      server and must contain only scheme, hostname and optional port -- no
+      userinfo, path prefix or other components.
+  - url: "https://atproto.com/guides/identity"
+    requirement: >
+      A DID document includes the URL of the user's PDS. Apps resolve a
+      handle to a DID, resolve the DID document, and then communicate with the
+      PDS at its serviceEndpoint.
+  - url: "https://atproto.com/guides/going-to-production"
+    requirement: >
+      Use separate domain names for the PDS and the app. Changing a PDS
+      hostname after accounts exist is difficult; each account needs a PLC
+      update. The PDS is the domain users trust and enter passwords on, so the
+      public hostname must be stable.
+  - url: "https://atproto.com/guides/self-hosting"
+    requirement: >
+      Moving a self-hosted PDS domain requires changing the PLC entries for
+      each hosted account and updating DNS. A provider that returns a new host
+      on restart cannot be treated as a transparent transport.
+old_code:
+  - path: "hono-pds/main.ts:15,54,114"
+    note: >
+      publicHostname is a first-class PDS option: it may differ from the bind
+      hostname.
+  - path: "hono-pds/lib/hono-factory-atproto-repo-deno/factory.ts:128,180-204"
+    note: >
+      publicHostname feeds the did:web document and the atproto_pds
+      serviceEndpoint at https://<host>.
+  - path: "hono-pds/lib/hono-factory-atproto-repo-deno/factory.ts:321-327"
+    note: >
+      createAccount derives the account PDS endpoint from publicHostname or the
+      Host header; without one it refuses.
+  - path: "hono-pds/lib/hono-factory-atproto-repo-deno/factory.ts:506-530"
+    note: >
+      requestCrawl is sent with opts.publicHostname, so relay discovery depends
+      on the externally reachable hostname.
+  - path: "hono-bidder/mod.ts:870-902"
+    note: >
+      The bidder announces its PDS via requestCrawl using the local/visibility
+      hostname; firehose discovery only works when that hostname is resolvable
+      by the relay.
+  - path: "did-key-ingress-proxy/hono-did-key-ingress-proxy-tunnel-subscriber/mod.ts:57-69"
+    note: >
+      The old ingress subscriber mapped a DID subdomain under the ingress
+      proxy host, giving each exposure a public hostname.
+  - path: "atproto-market/test/oauth_session_transfer_test.ts:328-352"
+    note: >
+      The old tests call out that publicHostname is read lazily and must be set
+      correctly before createAccount and requestCrawl.
+current_gaps: |
+  Standalone MarketBidder and Gateway do not create an IngressProxy component.
+  pdsExposures hardcodes IngressRef dispatcher and PublicHost
+  network.GuestTlsUrl. A standalone app has no dispatcher, so the PDS ingress
+  Exposure stays Pending.
+
+  pdsPublicURL prefers the ingress Exposure but falls back to the local
+  Exposure. Account creation therefore succeeds with a loopback PDS endpoint
+  while the public ingress is pending. The account DID's atproto_pds service
+  entry is wrong and is not repaired later.
+
+  Pds.PublicBaseURL drives the PDS service DID and OAuth issuer when ServiceDID
+  is empty. A loopback URL makes both wrong.
+
+  PDS ingress Exposure hostname is the component handle, but the ingress
+  registrar derives the DID subdomain from the ingress identity; the
+  PublicHost/GuestTlsUrl override makes the URL provider-dependent and can
+  bypass the provider's returned URL.
+
+  MarketNetwork hardcodes Provider xrpc-subscription. Standalone apps cannot
+  select opentunnel. There is no opentunnel binary asset pin, no stable route
+  name policy, and no check that the provider returns the same public host
+  after restart.
+
+  No code updates an existing did:plc account's atproto_pds serviceEndpoint
+  after an ingress URL changes. HTTPPLCSubmitter supports handle updates, not
+  service endpoint updates.
+
+  No PDS controller or planner ensures that every Pds component in a
+  production app has an ingress Exposure and a ready IngressProxy. No tests
+  cover PDS public URL, DID document, PLC service endpoint, relay crawl, or
+  provider restart stability.
+
+target_model: |
+  App roots select ingress:
+    ingress:
+      provider: xrpc-subscription | opentunnel
+      ingressRef: ingress | dispatcher
+      publicHost: optional expected host
+      opentunnel: {command, routeName, localHost, proxyProtocol}
+      xrpc: {ingressProxyHost, relayURL, identityRef}
+
+  Ingress providers:
+    xrpc-subscription: in-process subscriber to xrpc.fedproxy.com; public URL
+    is https://<did-subdomain>.<ingressProxyHost>; stable as long as the ingress
+    identity keypair persists.
+    opentunnel: supervises a pinned opentunnel binary; public URL is the
+    opentunnel-printed URL; routeName is deterministic per PDS and the URL must
+    stay stable across restarts.
+    iroh: recognized by the API but not selected in this plan; later plan.
+
+  PDS lifecycle:
+    IngressProxy component Ready -> ingress Exposure Ready -> PDS
+    PublicBaseURL set -> PDS account create/sign-in -> PLC serviceEndpoint
+    points at PublicBaseURL -> requestCrawl uses the same hostname.
+    No account is created with a loopback or internal PublicBaseURL when
+    ingress is required.
+
+  All PDS instances:
+    MarketBidder app PDS.
+    Gateway app PDS (requester).
+    MarketRequester app PDS.
+    MarketNetwork alice and bob PDS instances.
+    Any PDS rendered into a child app workspace.
+    Each has an ingress Exposure referring to a provider component. In a
+    market network, one dispatcher may serve several PDS exposures; standalone
+    apps get their own IngressProxy.
+
+  PDS public hostname:
+    serviceEndpoint is scheme://host[:port] only, no path.
+    The PDS did:web document and /.well-known/did.json use the public Host.
+    The ingress must preserve the public Host header and serve HTTPS.
+    A changed provider URL is a Failed condition, not a silent DID rewrite.
+
+waves:
+  - id: W0
+    title: "Contracts, URL policy and provider selection"
+    serial: true
+    tracks: [W0-CONTRACTS, W0-POLICY]
+    gate: "types, schemas and docs agree; provider selection is explicit and fail-closed."
+  - id: W1
+    title: "Ingress provider completion"
+    parallel: true
+    tracks:
+      - name: xrpc
+        items: [W1-XRPC]
+      - name: opentunnel
+        items: [W1-OPENTUNNEL]
+      - name: exposure
+        items: [W1-EXPOSURE]
+    gate: "both providers serve a fake PDS through a fake Exposure; public URL and Host are correct."
+  - id: W2
+    title: "PDS ingress lifecycle and public identity"
+    parallel: true
+    tracks:
+      - name: lifecycle
+        items: [W2-PDS-LIFECYCLE, W2-ALL-PDS]
+      - name: plc
+        items: [W2-PLC]
+      - name: migration
+        items: [W2-MIGRATION]
+        after: [W2-PDS-LIFECYCLE]
+    gate: "new PDS accounts get the ingress URL in their DID; existing accounts can be repaired; all app PDS types are covered."
+  - id: W3
+    title: "App and deployment wiring"
+    parallel: true
+    tracks:
+      - name: bidder
+        items: [W3-BIDDER]
+      - name: gateway
+        items: [W3-GATEWAY]
+      - name: network
+        items: [W3-NETWORK]
+      - name: deploy
+        items: [W3-DEPLOY]
+    gate: "prod config selects a provider for every PDS; no app leaves the PDS ingress Pending."
+  - id: W4
+    title: "Verification"
+    parallel: true
+    tracks:
+      - name: providers
+        items: [W4-PROVIDERS]
+      - name: hosts
+        items: [W4-HOSTS]
+      - name: prod
+        items: [W4-PROD]
+      - name: close
+        items: [W4-CLOSE]
+        after: [W4-PROVIDERS, W4-HOSTS, W4-PROD]
+    gate: "DID -> PDS works from outside each host; restart keeps the public URL; all hats and prod pass."
+
+items:
+  - id: W0-CONTRACTS
+    title: "Add PDS ingress provider contracts"
+    wave: W0
+    track: contracts
+    parallel_with: [W0-POLICY]
+    depends_on: []
+    status: todo
+    evidence: []
+    decision: >
+      Add an IngressConfig to MarketBidderSpec, MarketRequesterSpec,
+      GatewaySpec, SshGatewaySpec and MarketNetworkSpec/Value:
+      provider, ingressRef, publicHost, xrpc host/relay/identity refs, and
+      opentunnel command/routeName/localHost/proxyProtocol. Add
+      PdsSpec.RequireIngress, PdsSpec.IngressRef, PdsSpec.PublicURL and
+      PdsSpec.StableHost. Add IngressProxySpec fields needed by standalone
+      apps: ingressProxyHost, relayURL, identityRef, publicHost and status
+      provider/url. Regenerate deepcopy, schemas, exports and workspace type
+      bindings.
+    files:
+      - api/v1alpha1/types_application.go
+      - api/v1alpha1/types_component.go
+      - api/v1alpha1/types_component_pds.go
+      - api/events/v1alpha1/
+      - deploy/*-apiresourceschema.yaml
+      - deploy/workspacetype-application.yaml
+    done_when: >
+      go generate is clean; xrpc-subscription, opentunnel and iroh are
+      representable; unsupported iroh is rejected with a named error.
+
+  - id: W0-POLICY
+    title: "Write the public URL and provider policy"
+    wave: W0
+    track: contracts
+    parallel_with: [W0-CONTRACTS]
+    depends_on: []
+    status: todo
+    evidence: []
+    decision: >
+      Document: PDS serviceEndpoint is scheme/host/port only; PDS ingress is
+      required for prod; default provider is xrpc-subscription when
+      ingressProxyHost is set, opentunnel when spec.opentunnel is set, and no
+      implicit local fallback. The public host is persisted. A provider URL
+      change is Failed/StableHostMismatch. iroh is later, not in this plan.
+      Include atproto.com references in the plan and operator docs.
+    files:
+      - docs/plans/0022-pds-ingress-proxy.yaml
+      - docs/ARCHITECTURE.md
+      - CONTRIBUTING.md
+    done_when: >
+      Every provider choice and failure mode is named; no reviewer has to
+      infer whether local fallback is allowed.
+
+  - id: W1-XRPC
+    title: "Make xrpc-subscription work for standalone PDS apps"
+    wave: W1
+    track: xrpc
+    parallel_with: [W1-OPENTUNNEL, W1-EXPOSURE]
+    depends_on: [W0-CONTRACTS]
+    status: todo
+    evidence: []
+    decision: >
+      Supply ingressProxyHost, relayURL, hostname, identity and allowed
+      hosts/dids from the app ingress config, not only from MarketNetwork.
+      Create the IngressProxy component in the app root. Publish provider/url
+      and Ready conditions. Ensure the subscriber preserves the public Host
+      and serves /.well-known/did.json, /xrpc, /oauth and PDS repo routes.
+      Expose the provider endpoint for the exposure dispatcher.
+    files:
+      - internal/services/ingressproxy/xrpcsubscription/
+      - internal/services/ingressproxy/service.go
+      - internal/appctl/components.go
+      - internal/stack/componentcore/ingress.go
+    done_when: >
+      A standalone app with xrpc-subscription has Ready IngressProxy and
+      ingress Exposure; a fake dispatcher sees Host and URL
+      https://<did-subdomain>.<host>.
+
+  - id: W1-OPENTUNNEL
+    title: "Make opentunnel a production provider"
+    wave: W1
+    track: opentunnel
+    parallel_with: [W1-XRPC, W1-EXPOSURE]
+    depends_on: [W0-CONTRACTS]
+    status: todo
+    evidence: []
+    decision: >
+      Add a pinned opentunnel binary asset or a deterministic host command
+      path. Validate command, routeName, localHost and proxyProtocol. Use a
+      stable route name per PDS (workspace/PDS name). Persist the returned URL
+      and fail if it changes. Do not treat an ephemeral opentunnel URL as
+      stable. Expose the URL for the Exposure.
+    files:
+      - internal/services/ingressproxy/opentunnel/
+      - internal/versions/versions.json
+      - scripts/stage-assets.sh
+      - Makefile
+      - deploy/apps/
+    done_when: >
+      Fake opentunnel prints a URL; Exposure Ready; a changed URL makes the
+      PDS StableHostMismatch; no manual host install is required in prod.
+
+  - id: W1-EXPOSURE
+    title: "Give PDS Exposures a provider and a public URL"
+    wave: W1
+    track: exposure
+    parallel_with: [W1-XRPC, W1-OPENTUNNEL]
+    depends_on: [W0-CONTRACTS]
+    status: todo
+    evidence: []
+    decision: >
+      Stop hardcoding IngressRef dispatcher and PublicHost
+      network.GuestTlsUrl for PDS exposures. Use the app ingressRef. Let the
+      provider return the URL. For xrpc-subscription use the DID subdomain; for
+      opentunnel use the printed URL. PDS exposure path is /; the PDS public
+      URL is stripped to scheme/host/port. Publish URL, provider and
+      conditions on Exposure/Pds.
+    files:
+      - internal/appctl/components.go
+      - internal/exposure/
+      - internal/services/ingressproxy/
+      - api/exposure/v1alpha1/types_exposure.go
+    done_when: >
+      An ingress Exposure with each provider reports a public HTTPS URL; no
+      GuestTlsUrl override changes it.
+
+  - id: W2-PDS-LIFECYCLE
+    title: "Create the public PDS URL before the account"
+    wave: W2
+    track: lifecycle
+    parallel_with: [W2-PLC, W2-ALL-PDS]
+    depends_on: [W1-XRPC, W1-OPENTUNNEL, W1-EXPOSURE]
+    status: todo
+    evidence: []
+    decision: >
+      Appctl applies IngressProxy and the PDS ingress Exposure first, waits
+      for the ingress URL, then sets Pds.PublicBaseURL and only then creates or
+      signs in the PDS account. If RequireIngress is set and the ingress is not
+      Ready, keep Provisioning with a named condition; never use the local
+      URL. PDS ServiceDID and OAuth issuer derive from the public URL. The PDS
+      Host header and /.well-known/did.json use the public host.
+    files:
+      - internal/appctl/pds.go
+      - internal/appctl/bidder.go
+      - internal/appctl/gateway.go
+      - internal/appctl/requester.go
+      - internal/services/pds/
+    done_when: >
+      A new bidder/gateway PDS account is created with the ingress URL in its
+      DID; no account exists with a loopback service endpoint when ingress is
+      required.
+
+  - id: W2-ALL-PDS
+    title: "Cover every PDS component"
+    wave: W2
+    track: lifecycle
+    parallel_with: [W2-PDS-LIFECYCLE, W2-PLC]
+    depends_on: [W2-PDS-LIFECYCLE]
+    status: todo
+    evidence: []
+    decision: >
+      Enumerate and plan every Pds: bidder app, gateway app, requester app,
+      MarketNetwork alice/bob, and PDSes in child app workspaces. Use one
+      dispatcher per market network where appropriate and one IngressProxy per
+      standalone app. A planner/controller reports each PDS with its ingress
+      ref, provider, URL and readiness. Do not special-case only bidder PDS.
+    files:
+      - internal/appctl/network.go
+      - internal/appctl/components.go
+      - internal/stack/componentcore/
+      - deploy/apps/market-network/
+    done_when: >
+      Every Pds component in a production app has an ingress Exposure and
+      Ready IngressProxy; none is Pending.
+
+  - id: W2-PLC
+    title: "Keep the account DID service endpoint in sync"
+    wave: W2
+    track: plc
+    parallel_with: [W2-PDS-LIFECYCLE, W2-ALL-PDS]
+    depends_on: [W2-PDS-LIFECYCLE]
+    status: todo
+    evidence: []
+    decision: >
+      Add an UpdateService operation alongside UpdateHandle in the PDS PLC
+      submitter. When an existing did:plc account's PDS public URL changes,
+      submit a signed PLC operation preserving rotation keys and verification
+      methods and replacing atproto_pds serviceEndpoint. Verify the new DID
+      document before marking the PDS ready. For did:web, update the served
+      did.json and DNS instead. Failure is a named condition, never silent.
+    files:
+      - internal/services/pds/plc.go
+      - internal/atproto/plc/
+      - internal/statusstate/
+      - internal/appctl/pds.go
+    done_when: >
+      A changed public URL updates the DID service endpoint and the DID
+      document; the old endpoint is not left live.
+
+  - id: W2-MIGRATION
+    title: "Migrate existing PDS instances"
+    wave: W2
+    track: migration
+    parallel_with: [W2-PLC]
+    depends_on: [W2-PDS-LIFECYCLE]
+    status: todo
+    evidence: []
+    decision: >
+      Detect PDS accounts whose atproto_pds endpoint is loopback, local, or
+      the old app URL. Repair with W2-PLC when rotation keys and the old
+      account are usable. If repair is impossible, report a named migration
+      error and require a fresh install; never silently create a second
+      account. Cover this host, hat-9, hat-7 and prod gateway.
+    files:
+      - internal/appctl/pds.go
+      - internal/services/pds/
+      - docs/plans/0022-pds-ingress-proxy.yaml
+    done_when: >
+      Existing local URLs are detected; repairable accounts migrate; the
+      unrepairable path is explicit and tested.
+
+  - id: W3-BIDDER
+    title: "Select ingress in bidder apps"
+    wave: W3
+    track: bidder
+    parallel_with: [W3-GATEWAY, W3-NETWORK, W3-DEPLOY]
+    depends_on: [W2-ALL-PDS]
+    status: todo
+    evidence: []
+    decision: >
+      MarketBidder owns an IngressProxy selection for prod-qr and
+      market-network, with per-profile defaults. The bidder PDS ingress uses
+      the selected provider. The bidder's requestCrawl/offering/relay
+      registration uses the same public host. Standalone bidder no longer
+      depends on a MarketNetwork dispatcher.
+    files:
+      - internal/appctl/bidder.go
+      - deploy/apps/market-bidder/
+      - deploy/apps/option-map.yaml
+    done_when: >
+      Local and market-network bidders have public PDS URLs; the bidder
+      registers the public hostname, not loopback.
+
+  - id: W3-GATEWAY
+    title: "Select ingress in the gateway"
+    wave: W3
+    track: gateway
+    parallel_with: [W3-BIDDER, W3-NETWORK, W3-DEPLOY]
+    depends_on: [W2-ALL-PDS]
+    status: todo
+    evidence: []
+    decision: >
+      Gateway owns or reuses an IngressProxy for its requester PDS. Prod
+      config names the provider and public host. The gateway requester PDS is
+      publicly resolvable independently of the k8s web app and kcp endpoints.
+      Caddy is not used as a PDS proxy; the IngressProxy is.
+    files:
+      - internal/appctl/gateway.go
+      - deploy/apps/gateway/
+      - gateway-spec file
+    done_when: >
+      Prod Gateway PDS ingress is Ready; DID document points at the ingress;
+      PDS records are readable through the public URL.
+
+  - id: W3-NETWORK
+    title: "Select ingress in MarketNetwork"
+    wave: W3
+    track: network
+    parallel_with: [W3-BIDDER, W3-GATEWAY, W3-DEPLOY]
+    depends_on: [W2-ALL-PDS]
+    status: todo
+    evidence: []
+    decision: >
+      Replace hardcoded xrpc-subscription in MarketNetwork with the same
+      provider selection. One dispatcher may serve alice/bob and child PDSes;
+      expose every PDS through it. Preserve the network's public hostnames and
+      service-auth identity.
+    files:
+      - internal/appctl/network.go
+      - deploy/apps/market-network/
+      - deploy/sets.yaml
+    done_when: >
+      Every PDS in the market network has a public URL and the relay can crawl
+      it.
+
+  - id: W3-DEPLOY
+    title: "Prod config and secrets for PDS ingress"
+    wave: W3
+    track: deploy
+    parallel_with: [W3-BIDDER, W3-GATEWAY, W3-NETWORK]
+    depends_on: [W2-PLC]
+    status: todo
+    evidence: []
+    decision: >
+      Add provider, ingress host, opentunnel command/route and public host to
+      gateway-spec/network values and docs. Put ingress identity keys in
+      OpenBao/state, never in CRs. Pin opentunnel. Update CONTRIBUTING with a
+      copy-paste prod command for each provider. Keep iroh documented as
+      future.
+    files:
+      - CONTRIBUTING.md
+      - README.md
+      - deploy/apps/option-map.yaml
+      - internal/versions/versions.json
+    done_when: >
+      A fresh prod deploy selects a provider without hand-editing a ConfigMap;
+      the provider can be changed only through the app spec.
+
+  - id: W4-PROVIDERS
+    title: "Provider integration tests"
+    wave: W4
+    track: providers
+    parallel_with: [W4-HOSTS, W4-PROD]
+    depends_on: [W3-BIDDER, W3-GATEWAY, W3-NETWORK]
+    status: todo
+    evidence: []
+    decision: >
+      Test xrpc-subscription and opentunnel against a fake PDS: DID document
+      and atproto_pds endpoint, createAccount with public URL, getRecord,
+      listRecords, subscribeRepos, requestCrawl, Host preservation, restart,
+      URL stability, missing provider/command, iroh rejected as not yet
+      supported. Test every PDS app type, not just bidder.
+    files:
+      - test/integration/
+      - internal/services/ingressproxy/*_test.go
+    done_when: >
+      Both providers pass the same PDS public-URL tests; a URL change fails
+      with StableHostMismatch.
+
+  - id: W4-HOSTS
+    title: "Re-test every hat host"
+    wave: W4
+    track: hosts
+    parallel_with: [W4-PROVIDERS, W4-PROD]
+    depends_on: [W4-PROVIDERS]
+    status: todo
+    evidence: []
+    decision: >
+      Install/upgrade and test this host, hat-9 and hat-7. Resolve each DID
+      from outside the host, fetch the PDS endpoint, fetch a record, and
+      confirm requestCrawl. Verify association mode on this host and hat-9 and
+      non-association mode on hat-7 still hold. Restart each PDS and confirm
+      the public URL and DID endpoint are unchanged.
+    files:
+      - BIDDER_ARCH.md
+    done_when: >
+      all three hosts have a public PDS, unchanged across restart, and their
+      identity modes still work.
+
+  - id: W4-PROD
+    title: "Re-test prod gateway PDS"
+    wave: W4
+    track: prod
+    parallel_with: [W4-PROVIDERS, W4-HOSTS]
+    depends_on: [W3-DEPLOY]
+    status: todo
+    evidence: []
+    decision: >
+      Deploy the selected provider to socialweb.computer. Confirm the gateway
+      PDS is publicly resolvable, its DID document atproto_pds endpoint is the
+      ingress URL, Alice can sign in, the requester can read the PDS through
+      the public URL, and the kcp/gateway remain Ready. Test a restart and a
+      provider URL stability check. No push.
+    files:
+      - GATEWAY_ARCH.md
+      - scripts/deploy.sh
+    done_when: >
+      prod PDS is public and stable; Alice and cluster flows still work.
+
+  - id: W4-CLOSE
+    title: "Close with evidence"
+    wave: W4
+    track: close
+    parallel_with: []
+    depends_on: [W4-PROVIDERS, W4-HOSTS, W4-PROD]
+    status: todo
+    evidence: []
+    decision: >
+      Run gofmt, go build, go vet, deploy/check.sh --fast and make check-pins.
+      Record provider, public URL and DID for every PDS. Confirm no secret in
+      CR/status and no push.
+    files:
+      - docs/plans/0022-pds-ingress-proxy.yaml
+    done_when: >
+      every PDS row has a public URL and a resolution proof; remaining gaps
+      are named.
+
+test_matrix:
+  providers:
+    - xrpc-subscription
+    - opentunnel
+    - iroh (rejected/not implemented in this plan)
+  pds_instances:
+    - bidder app PDS on this host
+    - bidder app PDS on hat-9
+    - bidder app PDS on hat-7
+    - gateway app PDS on socialweb.computer
+    - requester app PDS
+    - market-network alice PDS
+    - market-network bob PDS
+    - child-app PDS
+  checks:
+    - DID resolves to atproto_pds serviceEndpoint
+    - serviceEndpoint is HTTPS scheme/host/port only
+    - createAccount uses the public URL
+    - getRecord/listRecords over the public URL
+    - subscribeRepos and requestCrawl through the public host
+    - Host header and did:web doc
+    - restart keeps the public URL
+    - provider URL change fails closed
+    - PDS account creation never uses loopback when ingress is required
+risks: |
+  Changing a PDS public host after accounts exist requires PLC updates and is
+  not transparent. opentunnel must provide a stable route, or the PDS cannot
+  use it for did:plc service endpoints without migration. xrpc-subscription
+  is preferred for a stable DID-subdomain host.
+
+  A local fallback can silently create a broken account. The PDS lifecycle
+  must fail closed when the selected ingress is not Ready.
+
+  PDS serviceEndpoint must not include a path. Exposure paths must stay /; any
+  future path-based proxy needs a separate public host.
+
+  Provider commands and identities are credentials/trust boundaries. Keep
+  ingress key material in OpenBao or a 0600 state dir; never in status.
+
+  An ingress provider is not a relay. The PDS still needs requestCrawl and a
+  relay/firehose path for discovery; test both separately.
+
+  iroh is explicitly deferred. The API may recognize it, but this plan must
+  fail closed rather than silently start a different provider.
+decisions:
+  provider_default: "xrpc-subscription when ingressProxyHost is set; opentunnel when spec.opentunnel is set; otherwise fail closed"
+  prod_requirement: "every PDS in a production app requires ingress"
+  stable_host: "persist the public URL; changed URL is StableHostMismatch"
+  pds_endpoint: "serviceEndpoint is scheme://host[:port] only"
+  all_pds: "one provider component per standalone app; one dispatcher may serve a market network"
+  iroh: "deferred; recognized but rejected until a later plan"
