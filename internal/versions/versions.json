@@ -290,7 +290,7 @@
         {"package": "libselinux1", "version": "3.3-1build2", "repo": "ubuntu", "pool": "pool/main/libs/libselinux/", "sha256": {"linux/amd64": "b96c6b40ee2388bd51341cb11c0f1d5bcca29b9180b6e3a77a06b881f2913f7e", "linux/arm64": "3a0726b2174a40fa28e74712867aa6e40d3d725543e8f668af9e9e59a28c817c"}},
         {"package": "libssl3", "version": "3.0.2-0ubuntu1.30", "repo": "ubuntu", "pool": "pool/main/o/openssl/", "sha256": {"linux/amd64": "d1b4636e32ac6d3b95d583ac05ac548b1aa248414bae1c51b14f54be0f8fd7bc", "linux/arm64": "1c4b8cc736eed8a0caafc385f854fa6852382221d84be4795f1d19a52b9fec53"}},
         {"package": "libstdc++6", "version": "12.3.0-1ubuntu1~22.04.3", "repo": "ubuntu", "pool": "pool/main/g/gcc-12/", "sha256": {"linux/amd64": "29ef3d289b272704b75141906c8f683db0f2bdb0942061366691333bfb289bdc", "linux/arm64": "59d244119e6129c7e9c0897491c0e210e925d15881b2dedcf8965ceb4fbf1aa3"}},
-        {"package": "libsystemd0", "version": "249.11-0ubuntu3.22", "repo": "ubuntu", "pool": "pool/main/s/systemd/", "sha256": {"linux/amd64": "4fae4644bcfd86f891faae12cedbf30aca280cf76a034768aec3a03fe42ddc25", "linux/arm64": "9805c8c136fd41d9bff355297fdf6f811529960908711f647e38e1fd39a198ec"}},
+        {"package": "libsystemd0", "version": "249.11-0ubuntu3.23", "repo": "ubuntu", "pool": "pool/main/s/systemd/", "sha256": {"linux/amd64": "ff02a85ba73f850cf7958d2867b34947c67a1072e2b2d1c108a8c6e23715624d", "linux/arm64": "a50379fcab4a6b974c5ee983ab2abd4341768a857715f2e8b855d3610dd73389"}},
         {"package": "libtasn1-6", "version": "4.18.0-4ubuntu0.2", "repo": "ubuntu", "pool": "pool/main/libt/libtasn1-6/", "sha256": {"linux/amd64": "a0903b4fae3ac2548a22d8822382e6d23586e42196d83ff67e82df36cd39fc6c", "linux/arm64": "d9f0ed3ca0cb86f6116bb59388aea92b021c05797b4fba7451a2fed594cb1e1e"}},
         {"package": "libtinfo6", "version": "6.3-2ubuntu0.3", "repo": "ubuntu", "pool": "pool/main/n/ncurses/", "sha256": {"linux/amd64": "3b8dff43a31168f5020928f2ab9a97324c5b47ae708311781f6bd01306c96214", "linux/arm64": "971b5fd1cf8f7d68ba00f40d8eec6474fae6a6adbe19883aa42dd2b74c672e4a"}},
         {"package": "libunistring2", "version": "1.0-1", "repo": "ubuntu", "pool": "pool/main/libu/libunistring/", "sha256": {"linux/amd64": "988fb59de6a0a313844277e8a6e45d3dc16f5ea75a603a46b16b936426f0ac65", "linux/arm64": "59e4af5c1fac70d1fbc19f3c732331ace8449f1f7112887e7b56b8370bd8942b"}},
@@ -306,8 +306,8 @@
         "linux/arm64": {"kind": "debs", "layout": "pgdg-tree"}
       },
       "platforms": {
-        "linux/amd64": {"treeSha256": "0292d37b4f071aa60d50d7de875f3a22a0a2b651417de478445f7d72aed0abe3", "rawBytes": 84341750, "zstdBytes": 25252775},
-        "linux/arm64": {"treeSha256": "609a42977b3df6af070a9d3f7b338888a74bd4d9af3f252f1b11e2ea5b7e77d8", "rawBytes": 81911526, "zstdBytes": 24680640}
+        "linux/amd64": {"treeSha256": "1d824f885e376efd64742bff433f3ec4aeb5485722470852a2aacbae0e92473f", "rawBytes": 84341750, "zstdBytes": 25252912},
+        "linux/arm64": {"treeSha256": "c92089af63c7f97ae8457a378aee8aab58eaef0192d17241eb224292f5de9843", "rawBytes": 81911526, "zstdBytes": 24680608}
       }
     },
     "socialweb-vmexec": {
