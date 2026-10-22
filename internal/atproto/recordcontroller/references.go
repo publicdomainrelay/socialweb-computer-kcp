@@ -102,9 +102,6 @@ func resolveReference(ctx context.Context, dyn dynamic.Interface, factory Dynami
 		return nil, []string{label + ": the reference names no fieldPath"}
 	}
 	namespace := strings.TrimSpace(from.Namespace)
-	if namespace == "" {
-		namespace = metav1.NamespaceDefault
-	}
 	client := dyn
 	if target := strings.TrimSpace(from.Workspace); target != "" && target != workspace {
 		if factory == nil {
@@ -119,7 +116,12 @@ func resolveReference(ctx context.Context, dyn dynamic.Interface, factory Dynami
 	if client == nil {
 		return nil, []string{label + ": no dynamic client"}
 	}
-	object, err := client.Resource(gvrFor(from)).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
+	resource := client.Resource(gvrFor(from))
+	var getter dynamic.ResourceInterface = resource
+	if namespace != "" {
+		getter = resource.Namespace(namespace)
+	}
+	object, err := getter.Get(ctx, name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) || apierrors.IsForbidden(err) {
 		return nil, []string{label + ": " + err.Error()}
 	}
