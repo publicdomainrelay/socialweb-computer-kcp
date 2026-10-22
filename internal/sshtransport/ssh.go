@@ -712,14 +712,11 @@ func (c *channelIO) Exit(code int) {
 	c.exitOnce.Do(func() {
 		c.mu.Lock()
 		c.exitedFlag = true
-		closed := c.closed
 		c.mu.Unlock()
-		if !closed {
-			_, _ = c.channel.SendRequest("exit-status", false, ssh.Marshal(struct {
-				Status uint32
-			}{uint32(code)}))
-			_ = c.channel.Close()
-		}
+		_, _ = c.channel.SendRequest("exit-status", false, ssh.Marshal(struct {
+			Status uint32
+		}{uint32(code)}))
+		_ = c.channel.Close()
 	})
 }
 
