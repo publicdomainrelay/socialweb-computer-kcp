@@ -318,6 +318,8 @@ func gatewayDesired(o v1alpha1.Gateway, id *v1alpha1.MarketIdentity, ws, stateRo
 		Hostnames:         hostnames,
 		Storage:           storage,
 		ClusterProvider:   clusterProvider,
+		ClusterStateDir:   filepath.Join(stateRoot, "clusterprovider"),
+		KubeconfigCAFile:  filepath.Join(stateRoot, "tls", "tls.crt"),
 		PublicOrigin:      publicOrigin,
 		Audience:          audience,
 		RequiredDownloads: requiredDownloads,

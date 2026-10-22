@@ -370,6 +370,10 @@ type GatewayAPISpec struct {
 
 	ClusterProvider *GatewayClusterProvider `json:"clusterProvider,omitempty"`
 
+	ClusterStateDir string `json:"clusterStateDir,omitempty"`
+
+	KubeconfigCAFile string `json:"kubeconfigCAFile,omitempty"`
+
 	PublicOrigin string `json:"publicOrigin,omitempty"`
 
 	Audience string `json:"audience,omitempty"`

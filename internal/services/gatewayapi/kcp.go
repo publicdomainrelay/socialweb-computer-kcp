@@ -14,6 +14,7 @@ import (
 
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/clientcert"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gateway"
 	coreapi "github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayapi"
@@ -36,7 +37,7 @@ var (
 	exposureServiceGVR = schema.GroupVersionResource{Group: exposurev1alpha1.GroupName, Version: exposurev1alpha1.Version, Resource: "services"}
 )
 
-func gatewayServerFor(deps component.Deps, workspace string) (*gateway.Server, error) {
+func gatewayServerFor(deps component.Deps, workspace string, certs *clientcert.Issuer) (*gateway.Server, error) {
 	server := &gateway.Server{}
 	if deps.KCP == nil {
 		return server, nil
@@ -49,9 +50,16 @@ func gatewayServerFor(deps component.Deps, workspace string) (*gateway.Server, e
 	if restConfig == nil || restConfig.Host == "" {
 		return server, nil
 	}
-	store, err := kcpclient.New(kcpclient.Options{Host: restConfig.Host, RestConfig: restConfig})
+	opts := kcpclient.Options{Host: restConfig.Host, RestConfig: restConfig}
+	if certs != nil {
+		opts.Kubeconfigs = certs
+	}
+	store, err := kcpclient.New(opts)
 	if err != nil {
 		return nil, fmt.Errorf("gatewayapi: the gateway kcp store: %w", err)
+	}
+	if certs != nil {
+		certs.Recorder = store
 	}
 	server.Store = store
 	server.Deny = store

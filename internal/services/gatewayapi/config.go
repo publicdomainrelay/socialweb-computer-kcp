@@ -16,6 +16,7 @@ import (
 
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/clientcert"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gateway"
 	coreapi "github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayapi"
@@ -79,6 +80,10 @@ type Config struct {
 	PublicOrigin string
 
 	ClusterProvider *v1alpha1.GatewayClusterProvider
+
+	ClusterStateDir string
+
+	KubeconfigCAFile string
 
 	Gateway GatewayConfig
 
@@ -609,15 +614,24 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		}
 		cfg.ClusterProvider = &clusterProvider
 	}
+	cfg.ClusterStateDir = decoded.ClusterStateDir
+	cfg.KubeconfigCAFile = decoded.KubeconfigCAFile
 	if decoded.Storage != nil && decoded.Storage.CertsDir != "" {
 		cfg.NodeMarket.ClusterCADir = decoded.Storage.CertsDir
 	}
-	server, err := gatewayServerFor(deps, workspace)
+	server, err := gatewayServerFor(deps, workspace, kubeconfigIssuer(cfg))
 	if err != nil {
 		return Config{}, err
 	}
 	cfg.Gateway.Server = server
 	return cfg.withDefaults(), nil
+}
+
+func kubeconfigIssuer(cfg Config) *clientcert.Issuer {
+	if cfg.ClusterStateDir == "" || cfg.KubeconfigCAFile == "" {
+		return nil
+	}
+	return &clientcert.Issuer{StateDir: cfg.ClusterStateDir, CAFile: cfg.KubeconfigCAFile}
 }
 
 func checkClusterProvider(cp v1alpha1.GatewayClusterProvider) error {

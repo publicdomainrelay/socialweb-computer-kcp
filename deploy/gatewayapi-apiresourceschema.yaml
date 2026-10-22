@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-2.gatewayapis.socialweb.computer
+  name: v1alpha1-3.gatewayapis.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -190,6 +190,10 @@ spec:
                   scalePodsPerNode:
                     type: integer
                     format: int32
+              clusterStateDir:
+                type: string
+              kubeconfigCAFile:
+                type: string
               publicOrigin:
                 type: string
               audience:
