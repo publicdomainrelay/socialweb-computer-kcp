@@ -365,6 +365,9 @@ func componentSpecMap(spec any) (map[string]any, error) {
 	if spec == nil {
 		return nil, nil
 	}
+	if value := reflect.ValueOf(spec); value.Kind() != reflect.Pointer {
+		spec = desiredSpecPtr(spec)
+	}
 	m, err := runtime.DefaultUnstructuredConverter.ToUnstructured(spec)
 	if err != nil {
 		return nil, fmt.Errorf("appctl: the component spec: %w", err)
