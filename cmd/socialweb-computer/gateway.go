@@ -12,8 +12,16 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devsup"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/gatewaykcp"
 )
+
+const envNodeClaimAgent = "SOCIALWEB_GATEWAY_NODECLAIM_AGENT"
+
+func (a *app) nodeClaimAgent() (*kcpclient.ServiceAccountRef, error) {
+	raw, _ := a.env.LookupEnv(envNodeClaimAgent)
+	return kcpclient.ParseServiceAccountRef(raw)
+}
 
 var serveGatewayOptions = []string{backendOpt, "state-dir", "unit-prefix", "kcp-path", "kine-path", "k3s-path", "postgres-root", "bao-path",
 	"openbao-plugin-dir", "asset-cache", "ready-timeout", "kcp-front-address", "tls-front-address", "cert-front-address", "tls-cert-file", "tls-key-file",
@@ -119,7 +127,11 @@ func runServeGatewayKcp(ctx context.Context, a *app, vals clicfg.Values, rest []
 	environ := os.Environ()
 	spec := gatewaykcp.Spec(base, vals.String("gateway-profile"), environ)
 	unit, _ := a.env.LookupEnv(devsup.EnvUnit)
-	cfg := gatewaykcp.Config{StateDir: state, Prefix: prefix, Backend: backend, Executables: exes,
+	agent, err := a.nodeClaimAgent()
+	if err != nil {
+		return a.fail(exitRefused, "%s: nodeclaim agent: %v", verb, err)
+	}
+	cfg := gatewaykcp.Config{StateDir: state, Prefix: prefix, Backend: backend, Executables: exes, NodeClaimAgent: agent,
 		Spec: spec, Unit: unit, FrontAddress: vals.String("kcp-front-address"), TLSAddress: vals.String("tls-front-address"),
 		CertFrontAddress: vals.String("cert-front-address"),
 		TLSCert:          vals.String("tls-cert-file"), TLSKey: vals.String("tls-key-file"),
@@ -177,7 +189,11 @@ func (a *app) runGatewayChild(ctx context.Context, rec devinstance.Record, m hos
 		exes[k] = v
 	}
 	unit, _ := a.env.LookupEnv(devsup.EnvUnit)
-	cfg := gatewaykcp.Config{Backend: hostsvc.BackendProc, Executables: exes,
+	agent, err := a.nodeClaimAgent()
+	if err != nil {
+		return err
+	}
+	cfg := gatewaykcp.Config{Backend: hostsvc.BackendProc, Executables: exes, NodeClaimAgent: agent,
 		Spec: gatewaykcp.Spec(base, base.Profile, environ), Unit: unit, TLSAddress: gatewaykcp.DefaultAddress,
 		CertFrontAddress: gatewaykcp.DefaultAddress,
 		BootstrapCluster: rec.Gateway.BootstrapCluster, BootstrapAccountDID: rec.Gateway.BootstrapAccountDID,

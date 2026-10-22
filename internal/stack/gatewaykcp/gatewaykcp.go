@@ -91,6 +91,7 @@ type Config struct {
 	Exe                 string
 	Stderr              io.Writer
 	Log                 *slog.Logger
+	NodeClaimAgent      *kcpclient.ServiceAccountRef
 }
 
 func NewLayout(state, prefix string) devinstance.Layout {
@@ -283,7 +284,8 @@ func run(ctx context.Context, c Config, l devinstance.Layout, app *table.App, m 
 		WebApp: &appctl.WebApp{FrontKubeconfig: g.memberKubeconfig(),
 			ClusterCADir: filepath.Join(c.StateDir, "clusterprovider", clusterstack.PublicCADirName),
 			DownloadsDir: c.Executables[ExeWebDownloads].Path},
-		OnComponents: reg.components, Before: g.before, Members: g.members, Listeners: reg.report}, m)
+		OnComponents: reg.components, Before: g.before, Members: g.members, Listeners: reg.report,
+		NodeClaimAgent: c.NodeClaimAgent}, m)
 }
 
 type gateway struct {

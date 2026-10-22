@@ -23,6 +23,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/exposure"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostlifecycle"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/identitycontroller"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyaction"
@@ -100,6 +101,8 @@ type Config struct {
 	PLCBaseURL string
 
 	RelayURLs []string
+
+	NodeClaimAgent *kcpclient.ServiceAccountRef
 }
 
 type Core struct {
@@ -235,6 +238,8 @@ func New(cfg Config) (*Core, error) {
 		Hosts:       registryHosts{registry: registry},
 		Registry:    registry,
 		Handlers:    handlers,
+
+		NodeClaimAgent: cfg.NodeClaimAgent,
 	}
 	registrar := cfg.ExposureIngressRegistrar
 	fallbackName := "configured-registrar"

@@ -22,6 +22,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostprocess"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/install"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/logcap"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/postgresctl"
@@ -54,6 +55,8 @@ type Config struct {
 	SignInGuard  appctl.SignInGuard
 	Handlers     *component.HandlerRegistry
 	RemotePDS    *pdsv1alpha1.RemotePDS
+
+	NodeClaimAgent *kcpclient.ServiceAccountRef
 }
 
 func LogCapConfig(l devinstance.Layout, log *slog.Logger) logcap.Config {
@@ -306,6 +309,7 @@ func ComponentCoreConfig(ctx context.Context, cfg Config, rec devinstance.Record
 		SlotsFile:               rec.Layout.SlotsFile(),
 		FrontControl:            rec.Layout.FrontControl(),
 		InstallStateRoot:        install.StateRoot,
+		NodeClaimAgent:          cfg.NodeClaimAgent,
 	}
 	if rec.AdminKubeconfig != "" {
 		if n, err := appctl.ReadNetwork(ctx, rec.AdminKubeconfig); err == nil && n.Status.Network != nil {

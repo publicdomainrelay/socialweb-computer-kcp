@@ -12,6 +12,8 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 )
 
 const (
@@ -46,6 +48,8 @@ type Deps struct {
 	Hosts       NetworkHosts
 	Registry    *Registry
 	Handlers    *HandlerRegistry
+
+	NodeClaimAgent *kcpclient.ServiceAccountRef
 }
 
 type NetworkHosts interface {
