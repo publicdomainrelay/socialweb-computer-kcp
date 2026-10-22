@@ -253,6 +253,7 @@ func requesterDesired(o v1alpha1.MarketRequester, plan accountPlan, id *v1alpha1
 		OAuthRedirectURI: oauthRedirectURI,
 		GuestSSHKeysFile: guestSSHKeysFile,
 		AcceptCopies:     int32(optionInt(o.Spec.Options, "accept-copies")),
+		Comms:            o.Spec.Comms,
 	}
 	out := []desiredComponent{policyEngineDesired(suspend)}
 	if local {
@@ -537,6 +538,10 @@ func (ctl *Controller) reconcileRequester(ctx context.Context, u *unstructured.U
 	}
 	if err := ctl.ensureDesired(ctx, u, desired); err != nil {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, err.Error()
+		return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
+	}
+	if err := ctl.ensureMarketStreams(ctx, ctl.c.workspace(), "requester", o.Spec.Comms, o.Spec.Network); err != nil {
+		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
 		return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
 	}
 	if err := ctl.pruneDesired(ctx, owner, allDesired); err != nil {

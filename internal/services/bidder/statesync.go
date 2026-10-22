@@ -298,7 +298,7 @@ func (a *marketEventAdapter) Apply(ctx context.Context, request statesync.Reques
 	if submitEventURL == "" {
 		submitEventURL = strings.TrimSpace(request.Sink.SubmitEventUrl)
 	}
-	if submitEventURL != "" && a.call != nil {
+	if submitEventURL != "" && a.call != nil && a.service.cfg.marketXRPCEnabled() {
 		body := map[string]any{"uri": event.URI, "cid": event.CID, "record": event.Record}
 		if err := a.call(ctx, submitEventURL, market.SubmitEventNSID, market.SubmitEventNSID, body); err != nil {
 			return statesync.Observation{}, classifyDeliveryError(err)
@@ -401,6 +401,10 @@ func (s *Service) startStateSync() error {
 	}
 	release := &releaseAdapter{service: s}
 	if err := registry.Register(release); err != nil {
+		return err
+	}
+	inbox := &marketInboxAdapter{service: s, log: s.log}
+	if err := registry.Register(inbox); err != nil {
 		return err
 	}
 	kick := make(chan struct{}, 1)
@@ -1429,5 +1433,105 @@ func (a *releaseAdapter) Apply(ctx context.Context, request statesync.Request) (
 }
 
 func (a *releaseAdapter) Delete(ctx context.Context, request statesync.Request) error {
+	return nil
+}
+
+const MarketInboxAdapter = "bidder.market-inbox"
+
+type marketInboxPayload struct {
+	DID string `json:"did"`
+
+	URI string `json:"uri"`
+
+	CID string `json:"cid"`
+
+	Collection string `json:"collection"`
+
+	Record map[string]any `json:"record"`
+}
+
+func decodeMarketInboxPayload(raw json.RawMessage) (marketInboxPayload, error) {
+	var payload marketInboxPayload
+	if len(raw) == 0 {
+		return payload, errors.New("bidder: the market inbox payload is empty")
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return payload, fmt.Errorf("bidder: the market inbox payload is not JSON: %w", err)
+	}
+	if strings.TrimSpace(payload.URI) == "" || strings.TrimSpace(payload.CID) == "" {
+		return payload, errors.New("bidder: the market inbox payload names no record")
+	}
+	if strings.TrimSpace(payload.Collection) == "" {
+		payload.Collection = market.NSIDFromURI(payload.URI)
+	}
+	return payload, nil
+}
+
+func marketInboxObservation(request statesync.Request, ref string) statesync.Observation {
+	sum := sha256.Sum256(request.Payload)
+	return statesync.Observation{
+		Exists: true,
+		Ref:    ref,
+		Hash:   "sha256:" + hex.EncodeToString(sum[:]),
+		At:     time.Now().UTC().Format(time.RFC3339),
+	}
+}
+
+type marketInboxAdapter struct {
+	service *Service
+
+	log *slog.Logger
+}
+
+func (a *marketInboxAdapter) Name() string { return MarketInboxAdapter }
+
+func (a *marketInboxAdapter) logf() *slog.Logger {
+	if a == nil || a.log == nil {
+		return slog.New(slog.DiscardHandler)
+	}
+	return a.log
+}
+
+func (a *marketInboxAdapter) Observe(ctx context.Context, request statesync.Request) (statesync.Observation, error) {
+	return marketInboxObservation(request, request.Key), nil
+}
+
+func (a *marketInboxAdapter) Apply(ctx context.Context, request statesync.Request) (statesync.Observation, error) {
+	payload, err := decodeMarketInboxPayload(request.Payload)
+	if err != nil {
+		return statesync.Observation{}, err
+	}
+	service := a.service
+	if service == nil {
+		return statesync.Observation{}, errors.New("bidder: the market inbox adapter has no service")
+	}
+	switch payload.Collection {
+	case market.RFPNSID:
+		if service.bids == nil || service.records == nil || service.did == "" {
+			return statesync.Observation{}, errors.New("bidder: the bidder is not ready to bid")
+		}
+		if _, err := service.enqueueBid(ctx, payload.URI, payload.CID, payload.DID); err != nil {
+			return statesync.Observation{}, fmt.Errorf("bidder: recording the bid intent: %w", err)
+		}
+		service.kickBids()
+	case market.AcceptNSID:
+		if service.records == nil || service.bids == nil || service.vms == nil || service.syncController == nil {
+			return statesync.Observation{}, errors.New("bidder: the bidder is not ready to accept")
+		}
+		provision := provisionPayload{RequesterDID: payload.DID}
+		provision.Accept.URI, provision.Accept.CID = payload.URI, payload.CID
+		if _, err := service.ensureProvisionSync(ctx, provision); err != nil {
+			return statesync.Observation{}, fmt.Errorf("bidder: recording the provision intent: %w", err)
+		}
+		service.kickStateSync()
+	case market.EventNSID:
+		if err := service.applyMarketEvent(ctx, payload.URI, payload.CID, payload.Record, payload.DID); err != nil {
+			return statesync.Observation{}, err
+		}
+	}
+	return marketInboxObservation(request, payload.URI), nil
+}
+
+func (a *marketInboxAdapter) Delete(ctx context.Context, request statesync.Request) error {
 	return nil
 }

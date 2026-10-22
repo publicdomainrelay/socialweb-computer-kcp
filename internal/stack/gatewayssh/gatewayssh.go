@@ -31,6 +31,7 @@ type SpecInput struct {
 	Network           *v1alpha1.MarketNetworkValue
 	BidderDids        []string
 	Options           []v1alpha1.ApplicationOption
+	Comms             *v1alpha1.MarketComms
 	OwnerSessionsFile string
 }
 
@@ -41,7 +42,7 @@ func Spec(in SpecInput) (v1alpha1.SshGatewaySpec, error) {
 	if in.Profile == appctl.SshGatewayProfileNetwork && in.Network == nil {
 		return v1alpha1.SshGatewaySpec{}, fmt.Errorf("gatewayssh: the %s profile takes its network value from a market network (--network)", in.Profile)
 	}
-	return v1alpha1.SshGatewaySpec{Profile: in.Profile, Network: in.Network, BidderDids: in.BidderDids, Options: in.Options,
+	return v1alpha1.SshGatewaySpec{Profile: in.Profile, Network: in.Network, BidderDids: in.BidderDids, Comms: in.Comms, Options: in.Options,
 		OwnerSessionsFile: in.OwnerSessionsFile}, nil
 }
 

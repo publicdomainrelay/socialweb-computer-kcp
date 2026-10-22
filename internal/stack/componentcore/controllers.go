@@ -396,6 +396,23 @@ func (c *Core) buildControllers() {
 		if workspace == "" {
 			continue
 		}
+		for _, role := range []string{"bidder", "requester"} {
+			handler, err := eventstream.NewMarketHandler(eventstream.MarketOptions{Workspace: workspace, Role: role,
+				Dynamic: eventstream.DynamicFactory(cfg.DynamicFactory), Resolver: resolver, Log: log})
+			if err != nil {
+				log.Warn("the market event handler is not wired", "workspace", workspace, "role", role, "err", err.Error())
+				continue
+			}
+			if err := c.eventHandlers.Register(eventstream.MarketHandlerName(role, workspace), handler); err != nil {
+				log.Warn("the market event handler is not registered", "workspace", workspace, "role", role, "err", err.Error())
+			}
+		}
+	}
+	for _, workspace := range cfg.Workspaces {
+		workspace = strings.TrimSpace(workspace)
+		if workspace == "" {
+			continue
+		}
 		if es, err := eventstream.New(eventstream.Options{Workspace: workspace, Dynamic: eventstream.DynamicFactory(cfg.DynamicFactory),
 			Resolver: resolver, Handlers: c.eventHandlers, Log: log}); err != nil {
 			log.Warn("the event stream controller is not wired", "workspace", workspace, "err", err.Error())

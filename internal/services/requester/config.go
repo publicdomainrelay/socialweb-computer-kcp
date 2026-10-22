@@ -257,6 +257,8 @@ type Config struct {
 
 	ShutdownTimeout time.Duration
 
+	Comms *v1alpha1.MarketComms
+
 	Now func() time.Time
 
 	Log *slog.Logger
@@ -266,6 +268,9 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 	var decoded v1alpha1.RequesterSpec
 	if err := spec.Spec.Decode(&decoded); err != nil {
 		return Config{}, fmt.Errorf("requester: decoding the component spec: %w", err)
+	}
+	if err := validateMarketComms("requester", decoded.Comms); err != nil {
+		return Config{}, err
 	}
 	cfg := Config{
 		Deps:              deps,
@@ -277,6 +282,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		PDSAccessTokenRef: accessTokenRef(decoded.PDSAccessTokenPath, decoded.VaultRef),
 		PolicyEngineRef:   decoded.PolicyEngineRef,
 		VaultRef:          decoded.VaultRef,
+		Comms:             decoded.Comms,
 		PolicyArgs:        map[string]string{},
 	}
 	if cfg.StateDir == "" {
@@ -645,6 +651,29 @@ func (c *Config) defaults() {
 	if c.Log == nil && c.Deps.Log != nil {
 		c.Log = c.Deps.Log
 	}
+}
+
+func validateMarketComms(prefix string, comms *v1alpha1.MarketComms) error {
+	if comms == nil || strings.TrimSpace(string(comms.Mode)) == "" {
+		return nil
+	}
+	switch comms.Mode {
+	case v1alpha1.MarketCommsModeXRPC, v1alpha1.MarketCommsModeFirehose, v1alpha1.MarketCommsModeBoth:
+		return nil
+	default:
+		return fmt.Errorf("%s: unknown comms mode %q", prefix, comms.Mode)
+	}
+}
+
+func (c Config) marketXRPCEnabled() bool {
+	if c.Comms == nil {
+		return true
+	}
+	switch c.Comms.Mode {
+	case "", v1alpha1.MarketCommsModeXRPC, v1alpha1.MarketCommsModeBoth:
+		return true
+	}
+	return false
 }
 
 func (c Config) firstFree() bool {

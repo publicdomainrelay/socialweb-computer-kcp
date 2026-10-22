@@ -391,28 +391,30 @@ func (r *contractRunner) requestOnce(ctx context.Context) (bool, error) {
 	responseBids := []BidRecord{}
 	var submitWG sync.WaitGroup
 	var submitMu sync.Mutex
-	for _, bidder := range bidders {
-		bidder := bidder
-		submitWG.Add(1)
-		go func() {
-			defer submitWG.Done()
-			timeout := r.svc.cfg.BidWindow
-			if timeout < 5*time.Second {
-				timeout = 5 * time.Second
-			}
-			cctx, cancel := context.WithTimeout(ctx, timeout)
-			defer cancel()
-			bids, err := r.svc.market.SubmitRFP(cctx, bidder, SubmitRFPRequest{URI: rfpURI, CID: rfpCID})
-			if err != nil {
-				r.log().Warn("requester_submit_rfp_failed", "bidder", bidder.DID, "err", err)
-				return
-			}
-			submitMu.Lock()
-			responseBids = append(responseBids, bids...)
-			submitMu.Unlock()
-		}()
+	if r.svc.marketXRPCEnabled() {
+		for _, bidder := range bidders {
+			bidder := bidder
+			submitWG.Add(1)
+			go func() {
+				defer submitWG.Done()
+				timeout := r.svc.cfg.BidWindow
+				if timeout < 5*time.Second {
+					timeout = 5 * time.Second
+				}
+				cctx, cancel := context.WithTimeout(ctx, timeout)
+				defer cancel()
+				bids, err := r.svc.market.SubmitRFP(cctx, bidder, SubmitRFPRequest{URI: rfpURI, CID: rfpCID})
+				if err != nil {
+					r.log().Warn("requester_submit_rfp_failed", "bidder", bidder.DID, "err", err)
+					return
+				}
+				submitMu.Lock()
+				responseBids = append(responseBids, bids...)
+				submitMu.Unlock()
+			}()
+		}
+		submitWG.Wait()
 	}
-	submitWG.Wait()
 
 	usePolicy := policyRef != nil
 	winner, allBids, retry, err := r.collectBids(ctx, rfpURI, responseBids, bidders, usePolicy, policyWorkflow)
@@ -1057,12 +1059,16 @@ func (r *contractRunner) releaseContract(ctx context.Context, state *v1alpha1.No
 	}
 	r.setRelease(release)
 
-	bidder, ok := r.svc.bidderForDID(ctx, bidderDID)
-	if !ok {
-		release.LastError = fmt.Sprintf("no endpoint is known for the bidder %s", bidderDID)
-		r.setRelease(release)
-		r.writeStatus(ctx, v1alpha1.ComputeContractReleasing, "the destroy could not be sent: "+release.LastError, state, r.currentBids(), r.currentChosen(), false, "releaseFailed", int32(release.Attempts))
-		return errors.New(release.LastError)
+	var bidder Bidder
+	if r.svc.marketXRPCEnabled() {
+		var ok bool
+		bidder, ok = r.svc.bidderForDID(ctx, bidderDID)
+		if !ok {
+			release.LastError = fmt.Sprintf("no endpoint is known for the bidder %s", bidderDID)
+			r.setRelease(release)
+			r.writeStatus(ctx, v1alpha1.ComputeContractReleasing, "the destroy could not be sent: "+release.LastError, state, r.currentBids(), r.currentChosen(), false, "releaseFailed", int32(release.Attempts))
+			return errors.New(release.LastError)
+		}
 	}
 
 	r.writeStatus(ctx, v1alpha1.ComputeContractReleasing, "destroying the guest", state, r.currentBids(), r.currentChosen(), false, "releasing", int32(release.Attempts))
@@ -1075,6 +1081,20 @@ func (r *contractRunner) releaseContract(ctx context.Context, state *v1alpha1.No
 		return err
 	}
 	r.writeStatus(ctx, v1alpha1.ComputeContractReleasing, "the destroy is recorded; sending it", state, r.currentBids(), r.currentChosen(), false, "releasing", int32(release.Attempts))
+
+	if !r.svc.marketXRPCEnabled() {
+		release.Attempts++
+		state.Release.OK = true
+		state.Phase = v1alpha1.ContractReleased
+		if state.Timestamps != nil && state.Timestamps.Released == "" {
+			state.Timestamps.Released = r.svc.nowISO()
+		}
+		release.LastError = ""
+		r.setRelease(release)
+		r.writeStatus(ctx, v1alpha1.ComputeContractReleased, "released; the firehose carries the destroy", state, r.currentBids(), r.currentChosen(), false, "released", int32(release.Attempts))
+		r.deleteRBAC(ctx)
+		return nil
+	}
 
 	for {
 		release.Attempts++

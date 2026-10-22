@@ -63,10 +63,12 @@ type contractInfo struct {
 
 func (s *Service) routes() *http.ServeMux {
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST "+SubmitRFPPath, s.handleSubmitRFP)
-	mux.HandleFunc("POST "+SubmitBidPath, s.handleSubmitBid)
-	mux.HandleFunc("POST "+SubmitAcceptPath, s.handleSubmitAccept)
-	mux.HandleFunc("POST "+SubmitEventPath, s.handleSubmitEvent)
+	if s.cfg.marketXRPCEnabled() {
+		mux.HandleFunc("POST "+SubmitRFPPath, s.handleSubmitRFP)
+		mux.HandleFunc("POST "+SubmitBidPath, s.handleSubmitBid)
+		mux.HandleFunc("POST "+SubmitAcceptPath, s.handleSubmitAccept)
+		mux.HandleFunc("POST "+SubmitEventPath, s.handleSubmitEvent)
+	}
 	mux.HandleFunc("GET "+HealthPath, func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	})
@@ -248,46 +250,59 @@ func (s *Service) handleSubmitEvent(w http.ResponseWriter, r *http.Request) {
 		writeXRPCError(w, http.StatusServiceUnavailable, "Unavailable", "the bidder is not ready to accept events")
 		return
 	}
-	event, err := market.ParseEvent(body.Record)
-	if err != nil {
-		writeXRPCError(w, http.StatusBadRequest, "InvalidRequest", err.Error())
+	if err := s.applyMarketEvent(r.Context(), body.URI, body.CID, body.Record, issuer); err != nil {
+		if errors.Is(err, errMarketEventForbidden) {
+			writeXRPCError(w, http.StatusForbidden, "Forbidden", "not the accept author")
+			return
+		}
+		if errors.Is(err, errMarketEventInvalid) {
+			writeXRPCError(w, http.StatusBadRequest, "InvalidRequest", err.Error())
+			return
+		}
+		s.log.Warn("recording the event intent failed", "event", body.URI, "err", err)
+		writeXRPCError(w, http.StatusServiceUnavailable, "Unavailable", err.Error())
 		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+var errMarketEventForbidden = errors.New("bidder: not the accept author")
+
+var errMarketEventInvalid = errors.New("bidder: the market event is invalid")
+
+func (s *Service) applyMarketEvent(ctx context.Context, uri, cid string, record map[string]any, issuer string) error {
+	if s.records == nil || s.vms == nil || s.syncController == nil {
+		return errors.New("the bidder is not ready to accept events")
+	}
+	event, err := market.ParseEvent(record)
+	if err != nil {
+		return fmt.Errorf("%w: %v", errMarketEventInvalid, err)
 	}
 	if market.NSIDFromURI(event.Payload.URI) != market.ComputeEventsVMDeleteNSID {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-		return
+		return nil
 	}
-	if terminated, ok := s.bidTerminatedByReceipt(r.Context(), event.Receipt.URI); ok {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "alreadyTerminated": true, "reason": terminated.Reason,
-			"eventUri": terminated.EventUri, "payloadUri": terminated.PayloadUri})
-		return
+	if _, ok := s.bidTerminatedByReceipt(ctx, event.Receipt.URI); ok {
+		return nil
 	}
-	info, vm, found, err := s.localContractForReceipt(r.Context(), event.Receipt.URI)
+	info, vm, found, err := s.localContractForReceipt(ctx, event.Receipt.URI)
 	if err != nil {
-		s.log.Warn("looking up the contract of the event failed", "receipt", event.Receipt.URI, "err", err)
-		writeXRPCError(w, http.StatusServiceUnavailable, "Unavailable", "the contract could not be looked up: "+err.Error())
-		return
+		return fmt.Errorf("the contract could not be looked up: %w", err)
 	}
 	if found && info.acceptAuthor != "" && info.acceptAuthor != issuer {
-		writeXRPCError(w, http.StatusForbidden, "Forbidden", "not the accept author")
-		return
+		return errMarketEventForbidden
 	}
 	if found && vm != nil && vm.UID != "" {
 		request := &v1alpha1.RecordRef{URI: event.Payload.URI, CID: event.Payload.CID}
-		if err := s.ensureInboundTerminationSync(r.Context(), vm, request, issuer, body.URI, body.CID, body.Record); err != nil {
-			s.log.Warn("recording the termination intent failed", "receipt", event.Receipt.URI, "err", err)
-			writeXRPCError(w, http.StatusServiceUnavailable, "Unavailable", "the termination intent could not be recorded: "+err.Error())
-			return
+		if err := s.ensureInboundTerminationSync(ctx, vm, request, issuer, uri, cid, record); err != nil {
+			return fmt.Errorf("the termination intent could not be recorded: %w", err)
 		}
 	} else {
-		if err := s.ensureReleaseSync(r.Context(), event.Receipt.URI, issuer, body.URI, body.CID, body.Record); err != nil {
-			s.log.Warn("recording the release intent failed", "receipt", event.Receipt.URI, "err", err)
-			writeXRPCError(w, http.StatusServiceUnavailable, "Unavailable", "the release intent could not be recorded: "+err.Error())
-			return
+		if err := s.ensureReleaseSync(ctx, event.Receipt.URI, issuer, uri, cid, record); err != nil {
+			return fmt.Errorf("the release intent could not be recorded: %w", err)
 		}
 	}
 	s.kickStateSync()
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	return nil
 }
 
 func (s *Service) authorizeRequest(r *http.Request, lxm, recordURI string) (string, bool, int) {

@@ -74,6 +74,7 @@ type SpecInput struct {
 	Mode    v1alpha1.MarketIdentityMode
 	Kcp     *v1alpha1.KcpProvider
 	Ingress *v1alpha1.IngressConfig
+	Comms   *v1alpha1.MarketComms
 	Options []v1alpha1.ApplicationOption
 }
 
@@ -119,7 +120,7 @@ func Spec(in SpecInput) (v1alpha1.MarketBidderSpec, error) {
 			ingress.Xrpc.IngressProxyHost = n.IngressProxyHost
 		}
 	}
-	return v1alpha1.MarketBidderSpec{Profile: in.Profile, Network: n, Ingress: ingress, Policy: in.Policy, Kcp: in.Kcp, Options: in.Options,
+	return v1alpha1.MarketBidderSpec{Profile: in.Profile, Network: n, Ingress: ingress, Comms: in.Comms, Policy: in.Policy, Kcp: in.Kcp, Options: in.Options,
 		Identity: v1alpha1.ApplicationIdentity{Mode: mode, Handle: in.Handle, PdsUrl: in.PdsUrl}}, nil
 }
 

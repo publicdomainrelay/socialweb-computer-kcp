@@ -712,20 +712,22 @@ func (s *Service) provisionSession(ctx context.Context, vmName, policyName strin
 }
 
 func (s *Service) sessionWinner(ctx context.Context, rfp market.SignedRecord, bidders []Bidder, usePolicy bool, workflow string) (*BidRecord, Bidder, error) {
-	for _, bidder := range bidders {
-		timeout := s.cfg.BidWindow
-		if timeout < 5*time.Second {
-			timeout = 5 * time.Second
-		}
-		cctx, cancel := context.WithTimeout(ctx, timeout)
-		bids, err := s.market.SubmitRFP(cctx, bidder, SubmitRFPRequest{URI: rfp.URI, CID: rfp.CID})
-		cancel()
-		if err != nil {
-			s.log.Warn("requester_session_rfp_failed", "bidder", bidder.DID, "err", err)
-			continue
-		}
-		for _, bid := range bids {
-			s.queueBid(rfp.URI, bid)
+	if s.marketXRPCEnabled() {
+		for _, bidder := range bidders {
+			timeout := s.cfg.BidWindow
+			if timeout < 5*time.Second {
+				timeout = 5 * time.Second
+			}
+			cctx, cancel := context.WithTimeout(ctx, timeout)
+			bids, err := s.market.SubmitRFP(cctx, bidder, SubmitRFPRequest{URI: rfp.URI, CID: rfp.CID})
+			cancel()
+			if err != nil {
+				s.log.Warn("requester_session_rfp_failed", "bidder", bidder.DID, "err", err)
+				continue
+			}
+			for _, bid := range bids {
+				s.queueBid(rfp.URI, bid)
+			}
 		}
 	}
 	deadline := time.Now().Add(s.cfg.BidWindow)
@@ -916,6 +918,13 @@ func (s *Service) releaseSession(ctx context.Context, target *SessionTarget) err
 	state.Release = release
 	if err := s.persistSessionRelease(ctx, state.Receipt.URI, release); err != nil {
 		return err
+	}
+	if !s.marketXRPCEnabled() {
+		release.OK = true
+		if err := s.persistSessionRelease(ctx, state.Receipt.URI, release); err != nil {
+			s.log.Warn("requester_session_release_status_failed", "receipt", state.Receipt.URI, "err", err)
+		}
+		return nil
 	}
 	var lastErr error
 	for attempt := 1; ; attempt++ {

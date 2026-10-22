@@ -590,6 +590,7 @@ func bidderDesired(o v1alpha1.MarketBidder, plan accountPlan, id *v1alpha1.Marke
 		Policy:             o.Spec.Policy,
 		PolicyArgs:         optionValue(o.Spec.Options, "policy-args"),
 		BidderDIDs:         append([]string(nil), bidderDIDs...),
+		Comms:              o.Spec.Comms,
 	}}
 	out := []desiredComponent{policyEngineDesired(suspend), guest, bidder}
 	if plan.Local {
@@ -881,6 +882,10 @@ func (ctl *Controller) reconcileBidder(ctx context.Context, u *unstructured.Unst
 	}
 	if err := ctl.ensureDesired(ctx, u, withoutPds(desired)); err != nil {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, err.Error()
+		return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
+	}
+	if err := ctl.ensureMarketStreams(ctx, ctl.c.workspace(), "bidder", o.Spec.Comms, o.Spec.Network); err != nil {
+		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
 		return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
 	}
 	if err := ctl.pruneDesired(ctx, owner, desired); err != nil {

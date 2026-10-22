@@ -332,6 +332,7 @@ func gatewayDesired(o v1alpha1.Gateway, plan accountPlan, id *v1alpha1.MarketIde
 		OAuthRedirectURI:   oauthRedirectURI,
 		GuestSSHKeysFile:   guestSSHKeysFile,
 		AcceptCopies:       int32(optionInt(o.Spec.Options, "accept-copies")),
+		Comms:              o.Spec.Comms,
 	}}
 	gatewayBase := NewComponentSpec(ComponentCRStateDir(stateRoot, ComponentKindGatewayAPI, GatewayAPIComponent), network, suspend)
 	gatewayBase.TLS = tlsSpec
@@ -639,6 +640,10 @@ func (ctl *Controller) reconcileGateway(ctx context.Context, u *unstructured.Uns
 	}
 	if err := ctl.ensureDesired(ctx, u, desired); err != nil {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, err.Error()
+		return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
+	}
+	if err := ctl.ensureMarketStreams(ctx, ws, "requester", o.Spec.Comms, o.Spec.Network); err != nil {
+		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
 		return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
 	}
 	if err := ctl.pruneDesired(ctx, owner, allDesired); err != nil {

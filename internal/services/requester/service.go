@@ -35,6 +35,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/statesync"
 )
 
 const (
@@ -129,6 +130,8 @@ type Service struct {
 	heldMu sync.Mutex
 
 	heldSessions map[string]*heldSession
+
+	syncController *statesync.Controller
 }
 
 type scopeEntry struct {
@@ -210,6 +213,16 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	s.ready = true
 	s.mu.Unlock()
 	go s.loop(runCtx)
+	if s.syncController != nil {
+		controller := s.syncController
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			if err := controller.Run(runCtx); err != nil && runCtx.Err() == nil {
+				s.log.Warn("requester_statesync_stopped", "err", err)
+			}
+		}()
+	}
 	s.log.Info("requester_started", "handler", s.logicalURL(), "repo", s.cfg.RepoDID, "mode", s.cfg.IdentityMode)
 
 	<-runCtx.Done()
@@ -388,6 +401,9 @@ func (s *Service) setup(ctx context.Context) error {
 	}
 	if err := s.setupKCP(); err != nil {
 		return err
+	}
+	if err := s.startStateSync(); err != nil {
+		s.log.Warn("requester_does_not_run_statesync", "err", err)
 	}
 	if s.cfg.Contracts == nil {
 		return errors.New("requester: no ComputeContract store is configured")
@@ -1338,6 +1354,13 @@ func (s *Service) submitAcceptAndWait(ctx context.Context, bidder Bidder, accept
 	provisionTimeout := submitAcceptProvisionTimeout
 	if s.cfg.ReceiptTimeout > provisionTimeout {
 		provisionTimeout = s.cfg.ReceiptTimeout
+	}
+	if !s.marketXRPCEnabled() {
+		timeout := s.cfg.ReceiptTimeout
+		if timeout <= 0 {
+			timeout = DefaultReceiptTimeout
+		}
+		return s.waitReceiptWithin(ctx, winnerDID, acceptURI, timeout)
 	}
 	if receipt, err := s.findReceiptWithin(ctx, winnerDID, acceptURI, submitAcceptReceiptTimeout); err == nil && receipt != nil {
 		return receipt, nil

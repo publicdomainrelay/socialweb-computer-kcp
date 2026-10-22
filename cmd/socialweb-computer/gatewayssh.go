@@ -27,6 +27,7 @@ type gatewaySshRun struct {
 	profile        string
 	network        string
 	options        []v1alpha1.ApplicationOption
+	comms          *v1alpha1.MarketComms
 	value          *v1alpha1.MarketNetworkValue
 	bidderDids     []string
 	ownerSessions  string
@@ -91,6 +92,17 @@ func (r *gatewaySshRun) passthrough(args []string) error {
 		}
 		if p.To == appctl.MapToOptions {
 			r.options = append(r.options, v1alpha1.ApplicationOption{Name: p.Name, Value: p.Value})
+			continue
+		}
+		if strings.HasPrefix(p.To, "spec.comms") {
+			var applied bool
+			var err error
+			if r.comms, applied, err = applyCommsOption(r.comms, p.Name, p.Value); err != nil {
+				return err
+			}
+			if !applied {
+				return fmt.Errorf("--%s maps to %s, which run gateway ssh does not take", p.Name, p.To)
+			}
 			continue
 		}
 		return fmt.Errorf("--%s maps to %s, which run gateway ssh does not take", p.Name, p.To)
@@ -220,7 +232,7 @@ func (r *gatewaySshRun) standalone(ctx context.Context) int {
 	if err != nil {
 		return r.a.fail(exitRefused, "run gateway ssh: --name: %v", err)
 	}
-	spec, err := gatewayssh.Spec(gatewayssh.SpecInput{Profile: r.profile, Network: r.value, BidderDids: r.bidderDids, Options: r.options})
+	spec, err := gatewayssh.Spec(gatewayssh.SpecInput{Profile: r.profile, Network: r.value, BidderDids: r.bidderDids, Options: r.options, Comms: r.comms})
 	if err != nil {
 		return r.a.fail(exitRefused, "run gateway ssh: %v", err)
 	}

@@ -202,6 +202,8 @@ type Config struct {
 
 	CallService ServiceCall
 
+	Comms *v1alpha1.MarketComms
+
 	Now func() time.Time
 }
 
@@ -212,6 +214,9 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 	}
 	policyArgs, err := parsePolicyArgs(bidderSpec.PolicyArgs)
 	if err != nil {
+		return Config{}, err
+	}
+	if err := validateMarketComms("bidder", bidderSpec.Comms); err != nil {
 		return Config{}, err
 	}
 	stateDir := deps.StateDir
@@ -234,6 +239,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		Policy:            bidderSpec.Policy,
 		PolicyArgs:        policyArgs,
 		BidderDIDs:        append([]string(nil), bidderSpec.BidderDIDs...),
+		Comms:             bidderSpec.Comms,
 		PolicyTimeout:     DefaultPolicyTimeout,
 		PolicyPoll:        DefaultPolicyPoll,
 		VaultClient:       "bidder",
@@ -476,6 +482,29 @@ func parsePolicyArgs(raw string) (map[string]string, error) {
 		}
 	}
 	return out, nil
+}
+
+func validateMarketComms(prefix string, comms *v1alpha1.MarketComms) error {
+	if comms == nil || strings.TrimSpace(string(comms.Mode)) == "" {
+		return nil
+	}
+	switch comms.Mode {
+	case v1alpha1.MarketCommsModeXRPC, v1alpha1.MarketCommsModeFirehose, v1alpha1.MarketCommsModeBoth:
+		return nil
+	default:
+		return fmt.Errorf("%s: unknown comms mode %q", prefix, comms.Mode)
+	}
+}
+
+func (c Config) marketXRPCEnabled() bool {
+	if c.Comms == nil {
+		return true
+	}
+	switch c.Comms.Mode {
+	case "", v1alpha1.MarketCommsModeXRPC, v1alpha1.MarketCommsModeBoth:
+		return true
+	}
+	return false
 }
 
 func portOf(raw string) int {

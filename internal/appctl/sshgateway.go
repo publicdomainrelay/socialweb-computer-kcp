@@ -296,6 +296,7 @@ func sshGatewayDesired(o v1alpha1.SshGateway, plan accountPlan, ident *v1alpha1.
 		OwnerSessionsFile:  o.Spec.OwnerSessionsFile,
 		IrohSocket:         sshGatewayIrohSocket(stateRoot),
 		AcceptCopies:       int32(optionInt(o.Spec.Options, "accept-copies")),
+		Comms:              o.Spec.Comms,
 	}}
 	sshServer := desiredComponent{Kind: ComponentKindSshServer, Name: SshServerComponent, Spec: v1alpha1.SshServerSpec{
 		ComponentSpec:     NewComponentSpec(ComponentCRStateDir(stateRoot, ComponentKindSshServer, SshServerComponent), network, suspend),
@@ -410,6 +411,10 @@ func (ctl *Controller) reconcileSshGateway(ctx context.Context, u *unstructured.
 	desired := sshGatewayDesired(o, plan, ident, ctl.c.workspace(), stateRoot)
 	if err := ctl.ensureDesired(ctx, u, desired); err != nil {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, err.Error()
+		return ctl.writeStatus(ctx, SshGatewayGVR, o.Name, st)
+	}
+	if err := ctl.ensureMarketStreams(ctx, ctl.c.workspace(), "requester", o.Spec.Comms, o.Spec.Network); err != nil {
+		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
 		return ctl.writeStatus(ctx, SshGatewayGVR, o.Name, st)
 	}
 	if err := ctl.pruneDesired(ctx, owner, desired); err != nil {

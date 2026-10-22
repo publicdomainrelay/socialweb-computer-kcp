@@ -762,7 +762,7 @@ func (n *networks) reconcile(ctx context.Context, u *unstructured.Unstructured) 
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			apps[i] = n.ensureApp(ctx, app, published, pdsURL, aliceURL, bidderDids)
+			apps[i] = n.ensureApp(ctx, app, published, o.Spec.Comms, pdsURL, aliceURL, bidderDids)
 		}()
 	}
 	wg.Wait()
@@ -929,7 +929,7 @@ func (n *networks) suspendApp(ctx context.Context, app v1alpha1.NetworkApp) v1al
 	return out
 }
 
-func (n *networks) ensureApp(ctx context.Context, app v1alpha1.NetworkApp, value v1alpha1.MarketNetworkValue, pdsURL, aliceURL string, bidderDids []string) v1alpha1.NetworkAppStatus {
+func (n *networks) ensureApp(ctx context.Context, app v1alpha1.NetworkApp, value v1alpha1.MarketNetworkValue, comms *v1alpha1.MarketComms, pdsURL, aliceURL string, bidderDids []string) v1alpha1.NetworkAppStatus {
 	out := v1alpha1.NetworkAppStatus{Name: app.Name, Kind: app.Kind, Phase: v1alpha1.ApplicationPhaseProvisioning}
 	fail := func(err error) v1alpha1.NetworkAppStatus {
 		out.Message = err.Error()
@@ -986,14 +986,14 @@ func (n *networks) ensureApp(ctx context.Context, app v1alpha1.NetworkApp, value
 		}
 		root = &v1alpha1.MarketBidder{ObjectMeta: meta, Spec: v1alpha1.MarketBidderSpec{Profile: app.Profile, Network: &value,
 			Identity: v1alpha1.ApplicationIdentity{Handle: handle, PdsUrl: pdsURL},
-			Policy:   app.Policy, Firecracker: fc, Kcp: kcp, Options: app.Options, Quota: app.Quota}}
+			Policy:   app.Policy, Firecracker: fc, Kcp: kcp, Options: app.Options, Quota: app.Quota, Comms: comms}}
 	case v1alpha1.ApplicationKindMarketRequester:
 		root = &v1alpha1.MarketRequester{ObjectMeta: meta, Spec: v1alpha1.MarketRequesterSpec{Profile: app.Profile, Network: &value,
 			Identity:   v1alpha1.ApplicationIdentity{Association: v1alpha1.AssociationSkip},
-			BidderDids: bidderDids, Options: app.Options, Quota: app.Quota}}
+			BidderDids: bidderDids, Options: app.Options, Quota: app.Quota, Comms: comms}}
 	case v1alpha1.ApplicationKindSshGateway:
 		root = &v1alpha1.SshGateway{ObjectMeta: meta, Spec: v1alpha1.SshGatewaySpec{Profile: app.Profile, Network: &value,
-			BidderDids: bidderDids, Options: app.Options, Quota: app.Quota, OwnerSessionsFile: app.OwnerSessionsFile}}
+			BidderDids: bidderDids, Options: app.Options, Quota: app.Quota, OwnerSessionsFile: app.OwnerSessionsFile, Comms: comms}}
 	}
 	if root != nil {
 		if err := applyRoot(ctx, rec, app.Kind, root); err != nil {

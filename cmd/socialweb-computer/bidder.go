@@ -47,6 +47,7 @@ type bidderRun struct {
 	options        []v1alpha1.ApplicationOption
 	value          *v1alpha1.MarketNetworkValue
 	ingress        *v1alpha1.IngressConfig
+	comms          *v1alpha1.MarketComms
 	pdsURL         string
 	identityMode   v1alpha1.MarketIdentityMode
 	password       string
@@ -111,6 +112,15 @@ func (r *bidderRun) passthrough(args []string) error {
 			var applied bool
 			var err error
 			if r.ingress, applied, err = applyIngressOption(r.ingress, p.Name, p.Value); err != nil {
+				return err
+			}
+			if !applied {
+				return fmt.Errorf("--%s maps to %s, which run bidder does not take", p.Name, p.To)
+			}
+		case strings.HasPrefix(p.To, "spec.comms"):
+			var applied bool
+			var err error
+			if r.comms, applied, err = applyCommsOption(r.comms, p.Name, p.Value); err != nil {
 				return err
 			}
 			if !applied {
@@ -320,7 +330,7 @@ func (r *bidderRun) kcpProvider() *v1alpha1.KcpProvider {
 
 func (r *bidderRun) spec() (v1alpha1.MarketBidderSpec, error) {
 	return bidder.Spec(bidder.SpecInput{Profile: r.profile, Handle: r.handle, Policy: r.policy, Network: r.value, PdsUrl: r.pdsURL,
-		Mode: r.identityMode, Kcp: r.kcpProvider(), Ingress: r.ingress, Options: r.options})
+		Mode: r.identityMode, Kcp: r.kcpProvider(), Ingress: r.ingress, Comms: r.comms, Options: r.options})
 }
 
 func (r *bidderRun) marketNetwork() (devinstance.Layout, devinstance.Record, error) {
