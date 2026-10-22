@@ -10,8 +10,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 )
 
-func (ctl *Controller) ensureOAuthIdentityEndpoints(ctx context.Context, ws, identity, exposure, role string) error {
-	snap, err := ctl.componentSnapshot(ctx, ctl.c.workspace())
+func (ctl *Controller) ensureOAuthIdentityEndpoints(ctx context.Context, owner, ws, identity, exposure, role string) error {
+	snap, err := ctl.componentSnapshot(ctx, owner)
 	if err != nil {
 		return err
 	}

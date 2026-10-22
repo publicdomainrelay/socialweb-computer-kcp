@@ -625,7 +625,7 @@ func (ctl *Controller) reconcileBidderAccount(ctx context.Context, u *unstructur
 				return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
 			}
 			_ = ctl.pruneDesired(ctx, owner, desired)
-			if err := ctl.ensureOAuthIdentityEndpoints(ctx, ctl.c.workspace(), BidderIdentity, serviceNameFor(ComponentKindBidder, BidderComponent)+ExposureIngressSuffix, "bidder"); err != nil {
+			if err := ctl.ensureOAuthIdentityEndpoints(ctx, owner, ctl.c.workspace(), BidderIdentity, serviceNameFor(ComponentKindBidder, BidderComponent)+ExposureIngressSuffix, "bidder"); err != nil {
 				return err
 			}
 		}
@@ -929,7 +929,7 @@ func (ctl *Controller) reconcileBidder(ctx context.Context, u *unstructured.Unst
 	if err != nil {
 		return err
 	}
-	if err := ctl.ensureOAuthIdentityEndpoints(ctx, ctl.c.workspace(), BidderIdentity, serviceNameFor(ComponentKindBidder, BidderComponent)+ExposureIngressSuffix, "bidder"); err != nil {
+	if err := ctl.ensureOAuthIdentityEndpoints(ctx, owner, ctl.c.workspace(), BidderIdentity, serviceNameFor(ComponentKindBidder, BidderComponent)+ExposureIngressSuffix, "bidder"); err != nil {
 		return err
 	}
 	st.Components, st.Listeners = snap.Components, snap.Listeners

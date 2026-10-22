@@ -313,7 +313,7 @@ func (ctl *Controller) reconcileRequesterAccount(ctx context.Context, u *unstruc
 	if err != nil {
 		return err
 	}
-	if err := ctl.ensureOAuthIdentityEndpoints(ctx, ctl.c.workspace(), RequesterIdentity, serviceNameFor(ComponentKindRequester, RequesterComponent)+ExposureIngressSuffix, "requester"); err != nil {
+	if err := ctl.ensureOAuthIdentityEndpoints(ctx, owner, ctl.c.workspace(), RequesterIdentity, serviceNameFor(ComponentKindRequester, RequesterComponent)+ExposureIngressSuffix, "requester"); err != nil {
 		return err
 	}
 	st.Components, st.Listeners = snap.Components, snap.Listeners
