@@ -117,6 +117,16 @@ func ParseAppArgs(app string, args []string) ([]AppArg, error) {
 	if len(args) == 0 {
 		return nil, nil
 	}
+	mapped, err := LoadOptionMap()
+	if err != nil {
+		return nil, err
+	}
+	known := map[string]OptionMapping{}
+	if a, ok := mapped.app(app); ok {
+		for _, o := range a.Options {
+			known[o.Name] = o
+		}
+	}
 	var out []AppArg
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -137,7 +147,14 @@ func ParseAppArgs(app string, args []string) ([]AppArg, error) {
 		if len(value) > maxOptionValue {
 			return nil, fmt.Errorf("appctl: --%s of %s is longer than %d bytes", name, app, maxOptionValue)
 		}
-		out = append(out, AppArg{Name: name, Value: value, To: MapToOptions})
+		to := MapToOptions
+		if mapping, ok := known[name]; ok {
+			to = mapping.To
+		}
+		if to == MapToRemoved {
+			return nil, fmt.Errorf("appctl: --%s of %s is removed: %s", name, app, known[name].Reason)
+		}
+		out = append(out, AppArg{Name: name, Value: value, To: to})
 	}
 	return out, nil
 }
