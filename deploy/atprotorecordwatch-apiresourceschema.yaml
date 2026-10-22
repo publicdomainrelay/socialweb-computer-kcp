@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-2.atprotorecordwatches.socialweb.computer
+  name: v1alpha1-3.atprotorecordwatches.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -117,6 +117,10 @@ spec:
                     - uri
                     - value
                     - verifiedAt
+              deleted:
+                type: array
+                items:
+                  type: string
               cursors:
                 type: array
                 items:

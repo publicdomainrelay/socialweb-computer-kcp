@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -665,6 +666,12 @@ func (s *eventStream) writeWatchStatus(ctx context.Context, workspace string, re
 				}
 			}
 			watch.Records = kept
+			if !slices.Contains(watch.Deleted, uri) {
+				watch.Deleted = append(watch.Deleted, uri)
+			}
+		}
+		if len(watch.Deleted) > 256 {
+			watch.Deleted = watch.Deleted[len(watch.Deleted)-256:]
 		}
 		for source, cursor := range cursors {
 			replaced := false

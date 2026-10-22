@@ -331,7 +331,7 @@ func (c *Controller) reconcileVerifiedAssociation(ctx context.Context, dyn dynam
 	if condition := meta.FindStatusCondition(watchObject.Status.Conditions, ConditionVerified); condition != nil {
 		verified = condition.Status == metav1.ConditionTrue
 	}
-	if !verified {
+	if !verified && len(watchObject.Status.Deleted) == 0 {
 		return
 	}
 	approved := map[string]bool{}

@@ -88,6 +88,8 @@ type AtprotoRecordWatchStatus struct {
 
 	Records []WatchedRecord `json:"records,omitempty"`
 
+	Deleted []string `json:"deleted,omitempty"`
+
 	Cursors []AtprotoRecordWatchCursor `json:"cursors,omitempty"`
 
 	Message string `json:"message,omitempty"`

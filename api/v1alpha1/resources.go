@@ -47,7 +47,7 @@ var APIResources = []APIResource{
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "AtprotoRecordWatch", Plural: "atprotorecordwatches", Revision: 2, Export: "marketidentities", Object: AtprotoRecordWatch{}, PrinterColumns: []PrinterColumn{
+	{Kind: "AtprotoRecordWatch", Plural: "atprotorecordwatches", Revision: 3, Export: "marketidentities", Object: AtprotoRecordWatch{}, PrinterColumns: []PrinterColumn{
 		{Name: "Repo", Type: "string", JSONPath: ".spec.repo"},
 		{Name: "Collection", Type: "string", JSONPath: ".spec.collection"},
 		{Name: "Message", Type: "string", JSONPath: ".status.message"},
