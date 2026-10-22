@@ -1,0 +1,847 @@
+plan: "0021"
+title: "Account modes and market transport modes: managed, associated, existing; XRPC, firehose, both"
+status: todo
+source: >
+  The old TypeScript market tree (atproto-market/hono-bidder, request-vm-ssh,
+  market-identity-*, atproto-event-streams-client) supported three account
+  behaviours and two practical transport combinations. The Go rewrite preserved
+  the API names but not the behaviour: MarketIdentity modes beyond localRepo are
+  declarative only, RemotePDS auth is unread, AtprotoRecord has no reconciler,
+  AtprotoRecordWatch ignores match/source, and no market service consumes a
+  firehose. This plan restores the full matrix without reintroducing Deno
+  application components.
+principle: >
+  An application owns a MarketIdentity (account/sign-in), an AtprotoRepo
+  (repo DID plus local Pds or RemotePDS plus credentials), declared
+  AtprotoRecord objects, and a CommS policy. Local and remote PDS differ only
+  in the AtprotoRepo binding. XRPC and firehose differ only in transport.
+  Domain state lives in kcp objects; transports are durable EventStream and
+  StateSync objects, not in-memory maps or time-window dedupe.
+
+old_behavior:
+  account_modes: |
+    Managed associated: localRepo plus association RequireApproval. New local
+    PDS/DID. The operator writes a canonical badgeBlueKeys claim into the
+    operator's repo; the app writes its side. The operator account is otherwise
+    untouched.
+
+    Managed unassociated: localRepo plus association Skip. New local PDS/DID.
+    No badgeBlueKeys record; the operator account is untouched. only-me policy
+    denies an unassociated peer unless the policy is open or association is
+    supplied separately.
+
+    Existing account: the real account's repo becomes the market repo. Bidder:
+    oauthQr, oauthBrowser, oauthDelegated, or pdsAccount (handle/password to
+    --atproto-pds-url). Requester: oauthQr or oauthBrowser only. OAuth session
+    is the association proof; no badgeBlueKeys record is created. Every market
+    record is authored as the account DID in the account's PDS.
+  account_details: |
+    Bidder selection precedence: explicit MarketIdentity mode, KCP mode,
+    --atproto-oauth -> oauthBrowser, --atproto-oauth-qr -> oauthQr, handle plus
+    password/vault -> pdsAccount, otherwise localRepo.
+
+    OAuth QR: qrOrigin/#oauth=<cliDid>&n=<nonce>; browser posts the full DPoP
+    session to com.fedfork.atprotoOauthQR; CLI polls with a service-auth JWT
+    (aud did:web:<qr host>, lxm com.fedfork.atprotoOauthQR); session TTL 5m;
+    session stored in a file or vault; refresh on access-token expiry;
+    SessionExpired -> signInAgain.
+
+    Local bidder association records historically used an inverted shape
+    (challenge=bidder, keyId=operator); requester and operator webapp used
+    canonical (challenge=operator, keyId=bidder). New Go trust expects
+    canonical only.
+
+    Bidder writes bidder_attestation (keyId=attestation did:key,
+    challenge=account DID, service=bidder_attestation) in all modes. The old
+    requester has no equivalent attestation binding.
+  comms_modes: |
+    Both: XRPC submit endpoints and event streams both active. This is the old
+    default.
+
+    Firehose/relay only: --no-ingress-proxy removes the custom XRPC ingress;
+    discovery and record observation come from subscribeRepos or JetStream.
+
+    XRPC only: not selectable from the old CLI. Only library embedders that
+    constructed the market without an eventStreams client could express it.
+
+    The old --firehose-mode off did not disable default relays or default
+    JetStream URLs. --firehose-mode jetstream was effectively unused, and
+    --firehose-url was consumed only by subscriberepos. The old subscribeRepos
+    watcher accepted JSON frames only; real relay CBOR was discarded.
+  old_dedupe: |
+    Event client: in-memory uri|cid, 15-second window.
+    Accept dispatch: acceptUri, in-memory 1-hour TTL.
+    Bid collector: bid.uri set per contract.
+    acceptToContract: acceptUri#acceptCid, restored only when a contract store
+    exists. vm.delete: receipt URI plus FS tombstones when a contract store
+    exists. No durable cursor and no cross-process dedupe.
+
+new_gaps: |
+  AtprotoRecord has no controller. Only reconcileOperatorRecords writes
+  spec.repo: operator records; spec.repo: pds records are never applied.
+
+  AtprotoRecordWatch decodes only repo and collection. It ignores match,
+  source.relayUrls and source.jetstreamUrls, and always generates a local Pds
+  EventStream. Relay-sourced watches cannot verify records.
+
+  EventStream handler sink has no registered handlers. The registry exists;
+  no market handler registers. Relay sinks cannot fetch records without a PDS
+  source.
+
+  No JetStream implementation exists in Go.
+
+  RemotePDS.spec.auth is never read. Resolver.ResolveCR uses URL/DID/TLS only.
+  appctl never creates or consumes a RemotePDS CR.
+
+  pdsAccount is partial. Bidder profiles force localRepo; a requester
+  pdsAccount/callback without PdsRef silently falls back to the local repo.
+  RequesterSpec has no PDS URL or session-ref field.
+
+  MarketIdentity.KeysRef, SessionRef, AssociateWith and AssociationWatch are
+  mostly unused. No Go code sets pendingAction. App readiness is not gated on
+  association.
+
+  PdsAccount and AtprotoSession status objects cannot become Ready: no
+  AccountSource/SessionSource is wired and the session resolver has no tokens.
+
+  Requester StateSync bids/events are passive mailboxes drained by the
+  requester loop, not reconciled by the StateSync controller.
+
+  Bidder and requester have separate RecordStore abstractions over the same
+  pdsclient.PDS.
+
+  GatewaySpec has no identity; gateway requester is hardcoded local.
+  SshGateway is hardcoded local/owner-session. BidderIdentityMode hardcodes
+  localRepo for every profile.
+
+  No tests cover OAuth modes, RemotePDS auth, EventStream cursors/sinks/
+  sources, watch match/source, or firehose market consumption.
+
+target_model:
+  identity: |
+    Managed associated: MarketIdentity mode=localRepo,
+    association=RequireApproval. AtprotoRepo points at the app Pds. Canonical
+    claim on the operator side and canonical association record on the app
+    side.
+    Managed unassociated: mode=localRepo, association=Skip. Same repo, no
+    association record; Associated=True/AssociationSkipped.
+    Existing OAuth: mode=oauthQr|oauthBrowser|oauthDelegated. No local Pds
+    component. AtprotoRepo points at the account PDS. No association record;
+    SignedIn is the proof.
+    Existing PDS account: mode=pdsAccount. AtprotoRepo points at the target
+    RemotePDS. Password from vault. No association record.
+  repo: |
+    AtprotoRepo is a binding, not a status mirror:
+      spec.did, spec.pdsRef {kind: Pds|RemotePDS, name}, spec.identityRef,
+      spec.authRef
+      status.phase, status.head, conditions Ready/InSync.
+    Every controller and service resolves through one RepoResolver returning
+    ResolvedRepo {pdsclient.PDS, repo DID, TokenSource, PDSRef}.
+  records: |
+    AtprotoRecord.spec.repoRef selects an AtprotoRepo. The controller resolves
+    valueFrom references, writes/deletes through pdsclient.PDS, and writes
+    Applied/Pending/Failed plus ReferencesResolved/InSync conditions.
+    AtprotoRecordWatch is a filtered verified view over one or more
+    EventStreams. It honors match and source URLs, fetches the record from the
+    author's PDS, and persists per-source cursors.
+  comms: |
+    spec.comms.mode: XRPC | Firehose | Both on MarketBidder, MarketRequester,
+    Gateway and SshGateway. PDS writes happen in all modes.
+    XRPC: submit/callback endpoints active; no market EventStreams; relay
+    listReposByCollection/static DIDs still used for discovery.
+    Firehose: no market submit calls; EventStreams are the only market ingress.
+    Both: both paths; durable dedupe.
+  dedupe: |
+    Immutable record version key: uri|#|cid.
+    One-shot side-effect keys: accept URI, receipt URI, termination URI.
+    StateSync object names are deterministic hashes of those keys; Create
+    returning AlreadyExists is success. EventStream cursor is persisted in
+    status. No in-memory time-window dedupe.
+
+state_rules:
+  - Read AGENTS.md first. status is one of todo, doing, done, blocked. The lead
+    flips statuses.
+  - One writer per directory. Tracks that touch the same file are serialized
+    even when the wave is parallel.
+  - Every item ends with gofmt, go build ./..., go vet ./..., and the relevant
+    integration gate. No push.
+  - The old TypeScript tree is reference only; no Deno application component
+    returns.
+  - Secrets stay in OpenBao. Status and CR specs carry refs, never tokens,
+    passwords, JWTs, DPoP private keys or callback codes.
+
+waves:
+  - id: W0
+    title: "Contracts and test matrix"
+    serial: true
+    tracks:
+      - W0-CONTRACTS
+      - W0-MATRIX
+    gate: "api types, deepcopy, schemas, exports and the mode matrix are agreed; no behavior changed."
+  - id: W1
+    title: "Shared plumbing"
+    parallel: true
+    tracks:
+      - name: repo
+        items: [W1-REPO]
+      - name: eventstream
+        items: [W1-EVENTSTREAM]
+      - name: oauth
+        items: [W1-OAUTH]
+    gate: "local and fake remote PDS resolve; watch sources and match decode; shared OAuth session compiles; go build/vet."
+  - id: W2
+    title: "Records, watches, identity"
+    parallel: true
+    tracks:
+      - name: records
+        items: [W2-RECORD, W2-WATCH]
+      - name: local-identity
+        items: [W2-IDENTITY-LOCAL]
+        after: [W2-RECORD, W2-WATCH]
+      - name: remote-identity
+        items: [W2-IDENTITY-REMOTE]
+      - name: status-fixtures
+        items: [W2-STATUS, W2-FIXTURES]
+    gate: "association records apply and revoke; local associated/skip work; pdsAccount and OAuth sessions resolve; status objects Ready."
+  - id: W3
+    title: "Transport modes"
+    parallel: true
+    tracks:
+      - name: market-events
+        items: [W3-MARKET-EVENTS]
+      - name: statesync
+        items: [W3-STATESYNC]
+      - name: discovery
+        items: [W3-DISCOVERY]
+      - name: service-wiring
+        items: [W3-SERVICE-WIRING]
+        after: [W3-MARKET-EVENTS, W3-STATESYNC, W3-DISCOVERY]
+    gate: "XRPC, firehose and both pass the duplicate/restart/out-of-order matrix on local and remote PDS."
+  - id: W4
+    title: "Composition and cleanup"
+    parallel: true
+    tracks:
+      - name: app-roots
+        items: [W4-APP-ROOTS]
+      - name: cleanup
+        items: [W4-REMOVE-LEGACY]
+        after: [W4-APP-ROOTS]
+      - name: migration
+        items: [W4-MIGRATION]
+        after: [W4-APP-ROOTS]
+      - name: docs
+        items: [W4-DOCS]
+        after: [W4-APP-ROOTS]
+    gate: "no hardcoded mode planner; existing localRepo installs upgrade; docs and manifests match."
+  - id: W5
+    title: "Live verification"
+    parallel: true
+    tracks:
+      - name: local-and-prod
+        items: [W5-LOCAL, W5-PROD]
+      - name: hosts
+        items: [W5-HOSTS]
+        after: [W5-LOCAL]
+      - name: close
+        items: [W5-CLOSE]
+        after: [W5-LOCAL, W5-HOSTS, W5-PROD]
+    gate: "every mode is proven live; prod gateway and the three bidder hosts stay Ready."
+
+items:
+  - id: W0-CONTRACTS
+    title: "Add the account, repo and comms API contracts"
+    wave: W0
+    track: contracts
+    parallel_with: [W0-MATRIX]
+    depends_on: []
+    status: todo
+    evidence: []
+    decision: >
+      Add MarketCommsMode {XRPC, Firehose, Both} and MarketComms {mode,
+      relayUrls, firehoseUrls}. Add it to MarketBidderSpec,
+      MarketRequesterSpec, GatewaySpec and SshGatewaySpec. Add RepoRef
+      {workspace, kind, name} and AtprotoRepoSpec fields did, pdsRef,
+      identityRef, authRef. Add AtprotoRecord.spec.repoRef and
+      AtprotoRecordWatch.spec.repoRef; keep the legacy repo string as a
+      compatibility alias. Extend EventStreamSource with relayUrls,
+      jetstreamUrls and kind=jetstream; keep component refs. Extend
+      ApplicationIdentity with PdsRef and SessionRef refs, never secret values.
+    files:
+      - api/v1alpha1/types_application.go
+      - api/v1alpha1/types_component.go
+      - api/v1alpha1/types_atprotorepo.go
+      - api/v1alpha1/types_atprotorecord.go
+      - api/v1alpha1/types_atprotorecordwatch.go
+      - api/events/v1alpha1/types_eventstream.go
+      - api/pds/v1alpha1/types_remotepds.go
+      - deploy/workspacetype-application.yaml
+      - deploy/sets.yaml
+    done_when: >
+      go generate ./api/... is clean, deepcopy and schemas include the new
+      fields, and the old default of managed associated remains representable.
+
+  - id: W0-MATRIX
+    title: "Freeze the account and transport acceptance matrix"
+    wave: W0
+    track: contracts
+    parallel_with: [W0-CONTRACTS]
+    depends_on: []
+    status: todo
+    evidence: []
+    decision: >
+      Write the integration matrix before implementation: three account modes
+      x local/remote PDS x bidder/requester; XRPC, firehose subscribeRepos,
+      firehose JetStream and both; duplicate delivery; restart; out-of-order
+      accept/event; association approval and revocation; existing-account no
+      association record. Name the fixtures and the live hosts for each row.
+    files:
+      - test/integration/
+      - docs/plans/0021-account-and-comms-modes.yaml
+    done_when: >
+      Every item below names the tests and live proof it needs. A row with no
+      test is blocked, not silently skipped.
+
+  - id: W1-REPO
+    title: "One repo/account resolver for local and remote PDS"
+    wave: W1
+    track: repo
+    parallel_with: [W1-EVENTSTREAM, W1-OAUTH]
+    depends_on: [W0-CONTRACTS]
+    status: todo
+    evidence: []
+    decision: >
+      Add ResolvedRepo and RepoResolver over pdsclient.PDS. Resolve local Pds
+      components, RemotePDS CRs and operator repo bindings. Read
+      RemotePDSAuth fields and turn them into TokenSource/DPoPSource; a remote
+      PDS without resolvable auth fails closed. Make AtprotoRepo a real
+      controller owned by componentcore. Switch appctl and statusstate to the
+      resolver. Add AccountSource/SessionSource wiring so PdsAccount and
+      AtprotoSession can become Ready for remote accounts.
+    files:
+      - internal/atproto/pdsclient/
+      - internal/appctl/pdsclient.go
+      - internal/appctl/atproto_repo.go
+      - internal/remotepds/
+      - internal/statusstate/
+      - internal/stack/componentcore/controllers.go
+    done_when: >
+      Local and fake remote AtprotoRepo objects report Ready; a RemotePDS
+      access-token ref resolves; a missing auth ref is Failed, not local.
+
+  - id: W1-EVENTSTREAM
+    title: "Make EventStream source- and match-aware"
+    wave: W1
+    track: eventstream
+    parallel_with: [W1-REPO, W1-OAUTH]
+    depends_on: [W0-CONTRACTS]
+    status: todo
+    evidence: []
+    decision: >
+      Decode AtprotoRecordWatch.match and source. Create one EventStream per
+      relay/JetStream/PDS source. Add external relay URLs and JetStream JSON
+      support. A record-watch sink resolves the author's PDS and fetches the
+      record by URI/CID; a relay source no longer requires a local PDS.
+      Register a real handler registry for the handler sink. Persist a cursor
+      per source. Do not store arbitrary event logs in status beyond the
+      bounded watched-record set.
+    files:
+      - internal/eventstream/recordwatch.go
+      - internal/eventstream/recordtypes.go
+      - internal/eventstream/stream.go
+      - internal/eventstream/relay.go
+      - internal/eventstream/controller.go
+      - api/events/v1alpha1/types_eventstream.go
+    done_when: >
+      A relay-sourced watch sees an operator repo record and verifies it from
+      the author's PDS; a JetStream fixture produces the same normalized event;
+      cursor resumes after restart.
+
+  - id: W1-OAUTH
+    title: "Extract the shared OAuth session and QR client"
+    wave: W1
+    track: oauth
+    parallel_with: [W1-REPO, W1-EVENTSTREAM]
+    depends_on: [W0-CONTRACTS]
+    status: todo
+    evidence: []
+    decision: >
+      Move requester OAuthSession/DPoP refresh into internal/atproto/oauthclient.
+      Add session store interfaces for OpenBao and tests. Add the QR session
+      transfer poller for com.fedfork.atprotoOauthQR with service-auth
+      audience/lxm, 5-minute TTL, nonce checks and burn-after-read semantics.
+      Add the browser callback state/code exchange helper. No component owns
+      tokens; all callers receive a TokenSource.
+    files:
+      - internal/atproto/oauthclient/
+      - internal/services/requester/oauth_session.go
+      - internal/appctl/oauth_session.go
+    done_when: >
+      The requester still restores and refreshes its existing token store; the
+      bidder can construct the same session client; QR poll and callback tests
+      pass against fakes.
+
+  - id: W2-RECORD
+    title: "Implement the AtprotoRecord controller"
+    wave: W2
+    track: records
+    parallel_with: [W2-WATCH, W2-IDENTITY-REMOTE, W2-STATUS, W2-FIXTURES]
+    depends_on: [W1-REPO]
+    status: todo
+    evidence: []
+    decision: >
+      Reconcile AtprotoRecord by repoRef. Resolve valueFrom with the existing
+      reference rules, write through pdsclient.PDS, compare CID for InSync,
+      repair drift, and delete according to finalizer/onMissingReference.
+      Replace reconcileOperatorRecords with the same controller using an
+      operator AtprotoRepo binding. Canonical association shape
+      {challenge=operator,keyId=subject}; read legacy inverted bidder records
+      only as a compatibility fallback.
+    files:
+      - internal/atproto/recordcontroller/
+      - internal/appctl/vouches.go
+      - internal/appctl/association.go
+      - deploy/apps/market-bidder/records.yaml
+      - deploy/apps/gateway/records.yaml
+    done_when: >
+      An association declaration is Applied without manual writes; deleting the
+      operator claim removes the local association; a changed reference rewrites
+      the record; finalizer deletes it when the PDS is up.
+
+  - id: W2-WATCH
+    title: "Verify association claims and revoke them"
+    wave: W2
+    track: records
+    parallel_with: [W2-RECORD, W2-IDENTITY-REMOTE, W2-STATUS, W2-FIXTURES]
+    depends_on: [W1-EVENTSTREAM]
+    status: todo
+    evidence: []
+    decision: >
+      Implement AtprotoRecordWatch match evaluation and verified-record status.
+      For every candidate, fetch by URI/CID from the author PDS, verify
+      authorship and match fields, and expose records/cursors/conditions. The
+      MarketIdentity consumer writes approvedAssociations only for verified
+      claims, and removes them on delete. No per-event status churn.
+    files:
+      - internal/eventstream/recordwatch.go
+      - internal/identitycontroller/
+      - internal/appctl/association.go
+    done_when: >
+      claim create -> status verified -> association Approved; claim delete ->
+      condition Revoked -> local association record removed; restart keeps the
+      approved state by re-verification.
+
+  - id: W2-IDENTITY-LOCAL
+    title: "Managed associated and unassociated modes"
+    wave: W2
+    track: local-identity
+    parallel_with: [W2-IDENTITY-REMOTE, W2-STATUS, W2-FIXTURES]
+    depends_on: [W2-RECORD, W2-WATCH, W1-REPO]
+    status: todo
+    evidence: []
+    decision: >
+      Drive localRepo from MarketIdentity spec. RequireApproval creates the
+      canonical association record and waits for the verified claim; Skip sets
+      Associated=True/AssociationSkipped. App readiness is gated on the
+      identity result. Remove the unused/dead OAuthQr check from the bidder.
+      Keep the app PDS only for localRepo.
+    files:
+      - internal/identitycontroller/
+      - internal/appctl/bidder.go
+      - internal/appctl/requester.go
+      - internal/appctl/pds.go
+      - internal/stack/bidder/bidder.go
+    done_when: >
+      local associated and skip reach Ready; the skip mode creates no
+      badgeBlueKeys record; a fresh install needs only the operator claim and
+      approvedAssociations patch.
+
+  - id: W2-IDENTITY-REMOTE
+    title: "Existing-account modes: pdsAccount, OAuth browser, QR, delegated"
+    wave: W2
+    track: remote-identity
+    parallel_with: [W2-IDENTITY-LOCAL, W2-STATUS, W2-FIXTURES]
+    depends_on: [W1-OAUTH, W1-REPO, W2-RECORD]
+    status: todo
+    evidence: []
+    decision: >
+      Implement the pdsAccount password/session flow and the OAuth flow.
+      pdsAccount resolves the target RemotePDS and vault password, creates a
+      session, and points AtprotoRepo at that PDS. OAuth browser exposes a
+      callback Exposure and pendingAction visitUrl. OAuth QR publishes
+      scanQr and polls the transfer endpoint. oauthDelegated waits for a
+      sessionRef. All modes write market records as the account DID and create
+      no association record. Existing-account is explicit opt-in.
+    files:
+      - internal/identitycontroller/
+      - internal/appctl/identity_planner.go
+      - internal/appctl/bidder.go
+      - internal/appctl/requester.go
+      - internal/appctl/gateway.go
+      - internal/atproto/oauthclient/
+    done_when: >
+      bidder pdsAccount and requester OAuth use a remote PDS; session expiry
+      publishes signInAgain; no token or password appears in status; existing
+      account writes no badgeBlueKeys record.
+
+  - id: W2-STATUS
+    title: "Make remote account and session status truthful"
+    wave: W2
+    track: status-fixtures
+    parallel_with: [W2-RECORD, W2-WATCH, W2-IDENTITY-LOCAL, W2-IDENTITY-REMOTE, W2-FIXTURES]
+    depends_on: [W1-REPO]
+    status: todo
+    evidence: []
+    decision: >
+      Wire AccountSource and SessionSource into statusstate. Resolve
+      PdsAccount and AtprotoSession through the shared RepoResolver with a real
+      token source. Keep only counts/booleans/metadata; never tokens. Remote
+      AtprotoRepo status uses GetLatestCommit/GetRepo.
+    files:
+      - internal/statusstate/account.go
+      - internal/statusstate/session.go
+      - internal/statusstate/repo.go
+      - internal/stack/componentcore/controllers.go
+    done_when: >
+      local and remote PdsAccount/AtprotoSession go Ready or a named failure;
+      no "no account source" or no-token false failure remains.
+
+  - id: W2-FIXTURES
+    title: "Shared fakes for local PDS, RemotePDS, OAuth and relay"
+    wave: W2
+    track: status-fixtures
+    parallel_with: [W2-RECORD, W2-WATCH, W2-IDENTITY-LOCAL, W2-IDENTITY-REMOTE, W2-STATUS]
+    depends_on: [W0-MATRIX]
+    status: todo
+    evidence: []
+    decision: >
+      Add test fixtures: local PDS with account/session/repo; RemotePDS with
+      auth refs; OAuth token store and QR transfer server; relay subscribeRepos
+      and JetStream frames; duplicate/restart injector. Reuse them across
+      account and comms tests.
+    files:
+      - test/integration/
+      - internal/atproto/pdsclient/ (test helpers only)
+    done_when: >
+      The W0 matrix can be run without a live host; fixtures can be pointed at
+      a real PDS without changing test logic.
+
+  - id: W3-MARKET-EVENTS
+    title: "Market EventStream inbox"
+    wave: W3
+    track: market-events
+    parallel_with: [W3-STATESYNC, W3-DISCOVERY]
+    depends_on: [W1-EVENTSTREAM, W2-RECORD]
+    status: todo
+    evidence: []
+    decision: >
+      Register a market handler sink that receives verified record events,
+      fetches the record from the author PDS, and creates a deterministic
+      StateSync inbox object. Collections are rfp, bid, accept, receipt,
+      market.event and compute events. No service-local subscription or
+      in-memory seen set. The handler reports Ready/Lagging/Stalled.
+    files:
+      - internal/services/bidder/
+      - internal/services/requester/
+      - internal/eventstream/handlers.go
+    done_when: >
+      A firehose-only bidder sees a new RFP and a firehose-only requester sees a
+      new bid without any submit XRPC call.
+
+  - id: W3-STATESYNC
+    title: "Durable outbox/inbox and dedupe"
+    wave: W3
+    track: statesync
+    parallel_with: [W3-MARKET-EVENTS, W3-DISCOVERY]
+    depends_on: [W2-RECORD]
+    status: todo
+    evidence: []
+    decision: >
+      Add market XRPC outbox adapters and inbound inbox adapters. Use
+      deterministic StateSync names and idempotency keys:
+      uri|#|cid for record versions; acceptUri, receiptUri, terminationUri for
+      one-shot side effects. XRPC and firehose create the same object; Create
+      AlreadyExists is success. Add retry/Stalled/pending-event handling; no
+      time-window dedupe. Replace the requester's passive mailbox drain with a
+      real adapter or a shared inbox controller.
+    files:
+      - internal/statesync/
+      - internal/services/bidder/statesync.go
+      - internal/services/requester/bids.go
+      - internal/services/requester/inbox.go
+    done_when: >
+      duplicate bid/accept/receipt/event from both transports produces one
+      domain object and one side effect; restart preserves dedupe.
+
+  - id: W3-DISCOVERY
+    title: "Relay crawl, offering and fail-closed discovery"
+    wave: W3
+    track: discovery
+    parallel_with: [W3-MARKET-EVENTS, W3-STATESYNC]
+    depends_on: [W1-REPO, W2-STATUS]
+    status: todo
+    evidence: []
+    decision: >
+      Make PDS registration/offering refresh a first-class controller action.
+      For Firehose/Both, require either a crawlable PDS (ingress/relay) or a
+      direct EventStream source. If neither, set Failed, do not silently fall
+      back to XRPC. Keep relay listReposByCollection for XRPC discovery and
+      static bidder DIDs as the offline fallback.
+    files:
+      - internal/services/bidder/
+      - internal/services/requester/
+      - internal/appctl/bidder.go
+      - internal/appctl/requester.go
+      - deploy/apps/market-bidder/
+      - deploy/apps/gateway/
+    done_when: >
+      local PDS bidder is visible in relay index in firehose mode; missing
+      ingress yields a named condition; XRPC-only still discovers via relay or
+      static DIDs.
+
+  - id: W3-SERVICE-WIRING
+    title: "Wire XRPC, firehose and both into bidder/requester"
+    wave: W3
+    track: service-wiring
+    parallel_with: []
+    depends_on: [W3-MARKET-EVENTS, W3-STATESYNC, W3-DISCOVERY]
+    status: todo
+    evidence: []
+    decision: >
+      Services read spec.comms from their component spec. XRPC mounts submit
+      handlers and sends submit outbox records. Firehose does not call submit*
+      for market records; its only market ingress is StateSync from the market
+      handler. Both does both. PDS writes are unconditional. Removal of XRPC
+      handlers is fail-closed when Firehose is selected.
+    files:
+      - internal/services/bidder/
+      - internal/services/requester/
+      - internal/appctl/components.go
+      - api/v1alpha1/types_component.go
+    done_when: >
+      mode is visible in component status; switching mode needs no env flags;
+      each mode passes the matrix.
+
+  - id: W4-APP-ROOTS
+    title: "One app-root composition for identity, repo and comms"
+    wave: W4
+    track: app-roots
+    parallel_with: []
+    depends_on: [W2-IDENTITY-LOCAL, W2-IDENTITY-REMOTE, W3-SERVICE-WIRING]
+    status: todo
+    evidence: []
+    decision: >
+      Replace BidderIdentityMode, gateway/SSH/network hardcoded modes and the
+      per-service mode decisions with one planner. Each root renders
+      MarketIdentity, AtprotoRepo, AtprotoRecord, EventStream and StateSync
+      children. Local Pds is created only for localRepo. RemotePDS refs are
+      explicit. Gateway and SshGateway gain identity/comms fields.
+    files:
+      - internal/appctl/bidder.go
+      - internal/appctl/requester.go
+      - internal/appctl/gateway.go
+      - internal/appctl/sshgateway.go
+      - internal/appctl/network.go
+      - internal/appctl/identity_planner.go
+    done_when: >
+      A root object alone chooses the account and transport mode; no profile
+      names a different planner; gateway and SSH can select local or remote
+      without code changes.
+
+  - id: W4-REMOVE-LEGACY
+    title: "Remove hardcoded and duplicate paths"
+    wave: W4
+    track: cleanup
+    parallel_with: [W4-MIGRATION, W4-DOCS]
+    depends_on: [W4-APP-ROOTS]
+    status: todo
+    evidence: []
+    decision: >
+      Delete BidderIdentityMode, dead CheckSignIn OAuth branch, direct
+      reconcileOperatorRecords, appctl ensurePdsAccountInVault branching and
+      the duplicate bidder/requester RecordStore. Keep only the shared
+      resolver and local/remote bindings. Remove unused RemotePDS in-memory
+      synthesis.
+    files:
+      - internal/appctl/
+      - internal/services/bidder/
+      - internal/services/requester/
+    done_when: >
+      rg finds no hardcoded localRepo for bidder/gateway/SSH; build/vet and
+      existing installs upgrade on localRepo.
+
+  - id: W4-MIGRATION
+    title: "Compatibility for existing installs and records"
+    wave: W4
+    track: migration
+    parallel_with: [W4-REMOVE-LEGACY, W4-DOCS]
+    depends_on: [W2-RECORD, W4-APP-ROOTS]
+    status: todo
+    evidence: []
+    decision: >
+      Default omitted identity to managed associated; default comms to Both
+      when sources exist, otherwise XRPC. Read legacy inverted association
+      records but write canonical. Keep old AtprotoRecord repo string mapped to
+      repoRef. Do not force a fresh install for localRepo state.
+    files:
+      - internal/appctl/
+      - internal/atproto/trust/
+      - api/v1alpha1/
+    done_when: >
+      local/hat-9 installed bidders upgrade without a new DID; old association
+      records still resolve; new records are canonical.
+
+  - id: W4-DOCS
+    title: "Update architecture and operator docs"
+    wave: W4
+    track: docs
+    parallel_with: [W4-REMOVE-LEGACY, W4-MIGRATION]
+    depends_on: [W4-APP-ROOTS]
+    status: todo
+    evidence: []
+    decision: >
+      Update AGENTS.md, CONTRIBUTING.md, BIDDER_ARCH.md, GATEWAY_ARCH.md,
+      docs/ARCHITECTURE.md and docs/oauth.md with the mode matrix, defaults,
+      vault paths, QR origin, and fail-closed transport conditions.
+    files:
+      - AGENTS.md
+      - CONTRIBUTING.md
+      - BIDDER_ARCH.md
+      - GATEWAY_ARCH.md
+      - docs/ARCHITECTURE.md
+      - docs/oauth.md
+    done_when: >
+      Docs match the implemented defaults and commands; no pendingAction or
+      DenoPod instructions remain for the Go tree.
+
+  - id: W5-LOCAL
+    title: "Run the local account and transport matrix"
+    wave: W5
+    track: local-and-prod
+    parallel_with: [W5-PROD]
+    depends_on: [W4-REMOVE-LEGACY, W4-MIGRATION]
+    status: todo
+    evidence: []
+    decision: >
+      Run local managed associated, managed unassociated, pdsAccount, OAuth
+      browser and OAuth QR where a safe account exists; run XRPC, subscribeRepos,
+      JetStream and both; inject duplicates, restart, and out-of-order events.
+      Use disposable accounts for existing-account modes.
+    files:
+      - test/integration/
+      - test/soak/
+    done_when: >
+      Every matrix row passes; no duplicate VM or bid; cursors resume; no
+      secrets in kcp.
+
+  - id: W5-HOSTS
+    title: "Prove the bidder hosts"
+    wave: W5
+    track: hosts
+    parallel_with: []
+    depends_on: [W5-LOCAL]
+    status: todo
+    evidence: []
+    decision: >
+      Install/upgrade this host, hat-9 and hat-7. Keep this host and hat-9 in
+      association mode and hat-7 in non-association mode. Verify DIDs, records,
+      association conditions and component readiness.
+    files:
+      - BIDDER_ARCH.md
+    done_when: >
+      all three bidders Ready; this host and hat-9 Associated; hat-7
+      AssociationSkipped; association records present where expected.
+
+  - id: W5-PROD
+    title: "Prove the prod gateway"
+    wave: W5
+    track: local-and-prod
+    parallel_with: [W5-LOCAL]
+    depends_on: [W4-REMOVE-LEGACY]
+    status: todo
+    evidence: []
+    decision: >
+      Upgrade the prod gateway, refresh Caddy certificates, sign in
+      aliceoa.bsky.social, create a cluster, fetch its kubeconfig, run kubectl
+      against kcp.socialweb.computer, delete the cluster, and verify
+      kcp.socialweb.computer health. Do not push.
+    files:
+      - GATEWAY_ARCH.md
+      - scripts/deploy.sh
+    done_when: >
+      prod gateway Ready; Alice session and cluster API work; kubeconfig
+      authenticates; test cluster removed.
+
+  - id: W5-CLOSE
+    title: "Close the plan with evidence"
+    wave: W5
+    track: close
+    parallel_with: []
+    depends_on: [W5-LOCAL, W5-HOSTS, W5-PROD]
+    status: todo
+    evidence: []
+    decision: >
+      Run gofmt, go build, go vet, deploy/check.sh --fast, make check-pins and
+      the full live matrix. Record evidence in each item. No push.
+    files:
+      - docs/plans/0021-account-and-comms-modes.yaml
+    done_when: >
+      all items done or blocked with a named reason; no secrets in status;
+      working tree clean except the plan evidence.
+
+test_matrix:
+  accounts:
+    - managed-associated (local PDS)
+    - managed-unassociated (local PDS)
+    - existing-pds-account (remote PDS)
+    - existing-oauth-browser (remote account)
+    - existing-oauth-qr (remote account)
+    - existing-oauth-delegated (remote account)
+  transports:
+    - XRPC
+    - Firehose subscribeRepos
+    - Firehose JetStream
+    - Both
+  faults:
+    - duplicate XRPC + firehose delivery
+    - process restart between delivery and apply
+    - out-of-order accept before bid/receipt
+    - relay reconnect/cursor resume
+    - missing ingress for Firehose
+    - revoked association claim
+    - expired OAuth session
+  live:
+    - this host: associated
+    - hat-9: associated
+    - hat-7: unassociated
+    - socialweb.computer: prod gateway, Alice sign-in and tenant kubeconfig
+
+risks: |
+  Existing-account mode writes market records into the real account repo. Keep
+  it explicit opt-in and document the risk.
+
+  OAuth QR depends on the external qr.fedfork.com/did-key-associator protocol.
+  Keep qrOrigin configurable and isolate the poller.
+
+  Firehose for a local PDS needs ingress/relay crawl. Do not silently call XRPC
+  when the selected mode cannot be satisfied.
+
+  Dedupe keys for updates need one rule: URI+CID for versions, URI for one-shot
+  side effects. Write it down and test both.
+
+  AtprotoRecordWatch status can grow; keep only bounded watched records and
+  per-source cursors.
+
+  RemotePDS auth refs and session refresh are security-sensitive; test
+  fail-closed and never log tokens.
+
+  Legacy inverted bidder association records must remain readable while new
+  writes are canonical.
+
+decisions:
+  account_default: "managed associated (localRepo + RequireApproval)"
+  comms_default: "Both when relay/firehose sources are configured; XRPC otherwise"
+  existing_account: "explicit opt-in; market records live in the real account repo"
+  qr_origin: "configurable; reuse qr.fedfork.com initially"
+  association_shape: "canonical challenge=operator,keyId=subject; legacy read fallback"
+  dedupe: "StateSync deterministic objects; uri|#|cid for versions; URI for one-shot effects"
+  abstraction: "AtprotoRepo binding plus MarketIdentity account; no separate AtprotoAccount CR"
