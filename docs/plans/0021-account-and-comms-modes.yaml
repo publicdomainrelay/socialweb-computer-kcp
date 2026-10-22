@@ -531,7 +531,7 @@ items:
     track: market-events
     parallel_with: [W3-STATESYNC, W3-DISCOVERY]
     depends_on: [W1-EVENTSTREAM, W2-RECORD]
-    status: done
+    status: doing
     evidence: []
     decision: >
       Register a market handler sink that receives verified record events,
@@ -553,7 +553,7 @@ items:
     track: statesync
     parallel_with: [W3-MARKET-EVENTS, W3-DISCOVERY]
     depends_on: [W2-RECORD]
-    status: done
+    status: doing
     evidence: []
     decision: >
       Add market XRPC outbox adapters and inbound inbox adapters. Use
@@ -604,7 +604,7 @@ items:
     track: service-wiring
     parallel_with: []
     depends_on: [W3-MARKET-EVENTS, W3-STATESYNC, W3-DISCOVERY]
-    status: done
+    status: doing
     evidence: []
     decision: >
       Services read spec.comms from their component spec. XRPC mounts submit
