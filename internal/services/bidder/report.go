@@ -2,6 +2,8 @@ package bidder
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
@@ -175,7 +177,7 @@ func (s *Service) publishTermination(ctx context.Context, req terminationPublish
 	if vm.Status.Market != nil {
 		current = vm.Status.Market.Termination
 	}
-	if current != nil && current.PayloadUri != "" {
+	if current != nil && current.PayloadUri != "" && current.EventUri != "" {
 		return current, nil
 	}
 	marker := v1alpha1.ComputeVMTermination{}
@@ -215,11 +217,12 @@ func (s *Service) publishTermination(ctx context.Context, req terminationPublish
 	if err := s.vms.PatchMarket(ctx, req.VMName, v1alpha1.ComputeVMMarket{Termination: &marker}); err != nil {
 		return nil, err
 	}
+	payloadRkey, eventRkey := terminationRecordKeys(req.Receipt.URI)
 	payload := map[string]any{
 		"$type":      market.ComputeEventsVMTerminatedNSID,
 		"reason":     marker.Reason,
 		"observedAt": marker.ObservedAt,
-		"createdAt":  s.cfg.Now().UTC().Format(time.RFC3339),
+		"createdAt":  marker.ObservedAt,
 	}
 	if marker.ExitCode != nil {
 		payload["exitCode"] = *marker.ExitCode
@@ -227,19 +230,86 @@ func (s *Service) publishTermination(ctx context.Context, req terminationPublish
 	if marker.Request != nil && marker.Request.URI != "" {
 		payload["request"] = market.NewStrongRef(marker.Request.URI, marker.Request.CID).Map()
 	}
-	payloadRef, event, err := s.publishMarketEvent(ctx, market.ComputeEventsVMTerminatedNSID, payload, req.Receipt, req.SubmitEventURL)
+	payloadRec, payloadFound, err := s.getMarketRecord(ctx, market.ComputeEventsVMTerminatedNSID, payloadRkey)
 	if err != nil {
 		return nil, err
 	}
+	eventRec, eventFound, err := s.getMarketRecord(ctx, market.EventNSID, eventRkey)
+	if err != nil {
+		return nil, err
+	}
+	var payloadRef market.RecordRef
+	if payloadFound {
+		payloadRef = market.RecordRef{URI: payloadRec.URI, CID: payloadRec.CID}
+	} else {
+		signed, err := market.SignRecord(payload, s.did, s.attestation)
+		if err != nil {
+			return nil, fmt.Errorf("signing the termination payload: %w", err)
+		}
+		written, err := s.records.PutRecord(ctx, s.did, market.ComputeEventsVMTerminatedNSID, payloadRkey, signed)
+		if err != nil {
+			return nil, fmt.Errorf("writing the termination payload: %w", err)
+		}
+		payloadRef = market.RecordRef{URI: written.URI, CID: written.CID}
+	}
+	var event market.SignedRecord
+	if eventFound {
+		event = market.SignedRecord{URI: eventRec.URI, CID: eventRec.CID, Record: eventRec.Value}
+	}
+	if !payloadFound || !eventFound {
+		event, err = market.PutEvent(ctx, s.records, s.did, eventRkey, market.EventOptions{
+			Receipt:   req.Receipt,
+			Payload:   payloadRef,
+			CreatedAt: marker.ObservedAt,
+		}, s.attestation)
+		if err != nil {
+			return nil, fmt.Errorf("writing the market event: %w", err)
+		}
+	}
+	if req.SubmitEventURL != "" {
+		body := map[string]any{"uri": event.URI, "cid": event.CID, "record": event.Record}
+		if err := s.callService(ctx, req.SubmitEventURL, market.SubmitEventNSID, market.SubmitEventNSID, body); err != nil {
+			return nil, fmt.Errorf("submitting the market event: %w", err)
+		}
+	}
+	verifiedPayload, err := s.records.GetRecord(ctx, s.did, market.ComputeEventsVMTerminatedNSID, payloadRkey)
+	if err != nil {
+		return nil, fmt.Errorf("verifying the termination payload: %w", err)
+	}
+	verifiedEvent, err := s.records.GetRecord(ctx, s.did, market.EventNSID, eventRkey)
+	if err != nil {
+		return nil, fmt.Errorf("verifying the market event: %w", err)
+	}
 	published := marker
-	published.PayloadUri, published.PayloadCid = payloadRef.URI, payloadRef.CID
-	published.EventUri, published.EventCid = event.URI, event.CID
+	published.PayloadUri, published.PayloadCid = verifiedPayload.URI, verifiedPayload.CID
+	published.EventUri, published.EventCid = verifiedEvent.URI, verifiedEvent.CID
 	if err := s.vms.PatchMarket(ctx, req.VMName, v1alpha1.ComputeVMMarket{Termination: &published}); err != nil {
 		return nil, err
 	}
 	s.log.Info("a ComputeVM termination is published", "computevm", req.VMName, "reason", published.Reason,
 		"payload", published.PayloadUri, "event", published.EventUri)
 	return &published, nil
+}
+
+func terminationRecordKeys(receiptURI string) (payloadRkey, eventRkey string) {
+	payloadSum := sha256.Sum256([]byte("terminated:" + receiptURI))
+	eventSum := sha256.Sum256([]byte("terminated:event:" + receiptURI))
+	return "termination-payload-" + hex.EncodeToString(payloadSum[:16]),
+		"termination-event-" + hex.EncodeToString(eventSum[:16])
+}
+
+func (s *Service) getMarketRecord(ctx context.Context, collection, rkey string) (market.ResolvedRecord, bool, error) {
+	if s.records == nil || s.did == "" {
+		return market.ResolvedRecord{}, false, nil
+	}
+	rec, err := s.records.GetRecord(ctx, s.did, collection, rkey)
+	if err != nil {
+		if errors.Is(err, market.ErrNotFound) {
+			return market.ResolvedRecord{}, false, nil
+		}
+		return market.ResolvedRecord{}, false, err
+	}
+	return rec, true, nil
 }
 
 func (s *Service) publishReport(ctx context.Context, vm *v1alpha1.ComputeVM, contract *v1alpha1.ComputeVMContract, collection string, payload map[string]any) {

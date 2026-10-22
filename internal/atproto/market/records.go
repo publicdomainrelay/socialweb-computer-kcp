@@ -818,6 +818,22 @@ func CreateEvent(ctx context.Context, w RecordWriter, repo string, opts EventOpt
 	return CreateSignedRecord(ctx, w, repo, EventNSID, record, signer)
 }
 
+func PutEvent(ctx context.Context, w RecordWriter, repo, rkey string, opts EventOptions, signer *Signer) (SignedRecord, error) {
+	record, err := BuildEvent(opts)
+	if err != nil {
+		return SignedRecord{}, err
+	}
+	signed, err := SignRecord(record, repo, signer)
+	if err != nil {
+		return SignedRecord{}, err
+	}
+	ref, err := w.PutRecord(ctx, repo, EventNSID, rkey, signed)
+	if err != nil {
+		return SignedRecord{}, err
+	}
+	return SignedRecord{URI: ref.URI, CID: ref.CID, Record: signed}, nil
+}
+
 type EventOptions struct {
 	Receipt   RecordRef
 	Payload   RecordRef
