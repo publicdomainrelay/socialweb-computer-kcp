@@ -139,6 +139,93 @@ func (p *HTTPPLCSubmitter) UpdateHandle(ctx context.Context, did syntax.DID, han
 	return p.submit(ctx, did, op.SignedObject())
 }
 
+func (p *HTTPPLCSubmitter) UpdateService(ctx context.Context, did syntax.DID, service string) error {
+	endpoint, err := plc.NormalizeServiceEndpoint(service)
+	if err != nil {
+		return fmt.Errorf("pds: the PLC service endpoint is invalid: %w", err)
+	}
+	var ops []plc.Operation
+	if err := p.getJSON(ctx, p.baseURL+"/"+did.String()+"/log", &ops); err != nil {
+		return err
+	}
+	if len(ops) == 0 {
+		return fmt.Errorf("pds: the PLC log for %s is empty", did)
+	}
+	last := ops[len(ops)-1]
+	if last.Type != plc.TypeOperation {
+		return fmt.Errorf("pds: the PLC operation for %s is not updateable", did)
+	}
+	authorized := false
+	for _, key := range last.RotationKeys {
+		if key == p.rotationDID {
+			authorized = true
+			break
+		}
+	}
+	if !authorized {
+		return fmt.Errorf("pds: the rotation key %s is not in the PLC log for %s", p.rotationDID, did)
+	}
+	prevCID, err := plc.OperationCID(&last)
+	if err != nil {
+		return fmt.Errorf("pds: computing the PLC operation cid: %w", err)
+	}
+	op, err := plc.CreateServiceUpdate(&last, prevCID, endpoint)
+	if err != nil {
+		return fmt.Errorf("pds: creating the PLC service update: %w", err)
+	}
+	if err := plc.SignOperation(op, p.rotationKey); err != nil {
+		return fmt.Errorf("pds: signing the PLC operation: %w", err)
+	}
+	opCID, err := plc.OperationCID(op)
+	if err != nil {
+		return fmt.Errorf("pds: computing the PLC service update cid: %w", err)
+	}
+	if err := p.submit(ctx, did, op.SignedObject()); err != nil {
+		return err
+	}
+	return p.verifyServiceUpdate(ctx, did, &last, op, opCID, endpoint)
+}
+
+func (p *HTTPPLCSubmitter) verifyServiceUpdate(ctx context.Context, did syntax.DID, prev *plc.Operation, expected *plc.Operation, expectedCID string, endpoint string) error {
+	var ops []plc.Operation
+	if err := p.getJSON(ctx, p.baseURL+"/"+did.String()+"/log", &ops); err != nil {
+		return fmt.Errorf("pds: verifying the PLC service update: %w", err)
+	}
+	if len(ops) == 0 {
+		return fmt.Errorf("pds: verifying the PLC service update: the PLC log for %s is empty", did)
+	}
+	last := &ops[len(ops)-1]
+	lastCID, err := plc.OperationCID(last)
+	if err != nil {
+		return fmt.Errorf("pds: verifying the PLC service update: %w", err)
+	}
+	if lastCID != expectedCID {
+		return fmt.Errorf("pds: the PLC service update for %s is not the head operation", did)
+	}
+	if err := plc.VerifyServiceOperation(last, prev, endpoint); err != nil {
+		return fmt.Errorf("pds: verifying the PLC service update: %w", err)
+	}
+	if expected.Sig != last.Sig {
+		return fmt.Errorf("pds: the PLC service update for %s has a different signature", did)
+	}
+	var doc plc.DIDDocument
+	if err := p.getJSON(ctx, p.baseURL+"/"+did.String(), &doc); err != nil {
+		return fmt.Errorf("pds: verifying the DID document: %w", err)
+	}
+	if err := plc.VerifyServiceDocument(&doc, did.String(), endpoint); err != nil {
+		return fmt.Errorf("pds: verifying the DID document: %w", err)
+	}
+	return nil
+}
+
+func (s *Service) UpdateService(ctx context.Context, did syntax.DID, service string) error {
+	server := s.Server()
+	if server == nil {
+		return errors.New("pds: the service is not started")
+	}
+	return server.UpdateService(ctx, did, service)
+}
+
 func (p *HTTPPLCSubmitter) submit(ctx context.Context, did syntax.DID, operation map[string]any) error {
 	body, err := json.Marshal(operation)
 	if err != nil {

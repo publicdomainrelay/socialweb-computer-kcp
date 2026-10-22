@@ -322,6 +322,13 @@ func (s *Server) ServiceDID() string {
 	return s.serviceDID
 }
 
+func (s *Server) UpdateService(ctx context.Context, did syntax.DID, service string) error {
+	if s.plc == nil {
+		return ErrUnsupported
+	}
+	return s.plc.UpdateService(ctx, did, service)
+}
+
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	version := s.cfg.Version
 	if version == "" {
