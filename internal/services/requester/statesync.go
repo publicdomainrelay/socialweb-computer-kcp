@@ -11,11 +11,13 @@ import (
 	"strings"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/ref"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/statesync"
 )
 
@@ -88,6 +90,19 @@ func (a *marketInboxAdapter) logf() *slog.Logger {
 }
 
 func (a *marketInboxAdapter) Observe(ctx context.Context, request statesync.Request) (statesync.Observation, error) {
+	payload, err := decodeMarketInboxPayload(request.Payload)
+	if err != nil {
+		return statesync.Observation{}, err
+	}
+	if a.service != nil && a.service.inbox != nil && isBidCollection(payload.Collection) {
+		if _, err := a.service.inbox.Get(ctx, ref.Ref{LogicalCluster: a.service.cfg.Workspace, Name: bidInboxName(payload.URI, payload.CID)}); err != nil {
+			if apierrors.IsNotFound(err) {
+				return statesync.Observation{At: time.Now().UTC().Format(time.RFC3339)}, nil
+			}
+			return statesync.Observation{}, err
+		}
+		return marketInboxObservation(request, payload.URI), nil
+	}
 	return marketInboxObservation(request, request.Key), nil
 }
 

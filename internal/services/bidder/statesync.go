@@ -1493,7 +1493,21 @@ func (a *marketInboxAdapter) logf() *slog.Logger {
 }
 
 func (a *marketInboxAdapter) Observe(ctx context.Context, request statesync.Request) (statesync.Observation, error) {
-	return marketInboxObservation(request, request.Key), nil
+	payload, err := decodeMarketInboxPayload(request.Payload)
+	if err != nil {
+		return statesync.Observation{}, err
+	}
+	service := a.service
+	if service != nil && service.bids != nil && service.did != "" && payload.Collection == market.RFPNSID {
+		bid, err := service.bids.Get(ctx, bidName(service.did, payload.URI, payload.CID))
+		if err != nil {
+			return statesync.Observation{}, err
+		}
+		if bid != nil {
+			return marketInboxObservation(request, payload.URI), nil
+		}
+	}
+	return statesync.Observation{At: time.Now().UTC().Format(time.RFC3339)}, nil
 }
 
 func (a *marketInboxAdapter) Apply(ctx context.Context, request statesync.Request) (statesync.Observation, error) {
@@ -1505,13 +1519,18 @@ func (a *marketInboxAdapter) Apply(ctx context.Context, request statesync.Reques
 	if service == nil {
 		return statesync.Observation{}, errors.New("bidder: the market inbox adapter has no service")
 	}
+	a.logf().Info("market inbox applied", "collection", payload.Collection, "uri", payload.URI, "bids", service.bids != nil, "records", service.records != nil, "did", service.did)
 	switch payload.Collection {
 	case market.RFPNSID:
 		if service.bids == nil || service.records == nil || service.did == "" {
 			return statesync.Observation{}, errors.New("bidder: the bidder is not ready to bid")
 		}
-		if _, err := service.enqueueBid(ctx, payload.URI, payload.CID, payload.DID); err != nil {
+		bid, err := service.enqueueBid(ctx, payload.URI, payload.CID, payload.DID)
+		if err != nil {
 			return statesync.Observation{}, fmt.Errorf("bidder: recording the bid intent: %w", err)
+		}
+		if bid != nil {
+			a.logf().Info("market inbox enqueued a bid", "rfp", payload.URI, "bid", bid.Name, "phase", string(bid.Status.Phase))
 		}
 		service.kickBids()
 	case market.AcceptNSID:
