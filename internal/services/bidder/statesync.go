@@ -745,6 +745,16 @@ func (a *provisionAdapter) Observe(ctx context.Context, request statesync.Reques
 	if err != nil {
 		return statesync.Observation{}, err
 	}
+	if a.service != nil && a.service.bids != nil {
+		bid, err := a.service.bids.Get(ctx, payload.BidName)
+		if err != nil {
+			return statesync.Observation{}, err
+		}
+		if bid != nil && bid.Status.Terminated != nil {
+			return statesync.Observation{Exists: true, Ref: "terminated:" + payload.Receipt.URI,
+				Hash: provisionPayloadHash(request.Payload), At: time.Now().UTC().Format(time.RFC3339)}, nil
+		}
+	}
 	vm, err := a.findVM(ctx, payload)
 	if err != nil {
 		return statesync.Observation{}, err
