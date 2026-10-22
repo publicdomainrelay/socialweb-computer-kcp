@@ -229,8 +229,8 @@ func TestComponentLinksAreReconciledOnALiveMarketNetwork(t *testing.T) {
 	if !toPds {
 		t.Fatalf("the bidder workspace %s has no ComponentLink from Bidder/%s to a Pds: %+v", bidderWorkspace, bidderName, bidderLinks)
 	}
-	if policyEngine != "" && !toPolicyEngine {
-		t.Fatalf("the bidder workspace %s has a PolicyEngine/%s but no ComponentLink to a PolicyEngine: %+v", bidderWorkspace, policyEngine, bidderLinks)
+	if toPolicyEngine {
+		t.Fatalf("the bidder workspace %s has a ComponentLink to PolicyEngine/%s; PolicyEngine is driven by PolicyWorkflowRun CRDs, not the handler registry: %+v", bidderWorkspace, policyEngine, bidderLinks)
 	}
 
 	var pick exposurev1alpha1.ComponentLink
