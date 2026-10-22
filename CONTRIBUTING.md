@@ -236,9 +236,8 @@ go test -tags integration -count=1 -v -timeout 60m ./test/integration/ -run Test
 go test -tags integration -count=1 -v -timeout 60m ./test/integration/ -run TestWebAppSignInThroughThePluginKeepsTheCookieAcrossARestartAndIssuesACertificate
 ```
 
-The web app sign-in test needs `deno` and `/usr/bin/google-chrome` for the user that runs `go test`:
-it runs `scripts/oauth-signin.ts` against the network's gateway, which it fronts with a TLS listener of
-its own on a port it picks.
+The web sign-in test drives the gateway's API directly: it calls `POST /oauth/start`, posts the PDS
+authorization form and follows the callback to the `swc_session` cookie. It needs no browser.
 
 Environment variables:
 
