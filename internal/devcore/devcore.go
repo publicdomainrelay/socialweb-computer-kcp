@@ -318,6 +318,12 @@ func ComponentCoreConfig(ctx context.Context, cfg Config, rec devinstance.Record
 		}
 	}
 	switch {
+	case cfg.Application != nil && cfg.Application.Role == table.RoleBidder:
+		out.CredentialClient = appctl.BidderVaultClient
+		out.VaultClient = appctl.BidderVaultClient
+	case cfg.Application != nil && cfg.Application.Role == table.RoleGateway:
+		out.CredentialClient = appctl.RequesterVaultClient
+		out.VaultClient = appctl.RequesterVaultClient
 	case strings.Contains(rec.BaseWorkspace, ":gateway"), strings.Contains(rec.BaseWorkspace, ":ssh"):
 		out.CredentialClient = appctl.RequesterVaultClient
 		out.VaultClient = appctl.RequesterVaultClient

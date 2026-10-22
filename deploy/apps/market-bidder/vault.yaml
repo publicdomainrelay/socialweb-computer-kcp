@@ -9,7 +9,7 @@ spec:
   clients:
     - name: bidder
       kvMount: bidder
-      policies: ["bidder-oidc-rotate", "bidder-guest-user-data-write"]
+      policies: ["bidder-oidc-rotate", "bidder-guest-user-data-write", "bidder-session"]
     - name: computevm
       policies: ["computevm-guest-user-data", "computevm-guest-login"]
     - name: guest-kcp
@@ -29,6 +29,10 @@ spec:
       - name: bidder-repo-key
         rules:
           - path: bidder/data/identity/bidder/keys
+            capabilities: ["read"]
+      - name: bidder-session
+        rules:
+          - path: bidder/data/identity/bidder/pds-session
             capabilities: ["read"]
       - name: bidder-oidc-rotate
         rules:
