@@ -9450,7 +9450,8 @@ postgres                     "initdb: error: cannot be run as root" -- fatal
   and 143e6e8e...7a03 on an Ubuntu 24.04 droplet with apt.llvm.org clang 22.1.8. The same clang version number
   from another packager is not enough; only the same distribution packages reproduce the bytes. The other
   release assets and the Go closure were not built on the droplet, so no second release runner is proposed
-  or registered; a Fedora 44 host would be the candidate and needs the full `--verify-reproducible` run first.
+  or registered; a Fedora 44 host would be the candidate and needs `make check-pins` to reproduce the
+  pinned assets first.
 - **The shared Linux dev VM dev-linux-1 (2026-10-17).** `scripts/dev-droplet.sh create/setup/sync/build/swc` from
   a Mac made one Ubuntu 24.04 droplet that builds and runs live (Go and Deno at the pinned versions, rustup, clang,
   podman, passt; user `dev` builds, test-0001 runs). Readings on `c-16` (nyc1, $0.50/h, the largest size that

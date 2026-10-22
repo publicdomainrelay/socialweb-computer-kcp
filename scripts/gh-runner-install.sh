@@ -7,8 +7,8 @@ usage: scripts/gh-runner-install.sh [--remove] [--account NAME] [--token-file FI
   Installs the GitHub Actions runner of socialweb-computer-kcp on this host: a dedicated unprivileged
   system account (no docker group, no sudo), one runner as a systemd user unit of that account,
   registered to this repository only, labelled self-hosted,linux,x64,socialweb-computer-kcp, one job
-  at a time. The binaries and release-reproducible jobs run here, because the assets they stage are
-  pinned by the bytes this host's toolchain produces (MESHD_CC, the C compiler of the meshd build).
+  at a time. The pins and binaries jobs run here, because the assets they stage are pinned by the
+  bytes this host's toolchain produces (MESHD_CC, the C compiler of the meshd build).
   --remove      stop the unit, delete the runner on GitHub, remove the account and its home
   --account     the runner account (default socialweb-ci)
   --token-file  a 0600 file holding a GitHub runner registration token (install) or a removal token

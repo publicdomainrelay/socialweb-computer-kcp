@@ -33,8 +33,25 @@ Build script options:
 | `--platform P` | A release platform (`linux/amd64`, `linux/arm64`); repeat for more. Default: every release platform. |
 | `--commit REV` | The commit to build. Default `HEAD`; uncommitted changes are not built. |
 | `--build-root DIR` | Checkouts, caches, and outputs. Default `$HOME/.tmp/socialweb-computer-build`. |
-| `--verify-reproducible` | Build the commit twice from two clean checkouts and refuse a platform whose builds differ. |
-| `--no-cache` | With `--verify-reproducible`, build both from scratch. |
+| `--update-pins` | Rebuild the assets built from this repository and write their new pins to `internal/versions/versions.json`. Downloaded assets only verify their pins. `make` passes this. |
+
+## Build with make
+
+```bash
+cd "$(git rev-parse --show-toplevel)"
+make
+make pins
+make check-pins
+make dev
+```
+
+`make` builds the release binary for both linux release platforms, rebuilding the assets this
+repository owns and writing their new pins to `internal/versions/versions.json`. Downloaded assets
+still verify their existing pins and never move. Commit the pin change with the source change.
+
+`make pins` stages only the assets this repository owns and updates `versions.json`; it does not build
+the binary. `make check-pins` runs that and fails if `versions.json` differs from `HEAD`; CI runs it.
+`make dev` builds the working-tree binary for live runs under `/var/tmp/swc`.
 
 Build a release binary of one commit, offline and cached by input hash:
 

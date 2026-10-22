@@ -30,7 +30,7 @@ needs the argument behind it. Do not read it end to end.
 | What a host must provide | `socialweb-computer check-host -role gateway` or `-role bidder`, `docs/host-contract.md` |
 | The market network | `deploy/market-network/README.md` |
 | The operator handoff | `handoff.yaml` |
-| What CI runs on a push, and its runners | `.github/workflows/ci.yml`: the gate, the guest image and the Spaces publish on GitHub-hosted runners; the release builds (`binaries`, `release-reproducible`) on the self-hosted runner of `scripts/gh-runner-install.sh` (account socialweb-ci) |
+| What CI runs on a push, and its runners | `.github/workflows/ci.yml`: the gate, the guest image and the Spaces publish on GitHub-hosted runners; the pin check (`pins`) and the release builds (`binaries`) on the self-hosted runner of `scripts/gh-runner-install.sh` (account socialweb-ci) |
 | Where the integration suite runs | a runner of `scripts/ci-runner-install.sh` (`.gitlab-ci.yml`, account socialweb-ci, tag socialweb-computer-kcp): on hat-8, or on the droplet gl-runner-1 (tag dev-work, `scripts/dev-droplet.sh create` + `setup`, then the install script). It needs kvm, `systemd --user`, an `/etc/subuid` range, `/usr/bin/google-chrome` and `/usr/local/bin/kubectl` (the pinned k3s minor), which a hosted runner has not. The droplet is off the tailnet: on hat-10 the user unit `gl-runner-1-tunnel.service` of johnandersen777 runs `ssh -N -R 127.0.0.1:8443:gitlab.dorper-matrix.ts.net:8443 root@<droplet>` (key `~/.ssh/gl-runner-1-tunnel`, allowed on the droplet only with `restrict,port-forwarding,permitlisten="127.0.0.1:8443"`), and the droplet's `/etc/hosts` maps gitlab.dorper-matrix.ts.net to 127.0.0.1, so TLS and clone URLs are unchanged |
 | A throwaway GitLab for integration runs | `scripts/gitlab-fixture.sh up` / `down`, `deploy/gitlab-fixture/template/` |
 
@@ -225,18 +225,19 @@ A prod deployment guarantees nothing; the routine path preserves most things.
   log and the network's PDSes their accounts, keys and sessions on disk (`--state-path`, `--kv-path`), so
   `dev restart` of plc or a PDS keeps them.
 - The release binary (prod only; the lead builds it): `scripts/build-socialweb-computer.sh` without
-  `--dev` builds one commit once per linux release platform from a clean checkout (every asset
-  staged and checked against its pin, the closure, `-tags release`). Each step is keyed by its
+  `--dev` builds one commit once per linux release platform from a clean checkout (owned assets
+  staged and re-pinned, downloaded assets checked against their pin, the closure, `-tags release`).
+  Each step is keyed by its
   inputs and does not run again when they did not change: asset blobs by their pinned inputs (assets
   built here by their tar bytes), socialweb-meshd by rust/ and the toolchain, the closure by its
   TypeScript trees and the last commit that touched them, plus the go build cache and the cargo
   target dir. About 7 s when nothing changed and about 5 minutes with empty caches. Every phase prints
-  a `timing` line. `--verify-reproducible` (0006 ACC6-REPRO; the `release-reproducible` CI job
-  on main) builds the commit twice from two clean checkouts and publishes a platform only when both
-  are byte-identical. `--no-cache` builds both from scratch, which proves the caches give the bytes
-  of a clean build. Checkouts, caches and outputs stay under
-  `~/.tmp/socialweb-computer-build`; `release/<commit>/` holds the binaries and `SHA256SUMS` that
-  `install` and `upgrade --binary --sha256` take. Never build it in the inner loop.
+  a `timing` line. `make` builds with `--update-pins`: assets built from this repository are rebuilt
+  and their new pins written to `internal/versions/versions.json`; downloaded assets still verify
+  their pins and never move. Commit the pin change with the source change. The `pins` CI job runs
+  `make check-pins` and fails when `versions.json` differs from HEAD. Checkouts, caches and outputs
+  stay under `~/.tmp/socialweb-computer-build`; `release/<commit>/` holds the binaries and
+  `SHA256SUMS` that `install` and `upgrade --binary --sha256` take. Never build it in the inner loop.
 
 ## Where and how to work
 
