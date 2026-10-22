@@ -89,6 +89,8 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 			Role:           cfg.Session.AtprotoRole,
 			RenewBelow:     cfg.Session.RenewBelow,
 			RenewIncrement: cfg.Session.RenewIncrement,
+			Network:        cfg.Network,
+			TLSConfig:      cfg.Deps.TLS,
 			Log:            log,
 		})
 		if err != nil {

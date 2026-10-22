@@ -3,6 +3,7 @@ package gatewayapi
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,7 +16,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	coreapi "github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayapi"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
 )
 
 const (
@@ -34,6 +37,8 @@ type custodySignIn struct {
 
 	renewIncrement time.Duration
 
+	allowInternalHTTP bool
+
 	log *slog.Logger
 }
 
@@ -45,6 +50,10 @@ type custodySignInOptions struct {
 	RenewBelow time.Duration
 
 	RenewIncrement time.Duration
+
+	Network *v1alpha1.MarketNetworkValue
+
+	TLSConfig *tls.Config
 
 	Log *slog.Logger
 }
@@ -60,16 +69,37 @@ func newCustodySignIn(opts custodySignInOptions) (*custodySignIn, error) {
 	if opts.Log == nil {
 		opts.Log = slog.New(slog.DiscardHandler)
 	}
+	return &custodySignIn{
+		client:            client,
+		pdsHTTP:           &http.Client{Timeout: 30 * time.Second, Transport: pdsTransport(opts.Network, opts.TLSConfig)},
+		role:              opts.Role,
+		renewBelow:        opts.RenewBelow,
+		renewIncrement:    opts.RenewIncrement,
+		allowInternalHTTP: opts.Network != nil,
+		log:               opts.Log,
+	}, nil
+}
+
+func pdsTransport(network *v1alpha1.MarketNetworkValue, tlsConfig *tls.Config) *http.Transport {
+	if network != nil {
+		pairs := make(map[string]string, len(network.Hosts))
+		for _, host := range network.Hosts {
+			pairs[host.Name] = host.Address
+		}
+		if hosts, err := networkdial.HostMapFromPairs(pairs); err == nil {
+			if transport, err := networkdial.NewHTTPTransportWithOptions(networkdial.DialOptions{
+				Hosts:          hosts,
+				TLSConfig:      tlsConfig,
+				AllowSystemDNS: true,
+			}); err == nil {
+				transport.Proxy = nil
+				return transport
+			}
+		}
+	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Proxy = nil
-	return &custodySignIn{
-		client:         client,
-		pdsHTTP:        &http.Client{Timeout: 30 * time.Second, Transport: transport},
-		role:           opts.Role,
-		renewBelow:     opts.RenewBelow,
-		renewIncrement: opts.RenewIncrement,
-		log:            opts.Log,
-	}, nil
+	return transport
 }
 
 func (s *custodySignIn) ClientMetadata(ctx context.Context) (json.RawMessage, error) {
@@ -134,7 +164,8 @@ func (s *custodySignIn) AgentFor(caller *coreapi.WebCaller) coreapi.WebAccountAg
 	if caller == nil {
 		return nil
 	}
-	return &custodyAgent{client: s.client, http: s.pdsHTTP, caller: caller, log: s.log, nonces: map[string]string{}}
+	return &custodyAgent{client: s.client, http: s.pdsHTTP, caller: caller, allowInternalHTTP: s.allowInternalHTTP,
+		log: s.log, nonces: map[string]string{}}
 }
 
 type custodyAgent struct {
@@ -143,6 +174,8 @@ type custodyAgent struct {
 	http *http.Client
 
 	caller *coreapi.WebCaller
+
+	allowInternalHTTP bool
 
 	log *slog.Logger
 
@@ -178,10 +211,15 @@ func (a *custodyAgent) pds() (*url.URL, error) {
 	if (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return nil, fmt.Errorf("gatewayapi: the account PDS URL %q is not absolute http or https", raw)
 	}
-	if u.Scheme == "http" && !loopbackHost(u.Hostname()) {
+	if u.Scheme == "http" && !loopbackHost(u.Hostname()) && !(a.allowInternalHTTP && internalServiceHost(u.Hostname())) {
 		return nil, fmt.Errorf("gatewayapi: the account PDS URL %q is plain http on a non-loopback host", raw)
 	}
 	return u, nil
+}
+
+func internalServiceHost(host string) bool {
+	host = strings.ToLower(strings.TrimSuffix(host, "."))
+	return host == "svc.kcp.local" || strings.HasSuffix(host, ".svc.kcp.local")
 }
 
 func (a *custodyAgent) request(ctx context.Context, method, target string, body any) ([]byte, error) {

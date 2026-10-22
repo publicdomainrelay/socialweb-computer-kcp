@@ -206,16 +206,14 @@ func (c *custodyClient) clientMetadata(ctx context.Context) (json.RawMessage, er
 	if err != nil {
 		return nil, err
 	}
-	var payload struct {
-		ClientMetadata json.RawMessage `json:"clientMetadata"`
-	}
-	if err := json.Unmarshal(data, &payload); err != nil {
+	var document map[string]json.RawMessage
+	if err := json.Unmarshal(data, &document); err != nil {
 		return nil, fmt.Errorf("gatewayapi: decoding the custody client metadata: %w", err)
 	}
-	if len(payload.ClientMetadata) == 0 {
+	if _, ok := document["client_id"]; !ok {
 		return nil, errors.New("gatewayapi: the custody client metadata is empty")
 	}
-	return payload.ClientMetadata, nil
+	return append(json.RawMessage(nil), data...), nil
 }
 
 func (c *custodyClient) start(ctx context.Context, role, identifier, redirectURI string) (authorizationURL, state string, err error) {
@@ -310,26 +308,24 @@ func (c *custodyClient) identify(ctx context.Context, token string) (*custodyIde
 		return nil, nil
 	}
 	var payload struct {
-		Identity *struct {
-			Meta      map[string]string `json:"meta"`
-			Policies  []string          `json:"policies"`
-			TTL       float64           `json:"ttl"`
-			Renewable bool              `json:"renewable"`
-		} `json:"identity"`
+		Meta      map[string]string `json:"meta"`
+		Policies  []string          `json:"policies"`
+		TTL       float64           `json:"ttl"`
+		Renewable bool              `json:"renewable"`
 	}
 	if err := json.Unmarshal(envelope.Data, &payload); err != nil {
 		return nil, fmt.Errorf("gatewayapi: decoding the custody identity: %w", err)
 	}
-	if payload.Identity == nil || payload.Identity.Meta["did"] == "" {
+	if payload.Meta["did"] == "" {
 		return nil, nil
 	}
 	return &custodyIdentity{
-		DID:        payload.Identity.Meta["did"],
-		Handle:     payload.Identity.Meta["handle"],
-		PDS:        payload.Identity.Meta["pds"],
-		Policies:   payload.Identity.Policies,
-		TTLSeconds: int64(payload.Identity.TTL),
-		Renewable:  payload.Identity.Renewable,
+		DID:        payload.Meta["did"],
+		Handle:     payload.Meta["handle"],
+		PDS:        payload.Meta["pds"],
+		Policies:   payload.Policies,
+		TTLSeconds: int64(payload.TTL),
+		Renewable:  payload.Renewable,
 	}, nil
 }
 
@@ -372,15 +368,13 @@ func (c *custodyClient) signOut(ctx context.Context, token, did string) (bool, s
 		return false, "", nil
 	}
 	var payload struct {
-		SignOut struct {
-			Revoked     bool   `json:"revoked"`
-			RevokeError string `json:"revoke_error"`
-		} `json:"signOut"`
+		Revoked     bool   `json:"revoked"`
+		RevokeError string `json:"revoke_error"`
 	}
 	if err := json.Unmarshal(envelope.Data, &payload); err != nil {
 		return false, "", fmt.Errorf("gatewayapi: decoding the custody sign out: %w", err)
 	}
-	return payload.SignOut.Revoked, payload.SignOut.RevokeError, nil
+	return payload.Revoked, payload.RevokeError, nil
 }
 
 func (c *custodyClient) sessionPath(did string) string {
@@ -403,16 +397,14 @@ func (c *custodyClient) proof(ctx context.Context, token, did, method, target, n
 		return custodyProof{}, err
 	}
 	var payload struct {
-		Proof struct {
-			AccessToken string `json:"access_token"`
-			DPoPProof   string `json:"dpop_proof"`
-		} `json:"proof"`
+		AccessToken string `json:"access_token"`
+		DPoPProof   string `json:"dpop_proof"`
 	}
 	if err := json.Unmarshal(data, &payload); err != nil {
 		return custodyProof{}, fmt.Errorf("gatewayapi: decoding the custody proof: %w", err)
 	}
-	if payload.Proof.AccessToken == "" || payload.Proof.DPoPProof == "" {
+	if payload.AccessToken == "" || payload.DPoPProof == "" {
 		return custodyProof{}, errors.New("gatewayapi: the custody proof returned no token or DPoP proof")
 	}
-	return custodyProof{AccessToken: payload.Proof.AccessToken, DPoP: payload.Proof.DPoPProof}, nil
+	return custodyProof{AccessToken: payload.AccessToken, DPoP: payload.DPoPProof}, nil
 }

@@ -2,6 +2,7 @@ package appctl
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"slices"
@@ -92,7 +93,7 @@ func atprotoTrust(n *v1alpha1.MarketNetworkValue) (plc string, hosts []string, c
 	for _, h := range n.Hosts {
 		switch {
 		case strings.HasPrefix(h.Name, "plc."):
-			plc = "https://" + h.Name
+			plc = plcScheme(n) + "://" + h.Name
 			hosts = append(hosts, h.Name+"="+h.Address)
 		case strings.HasPrefix(h.Name, "pds."):
 			hosts = append(hosts, h.Name+"="+h.Address)
@@ -125,9 +126,36 @@ func AtprotoPlugin(opts []v1alpha1.ApplicationOption, n *v1alpha1.MarketNetworkV
 	a := &v1alpha1.OpenBaoAtprotoPlugin{Roles: []v1alpha1.OpenBaoAtprotoRole{{Name: AtprotoUserRole, BoundDIDs: []string{"*"},
 		Policies: []string{AtprotoSelfPolicy}, TokenTTL: AtprotoUserTokenTTL, TokenMaxTTL: AtprotoUserTokenMaxTTL}}}
 	if origin := optionValue(opts, publicOriginOption); origin != "" {
+		if trusted := loopbackOriginHost(origin); trusted != "" && !slices.Contains(hosts, trusted) {
+			hosts = append(hosts, trusted)
+		}
 		a.Config = v1alpha1.OpenBaoAtprotoConfig{ClientID: origin + AtprotoClientMetadataPath, RedirectURIs: []string{origin + AtprotoCallbackPath},
 			ClientName: atprotoClientName, Scope: scope, PLCDirectoryURL: plc, TrustedHosts: hosts, TrustedCAPEM: caPEM}
 	}
 	return v1alpha1.OpenBaoPlugin{Name: AtprotoPluginName, Type: "auth", Asset: v1alpha1.HostProcessAsset{Name: openbaoctl.AtprotoPluginAsset},
 		MountPath: AtprotoMountPath, Atproto: a}, nil
+}
+
+func loopbackOriginHost(origin string) string {
+	parsed, err := url.Parse(origin)
+	if err != nil || parsed.Host == "" || !strings.EqualFold(parsed.Scheme, "http") {
+		return ""
+	}
+	host := parsed.Hostname()
+	if !strings.EqualFold(host, "localhost") {
+		ip := net.ParseIP(host)
+		if ip == nil || !ip.IsLoopback() {
+			return ""
+		}
+	}
+	return parsed.Host
+}
+
+func plcScheme(n *v1alpha1.MarketNetworkValue) string {
+	if n != nil {
+		if parsed, err := url.Parse(n.PlcDirectoryUrl); err == nil && strings.EqualFold(parsed.Scheme, "http") {
+			return "http"
+		}
+	}
+	return "https"
 }

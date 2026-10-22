@@ -3,11 +3,13 @@ package oauth
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"mime"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -163,6 +165,43 @@ func hardenHTTPClient(base *http.Client) *http.Client {
 	return &cloned
 }
 
+func loopbackHTTPClient(base *http.Client) *http.Client {
+	timeout := 15 * time.Second
+	var tlsConfig *tls.Config
+	if base != nil {
+		if base.Timeout > 0 {
+			timeout = base.Timeout
+		}
+		if transport, ok := base.Transport.(*http.Transport); ok && transport != nil && transport.TLSClientConfig != nil {
+			tlsConfig = transport.TLSClientConfig.Clone()
+		}
+	}
+	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+	return &http.Client{
+		Timeout: timeout,
+		Transport: &http.Transport{
+			Proxy:                 nil,
+			DialContext:           dialer.DialContext,
+			TLSClientConfig:       tlsConfig,
+			ForceAttemptHTTP2:     true,
+			MaxIdleConns:          10,
+			IdleConnTimeout:       30 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: time.Second,
+		},
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}
+
+func (r *ClientMetadataResolver) httpClientFor(target *url.URL) *http.Client {
+	if isLoopbackHostname(target.Hostname()) {
+		return loopbackHTTPClient(r.Client)
+	}
+	return hardenHTTPClient(r.Client)
+}
+
 func (r *ClientMetadataResolver) Resolve(ctx context.Context, clientID string) (*ClientMetadata, error) {
 	now := time.Now()
 	r.mu.Lock()
@@ -247,15 +286,16 @@ func localhostClientMetadata(clientID string) (*ClientMetadata, error) {
 }
 
 func (r *ClientMetadataResolver) fetchClientMetadata(ctx context.Context, clientID string) (*ClientMetadata, error) {
-	if _, err := metadataDocumentURL(clientID); err != nil {
+	target, err := metadataDocumentURL(clientID)
+	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, clientID, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidClientMetadata, err)
 	}
 	req.Header.Set("Accept", "application/json")
-	client := hardenHTTPClient(r.Client)
+	client := r.httpClientFor(target)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidClientMetadata, err)
@@ -287,11 +327,17 @@ func metadataDocumentURL(clientID string) (*url.URL, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidClientMetadata, err)
 	}
-	if parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" {
+	if parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" {
 		return nil, fmt.Errorf("%w: client_id must be an https URL", ErrInvalidClientMetadata)
 	}
-	if port := parsed.Port(); port != "" && port != "443" {
-		return nil, fmt.Errorf("%w: client_id must not name a port", ErrInvalidClientMetadata)
+	switch strings.ToLower(parsed.Scheme) {
+	case "https":
+	case "http":
+		if !isLoopbackHostname(parsed.Hostname()) {
+			return nil, fmt.Errorf("%w: client_id may use http only on a loopback host", ErrInvalidClientMetadata)
+		}
+	default:
+		return nil, fmt.Errorf("%w: client_id must be an https URL", ErrInvalidClientMetadata)
 	}
 	return parsed, nil
 }
@@ -504,15 +550,16 @@ func (r *ClientMetadataResolver) clientKeys(ctx context.Context, metadata *Clien
 	if metadata.JWKSURI == nil || *metadata.JWKSURI == "" {
 		return nil, fmt.Errorf("%w: client has no jwks", ErrInvalidClient)
 	}
-	if _, err := metadataDocumentURL(*metadata.JWKSURI); err != nil {
+	target, err := metadataDocumentURL(*metadata.JWKSURI)
+	if err != nil {
 		return nil, fmt.Errorf("%w: invalid jwks_uri", ErrInvalidClient)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, *metadata.JWKSURI, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidClient, err)
 	}
 	req.Header.Set("Accept", "application/json")
-	client := hardenHTTPClient(r.Client)
+	client := r.httpClientFor(target)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidClient, err)
