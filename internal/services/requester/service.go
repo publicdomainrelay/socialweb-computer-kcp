@@ -72,6 +72,8 @@ type Service struct {
 
 	contracts ContractStore
 
+	inbox *kcpstore.Resource[v1alpha1.StateSync]
+
 	policy *PolicyEvaluator
 
 	mu sync.Mutex
@@ -569,6 +571,7 @@ func (s *Service) setupKCP() error {
 	if err != nil {
 		return err
 	}
+	s.inbox = kcpstore.OfClusterScoped[v1alpha1.StateSync](store, inboxGVR)
 	if s.cfg.Contracts == nil {
 		s.cfg.Contracts = NewKCPContracts(kcpstore.OfClusterScoped[v1alpha1.ComputeContract](store, ComputeContractGVR), s.cfg.Workspace, "")
 	}
@@ -582,13 +585,13 @@ func (s *Service) setupKCP() error {
 func (s *Service) loop(ctx context.Context) {
 	ticker := time.NewTicker(s.cfg.ContractPoll)
 	defer ticker.Stop()
-	s.reconcile(ctx)
 	for {
+		s.reconcile(ctx)
+		s.processPendingEvents(ctx)
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.reconcile(ctx)
 		}
 	}
 }
@@ -1033,10 +1036,6 @@ func (s *Service) submitBid(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) submitEvent(w http.ResponseWriter, r *http.Request) {
-	issuer, ok := s.authorizeCallback(w, r, market.SubmitEventNSID, defaultComputeEventServiceID)
-	if !ok {
-		return
-	}
 	var body struct {
 		URI    string         `json:"uri"`
 		CID    string         `json:"cid"`
@@ -1046,8 +1045,8 @@ func (s *Service) submitEvent(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest", "message": err.Error()})
 		return
 	}
-	if err := market.AuthorizeRecord(issuer, body.URI); err != nil {
-		writeJSON(w, http.StatusForbidden, map[string]any{"error": "Forbidden", "message": err.Error()})
+	if body.URI == "" || body.CID == "" || body.Record == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest", "message": "missing uri, cid, or record"})
 		return
 	}
 	event, err := market.ParseEvent(body.Record)
@@ -1055,24 +1054,20 @@ func (s *Service) submitEvent(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest", "message": err.Error()})
 		return
 	}
-	if !market.VerifyRecordSignatures(r.Context(), body.Record, market.ATURIAuthority(body.URI), market.VerifyRecordOptions{
-		KeysForDID:             market.NewDirectoryKeyLister(s.directory),
-		KeyResolver:            market.DefaultKeyResolver,
-		KeyBoundByBadgeBlueKey: s.badgeBlueBinding(),
-	}) {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest", "message": "the event carries no valid signature"})
+	payloadNSID := market.NSIDFromURI(event.Payload.URI)
+	switch payloadNSID {
+	case market.ComputeEventsVMOnNetworkNSID, market.ComputeEventsVMHostKeysNSID, market.ComputeEventsVMTerminatedNSID:
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest", "message": "the payload is not a guest event"})
 		return
 	}
-	payload, err := s.repo.Resolve(r.Context(), market.RecordRef{URI: stringOf(event.Payload.URI), CID: stringOf(event.Payload.CID)})
-	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "EventPayloadUnavailable", "message": err.Error()})
+	ref := v1alpha1.ComputeContractEvent{URI: body.URI, CID: body.CID, ReceiptURI: event.Receipt.URI, ReceivedAt: s.nowISO()}
+	if err := s.enqueueEvent(r.Context(), ref); err != nil {
+		s.log.Warn("requester_event_enqueue_failed", "uri", body.URI, "err", err)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "Unavailable", "message": err.Error()})
 		return
 	}
-	s.dispatchEvent(event.Receipt.URI, MarketEvent{
-		Event:   market.ResolvedRecord{URI: body.URI, CID: body.CID, Value: body.Record},
-		Payload: payload,
-	})
-	s.log.Info("requester_event_received", "bidder", issuer, "uri", body.URI, "receipt", event.Receipt.URI)
+	s.log.Info("requester_event_queued", "uri", body.URI, "receipt", event.Receipt.URI)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 

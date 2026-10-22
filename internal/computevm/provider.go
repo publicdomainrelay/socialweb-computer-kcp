@@ -17,6 +17,10 @@ import (
 const (
 	AcceptAnnotation = "socialweb.computer/accept"
 
+	ReleaseRequestedAnnotation = "socialweb.computer/release-requested"
+
+	ReleaseRequestAnnotation = "socialweb.computer/release-request"
+
 	GuestLoginDefaultMount = "sshsig"
 
 	GuestLoginSecretBytes = 32
@@ -223,6 +227,35 @@ func AcceptKeyOf(o *v1alpha1.ComputeVM) string {
 		return ""
 	}
 	return o.Annotations[AcceptAnnotation]
+}
+
+func ReleaseRequested(o *v1alpha1.ComputeVM) bool {
+	if o == nil {
+		return false
+	}
+	return strings.TrimSpace(o.Annotations[ReleaseRequestedAnnotation]) != ""
+}
+
+func ReleaseRequestedAt(o *v1alpha1.ComputeVM) string {
+	if o == nil {
+		return ""
+	}
+	return strings.TrimSpace(o.Annotations[ReleaseRequestedAnnotation])
+}
+
+func ReleaseRequestRef(o *v1alpha1.ComputeVM) *v1alpha1.RecordRef {
+	if o == nil {
+		return nil
+	}
+	raw := strings.TrimSpace(o.Annotations[ReleaseRequestAnnotation])
+	if raw == "" {
+		return nil
+	}
+	uri, cid, found := strings.Cut(raw, "#")
+	if !found || strings.TrimSpace(uri) == "" {
+		return nil
+	}
+	return &v1alpha1.RecordRef{URI: strings.TrimSpace(uri), CID: strings.TrimSpace(cid)}
 }
 
 func ContractReceipt(o *v1alpha1.ComputeVM) string {

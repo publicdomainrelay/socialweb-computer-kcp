@@ -319,7 +319,7 @@ func (s *Service) prepare(ctx context.Context) error {
 		IssuerURL:      s.guestURL,
 		Log:            s.log,
 		Now:            s.cfg.Now,
-		WaitForRunning: true,
+		WaitForRunning: false,
 	}
 	if s.provider.Config.Handle == "" {
 		s.provider.Config.Handle = s.cfg.Handle

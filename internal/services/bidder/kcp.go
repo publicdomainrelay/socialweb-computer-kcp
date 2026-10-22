@@ -262,6 +262,20 @@ func (v *KCPVMs) PatchContract(ctx context.Context, name string, contract v1alph
 	return v.Res.PatchJSON(ctx, v.Cluster, name, patch)
 }
 
+func (v *KCPVMs) PatchAnnotations(ctx context.Context, name string, annotations map[string]string) error {
+	if v == nil || v.Res == nil {
+		return errors.New("bidder: the ComputeVM store is not configured")
+	}
+	if len(annotations) == 0 {
+		return nil
+	}
+	patch, err := json.Marshal(map[string]any{"metadata": map[string]any{"annotations": annotations}})
+	if err != nil {
+		return err
+	}
+	return v.Res.PatchMerge(ctx, v.Cluster, name, patch)
+}
+
 func (v *KCPVMs) WaitRunning(ctx context.Context, name string, timeout time.Duration) (*v1alpha1.ComputeVM, error) {
 	if timeout <= 0 {
 		timeout = DefaultBootTimeout

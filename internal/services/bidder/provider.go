@@ -31,6 +31,8 @@ type VMStore interface {
 	PatchMarket(ctx context.Context, name string, patch v1alpha1.ComputeVMMarket) error
 
 	PatchContract(ctx context.Context, name string, contract v1alpha1.ComputeVMContract) error
+
+	PatchAnnotations(ctx context.Context, name string, annotations map[string]string) error
 }
 
 type vmWaiter interface {
@@ -200,7 +202,7 @@ func (p *ComputeProvider) Provision(ctx context.Context, req ProvisionRequest) (
 			}
 			result := ProvisionResult{Name: existing.Name, VM: existing}
 			reuse := true
-			if existing.Status.Phase != v1alpha1.ComputeVMPhaseRunning {
+			if p.WaitForRunning && existing.Status.Phase != v1alpha1.ComputeVMPhaseRunning {
 				if waiter, ok := p.VMs.(vmWaiter); ok {
 					running, waitErr := waiter.WaitRunning(ctx, existing.Name, p.Config.BootTimeout)
 					switch {

@@ -37,6 +37,10 @@ type ContractStore interface {
 	Delete(ctx context.Context, name string) error
 
 	PatchStatus(ctx context.Context, name string, status v1alpha1.ComputeContractStatus) error
+
+	AppendPendingEvent(ctx context.Context, name string, event v1alpha1.ComputeContractEvent) error
+
+	SetPendingEvents(ctx context.Context, name string, events []v1alpha1.ComputeContractEvent) error
 }
 
 type KCPContracts struct {
@@ -110,6 +114,63 @@ func (c *KCPContracts) PatchStatus(ctx context.Context, name string, status v1al
 		return err
 	}
 	patch, err := statuspatch.Merge(value)
+	if err != nil {
+		return err
+	}
+	return c.Res.PatchStatus(ctx, ref.New(c.Cluster, "", name), patch)
+}
+
+func (c *KCPContracts) AppendPendingEvent(ctx context.Context, name string, event v1alpha1.ComputeContractEvent) error {
+	if c == nil || c.Res == nil {
+		return errors.New("requester: the contract store is not configured")
+	}
+	for range 5 {
+		current, err := c.Get(ctx, name)
+		if err != nil {
+			return err
+		}
+		if current == nil {
+			return fmt.Errorf("requester: the ComputeContract %s does not exist", name)
+		}
+		existing := current.Status.PendingEvents
+		found := false
+		for _, pending := range existing {
+			if pending.URI == event.URI && (pending.CID == "" || event.CID == "" || pending.CID == event.CID) {
+				found = true
+				break
+			}
+		}
+		if found {
+			return nil
+		}
+		next := make([]v1alpha1.ComputeContractEvent, 0, len(existing)+1)
+		next = append(next, existing...)
+		next = append(next, event)
+		patch, err := statuspatch.Merge(map[string]any{"pendingEvents": next})
+		if err != nil {
+			return err
+		}
+		target := ref.New(c.Cluster, "", name)
+		target.ResourceVersion = current.ResourceVersion
+		err = c.Res.PatchStatus(ctx, target, patch)
+		if err == nil {
+			return nil
+		}
+		if !apierrors.IsConflict(err) {
+			return err
+		}
+	}
+	return fmt.Errorf("requester: the pending event list of %s stayed in conflict", name)
+}
+
+func (c *KCPContracts) SetPendingEvents(ctx context.Context, name string, events []v1alpha1.ComputeContractEvent) error {
+	if c == nil || c.Res == nil {
+		return errors.New("requester: the contract store is not configured")
+	}
+	if events == nil {
+		events = []v1alpha1.ComputeContractEvent{}
+	}
+	patch, err := statuspatch.Merge(map[string]any{"pendingEvents": events})
 	if err != nil {
 		return err
 	}

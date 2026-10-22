@@ -10,10 +10,13 @@ import (
 
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestidentity"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/statesync"
 )
 
 const (
@@ -59,6 +62,10 @@ func (s *Service) reconcileBids(ctx context.Context) {
 
 func (s *Service) reconcileBid(ctx context.Context, bid *v1alpha1.Bid, now time.Time) {
 	if ctx.Err() != nil {
+		return
+	}
+	if bid.Status.Terminated != nil && bid.Status.Phase == v1alpha1.BidPhaseWon {
+		s.finishRelease(ctx, bid, now)
 		return
 	}
 	switch bid.Status.Phase {
@@ -298,6 +305,185 @@ func (s *Service) markBidReleasing(ctx context.Context, bid *v1alpha1.Bid, info 
 	}
 	setBidCondition(&status, bid.Generation, BidConditionReleasing, metav1.ConditionTrue, reason, message)
 	s.applyBidStatus(ctx, bid, status)
+}
+
+func (s *Service) markBidReleaseRequested(ctx context.Context, bid *v1alpha1.Bid, info contractInfo, request, event *v1alpha1.RecordRef, at string) {
+	if bid == nil {
+		return
+	}
+	status := cloneBidStatus(bid.Status)
+	terminated := &v1alpha1.BidTerminated{
+		ReceiptUri:   info.receiptURI,
+		ReceiptCid:   info.receiptCID,
+		AcceptAuthor: info.acceptAuthor,
+		Reason:       "deleted_on_request",
+		At:           at,
+	}
+	if request != nil {
+		terminated.PayloadUri = request.URI
+		terminated.PayloadCid = request.CID
+	}
+	if event != nil {
+		terminated.EventUri = event.URI
+		terminated.EventCid = event.CID
+	}
+	status.Terminated = terminated
+	if info.computeVM != "" {
+		setBidCondition(&status, bid.Generation, BidConditionReleasing, metav1.ConditionTrue, "ReleaseRequested",
+			"the release of "+info.computeVM+" is requested")
+	} else {
+		setBidCondition(&status, bid.Generation, BidConditionReleasing, metav1.ConditionTrue, "ReleaseRequested",
+			"the release of the accepted contract is requested")
+	}
+	s.applyBidStatus(ctx, bid, status)
+}
+
+func (s *Service) finishRelease(ctx context.Context, bid *v1alpha1.Bid, now time.Time) {
+	condition := apimeta.FindStatusCondition(bid.Status.Conditions, BidConditionReleasing)
+	if condition != nil && condition.Status == metav1.ConditionFalse && condition.Reason == "Released" {
+		return
+	}
+	terminated := bid.Status.Terminated
+	info := contractInfo{
+		bidName:      bid.Name,
+		computeVM:    bid.Status.ComputeVM,
+		receiptURI:   terminated.ReceiptUri,
+		receiptCID:   terminated.ReceiptCid,
+		acceptAuthor: terminated.AcceptAuthor,
+	}
+	if bid.Status.Accept != nil {
+		info.acceptURI, info.acceptCID = bid.Status.Accept.Uri, bid.Status.Accept.Cid
+	}
+	request := &v1alpha1.RecordRef{URI: terminated.PayloadUri, CID: terminated.PayloadCid}
+	if request.URI == "" {
+		request = nil
+	}
+	var vm *v1alpha1.ComputeVM
+	if info.computeVM != "" && s.vms != nil {
+		found, err := s.vms.Get(ctx, info.computeVM)
+		if err != nil {
+			if ctx.Err() == nil {
+				s.log.Warn("reading the ComputeVM of a releasing bid failed", "bid", bid.Name, "err", err)
+			}
+			return
+		}
+		vm = found
+	}
+	if vm != nil {
+		observedAt := terminated.At
+		if observedAt == "" {
+			observedAt = now.Format(time.RFC3339)
+		}
+		if request == nil {
+			request = computevm.ReleaseRequestRef(vm)
+		}
+		name, err := s.ensureTerminationSync(ctx, info, "deleted_on_request", observedAt, request)
+		if err != nil {
+			if ctx.Err() == nil {
+				s.log.Warn("resuming the termination of a releasing bid failed", "bid", bid.Name, "err", err)
+			}
+			return
+		}
+		acked, done := s.terminationAck(ctx, name)
+		if !done {
+			return
+		}
+		s.completeBidRelease(ctx, bid, info, acked, now)
+		return
+	}
+	acked, done := s.terminationAckForVM(ctx, info.computeVM)
+	if !done {
+		acked = nil
+	}
+	s.completeBidRelease(ctx, bid, info, acked, now)
+}
+
+func (s *Service) completeBidRelease(ctx context.Context, bid *v1alpha1.Bid, info contractInfo, acked *v1alpha1.ComputeVMTermination, now time.Time) {
+	status := cloneBidStatus(bid.Status)
+	status.Timings.FinishedAt = now.Format(time.RFC3339)
+	if status.Terminated == nil {
+		status.Terminated = &v1alpha1.BidTerminated{
+			ReceiptUri:   info.receiptURI,
+			ReceiptCid:   info.receiptCID,
+			AcceptAuthor: info.acceptAuthor,
+			Reason:       "deleted_on_request",
+			At:           now.Format(time.RFC3339),
+		}
+	}
+	if acked != nil {
+		status.Terminated.PayloadUri = acked.PayloadUri
+		status.Terminated.PayloadCid = acked.PayloadCid
+		status.Terminated.EventUri = acked.EventUri
+		status.Terminated.EventCid = acked.EventCid
+	}
+	setBidCondition(&status, bid.Generation, BidConditionReleasing, metav1.ConditionFalse, "Released", "the guest is released")
+	if s.applyBidStatus(ctx, bid, status) {
+		s.log.Info("a released bid is marked terminated", "bid", bid.Name, "computevm", info.computeVM)
+	}
+	s.contracts.Delete(info.receiptURI)
+}
+
+func (s *Service) terminationAck(ctx context.Context, name string) (*v1alpha1.ComputeVMTermination, bool) {
+	if name == "" {
+		return nil, false
+	}
+	dyn, err := s.syncDynamic(s.cfg.Workspace)
+	if err != nil {
+		return nil, false
+	}
+	u, err := dyn.Resource(statesync.StateSyncGVR).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return nil, false
+	}
+	return terminationOfStateSync(u)
+}
+
+func (s *Service) terminationAckForVM(ctx context.Context, vmName string) (*v1alpha1.ComputeVMTermination, bool) {
+	if vmName == "" {
+		return nil, false
+	}
+	dyn, err := s.syncDynamic(s.cfg.Workspace)
+	if err != nil {
+		return nil, false
+	}
+	list, err := dyn.Resource(statesync.StateSyncGVR).List(ctx, metav1.ListOptions{
+		LabelSelector: computevm.TerminationSyncVMNameLabel + "=" + vmName,
+	})
+	if err != nil {
+		return nil, false
+	}
+	for i := range list.Items {
+		if acked, ok := terminationOfStateSync(&list.Items[i]); ok {
+			return acked, true
+		}
+	}
+	return nil, false
+}
+
+func terminationOfStateSync(u *unstructured.Unstructured) (*v1alpha1.ComputeVMTermination, bool) {
+	if u == nil {
+		return nil, false
+	}
+	phase, _, _ := unstructured.NestedString(u.Object, "status", "phase")
+	if v1alpha1.StateSyncPhase(phase) != v1alpha1.StateSyncPhaseAcked {
+		return nil, false
+	}
+	payloadURI, _, _ := unstructured.NestedString(u.Object, "status", "acked", "ref")
+	if payloadURI == "" {
+		return nil, false
+	}
+	payloadCID, _, _ := unstructured.NestedString(u.Object, "status", "acked", "cid")
+	eventURI, _, _ := unstructured.NestedString(u.Object, "status", "acked", "eventUri")
+	eventCID, _, _ := unstructured.NestedString(u.Object, "status", "acked", "eventCid")
+	at, _, _ := unstructured.NestedString(u.Object, "status", "acked", "at")
+	return &v1alpha1.ComputeVMTermination{
+		Reason:     "deleted_on_request",
+		ObservedAt: at,
+		PayloadUri: payloadURI,
+		PayloadCid: payloadCID,
+		EventUri:   eventURI,
+		EventCid:   eventCID,
+	}, true
 }
 
 func cloneBidStatus(status v1alpha1.BidStatus) v1alpha1.BidStatus {

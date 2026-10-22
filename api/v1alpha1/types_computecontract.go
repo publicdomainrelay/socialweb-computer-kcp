@@ -149,6 +149,16 @@ type ComputeContractRelease struct {
 	LastError string `json:"lastError,omitempty"`
 }
 
+type ComputeContractEvent struct {
+	URI string `json:"uri"`
+
+	CID string `json:"cid,omitempty"`
+
+	ReceiptURI string `json:"receiptUri,omitempty"`
+
+	ReceivedAt string `json:"receivedAt,omitempty"`
+}
+
 type ComputeContractStatus struct {
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
@@ -173,6 +183,8 @@ type ComputeContractStatus struct {
 	Execution *ExecutionStatus `json:"execution,omitempty"`
 
 	Release *ComputeContractRelease `json:"release,omitempty"`
+
+	PendingEvents []ComputeContractEvent `json:"pendingEvents,omitempty"`
 }
 
 const (

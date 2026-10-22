@@ -35,8 +35,6 @@ const (
 
 	SubmitEventPath = "/xrpc/" + market.SubmitEventNSID
 
-	submitAcceptProvisionTimeout = 3 * time.Minute
-
 	MaxSubmitBody = 2 << 20
 )
 
@@ -248,7 +246,7 @@ func (s *Service) handleSubmitAccept(w http.ResponseWriter, r *http.Request) {
 	}
 	unlock := s.lockAccept(body.AcceptURI)
 	defer unlock()
-	if s.records == nil || s.bids == nil || s.vms == nil || s.provider == nil {
+	if s.records == nil || s.bids == nil || s.vms == nil {
 		writeXRPCError(w, http.StatusServiceUnavailable, "Unavailable", "the bidder is not ready to accept")
 		return
 	}
@@ -270,7 +268,6 @@ func (s *Service) handleSubmitAccept(w http.ResponseWriter, r *http.Request) {
 		writeXRPCError(w, http.StatusForbidden, "Forbidden", "the scope policy declined the accept")
 		return
 	}
-	submitEvent := s.submitEventURL(r.Context(), accept.SubmitEvent)
 	if existing, found := s.contractForAccept(r.Context(), body.AcceptURI, body.AcceptCID); found {
 		writeJSON(w, http.StatusOK, map[string]any{"id": lastSegment(existing.receiptURI), "uri": existing.receiptURI,
 			"cid": existing.receiptCID, "submitEvent": accept.SubmitEvent, "alreadyAccepted": true})
@@ -337,77 +334,44 @@ func (s *Service) handleSubmitAccept(w http.ResponseWriter, r *http.Request) {
 		writeXRPCError(w, http.StatusBadRequest, "InvalidRequest", "the bid config does not resolve: "+err.Error())
 		return
 	}
-	provisionCtx, cancelProvision := context.WithTimeout(context.WithoutCancel(r.Context()), submitAcceptProvisionTimeout)
-	defer cancelProvision()
-	provision, provisionErr := s.provider.Provision(provisionCtx, ProvisionRequest{
-		RFPURI:         accept.RFP.URI,
-		RFPCID:         accept.RFP.CID,
-		VMURI:          rfp.Payload.URI,
-		VMCID:          rfp.Payload.CID,
-		AcceptURI:      body.AcceptURI,
-		AcceptCID:      body.AcceptCID,
-		BidURI:         accept.Bid.URI,
-		BidCID:         accept.Bid.CID,
-		RequesterDID:   issuer,
-		SubmitEventURL: submitEvent,
-		VMPayload:      payloadResolved,
-		BidConfig:      market.StrongRef{URI: parsedBid.Config.URI, CID: parsedBid.Config.CID},
-		BidConfigValue: configResolved.Value,
-	})
-	if provisionErr != nil {
-		s.log.Warn("provisioning the guest failed", "accept", body.AcceptURI, "err", provisionErr)
-		if provision.Name != "" {
-			if destroyErr := s.provider.Destroy(context.WithoutCancel(r.Context()), provision.Name); destroyErr != nil {
-				s.log.Warn("releasing the partially provisioned guest failed", "computevm", provision.Name, "err", destroyErr)
-			}
-		}
-		writeXRPCError(w, http.StatusInternalServerError, "InternalError", "provisioning the guest failed: "+statusError(provisionErr))
-		return
-	}
-	receiptURI, receiptCID, err := s.createReceipt(provisionCtx, market.ReceiptRefs{
+	receiptURI, receiptCID, err := s.createReceipt(r.Context(), market.ReceiptRefs{
 		RFP:         market.RecordRef{URI: accept.RFP.URI, CID: accept.RFP.CID},
 		Bid:         market.RecordRef{URI: accept.Bid.URI, CID: accept.Bid.CID},
 		Accept:      market.RecordRef{URI: body.AcceptURI, CID: body.AcceptCID},
+		Payload:     &market.RecordRef{URI: rfp.Payload.URI, CID: rfp.Payload.CID},
 		SubmitEvent: accept.SubmitEvent,
 	}, resolved, issuer)
 	if err != nil {
-		if destroyErr := s.provider.Destroy(context.WithoutCancel(r.Context()), provision.Name); destroyErr != nil {
-			s.log.Warn("releasing the unreceipted guest failed", "computevm", provision.Name, "err", destroyErr)
-		}
 		writeXRPCError(w, http.StatusInternalServerError, "InternalError", "the receipt could not be written: "+err.Error())
 		return
-	}
-	info := contractInfo{
-		bidName:        bid.Name,
-		computeVM:      provision.Name,
-		receiptURI:     receiptURI,
-		receiptCID:     receiptCID,
-		acceptURI:      body.AcceptURI,
-		acceptCID:      body.AcceptCID,
-		acceptAuthor:   issuer,
-		submitEventURL: submitEvent,
 	}
 	statusValue := cloneBidStatus(bid.Status)
 	statusValue.Accept = &v1alpha1.BidRecordRef{Uri: body.AcceptURI, Cid: body.AcceptCID}
 	statusValue.Timings.AcceptedAt = now.Format(time.RFC3339)
 	statusValue.Phase = v1alpha1.BidPhaseWon
-	statusValue.ComputeVM = provision.Name
+	statusValue.ComputeVM = ""
 	setBidCondition(&statusValue, bid.Generation, v1alpha1.BidConditionComplete, metav1.ConditionTrue, "ContractAccepted", "the guest contract is accepted")
-	contract := v1alpha1.ComputeVMContract{
-		ReceiptUri:     receiptURI,
-		ReceiptCid:     receiptCID,
-		AcceptUri:      body.AcceptURI,
-		AcceptCid:      body.AcceptCID,
-		SubmitEventUrl: submitEvent,
-		AcceptedAt:     now.Format(time.RFC3339),
-	}
-	if err := s.provider.BindContract(provisionCtx, provision.Name, contract); err != nil {
-		s.log.Warn("recording the receipt on the ComputeVM failed", "computevm", provision.Name, "err", err)
-	}
-	if err := s.bids.PatchStatus(provisionCtx, bid.Name, statusValue); err != nil {
+	if err := s.bids.PatchStatus(r.Context(), bid.Name, statusValue); err != nil {
 		s.log.Warn("updating the bid after accept failed", "bid", bid.Name, "err", err)
 	}
-	s.contracts.Store(receiptURI, info)
+	payload := provisionPayload{
+		BidName:      bid.Name,
+		RequesterDID: issuer,
+		SubmitEvent:  accept.SubmitEvent,
+	}
+	payload.Accept.URI, payload.Accept.CID = body.AcceptURI, body.AcceptCID
+	payload.Bid.URI, payload.Bid.CID = accept.Bid.URI, accept.Bid.CID
+	payload.RFP.URI, payload.RFP.CID = accept.RFP.URI, accept.RFP.CID
+	payload.Payload.URI, payload.Payload.CID = rfp.Payload.URI, rfp.Payload.CID
+	payload.Payload.Value = payloadResolved.Value
+	payload.Receipt.URI, payload.Receipt.CID = receiptURI, receiptCID
+	payload.BidConfig.URI, payload.BidConfig.CID = parsedBid.Config.URI, parsedBid.Config.CID
+	payload.BidConfig.Value = configResolved.Value
+	if _, err := s.ensureProvisionSync(r.Context(), bid, payload); err != nil {
+		writeXRPCError(w, http.StatusInternalServerError, "InternalError", "the provisioning intent could not be recorded: "+err.Error())
+		return
+	}
+	s.kickStateSync()
 	writeJSON(w, http.StatusOK, map[string]any{"id": lastSegment(receiptURI), "uri": receiptURI, "cid": receiptCID, "submitEvent": accept.SubmitEvent})
 }
 
@@ -430,8 +394,8 @@ func (s *Service) handleSubmitEvent(w http.ResponseWriter, r *http.Request) {
 		writeXRPCError(w, status, authCode(status), "invalid service-auth token")
 		return
 	}
-	if s.records == nil {
-		writeXRPCError(w, http.StatusServiceUnavailable, "Unavailable", "the bidder has no market record store")
+	if s.records == nil || s.vms == nil {
+		writeXRPCError(w, http.StatusServiceUnavailable, "Unavailable", "the bidder has no market record or ComputeVM store")
 		return
 	}
 	resolved, err := s.records.Resolve(r.Context(), market.RecordRef{URI: body.URI, CID: body.CID})
@@ -481,55 +445,29 @@ func (s *Service) handleSubmitEvent(w http.ResponseWriter, r *http.Request) {
 			releaseBid = bid
 		}
 	}
-	var termination *v1alpha1.ComputeVMTermination
+	request := &v1alpha1.RecordRef{URI: event.Payload.URI, CID: event.Payload.CID}
+	eventRef := &v1alpha1.RecordRef{URI: body.URI, CID: body.CID}
+	observedAt := now.Format(time.RFC3339)
 	if info.computeVM != "" {
-		s.markBidReleasing(r.Context(), releaseBid, info, "ReleaseRequested", "the release of "+info.computeVM+" is requested")
-		name, err := s.ensureTerminationSync(r.Context(), info, "deleted_on_request", now.Format(time.RFC3339),
-			&v1alpha1.RecordRef{URI: event.Payload.URI, CID: event.Payload.CID})
-		if err == nil {
-			err = s.waitTerminationSync(r.Context(), name, TerminationSyncTimeout)
-		}
-		if err != nil {
-			s.log.Warn("publishing the termination on request failed", "computevm", info.computeVM, "err", err)
+		if _, err := s.ensureTerminationSync(r.Context(), info, "deleted_on_request", observedAt, request); err != nil {
+			s.log.Warn("recording the termination on request failed", "computevm", info.computeVM, "err", err)
 			s.markBidReleasing(r.Context(), releaseBid, info, "ReleaseFailed", statusError(err))
-			writeXRPCError(w, http.StatusInternalServerError, "InternalError", "the termination event could not be published: "+statusError(err))
+			writeXRPCError(w, http.StatusInternalServerError, "InternalError", "the termination event could not be queued: "+statusError(err))
 			return
 		}
-		termination = s.acknowledgedTermination(r.Context(), name)
-	}
-	if info.computeVM != "" && s.provider != nil {
-		if err := s.provider.Destroy(r.Context(), info.computeVM); err != nil {
-			s.log.Warn("deleting the guest on request failed", "computevm", info.computeVM, "err", err)
+		annotations := map[string]string{
+			computevm.ReleaseRequestedAnnotation: observedAt,
+			computevm.ReleaseRequestAnnotation:   request.URI + "#" + request.CID,
+		}
+		if err := s.vms.PatchAnnotations(r.Context(), info.computeVM, annotations); err != nil {
+			s.log.Warn("marking the ComputeVM for release failed", "computevm", info.computeVM, "err", err)
 			s.markBidReleasing(r.Context(), releaseBid, info, "ReleaseFailed", statusError(err))
-			writeXRPCError(w, http.StatusInternalServerError, "InternalError", "the guest release failed: "+statusError(err))
+			writeXRPCError(w, http.StatusInternalServerError, "InternalError", "the release could not be requested: "+statusError(err))
 			return
 		}
 	}
-	if s.bids != nil {
-		if bid, err := s.bids.Get(r.Context(), info.bidName); err == nil && bid != nil {
-			statusValue := cloneBidStatus(bid.Status)
-			statusValue.Timings.FinishedAt = now.Format(time.RFC3339)
-			terminated := &v1alpha1.BidTerminated{
-				ReceiptUri:   info.receiptURI,
-				ReceiptCid:   info.receiptCID,
-				AcceptAuthor: info.acceptAuthor,
-				Reason:       "deleted_on_request",
-				At:           now.Format(time.RFC3339),
-			}
-			if termination != nil {
-				terminated.PayloadUri = termination.PayloadUri
-				terminated.PayloadCid = termination.PayloadCid
-				terminated.EventUri = termination.EventUri
-				terminated.EventCid = termination.EventCid
-			}
-			statusValue.Terminated = terminated
-			setBidCondition(&statusValue, bid.Generation, BidConditionReleasing, metav1.ConditionFalse, "Released", "the guest is released")
-			if err := s.bids.PatchStatus(r.Context(), bid.Name, statusValue); err != nil {
-				s.log.Warn("updating the terminated bid failed", "bid", bid.Name, "err", err)
-			}
-		}
-	}
-	s.contracts.Delete(info.receiptURI)
+	s.markBidReleaseRequested(r.Context(), releaseBid, info, request, eventRef, observedAt)
+	s.kickStateSync()
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -683,7 +621,15 @@ func (s *Service) createReceipt(ctx context.Context, refs market.ReceiptRefs, ac
 	for key, item := range accept.Value {
 		value[key] = item
 	}
-	receipt, err := market.CreateReceiptRecordAt(ctx, s.records, s.did, market.ReceiptRKey(refs.Accept.URI, refs.Accept.CID), refs, market.ReceiptSubject{
+	rkey := market.ReceiptRKey(refs.Accept.URI, refs.Accept.CID)
+	existing, err := s.records.GetRecord(ctx, s.did, market.ReceiptNSID, rkey)
+	if err == nil {
+		return existing.URI, existing.CID, nil
+	}
+	if !errors.Is(err, market.ErrNotFound) {
+		return "", "", err
+	}
+	receipt, err := market.CreateReceiptRecordAt(ctx, s.records, s.did, rkey, refs, market.ReceiptSubject{
 		AcceptRecord:        value,
 		AcceptRepositoryDID: issuer,
 	}, s.attestation)

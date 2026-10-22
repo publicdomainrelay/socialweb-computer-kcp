@@ -122,6 +122,18 @@ func (r *clusterResource[T]) PatchJSON(ctx context.Context, cluster, name string
 	return nil
 }
 
+func (r *clusterResource[T]) PatchMerge(ctx context.Context, cluster, name string, patch []byte) error {
+	c, err := r.client(cluster)
+	if err != nil {
+		return err
+	}
+	response, err := c.Patch(types.MergePatchType).Resource(r.gvr.Resource).Name(name).Body(patch).Do(ctx).Raw()
+	if err != nil {
+		return fmt.Errorf("bidder: patch %s %s in %s: %w%s", r.gvr.Resource, name, cluster, err, detail(response))
+	}
+	return nil
+}
+
 func detail(response []byte) string {
 	if len(response) == 0 {
 		return ""

@@ -710,6 +710,38 @@ func terminationReportable(o v1alpha1.ComputeVM) bool {
 	return contract != nil && contract.ReceiptUri != "" && contract.ReceiptCid != ""
 }
 
+func (ct *Controller) reconcileReleaseRequest(ctx context.Context, o v1alpha1.ComputeVM) error {
+	name := TerminationSyncName(string(o.UID))
+	log := ct.c.log().With("computevm", o.Name, "statesync", name)
+	u, err := ct.syncs.Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		observedAt := ReleaseRequestedAt(&o)
+		if observedAt == "" {
+			observedAt = time.Now().UTC().Format(time.RFC3339)
+		}
+		if !terminationReportable(o) {
+			log.Warn("a release is requested and the termination StateSync is missing; the ComputeVM names no receipt to report")
+			return nil
+		}
+		if err := ct.ensureTerminationSync(ctx, o, "deleted_on_request", observedAt, ReleaseRequestRef(&o)); err != nil {
+			log.Warn("recreating the termination StateSync of a release-requested ComputeVM failed", "err", err.Error())
+		}
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	phase, _, _ := unstructured.NestedString(u.Object, "status", "phase")
+	if v1alpha1.StateSyncPhase(phase) != v1alpha1.StateSyncPhaseAcked {
+		return nil
+	}
+	log.Info("the termination StateSync of the release-requested ComputeVM is Acked; deleting the ComputeVM")
+	if err := ct.vms.Delete(ctx, o.Name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+		return err
+	}
+	return nil
+}
+
 func (ct *Controller) waitTermination(ctx context.Context, o v1alpha1.ComputeVM) error {
 	timeout := ct.c.TerminationReportTimeout
 	if timeout <= 0 {
@@ -860,6 +892,9 @@ func (ct *Controller) reconcile(ctx context.Context, name string) error {
 		}
 		return ct.ensureTerminationSync(ctx, o, reason, observedAt, request)
 	case v1alpha1.ComputeVMPhaseRunning:
+		if ReleaseRequested(&o) {
+			return ct.reconcileReleaseRequest(ctx, o)
+		}
 		return ct.observe(ctx, o)
 	}
 	if o.Status.Runtime != nil && o.Status.Runtime.Instance != "" {
