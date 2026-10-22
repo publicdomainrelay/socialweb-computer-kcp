@@ -314,13 +314,10 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 }
 
 func (s *Service) oauthConfig(ctx context.Context, cfg Config, baseURL string, credentials component.CredentialResolver) (*atpds.OAuthConfig, error) {
-	if cfg.Mode != atpds.ModeFull {
+	if cfg.Mode != atpds.ModeFull || cfg.OAuth == nil {
 		return nil, nil
 	}
 	opts := cfg.OAuth
-	if opts == nil {
-		opts = &OAuthOptions{}
-	}
 	signerKey, err := resolveOAuthSigner(ctx, cfg.StateDir, opts.Signer, opts.SignerRef, opts.SignerField, credentials)
 	if err != nil {
 		return nil, err
