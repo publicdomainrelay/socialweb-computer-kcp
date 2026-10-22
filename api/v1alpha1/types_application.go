@@ -65,7 +65,7 @@ type ApplicationOption struct {
 }
 
 type ApplicationIdentity struct {
-	Mode MarketIdentityMode `json:"mode"`
+	Mode MarketIdentityMode `json:"mode,omitempty"`
 
 	Handle string `json:"handle,omitempty"`
 

@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-11.sshgateways.socialweb.computer
+  name: v1alpha1-12.sshgateways.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -184,8 +184,6 @@ spec:
                     enum:
                       - RequireApproval
                       - Skip
-                required:
-                  - mode
               comms:
                 type: object
                 properties:
