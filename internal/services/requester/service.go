@@ -251,24 +251,38 @@ func (s *Service) resolveIdentity(ctx context.Context) error {
 	if ref == nil || ref.Name == "" || s.cfg.Deps.KCP == nil {
 		return nil
 	}
-	client, err := s.cfg.Deps.KCP.Client(s.cfg.Workspace)
-	if err != nil {
-		return fmt.Errorf("requester: kcp client for its MarketIdentity: %w", err)
+	workspaces := []string{s.cfg.Workspace}
+	if !strings.Contains(s.cfg.Workspace, ":") {
+		workspaces = append(workspaces, s.cfg.Workspace+":app")
 	}
-	cfg := client.RESTConfig()
-	if cfg == nil || cfg.Host == "" {
-		return errors.New("requester: the kcp client has no rest config for its MarketIdentity")
-	}
-	baseHost, _, _ := strings.Cut(strings.TrimSuffix(cfg.Host, "/"), "/clusters/")
-	cfg = rest.CopyConfig(cfg)
-	cfg.Host = baseHost + "/clusters/" + s.cfg.Workspace
-	dc, err := dynamic.NewForConfig(cfg)
-	if err != nil {
-		return fmt.Errorf("requester: reading its MarketIdentity: %w", err)
-	}
-	u, err := dc.Resource(marketIdentityGVR).Get(ctx, ref.Name, metav1.GetOptions{})
-	if err != nil {
+	var u *unstructured.Unstructured
+	for i, ws := range workspaces {
+		client, err := s.cfg.Deps.KCP.Client(ws)
+		if err != nil {
+			return fmt.Errorf("requester: kcp client for its MarketIdentity: %w", err)
+		}
+		cfg := client.RESTConfig()
+		if cfg == nil || cfg.Host == "" {
+			return errors.New("requester: the kcp client has no rest config for its MarketIdentity")
+		}
+		baseHost, _, _ := strings.Cut(strings.TrimSuffix(cfg.Host, "/"), "/clusters/")
+		cfg = rest.CopyConfig(cfg)
+		cfg.Host = baseHost + "/clusters/" + ws
+		dc, err := dynamic.NewForConfig(cfg)
+		if err != nil {
+			return fmt.Errorf("requester: reading its MarketIdentity: %w", err)
+		}
+		u, err = dc.Resource(marketIdentityGVR).Get(ctx, ref.Name, metav1.GetOptions{})
+		if err == nil {
+			break
+		}
+		if apierrors.IsNotFound(err) && i+1 < len(workspaces) {
+			continue
+		}
 		return fmt.Errorf("requester: reading its MarketIdentity %s: %w", ref.Name, err)
+	}
+	if u == nil {
+		return fmt.Errorf("requester: reading its MarketIdentity %s: not found", ref.Name)
 	}
 	did, _, _ := unstructured.NestedString(u.Object, "status", "did")
 	pdsURL, _, _ := unstructured.NestedString(u.Object, "status", "pdsUrl")
