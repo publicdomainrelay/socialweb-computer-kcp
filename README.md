@@ -473,9 +473,10 @@ The policy is still "nothing is guaranteed": a change may deliberately wipe stat
 
 ```bash
 # 1. confirm the commit's run is green on GitHub (.github/workflows/ci.yml)
-# 2. build the release
+# 2. build the release: make rebuilds the owned assets and their pins
 C=$(git rev-parse HEAD)
-scripts/build-socialweb-computer.sh --platform linux/amd64 --commit $C
+make
+# if make changed internal/versions/versions.json, commit it before tagging
 B=~/.tmp/socialweb-computer-build/release/$C/socialweb-computer-linux-amd64; SHA=$(sha256sum $B | cut -d' ' -f1)
 # 3. gateway (socialweb.computer): ship, install the first time or upgrade and install again after, write the caddy sites
 BINARY=$B SHA256=$SHA SSH_KEY=~/.ssh/id_ed25519_no_password \

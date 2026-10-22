@@ -231,7 +231,7 @@ A prod deployment guarantees nothing; the routine path preserves most things.
   inputs and does not run again when they did not change: asset blobs by their pinned inputs (assets
   built here by their tar bytes), socialweb-meshd by rust/ and the toolchain, the closure by its
   TypeScript trees and the last commit that touched them, plus the go build cache and the cargo
-  target dir. About 7 s when nothing changed and about 5 minutes with empty caches. Every phase prints
+  target dir. Tens of seconds warm; minutes with empty caches. Every phase prints
   a `timing` line. `make` builds with `--update-pins`: assets built from this repository are rebuilt
   and their new pins written to `internal/versions/versions.json`; downloaded assets still verify
   their pins and never move. Commit the pin change with the source change. The `pins` CI job runs
