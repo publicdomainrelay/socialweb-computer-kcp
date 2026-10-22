@@ -94,7 +94,10 @@ if [ -f "$INCOMING.env" ]; then
 fi
 if [ ! -f "/var/lib/socialweb-computer/install-${ACCOUNT}.json" ]; then
   say "install gateway (the one root step)"
-  "$INCOMING" install gateway --account "$ACCOUNT" --state-dir "$STATE_DIR" "${spec_args[@]}"
+  "$INCOMING" install gateway --account "$ACCOUNT" --state-dir "$STATE_DIR" \
+    --host-backend systemd-user --kcp-front-address "127.0.0.1:${KCP_PORT}" \
+    --tls-front-address "127.0.0.1:${GATEWAY_TLS_PORT}" --cert-front-address "127.0.0.1:${CERT_FRONT_PORT}" \
+    "${spec_args[@]}"
   if [ -f "$STATE_DIR/gateway.env" ] && [ "$(stat -c %U "$STATE_DIR/gateway.env")" != "$ACCOUNT" ]; then
     chown "$ACCOUNT:$ACCOUNT" "$STATE_DIR/gateway.env"
     say "gateway.env handed to $ACCOUNT; restarting the core so it reads it"
@@ -129,7 +132,10 @@ else
     say "the core unit is $state; continuing"
   fi
   say "install gateway again with bin/current (renders the unit files, restarts a core whose unit changed)"
-  "$STATE_DIR/bin/current/socialweb-computer" install gateway --account "$ACCOUNT" --state-dir "$STATE_DIR" "${spec_args[@]}"
+  "$STATE_DIR/bin/current/socialweb-computer" install gateway --account "$ACCOUNT" --state-dir "$STATE_DIR" \
+    --host-backend systemd-user --kcp-front-address "127.0.0.1:${KCP_PORT}" \
+    --tls-front-address "127.0.0.1:${GATEWAY_TLS_PORT}" --cert-front-address "127.0.0.1:${CERT_FRONT_PORT}" \
+    "${spec_args[@]}"
 fi
 
 say "waiting for the web app to answer"
