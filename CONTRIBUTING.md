@@ -223,8 +223,8 @@ sudo kubectl --kubeconfig "$K" get marketidentity bidder \
   -o jsonpath='{.status.phase}{" "}{range .status.conditions[*]}{.type}={.status} {.reason}{"\n"}{end}'
 ```
 
-The bidder side declaration `AtprotoRecord/association` is rendered but its generic reconciler is not
-implemented in this Go tree. The helper writes the record once; the association above is the proof.
+The bidder side declaration `AtprotoRecord/association` is rendered and reconciled through the app's
+PDS. If the helper wrote the operator record, the approved DID above completes the association.
 
 Non-association mode: set the identity association to `Skip` and let the controller reconcile it. No
 `badgeBlueKeys` record is written.
@@ -465,10 +465,63 @@ On `run bidder` and `run request`, `--ingress-provider`, `--ingress-public-host`
 sets `spec.ingress.opentunnel` selects OpenTunnel. A `MarketNetwork` publishes one
 `IngressProxy/dispatcher` in `status.network.ingress`; children inherit it.
 
-Known gap (plan 0022): standalone PDS ingress lifecycle is not complete. A standalone app's PDS
-ingress Exposure can stay `Pending` even though the root selects `xrpc-subscription`, and an account
-may be created against a loopback URL. Check `Pds.spec.publicURL`, the ingress `Exposure` and the DID
-document before trusting a standalone PDS.
+Known gap (plan 0022): OpenTunnel is wired but not yet proven on a prod host. Check
+`Pds.spec.publicURL`, the ingress `Exposure` and the DID document before trusting a standalone PDS
+whose host does not resolve.
+
+### Market transport modes
+
+`spec.comms.mode` is `XRPC` (default), `Firehose` or `Both`. PDS writes happen in every mode.
+
+```bash
+# Firehose only: no submit XRPC; events come from the relay or firehose URLs
+socialweb-computer run bidder --profile prod-qr --handle <handle> \
+  -- --comms-mode Firehose --comms-relay-url https://relay.example
+# Both: XRPC first, durable inbox dedupe for the firehose copy
+socialweb-computer run request --name demo \
+  -- --comms-mode Both --comms-relay-url https://relay.example
+```
+
+Or patch the root object:
+
+```bash
+K=$(sudo sh -c "ls /var/lib/socialweb-computer/swc-bidder/handles/*/kcp/admin.kubeconfig" | head -1)
+sudo kubectl --kubeconfig "$K" patch marketbidder app --type=merge \
+  -p '{"spec":{"comms":{"mode":"Both","relayUrls":["https://relay.example"]}}}'
+```
+
+Firehose and Both need at least one relay or firehose URL; otherwise the root reports `Failed`. The
+root creates one `EventStream` per URL with sink handler `market-<role>@<workspace>`. Incoming records
+become deterministic `StateSync` inboxes keyed by `uri#cid`; duplicate delivery from both transports
+creates one object. Switching back to XRPC deletes the root's market EventStreams.
+
+### Account modes
+
+| `spec.identity.mode` | What runs | Association |
+| --- | --- | --- |
+| `localRepo` (default) | Local `Pds` component and a new DID | `RequireApproval` or `Skip` |
+| `pdsAccount` | Existing account on a `RemotePDS`; password in OpenBao | None |
+| `oauthBrowser` | Existing account signed in from a browser callback | None |
+| `oauthQr` | Existing account signed in by scanning a QR | None |
+| `oauthDelegated` | Existing account signed in by a delegated flow | None |
+
+```bash
+# Managed, unassociated: patch the root after it exists (or use run request --skip-qr)
+K=$(sudo sh -c "ls /var/lib/socialweb-computer/swc-bidder/handles/*/kcp/admin.kubeconfig" | head -1)
+sudo kubectl --kubeconfig "$K" patch marketbidder app --type=merge \
+  -p '{"spec":{"identity":{"association":"Skip"}}}'
+# Existing account on another PDS (password comes from ATPROTO_PASSWORD)
+export ATPROTO_PASSWORD=...   # never echo it
+socialweb-computer run bidder --profile prod-qr --handle <handle> \
+  -- --atproto-identity-mode pdsAccount --atproto-pds-url https://pds.example
+# OAuth browser
+socialweb-computer run request --name demo \
+  -- --atproto-identity-mode oauthBrowser --atproto-pds-url https://pds.example
+```
+
+`pdsAccount` fails closed when it names no PDS. OAuth modes fail closed without a `pdsUrl` or a
+resolvable handle. Tokens stay in OpenBao; `MarketIdentity.status` carries refs only.
+
 
 ### Verify public PDS, DID and requestCrawl
 

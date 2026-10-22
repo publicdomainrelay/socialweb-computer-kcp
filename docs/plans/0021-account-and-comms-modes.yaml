@@ -254,7 +254,7 @@ items:
     track: contracts
     parallel_with: [W0-MATRIX]
     depends_on: []
-    status: todo
+    status: done
     evidence: []
     decision: >
       Add MarketCommsMode {XRPC, Firehose, Both} and MarketComms {mode,
@@ -286,7 +286,7 @@ items:
     track: contracts
     parallel_with: [W0-CONTRACTS]
     depends_on: []
-    status: todo
+    status: doing
     evidence: []
     decision: >
       Write the integration matrix before implementation: three account modes
@@ -307,7 +307,7 @@ items:
     track: repo
     parallel_with: [W1-EVENTSTREAM, W1-OAUTH]
     depends_on: [W0-CONTRACTS]
-    status: todo
+    status: done
     evidence: []
     decision: >
       Add ResolvedRepo and RepoResolver over pdsclient.PDS. Resolve local Pds
@@ -334,7 +334,7 @@ items:
     track: eventstream
     parallel_with: [W1-REPO, W1-OAUTH]
     depends_on: [W0-CONTRACTS]
-    status: todo
+    status: done
     evidence: []
     decision: >
       Decode AtprotoRecordWatch.match and source. Create one EventStream per
@@ -362,7 +362,7 @@ items:
     track: oauth
     parallel_with: [W1-REPO, W1-EVENTSTREAM]
     depends_on: [W0-CONTRACTS]
-    status: todo
+    status: done
     evidence: []
     decision: >
       Move requester OAuthSession/DPoP refresh into internal/atproto/oauthclient.
@@ -386,7 +386,7 @@ items:
     track: records
     parallel_with: [W2-WATCH, W2-IDENTITY-REMOTE, W2-STATUS, W2-FIXTURES]
     depends_on: [W1-REPO]
-    status: todo
+    status: done
     evidence: []
     decision: >
       Reconcile AtprotoRecord by repoRef. Resolve valueFrom with the existing
@@ -413,7 +413,7 @@ items:
     track: records
     parallel_with: [W2-RECORD, W2-IDENTITY-REMOTE, W2-STATUS, W2-FIXTURES]
     depends_on: [W1-EVENTSTREAM]
-    status: todo
+    status: doing
     evidence: []
     decision: >
       Implement AtprotoRecordWatch match evaluation and verified-record status.
@@ -436,7 +436,7 @@ items:
     track: local-identity
     parallel_with: [W2-IDENTITY-REMOTE, W2-STATUS, W2-FIXTURES]
     depends_on: [W2-RECORD, W2-WATCH, W1-REPO]
-    status: todo
+    status: done
     evidence: []
     decision: >
       Drive localRepo from MarketIdentity spec. RequireApproval creates the
@@ -461,7 +461,7 @@ items:
     track: remote-identity
     parallel_with: [W2-IDENTITY-LOCAL, W2-STATUS, W2-FIXTURES]
     depends_on: [W1-OAUTH, W1-REPO, W2-RECORD]
-    status: todo
+    status: done
     evidence: []
     decision: >
       Implement the pdsAccount password/session flow and the OAuth flow.
@@ -489,7 +489,7 @@ items:
     track: status-fixtures
     parallel_with: [W2-RECORD, W2-WATCH, W2-IDENTITY-LOCAL, W2-IDENTITY-REMOTE, W2-FIXTURES]
     depends_on: [W1-REPO]
-    status: todo
+    status: done
     evidence: []
     decision: >
       Wire AccountSource and SessionSource into statusstate. Resolve
@@ -511,7 +511,7 @@ items:
     track: status-fixtures
     parallel_with: [W2-RECORD, W2-WATCH, W2-IDENTITY-LOCAL, W2-IDENTITY-REMOTE, W2-STATUS]
     depends_on: [W0-MATRIX]
-    status: todo
+    status: doing
     evidence: []
     decision: >
       Add test fixtures: local PDS with account/session/repo; RemotePDS with
@@ -531,7 +531,7 @@ items:
     track: market-events
     parallel_with: [W3-STATESYNC, W3-DISCOVERY]
     depends_on: [W1-EVENTSTREAM, W2-RECORD]
-    status: todo
+    status: done
     evidence: []
     decision: >
       Register a market handler sink that receives verified record events,
@@ -553,7 +553,7 @@ items:
     track: statesync
     parallel_with: [W3-MARKET-EVENTS, W3-DISCOVERY]
     depends_on: [W2-RECORD]
-    status: todo
+    status: done
     evidence: []
     decision: >
       Add market XRPC outbox adapters and inbound inbox adapters. Use
@@ -578,7 +578,7 @@ items:
     track: discovery
     parallel_with: [W3-MARKET-EVENTS, W3-STATESYNC]
     depends_on: [W1-REPO, W2-STATUS]
-    status: todo
+    status: doing
     evidence: []
     decision: >
       Make PDS registration/offering refresh a first-class controller action.
@@ -604,7 +604,7 @@ items:
     track: service-wiring
     parallel_with: []
     depends_on: [W3-MARKET-EVENTS, W3-STATESYNC, W3-DISCOVERY]
-    status: todo
+    status: done
     evidence: []
     decision: >
       Services read spec.comms from their component spec. XRPC mounts submit
@@ -627,7 +627,7 @@ items:
     track: app-roots
     parallel_with: []
     depends_on: [W2-IDENTITY-LOCAL, W2-IDENTITY-REMOTE, W3-SERVICE-WIRING]
-    status: todo
+    status: done
     evidence: []
     decision: >
       Replace BidderIdentityMode, gateway/SSH/network hardcoded modes and the
@@ -653,7 +653,7 @@ items:
     track: cleanup
     parallel_with: [W4-MIGRATION, W4-DOCS]
     depends_on: [W4-APP-ROOTS]
-    status: todo
+    status: doing
     evidence: []
     decision: >
       Delete BidderIdentityMode, dead CheckSignIn OAuth branch, direct
@@ -675,7 +675,7 @@ items:
     track: migration
     parallel_with: [W4-REMOVE-LEGACY, W4-DOCS]
     depends_on: [W2-RECORD, W4-APP-ROOTS]
-    status: todo
+    status: doing
     evidence: []
     decision: >
       Default omitted identity to managed associated; default comms to Both
@@ -696,7 +696,7 @@ items:
     track: docs
     parallel_with: [W4-REMOVE-LEGACY, W4-MIGRATION]
     depends_on: [W4-APP-ROOTS]
-    status: todo
+    status: doing
     evidence: []
     decision: >
       Update AGENTS.md, CONTRIBUTING.md, BIDDER_ARCH.md, GATEWAY_ARCH.md,

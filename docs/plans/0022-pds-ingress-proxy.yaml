@@ -246,7 +246,7 @@ items:
     track: contracts
     parallel_with: [W0-POLICY]
     depends_on: []
-    status: todo
+    status: done
     evidence: []
     decision: >
       Add an IngressConfig to MarketBidderSpec, MarketRequesterSpec,
@@ -275,7 +275,7 @@ items:
     track: contracts
     parallel_with: [W0-CONTRACTS]
     depends_on: []
-    status: todo
+    status: done
     evidence: []
     decision: >
       Document: PDS serviceEndpoint is scheme/host/port only; PDS ingress is
@@ -298,7 +298,7 @@ items:
     track: xrpc
     parallel_with: [W1-OPENTUNNEL, W1-EXPOSURE]
     depends_on: [W0-CONTRACTS]
-    status: todo
+    status: done
     evidence: []
     decision: >
       Supply ingressProxyHost, relayURL, hostname, identity and allowed
@@ -323,7 +323,7 @@ items:
     track: opentunnel
     parallel_with: [W1-XRPC, W1-EXPOSURE]
     depends_on: [W0-CONTRACTS]
-    status: todo
+    status: doing
     evidence: []
     decision: >
       Add a pinned opentunnel binary asset or a deterministic host command
@@ -347,7 +347,7 @@ items:
     track: exposure
     parallel_with: [W1-XRPC, W1-OPENTUNNEL]
     depends_on: [W0-CONTRACTS]
-    status: todo
+    status: done
     evidence: []
     decision: >
       Stop hardcoding IngressRef dispatcher and PublicHost
@@ -371,7 +371,7 @@ items:
     track: lifecycle
     parallel_with: [W2-PLC, W2-ALL-PDS]
     depends_on: [W1-XRPC, W1-OPENTUNNEL, W1-EXPOSURE]
-    status: todo
+    status: done
     evidence: []
     decision: >
       Appctl applies IngressProxy and the PDS ingress Exposure first, waits
@@ -397,7 +397,7 @@ items:
     track: lifecycle
     parallel_with: [W2-PDS-LIFECYCLE, W2-PLC]
     depends_on: [W2-PDS-LIFECYCLE]
-    status: todo
+    status: done
     evidence: []
     decision: >
       Enumerate and plan every Pds: bidder app, gateway app, requester app,
@@ -420,7 +420,7 @@ items:
     track: plc
     parallel_with: [W2-PDS-LIFECYCLE, W2-ALL-PDS]
     depends_on: [W2-PDS-LIFECYCLE]
-    status: todo
+    status: done
     evidence: []
     decision: >
       Add an UpdateService operation alongside UpdateHandle in the PDS PLC
@@ -444,7 +444,7 @@ items:
     track: migration
     parallel_with: [W2-PLC]
     depends_on: [W2-PDS-LIFECYCLE]
-    status: todo
+    status: doing
     evidence: []
     decision: >
       Detect PDS accounts whose atproto_pds endpoint is loopback, local, or
@@ -466,7 +466,7 @@ items:
     track: bidder
     parallel_with: [W3-GATEWAY, W3-NETWORK, W3-DEPLOY]
     depends_on: [W2-ALL-PDS]
-    status: todo
+    status: done
     evidence: []
     decision: >
       MarketBidder owns an IngressProxy selection for prod-qr and
@@ -488,7 +488,7 @@ items:
     track: gateway
     parallel_with: [W3-BIDDER, W3-NETWORK, W3-DEPLOY]
     depends_on: [W2-ALL-PDS]
-    status: todo
+    status: done
     evidence: []
     decision: >
       Gateway owns or reuses an IngressProxy for its requester PDS. Prod
@@ -509,7 +509,7 @@ items:
     track: network
     parallel_with: [W3-BIDDER, W3-GATEWAY, W3-DEPLOY]
     depends_on: [W2-ALL-PDS]
-    status: todo
+    status: done
     evidence: []
     decision: >
       Replace hardcoded xrpc-subscription in MarketNetwork with the same
@@ -530,7 +530,7 @@ items:
     track: deploy
     parallel_with: [W3-BIDDER, W3-GATEWAY, W3-NETWORK]
     depends_on: [W2-PLC]
-    status: todo
+    status: doing
     evidence: []
     decision: >
       Add provider, ingress host, opentunnel command/route and public host to
