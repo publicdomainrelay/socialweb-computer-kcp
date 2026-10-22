@@ -273,7 +273,7 @@ func (s *Service) handleSubmitAccept(w http.ResponseWriter, r *http.Request) {
 	submitEvent := s.submitEventURL(r.Context(), accept.SubmitEvent)
 	if existing, found := s.contractForAccept(r.Context(), body.AcceptURI, body.AcceptCID); found {
 		writeJSON(w, http.StatusOK, map[string]any{"id": lastSegment(existing.receiptURI), "uri": existing.receiptURI,
-			"cid": existing.receiptCID, "submitEvent": submitEvent, "alreadyAccepted": true})
+			"cid": existing.receiptCID, "submitEvent": accept.SubmitEvent, "alreadyAccepted": true})
 		return
 	}
 	bid, err := s.bidForAccept(r.Context(), accept)
@@ -292,7 +292,7 @@ func (s *Service) handleSubmitAccept(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "alreadyAccepted": true, "terminated": true,
 			"id": lastSegment(terminated.ReceiptUri), "uri": terminated.ReceiptUri, "cid": terminated.ReceiptCid,
-			"submitEvent": submitEvent})
+			"submitEvent": accept.SubmitEvent})
 		return
 	}
 	now := s.cfg.Now().UTC()
@@ -368,7 +368,7 @@ func (s *Service) handleSubmitAccept(w http.ResponseWriter, r *http.Request) {
 		RFP:         market.RecordRef{URI: accept.RFP.URI, CID: accept.RFP.CID},
 		Bid:         market.RecordRef{URI: accept.Bid.URI, CID: accept.Bid.CID},
 		Accept:      market.RecordRef{URI: body.AcceptURI, CID: body.AcceptCID},
-		SubmitEvent: submitEvent,
+		SubmitEvent: accept.SubmitEvent,
 	}, resolved, issuer)
 	if err != nil {
 		if destroyErr := s.provider.Destroy(context.WithoutCancel(r.Context()), provision.Name); destroyErr != nil {
@@ -408,7 +408,7 @@ func (s *Service) handleSubmitAccept(w http.ResponseWriter, r *http.Request) {
 		s.log.Warn("updating the bid after accept failed", "bid", bid.Name, "err", err)
 	}
 	s.contracts.Store(receiptURI, info)
-	writeJSON(w, http.StatusOK, map[string]any{"id": lastSegment(receiptURI), "uri": receiptURI, "cid": receiptCID, "submitEvent": submitEvent})
+	writeJSON(w, http.StatusOK, map[string]any{"id": lastSegment(receiptURI), "uri": receiptURI, "cid": receiptCID, "submitEvent": accept.SubmitEvent})
 }
 
 func (s *Service) handleSubmitEvent(w http.ResponseWriter, r *http.Request) {

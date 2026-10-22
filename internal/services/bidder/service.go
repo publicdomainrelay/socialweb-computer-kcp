@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/identity"
+	"github.com/bluesky-social/indigo/atproto/syntax"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -38,6 +39,8 @@ const (
 	OAuthMetadataPath = "/oauth-client-metadata.json"
 
 	DefaultCallTimeout = 20 * time.Second
+
+	SubmitEventLookupTimeout = 3 * time.Second
 
 	guestExposurePoll = 2 * time.Second
 
@@ -766,12 +769,30 @@ func (s *Service) publicURL() string {
 	return s.listeningURL()
 }
 
-func (s *Service) submitEventURL(_ context.Context, ref string) string {
+func (s *Service) submitEventURL(ctx context.Context, ref string) string {
 	ref = strings.TrimSpace(ref)
 	if strings.HasPrefix(ref, "http://") || strings.HasPrefix(ref, "https://") {
 		return ref
 	}
-	return ""
+	did, fragment, found := strings.Cut(ref, "#")
+	if !found || strings.TrimSpace(fragment) == "" || s.dir == nil {
+		return ""
+	}
+	parsed, err := syntax.ParseDID(did)
+	if err != nil {
+		return ""
+	}
+	lookupCtx, cancel := context.WithTimeout(ctx, SubmitEventLookupTimeout)
+	defer cancel()
+	ident, err := s.dir.LookupDID(lookupCtx, parsed)
+	if err != nil || ident == nil {
+		return ""
+	}
+	service, ok := ident.Services[fragment]
+	if !ok {
+		return ""
+	}
+	return strings.TrimRight(strings.TrimSpace(service.URL), "/")
 }
 
 func (s *Service) offeringEndpoint() string {
