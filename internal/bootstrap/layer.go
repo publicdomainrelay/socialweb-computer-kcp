@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"syscall"
 	"time"
@@ -174,6 +175,9 @@ func (p Params) Spec(e table.Entry, frontURL string) (hostsvc.UnitSpec, error) {
 			Exec:    []string{p.Exe, "internal", "dev-core", "--instance-dir", p.InstanceDir, "--ready-timeout", timeout.String()},
 			WorkDir: p.InstanceDir, Slice: n.CoreSlice(), Restart: hostsvc.RestartOnFailure, KillSignal: syscall.SIGTERM,
 			StopTimeout: CoreStopTimeout, After: e.After, Wants: e.Wants, Delegate: true, OOMPolicy: "continue"}
+		if password := os.Getenv("ATPROTO_PASSWORD"); password != "" {
+			spec.Env = append(spec.Env, "ATPROTO_PASSWORD="+password)
+		}
 	default:
 		return hostsvc.UnitSpec{}, fmt.Errorf("bootstrap: unknown kind %q", e.Kind)
 	}
