@@ -613,6 +613,22 @@ func (ctl *Controller) reconcileBidderAccount(ctx context.Context, u *unstructur
 		return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
 	case v1alpha1.MarketIdentityPhaseReady:
 	default:
+		switch plan.Mode {
+		case v1alpha1.MarketIdentityModeOAuthBrowser, v1alpha1.MarketIdentityModeOAuthQr, v1alpha1.MarketIdentityModeOAuthDelegated:
+			desired, err := bidderDesired(o, plan, id, ctl.c.workspace(), stateRoot, bidderDIDs, "", "", nil, false, nil)
+			if err != nil {
+				st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
+				return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
+			}
+			if err := ctl.ensureDesired(ctx, u, desired); err != nil {
+				st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, err.Error()
+				return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
+			}
+			_ = ctl.pruneDesired(ctx, owner, desired)
+			if err := ctl.ensureOAuthIdentityEndpoints(ctx, ctl.c.workspace(), BidderIdentity, serviceNameFor(ComponentKindBidder, BidderComponent)+ExposureIngressSuffix, "bidder"); err != nil {
+				return err
+			}
+		}
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for its existing-account MarketIdentity to sign in"
 		return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
 	}
