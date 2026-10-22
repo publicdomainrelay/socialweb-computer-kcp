@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,6 +23,8 @@ import (
 )
 
 const relayMaxBody = 8 << 20
+
+var ErrStableHostMismatch = errors.New("StableHostMismatch")
 
 type IngressSpec struct {
 	Workspace string
@@ -93,20 +96,17 @@ func (r *SubscriberRegistrar) Register(ctx context.Context, spec IngressSpec) (I
 	}
 	host, secure, err := r.proxyHost(spec)
 	if err != nil {
-		if strings.TrimSpace(spec.IngressAddress) == "" {
+		if address := strings.TrimSpace(spec.IngressAddress); address != "" {
+			host, secure = address, false
+		} else {
 			return nil, err
 		}
-		parsed, parseErr := url.Parse(strings.TrimSpace(spec.PublicHost))
-		if parseErr != nil || parsed.Host == "" {
-			return nil, err
-		}
-		host, secure = parsed.Host, false
 	}
 	connectHost := host
 	var httpClient *http.Client
 	var wsDialer *websocket.Dialer
 	if address := strings.TrimSpace(spec.IngressAddress); address != "" {
-		connectHost, secure = address, false
+		connectHost, secure = address, ingressSecure(address)
 	}
 	audienceHost := hostnameOnly(connectHost)
 	if dial := strings.TrimSpace(spec.IngressDial); dial != "" && connectHost != "" {
@@ -137,6 +137,7 @@ func (r *SubscriberRegistrar) Register(ctx context.Context, spec IngressSpec) (I
 	}
 	handler := r.handler(spec.Target, spec.Handler)
 	tunnel := r.tunnel(spec.Target, spec.Handler)
+	wsTarget := r.wsTarget(spec.Target)
 	subscriber, err := ingress.NewSubscriber(ctx, ingress.SubscriberConfig{
 		Label:               "exposure-" + spec.Exposure,
 		Keypair:             keypair,
@@ -147,24 +148,13 @@ func (r *SubscriberRegistrar) Register(ctx context.Context, spec IngressSpec) (I
 		Dialer:              wsDialer,
 		HandleRequest:       handler,
 		TunnelHandler:       tunnel,
+		WSTarget:            wsTarget,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("connecting the ingress subscriber: %w", err)
 	}
 	scheme := "https"
-	if !secure {
-		scheme = "http"
-	}
-	urlHost := strings.TrimSpace(spec.Hostname)
-	if base := strings.TrimSpace(spec.PublicHost); base != "" {
-		parsed, err := url.Parse(base)
-		if err != nil || parsed.Host == "" {
-			return nil, fmt.Errorf("the Exposure public host %q is not an absolute URL", base)
-		}
-		scheme, urlHost = parsed.Scheme, didToSubdomain(did)+"."+parsed.Host
-	} else if urlHost == "" {
-		urlHost = didToSubdomain(did) + "." + host
-	}
+	urlHost := didToSubdomain(did) + "." + host
 	path := normalizePath(spec.Path)
 	raw := scheme + "://" + urlHost + path
 	return &subscriberRegistration{url: raw, subscriber: subscriber}, nil
@@ -196,6 +186,21 @@ func (r *SubscriberRegistrar) proxyHost(spec IngressSpec) (string, bool, error) 
 		}
 	}
 	return "", false, fmt.Errorf("the IngressProxy component %s is not ready", name)
+}
+
+func ingressSecure(address string) bool {
+	lower := strings.ToLower(strings.TrimSpace(address))
+	switch {
+	case strings.HasPrefix(lower, "https://"), strings.HasPrefix(lower, "wss://"):
+		return true
+	case strings.HasPrefix(lower, "http://"), strings.HasPrefix(lower, "ws://"):
+		return false
+	}
+	_, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return true
+	}
+	return port == "443"
 }
 
 func endpointHost(endpoint component.Endpoint) (string, bool, bool) {
@@ -252,6 +257,17 @@ func (r *SubscriberRegistrar) handler(target component.Key, name string) func(co
 		for key, value := range request.Headers {
 			req.Header.Set(key, value)
 		}
+		if host := strings.TrimSpace(request.Headers["host"]); host != "" {
+			req.Host = host
+		}
+		if req.Host != "" {
+			if req.Header.Get("X-Forwarded-Host") == "" {
+				req.Header.Set("X-Forwarded-Host", req.Host)
+			}
+			if req.Header.Get("X-Forwarded-Proto") == "" {
+				req.Header.Set("X-Forwarded-Proto", "https")
+			}
+		}
 		recorder := httptest.NewRecorder()
 		handler.ServeHTTP(recorder, req.WithContext(component.WithCaller(req.Context(), target)))
 		result := recorder.Result()
@@ -265,6 +281,39 @@ func (r *SubscriberRegistrar) handler(target component.Key, name string) func(co
 			headers["content-type"] = contentType
 		}
 		return &ingress.Response{Status: result.StatusCode, Body: json.RawMessage(raw), ContentType: result.Header.Get("Content-Type"), Headers: headers}, nil
+	}
+}
+
+func (r *SubscriberRegistrar) wsTarget(target component.Key) func() *ingress.Target {
+	return func() *ingress.Target {
+		if r == nil || r.deps.Registry == nil {
+			return nil
+		}
+		address := ""
+		for _, name := range []string{"http", "https", ""} {
+			endpoint, ok := r.deps.Registry.Endpoint(target.Workspace, target.Kind, target.Name, name)
+			if !ok {
+				continue
+			}
+			address = strings.TrimSpace(endpoint.Address)
+			if address == "" && endpoint.URL != "" {
+				if parsed, err := url.Parse(endpoint.URL); err == nil {
+					address = parsed.Host
+				}
+			}
+			if address != "" {
+				break
+			}
+		}
+		host, port, err := net.SplitHostPort(address)
+		if err != nil || host == "" || port == "" {
+			return nil
+		}
+		value, err := strconv.Atoi(port)
+		if err != nil || value <= 0 {
+			return nil
+		}
+		return &ingress.Target{Hostname: host, Port: value}
 	}
 }
 

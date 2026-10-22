@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -269,12 +270,17 @@ func (c *ExposureController) Reconcile(ctx context.Context, dyn dynamic.Interfac
 	}
 	if err != nil {
 		c.release(name)
+		reason := "Pending"
 		status.Phase = exposurev1alpha1.ExposurePending
+		if errors.Is(err, ErrStableHostMismatch) {
+			reason = "StableHostMismatch"
+			status.Phase = exposurev1alpha1.ExposureFailed
+		}
 		status.Ready = false
 		status.URL = ""
 		status.Endpoint = ""
 		setCondition(&status.Conditions, generation, ConditionHandlerRegistered, true, "HandlerRegistered", "the target handler is registered")
-		setCondition(&status.Conditions, generation, ConditionReady, false, "Pending", err.Error())
+		setCondition(&status.Conditions, generation, ConditionReady, false, reason, err.Error())
 		return writeStatus(ctx, ri, name, &status)
 	}
 	rt.fingerprint = fingerprint
@@ -284,6 +290,9 @@ func (c *ExposureController) Reconcile(ctx context.Context, dyn dynamic.Interfac
 	status.URL = url
 	status.Endpoint = endpoint
 	setCondition(&status.Conditions, generation, ConditionHandlerRegistered, true, "HandlerRegistered", "the target handler is registered")
+	if rt.provider != "" {
+		setCondition(&status.Conditions, generation, ConditionIngressProvider, true, "ProviderReady", rt.provider)
+	}
 	setCondition(&status.Conditions, generation, ConditionReady, true, "Ready", readyMessage(rt))
 	return writeStatus(ctx, ri, name, &status)
 }
@@ -456,8 +465,19 @@ func (c *ExposureController) startIngress(ctx context.Context, exp *exposurev1al
 	if described, ok := registration.(IngressRegistrationProvider); ok {
 		provider = strings.TrimSpace(described.Provider())
 	}
+	if path := normalizePath(exp.Spec.Path); path == "" || path == "/" {
+		url = originURL(url)
+	}
 	rt := &exposureRuntime{provider: provider, close: func() { _ = registration.Close() }}
 	return rt, url, url, nil
+}
+
+func originURL(raw string) string {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return raw
+	}
+	return parsed.Scheme + "://" + parsed.Host
 }
 
 func (c *ExposureController) localTLS(spec exposurev1alpha1.ExposureTLS) (*tls.Config, error) {

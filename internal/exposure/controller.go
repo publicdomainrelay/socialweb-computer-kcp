@@ -31,6 +31,7 @@ const (
 
 	ConditionHandlerRegistered = "HandlerRegistered"
 	ConditionReady             = "Ready"
+	ConditionIngressProvider   = "IngressProvider"
 
 	DefaultIngressName = "dispatcher"
 

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -310,16 +311,119 @@ func localExposure(kind, name string, tls exposurev1alpha1.ExposureTLS, suspend 
 	return exposureDesired(kind, name, ExposureLocalSuffix, exposurev1alpha1.ExposureModeLocal, "", "", "", tls, suspend)
 }
 
-func ingressExposure(kind, name, hostname string, network *v1alpha1.MarketNetworkValue, suspend bool) desiredComponent {
-	out := exposureDesired(kind, name, ExposureIngressSuffix, exposurev1alpha1.ExposureModeIngress, hostname, "/",
-		NetworkIngressName, exposureTLS(network, true), suspend)
+const (
+	AppIngressName = "ingress"
+
+	OpenTunnelExecutable = "opentunnel"
+)
+
+func firstIngress(ingress []*v1alpha1.IngressConfig) *v1alpha1.IngressConfig {
+	for _, value := range ingress {
+		if value != nil {
+			return value
+		}
+	}
+	return nil
+}
+
+func IngressProviderFor(ingress *v1alpha1.IngressConfig) string {
+	if ingress == nil {
+		return ""
+	}
+	provider := strings.ToLower(strings.TrimSpace(ingress.Provider))
+	switch provider {
+	case v1alpha1.IngressProviderXRPCSubscription, v1alpha1.IngressProviderOpenTunnel, v1alpha1.IngressProviderIroh:
+		return provider
+	case "":
+		if ingress.OpenTunnel != nil {
+			return v1alpha1.IngressProviderOpenTunnel
+		}
+		if ingress.Xrpc != nil && strings.TrimSpace(ingress.Xrpc.IngressProxyHost) != "" {
+			return v1alpha1.IngressProviderXRPCSubscription
+		}
+	}
+	return ""
+}
+
+func IngressProxyName(ingress *v1alpha1.IngressConfig, network *v1alpha1.MarketNetworkValue) string {
+	if ingress != nil && ingress.IngressRef != nil {
+		if name := strings.TrimSpace(ingress.IngressRef.Name); name != "" {
+			return name
+		}
+	}
+	if IngressProviderFor(ingress) != "" {
+		return AppIngressName
+	}
 	if network != nil {
-		spec := out.Spec.(exposurev1alpha1.ExposureSpec)
+		return NetworkIngressName
+	}
+	return ""
+}
+
+func ingressHost(value string) string {
+	value = strings.TrimSpace(value)
+	if parsed, err := url.Parse(value); err == nil && parsed.Host != "" {
+		return parsed.Host
+	}
+	return value
+}
+
+func ingressHostname(value string) string {
+	host := ingressHost(value)
+	if name, _, err := net.SplitHostPort(host); err == nil {
+		return name
+	}
+	return strings.Trim(host, "[]")
+}
+
+func IngressProxyDesired(ws string, network *v1alpha1.MarketNetworkValue, ingress *v1alpha1.IngressConfig, suspend bool) (desiredComponent, bool) {
+	name := IngressProxyName(ingress, nil)
+	provider := IngressProviderFor(ingress)
+	if ingress == nil || name == "" || provider == "" {
+		return desiredComponent{}, false
+	}
+	spec := v1alpha1.IngressProxySpec{
+		ComponentSpec: NewComponentSpec("", network, suspend),
+		Provider:      provider,
+		PublicHost:    strings.TrimSpace(ingress.PublicHost),
+	}
+	if ingress.Xrpc != nil {
+		spec.IngressProxyHost = strings.TrimSpace(ingress.Xrpc.IngressProxyHost)
+		spec.RelayURL = strings.TrimSpace(ingress.Xrpc.RelayURL)
+		spec.RelayRef = ingress.Xrpc.RelayRef
+		spec.IdentityRef = ingress.Xrpc.IdentityRef
+	}
+	if ingress.OpenTunnel != nil {
+		spec.OpenTunnel = &v1alpha1.IngressProxyOpenTunnel{
+			Command:       append([]string(nil), ingress.OpenTunnel.Command...),
+			RouteName:     strings.TrimSpace(ingress.OpenTunnel.RouteName),
+			ProxyProtocol: strings.TrimSpace(ingress.OpenTunnel.ProxyProtocol),
+			LocalHost:     strings.TrimSpace(ingress.OpenTunnel.LocalHost),
+		}
+	}
+	if handle := ingressHostname(spec.PublicHost); handle != "" {
+		spec.Hostnames = []string{handle}
+		spec.Identity = &v1alpha1.ComponentIdentity{Handle: handle}
+	}
+	return desiredComponent{Kind: ComponentKindIngressProxy, Name: name, Spec: spec}, true
+}
+
+func ingressExposure(kind, name, hostname string, network *v1alpha1.MarketNetworkValue, suspend bool,
+	ingress ...*v1alpha1.IngressConfig) desiredComponent {
+	cfg := firstIngress(ingress)
+	ingressRef := IngressProxyName(cfg, network)
+	out := exposureDesired(kind, name, ExposureIngressSuffix, exposurev1alpha1.ExposureModeIngress, hostname, "/",
+		ingressRef, exposureTLS(network, true), suspend)
+	spec := out.Spec.(exposurev1alpha1.ExposureSpec)
+	if cfg != nil {
+		if cfg.Xrpc != nil {
+			spec.IngressAddress = ingressHost(cfg.Xrpc.IngressProxyHost)
+		}
+	} else if network != nil {
 		spec.IngressAddress = network.IngressProxyHost
 		spec.IngressDial = ingressConnectAddress(*network)
-		spec.PublicHost = network.GuestTlsUrl
-		out.Spec = spec
 	}
+	out.Spec = spec
 	return out
 }
 
@@ -337,19 +441,25 @@ func ingressConnectAddress(n v1alpha1.MarketNetworkValue) string {
 }
 
 func httpServiceExposures(ws, kind, name, handler string, network *v1alpha1.MarketNetworkValue, hostnames []string,
-	local, ingress bool, suspend bool) []desiredComponent {
+	local, ingress bool, suspend bool, ingressConfig ...*v1alpha1.IngressConfig) []desiredComponent {
 	out := []desiredComponent{serviceDesired(ws, kind, name, exposurev1alpha1.ServiceProtocolHTTP, handler, suspend)}
 	if local {
 		out = append(out, localExposure(kind, name, exposurev1alpha1.ExposureTLS{}, suspend))
 	}
 	if ingress {
-		out = append(out, ingressExposure(kind, name, firstHost(hostnames), network, suspend))
+		out = append(out, ingressExposure(kind, name, firstHost(hostnames), network, suspend, ingressConfig...))
 	}
 	return out
 }
 
-func pdsExposures(ws, name string, network *v1alpha1.MarketNetworkValue, hostnames []string, suspend bool) []desiredComponent {
-	return httpServiceExposures(ws, ComponentKindPds, name, "http", network, hostnames, true, true, suspend)
+func pdsExposures(ws, name string, network *v1alpha1.MarketNetworkValue, hostnames []string, suspend bool,
+	ingress ...*v1alpha1.IngressConfig) []desiredComponent {
+	cfg := firstIngress(ingress)
+	out := make([]desiredComponent, 0, 4)
+	if proxy, ok := IngressProxyDesired(ws, network, cfg, suspend); ok {
+		out = append(out, proxy)
+	}
+	return append(out, httpServiceExposures(ws, ComponentKindPds, name, "http", network, hostnames, true, true, suspend, cfg)...)
 }
 
 func sshExposures(ws, name string, suspend bool) []desiredComponent {

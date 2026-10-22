@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -37,6 +38,8 @@ type Config struct {
 	Port              int
 	Hostname          string
 	Hostnames         []string
+	IngressProxyHost  string
+	PublicHost        string
 	Network           *v1alpha1.MarketNetworkValue
 	RelayRef          *v1alpha1.ComponentRef
 	RelayURL          string
@@ -89,24 +92,60 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		workspace = "root"
 	}
 	cfg := Config{
-		Deps:       deps,
-		StateDir:   stateDir,
-		Workspace:  workspace,
-		Host:       DefaultHost,
-		Hostnames:  append([]string(nil), decoded.Hostnames...),
-		RelayRef:   decoded.RelayRef,
-		Provider:   decoded.Provider,
-		Iroh:       copyIroh(decoded.Iroh),
-		OpenTunnel: copyOpenTunnel(decoded.OpenTunnel),
+		Deps:             deps,
+		StateDir:         stateDir,
+		Workspace:        workspace,
+		Host:             DefaultHost,
+		Hostnames:        append([]string(nil), decoded.Hostnames...),
+		IngressProxyHost: strings.TrimSpace(decoded.IngressProxyHost),
+		PublicHost:       strings.TrimSpace(decoded.PublicHost),
+		RelayRef:         decoded.RelayRef,
+		RelayURL:         strings.TrimSpace(decoded.RelayURL),
+		Provider:         decoded.Provider,
+		Iroh:             copyIroh(decoded.Iroh),
+		OpenTunnel:       copyOpenTunnel(decoded.OpenTunnel),
 	}
 	if decoded.Network != nil {
 		network := *decoded.Network
 		cfg.Network = &network
 		cfg.PLCURL = strings.TrimRight(strings.TrimSpace(decoded.Network.PlcDirectoryUrl), "/")
-		cfg.Hostname = hostnameOnly(strings.TrimSpace(decoded.Network.IngressProxyHost))
+		if cfg.IngressProxyHost == "" {
+			cfg.IngressProxyHost = strings.TrimSpace(decoded.Network.IngressProxyHost)
+		}
+		if cfg.Hostname == "" {
+			cfg.Hostname = hostnameOnly(strings.TrimSpace(decoded.Network.IngressProxyHost))
+		}
+		if cfg.RelayURL == "" && len(decoded.Network.RelayUrls) > 0 {
+			cfg.RelayURL = strings.TrimSpace(decoded.Network.RelayUrls[0])
+		}
+	}
+	if cfg.Hostname == "" {
+		cfg.Hostname = hostnameOnly(cfg.IngressProxyHost)
+	}
+	if cfg.Hostname == "" && len(cfg.Hostnames) > 0 {
+		cfg.Hostname = hostnameOnly(strings.TrimSpace(cfg.Hostnames[0]))
 	}
 	if cfg.Hostname == "" && decoded.Identity != nil {
 		cfg.Hostname = hostnameOnly(strings.TrimSpace(decoded.Identity.Handle))
+	}
+	if cfg.Hostname == "" && decoded.IdentityRef != nil {
+		cfg.Hostname = hostnameOnly(strings.TrimSpace(decoded.IdentityRef.Did))
+	}
+	if decoded.Identity != nil && strings.TrimSpace(decoded.Identity.Did) != "" {
+		cfg.AllowedDIDs = appendValues(cfg.AllowedDIDs, decoded.Identity.Did)
+	}
+	if decoded.IdentityRef != nil && strings.TrimSpace(decoded.IdentityRef.Did) != "" {
+		cfg.AllowedDIDs = appendValues(cfg.AllowedDIDs, decoded.IdentityRef.Did)
+	}
+	if decoded.RelayRef != nil && strings.TrimSpace(decoded.RelayRef.Did) != "" {
+		cfg.AllowedDIDs = appendValues(cfg.AllowedDIDs, decoded.RelayRef.Did)
+	}
+	if host := hostnameOnly(cfg.IngressProxyHost); host != "" {
+		cfg.AllowedHosts = appendValues(cfg.AllowedHosts, host, "*."+host)
+	}
+	if host := hostnameOnly(cfg.PublicHost); host != "" {
+		cfg.AllowedHosts = appendValues(cfg.AllowedHosts, host)
+		cfg.Hostnames = appendValues(cfg.Hostnames, host)
 	}
 	if decoded.Storage != nil && decoded.Storage.DataDir != "" {
 		cfg.StateDir = decoded.Storage.DataDir
@@ -376,8 +415,18 @@ func Register(runtime *component.Runtime, identity exposure.IngressIdentity) err
 
 func buildProvider(cfg Config) (Provider, string, error) {
 	name := strings.ToLower(strings.TrimSpace(cfg.Provider))
+	if name == "" {
+		switch {
+		case cfg.OpenTunnel != nil:
+			name = v1alpha1.IngressProviderOpenTunnel
+		case strings.TrimSpace(cfg.IngressProxyHost) != "":
+			name = v1alpha1.IngressProviderXRPCSubscription
+		default:
+			return nil, "", errors.New("ingressproxy: no provider selected: set spec.provider, spec.xrpc.ingressProxyHost or spec.opentunnel")
+		}
+	}
 	switch name {
-	case "", v1alpha1.IngressProviderXRPCSubscription:
+	case v1alpha1.IngressProviderXRPCSubscription:
 		provider := xrpcsubscription.New(xrpcsubscription.Config{
 			Address:           cfg.Address,
 			Host:              cfg.Host,
@@ -404,18 +453,7 @@ func buildProvider(cfg Config) (Provider, string, error) {
 		})
 		return provider, v1alpha1.IngressProviderXRPCSubscription, nil
 	case v1alpha1.IngressProviderIroh:
-		if cfg.Iroh == nil {
-			return nil, "", errors.New("ingressproxy: provider iroh requires spec.iroh with dumbpipePath")
-		}
-		providerCfg := iroh.Config{
-			DumbpipePath: strings.TrimSpace(cfg.Iroh.DumbpipePath),
-			RelayURL:     strings.TrimSpace(cfg.Iroh.RelayURL),
-			ListenHost:   strings.TrimSpace(cfg.Iroh.ListenHost),
-		}
-		if err := providerCfg.Check(); err != nil {
-			return nil, "", err
-		}
-		return iroh.New(providerCfg), v1alpha1.IngressProviderIroh, nil
+		return nil, "", errors.New("ingressproxy: provider iroh is not supported yet; select xrpc-subscription or opentunnel")
 	case v1alpha1.IngressProviderOpenTunnel:
 		if cfg.OpenTunnel == nil {
 			return nil, "", errors.New("ingressproxy: provider opentunnel requires spec.opentunnel")
@@ -481,11 +519,40 @@ func (s *Service) Ready(ctx context.Context) error {
 func (s *Service) Endpoints() []component.Endpoint {
 	s.mu.Lock()
 	provider := s.provider
+	name := s.providerName
+	publicURL := s.publicURLLocked()
 	s.mu.Unlock()
 	if provider == nil {
 		return nil
 	}
-	return provider.Endpoints()
+	out := provider.Endpoints()
+	if name != "" {
+		out = append(out, component.Endpoint{Name: "provider", Address: name})
+	}
+	if publicURL != "" {
+		out = append(out, component.Endpoint{Name: "url", URL: publicURL})
+	}
+	return out
+}
+
+func (s *Service) publicURLLocked() string {
+	if value := strings.TrimSpace(s.cfg.PublicHost); value != "" {
+		if parsed, err := url.Parse(value); err == nil && parsed.Host != "" {
+			return parsed.Scheme + "://" + parsed.Host
+		}
+		return "https://" + hostnameOnly(value)
+	}
+	host := hostnameOnly(primaryHostname(s.cfg.Hostname, s.cfg.Hostnames))
+	if host == "" || host == "localhost" {
+		return ""
+	}
+	return "https://" + host
+}
+
+func (s *Service) Provider() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.providerName
 }
 
 func (s *Service) Stop(ctx context.Context) error {

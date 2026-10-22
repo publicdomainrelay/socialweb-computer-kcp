@@ -53,12 +53,12 @@
     "linux/amd64": {
       "status": "release",
       "owner": "plan 0006 M1-ASSETS",
-            "assets": ["bao", "deno", "dumbpipe", "external-secrets", "external-secrets-bundle", "firecracker", "k3s", "kcp", "kine", "openbao-plugin-auth-atproto", "openbao-plugin-auth-sshsig", "pasta", "postgres", "socialweb-computer-k8s-downloads", "socialweb-vmexec", "swc-userns-stage"]
+            "assets": ["bao", "deno", "dumbpipe", "external-secrets", "external-secrets-bundle", "firecracker", "k3s", "kcp", "kine", "openbao-plugin-auth-atproto", "openbao-plugin-auth-sshsig", "opentunnel", "pasta", "postgres", "socialweb-computer-k8s-downloads", "socialweb-vmexec", "swc-userns-stage"]
     },
     "linux/arm64": {
       "status": "release",
       "owner": "plan 0006 M1-ASSETS",
-            "assets": ["bao", "deno", "dumbpipe", "external-secrets", "external-secrets-bundle", "firecracker", "k3s", "kcp", "kine", "openbao-plugin-auth-atproto", "openbao-plugin-auth-sshsig", "pasta", "postgres", "socialweb-computer-k8s-downloads", "socialweb-vmexec"]
+            "assets": ["bao", "deno", "dumbpipe", "external-secrets", "external-secrets-bundle", "firecracker", "k3s", "kcp", "kine", "openbao-plugin-auth-atproto", "openbao-plugin-auth-sshsig", "opentunnel", "pasta", "postgres", "socialweb-computer-k8s-downloads", "socialweb-vmexec"]
     },
     "darwin/arm64": {"status": "seam", "owner": "plan 0012", "note": "seam: builds and vets, owned by plan 0012; vfkit is pinned, the other assets follow with the plan's M1 and M2 items", "assets": ["vfkit"]},
     "darwin/amd64": {"status": "seam", "owner": "plan 0012", "note": "seam: builds and vets, no assets, owned by plan 0012", "assets": []},
@@ -148,6 +148,20 @@
       "platforms": {
         "linux/amd64": {"treeSha256": "b9d78696a060bc30f270731679d8222a1a4645f1c6f9c30aae647be6ef85d89e", "rawBytes": 8617456, "zstdBytes": 3097638},
         "linux/arm64": {"treeSha256": "92829aed18f366df3bd3a7295e28e1a225414a56819622c37693d02a8255ca91", "rawBytes": 7248832, "zstdBytes": 2854766}
+      }
+    },
+    "opentunnel": {
+      "version": "v0.5.5",
+      "source": "github.com/anomalyco/opentunnel release v0.5.5",
+      "verify": "sha256 pinned here (GitHub's asset digest); upstream publishes a SHA256SUMS asset that names each archive",
+      "executables": {"opentunnel": "opentunnel"},
+      "fetch": {
+        "linux/amd64": {"kind": "file", "url": "https://github.com/anomalyco/opentunnel/releases/download/v0.5.5/opentunnel-linux-x64.tar.gz", "sha256": "cb51e3b425e6c61708296dc3f973c225a949f957d7c524704da6a01fa8148d85", "checksums": {"url": "https://github.com/anomalyco/opentunnel/releases/download/v0.5.5/SHA256SUMS", "name": "opentunnel-linux-x64.tar.gz"}, "archive": "tar.gz", "members": {"opentunnel": "opentunnel"}},
+        "linux/arm64": {"kind": "file", "url": "https://github.com/anomalyco/opentunnel/releases/download/v0.5.5/opentunnel-linux-arm64.tar.gz", "sha256": "183f2b3b534c8e34841503186b9bbb858d9b8d3191471cce87d8eee40facb897", "checksums": {"url": "https://github.com/anomalyco/opentunnel/releases/download/v0.5.5/SHA256SUMS", "name": "opentunnel-linux-arm64.tar.gz"}, "archive": "tar.gz", "members": {"opentunnel": "opentunnel"}}
+      },
+      "platforms": {
+        "linux/amd64": {"treeSha256": "99a811c864b492b69530cd03254c0f0bcdb995de5e1d63fe8178f37a516025ab", "rawBytes": 6654576, "zstdBytes": 2572563},
+        "linux/arm64": {"treeSha256": "537cb690e4bb5183aea3fa9a1eddc5b1e089f5516fcd40ba5e040cd56552515e", "rawBytes": 5650496, "zstdBytes": 2400434}
       }
     },
     "external-secrets-bundle": {

@@ -3,6 +3,8 @@ package opentunnel
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -25,6 +27,8 @@ import (
 const (
 	DefaultListenHost = "127.0.0.1"
 
+	DefaultCommandPath = "/usr/local/bin/opentunnel"
+
 	URLTimeout = 30 * time.Second
 
 	MinRestartBackoff = time.Second
@@ -32,7 +36,11 @@ const (
 	MaxRestartBackoff = 30 * time.Second
 )
 
-var urlPattern = regexp.MustCompile(`https://[^\s"'<>]+`)
+var (
+	urlPattern = regexp.MustCompile(`https://[^\s"'<>]+`)
+
+	routePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
+)
 
 type Config struct {
 	Command []string
@@ -63,23 +71,66 @@ func (c Config) Check() error {
 			return fmt.Errorf("ingressproxy opentunnel: command %q: %w", path, err)
 		}
 	}
+	if name := strings.TrimSpace(c.RouteName); name != "" && !routePattern.MatchString(name) {
+		return fmt.Errorf("ingressproxy opentunnel: routeName %q is not a lowercase DNS label", c.RouteName)
+	}
 	switch strings.ToLower(strings.TrimSpace(c.ProxyProtocol)) {
 	case "", "v1", "v2":
 	default:
 		return fmt.Errorf("ingressproxy opentunnel: proxyProtocol %q is not v1 or v2", c.ProxyProtocol)
 	}
 	host := strings.TrimSpace(c.LocalHost)
-	if host != "" && strings.ContainsAny(host, ":/[]") {
-		return fmt.Errorf("ingressproxy opentunnel: localHost %q is a host without a port", host)
+	if host != "" {
+		if strings.ContainsAny(host, ":/[]/ \t") {
+			return fmt.Errorf("ingressproxy opentunnel: localHost %q is a host without a port", host)
+		}
+		if net.ParseIP(host) == nil && !routePattern.MatchString(strings.ToLower(host)) {
+			return fmt.Errorf("ingressproxy opentunnel: localHost %q is not a host name or IP address", host)
+		}
 	}
 	return nil
 }
 
 func (c Config) command() []string {
-	if len(c.Command) == 0 {
-		return []string{"opentunnel"}
+	if len(c.Command) > 0 {
+		return append([]string(nil), c.Command...)
 	}
-	return append([]string(nil), c.Command...)
+	if path := strings.TrimSpace(os.Getenv("SOCIALWEB_OPENTUNNEL_PATH")); path != "" {
+		return []string{path}
+	}
+	if st, err := os.Stat(DefaultCommandPath); err == nil && !st.IsDir() && st.Mode().Perm()&0o111 != 0 {
+		return []string{DefaultCommandPath}
+	}
+	return []string{"opentunnel"}
+}
+
+func routeName(configured string, spec exposure.IngressSpec) string {
+	if name := strings.TrimSpace(configured); name != "" {
+		return name
+	}
+	label := strings.ToLower(spec.Workspace + "-" + spec.Exposure)
+	var b strings.Builder
+	lastDash := false
+	for _, r := range label {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+			lastDash = false
+		default:
+			if !lastDash && b.Len() > 0 {
+				b.WriteByte('-')
+				lastDash = true
+			}
+		}
+	}
+	name := strings.Trim(b.String(), "-")
+	if len(name) > 63 {
+		name = strings.TrimRight(name[:63], "-")
+	}
+	if name == "" {
+		return "pds"
+	}
+	return name
 }
 
 func (c Config) localHost() string {
@@ -110,6 +161,8 @@ type Provider struct {
 	stopOnce sync.Once
 
 	ready bool
+
+	failed error
 
 	registrations map[*registration]struct{}
 }
@@ -154,6 +207,7 @@ func (p *Provider) Start(ctx context.Context, deps component.Deps) error {
 	p.stopCh = make(chan struct{})
 	p.stopOnce = sync.Once{}
 	p.ready = true
+	p.failed = nil
 	p.registrations = map[*registration]struct{}{}
 	stopCh := p.stopCh
 	p.mu.Unlock()
@@ -178,9 +232,13 @@ func (p *Provider) Start(ctx context.Context, deps component.Deps) error {
 func (p *Provider) Ready(ctx context.Context) error {
 	p.mu.Lock()
 	ready := p.ready
+	failed := p.failed
 	p.mu.Unlock()
 	if !ready {
 		return errors.New("ingressproxy opentunnel: the provider is not started")
+	}
+	if failed != nil {
+		return failed
 	}
 	return nil
 }
@@ -245,6 +303,12 @@ func (p *Provider) Register(ctx context.Context, spec exposure.IngressSpec) (exp
 		_ = bridge.Close()
 		return nil, err
 	}
+	if err := p.rememberURL(spec, child.url); err != nil {
+		killChild(child.cmd)
+		cancel()
+		_ = bridge.Close()
+		return nil, err
+	}
 	reg.mu.Lock()
 	reg.cmd = child.cmd
 	reg.url = child.url + spec.Path
@@ -281,6 +345,60 @@ func (p *Provider) forget(registration *registration) {
 		delete(p.registrations, registration)
 	}
 	p.mu.Unlock()
+}
+
+func (p *Provider) rememberURL(spec exposure.IngressSpec, raw string) error {
+	origin := originOf(raw)
+	if origin == "" {
+		return fmt.Errorf("ingressproxy opentunnel: printed URL %q has no https origin", raw)
+	}
+	p.mu.Lock()
+	dir := strings.TrimSpace(p.deps.StateDir)
+	p.mu.Unlock()
+	if dir == "" {
+		return nil
+	}
+	sum := sha256.Sum256([]byte(spec.Workspace + "/" + spec.Exposure))
+	path := filepath.Join(dir, "opentunnel", hex.EncodeToString(sum[:8])+".url")
+	current, err := os.ReadFile(path)
+	switch {
+	case err == nil:
+		if previous := strings.TrimSpace(string(current)); previous != "" && !strings.EqualFold(previous, origin) {
+			return fmt.Errorf("%w: opentunnel route %q for %s/%s is %s, was %s",
+				exposure.ErrStableHostMismatch, routeName(p.cfg.RouteName, spec), spec.Workspace, spec.Exposure, origin, previous)
+		}
+		return nil
+	case !errors.Is(err, os.ErrNotExist):
+		return fmt.Errorf("ingressproxy opentunnel: reading the stable host %s: %w", path, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("ingressproxy opentunnel: the stable host dir: %w", err)
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(origin+"\n"), 0o600); err != nil {
+		return fmt.Errorf("ingressproxy opentunnel: writing the stable host: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("ingressproxy opentunnel: placing the stable host: %w", err)
+	}
+	return nil
+}
+
+func (p *Provider) rememberRestart(spec exposure.IngressSpec, raw string) error {
+	err := p.rememberURL(spec, raw)
+	p.mu.Lock()
+	p.failed = err
+	p.mu.Unlock()
+	return err
+}
+
+func originOf(raw string) string {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
+		return ""
+	}
+	return parsed.Scheme + "://" + parsed.Host
 }
 
 type registration struct {
@@ -345,14 +463,11 @@ type child struct {
 
 func (r *registration) startChild(ctx context.Context) (*child, error) {
 	args := append([]string(nil), r.args...)
-	_, port, err := net.SplitHostPort(r.bridge.Address())
-	if err != nil {
+	if _, _, err := net.SplitHostPort(r.bridge.Address()); err != nil {
 		return nil, fmt.Errorf("ingressproxy opentunnel: the loopback address %q: %w", r.bridge.Address(), err)
 	}
-	args = append(args, "route", "add", port)
-	if name := strings.TrimSpace(r.provider.cfg.RouteName); name != "" {
-		args = append(args, "--name", name)
-	}
+	args = append(args, "route", "add", r.bridge.Address())
+	args = append(args, "--name", routeName(r.provider.cfg.RouteName, r.spec))
 	switch strings.ToLower(strings.TrimSpace(r.provider.cfg.ProxyProtocol)) {
 	case "v1", "v2":
 		args = append(args, "--proxy-protocol", strings.ToLower(strings.TrimSpace(r.provider.cfg.ProxyProtocol)))
@@ -419,6 +534,12 @@ func (r *registration) supervise(ctx context.Context, first *child) {
 				}
 				continue
 			}
+			if err := r.provider.rememberRestart(r.spec, next.url); err != nil {
+				killChild(next.cmd)
+				r.log.Error("ingressproxy_opentunnel_url_changed", "workspace", r.spec.Workspace,
+					"exposure", r.spec.Exposure, "err", err.Error())
+				return
+			}
 			current = next
 			r.mu.Lock()
 			r.cmd = next.cmd
@@ -472,7 +593,7 @@ func urlIn(line string) (string, bool) {
 			continue
 		}
 		host := strings.ToLower(parsed.Hostname())
-		if host == "opentunnel.xyz" || strings.HasSuffix(host, ".opentunnel.xyz") {
+		if host != "opentunnel.xyz" && strings.HasSuffix(host, ".opentunnel.xyz") && strings.Count(host, ".") >= 2 {
 			return candidate, true
 		}
 	}
