@@ -295,3 +295,10 @@ func runVM(verb string) verbFunc {
 		return exitOK
 	}
 }
+
+func devOnly(names ...string) []string {
+	if clicfg.ReleaseBuild() {
+		return nil
+	}
+	return names
+}

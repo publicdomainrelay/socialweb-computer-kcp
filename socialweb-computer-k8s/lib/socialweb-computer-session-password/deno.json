@@ -1,9 +1,0 @@
-{
-  "name": "@publicdomainrelay/socialweb-computer-session-password",
-  "version": "0.0.0",
-  "license": "Unlicense",
-  "exports": "./mod.ts",
-  "imports": {
-    "@publicdomainrelay/http-retry-fetch": "jsr:@publicdomainrelay/http-retry-fetch@^0"
-  }
-}

@@ -15,7 +15,6 @@ onto), reruns the generators and stages the result:
   go generate ./api/...    deploy/*-apiresourceschema.yaml, deploy/*-apiexport.yaml,
                            deploy/apiresourceschema-revisions.txt, the TypeScript wire types and
                            fixtures (cmd/socialweb-apigen -list names them all)
-  deno install             deno.lock, at the root with --node-modules-dir=none
 
 It never hand-merges generated output. The generators read api/v1alpha1, internal/apigen and
 cmd/socialweb-apigen, so a conflict there must be resolved first (the script says so and stops).
@@ -71,12 +70,8 @@ fi
 before_out="$(go run ./cmd/socialweb-apigen -root . -list)" || { say "cmd/socialweb-apigen failed (above): fix what it names (for example bump Revision in api/v1alpha1/resources.go), git add it, run this again"; exit 1; }
 mapfile -t before < <(echo "$before_out" | tr ' ' '\n' | grep .)
 generated=()
-lock_conflict=0
 for p in "${conflicted[@]}"; do
-  if [ "$p" = deno.lock ]; then
-    lock_conflict=1
-    generated+=("$p")
-  elif printf '%s\n' "${before[@]}" | grep -qxF -- "$p"; then
+  if printf '%s\n' "${before[@]}" | grep -qxF -- "$p"; then
     generated+=("$p")
   fi
 done
@@ -97,23 +92,15 @@ say "go generate ./api/..."
 go generate ./api/... || { say "go generate failed (above): fix what it names (for example bump Revision in api/v1alpha1/resources.go), git add it, run this again"; exit 1; }
 mapfile -t outputs < <(go run ./cmd/socialweb-apigen -root . -list | tr ' ' '\n' | grep .)
 for p in "${generated[@]}"; do
-  [ "$p" = deno.lock ] && continue
   if ! printf '%s\n' "${outputs[@]}" | grep -qxF -- "$p"; then
     say "warn: $p was taken from one side but apigen no longer writes it; it stays as taken"
   fi
 done
 
-if [ "$lock_conflict" = 1 ]; then
-  deno="$(command -v deno || echo "$HOME/.deno/bin/deno")"
-  say "$deno install --node-modules-dir=none (refreshes deno.lock for both sides' imports)"
-  "$deno" install --node-modules-dir=none >&2
-fi
-
 stage=()
 for p in "${outputs[@]}"; do
   [ -e "$p" ] && stage+=("$p")
 done
-[ "$lock_conflict" = 0 ] || stage+=(deno.lock)
 git add -- "${stage[@]}"
 say "regenerated and staged ${#stage[@]} generated paths (${#generated[@]} were conflicted)"
 

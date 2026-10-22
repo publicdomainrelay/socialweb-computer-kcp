@@ -1,9 +1,0 @@
-{
-  "name": "@publicdomainrelay/guest-identity-abc",
-  "version": "0.0.0",
-  "license": "Unlicense",
-  "exports": "./mod.ts",
-  "imports": {
-    "@publicdomainrelay/guest-identity-common": "jsr:@publicdomainrelay/guest-identity-common@^0"
-  }
-}

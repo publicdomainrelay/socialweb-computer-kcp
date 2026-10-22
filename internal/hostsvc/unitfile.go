@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/systemdunit"
 )
 
 const (
@@ -84,83 +86,88 @@ func RenderInstalled(spec UnitSpec, o InstallOptions) (InstalledFile, error) {
 	if oom == "" {
 		oom = "stop"
 	}
-	var b strings.Builder
-	line := func(k, v string) { fmt.Fprintf(&b, "%s=%s\n", k, v) }
-	b.WriteString("[Unit]\n")
-	line("Description", desc)
+	var unitEntries []systemdunit.KeyValue
+	add := func(k, v string) {
+		unitEntries = append(unitEntries, systemdunit.KV(k, v))
+	}
+	add("Description", desc)
 	if len(spec.After) > 0 {
-		line("After", strings.Join(spec.After, " "))
+		add("After", strings.Join(spec.After, " "))
 	}
 	if len(spec.Wants) > 0 {
-		line("Wants", strings.Join(spec.Wants, " "))
+		add("Wants", strings.Join(spec.Wants, " "))
 	}
-	line("StartLimitIntervalSec", "0")
-	b.WriteString("\n[Service]\n")
-	line("Type", "exec")
-	line("Slice", slice)
-	line("KillMode", "control-group")
-	line("OOMPolicy", oom)
-	line("Restart", string(restart))
+	add("StartLimitIntervalSec", "0")
+	service := []systemdunit.KeyValue{
+		systemdunit.KV("Type", "exec"),
+		systemdunit.KV("Slice", slice),
+		systemdunit.KV("KillMode", "control-group"),
+		systemdunit.KV("OOMPolicy", oom),
+		systemdunit.KV("Restart", string(restart)),
+	}
 	if restart != RestartNo {
-		line("RestartSec", "2")
+		service = append(service, systemdunit.KV("RestartSec", "2"))
 	}
 	if spec.WorkDir != "" {
-		line("WorkingDirectory", spec.WorkDir)
+		service = append(service, systemdunit.KV("WorkingDirectory", spec.WorkDir))
 	}
 	for _, e := range spec.Env {
 		q, err := quoteArg(e)
 		if err != nil {
 			return InstalledFile{}, fmt.Errorf("%s: %w", spec.Name, err)
 		}
-		line("Environment", q)
+		service = append(service, systemdunit.KV("Environment", q))
 	}
-	line("EnvironmentFile", o.EnvFile)
-	line("ExecStart", exe+" $"+ArgsVar)
+	service = append(service,
+		systemdunit.KV("EnvironmentFile", o.EnvFile),
+		systemdunit.KV("ExecStart", exe+" $"+ArgsVar))
 	if spec.KillSignal != 0 {
-		line("KillSignal", signalName(int(spec.KillSignal)))
+		service = append(service, systemdunit.KV("KillSignal", signalName(int(spec.KillSignal))))
 	}
 	if spec.StopTimeout > 0 {
-		line("TimeoutStopSec", strconv.FormatInt(int64(spec.StopTimeout.Seconds()), 10))
+		service = append(service, systemdunit.KV("TimeoutStopSec", strconv.FormatInt(int64(spec.StopTimeout.Seconds()), 10)))
 	}
 	if spec.Output.StdoutFile != "" {
-		line("StandardOutput", "append:"+spec.Output.StdoutFile)
+		service = append(service, systemdunit.KV("StandardOutput", "append:"+spec.Output.StdoutFile))
 	}
 	if spec.Output.StderrFile != "" {
-		line("StandardError", "append:"+spec.Output.StderrFile)
+		service = append(service, systemdunit.KV("StandardError", "append:"+spec.Output.StderrFile))
 	}
 	if spec.Limits.MemoryMax > 0 {
-		line("MemoryMax", strconv.FormatUint(spec.Limits.MemoryMax, 10))
-		line("MemorySwapMax", "0")
+		service = append(service, systemdunit.KV("MemoryMax", strconv.FormatUint(spec.Limits.MemoryMax, 10)),
+			systemdunit.KV("MemorySwapMax", "0"))
 	}
 	if spec.Delegate {
-		line("Delegate", "yes")
+		service = append(service, systemdunit.KV("Delegate", "yes"))
 	}
 	if spec.Limits.TasksMax > 0 {
-		line("TasksMax", strconv.FormatUint(spec.Limits.TasksMax, 10))
+		service = append(service, systemdunit.KV("TasksMax", strconv.FormatUint(spec.Limits.TasksMax, 10)))
 	}
 	if spec.Limits.CPUWeight > 0 {
-		line("CPUWeight", strconv.FormatUint(spec.Limits.CPUWeight, 10))
+		service = append(service, systemdunit.KV("CPUWeight", strconv.FormatUint(spec.Limits.CPUWeight, 10)))
 	}
 	if spec.FDStore > 0 {
-		line("FileDescriptorStoreMax", strconv.Itoa(spec.FDStore))
-		line("NotifyAccess", "main")
+		service = append(service, systemdunit.KV("FileDescriptorStoreMax", strconv.Itoa(spec.FDStore)),
+			systemdunit.KV("NotifyAccess", "main"))
 	}
-	b.WriteString("\n[Install]\n")
-	line("WantedBy", WantedBy)
+	unit := systemdunit.Unit{Sections: []systemdunit.Section{
+		{Name: "Unit", Entries: unitEntries},
+		{Name: "Service", Entries: service},
+		{Name: "Install", Entries: []systemdunit.KeyValue{systemdunit.KV("WantedBy", WantedBy)}},
+	}}
 	env := ArgsVar + "=" + strings.Join(args, " ") + "\n"
-	return InstalledFile{Unit: []byte(b.String()), Env: []byte(env), EnvPath: o.EnvFile}, nil
+	return InstalledFile{Unit: unit.Render(), Env: []byte(env), EnvPath: o.EnvFile}, nil
 }
 
 func RenderDropIn(after, wants []string) []byte {
-	var b strings.Builder
-	b.WriteString("[Unit]\n")
+	var entries []systemdunit.KeyValue
 	if len(after) > 0 {
-		fmt.Fprintf(&b, "After=%s\n", strings.Join(after, " "))
+		entries = append(entries, systemdunit.KV("After", strings.Join(after, " ")))
 	}
 	if len(wants) > 0 {
-		fmt.Fprintf(&b, "Wants=%s\n", strings.Join(wants, " "))
+		entries = append(entries, systemdunit.KV("Wants", strings.Join(wants, " ")))
 	}
-	return []byte(b.String())
+	return systemdunit.Unit{Sections: []systemdunit.Section{{Name: "Unit", Entries: entries}}}.Render()
 }
 
 func ParseArgsEnv(b []byte) ([]string, error) {

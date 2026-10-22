@@ -18,7 +18,10 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 
+	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
+	policyv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/policy/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpapply"
@@ -44,8 +47,23 @@ var (
 	MarketBidderGVR    = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "marketbidders"}
 	MarketRequesterGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "marketrequesters"}
 	GatewayGVR         = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "gateways"}
-	DenoPodGVR         = schema.GroupVersionResource{Group: "deno.computer", Version: "v1alpha1", Resource: "denopods"}
 	HostProcessGVR     = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "hostprocesses"}
+
+	BidderGVR            = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "bidders"}
+	GuestControlPlaneGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "guestcontrolplanes"}
+	PdsGVR               = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "pds"}
+	RequesterGVR         = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "requesters"}
+	GatewayAPIGVR        = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "gatewayapis"}
+	SshServerGVR         = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "sshservers"}
+	PlcGVR               = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "plcs"}
+	RelayGVR             = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "relays"}
+	IngressProxyGVR      = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "ingressproxies"}
+	DispatcherTLSGVR     = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "dispatchertlses"}
+
+	PolicyEngineGVR      = schema.GroupVersionResource{Group: policyv1alpha1.GroupName, Version: policyv1alpha1.Version, Resource: "policyengines"}
+	PolicyWorkflowGVR    = schema.GroupVersionResource{Group: policyv1alpha1.GroupName, Version: policyv1alpha1.Version, Resource: "policyworkflows"}
+	PolicyWorkflowRunGVR = schema.GroupVersionResource{Group: policyv1alpha1.GroupName, Version: policyv1alpha1.Version, Resource: "policyworkflowruns"}
+	PolicyTriggerGVR     = schema.GroupVersionResource{Group: policyv1alpha1.GroupName, Version: policyv1alpha1.Version, Resource: "policytriggers"}
 )
 
 func GVRFor(k v1alpha1.ApplicationKind) (schema.GroupVersionResource, error) {
@@ -76,6 +94,9 @@ type Config struct {
 	SignInGuard  SignInGuard
 	StoreUsage   func() *v1alpha1.StoreUsage
 	TTLReport    func() *v1alpha1.TTLStatus
+	Dynamic      dynamic.Interface
+	Handlers     *component.HandlerRegistry
+	RemotePDS    *pdsv1alpha1.RemotePDS
 	Log          *slog.Logger
 }
 
@@ -110,7 +131,6 @@ type Controller struct {
 	applied  map[string]int64
 	rotated  map[string]int64
 	written  map[string]string
-	placed   map[string]map[bool][]placedRef
 	network  *networks
 	stateDir atomic.Pointer[v1alpha1.StateDirUsage]
 	gc       atomic.Pointer[v1alpha1.GCStatus]
@@ -130,6 +150,9 @@ func clusterConfig(base *rest.Config, ws string) *rest.Config {
 }
 
 func (ctl *Controller) client(ws string, gvr schema.GroupVersionResource) (dynamic.NamespaceableResourceInterface, error) {
+	if ctl.c.Dynamic != nil {
+		return ctl.c.Dynamic.Resource(gvr), nil
+	}
 	dc, err := dynamic.NewForConfig(clusterConfig(ctl.restCfg, ws))
 	if err != nil {
 		return nil, err
@@ -159,12 +182,16 @@ func applySet(ctx context.Context, restCfg *rest.Config, base string, log *slog.
 }
 
 func New(c Config) (*Controller, error) {
-	restCfg, err := kcpserver.FrontRestConfig(c.Kubeconfig)
-	if err != nil {
-		return nil, err
+	var restCfg *rest.Config
+	if c.Dynamic == nil {
+		var err error
+		restCfg, err = kcpserver.FrontRestConfig(c.Kubeconfig)
+		if err != nil {
+			return nil, err
+		}
 	}
 	ctl := &Controller{c: c, restCfg: restCfg, applied: map[string]int64{}, rotated: map[string]int64{}, written: map[string]string{},
-		placed: map[string]map[bool][]placedRef{}, quotaApplied: map[string]string{}, quotaFailed: map[string]string{}}
+		quotaApplied: map[string]string{}, quotaFailed: map[string]string{}}
 	ctl.network = newNetworks(ctl)
 	return ctl, nil
 }

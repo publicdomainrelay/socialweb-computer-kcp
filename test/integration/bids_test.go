@@ -22,16 +22,12 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 )
 
-var (
-	bidGVR          = schema.GroupVersionResource{Group: "socialweb.computer", Version: "v1alpha1", Resource: "bids"}
-	marketBidderGVR = schema.GroupVersionResource{Group: "socialweb.computer", Version: "v1alpha1", Resource: "marketbidders"}
-)
+var bidGVR = schema.GroupVersionResource{Group: "socialweb.computer", Version: "v1alpha1", Resource: "bids"}
 
 const (
-	bidScaleOut    = 4 * time.Minute
-	bidReplay      = 90 * time.Second
-	bidderRestart  = 2 * time.Minute
-	bidderRootName = "app"
+	bidScaleOut   = 4 * time.Minute
+	bidderRestart = 2 * time.Minute
+	restartSettle = 15 * time.Second
 )
 
 func (n *Network) bidderClient(i int) (dynamic.Interface, error) {
@@ -65,37 +61,12 @@ func bidderBids(ctx context.Context, dyn dynamic.Interface) ([]v1alpha1.Bid, err
 	return out, nil
 }
 
-func bidderMarket(ctx context.Context, dyn dynamic.Interface) (*v1alpha1.MarketLoopStatus, error) {
-	u, err := dyn.Resource(marketBidderGVR).Get(ctx, bidderRootName, metav1.GetOptions{})
-	if err != nil {
-		return nil, err
-	}
-	var o v1alpha1.MarketBidder
-	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &o); err != nil {
-		return nil, err
-	}
-	return o.Status.Market, nil
-}
-
 func describeBids(bids []v1alpha1.Bid) string {
 	var b strings.Builder
 	for _, x := range bids {
 		fmt.Fprintf(&b, "\n  %s rfp=%s phase=%s vm=%s", x.Name, x.Spec.Rfp.Uri, x.Status.Phase, x.Status.ComputeVM)
 	}
 	return b.String()
-}
-
-func maxCursor(m *v1alpha1.MarketLoopStatus) int64 {
-	var c int64
-	if m == nil {
-		return 0
-	}
-	for _, s := range m.Streams {
-		if s.Cursor > c {
-			c = s.Cursor
-		}
-	}
-	return c
 }
 
 func TestBidderAnswersEachRFPOnceAcrossARestart(t *testing.T) {
@@ -177,40 +148,68 @@ func TestBidderAnswersEachRFPOnceAcrossARestart(t *testing.T) {
 			t.Fatalf("no Won Bid points at ComputeVM %s:%s", describeVM(vm), describeBids(bids))
 		}
 	}
-	before, err := bidderMarket(ctx, dyn)
-	if err != nil || before == nil {
-		t.Fatalf("the bidder's root object has no status.market: %v", err)
-	}
-	if before.Bids != int64(len(bids)) {
-		t.Fatalf("status.market.bids is %d for %d Bid(s):%s", before.Bids, len(bids), describeBids(bids))
-	}
-	t.Logf("before the restart: %d Bid(s), status.market %+v", len(bids), *before)
+	t.Logf("before the restart: %d Bid(s) for %d RFP(s), %d Won for %d ComputeVM(s)", len(bids), len(rfps), len(won), len(vms))
 
-	r := n.Run("restart-bidder", bidderRestart, "dev", "restart", "--instance", n.Instance, "--state-dir", n.StateRoot, "bidder-1/bidder")
-	if r.Err != nil {
-		t.Fatalf("dev restart bidder-1/bidder: %v\n%s", r.Err, r.Tail(10))
+	pid, _, err := n.bidderProcess(0)
+	if err != nil {
+		t.Fatal(err)
 	}
-	cursor := maxCursor(before)
-	deadline = time.Now().Add(bidReplay)
-	for {
-		m, err := bidderMarket(ctx, dyn)
-		if err == nil && m != nil && maxCursor(m) >= cursor && m.UpdatedAt > before.UpdatedAt {
-			break
+	if err := n.signal("KILL", pid); err != nil {
+		t.Fatal(err)
+	}
+	newPID, _, err := n.waitBidderBack(0, pid, bidderRestart)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := n.WaitBidderReady(0, bidderRestart); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("bidder %d killed and back as %d", pid, newPID)
+
+	for deadline := time.Now().Add(restartSettle); time.Now().Before(deadline); time.Sleep(time.Second) {
+		if err := n.health(); err != nil {
+			t.Fatalf("waiting for the restarted bidder: %v", err)
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("the restarted bidder's stream did not reach cursor %d inside %s", cursor, bidReplay)
+		settled, err := bidderBids(ctx, dyn)
+		if err != nil {
+			t.Fatal(err)
 		}
-		time.Sleep(time.Second)
+		if len(settled) != len(bids) {
+			t.Fatalf("the restart changed the Bids from %d to %d:%s", len(bids), len(settled), describeBids(settled))
+		}
 	}
 	after, err := bidderBids(ctx, dyn)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(after) != len(bids) {
-		t.Fatalf("the replay after the restart changed the Bids from %d to %d:%s", len(bids), len(after), describeBids(after))
+		t.Fatalf("the restart changed the Bids from %d to %d:%s", len(bids), len(after), describeBids(after))
 	}
-	m, _ := bidderMarket(ctx, dyn)
-	if m == nil || m.Bids != before.Bids {
-		t.Fatalf("status.market.bids moved across the restart: before %d, after %+v", before.Bids, m)
+	afterRfps := map[string]string{}
+	afterWon := map[string]string{}
+	for _, b := range after {
+		if prev, ok := afterRfps[b.Spec.Rfp.Uri]; ok {
+			t.Fatalf("two Bids answer RFP %s after the restart: %s and %s", b.Spec.Rfp.Uri, prev, b.Name)
+		}
+		afterRfps[b.Spec.Rfp.Uri] = b.Name
+		if b.Status.Phase == v1alpha1.BidPhaseWon {
+			afterWon[b.Status.ComputeVM] = b.Name
+		}
+	}
+	if len(afterRfps) != len(rfps) || len(afterWon) != len(won) {
+		t.Fatalf("after the restart: %d RFP(s) and %d Won Bid(s); before %d and %d:%s",
+			len(afterRfps), len(afterWon), len(rfps), len(won), describeBids(after))
+	}
+	vmsAfter, err := n.BidderVMs(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vmsAfter) != len(vms) {
+		t.Fatalf("the restart changed the ComputeVMs from %d to %d", len(vms), len(vmsAfter))
+	}
+	for _, vm := range vmsAfter {
+		if afterWon[vm.Name] == "" {
+			t.Fatalf("no Won Bid points at ComputeVM %s after the restart:%s", describeVM(vm), describeBids(after))
+		}
 	}
 }

@@ -9,7 +9,6 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/capabilities"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clicfg"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 )
 
 func runT(t *testing.T, env clicfg.MapEnv, goos string, args ...string) (int, string, string) {
@@ -61,25 +60,5 @@ func TestVersionJSON(t *testing.T) {
 	var v versionInfo
 	if code != 0 || json.Unmarshal([]byte(out), &v) != nil || v.Name != "socialweb-computer" || v.GOOS != "linux" || v.Go == "" {
 		t.Fatalf("exit %d %q", code, out)
-	}
-}
-
-func TestAPhaseSelectionTakesNamesAndOrderedRanges(t *testing.T) {
-	ix, err := manifests.Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	s, _ := ix.Set("market-network")
-	got, err := selectPhases(s, "workspaces..rbac-relay,verifier")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if names := strings.Join(phaseNames(manifests.Set{Phases: got}), " "); names != "workspaces rbac-global rbac-relay verifier" {
-		t.Fatalf("selected %s", names)
-	}
-	for _, bad := range []string{"nope", "relay..workspaces", "workspaces..nope"} {
-		if _, err := selectPhases(s, bad); err == nil {
-			t.Errorf("%q selected phases", bad)
-		}
 	}
 }

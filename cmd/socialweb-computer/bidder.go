@@ -26,17 +26,15 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/progress"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/bidder"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/denoruntime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/request"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/tsbundle"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vmruntime"
 )
 
 const bidderIdentityWait = 5 * time.Minute
 
 var bidderOptions = slices.Concat([]string{backendOpt, "profile", "network", "name", "instance", "state-dir", "fg", "ready-timeout",
-	"network-timeout", "market-network-file", "bidder-policy", "bidder-policy-args", "bidder-options", "kcp-path", "kine-path", "deno-path", "bao-path", "openbao-plugin-dir", "asset-cache", "unit-prefix", "kcp-front-address", "guest-image-release-base"},
-	devVMOptions, devOnly(tsbundle.SourceRootOption))
+	"network-timeout", "market-network-file", "bidder-policy", "bidder-policy-args", "bidder-options", "kcp-path", "kine-path", "bao-path", "openbao-plugin-dir", "asset-cache", "unit-prefix", "kcp-front-address", "guest-image-release-base"},
+	devVMOptions)
 
 type bidderRun struct {
 	a              *app
@@ -480,11 +478,6 @@ func (r *bidderRun) installedCore(ctx context.Context) int {
 		}
 		exes[x.name] = e
 	}
-	deno, err := r.a.denoExe(ctx, r.vals)
-	if err != nil {
-		return r.a.fail(exitRefused, "%s: %v", verb, err)
-	}
-	exes[bidder.ExeDeno] = deno
 	plugins, err := r.a.openBaoPluginExes(r.vals)
 	if err != nil {
 		return r.a.fail(exitRefused, "%s: %v", verb, err)
@@ -497,14 +490,6 @@ func (r *bidderRun) installedCore(ctx context.Context) int {
 		return r.a.fail(exitFailed, "%s: %v", verb, err)
 	}
 	exes[bidder.ExeCore] = devinstance.Executable{Path: exe}
-	src, err := tsbundle.Select(r.vals)
-	if err != nil {
-		return r.a.fail(exitRefused, "%s: the TypeScript closure: %v", verb, err)
-	}
-	closure, err := src.Prepare(state)
-	if err != nil {
-		return r.a.fail(exitFailed, "%s: %v", verb, err)
-	}
 	grace, err := vmStopGrace(r.vals)
 	if err != nil {
 		return r.a.fail(exitRefused, "%s: %v", verb, err)
@@ -539,8 +524,7 @@ func (r *bidderRun) installedCore(ctx context.Context) int {
 		return r.a.fail(exitFailed, "%s: the VM runtime: %v", verb, err)
 	}
 	unit, _ := r.a.env.LookupEnv(devsup.EnvUnit)
-	os.Setenv(denoruntime.WatchListEnv, "false")
-	cfg := bidder.CoreConfig{StateDir: state, Prefix: prefix, Handle: r.handle, Executables: exes, Closure: closure, Spec: spec, VM: vm,
+	cfg := bidder.CoreConfig{StateDir: state, Prefix: prefix, Handle: r.handle, Executables: exes, Spec: spec, VM: vm,
 		ComputeVM: computevm.Config{Handle: r.handle, Runtime: rt, Manager: m, Log: r.a.log}, FrontAddress: r.vals.String("kcp-front-address"),
 		ReadyTimeout: r.readyTimeout, Unit: unit, Log: r.a.log}
 	if err := bidder.RunCore(ctx, cfg, m); err != nil {

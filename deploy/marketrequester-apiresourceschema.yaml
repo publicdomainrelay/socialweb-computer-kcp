@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-9.marketrequesters.socialweb.computer
+  name: v1alpha1-11.marketrequesters.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -30,6 +30,8 @@ spec:
             properties:
               profile:
                 type: string
+              suspend:
+                type: boolean
               network:
                 type: object
                 properties:
@@ -122,9 +124,6 @@ spec:
                     type: integer
                     format: int32
                   policyWorkflowRuns:
-                    type: integer
-                    format: int32
-                  denoRuns:
                     type: integer
                     format: int32
             required:

@@ -122,8 +122,6 @@ func (n *Network) issuerURLs(i int) []string {
 	return out
 }
 
-func (n *Network) bidderCore(i int) (int, error) { return n.coreOf(n.bidderDir(i)) }
-
 func TestARentedVMSurvivesABidderKillAndRestart(t *testing.T) {
 	t.Parallel()
 	n := StartNetwork(t, NetworkOptions{Bidders: 1})
@@ -162,35 +160,9 @@ func TestARentedVMSurvivesABidderKillAndRestart(t *testing.T) {
 			_, _, err = n.waitBidderBack(0, pid, restartBackWait)
 			return err
 		}},
-		{"dev restart of the bidder DenoPod", func() error {
+		{"dev restart of the bidder component", func() error {
 			r := n.Run("restart-bidder", restartBackWait, "dev", "restart", "--instance", n.Instance, "--state-dir", n.StateRoot, "bidder-1/bidder")
 			return r.Err
-		}},
-		{"kill -9 of the bidder core", func() error {
-			pid, _, err := n.bidderProcess(0)
-			if err != nil {
-				return err
-			}
-			core, err := n.bidderCore(0)
-			if err != nil {
-				return err
-			}
-			if err := n.signal("KILL", core); err != nil {
-				return err
-			}
-			for deadline := time.Now().Add(restartBackWait); ; {
-				if again, err := n.bidderCore(0); err == nil && again != core {
-					break
-				}
-				if time.Now().After(deadline) {
-					return fmt.Errorf("the bidder's core %d did not come back inside %s", core, restartBackWait)
-				}
-				time.Sleep(time.Second)
-			}
-			if now, _, err := n.bidderProcess(0); err != nil || now != pid {
-				return fmt.Errorf("the bidder process %d did not outlive its core (the network's deno runtime runs it): now %d, %v", pid, now, err)
-			}
-			return nil
 		}},
 	}
 	for _, c := range cases {

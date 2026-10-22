@@ -44,9 +44,21 @@ type ClusterStatus struct {
 
 	Instance string `json:"instance,omitempty"`
 
+	FrontAddress string `json:"frontAddress,omitempty"`
+
+	HeldPorts []ClusterHeldPort `json:"heldPorts,omitempty"`
+
 	NodeExpiry *int64 `json:"nodeExpiry,omitempty"`
 
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+}
+
+type ClusterHeldPort struct {
+	Port int32 `json:"port"`
+
+	Purpose string `json:"purpose,omitempty"`
+
+	HolderRef string `json:"holderRef,omitempty"`
 }
 
 const (

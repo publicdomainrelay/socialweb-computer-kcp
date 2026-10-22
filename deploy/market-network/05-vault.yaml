@@ -7,7 +7,7 @@ spec:
     name: bao
     sha256: ""
   clients:
-    - name: denoruntime
+    - name: components
       policies: ["network-pki"]
       tokenTTL: 768h
       tokenMaxTTL: 768h

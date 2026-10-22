@@ -80,7 +80,7 @@ func TestFinalizerAdd(t *testing.T) {
 }
 
 func TestFinalizersOf(t *testing.T) {
-	body := []byte(`{"kind":"DenoRun","metadata":{"name":"r","finalizers":["a","b"]}}`)
+	body := []byte(`{"kind":"PolicyWorkflowRun","metadata":{"name":"r","finalizers":["a","b"]}}`)
 	finalizers, err := FinalizersOf(body)
 	if err != nil {
 		t.Fatal(err)

@@ -390,6 +390,11 @@ func (a *Applier) applyOne(ctx context.Context, ri dynamic.ResourceInterface, u 
 	if u.GetKind() == schemaKind {
 		return a.applySchema(ctx, ri, u, live, c)
 	}
+	if live != nil && u.GroupVersionKind().Group == "apis.kcp.io" && u.GetKind() == "APIBinding" &&
+		reflect.DeepEqual(u.Object["spec"], live.Object["spec"]) {
+		c.Action = Unchanged
+		return c, nil
+	}
 	if len(a.opts.Labels) > 0 {
 		u = u.DeepCopy()
 		labels := u.GetLabels()

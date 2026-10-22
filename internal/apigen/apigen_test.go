@@ -58,19 +58,3 @@ func TestTheRevisionLockRefusesAChangedSpecUnderAnOldName(t *testing.T) {
 		t.Fatalf("the lock forgot a revision: %v", lock)
 	}
 }
-
-func TestUpperSnake(t *testing.T) {
-	for in, want := range map[string]string{
-		"FinalizerNodeClaim":       "FINALIZER_NODE_CLAIM",
-		"GroupName":                "GROUP_NAME",
-		"Version":                  "VERSION",
-		"ConditionTenantPathShut":  "CONDITION_TENANT_PATH_SHUT",
-		"FinalizerAtprotoIdentity": "FINALIZER_ATPROTO_IDENTITY",
-		"NodeClaimPhase":           "NODE_CLAIM_PHASE",
-		"URLPath":                  "URL_PATH",
-	} {
-		if got := UpperSnake(in); got != want {
-			t.Errorf("UpperSnake(%q) = %q, want %q", in, got, want)
-		}
-	}
-}

@@ -33,12 +33,6 @@
       "description": "Extraction root of embedded assets (dev: the per-user $XDG_CACHE_HOME/socialweb-computer/runtime when unset)",
       "env": "SOCIALWEB_ASSET_CACHE"
     },
-    "source-root": {
-      "type": "string",
-      "description": "dev builds: the socialweb-computer-kcp checkout whose TypeScript runs (holds deno.json and deploy/ts-entries.yaml); unset walks up from the working directory, then the executable's. Release builds have no such option and run the embedded closure",
-      "env": "SOCIALWEB_COMPUTER_SOURCE_ROOT",
-      "build": "dev"
-    },
     "asset-gc-window": {
       "type": "string",
       "description": "dev gc: an asset dir used within this window is kept (Go duration)",
@@ -62,7 +56,7 @@
     },
     "app-values": {
       "type": "string",
-      "description": "dev up --profile market-network: a YAML file merged over deploy/apps/market-network/market-network.values.yaml (keys bidder and gateway: the NetworkApp fields every bidder or the gateway gets, e.g. bidder.firecracker)",
+      "description": "dev up --profile market-network: a YAML file merged over the built-in market-network defaults (keys bidder and gateway: the NetworkApp fields every bidder or the gateway gets, e.g. bidder.firecracker)",
       "env": "SOCIALWEB_DEV_APP_VALUES"
     },
     "network-timeout": {
@@ -105,14 +99,9 @@
       "description": "Directory holding the OpenBao plugin executables (openbao-plugin-auth-sshsig) an OpenBaoServer's spec.plugins names (dev build: explicit, never PATH, optional; a release build extracts its embedded plugins)",
       "env": "SOCIALWEB_OPENBAO_PLUGIN_DIR"
     },
-    "deno-path": {
-      "type": "string",
-      "description": "Absolute path of the pinned deno the core runs every DenoPod on (dev build: explicit, never PATH; a release build extracts its embedded deno)",
-      "env": "SOCIALWEB_DENO_PATH"
-    },
     "openbao-addr": {
       "type": "string",
-      "description": "dev up: URL of the OpenBao server the core's deno runtime provisions OpenBao namespaces in and issues DenoPod serving certificates from (unset: DenoPods serve plain HTTP)",
+      "description": "dev up: URL of the OpenBao server the core provisions OpenBao namespaces in and issues component serving certificates from (unset: components serve plain HTTP)",
       "env": "SOCIALWEB_OPENBAO_ADDR"
     },
     "openbao-token-file": {
@@ -507,7 +496,7 @@
     },
     "bidder-options": {
       "type": "string",
-      "description": "run bidder: hono-bidder options, written as after -- (for example \"--bid-ttl-sec 1800 --offering-refresh-sec 60\"), each an options entry of market-bidder in deploy/apps/option-map.yaml; they become MarketBidder spec.options and so the bidder DenoPod's argv. Set it in config.json of an installed bidder; an option after -- wins. Values are split on spaces: a value with a space goes in its own key (bidder-policy-args)",
+      "description": "run bidder: hono-bidder options, written as after -- (for example \"--bid-ttl-sec 1800 --offering-refresh-sec 60\"), each an options entry of market-bidder in deploy/apps/option-map.yaml; they become MarketBidder spec.options and so the bidder component's argv. Set it in config.json of an installed bidder; an option after -- wins. Values are split on spaces: a value with a space goes in its own key (bidder-policy-args)",
       "env": "SOCIALWEB_BIDDER_OPTIONS"
     },
     "gateway-spec-file": {

@@ -1,9 +1,0 @@
-{
-  "name": "@publicdomainrelay/rbac-atproto",
-  "version": "0.0.0",
-  "license": "Unlicense",
-  "exports": "./mod.ts",
-  "imports": {
-    "@publicdomainrelay/oidc-issuer-abc": "jsr:@publicdomainrelay/oidc-issuer-abc@^0"
-  }
-}

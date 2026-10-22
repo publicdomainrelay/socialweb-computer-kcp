@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -51,51 +52,104 @@ func (c Config) log() *slog.Logger {
 }
 
 func EnsureSelfSigned(dir string) (string, string, error) {
-	cert, key := filepath.Join(dir, CertName), filepath.Join(dir, KeyName)
-	if st, err := os.Stat(cert); err == nil && st.Size() > 0 {
-		if st, err := os.Stat(key); err == nil && st.Size() > 0 {
-			return cert, key, nil
+	return EnsurePair(dir, CertName, KeyName, func() ([]byte, []byte, error) {
+		priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		if err != nil {
+			return nil, nil, err
 		}
-	}
+		serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 127))
+		if err != nil {
+			return nil, nil, err
+		}
+		now := time.Now()
+		tmpl := &x509.Certificate{SerialNumber: serial, Subject: pkix.Name{CommonName: SelfSignedCN},
+			NotBefore: now.Add(-time.Minute), NotAfter: now.Add(SelfSignedLife), DNSNames: SelfSignedNames,
+			IPAddresses: []net.IP{net.IPv4(127, 0, 0, 1), net.IPv6loopback}, KeyUsage: x509.KeyUsageDigitalSignature,
+			ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, BasicConstraintsValid: true}
+		der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &priv.PublicKey, priv)
+		if err != nil {
+			return nil, nil, err
+		}
+		kder, err := x509.MarshalECPrivateKey(priv)
+		if err != nil {
+			return nil, nil, err
+		}
+		return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}),
+			pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: kder}), nil
+	})
+}
+
+func EnsurePair(dir, certName, keyName string, generate func() ([]byte, []byte, error)) (string, string, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", "", err
 	}
-	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	unlock, err := lockDir(dir)
 	if err != nil {
 		return "", "", err
 	}
-	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 127))
+	defer unlock()
+	cert, key := filepath.Join(dir, certName), filepath.Join(dir, keyName)
+	if pairOK(cert, key) {
+		return cert, key, nil
+	}
+	certPEM, keyPEM, err := generate()
 	if err != nil {
 		return "", "", err
 	}
-	now := time.Now()
-	tmpl := &x509.Certificate{SerialNumber: serial, Subject: pkix.Name{CommonName: SelfSignedCN},
-		NotBefore: now.Add(-time.Minute), NotAfter: now.Add(SelfSignedLife), DNSNames: SelfSignedNames,
-		IPAddresses: []net.IP{net.IPv4(127, 0, 0, 1), net.IPv6loopback}, KeyUsage: x509.KeyUsageDigitalSignature,
-		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, BasicConstraintsValid: true}
-	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &priv.PublicKey, priv)
-	if err != nil {
+	if err := writeFile(key, keyPEM, 0o600); err != nil {
 		return "", "", err
 	}
-	kder, err := x509.MarshalECPrivateKey(priv)
-	if err != nil {
-		return "", "", err
-	}
-	if err := writeFile(key, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: kder}), 0o600); err != nil {
-		return "", "", err
-	}
-	if err := writeFile(cert, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o644); err != nil {
+	if err := writeFile(cert, certPEM, 0o644); err != nil {
 		return "", "", err
 	}
 	return cert, key, nil
 }
 
+func pairOK(cert, key string) bool {
+	if st, err := os.Stat(cert); err != nil || st.Size() == 0 {
+		return false
+	}
+	if st, err := os.Stat(key); err != nil || st.Size() == 0 {
+		return false
+	}
+	_, err := tls.LoadX509KeyPair(cert, key)
+	return err == nil
+}
+
+func lockDir(dir string) (func(), error) {
+	file, err := os.OpenFile(filepath.Join(dir, ".tls.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX); err != nil {
+		file.Close()
+		return nil, err
+	}
+	return func() {
+		_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+		_ = file.Close()
+	}, nil
+}
+
 func writeFile(path string, b []byte, mode os.FileMode) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, b, mode); err != nil {
+	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	name := tmp.Name()
+	defer os.Remove(name)
+	if _, err := tmp.Write(b); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(mode); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(name, path)
 }
 
 func Fingerprint(certFile string) (string, error) {

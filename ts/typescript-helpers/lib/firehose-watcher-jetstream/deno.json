@@ -1,9 +1,0 @@
-{
-  "name": "@publicdomainrelay/firehose-watcher-jetstream",
-  "version": "0.0.0",
-  "license": "Unlicense",
-  "exports": "./mod.ts",
-  "imports": {
-    "@publicdomainrelay/firehose-watcher-abc": "jsr:@publicdomainrelay/firehose-watcher-abc@^0"
-  }
-}

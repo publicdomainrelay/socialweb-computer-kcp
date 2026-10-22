@@ -3,7 +3,6 @@ package appctl
 import (
 	"fmt"
 	"io/fs"
-	"slices"
 	"strings"
 
 	"sigs.k8s.io/yaml"
@@ -92,29 +91,10 @@ func optionArgs(app, want string, opts []v1alpha1.ApplicationOption) ([]string, 
 	if len(opts) == 0 {
 		return nil, nil
 	}
-	m, err := LoadOptionMap()
-	if err != nil {
-		return nil, err
-	}
-	a, ok := m.app(app)
-	if !ok {
-		return nil, fmt.Errorf("appctl: %s maps no option of %s", OptionMapPath, app)
-	}
 	var out []string
 	for _, o := range opts {
-		i := slices.IndexFunc(a.Options, func(x OptionMapping) bool { return x.Name == o.Name })
-		if i < 0 {
-			return nil, fmt.Errorf("appctl: %s has no option --%s (%s)", a.Entry, o.Name, OptionMapPath)
-		}
-		switch to := a.Options[i].To; to {
-		case want:
-		case MapToOptions, MapToRequester:
-			continue
-		default:
-			return nil, fmt.Errorf("appctl: --%s of %s is not an options entry: it maps to %s", o.Name, a.Entry, to)
-		}
 		if len(o.Value) > maxOptionValue {
-			return nil, fmt.Errorf("appctl: --%s of %s is longer than %d bytes", o.Name, a.Entry, maxOptionValue)
+			return nil, fmt.Errorf("appctl: --%s of %s is longer than %d bytes", o.Name, app, maxOptionValue)
 		}
 		switch o.Value {
 		case "true":
@@ -134,21 +114,19 @@ type AppArg struct {
 }
 
 func ParseAppArgs(app string, args []string) ([]AppArg, error) {
-	m, err := LoadOptionMap()
-	if err != nil {
-		return nil, err
-	}
-	a, ok := m.app(app)
-	if !ok {
-		return nil, fmt.Errorf("appctl: %s maps no option of %s", OptionMapPath, app)
+	if len(args) == 0 {
+		return nil, nil
 	}
 	var out []AppArg
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if !strings.HasPrefix(arg, "--") || arg == "--" {
-			return nil, fmt.Errorf("appctl: %q is no option of %s; pass --name value or --name=value", arg, a.Entry)
+			return nil, fmt.Errorf("appctl: %q is no option of %s; pass --name value or --name=value", arg, app)
 		}
 		name, value, hasValue := strings.Cut(strings.TrimPrefix(arg, "--"), "=")
+		if name == "" {
+			return nil, fmt.Errorf("appctl: %s has an option with no name", app)
+		}
 		if !hasValue {
 			value = "true"
 			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "--") {
@@ -156,23 +134,10 @@ func ParseAppArgs(app string, args []string) ([]AppArg, error) {
 				value = args[i]
 			}
 		}
-		j := slices.IndexFunc(a.Options, func(x OptionMapping) bool { return x.Name == name })
-		if j < 0 {
-			return nil, fmt.Errorf("appctl: %s has no option --%s (%s)", a.Entry, name, OptionMapPath)
+		if len(value) > maxOptionValue {
+			return nil, fmt.Errorf("appctl: --%s of %s is longer than %d bytes", name, app, maxOptionValue)
 		}
-		switch to := a.Options[j].To; to {
-		case MapToRemoved:
-			return nil, fmt.Errorf("appctl: --%s of %s is removed (%s)", name, a.Entry, a.Options[j].Reason)
-		case MapToState:
-			return nil, fmt.Errorf("appctl: --%s of %s is state the application keeps in its own vault and state dir, never an option", name, a.Entry)
-		case MapToProfile, MapToListener:
-			return nil, fmt.Errorf("appctl: --%s of %s is set by the application's profile (%s)", name, a.Entry, to)
-		default:
-			if len(value) > maxOptionValue {
-				return nil, fmt.Errorf("appctl: --%s of %s is longer than %d bytes", name, a.Entry, maxOptionValue)
-			}
-			out = append(out, AppArg{Name: name, Value: value, To: to})
-		}
+		out = append(out, AppArg{Name: name, Value: value, To: MapToOptions})
 	}
 	return out, nil
 }

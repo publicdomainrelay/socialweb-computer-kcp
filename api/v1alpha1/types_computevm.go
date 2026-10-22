@@ -213,6 +213,8 @@ const (
 	ConditionRuntimeObserved = "RuntimeObserved"
 
 	ConditionGuestReported = "GuestReported"
+
+	ConditionMarketReported = "MarketReported"
 )
 
 const FinalizerComputeVM = "computevm.socialweb.computer/release"

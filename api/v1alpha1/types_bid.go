@@ -113,10 +113,20 @@ type BidStatus struct {
 	Terminated *BidTerminated `json:"terminated,omitempty"`
 
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	PublishAttempts int `json:"publishAttempts,omitempty"`
+
+	LastError string `json:"lastError,omitempty"`
 }
 
 const (
 	BidConditionComplete = "Complete"
 
 	BidConditionFailed = "Failed"
+
+	BidConditionPublished = "Published"
+
+	BidConditionExpired = "Expired"
+
+	BidConditionStalled = "Stalled"
 )

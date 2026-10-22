@@ -16,11 +16,10 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/irohdial"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/gatewayssh"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/request"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/tsbundle"
 )
 
 var gatewaySshOptions = slices.Concat([]string{backendOpt, "profile", "network", "name", "instance", "state-dir", "fg", "ready-timeout",
-	"network-timeout", "kcp-path", "kine-path", "deno-path", "bao-path", "dumbpipe-path", "asset-cache"}, devOnly(tsbundle.SourceRootOption))
+	"network-timeout", "kcp-path", "kine-path", "bao-path", "dumbpipe-path", "asset-cache"})
 
 type gatewaySshRun struct {
 	a              *app

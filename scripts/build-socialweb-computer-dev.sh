@@ -161,44 +161,6 @@ done
 say "assets staged ($(elapsed)s)"
 
 hostkey="${hostplat/\//_}"
-deno_blob="$(blob_of "$hostplat" deno)"
-deno_dir="$dev_root/deno/$(sha_of "$deno_blob")"
-if [ ! -x "$deno_dir/deno" ]; then
-  rm -rf "$dev_root/deno"
-  mkdir -p "$deno_dir"
-  zstd -dc "$deno_blob" | tar -x -C "$deno_dir"
-fi
-[ -x "$deno_dir/deno" ] || die "the staged deno blob for $hostplat holds no deno"
-
-(cd "$root" && go build -trimpath -o "$dev_root/bin/socialweb-tsbundle" ./cmd/socialweb-tsbundle)
-ts_paths=(ts socialweb-computer-k8s deno.json deno.lock deploy/ts-entries.yaml)
-ts_key="$(
-  {
-    sha_of "$dev_root/bin/socialweb-tsbundle"
-    echo "$deno_dir"
-    git -C "$root" ls-files -s -- "${ts_paths[@]}"
-    git -C "$root" diff HEAD --binary -- "${ts_paths[@]}"
-    (cd "$root" && git ls-files -o --exclude-standard -z -- "${ts_paths[@]}" | xargs -0 -r git hash-object --)
-  } | sha256sum | cut -d' ' -f1
-)"
-if [ -f "$dev_root/closure/manifest.json.zst" ] && [ "$(cat "$dev_root/closure/key" 2>/dev/null)" = "$ts_key" ]; then
-  say "closure tree $(jq -r .treeSha256 "$dev_root/tsbundle.json") reused: no TypeScript input changed ($(elapsed)s)"
-else
-  work="$dev_root/closure-work"
-  for d in tree probe-bundle probe-state probe-home; do
-    chmod -R u+w "$work/$d" 2>/dev/null || true
-    rm -rf "${work:?}/$d"
-  done
-  mkdir -p "$work"
-  rm -rf "$dev_root/closure"
-  say "TypeScript closure of the working tree (pinned deno $hostplat, warm DENO_DIR in $work)"
-  (cd "$root" && "$dev_root/bin/socialweb-tsbundle" -source-root "$root" -deno "$deno_dir/deno" -probe=false \
-    -work "$work" -out "$dev_root/closure" >"$dev_root/tsbundle.json" 2>"$dev_root/tsbundle.log") \
-    || die "the closure build failed: $(tail -5 "$dev_root/tsbundle.log")"
-  echo "$ts_key" >"$dev_root/closure/key"
-  say "closure tree $(jq -r .treeSha256 "$dev_root/tsbundle.json") ($(elapsed)s)"
-fi
-
 source_root="$root"
 [ -z "$publish" ] || source_root="$publish/src"
 stamp="github.com/johnandersen777/socialweb-computer-kcp/internal/buildstamp"
@@ -214,9 +176,6 @@ for plat in "${platforms[@]}"; do
   {
     for asset in $(jq -r --arg p "$plat" '.platforms[$p].assets[]' "$versions"); do
       jq -n --arg k "$root/internal/assets/blobs/$key/$asset.tar.zst" --arg v "$(blob_of "$plat" "$asset")" '{($k): $v}'
-    done
-    for f in closure.tar.zst manifest.json.zst; do
-      jq -n --arg k "$root/internal/tsbundle/closure/$key/$f" --arg v "$dev_root/closure/$f" '{($k): $v}'
     done
   } | jq -s '{Replace: add}' >"$overlay"
   say "go build $plat"
@@ -235,7 +194,7 @@ if [ -n "$publish" ]; then
   mv -f "$publish/bin/socialweb-computer.new" "$publish/bin/socialweb-computer"
   chmod a+rx "$publish/bin" "$publish/bin/socialweb-computer"
   mirror "$publish"
-  say "published $publish/bin/socialweb-computer, TypeScript from $publish/src"
+  say "published $publish/bin/socialweb-computer, source from $publish/src"
 fi
 if [[ " ${platforms[*]} " == *" $hostplat "* ]]; then
   "$dev_root/$hostkey/socialweb-computer" version | tee "$dev_root/$hostkey/version.txt"

@@ -78,6 +78,9 @@ func schemaNode(s *Schema) *yaml.Node {
 	if s.Items != nil {
 		pairs = append(pairs, "items", schemaNode(s.Items))
 	}
+	if s.AdditionalProperties != nil {
+		pairs = append(pairs, "additionalProperties", schemaNode(s.AdditionalProperties))
+	}
 	if s.PreserveUnknown {
 		pairs = append(pairs, "x-kubernetes-preserve-unknown-fields", boolean(true))
 	}

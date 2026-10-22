@@ -101,6 +101,14 @@ type ComputeContractNodeJoin struct {
 	Cluster string `json:"cluster"`
 
 	Meshd *ComputeContractMeshd `json:"meshd,omitempty"`
+
+	NodeAgent *ComputeContractNodeAgent `json:"nodeAgent,omitempty"`
+}
+
+type ComputeContractNodeAgent struct {
+	DownloadBase string `json:"downloadBase"`
+
+	Pins []ComputeContractMeshdPin `json:"pins"`
 }
 
 type ComputeContractMeshd struct {
@@ -131,6 +139,16 @@ const (
 	ComputeContractFailed ComputeContractPhase = "Failed"
 )
 
+type ComputeContractRelease struct {
+	StartedAt string `json:"startedAt,omitempty"`
+
+	Deadline string `json:"deadline,omitempty"`
+
+	Attempts int `json:"attempts,omitempty"`
+
+	LastError string `json:"lastError,omitempty"`
+}
+
 type ComputeContractStatus struct {
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
@@ -153,4 +171,18 @@ type ComputeContractStatus struct {
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	Execution *ExecutionStatus `json:"execution,omitempty"`
+
+	Release *ComputeContractRelease `json:"release,omitempty"`
 }
+
+const (
+	ComputeContractConditionResumed = "Resumed"
+
+	ComputeContractConditionProgressing = "Progressing"
+
+	ComputeContractConditionHeld = "Held"
+
+	ComputeContractConditionReleaseAcknowledged = "ReleaseAcknowledged"
+
+	ComputeContractConditionReleaseFailed = "ReleaseFailed"
+)

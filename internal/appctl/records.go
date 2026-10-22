@@ -26,12 +26,8 @@ func (ctl *Controller) releaseRecords(ctx context.Context, recordsWs, podsWs, ow
 		return 0, err
 	}
 	pdsUp := false
-	if pods, err := ctl.ownedPods(ctx, podsWs, owner); err == nil {
-		for i := range pods {
-			if v := podViewOf(podsWs, &pods[i]); v.Name == PdsComponent && v.Ready {
-				pdsUp = true
-			}
-		}
+	if v, ok, err := ctl.GetComponentIn(ctx, podsWs, ComponentKindPds, PdsComponent); err == nil && ok && v.Status.Ready {
+		pdsUp = true
 	}
 	for _, o := range list.Items {
 		switch {

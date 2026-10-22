@@ -17,7 +17,7 @@ type Output struct {
 }
 
 func Generate(root string) ([]Output, error) {
-	m, err := BuildV1alpha1(root)
+	models, err := Build(root)
 	if err != nil {
 		return nil, err
 	}
@@ -31,70 +31,35 @@ func Generate(root string) ([]Output, error) {
 	}
 
 	var out []Output
-	for _, r := range m.Resources {
-		data, err := m.APIResourceSchema(r)
-		if err != nil {
-			return nil, err
+	for _, m := range models {
+		for _, r := range m.Resources {
+			data, err := m.APIResourceSchema(r)
+			if err != nil {
+				return nil, err
+			}
+			name, hash, err := SpecHash(data)
+			if err != nil {
+				return nil, err
+			}
+			if err := lock.Admit(name, hash); err != nil {
+				return nil, err
+			}
+			out = append(out, Output{Path: SchemaFile(r), Data: data})
 		}
-		name, hash, err := SpecHash(data)
-		if err != nil {
-			return nil, err
+		for _, e := range m.Exports() {
+			data, err := m.APIExport(e)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, Output{Path: ExportFile(e), Data: data})
 		}
-		if err := lock.Admit(name, hash); err != nil {
-			return nil, err
-		}
-		out = append(out, Output{Path: SchemaFile(r), Data: data})
-	}
-	for _, e := range m.Exports() {
-		data, err := m.APIExport(e)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, Output{Path: ExportFile(e), Data: data})
 	}
 	lockOut, err := lock.Marshal(RevisionOrder(lockData)...)
 	if err != nil {
 		return nil, err
 	}
 	out = append(out, Output{Path: RevisionLockFile, Data: lockOut})
-	for _, target := range TSTargets {
-		generated, err := generateTSTarget(root, m, target)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, generated...)
-	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
-	return out, nil
-}
-
-func generateTSTarget(root string, m *Model, target TSTarget) ([]Output, error) {
-	sub, err := m.Subset(target.Exports)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", target.Dir, err)
-	}
-	ts, err := sub.TypeScript()
-	if err != nil {
-		return nil, err
-	}
-	out := []Output{{Path: target.Dir + "/mod.ts", Data: ts}}
-	if target.Fixtures == "" {
-		return out, nil
-	}
-	entries, err := os.ReadDir(filepath.Join(root, filepath.FromSlash(target.Fixtures)))
-	if err != nil {
-		return nil, err
-	}
-	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(target.Fixtures), e.Name()))
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, Output{Path: target.FixturesDir + "/" + e.Name(), Data: data})
-	}
 	return out, nil
 }
 

@@ -1,9 +1,0 @@
-{
-  "name": "@publicdomainrelay/pds-write-budget-abc",
-  "version": "0.0.0",
-  "license": "Unlicense",
-  "exports": "./mod.ts",
-  "imports": {
-    "@publicdomainrelay/http-retry-common": "jsr:@publicdomainrelay/http-retry-common@^0"
-  }
-}

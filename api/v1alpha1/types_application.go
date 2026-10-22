@@ -168,8 +168,6 @@ type ApplicationQuota struct {
 	NodeClaims int32 `json:"nodeClaims,omitempty"`
 
 	PolicyWorkflowRuns int32 `json:"policyWorkflowRuns,omitempty"`
-
-	DenoRuns int32 `json:"denoRuns,omitempty"`
 }
 
 type QuotaUsage struct {
@@ -386,6 +384,8 @@ type MarketBidderList struct {
 type MarketBidderSpec struct {
 	Profile string `json:"profile"`
 
+	Suspend bool `json:"suspend,omitempty"`
+
 	Network *MarketNetworkValue `json:"network,omitempty"`
 
 	Identity ApplicationIdentity `json:"identity"`
@@ -423,6 +423,8 @@ type MarketRequesterList struct {
 type MarketRequesterSpec struct {
 	Profile string `json:"profile"`
 
+	Suspend bool `json:"suspend,omitempty"`
+
 	Network *MarketNetworkValue `json:"network,omitempty"`
 
 	Identity ApplicationIdentity `json:"identity"`
@@ -451,6 +453,8 @@ type GatewayList struct {
 
 type GatewaySpec struct {
 	Profile string `json:"profile"`
+
+	Suspend bool `json:"suspend,omitempty"`
 
 	Network *MarketNetworkValue `json:"network,omitempty"`
 
@@ -503,6 +507,8 @@ type SshGatewayList struct {
 type SshGatewaySpec struct {
 	Profile string `json:"profile"`
 
+	Suspend bool `json:"suspend,omitempty"`
+
 	Network *MarketNetworkValue `json:"network,omitempty"`
 
 	BidderDids []string `json:"bidderDids,omitempty"`
@@ -531,6 +537,8 @@ type MarketNetworkList struct {
 
 type MarketNetworkSpec struct {
 	Profile string `json:"profile"`
+
+	Suspend bool `json:"suspend,omitempty"`
 
 	GuestLabel string `json:"guestLabel,omitempty"`
 

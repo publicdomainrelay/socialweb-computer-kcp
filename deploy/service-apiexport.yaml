@@ -1,0 +1,16 @@
+apiVersion: apis.kcp.io/v1alpha2
+kind: APIExport
+metadata:
+  name: exposures
+spec:
+  resources:
+    - group: exposure.socialweb.computer
+      name: services
+      schema: v1alpha1-1.services.exposure.socialweb.computer
+      storage:
+        crd: {}
+    - group: exposure.socialweb.computer
+      name: exposures
+      schema: v1alpha1-3.exposures.exposure.socialweb.computer
+      storage:
+        crd: {}

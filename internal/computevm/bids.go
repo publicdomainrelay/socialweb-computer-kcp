@@ -20,8 +20,6 @@ const (
 	BidFinishEvery = time.Minute
 	BidLinkEvery   = 10 * time.Second
 	WonUnboundWait = time.Hour
-
-	acceptAnnotation = "socialweb.computer/accept"
 )
 
 var BidGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "bids"}
@@ -112,7 +110,7 @@ func (ct *Controller) linkBids(ctx context.Context, vms []unstructured.Unstructu
 	}
 	byAccept := map[string]string{}
 	for name, vm := range loose {
-		if accept, _, _ := strings.Cut(vm.GetAnnotations()[acceptAnnotation], "#"); accept != "" {
+		if accept, _, _ := strings.Cut(vm.GetAnnotations()[AcceptAnnotation], "#"); accept != "" {
 			byAccept[accept] = name
 		}
 	}

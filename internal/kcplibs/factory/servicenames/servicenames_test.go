@@ -18,8 +18,8 @@ func pod(name, namespace, cluster string, env map[string]string) *unstructured.U
 		values[key] = value
 	}
 	return &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": "deno.computer/v1alpha1",
-		"kind":       "DenoPod",
+		"apiVersion": "socialweb.computer/v1alpha1",
+		"kind":       "Pds",
 		"metadata": map[string]any{
 			"name":        name,
 			"namespace":   namespace,

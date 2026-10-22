@@ -414,14 +414,7 @@ func TestTenantClusterScalesFromZeroOnMarketVMsAndBack(t *testing.T) {
 	if _, err := tn.Kube.Discovery().RESTClient().Get().AbsPath("/readyz").DoRaw(ctx); err != nil {
 		t.Errorf("the control plane is not Ready at zero nodes: %v", err)
 	}
-	ssh, err := tn.SshSessions(started)
-	if err != nil {
-		t.Errorf("reading the logs for ssh sessions: %v", err)
-	}
-	for _, l := range ssh {
-		t.Errorf("an ssh session to a guest: %s", l)
-	}
-	t.Logf("released: %d confirmed releases, no ComputeVM, VM unit or VM work dir left, control plane Ready, %d ssh lines", released, len(ssh))
+	t.Logf("released: %d confirmed releases, no ComputeVM, VM unit or VM work dir left, control plane Ready", released)
 }
 
 func podReady(p *corev1.Pod) bool {

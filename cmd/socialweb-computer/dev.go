@@ -21,7 +21,6 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clicfg"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/denorun"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devcore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devsup"
@@ -29,7 +28,6 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/pgunit"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/bidder"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/denoruntime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/gatewaykcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/versions"
 )
@@ -399,14 +397,6 @@ func bringUp(ctx context.Context, a *app, vals clicfg.Values, host bool) (upRepo
 			return upReport{}, a.fail(exitRefused, "dev up: %v", err)
 		}
 	}
-	denoExe, err := a.denoExe(ctx, vals)
-	if err != nil {
-		return upReport{}, a.fail(exitRefused, "dev up: %v", err)
-	}
-	sourceRoot, err := closureSourceRoot(vals)
-	if err != nil {
-		return upReport{}, a.fail(exitRefused, "dev up: %v", err)
-	}
 	var baoExe devinstance.Executable
 	if standIns == nil && (assets.Release() || vals.String("bao-path") != "" || composes) {
 		if baoExe, err = a.devExe(ctx, vals, "bao", "bao-path"); err != nil {
@@ -528,7 +518,7 @@ func bringUp(ctx context.Context, a *app, vals clicfg.Values, host bool) (upRepo
 		rec.Worktree = ""
 	}
 	rec.BaseWorkspace = vals.String("kcp-base-workspace")
-	rec.Executables = map[string]devinstance.Executable{"kcp": kcpExe, "kine": kineExe, "postgres": pgExe, denorun.Executable: denoExe, "socialweb-computer": {Path: exe}}
+	rec.Executables = map[string]devinstance.Executable{"kcp": kcpExe, "kine": kineExe, "postgres": pgExe, "socialweb-computer": {Path: exe}}
 	if baoExe.Path != "" {
 		rec.Executables["bao"] = baoExe
 	}
@@ -541,7 +531,6 @@ func bringUp(ctx context.Context, a *app, vals clicfg.Values, host bool) (upRepo
 	for name, e := range pluginExes {
 		rec.Executables[name] = e
 	}
-	rec.SourceRoot = sourceRoot
 	rec.OpenBao = nil
 	if addr := vals.String("openbao-addr"); addr != "" {
 		tokenFile := vals.String("openbao-token-file")
@@ -933,28 +922,18 @@ func runDevCore(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 	if err != nil {
 		return a.fail(exitRefused, "internal dev-core: ready-timeout: %v", err)
 	}
-	os.Setenv(denoruntime.WatchListEnv, "false")
-	var deno denoruntime.Config
-	if rec.SharedKcp == "" {
-		if deno, err = a.coreDenoRuntime(vals, rec, timeout); err != nil {
-			return a.fail(exitFailed, "internal dev-core: %v", err)
-		}
-	}
-	if rec.Profile == bootstrap.ProfileMarketNetwork && rec.OpenBao == nil {
-		deno.OpenBaoFrom = appctl.NetworkOpenBao(rec.AdminKubeconfig, rec.BaseWorkspace)
-	}
 	m, err := a.instanceManager(ctx, rec)
 	if err != nil {
 		return a.fail(exitFailed, "internal dev-core: %v", err)
 	}
 	defer m.Close()
 	if rec.Gateway != nil {
-		if err := a.runGatewayChild(ctx, rec, deno, m, timeout); err != nil && !errors.Is(err, context.Canceled) {
+		if err := a.runGatewayChild(ctx, rec, m, timeout); err != nil && !errors.Is(err, context.Canceled) {
 			return a.fail(exitFailed, "internal dev-core: the gateway child %s: %v", rec.Layout.ID, err)
 		}
 		return exitOK
 	}
-	cfg := devcore.Config{Layout: rec.Layout, ReadyTimeout: timeout, Log: a.log, DenoRuntime: &deno, SignInGuard: bidder.CheckSignIn}
+	cfg := devcore.Config{Layout: rec.Layout, ReadyTimeout: timeout, Log: a.log, SignInGuard: bidder.CheckSignIn}
 	if rec.VM != nil {
 		rt, vm, err := a.instanceVMRuntime(ctx, rec)
 		if err != nil {

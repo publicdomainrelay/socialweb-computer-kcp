@@ -37,9 +37,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/providermain"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/denoruntime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsfront"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/tsbundle"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vaultlayout"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vaultmain"
 )
@@ -62,7 +60,6 @@ const (
 	ExeKine            = "kine"
 	ExePostgres        = "postgres"
 	ExeBao             = "bao"
-	ExeDeno            = "deno"
 	ExeExternalSecrets = "external-secrets"
 	ExeESOBundle       = "external-secrets-bundle"
 	ExeDumbpipe        = "dumbpipe"
@@ -79,7 +76,6 @@ type Config struct {
 	Prefix              string
 	Backend             hostsvc.Backend
 	Executables         map[string]devinstance.Executable
-	Closure             tsbundle.Prepared
 	Spec                v1alpha1.GatewaySpec
 	FrontAddress        string
 	TLSAddress          string
@@ -238,12 +234,10 @@ func Run(ctx context.Context, c Config, m hostsvc.Manager) error {
 	app := c.app()
 	c.log().Info("the gateway application instance starts: lock, kcp store, kine, front, active slot, sets, root vault, members",
 		"state", c.StateDir, "prefix", l.UnitPrefix(), "backend", string(c.Backend), "units", app.Names().UnitPrefix())
-	deno := denoruntime.Config{StateDir: c.StateDir, Deno: c.Executables[ExeDeno].Path, Kubeconfig: l.FrontKubeconfig(), Closure: c.Closure,
-		Unit: c.Unit, ApplyTimeout: ApplyTimeout, Log: c.Log, EnforceMemory: c.Backend == hostsvc.BackendSystemdUser}
-	return run(ctx, c, l, &deno, &app, m)
+	return run(ctx, c, l, &app, m)
 }
 
-func RunChild(ctx context.Context, c Config, l devinstance.Layout, deno denoruntime.Config, m hostsvc.Manager) error {
+func RunChild(ctx context.Context, c Config, l devinstance.Layout, m hostsvc.Manager) error {
 	c.StateDir = l.StateDir
 	if err := os.MkdirAll(l.KcpDir(), 0o700); err != nil {
 		return err
@@ -253,10 +247,10 @@ func RunChild(ctx context.Context, c Config, l devinstance.Layout, deno denorunt
 	}
 	c.log().Info("a gateway child application of a market network starts: its workspace of the network's kcp, sets, root vault, members",
 		"state", c.StateDir, "instance", l.ID, "root", c.RootName)
-	return run(ctx, c, l, &deno, nil, m)
+	return run(ctx, c, l, nil, m)
 }
 
-func run(ctx context.Context, c Config, l devinstance.Layout, deno *denoruntime.Config, app *table.App, m hostsvc.Manager) error {
+func run(ctx context.Context, c Config, l devinstance.Layout, app *table.App, m hostsvc.Manager) error {
 	reg := &listeners{addr: map[string]string{}, kind: map[string]string{}}
 	g := &gateway{c: c, l: l, reg: reg}
 	if n := c.Spec.Network; n != nil && n.CaBundleRef != "" && os.Getenv("SSL_CERT_FILE") == "" {
@@ -285,7 +279,8 @@ func run(ctx context.Context, c Config, l devinstance.Layout, deno *denoruntime.
 		}
 	}
 	return devcore.Run(ctx, devcore.Config{Layout: l, ReadyTimeout: c.ReadyTimeout, Log: c.Log, Application: app, FrontAddress: c.FrontAddress,
-		DenoRuntime: deno, WebApp: &appctl.WebApp{FrontKubeconfig: g.memberKubeconfig(),
+		TLSCertFile: c.TLSCert, TLSKeyFile: c.TLSKey,
+		WebApp: &appctl.WebApp{FrontKubeconfig: g.memberKubeconfig(),
 			ClusterCADir: filepath.Join(c.StateDir, "clusterprovider", clusterstack.PublicCADirName),
 			DownloadsDir: c.Executables[ExeWebDownloads].Path},
 		OnComponents: reg.components, Before: g.before, Members: g.members, Listeners: reg.report}, m)
@@ -560,7 +555,7 @@ func (g *gateway) members(ctx context.Context, rec devinstance.Record) error {
 	start(member{"clusterprovider", func(ctx context.Context) error {
 		return exitErr(providermain.Main(ctx, g.invocation(env, nil, "serve", "provider")))
 	}})
-	log.Info("the gateway's members run in this process; the app controller renders the "+appctl.WebAppComponent+" web app as a DenoPod", "xrpc", gw)
+	log.Info("the gateway's members run in this process; the app controller renders the "+appctl.WebAppComponent+" web app as a component", "xrpc", gw)
 	err = <-ended
 	cancel()
 	if err == nil {

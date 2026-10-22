@@ -1,7 +1,0 @@
-{
-  "name": "@publicdomainrelay/market-abc",
-  "version": "0.0.0",
-  "license": "Unlicense",
-  "imports": {},
-  "exports": "./mod.ts"
-}

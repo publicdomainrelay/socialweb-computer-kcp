@@ -26,19 +26,9 @@ var WaitKinds = map[string]WaitKind{
 		Resource: schema.GroupVersionResource{Group: "apis.kcp.io", Version: "v1alpha2", Resource: "apibindings"},
 		For:      map[string]string{"Ready": ""},
 	},
-	"OpenBao": {
-		Resource:   schema.GroupVersionResource{Group: "deno.computer", Version: "v1alpha1", Resource: "openbaos"},
-		Namespaced: true,
-		For:        map[string]string{"Ready": ""},
-	},
 	"OpenBaoServer": {
 		Resource: schema.GroupVersionResource{Group: "socialweb.computer", Version: "v1alpha1", Resource: "openbaoservers"},
 		For:      map[string]string{"Ready": ""},
-	},
-	"DenoPod": {
-		Resource:   schema.GroupVersionResource{Group: "deno.computer", Version: "v1alpha1", Resource: "denopods"},
-		Namespaced: true,
-		For:        map[string]string{"Address": CaptureAddressPort, "Ready": ""},
 	},
 }
 
@@ -74,16 +64,6 @@ func (w Wait) Met(u *unstructured.Unstructured) (bool, string) {
 		return conditionTrue(u, "Ready"), ""
 	case "OpenBaoServer/Ready":
 		return conditionTrue(u, "Ready"), ""
-	case "OpenBao/Ready":
-		ready, _, _ := unstructured.NestedBool(u.Object, "status", "ready")
-		return ready, ""
-	case "DenoPod/Address":
-		addr, _, _ := unstructured.NestedString(u.Object, "status", "address")
-		return addr != "", addr
-	case "DenoPod/Ready":
-		phase, _, _ := unstructured.NestedString(u.Object, "status", "phase")
-		ready, _, _ := unstructured.NestedBool(u.Object, "status", "ready")
-		return phase == "Running" && ready, ""
 	}
 	return false, ""
 }

@@ -244,8 +244,35 @@ func setCondition(st *v1alpha1.ComputeVMStatus, gen int64, t string, status meta
 		ObservedGeneration: gen})
 }
 
+func reportConditions(st *v1alpha1.ComputeVMStatus, gen int64) {
+	m := st.Market
+	if m != nil && (m.Address != "" || m.ReportedAt != "") {
+		msg := "the guest reported"
+		if m.Address != "" {
+			msg = "the guest reported its on-network address at " + m.Address
+		}
+		setCondition(st, gen, v1alpha1.ConditionGuestReported, metav1.ConditionTrue, "GuestReported", msg)
+	} else {
+		setCondition(st, gen, v1alpha1.ConditionGuestReported, metav1.ConditionFalse, "AwaitingGuestReport",
+			"the guest has not reported its on-network address")
+	}
+	if m != nil && m.OnNetworkUri != "" {
+		msg := "the market holds the guest's on-network report at " + m.OnNetworkUri
+		if m.HostKeysUri != "" {
+			msg += " and its host-key report at " + m.HostKeysUri
+		}
+		setCondition(st, gen, v1alpha1.ConditionMarketReported, metav1.ConditionTrue, "MarketReported", msg)
+		return
+	}
+	setCondition(st, gen, v1alpha1.ConditionMarketReported, metav1.ConditionFalse, "AwaitingMarketReport",
+		"the market holds no on-network report for the guest")
+}
+
 func (ct *Controller) writeStatus(ctx context.Context, o v1alpha1.ComputeVM, next v1alpha1.ComputeVMStatus) error {
 	prev := o.Status
+	prev.Conditions = append([]metav1.Condition(nil), o.Status.Conditions...)
+	next.Conditions = append([]metav1.Condition(nil), next.Conditions...)
+	reportConditions(&next, o.Generation)
 	prev.Market = nil
 	next.Market = nil
 	next.ObservedGeneration = o.Generation

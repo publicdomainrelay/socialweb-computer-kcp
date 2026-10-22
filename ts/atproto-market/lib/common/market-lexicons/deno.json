@@ -1,9 +1,0 @@
-{
-  "name": "@publicdomainrelay/market-lexicons",
-  "version": "0.0.0",
-  "license": "Unlicense",
-  "exports": "./mod.ts",
-  "imports": {
-    "@atproto/lex": "npm:@atproto/lex@^0.1.3"
-  }
-}

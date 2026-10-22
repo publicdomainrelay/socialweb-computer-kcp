@@ -6,16 +6,16 @@ spec:
   resources:
     - group: socialweb.computer
       name: computevms
-      schema: v1alpha1-3.computevms.socialweb.computer
+      schema: v1alpha1-4.computevms.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer
       name: bids
-      schema: v1alpha1-4.bids.socialweb.computer
+      schema: v1alpha1-5.bids.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer
       name: guestidentitygrants
-      schema: v1alpha1-1.guestidentitygrants.socialweb.computer
+      schema: v1alpha1-2.guestidentitygrants.socialweb.computer
       storage:
         crd: {}

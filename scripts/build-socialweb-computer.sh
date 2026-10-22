@@ -23,44 +23,34 @@ build root's go, asset and deno caches, skips the clean checkouts and the second
 reproducible: 'socialweb-computer version' says "dev build, not reproducible" with the commit and the
 tree's dirty state. It embeds every pinned asset (staged once per versions.json under
 dev/assets/<goos>_<goarch>/<asset>-<sha256 of its versions.json entry>; the assets built from
-this repository (fetch kind go, such as socialweb-vmexec) are built from the working tree each time) and a closure
-cmd/socialweb-tsbundle builds from the working tree (its deno.lock included, unpinned to a commit;
-its entries are not started here, the live run starts them).
-At run time the binary runs the TypeScript from the source root it was built with, live, and seeds
-each DENO_DIR from that closure: 'socialweb-computer dev restart <instance> [<app>/]<denopod>' picks
-up a TypeScript change without a rebuild. Output: dev/<worktree>/<goos>_<goarch>/socialweb-computer
+this repository (fetch kind go, such as socialweb-vmexec) are built from the working tree each time).
+Output: dev/<worktree>/<goos>_<goarch>/socialweb-computer
 (and dev/<worktree>/socialweb-computer for the host platform).
 
   --publish DIR  also copy the host binary to DIR/bin/socialweb-computer and mirror the working tree
                  (tracked and untracked files git does not ignore) to DIR/src, readable by every
-                 account (chmod a+rX), and build the binary to run the TypeScript from DIR/src: an
+                 account (chmod a+rX), and build the binary to run from DIR/src: an
                  account such as test-0001 that cannot read this checkout runs from there
   --sync-only    with --publish: only mirror the working tree to DIR/src again (no build), before a
-                 dev restart of a DenoPod
+                 dev restart of a component
 
 Without --dev it builds the release socialweb-computer binary (plan 0006 M4-BUILD) of one commit for
 each release platform of internal/versions/versions.json (in parallel), once, from a clean checkout.
 It stages every pinned asset with scripts/stage-assets.sh (in parallel, every tree checked against
-its pin), builds the TypeScript closure once with cmd/socialweb-tsbundle -release and the pinned deno
-of the build host (the closure is source plus the deno cache, the same bytes for every platform; its
-entries are started on the build host), embeds it for every platform, then runs
-go build -tags release with the go.mod toolchain, CGO_ENABLED=0, -trimpath, -buildvcs=true,
+its pin), stages the embedded Deno for the policy engine, then runs
+go build -tags "release embed_deno" with the go.mod toolchain, CGO_ENABLED=0, -trimpath, -buildvcs=true,
 GOPROXY=off. Its caches are content-addressed, so a warm build gives the same bytes as a clean one:
   cache/blobs     the zstd blob of an asset, by the sha256 of its versions.json entry, stage-assets.sh,
                   assetpack and the zstd version (downloaded kinds), or of its tar stream (built kinds)
   cache/meshd     socialweb-meshd per arch, by the sha256 of rust/ (with the zig it pins) and the rustc and cargo versions
   cache/cargo-target, cache/gocache   the cargo target dir and the go build cache
-  cache/closure   the TypeScript closure, by the git trees of ts/, socialweb-computer-k8s/, deno.json,
-                  deno.lock, deploy/ts-entries.yaml and the Go packages of socialweb-tsbundle, the last
-                  commit that touched the TypeScript (the closure's commit and SOURCE_DATE_EPOCH) and deno
-  cache/tsbundle-work                 the closure's DENO_DIR fill (deno.lock-verified downloads)
 A step whose key did not change is not run again.
 
 --verify-reproducible (plan 0006 ACC6-REPRO; the release-reproducible CI job on main) builds the
 commit twice, from two clean checkouts, and refuses to publish a platform whose two builds differ by
 one byte. It uses the keyed caches, so it rebuilds only what changed. --no-cache builds both from
-scratch, in parallel: an empty go build cache, cargo target dir and closure work dir and no blob,
-meshd or closure cache; it proves the caches give the bytes a clean build gives. Every mode refuses
+scratch, in parallel: an empty go build cache, cargo target dir and no blob or meshd cache; it
+proves the caches give the bytes a clean build gives. Every mode refuses
 to publish when release/<commit> already holds a binary of a platform that differs from this build.
 
   --platform    a release platform; repeat for more (default: every release platform)
@@ -70,8 +60,7 @@ to publish when release/<commit> already holds a binary of a platform that diffe
 Layout under the build root:
   src/<n>                       the clean checkout of build n (1; 2 with --verify-reproducible)
   cache/                        pinned downloads (assets, gomod) and the build caches above
-  work/<n>/                     the pinned deno, socialweb-tsbundle and the closure staging of build n
-                                (and its empty caches with --verify-reproducible)
+  work/<n>/                     the staging of build n (and its empty caches with --verify-reproducible)
   out/<commit>/<n>/<goos>_<goarch>  build n: socialweb-computer, its sha256, build.json, version.json
   release/<commit>              socialweb-computer-<goos>-<goarch>, SHA256SUMS, release.json (and
                                 reproducible.json with --verify-reproducible), version-<goos>-<goarch>.{json,txt}
@@ -110,7 +99,7 @@ timing() {
   echo "$line" >>"$timings"
 }
 
-for tool in git go jq zstd tar sha256sum unshare flock; do
+for tool in git go jq zstd tar sha256sum unshare flock curl; do
   command -v "$tool" >/dev/null 2>&1 || die "$tool is required on the build host"
 done
 
@@ -157,7 +146,7 @@ if [ -z "$want_go" ]; then
   want_go="go$(git -C "$root" show "$commit:go.mod" | awk '$1=="go"{print $2; exit}')"
 fi
 cache="$build_root/cache"
-mkdir -p "$cache/assets" "$cache/gomod" "$cache/gocache" "$cache/blobs" "$cache/meshd" "$cache/cargo-target" "$cache/closure"
+mkdir -p "$cache/assets" "$cache/gomod" "$cache/gocache" "$cache/blobs" "$cache/meshd" "$cache/cargo-target"
 export TMPDIR="$build_root/tmp"
 export GOTMPDIR="$build_root/tmp"
 export GOMODCACHE="$cache/gomod"
@@ -221,45 +210,44 @@ export GOPROXY=off
 export GOSUMDB=off
 timing "module download" "$t"
 
-ts_paths=(ts socialweb-computer-k8s deno.json deno.lock deploy/ts-entries.yaml)
-
-closure_key() {
-  local tree="$1" deno="$2" d
-  {
-    echo "socialweb-tsbundle closure v1"
-    sha_of "$deno"
-    go env GOVERSION
-    for d in "${ts_paths[@]}" go.mod go.sum; do
-      echo "$d $(git -C "$tree" rev-parse "$commit:$d")"
-    done
-    git -C "$tree" log -1 --format=%H "$commit" -- "${ts_paths[@]}"
-    (cd "$tree" && go list -deps -f '{{if not .Standard}}{{.Dir}}{{end}}' ./cmd/socialweb-tsbundle) | sed -n "s|^$tree/||p" | sort -u |
-      while read -r d; do echo "$d $(git -C "$tree" rev-parse "$commit:$d")"; done
-  } | sha256sum | cut -d' ' -f1
+stage_deno_embedded() {
+  local tree="$1" tree_versions="$1/internal/versions/versions.json" dir plat goos goarch url want cached part
+  dir="$tree/internal/policyengine/deno/deno_embedded"
+  mkdir -p "$cache/deno-embed" "$dir"
+  for plat in linux/amd64 linux/arm64; do
+    goos="${plat%/*}"
+    goarch="${plat#*/}"
+    url="$(jq -er --arg p "$plat" '.assets.deno.fetch[$p].url' "$tree_versions")" || die "no pinned deno url for $plat"
+    want="$(jq -er --arg p "$plat" '.assets.deno.fetch[$p].sha256' "$tree_versions")" || die "no pinned deno sha256 for $plat"
+    cached="$cache/deno-embed/$want.zip"
+    if [ ! -f "$cached" ] || [ "$(sha_of "$cached")" != "$want" ]; then
+      part="$cached.part.$BASHPID"
+      curl -fSL --retry 3 --connect-timeout 10 --speed-limit 10000 --speed-time 20 -o "$part" "$url" \
+        || { rm -f "$part"; die "deno download failed: $url"; }
+      [ "$(sha_of "$part")" = "$want" ] || { rm -f "$part"; die "deno sha256 mismatch for $url"; }
+      mv -f "$part" "$cached"
+    fi
+    cp -f "$cached" "$dir/deno-$goos-$goarch.zip"
+    [ "$(sha_of "$dir/deno-$goos-$goarch.zip")" = "$want" ] || die "staged deno-$goos-$goarch.zip does not match its pin"
+  done
 }
 
 build_once() {
-  local n="$1" tree="$build_root/src/$1" work="$build_root/work/$1" plat goos goarch key out started deno t
-  local closure_work stage_cache=() deno_blobs jobs_n
+  local n="$1" tree="$build_root/src/$1" work="$build_root/work/$1" plat goos goarch key out started t
+  local stage_cache=() jobs_n
   if [ "$nocache" = 1 ]; then
     export GOCACHE="$work/gocache"
     export CARGO_TARGET_DIR="$work/cargo-target"
-    closure_work="$work/closure/tsbundle"
     chmod -R u+w "$work" 2>/dev/null || true
     rm -rf "$work"
   else
     export CARGO_TARGET_DIR="$cache/cargo-target"
     export MESHD_CACHE="$cache/meshd"
     stage_cache=(--blob-cache "$cache/blobs")
-    closure_work="$cache/tsbundle-work"
-    for d in tree probe-bundle probe-state probe-home; do
-      chmod -R u+w "$closure_work/$d" 2>/dev/null || true
-      rm -rf "${closure_work:?}/$d"
-    done
     chmod -R u+w "$work" 2>/dev/null || true
     rm -rf "$work"
   fi
-  mkdir -p "$work/closure" "$work/deno" "$GOCACHE" "$CARGO_TARGET_DIR" "$closure_work"
+  mkdir -p "$GOCACHE" "$CARGO_TARGET_DIR"
   if [ "$n" != 1 ]; then
     t="$(now)"
     checkout "$tree"
@@ -267,60 +255,16 @@ build_once() {
   fi
 
   t="$(now)"
-  deno_blobs="$work/host-deno"
-  (cd "$tree" && ./scripts/stage-assets.sh --cache "$cache/assets" "${stage_cache[@]}" --blobs "$deno_blobs" \
-    --platform "$hostplat" --asset deno)
-  zstd -dc "$deno_blobs/${hostplat/\//_}/deno.tar.zst" | tar -x -C "$work/deno"
-  deno="$work/deno/deno"
-  [ -x "$deno" ] || die "the staged deno blob for $hostplat holds no deno"
-  timing "build $n: host deno" "$t"
+  local stage_args=() p
+  for p in "${platforms[@]}"; do stage_args+=(--platform "$p"); done
+  say "build $n: stage assets"
+  (cd "$tree" && ./scripts/stage-assets.sh --cache "$cache/assets" "${stage_cache[@]}" "${stage_args[@]}")
+  timing "build $n: stage assets" "$t"
 
-  jobs_n=0
-  (
-    t="$(now)"
-    local ckey="" cdir=""
-    if [ "$nocache" = 0 ]; then
-      ckey="$(closure_key "$tree" "$deno")"
-      cdir="$cache/closure/$ckey"
-    fi
-    if [ -n "$cdir" ] && [ -f "$cdir/tsbundle.json" ]; then
-      mkdir -p "$work/closure/out"
-      cp "$cdir/closure.tar.zst" "$cdir/manifest.json.zst" "$work/closure/out/"
-      cp "$cdir/tsbundle.json" "$work/closure/tsbundle.json"
-      say "build $n: TypeScript closure tree $(jq -r .treeSha256 "$cdir/tsbundle.json") reused by its source key $ckey"
-    else
-      say "build $n: TypeScript closure (pinned deno $hostplat)"
-      (cd "$tree" && go build -trimpath -o "$work/closure/socialweb-tsbundle" ./cmd/socialweb-tsbundle)
-      (cd "$tree" && "$work/closure/socialweb-tsbundle" -source-root "$tree" -release -deno "$deno" \
-        -work "$closure_work" -out "$work/closure/out" >"$work/closure/tsbundle.json" 2>"$work/closure/tsbundle.log") \
-        || { tail -20 "$work/closure/tsbundle.log" >&2; die "build $n: the closure build failed"; }
-      if [ -n "$cdir" ]; then
-        local outside
-        outside="$(jq -r --argjson keep "$(printf '%s\n' "${ts_paths[@]}" | jq -R . | jq -s .)" \
-          '[.repos[].prefixes[] | select(. as $p | $keep | any(. as $k | $p == $k or ($p | startswith($k + "/"))) | not)] | join(" ")' \
-          "$work/closure/tsbundle.json")"
-        if [ -n "$outside" ]; then
-          say "warn: the closure stages $outside, outside the closure key's paths; not cached"
-        else
-          mkdir -p "$cache/closure/.tmp.$BASHPID"
-          cp "$work/closure/out/closure.tar.zst" "$work/closure/out/manifest.json.zst" "$work/closure/tsbundle.json" "$cache/closure/.tmp.$BASHPID/"
-          mv -T "$cache/closure/.tmp.$BASHPID" "$cdir" 2>/dev/null || rm -rf "$cache/closure/.tmp.$BASHPID"
-        fi
-      fi
-    fi
-    timing "build $n: TypeScript closure" "$t"
-  ) &
-  jobs_n=$((jobs_n + 1))
-  (
-    t="$(now)"
-    local stage_args=() p
-    for p in "${platforms[@]}"; do stage_args+=(--platform "$p"); done
-    say "build $n: stage assets"
-    (cd "$tree" && ./scripts/stage-assets.sh --cache "$cache/assets" "${stage_cache[@]}" "${stage_args[@]}")
-    timing "build $n: stage assets" "$t"
-  ) &
-  jobs_n=$((jobs_n + 1))
-  wait_all "build $n: closure or asset staging" "$jobs_n"
+  t="$(now)"
+  say "build $n: stage embedded deno"
+  stage_deno_embedded "$tree"
+  timing "build $n: embedded deno" "$t"
 
   jobs_n=0
   for plat in "${platforms[@]}"; do
@@ -333,9 +277,8 @@ build_once() {
       t="$(now)"
       rm -rf "$out"
       mkdir -p "$out"
-      cp "$work/closure/out/"* "$tree/internal/tsbundle/closure/$key/"
       say "build $n $plat: go build"
-      (cd "$tree" && GOOS="$goos" GOARCH="$goarch" go build -tags release -trimpath -buildvcs=true \
+      (cd "$tree" && GOOS="$goos" GOARCH="$goarch" go build -tags "release embed_deno" -trimpath -buildvcs=true \
         -ldflags="-s -w -buildid= ${version:+-X github.com/johnandersen777/socialweb-computer-kcp/internal/buildstamp.Version=$version}" \
         -o "$out/socialweb-computer" ./cmd/socialweb-computer)
       (cd "$out" && sha256sum socialweb-computer >socialweb-computer.sha256)
@@ -343,8 +286,8 @@ build_once() {
       "$out/socialweb-computer" version >"$out/version.txt"
       jq -n --arg commit "$commit" --arg platform "$plat" --argjson build "$n" --arg go "$have_go" --arg mode "$mode" \
         --arg started "$started" --arg finished "$(utc)" --arg sha256 "$(sha_of "$out/socialweb-computer")" \
-        --argjson closure "$(jq --arg p "$hostplat" '{treeSha256, builtAndStartedOn: $p, entries: [.entries[] | {name, ok}]}' "$work/closure/tsbundle.json")" \
-        '{commit: $commit, platform: $platform, build: $build, mode: $mode, go: $go, startedUtc: $started, finishedUtc: $finished, sha256: $sha256, typescriptClosure: $closure}' \
+        --argjson denoEmbedded "$(jq -c '{version: .assets.deno.version, zips: (.assets.deno.fetch | with_entries(.value = .value.sha256))}' "$tree/internal/versions/versions.json")" \
+        '{commit: $commit, platform: $platform, build: $build, mode: $mode, go: $go, startedUtc: $started, finishedUtc: $finished, sha256: $sha256, denoEmbedded: $denoEmbedded}' \
         >"$out/build.json"
       say "build $n $plat: sha256 $(sha_of "$out/socialweb-computer")"
       timing "build $n $plat: go build" "$t"

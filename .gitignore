@@ -13,8 +13,7 @@ pkg_*.go
 staging_src_k8s.io_*.go
 
 node_modules/
-deno.lock
-!/deno.lock
+/internal/policyengine/deno/deno_embedded/*.zip
 .DS_Store
 
 .claude/
@@ -33,7 +32,6 @@ deno.lock
 port-bound-to
 
 /socialweb-computer
-/socialweb-tsbundle
 /socialweb-vmexec
 /cmd/*/socialweb-*
 .tempdir/

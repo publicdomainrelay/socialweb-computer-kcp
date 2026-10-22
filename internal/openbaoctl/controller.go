@@ -349,9 +349,16 @@ func syncWith(ctx context.Context, admin *openbao.Client, in layoutInput) (synce
 		return synced{}, err
 	}
 	rep, err := baosync.Sync(ctx, admin, d)
-	if err == nil && rep.Err == nil && len(pending) > 0 && rep.Changed() {
+	generatedRoot := false
+	if err == nil && rep.Err == nil {
+		generatedRoot, err = ensurePKIRoots(ctx, admin, in.declared)
+		if err != nil {
+			return synced{}, err
+		}
+	}
+	if err == nil && rep.Err == nil && (generatedRoot || len(pending) > 0 && rep.Changed()) {
 		in.accessors = accessorsOf(ctx, admin)
-		if d2, pending2, roles2, refused2, derr := desiredWithIdentity(ctx, in, pkiCA(admin)); derr == nil && len(pending2) < len(pending) {
+		if d2, pending2, roles2, refused2, derr := desiredWithIdentity(ctx, in, pkiCA(admin)); derr == nil {
 			rep2, err2 := baosync.Sync(ctx, admin, d2)
 			rep.Applied = append(rep.Applied, rep2.Applied...)
 			rep.Conflicts, rep.Err = rep2.Conflicts, errors.Join(rep.Err, rep2.Err)
@@ -371,6 +378,42 @@ func syncWith(ctx context.Context, admin *openbao.Client, in layoutInput) (synce
 		}
 	}
 	return s, err
+}
+
+const (
+	defaultPKIRootCommonName = "socialweb.local"
+	defaultPKIRootTTL        = "8760h"
+)
+
+func ensurePKIRoots(ctx context.Context, c *openbao.Client, d *v1alpha1.OpenBaoServerDeclared) (bool, error) {
+	if d == nil {
+		return false, nil
+	}
+	generated := false
+	for _, m := range d.SecretMounts {
+		if m.Type != string(baosync.MountPKI) {
+			continue
+		}
+		if _, err := c.CAPEM(ctx, m.Path); err == nil {
+			continue
+		} else if !pkiRootMissing(err) {
+			return false, err
+		}
+		ttl := strings.TrimSpace(m.MaxLeaseTTL)
+		if ttl == "" {
+			ttl = defaultPKIRootTTL
+		}
+		if _, err := c.GeneratePKIRoot(ctx, m.Path, defaultPKIRootCommonName, ttl); err != nil {
+			return false, fmt.Errorf("generating the pki root under %s: %w", m.Path, err)
+		}
+		generated = true
+	}
+	return generated, nil
+}
+
+func pkiRootMissing(err error) bool {
+	var re *openbao.ResponseError
+	return errors.As(err, &re) && (re.Status == 404 || re.Status == 400) || strings.Contains(err.Error(), "holds no certificate")
 }
 
 func accessorsOf(ctx context.Context, admin *openbao.Client) map[string]string {

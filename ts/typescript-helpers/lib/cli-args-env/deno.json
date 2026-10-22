@@ -1,8 +1,0 @@
-{
-  "name": "@publicdomainrelay/cli-args-env",
-  "version": "0.1.0",
-  "exports": "./mod.ts",
-  "imports": {
-    "@cliffy/command": "jsr:@cliffy/command@^1.0.0-rc.7"
-  }
-}

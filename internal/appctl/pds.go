@@ -1,28 +1,35 @@
 package appctl
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
-	"crypto/x509"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"math/big"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
-	"time"
+	"sync"
+
+	"github.com/bluesky-social/indigo/atproto/atcrypto"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 
+	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
 )
@@ -34,6 +41,353 @@ const (
 	RepoKeyField      = "repoKeyHex"
 	passwordBytes     = 24
 )
+
+var appPdsPublicURLs sync.Map
+
+type PdsSession struct {
+	Did string
+
+	AccessJWT string
+
+	RefreshJWT string
+}
+
+func pdsSessionPath(name string) string {
+	return "identity/" + name + "/pds-session"
+}
+
+func pdsAccessTokenPath(name string) string {
+	return "openbao:" + pdsSessionPath(name)
+}
+
+func firstString(m map[string]any, keys ...string) string {
+	for _, key := range keys {
+		if value, ok := m[key].(string); ok && strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func pdsSessionOf(m map[string]any) PdsSession {
+	return PdsSession{
+		Did:        firstString(m, "did"),
+		AccessJWT:  firstString(m, "accessJwt", "accessToken", "access_token", "token"),
+		RefreshJWT: firstString(m, "refreshJwt", "refreshToken", "refresh_token"),
+	}
+}
+
+func pdsHandle(workspace, suffix, explicit string) string {
+	if handle := strings.TrimSpace(explicit); handle != "" {
+		return strings.ToLower(handle)
+	}
+	var b strings.Builder
+	for _, r := range strings.ToLower(workspace) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
+		}
+	}
+	label := strings.Trim(b.String(), "-")
+	if label == "" {
+		label = "app"
+	}
+	return label + "." + suffix + ".local"
+}
+
+func appPdsFallbackURL(network *v1alpha1.MarketNetworkValue, hostnames []string) string {
+	if network != nil {
+		if host := hostOf(network.GuestTlsUrl); host != "" {
+			return "https://" + host
+		}
+		if host := hostOf(network.IngressProxyHost); host != "" {
+			return "https://" + host
+		}
+	}
+	if host := firstHost(hostnames); host != "" {
+		return "http://" + host
+	}
+	return ""
+}
+
+func (ctl *Controller) pdsApplied(ctx context.Context, owner string) (bool, error) {
+	snap, err := ctl.componentSnapshot(ctx, owner)
+	if err != nil {
+		return false, err
+	}
+	view, ok := snap.view(ComponentKindPds, PdsComponent)
+	if !ok || !view.Status.Ready {
+		return false, nil
+	}
+	return view.Status.ObservedGeneration >= view.Generation, nil
+}
+
+func (ctl *Controller) pdsPublicURL(ctx context.Context, ws, name string) string {
+	if url := ctl.pdsExposureURLOf(ctx, ws, name, ExposureIngressSuffix); url != "" {
+		return url
+	}
+	return ctl.pdsExposureURLOf(ctx, ws, name, ExposureLocalSuffix)
+}
+
+func (ctl *Controller) pdsExposureURL(ctx context.Context, ws, name string) string {
+	return ctl.pdsExposureURLOf(ctx, ws, name, ExposureIngressSuffix)
+}
+
+func (ctl *Controller) pdsExposureURLOf(ctx context.Context, ws, name, suffix string) string {
+	key := ws + "/" + name + suffix
+	ri, err := ctl.client(ws, ExposureGVR)
+	if err != nil {
+		return ""
+	}
+	u, err := ri.Get(ctx, serviceNameFor(ComponentKindPds, name)+suffix, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		appPdsPublicURLs.Delete(key)
+		return ""
+	}
+	if err != nil {
+		value, _ := appPdsPublicURLs.Load(key)
+		raw, _ := value.(string)
+		return raw
+	}
+	var o exposurev1alpha1.Exposure
+	if err := fromUnstructured(u, &o); err == nil && o.Status.URL != "" {
+		appPdsPublicURLs.Store(key, o.Status.URL)
+		return o.Status.URL
+	}
+	value, _ := appPdsPublicURLs.Load(key)
+	raw, _ := value.(string)
+	return raw
+}
+
+func appPdsSpec(stateRoot string, network *v1alpha1.MarketNetworkValue, handle string, vault *v1alpha1.ComponentRef,
+	hostnames []string, suspend bool, publicURL string) (v1alpha1.PdsSpec, error) {
+	plcURL := ""
+	if network != nil {
+		plcURL = strings.TrimSpace(network.PlcDirectoryUrl)
+	}
+	if plcURL == "" {
+		return v1alpha1.PdsSpec{}, errors.New("appctl: the app-owned Pds needs the network value's plcDirectoryUrl; no PLC URL is available")
+	}
+	stateDir := ComponentCRStateDir(stateRoot, ComponentKindPds, PdsComponent)
+	if err := ensurePDSKeyFiles(stateDir); err != nil {
+		return v1alpha1.PdsSpec{}, fmt.Errorf("appctl: the app-owned Pds keys: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Join(stateDir, pdsRepoKeyDir), 0o700); err != nil {
+		return v1alpha1.PdsSpec{}, fmt.Errorf("appctl: the app-owned Pds repo key directory: %w", err)
+	}
+	if strings.TrimSpace(publicURL) == "" {
+		publicURL = appPdsFallbackURL(network, hostnames)
+	}
+	publicURL = strings.TrimRight(strings.TrimSpace(publicURL), "/")
+	return v1alpha1.PdsSpec{
+		ComponentSpec:     NewComponentSpec(stateDir, network, suspend),
+		Identity:          &v1alpha1.ComponentIdentity{Handle: handle},
+		VaultRef:          vault,
+		Hostnames:         hostnames,
+		Mode:              v1alpha1.PdsModeFull,
+		PlcURL:            plcURL,
+		PublicBaseURL:     publicURL,
+		RepoKeyPath:       filepath.Join(stateDir, pdsRepoKeyDir),
+		SessionSecretPath: filepath.Join(stateDir, pdsSessionSecretFile),
+		RotationKeyPath:   filepath.Join(stateDir, pdsRotationKeyFile),
+		OAuth:             &v1alpha1.PdsOAuth{Issuer: publicURL, AllowLocalhostClients: true},
+	}, nil
+}
+
+func (ctl *Controller) pdsEndpointIn(ctx context.Context, ws, name string) string {
+	v, found, err := ctl.GetComponentIn(ctx, ws, ComponentKindPds, name)
+	if err != nil || !found {
+		return ""
+	}
+	e, ok := componentEndpoint(v, "http")
+	if !ok {
+		e, ok = componentEndpoint(v, "")
+	}
+	if !ok {
+		return ""
+	}
+	return endpointURL(e)
+}
+
+func (ctl *Controller) ensurePdsAccountInVault(ctx context.Context, server, clientName, path, pdsURL, caFile, handle string) (PdsSession, error) {
+	client, _, c, err := ctl.vaultClient(ctx, server, clientName)
+	if err != nil {
+		return PdsSession{}, err
+	}
+	defer client.RevokeSelf(context.Background())
+	ctl.ensureVaultCredentialStatus(ctx, server, c.KVMount, path)
+	kvPath := c.KVMount + "/data/" + path
+	data, err := client.GetKV(ctx, kvPath)
+	var re *openbao.ResponseError
+	if err != nil && !(errors.As(err, &re) && re.Status == http.StatusNotFound) {
+		return PdsSession{}, err
+	}
+	if data == nil {
+		data = map[string]any{}
+	}
+	if sess := pdsSessionOf(data); sess.Did != "" && sess.AccessJWT != "" {
+		return sess, nil
+	}
+	password := firstString(data, "password")
+	if password == "" {
+		buf := make([]byte, passwordBytes)
+		if _, err := rand.Read(buf); err != nil {
+			return PdsSession{}, err
+		}
+		password = hex.EncodeToString(buf)
+	}
+	sess, err := ctl.ensurePdsAccountSession(ctx, pdsURL, caFile, handle, password)
+	if err != nil {
+		return PdsSession{}, err
+	}
+	data["password"] = password
+	data["did"] = sess.Did
+	data["accessToken"] = sess.AccessJWT
+	data["accessJwt"] = sess.AccessJWT
+	data["refreshToken"] = sess.RefreshJWT
+	data["refreshJwt"] = sess.RefreshJWT
+	if err := client.PutKV(ctx, kvPath, data); err != nil {
+		return PdsSession{}, err
+	}
+	ctl.c.log().Info("the application's PDS session is in its own OpenBao", "server", server, "path", path, "did", sess.Did)
+	return sess, nil
+}
+
+func (ctl *Controller) syncRequesterRepoKey(stateRoot, did string) (bool, error) {
+	sum := sha256.Sum256([]byte(did))
+	keyPath := filepath.Join(ComponentCRStateDir(stateRoot, ComponentKindPds, PdsComponent), pdsRepoKeyDir,
+		hex.EncodeToString(sum[:])+".key")
+	raw, err := os.ReadFile(keyPath)
+	if err != nil {
+		return false, fmt.Errorf("the app Pds repo signing key of %s: %w", did, err)
+	}
+	lines := strings.SplitN(strings.TrimSpace(string(raw)), "\n", 2)
+	if len(lines) != 2 || strings.TrimSpace(lines[0]) != did {
+		return false, fmt.Errorf("the app Pds repo signing key file of %s is invalid", did)
+	}
+	key, err := atcrypto.ParsePrivateMultibase(strings.TrimSpace(lines[1]))
+	if err != nil {
+		return false, fmt.Errorf("the app Pds repo signing key of %s: %w", did, err)
+	}
+	payload := map[string]string{
+		"kty": "EC",
+		"crv": "secp256k1",
+		"use": "sig",
+		"alg": "ES256K",
+		"d":   base64.RawURLEncoding.EncodeToString(key.Bytes()),
+	}
+	out, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return false, err
+	}
+	out = append(out, '\n')
+	dir := ComponentCRStateDir(stateRoot, ComponentKindRequester, RequesterComponent)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return false, err
+	}
+	changed := false
+	for _, name := range []string{"repo-key.json", "attestation-key.json"} {
+		path := filepath.Join(dir, name)
+		if have, readErr := os.ReadFile(path); readErr == nil && string(have) == string(out) {
+			continue
+		}
+		if err := writeFileAtomic(path, out, 0o600); err != nil {
+			return changed, fmt.Errorf("writing the requester's %s: %w", name, err)
+		}
+		changed = true
+	}
+	return changed, nil
+}
+
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(name)
+		return err
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		tmp.Close()
+		os.Remove(name)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(name)
+		return err
+	}
+	if err := os.Rename(name, path); err != nil {
+		os.Remove(name)
+		return err
+	}
+	return nil
+}
+
+func (ctl *Controller) recordPdsIdentity(ctx context.Context, ws, name, handle, pdsURL, did string, association v1alpha1.AssociationMode) error {
+	ri, err := ctl.client(ws, MarketIdentityGVR)
+	if err != nil {
+		return err
+	}
+	for range 5 {
+		u, err := ri.Get(ctx, name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if u.GetDeletionTimestamp() != nil {
+			return nil
+		}
+		var st v1alpha1.MarketIdentityStatus
+		if m, ok, err := unstructured.NestedMap(u.Object, "status"); err != nil {
+			return err
+		} else if ok {
+			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(m, &st); err != nil {
+				return err
+			}
+		}
+		generation := u.GetGeneration()
+		st.Did = did
+		st.Phase = v1alpha1.MarketIdentityPhaseReady
+		st.ObservedGeneration = generation
+		st.Message = ""
+		if handle != "" {
+			st.Handle = handle
+		}
+		if pdsURL != "" {
+			st.PdsUrl = pdsURL
+		}
+		meta.SetStatusCondition(&st.Conditions, metav1.Condition{Type: "Ready", Status: metav1.ConditionTrue,
+			Reason: "Ready", Message: "the app PDS account is signed in", ObservedGeneration: generation})
+		if association == v1alpha1.AssociationSkip {
+			meta.SetStatusCondition(&st.Conditions, metav1.Condition{Type: v1alpha1.ConditionAssociated, Status: metav1.ConditionTrue,
+				Reason: "AssociationSkipped", Message: "the association is skipped", ObservedGeneration: generation})
+		} else {
+			meta.SetStatusCondition(&st.Conditions, metav1.Condition{Type: v1alpha1.ConditionAssociated, Status: metav1.ConditionFalse,
+				Reason: "AwaitingAssociation", Message: "the PDS is ready; the association is pending", ObservedGeneration: generation})
+		}
+		m, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&st)
+		if err != nil {
+			return err
+		}
+		u.Object["status"] = m
+		_, err = ri.UpdateStatus(ctx, u, metav1.UpdateOptions{FieldManager: FieldManager})
+		if err == nil {
+			return nil
+		}
+		if !apierrors.IsConflict(err) {
+			return err
+		}
+	}
+	return fmt.Errorf("appctl: the status of the MarketIdentity %s stayed in conflict", name)
+}
 
 var OpenBaoServerGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "openbaoservers"}
 
@@ -120,56 +474,48 @@ func (ctl *Controller) bidderPassword(ctx context.Context) (string, manifests.Bi
 	return password, manifests.BidderVault{Server: BidderVaultServer, Client: BidderVaultClient}, nil
 }
 
-func pdsPost(ctx context.Context, pdsURL string, caFile string, nsid string, body any) (map[string]any, int, error) {
-	caPEM, err := os.ReadFile(caFile)
+func (ctl *Controller) ensurePdsAccountSession(ctx context.Context, pdsURL, caFile, handle, password string) (PdsSession, error) {
+	domain := handle[strings.Index(handle, ".")+1:]
+	pds, err := ctl.pdsFor(pdsURL, caFile)
 	if err != nil {
-		return nil, 0, err
+		return PdsSession{}, err
 	}
-	pool := x509.NewCertPool()
-	if !pool.AppendCertsFromPEM(caPEM) {
-		return nil, 0, fmt.Errorf("the network CA bundle %s does not parse", caFile)
+	if sess, err := pds.CreateSession(ctx, handle, password); err == nil {
+		return pdsSessionFromSession(sess), nil
 	}
-	c := &http.Client{Timeout: 15 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}}
-	b, err := json.Marshal(body)
+	sess, err := pds.CreateAccount(ctx, pdsclient.CreateAccountRequest{Identifier: handle, Password: password, Email: handle + "@" + domain})
 	if err != nil {
-		return nil, 0, err
+		return PdsSession{}, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimSuffix(pdsURL, "/")+"/xrpc/"+nsid, bytes.NewReader(b))
+	return pdsSessionFromSession(sess), nil
+}
+
+func EnsurePdsAccountSession(ctx context.Context, pdsURL, caFile, handle, password string) (PdsSession, error) {
+	domain := handle[strings.Index(handle, ".")+1:]
+	pds, err := pdsClientAt(pdsURL, caFile)
 	if err != nil {
-		return nil, 0, err
+		return PdsSession{}, err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.Do(req)
+	if sess, err := pds.CreateSession(ctx, handle, password); err == nil {
+		return pdsSessionFromSession(sess), nil
+	}
+	sess, err := pds.CreateAccount(ctx, pdsclient.CreateAccountRequest{Identifier: handle, Password: password, Email: handle + "@" + domain})
 	if err != nil {
-		return nil, 0, err
+		return PdsSession{}, err
 	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	var out map[string]any
-	json.Unmarshal(raw, &out)
-	if out == nil {
-		out = map[string]any{"raw": strings.TrimSpace(string(raw))}
-	}
-	return out, resp.StatusCode, nil
+	return pdsSessionFromSession(sess), nil
+}
+
+func pdsSessionFromSession(sess pdsclient.Session) PdsSession {
+	return PdsSession{Did: sess.DID.String(), AccessJWT: sess.AccessJWT, RefreshJWT: sess.RefreshJWT}
 }
 
 func EnsurePdsAccount(ctx context.Context, pdsURL, caFile, handle, password string) (string, error) {
-	domain := handle[strings.Index(handle, ".")+1:]
-	sess, scode, err := pdsPost(ctx, pdsURL, caFile, "com.atproto.server.createSession", map[string]string{"identifier": handle, "password": password})
+	sess, err := EnsurePdsAccountSession(ctx, pdsURL, caFile, handle, password)
 	if err != nil {
 		return "", err
 	}
-	if did, _ := sess["did"].(string); scode == http.StatusOK && did != "" {
-		return did, nil
-	}
-	out, code, err := pdsPost(ctx, pdsURL, caFile, "com.atproto.server.createAccount", map[string]string{"handle": handle, "email": handle + "@" + domain, "password": password})
-	if err != nil {
-		return "", err
-	}
-	if did, _ := out["did"].(string); code == http.StatusOK && did != "" {
-		return did, nil
-	}
-	return "", fmt.Errorf("appctl: neither signing in to (%d %v) nor creating (%d %v) %s on %s worked", scode, sess, code, out, handle, pdsURL)
+	return sess.Did, nil
 }
 
 func (ctl *Controller) bidderVault(ctx context.Context, spec v1alpha1.MarketBidderSpec, stateDir string) (manifests.BidderVault, error) {
@@ -221,6 +567,7 @@ func (ctl *Controller) ensureRepoKey(ctx context.Context, server, clientName, ke
 		return err
 	}
 	defer client.RevokeSelf(context.Background())
+	ctl.ensureVaultCredentialStatus(ctx, server, c.KVMount, keysPath)
 	path := c.KVMount + "/data/" + keysPath
 	data, err := client.GetKV(ctx, path)
 	var re *openbao.ResponseError

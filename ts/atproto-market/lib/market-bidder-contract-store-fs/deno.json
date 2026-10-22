@@ -1,6 +1,0 @@
-{
-  "name": "@publicdomainrelay/market-bidder-contract-store-fs",
-  "version": "0.0.0",
-  "license": "Unlicense",
-  "exports": "./mod.ts"
-}

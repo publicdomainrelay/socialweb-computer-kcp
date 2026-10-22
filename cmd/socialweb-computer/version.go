@@ -11,7 +11,6 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/buildstamp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clicfg"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestimage"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/tsbundle"
 )
 
 type versionInfo struct {
@@ -26,14 +25,13 @@ type versionInfo struct {
 	Release  bool             `json:"release"`
 	Assets   []assets.Listed  `json:"assets"`
 	AssetsBy string           `json:"assetsBy"`
-	Closure  tsbundle.Info    `json:"typescriptClosure"`
 	Dev      *buildstamp.Info `json:"dev,omitempty"`
 	Images   []string         `json:"guestImages"`
 }
 
 func buildVersion(goos, goarch string) versionInfo {
 	v := versionInfo{Name: serviceName, Version: "(devel)", Go: runtime.Version(), GOOS: goos, GOARCH: goarch,
-		Release: assets.Release(), Assets: []assets.Listed{}, Closure: tsbundle.Describe(), Dev: buildstamp.Read(), Images: []string{}}
+		Release: assets.Release(), Assets: []assets.Listed{}, Dev: buildstamp.Read(), Images: []string{}}
 	if names, err := guestimage.Names(); err == nil && names != nil {
 		v.Images = names
 	}
@@ -84,13 +82,6 @@ func runVersion(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 	}
 	for _, l := range v.Assets {
 		fmt.Fprintf(a.stdout, "  %s %s %s\n", l.Name, l.Version, l.SHA256)
-	}
-	if c := v.Closure; c.Kind == tsbundle.KindWorkingTree {
-		fmt.Fprintf(a.stdout, "  typescript from the working tree %s (DENO_DIR seeded from the embedded closure %s)\n", c.SourceRoot, c.TreeSHA256)
-	} else if c.Embedded {
-		fmt.Fprintf(a.stdout, "  typescript-closure %s %d bytes (deno %s)\n", c.TreeSHA256, c.ArchiveBytes, c.Deno)
-	} else {
-		fmt.Fprintf(a.stdout, "  typescript-closure from the %s\n", c.Kind)
 	}
 	return exitOK
 }

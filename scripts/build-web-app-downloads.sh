@@ -10,6 +10,7 @@ usage: $0 --out DIR
 Builds the pinned downloads the socialweb-computer-k8s web app serves at /downloads/<sha256>/<name>
 (the socialweb-computer-k8s-downloads asset of internal/versions/versions.json) into DIR:
   socialweb-meshd-x86_64, socialweb-meshd-aarch64       rust/build.sh (static musl)
+  socialweb-node-x86_64, socialweb-node-aarch64         cmd/socialweb-node (linux, CGO disabled)
 each with a sha256sum-format <name>.sha256 sidecar. Every file is rebuilt from this checkout.
 EOF
   exit 2
@@ -44,6 +45,15 @@ for _ in "${pids[@]}"; do
     echo "build-web-app-downloads: a build failed" >&2
     exit 1
   fi
+done
+
+for pair in x86_64:amd64 aarch64:arm64; do
+  arch="${pair%%:*}"
+  goarch="${pair##*:}"
+  echo "build-web-app-downloads: building socialweb-node-$arch" >&2
+  (cd "$root" && CGO_ENABLED=0 GOOS=linux GOARCH="$goarch" go build -trimpath -buildvcs=false \
+    -ldflags='-s -w -buildid=' -o "$out/socialweb-node-$arch" ./cmd/socialweb-node)
+  (cd "$out" && sha256sum "socialweb-node-$arch" >"socialweb-node-$arch.sha256")
 done
 
 (cd "$out" && sha256sum -c --quiet ./*.sha256) || { echo "build-web-app-downloads: a download does not match its sidecar" >&2; exit 1; }

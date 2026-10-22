@@ -7,6 +7,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/systemdunit"
 )
 
 const NamePrefix = "socialweb-"
@@ -87,9 +89,9 @@ func (c Config) Validate() error {
 type Restart string
 
 const (
-	RestartNo        Restart = "no"
-	RestartOnFailure Restart = "on-failure"
-	RestartAlways    Restart = "always"
+	RestartNo        Restart = Restart(systemdunit.RestartNo)
+	RestartOnFailure Restart = Restart(systemdunit.RestartOnFailure)
+	RestartAlways    Restart = Restart(systemdunit.RestartAlways)
 )
 
 type UnitEvent struct {

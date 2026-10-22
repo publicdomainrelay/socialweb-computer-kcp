@@ -1,9 +1,0 @@
-{
-  "name": "@publicdomainrelay/market-bidder-worker",
-  "version": "0.0.0",
-  "license": "Unlicense",
-  "exports": "./mod.ts",
-  "imports": {
-    "@publicdomainrelay/policy-engine-abc": "jsr:@publicdomainrelay/policy-engine-abc@^0"
-  }
-}

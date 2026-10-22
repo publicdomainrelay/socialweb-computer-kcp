@@ -35,6 +35,7 @@ func TestKubeconfigClientCertificateWithoutCredentialHelper(t *testing.T) {
 	ctx := context.Background()
 	addr := n.xrpcAddress(t)
 	acct := n.OwnerAccount(t)
+	aud := n.gatewayAudience(t)
 	gw := &http.Client{Timeout: 30 * time.Second}
 
 	post := func(lxm string, token string, body string) (int, http.Header, []byte) {
@@ -54,7 +55,7 @@ func TestKubeconfigClientCertificateWithoutCredentialHelper(t *testing.T) {
 		return resp.StatusCode, resp.Header, raw
 	}
 
-	code, header, raw := post("getKubeconfig", acct.Token(t, "getKubeconfig"), `{"name":"tenant","ttlSeconds":3600}`)
+	code, header, raw := post("getKubeconfig", acct.Token(t, aud, "getKubeconfig"), `{"name":"tenant","ttlSeconds":3600}`)
 	if code != http.StatusOK {
 		t.Fatalf("getKubeconfig ttl 3600: %d %.200s", code, raw)
 	}
@@ -106,12 +107,12 @@ func TestKubeconfigClientCertificateWithoutCredentialHelper(t *testing.T) {
 	}
 
 	for _, ttl := range []int{59, 86401} {
-		code, _, raw := post("getKubeconfig", acct.Token(t, "getKubeconfig"), fmt.Sprintf(`{"name":"tenant","ttlSeconds":%d}`, ttl))
+		code, _, raw := post("getKubeconfig", acct.Token(t, aud, "getKubeconfig"), fmt.Sprintf(`{"name":"tenant","ttlSeconds":%d}`, ttl))
 		if code != http.StatusBadRequest || !strings.Contains(string(raw), "InvalidRequest") {
 			t.Fatalf("ttlSeconds %d: want 400 InvalidRequest, got %d %.200s", ttl, code, raw)
 		}
 	}
-	if code, _, raw := post("getKubeconfig", acct.Token(t, "listClusters"), `{"name":"tenant"}`); code != http.StatusUnauthorized {
+	if code, _, raw := post("getKubeconfig", acct.Token(t, aud, "listClusters"), `{"name":"tenant"}`); code != http.StatusUnauthorized {
 		t.Fatalf("a token for another lxm: want 401, got %d %.200s", code, raw)
 	}
 
@@ -156,7 +157,7 @@ func TestKubeconfigClientCertificateWithoutCredentialHelper(t *testing.T) {
 			"data":     map[string]any{"from": "kubectlApplyServerSide"},
 		},
 	}
-	if out, code, err := postJSON(gw, "http://"+addr+"/xrpc/"+k8sNSID+"kubectlApplyServerSide", acct.TokenFor(t, k8sNSID+"kubectlApplyServerSide"), applyBody); err != nil || code != http.StatusOK {
+	if out, code, err := postJSON(gw, "http://"+addr+"/xrpc/"+k8sNSID+"kubectlApplyServerSide", acct.TokenFor(t, aud, k8sNSID+"kubectlApplyServerSide"), applyBody); err != nil || code != http.StatusOK {
 		t.Fatalf("kubectlApplyServerSide: %d %v %v", code, out, err)
 	}
 	if cm, err := tn.Kube.CoreV1().ConfigMaps("default").Get(ctx, "it-owner-credential", metav1.GetOptions{}); err != nil || cm.Data["from"] != "kubectlApplyServerSide" {
@@ -164,7 +165,7 @@ func TestKubeconfigClientCertificateWithoutCredentialHelper(t *testing.T) {
 	}
 
 	revoked := time.Now()
-	if code, _, raw := post("revokeIdentity", acct.Token(t, "revokeIdentity"), `{"name":"tenant"}`); code != http.StatusOK {
+	if code, _, raw := post("revokeIdentity", acct.Token(t, aud, "revokeIdentity"), `{"name":"tenant"}`); code != http.StatusOK {
 		t.Fatalf("revokeIdentity: %d %.200s", code, raw)
 	}
 	for deadline := revoked.Add(revokeRefusalTime); ; {

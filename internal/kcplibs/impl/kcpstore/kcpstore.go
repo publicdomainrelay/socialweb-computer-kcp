@@ -124,10 +124,40 @@ type Resource[T any] struct {
 	store *Store
 
 	gvr schema.GroupVersionResource
+
+	clusterScoped bool
+}
+
+type ResourceOptions struct {
+	ClusterScoped bool
 }
 
 func Of[T any](s *Store, gvr schema.GroupVersionResource) *Resource[T] {
-	return &Resource[T]{store: s, gvr: gvr}
+	return OfWithOptions[T](s, gvr, ResourceOptions{})
+}
+
+func OfClusterScoped[T any](s *Store, gvr schema.GroupVersionResource) *Resource[T] {
+	return OfWithOptions[T](s, gvr, ResourceOptions{ClusterScoped: true})
+}
+
+func OfWithOptions[T any](s *Store, gvr schema.GroupVersionResource, opts ResourceOptions) *Resource[T] {
+	return &Resource[T]{store: s, gvr: gvr, clusterScoped: opts.ClusterScoped}
+}
+
+func (r *Resource[T]) ClusterScoped() *Resource[T] {
+	if r == nil {
+		return nil
+	}
+	out := *r
+	out.clusterScoped = true
+	return &out
+}
+
+func (r *Resource[T]) withNamespace(req *rest.Request, namespace string) *rest.Request {
+	if r.clusterScoped {
+		return req
+	}
+	return req.Namespace(namespace)
 }
 
 func (r *Resource[T]) client(logicalCluster string) (rest.Interface, error) {
@@ -139,7 +169,7 @@ func (r *Resource[T]) GetRaw(ctx context.Context, target ref.Ref) ([]byte, error
 	if err != nil {
 		return nil, err
 	}
-	raw, err := c.Get().Namespace(target.Namespace).Resource(r.gvr.Resource).Name(target.Name).Do(ctx).Raw()
+	raw, err := r.withNamespace(c.Get(), target.Namespace).Resource(r.gvr.Resource).Name(target.Name).Do(ctx).Raw()
 	if err != nil {
 		return nil, fmt.Errorf("kcpstore: read %s %s in %s: %w", r.gvr.Resource, target.Name, target.LogicalCluster, err)
 	}
@@ -187,11 +217,14 @@ func (r *Resource[T]) Create(ctx context.Context, logicalCluster string, obj *T)
 	if err != nil {
 		return fmt.Errorf("kcpstore: encode %s: %w", r.gvr.Resource, err)
 	}
-	namespace, err := namespaceOf(raw)
-	if err != nil {
-		return err
+	namespace := ""
+	if !r.clusterScoped {
+		namespace, err = namespaceOf(raw)
+		if err != nil {
+			return err
+		}
 	}
-	response, err := c.Post().Namespace(namespace).Resource(r.gvr.Resource).Body(raw).Do(ctx).Raw()
+	response, err := r.withNamespace(c.Post(), namespace).Resource(r.gvr.Resource).Body(raw).Do(ctx).Raw()
 	if err != nil {
 		return fmt.Errorf("kcpstore: create %s %s in %s: %w%s", r.gvr.Resource, nameOf(raw), logicalCluster, err, detail(response))
 	}
@@ -210,7 +243,7 @@ func (r *Resource[T]) Delete(ctx context.Context, target ref.Ref) error {
 	if err != nil {
 		return err
 	}
-	err = c.Delete().Namespace(target.Namespace).Resource(r.gvr.Resource).Name(target.Name).
+	err = r.withNamespace(c.Delete(), target.Namespace).Resource(r.gvr.Resource).Name(target.Name).
 		Body([]byte(`{"propagationPolicy":"Background"}`)).Do(ctx).Error()
 	if err != nil && !IsNotFound(err) {
 		return fmt.Errorf("kcpstore: delete %s %s in %s: %w", r.gvr.Resource, target.Name, target.LogicalCluster, err)
@@ -227,7 +260,7 @@ func (r *Resource[T]) PatchStatus(ctx context.Context, target ref.Ref, patch []b
 	if err != nil {
 		return err
 	}
-	response, err := c.Patch(mergePatch).SubResource("status").Namespace(target.Namespace).Resource(r.gvr.Resource).
+	response, err := r.withNamespace(c.Patch(mergePatch), target.Namespace).SubResource("status").Resource(r.gvr.Resource).
 		Name(target.Name).Body(body).Do(ctx).Raw()
 	if err != nil {
 		return fmt.Errorf("kcpstore: write %s status for %s in %s: %w%s", r.gvr.Resource, target.Name, target.LogicalCluster, err, detail(response))
@@ -240,7 +273,20 @@ func (r *Resource[T]) PatchJSON(ctx context.Context, target ref.Ref, patch []byt
 	if err != nil {
 		return err
 	}
-	response, err := c.Patch(jsonPatch).Namespace(target.Namespace).Resource(r.gvr.Resource).
+	response, err := r.withNamespace(c.Patch(jsonPatch), target.Namespace).Resource(r.gvr.Resource).
+		Name(target.Name).Body(patch).Do(ctx).Raw()
+	if err != nil {
+		return fmt.Errorf("kcpstore: patch %s %s in %s: %w%s", r.gvr.Resource, target.Name, target.LogicalCluster, err, detail(response))
+	}
+	return nil
+}
+
+func (r *Resource[T]) PatchMerge(ctx context.Context, target ref.Ref, patch []byte) error {
+	c, err := r.client(target.LogicalCluster)
+	if err != nil {
+		return err
+	}
+	response, err := r.withNamespace(c.Patch(mergePatch), target.Namespace).Resource(r.gvr.Resource).
 		Name(target.Name).Body(patch).Do(ctx).Raw()
 	if err != nil {
 		return fmt.Errorf("kcpstore: patch %s %s in %s: %w%s", r.gvr.Resource, target.Name, target.LogicalCluster, err, detail(response))

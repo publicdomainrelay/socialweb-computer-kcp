@@ -84,7 +84,7 @@ func BidderKcpOf(rec devinstance.Record) BidderKcp {
 	return BidderKcp{Server: host, Workspace: ws}
 }
 
-var ErrFirecrackerInPod = errors.New("appctl: spec.firecracker: the bidder DenoPod runs no VM runtime command, so the firecracker provider cannot run in it; " +
+var ErrFirecrackerInPod = errors.New("appctl: spec.firecracker: the bidder component runs no VM runtime command, so the firecracker provider cannot run in it; " +
 	"use spec.kcp (the ComputeVM controller of the bidder's own core boots its guests)")
 
 func providerValues(v *manifests.MarketBidder, spec v1alpha1.MarketBidderSpec, kcp BidderKcp) error {

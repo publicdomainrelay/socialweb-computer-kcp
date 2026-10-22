@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-1.guestidentitygrants.socialweb.computer
+  name: v1alpha1-2.guestidentitygrants.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -73,6 +73,11 @@ spec:
                 type: string
               lastError:
                 type: string
+              conditions:
+                type: array
+                items:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
             required:
               - applied
       additionalPrinterColumns:

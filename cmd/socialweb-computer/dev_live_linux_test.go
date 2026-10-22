@@ -12,23 +12,20 @@ import (
 	"testing"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/livegate"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/tsbundle"
 )
 
 type liveDev struct {
-	bin    string
-	state  string
-	kcp    string
-	kine   string
-	deno   string
-	source string
+	bin   string
+	state string
+	kcp   string
+	kine  string
 }
 
 func openLiveDev(t *testing.T) *liveDev {
 	t.Helper()
 	livegate.Short(t, "this test runs real kcp and kine processes under devsup (two dev instances, ~1 GB, ~20 s)")
-	d := &liveDev{kcp: testExe("SOCIALWEB_KCP_PATH", "kcp"), kine: testExe("SOCIALWEB_KINE_PATH", "kine"), deno: testExe("SOCIALWEB_DENO_PATH", "deno")}
-	for name, p := range map[string]string{"kcp": d.kcp, "kine": d.kine, "deno": d.deno} {
+	d := &liveDev{kcp: testExe("SOCIALWEB_KCP_PATH", "kcp"), kine: testExe("SOCIALWEB_KINE_PATH", "kine")}
+	for name, p := range map[string]string{"kcp": d.kcp, "kine": d.kine} {
 		if p == "" {
 			livegate.RequireLocal(t, "no %s executable here (its SOCIALWEB_*_PATH env or PATH)", name)
 			return nil
@@ -38,12 +35,6 @@ func openLiveDev(t *testing.T) *liveDev {
 		livegate.RequireLocal(t, "XDG_RUNTIME_DIR is unset")
 		return nil
 	}
-	source, err := tsbundle.FindCheckout(".")
-	if err != nil {
-		livegate.RequireLocal(t, "no socialweb-computer-kcp checkout above this package: %v", err)
-		return nil
-	}
-	d.source = source
 	dir := t.TempDir()
 	d.bin = filepath.Join(dir, "socialweb-computer")
 	if out, err := exec.Command("go", "build", "-o", d.bin, ".").CombinedOutput(); err != nil {
@@ -67,7 +58,7 @@ func testExe(env, name string) string {
 
 func (d *liveDev) runE(out any, args ...string) error {
 	cmd := exec.Command(d.bin, append(args, "--state-dir", d.state)...)
-	cmd.Env = append(os.Environ(), "SOCIALWEB_KCP_PATH="+d.kcp, "SOCIALWEB_KINE_PATH="+d.kine, "SOCIALWEB_DENO_PATH="+d.deno, tsbundle.SourceRootEnv+"="+d.source)
+	cmd.Env = append(os.Environ(), "SOCIALWEB_KCP_PATH="+d.kcp, "SOCIALWEB_KINE_PATH="+d.kine)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {

@@ -352,16 +352,16 @@
     },
     "socialweb-computer-k8s-downloads": {
       "version": "this module",
-      "source": "the pinned downloads the socialweb-computer-k8s web app serves at /downloads/<sha256>/<name>, built by scripts/build-web-app-downloads.sh: socialweb-meshd-x86_64 and socialweb-meshd-aarch64 by rust/build.sh (static musl, rustc of rust/rust-toolchain.toml in a mount namespace with fixed paths, zig cc and zig ar of the zig that rust/build.sh pins, and the toolchain's rust-lld), each with a sha256sum-format <name>.sha256 sidecar; the same tree on every platform, since the guests and the users that download them are not the gateway's platform",
-      "verify": "rebuilt from this commit; the unpacked tree must equal the treeSha256 pin, so a change to rust/ re-pins it; the web app refuses a sidecar that does not hash its file",
+      "source": "the pinned downloads the socialweb-computer-k8s web app serves at /downloads/<sha256>/<name>, built by scripts/build-web-app-downloads.sh: socialweb-meshd-x86_64 and socialweb-meshd-aarch64 by rust/build.sh (static musl, rustc of rust/rust-toolchain.toml in a mount namespace with fixed paths, zig cc and zig ar of the zig that rust/build.sh pins, and the toolchain's rust-lld), and socialweb-node-x86_64 and socialweb-node-aarch64 by go build from cmd/socialweb-node for linux with CGO disabled, each with a sha256sum-format <name>.sha256 sidecar; the same tree on every platform, since the guests and the users that download them are not the gateway's platform",
+      "verify": "rebuilt from this commit; the unpacked tree must equal the treeSha256 pin, so a change to rust/ or cmd/socialweb-node re-pins it; the web app refuses a sidecar that does not hash its file",
       "executables": {"socialweb-computer-k8s-downloads": "."},
       "fetch": {
-        "linux/amd64": {"kind": "script", "script": "scripts/build-web-app-downloads.sh", "members": {"socialweb-meshd-x86_64": "socialweb-meshd-x86_64", "socialweb-meshd-x86_64.sha256": "socialweb-meshd-x86_64.sha256", "socialweb-meshd-aarch64": "socialweb-meshd-aarch64", "socialweb-meshd-aarch64.sha256": "socialweb-meshd-aarch64.sha256"}},
-        "linux/arm64": {"kind": "script", "script": "scripts/build-web-app-downloads.sh", "members": {"socialweb-meshd-x86_64": "socialweb-meshd-x86_64", "socialweb-meshd-x86_64.sha256": "socialweb-meshd-x86_64.sha256", "socialweb-meshd-aarch64": "socialweb-meshd-aarch64", "socialweb-meshd-aarch64.sha256": "socialweb-meshd-aarch64.sha256"}}
+        "linux/amd64": {"kind": "script", "script": "scripts/build-web-app-downloads.sh", "members": {"socialweb-meshd-x86_64": "socialweb-meshd-x86_64", "socialweb-meshd-x86_64.sha256": "socialweb-meshd-x86_64.sha256", "socialweb-meshd-aarch64": "socialweb-meshd-aarch64", "socialweb-meshd-aarch64.sha256": "socialweb-meshd-aarch64.sha256", "socialweb-node-x86_64": "socialweb-node-x86_64", "socialweb-node-x86_64.sha256": "socialweb-node-x86_64.sha256", "socialweb-node-aarch64": "socialweb-node-aarch64", "socialweb-node-aarch64.sha256": "socialweb-node-aarch64.sha256"}},
+        "linux/arm64": {"kind": "script", "script": "scripts/build-web-app-downloads.sh", "members": {"socialweb-meshd-x86_64": "socialweb-meshd-x86_64", "socialweb-meshd-x86_64.sha256": "socialweb-meshd-x86_64.sha256", "socialweb-meshd-aarch64": "socialweb-meshd-aarch64", "socialweb-meshd-aarch64.sha256": "socialweb-meshd-aarch64.sha256", "socialweb-node-x86_64": "socialweb-node-x86_64", "socialweb-node-x86_64.sha256": "socialweb-node-x86_64.sha256", "socialweb-node-aarch64": "socialweb-node-aarch64", "socialweb-node-aarch64.sha256": "socialweb-node-aarch64.sha256"}}
       },
       "platforms": {
-        "linux/amd64": {"treeSha256": "acb85490524a910a214ecd80f8e8c791071eb12bb6f7fd440a0cf13a03c51a25", "rawBytes": 17227747, "zstdBytes": 5994408},
-        "linux/arm64": {"treeSha256": "acb85490524a910a214ecd80f8e8c791071eb12bb6f7fd440a0cf13a03c51a25", "rawBytes": 17227747, "zstdBytes": 5994408}
+        "linux/amd64": {"treeSha256": "64aa23bf78ccf94c0f4b8af9b9778d2c5dd940a1429a88b66abe9778d960a8e7", "rawBytes": 37937552, "zstdBytes": 11770882},
+        "linux/arm64": {"treeSha256": "64aa23bf78ccf94c0f4b8af9b9778d2c5dd940a1429a88b66abe9778d960a8e7", "rawBytes": 37937552, "zstdBytes": 11770882}
       }
     }
   },

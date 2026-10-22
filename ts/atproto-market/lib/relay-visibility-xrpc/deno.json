@@ -1,9 +1,0 @@
-{
-  "name": "@publicdomainrelay/relay-visibility-xrpc",
-  "version": "0.0.0",
-  "license": "Unlicense",
-  "exports": "./mod.ts",
-  "imports": {
-    "@publicdomainrelay/logger": "jsr:@publicdomainrelay/logger@^0"
-  }
-}

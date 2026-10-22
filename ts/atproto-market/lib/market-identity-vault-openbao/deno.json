@@ -1,9 +1,0 @@
-{
-  "name": "@publicdomainrelay/market-identity-vault-openbao",
-  "version": "0.0.0",
-  "license": "Unlicense",
-  "exports": "./mod.ts",
-  "imports": {
-    "@publicdomainrelay/market-identity-abc": "jsr:@publicdomainrelay/market-identity-abc@^0"
-  }
-}

@@ -1,0 +1,65 @@
+package component
+
+import (
+	"time"
+
+	v1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+func (s ComponentStatus) APIStatus() v1alpha1.ComponentStatus {
+	out := v1alpha1.ComponentStatus{
+		ObservedGeneration: s.ObservedGeneration,
+		Phase:              v1alpha1.ComponentPhase(s.Phase),
+		Ready:              s.Ready,
+		Message:            s.Message,
+		Restarts:           s.Restarts,
+		Conditions:         append([]metav1.Condition(nil), s.Conditions...),
+	}
+	if !s.StartedAt.IsZero() {
+		out.StartedAt = s.StartedAt.UTC().Format(time.RFC3339)
+	}
+	if primary, ok := s.PrimaryEndpoint(); ok {
+		out.Endpoint = primary.URL
+		if out.Endpoint == "" {
+			out.Endpoint = primary.Address
+		}
+	}
+	if len(s.Endpoints) > 0 {
+		out.Endpoints = make([]v1alpha1.Endpoint, 0, len(s.Endpoints))
+		for _, endpoint := range s.Endpoints {
+			out.Endpoints = append(out.Endpoints, APIEndpoint(endpoint))
+		}
+	}
+	return out
+}
+
+func APIEndpoint(endpoint Endpoint) v1alpha1.Endpoint {
+	return v1alpha1.Endpoint{
+		Name:     endpoint.Name,
+		Url:      endpoint.URL,
+		Address:  endpoint.Address,
+		Protocol: endpoint.Protocol,
+	}
+}
+
+func (s ComponentStatus) PrimaryEndpoint() (Endpoint, bool) {
+	return PrimaryEndpoint(s.Endpoints)
+}
+
+func PrimaryEndpoint(endpoints []Endpoint) (Endpoint, bool) {
+	for _, endpoint := range endpoints {
+		if endpoint.Name == "http" {
+			return endpoint, true
+		}
+	}
+	for _, endpoint := range endpoints {
+		if endpoint.URL != "" {
+			return endpoint, true
+		}
+	}
+	if len(endpoints) > 0 {
+		return endpoints[0], true
+	}
+	return Endpoint{}, false
+}

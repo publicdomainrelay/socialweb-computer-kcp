@@ -1,0 +1,1435 @@
+package requester
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/rest"
+
+	"github.com/bluesky-social/indigo/atproto/identity"
+	"github.com/bluesky-social/indigo/atproto/syntax"
+
+	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
+	policyv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/policy/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
+)
+
+const (
+	healthPath = "/xrpc/_health"
+
+	maxCallbackBody = 2 << 20
+
+	submitAcceptProvisionTimeout = 3 * time.Minute
+
+	submitAcceptReceiptTimeout = 5 * time.Second
+
+	submitAcceptReceiptPoll = 250 * time.Millisecond
+
+	acceptSettleDelay = 2 * time.Second
+)
+
+type Service struct {
+	cfg Config
+
+	log *slog.Logger
+
+	directory identity.Directory
+
+	repo RecordStore
+
+	ownsRepo bool
+
+	signer *market.Signer
+
+	oauth *OAuthSession
+
+	market MarketClient
+
+	contracts ContractStore
+
+	policy *PolicyEvaluator
+
+	mu sync.Mutex
+
+	reconcileMu sync.Mutex
+
+	started bool
+
+	ready bool
+
+	stopped bool
+
+	ctx context.Context
+
+	cancel context.CancelFunc
+
+	done chan struct{}
+
+	runners map[string]*contractRunner
+
+	finished map[string]bool
+
+	waiting map[string]bool
+
+	wg sync.WaitGroup
+
+	running int
+
+	perAccount map[string]int
+
+	pendingBids map[string][]BidRecord
+
+	eventMu sync.Mutex
+
+	eventSinks map[string]chan MarketEvent
+
+	pendingEvents map[string][]MarketEvent
+
+	bidderMu sync.Mutex
+
+	bidders map[string]Bidder
+
+	scopeMu sync.Mutex
+
+	scopeCache map[string]scopeEntry
+
+	secretsMu sync.Mutex
+
+	secrets map[string]*secretsState
+}
+
+type scopeEntry struct {
+	decision PolicyDecision
+
+	at time.Time
+}
+
+func New(cfg Config) (*Service, error) {
+	cfg.defaults()
+	if err := cfg.check(); err != nil {
+		return nil, err
+	}
+	log := cfg.Log
+	if log == nil {
+		log = slog.New(slog.DiscardHandler)
+	}
+	return &Service{
+		cfg:           cfg,
+		log:           log.With("component", "requester", "did", cfg.DID),
+		runners:       map[string]*contractRunner{},
+		finished:      map[string]bool{},
+		waiting:       map[string]bool{},
+		perAccount:    map[string]int{},
+		pendingBids:   map[string][]BidRecord{},
+		eventSinks:    map[string]chan MarketEvent{},
+		pendingEvents: map[string][]MarketEvent{},
+		bidders:       map[string]Bidder{},
+		scopeCache:    map[string]scopeEntry{},
+		secrets:       map[string]*secretsState{},
+	}, nil
+}
+
+func (s *Service) Start(ctx context.Context, deps component.Deps) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	s.mu.Lock()
+	if s.started {
+		s.mu.Unlock()
+		return errors.New("requester: the service is already started")
+	}
+	s.cfg = s.cfg.withDeps(deps)
+	if s.cfg.Log == nil {
+		s.cfg.Log = deps.Log
+	}
+	if s.cfg.Log != nil {
+		s.log = s.cfg.Log.With("component", "requester", "did", s.cfg.DID)
+	}
+	s.started = true
+	s.ready = false
+	s.done = make(chan struct{})
+	runCtx, cancel := context.WithCancel(ctx)
+	s.ctx = runCtx
+	s.cancel = cancel
+	s.mu.Unlock()
+
+	if err := s.setup(runCtx); err != nil {
+		cancel()
+		s.shutdown(context.Background())
+		s.mu.Lock()
+		s.started = false
+		s.mu.Unlock()
+		close(s.done)
+		return err
+	}
+
+	handler := s.handler()
+	if err := s.register(handler); err != nil {
+		s.shutdown(context.Background())
+		s.mu.Lock()
+		s.started = false
+		s.mu.Unlock()
+		close(s.done)
+		return err
+	}
+	s.mu.Lock()
+	s.ready = true
+	s.mu.Unlock()
+	go s.loop(runCtx)
+	s.log.Info("requester_started", "handler", s.logicalURL(), "repo", s.cfg.RepoDID, "mode", s.cfg.IdentityMode)
+
+	<-runCtx.Done()
+	s.shutdown(context.Background())
+	close(s.done)
+	return nil
+}
+
+func (s *Service) register(handler http.Handler) error {
+	if s.cfg.Deps.Handlers == nil {
+		return errors.New("requester: the handler registry is not available")
+	}
+	key := component.Key{Workspace: s.cfg.Workspace, Kind: Kind, Name: s.cfg.ComponentName}
+	return s.cfg.Deps.Handlers.RegisterHTTP(key, handler)
+}
+
+func (s *Service) logicalURL() string {
+	return handlerURL(s.cfg.Workspace, Kind, s.cfg.ComponentName)
+}
+
+func (s *Service) setup(ctx context.Context) error {
+	if s.cfg.StateDir != "" {
+		if err := os.MkdirAll(s.cfg.StateDir, 0o700); err != nil {
+			return fmt.Errorf("requester: state dir: %w", err)
+		}
+	}
+	if s.cfg.Directory == nil {
+		s.cfg.Directory = directoryFor(s.cfg.Network.PlcDirectoryUrl)
+	}
+	s.directory = s.cfg.Directory
+	if s.cfg.IdentityMode == IdentityModeOAuth {
+		session, err := openOAuthSession(ctx, s.cfg, s.directory)
+		if err != nil {
+			return err
+		}
+		s.oauth = session
+		s.cfg.DID = session.DID()
+		s.cfg.RepoDID = session.DID()
+		s.cfg.MarketDID = session.DID()
+		if s.cfg.PDSURL == "" {
+			s.cfg.PDSURL = session.HostURL()
+		}
+		if s.cfg.Log != nil {
+			s.log = s.cfg.Log.With("component", "requester", "did", s.cfg.DID)
+		}
+	}
+	if s.cfg.RepoKey == nil {
+		keyPath := s.cfg.RepoKeyPath
+		if keyPath == "" && s.cfg.StateDir != "" {
+			keyPath = filepath.Join(s.cfg.StateDir, "repo-key.json")
+		}
+		if keyPath != "" {
+			signer, err := market.LoadOrCreateSignerFile(keyPath)
+			if err != nil {
+				return fmt.Errorf("requester: repo key: %w", err)
+			}
+			s.cfg.RepoKey = signer.PrivateKey
+		}
+	}
+	if s.cfg.AttestationKey == nil {
+		keyPath := s.cfg.AttestationKeyPath
+		if keyPath == "" && s.cfg.StateDir != "" {
+			keyPath = filepath.Join(s.cfg.StateDir, "attestation-key.json")
+		}
+		if keyPath != "" {
+			signer, err := market.LoadOrCreateSignerFile(keyPath)
+			if err != nil {
+				return fmt.Errorf("requester: attestation key: %w", err)
+			}
+			s.cfg.AttestationKey = signer.PrivateKey
+		}
+	}
+	if s.cfg.AttestationKey == nil {
+		if s.cfg.RepoKey == nil {
+			return errors.New("requester: no attestation or repo key")
+		}
+		s.cfg.AttestationKey = s.cfg.RepoKey
+	}
+	s.signer = market.NewSigner(s.cfg.AttestationKey, s.cfg.MarketDID)
+	remote := market.NewHTTPReader(s.directory)
+	remote.Client = s.cfg.HTTPClient
+	if s.cfg.Repo == nil {
+		repoStore, err := s.openRepo(ctx, remote)
+		if err != nil {
+			return err
+		}
+		s.repo = repoStore
+		s.ownsRepo = true
+	} else {
+		s.repo = s.cfg.Repo
+	}
+	if s.cfg.Market == nil {
+		var serviceAuth ServiceAuthSource
+		if s.oauth != nil {
+			serviceAuth = s.oauth
+		}
+		s.market = &HTTPMarket{
+			Directory:      s.directory,
+			Reader:         s.repo,
+			RepoDID:        s.cfg.RepoDID,
+			Signer:         s.signer,
+			ServiceKey:     s.cfg.RepoKey,
+			ServiceAuth:    serviceAuth,
+			RelayURLs:      append([]string(nil), s.cfg.Network.RelayUrls...),
+			BidderDIDs:     append([]string(nil), s.cfg.BidderDIDs...),
+			DenyBidderDIDs: append([]string(nil), s.cfg.DenyBidderDIDs...),
+			HTTPClient:     s.cfg.HTTPClient,
+			Timeout:        s.cfg.BidWindow,
+			Log:            s.log,
+		}
+	} else {
+		s.market = s.cfg.Market
+	}
+	if err := s.setupKCP(); err != nil {
+		return err
+	}
+	if s.cfg.Contracts == nil {
+		return errors.New("requester: no ComputeContract store is configured")
+	}
+	if s.cfg.PolicyRuns == nil {
+		return errors.New("requester: no PolicyWorkflowRun store is configured")
+	}
+	s.contracts = s.cfg.Contracts
+	engineRef := ""
+	if s.cfg.PolicyEngineRef != nil {
+		engineRef = s.cfg.PolicyEngineRef.Name
+	}
+	s.policy = &PolicyEvaluator{
+		Runs:      s.cfg.PolicyRuns,
+		Namespace: s.cfg.Namespace,
+		EngineRef: engineRef,
+		Workflow:  PolicyWorkflowName(s.cfg.PolicyWorkflow),
+		Args:      s.cfg.PolicyArgs,
+		Timeout:   s.cfg.PolicyTimeout,
+		Poll:      s.cfg.PolicyPoll,
+		DID:       s.cfg.MarketDID,
+		Log:       s.log,
+		Now:       s.cfg.Now,
+	}
+	return nil
+}
+
+func (s *Service) openRepo(ctx context.Context, remote market.RecordResolver) (RecordStore, error) {
+	ref, tokens, client, err := s.pdsTarget(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if ref != nil {
+		resolver := &pdsclient.Resolver{
+			Handlers:   s.cfg.Deps.Handlers,
+			HTTPClient: client,
+			TLS:        s.cfg.Deps.TLS,
+			Tokens:     tokens,
+			Timeout:    RecordRequestTimeout,
+		}
+		pds, err := resolver.Resolve(ref)
+		if err != nil {
+			return nil, err
+		}
+		return NewPDSStore(PDSOptions{PDS: pds, DID: s.cfg.RepoDID, Remote: remote})
+	}
+	if s.cfg.RepoKey == nil {
+		return nil, errors.New("requester: no repo signing key")
+	}
+	path := repoPath(s.cfg.StateDir)
+	if s.cfg.StateDir == "" {
+		return nil, errors.New("requester: the local repo needs a state dir")
+	}
+	return NewLocalRepo(ctx, path, s.cfg.RepoDID, s.cfg.RepoKey, remote)
+}
+
+func (s *Service) pdsTarget(ctx context.Context) (pdsclient.Ref, pdsclient.TokenSource, *http.Client, error) {
+	switch s.cfg.IdentityMode {
+	case IdentityModeOAuth:
+		if s.oauth == nil {
+			return nil, nil, nil, errors.New("requester: oauth identity mode has no session")
+		}
+		did, err := syntax.ParseDID(s.oauth.DID())
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("requester: oauth PDS did: %w", err)
+		}
+		ref := pdsclient.CRRef{RemotePDS: &pdsv1alpha1.RemotePDS{
+			ObjectMeta: metav1.ObjectMeta{Name: "pds"},
+			Spec:       pdsv1alpha1.RemotePDSSpec{URL: s.oauth.HostURL(), DID: did.String()},
+		}}
+		return ref, s.oauth, s.oauth.HTTPClient(s.cfg.HTTPClient), nil
+	case IdentityModeCallback:
+		ref, err := s.pdsRef()
+		if err != nil || ref == nil {
+			return nil, nil, nil, err
+		}
+		token, err := s.pdsAccessToken(ctx)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		return ref, pdsTokenSource(token), s.cfg.HTTPClient, nil
+	}
+	return nil, nil, nil, nil
+}
+
+func (s *Service) pdsRef() (pdsclient.Ref, error) {
+	if s.cfg.RemotePDS != nil {
+		return pdsclient.CRRef{RemotePDS: s.cfg.RemotePDS}, nil
+	}
+	if s.cfg.PDSURL != "" {
+		return pdsclient.CRRef{RemotePDS: &pdsv1alpha1.RemotePDS{
+			ObjectMeta: metav1.ObjectMeta{Name: "pds"},
+			Spec:       pdsv1alpha1.RemotePDSSpec{URL: s.cfg.PDSURL, DID: s.cfg.RepoDID},
+		}}, nil
+	}
+	if s.cfg.PDSRef != nil && s.cfg.PDSRef.Name != "" {
+		kind := s.cfg.PDSRef.Kind
+		if kind == "" {
+			kind = "Pds"
+		}
+		return pdsclient.LocalRef{Workspace: s.cfg.Workspace, Kind: kind, Name: s.cfg.PDSRef.Name}, nil
+	}
+	return nil, nil
+}
+
+func (s *Service) pdsAccessToken(ctx context.Context) (string, error) {
+	token := s.cfg.PDSAccessToken
+	if token != "" || s.cfg.PDSAccessTokenRef == nil || s.cfg.Deps.Credentials == nil {
+		return token, nil
+	}
+	credential, err := s.cfg.Deps.Credentials.Resolve(ctx, *s.cfg.PDSAccessTokenRef)
+	if err != nil {
+		return "", fmt.Errorf("requester: PDS token: %w", err)
+	}
+	for _, key := range s.cfg.PDSAccessTokenRef.Keys {
+		if value, ok := credential.Value(key); ok && value != "" {
+			return value, nil
+		}
+	}
+	return "", nil
+}
+
+func pdsTokenSource(token string) pdsclient.TokenSource {
+	return pdsclient.TokenSourceFunc(func(context.Context) (string, error) {
+		return token, nil
+	})
+}
+
+func (s *Service) setupKCP() error {
+	if s.cfg.Contracts != nil && s.cfg.PolicyRuns != nil {
+		return nil
+	}
+	store, err := kcpStore(s.cfg.Deps, s.cfg.Workspace)
+	if err != nil {
+		return err
+	}
+	if s.cfg.Contracts == nil {
+		s.cfg.Contracts = NewKCPContracts(kcpstore.OfClusterScoped[v1alpha1.ComputeContract](store, ComputeContractGVR), s.cfg.Workspace, "")
+	}
+	if s.cfg.PolicyRuns == nil {
+		s.cfg.PolicyRuns = NewKCPPolicyRuns(kcpstore.Of[policyv1alpha1.PolicyWorkflowRun](store, PolicyWorkflowRunGVR), s.cfg.Workspace, s.cfg.Namespace)
+	}
+	s.contracts = s.cfg.Contracts
+	return nil
+}
+
+func (s *Service) loop(ctx context.Context) {
+	ticker := time.NewTicker(s.cfg.ContractPoll)
+	defer ticker.Stop()
+	s.reconcile(ctx)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.reconcile(ctx)
+		}
+	}
+}
+
+func (s *Service) reconcile(ctx context.Context) {
+	s.reconcileMu.Lock()
+	defer s.reconcileMu.Unlock()
+	contracts, err := s.cfg.Contracts.List(ctx)
+	if err != nil {
+		if ctx.Err() == nil {
+			s.log.Warn("requester_contracts_list_failed", "err", err)
+		}
+		return
+	}
+	present := make(map[string]bool, len(contracts))
+	for i := range contracts {
+		contract := contracts[i]
+		present[contract.Name] = true
+		s.mu.Lock()
+		runner := s.runners[contract.Name]
+		finished := s.finished[contract.Name]
+		s.mu.Unlock()
+		if runner != nil {
+			runner.Update(&contract)
+			continue
+		}
+		if finished {
+			continue
+		}
+		phase := contract.Status.Phase
+		if phase == "" {
+			phase = v1alpha1.ComputeContractPending
+		}
+		terminal := phase == v1alpha1.ComputeContractReleased
+		if phase == v1alpha1.ComputeContractFailed {
+			terminal = contract.Status.Contract == nil || contract.Status.Contract.Receipt == nil
+		}
+		if terminal {
+			s.mu.Lock()
+			s.finished[contract.Name] = true
+			s.mu.Unlock()
+			continue
+		}
+		hasReceipt := contract.Status.Contract != nil && contract.Status.Contract.Receipt != nil
+		if !hasReceipt && (contract.Spec.Release || contract.DeletionTimestamp != nil) {
+			if contract.DeletionTimestamp == nil {
+				status := contract.Status
+				status.Phase = v1alpha1.ComputeContractReleased
+				status.Message = "the contract was released before it started"
+				addContractConditions(&status, contract.Generation, status.Phase, status.Message, s.now(), false)
+				if err := s.cfg.Contracts.PatchStatus(ctx, contract.Name, status); err != nil {
+					s.log.Warn("requester_contract_status_failed", "contract", contract.Name, "err", err)
+				}
+			}
+			s.mu.Lock()
+			s.finished[contract.Name] = true
+			s.mu.Unlock()
+			continue
+		}
+		account := contract.Spec.OwnerDid
+		s.mu.Lock()
+		admit, reason := s.admitLocked(account)
+		if !admit {
+			_, waiting := s.waiting[contract.Name]
+			s.waiting[contract.Name] = true
+			s.mu.Unlock()
+			if !waiting {
+				s.log.Info("requester_contract_waiting", "contract", contract.Name, "reason", reason)
+				status := contract.Status
+				status.ObservedGeneration = contract.Generation
+				status.Phase = v1alpha1.ComputeContractPending
+				status.Message = reason
+				addContractConditions(&status, contract.Generation, status.Phase, reason, s.now(), true)
+				if err := s.cfg.Contracts.PatchStatus(ctx, contract.Name, status); err != nil {
+					s.log.Warn("requester_contract_status_failed", "contract", contract.Name, "err", err)
+				}
+			}
+			continue
+		}
+		delete(s.waiting, contract.Name)
+		s.running++
+		if account != "" {
+			s.perAccount[account]++
+		}
+		started := newContractRunner(s, contract)
+		if contract.Spec.Release || contract.DeletionTimestamp != nil {
+			started.requestRelease()
+		}
+		s.runners[contract.Name] = started
+		s.wg.Add(1)
+		s.mu.Unlock()
+		go func() {
+			defer s.wg.Done()
+			started.Run(ctx)
+			s.runnerDone(started, account)
+		}()
+	}
+	s.mu.Lock()
+	for name := range s.finished {
+		if !present[name] {
+			delete(s.finished, name)
+		}
+	}
+	for name := range s.waiting {
+		if !present[name] {
+			delete(s.waiting, name)
+		}
+	}
+	s.mu.Unlock()
+}
+
+func (s *Service) admitLocked(account string) (bool, string) {
+	if s.running >= s.cfg.MaxConcurrent {
+		return false, fmt.Sprintf("waiting for admission: %d of %d contracts are running", s.running, s.cfg.MaxConcurrent)
+	}
+	if account != "" && s.perAccount[account] >= s.cfg.PerAccount {
+		return false, fmt.Sprintf("this account has %d of %d contracts running", s.perAccount[account], s.cfg.PerAccount)
+	}
+	return true, ""
+}
+
+func (s *Service) runnerDone(runner *contractRunner, account string) {
+	s.mu.Lock()
+	current, ok := s.runners[runner.name]
+	if ok && current == runner {
+		delete(s.runners, runner.name)
+		if s.running > 0 {
+			s.running--
+		}
+		if account != "" {
+			if s.perAccount[account] <= 1 {
+				delete(s.perAccount, account)
+			} else {
+				s.perAccount[account]--
+			}
+		}
+		s.finished[runner.name] = true
+	}
+	s.mu.Unlock()
+	go s.reconcile(s.ctx)
+}
+
+func (s *Service) Ready(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.started {
+		return errors.New("requester: the service is not started")
+	}
+	if !s.ready {
+		return errors.New("requester: the service is starting")
+	}
+	if s.repo == nil {
+		return errors.New("requester: the repo is not open")
+	}
+	return nil
+}
+
+func (s *Service) Endpoints() []component.Endpoint {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.ready {
+		return nil
+	}
+	return []component.Endpoint{{Name: "http", Protocol: component.ProtocolHTTP}}
+}
+
+func (s *Service) Stop(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	s.mu.Lock()
+	cancel := s.cancel
+	done := s.done
+	s.mu.Unlock()
+	if cancel == nil {
+		return nil
+	}
+	cancel()
+	if done == nil {
+		return nil
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (s *Service) shutdown(ctx context.Context) {
+	s.mu.Lock()
+	if s.stopped {
+		s.mu.Unlock()
+		return
+	}
+	s.stopped = true
+	s.mu.Unlock()
+	wait := make(chan struct{})
+	go func() {
+		s.wg.Wait()
+		close(wait)
+	}()
+	select {
+	case <-wait:
+	case <-ctx.Done():
+	}
+	if s.ownsRepo {
+		if closer, ok := s.repo.(io.Closer); ok {
+			_ = closer.Close()
+		}
+	}
+	s.mu.Lock()
+	s.started = false
+	s.ready = false
+	s.mu.Unlock()
+}
+
+func (s *Service) handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET "+healthPath, s.health)
+	mux.HandleFunc("GET /xrpc/com.atproto.repo.getRecord", s.repoGetRecord)
+	mux.HandleFunc("GET /xrpc/com.atproto.repo.listRecords", s.repoListRecords)
+	mux.HandleFunc("GET /xrpc/com.atproto.repo.describeRepo", s.repoDescribe)
+	mux.HandleFunc("GET /xrpc/com.atproto.server.describeServer", s.serverDescribe)
+	mux.HandleFunc("POST /xrpc/"+market.SubmitBidNSID, s.submitBid)
+	mux.HandleFunc("POST /xrpc/"+market.SubmitEventNSID, s.submitEvent)
+	mux.HandleFunc("GET "+SecretsRoute+"/{contract}", s.getSecrets)
+	return mux
+}
+
+func (s *Service) registerSecrets(name string, state *secretsState) {
+	s.secretsMu.Lock()
+	s.secrets[name] = state
+	s.secretsMu.Unlock()
+}
+
+func (s *Service) unregisterSecrets(name string) {
+	s.secretsMu.Lock()
+	delete(s.secrets, name)
+	s.secretsMu.Unlock()
+}
+
+func (s *Service) getSecrets(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("contract")
+	s.secretsMu.Lock()
+	state := s.secrets[name]
+	s.secretsMu.Unlock()
+	if state == nil {
+		http.Error(w, `{"error":"NotFound"}`, http.StatusNotFound)
+		return
+	}
+	state.serve(r.Context(), w, r)
+}
+
+var exposureGVR = schema.GroupVersionResource{Group: "exposure.socialweb.computer", Version: "v1alpha1", Resource: "exposures"}
+
+func (s *Service) ingressExposureURL(ctx context.Context) (string, error) {
+	name := "svc-" + strings.ToLower(Kind) + "-" + strings.TrimSpace(s.cfg.ComponentName) + "-ingress"
+	deadline := time.Now().Add(DefaultExposureWait)
+	for {
+		raw, err := s.readExposureURL(ctx, name)
+		if err == nil && raw != "" {
+			return strings.TrimRight(raw, "/"), nil
+		}
+		if time.Now().After(deadline) {
+			if err != nil {
+				return "", fmt.Errorf("requester: the %s exposure: %w", name, err)
+			}
+			return "", fmt.Errorf("requester: the %s exposure reports no url", name)
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(time.Second):
+		}
+	}
+}
+
+func (s *Service) readExposureURL(ctx context.Context, name string) (string, error) {
+	if s.cfg.Deps.KCP == nil {
+		return "", errors.New("requester: no kcp clients")
+	}
+	client, err := s.cfg.Deps.KCP.Client(s.cfg.Workspace)
+	if err != nil {
+		return "", err
+	}
+	cfg := rest.CopyConfig(client.RESTConfig())
+	if cfg == nil || cfg.Host == "" {
+		return "", errors.New("requester: the kcp client has no rest config")
+	}
+	baseHost, _, _ := strings.Cut(strings.TrimSuffix(cfg.Host, "/"), "/clusters/")
+	cfg.Host = baseHost + "/clusters/" + s.cfg.Workspace
+	dc, err := dynamic.NewForConfig(cfg)
+	if err != nil {
+		return "", err
+	}
+	u, err := dc.Resource(exposureGVR).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return "", err
+	}
+	raw, _, _ := unstructured.NestedString(u.Object, "status", "url")
+	return strings.TrimSpace(raw), nil
+}
+
+func (s *Service) readSecretsBundle(ctx context.Context, ref v1alpha1.VaultRef) ([]secretEntry, error) {
+	if s.cfg.Deps.Vault == nil {
+		return nil, errors.New("requester: no vault clients")
+	}
+	if s.cfg.VaultRef == nil || s.cfg.VaultRef.Name == "" {
+		return nil, errors.New("requester: the contract names a secrets bundle and the component names no OpenBaoServer")
+	}
+	server := s.cfg.VaultRef.Name
+	client, err := s.cfg.Deps.Vault.Client(ctx, server)
+	if err != nil {
+		return nil, fmt.Errorf("requester: the vault client: %w", err)
+	}
+	data, err := client.ReadKV(ctx, ref.Mount, ref.Path)
+	if err != nil {
+		return nil, fmt.Errorf("requester: reading the secrets bundle %s/%s: %w", ref.Mount, ref.Path, err)
+	}
+	text, _ := data["bundle"].(string)
+	if text == "" {
+		return nil, fmt.Errorf("requester: the secrets bundle %s/%s carries no bundle", ref.Mount, ref.Path)
+	}
+	entries := []secretEntry{}
+	if err := json.Unmarshal([]byte(text), &entries); err != nil {
+		return nil, fmt.Errorf("requester: the secrets bundle %s/%s: %w", ref.Mount, ref.Path, err)
+	}
+	for i := range entries {
+		if entries[i].Path == "" || !strings.HasPrefix(entries[i].Path, "/") {
+			return nil, fmt.Errorf("requester: the secrets bundle names the path %q", entries[i].Path)
+		}
+	}
+	return entries, nil
+}
+
+func (s *Service) health(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	ready := s.ready && s.repo != nil
+	did := s.cfg.DID
+	s.mu.Unlock()
+	if !ready {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "did": did})
+}
+
+func (s *Service) repoGetRecord(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	repoDID := query.Get("repo")
+	if repoDID == "" {
+		repoDID = s.cfg.RepoDID
+	}
+	record, err := s.repo.GetRecord(r.Context(), repoDID, query.Get("collection"), query.Get("rkey"))
+	if err != nil {
+		status := http.StatusNotFound
+		if !errors.Is(err, market.ErrNotFound) {
+			status = http.StatusBadGateway
+		}
+		writeJSON(w, status, map[string]any{"error": "RecordNotFound", "message": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"uri": record.URI, "cid": record.CID, "value": record.Value})
+}
+
+func (s *Service) repoListRecords(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	repoDID := query.Get("repo")
+	if repoDID == "" {
+		repoDID = s.cfg.RepoDID
+	}
+	limit := 50
+	if raw := query.Get("limit"); raw != "" {
+		fmt.Sscanf(raw, "%d", &limit)
+	}
+	page, err := s.repo.ListRecords(r.Context(), repoDID, query.Get("collection"), limit, query.Get("cursor"))
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "RepoError", "message": err.Error()})
+		return
+	}
+	records := make([]any, 0, len(page.Records))
+	for _, record := range page.Records {
+		records = append(records, map[string]any{"uri": record.URI, "cid": record.CID, "value": record.Value})
+	}
+	body := map[string]any{"records": records}
+	if page.Cursor != "" {
+		body["cursor"] = page.Cursor
+	}
+	writeJSON(w, http.StatusOK, body)
+}
+
+func (s *Service) repoDescribe(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"did": s.cfg.RepoDID, "handle": s.cfg.Handle, "collections": []string{}})
+}
+
+func (s *Service) serverDescribe(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"did": s.cfg.RepoDID, "version": "socialweb-computer"})
+}
+
+func (s *Service) submitBid(w http.ResponseWriter, r *http.Request) {
+	issuer, ok := s.authorizeCallback(w, r, market.SubmitBidNSID, defaultMarketServiceID)
+	if !ok {
+		return
+	}
+	var body struct {
+		URI    string         `json:"uri"`
+		CID    string         `json:"cid"`
+		Record map[string]any `json:"record"`
+	}
+	if err := decodeBody(r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest", "message": err.Error()})
+		return
+	}
+	if err := market.AuthorizeRecord(issuer, body.URI); err != nil {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "Forbidden", "message": err.Error()})
+		return
+	}
+	bid, err := market.ParseBid(body.Record)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest", "message": err.Error()})
+		return
+	}
+	if !market.VerifyRecordSignatures(r.Context(), body.Record, market.ATURIAuthority(body.URI), market.VerifyRecordOptions{
+		KeysForDID:             market.NewDirectoryKeyLister(s.directory),
+		KeyResolver:            market.DefaultKeyResolver,
+		KeyBoundByBadgeBlueKey: s.badgeBlueBinding(),
+	}) {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest", "message": "the bid carries no valid badge.blue signature"})
+		return
+	}
+	s.queueBid(bid.RFP.URI, BidRecord{DID: issuer, URI: body.URI, CID: body.CID, Record: body.Record, ArrivedAt: s.now()})
+	s.log.Info("requester_bid_received", "bidder", issuer, "uri", body.URI, "rfp", bid.RFP.URI)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (s *Service) submitEvent(w http.ResponseWriter, r *http.Request) {
+	issuer, ok := s.authorizeCallback(w, r, market.SubmitEventNSID, defaultComputeEventServiceID)
+	if !ok {
+		return
+	}
+	var body struct {
+		URI    string         `json:"uri"`
+		CID    string         `json:"cid"`
+		Record map[string]any `json:"record"`
+	}
+	if err := decodeBody(r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest", "message": err.Error()})
+		return
+	}
+	if err := market.AuthorizeRecord(issuer, body.URI); err != nil {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "Forbidden", "message": err.Error()})
+		return
+	}
+	event, err := market.ParseEvent(body.Record)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest", "message": err.Error()})
+		return
+	}
+	if !market.VerifyRecordSignatures(r.Context(), body.Record, market.ATURIAuthority(body.URI), market.VerifyRecordOptions{
+		KeysForDID:             market.NewDirectoryKeyLister(s.directory),
+		KeyResolver:            market.DefaultKeyResolver,
+		KeyBoundByBadgeBlueKey: s.badgeBlueBinding(),
+	}) {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest", "message": "the event carries no valid signature"})
+		return
+	}
+	payload, err := s.repo.Resolve(r.Context(), market.RecordRef{URI: stringOf(event.Payload.URI), CID: stringOf(event.Payload.CID)})
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "EventPayloadUnavailable", "message": err.Error()})
+		return
+	}
+	s.dispatchEvent(event.Receipt.URI, MarketEvent{
+		Event:   market.ResolvedRecord{URI: body.URI, CID: body.CID, Value: body.Record},
+		Payload: payload,
+	})
+	s.log.Info("requester_event_received", "bidder", issuer, "uri", body.URI, "receipt", event.Receipt.URI)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (s *Service) authorizeCallback(w http.ResponseWriter, r *http.Request, lxm, serviceID string) (string, bool) {
+	hostname := s.callbackHostname(r)
+	if hostname == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest", "message": "no callback hostname"})
+		return "", false
+	}
+	result, err := market.VerifyServiceAuth(r.Context(), s.directory, market.VerifyServiceAuthOptions{
+		AuthHeader:        r.Header.Get("Authorization"),
+		Hostname:          hostname,
+		LXM:               lxm,
+		ServiceIDs:        []string{serviceID},
+		ExtraAudienceDIDs: []string{s.cfg.MarketDID, s.cfg.RepoDID, s.cfg.DID},
+	})
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "Unauthorized", "message": err.Error()})
+		return "", false
+	}
+	return result.IssuerDID, true
+}
+
+func (s *Service) callbackHostname(r *http.Request) string {
+	for _, raw := range []string{s.cfg.CallbackHostname, s.cfg.PublicHostname, s.cfg.Network.IngressProxyHost} {
+		if host := urlHost(raw); host != "" {
+			return host
+		}
+		if raw != "" && !strings.Contains(raw, "://") {
+			if host, _, err := net.SplitHostPort(raw); err == nil {
+				return host
+			}
+			return raw
+		}
+	}
+	host := r.Host
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	return host
+}
+
+func (s *Service) badgeBlueBinding() func(ctx context.Context, did, key string) (bool, error) {
+	return func(ctx context.Context, did, key string) (bool, error) {
+		return market.KeyBoundByBadgeBlueKey(ctx, s.repo, did, key), nil
+	}
+}
+
+func (s *Service) queueBid(rfpURI string, bid BidRecord) {
+	if rfpURI == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	list := s.pendingBids[rfpURI]
+	if len(list) >= 100 {
+		list = list[1:]
+	}
+	s.pendingBids[rfpURI] = append(list, bid)
+}
+
+func (s *Service) takeBids(rfpURI string) []BidRecord {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	bids := s.pendingBids[rfpURI]
+	delete(s.pendingBids, rfpURI)
+	return bids
+}
+
+func (s *Service) registerEventSink(receiptURI string) (<-chan MarketEvent, []MarketEvent, func()) {
+	s.eventMu.Lock()
+	channel := make(chan MarketEvent, 32)
+	s.eventSinks[receiptURI] = channel
+	pending := s.pendingEvents[receiptURI]
+	delete(s.pendingEvents, receiptURI)
+	s.eventMu.Unlock()
+	closeFn := func() {
+		s.eventMu.Lock()
+		if s.eventSinks[receiptURI] == channel {
+			delete(s.eventSinks, receiptURI)
+		}
+		s.eventMu.Unlock()
+	}
+	return channel, pending, closeFn
+}
+
+func (s *Service) dispatchEvent(receiptURI string, event MarketEvent) {
+	if receiptURI == "" {
+		return
+	}
+	s.eventMu.Lock()
+	defer s.eventMu.Unlock()
+	if channel, ok := s.eventSinks[receiptURI]; ok {
+		select {
+		case channel <- event:
+		default:
+		}
+		return
+	}
+	list := s.pendingEvents[receiptURI]
+	if len(list) >= 64 {
+		list = list[1:]
+	}
+	s.pendingEvents[receiptURI] = append(list, event)
+}
+
+func (s *Service) rememberBidders(bidders []Bidder) {
+	s.bidderMu.Lock()
+	defer s.bidderMu.Unlock()
+	for _, bidder := range bidders {
+		if _, ok := s.bidders[bidder.DID]; !ok {
+			s.bidders[bidder.DID] = bidder
+		}
+	}
+}
+
+func (s *Service) bidderFor(did string) (Bidder, bool) {
+	s.bidderMu.Lock()
+	defer s.bidderMu.Unlock()
+	bidder, ok := s.bidders[did]
+	return bidder, ok
+}
+
+func (s *Service) bidderForBid(ctx context.Context, bid BidRecord) (Bidder, bool) {
+	if bidder, ok := s.bidderFor(bid.DID); ok {
+		return bidder, true
+	}
+	raw := strings.TrimSpace(stringOf(bid.Record["submitAccept"]))
+	if raw == "" {
+		return Bidder{}, false
+	}
+	if strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "https://") {
+		endpoint, audience, err := resolveBidderEndpoint(raw)
+		if err != nil {
+			return Bidder{}, false
+		}
+		bidder := Bidder{DID: bid.DID, Endpoint: endpoint, Audience: audience}
+		s.rememberBidders([]Bidder{bidder})
+		return bidder, true
+	}
+	did := raw
+	fragment := defaultMarketServiceID
+	if before, after, found := strings.Cut(raw, "#"); found {
+		did = before
+		if after != "" {
+			fragment = after
+		}
+	}
+	parsed, err := syntax.ParseDID(did)
+	if err != nil || s.directory == nil {
+		return Bidder{}, false
+	}
+	identityDoc, err := s.directory.LookupDID(ctx, parsed)
+	if err != nil || identityDoc == nil {
+		return Bidder{}, false
+	}
+	service, ok := identityDoc.Services[fragment]
+	if !ok || service.URL == "" {
+		return Bidder{}, false
+	}
+	endpoint, audience, err := resolveBidderEndpoint(service.URL)
+	if err != nil {
+		return Bidder{}, false
+	}
+	bidder := Bidder{DID: bid.DID, Endpoint: endpoint, Audience: audience}
+	s.rememberBidders([]Bidder{bidder})
+	return bidder, true
+}
+
+func (s *Service) bidderForDID(ctx context.Context, did string) (Bidder, bool) {
+	if bidder, ok := s.bidderFor(did); ok {
+		return bidder, true
+	}
+	if discovered, err := s.market.Discover(ctx, s.now()); err == nil {
+		s.rememberBidders(discovered)
+		if bidder, ok := s.bidderFor(did); ok {
+			return bidder, true
+		}
+	}
+	if s.directory == nil {
+		return Bidder{}, false
+	}
+	parsed, err := syntax.ParseDID(did)
+	if err != nil {
+		return Bidder{}, false
+	}
+	identityDoc, err := s.directory.LookupDID(ctx, parsed)
+	if err != nil || identityDoc == nil {
+		return Bidder{}, false
+	}
+	for fragment, service := range identityDoc.Services {
+		if service.URL == "" {
+			continue
+		}
+		if fragment != defaultMarketServiceID && !strings.Contains(fragment, "market") {
+			continue
+		}
+		endpoint, audience, err := resolveBidderEndpoint(service.URL)
+		if err != nil {
+			continue
+		}
+		bidder := Bidder{DID: did, Endpoint: endpoint, Audience: audience}
+		s.rememberBidders([]Bidder{bidder})
+		return bidder, true
+	}
+	return Bidder{}, false
+}
+
+func (s *Service) submitAcceptAndWait(ctx context.Context, bidder Bidder, acceptURI, acceptCID, winnerDID string) (*market.ResolvedRecord, error) {
+	provisionTimeout := submitAcceptProvisionTimeout
+	if s.cfg.ReceiptTimeout > provisionTimeout {
+		provisionTimeout = s.cfg.ReceiptTimeout
+	}
+	if receipt, err := s.findReceiptWithin(ctx, winnerDID, acceptURI, submitAcceptReceiptTimeout); err == nil && receipt != nil {
+		return receipt, nil
+	}
+	select {
+	case <-time.After(acceptSettleDelay):
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	if copies := s.cfg.AcceptCopies; copies > 1 {
+		copiesCtx, cancel := context.WithTimeout(ctx, provisionTimeout)
+		var wg sync.WaitGroup
+		for i := 0; i < copies; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				_, _ = s.market.SubmitAccept(copiesCtx, bidder, acceptURI, acceptCID)
+			}()
+		}
+		wg.Wait()
+		cancel()
+		receipts := []string{}
+		receipt, receiptErr := s.waitReceiptWithin(ctx, winnerDID, acceptURI, provisionTimeout)
+		errText := ""
+		if receiptErr != nil {
+			errText = receiptErr.Error()
+		}
+		if receiptErr == nil && receipt != nil {
+			receipts = append(receipts, receipt.URI)
+		}
+		s.log.Info("submitAccept_copies", "copies", copies, "receipts", receipts, "err", errText)
+		if receiptErr == nil && receipt != nil {
+			return receipt, nil
+		}
+	}
+	deadline := time.Now().Add(s.cfg.ReceiptTimeout)
+	delay := s.cfg.ReceiptPoll
+	if delay <= 0 {
+		delay = DefaultReceiptPoll
+	}
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if time.Now().After(deadline) {
+			return nil, nil
+		}
+		s.log.Warn("submitAccept_retry", "bidder", bidder.DID, "accept", acceptURI, "acceptCid", acceptCID)
+		attemptCtx, cancel := context.WithTimeout(ctx, provisionTimeout)
+		_, err := s.market.SubmitAccept(attemptCtx, bidder, acceptURI, acceptCID)
+		cancel()
+		if err != nil {
+			s.log.Warn("requester_submit_accept_failed", "bidder", bidder.DID, "err", err)
+		}
+		receipt, err := s.findReceiptWithin(ctx, winnerDID, acceptURI, submitAcceptReceiptTimeout)
+		if err == nil && receipt != nil {
+			return receipt, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(delay):
+		}
+		delay *= 2
+		if delay > 2*time.Second {
+			delay = 2 * time.Second
+		}
+	}
+}
+
+func (s *Service) findReceiptWithin(ctx context.Context, bidderDID, acceptURI string, timeout time.Duration) (*market.ResolvedRecord, error) {
+	receiptCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	return s.market.FindReceipt(receiptCtx, bidderDID, acceptURI)
+}
+
+func (s *Service) waitReceiptWithin(ctx context.Context, bidderDID, acceptURI string, timeout time.Duration) (*market.ResolvedRecord, error) {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for {
+		receipt, err := s.findReceiptWithin(ctx, bidderDID, acceptURI, submitAcceptReceiptTimeout)
+		if err == nil && receipt != nil {
+			return receipt, nil
+		}
+		lastErr = err
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if time.Now().After(deadline) {
+			return nil, lastErr
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(submitAcceptReceiptPoll):
+		}
+	}
+}
+
+func (s *Service) classifyBid(ctx context.Context, bid *BidRecord) error {
+	if bid == nil {
+		return errors.New("requester: no bid")
+	}
+	ref := payloadRef(bid.Record)
+	if ref.URI == "" {
+		return nil
+	}
+	resolved, err := s.repo.Resolve(ctx, ref)
+	if err != nil {
+		return err
+	}
+	kind := market.NSIDFromURI(resolved.URI)
+	switch kind {
+	case market.BidsFreeNSID:
+		bid.Free = true
+		bid.Reason = stringOf(resolved.Value["reason"])
+	case market.BidsX402NSID:
+		bid.Cost = numberValue(resolved.Value["cost"])
+	}
+	if bid.Free {
+		bid.Cost = 0
+	}
+	return nil
+}
+
+func (s *Service) bidAllowedWithPolicy(ctx context.Context, bid BidRecord, usePolicy bool, workflow string) bool {
+	if !usePolicy {
+		return true
+	}
+	key := bid.DID + "|" + workflow
+	s.scopeMu.Lock()
+	if entry, ok := s.scopeCache[key]; ok && time.Since(entry.at) < 30*time.Second {
+		s.scopeMu.Unlock()
+		return entry.decision.Allow
+	}
+	s.scopeMu.Unlock()
+	if s.policy == nil || (s.policy.Workflow == "" && workflow == "") {
+		return true
+	}
+	input := PolicyInput{
+		SelfDid:          s.cfg.MarketDID,
+		SubjectDid:       bid.DID,
+		CounterpartyDid:  bid.DID,
+		RootRequesterDid: s.cfg.MarketDID,
+	}
+	if state := s.activeState(bid.Record); state != nil {
+		input.RFP = state.RFP
+	}
+	decision := s.policy.Scope(ctx, input)
+	s.scopeMu.Lock()
+	s.scopeCache[key] = scopeEntry{decision: decision, at: s.now()}
+	s.scopeMu.Unlock()
+	if !decision.Allow {
+		s.log.Info("requester_bid_policy_denied", "bidder", bid.DID, "reason", decision.Reason)
+	}
+	return decision.Allow
+}
+
+func (s *Service) activeState(record map[string]any) *PolicyInput {
+	rfp, _ := record["rfp"].(map[string]any)
+	if rfp == nil {
+		return nil
+	}
+	return &PolicyInput{RFP: &PolicyStrongRef{URI: stringOf(rfp["uri"]), CID: stringOf(rfp["cid"])}}
+}
+
+func (s *Service) releaseDeadline(contract v1alpha1.ComputeContract) time.Time {
+	base := contract.CreationTimestamp.Time
+	if base.IsZero() {
+		base = s.now()
+	}
+	bound := s.cfg.ReleaseBound
+	if raw := contract.Annotations["socialweb.computer/ttl-after-finished"]; raw != "" {
+		if parsed, ok := parseDuration(raw); ok && parsed > 0 {
+			bound = parsed
+		}
+	}
+	return base.Add(bound)
+}
+
+func (s *Service) releaseRetryDelay(attempt int) time.Duration {
+	delay := s.cfg.ReleaseRetryFirst
+	for i := 1; i < attempt; i++ {
+		delay *= 2
+		if delay >= s.cfg.ReleaseRetryMax {
+			return s.cfg.ReleaseRetryMax
+		}
+	}
+	if delay > s.cfg.ReleaseRetryMax {
+		delay = s.cfg.ReleaseRetryMax
+	}
+	return delay
+}
+
+func parseDuration(raw string) (time.Duration, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, false
+	}
+	if parsed, err := time.ParseDuration(raw); err == nil && parsed > 0 {
+		return parsed, true
+	}
+	if len(raw) > 1 {
+		unit := raw[len(raw)-1]
+		value := raw[:len(raw)-1]
+		var amount int64
+		if _, err := fmt.Sscanf(value, "%d", &amount); err == nil && amount > 0 {
+			switch unit {
+			case 's':
+				return time.Duration(amount) * time.Second, true
+			case 'm':
+				return time.Duration(amount) * time.Minute, true
+			case 'h':
+				return time.Duration(amount) * time.Hour, true
+			case 'd':
+				return time.Duration(amount) * 24 * time.Hour, true
+			}
+		}
+	}
+	return 0, false
+}
+
+func (s *Service) now() time.Time {
+	if s.cfg.Now != nil {
+		return s.cfg.Now()
+	}
+	return time.Now()
+}
+
+func (s *Service) nowISO() string {
+	return market.FormatTime(s.now())
+}
+
+func (s *Service) callbackDID() string {
+	if s.cfg.DID != "" {
+		return s.cfg.DID
+	}
+	return s.cfg.MarketDID
+}
+
+func (s *Service) generatedVMName() string {
+	raw := make([]byte, 4)
+	if _, err := rand.Read(raw); err != nil {
+		return fmt.Sprintf("%s%d", DefaultVMNamePrefix, time.Now().UnixNano()%100000000)
+	}
+	return DefaultVMNamePrefix + hex.EncodeToString(raw)
+}
+
+func (s *Service) directoryIdentity() identity.Directory {
+	return s.directory
+}
+
+func decodeBody(r *http.Request, out any) error {
+	raw, err := io.ReadAll(io.LimitReader(r.Body, maxCallbackBody+1))
+	if err != nil {
+		return err
+	}
+	if len(raw) > maxCallbackBody {
+		return errors.New("body too large")
+	}
+	if err := json.Unmarshal(raw, out); err != nil {
+		return err
+	}
+	return nil
+}
+
+func writeJSON(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(value)
+}
+
+func isNotFound(err error) bool {
+	return err != nil && (apierrors.IsNotFound(err) || strings.Contains(err.Error(), "not found"))
+}

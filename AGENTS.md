@@ -243,8 +243,12 @@ A prod deployment guarantees nothing; the routine path preserves most things.
 - Work in a plain git worktree or branch of this repository. Do not put a worktree inside another
   worktree. The org-root `scripts/task-tree.ts` is for the polyrepo work that is left, not for this
   repository.
-- Commit small logical changes and push after every commit. On `main`, push to origin main as work
-  lands.
+- Commit small logical commits and push as you go.
+- Before you mark a goal complete cut a release candidate
+  - Babysit CI every time you tag a release candidate. You are only allowed to
+    tag rc's, never full releases.
+  - Cut more rc's until CI is green and you have validated that they install and
+    work on all bidder hosts and prod gateway.
 - Never use `/tmp`; it is tmpfs and spills to swap. Use `~/.tmp` (set `TMPDIR` under it).
 - A one-off script is a `.ts` file under `$TMPDIR`, run with `deno run -A`, using `Deno.Command` for git
   and go. Keep each shell call to one plain command.
@@ -278,25 +282,6 @@ A prod deployment guarantees nothing; the routine path preserves most things.
   `deno run -A ~/.tmp/swc-lead/live-slot.ts acquire|beat|release <name>`. The default is 5 slots
   (`SWC_LIVE_SLOTS`), and `acquire` also waits while MemAvailable is under 12000 MB
   (`SWC_LIVE_MIN_AVAIL_MB`) or cpu pressure avg10 is over 90 (`SWC_LIVE_MAX_CPU_PSI`).
-- More live capacity: `scripts/dev-droplet.sh` makes a DigitalOcean droplet that has /dev/kvm (tag
-  `dev-work`, at most 8, deleted with `down`): `create`, `setup`, `push <publish-dir>`, then
-  `swc -- <args>` or `it <TestRegex> <publish-dir>` run as test-0001 there. A droplet needs no live slot.
-  Measurements: `docs/ARCHITECTURE.md` section 15, "Live capacity and iteration time".
-- The shared Linux dev VM `dev-linux-1` (c-48, 48 vCPU, 96 GB, build host and live host; Ubuntu 24.04; run
-  all of this from the Mac or any host with doctl and the Johns-Air key; it exists while the lead keeps it).
-  Use your own `<work>` name for everything (it names your worktree, publish dir and instance):
-  1. Push your branch to GitHub, then `scripts/dev-droplet.sh sync dev-linux-1 origin/<branch> <work>`
-     (a git worktree `~/w/<work>` of a clone of the public repository, owned by user `dev`).
-  2. `scripts/dev-droplet.sh build dev-linux-1 <work>` writes the binary and the mirror to `/var/tmp/<work>`
-     (`go build` and `deno task check` run there too: `scripts/dev-droplet.sh ssh dev-linux-1 "runuser -l dev -c 'cd w/<work> && <cmd>'"`).
-  3. Live run, as test-0001: `export SOCIALWEB_PUBLISH_DIR=/var/tmp/<work>`, then `scripts/dev-droplet.sh swc dev-linux-1 -- dev up
-     --instance <work> --profile market-network --bidders 1 --vm-host-backend systemd-user --state-dir /var/tmp/swcit/<work>
-     --guest-image-source https://socialweb-computer-kcp.sfo3.digitaloceanspaces.com/main/latest/guest-image/firecracker-x86_64`
-     (the binary fetches and verifies the pinned image itself; `main/latest` is the build that matches the pin).
-  4. `scripts/dev-droplet.sh swc dev-linux-1 -- run request --network <work> --state-dir /var/tmp/swcit/<work> --exec '<cmd>'`
-     per proof; `scripts/dev-droplet.sh ssh dev-linux-1 '<cmd>'` runs any command as root.
-  5. End with `dev down --instance <work> --state-dir /var/tmp/swcit/<work>`. Never run `scripts/dev-droplet.sh down`
-     (it deletes every dev-work droplet). Start parallel runs a few seconds apart; six at once fit.
 
 ## The loop
 

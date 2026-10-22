@@ -152,10 +152,19 @@ func TestAStoppedBidderIsReplacedAndReleasesItsOrphan(t *testing.T) {
 	if oldReceipt == "" {
 		t.Fatalf("claim %s has an accept but no receipt", first.Name)
 	}
-	onVM := `"receiptUri":"` + oldReceipt + `","type":"accepted"`
-	for deadline := time.Now().Add(failoverVMWait); !strings.Contains(n.appRunLogs(n.bidderName(winner)), onVM); time.Sleep(200 * time.Millisecond) {
+	for deadline := time.Now().Add(failoverVMWait); ; time.Sleep(200 * time.Millisecond) {
+		vms, err := n.BidderVMsOf(ctx, winner)
+		onVM := false
+		for _, vm := range vms {
+			if err == nil && vm.Spec.Contract != nil && vm.Spec.Contract.ReceiptUri == oldReceipt {
+				onVM = true
+			}
+		}
+		if onVM {
+			break
+		}
 		if time.Now().After(deadline) {
-			t.Fatalf("%s did not record receipt %s on a ComputeVM inside %s", n.bidderName(winner), oldReceipt, failoverVMWait)
+			t.Fatalf("%s did not record receipt %s on a ComputeVM inside %s (%v)", n.bidderName(winner), oldReceipt, failoverVMWait, err)
 		}
 	}
 	t.Logf("+%.1fs: claim %s (%s) accepted by %s, whose contract names its ComputeVM; stopping it before the node joins", time.Since(started).Seconds(), first.Name, first.Status.Phase, n.bidderName(winner))
@@ -166,7 +175,7 @@ func TestAStoppedBidderIsReplacedAndReleasesItsOrphan(t *testing.T) {
 		t.Fatal(err)
 	}
 	stoppedAt := time.Now()
-	t.Logf("+%.1fs: %s stopped (its core and DenoPods are down); its VM units: %q", time.Since(started).Seconds(), n.bidderName(winner), n.bidderUnits(winner))
+	t.Logf("+%.1fs: %s stopped (its core and components are down); its VM units: %q", time.Since(started).Seconds(), n.bidderName(winner), n.bidderUnits(winner))
 	if cs, _ := tn.Claims(ctx); len(cs) > 0 {
 		for _, c := range cs {
 			if c.Status.Phase == v1alpha1.NodeClaimJoining || c.Status.Phase == v1alpha1.NodeClaimRunning {

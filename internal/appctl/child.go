@@ -303,7 +303,7 @@ func readRoot(ctx context.Context, rec devinstance.Record, kind v1alpha1.Applica
 	return st, true, nil
 }
 
-const StoppedMessage = "stopped: its core and its DenoPods are down; its workspace and state dir are kept and clearing spec.apps[].stopped starts them again from it"
+const StoppedMessage = "stopped: its core and its components are down; its workspace and state dir are kept and clearing spec.apps[].stopped starts them again from it"
 
 func (n *networks) liveUnits(ctx context.Context, c child) ([]hostsvc.UnitStatus, error) {
 	units, err := devinstance.ChildUnits(ctx, n.ctl.c.Manager, c.id)
@@ -329,7 +329,7 @@ func (n *networks) stopChild(ctx context.Context, c child) error {
 		return nil
 	}
 	log := n.ctl.c.log().With("child", c.id)
-	if err := n.stopAppPods(ctx, c.app.Name); err != nil {
+	if err := n.stopAppComponents(ctx, c.app.Name); err != nil {
 		return err
 	}
 	if err := devinstance.DeleteChildWorkspace(ctx, n.ctl.c.Kubeconfig, c.id); err != nil {

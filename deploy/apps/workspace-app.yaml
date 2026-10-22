@@ -4,5 +4,5 @@ metadata:
   name: app
 spec:
   type:
-    name: denoruntime
+    name: socialweb-application
     path: root

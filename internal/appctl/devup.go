@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/fs"
 	"strings"
 	"time"
 
@@ -15,17 +14,14 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/deploy"
-	denov1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/internal/denokcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
 )
 
 const (
-	NetworkName        = "network"
-	NetworkProfilePath = "apps/market-network/market-network.values.yaml"
-	NetworkPoll        = time.Second
-	BidderPrefix       = "bidder-"
-	GatewayAppName     = "gateway"
+	NetworkName    = "network"
+	NetworkPoll    = time.Second
+	BidderPrefix   = "bidder-"
+	GatewayAppName = "gateway"
 )
 
 type networkProfile struct {
@@ -45,15 +41,23 @@ func merge(dst, src map[string]any) {
 	}
 }
 
+func defaultNetworkValues() map[string]any {
+	return map[string]any{
+		"bidder": map[string]any{
+			"kind":    string(v1alpha1.ApplicationKindMarketBidder),
+			"profile": NetworkProfile,
+			"policy":  "open",
+			"kcp":     map[string]any{"guestImageSource": ""},
+		},
+		"gateway": map[string]any{
+			"kind":    string(v1alpha1.ApplicationKindGateway),
+			"profile": NetworkProfile,
+		},
+	}
+}
+
 func loadNetworkProfile(overlay []byte) (networkProfile, error) {
-	base, err := fs.ReadFile(deploy.FS, NetworkProfilePath)
-	if err != nil {
-		return networkProfile{}, err
-	}
-	var m map[string]any
-	if err := yaml.Unmarshal(base, &m); err != nil {
-		return networkProfile{}, fmt.Errorf("appctl: %s: %w", NetworkProfilePath, err)
-	}
+	m := defaultNetworkValues()
 	if len(overlay) > 0 {
 		var o map[string]any
 		if err := yaml.Unmarshal(overlay, &o); err != nil {
@@ -253,7 +257,7 @@ func networkFailure(st v1alpha1.MarketNetworkStatus) string {
 	var out []string
 	failed := func(where string, cs []v1alpha1.ApplicationComponent) {
 		for _, c := range cs {
-			if c.Phase == string(denov1alpha1.DenoPodFailed) {
+			if c.Phase == string(v1alpha1.ComponentPhaseFailed) {
 				out = append(out, fmt.Sprintf("%s %s %s/%s is Failed", where, c.Kind, c.Workspace, c.Name))
 			}
 		}

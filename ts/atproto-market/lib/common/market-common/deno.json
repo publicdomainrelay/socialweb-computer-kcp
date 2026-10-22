@@ -1,7 +1,0 @@
-{
-  "name": "@publicdomainrelay/market-common",
-  "version": "0.0.0",
-  "license": "Unlicense",
-  "imports": {},
-  "exports": "./mod.ts"
-}

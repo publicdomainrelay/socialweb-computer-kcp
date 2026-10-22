@@ -1,9 +1,0 @@
-{
-  "name": "@publicdomainrelay/market-network-fetch",
-  "version": "0.0.0",
-  "license": "Unlicense",
-  "exports": "./mod.ts",
-  "imports": {
-    "@publicdomainrelay/market-network-common": "jsr:@publicdomainrelay/market-network-common@^0"
-  }
-}

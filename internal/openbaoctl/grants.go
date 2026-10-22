@@ -12,7 +12,9 @@ import (
 	"strings"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -29,6 +31,8 @@ const (
 	DefaultOIDCVerificationTTL = "48h"
 	DefaultGuestTokenTTL       = "5m"
 	GuestRoleHashLen           = 16
+	grantNotHeldReason         = "the server does not hold its declaration yet"
+	roleConflictMarker         = "role-conflict: "
 )
 
 var (
@@ -56,6 +60,32 @@ type grantRole struct {
 	role     string
 	audience string
 	object   baosync.Object
+}
+
+func splitGrantRefusal(why string) (string, bool) {
+	if s, ok := strings.CutPrefix(why, roleConflictMarker); ok {
+		return s, true
+	}
+	return why, false
+}
+
+func grantCondition(st *v1alpha1.GuestIdentityGrantStatus, gen int64, t string, ok bool, reason, msg string) {
+	s := metav1.ConditionFalse
+	if ok {
+		s = metav1.ConditionTrue
+	}
+	meta.SetStatusCondition(&st.Conditions, metav1.Condition{Type: t, Status: s, Reason: reason, Message: msg, ObservedGeneration: gen})
+}
+
+func keepConditionTimes(next []metav1.Condition, held []metav1.Condition) {
+	for i := range next {
+		for _, h := range held {
+			if h.Type == next[i].Type && h.Status == next[i].Status {
+				next[i].LastTransitionTime = h.LastTransitionTime
+				break
+			}
+		}
+	}
 }
 
 func grantTemplate(g v1alpha1.GuestIdentityGrant) (string, error) {
@@ -107,7 +137,7 @@ func grantRoles(grants []v1alpha1.GuestIdentityGrant, key, ttl string) (roles []
 		aud := GuestAudience(g.Spec.Api, g.Spec.Actx)
 		role := GuestRoleName(g.Spec.Entity, aud)
 		if other, dup := seen[role]; dup {
-			refused[g.Name] = fmt.Sprintf("grant %s already holds role %s", other, role)
+			refused[g.Name] = roleConflictMarker + fmt.Sprintf("grant %s already holds role %s", other, role)
 			continue
 		}
 		seen[role] = g.Name
@@ -188,13 +218,12 @@ func (c *Controller) writeGrantStatus(ctx context.Context, g v1alpha1.GuestIdent
 	}
 	var held v1alpha1.GuestIdentityGrant
 	if fromUnstructured(cur, &held) == nil {
-		same := held.Status.Applied == st.Applied && held.Status.Role == st.Role && held.Status.Audience == st.Audience &&
-			held.Status.LastError == st.LastError && held.Status.ObservedGeneration == st.ObservedGeneration
-		if same {
-			return
-		}
 		if st.Applied && held.Status.Applied && held.Status.Role == st.Role && held.Status.ObservedGeneration == st.ObservedGeneration {
 			st.AppliedAt = held.Status.AppliedAt
+		}
+		keepConditionTimes(st.Conditions, held.Status.Conditions)
+		if equality.Semantic.DeepEqual(held.Status, st) {
+			return
 		}
 	}
 	if st.Applied && st.AppliedAt == "" {
@@ -216,9 +245,27 @@ func (c *Controller) recordGrants(ctx context.Context, roles map[string]grantRol
 		if g.DeletionTimestamp != nil {
 			continue
 		}
-		st := v1alpha1.GuestIdentityGrantStatus{ObservedGeneration: g.Generation}
+		gen := g.Generation
+		st := v1alpha1.GuestIdentityGrantStatus{ObservedGeneration: gen}
 		if why, bad := refused[g.Name]; bad {
-			st.LastError = why
+			msg, conflict := splitGrantRefusal(why)
+			st.LastError = msg
+			appliedReason := "InvalidGrant"
+			appliedMsg := msg
+			if conflict {
+				appliedReason = "RoleConflict"
+				appliedMsg = "another grant already declares this role for the audience"
+			}
+			grantCondition(&st, gen, v1alpha1.GuestIdentityGrantConditionApplied, false, appliedReason, appliedMsg)
+			if conflict {
+				grantCondition(&st, gen, v1alpha1.GuestIdentityGrantConditionRoleConflict, true, "RoleConflict",
+					"another grant already declares this role for the audience; this grant is not applied")
+			} else {
+				grantCondition(&st, gen, v1alpha1.GuestIdentityGrantConditionRoleConflict, false, "NotEvaluated",
+					"the grant is refused before its role is compared with an existing one")
+			}
+			grantCondition(&st, gen, v1alpha1.GuestIdentityGrantConditionDrifted, false, "NotObserved",
+				"the grant is not applied, so the live OpenBao state was not compared")
 			c.writeGrantStatus(ctx, g, st)
 			continue
 		}
@@ -229,8 +276,32 @@ func (c *Controller) recordGrants(ctx context.Context, roles map[string]grantRol
 		st.Role, st.Audience = r.role, r.audience
 		if synced {
 			st.Applied = true
+			grantCondition(&st, gen, v1alpha1.GuestIdentityGrantConditionApplied, true, "Applied",
+				"the grant's role and policy are applied")
+			grantCondition(&st, gen, v1alpha1.GuestIdentityGrantConditionRoleConflict, false, "NoConflict",
+				"the desired role does not conflict with an existing role")
+			grantCondition(&st, gen, v1alpha1.GuestIdentityGrantConditionDrifted, false, "InSync",
+				"the live OpenBao role and policy match the grant")
 		} else {
 			st.LastError = syncErr
+			drift := syncErr == grantNotHeldReason
+			appliedReason := "SyncFailed"
+			msg := syncErr
+			if drift {
+				appliedReason, msg = "Pending", grantNotHeldReason
+			} else if msg == "" {
+				msg = "the grant is not applied"
+			}
+			grantCondition(&st, gen, v1alpha1.GuestIdentityGrantConditionApplied, false, appliedReason, msg)
+			grantCondition(&st, gen, v1alpha1.GuestIdentityGrantConditionRoleConflict, false, "NoConflict",
+				"the desired role does not conflict with an existing role")
+			if drift {
+				grantCondition(&st, gen, v1alpha1.GuestIdentityGrantConditionDrifted, true, "CorrectiveWrite",
+					"the live OpenBao role or policy differs from the grant; the controller writes the declaration on the next pass")
+			} else {
+				grantCondition(&st, gen, v1alpha1.GuestIdentityGrantConditionDrifted, false, "NotObserved",
+					"the live OpenBao state was not compared because the reconcile failed")
+			}
 		}
 		c.writeGrantStatus(ctx, g, st)
 	}

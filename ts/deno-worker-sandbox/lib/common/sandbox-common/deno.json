@@ -1,9 +1,0 @@
-{
-  "name": "@publicdomainrelay/sandbox-common",
-  "version": "0.0.0",
-  "license": "Unlicense",
-  "exports": "./mod.ts",
-  "imports": {
-    "@publicdomainrelay/cli-args-env": "jsr:@publicdomainrelay/cli-args-env@^0"
-  }
-}

@@ -1,9 +1,0 @@
-{
-  "name": "@publicdomainrelay/microvm-vmruntime",
-  "version": "0.0.0",
-  "license": "Unlicense",
-  "exports": "./mod.ts",
-  "imports": {
-    "@publicdomainrelay/microvm-abc": "jsr:@publicdomainrelay/microvm-abc@^0"
-  }
-}

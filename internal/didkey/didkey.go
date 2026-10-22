@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+
+	"github.com/bluesky-social/indigo/atproto/atcrypto"
 )
 
 const Prefix = "did:key:"
@@ -15,12 +17,16 @@ const MultibaseBase58BTC = 'z'
 
 var Ed25519PubMulticodec = []byte{0xed, 0x01}
 
+var Secp256k1PubMulticodec = []byte{0xe7, 0x01}
+
 const base58Alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 
 var (
 	ErrNotDidKey = errors.New("didkey: not a did:key")
 
 	ErrNotEd25519 = errors.New("didkey: the multicodec prefix is not ed25519-pub (0xed 0x01)")
+
+	ErrNotSecp256k1 = errors.New("didkey: the multicodec prefix is not secp256k1-pub (0xe7 0x01)")
 
 	ErrBadBase58 = errors.New("didkey: not base58btc")
 )
@@ -56,6 +62,51 @@ func ParseEd25519(did string) (ed25519.PublicKey, error) {
 			did, len(pub), ed25519.PublicKeySize)
 	}
 	return ed25519.PublicKey(pub), nil
+}
+
+func FromSecp256k1(pub atcrypto.PublicKey) (string, error) {
+	if pub == nil {
+		return "", errors.New("didkey: a nil secp256k1 public key")
+	}
+	k, ok := pub.(*atcrypto.PublicKeyK256)
+	if !ok {
+		return "", fmt.Errorf("%w: %T", ErrNotSecp256k1, pub)
+	}
+	return k.DIDKey(), nil
+}
+
+func ParseSecp256k1(did string) (*atcrypto.PublicKeyK256, error) {
+	if !strings.HasPrefix(did, Prefix) {
+		return nil, fmt.Errorf("%w: %q", ErrNotDidKey, did)
+	}
+	pub, err := atcrypto.ParsePublicDIDKey(did)
+	if err != nil {
+		return nil, fmt.Errorf("didkey: %q: %w", did, err)
+	}
+	k, ok := pub.(*atcrypto.PublicKeyK256)
+	if !ok {
+		return nil, fmt.Errorf("%w: %q", ErrNotSecp256k1, did)
+	}
+	return k, nil
+}
+
+func ParsePublic(did string) (atcrypto.PublicKey, error) {
+	if !strings.HasPrefix(did, Prefix) {
+		return nil, fmt.Errorf("%w: %q", ErrNotDidKey, did)
+	}
+	pub, err := atcrypto.ParsePublicDIDKey(did)
+	if err != nil {
+		return nil, fmt.Errorf("didkey: %q: %w", did, err)
+	}
+	return pub, nil
+}
+
+func Verify(did string, msg, sig []byte) error {
+	pub, err := ParsePublic(did)
+	if err != nil {
+		return err
+	}
+	return pub.HashAndVerify(msg, sig)
 }
 
 func EndpointID(pub ed25519.PublicKey) (string, error) {

@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -180,16 +182,95 @@ func (ctl *Controller) deleteHostProcesses(ctx context.Context, owner string) (i
 	return len(items), nil
 }
 
+func ownerIdentityOf(path string) (string, string) {
+	if path == "" {
+		return "", ""
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", ""
+	}
+	var sessions map[string]ownerSession
+	if json.Unmarshal(b, &sessions) != nil || len(sessions) == 0 {
+		return "", ""
+	}
+	dids := make([]string, 0, len(sessions))
+	for did := range sessions {
+		dids = append(dids, did)
+	}
+	sort.Strings(dids)
+	return dids[0], sessions[dids[0]].Identifier
+}
+
+func (ctl *Controller) sshRequesterIdentity(ctx context.Context, owner string, o v1alpha1.SshGateway) (*v1alpha1.ComponentIdentity, error) {
+	handle := optionValue(o.Spec.Options, "app-handle")
+	if did := optionValue(o.Spec.Options, "app-did"); did != "" {
+		return &v1alpha1.ComponentIdentity{Did: did, Handle: handle}, nil
+	}
+	if did, h := ownerIdentityOf(o.Spec.OwnerSessionsFile); did != "" {
+		if h != "" {
+			handle = h
+		}
+		return &v1alpha1.ComponentIdentity{Did: did, Handle: handle}, nil
+	}
+	spec := IdentitySpecOf(v1alpha1.ApplicationIdentity{Mode: v1alpha1.MarketIdentityModeLocalRepo, Handle: handle})
+	if err := ctl.ensureIdentitySpec(ctx, ctl.c.workspace(), owner, RequesterIdentity, spec); err != nil {
+		return nil, err
+	}
+	id, err := ctl.identityIn(ctx, ctl.c.workspace(), RequesterIdentity)
+	if apierrors.IsNotFound(err) {
+		return &v1alpha1.ComponentIdentity{MarketIdentityRef: ComponentRefFor("MarketIdentity", RequesterIdentity), Handle: handle}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return componentIdentity(id, handle), nil
+}
+
+func sshGatewayDesired(o v1alpha1.SshGateway, ident *v1alpha1.ComponentIdentity, ws, stateRoot string) []desiredComponent {
+	suspend := o.Spec.Suspend
+	network := o.Spec.Network
+	vault := ComponentRefFor("OpenBaoServer", SshGatewayVaultServer)
+	var hostnames []string
+	if ident.Handle != "" {
+		hostnames = []string{ident.Handle}
+	}
+	mode, publicOrigin, oauthClientID, oauthRedirectURI, guestSSHKeysFile := requesterComponentFields(o.Spec.Options, v1alpha1.MarketIdentityModeLocalRepo)
+	requester := desiredComponent{Kind: ComponentKindRequester, Name: RequesterComponent, Spec: v1alpha1.RequesterSpec{
+		ComponentSpec:    NewComponentSpec(ComponentCRStateDir(stateRoot, ComponentKindRequester, RequesterComponent), network, suspend),
+		Identity:         ident,
+		PolicyEngineRef:  ComponentRefFor(ComponentKindPolicyEngine, PolicyEngineComponent),
+		Hostnames:        hostnames,
+		Mode:             mode,
+		PublicOrigin:     publicOrigin,
+		OAuthClientID:    oauthClientID,
+		OAuthRedirectURI: oauthRedirectURI,
+		GuestSSHKeysFile: guestSSHKeysFile,
+		AcceptCopies:     int32(optionInt(o.Spec.Options, "accept-copies")),
+	}}
+	sshServer := desiredComponent{Kind: ComponentKindSshServer, Name: SshServerComponent, Spec: v1alpha1.SshServerSpec{
+		ComponentSpec:     NewComponentSpec(ComponentCRStateDir(stateRoot, ComponentKindSshServer, SshServerComponent), network, suspend),
+		Identity:          ident,
+		RequesterRef:      ComponentRefFor(ComponentKindRequester, RequesterComponent),
+		VaultRef:          vault,
+		Hostnames:         hostnames,
+		OwnerSessionsFile: o.Spec.OwnerSessionsFile,
+	}}
+	out := []desiredComponent{policyEngineDesired(suspend), requester, sshServer}
+	out = append(out, httpServiceExposures(ws, ComponentKindRequester, RequesterComponent, "http", network, hostnames, false, true, suspend)...)
+	out = append(out, sshExposures(ws, SshServerComponent, suspend)...)
+	return out
+}
+
 func (ctl *Controller) reconcileSshGateway(ctx context.Context, u *unstructured.Unstructured) error {
 	var o v1alpha1.SshGateway
 	if err := fromUnstructured(u, &o); err != nil {
 		return err
 	}
 	owner := ownerOf(u)
-	ws := ctl.c.workspace() + ":" + ComponentWorkspace
 	st := v1alpha1.ApplicationStatus{ObservedGeneration: o.Generation, Profile: o.Spec.Profile}
 	if u.GetDeletionTimestamp() != nil {
-		left, err := ctl.deletePods(ctx, ws, owner, nil)
+		left, err := ctl.stopComponents(ctx, owner)
 		if err != nil {
 			return err
 		}
@@ -208,7 +289,6 @@ func (ctl *Controller) reconcileSshGateway(ctx context.Context, u *unstructured.
 			return ctl.writeStatus(ctx, SshGatewayGVR, o.Name, st)
 		}
 		delete(ctl.applied, string(o.UID))
-		ctl.forgetPlaced(owner)
 		return ctl.setFinalizer(ctx, SshGatewayGVR, u, false)
 	}
 	if !hasFinalizer(u) {
@@ -216,12 +296,34 @@ func (ctl *Controller) reconcileSshGateway(ctx context.Context, u *unstructured.
 			return err
 		}
 	}
-	stateDir := ComponentStateDir(ctl.c.Layout.StateDir, SshGatewayComponent)
-	if ctl.applied[string(o.UID)] != o.Generation || ctl.lostComponent(ctx, owner) != "" {
+	stateRoot := ctl.c.Layout.StateDir
+	if o.Spec.Suspend {
+		ident, err := ctl.sshRequesterIdentity(ctx, owner, o)
+		if err != nil {
+			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "the ssh requester's identity: "+err.Error()
+			return ctl.writeStatus(ctx, SshGatewayGVR, o.Name, st)
+		}
+		desired := sshGatewayDesired(o, ident, ctl.c.workspace(), stateRoot)
+		if err := ctl.ensureDesired(ctx, u, desired); err != nil {
+			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, err.Error()
+			return ctl.writeStatus(ctx, SshGatewayGVR, o.Name, st)
+		}
+		_ = ctl.pruneDesired(ctx, owner, desired)
+		snap, err := ctl.componentSnapshot(ctx, owner)
+		if err != nil {
+			return err
+		}
+		st.Components, st.Listeners = snap.Components, snap.Listeners
+		st.Did = ident.Did
+		st.Phase, st.Message = v1alpha1.ApplicationPhasePending, "suspended"
+		return ctl.writeStatus(ctx, SshGatewayGVR, o.Name, st)
+	}
+	if ctl.applied[string(o.UID)] != o.Generation {
 		rec, err := ctl.c.Record()
 		if err != nil {
 			return err
 		}
+		stateDir := ComponentCRStateDir(stateRoot, ComponentKindSshServer, SshServerComponent)
 		values, err := SshGatewayValues(o.Spec, stateDir, ctl.c.Layout, rec)
 		if err != nil {
 			st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
@@ -229,38 +331,35 @@ func (ctl *Controller) reconcileSshGateway(ctx context.Context, u *unstructured.
 		}
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "applying its own OpenBaoServer, its iroh dialer and its workspace"
 		ctl.writeStatus(ctx, SshGatewayGVR, o.Name, st)
-		if _, err := ctl.applyProfile(ctx, SshGatewaySet, o.Spec.Profile, owner, false, &values); err != nil {
+		if err := ctl.applyInfra(ctx, SshGatewaySet, o.Spec.Profile, owner, &values); err != nil {
 			st.Message = err.Error()
 			return ctl.writeStatus(ctx, SshGatewayGVR, o.Name, st)
 		}
-		if values.Kcp, values.Vault, err = ctl.sshGatewayKcp(ctx, stateDir); err != nil {
+		if _, _, err := ctl.sshGatewayKcp(ctx, stateDir); err != nil {
 			st.Message = "its vault and its kcp account: " + err.Error()
 			return ctl.writeStatus(ctx, SshGatewayGVR, o.Name, st)
 		}
-		st.Message = "applying the " + o.Spec.Profile + " components"
-		ctl.writeStatus(ctx, SshGatewayGVR, o.Name, st)
-		pods, err := ctl.applyProfile(ctx, SshGatewaySet, o.Spec.Profile, owner, true, &values)
-		if err != nil {
-			st.Message = err.Error()
-			return ctl.writeStatus(ctx, SshGatewayGVR, o.Name, st)
-		}
-		if _, err := ctl.deletePods(ctx, ws, owner, pods); err != nil {
-			return err
-		}
 		ctl.applied[string(o.UID)] = o.Generation
-		ctl.c.log().Info("applied an SshGateway's components", "name", o.Name, "profile", o.Spec.Profile, "denopods", pods)
 	}
-	pods, err := ctl.ownedPods(ctx, ws, owner)
+	ident, err := ctl.sshRequesterIdentity(ctx, owner, o)
+	if err != nil {
+		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "the ssh requester's identity: "+err.Error()
+		return ctl.writeStatus(ctx, SshGatewayGVR, o.Name, st)
+	}
+	desired := sshGatewayDesired(o, ident, ctl.c.workspace(), stateRoot)
+	if err := ctl.ensureDesired(ctx, u, desired); err != nil {
+		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, err.Error()
+		return ctl.writeStatus(ctx, SshGatewayGVR, o.Name, st)
+	}
+	if err := ctl.pruneDesired(ctx, owner, desired); err != nil {
+		return err
+	}
+	snap, err := ctl.componentSnapshot(ctx, owner)
 	if err != nil {
 		return err
 	}
-	allReady := len(pods) > 0
-	for i := range pods {
-		v := podViewOf(ws, &pods[i])
-		st.Components = append(st.Components, v.component())
-		st.Listeners = append(st.Listeners, v.Listeners...)
-		allReady = allReady && v.Ready && len(v.Listeners) > 0
-	}
+	st.Components, st.Listeners = snap.Components, snap.Listeners
+	st.Did = ident.Did
 	hps, err := ctl.ownedHostProcesses(ctx, owner)
 	if err != nil {
 		return err
@@ -274,12 +373,14 @@ func (ctl *Controller) reconcileSshGateway(ctx context.Context, u *unstructured.
 		dialer = dialer || (h.GetName() == SshGatewayIrohDial && running)
 	}
 	switch {
-	case allReady && dialer:
-		st = ready(st, "the ssh gateway listens and its iroh dialer runs")
+	case snap.complete(desired) && dialer && ident.Did != "":
+		st = ready(st, "the ssh gateway listens, its iroh dialer runs and its owner identity is known")
+	case ident.Did == "":
+		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for the owner's atproto identity"
 	case !dialer:
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for the iroh dialer HostProcess to run"
 	default:
-		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for the ssh gateway DenoPod to report ready and its listeners"
+		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for every component to be ready"
 	}
 	return ctl.writeStatus(ctx, SshGatewayGVR, o.Name, st)
 }

@@ -18,11 +18,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clicfg"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/execrunner"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/denoruntime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/request"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/tsbundle"
 )
 
 const (
@@ -30,9 +26,8 @@ const (
 	requestIdentityWait = 5 * time.Minute
 )
 
-var requestOptions = append([]string{"network", "name", "secrets", "hold", "exec", "skip-ssh", "contract-timeout", "state-dir",
-	"ready-timeout", "network-timeout", "kcp-path", "kine-path", "deno-path", "bao-path", "dumbpipe-path", "asset-cache"},
-	devOnly(tsbundle.SourceRootOption)...)
+var requestOptions = []string{"network", "name", "secrets", "hold", "exec", "skip-ssh", "contract-timeout", "state-dir",
+	"ready-timeout", "network-timeout", "kcp-path", "kine-path", "bao-path", "dumbpipe-path", "asset-cache"}
 
 type requestRun struct {
 	a               *app
@@ -52,8 +47,6 @@ type requestRun struct {
 	kcp             *request.Kcp
 	standalone      devinstance.Layout
 	instanceDir     string
-	runsDir         string
-	podSuffix       string
 }
 
 func splitWords(rest []string) ([]string, []string) {
@@ -284,13 +277,10 @@ func (r *requestRun) start(ctx context.Context, fresh bool) error {
 			return err
 		}
 		rec, err := r.childRecord(netLayout, app.Instance)
-		r.instanceDir = rec.Layout.StateDir
-		if rec.SharedKcp != "" {
-			r.runsDir, r.podSuffix = denoruntime.RunsDir(rec.SharedKcp), manifests.ServiceSuffix(rec.BaseWorkspace+":"+appctl.ComponentWorkspace)
-		}
 		if err != nil {
 			return err
 		}
+		r.instanceDir = rec.Layout.StateDir
 		r.inv.Instance, r.summary.Instance, r.summary.KcpURL = app.Instance, app.Instance, rec.KcpURL
 		kubeconfig, workspace = rec.AdminKubeconfig, rec.BaseWorkspace
 	default:
@@ -317,6 +307,11 @@ func (r *requestRun) start(ctx context.Context, fresh bool) error {
 	r.summary.KcpColdSeconds = time.Since(started).Seconds()
 	r.summary.KcpRunning = true
 	r.log("the invocation's kcp runs", "kcp", r.summary.KcpURL, "workspace", workspace, "instance", r.inv.Instance, "coldSeconds", r.summary.KcpColdSeconds)
+	if err := r.kcp.WaitReady(ctx, r.networkTimeout, func(st v1alpha1.ApplicationStatus) {
+		r.log("requester", "phase", string(st.Phase), "message", st.Message, "components", len(st.Components))
+	}); err != nil {
+		return err
+	}
 	return request.WriteInvocation(r.inv)
 }
 
@@ -726,41 +721,15 @@ func (r *requestRun) keepLogs() {
 	if r.instanceDir == "" {
 		return
 	}
+	b, err := os.ReadFile(filepath.Join(r.instanceDir, "logs", "core.log"))
+	if err != nil {
+		return
+	}
 	out := filepath.Join(request.Dir(r.stateRoot, r.inv.Name), "logs")
-	runsDir := r.runsDir
-	if runsDir == "" {
-		runsDir = denoruntime.RunsDir(r.instanceDir)
+	if err := os.MkdirAll(out, 0o700); err != nil {
+		return
 	}
-	runs, _ := filepath.Glob(filepath.Join(runsDir, "pod-*"))
-	files := []string{filepath.Join(r.instanceDir, "logs", "core.log")}
-	for _, run := range runs {
-		if r.podSuffix != "" {
-			b, err := os.ReadFile(filepath.Join(run, execrunner.PodFile))
-			if err != nil || !strings.HasSuffix(strings.TrimSpace(string(b)), "."+r.podSuffix) {
-				continue
-			}
-		}
-		for _, f := range []string{"stdout.txt", "stderr.txt"} {
-			files = append(files, filepath.Join(run, f))
-		}
-	}
-	for _, f := range files {
-		b, err := os.ReadFile(f)
-		if err != nil {
-			continue
-		}
-		rel, err := filepath.Rel(r.instanceDir, f)
-		if err != nil || strings.HasPrefix(rel, "..") {
-			if rel, err = filepath.Rel(filepath.Dir(runsDir), f); err != nil {
-				continue
-			}
-			rel = filepath.Join("denokcp", rel)
-		}
-		dst := filepath.Join(out, strings.ReplaceAll(rel, string(filepath.Separator), "_"))
-		if err := os.MkdirAll(out, 0o700); err == nil {
-			os.WriteFile(dst, b, 0o600)
-		}
-	}
+	os.WriteFile(filepath.Join(out, "core.log"), b, 0o600)
 }
 
 func orDash(s string) string {

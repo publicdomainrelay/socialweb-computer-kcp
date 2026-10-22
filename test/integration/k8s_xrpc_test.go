@@ -16,21 +16,11 @@ import (
 
 const k8sNSID = "computer.socialweb.k8s."
 
-func (a *pdsAccount) TokenFor(t testing.TB, lxm string) string {
-	t.Helper()
-	q := url.Values{"aud": {gatewayAudience}, "lxm": {lxm}}
-	out, code, err := postJSON(a.client, a.pds+"/xrpc/com.atproto.server.getServiceAuth?"+q.Encode(), a.access, nil)
-	tok, _ := out["token"].(string)
-	if err != nil || code != http.StatusOK || tok == "" {
-		t.Fatalf("getServiceAuth %s: %d %v %v", lxm, code, out, err)
-	}
-	return tok
-}
-
 type k8sXRPC struct {
 	t       *testing.T
 	addr    string
 	acct    *pdsAccount
+	aud     string
 	cluster string
 	gw      *http.Client
 }
@@ -39,7 +29,7 @@ func (k *k8sXRPC) apply(in map[string]any) (map[string]any, int) {
 	k.t.Helper()
 	in["cluster"] = k.cluster
 	out, code, err := postJSON(k.gw, "http://"+k.addr+"/xrpc/"+k8sNSID+"kubectlApplyServerSide",
-		k.acct.TokenFor(k.t, k8sNSID+"kubectlApplyServerSide"), in)
+		k.acct.TokenFor(k.t, k.aud, k8sNSID+"kubectlApplyServerSide"), in)
 	if err != nil {
 		k.t.Fatalf("kubectlApplyServerSide: %v", err)
 	}
@@ -50,7 +40,7 @@ func (k *k8sXRPC) job(ns, name string) (map[string]any, int) {
 	k.t.Helper()
 	q := url.Values{"cluster": {k.cluster}, "namespace": {ns}, "name": {name}, "tailLines": {"20"}}
 	out, code, err := postJSON(k.gw, "http://"+k.addr+"/xrpc/"+k8sNSID+"getJob?"+q.Encode(),
-		k.acct.TokenFor(k.t, k8sNSID+"getJob"), nil)
+		k.acct.TokenFor(k.t, k.aud, k8sNSID+"getJob"), nil)
 	if err != nil {
 		k.t.Fatalf("getJob: %v", err)
 	}
@@ -59,7 +49,8 @@ func (k *k8sXRPC) job(ns, name string) (map[string]any, int) {
 
 func runJobThroughXRPC(t *testing.T, n *Network, tn *Tenant, cluster, ns, node string) {
 	ctx := context.Background()
-	k := &k8sXRPC{t: t, addr: n.xrpcAddress(t), acct: n.OwnerAccount(t), cluster: cluster, gw: &http.Client{Timeout: 60 * time.Second}}
+	k := &k8sXRPC{t: t, addr: n.xrpcAddress(t), acct: n.OwnerAccount(t), aud: n.gatewayAudience(t), cluster: cluster,
+		gw: &http.Client{Timeout: 60 * time.Second}}
 
 	cm := func(level string) map[string]any {
 		return map[string]any{

@@ -1,9 +1,0 @@
-{
-  "name": "@publicdomainrelay/identity-prompt-abc",
-  "version": "0.0.0",
-  "license": "Unlicense",
-  "exports": "./mod.ts",
-  "imports": {
-    "@publicdomainrelay/socialweb-computer-k8s-api": "jsr:@publicdomainrelay/socialweb-computer-k8s-api@^0"
-  }
-}

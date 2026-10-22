@@ -1,0 +1,398 @@
+package identitycontroller
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"reflect"
+	"strings"
+	"time"
+
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/dynamic"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
+)
+
+const (
+	ComponentKind = "Pds"
+
+	ComponentName = "pds"
+
+	FieldManager = "identitycontroller"
+
+	ConditionReady = "Ready"
+
+	DefaultRetryAfter = 2 * time.Second
+
+	requestTimeout = 5 * time.Second
+)
+
+var MarketIdentityGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "marketidentities"}
+
+type DynamicFactory func(workspace string) (dynamic.Interface, error)
+
+type EndpointFunc func(workspace, kind, name string) (string, bool)
+
+type Options struct {
+	Workspace string
+
+	Dynamic DynamicFactory
+
+	Endpoints EndpointFunc
+
+	Log *slog.Logger
+
+	HTTPClient *http.Client
+
+	Resolver *pdsclient.Resolver
+
+	RetryAfter time.Duration
+}
+
+type Controller struct {
+	workspace string
+
+	dynamic DynamicFactory
+
+	endpoints EndpointFunc
+
+	log *slog.Logger
+
+	http *http.Client
+
+	resolver *pdsclient.Resolver
+
+	retry time.Duration
+}
+
+func New(opts Options) (*Controller, error) {
+	if strings.TrimSpace(opts.Workspace) == "" {
+		return nil, fmt.Errorf("identitycontroller: a workspace is required")
+	}
+	if opts.Dynamic == nil {
+		return nil, fmt.Errorf("identitycontroller: a dynamic client factory is required")
+	}
+	log := opts.Log
+	if log == nil {
+		log = slog.New(slog.DiscardHandler)
+	}
+	client := opts.HTTPClient
+	if client == nil {
+		client = &http.Client{Timeout: requestTimeout}
+	}
+	resolver := opts.Resolver
+	if resolver == nil {
+		resolver = &pdsclient.Resolver{HTTPClient: client, Timeout: requestTimeout}
+	}
+	retry := opts.RetryAfter
+	if retry <= 0 {
+		retry = DefaultRetryAfter
+	}
+	return &Controller{workspace: opts.Workspace, dynamic: opts.Dynamic, endpoints: opts.Endpoints, log: log.With("component", "identity-controller"), http: client, resolver: resolver, retry: retry}, nil
+}
+
+func Run(ctx context.Context, opts Options) error {
+	ctl, err := New(opts)
+	if err != nil {
+		return err
+	}
+	return ctl.Run(ctx)
+}
+
+func (c *Controller) Run(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	for ctx.Err() == nil {
+		if err := c.watch(ctx); err != nil && ctx.Err() == nil {
+			c.log.Warn("watching MarketIdentity objects", "workspace", c.workspace, "err", err.Error())
+		}
+		if !sleep(ctx, c.retry) {
+			return nil
+		}
+	}
+	return nil
+}
+
+func (c *Controller) watch(ctx context.Context) error {
+	dyn, err := c.dynamic(c.workspace)
+	if err != nil {
+		return err
+	}
+	ri := dyn.Resource(MarketIdentityGVR)
+	list, err := ri.List(ctx, metav1.ListOptions{})
+	if apierrors.IsNotFound(err) || apierrors.IsForbidden(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for i := range list.Items {
+		c.reconcile(ctx, dyn, &list.Items[i])
+	}
+	w, err := ri.Watch(ctx, metav1.ListOptions{ResourceVersion: list.GetResourceVersion()})
+	if apierrors.IsNotFound(err) || apierrors.IsForbidden(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer w.Stop()
+	timer := time.NewTimer(c.retry)
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-timer.C:
+			return nil
+		case event, ok := <-w.ResultChan():
+			if !ok {
+				return nil
+			}
+			if event.Type == watch.Deleted || event.Type == watch.Bookmark {
+				continue
+			}
+			u, ok := event.Object.(*unstructured.Unstructured)
+			if !ok || u == nil {
+				continue
+			}
+			c.reconcile(ctx, dyn, u)
+		}
+	}
+}
+
+func (c *Controller) reconcile(ctx context.Context, dyn dynamic.Interface, u *unstructured.Unstructured) {
+	if u == nil || u.GetDeletionTimestamp() != nil {
+		return
+	}
+	var id v1alpha1.MarketIdentity
+	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &id); err != nil {
+		c.log.Warn("decoding a MarketIdentity", "workspace", c.workspace, "name", u.GetName(), "err", err.Error())
+		return
+	}
+	generation := u.GetGeneration()
+	status := id.Status
+	did := strings.TrimSpace(status.Did)
+	if suspended, _, _ := unstructured.NestedBool(u.Object, "spec", "suspend"); suspended {
+		status.Phase = v1alpha1.MarketIdentityPhasePending
+		status.ObservedGeneration = generation
+		status.Message = "suspended"
+		setReady(&status, generation, false, "Suspended", "the MarketIdentity is suspended")
+		c.write(ctx, dyn, u.GetName(), status)
+		return
+	}
+	if did != "" && status.ObservedGeneration >= generation && status.Phase != "" && status.Phase != v1alpha1.MarketIdentityPhasePending {
+		return
+	}
+	switch id.Spec.Mode {
+	case v1alpha1.MarketIdentityModeLocalRepo:
+		c.reconcileLocalRepo(ctx, dyn, &id, generation, status)
+	case v1alpha1.MarketIdentityModePdsAccount, v1alpha1.MarketIdentityModeOAuthBrowser, v1alpha1.MarketIdentityModeOAuthDelegated, v1alpha1.MarketIdentityModeOAuthQr:
+		c.reconcileSignedIn(ctx, dyn, &id, generation, status, did)
+	case "":
+		status.Phase = v1alpha1.MarketIdentityPhasePending
+		status.ObservedGeneration = generation
+		status.Message = "the MarketIdentity has no mode; no DID is recorded"
+		setReady(&status, generation, false, "UnknownMode", status.Message)
+		c.write(ctx, dyn, u.GetName(), status)
+	default:
+		status.Phase = v1alpha1.MarketIdentityPhasePending
+		status.ObservedGeneration = generation
+		status.Message = fmt.Sprintf("unknown mode %q; no DID is recorded", id.Spec.Mode)
+		setReady(&status, generation, false, "UnknownMode", status.Message)
+		c.write(ctx, dyn, u.GetName(), status)
+	}
+}
+
+func (c *Controller) reconcileLocalRepo(ctx context.Context, dyn dynamic.Interface, id *v1alpha1.MarketIdentity, generation int64, status v1alpha1.MarketIdentityStatus) {
+	endpoint := ""
+	if c.endpoints != nil {
+		if url, ok := c.endpoints(c.workspace, ComponentKind, ComponentName); ok {
+			endpoint = strings.TrimSpace(url)
+		}
+	}
+	if endpoint == "" {
+		c.pending(ctx, dyn, id, generation, status, "PdsNotReady", "waiting for the Pds/pds component endpoint in workspace "+c.workspace)
+		return
+	}
+	did, err := c.resolveDID(ctx, endpoint)
+	if err != nil {
+		c.pending(ctx, dyn, id, generation, status, "PdsNotReady", "waiting for the PDS at "+endpoint+": "+err.Error())
+		return
+	}
+	status.Phase = v1alpha1.MarketIdentityPhaseReady
+	status.ObservedGeneration = generation
+	if strings.TrimSpace(status.Did) == "" {
+		status.Did = did
+	}
+	if handle := strings.TrimSpace(id.Spec.Handle); handle != "" {
+		status.Handle = handle
+	}
+	status.Message = ""
+	setReady(&status, generation, true, "Ready", "the PDS at "+endpoint+" reports "+did)
+	setAssociated(&status, generation, id.Spec)
+	c.write(ctx, dyn, id.GetName(), status)
+}
+
+func (c *Controller) reconcileSignedIn(ctx context.Context, dyn dynamic.Interface, id *v1alpha1.MarketIdentity, generation int64, status v1alpha1.MarketIdentityStatus, did string) {
+	if did != "" {
+		status.Phase = v1alpha1.MarketIdentityPhaseReady
+		status.ObservedGeneration = generation
+		if handle := strings.TrimSpace(id.Spec.Handle); handle != "" {
+			status.Handle = handle
+		}
+		status.Message = ""
+		setReady(&status, generation, true, "AlreadySignedIn", "the status already records "+did)
+		c.write(ctx, dyn, id.GetName(), status)
+		return
+	}
+	status.Phase = v1alpha1.MarketIdentityPhasePending
+	status.ObservedGeneration = generation
+	message := fmt.Sprintf("mode %s signs in outside this controller; waiting for its DID", id.Spec.Mode)
+	reason := "AwaitingSignIn"
+	if id.Spec.SessionRef != nil || status.SessionRef != nil {
+		reason = "AwaitingSession"
+		message = fmt.Sprintf("mode %s holds a session ref but records no DID; this controller does not read the vault and does not invent one", id.Spec.Mode)
+	}
+	status.Message = message
+	setReady(&status, generation, false, reason, message)
+	c.write(ctx, dyn, id.GetName(), status)
+}
+
+func (c *Controller) pending(ctx context.Context, dyn dynamic.Interface, id *v1alpha1.MarketIdentity, generation int64, status v1alpha1.MarketIdentityStatus, reason, message string) {
+	status.Phase = v1alpha1.MarketIdentityPhasePending
+	status.ObservedGeneration = generation
+	status.Message = message
+	setReady(&status, generation, false, reason, message)
+	c.write(ctx, dyn, id.GetName(), status)
+}
+
+func (c *Controller) resolveDID(ctx context.Context, endpoint string) (string, error) {
+	pds, err := c.pdsAt(endpoint)
+	if err != nil {
+		return "", err
+	}
+	info, err := pds.Describe(ctx)
+	if err != nil {
+		return "", err
+	}
+	did := strings.TrimSpace(info.DID.String())
+	if did == "" {
+		return "", fmt.Errorf("the PDS reported no did")
+	}
+	return did, nil
+}
+
+func (c *Controller) pdsAt(endpoint string) (pdsclient.PDS, error) {
+	endpoint = strings.TrimSpace(endpoint)
+	if endpoint == "" {
+		return nil, fmt.Errorf("the PDS has no endpoint")
+	}
+	if !strings.Contains(endpoint, "://") {
+		endpoint = "http://" + endpoint
+	}
+	if c.resolver != nil && c.resolver.Handlers != nil {
+		return c.resolver.ResolveLocal(pdsclient.LocalRef{Workspace: c.workspace, Kind: ComponentKind, Name: ComponentName, Endpoint: endpoint})
+	}
+	r := c.resolver
+	if r == nil {
+		r = &pdsclient.Resolver{HTTPClient: c.http, Timeout: requestTimeout}
+	}
+	timeout := r.Timeout
+	if timeout <= 0 {
+		timeout = requestTimeout
+	}
+	return pdsclient.NewRemote(pdsclient.RemoteConfig{BaseURL: endpoint, HTTPClient: r.HTTPClient, TLS: r.TLS, Tokens: r.Tokens, DPoP: r.DPoP, Timeout: timeout})
+}
+
+func (c *Controller) write(ctx context.Context, dyn dynamic.Interface, name string, status v1alpha1.MarketIdentityStatus) {
+	if err := c.writeStatus(ctx, dyn, name, status); err != nil && ctx.Err() == nil {
+		c.log.Warn("writing the MarketIdentity status", "workspace", c.workspace, "name", name, "err", err.Error())
+	}
+}
+
+func (c *Controller) writeStatus(ctx context.Context, dyn dynamic.Interface, name string, status v1alpha1.MarketIdentityStatus) error {
+	m, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&status)
+	if err != nil {
+		return err
+	}
+	if m == nil {
+		m = map[string]any{}
+	}
+	ri := dyn.Resource(MarketIdentityGVR)
+	for range 5 {
+		cur, err := ri.Get(ctx, name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if cur.GetDeletionTimestamp() != nil {
+			return nil
+		}
+		if phase, _, _ := unstructured.NestedString(cur.Object, "status", "phase"); interactivePhase(v1alpha1.MarketIdentityPhase(phase)) {
+			return nil
+		}
+		existing, _, _ := unstructured.NestedMap(cur.Object, "status")
+		if reflect.DeepEqual(existing, m) {
+			return nil
+		}
+		cur.Object["status"] = m
+		_, err = ri.UpdateStatus(ctx, cur, metav1.UpdateOptions{FieldManager: FieldManager})
+		if err == nil {
+			return nil
+		}
+		if !apierrors.IsConflict(err) {
+			return err
+		}
+	}
+	return fmt.Errorf("the status of MarketIdentity %s stayed in conflict", name)
+}
+
+func interactivePhase(phase v1alpha1.MarketIdentityPhase) bool {
+	switch phase {
+	case v1alpha1.MarketIdentityPhaseAwaitingScan, v1alpha1.MarketIdentityPhaseAwaitingAuthorization,
+		v1alpha1.MarketIdentityPhaseAwaitingApproval, v1alpha1.MarketIdentityPhaseSessionExpired,
+		v1alpha1.MarketIdentityPhaseFailed:
+		return true
+	}
+	return false
+}
+
+func setReady(status *v1alpha1.MarketIdentityStatus, generation int64, ready bool, reason, message string) {
+	value := metav1.ConditionFalse
+	if ready {
+		value = metav1.ConditionTrue
+	}
+	meta.SetStatusCondition(&status.Conditions, metav1.Condition{Type: ConditionReady, Status: value, Reason: reason, Message: message, ObservedGeneration: generation})
+}
+
+func setAssociated(status *v1alpha1.MarketIdentityStatus, generation int64, spec v1alpha1.MarketIdentitySpec) {
+	if spec.Association == v1alpha1.AssociationSkip {
+		meta.SetStatusCondition(&status.Conditions, metav1.Condition{Type: v1alpha1.ConditionAssociated, Status: metav1.ConditionTrue, Reason: "AssociationSkipped", Message: "the association is skipped", ObservedGeneration: generation})
+		return
+	}
+	meta.SetStatusCondition(&status.Conditions, metav1.Condition{Type: v1alpha1.ConditionAssociated, Status: metav1.ConditionFalse, Reason: "AwaitingAssociation", Message: "the PDS is ready; the association is pending", ObservedGeneration: generation})
+}
+
+func sleep(ctx context.Context, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}

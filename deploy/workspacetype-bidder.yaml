@@ -7,10 +7,7 @@ spec:
     with:
       - name: universal
         path: root
-
   defaultAPIBindings:
-    - export: denoruntime
-      path: root:deno-provider
     - export: computevms
       path: root:socialweb-provider
     - export: hostprocesses

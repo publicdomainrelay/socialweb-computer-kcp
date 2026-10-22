@@ -51,4 +51,14 @@ type GuestIdentityGrantStatus struct {
 	AppliedAt string `json:"appliedAt,omitempty"`
 
 	LastError string `json:"lastError,omitempty"`
+
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
+
+const (
+	GuestIdentityGrantConditionApplied = "Applied"
+
+	GuestIdentityGrantConditionRoleConflict = "RoleConflict"
+
+	GuestIdentityGrantConditionDrifted = "Drifted"
+)

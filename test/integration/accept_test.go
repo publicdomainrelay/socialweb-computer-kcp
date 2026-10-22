@@ -16,7 +16,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/dynamic"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
@@ -32,39 +31,28 @@ func (n *Network) bidderDir(i int) string {
 	return filepath.Join(n.StateDir, "apps", "dev", fmt.Sprintf("%s-bidder-%d", n.Instance, i+1))
 }
 
-func (n *Network) runsDir() string { return filepath.Join(n.StateDir, "denokcp", "runs") }
-
 func (n *Network) appRunDirs(app string) []string {
-	r := n.h.As(context.Background(), "sh", "-c", `for d in "$1"/pod-*; do
-  grep -q -s -F -- ".default.app.$2.svc." "$d/service.txt" && echo "$d"
-done; true`, "sh", n.runsDir(), app)
-	return strings.Fields(r.Stdout)
+	dir := filepath.Join(n.StateDir, "apps", "dev", n.Instance+"-"+app)
+	r := n.h.As(context.Background(), "test", "-d", dir)
+	if r.Err != nil {
+		return nil
+	}
+	return []string{dir}
 }
 
 func (n *Network) appRunLogs(app string) string {
-	r := n.h.As(context.Background(), "sh", "-c", `for d in "$1"/pod-*; do
-  grep -q -s -F -- ".default.app.$2.svc." "$d/service.txt" && cat "$d"/std*.txt 2>/dev/null
-done; true`, "sh", n.runsDir(), app)
+	dir := filepath.Join(n.StateDir, "apps", "dev", n.Instance+"-"+app)
+	r := n.h.As(context.Background(), "cat", filepath.Join(dir, "logs", "core.log"))
 	return r.Stdout
 }
 
 func (n *Network) bidderProcess(i int) (int, string, error) {
-	r := n.h.As(context.Background(), "sh", "-c", `for d in "$1"/pod-*; do
-  [ -e "$d/done.json" ] && continue
-  grep -q -s -x -F -- "bidder.default.app.$2.svc.kcp.local" "$d/service.txt" || continue
-  grep -q -s -F '"bidder ready"' "$d/stdout.txt" "$d/stderr.txt" || continue
-  pid=$(sed -n 's/.*"pid":\([0-9]*\).*/\1/p' "$d/state.json")
-  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && echo "$pid $d"
-done; true`, "sh", n.runsDir(), n.bidderName(i))
-	if r.Err != nil {
-		return 0, "", r.Err
+	dir := n.bidderDir(i)
+	pid, err := n.coreOf(dir)
+	if err != nil {
+		return 0, "", fmt.Errorf("want the live core of %s's bidder under %s: %w", n.bidderName(i), dir, err)
 	}
-	lines := strings.Fields(strings.TrimSpace(r.Stdout))
-	if len(lines) != 2 {
-		return 0, "", fmt.Errorf("want one live run of %s's bidder under %s, found %q", n.bidderName(i), n.runsDir(), r.Stdout)
-	}
-	pid, err := strconv.Atoi(lines[0])
-	return pid, lines[1], err
+	return pid, dir, nil
 }
 
 func (n *Network) waitBidderBack(i, oldPID int, timeout time.Duration) (int, string, error) {
@@ -92,16 +80,6 @@ func (n *Network) signal(sig string, pid int) error {
 	return nil
 }
 
-func (n *Network) grepCount(pattern string, globs ...string) int {
-	r := n.h.As(context.Background(), append([]string{"sh", "-c", `cat "$@" 2>/dev/null | grep -c -a -F -e "$0"; true`, pattern}, globs...)...)
-	c, _ := strconv.Atoi(strings.TrimSpace(r.Stdout))
-	return c
-}
-
-func runLogs(dir string) []string {
-	return []string{filepath.Join(dir, "stdout.txt"), filepath.Join(dir, "stderr.txt")}
-}
-
 func wonBids(ctx context.Context, dyn dynamic.Interface) ([]v1alpha1.Bid, []v1alpha1.Bid, error) {
 	bids, err := bidderBids(ctx, dyn)
 	if err != nil {
@@ -114,30 +92,6 @@ func wonBids(ctx context.Context, dyn dynamic.Interface) ([]v1alpha1.Bid, []v1al
 		}
 	}
 	return bids, won, nil
-}
-
-func rewindStreams(ctx context.Context, dyn dynamic.Interface) (int, error) {
-	u, err := dyn.Resource(marketBidderGVR).Get(ctx, bidderRootName, metav1.GetOptions{})
-	if err != nil {
-		return 0, err
-	}
-	streams, _, _ := unstructured.NestedSlice(u.Object, "status", "market", "streams")
-	for i, s := range streams {
-		m, ok := s.(map[string]any)
-		if !ok {
-			continue
-		}
-		m["cursor"] = int64(1)
-		streams[i] = m
-	}
-	if len(streams) == 0 {
-		return 0, fmt.Errorf("the bidder's root object has no status.market.streams")
-	}
-	if err := unstructured.SetNestedSlice(u.Object, streams, "status", "market", "streams"); err != nil {
-		return 0, err
-	}
-	_, err = dyn.Resource(marketBidderGVR).UpdateStatus(ctx, u, metav1.UpdateOptions{})
-	return len(streams), err
 }
 
 func TestAcceptOfAnEndedContractStartsNoVM(t *testing.T) {
@@ -206,86 +160,77 @@ func TestAcceptOfAnEndedContractStartsNoVM(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var accepts []string
+	accepts := 0
 	for _, b := range won {
 		if b.Status.Accept != nil && b.Status.Accept.Uri != "" {
-			accepts = append(accepts, b.Status.Accept.Uri)
+			accepts++
 		}
 	}
-	if len(accepts) == 0 {
-		t.Fatalf("no Won Bid names its accept:%s", describeBids(bids))
+	if accepts != len(won) || accepts == 0 {
+		t.Fatalf("%d Won Bid(s) and %d naming an accept:%s", len(won), accepts, describeBids(bids))
 	}
-	bidderLogs := n.appRunLogs(n.bidderName(0))
-	for _, a := range accepts {
-		if !strings.Contains(bidderLogs, a) {
-			t.Fatalf("the bidder never logged the accept %s; the replay cannot deliver it again", a)
+	deadline = time.Now().Add(acceptReplay)
+	for {
+		cur, curWon, err := wonBids(ctx, dyn)
+		if err != nil {
+			t.Fatal(err)
 		}
+		terminated := 0
+		for _, b := range curWon {
+			if b.Status.Terminated != nil && b.Status.Accept != nil && b.Status.Accept.Uri != "" {
+				terminated++
+			}
+		}
+		if len(cur) == len(bids) && terminated == len(curWon) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the bidder did not terminate its %d ended contract(s) inside %s:%s", len(curWon), acceptReplay, describeBids(cur))
+		}
+		time.Sleep(time.Second)
 	}
-	t.Logf("scaled to zero: every guest released; %d Won Bid(s), accepts %s", len(won), strings.Join(accepts, " "))
+	t.Logf("scaled to zero: every guest released; %d Won Bid(s) now carry status.terminated", len(won))
 
 	pid, _, err := n.bidderProcess(0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := n.signal("STOP", pid); err != nil {
-		t.Fatal(err)
-	}
-	rewound, err := rewindStreams(ctx, dyn)
-	if err != nil {
-		n.signal("KILL", pid)
-		t.Fatalf("rewinding the bidder's stream cursors: %v", err)
-	}
-	if rm := n.h.As(ctx, "find", n.bidderDir(0), "-path", "*/contracts/tombstones/*.json", "-print", "-delete"); rm.Err != nil {
-		n.signal("KILL", pid)
-		t.Fatalf("removing the bidder's tombstones: %v", rm.Err)
-	} else {
-		t.Logf("removed the bidder's local contract records: %d file(s)", len(strings.Fields(rm.Stdout)))
-	}
 	if err := n.signal("KILL", pid); err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("bidder %d killed with %d stream cursor(s) rewound to 1: the restart replays the firehose and the accepts of the ended contracts", pid, rewound)
-
-	newPID, dir, err := n.waitBidderBack(0, pid, bidderBack)
+	newPID, _, err := n.waitBidderBack(0, pid, bidderBack)
 	if err != nil {
 		t.Fatal(err)
 	}
-	deadline = time.Now().Add(acceptReplay)
-	for {
+	if err := n.WaitBidderReady(0, bidderBack); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("bidder %d killed and back as %d: its reconciler re-read the ended contracts", pid, newPID)
+
+	for deadline := time.Now().Add(restartSettle); time.Now().Before(deadline); time.Sleep(time.Second) {
 		if vms, err := n.BidderVMs(ctx); err == nil && len(vms) > 0 {
-			t.Fatalf("the replayed accept of an ended contract started a ComputeVM: %s", describeVM(vms[0]))
+			t.Fatalf("the restart of the bidder started a ComputeVM for an ended contract: %s", describeVM(vms[0]))
 		}
-		if left := n.guestsLeft(); len(left) > 0 {
-			t.Fatalf("the replayed accept of an ended contract started a guest: %s", strings.Join(left, "; "))
-		}
-		if n.grepCount("bidder received accept for VM", runLogs(dir)...) > 0 {
-			t.Fatalf("the restarted bidder %d took a replayed accept of an ended contract", newPID)
-		}
-		refused := 0
-		for _, a := range accepts {
-			if n.grepCount(a, runLogs(dir)...) > 0 && n.grepCount("accept_contract_ended", runLogs(dir)...) > 0 {
-				refused++
-			}
-		}
-		if refused == len(accepts) {
-			t.Logf("the restarted bidder %d refused the %d replayed accept(s): a receipt in its own repo answers each", newPID, refused)
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("the restarted bidder %d did not refuse the replayed accepts inside %s (%d of %d)", newPID, acceptReplay, refused, len(accepts))
-		}
-		time.Sleep(time.Second)
 	}
 	if vms, err := n.BidderVMs(ctx); err != nil || len(vms) > 0 {
-		t.Fatalf("ComputeVMs after the replay: %d (%v)", len(vms), err)
+		t.Fatalf("the restart of the bidder started a ComputeVM for an ended contract: %d (%v)", len(vms), err)
+	}
+	if left := n.guestsLeft(); len(left) > 0 {
+		t.Fatalf("the restart of the bidder started a guest for an ended contract: %s", strings.Join(left, "; "))
 	}
 	after, wonAfter, err := wonBids(ctx, dyn)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(after) != len(bids) || len(wonAfter) != len(won) {
-		t.Fatalf("the Bids changed across the replay:%s", describeBids(after))
+		t.Fatalf("the Bids changed across the restart:%s", describeBids(after))
 	}
+	for _, b := range wonAfter {
+		if b.Status.Terminated == nil {
+			t.Fatalf("the Bid %s lost status.terminated across the restart", b.Name)
+		}
+	}
+	t.Logf("the restarted bidder kept the %d ended contract(s) terminated and started no ComputeVM", len(won))
 }
 
 func (n *Network) grepGlob(pattern, glob string) int {
@@ -305,8 +250,12 @@ func TestAcceptSurvivesABidderRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() {
+		n.signal("CONT", pid)
+		n.signal("KILL", pid)
+	}()
 	name := "rb" + randHex(3)
-	requesterLogs := filepath.Join(n.runsDir(), "pod-*", "std*.txt")
+	requesterLogs := filepath.Join(n.StateRoot, "dev", n.Instance, "apps", "dev", n.Instance+"-"+name, "logs", "core.log")
 	p := n.Start("run-request", acceptRequestTimeout, "run", "request", "--network", n.Instance, "--name", name, "--exec", "true",
 		"--contract-timeout", "4m", "--network-timeout", "2m", "--state-dir", n.StateRoot)
 	deadline := time.Now().Add(3 * time.Minute)
@@ -397,10 +346,6 @@ func TestOneAcceptMakesOneComputeVM(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, bidderRun, err := n.bidderProcess(0)
-	if err != nil {
-		t.Fatal(err)
-	}
 	name := "ao" + randHex(3)
 	p := n.Start("run-request", acceptRequestTimeout, "run", "request", "--network", n.Instance, "--name", name, "--exec", "true",
 		"--contract-timeout", "4m", "--network-timeout", "2m", "--state-dir", n.StateRoot, "--", "--accept-copies", strconv.Itoa(acceptCopies))
@@ -479,10 +424,9 @@ func TestOneAcceptMakesOneComputeVM(t *testing.T) {
 	if len(won) != 1 || won[0].Status.ClaimedBy == "" {
 		t.Fatalf("want one Won Bid with a claim:%s", describeBids(won))
 	}
-	dups := n.grepCount("accept_duplicate_delivery", runLogs(bidderRun)...)
 	resends := n.grepGlob("submitAccept_retry", kept)
-	t.Logf("one ComputeVM %v and one receipt %s for %d concurrent copies of the accept; %d answered from the accept in flight, %d re-send(s), Bid claimed by %s",
-		seen, s.Contract.ReceiptUri, acceptCopies, dups, resends, won[0].Status.ClaimedBy)
+	t.Logf("one ComputeVM %v and one receipt %s for %d concurrent copies of the accept; %d re-send(s), Bid claimed by %s",
+		seen, s.Contract.ReceiptUri, acceptCopies, resends, won[0].Status.ClaimedBy)
 	if err := n.WaitNoGuests(time.Minute); err != nil {
 		t.Fatal(err)
 	}

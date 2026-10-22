@@ -1,0 +1,378 @@
+package controller
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"time"
+
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	policyv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/policy/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/atproto"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/bundled-actions"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/models"
+	policyengine "github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/status"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/trust"
+)
+
+const (
+	perspectiveBidder    = "bidder"
+	perspectiveRequester = "requester"
+)
+
+type RunReconciler struct {
+	Engine    *Engine
+	Workflows WorkflowSource
+	Records   RecordSource
+	Host      trust.Host
+	Now       func() time.Time
+}
+
+func (r *RunReconciler) ReconcilePolicyWorkflowRun(ctx context.Context, run *policyv1alpha1.PolicyWorkflowRun) (Outcome, error) {
+	if run == nil {
+		return Outcome{}, fmt.Errorf("policy workflow run is required")
+	}
+	if run.Spec.Cancel || run.DeletionTimestamp != nil {
+		return cancelledOutcome(run, policyengine.ConditionCancelled, "Cancelled", "the run was cancelled"), nil
+	}
+	if run.Spec.Suspend {
+		return cancelledOutcome(run, policyengine.ConditionSuspended, "Suspended", "the run is suspended"), nil
+	}
+	if r.Engine == nil {
+		return failedOutcome(fmt.Errorf("policy engine is not configured")), nil
+	}
+	workflowRaw, workflowCR, err := r.resolveWorkflow(ctx, run)
+	if err != nil {
+		return failedOutcome(err), nil
+	}
+	inputs, err := r.buildInputs(ctx, run, workflowCR)
+	if err != nil {
+		return failedOutcome(err), nil
+	}
+	requestContext, contextErr := r.requestContext(ctx, run, workflowCR, inputs)
+	if contextErr != nil {
+		if ctx.Err() != nil {
+			return failedOutcome(ctx.Err()), nil
+		}
+		return failedOutcome(contextErr), nil
+	}
+	request := &PolicyEngineRequest{
+		Inputs:   inputs,
+		Workflow: workflowRaw,
+		Context:  requestContext,
+	}
+	opts := RunOptions{
+		Deadline: r.deadline(run, workflowCR),
+		Cache:    CacheFromAPI(run.Spec.Cache),
+	}
+	outcome, err := r.Engine.Execute(ctx, request, opts)
+	if err != nil {
+		return failedOutcome(err), nil
+	}
+	outcome.Status.Restarts = run.Status.Restarts
+	return outcome, nil
+}
+
+func (r *RunReconciler) resolveWorkflow(ctx context.Context, run *policyv1alpha1.PolicyWorkflowRun) (json.RawMessage, *policyv1alpha1.PolicyWorkflow, error) {
+	if len(bytes.TrimSpace(run.Spec.Workflow)) > 0 && !bytes.Equal(bytes.TrimSpace(run.Spec.Workflow), []byte("null")) {
+		raw, err := normalizeWorkflow(run.Spec.Workflow)
+		if err != nil {
+			return nil, nil, err
+		}
+		return raw, nil, nil
+	}
+	if run.Spec.WorkflowRef == "" {
+		return nil, nil, fmt.Errorf("workflowRef or workflow is required")
+	}
+	if r.Workflows != nil {
+		if workflowCR, err := r.Workflows.GetPolicyWorkflow(ctx, run.Spec.WorkflowRef); err == nil && workflowCR != nil {
+			if workflowCR.Spec.RecordRef != nil {
+				if r.Records == nil {
+					return nil, workflowCR, fmt.Errorf("policy workflow %s requires a record resolver", run.Spec.WorkflowRef)
+				}
+				raw, resolveErr := r.Records.ResolveWorkflow(ctx, *workflowCR.Spec.RecordRef)
+				if resolveErr != nil {
+					return nil, workflowCR, fmt.Errorf("resolve workflow record for %s: %w", run.Spec.WorkflowRef, resolveErr)
+				}
+				normalized, normalizeErr := normalizeWorkflow(raw)
+				if normalizeErr != nil {
+					return nil, workflowCR, normalizeErr
+				}
+				return normalized, workflowCR, nil
+			}
+			if len(bytes.TrimSpace(workflowCR.Spec.Workflow)) > 0 {
+				raw, normalizeErr := normalizeWorkflow(workflowCR.Spec.Workflow)
+				if normalizeErr != nil {
+					return nil, workflowCR, normalizeErr
+				}
+				return raw, workflowCR, nil
+			}
+			if raw, ok := bundledWorkflow(workflowCR.Name); ok {
+				return raw, workflowCR, nil
+			}
+		}
+	}
+	if raw, ok := bundledWorkflow(run.Spec.WorkflowRef); ok {
+		return raw, nil, nil
+	}
+	return nil, nil, fmt.Errorf("policy workflow %s not found", run.Spec.WorkflowRef)
+}
+
+func (r *RunReconciler) buildInputs(ctx context.Context, run *policyv1alpha1.PolicyWorkflowRun, workflowCR *policyv1alpha1.PolicyWorkflow) (map[string]any, error) {
+	inputs := map[string]any{}
+	defaultArgs := map[string]string{}
+	selfDid := run.Spec.SelfDid
+	perspective := run.Spec.Perspective
+	if workflowCR != nil {
+		for key, value := range workflowCR.Spec.DefaultInputs {
+			inputs[key] = value
+		}
+		for key, value := range workflowCR.Spec.DefaultArgs {
+			defaultArgs[key] = value
+		}
+		if selfDid == "" {
+			selfDid = workflowCR.Spec.DefaultSelfDid
+		}
+		if perspective == "" {
+			perspective = workflowCR.Spec.DefaultPerspective
+		}
+	}
+	args := make(map[string]string, len(defaultArgs)+len(run.Spec.Args))
+	for key, value := range defaultArgs {
+		args[key] = value
+	}
+	for key, value := range run.Spec.Args {
+		args[key] = value
+	}
+	argsJSON, err := json.Marshal(args)
+	if err != nil {
+		return nil, err
+	}
+	inputs["policy-args"] = string(argsJSON)
+	subjectDid := run.Spec.SubjectDid
+	counterpartyDid := run.Spec.CounterpartyDid
+	rootRequesterDid := run.Spec.RootRequesterDid
+	if counterpartyDid == "" {
+		switch perspective {
+		case perspectiveRequester:
+			if run.Spec.Bid != nil {
+				counterpartyDid = atproto.RepoFromURI(run.Spec.Bid.URI)
+			}
+		case perspectiveBidder:
+			if run.Spec.RFP != nil {
+				counterpartyDid = atproto.RepoFromURI(run.Spec.RFP.URI)
+			} else if run.Spec.Accept != nil {
+				counterpartyDid = atproto.RepoFromURI(run.Spec.Accept.URI)
+			}
+		}
+	}
+	if subjectDid == "" {
+		subjectDid = counterpartyDid
+	}
+	if rootRequesterDid == "" {
+		if perspective == perspectiveRequester {
+			rootRequesterDid = selfDid
+		} else {
+			rootRequesterDid = counterpartyDid
+		}
+	}
+	if selfDid != "" {
+		inputs["self-did"] = selfDid
+	}
+	if perspective != "" {
+		inputs["perspective"] = perspective
+	}
+	if subjectDid != "" {
+		inputs["subject-did"] = subjectDid
+	}
+	if counterpartyDid != "" {
+		inputs["counterparty-did"] = counterpartyDid
+	}
+	if rootRequesterDid != "" {
+		inputs["root-requester-did"] = rootRequesterDid
+	}
+	if value := r.recordInput(ctx, run.Spec.RFP); value != "" {
+		inputs["rfp"] = value
+	}
+	if value := r.recordInput(ctx, run.Spec.Bid); value != "" {
+		inputs["bid"] = value
+	}
+	if value := r.recordInput(ctx, run.Spec.Accept); value != "" {
+		inputs["accept"] = value
+	}
+	for key, value := range run.Spec.Inputs {
+		inputs[key] = value
+	}
+	return inputs, nil
+}
+
+func (r *RunReconciler) recordInput(ctx context.Context, ref *policyv1alpha1.PolicyStrongRef) string {
+	if ref == nil || ref.URI == "" {
+		return ""
+	}
+	entry := map[string]any{"uri": ref.URI, "cid": ref.CID}
+	if r.Records != nil {
+		if value, err := r.Records.ResolveRecord(ctx, *ref); err == nil && value != nil {
+			entry["value"] = value
+		}
+	}
+	data, err := json.Marshal(entry)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+func (r *RunReconciler) requestContext(ctx context.Context, run *policyv1alpha1.PolicyWorkflowRun, workflowCR *policyv1alpha1.PolicyWorkflow, inputs map[string]any) (map[string]any, error) {
+	selfDid := stringInput(inputs, "self-did")
+	counterpartyDid := stringInput(inputs, "counterparty-did")
+	env := map[string]any{}
+	if selfDid != "" {
+		env["GITHUB_ACTOR"] = selfDid
+	}
+	repository := ""
+	if workflowCR != nil && workflowCR.Spec.RecordRef != nil {
+		repository = atproto.RepoFromURI(workflowCR.Spec.RecordRef.URI)
+	}
+	if repository == "" {
+		repository = selfDid
+	}
+	if repository != "" {
+		env["GITHUB_REPOSITORY"] = repository
+	}
+	context := map[string]any{"config": map[string]any{"env": env}}
+	cache := CacheFromAPI(run.Spec.Cache)
+	if cache == nil {
+		cache = models.Cache{}
+	}
+	if r.Host != nil && selfDid != "" && counterpartyDid != "" {
+		snapshot, err := trust.BuildSnapshot(ctx, r.Host, selfDid, counterpartyDid)
+		if err != nil {
+			return nil, err
+		}
+		cache["trust/"+counterpartyDid] = snapshot.CacheFiles()
+	}
+	if len(cache) > 0 {
+		context["cache"] = cache
+	}
+	return context, nil
+}
+
+func stringInput(inputs map[string]any, key string) string {
+	value, ok := inputs[key]
+	if !ok {
+		return ""
+	}
+	text, _ := value.(string)
+	return text
+}
+
+func (r *RunReconciler) deadline(run *policyv1alpha1.PolicyWorkflowRun, workflowCR *policyv1alpha1.PolicyWorkflow) time.Duration {
+	var deadline time.Duration
+	if run.Spec.ActiveDeadlineSeconds != nil && *run.Spec.ActiveDeadlineSeconds > 0 {
+		deadline = time.Duration(*run.Spec.ActiveDeadlineSeconds) * time.Second
+	}
+	if workflowCR != nil && workflowCR.Spec.TimeoutSeconds != nil && *workflowCR.Spec.TimeoutSeconds > 0 {
+		value := time.Duration(*workflowCR.Spec.TimeoutSeconds) * time.Second
+		if deadline <= 0 || value < deadline {
+			deadline = value
+		}
+	}
+	return deadline
+}
+
+func normalizeWorkflow(raw json.RawMessage) (json.RawMessage, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil, fmt.Errorf("workflow is required")
+	}
+	if json.Valid(trimmed) {
+		var text string
+		if json.Unmarshal(trimmed, &text) == nil && text == "" {
+			return nil, fmt.Errorf("workflow is required")
+		}
+		return append(json.RawMessage(nil), trimmed...), nil
+	}
+	data, err := json.Marshal(string(trimmed))
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+func bundledWorkflow(name string) (json.RawMessage, bool) {
+	data, ok := bundledactions.Workflow(name)
+	if !ok {
+		return nil, false
+	}
+	encoded, err := json.Marshal(string(data))
+	if err != nil {
+		return nil, false
+	}
+	return encoded, true
+}
+
+func cancelledOutcome(run *policyv1alpha1.PolicyWorkflowRun, conditionType, reason, message string) Outcome {
+	completed := metav1.Now()
+	statusValue := policyengine.Status{
+		Phase:       policyengine.PhaseCancelled,
+		RunID:       run.Status.RunID,
+		CompletedAt: &completed,
+		Restarts:    run.Status.Restarts,
+	}
+	if run.Status.StartTime != nil {
+		statusValue.StartedAt = run.Status.StartTime
+	}
+	meta.SetStatusCondition(&statusValue.Conditions, metav1.Condition{
+		Type:    conditionType,
+		Status:  metav1.ConditionTrue,
+		Reason:  reason,
+		Message: message,
+	})
+	return Outcome{
+		Result: models.Result{
+			RunID:      statusValue.RunID,
+			Status:     models.ExecutionComplete,
+			ExitStatus: models.ExitFailure,
+			Cache:      CacheFromAPI(run.Status.Cache),
+		},
+		Status: statusValue,
+	}
+}
+
+func failedOutcome(err error) Outcome {
+	completed := metav1.Now()
+	message := "the policy run failed"
+	if err != nil {
+		message = err.Error()
+	}
+	statusValue := policyengine.Status{
+		Phase:       policyengine.PhaseFailed,
+		ExitStatus:  models.ExitFailure,
+		CompletedAt: &completed,
+		Annotations: models.Annotations{
+			"error": []models.Annotation{{
+				AnnotationLevel: models.AnnotationError,
+				Message:         message,
+				Title:           message,
+			}},
+		},
+	}
+	meta.SetStatusCondition(&statusValue.Conditions, metav1.Condition{
+		Type:    policyengine.ConditionFailed,
+		Status:  metav1.ConditionTrue,
+		Reason:  "Error",
+		Message: message,
+	})
+	return Outcome{
+		Result: models.Result{
+			Status:      models.ExecutionComplete,
+			ExitStatus:  models.ExitFailure,
+			Annotations: statusValue.Annotations,
+		},
+		Status: statusValue,
+	}
+}

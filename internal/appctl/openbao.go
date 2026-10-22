@@ -6,24 +6,20 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/dynamic"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/denoruntime"
 )
 
 const (
 	NetworkDir         = "network"
 	NetworkVaultServer = "network"
-	NetworkVaultClient = "denoruntime"
+	NetworkVaultClient = "components"
 	NetworkPKIMount    = "pki"
-	OpenBaoWaitPoll    = 200 * time.Millisecond
 )
 
 func NetworkStateDir(instanceState string) string { return filepath.Join(instanceState, NetworkDir) }
@@ -92,49 +88,6 @@ func (v networkVault) client(token string) (*openbao.Client, error) {
 		return nil, err
 	}
 	return openbao.New(v.address, token, openbao.WithCACertPool(pool), openbao.WithClientCertificate(cert)), nil
-}
-
-func NetworkOpenBao(kubeconfig, workspace string) func(context.Context) (denoruntime.OpenBao, error) {
-	if workspace == "" {
-		workspace = DefaultWorkspace
-	}
-	return func(ctx context.Context) (denoruntime.OpenBao, error) {
-		for {
-			ob, err := networkOpenBao(ctx, kubeconfig, workspace)
-			if err == nil {
-				return ob, nil
-			}
-			select {
-			case <-ctx.Done():
-				return denoruntime.OpenBao{}, ctx.Err()
-			case <-time.After(OpenBaoWaitPoll):
-			}
-		}
-	}
-}
-
-func networkOpenBao(ctx context.Context, kubeconfig, workspace string) (denoruntime.OpenBao, error) {
-	restCfg, err := kcpserver.FrontRestConfig(kubeconfig)
-	if err != nil {
-		return denoruntime.OpenBao{}, err
-	}
-	dc, err := dynamic.NewForConfig(clusterConfig(restCfg, workspace))
-	if err != nil {
-		return denoruntime.OpenBao{}, err
-	}
-	v, err := readNetworkVault(ctx, dc.Resource(OpenBaoServerGVR))
-	if err != nil {
-		return denoruntime.OpenBao{}, err
-	}
-	c, err := v.client("")
-	if err != nil {
-		return denoruntime.OpenBao{}, err
-	}
-	token, err := c.LoginCert(ctx, v.certMount, v.certRole)
-	if err != nil {
-		return denoruntime.OpenBao{}, err
-	}
-	return denoruntime.OpenBao{Address: v.address, Token: token, CACert: v.caPEM, ClientCert: v.clientCert, ClientKey: v.clientKey}, nil
 }
 
 func (n *networks) vault(ctx context.Context) (networkVault, error) {

@@ -1,0 +1,211 @@
+package guestcontrolplane
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"reflect"
+	"strings"
+
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestidentity"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
+)
+
+var (
+	ComputeVMGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "computevms"}
+
+	GuestIdentityGrantGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "guestidentitygrants"}
+
+	OpenBaoServerGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "openbaoservers"}
+
+	MarketIdentityGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "marketidentities"}
+)
+
+type OpenBaoSource interface {
+	Server(ctx context.Context, name string) (v1alpha1.OpenBaoServerStatus, error)
+}
+
+type KCPOpenBao struct {
+	Res *clusterResource[v1alpha1.OpenBaoServer]
+
+	Cluster string
+}
+
+func (k *KCPOpenBao) Server(ctx context.Context, name string) (v1alpha1.OpenBaoServerStatus, error) {
+	if k == nil || k.Res == nil {
+		return v1alpha1.OpenBaoServerStatus{}, errors.New("guestcontrolplane: the OpenBao source is not configured")
+	}
+	server, err := k.Res.Get(ctx, k.Cluster, name)
+	if err != nil {
+		return v1alpha1.OpenBaoServerStatus{}, err
+	}
+	return server.Status, nil
+}
+
+type VMStore interface {
+	Get(ctx context.Context, name string) (*v1alpha1.ComputeVM, error)
+
+	List(ctx context.Context) ([]v1alpha1.ComputeVM, error)
+
+	RecordMarket(ctx context.Context, name string, patch v1alpha1.ComputeVMMarket) error
+}
+
+type GuestStore = guestidentity.GrantStore
+
+type KCPVMs struct {
+	Res *clusterResource[v1alpha1.ComputeVM]
+
+	Cluster string
+
+	Handle string
+
+	Log *slog.Logger
+}
+
+func NewKCPVMs(store *kcpstore.Store, cluster, handle string) *KCPVMs {
+	return &KCPVMs{Res: newClusterResource[v1alpha1.ComputeVM](store, ComputeVMGVR), Cluster: cluster, Handle: handle}
+}
+
+func (v *KCPVMs) Get(ctx context.Context, name string) (*v1alpha1.ComputeVM, error) {
+	if v == nil || v.Res == nil {
+		return nil, errors.New("guestcontrolplane: the ComputeVM store is not configured")
+	}
+	vm, err := v.Res.Get(ctx, v.Cluster, name)
+	if apierrors.IsNotFound(err) {
+		return nil, nil
+	}
+	return vm, err
+}
+
+func (v *KCPVMs) List(ctx context.Context) ([]v1alpha1.ComputeVM, error) {
+	if v == nil || v.Res == nil {
+		return nil, errors.New("guestcontrolplane: the ComputeVM store is not configured")
+	}
+	return v.Res.List(ctx, v.Cluster)
+}
+
+func (v *KCPVMs) RecordMarket(ctx context.Context, name string, patch v1alpha1.ComputeVMMarket) error {
+	if v == nil || v.Res == nil {
+		return errors.New("guestcontrolplane: the ComputeVM store is not configured")
+	}
+	if patch.Address == "" && len(patch.HostKeys) == 0 && patch.ReportedAt == "" {
+		return nil
+	}
+	current, err := v.Get(ctx, name)
+	if err != nil {
+		return err
+	}
+	if current == nil {
+		return apierrors.NewNotFound(ComputeVMGVR.GroupResource(), name)
+	}
+	merged := computevm.MergeMarket(current.Status.Market, patch, computevm.GuestMarketFields())
+	if reflect.DeepEqual(current.Status.Market, &merged) {
+		return nil
+	}
+	if current.Status.Market == nil && merged.OnNetworkUri == "" && merged.Address == "" && len(merged.HostKeys) == 0 &&
+		merged.HostKeysUri == "" && merged.ReportedAt == "" {
+		return nil
+	}
+	status, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&merged)
+	if err != nil {
+		return err
+	}
+	if err := v.Res.ApplyStatus(ctx, v.Cluster, "ComputeVM", name, v1alpha1.FieldManagerComputeVMGuest,
+		map[string]any{"market": status}); err != nil {
+		return err
+	}
+	return nil
+}
+
+type KCPGrants struct {
+	Res *clusterResource[v1alpha1.GuestIdentityGrant]
+
+	Cluster string
+}
+
+func NewKCPGrants(store *kcpstore.Store, cluster string) *KCPGrants {
+	return &KCPGrants{Res: newClusterResource[v1alpha1.GuestIdentityGrant](store, GuestIdentityGrantGVR), Cluster: cluster}
+}
+
+func (g *KCPGrants) List(ctx context.Context) ([]v1alpha1.GuestIdentityGrant, error) {
+	if g == nil || g.Res == nil {
+		return nil, errors.New("guestcontrolplane: the GuestIdentityGrant store is not configured")
+	}
+	return g.Res.List(ctx, g.Cluster)
+}
+
+func (g *KCPGrants) Apply(ctx context.Context, grant v1alpha1.GuestIdentityGrant) error {
+	if g == nil || g.Res == nil {
+		return errors.New("guestcontrolplane: the GuestIdentityGrant store is not configured")
+	}
+	grant.TypeMeta = metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: "GuestIdentityGrant"}
+	held, err := g.Res.Get(ctx, g.Cluster, grant.Name)
+	if apierrors.IsNotFound(err) || err == nil && held == nil {
+		return g.Res.Create(ctx, g.Cluster, &grant)
+	}
+	if err != nil {
+		return err
+	}
+	spec, err := json.Marshal(grant.Spec)
+	if err != nil {
+		return err
+	}
+	var value any
+	if err := json.Unmarshal(spec, &value); err != nil {
+		return err
+	}
+	patch, err := json.Marshal([]map[string]any{{"op": "add", "path": "/spec", "value": value}})
+	if err != nil {
+		return err
+	}
+	return g.Res.PatchJSON(ctx, g.Cluster, grant.Name, patch)
+}
+
+func (g *KCPGrants) Delete(ctx context.Context, name string) error {
+	if g == nil || g.Res == nil {
+		return errors.New("guestcontrolplane: the GuestIdentityGrant store is not configured")
+	}
+	return g.Res.Delete(ctx, g.Cluster, name)
+}
+
+func kcpStore(deps component.Deps, workspace string) (*kcpstore.Store, string, error) {
+	if deps.KCP == nil {
+		return nil, "", errors.New("guestcontrolplane: the component has no kcp clients")
+	}
+	if workspace == "" {
+		workspace = "root"
+	}
+	client, err := deps.KCP.Client(workspace)
+	if err != nil {
+		return nil, "", fmt.Errorf("guestcontrolplane: kcp client for %s: %w", workspace, err)
+	}
+	cfg := client.RESTConfig()
+	if cfg == nil || cfg.Host == "" {
+		return nil, "", fmt.Errorf("guestcontrolplane: the kcp client for %s has no rest config", workspace)
+	}
+	store, err := kcpstore.New(kcpstore.Options{Host: cfg.Host, RestConfig: cfg})
+	if err != nil {
+		return nil, "", err
+	}
+	return store, workspace, nil
+}
+
+func handlerURL(workspace, kind, name string) string {
+	kind = strings.ToLower(strings.TrimSpace(kind))
+	name = strings.TrimSpace(name)
+	if kind == "" || name == "" {
+		return ""
+	}
+	return "http://" + kcp.ServiceFQDN(kind, "default", workspace, kcp.DefaultServiceDomain)
+}

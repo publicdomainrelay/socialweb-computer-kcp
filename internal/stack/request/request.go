@@ -22,7 +22,6 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/appctl"
-	denov1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/internal/denokcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
 )
@@ -267,6 +266,35 @@ func (k *Kcp) Root(ctx context.Context) (v1alpha1.ApplicationStatus, error) {
 	return o.Status, err
 }
 
+func (k *Kcp) WaitReady(ctx context.Context, timeout time.Duration, progress func(v1alpha1.ApplicationStatus)) error {
+	last := ""
+	return until(ctx, timeout, "waiting for the MarketRequester to be Ready", func() (bool, error) {
+		st, err := k.Root(ctx)
+		if err != nil {
+			return false, err
+		}
+		if key := string(st.Phase) + st.Message; key != last && progress != nil {
+			progress(st)
+			last = key
+		}
+		if st.Phase == v1alpha1.ApplicationPhaseFailed {
+			return true, fmt.Errorf("request: the MarketRequester failed: %s", st.Message)
+		}
+		if st.Phase != v1alpha1.ApplicationPhaseReady {
+			return false, nil
+		}
+		if len(st.Components) == 0 {
+			return false, nil
+		}
+		for _, c := range st.Components {
+			if !c.Ready {
+				return false, nil
+			}
+		}
+		return true, nil
+	})
+}
+
 func (k *Kcp) Contract(ctx context.Context) (*v1alpha1.ComputeContract, error) {
 	u, err := k.dyn.Resource(appctl.ComputeContractGVR).Get(ctx, appctl.RequesterContract, metav1.GetOptions{})
 	if err != nil {
@@ -363,7 +391,7 @@ func requesterFailure(st v1alpha1.ApplicationStatus) string {
 		return "phase Failed: " + st.Message
 	}
 	for _, c := range st.Components {
-		if c.Phase == string(denov1alpha1.DenoPodFailed) {
+		if c.Phase == string(v1alpha1.ComponentPhaseFailed) {
 			return fmt.Sprintf("%s %s/%s is Failed", c.Kind, c.Workspace, c.Name)
 		}
 	}

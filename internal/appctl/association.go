@@ -1,22 +1,18 @@
 package appctl
 
 import (
-	"bytes"
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
+	"github.com/bluesky-social/indigo/atproto/syntax"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 )
 
 const (
@@ -25,51 +21,6 @@ const (
 	BidderAssociate      = "bidder_associate"
 	AssociationWatch     = "association"
 )
-
-func xrpcCall(ctx context.Context, method, rawURL, caFile, bearer string, body any) (map[string]any, error) {
-	tr := &http.Transport{}
-	if caFile != "" && strings.HasPrefix(rawURL, "https://") {
-		caPEM, err := os.ReadFile(caFile)
-		if err != nil {
-			return nil, err
-		}
-		pool := x509.NewCertPool()
-		if !pool.AppendCertsFromPEM(caPEM) {
-			return nil, fmt.Errorf("the CA bundle %s does not parse", caFile)
-		}
-		tr.TLSClientConfig = &tls.Config{RootCAs: pool}
-	}
-	var rd io.Reader
-	if body != nil {
-		b, err := json.Marshal(body)
-		if err != nil {
-			return nil, err
-		}
-		rd = bytes.NewReader(b)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, rawURL, rd)
-	if err != nil {
-		return nil, err
-	}
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	if bearer != "" {
-		req.Header.Set("Authorization", "Bearer "+bearer)
-	}
-	resp, err := (&http.Client{Timeout: 30 * time.Second, Transport: tr}).Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	var out map[string]any
-	json.Unmarshal(raw, &out)
-	if resp.StatusCode != http.StatusOK {
-		return out, fmt.Errorf("%s %s: %d %s", method, rawURL, resp.StatusCode, strings.TrimSpace(string(raw)))
-	}
-	return out, nil
-}
 
 func (ctl *Controller) associateNetworkOperator(ctx context.Context, spec v1alpha1.MarketBidderSpec) error {
 	id, err := ctl.bidderIdentity(ctx)
@@ -80,7 +31,7 @@ func (ctl *Controller) associateNetworkOperator(ctx context.Context, spec v1alph
 	if err != nil {
 		return err
 	}
-	operator, err := writeClaim(ctx, id, spec.Identity.PdsUrl, spec.Network.CaBundleRef, spec.Identity.Handle, password, "bidder-")
+	operator, err := ctl.writeClaim(ctx, id, spec.Identity.PdsUrl, spec.Network.CaBundleRef, spec.Identity.Handle, password, "bidder-")
 	if err != nil || operator == "" {
 		return err
 	}
@@ -107,34 +58,43 @@ func claimOf(rawURL string) (nonce, service string) {
 	return q.Get("n"), q.Get("s")
 }
 
-func writeClaim(ctx context.Context, id *v1alpha1.MarketIdentity, operatorPds, ca, identifier, password, namePrefix string) (string, error) {
+func (ctl *Controller) writeClaim(ctx context.Context, id *v1alpha1.MarketIdentity, operatorPds, ca, identifier, password, namePrefix string) (string, error) {
 	nonce, service := claimOf(id.Status.PendingAction.Url)
 	if nonce == "" || service == "" {
 		return "", nil
 	}
-	did := id.Status.Did
-	pds := strings.TrimSuffix(operatorPds, "/")
-	sess, err := xrpcCall(ctx, http.MethodPost, pds+"/xrpc/com.atproto.server.createSession", ca, "",
-		map[string]string{"identifier": identifier, "password": password})
+	didText := strings.TrimSpace(id.Status.Did)
+	if _, err := syntax.ParseDID(didText); err != nil {
+		return "", fmt.Errorf("the identity's did %q: %w", didText, err)
+	}
+	pds, err := ctl.pdsFor(operatorPds, ca)
 	if err != nil {
 		return "", err
 	}
-	operator, _ := sess["did"].(string)
-	access, _ := sess["accessJwt"].(string)
-	rkey := service + "-" + strings.ReplaceAll(did, ":", "-")
-	q := url.Values{"repo": {operator}, "collection": {BadgeBlueKeysNSID}, "rkey": {rkey}}
-	if held, err := xrpcCall(ctx, http.MethodGet, pds+"/xrpc/com.atproto.repo.getRecord?"+q.Encode(), ca, "", nil); err == nil {
-		if v, _ := held["value"].(map[string]any); v != nil && v["nonce"] == nonce {
+	sess, err := pds.CreateSession(ctx, identifier, password)
+	if err != nil {
+		return "", err
+	}
+	operator := sess.DID
+	rkey := syntax.RecordKey(service + "-" + strings.ReplaceAll(didText, ":", "-"))
+	path := pdsclient.RepoPath{Repo: operator, Collection: syntax.NSID(BadgeBlueKeysNSID), Rkey: rkey}
+	if held, err := pds.GetRecord(ctx, path, nil); err == nil {
+		var value struct {
+			Nonce string `json:"nonce"`
+		}
+		if json.Unmarshal(held.Value, &value) == nil && value.Nonce == nonce {
 			return "", nil
 		}
 	}
-	rec := map[string]any{"$type": BadgeBlueKeysNSID, "keyId": did, "challenge": operator, "service": service, "nonce": nonce,
-		"name": namePrefix + did[len(did)-8:], "createdAt": time.Now().UTC().Format(time.RFC3339)}
-	if _, err := xrpcCall(ctx, http.MethodPost, pds+"/xrpc/com.atproto.repo.putRecord", ca, access,
-		map[string]any{"repo": operator, "collection": BadgeBlueKeysNSID, "rkey": rkey, "record": rec}); err != nil {
+	record, err := json.Marshal(map[string]any{"$type": BadgeBlueKeysNSID, "keyId": didText, "challenge": operator.String(), "service": service,
+		"nonce": nonce, "name": namePrefix + didText[len(didText)-8:], "createdAt": time.Now().UTC().Format(time.RFC3339)})
+	if err != nil {
 		return "", err
 	}
-	return operator, nil
+	if _, err := pds.PutRecord(ctx, path, record, pdsclient.WriteOptions{}); err != nil {
+		return "", err
+	}
+	return operator.String(), nil
 }
 
 func (ctl *Controller) identityIn(ctx context.Context, ws, name string) (*v1alpha1.MarketIdentity, error) {
@@ -161,7 +121,7 @@ func (ctl *Controller) associateGatewayOperator(ctx context.Context, id *v1alpha
 	if err != nil {
 		return err
 	}
-	operator, err := writeClaim(ctx, id, s.Service, n.CaBundleRef, s.Identifier, s.Password, "requester-")
+	operator, err := ctl.writeClaim(ctx, id, s.Service, n.CaBundleRef, s.Identifier, s.Password, "requester-")
 	if err != nil || operator == "" {
 		return err
 	}

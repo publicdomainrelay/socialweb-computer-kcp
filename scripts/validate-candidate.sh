@@ -6,8 +6,8 @@
 #   a  the GitHub gate, apigen diff and cross-OS builds concluded success for <sha>
 #   b  the full integration suite on gl-runner-1, detached, per test results
 #   c  upgrade lane: install the base release, upgrade to the candidate, assert
-#      the gateway keeps its DID, its fronts keep their ports, and a DenoPod
-#      whose TypeScript tree changed is replaced
+#      the gateway keeps its DID, its fronts keep their ports, and a component
+#      whose definition changed is replaced
 #
 # Every lane writes ~/.tmp/validate/<sha>/<lane>.log and expires its droplet.
 set -uo pipefail

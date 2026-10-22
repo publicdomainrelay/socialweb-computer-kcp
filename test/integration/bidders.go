@@ -114,8 +114,13 @@ func (n *Network) WaitBidderReady(i int, timeout time.Duration) error {
 		if a, ok := n.App(name); ok {
 			last = fmt.Sprintf("phase %s: %s", a.Phase, a.Message)
 			if a.Phase == v1alpha1.ApplicationPhaseReady && a.Did != "" {
-				if _, _, err := n.bidderProcess(i); err == nil {
-					return nil
+				for _, c := range a.Components {
+					if c.Kind == "Bidder" && c.Name == "bidder" && c.Ready {
+						return nil
+					}
+					if c.Kind == "Bidder" && c.Name == "bidder" {
+						last = fmt.Sprintf("Bidder component phase %s, ready %t", c.Phase, c.Ready)
+					}
 				}
 			}
 		}
@@ -123,7 +128,7 @@ func (n *Network) WaitBidderReady(i int, timeout time.Duration) error {
 			return err
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("%s was not Ready with a running bidder inside %s (%s)", name, timeout, last)
+			return fmt.Errorf("%s was not Ready with a ready Bidder component inside %s (%s)", name, timeout, last)
 		}
 		time.Sleep(time.Second)
 	}

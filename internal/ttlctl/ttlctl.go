@@ -18,6 +18,7 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 
+	policyv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/policy/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
 )
@@ -35,7 +36,6 @@ const (
 var (
 	WorkspaceGVR = schema.GroupVersionResource{Group: "tenancy.kcp.io", Version: "v1alpha1", Resource: "workspaces"}
 	groupApps    = v1alpha1.GroupName
-	groupDeno    = "deno.computer"
 )
 
 type Target struct {
@@ -47,9 +47,7 @@ func DefaultTargets() []Target {
 	return []Target{
 		{"Bid", schema.GroupVersionResource{Group: groupApps, Version: "v1alpha1", Resource: "bids"}},
 		{"ComputeContract", schema.GroupVersionResource{Group: groupApps, Version: "v1alpha1", Resource: "computecontracts"}},
-		{"DenoRun", schema.GroupVersionResource{Group: groupDeno, Version: "v1alpha1", Resource: "denoruns"}},
-		{"DenoJob", schema.GroupVersionResource{Group: groupDeno, Version: "v1alpha1", Resource: "denojobs"}},
-		{"PolicyWorkflowRun", schema.GroupVersionResource{Group: groupDeno, Version: "v1alpha1", Resource: "policyworkflowruns"}},
+		{"PolicyWorkflowRun", schema.GroupVersionResource{Group: policyv1alpha1.GroupName, Version: "v1alpha1", Resource: "policyworkflowruns"}},
 	}
 }
 

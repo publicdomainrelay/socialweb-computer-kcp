@@ -131,34 +131,50 @@ func (n *networks) deleteAccountWorkspaces(ctx context.Context) error {
 	}
 }
 
-func (n *networks) stopAppPods(ctx context.Context, name string) error {
+func (n *networks) stopAppComponents(ctx context.Context, name string) error {
 	ws := n.appWorkspace(name) + ":" + ComponentWorkspace
-	ri, err := n.ctl.client(ws, DenoPodGVR)
-	if err != nil {
-		return err
-	}
+	seen := map[string]bool{}
+	types := append(append([]ComponentType{}, ComponentTypes...), PolicyTypes...)
 	deadline := time.Now().Add(ChildDeleteTimeout)
 	for {
-		list, err := ri.Namespace("default").List(ctx, metav1.ListOptions{})
-		if apierrors.IsNotFound(err) || (err == nil && len(list.Items) == 0) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		for _, p := range list.Items {
-			if p.GetDeletionTimestamp() == nil {
+		left := 0
+		for _, ct := range types {
+			key := ct.Kind
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			ri, err := n.ctl.client(ws, ct.GVR)
+			if err != nil {
+				return err
+			}
+			list, err := ri.Namespace("default").List(ctx, metav1.ListOptions{})
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			left += len(list.Items)
+			for _, p := range list.Items {
+				if p.GetDeletionTimestamp() != nil {
+					continue
+				}
 				if err := ri.Namespace("default").Delete(ctx, p.GetName(), metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
 					return err
 				}
 			}
 		}
+		if left == 0 {
+			return nil
+		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("%d DenoPod(s) of %s still run %s after their delete", len(list.Items), ws, ChildDeleteTimeout)
+			return fmt.Errorf("%d component(s) of %s still run %s after their delete", left, ws, ChildDeleteTimeout)
 		}
 		if !sleep(ctx, ChildPoll) {
 			return ctx.Err()
 		}
+		seen = map[string]bool{}
 	}
 }
 

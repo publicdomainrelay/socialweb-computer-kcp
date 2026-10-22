@@ -1,0 +1,286 @@
+apiVersion: apis.kcp.io/v1alpha1
+kind: APIResourceSchema
+metadata:
+  name: v1alpha1-2.gatewayapis.socialweb.computer
+spec:
+  group: socialweb.computer
+  names:
+    kind: GatewayAPI
+    listKind: GatewayAPIList
+    plural: gatewayapis
+    singular: gatewayapi
+  scope: Cluster
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      schema:
+        type: object
+        properties:
+          apiVersion:
+            type: string
+          kind:
+            type: string
+          metadata:
+            type: object
+          spec:
+            type: object
+            properties:
+              suspend:
+                type: boolean
+              restartPolicy:
+                type: string
+                enum:
+                  - Never
+                  - OnFailure
+                  - Always
+              stateDir:
+                type: string
+              network:
+                type: object
+                properties:
+                  plcDirectoryUrl:
+                    type: string
+                  ingressProxyHost:
+                    type: string
+                  relayUrls:
+                    type: array
+                    items:
+                      type: string
+                  firehoseUrls:
+                    type: array
+                    items:
+                      type: string
+                  qrOrigin:
+                    type: string
+                  guestTlsUrl:
+                    type: string
+                  caBundleRef:
+                    type: string
+                  hosts:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        address:
+                          type: string
+                      required:
+                        - name
+                        - address
+                required:
+                  - plcDirectoryUrl
+                  - ingressProxyHost
+                  - relayUrls
+                  - firehoseUrls
+                  - qrOrigin
+              limits:
+                type: object
+                properties:
+                  cpuMillicores:
+                    type: integer
+                    format: int32
+                  memoryBytes:
+                    type: integer
+                    format: int64
+                  diskBytes:
+                    type: integer
+                    format: int64
+              tls:
+                type: object
+                properties:
+                  enabled:
+                    type: boolean
+                  hostnames:
+                    type: array
+                    items:
+                      type: string
+                  certRef:
+                    type: string
+                  caBundleRef:
+                    type: string
+              serviceAuth:
+                type: object
+                properties:
+                  issuer:
+                    type: string
+                  audience:
+                    type: array
+                    items:
+                      type: string
+                  keyRef:
+                    type: string
+              identity:
+                type: object
+                properties:
+                  marketIdentityRef:
+                    type: object
+                    properties:
+                      kind:
+                        type: string
+                      name:
+                        type: string
+                      did:
+                        type: string
+                  did:
+                    type: string
+                  handle:
+                    type: string
+              pdsRef:
+                type: object
+                properties:
+                  kind:
+                    type: string
+                  name:
+                    type: string
+                  did:
+                    type: string
+              requesterRef:
+                type: object
+                properties:
+                  kind:
+                    type: string
+                  name:
+                    type: string
+                  did:
+                    type: string
+              vaultRef:
+                type: object
+                properties:
+                  kind:
+                    type: string
+                  name:
+                    type: string
+                  did:
+                    type: string
+              hostnames:
+                type: array
+                items:
+                  type: string
+              storage:
+                type: object
+                properties:
+                  dataDir:
+                    type: string
+                  blobsDir:
+                    type: string
+                  certsDir:
+                    type: string
+              serve:
+                type: object
+                properties:
+                  host:
+                    type: string
+                  port:
+                    type: integer
+                    format: int32
+                  healthPath:
+                    type: string
+              clusterProvider:
+                type: object
+                properties:
+                  scaleHold:
+                    type: string
+                  scaleMaxNodes:
+                    type: integer
+                    format: int32
+                  scalePodsPerNode:
+                    type: integer
+                    format: int32
+              publicOrigin:
+                type: string
+              audience:
+                type: string
+              requiredDownloads:
+                type: array
+                items:
+                  type: string
+              postSignInURL:
+                type: string
+              nodeMarket:
+                type: object
+                properties:
+                  ownerSessionsFile:
+                    type: string
+                  userDataBaseFile:
+                    type: string
+                  homeWorkspace:
+                    type: string
+                  contractWorkspace:
+                    type: string
+                  nodePolicy:
+                    type: string
+                  nodePolicyArgs:
+                    type: string
+                  extraBidderDIDs:
+                    type: array
+                    items:
+                      type: string
+                  pollIntervalSeconds:
+                    type: integer
+                    format: int32
+          status:
+            type: object
+            properties:
+              observedGeneration:
+                type: integer
+                format: int64
+              phase:
+                type: string
+                enum:
+                  - Pending
+                  - Starting
+                  - Running
+                  - Ready
+                  - Failed
+                  - Stopping
+                  - Suspended
+              ready:
+                type: boolean
+              endpoint:
+                type: string
+              endpoints:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    url:
+                      type: string
+                    address:
+                      type: string
+                    protocol:
+                      type: string
+                  required:
+                    - name
+              message:
+                type: string
+              restarts:
+                type: integer
+                format: int32
+              startedAt:
+                type: string
+              conditions:
+                type: array
+                items:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+            required:
+              - ready
+      additionalPrinterColumns:
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: Ready
+          type: boolean
+          jsonPath: .status.ready
+        - name: Endpoint
+          type: string
+          jsonPath: .status.endpoint
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp

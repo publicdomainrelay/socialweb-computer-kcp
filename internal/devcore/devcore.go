@@ -7,21 +7,25 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
+	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/appctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap/table"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostos"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostprocess"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/install"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/logcap"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/postgresctl"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/denoruntime"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/componentcore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/storemaint"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/ttlctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/versions"
@@ -29,13 +33,14 @@ import (
 
 const CheckInterval = 5 * time.Second
 
-var TTLSkipWorkspaces = []string{"socialweb-provider", "deno-provider"}
+var TTLSkipWorkspaces = []string{"socialweb-provider"}
 
 type Config struct {
 	Layout       devinstance.Layout
 	ReadyTimeout time.Duration
 	Log          *slog.Logger
-	DenoRuntime  *denoruntime.Config
+	TLSCertFile  string
+	TLSKeyFile   string
 	ComputeVM    *computevm.Config
 	Application  *table.App
 	FrontAddress string
@@ -47,6 +52,8 @@ type Config struct {
 	WebApp       *appctl.WebApp
 	OnComponents func(owner string, listeners []v1alpha1.ApplicationListener)
 	SignInGuard  appctl.SignInGuard
+	Handlers     *component.HandlerRegistry
+	RemotePDS    *pdsv1alpha1.RemotePDS
 }
 
 func LogCapConfig(l devinstance.Layout, log *slog.Logger) logcap.Config {
@@ -91,6 +98,11 @@ func lockRecord(path string) (*os.File, error) {
 func Run(ctx context.Context, cfg Config, m hostsvc.Manager) error {
 	l := cfg.Layout
 	log := cfg.Log.With("component", "dev-core", "instance", l.ID)
+	handlers := cfg.Handlers
+	if handlers == nil {
+		handlers = component.NewHandlerRegistry()
+	}
+	cfg.Handlers = handlers
 	lf, err := os.OpenFile(l.CoreLock, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return err
@@ -132,14 +144,8 @@ func Run(ctx context.Context, cfg Config, m hostsvc.Manager) error {
 		}
 	}
 	go logcap.Keep(ctx, LogCapConfig(l, log))
-	go storemaint.KeepDenoKv(ctx, storemaint.DenoKvConfig{Dirs: []string{filepath.Join(l.StateDir, appctl.ComponentsDir),
-		filepath.Join(appctl.NetworkStateDir(l.StateDir), appctl.NetworkServiceState)}, Log: log})
-	if cfg.DenoRuntime != nil && rec.SharedKcp == "" {
-		deno := *cfg.DenoRuntime
-		deno.Units, deno.RunsUnit = m, l.Names().DenoPods()
-		go denoruntime.Supervise(ctx, deno)
-	}
 	if len(rec.StandIns) == 0 && rec.AdminKubeconfig != "" {
+		go componentcore.Supervise(ctx, ComponentCoreConfig(ctx, cfg, rec, log))
 		go hostprocess.Supervise(ctx, HostProcessConfig(bcfg, rec, m, log))
 		if cfg.ComputeVM != nil {
 			c := *cfg.ComputeVM
@@ -149,6 +155,7 @@ func Run(ctx context.Context, cfg Config, m hostsvc.Manager) error {
 		go openbaoctl.Supervise(ctx, OpenBaoServerConfig(bcfg, rec, log))
 		go postgresctl.Run(ctx, PostgresConfig(bcfg, rec, log))
 		ac := AppConfig(bcfg, rec, m, log)
+		ac.Handlers, ac.RemotePDS = cfg.Handlers, cfg.RemotePDS
 		ac.Listeners, ac.WebApp, ac.OnComponents = cfg.Listeners, cfg.WebApp, cfg.OnComponents
 		ac.SignInGuard = cfg.SignInGuard
 		if tc, err := ttlctl.New(ttlctl.Config{Kubeconfig: rec.AdminKubeconfig, Root: ac.Workspace, Skip: TTLSkipWorkspaces, Log: log}); err != nil {
@@ -284,6 +291,66 @@ func rollDrifted(ctx context.Context, m hostsvc.Manager, bcfg bootstrap.Config, 
 	}
 	log.Info("the kcp slot rolled to this binary's argv", "from", rep.Roll.From, "to", rep.Roll.To, "unit", d.Unit)
 	return ensure(ctx, m, bcfg, l, rec, core, log)
+}
+
+func ComponentCoreConfig(ctx context.Context, cfg Config, rec devinstance.Record, log *slog.Logger) componentcore.Config {
+	out := componentcore.Config{
+		Kubeconfig:              rec.AdminKubeconfig,
+		Workspaces:              componentcore.AppWorkspaces(rec.BaseWorkspace),
+		StateDir:                rec.Layout.StateDir,
+		Log:                     log,
+		TLSCertFile:             cfg.TLSCertFile,
+		TLSKeyFile:              cfg.TLSKeyFile,
+		Handlers:                cfg.Handlers,
+		ExposureIngressIdentity: componentcore.NewExposureIngressIdentity(rec.Layout.StateDir),
+		SlotsFile:               rec.Layout.SlotsFile(),
+		FrontControl:            rec.Layout.FrontControl(),
+		InstallStateRoot:        install.StateRoot,
+	}
+	if rec.AdminKubeconfig != "" {
+		if n, err := appctl.ReadNetwork(ctx, rec.AdminKubeconfig); err == nil && n.Status.Network != nil {
+			out.PLCBaseURL = n.Status.Network.PlcDirectoryUrl
+			out.RelayURLs = append([]string(nil), n.Status.Network.RelayUrls...)
+		}
+	}
+	switch {
+	case strings.Contains(rec.BaseWorkspace, ":gateway"), strings.Contains(rec.BaseWorkspace, ":ssh"):
+		out.CredentialClient = appctl.RequesterVaultClient
+		out.VaultClient = appctl.RequesterVaultClient
+	case strings.Contains(rec.BaseWorkspace, ":bidder"):
+		out.CredentialClient = appctl.BidderVaultClient
+		out.VaultClient = appctl.BidderVaultClient
+	}
+	if rec.Profile == bootstrap.ProfileQuick {
+		out.InstallAccount = install.AccountBidder
+	} else {
+		out.InstallAccount = install.AccountGateway
+	}
+	if rec.Profile == bootstrap.ProfileMarketNetwork && rec.AdminKubeconfig != "" {
+		out.WorkspacesFunc = func(ctx context.Context) []string {
+			n, err := appctl.ReadNetwork(ctx, rec.AdminKubeconfig)
+			if err != nil {
+				return out.Workspaces
+			}
+			seen := map[string]bool{}
+			var workspaces []string
+			add := func(workspace string) {
+				if workspace == "" || seen[workspace] {
+					return
+				}
+				seen[workspace] = true
+				workspaces = append(workspaces, workspace)
+			}
+			for _, workspace := range out.Workspaces {
+				add(workspace)
+			}
+			for _, c := range n.Status.Components {
+				add(c.Workspace)
+			}
+			return workspaces
+		}
+	}
+	return out
 }
 
 var ErrNotReady = errors.New("devcore: the core did not record this generation in time")

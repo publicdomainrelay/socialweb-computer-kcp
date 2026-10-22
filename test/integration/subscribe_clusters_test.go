@@ -21,15 +21,23 @@ import (
 	"github.com/gorilla/websocket"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 )
 
 const (
-	clusterNSID     = "com.publicdomainrelay.temp.cluster."
-	gatewayAudience = "did:web:socialweb.local"
-	streamCluster   = "demo"
-	streamPod       = "it-stream"
+	clusterNSID   = "com.publicdomainrelay.temp.cluster."
+	streamCluster = "demo"
+	streamPod     = "it-stream"
+)
+
+var (
+	exposureGVR   = schema.GroupVersionResource{Group: "exposure.socialweb.computer", Version: "v1alpha1", Resource: "exposures"}
+	gatewayAPIGVR = schema.GroupVersionResource{Group: "socialweb.computer", Version: "v1alpha1", Resource: "gatewayapis"}
 )
 
 type streamEvent struct {
@@ -53,18 +61,74 @@ type pdsAccount struct {
 	password   string
 }
 
+func (n *Network) workspaceClient(t testing.TB, app string) dynamic.Interface {
+	t.Helper()
+	kc, err := n.read(n.Up.AdminKubeconfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := clientcmd.RESTConfigFromKubeConfig(kc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws := "root:" + app
+	if a, ok := n.App(app); ok && a.Workspace != "" {
+		ws = a.Workspace
+	}
+	cfg.Host = strings.TrimSuffix(strings.SplitN(cfg.Host, "/clusters/", 2)[0], "/") + "/clusters/" + ws
+	cfg.Timeout = 15 * time.Second
+	dyn, err := dynamic.NewForConfig(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dyn
+}
+
 func (n *Network) xrpcAddress(t testing.TB) string {
 	t.Helper()
-	gw, ok := n.App("gateway")
-	if !ok {
-		t.Fatal("the market network has no gateway app")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	dyn := n.workspaceClient(t, "gateway")
+	var last error
+	for {
+		u, err := dyn.Resource(exposureGVR).Get(ctx, "svc-gatewayapi-gateway-api-local", metav1.GetOptions{})
+		if err == nil {
+			if endpoint, _, _ := unstructured.NestedString(u.Object, "status", "endpoint"); endpoint != "" {
+				return endpoint
+			}
+			if raw, _, _ := unstructured.NestedString(u.Object, "status", "url"); raw != "" {
+				if parsed, perr := url.Parse(raw); perr == nil && parsed.Host != "" {
+					return parsed.Host
+				}
+			}
+		}
+		last = err
+		if ctx.Err() != nil {
+			t.Fatalf("the gateway API's local Exposure reported no endpoint within 30s: %v", last)
+		}
+		time.Sleep(500 * time.Millisecond)
 	}
-	for _, l := range gw.Listeners {
-		if l.Name == "xrpc" {
-			return l.Address
+}
+
+func (n *Network) gatewayAudience(t testing.TB) string {
+	t.Helper()
+	dyn := n.workspaceClient(t, "gateway")
+	u, err := dyn.Resource(gatewayAPIGVR).Get(context.Background(), "gateway-api", metav1.GetOptions{})
+	if err == nil {
+		if aud, _, _ := unstructured.NestedString(u.Object, "spec", "audience"); aud != "" {
+			return aud
+		}
+		if list, _, _ := unstructured.NestedStringSlice(u.Object, "spec", "serviceAuth", "audience"); len(list) > 0 && list[0] != "" {
+			return list[0]
+		}
+		if did, _, _ := unstructured.NestedString(u.Object, "spec", "identity", "did"); did != "" {
+			return did
 		}
 	}
-	t.Fatalf("the gateway app reports no xrpc listener: %+v", gw.Listeners)
+	if a, ok := n.App("gateway"); ok && a.Did != "" {
+		return a.Did
+	}
+	t.Fatalf("the gateway API names no service-auth audience: %v", err)
 	return ""
 }
 
@@ -165,13 +229,18 @@ func (a *pdsAccount) Fresh(t testing.TB) *pdsAccount {
 	return f
 }
 
-func (a *pdsAccount) Token(t testing.TB, method string) string {
+func (a *pdsAccount) Token(t testing.TB, aud, method string) string {
 	t.Helper()
-	q := url.Values{"aud": {gatewayAudience}, "lxm": {clusterNSID + method}}
+	return a.TokenFor(t, aud, clusterNSID+method)
+}
+
+func (a *pdsAccount) TokenFor(t testing.TB, aud, lxm string) string {
+	t.Helper()
+	q := url.Values{"aud": {aud}, "lxm": {lxm}}
 	out, code, err := postJSON(a.client, a.pds+"/xrpc/com.atproto.server.getServiceAuth?"+q.Encode(), a.access, nil)
 	tok, _ := out["token"].(string)
 	if err != nil || code != http.StatusOK || tok == "" {
-		t.Fatalf("getServiceAuth %s: %d %v %v", method, code, out, err)
+		t.Fatalf("getServiceAuth %s: %d %v %v", lxm, code, out, err)
 	}
 	return tok
 }
@@ -292,9 +361,10 @@ func TestClusterEventsStreamFromSubscribeClusters(t *testing.T) {
 	n := SharedNetwork(t, NetworkOptions{Bidders: 2, WithGateway: true, UpTimeout: 5 * time.Minute})
 	addr := n.xrpcAddress(t)
 	acct := n.OwnerAccount(t)
+	aud := n.gatewayAudience(t)
 	gw := &http.Client{Timeout: 30 * time.Second}
 
-	s := subscribe(t, addr, acct.Token(t, "subscribeClusters"), "")
+	s := subscribe(t, addr, acct.Token(t, aud, "subscribeClusters"), "")
 	snap := s.until("the snapshot", 30*time.Second, func(ev streamEvent) bool {
 		return ev.Type == "info" && ev.str("name") == "SnapshotComplete"
 	}, nil)
@@ -307,7 +377,7 @@ func TestClusterEventsStreamFromSubscribeClusters(t *testing.T) {
 	tenantWasReady := tenantUp(snap[0])
 
 	fresh := acct.Fresh(t)
-	empty := subscribe(t, addr, fresh.Token(t, "subscribeClusters"), "")
+	empty := subscribe(t, addr, fresh.Token(t, aud, "subscribeClusters"), "")
 	emptySnap := empty.until("an empty snapshot for an account with no clusters", 30*time.Second, func(ev streamEvent) bool {
 		return ev.Type == "info" && ev.str("name") == "SnapshotComplete"
 	}, nil)
@@ -317,13 +387,13 @@ func TestClusterEventsStreamFromSubscribeClusters(t *testing.T) {
 		}
 	}
 
-	if out, code, err := postJSON(gw, "http://"+addr+"/xrpc/"+clusterNSID+"createCluster", acct.Token(t, "createCluster"),
+	if out, code, err := postJSON(gw, "http://"+addr+"/xrpc/"+clusterNSID+"createCluster", acct.Token(t, aud, "createCluster"),
 		map[string]string{"name": streamCluster}); err != nil || code != http.StatusOK {
 		t.Fatalf("createCluster: %d %v %v", code, out, err)
 	}
 	created := time.Now()
 
-	unknown := subscribe(t, addr, acct.Token(t, "subscribeClusters"), "nope")
+	unknown := subscribe(t, addr, acct.Token(t, aud, "subscribeClusters"), "nope")
 	unknown.until("ClusterNotFound for an unknown name", 15*time.Second, func(ev streamEvent) bool {
 		return ev.Type == "error" && ev.str("error") == "ClusterNotFound"
 	}, nil)

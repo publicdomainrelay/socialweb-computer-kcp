@@ -21,16 +21,15 @@ import (
 )
 
 const (
-	GCSampleEvery  = 30 * time.Second
-	GCStuckAfter   = 10 * time.Minute
-	GCResample     = 5 * time.Minute
-	GCExamples     = 5
-	GCListCap      = 40
-	TTLAnnotation  = "socialweb.computer/ttl-after-finished"
-	ClusterLabel   = "socialweb.computer/cluster"
-	NodeClaimNote  = "socialweb.computer/nodeclaim"
-	providerWS     = "socialweb-provider"
-	denoProviderWS = "deno-provider"
+	GCSampleEvery = 30 * time.Second
+	GCStuckAfter  = 10 * time.Minute
+	GCResample    = 5 * time.Minute
+	GCExamples    = 5
+	GCListCap     = 40
+	TTLAnnotation = "socialweb.computer/ttl-after-finished"
+	ClusterLabel  = "socialweb.computer/cluster"
+	NodeClaimNote = "socialweb.computer/nodeclaim"
+	providerWS    = "socialweb-provider"
 
 	accountWorkspaceType = "account"
 
@@ -46,7 +45,7 @@ type gcKind struct {
 	GVR  schema.GroupVersionResource
 }
 
-var gcKinds = []gcKind{
+var gcKinds = append([]gcKind{
 	{"Bid", gvr(v1alpha1.GroupName, "bids")},
 	{"ComputeVM", gvr(v1alpha1.GroupName, "computevms")},
 	{"GuestIdentityGrant", gvr(v1alpha1.GroupName, "guestidentitygrants")},
@@ -56,13 +55,20 @@ var gcKinds = []gcKind{
 	{"MarketIdentity", MarketIdentityGVR},
 	{"ComputeContract", ComputeContractGVR},
 	{"NodeClaim", gvr(v1alpha1.GroupName, "nodeclaims")},
-	{"DenoPod", DenoPodGVR},
-	{"PolicyEngine", gvr("deno.computer", "policyengines")},
-	{"DenoJob", gvr("deno.computer", "denojobs")},
-	{"DenoRun", gvr("deno.computer", "denoruns")},
-	{"RunTrigger", gvr("deno.computer", "runtriggers")},
-	{"PolicyWorkflowPod", gvr("deno.computer", "policyworkflowpods")},
-	{"PolicyWorkflowRun", gvr("deno.computer", "policyworkflowruns")},
+}, gcComponentKinds()...)
+
+func gcComponentKinds() []gcKind {
+	out := make([]gcKind, 0, len(ComponentTypes)+len(PolicyTypes))
+	for _, t := range ComponentTypes {
+		out = append(out, gcKind{t.Kind, t.GVR})
+	}
+	for _, t := range PolicyTypes {
+		if t.Kind == ComponentKindPolicyEngine {
+			continue
+		}
+		out = append(out, gcKind{t.Kind, t.GVR})
+	}
+	return out
 }
 
 var rootGVRs = []schema.GroupVersionResource{MarketNetworkGVR, MarketBidderGVR, MarketRequesterGVR, GatewayGVR, SshGatewayGVR}
@@ -76,11 +82,6 @@ var FinalizerControllers = map[string]string{
 	"node.socialweb.computer/teardown":              "clusterprovider: the cluster provider of the gateway",
 	"nodeclaim.socialweb.computer/release":          "socialweb-computer-k8s web app: the node-market claim mapper",
 	"atprotoidentity.socialweb.computer/revocation": "socialweb-computer-k8s web app: the revocation sweep",
-	"denopod.deno.computer/run":                     "denokcp provider: the deno provider of the core",
-	"denorun.deno.computer/run":                     "denokcp provider: the deno provider of the core",
-	"policyengine.deno.computer/run":                "denokcp provider: the deno provider of the core",
-	"policyworkflowrun.deno.computer/run":           "denokcp provider: the deno provider of the core",
-	"openbao.deno.computer/namespace":               "denokcp provider: the deno provider of the core",
 }
 
 func finalizerController(f string) string {
@@ -103,7 +104,7 @@ func (ctl *Controller) gcWorkspaces(ctx context.Context) []string {
 	}
 	for _, w := range list.Items {
 		name := w.GetName()
-		if _, app := w.GetLabels()[AppWorkspaceLabel]; app || name == providerWS || name == denoProviderWS || w.GetDeletionTimestamp() != nil {
+		if _, app := w.GetLabels()[AppWorkspaceLabel]; app || name == providerWS || w.GetDeletionTimestamp() != nil {
 			continue
 		}
 		if phase, _, _ := unstructured.NestedString(w.Object, "status", "phase"); phase != "Ready" {

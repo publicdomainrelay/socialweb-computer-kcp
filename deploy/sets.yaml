@@ -1,7 +1,7 @@
 sets:
   - name: provider
     scope: kcp
-    summary: the socialweb provider workspace, its schemas and exports, and the account and cluster WorkspaceTypes (was install-provider.sh)
+    summary: the socialweb provider workspace, its cluster and identity schemas and exports, the policy schema files and export, the policy binding in root, and the account, cluster and application WorkspaceTypes (was install-provider.sh)
     values: None
     phases:
       - name: workspace
@@ -22,11 +22,47 @@ sets:
           - path: atprotoidentity-apiresourceschema.yaml
           - path: cluster-apiexport.yaml
           - path: atprotoidentity-apiexport.yaml
+          - path: service-apiresourceschema.yaml
+          - path: exposure-apiresourceschema.yaml
+          - path: service-apiexport.yaml
+          - path: remotepds-apiresourceschema.yaml
+          - path: remotepds-apiexport.yaml
+          - path: eventstream-apiresourceschema.yaml
+          - path: eventstream-apiexport.yaml
+          - path: marketidentity-apiresourceschema.yaml
+          - path: atprotorecord-apiresourceschema.yaml
+          - path: atprotorecordwatch-apiresourceschema.yaml
+          - path: marketidentity-apiexport.yaml
+          - path: computecontract-apiresourceschema.yaml
+          - path: computecontract-apiexport.yaml
+      - name: policy
+        workspace: root:socialweb-provider
+        files:
+          - path: policyengine-apiresourceschema.yaml
+          - path: policyworkflow-apiresourceschema.yaml
+          - path: policyworkflowrun-apiresourceschema.yaml
+          - path: policytrigger-apiresourceschema.yaml
+          - path: policyengine-apiexport.yaml
+        after:
+          - kind: APIExport
+            name: policy
+            for: IdentityValid
+      - name: bindings
+        workspace: root
+        files:
+          - path: policy-binding.yaml
+          - path: exposures-binding.yaml
+          - path: pds-binding.yaml
+          - path: events-binding.yaml
+        after:
+          - kind: APIBinding
+            for: Ready
       - name: workspacetypes
         workspace: root
         files:
           - path: workspacetype-account.yaml
           - path: workspacetype-cluster.yaml
+          - path: workspacetype-application.yaml
         after:
           - kind: APIExport
             name: clusters
@@ -36,7 +72,22 @@ sets:
             name: atprotoidentities
             workspace: root:socialweb-provider
             for: IdentityValid
-
+          - kind: APIExport
+            name: policy
+            workspace: root:socialweb-provider
+            for: IdentityValid
+          - kind: APIExport
+            name: exposures
+            workspace: root:socialweb-provider
+            for: IdentityValid
+          - kind: APIExport
+            name: pds
+            workspace: root:socialweb-provider
+            for: IdentityValid
+          - kind: APIExport
+            name: events
+            workspace: root:socialweb-provider
+            for: IdentityValid
   - name: permission-inventory
     scope: kcp
     summary: the four provider ServiceAccounts, then their ClusterRoles and bindings named to the live provider cluster (was apply-permission-inventory.sh)
@@ -61,56 +112,8 @@ sets:
         files:
           - path: permission-inventory.yaml
             exceptKinds: [ServiceAccount]
-
-  - name: denoruntime
-    scope: kcp
-    summary: the deno provider workspace, the DenoPod, DenoRun, DenoJob, OpenBao and policy schemas and exports, and the workflow and denoruntime WorkspaceTypes (was denokcp/install-provider.sh)
-    values: None
-    phases:
-      - name: workspace
-        workspace: root
-        files:
-          - path: workspace-deno-provider.yaml
-        after:
-          - kind: Workspace
-            for: Ready
-      - name: schemas
-        workspace: root:deno-provider
-        files:
-          - path: denokcp/policyworkflowrun-apiresourceschema.yaml
-          - path: denokcp/policyworkflowrun-apiexport.yaml
-          - path: denokcp/denopod-apiresourceschema.yaml
-          - path: denokcp/denorun-apiresourceschema.yaml
-          - path: denokcp/denojob-apiresourceschema.yaml
-          - path: denokcp/runtrigger-apiresourceschema.yaml
-          - path: denokcp/policyengine-apiresourceschema.yaml
-          - path: denokcp/policyworkflowpod-apiresourceschema.yaml
-          - path: denokcp/openbao-apiresourceschema.yaml
-          - path: denokcp/denoruntime-apiexport.yaml
-      - name: workspacetypes
-        workspace: root
-        files:
-          - path: denokcp/workspacetype-workflow.yaml
-          - path: denokcp/workspacetype-denoruntime.yaml
-        after:
-          - kind: APIExport
-            name: policyworkflowruns
-            workspace: root:deno-provider
-            for: IdentityValid
-          - kind: APIExport
-            name: denoruntime
-            workspace: root:deno-provider
-            for: IdentityValid
-      - name: bindings
-        workspace: root:deno-provider
-        files:
-          - path: denoruntime-provider-bindings.yaml
-        after:
-          - kind: APIBinding
-            for: Ready
-
   - name: bidder
-    summary: the ComputeVM, Bid and GuestIdentityGrant schemas and their export (computevms) beside the provider's, the bidder WorkspaceType binding denoruntime, computevms and hostprocesses (plan 0007 M1-API), and the computevms binding in root that the ComputeVM controller of a bidder application instance applies with it (plan 0007 M2-CONTROLLER); needs the provider workspace and the hostprocesses set
+    summary: the ComputeVM, Bid and GuestIdentityGrant schemas and their export (computevms) beside the provider's, the bidder WorkspaceType binding computevms and hostprocesses (plan 0007 M1-API), and the computevms binding in root that the ComputeVM controller of a bidder application instance applies with it (plan 0007 M2-CONTROLLER); needs the provider workspace and the hostprocesses set
     values: None
     phases:
       - name: schemas
@@ -138,7 +141,6 @@ sets:
         after:
           - kind: APIBinding
             for: Ready
-
   - name: hostprocesses
     summary: the HostProcess, Postgres and OpenBaoServer schemas and their export in the provider workspace and its binding in root, applied by every core so the application's own kcp holds its host processes, the bootstrap mirrors, its postgres servers and its OpenBao servers (plan 0006 M2-HOSTPROCESS-KIND, M2-POSTGRES, M2-OPENBAO-SERVER); needs the provider workspace
     values: None
@@ -161,7 +163,6 @@ sets:
         after:
           - kind: APIBinding
             for: Ready
-
   - name: dev-host
     scope: kcp
     summary: the dev-instances and dev-instance WorkspaceTypes and the root:dev workspace of a dev host, whose root:dev:<instance> workspaces hold each child instance's HostProcess objects (plan 0006 M4-DEV-PARENT-KCP); needs the hostprocesses set
@@ -186,7 +187,6 @@ sets:
           - kind: Workspace
             name: dev
             for: Ready
-
   - name: market-identity
     summary: the MarketIdentity schema and export in an application's own workspace (plan 0007 M1-MARKET-IDENTITY)
     values: MarketIdentity
@@ -202,9 +202,8 @@ sets:
           - kind: APIExport
             name: marketidentities
             for: IdentityValid
-
   - name: applications
-    summary: the MarketNetwork, MarketBidder, MarketRequester, Gateway and SshGateway schemas and their export in the provider workspace and its binding in root, applied by every core so each application's root object lives in its own kcp (plan 0006 M2-APP-CONTROLLER); needs the provider workspace
+    summary: the MarketNetwork, MarketBidder, MarketRequester, Gateway and SshGateway and component schemas and their export in the provider workspace and its binding in root, applied by every core so each application's root object and components live in its own kcp (plan 0006 M2-APP-CONTROLLER); needs the provider workspace
     values: None
     phases:
       - name: schemas
@@ -215,6 +214,31 @@ sets:
           - path: marketrequester-apiresourceschema.yaml
           - path: gateway-apiresourceschema.yaml
           - path: sshgateway-apiresourceschema.yaml
+          - path: bidder-apiresourceschema.yaml
+          - path: guestcontrolplane-apiresourceschema.yaml
+          - path: pds-apiresourceschema.yaml
+          - path: requester-apiresourceschema.yaml
+          - path: gatewayapi-apiresourceschema.yaml
+          - path: sshserver-apiresourceschema.yaml
+          - path: plc-apiresourceschema.yaml
+          - path: relay-apiresourceschema.yaml
+          - path: ingressproxy-apiresourceschema.yaml
+          - path: dispatchertls-apiresourceschema.yaml
+          - path: marketpresence-apiresourceschema.yaml
+          - path: kcpinstallation-apiresourceschema.yaml
+          - path: hostinstall-apiresourceschema.yaml
+          - path: hostrelease-apiresourceschema.yaml
+          - path: childapplication-apiresourceschema.yaml
+          - path: atprotorepo-apiresourceschema.yaml
+          - path: pdsaccount-apiresourceschema.yaml
+          - path: atprotosession-apiresourceschema.yaml
+          - path: plcidentity-apiresourceschema.yaml
+          - path: portlease-apiresourceschema.yaml
+          - path: subnetlease-apiresourceschema.yaml
+          - path: clusterroll-apiresourceschema.yaml
+          - path: relaystatus-apiresourceschema.yaml
+          - path: vaultcredential-apiresourceschema.yaml
+          - path: vaultcertificate-apiresourceschema.yaml
           - path: marketnetwork-apiexport.yaml
         after:
           - kind: APIExport
@@ -224,12 +248,15 @@ sets:
         workspace: root
         files:
           - path: applications-binding.yaml
+          - path: policy-binding.yaml
+          - path: exposures-binding.yaml
+          - path: pds-binding.yaml
+          - path: events-binding.yaml
         after:
           - kind: APIBinding
             for: Ready
-
   - name: market-bidder
-    summary: the components of a MarketBidder application in its own kcp - the MarketIdentity schema bound in root (the bidder signs in through its MarketIdentity bidder in every profile), its own OpenBaoServer and the account that reads it in root, the root:app workspace and, per profile (prod-qr, market-network, dev-local), the bidder's own PDS DenoPod pds (its repo, its AtprotoRecord objects, the association; deploy/apps/repo-pds, shared with any application that owns a PDS; plan 0018), the bidder DenoPod rendered from deploy/apps/market-bidder/bidder.values.yaml and its guest DenoPod guest-kcp (the provider relay, OIDC issuer, /v1/on-network and /v1/host-keys; plan 0007 M5-BIDDER-COMPONENTS) from deploy/apps/market-bidder/guest-kcp.values.yaml (a phase named <component>@<profile> belongs to that profile only); applied by internal/appctl (plan 0007 M5-RUN-BIDDER)
+    summary: the components of a MarketBidder application in its own kcp - the MarketIdentity schema bound in root (the bidder signs in through its MarketIdentity bidder in every profile), its own OpenBaoServer and the account that reads it in root, the root:app workspace and, per profile (prod-qr, market-network, dev-local), the bidder's own PDS pds (its repo, its AtprotoRecord objects, the association; deploy/apps/repo-pds, shared with any application that owns a PDS; plan 0018), the bidder and its guest-kcp (the provider relay, OIDC issuer, /v1/on-network and /v1/host-keys; plan 0007 M5-BIDDER-COMPONENTS) (a phase named <component>@<profile> belongs to that profile only); applied by internal/appctl (plan 0007 M5-RUN-BIDDER)
     values: MarketBidder
     phases:
       - name: identity-schemas
@@ -293,69 +320,8 @@ sets:
         workspace: root
         files:
           - path: apps/repo-pds/association-watch.market-network.yaml
-      - name: pds@market-network
-        workspace: root:app
-        files:
-          - path: apps/repo-pds/pds.values.yaml
-            template: denopods/service.yaml
-      - name: policy-engine@market-network
-        workspace: root:app
-        files:
-          - path: apps/market-bidder/policy-engine.values.yaml
-            template: denopods/service.yaml
-      - name: bidder@market-network
-        workspace: root:app
-        files:
-          - path: apps/market-bidder/bidder.values.yaml
-            template: denopods/service.yaml
-      - name: guest-kcp@market-network
-        workspace: root:app
-        files:
-          - path: apps/market-bidder/guest-kcp.values.yaml
-            template: denopods/service.yaml
-      - name: pds@prod-qr
-        workspace: root:app
-        files:
-          - path: apps/repo-pds/pds.values.yaml
-            template: denopods/service.yaml
-      - name: policy-engine@prod-qr
-        workspace: root:app
-        files:
-          - path: apps/market-bidder/policy-engine.values.yaml
-            template: denopods/service.yaml
-      - name: bidder@prod-qr
-        workspace: root:app
-        files:
-          - path: apps/market-bidder/bidder.values.yaml
-            template: denopods/service.yaml
-      - name: guest-kcp@prod-qr
-        workspace: root:app
-        files:
-          - path: apps/market-bidder/guest-kcp.values.yaml
-            template: denopods/service.yaml
-      - name: pds@dev-local
-        workspace: root:app
-        files:
-          - path: apps/repo-pds/pds.values.yaml
-            template: denopods/service.yaml
-      - name: policy-engine@dev-local
-        workspace: root:app
-        files:
-          - path: apps/market-bidder/policy-engine.values.yaml
-            template: denopods/service.yaml
-      - name: bidder@dev-local
-        workspace: root:app
-        files:
-          - path: apps/market-bidder/bidder.values.yaml
-            template: denopods/service.yaml
-      - name: guest-kcp@dev-local
-        workspace: root:app
-        files:
-          - path: apps/market-bidder/guest-kcp.values.yaml
-            template: denopods/service.yaml
-
   - name: gateway
-    summary: the components of a Gateway application in its own kcp - the root:app workspace, the MarketIdentity schema bound there (one MarketIdentity per web app account) and, per profile, the socialweb-computer-k8s web app DenoPod rendered from deploy/apps/gateway/<profile>.values.yaml, the requester's own PDS DenoPod pds (deploy/apps/repo-pds; its repo holds every market record the requester writes, associated once by the operator's claim record that its AtprotoRecordWatch association verifies; plan 0018) and the requester DenoPod (a phase named <component>@<profile> belongs to that profile only); its root vault is the OpenBaoServer root-vault the app controller declares; applied by internal/appctl
+    summary: the components of a Gateway application in its own kcp - the root:app workspace, the MarketIdentity schema bound there (one MarketIdentity per web app account) and, per profile, the socialweb-computer-k8s web app, the requester's own PDS pds (deploy/apps/repo-pds; its repo holds every market record the requester writes, associated once by the operator's claim record that its AtprotoRecordWatch association verifies; plan 0018) and the requester (a phase named <component>@<profile> belongs to that profile only); its root vault is the OpenBaoServer root-vault the app controller declares; applied by internal/appctl
     values: Gateway
     phases:
       - name: workspace
@@ -391,7 +357,7 @@ sets:
             name: computecontracts
             for: IdentityValid
       - name: identity-binding
-        workspace: root:app
+        workspace: root
         files:
           - path: apps/gateway/marketidentities-binding.yaml
           - path: apps/gateway/computecontracts-binding.yaml
@@ -402,16 +368,6 @@ sets:
         workspace: root:app
         files:
           - path: apps/gateway/records.yaml
-      - name: socialweb-computer-k8s@prod
-        workspace: root:app
-        files:
-          - path: apps/gateway/prod.values.yaml
-            template: denopods/service.yaml
-      - name: socialweb-computer-k8s@market-network
-        workspace: root:app
-        files:
-          - path: apps/gateway/market-network.values.yaml
-            template: denopods/service.yaml
       - name: association-watch@prod
         workspace: root:app
         files:
@@ -420,29 +376,8 @@ sets:
         workspace: root:app
         files:
           - path: apps/repo-pds/association-watch.market-network.yaml
-      - name: pds@prod
-        workspace: root:app
-        files:
-          - path: apps/repo-pds/pds.values.yaml
-            template: denopods/service.yaml
-      - name: pds@market-network
-        workspace: root:app
-        files:
-          - path: apps/repo-pds/pds.values.yaml
-            template: denopods/service.yaml
-      - name: requester@prod
-        workspace: root:app
-        files:
-          - path: apps/gateway/requester.prod.values.yaml
-            template: denopods/service.yaml
-      - name: requester@market-network
-        workspace: root:app
-        files:
-          - path: apps/gateway/requester.market-network.values.yaml
-            template: denopods/service.yaml
-
   - name: market-requester
-    summary: the components of a MarketRequester application (one `run request` invocation) in its own kcp - the ComputeContract and MarketIdentity schemas bound in root, its own OpenBaoServer and the account the requester reads its objects with, the root:app workspace and, per profile, the requester DenoPod rendered from deploy/apps/market-requester/<profile>.values.yaml; applied by internal/appctl (plan 0008 M4-RUN-REQUEST)
+    summary: the components of a MarketRequester application (one `run request` invocation) in its own kcp - the ComputeContract and MarketIdentity schemas bound in root, its own OpenBaoServer and the account the requester reads its objects with, the root:app workspace and, per profile, the requester; applied by internal/appctl (plan 0008 M4-RUN-REQUEST)
     values: MarketRequester
     phases:
       - name: schemas
@@ -490,29 +425,8 @@ sets:
             for: Ready
         files:
           - path: market-network/10-rbac.yaml
-      - name: policy-engine@market-network
-        workspace: root:app
-        files:
-          - path: apps/market-requester/policy-engine.values.yaml
-            template: denopods/service.yaml
-      - name: requester@market-network
-        workspace: root:app
-        files:
-          - path: apps/market-requester/market-network.values.yaml
-            template: denopods/service.yaml
-      - name: policy-engine@default
-        workspace: root:app
-        files:
-          - path: apps/market-requester/policy-engine.values.yaml
-            template: denopods/service.yaml
-      - name: requester@default
-        workspace: root:app
-        files:
-          - path: apps/market-requester/default.values.yaml
-            template: denopods/service.yaml
-
   - name: ssh-gateway
-    summary: the components of an SshGateway application (socialweb-computer run gateway ssh) in its own kcp - its own OpenBaoServer holding the OAuth sessions and keys and the account that reads it, the iroh dialer HostProcess (internal iroh-dial, the only process that runs dumbpipe), the root:app workspace and, per profile, the hono-socialweb-computer-ssh DenoPod rendered from deploy/apps/ssh-gateway/<profile>.values.yaml; applied by internal/appctl (plan 0008 M4-RUN-GATEWAY-SSH)
+    summary: the components of an SshGateway application (socialweb-computer run gateway ssh) in its own kcp - its own OpenBaoServer holding the OAuth sessions and keys and the account that reads it, the iroh dialer HostProcess (internal iroh-dial, the only process that runs dumbpipe), the root:app workspace and, per profile, the hono-socialweb-computer-ssh service; applied by internal/appctl (plan 0008 M4-RUN-GATEWAY-SSH)
     values: SshGateway
     phases:
       - name: vault
@@ -541,20 +455,9 @@ sets:
             for: Ready
         files:
           - path: market-network/10-rbac.yaml
-      - name: ssh-gateway@market-network
-        workspace: root:app
-        files:
-          - path: apps/ssh-gateway/market-network.values.yaml
-            template: denopods/service.yaml
-      - name: ssh-gateway@default
-        workspace: root:app
-        files:
-          - path: apps/ssh-gateway/default.values.yaml
-            template: denopods/service.yaml
-
   - name: market-network
     scope: kcp
-    summary: the shared services of a MarketNetwork application - its OpenBaoServer network (the PKI the deno runtime issues the services' certificates from, through a client that holds only that policy), PLC, relay, dispatcher and its TLS front, two PDSes and the verifier - applied by its reconciler (internal/appctl); the bidders are child applications with their own kcp; needs denoruntime and a running deno provider
+    summary: the shared services of a MarketNetwork application - its OpenBaoServer network (the PKI the services' certificates come from, through a client that holds only that policy), PLC, relay, dispatcher and its TLS front, two PDSes and the verifier - applied by its reconciler (internal/appctl); the bidders are child applications with their own kcp; needs the provider workspace and the hostprocesses set
     values: MarketNetwork
     phases:
       - name: vault
@@ -600,112 +503,11 @@ sets:
             for: Ready
         files:
           - path: market-network/10-rbac.yaml
-      - name: openbao-global
-        workspace: root:global
-        files:
-          - path: market-network/15-openbao-global.yaml
-      - name: openbao-relay
-        workspace: root:relay
-        files:
-          - path: market-network/15-openbao-relay.yaml
-      - name: openbao-alice
-        workspace: root:alice
-        files:
-          - path: market-network/15-openbao-alice.yaml
-      - name: openbao-bob
-        workspace: root:bob
-        files:
-          - path: market-network/15-openbao-bob.yaml
-        after:
-          - kind: OpenBao
-            name: openbao
-            workspace: root:global
-            for: Ready
-          - kind: OpenBao
-            name: openbao
-            workspace: root:relay
-            for: Ready
-          - kind: OpenBao
-            name: openbao
-            workspace: root:alice
-            for: Ready
-          - kind: OpenBao
-            name: openbao
-            workspace: root:bob
-            for: Ready
-      - name: plc
-        workspace: root:global
-        files:
-          - path: market-network/20-global-plc.yaml
-            template: denopods/service.yaml
-      - name: dispatcher
-        workspace: root:relay
-        files:
-          - path: market-network/35-relay-dispatcher.yaml
-            template: denopods/service.yaml
-        after:
-          - kind: DenoPod
-            name: dispatcher
-            for: Address
-            capture:
-              into: DispatcherPort
-              from: AddressPort
-      - name: dispatcher-tls
-        workspace: root:relay
-        files:
-          - path: market-network/36-relay-dispatcher-tls.yaml
-        after:
-          - kind: DenoPod
-            name: dispatcher-tls
-            for: Address
-            capture:
-              into: GuestTLSPort
-              from: AddressPort
-      - name: alice-pds
-        workspace: root:alice
-        files:
-          - path: market-network/40-alice-pds.yaml
-            template: denopods/service.yaml
-      - name: bob-pds
-        workspace: root:bob
-        files:
-          - path: market-network/60-bob-pds.yaml
-            template: denopods/service.yaml
-        after:
-          - kind: DenoPod
-            name: pds
-            for: Address
-      - name: relay
-        workspace: root:relay
-        files:
-          - path: market-network/30-relay-relay.yaml
-            template: denopods/service.yaml
-      - name: verifier
-        workspace: root:alice
-        before:
-          - kind: DenoPod
-            name: pds
-            for: Ready
-            bestEffort: true
-          - kind: DenoPod
-            name: relay
-            workspace: root:relay
-            for: Address
-            bestEffort: true
-        files:
-          - path: market-network/50-verifier.yaml
-
 unapplied:
   - path: sets.yaml
     why: this index
   - path: audit-policy.yaml
     why: an audit.k8s.io Policy file a k3s apiserver reads at start through --audit-policy-file, never an object
-  - path: apps/option-map.yaml
-    why: maps every cli-args-env option of hono-bidder and request-vm-ssh to a root-object field, the network value, a ComputeContract field, a profile, the state dir, a listener report, the options passthrough, the foreground CLI or a legacy-transport removal; internal/appctl reads it to accept spec.options and `run request`'s passthrough (plans 0006 M2-APP-CONTROLLER, 0008 M4-RUN-REQUEST)
-  - path: apps/market-network/market-network.values.yaml
-    why: the market-network profile's NetworkApp defaults for each bidder and the gateway, merged with dev up's app-values into the MarketNetwork spec by internal/appctl, never an object
-  - path: ts-entries.yaml
-    why: the TypeScript closure entries cmd/socialweb-tsbundle bundles (plan 0008 M1-TS-CLOSURE), a build input, never an object
   - path: kcp-audit-policy.yaml
     why: the Policy file kcp reads at start through --audit-policy-file (run-kcp-instance.sh, the image), never an object
   - path: tenant-grant.yaml

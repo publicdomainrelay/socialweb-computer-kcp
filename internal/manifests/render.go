@@ -26,12 +26,8 @@ import (
 
 	swcv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/deploy"
-	denov1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/internal/denokcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/tsbundle"
 )
-
-const VendorRecordPath = "denokcp/vendor.json"
 
 type Text struct {
 	Path string
@@ -64,8 +60,6 @@ var typedKinds = map[schema.GroupVersionKind]func() any{
 	{Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "RoleBinding"}:                         func() any { return &rbacv1.RoleBinding{} },
 	{Group: "admissionregistration.k8s.io", Version: "v1", Kind: "ValidatingAdmissionPolicy"}:        func() any { return &admissionregistrationv1.ValidatingAdmissionPolicy{} },
 	{Group: "admissionregistration.k8s.io", Version: "v1", Kind: "ValidatingAdmissionPolicyBinding"}: func() any { return &admissionregistrationv1.ValidatingAdmissionPolicyBinding{} },
-	{Group: "deno.computer", Version: "v1alpha1", Kind: "DenoPod"}:                                   func() any { return &denov1alpha1.DenoPod{} },
-	{Group: "deno.computer", Version: "v1alpha1", Kind: "OpenBao"}:                                   func() any { return &denov1alpha1.OpenBao{} },
 	{Group: "socialweb.computer", Version: "v1alpha1", Kind: "OpenBaoServer"}:                        func() any { return &swcv1alpha1.OpenBaoServer{} },
 	{Group: "socialweb.computer", Version: "v1alpha1", Kind: "AtprotoRecord"}:                        func() any { return &swcv1alpha1.AtprotoRecord{} },
 	{Group: "socialweb.computer", Version: "v1alpha1", Kind: "AtprotoRecordWatch"}:                   func() any { return &swcv1alpha1.AtprotoRecordWatch{} },
@@ -180,7 +174,6 @@ func (s Set) RenderText(p Phase, values any) (string, []Text, error) {
 		}
 	}
 	var out []Text
-	var entries map[string]tsbundle.EntrySpec
 	for _, f := range p.Files {
 		src, err := readFile(f.Path)
 		if err != nil {
@@ -199,20 +192,10 @@ func (s Set) RenderText(p Phase, values any) (string, []Text, error) {
 				scopes = append(scopes, scope)
 			}
 		}
-		if f.Template != "" && entries == nil {
-			if entries, err = LoadEntries(); err != nil {
-				return "", nil, err
-			}
-		}
 		for _, scope := range scopes {
 			body, err := execute(f.Path, string(src), scope)
 			if err != nil {
 				return "", nil, err
-			}
-			if f.Template != "" {
-				if body, err = renderService(f.Path, f.Template, body, entries); err != nil {
-					return "", nil, err
-				}
 			}
 			out = append(out, Text{Path: f.Path, Body: body})
 		}
@@ -317,27 +300,4 @@ func decodeOne(js []byte) (Object, error) {
 		return Object{}, fmt.Errorf("%s %s does not decode strictly: %w", gvk.Kind, u.GetName(), err)
 	}
 	return Object{Typed: typed, Unstructured: u}, nil
-}
-
-type vendorRecord struct {
-	Files []struct {
-		Path    string `json:"path"`
-		Adapted string `json:"adapted"`
-	} `json:"files"`
-}
-
-func AdaptedFiles() (map[string]bool, error) {
-	b, err := readFile(VendorRecordPath)
-	if err != nil {
-		return nil, err
-	}
-	var r vendorRecord
-	if err := json.Unmarshal(b, &r); err != nil {
-		return nil, fmt.Errorf("manifests: %s: %w", VendorRecordPath, err)
-	}
-	out := map[string]bool{}
-	for _, f := range r.Files {
-		out[f.Path] = f.Adapted != ""
-	}
-	return out, nil
 }

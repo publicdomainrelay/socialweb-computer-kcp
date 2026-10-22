@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-4.bids.socialweb.computer
+  name: v1alpha1-5.bids.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -154,6 +154,10 @@ spec:
                 items:
                   type: object
                   x-kubernetes-preserve-unknown-fields: true
+              publishAttempts:
+                type: integer
+              lastError:
+                type: string
       additionalPrinterColumns:
         - name: Phase
           type: string

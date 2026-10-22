@@ -1,0 +1,323 @@
+package workflow
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"os/exec"
+	"regexp"
+	"sort"
+	"strings"
+)
+
+var (
+	expressionPattern = regexp.MustCompile(`\$\{\{\s*([\s\S]+?)\s*\}\}`)
+	alwaysPattern     = regexp.MustCompile(`(?:^|[^A-Za-z0-9_])always\(\)`)
+	failurePattern    = regexp.MustCompile(`(?:^|[^A-Za-z0-9_])failure\(\)`)
+)
+
+type guardResult struct {
+	run     bool
+	always  bool
+	failure bool
+}
+
+func (e *Executor) evaluateGuard(ctx context.Context, condition any) (guardResult, error) {
+	result := guardResult{run: true}
+	if condition == nil {
+		return result, nil
+	}
+	text, isText := condition.(string)
+	if isText {
+		result.always = alwaysPattern.MatchString(text)
+		result.failure = failurePattern.MatchString(text)
+	}
+	switch typed := condition.(type) {
+	case bool:
+		result.run = typed
+	case int:
+		result.run = typed != 0
+	case int64:
+		result.run = typed != 0
+	case float64:
+		result.run = typed != 0
+	case string:
+		trimmed := strings.ToLower(strings.TrimSpace(typed))
+		switch {
+		case trimmed == "":
+			result.run = false
+		case trimmed == "true" || trimmed == "1":
+			result.run = true
+		case trimmed == "false" || trimmed == "0":
+			result.run = false
+		default:
+			expression := typed
+			if !strings.Contains(expression, "${{") {
+				expression = "${{ " + expression + " }}"
+			}
+			evaluated, err := e.evaluateExpression(ctx, expression)
+			if err != nil {
+				return result, err
+			}
+			if strings.Contains(evaluated, "${{") {
+				return result, fmt.Errorf("could not evaluate expression %q", typed)
+			}
+			evaluated = strings.ToLower(strings.TrimSpace(evaluated))
+			if evaluated == "__github_actions_always__" {
+				result.run = true
+			} else if evaluated == "false" || evaluated == "0" || evaluated == "" || evaluated == "null" || evaluated == "undefined" {
+				result.run = false
+			} else {
+				result.run = true
+			}
+		}
+	}
+	if e.jobFailed {
+		result.run = result.always || result.failure
+	} else if result.failure {
+		result.run = false
+	}
+	return result, nil
+}
+
+func (e *Executor) evaluateExpression(ctx context.Context, expression string) (string, error) {
+	if !strings.Contains(expression, "${{") {
+		return expression, nil
+	}
+	matches := expressionPattern.FindAllStringSubmatchIndex(expression, -1)
+	if len(matches) == 0 {
+		return expression, nil
+	}
+	var builder strings.Builder
+	last := 0
+	for _, match := range matches {
+		builder.WriteString(expression[last:match[0]])
+		inner := strings.TrimSpace(expression[match[2]:match[3]])
+		value, err := e.evaluateInnerExpression(ctx, inner)
+		if err != nil {
+			return "", err
+		}
+		builder.WriteString(value)
+		last = match[1]
+	}
+	builder.WriteString(expression[last:])
+	return builder.String(), nil
+}
+
+func (e *Executor) evaluateInnerExpression(ctx context.Context, inner string) (string, error) {
+	value, err := e.evaluateUsingJavaScript(ctx, inner)
+	if err == nil {
+		return value, nil
+	}
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+	data := e.expressionData()
+	if resolved := resolvePropertyPath(inner, data); resolved != nil {
+		return fmt.Sprintf("%v", resolved), nil
+	}
+	return "", fmt.Errorf("could not evaluate expression %q: %w", inner, err)
+}
+
+func (e *Executor) expressionData() map[string]any {
+	return map[string]any{
+		"github":  e.buildGitHubContext(),
+		"steps":   e.Context.Outputs,
+		"inputs":  e.Context.Inputs,
+		"env":     e.Context.Env,
+		"secrets": e.Context.Secrets,
+		"vars":    e.Context.Vars,
+		"needs":   e.Context.JobResults,
+		"matrix":  map[string]any{},
+	}
+}
+
+func (e *Executor) evaluateUsingJavaScript(ctx context.Context, inner string) (string, error) {
+	githubContext, err := json.Marshal(e.buildGitHubContext())
+	if err != nil {
+		return "", err
+	}
+	steps, err := json.Marshal(e.Context.Outputs)
+	if err != nil {
+		return "", err
+	}
+	inputs, err := json.Marshal(e.Context.Inputs)
+	if err != nil {
+		return "", err
+	}
+	env, err := json.Marshal(e.Context.Env)
+	if err != nil {
+		return "", err
+	}
+	secrets, err := json.Marshal(e.Context.Secrets)
+	if err != nil {
+		return "", err
+	}
+	vars, err := json.Marshal(e.Context.Vars)
+	if err != nil {
+		return "", err
+	}
+	needs, err := json.Marshal(e.Context.JobResults)
+	if err != nil {
+		return "", err
+	}
+	matrix, err := json.Marshal(map[string]any{})
+	if err != nil {
+		return "", err
+	}
+	failed := "false"
+	if e.jobFailed {
+		failed = "true"
+	}
+	script := `console.log(String((() => {
+function always() { return "__GITHUB_ACTIONS_ALWAYS__"; }
+function success() { return !__pe_failed; }
+function failure() { return __pe_failed; }
+function cancelled() { return false; }
+function fromJSON(value) { return JSON.parse(value); }
+function toJSON(value) { return JSON.stringify(value); }
+function contains(haystack, needle) {
+  if (Array.isArray(haystack)) return haystack.includes(needle);
+  if (typeof haystack === "string") return haystack.includes(needle);
+  return false;
+}
+function startsWith(value, prefix) { return typeof value === "string" && value.startsWith(prefix); }
+function endsWith(value, suffix) { return typeof value === "string" && value.endsWith(suffix); }
+function format(value) {
+  const args = Array.prototype.slice.call(arguments, 1);
+  return String(value).replace(/\{(\d+)\}/g, (match, index) => args[Number(index)] !== undefined ? String(args[Number(index)]) : match);
+}
+function join(value, separator) { return Array.isArray(value) ? value.join(separator === undefined ? "," : separator) : String(value); }
+function hashFiles() { return ""; }
+const __pe_failed = ` + failed + `;
+const github = ` + string(githubContext) + `;
+const runner = {"debug":1};
+const steps = ` + string(steps) + `;
+const inputs = ` + string(inputs) + `;
+const env = ` + string(env) + `;
+const secrets = ` + string(secrets) + `;
+const vars = ` + string(vars) + `;
+const needs = ` + string(needs) + `;
+const matrix = ` + string(matrix) + `;
+return (` + transformPropertyAccessors(inner) + `);
+})()))
+`
+	stdout, stderr, err := e.runDeno(ctx, script, nil)
+	if err != nil {
+		return "", fmt.Errorf("deno evaluation failed: %w: %s", err, strings.TrimSpace(stderr))
+	}
+	return strings.TrimSpace(stdout), nil
+}
+
+func (e *Executor) buildGitHubContext() map[string]any {
+	context := make(map[string]any)
+	for key, value := range e.Context.Env {
+		if !strings.HasPrefix(key, "GITHUB_") {
+			continue
+		}
+		name := strings.Replace(strings.ToLower(key), "github_", "", 1)
+		context[name] = value
+	}
+	if _, exists := context["token"]; !exists {
+		context["token"] = e.Context.Secrets["GITHUB_TOKEN"]
+	}
+	context["event"] = map[string]any{"inputs": e.Context.Inputs}
+	return context
+}
+
+func resolvePropertyPath(path string, data map[string]any) any {
+	var current any = data
+	for _, part := range strings.Split(path, ".") {
+		object, ok := current.(map[string]any)
+		if !ok {
+			return nil
+		}
+		value, exists := object[part]
+		if !exists {
+			return nil
+		}
+		current = value
+	}
+	return current
+}
+
+func transformPropertyAccessors(code string) string {
+	var builder strings.Builder
+	index := 0
+	for index < len(code) {
+		character := code[index]
+		if character == '"' || character == '\'' {
+			quote := character
+			builder.WriteByte(character)
+			index++
+			for index < len(code) {
+				builder.WriteByte(code[index])
+				if code[index] == quote {
+					index++
+					break
+				}
+				index++
+			}
+			continue
+		}
+		if character == '.' {
+			builder.WriteString("['")
+			index++
+			start := index
+			for index < len(code) && isPropertyByte(code[index]) {
+				index++
+			}
+			builder.WriteString(code[start:index])
+			builder.WriteString("']")
+			continue
+		}
+		builder.WriteByte(character)
+		index++
+	}
+	return builder.String()
+}
+
+func isPropertyByte(value byte) bool {
+	return (value >= 'a' && value <= 'z') || (value >= 'A' && value <= 'Z') || (value >= '0' && value <= '9') || value == '_' || value == '-'
+}
+
+func (e *Executor) runDeno(ctx context.Context, script string, extraEnv map[string]string) (string, string, error) {
+	if e.opts.DenoPath == "" {
+		return "", "", fmt.Errorf("deno runtime unavailable")
+	}
+	command := exec.CommandContext(ctx, e.opts.DenoPath, "run", "--quiet", "--no-prompt", "--no-config", "--allow-net", "-")
+	command.Stdin = strings.NewReader(script)
+	env := make(map[string]string, len(extraEnv)+2)
+	for key, value := range extraEnv {
+		env[key] = value
+	}
+	if _, exists := env["NO_COLOR"]; !exists {
+		env["NO_COLOR"] = "1"
+	}
+	if _, exists := env["DENO_NO_UPDATE_CHECK"]; !exists {
+		env["DENO_NO_UPDATE_CHECK"] = "1"
+	}
+	command.Env = envSlice(env)
+	var stdout, stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+	err := command.Run()
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return stdout.String(), stderr.String(), ctxErr
+	}
+	return stdout.String(), stderr.String(), err
+}
+
+func envSlice(env map[string]string) []string {
+	keys := make([]string, 0, len(env))
+	for key := range env {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	out := make([]string, 0, len(keys))
+	for _, key := range keys {
+		out = append(out, key+"="+env[key])
+	}
+	return out
+}

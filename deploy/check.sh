@@ -8,7 +8,7 @@ case "$mode" in
   --full) run=full ;;
   *)
     echo "usage: $0 [--fast|--local|--full]" >&2
-    echo "  --fast   the build gate: gofmt, go build, apigen, go vet, deno check, deno.lock, cross-OS and release builds" >&2
+    echo "  --fast   the build gate: gofmt, go build, apigen, go vet, cross-OS and release builds" >&2
     echo "  --local  the proofs this host can run (kcp/kine/k3s/postgres); lists what it skipped" >&2
     echo "  --full   everything, and a skip is a failure; needs the live artifacts on this host" >&2
     exit 2
@@ -59,16 +59,6 @@ for module in $(jq -r '[.assets[].fetch // {} | .[] | select(.kind == "go") | .m
   (cd "$module" && go build -o /dev/null ./... && go vet ./...) || fail "go build and go vet of the asset module $module"
   echo "check.sh: ok go build and go vet of the asset module $module"
 done
-
-if command -v deno >/dev/null 2>&1; then
-  deno task --quiet check || fail "deno check (deno task check: the entries of deploy/ts-entries.yaml)"
-  deno install --frozen --node-modules-dir=none --quiet || fail "deno.lock is stale; run deno install at the repository root and commit deno.lock"
-  echo "check.sh: ok deno check (every entry of deploy/ts-entries.yaml) and deno.lock is current"
-elif [ "$run" = full ]; then
-  fail "deno not found; --full type-checks the TypeScript under ts/ and socialweb-computer-k8s/"
-else
-  echo "check.sh: skipped deno check (deno not found)"
-fi
 
 crossfailed=""
 for target in darwin/arm64 darwin/amd64 windows/amd64 windows/arm64 linux/arm64; do

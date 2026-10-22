@@ -27,8 +27,8 @@ const (
 var ResourceQuotaGVR = schema.GroupVersionResource{Version: "v1", Resource: "resourcequotas"}
 
 var QuotaDefaults = struct {
-	Bids, ComputeVMs, ComputeContracts, NodeClaims, PolicyWorkflowRuns, DenoRuns int64
-}{Bids: 10000, ComputeVMs: 64, ComputeContracts: 1024, NodeClaims: 64, PolicyWorkflowRuns: 500, DenoRuns: 200}
+	Bids, ComputeVMs, ComputeContracts, NodeClaims, PolicyWorkflowRuns, Components int64
+}{Bids: 10000, ComputeVMs: 64, ComputeContracts: 1024, NodeClaims: 64, PolicyWorkflowRuns: 500, Components: 16}
 
 type quotaEntry struct {
 	component string
@@ -42,24 +42,43 @@ func (e quotaEntry) key() string { return "count/" + e.gvr.Resource + "." + e.gv
 
 func (e quotaEntry) name() string { return e.gvr.Resource + "." + e.gvr.Group }
 
+func componentQuotaEntries(rootKind string) []quotaEntry {
+	kinds := ComponentKindsFor(rootKind)
+	out := make([]quotaEntry, 0, len(kinds))
+	for _, kind := range kinds {
+		ct, ok := ComponentTypeFor(kind)
+		if !ok {
+			continue
+		}
+		out = append(out, quotaEntry{"", ct.GVR, "components", QuotaDefaults.Components, false})
+	}
+	return out
+}
+
+func withComponentQuotas(entries []quotaEntry, rootKind string) []quotaEntry {
+	out := append([]quotaEntry{}, entries...)
+	return append(out, componentQuotaEntries(rootKind)...)
+}
+
 func quotaPlan(rootKind string) []quotaEntry {
 	apps := func(resource string) schema.GroupVersionResource { return gvr(v1alpha1.GroupName, resource) }
 	runs := []quotaEntry{
-		{ComponentWorkspace, gvr("deno.computer", "denoruns"), "denoRuns", QuotaDefaults.DenoRuns, false},
-		{ComponentWorkspace, gvr("deno.computer", "policyworkflowruns"), "policyWorkflowRuns", QuotaDefaults.PolicyWorkflowRuns, false},
+		{"", PolicyWorkflowRunGVR, "policyWorkflowRuns", QuotaDefaults.PolicyWorkflowRuns, false},
 	}
 	switch rootKind {
 	case string(v1alpha1.ApplicationKindMarketBidder):
-		return append([]quotaEntry{
+		return withComponentQuotas(append([]quotaEntry{
 			{"", apps("bids"), "bids", QuotaDefaults.Bids, true},
 			{"", apps("computevms"), "computeVMs", QuotaDefaults.ComputeVMs, true},
-		}, runs...)
+		}, runs...), rootKind)
 	case string(v1alpha1.ApplicationKindMarketRequester):
-		return append([]quotaEntry{{"", apps("computecontracts"), "computeContracts", QuotaDefaults.ComputeContracts, false}}, runs...)
+		return withComponentQuotas(append([]quotaEntry{{"", apps("computecontracts"), "computeContracts", QuotaDefaults.ComputeContracts, false}}, runs...), rootKind)
 	case string(v1alpha1.ApplicationKindGateway):
-		return append([]quotaEntry{{ComponentWorkspace, apps("computecontracts"), "computeContracts", QuotaDefaults.ComputeContracts, false}}, runs...)
+		return withComponentQuotas(append([]quotaEntry{{ComponentWorkspace, apps("computecontracts"), "computeContracts", QuotaDefaults.ComputeContracts, false}}, runs...), rootKind)
 	case string(v1alpha1.ApplicationKindSshGateway):
-		return runs[:1]
+		return withComponentQuotas(runs, rootKind)
+	case "MarketNetwork":
+		return withComponentQuotas(runs, rootKind)
 	}
 	return nil
 }

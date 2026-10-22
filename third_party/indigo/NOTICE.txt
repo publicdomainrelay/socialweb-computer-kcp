@@ -1,0 +1,24 @@
+Third-party notice: github.com/bluesky-social/indigo
+
+Copyright (c) 2022-2026 Bluesky Social PBC, @whyrusleeping, and Contributors
+
+This repository uses Indigo as a pinned Go module dependency:
+
+    github.com/bluesky-social/indigo v0.0.0-20261020053033-bdacece3f80e
+
+Commit: bdacece3f80ef8bc79676a005616b9a802895356
+Commit date: 2026-10-19
+Commit subject: build: Go 1.26.10 for CVE-2026-111943 (#1517)
+Source: https://github.com/bluesky-social/indigo
+
+The module version is a published commit and is resolved through the Go
+module proxy. go.sum records the module zip and go.mod checksums. This pin
+is 113 commits ahead of the previous module version
+(v0.0.0-20260903211445-41278964ec8e).
+
+Indigo is dual-licensed under the MIT License and the Apache License,
+Version 2.0. You may use it under either license, or both together, at your
+discretion. The full license texts are in this directory:
+
+    LICENSE-MIT
+    LICENSE-APACHE

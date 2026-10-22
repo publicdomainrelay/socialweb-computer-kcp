@@ -12,14 +12,12 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devsup"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/denoruntime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/gatewaykcp"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/tsbundle"
 )
 
-var serveGatewayOptions = append([]string{backendOpt, "state-dir", "unit-prefix", "kcp-path", "kine-path", "k3s-path", "postgres-root", "bao-path",
-	"openbao-plugin-dir", "deno-path", "asset-cache", "ready-timeout", "kcp-front-address", "tls-front-address", "cert-front-address", "tls-cert-file", "tls-key-file",
-	"gateway-spec-file", "gateway-profile", "bootstrap-cluster", "bootstrap-account-did"}, devOnly(tsbundle.SourceRootOption)...)
+var serveGatewayOptions = []string{backendOpt, "state-dir", "unit-prefix", "kcp-path", "kine-path", "k3s-path", "postgres-root", "bao-path",
+	"openbao-plugin-dir", "asset-cache", "ready-timeout", "kcp-front-address", "tls-front-address", "cert-front-address", "tls-cert-file", "tls-key-file",
+	"gateway-spec-file", "gateway-profile", "bootstrap-cluster", "bootstrap-account-did"}
 
 func (a *app) optionalExe(ctx context.Context, vals clicfg.Values, name, option string) (devinstance.Executable, error) {
 	if !assets.Release() && vals.String(option) == "" {
@@ -38,11 +36,6 @@ func (a *app) gatewayExecutables(ctx context.Context, vals clicfg.Values) (map[s
 		}
 		out[x.name] = e
 	}
-	deno, err := a.denoExe(ctx, vals)
-	if err != nil {
-		return nil, err
-	}
-	out[gatewaykcp.ExeDeno] = deno
 	plugins, err := a.openBaoPluginExes(vals)
 	if err != nil {
 		return nil, err
@@ -119,14 +112,6 @@ func runServeGatewayKcp(ctx context.Context, a *app, vals clicfg.Values, rest []
 	if err != nil {
 		return a.fail(exitRefused, "%s: %v", verb, err)
 	}
-	src, err := tsbundle.Select(vals)
-	if err != nil {
-		return a.fail(exitRefused, "%s: the TypeScript closure: %v", verb, err)
-	}
-	closure, err := src.Prepare(state)
-	if err != nil {
-		return a.fail(exitFailed, "%s: %v", verb, err)
-	}
 	base, err := gatewaykcp.ReadSpec(vals.String("gateway-spec-file"))
 	if err != nil {
 		return a.fail(exitRefused, "%s: %v", verb, err)
@@ -134,8 +119,7 @@ func runServeGatewayKcp(ctx context.Context, a *app, vals clicfg.Values, rest []
 	environ := os.Environ()
 	spec := gatewaykcp.Spec(base, vals.String("gateway-profile"), environ)
 	unit, _ := a.env.LookupEnv(devsup.EnvUnit)
-	os.Setenv(denoruntime.WatchListEnv, "false")
-	cfg := gatewaykcp.Config{StateDir: state, Prefix: prefix, Backend: backend, Executables: exes, Closure: closure,
+	cfg := gatewaykcp.Config{StateDir: state, Prefix: prefix, Backend: backend, Executables: exes,
 		Spec: spec, Unit: unit, FrontAddress: vals.String("kcp-front-address"), TLSAddress: vals.String("tls-front-address"),
 		CertFrontAddress: vals.String("cert-front-address"),
 		TLSCert:          vals.String("tls-cert-file"), TLSKey: vals.String("tls-key-file"),
@@ -182,7 +166,7 @@ func (a *app) gatewayChildExecutables(vals clicfg.Values) (map[string]devinstanc
 	return out, nil
 }
 
-func (a *app) runGatewayChild(ctx context.Context, rec devinstance.Record, deno denoruntime.Config, m hostsvc.Manager, timeout time.Duration) error {
+func (a *app) runGatewayChild(ctx context.Context, rec devinstance.Record, m hostsvc.Manager, timeout time.Duration) error {
 	base, err := gatewaykcp.ReadSpec(rec.Gateway.SpecFile)
 	if err != nil {
 		return err
@@ -192,10 +176,11 @@ func (a *app) runGatewayChild(ctx context.Context, rec devinstance.Record, deno 
 	for k, v := range rec.Executables {
 		exes[k] = v
 	}
-	cfg := gatewaykcp.Config{Backend: hostsvc.BackendProc, Executables: exes, Closure: deno.Closure,
-		Spec: gatewaykcp.Spec(base, base.Profile, environ), Unit: deno.Unit, TLSAddress: gatewaykcp.DefaultAddress,
+	unit, _ := a.env.LookupEnv(devsup.EnvUnit)
+	cfg := gatewaykcp.Config{Backend: hostsvc.BackendProc, Executables: exes,
+		Spec: gatewaykcp.Spec(base, base.Profile, environ), Unit: unit, TLSAddress: gatewaykcp.DefaultAddress,
 		CertFrontAddress: gatewaykcp.DefaultAddress,
 		BootstrapCluster: rec.Gateway.BootstrapCluster, BootstrapAccountDID: rec.Gateway.BootstrapAccountDID,
 		ReadyTimeout: timeout, Environ: environ, Exe: exes[gatewaykcp.ExeCore].Path, Stderr: a.stderr, Log: a.log}
-	return gatewaykcp.RunChild(ctx, cfg, rec.Layout, deno, m)
+	return gatewaykcp.RunChild(ctx, cfg, rec.Layout, m)
 }

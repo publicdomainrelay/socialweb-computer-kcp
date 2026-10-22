@@ -45,6 +45,7 @@ var CorePolicyRules = []v1alpha1.OpenBaoPolicyRule{
 	{Path: "auth/token/tidy", Capabilities: []string{"create", "update"}},
 	{Path: "sys/leases/tidy", Capabilities: []string{"create", "update"}},
 	{Path: "+/roles/*", Capabilities: []string{"create", "read", "update", "delete", "list"}},
+	{Path: "+/root/generate/internal", Capabilities: []string{"create", "update"}},
 	{Path: "+/metadata/*", Capabilities: []string{"read", "delete", "list"}},
 }
 

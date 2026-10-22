@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -243,16 +244,57 @@ func (ctl *Controller) vaultRefs(ctx context.Context, server, clientName string)
 	return "", st, v1alpha1.OpenBaoServerClientRefs{}, fmt.Errorf("the OpenBaoServer %s reports no client %s yet", server, clientName)
 }
 
+func requesterDesired(o v1alpha1.MarketRequester, id *v1alpha1.MarketIdentity, ws, stateRoot, pdsHandle, pdsPublicURL string) ([]desiredComponent, error) {
+	suspend := o.Spec.Suspend
+	network := o.Spec.Network
+	ident := componentIdentity(id, o.Spec.Identity.Handle)
+	vault := ComponentRefFor("OpenBaoServer", RequesterVaultServer)
+	var hostnames []string
+	if ident.Handle != "" {
+		hostnames = []string{ident.Handle}
+	}
+	local := o.Spec.Identity.Mode == "" || o.Spec.Identity.Mode == v1alpha1.MarketIdentityModeLocalRepo
+	mode, publicOrigin, oauthClientID, oauthRedirectURI, guestSSHKeysFile := requesterComponentFields(o.Spec.Options, o.Spec.Identity.Mode)
+	requesterSpec := v1alpha1.RequesterSpec{
+		ComponentSpec:    NewComponentSpec(ComponentCRStateDir(stateRoot, ComponentKindRequester, RequesterComponent), network, suspend),
+		Identity:         ident,
+		PolicyEngineRef:  ComponentRefFor(ComponentKindPolicyEngine, PolicyEngineComponent),
+		VaultRef:         vault,
+		Hostnames:        hostnames,
+		Mode:             mode,
+		PublicOrigin:     publicOrigin,
+		OAuthClientID:    oauthClientID,
+		OAuthRedirectURI: oauthRedirectURI,
+		GuestSSHKeysFile: guestSSHKeysFile,
+		AcceptCopies:     int32(optionInt(o.Spec.Options, "accept-copies")),
+	}
+	out := []desiredComponent{policyEngineDesired(suspend)}
+	if local {
+		pdsSpec, err := appPdsSpec(stateRoot, network, pdsHandle, vault, hostnames, suspend, pdsPublicURL)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, desiredComponent{Kind: ComponentKindPds, Name: PdsComponent, Spec: pdsSpec})
+		requesterSpec.PdsRef = ComponentRefFor(ComponentKindPds, PdsComponent)
+		requesterSpec.PDSAccessTokenPath = pdsAccessTokenPath("requester")
+	}
+	out = append(out, desiredComponent{Kind: ComponentKindRequester, Name: RequesterComponent, Spec: requesterSpec})
+	out = append(out, httpServiceExposures(ws, ComponentKindRequester, RequesterComponent, "http", network, hostnames, false, true, suspend)...)
+	if local {
+		out = append(out, pdsExposures(ws, PdsComponent, network, hostnames, suspend)...)
+	}
+	return out, nil
+}
+
 func (ctl *Controller) reconcileRequester(ctx context.Context, u *unstructured.Unstructured) error {
 	var o v1alpha1.MarketRequester
 	if err := fromUnstructured(u, &o); err != nil {
 		return err
 	}
 	owner := ownerOf(u)
-	ws := ctl.c.workspace() + ":" + ComponentWorkspace
 	st := v1alpha1.ApplicationStatus{ObservedGeneration: o.Generation, Profile: o.Spec.Profile}
 	if u.GetDeletionTimestamp() != nil {
-		left, err := ctl.deletePods(ctx, ws, owner, nil)
+		left, err := ctl.stopComponents(ctx, owner)
 		if err != nil {
 			return err
 		}
@@ -266,7 +308,6 @@ func (ctl *Controller) reconcileRequester(ctx context.Context, u *unstructured.U
 			return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
 		}
 		delete(ctl.applied, string(o.UID))
-		ctl.forgetPlaced(owner)
 		return ctl.setFinalizer(ctx, MarketRequesterGVR, u, false)
 	}
 	if !hasFinalizer(u) {
@@ -274,18 +315,36 @@ func (ctl *Controller) reconcileRequester(ctx context.Context, u *unstructured.U
 			return err
 		}
 	}
-	if ctl.applied[string(o.UID)] != o.Generation || ctl.lostComponent(ctx, owner) != "" {
-		values, err := RequesterValues(o.Spec, ComponentStateDir(ctl.c.Layout.StateDir, RequesterComponent))
-		if err == nil {
-			err = withRootName(&values.ExtraArgs, o.Name)
-		}
+	stateRoot := ctl.c.Layout.StateDir
+	pdsAccountHandle := pdsHandle(ctl.c.workspace(), "requester", o.Spec.Identity.Handle)
+	pdsPublicURL := ctl.pdsPublicURL(ctx, ctl.c.workspace(), PdsComponent)
+	if o.Spec.Suspend {
+		id, _ := ctl.identityIn(ctx, ctl.c.workspace(), RequesterIdentity)
+		desired, err := requesterDesired(o, id, ctl.c.workspace(), stateRoot, pdsAccountHandle, pdsPublicURL)
 		if err != nil {
 			st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
 			return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
 		}
+		if err := ctl.ensureDesired(ctx, u, desired); err != nil {
+			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, err.Error()
+			return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
+		}
+		_ = ctl.pruneDesired(ctx, owner, desired)
+		snap, err := ctl.componentSnapshot(ctx, owner)
+		if err != nil {
+			return err
+		}
+		st.Components, st.Listeners = snap.Components, snap.Listeners
+		if id != nil {
+			st.Did = id.Status.Did
+		}
+		st.Phase, st.Message = v1alpha1.ApplicationPhasePending, "suspended"
+		return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
+	}
+	if ctl.applied[string(o.UID)] != o.Generation {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "applying its schemas, its own OpenBaoServer and its workspace"
 		ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
-		if _, err := ctl.applyProfile(ctx, RequesterSet, o.Spec.Profile, owner, false, &values); err != nil {
+		if err := ctl.applyInfra(ctx, RequesterSet, o.Spec.Profile, owner, &manifests.MarketRequester{}); err != nil {
 			st.Message = err.Error()
 			return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
 		}
@@ -293,42 +352,128 @@ func (ctl *Controller) reconcileRequester(ctx context.Context, u *unstructured.U
 			st.Message = "its MarketIdentity: " + err.Error()
 			return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
 		}
-		if values.Kcp, values.Vault, err = ctl.requesterKcp(ctx, values.StateDir); err != nil {
+		if _, _, err := ctl.requesterKcp(ctx, ComponentCRStateDir(stateRoot, ComponentKindRequester, RequesterComponent)); err != nil {
 			st.Message = "its vault and its kcp account: " + err.Error()
 			return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
 		}
-		st.Message = "applying the " + o.Spec.Profile + " components"
-		ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
-		pods, err := ctl.applyProfile(ctx, RequesterSet, o.Spec.Profile, owner, true, &values)
-		if err != nil {
-			st.Message = err.Error()
-			return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
-		}
-		if _, err := ctl.deletePods(ctx, ws, owner, pods); err != nil {
-			return err
-		}
 		ctl.applied[string(o.UID)] = o.Generation
-		ctl.c.log().Info("applied a MarketRequester's components", "name", o.Name, "profile", o.Spec.Profile, "denopods", pods)
 	}
-	pods, err := ctl.ownedPods(ctx, ws, owner)
+	id, err := ctl.identityIn(ctx, ctl.c.workspace(), RequesterIdentity)
+	if apierrors.IsNotFound(err) {
+		delete(ctl.applied, string(o.UID))
+		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for its MarketIdentity"
+		return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
+	}
 	if err != nil {
 		return err
 	}
-	allReady := len(pods) > 0
-	for i := range pods {
-		v := podViewOf(ws, &pods[i])
-		st.Components = append(st.Components, v.component())
-		st.Listeners = append(st.Listeners, v.Listeners...)
-		allReady = allReady && v.Ready
+	desired, err := requesterDesired(o, id, ctl.c.workspace(), stateRoot, pdsAccountHandle, pdsPublicURL)
+	if err != nil {
+		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
+		return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
 	}
-	st.Did = ctl.identityDid(ctx)
+	allDesired := desired
+	pds, hasPds := desiredPds(desired)
+	if hasPds {
+		if err := ctl.ensureDesired(ctx, u, pdsComponentSet(desired)); err != nil {
+			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, err.Error()
+			return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
+		}
+		snap, err := ctl.componentSnapshot(ctx, owner)
+		if err != nil {
+			return err
+		}
+		if !snap.ready(ComponentKindPds, PdsComponent) {
+			st.Components, st.Listeners = snap.Components, snap.Listeners
+			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for the requester's app Pds to be ready"
+			return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
+		}
+		pdsPublicURL = ctl.pdsPublicURL(ctx, ctl.c.workspace(), PdsComponent)
+		if pdsPublicURL == "" {
+			st.Components, st.Listeners = snap.Components, snap.Listeners
+			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for the app Pds exposure"
+			return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
+		}
+		if desired, err = requesterDesired(o, id, ctl.c.workspace(), stateRoot, pdsAccountHandle, pdsPublicURL); err != nil {
+			st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
+			return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
+		}
+		allDesired = desired
+		pds, _ = desiredPds(desired)
+		if err := ctl.ensureDesired(ctx, u, []desiredComponent{pds}); err != nil {
+			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, err.Error()
+			return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
+		}
+		if applied, err := ctl.pdsApplied(ctx, owner); err != nil {
+			return err
+		} else if !applied {
+			st.Components, st.Listeners = snap.Components, snap.Listeners
+			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for the app Pds to apply its public URL"
+			return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
+		}
+		endpoint := ctl.pdsEndpointIn(ctx, ctl.c.workspace(), PdsComponent)
+		if endpoint == "" {
+			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for the requester's app Pds endpoint"
+			return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
+		}
+		caFile := ""
+		if o.Spec.Network != nil {
+			caFile = o.Spec.Network.CaBundleRef
+		}
+		sess, err := ctl.ensurePdsAccountInVault(ctx, RequesterVaultServer, RequesterVaultClient, pdsSessionPath("requester"), endpoint, caFile, pdsAccountHandle)
+		if err != nil {
+			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "its app Pds account: "+err.Error()
+			return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
+		}
+		ctl.ensureAppPdsStatus(ctx, pdsAccountHandle, sess, o.Spec.Network != nil)
+		changed, err := ctl.syncRequesterRepoKey(stateRoot, sess.Did)
+		if err != nil {
+			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "its app Pds signing key: "+err.Error()
+			return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
+		}
+		if changed {
+			if err := ctl.RestartComponentIn(ctx, ctl.c.workspace(), ComponentKindRequester, RequesterComponent); err != nil && !apierrors.IsNotFound(err) {
+				st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "restarting the requester: "+err.Error()
+				return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
+			}
+		}
+		if err := ctl.recordPdsIdentity(ctx, ctl.c.workspace(), RequesterIdentity, pdsAccountHandle, endpoint, sess.Did, o.Spec.Identity.Association); err != nil {
+			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "its app Pds identity: "+err.Error()
+			return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
+		}
+		if id, err = ctl.identityIn(ctx, ctl.c.workspace(), RequesterIdentity); err != nil {
+			return err
+		}
+		if desired, err = requesterDesired(o, id, ctl.c.workspace(), stateRoot, pdsAccountHandle, pdsPublicURL); err != nil {
+			st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
+			return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
+		}
+		allDesired = desired
+		desired = withoutPds(desired)
+	}
+	if err := ctl.ensureDesired(ctx, u, desired); err != nil {
+		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, err.Error()
+		return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
+	}
+	if err := ctl.pruneDesired(ctx, owner, allDesired); err != nil {
+		return err
+	}
+	if id, err = ctl.identityIn(ctx, ctl.c.workspace(), RequesterIdentity); err != nil {
+		return err
+	}
+	snap, err := ctl.componentSnapshot(ctx, owner)
+	if err != nil {
+		return err
+	}
+	st.Components, st.Listeners = snap.Components, snap.Listeners
+	st.Did = id.Status.Did
 	switch {
-	case allReady && st.Did != "":
+	case snap.complete(allDesired) && st.Did != "":
 		st = ready(st, "the requester is signed in and its components are ready")
 	case st.Did == "":
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for the requester's MarketIdentity to sign in"
 	default:
-		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for the requester DenoPod to report ready"
+		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for every component to be ready"
 	}
 	return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
 }

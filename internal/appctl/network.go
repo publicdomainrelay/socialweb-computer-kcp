@@ -2,9 +2,10 @@ package appctl
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -20,7 +21,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	denov1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/internal/denokcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpapply"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
@@ -33,131 +34,319 @@ const (
 	CABundleFile        = "ca-bundle.pem"
 	NetworkServiceState = "state"
 	NetworkPortsFile    = "ports.json"
+	NetworkPortFirst    = 30000
+	NetworkPortLast     = 39999
 	FrontRebindAfter    = 30 * time.Second
 )
 
-type service struct {
-	Workspace string
-	Name      string
-	Host      string
-	Long      bool
-}
+const (
+	NetworkPLCName           = "plc"
+	NetworkRelayName         = "relay"
+	NetworkIngressName       = "dispatcher"
+	NetworkDispatcherTLSName = "dispatcher-tls"
+	NetworkAlicePdsName      = "alice"
+	NetworkBobPdsName        = "bob"
 
-var networkServices = []service{
-	{"global", "plc", "plc.default.global.svc.kcp.local", true},
-	{"relay", "relay", "relay.default.relay.svc.kcp.local", true},
-	{"relay", "dispatcher", "dispatcher.default.relay.svc.kcp.local", true},
-	{"relay", "dispatcher-tls", "", true},
-	{"alice", "pds", "pds.default.alice.svc.kcp.local", true},
-	{"bob", "pds", "pds.default.bob.svc.kcp.local", true},
-	{"alice", "verifier", "", false},
-}
+	NetworkPlcHost        = "plc.default.global.svc.kcp.local"
+	NetworkRelayHost      = "relay.default.relay.svc.kcp.local"
+	NetworkIngressHost    = "dispatcher.default.relay.svc.kcp.local"
+	NetworkDispatcherHost = "dispatcher-tls.default.relay.svc.kcp.local"
+	NetworkAlicePdsHost   = "pds.default.alice.svc.kcp.local"
+	NetworkBobPdsHost     = "pds.default.bob.svc.kcp.local"
+	NetworkPortPlc        = "Global/plc"
+	NetworkPortRelay      = "Relay/relay"
+	NetworkPortIngress    = "IngressProxy/http"
+	NetworkPortDispatcher = "DispatcherTLS/tls"
+	NetworkPortAlicePds   = "AlicePds/http"
+	NetworkPortBobPds     = "BobPds/http"
+)
+
+var networkPortNames = []string{NetworkPortPlc, NetworkPortRelay, NetworkPortIngress, NetworkPortDispatcher, NetworkPortAlicePds, NetworkPortBobPds}
 
 type networks struct {
-	ctl     *Controller
-	mu      sync.Mutex
-	applied map[string]int64
-	pkiPEM  []byte
-	peers   string
-
-	rebinding map[string]time.Time
-
-	appliedPorts map[string]manifests.NetworkPorts
+	ctl      *Controller
+	mu       sync.Mutex
+	applied  map[string]int64
+	pkiPEM   []byte
+	peers    string
+	value    *v1alpha1.MarketNetworkValue
+	valueUID string
 }
 
 func newNetworks(ctl *Controller) *networks {
-	return &networks{ctl: ctl, applied: map[string]int64{}, rebinding: map[string]time.Time{}, appliedPorts: map[string]manifests.NetworkPorts{}}
+	return &networks{ctl: ctl, applied: map[string]int64{}}
 }
 
-func (n *networks) values(spec v1alpha1.MarketNetworkSpec) (manifests.MarketNetwork, error) {
-	dir := NetworkStateDir(n.ctl.c.Layout.StateDir)
-	alice, err := EnsureHexKey(filepath.Join(dir, keysDir, "alice-pds.hex"))
+func (n *networks) portLeases() (map[string]component.PortLease, error) {
+	reg, err := component.OpenPortRegistry(component.PortRegistryOptions{StateDir: NetworkStateDir(n.ctl.c.Layout.StateDir),
+		First: NetworkPortFirst, Last: NetworkPortLast})
 	if err != nil {
-		return manifests.MarketNetwork{}, err
+		return nil, err
 	}
-	bob, err := EnsureHexKey(filepath.Join(dir, keysDir, "bob-pds.hex"))
-	if err != nil {
-		return manifests.MarketNetwork{}, err
-	}
-	guest := filepath.Join(dir, GuestTLSDir)
-	if err := EnsureGuestTLS(guest); err != nil {
-		return manifests.MarketNetwork{}, err
-	}
-	label := spec.GuestLabel
-	if label == "" {
-		label = n.ctl.c.Layout.ID
-	}
-	var ports manifests.NetworkPorts
-	devinstance.ReadJSON(filepath.Join(dir, NetworkPortsFile), &ports)
-	return manifests.MarketNetwork{NetworkID: label, StateDir: filepath.Join(dir, NetworkServiceState), GuestTLSDir: guest,
-		PDSPrivateKeyHex: alice, BobPDSPrivateKeyHex: bob, Ports: ports}, nil
-}
-
-var frontPorts = []struct {
-	key  string
-	port func(*manifests.NetworkPorts) *int
-}{
-	{"global/plc", func(p *manifests.NetworkPorts) *int { return &p.Plc }},
-	{"relay/relay", func(p *manifests.NetworkPorts) *int { return &p.Relay }},
-	{"relay/dispatcher", func(p *manifests.NetworkPorts) *int { return &p.Dispatcher }},
-	{"relay/dispatcher-tls", func(p *manifests.NetworkPorts) *int { return &p.DispatcherTLS }},
-	{"alice/pds", func(p *manifests.NetworkPorts) *int { return &p.AlicePds }},
-	{"bob/pds", func(p *manifests.NetworkPorts) *int { return &p.BobPds }},
-}
-
-func servicePorts(views map[string]podView) (manifests.NetworkPorts, error) {
-	var p manifests.NetworkPorts
-	for _, f := range frontPorts {
-		s, err := portFrom(views[f.key].Address)
+	out := map[string]component.PortLease{}
+	for _, name := range networkPortNames {
+		lease, err := reg.Allocate(name)
 		if err != nil {
-			return p, fmt.Errorf("%s: %w", f.key, err)
+			return nil, err
 		}
-		if *f.port(&p), err = strconv.Atoi(s); err != nil {
-			return p, fmt.Errorf("%s: %w", f.key, err)
+		if lease.Port < NetworkPortFirst || lease.Port > NetworkPortLast {
+			if err := reg.Release(name); err != nil {
+				return nil, err
+			}
+			if lease, err = reg.Allocate(name); err != nil {
+				return nil, err
+			}
 		}
+		out[name] = lease
 	}
-	return p, nil
+	return out, nil
 }
 
-func (n *networks) holdPorts(ctx context.Context, views map[string]podView) (string, error) {
-	live, err := servicePorts(views)
+func leasePort(lease component.PortLease) int32 {
+	_, p, err := net.SplitHostPort(lease.Address())
 	if err != nil {
-		return "", err
+		return 0
 	}
-	path := filepath.Join(NetworkStateDir(n.ctl.c.Layout.StateDir), NetworkPortsFile)
-	var recorded manifests.NetworkPorts
-	if devinstance.ReadJSON(path, &recorded) != nil {
-		if err := devinstance.WriteJSON(path, live); err != nil {
-			return "", err
+	port, _ := strconv.Atoi(p)
+	return int32(port)
+}
+
+func networkValueFromLeases(leases map[string]component.PortLease, caBundle string) v1alpha1.MarketNetworkValue {
+	plc, relay := leases[NetworkPortPlc], leases[NetworkPortRelay]
+	ingress, dispatcher := leases[NetworkPortIngress], leases[NetworkPortDispatcher]
+	alice, bob := leases[NetworkPortAlicePds], leases[NetworkPortBobPds]
+	return v1alpha1.MarketNetworkValue{
+		PlcDirectoryUrl:  "http://" + plc.Address(),
+		IngressProxyHost: GuestTLSHost + ":" + strconv.Itoa(int(leasePort(ingress))),
+		RelayUrls:        []string{"http://" + relay.Address()},
+		FirehoseUrls:     []string{},
+		GuestTlsUrl:      "https://" + GuestTLSHost + ":" + strconv.Itoa(int(leasePort(dispatcher))),
+		CaBundleRef:      caBundle,
+		Hosts: []v1alpha1.NetworkHost{
+			{Name: NetworkPlcHost, Address: plc.Address()},
+			{Name: NetworkRelayHost, Address: relay.Address()},
+			{Name: NetworkIngressHost, Address: ingress.Address()},
+			{Name: NetworkDispatcherHost, Address: dispatcher.Address()},
+			{Name: NetworkAlicePdsHost, Address: alice.Address()},
+			{Name: NetworkBobPdsHost, Address: bob.Address()},
+		},
+	}
+}
+
+func endpointAddress(e v1alpha1.Endpoint) string {
+	if e.Address != "" {
+		return e.Address
+	}
+	u, err := url.Parse(e.Url)
+	if err != nil {
+		return ""
+	}
+	return u.Host
+}
+
+func endpointURL(e v1alpha1.Endpoint) string {
+	if e.Url != "" {
+		return e.Url
+	}
+	if e.Address != "" {
+		return "http://" + e.Address
+	}
+	return ""
+}
+
+func componentEndpoint(v ComponentView, name string) (v1alpha1.Endpoint, bool) {
+	for _, e := range v.Status.Endpoints {
+		if e.Name == name {
+			return e, true
 		}
-		return fmt.Sprintf("recorded the ports the network's fronts keep %+v; the services are applied again so their specs name them", live), nil
 	}
-	if live == recorded {
-		return "", nil
+	if len(v.Status.Endpoints) > 0 {
+		return v.Status.Endpoints[0], true
 	}
-	for _, f := range frontPorts {
-		if *f.port(&live) == *f.port(&recorded) {
+	return v1alpha1.Endpoint{}, false
+}
+
+func exposureURL(snap componentSnapshot, name string) (string, bool) {
+	v, ok := snap.view(ComponentKindExposure, name)
+	if !ok || !v.Status.Ready {
+		return "", false
+	}
+	for _, e := range v.Status.Endpoints {
+		if e.Url != "" {
+			return e.Url, true
+		}
+	}
+	return "", false
+}
+
+func exposureHost(snap componentSnapshot, name string) (string, error) {
+	raw, ok := exposureURL(snap, name)
+	if !ok {
+		return "", fmt.Errorf("the Exposure %s is not ready", name)
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return "", fmt.Errorf("the Exposure %s reports no address in %q", name, raw)
+	}
+	return u.Host, nil
+}
+
+func componentHost(snap componentSnapshot, kind, name string) (string, error) {
+	v, ok := snap.view(kind, name)
+	if !ok {
+		return "", fmt.Errorf("%s %s is not there", kind, name)
+	}
+	e, ok := componentEndpoint(v, "")
+	if !ok || endpointAddress(e) == "" {
+		return "", fmt.Errorf("%s %s reports no endpoint", kind, name)
+	}
+	return endpointAddress(e), nil
+}
+
+func networkValueFromExposures(snap componentSnapshot, caBundle string) (v1alpha1.MarketNetworkValue, error) {
+	plcURL, ok := exposureURL(snap, serviceNameFor(ComponentKindPlc, NetworkPLCName)+ExposureLocalSuffix)
+	if !ok {
+		return v1alpha1.MarketNetworkValue{}, fmt.Errorf("the Exposure %s is not ready", serviceNameFor(ComponentKindPlc, NetworkPLCName)+ExposureLocalSuffix)
+	}
+	relayURL, ok := exposureURL(snap, serviceNameFor(ComponentKindRelay, NetworkRelayName)+ExposureLocalSuffix)
+	if !ok {
+		return v1alpha1.MarketNetworkValue{}, fmt.Errorf("the Exposure %s is not ready", serviceNameFor(ComponentKindRelay, NetworkRelayName)+ExposureLocalSuffix)
+	}
+	aliceHost, err := exposureHost(snap, serviceNameFor(ComponentKindPds, NetworkAlicePdsName)+ExposureLocalSuffix)
+	if err != nil {
+		return v1alpha1.MarketNetworkValue{}, err
+	}
+	bobHost, err := exposureHost(snap, serviceNameFor(ComponentKindPds, NetworkBobPdsName)+ExposureLocalSuffix)
+	if err != nil {
+		return v1alpha1.MarketNetworkValue{}, err
+	}
+	plcHost, err := exposureHost(snap, serviceNameFor(ComponentKindPlc, NetworkPLCName)+ExposureLocalSuffix)
+	if err != nil {
+		return v1alpha1.MarketNetworkValue{}, err
+	}
+	relayHost, err := exposureHost(snap, serviceNameFor(ComponentKindRelay, NetworkRelayName)+ExposureLocalSuffix)
+	if err != nil {
+		return v1alpha1.MarketNetworkValue{}, err
+	}
+	ingressHost, err := componentHost(snap, ComponentKindIngressProxy, NetworkIngressName)
+	if err != nil {
+		return v1alpha1.MarketNetworkValue{}, err
+	}
+	dispatcherHost, err := componentHost(snap, ComponentKindDispatcherTLS, NetworkDispatcherTLSName)
+	if err != nil {
+		return v1alpha1.MarketNetworkValue{}, err
+	}
+	return v1alpha1.MarketNetworkValue{
+		PlcDirectoryUrl:  plcURL,
+		IngressProxyHost: GuestTLSHost + ":" + portFromValue(ingressHost),
+		RelayUrls:        []string{relayURL},
+		FirehoseUrls:     []string{},
+		GuestTlsUrl:      "https://" + GuestTLSHost + ":" + portFromValue(dispatcherHost),
+		CaBundleRef:      caBundle,
+		Hosts: []v1alpha1.NetworkHost{
+			{Name: NetworkPlcHost, Address: plcHost},
+			{Name: NetworkRelayHost, Address: relayHost},
+			{Name: NetworkIngressHost, Address: ingressHost},
+			{Name: NetworkDispatcherHost, Address: dispatcherHost},
+			{Name: NetworkAlicePdsHost, Address: aliceHost},
+			{Name: NetworkBobPdsHost, Address: bobHost},
+		},
+	}, nil
+}
+
+func networkValueHostURL(value v1alpha1.MarketNetworkValue, name string) string {
+	for _, host := range value.Hosts {
+		if host.Name == name && host.Address != "" {
+			return "http://" + host.Address
+		}
+	}
+	return ""
+}
+
+func portFromValue(address string) string {
+	p, err := portFrom(address)
+	if err != nil {
+		return ""
+	}
+	return p
+}
+
+func networkPds(stateRoot string, value v1alpha1.MarketNetworkValue, lease component.PortLease, name, handle, host string,
+	vault *v1alpha1.ComponentRef, suspend bool) desiredComponent {
+	stateDir := ComponentCRStateDir(NetworkStateDir(stateRoot), ComponentKindPds, name)
+	port := leasePort(lease)
+	publicURL := "http://" + host + ":" + strconv.Itoa(int(port))
+	for _, h := range value.Hosts {
+		if h.Name != host || h.Address == "" {
 			continue
 		}
-		if at, ok := n.rebinding[f.key]; ok && time.Since(at) < FrontRebindAfter {
-			continue
+		if p, err := portFrom(h.Address); err == nil {
+			publicURL = "http://" + host + ":" + p
 		}
-		ws, name, _ := strings.Cut(f.key, "/")
-		ri, err := n.ctl.client(n.ctl.c.workspace()+":"+ws, DenoPodGVR)
-		if err != nil {
-			return "", err
-		}
-		patch, _ := json.Marshal(map[string]any{"metadata": map[string]any{"annotations": map[string]string{denov1alpha1.AnnotationRestart: time.Now().UTC().Format(time.RFC3339Nano)}}})
-		if _, err := ri.Namespace("default").Patch(ctx, name, types.MergePatchType, patch, metav1.PatchOptions{FieldManager: FieldManager}); err != nil {
-			return "", fmt.Errorf("restarting %s onto its kept port: %w", f.key, err)
-		}
-		n.rebinding[f.key] = time.Now()
-		n.ctl.c.log().Info("a market network front is restarted onto the port it keeps", "front", f.key, "listens", *f.port(&live), "keeps", *f.port(&recorded))
 	}
-	return fmt.Sprintf("the network's services listen on %+v, not on the ports they keep across a core restart %+v; waiting for them to bind those again", live, recorded), nil
+	return desiredComponent{Kind: ComponentKindPds, Name: name, Spec: v1alpha1.PdsSpec{
+		ComponentSpec:     NewComponentSpec(stateDir, &value, suspend),
+		Identity:          &v1alpha1.ComponentIdentity{Handle: handle},
+		VaultRef:          vault,
+		Hostnames:         []string{host},
+		Serve:             componentServe("", port),
+		Mode:              v1alpha1.PdsModeFull,
+		PlcURL:            value.PlcDirectoryUrl,
+		PublicBaseURL:     publicURL,
+		RepoKeyPath:       filepath.Join(stateDir, pdsRepoKeyDir),
+		SessionSecretPath: filepath.Join(stateDir, pdsSessionSecretFile),
+		RotationKeyPath:   filepath.Join(stateDir, pdsRotationKeyFile),
+		AllowExplicitDID:  false,
+		OAuth:             &v1alpha1.PdsOAuth{Issuer: publicURL, AllowLocalhostClients: true},
+	}}
 }
 
-func (n *networks) applyServices(ctx context.Context, owner string, values *manifests.MarketNetwork) error {
+func networkDesired(o v1alpha1.MarketNetwork, ws, stateRoot string, leases map[string]component.PortLease,
+	value v1alpha1.MarketNetworkValue) []desiredComponent {
+	suspend := o.Spec.Suspend
+	guestDir := filepath.Join(NetworkStateDir(stateRoot), GuestTLSDir)
+	plc := desiredComponent{Kind: ComponentKindPlc, Name: NetworkPLCName, Spec: v1alpha1.PlcSpec{
+		ComponentSpec: NewComponentSpec(ComponentCRStateDir(NetworkStateDir(stateRoot), ComponentKindPlc, NetworkPLCName), &value, suspend),
+		Hostnames:     []string{NetworkPlcHost},
+		Serve:         componentServe("", leasePort(leases[NetworkPortPlc])),
+	}}
+	relay := desiredComponent{Kind: ComponentKindRelay, Name: NetworkRelayName, Spec: v1alpha1.RelaySpec{
+		ComponentSpec: NewComponentSpec(ComponentCRStateDir(NetworkStateDir(stateRoot), ComponentKindRelay, NetworkRelayName), &value, suspend),
+		PdsRefs: []v1alpha1.ComponentRef{*ComponentRefFor(ComponentKindPds, NetworkAlicePdsName),
+			*ComponentRefFor(ComponentKindPds, NetworkBobPdsName), {Kind: ComponentKindPds, Name: "*"}},
+		Hostnames: []string{NetworkRelayHost},
+		Serve:     componentServe("", leasePort(leases[NetworkPortRelay])),
+	}}
+	ingress := desiredComponent{Kind: ComponentKindIngressProxy, Name: NetworkIngressName, Spec: v1alpha1.IngressProxySpec{
+		ComponentSpec: NewComponentSpec(ComponentCRStateDir(NetworkStateDir(stateRoot), ComponentKindIngressProxy, NetworkIngressName), &value, suspend),
+		Provider:      v1alpha1.IngressProviderXRPCSubscription,
+		Identity:      &v1alpha1.ComponentIdentity{Handle: GuestTLSHost},
+		RelayRef:      ComponentRefFor(ComponentKindRelay, NetworkRelayName),
+		Hostnames:     []string{GuestTLSHost},
+		Serve:         componentServe("", leasePort(leases[NetworkPortIngress])),
+	}}
+	dispatcherBase := NewComponentSpec(ComponentCRStateDir(NetworkStateDir(stateRoot), ComponentKindDispatcherTLS, NetworkDispatcherTLSName), &value, suspend)
+	dispatcherBase.TLS = &v1alpha1.ComponentTLS{Enabled: true, Hostnames: []string{GuestTLSHost, "*." + GuestTLSHost},
+		CertRef: filepath.Join(guestDir, guestLeafFile), CaBundleRef: value.CaBundleRef}
+	dispatcher := desiredComponent{Kind: ComponentKindDispatcherTLS, Name: NetworkDispatcherTLSName, Spec: v1alpha1.DispatcherTLSSpec{
+		ComponentSpec: dispatcherBase,
+		UpstreamRef:   ComponentRefFor(ComponentKindIngressProxy, NetworkIngressName),
+		Hostnames:     []string{GuestTLSHost, "*." + GuestTLSHost},
+		Storage:       &v1alpha1.ComponentStorage{CertsDir: guestDir},
+		Serve:         componentServe("", leasePort(leases[NetworkPortDispatcher])),
+	}}
+	vault := ComponentRefFor("OpenBaoServer", NetworkVaultServer)
+	alice := networkPds(stateRoot, value, leases[NetworkPortAlicePds], NetworkAlicePdsName, "alice.test", NetworkAlicePdsHost, vault, suspend)
+	bob := networkPds(stateRoot, value, leases[NetworkPortBobPds], NetworkBobPdsName, "bob.test", NetworkBobPdsHost, vault, suspend)
+	out := []desiredComponent{policyEngineDesired(suspend), plc, relay, ingress, dispatcher, alice, bob}
+	out = append(out, httpServiceExposures(ws, ComponentKindPlc, NetworkPLCName, "http", &value, []string{NetworkPlcHost}, true, true, suspend)...)
+	out = append(out, httpServiceExposures(ws, ComponentKindRelay, NetworkRelayName, "http", &value, []string{NetworkRelayHost}, true, true, suspend)...)
+	out = append(out, pdsExposures(ws, NetworkAlicePdsName, &value, []string{NetworkAlicePdsHost}, suspend)...)
+	out = append(out, pdsExposures(ws, NetworkBobPdsName, &value, []string{NetworkBobPdsHost}, suspend)...)
+	return out
+}
+
+func (n *networks) ensureVault(ctx context.Context, owner string) error {
 	ix, err := manifests.Load()
 	if err != nil {
 		return err
@@ -166,76 +355,23 @@ func (n *networks) applyServices(ctx context.Context, owner string, values *mani
 	if !ok {
 		return fmt.Errorf("appctl: deploy/sets.yaml names no %s set", NetworkSet)
 	}
-	if values.Ports.Dispatcher != 0 && values.Ports.DispatcherTLS != 0 {
-		values.DispatcherPort, values.GuestTLSPort = values.Ports.Dispatcher, values.Ports.DispatcherTLS
-		set.Phases = slices.Clone(set.Phases)
-		for i := range set.Phases {
-			after := slices.Clone(set.Phases[i].After)
-			for j := range after {
-				after[j].Capture = nil
-			}
-			set.Phases[i].After = after
+	var phases []manifests.Phase
+	for _, p := range set.Phases {
+		if p.Name == "vault" {
+			phases = append(phases, p)
 		}
 	}
-	ap, err := kcpapply.New(n.ctl.restCfg, kcpapply.Options{WaitTimeout: ApplyTimeout, FieldManager: FieldManager,
+	if len(phases) == 0 {
+		return fmt.Errorf("appctl: the %s set names no vault phase", NetworkSet)
+	}
+	set.Phases = phases
+	ap, err := kcpapply.New(n.ctl.restCfg, kcpapply.Options{WaitTimeout: ApplyTimeout, FieldManager: FieldManager, Base: n.ctl.c.workspace(),
 		Labels: map[string]string{OwnerLabel: owner}, Log: n.ctl.c.log()})
 	if err != nil {
 		return err
 	}
-	rep, err := ap.Apply(ctx, set, values)
-	if err != nil {
-		return err
-	}
-	n.ctl.recordPlaced(owner, true, rep)
-	return nil
-}
-
-type serviceReport struct {
-	views      map[string]podView
-	components []v1alpha1.ApplicationComponent
-	listeners  []v1alpha1.ApplicationListener
-	notReady   []string
-	checks     []string
-	verifier   string
-	long       int
-}
-
-func (r serviceReport) ready() bool { return len(r.notReady) == 0 }
-
-func (n *networks) services(ctx context.Context) (serviceReport, error) {
-	r := serviceReport{views: map[string]podView{}}
-	for _, s := range networkServices {
-		ws := n.ctl.c.workspace() + ":" + s.Workspace
-		v, found, err := n.ctl.pod(ctx, ws, s.Name)
-		if err != nil {
-			return r, err
-		}
-		key := s.Workspace + "/" + s.Name
-		r.views[key] = v
-		r.components = append(r.components, v.component())
-		for _, l := range v.Listeners {
-			l.Component = key
-			r.listeners = append(r.listeners, l)
-		}
-		if s.Long {
-			r.long++
-		}
-		if !s.Long {
-			r.verifier = v.Phase
-			continue
-		}
-		switch {
-		case !found:
-			r.notReady = append(r.notReady, key+" is not there")
-		case v.Phase != "Running" || !v.Ready:
-			r.notReady = append(r.notReady, fmt.Sprintf("%s is %s ready=%t", key, v.Phase, v.Ready))
-		case len(v.Listeners) == 0:
-			r.checks = append(r.checks, key+" reports no listener")
-		case !v.stopsItsProcess():
-			r.checks = append(r.checks, key+" carries no "+denov1alpha1.FinalizerDenoPod+" finalizer")
-		}
-	}
-	return r, nil
+	_, err = ap.Apply(ctx, set, &manifests.MarketNetwork{})
+	return err
 }
 
 const (
@@ -283,33 +419,6 @@ func portFrom(address string) (string, error) {
 	return p, nil
 }
 
-func NetworkValue(views map[string]podView, caBundle string) (v1alpha1.MarketNetworkValue, error) {
-	ports := map[string]string{}
-	for _, k := range []string{"global/plc", "relay/relay", "relay/dispatcher", "relay/dispatcher-tls"} {
-		p, err := portFrom(views[k].Address)
-		if err != nil {
-			return v1alpha1.MarketNetworkValue{}, fmt.Errorf("%s: %w", k, err)
-		}
-		ports[k] = p
-	}
-	var hosts []v1alpha1.NetworkHost
-	for _, s := range networkServices {
-		if v := views[s.Workspace+"/"+s.Name]; s.Host != "" && v.Address != "" {
-			hosts = append(hosts, v1alpha1.NetworkHost{Name: s.Host, Address: v.Address})
-		}
-	}
-	return v1alpha1.MarketNetworkValue{
-		Hosts:            hosts,
-		PlcDirectoryUrl:  "https://127.0.0.1:" + ports["global/plc"],
-		IngressProxyHost: GuestTLSHost + ":" + ports["relay/dispatcher"],
-		RelayUrls:        []string{"https://127.0.0.1:" + ports["relay/relay"]},
-		FirehoseUrls:     []string{},
-		QrOrigin:         "",
-		GuestTlsUrl:      "https://" + GuestTLSHost + ":" + ports["relay/dispatcher-tls"],
-		CaBundleRef:      caBundle,
-	}, nil
-}
-
 func (n *networks) caBundle(ctx context.Context) (string, error) {
 	dir := NetworkStateDir(n.ctl.c.Layout.StateDir)
 	if len(n.pkiPEM) == 0 {
@@ -332,24 +441,6 @@ func (n *networks) caBundle(ctx context.Context) (string, error) {
 		return path, nil
 	}
 	return path, os.WriteFile(path, []byte(want), 0o644)
-}
-
-func (n *networks) deleteServices(ctx context.Context, owner string) (int, error) {
-	left := 0
-	seen := map[string]bool{}
-	for _, s := range networkServices {
-		ws := n.ctl.c.workspace() + ":" + s.Workspace
-		if seen[ws] {
-			continue
-		}
-		seen[ws] = true
-		l, err := n.ctl.deletePods(ctx, ws, owner, nil)
-		if err != nil && !apierrors.IsNotFound(err) {
-			return left, err
-		}
-		left += l
-	}
-	return left, nil
 }
 
 func (n *networks) knownChildren() []string {
@@ -417,16 +508,16 @@ func (n *networks) reconcile(ctx context.Context, u *unstructured.Unstructured) 
 		return n.ctl.writeStatus(ctx, MarketNetworkGVR, o.Name, st)
 	}
 	if u.GetDeletionTimestamp() != nil {
-		write(v1alpha1.ApplicationPhaseDeleting, "tearing down the child applications, then the network's services")
+		write(v1alpha1.ApplicationPhaseDeleting, "tearing down the child applications, then the network's components")
 		if err := n.teardownAll(ctx, nil); err != nil {
 			return write(v1alpha1.ApplicationPhaseDeleting, err.Error())
 		}
-		left, err := n.deleteServices(ctx, owner)
+		left, err := n.ctl.stopComponents(ctx, owner)
 		if err != nil {
 			return err
 		}
 		if left > 0 {
-			return write(v1alpha1.ApplicationPhaseDeleting, fmt.Sprintf("%d service(s) stopping", left))
+			return write(v1alpha1.ApplicationPhaseDeleting, fmt.Sprintf("%d component(s) stopping", left))
 		}
 		gone, err := n.deleteVault(ctx)
 		if err != nil {
@@ -436,8 +527,10 @@ func (n *networks) reconcile(ctx context.Context, u *unstructured.Unstructured) 
 			return write(v1alpha1.ApplicationPhaseDeleting, "the OpenBaoServer "+NetworkVaultServer+" is stopping")
 		}
 		delete(n.applied, string(o.UID))
-		n.ctl.forgetPlaced(owner)
-		log.Info("the market network is gone: children, services and its OpenBaoServer")
+		if n.valueUID == string(o.UID) {
+			n.value, n.valueUID = nil, ""
+		}
+		log.Info("the market network is gone: children, components and its OpenBaoServer")
 		return n.ctl.setFinalizer(ctx, MarketNetworkGVR, u, false)
 	}
 	if !hasFinalizer(u) {
@@ -448,58 +541,113 @@ func (n *networks) reconcile(ctx context.Context, u *unstructured.Unstructured) 
 	if o.Spec.Profile != NetworkProfile {
 		return write(v1alpha1.ApplicationPhaseFailed, fmt.Sprintf("profile %q: the built MarketNetwork profile is %s", o.Spec.Profile, NetworkProfile))
 	}
-	var kept manifests.NetworkPorts
-	devinstance.ReadJSON(filepath.Join(NetworkStateDir(n.ctl.c.Layout.StateDir), NetworkPortsFile), &kept)
-	if n.applied[string(o.UID)] != o.Generation || n.appliedPorts[string(o.UID)] != kept || n.ctl.lostComponent(ctx, owner) != "" {
-		values, err := n.values(o.Spec)
-		if err != nil {
-			return write(v1alpha1.ApplicationPhaseFailed, err.Error())
+	stateRoot := n.ctl.c.Layout.StateDir
+	if n.applied[string(o.UID)] != o.Generation {
+		write(v1alpha1.ApplicationPhaseProvisioning, "applying the network's OpenBaoServer")
+		if err := n.ensureVault(ctx, owner); err != nil {
+			return write(v1alpha1.ApplicationPhaseProvisioning, "the network's OpenBaoServer: "+err.Error())
 		}
-		write(v1alpha1.ApplicationPhaseProvisioning, "applying the network's services")
-		if err := n.applyServices(ctx, owner, &values); err != nil {
-			return write(v1alpha1.ApplicationPhaseProvisioning, "the network's services: "+err.Error())
-		}
-		n.applied[string(o.UID)], n.appliedPorts[string(o.UID)] = o.Generation, values.Ports
-		log.Info("applied the network's services", "set", NetworkSet, "ports", fmt.Sprintf("%+v", values.Ports))
+		n.applied[string(o.UID)] = o.Generation
+		log.Info("applied the market network's OpenBaoServer", "set", NetworkSet)
 	}
-	rep, err := n.services(ctx)
+	if _, err := n.vault(ctx); err != nil {
+		delete(n.applied, string(o.UID))
+		return write(v1alpha1.ApplicationPhaseProvisioning, "waiting for the network's OpenBaoServer: "+err.Error())
+	}
+	guestDir := filepath.Join(NetworkStateDir(stateRoot), GuestTLSDir)
+	if err := EnsureGuestTLS(guestDir); err != nil {
+		return write(v1alpha1.ApplicationPhaseFailed, err.Error())
+	}
+	leases, err := n.portLeases()
 	if err != nil {
-		return err
-	}
-	views := rep.views
-	st.Components, st.Listeners = rep.components, rep.listeners
-	if !rep.ready() {
-		setCondition(&st.Conditions, o.Generation, ConditionServicesReady, false, "Waiting", strings.Join(rep.notReady, "; "))
-		return write(v1alpha1.ApplicationPhaseProvisioning, "waiting for the network's services to report ready")
-	}
-	if why, err := n.holdPorts(ctx, views); err != nil || why != "" {
-		if err != nil {
-			why = err.Error()
-		}
-		setCondition(&st.Conditions, o.Generation, ConditionServicesReady, false, "Rebinding", why)
-		return write(v1alpha1.ApplicationPhaseProvisioning, why)
+		return write(v1alpha1.ApplicationPhaseFailed, err.Error())
 	}
 	bundle, err := n.caBundle(ctx)
 	if err != nil {
 		return write(v1alpha1.ApplicationPhaseProvisioning, "the network CA bundle: "+err.Error())
 	}
-	value, err := NetworkValue(views, bundle)
-	if err != nil {
+	value := networkValueFromLeases(leases, bundle)
+	if n.value != nil && n.valueUID == string(o.UID) {
+		value = *n.value
+	}
+	for _, name := range []string{NetworkAlicePdsName, NetworkBobPdsName} {
+		stateDir := ComponentCRStateDir(NetworkStateDir(stateRoot), ComponentKindPds, name)
+		if err := ensurePDSKeyFiles(stateDir); err != nil {
+			return write(v1alpha1.ApplicationPhaseFailed, "the "+name+" PDS keys: "+err.Error())
+		}
+	}
+	desired := networkDesired(o, n.ctl.c.workspace(), stateRoot, leases, value)
+	n.ctl.ensureRelayStatus(ctx, ComponentKey(ComponentKindRelay, NetworkRelayName))
+	if o.Spec.Suspend {
+		if err := n.ctl.ensureDesired(ctx, u, desired); err != nil {
+			return write(v1alpha1.ApplicationPhaseProvisioning, err.Error())
+		}
+		_ = n.ctl.pruneDesired(ctx, owner, desired)
+		snap, err := n.ctl.componentSnapshot(ctx, owner)
+		if err != nil {
+			return err
+		}
+		apps := make([]v1alpha1.NetworkAppStatus, len(o.Spec.Apps))
+		for i, app := range o.Spec.Apps {
+			apps[i] = n.suspendApp(ctx, app)
+		}
+		st.Apps = apps
+		st.Components, st.Listeners = snap.Components, snap.Listeners
+		setCondition(&st.Conditions, o.Generation, ConditionVerifierPassed, false, "Suspended", "the network is suspended")
+		return write(v1alpha1.ApplicationPhasePending, "suspended")
+	}
+	if err := n.ctl.ensureDesired(ctx, u, desired); err != nil {
 		return write(v1alpha1.ApplicationPhaseProvisioning, err.Error())
 	}
-	st.Network = &value
-	bob := views["bob/pds"]
-	pdsPort, err := portFrom(bob.Address)
-	if err != nil {
-		return write(v1alpha1.ApplicationPhaseProvisioning, "bob/pds: "+err.Error())
+	if err := n.ctl.pruneDesired(ctx, owner, desired); err != nil {
+		return err
 	}
-	pdsURL := "https://127.0.0.1:" + pdsPort
+	snap, err := n.ctl.componentSnapshot(ctx, owner)
+	if err != nil {
+		return err
+	}
+	st.Components, st.Listeners = snap.Components, snap.Listeners
+	if !snap.complete(desired) {
+		var waiting []string
+		for _, d := range desired {
+			if !isExposureKind(d.Kind) && !snap.ready(d.Kind, d.Name) {
+				waiting = append(waiting, ComponentKey(d.Kind, d.Name))
+			}
+		}
+		setCondition(&st.Conditions, o.Generation, ConditionServicesReady, false, "Waiting", strings.Join(waiting, "; "))
+		return write(v1alpha1.ApplicationPhaseProvisioning, "waiting for the network's components to report ready")
+	}
+	published, err := networkValueFromExposures(snap, bundle)
+	if err != nil {
+		if n.value == nil || n.valueUID != string(o.UID) {
+			setCondition(&st.Conditions, o.Generation, ConditionServicesReady, false, "Endpoints", err.Error())
+			return write(v1alpha1.ApplicationPhaseProvisioning, "the network's Exposure endpoints: "+err.Error())
+		}
+		published = *n.value
+	} else if n.value == nil || n.valueUID != string(o.UID) || !sameSpec(*n.value, published) {
+		n.value = &published
+		n.valueUID = string(o.UID)
+		desired = networkDesired(o, n.ctl.c.workspace(), stateRoot, leases, published)
+		if err := n.ctl.ensureDesired(ctx, u, desired); err != nil {
+			return write(v1alpha1.ApplicationPhaseProvisioning, err.Error())
+		}
+		if err := n.ctl.pruneDesired(ctx, owner, desired); err != nil {
+			return err
+		}
+	}
+	st.Network = &published
+	pdsURL, _ := exposureURL(snap, serviceNameFor(ComponentKindPds, NetworkBobPdsName)+ExposureLocalSuffix)
+	aliceURL, _ := exposureURL(snap, serviceNameFor(ComponentKindPds, NetworkAlicePdsName)+ExposureLocalSuffix)
+	if pdsURL == "" {
+		pdsURL = networkValueHostURL(published, NetworkBobPdsHost)
+	}
+	if aliceURL == "" {
+		aliceURL = networkValueHostURL(published, NetworkAlicePdsHost)
+	}
+	if pdsURL == "" || aliceURL == "" {
+		return write(v1alpha1.ApplicationPhaseProvisioning, "waiting for the network's PDS Exposure URLs")
+	}
 	st.BidderPdsUrl = pdsURL
-	alicePort, err := portFrom(views["alice/pds"].Address)
-	if err != nil {
-		return write(v1alpha1.ApplicationPhaseProvisioning, "alice/pds: "+err.Error())
-	}
-	aliceURL := "https://127.0.0.1:" + alicePort
 	var keep []string
 	for _, app := range o.Spec.Apps {
 		if c, err := n.child(app); err == nil {
@@ -521,7 +669,7 @@ func (n *networks) reconcile(ctx context.Context, u *unstructured.Unstructured) 
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			apps[i] = n.ensureApp(ctx, app, value, pdsURL, aliceURL, bidderDids)
+			apps[i] = n.ensureApp(ctx, app, published, pdsURL, aliceURL, bidderDids)
 		}()
 	}
 	wg.Wait()
@@ -534,39 +682,157 @@ func (n *networks) reconcile(ctx context.Context, u *unstructured.Unstructured) 
 	if err := n.grantPeers(ctx, names); err != nil {
 		log.Warn("granting the child applications reads of each other's MarketIdentity objects", "err", err.Error())
 	}
-	allReady := true
-	for i, a := range apps {
-		if k := o.Spec.Apps[i].Kind; k == v1alpha1.ApplicationKindMarketRequester || k == v1alpha1.ApplicationKindSshGateway {
-			continue
-		}
-		allReady = allReady && a.Phase == v1alpha1.ApplicationPhaseReady
-	}
-	if len(rep.checks) > 0 {
-		setCondition(&st.Conditions, o.Generation, ConditionServicesReady, false, "Checks", strings.Join(rep.checks, "; "))
-	} else {
-		setCondition(&st.Conditions, o.Generation, ConditionServicesReady, true, "Ready",
-			fmt.Sprintf("%d service(s) Running and ready, each listening and carrying %s", rep.long, denov1alpha1.FinalizerDenoPod))
-	}
-	switch rep.verifier {
-	case "Succeeded":
-		setCondition(&st.Conditions, o.Generation, ConditionVerifierPassed, true, "Succeeded", "alice/verifier created an account on alice's PDS and saw its commit on the relay")
-	default:
-		setCondition(&st.Conditions, o.Generation, ConditionVerifierPassed, false, "Phase"+rep.verifier, "alice/verifier is "+rep.verifier)
-	}
+	setCondition(&st.Conditions, o.Generation, ConditionServicesReady, true, "Ready",
+		fmt.Sprintf("%d component(s) are ready and report their endpoints", len(snap.Views)))
 	if wrong := n.oneKcp(apps); len(wrong) > 0 {
 		setCondition(&st.Conditions, o.Generation, ConditionOneKcp, false, "Apart", strings.Join(wrong, "; "))
 	} else {
 		setCondition(&st.Conditions, o.Generation, ConditionOneKcp, true, "Workspaces", "every child application runs in its own workspace of the network's kcp")
 	}
-	if !allReady {
-		return write(v1alpha1.ApplicationPhaseProvisioning, "the network's services are ready; waiting for its child applications")
+	if err := n.verify(ctx, snap, apps); err != nil {
+		setCondition(&st.Conditions, o.Generation, ConditionVerifierPassed, false, "Probe", err.Error())
+		return write(v1alpha1.ApplicationPhaseProvisioning, "the network verifier: "+err.Error())
 	}
-	for _, t := range []string{ConditionServicesReady, ConditionVerifierPassed, ConditionOneKcp} {
+	setCondition(&st.Conditions, o.Generation, ConditionVerifierPassed, true, "Verified",
+		"the PLC, relay, PDS, ingress and child application endpoints answer")
+	for _, t := range []string{ConditionServicesReady, ConditionOneKcp, ConditionVerifierPassed} {
 		if c := meta.FindStatusCondition(st.Conditions, t); c == nil || c.Status != metav1.ConditionTrue {
 			return write(v1alpha1.ApplicationPhaseProvisioning, "the child applications are ready; waiting for condition "+t)
 		}
 	}
-	return write(v1alpha1.ApplicationPhaseReady, fmt.Sprintf("%d service(s) and %d child application(s), each in its own workspace of one kcp, are ready", len(rep.components), len(apps)))
+	return write(v1alpha1.ApplicationPhaseReady, fmt.Sprintf("%d component(s) and %d child application(s), each in its own workspace of one kcp, are ready", len(snap.Views), len(apps)))
+}
+
+const VerifierProbeTimeout = 5 * time.Second
+
+func verifierTransport(req *http.Request, handlers *component.HandlerRegistry) http.RoundTripper {
+	if handlers == nil || req == nil || req.URL == nil {
+		return nil
+	}
+	host := strings.ToLower(req.URL.Hostname())
+	if host == "" {
+		return nil
+	}
+	if _, ok := handlers.HandlerForHost(host); ok {
+		return handlers.RoundTripper()
+	}
+	return nil
+}
+
+func (n *networks) verify(ctx context.Context, snap componentSnapshot, apps []v1alpha1.NetworkAppStatus) error {
+	for _, check := range []struct{ kind, name, path string }{
+		{ComponentKindPlc, NetworkPLCName, "/health"},
+		{ComponentKindRelay, NetworkRelayName, "/xrpc/_health"},
+		{ComponentKindPds, NetworkAlicePdsName, "/xrpc/_health"},
+		{ComponentKindPds, NetworkBobPdsName, "/xrpc/_health"},
+		{ComponentKindIngressProxy, NetworkIngressName, "/.well-known/did.json"},
+	} {
+		v, ok := snap.view(check.kind, check.name)
+		if !ok {
+			return fmt.Errorf("%s %s is not there", check.kind, check.name)
+		}
+		if !v.Status.Ready {
+			return fmt.Errorf("%s %s is not ready", check.kind, check.name)
+		}
+		e, ok := componentEndpoint(v, "http")
+		if !ok {
+			e, ok = componentEndpoint(v, "")
+		}
+		if !ok {
+			return fmt.Errorf("%s %s reports no endpoint", check.kind, check.name)
+		}
+		base := endpointURL(e)
+		if base == "" {
+			return fmt.Errorf("%s %s reports no endpoint URL", check.kind, check.name)
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(base, "/")+check.path, nil)
+		if err != nil {
+			return err
+		}
+		if check.kind == ComponentKindIngressProxy {
+			host := GuestTLSHost
+			if n.value != nil && n.value.IngressProxyHost != "" {
+				if h, _, ok := strings.Cut(n.value.IngressProxyHost, ":"); ok && h != "" {
+					host = h
+				} else {
+					host = n.value.IngressProxyHost
+				}
+			}
+			req.Host = host
+		}
+		client := &http.Client{Timeout: VerifierProbeTimeout}
+		if n.ctl != nil {
+			if transport := verifierTransport(req, n.ctl.c.Handlers); transport != nil {
+				client.Transport = transport
+			}
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			return fmt.Errorf("%s %s at %s: %w", check.kind, check.name, check.path, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return fmt.Errorf("%s %s at %s returned HTTP %d", check.kind, check.name, check.path, resp.StatusCode)
+		}
+	}
+	for _, a := range apps {
+		if a.Kind == v1alpha1.ApplicationKindMarketRequester || a.Kind == v1alpha1.ApplicationKindSshGateway {
+			continue
+		}
+		if a.Message == StoppedMessage {
+			continue
+		}
+		if a.Phase != v1alpha1.ApplicationPhaseReady {
+			return fmt.Errorf("the child application %s is %s: %s", a.Name, a.Phase, a.Message)
+		}
+	}
+	return nil
+}
+
+func (n *networks) suspendApp(ctx context.Context, app v1alpha1.NetworkApp) v1alpha1.NetworkAppStatus {
+	out := v1alpha1.NetworkAppStatus{Name: app.Name, Kind: app.Kind, Phase: v1alpha1.ApplicationPhaseProvisioning}
+	fail := func(err error) v1alpha1.NetworkAppStatus {
+		out.Phase, out.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
+		return out
+	}
+	if _, err := GVRFor(app.Kind); err != nil {
+		return fail(err)
+	}
+	c, err := n.child(app)
+	if err != nil {
+		return fail(err)
+	}
+	out.Instance = c.id
+	var rec devinstance.Record
+	if devinstance.ReadJSON(c.layout.Record, &rec) != nil || rec.AdminKubeconfig == "" {
+		out.Phase, out.Message = v1alpha1.ApplicationPhasePending, "suspended"
+		return out
+	}
+	ri, err := childClient(rec, app.Kind)
+	if err != nil {
+		return fail(err)
+	}
+	_, err = ri.Patch(ctx, ChildRootName, types.MergePatchType, []byte(`{"spec":{"suspend":true}}`), metav1.PatchOptions{FieldManager: FieldManager})
+	if apierrors.IsNotFound(err) {
+		out.Phase, out.Message = v1alpha1.ApplicationPhasePending, "suspended"
+		return out
+	}
+	if err != nil {
+		return fail(err)
+	}
+	rs, found, err := readRoot(ctx, rec, app.Kind)
+	if err != nil {
+		return fail(err)
+	}
+	if !found {
+		out.Phase, out.Message = v1alpha1.ApplicationPhasePending, "suspended"
+		return out
+	}
+	out.Phase, out.Message, out.Did, out.Components, out.Listeners = rs.Phase, rs.Message, rs.Did, rs.Components, rs.Listeners
+	if out.Phase == "" {
+		out.Phase = v1alpha1.ApplicationPhasePending
+	}
+	return out
 }
 
 func (n *networks) ensureApp(ctx context.Context, app v1alpha1.NetworkApp, value v1alpha1.MarketNetworkValue, pdsURL, aliceURL string, bidderDids []string) v1alpha1.NetworkAppStatus {
@@ -595,7 +861,7 @@ func (n *networks) ensureApp(ctx context.Context, app v1alpha1.NetworkApp, value
 	}
 	var gw *devinstance.GatewayChild
 	if app.Kind == v1alpha1.ApplicationKindGateway {
-		if gw, err = GatewayChildOf(ctx, c.id, c.layout.StateDir, app, value, aliceURL); err != nil {
+		if gw, err = GatewayChildOf(ctx, c.id, c.layout.StateDir, app, value, aliceURL, bidderDids); err != nil {
 			return fail(err)
 		}
 	}
@@ -608,6 +874,9 @@ func (n *networks) ensureApp(ctx context.Context, app v1alpha1.NetworkApp, value
 	var root any
 	switch app.Kind {
 	case v1alpha1.ApplicationKindMarketBidder:
+		if len(bidderDids) > 0 {
+			meta.Annotations = map[string]string{BidderDIDsAnnotation: strings.Join(bidderDids, ",")}
+		}
 		handle := app.Name + "." + BidderAccountDomain
 		var fc *v1alpha1.FirecrackerProvider
 		if app.Firecracker != nil {

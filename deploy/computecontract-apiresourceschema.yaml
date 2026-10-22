@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-4.computecontracts.socialweb.computer
+  name: v1alpha1-6.computecontracts.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -72,6 +72,26 @@ spec:
                   cluster:
                     type: string
                   meshd:
+                    type: object
+                    properties:
+                      downloadBase:
+                        type: string
+                      pins:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            arch:
+                              type: string
+                            sha256:
+                              type: string
+                          required:
+                            - arch
+                            - sha256
+                    required:
+                      - downloadBase
+                      - pins
+                  nodeAgent:
                     type: object
                     properties:
                       downloadBase:
@@ -462,6 +482,17 @@ spec:
                   attempts:
                     type: integer
                     format: int32
+              release:
+                type: object
+                properties:
+                  startedAt:
+                    type: string
+                  deadline:
+                    type: string
+                  attempts:
+                    type: integer
+                  lastError:
+                    type: string
       additionalPrinterColumns:
         - name: Phase
           type: string

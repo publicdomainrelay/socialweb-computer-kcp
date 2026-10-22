@@ -4,16 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"os"
 	"slices"
-	"strings"
 
+	"github.com/bluesky-social/indigo/atproto/syntax"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
 )
 
@@ -162,28 +162,29 @@ func (ctl *Controller) reconcileOperatorRecords(ctx context.Context, ws string, 
 	if err != nil {
 		return err
 	}
-	pds := strings.TrimSuffix(s.Service, "/")
-	sess, err := xrpcCall(ctx, http.MethodPost, pds+"/xrpc/com.atproto.server.createSession", n.CaBundleRef, "",
-		map[string]string{"identifier": s.Identifier, "password": s.Password})
+	pds, err := ctl.pdsFor(s.Service, n.CaBundleRef)
 	if err != nil {
 		return err
 	}
-	operator, _ := sess["did"].(string)
-	access, _ := sess["accessJwt"].(string)
+	sess, err := pds.CreateSession(ctx, s.Identifier, s.Password)
+	if err != nil {
+		return err
+	}
+	operator := sess.DID
 	for _, o := range held {
 		var record map[string]any
 		if err := json.Unmarshal(o.Spec.Record, &record); err != nil {
 			return fmt.Errorf("AtprotoRecord %s: the record is not a JSON object: %w", o.Name, err)
 		}
-		out, err := xrpcCall(ctx, http.MethodPost, pds+"/xrpc/com.atproto.repo.putRecord", n.CaBundleRef, access,
-			map[string]any{"repo": operator, "collection": o.Spec.Collection, "rkey": o.Spec.Rkey, "record": record})
+		path := pdsclient.RepoPath{Repo: operator, Collection: syntax.NSID(o.Spec.Collection), Rkey: syntax.RecordKey(o.Spec.Rkey)}
+		out, err := pds.PutRecord(ctx, path, o.Spec.Record, pdsclient.WriteOptions{})
 		if err != nil {
 			return fmt.Errorf("AtprotoRecord %s: %w", o.Name, err)
 		}
-		uri, _ := out["uri"].(string)
-		cid, _ := out["cid"].(string)
+		uri := out.URI.String()
+		cid := out.CID.String()
 		status, err := json.Marshal(map[string]any{"status": map[string]any{"phase": v1alpha1.AtprotoRecordPhaseApplied,
-			"observedGeneration": o.Generation, "did": operator, "uri": uri, "cid": cid, "message": ""}})
+			"observedGeneration": o.Generation, "did": operator.String(), "uri": uri, "cid": cid, "message": ""}})
 		if err != nil {
 			return err
 		}

@@ -1,9 +1,0 @@
-{
-  "name": "@publicdomainrelay/kcp-client-abc",
-  "version": "0.0.0",
-  "license": "Unlicense",
-  "exports": "./mod.ts",
-  "imports": {
-    "@publicdomainrelay/kcp-client-common": "jsr:@publicdomainrelay/kcp-client-common@^0"
-  }
-}

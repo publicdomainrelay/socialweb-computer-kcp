@@ -25,6 +25,8 @@ import (
 	"testing"
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vmruntime"
 )
@@ -52,6 +54,8 @@ const (
 	healthEvery    = 3 * time.Second
 	healthTimeout  = 20 * time.Second
 	maxSocketPath  = 107
+
+	verifierFailureGrace = time.Minute
 )
 
 type Harness struct {
@@ -362,6 +366,7 @@ type Network struct {
 	mu         sync.Mutex
 	runs       []string
 	seenDevsup bool
+	probeSince time.Time
 }
 
 type UpReport struct {
@@ -701,10 +706,22 @@ func (n *Network) health() error {
 	if s.Phase == v1alpha1.ApplicationPhaseFailed {
 		return fmt.Errorf("the MarketNetwork is Failed: %s", s.Message)
 	}
-	for _, c := range s.Components {
-		if c.Name == "verifier" && c.Phase == "Failed" {
-			return fmt.Errorf("the network's verifier DenoPod Failed")
+	probe, message := false, ""
+	for _, c := range s.Conditions {
+		if c.Type == "VerifierPassed" && c.Status == metav1.ConditionFalse && c.Reason == "Probe" {
+			probe, message = true, c.Message
 		}
+	}
+	n.mu.Lock()
+	if !probe {
+		n.probeSince = time.Time{}
+	} else if n.probeSince.IsZero() {
+		n.probeSince = time.Now()
+	}
+	failedFor := time.Since(n.probeSince)
+	n.mu.Unlock()
+	if probe && failedFor >= verifierFailureGrace {
+		return fmt.Errorf("the network verifier has failed for %s: %s", failedFor.Round(time.Second), message)
 	}
 	for _, a := range s.Apps {
 		if a.Phase == v1alpha1.ApplicationPhaseFailed {
@@ -921,6 +938,17 @@ func (n *Network) FilesContaining(dirs []string, values []string, excludeDirs ..
 	return out, nil
 }
 
+func (n *Network) coreOf(dir string) (int, error) {
+	r := n.h.As(context.Background(), "pgrep", "-f", "-u", fmt.Sprint(n.h.UID), "--", "[i]nternal dev-core --instance-dir "+dir+" ")
+	fields := strings.Fields(r.Stdout)
+	if len(fields) != 1 {
+		return 0, fmt.Errorf("want one dev-core of %s, found %q", dir, strings.TrimSpace(r.Stdout))
+	}
+	var pid int
+	_, err := fmt.Sscan(fields[0], &pid)
+	return pid, err
+}
+
 func (n *Network) JournalContains(values []string, since time.Time) (int, error) {
 	p, rm, err := n.patternFile(values...)
 	if err != nil {
@@ -994,8 +1022,9 @@ func (n *Network) diagnose() {
 
 func (n *Network) collectPodLogs() {
 	t := n.t
-	r := n.h.As(context.Background(), "find", n.StateDir, "(", "-name", "ts", "-o", "-name", "deno", "-o", "-name", "handles", "-o", "-name", "postgres", "-o", "-name", "openbaoservers", ")", "-prune",
-		"-o", "-type", "f", "(", "-name", "stdout.txt", "-o", "-name", "stderr.txt", "-o", "-name", "core.log", ")", "-print")
+	r := n.h.As(context.Background(), "find", n.StateDir, "(", "-name", "tmp", "-o", "-name", "kcp", "-o", "-name", "handles",
+		"-o", "-name", "components", "-o", "-name", "clusterprovider", ")", "-prune",
+		"-o", "-type", "f", "-name", "core.log", "-print")
 	files := strings.Fields(r.Stdout)
 	sort.Strings(files)
 	dir := filepath.Join(n.Logs, "pods")
@@ -1022,7 +1051,7 @@ func (n *Network) collectPodLogs() {
 		c := n.h.As(context.Background(), "tail", "-c", "2000000", f)
 		rel, _ := filepath.Rel(n.StateDir, f)
 		os.WriteFile(filepath.Join(dir, strings.ReplaceAll(rel, "/", "_")), []byte(c.Stdout), 0o644)
-		if strings.HasSuffix(f, "stderr.txt") || strings.HasSuffix(f, "core.log") {
+		if strings.HasSuffix(f, "core.log") {
 			lines := strings.Split(strings.TrimRight(c.Stdout, "\n"), "\n")
 			var bad []string
 			for _, l := range lines {

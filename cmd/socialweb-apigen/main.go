@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	root := flag.String("root", ".", "the repository root: api/v1alpha1 is read from it and the revision lock beside deploy/")
+	root := flag.String("root", ".", "the repository root: the api groups are read from it, and the revision lock beside deploy/")
 	out := flag.String("out", "", "the directory the generated files are written under, at their repository-relative paths; empty writes them into -root")
 	list := flag.Bool("list", false, "print the repository-relative path of every generated file and write nothing")
 	hash := flag.String("hash", "", "print the name and spec hash of this APIResourceSchema manifest, as the revision lock records it, and exit")

@@ -29,9 +29,9 @@ type runObject struct {
 	} `json:"status"`
 }
 
-var denoRuns = schema.GroupVersionResource{Group: "deno.computer", Version: "v1alpha1", Resource: "denoruns"}
+var runs = schema.GroupVersionResource{Group: "policy.socialweb.computer", Version: "v1alpha1", Resource: "policyworkflowruns"}
 
-var _ store.Resource[runObject] = Of[runObject](nil, denoRuns)
+var _ store.Resource[runObject] = Of[runObject](nil, runs)
 
 type request struct {
 	Method string
@@ -89,14 +89,14 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 
 func TestGetDecodesThroughTheClusterPath(t *testing.T) {
 	store, _ := newServer(t, []request{
-		{Method: "GET", Path: "/clusters/root:alice/apis/deno.computer/v1alpha1/namespaces/default/denoruns/run-1"},
+		{Method: "GET", Path: "/clusters/root:alice/apis/policy.socialweb.computer/v1alpha1/namespaces/default/policyworkflowruns/run-1"},
 	}, func(w http.ResponseWriter, _ *http.Request, _ int) {
 		writeJSON(w, 200, map[string]any{
 			"metadata": map[string]any{"name": "run-1", "namespace": "default"},
 			"status":   map[string]any{"phase": "Running"},
 		})
 	})
-	resource := Of[runObject](store, denoRuns)
+	resource := Of[runObject](store, runs)
 	found, err := resource.Get(context.Background(), ref.New("root:alice", "default", "run-1"))
 	if err != nil {
 		t.Fatal(err)
@@ -108,14 +108,14 @@ func TestGetDecodesThroughTheClusterPath(t *testing.T) {
 
 func TestListDecodesItems(t *testing.T) {
 	store, _ := newServer(t, []request{
-		{Method: "GET", Path: "/clusters/root:alice/apis/deno.computer/v1alpha1/denoruns"},
+		{Method: "GET", Path: "/clusters/root:alice/apis/policy.socialweb.computer/v1alpha1/policyworkflowruns"},
 	}, func(w http.ResponseWriter, _ *http.Request, _ int) {
 		writeJSON(w, 200, map[string]any{"items": []any{
 			map[string]any{"metadata": map[string]any{"name": "a"}},
 			map[string]any{"metadata": map[string]any{"name": "b"}},
 		}})
 	})
-	resource := Of[runObject](store, denoRuns)
+	resource := Of[runObject](store, runs)
 	items, err := resource.List(context.Background(), "root:alice")
 	if err != nil {
 		t.Fatal(err)
@@ -127,13 +127,13 @@ func TestListDecodesItems(t *testing.T) {
 
 func TestListInDecodesItemsInOneNamespace(t *testing.T) {
 	store, _ := newServer(t, []request{
-		{Method: "GET", Path: "/clusters/root:alice/apis/deno.computer/v1alpha1/namespaces/default/denoruns"},
+		{Method: "GET", Path: "/clusters/root:alice/apis/policy.socialweb.computer/v1alpha1/namespaces/default/policyworkflowruns"},
 	}, func(w http.ResponseWriter, _ *http.Request, _ int) {
 		writeJSON(w, 200, map[string]any{"items": []any{
 			map[string]any{"metadata": map[string]any{"name": "a", "namespace": "default"}},
 		}})
 	})
-	resource := Of[runObject](store, denoRuns)
+	resource := Of[runObject](store, runs)
 	items, err := resource.ListIn(context.Background(), "root:alice", "default")
 	if err != nil {
 		t.Fatal(err)
@@ -145,11 +145,11 @@ func TestListInDecodesItemsInOneNamespace(t *testing.T) {
 
 func TestCreatePostsTheObjectToItsNamespace(t *testing.T) {
 	store, _ := newServer(t, []request{
-		{Method: "POST", Path: "/clusters/root:alice/apis/deno.computer/v1alpha1/namespaces/default/denoruns"},
+		{Method: "POST", Path: "/clusters/root:alice/apis/policy.socialweb.computer/v1alpha1/namespaces/default/policyworkflowruns"},
 	}, func(w http.ResponseWriter, _ *http.Request, _ int) {
 		writeJSON(w, 201, map[string]any{"metadata": map[string]any{"name": "run-1"}})
 	})
-	resource := Of[runObject](store, denoRuns)
+	resource := Of[runObject](store, runs)
 	obj := &runObject{}
 	obj.Metadata.Name = "run-1"
 	obj.Metadata.Namespace = "default"
@@ -160,11 +160,11 @@ func TestCreatePostsTheObjectToItsNamespace(t *testing.T) {
 
 func TestPatchStatusUsesTheSubresource(t *testing.T) {
 	store, seen := newServer(t, []request{
-		{Method: "PATCH", Path: "/clusters/root:alice/apis/deno.computer/v1alpha1/namespaces/default/denoruns/run-1/status"},
+		{Method: "PATCH", Path: "/clusters/root:alice/apis/policy.socialweb.computer/v1alpha1/namespaces/default/policyworkflowruns/run-1/status"},
 	}, func(w http.ResponseWriter, _ *http.Request, _ int) {
 		writeJSON(w, 200, map[string]any{})
 	})
-	resource := Of[runObject](store, denoRuns)
+	resource := Of[runObject](store, runs)
 	patch, err := statuspatch.Merge(map[string]any{"phase": "Succeeded"})
 	if err != nil {
 		t.Fatal(err)
@@ -182,8 +182,8 @@ func TestPatchStatusUsesTheSubresource(t *testing.T) {
 
 func TestRemoveFinalizerTestsTheCachedList(t *testing.T) {
 	store, seen := newServer(t, []request{
-		{Method: "GET", Path: "/clusters/root:alice/apis/deno.computer/v1alpha1/namespaces/default/denoruns/run-1"},
-		{Method: "PATCH", Path: "/clusters/root:alice/apis/deno.computer/v1alpha1/namespaces/default/denoruns/run-1"},
+		{Method: "GET", Path: "/clusters/root:alice/apis/policy.socialweb.computer/v1alpha1/namespaces/default/policyworkflowruns/run-1"},
+		{Method: "PATCH", Path: "/clusters/root:alice/apis/policy.socialweb.computer/v1alpha1/namespaces/default/policyworkflowruns/run-1"},
 	}, func(w http.ResponseWriter, _ *http.Request, index int) {
 		if index == 0 {
 			writeJSON(w, 200, map[string]any{
@@ -193,7 +193,7 @@ func TestRemoveFinalizerTestsTheCachedList(t *testing.T) {
 		}
 		writeJSON(w, 200, map[string]any{})
 	})
-	resource := Of[runObject](store, denoRuns)
+	resource := Of[runObject](store, runs)
 	if err := resource.RemoveFinalizer(context.Background(), ref.New("root:alice", "default", "run-1"), "a"); err != nil {
 		t.Fatal(err)
 	}
@@ -204,13 +204,13 @@ func TestRemoveFinalizerTestsTheCachedList(t *testing.T) {
 
 func TestFinalizersAndKnownRemoval(t *testing.T) {
 	store, _ := newServer(t, []request{
-		{Method: "GET", Path: "/clusters/root:alice/apis/deno.computer/v1alpha1/namespaces/default/denoruns/run-1"},
+		{Method: "GET", Path: "/clusters/root:alice/apis/policy.socialweb.computer/v1alpha1/namespaces/default/policyworkflowruns/run-1"},
 	}, func(w http.ResponseWriter, _ *http.Request, _ int) {
 		writeJSON(w, 200, map[string]any{
 			"metadata": map[string]any{"name": "run-1", "finalizers": []string{"a"}},
 		})
 	})
-	resource := Of[runObject](store, denoRuns)
+	resource := Of[runObject](store, runs)
 	finalizers, err := resource.Finalizers(context.Background(), ref.New("root:alice", "default", "run-1"))
 	if err != nil {
 		t.Fatal(err)
@@ -224,7 +224,7 @@ func TestNotFoundIsRecognised(t *testing.T) {
 	store, _ := newServer(t, nil, func(w http.ResponseWriter, _ *http.Request, _ int) {
 		writeJSON(w, 404, map[string]any{"kind": "Status", "reason": "NotFound", "code": 404})
 	})
-	resource := Of[runObject](store, denoRuns)
+	resource := Of[runObject](store, runs)
 	_, err := resource.Get(context.Background(), ref.New("root:alice", "default", "missing"))
 	if err == nil || !IsNotFound(err) {
 		t.Fatalf("err = %v", err)

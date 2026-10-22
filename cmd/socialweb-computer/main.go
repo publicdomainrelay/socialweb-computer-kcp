@@ -24,10 +24,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gatewaymain"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostcontract"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/execrunner"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/providermain"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/tenantcredentialmain"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/tsbundle"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vaultmain"
 )
 
@@ -60,8 +58,8 @@ type builtVerb struct {
 func builtVerbs() map[string]builtVerb {
 	return map[string]builtVerb{
 		"version":                {[]string{"json"}, runVersion},
-		"dev up":                 {slices.Concat([]string{backendOpt, "instance", "state-dir", "profile", "bidders", "with-gateway", "app-values", "network-timeout", "stand-ins", "parent", "die-with", "kcp-path", "kine-path", "postgres-root", "deno-path", "bao-path", "openbao-plugin-dir", "dumbpipe-path", "openbao-addr", "openbao-token-file", "asset-cache", "ready-timeout", "kcp-base-workspace", "fg", "keep-state", "guest-image-release-base"}, devVMOptions, devOnly(tsbundle.SourceRootOption)), runDevUp},
-		"dev host":               {append([]string{backendOpt, "instance", "state-dir", "profile", "die-with", "kcp-path", "kine-path", "postgres-root", "deno-path", "bao-path", "asset-cache", "ready-timeout", "kcp-base-workspace", "fg", "keep-state"}, devOnly(tsbundle.SourceRootOption)...), runDevHost},
+		"dev up":                 {slices.Concat([]string{backendOpt, "instance", "state-dir", "profile", "bidders", "with-gateway", "app-values", "network-timeout", "stand-ins", "parent", "die-with", "kcp-path", "kine-path", "postgres-root", "bao-path", "openbao-plugin-dir", "dumbpipe-path", "openbao-addr", "openbao-token-file", "asset-cache", "ready-timeout", "kcp-base-workspace", "fg", "keep-state", "guest-image-release-base"}, devVMOptions), runDevUp},
+		"dev host":               {[]string{backendOpt, "instance", "state-dir", "profile", "die-with", "kcp-path", "kine-path", "postgres-root", "bao-path", "asset-cache", "ready-timeout", "kcp-base-workspace", "fg", "keep-state"}, runDevHost},
 		"dev status":             {[]string{"instance", "state-dir"}, runDevStatus},
 		"status":                 {[]string{"instance", "state-dir"}, runStatus},
 		"dev down":               {[]string{"instance", "state-dir", "keep-state"}, runDevDown},
@@ -69,7 +67,7 @@ func builtVerbs() map[string]builtVerb {
 		"dev logs":               {[]string{"instance", "state-dir", "tail"}, runDevLogs},
 		"dev env":                {[]string{"instance", "state-dir", "json"}, runDevEnv},
 		"dev check":              {nil, runDevCheck},
-		"dev restart":            {append([]string{"instance", "state-dir", "binary", "ready-timeout"}, devOnly(tsbundle.SourceRootOption)...), runDevRestart},
+		"dev restart":            {[]string{"instance", "state-dir", "binary", "ready-timeout"}, runDevRestart},
 		"dev gc":                 {[]string{"asset-cache", "state-dir", "asset-gc-window"}, runDevGC},
 		"apply":                  {applyOptions, runApply},
 		"run bidder":             {bidderOptions, runBidder},
@@ -94,7 +92,7 @@ func builtVerbs() map[string]builtVerb {
 		"internal ns-exec":       {[]string{"private-hostname", "bind", "inside"}, runNsExec},
 		"internal iroh-dial":     {[]string{"socket", "dumbpipe-path"}, runIrohDial},
 		"internal devsup":        {[]string{"state", "socket", "die-with", "instance"}, runDevsup},
-		"internal dev-core":      {append([]string{"instance-dir", "ready-timeout"}, devOnly(tsbundle.SourceRootOption)...), runDevCore},
+		"internal dev-core":      {[]string{"instance-dir", "ready-timeout"}, runDevCore},
 		"internal hostprocesses": {[]string{backendOpt, "instance", "state-dir", "kcp-kubeconfig", "kcp-base-workspace", "bao-path"}, runHostProcesses},
 		"dev roll kcp":           {[]string{"instance", "state-dir", "ready-timeout", "store-backup-keep", "store-backup-keep-days"}, runDevRoll},
 		"internal vm start":      {vmOptions, runVM("start")},
@@ -132,7 +130,6 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	code := run(ctx, os.Args[1:], clicfg.OSEnv{}, os.Stdout, os.Stderr, runtime.GOOS, runtime.GOARCH)
 	stop()
-	execrunner.ReleaseCgroups()
 	os.Exit(code)
 }
 

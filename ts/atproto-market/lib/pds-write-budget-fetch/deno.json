@@ -1,9 +1,0 @@
-{
-  "name": "@publicdomainrelay/pds-write-budget-fetch",
-  "version": "0.0.0",
-  "license": "Unlicense",
-  "exports": "./mod.ts",
-  "imports": {
-    "@publicdomainrelay/pds-write-budget-abc": "jsr:@publicdomainrelay/pds-write-budget-abc@^0"
-  }
-}

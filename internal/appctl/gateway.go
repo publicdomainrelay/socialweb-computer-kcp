@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -22,27 +23,34 @@ import (
 )
 
 const (
-	GatewayRootName        = "gateway"
-	RootVaultAsset         = "bao"
-	rootVaultAppRole       = "approle"
-	rootVaultPKIMount      = "pki"
-	rootVaultKVMount       = "secret"
-	rootVaultPKIMaxTTL     = 8760 * time.Hour
-	ProfileGatewayProd     = "prod"
-	ProfileGatewayNetwork  = "market-network"
-	GatewaySet             = "gateway"
-	GatewayApp             = "gateway"
-	WebAppComponent        = "socialweb-computer-k8s"
-	WebAppWebDir           = "socialweb-computer-k8s/web"
-	WebAppVaultClient      = "socialweb-computer-k8s"
-	WebAppVaultMount       = "socialweb-computer-k8s"
-	RequesterVaultMount    = "requester"
-	GatewayRequesterPolicy = "gateway-requester"
-	GatewayPdsPolicy       = "gateway-repo-key"
-	GatewayPdsGrant        = "socialweb-computer-k8s-pds"
-	RequesterAssociate     = "requester_associate"
-	NodeGuestCurlHome      = "/root"
+	GatewayRootName         = "gateway"
+	RootVaultAsset          = "bao"
+	rootVaultAppRole        = "approle"
+	rootVaultPKIMount       = "pki"
+	rootVaultKVMount        = "secret"
+	rootVaultPKIMaxTTL      = 8760 * time.Hour
+	ProfileGatewayProd      = "prod"
+	ProfileGatewayNetwork   = "market-network"
+	GatewaySet              = "gateway"
+	GatewayApp              = "gateway"
+	WebAppComponent         = "socialweb-computer-k8s"
+	WebAppWebDir            = "socialweb-computer-k8s/web"
+	WebAppVaultClient       = "socialweb-computer-k8s"
+	WebAppVaultMount        = "socialweb-computer-k8s"
+	RequesterVaultMount     = "requester"
+	GatewayRequesterPolicy  = "gateway-requester"
+	GatewayPdsPolicy        = "gateway-repo-key"
+	GatewayPdsGrant         = "socialweb-computer-k8s-pds"
+	RequesterAssociate      = "requester_associate"
+	NodeGuestCurlHome       = "/root"
+	GatewayAudienceOption   = "gateway-audience"
+	GatewayNodePolicy       = "node-policy"
+	GatewayNodePolicyArgs   = "node-policy-args"
+	GatewayNodePollOption   = "node-poll-interval-ms"
+	GatewayPostSignInOption = "post-sign-in-url"
 )
+
+var GatewayRequiredDownloads = []string{"socialweb-meshd-x86_64", "socialweb-meshd-aarch64"}
 
 type WebApp struct {
 	FrontKubeconfig string
@@ -223,31 +231,129 @@ func RootVaultSynced(o *v1alpha1.OpenBaoServer) bool {
 	return c != nil && c.Status == metav1.ConditionTrue && c.ObservedGeneration == o.Generation
 }
 
+func gatewayNodeMarket(o v1alpha1.Gateway, workspace string) *v1alpha1.GatewayNodeMarket {
+	m := o.Spec.MarketNetwork
+	if m == nil {
+		return nil
+	}
+	out := &v1alpha1.GatewayNodeMarket{OwnerSessionsFile: m.OwnerSessionsFile, UserDataBaseFile: m.NodeUserDataBaseFile,
+		HomeWorkspace: workspace, ContractWorkspace: workspace,
+		NodePolicy: optionValue(o.Spec.Options, GatewayNodePolicy), NodePolicyArgs: optionValue(o.Spec.Options, GatewayNodePolicyArgs),
+		ExtraBidderDIDs: append([]string(nil), o.Spec.BidderDids...)}
+	if ms := optionInt(o.Spec.Options, GatewayNodePollOption); ms > 0 {
+		out.PollIntervalSeconds = int32((ms + 999) / 1000)
+	}
+	return out
+}
+
+func gatewayDesired(o v1alpha1.Gateway, id *v1alpha1.MarketIdentity, ws, stateRoot, downloadsDir, clusterCADir, workspace, pdsHandle, pdsPublicURL string) ([]desiredComponent, error) {
+	suspend := o.Spec.Suspend
+	network := o.Spec.Network
+	ident := componentIdentity(id, "")
+	vault := ComponentRefFor("OpenBaoServer", vaultlayout.RootServerName)
+	var hostnames []string
+	if ident.Handle != "" {
+		hostnames = []string{ident.Handle}
+	}
+	if network != nil && network.QrOrigin != "" {
+		if h := hostOf(network.QrOrigin); h != "" && !slices.Contains(hostnames, h) {
+			hostnames = append(hostnames, h)
+		}
+	}
+	var clusterProvider *v1alpha1.GatewayClusterProvider
+	if o.Spec.ClusterProvider != nil {
+		cp := *o.Spec.ClusterProvider
+		clusterProvider = &cp
+	}
+	var storage *v1alpha1.ComponentStorage
+	if downloadsDir != "" || clusterCADir != "" {
+		storage = &v1alpha1.ComponentStorage{BlobsDir: downloadsDir, CertsDir: clusterCADir}
+	}
+	var tlsSpec *v1alpha1.ComponentTLS
+	if network != nil {
+		tlsSpec = &v1alpha1.ComponentTLS{Enabled: true, Hostnames: hostnames, CaBundleRef: network.CaBundleRef}
+	}
+	publicOrigin := optionValue(o.Spec.Options, publicOriginOption)
+	audience := optionValue(o.Spec.Options, GatewayAudienceOption)
+	if audience == "" {
+		audience = ident.Did
+	}
+	postSignInURL := optionValue(o.Spec.Options, GatewayPostSignInOption)
+	if postSignInURL == "" && publicOrigin != "" {
+		postSignInURL = strings.TrimRight(publicOrigin, "/") + "/"
+	}
+	var requiredDownloads []string
+	if downloadsDir != "" && (publicOrigin != "" || (tlsSpec != nil && len(hostnames) > 0)) {
+		requiredDownloads = append([]string(nil), GatewayRequiredDownloads...)
+	}
+	mode, requesterOrigin, oauthClientID, oauthRedirectURI, guestSSHKeysFile := requesterComponentFields(o.Spec.Options, v1alpha1.MarketIdentityModeLocalRepo)
+	pdsSpec, err := appPdsSpec(stateRoot, network, pdsHandle, vault, hostnames, suspend, pdsPublicURL)
+	if err != nil {
+		return nil, err
+	}
+	pds := desiredComponent{Kind: ComponentKindPds, Name: PdsComponent, Spec: pdsSpec}
+	requester := desiredComponent{Kind: ComponentKindRequester, Name: RequesterComponent, Spec: v1alpha1.RequesterSpec{
+		ComponentSpec:      NewComponentSpec(ComponentCRStateDir(stateRoot, ComponentKindRequester, RequesterComponent), network, suspend),
+		Identity:           ident,
+		PdsRef:             ComponentRefFor(ComponentKindPds, PdsComponent),
+		PDSAccessTokenPath: pdsAccessTokenPath("requester"),
+		PolicyEngineRef:    ComponentRefFor(ComponentKindPolicyEngine, PolicyEngineComponent),
+		VaultRef:           vault,
+		Hostnames:          hostnames,
+		Mode:               mode,
+		PublicOrigin:       requesterOrigin,
+		OAuthClientID:      oauthClientID,
+		OAuthRedirectURI:   oauthRedirectURI,
+		GuestSSHKeysFile:   guestSSHKeysFile,
+		AcceptCopies:       int32(optionInt(o.Spec.Options, "accept-copies")),
+	}}
+	gatewayBase := NewComponentSpec(ComponentCRStateDir(stateRoot, ComponentKindGatewayAPI, GatewayAPIComponent), network, suspend)
+	gatewayBase.TLS = tlsSpec
+	gatewayAPI := desiredComponent{Kind: ComponentKindGatewayAPI, Name: GatewayAPIComponent, Spec: v1alpha1.GatewayAPISpec{
+		ComponentSpec:     gatewayBase,
+		Identity:          ident,
+		PdsRef:            ComponentRefFor(ComponentKindPds, PdsComponent),
+		RequesterRef:      ComponentRefFor(ComponentKindRequester, RequesterComponent),
+		VaultRef:          vault,
+		Hostnames:         hostnames,
+		Storage:           storage,
+		ClusterProvider:   clusterProvider,
+		PublicOrigin:      publicOrigin,
+		Audience:          audience,
+		RequiredDownloads: requiredDownloads,
+		PostSignInURL:     postSignInURL,
+		NodeMarket:        gatewayNodeMarket(o, ws),
+	}}
+	out := []desiredComponent{pds, policyEngineDesired(suspend), requester, gatewayAPI}
+	out = append(out, pdsExposures(ws, PdsComponent, network, hostnames, suspend)...)
+	out = append(out, httpServiceExposures(ws, ComponentKindRequester, RequesterComponent, "http", network, hostnames, true, true, suspend)...)
+	out = append(out, httpServiceExposures(ws, ComponentKindGatewayAPI, GatewayAPIComponent, "http", network, hostnames, true, true, suspend)...)
+	return out, nil
+}
+
 func (ctl *Controller) reconcileGateway(ctx context.Context, u *unstructured.Unstructured) error {
 	var o v1alpha1.Gateway
 	if err := fromUnstructured(u, &o); err != nil {
 		return err
 	}
 	owner := ownerOf(u)
+	ws := ctl.c.workspace() + ":" + ComponentWorkspace
+	pdsAccountHandle := pdsHandle(ws, "gateway", "")
 	st := v1alpha1.ApplicationStatus{ObservedGeneration: o.Generation, Profile: o.Spec.Profile, Components: []v1alpha1.ApplicationComponent{}}
 	if u.GetDeletionTimestamp() != nil {
-		ws := ctl.c.workspace() + ":" + ComponentWorkspace
-		records, err := ctl.releaseRecords(ctx, ws, ws, owner)
+		records, err := ctl.releaseComponentRecords(ctx, ws, owner)
 		if err != nil {
 			return err
 		}
 		if records > 0 {
-			st.Phase, st.Message = v1alpha1.ApplicationPhaseDeleting, fmt.Sprintf("%d AtprotoRecord(s) leaving the repo before the pds DenoPod stops", records)
+			st.Phase, st.Message = v1alpha1.ApplicationPhaseDeleting, fmt.Sprintf("%d AtprotoRecord(s) leaving the repo before the Pds stops", records)
 			return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
 		}
-		left, err := ctl.deletePods(ctx, ws, owner, nil)
+		left, err := ctl.stopComponents(ctx, owner)
 		if err != nil {
 			return err
 		}
 		if left == 0 {
-			if err := ctl.revokeWebApp(ctx); err != nil {
-				return err
-			}
 			if left, err = ctl.deleteVaults(ctx, owner); err != nil {
 				return err
 			}
@@ -256,6 +362,7 @@ func (ctl *Controller) reconcileGateway(ctx context.Context, u *unstructured.Uns
 			st.Phase, st.Message = v1alpha1.ApplicationPhaseDeleting, fmt.Sprintf("%d component(s) stopping", left)
 			return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
 		}
+		delete(ctl.applied, string(o.UID))
 		return ctl.setFinalizer(ctx, GatewayGVR, u, false)
 	}
 	if !hasFinalizer(u) {
@@ -277,103 +384,196 @@ func (ctl *Controller) reconcileGateway(ctx context.Context, u *unstructured.Uns
 	vaultReady := RootVaultSynced(vault)
 	st.Components = append(st.Components, v1alpha1.ApplicationComponent{Kind: "OpenBaoServer", Name: vault.Name,
 		Workspace: ctl.c.workspace(), Phase: string(vault.Status.Phase), Ready: vaultReady})
-	var core []v1alpha1.ApplicationListener
-	if ctl.c.Listeners != nil {
-		core = ctl.c.Listeners(owner)
+	stateRoot := ctl.c.Layout.StateDir
+	pdsPublicURL := ctl.pdsPublicURL(ctx, ctl.c.workspace(), PdsComponent)
+	downloadsDir, clusterCADir := "", ""
+	if ctl.c.WebApp != nil {
+		downloadsDir, clusterCADir = ctl.c.WebApp.DownloadsDir, ctl.c.WebApp.ClusterCADir
 	}
-	st.Listeners = append(st.Listeners, core...)
-	webAppReady := true
-	awaitingOperator := ""
-	webAppVault, haveWebAppVault := WebAppVaultOf(vault)
-	requesterVault, haveRequesterVault := RequesterVaultOf(vault)
-	haveVault := haveWebAppVault && haveRequesterVault
-	if ctl.c.WebApp != nil && !haveVault {
-		webAppReady = false
-	}
-	if ctl.c.WebApp != nil && haveVault {
-		ws := ctl.c.workspace() + ":" + ComponentWorkspace
-		if ctl.applied[string(o.UID)] != o.Generation || ctl.lostComponent(ctx, owner) != "" {
-			values, err := GatewayValues(o, ctl.c.workspace(), ComponentStateDir(ctl.c.Layout.StateDir, WebAppComponent),
-				ComponentStateDir(ctl.c.Layout.StateDir, RequesterComponent), *ctl.c.WebApp, webAppVault, requesterVault)
-			if err != nil {
-				st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
-				return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
-			}
-			if _, err := ctl.applyProfile(ctx, GatewaySet, o.Spec.Profile, owner, false, &values); err != nil {
-				st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "its workspace: "+err.Error()
-				return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
-			}
-			if err := ctl.ensureIdentitySpec(ctx, ws, owner, RequesterIdentity, GatewayRequesterIdentity(o.Spec)); err != nil {
-				st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "the requester's MarketIdentity: "+err.Error()
-				return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
-			}
-			server, err := ctl.webAppIdentity(ctx, o, owner, *ctl.c.WebApp)
-			if err != nil {
-				st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "the web app's kcp identity: "+err.Error()
-				return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
-			}
-			values.KcpServer = server
-			if err := ctl.ensureRepoKey(ctx, vaultlayout.RootServerName, RequesterVaultClient, RequesterKeysPath()); err != nil {
-				st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "the requester's repo key: "+err.Error()
-				return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
-			}
-			if values.Pds, err = GatewayPds(values, ComponentStateDir(ctl.c.Layout.StateDir, PdsComponent), o.Spec.Network); err != nil {
-				st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
-				return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
-			}
-			pods, err := ctl.applyProfile(ctx, GatewaySet, o.Spec.Profile, owner, true, &values)
-			if err != nil {
-				st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "its components: "+err.Error()
-				return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
-			}
-			if _, err := ctl.deletePods(ctx, ws, owner, pods); err != nil {
-				return err
-			}
-			ctl.applied[string(o.UID)] = o.Generation
-			ctl.c.log().Info("applied the Gateway's components", "name", o.Name, "profile", o.Spec.Profile, "denopods", pods)
+	if o.Spec.Suspend {
+		id, _ := ctl.identityIn(ctx, ws, RequesterIdentity)
+		desired, err := gatewayDesired(o, id, ctl.c.workspace(), stateRoot, downloadsDir, clusterCADir, ws, pdsAccountHandle, pdsPublicURL)
+		if err != nil {
+			st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
+			return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
 		}
-		pods, err := ctl.ownedPods(ctx, ws, owner)
+		if err := ctl.ensureDesired(ctx, u, desired); err != nil {
+			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, err.Error()
+			return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
+		}
+		_ = ctl.pruneDesired(ctx, owner, desired)
+		snap, err := ctl.componentSnapshot(ctx, owner)
 		if err != nil {
 			return err
 		}
-		webAppReady = len(pods) > 0
-		var components []v1alpha1.ApplicationListener
-		for i := range pods {
-			v := podViewOf(ws, &pods[i])
-			st.Components = append(st.Components, v.component())
-			components = append(components, v.Listeners...)
-			webAppReady = webAppReady && v.Ready && len(v.Listeners) > 0
-		}
-		st.Listeners = append(st.Listeners, components...)
-		if id, err := ctl.identityIn(ctx, ws, RequesterIdentity); err == nil {
+		st.Components = append(st.Components, snap.Components...)
+		st.Listeners = snap.Listeners
+		if id != nil {
 			st.Did = id.Status.Did
-			if a := id.Status.PendingAction; a != nil && id.Status.Phase == v1alpha1.MarketIdentityPhaseAwaitingScan {
-				awaitingOperator = "waiting for the operator's claim record (badgeBlueKeys keyId " + id.Status.Did + " with the nonce n of " + a.Url + ")"
-			}
-			if m := o.Spec.MarketNetwork; o.Spec.Profile == ProfileGatewayNetwork && m != nil && m.OwnerSessionsFile != "" {
-				if err := ctl.associateGatewayOperator(ctx, id, m.OwnerSessionsFile, o.Spec.Network); err != nil {
-					ctl.c.log().Warn("associating the requester's DID with the market network operator account", "err", err.Error())
-				}
-				if err := ctl.reconcileOperatorRecords(ctx, ws, o.Spec.Network, func() (ownerSession, error) { return firstOwnerSession(m.OwnerSessionsFile) }); err != nil {
-					ctl.c.log().Warn("writing the declared records of the market network operator account", "err", err.Error())
-				}
+		}
+		st.Phase, st.Message = v1alpha1.ApplicationPhasePending, "suspended"
+		return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
+	}
+	if !vaultReady {
+		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for the root vault to be Ready and synced"
+		return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
+	}
+	awaitingOperator := ""
+	if ctl.applied[string(o.UID)] != o.Generation {
+		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "applying its workspace, its records and its requester identity"
+		ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
+		values := &manifests.Gateway{}
+		if o.Spec.Network != nil {
+			if pds, err := GatewayPds(*values, stateRoot, o.Spec.Network); err == nil {
+				values.Pds = pds
 			}
 		}
-		if ctl.c.OnComponents != nil {
-			ctl.c.OnComponents(owner, components)
+		if err := ctl.applyInfra(ctx, GatewaySet, o.Spec.Profile, owner, values, "association-watch"); err != nil {
+			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "its workspace: "+err.Error()
+			return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
+		}
+		if err := ctl.ensureIdentitySpec(ctx, ws, owner, RequesterIdentity, GatewayRequesterIdentity(o.Spec)); err != nil {
+			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "the requester's MarketIdentity: "+err.Error()
+			return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
+		}
+		if err := ctl.ensureRepoKey(ctx, vaultlayout.RootServerName, RequesterVaultClient, RequesterKeysPath()); err != nil {
+			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "the requester's repo key: "+err.Error()
+			return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
+		}
+		ctl.applied[string(o.UID)] = o.Generation
+	}
+	id, err := ctl.identityIn(ctx, ws, RequesterIdentity)
+	if apierrors.IsNotFound(err) {
+		delete(ctl.applied, string(o.UID))
+		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for the requester's MarketIdentity"
+		return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
+	}
+	if err != nil {
+		return err
+	}
+	desired, err := gatewayDesired(o, id, ctl.c.workspace(), stateRoot, downloadsDir, clusterCADir, ws, pdsAccountHandle, pdsPublicURL)
+	if err != nil {
+		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
+		return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
+	}
+	allDesired := desired
+	pds, hasPds := desiredPds(desired)
+	if hasPds {
+		if err := ctl.ensureDesired(ctx, u, pdsComponentSet(desired)); err != nil {
+			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, err.Error()
+			return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
+		}
+		snap, err := ctl.componentSnapshot(ctx, owner)
+		if err != nil {
+			return err
+		}
+		if !snap.ready(ComponentKindPds, PdsComponent) {
+			st.Components = append(st.Components, snap.Components...)
+			st.Listeners = snap.Listeners
+			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for the requester's app Pds to be ready"
+			return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
+		}
+		pdsPublicURL = ctl.pdsPublicURL(ctx, ctl.c.workspace(), PdsComponent)
+		if pdsPublicURL == "" {
+			st.Components, st.Listeners = snap.Components, snap.Listeners
+			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for the app Pds exposure"
+			return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
+		}
+		if desired, err = gatewayDesired(o, id, ctl.c.workspace(), stateRoot, downloadsDir, clusterCADir, ws, pdsAccountHandle, pdsPublicURL); err != nil {
+			st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
+			return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
+		}
+		allDesired = desired
+		pds, _ = desiredPds(desired)
+		if err := ctl.ensureDesired(ctx, u, []desiredComponent{pds}); err != nil {
+			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, err.Error()
+			return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
+		}
+		if applied, err := ctl.pdsApplied(ctx, owner); err != nil {
+			return err
+		} else if !applied {
+			st.Components, st.Listeners = snap.Components, snap.Listeners
+			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for the app Pds to apply its public URL"
+			return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
+		}
+		endpoint := ctl.pdsEndpointIn(ctx, ctl.c.workspace(), PdsComponent)
+		if endpoint == "" {
+			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for the requester's app Pds endpoint"
+			return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
+		}
+		caFile := ""
+		if o.Spec.Network != nil {
+			caFile = o.Spec.Network.CaBundleRef
+		}
+		sess, err := ctl.ensurePdsAccountInVault(ctx, vaultlayout.RootServerName, RequesterVaultClient, pdsSessionPath("requester"), endpoint, caFile, pdsAccountHandle)
+		if err != nil {
+			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "its app Pds account: "+err.Error()
+			return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
+		}
+		ctl.ensureAppPdsStatus(ctx, pdsAccountHandle, sess, o.Spec.Network != nil)
+		changed, err := ctl.syncRequesterRepoKey(stateRoot, sess.Did)
+		if err != nil {
+			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "its app Pds signing key: "+err.Error()
+			return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
+		}
+		if changed {
+			if err := ctl.RestartComponentIn(ctx, ctl.c.workspace(), ComponentKindRequester, RequesterComponent); err != nil && !apierrors.IsNotFound(err) {
+				st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "restarting the requester: "+err.Error()
+				return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
+			}
+		}
+		if err := ctl.recordPdsIdentity(ctx, ws, RequesterIdentity, pdsAccountHandle, endpoint, sess.Did, id.Spec.Association); err != nil {
+			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "its app Pds identity: "+err.Error()
+			return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
+		}
+		if id, err = ctl.identityIn(ctx, ws, RequesterIdentity); err != nil {
+			return err
+		}
+		if desired, err = gatewayDesired(o, id, ctl.c.workspace(), stateRoot, downloadsDir, clusterCADir, ws, pdsAccountHandle, pdsPublicURL); err != nil {
+			st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
+			return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
+		}
+		allDesired = desired
+		desired = withoutPds(desired)
+	}
+	if err := ctl.ensureDesired(ctx, u, desired); err != nil {
+		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, err.Error()
+		return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
+	}
+	if err := ctl.pruneDesired(ctx, owner, allDesired); err != nil {
+		return err
+	}
+	if id, err = ctl.identityIn(ctx, ws, RequesterIdentity); err != nil {
+		return err
+	}
+	snap, err := ctl.componentSnapshot(ctx, owner)
+	if err != nil {
+		return err
+	}
+	st.Components = append(st.Components, snap.Components...)
+	st.Listeners = snap.Listeners
+	st.Did = id.Status.Did
+	if a := id.Status.PendingAction; a != nil && id.Status.Phase == v1alpha1.MarketIdentityPhaseAwaitingScan {
+		awaitingOperator = "waiting for the operator's claim record (badgeBlueKeys keyId " + id.Status.Did + " with the nonce n of " + a.Url + ")"
+	}
+	if m := o.Spec.MarketNetwork; o.Spec.Profile == ProfileGatewayNetwork && m != nil && m.OwnerSessionsFile != "" {
+		if err := ctl.associateGatewayOperator(ctx, id, m.OwnerSessionsFile, o.Spec.Network); err != nil {
+			ctl.c.log().Warn("associating the requester's DID with the market network operator account", "err", err.Error())
+		}
+		if err := ctl.reconcileOperatorRecords(ctx, ws, o.Spec.Network, func() (ownerSession, error) { return firstOwnerSession(m.OwnerSessionsFile) }); err != nil {
+			ctl.c.log().Warn("writing the declared records of the market network operator account", "err", err.Error())
 		}
 	}
+	if ctl.c.OnComponents != nil {
+		ctl.c.OnComponents(owner, snap.Listeners)
+	}
 	switch {
-	case !vaultReady:
-		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for the root vault to be Ready and synced"
-	case ctl.c.Listeners != nil && len(core) == 0:
-		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "the root vault is Ready; waiting for the core's members to report their listeners"
-	case !webAppReady && awaitingOperator != "":
+	case awaitingOperator != "":
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, awaitingOperator
-	case !webAppReady:
-		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for the "+WebAppComponent+" DenoPod to be ready and report its listener"
+	case snap.complete(allDesired) && st.Did != "":
+		st = ready(st, "the root vault is Ready and every component is ready")
 	default:
-		st = ready(st, "the root vault is Ready and every member and component reported its listener")
+		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for every component to be ready and the requester's MarketIdentity for a did"
 	}
 	return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
 }

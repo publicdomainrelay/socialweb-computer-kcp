@@ -4,10 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"net"
 	"reflect"
 	"sort"
-	"strconv"
 
 	"sigs.k8s.io/yaml"
 )
@@ -171,13 +169,9 @@ type GatewayVault struct {
 	Client string `json:",omitempty"`
 }
 
-const (
-	CaptureAddressPort    = "AddressPort"
-	CaptureLogicalCluster = "LogicalCluster"
-)
+const CaptureLogicalCluster = "LogicalCluster"
 
 var captureKinds = map[string]reflect.Kind{
-	CaptureAddressPort:    reflect.Int,
 	CaptureLogicalCluster: reflect.String,
 }
 
@@ -222,16 +216,6 @@ func SetCaptured(values any, c Capture, raw string) error {
 		return fmt.Errorf("manifests: capture %s into %s: no such %s field", c.From, c.Into, captureKinds[c.From])
 	}
 	switch c.From {
-	case CaptureAddressPort:
-		_, port, err := net.SplitHostPort(raw)
-		if err != nil {
-			return fmt.Errorf("manifests: capture %s from %q: %w", c.Into, raw, err)
-		}
-		n, err := strconv.Atoi(port)
-		if err != nil || n <= 0 || n > 65535 {
-			return fmt.Errorf("manifests: capture %s from %q: no port", c.Into, raw)
-		}
-		f.SetInt(int64(n))
 	case CaptureLogicalCluster:
 		if raw == "" {
 			return fmt.Errorf("manifests: capture %s: an empty logical cluster", c.Into)

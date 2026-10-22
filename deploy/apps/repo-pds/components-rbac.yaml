@@ -5,9 +5,6 @@ metadata:
 rules:
   - nonResourceURLs: ["/"]
     verbs: ["access"]
-  - apiGroups: ["deno.computer"]
-    resources: ["denopods"]
-    verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

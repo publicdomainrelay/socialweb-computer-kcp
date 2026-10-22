@@ -31,6 +31,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gateway"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/revocation"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsfront"
 )
 
 const (
@@ -71,50 +72,30 @@ type Config struct {
 }
 
 func EnsureEdgeClient(dir string) (string, string, error) {
-	cert, key := filepath.Join(dir, EdgeCertName), filepath.Join(dir, EdgeKeyName)
-	if st, err := os.Stat(cert); err == nil && st.Size() > 0 {
-		if st, err := os.Stat(key); err == nil && st.Size() > 0 {
-			return cert, key, nil
+	return tlsfront.EnsurePair(dir, EdgeCertName, EdgeKeyName, func() ([]byte, []byte, error) {
+		priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		if err != nil {
+			return nil, nil, err
 		}
-	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", "", err
-	}
-	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return "", "", err
-	}
-	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 127))
-	if err != nil {
-		return "", "", err
-	}
-	now := time.Now()
-	tmpl := &x509.Certificate{SerialNumber: serial, Subject: pkix.Name{CommonName: EdgeClientCN},
-		NotBefore: now.Add(-time.Minute), NotAfter: now.Add(EdgeClientLife), KeyUsage: x509.KeyUsageDigitalSignature,
-		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}, BasicConstraintsValid: true}
-	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &priv.PublicKey, priv)
-	if err != nil {
-		return "", "", err
-	}
-	kder, err := x509.MarshalECPrivateKey(priv)
-	if err != nil {
-		return "", "", err
-	}
-	if err := writePEM(key, "EC PRIVATE KEY", kder, 0o600); err != nil {
-		return "", "", err
-	}
-	if err := writePEM(cert, "CERTIFICATE", der, 0o644); err != nil {
-		return "", "", err
-	}
-	return cert, key, nil
-}
-
-func writePEM(path, kind string, der []byte, mode os.FileMode) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, pem.EncodeToMemory(&pem.Block{Type: kind, Bytes: der}), mode); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+		serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 127))
+		if err != nil {
+			return nil, nil, err
+		}
+		now := time.Now()
+		tmpl := &x509.Certificate{SerialNumber: serial, Subject: pkix.Name{CommonName: EdgeClientCN},
+			NotBefore: now.Add(-time.Minute), NotAfter: now.Add(EdgeClientLife), KeyUsage: x509.KeyUsageDigitalSignature,
+			ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}, BasicConstraintsValid: true}
+		der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &priv.PublicKey, priv)
+		if err != nil {
+			return nil, nil, err
+		}
+		kder, err := x509.MarshalECPrivateKey(priv)
+		if err != nil {
+			return nil, nil, err
+		}
+		return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}),
+			pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: kder}), nil
+	})
 }
 
 type trust struct {

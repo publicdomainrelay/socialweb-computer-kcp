@@ -25,9 +25,8 @@ import (
 )
 
 var (
-	nodeClaimGVR  = schema.GroupVersionResource{Group: "socialweb.computer", Version: "v1alpha1", Resource: "nodeclaims"}
-	computeVMGVR  = schema.GroupVersionResource{Group: "socialweb.computer", Version: "v1alpha1", Resource: "computevms"}
-	clientCertGVR = schema.GroupVersionResource{Group: "socialweb.computer", Version: "v1alpha1", Resource: "clusterclientcertificates"}
+	nodeClaimGVR = schema.GroupVersionResource{Group: "socialweb.computer", Version: "v1alpha1", Resource: "nodeclaims"}
+	computeVMGVR = schema.GroupVersionResource{Group: "socialweb.computer", Version: "v1alpha1", Resource: "computevms"}
 )
 
 func (n *Network) BidderVMs(ctx context.Context) ([]v1alpha1.ComputeVM, error) {
@@ -78,7 +77,6 @@ type Tenant struct {
 	Address    string
 	Kube       *kubernetes.Clientset
 	claims     dynamic.ResourceInterface
-	certs      dynamic.ResourceInterface
 }
 
 func (n *Network) GatewayDir() string {
@@ -187,7 +185,7 @@ func (n *Network) openTenant(gw, name string) (*Tenant, error) {
 		return nil, err
 	}
 	return &Tenant{n: n, GatewayDir: gw, ClusterDir: dir, Home: home, Address: front.Address, Kube: kube,
-		claims: dyn.Resource(nodeClaimGVR), certs: dyn.Resource(clientCertGVR)}, nil
+		claims: dyn.Resource(nodeClaimGVR)}, nil
 }
 
 func (tn *Tenant) Claims(ctx context.Context) ([]v1alpha1.NodeClaim, error) {
@@ -204,22 +202,6 @@ func (tn *Tenant) Claims(ctx context.Context) ([]v1alpha1.NodeClaim, error) {
 		out = append(out, c)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out, nil
-}
-
-func (tn *Tenant) Certificates(ctx context.Context) ([]v1alpha1.ClusterClientCertificate, error) {
-	l, err := tn.certs.List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return nil, err
-	}
-	out := make([]v1alpha1.ClusterClientCertificate, 0, len(l.Items))
-	for _, u := range l.Items {
-		var c v1alpha1.ClusterClientCertificate
-		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &c); err != nil {
-			return nil, err
-		}
-		out = append(out, c)
-	}
 	return out, nil
 }
 
@@ -273,39 +255,28 @@ func (tn *Tenant) Summary(ctx context.Context) string {
 }
 
 type ReleaseLine struct {
-	Claim       string `json:"claim"`
-	Confirmed   bool   `json:"confirmed"`
-	MessageName string `json:"message"`
+	Claim     string `json:"claim"`
+	Contract  string `json:"contract"`
+	Confirmed bool   `json:"confirmed"`
 }
 
 func (tn *Tenant) ReleaseLines() ([]ReleaseLine, error) {
-	r := tn.n.h.As(context.Background(), "sh", "-c", `grep -h -s node_claim_released "$1"/*/stdout.txt; true`, "sh", tn.n.runsDir())
+	r := tn.n.h.As(context.Background(), "cat", filepath.Join(tn.GatewayDir, "logs", "core.log"))
 	if r.Err != nil {
 		return nil, r.Err
 	}
 	var out []ReleaseLine
-	for _, l := range strings.Split(strings.TrimSpace(r.Stdout), "\n") {
-		var rl ReleaseLine
-		if json.Unmarshal([]byte(l), &rl) == nil && rl.Claim != "" {
-			out = append(out, rl)
+	for _, l := range strings.Split(r.Stdout, "\n") {
+		var rec struct {
+			Msg       string `json:"msg"`
+			Claim     string `json:"claim"`
+			Contract  string `json:"contract"`
+			Confirmed bool   `json:"confirmed"`
 		}
-	}
-	return out, nil
-}
-
-func (tn *Tenant) SshSessions(since time.Time) ([]string, error) {
-	r := tn.n.h.As(context.Background(), "sh", "-c",
-		`grep -r -h -s -E 'runSession|ssh_session|pollReady|sshReady[^"]|ssh_connect' "$1" --include=stdout.txt --include=stderr.txt --include=core.log | head -5
-journalctl --user --no-pager -o cat --since "@$2" | grep -E 'sshd.*(Accepted|session opened|Failed password|Invalid user)' | head -5; true`,
-		"sh", tn.n.StateDir, fmt.Sprint(since.Unix()))
-	if r.Err != nil {
-		return nil, r.Err
-	}
-	var out []string
-	for _, l := range strings.Split(strings.TrimSpace(r.Stdout), "\n") {
-		if l != "" {
-			out = append(out, l)
+		if json.Unmarshal([]byte(l), &rec) != nil || rec.Msg != "node_claim_released" || rec.Claim == "" {
+			continue
 		}
+		out = append(out, ReleaseLine{Claim: rec.Claim, Contract: rec.Contract, Confirmed: rec.Confirmed})
 	}
 	return out, nil
 }

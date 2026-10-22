@@ -4,16 +4,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/denocomputer"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/ref"
 )
 
 func int32Ptr(v int32) *int32 { return &v }
 
 var testLifecycle = Lifecycle{
-	Running: func(phase string) bool { return phase == string(denocomputer.PhaseRunning) },
+	Running: func(phase string) bool { return phase == "Running" },
 
-	Terminal: denocomputer.TerminalPolicyWorkflow,
+	Terminal: func(phase string) bool { return phase == "Succeeded" || phase == "Failed" || phase == "Cancelled" },
 }
 
 func run(name string, phase string, seconds int) Run {
@@ -75,9 +74,9 @@ func TestDecision(t *testing.T) {
 
 func TestPlanForbidOrdersOldestFirst(t *testing.T) {
 	runs := []Run{
-		run("c", string(denocomputer.PhasePending), 3),
-		run("a", string(denocomputer.PhasePending), 1),
-		run("b", string(denocomputer.PhasePending), 2),
+		run("c", "Pending", 3),
+		run("a", "Pending", 1),
+		run("b", "Pending", 2),
 	}
 	planned := PlanIndex(runs, Capacity{Policy: PolicyForbid}, nil, 0, testLifecycle)
 	if !planned[ref.New("root:alice", "default", "a")].Allowed {
@@ -96,9 +95,9 @@ func TestPlanForbidOrdersOldestFirst(t *testing.T) {
 
 func TestPlanCountsRunningAndTerminal(t *testing.T) {
 	runs := []Run{
-		run("running", string(denocomputer.PhaseRunning), 1),
-		run("done", string(denocomputer.PhaseSucceeded), 2),
-		run("pending", string(denocomputer.PhasePending), 3),
+		run("running", "Running", 1),
+		run("done", "Succeeded", 2),
+		run("pending", "Pending", 3),
 	}
 	planned := PlanIndex(runs, Capacity{Policy: PolicyAllow, MaxConcurrent: int32Ptr(1)}, nil, 0, testLifecycle)
 	if planned[ref.New("root:alice", "default", "running")].Gated {
@@ -117,7 +116,7 @@ func TestPlanCountsRunningAndTerminal(t *testing.T) {
 }
 
 func TestPlanReservedCountsTowardActive(t *testing.T) {
-	runs := []Run{run("pending", string(denocomputer.PhasePending), 1)}
+	runs := []Run{run("pending", "Pending", 1)}
 	planned := PlanIndex(runs, Capacity{Policy: PolicyAllow, MaxConcurrent: int32Ptr(1)}, nil, 1, testLifecycle)
 	if planned[ref.New("root:alice", "default", "pending")].Allowed {
 		t.Fatal("a reserved slot must not be handed out twice")
@@ -126,9 +125,9 @@ func TestPlanReservedCountsTowardActive(t *testing.T) {
 
 func TestPlanReplaceAdmitsNewestAndPreempts(t *testing.T) {
 	runs := []Run{
-		run("old", string(denocomputer.PhasePending), 1),
-		run("middle", string(denocomputer.PhaseRunning), 2),
-		run("new", string(denocomputer.PhasePending), 3),
+		run("old", "Pending", 1),
+		run("middle", "Running", 2),
+		run("new", "Pending", 3),
 	}
 	planned := PlanIndex(runs, Capacity{Policy: PolicyReplace}, nil, 0, testLifecycle)
 	newest := planned[ref.New("root:alice", "default", "new")]
@@ -148,17 +147,17 @@ func TestPlanReplaceAdmitsNewestAndPreempts(t *testing.T) {
 
 func TestPlanBlockerGatesEveryPendingRun(t *testing.T) {
 	runs := []Run{
-		run("a", string(denocomputer.PhasePending), 1),
-		run("b", string(denocomputer.PhasePending), 2),
+		run("a", "Pending", 1),
+		run("b", "Pending", 2),
 	}
-	blocker := &Blocker{Reason: denocomputer.ReasonEngineNotReady, Message: "no endpoint"}
+	blocker := &Blocker{Reason: "EngineNotReady", Message: "no endpoint"}
 	planned := PlanIndex(runs, Capacity{Policy: PolicyForbid}, blocker, 0, testLifecycle)
 	for _, candidate := range runs {
 		admission := planned[candidate.Ref]
 		if !admission.Gated || admission.Allowed {
 			t.Fatalf("%s: gated=%v allowed=%v, want gated and refused", candidate.Ref.Name, admission.Gated, admission.Allowed)
 		}
-		if admission.Reason != denocomputer.ReasonEngineNotReady {
+		if admission.Reason != "EngineNotReady" {
 			t.Fatalf("%s: reason = %q", candidate.Ref.Name, admission.Reason)
 		}
 	}
@@ -166,11 +165,11 @@ func TestPlanBlockerGatesEveryPendingRun(t *testing.T) {
 
 func TestWakeListTakesCapacityManyOldestFirst(t *testing.T) {
 	runs := []Run{
-		run("running", string(denocomputer.PhaseRunning), 1),
-		run("done", string(denocomputer.PhaseSucceeded), 2),
-		run("c", string(denocomputer.PhasePending), 5),
-		run("a", string(denocomputer.PhasePending), 3),
-		run("b", string(denocomputer.PhasePending), 4),
+		run("running", "Running", 1),
+		run("done", "Succeeded", 2),
+		run("c", "Pending", 5),
+		run("a", "Pending", 3),
+		run("b", "Pending", 4),
 	}
 	woken := WakeList(runs, testLifecycle, 2, false)
 	if len(woken) != 2 {
@@ -194,7 +193,7 @@ func TestEffectivePolicyDefaultsToForbid(t *testing.T) {
 }
 
 func TestAnAdmissionHasThreeStates(t *testing.T) {
-	runs := []Run{run("a", string(denocomputer.PhasePending), 1), run("b", string(denocomputer.PhasePending), 2)}
+	runs := []Run{run("a", "Pending", 1), run("b", "Pending", 2)}
 	planned := PlanIndex(runs, Capacity{Policy: PolicyForbid}, nil, 0, testLifecycle)
 	admitted := planned[ref.New("root:alice", "default", "a")]
 	if admitted.Waiting() || !admitted.Allowed || !admitted.Gated {
@@ -204,7 +203,7 @@ func TestAnAdmissionHasThreeStates(t *testing.T) {
 	if !waiting.Waiting() || waiting.Allowed || !waiting.Gated {
 		t.Fatalf("the second run waits: %+v", waiting)
 	}
-	running := PlanIndex([]Run{run("r", string(denocomputer.PhaseRunning), 1)}, Capacity{Policy: PolicyForbid}, nil, 0, testLifecycle)
+	running := PlanIndex([]Run{run("r", "Running", 1)}, Capacity{Policy: PolicyForbid}, nil, 0, testLifecycle)
 	uncapped := running[ref.New("root:alice", "default", "r")]
 	if uncapped.Waiting() || !uncapped.Allowed || uncapped.Gated {
 		t.Fatalf("a running run is not subject to the cap: %+v", uncapped)

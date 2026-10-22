@@ -17,15 +17,12 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/install"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/notify"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/denoruntime"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/tsbundle"
 )
 
 const (
 	ExeCore           = "socialweb-computer"
 	ExeKcp            = "kcp"
 	ExeKine           = "kine"
-	ExeDeno           = "deno"
 	ExeBao            = "bao"
 	ApplyTimeout      = time.Minute
 	RootApplyDeadline = 3 * time.Minute
@@ -37,7 +34,6 @@ type CoreConfig struct {
 	Prefix       string
 	Handle       string
 	Executables  map[string]devinstance.Executable
-	Closure      tsbundle.Prepared
 	Spec         v1alpha1.MarketBidderSpec
 	VM           devinstance.VMRuntime
 	ComputeVM    computevm.Config
@@ -112,12 +108,10 @@ func RunCore(ctx context.Context, c CoreConfig, m hostsvc.Manager) error {
 	log := c.Log.With("component", "run-bidder", "handle", c.Handle)
 	log.Info("the bidder application instance starts: kcp store, kine, front, its slot, then its MarketBidder root object",
 		"state", l.StateDir, "units", app.Names().UnitPrefix(), "profile", c.Spec.Profile)
-	deno := denoruntime.Config{StateDir: l.StateDir, Deno: c.Executables[ExeDeno].Path, Kubeconfig: l.FrontKubeconfig(), Closure: c.Closure,
-		Unit: c.Unit, ApplyTimeout: ApplyTimeout, Log: c.Log, EnforceMemory: true}
 	cvm := c.ComputeVM
 	watchdogLogged := false
 	return devcore.Run(ctx, devcore.Config{Layout: l, ReadyTimeout: c.ReadyTimeout, Log: c.Log, Application: &app,
-		FrontAddress: c.FrontAddress, DenoRuntime: &deno, ComputeVM: &cvm, SignInGuard: CheckSignIn,
+		FrontAddress: c.FrontAddress, ComputeVM: &cvm, SignInGuard: CheckSignIn,
 		OnStep: func(step string) { log.Info("the core brings up the stack", "step", step) },
 		OnTick: func() {
 			if err := notify.Watchdog(); err != nil && !watchdogLogged {

@@ -109,8 +109,6 @@ func (n Names) HostProcessPrefix() string { return n.Prefix + "hp-" + n.Key + "-
 
 func (n Names) CorePrefix() string { return n.Prefix + "core-" + n.Key + "-" }
 
-func (n Names) DenoPods() string { return n.Prefix + "denopods-" + n.Key + hostsvc.ServiceSuffix }
-
 func (n Names) CoreSlice() string { return n.Prefix + "core-" + n.Key + ".slice" }
 
 func (n Names) StandIn(role string) string { return n.base() + "-" + role + hostsvc.ServiceSuffix }

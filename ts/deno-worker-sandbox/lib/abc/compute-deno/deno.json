@@ -1,9 +1,0 @@
-{
-  "name": "@publicdomainrelay/compute-deno-abc",
-  "version": "0.0.0",
-  "license": "Unlicense",
-  "exports": "./mod.ts",
-  "imports": {
-    "@publicdomainrelay/compute-deno-common": "jsr:@publicdomainrelay/compute-deno-common@^0"
-  }
-}

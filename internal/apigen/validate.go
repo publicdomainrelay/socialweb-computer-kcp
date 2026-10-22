@@ -74,7 +74,21 @@ func check(s *Schema, value any, path string, out *[]Issue) {
 			add(path, expected("an object", value))
 			return
 		}
-		if !s.Closed || s.PreserveUnknown {
+		if s.PreserveUnknown {
+			return
+		}
+		if s.AdditionalProperties != nil {
+			keys := make([]string, 0, len(obj))
+			for k := range obj {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			for _, k := range keys {
+				check(s.AdditionalProperties, obj[k], joinPath(path, k), out)
+			}
+			return
+		}
+		if !s.Closed {
 			return
 		}
 		declared := map[string]bool{}
