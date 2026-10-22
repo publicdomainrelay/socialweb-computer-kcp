@@ -252,12 +252,12 @@ HostProcesses, and listeners behind the edge bind port 0.
 | 3 | Cluster provider | Go | Owns the `Cluster` CR lifecycle: mints the instance token, fetches the identity bundle, sets `status.URL` once the apiserver answers. ONE process serves EVERY cluster in the kcp tree, and a cluster is named inside it by its home workspace, not by the bare name the owner chose |
 | 4 | Node provider | Go | Watches the home workspace for intent, actuates one node, writes `Node` state |
 | 5 | kcp provider workspace | YAML | `APIResourceSchema` plus `APIExport` for our CRDs; tenants `APIBinding` |
-| 6 | k3s cloud-init module | sibling repo, `UserDataModule` | Installs k3s in a market guest. The only sanctioned way a guest-side component arrives |
+| 6 | k3s cloud-init module | Go `internal/atproto/cloudinit`, `UserDataModule` | Writes the k3s, secrets, iroh and node modules cloud-init runs in a market guest. The only sanctioned way a guest-side component arrives |
 | 7 | OpenBao plus ESO | deploy config | The vault, at two levels: a root vault one per deployment and a cluster vault one per ON cluster, both in the production stack. OpenBao holds the per-cluster 13-entry identity bundle and is its AUTHORITATIVE store - the wake reads it out of the vault and materialises the file tree at `<DataDir>/server/tls`+`cred/`, because k3s has no vault plugin and must read files at runtime (sections 9, 14 and 15). ESO materialises vault-backed Secrets into the tenant cluster (row 9); the bundle is custody and wake-time restore, not the runtime location |
 | 8 | Cluster links | Go, `internal/clusterlink` + `internal/clusterprovider/links.go` | Two `dumbpipe listen-tcp` members of every cluster's process group, one in front of the k3s apiserver and one in front of the cluster vault, each an iroh endpoint whose key lives in that cluster's vault. A node dials the cluster through them; the door holds no per-node connection. Recorded as `ClusterLink` objects |
 | 9 | External Secrets pair | pinned upstream binary, `internal/eso` + `internal/clusterprovider/externalsecrets.go` | The External Secrets Operator v2.11.0 run as TWO members of every cluster's process group, beside the control plane: the controller (`external-secrets`) and its admission webhook (`external-secrets webhook`), one digest-pinned binary the release embeds as its `external-secrets` asset. They dial the tenant apiserver with a minted credential and reach the cluster vault on loopback, so an ExternalSecret syncs at ZERO nodes. The tenant keeps only the bundle's CRDs, ClusterRoles and a URL webhook registration; no ESO pod runs in it |
 
-| 10 | Node network | Rust `rust/socialweb-meshd`, Go `internal/tenantnet`, TS `lib/cloud-init-plugin-k3s-join` + `lib/socialweb-computer-k8s-downloads-fs` | Market clusters run `--flannel-backend=none`; each market node gets, from its `user_data`, a bridge CNI conflist on its Node's pod CIDR, cluster-CIDR-external SNAT, the sha256-pinned `socialweb-meshd` (downloaded from the door by hash) carrying pod traffic to other nodes over iroh, and `169.254.20.10` for its own CoreDNS; every tenant gets the meshd node reader RBAC and the per-node DNS DaemonSet as baseline (section 9) |
+| 10 | Node network | Rust `rust/socialweb-meshd`, Go `internal/tenantnet` + `internal/atproto/cloudinit` + `internal/nodeagent` | Market clusters run `--flannel-backend=none`; each market node gets, from its `user_data`, a bridge CNI conflist on its Node's pod CIDR, cluster-CIDR-external SNAT, the sha256-pinned `socialweb-meshd` (downloaded from the door by hash) carrying pod traffic to other nodes over iroh, and `169.254.20.10` for its own CoreDNS; every tenant gets the meshd node reader RBAC and the per-node DNS DaemonSet as baseline (section 9) |
 
 **Not building**, each rejected on evidence: a CNI plugin (the market path writes a conflist for
 k3s's bundled `bridge`/`host-local`/`portmap`; the cross-node half is component 10), a CAPI provider, an OIDC issuer, an ATProto
@@ -1189,8 +1189,9 @@ ClientCA cannot sign is refused with the reason, and the vault is not tried inst
 
 **The provider's credential never reaches a user.** It is a certificate credential signed by the
 cluster's client CA with `system:masters`. The user path is the kubeconfig of `getKubeconfig`: a client
-key made by the cluster's OpenBao PKI (role `kubeconfig-user`, at most 24 h), CN the user's DID, O
-`socialweb.computer:cluster-owners`, which the client certificate front admits only while its
+key signed from the cluster's own `client-ca.{crt,key}` on disk when they exist (`internal/clientcert`),
+or by the cluster's OpenBao PKI as the fallback (role `kubeconfig-user`, at most 24 h), CN the user's
+DID, O `socialweb.computer:cluster-owners`, which the client certificate front admits only while its
 `ClusterClientCertificate` exists and is not revoked.
 
 **A workspace ServiceAccount does not leave its workspace.** Its token carries
@@ -2088,62 +2089,43 @@ names both), `TestAnAdoptedNodeNotReadyFor90sIsReleased`, `TestAnAdoptedIdleNode
 `TestAnAdoptedClaimTheGuestHasNotFetchedYetGetsItsSecretWritten`,
 `TestAnEndedOrDeletingClaimIsNotAdopted`.
 
-**What the guest runs** (`lib/cloud-init-plugin-k3s-join`, still the module the door passes as
-`["k3s", createK3sJoinModule()]`). Besides the resolver it always wrote, it writes three `0700`
-scripts and four units, and its runcmd enables and starts them with `--no-block`. Its runcmd comes
-after the iroh transport module's `setup-iroh.sh` (which installs `/usr/local/bin/dumbpipe`) and the
-k3s module's `setup-k3s.sh` (which installs `/usr/local/bin/k3s`) in the composed `user_data`, so
-for the market path both binaries come from modules the door already uses; door-served hash-pinned
-binaries (M3-UNITS's fallback) are not needed by it. Every unit carries `StartLimitIntervalSec=0`.
+**What the guest runs** (`internal/atproto/cloudinit`, `K3sJoinModule`, built in Go). The module writes
+the resolver, the sysctl file, `/etc/socialweb/node/join.json`, the unit files and one pinned-download
+bootstrap shell. The bootstrap fetches `/downloads/<sha256>/socialweb-node-<arch>` from the door,
+checks the sha256, installs it 0755 and execs `socialweb-node units start`; everything after that is
+the one Go binary `cmd/socialweb-node` (`internal/nodeagent`), built on the shared
+`internal/systemdunit` library that HostProcess/hostsvc also use. The pin is the contract's
+`spec.nodeJoin.nodeAgent` (`ComputeContractNodeJoin.NodeAgent`), filled from the
+`socialweb-node-x86_64` and `socialweb-node-aarch64` downloads the web app serves. Every unit carries
+`StartLimitIntervalSec=0`.
 
-| unit | after | does | restart |
-|---|---|---|---|
-| `socialweb-openbao-link` | `setup-secrets` | `dumbpipe connect-tcp --addr 127.0.0.1:18200 <openbao-ticket>` | always |
-| `socialweb-node-secrets` | `setup-secrets`, openbao link | exchange the workload token for the claim's audience; OpenBao JWT login; KV read; write files | on-failure |
-| `socialweb-apiserver-link` | `setup-secrets` (the bundle) | `<advertiseAddress>/32` on `lo`; `dumbpipe connect-tcp --addr <advertiseAddress>:<apiserverPort> <apiserverTicket>` | always |
-| `socialweb-k3s-agent` | node secrets, apiserver link, DNS link, masquerade | `k3s agent --server https://<advertiseAddress>:<apiserverPort> --token-file /etc/socialweb/node/token --node-name <node> --data-dir /var/lib/rancher/k3s --kubelet-arg=cluster-dns=169.254.20.10 --node-label=socialweb.computer/node-local-dns=true` | always |
+| unit | after | does |
+|---|---|---|
+| `socialweb-node-bootstrap` | `network-online` | fetch and verify the pinned `socialweb-node`, then `units start`; oneshot |
+| `socialweb-node-prep` | `network-online`, `setup-secrets` | `socialweb-node join`: workload-token exchange, OpenBao JWT login, KV read, the `0600` files and `meshd.env`; then supervise the OpenBao and apiserver dumbpipe links |
+| `socialweb-node-dns-link` | prep | `169.254.20.10/32` on `swdns0` |
+| `socialweb-pod-masquerade` | prep | `net.ipv4.ip_forward=1` and the cluster-CIDR-only SNAT rule |
+| `socialweb-pod-cni` | prep | poll the Node's podCIDR, link the CNI plugins, write the bridge conflist with `encoding/json` through a rename |
+| `socialweb-node-diagnose` | prep | print containerd's CNI status to the console |
+| `socialweb-meshd-install` | prep | fetch the pinned meshd from the door, verify and install it 0755 |
+| `socialweb-meshd` | install, prep | run meshd with the kubelet kubeconfig and secret |
+| `socialweb-k3s-agent` | prep, DNS link, masquerade | `k3s agent` as before |
 
-M5 adds the node network units beside these four (section 9 "Pods reach pods..." and "Every market
-node resolves names..."): `socialweb-node-dns-link`, `socialweb-pod-masquerade`, `socialweb-pod-cni`
-(after node secrets) and, when the door ships a meshd pin, `socialweb-meshd-install` and
-`socialweb-meshd` (after the install and node secrets). All are enabled and started by the same
-runcmd; none is a dependency of the agent except the DNS link and the masquerade.
+The join's credentials are fetched by the Go agent itself: it runs `guest-login.sh token <audience>` for
+the claim's audience, logs in at `/v1/auth/<jwtMount>/login` with `{role, jwt}` and
+`--cacert openbao-ca.pem`, reads `/v1/<kvMount>/data/<kvPath>`, and requires `token`, `nodePassword`
+and `serverCA`. It writes `server-ca.pem`, `token`, `node-password` and `apiserver.env` under
+`/etc/socialweb/node/` and `/etc/rancher/node/password`, all `0600`; the token is the `K10` form unless
+the stored token already starts with `K10`. The advertise address, port and ticket are validated before
+they reach a unit's command line. The k3s agent is ordered after prep, the DNS link and masquerade, and
+never after meshd, its install or the CNI: those wait for the Node the agent registers.
 
-- `socialweb-node-secrets` is a oneshot with `Restart=on-failure`, because systemd refuses
-  `Restart=always` on `Type=oneshot`; with no start limit it retries until it succeeds, which is what
-  "always" means for a oneshot. Its token comes from the helper cloud-init-common's `secrets` module
-  uses, `guest-login.sh token <audience>`, for `aud` = the claim's audience (it retries until the
-  bidder's grant for that audience exists). It logs in at `/v1/auth/<jwtMount>/login` with
-  `{role, jwt}` and `--cacert openbao-ca.pem`, reads `/v1/<kvMount>/data/<kvPath>`, and requires
-  `token`, `nodePassword` and `serverCA`, because those three are credentials OpenBao alone holds.
-  Both calls go through a bounded wait on the link, because the OpenBao link is started beside this
-  unit and its listener is not bound the moment the unit is (MEASURED 2026-10-08T00:23Z: node-secrets
-  started at 11.0 s and failed at 11.0 s, and systemd's `RestartSec=5` cost the join 5.6 s): 120
-  attempts 0.5 s apart, the last one 60 s after the first, and each failed attempt says so on the
-  console with curl's own exit code and the address it is waiting on. The bound is
-  `NODE_SECRETS_LINK_ATTEMPTS`; a wait that runs out exits 1, so the retry is still systemd's.
-  The apiserver ticket, the advertise address and the port it requires only when the bundle did not
-  already write `/etc/socialweb/node/apiserver.env`; when the bundle did, it reads them back out of
-  that file and checks the file names this node, so the two halves of the join cannot disagree about
-  which node the ticket belongs to. Either way it refuses an `advertiseAddress` that is not IPv4, a
-  port that is not digits and a ticket outside `[a-z0-9]+`, because those three reach a unit's command
-  line, and the link script checks the same three itself, because systemd loads them from the file
-  without reading it. It writes `server-ca.pem`, `token`, `node-password` and `apiserver.env` under
-  `/etc/socialweb/node/` and `/etc/rancher/node/password`, all `0600`. The token is pinned as the ssh
-  join pinned it, `K10<sha256 of the server CA bytes>::server:<token>`, unless the stored token already
-  starts with `K10`.
-- `socialweb-k3s-agent` passes the flags the ssh join passed and no others (it passed no node-ip
-  flag); the node password stays where k3s reads it. Decided by Claude, user may veto: the unit is
-  `socialweb-k3s-agent`, not `k3s-agent`, because the k3s installer owns the `k3s` and `k3s-agent`
-  unit names. It carries the k3s installer unit's `Type=notify`, `KillMode=process`, `Delegate=yes`
-  and limits.
-- Gone: the `socialweb-k3s-join` stdin script, the sshd drop-in that set `AllowTcpForwarding remote`
-  and `GatewayPorts clientspecified`, and its sshd reload. The iroh transport module still installs
-  sshd for the requester's own ssh and is untouched; the door passes no ssh key, so that sshd's
-  `authorized_keys` is empty. The door no longer downloads dumbpipe, and `node-apiserver-host` is gone
-  from its options.
+Gone: the `lib/cloud-init-plugin-k3s-join` TypeScript module, its three `0700` scripts and four units.
+The separate `setup-secrets`, k3s-install and iroh modules remain cloud-init shell modules; the
+join path's own logic is the Go binary.
 
-**MEASURED locally end to end, 2026-10-07** (`internal/marketnetwork/TestAMarketNodeJoinsATenantClusterThroughItsOpenBaoWithNoSsh`,
+**MEASURED locally end to end, 2026-10-07** (this reading predates the Go node agent; section 15 records
+the rewrite's reading; `internal/marketnetwork/TestAMarketNodeJoinsATenantClusterThroughItsOpenBaoWithNoSsh`,
 PASS 753.57s, finished 23:55:13Z; the vendored market network held up by `accept.sh`'s `ACCEPT_HOLD_DIR`,
 and the deployed control-plane container `socialweb-k8s:m3live` built from the tree running against it, so
 prod's own entrypoint and provider are what was measured). One Deployment on a tenant cluster took the
@@ -2309,8 +2291,8 @@ and `--full` (skipped with a reason without cargo; `--full` fails instead), and 
 k3s proofs in `--local`/`--full` when `sudo -n` works.
 
 **The integration.** Every guest piece is
-written by the door's guest module (`lib/cloud-init-plugin-k3s-join`) into the `user_data` the RFP
-flow carries; nothing reaches a guest any other way. Decisions not in the meshd author's list are
+written by the Go cloud-init module (`internal/atproto/cloudinit`, `K3sJoinModule`) into the
+`user_data` the RFP flow carries; nothing reaches a guest any other way. Decisions not in the meshd author's list are
 marked "decided by Claude, user may veto".
 
 1. *Server.* `clusterstack.Spec.ServerArgv` adds `--flannel-backend=none --cluster-cidr=10.42.0.0/16`
@@ -2327,8 +2309,8 @@ marked "decided by Claude, user may veto".
    Node gets the `spec.podCIDR` the bridge waits for.
 2. *Bridge CNI on the Node's pod CIDR.* host-local has no "range from the Node" mode (that is
    Calico's IPAM; flannel feeds host-local through its own `subnet.env`), so decided by Claude, user
-   may veto: a oneshot `socialweb-pod-cni` (after `socialweb-node-secrets`, which supplies
-   `NODE_NAME`) polls `k3s kubectl --kubeconfig /var/lib/rancher/k3s/agent/kubelet.kubeconfig get
+   may veto: `socialweb-pod-cni` (after `socialweb-node-prep`, whose `join` writes `NODE_NAME`) polls
+   `k3s kubectl --kubeconfig /var/lib/rancher/k3s/agent/kubelet.kubeconfig get
    node $NODE_NAME -o jsonpath={.spec.podCIDR}` every 2 s for 3 minutes (the node authorizer lets a
    kubelet read its own Node), refuses anything that is not an IPv4 CIDR, and writes
    `/var/lib/rancher/k3s/agent/etc/cni/net.d/10-socialweb-bridge.conflist` through a rename:
@@ -2358,28 +2340,30 @@ marked "decided by Claude, user may veto".
    a temporary file beside the target, refuses bytes whose sha256 is not the pin, and renames it in
    0755. The unit is `rust/socialweb-meshd/deploy/socialweb-meshd.service` byte for byte (a test
    reads the file), plus the drop-in `socialweb-meshd.service.d/10-socialweb-node.conf`:
-   `After=`/`Wants=` the install and `socialweb-node-secrets`, `StartLimitIntervalSec=0`.
-   `socialweb-node-secrets` writes `/etc/socialweb/node/meshd.env`
+   `After=`/`Wants=` the install and `socialweb-node-prep`, `StartLimitIntervalSec=0`.
+   The `join` process in `socialweb-node-prep` writes `/etc/socialweb/node/meshd.env`
    (`SOCIALWEB_MESHD_NODE_NAME=<node>`, `SOCIALWEB_MESHD_KUBECONFIG=<the kubelet kubeconfig>`), since
-   it is the unit that learns the node name. `socialweb-k3s-agent` is ordered after
+   it is the process that learns the node name. `socialweb-k3s-agent` is ordered after
    `socialweb-node-dns-link` and `socialweb-pod-masquerade` and NEVER after meshd, its install or
    `socialweb-pod-cni`: all three wait for the agent's Node, so ordering the agent after any of them
    is a deadlock. A test asserts it on every `After`/`Wants`/`Requires`/`BindsTo`/`Requisite` line
    (watched to fail with meshd added to the agent's `After`).
 6. *Where the binary comes from.* The door serves pinned downloads at `/downloads/<sha256>/<name>`
-   (`lib/socialweb-computer-k8s-downloads-fs` `loadPinnedDownloads`, `createPinnedDownloadsFactory`):
+   (`internal/gatewayapi/downloads.go`, `LoadPinnedDownloads`):
    every file in its downloads dir with a `sha256sum`-format `<name>.sha256` sidecar, held in memory,
    served only at its own hash and name with `cache-control: public, max-age=31536000, immutable`
    and `etag "<sha256>"`; a sidecar that names another file, or bytes that do not hash to it, stop
-   the door at startup. The meshd pin is the sidecar hash of the shipped `socialweb-meshd-x86_64` and
-   `socialweb-meshd-aarch64` at the node download origin (`meshdPinOf`): `public-origin`, or in a
+   the gateway at startup. The meshd pin is the sidecar hash of the shipped `socialweb-meshd-x86_64` and
+   `socialweb-meshd-aarch64` at the node download origin (`MeshdPinOf`): `public-origin`, or in a
    market network `http://192.0.2.1:<the web app's bound port>` (`test-node-download-host`, the
    address at which a guest reaches this host's loopback through pasta). The downloads come from the
    socialweb-computer binary: its asset `socialweb-computer-k8s-downloads` (versions.json, built by
    `scripts/build-web-app-downloads.sh` in the release build and pinned by its tree sha256) holds both
-   meshd builds, each with its sidecar, and the
-   gateway passes the extracted tree as `--downloads-dir` (and as a read path of the DenoPod). Both
-   gateway profiles pass `--required-downloads` with those two names, so a web app that would offer
+   meshd builds and both `socialweb-node` builds, each with its sidecar, and the gateway passes the
+   extracted tree as `--downloads-dir` (and as a read path of the gateway component). The NodeClaim
+   mapper writes the node-agent pin into the contract's `spec.nodeJoin.nodeAgent`; the bootstrap
+   fetches them by the same hash. Both gateway profiles pass `--required-downloads` with those two names, so a
+   gateway that would offer
    no meshd refuses to start with `required_downloads_missing` (or
    `node_download_origin_missing`) instead of logging `meshd_not_offered`. The node images do not embed meshd yet; the install path that
    keeps an embedded binary is ready for when they do.
@@ -3173,6 +3157,11 @@ confirm inline, unchanged.
 api/v1alpha1/          wire types only. No logic, no I/O
 internal/${concept}/   one package per concern; the interface declared where consumed
 internal/atprotoauth/  verifies an atproto service-auth token for one XRPC method: signature, audience, method, admitted DID methods and a 5-minute lifetime cap
+internal/atproto/cloudinit/ the Go cloud-init modules: the k3s-join module writes the node config, the unit files and one pinned-download bootstrap shell; the secrets, k3s and iroh modules are siblings
+internal/nodeagent/    the guest node agent behind `cmd/socialweb-node`: join secrets, dumbpipe links, k3s ordering, CNI, diagnose, hostname, DNS link, masquerade and meshd install
+internal/systemdunit/  the one unit-file model and writer shared by HostProcess/hostsvc and the node agent
+internal/services/ingressproxy/ one IngressProxy component with providers xrpc-subscription, iroh and opentunnel; each provider is its own package
+internal/exposure/     resolves an Exposure's `ingressRef` through the component registry and uses the provider's optional `IngressRegistrar`
 internal/nodeprovider/ derives a node's DNS-1123 name from the (cluster label, node id) pair
 internal/vmruntime/    the Linux VM runtime: one-shot prep and one transient VM unit per guest (swc-userns-stage -> pasta -> socialweb-vmexec -> firecracker); `socialweb-computer internal vm start|inspect|stop|list` is its CLI, and the bidder's firecracker provider drives it
 internal/nodeimagemain/ the two Go steps of scripts/build-guest-image.sh, `socialweb-computer nodeimage guest-rootfs|guest-manifest`, compiled only into a dev build
@@ -3187,7 +3176,7 @@ internal/sweepkcp/     the kcp side of that sweep: build the account worklist fr
 internal/foldmain/     the Invocation a verb body runs with (args, env, stdio, the resolved bin/<sha>/ path, the verb words) and the re-exec argv it builds
 internal/${binary}main/ the body of a host verb (gatewaymain, providermain, vaultmain, checkhostmain, ccmmain, tenantcredentialmain) behind Main(ctx, Invocation) int; socialweb-computer dispatches its verb to it with the raw args, and the clusterprovider re-execs the CCM as `<bin/sha path> internal cloud-controller-manager` with the CCM's three-variable env rebuilt explicitly
 cmd/socialweb-computer/ the multi-call CLI; every host verb lives here
-cmd/${binary}/         standalone binaries only: socialweb-vmexec (VM-unit asset), socialweb-tsbundle and socialweb-apigen (build tools), openbao-plugin-auth-sshsig and openbao-plugin-auth-atproto (each its own module); socialweb-nodeboot, socialweb-nodeimage and socialweb-nodeinit no longer exist
+cmd/${binary}/         standalone binaries only: socialweb-node (the guest agent), socialweb-vmexec (VM-unit asset), socialweb-tsbundle and socialweb-apigen (build tools), openbao-plugin-auth-sshsig and openbao-plugin-auth-atproto (each its own module); socialweb-nodeboot, socialweb-nodeimage and socialweb-nodeinit no longer exist
 deploy/                manifests and manifest sets, the audit policy, check.sh, ts-entries.yaml
 rust/                  a cargo workspace; rust/socialweb-meshd is the per-node pod mesh daemon that runs INSIDE a market guest (section 9), rust/build.sh its static musl build
 ```
@@ -3220,8 +3209,9 @@ names and starts from an empty state dir - and the cost of the node names changi
 recorded in section 15.
 
 Binaries: `socialweb-computer` (the gateway, the clusterprovider, the vault and check-host are its
-verbs) and `socialweb-vmexec`; outside `cmd/`, `rust/build.sh` builds
-`socialweb-meshd`, which runs inside a market guest beside the k3s agent. The one placement is
+verbs) and `socialweb-vmexec`; `socialweb-node` is the guest agent, built by
+`scripts/build-web-app-downloads.sh` and fetched by the guest's bootstrap. Outside `cmd/`,
+`rust/build.sh` builds `socialweb-meshd`, which runs inside a market guest beside the k3s agent. The one placement is
 `internal/nodemarket`, whose node is a claim rather than a process; the VM runtime
 (`internal/vmruntime`) is what the BIDDER runs.
 
@@ -3465,6 +3455,12 @@ A change must not break any of these. Each exists because something failed.
     modprobe, or refuses the build. Without it no nf_tables expression autoloads, iptables-nft's
     native `log` and `limit` rules fail with ENOENT, and NetworkPolicies are silently not enforced
     (section 15, plan 0005 M5-NETPOL).
+34. **An ingress provider selected by `spec.provider` fails closed.** `xrpc-subscription`, `iroh` and
+    `opentunnel` are distinct packages; a missing or non-executable dumbpipe, a missing opentunnel
+    command, a missing `spec.iroh` or `spec.opentunnel` block for the selected provider, or an unknown
+    provider is an error. The component does not silently start a different provider, and an
+    `ingressRef` that resolves to a component with no registrar is an error rather than another
+    provider.
 
 ## 14. Open architectural gaps
 
@@ -9037,8 +9033,9 @@ postgres                     "initdb: error: cannot be run as root" -- fatal
   (`api/v1alpha1/types_clusterclientcertificate.go`, export `clusters`, schema `v1alpha1-1`) lives in the
   home workspace of the cluster, next to the `Cluster` it hangs from through `ownerReferences`; spec
   `{cluster, did, serial, notAfter, noExpiry, revoked}`, status `{revokedAt, lastError}`; no key and no
-  certificate body. `clientcert.Issuer.Grant` (the `getKubeconfig` handler) writes it after `pki/issue`
-  and before it hands the kubeconfig back (`kcpclient.RecordCertificate`); when the write fails it revokes
+  certificate body. `clientcert.Issuer.Grant` (the `getKubeconfig` handler) writes it after it signs
+  (from the client CA on disk, or after `pki/issue` when the vault is the source) and before it hands
+  the kubeconfig back (`kcpclient.RecordCertificate`); when the write fails it revokes
   the serial and answers ClusterInitializing, so no certificate exists without its object. It replaces
   the `noexpiry-<serial>` ConfigMap, which only no-expiry certificates had. `Issuer.Revoke` (a cluster
   delete, `revokeIdentity`) revokes the serials in the PKI and sets `spec.revoked` and `status.revokedAt`
@@ -9874,6 +9871,83 @@ every third cycle, calls createCluster again right after deleteCluster.
 - 71 finishDelete lines with homeRemoved true, 0 RemoveHome warnings, 0 cluster-list errors (before the
   re-read, with only the Deleting flag of the list: 12 "list clusters in root:<account>:<home>: ... 504"
   warnings in 25 cycles).
+
+### The guest node agent is one Go binary (2026-10-21, 1db5f084)
+
+The cloud-init module (`internal/atproto/cloudinit`, `K3sJoinModule`) now ships one Go binary,
+`socialweb-node` (`cmd/socialweb-node`, `internal/nodeagent`), on the shared `internal/systemdunit`
+library that HostProcess/hostsvc also use. The module writes the resolver, the sysctl file, the join
+config, the unit files and one pinned-download bootstrap shell; the bootstrap fetches
+`/downloads/<sha256>/socialweb-node-<arch>` from the door, checks the sha256, installs it 0755 and
+execs `socialweb-node units start`. The join's own work after that is Go: the workload-token exchange
+and OpenBao JWT login, the KV read and the `0600` files, the OpenBao and apiserver dumbpipe links,
+the k3s agent ordering, the bridge CNI conflist (`encoding/json`, written through a rename), diagnose,
+hostname, the DNS link, masquerade and the meshd install. The pin is
+`ComputeContractNodeJoin.NodeAgent`, filled from the `socialweb-node-x86_64` and
+`socialweb-node-aarch64` downloads the web app serves. The old `lib/cloud-init-plugin-k3s-join`
+TypeScript module and its scripts and units are gone; only the pinned-download bootstrap and the
+separate `setup-secrets`, k3s-install and iroh modules remain shell.
+
+### Ingress is one IngressProxy with three providers (2026-10-21, 1db5f084)
+
+An `IngressProxy` component (`internal/services/ingressproxy`) serves exposures through one of three
+providers: `xrpc-subscription`, `iroh` or `opentunnel` (`spec.provider`; empty means the
+`xrpc-subscription` default). Each provider is its own package under
+`internal/services/ingressproxy/`; `Exposure.spec.ingressRef` names the component, and the exposure
+dispatcher resolves it through the component registry and uses the optional `IngressRegistrar` the
+component publishes. `xrpc-subscription` is the former did:key subscriber, `iroh` supervises
+`dumbpipe listen-tcp`, and `opentunnel` supervises `opentunnel route add`. The component fails closed
+on a missing or non-executable dumbpipe, a missing opentunnel command, a missing `spec.iroh` or
+`spec.opentunnel` block for the selected provider, or an unknown provider; it does not silently start
+a different provider. An `ingressRef` that resolves to a component with no registrar is an error
+rather than a different provider.
+
+### Certificates share one pair path, and kubeconfig users sign from the tenant CA (2026-10-21, f4c30b42)
+
+`tlsfront.EnsurePair` and `clientcertfront.EnsureEdgeClient` now share one implementation: a lock file
+in the directory, a pair validated by `tls.LoadX509KeyPair`, generation under the lock, and
+temp-file-and-rename writes. A mismatched or truncated pair is regenerated, so a pair left half-written
+heals on the next start. Gateway kubeconfig user certificates are signed from the tenant's
+`server/tls/client-ca.crt` and `client-ca.key` when both exist (`internal/clientcert`,
+`signFromClientCA`); the vault PKI issue path is the fallback, and the gateway kubeconfig client gained
+the `pki/config/ca` and `pki/issuer/*` capabilities that fallback needs. The tenant k3s step now depends
+on the OpenBao step in the process-group graph, so k3s's post-readiness harvest cannot read
+`openbao/access.json` before the vault step writes it (25be7cb3).
+
+### The requester applies the contract's rules (2026-10-21)
+
+- `run request --deny-bidder-dids` writes `ComputeContract.spec.denyBidderDids`; the requester now
+  filters discovered bidders through the running contract's list (`withoutDeniedBidders`), not only its
+  own component config, so a denied bidder no longer answers the RFP (ba0e85a5).
+- An ssh gateway that acts for one signed-in owner defaults to the open policy workflow. The owner
+  session is the trust boundary, and a fresh network has no vouches for the tangled-vouch workflow to
+  read (637a5a21).
+- The NodeClaim mirrors the contract receipt's strongRef into `receiptUri` and `receiptCid`, which is
+  what the scale-to-zero assertions read (ff7969f3).
+- The in-process GatewayAPI builds its tenant API client from the gateway's clusterprovider state dir
+  and the front's address, so the cluster k8s routes no longer answer 503 ClusterUnavailable
+  (a8f341b7).
+
+### The rewrite's readings, and the host contract's limits (2026-10-21)
+
+On the rewrite's integration network in `test/integration` (hat-7): the market network reached Ready in
+52 to 56 s; a tenant cluster idled at zero nodes, scaled to two market RFP VMs and back to zero with
+cross-node pod connectivity, CoreDNS resolution and the NetworkPolicy matrix as expected (the matrix
+logged 404s on hat-7); a NodeClaim's Node was Ready with its podCIDR about 28 s after its pod
+was created; `TestAcceptSurvivesABidderRestart` completed the contract across a bidder kill and restart
+in about 250 s; `TestWebAppSignInOverLoopbackOriginIssuesAClientCertificate` issued a client certificate
+the tenant cluster accepted; and `TestKubeconfigClientCertificateWithoutCredentialHelper` issued a
+kubeconfig and had the revoked certificate refused. A market guest fetched its pinned meshd from
+`192.0.2.1`, the host loopback a guest reaches through pasta. The tests are the instruments; the
+wall-clock values are this run's readings.
+
+The host contract has two limits. A tenant host needs `/etc/rancher` to exist: the k3s server runs under
+`nsexec`, which binds `<slot data dir>/rancher` over `/etc/rancher`, and when the target is absent the
+bind is skipped, so k3s writes on the host instead of in the cluster's state; `check-host` does not test
+it. A dev build also needs Deno 2.9.3 on `PATH` for the policy engine: a release build extracts the
+embedded `deno` asset, while a dev build has no embedded zip and `internal/policyengine/deno` falls back
+to `exec.LookPath("deno")`. The integration hosts hat-7 and hat-9 were prepared by hand with linger,
+`kubectl`, `/etc/rancher`, and a subuid/subgid range for three VM slots.
 
 ## 16. Vocabulary
 

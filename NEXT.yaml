@@ -847,6 +847,17 @@ limits:
       and does its work move", and no instrument here measures that yet, so the branch that would do
       it is not written rather than written wrong. See `docs/plans/0002` section 4.4.
 
+  - title: A tenant host needs /etc/rancher, and check-host does not test it.
+    body: >
+      The cluster's k3s server runs under nsexec, which binds `<slot data dir>/rancher` over
+      `/etc/rancher`. When `/etc/rancher` does not exist the bind is skipped and k3s writes on the
+      host instead of in the cluster's state. `check-host` has no check for it. A dev build also
+      needs Deno 2.9.3 on `PATH` for the policy engine: a release build extracts the embedded deno
+      asset, while a dev build has no embedded zip and `internal/policyengine/deno` falls back to
+      `exec.LookPath("deno")`. The rewrite's integration hosts hat-7 and hat-9 were prepared by hand
+      with linger, kubectl, `/etc/rancher`, and a subuid/subgid range for three VM slots. See
+      `docs/ARCHITECTURE.md` section 15, "The rewrite's readings, and the host contract's limits".
+
 paused_2026_10_19:
   - id: RC21-VERIFIED
     text: >
