@@ -162,6 +162,10 @@ type Service struct {
 	acceptMu sync.Mutex
 
 	acceptLocks map[string]*sync.Mutex
+
+	serviceAuthMu sync.Mutex
+
+	serviceAuth map[string]serviceAuthToken
 }
 
 func (s *Service) lockAccept(uri string) func() {
