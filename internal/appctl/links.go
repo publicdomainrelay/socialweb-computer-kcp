@@ -206,6 +206,9 @@ func componentLinkName(fromKind, fromName, toKind, toName string) string {
 }
 
 func isLinkTargetKind(kind string) bool {
+	if strings.EqualFold(kind, ComponentKindPolicyEngine) {
+		return false
+	}
 	for candidate := range ComponentGVRs {
 		if strings.EqualFold(candidate, kind) {
 			return true
