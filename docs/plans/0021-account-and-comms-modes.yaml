@@ -286,7 +286,7 @@ items:
     track: contracts
     parallel_with: [W0-CONTRACTS]
     depends_on: []
-    status: doing
+    status: done
     evidence: []
     decision: >
       Write the integration matrix before implementation: three account modes
@@ -653,7 +653,7 @@ items:
     track: cleanup
     parallel_with: [W4-MIGRATION, W4-DOCS]
     depends_on: [W4-APP-ROOTS]
-    status: doing
+    status: done
     evidence: []
     decision: >
       Delete BidderIdentityMode, dead CheckSignIn OAuth branch, direct
@@ -675,7 +675,7 @@ items:
     track: migration
     parallel_with: [W4-REMOVE-LEGACY, W4-DOCS]
     depends_on: [W2-RECORD, W4-APP-ROOTS]
-    status: doing
+    status: done
     evidence: []
     decision: >
       Default omitted identity to managed associated; default comms to Both
@@ -696,7 +696,7 @@ items:
     track: docs
     parallel_with: [W4-REMOVE-LEGACY, W4-MIGRATION]
     depends_on: [W4-APP-ROOTS]
-    status: doing
+    status: done
     evidence: []
     decision: >
       Update AGENTS.md, CONTRIBUTING.md, BIDDER_ARCH.md, GATEWAY_ARCH.md,
@@ -719,7 +719,7 @@ items:
     track: local-and-prod
     parallel_with: [W5-PROD]
     depends_on: [W4-REMOVE-LEGACY, W4-MIGRATION]
-    status: todo
+    status: doing
     evidence: []
     decision: >
       Run local managed associated, managed unassociated, pdsAccount, OAuth
@@ -739,7 +739,7 @@ items:
     track: hosts
     parallel_with: []
     depends_on: [W5-LOCAL]
-    status: todo
+    status: done
     evidence: []
     decision: >
       Install/upgrade this host, hat-9 and hat-7. Keep this host and hat-9 in
@@ -757,7 +757,7 @@ items:
     track: local-and-prod
     parallel_with: [W5-LOCAL]
     depends_on: [W4-REMOVE-LEGACY]
-    status: todo
+    status: done
     evidence: []
     decision: >
       Upgrade the prod gateway, refresh Caddy certificates, sign in
@@ -816,6 +816,17 @@ test_matrix:
     - socialweb.computer: prod gateway, Alice sign-in and tenant kubeconfig
 
 acceptance_matrix:
+  rule: >
+    W0-MATRIX freezes these rows. Every row names a live host or a fixture
+    that already exists or is still required. A row with neither is blocked,
+    never silently skipped.
+  proof_sources: |
+    this host: the local bidder host, associated (W5-HOSTS)
+    hat-9: associated bidder host (W5-HOSTS)
+    hat-7: unassociated bidder host (W5-HOSTS)
+    prod gateway: socialweb.computer gateway, Alice sign-in (W5-PROD)
+    dev market network w3comms: disposable dev/CI market network
+    test/integration: the integration suite under test/integration
   fixtures:
     local-pds: a Pds component with account, session and repo, on a loopback port, no ingress
     remote-pds: a RemotePDS with URL, DID and auth refs, including a fail-closed missing-auth case
@@ -827,75 +838,85 @@ acceptance_matrix:
     restart-injector: stops the process between delivery and apply, then resumes the cursor
   rows:
     - account: managed-associated
-      pds: local
+      identity: localRepo + RequireApproval
+      pds: local Pds
       roles: [bidder, requester]
-      transports: [XRPC, Firehose subscribeRepos, Firehose JetStream, Both]
+      transports: [XRPC, Firehose subscribeRepos, JetStream, Both]
       fixtures: [local-pds, relay-subscribeRepos, jetstream, duplicate-injector, restart-injector]
-      live: [this-host, hat-9]
+      proof: [test/integration, this host, hat-9, dev market network w3comms]
       test: TestMarketAccountAndTransportMatrix/managed-associated
     - account: managed-unassociated
-      pds: local
+      identity: localRepo + Skip
+      pds: local Pds
       roles: [bidder, requester]
-      transports: [XRPC, Firehose subscribeRepos, Firehose JetStream, Both]
+      transports: [XRPC, Firehose subscribeRepos, JetStream, Both]
       fixtures: [local-pds, relay-subscribeRepos, jetstream, duplicate-injector]
-      live: [hat-7]
+      proof: [test/integration, this host, hat-7, dev market network w3comms]
       test: TestMarketAccountAndTransportMatrix/managed-unassociated
     - account: existing-pds-account
-      pds: remote
+      identity: pdsAccount
+      pds: RemotePDS
       roles: [bidder, requester]
-      transports: [XRPC, Firehose subscribeRepos, Firehose JetStream, Both]
+      transports: [XRPC, Firehose subscribeRepos, JetStream, Both]
       fixtures: [remote-pds, relay-subscribeRepos, jetstream]
-      live: [this-host disposable account]
+      proof: [test/integration, this host, dev market network w3comms]
       test: TestMarketAccountAndTransportMatrix/existing-pds-account
     - account: existing-oauth-browser
-      pds: remote
+      identity: oauthBrowser
+      pds: RemotePDS
       roles: [bidder, requester]
-      transports: [XRPC, Firehose subscribeRepos, Firehose JetStream, Both]
+      transports: [XRPC, Firehose subscribeRepos, JetStream, Both]
       fixtures: [remote-pds, oauth-store, relay-subscribeRepos, jetstream]
-      live: [this-host disposable account, socialweb.computer requester]
+      proof: [test/integration, this host, prod gateway]
       test: TestMarketAccountAndTransportMatrix/existing-oauth-browser
     - account: existing-oauth-qr
-      pds: remote
+      identity: oauthQr
+      pds: RemotePDS
       roles: [bidder, requester]
-      transports: [XRPC, Firehose subscribeRepos, Firehose JetStream, Both]
+      transports: [XRPC, Firehose subscribeRepos, JetStream, Both]
       fixtures: [remote-pds, qr-transfer, oauth-store, relay-subscribeRepos, jetstream]
-      live: [this-host disposable account]
+      proof: [test/integration, this host, prod gateway]
       test: TestMarketAccountAndTransportMatrix/existing-oauth-qr
     - account: existing-oauth-delegated
-      pds: remote
+      identity: oauthDelegated
+      pds: RemotePDS
       roles: [bidder, requester]
-      transports: [XRPC, Firehose subscribeRepos, Firehose JetStream, Both]
+      transports: [XRPC, Firehose subscribeRepos, JetStream, Both]
       fixtures: [remote-pds, oauth-store, relay-subscribeRepos, jetstream]
-      live: [this-host disposable account]
+      proof: [test/integration, this host]
       test: TestMarketAccountAndTransportMatrix/existing-oauth-delegated
   faults:
-    - fault: duplicate XRPC + firehose delivery
+    - fault: duplicate delivery (XRPC + firehose)
       fixtures: [duplicate-injector]
-      live: [this-host]
+      proof: [test/integration, this host, dev market network w3comms]
       test: TestMarketDuplicateDeliveryCreatesOneObject
     - fault: process restart between delivery and apply
       fixtures: [restart-injector]
-      live: [this-host]
+      proof: [test/integration, this host, dev market network w3comms]
       test: TestMarketRestartResumesCursorsAndDedupe
-    - fault: out-of-order accept before bid/receipt
+    - fault: out-of-order accept before bid/receipt and out-of-order event
       fixtures: [duplicate-injector]
-      live: [this-host]
+      proof: [test/integration, this host, dev market network w3comms]
       test: TestMarketOutOfOrderAcceptConverges
+    - fault: missing source fails closed (Firehose without ingress or EventStream)
+      fixtures: [local-pds]
+      proof: [test/integration, this host, dev market network w3comms]
+      test: TestMarketFirehoseFailsClosedWithoutIngress
+    - fault: missing auth fails closed (RemotePDS without auth ref)
+      fixtures: [remote-pds]
+      proof: [test/integration, this host, prod gateway]
+      test: TestMarketRemotePDSMissingAuthFailsClosed
     - fault: relay reconnect and cursor resume
       fixtures: [relay-subscribeRepos, jetstream]
-      live: [this-host]
+      proof: [test/integration, this host]
       test: TestMarketRelayReconnectResumesCursor
-    - fault: missing ingress for Firehose
-      fixtures: [local-pds]
-      live: [this-host]
-      test: TestMarketFirehoseFailsClosedWithoutIngress
     - fault: revoked association claim
       fixtures: [relay-subscribeRepos]
-      live: [this-host, hat-9]
+      proof: [test/integration, this host, hat-9]
       test: TestMarketAssociationRevocationRemovesApproval
     - fault: expired OAuth session
       fixtures: [oauth-store]
-      live: [this-host disposable account]
+      proof: [test/integration, this host, prod gateway]
       test: TestMarketExpiredSessionReportsSignInAgain
 
 risks: |
