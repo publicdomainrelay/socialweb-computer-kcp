@@ -7,14 +7,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/identity"
 	"github.com/bluesky-social/indigo/atproto/syntax"
+	cid "github.com/ipfs/go-cid"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -66,6 +69,8 @@ type marketHandler struct {
 	log *slog.Logger
 
 	directory identity.Directory
+
+	client *http.Client
 
 	mu    sync.Mutex
 	pdses map[syntax.DID]pdsclient.PDS
@@ -128,6 +133,7 @@ func NewMarketHandler(opts MarketOptions) (Handler, error) {
 		opts:      opts,
 		log:       opts.Log,
 		directory: fallbackDirectory{local, public},
+		client:    httpClient,
 		pdses:     map[syntax.DID]pdsclient.PDS{},
 	}, nil
 }
@@ -148,19 +154,10 @@ func (h *marketHandler) HandleEvent(ctx context.Context, event Event) error {
 			continue
 		}
 		uri := "at://" + event.Repo.String() + "/" + collection + "/" + rkey
-		pds, err := h.authorPDS(ctx, event.Repo)
-		if err != nil {
-			return fmt.Errorf("eventstream: resolving the market author PDS for %s: %w", uri, err)
-		}
-		record, err := pds.GetRecord(ctx, pdsclient.RepoPath{Repo: event.Repo, Collection: syntax.NSID(collection), Rkey: syntax.RecordKey(rkey)}, op.CID)
+		value, cid, err := h.fetchMarketRecord(ctx, event, collection, rkey, op.CID)
 		if err != nil {
 			return fmt.Errorf("eventstream: fetching the market record %s: %w", uri, err)
 		}
-		value := map[string]any{}
-		if err := json.Unmarshal(record.Value, &value); err != nil {
-			return fmt.Errorf("eventstream: decoding the market record %s: %w", uri, err)
-		}
-		cid := record.CID.String()
 		if err := h.createSync(ctx, adapter, event.Repo.String(), uri, cid, collection, value); err != nil {
 			return err
 		}
@@ -208,6 +205,89 @@ func (h *marketHandler) createSync(ctx context.Context, adapter, did, uri, cid, 
 	return nil
 }
 
+func (h *marketHandler) fetchMarketRecord(ctx context.Context, event Event, collection, rkey string, cidPtr *cid.Cid) (map[string]any, string, error) {
+	cidText := ""
+	if cidPtr != nil {
+		cidText = cidPtr.String()
+	}
+	if pds, err := h.authorPDS(ctx, event.Repo); err == nil {
+		record, err := pds.GetRecord(ctx, pdsclient.RepoPath{Repo: event.Repo, Collection: syntax.NSID(collection), Rkey: syntax.RecordKey(rkey)}, cidPtr)
+		if err == nil {
+			value := map[string]any{}
+			if err := json.Unmarshal(record.Value, &value); err != nil {
+				return nil, "", err
+			}
+			return value, record.CID.String(), nil
+		}
+	}
+	hostname, err := h.relayHost(ctx, event.Source, event.Repo.String())
+	if err != nil {
+		return nil, "", err
+	}
+	for _, scheme := range []string{"http", "https"} {
+		target := scheme + "://" + hostname + "/xrpc/com.atproto.repo.getRecord?repo=" + url.QueryEscape(event.Repo.String()) +
+			"&collection=" + url.QueryEscape(collection) + "&rkey=" + url.QueryEscape(rkey) + "&cid=" + url.QueryEscape(cidText)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+		if err != nil {
+			return nil, "", err
+		}
+		resp, err := h.httpClient().Do(req)
+		if err != nil {
+			continue
+		}
+		data, readErr := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+		resp.Body.Close()
+		if readErr != nil || resp.StatusCode != http.StatusOK {
+			continue
+		}
+		var body struct {
+			CID   string         `json:"cid"`
+			Value map[string]any `json:"value"`
+		}
+		if err := json.Unmarshal(data, &body); err != nil {
+			continue
+		}
+		if body.Value == nil {
+			continue
+		}
+		if body.CID == "" {
+			body.CID = cidText
+		}
+		return body.Value, body.CID, nil
+	}
+	return nil, "", errors.New("the author PDS is not reachable through its identity or the relay host list")
+}
+
+func (h *marketHandler) relayHost(ctx context.Context, source, did string) (string, error) {
+	base, ok := strings.CutPrefix(strings.TrimSpace(source), "relay/")
+	if !ok || base == "" {
+		return "", errors.New("no relay source names the author PDS")
+	}
+	target := strings.TrimRight(base, "/") + "/xrpc/com.atproto.sync.getRepoStatus?did=" + url.QueryEscape(did)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := h.httpClient().Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("relay getRepoStatus returned HTTP %d", resp.StatusCode)
+	}
+	var body struct {
+		Hostname string `json:"hostname"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(body.Hostname) == "" {
+		return "", fmt.Errorf("relay getRepoStatus names no host for %s", did)
+	}
+	return strings.TrimSpace(body.Hostname), nil
+}
+
 func (h *marketHandler) authorPDS(ctx context.Context, did syntax.DID) (pdsclient.PDS, error) {
 	h.mu.Lock()
 	cached := h.pdses[did]
@@ -239,11 +319,8 @@ func (h *marketHandler) authorPDS(ctx context.Context, did syntax.DID) (pdsclien
 }
 
 func (h *marketHandler) httpClient() *http.Client {
-	if h.opts.Resolver.HTTPClient != nil {
-		return h.opts.Resolver.HTTPClient
-	}
-	if h.opts.Resolver.Handlers != nil {
-		return h.opts.Resolver.Handlers.HTTPClient()
+	if h.client != nil {
+		return h.client
 	}
 	return httpClientWithFallback(nil)
 }
