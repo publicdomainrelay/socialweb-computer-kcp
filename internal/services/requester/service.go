@@ -1036,6 +1036,9 @@ func (s *Service) submitBid(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) submitEvent(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.authorizeCallback(w, r, market.SubmitEventNSID, defaultComputeEventServiceID); !ok {
+		return
+	}
 	var body struct {
 		URI    string         `json:"uri"`
 		CID    string         `json:"cid"`
