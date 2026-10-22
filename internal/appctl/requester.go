@@ -318,7 +318,8 @@ func (ctl *Controller) reconcileRequester(ctx context.Context, u *unstructured.U
 	}
 	stateRoot := ctl.c.Layout.StateDir
 	pdsAccountHandle := pdsHandle(ctl.c.workspace(), "requester", o.Spec.Identity.Handle)
-	requireIngress, ingressRef, ingressConfig, ingressErr := pdsAppIngress(o.Spec.Ingress, o.Spec.Network, o.Spec.Profile == RequesterProfileDefault)
+	ingressSpec := AppIngressOrDefault(o.Spec.Profile, o.Spec.Ingress, o.Spec.Network)
+	requireIngress, ingressRef, ingressConfig, ingressErr := pdsAppIngress(ingressSpec, o.Spec.Network, o.Spec.Profile == RequesterProfileDefault)
 	pdsPublicURL, _ := ctl.pdsPublicURLFor(ctx, ctl.c.workspace(), PdsComponent, requireIngress)
 	if o.Spec.Suspend {
 		id, _ := ctl.identityIn(ctx, ctl.c.workspace(), RequesterIdentity)

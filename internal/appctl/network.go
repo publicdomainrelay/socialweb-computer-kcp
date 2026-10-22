@@ -323,14 +323,44 @@ func networkDesired(o v1alpha1.MarketNetwork, ws, stateRoot string, leases map[s
 		Hostnames: []string{NetworkRelayHost},
 		Serve:     componentServe("", leasePort(leases[NetworkPortRelay])),
 	}}
-	ingress := desiredComponent{Kind: ComponentKindIngressProxy, Name: NetworkIngressName, Spec: v1alpha1.IngressProxySpec{
+	ingressCfg := NetworkIngressConfig(o.Spec.Ingress)
+	ingressSpec := v1alpha1.IngressProxySpec{
 		ComponentSpec: NewComponentSpec(ComponentCRStateDir(NetworkStateDir(stateRoot), ComponentKindIngressProxy, NetworkIngressName), &value, suspend),
-		Provider:      v1alpha1.IngressProviderXRPCSubscription,
+		Provider:      IngressProviderFor(ingressCfg),
 		Identity:      &v1alpha1.ComponentIdentity{Handle: GuestTLSHost},
 		RelayRef:      ComponentRefFor(ComponentKindRelay, NetworkRelayName),
 		Hostnames:     []string{GuestTLSHost},
 		Serve:         componentServe("", leasePort(leases[NetworkPortIngress])),
-	}}
+	}
+	if cfg := ingressCfg; cfg != nil {
+		ingressSpec.PublicHost = strings.TrimSpace(cfg.PublicHost)
+		if cfg.Xrpc != nil {
+			if host := strings.TrimSpace(cfg.Xrpc.IngressProxyHost); host != "" {
+				ingressSpec.IngressProxyHost = host
+			}
+			if relay := strings.TrimSpace(cfg.Xrpc.RelayURL); relay != "" {
+				ingressSpec.RelayURL = relay
+			}
+			if cfg.Xrpc.RelayRef != nil {
+				ingressSpec.RelayRef = cfg.Xrpc.RelayRef
+			}
+			if cfg.Xrpc.IdentityRef != nil {
+				ingressSpec.IdentityRef = cfg.Xrpc.IdentityRef
+			}
+		}
+		if cfg.OpenTunnel != nil {
+			ingressSpec.OpenTunnel = &v1alpha1.IngressProxyOpenTunnel{
+				Command:       append([]string(nil), cfg.OpenTunnel.Command...),
+				RouteName:     strings.TrimSpace(cfg.OpenTunnel.RouteName),
+				ProxyProtocol: strings.TrimSpace(cfg.OpenTunnel.ProxyProtocol),
+				LocalHost:     strings.TrimSpace(cfg.OpenTunnel.LocalHost),
+			}
+		}
+		if host := ingressHostname(ingressSpec.PublicHost); host != "" && !slices.Contains(ingressSpec.Hostnames, host) {
+			ingressSpec.Hostnames = append(ingressSpec.Hostnames, host)
+		}
+	}
+	ingress := desiredComponent{Kind: ComponentKindIngressProxy, Name: NetworkIngressName, Spec: ingressSpec}
 	dispatcherBase := NewComponentSpec(ComponentCRStateDir(NetworkStateDir(stateRoot), ComponentKindDispatcherTLS, NetworkDispatcherTLSName), &value, suspend)
 	dispatcherBase.TLS = &v1alpha1.ComponentTLS{Enabled: true, Hostnames: []string{GuestTLSHost, "*." + GuestTLSHost},
 		CertRef: filepath.Join(guestDir, guestLeafFile), CaBundleRef: value.CaBundleRef}
@@ -576,8 +606,9 @@ func (n *networks) reconcile(ctx context.Context, u *unstructured.Unstructured) 
 	if n.value != nil && n.valueUID == string(o.UID) {
 		value = *n.value
 	}
-	value.Ingress = o.Spec.Ingress
-	if err := networkIngressSelection(o.Spec.Ingress); err != nil {
+	netIngress := NetworkIngressConfig(o.Spec.Ingress)
+	value.Ingress = netIngress
+	if err := networkIngressSelection(netIngress); err != nil {
 		setPdsIngressConditionNamed(&st.Conditions, o.Generation, NetworkAlicePdsName, true, err)
 		setPdsIngressConditionNamed(&st.Conditions, o.Generation, NetworkBobPdsName, true, err)
 		return write(v1alpha1.ApplicationPhaseFailed, "the network Pds ingress: "+err.Error())
@@ -683,7 +714,7 @@ func (n *networks) reconcile(ctx context.Context, u *unstructured.Unstructured) 
 		}
 		published = *n.value
 	} else {
-		published.Ingress = o.Spec.Ingress
+		published.Ingress = netIngress
 		if n.value == nil || n.valueUID != string(o.UID) || !sameSpec(*n.value, published) {
 			n.value = &published
 			n.valueUID = string(o.UID)
@@ -696,7 +727,7 @@ func (n *networks) reconcile(ctx context.Context, u *unstructured.Unstructured) 
 			}
 		}
 	}
-	published.Ingress = o.Spec.Ingress
+	published.Ingress = netIngress
 	st.Network = &published
 	pdsURL, _ := exposureURL(snap, serviceNameFor(ComponentKindPds, NetworkBobPdsName)+ExposureLocalSuffix)
 	aliceURL, _ := exposureURL(snap, serviceNameFor(ComponentKindPds, NetworkAlicePdsName)+ExposureLocalSuffix)

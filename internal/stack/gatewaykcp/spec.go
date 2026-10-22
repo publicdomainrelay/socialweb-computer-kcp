@@ -119,6 +119,12 @@ func Spec(s v1alpha1.GatewaySpec, profile string, environ []string) v1alpha1.Gat
 		n.FirehoseUrls = []string{}
 	}
 	s.Network = &n
+	if s.Ingress == nil && profile == appctl.ProfileGatewayProd {
+		s.Ingress = appctl.DefaultIngressConfig()
+		if n.IngressProxyHost != "" {
+			s.Ingress.Xrpc.IngressProxyHost = n.IngressProxyHost
+		}
+	}
 	if s.WebAppFront == "" {
 		s.WebAppFront = PortZeroWebAppFront
 		if profile == appctl.ProfileGatewayProd {

@@ -310,6 +310,14 @@ and rejected until a later plan. A missing provider component, command or route 
 failure, and a provider that returns a different public URL on restart is a `StableHostMismatch`
 failure. There is no implicit local fallback and no `GuestTlsUrl` override.
 
+The app roots fill that selection for production profiles. `run bidder` with `prod-qr` or
+`market-network`, `run request` with its `default` profile, and a gateway with `profile: prod`
+default `spec.ingress` to provider `xrpc-subscription`, `IngressProxy/ingress`, and
+`xrpc.ingressProxyHost: xrpc.fedproxy.com`; `spec.ingress` in the root, or the matching `--ingress-*`
+options after `--` on `run bidder` and `run request`, overrides it. A gateway spec that sets
+`spec.ingress.opentunnel` selects `opentunnel`. A `MarketNetwork` publishes one
+`IngressProxy/dispatcher` selection in `status.network.ingress`; its children inherit it.
+
 Set `Pds.spec.requireIngress` for every production PDS. No account is created and no sign-in
 completes while the ingress is not Ready. The first public URL is persisted in
 `Pds.spec.publicURL` and `Pds.spec.stableHost`. See

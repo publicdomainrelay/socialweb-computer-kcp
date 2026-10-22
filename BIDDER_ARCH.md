@@ -69,13 +69,16 @@ Every component has a `Service` and an `Exposure`:
 
 | Service | target | Exposure |
 | --- | --- | --- |
-| `svc-bidder-bidder` | `Bidder/bidder` | ingress `bobvmbuilder.bsky.social` (Pending without an ingress proxy) |
-| `svc-guestcontrolplane-guest-kcp` | `GuestControlPlane/guest-kcp` | ingress (Pending) |
-| `svc-pds-pds` | `Pds/pds` | local `http://127.0.0.1:20000`; ingress (Pending) |
+| `svc-bidder-bidder` | `Bidder/bidder` | ingress `bobvmbuilder.bsky.social` through `IngressProxy/ingress` |
+| `svc-guestcontrolplane-guest-kcp` | `GuestControlPlane/guest-kcp` | ingress through `IngressProxy/ingress` |
+| `svc-pds-pds` | `Pds/pds` | local `http://127.0.0.1:20000`; ingress through `IngressProxy/ingress` |
 
 Application components do not bind their own public sockets. The component runtime registers
 handlers in-process; the local Exposure controller leases a loopback port from the port registry
-(`pds` is 20000 here), and ingress Exposure is fail-closed until an `IngressProxy` is available.
+(`pds` is 20000 here). The `prod-qr` and `market-network` profiles default `spec.ingress` to
+`xrpc-subscription` with `ingressProxyHost: xrpc.fedproxy.com` and `IngressProxy/ingress`; the PDS
+ingress Exposure is fail-closed until that provider is Ready. A bidder joined to a market network
+inherits `MarketNetworkValue.ingress` and its `dispatcher` instead.
 
 ## Identity and association
 

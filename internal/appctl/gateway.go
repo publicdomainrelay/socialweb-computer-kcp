@@ -392,7 +392,8 @@ func (ctl *Controller) reconcileGateway(ctx context.Context, u *unstructured.Uns
 	st.Components = append(st.Components, v1alpha1.ApplicationComponent{Kind: "OpenBaoServer", Name: vault.Name,
 		Workspace: ctl.c.workspace(), Phase: string(vault.Status.Phase), Ready: vaultReady})
 	stateRoot := ctl.c.Layout.StateDir
-	requireIngress, ingressRef, ingressConfig, ingressErr := pdsAppIngress(o.Spec.Ingress, o.Spec.Network, o.Spec.Profile == ProfileGatewayProd)
+	ingressSpec := AppIngressOrDefault(o.Spec.Profile, o.Spec.Ingress, o.Spec.Network)
+	requireIngress, ingressRef, ingressConfig, ingressErr := pdsAppIngress(ingressSpec, o.Spec.Network, o.Spec.Profile == ProfileGatewayProd)
 	pdsPublicURL, _ := ctl.pdsPublicURLFor(ctx, ctl.c.workspace(), PdsComponent, requireIngress)
 	downloadsDir, clusterCADir := "", ""
 	if ctl.c.WebApp != nil {

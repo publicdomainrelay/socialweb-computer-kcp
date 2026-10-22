@@ -63,6 +63,14 @@ apps:
       - {name: repo-pds-url, to: profile}
       - {name: policy, to: spec.policy}
       - {name: policy-args, to: options}
+      - {name: ingress-provider, to: spec.ingress.provider}
+      - {name: ingress-public-host, to: spec.ingress.publicHost}
+      - {name: ingress-xrpc-host, to: spec.ingress.xrpc.ingressProxyHost}
+      - {name: ingress-relay-url, to: spec.ingress.xrpc.relayURL}
+      - {name: ingress-opentunnel-command, to: spec.ingress.opentunnel.command}
+      - {name: ingress-opentunnel-route-name, to: spec.ingress.opentunnel.routeName}
+      - {name: ingress-opentunnel-local-host, to: spec.ingress.opentunnel.localHost}
+      - {name: ingress-opentunnel-proxy-protocol, to: spec.ingress.opentunnel.proxyProtocol}
       - {name: only-remote-policy-exec, to: options}
       - {name: allow-untrusted-policy-exec, to: options}
       - {name: offering-refresh-sec, to: options}
@@ -145,6 +153,14 @@ apps:
       - {name: firehose-url, to: network.firehoseUrls}
       - {name: qr-origin, to: network.qrOrigin}
       - {name: network-hosts, to: network.hosts}
+      - {name: ingress-provider, to: spec.ingress.provider}
+      - {name: ingress-public-host, to: spec.ingress.publicHost}
+      - {name: ingress-xrpc-host, to: spec.ingress.xrpc.ingressProxyHost}
+      - {name: ingress-relay-url, to: spec.ingress.xrpc.relayURL}
+      - {name: ingress-opentunnel-command, to: spec.ingress.opentunnel.command}
+      - {name: ingress-opentunnel-route-name, to: spec.ingress.opentunnel.routeName}
+      - {name: ingress-opentunnel-local-host, to: spec.ingress.opentunnel.localHost}
+      - {name: ingress-opentunnel-proxy-protocol, to: spec.ingress.opentunnel.proxyProtocol}
       - {name: accept-copies, to: options}
       - {name: firehose-mode, to: options}
       - {name: no-ingress-proxy, to: options}

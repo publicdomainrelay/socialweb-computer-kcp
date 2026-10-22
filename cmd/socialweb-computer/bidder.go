@@ -46,6 +46,7 @@ type bidderRun struct {
 	policy         string
 	options        []v1alpha1.ApplicationOption
 	value          *v1alpha1.MarketNetworkValue
+	ingress        *v1alpha1.IngressConfig
 	pdsURL         string
 	readyTimeout   time.Duration
 	networkTimeout time.Duration
@@ -94,6 +95,15 @@ func (r *bidderRun) passthrough(args []string) error {
 			r.handle = p.Value
 		case strings.HasPrefix(p.To, "spec.firecracker"):
 			return appctl.ErrFirecrackerInPod
+		case strings.HasPrefix(p.To, "spec.ingress"):
+			var applied bool
+			var err error
+			if r.ingress, applied, err = applyIngressOption(r.ingress, p.Name, p.Value); err != nil {
+				return err
+			}
+			if !applied {
+				return fmt.Errorf("--%s maps to %s, which run bidder does not take", p.Name, p.To)
+			}
 		case strings.HasPrefix(p.To, appctl.MapToNetwork):
 			nvSet = true
 			switch p.To {
@@ -292,8 +302,8 @@ func (r *bidderRun) kcpProvider() *v1alpha1.KcpProvider {
 }
 
 func (r *bidderRun) spec() (v1alpha1.MarketBidderSpec, error) {
-	return bidder.Spec(bidder.SpecInput{Profile: r.profile, Handle: r.handle, Policy: r.policy, Network: r.value, PdsUrl: r.pdsURL, Kcp: r.kcpProvider(),
-		Options: r.options})
+	return bidder.Spec(bidder.SpecInput{Profile: r.profile, Handle: r.handle, Policy: r.policy, Network: r.value, PdsUrl: r.pdsURL,
+		Kcp: r.kcpProvider(), Ingress: r.ingress, Options: r.options})
 }
 
 func (r *bidderRun) marketNetwork() (devinstance.Layout, devinstance.Record, error) {

@@ -133,6 +133,15 @@ func (r *requestRun) passthrough(args []string, network bool) error {
 			}
 		case p.To == "spec.bidderDids":
 			r.root.BidderDids = append(r.root.BidderDids, splitList(p.Value)...)
+		case strings.HasPrefix(p.To, "spec.ingress"):
+			var applied bool
+			var err error
+			if r.root.Ingress, applied, err = applyIngressOption(r.root.Ingress, p.Name, p.Value); err != nil {
+				return err
+			}
+			if !applied {
+				return fmt.Errorf("--%s maps to %s, which run request does not take", p.Name, p.To)
+			}
 		case strings.HasPrefix(p.To, appctl.MapToNetwork):
 			nvSet = true
 			switch p.To {
@@ -197,6 +206,12 @@ func (r *requestRun) passthrough(args []string, network bool) error {
 			nv.FirehoseUrls = []string{}
 		}
 		r.root.Network = &nv
+	}
+	if !network && r.root.Ingress == nil {
+		r.root.Ingress = appctl.DefaultIngressConfig()
+		if nv.IngressProxyHost != "" {
+			r.root.Ingress.Xrpc.IngressProxyHost = nv.IngressProxyHost
+		}
 	}
 	r.root.Options = r.appOptions
 	return nil

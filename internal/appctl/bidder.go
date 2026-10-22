@@ -649,7 +649,8 @@ func (ctl *Controller) reconcileBidder(ctx context.Context, u *unstructured.Unst
 	}
 	stateRoot := ctl.c.Layout.StateDir
 	pdsAccountHandle := pdsHandle(ctl.c.workspace(), "bidder", o.Spec.Identity.Handle)
-	requireIngress, ingressRef, ingressConfig, ingressErr := pdsAppIngress(o.Spec.Ingress, o.Spec.Network, o.Spec.Profile == BidderProfileProdQr)
+	ingressSpec := AppIngressOrDefault(o.Spec.Profile, o.Spec.Ingress, o.Spec.Network)
+	requireIngress, ingressRef, ingressConfig, ingressErr := pdsAppIngress(ingressSpec, o.Spec.Network, o.Spec.Profile == BidderProfileProdQr)
 	pdsPublicURL, _ := ctl.pdsPublicURLFor(ctx, ctl.c.workspace(), PdsComponent, requireIngress)
 	if o.Spec.Suspend {
 		id, _ := ctl.identityIn(ctx, ctl.c.workspace(), BidderIdentity)

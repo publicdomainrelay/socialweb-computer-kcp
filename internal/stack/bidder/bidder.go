@@ -72,6 +72,7 @@ type SpecInput struct {
 	Network *v1alpha1.MarketNetworkValue
 	PdsUrl  string
 	Kcp     *v1alpha1.KcpProvider
+	Ingress *v1alpha1.IngressConfig
 	Options []v1alpha1.ApplicationOption
 }
 
@@ -110,7 +111,14 @@ func Spec(in SpecInput) (v1alpha1.MarketBidderSpec, error) {
 	if in.Profile == appctl.BidderProfileNetwork && (in.PdsUrl == "" || n.CaBundleRef == "" || n.GuestTlsUrl == "") {
 		return v1alpha1.MarketBidderSpec{}, errors.New("bidder: profile market-network needs the market network's value and its bidders' PDS (--network, or --market-network-file)")
 	}
-	return v1alpha1.MarketBidderSpec{Profile: in.Profile, Network: n, Policy: in.Policy, Kcp: in.Kcp, Options: in.Options,
+	ingress := in.Ingress
+	if ingress == nil && (in.Profile == appctl.BidderProfileProdQr || in.Profile == appctl.BidderProfileNetwork) {
+		ingress = appctl.DefaultIngressConfig()
+		if n.IngressProxyHost != "" {
+			ingress.Xrpc.IngressProxyHost = n.IngressProxyHost
+		}
+	}
+	return v1alpha1.MarketBidderSpec{Profile: in.Profile, Network: n, Ingress: ingress, Policy: in.Policy, Kcp: in.Kcp, Options: in.Options,
 		Identity: v1alpha1.ApplicationIdentity{Mode: mode, Handle: in.Handle, PdsUrl: in.PdsUrl}}, nil
 }
 

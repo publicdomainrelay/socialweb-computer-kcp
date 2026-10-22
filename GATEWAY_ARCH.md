@@ -109,12 +109,16 @@ Services and exposures:
 
 | Service | target | Exposure |
 | --- | --- | --- |
-| `svc-gatewayapi-gateway-api` | `GatewayAPI/gateway-api` | local `127.0.0.1:20002`; ingress Pending |
-| `svc-pds-pds` | `Pds/pds` | local `127.0.0.1:20000`; ingress Pending |
-| `svc-requester-requester` | `Requester/requester` | local `127.0.0.1:20001`; ingress Pending |
+| `svc-gatewayapi-gateway-api` | `GatewayAPI/gateway-api` | local `127.0.0.1:20002`; ingress through `IngressProxy/ingress` |
+| `svc-pds-pds` | `Pds/pds` | local `127.0.0.1:20000`; ingress through `IngressProxy/ingress` |
+| `svc-requester-requester` | `Requester/requester` | local `127.0.0.1:20001`; ingress through `IngressProxy/ingress` |
 
-The ingress Exposures stay Pending unless an `IngressProxy` is available. Public `k8s` traffic uses
-the local 8788 front, not an ingress Exposure.
+The prod profile defaults `spec.ingress` to `xrpc-subscription` with
+`ingressProxyHost: xrpc.fedproxy.com` and the app `IngressProxy/ingress`, so the app PDS owns a
+public URL. A gateway spec that sets `spec.ingress.opentunnel` selects `opentunnel` instead; a spec
+that sets `spec.ingress` names its own provider. The `market-network` profile inherits the
+dispatcher provider from `MarketNetworkValue.ingress`. Public `k8s` traffic still uses the local 8788
+front, not an ingress Exposure.
 
 ## Gateway and requester identity
 
@@ -127,6 +131,11 @@ network:
   relayUrls: []
   firehoseUrls: []
   qrOrigin: ""
+ingress:
+  provider: xrpc-subscription
+  ingressRef: {kind: IngressProxy, name: ingress}
+  xrpc:
+    ingressProxyHost: xrpc.fedproxy.com
 options:
   - {name: public-origin, value: https://k8s.socialweb.computer}
   - {name: gateway-audience, value: did:web:k8s.socialweb.computer}

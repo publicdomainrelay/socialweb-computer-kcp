@@ -379,6 +379,13 @@ The network value (`status.network`, copied onto each child's root object):
 | `guestTlsUrl` | the guest TLS front URL |
 | `caBundleRef` | the path to the CA bundle the children trust |
 | `hosts` | the network's service names and their loopback addresses |
+| `ingress` | the network's PDS ingress selection: provider, the `dispatcher` ingress ref, and any xrpc or opentunnel settings; children inherit it |
+
+The network has one `IngressProxy/dispatcher` for its PDSes. `MarketNetwork.spec.ingress` selects its
+provider; with no spec it is `xrpc-subscription`. `spec.ingress.opentunnel` selects `opentunnel`, and
+`spec.ingress.provider` names the provider explicitly. The selected value is published as
+`status.network.ingress`; every child root inherits it, and a child's own `spec.ingress` overrides it.
+Alice, bob and the PDS of every child app are exposed through the dispatcher with ingress Exposures.
 
 ### Conditions
 
