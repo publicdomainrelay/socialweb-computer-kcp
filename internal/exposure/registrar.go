@@ -154,7 +154,14 @@ func (r *SubscriberRegistrar) Register(ctx context.Context, spec IngressSpec) (I
 		return nil, fmt.Errorf("connecting the ingress subscriber: %w", err)
 	}
 	scheme := "https"
-	urlHost := didToSubdomain(did) + "." + host
+	publicHost := strings.TrimSpace(spec.PublicHost)
+	if publicHost == "" {
+		publicHost = hostnameOnly(strings.TrimSpace(spec.IngressAddress))
+	}
+	if publicHost == "" {
+		publicHost = host
+	}
+	urlHost := didToSubdomain(did) + "." + publicHost
 	path := normalizePath(spec.Path)
 	raw := scheme + "://" + urlHost + path
 	return &subscriberRegistration{url: raw, subscriber: subscriber}, nil

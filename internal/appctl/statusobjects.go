@@ -2,6 +2,7 @@ package appctl
 
 import (
 	"context"
+	"reflect"
 	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -20,8 +21,9 @@ func (ctl *Controller) ensureAppPdsStatus(ctx context.Context, handle string, se
 	}
 	ws := ctl.c.workspace()
 	pdsRef := ComponentKey(ComponentKindPds, PdsComponent)
+	authRef := &v1alpha1.RepoRef{Kind: "Vault", Name: "openbao:" + strings.Trim(strings.TrimSpace(sessionPath), "/")}
 	ctl.ensureStatusObject(ctx, ws, statusstate.AtprotoRepoGVR, "AtprotoRepo",
-		statusObjectName("repo", sess.Did), v1alpha1.AtprotoRepoSpec{DID: sess.Did, PdsRef: &v1alpha1.RepoRef{Kind: ComponentKindPds, Name: PdsComponent}})
+		statusObjectName("repo", sess.Did), v1alpha1.AtprotoRepoSpec{DID: sess.Did, PdsRef: &v1alpha1.RepoRef{Kind: ComponentKindPds, Name: PdsComponent}, AuthRef: authRef})
 	accountName := statusObjectName("account", handle)
 	ctl.ensureStatusObject(ctx, ws, statusstate.PdsAccountGVR, "PdsAccount",
 		accountName, v1alpha1.PdsAccountSpec{DID: sess.Did, Handle: handle, PdsRef: pdsRef})
@@ -78,8 +80,27 @@ func (ctl *Controller) ensureStatusObject(ctx context.Context, ws string, gvr sc
 	if len(specMap) > 0 {
 		obj.Object["spec"] = specMap
 	}
-	if _, err := ri.Create(ctx, obj, metav1.CreateOptions{FieldManager: FieldManager}); err != nil && !apierrors.IsAlreadyExists(err) {
-		ctl.c.log().Warn("creating a status object", "kind", kind, "name", name, "err", err.Error())
+	existing, err := ri.Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		if _, err := ri.Create(ctx, obj, metav1.CreateOptions{FieldManager: FieldManager}); err != nil && !apierrors.IsAlreadyExists(err) {
+			ctl.c.log().Warn("creating a status object", "kind", kind, "name", name, "err", err.Error())
+		}
+		return
+	}
+	if err != nil {
+		ctl.c.log().Warn("reading a status object", "kind", kind, "name", name, "err", err.Error())
+		return
+	}
+	if len(specMap) == 0 {
+		return
+	}
+	current, _ := existing.Object["spec"].(map[string]any)
+	if reflect.DeepEqual(current, specMap) {
+		return
+	}
+	existing.Object["spec"] = specMap
+	if _, err := ri.Update(ctx, existing, metav1.UpdateOptions{FieldManager: FieldManager}); err != nil {
+		ctl.c.log().Warn("updating a status object", "kind", kind, "name", name, "err", err.Error())
 	}
 }
 

@@ -63,12 +63,14 @@ func (c *Controller) matchValue(ctx context.Context, dyn dynamic.Interface, matc
 	}
 	gvr := gvrFor(from)
 	namespace := strings.TrimSpace(from.Namespace)
-	if namespace == "" {
-		namespace = metav1.NamespaceDefault
+	resource := client.Resource(gvr)
+	var getter dynamic.ResourceInterface = resource
+	if namespace != "" {
+		getter = resource.Namespace(namespace)
 	}
-	object, err := client.Resource(gvr).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
+	object, err := getter.Get(ctx, name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
-		return "", fmt.Errorf("eventstream: match valueFrom %s %s/%s does not exist", from.Kind, namespace, name)
+		return "", fmt.Errorf("eventstream: match valueFrom %s %s does not exist", from.Kind, name)
 	}
 	if err != nil {
 		return "", err
