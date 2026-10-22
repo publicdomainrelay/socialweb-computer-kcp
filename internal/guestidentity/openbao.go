@@ -73,6 +73,9 @@ type Client struct {
 	own     string
 	ownKey  string
 	renewAt time.Time
+
+	endpointCached Endpoint
+	endpointHeld   bool
 }
 
 func EndpointFromServer(st v1alpha1.OpenBaoServerStatus, client string) (Endpoint, error) {
@@ -114,6 +117,44 @@ func NewClient(opts Options) (*Client, error) {
 }
 
 func (c *Client) Mount() string { return c.mount }
+
+func (c *Client) resolveEndpoint(ctx context.Context) (Endpoint, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.endpointHeld {
+		return c.endpointCached, nil
+	}
+	attempt, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+	endpoint, err := c.endpoint(attempt)
+	if err != nil {
+		return Endpoint{}, err
+	}
+	c.endpointCached = endpoint
+	c.endpointHeld = true
+	return endpoint, nil
+}
+
+func (c *Client) refreshEndpoint(ctx context.Context) error {
+	attempt, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+	endpoint, err := c.endpoint(attempt)
+	if err != nil {
+		return err
+	}
+	c.mu.Lock()
+	c.endpointCached = endpoint
+	c.endpointHeld = true
+	c.mu.Unlock()
+	return nil
+}
+
+func (c *Client) forgetEndpoint() {
+	c.mu.Lock()
+	c.endpointCached = Endpoint{}
+	c.endpointHeld = false
+	c.mu.Unlock()
+}
 
 func (c *Client) Step(ctx context.Context, step LoginStep, body map[string]string) (Reply, error) {
 	fields, ok := loginFields[step]
@@ -226,7 +267,7 @@ func (c *Client) authed(ctx context.Context, method, path string, body any) (Rep
 }
 
 func (c *Client) ownToken(ctx context.Context) (string, error) {
-	endpoint, err := c.endpoint(ctx)
+	endpoint, err := c.resolveEndpoint(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -285,7 +326,7 @@ func (c *Client) forgetOwn() {
 }
 
 func (c *Client) send(ctx context.Context, method, path, vaultToken string, body any) (Reply, error) {
-	endpoint, err := c.endpoint(ctx)
+	endpoint, err := c.resolveEndpoint(ctx)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -316,6 +357,7 @@ func (c *Client) send(ctx context.Context, method, path, vaultToken string, body
 	}
 	resp, err := client.Do(req)
 	if err != nil {
+		c.forgetEndpoint()
 		return Reply{}, fmt.Errorf("guestidentity: %s %s: %w", method, path, err)
 	}
 	defer resp.Body.Close()

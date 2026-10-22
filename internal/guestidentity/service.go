@@ -18,6 +18,12 @@ const (
 	DefaultHostKeyAttempts = 24
 
 	DefaultHostKeyRetry = 5 * time.Second
+
+	oidcDocumentRefresh = 5 * time.Minute
+
+	oidcDocumentRetry = time.Second
+
+	oidcDocumentRetryMax = 30 * time.Second
 )
 
 type VMStore = computevm.GuestStore
@@ -71,6 +77,9 @@ type Guest struct {
 	hostKeyAttempts int
 	hostKeyRetry    time.Duration
 
+	discovery oidcCache
+	keys      oidcCache
+
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -121,6 +130,11 @@ func NewGuest(ctx context.Context, opts GuestOptions) (*Guest, error) {
 		hostKeyAttempts: opts.HostKeyAttempts, hostKeyRetry: opts.HostKeyRetry,
 		ctx: root, cancel: cancel,
 	}
+	g.wg.Add(1)
+	go func() {
+		defer g.wg.Done()
+		g.refreshOIDCDocuments()
+	}()
 	return g, nil
 }
 
@@ -198,22 +212,14 @@ func (g *Guest) Discovery(ctx context.Context) Reply {
 	if !g.publicLimits.Take("discovery", g.now()) {
 		return jsonReply(429, map[string]any{"errors": []string{"too many requests"}})
 	}
-	reply, err := g.identity.Discovery(ctx)
-	if err != nil {
-		return jsonReply(502, map[string]any{"errors": []string{err.Error()}})
-	}
-	return normalized(reply)
+	return g.serveOIDCDocument(ctx, "discovery", &g.discovery, g.identity.Discovery)
 }
 
 func (g *Guest) Keys(ctx context.Context) Reply {
 	if !g.publicLimits.Take("keys", g.now()) {
 		return jsonReply(429, map[string]any{"errors": []string{"too many requests"}})
 	}
-	reply, err := g.identity.Keys(ctx)
-	if err != nil {
-		return jsonReply(502, map[string]any{"errors": []string{err.Error()}})
-	}
-	return normalized(reply)
+	return g.serveOIDCDocument(ctx, "keys", &g.keys, g.identity.Keys)
 }
 
 func (g *Guest) OnNetwork(ctx context.Context, authorization string, report OnNetworkReport) Reply {
@@ -300,6 +306,105 @@ func (g *Guest) recordBoundHostKeys(computevmName string) {
 			}
 		}
 	}()
+}
+
+type oidcCache struct {
+	mu      sync.RWMutex
+	reply   Reply
+	held    bool
+	fetchMu sync.Mutex
+}
+
+func (c *oidcCache) get() (Reply, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.reply, c.held
+}
+
+func (c *oidcCache) put(reply Reply) {
+	c.mu.Lock()
+	c.reply = reply
+	c.held = true
+	c.mu.Unlock()
+}
+
+func (g *Guest) serveOIDCDocument(ctx context.Context, name string, cache *oidcCache, fetch func(context.Context) (Reply, error)) Reply {
+	if reply, ok := cache.get(); ok {
+		return normalized(reply)
+	}
+	cache.fetchMu.Lock()
+	defer cache.fetchMu.Unlock()
+	if reply, ok := cache.get(); ok {
+		return normalized(reply)
+	}
+	reply, err := fetch(ctx)
+	if err != nil {
+		g.log.Warn("the guest OIDC document fetch failed", "document", name, "err", err.Error())
+		return jsonReply(502, map[string]any{"errors": []string{err.Error()}})
+	}
+	if reply.OK() {
+		cache.put(normalized(reply))
+	}
+	return normalized(reply)
+}
+
+func (g *Guest) refreshOIDCDocuments() {
+	delay := time.Duration(0)
+	for {
+		if delay > 0 {
+			select {
+			case <-g.ctx.Done():
+				return
+			case <-time.After(delay):
+			}
+		}
+		if g.ctx.Err() != nil {
+			return
+		}
+		if err := g.identity.refreshEndpoint(g.ctx); err != nil {
+			g.log.Warn("resolving the OpenBao endpoint for the guest OIDC documents failed", "err", err.Error())
+		}
+		discoveryErr := g.refreshOIDCDocument(g.ctx, "discovery", &g.discovery, g.identity.Discovery)
+		keysErr := g.refreshOIDCDocument(g.ctx, "keys", &g.keys, g.identity.Keys)
+		if discoveryErr == nil && keysErr == nil {
+			delay = oidcDocumentRefresh
+			continue
+		}
+		switch {
+		case delay <= 0 || delay >= oidcDocumentRefresh:
+			delay = oidcDocumentRetry
+		case delay >= oidcDocumentRetryMax:
+			delay = oidcDocumentRetryMax
+		default:
+			delay *= 2
+			if delay > oidcDocumentRetryMax {
+				delay = oidcDocumentRetryMax
+			}
+		}
+	}
+}
+
+func (g *Guest) refreshOIDCDocument(ctx context.Context, name string, cache *oidcCache, fetch func(context.Context) (Reply, error)) error {
+	reply, err := fetch(ctx)
+	if err != nil {
+		g.oidcRefreshWarning(name, cache, err)
+		return err
+	}
+	if !reply.OK() {
+		err := fmt.Errorf("the guest OIDC %s document returned HTTP %d", name, reply.Status)
+		g.oidcRefreshWarning(name, cache, err)
+		return err
+	}
+	cache.put(normalized(reply))
+	return nil
+}
+
+func (g *Guest) oidcRefreshWarning(name string, cache *oidcCache, err error) {
+	if _, held := cache.get(); held {
+		g.log.Warn("refreshing the guest OIDC document failed; serving the last known document", "document", name, "err", err.Error())
+		return
+	}
+	g.log.Warn("refreshing the guest OIDC document failed; no document is cached yet", "document", name, "err", err.Error())
 }
 
 func jsonReply(status int, body any) Reply {
