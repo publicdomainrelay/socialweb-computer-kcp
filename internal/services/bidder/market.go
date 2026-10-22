@@ -270,9 +270,10 @@ func (s *Service) handleSubmitAccept(w http.ResponseWriter, r *http.Request) {
 		writeXRPCError(w, http.StatusForbidden, "Forbidden", "the scope policy declined the accept")
 		return
 	}
+	submitEvent := s.submitEventURL(r.Context(), accept.SubmitEvent)
 	if existing, found := s.contractForAccept(r.Context(), body.AcceptURI, body.AcceptCID); found {
 		writeJSON(w, http.StatusOK, map[string]any{"id": lastSegment(existing.receiptURI), "uri": existing.receiptURI,
-			"cid": existing.receiptCID, "submitEvent": s.publicURL(), "alreadyAccepted": true})
+			"cid": existing.receiptCID, "submitEvent": submitEvent, "alreadyAccepted": true})
 		return
 	}
 	bid, err := s.bidForAccept(r.Context(), accept)
@@ -291,7 +292,7 @@ func (s *Service) handleSubmitAccept(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "alreadyAccepted": true, "terminated": true,
 			"id": lastSegment(terminated.ReceiptUri), "uri": terminated.ReceiptUri, "cid": terminated.ReceiptCid,
-			"submitEvent": s.publicURL()})
+			"submitEvent": submitEvent})
 		return
 	}
 	now := s.cfg.Now().UTC()
@@ -348,7 +349,7 @@ func (s *Service) handleSubmitAccept(w http.ResponseWriter, r *http.Request) {
 		BidURI:         accept.Bid.URI,
 		BidCID:         accept.Bid.CID,
 		RequesterDID:   issuer,
-		SubmitEventURL: s.publicURL(),
+		SubmitEventURL: submitEvent,
 		VMPayload:      payloadResolved,
 		BidConfig:      market.StrongRef{URI: parsedBid.Config.URI, CID: parsedBid.Config.CID},
 		BidConfigValue: configResolved.Value,
@@ -367,7 +368,7 @@ func (s *Service) handleSubmitAccept(w http.ResponseWriter, r *http.Request) {
 		RFP:         market.RecordRef{URI: accept.RFP.URI, CID: accept.RFP.CID},
 		Bid:         market.RecordRef{URI: accept.Bid.URI, CID: accept.Bid.CID},
 		Accept:      market.RecordRef{URI: body.AcceptURI, CID: body.AcceptCID},
-		SubmitEvent: s.publicURL(),
+		SubmitEvent: submitEvent,
 	}, resolved, issuer)
 	if err != nil {
 		if destroyErr := s.provider.Destroy(context.WithoutCancel(r.Context()), provision.Name); destroyErr != nil {
@@ -384,7 +385,7 @@ func (s *Service) handleSubmitAccept(w http.ResponseWriter, r *http.Request) {
 		acceptURI:      body.AcceptURI,
 		acceptCID:      body.AcceptCID,
 		acceptAuthor:   issuer,
-		submitEventURL: s.publicURL(),
+		submitEventURL: submitEvent,
 	}
 	statusValue := cloneBidStatus(bid.Status)
 	statusValue.Accept = &v1alpha1.BidRecordRef{Uri: body.AcceptURI, Cid: body.AcceptCID}
@@ -397,7 +398,7 @@ func (s *Service) handleSubmitAccept(w http.ResponseWriter, r *http.Request) {
 		ReceiptCid:     receiptCID,
 		AcceptUri:      body.AcceptURI,
 		AcceptCid:      body.AcceptCID,
-		SubmitEventUrl: s.publicURL(),
+		SubmitEventUrl: submitEvent,
 		AcceptedAt:     now.Format(time.RFC3339),
 	}
 	if err := s.provider.BindContract(provisionCtx, provision.Name, contract); err != nil {
@@ -407,7 +408,7 @@ func (s *Service) handleSubmitAccept(w http.ResponseWriter, r *http.Request) {
 		s.log.Warn("updating the bid after accept failed", "bid", bid.Name, "err", err)
 	}
 	s.contracts.Store(receiptURI, info)
-	writeJSON(w, http.StatusOK, map[string]any{"id": lastSegment(receiptURI), "uri": receiptURI, "cid": receiptCID, "submitEvent": s.publicURL()})
+	writeJSON(w, http.StatusOK, map[string]any{"id": lastSegment(receiptURI), "uri": receiptURI, "cid": receiptCID, "submitEvent": submitEvent})
 }
 
 func (s *Service) handleSubmitEvent(w http.ResponseWriter, r *http.Request) {
