@@ -23,8 +23,6 @@ const (
 
 	RequesterAssociateService = "requester_associate"
 
-	PDSServiceID = "#atproto_pds"
-
 	DefaultCacheTTL = 5 * time.Minute
 
 	DefaultNegativeCacheTTL = 30 * time.Second
@@ -114,9 +112,7 @@ func (r DirectoryResolver) ResolveDID(ctx context.Context, did string) (*DIDDocu
 	if doc.Handle == "" {
 		doc.Handle = doc.DID
 	}
-	if service, ok := id.Services[PDSServiceID]; ok {
-		doc.PDS = service.URL
-	}
+	doc.PDS = id.PDSEndpoint()
 	return doc, nil
 }
 
@@ -247,7 +243,7 @@ func GuardedFetch(ctx context.Context, client *http.Client, rawURL string, maxBy
 	host := target.Hostname()
 	loopback := target.Scheme == "http" &&
 		(host == "127.0.0.1" || host == "::1" || host == "localhost")
-	if target.Scheme != "https" && !loopback {
+	if target.Scheme != "https" && !loopback && !trustedHosts[host] {
 		return nil, fmt.Errorf("sshtransport: refused to fetch %s", target.Scheme+"://"+target.Host)
 	}
 	if !loopback && !trustedHosts[host] && !ResolvesToPublicAddress(ctx, host) {
