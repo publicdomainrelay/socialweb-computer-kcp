@@ -152,6 +152,7 @@ sets:
           - path: hostprocess-apiresourceschema.yaml
           - path: postgres-apiresourceschema.yaml
           - path: openbaoserver-apiresourceschema.yaml
+          - path: remoteopenbao-apiresourceschema.yaml
           - path: hostprocess-apiexport.yaml
         after:
           - kind: APIExport

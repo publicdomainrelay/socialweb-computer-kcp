@@ -19,3 +19,8 @@ spec:
       schema: v1alpha1-10.openbaoservers.socialweb.computer
       storage:
         crd: {}
+    - group: socialweb.computer
+      name: remoteopenbaos
+      schema: v1alpha1-1.remoteopenbaos.socialweb.computer
+      storage:
+        crd: {}

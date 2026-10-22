@@ -3067,3 +3067,172 @@ func (in *StateSyncStatus) DeepCopy() *StateSyncStatus {
 	in.DeepCopyInto(out)
 	return out
 }
+
+func (in *RemoteOpenBao) DeepCopyInto(out *RemoteOpenBao) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
+	in.Spec.DeepCopyInto(&out.Spec)
+	in.Status.DeepCopyInto(&out.Status)
+}
+
+func (in *RemoteOpenBao) DeepCopy() *RemoteOpenBao {
+	if in == nil {
+		return nil
+	}
+	out := new(RemoteOpenBao)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *RemoteOpenBao) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *RemoteOpenBaoList) DeepCopyInto(out *RemoteOpenBaoList) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ListMeta.DeepCopyInto(&out.ListMeta)
+	if in.Items != nil {
+		out.Items = make([]RemoteOpenBao, len(in.Items))
+		for i := range in.Items {
+			in.Items[i].DeepCopyInto(&out.Items[i])
+		}
+	}
+}
+
+func (in *RemoteOpenBaoList) DeepCopy() *RemoteOpenBaoList {
+	if in == nil {
+		return nil
+	}
+	out := new(RemoteOpenBaoList)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *RemoteOpenBaoList) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *RemoteOpenBaoSpec) DeepCopyInto(out *RemoteOpenBaoSpec) {
+	*out = *in
+	out.TLS = in.TLS
+	in.Auth.DeepCopyInto(&out.Auth)
+	out.Mounts = in.Mounts
+	if in.Capabilities != nil {
+		out.Capabilities = make([]string, len(in.Capabilities))
+		copy(out.Capabilities, in.Capabilities)
+	}
+}
+
+func (in *RemoteOpenBaoSpec) DeepCopy() *RemoteOpenBaoSpec {
+	if in == nil {
+		return nil
+	}
+	out := new(RemoteOpenBaoSpec)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *RemoteOpenBaoTLS) DeepCopyInto(out *RemoteOpenBaoTLS) {
+	*out = *in
+}
+
+func (in *RemoteOpenBaoTLS) DeepCopy() *RemoteOpenBaoTLS {
+	if in == nil {
+		return nil
+	}
+	out := new(RemoteOpenBaoTLS)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *RemoteOpenBaoAuth) DeepCopyInto(out *RemoteOpenBaoAuth) {
+	*out = *in
+	if in.AppRole != nil {
+		in, out := &in.AppRole, &out.AppRole
+		*out = new(RemoteOpenBaoAppRole)
+		**out = **in
+	}
+	if in.Cert != nil {
+		in, out := &in.Cert, &out.Cert
+		*out = new(RemoteOpenBaoCert)
+		**out = **in
+	}
+}
+
+func (in *RemoteOpenBaoAuth) DeepCopy() *RemoteOpenBaoAuth {
+	if in == nil {
+		return nil
+	}
+	out := new(RemoteOpenBaoAuth)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *RemoteOpenBaoAppRole) DeepCopyInto(out *RemoteOpenBaoAppRole) {
+	*out = *in
+}
+
+func (in *RemoteOpenBaoAppRole) DeepCopy() *RemoteOpenBaoAppRole {
+	if in == nil {
+		return nil
+	}
+	out := new(RemoteOpenBaoAppRole)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *RemoteOpenBaoCert) DeepCopyInto(out *RemoteOpenBaoCert) {
+	*out = *in
+}
+
+func (in *RemoteOpenBaoCert) DeepCopy() *RemoteOpenBaoCert {
+	if in == nil {
+		return nil
+	}
+	out := new(RemoteOpenBaoCert)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *RemoteOpenBaoMounts) DeepCopyInto(out *RemoteOpenBaoMounts) {
+	*out = *in
+}
+
+func (in *RemoteOpenBaoMounts) DeepCopy() *RemoteOpenBaoMounts {
+	if in == nil {
+		return nil
+	}
+	out := new(RemoteOpenBaoMounts)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *RemoteOpenBaoStatus) DeepCopyInto(out *RemoteOpenBaoStatus) {
+	*out = *in
+	if in.LastCheckedAt != nil {
+		out.LastCheckedAt = in.LastCheckedAt.DeepCopy()
+	}
+	if in.Conditions != nil {
+		out.Conditions = make([]metav1.Condition, len(in.Conditions))
+		for i := range in.Conditions {
+			in.Conditions[i].DeepCopyInto(&out.Conditions[i])
+		}
+	}
+}
+
+func (in *RemoteOpenBaoStatus) DeepCopy() *RemoteOpenBaoStatus {
+	if in == nil {
+		return nil
+	}
+	out := new(RemoteOpenBaoStatus)
+	in.DeepCopyInto(out)
+	return out
+}

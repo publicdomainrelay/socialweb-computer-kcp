@@ -86,6 +86,14 @@ func (c *Client) tlsConfig() *tls.Config {
 	return c.tls
 }
 
+func WithHTTPClient(client *http.Client) Option {
+	return func(c *Client) {
+		if client != nil {
+			c.http = client
+		}
+	}
+}
+
 const IdleConnTimeout = 90 * time.Second
 
 func New(addr, token string, opts ...Option) *Client {
@@ -264,6 +272,26 @@ func (c *Client) GetKV(ctx context.Context, path string) (map[string]any, error)
 		return nil, fmt.Errorf("openbao: reading %q returned a body that is not JSON: %v (%s)", path, err, strings.TrimSpace(string(raw)))
 	}
 	return payload.Data, nil
+}
+
+func (c *Client) WriteData(ctx context.Context, path string, body map[string]any) (map[string]any, error) {
+	raw, err := c.do(ctx, http.MethodPost, strings.Trim(path, "/"), body)
+	if err != nil {
+		return nil, err
+	}
+	return dataObject(raw, path)
+}
+
+func dataObject(raw json.RawMessage, path string) (map[string]any, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil, nil
+	}
+	var data map[string]any
+	if err := json.Unmarshal(trimmed, &data); err != nil {
+		return nil, fmt.Errorf("openbao: reading %q returned a body that is not JSON: %v (%s)", path, err, string(trimmed))
+	}
+	return data, nil
 }
 
 func (c *Client) EnableAppRole(ctx context.Context) error {

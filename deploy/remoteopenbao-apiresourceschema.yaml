@@ -1,0 +1,132 @@
+apiVersion: apis.kcp.io/v1alpha1
+kind: APIResourceSchema
+metadata:
+  name: v1alpha1-1.remoteopenbaos.socialweb.computer
+spec:
+  group: socialweb.computer
+  names:
+    kind: RemoteOpenBao
+    listKind: RemoteOpenBaoList
+    plural: remoteopenbaos
+    singular: remoteopenbao
+  scope: Cluster
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      schema:
+        type: object
+        properties:
+          apiVersion:
+            type: string
+          kind:
+            type: string
+          metadata:
+            type: object
+          spec:
+            type: object
+            properties:
+              url:
+                type: string
+              tls:
+                type: object
+                properties:
+                  enabled:
+                    type: boolean
+                  caBundleRef:
+                    type: string
+                  serverName:
+                    type: string
+              auth:
+                type: object
+                properties:
+                  method:
+                    type: string
+                    enum:
+                      - token
+                      - approle
+                      - cert
+                  tokenRef:
+                    type: string
+                  approle:
+                    type: object
+                    properties:
+                      roleIdRef:
+                        type: string
+                      secretIdRef:
+                        type: string
+                    required:
+                      - roleIdRef
+                      - secretIdRef
+                  cert:
+                    type: object
+                    properties:
+                      certRef:
+                        type: string
+                      keyRef:
+                        type: string
+                    required:
+                      - certRef
+                      - keyRef
+                required:
+                  - method
+              mounts:
+                type: object
+                properties:
+                  kv:
+                    type: string
+                  pki:
+                    type: string
+                  auth:
+                    type: string
+              capabilities:
+                type: array
+                items:
+                  type: string
+              suspend:
+                type: boolean
+            required:
+              - url
+          status:
+            type: object
+            properties:
+              phase:
+                type: string
+                enum:
+                  - Pending
+                  - Ready
+                  - Failed
+                  - Suspended
+              ready:
+                type: boolean
+              endpoint:
+                type: string
+              version:
+                type: string
+              sealed:
+                type: boolean
+              lastCheckedAt:
+                type: string
+                format: date-time
+              conditions:
+                type: array
+                items:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+              message:
+                type: string
+      additionalPrinterColumns:
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: Ready
+          type: boolean
+          jsonPath: .status.ready
+        - name: Endpoint
+          type: string
+          jsonPath: .status.endpoint
+        - name: Sealed
+          type: boolean
+          jsonPath: .status.sealed

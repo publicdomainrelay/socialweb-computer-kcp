@@ -38,6 +38,8 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&PostgresList{},
 		&OpenBaoServer{},
 		&OpenBaoServerList{},
+		&RemoteOpenBao{},
+		&RemoteOpenBaoList{},
 		&Bidder{},
 		&BidderList{},
 		&GuestControlPlane{},
