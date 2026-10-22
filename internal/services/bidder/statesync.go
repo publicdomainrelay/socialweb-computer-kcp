@@ -73,17 +73,40 @@ func decodeMarketEventPayload(raw json.RawMessage) (marketEventPayload, map[stri
 }
 
 func (p marketEventPayload) recordKeys(key string) (string, string) {
+	prefix := marketEventRKeyPrefix(key)
 	payloadRKey := strings.TrimSpace(p.PayloadRKey)
 	if payloadRKey == "" {
 		sum := sha256.Sum256([]byte(key))
-		payloadRKey = "termination-payload-" + hex.EncodeToString(sum[:16])
+		payloadRKey = prefix + "-payload-" + hex.EncodeToString(sum[:16])
 	}
 	eventRKey := strings.TrimSpace(p.EventRKey)
 	if eventRKey == "" {
 		sum := sha256.Sum256([]byte("event:" + key))
-		eventRKey = "termination-event-" + hex.EncodeToString(sum[:16])
+		eventRKey = prefix + "-event-" + hex.EncodeToString(sum[:16])
 	}
 	return payloadRKey, eventRKey
+}
+
+func marketEventRKeyPrefix(key string) string {
+	prefix := strings.TrimSpace(key)
+	if i := strings.IndexByte(prefix, ':'); i >= 0 {
+		prefix = prefix[:i]
+	}
+	prefix = strings.ToLower(prefix)
+	var clean strings.Builder
+	for _, r := range prefix {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			clean.WriteRune(r)
+		}
+	}
+	prefix = clean.String()
+	if prefix == "" {
+		return "market"
+	}
+	if prefix == "terminated" {
+		return "termination"
+	}
+	return prefix
 }
 
 func unsignedRecord(record map[string]any) map[string]any {
@@ -293,6 +316,118 @@ func (s *Service) kickStateSync() {
 	case s.syncKick <- struct{}{}:
 	default:
 	}
+}
+
+func reportSyncName(uid, collection string) string {
+	sum := sha256.Sum256([]byte(collection + "\x00" + uid))
+	return "report-" + hex.EncodeToString(sum[:8])
+}
+
+func reportSyncKey(collection, receiptURI string) string {
+	switch collection {
+	case market.ComputeEventsVMOnNetworkNSID:
+		return "onNetwork:" + receiptURI
+	case market.ComputeEventsVMHostKeysNSID:
+		return "hostKeys:" + receiptURI
+	default:
+		return collection + ":" + receiptURI
+	}
+}
+
+func (s *Service) ensureReportSync(ctx context.Context, vm *v1alpha1.ComputeVM, collection string, record map[string]any) (string, error) {
+	if vm == nil || vm.Spec.Contract == nil {
+		return "", errors.New("bidder: a report StateSync needs a contract")
+	}
+	contract := vm.Spec.Contract
+	if contract.ReceiptUri == "" || contract.ReceiptCid == "" {
+		return "", errors.New("bidder: a report StateSync needs a receipt")
+	}
+	if vm.UID == "" {
+		return "", errors.New("bidder: a report StateSync needs a ComputeVM UID")
+	}
+	payload := map[string]any{
+		"collection": collection,
+		"receipt":    map[string]any{"uri": contract.ReceiptUri, "cid": contract.ReceiptCid},
+		"record":     record,
+	}
+	if contract.SubmitEventUrl != "" {
+		payload["submitEventUrl"] = contract.SubmitEventUrl
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	var stored map[string]any
+	if err := json.Unmarshal(raw, &stored); err != nil {
+		return "", err
+	}
+	name := reportSyncName(string(vm.UID), collection)
+	object := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": v1alpha1.GroupVersion.String(),
+		"kind":       "StateSync",
+		"metadata": map[string]any{
+			"name": name,
+			"labels": map[string]any{
+				computevm.TerminationSyncSourceLabel: computevm.TerminationSyncSource,
+				computevm.TerminationSyncUIDLabel:    string(vm.UID),
+				computevm.TerminationSyncVMNameLabel: vm.Name,
+			},
+			"ownerReferences": []any{map[string]any{
+				"apiVersion": v1alpha1.GroupVersion.String(),
+				"kind":       "ComputeVM",
+				"name":       vm.Name,
+				"uid":        string(vm.UID),
+			}},
+		},
+		"spec": map[string]any{
+			"source": map[string]any{
+				"workspace":  s.cfg.Workspace,
+				"apiVersion": v1alpha1.GroupVersion.String(),
+				"kind":       "ComputeVM",
+				"name":       vm.Name,
+				"uid":        string(vm.UID),
+			},
+			"sink":           map[string]any{"adapter": computevm.TerminationSyncAdapter},
+			"direction":      string(v1alpha1.StateSyncDirectionOutbound),
+			"payload":        stored,
+			"idempotencyKey": reportSyncKey(collection, contract.ReceiptUri),
+			"conflictPolicy": string(v1alpha1.StateSyncConflictSourceWins),
+			"deletionPolicy": string(v1alpha1.StateSyncDeletionRetain),
+		},
+	}}
+	dyn, err := s.syncDynamic(s.cfg.Workspace)
+	if err != nil {
+		return "", err
+	}
+	if _, err := dyn.Resource(statesync.StateSyncGVR).Create(ctx, object, metav1.CreateOptions{}); err != nil {
+		if !apierrors.IsAlreadyExists(err) {
+			return "", fmt.Errorf("bidder: creating the report StateSync %s: %w", name, err)
+		}
+	} else {
+		s.log.Info("a market report StateSync is created", "computevm", vm.Name, "collection", collection, "statesync", name)
+	}
+	s.kickStateSync()
+	return name, nil
+}
+
+func (s *Service) observedReportURI(ctx context.Context, name string) string {
+	if name == "" {
+		return ""
+	}
+	dyn, err := s.syncDynamic(s.cfg.Workspace)
+	if err != nil {
+		return ""
+	}
+	u, err := dyn.Resource(statesync.StateSyncGVR).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return ""
+	}
+	phase, _, _ := unstructured.NestedString(u.Object, "status", "phase")
+	if v1alpha1.StateSyncPhase(phase) != v1alpha1.StateSyncPhaseAcked {
+		return ""
+	}
+	ref, _, _ := unstructured.NestedString(u.Object, "status", "acked", "ref")
+	return strings.TrimSpace(ref)
 }
 
 func (s *Service) ensureTerminationSync(ctx context.Context, info contractInfo, reason, observedAt string, request *v1alpha1.RecordRef) (string, error) {
