@@ -430,7 +430,7 @@ func ingressExposure(kind, name, hostname string, network *v1alpha1.MarketNetwor
 func ingressConnectAddress(n v1alpha1.MarketNetworkValue) string {
 	_, port, err := net.SplitHostPort(n.IngressProxyHost)
 	if err != nil || port == "" {
-		return n.IngressProxyHost
+		return ""
 	}
 	for _, host := range n.Hosts {
 		if _, candidate, splitErr := net.SplitHostPort(host.Address); splitErr == nil && candidate == port {
