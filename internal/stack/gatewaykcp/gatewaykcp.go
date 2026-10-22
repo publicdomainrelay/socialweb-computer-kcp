@@ -534,6 +534,12 @@ func (g *gateway) members(ctx context.Context, rec devinstance.Record) error {
 		env.set("SOCIALWEB_GATEWAY_KCP_PUBLIC_HOST", "https://"+certFront)
 		env.dflt("SOCIALWEB_GATEWAY_KCP_PUBLIC_CA_FILE", cert)
 	}
+	if host := env.get("SOCIALWEB_GATEWAY_KCP_PUBLIC_HOST"); host != "" {
+		_ = os.Setenv("SOCIALWEB_GATEWAY_KCP_PUBLIC_HOST", host)
+	}
+	if ca := env.get("SOCIALWEB_GATEWAY_KCP_PUBLIC_CA_FILE"); ca != "" {
+		_ = os.Setenv("SOCIALWEB_GATEWAY_KCP_PUBLIC_CA_FILE", ca)
+	}
 	start(member{"gateway", func(ctx context.Context) error {
 		inv := g.invocation(env, nil, "serve", "gateway", "xrpc")
 		inv.Listen = func(_ string, a net.Addr) { g.reg.set(ListenerXRPC, "http", a) }

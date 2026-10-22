@@ -37,7 +37,7 @@ var (
 	exposureServiceGVR = schema.GroupVersionResource{Group: exposurev1alpha1.GroupName, Version: exposurev1alpha1.Version, Resource: "services"}
 )
 
-func gatewayServerFor(deps component.Deps, workspace string, certs *clientcert.Issuer) (*gateway.Server, error) {
+func gatewayServerFor(deps component.Deps, workspace string, certs *clientcert.Issuer, publicHost string) (*gateway.Server, error) {
 	server := &gateway.Server{}
 	if deps.KCP == nil {
 		return server, nil
@@ -50,7 +50,7 @@ func gatewayServerFor(deps component.Deps, workspace string, certs *clientcert.I
 	if restConfig == nil || restConfig.Host == "" {
 		return server, nil
 	}
-	opts := kcpclient.Options{Host: restConfig.Host, RestConfig: restConfig}
+	opts := kcpclient.Options{Host: restConfig.Host, RestConfig: restConfig, PublicHost: publicHost}
 	if certs != nil {
 		opts.Kubeconfigs = certs
 	}

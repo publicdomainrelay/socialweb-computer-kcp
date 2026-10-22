@@ -104,6 +104,9 @@ func (a *app) devVMExecutables(vals clicfg.Values) (map[string]devinstance.Execu
 		p, err := a.vmExe(vals, x.name, x.option)
 		if err != nil {
 			if assets.Release() {
+				if a.log != nil {
+					a.log.Warn("the dev VM executable does not resolve; the network will record it missing", "executable", x.name, "err", err.Error())
+				}
 				continue
 			}
 			return nil, err

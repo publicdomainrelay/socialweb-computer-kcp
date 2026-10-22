@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -616,10 +617,14 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 	}
 	cfg.ClusterStateDir = decoded.ClusterStateDir
 	cfg.KubeconfigCAFile = decoded.KubeconfigCAFile
+	if cfg.KubeconfigCAFile == "" {
+		cfg.KubeconfigCAFile = os.Getenv("SOCIALWEB_GATEWAY_KCP_PUBLIC_CA_FILE")
+	}
+	publicHost := os.Getenv("SOCIALWEB_GATEWAY_KCP_PUBLIC_HOST")
 	if decoded.Storage != nil && decoded.Storage.CertsDir != "" {
 		cfg.NodeMarket.ClusterCADir = decoded.Storage.CertsDir
 	}
-	server, err := gatewayServerFor(deps, workspace, kubeconfigIssuer(cfg))
+	server, err := gatewayServerFor(deps, workspace, kubeconfigIssuer(cfg), publicHost)
 	if err != nil {
 		return Config{}, err
 	}
