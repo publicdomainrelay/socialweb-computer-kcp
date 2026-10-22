@@ -38,6 +38,8 @@ const (
 	cookieSameSiteLax    = "Lax"
 )
 
+const clientMetadataRefreshTimeout = 30 * time.Second
+
 type WebUser struct {
 	DID    string
 	Handle string
@@ -232,22 +234,23 @@ type OAuthOptions struct {
 }
 
 type OAuth struct {
-	opts           OAuthOptions
-	cookieName     string
-	cookieMaxAge   int
-	publicOrigin   string
-	secure         bool
-	maxBody        int64
-	postSignInURL  string
-	metadataPath   string
-	metadataCache  time.Duration
-	stateCookie    func(value string, maxAge int) string
-	sessionCookie  func(value string, maxAge int) string
-	auth           *RequestAuth
-	mu             sync.Mutex
-	metadata       json.RawMessage
-	metadataAt     time.Time
-	metadataLoaded bool
+	opts               OAuthOptions
+	cookieName         string
+	cookieMaxAge       int
+	publicOrigin       string
+	secure             bool
+	maxBody            int64
+	postSignInURL      string
+	metadataPath       string
+	metadataCache      time.Duration
+	stateCookie        func(value string, maxAge int) string
+	sessionCookie      func(value string, maxAge int) string
+	auth               *RequestAuth
+	mu                 sync.Mutex
+	metadata           json.RawMessage
+	metadataAt         time.Time
+	metadataLoaded     bool
+	metadataRefreshing bool
 }
 
 func NewOAuth(opts OAuthOptions) (*OAuth, error) {
@@ -347,22 +350,64 @@ func (o *OAuth) Handler() http.Handler {
 
 func (o *OAuth) clientMetadata(w http.ResponseWriter, r *http.Request) {
 	o.mu.Lock()
-	if !o.metadataLoaded || time.Since(o.metadataAt) > o.metadataCache {
+	if !o.metadataLoaded {
+		o.mu.Unlock()
 		doc, err := o.opts.SignIn.ClientMetadata(r.Context())
 		if err != nil {
-			o.mu.Unlock()
 			o.opts.Log.Error("client_metadata_unavailable", "err", err)
 			writeJSON(w, http.StatusServiceUnavailable, struct {
 				Error string `json:"error"`
 			}{"client metadata is not available from the vault"})
 			return
 		}
+		o.mu.Lock()
 		o.metadata = append(o.metadata[:0], doc...)
 		o.metadataAt = time.Now()
 		o.metadataLoaded = true
+		cached := append(json.RawMessage(nil), o.metadata...)
+		o.mu.Unlock()
+		o.writeClientMetadata(w, cached)
+		return
 	}
-	doc := append(json.RawMessage(nil), o.metadata...)
+	if !o.metadataRefreshing && time.Since(o.metadataAt) >= o.metadataRefreshAfter() {
+		o.metadataRefreshing = true
+		go o.refreshClientMetadata()
+	}
+	cached := append(json.RawMessage(nil), o.metadata...)
 	o.mu.Unlock()
+	o.writeClientMetadata(w, cached)
+}
+
+func (o *OAuth) metadataRefreshAfter() time.Duration {
+	after := o.metadataCache / 2
+	if after < time.Second {
+		after = time.Second
+	}
+	return after
+}
+
+func (o *OAuth) refreshClientMetadata() {
+	timeout := o.metadataCache
+	if timeout <= 0 || timeout > clientMetadataRefreshTimeout {
+		timeout = clientMetadataRefreshTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	doc, err := o.opts.SignIn.ClientMetadata(ctx)
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.metadataRefreshing = false
+	if err != nil {
+		o.opts.Log.Warn("client_metadata_refresh_failed", "err", err)
+		o.metadataAt = time.Now()
+		return
+	}
+	o.metadata = append(o.metadata[:0], doc...)
+	o.metadataAt = time.Now()
+	o.metadataLoaded = true
+}
+
+func (o *OAuth) writeClientMetadata(w http.ResponseWriter, doc json.RawMessage) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", int(o.metadataCache/time.Second)))
 	_, _ = w.Write(doc)

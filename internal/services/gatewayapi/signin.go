@@ -3,6 +3,7 @@ package gatewayapi
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
@@ -26,6 +27,20 @@ const (
 	agentPageMax = 100
 )
 
+const (
+	identityCacheEntries = 4096
+
+	identityCacheTTL = time.Minute
+
+	identityCacheMargin = 5 * time.Second
+
+	identityActiveWindow = 2 * time.Minute
+
+	identityRefreshBackoffMin = time.Second
+
+	identityRefreshBackoffMax = 30 * time.Second
+)
+
 type custodySignIn struct {
 	client *custodyClient
 
@@ -40,6 +55,38 @@ type custodySignIn struct {
 	allowInternalHTTP bool
 
 	log *slog.Logger
+
+	mu sync.Mutex
+
+	identities map[[sha256.Size]byte]*custodyIdentityEntry
+
+	wake chan struct{}
+
+	stopCh chan struct{}
+
+	closed bool
+
+	refreshing bool
+}
+
+type custodyIdentityEntry struct {
+	user coreapi.WebUser
+
+	token string
+
+	leaseUntil time.Time
+
+	checkUntil time.Time
+
+	renewable bool
+
+	renewDue bool
+
+	lastSeen time.Time
+
+	failures int
+
+	nextTry time.Time
 }
 
 type custodySignInOptions struct {
@@ -77,6 +124,9 @@ func newCustodySignIn(opts custodySignInOptions) (*custodySignIn, error) {
 		renewIncrement:    opts.RenewIncrement,
 		allowInternalHTTP: opts.Network != nil,
 		log:               opts.Log,
+		identities:        map[[sha256.Size]byte]*custodyIdentityEntry{},
+		wake:              make(chan struct{}, 1),
+		stopCh:            make(chan struct{}),
 	}, nil
 }
 
@@ -127,6 +177,31 @@ func (s *custodySignIn) Complete(ctx context.Context, params coreapi.SignInCompl
 }
 
 func (s *custodySignIn) Identify(ctx context.Context, token string) (*coreapi.WebUser, error) {
+	if token == "" {
+		return nil, nil
+	}
+	key := sha256.Sum256([]byte(token))
+	now := time.Now()
+	s.mu.Lock()
+	entry := s.identities[key]
+	if entry != nil && now.Before(entry.leaseUntil) {
+		user := entry.user
+		due := !entry.checkUntil.IsZero() && !entry.checkUntil.After(now)
+		if s.renewalDue(entry, now) {
+			entry.renewDue = true
+			due = true
+		}
+		entry.lastSeen = now
+		if due {
+			s.wakeRefresherLocked()
+		}
+		s.mu.Unlock()
+		return &user, nil
+	}
+	if entry != nil {
+		delete(s.identities, key)
+	}
+	s.mu.Unlock()
 	identity, err := s.client.identify(ctx, token)
 	if err != nil {
 		var custody *custodyError
@@ -138,18 +213,338 @@ func (s *custodySignIn) Identify(ctx context.Context, token string) (*coreapi.We
 	if identity == nil {
 		return nil, nil
 	}
-	if identity.Renewable && s.renewBelow > 0 && time.Duration(identity.TTLSeconds)*time.Second < s.renewBelow {
-		if _, err := s.client.renew(ctx, token, s.renewIncrement); err != nil {
-			s.log.Warn("web_token_renew_failed", "did", identity.DID, "err", err)
+	s.storeIdentity(key, token, identity, time.Now())
+	return &coreapi.WebUser{DID: identity.DID, Handle: identity.Handle, PDS: identity.PDS}, nil
+}
+
+func identityCacheWindow(now time.Time, ttlSeconds int64) (time.Time, time.Time) {
+	if ttlSeconds <= 0 {
+		return time.Time{}, time.Time{}
+	}
+	lease := time.Duration(ttlSeconds) * time.Second
+	leaseUntil := now.Add(lease)
+	window := lease
+	if window > identityCacheTTL {
+		window = identityCacheTTL
+	}
+	margin := identityCacheMargin
+	if quarter := lease / 4; quarter < margin {
+		margin = quarter
+	}
+	window -= margin
+	if window <= 0 {
+		return leaseUntil, time.Time{}
+	}
+	return leaseUntil, now.Add(window)
+}
+
+func (s *custodySignIn) renewalDue(entry *custodyIdentityEntry, now time.Time) bool {
+	return entry.renewable && s.renewBelow > 0 && !entry.leaseUntil.Add(-s.renewBelow).After(now)
+}
+
+func (s *custodySignIn) dueAt(entry *custodyIdentityEntry, now time.Time) time.Time {
+	if entry.renewDue {
+		return now
+	}
+	if entry.nextTry.After(now) {
+		return entry.nextTry
+	}
+	next := entry.leaseUntil
+	if !entry.checkUntil.IsZero() && entry.checkUntil.Before(next) {
+		next = entry.checkUntil
+	}
+	if entry.renewable && s.renewBelow > 0 {
+		if horizon := entry.leaseUntil.Add(-s.renewBelow); horizon.Before(next) {
+			next = horizon
 		}
 	}
-	return &coreapi.WebUser{DID: identity.DID, Handle: identity.Handle, PDS: identity.PDS}, nil
+	if !next.After(now) {
+		return now
+	}
+	return next
+}
+
+func (s *custodySignIn) storeIdentity(key [sha256.Size]byte, token string, identity *custodyIdentity, now time.Time) {
+	leaseUntil, checkUntil := identityCacheWindow(now, identity.TTLSeconds)
+	if leaseUntil.IsZero() {
+		return
+	}
+	s.mu.Lock()
+	s.pruneLocked(now)
+	if len(s.identities) >= identityCacheEntries {
+		s.evictLocked()
+	}
+	entry := &custodyIdentityEntry{
+		user:       coreapi.WebUser{DID: identity.DID, Handle: identity.Handle, PDS: identity.PDS},
+		token:      token,
+		leaseUntil: leaseUntil,
+		checkUntil: checkUntil,
+		renewable:  identity.Renewable,
+		lastSeen:   now,
+	}
+	entry.renewDue = s.renewalDue(entry, now)
+	s.identities[key] = entry
+	s.wakeRefresherLocked()
+	s.mu.Unlock()
+}
+
+func (s *custodySignIn) pruneLocked(now time.Time) {
+	for key, entry := range s.identities {
+		if !now.Before(entry.leaseUntil) {
+			delete(s.identities, key)
+		}
+	}
+}
+
+func (s *custodySignIn) evictLocked() {
+	var oldestKey [sha256.Size]byte
+	var oldest time.Time
+	found := false
+	for key, entry := range s.identities {
+		if !found || entry.leaseUntil.Before(oldest) {
+			oldestKey = key
+			oldest = entry.leaseUntil
+			found = true
+		}
+	}
+	if found {
+		delete(s.identities, oldestKey)
+	}
+}
+
+func (s *custodySignIn) forgetToken(token string) {
+	if token == "" {
+		return
+	}
+	key := sha256.Sum256([]byte(token))
+	s.mu.Lock()
+	delete(s.identities, key)
+	s.mu.Unlock()
+}
+
+func (s *custodySignIn) forgetKey(key [sha256.Size]byte, token string) {
+	s.mu.Lock()
+	entry := s.identities[key]
+	if entry != nil && entry.token == token {
+		delete(s.identities, key)
+	}
+	s.mu.Unlock()
+}
+
+func (s *custodySignIn) ensureRefresherLocked() {
+	if s.closed || s.refreshing {
+		return
+	}
+	s.refreshing = true
+	go s.refreshLoop()
+}
+
+func (s *custodySignIn) wakeRefresherLocked() {
+	if s.closed {
+		return
+	}
+	s.ensureRefresherLocked()
+	select {
+	case s.wake <- struct{}{}:
+	default:
+	}
+}
+
+func (s *custodySignIn) Close() {
+	s.mu.Lock()
+	if !s.closed {
+		s.closed = true
+		close(s.stopCh)
+	}
+	s.mu.Unlock()
+}
+
+func (s *custodySignIn) refreshLoop() {
+	for {
+		s.mu.Lock()
+		if s.closed {
+			s.refreshing = false
+			s.mu.Unlock()
+			return
+		}
+		now := time.Now()
+		var pickKey [sha256.Size]byte
+		var pick *custodyIdentityEntry
+		var next time.Time
+		active := false
+		for key, entry := range s.identities {
+			if !now.Before(entry.leaseUntil) {
+				delete(s.identities, key)
+				continue
+			}
+			if now.Sub(entry.lastSeen) > identityActiveWindow {
+				continue
+			}
+			active = true
+			due := s.dueAt(entry, now)
+			if !due.After(now) {
+				pickKey = key
+				pick = entry
+				break
+			}
+			if next.IsZero() || due.Before(next) {
+				next = due
+			}
+		}
+		if pick == nil {
+			if !active {
+				s.refreshing = false
+				s.mu.Unlock()
+				return
+			}
+			delay := next.Sub(now)
+			if delay < time.Millisecond {
+				delay = time.Millisecond
+			}
+			s.mu.Unlock()
+			timer := time.NewTimer(delay)
+			select {
+			case <-s.stopCh:
+				timer.Stop()
+				s.mu.Lock()
+				s.refreshing = false
+				s.mu.Unlock()
+				return
+			case <-s.wake:
+				timer.Stop()
+			case <-timer.C:
+			}
+			continue
+		}
+		token := pick.token
+		renew := pick.renewDue || s.renewalDue(pick, now)
+		s.mu.Unlock()
+		s.refreshIdentity(pickKey, token, renew)
+	}
+}
+
+func (s *custodySignIn) refreshIdentity(key [sha256.Size]byte, token string, renew bool) {
+	timeout := s.client.endpoint.Timeout
+	if timeout <= 0 {
+		timeout = DefaultCustodyTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	if renew {
+		leaseSeconds, err := s.client.renew(ctx, token, s.renewIncrement)
+		if err != nil {
+			s.refreshFailed(key, token, err)
+			return
+		}
+		if leaseSeconds <= 0 {
+			s.refreshFailed(key, token, errors.New("gatewayapi: the custody renew returned no lease"))
+			return
+		}
+		s.refreshRenewed(key, token, leaseSeconds)
+		return
+	}
+	identity, err := s.client.identify(ctx, token)
+	if err != nil {
+		s.refreshFailed(key, token, err)
+		return
+	}
+	if identity == nil {
+		s.forgetKey(key, token)
+		return
+	}
+	s.refreshIdentified(key, token, identity)
+}
+
+func (s *custodySignIn) refreshFailed(key [sha256.Size]byte, token string, err error) {
+	now := time.Now()
+	var custody *custodyError
+	invalid := errors.As(err, &custody) && (custody.Status == http.StatusForbidden || custody.Status == http.StatusUnauthorized)
+	s.mu.Lock()
+	entry := s.identities[key]
+	if entry == nil || entry.token != token {
+		s.mu.Unlock()
+		return
+	}
+	if invalid || !now.Before(entry.leaseUntil) {
+		delete(s.identities, key)
+		s.mu.Unlock()
+		return
+	}
+	entry.failures++
+	delay := identityRefreshBackoff(entry.failures)
+	if remaining := entry.leaseUntil.Sub(now); delay > remaining/2 {
+		delay = remaining / 2
+	}
+	if delay < identityRefreshBackoffMin {
+		delay = identityRefreshBackoffMin
+	}
+	entry.nextTry = now.Add(delay)
+	did := entry.user.DID
+	s.mu.Unlock()
+	s.log.Warn("web_token_refresh_failed", "did", did, "err", err)
+}
+
+func identityRefreshBackoff(failures int) time.Duration {
+	delay := identityRefreshBackoffMin
+	for i := 1; i < failures; i++ {
+		if delay >= identityRefreshBackoffMax/2 {
+			return identityRefreshBackoffMax
+		}
+		delay *= 2
+	}
+	if delay > identityRefreshBackoffMax {
+		delay = identityRefreshBackoffMax
+	}
+	return delay
+}
+
+func (s *custodySignIn) refreshRenewed(key [sha256.Size]byte, token string, leaseSeconds int64) {
+	now := time.Now()
+	leaseUntil, checkUntil := identityCacheWindow(now, leaseSeconds)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry := s.identities[key]
+	if entry == nil || entry.token != token {
+		return
+	}
+	if leaseUntil.IsZero() {
+		delete(s.identities, key)
+		return
+	}
+	entry.leaseUntil = leaseUntil
+	entry.checkUntil = checkUntil
+	entry.failures = 0
+	entry.nextTry = time.Time{}
+	entry.renewDue = s.renewalDue(entry, now)
+}
+
+func (s *custodySignIn) refreshIdentified(key [sha256.Size]byte, token string, identity *custodyIdentity) {
+	now := time.Now()
+	leaseUntil, checkUntil := identityCacheWindow(now, identity.TTLSeconds)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry := s.identities[key]
+	if entry == nil || entry.token != token {
+		return
+	}
+	if leaseUntil.IsZero() {
+		delete(s.identities, key)
+		return
+	}
+	entry.user = coreapi.WebUser{DID: identity.DID, Handle: identity.Handle, PDS: identity.PDS}
+	entry.leaseUntil = leaseUntil
+	entry.checkUntil = checkUntil
+	entry.renewable = identity.Renewable
+	entry.failures = 0
+	entry.nextTry = time.Time{}
+	entry.renewDue = s.renewalDue(entry, now)
 }
 
 func (s *custodySignIn) SignOut(ctx context.Context, caller *coreapi.WebCaller) (coreapi.SignOutResult, error) {
 	if caller == nil {
 		return coreapi.SignOutResult{}, errors.New("gatewayapi: no caller to sign out")
 	}
+	s.forgetToken(caller.Token)
 	revoked, revokeError, signOutErr := s.client.signOut(ctx, caller.Token, caller.DID)
 	if err := s.client.revokeToken(ctx, caller.Token); err != nil {
 		s.log.Warn("web_token_revoke_failed", "did", caller.DID, "err", err)
