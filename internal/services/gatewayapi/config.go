@@ -624,7 +624,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 	if decoded.Storage != nil && decoded.Storage.CertsDir != "" {
 		cfg.NodeMarket.ClusterCADir = decoded.Storage.CertsDir
 	}
-	server, err := gatewayServerFor(deps, workspace, kubeconfigIssuer(cfg), publicHost)
+	server, err := gatewayServerFor(deps, workspace, kubeconfigIssuer(cfg), publicHost, cfg.ClusterStateDir)
 	if err != nil {
 		return Config{}, err
 	}

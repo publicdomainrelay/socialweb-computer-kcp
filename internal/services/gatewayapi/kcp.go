@@ -37,8 +37,13 @@ var (
 	exposureServiceGVR = schema.GroupVersionResource{Group: exposurev1alpha1.GroupName, Version: exposurev1alpha1.Version, Resource: "services"}
 )
 
-func gatewayServerFor(deps component.Deps, workspace string, certs *clientcert.Issuer, publicHost string) (*gateway.Server, error) {
+func gatewayServerFor(deps component.Deps, workspace string, certs *clientcert.Issuer, publicHost, clusterStateDir string) (*gateway.Server, error) {
 	server := &gateway.Server{}
+	tenant, err := newTenantAPI(clusterStateDir)
+	if err != nil {
+		return nil, fmt.Errorf("gatewayapi: the tenant API client: %w", err)
+	}
+	server.Tenant = tenant
 	if deps.KCP == nil {
 		return server, nil
 	}
