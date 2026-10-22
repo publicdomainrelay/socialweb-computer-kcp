@@ -158,7 +158,7 @@ func componentLinks(workspace string, desired []desiredComponent) []desiredLink 
 			continue
 		}
 		for _, ref := range specRefs(d.Spec) {
-			if !isLinkTargetKind(ref.Kind) {
+			if !isLinkTargetKind(ref.Kind) || ref.Name == "*" {
 				continue
 			}
 			if strings.EqualFold(d.Kind, ref.Kind) && strings.EqualFold(d.Name, ref.Name) {
@@ -194,6 +194,10 @@ func componentLinkName(fromKind, fromName, toKind, toName string) string {
 			return '-'
 		}
 	}, raw)
+	safe = strings.Trim(safe, "-.")
+	if safe == "" {
+		return "link"
+	}
 	if len(safe) <= 63 {
 		return safe
 	}
