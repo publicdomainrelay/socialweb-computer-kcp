@@ -31,7 +31,7 @@ spec:
         crd: {}
     - group: socialweb.computer
       name: bidders
-      schema: v1alpha1-4.bidders.socialweb.computer
+      schema: v1alpha1-5.bidders.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer
@@ -46,7 +46,7 @@ spec:
         crd: {}
     - group: socialweb.computer
       name: requesters
-      schema: v1alpha1-6.requesters.socialweb.computer
+      schema: v1alpha1-7.requesters.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer

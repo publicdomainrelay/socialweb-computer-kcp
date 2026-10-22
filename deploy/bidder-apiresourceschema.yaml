@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-4.bidders.socialweb.computer
+  name: v1alpha1-5.bidders.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -293,6 +293,23 @@ spec:
                 type: array
                 items:
                   type: string
+              comms:
+                type: object
+                properties:
+                  mode:
+                    type: string
+                    enum:
+                      - XRPC
+                      - Firehose
+                      - Both
+                  relayUrls:
+                    type: array
+                    items:
+                      type: string
+                  firehoseUrls:
+                    type: array
+                    items:
+                      type: string
           status:
             type: object
             properties:

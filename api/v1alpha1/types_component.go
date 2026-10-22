@@ -197,6 +197,8 @@ type BidderSpec struct {
 	PolicyArgs string `json:"policyArgs,omitempty"`
 
 	BidderDIDs []string `json:"bidderDIDs,omitempty"`
+
+	Comms *MarketComms `json:"comms,omitempty"`
 }
 
 type GuestControlPlane struct {
@@ -354,6 +356,8 @@ type RequesterSpec struct {
 	IrohSocket string `json:"irohSocket,omitempty"`
 
 	AcceptCopies int32 `json:"acceptCopies,omitempty"`
+
+	Comms *MarketComms `json:"comms,omitempty"`
 }
 
 type GatewayAPI struct {

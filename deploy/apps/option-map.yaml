@@ -15,6 +15,9 @@ apps:
       - {name: network-hosts, to: network.hosts}
       - {name: ingress-proxy-host, to: network.ingressProxyHost}
       - {name: relay-url, to: network.relayUrls}
+      - {name: comms-mode, to: spec.comms.mode}
+      - {name: comms-relay-url, to: spec.comms.relayUrls}
+      - {name: comms-firehose-url, to: spec.comms.firehoseUrls}
       - {name: atproto-identity-mode, to: spec.identity.mode}
       - {name: atproto-handle, to: spec.identity.handle}
       - {name: atproto-password, to: state}
@@ -119,6 +122,9 @@ apps:
       - {name: network-hosts, to: network.hosts}
       - {name: ingress-proxy-host, to: network.ingressProxyHost}
       - {name: relay-url, to: network.relayUrls}
+      - {name: comms-mode, to: spec.comms.mode}
+      - {name: comms-relay-url, to: spec.comms.relayUrls}
+      - {name: comms-firehose-url, to: spec.comms.firehoseUrls}
       - {name: gateway-audience, to: options}
       - {name: kcp-public-host, to: options}
       - {name: kubeconfig-max-ttl-sec, to: options}
@@ -150,6 +156,9 @@ apps:
       - {name: plc-directory-url, to: network.plcDirectoryUrl}
       - {name: ingress-proxy-host, to: network.ingressProxyHost}
       - {name: relay-url, to: network.relayUrls}
+      - {name: comms-mode, to: spec.comms.mode}
+      - {name: comms-relay-url, to: spec.comms.relayUrls}
+      - {name: comms-firehose-url, to: spec.comms.firehoseUrls}
       - {name: firehose-url, to: network.firehoseUrls}
       - {name: qr-origin, to: network.qrOrigin}
       - {name: network-hosts, to: network.hosts}
@@ -259,6 +268,9 @@ apps:
       - {name: public-origin, to: options}
       - {name: ingress-proxy-host, to: network.ingressProxyHost}
       - {name: relay-url, to: network.relayUrls}
+      - {name: comms-mode, to: spec.comms.mode}
+      - {name: comms-relay-url, to: spec.comms.relayUrls}
+      - {name: comms-firehose-url, to: spec.comms.firehoseUrls}
       - {name: network-hosts, to: network.hosts}
       - {name: bidder-dids, to: spec.bidderDids}
       - {name: guest-host-aliases, to: profile}
