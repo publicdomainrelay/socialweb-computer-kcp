@@ -331,11 +331,11 @@ func ComponentCoreConfig(ctx context.Context, cfg Config, rec devinstance.Record
 		out.CredentialClient = appctl.RequesterVaultClient
 		out.CredentialServer = vaultlayout.RootServerName
 		out.VaultClient = appctl.RequesterVaultClient
-	case strings.Contains(rec.BaseWorkspace, ":bidder"), strings.HasPrefix(rec.BaseWorkspace, "b-"):
+	case strings.Contains(rec.BaseWorkspace, ":bidder"), strings.HasPrefix(rec.BaseWorkspace, "b-"), strings.HasPrefix(rec.Layout.ID, "b-"):
 		out.CredentialClient = appctl.BidderVaultClient
 		out.CredentialServer = appctl.BidderVaultServer
 		out.VaultClient = appctl.BidderVaultClient
-	case strings.HasPrefix(rec.BaseWorkspace, "r-"):
+	case strings.HasPrefix(rec.BaseWorkspace, "r-"), strings.HasPrefix(rec.Layout.ID, "r-"):
 		out.CredentialClient = appctl.RequesterVaultClient
 		out.CredentialServer = vaultlayout.RootServerName
 		out.VaultClient = appctl.RequesterVaultClient
