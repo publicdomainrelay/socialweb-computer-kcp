@@ -677,9 +677,10 @@ func (r *contractRunner) verifyRecordedReceipt(ctx context.Context, state *v1alp
 func (r *contractRunner) collectBids(ctx context.Context, rfpURI string, response []BidRecord, bidders []Bidder, usePolicy bool, workflow string) (*BidRecord, []v1alpha1.ContractBid, bool, error) {
 	deadline := time.Now().Add(r.svc.cfg.BidWindow)
 	byURI := map[string]BidRecord{}
+	deny := r.snapshot().Spec.DenyBidderDids
 	add := func(bids []BidRecord) {
 		for _, bid := range bids {
-			if bid.URI == "" {
+			if bid.URI == "" || containsString(deny, bid.DID) {
 				continue
 			}
 			byURI[bid.URI] = bid
