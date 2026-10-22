@@ -283,6 +283,9 @@ func (p *GuestSessionProvider) timeout() time.Duration {
 }
 
 func GenerateGuestKeypair(dir, vmName string) (string, string, error) {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", "", err
+	}
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return "", "", err
