@@ -57,7 +57,7 @@ const (
 
 	DefaultBidWindow = 30 * time.Second
 
-	DefaultReceiptTimeout = 120 * time.Second
+	DefaultReceiptTimeout = 5 * time.Minute
 
 	DefaultReceiptPoll = 500 * time.Millisecond
 
