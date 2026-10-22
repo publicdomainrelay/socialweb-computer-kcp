@@ -86,3 +86,10 @@ func (r *HandlerRegistry) Remove(name string) bool {
 	delete(r.handlers, name)
 	return true
 }
+
+func (c *Controller) RegisterHandler(name string, handler Handler) error {
+	if c == nil || c.handlers == nil {
+		return errors.New("eventstream: the controller has no handler registry")
+	}
+	return c.handlers.Register(name, handler)
+}

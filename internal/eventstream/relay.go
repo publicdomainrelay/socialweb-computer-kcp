@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -96,7 +95,10 @@ func openRelayStream(ctx context.Context, base string, cursor *int64, handlers *
 	default:
 		parsed.Scheme = "ws"
 	}
-	parsed.Path = strings.TrimRight(parsed.Path, "/") + "/xrpc/com.atproto.sync.subscribeRepos"
+	parsed.Path = strings.TrimRight(parsed.Path, "/")
+	if !strings.HasSuffix(parsed.Path, "/xrpc/com.atproto.sync.subscribeRepos") {
+		parsed.Path = strings.TrimRight(parsed.Path, "/") + "/xrpc/com.atproto.sync.subscribeRepos"
+	}
 	parsed.RawPath = ""
 	parsed.Fragment = ""
 	parsed.RawQuery = ""
@@ -111,9 +113,7 @@ func openRelayStream(ctx context.Context, base string, cursor *int64, handlers *
 		TLSClientConfig:  &tls.Config{MinVersion: tls.VersionTLS12},
 	}
 	if handlers != nil {
-		dialer.NetDialContext = func(ctx context.Context, _, address string) (net.Conn, error) {
-			return handlers.DialHTTP(ctx, address)
-		}
+		dialer.NetDialContext = streamDialContext(handlers)
 	}
 	conn, response, err := dialer.DialContext(ctx, parsed.String(), nil)
 	if err != nil {

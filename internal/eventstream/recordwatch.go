@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -120,52 +119,54 @@ func (c *Controller) reconcileRecordWatch(ctx context.Context, dyn dynamic.Inter
 	if err != nil {
 		return err
 	}
-	eventStreamName := EventStreamNameForWatch(name)
-	if strings.TrimSpace(spec.Repo) == "" {
+	plans, err := c.planWatchSources(ctx, dyn, name, spec)
+	if err != nil {
 		c.writeRecordWatchConditions(ctx, dyn, name, []metav1.Condition{
-			condition(RecordWatchConditionReady, false, "InvalidSpec", "spec.repo is required", u.GetGeneration()),
-			condition(RecordWatchConditionProgressing, false, "InvalidSpec", "spec.repo is required", u.GetGeneration()),
-			condition(RecordWatchConditionFailed, true, "InvalidSpec", "spec.repo is required", u.GetGeneration()),
-		})
-		return errors.New("eventstream: AtprotoRecordWatch " + name + " has no spec.repo")
-	}
-	if err := c.ensureWatchEventStream(ctx, dyn, u, name, spec, status); err != nil {
-		c.writeRecordWatchConditions(ctx, dyn, name, []metav1.Condition{
-			condition(RecordWatchConditionReady, false, "ReconcileFailed", err.Error(), u.GetGeneration()),
-			condition(RecordWatchConditionProgressing, false, "ReconcileFailed", err.Error(), u.GetGeneration()),
-			condition(RecordWatchConditionFailed, true, "ReconcileFailed", err.Error(), u.GetGeneration()),
+			condition(RecordWatchConditionReady, false, "InvalidSpec", err.Error(), u.GetGeneration()),
+			condition(RecordWatchConditionProgressing, false, "InvalidSpec", err.Error(), u.GetGeneration()),
+			condition(RecordWatchConditionFailed, true, "InvalidSpec", err.Error(), u.GetGeneration()),
 		})
 		return err
 	}
-	conditions, err := c.watchConditions(ctx, dyn, eventStreamName, u.GetGeneration())
+	if _, err := c.resolveMatches(ctx, dyn, spec); err != nil {
+		c.writeRecordWatchConditions(ctx, dyn, name, []metav1.Condition{
+			condition(RecordWatchConditionReady, false, "MatchPending", err.Error(), u.GetGeneration()),
+			condition(RecordWatchConditionProgressing, true, "MatchPending", err.Error(), u.GetGeneration()),
+			condition(RecordWatchConditionFailed, false, "NoError", err.Error(), u.GetGeneration()),
+		})
+		return err
+	}
+	wanted := map[string]bool{}
+	for _, plan := range plans {
+		wanted[plan.Name] = true
+		if err := c.ensureWatchEventStream(ctx, dyn, name, plan, status); err != nil {
+			c.writeRecordWatchConditions(ctx, dyn, name, []metav1.Condition{
+				condition(RecordWatchConditionReady, false, "ReconcileFailed", err.Error(), u.GetGeneration()),
+				condition(RecordWatchConditionProgressing, false, "ReconcileFailed", err.Error(), u.GetGeneration()),
+				condition(RecordWatchConditionFailed, true, "ReconcileFailed", err.Error(), u.GetGeneration()),
+			})
+			return err
+		}
+	}
+	c.gcStaleEventStreams(ctx, dyn, name, wanted)
+	conditions, err := c.watchConditions(ctx, dyn, plans, u.GetGeneration())
 	if err != nil {
 		return err
 	}
 	return c.writeRecordWatchConditions(ctx, dyn, name, conditions)
 }
 
-func (c *Controller) ensureWatchEventStream(ctx context.Context, dyn dynamic.Interface, u *unstructured.Unstructured, name string, spec recordWatchSpec, status recordWatchStatus) error {
-	eventStreamName := EventStreamNameForWatch(name)
-	source := eventsapi.EventStreamSource{
-		Kind: eventsapi.EventStreamSourcePDS,
-		PDSRef: &eventsapi.EventStreamRef{
-			Workspace: c.opts.Workspace,
-			Kind:      "Pds",
-			Name:      strings.TrimSpace(spec.Repo),
-		},
-	}
-	if collection := strings.TrimSpace(spec.Collection); collection != "" {
-		source.Collections = []string{collection}
-	}
+func (c *Controller) ensureWatchEventStream(ctx context.Context, dyn dynamic.Interface, name string, plan watchSourcePlan, status recordWatchStatus) error {
+	eventStreamName := plan.Name
 	desiredSpec := eventsapi.EventStreamSpec{
-		Source: source,
+		Source: plan.Source,
 		Sink: eventsapi.EventStreamSink{
 			Kind:      eventsapi.EventStreamSinkRecordWatch,
 			Name:      name,
 			Namespace: c.opts.Workspace,
 		},
 	}
-	if cursor := watchCursorFromStatus(status, spec.Repo); cursor != nil {
+	if cursor := watchCursorFromStatus(status, plan.Key); cursor != nil {
 		desiredSpec.Cursor = cursor
 	}
 	labels := map[string]string{RecordWatchLabel: name}
@@ -233,48 +234,60 @@ func (c *Controller) ensureWatchEventStream(ctx context.Context, dyn dynamic.Int
 	return fmt.Errorf("eventstream: the EventStream for AtprotoRecordWatch %s stayed in conflict", name)
 }
 
-func (c *Controller) watchConditions(ctx context.Context, dyn dynamic.Interface, eventStreamName string, generation int64) ([]metav1.Condition, error) {
+func (c *Controller) watchConditions(ctx context.Context, dyn dynamic.Interface, plans []watchSourcePlan, generation int64) ([]metav1.Condition, error) {
 	ri := dyn.Resource(EventStreamGVR)
-	u, err := ri.Get(ctx, eventStreamName, metav1.GetOptions{})
-	if apierrors.IsNotFound(err) {
-		return []metav1.Condition{
-			condition(RecordWatchConditionReady, false, "Creating", "the EventStream is being created", generation),
-			condition(RecordWatchConditionProgressing, true, "Creating", "the EventStream is being created", generation),
-			condition(RecordWatchConditionFailed, false, "NoError", "the EventStream is being created", generation),
-		}, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	statusMap, _, _ := unstructured.NestedMap(u.Object, "status")
-	var status eventsapi.EventStreamStatus
-	if len(statusMap) > 0 {
-		raw, err := json.Marshal(statusMap)
+	var latestFailed *metav1.Condition
+	readyCount := 0
+	starting := false
+	for _, plan := range plans {
+		u, err := ri.Get(ctx, plan.Name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			starting = true
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
-		if err := json.Unmarshal(raw, &status); err != nil {
-			return nil, err
+		statusMap, _, _ := unstructured.NestedMap(u.Object, "status")
+		var status eventsapi.EventStreamStatus
+		if len(statusMap) > 0 {
+			raw, err := json.Marshal(statusMap)
+			if err != nil {
+				return nil, err
+			}
+			if err := json.Unmarshal(raw, &status); err != nil {
+				return nil, err
+			}
 		}
+		if failed := meta.FindStatusCondition(status.Conditions, eventsapi.EventStreamConditionFailed); failed != nil && failed.Status == metav1.ConditionTrue {
+			failedCopy := *failed
+			latestFailed = &failedCopy
+			continue
+		}
+		if ready := meta.FindStatusCondition(status.Conditions, eventsapi.EventStreamConditionReady); ready != nil && ready.Status == metav1.ConditionTrue {
+			readyCount++
+			continue
+		}
+		starting = true
 	}
-	if failed := meta.FindStatusCondition(status.Conditions, eventsapi.EventStreamConditionFailed); failed != nil && failed.Status == metav1.ConditionTrue {
+	if latestFailed != nil {
 		return []metav1.Condition{
-			condition(RecordWatchConditionReady, false, "StreamFailed", failed.Message, generation),
-			condition(RecordWatchConditionProgressing, false, "StreamFailed", failed.Message, generation),
-			condition(RecordWatchConditionFailed, true, "StreamFailed", failed.Message, generation),
+			condition(RecordWatchConditionReady, false, "StreamFailed", latestFailed.Message, generation),
+			condition(RecordWatchConditionProgressing, false, "StreamFailed", latestFailed.Message, generation),
+			condition(RecordWatchConditionFailed, true, "StreamFailed", latestFailed.Message, generation),
 		}, nil
 	}
-	if ready := meta.FindStatusCondition(status.Conditions, eventsapi.EventStreamConditionReady); ready != nil && ready.Status == metav1.ConditionTrue {
+	if readyCount == len(plans) && !starting {
 		return []metav1.Condition{
-			condition(RecordWatchConditionReady, true, "StreamReady", "the EventStream is open", generation),
-			condition(RecordWatchConditionProgressing, false, "StreamReady", "the EventStream is open", generation),
-			condition(RecordWatchConditionFailed, false, "NoError", "the EventStream is open", generation),
+			condition(RecordWatchConditionReady, true, "StreamReady", "every EventStream is open", generation),
+			condition(RecordWatchConditionProgressing, false, "StreamReady", "every EventStream is open", generation),
+			condition(RecordWatchConditionFailed, false, "NoError", "every EventStream is open", generation),
 		}, nil
 	}
 	return []metav1.Condition{
-		condition(RecordWatchConditionReady, false, "Starting", "the EventStream is starting", generation),
-		condition(RecordWatchConditionProgressing, true, "Starting", "the EventStream is starting", generation),
-		condition(RecordWatchConditionFailed, false, "NoError", "the EventStream is starting", generation),
+		condition(RecordWatchConditionReady, false, "Starting", "the EventStreams are starting", generation),
+		condition(RecordWatchConditionProgressing, true, "Starting", "the EventStreams are starting", generation),
+		condition(RecordWatchConditionFailed, false, "NoError", "the EventStreams are starting", generation),
 	}, nil
 }
 
@@ -330,20 +343,43 @@ func (c *Controller) writeRecordWatchConditions(ctx context.Context, dyn dynamic
 
 func (c *Controller) gcRecordWatch(ctx context.Context, dyn dynamic.Interface, watchName string) {
 	ri := dyn.Resource(EventStreamGVR)
-	name := EventStreamNameForWatch(watchName)
-	current, err := ri.Get(ctx, name, metav1.GetOptions{})
-	if apierrors.IsNotFound(err) {
+	list, err := ri.List(ctx, metav1.ListOptions{LabelSelector: RecordWatchLabel})
+	if apierrors.IsNotFound(err) || apierrors.IsForbidden(err) {
 		return
 	}
 	if err != nil {
-		c.log.Warn("reading an EventStream to collect", "name", name, "err", err.Error())
+		c.log.Warn("listing EventStreams to collect", "watch", watchName, "err", err.Error())
 		return
 	}
-	if current.GetLabels()[RecordWatchLabel] != watchName {
+	for i := range list.Items {
+		item := &list.Items[i]
+		if item.GetLabels()[RecordWatchLabel] != watchName {
+			continue
+		}
+		if err := ri.Delete(ctx, item.GetName(), metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+			c.log.Warn("collecting an EventStream", "name", item.GetName(), "err", err.Error())
+		}
+	}
+}
+
+func (c *Controller) gcStaleEventStreams(ctx context.Context, dyn dynamic.Interface, watchName string, wanted map[string]bool) {
+	ri := dyn.Resource(EventStreamGVR)
+	list, err := ri.List(ctx, metav1.ListOptions{LabelSelector: RecordWatchLabel})
+	if apierrors.IsNotFound(err) || apierrors.IsForbidden(err) {
 		return
 	}
-	if err := ri.Delete(ctx, name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
-		c.log.Warn("collecting an EventStream", "name", name, "err", err.Error())
+	if err != nil {
+		c.log.Warn("listing EventStreams to collect", "watch", watchName, "err", err.Error())
+		return
+	}
+	for i := range list.Items {
+		item := &list.Items[i]
+		if item.GetLabels()[RecordWatchLabel] != watchName || wanted[item.GetName()] {
+			continue
+		}
+		if err := ri.Delete(ctx, item.GetName(), metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+			c.log.Warn("collecting a stale EventStream", "name", item.GetName(), "err", err.Error())
+		}
 	}
 }
 
@@ -395,15 +431,15 @@ func decodeRecordWatch(u *unstructured.Unstructured) (recordWatchSpec, recordWat
 	return spec, status, nil
 }
 
-func watchCursorFromStatus(status recordWatchStatus, repo string) *int64 {
-	want := "pds/" + strings.TrimSpace(repo)
+func watchCursorFromStatus(status recordWatchStatus, sourceKey string) *int64 {
+	want := strings.TrimSpace(sourceKey)
 	for _, cursor := range status.Cursors {
 		if cursor.Source == want {
 			value := cursor.Cursor
 			return &value
 		}
 	}
-	if len(status.Cursors) == 1 {
+	if len(status.Cursors) == 1 && want == "" {
 		value := status.Cursors[0].Cursor
 		return &value
 	}

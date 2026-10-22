@@ -8,10 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/bluesky-social/indigo/atproto/identity"
+	"github.com/bluesky-social/indigo/atproto/syntax"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -23,6 +26,7 @@ import (
 
 	eventsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/events/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
 )
 
 const (
@@ -52,6 +56,10 @@ type Options struct {
 	Handlers  *HandlerRegistry
 	Log       *slog.Logger
 
+	Directory       identity.Directory
+	PLCDirectoryURL string
+	HTTPClient      *http.Client
+
 	RetryAfter       time.Duration
 	StatusInterval   time.Duration
 	ReconnectDelay   time.Duration
@@ -63,8 +71,12 @@ type Controller struct {
 	log      *slog.Logger
 	handlers *HandlerRegistry
 
-	mu      sync.Mutex
-	streams map[string]*streamRuntime
+	directory identity.Directory
+	http      *http.Client
+
+	mu       sync.Mutex
+	streams  map[string]*streamRuntime
+	pdsCache map[syntax.DID]pdsclient.PDS
 }
 
 type streamRuntime struct {
@@ -108,11 +120,42 @@ func New(opts Options) (*Controller, error) {
 	if opts.MaxReconnectWait < opts.ReconnectDelay {
 		opts.MaxReconnectWait = DefaultMaxReconnectWait
 	}
+	httpClient := opts.HTTPClient
+	if httpClient == nil && opts.Resolver != nil && opts.Resolver.Handlers != nil {
+		httpClient = opts.Resolver.Handlers.HTTPClient()
+	}
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: 20 * time.Second}
+	}
+	httpClient = httpClientWithFallback(httpClient)
+	directory := opts.Directory
+	if directory == nil {
+		plcURL := strings.TrimSpace(opts.PLCDirectoryURL)
+		if plcURL == "" {
+			plcURL = "http://" + kcp.ServiceFQDN("plc", "default", opts.Workspace, kcp.DefaultServiceDomain)
+		}
+		local := &identity.BaseDirectory{
+			PLCURL:                 plcURL,
+			HTTPClient:             *httpClient,
+			PLCClient:              httpClient,
+			SkipHandleVerification: true,
+		}
+		public := &identity.BaseDirectory{
+			PLCURL:                 identity.DefaultPLCURL,
+			HTTPClient:             *httpClient,
+			PLCClient:              httpClient,
+			SkipHandleVerification: true,
+		}
+		directory = fallbackDirectory{local, public}
+	}
 	return &Controller{
-		opts:     opts,
-		log:      opts.Log.With("component", "eventstream-controller"),
-		handlers: opts.Handlers,
-		streams:  map[string]*streamRuntime{},
+		opts:      opts,
+		log:       opts.Log.With("component", "eventstream-controller"),
+		handlers:  opts.Handlers,
+		streams:   map[string]*streamRuntime{},
+		directory: directory,
+		http:      httpClient,
+		pdsCache:  map[syntax.DID]pdsclient.PDS{},
 	}, nil
 }
 

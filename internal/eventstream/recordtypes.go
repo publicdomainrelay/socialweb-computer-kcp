@@ -7,9 +7,53 @@ import (
 )
 
 type recordWatchSpec struct {
+	RepoRef *recordRepoRef `json:"repoRef,omitempty"`
+
 	Repo string `json:"repo"`
 
 	Collection string `json:"collection"`
+
+	Match []recordMatch `json:"match,omitempty"`
+
+	Source recordWatchSource `json:"source"`
+}
+
+type recordRepoRef struct {
+	Workspace string `json:"workspace,omitempty"`
+
+	Kind string `json:"kind,omitempty"`
+
+	Name string `json:"name"`
+}
+
+type recordMatch struct {
+	FieldPath string `json:"fieldPath"`
+
+	Value string `json:"value,omitempty"`
+
+	ValueFrom *recordValueFrom `json:"valueFrom,omitempty"`
+}
+
+type recordValueFrom struct {
+	Kind string `json:"kind,omitempty"`
+
+	Resource string `json:"resource,omitempty"`
+
+	ApiVersion string `json:"apiVersion,omitempty"`
+
+	Name string `json:"name"`
+
+	FieldPath string `json:"fieldPath"`
+
+	Workspace string `json:"workspace,omitempty"`
+
+	Namespace string `json:"namespace,omitempty"`
+}
+
+type recordWatchSource struct {
+	RelayUrls []string `json:"relayUrls,omitempty"`
+
+	JetstreamUrls []string `json:"jetstreamUrls,omitempty"`
 }
 
 type recordWatchCursor struct {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -83,7 +84,7 @@ func (s *eventStream) run(ctx context.Context) {
 
 	delay := s.ctl.opts.ReconnectDelay
 	for runCtx.Err() == nil {
-		pds, relayBase, source, err := s.resolveSource(runCtx)
+		source, err := s.resolveSource(runCtx)
 		if err != nil {
 			s.set(eventsv1alpha1.EventStreamPhaseFailed, false, false, true, err.Error())
 			s.publish(ctx)
@@ -94,10 +95,13 @@ func (s *eventStream) run(ctx context.Context) {
 			continue
 		}
 		var stream repoStream
-		if relayBase != "" {
-			stream, err = openRelayStream(runCtx, relayBase, s.nextCursor(), s.ctl.opts.Resolver.Handlers)
-		} else {
-			stream, err = pds.SubscribeRepos(runCtx, s.nextCursor())
+		switch {
+		case source.relayBase != "":
+			stream, err = openRelayStream(runCtx, source.relayBase, s.nextCursor(), s.ctl.opts.Resolver.Handlers)
+		case source.jetstreamBase != "":
+			stream, err = openJetstreamStream(runCtx, source.jetstreamBase, s.nextCursor(), s.es.Spec.Source.Collections, s.es.Spec.Source.DIDs, s.ctl.opts.Resolver.Handlers)
+		default:
+			stream, err = source.pds.SubscribeRepos(runCtx, s.nextCursor())
 		}
 		if err != nil {
 			s.set(eventsv1alpha1.EventStreamPhaseFailed, false, false, true, err.Error())
@@ -119,7 +123,7 @@ func (s *eventStream) run(ctx context.Context) {
 		for {
 			event, err := stream.Next(runCtx)
 			if err == nil {
-				s.handle(runCtx, pds, source, event)
+				s.handle(runCtx, source, event)
 				continue
 			}
 			_ = stream.Close()
@@ -150,19 +154,29 @@ func (s *eventStream) flushLoop(ctx context.Context) {
 	}
 }
 
-func (s *eventStream) resolveSource(ctx context.Context) (pdsclient.PDS, string, string, error) {
+type resolvedSource struct {
+	pds pdsclient.PDS
+
+	relayBase string
+
+	jetstreamBase string
+
+	key string
+}
+
+func (s *eventStream) resolveSource(ctx context.Context) (resolvedSource, error) {
 	source := s.es.Spec.Source
 	switch eventsv1alpha1.EventStreamSourceKind(strings.ToLower(strings.TrimSpace(string(source.Kind)))) {
 	case eventsv1alpha1.EventStreamSourcePDS:
 		ref := source.PDSRef
 		if ref == nil {
-			return nil, "", "", errors.New("eventstream: source.kind pds needs pdsRef")
+			return resolvedSource{}, errors.New("eventstream: source.kind pds needs pdsRef")
 		}
 		if strings.TrimSpace(ref.Name) == "" {
-			return nil, "", "", errors.New("eventstream: pdsRef needs a name")
+			return resolvedSource{}, errors.New("eventstream: pdsRef needs a name")
 		}
 		if strings.TrimSpace(ref.Kind) == "" {
-			return nil, "", "", errors.New("eventstream: pdsRef needs a kind")
+			return resolvedSource{}, errors.New("eventstream: pdsRef needs a kind")
 		}
 		kind := strings.ToLower(strings.TrimSpace(ref.Kind))
 		if kind == "remotepds" || kind == "remote" {
@@ -172,43 +186,63 @@ func (s *eventStream) resolveSource(ctx context.Context) (pdsclient.PDS, string,
 			}
 			dyn, err := s.ctl.opts.Dynamic(workspace)
 			if err != nil {
-				return nil, "", "", err
+				return resolvedSource{}, err
 			}
 			object, err := dyn.Resource(RemotePDSGVR).Get(ctx, ref.Name, metav1.GetOptions{})
 			if err != nil {
-				return nil, "", "", fmt.Errorf("eventstream: reading RemotePDS %s: %w", ref.Name, err)
+				return resolvedSource{}, fmt.Errorf("eventstream: reading RemotePDS %s: %w", ref.Name, err)
 			}
 			var remote pdsv1alpha1.RemotePDS
 			raw, err := json.Marshal(object.Object)
 			if err != nil {
-				return nil, "", "", err
+				return resolvedSource{}, err
 			}
 			if err := json.Unmarshal(raw, &remote); err != nil {
-				return nil, "", "", fmt.Errorf("eventstream: decoding RemotePDS %s: %w", ref.Name, err)
+				return resolvedSource{}, fmt.Errorf("eventstream: decoding RemotePDS %s: %w", ref.Name, err)
 			}
 			pds, err := s.ctl.opts.Resolver.Resolve(pdsclient.CRRef{RemotePDS: &remote})
 			if err != nil {
-				return nil, "", "", err
+				return resolvedSource{}, err
 			}
-			return pds, "", "pds/" + ref.Name, nil
+			return resolvedSource{pds: pds, key: pdsSourceKey(ref.Name)}, nil
 		}
 		pds, err := s.ctl.opts.Resolver.Resolve(pdsclient.LocalRef{Workspace: ref.Workspace, Kind: ref.Kind, Name: ref.Name})
 		if err != nil {
-			return nil, "", "", err
+			return resolvedSource{}, err
 		}
-		return pds, "", "pds/" + ref.Name, nil
+		return resolvedSource{pds: pds, key: pdsSourceKey(ref.Name)}, nil
 	case eventsv1alpha1.EventStreamSourceRelay:
-		ref := source.RelayRef
-		if ref == nil {
-			return nil, "", "", errors.New("eventstream: source.kind relay needs relayRef")
+		base := ""
+		if ref := source.RelayRef; ref != nil {
+			var err error
+			base, err = relayBaseURL(*ref)
+			if err != nil {
+				return resolvedSource{}, err
+			}
+		} else if len(source.RelayUrls) > 0 {
+			base = normalizeStreamURL(source.RelayUrls[0])
 		}
-		base, err := relayBaseURL(*ref)
-		if err != nil {
-			return nil, "", "", err
+		if base == "" {
+			return resolvedSource{}, errors.New("eventstream: source.kind relay needs relayRef or relayUrls")
 		}
-		return nil, base, "relay/" + strings.TrimSpace(ref.Name), nil
+		if _, err := parseStreamURL(base); err != nil {
+			return resolvedSource{}, err
+		}
+		return resolvedSource{relayBase: normalizeStreamURL(base), key: relaySourceKey(normalizeStreamURL(base))}, nil
+	case eventsv1alpha1.EventStreamSourceJetstream:
+		base := ""
+		if len(source.JetstreamUrls) > 0 {
+			base = normalizeStreamURL(source.JetstreamUrls[0])
+		}
+		if base == "" {
+			return resolvedSource{}, errors.New("eventstream: source.kind jetstream needs jetstreamUrls")
+		}
+		if _, err := parseStreamURL(base); err != nil {
+			return resolvedSource{}, err
+		}
+		return resolvedSource{jetstreamBase: normalizeStreamURL(base), key: jetstreamSourceKey(normalizeStreamURL(base))}, nil
 	default:
-		return nil, "", "", fmt.Errorf("eventstream: unknown source kind %q", source.Kind)
+		return resolvedSource{}, fmt.Errorf("eventstream: unknown source kind %q", source.Kind)
 	}
 }
 
@@ -219,18 +253,18 @@ func (s *eventStream) nextCursor() *int64 {
 		value := s.cursor
 		return &value
 	}
-	if s.es.Spec.Cursor != nil {
-		value := *s.es.Spec.Cursor
-		return &value
-	}
 	if s.es.Status.Cursor > 0 {
 		value := s.es.Status.Cursor
+		return &value
+	}
+	if s.es.Spec.Cursor != nil {
+		value := *s.es.Spec.Cursor
 		return &value
 	}
 	return nil
 }
 
-func (s *eventStream) handle(ctx context.Context, pds pdsclient.PDS, source string, event pdsclient.RepoEvent) {
+func (s *eventStream) handle(ctx context.Context, source resolvedSource, event pdsclient.RepoEvent) {
 	when := event.Time
 	if when.IsZero() {
 		when = time.Now().UTC()
@@ -241,7 +275,9 @@ func (s *eventStream) handle(ctx context.Context, pds pdsclient.PDS, source stri
 		ops = nil
 	}
 	s.mu.Lock()
-	if s.started && event.Seq > s.cursor+1 {
+	if strings.HasPrefix(source.key, "jetstream/") {
+		s.lag = 0
+	} else if s.started && event.Seq > s.cursor+1 {
 		s.lag = event.Seq - s.cursor - 1
 	} else {
 		s.lag = 0
@@ -262,14 +298,9 @@ func (s *eventStream) handle(ctx context.Context, pds pdsclient.PDS, source stri
 	}
 	switch s.es.Spec.Sink.Kind {
 	case eventsv1alpha1.EventStreamSinkHandler:
-		s.deliverHandler(ctx, source, event, when, ops)
+		s.deliverHandler(ctx, source.key, event, when, ops)
 	case eventsv1alpha1.EventStreamSinkRecordWatch:
-		if pds == nil {
-			s.set(eventsv1alpha1.EventStreamPhaseFailed, s.isReady(), s.isLagging(), true,
-				"the atprotoRecordWatch sink needs a pds source to read records")
-			return
-		}
-		s.bufferRecords(ctx, pds, source, event, ops)
+		s.bufferRecords(ctx, source, event, ops)
 	default:
 		s.set(eventsv1alpha1.EventStreamPhaseFailed, s.isReady(), s.isLagging(), true,
 			fmt.Sprintf("unknown sink kind %q", s.es.Spec.Sink.Kind))
@@ -301,7 +332,8 @@ func (s *eventStream) deliverHandler(ctx context.Context, source string, event p
 	}
 }
 
-func (s *eventStream) bufferRecords(ctx context.Context, pds pdsclient.PDS, source string, event pdsclient.RepoEvent, ops []pdsclient.RepoOp) {
+func (s *eventStream) bufferRecords(ctx context.Context, source resolvedSource, event pdsclient.RepoEvent, ops []pdsclient.RepoOp) {
+	matches := s.watchMatches(ctx)
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	records := map[string]v1alpha1.WatchedRecord{}
 	deletes := map[string]struct{}{}
@@ -313,14 +345,34 @@ func (s *eventStream) bufferRecords(ctx context.Context, pds pdsclient.PDS, sour
 		uri := "at://" + event.Repo.String() + "/" + collection + "/" + rkey
 		switch strings.ToLower(op.Action) {
 		case "create", "update":
-			record, err := pds.GetRecord(ctx, pdsclient.RepoPath{Repo: event.Repo, Collection: syntax.NSID(collection), Rkey: syntax.RecordKey(rkey)}, nil)
+			pds := source.pds
+			if pds == nil {
+				var err error
+				pds, err = s.ctl.authorPDS(ctx, event.Repo)
+				if err != nil {
+					s.ctl.log.Warn("resolving the author PDS for a watched record", "uri", uri, "err", err.Error())
+					continue
+				}
+			}
+			record, err := pds.GetRecord(ctx, pdsclient.RepoPath{Repo: event.Repo, Collection: syntax.NSID(collection), Rkey: syntax.RecordKey(rkey)}, op.CID)
 			if err != nil {
 				s.ctl.log.Warn("fetching a watched record", "uri", uri, "err", err.Error())
+				continue
+			}
+			if record.URI.String() != uri {
+				s.ctl.log.Warn("a watched record came back under another URI", "uri", uri, "got", record.URI.String())
+				continue
+			}
+			if op.CID != nil && op.CID.Defined() && record.CID != *op.CID {
+				s.ctl.log.Warn("a watched record came back with another CID", "uri", uri, "want", op.CID.String(), "got", record.CID.String())
 				continue
 			}
 			value := record.Value
 			if !json.Valid(value) {
 				value = json.RawMessage(`{}`)
+			}
+			if len(matches) > 0 && !matchesRecord(value, matches) {
+				continue
 			}
 			records[uri] = v1alpha1.WatchedRecord{
 				Did:        event.Repo.String(),
@@ -342,9 +394,79 @@ func (s *eventStream) bufferRecords(ctx context.Context, pds pdsclient.PDS, sour
 		delete(s.records, uri)
 		s.deletes[uri] = struct{}{}
 	}
-	s.watchCursors[source] = event.Seq
+	s.watchCursors[source.key] = event.Seq
 	s.watchDirty = true
 	s.mu.Unlock()
+}
+
+func (s *eventStream) watchMatches(ctx context.Context) []resolvedMatch {
+	workspace := strings.TrimSpace(s.es.Spec.Sink.Namespace)
+	if workspace == "" {
+		workspace = s.ctl.opts.Workspace
+	}
+	dyn := s.dyn
+	if workspace != s.ctl.opts.Workspace {
+		var err error
+		dyn, err = s.ctl.opts.Dynamic(workspace)
+		if err != nil {
+			s.ctl.log.Warn("reading the AtprotoRecordWatch for its match", "name", s.es.Spec.Sink.Name, "err", err.Error())
+			return nil
+		}
+	}
+	object, err := dyn.Resource(RecordWatchGVR).Get(ctx, strings.TrimSpace(s.es.Spec.Sink.Name), metav1.GetOptions{})
+	if err != nil {
+		if !apierrors.IsNotFound(err) {
+			s.ctl.log.Warn("reading the AtprotoRecordWatch for its match", "name", s.es.Spec.Sink.Name, "err", err.Error())
+		}
+		return nil
+	}
+	spec, _, err := decodeRecordWatch(object)
+	if err != nil {
+		s.ctl.log.Warn("decoding the AtprotoRecordWatch for its match", "name", s.es.Spec.Sink.Name, "err", err.Error())
+		return nil
+	}
+	matches, err := s.ctl.resolveMatches(ctx, dyn, spec)
+	if err != nil {
+		s.ctl.log.Warn("resolving the AtprotoRecordWatch match", "name", s.es.Spec.Sink.Name, "err", err.Error())
+		return nil
+	}
+	return matches
+}
+
+func (c *Controller) authorPDS(ctx context.Context, did syntax.DID) (pdsclient.PDS, error) {
+	c.mu.Lock()
+	cached := c.pdsCache[did]
+	c.mu.Unlock()
+	if cached != nil {
+		return cached, nil
+	}
+	if c.directory == nil {
+		return nil, errors.New("eventstream: no DID directory is configured")
+	}
+	ident, err := c.directory.LookupDID(ctx, did)
+	if err != nil {
+		return nil, fmt.Errorf("eventstream: resolving %s: %w", did, err)
+	}
+	endpoint := strings.TrimSpace(ident.PDSEndpoint())
+	if endpoint == "" {
+		return nil, fmt.Errorf("eventstream: %s declares no atproto_pds service", did)
+	}
+	pds, err := pdsclient.NewRemote(pdsclient.RemoteConfig{
+		BaseURL:    endpoint,
+		DID:        did,
+		HTTPClient: c.http,
+		Timeout:    20 * time.Second,
+	})
+	if err != nil {
+		return nil, err
+	}
+	c.mu.Lock()
+	if c.pdsCache == nil {
+		c.pdsCache = map[syntax.DID]pdsclient.PDS{}
+	}
+	c.pdsCache[did] = pds
+	c.mu.Unlock()
+	return pds, nil
 }
 
 func (s *eventStream) publish(ctx context.Context) {
@@ -557,6 +679,7 @@ func (s *eventStream) writeWatchStatus(ctx context.Context, workspace string, re
 				watch.Cursors = append(watch.Cursors, v1alpha1.AtprotoRecordWatchCursor{Source: source, Cursor: cursor})
 			}
 		}
+		watch.Records = boundWatchedRecords(watch.Records)
 		raw, err := json.Marshal(watch)
 		if err != nil {
 			return err
@@ -573,6 +696,19 @@ func (s *eventStream) writeWatchStatus(ctx context.Context, workspace string, re
 		}
 	}
 	return fmt.Errorf("eventstream: the status of AtprotoRecordWatch %s stayed in conflict", s.es.Spec.Sink.Name)
+}
+
+const maxWatchedRecords = 512
+
+func boundWatchedRecords(records []v1alpha1.WatchedRecord) []v1alpha1.WatchedRecord {
+	if len(records) <= maxWatchedRecords {
+		return records
+	}
+	ordered := append([]v1alpha1.WatchedRecord(nil), records...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		return ordered[i].VerifiedAt > ordered[j].VerifiedAt
+	})
+	return ordered[:maxWatchedRecords]
 }
 
 func writeEventStreamStatus(ctx context.Context, ri dynamic.ResourceInterface, name string, status eventsv1alpha1.EventStreamStatus) error {
