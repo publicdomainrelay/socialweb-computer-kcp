@@ -153,6 +153,35 @@ target_model: |
     The ingress must preserve the public Host header and serve HTTPS.
     A changed provider URL is a Failed condition, not a silent DID rewrite.
 
+public_url_policy:
+  service_endpoint: >
+    The PDS atproto_pds serviceEndpoint is scheme://host[:port] only. It carries
+    no userinfo, path, query or fragment. The PDS did:web document,
+    /.well-known/did.json, createAccount endpoints and requestCrawl all use the
+    same public host.
+  provider_selection: >
+    xrpc-subscription when ingress.xrpc.ingressProxyHost is set; opentunnel when
+    ingress.opentunnel is set; otherwise fail closed. iroh is recognized by the
+    API and rejected with a named error until a later plan. Selection is
+    explicit in the app spec; no environment flag or profile changes it.
+  ingress_required: >
+    Every Pds in a production app sets requireIngress. No account is created
+    and no sign-in completes while the ingress is not Ready and the PDS has no
+    public URL. A local or loopback URL is never a fallback for a required
+    ingress.
+  stable_host: >
+    The first public URL is persisted in Pds spec/status and is the stable
+    host. A provider that later returns a different URL is Failed with
+    StableHostMismatch; the DID service endpoint is never silently rewritten.
+  provider_failures: >
+    A missing provider component, an unknown provider, a missing opentunnel
+    command, a missing route name, a missing local host or a provider URL that
+    changes is a named condition, not a fallback to another provider.
+  exposure: >
+    The PDS ingress Exposure path is /. The provider returns the public URL;
+    the app ingress ref selects the provider component, and
+    GuestTlsUrl is not used as an override.
+
 waves:
   - id: W0
     title: "Contracts, URL policy and provider selection"

@@ -815,6 +815,89 @@ test_matrix:
     - hat-7: unassociated
     - socialweb.computer: prod gateway, Alice sign-in and tenant kubeconfig
 
+acceptance_matrix:
+  fixtures:
+    local-pds: a Pds component with account, session and repo, on a loopback port, no ingress
+    remote-pds: a RemotePDS with URL, DID and auth refs, including a fail-closed missing-auth case
+    oauth-store: a token store with refresh, expiry and revoked-session cases
+    qr-transfer: the com.fedfork.atprotoOauthQR transfer endpoint with nonce and burn-after-read
+    relay-subscribeRepos: an external relay serving JSON and CBOR subscribeRepos frames
+    jetstream: an external JetStream endpoint serving the same normalized events
+    duplicate-injector: delivers one uri|#|cid twice over XRPC and the firehose
+    restart-injector: stops the process between delivery and apply, then resumes the cursor
+  rows:
+    - account: managed-associated
+      pds: local
+      roles: [bidder, requester]
+      transports: [XRPC, Firehose subscribeRepos, Firehose JetStream, Both]
+      fixtures: [local-pds, relay-subscribeRepos, jetstream, duplicate-injector, restart-injector]
+      live: [this-host, hat-9]
+      test: TestMarketAccountAndTransportMatrix/managed-associated
+    - account: managed-unassociated
+      pds: local
+      roles: [bidder, requester]
+      transports: [XRPC, Firehose subscribeRepos, Firehose JetStream, Both]
+      fixtures: [local-pds, relay-subscribeRepos, jetstream, duplicate-injector]
+      live: [hat-7]
+      test: TestMarketAccountAndTransportMatrix/managed-unassociated
+    - account: existing-pds-account
+      pds: remote
+      roles: [bidder, requester]
+      transports: [XRPC, Firehose subscribeRepos, Firehose JetStream, Both]
+      fixtures: [remote-pds, relay-subscribeRepos, jetstream]
+      live: [this-host disposable account]
+      test: TestMarketAccountAndTransportMatrix/existing-pds-account
+    - account: existing-oauth-browser
+      pds: remote
+      roles: [bidder, requester]
+      transports: [XRPC, Firehose subscribeRepos, Firehose JetStream, Both]
+      fixtures: [remote-pds, oauth-store, relay-subscribeRepos, jetstream]
+      live: [this-host disposable account, socialweb.computer requester]
+      test: TestMarketAccountAndTransportMatrix/existing-oauth-browser
+    - account: existing-oauth-qr
+      pds: remote
+      roles: [bidder, requester]
+      transports: [XRPC, Firehose subscribeRepos, Firehose JetStream, Both]
+      fixtures: [remote-pds, qr-transfer, oauth-store, relay-subscribeRepos, jetstream]
+      live: [this-host disposable account]
+      test: TestMarketAccountAndTransportMatrix/existing-oauth-qr
+    - account: existing-oauth-delegated
+      pds: remote
+      roles: [bidder, requester]
+      transports: [XRPC, Firehose subscribeRepos, Firehose JetStream, Both]
+      fixtures: [remote-pds, oauth-store, relay-subscribeRepos, jetstream]
+      live: [this-host disposable account]
+      test: TestMarketAccountAndTransportMatrix/existing-oauth-delegated
+  faults:
+    - fault: duplicate XRPC + firehose delivery
+      fixtures: [duplicate-injector]
+      live: [this-host]
+      test: TestMarketDuplicateDeliveryCreatesOneObject
+    - fault: process restart between delivery and apply
+      fixtures: [restart-injector]
+      live: [this-host]
+      test: TestMarketRestartResumesCursorsAndDedupe
+    - fault: out-of-order accept before bid/receipt
+      fixtures: [duplicate-injector]
+      live: [this-host]
+      test: TestMarketOutOfOrderAcceptConverges
+    - fault: relay reconnect and cursor resume
+      fixtures: [relay-subscribeRepos, jetstream]
+      live: [this-host]
+      test: TestMarketRelayReconnectResumesCursor
+    - fault: missing ingress for Firehose
+      fixtures: [local-pds]
+      live: [this-host]
+      test: TestMarketFirehoseFailsClosedWithoutIngress
+    - fault: revoked association claim
+      fixtures: [relay-subscribeRepos]
+      live: [this-host, hat-9]
+      test: TestMarketAssociationRevocationRemovesApproval
+    - fault: expired OAuth session
+      fixtures: [oauth-store]
+      live: [this-host disposable account]
+      test: TestMarketExpiredSessionReportsSignInAgain
+
 risks: |
   Existing-account mode writes market records into the real account repo. Keep
   it explicit opt-in and document the risk.

@@ -265,6 +265,57 @@ That runs gofmt, go build, apigen and its diff, go vet, the cross-OS builds and 
 The full gate before a release also runs the release closure and the live proofs this host can run:
 read [AGENTS.md](AGENTS.md) "How to verify".
 
+## Select the PDS ingress provider
+
+A production PDS is a public HTTPS service. Its account DID document carries an `atproto_pds`
+service entry whose `serviceEndpoint` is scheme, host and optional port only, and the PDS
+`/.well-known/did.json`, `createAccount` and `requestCrawl` use the same public host. An
+`IngressProxy` provides that public URL; the PDS itself may bind loopback or an internal port.
+
+Every app root selects the provider explicitly:
+
+```yaml
+spec:
+  ingress:
+    provider: xrpc-subscription
+    ingressRef:
+      kind: IngressProxy
+      name: ingress
+    publicHost: example.fedproxy.com
+    xrpc:
+      ingressProxyHost: example.fedproxy.com
+      relayURL: https://relay.example
+```
+
+Or, for a tunneled route:
+
+```yaml
+spec:
+  ingress:
+    provider: opentunnel
+    ingressRef:
+      kind: IngressProxy
+      name: ingress
+    publicHost: example.example
+    opentunnel:
+      command: [/usr/local/bin/opentunnel, route, add]
+      routeName: alice-pds
+      localHost: 127.0.0.1:2583
+      proxyProtocol: v2
+```
+
+The default is `xrpc-subscription` when `ingress.xrpc.ingressProxyHost` is set and `opentunnel` when
+`ingress.opentunnel` is set. With neither, selection fails closed. `iroh` is recognized by the API
+and rejected until a later plan. A missing provider component, command or route name is a named
+failure, and a provider that returns a different public URL on restart is a `StableHostMismatch`
+failure. There is no implicit local fallback and no `GuestTlsUrl` override.
+
+Set `Pds.spec.requireIngress` for every production PDS. No account is created and no sign-in
+completes while the ingress is not Ready. The first public URL is persisted in
+`Pds.spec.publicURL` and `Pds.spec.stableHost`. See
+[the atproto DID specification](https://atproto.com/specs/did) and
+[the going-to-production guide](https://atproto.com/guides/going-to-production).
+
 ## Install a release build on a bidder host
 
 Build the release commit first. `make` builds both linux release platforms and updates the owned

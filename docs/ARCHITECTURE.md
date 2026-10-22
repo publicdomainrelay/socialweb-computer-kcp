@@ -3482,6 +3482,14 @@ A change must not break any of these. Each exists because something failed.
 
 ## 14. Open architectural gaps
 
+- **PDS ingress is contracted but not yet planned per app (plan 0022, 2026-10-22).** The API now
+  carries `spec.ingress` on `MarketBidder`, `MarketRequester`, `Gateway`, `SshGateway` and
+  `MarketNetwork`, `Pds.spec.requireIngress`, `ingressRef`, `publicURL` and `stableHost`, and the
+  extra `IngressProxy` fields. No app root creates the `IngressProxy` component yet and no lifecycle
+  gates account creation on a Ready ingress. Until W1 and W2 land, a standalone app PDS can still
+  have a loopback service endpoint. The policy itself is fixed: see `public_url_policy` in
+  `docs/plans/0022-pds-ingress-proxy.yaml`.
+
 - **Plan 0013 soak paused 2026-10-19 06:28Z (third reading, partial).** `dev-soak-3` ran rc18 code
   1 h warm-up + 2 h 43 min of the fit window at ~1.1 RFP/s: 15,311 RFPs created, 0 failed; 227 tenant
   cycles, 0 failed; 286 VM contracts, 21 failed around chaos; host OOM 0, MemAvailable 82 GB, swap 0.
@@ -9910,8 +9918,10 @@ separate `setup-secrets`, k3s-install and iroh modules remain shell.
 ### Ingress is one IngressProxy with three providers (2026-10-21, 1db5f084)
 
 An `IngressProxy` component (`internal/services/ingressproxy`) serves exposures through one of three
-providers: `xrpc-subscription`, `iroh` or `opentunnel` (`spec.provider`; empty means the
-`xrpc-subscription` default). Each provider is its own package under
+providers: `xrpc-subscription`, `iroh` or `opentunnel` (`spec.provider`). The provider is selected
+explicitly: `ingress.xrpc.ingressProxyHost` selects `xrpc-subscription`, `ingress.opentunnel` selects
+`opentunnel`, and neither fails closed; `iroh` is recognized but rejected until a later plan. Each
+provider is its own package under
 `internal/services/ingressproxy/`; `Exposure.spec.ingressRef` names the component, and the exposure
 dispatcher resolves it through the component registry and uses the optional `IngressRegistrar` the
 component publishes. `xrpc-subscription` is the former did:key subscriber, `iroh` supervises
