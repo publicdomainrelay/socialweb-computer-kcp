@@ -322,7 +322,9 @@ func (s *Service) oauthClientMetadata(w http.ResponseWriter, r *http.Request) {
 
 func (s *Service) oauthCallback(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("identity")
+	s.log.Info("oauth callback received", "identity", name, "state", r.URL.Query().Get("state"))
 	handler, ok := oauthcallback.Lookup(name)
+	s.log.Info("oauth callback lookup", "identity", name, "found", ok)
 	if !ok {
 		http.Error(w, "unknown identity", http.StatusNotFound)
 		return

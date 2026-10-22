@@ -577,6 +577,7 @@ func (c *Controller) BrowserCallbackHandler(name string) http.Handler {
 }
 
 func (c *Controller) CompleteBrowserAuthorization(ctx context.Context, name string, r *http.Request) error {
+	c.log.Info("oauth callback complete: start", "identity", name, "states", fmt.Sprintf("%T", c.states))
 	dyn, err := c.dynamic(c.workspace)
 	if err != nil {
 		return err
@@ -593,6 +594,7 @@ func (c *Controller) CompleteBrowserAuthorization(ctx context.Context, name stri
 	if id.Spec.Mode != v1alpha1.MarketIdentityModeOAuthBrowser {
 		return fmt.Errorf("identitycontroller: MarketIdentity %s is mode %s, not oauthBrowser", name, id.Spec.Mode)
 	}
+	c.log.Info("oauth callback complete: identity read", "identity", name)
 	ref := oauthSessionRef(&id, &id.Status)
 	if ref == nil {
 		return errNoSessionRef
@@ -600,10 +602,13 @@ func (c *Controller) CompleteBrowserAuthorization(ctx context.Context, name stri
 	if c.vault == nil {
 		return errors.New("identitycontroller: no vault writes the oauth session")
 	}
+	c.log.Info("oauth callback complete: exchanging code", "identity", name)
 	data, err := oauthclient.ExchangeCallback(ctx, c.states, r, c.oauthHTTP())
 	if err != nil {
+		c.log.Info("oauth callback exchange failed", "identity", name, "err", err.Error())
 		return err
 	}
+	c.log.Info("oauth callback complete: saving session", "identity", name)
 	if err := c.saveSession(ctx, ref, data); err != nil {
 		return err
 	}

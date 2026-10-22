@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -349,6 +350,13 @@ func (c *Core) runIdentity(ctx context.Context) {
 		}
 		oauth := identitycontroller.OAuthOptions{Directory: identity.DefaultDirectory(), HTTPClient: &http.Client{Timeout: 20 * time.Second},
 			States: &oauthclient.MemoryStateStore{}}
+		if key, err := loadOAuthCLIKey(c.cfg.StateDir); err == nil {
+			oauth.CLIKey = key
+			oauth.QROrigin = strings.TrimSpace(os.Getenv("SOCIALWEB_QR_ORIGIN"))
+			if oauth.QROrigin == "" {
+				oauth.QROrigin = "https://qr.fedfork.com"
+			}
+		}
 		ctl, err := identitycontroller.New(identitycontroller.Options{Workspace: workspace, Dynamic: identitycontroller.DynamicFactory(c.cfg.DynamicFactory),
 			Endpoints: c.pdsEndpoint, Resolver: &pdsclient.Resolver{Handlers: c.handlers, Timeout: 10 * time.Second},
 			Vault: vault, OAuth: oauth, Log: log.With("workspace", workspace)})
@@ -356,11 +364,13 @@ func (c *Core) runIdentity(ctx context.Context) {
 			log.Warn("the MarketIdentity controller does not start", "workspace", workspace, "err", err.Error())
 			continue
 		}
-		for _, name := range []string{"bidder", "requester"} {
-			name := name
-			oauthcallback.Register(name, func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-				return ctl.CompleteBrowserAuthorization(ctx, name, r)
-			})
+		if len(c.cfg.Workspaces) > 0 && workspace == strings.TrimSpace(c.cfg.Workspaces[0]) {
+			for _, name := range []string{"bidder", "requester"} {
+				name := name
+				oauthcallback.Register(name, func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+					return ctl.CompleteBrowserAuthorization(ctx, name, r)
+				})
+			}
 		}
 		go func() {
 			log.Info("the MarketIdentity controller writes its status in process", "workspace", workspace)
