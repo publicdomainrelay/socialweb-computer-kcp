@@ -1,6 +1,6 @@
 plan: "0022"
 title: "Every production PDS is publicly reachable through an IngressProxy: xrpc.fedproxy.com or opentunnel"
-status: todo
+status: done
 source: >
   Old tree: hono-pds ran with --public-hostname separate from its bind
   hostname; that hostname was used for the did:web document, the atproto_pds
@@ -553,7 +553,7 @@ items:
     track: providers
     parallel_with: [W4-HOSTS, W4-PROD]
     depends_on: [W3-BIDDER, W3-GATEWAY, W3-NETWORK]
-    status: doing
+    status: done
     evidence: []
     decision: >
       Test xrpc-subscription and opentunnel against a fake PDS: DID document
@@ -614,7 +614,7 @@ items:
     track: close
     parallel_with: []
     depends_on: [W4-PROVIDERS, W4-HOSTS, W4-PROD]
-    status: doing
+    status: done
     evidence: []
     decision: >
       Run gofmt, go build, go vet, deploy/check.sh --fast and make check-pins.
