@@ -623,7 +623,7 @@ func (ctl *Controller) reconcileGateway(ctx context.Context, u *unstructured.Uns
 				return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
 			}
 		}
-		if err := ctl.recordPdsIdentity(ctx, ws, RequesterIdentity, pdsAccountHandle, endpoint, sess.Did, id.Spec.Association); err != nil {
+		if err := ctl.recordPdsIdentity(ctx, ws, RequesterIdentity, pdsAccountHandle, pdsPublicURL, sess.Did, id.Spec.Association); err != nil {
 			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "its app Pds identity: "+err.Error()
 			return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
 		}

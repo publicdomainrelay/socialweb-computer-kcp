@@ -521,7 +521,7 @@ func (ctl *Controller) reconcileRequester(ctx context.Context, u *unstructured.U
 				return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
 			}
 		}
-		if err := ctl.recordPdsIdentity(ctx, ctl.c.workspace(), RequesterIdentity, pdsAccountHandle, endpoint, sess.Did, o.Spec.Identity.Association); err != nil {
+		if err := ctl.recordPdsIdentity(ctx, ctl.c.workspace(), RequesterIdentity, pdsAccountHandle, pdsPublicURL, sess.Did, o.Spec.Identity.Association); err != nil {
 			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "its app Pds identity: "+err.Error()
 			return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
 		}

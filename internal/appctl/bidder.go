@@ -868,7 +868,7 @@ func (ctl *Controller) reconcileBidder(ctx context.Context, u *unstructured.Unst
 		return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
 	}
 	ctl.ensureAppPdsStatus(ctx, pdsAccountHandle, sess, BidderVaultServer+":"+pdsSessionPath("bidder"), o.Spec.Network != nil)
-	if err := ctl.recordPdsIdentity(ctx, ctl.c.workspace(), BidderIdentity, pdsAccountHandle, endpoint, sess.Did, o.Spec.Identity.Association); err != nil {
+	if err := ctl.recordPdsIdentity(ctx, ctl.c.workspace(), BidderIdentity, pdsAccountHandle, pdsPublicURL, sess.Did, o.Spec.Identity.Association); err != nil {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "its app Pds identity: "+err.Error()
 		return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
 	}
