@@ -246,7 +246,7 @@ func New(cfg Config) (*Core, error) {
 	if err != nil {
 		return nil, err
 	}
-	policyOptions := policyenginesvc.Options{Store: store, Cluster: base, Log: cfg.Log, Handlers: actionHandlers}
+	policyOptions := policyenginesvc.Options{Store: store, Cluster: base, PLCURL: cfg.PLCBaseURL, Log: cfg.Log, Handlers: actionHandlers}
 	if err := Register(runtime, policyOptions, cfg.ExposureIngressIdentity); err != nil {
 		return nil, err
 	}
@@ -388,7 +388,7 @@ func (c *Core) supervisePolicy(ctx context.Context, workspace string, log *slog.
 			sleep(ctx, RetryAfter)
 			continue
 		}
-		svc, err := policyenginesvc.New(policyenginesvc.Options{Store: c.store, Cluster: workspace, Log: log, Handlers: handlers})
+		svc, err := policyenginesvc.New(policyenginesvc.Options{Store: c.store, Cluster: workspace, PLCURL: c.cfg.PLCBaseURL, Log: log, Handlers: handlers})
 		if err != nil {
 			log.Warn("the policy controller does not start", "err", err.Error())
 			sleep(ctx, RetryAfter)

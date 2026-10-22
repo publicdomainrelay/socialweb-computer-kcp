@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"gopkg.in/yaml.v3"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	policyv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/policy/v1alpha1"
@@ -244,7 +245,11 @@ func workflowOfRecord(value map[string]any) (json.RawMessage, error) {
 		if strings.TrimSpace(v) == "" {
 			return nil, fmt.Errorf("the policy record names an empty workflow")
 		}
-		return json.Marshal(v)
+		var parsed map[string]any
+		if err := yaml.Unmarshal([]byte(v), &parsed); err != nil || parsed == nil {
+			return nil, fmt.Errorf("the policy record's workflow is not a gha-lite workflow mapping")
+		}
+		return json.Marshal(parsed)
 	case map[string]any:
 		return json.Marshal(v)
 	default:

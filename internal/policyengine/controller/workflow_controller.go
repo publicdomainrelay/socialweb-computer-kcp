@@ -51,6 +51,9 @@ func (r *WorkflowReconciler) ReconcilePolicyWorkflow(ctx context.Context, workfl
 		raw = resolved
 	} else {
 		if len(bytes.TrimSpace(workflowCR.Spec.Workflow)) == 0 {
+			if bundled, ok := bundledWorkflow(workflowCR.Name); ok {
+				return r.validate(bundled), nil
+			}
 			return workflowInvalid("workflow or recordRef is required"), nil
 		}
 		raw = workflowCR.Spec.Workflow

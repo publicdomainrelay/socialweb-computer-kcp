@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -33,6 +34,8 @@ type Options struct {
 	DefaultRunTTL time.Duration
 
 	DenoPath string
+
+	PLCURL string
 
 	Limits controller.Limits
 
@@ -111,6 +114,13 @@ func New(options Options) (*Service, error) {
 	var denoErr error
 	if denoPath == "" {
 		denoPath, denoErr = deno.Resolve("")
+	}
+	if options.Host == nil && options.Resolve == nil {
+		client := atproto.NewClient()
+		if plcURL := strings.TrimSpace(options.PLCURL); plcURL != "" {
+			client.PLCURL = plcURL
+		}
+		options.Host = trust.NewResolver(trust.ResolverOptions{Client: client, Log: logf})
 	}
 	denoOptions := executor.GhaLiteOptions{
 		DenoPath:        denoPath,

@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -195,6 +196,33 @@ func ReadRecord(store *Store, ref atproto.StrongRef) (map[string]any, bool) {
 	}
 	var value map[string]any
 	if err := json.Unmarshal([]byte(file.Data), &value); err != nil {
+		return nil, false
+	}
+	return value, true
+}
+
+func ReadRecordCache(seed models.Cache, ref atproto.StrongRef) (map[string]any, bool) {
+	if len(seed) == 0 || ref.URI == "" {
+		return nil, false
+	}
+	entry, ok := seed[RecordKey(ref)]
+	if !ok {
+		return nil, false
+	}
+	file, ok := entry[RecordValueFile]
+	if !ok {
+		return nil, false
+	}
+	data := []byte(file.Data)
+	if file.Encoding == models.CacheEncodingBase64 {
+		decoded, err := base64.StdEncoding.DecodeString(file.Data)
+		if err != nil {
+			return nil, false
+		}
+		data = decoded
+	}
+	var value map[string]any
+	if err := json.Unmarshal(data, &value); err != nil {
 		return nil, false
 	}
 	return value, true

@@ -8,9 +8,18 @@ import (
 	"strings"
 
 	policyv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/policy/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/atproto"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/cache"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/executor"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/models"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/registry"
 )
+
+type RecordCacheSource interface {
+	ResolveRecordCached(ctx context.Context, ref policyv1alpha1.PolicyStrongRef, seed models.Cache) (map[string]any, error)
+
+	ResolveWorkflowCached(ctx context.Context, ref policyv1alpha1.PolicyStrongRef, seed models.Cache) (json.RawMessage, error)
+}
 
 type RecordResolver struct {
 	ResolveFunc func(ctx context.Context, ref policyv1alpha1.PolicyStrongRef) (map[string]any, error)
@@ -39,11 +48,30 @@ func (r *RecordResolver) ResolveRecord(ctx context.Context, ref policyv1alpha1.P
 	return value, nil
 }
 
+func (r *RecordResolver) ResolveRecordCached(ctx context.Context, ref policyv1alpha1.PolicyStrongRef, seed models.Cache) (map[string]any, error) {
+	if value, ok := cache.ReadRecordCache(seed, atproto.StrongRef{URI: ref.URI, CID: ref.CID}); ok {
+		return value, nil
+	}
+	return r.ResolveRecord(ctx, ref)
+}
+
 func (r *RecordResolver) ResolveWorkflow(ctx context.Context, ref policyv1alpha1.PolicyStrongRef) (json.RawMessage, error) {
 	value, err := r.ResolveRecord(ctx, ref)
 	if err != nil {
 		return nil, err
 	}
+	return r.workflowOfRecord(ref, value)
+}
+
+func (r *RecordResolver) ResolveWorkflowCached(ctx context.Context, ref policyv1alpha1.PolicyStrongRef, seed models.Cache) (json.RawMessage, error) {
+	value, err := r.ResolveRecordCached(ctx, ref, seed)
+	if err != nil {
+		return nil, err
+	}
+	return r.workflowOfRecord(ref, value)
+}
+
+func (r *RecordResolver) workflowOfRecord(ref policyv1alpha1.PolicyStrongRef, value map[string]any) (json.RawMessage, error) {
 	kind := executor.RecordType(ref.URI, value)
 	if r.Registry != nil {
 		item, ok := r.Registry.Get(kind)

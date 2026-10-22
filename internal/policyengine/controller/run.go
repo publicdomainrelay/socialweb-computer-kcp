@@ -11,6 +11,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	policyv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/policy/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/atproto"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/bundled-actions"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/models"
@@ -48,7 +49,8 @@ func (r *RunReconciler) ReconcilePolicyWorkflowRun(ctx context.Context, run *pol
 	if err != nil {
 		return failedOutcome(err), nil
 	}
-	inputs, err := r.buildInputs(ctx, run, workflowCR)
+	seed := runCacheSeed(run)
+	inputs, err := r.buildInputs(ctx, run, workflowCR, seed)
 	if err != nil {
 		return failedOutcome(err), nil
 	}
@@ -66,7 +68,7 @@ func (r *RunReconciler) ReconcilePolicyWorkflowRun(ctx context.Context, run *pol
 	}
 	opts := RunOptions{
 		Deadline: r.deadline(run, workflowCR),
-		Cache:    CacheFromAPI(run.Spec.Cache),
+		Cache:    seed,
 	}
 	outcome, err := r.Engine.Execute(ctx, request, opts)
 	if err != nil {
@@ -87,13 +89,15 @@ func (r *RunReconciler) resolveWorkflow(ctx context.Context, run *policyv1alpha1
 	if run.Spec.WorkflowRef == "" {
 		return nil, nil, fmt.Errorf("workflowRef or workflow is required")
 	}
+	seed := runCacheSeed(run)
 	if r.Workflows != nil {
-		if workflowCR, err := r.Workflows.GetPolicyWorkflow(ctx, run.Spec.WorkflowRef); err == nil && workflowCR != nil {
+		workflowCR, getErr := r.Workflows.GetPolicyWorkflow(ctx, run.Spec.WorkflowRef)
+		if getErr == nil && workflowCR != nil {
 			if workflowCR.Spec.RecordRef != nil {
 				if r.Records == nil {
 					return nil, workflowCR, fmt.Errorf("policy workflow %s requires a record resolver", run.Spec.WorkflowRef)
 				}
-				raw, resolveErr := r.Records.ResolveWorkflow(ctx, *workflowCR.Spec.RecordRef)
+				raw, resolveErr := resolveWorkflowRef(ctx, r.Records, *workflowCR.Spec.RecordRef, seed)
 				if resolveErr != nil {
 					return nil, workflowCR, fmt.Errorf("resolve workflow record for %s: %w", run.Spec.WorkflowRef, resolveErr)
 				}
@@ -114,6 +118,11 @@ func (r *RunReconciler) resolveWorkflow(ctx context.Context, run *policyv1alpha1
 				return raw, workflowCR, nil
 			}
 		}
+		if getErr != nil && !kcpstore.IsNotFound(getErr) {
+			if _, ok := bundledWorkflow(run.Spec.WorkflowRef); !ok {
+				return nil, nil, fmt.Errorf("read policy workflow %s: %w", run.Spec.WorkflowRef, getErr)
+			}
+		}
 	}
 	if raw, ok := bundledWorkflow(run.Spec.WorkflowRef); ok {
 		return raw, nil, nil
@@ -121,7 +130,7 @@ func (r *RunReconciler) resolveWorkflow(ctx context.Context, run *policyv1alpha1
 	return nil, nil, fmt.Errorf("policy workflow %s not found", run.Spec.WorkflowRef)
 }
 
-func (r *RunReconciler) buildInputs(ctx context.Context, run *policyv1alpha1.PolicyWorkflowRun, workflowCR *policyv1alpha1.PolicyWorkflow) (map[string]any, error) {
+func (r *RunReconciler) buildInputs(ctx context.Context, run *policyv1alpha1.PolicyWorkflowRun, workflowCR *policyv1alpha1.PolicyWorkflow, seed models.Cache) (map[string]any, error) {
 	inputs := map[string]any{}
 	defaultArgs := map[string]string{}
 	selfDid := run.Spec.SelfDid
@@ -194,13 +203,13 @@ func (r *RunReconciler) buildInputs(ctx context.Context, run *policyv1alpha1.Pol
 	if rootRequesterDid != "" {
 		inputs["root-requester-did"] = rootRequesterDid
 	}
-	if value := r.recordInput(ctx, run.Spec.RFP); value != "" {
+	if value := r.recordInput(ctx, run.Spec.RFP, seed); value != "" {
 		inputs["rfp"] = value
 	}
-	if value := r.recordInput(ctx, run.Spec.Bid); value != "" {
+	if value := r.recordInput(ctx, run.Spec.Bid, seed); value != "" {
 		inputs["bid"] = value
 	}
-	if value := r.recordInput(ctx, run.Spec.Accept); value != "" {
+	if value := r.recordInput(ctx, run.Spec.Accept, seed); value != "" {
 		inputs["accept"] = value
 	}
 	for key, value := range run.Spec.Inputs {
@@ -209,13 +218,13 @@ func (r *RunReconciler) buildInputs(ctx context.Context, run *policyv1alpha1.Pol
 	return inputs, nil
 }
 
-func (r *RunReconciler) recordInput(ctx context.Context, ref *policyv1alpha1.PolicyStrongRef) string {
+func (r *RunReconciler) recordInput(ctx context.Context, ref *policyv1alpha1.PolicyStrongRef, seed models.Cache) string {
 	if ref == nil || ref.URI == "" {
 		return ""
 	}
 	entry := map[string]any{"uri": ref.URI, "cid": ref.CID}
 	if r.Records != nil {
-		if value, err := r.Records.ResolveRecord(ctx, *ref); err == nil && value != nil {
+		if value, err := resolveRecordRef(ctx, r.Records, *ref, seed); err == nil && value != nil {
 			entry["value"] = value
 		}
 	}
@@ -224,6 +233,33 @@ func (r *RunReconciler) recordInput(ctx context.Context, ref *policyv1alpha1.Pol
 		return ""
 	}
 	return string(data)
+}
+
+func resolveRecordRef(ctx context.Context, source RecordSource, ref policyv1alpha1.PolicyStrongRef, seed models.Cache) (map[string]any, error) {
+	if cached, ok := source.(RecordCacheSource); ok {
+		return cached.ResolveRecordCached(ctx, ref, seed)
+	}
+	return source.ResolveRecord(ctx, ref)
+}
+
+func resolveWorkflowRef(ctx context.Context, source RecordSource, ref policyv1alpha1.PolicyStrongRef, seed models.Cache) (json.RawMessage, error) {
+	if cached, ok := source.(RecordCacheSource); ok {
+		return cached.ResolveWorkflowCached(ctx, ref, seed)
+	}
+	return source.ResolveWorkflow(ctx, ref)
+}
+
+func runCacheSeed(run *policyv1alpha1.PolicyWorkflowRun) models.Cache {
+	if run == nil {
+		return models.Cache{}
+	}
+	if len(run.Spec.Cache) > 0 {
+		return CacheFromAPI(run.Spec.Cache)
+	}
+	if len(run.Status.Cache) > 0 {
+		return CacheFromAPI(run.Status.Cache)
+	}
+	return models.Cache{}
 }
 
 func (r *RunReconciler) requestContext(ctx context.Context, run *policyv1alpha1.PolicyWorkflowRun, workflowCR *policyv1alpha1.PolicyWorkflow, inputs map[string]any) (map[string]any, error) {
@@ -244,16 +280,18 @@ func (r *RunReconciler) requestContext(ctx context.Context, run *policyv1alpha1.
 		env["GITHUB_REPOSITORY"] = repository
 	}
 	context := map[string]any{"config": map[string]any{"env": env}}
-	cache := CacheFromAPI(run.Spec.Cache)
+	cache := runCacheSeed(run)
 	if cache == nil {
 		cache = models.Cache{}
 	}
 	if r.Host != nil && selfDid != "" && counterpartyDid != "" {
-		snapshot, err := trust.BuildSnapshot(ctx, r.Host, selfDid, counterpartyDid)
-		if err != nil {
-			return nil, err
+		if _, seeded := cache["trust/"+counterpartyDid]; !seeded {
+			snapshot, err := trust.BuildSnapshot(ctx, r.Host, selfDid, counterpartyDid)
+			if err != nil {
+				return nil, err
+			}
+			cache["trust/"+counterpartyDid] = snapshot.CacheFiles()
 		}
-		cache["trust/"+counterpartyDid] = snapshot.CacheFiles()
 	}
 	if len(cache) > 0 {
 		context["cache"] = cache
