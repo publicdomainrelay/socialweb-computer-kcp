@@ -240,11 +240,27 @@ func (c *Controller) reconcileOAuthDelegated(ctx context.Context, dyn dynamic.In
 	c.pending(ctx, dyn, id, generation, status, "SessionError", "restoring the oauth session: "+err.Error())
 }
 
+func (c *Controller) oauthClientID(id *v1alpha1.MarketIdentity) string {
+	if id != nil && strings.TrimSpace(id.Spec.OAuthClientID) != "" {
+		return strings.TrimSpace(id.Spec.OAuthClientID)
+	}
+	return strings.TrimSpace(c.oauth.ClientID)
+}
+
+func (c *Controller) oauthRedirectURI(id *v1alpha1.MarketIdentity) string {
+	if id != nil && strings.TrimSpace(id.Spec.OAuthRedirectURI) != "" {
+		return strings.TrimSpace(id.Spec.OAuthRedirectURI)
+	}
+	return strings.TrimSpace(c.oauth.RedirectURI)
+}
+
 func (c *Controller) beginBrowserAuthorization(ctx context.Context, id *v1alpha1.MarketIdentity) (string, time.Time, error) {
-	if strings.TrimSpace(c.oauth.ClientID) == "" {
+	clientID := c.oauthClientID(id)
+	redirectURI := c.oauthRedirectURI(id)
+	if clientID == "" {
 		return "", time.Time{}, errors.New("identitycontroller: mode oauthBrowser needs an oauth clientID")
 	}
-	if strings.TrimSpace(c.oauth.RedirectURI) == "" {
+	if redirectURI == "" {
 		return "", time.Time{}, errors.New("identitycontroller: mode oauthBrowser needs an oauth redirectURI")
 	}
 	pdsURL, err := c.oauthPDSURL(ctx, id)
@@ -286,8 +302,8 @@ func (c *Controller) beginBrowserAuthorization(ctx context.Context, id *v1alpha1
 	pending := oauthclient.PendingAuth{
 		State:                   state,
 		CodeVerifier:            verifier,
-		RedirectURI:             c.oauth.RedirectURI,
-		ClientID:                c.oauth.ClientID,
+		RedirectURI:             redirectURI,
+		ClientID:                clientID,
 		HostURL:                 pdsURL,
 		Issuer:                  metadata.Issuer,
 		AuthServerURL:           authServer,
@@ -300,8 +316,8 @@ func (c *Controller) beginBrowserAuthorization(ctx context.Context, id *v1alpha1
 	}
 	query := url.Values{
 		"response_type":         {"code"},
-		"client_id":             {c.oauth.ClientID},
-		"redirect_uri":          {c.oauth.RedirectURI},
+		"client_id":             {clientID},
+		"redirect_uri":          {redirectURI},
 		"scope":                 {strings.Join(scopes, " ")},
 		"state":                 {state},
 		"code_challenge":        {challenge},
@@ -361,7 +377,7 @@ func (c *Controller) openSessionDataRef(ctx context.Context, id *v1alpha1.Market
 		Handle:     id.Spec.Handle,
 		RepoDID:    did,
 		PDSURL:     id.Spec.PdsUrl,
-		ClientID:   c.oauth.ClientID,
+		ClientID:   c.oauthClientID(id),
 		Scopes:     c.oauthScopes(),
 		Directory:  c.oauth.Directory,
 		HTTPClient: c.oauthHTTP(),
@@ -376,7 +392,7 @@ func (c *Controller) openSessionData(ctx context.Context, id *v1alpha1.MarketIde
 		Handle:     id.Spec.Handle,
 		RepoDID:    data.AccountDID,
 		PDSURL:     data.HostURL,
-		ClientID:   c.oauth.ClientID,
+		ClientID:   c.oauthClientID(id),
 		Scopes:     c.oauthScopes(),
 		Directory:  c.oauth.Directory,
 		HTTPClient: c.oauthHTTP(),

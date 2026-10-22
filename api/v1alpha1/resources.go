@@ -39,7 +39,7 @@ var APIResources = []APIResource{
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
 	{Kind: "AtprotoIdentity", Plural: "atprotoidentities", Revision: 1, Export: "atprotoidentities", Object: AtprotoIdentity{}},
-	{Kind: "MarketIdentity", Plural: "marketidentities", Revision: 2, Export: "marketidentities", Object: MarketIdentity{}},
+	{Kind: "MarketIdentity", Plural: "marketidentities", Revision: 3, Export: "marketidentities", Object: MarketIdentity{}},
 	{Kind: "AtprotoRecord", Plural: "atprotorecords", Revision: 3, Export: "marketidentities", Object: AtprotoRecord{}, PrinterColumns: []PrinterColumn{
 		{Name: "Repo", Type: "string", JSONPath: ".spec.repo"},
 		{Name: "Collection", Type: "string", JSONPath: ".spec.collection"},

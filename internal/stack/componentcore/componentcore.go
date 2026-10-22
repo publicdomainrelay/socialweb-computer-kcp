@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"path/filepath"
 	"strings"
 	"time"
@@ -15,6 +16,8 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 
+	"github.com/bluesky-social/indigo/atproto/identity"
+	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/appctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
@@ -26,6 +29,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/oauthcallback"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyaction"
 	policycontroller "github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/controller"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/bidder"
@@ -343,12 +347,22 @@ func (c *Core) runIdentity(ctx context.Context) {
 		if store, err := newIdentityVaultStore(c.store, workspace, c.cfg.CredentialClient, c.cfg.CredentialServer); err == nil {
 			vault = store
 		}
+		oauth := identitycontroller.OAuthOptions{Directory: identity.DefaultDirectory(), HTTPClient: &http.Client{Timeout: 20 * time.Second}}
+		if vault != nil {
+			oauth.StateRef = &v1alpha1.VaultRef{Mount: c.cfg.CredentialClient, Path: "identity/oauth-state"}
+		}
 		ctl, err := identitycontroller.New(identitycontroller.Options{Workspace: workspace, Dynamic: identitycontroller.DynamicFactory(c.cfg.DynamicFactory),
 			Endpoints: c.pdsEndpoint, Resolver: &pdsclient.Resolver{Handlers: c.handlers, Timeout: 10 * time.Second},
-			Vault: vault, Log: log.With("workspace", workspace)})
+			Vault: vault, OAuth: oauth, Log: log.With("workspace", workspace)})
 		if err != nil {
 			log.Warn("the MarketIdentity controller does not start", "workspace", workspace, "err", err.Error())
 			continue
+		}
+		for _, name := range []string{"bidder", "requester"} {
+			name := name
+			oauthcallback.Register(name, func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+				return ctl.CompleteBrowserAuthorization(ctx, name, r)
+			})
 		}
 		go func() {
 			log.Info("the MarketIdentity controller writes its status in process", "workspace", workspace)

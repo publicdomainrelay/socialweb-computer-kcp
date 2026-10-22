@@ -35,6 +35,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/oauthcallback"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/statesync"
 )
 
@@ -966,7 +967,39 @@ func (s *Service) handler() http.Handler {
 	mux.HandleFunc("POST /xrpc/"+market.SubmitBidNSID, s.submitBid)
 	mux.HandleFunc("POST /xrpc/"+market.SubmitEventNSID, s.submitEvent)
 	mux.HandleFunc("GET "+SecretsRoute+"/{contract}", s.getSecrets)
+	mux.HandleFunc("GET /oauth-client-metadata.json", s.oauthClientMetadata)
+	mux.HandleFunc("GET /oauth/callback/{identity}", s.oauthCallback)
 	return mux
+}
+
+func (s *Service) oauthClientMetadata(w http.ResponseWriter, r *http.Request) {
+	base := "https://" + r.Host
+	writeJSON(w, http.StatusOK, map[string]any{
+		"client_id":                  base + "/oauth-client-metadata.json",
+		"client_name":                "socialweb-computer requester",
+		"redirect_uris":              []string{base + "/oauth/callback/requester"},
+		"grant_types":                []string{"authorization_code", "refresh_token"},
+		"response_types":             []string{"code"},
+		"scope":                      "atproto transition:generic",
+		"token_endpoint_auth_method": "none",
+		"application_type":           "web",
+		"dpop_bound_access_tokens":   true,
+	})
+}
+
+func (s *Service) oauthCallback(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("identity")
+	handler, ok := oauthcallback.Lookup(name)
+	if !ok {
+		http.Error(w, "unknown identity", http.StatusNotFound)
+		return
+	}
+	if err := handler(r.Context(), w, r); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("signed in"))
 }
 
 func (s *Service) registerSecrets(name string, state *secretsState) {

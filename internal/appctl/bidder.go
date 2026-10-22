@@ -913,6 +913,9 @@ func (ctl *Controller) reconcileBidder(ctx context.Context, u *unstructured.Unst
 	if err != nil {
 		return err
 	}
+	if err := ctl.ensureOAuthIdentityEndpoints(ctx, ctl.c.workspace(), BidderIdentity, serviceNameFor(ComponentKindBidder, BidderComponent)+ExposureIngressSuffix, "bidder"); err != nil {
+		return err
+	}
 	st.Components, st.Listeners = snap.Components, snap.Listeners
 	st.Did = id.Status.Did
 	if o.Spec.Kcp != nil {

@@ -67,6 +67,10 @@ type MarketIdentitySpec struct {
 	KeysRef *VaultRef `json:"keysRef,omitempty"`
 
 	SessionRef *VaultRef `json:"sessionRef,omitempty"`
+
+	OAuthClientID string `json:"oauthClientID,omitempty"`
+
+	OAuthRedirectURI string `json:"oauthRedirectURI,omitempty"`
 }
 
 type MarketIdentityPhase string
@@ -129,6 +133,10 @@ type MarketIdentityStatus struct {
 	Associations []string `json:"associations,omitempty"`
 
 	SessionRef *VaultRef `json:"sessionRef,omitempty"`
+
+	OAuthClientID string `json:"oauthClientID,omitempty"`
+
+	OAuthRedirectURI string `json:"oauthRedirectURI,omitempty"`
 
 	Message string `json:"message,omitempty"`
 

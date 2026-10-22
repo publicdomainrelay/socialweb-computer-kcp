@@ -23,6 +23,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/oauthcallback"
 )
 
 const (
@@ -75,6 +76,8 @@ func (s *Service) routes() *http.ServeMux {
 	mux.HandleFunc("GET "+OAuthMetadataPath, func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"client_name": "Compute Provider (bidder)"})
 	})
+	mux.HandleFunc("GET /oauth-client-metadata.json", s.oauthClientMetadata)
+	mux.HandleFunc("GET /oauth/callback/{identity}", s.oauthCallback)
 	return mux
 }
 
@@ -303,6 +306,36 @@ func (s *Service) applyMarketEvent(ctx context.Context, uri, cid string, record 
 	}
 	s.kickStateSync()
 	return nil
+}
+
+func (s *Service) oauthClientMetadata(w http.ResponseWriter, r *http.Request) {
+	base := "https://" + r.Host
+	writeJSON(w, http.StatusOK, map[string]any{
+		"client_id":                  base + "/oauth-client-metadata.json",
+		"client_name":                "socialweb-computer bidder",
+		"redirect_uris":              []string{base + "/oauth/callback/bidder"},
+		"grant_types":                []string{"authorization_code", "refresh_token"},
+		"response_types":             []string{"code"},
+		"scope":                      "atproto transition:generic",
+		"token_endpoint_auth_method": "none",
+		"application_type":           "web",
+		"dpop_bound_access_tokens":   true,
+	})
+}
+
+func (s *Service) oauthCallback(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("identity")
+	handler, ok := oauthcallback.Lookup(name)
+	if !ok {
+		http.Error(w, "unknown identity", http.StatusNotFound)
+		return
+	}
+	if err := handler(r.Context(), w, r); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("signed in"))
 }
 
 func (s *Service) authorizeRequest(r *http.Request, lxm, recordURI string) (string, bool, int) {
