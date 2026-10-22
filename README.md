@@ -380,10 +380,13 @@ grep " socialweb-computer-linux-amd64$" SHA256SUMS | sha256sum -c -
 sudo install -m 0755 socialweb-computer-linux-amd64 /usr/local/bin/socialweb-computer
 sudo socialweb-computer install bidder --handle "$HANDLE"
 
-# associate its DID with your account once; the URL expires in about five minutes
+# associate its DID with your account once; the exact commands are in CONTRIBUTING.md
 K=$(sudo sh -c 'ls /var/lib/socialweb-computer/swc-bidder/handles/*/kcp/admin.kubeconfig' | head -1)
-U=$(sudo kubectl --kubeconfig "$K" get marketidentity bidder -o jsonpath='{.status.pendingAction.url}')
-deno run -A --no-lock scripts/oauth-signin.ts --creds ~/.bobvmbuilder_bsky_social_source --account BOB --url "$U" --click '^Yes, this is my bidder$'
+BIDDER_DID=$(sudo kubectl --kubeconfig "$K" get marketidentity bidder -o jsonpath='{.status.did}')
+OPERATOR_DID=$(curl -fsS "https://public.api.bsky.app/xrpc/com.atproto.identity.resolveHandle?handle=$HANDLE" | jq -r .did)
+deno run -A --no-lock scripts/associate-bidder.ts --creds ~/.bobvmbuilder_bsky_social_source --account BOB --bidder-did "$BIDDER_DID"
+sudo kubectl --kubeconfig "$K" patch marketidentity bidder --type=merge \
+  -p "{\"spec\":{\"approvedAssociations\":[\"$OPERATOR_DID\"]}}"
 
 # upgrade it, as its account, then install again
 sudo runuser -u swc-bidder -- env XDG_RUNTIME_DIR=/run/user/$(id -u swc-bidder) \

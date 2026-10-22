@@ -309,6 +309,10 @@ func gatewayDesired(o v1alpha1.Gateway, id *v1alpha1.MarketIdentity, ws, stateRo
 	}}
 	gatewayBase := NewComponentSpec(ComponentCRStateDir(stateRoot, ComponentKindGatewayAPI, GatewayAPIComponent), network, suspend)
 	gatewayBase.TLS = tlsSpec
+	kubeconfigCAFile := optionValue(o.Spec.Options, "kcp-public-ca-file")
+	if kubeconfigCAFile == "" && o.Spec.Profile != ProfileGatewayProd {
+		kubeconfigCAFile = filepath.Join(stateRoot, "tls", "tls.crt")
+	}
 	gatewayAPI := desiredComponent{Kind: ComponentKindGatewayAPI, Name: GatewayAPIComponent, Spec: v1alpha1.GatewayAPISpec{
 		ComponentSpec:     gatewayBase,
 		Identity:          ident,
@@ -319,7 +323,7 @@ func gatewayDesired(o v1alpha1.Gateway, id *v1alpha1.MarketIdentity, ws, stateRo
 		Storage:           storage,
 		ClusterProvider:   clusterProvider,
 		ClusterStateDir:   filepath.Join(stateRoot, "clusterprovider"),
-		KubeconfigCAFile:  filepath.Join(stateRoot, "tls", "tls.crt"),
+		KubeconfigCAFile:  kubeconfigCAFile,
 		PublicOrigin:      publicOrigin,
 		Audience:          audience,
 		RequiredDownloads: requiredDownloads,

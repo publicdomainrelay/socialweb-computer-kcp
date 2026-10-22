@@ -327,6 +327,24 @@ sets:
     summary: the components of a Gateway application in its own kcp - the root:app workspace, the MarketIdentity schema bound there (one MarketIdentity per web app account) and, per profile, the socialweb-computer-k8s web app, the requester's own PDS pds (deploy/apps/repo-pds; its repo holds every market record the requester writes, associated once by the operator's claim record that its AtprotoRecordWatch association verifies; plan 0018) and the requester (a phase named <component>@<profile> belongs to that profile only); its root vault is the OpenBaoServer root-vault the app controller declares; applied by internal/appctl
     values: Gateway
     phases:
+      - name: computevms
+        workspace: root:socialweb-provider
+        files:
+          - path: computevm-apiresourceschema.yaml
+          - path: bid-apiresourceschema.yaml
+          - path: guestidentitygrant-apiresourceschema.yaml
+          - path: computevm-apiexport.yaml
+        after:
+          - kind: APIExport
+            name: computevms
+            for: IdentityValid
+      - name: computevms-binding
+        workspace: root
+        files:
+          - path: computevms-binding.yaml
+        after:
+          - kind: APIBinding
+            for: Ready
       - name: workspace
         workspace: root
         files:

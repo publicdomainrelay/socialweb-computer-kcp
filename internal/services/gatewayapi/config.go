@@ -633,7 +633,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 }
 
 func kubeconfigIssuer(cfg Config) *clientcert.Issuer {
-	if cfg.ClusterStateDir == "" || cfg.KubeconfigCAFile == "" {
+	if cfg.ClusterStateDir == "" {
 		return nil
 	}
 	return &clientcert.Issuer{StateDir: cfg.ClusterStateDir, CAFile: cfg.KubeconfigCAFile}
