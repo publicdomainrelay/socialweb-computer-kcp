@@ -461,7 +461,7 @@ items:
     track: remote-identity
     parallel_with: [W2-IDENTITY-LOCAL, W2-STATUS, W2-FIXTURES]
     depends_on: [W1-OAUTH, W1-REPO, W2-RECORD]
-    status: doing
+    status: blocked
     evidence: []
     decision: >
       Implement the pdsAccount password/session flow and the OAuth flow.
@@ -719,7 +719,7 @@ items:
     track: local-and-prod
     parallel_with: [W5-PROD]
     depends_on: [W4-REMOVE-LEGACY, W4-MIGRATION]
-    status: doing
+    status: blocked
     evidence: []
     decision: >
       Run local managed associated, managed unassociated, pdsAccount, OAuth
@@ -777,7 +777,7 @@ items:
     track: close
     parallel_with: []
     depends_on: [W5-LOCAL, W5-HOSTS, W5-PROD]
-    status: todo
+    status: blocked
     evidence: []
     decision: >
       Run gofmt, go build, go vet, deploy/check.sh --fast, make check-pins and
