@@ -55,7 +55,7 @@ func gatewayServerFor(deps component.Deps, workspace string, certs *clientcert.I
 	if restConfig == nil || restConfig.Host == "" {
 		return server, nil
 	}
-	opts := kcpclient.Options{Host: restConfig.Host, RestConfig: restConfig, PublicHost: publicHost}
+	opts := kcpclient.Options{Host: restConfig.Host, RestConfig: restConfig, PublicHost: publicHost, RecordWorkspaceOwner: true}
 	if certs != nil {
 		opts.Kubeconfigs = certs
 	}

@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	authenticationv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -72,6 +74,8 @@ type Options struct {
 	RestConfig *rest.Config
 
 	Transport http.RoundTripper
+
+	RecordWorkspaceOwner bool
 }
 
 type Client struct {
@@ -89,6 +93,11 @@ type Client struct {
 
 	certMu      sync.Mutex
 	certWatches map[string]*certWatch
+
+	recordOwner bool
+
+	ownerMu sync.Mutex
+	owner   *authenticationv1.UserInfo
 }
 
 var ErrNoKubeconfigGranter = errors.New(
@@ -144,6 +153,7 @@ func New(opts Options) (*Client, error) {
 
 		hostProcessWorkspace: opts.HostProcessWorkspace,
 		nodeClaimQuota:       opts.NodeClaimQuota,
+		recordOwner:          opts.RecordWorkspaceOwner,
 	}
 	if c.hostProcessWorkspace == "" {
 		c.hostProcessWorkspace = RootWorkspace
@@ -189,7 +199,15 @@ func (c *Client) bind(logicalCluster string, gv schema.GroupVersion, endpoint st
 var (
 	workspaceReadyTimeout = 5 * time.Minute
 	workspaceReadyPoll    = 250 * time.Millisecond
+
+	workspaceNudgeAfter = 5 * time.Second
+	workspaceNudgeEvery = 10 * time.Second
 )
+
+const workspaceNudgeAnnotation = "socialweb.computer/initializer-nudge"
+
+var errNoWorkspaceType = errors.New(
+	"kcpclient: the workspace names no type, so no WorkspaceType exists to nudge; its initializer cannot be re-run")
 
 func (c *Client) homePath(caller gateway.Caller, name string) (string, error) {
 	if caller == "" {
@@ -216,24 +234,18 @@ func (c *Client) ensure(ctx context.Context, permit revocation.Permit, name stri
 	did := permit.Admitted()
 	home := HomePath(did, name)
 
-	if err := c.createWorkspace(ctx, RootWorkspace, AccountHash(did), kcpv1alpha1.WorkspaceSpec{
+	if err := c.ensureWorkspace(ctx, RootWorkspace, AccountHash(did), kcpv1alpha1.WorkspaceSpec{
 		Type: &kcpv1alpha1.WorkspaceTypeReference{Name: AccountWorkspaceType, Path: RootWorkspace},
 	}); err != nil {
 		return fmt.Errorf("kcpclient: account workspace %s: %w", AccountHash(did), err)
 	}
-	if err := c.waitForWorkspaceReady(ctx, RootWorkspace, AccountHash(did)); err != nil {
-		return err
-	}
 	if err := c.createGrant(ctx, AccountPath(did), IdentityRecordName(did), did); err != nil {
 		return fmt.Errorf("kcpclient: account identity record %s: %w", IdentityRecordName(did), err)
 	}
-	if err := c.createWorkspace(ctx, AccountPath(did), name, kcpv1alpha1.WorkspaceSpec{
+	if err := c.ensureWorkspace(ctx, AccountPath(did), name, kcpv1alpha1.WorkspaceSpec{
 		Type: &kcpv1alpha1.WorkspaceTypeReference{Name: HomeWorkspaceType, Path: RootWorkspace},
 	}); err != nil {
 		return fmt.Errorf("kcpclient: home workspace %s: %w", home, err)
-	}
-	if err := c.waitForWorkspaceReady(ctx, AccountPath(did), name); err != nil {
-		return err
 	}
 	created, err := c.createCluster(ctx, home, name, did)
 	if err != nil {
@@ -344,10 +356,48 @@ func (c *Client) patchWorkspaceURL(ctx context.Context, parent, name, url string
 	return nil
 }
 
-func (c *Client) waitForWorkspaceReady(ctx context.Context, parent, name string) error {
+func (c *Client) ensureWorkspace(ctx context.Context, parent, name string, spec kcpv1alpha1.WorkspaceSpec) error {
+	if err := c.createWorkspace(ctx, parent, name, spec); err != nil {
+		return err
+	}
+	return c.waitForWorkspaceReady(ctx, parent, name, spec)
+}
+
+func (c *Client) workspaceOwner(ctx context.Context) (string, error) {
+	c.ownerMu.Lock()
+	defer c.ownerMu.Unlock()
+	if c.owner == nil {
+		r, err := c.resource(RootWorkspace, authenticationv1.SchemeGroupVersion)
+		if err != nil {
+			return "", err
+		}
+		review := []byte(`{"apiVersion":"authentication.k8s.io/v1","kind":"SelfSubjectReview"}`)
+		raw, err := r.Post().Resource("selfsubjectreviews").Body(review).Do(ctx).Raw()
+		if err != nil {
+			return "", fmt.Errorf("kcpclient: the identity the workspace owner is recorded as: %w. "+
+				"kcp records a workspace's creator from the request user, the initializing workspace "+
+				"virtual workspace impersonates exactly that user to bind the workspace type's "+
+				"defaultAPIBindings, and a workspace recorded without one never leaves Initializing", err)
+		}
+		var got authenticationv1.SelfSubjectReview
+		if err := json.Unmarshal(raw, &got); err != nil {
+			return "", fmt.Errorf("kcpclient: the self subject review of the workspace owner: %w", err)
+		}
+		c.owner = &got.Status.UserInfo
+	}
+	raw, err := json.Marshal(c.owner)
+	if err != nil {
+		return "", fmt.Errorf("kcpclient: the workspace owner annotation: %w", err)
+	}
+	return string(raw), nil
+}
+
+func (c *Client) waitForWorkspaceReady(ctx context.Context, parent, name string, spec kcpv1alpha1.WorkspaceSpec) error {
 	path := parent + ":" + name
 	deadline := time.Now().Add(workspaceReadyTimeout)
 	last := "never read"
+	lastNudge := time.Time{}
+	started := time.Now()
 	for {
 		ws, err := c.readWorkspace(ctx, parent, name)
 		switch {
@@ -357,6 +407,20 @@ func (c *Client) waitForWorkspaceReady(ctx context.Context, parent, name string)
 			return nil
 		case err == nil:
 			last = "phase " + string(ws.Status.Phase)
+			if ws.Status.Phase == corev1alpha1.LogicalClusterPhaseInitializing &&
+				hasInitializer(ws.Status.Initializers, kcpv1alpha1.WorkspaceAPIBindingsInitializer) {
+				last = fmt.Sprintf("phase %s with initializers %v", ws.Status.Phase, ws.Status.Initializers)
+				if time.Since(started) >= workspaceNudgeAfter && time.Since(lastNudge) >= workspaceNudgeEvery {
+					if err := c.nudgeWorkspaceType(ctx, spec.Type); err != nil {
+						slog.Warn("kcpclient: the workspace stayed Initializing and its kcp APIBinding initializer could not be re-run",
+							"workspace", path, "initializers", ws.Status.Initializers, "err", err.Error())
+					} else {
+						lastNudge = time.Now()
+						slog.Warn("kcpclient: the workspace stayed Initializing with the kcp APIBinding initializer; re-ran it by updating the WorkspaceType so the apibinder queues every initializing workspace again",
+							"workspace", path, "type", workspaceTypeName(spec.Type), "initializers", ws.Status.Initializers)
+					}
+				}
+			}
 		default:
 			last = err.Error()
 		}
@@ -372,6 +436,47 @@ func (c *Client) waitForWorkspaceReady(ctx context.Context, parent, name string)
 		case <-time.After(workspaceReadyPoll):
 		}
 	}
+}
+
+func hasInitializer(initializers []corev1alpha1.LogicalClusterInitializer, want corev1alpha1.LogicalClusterInitializer) bool {
+	for _, initializer := range initializers {
+		if initializer == want {
+			return true
+		}
+	}
+	return false
+}
+
+func workspaceTypeName(ref *kcpv1alpha1.WorkspaceTypeReference) string {
+	if ref == nil {
+		return ""
+	}
+	return ref.Path + ":" + string(ref.Name)
+}
+
+func (c *Client) nudgeWorkspaceType(ctx context.Context, ref *kcpv1alpha1.WorkspaceTypeReference) error {
+	if ref == nil || ref.Name == "" {
+		return errNoWorkspaceType
+	}
+	path := ref.Path
+	if path == "" {
+		path = RootWorkspace
+	}
+	r, err := c.resource(path, tenancyResource)
+	if err != nil {
+		return err
+	}
+	body, err := json.Marshal(map[string]any{"metadata": map[string]any{"annotations": map[string]string{
+		workspaceNudgeAnnotation: time.Now().UTC().Format(time.RFC3339Nano),
+	}}})
+	if err != nil {
+		return fmt.Errorf("kcpclient: nudge workspace type %s: marshal: %w", workspaceTypeName(ref), err)
+	}
+	if err := r.Patch(types.MergePatchType).Resource("workspacetypes").Name(string(ref.Name)).
+		Body(body).Do(ctx).Error(); err != nil {
+		return fmt.Errorf("kcpclient: nudge workspace type %s: %w", workspaceTypeName(ref), err)
+	}
+	return nil
 }
 
 func (c *Client) createGrant(ctx context.Context, logicalCluster, name, did string) error {
@@ -407,9 +512,17 @@ func (c *Client) createWorkspace(ctx context.Context, parent, name string, spec 
 	if err != nil {
 		return err
 	}
+	annotations := map[string]string{}
+	if c.recordOwner {
+		owner, err := c.workspaceOwner(ctx)
+		if err != nil {
+			return err
+		}
+		annotations[kcpv1alpha1.ExperimentalWorkspaceOwnerAnnotationKey] = owner
+	}
 	obj := &kcpv1alpha1.Workspace{
 		TypeMeta:   metav1.TypeMeta{APIVersion: tenancyResource.String(), Kind: "Workspace"},
-		ObjectMeta: metav1.ObjectMeta{Name: name},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Annotations: annotations},
 		Spec:       spec,
 	}
 	var out kcpv1alpha1.Workspace

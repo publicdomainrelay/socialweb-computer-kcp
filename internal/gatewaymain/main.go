@@ -60,6 +60,7 @@ func run(ctx context.Context, inv foldmain.Invocation) error {
 	log.Info("serving",
 		"addr", cfg.Addr,
 		"kcp", cfg.KCPHost,
+		"kcpKubeconfig", cfg.KCPKubeconfig,
 		"audiences", cfg.Audiences,
 		"xrpc", xrpcserver.XRPCPrefix,
 	)
@@ -93,6 +94,7 @@ func buildDeps(cfg Config) (Deps, error) {
 		NodeClaimQuota: cfg.NodeClaimQuota,
 
 		HostProcessWorkspace: cfg.HostProcessWorkspace,
+		RecordWorkspaceOwner: true,
 	})
 	if err != nil {
 		return Deps{}, err
