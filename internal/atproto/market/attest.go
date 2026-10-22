@@ -402,6 +402,18 @@ func CreateSignedRecord(ctx context.Context, w RecordWriter, repo, collection st
 	return SignedRecord{URI: ref.URI, CID: ref.CID, Record: signed}, nil
 }
 
+func CreateSignedRecordAt(ctx context.Context, w RecordWriter, repo, collection, rkey string, record map[string]any, signer *Signer) (SignedRecord, error) {
+	signed, err := SignRecord(record, repo, signer)
+	if err != nil {
+		return SignedRecord{}, err
+	}
+	ref, err := w.PutRecord(ctx, repo, collection, rkey, signed)
+	if err != nil {
+		return SignedRecord{}, err
+	}
+	return SignedRecord{URI: ref.URI, CID: ref.CID, Record: signed}, nil
+}
+
 type RemoteProofSubject struct {
 	SubjectRecord        map[string]any
 	SubjectRepositoryDID string

@@ -369,6 +369,45 @@ func heldContractName(did, name string) string {
 	return "ssh-" + hex.EncodeToString(sum[:10])
 }
 
+const sessionRKeyAlphabet = "234567abcdefghijklmnopqrstuvwxyz"
+
+func sessionRKey(label string, parts ...string) string {
+	h := sha256.New()
+	h.Write([]byte(label))
+	for _, part := range parts {
+		h.Write([]byte{0})
+		h.Write([]byte(part))
+	}
+	sum := h.Sum(nil)
+	out := make([]byte, 13)
+	for i := range out {
+		out[i] = sessionRKeyAlphabet[int(sum[i])%len(sessionRKeyAlphabet)]
+	}
+	return string(out)
+}
+
+func (s *Service) existingSignedRecord(ctx context.Context, collection, rkey string) (market.SignedRecord, bool, error) {
+	record, err := s.repo.GetRecord(ctx, s.cfg.RepoDID, collection, rkey)
+	if err != nil {
+		if errors.Is(err, market.ErrNotFound) {
+			return market.SignedRecord{}, false, nil
+		}
+		return market.SignedRecord{}, false, err
+	}
+	return market.SignedRecord{URI: record.URI, CID: record.CID, Record: record.Value}, true, nil
+}
+
+func (s *Service) existingOrPutRecord(ctx context.Context, collection, rkey string, record map[string]any) (market.StrongRef, error) {
+	existing, found, err := s.existingSignedRecord(ctx, collection, rkey)
+	if err != nil {
+		return market.StrongRef{}, err
+	}
+	if found {
+		return market.NewStrongRef(existing.URI, existing.CID), nil
+	}
+	return s.repo.PutRecord(ctx, s.cfg.RepoDID, collection, rkey, record)
+}
+
 func contractTarget(contract *v1alpha1.ComputeContract) (*SessionTarget, bool, error) {
 	state := contract.Status.Contract
 	if state == nil || state.VMAddress == "" || state.HostKeys == nil || len(state.HostKeys.Keys) == 0 ||
@@ -531,15 +570,22 @@ func (s *Service) provisionSession(ctx context.Context, vmName, policyName strin
 		return nil, fmt.Errorf("the guest iroh transport: %w", err)
 	}
 	userData = withGuestCACerts(userData, s.cfg.GuestCAPEM)
-	payload, err := s.repo.CreateRecord(ctx, s.cfg.RepoDID, market.ComputeVMNSID, map[string]any{
-		"$type":     market.ComputeVMNSID,
-		"role":      vmName,
-		"disk":      DefaultComputeDisk,
-		"user_data": userData,
-		"createdAt": s.nowISO(),
-	})
+	vmRKey := sessionRKey("vm", s.cfg.RepoDID, vmName)
+	payload, found, err := s.existingSignedRecord(ctx, market.ComputeVMNSID, vmRKey)
 	if err != nil {
 		return nil, err
+	}
+	if !found {
+		payload, err = market.CreateSignedRecordAt(ctx, s.repo, s.cfg.RepoDID, market.ComputeVMNSID, vmRKey, map[string]any{
+			"$type":     market.ComputeVMNSID,
+			"role":      vmName,
+			"disk":      DefaultComputeDisk,
+			"user_data": userData,
+			"createdAt": s.nowISO(),
+		}, s.signer)
+		if err != nil {
+			return nil, err
+		}
 	}
 	var policyRef *market.StrongRef
 	policyName = strings.TrimSpace(policyName)
@@ -550,7 +596,7 @@ func (s *Service) provisionSession(ctx context.Context, vmName, policyName strin
 			return nil, fmt.Errorf("policy %q names no bundled workflow", policyName)
 		}
 		record := BuildPolicyRecord(policyName, workflow, workflowText, s.cfg.MarketDID, policyArgs, s.nowISO())
-		created, err := s.repo.CreateRecord(ctx, s.cfg.RepoDID, PolicyGhaLiteNSID, record)
+		created, err := s.existingOrPutRecord(ctx, PolicyGhaLiteNSID, sessionRKey("policy", s.cfg.RepoDID, vmName, policyName), record)
 		if err != nil {
 			return nil, err
 		}
@@ -565,9 +611,16 @@ func (s *Service) provisionSession(ctx context.Context, vmName, policyName strin
 	if policyRef != nil {
 		options.Policies = []market.RecordRef{{URI: policyRef.URI, CID: policyRef.CID}}
 	}
-	rfp, err := market.CreateRFP(ctx, s.repo, s.cfg.RepoDID, options, s.signer)
+	rfpRKey := sessionRKey("rfp", s.cfg.RepoDID, vmName)
+	rfp, found, err := s.existingSignedRecord(ctx, market.RFPNSID, rfpRKey)
 	if err != nil {
 		return nil, err
+	}
+	if !found {
+		rfp, err = market.CreateRFPAt(ctx, s.repo, s.cfg.RepoDID, rfpRKey, options, s.signer)
+		if err != nil {
+			return nil, err
+		}
 	}
 	bidders, err := s.market.Discover(ctx, s.now())
 	if err != nil {
@@ -578,18 +631,25 @@ func (s *Service) provisionSession(ctx context.Context, vmName, policyName strin
 	if err != nil {
 		return nil, err
 	}
-	acceptRecord, err := market.BuildAccept(market.AcceptOptions{
-		RFP:         market.RecordRef{URI: rfp.URI, CID: rfp.CID},
-		Bid:         market.RecordRef{URI: winner.URI, CID: winner.CID},
-		SubmitEvent: s.callbackDID() + "#" + defaultComputeEventServiceID,
-		CreatedAt:   s.nowISO(),
-	})
+	acceptRKey := sessionRKey("accept", s.cfg.RepoDID, vmName, rfp.URI, rfp.CID, winner.URI, winner.CID)
+	accept, found, err := s.existingSignedRecord(ctx, market.AcceptNSID, acceptRKey)
 	if err != nil {
 		return nil, err
 	}
-	accept, err := market.CreateSignedRecord(ctx, s.repo, s.cfg.RepoDID, market.AcceptNSID, acceptRecord, s.signer)
-	if err != nil {
-		return nil, err
+	if !found {
+		acceptRecord, err := market.BuildAccept(market.AcceptOptions{
+			RFP:         market.RecordRef{URI: rfp.URI, CID: rfp.CID},
+			Bid:         market.RecordRef{URI: winner.URI, CID: winner.CID},
+			SubmitEvent: s.callbackDID() + "#" + defaultComputeEventServiceID,
+			CreatedAt:   s.nowISO(),
+		})
+		if err != nil {
+			return nil, err
+		}
+		accept, err = market.CreateSignedRecordAt(ctx, s.repo, s.cfg.RepoDID, market.AcceptNSID, acceptRKey, acceptRecord, s.signer)
+		if err != nil {
+			return nil, err
+		}
 	}
 	receipt, err := s.submitAcceptAndWait(ctx, winnerBidder, accept.URI, accept.CID, winner.DID)
 	if err != nil {
@@ -819,28 +879,87 @@ func (s *Service) releaseSession(ctx context.Context, target *SessionTarget) err
 		return nil
 	}
 	state := target.State
-	payload, err := market.CreateSignedRecord(ctx, s.repo, s.cfg.RepoDID, market.ComputeEventsVMDeleteNSID, map[string]any{
-		"$type":     market.ComputeEventsVMDeleteNSID,
-		"reason":    "session_ended",
-		"createdAt": s.nowISO(),
-	}, s.signer)
+	payloadRKey := sessionRKey("delete", state.Receipt.URI)
+	payload, found, err := s.existingSignedRecord(ctx, market.ComputeEventsVMDeleteNSID, payloadRKey)
 	if err != nil {
 		return err
 	}
-	envelope, err := market.CreateEvent(ctx, s.repo, s.cfg.RepoDID, market.EventOptions{
-		Receipt:   market.RecordRef{URI: state.Receipt.URI, CID: state.Receipt.CID},
-		Payload:   market.RecordRef{URI: payload.URI, CID: payload.CID},
-		CreatedAt: s.nowISO(),
-	}, s.signer)
+	if !found {
+		payload, err = market.CreateSignedRecordAt(ctx, s.repo, s.cfg.RepoDID, market.ComputeEventsVMDeleteNSID, payloadRKey, map[string]any{
+			"$type":     market.ComputeEventsVMDeleteNSID,
+			"reason":    "session_ended",
+			"createdAt": s.nowISO(),
+		}, s.signer)
+		if err != nil {
+			return err
+		}
+	}
+	eventRKey := sessionRKey("event", state.Receipt.URI)
+	envelope, found, err := s.existingSignedRecord(ctx, market.EventNSID, eventRKey)
 	if err != nil {
 		return err
 	}
-	status, err := s.market.SubmitEvent(ctx, target.Bidder, SubmitEventRequest{URI: envelope.URI, CID: envelope.CID, Record: envelope.Record})
-	if err != nil {
+	if !found {
+		envelope, err = market.PutEvent(ctx, s.repo, s.cfg.RepoDID, eventRKey, market.EventOptions{
+			Receipt:   market.RecordRef{URI: state.Receipt.URI, CID: state.Receipt.CID},
+			Payload:   market.RecordRef{URI: payload.URI, CID: payload.CID},
+			CreatedAt: s.nowISO(),
+		}, s.signer)
+		if err != nil {
+			return err
+		}
+	}
+	release := &v1alpha1.ContractRelease{
+		Event:   v1alpha1.RecordRef{URI: envelope.URI, CID: envelope.CID},
+		Payload: v1alpha1.RecordRef{URI: payload.URI, CID: payload.CID},
+	}
+	state.Release = release
+	if err := s.persistSessionRelease(ctx, state.Receipt.URI, release); err != nil {
 		return err
 	}
-	if status < 200 || status > 299 {
-		return fmt.Errorf("vm.delete answered HTTP %d", status)
+	var lastErr error
+	for attempt := 1; ; attempt++ {
+		status, err := s.market.SubmitEvent(ctx, target.Bidder, SubmitEventRequest{URI: envelope.URI, CID: envelope.CID, Record: envelope.Record})
+		if err == nil && status >= 200 && status <= 299 {
+			release.OK = true
+			release.Status = &status
+			if err := s.persistSessionRelease(ctx, state.Receipt.URI, release); err != nil {
+				s.log.Warn("requester_session_release_status_failed", "receipt", state.Receipt.URI, "err", err)
+			}
+			return nil
+		}
+		if err != nil {
+			lastErr = err
+		} else {
+			lastErr = fmt.Errorf("vm.delete answered HTTP %d", status)
+			release.Status = &status
+		}
+		select {
+		case <-ctx.Done():
+			return lastErr
+		case <-time.After(s.releaseRetryDelay(attempt)):
+		}
+	}
+}
+
+func (s *Service) persistSessionRelease(ctx context.Context, receiptURI string, release *v1alpha1.ContractRelease) error {
+	if s.cfg.Contracts == nil || receiptURI == "" {
+		return nil
+	}
+	contracts, err := s.cfg.Contracts.List(ctx)
+	if err != nil {
+		s.log.Warn("requester_session_release_lookup_failed", "receipt", receiptURI, "err", err)
+		return nil
+	}
+	for i := range contracts {
+		state := contracts[i].Status.Contract
+		if state == nil || state.Receipt == nil || state.Receipt.URI != receiptURI {
+			continue
+		}
+		status := v1alpha1.ComputeContractStatus{Contract: &v1alpha1.NodeClaimContract{Release: release}}
+		if err := s.cfg.Contracts.PatchStatus(ctx, contracts[i].Name, status); err != nil {
+			return fmt.Errorf("persist the release refs on contract %s: %w", contracts[i].Name, err)
+		}
 	}
 	return nil
 }

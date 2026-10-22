@@ -655,6 +655,14 @@ func CreateRFP(ctx context.Context, w RecordWriter, repo string, opts RFPOptions
 	return CreateSignedRecord(ctx, w, repo, RFPNSID, record, signer)
 }
 
+func CreateRFPAt(ctx context.Context, w RecordWriter, repo, rkey string, opts RFPOptions, signer *Signer) (SignedRecord, error) {
+	record, err := BuildRFP(opts)
+	if err != nil {
+		return SignedRecord{}, err
+	}
+	return CreateSignedRecordAt(ctx, w, repo, RFPNSID, rkey, record, signer)
+}
+
 type BidOptions struct {
 	RFP          RecordRef
 	Config       *RecordRef
