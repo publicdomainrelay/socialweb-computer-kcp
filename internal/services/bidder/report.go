@@ -268,8 +268,9 @@ func (s *Service) publishTermination(ctx context.Context, req terminationPublish
 	}
 	if req.SubmitEventURL != "" {
 		body := map[string]any{"uri": event.URI, "cid": event.CID, "record": event.Record}
-		if err := s.callService(ctx, req.SubmitEventURL, market.SubmitEventNSID, market.SubmitEventNSID, body); err != nil {
-			return nil, fmt.Errorf("submitting the market event: %w", err)
+		if err := s.callService(ctx, req.SubmitEventURL, market.SubmitEventNSID, market.SubmitEventNSID, body); err != nil && ctx.Err() == nil {
+			s.log.Warn("submitting the termination event failed; the records are on the PDS and the firehose carries them",
+				"computevm", req.VMName, "event", event.URI, "err", err)
 		}
 	}
 	verifiedPayload, err := s.records.GetRecord(ctx, s.did, market.ComputeEventsVMTerminatedNSID, payloadRkey)
