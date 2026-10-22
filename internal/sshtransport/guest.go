@@ -350,6 +350,33 @@ func reportedKeySet(hostKeys GuestHostKeys) map[string]bool {
 	return accepted
 }
 
+func reportedKeyAlgorithms(hostKeys GuestHostKeys) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(hostKeys.Keys))
+	add := func(algo string) {
+		if algo == "" || seen[algo] {
+			return
+		}
+		seen[algo] = true
+		out = append(out, algo)
+	}
+	for _, line := range hostKeys.Keys {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		switch fields[0] {
+		case ssh.KeyAlgoRSA:
+			add(ssh.KeyAlgoRSASHA256)
+			add(ssh.KeyAlgoRSASHA512)
+			add(ssh.KeyAlgoRSA)
+		default:
+			add(fields[0])
+		}
+	}
+	return out
+}
+
 func (p *GuestSessionProvider) connect(ctx context.Context, target, privateKeyPath string, hostKeys GuestHostKeys) (*ssh.Client, net.Conn, error) {
 	if err := irohdial.CheckTicket(target); err != nil {
 		return nil, nil, &NonIrohGuestAddressError{Target: target}
@@ -372,9 +399,10 @@ func (p *GuestSessionProvider) connect(ctx context.Context, target, privateKeyPa
 	accepted := reportedKeySet(hostKeys)
 	mismatch := false
 	config := &ssh.ClientConfig{
-		User:    "root",
-		Auth:    []ssh.AuthMethod{ssh.PublicKeys(signer)},
-		Timeout: p.timeout(),
+		User:              "root",
+		Auth:              []ssh.AuthMethod{ssh.PublicKeys(signer)},
+		Timeout:           p.timeout(),
+		HostKeyAlgorithms: reportedKeyAlgorithms(hostKeys),
 		HostKeyCallback: func(_ string, _ net.Addr, key ssh.PublicKey) error {
 			got := base64.StdEncoding.EncodeToString(key.Marshal())
 			if accepted[got] {
