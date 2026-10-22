@@ -40,8 +40,8 @@ func (v vmIdentity) String() string {
 		units = append(units, u+"="+id)
 	}
 	sort.Strings(units)
-	return fmt.Sprintf("ComputeVM %s %s pid %d start %s address %s onNetwork %s receipt %s units [%s]",
-		v.ComputeVM, v.Phase, v.Pid, v.StartTime, v.Address, v.OnNetworkURI, v.ReceiptURI, strings.Join(units, " "))
+	return fmt.Sprintf("ComputeVM %s %s pid %d start %s address %s receipt %s units [%s]",
+		v.ComputeVM, v.Phase, v.Pid, v.StartTime, v.Address, v.ReceiptURI, strings.Join(units, " "))
 }
 
 func (n *Network) unitIdentities(i int) (map[string]string, error) {
