@@ -198,7 +198,8 @@ func (q *QRTransfer) PollOnce(ctx context.Context) (QRSession, bool, error) {
 	if err != nil {
 		return QRSession{}, false, fmt.Errorf("oauthclient: the qr service auth token: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, q.Origin+"/xrpc/"+QRNSID, nil)
+	query := url.Values{"cliDid": {q.CLIDID}, "nonce": {q.Nonce}}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, q.Origin+"/xrpc/"+QRNSID+"?"+query.Encode(), nil)
 	if err != nil {
 		return QRSession{}, false, err
 	}
