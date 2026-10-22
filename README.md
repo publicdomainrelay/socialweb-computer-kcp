@@ -368,7 +368,7 @@ socialweb-computer version
 - Long form: [docs/bidder.md](docs/bidder.md) (every flag, the unit, the guest-image resolution).
 
 A bidder runs as its own installed application on a host, in its own account. Its records live in its
-own PDS DenoPod, never in your repo.
+own PDS, never in your repo.
 
 ```bash
 # installed on a host, from the release binary (see Install a release binary)
@@ -400,7 +400,7 @@ sudo runuser -u swc-bidder -- env XDG_RUNTIME_DIR=/run/user/$(id -u swc-bidder) 
 | Unit | `socialweb-computer-bidder@<handle>.service` in the account's own manager; the account is `swc-bidder` |
 | Logs | `sudo journalctl _SYSTEMD_USER_UNIT='socialweb-computer-bidder@<handle>.service'`; the account is a system account, so its logs are in the system journal |
 | State | `/var/lib/socialweb-computer/swc-bidder`; its kcp at `handles/<hash>/kcp` (root-readable only) |
-| Identity | profile `prod-qr`: own PDS DenoPod, key in its own OpenBao, DID kept across restarts and upgrades; one association write, and deleting the badgeBlueKeys record revokes it |
+| Identity | profile `prod-qr`: own PDS, key in its own OpenBao, DID kept across restarts and upgrades; one association write, and deleting the badgeBlueKeys record revokes it |
 | Discovery | a signed heartbeat every 60 s; requesters keep only bidders fresh within 5 min, so a stopped bidder gets no direct `submitRfp` |
 | Policy | `bidder-policy` in `config.json`; unset means `open`. A production bidder names `tangled-vouch` |
 | Other options | `"bidder-options": "--bid-ttl-sec 1800"` in the same `config.json`; each must be a `market-bidder` option in `deploy/apps/option-map.yaml`; restart the unit after editing |
@@ -470,7 +470,7 @@ Two deploy shapes, and they differ:
 | --- | --- | --- |
 | Routine gateway deploy (`scripts/deploy.sh` on an installed gateway) | `upgrade --binary --sha256`, then `install gateway` again; the core adopts its DenoPods and rolls the kcp slot only when kcp's argv or binary changed | State dir and its kcp objects, the root OpenBao (requester repo key, sessions), the gateway requester's DID and its association record, web app sessions, running DenoPods. Read on prod: web session across rc8 to rc9, requester DID and association across rc11 to rc21 with no new claim |
 | Routine bidder upgrade (as the account: `upgrade --binary <path> --sha256 <digest>`, then the same `install bidder` again) | The bidder's core restarts on the new binary; pods are replaced only when the spec or the TypeScript tree changed | The bidder's state dir, its OpenBao (repo key), the bidder DID and handle, its association record, its pds DenoPod repo. Read on prod: Bob's bidder DID and association across rc11 to rc21 with no new claim |
-| Fresh install (`install gateway` or `install bidder` on an empty host, or a lost or purged state dir) | First install; new keys generated | Nothing. The identity gets a new DID and needs one association write again (a bidder through `scripts/oauth-signin.ts`, see [CONTRIBUTING.md](CONTRIBUTING.md); the web app sign-in for a gateway owner) |
+| Fresh install (`install gateway` or `install bidder` on an empty host, or a lost or purged state dir) | First install; new keys generated | Nothing. The identity gets a new DID and needs one association write again (a bidder through `scripts/associate-bidder.ts`, see [CONTRIBUTING.md](CONTRIBUTING.md); the web app sign-in for a gateway owner) |
 
 The policy is still "nothing is guaranteed": a change may deliberately wipe state, and there is no migration or backward compatibility to plan for. Losing sessions, VMs, clusters, claims or receipts is acceptable; what exists, this table says.
 
@@ -528,11 +528,10 @@ The script drives headless Chrome through the page, the PDS password and "Author
 
 ```bash
 # the gateway's web app user; needed after a fresh deploy, not after an upgrade
-deno run -A --no-lock scripts/oauth-signin.ts --creds ~/.aliceoa_bsky_social_source --account ALICE --url https://k8s.socialweb.computer/
-# a bidder's association through its pending URL
-K=$(sudo sh -c 'ls /var/lib/socialweb-computer/swc-bidder/handles/*/kcp/admin.kubeconfig' | head -1)
-U=$(sudo kubectl --kubeconfig "$K" get marketidentity bidder -o jsonpath='{.status.pendingAction.url}')
-deno run -A --no-lock scripts/oauth-signin.ts --creds ~/.bobvmbuilder_bsky_social_source --account BOB --url "$U" --click '^Yes, this is my bidder$'
+# the gateway is API-only: start the sign-in with JSON, then finish the returned URL in a browser
+curl -sS -X POST -H 'Content-Type: application/json' \
+  -d '{"handle":"aliceoa.bsky.social"}' https://k8s.socialweb.computer/oauth/start
+# the bidder association is scripts/associate-bidder.ts; see CONTRIBUTING.md
 ```
 
 | Symptom | Meaning |

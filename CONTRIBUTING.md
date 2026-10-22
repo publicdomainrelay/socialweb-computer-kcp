@@ -345,6 +345,45 @@ sudo kubectl --kubeconfig "$K" patch marketbidder app --type=merge \
 sudo kubectl --kubeconfig "$K" get marketidentity bidder -o jsonpath='{.status.phase}{" "}{range .status.conditions[*]}{.type}={.status} {.reason}{"\n"}{end}'
 ```
 
+## Deploy a gateway to a host
+
+`scripts/deploy.sh` installs or upgrades the gateway on the target host, writes the Caddy sites,
+copies the gateway, edge-client and kcp CA certificates, validates Caddy and reloads it. The host
+must already run Caddy and have `/etc/caddy/sites` enabled from `/etc/caddy/Caddyfile`.
+
+```bash
+cd "$(git rev-parse --show-toplevel)"
+SSH_TARGET=root@socialweb.computer \
+SSH_PORT=1997 \
+ACCOUNT=socialweb \
+STATE_DIR=/var/lib/socialweb-computer/socialweb \
+GATEWAY_ENV_FILE=$HOME/.tmp/gateway.env \
+GATEWAY_SPEC_FILE=$HOME/.tmp/gateway-spec-socialweb.yaml \
+scripts/deploy.sh
+```
+
+`GATEWAY_ENV_FILE` holds the account's environment (audiences and cluster-provider options); it is
+installed as `$STATE_DIR/gateway.env`, mode 0600 and owned by `socialweb`. `GATEWAY_SPEC_FILE` is
+installed as `/var/lib/socialweb-computer/gateway-spec-$ACCOUNT.yaml`. Both are required for a fresh
+host; an existing host may omit them and keep the files already in its state. `scripts/deploy.sh`
+uses the release binary of `HEAD` (or `BINARY` and `SHA256`) and refuses a digest mismatch.
+
+The public edge is Caddy:
+
+- `k8s.<domain>` goes to `127.0.0.1:8788`, the gateway's web-app front. That front resolves to the
+  GatewayAPI local Exposure, which serves `/api`, `/session`, `/oauth`, `/xrpc` and `/downloads`.
+- `kcp.<domain>` goes to kcp `6443` without a client certificate and to the `8444` certificate front
+  with one.
+
+The web root returns 404: this tree is API-only. Start a sign-in with
+`POST https://k8s.<domain>/oauth/start` and `{"handle":"..."}`; finish it in the returned
+authorization URL. The callback sets `swc_session` on the gateway origin.
+
+A fresh install over an old `denoruntime` workspace must purge first: the `app` WorkspaceType name is
+immutable. Back up `/var/lib/socialweb-computer/<account>` and the Caddy sites before a purge. After
+any fresh install, run the Caddy certificate handoff (inside `scripts/deploy.sh`) before testing
+`kcp.<domain>`; stale edge-client or gateway certificates fail with `tls: bad certificate`.
+
 ## Install a development build on a bidder host
 
 This installs a binary built from the working tree, not a release. The install and upgrade require
