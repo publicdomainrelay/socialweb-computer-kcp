@@ -387,7 +387,7 @@ func (c *ExposureController) startLocal(ctx context.Context, exp *exposurev1alph
 				http.Error(w, "the target handler is not registered", http.StatusServiceUnavailable)
 				return
 			}
-			h.ServeHTTP(w, r)
+			h.ServeHTTP(w, r.WithContext(component.WithCaller(r.Context(), target)))
 		})
 		server := &http.Server{Handler: current, ReadHeaderTimeout: 10 * time.Second}
 		go func() {
@@ -501,7 +501,7 @@ func bridge(ctx context.Context, handlers *component.Handlers, target component.
 	if handlers == nil {
 		return
 	}
-	stream, err := handlers.DialStream(ctx, target, name)
+	stream, err := handlers.DialStream(component.WithSystemCaller(ctx), target, name)
 	if err != nil {
 		return
 	}

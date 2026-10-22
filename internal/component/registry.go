@@ -2,6 +2,7 @@ package component
 
 import (
 	"sort"
+	"strings"
 	"sync"
 
 	"k8s.io/apimachinery/pkg/types"
@@ -109,6 +110,33 @@ func (r *Registry) URL(workspace, kind, name, endpoint string) (string, bool) {
 		return "", false
 	}
 	return e.URL, true
+}
+
+func (r *Registry) Has(workspace, kind, name string) bool {
+	if r == nil {
+		return false
+	}
+	workspace = strings.TrimSpace(workspace)
+	kind = strings.TrimSpace(kind)
+	name = strings.TrimSpace(name)
+	if workspace == "" && kind == "" && name == "" {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for key := range r.entries {
+		if workspace != "" && key.Workspace != workspace {
+			continue
+		}
+		if kind != "" && !strings.EqualFold(key.Kind, kind) {
+			continue
+		}
+		if name != "" && !strings.EqualFold(key.Name, name) {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 func (r *Registry) List(workspace string) []Entry {

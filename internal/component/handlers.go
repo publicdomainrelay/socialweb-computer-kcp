@@ -32,6 +32,7 @@ type HandlerRegistry struct {
 	aliases   map[string]handlerAlias
 	streams   map[streamKey]StreamHandler
 	conns     map[*trackedConn]Key
+	links     []AccessLink
 
 	root   context.Context
 	cancel context.CancelFunc
@@ -67,7 +68,7 @@ func NewHandlerRegistry() *HandlerRegistry {
 	r.transport = &http.Transport{
 		Proxy: nil,
 		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
-			return r.dialHTTP(network, address)
+			return r.dialHTTP(ctx, network, address)
 		},
 	}
 	return r
@@ -92,6 +93,35 @@ func (r *HandlerRegistry) HTTPClient() *http.Client {
 
 func (r *HandlerRegistry) RoundTripper() http.RoundTripper {
 	return &handlerRoundTripper{registry: r}
+}
+
+func (r *HandlerRegistry) SetLinks(links []AccessLink) {
+	if r == nil {
+		return
+	}
+	next := cloneLinks(links)
+	r.mu.Lock()
+	if accessLinksEqual(r.links, next) {
+		r.mu.Unlock()
+		return
+	}
+	r.links = next
+	stale := make([]*trackedConn, 0, len(r.conns))
+	for conn := range r.conns {
+		stale = append(stale, conn)
+	}
+	r.conns = map[*trackedConn]Key{}
+	r.mu.Unlock()
+	closeTracked(stale)
+}
+
+func (r *HandlerRegistry) Links() []AccessLink {
+	if r == nil {
+		return nil
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return cloneLinks(r.links)
 }
 
 func (r *HandlerRegistry) RegisterHTTP(key Key, handler http.Handler, name ...string) error {
@@ -161,7 +191,7 @@ func (r *HandlerRegistry) HandlerNamed(key Key, name string) (http.Handler, bool
 }
 
 func (r *HandlerRegistry) HandlerForHost(host string) (http.Handler, bool) {
-	handler, _, ok := r.handlerForHost(host)
+	handler, _, _, ok := r.handlerForHost(host)
 	return handler, ok
 }
 
@@ -169,7 +199,7 @@ func (r *HandlerRegistry) DialHTTP(ctx context.Context, address string) (net.Con
 	if err := r.Ready(ctx); err != nil {
 		return nil, err
 	}
-	return r.dialHTTP("tcp", address)
+	return r.dialHTTP(ctx, "tcp", address)
 }
 
 func (r *HandlerRegistry) Remove(key Key) bool {
@@ -228,7 +258,11 @@ func (r *HandlerRegistry) DialStream(ctx context.Context, key Key, name ...strin
 	if r == nil {
 		return nil, ErrHandlersStopped
 	}
-	sk := streamKey{Key: key, name: normalizeHandlerName(optionalName(name))}
+	handlerName := normalizeHandlerName(optionalName(name))
+	if err := r.authorize(ctx, key, handlerName); err != nil {
+		return nil, err
+	}
+	sk := streamKey{Key: key, name: handlerName}
 	r.mu.RLock()
 	if r.closed {
 		r.mu.RUnlock()
@@ -345,15 +379,19 @@ func (r *HandlerRegistry) Closed() bool {
 	return r.closed
 }
 
-func (r *HandlerRegistry) dialHTTP(_ string, address string) (net.Conn, error) {
+func (r *HandlerRegistry) dialHTTP(ctx context.Context, _ string, address string) (net.Conn, error) {
 	if err := r.Ready(); err != nil {
 		return nil, err
 	}
 	host := normalizeHost(address)
-	handler, key, ok := r.handlerForHost(host)
+	handler, key, name, ok := r.handlerForHost(host)
 	if !ok {
 		return nil, fmt.Errorf("%w: %s", ErrNoHandler, host)
 	}
+	if err := r.authorize(ctx, key, name); err != nil {
+		return nil, err
+	}
+	caller, hasCaller := CallerFrom(ctx)
 	client, server := net.Pipe()
 	clientConn, err := r.trackConn(client, key)
 	if err != nil {
@@ -366,6 +404,8 @@ func (r *HandlerRegistry) dialHTTP(_ string, address string) (net.Conn, error) {
 		server.Close()
 		return nil, err
 	}
+	serverConn.caller = caller
+	serverConn.hasCaller = hasCaller
 	serveCtx, cancel := context.WithCancel(r.rootContext())
 	go func() {
 		defer cancel()
@@ -376,6 +416,9 @@ func (r *HandlerRegistry) dialHTTP(_ string, address string) (net.Conn, error) {
 
 func (r *HandlerRegistry) serveHTTP(ctx context.Context, conn *trackedConn, handler http.Handler) {
 	defer conn.Close()
+	if conn.hasCaller {
+		ctx = WithCaller(ctx, conn.caller)
+	}
 	server := &http.Server{
 		Handler: handler,
 		BaseContext: func(net.Listener) context.Context {
@@ -386,9 +429,9 @@ func (r *HandlerRegistry) serveHTTP(ctx context.Context, conn *trackedConn, hand
 	_ = server.Serve(newSingleConnListener(conn))
 }
 
-func (r *HandlerRegistry) handlerForHost(host string) (http.Handler, Key, bool) {
+func (r *HandlerRegistry) handlerForHost(host string) (http.Handler, Key, string, bool) {
 	if r == nil {
-		return nil, Key{}, false
+		return nil, Key{}, "", false
 	}
 	host = normalizeHost(host)
 	r.mu.RLock()
@@ -396,10 +439,10 @@ func (r *HandlerRegistry) handlerForHost(host string) (http.Handler, Key, bool) 
 	if ok && !alias.ambiguous {
 		handler := r.handlers[alias.key][alias.name]
 		r.mu.RUnlock()
-		return handler, alias.key, handler != nil
+		return handler, alias.key, alias.name, handler != nil
 	}
 	r.mu.RUnlock()
-	return nil, Key{}, false
+	return nil, Key{}, "", false
 }
 
 func (r *HandlerRegistry) rootContext() context.Context {
@@ -472,6 +515,9 @@ type trackedConn struct {
 	mu     sync.Mutex
 	hooks  []func()
 	closed bool
+
+	caller    Key
+	hasCaller bool
 
 	onClose func()
 }
@@ -559,10 +605,16 @@ func (t *handlerRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 		return nil, err
 	}
 	host := normalizeHost(requestHost(req))
-	if _, _, ok := t.registry.handlerForHost(host); !ok {
+	_, key, name, ok := t.registry.handlerForHost(host)
+	if !ok {
 		return nil, fmt.Errorf("%w: %s", ErrNoHandler, host)
 	}
-	return t.registry.transport.RoundTrip(req)
+	if err := t.registry.authorize(req.Context(), key, name); err != nil {
+		return nil, err
+	}
+	next := req.Clone(req.Context())
+	next.Close = true
+	return t.registry.transport.RoundTrip(next)
 }
 
 type roundTripperFunc func(*http.Request) (*http.Response, error)
@@ -576,6 +628,70 @@ func requestHost(req *http.Request) string {
 		return req.URL.Host
 	}
 	return req.Host
+}
+
+func (r *HandlerRegistry) authorize(ctx context.Context, to Key, handler string) error {
+	if r == nil {
+		return ErrHandlersStopped
+	}
+	handler = normalizeHandlerName(handler)
+	from, ok := CallerFrom(ctx)
+	if !ok {
+		return &LinkDeniedError{To: to, Handler: handler}
+	}
+	if SystemCaller(from) {
+		return nil
+	}
+	if strings.TrimSpace(from.Workspace) == "" || strings.TrimSpace(from.Kind) == "" || strings.TrimSpace(from.Name) == "" {
+		return &LinkDeniedError{From: from, To: to, Handler: handler}
+	}
+	if from.Workspace == to.Workspace {
+		return nil
+	}
+	r.mu.RLock()
+	links := r.links
+	r.mu.RUnlock()
+	for _, link := range links {
+		if AccessLinkAllows(link, from, to, handler) {
+			return nil
+		}
+	}
+	return &LinkDeniedError{From: from, To: to, Handler: handler}
+}
+
+func cloneLinks(links []AccessLink) []AccessLink {
+	if links == nil {
+		return nil
+	}
+	out := make([]AccessLink, len(links))
+	for i, link := range links {
+		out[i] = link
+		out[i].Handlers = append([]string(nil), link.Handlers...)
+	}
+	return out
+}
+
+func accessLinksEqual(a, b []AccessLink) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].FromWorkspace != b[i].FromWorkspace || a[i].FromKind != b[i].FromKind || a[i].FromName != b[i].FromName {
+			return false
+		}
+		if a[i].ToWorkspace != b[i].ToWorkspace || a[i].ToKind != b[i].ToKind || a[i].ToName != b[i].ToName {
+			return false
+		}
+		if len(a[i].Handlers) != len(b[i].Handlers) {
+			return false
+		}
+		for j := range a[i].Handlers {
+			if a[i].Handlers[j] != b[i].Handlers[j] {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func handlerAliases(key Key, name string) []string {

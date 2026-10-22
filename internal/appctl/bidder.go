@@ -139,12 +139,14 @@ func (ctl *Controller) ensureDesired(ctx context.Context, root *unstructured.Uns
 			return fmt.Errorf("%s %s: %w", d.Kind, d.Name, err)
 		}
 	}
-	return nil
+	return ctl.ensureDesiredLinks(ctx, root, desired)
 }
 
 func (ctl *Controller) pruneDesired(ctx context.Context, owner string, desired []desiredComponent) error {
-	_, err := ctl.DeleteComponentsExcept(ctx, owner, desiredKeys(desired))
-	return err
+	if _, err := ctl.DeleteComponentsExcept(ctx, owner, desiredKeys(desired)); err != nil {
+		return err
+	}
+	return ctl.pruneDesiredLinks(ctx, owner, desired)
 }
 
 func desiredPds(desired []desiredComponent) (desiredComponent, bool) {
@@ -298,6 +300,9 @@ func (ctl *Controller) stopComponents(ctx context.Context, owner string) (int, e
 			}
 		}
 		start = end
+	}
+	if err := ctl.deleteLinks(ctx, owner); err != nil {
+		ctl.c.log().Warn("deleting the ComponentLinks of a stopped application", "owner", owner, "err", err.Error())
 	}
 	return ctl.componentsLeft(ctx, views)
 }

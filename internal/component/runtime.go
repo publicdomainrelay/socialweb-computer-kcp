@@ -377,7 +377,7 @@ func (r *Runtime) startLocked(ctx context.Context, inst *instance, spec Componen
 		r.emit(ctx, spec, st)
 		return st, err
 	}
-	runCtx, cancel := context.WithCancel(root)
+	runCtx, cancel := context.WithCancel(WithCaller(root, Key{Workspace: spec.Workspace, Kind: spec.Kind, Name: spec.Name}))
 	done := make(chan struct{})
 	startedAt := time.Now().UTC()
 	inst.mu.Lock()
@@ -416,6 +416,7 @@ func (r *Runtime) stopInstanceLocked(ctx context.Context, inst *instance) error 
 	cancel := inst.cancel
 	done := inst.done
 	description := fmt.Sprintf("%s/%s", inst.key.Kind, inst.key.Name)
+	key := inst.key
 	if svc == nil && done == nil {
 		inst.mu.Unlock()
 		return nil
@@ -433,7 +434,7 @@ func (r *Runtime) stopInstanceLocked(ctx context.Context, inst *instance) error 
 	var stopErr error
 	if callStop {
 		stopCtx, stopCancel := context.WithTimeout(context.WithoutCancel(ctx), DefaultStopTimeout)
-		stopErr = r.callStop(stopCtx, description, svc)
+		stopErr = r.callStop(stopCtx, description, key, svc)
 		stopCancel()
 		if stopErr != nil {
 			stopErr = fmt.Errorf("component: stopping %s: %w", description, stopErr)
@@ -539,7 +540,7 @@ func (r *Runtime) supervise(inst *instance, spec ComponentSpec, deps Deps, svc S
 		r.unregister(inst)
 		if inst.claimStop() {
 			stopCtx, stopCancel := context.WithTimeout(context.WithoutCancel(runCtx), DefaultStopTimeout)
-			if stopErr := r.callStop(stopCtx, spec.Kind+"/"+spec.Name, svc); stopErr != nil {
+			if stopErr := r.callStop(stopCtx, spec.Kind+"/"+spec.Name, Key{Workspace: spec.Workspace, Kind: spec.Kind, Name: spec.Name}, svc); stopErr != nil {
 				r.deps.Log.Warn("component: stopping the exited service failed", "component", spec.Kind+"/"+spec.Name, "workspace", spec.Workspace, "err", stopErr)
 			}
 			stopCancel()
@@ -777,7 +778,7 @@ func (r *Runtime) callStart(ctx context.Context, svc Service, deps Deps, spec Co
 			err = newPanicError(name, value)
 		}
 	}()
-	return svc.Start(ctx, deps)
+	return svc.Start(WithCaller(ctx, Key{Workspace: spec.Workspace, Kind: spec.Kind, Name: spec.Name}), deps)
 }
 
 func (r *Runtime) callReady(ctx context.Context, inst *instance, svc Service) (err error) {
@@ -787,7 +788,7 @@ func (r *Runtime) callReady(ctx context.Context, inst *instance, svc Service) (e
 			err = newPanicError(name, value)
 		}
 	}()
-	return svc.Ready(ctx)
+	return svc.Ready(WithCaller(ctx, inst.keyOf()))
 }
 
 func (r *Runtime) callEndpoints(inst *instance, svc Service) (endpoints []Endpoint, err error) {
@@ -801,13 +802,13 @@ func (r *Runtime) callEndpoints(inst *instance, svc Service) (endpoints []Endpoi
 	return svc.Endpoints(), nil
 }
 
-func (r *Runtime) callStop(ctx context.Context, name string, svc Service) (err error) {
+func (r *Runtime) callStop(ctx context.Context, name string, key Key, svc Service) (err error) {
 	defer func() {
 		if value := recover(); value != nil {
 			err = newPanicError(name, value)
 		}
 	}()
-	return svc.Stop(ctx)
+	return svc.Stop(WithCaller(ctx, key))
 }
 
 func (r *Runtime) callFactory(ctx context.Context, spec ComponentSpec, factory ServiceFactory, deps Deps) (svc Service, err error) {
@@ -818,7 +819,7 @@ func (r *Runtime) callFactory(ctx context.Context, spec ComponentSpec, factory S
 			err = newPanicError(name, value)
 		}
 	}()
-	return factory(ctx, deps, spec)
+	return factory(WithCaller(ctx, Key{Workspace: spec.Workspace, Kind: spec.Kind, Name: spec.Name}), deps, spec)
 }
 
 func newPanicError(name string, value any) *PanicError {
@@ -900,6 +901,12 @@ func (i *instance) name() string {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	return i.key.Kind + "/" + i.key.Name
+}
+
+func (i *instance) keyOf() Key {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	return i.key
 }
 
 func (i *instance) restartsOf() int32 {

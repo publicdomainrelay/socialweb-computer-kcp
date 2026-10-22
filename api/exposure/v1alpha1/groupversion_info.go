@@ -22,6 +22,8 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&ServiceList{},
 		&Exposure{},
 		&ExposureList{},
+		&ComponentLink{},
+		&ComponentLinkList{},
 	)
 	return nil
 }

@@ -25,4 +25,11 @@ var APIResources = []APIResource{
 		{Name: "URL", Type: "string", JSONPath: ".status.url"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
+	{Kind: "ComponentLink", Plural: "componentlinks", Revision: 1, Export: "exposures", Object: ComponentLink{}, PrinterColumns: []PrinterColumn{
+		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
+		{Name: "Ready", Type: "boolean", JSONPath: ".status.ready"},
+		{Name: "From", Type: "string", JSONPath: ".spec.from.workspace"},
+		{Name: "To", Type: "string", JSONPath: ".spec.to.workspace"},
+		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
+	}},
 }

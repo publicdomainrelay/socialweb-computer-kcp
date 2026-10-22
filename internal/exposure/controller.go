@@ -38,8 +38,9 @@ const (
 )
 
 var (
-	ServiceGVR  = schema.GroupVersionResource{Group: GroupName, Version: Version, Resource: "services"}
-	ExposureGVR = schema.GroupVersionResource{Group: GroupName, Version: Version, Resource: "exposures"}
+	ServiceGVR       = schema.GroupVersionResource{Group: GroupName, Version: Version, Resource: "services"}
+	ExposureGVR      = schema.GroupVersionResource{Group: GroupName, Version: Version, Resource: "exposures"}
+	ComponentLinkGVR = schema.GroupVersionResource{Group: GroupName, Version: Version, Resource: "componentlinks"}
 )
 
 type DynamicFactory func(workspace string) (dynamic.Interface, error)

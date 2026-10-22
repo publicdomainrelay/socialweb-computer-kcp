@@ -103,7 +103,7 @@ func (b *Bridge) serveStreams() {
 
 func (b *Bridge) bridge(conn net.Conn) {
 	defer conn.Close()
-	stream, err := b.cfg.Handlers.DialStream(b.ctx, b.cfg.Target, b.cfg.Handler)
+	stream, err := b.cfg.Handlers.DialStream(component.WithSystemCaller(b.ctx), b.cfg.Target, b.cfg.Handler)
 	if err != nil {
 		return
 	}

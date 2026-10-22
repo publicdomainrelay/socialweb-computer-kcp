@@ -253,7 +253,7 @@ func (r *SubscriberRegistrar) handler(target component.Key, name string) func(co
 			req.Header.Set(key, value)
 		}
 		recorder := httptest.NewRecorder()
-		handler.ServeHTTP(recorder, req)
+		handler.ServeHTTP(recorder, req.WithContext(component.WithCaller(req.Context(), target)))
 		result := recorder.Result()
 		defer result.Body.Close()
 		raw, err := io.ReadAll(io.LimitReader(result.Body, relayMaxBody))
@@ -277,7 +277,7 @@ func (r *SubscriberRegistrar) tunnel(target component.Key, name string) func(con
 		if registry == nil {
 			return errors.New("the handler registry is not configured")
 		}
-		stream, err := registry.DialStream(ctx, target, name)
+		stream, err := registry.DialStream(component.WithSystemCaller(ctx), target, name)
 		if err != nil {
 			return err
 		}

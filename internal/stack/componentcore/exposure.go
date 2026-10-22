@@ -61,12 +61,28 @@ func (c *Core) runWorkspaceExposure(ctx context.Context, workspace string, log *
 		log.Warn("the Service controller does not start", "err", err.Error())
 		return
 	}
+	links, err := exposure.NewLinkController(exposure.LinkOptions{
+		Workspace: workspace,
+		Dynamic:   exposure.DynamicFactory(c.cfg.DynamicFactory),
+		Registry:  c.registry,
+		Policy:    c.linkPolicy,
+		Log:       log,
+	})
+	if err != nil {
+		log.Warn("the ComponentLink controller does not start", "err", err.Error())
+		return
+	}
 	go func() {
 		if err := services.Run(ctx); err != nil && ctx.Err() == nil {
 			log.Warn("the Service controller stopped", "err", err.Error())
 		}
 	}()
-	log.Info("the Service and Exposure controllers reconcile in process")
+	go func() {
+		if err := links.Run(ctx); err != nil && ctx.Err() == nil {
+			log.Warn("the ComponentLink controller stopped", "err", err.Error())
+		}
+	}()
+	log.Info("the Service, Exposure and ComponentLink controllers reconcile in process")
 	if err := exposures.Run(ctx); err != nil && ctx.Err() == nil {
 		log.Warn("the Exposure controller stopped", "err", err.Error())
 	}

@@ -223,6 +223,101 @@ func (in *ExposureStatus) DeepCopy() *ExposureStatus {
 	return out
 }
 
+func (in *ComponentLink) DeepCopyInto(out *ComponentLink) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
+	in.Spec.DeepCopyInto(&out.Spec)
+	in.Status.DeepCopyInto(&out.Status)
+}
+
+func (in *ComponentLink) DeepCopy() *ComponentLink {
+	if in == nil {
+		return nil
+	}
+	out := new(ComponentLink)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *ComponentLink) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *ComponentLinkList) DeepCopyInto(out *ComponentLinkList) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ListMeta.DeepCopyInto(&out.ListMeta)
+	if in.Items != nil {
+		out.Items = make([]ComponentLink, len(in.Items))
+		for i := range in.Items {
+			in.Items[i].DeepCopyInto(&out.Items[i])
+		}
+	}
+}
+
+func (in *ComponentLinkList) DeepCopy() *ComponentLinkList {
+	if in == nil {
+		return nil
+	}
+	out := new(ComponentLinkList)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *ComponentLinkList) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *ComponentLinkSpec) DeepCopyInto(out *ComponentLinkSpec) {
+	*out = *in
+	out.From = in.From
+	out.To = in.To
+	out.Handlers = copyStringSlice(in.Handlers)
+}
+
+func (in *ComponentLinkSpec) DeepCopy() *ComponentLinkSpec {
+	if in == nil {
+		return nil
+	}
+	out := new(ComponentLinkSpec)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *ComponentLinkEndpoint) DeepCopyInto(out *ComponentLinkEndpoint) {
+	*out = *in
+}
+
+func (in *ComponentLinkEndpoint) DeepCopy() *ComponentLinkEndpoint {
+	if in == nil {
+		return nil
+	}
+	out := new(ComponentLinkEndpoint)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *ComponentLinkStatus) DeepCopyInto(out *ComponentLinkStatus) {
+	*out = *in
+	out.Conditions = copyConditions(in.Conditions)
+}
+
+func (in *ComponentLinkStatus) DeepCopy() *ComponentLinkStatus {
+	if in == nil {
+		return nil
+	}
+	out := new(ComponentLinkStatus)
+	in.DeepCopyInto(out)
+	return out
+}
+
 func copyStringSlice(in []string) []string {
 	if in == nil {
 		return nil

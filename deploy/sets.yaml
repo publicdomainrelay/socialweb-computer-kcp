@@ -24,6 +24,7 @@ sets:
           - path: atprotoidentity-apiexport.yaml
           - path: service-apiresourceschema.yaml
           - path: exposure-apiresourceschema.yaml
+          - path: componentlink-apiresourceschema.yaml
           - path: service-apiexport.yaml
           - path: remotepds-apiresourceschema.yaml
           - path: remotepds-apiexport.yaml

@@ -119,6 +119,8 @@ type Core struct {
 
 	handlers *component.HandlerRegistry
 
+	linkPolicy *exposure.LinkPolicy
+
 	ingressRegistrar exposure.IngressRegistrar
 
 	controllers *controllerRuntime
@@ -256,7 +258,7 @@ func New(cfg Config) (*Core, error) {
 		return nil, err
 	}
 	core := &Core{cfg: cfg, deps: deps, runtime: runtime, controller: ctl, registry: registry, ports: ports, store: store,
-		handlers: handlers, ingressRegistrar: dispatcher}
+		handlers: handlers, linkPolicy: exposure.NewLinkPolicy(handlers), ingressRegistrar: dispatcher}
 	core.buildControllers()
 	return core, nil
 }
@@ -291,7 +293,7 @@ func (c *Core) Run(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	runCtx, cancel := context.WithCancel(ctx)
+	runCtx, cancel := context.WithCancel(component.WithSystemCaller(ctx))
 	defer cancel()
 	if !c.cfg.DisablePolicy {
 		go c.runPolicy(runCtx)
