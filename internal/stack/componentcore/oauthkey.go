@@ -17,12 +17,15 @@ func loadOAuthCLIKey(stateDir string) (atcrypto.PrivateKey, error) {
 	path := filepath.Join(stateDir, "oauth-cli-key")
 	raw, err := os.ReadFile(path)
 	if err == nil {
-		return atcrypto.ParsePrivateMultibase(strings.TrimSpace(string(raw)))
-	}
-	if !errors.Is(err, os.ErrNotExist) {
+		if key, parseErr := atcrypto.ParsePrivateMultibase(strings.TrimSpace(string(raw))); parseErr == nil {
+			if _, ok := key.(*atcrypto.PrivateKeyK256); ok {
+				return key, nil
+			}
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
-	key, err := atcrypto.GeneratePrivateKeyP256()
+	key, err := atcrypto.GeneratePrivateKeyK256()
 	if err != nil {
 		return nil, err
 	}
