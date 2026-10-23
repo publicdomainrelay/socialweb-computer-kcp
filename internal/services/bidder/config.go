@@ -470,7 +470,7 @@ func accessTokenRef(raw string, vaultRef *v1alpha1.ComponentRef) *component.Cred
 	if raw == "" {
 		return nil
 	}
-	ref := &component.CredentialRef{Keys: []string{"accessJwt", "accessToken", "access_token", "token", "value",
+	ref := &component.CredentialRef{Keys: []string{"session", "accessJwt", "accessToken", "access_token", "token", "value",
 		"dpop_privatekey_multibase", "dpopPrivateKeyMultibase"}}
 	switch {
 	case strings.HasPrefix(raw, "openbao:"), strings.HasPrefix(raw, "vault:"):
