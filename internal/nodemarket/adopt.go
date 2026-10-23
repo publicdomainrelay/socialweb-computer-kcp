@@ -13,7 +13,7 @@ var ErrNotAdoptable = errors.New(
 		"nothing is running")
 
 func Adoptable(claim v1alpha1.NodeClaim) bool {
-	return claim.DeletionTimestamp == nil && !endedClaimPhase(claim.Status.Phase)
+	return claim.DeletionTimestamp == nil && !EndedClaimPhase(claim.Status.Phase)
 }
 
 func JoinSecretSpent(phase v1alpha1.NodeClaimPhase) bool {

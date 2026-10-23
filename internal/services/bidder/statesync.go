@@ -1472,16 +1472,6 @@ func decodeMarketInboxPayload(raw json.RawMessage) (marketInboxPayload, error) {
 	return payload, nil
 }
 
-func marketInboxObservation(request statesync.Request, ref string) statesync.Observation {
-	sum := sha256.Sum256(request.Payload)
-	return statesync.Observation{
-		Exists: true,
-		Ref:    ref,
-		Hash:   "sha256:" + hex.EncodeToString(sum[:]),
-		At:     time.Now().UTC().Format(time.RFC3339),
-	}
-}
-
 type marketInboxAdapter struct {
 	service *Service
 
@@ -1509,7 +1499,7 @@ func (a *marketInboxAdapter) Observe(ctx context.Context, request statesync.Requ
 			return statesync.Observation{}, err
 		}
 		if bid != nil {
-			return marketInboxObservation(request, payload.URI), nil
+			return statesync.InboxObservation(request, payload.URI), nil
 		}
 	}
 	return statesync.Observation{At: time.Now().UTC().Format(time.RFC3339)}, nil
@@ -1553,7 +1543,7 @@ func (a *marketInboxAdapter) Apply(ctx context.Context, request statesync.Reques
 			return statesync.Observation{}, err
 		}
 	}
-	return marketInboxObservation(request, payload.URI), nil
+	return statesync.InboxObservation(request, payload.URI), nil
 }
 
 func (a *marketInboxAdapter) Delete(ctx context.Context, request statesync.Request) error {

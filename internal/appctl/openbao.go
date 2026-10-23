@@ -14,6 +14,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
 )
 
 const (
@@ -72,7 +73,7 @@ func readNetworkVault(ctx context.Context, ri dynamic.ResourceInterface) (networ
 		dst *[]byte
 		ref string
 	}{{&v.caPEM, st.Refs.CA}, {&v.clientCert, c.ClientCert}, {&v.clientKey, c.ClientKey}} {
-		if *f.dst, err = os.ReadFile(fileRef(f.ref)); err != nil {
+		if *f.dst, err = os.ReadFile(openbaoctl.FileRef(f.ref)); err != nil {
 			return networkVault{}, err
 		}
 	}

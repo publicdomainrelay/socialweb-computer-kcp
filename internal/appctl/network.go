@@ -26,6 +26,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpapply"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/jsonx"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 
@@ -727,7 +728,7 @@ func (n *networks) reconcile(ctx context.Context, u *unstructured.Unstructured) 
 		published = *n.value
 	} else {
 		published.Ingress = netIngress
-		if n.value == nil || n.valueUID != string(o.UID) || !sameSpec(*n.value, published) {
+		if n.value == nil || n.valueUID != string(o.UID) || !jsonx.Equal(*n.value, published) {
 			n.value = &published
 			n.valueUID = string(o.UID)
 			desired, err = networkDesired(o, n.ctl.c.workspace(), stateRoot, leases, published, alicePublicURL, bobPublicURL)

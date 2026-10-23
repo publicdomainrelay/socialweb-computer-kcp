@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -77,7 +76,7 @@ func (r *clusterResource[T]) Create(ctx context.Context, cluster string, obj *T)
 	}
 	response, err := c.Post().Resource(r.gvr.Resource).Body(raw).Do(ctx).Raw()
 	if err != nil {
-		return fmt.Errorf("guestcontrolplane: create %s %s in %s: %w%s", r.gvr.Resource, nameOf(raw), cluster, err, detail(response))
+		return fmt.Errorf("guestcontrolplane: create %s %s in %s: %w%s", r.gvr.Resource, kcpstore.NameOf(raw), cluster, err, kcpstore.ResponseDetail(response))
 	}
 	return nil
 }
@@ -105,7 +104,7 @@ func (r *clusterResource[T]) PatchStatus(ctx context.Context, cluster, name, res
 	}
 	response, err := c.Patch(types.MergePatchType).SubResource("status").Resource(r.gvr.Resource).Name(name).Body(body).Do(ctx).Raw()
 	if err != nil {
-		return fmt.Errorf("guestcontrolplane: write %s status for %s in %s: %w%s", r.gvr.Resource, name, cluster, err, detail(response))
+		return fmt.Errorf("guestcontrolplane: write %s status for %s in %s: %w%s", r.gvr.Resource, name, cluster, err, kcpstore.ResponseDetail(response))
 	}
 	return nil
 }
@@ -127,7 +126,7 @@ func (r *clusterResource[T]) ApplyStatus(ctx context.Context, cluster, kind, nam
 	response, err := c.Patch(types.ApplyPatchType).SubResource("status").Resource(r.gvr.Resource).Name(name).
 		Param("fieldManager", fieldManager).Param("force", "true").Body(body).Do(ctx).Raw()
 	if err != nil {
-		return fmt.Errorf("guestcontrolplane: apply %s status for %s in %s: %w%s", r.gvr.Resource, name, cluster, err, detail(response))
+		return fmt.Errorf("guestcontrolplane: apply %s status for %s in %s: %w%s", r.gvr.Resource, name, cluster, err, kcpstore.ResponseDetail(response))
 	}
 	return nil
 }
@@ -139,24 +138,7 @@ func (r *clusterResource[T]) PatchJSON(ctx context.Context, cluster, name string
 	}
 	response, err := c.Patch(types.JSONPatchType).Resource(r.gvr.Resource).Name(name).Body(patch).Do(ctx).Raw()
 	if err != nil {
-		return fmt.Errorf("guestcontrolplane: patch %s %s in %s: %w%s", r.gvr.Resource, name, cluster, err, detail(response))
+		return fmt.Errorf("guestcontrolplane: patch %s %s in %s: %w%s", r.gvr.Resource, name, cluster, err, kcpstore.ResponseDetail(response))
 	}
 	return nil
-}
-
-func detail(response []byte) string {
-	if len(response) == 0 {
-		return ""
-	}
-	return ": " + strings.TrimSpace(string(response))
-}
-
-func nameOf(raw []byte) string {
-	var obj struct {
-		Metadata struct {
-			Name string `json:"name"`
-		} `json:"metadata"`
-	}
-	_ = json.Unmarshal(raw, &obj)
-	return obj.Metadata.Name
 }

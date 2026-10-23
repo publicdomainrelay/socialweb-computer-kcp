@@ -420,7 +420,7 @@ func (g *gateway) rootVault(ctx context.Context, rec devinstance.Record) (vaultm
 			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &o); err != nil {
 				return vaultmain.RootAccess{}, err
 			}
-			if appctl.RootVaultSynced(&o) {
+			if openbaoctl.Synced(&o) {
 				return vaultmain.RootAccessOf(o)
 			}
 			last = fmt.Sprintf("%s %s", o.Status.Phase, o.Status.Message)

@@ -376,7 +376,7 @@ func (h *Host) End() End {
 		}
 		return End{Message: claimGoneMessage}
 	}
-	if !endedClaimPhase(claim.Status.Phase) {
+	if !EndedClaimPhase(claim.Status.Phase) {
 		return End{}
 	}
 	end := End{Message: endedMessage(claim), Declined: MarketDeclined(claim),
@@ -476,7 +476,7 @@ func (h *Host) read(ctx context.Context) (*v1alpha1.NodeClaim, error) {
 	return claim, nil
 }
 
-func endedClaimPhase(phase v1alpha1.NodeClaimPhase) bool {
+func EndedClaimPhase(phase v1alpha1.NodeClaimPhase) bool {
 	return phase == v1alpha1.NodeClaimFailed || phase == v1alpha1.NodeClaimReleased ||
 		phase == v1alpha1.NodeClaimLost
 }

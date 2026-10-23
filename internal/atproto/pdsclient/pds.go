@@ -12,6 +12,7 @@ import (
 
 	"github.com/bluesky-social/indigo/atproto/syntax"
 	"github.com/ipfs/go-cid"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 )
 
 var (
@@ -218,4 +219,24 @@ func (e *XRPCError) Error() string {
 		return fmt.Sprintf("pdsclient: xrpc status %d: %s", e.StatusCode, e.Message)
 	}
 	return fmt.Sprintf("pdsclient: xrpc %s: %s (status %d)", e.Code, e.Message, e.StatusCode)
+}
+
+func ParseRepoPath(repo, collection, rkey string) (RepoPath, error) {
+	did, err := syntax.ParseDID(repo)
+	if err != nil {
+		return RepoPath{}, fmt.Errorf("%w: repo %q: %v", market.ErrInvalidRef, repo, err)
+	}
+	nsid, err := syntax.ParseNSID(collection)
+	if err != nil {
+		return RepoPath{}, fmt.Errorf("%w: collection %q: %v", market.ErrInvalidRef, collection, err)
+	}
+	path := RepoPath{Repo: did, Collection: nsid}
+	if rkey != "" {
+		key, err := syntax.ParseRecordKey(rkey)
+		if err != nil {
+			return RepoPath{}, fmt.Errorf("%w: rkey %q: %v", market.ErrInvalidRef, rkey, err)
+		}
+		path.Rkey = key
+	}
+	return path, nil
 }

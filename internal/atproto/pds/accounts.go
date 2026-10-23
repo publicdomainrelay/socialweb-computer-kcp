@@ -13,6 +13,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/repo"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/serviceauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
 )
 
@@ -281,7 +282,7 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleRefreshSession(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	scheme, token, ok := bearerToken(r.Header.Get("Authorization"))
+	scheme, token, ok := serviceauth.SplitAuthorization(r.Header.Get("Authorization"))
 	if !ok || !strings.EqualFold(scheme, "Bearer") {
 		writeXRPCError(w, http.StatusUnauthorized, "AuthenticationRequired", "refresh token required")
 		return
@@ -336,7 +337,7 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		httpjson.Write(w, http.StatusOK, map[string]any{})
 		return
 	}
-	scheme, token, ok := bearerToken(r.Header.Get("Authorization"))
+	scheme, token, ok := serviceauth.SplitAuthorization(r.Header.Get("Authorization"))
 	if !ok || !strings.EqualFold(scheme, "Bearer") {
 		writeXRPCError(w, http.StatusUnauthorized, "AuthenticationRequired", "refresh token required")
 		return

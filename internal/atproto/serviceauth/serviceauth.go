@@ -96,7 +96,7 @@ func (v *Verifier) Verify(ctx context.Context, token string, lexMethod syntax.NS
 }
 
 func (v *Verifier) VerifyRequest(r *http.Request) (syntax.DID, error) {
-	scheme, token, ok := authorizationCredentials(r.Header.Get("Authorization"))
+	scheme, token, ok := SplitAuthorization(r.Header.Get("Authorization"))
 	if !ok || !strings.EqualFold(scheme, "Bearer") {
 		return "", fmt.Errorf("%w: missing bearer token", ErrMalformed)
 	}
@@ -147,7 +147,7 @@ func (v *Verifier) middleware(next http.Handler, mandatory bool) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if scheme, _, ok := authorizationCredentials(authorization); !ok || !strings.EqualFold(scheme, "Bearer") {
+		if scheme, _, ok := SplitAuthorization(authorization); !ok || !strings.EqualFold(scheme, "Bearer") {
 			if mandatory {
 				writeUnauthorized(w, "atproto service auth required, but missing or incorrect formatting")
 				return
@@ -171,7 +171,7 @@ func (v *Verifier) middleware(next http.Handler, mandatory bool) http.Handler {
 	})
 }
 
-func authorizationCredentials(header string) (string, string, bool) {
+func SplitAuthorization(header string) (string, string, bool) {
 	parts := strings.Fields(header)
 	if len(parts) != 2 {
 		return "", "", false

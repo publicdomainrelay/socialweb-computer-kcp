@@ -39,21 +39,19 @@ type RootAccess struct {
 	CertRole   string
 }
 
-func fileRef(ref string) string { return strings.TrimPrefix(ref, "file:") }
-
 func RootAccessOf(o v1alpha1.OpenBaoServer) (RootAccess, error) {
 	if o.Status.Phase != v1alpha1.OpenBaoServerPhaseReady || o.Status.Address == "" {
 		return RootAccess{}, fmt.Errorf("the OpenBaoServer %s is %s (%s), not Ready", o.Name, o.Status.Phase, o.Status.Message)
 	}
 	a := RootAccess{Server: o.Name, Address: o.Status.Address, CertMount: openbaoctl.CertAuthMount}
 	if o.Status.Refs != nil {
-		a.CAFile = fileRef(o.Status.Refs.CA)
+		a.CAFile = openbaoctl.FileRef(o.Status.Refs.CA)
 	}
 	for _, c := range o.Status.Clients {
 		if c.Name != vaultlayout.RootClient {
 			continue
 		}
-		a.ClientCert, a.ClientKey, a.CertRole = fileRef(c.ClientCert), fileRef(c.ClientKey), c.CertAuthRole
+		a.ClientCert, a.ClientKey, a.CertRole = openbaoctl.FileRef(c.ClientCert), openbaoctl.FileRef(c.ClientKey), c.CertAuthRole
 		if c.CertAuthMount != "" {
 			a.CertMount = c.CertAuthMount
 		}

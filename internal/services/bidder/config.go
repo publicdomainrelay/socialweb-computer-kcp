@@ -15,6 +15,7 @@ import (
 
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauthclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
@@ -232,7 +233,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 	if err != nil {
 		return Config{}, err
 	}
-	if err := validateMarketComms("bidder", bidderSpec.Comms); err != nil {
+	if err := market.ValidateComms("bidder", bidderSpec.Comms); err != nil {
 		return Config{}, err
 	}
 	stateDir := deps.StateDir
@@ -566,18 +567,6 @@ func parsePolicyArgs(raw string) (map[string]string, error) {
 		}
 	}
 	return out, nil
-}
-
-func validateMarketComms(prefix string, comms *v1alpha1.MarketComms) error {
-	if comms == nil || strings.TrimSpace(string(comms.Mode)) == "" {
-		return nil
-	}
-	switch comms.Mode {
-	case v1alpha1.MarketCommsModeXRPC, v1alpha1.MarketCommsModeFirehose, v1alpha1.MarketCommsModeBoth:
-		return nil
-	default:
-		return fmt.Errorf("%s: unknown comms mode %q", prefix, comms.Mode)
-	}
 }
 
 func (c Config) inboundXRPC() bool {

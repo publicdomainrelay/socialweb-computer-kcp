@@ -18,6 +18,7 @@ import (
 
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	atprotooauth "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauthclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
@@ -284,7 +285,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 	if err := spec.Spec.Decode(&decoded); err != nil {
 		return Config{}, fmt.Errorf("requester: decoding the component spec: %w", err)
 	}
-	if err := validateMarketComms("requester", decoded.Comms); err != nil {
+	if err := market.ValidateComms("requester", decoded.Comms); err != nil {
 		return Config{}, err
 	}
 	cfg := Config{
@@ -690,18 +691,6 @@ func (c *Config) defaults() {
 	}
 	if c.Log == nil && c.Deps.Log != nil {
 		c.Log = c.Deps.Log
-	}
-}
-
-func validateMarketComms(prefix string, comms *v1alpha1.MarketComms) error {
-	if comms == nil || strings.TrimSpace(string(comms.Mode)) == "" {
-		return nil
-	}
-	switch comms.Mode {
-	case v1alpha1.MarketCommsModeXRPC, v1alpha1.MarketCommsModeFirehose, v1alpha1.MarketCommsModeBoth:
-		return nil
-	default:
-		return fmt.Errorf("%s: unknown comms mode %q", prefix, comms.Mode)
 	}
 }
 

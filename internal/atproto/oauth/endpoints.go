@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/serviceauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
 )
 
@@ -221,7 +222,7 @@ func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		}
 		account = authenticated
 	} else {
-		scheme, token, ok := authCredentials(r.Header.Get("Authorization"))
+		scheme, token, ok := serviceauth.SplitAuthorization(r.Header.Get("Authorization"))
 		if !ok || !strings.EqualFold(scheme, AuthSchemeDPoP) {
 			writeOAuthError(w, http.StatusUnauthorized, "invalid_request", "DPoP authorization required")
 			return

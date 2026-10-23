@@ -2,11 +2,14 @@ package statesync
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	v1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 )
@@ -105,4 +108,14 @@ func (r *Registry) Lookup(name string) (Adapter, error) {
 
 func normalizeAdapterName(name string) string {
 	return strings.ToLower(strings.TrimSpace(name))
+}
+
+func InboxObservation(request Request, ref string) Observation {
+	sum := sha256.Sum256(request.Payload)
+	return Observation{
+		Exists: true,
+		Ref:    ref,
+		Hash:   "sha256:" + hex.EncodeToString(sum[:]),
+		At:     time.Now().UTC().Format(time.RFC3339),
+	}
 }

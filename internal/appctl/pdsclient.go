@@ -14,6 +14,7 @@ import (
 
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
 )
 
 const pdsClientTimeout = 30 * time.Second
@@ -105,7 +106,7 @@ func pdsTLS(endpoint, caPEM string) (*tls.Config, error) {
 func remotePDSTLS(spec pdsv1alpha1.RemotePDSTLS, fallbackCA string) (*tls.Config, error) {
 	caPEM := strings.TrimSpace(fallbackCA)
 	if ref := strings.TrimSpace(spec.CABundleRef); ref != "" {
-		raw, err := os.ReadFile(fileRef(ref))
+		raw, err := os.ReadFile(openbaoctl.FileRef(ref))
 		if err != nil {
 			return nil, err
 		}

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/syntax"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/serviceauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
 )
@@ -298,7 +299,7 @@ func DIDFromContext(ctx context.Context) (syntax.DID, bool) {
 func (s *Server) ResourceHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authorization := r.Header.Get("Authorization")
-		scheme, token, ok := authCredentials(authorization)
+		scheme, token, ok := serviceauth.SplitAuthorization(authorization)
 		if !ok || !strings.EqualFold(scheme, AuthSchemeDPoP) {
 			next.ServeHTTP(w, r)
 			return
@@ -361,14 +362,6 @@ func writeResourceError(w http.ResponseWriter, status int, code, description, no
 		w.Header().Set(HeaderDPoPNonce, nonce)
 	}
 	writeOAuthError(w, status, code, description)
-}
-
-func authCredentials(header string) (string, string, bool) {
-	parts := strings.Fields(header)
-	if len(parts) != 2 {
-		return "", "", false
-	}
-	return parts[0], parts[1], true
 }
 
 func (s *Server) ValidateAccessToken(ctx context.Context, token string) (*Session, error) {

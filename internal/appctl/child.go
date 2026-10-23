@@ -31,6 +31,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/jsonx"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/kcprest"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 )
@@ -152,7 +153,7 @@ func (n *networks) coreLive(ctx context.Context, c child) bool {
 
 func (n *networks) placeChild(ctx context.Context, c child, gw *devinstance.GatewayChild) (devinstance.Record, error) {
 	var rec devinstance.Record
-	if fsx.ReadJSON(c.layout.Record, &rec) == nil && rec.Ready && rec.SharedKcp != "" && n.coreLive(ctx, c) && sameSpec(rec.Gateway, gw) {
+	if fsx.ReadJSON(c.layout.Record, &rec) == nil && rec.Ready && rec.SharedKcp != "" && n.coreLive(ctx, c) && jsonx.Equal(rec.Gateway, gw) {
 		return rec, nil
 	}
 	parent, err := n.ctl.c.Record()

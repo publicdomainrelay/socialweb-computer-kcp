@@ -2,8 +2,6 @@ package requester
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -56,16 +54,6 @@ func decodeMarketInboxPayload(raw json.RawMessage) (marketInboxPayload, error) {
 	return payload, nil
 }
 
-func marketInboxObservation(request statesync.Request, ref string) statesync.Observation {
-	sum := sha256.Sum256(request.Payload)
-	return statesync.Observation{
-		Exists: true,
-		Ref:    ref,
-		Hash:   "sha256:" + hex.EncodeToString(sum[:]),
-		At:     time.Now().UTC().Format(time.RFC3339),
-	}
-}
-
 func isBidCollection(collection string) bool {
 	switch collection {
 	case market.BidNSID, market.BidsFreeNSID, market.BidsX402NSID:
@@ -101,9 +89,9 @@ func (a *marketInboxAdapter) Observe(ctx context.Context, request statesync.Requ
 			}
 			return statesync.Observation{}, err
 		}
-		return marketInboxObservation(request, payload.URI), nil
+		return statesync.InboxObservation(request, payload.URI), nil
 	}
-	return marketInboxObservation(request, request.Key), nil
+	return statesync.InboxObservation(request, request.Key), nil
 }
 
 func (a *marketInboxAdapter) Apply(ctx context.Context, request statesync.Request) (statesync.Observation, error) {
@@ -135,7 +123,7 @@ func (a *marketInboxAdapter) Apply(ctx context.Context, request statesync.Reques
 			return statesync.Observation{}, err
 		}
 	}
-	return marketInboxObservation(request, payload.URI), nil
+	return statesync.InboxObservation(request, payload.URI), nil
 }
 
 func (a *marketInboxAdapter) Delete(ctx context.Context, request statesync.Request) error {
@@ -149,11 +137,11 @@ type inboxNoopAdapter struct {
 func (a *inboxNoopAdapter) Name() string { return a.name }
 
 func (a *inboxNoopAdapter) Observe(ctx context.Context, request statesync.Request) (statesync.Observation, error) {
-	return marketInboxObservation(request, request.Key), nil
+	return statesync.InboxObservation(request, request.Key), nil
 }
 
 func (a *inboxNoopAdapter) Apply(ctx context.Context, request statesync.Request) (statesync.Observation, error) {
-	return marketInboxObservation(request, request.Key), nil
+	return statesync.InboxObservation(request, request.Key), nil
 }
 
 func (a *inboxNoopAdapter) Delete(ctx context.Context, request statesync.Request) error {
