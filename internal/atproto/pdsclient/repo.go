@@ -459,6 +459,14 @@ func firstString(data map[string]any, keys ...string) string {
 	return ""
 }
 
+func DPoPSourceFromData(data map[string]any) (DPoPSource, error) {
+	key, err := dpopKey(data)
+	if err != nil {
+		return nil, err
+	}
+	return &dpopSigner{key: key}, nil
+}
+
 func dpopKey(data map[string]any) (atcrypto.PrivateKeyExportable, error) {
 	if value, ok := data["dpopPrivateJwk"]; ok {
 		key, err := dpopKeyValue(value)

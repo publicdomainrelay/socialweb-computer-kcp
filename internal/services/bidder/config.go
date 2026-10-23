@@ -320,6 +320,13 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
+	if cfg.PDSDPoP == nil && cfg.PDSAccessTokenRef != nil && deps.Credentials != nil {
+		if credential, err := deps.Credentials.Resolve(context.Background(), *cfg.PDSAccessTokenRef); err == nil {
+			if source, err := pdsclient.DPoPSourceFromData(credential.Data); err == nil {
+				cfg.PDSDPoP = source
+			}
+		}
+	}
 	return cfg, nil
 }
 
