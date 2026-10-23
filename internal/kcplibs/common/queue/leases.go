@@ -3,33 +3,38 @@ package queue
 import (
 	"time"
 
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/expiringmap"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/ref"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 )
+
+const defaultLeaseTTL = 2 * time.Minute
 
 type Lease struct {
 	Parent ref.Ref
 }
 
 type Leases struct {
-	entries *expiringmap.Map[ref.Ref, Lease]
+	entries *ttlcache.Cache[ref.Ref, Lease]
 }
 
-func NewLeases(ttl time.Duration) *Leases {
-	return &Leases{entries: expiringmap.NewMap[ref.Ref, Lease](ttl)}
+func NewLeases(ttl time.Duration, now func() time.Time) *Leases {
+	if ttl <= 0 {
+		ttl = defaultLeaseTTL
+	}
+	return &Leases{entries: ttlcache.New[ref.Ref, Lease](ttlcache.Options{TTL: ttl, Now: now})}
 }
 
-func (l *Leases) Grant(run, parent ref.Ref, now time.Time) {
-	l.entries.Set(run, Lease{Parent: parent}, now)
+func (l *Leases) Grant(run, parent ref.Ref) {
+	l.entries.Set(run, Lease{Parent: parent})
 }
 
 func (l *Leases) Forget(run ref.Ref) {
 	l.entries.Delete(run)
 }
 
-func (l *Leases) Count(parent ref.Ref, observed map[ref.Ref]string, now time.Time, lifecycle Lifecycle) int32 {
-	l.entries.Expire(now)
-	l.entries.DeleteIf(func(run ref.Ref, lease Lease) bool {
+func (l *Leases) Count(parent ref.Ref, observed map[ref.Ref]string, lifecycle Lifecycle) int32 {
+	l.entries.Prune()
+	l.entries.DeleteFunc(func(run ref.Ref, lease Lease) bool {
 		if lease.Parent != parent {
 			return false
 		}

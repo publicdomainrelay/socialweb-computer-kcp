@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/vault"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/expiringmap"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 )
 
 const DefaultAuthorityTTL = 5 * time.Minute
@@ -47,7 +47,7 @@ type Provisioner struct {
 
 	root *vault.RootCA
 
-	namespaces *expiringmap.Map[string, vault.Authority]
+	namespaces *ttlcache.Cache[string, vault.Authority]
 }
 
 var _ vault.PKIProvisioner = (*Provisioner)(nil)
@@ -80,7 +80,7 @@ func New(opts Options) (*Provisioner, error) {
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
-	return &Provisioner{opts: opts, namespaces: expiringmap.NewMap[string, vault.Authority](opts.AuthorityTTL)}, nil
+	return &Provisioner{opts: opts, namespaces: ttlcache.New[string, vault.Authority](ttlcache.Options{TTL: opts.AuthorityTTL, Now: opts.Now})}, nil
 }
 
 func (p *Provisioner) EnsureRoot(ctx context.Context) (vault.RootCA, error) {
@@ -129,14 +129,14 @@ func (p *Provisioner) EnsureAuthority(ctx context.Context, path string) (vault.A
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if cached, ok := p.namespaces.Get(path, p.opts.Now()); ok {
+	if cached, ok := p.namespaces.Get(path); ok {
 		return cached, nil
 	}
 	authority, err := p.ensureAuthority(ctx, path)
 	if err != nil {
 		return vault.Authority{}, err
 	}
-	p.namespaces.Set(path, authority, p.opts.Now())
+	p.namespaces.Set(path, authority)
 	return authority, nil
 }
 
