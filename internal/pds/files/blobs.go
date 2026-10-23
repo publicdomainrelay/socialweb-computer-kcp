@@ -1,4 +1,4 @@
-package pds
+package files
 
 import (
 	"bytes"
@@ -18,6 +18,8 @@ import (
 
 	atpds "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pds"
 )
+
+var _ atpds.BlobStore = (*FileBlobStore)(nil)
 
 type FileBlobStore struct {
 	dir string

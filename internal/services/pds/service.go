@@ -28,6 +28,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/pds/files"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/pds/plcsubmit"
 )
 
 const (
@@ -44,9 +46,6 @@ type Service struct {
 	stateDir      string
 	publicBaseURL string
 	plcURL        string
-	certFile      string
-	keyFile       string
-	caBundle      string
 
 	mu       sync.Mutex
 	started  bool
@@ -85,14 +84,6 @@ func New(spec v1alpha1.PdsSpec, deps Deps) (*Service, error) {
 	}
 	if s.plcURL == "" && spec.Network != nil {
 		s.plcURL = strings.TrimRight(strings.TrimSpace(spec.Network.PLCDirectoryURL), "/")
-	}
-	if spec.TLS != nil && spec.TLS.Enabled {
-		s.certFile = filePath(spec.TLS.CertRef)
-		s.keyFile = keyFileFor(s.certFile)
-		s.caBundle = strings.TrimSpace(spec.TLS.CABundle)
-	}
-	if s.caBundle == "" && spec.Network != nil {
-		s.caBundle = strings.TrimSpace(spec.Network.CABundle)
 	}
 	if spec.RequireIngress && s.publicBaseURL != "" {
 		if err := publicEndpoint(s.publicBaseURL); err != nil {
@@ -162,11 +153,7 @@ func (s *Service) Start(ctx context.Context) error {
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		return fmt.Errorf("pds: creating the state directory: %w", err)
 	}
-	credentials := s.deps.Credentials
 	log := s.deps.Log
-	if _, err := s.buildTLSConfig(); err != nil {
-		return err
-	}
 	var err error
 	var (
 		repoStore    *repo.SQLiteStore
@@ -220,25 +207,25 @@ func (s *Service) Start(ctx context.Context) error {
 	if s.spec.Storage != nil {
 		blobDir = cmp.Or(strings.TrimSpace(s.spec.Storage.BlobsDir), blobDir)
 	}
-	blobStore, err := NewFileBlobStore(blobDir)
+	blobStore, err := files.NewFileBlobStore(blobDir)
 	if err != nil {
 		return err
 	}
 
 	var sessionSecret []byte
 	if s.mode == atpds.ModeFull {
-		sessionSecret, err = resolveSessionSecret(ctx, stateDir, s.componentPath(SessionSecretFile), s.spec.VaultRef, credentials)
+		sessionSecret, err = files.SessionSecret(stateDir, s.componentPath(SessionSecretFile))
 		if err != nil {
 			return err
 		}
 	}
 
-	keyStore, err := resolveRepoKeyStore(s.componentPath(RepoKeyDir), s.spec.VaultRef, credentials)
+	keyStore, err := files.RepoKeyStore(s.componentPath(RepoKeyDir))
 	if err != nil {
 		return err
 	}
 	if s.mode == atpds.ModeFull && keyStore == nil {
-		return errors.New("pds: full mode needs a repo key store (repoKeyDir or a credential ref)")
+		return errors.New("pds: full mode needs a repo key store (a state dir for repo-keys)")
 	}
 
 	directory := buildDirectory(plcURL, plcClient, handlers, s.deps.Egress)
@@ -246,11 +233,11 @@ func (s *Service) Start(ctx context.Context) error {
 	var submitter atpds.PLCSubmitter
 	var rotation atcrypto.PrivateKey
 	if s.mode == atpds.ModeFull && plcURL != "" {
-		rotation, err = resolveRotationKey(ctx, stateDir, s.componentPath(RotationKeyFile), s.spec.VaultRef, credentials)
+		rotation, err = files.RotationKey(stateDir, s.componentPath(RotationKeyFile))
 		if err != nil {
 			return err
 		}
-		submitter, err = NewHTTPPLCSubmitter(plcURL, rotation, plcClient)
+		submitter, err = plcsubmit.New(plcURL, rotation, plcClient)
 		if err != nil {
 			return err
 		}
@@ -364,7 +351,7 @@ func (s *Service) oauthConfig(stateDir, baseURL string) (*atpds.OAuthConfig, err
 		return nil, nil
 	}
 	opts := s.spec.OAuth
-	signerKey, err := resolveOAuthSigner(stateDir)
+	signerKey, err := files.OAuthSigner(stateDir)
 	if err != nil {
 		return nil, err
 	}
@@ -510,4 +497,12 @@ func (s *Service) ServiceDID() string {
 		return ""
 	}
 	return server.ServiceDID()
+}
+
+func (s *Service) UpdateService(ctx context.Context, did syntax.DID, service string) error {
+	server := s.Server()
+	if server == nil {
+		return errors.New("pds: the service is not started")
+	}
+	return server.UpdateService(ctx, did, service)
 }

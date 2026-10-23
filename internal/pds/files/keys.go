@@ -1,7 +1,6 @@
-package pds
+package files
 
 import (
-	"cmp"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -19,17 +18,100 @@ import (
 	"github.com/bluesky-social/indigo/atproto/syntax"
 
 	atpds "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pds"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
-
-	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
-type CredentialWriter interface {
-	WriteCredential(ctx context.Context, ref component.CredentialRef, data map[string]any) error
+var (
+	_ atpds.RepoKeyStore = (*FileRepoKeyStore)(nil)
+	_ atpds.RepoKeyStore = (*JSONFileRepoKeyStore)(nil)
+)
+
+func Path(raw string) string {
+	raw = strings.TrimSpace(raw)
+	for _, prefix := range []string{"file://", "file:"} {
+		if after, ok := strings.CutPrefix(raw, prefix); ok {
+			return after
+		}
+	}
+	return raw
 }
 
-type CredentialDeleter interface {
-	DeleteCredential(ctx context.Context, ref component.CredentialRef) error
+func RepoKeyStore(repoKeyPath string) (atpds.RepoKeyStore, error) {
+	raw := strings.TrimSpace(repoKeyPath)
+	if raw == "" {
+		return nil, nil
+	}
+	path := Path(raw)
+	if info, err := os.Stat(path); err == nil {
+		if info.IsDir() {
+			return NewFileRepoKeyStore(path)
+		}
+		return NewJSONFileRepoKeyStore(path)
+	}
+	if strings.HasSuffix(raw, string(os.PathSeparator)) || filepath.Ext(path) == "" {
+		return NewFileRepoKeyStore(path)
+	}
+	return NewJSONFileRepoKeyStore(path)
+}
+
+func SessionSecret(stateDir string, path string) ([]byte, error) {
+	if strings.TrimSpace(path) != "" {
+		data, err := pathData(path)
+		if err != nil {
+			return nil, fmt.Errorf("pds: resolving the session secret: %w", err)
+		}
+		return sessionSecretFromData(data)
+	}
+	file := filepath.Join(stateDir, "session-secret")
+	data, err := os.ReadFile(file)
+	if err == nil {
+		secret, decodeErr := hex.DecodeString(strings.TrimSpace(string(data)))
+		if decodeErr != nil || len(secret) == 0 {
+			return nil, fmt.Errorf("pds: the persisted session secret is invalid")
+		}
+		return secret, nil
+	}
+	if !errors.Is(err, fs.ErrNotExist) {
+		return nil, fmt.Errorf("pds: reading the session secret: %w", err)
+	}
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		return nil, fmt.Errorf("pds: generating the session secret: %w", err)
+	}
+	if err := writePrivateFile(file, []byte(hex.EncodeToString(secret)+"\n")); err != nil {
+		return nil, fmt.Errorf("pds: persisting the session secret: %w", err)
+	}
+	return secret, nil
+}
+
+func OAuthSigner(stateDir string) (atcrypto.PrivateKey, error) {
+	return resolvePrivateKey(stateDir, "oauth-signing.key", func() (atcrypto.PrivateKeyExportable, error) {
+		return atcrypto.GeneratePrivateKeyP256()
+	})
+}
+
+func RotationKey(stateDir string, path string) (atcrypto.PrivateKey, error) {
+	if strings.TrimSpace(path) != "" {
+		data, err := pathData(path)
+		if err != nil {
+			return nil, fmt.Errorf("pds: resolving the rotation key: %w", err)
+		}
+		return privateKeyFromData(data)
+	}
+	return resolvePrivateKey(stateDir, "plc-rotation.key", func() (atcrypto.PrivateKeyExportable, error) {
+		return atcrypto.GeneratePrivateKeyK256()
+	})
+}
+
+func pathData(raw string) (map[string]any, error) {
+	data, err := os.ReadFile(Path(raw))
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]any{}
+	if json.Unmarshal(data, &out) == nil && out != nil {
+		return out, nil
+	}
+	return map[string]any{"value": string(data)}, nil
 }
 
 type FileRepoKeyStore struct {
@@ -87,72 +169,6 @@ func (s *FileRepoKeyStore) DeleteRepoKey(_ context.Context, did syntax.DID) erro
 		return fmt.Errorf("pds: deleting the repo signing key: %w", err)
 	}
 	return nil
-}
-
-type CredentialRepoKeyStore struct {
-	Resolver component.CredentialResolver
-	Ref      component.CredentialRef
-	Field    string
-}
-
-func NewCredentialRepoKeyStore(resolver component.CredentialResolver, ref component.CredentialRef, field string) (*CredentialRepoKeyStore, error) {
-	if resolver == nil {
-		return nil, errors.New("pds: the credential repo key store needs a credential resolver")
-	}
-	if err := ref.Check(); err != nil {
-		return nil, err
-	}
-	field = strings.TrimSpace(field)
-	field = cmp.Or(field, "signingKey")
-	return &CredentialRepoKeyStore{Resolver: resolver, Ref: ref, Field: field}, nil
-}
-
-func (s *CredentialRepoKeyStore) credentialRef(did syntax.DID) component.CredentialRef {
-	ref := s.Ref
-	if strings.Contains(ref.Path, "{did}") {
-		ref.Path = strings.ReplaceAll(ref.Path, "{did}", did.String())
-	} else {
-		ref.Path = strings.TrimRight(ref.Path, "/") + "/" + did.String()
-	}
-	if len(ref.Keys) == 0 {
-		ref.Keys = []string{s.Field}
-	}
-	return ref
-}
-
-func (s *CredentialRepoKeyStore) PutRepoKey(ctx context.Context, did syntax.DID, key atcrypto.PrivateKeyExportable) error {
-	writer, ok := s.Resolver.(CredentialWriter)
-	if !ok {
-		return errors.New("pds: the credential resolver is read-only; configure an explicit repoKeyDir for development")
-	}
-	if key == nil {
-		return errors.New("pds: the repo signing key is nil")
-	}
-	return writer.WriteCredential(ctx, s.credentialRef(did), map[string]any{s.Field: key.Multibase()})
-}
-
-func (s *CredentialRepoKeyStore) GetRepoKey(ctx context.Context, did syntax.DID) (atcrypto.PrivateKeyExportable, error) {
-	cred, err := s.Resolver.Resolve(ctx, s.credentialRef(did))
-	if err != nil {
-		return nil, fmt.Errorf("pds: resolving the repo signing key: %w", err)
-	}
-	raw, ok := cred.Value(s.Field)
-	if !ok || strings.TrimSpace(raw) == "" {
-		return nil, fmt.Errorf("pds: the repo signing key credential has no %s field", s.Field)
-	}
-	key, err := atcrypto.ParsePrivateMultibase(strings.TrimSpace(raw))
-	if err != nil {
-		return nil, fmt.Errorf("pds: parsing the repo signing key: %w", err)
-	}
-	return key, nil
-}
-
-func (s *CredentialRepoKeyStore) DeleteRepoKey(ctx context.Context, did syntax.DID) error {
-	deleter, ok := s.Resolver.(CredentialDeleter)
-	if !ok {
-		return errors.New("pds: the credential resolver cannot delete credentials")
-	}
-	return deleter.DeleteCredential(ctx, s.credentialRef(did))
 }
 
 type JSONFileRepoKeyStore struct {
@@ -244,127 +260,6 @@ func (s *JSONFileRepoKeyStore) DeleteRepoKey(_ context.Context, did syntax.DID) 
 	}
 	delete(keys, did.String())
 	return s.save(keys)
-}
-
-func resolveRepoKeyStore(repoKeyPath string, vaultRef *commonv1.ObjectRef, credentials component.CredentialResolver) (atpds.RepoKeyStore, error) {
-	raw := strings.TrimSpace(repoKeyPath)
-	if raw == "" {
-		return nil, nil
-	}
-	if isVaultPath(raw) || strings.Contains(raw, "{did}") {
-		if credentials == nil {
-			return nil, errors.New("pds: the repo key credential needs a credential resolver")
-		}
-		ref := vaultCredentialRef(raw, vaultRef, nil)
-		return NewCredentialRepoKeyStore(credentials, ref, "")
-	}
-	path := filePath(raw)
-	if info, err := os.Stat(path); err == nil {
-		if info.IsDir() {
-			return NewFileRepoKeyStore(path)
-		}
-		return NewJSONFileRepoKeyStore(path)
-	}
-	if strings.HasSuffix(raw, string(os.PathSeparator)) || filepath.Ext(path) == "" {
-		return NewFileRepoKeyStore(path)
-	}
-	return NewJSONFileRepoKeyStore(path)
-}
-
-func resolveSessionSecret(ctx context.Context, stateDir string, path string, vaultRef *commonv1.ObjectRef, credentials component.CredentialResolver) ([]byte, error) {
-	if strings.TrimSpace(path) != "" {
-		data, err := resolvePathData(ctx, credentials, path, vaultRef, []string{"sessionSecret", "session_secret", "value", "secret"})
-		if err != nil {
-			return nil, fmt.Errorf("pds: resolving the session secret: %w", err)
-		}
-		return sessionSecretFromData(data)
-	}
-	file := filepath.Join(stateDir, "session-secret")
-	data, err := os.ReadFile(file)
-	if err == nil {
-		secret, decodeErr := hex.DecodeString(strings.TrimSpace(string(data)))
-		if decodeErr != nil || len(secret) == 0 {
-			return nil, fmt.Errorf("pds: the persisted session secret is invalid")
-		}
-		return secret, nil
-	}
-	if !errors.Is(err, fs.ErrNotExist) {
-		return nil, fmt.Errorf("pds: reading the session secret: %w", err)
-	}
-	secret := make([]byte, 32)
-	if _, err := rand.Read(secret); err != nil {
-		return nil, fmt.Errorf("pds: generating the session secret: %w", err)
-	}
-	if err := writePrivateFile(file, []byte(hex.EncodeToString(secret)+"\n")); err != nil {
-		return nil, fmt.Errorf("pds: persisting the session secret: %w", err)
-	}
-	return secret, nil
-}
-
-func resolveOAuthSigner(stateDir string) (atcrypto.PrivateKey, error) {
-	return resolvePrivateKey(stateDir, "oauth-signing.key", func() (atcrypto.PrivateKeyExportable, error) {
-		return atcrypto.GeneratePrivateKeyP256()
-	})
-}
-
-func resolveRotationKey(ctx context.Context, stateDir string, path string, vaultRef *commonv1.ObjectRef, credentials component.CredentialResolver) (atcrypto.PrivateKey, error) {
-	if strings.TrimSpace(path) != "" {
-		data, err := resolvePathData(ctx, credentials, path, vaultRef, []string{"rotationKey", "rotation_key", "value", "key"})
-		if err != nil {
-			return nil, fmt.Errorf("pds: resolving the rotation key: %w", err)
-		}
-		return privateKeyFromData(data)
-	}
-	return resolvePrivateKey(stateDir, "plc-rotation.key", func() (atcrypto.PrivateKeyExportable, error) {
-		return atcrypto.GeneratePrivateKeyK256()
-	})
-}
-
-func isVaultPath(raw string) bool {
-	raw = strings.TrimSpace(raw)
-	return strings.HasPrefix(raw, "openbao:") || strings.HasPrefix(raw, "vault:")
-}
-
-func vaultCredentialRef(raw string, vaultRef *commonv1.ObjectRef, keys []string) component.CredentialRef {
-	raw = strings.TrimSpace(raw)
-	raw = strings.TrimPrefix(raw, "openbao:")
-	raw = strings.TrimPrefix(raw, "vault:")
-	ref := component.CredentialRef{Path: strings.Trim(raw, "/"), Keys: append([]string(nil), keys...)}
-	if vaultRef != nil {
-		ref.Server = strings.TrimSpace(vaultRef.Name)
-	}
-	return ref
-}
-
-func resolvePathData(ctx context.Context, credentials component.CredentialResolver, raw string, vaultRef *commonv1.ObjectRef, keys []string) (map[string]any, error) {
-	raw = strings.TrimSpace(raw)
-	if isVaultPath(raw) {
-		if credentials == nil {
-			return nil, errors.New("pds: the credential path needs a credential resolver")
-		}
-		ref := vaultCredentialRef(raw, vaultRef, keys)
-		cred, err := credentials.Resolve(ctx, ref)
-		if err != nil {
-			return nil, err
-		}
-		return cred.Data, nil
-	}
-	path := filePath(raw)
-	if credentials != nil {
-		cred, err := credentials.Resolve(ctx, component.CredentialRef{Mount: "file", Path: path, Keys: append([]string(nil), keys...)})
-		if err == nil {
-			return cred.Data, nil
-		}
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	out := map[string]any{}
-	if json.Unmarshal(data, &out) == nil && out != nil {
-		return out, nil
-	}
-	return map[string]any{"value": string(data)}, nil
 }
 
 func sessionSecretFromData(data map[string]any) ([]byte, error) {

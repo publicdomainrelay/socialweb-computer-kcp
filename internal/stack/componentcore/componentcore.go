@@ -287,7 +287,7 @@ func (c *Core) register() error {
 			return guestcontrolplane.New(spec, guestcontrolplane.Deps{Instance: in, KCP: kcp, Hosts: hosts})
 		})},
 		{pds.Kind, component.Typed(func(in component.Instance, spec v1alpha1.PdsSpec) (*pds.Service, error) {
-			return pds.New(spec, pds.Deps{Instance: in, Credentials: creds, TLS: tlsConfig, Egress: egress(in)})
+			return pds.New(spec, pds.Deps{Instance: in, Egress: egress(in)})
 		})},
 		{requester.Kind, component.Typed(func(in component.Instance, spec v1alpha1.RequesterSpec) (*requester.Service, error) {
 			return requester.New(spec, requester.Deps{Instance: in, KCP: kcp, Credentials: creds, Egress: egress(in)})

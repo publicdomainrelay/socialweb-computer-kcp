@@ -1,4 +1,4 @@
-package pds
+package plcsubmit
 
 import (
 	"bytes"
@@ -23,6 +23,8 @@ import (
 
 const plcMaxResponseBytes = 1 << 20
 
+var _ atpds.PLCSubmitter = (*HTTPPLCSubmitter)(nil)
+
 type HTTPPLCSubmitter struct {
 	baseURL     string
 	rotationKey atcrypto.PrivateKey
@@ -30,7 +32,7 @@ type HTTPPLCSubmitter struct {
 	client      *http.Client
 }
 
-func NewHTTPPLCSubmitter(baseURL string, rotationKey atcrypto.PrivateKey, client *http.Client) (*HTTPPLCSubmitter, error) {
+func New(baseURL string, rotationKey atcrypto.PrivateKey, client *http.Client) (*HTTPPLCSubmitter, error) {
 	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	parsed, err := url.Parse(baseURL)
 	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
@@ -216,14 +218,6 @@ func (p *HTTPPLCSubmitter) verifyServiceUpdate(ctx context.Context, did syntax.D
 		return fmt.Errorf("pds: verifying the DID document: %w", err)
 	}
 	return nil
-}
-
-func (s *Service) UpdateService(ctx context.Context, did syntax.DID, service string) error {
-	server := s.Server()
-	if server == nil {
-		return errors.New("pds: the service is not started")
-	}
-	return server.UpdateService(ctx, did, service)
 }
 
 func (p *HTTPPLCSubmitter) submit(ctx context.Context, did syntax.DID, operation map[string]any) error {
