@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -22,6 +21,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/serviceauth"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
 )
 
 const (
@@ -313,49 +313,23 @@ func (m *HTTPMarket) postWithClient(ctx context.Context, client *http.Client, en
 	if strings.TrimSpace(endpoint) == "" {
 		return 0, nil, fmt.Errorf("requester: no inbound endpoint is advertised for %s", lxm)
 	}
-	raw, err := json.Marshal(body)
-	if err != nil {
-		return 0, nil, err
-	}
 	if timeout <= 0 {
 		timeout = DefaultReceiptTimeout
 	}
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	var resp *http.Response
-	for attempt := range 2 {
-		token, err := m.token(cctx, audience, lxm)
-		if err != nil {
-			return 0, nil, err
-		}
-		req, err := http.NewRequestWithContext(cctx, http.MethodPost, endpoint+"/"+lxm, bytes.NewReader(raw))
-		if err != nil {
-			return 0, nil, err
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Accept", "application/json")
-		req.Header.Set("Authorization", "Bearer "+token)
-		resp, err = client.Do(req)
-		if err != nil {
-			return 0, nil, err
-		}
-		if attempt == 0 && (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) {
-			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, marketReplyLimit))
-			resp.Body.Close()
-			continue
-		}
-		break
-	}
-	defer resp.Body.Close()
-	reply, err := io.ReadAll(io.LimitReader(resp.Body, marketReplyLimit))
-	if err != nil {
-		return resp.StatusCode, nil, err
+	auth := xrpc.NewServiceAuth(xrpc.MinterFunc(m.token), audience, lxm)
+	reply, err := xrpc.Procedure[any, xrpc.Reply](cctx, &xrpc.Client{Host: endpoint, HTTP: client, Auth: auth, Limit: marketReplyLimit}, lxm, body)
+	if xerr, ok := errors.AsType[*xrpc.Error](err); ok {
+		reply = xrpc.Reply{Status: xerr.Status, Body: xerr.Body}
+	} else if err != nil {
+		return 0, nil, err
 	}
 	out := map[string]any{}
-	if len(bytes.TrimSpace(reply)) > 0 {
-		_ = json.Unmarshal(reply, &out)
+	if len(bytes.TrimSpace(reply.Body)) > 0 {
+		_ = json.Unmarshal(reply.Body, &out)
 	}
-	return resp.StatusCode, out, nil
+	return reply.Status, out, nil
 }
 
 func (m *HTTPMarket) SubmitRFP(ctx context.Context, bidder Bidder, rfp SubmitRFPRequest) ([]BidRecord, error) {

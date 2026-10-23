@@ -3,7 +3,6 @@ package requester
 import (
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -24,6 +23,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauthclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/sshtransport"
 
@@ -546,11 +546,11 @@ func networkTLSConfig(n v1alpha1.MarketNetworkValue) *tls.Config {
 	if bundle == "" {
 		return nil
 	}
-	pool := x509.NewCertPool()
-	if !pool.AppendCertsFromPEM([]byte(bundle)) {
+	cfg, err := httpclient.TLSConfig(httpclient.TLSOptions{CAPEM: []byte(bundle)})
+	if err != nil {
 		return nil
 	}
-	return &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
+	return cfg
 }
 
 func accessTokenRef(secret *commonv1.SecretRef, vaultRef *commonv1.ObjectRef) *component.CredentialRef {
@@ -702,7 +702,7 @@ func (c *Config) defaults() {
 		}
 	}
 	if c.HTTPClient == nil {
-		c.HTTPClient = externalHTTPClient(c.Deps, DefaultHTTPTimeout)
+		c.HTTPClient = c.Deps.ExternalHTTPClient(DefaultHTTPTimeout)
 	}
 	if c.PolicyArgs == nil {
 		c.PolicyArgs = map[string]string{}
@@ -810,18 +810,6 @@ func handlerURL(workspace, kind, name string) string {
 		return ""
 	}
 	return "http://" + kcp.ServiceFQDN(kind, "default", workspace, kcp.DefaultServiceDomain)
-}
-
-func externalHTTPClient(deps component.Deps, timeout time.Duration) *http.Client {
-	transport, err := networkdial.NewHTTPTransportWithOptions(networkdial.DialOptions{
-		Hosts:          deps.Hosts,
-		TLSConfig:      deps.TLS,
-		AllowSystemDNS: true,
-	})
-	if err != nil {
-		return &http.Client{Timeout: timeout}
-	}
-	return &http.Client{Timeout: timeout, Transport: transport}
 }
 
 func Factory(ctx context.Context, deps component.Deps, spec component.ComponentSpec) (component.Service, error) {

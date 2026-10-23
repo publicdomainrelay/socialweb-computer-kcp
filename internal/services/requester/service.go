@@ -34,6 +34,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	atprotooauth "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/oauthcallback"
@@ -288,17 +289,7 @@ func (s *Service) registerPDSWithRelay(ctx context.Context) {
 		return
 	}
 	for _, relayURL := range s.cfg.Network.RelayURLs {
-		body := strings.NewReader(fmt.Sprintf(`{"hostname":%q}`, parsed.Host))
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-			strings.TrimRight(relayURL, "/")+"/xrpc/com.atproto.sync.requestCrawl", body)
-		if err != nil {
-			return
-		}
-		req.Header.Set("Content-Type", "application/json")
-		resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
-		if err == nil {
-			resp.Body.Close()
-		}
+		_ = xrpc.RequestCrawl(ctx, &xrpc.Client{Host: relayURL, HTTP: &http.Client{Timeout: 10 * time.Second}}, parsed.Host)
 	}
 }
 
@@ -560,74 +551,32 @@ func (s *Service) authenticateOwnerSession(ctx context.Context) error {
 	s.ownerTokens = tokens
 	s.cfg.PDSAccessToken = access
 	s.cfg.PDSURL = session.Service
-	s.ownerServiceAuth = &ownerSessionServiceAuth{
-		pdsURL: session.Service,
-		tokens: tokens,
-		client: s.cfg.HTTPClient,
-	}
+	s.ownerServiceAuth = newOwnerSessionServiceAuth(session.Service, tokens, s.cfg.HTTPClient)
 	return nil
 }
 
 type ownerSessionServiceAuth struct {
-	pdsURL string
-
-	tokens pdsclient.TokenSource
-
-	client *http.Client
+	minter xrpc.PDSMinter
 }
 
-func (a *ownerSessionServiceAuth) ServiceAuth(ctx context.Context, audience, lxm string) (string, error) {
-	query := url.Values{"aud": {audience}}
-	if lxm != "" {
-		query.Set("lxm", lxm)
-	}
-	target := strings.TrimRight(a.pdsURL, "/") + "/xrpc/com.atproto.server.getServiceAuth?" + query.Encode()
-	client := a.client
+func newOwnerSessionServiceAuth(pdsURL string, tokens pdsclient.TokenSource, client *http.Client) *ownerSessionServiceAuth {
 	if client == nil {
 		client = &http.Client{Timeout: DefaultHTTPTimeout}
 	}
-	for attempt := range 2 {
-		token, err := a.tokens.AccessToken(ctx)
-		if err != nil {
-			return "", fmt.Errorf("requester: owner session token: %w", err)
-		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
-		if err != nil {
-			return "", err
-		}
-		req.Header.Set("Authorization", "Bearer "+token)
-		req.Header.Set("Accept", "application/json")
-		resp, err := client.Do(req)
-		if err != nil {
-			return "", fmt.Errorf("requester: getServiceAuth: %w", err)
-		}
-		raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-		resp.Body.Close()
-		if err != nil {
-			return "", err
-		}
-		if resp.StatusCode < 200 || resp.StatusCode > 299 {
-			if attempt == 0 && (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) {
-				if refresher, ok := a.tokens.(pdsclient.TokenRefresher); ok {
-					if _, refreshErr := refresher.RefreshAccessToken(ctx); refreshErr == nil {
-						continue
-					}
-				}
-			}
-			return "", fmt.Errorf("requester: getServiceAuth answered HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
-		}
-		var out struct {
-			Token string `json:"token"`
-		}
-		if err := json.Unmarshal(raw, &out); err != nil {
-			return "", fmt.Errorf("requester: decoding getServiceAuth: %w", err)
-		}
-		if out.Token == "" {
-			return "", errors.New("requester: getServiceAuth returned no token")
-		}
-		return out.Token, nil
+	var refresh xrpc.TokenFunc
+	if refresher, ok := tokens.(pdsclient.TokenRefresher); ok {
+		refresh = refresher.RefreshAccessToken
 	}
-	return "", errors.New("requester: getServiceAuth kept rejecting the owner session")
+	auth := &xrpc.Bearer{Tokens: xrpc.Refreshing(tokens.AccessToken, refresh)}
+	return &ownerSessionServiceAuth{minter: xrpc.PDSMinter{Client: &xrpc.Client{Host: pdsURL, HTTP: client, Auth: auth}}}
+}
+
+func (a *ownerSessionServiceAuth) ServiceAuth(ctx context.Context, audience, lxm string) (string, error) {
+	token, err := a.minter.ServiceAuth(ctx, audience, lxm)
+	if err != nil {
+		return "", fmt.Errorf("requester: getServiceAuth: %w", err)
+	}
+	return token, nil
 }
 
 func (s *Service) bindSignerKey(ctx context.Context) error {
