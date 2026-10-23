@@ -1,0 +1,858 @@
+plan: "0024"
+title: "Per-component suspend and typed configuration overrides for app roots"
+status: todo
+source: >
+  Every app root has one spec.suspend and one set of root-wide fields. appctl
+  passes that one suspend to every child it creates, including the shared
+  IngressProxy and every Service/Exposure. Suspending a Bidder therefore also
+  suspends GuestControlPlane, Pds, IngressProxy and all exposures. Operators
+  cannot pause one component, cannot tune one component, and cannot use the
+  per-component fields that already exist on some child CRDs because
+  ensureComponentIn replaces the whole child spec on every pass.
+
+  The concrete case is hat-7: it runs an oauthQr bidder as the bobvmbuilder
+  account and has no local Pds. An operator wants to stop only the Bidder
+  market loop so Bob's PDS stops receiving heartbeat writes, while
+  GuestControlPlane and IngressProxy stay Ready and their public URLs keep
+  answering. Today the only supported lever, spec.suspend, stops all of them.
+principle: >
+  The app root is the only writer of its children. A per-component override is
+  desired state on the root, resolved by appctl into one child spec. The child
+  CR stays appctl-owned; direct edits are reverted. Suspend is per component
+  and never cascades unless the root itself is suspended. Configuration is
+  typed and validated; no arbitrary pod specs, no arbitrary commands, no
+  secrets, and no bypass of root ownership.
+old_behavior: |
+  Old bidder discovery: offering refresh was a per-bidder option,
+  offering-refresh-sec, default 300, and 0 disabled it
+  (old tree: atproto-market/hono-bidder/cli-args-env.ts:328,
+  atproto-market/hono-bidder/mod.ts:704; accepted by the root option map at
+  deploy/apps/option-map.yaml:79). The old requester exposed max-concurrent
+  and per-account limits through options (deploy/apps/option-map.yaml:188).
+  The old SSH service exposed max-sessions, sessions-per-account,
+  max-connections, auth-timeout-sec and session-max-sec with explicit
+  defaults (old tree:
+  socialweb-computer-ssh/hono-socialweb-computer-ssh/cli-args-env.json:75-108).
+  The old ingress proxy exposed relay-timeout-ms, keepalive-ms,
+  keepalive-timeout-ms, reconnect-grace-ms and nonce-ttl-ms
+  (old tree: did-key-ingress-proxy/hono-did-key-ingress-proxy/cli-args-env.json:1-60).
+  The old requester bid collection polled every 250 ms
+  (old tree: atproto-market/lib/compute-request-xrpc/mod.ts:1589).
+  The rewrite kept the API names but moved most of these values to constants
+  in the services, and appctl never feeds them from a root CR.
+
+current_gaps: |
+  Ranked by operator impact. Every entry was verified in the current tree.
+  1. App-wide suspend. bidder.go:546 and :751, requester.go:234 and :370,
+     gateway.go:264 and :443, sshgateway.go:270 and :358, network.go:312 and
+     :643 all use one root bool. NewComponentSpec (components.go:161-163)
+     gives it to every child; serviceDesiredNamed and
+     exposureDesiredForService (components.go:262-291) give it to every
+     Service/Exposure; policyEngineDesired (bidder.go:221-224) gives it to
+     PolicyEngine. IngressProxyDesired (components.go:379-386) gives it to the
+     shared proxy. One pause stops the app.
+  2. No override path. ensureComponentIn replaces child spec wholesale on
+     every pass (components.go:572-579). Child fields such as
+     ComponentSpec.Limits and ComponentSpec.ServiceAuth
+     (types_component.go:105-118) are unreachable from a root and any direct
+     child edit is lost.
+  3. Bidder market timing is hardcoded. heartbeat is
+     market.HeartbeatInterval = 60s (atproto/market/nsid.go:56) and offering
+     refresh is DefaultOfferingRefresh = 5m (bidder/config.go:52), assigned at
+     bidder/service.go:366-367. BidderSpec has no timing fields
+     (types_component.go:166-203). The offering loop only reads these fields
+     (bidder/offering.go:105-114), so exposure is small.
+  4. Requester concurrency and timing are hardcoded. MaxConcurrent 64,
+     PerAccount 16, ContractPoll 2s, BidWindow 30s, ReceiptTimeout 5m,
+     ReceiptPoll 500ms, SessionCap 1h, SessionIdle 5m, DirectoryTTL 60s,
+     DirectoryKeys 10000 (requester/config.go:44-90, defaults at :553-599).
+     RequesterSpec (types_component.go:327-365) has no such fields.
+  5. Comms is root-wide. The same MarketComms is copied into BidderSpec
+     (appctl/bidder.go:609), RequesterSpec (requester.go:257), Gateway
+     requester (gateway.go:336) and SshGateway requester (sshgateway.go:299).
+     NetworkApp has no Comms field (types_application.go:620-643), and
+     EventStreams are created per role with no tuning (marketstreams.go:80-110).
+     A gateway cannot use XRPC while its bidder uses firehose.
+  6. Ingress is root-wide. One IngressConfig feeds every Pds and IngressProxy.
+     NetworkIngressConfig forces ingressRef to the network's dispatcher
+     (ingressselect.go:40-56, network.go:330-365); app IngressProxy is always
+     named ingress with an empty state dir (components.go:379-386). Per-PDS
+     public host/provider is impossible without a second root.
+  7. PolicyEngine is hardcoded. policyEngineDesired sets only Suspend and
+     BundledActionsEnabled (bidder.go:221-224). PolicyEngineSpec supports
+     Limits, Trust and Cache (api/policy/v1alpha1/types_policyengine.go:22-50),
+     but no root feeds them.
+  8. Component limits and service auth are declared but dead. ComponentLimits
+     and ComponentServiceAuth exist (types_component.go:63-87, 105-118), but
+     appctl sets neither (no Limits: or ServiceAuth: in internal/appctl).
+     ComponentLimits is not enforced by componentcore; HostProcessLimits
+     (types_hostprocess.go:100-108, hostprocess/reconcile.go:106-115) is the
+     only enforced path.
+  9. Service identity is fixed by root kind. bidder_associate
+     (association.go:21), requester_associate (gateway.go:44, :697), SSH always
+     validates requester_associate (sshtransport/authorizer.go:24), and trust
+     accepts only those two IDs (policyengine/trust/trust.go:18-19). Gateway
+     audience is one root option (gateway.go:291, :360). ComponentServiceAuth
+     is unused.
+  10. GuestControlPlane has no toggles. Its spec exposes only identity, refs,
+      hostnames, storage, serve and HostKeyRef (types_component.go:221-237);
+      appctl never sets HostKeyRef (bidder.go:566-574). Login mount, role,
+      grant sync, issuer retry, host-key attempts and relay are constants
+      (guestcontrolplane/config.go:21-33, :122-178), and ConfigFrom never
+      populates Relay, so relay is always off (guestcontrolplane/relay.go:19).
+  11. PDS settings are hardcoded. appPdsSpec forces Mode Full and
+      AllowLocalhostClients true (appctl/pds.go:201-221); network PDS does the
+      same (network.go:295-306). PdsOAuth TTLs and localhost policy exist
+      (types_component.go:300-310) but no root sets them. Blob and request
+      limits are not in PdsSpec at all (pds/config.go:77-81,
+      atproto/pds/server.go:24-25, :107-113). OAuth scope is only atproto
+      (atproto/oauth/server.go:194); Requester default scope
+      "atproto transition:generic" is a constant (requester/config.go:96).
+  12. SshServer limits and timeouts are hardcoded. MaxConnections,
+      MaxSessions, SessionsPerAccount, MaxAuthAttempts, AuthTimeout,
+      SessionMax and association cache settings are constants
+      (sshserver/config.go:43-67); SshServerSpec has no fields
+      (types_component.go:449-466).
+  13. EventStream timing is hardcoded. Retry, status and reconnect constants
+      (eventstream/controller.go:38-41); EventStreamSpec has no tuning fields.
+  14. Relay and IngressProxy timing is hardcoded. Relay crawl interval 30s
+      (relay/service.go:33, :140); IngressProxy keepalive/nonce/timeouts are
+      provider defaults with no CR fields (ingressproxy/service.go:55-59).
+  15. Gateway child fields are partly reachable only through root options.
+      RequiredDownloads is built from a fixed list (gateway.go:53, :301);
+      gateway-audience, node-poll-interval-ms and post-sign-in-url are root
+      options (gateway.go:254-257, :290-295), not child CR fields users can
+      set through spec.components.
+
+old_gaps_addressed: |
+  This plan restores the old per-service knobs without restoring the old
+  untyped CLI/env surface: offering refresh (including 0 to disable),
+  requester concurrency, SSH limits, ingress timeouts, PDS/OAuth settings and
+  policy-engine cache/limits all become typed child settings resolved from the
+  root.
+
+target_model:
+  spec_components: |
+    Add one field to MarketBidderSpec, MarketRequesterSpec, GatewaySpec,
+    SshGatewaySpec and MarketNetworkSpec:
+
+      components: map[string]ComponentOverride
+
+    The key is the component kind for a singleton (Bidder, Pds, ...) or
+    Kind/name for an explicit instance (Pds/alice, Pds/bob). The existing
+    ComponentKey(kind, name) helper is kind+"/"+name (components.go:157), so
+    the key is already the internal identity. Matching is case-sensitive
+    against CRD kinds. An ambiguous singleton (two Pds children) requires the
+    explicit form. Names are the constants in appctl: bidder, guest-kcp, pds,
+    policy-engine, requester, gateway-api, ssh-server, ingress, plc, relay,
+    dispatcher. NetworkApp also gains components: ComponentOverrides, applied
+    to the child application root it creates; NetworkApp.Stopped remains the
+    coarse per-app stop.
+  crd_shape: |
+    spec:
+      suspend: false                    # unchanged master kill switch
+      components:
+        Bidder:                         # singleton; or Bidder/bidder
+          suspend: true                 # *bool: absent = inherit, false = resume
+          restartPolicy: Always         # Never | OnFailure | Always
+          limits:                       # ComponentLimits, typed
+            cpuMillicores: 500
+            memoryBytes: 1073741824
+            diskBytes: 0
+          serviceAuth:                  # no issuer/key material here
+            audience: [did:web:example]
+            hostname: example
+          comms:                        # per-component transport
+            mode: Firehose
+            relayUrls: [wss://relay.example]
+            firehoseUrls: []
+          ingress:                      # per-component ingress selection
+            provider: xrpc-subscription
+            publicHost: pds.example
+            ingressRef: {kind: IngressProxy, name: ingress}
+          settings:
+            # exactly one block, matching this entry's kind; all are shown
+            bidder:
+              heartbeatIntervalSeconds: 5
+              offeringRefreshSeconds: 0
+              bidTtlSeconds: 86400
+              maxConcurrentGuests: 2
+              policyPollMilliseconds: 250
+              policyTimeoutSeconds: 120
+            requester:
+              maxConcurrent: 32
+              perAccount: 8
+              contractPollMilliseconds: 2000
+              bidWindowSeconds: 30
+              receiptTimeoutSeconds: 300
+              receiptPollMilliseconds: 500
+              sessionCapSeconds: 3600
+              sessionIdleSeconds: 300
+              directoryTTLSeconds: 60
+              directoryKeys: 10000
+              policyPollMilliseconds: 250
+              policyTimeoutSeconds: 120
+              oauthScopes: [atproto, "transition:generic"]
+            guestControlPlane:
+              guestLoginMount: sshsig
+              role: kcp
+              grantSyncSeconds: 30
+              issuerRetrySeconds: 30
+              hostKeyAttempts: 10
+              relayEnabled: false
+            pds:
+              maxBlobSize: 5242880
+              maxRequestBytes: 4194304
+              contactEmail: ops@example
+              oauth:
+                allowLocalhostClients: true
+                accessTokenTTLSeconds: 0
+                refreshTokenTTLSeconds: 0
+                disableLocalhostClients: false
+                scopes: [atproto]
+            sshServer:
+              maxConnections: 10000
+              maxSessions: 1000
+              sessionsPerAccount: 1000
+              maxAuthAttempts: 3
+              authTimeoutSeconds: 120
+              sessionMaxSeconds: 3600
+              cacheEntries: 10000
+            gatewayAPI:
+              nodePollIntervalSeconds: 30
+              requiredDownloads: [socialweb-meshd-x86_64]
+            ingressProxy:
+              relayTimeoutMilliseconds: 30000
+              keepaliveMilliseconds: 5000
+              keepaliveTimeoutMilliseconds: 5000
+              reconnectGraceMilliseconds: 10000
+              nonceTTLMilliseconds: 60000
+            relay:
+              crawlIntervalSeconds: 30
+            policyEngine:
+              limits:
+                maxConcurrentRuns: 4
+                queueDepth: 64
+                activeDeadlineSeconds: 120
+                maxConsoleBytes: 1048576
+                maxOutputBytes: 1048576
+                maxCacheEntries: 512
+                maxCacheBytes: 67108864
+              trust:
+                ttlSeconds: 300
+              cache:
+                verdictTTLSeconds: 300
+                scopeTTLSeconds: 300
+                recordTTLSeconds: 300
+    Zero means "use the service default" except offeringRefreshSeconds, where
+    0 disables refresh (matching old behavior). Unset pointers inherit.
+  go_types: |
+    type ComponentOverrides map[string]ComponentOverride
+
+    type ComponentOverride struct {
+        Suspend       *bool                    `json:"suspend,omitempty"`
+        RestartPolicy ComponentRestartPolicy   `json:"restartPolicy,omitempty"`
+        Limits        *ComponentLimits         `json:"limits,omitempty"`
+        ServiceAuth   *ComponentServiceAuthOverride `json:"serviceAuth,omitempty"`
+        Comms         *MarketComms             `json:"comms,omitempty"`
+        Ingress       *IngressConfig           `json:"ingress,omitempty"`
+        Settings      *ComponentSettings       `json:"settings,omitempty"`
+    }
+
+    type ComponentServiceAuthOverride struct {
+        Audience []string `json:"audience,omitempty"`
+        Hostname string   `json:"hostname,omitempty"`
+    }
+
+    type ComponentSettings struct {
+        Bidder            *BidderSettings            `json:"bidder,omitempty"`
+        Requester         *RequesterSettings         `json:"requester,omitempty"`
+        GuestControlPlane *GuestControlPlaneSettings `json:"guestControlPlane,omitempty"`
+        Pds               *PdsSettings               `json:"pds,omitempty"`
+        SshServer         *SshServerSettings         `json:"sshServer,omitempty"`
+        GatewayAPI        *GatewayAPISettings        `json:"gatewayAPI,omitempty"`
+        IngressProxy      *IngressProxySettings      `json:"ingressProxy,omitempty"`
+        Relay             *RelaySettings             `json:"relay,omitempty"`
+        PolicyEngine      *PolicyEngineSettings      `json:"policyEngine,omitempty"`
+    }
+
+    NetworkApp gains Components ComponentOverrides `json:"components,omitempty"`.
+    PolicyEngineSettings is a local typed mirror of PolicyEngineLimits,
+    TrustConfig and CacheConfig; appctl translates it into
+    policyv1alpha1.PolicyEngineSpec so api/v1alpha1 does not import the policy
+    API. A ComponentSettings block is valid only when it matches the entry's
+    kind; appctl rejects a mismatch. Interval fields are *int32 seconds or
+    milliseconds; unset means default. The per-kind structs use the field names
+    in the YAML above, with Go names HeartbeatIntervalSeconds etc.
+  typed_vs_options: |
+    Typed fields win. Generic options (ApplicationOption{Name,Value} at
+    types_application.go:61-65, option-map at deploy/apps/option-map.yaml) are
+    stringly typed, have no component target, cannot be validated by the CRD,
+    cannot express units or pointers, make GitOps diffs and SSA ownership
+    poor, and invite secrets into a field that status/docs will echo. They are
+    retained only for existing CLI compatibility; this plan does not extend
+    them. Typed fields give schema validation, deterministic defaults,
+    per-field precedence, readable status and safe concatenation into child
+    CRs. The only map in the design is the component-keyed override map, which
+    is a namespacing device, not a bag of arbitrary settings.
+  precedence: |
+    For every field: component override > root default > service default.
+    effectiveSuspend = root.Spec.Suspend || (override.Suspend != nil &&
+    *override.Suspend). Root suspend is a master kill switch: an override of
+    suspend:false cannot resume anything while root.Spec.Suspend is true.
+    Removing a key restores the root/service default on the next pass; it does
+    not delete the child because the desired component set is unchanged. A key
+    must resolve to a component in the desired set for the current profile; a
+    conditional component that is absent (for example Pds on an oauthQr bidder
+    with no local PDS) is invalid. A malformed key, an unresolvable component
+    or an inapplicable settings block fails the whole override set closed:
+    appctl makes no child spec changes for that pass, sets
+    ComponentOverridesValid=False and Phase=Failed, and names the key. A typo
+    therefore cannot silently resume a paused component.
+  ownership: |
+    spec.components is the only operator interface. appctl computes the child
+    spec from root fields plus the override and writes it with
+    ensureComponentIn, which replaces the whole spec (components.go:572-579).
+    Direct child spec edits are unsupported and revert on the next pass; child
+    annotations are preserved, so the existing restart-at annotation remains
+    an emergency restart path (components.go:706, contract.go:20). The root
+    spec is never written by appctl; only status is. Root objects are applied
+    by stack components with server-side apply, FieldManager
+    socialweb-computer and Force=true (stack/bidder/bidder.go:197-199,
+    stack/request/request.go:252-254). New components is omitempty and absent
+    from those applies, so a GitOps manager can own spec.components without
+    the stack taking it; verify this in W0. If two managers set the same
+    components key, Kubernetes reports the SSA conflict instead of appctl
+    choosing silently.
+  gitops_and_ssa: |
+    Use a map, not a list: SSA owns and merges each map key independently, so
+    two GitOps changes to different components do not conflict and do not
+    churn the whole list. A list would be atomic in this codebase because
+    neither the Go types nor generated schemas use x-kubernetes-list-type
+    markers today. The trade-off is that the schema cannot constrain map keys;
+    appctl validates every key against the desired component set and fails
+    closed on unknown keys. GitOps owns roots only. It must not apply child
+    Bidder/Pds/... specs; if it does, appctl's Update wins next pass and sets
+    ComponentDrift=True with the child key until the next successful apply.
+    Do not add Force to that drift path; make the conflict visible.
+  restart_and_immutability: |
+    Any applied change to restartPolicy, limits, serviceAuth, comms, ingress
+    or settings changes the child generation; component/runtime.go:250-278
+    stops and starts the process, and the restarts counter increments. suspend
+    stops the process without deleting its state; resume starts it from the
+    same state dir. Immutable and rejected: the map key (kind/name), identity
+    DID, PdsRef/MarketIdentityRef, association serviceID, and a PDS publicHost
+    after StableHost has been published (pdsingress.go:164-169). Computed and
+    not overrideable: stateDir, network, hostnames, serve bind/port, owner
+    refs, labels, and the Service/Exposure set. Public host changes before
+    publication are allowed.
+  status: |
+    Extend ApplicationComponent with Suspended bool, ObservedGeneration int64,
+    Restarts int32 and Message string. Add ComponentSummary {Desired, Ready,
+    Suspended, NotReady} and ComponentOverrideStatus {Component, Generation,
+    Suspend, RestartPolicy, Applied, Message}. Add conditions
+    ComponentsReady, ComponentSuspended, ComponentOverridesValid and
+    ComponentDrift. Root Phase stays Ready when every desired component is
+    either Ready or Suspended by intent; Provisioning when a non-suspended
+    component is not Ready; Pending when root.Spec.Suspend is true; Failed
+    when an override is invalid. This replaces snap.complete(allDesired)
+    (bidder.go:100-110), which would never report Ready with a suspended
+    child. Do not echo setting values or any secret in status.
+  suspend_propagation: |
+    Root suspend keeps today's behavior: every child, Service, Exposure and
+    the shared IngressProxy is suspended. Per-component suspend sets only the
+    named child's ComponentSpec.Suspend. It must not suspend that child's
+    Service/Exposure or a shared IngressProxy, because that would stop other
+    components. Consequence: a suspended Bidder's own market URL will fail
+    while stopped, but GuestControlPlane, Pds and IngressProxy URLs remain
+    Ready and answer. This is the hat-7 contract.
+
+state_rules:
+  - Read AGENTS.md first. status is todo, doing, done or blocked; the lead
+    flips statuses. One writer per directory; tracks touching the same file
+    are serialized even in a parallel wave.
+  - Every item ends with gofmt, go build ./..., go vet ./..., and the
+    relevant live proof. No unit tests and no test-first work. Integration
+    tests are written only in W4, after the live proof, per AGENTS.md. No
+    push.
+  - Keep defaults identical when components is absent. Existing roots must
+    reconcile without changing any child generation.
+  - Regenerate with go generate ./api/...; deploy/check.sh --fast must pass.
+    Bump Revision in api/v1alpha1/resources.go only if the generator requires
+    it; record schema revisions in deploy/apiresourceschema-revisions.txt.
+  - Never put a secret, token, password, private key or credential value in a
+    root spec, child spec or status. Key refs only.
+  - The old tree is reference only. Do not reintroduce Deno components or a
+    second configuration path.
+
+waves:
+  - id: W0
+    title: "Contracts, schema and validation"
+    status: todo
+    serial: true
+    tracks: [W0-CONTRACTS]
+    item: W0-CONTRACTS
+    gate: "types and schemas compile; invalid keys and setting blocks fail closed; no child behavior changes."
+  - id: W1
+    title: "Per-component suspend and truthful status"
+    status: todo
+    serial: true
+    tracks: [W1-SUSPEND]
+    item: W1-SUSPEND
+    depends_on: [W0]
+    gate: "local pause proof passes; hat-7/A1 reproduces it in W4; root Ready with one suspended child; resume advances heartbeat."
+  - id: W2
+    title: "Bidder and Requester typed tuning"
+    status: todo
+    parallel: true
+    tracks: [W2-TUNING]
+    item: W2-TUNING
+    depends_on: [W1]
+    gate: "heartbeat/offering and requester limits take effect from settings and are visible in status."
+  - id: W3
+    title: "Remaining components, overrides and immutability"
+    status: todo
+    parallel: true
+    tracks: [W3-COMPONENTS]
+    item: W3-COMPONENTS
+    depends_on: [W2]
+    gate: "every child kind has a verified override path or an explicit not-supported reason; immutable changes are rejected."
+  - id: W4
+    title: "Integration and live proof"
+    status: todo
+    serial: true
+    tracks: [W4-PROOF]
+    item: W4-PROOF
+    depends_on: [W3]
+    gate: "acceptance matrix passes on this host, hat-9, hat-7 and prod gateway; no secrets; no app-wide collateral stop."
+
+items:
+  - id: W0-CONTRACTS
+    title: "Add spec.components and typed override contracts"
+    wave: W0
+    track: contracts
+    parallel_with: []
+    depends_on: []
+    status: todo
+    decision: >
+      Add ComponentOverrides map[string]ComponentOverride to all five app
+      roots, with Suspend *bool, RestartPolicy, Limits, ServiceAuth,
+      Comms, Ingress and per-kind Settings. Add the per-kind settings structs
+      listed in target_model. Extend ApplicationStatus with
+      ComponentSummary, ComponentOverrideStatus and the four conditions.
+      Implement one resolver in appctl that resolves Kind or Kind/name
+      against the desired set, rejects unknown keys, ambiguous singletons,
+      mismatched settings blocks and immutable fields, and returns the
+      effective override per component. Add Components ComponentOverrides to
+      NetworkApp so a network's child application roots receive the same map.
+      Do not change child specs yet.
+    files:
+      - api/v1alpha1/types_application.go
+      - api/v1alpha1/types_component.go
+      - api/v1alpha1/resources.go
+      - api/v1alpha1/zz_generated.deepcopy.go
+      - deploy/marketbidder-apiresourceschema.yaml
+      - deploy/marketrequester-apiresourceschema.yaml
+      - deploy/gateway-apiresourceschema.yaml
+      - deploy/sshgateway-apiresourceschema.yaml
+      - deploy/marketnetwork-apiresourceschema.yaml
+      - deploy/workspacetype-application.yaml
+      - deploy/apiresourceschema-revisions.txt
+      - internal/appctl/components.go
+      - docs/ARCHITECTURE.md
+    done_when: >
+      go generate ./api/... and deploy/check.sh --fast are clean; each root
+      accepts a components map; a live apply with an unknown key, an
+      ambiguous name, a mismatched settings block or an immutable field fails
+      closed with a named condition; an absent components map produces
+      byte-identical child specs and does not restart any component.
+
+  - id: W1-SUSPEND
+    title: "Resolve per-component suspend without collateral stops"
+    wave: W1
+    track: suspend
+    parallel_with: []
+    depends_on: [W0-CONTRACTS]
+    status: todo
+    decision: >
+      Replace each root's single suspend := o.Spec.Suspend with
+      suspendFor(kind, name) = root.Spec.Suspend || override.Suspend, and
+      pass only the named child's effective suspend to that child. Keep root
+      suspend propagating to exposures and the shared IngressProxy; a
+      per-component suspend must not. Replace snap.complete(allDesired) with
+      an evaluator that is satisfied when a desired component is Ready or
+      Suspended by intent. Add ComponentSummary, per-component Suspended,
+      ObservedGeneration, Restarts and Message, plus ComponentsReady,
+      ComponentSuspended and ComponentOverridesValid. A suspended child must
+      report Phase Suspended, Ready false and Ready condition reason
+      Suspended from the existing runtime (component/runtime.go:262-270).
+      Persist no new state; resume starts from the same state dir.
+    files:
+      - internal/appctl/components.go
+      - internal/appctl/bidder.go
+      - internal/appctl/requester.go
+      - internal/appctl/gateway.go
+      - internal/appctl/sshgateway.go
+      - internal/appctl/network.go
+      - internal/appctl/statusobjects.go
+      - api/v1alpha1/types_application.go
+      - docs/ARCHITECTURE.md
+    done_when: >
+      On a disposable local root with a Bidder-only override, Bidder is
+      Suspended/not Ready, its heartbeat record createdAt stops advancing,
+      GuestControlPlane and IngressProxy stay Ready and their listener URLs
+      answer, no other component changes phase, and the root stays Ready with
+      ComponentSuspended=True and componentSummary.suspended=1. Clearing the
+      override returns Bidder to Ready and the heartbeat advances again.
+      Root spec.suspend=true still suspends everything and cannot be
+      overridden by a component false. W4/A1 reproduces this on hat-7.
+
+  - id: W2-TUNING
+    title: "Wire Bidder and Requester settings to services"
+    wave: W2
+    track: tuning
+    parallel_with: []
+    depends_on: [W1-SUSPEND]
+    status: todo
+    decision: >
+      Add the Bidder and Requester settings to their child specs and read them
+      in the service configs. Bidder: heartbeatIntervalSeconds,
+      offeringRefreshSeconds (0 disables), bidTtlSeconds,
+      maxConcurrentGuests, policyPollMilliseconds, policyTimeoutSeconds.
+      Requester: maxConcurrent, perAccount, contractPollMilliseconds,
+      bidWindowSeconds, receiptTimeoutSeconds, receiptPollMilliseconds,
+      sessionCapSeconds, sessionIdleSeconds, directoryTTLSeconds,
+      directoryKeys, policyPollMilliseconds, policyTimeoutSeconds. appctl
+      resolves and writes them; services read them instead of constants.
+      ComponentOverrideStatus records the child generation and Applied=true,
+      and ComponentOverridesValid=True reports that appctl accepted the
+      override, so an operator can see that the root value reached the
+      child. A settings change restarts only that child.
+    files:
+      - api/v1alpha1/types_component.go
+      - internal/services/bidder/config.go
+      - internal/services/bidder/service.go
+      - internal/services/bidder/offering.go
+      - internal/services/bidder/lifecycle.go
+      - internal/services/bidder/report.go
+      - internal/services/requester/config.go
+      - internal/appctl/bidder.go
+      - internal/appctl/requester.go
+      - internal/appctl/components.go
+      - deploy/bidder-apiresourceschema.yaml
+      - deploy/requester-apiresourceschema.yaml
+    done_when: >
+      settings.bidder.heartbeatIntervalSeconds=5 makes heartbeat createdAt
+      advance about every 5s instead of 60s; offeringRefreshSeconds=0 stops
+      offering re-commits; requester maxConcurrent and contract poll change
+      the observed service behavior. The root reports the override generation
+      and Applied=True; removing the override restores defaults without a
+      root or component recreation.
+
+  - id: W3-COMPONENTS
+    title: "Complete per-component settings, overrides and immutability"
+    wave: W3
+    track: components
+    parallel_with: []
+    depends_on: [W2-TUNING]
+    status: todo
+    decision: >
+      Add typed settings and override translation for GuestControlPlane,
+      Pds, SshServer, GatewayAPI and PolicyEngine. GuestControlPlane:
+      guestLoginMount, role, grantSyncSeconds, issuerRetrySeconds,
+      hostKeyAttempts, relayEnabled and HostKeyRef. Pds: maxBlobSize,
+      maxRequestBytes, contactEmail, PdsOAuth TTLs/localhost policy, and an
+      explicit OAuth scope list consistent with atproto. SshServer: the
+      limits/timeouts/cache fields from target_model. GatewayAPI:
+      nodePollIntervalSeconds and requiredDownloads. IngressProxy: provider
+      relay/keepalive/nonce timeouts. Relay: crawlIntervalSeconds.
+      PolicyEngine: limits/trust/cache. Requester: oauthScopes. Wire
+      per-component Comms, Ingress, ServiceAuth and Limits where the child
+      supports them. Keep identity DID, PDS ref, serviceID and published
+      StableHost immutable. ComponentLimits is resolved and reported; wire
+      enforcement only where the backend can enforce it (HostProcessLimits)
+      and otherwise set a named LimitsEnforced=False condition rather than
+      pretending. Add drift detection: a child spec that differs from
+      appctl's prior desired spec sets ComponentDrift=True with the child key.
+      NetworkApp.Components carries the same override map into each child
+      application root; NetworkApp.Stopped stays the coarse app stop.
+    files:
+      - api/v1alpha1/types_component.go
+      - api/v1alpha1/types_application.go
+      - internal/services/guestcontrolplane/config.go
+      - internal/services/guestcontrolplane/relay.go
+      - internal/services/pds/config.go
+      - internal/services/sshserver/config.go
+      - internal/services/gatewayapi/config.go
+      - internal/services/ingressproxy/service.go
+      - internal/services/relay/service.go
+      - internal/policyengine/controller/controller.go
+      - internal/appctl/components.go
+      - internal/appctl/pds.go
+      - internal/appctl/ingressselect.go
+      - internal/appctl/pdsingress.go
+      - internal/appctl/gateway.go
+      - internal/appctl/sshgateway.go
+      - internal/appctl/network.go
+      - deploy/guestcontrolplane-apiresourceschema.yaml
+      - deploy/pds-apiresourceschema.yaml
+      - deploy/sshserver-apiresourceschema.yaml
+      - deploy/gatewayapi-apiresourceschema.yaml
+      - deploy/policyengine-apiresourceschema.yaml
+    done_when: >
+      Every child kind in target_model has a verified override path or a
+      documented not-supported reason; settings reach the service config;
+      per-component comms and ingress select distinct providers/hosts;
+      immutable changes are rejected with a named condition; direct child
+      edits are reverted and set ComponentDrift=True; limits report whether
+      they are enforced; network children and NetworkApp apps can be tuned
+      independently.
+
+  - id: W4-PROOF
+    title: "Prove the matrix locally and on the hosts"
+    wave: W4
+    track: proof
+    parallel_with: []
+    depends_on: [W3-COMPONENTS]
+    status: todo
+    decision: >
+      Run the live matrix on this host, hat-9, hat-7 and the prod gateway
+      first. Only after that proof works, write the integration suite in
+      test/integration, per AGENTS.md. The hat-7 proof is the canonical
+      pause: components.Bidder.suspend=true, heartbeat createdAt unchanged
+      across at least three default heartbeat intervals, GuestControlPlane
+      and IngressProxy Ready and their URLs answering, all other components
+      unchanged, root Ready. Then resume and prove the heartbeat advances.
+      Then set a visible typed override (heartbeatIntervalSeconds=5) and
+      prove the cadence and status. The lead runs the prod gateway row; task
+      agents do not. Do not push. Update operator docs with the key grammar,
+      default names, precedence and the pause/resume recipe.
+    files:
+      - docs/plans/0024-crd-configurability.yaml
+      - test/integration/
+      - test/soak/
+      - BIDDER_ARCH.md
+      - GATEWAY_ARCH.md
+      - docs/ARCHITECTURE.md
+    done_when: >
+      Every acceptance row has live evidence or a named blocked reason; no
+      secret appears in any root or child status; root remains Ready with a
+      suspended child; resume and per-component tuning work on all four
+      hosts; gofmt, go build ./..., go vet ./..., deploy/check.sh --fast and
+      make check-pins pass; no push.
+
+test_matrix:
+  roots:
+    - MarketBidder
+    - MarketRequester
+    - Gateway
+    - SshGateway
+    - MarketNetwork
+  components:
+    - Bidder
+    - GuestControlPlane
+    - Pds
+    - PolicyEngine
+    - Requester
+    - GatewayAPI
+    - SshServer
+    - IngressProxy
+    - Plc
+    - Relay
+    - DispatcherTLS
+  scenarios:
+    - per-component suspend and resume
+    - root suspend precedence over a component false
+    - per-component settings take effect
+    - per-component comms and ingress selection
+    - component limits and service auth
+    - unknown key, ambiguous singleton, mismatched settings block
+    - immutable identity, serviceID and published public host
+    - direct child edit reverted with drift condition
+    - GitOps SSA ownership of spec.components
+    - root Ready with one suspended child, no collateral stop
+    - no secret in spec or status
+  live:
+    - this host
+    - hat-9
+    - hat-7 (oauthQr, bobvmbuilder account, no local Pds)
+    - socialweb.computer prod gateway
+
+acceptance_matrix:
+  rule: >
+    W0 freezes these rows. Every row names a live host or a fixture. A row
+    with neither is blocked, never silently skipped.
+  proof_sources: |
+    this host: local bidder, associated
+    hat-9: associated bidder host
+    hat-7: oauthQr bidder as bobvmbuilder, no local Pds
+    prod gateway: socialweb.computer, Alice sign-in
+    test/integration: final regression suite, written in W4 only after the
+    live proof, per AGENTS.md
+  fixtures:
+    paused-bidder: components.Bidder.suspend=true on a disposable root
+    resumed-bidder: the same root with the override removed
+    fast-heartbeat: settings.bidder.heartbeatIntervalSeconds=5
+    drift-child: a direct patch to a child spec.suspend
+    typo-override: an unknown components key
+  rows:
+    - id: A1
+      check: "pause Bidder only; Bidder not Ready/Suspended; heartbeat createdAt stops advancing; GuestControlPlane and IngressProxy stay Ready; public URLs still answer"
+      proof: >
+        On hat-7 set components.Bidder.suspend=true. kubectl get the root:
+        status.components[Bidder].phase=Suspended and ready=false;
+        GuestControlPlane and IngressProxy ready=true. Fetch
+        com.publicdomainrelay.temp.market.heartbeat/self through Bob's PDS
+        (com.atproto.repo.getRecord with the bidder DID, collection
+        com.publicdomainrelay.temp.market.heartbeat, rkey self) at T0 and
+        T0+180s; value.createdAt is identical. curl the GuestControlPlane
+        /healthz listener URL from status and, where the root has a Pds, its
+        /xrpc/_health listener URL; both answer below 400. On hat-7 there is
+        no local Pds, so GuestControlPlane and IngressProxy are the check.
+        The bidder market URL may fail because the bidder process is stopped;
+        that is expected and is not a collateral stop.
+      hosts: [hat-7, this host]
+    - id: A2
+      check: "resume -> Bidder Ready; heartbeat advances again"
+      proof: >
+        Remove the components.Bidder entry or set suspend=false. Bidder
+        phase returns Ready, ready=true, componentSummary.suspended returns
+        0. Fetch the same heartbeat record at T1 and T1+120s; createdAt
+        changes and the delta is within two heartbeat intervals. No root or
+        other component recreation is observed.
+      hosts: [hat-7, this host]
+    - id: A3
+      check: "per-component options override takes effect and is reflected in status/conditions"
+      proof: >
+        Set settings.bidder.heartbeatIntervalSeconds=5 on the running
+        Bidder. The root reports ComponentOverridesValid=True, and
+        ComponentOverrideStatus has the child component key, its
+        observedGeneration and Applied=true; the child reports the same
+        generation. The heartbeat record createdAt advances
+        about every 5s, not 60s. Set offeringRefreshSeconds=0 and confirm no
+        offering refresh write in two default refresh periods. Remove the
+        settings and confirm the 60s cadence returns.
+      hosts: [this host, hat-9]
+    - id: A4
+      check: "no app-wide collateral stop"
+      proof: >
+        During A1, root phase is Ready; status.componentSummary shows
+        desired=N, ready=N-1, suspended=1, notReady=0; every non-Bidder
+        component has the same phase and ready value as before the pause; the
+        shared IngressProxy is Ready; listener URLs for GuestControlPlane
+        and Pds are unchanged. No root-wide condition is Failed.
+      hosts: [hat-7, this host]
+    - id: A5
+      check: "root suspend remains the master kill switch"
+      proof: >
+        With components.Bidder.suspend=false, set spec.suspend=true. Every
+        child including the shared IngressProxy and all Exposures is
+        Suspended. Clearing spec.suspend resumes only components whose own
+        override is not suspending them.
+      hosts: [this host]
+    - id: A6
+      check: "direct child edit is reverted and observed"
+      proof: >
+        Patch a child Bidder spec.suspend=true while the root says false. On
+        the next appctl pass the child spec.suspend returns to false and the
+        root sets ComponentDrift=True naming Bidder/bidder. No manual child
+        edit is required to keep the root authoritative.
+      hosts: [this host]
+    - id: A7
+      check: "invalid override fails closed without partial apply"
+      proof: >
+        Add components.Bldier.suspend=true (typo). The root sets
+        ComponentOverridesValid=False with reason InvalidKey and Phase
+        Failed. No child generation changes in that pass. Removing the typo
+        restores Ready without touching the children.
+      hosts: [this host]
+    - id: A8
+      check: "immutable fields are rejected"
+      proof: >
+        Attempt to change identity DID, PdsRef, association serviceID or a
+        published PDS publicHost through components. The root sets
+        ComponentOverridesValid=False with reason ImmutableField or
+        StableHostMismatch and does not change the child. The existing
+        stable-host path still reports StableHostMismatch.
+      hosts: [this host, prod gateway]
+    - id: A9
+      check: "no secret in spec or status"
+      proof: >
+        Dump every root and child CR spec and status. No token, password,
+        private key, session, audience key material or credential value
+        appears. Status contains only refs, counts, phases, generations,
+        condition reasons and messages.
+      hosts: [this host, hat-7, hat-9, prod gateway]
+    - id: A10
+      check: "GitOps SSA owns spec.components without conflict"
+      proof: >
+        Apply a second SSA field manager that sets only
+        spec.components.Bidder.suspend. The stack's forced root apply leaves
+        the field intact; appctl resolves it. Two edits to different
+        component keys merge; two edits to the same key produce a visible
+        conflict rather than a silent winner.
+      hosts: [this host]
+
+risks: |
+  A per-component suspend leaves that component's Service/Exposure and the
+  shared IngressProxy Ready, so the paused component's own URL fails while the
+  rest of the app answers. This is deliberate: propagating suspend to the
+  shared proxy would recreate the app-wide collateral stop. Document it in the
+  pause recipe.
+
+  Per-component suspend can create dependency breakage (for example a
+  suspended Pds with a running Bidder). The plan does not block combinations;
+  the status shows every component and the operator owns the combination.
+
+  ComponentLimits is declared but not enforced by the in-process component
+  runtime. Wiring it to HostProcessLimits is only possible where the backend
+  has cgroups and a per-component unit. Report LimitsEnforced=False rather
+  than claiming enforcement.
+
+  Public host, DID and association serviceID changes are not transparent once
+  accounts exist; DID documents and association records must move. This plan
+  rejects them instead of attempting a migration.
+
+  The components map cannot be key-validated by the generated CRD (no CEL in
+  this tree), so appctl validation is the only guard. A typo fails the root
+  closed; it cannot silently resume a paused component.
+
+  appctl uses Update, not server-side apply, on children. Direct child edits
+  and child-level GitOps are overwritten; drift is visible only through the
+  ComponentDrift condition/event. Operators must move child configuration to
+  the root.
+
+  Adding typed settings grows the CRD surface and schema revisions. Keep every
+  new field optional and every default identical to today, or existing roots
+  will restart components on upgrade.
+
+  Status must not echo settings values. Only names, generations, booleans and
+  counts are safe; a future settings field must be reviewed for secret risk.
+
+decisions:
+  key_shape: "spec.components is a map keyed by Kind (singleton) or Kind/name; it is not a list"
+  key_reason: "map keys give SSA per-component merge and mirror ComponentKey(kind,name); list is atomic here because no list-type markers exist"
+  typed_over_options: "typed fields and per-kind settings; generic ApplicationOption remains legacy CLI compatibility only"
+  master_suspend: "effective suspend is root.Spec.Suspend OR component override; root cannot be overridden"
+  no_cascade: "per-component suspend does not suspend its Service/Exposure or a shared IngressProxy; root suspend still cascades"
+  root_ready_with_suspended_child: "root Phase is Ready when every component is Ready or Suspended by intent"
+  invalid_overrides: "fail closed: no child spec changes, Phase Failed, ComponentOverridesValid=False naming the key"
+  immutable: "kind/name key, identity DID/PdsRef, association serviceID and published StableHost are immutable"
+  child_ownership: "appctl owns child spec; direct child edits revert; annotations including restart-at survive"
+  limits: "resolve and report component limits; enforce only through HostProcessLimits, otherwise LimitsEnforced=False"
+  secrets: "no secret or setting value in status; refs, counts, enums and generations only"
+  service_id: "serviceID stays root-kind-derived in this plan; only audience and hostname are per-component overridable"
+
+do_not_do:
+  - "No secrets, tokens, passwords, private keys or credential values in root spec, child spec or status."
+  - "No arbitrary pod specs, container images, commands, argv, env, volumes, hostPath, service accounts or raw Kubernetes objects in overrides."
+  - "No overriding computed fields: stateDir, network, hostnames, serve bind/port, owner references, labels, Service/Exposure set."
+  - "No bypass of root ownership: do not patch child specs, do not let GitOps own child components, do not let appctl write root spec."
+  - "No override that creates or deletes a component; unknown keys are errors, not deletions."
+  - "No per-component suspend cascading to a shared IngressProxy or another component's Exposure."
+  - "No per-component override of root spec.suspend; it is the master kill switch."
+  - "No untyped options bag for new settings; do not extend ApplicationOption except for legacy CLI compatibility."
+  - "No mutable DID, PdsRef, association serviceID or published public host; reject with a named condition."
+  - "No silent ignore of invalid overrides and no partial apply of a bad override set."
+  - "No heartbeat or app data in status; do not poll a PDS from appctl to report application health."
+  - "No reintroduction of Deno application components or a second configuration path."
