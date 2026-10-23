@@ -1,0 +1,1223 @@
+catalog: integration-catalog
+plan: 0026-abc-control-plane W0-TESTS
+purpose: >
+  The behavior that the Go integration suite (test/integration, build tag integration), the soak
+  program (test/soak) and the wire-level unit tests asserted before plan 0026 W0-TESTS deleted every
+  Go test. Plan 0027 writes specification tests from this file. Each entry names actors, inputs,
+  the observable outcome and the cleanup expectation, not how the code did it. The deleted sources
+  are in git history at the parent of the W0-TESTS deletion commit.
+kinds:
+  integration: a Go test function in test/integration (its own or a shared market network, or in-process fakes)
+  fixture: a shared fake or check in test/integration with no Test function of its own
+  soak: a verb or lane of the soak program in test/soak
+  wire: a deleted unit test that asserted an externally observable wire rule; terse
+
+harness:
+  network: >
+    A market network is brought up with `socialweb-computer dev up --instance i<6 hex> --profile
+    market-network --bidders N [--with-gateway] --guest-image-source <image> --vm-host-backend
+    systemd-user --app-values <file: bidder kcp handle {app}.<inst>.bob.test> --ready-timeout 90s
+    --network-timeout 4m|5m|10m --state-dir <run root>`. dev up must exit 0 and print a report whose
+    MarketNetwork status.phase is Ready. Every listener binds port 0. A tenant cluster front socket
+    path must fit in 107 bytes, so the run root is short (default /var/tmp/swcit). Each network
+    takes a host live slot first (SOCIALWEB_IT_LIVE_SLOT; up to 30m wait, heartbeat every 10m).
+    Shared networks: one 1-bidder network without gateway (policy tests) and one 2-bidder network
+    with gateway (scale-to-zero and subscribeClusters tests), each brought up once per package run.
+  fail_fast: >
+    While a network is up, `dev status` is read every 3s and every watched command is stopped at
+    once when: devsup becomes unreachable after it was reachable; the MarketNetwork phase is Failed;
+    VerifierPassed=False with reason Probe lasts 3m or more; any child application is Failed; or any
+    ComputeVM is Failed.
+  teardown: >
+    Always, also on failure. On failure only, first save the `dev status` JSON as
+    status-on-failure.json and copy core logs, guest console logs and VMM logs into the test log
+    dir. Then `socialweb-computer dev down --instance <inst> --state-dir <run root>` (6m limit). Its
+    report must show no remaining processes, no VMs left and removedState=true. Leak check, any hit
+    is a failure: the state dir still exists; a VM work dir exists under handles/*/vms/*; a process
+    names the state dir in its cmdline or environ; a systemd --user unit or the slice of a bidder
+    handle is still listed; a socialweb-b.slice cgroup of a bidder handle exists. Then the
+    per-network fixture dir is removed and the live slot released. Artifacts are kept.
+  account: >
+    Every command runs as the VM account (SOCIALWEB_IT_ACCOUNT, default test-0001; via
+    `sudo -n -u <account>` when the caller differs) with HOME, XDG_RUNTIME_DIR=/run/user/<uid>, the
+    user DBUS bus, PATH=/usr/local/bin:/usr/bin:/bin, TMPDIR=<run root>/tmp, LANG=C.UTF-8 and
+    SOCIALWEB_CLUSTERPROVIDER_SCALE_HOLD=10s.
+  pod_probe: >
+    The tenant probe pod used by several tests: busybox 1.36.1 pinned by digest, sleep 3600,
+    requests 10m CPU and 16Mi, termination grace 0.
+
+entries:
+  - id: TestMain
+    kind: integration
+    source: test/integration/main_test.go
+    actors: [test operator, VM account, build script, socialweb-computer CLI, live-slot broker]
+    setup: >
+      Suite preconditions. Offline mode (no host preconditions, no build) when SOCIALWEB_IT_OFFLINE
+      is non-empty or every '|' part of -test.run starts with TestMarket. Otherwise, in order, and
+      exit 1 if any fails: SOCIALWEB_IT_ACCOUNT is a local user and `sudo -n -u <account> true`
+      works when the caller differs; SOCIALWEB_IT_ARTIFACTS (default
+      ~/.tmp/swc-it/<utc yyyymmddThhmmss>-<4 hex>) is created; SOCIALWEB_IT_GUEST_IMAGE (default
+      file:///var/lib/socialweb-computer/guest-image) holds vmlinux, rootfs.ext4 and image.json for a
+      file:// source; unless SOCIALWEB_IT_SKIP_BUILD, `scripts/build-socialweb-computer.sh --dev
+      --publish <SOCIALWEB_IT_PUBLISH, default /var/tmp/swc-it-<repo dir>>` (15m, build.log) leaves
+      <publish>/bin/socialweb-computer; SOCIALWEB_IT_RUN_ROOT (default /var/tmp/swcit) exists with mode
+      1777 and <run root>/<run id> does not exist yet and is created as the VM account with tmp/.
+    asserts: >
+      The exit code is the suite result, forced to 1 when harness setup fails, a shared network
+      fails its teardown, or the run root cannot be removed. The artifact path is printed at the end.
+    cleanup: >
+      After all tests every shared network runs the standard teardown; a failure there fails the
+      run. Then <run root>/<run id> is removed as the VM account. Artifacts are kept.
+
+  - id: TestHarnessEmptyNetworkUpAndDown
+    kind: integration
+    source: test/integration/harness_test.go
+    actors: [kcp, devsup, bidder, pds, plc]
+    setup: >
+      Two parallel subtests, each its own 1-bidder network without gateway (harness.network).
+    asserts: >
+      dev up exits 0 within 4m30s with MarketNetwork phase Ready. The fresh network lists 0
+      ComputeVM components in every application status. Two simultaneous instances on one host do
+      not collide.
+    cleanup: Standard teardown per subtest (harness.teardown).
+    cases:
+      - "a: one empty 1-bidder network up and down"
+      - "b: a second empty 1-bidder network up and down at the same time"
+
+  - id: TestAcceptOfAnEndedContractStartsNoVM
+    kind: integration
+    source: test/integration/accept_test.go
+    actors: [tenant cluster, gateway, requester, bidder, kcp, pds, relay]
+    setup: >
+      Own network: --bidders 1 --with-gateway, network timeout 5m. Tenant cluster "tenant" answers
+      /readyz within 3m; the default ServiceAccount exists within 30s. Pod default/it-accept-probe
+      (harness.pod_probe) drives a NodeClaim, an RFP, a Bid, an accept and a ComputeVM on bidder-1.
+      The pod is then deleted with grace 0. Then the bidder's dev-core process group gets SIGKILL.
+    asserts: >
+      A tenant Node is Ready within 4m; no NodeClaim is Failed or Lost at any time; no member keeps
+      logging "failed after placement". Within 100s after the pod delete (10s scale hold + 90s)
+      bidder-1 lists 0 ComputeVMs and no guest remains (no VM work dir, no VM unit). There is at
+      least one Won Bid and every Won Bid has status.accept.uri; within 90s every Won Bid has
+      status.terminated and the Bid count is unchanged. After the SIGKILL a new bidder pid appears
+      within 2m and bidder-1 is Ready with a DID and a ready Bidder/bidder component within 2m.
+      During a 15s settle window and at its end no ComputeVM appears and no guest starts for the
+      ended contract; Bid and Won counts equal the counts from before the restart; every Won Bid
+      still has status.terminated.
+    cleanup: Standard teardown. The pod is already deleted.
+
+  - id: TestAcceptSurvivesABidderRestart
+    kind: integration
+    source: test/integration/accept_test.go
+    actors: [requester, bidder, kcp, pds, relay]
+    setup: >
+      Own network: --bidders 1, no gateway. `socialweb-computer run request --network <inst> --name
+      rb<6 hex> --exec true --contract-timeout 4m --network-timeout 2m --state-dir <run root>` (5m).
+      Bids in root:bidder-1 are read every 50ms. When the first Bid is Published or Won the bidder
+      dev-core process group gets SIGSTOP; once the requester retries the accept it gets SIGKILL.
+    asserts: >
+      The bidder publishes a Bid within 3m and run request has not exited before it. The stop lands
+      while the Bid is Published, not Won (the restart falls between bid and accept). Within 45s the
+      requester core log has submitAccept_retry. A new bidder pid appears within 2m. run request
+      exits 0; its last JSON summary has phase Released, a non-empty contract receipt URI and a
+      non-empty VM address. Exactly 1 Bid is Won. No guest remains within 1m.
+    cleanup: >
+      SIGCONT and SIGKILL to the original bidder pid, then standard teardown. A still running run
+      request is killed.
+
+  - id: TestOneAcceptMakesOneComputeVM
+    kind: integration
+    source: test/integration/accept_test.go
+    actors: [requester, bidder, kcp, pds, relay]
+    setup: >
+      Own network: --bidders 1, no gateway. `run request --network <inst> --name ao<6 hex> --exec
+      true --contract-timeout 4m --network-timeout 2m -- --accept-copies 10`: the requester sends 10
+      concurrent copies of one accept. ComputeVMs on bidder-1 are read every 200ms during the run.
+    asserts: >
+      At most 1 distinct ComputeVM is ever seen (a second one fails the test at once). run request
+      exits 0 with phase Released, a receipt URI and a VM address. Every receipt on any ComputeVM is
+      the requester's receipt. The requester log has submitAccept_copies with copies=10 and receipts
+      equal to exactly that receipt. Exactly 1 Won Bid with a non-empty status.claimedBy. No guest
+      remains within 1m.
+    cleanup: Standard teardown.
+
+  - id: TestARentedVMSurvivesABidderKillAndRestart
+    kind: integration
+    source: test/integration/bidder_restart_test.go
+    actors: [requester, bidder, kcp, pds, relay, VM host systemd user units]
+    setup: >
+      Own network: --bidders 1, no gateway, parallel. `run request --network <inst> --name br<6 hex>
+      --hold --exec 'echo IT-RESTART-HELD; read -r _' --contract-timeout 4m --network-timeout 2m`
+      (6m), waiting for the marker. Records the VM identity: ComputeVM name and phase, runtime pid
+      and start time, market address, receipt URI, and per VM user unit ActiveState, InvocationID,
+      MainPID and process start ticks; and the issuerUrl values in the bidder core log. Two
+      disruptions in sequence, then "done" on the guest stdin, then `run request release <name>
+      --contract-timeout 2m --network-timeout 2m` (3m).
+    asserts: >
+      Before: exactly 1 ComputeVM, phase Running, non-zero pid, an address, a receipt, at least 1
+      unit; the bidder log names exactly 1 issuer URL. After each disruption, within 2m the VM
+      identity is unchanged (same units and invocation ids, same pid and start time) and so is the
+      issuer URL. The held run request exits 0 with phase Held and the original receipt. The release
+      exits 0 with phase Released and contract releaseStatus 200 (the vm.delete answer). No
+      ComputeVM, VM unit or VM work dir remains within 1m.
+    cleanup: Standard teardown.
+    cases:
+      - "kill -9 of the bidder dev-core process group; a new pid within 2m"
+      - "socialweb-computer dev restart --instance <inst> bidder-1/bidder within 2m"
+
+  - id: TestBidderAnswersEachRFPOnceAcrossARestart
+    kind: integration
+    source: test/integration/bids_test.go
+    actors: [tenant cluster, gateway, bidder, kcp, pds, relay]
+    setup: >
+      Own network: --bidders 1 --with-gateway, 5m. Tenant "tenant" /readyz within 3m, default
+      ServiceAccount within 30s. Pod default/it-bid-probe (harness.pod_probe) scales out. Then
+      SIGKILL to the bidder-1 dev-core process group.
+    asserts: >
+      At least 1 tenant Node Ready within 4m; no NodeClaim Failed or Lost. Before the restart: no
+      two Bids share spec.rfp.uri; at least 1 ComputeVM; exactly 1 Won Bid per ComputeVM (Bid
+      status.computeVM names it). After the kill a new pid within 2m and bidder-1 Ready with a ready
+      Bidder component within 2m. For a 15s settle window the Bid count does not change and the
+      network stays healthy. After: same Bid, RFP, Won and ComputeVM counts, still 1 Bid per RFP,
+      every ComputeVM still has a Won Bid.
+    cleanup: Standard teardown (it also removes the pod, guests and tenant cluster).
+
+  - id: TestComponentLinkRegistryEnforcesWorkspaceAccess
+    kind: integration
+    source: test/integration/componentlink_test.go
+    actors: [component handler registry, bidder caller, pds handler, system caller]
+    setup: >
+      In process, no network (suite preconditions still apply unless offline). Handlers: root:beta
+      Pds/pds HTTP handler "http" answering 204 and a stream handler "http"; root:alpha Pds/pds an
+      HTTP handler. Calls GET http://<root:beta pds service name>/ and opens streams to root:beta
+      Pds/pds "http" as several callers under several ComponentLink sets.
+    asserts: >
+      Denials are the link-denied error. With no links: alpha Bidder/bidder is denied; beta
+      Bidder/bidder (same workspace) gets 204; the system caller gets 204. An exact link alpha
+      Bidder/bidder -> beta Pds/pds gives 204; restricted to handler "other" denied, to "http" 204.
+      A workspace-only link alpha -> beta gives 204; with a mismatched fromName denied. Streams: no
+      link denied, the exact link allowed, a link for handler "other" denied. Clearing the links
+      closes an open stream within 2s. After clearing, cross-workspace HTTP and streams are denied.
+    cleanup: The registry is closed. Nothing on disk.
+
+  - id: TestComponentLinksAreReconciledOnALiveMarketNetwork
+    kind: integration
+    source: test/integration/componentlink_test.go
+    actors: [kcp, bidder, pds, policy engine]
+    setup: >
+      Own network: --bidders 1, no gateway, 5m. Reads every application component workspace from
+      dev status and lists exposure.socialweb.computer/v1alpha1 ComponentLink objects in each.
+      Deletes the reconciled Bidder -> Pds link in the MarketBidder workspace. Creates a manual
+      ComponentLink manual-cross-workspace-<8 hex> in a Pds workspace outside the bidder workspace
+      from <bidder ws> Bidder/<name> to that Pds, then deletes it.
+    asserts: >
+      The MarketNetwork names at least 1 component workspace. In every workspace within 3m every
+      ComponentLink has from and to in that workspace, observedGeneration == generation and
+      status.ready=true with phase Ready. The bidder workspace links Bidder/<bidder> to a Pds and
+      has no link to PolicyEngine. The deleted Bidder -> Pds link returns with the same name and a
+      new UID, Ready within 3m. The manual cross-workspace link is Ready within 3m and never Failed,
+      and is gone within 2m after its delete. The network stays healthy.
+    cleanup: The manual ComponentLink is deleted (30s, NotFound ignored), then standard teardown.
+
+  - id: TestAStoppedBidderIsReplacedAndReleasesItsOrphan
+    kind: integration
+    source: test/integration/failover_test.go
+    actors: [tenant cluster, gateway, requester, bidder-1, bidder-2, kcp, pds, relay]
+    setup: >
+      Own network: --bidders 2 --with-gateway, 5m, gateway option vm-ready-timeout-sec=90, parallel.
+      Warm-up: two concurrent `run request --name fo<6 hex> --exec true --contract-timeout 4m
+      --network-timeout 2m -- --deny-bidder-dids <other bidder DID>` (5m each). Then pod
+      default/it-failover in tenant "tenant". Before the winner's node joins, the winner is stopped
+      by stopped=true on its entry in MarketNetwork "network" spec.apps (root). Later the flag is
+      removed. Finally the pod is deleted.
+    asserts: >
+      Warm-up: each request exits Released with a receipt, won by the bidder not denied; no guests
+      within 2m. Within 4m a NodeClaim has status.contract.acceptUri and a winner DID while not yet
+      Joining or Running; its receipt within 2m, still before any join; within 30s the winner has a
+      ComputeVM carrying that receipt. After the stop the application message starts with "stopped:"
+      within 2m and no claim for the old RFP is Joining or Running; within 270s that claim ends
+      (Failed, Lost or Released) or is gone. Within 6m a replacement claim for a new RFP is Running,
+      won by the other bidder, never Failed or Lost, and the pod is Ready on its node. After the
+      restore the stopped bidder is Ready within 3m and within 3m has no ComputeVMs and no VM units;
+      any ComputeVM it shows meanwhile carries only the old orphan receipt, never the replacement's.
+      The pod stays Ready on the same node. After the pod delete no guest remains within 100s.
+    cleanup: The pod is deleted with grace 0, then standard teardown for both bidder handles.
+
+  - id: TestOpenTunnelProviderPublication
+    kind: integration
+    source: test/integration/ingress_provider_test.go
+    actors: [opentunnel ingress provider, pds handler, fake opentunnel process]
+    setup: >
+      In process, no network. A fake opentunnel executable prints the URL held in a file (first
+      https://pds-one.opentunnel.xyz) and sleeps. Handler root Pds/pds answers "ok". The opentunnel
+      provider runs with route pds-test and local host 127.0.0.1. Ingress is registered (workspace
+      root, exposure pds-ingress, service pds, protocol HTTP, handler http, ingress ref "ingress").
+      Then the file changes to https://pds-two.opentunnel.xyz and the same spec is registered again.
+    asserts: >
+      The provider is Ready within 10s. The first URL starts with https://pds-one.opentunnel.xyz.
+      The second registration is refused with the stable-host-mismatch error.
+    cleanup: Registration closed, provider cancelled and awaited, temp dir removed.
+
+  - id: TestKubeconfigClientCertificateWithoutCredentialHelper
+    kind: integration
+    source: test/integration/kubeconfig_client_cert_test.go
+    actors: [owner pds account, pds, gateway, tenant cluster, kcp, kubectl]
+    setup: >
+      Own network: --bidders 1 --with-gateway, 5m, parallel. Tenant "tenant" ready within 3m and
+      ClusterRoleBinding socialweb-owner within 3m. Gateway XRPC address from Exposure
+      svc-gatewayapi-gateway-api-local status.endpoint; owner from the gateway owner-sessions.json
+      (exactly 1) via com.atproto.server.createSession over the network CA. Service-auth tokens from
+      com.atproto.server.getServiceAuth with aud = the GatewayAPI gateway-api audience and a per
+      method lxm. Calls com.publicdomainrelay.temp.cluster.getKubeconfig,
+      computer.socialweb.k8s.kubectlApplyServerSide and
+      com.publicdomainrelay.temp.cluster.revokeIdentity. Uses the kubeconfig through client-go and
+      /usr/local/bin/kubectl with a PATH that lacks socialweb-credential.
+    asserts: >
+      getKubeconfig {"name":"tenant","ttlSeconds":3600} is 200 with Cache-Control no-store. The
+      kubeconfig has exactly 1 user with a plain client cert and key (no exec plugin, no token);
+      cert CN = owner DID, O = [socialweb.computer:cluster-owners], lifetime 1h to 1h05m.
+      ttlSeconds 59 and 86401 are 400 InvalidRequest. A token for lxm listClusters is 401 on
+      getKubeconfig. `kubectl get nodes -o name` exits 0 and a client-go node list works.
+      kubectlApplyServerSide of ConfigMap default/it-owner-credential (fieldManager kubectl) is 200
+      and the object exists. revokeIdentity {"name":"tenant"} is 200, and within 2s the cert is
+      refused (401/403; kubectl non-zero). The private key (base64 of the PEM, and PEM body lines of
+      40+ chars) appears in no file under the gateway logs or the gateway run dir.
+    cleanup: Fixture dir removed; standard teardown.
+
+  - id: k8s_xrpc_test.go
+    kind: fixture
+    source: test/integration/k8s_xrpc_test.go
+    actors: [owner pds account, gateway, tenant cluster]
+    setup: >
+      The shared "Job through XRPC" check of the scale-to-zero test (cluster "tenant", a test
+      namespace, a pinned node), calling the gateway computer.socialweb.k8s.* methods with owner
+      service-auth tokens (aud = gateway audience, lxm = full method NSID).
+    asserts: >
+      kubectlApplyServerSide of ConfigMap it-app-config (environment=production, log_level=info,
+      fieldManager kubectl) is 200 with a uid and kind ConfigMap, and the object exists. log_level=debug
+      with fieldManager other and no force is 409 ApplyConflict; with force=true 200 and the cluster
+      shows debug. Kind example.invalid/v1 Nope is 400 KindNotFound. Job it-xrpc-job (batch/v1,
+      backoffLimit 0, nodeName pinned, restartPolicy Never, busybox printing a marker and uname -m)
+      is 200 kind Job. getJob (tailLines 20) reaches Succeeded within 90s with exactly 1 pod, 1
+      container, Terminated, exit 0, the marker in its log. getJob it-no-such-job is 404
+      ObjectNotFound.
+    cleanup: Job it-xrpc-job deleted with background propagation; a failed delete is an error.
+
+  - id: market_fixtures_test.go
+    kind: fixture
+    source: test/integration/market_fixtures_test.go
+    actors: [pds, relay, jetstream, oauth token server, oauth QR transfer service, event stream controller, market inbox]
+    setup: >
+      In-process fakes for the offline TestMarket* tests. PDS: a local full-mode PDS (sqlite repo
+      and account stores, random did:plc, handle market<8 hex>.test, k256 repo key), or a real PDS
+      from SOCIALWEB_IT_MARKET_PDS_URL/_DID/_HANDLE/_PASSWORD. Account modes: managed-associated
+      (association RequireApproval) and managed-unassociated (Skip) use a bearer session;
+      existing-pds-account a RemotePDS market-remote with secret refs market/access (accessJwt) and
+      market/dpop (P-256 DPoP key); existing-oauth-browser and existing-oauth-delegated OAuth
+      sessions refreshed by a fake token server; existing-oauth-qr a QR transfer at
+      /xrpc/com.fedfork.atprotoOauthQR. Relay fake: com.atproto.sync.subscribeRepos websocket in
+      cbor or json frames. Jetstream fake: commit frames with time_us. EventStream objects (source
+      relay or jetstream, collections, optional dids, handler sink) on a fake API with 20ms retry.
+      Records: com.publicdomainrelay.temp.market.rfp, .bid, .accept, .receipt; association claims as
+      com.publicdomainrelay.temp.badgeBlueKeys.
+    asserts: >
+      Relay and jetstream record each requested cursor and replay the backlog above it (resume is
+      observable); the relay can close after N events to force a reconnect. The inbox dedupes on
+      uri#cid and counts every apply. The token server in revoked mode answers 400 invalid_grant.
+      The QR service needs a Bearer token (401 without), answers 400 without a nonce, and serves a
+      nonce once (404 after).
+    cleanup: Every fake server closed, local PDS stores closed and removed, controllers cancelled.
+
+  - id: TestMarketAccountAndTransportMatrix
+    kind: integration
+    source: test/integration/market_matrix_test.go
+    actors: [account holder, pds, jetstream, event stream controller, oauth token server, qr transfer service]
+    setup: >
+      Offline (market_fixtures_test.go). Each account subtest has its own PDS account and a
+      com.atproto.server.createSession session; the OAuth modes use a DPoP-bound session as client
+      fixture-browser, fixture-delegated or (via the one-shot QR transfer with a Bearer service-auth
+      token) fixture-qr. Each transport subtest writes one com.publicdomainrelay.temp.market.bid with
+      com.atproto.repo.createRecord and delivers it into an inbox keyed by at-uri#cid. XRPC: by
+      com.atproto.repo.getRecord. subscribeRepos: com.atproto.sync.subscribeRepos opened before the
+      write. JetStream: an EventStream (jetstream, collections [bid], dids [account]). Both:
+      subscribeRepos plus XRPC.
+    asserts: >
+      XRPC: the first delivery is new, 1 object. subscribeRepos: within 10s an event with seq >= 0
+      and ops[0].path <collection>/<rkey>, 1 object. JetStream: the handler gets the commit within
+      15s, new, 1 object. Both: within 15s an event with repo = account DID and an op path; XRPC
+      delivery is new, the firehose copy (same uri and cid) is not; 1 object after 2+ applies.
+    cleanup: Fakes closed, temp stores removed, controller stopped.
+    cases:
+      - "accounts: managed-associated, managed-unassociated, existing-pds-account, existing-oauth-browser, existing-oauth-qr, existing-oauth-delegated"
+      - "transports: XRPC, Firehose subscribeRepos, Firehose JetStream, Both"
+      - "6 accounts x 4 transports = 24 subtests"
+
+  - id: TestMarketDuplicateDeliveryCreatesOneObject
+    kind: integration
+    source: test/integration/market_matrix_test.go
+    actors: [account holder, pds, relay, event stream controller]
+    setup: >
+      Offline. A relay EventStream (relayUrls [fake relay], collections
+      [com.publicdomainrelay.temp.market.bid], dids [account]). One bid record; the relay publishes
+      its commit at seq 1 and again at seq 2.
+    asserts: >
+      Both firehose events reach the handler within 15s. Both copies plus the getRecord copy give
+      exactly 1 object after exactly 3 applies.
+    cleanup: Fakes closed, controller stopped.
+
+  - id: TestMarketRestartResumesCursorsAndDedupe
+    kind: integration
+    source: test/integration/market_matrix_test.go
+    actors: [account holder, pds, relay, event stream controller]
+    setup: >
+      Offline. A JSON relay that drops the websocket after every event. Relay EventStream on the bid
+      collection and the account DID. Two bids published at seq 1 and 2.
+    asserts: >
+      Both events arrive (15s each). Event one, then event two twice, give exactly 2 objects. The
+      relay saw a reconnect with cursor=1.
+    cleanup: Fakes closed, controller stopped.
+
+  - id: TestMarketOutOfOrderAcceptConverges
+    kind: integration
+    source: test/integration/market_matrix_test.go
+    actors: [account holder, pds]
+    setup: >
+      Offline. One record each of com.publicdomainrelay.temp.market.bid, .receipt and .accept,
+      delivered by getRecord in the order accept, bid, receipt, accept.
+    asserts: Exactly 3 objects after exactly 4 applies; the early accept does not block.
+    cleanup: PDS closed, stores removed.
+
+  - id: TestMarketFirehoseFailsClosedWithoutIngress
+    kind: integration
+    source: test/integration/market_matrix_test.go
+    actors: [event stream controller]
+    setup: An EventStream with source relay, an empty relay URL, the bid collection, no DID filter.
+    asserts: Within 15s status.phase is Failed and status.cursor stays 0.
+    cleanup: Controller stopped.
+
+  - id: TestMarketRemotePDSMissingAuthFailsClosed
+    kind: integration
+    source: test/integration/market_matrix_test.go
+    actors: [pds, remote pds binding]
+    setup: >
+      Offline. A RemotePDS market-remote with spec.url and spec.did, resolved first without auth,
+      then with spec.auth accessTokenRef market/access and dPoPKeyRef market/dpop (P-256 multibase).
+    asserts: >
+      Without auth resolving fails with the authentication-required error. With auth it resolves and
+      com.atproto.server.describeServer returns the PDS DID.
+    cleanup: PDS closed, stores removed.
+
+  - id: TestMarketRelayReconnectResumesCursor
+    kind: integration
+    source: test/integration/market_matrix_test.go
+    actors: [account holder, pds, relay, event stream controller]
+    setup: Offline. A JSON relay that drops after every event; two bids published at seq 10 and 11.
+    asserts: Both events reach the handler (15s each); the relay saw a reconnect with cursor=10.
+    cleanup: Fakes closed, controller stopped.
+
+  - id: TestMarketAssociationRevocationRemovesApproval
+    kind: integration
+    source: test/integration/market_matrix_test.go
+    actors: [account holder, pds]
+    setup: >
+      Offline. com.atproto.repo.putRecord of a com.publicdomainrelay.temp.badgeBlueKeys claim (rkey
+      fixture-claim-<subject>, keyId a random did:plc, challenge the account DID, service, nonce,
+      createdAt), then com.atproto.repo.deleteRecord.
+    asserts: >
+      Before the delete getRecord finds it; after, getRecord reports it absent (RecordNotFound,
+      RepoNotFound or 404).
+    cleanup: PDS closed, stores removed.
+
+  - id: TestMarketExpiredSessionReportsSignInAgain
+    kind: integration
+    source: test/integration/market_matrix_test.go
+    actors: [oauth client, oauth token server]
+    setup: >
+      Offline. An OAuth session whose access JWT expired 1h ago (P-256 DPoP key, scope atproto,
+      refresh token fixture-refresh) against a token endpoint that issues new tokens; a second
+      session (fixture-revoked) against one that answers 400 invalid_grant.
+    asserts: >
+      The first session refreshes and returns a new access token. The revoked one fails with the
+      session-expired (sign in again) error.
+    cleanup: Fake token servers closed.
+
+  - id: TestMarketTransportFixtureFormats
+    kind: integration
+    source: test/integration/market_matrix_test.go
+    actors: [account holder, pds, relay, event stream controller]
+    setup: >
+      Offline. One bid record. json: a relay EventStream consumes text frames. cbor: a
+      subscribeRepos client consumes binary frames (header op 1 t #commit; body with a CID tag 42 and
+      an op path). Commit published at seq 1.
+    asserts: In both formats the decoded event arrives within 15s with repo = account DID.
+    cleanup: Fakes closed.
+    cases: [json, cbor]
+
+  - id: TestMarketPDSFixturePointableAtRealPDS
+    kind: integration
+    source: test/integration/market_matrix_test.go
+    actors: [pds]
+    setup: >
+      Skipped unless SOCIALWEB_IT_MARKET_PDS_URL is set; uses that PDS with _DID (must parse), _HANDLE
+      and _PASSWORD and a createSession session.
+    asserts: An authenticated com.atproto.server.describeServer succeeds.
+    cleanup: Nothing created.
+
+  - id: TestPolicyWorkflowRunsBundledMatrix
+    kind: integration
+    source: test/integration/policy_matrix_test.go
+    actors: [bidder, requester, policy engine, kcp]
+    setup: >
+      Shared 1-bidder network without gateway. PolicyEngine policy-engine in root:bidder-1 has
+      status.ready=true within 2m. Per case a PolicyWorkflowRun: engineRef policy-engine,
+      workflowRef the bundled workflow of the case; perspective, selfDid, subjectDid,
+      counterpartyDid, rootRequesterDid from the case; args {matrixCase: <case>}; inputs mode=full,
+      self-did, perspective, subject-did, counterparty-did, root-requester-did and strong-ref record
+      JSON for com.publicdomainrelay.temp.market.rfp, .bid and .accept; activeDeadlineSeconds 120;
+      ttlSecondsAfterFinished 600.
+    asserts: >
+      Within 2m each run is Succeeded with exitStatus success and condition Complete=True;
+      outputs.evaluate.allow is "true" or "false" and violations a JSON array; consoleOutput is
+      non-empty and contains "policy":"<case>"; status.cache has a key policy/<case>/... holding
+      result.json.
+    cleanup: Runs expire by TTL or with the network; shared network standard teardown at package end.
+    cases:
+      - "bidder-mutuals (bidder)"
+      - "bidder-only-me (bidder)"
+      - "bidder-tangled-vouch (bidder)"
+      - "bid-payload (requester)"
+      - "open (bidder)"
+      - "requester-mutuals (requester)"
+      - "requester-only-me (requester)"
+      - "requester-tangled-vouch (requester)"
+      - "under-4-cpus (bidder)"
+
+  - id: TestPolicyWorkflowRunCacheRoundTrip
+    kind: integration
+    source: test/integration/policy_matrix_test.go
+    actors: [bidder, policy engine, kcp]
+    setup: >
+      Shared 1-bidder network; PolicyEngine ready within 2m. A first PolicyWorkflowRun of the bundled
+      open workflow (bidder perspective, args {cacheRoundTrip: <marker>}, full inputs); a second with
+      the same spec and spec.cache seeded from the first run's status.cache.
+    asserts: >
+      Both Succeeded within 2m with the success shape. The first persists a policy/open/ cache key.
+      The second run's console contains "policy cache hit", and every policy/open/ key of the first
+      is in the second's status.cache with byte-identical result.json.
+    cleanup: Runs expire by TTL; shared network teardown at package end.
+
+  - id: TestPolicyWorkflowRunInputsArgsPerspective
+    kind: integration
+    source: test/integration/policy_matrix_test.go
+    actors: [requester, policy engine, kcp]
+    setup: >
+      Shared 1-bidder network. A PolicyWorkflow (engineRef policy-engine) with one job echo whose
+      outputs args, perspective and self come from inputs.policy-args, inputs.perspective and
+      inputs.self-did, visible within 30s. A PolicyWorkflowRun of it: perspective requester, selfDid
+      did:plc:itechobidder000000000000, args {alpha: one, beta: two}, activeDeadlineSeconds 60.
+    asserts: >
+      Succeeded within 2m; outputs.echo.args is exactly {"alpha":"one","beta":"two"}, perspective
+      requester, self the selfDid.
+    cleanup: Objects go with the shared network.
+
+  - id: TestPolicyWorkflowRunCancellationAndDeadline
+    kind: integration
+    source: test/integration/policy_matrix_test.go
+    actors: [bidder, policy engine, kcp]
+    setup: >
+      Shared 1-bidder network. Each case notes the network's deno policy processes (deno --no-prompt
+      --no-config --allow-net under the network dev-core) and creates a PolicyWorkflowRun with an
+      inline spec.workflow of 800 blocking tangy/policy-open@v1 steps.
+    asserts: >
+      spec-cancel (deadline 600; Running and a new deno process within 60s, then spec.cancel=true):
+      Cancelled with condition Cancelled=True within 2m. deadline (activeDeadlineSeconds 1): Failed
+      with Failed=True reason DeadlineExceeded within 30s. deletion (deadline 600; Running, then the
+      object is deleted): gone within 30s. In all three every deno process the run started exits
+      within 60s.
+    cleanup: Runs expire by TTL; shared network teardown.
+    cases: [spec-cancel, deadline, deletion]
+
+  - id: TestPolicyWorkflowRunFailsClosedOnRecordTypes
+    kind: integration
+    source: test/integration/policy_matrix_test.go
+    actors: [bidder, policy engine, kcp]
+    setup: >
+      Shared 1-bidder network. Per case a PolicyWorkflow with spec.recordRef {uri
+      at://did:example:matrix/<recordType>/<case>, cid bafyfailclosed<case>} and a PolicyWorkflowRun
+      of it whose spec.cache entry rec/<uri>/<cid> holds value.json {"$type":"<recordType>"}.
+    asserts: >
+      Within 30s the run is Failed with "typescript policy records are disabled" or "denoWorker
+      policy records are disabled"; consoleOutput is empty; no new deno policy process after 10s.
+    cleanup: The PolicyWorkflow is deleted; the run expires by TTL.
+    cases:
+      - "typescript (computer.socialweb.temp.policy.typescript)"
+      - "deno-worker (com.publicdomainrelay.temp.market.policies.denoWorker)"
+
+  - id: TestPolicyWorkflowRunTTLDeletesFinishedRun
+    kind: integration
+    source: test/integration/policy_matrix_test.go
+    actors: [bidder, policy engine, kcp]
+    setup: >
+      Shared 1-bidder network. A PolicyWorkflowRun of the bundled open workflow with
+      ttlSecondsAfterFinished 2.
+    asserts: Succeeded within 2m with the success shape, then deleted by its TTL within 60s.
+    cleanup: The TTL deletes the run.
+
+  - id: TestRequestSecretsReachTheGuestThroughTheRFPFlow
+    kind: integration
+    source: test/integration/request_secrets_test.go
+    actors: [requester, bidder, pds, kcp, guest VM]
+    setup: >
+      Own network: --bidders 1, no gateway, parallel. A secrets bundle [{path:
+      /root/secrets/it/value, value: it-secret-<32 hex>}] (mode 0600). `run request --network <inst>
+      --name rq<6 hex> --secrets <file> --hold --contract-timeout 2m --network-timeout 2m --exec
+      "systemctl start setup-secrets.service; cat /root/secrets/it/value; echo; echo IT-SECRET-READ;
+      read -r _"` (5m). Then "done" and `run request release <name>` (3m).
+    asserts: >
+      The guest prints the exact secret before IT-SECRET-READ. While held the secret (plain, and std
+      and raw-url base64 at 3 byte offsets) appears nowhere outside the guest: files under the state
+      dir and requests/<name> (vms excluded), process cmdlines and environments, the VM account's
+      user journal since the start, test logs other than run request stdout; the scan covered at
+      least 1 kine.db and at least 2 repos.db. The summary has phase Held, contract.receiptUri,
+      winnerDid, secretsFetchedAt and at least one contract.hostKeys entry; stderr has
+      StrictHostKeyChecking=yes. The release is Released with releaseStatus 200. Within 1m no
+      ComputeVM, VM work dir or VM unit is left. The scans are clean again after the release.
+    cleanup: Standard teardown.
+
+  - id: TestTenantClusterScalesFromZeroOnMarketVMsAndBack
+    kind: integration
+    source: test/integration/scale_to_zero_test.go
+    actors: [tenant owner, gateway, bidder, kcp, tenant cluster, guest VM]
+    setup: >
+      Shared 2-bidder network with gateway, parallel with TestClusterEventsStreamFromSubscribeClusters.
+      Tenant "tenant" /readyz within 3m. Namespaces it-srv, it-cli-allowed (label it-allow=yes),
+      it-cli-other. busybox httpd pods it-a and it-b in it-srv with required hostname anti-affinity,
+      Service it-b:8080; later pod it-c pinned to B's node. The k8s_xrpc_test.go check on node A.
+      NetworkPolicies applied and removed one at a time: deny-ingress, deny-egress,
+      egress-one-ipblock (B /32), allow-labelled-namespaces, default-deny-dns-allow (UDP and TCP 53).
+      Then delete it-b and it-c, then the three namespaces.
+    asserts: >
+      Idle 0 Nodes and 0 NodeClaims. Within 4m two nodes join from market RFP VMs and it-a and it-b
+      are Ready on different nodes; exactly 2 NodeClaims Running with status.contract.receiptUri
+      (within 2m); the bidders run one ComputeVM per receipt. The XRPC fixture passes. Network
+      probes from node A (30s settle each): without policy B by IP, the CoreDNS name
+      it-b.it-srv.svc.cluster.local and the service name all reach; deny ingress and deny egress
+      block and removal restores; ipBlock allows B and blocks C; namespaceSelector allows only the
+      labelled namespace; default deny with DNS allowed resolves but blocks B. Scale in: 1 Node and 1
+      NodeClaim within 100s, never more than one node released at once, node A kept; then 0 and 0.
+      Within 1m no ComputeVM carries this test's receipts. The gateway core log has 2+
+      node_claim_released lines, all confirmed=true. /readyz answers at 0 nodes.
+    cleanup: The test scales to zero itself; shared network standard teardown at package end.
+
+  - id: TestSshGatewayExposesItsServerAndReusesTheGuestAcrossRestart
+    kind: integration
+    source: test/integration/sshgateway_test.go
+    actors: [owner, ssh gateway, ssh server, pds, bidder, kcp, guest VM]
+    setup: >
+      Needs a dumbpipe executable (SOCIALWEB_IT_DUMBPIPE, /usr/local/bin/dumbpipe or PATH). Own
+      network: --bidders 1, network timeout 10m. An owner ssh-<8 hex>.alice.test on the alice PDS via
+      com.atproto.server.createAccount, written to owner-sessions.json (0600). `socialweb-computer run
+      gateway ssh --network <inst> --host-backend proc --name sshgw --network-timeout 5m --
+      --test-owner-sessions-file <file>`; its report names a local ssh exposure and the local
+      svc-sshserver HTTP exposure. POST /keys with HTTP basic auth registers one ed25519 key. ssh as
+      user <owner DID> with LC_SESSION=it-<8 hex> runs hostname. Then `socialweb-computer dev restart
+      sshgw/ssh-server --instance <inst>` and the same session again.
+    asserts: >
+      Key registration is 200 with an rkey. An unregistered key is refused. The first hostname is
+      non-empty and the bidders hold exactly 1 ComputeVM. dev restart succeeds within 4m. The second
+      session returns the same hostname and still exactly 1 ComputeVM (the guest is reused).
+    cleanup: Standard teardown.
+
+  - id: TestClusterEventsStreamFromSubscribeClusters
+    kind: integration
+    source: test/integration/subscribe_clusters_test.go
+    actors: [tenant owner, fresh account, gateway, pds, bidder, kcp, tenant cluster]
+    setup: >
+      Shared 2-bidder network with gateway. Gateway endpoint from Exposure
+      svc-gatewayapi-gateway-api-local, audience from GatewayAPI gateway-api; owner from
+      owner-sessions.json; tokens with lxm com.publicdomainrelay.temp.cluster.<method>. Websocket
+      /xrpc/com.publicdomainrelay.temp.cluster.subscribeClusters (binary CBOR frames) for the owner
+      and for a fresh createAccount account. POST com.publicdomainrelay.temp.cluster.createCluster
+      {name: demo}; a subscription with ?name=nope. Then namespace it-srv and pod it-stream in demo,
+      later deleted.
+    asserts: >
+      Within 30s the owner snapshot ends with #info SnapshotComplete, has 2+ events and starts with
+      #cluster tenant snapshot=true. The fresh account's snapshot has no #cluster and no error
+      frames. createCluster is 200. ?name=nope yields an error frame ClusterNotFound within 15s.
+      #cluster demo reaches Ready within 3m with Initializing before Ready and at least one #member
+      event; if tenant was not Ready at snapshot time, demo's first #member precedes tenant Ready.
+      After the pod is created a #nodeClaim reaches Running within 4m after Bidding and Provisioning,
+      never Failed or Lost; the pod is Ready within 90s. After the pod delete a #nodeClaim
+      deleted=true frame arrives within 100s.
+    cleanup: Websockets closed; demo goes with the shared network teardown.
+
+  - id: TestOutOfBandComputeVMDeletionPublishesTermination
+    kind: integration
+    source: test/integration/termination_test.go
+    actors: [requester, bidder, kcp, pds, guest VM]
+    setup: >
+      Own network: --bidders 1, parallel. `run request --network <inst> --name term<6 hex> --hold
+      --exec "echo <marker>; read -r _" --contract-timeout 4m --network-timeout 2m` (6m). After the
+      marker the single ComputeVM in root:bidder-1 is deleted directly in kcp.
+    asserts: >
+      Exactly 1 ComputeVM with a UID while held. It is gone within 3m. Within 2m StateSync
+      termination-<hex of the first 8 bytes of sha256(UID)> in root:bidder-1 has status.phase Acked
+      and status.acked.ref (one termination published). The held run request exits within 90s. The
+      network stays healthy.
+    cleanup: Standard teardown.
+
+  - id: TestWebAppSignInOverLoopbackOriginIssuesAClientCertificate
+    kind: integration
+    source: test/integration/web_app_signin_test.go
+    actors: [browser user, web app, gateway, pds, kcp, tenant cluster]
+    setup: >
+      A loopback origin http://127.0.0.1:<port>. Own network: --bidders 1 --with-gateway, 5m,
+      gateway option public-origin=<origin>; a TCP proxy from the origin to the gateway API Exposure
+      endpoint. Tenant "tenant" /readyz and ClusterRoleBinding socialweb-owner within 3m. A cookie-jar
+      client that does not follow redirects, with Origin=<origin>: GET /oauth-client-metadata.json;
+      POST /oauth/start {handle: owner DID}; POST /oauth/authorize on the PDS (identifier, password,
+      request_uri, client_id); GET the /oauth/callback it returns; GET /session twice; POST
+      /api/clusters/list; POST /api/clusters/kubeconfig {name: tenant}.
+    asserts: >
+      Metadata (retried up to 2m) is 200 with client_id <origin>/oauth-client-metadata.json and
+      redirect_uris containing <origin>/oauth/callback. /oauth/start is 200 with an authorizationUrl
+      at /oauth/authorize on the PDS carrying request_uri and that client_id (a PAR was pushed). The
+      PDS authorize is 200 with a code and a redirect_uri at /oauth/callback with state and iss. The
+      callback is 302 to <origin>/ and sets swc_session HttpOnly, SameSite=Strict, Path=/, not
+      Secure. /session is 200 with did = owner DID on both calls. clusters/list is 200 naming tenant,
+      which is Ready within 5m. kubeconfig is 200 (429 retried) with Cache-Control no-store, exactly
+      1 user with a plain client cert and key, CN = owner DID, O [socialweb.computer:cluster-owners];
+      a client-go node list on the tenant works with it.
+    cleanup: Listener and proxy closed; standard teardown.
+
+  - id: soak
+    kind: soak
+    source: test/soak/main.go
+    actors: [market network, requester soakreq, bidder, gateway, tenant cluster, pds, openbao, kcp front, operator host]
+    setup: >
+      A Linux-only program `soak <verb> [flags]` with verbs load, sample, hammer, tidy, inspect,
+      orphans and release (anything else: usage, exit 2). No script or CI invoked it; it was run by
+      hand as systemd user units on a DigitalOcean droplet. Target: an existing `socialweb-computer
+      dev up --profile market-network --bidders 1 --with-gateway` instance (optionally
+      --vm-host-backend systemd-user), read from --instance (default soak) and --state-dir (default
+      /var/tmp/swcit/soak); children under <state-dir>/apps/dev/<instance>-<app>. --binary (default
+      /var/tmp/soak/bin/socialweb-computer) runs `dev status` and `status`. A typical run: a long
+      load (RFP, VM and tenant lanes), a sample process, tidy every 10 minutes, and chaos run apart
+      (dev restart of DenoPods, kill -9 of cores and bidder pods); recorded rates 1.1 RFP/s, a VM
+      contract every 40s on 3 lanes held 20s, 2 to 6 tenant lanes, contract TTL 40m, requester
+      retention 900s, 3h or more.
+    asserts: >
+      No threshold in the program; verbs exit 1 only on setup errors. load prints a JSON counter
+      line every minute (ts, elapsedSec, rfpCreated, rfpFailed, vmStarted, vmHeld, vmReleased,
+      vmFailed, refused, tenantCycles, tenantOut, tenantIn, tenantFailed, clustersCreated,
+      clustersDeleted), one at stop and one after in-flight lanes drain (up to 15m). Pass, judged
+      outside: failed counters 0 or explained by chaos; each application reports 0 orphans and 0
+      stuck terminations; `soak orphans` reports unclaimed 0; every series in samples.jsonl
+      plateaus: after warm-up a least-squares fit is flat when |slope x window| <= max(2 x residual
+      sd, 5% of the mean).
+    cleanup: >
+      Contracts expire by their socialweb.computer/ttl-after-finished annotation; open VM contracts
+      are closed by soak release; tenant lanes delete their Cluster and Workspace. The soakreq child
+      stays until dev down. Afterwards only live and retained objects and records: no orphan
+      compute.vm records, no unowned objects, no stuck finalizers.
+
+  - id: soak/load-requester-bootstrap
+    kind: soak
+    source: test/soak/main.go
+    actors: [market network, requester soakreq]
+    setup: >
+      First phase of soak load. --requester (default soakreq), --contract-quota 20000,
+      --record-retention-sec 1800, --record-retention-scan-ms 60000, --max-concurrent 64. Without a
+      NetworkApp of that name it adds a MarketRequester application with the network requester
+      profile, a ComputeContracts quota and options record-retention-sec, record-retention-scan-ms,
+      max-concurrent and per-account-max; an existing one is reused.
+    asserts: >
+      The NetworkApp reaches phase Ready with an instance name and kcp URL, without the stopped
+      message, within 10m; listing ComputeContract in the child workspace works within 3m; prints
+      {"event":"requester ready","instance":"<child>"}. Failure exits 1.
+    cleanup: None; the requester child stays.
+
+  - id: soak/load-rfp
+    kind: soak
+    source: test/soak/main.go
+    actors: [requester soakreq, bidder, pds]
+    setup: >
+      On when --rfp-rate > 0 (default 0.5/s). RFP-only ComputeContracts rfp-<epoch>-<seq> (spec.vmName
+      soak-rfp, annotation socialweb.computer/rfp-only=true, ttl-after-finished --contract-ttl default
+      50m) at a fixed pace, at most --rfp-inflight (48) in flight, for --duration or until a signal.
+    asserts: >
+      rfpCreated per accepted create; Forbidden or Invalid with "quota" counts refused
+      (back-pressure); other errors rfpFailed. Healthy: rfpFailed 0; object counts, market.rfp repo
+      records and process memory plateau.
+    cleanup: Contracts expire by TTL, market.rfp records by requester retention.
+
+  - id: soak/load-vm
+    kind: soak
+    source: test/soak/main.go
+    actors: [requester soakreq, bidder, vm host, pds]
+    setup: >
+      On when --vm-every > 0 (default 45s). A full ComputeContract vm-<epoch>-<seq> every
+      --vm-every, at most --vm-lanes (3) open, through RFP, Bids, accept and VM boot.
+    asserts: >
+      vmStarted per create; Held within 10m counts vmHeld, else (Failed, Released, timeout)
+      vmFailed. After --vm-hold (20s) spec.release=true and Released within 5m counts vmReleased,
+      else vmFailed. Pass: vmFailed 0 or only chaos-explained (no_bids around a bidder kill).
+    cleanup: Every opened contract gets spec.release=true; nothing left behind.
+
+  - id: soak/load-tenant-cycle
+    kind: soak
+    source: test/soak/tenant.go
+    actors: [gateway, tenant cluster, bidder, vm host]
+    setup: >
+      On when --tenant-every > 0 (default off). An existing tenant cluster --tenant-name (default
+      tenant) on the <instance>-gateway child, opened through the gateway state dir
+      (clusterprovider/pdr-*-<name>: front.json, server CA, admin client cert). One cycle per
+      --tenant-every, pod hold --tenant-hold (20s).
+    asserts: >
+      default ServiceAccount within 1m; pod soak-<unix>-<seq> (pinned busybox, 10m CPU, 16Mi, grace
+      0) Running within 6m (tenantOut); after the hold and delete, 0 nodes within 5m (tenantIn);
+      any failure counts tenantFailed with a JSON event.
+    cleanup: The probe pod is always deleted; the cluster stays; no nodes, VMs or contracts remain.
+
+  - id: soak/load-tenant-lanes
+    kind: soak
+    source: test/soak/lanes.go
+    actors: [gateway, tenant cluster, bidder, vm host, kcp workspace]
+    setup: >
+      On when --tenant-lanes N > 0 (recorded 2, 4, 6). Needs <instance>-gateway with a bootstrap
+      account DID. Lanes --lane-base+1 .. --lane-base+N, lane i starts after i x 20s. Each lane
+      loops: create Cluster l<lane>c<seq> in the bootstrap account home workspace
+      (root:<account hash>:<name>) through the gateway members.kubeconfig, run the scale cycle,
+      delete the cluster.
+    asserts: >
+      clustersCreated; tenant /readyz within 5m; pod Running within 8m (tenantOut); nodes 0 within
+      6m after delete (tenantIn); errors count tenantFailed with backoff 1m per failure up to 5m;
+      Cluster NotFound within 10m after delete. Pass: tenantFailed 0 apart from stop-cut cycles,
+      clustersDeleted == clustersCreated, gateway kcp memory and OpenBao storage per cycle plateau.
+    cleanup: >
+      After every round the Cluster is deleted and awaited, then the tenancy.kcp.io Workspace of the
+      same name; no cluster, workspace, node or VM left.
+
+  - id: soak/sample
+    kind: soak
+    source: test/soak/sample.go
+    actors: [operator host, market network, requester, bidder, gateway, pds, kcp, kine, openbao]
+    setup: >
+      `soak sample` --every (default 5m; 1m used), --out (default /var/tmp/soak/samples.jsonl), --once.
+      One JSON line per tick: host memory, swap, oom_kill count, load, /var/tmp use, journal bytes;
+      per app and role process count, RSS and sockets (kcp, kine, bao, firecracker, dumbpipe, caddy,
+      postgres, deno:<pod>, core:<subcommand>); bytes per state subdir and sqlite file; `status`
+      contracts per phase; kv.sqlite3 and pds repo.sqlite3 bytes, wal and rows; per PDS listener
+      com.atproto.repo.describeRepo and paged com.atproto.repo.listRecords counts per DID and
+      collection; kine live keys per resource and logical clusters; sampleSec.
+    asserts: >
+      Collection only; the evidence for the soak verdict (plateau rule; OOM kills flat; record counts
+      follow retention). It closes idle connections after each sample so it does not leak itself.
+    cleanup: Writes only the samples file.
+
+  - id: soak/hammer
+    kind: soak
+    source: test/soak/hammer.go
+    actors: [kcp front, gateway, tenant cluster mount]
+    setup: >
+      `soak hammer` --workers (64), --duration (5m), --every (0). Targets the network kcp default
+      workspace, a child kcp (--app), or a tenant cluster's mounted workspace under the gateway
+      account (--mount, root:<account hash>:<cluster>:<child label>). Each worker lists core v1
+      namespaces (limit 1) through the kcp front, no client rate limit, 10s timeout.
+    asserts: >
+      Prints "requests <n> failed <m>". Pass: failed 0 and kcp RSS flat (reproduces mount proxy
+      transport growth and audit-log growth).
+    cleanup: None; read-only.
+
+  - id: soak/tidy
+    kind: soak
+    source: test/soak/tidy.go
+    actors: [market network, requester, bidder, gateway, openbao, tenant vault]
+    setup: >
+      `soak tidy` --interval (15m), once or every 10 minutes. For the network kcp and every child,
+      every OpenBaoServer gets a merge patch (field manager soak-tidy) setting spec.tidy.interval and,
+      when present, each spec.declared.pkiTidy interval.
+    asserts: >
+      Prints one line per server; OpenBaoServer status lastRunAt advances every interval and OpenBao
+      storage stays flat in the samples.
+    cleanup: The shortened intervals stay until teardown.
+
+  - id: soak/inspect
+    kind: soak
+    source: test/soak/inspect.go
+    actors: [bidder, requester, gateway]
+    setup: >
+      `soak inspect` --app (soak-bidder-1), --group (socialweb.computer), --resource (computevms,
+      v1alpha1), --path (root), --unowned (true), --name. Lists the resource in that child's kcp.
+    asserts: >
+      One JSON line per object (name, phase, ageSec, owners, finalizers, deleting, annotations);
+      unowned only by default. Pass: no unowned object older than its TTL, none stuck deleting with
+      finalizers.
+    cleanup: None; read-only.
+
+  - id: soak/orphans
+    kind: soak
+    source: test/soak/orphans.go
+    actors: [requester soakreq, pds]
+    setup: >
+      `soak orphans` --app (soakreq), --older-than (1h). Finds the app DID and repo listener from
+      `dev status`, lists every ComputeContract (status.contract.payload.uri, status.contract.rfp.uri),
+      pages com.atproto.repo.listRecords for com.publicdomainrelay.temp.compute.vm and
+      com.publicdomainrelay.temp.market.rfp.
+    asserts: >
+      A compute.vm record older than --older-than whose URI and rfp URI no live ComputeContract
+      claims is an orphan; one JSON line each, then a summary {contracts, vms, rfps, older,
+      unclaimed, olderThan, repo}. Pass: unclaimed 0 (ACC13-NO-ORPHANS).
+    cleanup: None; reports only.
+
+  - id: soak/release
+    kind: soak
+    source: test/soak/release.go
+    actors: [requester soakreq, bidder, vm host]
+    setup: >
+      `soak release` --app (soakreq), after load stops or crashes. Lists the ComputeContracts of the
+      requester child.
+    asserts: >
+      Every vm-* contract not Released or Failed gets spec.release=true; each then reaches Released
+      and its VM stops (seen with status or soak sample). RFP-only contracts are skipped.
+    cleanup: The cleanup of the VM lane; no vm-* contract stays Held or pending.
+
+  - id: internal/xrpcserver/Test*
+    kind: wire
+    source: internal/xrpcserver/xrpcserver_test.go
+    asserts: >
+      XRPC at /xrpc/<NSID>: missing, expired or badly signed token, wrong or missing lxm, or wrong aud
+      (did:web:host or did:web:host#socialweb_computer) is 401 {"error":"Unauthorized"}; a body that
+      fails the lexicon is 400 InvalidRequest; Initializing is 429 ClusterInitializing with
+      Retry-After; Draining is 409 ClusterDraining without it; unmapped errors 500 InternalError with
+      no detail; wrong method 405; revokeIdentity of another DID 403 Forbidden, its revoked[] starts
+      with {name:"",state:RevocationPending}, no writer 503 ClusterUnavailable.
+
+  - id: internal/atprotoauth/Test*
+    kind: wire
+    source: internal/atprotoauth/atprotoauth_test.go
+    asserts: >
+      Service-auth JWT: lifetime above the maximum refused (exactly the maximum accepted); exp, lxm
+      (present and equal) and aud checked; did:key issuers refused without lookup; did:plc and
+      did:web resolved; an unresolvable issuer is no-key, not bad-signature.
+
+  - id: internal/gateway/Test*
+    kind: wire
+    source: internal/gateway/gateway_test.go
+    asserts: >
+      A cluster the caller does not own is 404 ClusterNotFound (not 403); revoked identity is
+      IdentityRevoked and creates nothing; a kcp refusal is ClusterUnavailable carrying the cause;
+      an unreadable deny fails closed; createCluster sets running=true and returns the current phase.
+
+  - id: internal/revocation/Test*
+    kind: wire
+    source: internal/revocation/revocation_test.go
+    asserts: >
+      revokeIdentity reply: account entry {name:"",state:RevocationPending}, then one per cluster
+      (ColdDeferred when cold, else RevocationPending); no clusters gives a single Revoked entry.
+      Revoke on DID 404 or a document without keys, never on a fetch error.
+
+  - id: internal/plcresolver/Test*
+    kind: wire
+    source: internal/plcresolver/plcresolver_test.go
+    asserts: >
+      did:plc via GET <plc>/<did>: 404 is gone; 500, 429, transport error or non-JSON is an error.
+      Keys are verificationMethod ids (did#atproto). did:web via https://host/.well-known/did.json:
+      404 revokes, NXDOMAIN or timeout does not. did:key and non-DIDs make no request.
+
+  - id: internal/didkey/Test*
+    kind: wire
+    source: internal/didkey/didkey_test.go
+    asserts: >
+      did:key ed25519 spec vector 3b6a27bc... <-> did:key:z6MkiTBz1ymuepAQ4HEHYSF1H8quG5GLVVQR3djdX3mDooWp;
+      secp256k1 did:key refused; base58 keeps leading zeros; the iroh/dumbpipe EndpointID is the hex
+      ed25519 public key of IROH_SECRET (vector f8555129... -> cb668665...).
+
+  - id: internal/kcpclient/Test*
+    kind: wire
+    source: internal/kcpclient/*_test.go
+    asserts: >
+      ServiceAccount name is "did-" + lowercase unpadded base32 of the DID (ADR 0020 vector
+      did:plc:testaccount0000000000000000 -> did-mruwiotqnrrtu5dfon2gcy3dn52w45bqgaydambqgaydambqgaydambq).
+      Tree root:<hash>:<cluster>:clusters; account and home workspaces carry their spec.type, the
+      mounted child none and spec.mount.ref {socialweb.computer/v1alpha1, Cluster, name}; running off
+      is PATCH spec.running=false; deny is an atprotoidentities object {did, scope Account, revoked};
+      Node and ClusterLink status via /status; MarketIdentity approve is a JSON patch testing
+      resourceVersion and appending spec.approvedAssociations; context system:admin is the shard admin.
+
+  - id: internal/kcpapply/Test*
+    kind: wire
+    source: internal/kcpapply/kcpapply_test.go
+    asserts: >
+      A workspace is addressed as <host>/clusters/<path>; an object whose managedFields name kubectl,
+      kubectl-client-side-apply or kubectl-edit is refused, never adopted.
+
+  - id: cmd/socialweb-computer/TestAChangedAPIResourceSchemaIsRefusedNotPatched
+    kind: wire
+    source: cmd/socialweb-computer/apply_live_linux_test.go
+    asserts: >
+      Live kcp: `socialweb-computer apply` of an APIResourceSchema with a changed spec under the same
+      name is refused; the live object is unchanged.
+
+  - id: cmd/socialweb-computer/TestTheKcpFrontFlipsWithZeroFailedReadyzPolls
+    kind: wire
+    source: cmd/socialweb-computer/roll_live_linux_test.go
+    asserts: >
+      Live: during a kcp slot roll, a front restart and a slot kill -9, GET /readyz through the front
+      never fails or is refused; the front port does not change; watches reconnect.
+
+  - id: cmd/socialweb-computer/Test*
+    kind: wire
+    source: cmd/socialweb-computer/main_test.go, dev_verbs_test.go, install_test.go, release_test.go
+    asserts: >
+      Exit 2 for a verb with no backend on the OS (names plan and GOOS), for unset or unknown
+      SOCIALWEB_HOST_BACKEND, and for install with proc or as non-root. version --json gives
+      {name,goos,go,release,assets[name,version,sha256,embedded]}. dev env prints export lines
+      (KUBECONFIG, SOCIALWEB_DEV_PORT_KCP_A); --json includes SOCIALWEB_KCP_HOST. dev ls prints JSON
+      ([] when empty); an instance not up exits 1 "dev up first". A release binary missing assets
+      exits 2 and names them.
+
+  - id: internal/assets/TestEveryEmbeddedAssetExtractsAndVerifies
+    kind: wire
+    source: internal/assets/release_test.go
+    asserts: >
+      Release build: every embedded asset of the host platform extracts, every pinned executable is
+      an executable file in a tree whose digest equals the pin. Now the release-only verb
+      `socialweb-computer dev verify-assets`, run by deploy/check.sh --local and --full.
+
+  - id: api/v1alpha1/Test*
+    kind: wire
+    source: api/v1alpha1/types_test.go, types_marketidentity_test.go
+    asserts: >
+      status.nodeExpiry absent = unknown, 0 = unlimited, else a unix second; the Ready phase is the
+      literal "Ready"; Cluster, Node, NodeClaim, AtprotoIdentity, MarketIdentity and their lists are
+      registered under socialweb.computer.
+
+  - id: internal/apigen/Test*
+    kind: wire
+    source: internal/apigen/apigen_test.go
+    asserts: >
+      CRD required fields follow omitempty/optional (NodeClaimSpec requires cluster, nodeName,
+      ownerDid, apiserverPort, advertiseAddress, tokenFile, nodePasswordFile, serverCAFile; RecordRef
+      uri and cid). APIResourceSchema name v1alpha1-N.<plural>.socialweb.computer; a changed spec
+      under an old N is refused (bump Revision). A workspace bound to v1alpha1-1 keeps new fields after
+      the export is re-pointed to v1alpha1-2 (live kcp; the v1alpha1-1 NodeClaim schema was kept in
+      testdata/apiresourceschema/).
+
+  - id: internal/clicfg/Test*
+    kind: wire
+    source: internal/clicfg/clicfg_test.go
+    asserts: >
+      Precedence flag > SOCIALWEB_<NAME> env > config.json (path from CONFIG_PATH_SOCIALWEB_COMPUTER)
+      > default; an empty env value still wins; booleans are bare flags; numbers are checked.
+
+  - id: internal/ccmmain/TestLoad*
+    kind: wire
+    source: internal/ccmmain/config_test.go
+    asserts: >
+      Env SOCIALWEB_CLOUDCONTROLLERMANAGER_{TENANT_KUBECONFIG,CLUSTER,INSTANCES_FILE} required,
+      {MAX_NODES,PODS_PER_NODE,RESYNC} positive; the k3s admin kubeconfig and static bearer tokens are
+      refused.
+
+  - id: internal/tenantcredentialmain/Test*
+    kind: wire
+    source: internal/tenantcredentialmain/config_test.go, main_test.go
+    asserts: >
+      Env SOCIALWEB_TENANTCREDENTIAL_{STATE_DIR,CLUSTER,SERVER (https only),COMMON_NAME,ORGANIZATIONS,
+      OUT_DIR}, optional VALID_FOR; writes ca.crt, tls.crt, tls.key mode 0600, never overwrites; leaf
+      CN and O as requested; stdout one summary line without key material.
+
+  - id: internal/devinstance/Test*
+    kind: wire
+    source: internal/devinstance/devinstance_test.go
+    asserts: >
+      State root: option, else $TASK_STATE_DIR/socialweb-computer, else
+      $XDG_STATE_HOME/socialweb-computer, else $HOME/.local/state/socialweb-computer; instance ids
+      prefixed socialweb-comput-; socket paths under 108 bytes; dev refuses uid 0.
+
+  - id: internal/guestseed/Test*
+    kind: wire
+    source: internal/guestseed/guestseed_test.go
+    asserts: >
+      cloud-init NoCloud seed: FAT16 labelled "cidata" with user-data, meta-data and optional
+      network-config; readable by fsck.fat, blkid (TYPE=vfat) and mtype; byte-identical for one input.
+
+  - id: internal/guestrootfs/Test*
+    kind: wire
+    source: internal/guestrootfs/guestrootfs_test.go
+    asserts: >
+      Guest rootfs has no ssh host keys, cloud-init state or machine-id; cloud.cfg drop-in growpart
+      auto ["/"], resize_rootfs true, ssh_deletekeys true; tar byte-identical across builds with
+      mtimes clamped to SOURCE_DATE_EPOCH.
+
+  - id: internal/tenantnet/Test*+internal/providermain/TestTheTenantAddOnsApply*
+    kind: wire
+    source: internal/tenantnet/tenantnet_test.go, internal/providermain/podnetwork_test.go
+    asserts: >
+      Per-node DNS DaemonSet (hostNetwork, dnsPolicy Default, node label selector), Corefile on
+      169.254.20.10 (health :8080, ready :8181, kubernetes cluster.local, forward . /etc/resolv.conf).
+      Add-ons are applied as application/apply-patch+yaml under one field manager, node-reader RBAC
+      first, then the DNS objects in kube-system.
+
+  - id: internal/eso/Test*
+    kind: wire
+    source: internal/eso/eso_test.go, beside_test.go, secret_body_test.go
+    asserts: >
+      ClusterSecretStore spec.provider.vault {server, caBundle, auth.cert} names the client secret;
+      ExternalSecret reads k3s/eso-demo; webhook clientConfig.url
+      https://127.0.0.1:<port>/validate-external-secrets-io-v1-{clustersecretstore,externalsecret,secretstore},
+      no service, caBundle the minted CA, failurePolicy Ignore; the webhook cert verifies for that URL.
+
+  - id: internal/vaultcert/Test*+internal/rootvault/Test*
+    kind: wire
+    source: internal/vaultcert/*_test.go, internal/rootvault/rootvault_test.go
+    asserts: >
+      Vault TLS CA stable across runs; server SANs cover every requested host and rotate when one is
+      missing; server and client EKUs not interchangeable; files 0600, dirs 0700. OpenBao listener
+      requires and verifies client certs (tls_require_and_verify_client_cert true).
+
+  - id: internal/vaultlayout/Test*
+    kind: wire
+    source: internal/vaultlayout/*_test.go
+    asserts: >
+      OpenBao names shared with guests and the web app: socialweb-nodes/{data,metadata}/<node>, policy
+      node-<node>, role <node>, mount jwt-<12 hex of the issuer> (https://bidder.example.com ->
+      jwt-5860b7149f69); secret/data/k3s/node/<n>, role node-<n>, policy node-secret-<n>; ESO policy is
+      exactly lookup-self read, secret/data/k3s/eso-demo read, revoke-self update; door path
+      secret/data/socialweb-door/claims/<claim>/secrets-ingress.
+
+  - id: internal/kcplibs/impl/openbaoclient/Test*
+    kind: wire
+    source: internal/kcplibs/impl/openbaoclient/openbaoclient_test.go
+    asserts: >
+      X-Vault-Token on every request; namespace header only outside root; POST /v1/sys/mounts/pki
+      {"type":"pki"}; PUT /v1/sys/namespaces/<ns> only when absent; 404/403 unwrapped; ip_sans sent
+      apart from alt_names; 429 standby is healthy; BAO_/VAULT_ env cannot change TLS, address or proxy.
+
+  - id: internal/kcplibs/impl/policyclient/Test*
+    kind: wire
+    source: internal/kcplibs/impl/policyclient/policyclient_test.go
+    asserts: >
+      Policy engine POST <endpoint>/request/create returns {"status":"ok","detail":{"id"}}; in_progress
+      is running; completed with exit_status success/failure maps outcome; verdict read from
+      policy/<name>/result.json; an unreachable engine counts as running.
+
+  - id: internal/kcplibs/impl/kcpstore/Test*+internal/kcplibs/common/statuspatch/Test*
+    kind: wire
+    source: internal/kcplibs/impl/kcpstore/*_test.go, internal/kcplibs/common/statuspatch/statuspatch_test.go
+    asserts: >
+      /clusters/<path>/apis/policy.socialweb.computer/v1alpha1/[namespaces/<ns>/]policyworkflowruns,
+      status by merge-patch on /status with body {"status":{...}}; token mint POST
+      .../serviceaccounts/<sa>/token; workspace path from the kcp.io/path annotation of the
+      LogicalCluster "cluster"; finalizer removal is a JSON patch [test, add].
+
+  - id: internal/kcplibs/common/kcp/Test*+internal/kcplibs/common/ref/Test*
+    kind: wire
+    source: internal/kcplibs/common/kcp/kcp_test.go, internal/kcplibs/common/ref/ref_test.go
+    asserts: >
+      Service name <svc>.<ns|default>.<reversed workspace labels below root>.svc.kcp.local (root:acme:prod
+      -> prod.acme); cluster URL <base>/clusters/<path>.
+
+  - id: internal/kcplibs/common/listeners/Test*+internal/kcplibs/factory/servicenames/Test*
+    kind: wire
+    source: internal/kcplibs/common/listeners/listeners_test.go, internal/kcplibs/factory/servicenames/*_test.go
+    asserts: >
+      Listener report {"listeners":[{name,kind tcp|unix|relay,address}]}; wildcard binds become
+      127.0.0.1; port 0, relative unix paths and duplicates dropped. Workload env SERVICE_ARGS,
+      SERVICE_ENV, KCP_DNS_TABLE, KCP_DNS_TABLE_FILE (/runs/.kcpdns/table.json), KCP_TOKENS,
+      KCP_SERVICE_DOMAIN, KCP_NAMESPACE, KCP_SHIM; a port-0 manifest advertises nothing until bound.
+
+  - id: internal/kcplibs/common/denospec/Test*
+    kind: wire
+    source: internal/kcplibs/common/denospec/denospec_test.go
+    asserts: >
+      Deno argv --allow-*/--deny-* bare or =a,b, --ignore-env=, --allow-scripts=; commas or empty
+      values inside an entry refused.
+
+  - id: internal/kcplibs/impl/metrics/Test*
+    kind: wire
+    source: internal/kcplibs/impl/metrics/metrics_test.go
+    asserts: >
+      GET /metrics Prometheus text with kcp_reconciles_total counter, kcp_queue_depth gauge,
+      kcp_reconcile_seconds summary, each family described once.
+
+  - id: internal/kcpserver/Test*+internal/kcpstore/Test*
+    kind: wire
+    source: internal/kcpserver/*_test.go, internal/kcpstore/kcpstore_test.go
+    asserts: >
+      kcp argv: start, leader election, the WorkspaceMounts gate, --secure-port=0,
+      --experimental-bind-free-port, --etcd-servers=http://127.0.0.1:<kine>, --bind-address=127.0.0.1,
+      --shard-base-url=<front>; readiness GET /readyz with the shard-admin bearer on the slot port;
+      kcp-slots.json persisted before the front flips. kine on sqlite (or postgres for the market
+      profile) listening only on a unix socket, --metrics-bind-address=0; store backed up (with
+      -wal/-shm) before an asset-changing restart.
+
+  - id: internal/cloudprovider/Test*
+    kind: wire
+    source: internal/cloudprovider/*_test.go
+    asserts: >
+      Node spec.providerID socialweb://<cluster>/<node>; labels node.socialweb.computer/cluster and
+      /instance-type; unknown or draining instance deletes the Node; nodes.json is a JSON array of
+      {nodeName,cluster,addresses,instanceType,draining}, empty "[]", absent or malformed deletes nothing.
+
+  - id: internal/clusterprovider/Test*+internal/identitybundle/Test*
+    kind: wire
+    source: internal/clusterprovider/*_test.go, internal/identitybundle/identitybundle_test.go
+    asserts: >
+      The k3s identity bundle (13 files) lands under <dataDir>/server/tls byte- and mtime-exact and
+      persists per cluster; kube-scheduler config 0600 only for market clusters; apiserver probe 200
+      and 401 reachable, 500 and 503 not.
+
+  - id: internal/subnetallocator/Test*+internal/instance/Test*
+    kind: wire
+    source: internal/subnetallocator/*_test.go, internal/instance/writefile_test.go
+    asserts: >
+      networks.json {"version":1,"pool","leases":[{cluster,block,allocatedAt,appInstance?}]}, 0600 in
+      a 0700 dir; another pool, duplicates or unparseable refused. The k3s token file holds exactly the
+      raw token, mode 0600 at open.
+
+  - id: internal/install/Test*+internal/foldmain/Test*
+    kind: wire
+    source: internal/install/*_test.go, internal/foldmain/foldmain_test.go
+    asserts: >
+      /etc/subuid and /etc/subgid ranges above existing entries; user@<uid>.service.d
+      socialweb-delegate.conf; apparmor socialweb-pasta; config.json {"host-backend":"systemd-user",
+      "state-dir"}; the unit sets CONFIG_PATH_SOCIALWEB_COMPUTER and ExecStart
+      <state>/bin/current/socialweb-computer serve gateway kcp; bin/current and bin/previous point at
+      bin/<sha>; members re-exec as "<exe> internal <verb>".
+
+  - id: internal/hostsvc/Test*
+    kind: wire
+    source: internal/hostsvc/systemd_linux_test.go
+    asserts: >
+      Transient units: one ExecStart, CollectMode inactive, KillMode control-group, MemoryMax with
+      MemorySwapMax=0, OOMPolicy stop, TasksMax; fd-store units FileDescriptorStoreMax=1,
+      NotifyAccess=main; names prefixed socialweb-; systemd older than 253 refused.
+
+  - id: internal/sweepkcp/Test*
+    kind: wire
+    source: internal/sweepkcp/sweepkcp_test.go
+    asserts: >
+      The sweep worklist is the atprotoidentities with spec.scope Account; annotation
+      socialweb.computer/sweep=exempt excludes one.
+
+  - id: internal/nodemarket/Test*
+    kind: wire
+    source: internal/nodemarket/*_test.go
+    asserts: >
+      NodeClaim contract with the web app: the provider writes spec only, never status.phase; Joined
+      is Joining or Running with secrets fetched; Failed with rfpUri and no acceptUri is a market
+      decline; Lost is an end, not adoptable; status.message passes through; node policy and secret
+      are written before the claim, which waits for both ClusterLinks to listen.
+
+  - id: internal/appcli/TestTheRenderer*
+    kind: wire
+    source: internal/appcli/identity_test.go
+    asserts: >
+      CLI rendering of MarketIdentity status: AwaitingScan shows pendingAction url once and a QR;
+      Ready prints the handle; AwaitingApproval y/n approves or rejects through spec; SessionExpired
+      says sign in again; Failed returns status.message.
+
+deleted_fixtures:
+  - internal/eso/testdata/bundle-v2.11.0-subset.yaml (read only by internal/eso tests)
+  - testdata/apiresourceschema/v1alpha1-1.nodeclaims.socialweb.computer.yaml (read only by internal/apigen tests)
+  - testdata/computevm/*.json (ComputeVM valid/invalid fixtures; read by no non-test code)

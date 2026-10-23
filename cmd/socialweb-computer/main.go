@@ -56,7 +56,7 @@ type builtVerb struct {
 }
 
 func builtVerbs() map[string]builtVerb {
-	return map[string]builtVerb{
+	verbs := map[string]builtVerb{
 		"version":                {[]string{"json"}, runVersion},
 		"dev up":                 {slices.Concat([]string{backendOpt, "instance", "state-dir", "profile", "bidders", "with-gateway", "app-values", "network-timeout", "stand-ins", "parent", "die-with", "kcp-path", "kine-path", "postgres-root", "bao-path", "openbao-plugin-dir", "dumbpipe-path", "openbao-addr", "openbao-token-file", "asset-cache", "ready-timeout", "kcp-base-workspace", "fg", "keep-state", "guest-image-release-base"}, devVMOptions), runDevUp},
 		"dev host":               {[]string{backendOpt, "instance", "state-dir", "profile", "die-with", "kcp-path", "kine-path", "postgres-root", "bao-path", "asset-cache", "ready-timeout", "kcp-base-workspace", "fg", "keep-state"}, runDevHost},
@@ -103,6 +103,10 @@ func builtVerbs() map[string]builtVerb {
 		"internal apiserver-front": {[]string{"owner", "kcp-front-address", "front-control", "front-state", "front-fd-store"},
 			runApiserverFront},
 	}
+	for path, v := range releaseBuiltVerbs() {
+		verbs[path] = v
+	}
+	return verbs
 }
 
 type foldedVerb struct {

@@ -9,8 +9,8 @@ case "$mode" in
   *)
     echo "usage: $0 [--fast|--local|--full]" >&2
     echo "  --fast   the build gate: gofmt, go build, apigen, go vet, cross-OS and release builds" >&2
-    echo "  --local  the proofs this host can run (kcp/kine/k3s/postgres); lists what it skipped" >&2
-    echo "  --full   everything, and a skip is a failure; needs the live artifacts on this host" >&2
+    echo "  --local  --fast plus cargo test of rust/ and the embedded asset check (dev verify-assets); lists what it skipped" >&2
+    echo "  --full   --local, and a skip is a failure; needs sudo -n, cargo and the staged assets on this host" >&2
     exit 2
     ;;
 esac
@@ -20,7 +20,7 @@ fail() {
   exit 1
 }
 
-unformatted="$(gofmt -l api internal cmd test)"
+unformatted="$(gofmt -l api internal cmd)"
 if [ -n "$unformatted" ]; then
   echo "$unformatted" >&2
   fail gofmt
@@ -106,9 +106,6 @@ for target in $(jq -r '.platforms | to_entries[] | select(.value.status == "rele
 done
 rm -rf "$releasedir"
 
-log="$(mktemp)"
-trap 'rm -f "$log"' EXIT
-
 rust_check() {
   if ! command -v cargo >/dev/null 2>&1; then
     if [ "$run" = full ]; then
@@ -145,7 +142,16 @@ fi
 if [ "$run" != fast ]; then
   hostplat="$(go env GOOS)_$(go env GOARCH)"
   if [ -n "$(ls internal/assets/blobs/"$hostplat"/*.tar.zst 2>/dev/null)" ]; then
-    go test -tags release -count=1 -run TestEveryEmbeddedAssetExtractsAndVerifies ./internal/assets || fail "embedded assets extract and verify ($hostplat)"
+    verifydir="$(mktemp -d)"
+    if ! CGO_ENABLED=0 go build -tags release -trimpath -o "$verifydir/socialweb-computer" ./cmd/socialweb-computer; then
+      rm -rf "$verifydir"
+      fail "release build for the embedded asset check ($hostplat)"
+    fi
+    if ! "$verifydir/socialweb-computer" dev verify-assets >/dev/null; then
+      rm -rf "$verifydir"
+      fail "embedded assets extract and verify ($hostplat)"
+    fi
+    rm -rf "$verifydir"
     echo "check.sh: ok embedded assets extract and verify ($hostplat)"
   elif [ "$run" = full ]; then
     fail "no staged blobs for $hostplat; --full extracts every embedded asset: run scripts/stage-assets.sh"
@@ -153,23 +159,3 @@ if [ "$run" != fast ]; then
     echo "check.sh: skipped embedded asset extraction (no staged blobs for $hostplat; run scripts/stage-assets.sh)"
   fi
 fi
-
-case "$run" in
-  local)
-    if ! SOCIALWEB_LOCAL=1 go test ./... -count=1 -timeout 60m -v >"$log" 2>&1; then
-      grep -E -- '^(--- FAIL|FAIL)' "$log" | head -30 >&2
-      fail "go test local"
-    fi
-    skipped="$(grep -c -- '^--- SKIP' "$log" || true)"
-    echo "check.sh: ok go test local ($skipped artifact-gated tests skipped and named below)"
-    grep -- '^--- SKIP' "$log" | sed 's/^/  /' || true
-    ;;
-  full)
-    if ! SOCIALWEB_REQUIRE_LIVE=1 go test ./... -count=1 -timeout 60m -v >"$log" 2>&1; then
-      echo "check.sh: --full needs live inputs this host must be handed; the failing tests and the input each names:" >&2
-      grep -E -- '^(--- FAIL|[[:space:]]+[A-Za-z0-9_./-]+\.go:[0-9]+:)' "$log" | head -60 >&2
-      fail "go test full"
-    fi
-    echo "check.sh: ok go test full (nothing skipped)"
-    ;;
-esac

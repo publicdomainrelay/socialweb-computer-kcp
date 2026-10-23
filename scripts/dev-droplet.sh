@@ -4,7 +4,7 @@ set -euo pipefail
 usage() {
   cat >&2 <<'EOF'
 usage: scripts/dev-droplet.sh create [name] | setup [name] | push <publish-dir> [name] | swc [name] -- <socialweb-computer args>
-       scripts/dev-droplet.sh it <test-regex> <publish-dir> [name] | ssh [name] [cmd...] | list | down
+       scripts/dev-droplet.sh ssh [name] [cmd...] | list | down
        scripts/dev-droplet.sh sync [name] [ref] [work] | build [name] [work]
 EOF
   exit 2
@@ -85,9 +85,8 @@ mkdir -p /etc/rancher/node
 test -s /etc/rancher/node/password || head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n' >/etc/rancher/node/password
 chown test-0001:test-0001 /etc/rancher/node/password
 chmod 600 /etc/rancher/node/password
-mkdir -p /var/lib/socialweb-computer /var/tmp/swcit /var/tmp/it-art
+mkdir -p /var/lib/socialweb-computer /var/tmp/swcit
 chmod 1777 /var/tmp/swcit
-chown test-0001:test-0001 /var/tmp/it-art
 chown dev:dev /var/lib/socialweb-computer
 test -c /dev/kvm
 test -x /usr/local/go/bin/go && /usr/local/go/bin/go version | grep -q "go$GO_VER " || { curl -fsSL "https://go.dev/dl/go$GO_VER.linux-amd64.tar.gz" | tar -C /usr/local -xzf - --transform "s,^go,go.new," && rm -rf /usr/local/go && mv /usr/local/go.new /usr/local/go; }
@@ -111,19 +110,6 @@ EOF
     publish="${SOCIALWEB_PUBLISH_DIR:?set SOCIALWEB_PUBLISH_DIR to the pushed publish dir}"
     uid="$(rssh "$name" id -u test-0001)"
     rssh "$name" cd /var/tmp '&&' runuser -u test-0001 -- env HOME=/home/test-0001 XDG_RUNTIME_DIR=/run/user/$uid DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus PATH=/usr/local/bin:/usr/bin:/bin LANG=C.UTF-8 "$publish/bin/socialweb-computer" $(printf '%q ' "$@")
-    ;;
-  it)
-    pattern="${1:?test regex}"
-    publish="${2:?publish dir}"
-    name="${3:-dev-work-0001}"
-    repo="$(cd "$(dirname "$0")/.." && pwd)"
-    bin="$state/it.test"
-    (cd "$repo" && GOOS=linux GOARCH=amd64 go test -c -tags integration -o "$bin" ./test/integration/)
-    scp -q -i "$key_file" -o StrictHostKeyChecking=accept-new "$bin" "root@$(ip_of "$name"):/var/tmp/it.test"
-    uid="$(rssh "$name" id -u test-0001)"
-    rssh "$name" cd /var/tmp '&&' runuser -u test-0001 -- env HOME=/home/test-0001 XDG_RUNTIME_DIR=/run/user/$uid DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus PATH=/usr/local/bin:/usr/bin:/bin LANG=C.UTF-8 \
-      SOCIALWEB_IT_SKIP_BUILD=1 SOCIALWEB_IT_PUBLISH="$publish" SOCIALWEB_IT_LIVE_SLOT=none SOCIALWEB_IT_RUN_ROOT=/var/tmp/swcit SOCIALWEB_IT_ARTIFACTS=/var/tmp/it-art/run \
-      /var/tmp/it.test -test.v -test.timeout "${SOCIALWEB_IT_TIMEOUT:-40m}" -test.run "$pattern"
     ;;
   sync)
     name="${1:-dev-work-0001}"
