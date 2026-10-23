@@ -385,7 +385,10 @@ func buildMapper(cfg Config, deps component.Deps, vault *vaultRuntime, pinned *c
 				if cached != "" {
 					return cached, true
 				}
-				resolved := cfg.localDownloadBase(ctx, deps)
+				resolved := cfg.downloadBase()
+				if resolved == "" {
+					resolved = cfg.localDownloadBase(ctx, deps)
+				}
 				if resolved == "" {
 					return "", false
 				}
