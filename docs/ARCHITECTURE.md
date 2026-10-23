@@ -3993,6 +3993,24 @@ because it bounds a mechanism the rest of this document leans on.
   market network reading.
 ## 15. Settled decisions, and the defects they closed
 
+- **Per-component suspend and typed overrides on the app roots (plan 0024 W0-W3, 2026-10-22).** The
+  five app roots and `NetworkApp` accept `spec.components`, keyed by `Kind` for a singleton or
+  `Kind/name`. appctl resolves every entry against the root's desired component set before it writes
+  a child, and fails the pass closed on an unknown or ambiguous key, a settings block for another
+  kind, an unsupported field or a negative value. It writes the child spec with
+  `root.spec.suspend OR override.suspend`, so root suspend stays the master kill switch. Typed
+  settings reach the Bidder heartbeat, offering refresh, bid TTL and policy poll; the Requester
+  concurrency, contract/bid/receipt timings, sessions, directory cache and OAuth scopes; the
+  GuestControlPlane login mount, role, grant/issuer timings, host-key attempts, relay toggle and
+  HostKeyRef; the PDS blob/request limits, contact email and OAuth TTLs/scopes; the SshServer limits;
+  the GatewayAPI node poll; the IngressProxy timeouts; the Relay crawl interval; and the PolicyEngine
+  limits, trust and cache. Root status carries `componentSummary`, `componentOverrides`, and the
+  `ComponentsReady`, `ComponentSuspended`, `ComponentOverridesValid`, `ComponentDrift` and
+  `LimitsEnforced` conditions. A per-component suspend does not propagate to that component's
+  Service or Exposure or to the shared IngressProxy. `ComponentLimits` resolves and reports but the
+  in-process component runtime does not enforce it; the `LimitsEnforced=False` condition says so.
+  Live proof on this host, hat-7, hat-9 and the prod gateway is W4 and has not run yet.
+
 Not gaps. Each entry was open once, and each says what settled it and what the settlement was - and,
 where it matters, that it was settled AFTER the entry was written. That timing is kept because it is the
 case nobody re-reads: a gap still listed as open reads as honest incompleteness, which is why a bullet
