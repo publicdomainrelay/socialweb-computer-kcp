@@ -10,12 +10,13 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/credentials/openbaosession"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/authretry"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
 )
 
@@ -70,19 +71,7 @@ type Resolver struct {
 
 	open func(ctx context.Context, srv openbaosession.Server) (Session, error)
 
-	state *resolverState
-}
-
-type resolverState struct {
-	mu sync.Mutex
-
-	sessions map[string]cachedSession
-}
-
-type cachedSession struct {
-	session Session
-
-	until time.Time
+	sessions *ttlcache.Cache[string, Session]
 }
 
 var _ component.CredentialResolver = (*Resolver)(nil)
@@ -121,7 +110,7 @@ func New(opts Options) (*Resolver, error) {
 		timeout:   opts.Timeout,
 		loginFor:  opts.LoginFor,
 		open:      opts.Open,
-		state:     &resolverState{sessions: map[string]cachedSession{}},
+		sessions:  ttlcache.New[string, Session](ttlcache.Options{}),
 	}, nil
 }
 
@@ -187,24 +176,16 @@ func (r *Resolver) WriteCredential(ctx context.Context, ref component.Credential
 	if err != nil {
 		return err
 	}
-	session, err := r.session(ctx, srv)
-	if err != nil {
-		return err
-	}
-	if err := session.WriteKV(ctx, mount, path, data); err != nil {
-		if !openbao.IsAuthError(err) {
-			return fmt.Errorf("credentials: writing %s/data/%s: %w", mount, path, err)
-		}
-		r.forgetSession(srv)
-		session, err = r.session(ctx, srv)
+	return authretry.Run(ctx, r.forgetter(srv), func(ctx context.Context) error {
+		session, err := r.session(ctx, srv)
 		if err != nil {
 			return err
 		}
 		if err := session.WriteKV(ctx, mount, path, data); err != nil {
 			return fmt.Errorf("credentials: writing %s/data/%s: %w", mount, path, err)
 		}
-	}
-	return nil
+		return nil
+	}, openbao.IsAuthError)
 }
 
 func (r *Resolver) DeleteCredential(ctx context.Context, ref component.CredentialRef) error {
@@ -219,24 +200,16 @@ func (r *Resolver) DeleteCredential(ctx context.Context, ref component.Credentia
 	if err != nil {
 		return err
 	}
-	session, err := r.session(ctx, srv)
-	if err != nil {
-		return err
-	}
-	if err := session.DeleteKV(ctx, mount, path); err != nil {
-		if !openbao.IsAuthError(err) {
-			return fmt.Errorf("credentials: deleting %s/metadata/%s: %w", mount, path, err)
-		}
-		r.forgetSession(srv)
-		session, err = r.session(ctx, srv)
+	return authretry.Run(ctx, r.forgetter(srv), func(ctx context.Context) error {
+		session, err := r.session(ctx, srv)
 		if err != nil {
 			return err
 		}
 		if err := session.DeleteKV(ctx, mount, path); err != nil {
 			return fmt.Errorf("credentials: deleting %s/metadata/%s: %w", mount, path, err)
 		}
-	}
-	return nil
+		return nil
+	}, openbao.IsAuthError)
 }
 
 func (r *Resolver) target(ctx context.Context, ref component.CredentialRef) (string, string, openbaosession.Server, error) {
@@ -273,51 +246,37 @@ func (r *Resolver) target(ctx context.Context, ref component.CredentialRef) (str
 }
 
 func (r *Resolver) readKV(ctx context.Context, srv openbaosession.Server, mount, path string, version int) (map[string]any, error) {
-	session, err := r.session(ctx, srv)
-	if err != nil {
-		return nil, err
-	}
-	data, err := session.ReadKV(ctx, mount, path, version)
-	if !openbao.IsAuthError(err) {
-		return data, err
-	}
-	r.forgetSession(srv)
-	session, err = r.session(ctx, srv)
-	if err != nil {
-		return nil, err
-	}
-	return session.ReadKV(ctx, mount, path, version)
+	return authretry.Do(ctx, r.forgetter(srv), func(ctx context.Context) (map[string]any, error) {
+		session, err := r.session(ctx, srv)
+		if err != nil {
+			return nil, err
+		}
+		return session.ReadKV(ctx, mount, path, version)
+	}, openbao.IsAuthError)
 }
 
-func (r *Resolver) forgetSession(srv openbaosession.Server) {
-	key := srv.Workspace + "|" + srv.Name
-	r.state.mu.Lock()
-	delete(r.state.sessions, key)
-	r.state.mu.Unlock()
+func sessionKey(srv openbaosession.Server) string {
+	return srv.Workspace + "|" + srv.Name
+}
+
+func (r *Resolver) forgetter(srv openbaosession.Server) authretry.InvalidateFunc {
+	return func() { r.sessions.Delete(sessionKey(srv)) }
 }
 
 func (r *Resolver) session(ctx context.Context, srv openbaosession.Server) (Session, error) {
-	key := srv.Workspace + "|" + srv.Name
-	r.state.mu.Lock()
-	cached, ok := r.state.sessions[key]
-	r.state.mu.Unlock()
-	if ok && time.Now().Before(cached.until) {
-		return cached.session, nil
-	}
-	session, err := r.open(ctx, srv)
-	if err != nil {
-		return nil, err
-	}
-	until := time.Now().Add(r.loginFor)
-	if refresh, ok := session.(interface{ RefreshAt() time.Time }); ok {
-		if at := refresh.RefreshAt(); !at.IsZero() && at.Before(until) {
-			until = at
+	return r.sessions.GetOrLoad(ctx, sessionKey(srv), func(ctx context.Context) (Session, time.Duration, error) {
+		session, err := r.open(ctx, srv)
+		if err != nil {
+			return nil, 0, err
 		}
-	}
-	r.state.mu.Lock()
-	r.state.sessions[key] = cachedSession{session: session, until: until}
-	r.state.mu.Unlock()
-	return session, nil
+		until := time.Now().Add(r.loginFor)
+		if refresh, ok := session.(interface{ RefreshAt() time.Time }); ok {
+			if at := refresh.RefreshAt(); !at.IsZero() && at.Before(until) {
+				until = at
+			}
+		}
+		return session, time.Until(until), nil
+	})
 }
 
 func (r *Resolver) expand(ref component.CredentialRef, vars map[string]string) component.CredentialRef {
