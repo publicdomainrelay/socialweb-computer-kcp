@@ -99,17 +99,17 @@ func Open(ctx context.Context, opts Options) (*Session, error) {
 		return nil, fmt.Errorf("oauthclient: no oauth session stored for %s", did)
 	}
 	if session.HostURL == "" {
-		return nil, errors.New("oauthclient: the oauth session names no PDS")
+		return nil, fmt.Errorf("%w: the oauth session names no PDS", ErrInvalidSession)
 	}
 	if opts.RepoDID != "" && opts.RepoDID != did {
-		return nil, fmt.Errorf("oauthclient: the oauth session is for %s, not %s", did, opts.RepoDID)
+		return nil, fmt.Errorf("%w: the oauth session is for %s, not %s", ErrInvalidSession, did, opts.RepoDID)
 	}
 	if opts.PDSURL != "" && strings.TrimRight(opts.PDSURL, "/") != strings.TrimRight(session.HostURL, "/") {
-		return nil, fmt.Errorf("oauthclient: the oauth session names PDS %s, not %s", session.HostURL, opts.PDSURL)
+		return nil, fmt.Errorf("%w: the oauth session names PDS %s, not %s", ErrInvalidSession, session.HostURL, opts.PDSURL)
 	}
 	instance, err := New(session, opts)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %v", ErrInvalidSession, err)
 	}
 	if !AccessTokenLive(session.AccessToken) {
 		if err := instance.refresh(ctx); err != nil {

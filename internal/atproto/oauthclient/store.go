@@ -23,6 +23,8 @@ var (
 
 	ErrSessionExpired = errors.New("oauthclient: the oauth session expired")
 
+	ErrInvalidSession = errors.New("oauthclient: invalid stored oauth session")
+
 	ErrNoRefreshToken = errors.New("oauthclient: the oauth session has no refresh token")
 
 	ErrQRConsumed = errors.New("oauthclient: the qr session transfer was already consumed")

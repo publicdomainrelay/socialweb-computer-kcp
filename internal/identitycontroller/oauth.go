@@ -372,7 +372,7 @@ func (c *Controller) restoreOAuthSession(ctx context.Context, id *v1alpha1.Marke
 
 func (c *Controller) openSessionDataRef(ctx context.Context, id *v1alpha1.MarketIdentity, ref v1alpha1.VaultRef, did string) (*oauthclient.Session, error) {
 	store := &vaultSessionStore{vault: c.vault, ref: ref}
-	return oauthclient.Open(ctx, oauthclient.Options{
+	session, err := oauthclient.Open(ctx, oauthclient.Options{
 		DID:        did,
 		Handle:     id.Spec.Handle,
 		RepoDID:    did,
@@ -383,6 +383,11 @@ func (c *Controller) openSessionDataRef(ctx context.Context, id *v1alpha1.Market
 		HTTPClient: c.oauthHTTP(),
 		Store:      store,
 	})
+	if errors.Is(err, oauthclient.ErrInvalidSession) {
+		_ = c.vault.Delete(ctx, ref)
+		return nil, oauthclient.ErrNoSession
+	}
+	return session, err
 }
 
 func (c *Controller) openSessionData(ctx context.Context, id *v1alpha1.MarketIdentity, data oauthclient.SessionData,
