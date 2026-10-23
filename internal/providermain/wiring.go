@@ -51,6 +51,8 @@ type Deps struct {
 
 	Links *linkRecorder
 
+	ClusterLinks *clusterprovider.Links
+
 	Roller *clusterprovider.Roller
 }
 
@@ -86,7 +88,8 @@ type Provider struct {
 
 	host materialiser.Host
 
-	links *linkRecorder
+	links      *linkRecorder
+	linkWrites *clusterprovider.Links
 
 	homes   *kcpclient.Client
 	sweptAt time.Time
@@ -105,15 +108,19 @@ const MaxConcurrentBringUps = 4
 
 const ShutdownTimeout = 60 * time.Second
 
-func (p *Provider) Shutdown() error {
+func (p *Provider) Shutdown(ctx context.Context) error {
 	if p.cfg.ObserveOnly() || p.host == nil {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), ShutdownTimeout)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), ShutdownTimeout)
 	defer cancel()
 	p.log.Info("cluster provider: shutting down; every cluster's member units and Postgres object keep running and the next provider adopts them",
 		"join", p.cfg.Join)
-	return p.reapNodeHosts(ctx)
+	err := p.reapNodeHosts(ctx)
+	if p.linkWrites != nil {
+		err = errors.Join(err, p.linkWrites.Wait(ctx))
+	}
+	return err
 }
 
 func (p *Provider) removeStore(ctx context.Context, key string) error {
@@ -256,6 +263,7 @@ func Build(cfg Config, d Deps, log *slog.Logger) (*Provider, error) {
 		nodes:       d.NodeHosts,
 		host:        d.Host,
 		links:       d.Links,
+		linkWrites:  d.ClusterLinks,
 		homes:       d.Homes,
 		newInstance: d.NewInstance,
 		log:         log,
@@ -396,12 +404,10 @@ func (p *Provider) passAll(ctx context.Context) {
 		if !p.claim(key) {
 			continue
 		}
-		p.workers.Add(1)
-		go func(ref clusterprovider.Ref, key string) {
-			defer p.workers.Done()
+		p.workers.Go(func() {
 			defer p.release(key)
 			p.runOne(ctx, ref)
-		}(ref, key)
+		})
 	}
 }
 

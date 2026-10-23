@@ -102,11 +102,15 @@ func run(ctx context.Context, inv foldmain.Invocation) error {
 		return err
 	}
 
+	var rolling sync.WaitGroup
+	rollCtx, stopRoll := context.WithCancel(ctx)
 	if d.Roller != nil {
-		go d.Roller.Run(ctx)
+		rolling.Go(func() { d.Roller.Run(rollCtx) })
 	}
 	runErr := p.Run(ctx)
-	if err := p.Shutdown(); err != nil {
+	stopRoll()
+	rolling.Wait()
+	if err := p.Shutdown(ctx); err != nil {
 		log.Error("cluster provider: the shutdown reap did not complete", "error", err.Error())
 	}
 	if runErr != nil {
@@ -405,6 +409,7 @@ func buildDeps(ctx context.Context, cfg Config, log *slog.Logger) (Deps, error) 
 	}
 	if links != nil {
 		deps.Links = &linkRecorder{client: linkClient, registry: registry}
+		deps.ClusterLinks = links
 	}
 	if !cfg.ObserveOnly() {
 		deps.Host = units
