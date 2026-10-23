@@ -17,6 +17,7 @@ import (
 	"k8s.io/client-go/dynamic"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vaultaccess"
 )
 
@@ -170,7 +171,7 @@ func (c *Controller) Run(ctx context.Context) error {
 		if err := c.watch(ctx); err != nil && ctx.Err() == nil {
 			c.log.Warn("watching RemoteOpenBao objects", "workspace", c.workspace, "err", err.Error())
 		}
-		if !sleep(ctx, c.retry) {
+		if !clock.Sleep(ctx, c.retry) {
 			return nil
 		}
 	}
@@ -265,15 +266,4 @@ func (c *Controller) succeed(name string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.attempts, name)
-}
-
-func sleep(ctx context.Context, d time.Duration) bool {
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-timer.C:
-		return true
-	}
 }

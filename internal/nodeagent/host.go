@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/sha256sum"
 )
 
@@ -154,7 +155,7 @@ func InstallMeshd(ctx context.Context, cfg Config, log *slog.Logger) error {
 		if attempt < 5 {
 			log.Info("the socialweb-meshd download failed; retrying", "url", url, "attempt", attempt,
 				"of", 5, "err", err.Error())
-			if err := sleep(ctx, 2*time.Second); err != nil {
+			if err := clock.SleepErr(ctx, 2*time.Second); err != nil {
 				return err
 			}
 		}

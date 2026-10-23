@@ -24,7 +24,9 @@ import (
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	v1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 type eventStream struct {
@@ -91,7 +93,7 @@ func (s *eventStream) run(ctx context.Context) {
 		if err != nil {
 			s.set(eventsv1alpha1.EventStreamPhaseFailed, false, false, true, err.Error())
 			s.publish(ctx)
-			if !sleep(runCtx, delay) {
+			if !clock.Sleep(runCtx, opt.Positive(delay, DefaultRetryAfter)) {
 				return
 			}
 			delay = nextDelay(delay, s.ctl.opts.MaxReconnectWait)
@@ -109,7 +111,7 @@ func (s *eventStream) run(ctx context.Context) {
 		if err != nil {
 			s.set(eventsv1alpha1.EventStreamPhaseFailed, false, false, true, err.Error())
 			s.publish(ctx)
-			if !sleep(runCtx, delay) {
+			if !clock.Sleep(runCtx, opt.Positive(delay, DefaultRetryAfter)) {
 				return
 			}
 			delay = nextDelay(delay, s.ctl.opts.MaxReconnectWait)
@@ -137,7 +139,7 @@ func (s *eventStream) run(ctx context.Context) {
 			s.publish(ctx)
 			break
 		}
-		if !sleep(runCtx, delay) {
+		if !clock.Sleep(runCtx, opt.Positive(delay, DefaultRetryAfter)) {
 			return
 		}
 		delay = nextDelay(delay, s.ctl.opts.MaxReconnectWait)

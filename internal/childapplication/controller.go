@@ -15,6 +15,7 @@ import (
 	"k8s.io/client-go/dynamic"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 )
 
 const (
@@ -132,7 +133,7 @@ func (c *Controller) Run(ctx context.Context) error {
 		if err := c.round(ctx); err != nil && ctx.Err() == nil {
 			c.log.Warn("watching child applications", "workspace", c.workspace, "err", err.Error())
 		}
-		if !sleep(ctx, c.retry) {
+		if !clock.Sleep(ctx, c.retry) {
 			return nil
 		}
 	}
@@ -206,15 +207,4 @@ func (c *Controller) client(workspace string) (dynamic.Interface, error) {
 		return nil, fmt.Errorf("childapplication: the client for %s is nil", workspace)
 	}
 	return dyn, nil
-}
-
-func sleep(ctx context.Context, d time.Duration) bool {
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-timer.C:
-		return true
-	}
 }

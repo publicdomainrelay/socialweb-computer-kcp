@@ -29,6 +29,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostprocess"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 )
 
@@ -231,7 +232,7 @@ func waitChildCore(ctx context.Context, l devinstance.Layout, invocation string,
 			b, _ := os.ReadFile(filepath.Join(l.Logs, "core.log"))
 			return fmt.Errorf("the core of %s (invocation %s) did not record its adoption within %s\n%s", l.ID, invocation, timeout, tail(b, 2048))
 		}
-		if !sleep(ctx, ChildPoll) {
+		if !clock.Sleep(ctx, ChildPoll) {
 			return ctx.Err()
 		}
 	}
@@ -346,7 +347,7 @@ func (n *networks) stopChild(ctx context.Context, c child) error {
 			}
 			break
 		}
-		if !sleep(ctx, ChildPoll) {
+		if !clock.Sleep(ctx, ChildPoll) {
 			return ctx.Err()
 		}
 		if live, err = n.liveUnits(ctx, c); err != nil {
@@ -392,7 +393,7 @@ func (n *networks) teardownChild(ctx context.Context, c child) error {
 					log.Warn("the child's root object did not go within the timeout; its workspace is deleted anyway", "kind", kind)
 					break
 				}
-				if !sleep(ctx, ChildPoll) {
+				if !clock.Sleep(ctx, ChildPoll) {
 					return ctx.Err()
 				}
 			}
@@ -419,7 +420,7 @@ func (n *networks) teardownChild(ctx context.Context, c child) error {
 		if time.Now().After(deadline) {
 			return fmt.Errorf("%d unit(s) of %s still run after its workspace was deleted", live, c.id)
 		}
-		if !sleep(ctx, ChildPoll) {
+		if !clock.Sleep(ctx, ChildPoll) {
 			return ctx.Err()
 		}
 	}

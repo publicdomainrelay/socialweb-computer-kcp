@@ -19,6 +19,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/appctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 )
 
 type DynamicFactory func(workspace string) (dynamic.Interface, error)
@@ -126,7 +127,7 @@ func (s *source) watch(ctx context.Context, workspace string, kind componentKind
 	for ctx.Err() == nil {
 		dyn, err := s.dynamic(workspace)
 		if err != nil {
-			sleep(ctx, RetryAfter)
+			clock.Sleep(ctx, RetryAfter)
 			continue
 		}
 		w, err := dyn.Resource(kind.GVR).Watch(ctx, metav1.ListOptions{})
@@ -134,7 +135,7 @@ func (s *source) watch(ctx context.Context, workspace string, kind componentKind
 			if !apierrors.IsNotFound(err) && !apierrors.IsForbidden(err) && ctx.Err() == nil {
 				s.log.Warn("component: watching components", "workspace", workspace, "kind", kind.Kind, "err", err.Error())
 			}
-			sleep(ctx, RetryAfter)
+			clock.Sleep(ctx, RetryAfter)
 			continue
 		}
 		for event := range w.ResultChan() {
@@ -170,7 +171,7 @@ func (s *source) watch(ctx context.Context, workspace string, kind componentKind
 			}
 		}
 		w.Stop()
-		sleep(ctx, RetryAfter)
+		clock.Sleep(ctx, RetryAfter)
 	}
 }
 

@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 )
 
 type cniRange struct {
@@ -87,7 +89,7 @@ func CNI(ctx context.Context, cfg Config, log *slog.Logger) error {
 			}
 		}
 		if attempt < cfg.CNIWaitAttempts {
-			if err := sleep(ctx, cfg.CNIWaitInterval()); err != nil {
+			if err := clock.SleepErr(ctx, cfg.CNIWaitInterval()); err != nil {
 				return err
 			}
 		}

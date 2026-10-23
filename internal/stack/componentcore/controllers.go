@@ -37,6 +37,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/ref"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/leasecontroller"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/marketpresence"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
@@ -136,14 +137,14 @@ func (r *controllerRuntime) watch(ctx context.Context, entry controllerEntry, wo
 		dyn, err := r.dynamic(workspace)
 		if err != nil {
 			log.Warn("the controller has no dynamic client", "err", err.Error())
-			if !wait(ctx, r.retry) {
+			if !clock.Sleep(ctx, r.retry) {
 				return
 			}
 			continue
 		}
 		if dyn == nil {
 			log.Warn("the controller has a nil dynamic client")
-			if !wait(ctx, r.retry) {
+			if !clock.Sleep(ctx, r.retry) {
 				return
 			}
 			continue
@@ -151,7 +152,7 @@ func (r *controllerRuntime) watch(ctx context.Context, entry controllerEntry, wo
 		if err := r.round(ctx, entry, workspace, dyn); err != nil && ctx.Err() == nil {
 			log.Warn("watching the resource", "err", err.Error())
 		}
-		if !wait(ctx, r.retry) {
+		if !clock.Sleep(ctx, r.retry) {
 			return
 		}
 	}
@@ -209,17 +210,6 @@ func (r *controllerRuntime) reconcile(ctx context.Context, entry controllerEntry
 	if err := entry.reconcile(ctx, dyn, workspace, u); err != nil && ctx.Err() == nil {
 		r.log.Warn("reconciling a controller object", "resource", entry.gvr.Resource, "workspace", workspace,
 			"name", u.GetName(), "err", err.Error())
-	}
-}
-
-func wait(ctx context.Context, d time.Duration) bool {
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-timer.C:
-		return true
 	}
 }
 
@@ -465,7 +455,7 @@ func (c *Core) mirrorLeases(ctx context.Context, ctl *leasecontroller.Controller
 				log.Warn("mirroring the allocator leases", "workspace", workspace, "err", err.Error())
 			}
 		}
-		if !wait(ctx, controllerResync) {
+		if !clock.Sleep(ctx, controllerResync) {
 			return nil
 		}
 	}

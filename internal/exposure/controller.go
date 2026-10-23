@@ -19,6 +19,8 @@ import (
 
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 const (
@@ -64,7 +66,7 @@ func (w *watcher) Run(ctx context.Context) error {
 		if err := w.round(ctx); err != nil && ctx.Err() == nil {
 			w.log.Warn("watching exposure resources", "gvr", w.gvr.Resource, "workspace", w.workspace, "err", err.Error())
 		}
-		if !sleep(ctx, w.retry) {
+		if !clock.Sleep(ctx, opt.Positive(w.retry, DefaultRetryAfter)) {
 			return nil
 		}
 	}
@@ -221,20 +223,6 @@ func writeStatus(ctx context.Context, ri dynamic.ResourceInterface, name string,
 
 func containsString(values []string, want string) bool {
 	return slices.Contains(values, want)
-}
-
-func sleep(ctx context.Context, d time.Duration) bool {
-	if d <= 0 {
-		d = DefaultRetryAfter
-	}
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-timer.C:
-		return true
-	}
 }
 
 func normalizeName(value string) string {

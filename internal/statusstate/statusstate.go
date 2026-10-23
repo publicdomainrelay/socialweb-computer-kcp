@@ -21,6 +21,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -221,7 +222,7 @@ func (c *Controller) runKind(ctx context.Context, gvr schema.GroupVersionResourc
 		if err := c.watchKind(ctx, gvr, reconcile); err != nil && ctx.Err() == nil {
 			c.log.Warn("watching status objects", "workspace", c.workspace, "resource", gvr.Resource, "err", err.Error())
 		}
-		if !sleep(ctx, c.retry) {
+		if !clock.Sleep(ctx, c.retry) {
 			return
 		}
 	}
@@ -329,17 +330,6 @@ func truncate(message string) string {
 		return message
 	}
 	return message[:maxMessage]
-}
-
-func sleep(ctx context.Context, d time.Duration) bool {
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-timer.C:
-		return true
-	}
 }
 
 func refString(r commonv1.ObjectRef) string {

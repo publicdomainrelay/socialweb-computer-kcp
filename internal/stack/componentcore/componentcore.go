@@ -33,6 +33,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/tlsreload"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/oauthcallback"
@@ -428,26 +429,26 @@ func (c *Core) runPolicy(ctx context.Context) {
 func (c *Core) supervisePolicy(ctx context.Context, workspace string, log *slog.Logger) {
 	for ctx.Err() == nil {
 		if !c.policyBound(ctx, workspace) {
-			sleep(ctx, RetryAfter)
+			clock.Sleep(ctx, RetryAfter)
 			continue
 		}
 		handlers, err := policyActionHandlers(c.store, workspace)
 		if err != nil {
 			log.Warn("the policy controller has no action handlers", "err", err.Error())
-			sleep(ctx, RetryAfter)
+			clock.Sleep(ctx, RetryAfter)
 			continue
 		}
 		svc, err := policyenginesvc.New(policyenginesvc.Options{Store: c.store, Cluster: workspace, PLCURL: c.cfg.PLCBaseURL, Log: log, Handlers: handlers})
 		if err != nil {
 			log.Warn("the policy controller does not start", "err", err.Error())
-			sleep(ctx, RetryAfter)
+			clock.Sleep(ctx, RetryAfter)
 			continue
 		}
 		log.Info("the policy controller reconciles PolicyEngine, PolicyWorkflow, PolicyWorkflowRun and PolicyTrigger in process")
 		if err := svc.Controller().Run(ctx); ctx.Err() == nil {
 			log.Warn("the policy controller stopped; starting it again", "err", fmt.Sprint(err))
 		}
-		sleep(ctx, RetryAfter)
+		clock.Sleep(ctx, RetryAfter)
 	}
 }
 
@@ -551,13 +552,6 @@ func Supervise(ctx context.Context, cfg Config) {
 		log.Info("the component controller reconciles the application workspaces", "workspaces", strings.Join(cfg.Workspaces, ", "))
 		return core.Run(ctx)
 	})
-}
-
-func sleep(ctx context.Context, d time.Duration) {
-	select {
-	case <-ctx.Done():
-	case <-time.After(d):
-	}
 }
 
 func dynamicForRestConfig(cfg *rest.Config, workspace string) (dynamic.Interface, error) {

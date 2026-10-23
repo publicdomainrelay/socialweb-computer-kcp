@@ -31,6 +31,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpapply"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 )
@@ -228,7 +229,7 @@ func Run(ctx context.Context, c Config) error {
 			return ctx.Err()
 		}
 		log.Warn("applying the applications set; retrying", "err", err.Error())
-		if !sleep(ctx, RetryAfter) {
+		if !clock.Sleep(ctx, RetryAfter) {
 			return ctx.Err()
 		}
 	}
@@ -239,7 +240,7 @@ func Run(ctx context.Context, c Config) error {
 	wg.Go(func() { ctl.sampleGC(ctx) })
 	for {
 		ctl.Pass(ctx)
-		if !sleep(ctx, c.interval()) {
+		if !clock.Sleep(ctx, c.interval()) {
 			return ctx.Err()
 		}
 	}
@@ -249,15 +250,6 @@ func Supervise(ctx context.Context, c Config) {
 	supervise.Restart(ctx, "appctl", supervise.Backoff{Min: RetryAfter, Max: RetryAfter, OnError: func(err error, _ time.Duration) {
 		c.log().Error("the application controller stopped; starting it again", "err", fmt.Sprint(err))
 	}}, func(ctx context.Context) error { return Run(ctx, c) })
-}
-
-func sleep(ctx context.Context, d time.Duration) bool {
-	select {
-	case <-ctx.Done():
-		return false
-	case <-time.After(d):
-		return true
-	}
 }
 
 func (ctl *Controller) Pass(ctx context.Context) {

@@ -25,7 +25,9 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 const (
@@ -60,7 +62,7 @@ func (c *Controller) runRecordWatches(ctx context.Context) {
 		if err := c.recordWatchRound(ctx); err != nil && ctx.Err() == nil {
 			c.log.Warn("watching AtprotoRecordWatches", "workspace", c.opts.Workspace, "err", err.Error())
 		}
-		if !sleep(ctx, c.opts.RetryAfter) {
+		if !clock.Sleep(ctx, opt.Positive(c.opts.RetryAfter, DefaultRetryAfter)) {
 			return
 		}
 	}

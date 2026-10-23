@@ -22,6 +22,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/exposure"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/irohdial"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/ingressproxy/loopback"
 )
 
@@ -434,7 +435,7 @@ func (r *registration) supervise(ctx context.Context, first *child) {
 				}
 				r.log.Warn("ingressproxy_iroh_dumbpipe_restart_failed", "err", err.Error())
 				backoff = nextBackoff(backoff)
-				if !sleepCtx(ctx, backoff) {
+				if !clock.Sleep(ctx, backoff) {
 					return
 				}
 				continue
@@ -462,7 +463,7 @@ func (r *registration) supervise(ctx context.Context, first *child) {
 			backoff = MinRestartBackoff
 		}
 		r.log.Warn("ingressproxy_iroh_dumbpipe_exited", "err", fmt.Sprint(err), "stderr", stderr)
-		if !sleepCtx(ctx, backoff) {
+		if !clock.Sleep(ctx, backoff) {
 			return
 		}
 		backoff = nextBackoff(backoff)
@@ -523,17 +524,6 @@ func killChild(cmd *exec.Cmd) {
 	}
 	_ = cmd.Process.Kill()
 	_ = cmd.Wait()
-}
-
-func sleepCtx(ctx context.Context, d time.Duration) bool {
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-timer.C:
-		return true
-	}
 }
 
 func nextBackoff(current time.Duration) time.Duration {

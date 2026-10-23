@@ -15,6 +15,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 )
 
 const (
@@ -175,7 +176,7 @@ func ApplyNetwork(ctx context.Context, kubeconfig string, spec v1alpha1.MarketNe
 		if time.Now().After(deadline) {
 			return fmt.Errorf("appctl: applying the MarketNetwork (the core applies the applications set first): %w", err)
 		}
-		if !sleep(ctx, NetworkPoll) {
+		if !clock.Sleep(ctx, NetworkPoll) {
 			return ctx.Err()
 		}
 	}
@@ -222,7 +223,7 @@ func WaitNetwork(ctx context.Context, kubeconfig string, timeout time.Duration, 
 		if time.Now().After(deadline) {
 			return o, fmt.Errorf("appctl: the MarketNetwork was not Ready within %s (phase %s: %s)", timeout, o.Status.Phase, o.Status.Message)
 		}
-		if !sleep(ctx, NetworkPoll) {
+		if !clock.Sleep(ctx, NetworkPoll) {
 			return o, ctx.Err()
 		}
 	}
@@ -248,7 +249,7 @@ func DeleteNetwork(ctx context.Context, kubeconfig string, timeout time.Duration
 		if time.Now().After(deadline) {
 			return fmt.Errorf("appctl: the MarketNetwork was not gone within %s", timeout)
 		}
-		if !sleep(ctx, NetworkPoll) {
+		if !clock.Sleep(ctx, NetworkPoll) {
 			return ctx.Err()
 		}
 	}

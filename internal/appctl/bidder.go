@@ -22,6 +22,7 @@ import (
 	policyv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/policy/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpapply"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
@@ -297,7 +298,7 @@ func (ctl *Controller) stopComponents(ctx context.Context, owner string) (int, e
 				total, err := ctl.componentsLeft(ctx, views)
 				return total, err
 			}
-			if !sleep(ctx, RetryAfter) {
+			if !clock.Sleep(ctx, RetryAfter) {
 				return left, ctx.Err()
 			}
 		}
