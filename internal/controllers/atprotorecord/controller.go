@@ -34,8 +34,6 @@ const (
 
 	RecordWatchKind = "AtprotoRecordWatch"
 
-	LegacyOperatorRepo = "operator"
-
 	ConditionReferencesResolved = v1alpha1.ConditionReferencesResolved
 
 	ConditionInSync = v1alpha1.ConditionRecordInSync
@@ -143,10 +141,6 @@ func scopeOf(spec v1alpha1.AtprotoRecordSpec) []string {
 
 func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, object *v1alpha1.AtprotoRecord) (ctlruntime.Result, error) {
 	target := binding.Target{Cluster: req.Cluster, Workspace: req.Workspace, Name: req.Name}
-	if object.Spec.RepoRef == nil && strings.TrimSpace(object.Spec.Repo) == LegacyOperatorRepo {
-		c.repos.Set(target, nil)
-		return ctlruntime.Result{}, nil
-	}
 	if !object.DeletionTimestamp.IsZero() {
 		return ctlruntime.Result{}, c.finalize(ctx, req, object, target)
 	}

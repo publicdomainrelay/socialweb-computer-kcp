@@ -712,8 +712,8 @@ func (p *pass) operatorWrites(ctx context.Context, id *v1alpha1.MarketIdentity, 
 		}
 	}
 	if o.Spec.Network != nil {
-		if err := c.OperatorRecords(ctx, r, p.ws, op); err != nil {
-			log.Warn("writing the declared records of the market network operator account", "err", err.Error())
+		if err := c.ApplyOperatorRepo(ctx, r, p.ws, op); err != nil {
+			log.Warn("composing the repo the market network operator account's declared records write through", "err", err.Error())
 		}
 	}
 }

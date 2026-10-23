@@ -6,13 +6,15 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
+	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/atprotorecord"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/atprotorepo"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 )
 
@@ -22,6 +24,12 @@ const (
 	OperatorRepoName = "operator"
 
 	OperatorVouchPrefix = "operator-vouch-"
+
+	OperatorRecordLabel = "apps.socialweb.computer/record-repo"
+
+	OperatorSessionPath = "identity/operator/pds-session"
+
+	operatorRecordLinkSet = "operator-records"
 )
 
 type OwnerSession struct {
@@ -58,59 +66,70 @@ func FirstOwnerSession(path string) (string, OwnerSession, error) {
 	return owners[0], sessions[owners[0]], nil
 }
 
+func OperatorRepoRef() *commonv1.ObjectRef {
+	return &commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: KindAtprotoRepo, Name: OperatorRepoName}
+}
+
 func (c *Composer) ApplyOperatorVouch(ctx context.Context, r Root, ws, app, subject, at string) error {
 	record, err := json.Marshal(map[string]any{"$type": VouchNSID, "subject": subject, "createdAt": at})
 	if err != nil {
 		return err
 	}
-	obj := &v1alpha1.AtprotoRecord{ObjectMeta: metav1.ObjectMeta{Name: OperatorVouchPrefix + app},
-		Spec: v1alpha1.AtprotoRecordSpec{Repo: OperatorRepoName, Collection: VouchNSID, Rkey: subject, Record: record}}
+	obj := &v1alpha1.AtprotoRecord{ObjectMeta: metav1.ObjectMeta{Name: OperatorVouchPrefix + app, Labels: map[string]string{OperatorRecordLabel: OperatorRepoName}},
+		Spec: v1alpha1.AtprotoRecordSpec{RepoRef: OperatorRepoRef(), Collection: VouchNSID, Rkey: subject, Record: record}}
 	return c.ApplyTyped(ctx, r, ws, AtprotoRecordGVR, v1alpha1.GroupVersion.String(), "AtprotoRecord", obj)
 }
 
-func (c *Composer) OperatorRecords(ctx context.Context, r Root, ws string, op Operator) error {
+func OperatorRecordLinks(ws string, remotePDS commonv1.ObjectRef, did string) []Link {
+	repo := AppRef(KindAtprotoRepo, OperatorRepoName, ws)
+	remote := AppRef(KindRemoteRepo, OperatorRepoName, ws)
+	records := exposurev1alpha1.ComponentLinkSelector{Group: v1alpha1.GroupName, Kind: "AtprotoRecord", Workspace: ws,
+		MatchLabels: map[string]string{OperatorRecordLabel: OperatorRepoName}}
+	links := []Link{
+		SelectorLink(LinkName("records", OperatorRepoName), records, repo, Cap(atprotorepo.CapabilityWrite, VouchNSID)),
+		RepoBackendLink(repo, remote),
+	}
+	return append(links, RemoteRepoLinks(remote, remotePDS, AppRef(KindMarketIdentity, OperatorRepoName, ws), did)...)
+}
+
+func (c *Composer) ApplyOperatorRepo(ctx context.Context, r Root, ws string, op Operator) error {
 	ri, err := c.Client(ws, AtprotoRecordGVR)
 	if err != nil {
 		return err
 	}
-	list, err := kube.List[v1alpha1.AtprotoRecord](ctx, ri, metav1.ListOptions{})
+	records, err := kube.List[v1alpha1.AtprotoRecord](ctx, ri, metav1.ListOptions{LabelSelector: OperatorRecordLabel + "=" + OperatorRepoName})
 	if apierrors.IsNotFound(err) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	var records []v1alpha1.AtprotoRecord
-	for _, o := range list {
-		if o.Spec.Repo == OperatorRepoName && o.Spec.RepoRef == nil && o.DeletionTimestamp == nil &&
-			(o.Status.Phase != v1alpha1.AtprotoRecordPhaseApplied || o.Status.ObservedGeneration != o.Generation) {
-			records = append(records, o)
-		}
-	}
 	if len(records) == 0 {
 		return nil
 	}
-	repo, _, err := c.OperatorRepo(ctx, r, op)
-	if err != nil {
+	did := ""
+	if id, err := c.Identity(ctx, ws, OperatorRepoName); err == nil {
+		did = strings.TrimSpace(id.Status.Did)
+	} else if !apierrors.IsNotFound(err) {
 		return err
 	}
-	for i := range records {
-		o := &records[i]
-		outcome, applyErr := atprotorecord.Apply(ctx, repo, o, atprotorecord.References{Workspace: ws})
-		status := outcome.Status(o)
-		m, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&status)
-		if err != nil {
+	if did == "" {
+		if _, did, err = c.OperatorRepo(ctx, r, op); err != nil {
 			return err
 		}
-		u := NewDoc(v1alpha1.GroupVersion.String(), "AtprotoRecord", o.Name)
-		u["status"] = m
-		if _, err := kube.Apply[kube.Doc](ctx, ri, u, kube.ApplyOptions{FieldManager: r.Manager() + "/records", Force: true, Status: true}); err != nil &&
-			!apierrors.IsNotFound(err) {
-			return fmt.Errorf("AtprotoRecord %s: writing the status: %w", o.Name, err)
-		}
-		if applyErr != nil {
-			return fmt.Errorf("AtprotoRecord %s: %w", o.Name, applyErr)
-		}
 	}
-	return nil
+	identity := v1alpha1.MarketIdentitySpec{Mode: v1alpha1.MarketIdentityModePdsAccount, Handle: strings.TrimSpace(op.Identifier),
+		PdsURL: strings.TrimRight(strings.TrimSpace(op.PdsURL), "/"), Association: v1alpha1.AssociationSkip,
+		KeysRef:    &commonv1.SecretRef{Mount: op.Mount, Path: OperatorKeysPath},
+		SessionRef: &commonv1.SecretRef{Mount: op.Mount, Path: OperatorSessionPath}}
+	if err := c.ApplyIdentitySpec(ctx, r, ws, OperatorRepoName, identity); err != nil {
+		return err
+	}
+	pdsRef := op.ref(r.Workspace)
+	remote := &v1alpha1.RemoteRepo{ObjectMeta: metav1.ObjectMeta{Name: OperatorRepoName}, Spec: v1alpha1.RemoteRepoSpec{DID: did, PdsRef: pdsRef,
+		CredentialsRef: commonv1.CredentialsRef{ObjectRef: commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: KindMarketIdentity, Name: OperatorRepoName}}}}
+	if err := c.ApplyRepo(ctx, r, ws, OperatorRepoName, KindRemoteRepo, v1alpha1.RemoteRepoGVR, remote); err != nil {
+		return err
+	}
+	return c.ApplyLinks(ctx, r, operatorRecordLinkSet, OperatorRecordLinks(ws, pdsRef, did), ws)
 }

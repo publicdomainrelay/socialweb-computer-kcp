@@ -26,8 +26,6 @@ type AtprotoRecordList struct {
 type AtprotoRecordSpec struct {
 	RepoRef *commonv1.ObjectRef `json:"repoRef,omitempty"`
 
-	Repo string `json:"repo,omitempty"`
-
 	Collection string `json:"collection"`
 
 	Rkey string `json:"rkey"`
