@@ -69,6 +69,8 @@ type Controller struct {
 
 	events chan ctlruntime.Request
 
+	resyncs chan struct{}
+
 	mu sync.Mutex
 
 	binding *contract.Binding
@@ -91,7 +93,7 @@ func New(opts Options) *Controller {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	return &Controller{bus: opts.Bus, log: log.With("controller", Name), events: make(chan ctlruntime.Request, 64),
+	return &Controller{bus: opts.Bus, log: log.With("controller", Name), events: make(chan ctlruntime.Request, 64), resyncs: make(chan struct{}, 1),
 		clusters: map[string]string{}, claims: map[ctlruntime.Request]known{}, waiting: map[ctlruntime.Request]bool{}}
 }
 
@@ -130,13 +132,31 @@ func Register(m *ctlruntime.Manager, c *Controller, cfg *rest.Config) error {
 	); err != nil {
 		return fmt.Errorf("nodeclaim: registering the NodeClaim controller: %w", err)
 	}
-	c.mu.Lock()
-	b := c.binding
-	c.mu.Unlock()
-	if b != nil {
-		go c.resync(*b)
+	if err := m.Go(Name+": resync", c.resyncLoop); err != nil {
+		return fmt.Errorf("nodeclaim: the resync loop: %w", err)
 	}
+	c.wake()
 	return nil
+}
+
+func (c *Controller) wake() {
+	select {
+	case c.resyncs <- struct{}{}:
+	default:
+	}
+}
+
+func (c *Controller) resyncLoop(ctx context.Context) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-c.resyncs:
+		}
+		if b, _ := c.current(); b != nil {
+			c.resync(ctx, *b)
+		}
+	}
 }
 
 func (c *Controller) Bind(b contract.Binding) {
@@ -147,13 +167,10 @@ func (c *Controller) Bind(b contract.Binding) {
 	c.mu.Lock()
 	c.binding = &b
 	c.homes, c.homesAt = nil, time.Time{}
-	store := c.store
 	c.mu.Unlock()
 	c.log.Info("node_claim_bound", "owner", b.Owner.Workspace+"/"+b.Owner.Name, "homes", b.Homes,
 		"indexWorkspace", b.IndexWorkspace, "indexNamespace", b.IndexNamespace, "contractWorkspace", b.ContractWorkspace)
-	if store != nil {
-		go c.resync(b)
-	}
+	c.wake()
 }
 
 func (c *Controller) Unbind(owner commonv1.ObjectRef) {
@@ -589,8 +606,8 @@ func (c *Controller) clusterOf(ctx context.Context, workspace string) (string, e
 	return ws.Spec.Cluster, nil
 }
 
-func (c *Controller) resync(b contract.Binding) {
-	ctx, cancel := context.WithTimeout(context.Background(), resyncTimeout)
+func (c *Controller) resync(ctx context.Context, b contract.Binding) {
+	ctx, cancel := context.WithTimeout(ctx, resyncTimeout)
 	defer cancel()
 	_, store := c.current()
 	if store == nil {

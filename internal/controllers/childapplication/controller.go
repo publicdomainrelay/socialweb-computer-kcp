@@ -3,6 +3,7 @@ package childapplication
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -129,25 +130,16 @@ func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
 		options = append(options, ctlruntime.InWorkspaces(opts.Scope))
 	}
 	if opts.WorkspaceEvents != nil {
-		options = append(options, ctlruntime.Events(c.forward(opts.WorkspaceEvents)))
+		events, err := ctlruntime.Forward(m, Name+": workspaces", opts.WorkspaceEvents, c.inWorkspace)
+		if err != nil {
+			return nil, fmt.Errorf("childapplication: forwarding changes: %w", err)
+		}
+		options = append(options, ctlruntime.Events(events))
 	}
 	if err := ctlruntime.For[*v1alpha1.ChildApplication](m, Name, c, options...); err != nil {
 		return nil, err
 	}
 	return c, nil
-}
-
-func (c *Controller) forward(workspaces <-chan string) <-chan ctlruntime.Request {
-	out := make(chan ctlruntime.Request)
-	go func() {
-		defer close(out)
-		for workspace := range workspaces {
-			for _, r := range c.inWorkspace(workspace) {
-				out <- r
-			}
-		}
-	}()
-	return out
 }
 
 func (c *Controller) inWorkspace(workspace string) []ctlruntime.Request {

@@ -193,6 +193,8 @@ func AwaitListWatch(ctx context.Context, lw cache.ListerWatcher, objType kruntim
 		defer cancel()
 	}
 	ctx, stop := context.WithCancel(ctx)
+	var informer sync.WaitGroup
+	defer informer.Wait()
 	defer stop()
 	changed := make(chan struct{}, 1)
 	kick := func() {
@@ -207,7 +209,7 @@ func AwaitListWatch(ctx context.Context, lw cache.ListerWatcher, objType kruntim
 			UpdateFunc: func(any, any) { kick() },
 			DeleteFunc: func(any) { kick() },
 		}})
-	go ctrl.RunWithContext(ctx)
+	informer.Go(func() { ctrl.RunWithContext(ctx) })
 	timedOut := func() error {
 		if parent.Err() != nil {
 			return parent.Err()

@@ -31,8 +31,6 @@ const (
 	ExportExposures = "exposures"
 
 	ExportMarketIdentities = "marketidentities"
-
-	eventBuffer = 1024
 )
 
 type Options struct {
@@ -82,7 +80,7 @@ type Controller struct {
 
 	subs map[*subscriber]struct{}
 
-	events map[string]chan ctlruntime.Request
+	events map[string]*ctlruntime.Queue
 
 	owners map[string]ownerUID
 }
@@ -105,7 +103,7 @@ func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
 		log = slog.New(slog.DiscardHandler)
 	}
 	c := &Controller{clients: opts.Clients, scope: opts.Scope, log: log.With("component", "marketintents"), clusters: map[key]string{},
-		subs: map[*subscriber]struct{}{}, events: map[string]chan ctlruntime.Request{}, owners: map[string]ownerUID{}}
+		subs: map[*subscriber]struct{}{}, events: map[string]*ctlruntime.Queue{}, owners: map[string]ownerUID{}}
 	err := errors.Join(
 		forward(m, c, opts.Scope, market.KindBid, ExportComputeVMs, 4, func(ch *market.Change, o *v1alpha1.Bid) { ch.Bid = o }),
 		forward(m, c, opts.Scope, market.KindComputeVM, ExportComputeVMs, 2, func(ch *market.Change, o *v1alpha1.ComputeVM) { ch.ComputeVM = o }),
@@ -140,9 +138,13 @@ type forwarder[T object[T]] struct {
 
 func forward[T object[T]](m *ctlruntime.Manager, c *Controller, scope func(string) bool, kind, export string, workers int,
 	fill func(*market.Change, T)) error {
-	events := make(chan ctlruntime.Request, eventBuffer)
+	queue := ctlruntime.NewQueue()
+	events, err := queue.Run(m, Name+"-"+strings.ToLower(kind)+": replay")
+	if err != nil {
+		return fmt.Errorf("marketintents: the %s replay: %w", kind, err)
+	}
 	c.mu.Lock()
-	c.events[kind] = events
+	c.events[kind] = queue
 	c.mu.Unlock()
 	f := &forwarder[T]{c: c, kind: kind, fill: fill}
 	opts := []ctlruntime.Option{ctlruntime.Export(export), ctlruntime.Events(events), ctlruntime.Gone(f.gone), ctlruntime.Workers(workers),
@@ -243,7 +245,7 @@ func (c *Controller) subscribe(ctx context.Context, home string, sub market.Subs
 		}
 	}
 	c.mu.Unlock()
-	go c.enqueue(ctx, replay)
+	c.enqueue(replay)
 	c.settle(s)
 	var once sync.Once
 	cancel := func() {

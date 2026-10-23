@@ -83,6 +83,10 @@ type Controller struct {
 	mu sync.Mutex
 
 	feeds map[string]*commitFeed
+
+	closed bool
+
+	relays sync.WaitGroup
 }
 
 type commitFeed struct {
@@ -124,7 +128,23 @@ func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
 	if err := ctlruntime.For[*v1alpha1.LocalRepo](m, Name, ctl, options...); err != nil {
 		return nil, fmt.Errorf("localrepo: registering the LocalRepo controller: %w", err)
 	}
+	if err := m.Go(Name+": commit feeds", ctl.serveFeeds); err != nil {
+		return nil, fmt.Errorf("localrepo: the commit feeds: %w", err)
+	}
 	return ctl, nil
+}
+
+func (c *Controller) serveFeeds(ctx context.Context) error {
+	<-ctx.Done()
+	c.mu.Lock()
+	c.closed = true
+	for key, feed := range c.feeds {
+		close(feed.stop)
+		delete(c.feeds, key)
+	}
+	c.mu.Unlock()
+	c.relays.Wait()
+	return nil
 }
 
 func (c *Controller) Provide() {
@@ -293,6 +313,9 @@ func (c *Controller) follow(pdsKey string, pdsRef commonv1.ObjectRef) {
 	srv, ok := c.pds(pdsRef.Workspace, strings.TrimSpace(pdsRef.Name))
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.closed {
+		return
+	}
 	current := c.feeds[pdsKey]
 	if !ok || srv == nil {
 		if current != nil {
@@ -309,7 +332,7 @@ func (c *Controller) follow(pdsKey string, pdsRef commonv1.ObjectRef) {
 	}
 	feed := &commitFeed{srv: srv, stop: make(chan struct{})}
 	c.feeds[pdsKey] = feed
-	go c.relay(pdsKey, feed)
+	c.relays.Go(func() { c.relay(pdsKey, feed) })
 }
 
 func (c *Controller) prune() {

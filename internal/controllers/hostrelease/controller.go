@@ -68,7 +68,11 @@ func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
 		options = append(options, ctlruntime.InWorkspaces(opts.Scope))
 	}
 	if opts.Changed != nil {
-		options = append(options, ctlruntime.Events(c.forward(opts.Changed)))
+		events, err := ctlruntime.Forward(m, Name+": changes", opts.Changed, c.forwarded)
+		if err != nil {
+			return nil, fmt.Errorf("hostrelease: forwarding changes: %w", err)
+		}
+		options = append(options, ctlruntime.Events(events))
 	}
 	if err := ctlruntime.For[*v1alpha1.HostRelease](m, Name, c, options...); err != nil {
 		return nil, err
@@ -83,17 +87,8 @@ func Desired(ctx context.Context, a hostlifecycle.Authority) (*v1alpha1.HostRele
 	return obj, err
 }
 
-func (c *Controller) forward(changed <-chan struct{}) <-chan ctlruntime.Request {
-	out := make(chan ctlruntime.Request)
-	go func() {
-		defer close(out)
-		for range changed {
-			for _, r := range c.requests() {
-				out <- r
-			}
-		}
-	}()
-	return out
+func (c *Controller) forwarded(struct{}) []ctlruntime.Request {
+	return c.requests()
 }
 
 func (c *Controller) requests() []ctlruntime.Request {

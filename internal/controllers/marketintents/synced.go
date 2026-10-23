@@ -96,7 +96,7 @@ func (c *Controller) settle(s *subscriber) {
 	replay := c.replayLocked(s)
 	c.mu.Unlock()
 	s.synced()
-	go c.enqueue(s.ctx, replay)
+	c.enqueue(replay)
 }
 
 func (c *Controller) replayLocked(s *subscriber) map[string][]ctlruntime.Request {
@@ -109,24 +109,16 @@ func (c *Controller) replayLocked(s *subscriber) map[string][]ctlruntime.Request
 	return replay
 }
 
-func (c *Controller) enqueue(ctx context.Context, replay map[string][]ctlruntime.Request) {
+func (c *Controller) enqueue(replay map[string][]ctlruntime.Request) {
 	c.mu.Lock()
-	events := map[string]chan ctlruntime.Request{}
+	queues := map[string]*ctlruntime.Queue{}
 	for kind := range replay {
-		events[kind] = c.events[kind]
+		queues[kind] = c.events[kind]
 	}
 	c.mu.Unlock()
 	for kind, reqs := range replay {
-		ch := events[kind]
-		if ch == nil {
-			continue
-		}
-		for _, r := range reqs {
-			select {
-			case ch <- r:
-			case <-ctx.Done():
-				return
-			}
+		if q := queues[kind]; q != nil {
+			q.Add(reqs...)
 		}
 	}
 }

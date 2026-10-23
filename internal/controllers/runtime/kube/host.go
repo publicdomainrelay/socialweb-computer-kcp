@@ -27,13 +27,15 @@ func Watch[T any](ctx context.Context, r Resource, opts metav1.ListOptions) (<-c
 	out := make(chan Event[T])
 	done := make(chan struct{})
 	var once sync.Once
+	var forwarder sync.WaitGroup
 	stop := func() {
 		once.Do(func() {
 			close(done)
 			w.Stop()
 		})
+		forwarder.Wait()
 	}
-	go func() {
+	forwarder.Go(func() {
 		defer close(out)
 		for ev := range w.ResultChan() {
 			e := Event[T]{Type: ev.Type}
@@ -54,7 +56,7 @@ func Watch[T any](ctx context.Context, r Resource, opts metav1.ListOptions) (<-c
 				return
 			}
 		}
-	}()
+	})
 	return out, stop, nil
 }
 

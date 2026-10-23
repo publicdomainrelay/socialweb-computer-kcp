@@ -39,8 +39,6 @@ type Controller struct {
 	mu sync.Mutex
 
 	known map[ctlruntime.Request]bool
-
-	events chan ctlruntime.Request
 }
 
 func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
@@ -56,14 +54,14 @@ func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
 		options = append(options, ctlruntime.InWorkspaces(opts.Scope))
 	}
 	if opts.Changes != nil {
-		ctl.events = make(chan ctlruntime.Request, 16)
-		options = append(options, ctlruntime.Events(ctl.events))
+		events, err := ctlruntime.Forward(m, Name+": changes", opts.Changes, ctl.changed)
+		if err != nil {
+			return nil, fmt.Errorf("clusterroll: forwarding changes: %w", err)
+		}
+		options = append(options, ctlruntime.Events(events))
 	}
 	if err := ctlruntime.For[*v1alpha1.ClusterRoll](m, Name, ctl, options...); err != nil {
 		return nil, fmt.Errorf("clusterroll: registering the ClusterRoll controller: %w", err)
-	}
-	if opts.Changes != nil {
-		go ctl.forward(opts.Changes)
 	}
 	return ctl, nil
 }
@@ -171,13 +169,8 @@ func (c *Controller) all() []ctlruntime.Request {
 	return out
 }
 
-func (c *Controller) forward(changes <-chan struct{}) {
-	defer close(c.events)
-	for range changes {
-		for _, r := range c.all() {
-			c.events <- r
-		}
-	}
+func (c *Controller) changed(struct{}) []ctlruntime.Request {
+	return c.all()
 }
 
 func formatTime(t time.Time) string {
