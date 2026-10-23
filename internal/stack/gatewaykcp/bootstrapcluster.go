@@ -3,10 +3,12 @@ package gatewaykcp
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -16,6 +18,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
 	appgateway "github.com/johnandersen777/socialweb-computer-kcp/internal/app/gateway"
+	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/sweepkcp"
 )
@@ -23,6 +26,7 @@ import (
 const (
 	DefaultBootstrapDID   = "did:web:example.com"
 	bootstrapWorkspaceTTL = 2 * time.Minute
+	bootstrapRetryMax     = 5 * time.Second
 )
 
 var (
@@ -49,33 +53,44 @@ func workspace(name, typ string) map[string]any {
 
 func retry(ctx context.Context, what string, f func() error) error {
 	deadline := time.Now().Add(bootstrapWorkspaceTTL)
+	delay := Poll
 	for {
 		err := f()
 		if err == nil {
 			return nil
 		}
-		if time.Now().After(deadline) {
+		left := time.Until(deadline)
+		if left <= 0 {
 			return fmt.Errorf("gatewaykcp: bootstrap cluster: %s: %w", what, err)
 		}
+		again := time.NewTimer(min(delay, left))
 		select {
 		case <-ctx.Done():
+			again.Stop()
 			return ctx.Err()
-		case <-time.After(Poll):
+		case <-again.C:
 		}
+		delay = min(2*delay, bootstrapRetryMax)
 	}
 }
 
 func waitReady(ctx context.Context, ri dynamic.ResourceInterface, name string) error {
-	return retry(ctx, "workspace "+name+" Ready", func() error {
-		u, err := ri.Get(ctx, name, metav1.GetOptions{})
-		if err != nil {
-			return err
+	var last error
+	_, err := ctlruntime.Await(ctx, ri, name, bootstrapWorkspaceTTL, func(u *unstructured.Unstructured) (bool, error) {
+		if u == nil {
+			last = apierrors.NewNotFound(workspaceGVR.GroupResource(), name)
+			return false, nil
 		}
 		if p, _, _ := unstructured.NestedString(u.Object, "status", "phase"); p != "Ready" {
-			return fmt.Errorf("phase %q", p)
+			last = fmt.Errorf("phase %q", p)
+			return false, nil
 		}
-		return nil
+		return true, nil
 	})
+	if errors.Is(err, ctlruntime.ErrAwaitTimeout) && last != nil {
+		return fmt.Errorf("gatewaykcp: bootstrap cluster: %s: %w", "workspace "+name+" Ready", last)
+	}
+	return err
 }
 
 func bootstrapCluster(ctx context.Context, kubeconfig, base, did, cluster string, log *slog.Logger) error {

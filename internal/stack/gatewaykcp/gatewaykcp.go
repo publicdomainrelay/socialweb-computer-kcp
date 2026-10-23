@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -31,6 +32,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap/table"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clientcertfront"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterstack"
+	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devcore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/foldmain"
@@ -161,10 +163,11 @@ func (c Config) record(l devinstance.Layout) (devinstance.Record, error) {
 }
 
 type listeners struct {
-	mu     sync.Mutex
-	addr   map[string]string
-	kind   map[string]string
-	webApp string
+	mu      sync.Mutex
+	addr    map[string]string
+	kind    map[string]string
+	webApp  string
+	changed chan struct{}
 }
 
 func (r *listeners) components(_ string, ls []v1alpha1.ApplicationListener) {
@@ -202,6 +205,19 @@ func (r *listeners) set(name, kind string, a net.Addr) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.addr[name], r.kind[name] = a.String(), kind
+	if r.changed != nil {
+		close(r.changed)
+		r.changed = nil
+	}
+}
+
+func (r *listeners) await(name string) (string, <-chan struct{}) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.changed == nil {
+		r.changed = make(chan struct{})
+	}
+	return r.addr[name], r.changed
 }
 
 func (r *listeners) get(name string) string {
@@ -409,35 +425,30 @@ func (g *gateway) rootVault(ctx context.Context, rec devinstance.Record) (vaultm
 	if err != nil {
 		return vaultmain.RootAccess{}, err
 	}
-	deadline := time.Now().Add(VaultTimeout)
 	last := "not declared yet"
-	for {
-		u, err := dc.Resource(openbaoctl.GVR).Get(ctx, vaultlayout.RootServerName, metav1.GetOptions{})
-		if err == nil {
-			var o v1alpha1.OpenBaoServer
-			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &o); err != nil {
-				return vaultmain.RootAccess{}, err
-			}
-			if openbaoctl.Synced(&o) {
-				return vaultmain.RootAccessOf(o)
-			}
-			last = fmt.Sprintf("%s %s", o.Status.Phase, o.Status.Message)
-			if o.Status.Phase == v1alpha1.OpenBaoServerPhaseFailed && o.Status.ObservedGeneration == o.Generation {
-				return vaultmain.RootAccess{}, fmt.Errorf("gatewaykcp: the root vault %s failed: %s", vaultlayout.RootServerName, last)
-			}
-		} else {
-			last = err.Error()
+	failed := false
+	o, err := ctlruntime.AwaitAs(ctx, dc.Resource(openbaoctl.GVR), vaultlayout.RootServerName, VaultTimeout, func(o *v1alpha1.OpenBaoServer) (bool, error) {
+		if o == nil {
+			last = apierrors.NewNotFound(openbaoctl.GVR.GroupResource(), vaultlayout.RootServerName).Error()
+			return false, nil
 		}
-		if time.Now().After(deadline) {
-			return vaultmain.RootAccess{}, fmt.Errorf("gatewaykcp: the root vault %s was not Ready and synced within %s: %s",
-				vaultlayout.RootServerName, VaultTimeout, last)
+		if openbaoctl.Synced(o) {
+			return true, nil
 		}
-		select {
-		case <-ctx.Done():
-			return vaultmain.RootAccess{}, ctx.Err()
-		case <-time.After(Poll):
-		}
+		last = fmt.Sprintf("%s %s", o.Status.Phase, o.Status.Message)
+		failed = o.Status.Phase == v1alpha1.OpenBaoServerPhaseFailed && o.Status.ObservedGeneration == o.Generation
+		return failed, nil
+	})
+	switch {
+	case errors.Is(err, ctlruntime.ErrAwaitTimeout):
+		return vaultmain.RootAccess{}, fmt.Errorf("gatewaykcp: the root vault %s was not Ready and synced within %s: %s",
+			vaultlayout.RootServerName, VaultTimeout, last)
+	case err != nil:
+		return vaultmain.RootAccess{}, err
+	case failed:
+		return vaultmain.RootAccess{}, fmt.Errorf("gatewaykcp: the root vault %s failed: %s", vaultlayout.RootServerName, last)
 	}
+	return vaultmain.RootAccessOf(*o)
 }
 
 func (g *gateway) applyRoot(ctx context.Context, rec devinstance.Record, vcfg vaultmain.Config) (vaultmain.RootAccess, error) {
@@ -456,10 +467,12 @@ func (g *gateway) applyRoot(ctx context.Context, rec devinstance.Record, vcfg va
 		}
 		g.c.log().Warn("apply-root did not reach the root vault; its status may name a process that is gone while the core places it again",
 			"address", access.Address, "err", err.Error())
+		again := time.NewTimer(min(4*Poll, max(time.Until(deadline), 0)))
 		select {
 		case <-ctx.Done():
+			again.Stop()
 			return access, ctx.Err()
-		case <-time.After(4 * Poll):
+		case <-again.C:
 		}
 	}
 }
@@ -513,7 +526,9 @@ func (g *gateway) members(ctx context.Context, rec devinstance.Record) error {
 	defer wg.Wait()
 	mctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	wg.Go(func() { followMemberToken(mctx, g.activeSlotRoot, filepath.Join(g.l.KcpDir(), MemberToken), log) })
+	wg.Go(func() {
+		followMemberToken(mctx, g.activeSlotRoot, g.kcp.SlotsFile(), filepath.Join(g.l.KcpDir(), MemberToken), log)
+	})
 	ended := make(chan error, 8)
 	start := func(m member) {
 		wg.Go(func() {
@@ -595,9 +610,11 @@ func exitErr(code int) error {
 }
 
 func (g *gateway) waitListener(ctx context.Context, ended <-chan error, name string) (string, error) {
-	deadline := time.After(ListenTimeout)
+	deadline := time.NewTimer(ListenTimeout)
+	defer deadline.Stop()
 	for {
-		if a := g.reg.get(name); a != "" {
+		a, changed := g.reg.await(name)
+		if a != "" {
 			return a, nil
 		}
 		select {
@@ -605,9 +622,9 @@ func (g *gateway) waitListener(ctx context.Context, ended <-chan error, name str
 			return "", fmt.Errorf("gatewaykcp: %s ended before it listened: %v", name, err)
 		case <-ctx.Done():
 			return "", ctx.Err()
-		case <-deadline:
+		case <-deadline.C:
 			return "", fmt.Errorf("gatewaykcp: %s reported no listener within %s", name, ListenTimeout)
-		case <-time.After(50 * time.Millisecond):
+		case <-changed:
 		}
 	}
 }
