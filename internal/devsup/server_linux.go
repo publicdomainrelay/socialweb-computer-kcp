@@ -260,15 +260,7 @@ func (s *server) spawner() {
 }
 
 func (s *server) reaper(sigchld <-chan os.Signal) {
-	t := time.NewTicker(time.Second)
-	defer t.Stop()
 	for {
-		select {
-		case <-s.done:
-			return
-		case <-sigchld:
-		case <-t.C:
-		}
 		for {
 			var ws unix.WaitStatus
 			pid, err := unix.Wait4(-1, &ws, unix.WNOHANG, nil)
@@ -279,6 +271,11 @@ func (s *server) reaper(sigchld <-chan os.Signal) {
 				break
 			}
 			s.exited(pid, ws)
+		}
+		select {
+		case <-s.done:
+			return
+		case <-sigchld:
 		}
 	}
 }
@@ -395,20 +392,40 @@ func (s *server) killRemainder(name, inv string, pgid int, sig syscall.Signal, g
 	for _, pid := range set {
 		syscall.Kill(pid, sig)
 	}
-	deadline := time.Now().Add(grace)
-wait:
-	for time.Now().Before(deadline) {
-		if len(s.members(name, inv, pgid)) == 0 {
-			return
-		}
-		select {
-		case <-s.done:
-			break wait
-		case <-time.After(50 * time.Millisecond):
-		}
+	if s.awaitGone(name, inv, pgid, time.Now().Add(grace)) {
+		return
 	}
 	for _, pid := range s.members(name, inv, pgid) {
 		syscall.Kill(pid, syscall.SIGKILL)
+	}
+}
+
+func (s *server) awaitGone(name, inv string, pgid int, deadline time.Time) bool {
+	ctx, cancel := context.WithDeadline(context.Background(), deadline)
+	defer cancel()
+	go func() {
+		select {
+		case <-s.done:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	for {
+		set := s.members(name, inv, pgid)
+		if len(set) == 0 {
+			return true
+		}
+		for _, pid := range set {
+			err := hostos.AwaitExit(ctx, pid, 0)
+			if ctx.Err() != nil {
+				return false
+			}
+			if err != nil {
+				s.log.Warn("waiting for a unit process to exit; the stop waits out its grace", "unit", name, "pid", pid, "err", err.Error())
+				<-ctx.Done()
+				return false
+			}
+		}
 	}
 }
 
@@ -440,6 +457,9 @@ func (s *server) members(name, inv string, pgid int) []int {
 }
 
 func (s *server) orphanKiller() {
+	if OrphanScanInterval <= 0 {
+		return
+	}
 	t := time.NewTicker(OrphanScanInterval)
 	defer t.Stop()
 	for {
@@ -901,9 +921,7 @@ func (s *server) stop(name string) error {
 		case <-s.done:
 		}
 	}
-	for time.Now().Before(deadline) && len(s.members(name, inv, pgid)) > 0 {
-		time.Sleep(50 * time.Millisecond)
-	}
+	s.awaitGone(name, inv, pgid, deadline)
 	for _, pid := range s.members(name, inv, pgid) {
 		syscall.Kill(pid, syscall.SIGKILL)
 	}
