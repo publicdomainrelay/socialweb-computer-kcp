@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"time"
 
 	"k8s.io/client-go/dynamic"
 
@@ -53,9 +54,9 @@ func ApplyVaultStore(ctx context.Context, dyn dynamic.Interface, o VaultStore) (
 		return "", fmt.Errorf("esovault: writing the demo value the tenant's ExternalSecret reads out of "+
 			"the cluster vault for %s: %w", o.Cluster, err)
 	}
-	cert, err := vaultcert.IssueESOCertificate(ctx, o.Client, vaultURL, vaultTLS.CAPEM)
+	cert, err := currentOrNewESOCertificate(ctx, dyn, o, vaultURL, vaultTLS.CAPEM)
 	if err != nil {
-		return "", fmt.Errorf("esovault: issuing the store's client certificate for %s: %w", o.Cluster, err)
+		return "", fmt.Errorf("esovault: providing the store's client certificate for %s: %w", o.Cluster, err)
 	}
 	if err := eso.Apply(ctx, dyn, eso.Options{
 		ManifestDir:   o.ManifestDir,
@@ -68,4 +69,23 @@ func ApplyVaultStore(ctx context.Context, dyn dynamic.Interface, o VaultStore) (
 		return "", err
 	}
 	return vaultURL, nil
+}
+
+func currentOrNewESOCertificate(ctx context.Context, dyn dynamic.Interface, o VaultStore, vaultURL string, caPEM []byte) (vaultcert.ClientCertificate, error) {
+	heldCert, heldKey, found, err := eso.CurrentClientCertificate(ctx, dyn, o.Namespace)
+	if err != nil {
+		return vaultcert.ClientCertificate{}, err
+	}
+	if found && len(heldCert) > 0 && len(heldKey) > 0 {
+		fresh, freshErr := vaultcert.ESOCertificateFresh(heldCert, heldKey, time.Now())
+		if freshErr == nil && fresh {
+			return vaultcert.ClientCertificate{
+				Metadata:    vaultcert.ClientMetadata{Identity: vaultlayout.RoleESO, Role: vaultlayout.RoleESO, VaultAddr: vaultURL},
+				CertPEM:     heldCert,
+				KeyPEM:      heldKey,
+				ServerCAPEM: caPEM,
+			}, nil
+		}
+	}
+	return vaultcert.IssueESOCertificate(ctx, o.Client, vaultURL, caPEM)
 }

@@ -25,6 +25,8 @@ const (
 
 	DefaultCacheTTL = 5 * time.Minute
 
+	DefaultPositiveCacheTTL = 30 * time.Second
+
 	DefaultNegativeCacheTTL = 30 * time.Second
 
 	DefaultMissRecheck = 5 * time.Second
@@ -295,6 +297,8 @@ type KeyAuthorizerOptions struct {
 
 	CacheTTL time.Duration
 
+	PositiveCacheTTL time.Duration
+
 	NegativeCacheTTL time.Duration
 
 	MissRecheck time.Duration
@@ -335,6 +339,9 @@ func NewPDSKeyAuthorizer(opts KeyAuthorizerOptions) (*PDSKeyAuthorizer, error) {
 	}
 	if opts.CacheTTL <= 0 {
 		opts.CacheTTL = DefaultCacheTTL
+	}
+	if opts.PositiveCacheTTL <= 0 {
+		opts.PositiveCacheTTL = DefaultPositiveCacheTTL
 	}
 	if opts.NegativeCacheTTL <= 0 {
 		opts.NegativeCacheTTL = DefaultNegativeCacheTTL
@@ -497,9 +504,16 @@ func (a *PDSKeyAuthorizer) Authorize(ctx context.Context, username string, key P
 		entry = a.load(ctx, username)
 		a.remember(username, entry)
 	}
-	if !entryMatches(entry, key) && now.Sub(entry.checkedAt) >= a.opts.MissRecheck {
+	matched := entryMatches(entry, key)
+	if !matched && now.Sub(entry.checkedAt) >= a.opts.MissRecheck {
 		entry = a.load(ctx, username)
 		a.remember(username, entry)
+		matched = entryMatches(entry, key)
+	}
+	if matched && now.Sub(entry.checkedAt) >= a.opts.PositiveCacheTTL {
+		entry = a.load(ctx, username)
+		a.remember(username, entry)
+		matched = entryMatches(entry, key)
 	}
 	if entry.lookupFailed {
 		return nil, fmt.Errorf("association lookup failed for %s", username)
@@ -511,7 +525,7 @@ func (a *PDSKeyAuthorizer) Authorize(ctx context.Context, username string, key P
 		}
 		return nil, &NoKeyCouldMatchError{Username: username, Reason: reason}
 	}
-	if entryMatches(entry, key) {
+	if matched {
 		return entry.account, nil
 	}
 	return nil, nil

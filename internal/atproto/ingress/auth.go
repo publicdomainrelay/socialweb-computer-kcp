@@ -46,9 +46,15 @@ func BearerToken(authHeader, queryToken string) (string, error) {
 	return "", errors.New("missing Authorization header")
 }
 
-func VerifyServiceAuth(ctx context.Context, token, aud, lxm string, dir identity.Directory) (string, error) {
+type ServiceAuth struct {
+	Issuer string
+
+	ExpiresAt time.Time
+}
+
+func VerifyServiceAuth(ctx context.Context, token, aud, lxm string, dir identity.Directory) (ServiceAuth, error) {
 	if token == "" {
-		return "", errors.New("missing Authorization header")
+		return ServiceAuth{}, errors.New("missing Authorization header")
 	}
 	claims := jwt.MapClaims{}
 	opts := []jwt.ParserOption{
@@ -78,20 +84,27 @@ func VerifyServiceAuth(ctx context.Context, token, aud, lxm string, dir identity
 		}
 	}
 	if err != nil {
-		return "", err
+		return ServiceAuth{}, err
 	}
 	if !parsed.Valid {
-		return "", errors.New("service auth token is not valid")
+		return ServiceAuth{}, errors.New("service auth token is not valid")
 	}
 	gotLXM, _ := claims["lxm"].(string)
 	if gotLXM != lxm {
-		return "", fmt.Errorf("lxm mismatch: expected %s, got %s", lxm, gotLXM)
+		return ServiceAuth{}, fmt.Errorf("lxm mismatch: expected %s, got %s", lxm, gotLXM)
 	}
 	iss, err := claims.GetIssuer()
 	if err != nil {
-		return "", err
+		return ServiceAuth{}, err
 	}
-	return iss, nil
+	exp, err := claims.GetExpirationTime()
+	if err != nil {
+		return ServiceAuth{}, fmt.Errorf("missing exp claim: %w", err)
+	}
+	if exp == nil {
+		return ServiceAuth{}, errors.New("missing exp claim")
+	}
+	return ServiceAuth{Issuer: iss, ExpiresAt: exp.Time}, nil
 }
 
 func resolveSigningKey(ctx context.Context, did string, dir identity.Directory) (atcrypto.PublicKey, error) {

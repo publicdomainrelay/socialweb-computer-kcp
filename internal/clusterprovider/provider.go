@@ -34,6 +34,8 @@ var readyPhase = func() v1alpha1.ClusterPhase {
 
 const DefaultInterval = 2 * time.Second
 
+const DefaultAddOnInterval = 30 * time.Minute
+
 var ErrNoDecider = errors.New("clusterprovider: Decider is required: the phase machine is internal/materialiser's, not this package's")
 
 type Clusters interface {
@@ -116,6 +118,8 @@ type Options struct {
 
 	Interval time.Duration
 
+	AddOnInterval time.Duration
+
 	Now func() time.Time
 
 	Log *slog.Logger
@@ -127,6 +131,8 @@ type Provider struct {
 	mu sync.Mutex
 
 	nodeBackoff map[string]NodeBackoff
+
+	addOns map[string]time.Time
 }
 
 type NodeBackoff struct {
@@ -229,6 +235,9 @@ func New(opts Options) (*Provider, error) {
 	}
 	if opts.Interval == 0 {
 		opts.Interval = DefaultInterval
+	}
+	if opts.AddOnInterval <= 0 {
+		opts.AddOnInterval = DefaultAddOnInterval
 	}
 	if opts.Now == nil {
 		opts.Now = time.Now
@@ -369,7 +378,53 @@ func (p *Provider) reconcile(ctx context.Context, ref Ref, with func(*materialis
 			return pass, err
 		}
 	}
+	if !bootstrapping && done && res.Phase == readyPhase &&
+		p.opts.InstallTenant != nil && p.opts.Tenant != nil && p.tenantAddOnsDue(ref) {
+		if err := p.refreshTenantAddOns(ctx, ref, cl); err != nil {
+			pass.Err = err
+			return pass, err
+		}
+	}
 	return pass, nil
+}
+
+func (p *Provider) tenantAddOnsDue(ref Ref) bool {
+	key, err := ref.Key()
+	if err != nil {
+		return false
+	}
+	now := p.opts.Now()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if last, ok := p.addOns[key]; ok && now.Sub(last) < p.opts.AddOnInterval {
+		return false
+	}
+	if p.addOns == nil {
+		p.addOns = map[string]time.Time{}
+	}
+	p.addOns[key] = now
+	return true
+}
+
+func (p *Provider) refreshTenantAddOns(ctx context.Context, ref Ref, cl *v1alpha1.Cluster) error {
+	key, err := ref.Key()
+	if err != nil {
+		return err
+	}
+	cfg, err := p.opts.Tenant(ctx, ref, cl)
+	if err != nil {
+		return fmt.Errorf("clusterprovider: no tenant credential for the add-on refresh of %s: %w", ref.Name, err)
+	}
+	if cfg == nil {
+		return fmt.Errorf("clusterprovider: no tenant credential for the add-on refresh of %s", ref.Name)
+	}
+	if err := p.opts.InstallTenant(ctx, key, cfg); err != nil {
+		return fmt.Errorf("clusterprovider: refreshing the tenant add-ons of %s, which reissues the "+
+			"client certificate the External Secrets store dials the vault with before it expires: %w",
+			ref.Name, err)
+	}
+	p.opts.Log.Info("tenant add-ons refreshed", "cluster", ref.Name, "key", key)
+	return nil
 }
 
 func (p *Provider) addressMount(ctx context.Context, ref Ref, url string) error {

@@ -386,6 +386,31 @@ func applyClientSecret(ctx context.Context, dyn dynamic.Interface, o Options) er
 	return nil
 }
 
+func CurrentClientCertificate(ctx context.Context, dyn dynamic.Interface, namespace string) (certPEM, keyPEM []byte, found bool, err error) {
+	if namespace == "" {
+		return nil, nil, false, fmt.Errorf("%w: it names no tenant namespace to read the client certificate Secret from", ErrIncomplete)
+	}
+	if dyn == nil {
+		return nil, nil, false, errors.New("eso: no dynamic client to read the client certificate Secret")
+	}
+	secret, err := dyn.Resource(secretResource).Namespace(namespace).Get(ctx, ClientSecretName, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil, nil, false, nil
+	}
+	if err != nil {
+		return nil, nil, false, fmt.Errorf("eso: reading the client certificate Secret %s/%s: %w",
+			namespace, ClientSecretName, err)
+	}
+	certB64, _, _ := unstructured.NestedString(secret.Object, "data", CertKey)
+	keyB64, _, _ := unstructured.NestedString(secret.Object, "data", KeyKey)
+	if certB64 == "" || keyB64 == "" {
+		return nil, nil, true, nil
+	}
+	certPEM, _ = base64.StdEncoding.DecodeString(certB64)
+	keyPEM, _ = base64.StdEncoding.DecodeString(keyB64)
+	return certPEM, keyPEM, true, nil
+}
+
 func applyObject(ctx context.Context, ri dynamic.ResourceInterface, u *unstructured.Unstructured) error {
 	body, err := json.Marshal(u.Object)
 	if err != nil {

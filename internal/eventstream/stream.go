@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"reflect"
 	"slices"
 	"sort"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/syntax"
+	"github.com/ipfs/go-cid"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -333,6 +335,27 @@ func (s *eventStream) deliverHandler(ctx context.Context, source string, event p
 	}
 }
 
+func (s *eventStream) getWatchedRecord(ctx context.Context, source pdsclient.PDS, did syntax.DID, path pdsclient.RepoPath, expected *cid.Cid) (pdsclient.Record, error) {
+	pds := source
+	if pds == nil {
+		var err error
+		pds, err = s.ctl.authorPDS(ctx, did)
+		if err != nil {
+			return pdsclient.Record{}, err
+		}
+	}
+	record, err := pds.GetRecord(ctx, path, expected)
+	if err == nil || !pdsEndpointStale(err) {
+		return record, err
+	}
+	s.ctl.forgetAuthorPDS(ctx, did)
+	resolved, resolveErr := s.ctl.authorPDS(ctx, did)
+	if resolveErr != nil {
+		return pdsclient.Record{}, err
+	}
+	return resolved.GetRecord(ctx, path, expected)
+}
+
 func (s *eventStream) bufferRecords(ctx context.Context, source resolvedSource, event pdsclient.RepoEvent, ops []pdsclient.RepoOp) {
 	matches := s.watchMatches(ctx)
 	now := time.Now().UTC().Format(time.RFC3339Nano)
@@ -346,16 +369,8 @@ func (s *eventStream) bufferRecords(ctx context.Context, source resolvedSource, 
 		uri := "at://" + event.Repo.String() + "/" + collection + "/" + rkey
 		switch strings.ToLower(op.Action) {
 		case "create", "update":
-			pds := source.pds
-			if pds == nil {
-				var err error
-				pds, err = s.ctl.authorPDS(ctx, event.Repo)
-				if err != nil {
-					s.ctl.log.Warn("resolving the author PDS for a watched record", "uri", uri, "err", err.Error())
-					continue
-				}
-			}
-			record, err := pds.GetRecord(ctx, pdsclient.RepoPath{Repo: event.Repo, Collection: syntax.NSID(collection), Rkey: syntax.RecordKey(rkey)}, op.CID)
+			path := pdsclient.RepoPath{Repo: event.Repo, Collection: syntax.NSID(collection), Rkey: syntax.RecordKey(rkey)}
+			record, err := s.getWatchedRecord(ctx, source.pds, event.Repo, path, op.CID)
 			if err != nil {
 				s.ctl.log.Warn("fetching a watched record", "uri", uri, "err", err.Error())
 				continue
@@ -436,11 +451,15 @@ func (s *eventStream) watchMatches(ctx context.Context) []resolvedMatch {
 
 func (c *Controller) authorPDS(ctx context.Context, did syntax.DID) (pdsclient.PDS, error) {
 	c.mu.Lock()
-	cached := c.pdsCache[did]
+	cached, ok := c.pdsCache[did]
 	c.mu.Unlock()
-	if cached != nil {
-		return cached, nil
+	if ok && cached.pds != nil && time.Since(cached.fetchedAt) < pdsCacheTTL {
+		return cached.pds, nil
 	}
+	return c.resolveAuthorPDS(ctx, did)
+}
+
+func (c *Controller) resolveAuthorPDS(ctx context.Context, did syntax.DID) (pdsclient.PDS, error) {
 	if c.directory == nil {
 		return nil, errors.New("eventstream: no DID directory is configured")
 	}
@@ -463,11 +482,32 @@ func (c *Controller) authorPDS(ctx context.Context, did syntax.DID) (pdsclient.P
 	}
 	c.mu.Lock()
 	if c.pdsCache == nil {
-		c.pdsCache = map[syntax.DID]pdsclient.PDS{}
+		c.pdsCache = map[syntax.DID]pdsCacheEntry{}
 	}
-	c.pdsCache[did] = pds
+	c.pdsCache[did] = pdsCacheEntry{pds: pds, fetchedAt: time.Now()}
 	c.mu.Unlock()
 	return pds, nil
+}
+
+func (c *Controller) forgetAuthorPDS(ctx context.Context, did syntax.DID) {
+	c.mu.Lock()
+	delete(c.pdsCache, did)
+	c.mu.Unlock()
+	if c.directory != nil {
+		_ = c.directory.Purge(ctx, did.AtIdentifier())
+	}
+}
+
+func pdsEndpointStale(err error) bool {
+	var xrpc *pdsclient.XRPCError
+	if !errors.As(err, &xrpc) {
+		return false
+	}
+	switch xrpc.StatusCode {
+	case http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound:
+		return true
+	}
+	return false
 }
 
 func (s *eventStream) publish(ctx context.Context) {

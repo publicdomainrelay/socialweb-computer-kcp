@@ -58,9 +58,12 @@ type peer struct {
 	conn         *websocket.Conn
 	did          string
 	subdomain    string
+	expiresAt    time.Time
 	writeMu      sync.Mutex
 	lastResponse time.Time
 	closeOnce    sync.Once
+	goneOnce     sync.Once
+	gone         chan struct{}
 	removed      bool
 }
 
@@ -365,7 +368,8 @@ func (s *Server) handleSubscribe(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "AuthenticationRequired", "message": err.Error()})
 		return
 	}
-	if _, err := VerifyServiceAuth(req.Context(), token, hostnameToDID(s.cfg.Hostname), SubscribeNSID, s.dir); err != nil {
+	auth, err := VerifyServiceAuth(req.Context(), token, hostnameToDID(s.cfg.Hostname), SubscribeNSID, s.dir)
+	if err != nil {
 		s.log.Warn("auth_denied", "nsid", SubscribeNSID, "err", err)
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "AuthenticationRequired", "message": err.Error()})
 		return
@@ -411,7 +415,7 @@ func (s *Server) handleSubscribe(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	p := &peer{conn: conn, did: clientDID, subdomain: subdomain}
+	p := &peer{conn: conn, did: clientDID, subdomain: subdomain, expiresAt: auth.ExpiresAt, gone: make(chan struct{})}
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
@@ -421,6 +425,7 @@ func (s *Server) handleSubscribe(w http.ResponseWriter, req *http.Request) {
 	s.peers[subdomain] = p
 	s.mu.Unlock()
 	s.startKeepalive(p)
+	go s.watchPeerExpiry(p)
 	s.log.Info("subscriber_connected", "subdomain", subdomain, "key", result.Key)
 	_ = p.writeJSON(map[string]any{
 		"$type":      frameType("registered"),
@@ -517,7 +522,33 @@ func (s *Server) handleResponse(p *peer, msg frame) {
 	}}
 }
 
+func (p *peer) markGone() {
+	if p.gone == nil {
+		return
+	}
+	p.goneOnce.Do(func() { close(p.gone) })
+}
+
+func (s *Server) watchPeerExpiry(p *peer) {
+	wait := time.Until(p.expiresAt)
+	if wait <= 0 {
+		s.log.Info("subscriber_expired", "subdomain", p.subdomain)
+		s.evictPeer(p, 1008, "service auth token expired")
+		return
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		s.log.Info("subscriber_expired", "subdomain", p.subdomain)
+		s.evictPeer(p, 1008, "service auth token expired")
+	case <-p.gone:
+	case <-s.closedCh:
+	}
+}
+
 func (s *Server) dropPeer(p *peer) {
+	p.markGone()
 	s.mu.Lock()
 	if p.removed {
 		s.mu.Unlock()

@@ -36,6 +36,8 @@ const (
 	NodeTokenTTL = "15m"
 	NodeTokenMax = "1h"
 
+	ESOCertRenewWindow = NodeCertTTL / 3
+
 	nodeFileMode = 0o600
 )
 
@@ -147,6 +149,23 @@ func IssueESOCertificate(ctx context.Context, client *openbao.Client, vaultAddr 
 		ServerCAPEM: serverCAPEM,
 		Serial:      issued.Serial,
 	}, nil
+}
+
+func ESOCertificateFresh(certPEM, keyPEM []byte, now time.Time) (bool, error) {
+	if len(certPEM) == 0 || len(keyPEM) == 0 {
+		return false, nil
+	}
+	if _, err := tls.X509KeyPair(certPEM, keyPEM); err != nil {
+		return false, err
+	}
+	leaf, err := parseLeaf(certPEM)
+	if err != nil {
+		return false, err
+	}
+	if leaf.Subject.CommonName != vaultlayout.RoleESO {
+		return false, nil
+	}
+	return leaf.NotAfter.Sub(now) > ESOCertRenewWindow, nil
 }
 
 func (c ClientCertificate) Login(ctx context.Context) (string, error) {

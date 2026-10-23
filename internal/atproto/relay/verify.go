@@ -69,7 +69,23 @@ func (v *verifier) verify(ctx context.Context, evt *comatproto.SyncSubscribeRepo
 		return fmt.Errorf("commit verification: %w", err)
 	}
 	if err := commit.VerifySignature(pubkey); err != nil {
-		return fmt.Errorf("commit verification: %w", err)
+		signatureErr := err
+		if purgeErr := v.dir.Purge(ctx, did.AtIdentifier()); purgeErr != nil {
+			v.log.Warn("failed to purge a DID whose commit signature did not verify",
+				"did", did.String(), "err", purgeErr)
+			return fmt.Errorf("commit verification: %w", signatureErr)
+		}
+		ident, err = v.dir.LookupDID(ctx, did)
+		if err != nil {
+			return fmt.Errorf("commit verification: %w", signatureErr)
+		}
+		pubkey, err = ident.PublicKey()
+		if err != nil {
+			return fmt.Errorf("commit verification: %w", signatureErr)
+		}
+		if err := commit.VerifySignature(pubkey); err != nil {
+			return fmt.Errorf("commit verification: %w", err)
+		}
 	}
 	if evt.Repo != commit.DID {
 		return fmt.Errorf("mismatched inner commit DID field: %s", commit.DID)

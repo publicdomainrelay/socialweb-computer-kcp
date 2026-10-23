@@ -39,6 +39,8 @@ const (
 	DefaultStatusInterval   = 5 * time.Second
 	DefaultReconnectDelay   = time.Second
 	DefaultMaxReconnectWait = 30 * time.Second
+
+	pdsCacheTTL = 2 * time.Minute
 )
 
 var EventStreamGVR = schema.GroupVersionResource{Group: GroupName, Version: Version, Resource: "eventstreams"}
@@ -76,8 +78,13 @@ type Controller struct {
 
 	mu       sync.Mutex
 	streams  map[string]*streamRuntime
-	pdsCache map[syntax.DID]pdsclient.PDS
+	pdsCache map[syntax.DID]pdsCacheEntry
 	verifyAt map[string]time.Time
+}
+
+type pdsCacheEntry struct {
+	pds       pdsclient.PDS
+	fetchedAt time.Time
 }
 
 type streamRuntime struct {
@@ -156,7 +163,7 @@ func New(opts Options) (*Controller, error) {
 		streams:   map[string]*streamRuntime{},
 		directory: directory,
 		http:      httpClient,
-		pdsCache:  map[syntax.DID]pdsclient.PDS{},
+		pdsCache:  map[syntax.DID]pdsCacheEntry{},
 		verifyAt:  map[string]time.Time{},
 	}, nil
 }

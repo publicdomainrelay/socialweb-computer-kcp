@@ -10,6 +10,7 @@ import (
 
 	"github.com/bluesky-social/indigo/atproto/atcrypto"
 	"github.com/bluesky-social/indigo/atproto/identity"
+	"github.com/bluesky-social/indigo/atproto/syntax"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/didkey"
 )
@@ -119,7 +120,25 @@ func (n *NonceStore) Verify(ctx context.Context, reg Registration) verifyResult 
 	if err != nil {
 		return verifyResult{Reason: "nonce is not base64"}
 	}
-	for _, sig := range reg.Signatures {
+	if n.verifySignatures(ctx, nonceBytes, reg.Signatures) {
+		n.consume(reg.Nonce)
+		return verifyResult{OK: true, Key: reg.Key}
+	}
+	if n.purgeSignatureKeys(ctx, reg.Signatures) && n.verifySignatures(ctx, nonceBytes, reg.Signatures) {
+		n.consume(reg.Nonce)
+		return verifyResult{OK: true, Key: reg.Key}
+	}
+	return verifyResult{Reason: "no signature verifies over the nonce"}
+}
+
+func (n *NonceStore) consume(nonce string) {
+	n.mu.Lock()
+	delete(n.entries, nonce)
+	n.mu.Unlock()
+}
+
+func (n *NonceStore) verifySignatures(ctx context.Context, nonceBytes []byte, signatures []Signature) bool {
+	for _, sig := range signatures {
 		if sig.Key == "" || sig.Signature == "" {
 			continue
 		}
@@ -132,13 +151,30 @@ func (n *NonceStore) Verify(ctx context.Context, reg Registration) verifyResult 
 			continue
 		}
 		if err := pub.HashAndVerify(nonceBytes, sigBytes); err == nil {
-			n.mu.Lock()
-			delete(n.entries, reg.Nonce)
-			n.mu.Unlock()
-			return verifyResult{OK: true, Key: reg.Key}
+			return true
 		}
 	}
-	return verifyResult{Reason: "no signature verifies over the nonce"}
+	return false
+}
+
+func (n *NonceStore) purgeSignatureKeys(ctx context.Context, signatures []Signature) bool {
+	if n.dir == nil {
+		return false
+	}
+	purged := false
+	for _, sig := range signatures {
+		if sig.Key == "" || strings.HasPrefix(sig.Key, didkey.Prefix) {
+			continue
+		}
+		did, err := syntax.ParseDID(sig.Key)
+		if err != nil {
+			continue
+		}
+		if err := n.dir.Purge(ctx, did.AtIdentifier()); err == nil {
+			purged = true
+		}
+	}
+	return purged
 }
 
 func resolveRegistrationKey(ctx context.Context, key string, dir identity.Directory) (atcrypto.PublicKey, error) {

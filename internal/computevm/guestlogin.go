@@ -113,9 +113,16 @@ func (ct *Controller) dropGuestLogin(ctx context.Context, o v1alpha1.ComputeVM) 
 	if err != nil {
 		return
 	}
-	client, err := ct.vaultFor(ctx, o.Spec.UserData.Vault.Server)
+	server := o.Spec.UserData.Vault.Server
+	client, err := ct.vaultFor(ctx, server)
 	if err == nil {
 		err = client.Delete(ctx, path)
+		if openbao.IsAuthError(err) {
+			ct.forgetLogin(server)
+			if client, err = ct.vaultFor(ctx, server); err == nil {
+				err = client.Delete(ctx, path)
+			}
+		}
 	}
 	if err != nil {
 		ct.c.log().Warn("the guest login role stays in the bidder's OpenBao", "computevm", o.Name, "role", path, "err", err.Error())
