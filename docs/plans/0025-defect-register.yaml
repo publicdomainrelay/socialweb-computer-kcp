@@ -1,6 +1,6 @@
 plan: "0025"
 title: "Defect register from the rc81 live proof and the architecture audit"
-status: open
+status: doing
 source: >
   Defects observed during the rc81 live proof of plans 0023 and 0024 and
   found by the 2026-10-22 architecture audit. Each item records the defect
@@ -39,14 +39,14 @@ items:
       during the rc81 proof.
   - id: D04-SUSPEND-STOPS-RELEASE
     title: "Bidder suspend also stops release consumption"
-    status: todo
+    status: not-an-issue
     defect: >
       A paused Bidder stops taking new RFPs and also stops consuming release
       events for VMs it already runs. During the rc81 proof the paused
       winners had to be resumed before the cluster could scale to zero.
   - id: D05-SUSPEND-ROOT-PHASE
     title: "A suspended root reports Pending and still runs ensureDesired"
-    status: todo
+    status: not-an-issue
     defect: >
       ApplicationPhase has no Suspended value, so a suspended root reports
       Phase Pending with message "suspended" (internal/appctl/bidder.go:782),
@@ -54,7 +54,7 @@ items:
       A suspended root still runs ensureDesired (internal/appctl/bidder.go:761-770).
   - id: D06-SUSPEND-OVERRIDE
     title: "An override cannot un-suspend a component under a suspended root"
-    status: todo
+    status: not-an-issue
     defect: >
       The effective suspend is rootSuspend || *ov.Suspend
       (internal/appctl/overrides.go:406-407). NetworkApp uses stopped, not
@@ -63,7 +63,7 @@ items:
       (inferred from the audit).
   - id: D07-SUSPEND-WRITERS
     title: "Suspend fields have competing writers"
-    status: todo
+    status: not-an-issue
     defect: >
       SuspendComponentIn merge-patches component spec.suspend
       (internal/appctl/components.go:762-771) and the next whole-spec Update
@@ -73,7 +73,7 @@ items:
       (internal/appctl/network.go:926).
   - id: D08-COMPUTEVM-MARKET-WRITERS
     title: "ComputeVM status.market has four writers"
-    status: todo
+    status: not-an-issue
     defect: >
       The bidder merge patch (internal/services/bidder/kcp.go:246),
       guestcontrolplane SSA (internal/services/guestcontrolplane/store.go:125),
@@ -81,21 +81,21 @@ items:
       internal/computevm/client.go:252 all write status.market.
   - id: D09-BID-STATUS-WRITERS
     title: "Bid status has two writers, one with no field manager"
-    status: todo
+    status: not-an-issue
     defect: >
       The bidder writes Bid status with PatchStatus
       (internal/services/bidder/kcp.go:119-138); computevm writes it with
       UpdateStatus and no field manager (internal/computevm/bids.go:134).
   - id: D10-ROOT-STATUS-RMW
     title: "Root status is written by read-modify-write next to a component-owned field"
-    status: todo
+    status: not-an-issue
     defect: >
       appctl overwrites root status except status.market with
       read-modify-write UpdateStatus (internal/appctl/appctl.go:358-427),
       while a component owns status.market.
   - id: D11-DEAD-REPO-CONTROLLER
     title: "Duplicate AtprotoRepo status controller is never registered"
-    status: todo
+    status: not-an-issue
     defect: >
       internal/statusstate/repo.go:20 reconciles AtprotoRepo status but is
       never registered (internal/statusstate/statusstate.go:199-210). The
@@ -118,7 +118,7 @@ items:
       reload on file change (internal/tlsreload); the CA pools do not.
   - id: D14-VAULT-TOKEN-STAMPEDE
     title: "Global OpenBao token cache has no request dedupe"
-    status: todo
+    status: not-an-issue
     defect: >
       The package-level vaultTokens cache
       (internal/clusterprovider/openbaoserver.go:137) has no single-flight,
@@ -151,7 +151,7 @@ items:
       library's global ES256 signing method in init.
   - id: D18-ANNOTATION-SIGNALS
     title: "Annotations carry control signals between controllers"
-    status: todo
+    status: not-an-issue
     defect: >
       release-requested/release-request (written in
       internal/services/bidder/statesync.go:344-345,1274,1418, read in
@@ -187,7 +187,7 @@ items:
       MarketIdentity.
   - id: D22-UNREGISTERED-KINDS
     title: "Eleven kinds have no DeepCopyObject and are not in the scheme"
-    status: todo
+    status: not-an-issue
     defect: >
       Bid, ComputeContract, Gateway, MarketBidder, MarketNetwork,
       MarketRequester, SshGateway, AtprotoRecord, AtprotoRecordWatch,
