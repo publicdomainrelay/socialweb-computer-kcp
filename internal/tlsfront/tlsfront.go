@@ -194,13 +194,15 @@ func Run(ctx context.Context, c Config) error {
 		c.OnListen(ln.Addr())
 	}
 	var wg sync.WaitGroup
+	defer wg.Wait()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	stop := context.AfterFunc(ctx, func() { ln.Close() })
 	defer stop()
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
 			if ctx.Err() != nil {
-				wg.Wait()
 				return ctx.Err()
 			}
 			var ne net.Error
