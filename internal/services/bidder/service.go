@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -773,38 +772,13 @@ func (s *Service) newAuthorizer() Authorizer {
 		s.cfg.ServiceAuth.Hostname = hostPortOf(s.publicMarketURL())
 	}
 	audienceDIDs := append([]string(nil), s.cfg.ServiceAuth.AudienceDIDs...)
-	audienceDIDs = append(audienceDIDs, bidderAudienceDIDs(s.cfg.ServiceAuth.Hostname)...)
+	audienceDIDs = append(audienceDIDs, market.ServiceAudienceDIDs(s.cfg.ServiceAuth.Hostname)...)
 	return &ServiceAuthAuthorizer{
 		Dir:          s.dir,
 		Hostname:     s.cfg.ServiceAuth.Hostname,
 		ServiceIDs:   []string{market.DefaultMarketServiceID, market.DefaultComputeEventServiceID},
 		AudienceDIDs: audienceDIDs,
 	}
-}
-
-func bidderAudienceDIDs(host string) []string {
-	host = strings.TrimSpace(host)
-	if host == "" {
-		return nil
-	}
-	candidates := []string{host, strings.ToLower(host)}
-	if name, _, err := net.SplitHostPort(host); err == nil && name != "" {
-		candidates = append(candidates, name, strings.ToLower(name))
-	}
-	unique := []string{}
-	seen := map[string]bool{}
-	for _, candidate := range candidates {
-		if candidate == "" {
-			continue
-		}
-		did := market.ServiceDIDForHost(candidate)
-		if seen[did] {
-			continue
-		}
-		seen[did] = true
-		unique = append(unique, did)
-	}
-	return unique
 }
 
 func (s *Service) addEndpoint(endpoint component.Endpoint) {

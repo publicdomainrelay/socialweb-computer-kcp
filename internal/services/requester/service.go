@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -1287,9 +1286,9 @@ func (s *Service) authorizeCallback(w http.ResponseWriter, r *http.Request, lxm,
 		if u, err := url.Parse(raw); err == nil && u.Host != "" {
 			host = u.Host
 		}
-		audiences = append(audiences, serviceAudienceDIDs(host)...)
+		audiences = append(audiences, market.ServiceAudienceDIDs(host)...)
 	}
-	audiences = append(audiences, serviceAudienceDIDs(hostname)...)
+	audiences = append(audiences, market.ServiceAudienceDIDs(hostname)...)
 	result, err := market.VerifyServiceAuth(ctx, s.directory, market.VerifyServiceAuthOptions{
 		AuthHeader:        r.Header.Get("Authorization"),
 		Hostname:          hostname,
@@ -1302,31 +1301,6 @@ func (s *Service) authorizeCallback(w http.ResponseWriter, r *http.Request, lxm,
 		return "", false
 	}
 	return result.IssuerDID, true
-}
-
-func serviceAudienceDIDs(host string) []string {
-	host = strings.TrimSpace(host)
-	if host == "" {
-		return nil
-	}
-	candidates := []string{host, strings.ToLower(host)}
-	if name, _, err := net.SplitHostPort(host); err == nil && name != "" {
-		candidates = append(candidates, name, strings.ToLower(name))
-	}
-	unique := []string{}
-	seen := map[string]bool{}
-	for _, candidate := range candidates {
-		if candidate == "" {
-			continue
-		}
-		did := market.ServiceDIDForHost(candidate)
-		if seen[did] {
-			continue
-		}
-		seen[did] = true
-		unique = append(unique, did)
-	}
-	return unique
 }
 
 func (s *Service) callbackHostname(r *http.Request) string {

@@ -369,7 +369,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 			if deps.Log != nil {
 				deps.Log.Warn("requester_could_not_read_the_oauth_session", "err", err)
 			}
-		} else if data, ok := credentialSessionData(credential.Data); ok {
+		} else if data, ok := oauthclient.SessionFromSecret(credential.Data); ok {
 			cfg.OAuthSessionData = &data
 			cfg.DID = data.AccountDID
 			cfg.RepoDID = data.AccountDID

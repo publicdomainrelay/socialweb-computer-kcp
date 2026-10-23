@@ -104,3 +104,28 @@ func AuthorizeRecord(issuerDID, recordURI string) error {
 	}
 	return nil
 }
+
+func ServiceAudienceDIDs(host string) []string {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return nil
+	}
+	candidates := []string{host, strings.ToLower(host)}
+	if name, _, err := net.SplitHostPort(host); err == nil && name != "" {
+		candidates = append(candidates, name, strings.ToLower(name))
+	}
+	unique := []string{}
+	seen := map[string]bool{}
+	for _, candidate := range candidates {
+		if candidate == "" {
+			continue
+		}
+		did := ServiceDIDForHost(candidate)
+		if seen[did] {
+			continue
+		}
+		seen[did] = true
+		unique = append(unique, did)
+	}
+	return unique
+}

@@ -366,7 +366,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 	}
 	if cfg.PDSDPoP == nil && cfg.PDSAccessTokenRef != nil && deps.Credentials != nil {
 		if credential, err := deps.Credentials.Resolve(context.Background(), *cfg.PDSAccessTokenRef); err == nil {
-			if data, ok := credentialSessionData(credential.Data); ok {
+			if data, ok := oauthclient.SessionFromSecret(credential.Data); ok {
 				clientID := data.ClientID
 				if clientID == "" {
 					clientID = defaultBidderOAuthClientID

@@ -19,6 +19,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauthclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
 )
 
 const defaultBidderOAuthClientID = "https://socialweb.computer/oauth-client-metadata.json"
@@ -41,7 +42,7 @@ func (s *bidderSessionStore) List(ctx context.Context) ([]oauthclient.SessionDat
 	if err != nil {
 		return nil, err
 	}
-	data, ok := credentialSessionData(credential.Data)
+	data, ok := oauthclient.SessionFromSecret(credential.Data)
 	if !ok {
 		return nil, nil
 	}
@@ -63,7 +64,7 @@ func (s *bidderSessionStore) Save(ctx context.Context, session oauthclient.Sessi
 			maps.Copy(data, credential.Data)
 		}
 	}
-	maps.Copy(data, credentialSessionSecret(session))
+	maps.Copy(data, oauthclient.SessionSecret(session))
 	return s.writer.WriteCredential(ctx, s.ref, data)
 }
 
@@ -119,8 +120,8 @@ func (t *credentialPDSTokens) refreshLocked(ctx context.Context) (string, error)
 		}
 		return "", err
 	}
-	access := credentialString(credential.Data, "accessJwt", "accessToken", "access_token", "token", "value")
-	refresh := credentialString(credential.Data, "refreshJwt", "refreshToken", "refresh_token")
+	access := strs.Lookup(credential.Data, "accessJwt", "accessToken", "access_token", "token", "value")
+	refresh := strs.Lookup(credential.Data, "refreshJwt", "refreshToken", "refresh_token")
 	if pdsclient.TokenLive(access) {
 		t.access = access
 		return access, nil
@@ -148,7 +149,7 @@ func (t *credentialPDSTokens) refreshLocked(ctx context.Context) (string, error)
 		updated["refreshJwt"] = session.RefreshJWT
 		updated["access_token"] = session.AccessJWT
 		updated["refresh_token"] = session.RefreshJWT
-		if raw := credentialString(credential.Data, "session"); raw != "" {
+		if raw := strs.Lookup(credential.Data, "session"); raw != "" {
 			var stored oauthclient.SessionData
 			if json.Unmarshal([]byte(raw), &stored) == nil {
 				stored.AccessToken = session.AccessJWT
@@ -161,85 +162,6 @@ func (t *credentialPDSTokens) refreshLocked(ctx context.Context) (string, error)
 		_ = t.writer.WriteCredential(ctx, t.ref, updated)
 	}
 	return t.access, nil
-}
-
-func credentialSessionData(data map[string]any) (oauthclient.SessionData, bool) {
-	if raw := credentialString(data, "session"); raw != "" {
-		var session oauthclient.SessionData
-		if err := json.Unmarshal([]byte(raw), &session); err != nil {
-			return oauthclient.SessionData{}, false
-		}
-		if session.AccountDID != "" && session.HostURL != "" {
-			return session, true
-		}
-	}
-	session := oauthclient.SessionData{
-		AccountDID:                   credentialString(data, "account_did", "did", "userDid"),
-		SessionID:                    credentialString(data, "session_id"),
-		HostURL:                      credentialString(data, "host_url", "pds"),
-		ClientID:                     credentialString(data, "client_id", "clientId"),
-		AuthServerURL:                credentialString(data, "authserver_url"),
-		AuthServerTokenEndpoint:      credentialString(data, "authserver_token_endpoint"),
-		AuthServerRevocationEndpoint: credentialString(data, "authserver_revocation_endpoint"),
-		Scopes:                       strings.Fields(credentialString(data, "scopes", "scope")),
-		AccessToken:                  credentialString(data, "access_token", "accessJwt", "accessToken"),
-		RefreshToken:                 credentialString(data, "refresh_token", "refreshJwt", "refreshToken"),
-		DPoPAuthServerNonce:          credentialString(data, "dpop_authserver_nonce"),
-		DPoPHostNonce:                credentialString(data, "dpop_host_nonce"),
-		DPoPPrivateKeyMultibase:      credentialString(data, "dpop_privatekey_multibase", "dpopPrivateKeyMultibase"),
-	}
-	if session.AccountDID == "" || session.HostURL == "" || session.AccessToken == "" {
-		return oauthclient.SessionData{}, false
-	}
-	return session, true
-}
-
-func credentialSessionSecret(session oauthclient.SessionData) map[string]any {
-	raw, _ := json.Marshal(session)
-	return map[string]any{
-		"session":                   string(raw),
-		"account_did":               session.AccountDID,
-		"session_id":                session.SessionID,
-		"did":                       session.AccountDID,
-		"host_url":                  session.HostURL,
-		"pds":                       session.HostURL,
-		"client_id":                 session.ClientID,
-		"authserver_url":            session.AuthServerURL,
-		"authserver_token_endpoint": session.AuthServerTokenEndpoint,
-		"scopes":                    strings.Join(session.Scopes, " "),
-		"access_token":              session.AccessToken,
-		"refresh_token":             session.RefreshToken,
-		"accessJwt":                 session.AccessToken,
-		"refreshJwt":                session.RefreshToken,
-		"dpop_authserver_nonce":     session.DPoPAuthServerNonce,
-		"dpop_host_nonce":           session.DPoPHostNonce,
-		"dpop_privatekey_multibase": session.DPoPPrivateKeyMultibase,
-		"dpopPrivateKeyMultibase":   session.DPoPPrivateKeyMultibase,
-	}
-}
-
-func credentialString(data map[string]any, keys ...string) string {
-	for _, key := range keys {
-		value, ok := data[key]
-		if !ok {
-			continue
-		}
-		switch typed := value.(type) {
-		case string:
-			if strings.TrimSpace(typed) != "" {
-				return strings.TrimSpace(typed)
-			}
-		case []byte:
-			if strings.TrimSpace(string(typed)) != "" {
-				return strings.TrimSpace(string(typed))
-			}
-		case json.Number:
-			if typed.String() != "" {
-				return typed.String()
-			}
-		}
-	}
-	return ""
 }
 
 func indigoSessionPDS(data oauthclient.SessionData) (pdsclient.PDS, error) {

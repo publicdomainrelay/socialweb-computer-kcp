@@ -1,6 +1,7 @@
 package strs
 
 import (
+	"encoding/json"
 	"strconv"
 	"strings"
 )
@@ -82,4 +83,28 @@ func SplitNUL(b []byte) []string {
 		return fields[:n-1]
 	}
 	return fields
+}
+
+func Lookup(data map[string]any, keys ...string) string {
+	for _, key := range keys {
+		value, ok := data[key]
+		if !ok {
+			continue
+		}
+		switch typed := value.(type) {
+		case string:
+			if strings.TrimSpace(typed) != "" {
+				return strings.TrimSpace(typed)
+			}
+		case []byte:
+			if strings.TrimSpace(string(typed)) != "" {
+				return strings.TrimSpace(string(typed))
+			}
+		case json.Number:
+			if typed.String() != "" {
+				return typed.String()
+			}
+		}
+	}
+	return ""
 }
