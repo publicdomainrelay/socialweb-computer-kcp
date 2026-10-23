@@ -829,7 +829,7 @@ items:
     track: policy
     parallel_with: [W2-REPO, W2-PDS, W2-VAULT, W2-EVENTS, W2-COMPUTE]
     depends_on: [W1-CACHE-LEASE, W1-XRPC]
-    status: doing
+    status: done
     decision: >
       contract/policy.Runner Provided by the PolicyEngine component.
       PolicyEngine, PolicyWorkflow, PolicyWorkflowRun and PolicyTrigger
