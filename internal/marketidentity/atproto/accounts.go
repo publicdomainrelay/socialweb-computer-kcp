@@ -140,13 +140,18 @@ func (a *Accounts) localRepo(ctx context.Context, workspace string, id *v1alpha1
 	}
 	status.Phase = v1alpha1.MarketIdentityPhaseReady
 	status.ObservedGeneration = generation
-	if strings.TrimSpace(status.Did) == "" {
+	if composed := strings.TrimSpace(id.Spec.Did); composed != "" {
+		status.Did = composed
+	} else if strings.TrimSpace(status.Did) == "" {
 		status.Did = did
 	}
 	if handle := strings.TrimSpace(id.Spec.Handle); handle != "" {
 		status.Handle = handle
 	}
-	setAssociated(&status, generation, id.Spec)
+	if pdsURL := strings.TrimSpace(id.Spec.PdsURL); pdsURL != "" {
+		status.PdsURL = pdsURL
+	}
+	setAssociated(&status, generation, id.Spec.Association)
 	if id.Spec.Association != v1alpha1.AssociationSkip && !associatedTrue(&status) {
 		status.Phase = v1alpha1.MarketIdentityPhaseAwaitingApproval
 		status.Message = "the PDS is ready; waiting for the operator's verified association claim"

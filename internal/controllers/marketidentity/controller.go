@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
@@ -105,12 +104,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 	if err != nil {
 		return ctlruntime.Result{}, err
 	}
-	if association := atproto.Associate(object, watch, &status); association.Changed {
-		if err := c.applyApproved(ctx, req, object, association.Approved); err != nil {
-			return ctlruntime.Result{}, err
-		}
-		object.Spec.ApprovedAssociations = association.Approved
-	}
+	atproto.Associate(object, watch, &status)
 	result, reconcileErr := c.accounts.Reconcile(ctx, req.Workspace, object, status)
 	next := object.DeepCopy()
 	next.Status = result.Status
@@ -155,15 +149,6 @@ func (c *Controller) associationWatch(ctx context.Context, req ctlruntime.Reques
 		return nil, fmt.Errorf("marketidentity: reading the association watch %s: %w", name, err)
 	}
 	return &watch, nil
-}
-
-func (c *Controller) applyApproved(ctx context.Context, req ctlruntime.Request, object *v1alpha1.MarketIdentity, approved []string) error {
-	intent := &v1alpha1.MarketIdentity{TypeMeta: object.TypeMeta, ObjectMeta: metav1.ObjectMeta{Name: object.Name, Namespace: object.Namespace},
-		Spec: v1alpha1.MarketIdentitySpec{Mode: object.Spec.Mode, ApprovedAssociations: approved}}
-	if err := req.Apply(ctx, intent); err != nil {
-		return fmt.Errorf("marketidentity: writing the approved associations of %s: %w", object.Name, err)
-	}
-	return nil
 }
 
 func (c *Controller) remember(req ctlruntime.Request, object *v1alpha1.MarketIdentity) {
