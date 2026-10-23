@@ -72,6 +72,13 @@ func Provide(opts Options) {
 		}
 		return local.NewSessions(srv, secrets(to.Workspace), scope), nil
 	})
+	bus.Provide(opts.Bus, GroupKind, pdscontract.CapabilityServiceAuth, func(_ context.Context, to commonv1.ObjectRef, scope []string) (pdscontract.ServiceAuth, error) {
+		srv, err := server(to)
+		if err != nil {
+			return nil, err
+		}
+		return local.NewServiceAuth(srv, scope), nil
+	})
 	bus.Provide(opts.Bus, GroupKind, pdscontract.CapabilitySync, func(_ context.Context, to commonv1.ObjectRef, _ []string) (pdscontract.Sync, error) {
 		srv, err := server(to)
 		if err != nil {

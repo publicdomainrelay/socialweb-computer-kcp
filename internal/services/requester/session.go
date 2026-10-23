@@ -606,6 +606,9 @@ func (s *Service) provisionSession(ctx context.Context, vmName, policyName strin
 	if err != nil {
 		return nil, err
 	}
+	if !found && s.spec.SuspendParticipation {
+		return nil, ErrParticipationSuspended
+	}
 	if !found {
 		rfp, err = market.CreateRFPAt(ctx, s.repo, s.repoDID, rfpRKey, options, s.signer)
 		if err != nil {

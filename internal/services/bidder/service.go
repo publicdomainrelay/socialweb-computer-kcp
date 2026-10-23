@@ -520,6 +520,11 @@ func (s *Service) resolveRecords(ctx context.Context) error {
 	if s.did == "" {
 		return errors.New("bidder: the record store needs the bidder DID")
 	}
+	if s.pdsTokens == nil && s.deps.Bus != nil && s.spec.PdsRef != nil && strings.EqualFold(strings.TrimSpace(s.spec.PdsRef.Kind), "Pds") {
+		s.pdsTokens = busServiceAuth{bus: s.deps.Bus, did: s.did,
+			self: commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: Kind, Name: s.deps.Self.Name, Workspace: s.workspace},
+			pds:  commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: "Pds", Name: s.spec.PdsRef.Name, Workspace: s.workspace}}
+	}
 	if s.deps.Bus == nil {
 		return errors.New("bidder: the record store needs the bus")
 	}
@@ -778,7 +783,11 @@ func (s *Service) startLoops(ctx context.Context) {
 	if s.bidKick == nil {
 		s.bidKick = make(chan struct{}, 1)
 	}
-	if s.loop != nil {
+	if s.loop != nil && s.spec.SuspendParticipation {
+		s.wg.Go(func() {
+			s.loop.withdraw(ctx)
+		})
+	} else if s.loop != nil {
 		s.wg.Go(func() {
 			s.loop.run(ctx)
 		})

@@ -14,7 +14,7 @@ import (
 
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/appctl"
+	appgateway "github.com/johnandersen777/socialweb-computer-kcp/internal/app/gateway"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clientcert"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gateway"
@@ -59,7 +59,7 @@ func gatewayServerFor(kcpClients component.KCPClients, nodeClaimAgent *kcpclient
 	}
 	agent := nodeClaimAgent
 	if agent == nil {
-		agent, _ = kcpclient.ParseServiceAccountRef(appctl.WebAppAccountRef(workspace))
+		agent, _ = kcpclient.ParseServiceAccountRef(appgateway.WebAppAccountRef(workspace))
 	}
 	opts := kcpclient.Options{Host: restConfig.Host, RestConfig: restConfig, PublicHost: publicHost,
 		HostProcessWorkspace: workspace, NodeClaimAgent: agent, RecordWorkspaceOwner: true}

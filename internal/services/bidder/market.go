@@ -156,6 +156,10 @@ func (s *Service) handleSubmitRFP(w http.ResponseWriter, r *http.Request) {
 		writeXRPCError(w, status, authCode(status), "invalid service-auth token")
 		return
 	}
+	if s.spec.SuspendParticipation {
+		writeXRPCError(w, http.StatusServiceUnavailable, "Suspended", "the bidder's participation is suspended")
+		return
+	}
 	if s.bids == nil || s.records == nil || s.attestation == nil || s.did == "" {
 		writeXRPCError(w, http.StatusServiceUnavailable, "Unavailable", "the bidder is not ready to bid")
 		return
@@ -211,6 +215,10 @@ func (s *Service) handleSubmitAccept(w http.ResponseWriter, r *http.Request) {
 	issuer, ok, status := s.authorizeRequest(r, market.SubmitAcceptNSID, body.AcceptURI)
 	if !ok {
 		writeXRPCError(w, status, authCode(status), "invalid service-auth token")
+		return
+	}
+	if s.spec.SuspendParticipation {
+		writeXRPCError(w, http.StatusServiceUnavailable, "Suspended", "the bidder's participation is suspended")
 		return
 	}
 	if s.records == nil || s.bids == nil || s.vms == nil || s.syncController == nil {

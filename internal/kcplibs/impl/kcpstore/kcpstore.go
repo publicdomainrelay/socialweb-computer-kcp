@@ -282,6 +282,19 @@ func (r *Resource[T]) PatchJSON(ctx context.Context, target ref.Ref, patch []byt
 	return nil
 }
 
+func (r *Resource[T]) Apply(ctx context.Context, target ref.Ref, body []byte, fieldManager string) error {
+	c, err := r.client(target.LogicalCluster)
+	if err != nil {
+		return err
+	}
+	response, err := r.withNamespace(c.Patch(types.ApplyPatchType), target.Namespace).Resource(r.gvr.Resource).
+		Name(target.Name).Param("fieldManager", fieldManager).Param("force", "true").Body(body).Do(ctx).Raw()
+	if err != nil {
+		return fmt.Errorf("kcpstore: apply %s %s in %s: %w%s", r.gvr.Resource, target.Name, target.LogicalCluster, err, ResponseDetail(response))
+	}
+	return nil
+}
+
 func (r *Resource[T]) PatchMerge(ctx context.Context, target ref.Ref, patch []byte) error {
 	c, err := r.client(target.LogicalCluster)
 	if err != nil {

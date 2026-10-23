@@ -36,6 +36,11 @@ func (in *ApplicationIdentity) DeepCopyInto(out *ApplicationIdentity) {
 		*out = new(commonv1alpha1.ObjectRef)
 		**out = **in
 	}
+	if in.ApprovedAssociations != nil {
+		in, out := &in.ApprovedAssociations, &out.ApprovedAssociations
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	return
 }
 
@@ -4719,6 +4724,11 @@ func (in *MarketBidderSpec) DeepCopyInto(out *MarketBidderSpec) {
 		for key, val := range *in {
 			(*out)[key] = *val.DeepCopy()
 		}
+	}
+	if in.BidderDids != nil {
+		in, out := &in.BidderDids, &out.BidderDids
+		*out = make([]string, len(*in))
+		copy(*out, *in)
 	}
 	return
 }

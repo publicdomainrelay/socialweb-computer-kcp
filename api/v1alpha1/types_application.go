@@ -97,6 +97,8 @@ const (
 	ApplicationPhaseDeleting ApplicationPhase = "Deleting"
 
 	ApplicationPhaseFailed ApplicationPhase = "Failed"
+
+	ApplicationPhaseSuspended ApplicationPhase = "Suspended"
 )
 
 type ApplicationOption struct {
@@ -115,6 +117,8 @@ type ApplicationIdentity struct {
 	PdsRef *commonv1.ObjectRef `json:"pdsRef,omitempty"`
 
 	Association AssociationMode `json:"association,omitempty"`
+
+	ApprovedAssociations []string `json:"approvedAssociations,omitempty" apigen:"listType=set"`
 }
 
 type MarketCommsMode string
@@ -530,6 +534,8 @@ type MarketBidderSpec struct {
 	Components ComponentOverrides `json:"components,omitempty"`
 
 	Operator string `json:"operator,omitempty"`
+
+	BidderDids []string `json:"bidderDids,omitempty" apigen:"listType=set"`
 }
 
 type MarketRequester struct {
@@ -722,6 +728,8 @@ type NetworkApp struct {
 	ClusterProvider *GatewayClusterProvider `json:"clusterProvider,omitempty"`
 
 	Components ComponentOverrides `json:"components,omitempty"`
+
+	Suspend bool `json:"suspend,omitempty"`
 
 	Stopped bool `json:"stopped,omitempty"`
 }

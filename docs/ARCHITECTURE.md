@@ -3479,11 +3479,50 @@ and the run read as a bidder that never provisioned. `apply.sh` refuses such a w
 
 ### Access links, state syncs and remote vaults
 
-**A `ComponentLink` is the rule that admits a component call** (`api/exposure/v1alpha1/types_componentlink.go`, `internal/exposure/links.go`, `internal/appctl/links.go`). It is cluster-scoped and lives in the target's workspace; `spec.from` and `spec.to` name a workspace, kind and name, and an optional `handlers` list narrows it to named handlers. The handler registry denies a caller with no identity, allows a System caller, allows a call inside one workspace, and allows a cross-workspace call only through a matching link. `LinkController` compiles a valid link into the registry and reports `TargetRegistered` and `Ready`; a link whose target is not registered, is suspended or is invalid stays out of the registry. appctl generates links from the concrete component refs in an application's desired specs only: wildcard refs are skipped, and `OpenBaoServer` and `PolicyEngine` are excluded because they are not handler-registry targets.
+**A `ComponentLink` is the rule that admits a component call** (`api/exposure/v1alpha1/types_componentlink.go`, `internal/exposure/links.go`, `internal/app/compose/links.go`). It is cluster-scoped and lives in the target's workspace; `spec.from` and `spec.to` name a workspace, kind and name, and an optional `handlers` list narrows it to named handlers. The handler registry denies a caller with no identity, allows a System caller, allows a call inside one workspace, and allows a cross-workspace call only through a matching link. `LinkController` compiles a valid link into the registry and reports `TargetRegistered` and `Ready`; a link whose target is not registered, is suspended or is invalid stays out of the registry. appctl generates links from the concrete component refs in an application's desired specs only: wildcard refs are skipped, and `OpenBaoServer` and `PolicyEngine` are excluded because they are not handler-registry targets.
 
 **A `StateSync` is the durable runtime outbox** (`api/v1alpha1/types_statesync.go`, `internal/statesync`). Its spec names the source, sink, direction, payload, `idempotencyKey`, conflict and deletion policies, optional ack paths, retry limits and suspend; its status carries the phase, observation, ack, cursor, attempts and conditions. Observe is the authority: the controller applies only when the observation differs, `Apply` is idempotent under the key, and the object becomes Acked only after an observation matches the desired hash. Deletion is `Retain`, `DeleteRemote` or `AckThenDelete`. The status holds refs, CIDs, hashes and metadata, never secrets or payload bytes. The bidder runs the controller with the `atproto.market.event` adapter. The ComputeVM controller creates a `vm.terminated` sync before teardown; its finalizer waits for Acked, then drops after the timeout so the sync outlives the VM. The adapter writes a deterministic payload and `market.event` rkeys. The bidder also writes the `onNetwork` and `hostKeys` report syncs.
 
 **A `RemoteOpenBao` is vault access separate from an `OpenBaoServer`'s lifecycle** (`api/v1alpha1/types_remoteopenbao.go`, `internal/vaultaccess`, `internal/remoteopenbao`). A local ref resolves through `openbaosession` and `KCPStoreSource`; a remote ref is refused unless `Resolver.RemoteEnabled` is set, uses token or AppRole auth, requires https unless the explicit insecure flag allows http, and reads its refs from files only. The controller probes `sys/health` and `sys/seal-status`, authenticates, checks the declared mounts and capabilities, and writes only status and the conditions `Reachable`, `Unsealed`, `Authenticated` and `Authorized`; it never writes the remote vault. `Component.spec.vaultRef` does not use the object yet, so local `OpenBaoServer` access remains the default.
+
+### Composition roots: internal/app (plan 0026 W3-ROOTS)
+
+`internal/app/{marketbidder,marketrequester,gateway,sshgateway,marketnetwork}` are the five app roots; each is one
+composition controller on `internal/controllers/runtime`, registered by `internal/app.Register`, which
+`componentcore` calls once from its controller manager (every core runs the manager for its own workspaces, and a
+root reconciles only the roots of its core's base workspace). `internal/app/compose` is what they share:
+
+- **Writers.** A root applies every child spec, every ComponentLink it needs and its own status by server-side
+  apply under the field manager `socialweb.computer/<root kind lowercase>`. A child edited by another manager is
+  re-applied: the root applies without force first, and on a field conflict records a `ChildEditReverted` Warning
+  Event in the child's workspace (namespace `default`) and applies again with force. Root status is applied with the
+  root's manager and never carries `status.market`, which the participant component reports under its own manager.
+  Sub-managers of the root: `.../adopt` (owner references on intent objects), `.../identity` (the MarketIdentity
+  OAuth endpoints), `.../records` (operator AtprotoRecord status), `.../restart` (the restart annotation).
+- **Ownership.** Every child in the root's own workspace carries a controller ownerReference to the root and the
+  labels `apps.socialweb.computer/root`, `root-kind` and `root-cluster`; the root watches every child kind by those
+  labels. `compose.Adopt` puts the root's ownerReference on unowned Bid, StateSync, MarketPresence and
+  ComputeContract objects (and on infra its sets created). A ComputeVM is owned by its Bid, a won Bid stays open
+  while its VM lives, and a root's deletion first releases its ComputeVMs, so no TTL on a short-lived object reaches
+  a running guest. Cross-workspace children cannot carry an ownerReference: the Gateway's requester MarketIdentity,
+  its association watch and records and its market streams live in `root:app`, and a MarketNetwork's child roots
+  live in `root:<app>`; they carry the root labels (including the root's logical cluster), are pruned by label and
+  are torn down by the root's deletion before it lets go of its finalizer.
+- **Links.** A root writes the ComponentLinks its children use, each in the workspace of its target: spec refs
+  between components (`xrpc.call`, `stream.dial`), Service and Exposure to their target, policy.run, vault.*,
+  repo.*, pds.*, pds.serviceauth, events.* and its own calls as the caller (the root reaches its Vault and its Pds
+  through the bus to bootstrap the app account). It waits for its own links to be Accepted before it calls.
+- **Suspend.** `spec.suspend` on a root stops participation, never a process: the Bidder and Requester components
+  get `spec.suspendParticipation` (no new RFPs, bids, accepts or offerings; the bidder withdraws its offering),
+  while releases of running VMs, termination StateSync acks and credential renewal continue. A suspended root
+  applies only the children it already has, runs no account, claim or record bootstrap, prunes nothing and reports
+  phase `Suspended`. A MarketNetwork suspend cascades into each child root's `spec.suspend`; `spec.apps[].suspend`
+  and `spec.components[].suspend` can only add suspension (the latter stops that component's process). Each suspend
+  field has one writer: the composer of that object.
+- **Operator associations (D21).** `spec.identity.approvedAssociations` on a root is composed into the requester or
+  bidder MarketIdentity spec and into the Requester component's `operatorDID`; the MarketIdentity controller only
+  reports `status.associations` (declared plus watch-verified). The prod gateway reads them from
+  `SOCIALWEB_GATEWAY_APPROVED_ASSOCIATIONS`, so a restart keeps them.
 
 ## 13. Invariants
 

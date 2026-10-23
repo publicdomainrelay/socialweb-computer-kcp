@@ -21,6 +21,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/controller"
 )
 
+const ContractFieldManager = "socialweb.computer/policyaction/contract"
+
 var (
 	ErrNoStore = errors.New("policyaction: a kcp store is required")
 
@@ -188,19 +190,12 @@ func ensureExisting(ctx context.Context, resource *kcpstore.Resource[v1alpha1.Co
 		}
 		return fmt.Errorf("policyaction: ComputeVM %s in %s already carries a different contract", existing.Name, target.LogicalCluster)
 	}
-	raw, err := json.Marshal(wanted.Spec.Contract)
+	body, err := json.Marshal(map[string]any{"apiVersion": v1alpha1.GroupVersion.String(), "kind": "ComputeVM",
+		"metadata": map[string]any{"name": existing.Name, "uid": string(existing.UID)}, "spec": map[string]any{"contract": wanted.Spec.Contract}})
 	if err != nil {
 		return fmt.Errorf("policyaction: encode the contract of ComputeVM %s: %w", existing.Name, err)
 	}
-	var value any
-	if err := json.Unmarshal(raw, &value); err != nil {
-		return fmt.Errorf("policyaction: encode the contract of ComputeVM %s: %w", existing.Name, err)
-	}
-	patch, err := json.Marshal([]map[string]any{{"op": "add", "path": "/spec/contract", "value": value}})
-	if err != nil {
-		return fmt.Errorf("policyaction: encode the contract patch of ComputeVM %s: %w", existing.Name, err)
-	}
-	if err := resource.PatchJSON(ctx, target, patch); err != nil {
+	if err := resource.Apply(ctx, target, body, ContractFieldManager); err != nil {
 		return fmt.Errorf("policyaction: set the contract of ComputeVM %s in %s: %w", existing.Name, target.LogicalCluster, err)
 	}
 	return nil

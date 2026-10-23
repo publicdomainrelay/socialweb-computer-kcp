@@ -16,8 +16,10 @@ import (
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/marketbidder"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/marketnetwork"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/appcli"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/appctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/buildstamp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clicfg"
@@ -80,22 +82,22 @@ func (r *bidderRun) log(msg string, args ...any) {
 }
 
 func (r *bidderRun) passthrough(args []string) error {
-	parsed, err := appctl.ParseAppArgs(appctl.BidderApp, args)
+	parsed, err := compose.ParseAppArgs(marketbidder.BidderApp, args)
 	if err != nil {
 		return err
 	}
 	var nv v1alpha1.MarketNetworkValue
 	nvSet := false
 	for _, p := range parsed {
-		if r.network != "" && strings.HasPrefix(p.To, appctl.MapToNetwork) {
+		if r.network != "" && strings.HasPrefix(p.To, compose.MapToNetwork) {
 			return fmt.Errorf("--%s maps to %s, which the market network sets for its child applications", p.Name, p.To)
 		}
 		switch {
-		case p.To == appctl.MapToOptions && p.Name == "atproto-oauth":
+		case p.To == compose.MapToOptions && p.Name == "atproto-oauth":
 			r.identityMode = v1alpha1.MarketIdentityModeOAuthBrowser
-		case p.To == appctl.MapToOptions && p.Name == "atproto-oauth-qr":
+		case p.To == compose.MapToOptions && p.Name == "atproto-oauth-qr":
 			r.identityMode = v1alpha1.MarketIdentityModeOAuthQr
-		case p.To == appctl.MapToOptions:
+		case p.To == compose.MapToOptions:
 			r.options = append(r.options, v1alpha1.ApplicationOption{Name: p.Name, Value: p.Value})
 		case p.To == "spec.policy":
 			r.policy = p.Value
@@ -103,7 +105,7 @@ func (r *bidderRun) passthrough(args []string) error {
 			r.identityMode = v1alpha1.MarketIdentityMode(p.Value)
 		case p.To == "spec.identity.pdsUrl":
 			r.pdsURL = p.Value
-		case p.To == appctl.MapToState && p.Name == "atproto-password":
+		case p.To == compose.MapToState && p.Name == "atproto-password":
 			r.password = p.Value
 		case p.To == "spec.identity.handle":
 			if r.handle != "" && r.handle != p.Value {
@@ -111,7 +113,7 @@ func (r *bidderRun) passthrough(args []string) error {
 			}
 			r.handle = p.Value
 		case strings.HasPrefix(p.To, "spec.firecracker"):
-			return appctl.ErrFirecrackerInPod
+			return marketbidder.ErrFirecrackerInPod
 		case strings.HasPrefix(p.To, "spec.ingress"):
 			var applied bool
 			var err error
@@ -130,7 +132,7 @@ func (r *bidderRun) passthrough(args []string) error {
 			if !applied {
 				return fmt.Errorf("--%s maps to %s, which run bidder does not take", p.Name, p.To)
 			}
-		case strings.HasPrefix(p.To, appctl.MapToNetwork):
+		case strings.HasPrefix(p.To, compose.MapToNetwork):
 			nvSet = true
 			switch p.To {
 			case "network.plcDirectoryUrl":
@@ -168,13 +170,13 @@ func (r *bidderRun) passthrough(args []string) error {
 }
 
 func (r *bidderRun) configOptions(words string) error {
-	parsed, err := appctl.ParseAppArgs(appctl.BidderApp, strings.Fields(words))
+	parsed, err := compose.ParseAppArgs(marketbidder.BidderApp, strings.Fields(words))
 	if err != nil {
 		return err
 	}
 	for _, p := range parsed {
-		if p.To != appctl.MapToOptions {
-			return fmt.Errorf("--%s maps to %s; bidder-options carries only the options entries of %s", p.Name, p.To, appctl.OptionMapPath)
+		if p.To != compose.MapToOptions {
+			return fmt.Errorf("--%s maps to %s; bidder-options carries only the options entries of %s", p.Name, p.To, compose.OptionMapPath)
 		}
 		if !slices.ContainsFunc(r.options, func(o v1alpha1.ApplicationOption) bool { return o.Name == p.Name }) {
 			r.options = append(r.options, v1alpha1.ApplicationOption{Name: p.Name, Value: p.Value})
@@ -194,8 +196,8 @@ func runBidder(ctx context.Context, a *app, vals clicfg.Values, rest []string) i
 	}
 	r := &bidderRun{a: a, vals: vals, backend: backend, profile: vals.String("profile"), handle: strings.ToLower(vals.String("handle")),
 		network: vals.String("network")}
-	if !slices.Contains(appctl.BidderProfiles, r.profile) {
-		return a.fail(exitRefused, "run bidder: --profile %q: want one of %s", r.profile, strings.Join(appctl.BidderProfiles, ", "))
+	if !slices.Contains(marketbidder.BidderProfiles, r.profile) {
+		return a.fail(exitRefused, "run bidder: --profile %q: want one of %s", r.profile, strings.Join(marketbidder.BidderProfiles, ", "))
 	}
 	if r.readyTimeout, err = time.ParseDuration(vals.String("ready-timeout")); err != nil {
 		return a.fail(exitRefused, "run bidder: ready-timeout: %v", err)
@@ -213,7 +215,7 @@ func runBidder(ctx context.Context, a *app, vals clicfg.Values, rest []string) i
 		return a.fail(exitRefused, "run bidder: bidder-options: %v", err)
 	}
 	if r.password != "" {
-		if err := os.Setenv(appctl.EnvPdsAccountPassword, r.password); err != nil {
+		if err := os.Setenv(compose.EnvPdsAccountPassword, r.password); err != nil {
 			return a.fail(exitRefused, "run bidder: --atproto-password: %v", err)
 		}
 	}
@@ -224,9 +226,9 @@ func runBidder(ctx context.Context, a *app, vals clicfg.Values, rest []string) i
 		r.options = append(r.options, v1alpha1.ApplicationOption{Name: "policy-args", Value: args})
 	}
 	switch {
-	case r.network != "" && r.profile != appctl.BidderProfileNetwork:
-		return a.fail(exitRefused, "run bidder: --network places the bidder in a market network, whose profile is %s, not %s", appctl.BidderProfileNetwork, r.profile)
-	case r.network == "" && r.profile == appctl.BidderProfileNetwork && r.vals.String("market-network-file") == "":
+	case r.network != "" && r.profile != marketbidder.BidderProfileNetwork:
+		return a.fail(exitRefused, "run bidder: --network places the bidder in a market network, whose profile is %s, not %s", marketbidder.BidderProfileNetwork, r.profile)
+	case r.network == "" && r.profile == marketbidder.BidderProfileNetwork && r.vals.String("market-network-file") == "":
 		return a.fail(exitRefused, "run bidder: --profile %s needs --network <market network instance> (dev up --profile market-network), or --market-network-file for an installed bidder account", r.profile)
 	case r.network != "" && r.vals.String("market-network-file") != "":
 		return a.fail(exitRefused, "run bidder: --network places the bidder in the market network, which hands it the network value; --market-network-file is for a bidder outside it")
@@ -266,8 +268,8 @@ func runBidder(ctx context.Context, a *app, vals clicfg.Values, rest []string) i
 }
 
 func (r *bidderRun) readMarketNetwork(path string) error {
-	if r.profile != appctl.BidderProfileNetwork {
-		return fmt.Errorf("it names a market network, whose profile is %s, not %s", appctl.BidderProfileNetwork, r.profile)
+	if r.profile != marketbidder.BidderProfileNetwork {
+		return fmt.Errorf("it names a market network, whose profile is %s, not %s", marketbidder.BidderProfileNetwork, r.profile)
 	}
 	if r.value != nil {
 		return errors.New("it and the --network-* options both name the network value")
@@ -369,7 +371,7 @@ func (r *bidderRun) inNetwork(ctx context.Context) int {
 	if err := request.CheckName(name); err != nil {
 		return r.a.fail(exitRefused, "run bidder: --name: %v", err)
 	}
-	app, err := appctl.NetworkBidderApp(name, nil, appctl.BidderVMDefaults{GuestImageSource: r.vals.String("guest-image-source"),
+	app, err := marketnetwork.NetworkBidderApp(name, nil, marketnetwork.BidderVMDefaults{GuestImageSource: r.vals.String("guest-image-source"),
 		VmHostBackend: r.vals.String("vm-host-backend"), Handle: r.handle})
 	if err != nil {
 		return r.a.fail(exitRefused, "run bidder: %v", err)
@@ -386,8 +388,8 @@ func (r *bidderRun) inNetwork(ctx context.Context) int {
 		if err := request.AddToNetwork(ctx, netRec.AdminKubeconfig, app); err != nil {
 			return r.a.fail(exitFailed, "run bidder: %v", err)
 		}
-		r.log("the market network places the bidder in its workspace of the network's kcp", "network", r.network, "name", name, "computeVMHandle", appctl.KcpHandle(app))
-	case cur.Message == appctl.StoppedMessage:
+		r.log("the market network places the bidder in its workspace of the network's kcp", "network", r.network, "name", name, "computeVMHandle", marketnetwork.KcpHandle(app))
+	case cur.Message == marketnetwork.StoppedMessage:
 		if err := request.SetStopped(ctx, netRec.AdminKubeconfig, name, false); err != nil {
 			return r.a.fail(exitFailed, "run bidder: %v", err)
 		}
@@ -400,7 +402,7 @@ func (r *bidderRun) inNetwork(ctx context.Context) int {
 	}, func(a v1alpha1.NetworkAppStatus) {
 		r.log("network child", "name", name, "phase", string(a.Phase), "message", a.Message)
 	})
-	sum := bidderSummary{Profile: r.profile, Handle: name + "." + appctl.BidderAccountDomain, Network: r.network, Name: name, Instance: st.Instance,
+	sum := bidderSummary{Profile: r.profile, Handle: name + "." + marketnetwork.BidderAccountDomain, Network: r.network, Name: name, Instance: st.Instance,
 		KcpURL: st.KcpURL, Did: st.Did, Phase: st.Phase, Message: st.Message, Listeners: st.Listeners, Seconds: time.Since(started).Seconds()}
 	r.a.printJSON(sum)
 	if err != nil {
@@ -500,7 +502,7 @@ func (r *bidderRun) signIn(ctx context.Context, k *bidder.Kcp, spec v1alpha1.Mar
 	}
 	wctx, cancel := context.WithTimeout(ctx, bidderIdentityWait)
 	defer cancel()
-	id, err := appcli.IdentityRenderer{Client: ids, Out: r.a.stderr, In: in}.WaitReady(wctx, appctl.BidderIdentity)
+	id, err := appcli.IdentityRenderer{Client: ids, Out: r.a.stderr, In: in}.WaitReady(wctx, marketbidder.BidderIdentity)
 	if err != nil {
 		return id, err
 	}

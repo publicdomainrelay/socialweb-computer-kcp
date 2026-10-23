@@ -7,7 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/appctl"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/marketnetwork"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clicfg"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
@@ -39,7 +40,7 @@ type componentRestartReport struct {
 }
 
 func canonicalComponentKind(name string) (string, bool) {
-	for _, kind := range appctl.ComponentTypes {
+	for _, kind := range compose.ComponentTypes {
 		if strings.EqualFold(kind.Kind, name) {
 			return kind.Kind, true
 		}
@@ -86,7 +87,7 @@ func (a *app) resolveComponentTarget(ctx context.Context, l devinstance.Layout, 
 		if rec.Profile != bootstrap.ProfileMarketNetwork || rec.AdminKubeconfig == "" {
 			return t, fmt.Errorf("instance %s is not a market network; name the component as [<workspace>:][<kind>/]<component>", l.ID)
 		}
-		n, err := appctl.ReadNetwork(ctx, rec.AdminKubeconfig)
+		n, err := marketnetwork.ReadNetwork(ctx, rec.AdminKubeconfig)
 		if err != nil {
 			return t, fmt.Errorf("reading the MarketNetwork of %s: %w", l.ID, err)
 		}
@@ -99,7 +100,7 @@ func (a *app) resolveComponentTarget(ctx context.Context, l devinstance.Layout, 
 			if ap.Instance == "" {
 				return t, fmt.Errorf("network child %s has no instance yet (phase %s)", t.App, ap.Phase)
 			}
-			cl, err := devinstance.NewLayout(ap.Instance, filepath.Join(l.StateDir, appctl.AppsDir), filepath.Join(l.RuntimeDir, appctl.AppsDir))
+			cl, err := devinstance.NewLayout(ap.Instance, filepath.Join(l.StateDir, compose.AppsDir), filepath.Join(l.RuntimeDir, compose.AppsDir))
 			if err != nil {
 				return t, err
 			}
@@ -117,7 +118,7 @@ func (a *app) resolveComponentTarget(ctx context.Context, l devinstance.Layout, 
 			return t, fmt.Errorf("market network %s has no child application %s (it has: %s)", l.ID, t.App, strings.Join(names, ", "))
 		}
 	case rec.Profile == bootstrap.ProfileMarketNetwork && rec.AdminKubeconfig != "":
-		n, err := appctl.ReadNetwork(ctx, rec.AdminKubeconfig)
+		n, err := marketnetwork.ReadNetwork(ctx, rec.AdminKubeconfig)
 		if err == nil {
 			seen := map[string]bool{}
 			add := func(workspace string) {
@@ -141,7 +142,7 @@ func (a *app) resolveComponentTarget(ctx context.Context, l devinstance.Layout, 
 	if len(t.Workspaces) == 0 {
 		t.Workspaces = componentcore.AppWorkspaces(t.Base)
 	}
-	if t.Kind == appctl.ComponentKindPolicyEngine {
+	if t.Kind == compose.ComponentKindPolicyEngine {
 		return t, fmt.Errorf("the PolicyEngine is the component controller; dev restart core restarts it")
 	}
 	if t.Kubeconfig == "" {

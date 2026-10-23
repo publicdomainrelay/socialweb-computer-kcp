@@ -19,7 +19,8 @@ import (
 	"k8s.io/client-go/rest"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/appctl"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/marketbidder"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostcontract"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/install"
@@ -28,7 +29,7 @@ import (
 )
 
 const (
-	RootName       = appctl.ChildRootName
+	RootName       = compose.ChildRootName
 	FieldManager   = "socialweb-computer"
 	Poll           = time.Second
 	PublicPlc      = "https://plc.directory"
@@ -81,7 +82,7 @@ type SpecInput struct {
 func Spec(in SpecInput) (v1alpha1.MarketBidderSpec, error) {
 	mode := in.Mode
 	mode = cmp.Or(mode, v1alpha1.MarketIdentityModeLocalRepo)
-	if in.Profile == appctl.BidderProfileProdQr && in.Handle == "" {
+	if in.Profile == marketbidder.BidderProfileProdQr && in.Handle == "" {
 		return v1alpha1.MarketBidderSpec{}, errors.New("bidder: profile prod-qr needs --handle: the QR sign-in is refused for any other account")
 	}
 	if in.Handle != "" {
@@ -98,12 +99,12 @@ func Spec(in SpecInput) (v1alpha1.MarketBidderSpec, error) {
 	}
 	n.PLCDirectoryURL = cmp.Or(n.PLCDirectoryURL, PublicPlc)
 	n.IngressProxyHost = cmp.Or(n.IngressProxyHost, PublicIngress)
-	if in.Profile == appctl.BidderProfileNetwork && (in.PdsUrl == "" || n.CABundle == "" || n.GuestTLSURL() == "") {
+	if in.Profile == marketbidder.BidderProfileNetwork && (in.PdsUrl == "" || n.CABundle == "" || n.GuestTLSURL() == "") {
 		return v1alpha1.MarketBidderSpec{}, errors.New("bidder: profile market-network needs the market network's value and its bidders' PDS (--network, or --market-network-file)")
 	}
 	ingress := in.Ingress
-	if ingress == nil && (in.Profile == appctl.BidderProfileProdQr || in.Profile == appctl.BidderProfileNetwork) {
-		ingress = appctl.DefaultIngressConfig()
+	if ingress == nil && (in.Profile == marketbidder.BidderProfileProdQr || in.Profile == marketbidder.BidderProfileNetwork) {
+		ingress = compose.DefaultIngressConfig()
 		if n.IngressProxyHost != "" {
 			ingress.Xrpc.IngressProxyHost = n.IngressProxyHost
 		}
@@ -159,7 +160,7 @@ func OpenKcp(kubeconfig string) (*Kcp, error) {
 		return nil, err
 	}
 	root := rest.CopyConfig(cfg)
-	root.Host = strings.TrimSuffix(cfg.Host, "/") + "/clusters/" + appctl.DefaultWorkspace
+	root.Host = strings.TrimSuffix(cfg.Host, "/") + "/clusters/" + compose.DefaultWorkspace
 	dc, err := dynamic.NewForConfig(root)
 	if err != nil {
 		return nil, err
@@ -182,13 +183,13 @@ func (k *Kcp) ApplyRoot(ctx context.Context, spec v1alpha1.MarketBidderSpec) err
 		return err
 	}
 	force := true
-	_, err = k.dyn.Resource(appctl.MarketBidderGVR).Patch(ctx, RootName, types.ApplyPatchType, body,
+	_, err = k.dyn.Resource(compose.MarketBidderGVR).Patch(ctx, RootName, types.ApplyPatchType, body,
 		metav1.PatchOptions{FieldManager: FieldManager, Force: &force})
 	return err
 }
 
 func (k *Kcp) Root(ctx context.Context) (*v1alpha1.MarketBidder, error) {
-	u, err := k.dyn.Resource(appctl.MarketBidderGVR).Get(ctx, RootName, metav1.GetOptions{})
+	u, err := k.dyn.Resource(compose.MarketBidderGVR).Get(ctx, RootName, metav1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -204,18 +205,18 @@ func (k *Kcp) Identities() (*kcpclient.MarketIdentities, error) {
 	if err != nil {
 		return nil, err
 	}
-	return c.MarketIdentities(appctl.DefaultWorkspace)
+	return c.MarketIdentities(compose.DefaultWorkspace)
 }
 
 func (k *Kcp) WaitIdentityObject(ctx context.Context, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for {
-		_, err := k.dyn.Resource(appctl.MarketIdentityGVR).Get(ctx, appctl.BidderIdentity, metav1.GetOptions{})
+		_, err := k.dyn.Resource(compose.MarketIdentityGVR).Get(ctx, marketbidder.BidderIdentity, metav1.GetOptions{})
 		if err == nil {
 			return nil
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("bidder: the core created no MarketIdentity %s within %s: %w", appctl.BidderIdentity, timeout, err)
+			return fmt.Errorf("bidder: the core created no MarketIdentity %s within %s: %w", marketbidder.BidderIdentity, timeout, err)
 		}
 		select {
 		case <-ctx.Done():

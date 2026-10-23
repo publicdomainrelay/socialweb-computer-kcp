@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/appctl"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap/table"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
@@ -82,9 +82,9 @@ func PostgresConfig(bcfg bootstrap.Config, rec devinstance.Record) postgresctl.C
 		DataRoot: filepath.Join(l.StateDir, "postgres"), SocketRoot: l.RuntimeDir, LogDir: l.Logs}
 }
 
-func AppConfig(bcfg bootstrap.Config, rec devinstance.Record, m hostsvc.Manager, log *slog.Logger) appctl.Config {
+func AppConfig(bcfg bootstrap.Config, rec devinstance.Record, m hostsvc.Manager, log *slog.Logger) compose.Config {
 	l := bcfg.Layout
-	return appctl.Config{Kubeconfig: rec.AdminKubeconfig, Workspace: rec.BaseWorkspace, Layout: l, Manager: m,
+	return compose.Config{Kubeconfig: rec.AdminKubeconfig, Workspace: rec.BaseWorkspace, Layout: l, Manager: m,
 		Record: func() (devinstance.Record, error) {
 			var r devinstance.Record
 			return r, fsx.ReadJSON(l.Record, &r)

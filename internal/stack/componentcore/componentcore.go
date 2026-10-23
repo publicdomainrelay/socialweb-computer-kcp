@@ -16,6 +16,7 @@ import (
 	"k8s.io/client-go/rest"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/app"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component/kcpclients"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
@@ -115,6 +116,8 @@ type Config struct {
 	TTLScope func(workspace string) bool
 
 	OnTTL func(report func() *v1alpha1.TTLStatus)
+
+	Apps *app.Config
 }
 
 type Core struct {

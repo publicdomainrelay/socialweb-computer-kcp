@@ -12,7 +12,8 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/appctl"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
+	appgateway "github.com/johnandersen777/socialweb-computer-kcp/internal/app/gateway"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/providermain"
 )
 
@@ -110,16 +111,23 @@ func Spec(s v1alpha1.GatewaySpec, profile string, environ []string) v1alpha1.Gat
 	}
 	n.IngressProxyHost = cmp.Or(n.IngressProxyHost, DefaultIngress)
 	s.Network = &n
-	if s.Ingress == nil && profile == appctl.ProfileGatewayProd {
-		s.Ingress = appctl.DefaultIngressConfig()
+	if s.Ingress == nil && profile == appgateway.ProfileGatewayProd {
+		s.Ingress = compose.DefaultIngressConfig()
 		if n.IngressProxyHost != "" {
 			s.Ingress.Xrpc.IngressProxyHost = n.IngressProxyHost
 		}
 	}
 	if s.WebAppFront == "" {
 		s.WebAppFront = PortZeroWebAppFront
-		if profile == appctl.ProfileGatewayProd {
+		if profile == appgateway.ProfileGatewayProd {
 			s.WebAppFront = DefaultWebAppFront
+		}
+	}
+	if len(s.Identity.ApprovedAssociations) == 0 {
+		for did := range strings.SplitSeq(e.get("SOCIALWEB_GATEWAY_APPROVED_ASSOCIATIONS"), ",") {
+			if did = strings.TrimSpace(did); did != "" && !slices.Contains(s.Identity.ApprovedAssociations, did) {
+				s.Identity.ApprovedAssociations = append(s.Identity.ApprovedAssociations, did)
+			}
 		}
 	}
 	s.Options = slices.Clone(s.Options)

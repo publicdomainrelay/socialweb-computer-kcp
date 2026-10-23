@@ -15,7 +15,7 @@ import (
 	"k8s.io/client-go/dynamic"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/appctl"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 )
 
@@ -27,16 +27,16 @@ type componentKind struct {
 }
 
 var runtimeKinds = []componentKind{
-	{appctl.ComponentKindBidder, appctl.BidderGVR},
-	{appctl.ComponentKindGuestControlPlane, appctl.GuestControlPlaneGVR},
-	{appctl.ComponentKindPds, appctl.PdsGVR},
-	{appctl.ComponentKindRequester, appctl.RequesterGVR},
-	{appctl.ComponentKindGatewayAPI, appctl.GatewayAPIGVR},
-	{appctl.ComponentKindSshServer, appctl.SshServerGVR},
-	{appctl.ComponentKindPlc, appctl.PlcGVR},
-	{appctl.ComponentKindRelay, appctl.RelayGVR},
-	{appctl.ComponentKindIngressProxy, appctl.IngressProxyGVR},
-	{appctl.ComponentKindDispatcherTLS, appctl.DispatcherTLSGVR},
+	{compose.ComponentKindBidder, compose.BidderGVR},
+	{compose.ComponentKindGuestControlPlane, compose.GuestControlPlaneGVR},
+	{compose.ComponentKindPds, compose.PdsGVR},
+	{compose.ComponentKindRequester, compose.RequesterGVR},
+	{compose.ComponentKindGatewayAPI, compose.GatewayAPIGVR},
+	{compose.ComponentKindSshServer, compose.SshServerGVR},
+	{compose.ComponentKindPlc, compose.PlcGVR},
+	{compose.ComponentKindRelay, compose.RelayGVR},
+	{compose.ComponentKindIngressProxy, compose.IngressProxyGVR},
+	{compose.ComponentKindDispatcherTLS, compose.DispatcherTLSGVR},
 }
 
 type ComponentRef struct {

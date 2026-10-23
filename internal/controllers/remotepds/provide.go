@@ -44,6 +44,13 @@ func (c *Controller) Provide() {
 		}
 		return host.Sessions(scope), nil
 	})
+	bus.Provide(c.bus, GroupKind, pds.CapabilityServiceAuth, func(_ context.Context, to commonv1.ObjectRef, scope []string) (pds.ServiceAuth, error) {
+		host, err := c.host(to)
+		if err != nil {
+			return nil, err
+		}
+		return host.ServiceAuth(scope), nil
+	})
 	bus.Provide(c.bus, GroupKind, pds.CapabilitySync, func(_ context.Context, to commonv1.ObjectRef, _ []string) (pds.Sync, error) {
 		host, err := c.host(to)
 		if err != nil {

@@ -15,7 +15,8 @@ import (
 	"k8s.io/client-go/rest"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/appctl"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/sshgateway"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
 )
 
@@ -36,10 +37,10 @@ type SpecInput struct {
 }
 
 func Spec(in SpecInput) (v1alpha1.SshGatewaySpec, error) {
-	if !slices.Contains(appctl.SshGatewayProfiles, in.Profile) {
-		return v1alpha1.SshGatewaySpec{}, fmt.Errorf("gatewayssh: --profile %q: want one of %s", in.Profile, strings.Join(appctl.SshGatewayProfiles, ", "))
+	if !slices.Contains(sshgateway.SshGatewayProfiles, in.Profile) {
+		return v1alpha1.SshGatewaySpec{}, fmt.Errorf("gatewayssh: --profile %q: want one of %s", in.Profile, strings.Join(sshgateway.SshGatewayProfiles, ", "))
 	}
-	if in.Profile == appctl.SshGatewayProfileNetwork && in.Network == nil {
+	if in.Profile == sshgateway.SshGatewayProfileNetwork && in.Network == nil {
 		return v1alpha1.SshGatewaySpec{}, fmt.Errorf("gatewayssh: the %s profile takes its network value from a market network (--network)", in.Profile)
 	}
 	return v1alpha1.SshGatewaySpec{Profile: in.Profile, Network: in.Network, BidderDids: in.BidderDids, Comms: in.Comms, Options: in.Options,
@@ -60,7 +61,7 @@ func OpenKcp(kubeconfig string) (*Kcp, error) {
 		return nil, err
 	}
 	root := rest.CopyConfig(cfg)
-	root.Host = strings.TrimSuffix(cfg.Host, "/") + "/clusters/" + appctl.DefaultWorkspace
+	root.Host = strings.TrimSuffix(cfg.Host, "/") + "/clusters/" + compose.DefaultWorkspace
 	dc, err := dynamic.NewForConfig(root)
 	if err != nil {
 		return nil, err
@@ -83,13 +84,13 @@ func (k *Kcp) ApplyRoot(ctx context.Context, spec v1alpha1.SshGatewaySpec) error
 		return err
 	}
 	force := true
-	_, err = k.dyn.Resource(appctl.SshGatewayGVR).Patch(ctx, RootName, types.ApplyPatchType, body,
+	_, err = k.dyn.Resource(compose.SshGatewayGVR).Patch(ctx, RootName, types.ApplyPatchType, body,
 		metav1.PatchOptions{FieldManager: FieldManager, Force: &force})
 	return err
 }
 
 func (k *Kcp) Root(ctx context.Context) (*v1alpha1.SshGateway, error) {
-	u, err := k.dyn.Resource(appctl.SshGatewayGVR).Get(ctx, RootName, metav1.GetOptions{})
+	u, err := k.dyn.Resource(compose.SshGatewayGVR).Get(ctx, RootName, metav1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}

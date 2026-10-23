@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-11.bidders.socialweb.computer
+  name: v1alpha1-12.bidders.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -438,6 +438,8 @@ spec:
                       required:
                         - kind
                         - name
+              suspendParticipation:
+                type: boolean
           status:
             type: object
             properties:

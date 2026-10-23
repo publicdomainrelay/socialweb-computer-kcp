@@ -17,7 +17,9 @@ import (
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/appctl"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/marketnetwork"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/sshgateway"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/assets"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clicfg"
@@ -413,7 +415,7 @@ func bringUp(ctx context.Context, a *app, vals clicfg.Values, host bool) (upRepo
 	}
 	var dumbpipeExe devinstance.Executable
 	if standIns == nil && (assets.Release() || vals.String("dumbpipe-path") != "") {
-		if dumbpipeExe, err = a.devExe(ctx, vals, appctl.DumbpipeExecutable, "dumbpipe-path"); err != nil {
+		if dumbpipeExe, err = a.devExe(ctx, vals, sshgateway.DumbpipeExecutable, "dumbpipe-path"); err != nil {
 			return upReport{}, a.fail(exitRefused, "dev up: %v", err)
 		}
 	}
@@ -443,8 +445,8 @@ func bringUp(ctx context.Context, a *app, vals clicfg.Values, host bool) (upRepo
 				return upReport{}, a.fail(exitRefused, "dev up: %v", err)
 			}
 		}
-		vm := appctl.BidderVMDefaults{GuestImageSource: imageSource, VmHostBackend: vals.String("vm-host-backend")}
-		if networkSpec, err = appctl.NetworkSpec(l.ID, vals.Int("bidders"), vals.Bool("with-gateway"), networkOverlay, vm); err != nil {
+		vm := marketnetwork.BidderVMDefaults{GuestImageSource: imageSource, VmHostBackend: vals.String("vm-host-backend")}
+		if networkSpec, err = marketnetwork.NetworkSpec(l.ID, vals.Int("bidders"), vals.Bool("with-gateway"), networkOverlay, vm); err != nil {
 			return upReport{}, a.fail(exitRefused, "dev up: %v", err)
 		}
 		for i := range networkSpec.Apps {
@@ -525,7 +527,7 @@ func bringUp(ctx context.Context, a *app, vals clicfg.Values, host bool) (upRepo
 		rec.Executables["bao"] = baoExe
 	}
 	if dumbpipeExe.Path != "" {
-		rec.Executables[appctl.DumbpipeExecutable] = dumbpipeExe
+		rec.Executables[sshgateway.DumbpipeExecutable] = dumbpipeExe
 	}
 	maps.Copy(rec.Executables, gatewayExes)
 	maps.Copy(rec.Executables, pluginExes)
@@ -583,12 +585,12 @@ func bringUp(ctx context.Context, a *app, vals clicfg.Values, host bool) (upRepo
 	}
 	var network *v1alpha1.MarketNetwork
 	if composes {
-		if err := appctl.ApplyNetwork(ctx, rec.AdminKubeconfig, networkSpec, readyTimeout); err != nil {
+		if err := marketnetwork.ApplyNetwork(ctx, rec.AdminKubeconfig, networkSpec, readyTimeout); err != nil {
 			return upReport{}, a.fail(exitFailed, "dev up: %v", err)
 		}
 		a.log.Info("the MarketNetwork root object is applied; its core composes the children", "bidders", vals.Int("bidders"),
 			"gateway", vals.Bool("with-gateway"), "apps", len(networkSpec.Apps))
-		o, err := appctl.WaitNetwork(ctx, rec.AdminKubeconfig, networkTimeout, func(st v1alpha1.MarketNetworkStatus) {
+		o, err := marketnetwork.WaitNetwork(ctx, rec.AdminKubeconfig, networkTimeout, func(st v1alpha1.MarketNetworkStatus) {
 			var apps []string
 			for _, ap := range st.Apps {
 				apps = append(apps, ap.Name+"="+string(ap.Phase))
@@ -717,7 +719,7 @@ func runDevStatus(ctx context.Context, a *app, vals clicfg.Values, rest []string
 		r.Devsup.Error = err.Error()
 	}
 	if rec.Profile == bootstrap.ProfileMarketNetwork && rec.AdminKubeconfig != "" {
-		if o, err := appctl.ReadNetwork(ctx, rec.AdminKubeconfig); err == nil {
+		if o, err := marketnetwork.ReadNetwork(ctx, rec.AdminKubeconfig); err == nil {
 			r.Network = &o
 		} else {
 			r.NetworkError = err.Error()
@@ -776,7 +778,7 @@ func downInstance(ctx context.Context, a *app, l devinstance.Layout, keepState b
 		vmOwners = append(vmOwners, networkChildren(l)...)
 	}
 	if rec.Profile == bootstrap.ProfileMarketNetwork && rec.AdminKubeconfig != "" {
-		if err := appctl.DeleteNetwork(ctx, rec.AdminKubeconfig, networkDownTimeout); err != nil {
+		if err := marketnetwork.DeleteNetwork(ctx, rec.AdminKubeconfig, networkDownTimeout); err != nil {
 			a.log.Warn("deleting the MarketNetwork before devsup stops; devsup stops what is left", "err", err.Error())
 		} else {
 			a.log.Info("the MarketNetwork is deleted: its children, their kcps and its services are gone")
@@ -808,7 +810,7 @@ func downInstance(ctx context.Context, a *app, l devinstance.Layout, keepState b
 	if pids := devsup.KillInstance(l.ID); len(pids) > 0 {
 		r.LeftoverKilled = pids
 	}
-	if pids := appctl.KillUnder(l.StateDir, 5*time.Second); len(pids) > 0 {
+	if pids := marketnetwork.KillUnder(l.StateDir, 5*time.Second); len(pids) > 0 {
 		r.LeftoverKilled = append(r.LeftoverKilled, pids...)
 	}
 	time.Sleep(100 * time.Millisecond)
@@ -832,7 +834,7 @@ func downInstance(ctx context.Context, a *app, l devinstance.Layout, keepState b
 }
 
 func networkChildren(l devinstance.Layout) []devinstance.Record {
-	state, rt := filepath.Join(l.StateDir, appctl.AppsDir), filepath.Join(l.RuntimeDir, appctl.AppsDir)
+	state, rt := filepath.Join(l.StateDir, compose.AppsDir), filepath.Join(l.RuntimeDir, compose.AppsDir)
 	entries, err := os.ReadDir(devinstance.DevRoot(state))
 	if err != nil {
 		return nil

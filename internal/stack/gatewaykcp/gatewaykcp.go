@@ -25,7 +25,8 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/appctl"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
+	appgateway "github.com/johnandersen777/socialweb-computer-kcp/internal/app/gateway"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap/table"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clientcertfront"
@@ -74,7 +75,7 @@ const (
 	componentsReport   = "members"
 )
 
-var Sets = []string{"provider", "permission-inventory", "hostprocesses", appctl.ManifestSet}
+var Sets = []string{"provider", "permission-inventory", "hostprocesses", compose.ManifestSet}
 
 type Config struct {
 	StateDir            string
@@ -171,7 +172,7 @@ func (r *listeners) components(_ string, ls []v1alpha1.ApplicationListener) {
 	defer r.mu.Unlock()
 	r.webApp = ""
 	for _, l := range ls {
-		if l.Component == appctl.WebAppComponent && l.Address != "" {
+		if l.Component == appgateway.WebAppComponent && l.Address != "" {
 			r.webApp = l.Address
 		}
 	}
@@ -260,7 +261,7 @@ func RunChild(ctx context.Context, c Config, l devinstance.Layout, m hostsvc.Man
 	if err := os.MkdirAll(l.KcpDir(), 0o700); err != nil {
 		return err
 	}
-	c.RootName = cmp.Or(c.RootName, appctl.ChildRootName)
+	c.RootName = cmp.Or(c.RootName, compose.ChildRootName)
 	c.log().Info("a gateway child application of a market network starts: its workspace of the network's kcp, sets, root vault, members",
 		"state", c.StateDir, "instance", l.ID, "root", c.RootName)
 	return run(ctx, c, l, nil, m)
@@ -297,7 +298,7 @@ func run(ctx context.Context, c Config, l devinstance.Layout, app *table.App, m 
 	}
 	return devcore.Run(ctx, devcore.Config{Layout: l, ReadyTimeout: c.ReadyTimeout, Log: c.Log, Application: app, FrontAddress: c.FrontAddress,
 		TLSCertFile: c.TLSCert, TLSKeyFile: c.TLSKey,
-		WebApp: &appctl.WebApp{FrontKubeconfig: g.memberKubeconfig(),
+		WebApp: &appgateway.WebApp{FrontKubeconfig: g.memberKubeconfig(),
 			ClusterCADir: filepath.Join(c.StateDir, "clusterprovider", clusterstack.PublicCADirName),
 			DownloadsDir: c.Executables[ExeWebDownloads].Path},
 		OnComponents: reg.components, Before: g.before, Members: g.members, Listeners: reg.report,
@@ -317,7 +318,7 @@ func (g *gateway) adopt(rec devinstance.Record) {
 	if rec.SharedKcp != "" {
 		g.kcp = devinstance.Layout{StateDir: rec.SharedKcp}
 	}
-	g.ws = cmp.Or(g.ws, appctl.DefaultWorkspace)
+	g.ws = cmp.Or(g.ws, compose.DefaultWorkspace)
 }
 
 func clusterConfig(base *rest.Config, ws string) *rest.Config {
@@ -371,7 +372,7 @@ func (g *gateway) rootName() string {
 	if g.c.RootName != "" {
 		return g.c.RootName
 	}
-	return appctl.GatewayRootName
+	return appgateway.GatewayRootName
 }
 
 func applyRoot(ctx context.Context, restCfg *rest.Config, ws, name string, spec v1alpha1.GatewaySpec) error {
@@ -394,7 +395,7 @@ func applyRoot(ctx context.Context, restCfg *rest.Config, ws, name string, spec 
 		return err
 	}
 	force := true
-	_, err = dc.Resource(appctl.GatewayGVR).Patch(ctx, name, types.ApplyPatchType, body,
+	_, err = dc.Resource(compose.GatewayGVR).Patch(ctx, name, types.ApplyPatchType, body,
 		metav1.PatchOptions{FieldManager: FieldManager, Force: &force})
 	return err
 }
@@ -577,7 +578,7 @@ func (g *gateway) members(ctx context.Context, rec devinstance.Record) error {
 	start(member{"clusterprovider", func(ctx context.Context) error {
 		return exitErr(providermain.Main(ctx, g.invocation(env, nil, "serve", "provider")))
 	}})
-	log.Info("the gateway's members run in this process; the app controller renders the "+appctl.WebAppComponent+" web app as a component", "xrpc", gw)
+	log.Info("the gateway's members run in this process; the app controller renders the "+appgateway.WebAppComponent+" web app as a component", "xrpc", gw)
 	err = <-ended
 	cancel()
 	if err == nil {

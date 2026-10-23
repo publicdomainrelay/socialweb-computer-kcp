@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/appctl"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/marketnetwork"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/sshgateway"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clicfg"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
@@ -55,7 +57,7 @@ func (r *gatewaySshRun) log(msg string, args ...any) {
 }
 
 func (r *gatewaySshRun) passthrough(args []string) error {
-	parsed, err := appctl.ParseAppArgs(appctl.SshGatewayApp, args)
+	parsed, err := compose.ParseAppArgs(sshgateway.SshGatewayApp, args)
 	if err != nil {
 		return err
 	}
@@ -90,7 +92,7 @@ func (r *gatewaySshRun) passthrough(args []string) error {
 			}
 			continue
 		}
-		if p.To == appctl.MapToOptions {
+		if p.To == compose.MapToOptions {
 			r.options = append(r.options, v1alpha1.ApplicationOption{Name: p.Name, Value: p.Value})
 			continue
 		}
@@ -123,12 +125,12 @@ func runGatewaySsh(ctx context.Context, a *app, vals clicfg.Values, rest []strin
 	if r.networkTimeout, err = time.ParseDuration(vals.String("network-timeout")); err != nil {
 		return a.fail(exitRefused, "run gateway ssh: network-timeout: %v", err)
 	}
-	if r.network != "" && (r.profile == "" || r.profile == appctl.SshGatewayProfileDefault) {
-		r.profile = appctl.SshGatewayProfileNetwork
+	if r.network != "" && (r.profile == "" || r.profile == sshgateway.SshGatewayProfileDefault) {
+		r.profile = sshgateway.SshGatewayProfileNetwork
 	}
-	r.profile = cmp.Or(r.profile, appctl.SshGatewayProfileDefault)
-	if !slices.Contains(appctl.SshGatewayProfiles, r.profile) {
-		return a.fail(exitRefused, "run gateway ssh: --profile %q: want one of %s", r.profile, strings.Join(appctl.SshGatewayProfiles, ", "))
+	r.profile = cmp.Or(r.profile, sshgateway.SshGatewayProfileDefault)
+	if !slices.Contains(sshgateway.SshGatewayProfiles, r.profile) {
+		return a.fail(exitRefused, "run gateway ssh: --profile %q: want one of %s", r.profile, strings.Join(sshgateway.SshGatewayProfiles, ", "))
 	}
 	if err := r.passthrough(pass); err != nil {
 		return a.fail(exitRefused, "run gateway ssh: %v", err)
@@ -142,7 +144,7 @@ func runGatewaySsh(ctx context.Context, a *app, vals clicfg.Values, rest []strin
 		return a.fail(exitRefused, "run gateway ssh: --network: the market network places its children under its own devsup; pass --host-backend=proc")
 	case r.network != "":
 		return r.inNetwork(ctx)
-	case r.profile == appctl.SshGatewayProfileNetwork:
+	case r.profile == sshgateway.SshGatewayProfileNetwork:
 		return a.fail(exitRefused, "run gateway ssh: --profile %s needs --network <market network instance> (dev up --profile market-network)", r.profile)
 	}
 	return r.standalone(ctx)
@@ -173,7 +175,7 @@ func (r *gatewaySshRun) inNetwork(ctx context.Context) int {
 	if netRec.Profile != bootstrap.ProfileMarketNetwork || netRec.AdminKubeconfig == "" {
 		return r.a.fail(exitRefused, "run gateway ssh: instance %s is not a market network (profile %s)", r.network, netRec.Profile)
 	}
-	if netRec.Executables[appctl.DumbpipeExecutable].Path == "" {
+	if netRec.Executables[sshgateway.DumbpipeExecutable].Path == "" {
 		return r.a.fail(exitRefused, "run gateway ssh: market network %s was brought up without dumbpipe; its children reach guests over iroh only (dev up --dumbpipe-path in a dev build)", r.network)
 	}
 	name, err := r.name()
@@ -191,7 +193,7 @@ func (r *gatewaySshRun) inNetwork(ctx context.Context) int {
 			return r.a.fail(exitFailed, "run gateway ssh: %v", err)
 		}
 		r.log("the market network places the ssh gateway in its workspace of the network's kcp", "network", r.network, "name", name)
-	case cur.Message == appctl.StoppedMessage:
+	case cur.Message == marketnetwork.StoppedMessage:
 		if err := request.SetStopped(ctx, netRec.AdminKubeconfig, name, false); err != nil {
 			return r.a.fail(exitFailed, "run gateway ssh: %v", err)
 		}
@@ -241,7 +243,7 @@ func (r *gatewaySshRun) standalone(ctx context.Context) int {
 	if code != exitOK {
 		return code
 	}
-	if up.Executables[appctl.DumbpipeExecutable].Path == "" {
+	if up.Executables[sshgateway.DumbpipeExecutable].Path == "" {
 		return r.a.fail(exitRefused, "run gateway ssh: the instance has no dumbpipe; the ssh gateway reaches guests over iroh only (--dumbpipe-path in a dev build)")
 	}
 	k, err := gatewayssh.OpenKcp(up.AdminKubeconfig)

@@ -50,6 +50,8 @@ type MarketIdentitySpec struct {
 
 	PdsURL string `json:"pdsUrl,omitempty" apigen:"userEndpoint"`
 
+	Did string `json:"did,omitempty"`
+
 	Association AssociationMode `json:"association,omitempty"`
 
 	AssociateWith string `json:"associateWith,omitempty"`

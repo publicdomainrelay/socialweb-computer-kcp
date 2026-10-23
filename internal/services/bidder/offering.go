@@ -139,6 +139,26 @@ func (l *marketLoop) run(ctx context.Context) {
 	}
 }
 
+func (l *marketLoop) withdraw(ctx context.Context) {
+	if l == nil || l.records == nil || l.did == "" {
+		return
+	}
+	page, err := l.records.ListRecords(ctx, l.did, market.OfferingNSID, 20, "")
+	if err != nil {
+		l.logf().Warn("listing the market offerings to withdraw failed", "err", err)
+		l.setError(err)
+		return
+	}
+	for _, rec := range page.Records {
+		if err := l.records.DeleteRecord(ctx, l.did, market.OfferingNSID, lastSegment(rec.URI)); err != nil {
+			l.logf().Warn("withdrawing the market offering failed", "offering", rec.URI, "err", err)
+			l.setError(err)
+			continue
+		}
+		l.logf().Info("the bidder offering is withdrawn while its participation is suspended", "offering", rec.URI)
+	}
+}
+
 func (l *marketLoop) ensureOffering(ctx context.Context) error {
 	appliesTo := []string{market.ComputeVMNSID}
 	now := l.timestamp().UTC().Format(time.RFC3339)
