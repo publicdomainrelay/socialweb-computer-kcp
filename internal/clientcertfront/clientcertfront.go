@@ -114,11 +114,6 @@ type trust struct {
 	bearer    *http.Transport
 }
 
-type gateEntry struct {
-	gate    kcpclient.ClusterGate
-	fetched time.Time
-}
-
 type openRequest struct{ cancel context.CancelFunc }
 
 type revokedEntry struct {
@@ -135,7 +130,7 @@ type server struct {
 	revoked    map[string]*revokedEntry
 	refreshing map[string]bool
 	admitted   *ttlcache.Cache[string, struct{}]
-	gates      map[string]*gateEntry
+	gates      *ttlcache.Cache[string, kcpclient.ClusterGate]
 	open       map[string]map[*openRequest]struct{}
 	wake       chan struct{}
 }
@@ -171,7 +166,7 @@ func Run(ctx context.Context, c Config) error {
 		}),
 		revoked: map[string]*revokedEntry{}, refreshing: map[string]bool{},
 		admitted: ttlcache.New[string, struct{}](ttlcache.Options{TTL: denyTTL}),
-		gates:    map[string]*gateEntry{}, open: map[string]map[*openRequest]struct{}{},
+		gates:    ttlcache.New[string, kcpclient.ClusterGate](ttlcache.Options{TTL: gateTTL}), open: map[string]map[*openRequest]struct{}{},
 		wake: make(chan struct{}, 1)}
 	ln, err := net.Listen("tcp", c.Address)
 	if err != nil {
@@ -431,11 +426,8 @@ func (s *server) admitGate(ctx context.Context, account, home, cluster string) (
 }
 
 func (s *server) gateFor(ctx context.Context, home, cluster string) (kcpclient.ClusterGate, error) {
-	s.mu.Lock()
-	e := s.gates[home]
-	s.mu.Unlock()
-	if e != nil && time.Since(e.fetched) < gateTTL {
-		return e.gate, nil
+	if g, ok := s.gates.Get(home); ok {
+		return g, nil
 	}
 	return s.fetchGate(ctx, home, cluster)
 }
@@ -447,9 +439,7 @@ func (s *server) fetchGate(ctx context.Context, home, cluster string) (kcpclient
 	if err != nil {
 		return g, err
 	}
-	s.mu.Lock()
-	s.gates[home] = &gateEntry{gate: g, fetched: time.Now()}
-	s.mu.Unlock()
+	s.gates.Set(home, g)
 	return g, nil
 }
 
