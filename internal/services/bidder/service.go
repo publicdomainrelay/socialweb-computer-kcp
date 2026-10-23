@@ -28,6 +28,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/policy"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
@@ -722,14 +723,18 @@ func (s *Service) guestExposureURL(ctx context.Context) string {
 	return raw
 }
 
+func (s *Service) resolvePolicyRunner(ctx context.Context, engine commonv1.ObjectRef, workflow string) (policy.Runner, error) {
+	caller := commonv1.ObjectRef{Group: corev1alpha1.GroupName, Kind: Kind, Name: s.cfg.ComponentName, Workspace: s.cfg.Workspace}
+	return bus.Resolve[policy.Runner](ctx, s.cfg.Deps.Handlers, caller, engine, bus.Capability{Name: policy.CapabilityRun, Scope: []string{workflow}})
+}
+
 func (s *Service) policyRuns() *runs.Client {
 	engine := runs.EngineRef(s.cfg.PolicyEngineRef, s.cfg.Workspace)
 	if s.cfg.Deps.Handlers == nil || engine.Name == "" {
 		return nil
 	}
 	return &runs.Client{
-		Bus:     s.cfg.Deps.Handlers,
-		Caller:  commonv1.ObjectRef{Group: corev1alpha1.GroupName, Kind: Kind, Name: s.cfg.ComponentName, Workspace: s.cfg.Workspace},
+		Resolve: s.resolvePolicyRunner,
 		Owner:   policy.Owner{APIVersion: corev1alpha1.GroupVersion.String(), Kind: Kind, Name: s.cfg.ComponentName, UID: s.cfg.ComponentUID},
 		Engine:  engine,
 		Role:    "bidder",

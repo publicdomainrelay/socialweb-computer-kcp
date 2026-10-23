@@ -7,7 +7,6 @@ import (
 	"fmt"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/policy"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/outputs"
 	policyengine "github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/status"
 )
 
@@ -42,7 +41,7 @@ func (t Tasks) Status(_ context.Context, taskID string) (policy.Task, error) {
 	if !status.Phase.Terminal() {
 		return policy.Task{State: policy.StateRunning}, nil
 	}
-	task := policy.Task{ExitStatus: string(status.ExitStatus), Outputs: outputs.Stringify(status.Outputs)}
+	task := policy.Task{ExitStatus: string(status.ExitStatus), Outputs: stringify(status.Outputs)}
 	if status.Phase == policyengine.PhaseSucceeded {
 		task.State = policy.StateSucceeded
 		return task, nil
@@ -54,4 +53,24 @@ func (t Tasks) Status(_ context.Context, taskID string) (policy.Task, error) {
 		task.Message = "the policy engine did not report a success exit status"
 	}
 	return task, nil
+}
+
+func stringify(values map[string]any) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(values))
+	for key, value := range values {
+		if text, ok := value.(string); ok {
+			out[key] = text
+			continue
+		}
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			out[key] = fmt.Sprint(value)
+			continue
+		}
+		out[key] = string(encoded)
+	}
+	return out
 }

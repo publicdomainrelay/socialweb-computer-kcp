@@ -14,7 +14,6 @@ import (
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	policyv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/policy/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/policy"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
@@ -61,10 +60,10 @@ type Request struct {
 	Timeout time.Duration
 }
 
-type Client struct {
-	Bus *bus.Bus
+type ResolveFunc func(ctx context.Context, engine commonv1.ObjectRef, workflow string) (policy.Runner, error)
 
-	Caller commonv1.ObjectRef
+type Client struct {
+	Resolve ResolveFunc
 
 	Owner policy.Owner
 
@@ -94,7 +93,7 @@ func EngineRef(ref *commonv1.ObjectRef, workspace string) commonv1.ObjectRef {
 }
 
 func (c *Client) Run(ctx context.Context, req Request) Decision {
-	if c == nil || c.Bus == nil {
+	if c == nil || c.Resolve == nil {
 		return Decision{Reason: "the policy run client is not configured"}
 	}
 	if c.Engine.Name == "" {
@@ -108,7 +107,7 @@ func (c *Client) Run(ctx context.Context, req Request) Decision {
 	timeout = opt.Positive(timeout, DefaultTimeout)
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	runner, err := bus.Resolve[policy.Runner](runCtx, c.Bus, c.Caller, c.Engine, bus.Capability{Name: policy.CapabilityRun, Scope: []string{workflow}})
+	runner, err := c.Resolve(runCtx, c.Engine, workflow)
 	if err != nil {
 		return Decision{Reason: "the policy run could not be created: " + err.Error()}
 	}

@@ -34,6 +34,7 @@ import (
 	atprotooauth "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/policy"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
@@ -705,13 +706,17 @@ func pdsTokenSource(token string) pdsclient.TokenSource {
 	})
 }
 
+func (s *Service) resolvePolicyRunner(ctx context.Context, engine commonv1.ObjectRef, workflow string) (policy.Runner, error) {
+	caller := commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: Kind, Name: s.cfg.ComponentName, Workspace: s.cfg.Workspace}
+	return bus.Resolve[policy.Runner](ctx, s.cfg.Deps.Handlers, caller, engine, bus.Capability{Name: policy.CapabilityRun, Scope: []string{workflow}})
+}
+
 func (s *Service) policyRuns() *runs.Client {
 	if s.cfg.Deps.Handlers == nil {
 		return nil
 	}
 	return &runs.Client{
-		Bus:     s.cfg.Deps.Handlers,
-		Caller:  commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: Kind, Name: s.cfg.ComponentName, Workspace: s.cfg.Workspace},
+		Resolve: s.resolvePolicyRunner,
 		Owner:   policy.Owner{APIVersion: v1alpha1.GroupVersion.String(), Kind: Kind, Name: s.cfg.ComponentName, UID: s.cfg.ComponentUID},
 		Engine:  runs.EngineRef(s.cfg.PolicyEngineRef, s.cfg.Workspace),
 		Role:    "requester",
