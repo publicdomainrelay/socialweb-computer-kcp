@@ -64,6 +64,22 @@ func Run(ctx context.Context, name string, fn func(context.Context) error) (err 
 	return nil
 }
 
+// Join calls wait and returns nil when it returns, or the context error when
+// ctx ends first. A wait that outlives ctx still returns on its own.
+func Join(ctx context.Context, wait func()) error {
+	done := make(chan struct{})
+	go func() {
+		wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return context.Cause(ctx)
+	}
+}
+
 type Backoff struct {
 	Min     time.Duration
 	Max     time.Duration
