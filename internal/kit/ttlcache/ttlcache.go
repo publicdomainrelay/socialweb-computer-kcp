@@ -74,6 +74,17 @@ func (c *Cache[K, V]) SetTTL(key K, value V, ttl time.Duration) {
 	c.setLocked(key, value, ttl)
 }
 
+// Add stores value only when key holds no live entry and reports whether it stored.
+func (c *Cache[K, V]) Add(key K, value V, ttl time.Duration) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, ok := c.getLocked(key); ok {
+		return false
+	}
+	c.setLocked(key, value, ttl)
+	return true
+}
+
 func (c *Cache[K, V]) Delete(key K) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
