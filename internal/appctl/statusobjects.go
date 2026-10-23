@@ -30,8 +30,8 @@ func (ctl *Controller) ensureAppPdsStatus(ctx context.Context, handle string, se
 		authPath = rest
 	}
 	authRef := &commonv1.SecretRef{Path: strings.Trim(authPath, "/")}
-	ctl.ensureStatusObject(ctx, ws, statusstate.AtprotoRepoGVR, "AtprotoRepo",
-		statusObjectName("repo", sess.Did), v1alpha1.AtprotoRepoSpec{DID: sess.Did, PdsRef: &pdsRef, AuthRef: authRef})
+	ctl.ensureRepoObjects(ctx, ws, statusObjectName("repo", sess.Did), "LocalRepo", v1alpha1.LocalRepoGVR,
+		v1alpha1.LocalRepoSpec{DID: sess.Did, PdsRef: pdsRef, AuthRef: authRef})
 	accountName := statusObjectName("account", handle)
 	ctl.ensureStatusObject(ctx, ws, statusstate.PdsAccountGVR, "PdsAccount",
 		accountName, v1alpha1.PdsAccountSpec{DID: sess.Did, Handle: handle, PdsRef: pdsRef})
@@ -44,6 +44,12 @@ func (ctl *Controller) ensureAppPdsStatus(ctx context.Context, handle string, se
 			statusObjectName("session", handle), v1alpha1.AtprotoSessionSpec{DID: sess.Did, AccountRef: commonv1.LocalObjectRef{Name: accountName},
 				PdsRef: pdsRef, SessionID: sessionPath})
 	}
+}
+
+func (ctl *Controller) ensureRepoObjects(ctx context.Context, ws, name, backendKind string, backendGVR schema.GroupVersionResource, backendSpec any) {
+	ctl.ensureStatusObject(ctx, ws, backendGVR, backendKind, name, backendSpec)
+	ctl.ensureStatusObject(ctx, ws, statusstate.AtprotoRepoGVR, "AtprotoRepo", name,
+		v1alpha1.AtprotoRepoSpec{BackendRef: commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: backendKind, Name: name}})
 }
 
 func (ctl *Controller) ensureRelayStatus(ctx context.Context, relayRef string) {

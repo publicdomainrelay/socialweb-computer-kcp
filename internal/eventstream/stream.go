@@ -102,7 +102,7 @@ func (s *eventStream) run(ctx context.Context) {
 		case source.relayBase != "":
 			stream, err = openRelayStream(runCtx, source.relayBase, s.nextCursor(), s.ctl.opts.Resolver.Handlers)
 		case source.jetstreamBase != "":
-			stream, err = openJetstreamStream(runCtx, source.jetstreamBase, s.nextCursor(), s.es.Spec.Source.Collections, s.es.Spec.Source.DIDs, s.ctl.opts.Resolver.Handlers)
+			stream, err = openJetstreamStream(runCtx, source.jetstreamBase, s.nextCursor(), s.es.Spec.Filter.Collections, s.es.Spec.Filter.DIDs, s.ctl.opts.Resolver.Handlers)
 		default:
 			stream, err = source.pds.SubscribeRepos(runCtx, s.nextCursor())
 		}
@@ -168,12 +168,18 @@ type resolvedSource struct {
 }
 
 func (s *eventStream) resolveSource(ctx context.Context) (resolvedSource, error) {
-	source := s.es.Spec.Source
-	switch eventsv1alpha1.EventStreamSourceKind(strings.ToLower(strings.TrimSpace(string(source.Kind)))) {
-	case eventsv1alpha1.EventStreamSourcePDS:
-		ref := source.PDSRef
-		if ref == nil {
-			return resolvedSource{}, errors.New("eventstream: source.kind pds needs pdsRef")
+	source, err := s.ctl.loadSource(ctx, *s.es)
+	if err != nil {
+		return resolvedSource{}, err
+	}
+	switch source.Kind {
+	case eventsv1alpha1.PdsEventSourceKind:
+		if source.RepoRef == nil {
+			return resolvedSource{}, errors.New("eventstream: a PdsEventSource needs a repoRef")
+		}
+		ref, err := s.ctl.sourcePDSRef(ctx, *source.RepoRef)
+		if err != nil {
+			return resolvedSource{}, err
 		}
 		if strings.TrimSpace(ref.Name) == "" {
 			return resolvedSource{}, errors.New("eventstream: pdsRef needs a name")
@@ -214,7 +220,7 @@ func (s *eventStream) resolveSource(ctx context.Context) (resolvedSource, error)
 			return resolvedSource{}, err
 		}
 		return resolvedSource{pds: pds, key: pdsSourceKey(ref.Name)}, nil
-	case eventsv1alpha1.EventStreamSourceRelay:
+	case eventsv1alpha1.RelayEventSourceKind:
 		base := ""
 		if ref := source.RelayRef; ref != nil {
 			var err error
@@ -222,30 +228,27 @@ func (s *eventStream) resolveSource(ctx context.Context) (resolvedSource, error)
 			if err != nil {
 				return resolvedSource{}, err
 			}
-		} else if len(source.RelayURLs) > 0 {
-			base = normalizeStreamURL(source.RelayURLs[0])
+		} else if source.URL != "" {
+			base = normalizeStreamURL(source.URL)
 		}
 		if base == "" {
-			return resolvedSource{}, errors.New("eventstream: source.kind relay needs relayRef or relayUrls")
+			return resolvedSource{}, errors.New("eventstream: a RelayEventSource needs relayRef or url")
 		}
 		if _, err := parseStreamURL(base); err != nil {
 			return resolvedSource{}, err
 		}
 		return resolvedSource{relayBase: normalizeStreamURL(base), key: relaySourceKey(normalizeStreamURL(base))}, nil
-	case eventsv1alpha1.EventStreamSourceJetstream:
-		base := ""
-		if len(source.JetstreamURLs) > 0 {
-			base = normalizeStreamURL(source.JetstreamURLs[0])
-		}
+	case eventsv1alpha1.JetstreamEventSourceKind:
+		base := normalizeStreamURL(source.URL)
 		if base == "" {
-			return resolvedSource{}, errors.New("eventstream: source.kind jetstream needs jetstreamUrls")
+			return resolvedSource{}, errors.New("eventstream: a JetstreamEventSource needs url")
 		}
 		if _, err := parseStreamURL(base); err != nil {
 			return resolvedSource{}, err
 		}
 		return resolvedSource{jetstreamBase: normalizeStreamURL(base), key: jetstreamSourceKey(normalizeStreamURL(base))}, nil
 	default:
-		return resolvedSource{}, fmt.Errorf("eventstream: unknown source kind %q", source.Kind)
+		return resolvedSource{}, fmt.Errorf("eventstream: unknown EventSource backend kind %q", source.Kind)
 	}
 }
 
@@ -273,8 +276,8 @@ func (s *eventStream) handle(ctx context.Context, source resolvedSource, event p
 		when = time.Now().UTC()
 	}
 	stamp := metav1.NewTime(when)
-	ops := filterOps(event.Ops, s.es.Spec.Source.Collections)
-	if !allowedDID(event.Repo.String(), s.es.Spec.Source.DIDs) {
+	ops := filterOps(event.Ops, s.es.Spec.Filter.Collections)
+	if !allowedDID(event.Repo.String(), s.es.Spec.Filter.DIDs) {
 		ops = nil
 	}
 	s.mu.Lock()

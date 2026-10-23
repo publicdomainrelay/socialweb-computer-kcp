@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -14,10 +13,12 @@ import (
 	"github.com/bluesky-social/indigo/atproto/syntax"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/dynamic"
 
 	eventsapi "github.com/johnandersen777/socialweb-computer-kcp/api/events/v1alpha1"
 	v1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -101,13 +102,17 @@ type watchSourcePlan struct {
 
 	Key string
 
-	Source eventsapi.EventStreamSource
+	Source StreamSource
+
+	Filter eventsapi.EventStreamFilter
 }
 
 type watchRepo struct {
 	Did string
 
 	PDSRef *commonv1.ObjectRef
+
+	RepoRef *commonv1.ObjectRef
 }
 
 func EventStreamNameForWatchSource(watchName, sourceKey string) string {
@@ -151,7 +156,8 @@ func (c *Controller) planWatchSources(ctx context.Context, dyn dynamic.Interface
 	}
 	var plans []watchSourcePlan
 	seen := map[string]bool{}
-	add := func(key string, source eventsapi.EventStreamSource) {
+	filter := eventsapi.EventStreamFilter{Collections: collections, DIDs: dids}
+	add := func(key string, source StreamSource) {
 		if seen[key] {
 			return
 		}
@@ -160,6 +166,7 @@ func (c *Controller) planWatchSources(ctx context.Context, dyn dynamic.Interface
 			Name:   EventStreamNameForWatchSource(watchName, key),
 			Key:    key,
 			Source: source,
+			Filter: filter,
 		})
 	}
 	for _, raw := range spec.Source.RelayUrls {
@@ -167,24 +174,14 @@ func (c *Controller) planWatchSources(ctx context.Context, dyn dynamic.Interface
 		if raw == "" {
 			continue
 		}
-		add(relaySourceKey(raw), eventsapi.EventStreamSource{
-			Kind:        eventsapi.EventStreamSourceRelay,
-			RelayURLs:   []string{raw},
-			Collections: collections,
-			DIDs:        dids,
-		})
+		add(relaySourceKey(raw), StreamSource{Kind: eventsapi.RelayEventSourceKind, URL: raw})
 	}
 	for _, raw := range spec.Source.JetstreamUrls {
 		raw = normalizeStreamURL(raw)
 		if raw == "" {
 			continue
 		}
-		add(jetstreamSourceKey(raw), eventsapi.EventStreamSource{
-			Kind:          eventsapi.EventStreamSourceJetstream,
-			JetstreamURLs: []string{raw},
-			Collections:   collections,
-			DIDs:          dids,
-		})
+		add(jetstreamSourceKey(raw), StreamSource{Kind: eventsapi.JetstreamEventSourceKind, URL: raw})
 	}
 	if len(plans) > 0 {
 		return plans, nil
@@ -192,12 +189,11 @@ func (c *Controller) planWatchSources(ctx context.Context, dyn dynamic.Interface
 	if repo.PDSRef == nil {
 		return nil, errors.New("eventstream: the record watch has no pds source and no relay or jetstream source")
 	}
-	add(pdsSourceKey(repo.PDSRef.Name), eventsapi.EventStreamSource{
-		Kind:        eventsapi.EventStreamSourcePDS,
-		PDSRef:      repo.PDSRef,
-		Collections: collections,
-		DIDs:        dids,
-	})
+	repoRef := repo.RepoRef
+	if repoRef == nil {
+		repoRef = repo.PDSRef
+	}
+	add(pdsSourceKey(repo.PDSRef.Name), StreamSource{Kind: eventsapi.PdsEventSourceKind, RepoRef: repoRef})
 	return plans, nil
 }
 
@@ -247,40 +243,36 @@ func (c *Controller) resolveWatchRepoRef(ctx context.Context, dyn dynamic.Interf
 		if err != nil {
 			return watchRepo{}, fmt.Errorf("eventstream: reading AtprotoRepo %s: %w", name, err)
 		}
-		return watchRepoFromAtprotoRepo(object)
+		out, err := watchRepoFromAtprotoRepo(ctx, client, workspace, object)
+		if err != nil {
+			return watchRepo{}, err
+		}
+		out.RepoRef = &commonv1.ObjectRef{Workspace: workspace, Group: v1alpha1.GroupName, Kind: "AtprotoRepo", Name: name}
+		return out, nil
 	default:
 		return watchRepo{}, fmt.Errorf("eventstream: unknown repoRef kind %q", ref.Kind)
 	}
 }
 
-func watchRepoFromAtprotoRepo(object *unstructured.Unstructured) (watchRepo, error) {
-	raw, err := json.Marshal(object.Object)
+func watchRepoFromAtprotoRepo(ctx context.Context, dyn dynamic.Interface, workspace string, object *unstructured.Unstructured) (watchRepo, error) {
+	var repo v1alpha1.AtprotoRepo
+	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(object.Object, &repo); err != nil {
+		return watchRepo{}, err
+	}
+	backend, err := pdsclient.ReadRepoBackend(ctx, dyn, workspace, repo)
 	if err != nil {
 		return watchRepo{}, err
 	}
-	var repo struct {
-		Spec struct {
-			DID    string `json:"did"`
-			PdsRef *struct {
-				Workspace string `json:"workspace,omitempty"`
-				Kind      string `json:"kind,omitempty"`
-				Name      string `json:"name"`
-			} `json:"pdsRef,omitempty"`
-		} `json:"spec"`
-	}
-	if err := json.Unmarshal(raw, &repo); err != nil {
-		return watchRepo{}, err
-	}
-	out := watchRepo{Did: strings.TrimSpace(repo.Spec.DID)}
-	if repo.Spec.PdsRef != nil && strings.TrimSpace(repo.Spec.PdsRef.Name) != "" {
-		kind := strings.TrimSpace(repo.Spec.PdsRef.Kind)
+	out := watchRepo{Did: backend.DID}
+	if name := strings.TrimSpace(backend.PdsRef.Name); name != "" {
+		kind := strings.TrimSpace(backend.PdsRef.Kind)
 		if kind == "" {
 			kind = "Pds"
 		}
 		out.PDSRef = &commonv1.ObjectRef{
-			Workspace: strings.TrimSpace(repo.Spec.PdsRef.Workspace),
+			Workspace: strings.TrimSpace(backend.PdsRef.Workspace),
 			Kind:      kind,
-			Name:      strings.TrimSpace(repo.Spec.PdsRef.Name),
+			Name:      name,
 		}
 	}
 	return out, nil

@@ -26,16 +26,20 @@ func (c *Controller) reconcileRepo(ctx context.Context, dyn dynamic.Interface, u
 	generation := u.GetGeneration()
 	status := obj.Status
 	status.ObservedGeneration = generation
-	didText := strings.TrimSpace(obj.Spec.DID)
-	ref := ""
-	if obj.Spec.PdsRef != nil {
-		ref = strings.TrimSpace(obj.Spec.PdsRef.Name)
-		if kind := strings.TrimSpace(obj.Spec.PdsRef.Kind); kind != "" {
-			ref = kind + "/" + ref
-		}
+	backend, err := pdsclient.ReadRepoBackend(ctx, dyn, c.workspace, obj)
+	if err != nil {
+		setReady(&status.Conditions, generation, false, ReasonWaiting, "the AtprotoRepo backend: "+err.Error())
+		c.write(ctx, dyn, AtprotoRepoGVR, u, &status)
+		return
+	}
+	didText := backend.DID
+	status.DID = didText
+	ref := strings.TrimSpace(backend.PdsRef.Name)
+	if kind := strings.TrimSpace(backend.PdsRef.Kind); kind != "" && ref != "" {
+		ref = kind + "/" + ref
 	}
 	if didText == "" || ref == "" {
-		setReady(&status.Conditions, generation, false, ReasonWaiting, "the AtprotoRepo needs a did and a pdsRef")
+		setReady(&status.Conditions, generation, false, ReasonWaiting, "the AtprotoRepo backend needs a did and a pdsRef")
 		c.write(ctx, dyn, AtprotoRepoGVR, u, &status)
 		return
 	}
@@ -64,8 +68,6 @@ func (c *Controller) reconcileRepo(ctx context.Context, dyn dynamic.Interface, u
 	}
 	status.Head = observation.Head
 	status.Rev = observation.Rev
-	status.Seq = observation.Seq
-	status.KeyFingerprint = observation.KeyFingerprint
 	setReady(&status.Conditions, generation, true, ReasonReady, "the repo head is "+observation.Head)
 	setInSync(&status.Conditions, generation, true, ReasonReady, "the repo head is "+observation.Head)
 	c.write(ctx, dyn, AtprotoRepoGVR, u, &status)

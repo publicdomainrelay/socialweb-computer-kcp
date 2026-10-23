@@ -309,9 +309,24 @@ func (c *Controller) writeWatchRecords(ctx context.Context, dyn dynamic.Interfac
 }
 
 func (c *Controller) ensureWatchEventStream(ctx context.Context, dyn dynamic.Interface, name string, plan watchSourcePlan, status recordWatchStatus) error {
+	if err := c.ensureWatchEventStreamObject(ctx, dyn, name, plan, status); err != nil {
+		return err
+	}
+	stream, err := dyn.Resource(EventStreamGVR).Get(ctx, plan.Name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return EnsureEventSource(ctx, DynamicResources(dyn), FieldManager, stream, plan.Source)
+}
+
+func (c *Controller) ensureWatchEventStreamObject(ctx context.Context, dyn dynamic.Interface, name string, plan watchSourcePlan, status recordWatchStatus) error {
 	eventStreamName := plan.Name
 	desiredSpec := eventsapi.EventStreamSpec{
-		Source: plan.Source,
+		SourceRef: SourceRef(plan.Name),
+		Filter:    plan.Filter,
 		Sink: eventsapi.EventStreamSink{
 			Kind:      eventsapi.EventStreamSinkRecordWatch,
 			Name:      name,

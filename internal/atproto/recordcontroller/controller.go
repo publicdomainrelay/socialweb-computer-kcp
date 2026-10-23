@@ -333,20 +333,16 @@ func (c *Controller) repoBindingForRef(ctx context.Context, dyn dynamic.Interfac
 		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(object.Object, &repo); err != nil {
 			return pdsclient.RepoBinding{}, fmt.Errorf("decoding AtprotoRepo %s: %w", name, err)
 		}
-		binding := pdsclient.RepoBinding{Workspace: refWorkspace, DID: strings.TrimSpace(repo.Spec.DID)}
+		backend, err := pdsclient.ReadRepoBackend(ctx, client, refWorkspace, repo)
+		if err != nil {
+			return pdsclient.RepoBinding{}, err
+		}
+		binding := backend.Binding()
 		if strings.TrimSpace(binding.DID) == "" {
 			return pdsclient.RepoBinding{}, fmt.Errorf("AtprotoRepo %s names no did", name)
 		}
-		if repo.Spec.PdsRef == nil {
+		if binding.Name == "" {
 			return pdsclient.RepoBinding{}, fmt.Errorf("AtprotoRepo %s names no pdsRef", name)
-		}
-		binding.Kind = strings.TrimSpace(repo.Spec.PdsRef.Kind)
-		binding.Name = strings.TrimSpace(repo.Spec.PdsRef.Name)
-		if ws := strings.TrimSpace(repo.Spec.PdsRef.Workspace); ws != "" {
-			binding.Workspace = ws
-		}
-		if repo.Spec.AuthRef != nil {
-			binding.AuthRef = repo.Spec.AuthRef.DeepCopy()
 		}
 		return binding, nil
 	case "remotepds", "remote", "remote-pds":
@@ -386,30 +382,17 @@ func localRepoBinding(ctx context.Context, dyn dynamic.Interface, workspace, kin
 	if strings.TrimSpace(kind) == "" || strings.EqualFold(kind, "pds") {
 		kind = "Pds"
 	}
-	list, err := dyn.Resource(AtprotoRepoGVR).List(ctx, metav1.ListOptions{})
+	backends, err := pdsclient.ListRepoBackends(ctx, dyn, workspace)
 	if err != nil {
-		if apierrors.IsNotFound(err) || apierrors.IsForbidden(err) {
-			return nil, nil
-		}
 		return nil, err
 	}
-	for i := range list.Items {
-		var repo v1alpha1.AtprotoRepo
-		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(list.Items[i].Object, &repo); err != nil {
+	for _, backend := range backends {
+		if backend.PdsRef.Name != name || !strings.EqualFold(strings.TrimSpace(backend.PdsRef.Kind), kind) || backend.DID == "" {
 			continue
 		}
-		if repo.Spec.PdsRef == nil || repo.Spec.PdsRef.Name != name {
-			continue
-		}
-		if !strings.EqualFold(strings.TrimSpace(repo.Spec.PdsRef.Kind), kind) {
-			continue
-		}
-		if strings.TrimSpace(repo.Spec.DID) == "" {
-			continue
-		}
-		binding := &pdsclient.RepoBinding{Workspace: workspace, Kind: kind, Name: name, DID: strings.TrimSpace(repo.Spec.DID)}
-		if repo.Spec.AuthRef != nil {
-			binding.AuthRef = repo.Spec.AuthRef.DeepCopy()
+		binding := &pdsclient.RepoBinding{Workspace: workspace, Kind: kind, Name: name, DID: backend.DID}
+		if backend.AuthRef != nil {
+			binding.AuthRef = backend.AuthRef.DeepCopy()
 		}
 		return binding, nil
 	}
