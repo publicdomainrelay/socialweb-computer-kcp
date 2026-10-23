@@ -59,10 +59,20 @@ type subscriber struct {
 	kinds map[string]bool
 
 	observer market.Observer
+
+	synced func()
+
+	pending map[key]bool
+
+	fired bool
+
+	ctx context.Context
 }
 
 type Controller struct {
 	clients func(workspace string) (client.Client, error)
+
+	scope func(workspace string) bool
 
 	log *slog.Logger
 
@@ -94,7 +104,7 @@ func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	c := &Controller{clients: opts.Clients, log: log.With("component", "marketintents"), clusters: map[key]string{},
+	c := &Controller{clients: opts.Clients, scope: opts.Scope, log: log.With("component", "marketintents"), clusters: map[key]string{},
 		subs: map[*subscriber]struct{}{}, events: map[string]chan ctlruntime.Request{}, owners: map[string]ownerUID{}}
 	err := errors.Join(
 		forward(m, c, opts.Scope, market.KindBid, ExportComputeVMs, 4, func(ch *market.Change, o *v1alpha1.Bid) { ch.Bid = o }),
@@ -170,24 +180,26 @@ func (f *forwarder[T]) gone(ctx context.Context, req ctlruntime.Request) {
 }
 
 func (c *Controller) deliver(ctx context.Context, change market.Change) (time.Duration, error) {
+	k := key{workspace: change.Workspace, kind: change.Kind, name: change.Name}
 	c.mu.Lock()
-	var targets []market.Observer
+	var targets []*subscriber
 	for s := range c.subs {
-		if s.workspaces[change.Workspace] && (len(s.kinds) == 0 || s.kinds[change.Kind]) {
-			targets = append(targets, s.observer)
+		if s.matches(change.Workspace, change.Kind) {
+			targets = append(targets, s)
 		}
 	}
 	c.mu.Unlock()
 	var wait time.Duration
 	var errs []error
-	for _, observer := range targets {
-		d, err := observer.Observe(ctx, change)
+	for _, s := range targets {
+		d, err := s.observer.Observe(ctx, change)
 		if err != nil {
 			errs = append(errs, err)
 		}
 		if d > 0 && (wait == 0 || d < wait) {
 			wait = d
 		}
+		c.observed(s, k)
 	}
 	return wait, errors.Join(errs...)
 }
@@ -196,7 +208,7 @@ func (c *Controller) subscribe(ctx context.Context, home string, sub market.Subs
 	if sub.Observer == nil {
 		return nil, errors.New("marketintents: a subscription needs an observer")
 	}
-	s := &subscriber{workspaces: map[string]bool{home: true}, kinds: map[string]bool{}, observer: sub.Observer}
+	s := &subscriber{workspaces: map[string]bool{home: true}, kinds: map[string]bool{}, observer: sub.Observer, synced: sub.Synced, ctx: ctx}
 	for _, ws := range sub.Workspaces {
 		if ws = strings.TrimSpace(ws); ws != "" {
 			s.workspaces[ws] = true
@@ -207,30 +219,32 @@ func (c *Controller) subscribe(ctx context.Context, home string, sub market.Subs
 			s.kinds[kind] = true
 		}
 	}
+	var listed map[key]string
+	if s.synced != nil {
+		var err error
+		if listed, err = c.listed(ctx, s); err != nil {
+			return nil, err
+		}
+	}
 	c.mu.Lock()
 	c.subs[s] = struct{}{}
-	replay := map[string][]ctlruntime.Request{}
-	for k, cluster := range c.clusters {
-		if s.workspaces[k.workspace] && (len(s.kinds) == 0 || s.kinds[k.kind]) {
-			replay[k.kind] = append(replay[k.kind], ctlruntime.Request{Cluster: cluster, Name: k.name})
-		}
-	}
-	events := map[string]chan ctlruntime.Request{}
-	for kind := range replay {
-		events[kind] = c.events[kind]
-	}
-	c.mu.Unlock()
-	go func() {
-		for kind, reqs := range replay {
-			for _, r := range reqs {
-				select {
-				case events[kind] <- r:
-				case <-ctx.Done():
-					return
-				}
+	replay := c.replayLocked(s)
+	if s.synced != nil {
+		s.pending = map[key]bool{}
+		for k, annotated := range listed {
+			if _, known := c.clusters[k]; known {
+				s.pending[k] = true
+				continue
+			}
+			if cluster := c.clusterOfLocked(k, annotated); cluster != "" {
+				s.pending[k] = true
+				replay[k.kind] = append(replay[k.kind], ctlruntime.Request{Cluster: cluster, Name: k.name})
 			}
 		}
-	}()
+	}
+	c.mu.Unlock()
+	go c.enqueue(ctx, replay)
+	c.settle(s)
 	var once sync.Once
 	cancel := func() {
 		once.Do(func() {
