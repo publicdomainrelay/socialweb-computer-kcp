@@ -92,7 +92,7 @@ func New(opts Options) (*Controller, error) {
 	if now == nil {
 		now = time.Now
 	}
-	return &Controller{heartbeats: opts.Heartbeats, bidders: opts.Bidders, refresh: opt.Positive(opts.Refresh, DefaultRefresh), now: now,
+	return &Controller{heartbeats: opts.Heartbeats, bidders: opts.Bidders, refresh: ctlruntime.Period(opts.Refresh, DefaultRefresh), now: now,
 		log: log.With("component", "marketpresence-controller"), refs: binding.New[struct{}]()}, nil
 }
 
@@ -248,7 +248,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 	if did == "" {
 		return ctlruntime.Result{}, nil
 	}
-	return ctlruntime.Result{RequeueAfter: c.refresh}, nil
+	return ctlruntime.RefreshAfter(c.refresh), nil
 }
 
 func (c *Controller) gone(ctx context.Context, req ctlruntime.Request) {

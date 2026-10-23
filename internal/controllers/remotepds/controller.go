@@ -93,7 +93,7 @@ func New(opts Options) *Controller {
 	timeout := opts.Timeout
 	timeout = opt.Positive(timeout, DefaultTimeout)
 	checkInterval := opts.CheckInterval
-	checkInterval = opt.Positive(checkInterval, DefaultCheckInterval)
+	checkInterval = ctlruntime.Period(checkInterval, DefaultCheckInterval)
 	return &Controller{log: log.With("component", "remotepds-controller"), caBundle: opts.CABundle, bus: opts.Bus, secrets: opts.Secrets,
 		secretRefs: opts.SecretRefs, timeout: timeout, checkInterval: checkInterval, hosts: binding.New[*remote.Host]()}
 }
@@ -146,7 +146,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 	}
 	c.log.Info("the RemotePDS is ready", "cluster", req.Cluster, "workspace", req.Workspace, "name", req.Name,
 		"endpoint", endpoint, "fieldManager", req.FieldManager())
-	return ctlruntime.Result{RequeueAfter: c.checkInterval}, nil
+	return ctlruntime.RefreshAfter(c.checkInterval), nil
 }
 
 func (c *Controller) fail(ctx context.Context, req ctlruntime.Request, object *pdsv1alpha1.RemotePDS, status pdsv1alpha1.RemotePDSStatus,

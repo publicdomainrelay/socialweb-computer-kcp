@@ -13,7 +13,6 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atprotorepo/binding"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/statusstate"
 )
 
@@ -60,7 +59,7 @@ type Controller struct {
 }
 
 func New(opts Options) *Controller {
-	return &Controller{source: opts.Source, refresh: opt.Positive(opts.Refresh, DefaultRefresh), refs: binding.New[struct{}]()}
+	return &Controller{source: opts.Source, refresh: ctlruntime.Period(opts.Refresh, DefaultRefresh), refs: binding.New[struct{}]()}
 }
 
 func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
@@ -114,7 +113,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 	if err := c.apply(ctx, req, object, status); err != nil {
 		return ctlruntime.Result{}, err
 	}
-	return ctlruntime.Result{RequeueAfter: c.refresh}, nil
+	return ctlruntime.RefreshAfter(c.refresh), nil
 }
 
 func (c *Controller) apply(ctx context.Context, req ctlruntime.Request, object *v1alpha1.RelayStatus, status v1alpha1.RelayStatusStatus) error {
