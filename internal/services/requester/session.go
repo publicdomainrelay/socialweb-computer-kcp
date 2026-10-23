@@ -68,7 +68,7 @@ func (s *Service) RunCommand(ctx context.Context, account sshtransport.Authorize
 
 func (s *Service) sessionPolicy(lc map[string]string) (string, map[string]string, bool, error) {
 	policyName := strings.TrimSpace(lc["LC_POLICY"])
-	policyName = cmp.Or(policyName, s.cfg.PolicyWorkflow)
+	policyName = cmp.Or(policyName, s.policyWorkflow)
 	usePolicy := true
 	switch strings.ToLower(policyName) {
 	case "", "none", "off":
@@ -82,11 +82,6 @@ func (s *Service) sessionPolicy(lc map[string]string) (string, map[string]string
 			return "", nil, false, fmt.Errorf("LC_POLICY_ARGS: %w", err)
 		}
 		policyArgs = parsed
-	}
-	for key, value := range s.cfg.PolicyArgs {
-		if _, ok := policyArgs[key]; !ok {
-			policyArgs[key] = value
-		}
 	}
 	return policyName, policyArgs, usePolicy, nil
 }
@@ -109,10 +104,10 @@ func (s *Service) runTransientCommand(ctx context.Context, account sshtransport.
 		return err
 	}
 	command = renderExecCommand(command, lc)
-	sessionCtx, cancel := context.WithTimeout(ctx, s.cfg.SessionCap)
+	sessionCtx, cancel := context.WithTimeout(ctx, s.sessionCap)
 	defer cancel()
 	ctx = sessionCtx
-	publicKey, privateKeyPath, err := sshtransport.GenerateGuestKeypair(s.cfg.GuestKeyDir, vmName)
+	publicKey, privateKeyPath, err := sshtransport.GenerateGuestKeypair(s.guestKeyDir(), vmName)
 	if err != nil {
 		io.WriteErr([]byte("provisioning failed: " + err.Error() + "\n"))
 		io.Exit(1)
@@ -127,7 +122,7 @@ func (s *Service) runTransientCommand(ctx context.Context, account sshtransport.
 	}
 	defer func() {
 		if !truthy(lc["LC_KEEP_VM"]) {
-			releaseCtx, releaseCancel := context.WithTimeout(context.WithoutCancel(ctx), s.cfg.ReleaseTimeout)
+			releaseCtx, releaseCancel := context.WithTimeout(context.WithoutCancel(ctx), DefaultReleaseTimeout)
 			defer releaseCancel()
 			if err := s.releaseSession(releaseCtx, target); err != nil {
 				s.log.Warn("requester_session_release_failed", "vm", target.VMName, "err", err)
@@ -146,7 +141,7 @@ func (s *Service) runTransientCommand(ctx context.Context, account sshtransport.
 		io.Exit(1)
 		return err
 	}
-	if !provider.PollReady(ctx, privateKeyPath, ticket, s.cfg.VMReadyTimeout, target.HostKeys) {
+	if !provider.PollReady(ctx, privateKeyPath, ticket, DefaultVMReadyTimeout, target.HostKeys) {
 		io.WriteErr([]byte("guest session failed: the guest ssh did not answer\n"))
 		io.Exit(1)
 		return errors.New("the guest ssh did not answer")
@@ -190,7 +185,7 @@ func (s *Service) armHeldSession(key string, held *heldSession) {
 	}
 	held.generation++
 	generation := held.generation
-	held.timer = time.AfterFunc(s.cfg.SessionIdle, func() {
+	held.timer = time.AfterFunc(s.sessionIdle, func() {
 		s.releaseHeldSession(key, held, generation, "idle")
 	})
 	held.mu.Unlock()
@@ -257,7 +252,7 @@ func (s *Service) runHeldCommand(ctx context.Context, account sshtransport.Autho
 		return err
 	}
 	command = renderExecCommand(command, lc)
-	sessionCtx, cancel := context.WithTimeout(ctx, s.cfg.SessionCap)
+	sessionCtx, cancel := context.WithTimeout(ctx, s.sessionCap)
 	defer cancel()
 	ctx = sessionCtx
 	provider, err := sshtransport.NewGuestSessionProvider(s.guestDialer(), s.log)
@@ -268,7 +263,7 @@ func (s *Service) runHeldCommand(ctx context.Context, account sshtransport.Autho
 	}
 	contractName := heldContractName(account.DID, name)
 	provision := func() (*SessionTarget, string, error) {
-		publicKey, privateKeyPath, err := sshtransport.GenerateGuestKeypair(s.cfg.GuestKeyDir, vmName)
+		publicKey, privateKeyPath, err := sshtransport.GenerateGuestKeypair(s.guestKeyDir(), vmName)
 		if err != nil {
 			return nil, "", err
 		}
@@ -307,7 +302,7 @@ func (s *Service) runHeldCommand(ctx context.Context, account sshtransport.Autho
 	}
 	ready := false
 	if ticket, ticketErr := ValidateTicket(target.Address); ticketErr == nil {
-		ready = provider.PollReady(ctx, privateKeyPath, ticket, s.cfg.VMReadyTimeout, target.HostKeys)
+		ready = provider.PollReady(ctx, privateKeyPath, ticket, DefaultVMReadyTimeout, target.HostKeys)
 	}
 	if !ready && reused {
 		s.log.Warn("requester_held_session_lost", "contract", contract)
@@ -332,7 +327,7 @@ func (s *Service) runHeldCommand(ctx context.Context, account sshtransport.Autho
 			io.Exit(1)
 			return ticketErr
 		}
-		ready = provider.PollReady(ctx, privateKeyPath, ticket, s.cfg.VMReadyTimeout, target.HostKeys)
+		ready = provider.PollReady(ctx, privateKeyPath, ticket, DefaultVMReadyTimeout, target.HostKeys)
 	}
 	if !ready {
 		if fresh {
@@ -389,7 +384,7 @@ func sessionRKey(label string, parts ...string) string {
 }
 
 func (s *Service) existingSignedRecord(ctx context.Context, collection, rkey string) (market.SignedRecord, bool, error) {
-	record, err := s.repo.GetRecord(ctx, s.cfg.RepoDID, collection, rkey)
+	record, err := s.repo.GetRecord(ctx, s.repoDID, collection, rkey)
 	if err != nil {
 		if errors.Is(err, market.ErrNotFound) {
 			return market.SignedRecord{}, false, nil
@@ -407,7 +402,7 @@ func (s *Service) existingOrPutRecord(ctx context.Context, collection, rkey stri
 	if found {
 		return market.NewStrongRef(existing.URI, existing.CID), nil
 	}
-	return s.repo.PutRecord(ctx, s.cfg.RepoDID, collection, rkey, record)
+	return s.repo.PutRecord(ctx, s.repoDID, collection, rkey, record)
 }
 
 func contractTarget(contract *v1alpha1.ComputeContract) (*SessionTarget, bool, error) {
@@ -443,9 +438,9 @@ func (s *Service) provisionHeldContract(ctx context.Context, name, vmName, did, 
 		}
 		args = string(raw)
 	}
-	deadline := time.Now().Add(s.cfg.BidWindow + s.cfg.ReceiptTimeout + s.cfg.VMReadyTimeout)
+	deadline := time.Now().Add(s.bidWindow + s.receiptTimeout + DefaultVMReadyTimeout)
 	for {
-		existing, err := s.cfg.Contracts.Get(ctx, name)
+		existing, err := s.contracts.Get(ctx, name)
 		if err != nil {
 			return nil, err
 		}
@@ -453,7 +448,7 @@ func (s *Service) provisionHeldContract(ctx context.Context, name, vmName, did, 
 			break
 		}
 		if existing.DeletionTimestamp == nil {
-			if err := s.cfg.Contracts.Delete(ctx, name); err != nil {
+			if err := s.contracts.Delete(ctx, name); err != nil {
 				return nil, err
 			}
 		}
@@ -480,7 +475,7 @@ func (s *Service) provisionHeldContract(ctx context.Context, name, vmName, did, 
 		},
 	}
 	for {
-		err := s.cfg.Contracts.Create(ctx, contract)
+		err := s.contracts.Create(ctx, contract)
 		if err == nil {
 			break
 		}
@@ -501,7 +496,7 @@ func (s *Service) provisionHeldContract(ctx context.Context, name, vmName, did, 
 
 func (s *Service) waitHeldContract(ctx context.Context, name string, deadline time.Time) (*SessionTarget, error) {
 	for {
-		contract, err := s.cfg.Contracts.Get(ctx, name)
+		contract, err := s.contracts.Get(ctx, name)
 		if err != nil {
 			return nil, err
 		}
@@ -536,9 +531,9 @@ func (s *Service) releaseHeldContract(name string) {
 	if name == "" {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.ReleaseTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultReleaseTimeout)
 	defer cancel()
-	if err := s.cfg.Contracts.Release(ctx, name); err != nil && !apierrors.IsNotFound(err) {
+	if err := s.contracts.Release(ctx, name); err != nil && !apierrors.IsNotFound(err) {
 		s.log.Warn("requester_held_contract_release_failed", "contract", name, "err", err)
 	}
 }
@@ -551,32 +546,27 @@ func (s *Service) releaseHeldSessionTarget(contract, privateKeyPath string) {
 }
 
 func (s *Service) guestDialer() sshtransport.Dialer {
-	if s.cfg.IrohSocket != "" {
-		return sshtransport.UnixSocketDialer{Socket: s.cfg.IrohSocket, Log: s.log}
+	if socket := strings.TrimSpace(s.spec.IrohSocket); socket != "" {
+		return sshtransport.UnixSocketDialer{Socket: socket, Log: s.log}
 	}
-	path := s.cfg.DumbpipePath
-	path = cmp.Or(path, "dumbpipe")
-	return sshtransport.DumbpipeDialer{Path: path, Log: s.log}
+	return sshtransport.DumbpipeDialer{Path: "dumbpipe", Log: s.log}
 }
 
 func (s *Service) provisionSession(ctx context.Context, vmName, policyName string, policyArgs map[string]string, publicKey string, usePolicy bool) (*SessionTarget, error) {
 	userData := defaultUserData([]string{publicKey})
-	if s.cfg.GuestUserData != "" {
-		userData = s.cfg.GuestUserData
-	}
 	var err error
-	userData, err = guestseed.WithIrohTransport(userData, []string{publicKey}, s.cfg.GuestHostAliases)
+	userData, err = guestseed.WithIrohTransport(userData, []string{publicKey}, nil)
 	if err != nil {
 		return nil, fmt.Errorf("the guest iroh transport: %w", err)
 	}
-	userData = withGuestCACerts(userData, s.cfg.GuestCAPEM)
-	vmRKey := sessionRKey("vm", s.cfg.RepoDID, vmName)
+	userData = withGuestCACerts(userData, s.guestCAPEM())
+	vmRKey := sessionRKey("vm", s.repoDID, vmName)
 	payload, found, err := s.existingSignedRecord(ctx, market.ComputeVMNSID, vmRKey)
 	if err != nil {
 		return nil, err
 	}
 	if !found {
-		payload, err = market.CreateSignedRecordAt(ctx, s.repo, s.cfg.RepoDID, market.ComputeVMNSID, vmRKey, map[string]any{
+		payload, err = market.CreateSignedRecordAt(ctx, s.repo, s.repoDID, market.ComputeVMNSID, vmRKey, map[string]any{
 			"$type":     market.ComputeVMNSID,
 			"role":      vmName,
 			"disk":      DefaultComputeDisk,
@@ -595,8 +585,8 @@ func (s *Service) provisionSession(ctx context.Context, vmName, policyName strin
 		if !ok {
 			return nil, fmt.Errorf("policy %q names no bundled workflow", policyName)
 		}
-		record := BuildPolicyRecord(policyName, workflow, workflowText, s.cfg.MarketDID, policyArgs, s.nowISO())
-		created, err := s.existingOrPutRecord(ctx, PolicyGhaLiteNSID, sessionRKey("policy", s.cfg.RepoDID, vmName, policyName), record)
+		record := BuildPolicyRecord(policyName, workflow, workflowText, s.marketDID, policyArgs, s.nowISO())
+		created, err := s.existingOrPutRecord(ctx, PolicyGhaLiteNSID, sessionRKey("policy", s.repoDID, vmName, policyName), record)
 		if err != nil {
 			return nil, err
 		}
@@ -611,13 +601,13 @@ func (s *Service) provisionSession(ctx context.Context, vmName, policyName strin
 	if policyRef != nil {
 		options.Policies = []market.RecordRef{{URI: policyRef.URI, CID: policyRef.CID}}
 	}
-	rfpRKey := sessionRKey("rfp", s.cfg.RepoDID, vmName)
+	rfpRKey := sessionRKey("rfp", s.repoDID, vmName)
 	rfp, found, err := s.existingSignedRecord(ctx, market.RFPNSID, rfpRKey)
 	if err != nil {
 		return nil, err
 	}
 	if !found {
-		rfp, err = market.CreateRFPAt(ctx, s.repo, s.cfg.RepoDID, rfpRKey, options, s.signer)
+		rfp, err = market.CreateRFPAt(ctx, s.repo, s.repoDID, rfpRKey, options, s.signer)
 		if err != nil {
 			return nil, err
 		}
@@ -631,7 +621,7 @@ func (s *Service) provisionSession(ctx context.Context, vmName, policyName strin
 	if err != nil {
 		return nil, err
 	}
-	acceptRKey := sessionRKey("accept", s.cfg.RepoDID, vmName, rfp.URI, rfp.CID, winner.URI, winner.CID)
+	acceptRKey := sessionRKey("accept", s.repoDID, vmName, rfp.URI, rfp.CID, winner.URI, winner.CID)
 	accept, found, err := s.existingSignedRecord(ctx, market.AcceptNSID, acceptRKey)
 	if err != nil {
 		return nil, err
@@ -646,7 +636,7 @@ func (s *Service) provisionSession(ctx context.Context, vmName, policyName strin
 		if err != nil {
 			return nil, err
 		}
-		accept, err = market.CreateSignedRecordAt(ctx, s.repo, s.cfg.RepoDID, market.AcceptNSID, acceptRKey, acceptRecord, s.signer)
+		accept, err = market.CreateSignedRecordAt(ctx, s.repo, s.repoDID, market.AcceptNSID, acceptRKey, acceptRecord, s.signer)
 		if err != nil {
 			return nil, err
 		}
@@ -656,7 +646,7 @@ func (s *Service) provisionSession(ctx context.Context, vmName, policyName strin
 		return nil, err
 	}
 	if receipt == nil {
-		return nil, errors.New("no receipt arrived within " + s.cfg.ReceiptTimeout.String())
+		return nil, errors.New("no receipt arrived within " + s.receiptTimeout.String())
 	}
 	verification := market.VerifyReceipt(ctx, receipt.Value, receipt.URI, accept.Record, accept.URI, market.VerifyRecordOptions{
 		KeysForDID:  market.NewDirectoryKeyLister(s.directory),
@@ -673,7 +663,7 @@ func (s *Service) provisionSession(ctx context.Context, vmName, policyName strin
 		ReceiptURI:   receipt.URI,
 		ReceiptCid:   receipt.CID,
 		RequesterDid: s.callbackDID(),
-		MarketDid:    s.cfg.MarketDID,
+		MarketDid:    s.marketDID,
 		Payload:      &commonv1.StrongRef{URI: payload.URI, CID: payload.CID},
 		RFP:          &commonv1.StrongRef{URI: rfp.URI, CID: rfp.CID},
 		Bid:          &commonv1.StrongRef{URI: winner.URI, CID: winner.CID},
@@ -717,7 +707,7 @@ func (s *Service) sessionWinner(ctx context.Context, rfp market.SignedRecord, bi
 			if bidder.Endpoint == "" {
 				continue
 			}
-			timeout := max(s.cfg.BidWindow, 5*time.Second)
+			timeout := max(s.bidWindow, 5*time.Second)
 			cctx, cancel := context.WithTimeout(ctx, timeout)
 			bids, err := s.market.SubmitRFP(cctx, bidder, SubmitRFPRequest{URI: rfp.URI, CID: rfp.CID})
 			cancel()
@@ -730,7 +720,7 @@ func (s *Service) sessionWinner(ctx context.Context, rfp market.SignedRecord, bi
 			}
 		}
 	}
-	deadline := time.Now().Add(s.cfg.BidWindow)
+	deadline := time.Now().Add(s.bidWindow)
 	byURI := map[string]BidRecord{}
 	bidderByDID := map[string]Bidder{}
 	for _, bidder := range bidders {
@@ -767,7 +757,7 @@ func (s *Service) sessionWinner(ctx context.Context, rfp market.SignedRecord, bi
 		}
 	}
 	if len(byURI) == 0 {
-		return nil, Bidder{}, errors.New("no bids arrived within " + s.cfg.BidWindow.String())
+		return nil, Bidder{}, errors.New("no bids arrived within " + s.bidWindow.String())
 	}
 	return nil, Bidder{}, errors.New("every bid was denied by policy")
 }
@@ -794,10 +784,10 @@ func (s *Service) sessionBestBid(ctx context.Context, bids map[string]BidRecord,
 	}
 	if usePolicy && best != nil && !best.Free {
 		decision := s.policy.Evaluate(ctx, PolicyInput{
-			SelfDid:          s.cfg.MarketDID,
+			SelfDid:          s.marketDID,
 			SubjectDid:       best.DID,
 			CounterpartyDid:  best.DID,
-			RootRequesterDid: s.cfg.MarketDID,
+			RootRequesterDid: s.marketDID,
 			Bid:              &PolicyStrongRef{URI: best.URI, CID: best.CID},
 		})
 		if !decision.Allow {
@@ -840,7 +830,7 @@ func (s *Service) sessionGuest(ctx context.Context, receiptURI, bidderDID string
 	if slices.ContainsFunc(pending, handle) {
 
 	}
-	deadline := time.Now().Add(s.cfg.VMReadyTimeout)
+	deadline := time.Now().Add(DefaultVMReadyTimeout)
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 	for {
@@ -851,7 +841,7 @@ func (s *Service) sessionGuest(ctx context.Context, receiptURI, bidderDID string
 			return address, hostKeys, nil, nil
 		}
 		if time.Now().After(deadline) {
-			return "", nil, nil, errors.New("the guest did not report onNetwork and hostKeys within " + s.cfg.VMReadyTimeout.String())
+			return "", nil, nil, errors.New("the guest did not report onNetwork and hostKeys within " + DefaultVMReadyTimeout.String())
 		}
 		select {
 		case <-ctx.Done():
@@ -883,7 +873,7 @@ func (s *Service) releaseSession(ctx context.Context, target *SessionTarget) err
 		return err
 	}
 	if !found {
-		payload, err = market.CreateSignedRecordAt(ctx, s.repo, s.cfg.RepoDID, market.ComputeEventsVMDeleteNSID, payloadRKey, map[string]any{
+		payload, err = market.CreateSignedRecordAt(ctx, s.repo, s.repoDID, market.ComputeEventsVMDeleteNSID, payloadRKey, map[string]any{
 			"$type":     market.ComputeEventsVMDeleteNSID,
 			"reason":    "session_ended",
 			"createdAt": s.nowISO(),
@@ -898,7 +888,7 @@ func (s *Service) releaseSession(ctx context.Context, target *SessionTarget) err
 		return err
 	}
 	if !found {
-		envelope, err = market.PutEvent(ctx, s.repo, s.cfg.RepoDID, eventRKey, market.EventOptions{
+		envelope, err = market.PutEvent(ctx, s.repo, s.repoDID, eventRKey, market.EventOptions{
 			Receipt:   market.RecordRef{URI: state.Receipt.URI, CID: state.Receipt.CID},
 			Payload:   market.RecordRef{URI: payload.URI, CID: payload.CID},
 			CreatedAt: s.nowISO(),
@@ -948,10 +938,10 @@ func (s *Service) releaseSession(ctx context.Context, target *SessionTarget) err
 }
 
 func (s *Service) persistSessionRelease(ctx context.Context, receiptURI string, release *v1alpha1.ContractRelease) error {
-	if s.cfg.Contracts == nil || receiptURI == "" {
+	if s.contracts == nil || receiptURI == "" {
 		return nil
 	}
-	contracts, err := s.cfg.Contracts.List(ctx)
+	contracts, err := s.contracts.List(ctx)
 	if err != nil {
 		s.log.Warn("requester_session_release_lookup_failed", "receipt", receiptURI, "err", err)
 		return nil
@@ -962,7 +952,7 @@ func (s *Service) persistSessionRelease(ctx context.Context, receiptURI string, 
 			continue
 		}
 		status := v1alpha1.ComputeContractStatus{Contract: &v1alpha1.NodeClaimContract{Release: release}}
-		if err := s.cfg.Contracts.PatchStatus(ctx, contracts[i].Name, status); err != nil {
+		if err := s.contracts.PatchStatus(ctx, contracts[i].Name, status); err != nil {
 			return fmt.Errorf("persist the release refs on contract %s: %w", contracts[i].Name, err)
 		}
 	}

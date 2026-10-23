@@ -56,7 +56,7 @@ func (r *contractRunner) ensureSecrets(ctx context.Context, contract v1alpha1.Co
 	r.mu.Unlock()
 	if grant := contract.Status.Grant; grant != nil && contract.Spec.NodeJoin != nil {
 		audience := secretsAudience(r.svc.callbackDID())
-		state.install(grant.Issuer, audience, grant.Subject, newIssuerVerifier(grant.Issuer, r.svc.cfg.HTTPClient))
+		state.install(grant.Issuer, audience, grant.Subject, newIssuerVerifier(grant.Issuer, r.svc.httpClient))
 		doc, err := json.Marshal(nodeClaimDocument(contract.Spec.NodeJoin.ClusterRef.Name, grant.Role, grant.Issuer))
 		if err != nil {
 			return err
@@ -65,7 +65,7 @@ func (r *contractRunner) ensureSecrets(ctx context.Context, contract v1alpha1.Co
 		record := nodeRBACRecord(grant.Role, grant.Issuer, grant.Subject, audience, grant.Audience, true)
 		key := secretsRBACKey(r.name)
 		if r.svc.repo != nil {
-			if _, err := r.svc.repo.PutRecord(ctx, r.svc.cfg.RepoDID, FedproxyRBACNSID, key, record); err != nil {
+			if _, err := r.svc.repo.PutRecord(ctx, r.svc.repoDID, FedproxyRBACNSID, key, record); err != nil {
 				return fmt.Errorf("requester: rewriting the contract's RBAC record: %w", err)
 			}
 			r.mu.Lock()
@@ -109,7 +109,7 @@ func (r *contractRunner) prepareWorkloadGrant(ctx context.Context, state *v1alph
 		return nil
 	}
 	reader := market.NewHTTPReader(r.svc.directory)
-	reader.Client = r.svc.cfg.HTTPClient
+	reader.Client = r.svc.httpClient
 	cfg, err := resolveBidConfig(ctx, reader, winner.Record)
 	if err != nil {
 		return err
@@ -138,7 +138,7 @@ func (r *contractRunner) prepareWorkloadGrant(ctx context.Context, state *v1alph
 		return nil
 	}
 	audience := secretsAudience(r.svc.callbackDID())
-	r.secrets.install(cfg.IssuerURI, audience, subject, newIssuerVerifier(cfg.IssuerURI, r.svc.cfg.HTTPClient))
+	r.secrets.install(cfg.IssuerURI, audience, subject, newIssuerVerifier(cfg.IssuerURI, r.svc.httpClient))
 	if r.nodeJoin != nil {
 		doc, err := json.Marshal(nodeClaimDocument(r.nodeJoin.ClusterRef.Name, vmName, cfg.IssuerURI))
 		if err != nil {
@@ -155,7 +155,7 @@ func (r *contractRunner) prepareWorkloadGrant(ctx context.Context, state *v1alph
 	if r.svc.repo == nil {
 		return errors.New("requester: the contract needs an RBAC record and the repo is not configured")
 	}
-	if _, err := r.svc.repo.PutRecord(ctx, r.svc.cfg.RepoDID, FedproxyRBACNSID, key, record); err != nil {
+	if _, err := r.svc.repo.PutRecord(ctx, r.svc.repoDID, FedproxyRBACNSID, key, record); err != nil {
 		return fmt.Errorf("requester: writing the contract's RBAC record: %w", err)
 	}
 	r.mu.Lock()
@@ -182,7 +182,7 @@ func (r *contractRunner) deleteRBAC(ctx context.Context) {
 	}
 	deleteCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	if err := r.svc.repo.DeleteRecord(deleteCtx, r.svc.cfg.RepoDID, FedproxyRBACNSID, key); err != nil && !isNotFound(err) {
+	if err := r.svc.repo.DeleteRecord(deleteCtx, r.svc.repoDID, FedproxyRBACNSID, key); err != nil && !isNotFound(err) {
 		r.log().Warn("requester_rbac_delete_failed", "rkey", key, "err", err)
 	}
 	r.mu.Lock()

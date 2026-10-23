@@ -67,7 +67,7 @@ func (s *Service) storeBidMailbox(ctx context.Context, did, uri, cid string, rec
 			DeletionPolicy: v1alpha1.StateSyncDeletionRetain,
 		},
 	}
-	err = s.inbox.Create(ctx, s.cfg.Workspace, object)
+	err = s.inbox.Create(ctx, s.workspace(), object)
 	if apierrors.IsAlreadyExists(err) {
 		return nil
 	}
@@ -78,7 +78,7 @@ func (s *Service) processBidMailboxes(ctx context.Context) {
 	if s.inbox == nil {
 		return
 	}
-	items, err := s.inbox.List(ctx, s.cfg.Workspace)
+	items, err := s.inbox.List(ctx, s.workspace())
 	if err != nil {
 		if ctx.Err() == nil {
 			s.log.Warn("requester_bid_inbox_list_failed", "err", err)
@@ -135,7 +135,7 @@ func (s *Service) deleteBidMailbox(ctx context.Context, name string) {
 	if s.inbox == nil {
 		return
 	}
-	if err := s.inbox.Delete(ctx, ref.New(s.cfg.Workspace, "", name)); err != nil {
+	if err := s.inbox.Delete(ctx, ref.New(s.workspace(), "", name)); err != nil {
 		if ctx.Err() == nil {
 			s.log.Warn("requester_bid_inbox_delete_failed", "statesync", name, "err", err)
 		}
