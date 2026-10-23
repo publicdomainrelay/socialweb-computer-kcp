@@ -21,6 +21,7 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/irohdial"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/childproc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
@@ -129,7 +130,7 @@ func (d DumbpipeDialer) Dial(ctx context.Context, target string) (net.Conn, erro
 		return nil, err
 	}
 	tail := &tailWriter{limit: 2048}
-	cmd.Stderr = tail
+	cmd.Stderr = childproc.FilterSecrets(tail)
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}

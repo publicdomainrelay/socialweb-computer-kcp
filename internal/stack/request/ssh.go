@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/childproc"
 )
 
 const (
@@ -104,7 +105,7 @@ func (s SSH) WaitReady(ctx context.Context, t Target, timeout time.Duration, pro
 		args := append(s.args(t), "-o", "BatchMode=yes", "-o", sshConnectTimout, "root@"+t.Alias, "true")
 		var stderr bytes.Buffer
 		cmd := exec.CommandContext(ctx, "ssh", args...)
-		cmd.Stderr = &stderr
+		cmd.Stderr = childproc.FilterSecrets(&stderr)
 		err := cmd.Run()
 		if err == nil {
 			return nil
@@ -138,7 +139,7 @@ func (s SSH) Run(ctx context.Context, t Target, program string, interactive bool
 		args = append(args, "root@"+t.Alias, program)
 	}
 	cmd := exec.CommandContext(ctx, "ssh", args...)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, childproc.FilterSecrets(stderr)
 	err := cmd.Run()
 	var ee *exec.ExitError
 	if errors.As(err, &ee) {

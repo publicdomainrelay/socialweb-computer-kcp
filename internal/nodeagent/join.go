@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/childproc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/nodemarket"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/systemdunit"
@@ -404,7 +405,7 @@ func superviseLink(ctx context.Context, cfg Config, name string, log *slog.Logge
 		}
 		cmd := exec.CommandContext(ctx, cfg.DumbpipePath, args...)
 		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
+		cmd.Stderr = childproc.FilterSecrets(os.Stderr)
 		started := time.Now()
 		err = cmd.Run()
 		if ctx.Err() != nil {
