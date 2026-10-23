@@ -139,10 +139,13 @@ func (c *Composer) ApplyOperatorRepo(ctx context.Context, r Root, ws string, op 
 			return err
 		}
 	}
+	vault := func() *commonv1.ObjectRef {
+		return &commonv1.ObjectRef{Kind: v1alpha1.KindOpenBaoServer, Name: op.Vault, Workspace: r.Workspace}
+	}
 	identity := v1alpha1.MarketIdentitySpec{Mode: v1alpha1.MarketIdentityModePdsAccount, Handle: strings.TrimSpace(op.Identifier),
 		PdsURL: strings.TrimRight(strings.TrimSpace(op.PdsURL), "/"), Association: v1alpha1.AssociationSkip,
-		KeysRef:    &commonv1.SecretRef{Mount: op.Mount, Path: OperatorKeysPath},
-		SessionRef: &commonv1.SecretRef{Mount: op.Mount, Path: OperatorSessionPath}}
+		KeysRef:    &commonv1.SecretRef{Vault: vault(), Mount: op.Mount, Path: OperatorKeysPath},
+		SessionRef: &commonv1.SecretRef{Vault: vault(), Mount: op.Mount, Path: OperatorSessionPath}}
 	var caRef *commonv1.ObjectRef
 	if op.CARef != nil && op.tls() {
 		ca := *op.CARef
