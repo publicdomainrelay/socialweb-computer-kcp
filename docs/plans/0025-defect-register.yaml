@@ -196,3 +196,18 @@ items:
       AddKnownTypes (api/v1alpha1/groupversion_info.go:19). 46 kinds are
       registered against 57 schemas. The deepcopy file is kept by hand; no
       generator writes it (scripts/regen-after-rebase.sh:21).
+  - id: D23-APP-WORKSPACE-NO-COMPUTEVMS
+    title: "socialweb-application workspaces never initialize in a network without bidders"
+    status: todo
+    defect: >
+      In a market network brought up with --bidders 0, a workspace of type
+      socialweb-application never leaves initializing, because the
+      computevms APIExport that the type binds by default does not exist.
+      Seen in the plan 0026 W0-RUNTIME live run (instance w0rt).
+  - id: D24-WORKSPACE-NO-CREATEDBY
+    title: "A workspace created without the owner annotation stalls"
+    status: todo
+    defect: >
+      A workspace created without the experimental.tenancy.kcp.io/owner
+      annotation stalls with "no createdBy recorded". Seen in the plan 0026
+      W0-RUNTIME live run (instance w0rt).
