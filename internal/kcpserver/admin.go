@@ -14,14 +14,14 @@ import (
 	"strings"
 	"time"
 
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/dynamic"
+	tenancyv1alpha1 "github.com/kcp-dev/sdk/apis/tenancy/v1alpha1"
+	coordinationv1 "k8s.io/api/coordination/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 
-	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
+	"github.com/johnandersen777/socialweb-computer-kcp/api/kcpgvr"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpclient"
 )
 
@@ -98,18 +98,13 @@ func loopbackClient(ca []byte, timeout time.Duration) (*http.Client, error) {
 	return httpclient.TLSClient(httpclient.TLSOptions{CAPEM: ca, ServerName: "127.0.0.1", Timeout: timeout})
 }
 
-var ErrAwaitTimeout = ctlruntime.ErrAwaitTimeout
+var ErrAwaitTimeout = kube.ErrAwaitTimeout
 
-var (
-	leaseGVR     = schema.GroupVersionResource{Group: "coordination.k8s.io", Version: "v1", Resource: "leases"}
-	workspaceGVR = schema.GroupVersionResource{Group: "tenancy.kcp.io", Version: "v1alpha1", Resource: "workspaces"}
-)
-
-func (h *HTTPAdmin) dynamicFor(cluster string) (dynamic.Interface, error) {
+func (h *HTTPAdmin) clientFor(cluster string) (*kube.Client, error) {
 	if len(h.Admin.CA) == 0 {
 		return nil, httpclient.ErrNoCA
 	}
-	return dynamic.NewForConfig(Throughput(&rest.Config{Host: h.Front + "/clusters/" + cluster, BearerToken: h.Admin.Token,
+	return kube.New(Throughput(&rest.Config{Host: h.Front + "/clusters/" + cluster, BearerToken: h.Admin.Token,
 		TLSClientConfig: rest.TLSClientConfig{CAData: h.Admin.CA, ServerName: "127.0.0.1"}}))
 }
 
@@ -301,26 +296,28 @@ func (h *HTTPAdmin) Lease(ctx context.Context) (Lease, error) {
 	return out, nil
 }
 
-func leaseOf(u *unstructured.Unstructured) Lease {
-	if u == nil {
+func leaseOf(l *coordinationv1.Lease) Lease {
+	if l == nil {
 		return Lease{}
 	}
 	out := Lease{Found: true}
-	out.Holder, _, _ = unstructured.NestedString(u.Object, "spec", "holderIdentity")
-	if renew, ok, _ := unstructured.NestedString(u.Object, "spec", "renewTime"); ok {
-		out.RenewTime, _ = time.Parse(time.RFC3339Nano, renew)
+	if l.Spec.HolderIdentity != nil {
+		out.Holder = *l.Spec.HolderIdentity
+	}
+	if l.Spec.RenewTime != nil {
+		out.RenewTime = l.Spec.RenewTime.UTC()
 	}
 	return out
 }
 
 func (h *HTTPAdmin) AwaitLease(ctx context.Context, timeout time.Duration, done func(Lease) bool) (Lease, error) {
-	dc, err := h.dynamicFor(SystemAdminCluster)
+	c, err := h.clientFor(SystemAdminCluster)
 	if err != nil {
 		return Lease{}, err
 	}
-	u, err := ctlruntime.Await(ctx, dc.Resource(leaseGVR).Namespace(ControllerLeaseNamespace), ControllerLeaseName, timeout,
-		func(u *unstructured.Unstructured) (bool, error) { return done(leaseOf(u)), nil })
-	return leaseOf(u), err
+	l, err := kube.Await(ctx, c.Resource(kcpgvr.Leases).In(ControllerLeaseNamespace), ControllerLeaseName, timeout,
+		func(l *coordinationv1.Lease) (bool, error) { return done(leaseOf(l)), nil })
+	return leaseOf(l), err
 }
 
 func (h *HTTPAdmin) DeleteLease(ctx context.Context) error {
@@ -412,25 +409,24 @@ func (h *HTTPAdmin) DeleteWorkspace(ctx context.Context, parent, name string) er
 }
 
 func (h *HTTPAdmin) WaitWorkspaceReady(ctx context.Context, parent, name string) error {
-	dc, err := h.dynamicFor(parent)
+	c, err := h.clientFor(parent)
 	if err != nil {
 		return err
 	}
-	u, err := ctlruntime.Await(ctx, dc.Resource(workspaceGVR), name, 0, func(u *unstructured.Unstructured) (bool, error) {
-		return u != nil && workspacePhaseOf(u) == "Ready", nil
+	ws, err := kube.Await(ctx, c.Resource(kcpgvr.Workspaces), name, 0, func(ws *tenancyv1alpha1.Workspace) (bool, error) {
+		return workspacePhaseOf(ws) == "Ready", nil
 	})
 	if err != nil {
-		return fmt.Errorf("kcpserver: workspace %s:%s not Ready: phase %q (%w)", parent, name, workspacePhaseOf(u), err)
+		return fmt.Errorf("kcpserver: workspace %s:%s not Ready: phase %q (%w)", parent, name, workspacePhaseOf(ws), err)
 	}
 	return nil
 }
 
-func workspacePhaseOf(u *unstructured.Unstructured) string {
-	if u == nil {
+func workspacePhaseOf(ws *tenancyv1alpha1.Workspace) string {
+	if ws == nil {
 		return ""
 	}
-	phase, _, _ := unstructured.NestedString(u.Object, "status", "phase")
-	return phase
+	return string(ws.Status.Phase)
 }
 
 func (h *HTTPAdmin) ProbeWorkspace(ctx context.Context, name string) error {

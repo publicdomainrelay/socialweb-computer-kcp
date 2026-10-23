@@ -14,20 +14,17 @@ import (
 	"github.com/fsnotify/fsnotify"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
-	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kcpapply"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/manifests"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/logcap"
 )
 
@@ -41,8 +38,6 @@ const (
 	MirrorLabel      = "socialweb.computer/placement"
 	ConditionReady   = "Ready"
 	ConditionLimits  = "LimitsEnforced"
-
-	AnnotationDescription = "socialweb.computer/unit-description"
 )
 
 var GVR = v1alpha1.HostProcessGVR
@@ -75,7 +70,7 @@ type Config struct {
 
 type Supervisor struct {
 	c       Config
-	client  dynamic.ResourceInterface
+	client  kube.Resource
 	placed  map[string]bool
 	listed  bool
 	backend hostsvc.Backend
@@ -200,21 +195,17 @@ func (s *Supervisor) markAdopted(o v1alpha1.HostProcess, obs Observed) {
 	}
 }
 
-func (s *Supervisor) reconcileObject(ctx context.Context, cur *unstructured.Unstructured) (v1alpha1.HostProcess, bool) {
-	unlock := s.lockObject(cur.GetName())
+func (s *Supervisor) reconcileObject(ctx context.Context, o v1alpha1.HostProcess) (v1alpha1.HostProcess, bool) {
+	unlock := s.lockObject(o.Name)
 	defer unlock()
-	o, err := unstruct.From[v1alpha1.HostProcess](cur)
-	if err != nil {
-		s.c.log().Warn("decoding", "name", cur.GetName(), "err", err.Error())
-		return o, false
-	}
+	cur := o.DeepCopy()
 	s.track(o.Name, o.Spec.Unit, false)
 	s.capOutput(o)
 	obs := s.observe(ctx, o)
 	s.markAdopted(o, obs)
 	r := Reconcile(obs)
 	next, failed := s.apply(ctx, o, r)
-	err = s.writeStatus(ctx, cur, next)
+	err := s.writeStatus(ctx, cur, next)
 	if err != nil && !apierrors.IsConflict(err) {
 		s.c.log().Warn("writing status", "name", o.Name, "err", err.Error())
 	}
@@ -230,14 +221,14 @@ func (s *Supervisor) reconcileObject(ctx context.Context, cur *unstructured.Unst
 }
 
 func (s *Supervisor) reconcileName(ctx context.Context, name string) {
-	cur, err := s.client.Get(ctx, name, metav1.GetOptions{})
+	cur, err := kube.Get[v1alpha1.HostProcess](ctx, s.client, name)
 	if err != nil {
 		if !apierrors.IsNotFound(err) {
 			s.c.log().Warn("reading a changed HostProcess", "name", name, "err", err.Error())
 		}
 		return
 	}
-	s.reconcileObject(ctx, cur)
+	s.reconcileObject(ctx, *cur)
 }
 
 func (c Config) log() *slog.Logger {
@@ -314,21 +305,11 @@ func New(ctx context.Context, c Config) (*Supervisor, error) {
 	}
 	cfg := rest.CopyConfig(restCfg)
 	cfg.Host = strings.TrimSuffix(cfg.Host, "/") + "/clusters/" + c.workspace()
-	dc, err := dynamic.NewForConfig(cfg)
+	kc, err := kube.New(cfg)
 	if err != nil {
 		return nil, err
 	}
-	return &Supervisor{c: c, client: dc.Resource(GVR), placed: map[string]bool{}, backend: c.Manager.Capabilities().Backend}, nil
-}
-
-func toUnstructured(o *v1alpha1.HostProcess) (*unstructured.Unstructured, error) {
-	o.APIVersion = v1alpha1.GroupVersion.String()
-	o.Kind = "HostProcess"
-	m, err := runtime.DefaultUnstructuredConverter.ToUnstructured(o)
-	if err != nil {
-		return nil, err
-	}
-	return &unstructured.Unstructured{Object: m}, nil
+	return &Supervisor{c: c, client: kc.Resource(GVR), placed: map[string]bool{}, backend: c.Manager.Capabilities().Backend}, nil
 }
 
 func MirrorName(role string) string { return MirrorPrefix + role }
@@ -344,14 +325,10 @@ func (s *Supervisor) syncMirrors(ctx context.Context) {
 		if len(m.Exec) > 0 {
 			want.Exec, want.Argv = m.Exec[0], m.Exec[1:]
 		}
-		cur, err := s.client.Get(ctx, name, metav1.GetOptions{})
+		cur, err := kube.Get[v1alpha1.HostProcess](ctx, s.client, name)
 		if apierrors.IsNotFound(err) {
 			o := v1alpha1.HostProcess{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{MirrorLabel: string(v1alpha1.HostProcessPlacementBootstrap)}}, Spec: want}
-			u, err := toUnstructured(&o)
-			if err == nil {
-				_, err = s.client.Create(ctx, u, metav1.CreateOptions{})
-			}
-			if err != nil {
+			if _, err := kube.Create[v1alpha1.HostProcess](ctx, s.client, &o, metav1.CreateOptions{}); err != nil {
 				s.c.log().Warn("writing a bootstrap mirror", "name", name, "err", err.Error())
 			}
 			continue
@@ -360,16 +337,11 @@ func (s *Supervisor) syncMirrors(ctx context.Context) {
 			s.c.log().Warn("reading a bootstrap mirror", "name", name, "err", err.Error())
 			continue
 		}
-		o, err := unstruct.From[v1alpha1.HostProcess](cur)
-		if err != nil {
-			continue
-		}
+		o := *cur
 		if o.Spec.Unit != want.Unit || o.Spec.Exec != want.Exec || !slices.Equal(o.Spec.Argv, want.Argv) || o.Spec.Placement != want.Placement {
 			o.Spec = want
-			if u, err := toUnstructured(&o); err == nil {
-				if _, err := s.client.Update(ctx, u, metav1.UpdateOptions{}); err != nil {
-					s.c.log().Warn("updating a bootstrap mirror", "name", name, "err", err.Error())
-				}
+			if _, err := kube.Update[v1alpha1.HostProcess](ctx, s.client, &o, metav1.UpdateOptions{}); err != nil {
+				s.c.log().Warn("updating a bootstrap mirror", "name", name, "err", err.Error())
 			}
 		}
 	}
@@ -491,16 +463,20 @@ func (s *Supervisor) apply(ctx context.Context, o v1alpha1.HostProcess, r Result
 	return next, failed
 }
 
-func (s *Supervisor) writeStatus(ctx context.Context, cur *unstructured.Unstructured, next v1alpha1.HostProcess) error {
-	u, err := toUnstructured(&next)
+func (s *Supervisor) writeStatus(ctx context.Context, cur *v1alpha1.HostProcess, next v1alpha1.HostProcess) error {
+	next.ResourceVersion = cur.ResourceVersion
+	was, err := kube.Encode(cur)
 	if err != nil {
 		return err
 	}
-	if equalStatus(cur.Object["status"], u.Object["status"]) {
+	u, err := kube.Encode(&next)
+	if err != nil {
+		return err
+	}
+	if equalStatus(was["status"], u["status"]) {
 		return nil
 	}
-	u.SetResourceVersion(cur.GetResourceVersion())
-	_, err = s.client.UpdateStatus(ctx, u, metav1.UpdateOptions{})
+	_, err = kube.UpdateStatus[v1alpha1.HostProcess](ctx, s.client, u, metav1.UpdateOptions{})
 	return err
 }
 
@@ -509,14 +485,14 @@ func equalStatus(a, b any) bool { return fmt.Sprint(a) == fmt.Sprint(b) }
 func (s *Supervisor) Pass(ctx context.Context) error {
 	s.syncMirrors(ctx)
 	listedAt := time.Now()
-	list, err := s.client.List(ctx, metav1.ListOptions{LabelSelector: s.c.Selector})
+	list, err := kube.List[v1alpha1.HostProcess](ctx, s.client, metav1.ListOptions{LabelSelector: s.c.Selector})
 	if err != nil {
 		return err
 	}
 	seen := map[string]bool{}
 	var liveSlices []string
-	for i := range list.Items {
-		if o, ok := s.reconcileObject(ctx, &list.Items[i]); ok {
+	for i := range list {
+		if o, ok := s.reconcileObject(ctx, list[i]); ok {
 			seen[o.Spec.Unit] = true
 			liveSlices = append(liveSlices, o.Spec.Slice)
 		}
@@ -784,7 +760,7 @@ func (s *Supervisor) watch(ctx context.Context, wake chan<- struct{}, changedCh 
 	generations := map[string]int64{}
 	failing := false
 	for ctx.Err() == nil {
-		w, err := s.client.Watch(ctx, metav1.ListOptions{LabelSelector: s.c.Selector})
+		events, stop, err := kube.Watch[v1alpha1.HostProcess](ctx, s.client, metav1.ListOptions{LabelSelector: s.c.Selector})
 		if err != nil {
 			if !failing {
 				s.c.log().Warn("watching HostProcess objects failed; the supervisor retries the watch", "err", err.Error(), "after", RetryAfter.String())
@@ -802,13 +778,11 @@ func (s *Supervisor) watch(ctx context.Context, wake chan<- struct{}, changedCh 
 			failing = false
 		}
 		poke(wake)
-		for ev := range w.ResultChan() {
-			u, ok := ev.Object.(*unstructured.Unstructured)
-			if !ok {
+		for ev := range events {
+			if ev.Object == nil {
 				continue
 			}
-			name, gen := u.GetName(), u.GetGeneration()
-			unit, _, _ := unstructured.NestedString(u.Object, "spec", "unit")
+			name, gen, unit := ev.Object.Name, ev.Object.Generation, ev.Object.Spec.Unit
 			s.track(name, unit, ev.Type == watch.Deleted)
 			if ev.Type == watch.Deleted {
 				s.unfollowOutput(name)
@@ -831,7 +805,7 @@ func (s *Supervisor) watch(ctx context.Context, wake chan<- struct{}, changedCh 
 			}
 			poke(wake)
 		}
-		w.Stop()
+		stop()
 		select {
 		case <-ctx.Done():
 			return

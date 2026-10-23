@@ -1,8 +1,6 @@
 package bidder
 
 import (
-	"encoding/json"
-
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
@@ -86,17 +84,11 @@ func (guests) BidConfig(issuerURL, bidderDID, acceptPath, createdAt string) (str
 }
 
 func (guests) Termination(vm *v1alpha1.ComputeVM, workspace, reason, observedAt string, request *commonv1.StrongRef) (v1alpha1.StateSync, error) {
-	var sync v1alpha1.StateSync
 	object, err := computevm.TerminationStateSync(vm, workspace, reason, observedAt, request)
 	if err != nil {
-		return sync, err
+		return v1alpha1.StateSync{}, err
 	}
-	raw, err := json.Marshal(object.Object)
-	if err != nil {
-		return sync, err
-	}
-	err = json.Unmarshal(raw, &sync)
-	return sync, err
+	return *object, nil
 }
 
 func (guests) EventAdapter() string { return computevm.TerminationSyncAdapter }

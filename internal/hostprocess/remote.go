@@ -12,22 +12,17 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/watch"
-	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/host"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 )
 
-const (
-	RemoteTimeout = 2 * time.Minute
-	UnitLabel     = "socialweb.computer/unit"
-)
+const RemoteTimeout = 2 * time.Minute
 
 type RemoteConfig struct {
 	Kubeconfig string
@@ -42,7 +37,7 @@ var _ host.Units = (*Remote)(nil)
 type Remote struct {
 	hostsvc.Manager
 	c      RemoteConfig
-	client dynamic.ResourceInterface
+	client kube.Resource
 }
 
 func NewRemote(c RemoteConfig) (*Remote, error) {
@@ -55,11 +50,11 @@ func NewRemote(c RemoteConfig) (*Remote, error) {
 	}
 	cfg := rest.CopyConfig(restCfg)
 	cfg.Host = strings.TrimSuffix(cfg.Host, "/") + "/clusters/" + c.Workspace
-	dc, err := dynamic.NewForConfig(cfg)
+	kc, err := kube.New(cfg)
 	if err != nil {
 		return nil, err
 	}
-	return &Remote{Manager: c.Reader, c: c, client: dc.Resource(GVR)}, nil
+	return &Remote{Manager: c.Reader, c: c, client: kc.Resource(GVR)}, nil
 }
 
 func (r *Remote) log() *slog.Logger {
@@ -135,7 +130,7 @@ func (r *Remote) Start(ctx context.Context, spec hostsvc.UnitSpec) (hostsvc.Unit
 		return hostsvc.UnitStatus{}, err
 	}
 	name := ObjectName(spec.Name)
-	_, err := r.client.Get(ctx, name, metav1.GetOptions{})
+	_, err := kube.Get[v1alpha1.HostProcess](ctx, r.client, name)
 	switch {
 	case apierrors.IsNotFound(err):
 	case err != nil:
@@ -150,13 +145,9 @@ func (r *Remote) Start(ctx context.Context, spec hostsvc.UnitSpec) (hostsvc.Unit
 		}
 	}
 	o := v1alpha1.HostProcess{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{
-		MirrorLabel: string(v1alpha1.HostProcessPlacementSupervisor)}, Annotations: map[string]string{UnitLabel: spec.Name}},
+		MirrorLabel: string(v1alpha1.HostProcessPlacementSupervisor)}},
 		Spec: SpecOf(spec)}
-	u, err := toUnstructured(&o)
-	if err != nil {
-		return hostsvc.UnitStatus{}, err
-	}
-	if _, err := r.client.Create(ctx, u, metav1.CreateOptions{}); err != nil {
+	if _, err := kube.Create[v1alpha1.HostProcess](ctx, r.client, &o, metav1.CreateOptions{}); err != nil {
 		return hostsvc.UnitStatus{}, fmt.Errorf("hostprocess: writing %s into %s: %w", name, r.c.Workspace, err)
 	}
 	r.log().Info("declared", "hostprocess", name, "unit", spec.Name)
@@ -189,16 +180,14 @@ func (r *Remote) followOnce(ctx context.Context, name, unit string, done func(o 
 	if err != nil {
 		return err
 	}
-	w, err := r.client.Watch(wctx, metav1.ListOptions{FieldSelector: "metadata.name=" + name})
+	events, stop, err := kube.Watch[v1alpha1.HostProcess](wctx, r.client, metav1.ListOptions{FieldSelector: "metadata.name=" + name})
 	if err != nil {
 		return fmt.Errorf("%w: %w", errWatchEnded, err)
 	}
-	defer w.Stop()
+	defer stop()
 	var o *v1alpha1.HostProcess
-	if cur, err := r.client.Get(ctx, name, metav1.GetOptions{}); err == nil {
-		if obj, err := unstruct.From[v1alpha1.HostProcess](cur); err == nil {
-			o = &obj
-		}
+	if cur, err := kube.Get[v1alpha1.HostProcess](ctx, r.client, name); err == nil {
+		o = cur
 	}
 	for {
 		if ok, err := done(o); ok || err != nil {
@@ -207,7 +196,7 @@ func (r *Remote) followOnce(ctx context.Context, name, unit string, done func(o 
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case ev, ok := <-w.ResultChan():
+		case ev, ok := <-events:
 			if !ok || ev.Type == watch.Error {
 				return errWatchEnded
 			}
@@ -215,10 +204,8 @@ func (r *Remote) followOnce(ctx context.Context, name, unit string, done func(o 
 				o = nil
 				continue
 			}
-			if u, ok := ev.Object.(*unstructured.Unstructured); ok {
-				if obj, err := unstruct.From[v1alpha1.HostProcess](u); err == nil {
-					o = &obj
-				}
+			if ev.Object != nil {
+				o = ev.Object
 			}
 		case _, ok := <-units:
 			if !ok {
@@ -300,13 +287,13 @@ func (r *Remote) StopSlice(ctx context.Context, slice string) error {
 	if err := hostsvc.ValidateSlice(slice); err != nil {
 		return err
 	}
-	list, err := r.client.List(ctx, metav1.ListOptions{})
+	list, err := kube.List[v1alpha1.HostProcess](ctx, r.client, metav1.ListOptions{})
 	if err != nil {
 		return err
 	}
-	for i := len(list.Items) - 1; i >= 0; i-- {
-		o, err := unstruct.From[v1alpha1.HostProcess](&list.Items[i])
-		if err != nil || !hostsvc.SliceContains(slice, o.Spec.Slice) {
+	for i := len(list) - 1; i >= 0; i-- {
+		o := list[i]
+		if !hostsvc.SliceContains(slice, o.Spec.Slice) {
 			continue
 		}
 		if err := r.Stop(ctx, o.Spec.Unit); err != nil {

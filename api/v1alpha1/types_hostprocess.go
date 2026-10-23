@@ -40,6 +40,8 @@ const (
 type HostProcessSpec struct {
 	Unit string `json:"unit"`
 
+	Description string `json:"description,omitempty"`
+
 	Asset *HostProcessAsset `json:"asset,omitempty"`
 
 	Exec string `json:"exec,omitempty"`
