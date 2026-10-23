@@ -353,7 +353,7 @@ func (s *Service) cachedDownloadBase() func(context.Context) (string, bool) {
 		if cached != "" {
 			return cached, true
 		}
-		resolved := s.downloadBase()
+		resolved := strings.TrimRight(strings.TrimSpace(s.spec.PublicOrigin), "/")
 		if resolved == "" {
 			resolved = s.localDownloadBase(ctx)
 		}
