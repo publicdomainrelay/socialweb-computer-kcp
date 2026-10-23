@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-16.marketbidders.socialweb.computer
+  name: v1alpha1-17.marketbidders.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -315,6 +315,329 @@ spec:
                   policyWorkflowRuns:
                     type: integer
                     format: int32
+              components:
+                type: object
+                additionalProperties:
+                  type: object
+                  properties:
+                    suspend:
+                      type: boolean
+                    restartPolicy:
+                      type: string
+                      enum:
+                        - Never
+                        - OnFailure
+                        - Always
+                    limits:
+                      type: object
+                      properties:
+                        cpuMillicores:
+                          type: integer
+                          format: int32
+                        memoryBytes:
+                          type: integer
+                          format: int64
+                        diskBytes:
+                          type: integer
+                          format: int64
+                    serviceAuth:
+                      type: object
+                      properties:
+                        audience:
+                          type: array
+                          items:
+                            type: string
+                        hostname:
+                          type: string
+                    comms:
+                      type: object
+                      properties:
+                        mode:
+                          type: string
+                          enum:
+                            - XRPC
+                            - Firehose
+                            - Both
+                        relayUrls:
+                          type: array
+                          items:
+                            type: string
+                        firehoseUrls:
+                          type: array
+                          items:
+                            type: string
+                    ingress:
+                      type: object
+                      properties:
+                        provider:
+                          type: string
+                        ingressRef:
+                          type: object
+                          properties:
+                            kind:
+                              type: string
+                            name:
+                              type: string
+                            did:
+                              type: string
+                        publicHost:
+                          type: string
+                        xrpc:
+                          type: object
+                          properties:
+                            ingressProxyHost:
+                              type: string
+                            relayURL:
+                              type: string
+                            relayRef:
+                              type: object
+                              properties:
+                                kind:
+                                  type: string
+                                name:
+                                  type: string
+                                did:
+                                  type: string
+                            identityRef:
+                              type: object
+                              properties:
+                                kind:
+                                  type: string
+                                name:
+                                  type: string
+                                did:
+                                  type: string
+                        opentunnel:
+                          type: object
+                          properties:
+                            command:
+                              type: array
+                              items:
+                                type: string
+                            routeName:
+                              type: string
+                            proxyProtocol:
+                              type: string
+                            localHost:
+                              type: string
+                    settings:
+                      type: object
+                      properties:
+                        bidder:
+                          type: object
+                          properties:
+                            heartbeatIntervalSeconds:
+                              type: integer
+                              format: int32
+                            offeringRefreshSeconds:
+                              type: integer
+                              format: int32
+                            bidTtlSeconds:
+                              type: integer
+                              format: int32
+                            maxConcurrentGuests:
+                              type: integer
+                              format: int32
+                            policyPollMilliseconds:
+                              type: integer
+                              format: int32
+                            policyTimeoutSeconds:
+                              type: integer
+                              format: int32
+                        requester:
+                          type: object
+                          properties:
+                            maxConcurrent:
+                              type: integer
+                              format: int32
+                            perAccount:
+                              type: integer
+                              format: int32
+                            contractPollMilliseconds:
+                              type: integer
+                              format: int32
+                            bidWindowSeconds:
+                              type: integer
+                              format: int32
+                            receiptTimeoutSeconds:
+                              type: integer
+                              format: int32
+                            receiptPollMilliseconds:
+                              type: integer
+                              format: int32
+                            sessionCapSeconds:
+                              type: integer
+                              format: int32
+                            sessionIdleSeconds:
+                              type: integer
+                              format: int32
+                            directoryTTLSeconds:
+                              type: integer
+                              format: int32
+                            directoryKeys:
+                              type: integer
+                              format: int32
+                            policyPollMilliseconds:
+                              type: integer
+                              format: int32
+                            policyTimeoutSeconds:
+                              type: integer
+                              format: int32
+                            oauthScopes:
+                              type: array
+                              items:
+                                type: string
+                        guestControlPlane:
+                          type: object
+                          properties:
+                            guestLoginMount:
+                              type: string
+                            role:
+                              type: string
+                            grantSyncSeconds:
+                              type: integer
+                              format: int32
+                            issuerRetrySeconds:
+                              type: integer
+                              format: int32
+                            hostKeyAttempts:
+                              type: integer
+                              format: int32
+                            relayEnabled:
+                              type: boolean
+                            hostKeyRef:
+                              type: string
+                        pds:
+                          type: object
+                          properties:
+                            maxBlobSize:
+                              type: integer
+                              format: int64
+                            maxRequestBytes:
+                              type: integer
+                              format: int64
+                            contactEmail:
+                              type: string
+                            oauth:
+                              type: object
+                              properties:
+                                allowLocalhostClients:
+                                  type: boolean
+                                accessTokenTTLSeconds:
+                                  type: integer
+                                  format: int32
+                                refreshTokenTTLSeconds:
+                                  type: integer
+                                  format: int32
+                                disableLocalhostClients:
+                                  type: boolean
+                                scopes:
+                                  type: array
+                                  items:
+                                    type: string
+                        sshServer:
+                          type: object
+                          properties:
+                            maxConnections:
+                              type: integer
+                              format: int32
+                            maxSessions:
+                              type: integer
+                              format: int32
+                            sessionsPerAccount:
+                              type: integer
+                              format: int32
+                            maxAuthAttempts:
+                              type: integer
+                              format: int32
+                            authTimeoutSeconds:
+                              type: integer
+                              format: int32
+                            sessionMaxSeconds:
+                              type: integer
+                              format: int32
+                            cacheEntries:
+                              type: integer
+                              format: int32
+                        gatewayAPI:
+                          type: object
+                          properties:
+                            nodePollIntervalSeconds:
+                              type: integer
+                              format: int32
+                            requiredDownloads:
+                              type: array
+                              items:
+                                type: string
+                        ingressProxy:
+                          type: object
+                          properties:
+                            relayTimeoutMilliseconds:
+                              type: integer
+                              format: int32
+                            keepaliveMilliseconds:
+                              type: integer
+                              format: int32
+                            keepaliveTimeoutMilliseconds:
+                              type: integer
+                              format: int32
+                            reconnectGraceMilliseconds:
+                              type: integer
+                              format: int32
+                            nonceTTLMilliseconds:
+                              type: integer
+                              format: int32
+                        relay:
+                          type: object
+                          properties:
+                            crawlIntervalSeconds:
+                              type: integer
+                              format: int32
+                        policyEngine:
+                          type: object
+                          properties:
+                            limits:
+                              type: object
+                              properties:
+                                maxConcurrentRuns:
+                                  type: integer
+                                  format: int32
+                                queueDepth:
+                                  type: integer
+                                  format: int32
+                                activeDeadlineSeconds:
+                                  type: integer
+                                  format: int64
+                                maxConsoleBytes:
+                                  type: integer
+                                  format: int64
+                                maxOutputBytes:
+                                  type: integer
+                                  format: int64
+                                maxCacheEntries:
+                                  type: integer
+                                  format: int32
+                                maxCacheBytes:
+                                  type: integer
+                                  format: int64
+                            trust:
+                              type: object
+                              properties:
+                                ttlSeconds:
+                                  type: integer
+                                  format: int64
+                            cache:
+                              type: object
+                              properties:
+                                verdictTTLSeconds:
+                                  type: integer
+                                  format: int64
+                                scopeTTLSeconds:
+                                  type: integer
+                                  format: int64
+                                recordTTLSeconds:
+                                  type: integer
+                                  format: int64
               operator:
                 type: string
             required:
@@ -355,11 +678,58 @@ spec:
                       type: string
                     ready:
                       type: boolean
+                    suspended:
+                      type: boolean
+                    observedGeneration:
+                      type: integer
+                      format: int64
+                    restarts:
+                      type: integer
+                      format: int32
+                    message:
+                      type: string
                   required:
                     - kind
                     - name
                     - workspace
                     - ready
+              componentSummary:
+                type: object
+                properties:
+                  desired:
+                    type: integer
+                  ready:
+                    type: integer
+                  suspended:
+                    type: integer
+                  notReady:
+                    type: integer
+                required:
+                  - desired
+                  - ready
+                  - suspended
+                  - notReady
+              componentOverrides:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    component:
+                      type: string
+                    generation:
+                      type: integer
+                      format: int64
+                    suspend:
+                      type: boolean
+                    restartPolicy:
+                      type: string
+                    applied:
+                      type: boolean
+                    message:
+                      type: string
+                  required:
+                    - component
+                    - applied
               listeners:
                 type: array
                 items:

@@ -154,6 +154,38 @@ type ApplicationComponent struct {
 	Phase string `json:"phase,omitempty"`
 
 	Ready bool `json:"ready"`
+
+	Suspended bool `json:"suspended,omitempty"`
+
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
+	Restarts int32 `json:"restarts,omitempty"`
+
+	Message string `json:"message,omitempty"`
+}
+
+type ComponentSummary struct {
+	Desired int `json:"desired"`
+
+	Ready int `json:"ready"`
+
+	Suspended int `json:"suspended"`
+
+	NotReady int `json:"notReady"`
+}
+
+type ComponentOverrideStatus struct {
+	Component string `json:"component"`
+
+	Generation int64 `json:"generation,omitempty"`
+
+	Suspend bool `json:"suspend,omitempty"`
+
+	RestartPolicy string `json:"restartPolicy,omitempty"`
+
+	Applied bool `json:"applied"`
+
+	Message string `json:"message,omitempty"`
 }
 
 type ApplicationStatus struct {
@@ -168,6 +200,10 @@ type ApplicationStatus struct {
 	Did string `json:"did,omitempty"`
 
 	Components []ApplicationComponent `json:"components,omitempty"`
+
+	ComponentSummary *ComponentSummary `json:"componentSummary,omitempty"`
+
+	ComponentOverrides []ComponentOverrideStatus `json:"componentOverrides,omitempty"`
 
 	Listeners []ApplicationListener `json:"listeners,omitempty"`
 
@@ -454,6 +490,8 @@ type MarketBidderSpec struct {
 
 	Quota *ApplicationQuota `json:"quota,omitempty"`
 
+	Components ComponentOverrides `json:"components,omitempty"`
+
 	Operator string `json:"operator,omitempty"`
 }
 
@@ -490,6 +528,8 @@ type MarketRequesterSpec struct {
 	Options []ApplicationOption `json:"options,omitempty"`
 
 	Quota *ApplicationQuota `json:"quota,omitempty"`
+
+	Components ComponentOverrides `json:"components,omitempty"`
 }
 
 type Gateway struct {
@@ -525,6 +565,8 @@ type GatewaySpec struct {
 	Options []ApplicationOption `json:"options,omitempty"`
 
 	Quota *ApplicationQuota `json:"quota,omitempty"`
+
+	Components ComponentOverrides `json:"components,omitempty"`
 
 	MarketNetwork *GatewayMarketNetwork `json:"marketNetwork,omitempty"`
 
@@ -586,6 +628,8 @@ type SshGatewaySpec struct {
 	Quota *ApplicationQuota `json:"quota,omitempty"`
 
 	OwnerSessionsFile string `json:"ownerSessionsFile,omitempty"`
+
+	Components ComponentOverrides `json:"components,omitempty"`
 }
 
 type MarketNetwork struct {
@@ -614,6 +658,8 @@ type MarketNetworkSpec struct {
 
 	Ingress *IngressConfig `json:"ingress,omitempty"`
 
+	Components ComponentOverrides `json:"components,omitempty"`
+
 	Apps []NetworkApp `json:"apps,omitempty"`
 }
 
@@ -637,6 +683,8 @@ type NetworkApp struct {
 	OwnerSessionsFile string `json:"ownerSessionsFile,omitempty"`
 
 	ClusterProvider *GatewayClusterProvider `json:"clusterProvider,omitempty"`
+
+	Components ComponentOverrides `json:"components,omitempty"`
 
 	Stopped bool `json:"stopped,omitempty"`
 }
@@ -675,6 +723,10 @@ type MarketNetworkStatus struct {
 	BidderPdsUrl string `json:"bidderPdsUrl,omitempty"`
 
 	Components []ApplicationComponent `json:"components,omitempty"`
+
+	ComponentSummary *ComponentSummary `json:"componentSummary,omitempty"`
+
+	ComponentOverrides []ComponentOverrideStatus `json:"componentOverrides,omitempty"`
 
 	Listeners []ApplicationListener `json:"listeners,omitempty"`
 

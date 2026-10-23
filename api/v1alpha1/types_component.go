@@ -83,7 +83,207 @@ type ComponentServiceAuth struct {
 
 	Audience []string `json:"audience,omitempty"`
 
+	Hostname string `json:"hostname,omitempty"`
+
 	KeyRef string `json:"keyRef,omitempty"`
+}
+
+type ComponentOverrides map[string]ComponentOverride
+
+type ComponentOverride struct {
+	Suspend *bool `json:"suspend,omitempty"`
+
+	RestartPolicy ComponentRestartPolicy `json:"restartPolicy,omitempty"`
+
+	Limits *ComponentLimits `json:"limits,omitempty"`
+
+	ServiceAuth *ComponentServiceAuthOverride `json:"serviceAuth,omitempty"`
+
+	Comms *MarketComms `json:"comms,omitempty"`
+
+	Ingress *IngressConfig `json:"ingress,omitempty"`
+
+	Settings *ComponentSettings `json:"settings,omitempty"`
+}
+
+type ComponentServiceAuthOverride struct {
+	Audience []string `json:"audience,omitempty"`
+
+	Hostname string `json:"hostname,omitempty"`
+}
+
+type ComponentSettings struct {
+	Bidder *BidderSettings `json:"bidder,omitempty"`
+
+	Requester *RequesterSettings `json:"requester,omitempty"`
+
+	GuestControlPlane *GuestControlPlaneSettings `json:"guestControlPlane,omitempty"`
+
+	Pds *PdsSettings `json:"pds,omitempty"`
+
+	SshServer *SshServerSettings `json:"sshServer,omitempty"`
+
+	GatewayAPI *GatewayAPISettings `json:"gatewayAPI,omitempty"`
+
+	IngressProxy *IngressProxySettings `json:"ingressProxy,omitempty"`
+
+	Relay *RelaySettings `json:"relay,omitempty"`
+
+	PolicyEngine *PolicyEngineSettings `json:"policyEngine,omitempty"`
+}
+
+type BidderSettings struct {
+	HeartbeatIntervalSeconds *int32 `json:"heartbeatIntervalSeconds,omitempty"`
+
+	OfferingRefreshSeconds *int32 `json:"offeringRefreshSeconds,omitempty"`
+
+	BidTTLSeconds *int32 `json:"bidTtlSeconds,omitempty"`
+
+	MaxConcurrentGuests *int32 `json:"maxConcurrentGuests,omitempty"`
+
+	PolicyPollMilliseconds *int32 `json:"policyPollMilliseconds,omitempty"`
+
+	PolicyTimeoutSeconds *int32 `json:"policyTimeoutSeconds,omitempty"`
+}
+
+type RequesterSettings struct {
+	MaxConcurrent *int32 `json:"maxConcurrent,omitempty"`
+
+	PerAccount *int32 `json:"perAccount,omitempty"`
+
+	ContractPollMilliseconds *int32 `json:"contractPollMilliseconds,omitempty"`
+
+	BidWindowSeconds *int32 `json:"bidWindowSeconds,omitempty"`
+
+	ReceiptTimeoutSeconds *int32 `json:"receiptTimeoutSeconds,omitempty"`
+
+	ReceiptPollMilliseconds *int32 `json:"receiptPollMilliseconds,omitempty"`
+
+	SessionCapSeconds *int32 `json:"sessionCapSeconds,omitempty"`
+
+	SessionIdleSeconds *int32 `json:"sessionIdleSeconds,omitempty"`
+
+	DirectoryTTLSeconds *int32 `json:"directoryTTLSeconds,omitempty"`
+
+	DirectoryKeys *int32 `json:"directoryKeys,omitempty"`
+
+	PolicyPollMilliseconds *int32 `json:"policyPollMilliseconds,omitempty"`
+
+	PolicyTimeoutSeconds *int32 `json:"policyTimeoutSeconds,omitempty"`
+
+	OAuthScopes []string `json:"oauthScopes,omitempty"`
+}
+
+type GuestControlPlaneSettings struct {
+	GuestLoginMount string `json:"guestLoginMount,omitempty"`
+
+	Role string `json:"role,omitempty"`
+
+	GrantSyncSeconds *int32 `json:"grantSyncSeconds,omitempty"`
+
+	IssuerRetrySeconds *int32 `json:"issuerRetrySeconds,omitempty"`
+
+	HostKeyAttempts *int32 `json:"hostKeyAttempts,omitempty"`
+
+	RelayEnabled *bool `json:"relayEnabled,omitempty"`
+
+	HostKeyRef string `json:"hostKeyRef,omitempty"`
+}
+
+type PdsSettings struct {
+	MaxBlobSize *int64 `json:"maxBlobSize,omitempty"`
+
+	MaxRequestBytes *int64 `json:"maxRequestBytes,omitempty"`
+
+	ContactEmail string `json:"contactEmail,omitempty"`
+
+	OAuth *PdsOAuthSettings `json:"oauth,omitempty"`
+}
+
+type PdsOAuthSettings struct {
+	AllowLocalhostClients *bool `json:"allowLocalhostClients,omitempty"`
+
+	AccessTokenTTLSeconds *int32 `json:"accessTokenTTLSeconds,omitempty"`
+
+	RefreshTokenTTLSeconds *int32 `json:"refreshTokenTTLSeconds,omitempty"`
+
+	DisableLocalhostClients *bool `json:"disableLocalhostClients,omitempty"`
+
+	Scopes []string `json:"scopes,omitempty"`
+}
+
+type SshServerSettings struct {
+	MaxConnections *int32 `json:"maxConnections,omitempty"`
+
+	MaxSessions *int32 `json:"maxSessions,omitempty"`
+
+	SessionsPerAccount *int32 `json:"sessionsPerAccount,omitempty"`
+
+	MaxAuthAttempts *int32 `json:"maxAuthAttempts,omitempty"`
+
+	AuthTimeoutSeconds *int32 `json:"authTimeoutSeconds,omitempty"`
+
+	SessionMaxSeconds *int32 `json:"sessionMaxSeconds,omitempty"`
+
+	CacheEntries *int32 `json:"cacheEntries,omitempty"`
+}
+
+type GatewayAPISettings struct {
+	NodePollIntervalSeconds *int32 `json:"nodePollIntervalSeconds,omitempty"`
+
+	RequiredDownloads []string `json:"requiredDownloads,omitempty"`
+}
+
+type IngressProxySettings struct {
+	RelayTimeoutMilliseconds *int32 `json:"relayTimeoutMilliseconds,omitempty"`
+
+	KeepaliveMilliseconds *int32 `json:"keepaliveMilliseconds,omitempty"`
+
+	KeepaliveTimeoutMilliseconds *int32 `json:"keepaliveTimeoutMilliseconds,omitempty"`
+
+	ReconnectGraceMilliseconds *int32 `json:"reconnectGraceMilliseconds,omitempty"`
+
+	NonceTTLMilliseconds *int32 `json:"nonceTTLMilliseconds,omitempty"`
+}
+
+type RelaySettings struct {
+	CrawlIntervalSeconds *int32 `json:"crawlIntervalSeconds,omitempty"`
+}
+
+type PolicyEngineSettings struct {
+	Limits *PolicyEngineLimitsSettings `json:"limits,omitempty"`
+
+	Trust *PolicyEngineTrustSettings `json:"trust,omitempty"`
+
+	Cache *PolicyEngineCacheSettings `json:"cache,omitempty"`
+}
+
+type PolicyEngineLimitsSettings struct {
+	MaxConcurrentRuns *int32 `json:"maxConcurrentRuns,omitempty"`
+
+	QueueDepth *int32 `json:"queueDepth,omitempty"`
+
+	ActiveDeadlineSeconds *int64 `json:"activeDeadlineSeconds,omitempty"`
+
+	MaxConsoleBytes *int64 `json:"maxConsoleBytes,omitempty"`
+
+	MaxOutputBytes *int64 `json:"maxOutputBytes,omitempty"`
+
+	MaxCacheEntries *int32 `json:"maxCacheEntries,omitempty"`
+
+	MaxCacheBytes *int64 `json:"maxCacheBytes,omitempty"`
+}
+
+type PolicyEngineTrustSettings struct {
+	TTLSeconds *int64 `json:"ttlSeconds,omitempty"`
+}
+
+type PolicyEngineCacheSettings struct {
+	VerdictTTLSeconds *int64 `json:"verdictTTLSeconds,omitempty"`
+
+	ScopeTTLSeconds *int64 `json:"scopeTTLSeconds,omitempty"`
+
+	RecordTTLSeconds *int64 `json:"recordTTLSeconds,omitempty"`
 }
 
 type ComponentStorage struct {
@@ -190,6 +390,16 @@ type BidderSpec struct {
 
 	MaxConcurrentGuests int32 `json:"maxConcurrentGuests,omitempty"`
 
+	HeartbeatIntervalSeconds *int32 `json:"heartbeatIntervalSeconds,omitempty"`
+
+	OfferingRefreshSeconds *int32 `json:"offeringRefreshSeconds,omitempty"`
+
+	BidTTLSeconds *int32 `json:"bidTtlSeconds,omitempty"`
+
+	PolicyPollMilliseconds *int32 `json:"policyPollMilliseconds,omitempty"`
+
+	PolicyTimeoutSeconds *int32 `json:"policyTimeoutSeconds,omitempty"`
+
 	Operator string `json:"operator,omitempty"`
 
 	Policy string `json:"policy,omitempty"`
@@ -236,6 +446,18 @@ type GuestControlPlaneSpec struct {
 	Serve *ComponentServe `json:"serve,omitempty"`
 
 	HostKeyRef string `json:"hostKeyRef,omitempty"`
+
+	GuestLoginMount string `json:"guestLoginMount,omitempty"`
+
+	Role string `json:"role,omitempty"`
+
+	GrantSyncSeconds *int32 `json:"grantSyncSeconds,omitempty"`
+
+	IssuerRetrySeconds *int32 `json:"issuerRetrySeconds,omitempty"`
+
+	HostKeyAttempts *int32 `json:"hostKeyAttempts,omitempty"`
+
+	RelayEnabled *bool `json:"relayEnabled,omitempty"`
 }
 
 type PdsMode string
@@ -296,6 +518,12 @@ type PdsSpec struct {
 
 	AllowExplicitDID bool `json:"allowExplicitDID,omitempty"`
 
+	MaxBlobSize *int64 `json:"maxBlobSize,omitempty"`
+
+	MaxRequestBytes *int64 `json:"maxRequestBytes,omitempty"`
+
+	ContactEmail string `json:"contactEmail,omitempty"`
+
 	OAuth *PdsOAuth `json:"oauth,omitempty"`
 }
 
@@ -309,6 +537,8 @@ type PdsOAuth struct {
 	RefreshTokenTTLSeconds int32 `json:"refreshTokenTTLSeconds,omitempty"`
 
 	DisableLocalhostClients bool `json:"disableLocalhostClients,omitempty"`
+
+	Scopes []string `json:"scopes,omitempty"`
 }
 
 type Requester struct {
@@ -363,6 +593,32 @@ type RequesterSpec struct {
 
 	AcceptCopies int32 `json:"acceptCopies,omitempty"`
 
+	MaxConcurrent int32 `json:"maxConcurrent,omitempty"`
+
+	PerAccount int32 `json:"perAccount,omitempty"`
+
+	ContractPollMilliseconds *int32 `json:"contractPollMilliseconds,omitempty"`
+
+	BidWindowSeconds *int32 `json:"bidWindowSeconds,omitempty"`
+
+	ReceiptTimeoutSeconds *int32 `json:"receiptTimeoutSeconds,omitempty"`
+
+	ReceiptPollMilliseconds *int32 `json:"receiptPollMilliseconds,omitempty"`
+
+	SessionCapSeconds *int32 `json:"sessionCapSeconds,omitempty"`
+
+	SessionIdleSeconds *int32 `json:"sessionIdleSeconds,omitempty"`
+
+	DirectoryTTLSeconds *int32 `json:"directoryTTLSeconds,omitempty"`
+
+	DirectoryKeys *int32 `json:"directoryKeys,omitempty"`
+
+	PolicyPollMilliseconds *int32 `json:"policyPollMilliseconds,omitempty"`
+
+	PolicyTimeoutSeconds *int32 `json:"policyTimeoutSeconds,omitempty"`
+
+	OAuthScopes []string `json:"oauthScopes,omitempty"`
+
 	Comms *MarketComms `json:"comms,omitempty"`
 }
 
@@ -413,6 +669,8 @@ type GatewayAPISpec struct {
 	PostSignInURL string `json:"postSignInURL,omitempty"`
 
 	NodeMarket *GatewayNodeMarket `json:"nodeMarket,omitempty"`
+
+	NodePollIntervalSeconds *int32 `json:"nodePollIntervalSeconds,omitempty"`
 }
 
 type GatewayNodeMarket struct {
@@ -466,6 +724,20 @@ type SshServerSpec struct {
 	HostKeyRef string `json:"hostKeyRef,omitempty"`
 
 	OwnerSessionsFile string `json:"ownerSessionsFile,omitempty"`
+
+	MaxConnections int32 `json:"maxConnections,omitempty"`
+
+	MaxSessions int32 `json:"maxSessions,omitempty"`
+
+	SessionsPerAccount int32 `json:"sessionsPerAccount,omitempty"`
+
+	MaxAuthAttempts int32 `json:"maxAuthAttempts,omitempty"`
+
+	AuthTimeoutSeconds *int32 `json:"authTimeoutSeconds,omitempty"`
+
+	SessionMaxSeconds *int32 `json:"sessionMaxSeconds,omitempty"`
+
+	CacheEntries int32 `json:"cacheEntries,omitempty"`
 }
 
 type Plc struct {
@@ -526,6 +798,8 @@ type RelaySpec struct {
 	Storage *ComponentStorage `json:"storage,omitempty"`
 
 	Serve *ComponentServe `json:"serve,omitempty"`
+
+	CrawlIntervalSeconds *int32 `json:"crawlIntervalSeconds,omitempty"`
 }
 
 type IngressProxy struct {
@@ -579,6 +853,16 @@ type IngressProxySpec struct {
 	Iroh *IngressProxyIroh `json:"iroh,omitempty"`
 
 	OpenTunnel *IngressProxyOpenTunnel `json:"opentunnel,omitempty"`
+
+	RelayTimeoutMilliseconds *int32 `json:"relayTimeoutMilliseconds,omitempty"`
+
+	KeepaliveMilliseconds *int32 `json:"keepaliveMilliseconds,omitempty"`
+
+	KeepaliveTimeoutMilliseconds *int32 `json:"keepaliveTimeoutMilliseconds,omitempty"`
+
+	ReconnectGraceMilliseconds *int32 `json:"reconnectGraceMilliseconds,omitempty"`
+
+	NonceTTLMilliseconds *int32 `json:"nonceTTLMilliseconds,omitempty"`
 }
 
 type IngressProxyIroh struct {

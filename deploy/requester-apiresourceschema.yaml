@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-8.requesters.socialweb.computer
+  name: v1alpha1-9.requesters.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -182,6 +182,8 @@ spec:
                     type: array
                     items:
                       type: string
+                  hostname:
+                    type: string
                   keyRef:
                     type: string
               identity:
@@ -273,6 +275,46 @@ spec:
               acceptCopies:
                 type: integer
                 format: int32
+              maxConcurrent:
+                type: integer
+                format: int32
+              perAccount:
+                type: integer
+                format: int32
+              contractPollMilliseconds:
+                type: integer
+                format: int32
+              bidWindowSeconds:
+                type: integer
+                format: int32
+              receiptTimeoutSeconds:
+                type: integer
+                format: int32
+              receiptPollMilliseconds:
+                type: integer
+                format: int32
+              sessionCapSeconds:
+                type: integer
+                format: int32
+              sessionIdleSeconds:
+                type: integer
+                format: int32
+              directoryTTLSeconds:
+                type: integer
+                format: int32
+              directoryKeys:
+                type: integer
+                format: int32
+              policyPollMilliseconds:
+                type: integer
+                format: int32
+              policyTimeoutSeconds:
+                type: integer
+                format: int32
+              oauthScopes:
+                type: array
+                items:
+                  type: string
               comms:
                 type: object
                 properties:

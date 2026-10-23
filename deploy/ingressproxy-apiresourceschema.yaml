@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-3.ingressproxies.socialweb.computer
+  name: v1alpha1-4.ingressproxies.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -182,6 +182,8 @@ spec:
                     type: array
                     items:
                       type: string
+                  hostname:
+                    type: string
                   keyRef:
                     type: string
               provider:
@@ -280,6 +282,21 @@ spec:
                     type: string
                   localHost:
                     type: string
+              relayTimeoutMilliseconds:
+                type: integer
+                format: int32
+              keepaliveMilliseconds:
+                type: integer
+                format: int32
+              keepaliveTimeoutMilliseconds:
+                type: integer
+                format: int32
+              reconnectGraceMilliseconds:
+                type: integer
+                format: int32
+              nonceTTLMilliseconds:
+                type: integer
+                format: int32
           status:
             type: object
             properties:

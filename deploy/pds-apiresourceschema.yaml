@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-3.pds.socialweb.computer
+  name: v1alpha1-4.pds.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -182,6 +182,8 @@ spec:
                     type: array
                     items:
                       type: string
+                  hostname:
+                    type: string
                   keyRef:
                     type: string
               identity:
@@ -264,6 +266,14 @@ spec:
                 type: string
               allowExplicitDID:
                 type: boolean
+              maxBlobSize:
+                type: integer
+                format: int64
+              maxRequestBytes:
+                type: integer
+                format: int64
+              contactEmail:
+                type: string
               oauth:
                 type: object
                 properties:
@@ -279,6 +289,10 @@ spec:
                     format: int32
                   disableLocalhostClients:
                     type: boolean
+                  scopes:
+                    type: array
+                    items:
+                      type: string
           status:
             type: object
             properties:
