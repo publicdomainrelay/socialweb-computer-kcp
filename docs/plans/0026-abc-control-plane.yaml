@@ -935,11 +935,11 @@ items:
     status: todo
     decision: >
       The core of each service moves out of internal/services: role logic
-    lives in impl packages (internal/market/participant,
-    internal/market/bidder, internal/market/requester and the like) that
-    obey testable_backends, and internal/services/<svc> keeps only the
-    XRPC/HTTP adapter and the component lifecycle.
-    internal/market/participant holds the shared market loop pieces:
+      lives in impl packages (internal/market/participant,
+      internal/market/bidder, internal/market/requester and the like) that
+      obey testable_backends, and internal/services/<svc> keeps only the
+      XRPC/HTTP adapter and the component lifecycle.
+      internal/market/participant holds the shared market loop pieces:
       credential sessions, record encode/decode, comms validation, policy
       run handling, StateSync outbox, service-auth. Bidder and Requester
       keep only their role logic. Services create Bid, StateSync and
@@ -963,7 +963,7 @@ items:
     closes: [D18]
     decision: >
       Same core and adapter split as W4-MARKET for every service below.
-    gatewayapi (NodeClaim manager on the runtime), guestcontrolplane,
+      gatewayapi (NodeClaim manager on the runtime), guestcontrolplane,
       sshserver, ingressproxy, plc, relay, dispatchertls and pds take typed
       specs and bus handles. bidder-dids, adopt-joined-node,
       initializer-nudge and restart-at signals become spec fields or
