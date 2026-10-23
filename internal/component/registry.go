@@ -24,6 +24,49 @@ type Registry struct {
 	mu      sync.RWMutex
 	entries map[Key]Entry
 	uids    map[types.UID]Key
+
+	subMu sync.Mutex
+	subs  map[uint64]func(Key)
+	next  uint64
+}
+
+func (r *Registry) Subscribe(fn func(Key)) (cancel func()) {
+	if r == nil || fn == nil {
+		return func() {}
+	}
+	r.subMu.Lock()
+	if r.subs == nil {
+		r.subs = map[uint64]func(Key){}
+	}
+	r.next++
+	id := r.next
+	r.subs[id] = fn
+	r.subMu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			r.subMu.Lock()
+			delete(r.subs, id)
+			r.subMu.Unlock()
+		})
+	}
+}
+
+func (r *Registry) notify(keys ...Key) {
+	if len(keys) == 0 {
+		return
+	}
+	r.subMu.Lock()
+	fns := make([]func(Key), 0, len(r.subs))
+	for _, fn := range r.subs {
+		fns = append(fns, fn)
+	}
+	r.subMu.Unlock()
+	for _, key := range keys {
+		for _, fn := range fns {
+			fn(key)
+		}
+	}
 }
 
 func NewRegistry() *Registry {
@@ -37,8 +80,13 @@ func (r *Registry) Put(entry Entry) {
 	if r == nil {
 		return
 	}
+	r.notify(r.put(entry)...)
+}
+
+func (r *Registry) put(entry Entry) []Key {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	changed := []Key{entry.Key}
 	if r.entries == nil {
 		r.entries = map[Key]Entry{}
 	}
@@ -53,11 +101,13 @@ func (r *Registry) Put(entry Entry) {
 	if entry.UID != "" {
 		if oldKey, ok := r.uids[entry.UID]; ok && oldKey != entry.Key {
 			delete(r.entries, oldKey)
+			changed = append(changed, oldKey)
 		}
 		r.uids[entry.UID] = entry.Key
 	}
 	entry.Endpoints = cloneEndpoints(entry.Endpoints)
 	r.entries[entry.Key] = entry
+	return changed
 }
 
 func (r *Registry) Get(key Key) (Entry, bool) {
@@ -166,6 +216,14 @@ func (r *Registry) Unregister(key Key, uid types.UID) bool {
 	if r == nil {
 		return false
 	}
+	if !r.unregister(key, uid) {
+		return false
+	}
+	r.notify(key)
+	return true
+}
+
+func (r *Registry) unregister(key Key, uid types.UID) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	entry, ok := r.entries[key]
@@ -188,18 +246,26 @@ func (r *Registry) DeleteUID(uid types.UID) bool {
 	if r == nil {
 		return false
 	}
+	key, ok := r.deleteUID(uid)
+	if ok {
+		r.notify(key)
+	}
+	return ok
+}
+
+func (r *Registry) deleteUID(uid types.UID) (Key, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	key, ok := r.uids[uid]
 	if !ok {
-		return false
+		return Key{}, false
 	}
 	entry, ok := r.entries[key]
 	if ok && entry.UID == uid {
 		delete(r.entries, key)
 	}
 	delete(r.uids, uid)
-	return ok
+	return key, ok
 }
 
 func (r *Registry) Len() int {

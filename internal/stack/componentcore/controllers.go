@@ -129,6 +129,9 @@ func (c *Core) registerLocal(ctx context.Context, mgr *ctlruntime.Manager, clien
 	}
 	exposures, err := c.registerExposure(mgr, local)
 	warn("Service, Exposure, ComponentLink", err)
+	for _, changed := range exposures {
+		c.closers = append(c.closers, c.registry.Subscribe(changed))
+	}
 	_, err = componentctl.Register(mgr, componentctl.Options{Runtime: c.runtime, Scope: local, Changed: exposures, Log: cfg.Log})
 	warn("components", err)
 	warn("MarketIdentity", c.registerIdentity(mgr, local))
