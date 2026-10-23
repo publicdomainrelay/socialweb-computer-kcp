@@ -303,7 +303,7 @@ waves:
     gate: "bidder and requester share one participant core; services create intent objects only through bus handles; no service lists kcp objects."
   - id: W5
     title: "No polling, no signals, architecture gates"
-    status: doing
+    status: done
     serial: true
     tracks: [W5-NO-POLL, W5-GATES]
     depends_on: [W4]
@@ -317,7 +317,7 @@ waves:
     gate: "generated record types produce byte-identical CIDs for every fixture record."
   - id: W7
     title: "Live proof and integration"
-    status: todo
+    status: doing
     serial: true
     tracks: [W7-PROOF]
     depends_on: [W5, W6]
@@ -1013,7 +1013,7 @@ items:
     track: gates
     parallel_with: []
     depends_on: [W5-NO-POLL]
-    status: doing
+    status: done
     decision: >
       scripts/check-architecture.sh enforces: import direction with kit as its own layer (strict); backend packages free of kcp, bus and controller runtime (decisions.testable_backends, strict); every impl package carries a compile-time assertion against an internal/contract interface; no ticker
       outside deploy/obligations.txt; no System caller outside
@@ -1058,7 +1058,7 @@ items:
     track: proof
     parallel_with: []
     depends_on: [W5-GATES, W6-LEXICONS]
-    status: todo
+    status: doing
     decision: >
       Fresh deploy from a dev build on this host first, then an rc build to
       this host, hat-9, hat-7 and the prod gateway. Repeat
