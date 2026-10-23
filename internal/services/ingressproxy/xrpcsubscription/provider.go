@@ -171,7 +171,7 @@ func (p *Provider) Start(ctx context.Context, deps component.Deps) error {
 		return nil
 	}
 
-	p.shutdown()
+	p.shutdown(ctx)
 	server.Close()
 	serveErr := <-errCh
 	p.finish()
@@ -242,7 +242,7 @@ func (p *Provider) Stop(ctx context.Context) error {
 		return nil
 	}
 	p.stopOnce.Do(func() { close(stopCh) })
-	p.shutdown()
+	p.shutdown(ctx)
 	return nil
 }
 
@@ -252,7 +252,7 @@ func (p *Provider) IngressRegistrar() exposure.IngressRegistrar {
 	return p.registrar
 }
 
-func (p *Provider) shutdown() {
+func (p *Provider) shutdown(ctx context.Context) {
 	p.mu.Lock()
 	httpServer := p.http
 	timeout := p.cfg.ShutdownTimeout
@@ -263,7 +263,7 @@ func (p *Provider) shutdown() {
 	if timeout <= 0 {
 		timeout = DefaultShutdownTimeout
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
 	defer cancel()
 	if err := httpServer.Shutdown(ctx); err != nil {
 		_ = httpServer.Close()
