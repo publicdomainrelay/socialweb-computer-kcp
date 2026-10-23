@@ -2,19 +2,25 @@
 set -euo pipefail
 
 if [ "$#" -ne 2 ]; then
-  echo "usage: $0 <from-tag> <to-tag>   (kcp release tags, e.g. v0.33.0 v0.33.1)" >&2
+  echo "usage: $0 <from> <to>   (each a kcp release tag, e.g. v0.33.0, or <release>=<commit> for a source-built kcp," >&2
+  echo "       e.g. v0.33.0-162-g74e9fb9c03f778=74e9fb9c03f778c57d1a6a782d5adc9476ec1af5, <release> being what kcpserver.Release reads from its --version)" >&2
   exit 2
 fi
-from="$1"
-to="$2"
+from="${1%%=*}"
+from_rev="${1#*=}"
+to="${2%%=*}"
+to_rev="${2#*=}"
 repo="${KCP_REPO:-https://github.com/kcp-dev/kcp}"
 work="$(mktemp -d "${TMPDIR:-$HOME/.tmp}/kcp-compat.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 
 listing() {
-  local tag="$1" dir="$work/$1"
-  git clone -q --depth 1 --branch "$tag" --filter=blob:none --sparse "$repo" "$dir" 2>/dev/null
+  local rev="$1" dir="$work/$2"
+  git init -q "$dir"
+  git -C "$dir" remote add origin "$repo"
+  git -C "$dir" fetch -q --depth 1 --filter=blob:none origin "$rev" 2>/dev/null
   git -C "$dir" sparse-checkout set config >/dev/null 2>&1
+  git -C "$dir" checkout -q FETCH_HEAD 2>/dev/null
   local d
   for d in crds system-crds root-phase0 root shard; do
     [ -d "$dir/config/$d" ] || continue
@@ -31,8 +37,8 @@ listing() {
   done | grep -v '^$' | sort -u
 }
 
-listing "$from" >"$work/from.txt"
-listing "$to" >"$work/to.txt"
+listing "$from_rev" from >"$work/from.txt"
+listing "$to_rev" to >"$work/to.txt"
 if [ ! -s "$work/from.txt" ] || [ ! -s "$work/to.txt" ]; then
   echo "kcp-compat: an empty listing for $from or $to; the kcp source layout changed and this script must follow it" >&2
   exit 1
