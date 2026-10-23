@@ -7,3 +7,5 @@ guest-sshd-probe	internal/sshtransport (Requester)	5s until the session timeout	
 guest-rbac-resync	internal/guestidentity (GuestControlPlane)	spec.grantSyncSeconds, 30s when 0	resync requester RBAC records held in a remote repo with no watch
 guest-oidc-refresh	internal/guestidentity (GuestControlPlane)	5m	refresh the OIDC discovery and keys OpenBao publishes with no watch
 custody-renew	internal/gateway/custody (GatewayAPI)	per session: renew below 30m left, by 1h	renew the custody sessions of signed-in web users
+market-heartbeat	internal/market/bidder (Bidder)	spec.heartbeatIntervalSeconds; none when 0	write the market heartbeat record; refresh the offering on a tick once spec.offeringRefreshSeconds has elapsed
+pds-relay-crawl	internal/market/participant (Bidder, Requester)	10s	requestCrawl of the component PDS (Exposure svc-pds-pds-local) at each network relay; a relay offers no watch
