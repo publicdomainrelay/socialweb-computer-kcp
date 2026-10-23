@@ -75,6 +75,8 @@ type Manager struct {
 
 	exportsWG sync.WaitGroup
 
+	sourcesWG sync.WaitGroup
+
 	paths sync.Map
 }
 
@@ -150,6 +152,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.mu.Unlock()
 	cancel()
 	m.exportsWG.Wait()
+	m.sourcesWG.Wait()
 	return err
 }
 
@@ -190,24 +193,24 @@ func (m *Manager) serveExport(ctx context.Context, name string) {
 	}
 }
 
-func (m *Manager) path(ctx context.Context, cluster string) string {
+func (m *Manager) path(ctx context.Context, cluster string) (string, error) {
 	if v, ok := m.paths.Load(cluster); ok {
-		return v.(string)
+		return v.(string), nil
 	}
 	dyn, err := dynamic.NewForConfig(clusterConfig(m.base, cluster))
 	if err != nil {
-		return cluster
+		return "", fmt.Errorf("runtime: the client of logical cluster %s: %w", cluster, err)
 	}
 	lc, err := dyn.Resource(kcpgvr.LogicalClusters).Get(ctx, "cluster", metav1.GetOptions{})
 	if err != nil {
-		return cluster
+		return "", fmt.Errorf("runtime: the workspace path of logical cluster %s: %w", cluster, err)
 	}
 	path := strings.TrimSpace(lc.GetAnnotations()[pathAnnotation])
 	if path == "" {
-		return cluster
+		return cluster, nil
 	}
 	m.paths.Store(cluster, path)
-	return path
+	return path, nil
 }
 
 func clusterConfig(base *rest.Config, cluster string) *rest.Config {

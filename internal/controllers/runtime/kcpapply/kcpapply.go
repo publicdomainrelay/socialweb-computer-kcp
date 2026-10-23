@@ -14,6 +14,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	tenancyv1alpha1 "github.com/kcp-dev/sdk/apis/tenancy/v1alpha1"
@@ -127,9 +128,10 @@ func (r Report) Changed() int {
 }
 
 type Applier struct {
-	base  *rest.Config
-	opts  Options
-	owner string
+	base    *rest.Config
+	opts    Options
+	ownerMu sync.Mutex
+	owner   string
 }
 
 type workspaceOwner struct {
@@ -437,34 +439,44 @@ func (a *Applier) stampOwner(ctx context.Context, u *unstructured.Unstructured) 
 	if _, set := u.GetAnnotations()[tenancyv1alpha1.ExperimentalWorkspaceOwnerAnnotationKey]; set {
 		return u, nil
 	}
-	if a.owner == "" {
-		dyn, err := dynamic.NewForConfig(a.ForWorkspace("root"))
-		if err != nil {
-			return nil, err
-		}
-		review := &unstructured.Unstructured{Object: map[string]any{"apiVersion": "authentication.k8s.io/v1", "kind": "SelfSubjectReview"}}
-		got, err := dyn.Resource(kcpgvr.SelfSubjectReviews).Create(ctx, review, metav1.CreateOptions{})
-		if err != nil {
-			return nil, fmt.Errorf("reading the applying identity for the workspace owner: %w", err)
-		}
-		var r authenticationv1.SelfSubjectReview
-		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(got.Object, &r); err != nil {
-			return nil, err
-		}
-		b, err := json.Marshal(workspaceOwner{Username: r.Status.UserInfo.Username, Groups: r.Status.UserInfo.Groups})
-		if err != nil {
-			return nil, err
-		}
-		a.owner = string(b)
+	owner, err := a.workspaceOwner(ctx)
+	if err != nil {
+		return nil, err
 	}
 	out := u.DeepCopy()
 	ann := out.GetAnnotations()
 	if ann == nil {
 		ann = map[string]string{}
 	}
-	ann[tenancyv1alpha1.ExperimentalWorkspaceOwnerAnnotationKey] = a.owner
+	ann[tenancyv1alpha1.ExperimentalWorkspaceOwnerAnnotationKey] = owner
 	out.SetAnnotations(ann)
 	return out, nil
+}
+
+func (a *Applier) workspaceOwner(ctx context.Context) (string, error) {
+	a.ownerMu.Lock()
+	defer a.ownerMu.Unlock()
+	if a.owner == "" {
+		dyn, err := dynamic.NewForConfig(a.ForWorkspace("root"))
+		if err != nil {
+			return "", err
+		}
+		review := &unstructured.Unstructured{Object: map[string]any{"apiVersion": "authentication.k8s.io/v1", "kind": "SelfSubjectReview"}}
+		got, err := dyn.Resource(kcpgvr.SelfSubjectReviews).Create(ctx, review, metav1.CreateOptions{})
+		if err != nil {
+			return "", fmt.Errorf("reading the applying identity for the workspace owner: %w", err)
+		}
+		var r authenticationv1.SelfSubjectReview
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(got.Object, &r); err != nil {
+			return "", err
+		}
+		b, err := json.Marshal(workspaceOwner{Username: r.Status.UserInfo.Username, Groups: r.Status.UserInfo.Groups})
+		if err != nil {
+			return "", err
+		}
+		a.owner = string(b)
+	}
+	return a.owner, nil
 }
 
 func (a *Applier) applySchema(ctx context.Context, ri dynamic.ResourceInterface, u, live *unstructured.Unstructured, c Change) (Change, error) {

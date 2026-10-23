@@ -152,7 +152,7 @@ func networkWorkspaces(ctx context.Context, rec devinstance.Record) []string {
 		seen[workspace] = true
 		out = append(out, workspace)
 	}
-	for _, workspace := range componentcore.AppWorkspaces(baseWorkspace(rec)) {
+	for _, workspace := range componentcore.NetworkWorkspaces(baseWorkspace(rec)) {
 		add(workspace)
 	}
 	for _, c := range n.Status.Components {

@@ -42,7 +42,7 @@ func gatewayServerFor(kcpClients component.KCPClients, nodeClaimAgent *kcpclient
 		agent, _ = kcpclient.ParseServiceAccountRef(contractnodeclaim.AgentRef(workspace))
 	}
 	opts := kcpclient.Options{Host: restConfig.Host, RestConfig: restConfig, PublicHost: publicHost,
-		HostProcessWorkspace: workspace, NodeClaimAgent: agent, RecordWorkspaceOwner: true}
+		HostProcessWorkspace: workspace, NodeClaimAgent: agent}
 	if clusterStateDir != "" {
 		opts.Tenant = ownerCredentials(clusterStateDir)
 	}

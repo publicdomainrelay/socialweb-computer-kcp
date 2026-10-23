@@ -467,6 +467,9 @@ func ComponentCoreConfig(ctx context.Context, cfg Config, rec devinstance.Record
 	} else {
 		out.InstallAccount = install.AccountGateway
 	}
+	if rec.Profile == bootstrap.ProfileMarketNetwork {
+		out.Workspaces = componentcore.NetworkWorkspaces(rec.BaseWorkspace)
+	}
 	if rec.Profile == bootstrap.ProfileMarketNetwork && rec.AdminKubeconfig != "" {
 		out.WorkspacesFunc = func(ctx context.Context) []string {
 			n, err := marketnetwork.ReadNetwork(ctx, rec.AdminKubeconfig)

@@ -34,6 +34,8 @@ import (
 	mcreconcile "sigs.k8s.io/multicluster-runtime/pkg/reconcile"
 )
 
+const scopeMissRetries = 10
+
 type Object interface {
 	metav1.Object
 	kruntime.Object
@@ -260,7 +262,7 @@ func For[T Object](m *Manager, name string, r Reconciler[T], opts ...Option) err
 		b = b.Watches(w.object, m.mapHandler(o.export, w.mapFunc), source)
 	}
 	for _, ch := range o.events {
-		b = b.WatchesRawSource(eventSource(o.export, ch))
+		b = b.WatchesRawSource(m.eventSource(o.export, ch))
 	}
 	a := &adapter[T]{m: m, name: name, r: r, limiter: limiter, log: log, only: o.only, inWorkspace: o.inWorkspace, gone: o.gone,
 		scope: scope{scheme: m.scheme, fieldManager: o.fieldManager, finalizer: o.finalizer, sharedStatus: o.sharedStatus, log: log}}
@@ -275,7 +277,13 @@ func (m *Manager) mapHandler(export string, mapFunc func(ctx context.Context, sr
 	return func(cn multicluster.ClusterName, _ cluster.Cluster) handler.TypedEventHandler[client.Object, mcreconcile.Request] {
 		_, lc := splitCluster(string(cn))
 		return handler.TypedEnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []mcreconcile.Request {
-			src := Request{Cluster: lc, Workspace: m.path(ctx, lc), Namespace: obj.GetNamespace(), Name: obj.GetName()}
+			workspace, err := m.path(ctx, lc)
+			if err != nil {
+				m.log.Warn("a watched object is not mapped: its workspace path does not resolve", "export", export, "cluster", lc,
+					"name", obj.GetName(), "err", err.Error())
+				return nil
+			}
+			src := Request{Cluster: lc, Workspace: workspace, Namespace: obj.GetNamespace(), Name: obj.GetName()}
 			var out []mcreconcile.Request
 			for _, r := range mapFunc(ctx, src, obj) {
 				cluster := lc
@@ -291,20 +299,24 @@ func (m *Manager) mapHandler(export string, mapFunc func(ctx context.Context, sr
 	}
 }
 
-func eventSource(export string, ch <-chan Request) source.TypedSource[mcreconcile.Request] {
-	events := make(chan event.TypedGenericEvent[mcreconcile.Request])
-	go func() {
-		defer close(events)
-		for r := range ch {
-			events <- event.TypedGenericEvent[mcreconcile.Request]{Object: mcreconcile.Request{
-				ClusterName: multicluster.ClusterName(export + clusterSeparator + r.Cluster),
-				Request:     reconcile.Request{NamespacedName: types.NamespacedName{Namespace: r.Namespace, Name: r.Name}}}}
-		}
-	}()
-	return source.TypedChannel(events, handler.TypedFuncs[mcreconcile.Request, mcreconcile.Request]{
-		GenericFunc: func(_ context.Context, e event.TypedGenericEvent[mcreconcile.Request], q workqueue.TypedRateLimitingInterface[mcreconcile.Request]) {
-			q.Add(e.Object)
-		}})
+func (m *Manager) eventSource(export string, ch <-chan Request) source.TypedSource[mcreconcile.Request] {
+	return source.TypedFunc[mcreconcile.Request](func(ctx context.Context, q workqueue.TypedRateLimitingInterface[mcreconcile.Request]) error {
+		m.sourcesWG.Go(func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case r, ok := <-ch:
+					if !ok {
+						return
+					}
+					q.Add(mcreconcile.Request{ClusterName: multicluster.ClusterName(export + clusterSeparator + r.Cluster),
+						Request: reconcile.Request{NamespacedName: types.NamespacedName{Namespace: r.Namespace, Name: r.Name}}})
+				}
+			}
+		})
+		return nil
+	})
 }
 
 func exportFilter(export string) mcbuilder.EngageOptions {
@@ -351,9 +363,12 @@ func (a *adapter[T]) Reconcile(ctx context.Context, mcreq mcreconcile.Request) (
 	if err != nil {
 		return reconcile.Result{}, err
 	}
-	workspace := a.m.path(ctx, lc)
+	workspace, err := a.m.path(ctx, lc)
+	if err != nil {
+		return reconcile.Result{}, a.failed(mcreq, lc, mcreq.Name, err)
+	}
 	if a.inWorkspace != nil && !a.inWorkspace(workspace) {
-		return reconcile.Result{}, nil
+		return a.outOfScope(mcreq, workspace), nil
 	}
 	obj, err := newObject[T]()
 	if err != nil {
@@ -397,6 +412,18 @@ func (a *adapter[T]) Reconcile(ctx context.Context, mcreq mcreconcile.Request) (
 		}
 	}
 	return reconcile.Result{RequeueAfter: res.RequeueAfter}, nil
+}
+
+func (a *adapter[T]) outOfScope(item mcreconcile.Request, workspace string) reconcile.Result {
+	misses := a.limiter.NumRequeues(item)
+	if misses >= scopeMissRetries {
+		a.log.Debug("the workspace stays outside the controller's scope; the request is dropped", "workspace", workspace,
+			"name", item.Name, "misses", misses)
+		return reconcile.Result{}
+	}
+	a.log.Debug("the workspace is not in the controller's scope yet; it requeues with backoff", "workspace", workspace,
+		"name", item.Name, "misses", misses+1)
+	return reconcile.Result{Requeue: true} //nolint:staticcheck
 }
 
 func (a *adapter[T]) failed(item mcreconcile.Request, workspace, name string, err error) error {
