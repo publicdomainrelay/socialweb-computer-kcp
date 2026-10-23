@@ -579,8 +579,10 @@ func (s *Supervisor) Run(ctx context.Context) error {
 	defer t.Stop()
 	wake := make(chan struct{}, 1)
 	changed := make(chan string, 1024)
+	var wg sync.WaitGroup
+	defer wg.Wait()
 	for range EventWorkers {
-		go func() {
+		wg.Go(func() {
 			for {
 				select {
 				case <-ctx.Done():
@@ -589,9 +591,9 @@ func (s *Supervisor) Run(ctx context.Context) error {
 					s.reconcileName(ctx, name)
 				}
 			}
-		}()
+		})
 	}
-	go s.watch(ctx, wake, changed)
+	wg.Go(func() { s.watch(ctx, wake, changed) })
 	for {
 		if err := s.Pass(ctx); err != nil {
 			s.c.log().Warn("a reconcile pass failed; units keep running", "err", err.Error())
