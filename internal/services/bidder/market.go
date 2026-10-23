@@ -25,6 +25,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	atprotooauth "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/oauthcallback"
@@ -42,8 +43,6 @@ const (
 	SubmitEventPath = "/xrpc/" + market.SubmitEventNSID
 
 	MaxSubmitBody = 2 << 20
-
-	serviceAuthMintNSID = "com.atproto.server.getServiceAuth"
 
 	serviceAuthTokenLifetime = 5 * time.Minute
 
@@ -467,55 +466,36 @@ func (s *Service) callService(ctx context.Context, endpoint, nsid, lxm string, b
 }
 
 func (s *Service) postXRPC(ctx context.Context, endpoint, nsid string, body any) error {
-	raw, err := json.Marshal(body)
-	if err != nil {
-		return err
-	}
-	target := strings.TrimRight(endpoint, "/") + "/xrpc/" + nsid
 	host := hostPortOf(endpoint)
-	client := externalHTTPClient(s.cfg.Deps, DefaultCallTimeout)
-	var resp *http.Response
-	for attempt := range 2 {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, strings.NewReader(string(raw)))
-		if err != nil {
-			return err
-		}
-		req.Header.Set("Content-Type", "application/json")
-		token := ""
-		if host == "" {
-			if attempt == 0 {
-				s.log.Warn("the outbound XRPC call is unsigned: the endpoint has no hostname", "url", endpoint, "nsid", nsid)
-			}
-		} else if minted, tokenErr := s.serviceAuthToken(ctx, host, nsid); tokenErr != nil {
-			if attempt == 0 {
-				s.log.Warn("the outbound XRPC call is unsigned: the PDS cannot mint a service-auth token", "url", endpoint, "nsid", nsid, "err", tokenErr)
-			}
-		} else {
-			token = minted
-			req.Header.Set("Authorization", "Bearer "+token)
-		}
-		resp, err = client.Do(req)
-		if err != nil {
-			return err
-		}
-		if attempt == 0 && token != "" && (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) {
-			io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
-			resp.Body.Close()
-			s.invalidateServiceAuth(host, nsid)
-			continue
-		}
-		break
+	client := &xrpc.Client{Host: endpoint, HTTP: s.cfg.Deps.ExternalHTTPClient(DefaultCallTimeout), Limit: 4096}
+	if host == "" {
+		s.log.Warn("the outbound XRPC call is unsigned: the endpoint has no hostname", "url", endpoint, "nsid", nsid)
+	} else if _, tokenErr := s.serviceAuthToken(ctx, host, nsid); tokenErr != nil {
+		s.log.Warn("the outbound XRPC call is unsigned: the PDS cannot mint a service-auth token", "url", endpoint, "nsid", nsid, "err", tokenErr)
+	} else {
+		client.Auth = &xrpc.ServiceAuth{Tokens: serviceAuthSource{s: s, host: host, lxm: nsid}}
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		detail, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		message := strings.TrimSpace(string(detail))
-		if message == "" {
-			return &serviceCallError{Status: resp.StatusCode, Err: fmt.Errorf("HTTP %d", resp.StatusCode)}
-		}
-		return &serviceCallError{Status: resp.StatusCode, Err: fmt.Errorf("HTTP %d: %s", resp.StatusCode, message)}
+	_, err := xrpc.Procedure[any, struct{}](ctx, client, nsid, body)
+	if xerr, ok := errors.AsType[*xrpc.Error](err); ok {
+		return &serviceCallError{Status: xerr.Status, Err: xerr}
 	}
-	return nil
+	return err
+}
+
+type serviceAuthSource struct {
+	s *Service
+
+	host string
+
+	lxm string
+}
+
+func (a serviceAuthSource) Get(ctx context.Context) (string, error) {
+	return a.s.serviceAuthToken(ctx, a.host, a.lxm)
+}
+
+func (a serviceAuthSource) Invalidate() {
+	a.s.invalidateServiceAuth(a.host, a.lxm)
 }
 
 type serviceAuthToken struct {
@@ -571,75 +551,39 @@ func (s *Service) mintServiceAuth(ctx context.Context, aud, lxm string, now time
 		}
 		return token, serviceAuthCacheExpiry(token, expires), nil
 	}
-	query := url.Values{"aud": {aud}, "lxm": {lxm}, "exp": {fmt.Sprintf("%d", expires.Unix())}}
-	target := endpoint + "/xrpc/" + serviceAuthMintNSID + "?" + query.Encode()
 	callCtx, cancel := context.WithTimeout(ctx, DefaultCallTimeout)
 	defer cancel()
-	var resp *http.Response
-	var raw []byte
-	for attempt := range 2 {
-		accessToken, err := s.pdsAccessTokenForServiceAuth(ctx)
-		if err != nil {
-			return "", time.Time{}, err
-		}
-		if accessToken == "" {
-			return "", time.Time{}, errors.New("the bidder has no PDS access token")
-		}
-		req, err := http.NewRequestWithContext(callCtx, http.MethodGet, target, nil)
-		if err != nil {
-			return "", time.Time{}, err
-		}
-		req.Header.Set("Accept", "application/json")
-		scheme := "Bearer"
-		if s.cfg.PDSDPoP != nil {
-			scheme = "DPoP"
-		}
-		req.Header.Set("Authorization", scheme+" "+accessToken)
-		if s.cfg.PDSDPoP != nil {
-			proof, proofErr := s.cfg.PDSDPoP.DPoPProof(callCtx, http.MethodGet, req.URL.String(), accessToken)
-			if proofErr != nil {
-				return "", time.Time{}, proofErr
-			}
-			if proof != "" {
-				req.Header.Set("DPoP", proof)
-			}
-		}
-		resp, err = s.pdsHTTPClient().Do(req)
-		if err != nil {
-			return "", time.Time{}, err
-		}
-		raw, err = io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-		resp.Body.Close()
-		if err != nil {
-			return "", time.Time{}, err
-		}
-		if attempt == 0 && (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) {
-			if refresher, ok := s.cfg.PDSTokens.(pdsclient.TokenRefresher); ok {
-				if _, refreshErr := refresher.RefreshAccessToken(ctx); refreshErr == nil {
-					continue
-				}
-			}
-		}
-		break
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		message := strings.TrimSpace(string(raw))
-		if message == "" {
-			return "", time.Time{}, fmt.Errorf("getServiceAuth answered HTTP %d", resp.StatusCode)
-		}
-		return "", time.Time{}, fmt.Errorf("getServiceAuth answered HTTP %d: %s", resp.StatusCode, message)
-	}
-	var out struct {
-		Token string `json:"token"`
-	}
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return "", time.Time{}, err
-	}
-	token := strings.TrimSpace(out.Token)
-	if token == "" {
-		return "", time.Time{}, errors.New("the PDS returned no service-auth token")
+	client := &xrpc.Client{Host: endpoint, HTTP: s.pdsHTTPClient(), Auth: s.pdsAuth()}
+	token, err := xrpc.GetServiceAuth(callCtx, client, aud, lxm, expires)
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("getServiceAuth %s: %w", aud, err)
 	}
 	return token, serviceAuthCacheExpiry(token, expires), nil
+}
+
+func (s *Service) pdsAuth() xrpc.Auth {
+	var refresh xrpc.TokenFunc
+	if refresher, ok := s.cfg.PDSTokens.(pdsclient.TokenRefresher); ok {
+		refresh = refresher.RefreshAccessToken
+	}
+	tokens := xrpc.Refreshing(func(ctx context.Context) (string, error) {
+		token, err := s.pdsAccessTokenForServiceAuth(ctx)
+		if err != nil {
+			return "", err
+		}
+		if token == "" {
+			return "", errors.New("the bidder has no PDS access token")
+		}
+		return token, nil
+	}, refresh)
+	if s.cfg.PDSDPoP == nil {
+		return &xrpc.Bearer{Tokens: tokens}
+	}
+	dpop := s.cfg.PDSDPoP
+	return xrpc.StatusRetry(&xrpc.DPoP{Tokens: tokens, Prover: xrpc.DPoPProverFunc(func(ctx context.Context, method, target, accessToken, _ string) (xrpc.DPoPProof, error) {
+		proof, err := dpop.DPoPProof(ctx, method, target, accessToken)
+		return xrpc.DPoPProof{Proof: proof}, err
+	})})
 }
 
 func serviceAuthCacheExpiry(token string, requested time.Time) time.Time {
@@ -697,7 +641,7 @@ func (s *Service) pdsHTTPClient() *http.Client {
 	if s.pdsInternal && s.cfg.Deps.Handlers != nil {
 		return s.cfg.Deps.Handlers.HTTPClient()
 	}
-	return externalHTTPClient(s.cfg.Deps, DefaultCallTimeout)
+	return s.cfg.Deps.ExternalHTTPClient(DefaultCallTimeout)
 }
 
 func (s *Service) createReceipt(ctx context.Context, refs market.ReceiptRefs, accept market.ResolvedRecord, issuer string) (string, string, error) {

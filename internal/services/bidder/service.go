@@ -26,6 +26,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/ingress"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/ref"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
@@ -427,23 +428,11 @@ func (s *Service) registerPDSWithRelay(ctx context.Context) {
 		s.log.Warn("the bidder PDS Exposure has no URL", "url", raw)
 		return
 	}
-	body := strings.NewReader(fmt.Sprintf(`{"hostname":%q}`, parsed.Host))
 	registered := false
 	for _, relayURL := range s.cfg.Network.RelayURLs {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-			strings.TrimRight(relayURL, "/")+"/xrpc/com.atproto.sync.requestCrawl", body)
-		if err != nil {
-			return
+		if xrpc.RequestCrawl(ctx, &xrpc.Client{Host: relayURL, HTTP: &http.Client{Timeout: 10 * time.Second}}, parsed.Host) == nil {
+			registered = true
 		}
-		req.Header.Set("Content-Type", "application/json")
-		resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
-		if err == nil {
-			if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-				registered = true
-			}
-			resp.Body.Close()
-		}
-		body = strings.NewReader(fmt.Sprintf(`{"hostname":%q}`, parsed.Host))
 	}
 	if registered && s.loop != nil {
 		if err := s.loop.touchOffering(ctx); err != nil {
@@ -534,7 +523,7 @@ func (s *Service) resolveRecords(ctx context.Context) error {
 		if resolver == nil {
 			resolver = &pdsclient.Resolver{
 				Handlers:   s.cfg.Deps.Handlers,
-				HTTPClient: externalHTTPClient(s.cfg.Deps, RecordRequestTimeout),
+				HTTPClient: s.cfg.Deps.ExternalHTTPClient(RecordRequestTimeout),
 				TLS:        s.cfg.Deps.TLS,
 				Tokens:     tokens,
 				DPoP:       s.cfg.PDSDPoP,
@@ -555,7 +544,7 @@ func (s *Service) resolveRecords(ctx context.Context) error {
 		return err
 	}
 	reader := market.NewHTTPReader(s.dir)
-	reader.Client = externalHTTPClient(s.cfg.Deps, RecordRequestTimeout)
+	reader.Client = s.cfg.Deps.ExternalHTTPClient(RecordRequestTimeout)
 	if client, ok := reader.Client.(*http.Client); ok {
 		if transport, ok := client.Transport.(*http.Transport); ok && transport.TLSClientConfig != nil {
 			s.log.Info("the bidder's record reader trusts its roots", "rootCAs", transport.TLSClientConfig.RootCAs != nil)
@@ -569,7 +558,7 @@ func (s *Service) credentialTokenSource() pdsclient.TokenSource {
 	if s.cfg.PDSAccessTokenRef == nil || s.cfg.Deps.Credentials == nil || strings.TrimSpace(s.cfg.PDSURL) == "" {
 		return nil
 	}
-	client := externalHTTPClient(s.cfg.Deps, DefaultCallTimeout)
+	client := s.cfg.Deps.ExternalHTTPClient(DefaultCallTimeout)
 	if s.pdsInternal && s.cfg.Deps.Handlers != nil {
 		client = s.cfg.Deps.Handlers.HTTPClient()
 	}

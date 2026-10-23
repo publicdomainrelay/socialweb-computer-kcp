@@ -33,6 +33,14 @@ type Challenger interface {
 	Challenge(resp *http.Response) Verdict
 }
 
+func StatusRetry(a Auth) Auth {
+	return statusRetry{Auth: a}
+}
+
+type statusRetry struct {
+	Auth
+}
+
 type TokenFunc func(ctx context.Context) (string, error)
 
 func Static(token string) Source[string] {

@@ -51,10 +51,7 @@ func Query[Out any](ctx context.Context, c *Client, nsid string, params url.Valu
 		return out, err
 	}
 	reply, err := c.do(ctx, http.MethodGet, nsid, target, nil)
-	if err != nil {
-		return out, err
-	}
-	return decode[Out](nsid, reply)
+	return decode[Out](nsid, reply, err)
 }
 
 func Procedure[In, Out any](ctx context.Context, c *Client, nsid string, in In) (Out, error) {
@@ -68,10 +65,7 @@ func Procedure[In, Out any](ctx context.Context, c *Client, nsid string, in In) 
 		return out, fmt.Errorf("xrpc: encoding %s: %w", nsid, err)
 	}
 	reply, err := c.do(ctx, http.MethodPost, nsid, target, body)
-	if err != nil {
-		return out, err
-	}
-	return decode[Out](nsid, reply)
+	return decode[Out](nsid, reply, err)
 }
 
 func Health(ctx context.Context, c *Client) error {
@@ -174,10 +168,11 @@ func (c *Client) do(ctx context.Context, method, nsid, target string, body []byt
 		if resp.StatusCode < 200 || resp.StatusCode > 299 {
 			return Reply{}, newError(resp.StatusCode, raw)
 		}
+		reply := Reply{Status: resp.StatusCode, Header: resp.Header, Body: raw}
 		if over {
-			return Reply{}, fmt.Errorf("%w: %s answered more than %d bytes", ErrTooLarge, nsid, limit)
+			return reply, fmt.Errorf("%w: %s answered more than %d bytes", ErrTooLarge, nsid, limit)
 		}
-		return Reply{Status: resp.StatusCode, Header: resp.Header, Body: raw}, nil
+		return reply, nil
 	}
 }
 
@@ -191,8 +186,14 @@ func (c *Client) verdict(resp *http.Response) Verdict {
 	return Done
 }
 
-func decode[Out any](nsid string, reply Reply) (Out, error) {
+func decode[Out any](nsid string, reply Reply, err error) (Out, error) {
 	var out Out
+	if _, discard := any(&out).(*struct{}); discard && errors.Is(err, ErrTooLarge) {
+		return out, nil
+	}
+	if err != nil {
+		return out, err
+	}
 	switch target := any(&out).(type) {
 	case *Reply:
 		*target = reply
