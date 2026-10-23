@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -152,6 +153,8 @@ type Controller struct {
 
 	lastDesired map[string]map[string]any
 	drift       map[string]map[string]time.Time
+
+	pdsPublicURLs sync.Map
 }
 
 func clusterConfig(base *rest.Config, ws string) *rest.Config {

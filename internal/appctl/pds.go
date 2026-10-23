@@ -16,7 +16,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/atcrypto"
@@ -44,8 +43,6 @@ const (
 	RepoKeyField      = "repoKeyHex"
 	passwordBytes     = 24
 )
-
-var appPdsPublicURLs sync.Map
 
 type PdsSession struct {
 	Did string
@@ -153,20 +150,20 @@ func (ctl *Controller) pdsExposureURLOf(ctx context.Context, ws, name, suffix st
 	}
 	u, err := ri.Get(ctx, serviceNameFor(ComponentKindPds, name)+suffix, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
-		appPdsPublicURLs.Delete(key)
+		ctl.pdsPublicURLs.Delete(key)
 		return ""
 	}
 	if err != nil {
-		value, _ := appPdsPublicURLs.Load(key)
+		value, _ := ctl.pdsPublicURLs.Load(key)
 		raw, _ := value.(string)
 		return raw
 	}
 	var o exposurev1alpha1.Exposure
 	if err := fromUnstructured(u, &o); err == nil && o.Status.Address != "" {
-		appPdsPublicURLs.Store(key, o.Status.Address)
+		ctl.pdsPublicURLs.Store(key, o.Status.Address)
 		return o.Status.Address
 	}
-	value, _ := appPdsPublicURLs.Load(key)
+	value, _ := ctl.pdsPublicURLs.Load(key)
 	raw, _ := value.(string)
 	return raw
 }
