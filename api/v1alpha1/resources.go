@@ -107,19 +107,19 @@ var APIResources = []APIResource{
 		{Name: "Sealed", Type: "boolean", JSONPath: ".status.sealed"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "MarketNetwork", Plural: "marketnetworks", Revision: 18, Export: "applications", Object: MarketNetwork{}, PrinterColumns: []PrinterColumn{
+	{Kind: "MarketNetwork", Plural: "marketnetworks", Revision: 19, Export: "applications", Object: MarketNetwork{}, PrinterColumns: []PrinterColumn{
 		{Name: "Profile", Type: "string", JSONPath: ".spec.profile"},
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "PLC", Type: "string", JSONPath: ".status.network.plcDirectoryUrl"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "MarketBidder", Plural: "marketbidders", Revision: 21, Export: "applications", Object: MarketBidder{}, PrinterColumns: []PrinterColumn{
+	{Kind: "MarketBidder", Plural: "marketbidders", Revision: 22, Export: "applications", Object: MarketBidder{}, PrinterColumns: []PrinterColumn{
 		{Name: "Profile", Type: "string", JSONPath: ".spec.profile"},
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "DID", Type: "string", JSONPath: ".status.did"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "MarketRequester", Plural: "marketrequesters", Revision: 18, Export: "applications", Object: MarketRequester{}, PrinterColumns: []PrinterColumn{
+	{Kind: "MarketRequester", Plural: "marketrequesters", Revision: 19, Export: "applications", Object: MarketRequester{}, PrinterColumns: []PrinterColumn{
 		{Name: "Profile", Type: "string", JSONPath: ".spec.profile"},
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "DID", Type: "string", JSONPath: ".status.did"},
@@ -131,12 +131,12 @@ var APIResources = []APIResource{
 		{Name: "Winner", Type: "string", JSONPath: ".status.contract.winner.did"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "Gateway", Plural: "gateways", Revision: 23, Export: "applications", Object: Gateway{}, PrinterColumns: []PrinterColumn{
+	{Kind: "Gateway", Plural: "gateways", Revision: 24, Export: "applications", Object: Gateway{}, PrinterColumns: []PrinterColumn{
 		{Name: "Profile", Type: "string", JSONPath: ".spec.profile"},
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "SshGateway", Plural: "sshgateways", Revision: 17, Export: "applications", Object: SshGateway{}, PrinterColumns: []PrinterColumn{
+	{Kind: "SshGateway", Plural: "sshgateways", Revision: 18, Export: "applications", Object: SshGateway{}, PrinterColumns: []PrinterColumn{
 		{Name: "Profile", Type: "string", JSONPath: ".spec.profile"},
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
@@ -145,7 +145,7 @@ var APIResources = []APIResource{
 	{Kind: "GuestControlPlane", Plural: "guestcontrolplanes", Revision: 7, Export: "applications", Object: GuestControlPlane{}, PrinterColumns: componentPrinterColumns},
 	{Kind: "Pds", Plural: "pds", Revision: 8, Export: "applications", Object: Pds{}, PrinterColumns: componentPrinterColumns},
 	{Kind: "Requester", Plural: "requesters", Revision: 16, Export: "applications", Object: Requester{}, PrinterColumns: componentPrinterColumns},
-	{Kind: "GatewayAPI", Plural: "gatewayapis", Revision: 9, Export: "applications", Object: GatewayAPI{}, PrinterColumns: componentPrinterColumns},
+	{Kind: "GatewayAPI", Plural: "gatewayapis", Revision: 10, Export: "applications", Object: GatewayAPI{}, PrinterColumns: componentPrinterColumns},
 	{Kind: "SshServer", Plural: "sshservers", Revision: 8, Export: "applications", Object: SshServer{}, PrinterColumns: componentPrinterColumns},
 	{Kind: "Plc", Plural: "plcs", Revision: 7, Export: "applications", Object: Plc{}, PrinterColumns: componentPrinterColumns},
 	{Kind: "Relay", Plural: "relays", Revision: 7, Export: "applications", Object: Relay{}, PrinterColumns: componentPrinterColumns},

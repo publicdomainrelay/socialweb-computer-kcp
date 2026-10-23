@@ -44,7 +44,6 @@ const (
 	GatewayAudienceOption   = "gateway-audience"
 	GatewayNodePolicy       = "node-policy"
 	GatewayNodePolicyArgs   = "node-policy-args"
-	GatewayNodePollOption   = "node-poll-interval-ms"
 	GatewayPostSignInOption = "post-sign-in-url"
 	GatewayAPIComponent     = "gateway-api"
 )
@@ -204,9 +203,6 @@ func gatewayNodeMarket(o *v1alpha1.Gateway, workspace string) *v1alpha1.GatewayN
 		HomeWorkspace: workspace, ContractWorkspace: workspace,
 		NodePolicy: compose.OptionValue(o.Spec.Options, GatewayNodePolicy), NodePolicyArgs: compose.OptionValue(o.Spec.Options, GatewayNodePolicyArgs),
 		ExtraBidderDIDs: slices.Clone(o.Spec.BidderDids)}
-	if ms := compose.OptionInt(o.Spec.Options, GatewayNodePollOption); ms > 0 {
-		out.PollIntervalSeconds = int32((ms + 999) / 1000)
-	}
 	return out
 }
 

@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-23.gateways.socialweb.computer
+  name: v1alpha1-24.gateways.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -627,9 +627,6 @@ spec:
                         gatewayAPI:
                           type: object
                           properties:
-                            nodePollIntervalSeconds:
-                              type: integer
-                              format: int32
                             requiredDownloads:
                               type: array
                               items:
