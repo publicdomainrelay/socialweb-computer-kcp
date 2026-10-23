@@ -108,7 +108,7 @@ func (g *grantLoop) scan(ctx context.Context) error {
 				continue
 			}
 		}
-		if vm.Status.Market == nil || len(vm.Status.Market.HostKeys) == 0 {
+		if held := computevm.GuestReportOf(vm); held == nil || len(held.HostKeys) == 0 {
 			g.recordHostKey(ctx, vm.Name)
 		}
 	}

@@ -72,11 +72,14 @@ func (s *Service) reconcileBid(ctx context.Context, bid *v1alpha1.Bid, now time.
 	}
 	if bid.Status.Terminated != nil && bid.Status.Phase == v1alpha1.BidPhaseWon {
 		s.finishRelease(ctx, bid, now)
+		s.finishBid(ctx, bid, now)
 		return
 	}
 	switch bid.Status.Phase {
 	case v1alpha1.BidPhaseDeciding, v1alpha1.BidPhasePublished:
 	default:
+		s.bindWonBid(ctx, bid)
+		s.finishBid(ctx, bid, now)
 		return
 	}
 	if bidExpired(bid, now) {

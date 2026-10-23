@@ -18,6 +18,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestidentity"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestnet"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestseed"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 type VMStore interface {
@@ -29,11 +30,11 @@ type VMStore interface {
 
 	List(ctx context.Context) ([]v1alpha1.ComputeVM, error)
 
-	PatchMarket(ctx context.Context, name string, patch v1alpha1.ComputeVMMarket) error
+	PublishMarket(ctx context.Context, name string, published v1alpha1.ComputeVMPublished) error
 
 	PatchContract(ctx context.Context, name string, contract v1alpha1.ComputeVMContract) error
 
-	PatchAnnotations(ctx context.Context, name string, annotations map[string]string) error
+	Release(ctx context.Context, name string, release v1alpha1.ComputeVMRelease) error
 }
 
 type vmWaiter interface {
@@ -90,6 +91,8 @@ type ProvisionRequest struct {
 	BidConfig market.StrongRef
 
 	BidConfigValue map[string]any
+
+	Bid *metav1.OwnerReference
 }
 
 type ProvisionResult struct {
@@ -289,6 +292,7 @@ func (p *ComputeProvider) Provision(ctx context.Context, req ProvisionRequest) (
 		StopGraceSeconds: p.Config.StopGraceSeconds,
 		GuestLogin:       &v1alpha1.ComputeVMGuestLogin{Mount: mount, BindSecretSha256: secretHash},
 		Accept:           &computevm.AcceptRef{URI: req.AcceptURI, CID: req.AcceptCID},
+		Owner:            req.Bid,
 	})
 	if err != nil {
 		return ProvisionResult{}, err

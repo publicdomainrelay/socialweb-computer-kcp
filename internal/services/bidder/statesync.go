@@ -343,11 +343,11 @@ func (a *marketEventAdapter) applyInboundEvent(ctx context.Context, request stat
 		return errors.New("bidder: the inbound event is not from the contract requester")
 	}
 	observedAt := service.nowUTC().Format(time.RFC3339)
-	annotations := map[string]string{
-		computevm.ReleaseRequestedAnnotation: observedAt,
-		computevm.ReleaseRequestAnnotation:   event.Payload.URI + "#" + event.Payload.CID,
+	release := v1alpha1.ComputeVMRelease{RequestedAt: observedAt}
+	if event.Payload.URI != "" {
+		release.Request = &commonv1.StrongRef{URI: event.Payload.URI, CID: event.Payload.CID}
 	}
-	if err := service.vms.PatchAnnotations(ctx, vm.Name, annotations); err != nil {
+	if err := service.vms.Release(ctx, vm.Name, release); err != nil {
 		return fmt.Errorf("bidder: recording the release request on the ComputeVM: %w", err)
 	}
 	bid, err := service.bidForVM(ctx, vm)
@@ -1226,6 +1226,7 @@ func (a *provisionAdapter) Apply(ctx context.Context, request statesync.Request)
 		VMPayload:      payloadResolved,
 		BidConfig:      market.StrongRef{URI: parsedBid.Config.URI, CID: parsedBid.Config.CID},
 		BidConfigValue: configResolved.Value,
+		Bid:            bidOwner(bid),
 	})
 	if err != nil {
 		return statesync.Observation{}, err
@@ -1269,11 +1270,11 @@ func (a *provisionAdapter) Apply(ctx context.Context, request statesync.Request)
 				}
 			}
 			if terminated := current.Status.Terminated; terminated != nil {
-				annotations := map[string]string{
-					computevm.ReleaseRequestedAnnotation: terminated.At,
-					computevm.ReleaseRequestAnnotation:   terminated.PayloadURI + "#" + terminated.PayloadCid,
+				release := v1alpha1.ComputeVMRelease{RequestedAt: terminated.At}
+				if terminated.PayloadURI != "" {
+					release.Request = &commonv1.StrongRef{URI: terminated.PayloadURI, CID: terminated.PayloadCid}
 				}
-				if err := service.vms.PatchAnnotations(ctx, result.Name, annotations); err != nil {
+				if err := service.vms.Release(ctx, result.Name, release); err != nil {
 					return statesync.Observation{}, err
 				}
 				var requestRef *commonv1.StrongRef
@@ -1411,11 +1412,11 @@ func (a *releaseAdapter) Apply(ctx context.Context, request statesync.Request) (
 		return releaseSettledObservation(payload, request, ""), nil
 	}
 	info.computeVM = vm.Name
-	annotations := map[string]string{
-		computevm.ReleaseRequestedAnnotation: observedAt,
-		computevm.ReleaseRequestAnnotation:   requestRef.URI + "#" + requestRef.CID,
+	release := v1alpha1.ComputeVMRelease{RequestedAt: observedAt}
+	if requestRef.URI != "" {
+		release.Request = &commonv1.StrongRef{URI: requestRef.URI, CID: requestRef.CID}
 	}
-	if err := service.vms.PatchAnnotations(ctx, vm.Name, annotations); err != nil {
+	if err := service.vms.Release(ctx, vm.Name, release); err != nil {
 		return statesync.Observation{}, fmt.Errorf("bidder: recording the release request on the ComputeVM: %w", err)
 	}
 	bid, err := service.bidForVM(ctx, vm)

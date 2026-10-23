@@ -396,7 +396,7 @@ func (s *Service) enqueueBid(ctx context.Context, rfpURI, rfpCID, issuer string)
 		return existing, nil
 	}
 	bid := &v1alpha1.Bid{
-		ObjectMeta: metav1.ObjectMeta{Name: name},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Annotations: map[string]string{v1alpha1.AnnotationTTLAfterFinished: BidTTL}},
 		Spec: v1alpha1.BidSpec{
 			Rfp:       commonv1.StrongRef{URI: rfpURI, CID: rfpCID},
 			Requester: issuer,

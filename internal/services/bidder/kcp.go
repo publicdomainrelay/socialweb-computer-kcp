@@ -15,7 +15,6 @@ import (
 	policyv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/policy/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/statuspatch"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
@@ -119,22 +118,11 @@ func (b *KCPBids) PatchStatus(ctx context.Context, name string, status v1alpha1.
 	if b == nil || b.Res == nil {
 		return errors.New("bidder: the Bid store is not configured")
 	}
-	current, err := b.Res.Get(ctx, b.Cluster, name)
-	if err != nil {
-		return err
-	}
 	value, err := statusMap(status)
 	if err != nil {
 		return err
 	}
-	if status.LastError == "" {
-		value["lastError"] = ""
-	}
-	patch, err := statuspatch.Merge(value)
-	if err != nil {
-		return err
-	}
-	return b.Res.PatchStatus(ctx, b.Cluster, name, current.ResourceVersion, patch)
+	return b.Res.ApplyStatus(ctx, b.Cluster, "Bid", name, v1alpha1.FieldManagerBid, value)
 }
 
 type KCPVMs struct {
@@ -198,58 +186,22 @@ func (v *KCPVMs) Delete(ctx context.Context, name string) error {
 	return err
 }
 
-func (v *KCPVMs) PatchMarket(ctx context.Context, name string, patch v1alpha1.ComputeVMMarket) error {
+func (v *KCPVMs) PublishMarket(ctx context.Context, name string, published v1alpha1.ComputeVMPublished) error {
 	if v == nil || v.Res == nil {
 		return errors.New("bidder: the ComputeVM store is not configured")
 	}
-	owned := map[string]any{}
-	if patch.OnNetworkURI != "" {
-		owned["onNetworkUri"] = patch.OnNetworkURI
-	}
-	if patch.HostKeysURI != "" {
-		owned["hostKeysUri"] = patch.HostKeysURI
-	}
-	if patch.Termination != nil {
-		termination := map[string]any{}
-		if patch.Termination.Reason != "" {
-			termination["reason"] = patch.Termination.Reason
-		}
-		if patch.Termination.ObservedAt != "" {
-			termination["observedAt"] = patch.Termination.ObservedAt
-		}
-		if patch.Termination.ExitCode != nil {
-			termination["exitCode"] = *patch.Termination.ExitCode
-		}
-		if patch.Termination.Request != nil {
-			termination["request"] = map[string]any{"uri": patch.Termination.Request.URI, "cid": patch.Termination.Request.CID}
-		}
-		if patch.Termination.PayloadURI != "" {
-			termination["payloadUri"] = patch.Termination.PayloadURI
-		}
-		if patch.Termination.PayloadCid != "" {
-			termination["payloadCid"] = patch.Termination.PayloadCid
-		}
-		if patch.Termination.EventURI != "" {
-			termination["eventUri"] = patch.Termination.EventURI
-		}
-		if patch.Termination.EventCid != "" {
-			termination["eventCid"] = patch.Termination.EventCid
-		}
-		if len(termination) > 0 {
-			owned["termination"] = termination
-		}
-	}
-	if len(owned) == 0 {
+	if published.OnNetworkURI == "" && published.HostKeysURI == "" {
 		return nil
 	}
-	body, err := statuspatch.Merge(map[string]any{"market": owned})
+	value, err := statusMap(published)
 	if err != nil {
 		return err
 	}
-	if err := v.Res.PatchStatus(ctx, v.Cluster, name, "", body); err != nil {
+	if err := v.Res.ApplyStatus(ctx, v.Cluster, "ComputeVM", name, v1alpha1.FieldManagerComputeVMMarketPublished,
+		map[string]any{"market": map[string]any{"published": value}}); err != nil {
 		return err
 	}
-	v.log().Info("a ComputeVM market field is recorded", "computevm", name)
+	v.log().Info("a ComputeVM market report is published", "computevm", name)
 	return nil
 }
 
@@ -272,18 +224,15 @@ func (v *KCPVMs) PatchContract(ctx context.Context, name string, contract v1alph
 	return v.Res.PatchJSON(ctx, v.Cluster, name, patch)
 }
 
-func (v *KCPVMs) PatchAnnotations(ctx context.Context, name string, annotations map[string]string) error {
+func (v *KCPVMs) Release(ctx context.Context, name string, release v1alpha1.ComputeVMRelease) error {
 	if v == nil || v.Res == nil {
 		return errors.New("bidder: the ComputeVM store is not configured")
 	}
-	if len(annotations) == 0 {
-		return nil
-	}
-	patch, err := json.Marshal(map[string]any{"metadata": map[string]any{"annotations": annotations}})
+	value, err := statusMap(release)
 	if err != nil {
 		return err
 	}
-	return v.Res.PatchMerge(ctx, v.Cluster, name, patch)
+	return v.Res.ApplySpec(ctx, v.Cluster, "ComputeVM", name, v1alpha1.FieldManagerComputeVMCreator, map[string]any{"release": value})
 }
 
 func (v *KCPVMs) WaitRunning(ctx context.Context, name string, timeout time.Duration) (*v1alpha1.ComputeVM, error) {
