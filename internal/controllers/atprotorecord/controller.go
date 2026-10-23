@@ -166,9 +166,6 @@ func (c *Controller) resolveFailed(ctx context.Context, req ctlruntime.Request, 
 	if errors.Is(err, bus.ErrLinkDenied) {
 		return errors.Join(err, c.fail(ctx, req, object, ReasonLinkDenied, err))
 	}
-	if errors.Is(err, atprotorepo.ErrNotBound) || errors.Is(err, bus.ErrNoProvider) {
-		return c.fail(ctx, req, object, ReasonRepoNotReady, err)
-	}
 	return errors.Join(err, c.fail(ctx, req, object, ReasonRepoNotReady, err))
 }
 
