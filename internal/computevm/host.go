@@ -24,15 +24,13 @@ import (
 )
 
 const (
-	ChildPrefix      = "vm-"
-	LabelComputeVM   = "socialweb.computer/computevm"
-	BidderSet        = "bidder"
-	RetryAfter       = 3 * time.Second
-	OrphanGrace      = 2 * time.Minute
-	PlaceTimeout     = 20 * time.Second
-	ReleaseKillAfter = 30 * time.Second
-	MessageCap       = 4000
-	ApplyTimeout     = time.Minute
+	ChildPrefix    = "vm-"
+	LabelComputeVM = "socialweb.computer/computevm"
+	BidderSet      = "bidder"
+	RetryAfter     = 3 * time.Second
+	OrphanGrace    = 2 * time.Minute
+	MessageCap     = 4000
+	ApplyTimeout   = time.Minute
 )
 
 var GVR = v1alpha1.ComputeVMGVR
