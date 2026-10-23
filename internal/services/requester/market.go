@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/atcrypto"
@@ -136,6 +137,12 @@ type HTTPMarket struct {
 	Timeout time.Duration
 
 	Log *slog.Logger
+
+	discoveryMu sync.Mutex
+
+	cachedBidders []Bidder
+
+	cachedAt time.Time
 }
 
 func (m *HTTPMarket) client() *http.Client {
@@ -155,6 +162,11 @@ func (m *HTTPMarket) log() *slog.Logger {
 func (m *HTTPMarket) Discover(ctx context.Context, now time.Time) ([]Bidder, error) {
 	if m == nil || m.Reader == nil {
 		return nil, errors.New("requester: the market has no record reader")
+	}
+	m.discoveryMu.Lock()
+	defer m.discoveryMu.Unlock()
+	if len(m.cachedBidders) > 0 && time.Since(m.cachedAt) < 20*time.Second {
+		return append([]Bidder(nil), m.cachedBidders...), nil
 	}
 	seen := map[string]bool{}
 	candidates := []string{}
@@ -208,6 +220,8 @@ func (m *HTTPMarket) Discover(ctx context.Context, now time.Time) ([]Bidder, err
 			bidders = append(bidders, Bidder{DID: did, Endpoint: endpoint, Audience: audience})
 		}
 	}
+	m.cachedBidders = append(m.cachedBidders[:0], bidders...)
+	m.cachedAt = time.Now()
 	return bidders, nil
 }
 
