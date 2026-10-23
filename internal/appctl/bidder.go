@@ -668,6 +668,11 @@ func (ctl *Controller) reconcileBidderAccount(ctx context.Context, u *unstructur
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, err.Error()
 		return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
 	}
+	if err := ctl.ensureMarketStreams(ctx, ctl.c.workspace(), "bidder", o.Spec.Comms, o.Spec.Network, oauthReceiveOnly(plan.Mode)); err != nil {
+		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
+		setOverrideErrorIfAny(&st, o.Generation, err)
+		return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
+	}
 	if err := ctl.pruneDesired(ctx, owner, desired); err != nil {
 		return err
 	}

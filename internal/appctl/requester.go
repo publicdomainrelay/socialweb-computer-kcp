@@ -307,6 +307,11 @@ func (ctl *Controller) reconcileRequesterAccount(ctx context.Context, u *unstruc
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, err.Error()
 		return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
 	}
+	if err := ctl.ensureMarketStreams(ctx, ctl.c.workspace(), "requester", o.Spec.Comms, o.Spec.Network, oauthReceiveOnly(plan.Mode)); err != nil {
+		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
+		setOverrideErrorIfAny(&st, o.Generation, err)
+		return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
+	}
 	if err := ctl.pruneDesired(ctx, owner, desired); err != nil {
 		return err
 	}

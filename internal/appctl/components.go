@@ -559,9 +559,13 @@ func (ctl *Controller) ensureComponentIn(ctx context.Context, ws string, root *u
 	if err != nil {
 		return err
 	}
-	if previous, known := ctl.lastDesired[desiredKey]; known && !reflect.DeepEqual(previous, desiredSpec) &&
-		!reflect.DeepEqual(cur.Object["spec"], previous) {
-		ctl.recordComponentDrift(root, ComponentKey(kind, name))
+	if previous, known := ctl.lastDesired[desiredKey]; known {
+		childSpec := cur.Object["spec"]
+		changedUnderUs := !reflect.DeepEqual(previous, desiredSpec) && !reflect.DeepEqual(childSpec, previous)
+		editedByHand := reflect.DeepEqual(previous, desiredSpec) && !reflect.DeepEqual(childSpec, desiredSpec)
+		if changedUnderUs || editedByHand {
+			ctl.recordComponentDrift(root, ComponentKey(kind, name))
+		}
 	}
 	changed := false
 	labels := cur.GetLabels()
