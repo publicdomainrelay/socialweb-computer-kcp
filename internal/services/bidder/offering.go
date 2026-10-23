@@ -10,7 +10,6 @@ import (
 	"github.com/bluesky-social/indigo/atproto/syntax"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 type marketLoopStats struct {
@@ -106,16 +105,12 @@ func (l *marketLoop) run(ctx context.Context) {
 		l.logf().Warn("sending the market heartbeat failed", "err", err)
 	}
 	l.verifyVisibility(ctx)
-	heartbeat := l.heartbeat
-	heartbeat = opt.Positive(heartbeat, market.HeartbeatInterval)
-	refresh := l.offeringRefresh
-	refresh = opt.Positive(refresh, DefaultOfferingRefresh)
-	heartbeatTicker := time.NewTicker(heartbeat)
+	heartbeatTicker := time.NewTicker(l.heartbeat)
 	defer heartbeatTicker.Stop()
 	var refreshTicker *time.Ticker
 	var refreshCh <-chan time.Time
 	if !l.offeringRefreshDisabled {
-		refreshTicker = time.NewTicker(refresh)
+		refreshTicker = time.NewTicker(l.offeringRefresh)
 		defer refreshTicker.Stop()
 		refreshCh = refreshTicker.C
 	}

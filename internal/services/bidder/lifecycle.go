@@ -17,6 +17,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestidentity"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestseed"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/statesync"
 
@@ -60,7 +61,7 @@ func (s *Service) reconcileBids(ctx context.Context) {
 		}
 		return
 	}
-	now := s.cfg.Now().UTC()
+	now := time.Now().UTC()
 	for i := range bids {
 		s.reconcileBid(ctx, &bids[i], now)
 	}
@@ -180,7 +181,7 @@ func (s *Service) applyBidSpec(ctx context.Context, bid *v1alpha1.Bid, rfp *mark
 		spec.Offer = v1alpha1.BidOffer{Kind: "free"}
 	}
 	spec.Provider = cmp.Or(spec.Provider, "kcp")
-	spec.ExpiresAt = now.Add(s.cfg.bidTTL()).Format(time.RFC3339)
+	spec.ExpiresAt = now.Add(s.bidTTL).Format(time.RFC3339)
 	if err := s.bids.PatchSpec(ctx, bid.Name, spec); err != nil {
 		if ctx.Err() == nil {
 			s.log.Warn("recording the bid decision failed", "bid", bid.Name, "err", err)
@@ -293,7 +294,7 @@ func (s *Service) writeBidRecord(ctx context.Context, bid *v1alpha1.Bid, now tim
 		return market.StrongRef{}, errors.New("the bidder has no record store or attestation key")
 	}
 	rkey := bidRecordRkey(bid)
-	config, err := guestidentity.BidConfigFor(s.guestURL, s.did, s.cfg.Provider.AcceptPath, now.Format(time.RFC3339))
+	config, err := guestidentity.BidConfigFor(s.guestURL, s.did, guestseed.AcceptPathVM, now.Format(time.RFC3339))
 	if err != nil {
 		return market.StrongRef{}, err
 	}
@@ -444,7 +445,7 @@ func (s *Service) markBidReleasing(ctx context.Context, bid *v1alpha1.Bid, info 
 	if bid == nil {
 		return
 	}
-	now := s.cfg.Now().UTC()
+	now := time.Now().UTC()
 	status := cloneBidStatus(bid.Status)
 	status.Terminated = &v1alpha1.BidTerminated{
 		ReceiptURI:   info.receiptURI,
@@ -580,7 +581,7 @@ func (s *Service) terminationAck(ctx context.Context, name string) (*v1alpha1.Co
 	if name == "" {
 		return nil, false
 	}
-	dyn, err := s.syncDynamic(s.cfg.Workspace)
+	dyn, err := s.syncDynamic(s.workspace)
 	if err != nil {
 		return nil, false
 	}
@@ -595,7 +596,7 @@ func (s *Service) terminationAckForVM(ctx context.Context, vmName string) (*v1al
 	if vmName == "" {
 		return nil, false
 	}
-	dyn, err := s.syncDynamic(s.cfg.Workspace)
+	dyn, err := s.syncDynamic(s.workspace)
 	if err != nil {
 		return nil, false
 	}

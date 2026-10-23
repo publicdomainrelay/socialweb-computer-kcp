@@ -208,7 +208,7 @@ func (p *ComputeProvider) Provision(ctx context.Context, req ProvisionRequest) (
 			reuse := true
 			if p.WaitForRunning && existing.Status.Phase != v1alpha1.ComputeVMPhaseRunning {
 				if waiter, ok := p.VMs.(vmWaiter); ok {
-					running, waitErr := waiter.WaitRunning(ctx, existing.Name, p.Config.BootTimeout)
+					running, waitErr := waiter.WaitRunning(ctx, existing.Name, DefaultBootTimeout)
 					switch {
 					case waitErr == nil:
 						if running != nil {
@@ -238,10 +238,8 @@ func (p *ComputeProvider) Provision(ctx context.Context, req ProvisionRequest) (
 	if err != nil {
 		return ProvisionResult{}, err
 	}
-	mount := p.Config.GuestLoginMount
-	mount = cmp.Or(mount, DefaultGuestLoginMount)
-	acceptPath := p.Config.AcceptPath
-	acceptPath = cmp.Or(acceptPath, guestseed.AcceptPathVM)
+	mount := DefaultGuestLoginMount
+	acceptPath := guestseed.AcceptPathVM
 	bundle := map[string]any{
 		"$type":               market.AcceptNSID,
 		"accept":              market.NewStrongRef(req.AcceptURI, req.AcceptCID).Map(),
@@ -271,14 +269,14 @@ func (p *ComputeProvider) Provision(ctx context.Context, req ProvisionRequest) (
 		BearerAudience: guestidentity.GuestAudience(guestidentity.KCPAPI, name),
 		Reporter:       true,
 		BaseURL:        true,
-		HostAddress:    p.Config.GuestHostAddress,
+		HostAddress:    v1alpha1.GuestHostAddress,
 		TLSPort:        p.Config.GuestTLSPort,
 	})
 	if err != nil {
 		return ProvisionResult{}, err
 	}
 	path := computevm.UserDataPath(name)
-	if err := p.Vault.WriteKV(ctx, p.Config.GuestVaultMount, path, computevm.UserDataEntry(userData)); err != nil {
+	if err := p.Vault.WriteKV(ctx, DefaultGuestVaultMount, path, computevm.UserDataEntry(userData)); err != nil {
 		return ProvisionResult{}, fmt.Errorf("bidder: writing the guest user data: %w", err)
 	}
 	shape := v1alpha1.ComputeVMShape{Cpus: record.CPUs, Mem: record.Mem, Disk: record.Disk, Role: record.Role}
@@ -287,8 +285,7 @@ func (p *ComputeProvider) Provision(ctx context.Context, req ProvisionRequest) (
 		Handle:           p.Config.Handle,
 		VM:               shape,
 		RequesterDID:     req.RequesterDID,
-		Vault:            computevm.GuestVaultRef{Server: p.Config.GuestVaultServer, Mount: p.Config.GuestVaultMount},
-		ReuseStale:       p.Config.ReuseStale,
+		Vault:            computevm.GuestVaultRef{Server: p.Config.GuestVaultServer, Mount: DefaultGuestVaultMount},
 		StopGraceSeconds: p.Config.StopGraceSeconds,
 		GuestLogin:       &v1alpha1.ComputeVMGuestLogin{Mount: mount, BindSecretSha256: secretHash},
 		Accept:           &computevm.AcceptRef{URI: req.AcceptURI, CID: req.AcceptCID},
@@ -321,7 +318,7 @@ func (p *ComputeProvider) Provision(ctx context.Context, req ProvisionRequest) (
 	}
 	if p.WaitForRunning {
 		if waiter, ok := p.VMs.(vmWaiter); ok {
-			running, err := waiter.WaitRunning(ctx, name, p.Config.BootTimeout)
+			running, err := waiter.WaitRunning(ctx, name, DefaultBootTimeout)
 			if err != nil {
 				if created {
 					p.abandon(ctx, name)
@@ -397,7 +394,7 @@ func (p *ComputeProvider) Destroy(ctx context.Context, name string) error {
 		return err
 	}
 	if waiter, ok := p.VMs.(vmWaiter); ok {
-		return waiter.WaitAbsent(ctx, name, p.Config.ReleaseTimeout)
+		return waiter.WaitAbsent(ctx, name, DefaultReleaseTimeout)
 	}
 	return nil
 }
