@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-20.gateways.socialweb.computer
+  name: v1alpha1-21.gateways.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -39,14 +39,6 @@ spec:
                     type: string
                   ingressProxyHost:
                     type: string
-                  relayUrls:
-                    type: array
-                    items:
-                      type: string
-                  firehoseUrls:
-                    type: array
-                    items:
-                      type: string
                   qrOrigin:
                     type: string
                   caBundle:
@@ -75,14 +67,24 @@ spec:
                           - XRPC
                           - Firehose
                           - Both
-                      relayUrls:
+                      eventSourceRefs:
                         type: array
                         items:
-                          type: string
-                      firehoseUrls:
-                        type: array
-                        items:
-                          type: string
+                          type: object
+                          properties:
+                            group:
+                              type: string
+                            kind:
+                              type: string
+                              maxLength: 63
+                            name:
+                              type: string
+                              maxLength: 253
+                            workspace:
+                              type: string
+                          required:
+                            - kind
+                            - name
                   ingress:
                     type: object
                     properties:
@@ -161,8 +163,6 @@ spec:
                 required:
                   - plcDirectoryUrl
                   - ingressProxyHost
-                  - relayUrls
-                  - firehoseUrls
                   - qrOrigin
               identity:
                 type: object
@@ -209,14 +209,24 @@ spec:
                       - XRPC
                       - Firehose
                       - Both
-                  relayUrls:
+                  eventSourceRefs:
                     type: array
                     items:
-                      type: string
-                  firehoseUrls:
-                    type: array
-                    items:
-                      type: string
+                      type: object
+                      properties:
+                        group:
+                          type: string
+                        kind:
+                          type: string
+                          maxLength: 63
+                        name:
+                          type: string
+                          maxLength: 253
+                        workspace:
+                          type: string
+                      required:
+                        - kind
+                        - name
               ingress:
                 type: object
                 properties:
@@ -368,14 +378,24 @@ spec:
                             - XRPC
                             - Firehose
                             - Both
-                        relayUrls:
+                        eventSourceRefs:
                           type: array
                           items:
-                            type: string
-                        firehoseUrls:
-                          type: array
-                          items:
-                            type: string
+                            type: object
+                            properties:
+                              group:
+                                type: string
+                              kind:
+                                type: string
+                                maxLength: 63
+                              name:
+                                type: string
+                                maxLength: 253
+                              workspace:
+                                type: string
+                            required:
+                              - kind
+                              - name
                     ingress:
                       type: object
                       properties:

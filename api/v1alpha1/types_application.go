@@ -14,10 +14,6 @@ type MarketNetworkValue struct {
 
 	IngressProxyHost string `json:"ingressProxyHost"`
 
-	RelayURLs []string `json:"relayUrls" apigen:"userEndpoint"`
-
-	FirehoseURLs []string `json:"firehoseUrls" apigen:"userEndpoint"`
-
 	QrOrigin string `json:"qrOrigin"`
 
 	CABundle string `json:"caBundle,omitempty"`
@@ -38,6 +34,8 @@ type NetworkHost struct {
 const (
 	NetworkDispatcherHost = "dispatcher-tls.default.relay.svc.kcp.local"
 
+	NetworkRelayHost = "relay.default.relay.svc.kcp.local"
+
 	GuestTLSHost = "relay.localhost"
 )
 
@@ -51,6 +49,20 @@ func (n *MarketNetworkValue) HostAddress(name string) string {
 		}
 	}
 	return ""
+}
+
+func (n *MarketNetworkValue) RelayURL() string {
+	if address := n.HostAddress(NetworkRelayHost); address != "" {
+		return "http://" + address
+	}
+	return ""
+}
+
+func (n *MarketNetworkValue) Relays() []string {
+	if u := n.RelayURL(); u != "" {
+		return []string{u}
+	}
+	return nil
 }
 
 func (n *MarketNetworkValue) GuestTLSURL() string {
@@ -118,9 +130,7 @@ const (
 type MarketComms struct {
 	Mode MarketCommsMode `json:"mode,omitempty"`
 
-	RelayURLs []string `json:"relayUrls,omitempty" apigen:"userEndpoint"`
-
-	FirehoseURLs []string `json:"firehoseUrls,omitempty" apigen:"userEndpoint"`
+	EventSourceRefs []commonv1.ObjectRef `json:"eventSourceRefs,omitempty"`
 }
 
 type IngressConfig struct {

@@ -536,7 +536,7 @@ func networkTrustedHosts(network v1alpha1.MarketNetworkValue, hostnames []string
 	add(network.GuestTLSURL())
 	add(network.QrOrigin)
 	add(network.PLCDirectoryURL)
-	for _, raw := range network.RelayURLs {
+	for _, raw := range network.Relays() {
 		add(raw)
 	}
 	return out

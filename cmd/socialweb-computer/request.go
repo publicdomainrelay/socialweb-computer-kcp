@@ -163,10 +163,6 @@ func (r *requestRun) passthrough(args []string, network bool) error {
 				nv.PLCDirectoryURL = p.Value
 			case "network.ingressProxyHost":
 				nv.IngressProxyHost = p.Value
-			case "network.relayUrls":
-				nv.RelayURLs = splitList(p.Value)
-			case "network.firehoseUrls":
-				nv.FirehoseURLs = splitList(p.Value)
 			case "network.qrOrigin":
 				nv.QrOrigin = p.Value
 			case "network.hosts":
@@ -209,12 +205,6 @@ func (r *requestRun) passthrough(args []string, network bool) error {
 	if nvSet {
 		nv.PLCDirectoryURL = cmp.Or(nv.PLCDirectoryURL, "https://plc.directory")
 		nv.IngressProxyHost = cmp.Or(nv.IngressProxyHost, "xrpc.fedproxy.com")
-		if nv.RelayURLs == nil {
-			nv.RelayURLs = []string{}
-		}
-		if nv.FirehoseURLs == nil {
-			nv.FirehoseURLs = []string{}
-		}
 		r.root.Network = &nv
 	}
 	if !network && r.root.Ingress == nil {

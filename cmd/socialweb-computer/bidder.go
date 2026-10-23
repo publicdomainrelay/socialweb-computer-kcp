@@ -137,10 +137,6 @@ func (r *bidderRun) passthrough(args []string) error {
 				nv.PLCDirectoryURL = p.Value
 			case "network.ingressProxyHost":
 				nv.IngressProxyHost = p.Value
-			case "network.relayUrls":
-				nv.RelayURLs = splitList(p.Value)
-			case "network.firehoseUrls":
-				nv.FirehoseURLs = splitList(p.Value)
 			case "network.qrOrigin":
 				nv.QrOrigin = p.Value
 			case "network.guestTlsUrl":

@@ -637,7 +637,7 @@ func (ctl *Controller) reconcileGateway(ctx context.Context, u *unstructured.Uns
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, err.Error()
 		return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
 	}
-	if err := ctl.ensureMarketStreams(ctx, ws, "requester", o.Spec.Comms, o.Spec.Network, oauthReceiveOnly(plan.Mode)); err != nil {
+	if err := ctl.ensureMarketStreams(ctx, u, ws, "requester", o.Spec.Comms, o.Spec.Network, oauthReceiveOnly(plan.Mode)); err != nil {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
 		setOverrideErrorIfAny(&st, o.Generation, err)
 		return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
@@ -698,7 +698,7 @@ func GatewayPds(v manifests.Gateway, stateDir string, n *v1alpha1.MarketNetworkV
 			return p, err
 		}
 		p.PlcDirectoryUrl, p.IngressProxyHost = n.PLCDirectoryURL, n.IngressProxyHost
-		if p.WatchRelayUrls, err = listFragment(append(append([]string{}, n.RelayURLs...), n.FirehoseURLs...)...); err != nil {
+		if p.WatchEventSources, err = refFragment(WatchEventSources(n)); err != nil {
 			return p, err
 		}
 		if hosts := NetworkHostsArg(n.Hosts); hosts != "" {
@@ -773,7 +773,6 @@ func GatewayValues(o v1alpha1.Gateway, workspace, stateDir, requesterStateDir st
 		for _, kv := range [][2]string{
 			{"--plc-directory-url", n.PLCDirectoryURL},
 			{"--ingress-proxy-host", n.IngressProxyHost},
-			{"--relay-url", strings.Join(n.RelayURLs, ",")},
 			{"--network-hosts", NetworkHostsArg(n.Hosts)},
 		} {
 			if kv[1] != "" {

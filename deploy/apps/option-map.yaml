@@ -14,10 +14,8 @@ apps:
       - {name: qr-origin, to: network.qrOrigin}
       - {name: network-hosts, to: network.hosts}
       - {name: ingress-proxy-host, to: network.ingressProxyHost}
-      - {name: relay-url, to: network.relayUrls}
       - {name: comms-mode, to: spec.comms.mode}
-      - {name: comms-relay-url, to: spec.comms.relayUrls}
-      - {name: comms-firehose-url, to: spec.comms.firehoseUrls}
+      - {name: comms-event-source, to: spec.comms.eventSourceRefs}
       - {name: atproto-identity-mode, to: spec.identity.mode}
       - {name: atproto-handle, to: spec.identity.handle}
       - {name: atproto-password, to: state}
@@ -57,7 +55,6 @@ apps:
       - {name: serve-port, to: listener}
       - {name: serve-unix, to: listener}
       - {name: firehose-mode, to: options}
-      - {name: firehose-url, to: network.firehoseUrls}
       - {name: oauth-session-client-id, to: options}
       - {name: skip-qr, to: options}
       - {name: associate-with, to: options}
@@ -121,10 +118,8 @@ apps:
       - {name: plc-directory-url, to: network.plcDirectoryUrl}
       - {name: network-hosts, to: network.hosts}
       - {name: ingress-proxy-host, to: network.ingressProxyHost}
-      - {name: relay-url, to: network.relayUrls}
       - {name: comms-mode, to: spec.comms.mode}
-      - {name: comms-relay-url, to: spec.comms.relayUrls}
-      - {name: comms-firehose-url, to: spec.comms.firehoseUrls}
+      - {name: comms-event-source, to: spec.comms.eventSourceRefs}
       - {name: gateway-audience, to: options}
       - {name: kcp-public-host, to: options}
       - {name: kubeconfig-max-ttl-sec, to: options}
@@ -155,11 +150,8 @@ apps:
       - {name: label, to: options}
       - {name: plc-directory-url, to: network.plcDirectoryUrl}
       - {name: ingress-proxy-host, to: network.ingressProxyHost}
-      - {name: relay-url, to: network.relayUrls}
       - {name: comms-mode, to: spec.comms.mode}
-      - {name: comms-relay-url, to: spec.comms.relayUrls}
-      - {name: comms-firehose-url, to: spec.comms.firehoseUrls}
-      - {name: firehose-url, to: network.firehoseUrls}
+      - {name: comms-event-source, to: spec.comms.eventSourceRefs}
       - {name: qr-origin, to: network.qrOrigin}
       - {name: network-hosts, to: network.hosts}
       - {name: ingress-provider, to: spec.ingress.provider}
@@ -267,10 +259,8 @@ apps:
       - {name: openbao-atproto-mount, to: profile}
       - {name: public-origin, to: options}
       - {name: ingress-proxy-host, to: network.ingressProxyHost}
-      - {name: relay-url, to: network.relayUrls}
       - {name: comms-mode, to: spec.comms.mode}
-      - {name: comms-relay-url, to: spec.comms.relayUrls}
-      - {name: comms-firehose-url, to: spec.comms.firehoseUrls}
+      - {name: comms-event-source, to: spec.comms.eventSourceRefs}
       - {name: network-hosts, to: network.hosts}
       - {name: bidder-dids, to: spec.bidderDids}
       - {name: guest-host-aliases, to: profile}

@@ -109,12 +109,6 @@ func Spec(s v1alpha1.GatewaySpec, profile string, environ []string) v1alpha1.Gat
 		n.IngressProxyHost = e.get("SOCIALWEB_GATEWAY_INGRESS_PROXY_HOST")
 	}
 	n.IngressProxyHost = cmp.Or(n.IngressProxyHost, DefaultIngress)
-	if n.RelayURLs == nil {
-		n.RelayURLs = []string{}
-	}
-	if n.FirehoseURLs == nil {
-		n.FirehoseURLs = []string{}
-	}
 	s.Network = &n
 	if s.Ingress == nil && profile == appctl.ProfileGatewayProd {
 		s.Ingress = appctl.DefaultIngressConfig()

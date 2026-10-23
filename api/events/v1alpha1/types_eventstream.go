@@ -73,8 +73,6 @@ const (
 	EventStreamConditionLagging = "Lagging"
 
 	EventStreamConditionFailed = "Failed"
-
-	EventStreamDefaultRelayKind = "Relay"
 )
 
 type EventStreamStatus struct {

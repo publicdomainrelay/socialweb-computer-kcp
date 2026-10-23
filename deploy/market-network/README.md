@@ -373,8 +373,6 @@ The network value (`status.network`, copied onto each child's root object):
 | --- | --- |
 | `plcDirectoryUrl` | the network PLC directory URL |
 | `ingressProxyHost` | the dispatcher's host, `relay.localhost` |
-| `relayUrls` | the relay URLs |
-| `firehoseUrls` | the relay firehose URLs |
 | `qrOrigin` | the QR session-transfer origin |
 | `guestTlsUrl` | the guest TLS front URL |
 | `caBundleRef` | the path to the CA bundle the children trust |

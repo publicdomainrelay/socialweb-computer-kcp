@@ -4095,7 +4095,7 @@ because it bounds a mechanism the rest of this document leans on.
   {keyId: the application's DID, challenge: the operator's DID, service: bidder_associate |
   requester_associate, nonce, createdAt}. The kind AtprotoRecordWatch (export marketidentities) is the
   mirror of AtprotoRecord: spec {repo, collection, match: [{fieldPath, value | valueFrom}], source:
-  {relayUrls, jetstreamUrls}}, status {records: [{did, handle, uri, cid, value, verifiedAt}], cursors:
+  {eventSourceRefs}}, status {records: [{did, handle, uri, cid, value, verifiedAt}], cursors:
   [{source, cursor}], conditions: Verified}. The pds DenoPod reconciles the watches whose spec.repo is pds:
   it subscribes to every source with the collection filter (relay subscribeRepos with a client-side
   filter, Jetstream `wantedCollections`), takes each event only as a trigger, and fetches the record with
@@ -4105,8 +4105,9 @@ because it bounds a mechanism the rest of this document leans on.
   pds re-verifies every entry of status (Verified False, reason Reverifying, until done), resumes each
   source from its cursor, and re-verifies every 5 minutes. `deploy/apps/repo-pds/association-watch.<profile>.yaml`
   declares `association`: keyId equals valueFrom MarketIdentity status.did, service equals the
-  application's service; the market network source is the network value's relayUrls and firehoseUrls,
-  prod adds two public Jetstream instances (the profile file, not code). The MarketIdentity reconciler
+  application's service; its sources are the EventSources the root composes: the network relay
+  (`relay-network`, from the network value's relay host) or, with no relay host, two public Jetstream
+  instances (`jetstream-bsky-us-east`, `jetstream-bsky-us-west`). The MarketIdentity reconciler
   (mode localRepo, `spec.associationWatch`) waits on the watch: the first verified record whose author
   is its challenge and that carries the current nonce (or whose author is the allow-listed operator)
   wins; it is written to `spec.approvedAssociations` and the nonce is deleted. Then the identity is

@@ -69,7 +69,7 @@ func (r *gatewaySshRun) passthrough(args []string) error {
 		case "bidder-dids":
 			r.bidderDids = append(r.bidderDids, splitList(p.Value)...)
 			continue
-		case "plc-directory-url", "ingress-proxy-host", "relay-url", "network-hosts":
+		case "plc-directory-url", "ingress-proxy-host", "network-hosts":
 			if r.network != "" {
 				return fmt.Errorf("--%s is set by the market network for its child applications", p.Name)
 			}
@@ -79,8 +79,6 @@ func (r *gatewaySshRun) passthrough(args []string) error {
 				nv.PLCDirectoryURL = p.Value
 			case "ingress-proxy-host":
 				nv.IngressProxyHost = p.Value
-			case "relay-url":
-				nv.RelayURLs = splitList(p.Value)
 			case "network-hosts":
 				for _, h := range splitList(p.Value) {
 					name, addr, ok := strings.Cut(h, "=")

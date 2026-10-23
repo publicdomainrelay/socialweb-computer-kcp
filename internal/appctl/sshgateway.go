@@ -77,7 +77,6 @@ func SshGatewayValues(spec v1alpha1.SshGatewaySpec, stateDir string, l devinstan
 		for _, kv := range [][2]string{
 			{"--plc-directory-url", n.PLCDirectoryURL},
 			{"--ingress-proxy-host", n.IngressProxyHost},
-			{"--relay-url", strings.Join(n.RelayURLs, ",")},
 			{"--network-hosts", NetworkHostsArg(n.Hosts)},
 		} {
 			if kv[1] != "" {
@@ -431,7 +430,7 @@ func (ctl *Controller) reconcileSshGateway(ctx context.Context, u *unstructured.
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, err.Error()
 		return ctl.writeStatus(ctx, SshGatewayGVR, o.Name, st)
 	}
-	if err := ctl.ensureMarketStreams(ctx, ctl.c.workspace(), "requester", o.Spec.Comms, o.Spec.Network, oauthReceiveOnly(plan.Mode)); err != nil {
+	if err := ctl.ensureMarketStreams(ctx, u, ctl.c.workspace(), "requester", o.Spec.Comms, o.Spec.Network, oauthReceiveOnly(plan.Mode)); err != nil {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
 		return ctl.writeStatus(ctx, SshGatewayGVR, o.Name, st)
 	}

@@ -106,8 +106,6 @@ func RequesterValues(spec v1alpha1.MarketRequesterSpec, stateDir string) (manife
 		for _, kv := range [][2]string{
 			{"--plc-directory-url", n.PLCDirectoryURL},
 			{"--ingress-proxy-host", n.IngressProxyHost},
-			{"--relay-url", strings.Join(n.RelayURLs, ",")},
-			{"--firehose-url", strings.Join(n.FirehoseURLs, ",")},
 			{"--qr-origin", n.QrOrigin},
 		} {
 			if kv[1] != "" {
@@ -337,7 +335,7 @@ func (ctl *Controller) reconcileRequesterAccount(ctx context.Context, u *unstruc
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, err.Error()
 		return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
 	}
-	if err := ctl.ensureMarketStreams(ctx, ctl.c.workspace(), "requester", o.Spec.Comms, o.Spec.Network, oauthReceiveOnly(plan.Mode)); err != nil {
+	if err := ctl.ensureMarketStreams(ctx, u, ctl.c.workspace(), "requester", o.Spec.Comms, o.Spec.Network, oauthReceiveOnly(plan.Mode)); err != nil {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
 		setOverrideErrorIfAny(&st, o.Generation, err)
 		return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
@@ -591,7 +589,7 @@ func (ctl *Controller) reconcileRequester(ctx context.Context, u *unstructured.U
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, err.Error()
 		return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
 	}
-	if err := ctl.ensureMarketStreams(ctx, ctl.c.workspace(), "requester", o.Spec.Comms, o.Spec.Network, oauthReceiveOnly(plan.Mode)); err != nil {
+	if err := ctl.ensureMarketStreams(ctx, u, ctl.c.workspace(), "requester", o.Spec.Comms, o.Spec.Network, oauthReceiveOnly(plan.Mode)); err != nil {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
 		setOverrideErrorIfAny(&st, o.Generation, err)
 		return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
