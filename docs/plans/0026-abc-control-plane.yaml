@@ -990,7 +990,7 @@ items:
     track: no-poll
     parallel_with: []
     depends_on: [W4-MARKET, W4-SERVICES]
-    status: doing
+    status: done
     decision: >
       Includes the clientcertfront Cluster gate recheck (a 2s cache and
       recheck from W0-MOUNTS), which becomes a watch on Cluster.
@@ -1013,7 +1013,7 @@ items:
     track: gates
     parallel_with: []
     depends_on: [W5-NO-POLL]
-    status: todo
+    status: doing
     decision: >
       scripts/check-architecture.sh enforces: import direction with kit as its own layer (strict); backend packages free of kcp, bus and controller runtime (decisions.testable_backends, strict); every impl package carries a compile-time assertion against an internal/contract interface; no ticker
       outside deploy/obligations.txt; no System caller outside
