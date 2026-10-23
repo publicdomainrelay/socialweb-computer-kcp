@@ -162,6 +162,14 @@ func AppWorkspaces(base string) []string {
 	return out
 }
 
+func NetworkWorkspaces(base string) []string {
+	base = cmp.Or(strings.TrimSpace(base), DefaultWorkspace)
+	if base == DefaultWorkspace {
+		return []string{base}
+	}
+	return AppWorkspaces(base)
+}
+
 func New(cfg Config) (*Core, error) {
 	if cfg.Log == nil {
 		cfg.Log = slog.New(slog.DiscardHandler)
