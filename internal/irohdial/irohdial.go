@@ -137,7 +137,7 @@ func serve(ctx context.Context, c Config, log *slog.Logger, conn net.Conn) {
 		return
 	}
 	var tail childproc.Tail
-	cmd.Stderr = &tail
+	cmd.Stderr = childproc.FilterSecrets(&tail)
 	if err := cmd.Start(); err != nil {
 		log.Warn("starting dumbpipe connect", "err", err.Error())
 		return

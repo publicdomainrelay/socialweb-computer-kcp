@@ -53,6 +53,9 @@ func Cap(name string, scope ...string) exposurev1alpha1.LinkCapability {
 func RefLink(from, to commonv1.ObjectRef, caps ...exposurev1alpha1.LinkCapability) Link {
 	f := from
 	parts := []string{from.Kind, from.Name, to.Kind, to.Name}
+	if from.Workspace != "" && to.Workspace != "" && from.Workspace != to.Workspace {
+		parts = append([]string{from.Workspace}, parts...)
+	}
 	if suffix := capabilitySuffix(caps); suffix != "" {
 		parts = append(parts, suffix)
 	}
@@ -100,7 +103,8 @@ func SpecRefLinks(ws string, desired []Desired) []Link {
 			if strings.EqualFold(d.Kind, ref.Kind) && strings.EqualFold(d.Name, ref.Name) {
 				continue
 			}
-			link := RefLink(commonv1.ObjectRef{Workspace: ws, Kind: d.Kind, Name: d.Name}, commonv1.ObjectRef{Workspace: ws, Kind: ref.Kind, Name: ref.Name},
+			link := RefLink(commonv1.ObjectRef{Workspace: ws, Kind: d.Kind, Name: d.Name},
+				commonv1.ObjectRef{Workspace: workspaceOr(ref.Workspace, ws), Kind: ref.Kind, Name: ref.Name},
 				Cap(bus.CapabilityXRPC), Cap(bus.CapabilityStream))
 			out[link.Name] = link
 		}
@@ -150,6 +154,8 @@ type specRef struct {
 	Kind string
 
 	Name string
+
+	Workspace string
 }
 
 func specRefs(spec any) []specRef {
@@ -187,11 +193,12 @@ func appendSpecRefs(value any, out *[]specRef) {
 	case map[string]any:
 		kind, _ := typed["kind"].(string)
 		name, _ := typed["name"].(string)
+		workspace, _ := typed["workspace"].(string)
 		kind, name = strings.TrimSpace(kind), strings.TrimSpace(name)
 		if kind == "" || name == "" {
 			return
 		}
-		*out = append(*out, specRef{Kind: kind, Name: name})
+		*out = append(*out, specRef{Kind: kind, Name: name, Workspace: strings.TrimSpace(workspace)})
 	case []any:
 		for _, entry := range typed {
 			appendSpecRefs(entry, out)
@@ -200,13 +207,51 @@ func appendSpecRefs(value any, out *[]specRef) {
 }
 
 func (c *Composer) ApplyLinks(ctx context.Context, r Root, set string, links []Link, prune ...string) error {
-	keep := map[string]map[string]bool{}
-	workspaces := map[string]bool{r.Workspace: true}
+	keep, workspaces, err := c.writeLinks(ctx, r, set, links)
+	if err != nil {
+		return err
+	}
+	workspaces[r.Workspace] = true
 	for _, ws := range prune {
 		if ws = strings.TrimSpace(ws); ws != "" {
 			workspaces[ws] = true
 		}
 	}
+	selector := OwnerLabel + "=" + r.Owner() + "," + LinkSetLabel + "=" + set
+	for ws := range workspaces {
+		scoped := selector
+		if ws != r.Workspace && r.Cluster != "" {
+			scoped += "," + RootClusterLabel + "=" + r.Cluster
+		}
+		if err := c.Prune(ctx, ws, ComponentLinkGVR, scoped, keep[ws]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *Composer) AddLinks(ctx context.Context, r Root, set string, links []Link) error {
+	_, _, err := c.writeLinks(ctx, r, set, links)
+	return err
+}
+
+func (c *Composer) EnsureLinked(ctx context.Context, r Root, linked, components []Desired) error {
+	if err := c.ApplyLinks(ctx, r, ComponentLinkSet, ComponentLinks(r.Workspace, linked)); err != nil {
+		return err
+	}
+	return c.EnsureComponents(ctx, r, components)
+}
+
+func (c *Composer) EnsureAdding(ctx context.Context, r Root, components []Desired) error {
+	if err := c.AddLinks(ctx, r, ComponentLinkSet, ComponentLinks(r.Workspace, components)); err != nil {
+		return err
+	}
+	return c.EnsureComponents(ctx, r, components)
+}
+
+func (c *Composer) writeLinks(ctx context.Context, r Root, set string, links []Link) (map[string]map[string]bool, map[string]bool, error) {
+	keep := map[string]map[string]bool{}
+	workspaces := map[string]bool{}
 	for _, l := range Dedupe(links) {
 		ws := workspaceOr(l.Workspace(), r.Workspace)
 		l.Spec.To.Workspace = ws
@@ -217,16 +262,10 @@ func (c *Composer) ApplyLinks(ctx context.Context, r Root, set string, links []L
 		keep[ws][l.Name] = true
 		obj := &exposurev1alpha1.ComponentLink{ObjectMeta: metav1.ObjectMeta{Name: l.Name, Labels: map[string]string{LinkSetLabel: set}}, Spec: l.Spec}
 		if err := c.ApplyTyped(ctx, r, ws, ComponentLinkGVR, exposurev1alpha1.GroupVersion.String(), ComponentKindComponentLink, obj); err != nil {
-			return fmt.Errorf("ComponentLink %s: %w", l.Name, err)
+			return nil, nil, fmt.Errorf("ComponentLink %s: %w", l.Name, err)
 		}
 	}
-	selector := OwnerLabel + "=" + r.Owner() + "," + LinkSetLabel + "=" + set
-	for ws := range workspaces {
-		if err := c.Prune(ctx, ws, ComponentLinkGVR, selector, keep[ws]); err != nil {
-			return err
-		}
-	}
-	return nil
+	return keep, workspaces, nil
 }
 
 func (c *Composer) DeleteLinks(ctx context.Context, r Root, workspaces ...string) error {

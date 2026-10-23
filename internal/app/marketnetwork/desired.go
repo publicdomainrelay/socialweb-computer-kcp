@@ -231,7 +231,7 @@ func networkDesired(o *v1alpha1.MarketNetwork, ws, stateRoot string, leases map[
 		relaySpec.PdsRefs = nil
 	}
 	relay := compose.Desired{Kind: compose.ComponentKindRelay, Name: compose.NetworkRelayName, Spec: relaySpec}
-	ingressCfg := compose.NetworkIngressConfig(o.Spec.Ingress)
+	ingressCfg := compose.NetworkIngressConfig(o.Spec.Ingress, ws)
 	ingressSpec := v1alpha1.IngressProxySpec{
 		ComponentSpec: compose.NewComponentSpec(compose.ComponentCRStateDir(netState, compose.ComponentKindIngressProxy, compose.NetworkIngressName), &value),
 		Provider:      compose.IngressProviderFor(ingressCfg),

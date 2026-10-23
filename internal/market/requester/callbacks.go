@@ -123,5 +123,22 @@ func (q *Requester) SubmitEvent(ctx context.Context, issuer string, body Submitt
 		return &RequestError{Status: http.StatusServiceUnavailable, Code: "Unavailable", Message: err.Error()}
 	}
 	q.log.Info("requester_event_queued", "uri", body.URI, "receipt", event.Receipt.URI)
+	q.noteEventReceipt(ctx, issuer, market.RecordRef{URI: event.Receipt.URI, CID: event.Receipt.CID})
 	return nil
+}
+
+func (q *Requester) noteEventReceipt(ctx context.Context, issuer string, ref market.RecordRef) {
+	if ref.URI == "" || market.ATURIAuthority(ref.URI) != issuer || market.NSIDFromURI(ref.URI) != market.ReceiptNSID {
+		return
+	}
+	resolved, err := q.repo.Resolve(ctx, ref)
+	if err != nil {
+		q.log.Warn("requester_event_receipt_unresolved", "receipt", ref.URI, "err", err)
+		return
+	}
+	if _, err := market.ParseReceipt(resolved.Value); err != nil {
+		q.log.Warn("requester_event_receipt_invalid", "receipt", ref.URI, "err", err)
+		return
+	}
+	q.noteReceipt(resolved)
 }

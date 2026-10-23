@@ -1,6 +1,8 @@
 package childproc
 
 import (
+	"bytes"
+	"io"
 	"os/exec"
 	"sync"
 	"time"
@@ -28,6 +30,61 @@ func (t *Tail) String() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return string(t.buf)
+}
+
+var irohSecretLine = []byte("using secret key")
+
+type SecretFilter struct {
+	mu sync.Mutex
+
+	out io.Writer
+
+	start bool
+
+	dropping bool
+
+	pending []byte
+}
+
+func FilterSecrets(out io.Writer) *SecretFilter {
+	if out == nil {
+		out = io.Discard
+	}
+	return &SecretFilter{out: out, start: true}
+}
+
+func (f *SecretFilter) Write(p []byte) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []byte
+	for _, c := range p {
+		switch {
+		case f.dropping:
+			if c == '\n' {
+				f.dropping, f.start = false, true
+			}
+		case f.start || len(f.pending) > 0:
+			f.pending = append(f.pending, c)
+			switch {
+			case bytes.HasPrefix(f.pending, irohSecretLine):
+				f.dropping, f.start, f.pending = c != '\n', c == '\n', f.pending[:0]
+			case bytes.HasPrefix(irohSecretLine, f.pending):
+				f.start = false
+			default:
+				out = append(out, f.pending...)
+				f.pending, f.start = f.pending[:0], c == '\n'
+			}
+		default:
+			out = append(out, c)
+			f.start = c == '\n'
+		}
+	}
+	if len(out) > 0 {
+		if _, err := f.out.Write(out); err != nil {
+			return 0, err
+		}
+	}
+	return len(p), nil
 }
 
 func Kill(cmd *exec.Cmd) {

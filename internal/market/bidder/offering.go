@@ -100,6 +100,12 @@ func (b *Bidder) setOffering(uri string) {
 }
 
 func (b *Bidder) ensureOffering(ctx context.Context) error {
+	b.offerWrite.Lock()
+	defer b.offerWrite.Unlock()
+	return b.ensureOfferingLocked(ctx)
+}
+
+func (b *Bidder) ensureOfferingLocked(ctx context.Context) error {
 	appliesTo := []string{market.ComputeVMNSID}
 	now := b.now().UTC().Format(time.RFC3339)
 	page, err := b.records.ListRecords(ctx, b.cfg.DID, market.OfferingNSID, 20, "")
@@ -108,6 +114,7 @@ func (b *Bidder) ensureOffering(ctx context.Context) error {
 	}
 	if len(page.Records) > 0 {
 		rec := page.Records[0]
+		b.dropExtraOfferings(ctx, page.Records[1:])
 		offering, err := market.ParseOffering(rec.Value)
 		if err != nil {
 			return err
@@ -150,14 +157,17 @@ func (b *Bidder) TouchOffering(ctx context.Context) {
 }
 
 func (b *Bidder) touchOffering(ctx context.Context) error {
+	b.offerWrite.Lock()
+	defer b.offerWrite.Unlock()
 	page, err := b.records.ListRecords(ctx, b.cfg.DID, market.OfferingNSID, 20, "")
 	if err != nil {
 		return err
 	}
 	if len(page.Records) == 0 {
-		return b.ensureOffering(ctx)
+		return b.ensureOfferingLocked(ctx)
 	}
 	rec := page.Records[0]
+	b.dropExtraOfferings(ctx, page.Records[1:])
 	offering, err := market.ParseOffering(rec.Value)
 	if err != nil {
 		return err
@@ -171,6 +181,16 @@ func (b *Bidder) touchOffering(ctx context.Context) error {
 	}
 	b.log.Info("the bidder offering is refreshed for the relay", "offering", rec.URI)
 	return nil
+}
+
+func (b *Bidder) dropExtraOfferings(ctx context.Context, extra []market.ListedRecord) {
+	for _, rec := range extra {
+		if err := b.records.DeleteRecord(ctx, b.cfg.DID, market.OfferingNSID, participant.LastSegment(rec.URI)); err != nil {
+			b.log.Warn("deleting a second market offering failed", "offering", rec.URI, "err", err)
+			continue
+		}
+		b.log.Info("a second market offering is deleted; the bidder keeps one", "offering", rec.URI)
+	}
 }
 
 func (b *Bidder) beat(ctx context.Context) error {

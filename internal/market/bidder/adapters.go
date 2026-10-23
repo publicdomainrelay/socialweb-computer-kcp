@@ -795,6 +795,9 @@ func (b *Bidder) observeInbox(_ context.Context, request participant.OutboxReque
 	if err := payload.decode(request.Payload); err != nil {
 		return participant.Observation{}, err
 	}
+	if _, ok := b.inboxed.Load(inboxKey(request)); ok {
+		return participant.InboxObservation(request, payload.URI), nil
+	}
 	if payload.Collection == market.RFPNSID {
 		if _, ok := b.bids.Get(bidName(b.cfg.DID, payload.URI, payload.CID)); ok {
 			return participant.InboxObservation(request, payload.URI), nil
@@ -811,6 +814,7 @@ func (b *Bidder) applyInbox(ctx context.Context, request participant.OutboxReque
 	b.log.Info("market inbox applied", "collection", payload.Collection, "uri", payload.URI, "did", b.cfg.DID)
 	if b.cfg.Suspend && (payload.Collection == market.RFPNSID || payload.Collection == market.AcceptNSID) {
 		b.log.Info("market inbox declined: the bidder's participation is suspended", "collection", payload.Collection, "uri", payload.URI)
+		b.inboxed.Store(inboxKey(request), true)
 		return participant.InboxObservation(request, payload.URI), nil
 	}
 	switch payload.Collection {
@@ -830,5 +834,10 @@ func (b *Bidder) applyInbox(ctx context.Context, request participant.OutboxReque
 			return participant.Observation{}, err
 		}
 	}
+	b.inboxed.Store(inboxKey(request), true)
 	return participant.InboxObservation(request, payload.URI), nil
+}
+
+func inboxKey(request participant.OutboxRequest) string {
+	return request.UID + "#" + request.Key
 }

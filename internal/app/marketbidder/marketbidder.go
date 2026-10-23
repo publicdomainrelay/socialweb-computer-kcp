@@ -222,10 +222,7 @@ func (p *pass) baseLinks(mount string) []compose.Link {
 }
 
 func (p *pass) ensure(ctx context.Context, desired []compose.Desired) error {
-	if err := p.c.ApplyLinks(ctx, p.r, "components", compose.ComponentLinks(p.r.Workspace, desired)); err != nil {
-		return err
-	}
-	return p.c.EnsureComponents(ctx, p.r, desired)
+	return p.c.EnsureLinked(ctx, p.r, desired, desired)
 }
 
 func (p *pass) prune(ctx context.Context, desired []compose.Desired) error {
@@ -416,7 +413,7 @@ func (p *pass) suspended(ctx context.Context, plan compose.AccountPlan, pdsHandl
 }
 
 func (p *pass) streams(ctx context.Context, plan compose.AccountPlan, localDID string) error {
-	links, err := p.c.ApplyMarketStreams(ctx, p.r, compose.Streams{Role: "bidder", Comms: p.o.Spec.Comms,
+	links, err := p.c.ApplyMarketStreams(ctx, p.r, compose.Streams{Role: "bidder", Comms: compose.OverrideComms(p.o.Spec.Components, compose.ComponentKindBidder, BidderComponent, p.o.Spec.Comms),
 		Sources: compose.SourceInput{Network: p.o.Spec.Network, LocalDID: localDID}, ForceFirehose: compose.OAuthReceiveOnly(plan.Mode)})
 	if err != nil {
 		return err
@@ -519,7 +516,7 @@ func (p *pass) local(ctx context.Context, plan compose.AccountPlan, id *v1alpha1
 			first = compose.WithoutPds(first)
 		}
 	}
-	if err := p.ensure(ctx, first); err != nil {
+	if err := p.c.EnsureAdding(ctx, p.r, first); err != nil {
 		return p.retry("", err)
 	}
 	snap, err := p.snapshot(ctx)
@@ -554,7 +551,7 @@ func (p *pass) local(ctx context.Context, plan compose.AccountPlan, id *v1alpha1
 		return p.fail(err)
 	}
 	pds, _ := compose.DesiredPds(desired)
-	if err := p.ensure(ctx, []compose.Desired{pds}); err != nil {
+	if err := p.c.EnsureAdding(ctx, p.r, []compose.Desired{pds}); err != nil {
 		return p.retry("", err)
 	}
 	if snap, err = p.snapshot(ctx); err != nil {
@@ -601,7 +598,7 @@ func (p *pass) local(ctx context.Context, plan compose.AccountPlan, id *v1alpha1
 	if desired, err = p.desired(ctx, plan, id, pdsHandle, pdsPublicURL, in); err != nil {
 		return p.fail(err)
 	}
-	if err := p.ensure(ctx, compose.WithoutPds(desired)); err != nil {
+	if err := p.c.EnsureLinked(ctx, p.r, desired, compose.WithoutPds(desired)); err != nil {
 		return p.retry("", err)
 	}
 	if err := p.streams(ctx, plan, did); err != nil {

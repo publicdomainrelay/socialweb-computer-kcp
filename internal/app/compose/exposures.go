@@ -249,7 +249,7 @@ func AppIngressOrDefault(defaultIngress bool, spec *v1alpha1.IngressConfig, netw
 	return nil
 }
 
-func NetworkIngressConfig(spec *v1alpha1.IngressConfig) *v1alpha1.IngressConfig {
+func NetworkIngressConfig(spec *v1alpha1.IngressConfig, workspace string) *v1alpha1.IngressConfig {
 	out := &v1alpha1.IngressConfig{}
 	if spec != nil {
 		out = &v1alpha1.IngressConfig{
@@ -264,6 +264,7 @@ func NetworkIngressConfig(spec *v1alpha1.IngressConfig) *v1alpha1.IngressConfig 
 		out.Provider = v1alpha1.IngressProviderXRPCSubscription
 	}
 	out.IngressRef = ComponentRefFor(ComponentKindIngressProxy, NetworkIngressName)
+	out.IngressRef.Workspace = strings.TrimSpace(workspace)
 	return out
 }
 

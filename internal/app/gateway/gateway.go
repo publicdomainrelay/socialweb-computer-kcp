@@ -479,10 +479,7 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 }
 
 func (p *pass) ensure(ctx context.Context, desired []compose.Desired) error {
-	if err := p.c.ApplyLinks(ctx, p.r, "components", compose.ComponentLinks(p.r.Workspace, desired)); err != nil {
-		return err
-	}
-	return p.c.EnsureComponents(ctx, p.r, desired)
+	return p.c.EnsureLinked(ctx, p.r, desired, desired)
 }
 
 func (p *pass) suspended(ctx context.Context, plan compose.AccountPlan, in desiredInput) (ctlruntime.Result, error) {
@@ -520,7 +517,7 @@ func (p *pass) localAccount(ctx context.Context, plan compose.AccountPlan, id *v
 			first = compose.WithoutPds(first)
 		}
 	}
-	if err := p.ensure(ctx, first); err != nil {
+	if err := p.c.EnsureAdding(ctx, p.r, first); err != nil {
 		return nil, nil, "", false, err
 	}
 	snap, err := p.snapshot(ctx)
@@ -555,7 +552,7 @@ func (p *pass) localAccount(ctx context.Context, plan compose.AccountPlan, id *v
 		return nil, nil, "", true, err
 	}
 	pds, _ := compose.DesiredPds(desired)
-	if err := p.ensure(ctx, []compose.Desired{pds}); err != nil {
+	if err := p.c.EnsureAdding(ctx, p.r, []compose.Desired{pds}); err != nil {
 		return nil, nil, "", false, err
 	}
 	if snap, err = p.snapshot(ctx); err != nil {
@@ -635,10 +632,11 @@ func (p *pass) run(ctx context.Context, plan compose.AccountPlan, id *v1alpha1.M
 		}
 		all, id, desired = next, nextID, compose.WithoutPds(next)
 	}
-	if err := p.ensure(ctx, desired); err != nil {
+	if err := p.c.EnsureLinked(ctx, p.r, all, desired); err != nil {
 		return p.retry("", err)
 	}
-	streamLinks, err := c.ApplyMarketStreams(ctx, r, compose.Streams{Role: "requester", Workspace: ws, Comms: o.Spec.Comms,
+	streamLinks, err := c.ApplyMarketStreams(ctx, r, compose.Streams{Role: "requester", Workspace: ws,
+		Comms:   compose.OverrideComms(o.Spec.Components, compose.ComponentKindRequester, marketrequester.RequesterComponent, o.Spec.Comms),
 		Sources: compose.SourceInput{Network: o.Spec.Network}, ForceFirehose: compose.OAuthReceiveOnly(plan.Mode)})
 	if err != nil {
 		return p.fail(err)

@@ -246,7 +246,11 @@ func appIngressConfig(spec *v1alpha1.IngressConfig, network *v1alpha1.MarketNetw
 func pdsIngressRef(cfg *v1alpha1.IngressConfig, fromNetwork bool) *commonv1.ObjectRef {
 	if cfg != nil && cfg.IngressRef != nil {
 		if name := strings.TrimSpace(cfg.IngressRef.Name); name != "" {
-			return ComponentRefFor(ComponentKindIngressProxy, name)
+			ref := ComponentRefFor(ComponentKindIngressProxy, name)
+			if fromNetwork {
+				ref.Workspace = strings.TrimSpace(cfg.IngressRef.Workspace)
+			}
+			return ref
 		}
 	}
 	if fromNetwork {

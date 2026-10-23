@@ -408,10 +408,7 @@ func (p *pass) desired(plan compose.AccountPlan, ident *v1alpha1.ComponentIdenti
 }
 
 func (p *pass) ensure(ctx context.Context, desired []compose.Desired) error {
-	if err := p.c.ApplyLinks(ctx, p.r, "components", compose.ComponentLinks(p.r.Workspace, desired)); err != nil {
-		return err
-	}
-	return p.c.EnsureComponents(ctx, p.r, desired)
+	return p.c.EnsureLinked(ctx, p.r, desired, desired)
 }
 
 func (p *pass) baseLinks(mount string) []compose.Link {
@@ -497,7 +494,8 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 	if err := p.ensure(ctx, desired); err != nil {
 		return p.retry("", err)
 	}
-	streams, err := c.ApplyMarketStreams(ctx, r, compose.Streams{Role: "requester", Comms: o.Spec.Comms,
+	streams, err := c.ApplyMarketStreams(ctx, r, compose.Streams{Role: "requester",
+		Comms:   compose.OverrideComms(o.Spec.Components, compose.ComponentKindRequester, marketrequester.RequesterComponent, o.Spec.Comms),
 		Sources: compose.SourceInput{Network: o.Spec.Network}, ForceFirehose: compose.OAuthReceiveOnly(plan.Mode)})
 	if err != nil {
 		return p.fail(err)
