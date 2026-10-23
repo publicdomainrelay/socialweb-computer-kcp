@@ -241,7 +241,7 @@ waves:
     gate: "all kinds registered; refs unified; contract packages pure; bus denies an unlinked call; the pilot controller runs on the runtime across root and a later-created root:<app> workspace with no ticker."
   - id: W1
     title: "Shared kit"
-    status: todo
+    status: doing
     parallel: true
     tracks: [W1-MODERNIZE, W1-CACHE-LEASE, W1-XRPC, W1-LIFECYCLE]
     depends_on: [W0]
@@ -415,7 +415,7 @@ items:
     track: abstract
     parallel_with: []
     depends_on: [W0-REFS]
-    status: todo
+    status: doing
     decision: >
       Define the kinds in decisions.abstract_kind_set. AtprotoRepo becomes
       abstract with spec.backendRef and contract status (did, head, rev,
@@ -538,7 +538,7 @@ items:
     track: mounts
     parallel_with: [W0-ABSTRACT]
     depends_on: [W0-RUNTIME]
-    status: todo
+    status: doing
     closes: [D25]
     decision: >
       kcp main authenticates mount callers itself and verifies the mount
@@ -567,7 +567,7 @@ items:
     track: modernize
     parallel_with: [W1-CACHE-LEASE, W1-XRPC, W1-LIFECYCLE]
     depends_on: [W0-RUNTIME]
-    status: todo
+    status: doing
     decision: >
       Run go fix ./.... Replace option default blocks with cmp.Or or a
       Positive helper. Move the 89 byte-identical helper groups into shared
@@ -589,7 +589,7 @@ items:
     track: cache-lease
     parallel_with: [W1-MODERNIZE, W1-XRPC, W1-LIFECYCLE]
     depends_on: [W0-RUNTIME]
-    status: todo
+    status: doing
     closes: [D14]
     decision: >
       internal/kit/ttlcache.Cache[K,V] with GetOrLoad (single-flight,
@@ -615,7 +615,7 @@ items:
     track: xrpc
     parallel_with: [W1-MODERNIZE, W1-CACHE-LEASE, W1-LIFECYCLE]
     depends_on: [W0-RUNTIME]
-    status: todo
+    status: doing
     decision: >
       internal/atproto/xrpc: Query[Out], Procedure[In,Out] with an Auth hook
       (Bearer, DPoP, service auth) built on lease.Source, a response size
@@ -636,7 +636,7 @@ items:
     track: lifecycle
     parallel_with: [W1-MODERNIZE, W1-CACHE-LEASE, W1-XRPC]
     depends_on: [W0-RUNTIME]
-    status: todo
+    status: doing
     closes: [D15, D16, D17]
     decision: >
       Every goroutine is started by an errgroup or a supervisor that is
