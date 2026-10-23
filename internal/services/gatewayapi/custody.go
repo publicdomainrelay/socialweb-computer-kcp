@@ -3,16 +3,16 @@ package gatewayapi
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
 )
 
 const custodyMaxBody = 1 << 20
@@ -98,20 +98,12 @@ func newCustodyClient(endpoint custodyEndpoint) (*custodyClient, error) {
 	if err := endpoint.check(); err != nil {
 		return nil, err
 	}
-	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
-	if len(endpoint.CACert) > 0 {
-		pool := x509.NewCertPool()
-		if !pool.AppendCertsFromPEM(endpoint.CACert) {
-			return nil, errors.New("gatewayapi: the custody CA bundle holds no certificate")
-		}
-		tlsConfig.RootCAs = pool
+	tlsConfig, err := httpclient.TLSConfig(httpclient.TLSOptions{CAPEM: endpoint.CACert, CertPEM: endpoint.ClientCert, KeyPEM: endpoint.ClientKey})
+	if errors.Is(err, httpclient.ErrNoCA) {
+		return nil, errors.New("gatewayapi: the custody CA bundle holds no certificate")
 	}
-	if len(endpoint.ClientCert) > 0 || len(endpoint.ClientKey) > 0 {
-		pair, err := tls.X509KeyPair(endpoint.ClientCert, endpoint.ClientKey)
-		if err != nil {
-			return nil, fmt.Errorf("gatewayapi: the custody client certificate: %w", err)
-		}
-		tlsConfig.Certificates = []tls.Certificate{pair}
+	if err != nil {
+		return nil, fmt.Errorf("gatewayapi: the custody client certificate: %w", err)
 	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Proxy = nil
@@ -127,45 +119,29 @@ func newCustodyClient(endpoint custodyEndpoint) (*custodyClient, error) {
 }
 
 func (c *custodyClient) call(ctx context.Context, operation, method, path, token string, body any) (*custodyEnvelope, int, error) {
-	var reader io.Reader
-	if body != nil {
-		raw, err := json.Marshal(body)
-		if err != nil {
-			return nil, 0, fmt.Errorf("gatewayapi: encoding custody %s: %w", operation, err)
-		}
-		reader = bytes.NewReader(raw)
-	}
 	target := strings.TrimRight(c.endpoint.Address, "/") + "/v1/" + strings.TrimLeft(path, "/")
-	req, err := http.NewRequestWithContext(ctx, method, target, reader)
+	req, err := httpjson.NewRequest(ctx, method, target, body)
 	if err != nil {
 		return nil, 0, fmt.Errorf("gatewayapi: building custody %s: %w", operation, err)
 	}
 	req.Header.Set("Accept", "application/json")
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
 	if token != "" {
 		req.Header.Set("X-Vault-Token", token)
 	}
-	resp, err := c.http.Do(req)
+	resp, err := httpjson.Exchange(ctx, c.http, req, custodyMaxBody)
+	if tooLarge, ok := errors.AsType[*httpjson.TooLargeError](err); ok {
+		return nil, 0, &custodyError{Operation: operation, Status: tooLarge.Status, Message: "the answer is too large"}
+	}
 	if err != nil {
 		return nil, 0, fmt.Errorf("gatewayapi: custody %s: %w", operation, err)
 	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, custodyMaxBody+1))
-	if err != nil {
-		return nil, 0, fmt.Errorf("gatewayapi: reading custody %s: %w", operation, err)
-	}
-	if len(raw) > custodyMaxBody {
-		return nil, 0, &custodyError{Operation: operation, Status: resp.StatusCode, Message: "the answer is too large"}
-	}
 	var envelope custodyEnvelope
-	if len(bytes.TrimSpace(raw)) > 0 {
-		if err := json.Unmarshal(raw, &envelope); err != nil {
-			return nil, resp.StatusCode, &custodyError{Operation: operation, Status: resp.StatusCode, Message: "the answer is not JSON: " + truncate(string(raw), 200)}
+	if len(bytes.TrimSpace(resp.Body)) > 0 {
+		if err := json.Unmarshal(resp.Body, &envelope); err != nil {
+			return nil, resp.Status, &custodyError{Operation: operation, Status: resp.Status, Message: "the answer is not JSON: " + truncate(string(resp.Body), 200)}
 		}
 	}
-	return &envelope, resp.StatusCode, nil
+	return &envelope, resp.Status, nil
 }
 
 func (c *custodyClient) expect(ctx context.Context, operation, method, path, token string, body any) (json.RawMessage, *custodyEnvelope, error) {
