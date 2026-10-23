@@ -107,10 +107,21 @@ func (f LinkFrom) matches(caller Caller) bool {
 	if !groupMatches(f.Group, caller.Ref.Group) {
 		return false
 	}
-	if strings.TrimSpace(f.Workspace) != strings.TrimSpace(caller.Ref.Workspace) {
+	if !workspaceMatches(f.Workspace, caller.Ref.Workspace) {
 		return false
 	}
 	return f.Selector.Matches(labels.Set(caller.Labels))
+}
+
+func workspaceMatches(pattern, workspace string) bool {
+	pattern, workspace = strings.TrimSpace(pattern), strings.TrimSpace(workspace)
+	if pattern == ScopeAll {
+		return workspace != ""
+	}
+	if parent, ok := strings.CutSuffix(pattern, ":"+ScopeAll); ok {
+		return strings.HasPrefix(workspace, parent+":")
+	}
+	return pattern == workspace
 }
 
 func refMatches(pattern, ref commonv1.ObjectRef) bool {
