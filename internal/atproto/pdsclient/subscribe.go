@@ -171,9 +171,6 @@ func newRepoEventStream(parent context.Context, cursor *int64, open func(context
 	if open == nil {
 		return nil, fmt.Errorf("%w: subscription dial is not configured", ErrInvalidConfig)
 	}
-	if parent == nil {
-		parent = context.Background()
-	}
 	ctx, cancel := context.WithCancel(parent)
 	initial := int64(-1)
 	if cursor != nil {
