@@ -36,6 +36,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/oauthcallback"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/statesync"
 
@@ -129,9 +130,7 @@ type Service struct {
 
 	bidders map[string]Bidder
 
-	scopeMu sync.Mutex
-
-	scopeCache map[string]scopeEntry
+	scopeCache *ttlcache.Cache[string, PolicyDecision]
 
 	secretsMu sync.Mutex
 
@@ -142,12 +141,6 @@ type Service struct {
 	heldSessions map[string]*heldSession
 
 	syncController *statesync.Controller
-}
-
-type scopeEntry struct {
-	decision PolicyDecision
-
-	at time.Time
 }
 
 func New(cfg Config) (*Service, error) {
@@ -170,7 +163,7 @@ func New(cfg Config) (*Service, error) {
 		eventSinks:    map[string]chan MarketEvent{},
 		pendingEvents: map[string][]MarketEvent{},
 		bidders:       map[string]Bidder{},
-		scopeCache:    map[string]scopeEntry{},
+		scopeCache:    ttlcache.New[string, PolicyDecision](ttlcache.Options{TTL: 30 * time.Second}),
 		secrets:       map[string]*secretsState{},
 		heldSessions:  map[string]*heldSession{},
 	}, nil
@@ -1697,12 +1690,9 @@ func (s *Service) bidAllowedWithPolicy(ctx context.Context, bid BidRecord, usePo
 		return true
 	}
 	key := bid.DID + "|" + workflow
-	s.scopeMu.Lock()
-	if entry, ok := s.scopeCache[key]; ok && time.Since(entry.at) < 30*time.Second {
-		s.scopeMu.Unlock()
-		return entry.decision.Allow
+	if decision, ok := s.scopeCache.Get(key); ok {
+		return decision.Allow
 	}
-	s.scopeMu.Unlock()
 	if s.policy == nil || (s.policy.Workflow == "" && workflow == "") {
 		return true
 	}
@@ -1720,9 +1710,7 @@ func (s *Service) bidAllowedWithPolicy(ctx context.Context, bid BidRecord, usePo
 		input.RFP = state.RFP
 	}
 	decision := s.policy.Scope(ctx, input)
-	s.scopeMu.Lock()
-	s.scopeCache[key] = scopeEntry{decision: decision, at: s.now()}
-	s.scopeMu.Unlock()
+	s.scopeCache.Set(key, decision)
 	if !decision.Allow {
 		s.log.Info("requester_bid_policy_denied", "bidder", bid.DID, "reason", decision.Reason)
 	}

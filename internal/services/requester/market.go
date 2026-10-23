@@ -22,6 +22,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/serviceauth"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 )
 
 const (
@@ -141,11 +142,9 @@ type HTTPMarket struct {
 
 	Log *slog.Logger
 
-	discoveryMu sync.Mutex
+	discoveryOnce sync.Once
 
-	cachedBidders []Bidder
-
-	cachedAt time.Time
+	discovered *ttlcache.Cache[struct{}, []Bidder]
 }
 
 func (m *HTTPMarket) client() *http.Client {
@@ -166,11 +165,23 @@ func (m *HTTPMarket) Discover(ctx context.Context, now time.Time) ([]Bidder, err
 	if m == nil || m.Reader == nil {
 		return nil, errors.New("requester: the market has no record reader")
 	}
-	m.discoveryMu.Lock()
-	defer m.discoveryMu.Unlock()
-	if len(m.cachedBidders) > 0 && time.Since(m.cachedAt) < 20*time.Second {
-		return append([]Bidder(nil), m.cachedBidders...), nil
+	m.discoveryOnce.Do(func() {
+		m.discovered = ttlcache.New[struct{}, []Bidder](ttlcache.Options{TTL: 20 * time.Second})
+	})
+	bidders, err := m.discovered.GetOrLoad(ctx, struct{}{}, func(ctx context.Context) ([]Bidder, time.Duration, error) {
+		bidders := m.discover(ctx, now)
+		if len(bidders) == 0 {
+			return bidders, -1, nil
+		}
+		return bidders, 0, nil
+	})
+	if err != nil {
+		return nil, err
 	}
+	return append(make([]Bidder, 0, len(bidders)), bidders...), nil
+}
+
+func (m *HTTPMarket) discover(ctx context.Context, now time.Time) []Bidder {
 	seen := map[string]bool{}
 	candidates := []string{}
 	add := func(did string) {
@@ -223,9 +234,7 @@ func (m *HTTPMarket) Discover(ctx context.Context, now time.Time) ([]Bidder, err
 			bidders = append(bidders, Bidder{DID: did, Endpoint: endpoint, Audience: audience})
 		}
 	}
-	m.cachedBidders = append(m.cachedBidders[:0], bidders...)
-	m.cachedAt = time.Now()
-	return bidders, nil
+	return bidders
 }
 
 func resolveBidderEndpoint(ctx context.Context, dir identity.Directory, raw string) (string, string, error) {
