@@ -295,6 +295,8 @@ func Run(ctx context.Context, cfg Config, m hostsvc.Manager) error {
 				settled = false
 			} else {
 				events, watched, unwatch = ch, prefix, cancel
+				retry.Reset(0)
+				continue
 			}
 		}
 		if !settled {
