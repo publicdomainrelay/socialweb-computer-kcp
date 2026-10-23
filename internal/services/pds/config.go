@@ -17,7 +17,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	atpds "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsreload"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/tlsreload"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )

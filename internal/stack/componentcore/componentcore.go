@@ -34,6 +34,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/tlsreload"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/oauthcallback"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyaction"
 	policycontroller "github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/controller"
@@ -49,7 +50,6 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/requester"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/sshserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsfront"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsreload"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 )
 

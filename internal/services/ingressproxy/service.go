@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -17,10 +16,10 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/exposure"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/servetls"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/ingressproxy/iroh"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/ingressproxy/opentunnel"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/ingressproxy/xrpcsubscription"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsreload"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -180,10 +179,10 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		}
 	}
 	if decoded.TLS != nil && decoded.TLS.Enabled {
-		certFile, keyFile := certificateFiles(decoded.TLS.CertRef, decoded.Storage, cfg.Hostnames)
+		certFile, keyFile := servetls.CertificateFiles(decoded.TLS.CertRef, decoded.Storage, cfg.Hostnames)
 		cfg.CertFile = certFile
 		cfg.KeyFile = keyFile
-		tlsConfig, err := serverTLS(deps, cfg.CertFile)
+		tlsConfig, err := servetls.Config(cfg.CertFile, deps.TLS, deps.Log)
 		if err != nil {
 			return Config{}, fmt.Errorf("ingressproxy: %w", err)
 		}
@@ -292,67 +291,6 @@ func relayEndpoint(deps component.Deps, workspace string, ref *commonv1.ObjectRe
 		}
 	}
 	return "", false
-}
-
-func certificateFiles(certRef string, storage *v1alpha1.ComponentStorage, hostnames []string) (string, string) {
-	certFile := refPath(certRef, storage)
-	if certFile == "" && storage != nil && storage.CertsDir != "" && len(hostnames) > 0 {
-		name := hostport.HostnameOnly(hostnames[0])
-		if name != "" && name != "*" {
-			certFile = filepath.Join(storage.CertsDir, name+".crt")
-		}
-	}
-	return certFile, keyFileFor(certFile)
-}
-
-func refPath(ref string, storage *v1alpha1.ComponentStorage) string {
-	ref = strings.TrimSpace(ref)
-	if ref == "" {
-		return ""
-	}
-	if filepath.IsAbs(ref) || storage == nil || storage.CertsDir == "" {
-		return ref
-	}
-	return filepath.Join(storage.CertsDir, ref)
-}
-
-func keyFileFor(certFile string) string {
-	switch {
-	case certFile == "":
-		return ""
-	case strings.HasSuffix(certFile, ".crt"):
-		return strings.TrimSuffix(certFile, ".crt") + ".key"
-	case strings.HasSuffix(certFile, ".pem"):
-		return strings.TrimSuffix(certFile, ".pem") + ".key"
-	default:
-		return certFile + ".key"
-	}
-}
-
-func keyFilesFor(certFile string) []string {
-	candidates := []string{keyFileFor(certFile)}
-	if before, ok := strings.CutSuffix(certFile, ".pem"); ok {
-		candidates = append(candidates, before+"-key.pem")
-	}
-	return append(candidates, certFile)
-}
-
-func serverTLS(deps component.Deps, certFile string) (*tls.Config, error) {
-	if certFile != "" {
-		reloader, err := tlsreload.New(certFile, keyFilesFor(certFile), deps.Log)
-		if err != nil {
-			return nil, err
-		}
-		return reloader.TLSConfig(&tls.Config{MinVersion: tls.VersionTLS12, NextProtos: []string{"http/1.1"}}), nil
-	}
-	if deps.TLS != nil {
-		tlsConfig := deps.TLS.Clone()
-		if len(tlsConfig.NextProtos) == 0 {
-			tlsConfig.NextProtos = []string{"http/1.1"}
-		}
-		return tlsConfig, nil
-	}
-	return nil, errors.New("a TLS certificate is required")
 }
 
 func Factory(ctx context.Context, deps component.Deps, spec component.ComponentSpec) (component.Service, error) {

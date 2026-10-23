@@ -25,7 +25,8 @@ import (
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsreload"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/servetls"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/tlsreload"
 )
 
 const (
@@ -505,7 +506,7 @@ func (c *ExposureController) localTLS(spec exposurev1alpha1.ExposureTLS) (*tls.C
 	switch {
 	case strings.TrimSpace(spec.CertRef) != "":
 		certFile := strings.TrimSpace(spec.CertRef)
-		reloader, err := tlsreload.New(certFile, []string{keyFileFor(certFile)}, c.log)
+		reloader, err := tlsreload.New(certFile, []string{servetls.KeyFileFor(certFile)}, c.log)
 		if err != nil {
 			return nil, fmt.Errorf("loading the certificate %s: %w", certFile, err)
 		}
@@ -554,19 +555,6 @@ func bridge(ctx context.Context, handlers *component.Handlers, target component.
 	_ = conn.Close()
 	_ = stream.Close()
 	<-done
-}
-
-func keyFileFor(certFile string) string {
-	switch {
-	case certFile == "":
-		return ""
-	case strings.HasSuffix(certFile, ".crt"):
-		return strings.TrimSuffix(certFile, ".crt") + ".key"
-	case strings.HasSuffix(certFile, ".pem"):
-		return strings.TrimSuffix(certFile, ".pem") + ".key"
-	default:
-		return certFile + ".key"
-	}
 }
 
 func normalizePath(value string) string {

@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -20,7 +19,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsreload"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/servetls"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -105,7 +104,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 	if decoded.TLS != nil {
 		cfg.CABundle = strings.TrimSpace(decoded.TLS.CABundle)
 		if decoded.TLS.CertRef != "" || decoded.TLS.Enabled {
-			certFile, keyFile := certificateFiles(decoded.TLS.CertRef, decoded.Storage, cfg.Hostnames)
+			certFile, keyFile := servetls.CertificateFiles(decoded.TLS.CertRef, decoded.Storage, cfg.Hostnames)
 			cfg.CertFile = certFile
 			cfg.KeyFile = keyFile
 		}
@@ -140,49 +139,6 @@ func appendValues(values []string, extra ...string) []string {
 		add(value)
 	}
 	return out
-}
-
-func certificateFiles(certRef string, storage *v1alpha1.ComponentStorage, hostnames []string) (string, string) {
-	certFile := refPath(certRef, storage)
-	if certFile == "" && storage != nil && storage.CertsDir != "" && len(hostnames) > 0 {
-		name := hostport.HostnameOnly(hostnames[0])
-		if name != "" && name != "*" {
-			certFile = filepath.Join(storage.CertsDir, name+".crt")
-		}
-	}
-	return certFile, keyFileFor(certFile)
-}
-
-func refPath(ref string, storage *v1alpha1.ComponentStorage) string {
-	ref = strings.TrimSpace(ref)
-	if ref == "" {
-		return ""
-	}
-	if filepath.IsAbs(ref) || storage == nil || storage.CertsDir == "" {
-		return ref
-	}
-	return filepath.Join(storage.CertsDir, ref)
-}
-
-func keyFileFor(certFile string) string {
-	switch {
-	case certFile == "":
-		return ""
-	case strings.HasSuffix(certFile, ".crt"):
-		return strings.TrimSuffix(certFile, ".crt") + ".key"
-	case strings.HasSuffix(certFile, ".pem"):
-		return strings.TrimSuffix(certFile, ".pem") + ".key"
-	default:
-		return certFile + ".key"
-	}
-}
-
-func keyFilesFor(certFile string) []string {
-	candidates := []string{keyFileFor(certFile)}
-	if before, ok := strings.CutSuffix(certFile, ".pem"); ok {
-		candidates = append(candidates, before+"-key.pem")
-	}
-	return append(candidates, certFile)
 }
 
 func upstreamEndpoint(deps component.Deps, workspace string, ref *commonv1.ObjectRef) (string, bool) {
@@ -512,11 +468,7 @@ func parseUpstream(raw string) (*url.URL, error) {
 
 func serverTLS(cfg Config) (*tls.Config, error) {
 	if cfg.CertFile != "" {
-		reloader, err := tlsreload.New(cfg.CertFile, keyFilesFor(cfg.CertFile), cfg.Deps.Log)
-		if err != nil {
-			return nil, err
-		}
-		return reloader.TLSConfig(&tls.Config{MinVersion: tls.VersionTLS12, NextProtos: []string{"http/1.1"}}), nil
+		return servetls.Config(cfg.CertFile, nil, cfg.Deps.Log)
 	}
 	tlsConfig := cfg.TLS
 	if tlsConfig == nil {
