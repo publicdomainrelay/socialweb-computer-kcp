@@ -19,6 +19,8 @@ const (
 	CapabilitySession = "pds.session"
 
 	CapabilitySync = "repo.read"
+
+	CapabilityServiceAuth = "pds.serviceauth"
 )
 
 var (
@@ -119,6 +121,10 @@ type Sessions interface {
 	Session(ctx context.Context, did string) (Session, error)
 
 	SignOut(ctx context.Context, did string) error
+}
+
+type ServiceAuth interface {
+	ServiceAuth(ctx context.Context, did, audience, lxm string, expires time.Time) (string, error)
 }
 
 type Sync interface {
