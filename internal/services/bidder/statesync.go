@@ -1,6 +1,7 @@
 package bidder
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -588,9 +589,7 @@ func (s *Service) ensureTerminationSync(ctx context.Context, info contractInfo, 
 			vm.Spec.Contract.Receipt.URI = info.receiptURI
 			vm.Spec.Contract.Receipt.CID = info.receiptCID
 		}
-		if vm.Spec.Contract.SubmitEventURL == "" {
-			vm.Spec.Contract.SubmitEventURL = submitEventURL
-		}
+		vm.Spec.Contract.SubmitEventURL = cmp.Or(vm.Spec.Contract.SubmitEventURL, submitEventURL)
 	}
 	object, err := computevm.TerminationStateSync(vm, s.cfg.Workspace, reason, observedAt, request)
 	if err != nil {
@@ -1305,9 +1304,7 @@ type releaseAdapter struct {
 func (a *releaseAdapter) Name() string { return ReleaseSyncAdapter }
 
 func releaseSettledObservation(payload releasePayload, request statesync.Request, ref string) statesync.Observation {
-	if ref == "" {
-		ref = "released:" + payload.ReceiptURI
-	}
+	ref = cmp.Or(ref, "released:"+payload.ReceiptURI)
 	return statesync.Observation{
 		Exists: true,
 		Ref:    ref,

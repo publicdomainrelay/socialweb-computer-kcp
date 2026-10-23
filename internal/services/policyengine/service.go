@@ -1,6 +1,7 @@
 package policyengine
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	policyv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/policy/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/atproto"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/cache"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/controller"
@@ -91,9 +93,7 @@ func New(options Options) (*Service, error) {
 	if options.Store == nil {
 		return nil, errors.New("policy engine service: a kcpstore store is required")
 	}
-	if options.Cluster == "" {
-		options.Cluster = "root"
-	}
+	options.Cluster = cmp.Or(options.Cluster, "root")
 	if options.Log == nil {
 		options.Log = slog.New(slog.DiscardHandler)
 	}
@@ -179,17 +179,11 @@ func New(options Options) (*Service, error) {
 		return nil, err
 	}
 	scopeTTL := options.ScopeTTL
-	if scopeTTL <= 0 {
-		scopeTTL = 5 * time.Minute
-	}
+	scopeTTL = opt.Positive(scopeTTL, 5*time.Minute)
 	negativeScopeTTL := options.NegativeScopeTTL
-	if negativeScopeTTL <= 0 {
-		negativeScopeTTL = 30 * time.Second
-	}
+	negativeScopeTTL = opt.Positive(negativeScopeTTL, 30*time.Second)
 	verdictTTL := options.VerdictTTL
-	if verdictTTL <= 0 {
-		verdictTTL = 30 * time.Second
-	}
+	verdictTTL = opt.Positive(verdictTTL, 30*time.Second)
 	scopeCache := evaluator.NewScopeCache(scopeTTL, negativeScopeTTL, 10000, logf)
 	ev := evaluator.New(evaluator.Options{
 		Registry:      policyRegistry,
@@ -266,9 +260,7 @@ func Factory(options Options) component.ServiceFactory {
 			return nil, err
 		}
 		workspace := spec.Workspace
-		if workspace == "" {
-			workspace = config.Cluster
-		}
+		workspace = cmp.Or(workspace, config.Cluster)
 		if config.Store == nil {
 			if deps.KCP == nil {
 				return nil, errors.New("policy engine service: kcp clients are not configured")
@@ -287,9 +279,7 @@ func Factory(options Options) component.ServiceFactory {
 			}
 			config.Store = store
 		}
-		if config.Cluster == "" {
-			config.Cluster = workspace
-		}
+		config.Cluster = cmp.Or(config.Cluster, workspace)
 		return New(config)
 	}
 }

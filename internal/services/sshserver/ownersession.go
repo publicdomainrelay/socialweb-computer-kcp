@@ -17,6 +17,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayhttp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/lease"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/sshtransport"
 )
 
@@ -220,9 +221,7 @@ func (a *ownerSessionAgent) ListRecords(ctx context.Context, did, collection str
 	if err != nil {
 		return nil, err
 	}
-	if limit <= 0 {
-		limit = 50
-	}
+	limit = opt.Positive(limit, 50)
 	page, err := pds.ListRecords(ctx, pdsclient.ListRecordsRequest{Repo: repo, Collection: nsid, Limit: limit})
 	if err != nil {
 		return nil, err

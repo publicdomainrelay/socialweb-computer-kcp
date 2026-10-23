@@ -1,6 +1,7 @@
 package bidder
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -324,9 +325,7 @@ func (s *Service) prepare(ctx context.Context) error {
 		Now:            s.cfg.Now,
 		WaitForRunning: false,
 	}
-	if s.provider.Config.Handle == "" {
-		s.provider.Config.Handle = s.cfg.Handle
-	}
+	s.provider.Config.Handle = cmp.Or(s.provider.Config.Handle, s.cfg.Handle)
 	s.policy = &PolicyEvaluator{
 		Runs:        s.policyRuns(),
 		Cluster:     s.cluster,
@@ -462,9 +461,7 @@ func (s *Service) resolveIdentity(ctx context.Context) error {
 	s.did = s.cfg.DID
 	if s.cfg.PDSURL == "" && s.cfg.PDSRef != nil {
 		kind := s.cfg.PDSRef.Kind
-		if kind == "" {
-			kind = "Pds"
-		}
+		kind = cmp.Or(kind, "Pds")
 		s.cfg.PDSURL = kcp.HandlerURL(s.cfg.Workspace, kind, s.cfg.PDSRef.Name)
 		s.pdsInternal = s.cfg.PDSURL != ""
 	}
@@ -476,15 +473,9 @@ func (s *Service) resolveIdentity(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if s.did == "" {
-		s.did = obj.Status.Did
-	}
-	if s.cfg.PDSURL == "" {
-		s.cfg.PDSURL = obj.Status.PdsURL
-	}
-	if s.cfg.Handle == "" {
-		s.cfg.Handle = obj.Status.Handle
-	}
+	s.did = cmp.Or(s.did, obj.Status.Did)
+	s.cfg.PDSURL = cmp.Or(s.cfg.PDSURL, obj.Status.PdsURL)
+	s.cfg.Handle = cmp.Or(s.cfg.Handle, obj.Status.Handle)
 	return nil
 }
 
@@ -584,9 +575,7 @@ func (s *Service) pdsRef() (pdsclient.Ref, error) {
 	}
 	if s.cfg.PDSRef != nil {
 		kind := s.cfg.PDSRef.Kind
-		if kind == "" {
-			kind = "Pds"
-		}
+		kind = cmp.Or(kind, "Pds")
 		return pdsclient.LocalRef{Workspace: s.cfg.Workspace, Kind: kind, Name: s.cfg.PDSRef.Name}, nil
 	}
 	if s.cfg.PDSURL != "" {
@@ -626,9 +615,7 @@ func (s *Service) resolveVault(ctx context.Context) error {
 	}
 	if s.store != nil {
 		clientName := s.cfg.VaultClient
-		if clientName == "" {
-			clientName = "bidder"
-		}
+		clientName = cmp.Or(clientName, "bidder")
 		vault, err := kcpOpenBaoVault(s.store, s.cluster, s.cfg.Provider.GuestVaultServer, clientName)
 		if err != nil {
 			return err
@@ -678,9 +665,7 @@ func (s *Service) resolveGuestURL(ctx context.Context) string {
 		return ""
 	}
 	kind := s.cfg.GuestControlRef.Kind
-	if kind == "" {
-		kind = "GuestControlPlane"
-	}
+	kind = cmp.Or(kind, "GuestControlPlane")
 	return kcp.HandlerURL(s.cfg.Workspace, kind, s.cfg.GuestControlRef.Name)
 }
 
@@ -727,9 +712,7 @@ func (s *Service) guestExposureURL(ctx context.Context) string {
 		return ""
 	}
 	kind := ref.Kind
-	if kind == "" {
-		kind = "GuestControlPlane"
-	}
+	kind = cmp.Or(kind, "GuestControlPlane")
 	name := "svc-" + strings.ToLower(kind) + "-" + strings.TrimSpace(ref.Name) + "-ingress"
 	client, err := s.exposureClient()
 	if err != nil {

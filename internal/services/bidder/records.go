@@ -2,6 +2,7 @@ package bidder
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -148,9 +149,7 @@ func (p *PDSStore) PutRecord(ctx context.Context, repo, collection, rkey string,
 		return market.StrongRef{}, pdsError("putRecord of "+repo+"/"+collection+"/"+rkey, err)
 	}
 	uri := result.URI.String()
-	if uri == "" {
-		uri = "at://" + repo + "/" + collection + "/" + rkey
-	}
+	uri = cmp.Or(uri, "at://"+repo+"/"+collection+"/"+rkey)
 	if !result.CID.Defined() {
 		return market.StrongRef{}, fmt.Errorf("bidder: putRecord of %s returned no cid", uri)
 	}
@@ -188,9 +187,7 @@ func (p *PDSStore) GetRecord(ctx context.Context, repo, collection, rkey string)
 		return market.ResolvedRecord{}, err
 	}
 	uri := record.URI.String()
-	if uri == "" {
-		uri = "at://" + repo + "/" + collection + "/" + rkey
-	}
+	uri = cmp.Or(uri, "at://"+repo+"/"+collection+"/"+rkey)
 	return market.ResolvedRecord{URI: uri, CID: record.CID.String(), Value: value}, nil
 }
 
@@ -240,9 +237,7 @@ func (p *PDSStore) Resolve(ctx context.Context, ref market.RecordRef) (market.Re
 	if err != nil {
 		return market.ResolvedRecord{}, err
 	}
-	if rec.CID == "" {
-		rec.CID = ref.CID
-	}
+	rec.CID = cmp.Or(rec.CID, ref.CID)
 	return rec, nil
 }
 
@@ -303,8 +298,6 @@ func (r *routedStore) Resolve(ctx context.Context, ref market.RecordRef) (market
 	if err != nil {
 		return market.ResolvedRecord{}, err
 	}
-	if rec.CID == "" {
-		rec.CID = ref.CID
-	}
+	rec.CID = cmp.Or(rec.CID, ref.CID)
 	return rec, nil
 }

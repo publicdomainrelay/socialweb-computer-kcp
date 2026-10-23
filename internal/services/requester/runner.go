@@ -1,6 +1,7 @@
 package requester
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -17,6 +18,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestseed"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -262,9 +264,7 @@ func (r *contractRunner) requestOnce(ctx context.Context) (bool, error) {
 	authorizedKeys := append([]string(nil), contract.Spec.SshAuthorizedKeys...)
 	authorizedKeys = append(authorizedKeys, r.svc.cfg.GuestAuthorizedKeys...)
 	userData := contract.Spec.UserData
-	if userData == "" {
-		userData = r.svc.cfg.GuestUserData
-	}
+	userData = cmp.Or(userData, r.svc.cfg.GuestUserData)
 	if userData == "" {
 		userData = defaultUserData(authorizedKeys)
 	}
@@ -291,24 +291,18 @@ func (r *contractRunner) requestOnce(ctx context.Context) (bool, error) {
 			Timestamps: &v1alpha1.ContractTimestamps{Requested: r.svc.nowISO()},
 		}
 	}
-	if state.VMName == "" {
-		state.VMName = vmName
-	}
+	state.VMName = cmp.Or(state.VMName, vmName)
 	if state.RequesterDid == "" {
 		state.RequesterDid = r.svc.callbackDID()
 	}
-	if state.MarketDid == "" {
-		state.MarketDid = r.svc.cfg.MarketDID
-	}
+	state.MarketDid = cmp.Or(state.MarketDid, r.svc.cfg.MarketDID)
 	if state.Version == nil {
 		state.Version = new(1)
 	}
 	if state.Timestamps == nil {
 		state.Timestamps = &v1alpha1.ContractTimestamps{Requested: r.svc.nowISO()}
 	}
-	if state.Phase == "" {
-		state.Phase = v1alpha1.ContractRequested
-	}
+	state.Phase = cmp.Or(state.Phase, v1alpha1.ContractRequested)
 	r.setState(state)
 	r.step(ctx, "preparing", 1)
 
@@ -569,9 +563,7 @@ func (r *contractRunner) runGuestAndHold(ctx context.Context, state *v1alpha1.No
 	}
 	if r.secrets != nil && r.secretsFetched() == "" {
 		timeout := r.svc.cfg.VMReadyTimeout
-		if timeout <= 0 {
-			timeout = DefaultSecretsFetchTimeout
-		}
+		timeout = opt.Positive(timeout, DefaultSecretsFetchTimeout)
 		select {
 		case <-r.secrets.fetched:
 			r.setSecretsFetched(r.secrets.fetchedAtValue())

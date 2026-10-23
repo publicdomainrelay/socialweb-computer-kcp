@@ -1,6 +1,7 @@
 package sshserver
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -166,18 +167,10 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 		return err
 	}
 	key := s.cfg.Key
-	if key.Kind == "" {
-		key.Kind = Kind
-	}
-	if key.Name == "" {
-		key.Name = s.cfg.ComponentName
-	}
-	if key.Name == "" {
-		key.Name = "default"
-	}
-	if key.Workspace == "" {
-		key.Workspace = s.cfg.Workspace
-	}
+	key.Kind = cmp.Or(key.Kind, Kind)
+	key.Name = cmp.Or(key.Name, s.cfg.ComponentName)
+	key.Name = cmp.Or(key.Name, "default")
+	key.Workspace = cmp.Or(key.Workspace, s.cfg.Workspace)
 	handlers := s.cfg.Deps.Handlers
 	if handlers == nil {
 		s.shutdown(ctx)
@@ -280,9 +273,7 @@ func (s *Service) resolveRequester(ctx context.Context) (CommandRunner, error) {
 	}
 	workspace := s.cfg.Workspace
 	kind := s.cfg.RequesterRef.Kind
-	if kind == "" {
-		kind = "Requester"
-	}
+	kind = cmp.Or(kind, "Requester")
 	service, ok := s.cfg.Deps.Registry.Service(workspace, kind, s.cfg.RequesterRef.Name)
 	if !ok {
 		return nil, fmt.Errorf("sshserver: the Requester %s/%s is not registered", workspace, s.cfg.RequesterRef.Name)
@@ -435,12 +426,8 @@ func (s *Service) health(w http.ResponseWriter, r *http.Request) {
 
 func (s *Service) connect(w http.ResponseWriter, r *http.Request) {
 	host := s.cfg.SSHPublicHost
-	if host == "" {
-		host = s.cfg.PublicHostname
-	}
-	if host == "" {
-		host = s.cfg.SSHHost
-	}
+	host = cmp.Or(host, s.cfg.PublicHostname)
+	host = cmp.Or(host, s.cfg.SSHHost)
 	port := s.cfg.SSHPort
 	if _, _, err := net.SplitHostPort(host); err != nil && port > 0 {
 		host = net.JoinHostPort(host, fmt.Sprintf("%d", port))

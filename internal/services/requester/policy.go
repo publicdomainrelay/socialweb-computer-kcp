@@ -1,6 +1,7 @@
 package requester
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -17,6 +18,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/ref"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/policyrun"
 	bundledactions "github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/bundled-actions"
 
@@ -105,9 +107,7 @@ func (c *KCPPolicyRuns) WaitPolicyWorkflowRun(ctx context.Context, name string) 
 		return nil, errors.New("requester: the policy run client is not configured")
 	}
 	poll := c.Poll
-	if poll <= 0 {
-		poll = DefaultPolicyPoll
-	}
+	poll = opt.Positive(poll, DefaultPolicyPoll)
 	target := ref.New(c.Cluster, "", name)
 	for {
 		run, err := c.Res.Get(ctx, target)
@@ -188,9 +188,7 @@ func (e *PolicyEvaluator) Evaluate(ctx context.Context, input PolicyInput) Polic
 	if e == nil || (e.Workflow == "" && input.Workflow == "") {
 		return PolicyDecision{Allow: true}
 	}
-	if input.Mode == "" {
-		input.Mode = PolicyModeFull
-	}
+	input.Mode = cmp.Or(input.Mode, PolicyModeFull)
 	return e.run(ctx, input)
 }
 
@@ -202,16 +200,12 @@ func (e *PolicyEvaluator) run(ctx context.Context, input PolicyInput) PolicyDeci
 		return PolicyDecision{Reason: "no PolicyEngine is configured for this requester"}
 	}
 	workflow := input.Workflow
-	if workflow == "" {
-		workflow = e.Workflow
-	}
+	workflow = cmp.Or(workflow, e.Workflow)
 	if workflow == "" {
 		return PolicyDecision{Reason: "the requester names no policy workflow"}
 	}
 	timeout := e.Timeout
-	if timeout <= 0 {
-		timeout = DefaultPolicyTimeout
-	}
+	timeout = opt.Positive(timeout, DefaultPolicyTimeout)
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	run, err := e.buildRun(input, workflow)
@@ -232,17 +226,11 @@ func (e *PolicyEvaluator) buildRun(input PolicyInput, workflow string) (*policyv
 	if e.DID == "" {
 		return nil, errors.New("the requester has no DID for the policy run")
 	}
-	if input.Mode == "" {
-		input.Mode = PolicyModeFull
-	}
+	input.Mode = cmp.Or(input.Mode, PolicyModeFull)
 	self := input.SelfDid
-	if self == "" {
-		self = e.DID
-	}
+	self = cmp.Or(self, e.DID)
 	counterparty := input.CounterpartyDid
-	if counterparty == "" {
-		counterparty = input.SubjectDid
-	}
+	counterparty = cmp.Or(counterparty, input.SubjectDid)
 	inputs := map[string]string{"mode": input.Mode, "self-did": self, "perspective": PolicyPerspectiveRequester}
 	if input.SubjectDid != "" {
 		inputs["subject-did"] = input.SubjectDid

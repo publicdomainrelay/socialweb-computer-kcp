@@ -1,6 +1,7 @@
 package plc
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -117,9 +118,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 		log = slog.New(slog.DiscardHandler)
 	}
 	stateDir := cfg.StateDir
-	if stateDir == "" {
-		stateDir = cfg.Deps.StateDir
-	}
+	stateDir = cmp.Or(stateDir, cfg.Deps.StateDir)
 	var store atplc.Store = atplc.NewMemoryStore()
 	if stateDir != "" {
 		fs, err := atplc.NewFileStore(filepath.Join(stateDir, "plc.json"))
@@ -130,12 +129,8 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	}
 	server := atplc.NewServer(atplc.Options{Store: store, Version: cfg.Version})
 	key := cfg.Key
-	if key.Kind == "" {
-		key.Kind = Kind
-	}
-	if key.Name == "" {
-		key.Name = "default"
-	}
+	key.Kind = cmp.Or(key.Kind, Kind)
+	key.Name = cmp.Or(key.Name, "default")
 	handlers := cfg.Deps.Handlers
 	if handlers == nil {
 		return errors.New("plc: no handler registry is available")

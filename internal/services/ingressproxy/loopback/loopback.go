@@ -1,6 +1,7 @@
 package loopback
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -52,9 +53,7 @@ type Bridge struct {
 
 func Start(cfg Config) (*Bridge, error) {
 	host := strings.TrimSpace(cfg.Host)
-	if host == "" {
-		host = DefaultHost
-	}
+	host = cmp.Or(host, DefaultHost)
 	listener, err := net.Listen("tcp", net.JoinHostPort(host, "0"))
 	if err != nil {
 		return nil, fmt.Errorf("loopback: listening on %s: %w", host, err)

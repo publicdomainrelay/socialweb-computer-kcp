@@ -1,6 +1,7 @@
 package guestcontrolplane
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -39,9 +40,7 @@ func (s *Service) startRelay(ctx context.Context) error {
 		return errors.New("guestcontrolplane: the relay has no service-auth token source")
 	}
 	label := relay.Label
-	if label == "" {
-		label = "guest-" + s.cfg.Role
-	}
+	label = cmp.Or(label, "guest-"+s.cfg.Role)
 	subscriber, err := ingress.NewSubscriber(ctx, ingress.SubscriberConfig{
 		Label:               label,
 		Keypair:             keypair,
@@ -92,9 +91,7 @@ func (s *Service) forwardRelay(ctx context.Context, request *ingress.Request) (*
 		return nil, errors.New("guestcontrolplane: the relay request is empty")
 	}
 	path := request.Path
-	if path == "" {
-		path = "/"
-	}
+	path = cmp.Or(path, "/")
 	if !strings.HasPrefix(path, "/") {
 		path = "/" + path
 	}

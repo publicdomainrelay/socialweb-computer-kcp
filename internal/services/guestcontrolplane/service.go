@@ -1,6 +1,7 @@
 package guestcontrolplane
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -26,6 +27,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestidentity"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 )
 
@@ -305,12 +307,8 @@ func (s *Service) resolveIdentity(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if s.did == "" {
-		s.did = obj.Status.Did
-	}
-	if s.cfg.Handle == "" {
-		s.cfg.Handle = obj.Status.Handle
-	}
+	s.did = cmp.Or(s.did, obj.Status.Did)
+	s.cfg.Handle = cmp.Or(s.cfg.Handle, obj.Status.Handle)
 	return nil
 }
 
@@ -416,9 +414,7 @@ func (s *Service) configureIssuerLoop(ctx context.Context) {
 		return
 	}
 	delay := s.cfg.IssuerRetry
-	if delay <= 0 {
-		delay = DefaultIssuerRetry
-	}
+	delay = opt.Positive(delay, DefaultIssuerRetry)
 	for {
 		issuer := s.issuerURL()
 		if issuer == "" {

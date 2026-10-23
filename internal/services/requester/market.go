@@ -22,6 +22,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/serviceauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 )
 
@@ -322,9 +323,7 @@ func (m *HTTPMarket) postWithClient(ctx context.Context, client *http.Client, en
 	if strings.TrimSpace(endpoint) == "" {
 		return 0, nil, fmt.Errorf("requester: no inbound endpoint is advertised for %s", lxm)
 	}
-	if timeout <= 0 {
-		timeout = DefaultReceiptTimeout
-	}
+	timeout = opt.Positive(timeout, DefaultReceiptTimeout)
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	auth := xrpc.NewServiceAuth(xrpc.MinterFunc(m.token), audience, lxm)

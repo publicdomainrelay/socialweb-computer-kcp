@@ -1,6 +1,7 @@
 package requester
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -38,6 +39,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/oauthcallback"
@@ -335,19 +337,13 @@ func (s *Service) resolveIdentity(ctx context.Context) error {
 	handle, _, _ := unstructured.NestedString(u.Object, "status", "handle")
 	if did != "" {
 		s.cfg.DID = did
-		if s.cfg.RepoDID == "" {
-			s.cfg.RepoDID = did
-		}
-		if s.cfg.MarketDID == "" {
-			s.cfg.MarketDID = did
-		}
+		s.cfg.RepoDID = cmp.Or(s.cfg.RepoDID, did)
+		s.cfg.MarketDID = cmp.Or(s.cfg.MarketDID, did)
 	}
 	if pdsURL != "" {
 		s.cfg.PDSURL = pdsURL
 	}
-	if s.cfg.Handle == "" {
-		s.cfg.Handle = handle
-	}
+	s.cfg.Handle = cmp.Or(s.cfg.Handle, handle)
 	return nil
 }
 
@@ -697,9 +693,7 @@ func (s *Service) pdsRef() (pdsclient.Ref, error) {
 	}
 	if s.cfg.PDSRef != nil && s.cfg.PDSRef.Name != "" {
 		kind := s.cfg.PDSRef.Kind
-		if kind == "" {
-			kind = "Pds"
-		}
+		kind = cmp.Or(kind, "Pds")
 		return pdsclient.LocalRef{Workspace: s.cfg.Workspace, Kind: kind, Name: s.cfg.PDSRef.Name}, nil
 	}
 	return nil, nil
@@ -788,9 +782,7 @@ func (s *Service) reconcile(ctx context.Context) {
 			continue
 		}
 		phase := contract.Status.Phase
-		if phase == "" {
-			phase = v1alpha1.ComputeContractPending
-		}
+		phase = cmp.Or(phase, v1alpha1.ComputeContractPending)
 		terminal := phase == v1alpha1.ComputeContractReleased
 		if phase == v1alpha1.ComputeContractFailed {
 			terminal = contract.Status.Contract == nil || contract.Status.Contract.Receipt == nil
@@ -1142,9 +1134,7 @@ func (s *Service) health(w http.ResponseWriter, r *http.Request) {
 func (s *Service) repoGetRecord(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	repoDID := query.Get("repo")
-	if repoDID == "" {
-		repoDID = s.cfg.RepoDID
-	}
+	repoDID = cmp.Or(repoDID, s.cfg.RepoDID)
 	record, err := s.repo.GetRecord(r.Context(), repoDID, query.Get("collection"), query.Get("rkey"))
 	if err != nil {
 		status := http.StatusNotFound
@@ -1160,9 +1150,7 @@ func (s *Service) repoGetRecord(w http.ResponseWriter, r *http.Request) {
 func (s *Service) repoListRecords(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	repoDID := query.Get("repo")
-	if repoDID == "" {
-		repoDID = s.cfg.RepoDID
-	}
+	repoDID = cmp.Or(repoDID, s.cfg.RepoDID)
 	limit := 50
 	if raw := query.Get("limit"); raw != "" {
 		fmt.Sscanf(raw, "%d", &limit)
@@ -1471,9 +1459,7 @@ func (s *Service) submitAcceptAndWait(ctx context.Context, bidder Bidder, accept
 	provisionTimeout := max(s.cfg.ReceiptTimeout, submitAcceptProvisionTimeout)
 	if !s.outboundXRPC() || bidder.Endpoint == "" {
 		timeout := s.cfg.ReceiptTimeout
-		if timeout <= 0 {
-			timeout = DefaultReceiptTimeout
-		}
+		timeout = opt.Positive(timeout, DefaultReceiptTimeout)
 		return s.waitReceiptWithin(ctx, winnerDID, acceptURI, timeout)
 	}
 	if receipt, err := s.findReceiptWithin(ctx, winnerDID, acceptURI, submitAcceptReceiptTimeout); err == nil && receipt != nil {
@@ -1510,9 +1496,7 @@ func (s *Service) submitAcceptAndWait(ctx context.Context, bidder Bidder, accept
 	}
 	deadline := time.Now().Add(s.cfg.ReceiptTimeout)
 	delay := s.cfg.ReceiptPoll
-	if delay <= 0 {
-		delay = DefaultReceiptPoll
-	}
+	delay = opt.Positive(delay, DefaultReceiptPoll)
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err

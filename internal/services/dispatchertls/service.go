@@ -1,6 +1,7 @@
 package dispatchertls
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -19,6 +20,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/servetls"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
 
@@ -79,9 +81,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		stateDir = spec.StateDir
 	}
 	workspace := strings.TrimSpace(spec.Workspace)
-	if workspace == "" {
-		workspace = "root"
-	}
+	workspace = cmp.Or(workspace, "root")
 	cfg := Config{
 		Deps:        deps,
 		StateDir:    stateDir,
@@ -123,9 +123,7 @@ func upstreamEndpoint(deps component.Deps, workspace string, ref *commonv1.Objec
 		return "", false
 	}
 	kind := strings.TrimSpace(ref.Kind)
-	if kind == "" {
-		kind = "IngressProxy"
-	}
+	kind = cmp.Or(kind, "IngressProxy")
 	name := strings.TrimSpace(ref.Name)
 	if name == "" {
 		return "", false
@@ -174,9 +172,7 @@ func loadCA(data []byte) (*x509.CertPool, error) {
 func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	cfg := s.cfg
 	cfg.Deps = cfg.Deps.Or(deps)
-	if cfg.Workspace == "" {
-		cfg.Workspace = "root"
-	}
+	cfg.Workspace = cmp.Or(cfg.Workspace, "root")
 	if !upstreamConfigured(cfg) {
 		return errors.New("dispatchertls: the upstream is required")
 	}
@@ -366,9 +362,7 @@ func (s *Service) shutdown(ctx context.Context) {
 	if httpServer == nil {
 		return
 	}
-	if timeout <= 0 {
-		timeout = DefaultShutdownTimeout
-	}
+	timeout = opt.Positive(timeout, DefaultShutdownTimeout)
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
 	defer cancel()
 	if err := httpServer.Shutdown(ctx); err != nil {
@@ -406,9 +400,7 @@ func resolveUpstream(cfg Config) (string, bool) {
 	}
 	if cfg.Upstream.Address != "" {
 		scheme := strings.TrimSpace(cfg.Upstream.Protocol)
-		if scheme == "" {
-			scheme = "http"
-		}
+		scheme = cmp.Or(scheme, "http")
 		return scheme + "://" + cfg.Upstream.Address, true
 	}
 	if cfg.UpstreamRef != nil {

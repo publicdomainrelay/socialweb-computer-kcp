@@ -1,6 +1,7 @@
 package gatewayapi
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
@@ -20,6 +21,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayhttp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
 )
@@ -114,9 +116,7 @@ func newCustodySignIn(opts custodySignInOptions) (*custodySignIn, error) {
 	if err != nil {
 		return nil, err
 	}
-	if opts.Role == "" {
-		opts.Role = DefaultAtprotoRole
-	}
+	opts.Role = cmp.Or(opts.Role, DefaultAtprotoRole)
 	if opts.Log == nil {
 		opts.Log = slog.New(slog.DiscardHandler)
 	}
@@ -388,9 +388,7 @@ func (s *custodySignIn) refreshLoop() {
 
 func (s *custodySignIn) refreshIdentity(key [sha256.Size]byte, token string, renew bool) {
 	timeout := s.client.endpoint.Timeout
-	if timeout <= 0 {
-		timeout = DefaultCustodyTimeout
-	}
+	timeout = opt.Positive(timeout, DefaultCustodyTimeout)
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	if renew {
@@ -636,9 +634,7 @@ func (a *custodyAgent) GetServiceAuth(ctx context.Context, aud, lxm string) (str
 }
 
 func (a *custodyAgent) ListRecords(ctx context.Context, did, collection string, limit int) ([]gatewayhttp.Record, error) {
-	if limit <= 0 {
-		limit = 50
-	}
+	limit = opt.Positive(limit, 50)
 	out := make([]gatewayhttp.Record, 0, limit)
 	cursor := ""
 	for len(out) < limit {

@@ -1,6 +1,7 @@
 package bidder
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -23,6 +24,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestseed"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
@@ -338,9 +340,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 	if bidderSpec.Kcp != nil {
 		if bidderSpec.Kcp.Handle != "" {
 			cfg.Provider.Handle = bidderSpec.Kcp.Handle
-			if cfg.Handle == "" {
-				cfg.Handle = bidderSpec.Kcp.Handle
-			}
+			cfg.Handle = cmp.Or(cfg.Handle, bidderSpec.Kcp.Handle)
 		}
 		cfg.Provider.StopGraceSeconds = bidderSpec.Kcp.StopGraceSeconds
 	}
@@ -355,12 +355,8 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 	if port := portOf(cfg.Network.GuestTLSURL()); port > 0 {
 		cfg.Provider.GuestTLSPort = port
 	}
-	if cfg.Workspace == "" {
-		cfg.Workspace = "root"
-	}
-	if cfg.Namespace == "" {
-		cfg.Namespace = "default"
-	}
+	cfg.Workspace = cmp.Or(cfg.Workspace, "root")
+	cfg.Namespace = cmp.Or(cfg.Namespace, "default")
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
@@ -368,9 +364,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		if credential, err := deps.Credentials.Resolve(context.Background(), *cfg.PDSAccessTokenRef); err == nil {
 			if data, ok := oauthclient.SessionFromSecret(credential.Data); ok {
 				clientID := data.ClientID
-				if clientID == "" {
-					clientID = defaultBidderOAuthClientID
-				}
+				clientID = cmp.Or(clientID, defaultBidderOAuthClientID)
 				opts := oauthclient.Options{
 					DID:        data.AccountDID,
 					RepoDID:    data.AccountDID,
@@ -386,9 +380,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 				if err == nil {
 					cfg.PDSTokens = session
 					cfg.PDSDPoP = session
-					if cfg.PDSURL == "" {
-						cfg.PDSURL = data.HostURL
-					}
+					cfg.PDSURL = cmp.Or(cfg.PDSURL, data.HostURL)
 				} else {
 					if deps.Log != nil {
 						deps.Log.Warn("the bidder could not restore the oauth session", "err", err.Error())
@@ -665,52 +657,24 @@ func (c Config) withDeps(deps component.Deps) Config {
 	if out.Deps.Handlers == nil {
 		out.Deps.Handlers = deps.Handlers
 	}
-	if out.Deps.StateDir == "" {
-		out.Deps.StateDir = deps.StateDir
-	}
-	if out.StateDir == "" {
-		out.StateDir = out.Deps.StateDir
-	}
+	out.Deps.StateDir = cmp.Or(out.Deps.StateDir, deps.StateDir)
+	out.StateDir = cmp.Or(out.StateDir, out.Deps.StateDir)
 	return out
 }
 
 func (c *Config) defaults() {
-	if c.ServeHost == "" {
-		c.ServeHost = DefaultServeHost
-	}
-	if c.PolicyTimeout <= 0 {
-		c.PolicyTimeout = DefaultPolicyTimeout
-	}
-	if c.PolicyPoll <= 0 {
-		c.PolicyPoll = DefaultPolicyPoll
-	}
-	if c.Provider.GuestLoginMount == "" {
-		c.Provider.GuestLoginMount = DefaultGuestLoginMount
-	}
-	if c.Provider.GuestHostAddress == "" {
-		c.Provider.GuestHostAddress = v1alpha1.GuestHostAddress
-	}
-	if c.Provider.GuestVaultServer == "" {
-		c.Provider.GuestVaultServer = DefaultGuestVaultServer
-	}
-	if c.Provider.GuestVaultMount == "" {
-		c.Provider.GuestVaultMount = DefaultGuestVaultMount
-	}
-	if c.Provider.AcceptPath == "" {
-		c.Provider.AcceptPath = guestseed.AcceptPathVM
-	}
-	if c.Provider.BootTimeout <= 0 {
-		c.Provider.BootTimeout = DefaultBootTimeout
-	}
-	if c.Provider.ReleaseTimeout <= 0 {
-		c.Provider.ReleaseTimeout = DefaultReleaseTimeout
-	}
-	if c.Provider.Handle == "" {
-		c.Provider.Handle = c.Handle
-	}
-	if c.VaultClient == "" {
-		c.VaultClient = "bidder"
-	}
+	c.ServeHost = cmp.Or(c.ServeHost, DefaultServeHost)
+	c.PolicyTimeout = opt.Positive(c.PolicyTimeout, DefaultPolicyTimeout)
+	c.PolicyPoll = opt.Positive(c.PolicyPoll, DefaultPolicyPoll)
+	c.Provider.GuestLoginMount = cmp.Or(c.Provider.GuestLoginMount, DefaultGuestLoginMount)
+	c.Provider.GuestHostAddress = cmp.Or(c.Provider.GuestHostAddress, v1alpha1.GuestHostAddress)
+	c.Provider.GuestVaultServer = cmp.Or(c.Provider.GuestVaultServer, DefaultGuestVaultServer)
+	c.Provider.GuestVaultMount = cmp.Or(c.Provider.GuestVaultMount, DefaultGuestVaultMount)
+	c.Provider.AcceptPath = cmp.Or(c.Provider.AcceptPath, guestseed.AcceptPathVM)
+	c.Provider.BootTimeout = opt.Positive(c.Provider.BootTimeout, DefaultBootTimeout)
+	c.Provider.ReleaseTimeout = opt.Positive(c.Provider.ReleaseTimeout, DefaultReleaseTimeout)
+	c.Provider.Handle = cmp.Or(c.Provider.Handle, c.Handle)
+	c.VaultClient = cmp.Or(c.VaultClient, "bidder")
 	if c.GuestControlRef == nil {
 		c.GuestControlRef = &commonv1.ObjectRef{Kind: "GuestControlPlane", Name: DefaultGuestControlName}
 	}
@@ -720,12 +684,8 @@ func (c *Config) defaults() {
 	if c.PolicyArgs == nil {
 		c.PolicyArgs = map[string]string{}
 	}
-	if c.Workspace == "" {
-		c.Workspace = "root"
-	}
-	if c.StateDir == "" {
-		c.StateDir = c.Deps.StateDir
-	}
+	c.Workspace = cmp.Or(c.Workspace, "root")
+	c.StateDir = cmp.Or(c.StateDir, c.Deps.StateDir)
 }
 
 func New(cfg Config) (*Service, error) {

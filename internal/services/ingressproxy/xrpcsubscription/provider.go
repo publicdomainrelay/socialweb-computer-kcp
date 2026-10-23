@@ -17,6 +17,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/exposure"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 const DefaultShutdownTimeout = 5 * time.Second
@@ -259,9 +260,7 @@ func (p *Provider) shutdown(ctx context.Context) {
 	if httpServer == nil {
 		return
 	}
-	if timeout <= 0 {
-		timeout = DefaultShutdownTimeout
-	}
+	timeout = opt.Positive(timeout, DefaultShutdownTimeout)
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
 	defer cancel()
 	if err := httpServer.Shutdown(ctx); err != nil {

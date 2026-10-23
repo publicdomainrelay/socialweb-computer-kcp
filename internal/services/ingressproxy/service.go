@@ -1,6 +1,7 @@
 package ingressproxy
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -90,9 +91,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		stateDir = spec.StateDir
 	}
 	workspace := strings.TrimSpace(spec.Workspace)
-	if workspace == "" {
-		workspace = "root"
-	}
+	workspace = cmp.Or(workspace, "root")
 	cfg := Config{
 		Deps:             deps,
 		StateDir:         stateDir,
@@ -235,9 +234,7 @@ func relayEndpoint(deps component.Deps, workspace string, ref *commonv1.ObjectRe
 		return "", false
 	}
 	kind := strings.TrimSpace(ref.Kind)
-	if kind == "" {
-		kind = "Relay"
-	}
+	kind = cmp.Or(kind, "Relay")
 	name := strings.TrimSpace(ref.Name)
 	if name == "" {
 		return "", false
@@ -345,9 +342,7 @@ func buildProvider(cfg Config) (Provider, string, error) {
 func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	cfg := s.cfg
 	cfg.Deps = cfg.Deps.Or(deps)
-	if cfg.Workspace == "" {
-		cfg.Workspace = "root"
-	}
+	cfg.Workspace = cmp.Or(cfg.Workspace, "root")
 	if cfg.RelayRef != nil {
 		if relayURL, ok := relayEndpoint(cfg.Deps, cfg.Workspace, cfg.RelayRef); ok {
 			cfg.RelayURL = relayURL

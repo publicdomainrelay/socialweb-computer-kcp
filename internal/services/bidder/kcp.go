@@ -1,6 +1,7 @@
 package bidder
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,6 +17,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/statuspatch"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 var (
@@ -36,9 +38,7 @@ func kcpStore(deps component.Deps, workspace string) (*kcpstore.Store, string, e
 	if deps.KCP == nil {
 		return nil, "", errors.New("bidder: the component has no kcp clients")
 	}
-	if workspace == "" {
-		workspace = "root"
-	}
+	workspace = cmp.Or(workspace, "root")
 	client, err := deps.KCP.Client(workspace)
 	if err != nil {
 		return nil, "", fmt.Errorf("bidder: kcp client for %s: %w", workspace, err)
@@ -287,9 +287,7 @@ func (v *KCPVMs) PatchAnnotations(ctx context.Context, name string, annotations 
 }
 
 func (v *KCPVMs) WaitRunning(ctx context.Context, name string, timeout time.Duration) (*v1alpha1.ComputeVM, error) {
-	if timeout <= 0 {
-		timeout = DefaultBootTimeout
-	}
+	timeout = opt.Positive(timeout, DefaultBootTimeout)
 	deadline := time.Now().Add(timeout)
 	for {
 		vm, err := v.Get(ctx, name)
@@ -316,9 +314,7 @@ func (v *KCPVMs) WaitRunning(ctx context.Context, name string, timeout time.Dura
 }
 
 func (v *KCPVMs) WaitAbsent(ctx context.Context, name string, timeout time.Duration) error {
-	if timeout <= 0 {
-		timeout = DefaultReleaseTimeout
-	}
+	timeout = opt.Positive(timeout, DefaultReleaseTimeout)
 	deadline := time.Now().Add(timeout)
 	for {
 		vm, err := v.Get(ctx, name)

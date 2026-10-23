@@ -1,6 +1,7 @@
 package sshserver
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -18,6 +19,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayhttp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/sshtransport"
 
@@ -221,9 +223,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		Hostnames:     append([]string(nil), decoded.Hostnames...),
 		HostKeyRef:    decoded.HostKeyRef,
 	}
-	if cfg.StateDir == "" {
-		cfg.StateDir = deps.StateDir
-	}
+	cfg.StateDir = cmp.Or(cfg.StateDir, deps.StateDir)
 	if decoded.Identity != nil {
 		cfg.Identity = *decoded.Identity
 		cfg.DID = decoded.Identity.Did
@@ -269,25 +269,13 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		}
 		cfg.OwnerSessionsFile = decoded.OwnerSessionsFile
 		cfg.OwnerSessions = sessions
-		if cfg.DID == "" {
-			cfg.DID = did
-		}
-		if cfg.Handle == "" {
-			cfg.Handle = handle
-		}
-		if cfg.Identity.Did == "" {
-			cfg.Identity.Did = did
-		}
-		if cfg.Identity.Handle == "" {
-			cfg.Identity.Handle = handle
-		}
+		cfg.DID = cmp.Or(cfg.DID, did)
+		cfg.Handle = cmp.Or(cfg.Handle, handle)
+		cfg.Identity.Did = cmp.Or(cfg.Identity.Did, did)
+		cfg.Identity.Handle = cmp.Or(cfg.Identity.Handle, handle)
 	}
-	if cfg.Workspace == "" {
-		cfg.Workspace = "root"
-	}
-	if cfg.Namespace == "" {
-		cfg.Namespace = "default"
-	}
+	cfg.Workspace = cmp.Or(cfg.Workspace, "root")
+	cfg.Namespace = cmp.Or(cfg.Namespace, "default")
 	cfg.defaults()
 	return cfg, nil
 }
@@ -318,9 +306,7 @@ func (c Config) withDeps(deps component.Deps) Config {
 	if out.Deps.TLS == nil {
 		out.Deps.TLS = deps.TLS
 	}
-	if out.StateDir == "" {
-		out.StateDir = deps.StateDir
-	}
+	out.StateDir = cmp.Or(out.StateDir, deps.StateDir)
 	if out.Log == nil {
 		out.Log = deps.Log
 	}
@@ -329,69 +315,27 @@ func (c Config) withDeps(deps component.Deps) Config {
 }
 
 func (c *Config) defaults() {
-	if c.HTTPHost == "" {
-		c.HTTPHost = DefaultHTTPHost
-	}
-	if c.SSHHost == "" {
-		c.SSHHost = DefaultSSHHost
-	}
-	if c.DefaultCommand == "" {
-		c.DefaultCommand = DefaultDefaultCommand
-	}
-	if c.MaxConnections <= 0 {
-		c.MaxConnections = DefaultMaxConnections
-	}
-	if c.MaxSessions <= 0 {
-		c.MaxSessions = DefaultMaxSessions
-	}
-	if c.SessionsPerAccount <= 0 {
-		c.SessionsPerAccount = DefaultSessionsPerAccount
-	}
-	if c.MaxAuthAttempts <= 0 {
-		c.MaxAuthAttempts = DefaultMaxAuthAttempts
-	}
-	if c.AuthTimeout <= 0 {
-		c.AuthTimeout = DefaultAuthTimeout
-	}
-	if c.SessionMax <= 0 {
-		c.SessionMax = DefaultSessionMax
-	}
-	if c.AssociationTTL <= 0 {
-		c.AssociationTTL = DefaultAssociationTTL
-	}
-	if c.NegativeCacheTTL <= 0 {
-		c.NegativeCacheTTL = DefaultNegativeTTL
-	}
-	if c.MissRecheck <= 0 {
-		c.MissRecheck = DefaultMissRecheck
-	}
-	if c.CacheEntries <= 0 {
-		c.CacheEntries = DefaultCacheEntries
-	}
-	if c.DirectoryTTL <= 0 {
-		c.DirectoryTTL = 60 * time.Second
-	}
-	if c.DirectoryKeys <= 0 {
-		c.DirectoryKeys = 10_000
-	}
-	if c.CocoreAPIBaseURL == "" {
-		c.CocoreAPIBaseURL = DefaultCocoreAPIBaseURL
-	}
-	if c.CocoreAppName == "" {
-		c.CocoreAppName = DefaultCocoreAppName
-	}
-	if c.CocoreKeyName == "" {
-		c.CocoreKeyName = c.CocoreAppName
-	}
-	if c.CocoreTTL <= 0 {
-		c.CocoreTTL = DefaultCocoreTTL
-	}
-	if c.ShutdownTimeout <= 0 {
-		c.ShutdownTimeout = DefaultShutdownTimeout
-	}
-	if c.IdentityMode == "" {
-		c.IdentityMode = IdentityModeOwner
-	}
+	c.HTTPHost = cmp.Or(c.HTTPHost, DefaultHTTPHost)
+	c.SSHHost = cmp.Or(c.SSHHost, DefaultSSHHost)
+	c.DefaultCommand = cmp.Or(c.DefaultCommand, DefaultDefaultCommand)
+	c.MaxConnections = opt.Positive(c.MaxConnections, DefaultMaxConnections)
+	c.MaxSessions = opt.Positive(c.MaxSessions, DefaultMaxSessions)
+	c.SessionsPerAccount = opt.Positive(c.SessionsPerAccount, DefaultSessionsPerAccount)
+	c.MaxAuthAttempts = opt.Positive(c.MaxAuthAttempts, DefaultMaxAuthAttempts)
+	c.AuthTimeout = opt.Positive(c.AuthTimeout, DefaultAuthTimeout)
+	c.SessionMax = opt.Positive(c.SessionMax, DefaultSessionMax)
+	c.AssociationTTL = opt.Positive(c.AssociationTTL, DefaultAssociationTTL)
+	c.NegativeCacheTTL = opt.Positive(c.NegativeCacheTTL, DefaultNegativeTTL)
+	c.MissRecheck = opt.Positive(c.MissRecheck, DefaultMissRecheck)
+	c.CacheEntries = opt.Positive(c.CacheEntries, DefaultCacheEntries)
+	c.DirectoryTTL = opt.Positive(c.DirectoryTTL, 60*time.Second)
+	c.DirectoryKeys = opt.Positive(c.DirectoryKeys, 10_000)
+	c.CocoreAPIBaseURL = cmp.Or(c.CocoreAPIBaseURL, DefaultCocoreAPIBaseURL)
+	c.CocoreAppName = cmp.Or(c.CocoreAppName, DefaultCocoreAppName)
+	c.CocoreKeyName = cmp.Or(c.CocoreKeyName, c.CocoreAppName)
+	c.CocoreTTL = opt.Positive(c.CocoreTTL, DefaultCocoreTTL)
+	c.ShutdownTimeout = opt.Positive(c.ShutdownTimeout, DefaultShutdownTimeout)
+	c.IdentityMode = cmp.Or(c.IdentityMode, IdentityModeOwner)
 	if c.HostKeyPath == "" {
 		if c.HostKeyRef != "" {
 			c.HostKeyPath = c.HostKeyRef
@@ -408,9 +352,7 @@ func (c *Config) defaults() {
 	if len(c.TrustedHosts) == 0 {
 		c.TrustedHosts = networkTrustedHosts(c.Network, c.Hostnames, c.PublicHostname)
 	}
-	if c.CocoreAppDID == "" {
-		c.CocoreAppDID = c.DID
-	}
+	c.CocoreAppDID = cmp.Or(c.CocoreAppDID, c.DID)
 	if c.CocoreReturnURL == "" {
 		if c.PublicOrigin != "" {
 			c.CocoreReturnURL = strings.TrimRight(c.PublicOrigin, "/") + "/"

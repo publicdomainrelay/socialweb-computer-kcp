@@ -1,6 +1,7 @@
 package bidder
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/ref"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/policyrun"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
@@ -100,9 +102,7 @@ func (c *KCPPolicyRuns) WaitPolicyWorkflowRun(ctx context.Context, target ref.Re
 		return nil, fmt.Errorf("bidder: the policy run client is not configured")
 	}
 	poll := c.Poll
-	if poll <= 0 {
-		poll = DefaultPolicyPoll
-	}
+	poll = opt.Positive(poll, DefaultPolicyPoll)
 	for {
 		run, err := c.Res.Get(ctx, target.LogicalCluster, target.Name)
 		if err == nil && run != nil && policyrun.Terminal(run.Status.Phase) {
@@ -183,12 +183,8 @@ func (e *PolicyEvaluator) EvaluatePolicies(ctx context.Context, refs []market.St
 	if len(refs) == 0 {
 		return PolicyDecision{Allow: true}
 	}
-	if input.Perspective == "" {
-		input.Perspective = PolicyPerspectiveBidder
-	}
-	if input.Mode == "" {
-		input.Mode = PolicyModeFull
-	}
+	input.Perspective = cmp.Or(input.Perspective, PolicyPerspectiveBidder)
+	input.Mode = cmp.Or(input.Mode, PolicyModeFull)
 	for _, entry := range refs {
 		refCopy := entry
 		record, err := e.resolvePolicy(ctx, refCopy)
@@ -265,12 +261,8 @@ func (e *PolicyEvaluator) run(ctx context.Context, req PolicyRunRequest) PolicyD
 		return PolicyDecision{Reason: "the policy run names no workflow"}
 	}
 	timeout := req.Timeout
-	if timeout <= 0 {
-		timeout = e.Timeout
-	}
-	if timeout <= 0 {
-		timeout = DefaultPolicyTimeout
-	}
+	timeout = opt.Positive(timeout, e.Timeout)
+	timeout = opt.Positive(timeout, DefaultPolicyTimeout)
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	run := e.buildRun(req)
@@ -287,12 +279,8 @@ func (e *PolicyEvaluator) run(ctx context.Context, req PolicyRunRequest) PolicyD
 
 func (e *PolicyEvaluator) buildRun(req PolicyRunRequest) *policyv1alpha1.PolicyWorkflowRun {
 	input := req.Input
-	if input.Perspective == "" {
-		input.Perspective = PolicyPerspectiveBidder
-	}
-	if input.Mode == "" {
-		input.Mode = PolicyModeFull
-	}
+	input.Perspective = cmp.Or(input.Perspective, PolicyPerspectiveBidder)
+	input.Mode = cmp.Or(input.Mode, PolicyModeFull)
 	inputs := map[string]string{"mode": input.Mode}
 	if input.SelfDid != "" {
 		inputs["self-did"] = input.SelfDid

@@ -1,6 +1,7 @@
 package guestcontrolplane
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -180,9 +181,7 @@ func kcpStore(deps component.Deps, workspace string) (*kcpstore.Store, string, e
 	if deps.KCP == nil {
 		return nil, "", errors.New("guestcontrolplane: the component has no kcp clients")
 	}
-	if workspace == "" {
-		workspace = "root"
-	}
+	workspace = cmp.Or(workspace, "root")
 	client, err := deps.KCP.Client(workspace)
 	if err != nil {
 		return nil, "", fmt.Errorf("guestcontrolplane: kcp client for %s: %w", workspace, err)

@@ -2,6 +2,7 @@ package pds
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"errors"
@@ -35,9 +36,7 @@ func NewFileBlobStore(dir string) (*FileBlobStore, error) {
 
 func (s *FileBlobStore) PutBlob(_ context.Context, _ syntax.DID, mimeType string, data []byte) (*atpds.BlobRef, error) {
 	mimeType = strings.TrimSpace(mimeType)
-	if mimeType == "" {
-		mimeType = "application/octet-stream"
-	}
+	mimeType = cmp.Or(mimeType, "application/octet-stream")
 	if strings.ContainsAny(mimeType, "\r\n") {
 		return nil, errors.New("pds: the blob mime type has a newline")
 	}

@@ -13,6 +13,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 const custodyMaxBody = 1 << 20
@@ -109,9 +110,7 @@ func newCustodyClient(endpoint custodyEndpoint) (*custodyClient, error) {
 	transport.Proxy = nil
 	transport.TLSClientConfig = tlsConfig
 	timeout := endpoint.Timeout
-	if timeout <= 0 {
-		timeout = DefaultCustodyTimeout
-	}
+	timeout = opt.Positive(timeout, DefaultCustodyTimeout)
 	return &custodyClient{
 		endpoint: endpoint,
 		http:     &http.Client{Timeout: timeout, Transport: transport},

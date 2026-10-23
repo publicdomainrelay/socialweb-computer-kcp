@@ -2,6 +2,7 @@ package requester
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -351,9 +352,7 @@ func (p *PDSStore) PutRecord(ctx context.Context, repoDID, collection, rkey stri
 		return market.StrongRef{}, pdsError("putRecord of "+repoDID+"/"+collection+"/"+rkey, err)
 	}
 	uri := result.URI.String()
-	if uri == "" {
-		uri = "at://" + repoDID + "/" + collection + "/" + rkey
-	}
+	uri = cmp.Or(uri, "at://"+repoDID+"/"+collection+"/"+rkey)
 	if !result.CID.Defined() {
 		return market.StrongRef{}, fmt.Errorf("requester: putRecord of %s returned no cid", uri)
 	}
@@ -396,9 +395,7 @@ func (p *PDSStore) GetRecord(ctx context.Context, repoDID, collection, rkey stri
 		return market.ResolvedRecord{}, err
 	}
 	uri := record.URI.String()
-	if uri == "" {
-		uri = "at://" + repoDID + "/" + collection + "/" + rkey
-	}
+	uri = cmp.Or(uri, "at://"+repoDID+"/"+collection+"/"+rkey)
 	return market.ResolvedRecord{URI: uri, CID: record.CID.String(), Value: value}, nil
 }
 

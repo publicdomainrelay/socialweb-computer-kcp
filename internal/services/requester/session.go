@@ -1,6 +1,7 @@
 package requester
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -67,9 +68,7 @@ func (s *Service) RunCommand(ctx context.Context, account sshtransport.Authorize
 
 func (s *Service) sessionPolicy(lc map[string]string) (string, map[string]string, bool, error) {
 	policyName := strings.TrimSpace(lc["LC_POLICY"])
-	if policyName == "" {
-		policyName = s.cfg.PolicyWorkflow
-	}
+	policyName = cmp.Or(policyName, s.cfg.PolicyWorkflow)
 	usePolicy := true
 	switch strings.ToLower(policyName) {
 	case "", "none", "off":
@@ -556,9 +555,7 @@ func (s *Service) guestDialer() sshtransport.Dialer {
 		return sshtransport.UnixSocketDialer{Socket: s.cfg.IrohSocket, Log: s.log}
 	}
 	path := s.cfg.DumbpipePath
-	if path == "" {
-		path = "dumbpipe"
-	}
+	path = cmp.Or(path, "dumbpipe")
 	return sshtransport.DumbpipeDialer{Path: path, Log: s.log}
 }
 
@@ -828,9 +825,7 @@ func (s *Service) sessionGuest(ctx context.Context, receiptURI, bidderDID string
 		}
 		switch parsed.Kind {
 		case market.ComputeEventsVMOnNetworkNSID:
-			if address == "" {
-				address = parsed.Address
-			}
+			address = cmp.Or(address, parsed.Address)
 		case market.ComputeEventsVMHostKeysNSID:
 			hostKeys = parsed.HostKeys
 		case market.ComputeEventsVMTerminatedNSID:

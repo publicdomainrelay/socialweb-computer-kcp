@@ -1,6 +1,7 @@
 package gatewayapi
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -128,12 +129,8 @@ type homeListing struct {
 const homeIndexRefresh = 2 * time.Second
 
 func newHomeIndex(store *kcpstore.Store, workspace, namespace string, fallback []string) *homeIndex {
-	if workspace == "" {
-		workspace = "root"
-	}
-	if namespace == "" {
-		namespace = "default"
-	}
+	workspace = cmp.Or(workspace, "root")
+	namespace = cmp.Or(namespace, "default")
 	i := &homeIndex{configmaps: kcpstore.Of[corev1.ConfigMap](store, configMapGVR), workspace: workspace,
 		namespace: namespace, fallback: append([]string(nil), fallback...)}
 	i.listed = lease.New(i.list)

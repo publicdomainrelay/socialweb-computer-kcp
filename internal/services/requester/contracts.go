@@ -1,6 +1,7 @@
 package requester
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -177,9 +178,7 @@ func kcpStore(deps component.Deps, workspace string) (*kcpstore.Store, error) {
 	if deps.KCP == nil {
 		return nil, errors.New("requester: the component has no kcp clients")
 	}
-	if workspace == "" {
-		workspace = "root"
-	}
+	workspace = cmp.Or(workspace, "root")
 	client, err := deps.KCP.Client(workspace)
 	if err != nil {
 		return nil, fmt.Errorf("requester: kcp client for %s: %w", workspace, err)

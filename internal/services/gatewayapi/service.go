@@ -1,6 +1,7 @@
 package gatewayapi
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayhttp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/xrpcserver"
 )
 
@@ -59,9 +61,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 		log = slog.New(slog.DiscardHandler)
 	}
 	stateDir := cfg.StateDir
-	if stateDir == "" {
-		stateDir = cfg.Deps.StateDir
-	}
+	stateDir = cmp.Or(stateDir, cfg.Deps.StateDir)
 	if stateDir == "" {
 		return errors.New("gatewayapi: no state dir")
 	}
@@ -327,9 +327,7 @@ func buildMapper(cfg Config, deps component.Deps, vault *vaultRuntime, pinned *g
 	log.Info("gatewayapi node market", "homes", homes, "indexWorkspace", indexWorkspace, "indexNamespace", indexNamespace,
 		"contractWorkspace", cfg.NodeMarket.ContractWorkspace)
 	mount := cfg.NodeMarket.VaultMount
-	if mount == "" {
-		mount = vault.mount
-	}
+	mount = cmp.Or(mount, vault.mount)
 	if mount == "" {
 		return nil, errors.New("gatewayapi: the node market needs a vault mount")
 	}
@@ -457,9 +455,7 @@ func (s *Service) shutdown(ctx context.Context) {
 	mapper := s.mapper
 	timeout := s.cfg.ShutdownTimeout
 	s.mu.Unlock()
-	if timeout <= 0 {
-		timeout = DefaultShutdownTimeout
-	}
+	timeout = opt.Positive(timeout, DefaultShutdownTimeout)
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
 	defer cancel()
 	if mapper != nil {

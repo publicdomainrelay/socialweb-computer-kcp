@@ -1,6 +1,7 @@
 package bidder
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -175,9 +176,7 @@ func (s *Service) applyBidSpec(ctx context.Context, bid *v1alpha1.Bid, rfp *mark
 	if spec.Offer.Kind == "" {
 		spec.Offer = v1alpha1.BidOffer{Kind: "free"}
 	}
-	if spec.Provider == "" {
-		spec.Provider = "kcp"
-	}
+	spec.Provider = cmp.Or(spec.Provider, "kcp")
 	spec.ExpiresAt = now.Add(s.cfg.bidTTL()).Format(time.RFC3339)
 	if err := s.bids.PatchSpec(ctx, bid.Name, spec); err != nil {
 		if ctx.Err() == nil {

@@ -1,6 +1,7 @@
 package bidder
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -785,13 +786,9 @@ func (s *Service) startRelay(ctx context.Context) error {
 		}
 	}
 	label := relay.Label
-	if label == "" {
-		label = "market"
-	}
+	label = cmp.Or(label, "market")
 	connectHost := relay.ConnectHost
-	if connectHost == "" {
-		connectHost = relay.IngressProxyHost
-	}
+	connectHost = cmp.Or(connectHost, relay.IngressProxyHost)
 	httpClient := relay.HTTPClient
 	var dialer *websocket.Dialer
 	if relay.DialAddress != "" && connectHost != "" {
@@ -861,9 +858,7 @@ func (s *Service) forwardRelay(ctx context.Context, request *ingress.Request) (*
 		return nil, errors.New("the relay request is empty")
 	}
 	path := request.Path
-	if path == "" {
-		path = "/"
-	}
+	path = cmp.Or(path, "/")
 	if !strings.HasPrefix(path, "/") {
 		path = "/" + path
 	}

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	atrelay "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/relay"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 type diskState struct {
@@ -153,9 +154,7 @@ func (s *fileStore) flush() error {
 
 func (s *fileStore) run(interval time.Duration, done <-chan struct{}, stopped chan<- struct{}) {
 	defer close(stopped)
-	if interval <= 0 {
-		interval = time.Second
-	}
+	interval = opt.Positive(interval, time.Second)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {

@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -98,9 +99,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		stateDir = spec.StateDir
 	}
 	workspace := strings.TrimSpace(spec.Workspace)
-	if workspace == "" {
-		workspace = "root"
-	}
+	workspace = cmp.Or(workspace, "root")
 	cfg := Config{
 		Deps:      deps,
 		Key:       component.Key{Workspace: spec.Workspace, Kind: spec.Kind, Name: spec.Name},
@@ -164,9 +163,7 @@ func pdsEndpoints(deps component.Deps, workspace string, refs []commonv1.ObjectR
 	out := make([]component.Endpoint, 0, len(refs))
 	for _, ref := range refs {
 		kind := strings.TrimSpace(ref.Kind)
-		if kind == "" {
-			kind = "Pds"
-		}
+		kind = cmp.Or(kind, "Pds")
 		if ref.Name == "*" {
 			if deps.Registry == nil {
 				continue
@@ -251,9 +248,7 @@ func resolveEndpoint(deps component.Deps, workspace, kind, name string, names ..
 func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	cfg := s.cfg
 	cfg.Deps = cfg.Deps.Or(deps)
-	if cfg.Workspace == "" {
-		cfg.Workspace = "root"
-	}
+	cfg.Workspace = cmp.Or(cfg.Workspace, "root")
 	cfg.Upstreams = pdsEndpoints(cfg.Deps, cfg.Workspace, cfg.PdsRefs)
 	if len(cfg.AllowedHosts) == 0 {
 		cfg.AllowedHosts = resolvedHosts(cfg.Upstreams, cfg.PdsRefs)
@@ -271,9 +266,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 		log = slog.New(slog.DiscardHandler)
 	}
 	stateDir := cfg.StateDir
-	if stateDir == "" {
-		stateDir = cfg.Deps.StateDir
-	}
+	stateDir = cmp.Or(stateDir, cfg.Deps.StateDir)
 	store := cfg.Store
 	var persistent *fileStore
 	if store == nil {
@@ -328,12 +321,8 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 		relay.AddSink(sink)
 	}
 	key := cfg.Key
-	if key.Kind == "" {
-		key.Kind = Kind
-	}
-	if key.Name == "" {
-		key.Name = "default"
-	}
+	key.Kind = cmp.Or(key.Kind, Kind)
+	key.Name = cmp.Or(key.Name, "default")
 	if handlers == nil {
 		relay.Close()
 		return errors.New("relay: no handler registry is available")

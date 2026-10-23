@@ -1,6 +1,7 @@
 package bidder
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -154,9 +155,7 @@ func parseVMRecord(value map[string]any) (vmRecord, error) {
 	if err := jsonUnmarshal(raw, &out); err != nil {
 		return out, fmt.Errorf("bidder: the RFP payload is not a compute.vm record: %w", err)
 	}
-	if out.CPUs == 0 {
-		out.CPUs = 2
-	}
+	out.CPUs = cmp.Or(out.CPUs, 2)
 	if strings.TrimSpace(out.Mem) == "" {
 		out.Mem = "4G"
 	}
@@ -237,13 +236,9 @@ func (p *ComputeProvider) Provision(ctx context.Context, req ProvisionRequest) (
 		return ProvisionResult{}, err
 	}
 	mount := p.Config.GuestLoginMount
-	if mount == "" {
-		mount = DefaultGuestLoginMount
-	}
+	mount = cmp.Or(mount, DefaultGuestLoginMount)
 	acceptPath := p.Config.AcceptPath
-	if acceptPath == "" {
-		acceptPath = guestseed.AcceptPathVM
-	}
+	acceptPath = cmp.Or(acceptPath, guestseed.AcceptPathVM)
 	bundle := map[string]any{
 		"$type":               market.AcceptNSID,
 		"accept":              market.NewStrongRef(req.AcceptURI, req.AcceptCID).Map(),
@@ -463,8 +458,6 @@ func vmNamePrefix(requesterDID string) (string, error) {
 	if len(text) > 12 {
 		text = text[:12]
 	}
-	if text == "" {
-		text = "guest"
-	}
+	text = cmp.Or(text, "guest")
 	return "fc-" + text, nil
 }
