@@ -209,19 +209,11 @@ func (v *KCPVMs) PatchContract(ctx context.Context, name string, contract v1alph
 	if v == nil || v.Res == nil {
 		return errors.New("bidder: the ComputeVM store is not configured")
 	}
-	value, err := json.Marshal(contract)
+	value, err := statusMap(contract)
 	if err != nil {
 		return err
 	}
-	var raw any
-	if err := json.Unmarshal(value, &raw); err != nil {
-		return err
-	}
-	patch, err := json.Marshal([]map[string]any{{"op": "add", "path": "/spec/contract", "value": raw}})
-	if err != nil {
-		return err
-	}
-	return v.Res.PatchJSON(ctx, v.Cluster, name, patch)
+	return v.Res.ApplySpec(ctx, v.Cluster, "ComputeVM", name, v1alpha1.FieldManagerComputeVMCreator, map[string]any{"contract": value})
 }
 
 func (v *KCPVMs) Release(ctx context.Context, name string, release v1alpha1.ComputeVMRelease) error {
