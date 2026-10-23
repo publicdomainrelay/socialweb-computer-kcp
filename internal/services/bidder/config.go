@@ -18,6 +18,7 @@ import (
 
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauthclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
@@ -323,6 +324,17 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 	}
 	if cfg.PDSDPoP == nil && cfg.PDSAccessTokenRef != nil && deps.Credentials != nil {
 		if credential, err := deps.Credentials.Resolve(context.Background(), *cfg.PDSAccessTokenRef); err == nil {
+			if raw, ok := credential.Value("session"); ok && raw != "" {
+				var data oauthclient.SessionData
+				if json.Unmarshal([]byte(raw), &data) == nil && data.HostURL != "" {
+					if session, err := oauthclient.New(data, oauthclient.Options{DID: data.AccountDID, RepoDID: data.AccountDID,
+						PDSURL: data.HostURL, Scopes: data.Scopes}); err == nil {
+						if remote, err := pdsclient.NewRemote(pdsclient.RemoteConfig{BaseURL: data.HostURL, Tokens: session, DPoP: session}); err == nil {
+							cfg.PDS = remote
+						}
+					}
+				}
+			}
 			source, err := pdsclient.DPoPSourceFromData(credential.Data)
 			if err != nil {
 				if deps.Log != nil {
