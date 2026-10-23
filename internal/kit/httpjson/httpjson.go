@@ -39,6 +39,8 @@ type StatusError struct {
 	Body []byte
 }
 
+func (e *StatusError) HTTPStatus() int { return e.Status }
+
 func (e *StatusError) Error() string {
 	text := strings.TrimSpace(string(e.Body))
 	if len(text) > statusDetailLimit {

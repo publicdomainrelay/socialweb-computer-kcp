@@ -7,9 +7,13 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/lease"
 )
 
 var ErrNoCredentials = errors.New("xrpc: no credentials are available")
+
+var _ Source[string] = (*lease.Source[string])(nil)
 
 type Source[T any] interface {
 	Get(ctx context.Context) (T, error)

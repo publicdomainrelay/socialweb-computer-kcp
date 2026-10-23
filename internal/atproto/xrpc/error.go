@@ -16,7 +16,11 @@ type Error struct {
 	Message string
 
 	Body []byte
+
+	verdict Verdict
 }
+
+func (e *Error) HTTPStatus() int { return e.Status }
 
 func newError(status int, body []byte) *Error {
 	out := &Error{Status: status, Body: body}

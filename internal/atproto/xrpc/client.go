@@ -12,6 +12,8 @@ import (
 	"strings"
 
 	"github.com/bluesky-social/indigo/atproto/syntax"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/authretry"
 )
 
 const (
@@ -110,70 +112,87 @@ func (c *Client) do(ctx context.Context, method, nsid, target string, body []byt
 		limit = DefaultLimit
 	}
 	nonceRetried := false
-	authRetried := false
 	var rejected error
-	for {
-		var reader io.Reader
-		if body != nil {
-			reader = bytes.NewReader(body)
-		}
-		req, err := http.NewRequestWithContext(ctx, method, target, reader)
-		if err != nil {
-			return Reply{}, fmt.Errorf("xrpc: building %s: %w", nsid, err)
-		}
-		for key, values := range c.Header {
-			req.Header[key] = append([]string(nil), values...)
-		}
-		req.Header.Set("Accept", "application/json")
-		if body != nil {
-			req.Header.Set("Content-Type", "application/json")
-		}
-		if c.Auth != nil {
-			if err := c.Auth.Apply(req); err != nil {
-				if rejected != nil {
+	send := func(ctx context.Context) (Reply, error) {
+		for {
+			reply, over, verdict, applied, err := c.attempt(ctx, client, method, nsid, target, body, limit)
+			if err != nil {
+				if !applied && rejected != nil {
 					return Reply{}, fmt.Errorf("%w (renewing the credentials: %v)", rejected, err)
 				}
 				return Reply{}, err
 			}
-		}
-		resp, err := client.Do(req)
-		if err != nil {
-			return Reply{}, fmt.Errorf("xrpc: %s: %w", nsid, err)
-		}
-		raw, readErr := io.ReadAll(io.LimitReader(resp.Body, limit+1))
-		resp.Body.Close()
-		if readErr != nil {
-			return Reply{}, fmt.Errorf("xrpc: reading %s: %w", nsid, readErr)
-		}
-		over := int64(len(raw)) > limit
-		if over {
-			raw = raw[:limit]
-		}
-		if c.Auth != nil {
-			switch c.verdict(resp) {
-			case RetryNonce:
-				if !nonceRetried {
-					nonceRetried = true
-					continue
-				}
-			case RetryAuth:
-				if !authRetried {
-					authRetried = true
-					rejected = newError(resp.StatusCode, raw)
-					c.Auth.Invalidate()
-					continue
-				}
+			if verdict == RetryNonce && !nonceRetried {
+				nonceRetried = true
+				continue
 			}
+			if reply.Status < 200 || reply.Status > 299 {
+				failure := newError(reply.Status, reply.Body)
+				failure.verdict = verdict
+				return Reply{}, failure
+			}
+			if over {
+				return reply, fmt.Errorf("%w: %s answered more than %d bytes", ErrTooLarge, nsid, limit)
+			}
+			return reply, nil
 		}
-		if resp.StatusCode < 200 || resp.StatusCode > 299 {
-			return Reply{}, newError(resp.StatusCode, raw)
-		}
-		reply := Reply{Status: resp.StatusCode, Header: resp.Header, Body: raw}
-		if over {
-			return reply, fmt.Errorf("%w: %s answered more than %d bytes", ErrTooLarge, nsid, limit)
-		}
-		return reply, nil
 	}
+	if c.Auth == nil {
+		return send(ctx)
+	}
+	return authretry.Do(ctx, c.Auth, func(ctx context.Context) (Reply, error) {
+		reply, err := send(ctx)
+		if rejected == nil && authRejected(err) {
+			rejected = err
+		}
+		return reply, err
+	}, authRejected)
+}
+
+func authRejected(err error) bool {
+	failure, ok := errors.AsType[*Error](err)
+	return ok && failure.verdict == RetryAuth
+}
+
+func (c *Client) attempt(ctx context.Context, client *http.Client, method, nsid, target string, body []byte, limit int64) (Reply, bool, Verdict, bool, error) {
+	var reader io.Reader
+	if body != nil {
+		reader = bytes.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, target, reader)
+	if err != nil {
+		return Reply{}, false, Done, true, fmt.Errorf("xrpc: building %s: %w", nsid, err)
+	}
+	for key, values := range c.Header {
+		req.Header[key] = append([]string(nil), values...)
+	}
+	req.Header.Set("Accept", "application/json")
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if c.Auth != nil {
+		if err := c.Auth.Apply(req); err != nil {
+			return Reply{}, false, Done, false, err
+		}
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return Reply{}, false, Done, true, fmt.Errorf("xrpc: %s: %w", nsid, err)
+	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	resp.Body.Close()
+	if err != nil {
+		return Reply{}, false, Done, true, fmt.Errorf("xrpc: reading %s: %w", nsid, err)
+	}
+	over := int64(len(raw)) > limit
+	if over {
+		raw = raw[:limit]
+	}
+	verdict := Done
+	if c.Auth != nil {
+		verdict = c.verdict(resp)
+	}
+	return Reply{Status: resp.StatusCode, Header: resp.Header, Body: raw}, over, verdict, true, nil
 }
 
 func (c *Client) verdict(resp *http.Response) Verdict {
