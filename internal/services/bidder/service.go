@@ -617,6 +617,18 @@ func (s *Service) resolveVault(ctx context.Context) error {
 		s.vault = s.cfg.Vault
 		return nil
 	}
+	if s.store != nil {
+		clientName := s.cfg.VaultClient
+		if clientName == "" {
+			clientName = "bidder"
+		}
+		vault, err := kcpOpenBaoVault(s.store, s.cluster, s.cfg.Provider.GuestVaultServer, clientName)
+		if err != nil {
+			return err
+		}
+		s.vault = vault
+		return nil
+	}
 	if s.cfg.Deps.Vault != nil {
 		client, err := s.cfg.Deps.Vault.Client(ctx, s.cfg.Provider.GuestVaultServer)
 		if err == nil {
@@ -626,19 +638,7 @@ func (s *Service) resolveVault(ctx context.Context) error {
 			}
 		}
 	}
-	if s.store == nil {
-		return errors.New("bidder: no guest vault is available")
-	}
-	clientName := s.cfg.VaultClient
-	if clientName == "" {
-		clientName = "bidder"
-	}
-	vault, err := kcpOpenBaoVault(s.store, s.cluster, s.cfg.Provider.GuestVaultServer, clientName)
-	if err != nil {
-		return err
-	}
-	s.vault = vault
-	return nil
+	return errors.New("bidder: no guest vault is available")
 }
 
 func (s *Service) resolveGuestURL(ctx context.Context) string {
