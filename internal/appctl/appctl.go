@@ -146,6 +146,9 @@ type Controller struct {
 	quotaFailed  map[string]string
 
 	observedAt map[string]time.Time
+
+	lastDesired map[string]map[string]any
+	drift       map[string]map[string]time.Time
 }
 
 func clusterConfig(base *rest.Config, ws string) *rest.Config {
@@ -197,7 +200,8 @@ func New(c Config) (*Controller, error) {
 		}
 	}
 	ctl := &Controller{c: c, restCfg: restCfg, applied: map[string]int64{}, rotated: map[string]int64{}, written: map[string]string{},
-		quotaApplied: map[string]string{}, quotaFailed: map[string]string{}, observedAt: map[string]time.Time{}}
+		quotaApplied: map[string]string{}, quotaFailed: map[string]string{}, observedAt: map[string]time.Time{},
+		lastDesired: map[string]map[string]any{}, drift: map[string]map[string]time.Time{}}
 	ctl.network = newNetworks(ctl)
 	return ctl, nil
 }

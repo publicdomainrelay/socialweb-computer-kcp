@@ -175,7 +175,9 @@ type ComponentView struct {
 }
 
 func (v ComponentView) ApplicationComponent() v1alpha1.ApplicationComponent {
-	return v1alpha1.ApplicationComponent{Kind: v.Kind, Name: v.Name, Workspace: v.Workspace, Phase: string(v.Status.Phase), Ready: v.Status.Ready}
+	return v1alpha1.ApplicationComponent{Kind: v.Kind, Name: v.Name, Workspace: v.Workspace, Phase: string(v.Status.Phase),
+		Ready: v.Status.Ready, Suspended: v.Status.Phase == v1alpha1.ComponentPhaseSuspended,
+		ObservedGeneration: v.Status.ObservedGeneration, Restarts: v.Status.Restarts, Message: v.Status.Message}
 }
 
 func (v ComponentView) Listeners() []v1alpha1.ApplicationListener {
@@ -536,6 +538,7 @@ func (ctl *Controller) ensureComponentIn(ctx context.Context, ws string, root *u
 		return err
 	}
 	cur, err := ri.Get(ctx, name, metav1.GetOptions{})
+	desiredKey := ws + "/" + ComponentKey(kind, name)
 	if apierrors.IsNotFound(err) {
 		want := &unstructured.Unstructured{Object: map[string]any{"apiVersion": ct.APIVersion(), "kind": ct.Kind}}
 		want.SetName(name)
@@ -545,6 +548,9 @@ func (ctl *Controller) ensureComponentIn(ctx context.Context, ws string, root *u
 			want.Object["spec"] = desiredSpec
 		}
 		_, err = ri.Create(ctx, want, metav1.CreateOptions{FieldManager: FieldManager})
+		if err == nil {
+			ctl.lastDesired[desiredKey] = desiredSpec
+		}
 		if apierrors.IsAlreadyExists(err) {
 			return nil
 		}
@@ -552,6 +558,10 @@ func (ctl *Controller) ensureComponentIn(ctx context.Context, ws string, root *u
 	}
 	if err != nil {
 		return err
+	}
+	if previous, known := ctl.lastDesired[desiredKey]; known && !reflect.DeepEqual(previous, desiredSpec) &&
+		!reflect.DeepEqual(cur.Object["spec"], previous) {
+		ctl.recordComponentDrift(root, ComponentKey(kind, name))
 	}
 	changed := false
 	labels := cur.GetLabels()
@@ -574,13 +584,43 @@ func (ctl *Controller) ensureComponentIn(ctx context.Context, ws string, root *u
 		changed = true
 	}
 	if !changed {
+		ctl.lastDesired[desiredKey] = desiredSpec
 		return nil
 	}
 	_, err = ri.Update(ctx, cur, metav1.UpdateOptions{FieldManager: FieldManager})
+	if err == nil {
+		ctl.lastDesired[desiredKey] = desiredSpec
+	}
 	if apierrors.IsConflict(err) {
 		return fmt.Errorf("appctl: the %s component %s changed under its update; the next pass retries", kind, name)
 	}
 	return err
+}
+
+func (ctl *Controller) recordComponentDrift(root *unstructured.Unstructured, key string) {
+	uid := string(root.GetUID())
+	if uid == "" {
+		return
+	}
+	if ctl.drift[uid] == nil {
+		ctl.drift[uid] = map[string]time.Time{}
+	}
+	ctl.drift[uid][key] = time.Now()
+}
+
+func (ctl *Controller) componentDrift(uid string) []string {
+	const driftWindow = 10 * time.Minute
+	now := time.Now()
+	var out []string
+	for key, at := range ctl.drift[uid] {
+		if now.Sub(at) > driftWindow {
+			delete(ctl.drift[uid], key)
+			continue
+		}
+		out = append(out, key)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func (ctl *Controller) GetComponent(ctx context.Context, kind, name string) (ComponentView, bool, error) {

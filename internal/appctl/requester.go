@@ -274,7 +274,7 @@ func requesterDesired(o v1alpha1.MarketRequester, plan accountPlan, id *v1alpha1
 	if local {
 		out = append(out, pdsExposures(ws, PdsComponent, network, hostnames, suspend, ingress)...)
 	}
-	return out, nil
+	return applyComponentOverrides(o.Spec.Suspend, o.Spec.Components, out)
 }
 
 func (ctl *Controller) reconcileRequesterAccount(ctx context.Context, u *unstructured.Unstructured, o v1alpha1.MarketRequester,
@@ -300,6 +300,7 @@ func (ctl *Controller) reconcileRequesterAccount(ctx context.Context, u *unstruc
 	desired, err := requesterDesired(o, plan, id, ctl.c.workspace(), stateRoot, "", "", nil, false, nil)
 	if err != nil {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
+		setOverrideErrorIfAny(&st, o.Generation, err)
 		return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
 	}
 	if err := ctl.ensureDesired(ctx, u, desired); err != nil {
@@ -319,7 +320,8 @@ func (ctl *Controller) reconcileRequesterAccount(ctx context.Context, u *unstruc
 	}
 	st.Components, st.Listeners = snap.Components, snap.Listeners
 	st.Did = id.Status.Did
-	if snap.complete(desired) {
+	fillComponentStatus(&st, o.Generation, o.Spec.Suspend, o.Spec.Components, desired, snap, nil, ctl.componentDrift(string(o.UID)))
+	if snap.satisfied(desired) {
 		st = ready(st, "the existing account is signed in and every component is ready")
 	} else {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for every component to be ready"
@@ -361,6 +363,7 @@ func (ctl *Controller) reconcileRequester(ctx context.Context, u *unstructured.U
 		v1alpha1.AssociationRequireApproval)
 	if err != nil {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
+		setOverrideErrorIfAny(&st, o.Generation, err)
 		return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
 	}
 	stateRoot := ctl.c.Layout.StateDir
@@ -373,6 +376,7 @@ func (ctl *Controller) reconcileRequester(ctx context.Context, u *unstructured.U
 		desired, err := requesterDesired(o, plan, id, ctl.c.workspace(), stateRoot, pdsAccountHandle, pdsPublicURL, ingressConfig, requireIngress, ingressRef)
 		if err != nil {
 			st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
+			setOverrideErrorIfAny(&st, o.Generation, err)
 			return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
 		}
 		if err := ctl.ensureDesired(ctx, u, desired); err != nil {
@@ -388,6 +392,7 @@ func (ctl *Controller) reconcileRequester(ctx context.Context, u *unstructured.U
 		if id != nil {
 			st.Did = id.Status.Did
 		}
+		fillComponentStatus(&st, o.Generation, o.Spec.Suspend, o.Spec.Components, desired, snap, nil, ctl.componentDrift(string(o.UID)))
 		st.Phase, st.Message = v1alpha1.ApplicationPhasePending, "suspended"
 		return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
 	}
@@ -431,6 +436,7 @@ func (ctl *Controller) reconcileRequester(ctx context.Context, u *unstructured.U
 	desired, err := requesterDesired(o, plan, id, ctl.c.workspace(), stateRoot, pdsAccountHandle, pdsPublicURL, ingressConfig, requireIngress, ingressRef)
 	if err != nil {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
+		setOverrideErrorIfAny(&st, o.Generation, err)
 		return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
 	}
 	allDesired := desired
@@ -489,6 +495,7 @@ func (ctl *Controller) reconcileRequester(ctx context.Context, u *unstructured.U
 		}
 		if desired, err = requesterDesired(o, plan, id, ctl.c.workspace(), stateRoot, pdsAccountHandle, pdsPublicURL, ingressConfig, requireIngress, ingressRef); err != nil {
 			st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
+			setOverrideErrorIfAny(&st, o.Generation, err)
 			return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
 		}
 		allDesired = desired
@@ -539,6 +546,7 @@ func (ctl *Controller) reconcileRequester(ctx context.Context, u *unstructured.U
 		}
 		if desired, err = requesterDesired(o, plan, id, ctl.c.workspace(), stateRoot, pdsAccountHandle, pdsPublicURL, ingressConfig, requireIngress, ingressRef); err != nil {
 			st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
+			setOverrideErrorIfAny(&st, o.Generation, err)
 			return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
 		}
 		allDesired = desired
@@ -550,6 +558,7 @@ func (ctl *Controller) reconcileRequester(ctx context.Context, u *unstructured.U
 	}
 	if err := ctl.ensureMarketStreams(ctx, ctl.c.workspace(), "requester", o.Spec.Comms, o.Spec.Network, oauthReceiveOnly(plan.Mode)); err != nil {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
+		setOverrideErrorIfAny(&st, o.Generation, err)
 		return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
 	}
 	if err := ctl.pruneDesired(ctx, owner, allDesired); err != nil {
@@ -564,8 +573,9 @@ func (ctl *Controller) reconcileRequester(ctx context.Context, u *unstructured.U
 	}
 	st.Components, st.Listeners = snap.Components, snap.Listeners
 	st.Did = id.Status.Did
+	fillComponentStatus(&st, o.Generation, o.Spec.Suspend, o.Spec.Components, allDesired, snap, nil, ctl.componentDrift(string(o.UID)))
 	switch {
-	case snap.complete(allDesired) && st.Did != "":
+	case snap.satisfied(allDesired) && st.Did != "":
 		st = ready(st, "the requester is signed in and its components are ready")
 	case st.Did == "":
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for the requester's MarketIdentity to sign in"

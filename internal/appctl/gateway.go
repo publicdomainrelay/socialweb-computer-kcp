@@ -369,7 +369,7 @@ func gatewayDesired(o v1alpha1.Gateway, plan accountPlan, id *v1alpha1.MarketIde
 	}
 	out = append(out, httpServiceExposures(ws, ComponentKindRequester, RequesterComponent, "http", network, hostnames, true, true, suspend)...)
 	out = append(out, httpServiceExposures(ws, ComponentKindGatewayAPI, GatewayAPIComponent, "http", network, hostnames, true, true, suspend)...)
-	return out, nil
+	return applyComponentOverrides(o.Spec.Suspend, o.Spec.Components, out)
 }
 
 func (ctl *Controller) reconcileGateway(ctx context.Context, u *unstructured.Unstructured) error {
@@ -422,6 +422,7 @@ func (ctl *Controller) reconcileGateway(ctx context.Context, u *unstructured.Uns
 		v1alpha1.AssociationRequireApproval)
 	if err != nil {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
+		setOverrideErrorIfAny(&st, o.Generation, err)
 		return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
 	}
 	vault, err := ctl.ensureRootVault(ctx, owner, o.Spec)
@@ -445,6 +446,7 @@ func (ctl *Controller) reconcileGateway(ctx context.Context, u *unstructured.Uns
 		desired, err := gatewayDesired(o, plan, id, ctl.c.workspace(), stateRoot, downloadsDir, clusterCADir, ws, pdsAccountHandle, pdsPublicURL, ingressConfig, requireIngress, ingressRef)
 		if err != nil {
 			st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
+			setOverrideErrorIfAny(&st, o.Generation, err)
 			return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
 		}
 		if err := ctl.ensureDesired(ctx, u, desired); err != nil {
@@ -461,6 +463,7 @@ func (ctl *Controller) reconcileGateway(ctx context.Context, u *unstructured.Uns
 		if id != nil {
 			st.Did = id.Status.Did
 		}
+		fillComponentStatus(&st, o.Generation, o.Spec.Suspend, o.Spec.Components, desired, snap, nil, ctl.componentDrift(string(o.UID)))
 		st.Phase, st.Message = v1alpha1.ApplicationPhasePending, "suspended"
 		return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
 	}
@@ -529,6 +532,7 @@ func (ctl *Controller) reconcileGateway(ctx context.Context, u *unstructured.Uns
 	desired, err := gatewayDesired(o, plan, id, ctl.c.workspace(), stateRoot, downloadsDir, clusterCADir, ws, pdsAccountHandle, pdsPublicURL, ingressConfig, requireIngress, ingressRef)
 	if err != nil {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
+		setOverrideErrorIfAny(&st, o.Generation, err)
 		return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
 	}
 	allDesired := desired
@@ -588,6 +592,7 @@ func (ctl *Controller) reconcileGateway(ctx context.Context, u *unstructured.Uns
 		}
 		if desired, err = gatewayDesired(o, plan, id, ctl.c.workspace(), stateRoot, downloadsDir, clusterCADir, ws, pdsAccountHandle, pdsPublicURL, ingressConfig, requireIngress, ingressRef); err != nil {
 			st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
+			setOverrideErrorIfAny(&st, o.Generation, err)
 			return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
 		}
 		allDesired = desired
@@ -638,6 +643,7 @@ func (ctl *Controller) reconcileGateway(ctx context.Context, u *unstructured.Uns
 		}
 		if desired, err = gatewayDesired(o, plan, id, ctl.c.workspace(), stateRoot, downloadsDir, clusterCADir, ws, pdsAccountHandle, pdsPublicURL, ingressConfig, requireIngress, ingressRef); err != nil {
 			st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
+			setOverrideErrorIfAny(&st, o.Generation, err)
 			return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
 		}
 		allDesired = desired
@@ -649,6 +655,7 @@ func (ctl *Controller) reconcileGateway(ctx context.Context, u *unstructured.Uns
 	}
 	if err := ctl.ensureMarketStreams(ctx, ws, "requester", o.Spec.Comms, o.Spec.Network, oauthReceiveOnly(plan.Mode)); err != nil {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
+		setOverrideErrorIfAny(&st, o.Generation, err)
 		return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
 	}
 	if err := ctl.pruneDesired(ctx, owner, allDesired); err != nil {
@@ -664,6 +671,7 @@ func (ctl *Controller) reconcileGateway(ctx context.Context, u *unstructured.Uns
 	st.Components = append(st.Components, snap.Components...)
 	st.Listeners = snap.Listeners
 	st.Did = id.Status.Did
+	fillComponentStatus(&st, o.Generation, o.Spec.Suspend, o.Spec.Components, allDesired, snap, nil, ctl.componentDrift(string(o.UID)))
 	ctl.ensureAccountRepo(ctx, ws, RequesterIdentity, plan, id.Status.Did, id.Status.PdsUrl)
 	if a := id.Status.PendingAction; a != nil && id.Status.Phase == v1alpha1.MarketIdentityPhaseAwaitingScan {
 		awaitingOperator = "waiting for the operator's claim record (badgeBlueKeys keyId " + id.Status.Did + " with the nonce n of " + a.Url + ")"
@@ -682,7 +690,7 @@ func (ctl *Controller) reconcileGateway(ctx context.Context, u *unstructured.Uns
 	switch {
 	case awaitingOperator != "":
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, awaitingOperator
-	case snap.complete(allDesired) && st.Did != "":
+	case snap.satisfied(allDesired) && st.Did != "":
 		st = ready(st, "the root vault is Ready and every component is ready")
 	default:
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for every component to be ready and the requester's MarketIdentity for a did"

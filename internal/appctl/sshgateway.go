@@ -266,7 +266,7 @@ func sshServerExposuresReady(snap componentSnapshot, desired []desiredComponent)
 	return found
 }
 
-func sshGatewayDesired(o v1alpha1.SshGateway, plan accountPlan, ident *v1alpha1.ComponentIdentity, ws, stateRoot string) []desiredComponent {
+func sshGatewayDesired(o v1alpha1.SshGateway, plan accountPlan, ident *v1alpha1.ComponentIdentity, ws, stateRoot string) ([]desiredComponent, error) {
 	suspend := o.Spec.Suspend
 	network := o.Spec.Network
 	vault := ComponentRefFor("OpenBaoServer", SshGatewayVaultServer)
@@ -310,7 +310,7 @@ func sshGatewayDesired(o v1alpha1.SshGateway, plan accountPlan, ident *v1alpha1.
 	out = append(out, httpServiceExposures(ws, ComponentKindRequester, RequesterComponent, "http", network, hostnames, false, true, suspend)...)
 	out = append(out, httpServiceExposures(ws, ComponentKindSshServer, SshServerComponent, "http", network, hostnames, true, false, suspend)...)
 	out = append(out, sshExposures(ws, SshServerComponent, suspend)...)
-	return out
+	return applyComponentOverrides(o.Spec.Suspend, o.Spec.Components, out)
 }
 
 func (ctl *Controller) reconcileSshGateway(ctx context.Context, u *unstructured.Unstructured) error {
@@ -361,7 +361,12 @@ func (ctl *Controller) reconcileSshGateway(ctx context.Context, u *unstructured.
 			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "the ssh requester's identity: "+err.Error()
 			return ctl.writeStatus(ctx, SshGatewayGVR, o.Name, st)
 		}
-		desired := sshGatewayDesired(o, plan, ident, ctl.c.workspace(), stateRoot)
+		desired, err := sshGatewayDesired(o, plan, ident, ctl.c.workspace(), stateRoot)
+		if err != nil {
+			setOverrideErrorIfAny(&st, o.Generation, err)
+			st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
+			return ctl.writeStatus(ctx, SshGatewayGVR, o.Name, st)
+		}
 		if err := ctl.ensureDesired(ctx, u, desired); err != nil {
 			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, err.Error()
 			return ctl.writeStatus(ctx, SshGatewayGVR, o.Name, st)
@@ -373,6 +378,7 @@ func (ctl *Controller) reconcileSshGateway(ctx context.Context, u *unstructured.
 		}
 		st.Components, st.Listeners = snap.Components, snap.Listeners
 		st.Did = ident.Did
+		fillComponentStatus(&st, o.Generation, o.Spec.Suspend, o.Spec.Components, desired, snap, nil, ctl.componentDrift(string(o.UID)))
 		st.Phase, st.Message = v1alpha1.ApplicationPhasePending, "suspended"
 		return ctl.writeStatus(ctx, SshGatewayGVR, o.Name, st)
 	}
@@ -408,7 +414,12 @@ func (ctl *Controller) reconcileSshGateway(ctx context.Context, u *unstructured.
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "the ssh requester's identity: "+err.Error()
 		return ctl.writeStatus(ctx, SshGatewayGVR, o.Name, st)
 	}
-	desired := sshGatewayDesired(o, plan, ident, ctl.c.workspace(), stateRoot)
+	desired, err := sshGatewayDesired(o, plan, ident, ctl.c.workspace(), stateRoot)
+	if err != nil {
+		setOverrideErrorIfAny(&st, o.Generation, err)
+		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
+		return ctl.writeStatus(ctx, SshGatewayGVR, o.Name, st)
+	}
 	if err := ctl.ensureDesired(ctx, u, desired); err != nil {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, err.Error()
 		return ctl.writeStatus(ctx, SshGatewayGVR, o.Name, st)
@@ -426,6 +437,7 @@ func (ctl *Controller) reconcileSshGateway(ctx context.Context, u *unstructured.
 	}
 	st.Components, st.Listeners = snap.Components, snap.Listeners
 	st.Did = ident.Did
+	fillComponentStatus(&st, o.Generation, o.Spec.Suspend, o.Spec.Components, desired, snap, nil, ctl.componentDrift(string(o.UID)))
 	hps, err := ctl.ownedHostProcesses(ctx, owner)
 	if err != nil {
 		return err
@@ -439,7 +451,7 @@ func (ctl *Controller) reconcileSshGateway(ctx context.Context, u *unstructured.
 		dialer = dialer || (h.GetName() == SshGatewayIrohDial && running)
 	}
 	switch {
-	case snap.complete(desired) && sshServerExposuresReady(snap, desired) && dialer && ident.Did != "":
+	case snap.satisfied(desired) && sshServerExposuresReady(snap, desired) && dialer && ident.Did != "":
 		st = ready(st, "the ssh gateway listens, its iroh dialer runs and its owner identity is known")
 	case ident.Did == "":
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for the owner's atproto identity"

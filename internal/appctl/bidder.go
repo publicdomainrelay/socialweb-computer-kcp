@@ -617,7 +617,7 @@ func bidderDesired(o v1alpha1.MarketBidder, plan accountPlan, id *v1alpha1.Marke
 	if plan.Local {
 		out = append(out, pdsExposures(ws, PdsComponent, network, hostnames, suspend, ingress)...)
 	}
-	return out, nil
+	return applyComponentOverrides(o.Spec.Suspend, o.Spec.Components, out)
 }
 
 func (ctl *Controller) reconcileBidderAccount(ctx context.Context, u *unstructured.Unstructured, o v1alpha1.MarketBidder,
@@ -635,6 +635,7 @@ func (ctl *Controller) reconcileBidderAccount(ctx context.Context, u *unstructur
 			desired, err := bidderDesired(o, plan, id, ctl.c.workspace(), stateRoot, bidderDIDs, "", "", nil, false, nil)
 			if err != nil {
 				st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
+				setOverrideErrorIfAny(&st, o.Generation, err)
 				return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
 			}
 			if err := ctl.ensureDesired(ctx, u, desired); err != nil {
@@ -660,6 +661,7 @@ func (ctl *Controller) reconcileBidderAccount(ctx context.Context, u *unstructur
 	desired, err := bidderDesired(o, plan, id, ctl.c.workspace(), stateRoot, bidderDIDs, "", "", nil, false, nil)
 	if err != nil {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
+		setOverrideErrorIfAny(&st, o.Generation, err)
 		return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
 	}
 	if err := ctl.ensureDesired(ctx, u, desired); err != nil {
@@ -679,7 +681,8 @@ func (ctl *Controller) reconcileBidderAccount(ctx context.Context, u *unstructur
 	}
 	st.Components, st.Listeners = snap.Components, snap.Listeners
 	st.Did = id.Status.Did
-	if snap.complete(desired) {
+	fillComponentStatus(&st, o.Generation, o.Spec.Suspend, o.Spec.Components, desired, snap, nil, ctl.componentDrift(string(o.UID)))
+	if snap.satisfied(desired) {
 		st = ready(st, "the existing account is signed in and every component is ready")
 	} else {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for every component to be ready"
@@ -738,6 +741,7 @@ func (ctl *Controller) reconcileBidder(ctx context.Context, u *unstructured.Unst
 		v1alpha1.AssociationRequireApproval)
 	if err != nil {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
+		setOverrideErrorIfAny(&st, o.Generation, err)
 		return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
 	}
 	plan.MarketURL = ctl.bidderMarketURL(ctx, ctl.c.workspace())
@@ -754,6 +758,7 @@ func (ctl *Controller) reconcileBidder(ctx context.Context, u *unstructured.Unst
 		desired, err := bidderDesired(o, plan, id, ctl.c.workspace(), stateRoot, bidderDIDs, pdsAccountHandle, pdsPublicURL, ingressConfig, requireIngress, ingressRef)
 		if err != nil {
 			st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
+			setOverrideErrorIfAny(&st, o.Generation, err)
 			return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
 		}
 		if err := ctl.ensureDesired(ctx, u, desired); err != nil {
@@ -769,6 +774,7 @@ func (ctl *Controller) reconcileBidder(ctx context.Context, u *unstructured.Unst
 		if id != nil {
 			st.Did = id.Status.Did
 		}
+		fillComponentStatus(&st, o.Generation, o.Spec.Suspend, o.Spec.Components, desired, snap, nil, ctl.componentDrift(string(o.UID)))
 		st.Phase, st.Message = v1alpha1.ApplicationPhasePending, "suspended"
 		return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
 	}
@@ -827,6 +833,7 @@ func (ctl *Controller) reconcileBidder(ctx context.Context, u *unstructured.Unst
 	desired, err := bidderDesired(o, plan, id, ctl.c.workspace(), stateRoot, bidderDIDs, pdsAccountHandle, pdsPublicURL, ingressConfig, requireIngress, ingressRef)
 	if err != nil {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
+		setOverrideErrorIfAny(&st, o.Generation, err)
 		return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
 	}
 	first := pdsApplySet(desired, PdsComponent, componentRefName(ingressRef))
@@ -882,6 +889,7 @@ func (ctl *Controller) reconcileBidder(ctx context.Context, u *unstructured.Unst
 	}
 	if desired, err = bidderDesired(o, plan, id, ctl.c.workspace(), stateRoot, bidderDIDs, pdsAccountHandle, pdsPublicURL, ingressConfig, requireIngress, ingressRef); err != nil {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
+		setOverrideErrorIfAny(&st, o.Generation, err)
 		return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
 	}
 	pds, _ := desiredPds(desired)
@@ -920,6 +928,7 @@ func (ctl *Controller) reconcileBidder(ctx context.Context, u *unstructured.Unst
 	}
 	if desired, err = bidderDesired(o, plan, id, ctl.c.workspace(), stateRoot, bidderDIDs, pdsAccountHandle, pdsPublicURL, ingressConfig, requireIngress, ingressRef); err != nil {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
+		setOverrideErrorIfAny(&st, o.Generation, err)
 		return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
 	}
 	if err := ctl.ensureDesired(ctx, u, withoutPds(desired)); err != nil {
@@ -928,6 +937,7 @@ func (ctl *Controller) reconcileBidder(ctx context.Context, u *unstructured.Unst
 	}
 	if err := ctl.ensureMarketStreams(ctx, ctl.c.workspace(), "bidder", o.Spec.Comms, o.Spec.Network, oauthReceiveOnly(plan.Mode)); err != nil {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
+		setOverrideErrorIfAny(&st, o.Generation, err)
 		return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
 	}
 	if err := ctl.pruneDesired(ctx, owner, desired); err != nil {
@@ -959,6 +969,7 @@ func (ctl *Controller) reconcileBidder(ctx context.Context, u *unstructured.Unst
 	if o.Spec.Kcp != nil {
 		st.Components = append(st.Components, ctl.guestComponents(ctx)...)
 	}
+	fillComponentStatus(&st, o.Generation, o.Spec.Suspend, o.Spec.Components, desired, snap, nil, ctl.componentDrift(string(o.UID)))
 	if o.Spec.Profile == BidderProfileNetwork {
 		if err := ctl.associateNetworkOperator(ctx, o.Spec); err != nil {
 			ctl.c.log().Warn("associating the bidder's DID with the market network operator account", "err", err.Error())
@@ -971,7 +982,7 @@ func (ctl *Controller) reconcileBidder(ctx context.Context, u *unstructured.Unst
 		}
 	}
 	switch {
-	case snap.complete(desired) && st.Did != "":
+	case snap.satisfied(desired) && st.Did != "":
 		st = ready(st, "every component is ready")
 	default:
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for every component to be ready and the bidder's MarketIdentity for a did"

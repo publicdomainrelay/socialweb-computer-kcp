@@ -92,7 +92,8 @@ func GatewayChildOf(ctx context.Context, id, stateDir string, app v1alpha1.Netwo
 		return nil, fmt.Errorf("the owner account of %s's tenant cluster: %w", id, err)
 	}
 	spec := v1alpha1.GatewaySpec{Profile: app.Profile, Network: &value, Options: app.Options, BidderDids: append([]string(nil), bidderDids...),
-		MarketNetwork: &v1alpha1.GatewayMarketNetwork{OwnerSessionsFile: sessions}, ClusterProvider: app.ClusterProvider, Quota: app.Quota}
+		MarketNetwork: &v1alpha1.GatewayMarketNetwork{OwnerSessionsFile: sessions}, ClusterProvider: app.ClusterProvider, Quota: app.Quota,
+		Components: app.Components}
 	b, err := json.MarshalIndent(spec, "", "  ")
 	if err != nil {
 		return nil, err

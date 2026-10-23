@@ -308,7 +308,7 @@ func networkPds(stateRoot string, value v1alpha1.MarketNetworkValue, lease compo
 }
 
 func networkDesired(o v1alpha1.MarketNetwork, ws, stateRoot string, leases map[string]component.PortLease,
-	value v1alpha1.MarketNetworkValue, alicePublicURL, bobPublicURL string) []desiredComponent {
+	value v1alpha1.MarketNetworkValue, alicePublicURL, bobPublicURL string) ([]desiredComponent, error) {
 	suspend := o.Spec.Suspend
 	guestDir := filepath.Join(NetworkStateDir(stateRoot), GuestTLSDir)
 	plc := desiredComponent{Kind: ComponentKindPlc, Name: NetworkPLCName, Spec: v1alpha1.PlcSpec{
@@ -383,7 +383,7 @@ func networkDesired(o v1alpha1.MarketNetwork, ws, stateRoot string, leases map[s
 	out = append(out, httpServiceExposures(ws, ComponentKindRelay, NetworkRelayName, "http", &value, []string{NetworkRelayHost}, true, true, suspend)...)
 	out = append(out, pdsExposures(ws, NetworkAlicePdsName, &value, []string{NetworkAlicePdsHost}, suspend)...)
 	out = append(out, pdsExposures(ws, NetworkBobPdsName, &value, []string{NetworkBobPdsHost}, suspend)...)
-	return out
+	return applyComponentOverrides(o.Spec.Suspend, o.Spec.Components, out)
 }
 
 func (n *networks) ensureVault(ctx context.Context, owner string) error {
@@ -638,7 +638,11 @@ func (n *networks) reconcile(ctx context.Context, u *unstructured.Unstructured) 
 	}
 	setPdsIngressConditionNamed(&st.Conditions, o.Generation, NetworkAlicePdsName, true, aliceIngressErr)
 	setPdsIngressConditionNamed(&st.Conditions, o.Generation, NetworkBobPdsName, true, bobIngressErr)
-	desired := networkDesired(o, n.ctl.c.workspace(), stateRoot, leases, value, alicePublicURL, bobPublicURL)
+	desired, err := networkDesired(o, n.ctl.c.workspace(), stateRoot, leases, value, alicePublicURL, bobPublicURL)
+	if err != nil {
+		setNetworkOverrideFailure(&st, o.Generation, err)
+		return write(v1alpha1.ApplicationPhaseFailed, err.Error())
+	}
 	n.ctl.ensureRelayStatus(ctx, ComponentKey(ComponentKindRelay, NetworkRelayName))
 	if o.Spec.Suspend {
 		suspendDesired := desired
@@ -669,6 +673,7 @@ func (n *networks) reconcile(ctx context.Context, u *unstructured.Unstructured) 
 		}
 		st.Apps = apps
 		st.Components, st.Listeners = snap.Components, snap.Listeners
+		fillNetworkComponentStatus(&st, o.Generation, o.Spec.Suspend, o.Spec.Components, desired, snap, nil, n.ctl.componentDrift(string(o.UID)))
 		setCondition(&st.Conditions, o.Generation, ConditionVerifierPassed, false, "Suspended", "the network is suspended")
 		return write(v1alpha1.ApplicationPhasePending, "suspended")
 	}
@@ -697,7 +702,8 @@ func (n *networks) reconcile(ctx context.Context, u *unstructured.Unstructured) 
 		return err
 	}
 	st.Components, st.Listeners = snap.Components, snap.Listeners
-	if !snap.complete(desired) {
+	fillNetworkComponentStatus(&st, o.Generation, o.Spec.Suspend, o.Spec.Components, desired, snap, nil, n.ctl.componentDrift(string(o.UID)))
+	if !snap.satisfied(desired) {
 		var waiting []string
 		for _, d := range desired {
 			if !isExposureKind(d.Kind) && !snap.ready(d.Kind, d.Name) {
@@ -722,7 +728,11 @@ func (n *networks) reconcile(ctx context.Context, u *unstructured.Unstructured) 
 		if n.value == nil || n.valueUID != string(o.UID) || !sameSpec(*n.value, published) {
 			n.value = &published
 			n.valueUID = string(o.UID)
-			desired = networkDesired(o, n.ctl.c.workspace(), stateRoot, leases, published, alicePublicURL, bobPublicURL)
+			desired, err = networkDesired(o, n.ctl.c.workspace(), stateRoot, leases, published, alicePublicURL, bobPublicURL)
+			if err != nil {
+				setNetworkOverrideFailure(&st, o.Generation, err)
+				return write(v1alpha1.ApplicationPhaseFailed, err.Error())
+			}
 			if err := n.ctl.ensureDesired(ctx, u, desired); err != nil {
 				return write(v1alpha1.ApplicationPhaseProvisioning, err.Error())
 			}
@@ -828,6 +838,9 @@ func (n *networks) verify(ctx context.Context, snap componentSnapshot, apps []v1
 		v, ok := snap.view(check.kind, check.name)
 		if !ok {
 			return fmt.Errorf("%s %s is not there", check.kind, check.name)
+		}
+		if v.Status.Phase == v1alpha1.ComponentPhaseSuspended {
+			continue
 		}
 		if !v.Status.Ready {
 			return fmt.Errorf("%s %s is not ready", check.kind, check.name)
@@ -990,14 +1003,14 @@ func (n *networks) ensureApp(ctx context.Context, app v1alpha1.NetworkApp, value
 		}
 		root = &v1alpha1.MarketBidder{ObjectMeta: meta, Spec: v1alpha1.MarketBidderSpec{Profile: app.Profile, Network: &value,
 			Identity: v1alpha1.ApplicationIdentity{Handle: handle, PdsUrl: pdsURL},
-			Policy:   app.Policy, Firecracker: fc, Kcp: kcp, Options: app.Options, Quota: app.Quota, Comms: comms}}
+			Policy:   app.Policy, Firecracker: fc, Kcp: kcp, Options: app.Options, Quota: app.Quota, Comms: comms, Components: app.Components}}
 	case v1alpha1.ApplicationKindMarketRequester:
 		root = &v1alpha1.MarketRequester{ObjectMeta: meta, Spec: v1alpha1.MarketRequesterSpec{Profile: app.Profile, Network: &value,
 			Identity:   v1alpha1.ApplicationIdentity{Association: v1alpha1.AssociationSkip},
-			BidderDids: bidderDids, Options: app.Options, Quota: app.Quota, Comms: comms}}
+			BidderDids: bidderDids, Options: app.Options, Quota: app.Quota, Comms: comms, Components: app.Components}}
 	case v1alpha1.ApplicationKindSshGateway:
 		root = &v1alpha1.SshGateway{ObjectMeta: meta, Spec: v1alpha1.SshGatewaySpec{Profile: app.Profile, Network: &value,
-			BidderDids: bidderDids, Options: app.Options, Quota: app.Quota, OwnerSessionsFile: app.OwnerSessionsFile, Comms: comms}}
+			BidderDids: bidderDids, Options: app.Options, Quota: app.Quota, OwnerSessionsFile: app.OwnerSessionsFile, Comms: comms, Components: app.Components}}
 	}
 	if root != nil {
 		if err := applyRoot(ctx, rec, app.Kind, root); err != nil {
