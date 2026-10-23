@@ -567,6 +567,8 @@ type RequesterSpec struct {
 
 	MarketURL string `json:"marketURL,omitempty"`
 
+	OperatorDID string `json:"operatorDID,omitempty"`
+
 	PolicyEngineRef *ComponentRef `json:"policyEngineRef,omitempty"`
 
 	VaultRef *ComponentRef `json:"vaultRef,omitempty"`

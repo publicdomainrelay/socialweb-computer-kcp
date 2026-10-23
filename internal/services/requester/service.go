@@ -1601,11 +1601,15 @@ func (s *Service) bidAllowedWithPolicy(ctx context.Context, bid BidRecord, usePo
 	if s.policy == nil || (s.policy.Workflow == "" && workflow == "") {
 		return true
 	}
+	self := s.cfg.MarketDID
+	if s.cfg.OperatorDID != "" {
+		self = s.cfg.OperatorDID
+	}
 	input := PolicyInput{
-		SelfDid:          s.cfg.MarketDID,
+		SelfDid:          self,
 		SubjectDid:       bid.DID,
 		CounterpartyDid:  bid.DID,
-		RootRequesterDid: s.cfg.MarketDID,
+		RootRequesterDid: self,
 	}
 	if state := s.activeState(bid.Record); state != nil {
 		input.RFP = state.RFP

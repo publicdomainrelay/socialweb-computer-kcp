@@ -230,6 +230,23 @@ func (ctl *Controller) vaultRefs(ctx context.Context, server, clientName string)
 	return "", st, v1alpha1.OpenBaoServerClientRefs{}, fmt.Errorf("the OpenBaoServer %s reports no client %s yet", server, clientName)
 }
 
+func requesterOperatorDID(id *v1alpha1.MarketIdentity) string {
+	if id == nil {
+		return ""
+	}
+	for _, did := range id.Status.Associations {
+		if strings.TrimSpace(did) != "" {
+			return strings.TrimSpace(did)
+		}
+	}
+	for _, did := range id.Spec.ApprovedAssociations {
+		if strings.TrimSpace(did) != "" {
+			return strings.TrimSpace(did)
+		}
+	}
+	return ""
+}
+
 func (ctl *Controller) requesterMarketURL(ctx context.Context, ws string) string {
 	ri, err := ctl.client(ws, ExposureGVR)
 	if err != nil {
@@ -265,6 +282,7 @@ func (ctl *Controller) requesterDesired(ctx context.Context, o v1alpha1.MarketRe
 		Mode:             mode,
 		PublicOrigin:     publicOrigin,
 		MarketURL:        ctl.requesterMarketURL(ctx, ws),
+		OperatorDID:      requesterOperatorDID(id),
 		OAuthClientID:    oauthClientID,
 		OAuthRedirectURI: oauthRedirectURI,
 		GuestSSHKeysFile: guestSSHKeysFile,

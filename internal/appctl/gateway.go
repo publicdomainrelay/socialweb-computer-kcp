@@ -329,6 +329,7 @@ func (ctl *Controller) gatewayDesired(ctx context.Context, o v1alpha1.Gateway, p
 		Mode:               mode,
 		PublicOrigin:       requesterOrigin,
 		MarketURL:          ctl.requesterMarketURL(ctx, ws),
+		OperatorDID:        requesterOperatorDID(id),
 		OAuthClientID:      oauthClientID,
 		OAuthRedirectURI:   oauthRedirectURI,
 		GuestSSHKeysFile:   guestSSHKeysFile,

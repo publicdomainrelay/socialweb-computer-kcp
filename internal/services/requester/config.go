@@ -160,6 +160,8 @@ type Config struct {
 
 	MarketURL string
 
+	OperatorDID string
+
 	OAuthClientID string
 
 	OAuthRedirectURI string
@@ -343,6 +345,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 	}
 	cfg.PublicOrigin = strings.TrimRight(strings.TrimSpace(decoded.PublicOrigin), "/")
 	cfg.MarketURL = strings.TrimRight(strings.TrimSpace(decoded.MarketURL), "/")
+	cfg.OperatorDID = strings.TrimSpace(decoded.OperatorDID)
 	cfg.OAuthClientID = strings.TrimSpace(decoded.OAuthClientID)
 	cfg.OAuthRedirectURI = strings.TrimSpace(decoded.OAuthRedirectURI)
 	modeText := strings.ToLower(strings.TrimSpace(decoded.Mode))
