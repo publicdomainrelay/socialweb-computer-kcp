@@ -292,6 +292,12 @@ func (s *Service) prepare(ctx context.Context) error {
 		}
 	}
 	s.dir = ingress.NewDirectory(s.cfg.Network.PLCDirectoryURL)
+	if err := s.resolveMarketURL(ctx); err != nil {
+		s.log.Warn("the bidder market URL is not resolved yet", "err", err)
+	}
+	if err := s.cfg.checkServiceAuthHost(); err != nil {
+		return err
+	}
 	if err := s.resolveIdentity(ctx); err != nil {
 		s.log.Warn("the bidder identity is not resolved yet", "err", err)
 	}
@@ -552,8 +558,7 @@ func (s *Service) resolveRecords(ctx context.Context) error {
 	reader.Client = externalHTTPClient(s.cfg.Deps, RecordRequestTimeout)
 	if client, ok := reader.Client.(*http.Client); ok {
 		if transport, ok := client.Transport.(*http.Transport); ok && transport.TLSClientConfig != nil {
-			s.log.Info("the bidder's record reader trusts its roots", "rootCAs", transport.TLSClientConfig.RootCAs != nil,
-				"bundle", s.cfg.Network.CaBundleRef)
+			s.log.Info("the bidder's record reader trusts its roots", "rootCAs", transport.TLSClientConfig.RootCAs != nil)
 		}
 	}
 	s.cfg.Records = NewRoutedStore(s.did, store, reader)
@@ -705,7 +710,25 @@ func (s *Service) resolveGuestURL(ctx context.Context) string {
 
 func (s *Service) publicNetwork() bool {
 	return strings.TrimSpace(s.cfg.Network.IngressProxyHost) != "" ||
-		strings.TrimSpace(s.cfg.Network.GuestTlsUrl) != ""
+		strings.TrimSpace(s.cfg.Network.GuestTLSURL()) != ""
+}
+
+func (s *Service) resolveMarketURL(ctx context.Context) error {
+	ref := s.cfg.MarketExposureRef
+	if s.cfg.MarketURL != "" || ref == nil || strings.TrimSpace(ref.Name) == "" {
+		return nil
+	}
+	client, err := s.exposureClient()
+	if err != nil {
+		return err
+	}
+	u, err := client.Resource(exposureGVR).Get(ctx, strings.TrimSpace(ref.Name), metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("bidder: reading the market Exposure %s: %w", ref.Name, err)
+	}
+	raw, _, _ := unstructured.NestedString(u.Object, "status", "address")
+	s.cfg.MarketURL = strings.TrimRight(strings.TrimSpace(raw), "/")
+	return nil
 }
 
 func (s *Service) exposureClient() (dynamic.Interface, error) {

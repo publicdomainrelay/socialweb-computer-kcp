@@ -12,6 +12,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/irohdial"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 type GuestEvent struct {
@@ -123,8 +125,8 @@ func parseGuestEvent(ctx context.Context, dir identity.Directory, badge func(con
 		termination := &v1alpha1.ContractTermination{
 			Reason:     reason,
 			ObservedAt: observedAt,
-			Event:      v1alpha1.RecordRef{URI: event.Event.URI, CID: event.Event.CID},
-			Payload:    v1alpha1.RecordRef{URI: event.Payload.URI, CID: event.Payload.CID},
+			Event:      commonv1.StrongRef{URI: event.Event.URI, CID: event.Event.CID},
+			Payload:    commonv1.StrongRef{URI: event.Payload.URI, CID: event.Payload.CID},
 		}
 		if code, ok := event.Payload.Value["exitCode"]; ok {
 			value := int(numberValue(code))
@@ -134,7 +136,7 @@ func parseGuestEvent(ctx context.Context, dir identity.Directory, badge func(con
 			uri := stringOf(request["uri"])
 			cid := stringOf(request["cid"])
 			if uri != "" {
-				termination.Request = &v1alpha1.RecordRef{URI: uri, CID: cid}
+				termination.Request = &commonv1.StrongRef{URI: uri, CID: cid}
 			}
 		}
 		out.Termination = termination
@@ -149,7 +151,7 @@ func parseGuestEvent(ctx context.Context, dir identity.Directory, badge func(con
 	return out, nil
 }
 
-func sameRecordRef(a, b v1alpha1.RecordRef) bool {
+func sameRecordRef(a, b commonv1.StrongRef) bool {
 	if a.URI == "" || b.URI == "" || a.URI != b.URI {
 		return false
 	}
@@ -227,12 +229,12 @@ func guestEventSeen(seen map[string]bool, event MarketEvent) bool {
 	return found
 }
 
-func guestEventRecorded(eventRef, payloadRef v1alpha1.RecordRef, parsed *GuestEvent) bool {
+func guestEventRecorded(eventRef, payloadRef commonv1.StrongRef, parsed *GuestEvent) bool {
 	if parsed == nil {
 		return false
 	}
-	return sameRecordRef(eventRef, v1alpha1.RecordRef{URI: parsed.Event.URI, CID: parsed.Event.CID}) ||
-		sameRecordRef(payloadRef, v1alpha1.RecordRef{URI: parsed.Payload.URI, CID: parsed.Payload.CID})
+	return sameRecordRef(eventRef, commonv1.StrongRef{URI: parsed.Event.URI, CID: parsed.Event.CID}) ||
+		sameRecordRef(payloadRef, commonv1.StrongRef{URI: parsed.Payload.URI, CID: parsed.Payload.CID})
 }
 
 func hostKeyLines(keys []v1alpha1.ComputeVMHostKey) []string {

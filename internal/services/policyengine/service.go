@@ -20,6 +20,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/executor"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/registry"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/trust"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 const Kind = "PolicyEngine"
@@ -134,7 +136,7 @@ func New(options Options) (*Service, error) {
 	}
 	records := options.Records
 	if records == nil && resolve != nil {
-		records = controller.NewRecordResolver(func(ctx context.Context, ref policyv1alpha1.PolicyStrongRef) (map[string]any, error) {
+		records = controller.NewRecordResolver(func(ctx context.Context, ref commonv1.StrongRef) (map[string]any, error) {
 			return resolve(ctx, atproto.StrongRef{URI: ref.URI, CID: ref.CID})
 		}, policyRegistry)
 	}

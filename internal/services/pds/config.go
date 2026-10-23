@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -19,11 +18,19 @@ import (
 	atpds "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsreload"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 const Kind = "Pds"
 
 const DefaultServeHost = "127.0.0.1"
+
+const (
+	RepoKeyDir        = "repo-keys"
+	SessionSecretFile = "session-secret"
+	RotationKeyFile   = "plc-rotation.key"
+)
 
 type Config struct {
 	Deps     component.Deps
@@ -34,7 +41,7 @@ type Config struct {
 	CertsDir string
 
 	Identity  v1alpha1.ComponentIdentity
-	VaultRef  *v1alpha1.ComponentRef
+	VaultRef  *commonv1.ObjectRef
 	Hostnames []string
 
 	PublicBaseURL string
@@ -42,18 +49,18 @@ type Config struct {
 	AlsoKnownAs   []string
 
 	RequireIngress bool
-	IngressRef     *v1alpha1.ComponentRef
+	IngressRef     *commonv1.ObjectRef
 	PublicURL      string
 	StableHost     string
 
-	ServeHost    string
-	ServePort    int
-	HealthPath   string
-	TLS          *v1alpha1.ComponentTLS
-	TLSConfig    *tls.Config
-	CertFile     string
-	KeyFile      string
-	CABundleFile string
+	ServeHost  string
+	ServePort  int
+	HealthPath string
+	TLS        *v1alpha1.ComponentTLS
+	TLSConfig  *tls.Config
+	CertFile   string
+	KeyFile    string
+	CABundle   string
 
 	Directory identity.Directory
 	Resolver  atpds.DIDResolver
@@ -138,9 +145,6 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 	if decoded.Identity != nil {
 		cfg.Identity = *decoded.Identity
 		cfg.ServiceDID = strings.TrimSpace(decoded.Identity.Did)
-		if cfg.ServiceDID == "" && decoded.Identity.MarketIdentityRef != nil {
-			cfg.ServiceDID = strings.TrimSpace(decoded.Identity.MarketIdentityRef.Did)
-		}
 		if handle := strings.TrimSpace(decoded.Identity.Handle); handle != "" {
 			cfg.AlsoKnownAs = []string{"at://" + handle}
 		}
@@ -154,9 +158,11 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 	if cfg.PLCURL == "" && decoded.Network != nil {
 		cfg.PLCURL = strings.TrimRight(strings.TrimSpace(decoded.Network.PLCDirectoryURL), "/")
 	}
-	cfg.RepoKeyPath = strings.TrimSpace(decoded.RepoKeyPath)
-	cfg.SessionSecretPath = strings.TrimSpace(decoded.SessionSecretPath)
-	cfg.RotationKeyPath = strings.TrimSpace(decoded.RotationKeyPath)
+	if stateDir != "" {
+		cfg.RepoKeyPath = filepath.Join(stateDir, RepoKeyDir)
+		cfg.SessionSecretPath = filepath.Join(stateDir, SessionSecretFile)
+		cfg.RotationKeyPath = filepath.Join(stateDir, RotationKeyFile)
+	}
 	cfg.AllowExplicitDID = decoded.AllowExplicitDID
 	switch strings.ToLower(strings.TrimSpace(string(decoded.Mode))) {
 	case "", "full":
@@ -179,11 +185,11 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		if tlsSpec.Enabled {
 			cfg.CertFile = filePath(tlsSpec.CertRef)
 			cfg.KeyFile = keyFileFor(cfg.CertFile)
-			cfg.CABundleFile = filePath(tlsSpec.CaBundleRef)
+			cfg.CABundle = strings.TrimSpace(tlsSpec.CABundle)
 		}
 	}
-	if cfg.CABundleFile == "" && decoded.Network != nil {
-		cfg.CABundleFile = filePath(decoded.Network.CaBundleRef)
+	if cfg.CABundle == "" && decoded.Network != nil {
+		cfg.CABundle = strings.TrimSpace(decoded.Network.CABundle)
 	}
 	if decoded.ServiceAuth != nil {
 		cfg.ServiceAuthAudiences = append([]string(nil), decoded.ServiceAuth.Audience...)
@@ -257,11 +263,8 @@ func buildTLSConfig(cfg Config) (*tls.Config, error) {
 			tlsConfig = reloader.TLSConfig(&tls.Config{MinVersion: tls.VersionTLS12})
 		}
 	}
-	if cfg.CABundleFile != "" {
-		raw, err := os.ReadFile(cfg.CABundleFile)
-		if err != nil {
-			return nil, fmt.Errorf("pds: reading the tls ca bundle: %w", err)
-		}
+	if cfg.CABundle != "" {
+		raw := []byte(cfg.CABundle)
 		pool := tlsConfig.RootCAs
 		if pool == nil {
 			pool = x509.NewCertPool()

@@ -46,7 +46,7 @@ func (s *Service) reportOnce(ctx context.Context) {
 			continue
 		}
 		contract := vm.Spec.Contract
-		if contract == nil || contract.ReceiptURI == "" || contract.ReceiptCID == "" {
+		if contract == nil || contract.Receipt.URI == "" || contract.Receipt.CID == "" {
 			continue
 		}
 		held := vm.Status.Market

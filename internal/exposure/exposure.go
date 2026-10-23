@@ -12,7 +12,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -503,14 +502,10 @@ func (c *ExposureController) localTLS(spec exposurev1alpha1.ExposureTLS) (*tls.C
 	default:
 		return nil, errors.New("TLS is enabled but no certificate is available")
 	}
-	if caRef := strings.TrimSpace(spec.CABundleRef); caRef != "" {
-		data, err := os.ReadFile(caRef)
-		if err != nil {
-			return nil, fmt.Errorf("reading the CA bundle %s: %w", caRef, err)
-		}
+	if bundle := strings.TrimSpace(spec.CABundle); bundle != "" {
 		pool := x509.NewCertPool()
-		if !pool.AppendCertsFromPEM(data) {
-			return nil, fmt.Errorf("the CA bundle %s holds no certificate", caRef)
+		if !pool.AppendCertsFromPEM([]byte(bundle)) {
+			return nil, errors.New("the CA bundle holds no certificate")
 		}
 		config.ClientCAs = pool
 		config.ClientAuth = tls.VerifyClientCertIfGiven

@@ -181,7 +181,7 @@ func (s *Service) guestLoginScopes(ctx context.Context, name string) []string {
 	}
 	scopes := []string{}
 	for i := range grantList {
-		if grantList[i].Spec.Computevm != name {
+		if grantList[i].Spec.ComputeVMRef.Name != name {
 			continue
 		}
 		scopes = append(scopes, grantList[i].Spec.Scopes...)

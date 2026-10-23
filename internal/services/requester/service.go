@@ -38,6 +38,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/oauthcallback"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/statesync"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 const (
@@ -372,6 +374,15 @@ func (s *Service) setup(ctx context.Context) error {
 	if s.cfg.StateDir != "" {
 		if err := os.MkdirAll(s.cfg.StateDir, 0o700); err != nil {
 			return fmt.Errorf("requester: state dir: %w", err)
+		}
+	}
+	if ref := s.cfg.MarketExposureRef; s.cfg.MarketURL == "" && ref != nil && strings.TrimSpace(ref.Name) != "" {
+		if raw, err := s.readExposureURL(ctx, strings.TrimSpace(ref.Name)); err != nil {
+			if s.log != nil {
+				s.log.Warn("the requester market URL is not resolved yet", "exposure", ref.Name, "err", err)
+			}
+		} else {
+			s.cfg.MarketURL = strings.TrimRight(raw, "/")
 		}
 	}
 	if s.cfg.Directory == nil {
@@ -1155,14 +1166,14 @@ func (s *Service) readExposureURL(ctx context.Context, name string) (string, err
 	return strings.TrimSpace(raw), nil
 }
 
-func (s *Service) readSecretsBundle(ctx context.Context, ref v1alpha1.VaultRef) ([]secretEntry, error) {
+func (s *Service) readSecretsBundle(ctx context.Context, ref commonv1.SecretRef) ([]secretEntry, error) {
 	if s.cfg.Deps.Vault == nil {
 		return nil, errors.New("requester: no vault clients")
 	}
 	if s.cfg.VaultRef == nil || s.cfg.VaultRef.Name == "" {
 		return nil, errors.New("requester: the contract names a secrets bundle and the component names no OpenBaoServer")
 	}
-	server := s.cfg.VaultRef.VaultServer("")
+	server := v1alpha1.VaultServer(s.cfg.VaultRef, "")
 	client, err := s.cfg.Deps.Vault.Client(ctx, server)
 	if err != nil {
 		return nil, fmt.Errorf("requester: the vault client: %w", err)

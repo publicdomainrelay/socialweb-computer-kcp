@@ -16,6 +16,8 @@ import (
 
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 type ServiceOptions struct {
@@ -136,7 +138,7 @@ func (c *ServiceController) Reconcile(ctx context.Context, dyn dynamic.Interface
 	return writeStatus(ctx, ri, name, &status)
 }
 
-func targetKey(ref exposurev1alpha1.ServiceTargetRef, workspace string) (component.Key, error) {
+func targetKey(ref commonv1.ObjectRef, workspace string) (component.Key, error) {
 	kind := strings.TrimSpace(ref.Kind)
 	name := strings.TrimSpace(ref.Name)
 	if kind == "" {

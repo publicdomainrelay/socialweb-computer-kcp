@@ -110,7 +110,7 @@ func Spec(in SpecInput) (v1alpha1.MarketBidderSpec, error) {
 	if n.FirehoseURLs == nil {
 		n.FirehoseURLs = []string{}
 	}
-	if in.Profile == appctl.BidderProfileNetwork && (in.PdsUrl == "" || n.CaBundleRef == "" || n.GuestTlsUrl == "") {
+	if in.Profile == appctl.BidderProfileNetwork && (in.PdsUrl == "" || n.CABundle == "" || n.GuestTLSURL() == "") {
 		return v1alpha1.MarketBidderSpec{}, errors.New("bidder: profile market-network needs the market network's value and its bidders' PDS (--network, or --market-network-file)")
 	}
 	ingress := in.Ingress

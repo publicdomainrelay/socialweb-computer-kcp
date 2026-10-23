@@ -17,6 +17,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestidentity"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/statesync"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 const (
@@ -162,9 +164,9 @@ func (s *Service) validateBid(ctx context.Context, bid *v1alpha1.Bid, now time.T
 }
 
 func (s *Service) applyBidSpec(ctx context.Context, bid *v1alpha1.Bid, rfp *market.RFP, now time.Time) {
-	attached := make([]v1alpha1.BidRecordRef, 0, len(rfp.Policies))
+	attached := make([]commonv1.StrongRef, 0, len(rfp.Policies))
 	for _, policy := range rfp.Policies {
-		attached = append(attached, v1alpha1.BidRecordRef{URI: policy.URI, CID: policy.CID})
+		attached = append(attached, commonv1.StrongRef{URI: policy.URI, CID: policy.CID})
 	}
 	spec := bid.Spec
 	spec.PayloadNsid = market.NSIDFromURI(rfp.Payload.URI)
@@ -272,7 +274,7 @@ func (s *Service) recordPublishedBid(ctx context.Context, bid *v1alpha1.Bid, ref
 		return false
 	}
 	status.Phase = v1alpha1.BidPhasePublished
-	status.Bid = &v1alpha1.BidRecordRef{URI: ref.URI, CID: ref.CID}
+	status.Bid = &commonv1.StrongRef{URI: ref.URI, CID: ref.CID}
 	if status.Timings.PublishedAt == "" {
 		status.Timings.PublishedAt = now.Format(time.RFC3339)
 	}
@@ -451,7 +453,7 @@ func (s *Service) markBidReleasing(ctx context.Context, bid *v1alpha1.Bid, info 
 	s.applyBidStatus(ctx, bid, status)
 }
 
-func (s *Service) markBidReleaseRequested(ctx context.Context, bid *v1alpha1.Bid, info contractInfo, request, event *v1alpha1.RecordRef, at string) {
+func (s *Service) markBidReleaseRequested(ctx context.Context, bid *v1alpha1.Bid, info contractInfo, request, event *commonv1.StrongRef, at string) {
 	if bid == nil {
 		return
 	}
@@ -498,7 +500,7 @@ func (s *Service) finishRelease(ctx context.Context, bid *v1alpha1.Bid, now time
 	if bid.Status.Accept != nil {
 		info.acceptURI, info.acceptCID = bid.Status.Accept.URI, bid.Status.Accept.CID
 	}
-	request := &v1alpha1.RecordRef{URI: terminated.PayloadURI, CID: terminated.PayloadCid}
+	request := &commonv1.StrongRef{URI: terminated.PayloadURI, CID: terminated.PayloadCid}
 	if request.URI == "" {
 		request = nil
 	}

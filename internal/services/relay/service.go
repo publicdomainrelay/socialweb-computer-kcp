@@ -23,6 +23,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsreload"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 const Kind = "Relay"
@@ -43,7 +45,7 @@ type Config struct {
 	Port            int
 	Hostnames       []string
 	Network         *v1alpha1.MarketNetworkValue
-	PdsRefs         []v1alpha1.ComponentRef
+	PdsRefs         []commonv1.ObjectRef
 	Version         string
 	PLCURL          string
 	AllowedDIDs     []string
@@ -104,7 +106,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		Workspace: workspace,
 		Host:      DefaultHost,
 		Hostnames: append([]string(nil), decoded.Hostnames...),
-		PdsRefs:   append([]v1alpha1.ComponentRef(nil), decoded.PdsRefs...),
+		PdsRefs:   append([]commonv1.ObjectRef(nil), decoded.PdsRefs...),
 	}
 	if decoded.Network != nil {
 		network := *decoded.Network
@@ -128,7 +130,6 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		cfg.Hostnames = appendValues(cfg.Hostnames, networkHostnames(decoded.Network, cfg.Port)...)
 	}
 	cfg.Upstreams = pdsEndpoints(cfg.Deps, cfg.Workspace, cfg.PdsRefs)
-	cfg.AllowedDIDs = pdsRefDIDs(cfg.PdsRefs)
 	if allowsAnyPDS(cfg.PdsRefs) {
 		cfg.AllowedDIDs = nil
 	}
@@ -197,7 +198,7 @@ func networkHostnames(network *v1alpha1.MarketNetworkValue, port int) []string {
 	return out
 }
 
-func pdsEndpoints(deps component.Deps, workspace string, refs []v1alpha1.ComponentRef) []component.Endpoint {
+func pdsEndpoints(deps component.Deps, workspace string, refs []commonv1.ObjectRef) []component.Endpoint {
 	out := make([]component.Endpoint, 0, len(refs))
 	for _, ref := range refs {
 		kind := strings.TrimSpace(ref.Kind)
@@ -225,7 +226,7 @@ func pdsEndpoints(deps component.Deps, workspace string, refs []v1alpha1.Compone
 	return out
 }
 
-func allowsAnyPDS(refs []v1alpha1.ComponentRef) bool {
+func allowsAnyPDS(refs []commonv1.ObjectRef) bool {
 	for _, ref := range refs {
 		if strings.TrimSpace(ref.Name) == "*" {
 			return true
@@ -234,24 +235,7 @@ func allowsAnyPDS(refs []v1alpha1.ComponentRef) bool {
 	return false
 }
 
-func pdsRefDIDs(refs []v1alpha1.ComponentRef) []string {
-	var out []string
-	seen := map[string]struct{}{}
-	for _, ref := range refs {
-		did := strings.TrimSpace(ref.Did)
-		if did == "" {
-			continue
-		}
-		if _, ok := seen[did]; ok {
-			continue
-		}
-		seen[did] = struct{}{}
-		out = append(out, did)
-	}
-	return out
-}
-
-func resolvedHosts(endpoints []component.Endpoint, refs []v1alpha1.ComponentRef) []string {
+func resolvedHosts(endpoints []component.Endpoint, refs []commonv1.ObjectRef) []string {
 	if len(endpoints) != len(refs) {
 		return nil
 	}
@@ -329,8 +313,6 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	}
 	if allowsAnyPDS(cfg.PdsRefs) {
 		cfg.AllowedDIDs = nil
-	} else {
-		cfg.AllowedDIDs = appendValues(cfg.AllowedDIDs, pdsRefDIDs(cfg.PdsRefs)...)
 	}
 	for _, endpoint := range cfg.Upstreams {
 		if strings.HasPrefix(strings.ToLower(endpoint.URL), "http://") {
@@ -558,7 +540,7 @@ func (s *Service) crawlHosts(cfg Config) []string {
 	if !allowsAnyPDS(cfg.PdsRefs) || cfg.Deps.Registry == nil {
 		return crawlHosts(cfg)
 	}
-	eps := pdsEndpoints(cfg.Deps, cfg.Workspace, []v1alpha1.ComponentRef{{Kind: "Pds", Name: "*"}})
+	eps := pdsEndpoints(cfg.Deps, cfg.Workspace, []commonv1.ObjectRef{{Kind: "Pds", Name: "*"}})
 	out := make([]string, 0, len(eps))
 	seen := map[string]struct{}{}
 	for _, endpoint := range eps {

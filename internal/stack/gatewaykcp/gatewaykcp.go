@@ -270,17 +270,17 @@ func RunChild(ctx context.Context, c Config, l devinstance.Layout, m hostsvc.Man
 func run(ctx context.Context, c Config, l devinstance.Layout, app *table.App, m hostsvc.Manager) error {
 	reg := &listeners{addr: map[string]string{}, kind: map[string]string{}}
 	g := &gateway{c: c, l: l, reg: reg}
-	if n := c.Spec.Network; n != nil && n.CaBundleRef != "" && os.Getenv("SSL_CERT_FILE") == "" {
-		bundle, err := outboundCABundle(filepath.Join(c.StateDir, "tls"), n.CaBundleRef)
+	if n := c.Spec.Network; n != nil && n.CABundle != "" && os.Getenv("SSL_CERT_FILE") == "" {
+		bundle, err := outboundCABundle(filepath.Join(c.StateDir, "tls"), n.CABundle)
 		if err != nil {
 			return err
 		}
 		os.Setenv("SSL_CERT_FILE", bundle)
 		c.log().Info("the system roots and the market network's CA are this gateway's outbound trust: every vault it places verifies a bidder's issuer with them",
-			"bundle", bundle, "networkCA", n.CaBundleRef)
+			"bundle", bundle)
 	}
 	if c.Spec.Network != nil {
-		m, ok, err := guestTLSEgress(c.Spec.Network.GuestTlsUrl)
+		m, ok, err := guestTLSEgress(c.Spec.Network.GuestTLSURL())
 		if err != nil {
 			return err
 		}

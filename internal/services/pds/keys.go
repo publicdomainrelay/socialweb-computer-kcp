@@ -17,9 +17,10 @@ import (
 	"github.com/bluesky-social/indigo/atproto/atcrypto"
 	"github.com/bluesky-social/indigo/atproto/syntax"
 
-	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	atpds "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 type CredentialWriter interface {
@@ -274,7 +275,7 @@ func resolveRepoKeyStore(ctx context.Context, cfg Config, credentials component.
 	return NewJSONFileRepoKeyStore(path)
 }
 
-func resolveSessionSecret(ctx context.Context, stateDir string, explicit []byte, path string, vaultRef *v1alpha1.ComponentRef, credentials component.CredentialResolver) ([]byte, error) {
+func resolveSessionSecret(ctx context.Context, stateDir string, explicit []byte, path string, vaultRef *commonv1.ObjectRef, credentials component.CredentialResolver) ([]byte, error) {
 	if len(explicit) > 0 {
 		return append([]byte(nil), explicit...), nil
 	}
@@ -316,7 +317,7 @@ func resolveOAuthSigner(ctx context.Context, stateDir string, explicit atcrypto.
 	})
 }
 
-func resolveRotationKey(ctx context.Context, stateDir string, explicit atcrypto.PrivateKey, path string, vaultRef *v1alpha1.ComponentRef, ref *component.CredentialRef, field string, credentials component.CredentialResolver) (atcrypto.PrivateKey, error) {
+func resolveRotationKey(ctx context.Context, stateDir string, explicit atcrypto.PrivateKey, path string, vaultRef *commonv1.ObjectRef, ref *component.CredentialRef, field string, credentials component.CredentialResolver) (atcrypto.PrivateKey, error) {
 	if explicit != nil {
 		return explicit, nil
 	}
@@ -340,7 +341,7 @@ func isVaultPath(raw string) bool {
 	return strings.HasPrefix(raw, "openbao:") || strings.HasPrefix(raw, "vault:")
 }
 
-func vaultCredentialRef(raw string, vaultRef *v1alpha1.ComponentRef, keys []string) component.CredentialRef {
+func vaultCredentialRef(raw string, vaultRef *commonv1.ObjectRef, keys []string) component.CredentialRef {
 	raw = strings.TrimSpace(raw)
 	raw = strings.TrimPrefix(raw, "openbao:")
 	raw = strings.TrimPrefix(raw, "vault:")
@@ -351,7 +352,7 @@ func vaultCredentialRef(raw string, vaultRef *v1alpha1.ComponentRef, keys []stri
 	return ref
 }
 
-func resolvePathData(ctx context.Context, credentials component.CredentialResolver, raw string, vaultRef *v1alpha1.ComponentRef, keys []string) (map[string]any, error) {
+func resolvePathData(ctx context.Context, credentials component.CredentialResolver, raw string, vaultRef *commonv1.ObjectRef, keys []string) (map[string]any, error) {
 	raw = strings.TrimSpace(raw)
 	if isVaultPath(raw) {
 		if credentials == nil {

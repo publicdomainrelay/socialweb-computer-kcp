@@ -15,6 +15,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestseed"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 type contractRunner struct {
@@ -323,7 +325,7 @@ func (r *contractRunner) requestOnce(ctx context.Context) (bool, error) {
 			return false, fmt.Errorf("create the compute.vm record: %w", err)
 		}
 		state.VMURI = payload.URI
-		state.Payload = &v1alpha1.RecordRef{URI: payload.URI, CID: payload.CID}
+		state.Payload = &commonv1.StrongRef{URI: payload.URI, CID: payload.CID}
 		state.Phase = v1alpha1.ContractRFPSubmitted
 	} else {
 		state.VMURI = state.Payload.URI
@@ -352,7 +354,7 @@ func (r *contractRunner) requestOnce(ctx context.Context) (bool, error) {
 			return false, fmt.Errorf("create the policy record: %w", err)
 		}
 		policyRef = &created
-		state.Policy = &v1alpha1.RecordRef{URI: created.URI, CID: created.CID}
+		state.Policy = &commonv1.StrongRef{URI: created.URI, CID: created.CID}
 	}
 	rfpURI, rfpCID := "", ""
 	if state.RFP != nil && state.RFP.URI != "" {
@@ -372,7 +374,7 @@ func (r *contractRunner) requestOnce(ctx context.Context) (bool, error) {
 			return false, fmt.Errorf("create the market.rfp record: %w", err)
 		}
 		state.RFPURI = rfp.URI
-		state.RFP = &v1alpha1.RecordRef{URI: rfp.URI, CID: rfp.CID}
+		state.RFP = &commonv1.StrongRef{URI: rfp.URI, CID: rfp.CID}
 		state.Timestamps.RFPSubmitted = r.svc.nowISO()
 		rfpURI, rfpCID = rfp.URI, rfp.CID
 	}
@@ -494,7 +496,7 @@ func (r *contractRunner) requestOnce(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	state.Phase = v1alpha1.ContractWinnerSelected
-	state.Bid = &v1alpha1.RecordRef{URI: winner.URI, CID: winner.CID}
+	state.Bid = &commonv1.StrongRef{URI: winner.URI, CID: winner.CID}
 	state.Winner = &v1alpha1.ContractWinner{DID: winner.DID}
 	state.Bids = intPtr(len(allBids))
 	state.Timestamps.WinnerSelected = r.svc.nowISO()
@@ -522,7 +524,7 @@ func (r *contractRunner) requestOnce(ctx context.Context) (bool, error) {
 		}
 	}
 	state.AcceptURI = accept.URI
-	state.Accept = &v1alpha1.RecordRef{URI: accept.URI, CID: accept.CID}
+	state.Accept = &commonv1.StrongRef{URI: accept.URI, CID: accept.CID}
 	state.AcceptPending = &v1alpha1.ContractAcceptPending{BidURI: winner.URI}
 	state.Phase = v1alpha1.ContractAccepted
 	state.Timestamps.Accepted = r.svc.nowISO()
@@ -539,7 +541,7 @@ func (r *contractRunner) requestOnce(ctx context.Context) (bool, error) {
 		KeysForDID:  market.NewDirectoryKeyLister(r.svc.directory),
 		KeyResolver: market.DefaultKeyResolver,
 	})
-	state.Receipt = &v1alpha1.RecordRef{URI: receipt.URI, CID: receipt.CID}
+	state.Receipt = &commonv1.StrongRef{URI: receipt.URI, CID: receipt.CID}
 	state.SubmitEventRef = stringOf(receipt.Value["submitEvent"])
 	state.ReceiptOk = boolPtr(verification.OK)
 	state.Phase = v1alpha1.ContractReceipt
@@ -621,7 +623,7 @@ func (r *contractRunner) acceptReceipt(ctx context.Context, state *v1alpha1.Node
 		KeysForDID:  market.NewDirectoryKeyLister(r.svc.directory),
 		KeyResolver: market.DefaultKeyResolver,
 	})
-	state.Receipt = &v1alpha1.RecordRef{URI: receipt.URI, CID: receipt.CID}
+	state.Receipt = &commonv1.StrongRef{URI: receipt.URI, CID: receipt.CID}
 	state.SubmitEventRef = stringOf(receipt.Value["submitEvent"])
 	state.ReceiptOk = boolPtr(verification.OK)
 	state.Phase = v1alpha1.ContractReceipt
@@ -901,8 +903,8 @@ func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClai
 			state.HostKeys = &v1alpha1.ContractHostKeys{
 				Keys:       contractHostKeys(parsed.HostKeys),
 				ObservedAt: parsed.ObservedAt,
-				Event:      v1alpha1.RecordRef{URI: parsed.Event.URI, CID: parsed.Event.CID},
-				Payload:    v1alpha1.RecordRef{URI: parsed.Payload.URI, CID: parsed.Payload.CID},
+				Event:      commonv1.StrongRef{URI: parsed.Event.URI, CID: parsed.Event.CID},
+				Payload:    commonv1.StrongRef{URI: parsed.Payload.URI, CID: parsed.Payload.CID},
 			}
 			r.log().Info("requester_guest_host_keys", "keys", len(parsed.HostKeys))
 		case market.ComputeEventsVMTerminatedNSID:
@@ -1178,8 +1180,8 @@ func (r *contractRunner) releaseEnvelope(ctx context.Context, state *v1alpha1.No
 		}
 	}
 	state.Release = &v1alpha1.ContractRelease{
-		Event:   v1alpha1.RecordRef{URI: envelope.URI, CID: envelope.CID},
-		Payload: v1alpha1.RecordRef{URI: payload.URI, CID: payload.CID},
+		Event:   commonv1.StrongRef{URI: envelope.URI, CID: envelope.CID},
+		Payload: commonv1.StrongRef{URI: payload.URI, CID: payload.CID},
 	}
 	return market.RecordRef{URI: envelope.URI, CID: envelope.CID}, envelope.Record, nil
 }

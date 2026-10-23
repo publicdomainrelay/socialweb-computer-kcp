@@ -24,6 +24,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/appctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 const (
@@ -398,8 +400,8 @@ func requesterFailure(st v1alpha1.ApplicationStatus) string {
 	return ""
 }
 
-func (k *Kcp) PutSecrets(ctx context.Context, bundle []byte, timeout time.Duration) (v1alpha1.VaultRef, error) {
-	ref := v1alpha1.VaultRef{Mount: appctl.RequesterVaultClient, Path: SecretsPath}
+func (k *Kcp) PutSecrets(ctx context.Context, bundle []byte, timeout time.Duration) (commonv1.SecretRef, error) {
+	ref := commonv1.SecretRef{Mount: appctl.RequesterVaultClient, Path: SecretsPath}
 	ri := k.dyn.Resource(appctl.OpenBaoServerGVR)
 	err := until(ctx, timeout, "writing the secrets bundle into the requester's own OpenBao", func() (bool, error) {
 		client, _, c, err := appctl.ServerClient(ctx, ri, appctl.RequesterVaultServer, appctl.RequesterVaultClient)

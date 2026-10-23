@@ -6,7 +6,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
@@ -28,12 +27,10 @@ func networkHTTPClient(deps component.Deps, network v1alpha1.MarketNetworkValue,
 		resolver = mapped
 	}
 	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
-	if path := strings.TrimSpace(network.CaBundleRef); path != "" {
-		if data, err := os.ReadFile(path); err == nil {
-			pool := x509.NewCertPool()
-			if pool.AppendCertsFromPEM(data) {
-				tlsConfig.RootCAs = pool
-			}
+	if bundle := strings.TrimSpace(network.CABundle); bundle != "" {
+		pool := x509.NewCertPool()
+		if pool.AppendCertsFromPEM([]byte(bundle)) {
+			tlsConfig.RootCAs = pool
 		}
 	}
 	transport, err := networkdial.NewHTTPTransportWithOptions(networkdial.DialOptions{
@@ -48,7 +45,7 @@ func networkHTTPClient(deps component.Deps, network v1alpha1.MarketNetworkValue,
 }
 
 func guestTLSHostAddress(network v1alpha1.MarketNetworkValue) (string, string) {
-	raw := strings.TrimSpace(network.GuestTlsUrl)
+	raw := strings.TrimSpace(network.GuestTLSURL())
 	if raw == "" {
 		return "", ""
 	}
