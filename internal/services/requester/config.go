@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -20,6 +21,7 @@ import (
 
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauthclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
@@ -162,6 +164,8 @@ type Config struct {
 	OAuthRedirectURI string
 
 	OAuthSessionPath string
+
+	OAuthSessionData *oauthclient.SessionData
 
 	OAuthScopes []string
 
@@ -355,6 +359,26 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		cfg.RepoDID = cfg.DID
 		cfg.MarketDID = cfg.DID
 	}
+	if cfg.IdentityMode == IdentityModeOAuth && deps.Credentials != nil && cfg.PDSAccessTokenRef != nil {
+		credential, err := deps.Credentials.Resolve(context.Background(), *cfg.PDSAccessTokenRef)
+		if err != nil {
+			if deps.Log != nil {
+				deps.Log.Warn("requester_could_not_read_the_oauth_session", "err", err)
+			}
+		} else if raw, ok := credential.Value("session"); ok && raw != "" {
+			var data oauthclient.SessionData
+			if err := json.Unmarshal([]byte(raw), &data); err != nil {
+				if deps.Log != nil {
+					deps.Log.Warn("requester_could_not_decode_the_oauth_session", "err", err)
+				}
+			} else if data.AccountDID != "" && data.HostURL != "" {
+				cfg.OAuthSessionData = &data
+				cfg.DID = data.AccountDID
+				cfg.RepoDID = data.AccountDID
+				cfg.MarketDID = data.AccountDID
+			}
+		}
+	}
 	if decoded.OwnerSessionsFile != "" {
 		if cfg.IdentityMode == IdentityModeOAuth {
 			return Config{}, errors.New("requester: ownerSessionsFile and the oauth identity mode exclude each other")
@@ -378,6 +402,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		}
 		cfg.PDSURL = session.Service
 		cfg.IdentityMode = IdentityModeCallback
+		cfg.LocalSigner = false
 	}
 	if decoded.IrohSocket != "" {
 		cfg.IrohSocket = strings.TrimSpace(decoded.IrohSocket)
@@ -765,7 +790,7 @@ func (c Config) check() error {
 		return fmt.Errorf("requester: oauth redirect uri %q is not an absolute http or https URL", c.OAuthRedirectURI)
 	case c.PublicOrigin != "" && !absoluteHTTPURL(c.PublicOrigin):
 		return fmt.Errorf("requester: oauth public origin %q is not an absolute http or https URL", c.PublicOrigin)
-	case c.OAuthSessionPath == "":
+	case c.OAuthSessionPath == "" && c.OAuthSessionData == nil:
 		return errors.New("requester: oauth identity mode needs a state dir or an OAuthSessionPath")
 	}
 	return nil

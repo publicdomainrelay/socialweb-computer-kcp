@@ -439,7 +439,7 @@ func (s *Service) setup(ctx context.Context) error {
 	} else {
 		s.repo = s.cfg.Repo
 	}
-	if len(s.cfg.OwnerSessions) > 0 {
+	if len(s.cfg.OwnerSessions) > 0 || s.cfg.IdentityMode == IdentityModeOAuth {
 		if err := s.bindSignerKey(ctx); err != nil {
 			return err
 		}
@@ -1224,7 +1224,8 @@ func (s *Service) submitBid(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) submitEvent(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.authorizeCallback(w, r, market.SubmitEventNSID, defaultComputeEventServiceID); !ok {
+	issuer, ok := s.authorizeCallback(w, r, market.SubmitEventNSID, defaultComputeEventServiceID)
+	if !ok {
 		return
 	}
 	var body struct {
@@ -1238,6 +1239,10 @@ func (s *Service) submitEvent(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.URI == "" || body.CID == "" || body.Record == nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest", "message": "missing uri, cid, or record"})
+		return
+	}
+	if err := market.AuthorizeRecord(issuer, body.URI); err != nil {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "Forbidden", "message": err.Error()})
 		return
 	}
 	event, err := market.ParseEvent(body.Record)
@@ -1369,9 +1374,16 @@ func (s *Service) rememberBidders(bidders []Bidder) {
 	s.bidderMu.Lock()
 	defer s.bidderMu.Unlock()
 	for _, bidder := range bidders {
-		if _, ok := s.bidders[bidder.DID]; !ok {
-			s.bidders[bidder.DID] = bidder
+		if strings.TrimSpace(bidder.DID) == "" {
+			continue
 		}
+		if bidder.Endpoint == "" && bidder.Audience == "" {
+			continue
+		}
+		if current, ok := s.bidders[bidder.DID]; ok && current.Endpoint != "" && bidder.Endpoint == "" {
+			continue
+		}
+		s.bidders[bidder.DID] = bidder
 	}
 }
 
@@ -1383,7 +1395,7 @@ func (s *Service) bidderFor(did string) (Bidder, bool) {
 }
 
 func (s *Service) bidderForBid(ctx context.Context, bid BidRecord) (Bidder, bool) {
-	if bidder, ok := s.bidderFor(bid.DID); ok {
+	if bidder, ok := s.bidderFor(bid.DID); ok && bidder.Endpoint != "" {
 		return bidder, true
 	}
 	raw := strings.TrimSpace(stringOf(bid.Record["submitAccept"]))
@@ -1400,12 +1412,12 @@ func (s *Service) bidderForBid(ctx context.Context, bid BidRecord) (Bidder, bool
 }
 
 func (s *Service) bidderForDID(ctx context.Context, did string) (Bidder, bool) {
-	if bidder, ok := s.bidderFor(did); ok {
+	if bidder, ok := s.bidderFor(did); ok && bidder.Endpoint != "" {
 		return bidder, true
 	}
 	if discovered, err := s.market.Discover(ctx, s.now()); err == nil {
 		s.rememberBidders(discovered)
-		if bidder, ok := s.bidderFor(did); ok {
+		if bidder, ok := s.bidderFor(did); ok && bidder.Endpoint != "" {
 			return bidder, true
 		}
 	}
