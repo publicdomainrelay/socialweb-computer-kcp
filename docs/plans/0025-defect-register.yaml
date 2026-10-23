@@ -126,7 +126,7 @@ items:
       expired (inferred from the code).
   - id: D15-UNJOINED-GOROUTINES
     title: "Goroutines started without a join"
-    status: todo
+    status: done
     defect: >
       28 files start goroutines with no WaitGroup, done channel or errgroup,
       for example internal/appctl/appctl.go:229-230,
@@ -136,14 +136,14 @@ items:
       them.
   - id: D16-NIL-CONTEXT
     title: "Library code accepts a nil context and uses Background for shutdown"
-    status: todo
+    status: done
     defect: >
       67 "if ctx == nil { ctx = context.Background() }" guards, for example
       internal/component/runtime.go:168,185,225,288,412,765. Shutdown paths
       use context.Background() (internal/services/requester/service.go:203,213,237).
   - id: D17-MUTABLE-GLOBALS
     title: "Package globals mutated at runtime"
-    status: todo
+    status: done
     defect: >
       appPdsPublicURLs is mutated at runtime (internal/appctl/pds.go:155-168),
       a package-level sync.Map sits at internal/appctl/pds.go:47, and
