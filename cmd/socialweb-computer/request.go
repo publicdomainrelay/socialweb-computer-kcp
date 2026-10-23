@@ -355,17 +355,7 @@ func (r *requestRun) stop(ctx context.Context, remove bool) {
 				return a.Message == marketnetwork.StoppedMessage
 			}, nil)
 		} else {
-			for deadline := time.Now().Add(r.networkTimeout); ; {
-				_, found, gerr := request.NetworkApp(ctx, netRec.AdminKubeconfig, r.inv.Name)
-				if gerr == nil && !found {
-					break
-				}
-				if time.Now().After(deadline) {
-					err = fmt.Errorf("the market network still lists %s", r.inv.Name)
-					break
-				}
-				time.Sleep(request.Poll)
-			}
+			err = request.WaitNetworkGone(ctx, netRec.AdminKubeconfig, r.inv.Name, r.networkTimeout)
 		}
 		if err != nil {
 			r.a.log.Warn("stopping the invocation", "err", err.Error())
@@ -418,8 +408,12 @@ func (r *requestRun) signIn(ctx context.Context) error {
 	}
 	wctx, cancel := context.WithTimeout(ctx, requestIdentityWait)
 	defer cancel()
-	_, err = appcli.IdentityRenderer{Client: ids, Out: r.a.stderr, In: in}.WaitReady(wctx, marketrequester.RequesterIdentity)
+	_, err = appcli.IdentityRenderer{Client: ids, Watch: r.kcp.AwaitIdentity, Out: r.a.stderr, In: in}.WaitReady(wctx, marketrequester.RequesterIdentity)
 	return err
+}
+
+func leftHeld(c *v1alpha1.ComputeContract) bool {
+	return c.Status.Phase != v1alpha1.ComputeContractHeld
 }
 
 func contractSettled(c *v1alpha1.ComputeContract) bool {
@@ -480,22 +474,15 @@ func (r *requestRun) ssh(ctx context.Context, c *v1alpha1.ComputeContract) (int,
 			r.log("ssh session ended because the contract left Held", "err", cause)
 			return 0, nil
 		}
-		for deadline := time.Now().Add(15 * time.Second); ; time.Sleep(500 * time.Millisecond) {
-			if current, cerr := r.kcp.Contract(ctx); cerr == nil && current.Status.Phase != v1alpha1.ComputeContractHeld {
-				r.log("ssh session ended because the contract left Held", "phase", current.Status.Phase, "err", err)
-				return 0, nil
-			}
-			if time.Now().After(deadline) {
-				break
-			}
+		if current, cerr := r.kcp.AwaitContract(ctx, 15*time.Second, leftHeld); cerr == nil {
+			r.log("ssh session ended because the contract left Held", "phase", current.Status.Phase, "err", err)
+			return 0, nil
 		}
 	}
 	if r.hold {
-		for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(200 * time.Millisecond) {
-			if current, cerr := r.kcp.Contract(ctx); cerr == nil && current.Status.Phase != v1alpha1.ComputeContractHeld {
-				r.log("ssh session ended because the contract left Held", "phase", current.Status.Phase)
-				return 0, nil
-			}
+		if current, cerr := r.kcp.AwaitContract(ctx, 5*time.Second, leftHeld); cerr == nil {
+			r.log("ssh session ended because the contract left Held", "phase", current.Status.Phase)
+			return 0, nil
 		}
 	}
 	r.log("ssh session ended", "exit", code)
@@ -506,17 +493,8 @@ func (r *requestRun) whileHeld(ctx context.Context) (context.Context, func()) {
 	held, cancel := context.WithCancelCause(ctx)
 	var wg sync.WaitGroup
 	wg.Go(func() {
-		for {
-			select {
-			case <-held.Done():
-				return
-			case <-time.After(request.Poll):
-			}
-			c, err := r.kcp.Contract(held)
-			if err == nil && c.Status.Phase != v1alpha1.ComputeContractHeld {
-				cancel(fmt.Errorf("the contract left Held while ssh waited for the guest: phase %s: %s", c.Status.Phase, c.Status.Message))
-				return
-			}
+		if c, err := r.kcp.AwaitContract(held, 0, leftHeld); err == nil {
+			cancel(fmt.Errorf("the contract left Held while ssh waited for the guest: phase %s: %s", c.Status.Phase, c.Status.Message))
 		}
 	})
 	return held, func() {

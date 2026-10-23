@@ -7,12 +7,11 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"time"
 
 	qrcode "github.com/skip2/go-qrcode"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 type MarketIdentityClient interface {
@@ -21,14 +20,14 @@ type MarketIdentityClient interface {
 	RejectAssociation(ctx context.Context, name, callerDid string) error
 }
 
-type IdentityRenderer struct {
-	Client   MarketIdentityClient
-	Out      io.Writer
-	In       io.Reader
-	Interval time.Duration
-}
+type MarketIdentityWatch func(ctx context.Context, name string, each func(*v1alpha1.MarketIdentity) (bool, error)) (*v1alpha1.MarketIdentity, error)
 
-const defaultIdentityInterval = time.Second
+type IdentityRenderer struct {
+	Client MarketIdentityClient
+	Watch  MarketIdentityWatch
+	Out    io.Writer
+	In     io.Reader
+}
 
 func actionKey(a *v1alpha1.MarketIdentityPendingAction) string {
 	if a == nil {
@@ -38,37 +37,40 @@ func actionKey(a *v1alpha1.MarketIdentityPendingAction) string {
 }
 
 func (r IdentityRenderer) WaitReady(ctx context.Context, name string) (*v1alpha1.MarketIdentity, error) {
-	interval := r.Interval
-	interval = opt.Positive(interval, defaultIdentityInterval)
+	if r.Watch == nil {
+		return nil, fmt.Errorf("marketidentity %s: the renderer has no watch", name)
+	}
 	var in *bufio.Reader
 	if r.In != nil {
 		in = bufio.NewReader(r.In)
 	}
 	shown := ""
-	for {
-		obj, err := r.Client.GetMarketIdentity(ctx, name)
-		if err != nil {
-			return nil, fmt.Errorf("marketidentity %s: %w", name, err)
+	var failed error
+	obj, err := r.Watch(ctx, name, func(obj *v1alpha1.MarketIdentity) (bool, error) {
+		if obj == nil {
+			return false, fmt.Errorf("marketidentity %s: kcpclient: read marketidentity %s: %w", name, name,
+				apierrors.NewNotFound(v1alpha1.MarketIdentityGVR.GroupResource(), name))
 		}
 		switch obj.Status.Phase {
 		case v1alpha1.MarketIdentityPhaseReady:
 			fmt.Fprintf(r.Out, "signed in as %s (%s)\n", cmp.Or(obj.Status.Handle), cmp.Or(obj.Status.Did))
-			return obj, nil
+			return true, nil
 		case v1alpha1.MarketIdentityPhaseFailed:
-			return obj, fmt.Errorf("marketidentity %s failed: %s", name, obj.Status.Message)
+			failed = fmt.Errorf("marketidentity %s failed: %s", name, obj.Status.Message)
+			return true, nil
 		}
 		if key := actionKey(obj.Status.PendingAction); key != "" && key != shown {
 			shown = key
 			if err := r.render(ctx, name, obj.Status.PendingAction, in); err != nil {
-				return obj, err
+				return false, err
 			}
 		}
-		select {
-		case <-ctx.Done():
-			return obj, ctx.Err()
-		case <-time.After(interval):
-		}
+		return false, nil
+	})
+	if err != nil {
+		return obj, err
 	}
+	return obj, failed
 }
 
 func (r IdentityRenderer) render(ctx context.Context, name string, a *v1alpha1.MarketIdentityPendingAction, in *bufio.Reader) error {
