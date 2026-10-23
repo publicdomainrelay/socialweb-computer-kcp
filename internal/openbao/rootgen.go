@@ -11,12 +11,10 @@ import (
 )
 
 func (c *Client) WithToken(token string) *Client {
-	out := *c
-	out.token = token
-	return &out
+	return &Client{addr: c.addr, token: token, http: c.http, tls: c.tls}
 }
 
-func (c *Client) Token() string { return c.token }
+func (c *Client) Token() string { return c.currentToken() }
 
 func (c *Client) LoginCert(ctx context.Context, mount, role string) (string, error) {
 	path := "auth/" + strings.Trim(mount, "/") + "/login"

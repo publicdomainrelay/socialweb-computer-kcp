@@ -6,8 +6,10 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
+	"time"
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
@@ -136,6 +138,9 @@ func buildVault(ctx context.Context, cfg Config, address, token string, ca, cert
 	if err != nil {
 		return nil, err
 	}
+	if token == "" && certMount != "" && certRole != "" {
+		go renewVaultToken(ctx, client, anonymous, certMount, certRole, cfg.Log)
+	}
 	return &vaultRuntime{
 		client: client,
 		mount:  strings.Trim(mount, "/"),
@@ -150,6 +155,27 @@ func buildVault(ctx context.Context, cfg Config, address, token string, ca, cert
 			Timeout:    cfg.Vault.Timeout,
 		},
 	}, nil
+}
+
+func renewVaultToken(ctx context.Context, client, login *openbao.Client, mount, role string, log *slog.Logger) {
+	interval := 5 * time.Minute
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			token, err := login.LoginCert(ctx, mount, role)
+			if err != nil {
+				if log != nil {
+					log.Warn("gatewayapi: renewing the vault token failed", "mount", mount, "role", role, "err", err)
+				}
+				continue
+			}
+			client.SetToken(token)
+		}
+	}
 }
 
 func custodyFromConfig(v VaultConfig) custodyEndpoint {

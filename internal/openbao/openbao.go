@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -50,6 +51,21 @@ type Client struct {
 	token string
 	http  *http.Client
 	tls   *tls.Config
+
+	tokenMu sync.RWMutex
+}
+
+func (c *Client) SetToken(token string) {
+	c.tokenMu.Lock()
+	c.token = token
+	c.tokenMu.Unlock()
+}
+
+func (c *Client) currentToken() string {
+	c.tokenMu.RLock()
+	token := c.token
+	c.tokenMu.RUnlock()
+	return token
 }
 
 type Option func(*Client)
@@ -500,8 +516,8 @@ func (c *Client) request(ctx context.Context, method, path string, in any) (int,
 	if err != nil {
 		return 0, nil, fmt.Errorf("%w: build %s /v1/%s: %v", ErrTransport, method, path, err)
 	}
-	if c.token != "" {
-		req.Header.Set("X-Vault-Token", c.token)
+	if token := c.currentToken(); token != "" {
+		req.Header.Set("X-Vault-Token", token)
 	}
 	if in != nil {
 		req.Header.Set("Content-Type", "application/json")
