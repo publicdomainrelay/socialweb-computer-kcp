@@ -1,9 +1,7 @@
 package component
 
 import (
-	"context"
 	"crypto/tls"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -13,6 +11,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
+	contract "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 )
 
@@ -23,20 +22,15 @@ const (
 )
 
 const (
-	ProtocolHTTP  = "http"
-	ProtocolHTTPS = "https"
-	ProtocolWS    = "ws"
-	ProtocolWSS   = "wss"
-	ProtocolTCP   = "tcp"
-	ProtocolSSH   = "ssh"
+	ProtocolHTTP  = contract.ProtocolHTTP
+	ProtocolHTTPS = contract.ProtocolHTTPS
+	ProtocolWS    = contract.ProtocolWS
+	ProtocolWSS   = contract.ProtocolWSS
+	ProtocolTCP   = contract.ProtocolTCP
+	ProtocolSSH   = contract.ProtocolSSH
 )
 
-type Service interface {
-	Start(ctx context.Context, deps Deps) error
-	Ready(ctx context.Context) error
-	Endpoints() []Endpoint
-	Stop(ctx context.Context) error
-}
+type Service = contract.Service[Deps]
 
 type Deps struct {
 	KCP         KCPClients
@@ -52,86 +46,19 @@ type Deps struct {
 	NodeClaimAgent *kcpclient.ServiceAccountRef
 }
 
-type NetworkHosts interface {
-	Address(hostport string) (string, bool)
-	Hosts() map[string]string
-}
+type NetworkHosts = contract.NetworkHosts
 
-type Endpoint struct {
-	Name     string
-	Protocol string
-	URL      string
-	Address  string
-}
+type Endpoint = contract.Endpoint
 
-type RawSpec json.RawMessage
+type RawSpec = contract.RawSpec
 
-func (s RawSpec) Bytes() []byte {
-	return []byte(s)
-}
-
-func (s RawSpec) Decode(v any) error {
-	if len(s) == 0 {
-		return nil
-	}
-	if err := json.Unmarshal(s, v); err != nil {
-		return fmt.Errorf("component: decoding the raw spec: %w", err)
-	}
-	return nil
-}
-
-func (s RawSpec) Map() (map[string]any, error) {
-	out := map[string]any{}
-	if err := s.Decode(&out); err != nil {
-		return nil, err
-	}
-	if out == nil {
-		out = map[string]any{}
-	}
-	return out, nil
-}
-
-func (s RawSpec) MarshalJSON() ([]byte, error) {
-	if len(s) == 0 {
-		return []byte("null"), nil
-	}
-	if !json.Valid(s) {
-		return nil, errors.New("component: the raw spec is not valid JSON")
-	}
-	return s, nil
-}
-
-func (s *RawSpec) UnmarshalJSON(b []byte) error {
-	if s == nil {
-		return errors.New("component: raw spec unmarshal into nil")
-	}
-	*s = append((*s)[:0], b...)
-	return nil
-}
-
-type RestartPolicy string
+type RestartPolicy = contract.RestartPolicy
 
 const (
-	RestartAlways    RestartPolicy = "Always"
-	RestartOnFailure RestartPolicy = "OnFailure"
-	RestartNever     RestartPolicy = "Never"
+	RestartAlways    = contract.RestartAlways
+	RestartOnFailure = contract.RestartOnFailure
+	RestartNever     = contract.RestartNever
 )
-
-func (p RestartPolicy) Valid() bool {
-	switch p {
-	case RestartAlways, RestartOnFailure, RestartNever:
-		return true
-	default:
-		return false
-	}
-}
-
-func (p RestartPolicy) WithDefault() RestartPolicy {
-	if p.Valid() {
-		return p
-	}
-	return RestartAlways
-}
 
 type ComponentSpec struct {
 	UID           types.UID
@@ -174,16 +101,16 @@ func (s ComponentSpec) ComponentStateDir(base string) string {
 	return filepath.Join(base, "components", s.Kind+"-"+s.Name)
 }
 
-type ComponentPhase string
+type ComponentPhase = contract.Phase
 
 const (
-	PhasePending   ComponentPhase = "Pending"
-	PhaseStarting  ComponentPhase = "Starting"
-	PhaseRunning   ComponentPhase = "Running"
-	PhaseReady     ComponentPhase = "Ready"
-	PhaseFailed    ComponentPhase = "Failed"
-	PhaseStopping  ComponentPhase = "Stopping"
-	PhaseSuspended ComponentPhase = "Suspended"
+	PhasePending   = contract.PhasePending
+	PhaseStarting  = contract.PhaseStarting
+	PhaseRunning   = contract.PhaseRunning
+	PhaseReady     = contract.PhaseReady
+	PhaseFailed    = contract.PhaseFailed
+	PhaseStopping  = contract.PhaseStopping
+	PhaseSuspended = contract.PhaseSuspended
 )
 
 type ComponentStatus struct {

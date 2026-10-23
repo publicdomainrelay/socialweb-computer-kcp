@@ -6,13 +6,11 @@ import (
 	"sync"
 
 	"k8s.io/apimachinery/pkg/types"
+
+	contract "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/component"
 )
 
-type Key struct {
-	Workspace string
-	Kind      string
-	Name      string
-}
+type Key = contract.Key
 
 type Entry struct {
 	Key        Key

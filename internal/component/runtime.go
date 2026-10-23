@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"runtime/debug"
 	"sync"
 	"time"
@@ -55,6 +54,8 @@ func (e *PanicError) Unwrap() error {
 
 type Runtime struct {
 	deps Deps
+
+	makeStateDir func(dir string) error
 
 	mu        sync.Mutex
 	instances map[types.UID]*instance
@@ -125,6 +126,12 @@ func (r *Runtime) SetStatusCallback(cb StatusCallback) {
 	r.callbackMu.Unlock()
 }
 
+func (r *Runtime) SetStateDirMaker(fn func(dir string) error) {
+	r.mu.Lock()
+	r.makeStateDir = fn
+	r.mu.Unlock()
+}
+
 func (r *Runtime) SetBackoff(initial, max time.Duration) error {
 	switch {
 	case initial <= 0:
@@ -137,6 +144,13 @@ func (r *Runtime) SetBackoff(initial, max time.Duration) error {
 	r.maxRestartBackoff = max
 	r.mu.Unlock()
 	return nil
+}
+
+func (r *Runtime) prepareStateDir(dir string) error {
+	if r.makeStateDir == nil {
+		return nil
+	}
+	return r.makeStateDir(dir)
 }
 
 func (r *Runtime) Registry() *Registry {
@@ -358,7 +372,7 @@ func (r *Runtime) startLocked(ctx context.Context, inst *instance, spec Componen
 		r.emit(ctx, spec, st)
 		return st, err
 	}
-	if err := os.MkdirAll(deps.StateDir, 0o700); err != nil {
+	if err := r.prepareStateDir(deps.StateDir); err != nil {
 		err := fmt.Errorf("component: creating the state dir for %s/%s: %w", spec.Kind, spec.Name, err)
 		st := failedStatus(spec, inst.restartsOf(), err)
 		r.emit(ctx, spec, st)

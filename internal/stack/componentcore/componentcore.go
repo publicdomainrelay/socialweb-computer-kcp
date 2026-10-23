@@ -23,6 +23,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauthclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/component/kcpclients"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/credentials"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/eventstream"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/exposure"
@@ -47,6 +48,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/sshserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsfront"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsreload"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 )
 
 const (
@@ -166,7 +168,7 @@ func New(cfg Config) (*Core, error) {
 		cfg.Workspaces = AppWorkspaces(DefaultWorkspace)
 	}
 	if cfg.KCP == nil {
-		set, err := component.NewKCPClientsFromKubeconfig(cfg.Kubeconfig)
+		set, err := kcpclients.FromKubeconfig(cfg.Kubeconfig)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrNoKubeconfig, err)
 		}
@@ -235,7 +237,7 @@ func New(cfg Config) (*Core, error) {
 	if vaultClient == "" && strings.TrimSpace(cfg.CredentialServer) != "" {
 		return nil, errors.New("componentcore: the vault clients need the named client certificate of the credential server")
 	}
-	vault, err := component.NewOpenBaoVaultClients(store, base, vaultClient)
+	vault, err := openbao.New(store, base, vaultClient)
 	if err != nil {
 		return nil, fmt.Errorf("componentcore: the vault clients: %w", err)
 	}
@@ -265,6 +267,7 @@ func New(cfg Config) (*Core, error) {
 	}
 	dispatcher := newIngressDispatcher(registry, registrar, fallbackName, cfg.Log)
 	runtime := component.NewRuntime(deps, nil)
+	runtime.SetStateDirMaker(func(dir string) error { return os.MkdirAll(dir, 0o700) })
 	actionHandlers, err := policyActionHandlers(store, base)
 	if err != nil {
 		return nil, err
