@@ -183,7 +183,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	tlsConfig, err := serverTLS(cfg)
+	tlsConfig, err := listenerTLS(cfg)
 	if err != nil {
 		return err
 	}
@@ -423,7 +423,7 @@ func parseUpstream(raw string) (*url.URL, error) {
 	return target, nil
 }
 
-func serverTLS(cfg Config) (*tls.Config, error) {
+func listenerTLS(cfg Config) (*tls.Config, error) {
 	if cfg.CertFile != "" {
 		return servetls.Config(cfg.CertFile, nil, cfg.Deps.Log)
 	}

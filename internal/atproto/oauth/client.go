@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -66,13 +67,13 @@ func (m *ClientMetadata) Validate(clientID string) error {
 	if m.ApplicationType != nil && *m.ApplicationType != "web" && *m.ApplicationType != "native" {
 		return fmt.Errorf("application_type must be web or native")
 	}
-	if !containsString(m.GrantTypes, "authorization_code") {
+	if !slices.Contains(m.GrantTypes, "authorization_code") {
 		return fmt.Errorf("grant_types must include authorization_code")
 	}
-	if !containsString(strings.Fields(m.Scope), ScopeAtproto) {
+	if !slices.Contains(strings.Fields(m.Scope), ScopeAtproto) {
 		return fmt.Errorf("scope must include atproto")
 	}
-	if !containsString(m.ResponseTypes, "code") {
+	if !slices.Contains(m.ResponseTypes, "code") {
 		return fmt.Errorf("response_types must include code")
 	}
 	if len(m.RedirectURIs) == 0 {
@@ -108,15 +109,6 @@ func (m *ClientMetadata) Validate(clientID string) error {
 		}
 	}
 	return nil
-}
-
-func containsString(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
 }
 
 type ClientMetadataResolver struct {

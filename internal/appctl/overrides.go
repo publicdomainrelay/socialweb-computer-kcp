@@ -2,6 +2,7 @@ package appctl
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -175,15 +176,6 @@ func validateMilliseconds(key, name string, value *int32) error {
 	return validateSeconds(key, name, value)
 }
 
-func containsString(items []string, want string) bool {
-	for _, item := range items {
-		if strings.TrimSpace(item) == want {
-			return true
-		}
-	}
-	return false
-}
-
 func validateCount(key, name string, value *int32) error {
 	if value != nil && *value < 0 {
 		return newOverrideError(key, ReasonInvalidValue, "%s must not be negative", name)
@@ -268,7 +260,7 @@ func validateSettings(key, kind string, settings *v1alpha1.ComponentSettings) er
 						return err
 					}
 				}
-				if len(s.OAuth.Scopes) > 0 && !containsString(s.OAuth.Scopes, "atproto") {
+				if len(s.OAuth.Scopes) > 0 && !slices.ContainsFunc(s.OAuth.Scopes, func(scope string) bool { return strings.TrimSpace(scope) == "atproto" }) {
 					return newOverrideError(key, ReasonInvalidValue, "oauth scopes must include atproto")
 				}
 			}

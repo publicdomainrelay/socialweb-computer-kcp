@@ -225,7 +225,7 @@ func New(cfg Config) (*Core, error) {
 	if cfg.FrontControl == "" {
 		cfg.FrontControl = filepath.Join(cfg.StateDir, "run", "front.sock")
 	}
-	tlsConfig, err := serverTLS(cfg)
+	tlsConfig, err := frontTLS(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -505,7 +505,7 @@ func NewDynamicFactory(kubeconfig string) (DynamicFactory, error) {
 	}, nil
 }
 
-func serverTLS(cfg Config) (*tls.Config, error) {
+func frontTLS(cfg Config) (*tls.Config, error) {
 	certFile, keyFile := cfg.TLSCertFile, cfg.TLSKeyFile
 	if certFile == "" && keyFile == "" {
 		var err error
