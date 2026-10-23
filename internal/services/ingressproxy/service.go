@@ -23,6 +23,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/kcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/servetls"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -241,9 +242,12 @@ func (s *Service) Start(ctx context.Context) error {
 	s.registrar = registrar
 	s.providerName = name
 	s.mu.Unlock()
-	followCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	go s.follow(followCtx, provider.Ready())
+	readiness := supervise.New(ctx)
+	defer func() { _ = readiness.Stop() }()
+	readiness.Go("ingressproxy: readiness", func(ctx context.Context) error {
+		s.follow(ctx, provider.Ready())
+		return nil
+	})
 	return provider.Start(ctx)
 }
 

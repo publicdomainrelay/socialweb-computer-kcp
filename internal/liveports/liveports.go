@@ -93,25 +93,24 @@ func lockPath(b Block, i int) string {
 	return filepath.Join(LockDir(), strconv.Itoa(b.First)+"-"+strconv.Itoa(i)+".lock")
 }
 
-var heldSlots []*os.File
-
-func TakeForProcess(b Block) (portallocator.Range, error) {
+// TakeForProcess locks a free slot of b and returns its range with the held
+// lock file; the slot stays taken until the caller closes the file.
+func TakeForProcess(b Block) (portallocator.Range, *os.File, error) {
 	if err := os.MkdirAll(LockDir(), 0o700); err != nil {
-		return portallocator.Range{}, fmt.Errorf("%w: %s: %v", ErrNoLockDir, LockDir(), err)
+		return portallocator.Range{}, nil, fmt.Errorf("%w: %s: %v", ErrNoLockDir, LockDir(), err)
 	}
 	start := os.Getpid() % b.Slots
 	for n := 0; n < b.Slots; n++ {
 		i := (start + n) % b.Slots
 		f, err := os.OpenFile(lockPath(b, i), os.O_CREATE|os.O_RDWR, 0o600)
 		if err != nil {
-			return portallocator.Range{}, fmt.Errorf("%w: %s: %v", ErrNoLockDir, lockPath(b, i), err)
+			return portallocator.Range{}, nil, fmt.Errorf("%w: %s: %v", ErrNoLockDir, lockPath(b, i), err)
 		}
 		if err := hostos.Lock(f, hostos.LockExclusive|hostos.LockNonBlocking); err != nil {
 			_ = f.Close()
 			continue
 		}
-		heldSlots = append(heldSlots, f)
-		return b.Slot(i), nil
+		return b.Slot(i), f, nil
 	}
-	return portallocator.Range{}, fmt.Errorf("%w (%s, %d slots from %d)", ErrNoSlot, b.What, b.Slots, b.First)
+	return portallocator.Range{}, nil, fmt.Errorf("%w (%s, %d slots from %d)", ErrNoSlot, b.What, b.Slots, b.First)
 }

@@ -42,8 +42,8 @@ func ReadCARBytes(ctx context.Context, data []byte) (cid.Cid, []blocks.Block, er
 	return ReadCAR(ctx, bytes.NewReader(data))
 }
 
-func VerifyCAR(data []byte) (cid.Cid, error) {
-	root, _, err := ReadCARBytes(context.Background(), data)
+func VerifyCAR(ctx context.Context, data []byte) (cid.Cid, error) {
+	root, _, err := ReadCARBytes(ctx, data)
 	return root, err
 }
 
@@ -75,8 +75,4 @@ func WriteCAR(root cid.Cid, blks []blocks.Block) ([]byte, error) {
 		}
 	}
 	return buf.Bytes(), nil
-}
-
-func CARBlocks(data []byte) (cid.Cid, []blocks.Block, error) {
-	return ReadCARBytes(context.Background(), data)
 }

@@ -29,6 +29,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/pgunit"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/postgresctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/procgroup"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 )
 
 const (
@@ -72,6 +73,8 @@ type UnitsConfig struct {
 	StoreTimeout time.Duration
 
 	ReapTimeout time.Duration
+
+	Logins *openbao.Logins
 
 	Log *slog.Logger
 }
@@ -476,8 +479,8 @@ func Verified(o *v1alpha1.HostProcess) bool {
 	return inv != "" && o.Labels[LabelVerified] == inv
 }
 
-func (h *UnitsHost) Live(key string) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+func (h *UnitsHost) Live(ctx context.Context, key string) bool {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	m, err := h.Members(ctx, key)
 	return err == nil && len(m) > 0

@@ -203,7 +203,7 @@ func (s *Service) Start(ctx context.Context) error {
 		tlsConfig = s.tlsConfig
 	}
 	hostname := hostport.Primary(s.serveHost, s.hostnames)
-	relay, err := local.New(local.Config{
+	relay, err := local.New(ctx, local.Config{
 		Hostname:      hostname,
 		PLCURL:        s.plcURL,
 		InsecureHTTP:  s.insecureHTTP,
@@ -215,7 +215,6 @@ func (s *Service) Start(ctx context.Context) error {
 		Log:         log,
 		HTTPClient:  &http.Client{Transport: handlers.Transport(s.deps.Egress.Client(0).Transport)},
 		DialContext: handlerDialer(handlers, externalDialContext(s.deps.Egress)),
-		BaseContext: ctx,
 	})
 	if err != nil {
 		return fmt.Errorf("relay: opening the crawl state: %w", err)
@@ -253,14 +252,16 @@ func (s *Service) Start(ctx context.Context) error {
 	s.readiness.Signal()
 
 	runCtx, cancel := context.WithCancel(ctx)
+	var stopper sync.WaitGroup
+	defer stopper.Wait()
 	defer cancel()
-	go func() {
+	stopper.Go(func() {
 		select {
 		case <-stopCh:
 			cancel()
 		case <-runCtx.Done():
 		}
-	}()
+	})
 	unfollow := s.follow(relay)
 	_ = relay.Run(runCtx)
 	unfollow()

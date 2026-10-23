@@ -207,26 +207,26 @@ type nodeHost interface {
 }
 
 type guestWatcher interface {
-	Terminal() string
+	Terminal(ctx context.Context) string
 }
 
-func guestTerminal(host nodeHost) string {
+func guestTerminal(ctx context.Context, host nodeHost) string {
 	watcher, ok := host.(guestWatcher)
 	if !ok {
 		return ""
 	}
-	return watcher.Terminal()
+	return watcher.Terminal(ctx)
 }
 
 type marketEnder interface {
-	End() nodemarket.End
+	End(ctx context.Context) nodemarket.End
 }
 
-func guestEnd(host nodeHost) nodemarket.End {
+func guestEnd(ctx context.Context, host nodeHost) nodemarket.End {
 	if ender, ok := host.(marketEnder); ok {
-		return ender.End()
+		return ender.End(ctx)
 	}
-	return nodemarket.End{Message: guestTerminal(host)}
+	return nodemarket.End{Message: guestTerminal(ctx, host)}
 }
 
 type confirmOutcome struct {
@@ -379,7 +379,7 @@ func (n *tenantNodes) Provision(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		built, err := newNodeHost(n.opts, n.log, n.cluster, id)
+		built, err := newNodeHost(ctx, n.opts, n.log, n.cluster, id)
 		if err != nil {
 			return err
 		}
@@ -423,7 +423,7 @@ func (n *tenantNodes) confirmHeld(ctx context.Context) (confirmOutcome, error) {
 
 	var problems []error
 	for _, node := range held {
-		end := guestEnd(node.host)
+		end := guestEnd(ctx, node.host)
 		if end.Message != "" && !end.Declined {
 			outcome.failed = append(outcome.failed, node.name)
 			outcome.failedWords = cmp.Or(outcome.failedWords, end.Message)
@@ -959,7 +959,7 @@ func newNodeHosts(opts nodeHostsOptions) (*nodeHosts, error) {
 		synced: map[string]time.Time{}}, nil
 }
 
-func (h *nodeHosts) forCluster(cluster string) (scale.Nodes, error) {
+func (h *nodeHosts) forCluster(ctx context.Context, cluster string) (scale.Nodes, error) {
 	if cluster == "" {
 		return nil, errNoNodeCluster
 	}
@@ -968,7 +968,7 @@ func (h *nodeHosts) forCluster(cluster string) (scale.Nodes, error) {
 	if n, ok := h.hosts[cluster]; ok {
 		return n, nil
 	}
-	created, err := newNodeHost(h.opts, h.log, cluster, nodeID)
+	created, err := newNodeHost(ctx, h.opts, h.log, cluster, nodeID)
 	if err != nil {
 		return nil, err
 	}
@@ -1028,7 +1028,7 @@ func (h *nodeHosts) reconcile(ctx context.Context, cluster string) error {
 			"the claims that say which Nodes have no machine behind them", target.Workspace, err)
 	}
 	claims, orphanErr := h.claimJoinedOrphans(ctx, cluster, claims)
-	adoptErr := errors.Join(orphanErr, h.adoptClaims(cluster, claims), h.releaseStranded(ctx, cluster, claims))
+	adoptErr := errors.Join(orphanErr, h.adoptClaims(ctx, cluster, claims), h.releaseStranded(ctx, cluster, claims))
 	if orphanErr == nil {
 		adoptErr = errors.Join(adoptErr, h.reconcileVault(ctx, cluster, claims))
 	}
@@ -1144,8 +1144,8 @@ func (h *nodeHosts) reap(ctx context.Context) error {
 	return nil
 }
 
-func newNodeHost(opts nodeHostsOptions, log *slog.Logger, cluster, nodeID string) (*tenantNodes, error) {
-	apiserver, err := opts.Allocator.Allocate(portallocator.Request{
+func newNodeHost(ctx context.Context, opts nodeHostsOptions, log *slog.Logger, cluster, nodeID string) (*tenantNodes, error) {
+	apiserver, err := opts.Allocator.Allocate(ctx, portallocator.Request{
 		Cluster: cluster, Purpose: portallocator.PurposeK3sSecure,
 	})
 	if err != nil {

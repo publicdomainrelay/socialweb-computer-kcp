@@ -434,7 +434,7 @@ func (h *HTTPAdmin) ProbeWorkspace(ctx context.Context, name string) error {
 		return err
 	}
 	err := h.WaitWorkspaceReady(ctx, RootCluster, name)
-	dctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
 	if derr := h.DeleteWorkspace(dctx, RootCluster, name); derr != nil && err == nil {
 		err = derr

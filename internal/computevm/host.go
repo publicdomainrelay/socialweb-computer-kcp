@@ -20,6 +20,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/statesync"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vmruntime"
 )
 
@@ -46,6 +47,7 @@ type Config struct {
 	VaultServer string
 	VaultClient string
 	VaultMount  string
+	Logins      *openbao.Logins
 	Log         *slog.Logger
 }
 
@@ -86,6 +88,9 @@ func Open(ctx context.Context, c Config) (*Host, error) {
 	}
 	if c.Runtime == nil || c.Manager == nil {
 		return nil, errors.New("computevm: no VM runtime")
+	}
+	if c.Logins == nil {
+		return nil, errors.New("computevm: no OpenBao logins")
 	}
 	c.Workspace = cmp.Or(c.Workspace, hostprocess.DefaultWorkspace)
 	restCfg, err := kcpserver.FrontRestConfig(c.Kubeconfig)

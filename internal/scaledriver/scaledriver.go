@@ -15,7 +15,7 @@ var ErrNoFactory = errors.New(
 	"scaledriver: no Nodes factory; the decision would be made and nothing could perform it, " +
 		"which is the state this package exists to end")
 
-type Factory func(cluster string) (scale.Nodes, error)
+type Factory func(ctx context.Context, cluster string) (scale.Nodes, error)
 
 type Options struct {
 	Scale scale.Options
@@ -78,7 +78,7 @@ func (d *Driver) Pass(ctx context.Context, cluster string, o scale.Observation, 
 		return dec, nil
 	}
 
-	nodes, err := d.factory(cluster)
+	nodes, err := d.factory(ctx, cluster)
 	if err != nil {
 		return dec, fmt.Errorf("scaledriver: building the actuator for %s: %w", cluster, err)
 	}

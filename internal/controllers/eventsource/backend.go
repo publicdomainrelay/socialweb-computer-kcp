@@ -53,6 +53,8 @@ type Upstream struct {
 type Configure[T ctlruntime.Object] func(ctx context.Context, req ctlruntime.Request, obj T) (Upstream, error)
 
 type Backend[T ctlruntime.Object] struct {
+	root context.Context
+
 	kind string
 
 	bus *bus.Bus
@@ -102,12 +104,12 @@ type BackendOptions struct {
 	FlushDelay time.Duration
 }
 
-func NewBackend[T ctlruntime.Object](kind string, opts BackendOptions, configure Configure[T], status func(T) *eventsv1.EventSourceStatus) *Backend[T] {
+func NewBackend[T ctlruntime.Object](ctx context.Context, kind string, opts BackendOptions, configure Configure[T], status func(T) *eventsv1.EventSourceStatus) *Backend[T] {
 	log := opts.Log
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	b := &Backend[T]{kind: kind, bus: opts.Bus, configure: configure, status: status, flushDelay: opts.FlushDelay,
+	b := &Backend[T]{root: ctx, kind: kind, bus: opts.Bus, configure: configure, status: status, flushDelay: opts.FlushDelay,
 		log: log.With("component", strings.ToLower(kind)+"-controller"), entries: map[string]*backendEntry[T]{}}
 	bus.Provide[events.Source](opts.Bus, schema.GroupKind{Group: eventsv1.GroupName, Kind: kind}, events.CapabilitySubscribe, b.open)
 	return b
@@ -151,7 +153,7 @@ func (b *Backend[T]) Reconcile(ctx context.Context, req ctlruntime.Request, obj 
 }
 
 func (e *backendEntry[T]) flushNow() {
-	ctx, cancel := context.WithTimeout(context.Background(), statusTimeout)
+	ctx, cancel := context.WithTimeout(e.b.root, statusTimeout)
 	defer cancel()
 	if err := e.publish(ctx); err != nil {
 		e.b.log.Warn("writing the event source status", "workspace", e.ref.Workspace, "name", e.ref.Name, "err", err.Error())

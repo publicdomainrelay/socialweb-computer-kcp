@@ -31,6 +31,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/scale"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/scaledriver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/subnetallocator"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vaultcert"
 )
 
@@ -208,6 +209,7 @@ func buildDeps(ctx context.Context, cfg Config, log *slog.Logger) (Deps, error) 
 	restCfg, registry, alloc, networks := in.restCfg, in.registry, in.alloc, in.networks
 
 	tokens := newTokenStore(cfg.StateDir, log)
+	logins := openbao.NewLogins(nil)
 
 	units, err := clusterkcp.NewUnitsHost(clusterkcp.UnitsConfig{
 		RestConfig: restCfg,
@@ -217,6 +219,7 @@ func buildDeps(ctx context.Context, cfg Config, log *slog.Logger) (Deps, error) 
 			Prefix:        cfg.UnitPrefix,
 			StateDir:      cfg.StateDir,
 			VaultStateDir: cfg.VaultStateDir,
+			Logins:        logins,
 			Resolve:       cfg.lookPath,
 			Log:           log,
 		},
@@ -243,7 +246,7 @@ func buildDeps(ctx context.Context, cfg Config, log *slog.Logger) (Deps, error) 
 	if err != nil {
 		return Deps{}, err
 	}
-	links := clusterLinks(cfg, linkClient, registry, log)
+	links := clusterLinks(cfg, linkClient, registry, logins, log)
 	log.Info("cluster provider: cluster links", "on", links != nil, "dumbpipe", cfg.Dumbpipe,
 		"reason", "each cluster gets a dumbpipe listener in front of its apiserver and one in front of its "+
 			"vault when "+envDumbpipe+" names the binary; unset, no cluster has a link and no node can join without ssh")
@@ -289,6 +292,7 @@ func buildDeps(ctx context.Context, cfg Config, log *slog.Logger) (Deps, error) 
 				Cluster:     cluster,
 				VaultPort:   port,
 				PostgresDSN: dsn,
+				Logins:      logins,
 			})
 		},
 		GuardRides: true,
@@ -312,7 +316,7 @@ func buildDeps(ctx context.Context, cfg Config, log *slog.Logger) (Deps, error) 
 			}
 			return nil
 		},
-		Identity:    clusterprovider.GuardFor(guardDeps(cfg, tokens, units, log)),
+		Identity:    clusterprovider.GuardFor(guardDeps(cfg, tokens, units, logins, log)),
 		NewInstance: minter,
 		Now:         time.Now,
 		Purposes:    purposes,
@@ -335,7 +339,7 @@ func buildDeps(ctx context.Context, cfg Config, log *slog.Logger) (Deps, error) 
 		}
 	}
 
-	tenantConfig := tenantFromClusterCA(alloc, cfg.StateDir, tenantCredentialSource())
+	tenantConfig := tenantFromClusterCA(alloc, logins, cfg.StateDir, tenantCredentialSource())
 	tenant := tenantClients(registry, tenantConfig)
 	nodeObserver := clusterkcp.NodeObserver{
 		Client:    tenant,
@@ -412,7 +416,7 @@ func buildDeps(ctx context.Context, cfg Config, log *slog.Logger) (Deps, error) 
 
 		Homes: linkClient,
 
-		InstallTenant: tenantAddOns(cfg, log),
+		InstallTenant: tenantAddOns(cfg, logins, log),
 	}
 	if links != nil {
 		deps.Links = &linkRecorder{client: linkClient, registry: registry}
@@ -515,7 +519,7 @@ func tenantCluster(ctx context.Context, reg clusterprovider.Clusters, key string
 	return clusterprovider.Ref{}, nil, fmt.Errorf("clusterprovider: no Cluster CR with the key %s", key)
 }
 
-func guardDeps(cfg Config, tokens *tokenStore, units *clusterprovider.UnitsHost, log *slog.Logger) clusterprovider.GuardDeps {
+func guardDeps(cfg Config, tokens *tokenStore, units *clusterprovider.UnitsHost, logins *openbao.Logins, log *slog.Logger) clusterprovider.GuardDeps {
 	return clusterprovider.GuardDeps{
 		StateDir: cfg.StateDir,
 		Token:    tokens.token,
@@ -528,15 +532,15 @@ func guardDeps(cfg Config, tokens *tokenStore, units *clusterprovider.UnitsHost,
 			return s.DeleteBootstrapRows(ctx)
 		},
 		SeedBundle: func(ctx context.Context, cluster string) error {
-			return clusterprovider.SeedBundleForWake(ctx, cfg.StateDir, cluster)
+			return clusterprovider.SeedBundleForWake(ctx, logins, cfg.StateDir, cluster)
 		},
 		Bundle: clusterprovider.BundleGuard(cfg.StateDir),
 		Log:    log,
 	}
 }
 
-func bootstrapRowObserved(cfg Config, units *clusterprovider.UnitsHost, log *slog.Logger) func(cluster string) bool {
-	return func(cluster string) bool {
+func bootstrapRowObserved(cfg Config, units *clusterprovider.UnitsHost, log *slog.Logger) func(ctx context.Context, cluster string) bool {
+	return func(ctx context.Context, cluster string) bool {
 		if cfg.StoreEndpoint != "" {
 			log.Warn("cluster provider: the store is external, so whether it holds k3s's bootstrap "+
 				"row cannot be observed from here; falling back to the operator's declaration",
@@ -549,7 +553,7 @@ func bootstrapRowObserved(cfg Config, units *clusterprovider.UnitsHost, log *slo
 				"cluster", cluster)
 			return cfg.DatastoreHasRow
 		}
-		has, err := s.HasBootstrapRow(context.Background())
+		has, err := s.HasBootstrapRow(ctx)
 		if err != nil {
 			log.Info("cluster provider: reading the bootstrap row failed, so the operator's "+
 				"declaration is used instead", "cluster", cluster, "error", err.Error(),
@@ -599,19 +603,19 @@ func tenantCredentialSource() clusterprovider.CredentialSource {
 	return clusterprovider.CredentialSourceClusterCA
 }
 
-func tenantFromClusterCA(alloc *portallocator.Allocator, stateDir string, source clusterprovider.CredentialSource) func(context.Context, clusterprovider.Ref, *v1alpha1.Cluster) (*clusterprovider.Credential, error) {
+func tenantFromClusterCA(alloc *portallocator.Allocator, logins *openbao.Logins, stateDir string, source clusterprovider.CredentialSource) func(context.Context, clusterprovider.Ref, *v1alpha1.Cluster) (*clusterprovider.Credential, error) {
 	return func(ctx context.Context, ref clusterprovider.Ref, cl *v1alpha1.Cluster) (*clusterprovider.Credential, error) {
 		key, err := ref.Key()
 		if err != nil {
 			return nil, err
 		}
-		lease, err := alloc.Allocate(portallocator.Request{
+		lease, err := alloc.Allocate(ctx, portallocator.Request{
 			Cluster: key, Purpose: portallocator.PurposeK3sSecure,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("clusterprovider: the apiserver lease for %s, which is the "+
 				"address this cluster's apiserver answers on: %w", cl.Name, err)
 		}
-		return clusterprovider.MintTenantCredentialForCluster(ctx, stateDir, key, clusterprovider.APIServerURL(lease.Port), source)
+		return clusterprovider.MintTenantCredentialForCluster(ctx, logins, stateDir, key, clusterprovider.APIServerURL(lease.Port), source)
 	}
 }

@@ -12,9 +12,9 @@ import (
 
 const Name = "jetstreameventsource"
 
-func Register(m *ctlruntime.Manager, opts eventsource.BackendOptions) (*eventsource.Backend[*eventsv1.JetstreamEventSource], error) {
+func Register(ctx context.Context, m *ctlruntime.Manager, opts eventsource.BackendOptions) (*eventsource.Backend[*eventsv1.JetstreamEventSource], error) {
 	dial := eventsource.BusDial(opts.Bus)
-	b := eventsource.NewBackend(eventsv1.JetstreamEventSourceKind, opts,
+	b := eventsource.NewBackend(ctx, eventsv1.JetstreamEventSourceKind, opts,
 		func(_ context.Context, _ ctlruntime.Request, obj *eventsv1.JetstreamEventSource) (eventsource.Upstream, error) {
 			source, err := jetstream.New(jetstream.Config{URL: obj.Spec.URL}, jetstream.Deps{Dial: dial})
 			if err != nil {

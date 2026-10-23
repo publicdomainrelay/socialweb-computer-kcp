@@ -23,8 +23,6 @@ const (
 	ConditionHandlerRegistered = "HandlerRegistered"
 
 	ConditionReady = "Ready"
-
-	EventBuffer = 1024
 )
 
 type Options struct {
@@ -46,7 +44,7 @@ type Controller struct {
 
 	targets *binding.Table[struct{}]
 
-	events chan ctlruntime.Request
+	events *ctlruntime.Queue
 }
 
 func New(opts Options) *Controller {
@@ -55,7 +53,7 @@ func New(opts Options) *Controller {
 		log = slog.New(slog.DiscardHandler)
 	}
 	return &Controller{handlers: opts.Handlers, registry: opts.Registry, log: log.With("component", "service-controller"),
-		targets: binding.New[struct{}](), events: make(chan ctlruntime.Request, EventBuffer)}
+		targets: binding.New[struct{}](), events: ctlruntime.NewQueue()}
 }
 
 func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
@@ -63,7 +61,11 @@ func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
 		return nil, err
 	}
 	ctl := New(opts)
-	options := []ctlruntime.Option{ctlruntime.Export(Export), ctlruntime.Events(ctl.events), ctlruntime.Gone(ctl.gone),
+	events, err := ctl.events.Run(m, Name+": components")
+	if err != nil {
+		return nil, fmt.Errorf("%s: forwarding component changes: %w", Name, err)
+	}
+	options := []ctlruntime.Option{ctlruntime.Export(Export), ctlruntime.Events(events), ctlruntime.Gone(ctl.gone),
 		ctlruntime.Watches(func(_ context.Context, src ctlruntime.Request, obj *exposurev1alpha1.ComponentLink) []ctlruntime.Request {
 			to := obj.Spec.To
 			return ctl.users(binding.Key(to.InWorkspace(src.Workspace), to.Kind, to.Name))
@@ -78,13 +80,7 @@ func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
 }
 
 func (c *Controller) ComponentChanged(key component.Key) {
-	for _, r := range c.users(binding.Key(key.Workspace, key.Kind, key.Name)) {
-		select {
-		case c.events <- r:
-		default:
-			go func() { c.events <- r }()
-		}
-	}
+	c.events.Add(c.users(binding.Key(key.Workspace, key.Kind, key.Name))...)
 }
 
 func (c *Controller) users(ref string) []ctlruntime.Request {

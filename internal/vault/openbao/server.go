@@ -284,19 +284,12 @@ func (l *Logins) Forget(workspace, name string) {
 	l.mu.Unlock()
 }
 
-var shared = NewLogins(nil)
-
-func Login(ctx context.Context, srv Server) (*Client, error) {
-	client, _, err := shared.Open(ctx, srv)
-	return client, err
-}
-
-func ForgetLogins(workspace string) {
-	shared.mu.Lock()
-	for k := range shared.clients {
+func (l *Logins) ForgetWorkspace(workspace string) {
+	l.mu.Lock()
+	for k := range l.clients {
 		if k.workspace == workspace {
-			delete(shared.clients, k)
+			delete(l.clients, k)
 		}
 	}
-	shared.mu.Unlock()
+	l.mu.Unlock()
 }

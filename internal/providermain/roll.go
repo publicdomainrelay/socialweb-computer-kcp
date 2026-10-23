@@ -63,8 +63,8 @@ func newRoller(units *clusterprovider.UnitsHost, stack clusterprovider.StackConf
 			}
 			return out, nil
 		},
-		Relet: func(cluster string, p portallocator.Purpose) (portallocator.Lease, bool, error) {
-			return alloc.Relet(portallocator.Request{Cluster: cluster, Purpose: p})
+		Relet: func(ctx context.Context, cluster string, p portallocator.Purpose) (portallocator.Lease, bool, error) {
+			return alloc.Relet(ctx, portallocator.Request{Cluster: cluster, Purpose: p})
 		},
 		Name: name,
 		Log:  log,

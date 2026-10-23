@@ -73,6 +73,8 @@ type server struct {
 	watchers map[*watcher]struct{}
 	spawn    chan spawnReq
 	done     chan struct{}
+	life     context.Context
+	end      context.CancelFunc
 	stopOnce sync.Once
 	conns    map[net.Conn]struct{}
 	wg       sync.WaitGroup
@@ -118,12 +120,14 @@ func Run(ctx context.Context, o Options) error {
 	}
 	s := &server{o: o, log: log, id: newID(), boot: boot, units: map[string]*unit{},
 		watchers: map[*watcher]struct{}{}, spawn: make(chan spawnReq), done: make(chan struct{}), conns: map[net.Conn]struct{}{}}
+	s.life, s.end = context.WithCancel(context.WithoutCancel(ctx))
+	defer s.end()
 	ticks, _ := hostos.ProcStart(os.Getpid())
 	s.hello = hostsvc.ProcHello{Instance: s.id, PID: os.Getpid(), StartTicks: ticks, BootID: boot,
 		Started: time.Now().UTC(), State: o.State, Socket: o.Socket}
 	s.sweep()
 	abort := func(err error) error {
-		s.stopOnce.Do(func() { close(s.done) })
+		s.stopOnce.Do(s.finish)
 		s.wg.Wait()
 		return err
 	}
@@ -184,11 +188,16 @@ func Run(ctx context.Context, o Options) error {
 
 func (s *server) shutdown() {
 	s.stopOnce.Do(func() {
-		go func() {
+		s.wg.Go(func() {
 			s.stopAll()
-			close(s.done)
-		}()
+			s.finish()
+		})
 	})
+}
+
+func (s *server) finish() {
+	close(s.done)
+	s.end()
 }
 
 func (s *server) stopAll() {
@@ -401,15 +410,8 @@ func (s *server) killRemainder(name, inv string, pgid int, sig syscall.Signal, g
 }
 
 func (s *server) awaitGone(name, inv string, pgid int, deadline time.Time) bool {
-	ctx, cancel := context.WithDeadline(context.Background(), deadline)
+	ctx, cancel := context.WithDeadline(s.life, deadline)
 	defer cancel()
-	go func() {
-		select {
-		case <-s.done:
-			cancel()
-		case <-ctx.Done():
-		}
-	}()
 	for {
 		set := s.members(name, inv, pgid)
 		if len(set) == 0 {

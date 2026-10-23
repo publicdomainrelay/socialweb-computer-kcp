@@ -252,7 +252,7 @@ func Roll(ctx context.Context, m hostsvc.Manager, front FrontSwitch, admin Shard
 	}
 	fail := func(err error) (RollReport, Slots, error) {
 		log.Error("roll aborted before the flip; stopping the new slot", "slot", to, "err", err.Error())
-		sctx, cancel := context.WithTimeout(context.Background(), SlotStopTimeout+cfg.ReadyTimeout)
+		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), SlotStopTimeout+cfg.ReadyTimeout)
 		defer cancel()
 		m.Stop(sctx, spec.Name)
 		m.ResetFailed(sctx, spec.Name)

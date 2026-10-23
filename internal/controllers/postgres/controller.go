@@ -54,6 +54,10 @@ type Controller struct {
 	mu sync.Mutex
 
 	follows map[ctlruntime.Request]*follow
+
+	closed bool
+
+	followers sync.WaitGroup
 }
 
 type follow struct {
@@ -78,7 +82,22 @@ func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
 	if err := ctlruntime.For[*v1alpha1.Postgres](m, Name, c, options...); err != nil {
 		return nil, err
 	}
+	if err := m.Go(Name+": pid follows", c.serveFollows); err != nil {
+		return nil, fmt.Errorf("postgres: the pid follows: %w", err)
+	}
 	return c, nil
+}
+
+func (c *Controller) serveFollows(ctx context.Context) error {
+	<-ctx.Done()
+	c.mu.Lock()
+	c.closed = true
+	for _, f := range c.follows {
+		f.cancel()
+	}
+	c.mu.Unlock()
+	c.followers.Wait()
+	return nil
 }
 
 func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, o *v1alpha1.Postgres) (ctlruntime.Result, error) {
@@ -242,7 +261,7 @@ func (c *Controller) follow(ctx context.Context, req ctlruntime.Request, o *v1al
 	key := ctlruntime.Request{Cluster: req.Cluster, Name: req.Name}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if _, ok := c.follows[key]; ok {
+	if _, ok := c.follows[key]; ok || c.closed {
 		return nil
 	}
 	fctx, cancel := context.WithCancel(ctx)
@@ -253,7 +272,7 @@ func (c *Controller) follow(ctx context.Context, req ctlruntime.Request, o *v1al
 	}
 	f := &follow{cancel: cancel}
 	c.follows[key] = f
-	go func() {
+	c.followers.Go(func() {
 		defer c.drop(key, f)
 		for range changes {
 			select {
@@ -262,7 +281,7 @@ func (c *Controller) follow(ctx context.Context, req ctlruntime.Request, o *v1al
 				return
 			}
 		}
-	}()
+	})
 	return nil
 }
 

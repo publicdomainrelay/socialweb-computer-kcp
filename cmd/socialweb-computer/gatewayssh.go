@@ -218,7 +218,9 @@ func (r *gatewaySshRun) inNetwork(ctx context.Context) int {
 	}
 	r.log("run gateway ssh --fg: the ssh gateway lives as long as this process; Ctrl-C removes it from the market network", "name", name)
 	<-ctx.Done()
-	if err := request.RemoveFromNetwork(context.Background(), netRec.AdminKubeconfig, name); err != nil {
+	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), networkDownTimeout)
+	defer cancel()
+	if err := request.RemoveFromNetwork(rctx, netRec.AdminKubeconfig, name); err != nil {
 		return r.a.fail(exitFailed, "run gateway ssh: removing %s from the market network: %v", name, err)
 	}
 	return exitOK
@@ -271,7 +273,9 @@ func (r *gatewaySshRun) standalone(ctx context.Context) int {
 	}
 	r.log("run gateway ssh --fg: the ssh gateway lives as long as this process; Ctrl-C stops its instance and keeps its state", "instance", up.Instance)
 	<-ctx.Done()
-	d := downInstance(context.Background(), r.a, up.layout, true)
+	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), fgDownTimeout)
+	defer cancel()
+	d := downInstance(dctx, r.a, up.layout, true)
 	r.a.printJSON(d)
 	if len(d.Remaining) > 0 {
 		return exitFailed

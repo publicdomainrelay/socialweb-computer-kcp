@@ -41,8 +41,8 @@ type Controller struct {
 	clusters map[string]string
 }
 
-func Register(m *ctlruntime.Manager, p *firecracker.Provider, host *computevm.Host, placement *Placement) (*Controller, error) {
-	life, end := context.WithCancel(context.Background())
+func Register(ctx context.Context, m *ctlruntime.Manager, p *firecracker.Provider, host *computevm.Host, placement *Placement) (*Controller, error) {
+	life, end := context.WithCancel(ctx)
 	ctl := &Controller{p: p, host: host, placement: placement, log: host.Log().With("controller", Name), events: make(chan ctlruntime.Request, 256),
 		life: life, end: end, clusters: map[string]string{}}
 	handle := p.Handle()

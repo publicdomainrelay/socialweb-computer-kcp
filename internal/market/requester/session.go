@@ -525,7 +525,7 @@ func (q *Requester) releaseHeldContract(name string) {
 	if name == "" {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), DefaultReleaseTimeout)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(q.runContext()), DefaultReleaseTimeout)
 	defer cancel()
 	if err := q.deps.Intents.ReleaseComputeContract(ctx, name); err != nil && !errors.Is(err, contractmarket.ErrNotFound) {
 		q.log.Warn("requester_held_contract_release_failed", "contract", name, "err", err)

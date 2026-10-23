@@ -52,8 +52,6 @@ type ProviderController struct {
 	byKey map[string]ctlruntime.Request
 
 	refs map[ctlruntime.Request]clusterprovider.Ref
-
-	events chan ctlruntime.Request
 }
 
 func RegisterProvider(m *ctlruntime.Manager, opts ProviderOptions) (*ProviderController, error) {
@@ -78,14 +76,14 @@ func RegisterProvider(m *ctlruntime.Manager, opts ProviderOptions) (*ProviderCon
 		ctlruntime.WatchesIn(HostProcessExport, hostOf[*v1alpha1.Postgres](ctl)),
 		ctlruntime.WatchesIn(HostProcessExport, hostOf[*v1alpha1.OpenBaoServer](ctl))}
 	if opts.Changes != nil {
-		ctl.events = make(chan ctlruntime.Request, 64)
-		options = append(options, ctlruntime.Events(ctl.events))
+		events, err := ctlruntime.Forward(m, ProviderName+": changes", opts.Changes, ctl.requestsOf)
+		if err != nil {
+			return nil, fmt.Errorf("cluster: forwarding provider changes: %w", err)
+		}
+		options = append(options, ctlruntime.Events(events))
 	}
 	if err := ctlruntime.For[*v1alpha1.Cluster](m, ProviderName, ctl, options...); err != nil {
 		return nil, fmt.Errorf("cluster: registering the cluster provider controller: %w", err)
-	}
-	if opts.Changes != nil {
-		go ctl.forward(opts.Changes)
 	}
 	return ctl, nil
 }
@@ -207,11 +205,9 @@ func hostOf[T ctlruntime.Object](c *ProviderController) func(context.Context, ct
 	}
 }
 
-func (c *ProviderController) forward(changes <-chan string) {
-	defer close(c.events)
-	for key := range changes {
-		if r, ok := c.request(key); ok {
-			c.events <- r
-		}
+func (c *ProviderController) requestsOf(key string) []ctlruntime.Request {
+	if r, ok := c.request(key); ok {
+		return []ctlruntime.Request{r}
 	}
+	return nil
 }

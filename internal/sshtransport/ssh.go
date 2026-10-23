@@ -178,7 +178,6 @@ func NewServer(opts ServerOptions) (*Server, error) {
 		PublicKeyCallback: func(ssh.ConnMetadata, ssh.PublicKey) (*ssh.Permissions, error) {
 			return &ssh.Permissions{}, nil
 		},
-		VerifiedPublicKeyCallback: s.verifiedPublicKey,
 	}
 	if opts.Config.Banner != "" {
 		banner := opts.Config.Banner
@@ -246,13 +245,13 @@ func loadOrCreateHostKey(path string, log *slog.Logger) (ssh.Signer, error) {
 	return ssh.NewSignerFromKey(priv)
 }
 
-func (s *Server) verifiedPublicKey(conn ssh.ConnMetadata, key ssh.PublicKey, permissions *ssh.Permissions, signatureAlgorithm string) (*ssh.Permissions, error) {
+func (s *Server) verifiedPublicKey(ctx context.Context, conn ssh.ConnMetadata, key ssh.PublicKey, permissions *ssh.Permissions, signatureAlgorithm string) (*ssh.Permissions, error) {
 	if !allowedSignatureFormats[signatureAlgorithm] {
 		s.log.Warn("auth_rejected_algo", "username", conn.User(), "algo", signatureAlgorithm)
 		return nil, fmt.Errorf("sshtransport: signature algorithm %q is not accepted", signatureAlgorithm)
 	}
 	presented := PresentedKey{Algo: key.Type(), Key: base64.StdEncoding.EncodeToString(key.Marshal())}
-	ctx, cancel := context.WithTimeout(context.Background(), DefaultAuthorizationLookupTimeout)
+	ctx, cancel := context.WithTimeout(ctx, DefaultAuthorizationLookupTimeout)
 	defer cancel()
 	account, err := s.opts.Authorizer.Authorize(ctx, conn.User(), presented)
 	if err != nil {
@@ -310,7 +309,11 @@ func (s *Server) handleConnection(ctx context.Context, raw net.Conn) {
 	if s.opts.Config.AuthTimeout > 0 {
 		raw.SetDeadline(time.Now().Add(s.opts.Config.AuthTimeout))
 	}
-	conn, channels, requests, err := ssh.NewServerConn(raw, s.sshConfig)
+	cfg := *s.sshConfig
+	cfg.VerifiedPublicKeyCallback = func(c ssh.ConnMetadata, key ssh.PublicKey, permissions *ssh.Permissions, algo string) (*ssh.Permissions, error) {
+		return s.verifiedPublicKey(ctx, c, key, permissions, algo)
+	}
+	conn, channels, requests, err := ssh.NewServerConn(raw, &cfg)
 	if err != nil {
 		raw.Close()
 		s.log.Warn("connection_error", "err", err)

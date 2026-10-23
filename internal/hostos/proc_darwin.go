@@ -3,6 +3,7 @@
 package hostos
 
 import (
+	"context"
 	"fmt"
 	"time"
 )
@@ -27,6 +28,6 @@ func Reload(pid int) error {
 	return unsupported(fmt.Sprintf("asking pid %d to reload", pid), "0012")
 }
 
-func Terminate(pid int, grace time.Duration) error {
+func Terminate(_ context.Context, pid int, grace time.Duration) error {
 	return unsupported(fmt.Sprintf("terminating pid %d", pid), "0012")
 }

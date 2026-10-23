@@ -92,6 +92,8 @@ type Provider struct {
 
 	follows map[string]*follow
 
+	awaits sync.WaitGroup
+
 	vmmExits chan string
 }
 
@@ -623,7 +625,17 @@ func (p *Provider) Follow(ctx context.Context, vm *v1alpha1.FirecrackerVM) {
 	fctx, stop := context.WithCancel(ctx)
 	f := &follow{pid: pid, ticks: ticks, stop: stop}
 	p.follows[name] = f
-	go p.await(fctx, name, f)
+	p.awaits.Go(func() { p.await(fctx, name, f) })
+}
+
+func (p *Provider) Close() {
+	p.mu.Lock()
+	for name, f := range p.follows {
+		f.stop()
+		delete(p.follows, name)
+	}
+	p.mu.Unlock()
+	p.awaits.Wait()
 }
 
 func (p *Provider) Unfollow(name string) {

@@ -81,7 +81,7 @@ func linksAfterK3s(steps []procgroup.Step, cfg StackConfig, cluster, dataDir str
 	}
 	keys := links.Keys
 	if keys == nil {
-		keys = VaultLinkKeys
+		return nil, fmt.Errorf("clusterprovider: cluster links are on and no link key store is configured (cluster %s)", cluster)
 	}
 	random := links.Random
 	if random == nil {
@@ -253,17 +253,19 @@ type vaultLinkKeys struct {
 	admin  *vaultAdmin
 }
 
-func VaultLinkKeys(ctx context.Context, dataDir string, vaultPort int) (clusterlink.KeyStore, error) {
-	client, _, err := clusterVault(ctx, dataDir)
-	if err != nil {
-		return nil, err
+func VaultLinkKeys(logins *openbao.Logins) LinkKeys {
+	return func(ctx context.Context, dataDir string, vaultPort int) (clusterlink.KeyStore, error) {
+		client, _, err := clusterVault(ctx, logins, dataDir)
+		if err != nil {
+			return nil, err
+		}
+		pool, err := vaultCA(dataDir)
+		if err != nil {
+			return nil, err
+		}
+		addr := VaultAddr(vaultPort)
+		return &vaultLinkKeys{client: client, admin: newVaultAdmin(addr, client, pool)}, nil
 	}
-	pool, err := vaultCA(dataDir)
-	if err != nil {
-		return nil, err
-	}
-	addr := VaultAddr(vaultPort)
-	return &vaultLinkKeys{client: client, admin: newVaultAdmin(addr, client, pool)}, nil
 }
 
 func linkDataPath(path string) string { return clusterlink.Mount + "/data/" + strings.Trim(path, "/") }

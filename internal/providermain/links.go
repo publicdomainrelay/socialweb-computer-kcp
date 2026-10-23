@@ -9,6 +9,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterlink"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterprovider"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 )
 
 type clusterLinkClient interface {
@@ -63,13 +64,14 @@ func (r linkRecorder) remove(ctx context.Context, home, cluster string) error {
 	return errors.Join(errs...)
 }
 
-func clusterLinks(cfg Config, client clusterLinkClient, registry clusterprovider.Clusters, log *slog.Logger) *clusterprovider.Links {
+func clusterLinks(cfg Config, client clusterLinkClient, registry clusterprovider.Clusters, logins *openbao.Logins, log *slog.Logger) *clusterprovider.Links {
 	if cfg.Dumbpipe == "" || cfg.ObserveOnly() || client == nil {
 		return nil
 	}
 	return &clusterprovider.Links{
 		Dumbpipe: cfg.Dumbpipe,
 		Recorder: linkRecorder{client: client, registry: registry},
+		Keys:     clusterprovider.VaultLinkKeys(logins),
 		Log:      log,
 	}
 }

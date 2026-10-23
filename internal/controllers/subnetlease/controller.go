@@ -48,8 +48,6 @@ type Controller struct {
 	log *slog.Logger
 
 	holders *local.Holders
-
-	events chan ctlruntime.Request
 }
 
 func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
@@ -70,14 +68,14 @@ func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
 		options = append(options, ctlruntime.InWorkspaces(opts.Scope))
 	}
 	if opts.Changes != nil {
-		ctl.events = make(chan ctlruntime.Request, 64)
-		options = append(options, ctlruntime.Events(ctl.events))
+		events, err := ctlruntime.Forward(m, Name+": changes", opts.Changes, ctl.changed)
+		if err != nil {
+			return nil, fmt.Errorf("subnetlease: forwarding changes: %w", err)
+		}
+		options = append(options, ctlruntime.Events(events))
 	}
 	if err := ctlruntime.For[*v1alpha1.SubnetLease](m, Name, ctl, options...); err != nil {
 		return nil, fmt.Errorf("subnetlease: registering the SubnetLease controller: %w", err)
-	}
-	if opts.Changes != nil {
-		go ctl.forward(opts.Changes)
 	}
 	return ctl, nil
 }
@@ -241,13 +239,12 @@ func (c *Controller) engage(_ context.Context, src ctlruntime.Request, cluster *
 	return out
 }
 
-func (c *Controller) forward(changes <-chan struct{}) {
-	defer close(c.events)
-	for range changes {
-		for _, p := range c.holders.Placements(keysOf(c.leases())) {
-			c.events <- ctlruntime.Request{Cluster: p.Cluster, Name: local.MirrorName(Name, p.Key)}
-		}
+func (c *Controller) changed(struct{}) []ctlruntime.Request {
+	var out []ctlruntime.Request
+	for _, p := range c.holders.Placements(keysOf(c.leases())) {
+		out = append(out, ctlruntime.Request{Cluster: p.Cluster, Name: local.MirrorName(Name, p.Key)})
 	}
+	return out
 }
 
 func formatTime(t time.Time) string {

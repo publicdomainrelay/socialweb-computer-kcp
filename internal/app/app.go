@@ -29,7 +29,7 @@ type Config struct {
 	SignInGuard marketbidder.SignInGuard
 }
 
-func Register(ctx context.Context, m *ctlruntime.Manager, cfg Config) error {
+func Register(_ context.Context, m *ctlruntime.Manager, cfg Config) error {
 	if err := m.AddToScheme(v1alpha1.AddToScheme, exposurev1alpha1.AddToScheme, eventsv1alpha1.AddToScheme,
 		policyv1alpha1.AddToScheme, pdsv1alpha1.AddToScheme); err != nil {
 		return err
@@ -38,8 +38,11 @@ func Register(ctx context.Context, m *ctlruntime.Manager, cfg Config) error {
 	if err != nil {
 		return err
 	}
-	go applyManifests(ctx, c)
 	return errors.Join(
+		m.Go("app: manifests", func(ctx context.Context) error {
+			applyManifests(ctx, c)
+			return nil
+		}),
 		marketnetwork.Register(m, c),
 		marketbidder.Register(m, c, cfg.SignInGuard),
 		marketrequester.Register(m, c),

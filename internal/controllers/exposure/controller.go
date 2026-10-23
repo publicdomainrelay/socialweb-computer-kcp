@@ -34,8 +34,6 @@ const (
 	ServiceKind = "Service"
 
 	IngressProxyKind = "IngressProxy"
-
-	EventBuffer = 1024
 )
 
 type Options struct {
@@ -53,7 +51,7 @@ type Controller struct {
 
 	refs *binding.Table[struct{}]
 
-	events chan ctlruntime.Request
+	events *ctlruntime.Queue
 }
 
 func New(opts Options) (*Controller, error) {
@@ -65,7 +63,7 @@ func New(opts Options) (*Controller, error) {
 		log = slog.New(slog.DiscardHandler)
 	}
 	return &Controller{publisher: opts.Publisher, log: log.With("component", "exposure-controller"), refs: binding.New[struct{}](),
-		events: make(chan ctlruntime.Request, EventBuffer)}, nil
+		events: ctlruntime.NewQueue()}, nil
 }
 
 func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
@@ -76,7 +74,11 @@ func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
 	if err != nil {
 		return nil, err
 	}
-	options := []ctlruntime.Option{ctlruntime.Export(Export), ctlruntime.Events(ctl.events), ctlruntime.Gone(ctl.gone),
+	events, err := ctl.events.Run(m, Name+": components")
+	if err != nil {
+		return nil, fmt.Errorf("%s: forwarding component changes: %w", Name, err)
+	}
+	options := []ctlruntime.Option{ctlruntime.Export(Export), ctlruntime.Events(events), ctlruntime.Gone(ctl.gone),
 		ctlruntime.Watches(func(_ context.Context, src ctlruntime.Request, obj *exposurev1alpha1.Service) []ctlruntime.Request {
 			return ctl.users(binding.Key(src.Workspace, ServiceKind, obj.Name))
 		}),
@@ -106,11 +108,7 @@ func (c *Controller) ComponentChanged(key component.Key) {
 				continue
 			}
 			seen[id] = true
-			select {
-			case c.events <- r:
-			default:
-				go func() { c.events <- r }()
-			}
+			c.events.Add(r)
 		}
 	}
 }

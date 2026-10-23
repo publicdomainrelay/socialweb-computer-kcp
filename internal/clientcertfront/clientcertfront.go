@@ -31,10 +31,12 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterprovider"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gateway"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/tlsreload"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/revocation"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsfront"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 )
 
 const (
@@ -76,6 +78,7 @@ type Config struct {
 	ClusterStateDir string
 	Deny            revocation.Deny
 	Records         Records
+	Logins          *openbao.Logins
 	OnListen        func(net.Addr)
 	Log             *slog.Logger
 }
@@ -144,6 +147,7 @@ type server struct {
 	log        *slog.Logger
 	edgePin    [32]byte
 	ctx        context.Context
+	tasks      *supervise.Group
 	mu         sync.Mutex
 	trusts     *ttlcache.Cache[string, *trust]
 	revoked    map[string]*revokedEntry
@@ -159,6 +163,9 @@ func Run(ctx context.Context, c Config) error {
 	}
 	if c.Records == nil {
 		return errors.New("clientcertfront: no certificate records")
+	}
+	if c.Logins == nil {
+		return errors.New("clientcertfront: no OpenBao logins")
 	}
 	edgeCert, _, err := EnsureEdgeClient(c.EdgeDir)
 	if err != nil {
@@ -177,9 +184,9 @@ func Run(ctx context.Context, c Config) error {
 	if err != nil {
 		return fmt.Errorf("clientcertfront: the certificate %s and key %s: %w", c.CertFile, c.KeyFile, err)
 	}
-	loopCtx, stopLoop := context.WithCancel(ctx)
-	defer stopLoop()
-	s := &server{c: c, log: log, edgePin: sha256.Sum256(edgeDER), ctx: loopCtx,
+	tasks := supervise.New(ctx)
+	defer func() { _ = tasks.Stop() }()
+	s := &server{c: c, log: log, edgePin: sha256.Sum256(edgeDER), ctx: tasks.Context(), tasks: tasks,
 		trusts: ttlcache.New[string, *trust](ttlcache.Options{TTL: trustTTL}).OnEvict(func(_ string, t *trust) {
 			t.transport.CloseIdleConnections()
 			t.bearer.CloseIdleConnections()
@@ -478,7 +485,10 @@ func (s *server) gateWatcher(home, cluster string) *gateWatch {
 	w := &gateWatch{ready: make(chan struct{}), cancel: cancel, used: time.Now()}
 	w.idle = time.AfterFunc(gateIdle, func() { s.expireGate(home, w) })
 	s.gates[home] = w
-	go s.followGate(ctx, w, home, cluster)
+	s.tasks.Go("clientcertfront: gate "+home, func(context.Context) error {
+		s.followGate(ctx, w, home, cluster)
+		return nil
+	})
 	return w
 }
 
@@ -623,7 +633,10 @@ func (s *server) revokedFor(ctx context.Context, dir string) (map[string]struct{
 	if f == nil {
 		f = &revokedFlight{done: make(chan struct{})}
 		s.refreshing[dir] = f
-		go s.refresh(dir, f)
+		s.tasks.Go("clientcertfront: revocations "+dir, func(context.Context) error {
+			s.refresh(dir, f)
+			return nil
+		})
 	}
 	s.mu.Unlock()
 	select {
@@ -646,7 +659,7 @@ func (s *server) revokedFor(ctx context.Context, dir string) (map[string]struct{
 func (s *server) refresh(dir string, f *revokedFlight) {
 	ctx, cancel := context.WithTimeout(s.ctx, revokedFetchTimeout)
 	defer cancel()
-	serials, err := clientcert.FetchRevoked(ctx, dir)
+	serials, err := clientcert.FetchRevoked(ctx, s.c.Logins, dir)
 	s.mu.Lock()
 	f.serials, f.err = serials, err
 	if err == nil {

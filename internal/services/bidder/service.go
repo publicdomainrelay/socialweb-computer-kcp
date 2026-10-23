@@ -26,6 +26,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	core "github.com/johnandersen777/socialweb-computer-kcp/internal/market/bidder"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/participant"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/oauthcallback"
 )
 
 const (
@@ -68,6 +69,8 @@ type Deps struct {
 	Credentials component.CredentialResolver
 
 	Egress component.Egress
+
+	OAuthCallbacks *oauthcallback.Registry
 }
 
 type Service struct {

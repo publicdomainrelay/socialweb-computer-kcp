@@ -109,7 +109,7 @@ type Store struct {
 	db *sql.DB
 }
 
-func NewStore(path string) (*Store, error) {
+func NewStore(ctx context.Context, path string) (*Store, error) {
 	if path == "" {
 		return nil, fmt.Errorf("pds: empty sqlite path")
 	}
@@ -136,7 +136,7 @@ func NewStore(path string) (*Store, error) {
 	}
 	db.SetMaxIdleConns(4)
 	s := &Store{db: db}
-	if err := s.init(context.Background()); err != nil {
+	if err := s.init(ctx); err != nil {
 		db.Close()
 		return nil, err
 	}

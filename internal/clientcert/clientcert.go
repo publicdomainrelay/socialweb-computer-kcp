@@ -45,6 +45,7 @@ type Recorder interface {
 type Issuer struct {
 	StateDir string
 	CAFile   string
+	Logins   *openbao.Logins
 	Log      *slog.Logger
 	Recorder Recorder
 }
@@ -86,7 +87,7 @@ func (i *Issuer) Grant(ctx context.Context, in kcpclient.GrantInput) (string, er
 	} else if ok {
 		return i.recordAndBuild(ctx, in, leaf, leaf.SerialNumber.Text(16), certPEM, keyPEM, nil)
 	}
-	client, _, err := clusterprovider.GatewayVaultClient(ctx, dir)
+	client, _, err := clusterprovider.GatewayVaultClient(ctx, i.Logins, dir)
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrVaultUnavailable, err)
 	}
@@ -258,7 +259,7 @@ func (i *Issuer) Revoke(ctx context.Context, did, cluster string) (int, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, revokeTimeout)
 	defer cancel()
-	client, _, err := clusterprovider.GatewayVaultClient(ctx, dir)
+	client, _, err := clusterprovider.GatewayVaultClient(ctx, i.Logins, dir)
 	if err != nil {
 		return 0, fmt.Errorf("%w: %v", ErrVaultUnavailable, err)
 	}
@@ -295,10 +296,10 @@ func (i *Issuer) Revoke(ctx context.Context, did, cluster string) (int, error) {
 	return count, nil
 }
 
-func FetchRevoked(ctx context.Context, dataDir string) (map[string]struct{}, error) {
+func FetchRevoked(ctx context.Context, logins *openbao.Logins, dataDir string) (map[string]struct{}, error) {
 	ctx, cancel := context.WithTimeout(ctx, crlTimeout)
 	defer cancel()
-	client, _, err := clusterprovider.GatewayVaultClient(ctx, dataDir)
+	client, _, err := clusterprovider.GatewayVaultClient(ctx, logins, dataDir)
 	if err != nil {
 		return nil, err
 	}

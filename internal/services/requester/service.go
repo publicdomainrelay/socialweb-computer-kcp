@@ -18,6 +18,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/participant"
 	role "github.com/johnandersen777/socialweb-computer-kcp/internal/market/requester"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/oauthcallback"
 )
 
 const Kind = role.KindRequester
@@ -30,6 +31,8 @@ type Deps struct {
 	Credentials component.CredentialResolver
 
 	Egress component.Egress
+
+	OAuthCallbacks *oauthcallback.Registry
 }
 
 type Service struct {

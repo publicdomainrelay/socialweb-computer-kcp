@@ -25,6 +25,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 )
 
 const Kind = "GatewayAPI"
@@ -52,6 +53,8 @@ type Deps struct {
 	NodeClaimAgent *kcpclient.ServiceAccountRef
 
 	NodeClaims contractnodeclaim.Binder
+
+	Logins *openbao.Logins
 }
 
 func New(spec v1alpha1.GatewayAPISpec, deps Deps) (*Service, error) {
@@ -93,7 +96,7 @@ func New(spec v1alpha1.GatewayAPISpec, deps Deps) (*Service, error) {
 		return nil, err
 	}
 	caFile := cmp.Or(spec.KubeconfigCAFile, os.Getenv("SOCIALWEB_GATEWAY_KCP_PUBLIC_CA_FILE"))
-	server, err := gatewayServerFor(deps.KCP, deps.NodeClaimAgent, s.workspace, kubeconfigIssuer(spec.ClusterStateDir, caFile),
+	server, err := gatewayServerFor(deps.KCP, deps.NodeClaimAgent, s.workspace, kubeconfigIssuer(spec.ClusterStateDir, caFile, deps.Logins),
 		os.Getenv("SOCIALWEB_GATEWAY_KCP_PUBLIC_HOST"), spec.ClusterStateDir)
 	if err != nil {
 		return nil, err
@@ -237,11 +240,11 @@ func checkLoopbackHost(host string) error {
 	return fmt.Errorf("gatewayapi: host %q is not loopback; this listener carries session cookies and service-auth tokens, so it binds 127.0.0.1 or [::1] only", host)
 }
 
-func kubeconfigIssuer(clusterStateDir, caFile string) *clientcert.Issuer {
+func kubeconfigIssuer(clusterStateDir, caFile string, logins *openbao.Logins) *clientcert.Issuer {
 	if clusterStateDir == "" {
 		return nil
 	}
-	return &clientcert.Issuer{StateDir: clusterStateDir, CAFile: caFile}
+	return &clientcert.Issuer{StateDir: clusterStateDir, CAFile: caFile, Logins: logins}
 }
 
 func checkClusterProvider(cp v1alpha1.GatewayClusterProvider) error {

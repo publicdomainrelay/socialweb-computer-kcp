@@ -1,6 +1,7 @@
 package portallocator
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -159,7 +160,7 @@ type leaseFile struct {
 	Leases  []Lease `json:"leases"`
 }
 
-type Holder func(cluster string, p Purpose) (int, error)
+type Holder func(ctx context.Context, cluster string, p Purpose) (int, error)
 
 var ErrNoHolder = errors.New("portallocator: no holder: a port is chosen by the kernel and held by the " +
 	"cluster's apiserver front, and this allocator was opened without a way to reach one")
@@ -276,7 +277,7 @@ type Request struct {
 	Purpose  Purpose
 }
 
-func (a *Allocator) Allocate(req Request) (Lease, error) {
+func (a *Allocator) Allocate(ctx context.Context, req Request) (Lease, error) {
 	if req.Cluster == "" {
 		return Lease{}, errors.New("portallocator: Cluster is required; the lease is keyed on CR presence")
 	}
@@ -289,7 +290,7 @@ func (a *Allocator) Allocate(req Request) (Lease, error) {
 	if holder == nil {
 		return Lease{}, ErrNoHolder
 	}
-	port, err := holder(req.Cluster, req.Purpose)
+	port, err := holder(ctx, req.Cluster, req.Purpose)
 	if err != nil {
 		return Lease{}, fmt.Errorf("portallocator: holding %s of %s: %w", req.Purpose, req.Cluster, err)
 	}
@@ -330,9 +331,9 @@ func (a *Allocator) Allocate(req Request) (Lease, error) {
 	return granted, nil
 }
 
-func (a *Allocator) Relet(req Request) (Lease, bool, error) {
+func (a *Allocator) Relet(ctx context.Context, req Request) (Lease, bool, error) {
 	held, ok := a.PortFor(req.Cluster, req.Purpose)
-	l, err := a.Allocate(req)
+	l, err := a.Allocate(ctx, req)
 	return l, ok && l.Port != held.Port, err
 }
 

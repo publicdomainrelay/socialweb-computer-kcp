@@ -43,6 +43,7 @@ const (
 	devsupExitTimeout  = 90 * time.Second
 	networkDownTimeout = 2 * time.Minute
 	coreStopTimeout    = 10 * time.Second
+	fgDownTimeout      = 5 * time.Minute
 )
 
 func (a *app) fail(code int, format string, args ...any) int {
@@ -191,27 +192,16 @@ func hashExe(option, path string) (devinstance.Executable, error) {
 	return devinstance.Executable{Path: path, SHA256: hex.EncodeToString(h.Sum(nil))}, nil
 }
 
-func lockFile(path string, wait time.Duration) (*os.File, error) {
+func lockFile(ctx context.Context, path string, wait time.Duration) (*os.File, error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err
 	}
-	if hostos.Lock(f, hostos.LockExclusive|hostos.LockNonBlocking) == nil {
-		return f, nil
+	if err := hostos.LockWait(ctx, f, hostos.LockExclusive, wait); err != nil {
+		f.Close()
+		return nil, fmt.Errorf("%s is held by another dev up or dev down of this instance: %w", path, err)
 	}
-	locked := make(chan error, 1)
-	go func() { locked <- hostos.Lock(f, hostos.LockExclusive) }()
-	t := time.NewTimer(wait)
-	defer t.Stop()
-	select {
-	case err := <-locked:
-		if err == nil {
-			return f, nil
-		}
-	case <-t.C:
-	}
-	f.Close()
-	return nil, fmt.Errorf("%s is held by another dev up or dev down of this instance", path)
+	return f, nil
 }
 
 func procConfig(l devinstance.Layout) hostsvc.Config {
@@ -479,7 +469,7 @@ func bringUp(ctx context.Context, a *app, vals clicfg.Values, host bool) (upRepo
 		}
 		os.Chmod(d, 0o700)
 	}
-	lock, err := lockFile(l.Lock, 30*time.Second)
+	lock, err := lockFile(ctx, l.Lock, 30*time.Second)
 	if err != nil {
 		return upReport{}, a.fail(exitFailed, "dev up: %v", err)
 	}
@@ -640,7 +630,9 @@ func devUp(ctx context.Context, a *app, vals clicfg.Values, host bool) int {
 	}
 	a.log.Info("dev up --fg: the instance lives as long as this process; Ctrl-C is dev down", "instance", r.layout.ID)
 	<-ctx.Done()
-	d := downInstance(context.Background(), a, r.layout, vals.Bool("keep-state"))
+	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), fgDownTimeout)
+	defer cancel()
+	d := downInstance(dctx, a, r.layout, vals.Bool("keep-state"))
 	a.printJSON(d)
 	if len(d.Remaining) > 0 {
 		return exitFailed
@@ -780,7 +772,7 @@ func runDevDown(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 		return a.fail(exitRefused, "dev down: %v", err)
 	}
 	if _, err := os.Stat(l.StateDir); err == nil {
-		lock, err := lockFile(l.Lock, 2*time.Minute)
+		lock, err := lockFile(ctx, l.Lock, 2*time.Minute)
 		if err != nil {
 			return a.fail(exitFailed, "dev down: %v", err)
 		}

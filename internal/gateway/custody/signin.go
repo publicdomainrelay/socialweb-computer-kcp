@@ -75,7 +75,9 @@ type SignIn struct {
 
 	wake chan struct{}
 
-	stopCh chan struct{}
+	root context.Context
+
+	stop context.CancelFunc
 
 	closed bool
 
@@ -122,11 +124,12 @@ type Deps struct {
 	Log *slog.Logger
 }
 
-func New(cfg Config, deps Deps) (*SignIn, error) {
+func New(ctx context.Context, cfg Config, deps Deps) (*SignIn, error) {
 	client, err := newCustodyClient(cfg.Endpoint)
 	if err != nil {
 		return nil, err
 	}
+	root, stop := context.WithCancel(ctx)
 	log := deps.Log
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
@@ -141,7 +144,8 @@ func New(cfg Config, deps Deps) (*SignIn, error) {
 		log:               log,
 		identities:        ttlcache.New[[sha256.Size]byte, *custodyIdentityEntry](ttlcache.Options{MaxEntries: identityCacheEntries}),
 		wake:              make(chan struct{}, 1),
-		stopCh:            make(chan struct{}),
+		root:              root,
+		stop:              stop,
 	}, nil
 }
 
@@ -333,7 +337,7 @@ func (s *SignIn) Close() {
 	s.mu.Lock()
 	if !s.closed {
 		s.closed = true
-		close(s.stopCh)
+		s.stop()
 	}
 	s.mu.Unlock()
 	s.wg.Wait()
@@ -378,7 +382,7 @@ func (s *SignIn) refreshLoop() {
 			s.mu.Unlock()
 			timer := time.NewTimer(delay)
 			select {
-			case <-s.stopCh:
+			case <-s.root.Done():
 				timer.Stop()
 				s.mu.Lock()
 				s.refreshing = false
@@ -400,7 +404,7 @@ func (s *SignIn) refreshLoop() {
 func (s *SignIn) refreshIdentity(key [sha256.Size]byte, token string, renew bool) {
 	timeout := s.client.endpoint.Timeout
 	timeout = opt.Positive(timeout, DefaultTimeout)
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(s.root, timeout)
 	defer cancel()
 	if renew {
 		leaseSeconds, err := s.client.renew(ctx, token, s.renewIncrement)

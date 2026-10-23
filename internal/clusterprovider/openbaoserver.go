@@ -94,10 +94,6 @@ func writeVaultAccess(dataDir, client string, a VaultAccess) error {
 	return os.Rename(tmp, path)
 }
 
-func forgetVaultToken(dataDir string) {
-	openbao.ForgetLogins(dataDir)
-}
-
 func (a VaultAccess) Port() int {
 	u, err := url.Parse(a.Address)
 	if err != nil {
@@ -107,31 +103,34 @@ func (a VaultAccess) Port() int {
 	return p
 }
 
-func ClusterVaultClient(ctx context.Context, dataDir string) (*openbao.Client, VaultAccess, error) {
-	return clusterVault(ctx, dataDir)
+func ClusterVaultClient(ctx context.Context, logins *openbao.Logins, dataDir string) (*openbao.Client, VaultAccess, error) {
+	return clusterVault(ctx, logins, dataDir)
 }
 
-func GatewayVaultClient(ctx context.Context, dataDir string) (*openbao.Client, VaultAccess, error) {
-	return clusterVaultAs(ctx, dataDir, VaultGatewayClient)
+func GatewayVaultClient(ctx context.Context, logins *openbao.Logins, dataDir string) (*openbao.Client, VaultAccess, error) {
+	return clusterVaultAs(ctx, logins, dataDir, VaultGatewayClient)
 }
 
-func clusterVault(ctx context.Context, dataDir string) (*openbao.Client, VaultAccess, error) {
-	return clusterVaultAs(ctx, dataDir, VaultClient)
+func clusterVault(ctx context.Context, logins *openbao.Logins, dataDir string) (*openbao.Client, VaultAccess, error) {
+	return clusterVaultAs(ctx, logins, dataDir, VaultClient)
 }
 
-func clusterVaultAs(ctx context.Context, dataDir, client string) (*openbao.Client, VaultAccess, error) {
+func clusterVaultAs(ctx context.Context, logins *openbao.Logins, dataDir, client string) (*openbao.Client, VaultAccess, error) {
+	if logins == nil {
+		return nil, VaultAccess{}, errors.New("clusterprovider: no OpenBao logins are configured")
+	}
 	a, err := readVaultAccessFor(dataDir, client)
 	if err != nil {
 		return nil, a, err
 	}
-	c, err := loginClusterVault(ctx, dataDir, client, a)
+	c, err := loginClusterVault(ctx, logins, dataDir, client, a)
 	if err != nil {
 		return nil, a, err
 	}
 	return c, a, nil
 }
 
-func loginClusterVault(ctx context.Context, dataDir, client string, a VaultAccess) (*openbao.Client, error) {
+func loginClusterVault(ctx context.Context, logins *openbao.Logins, dataDir, client string, a VaultAccess) (*openbao.Client, error) {
 	ca, err := os.ReadFile(a.CAFile)
 	if err != nil {
 		return nil, fmt.Errorf("clusterprovider: the cluster vault's TLS CA: %w", err)
@@ -144,7 +143,7 @@ func loginClusterVault(ctx context.Context, dataDir, client string, a VaultAcces
 	if err != nil {
 		return nil, fmt.Errorf("clusterprovider: the client key of %s: %w", client, err)
 	}
-	c, err := openbao.Login(ctx, openbao.Server{Workspace: dataDir, Name: a.Server, Client: client, Address: a.Address,
+	c, _, err := logins.Open(ctx, openbao.Server{Workspace: dataDir, Name: a.Server, Client: client, Address: a.Address,
 		CACert: ca, ClientCert: cert, ClientKey: key, CertMount: a.CertMount, CertRole: a.CertRole})
 	if err != nil {
 		return nil, fmt.Errorf("clusterprovider: logging in to the cluster vault at %s as %s: %w", a.Address, a.CertRole, err)
@@ -367,7 +366,11 @@ func (h *UnitsHost) reapVault(ctx context.Context, key string) error {
 	if err := h.obs.Delete(ctx, name); err != nil && !apierrors.IsNotFound(err) {
 		return err
 	}
-	forgetVaultToken(func() string { d, _ := ClusterDataDir(h.c.StateDir, key); return d }())
+	if h.c.Logins != nil {
+		if d, err := ClusterDataDir(h.c.StateDir, key); err == nil {
+			h.c.Logins.ForgetWorkspace(d)
+		}
+	}
 	ctx, cancel := context.WithTimeout(ctx, h.c.ReapTimeout)
 	defer cancel()
 	for _, gone := range []func() error{

@@ -20,9 +20,9 @@ const (
 	DefaultRelayKind = "Relay"
 )
 
-func Register(m *ctlruntime.Manager, opts eventsource.BackendOptions) (*eventsource.Backend[*eventsv1.RelayEventSource], error) {
+func Register(ctx context.Context, m *ctlruntime.Manager, opts eventsource.BackendOptions) (*eventsource.Backend[*eventsv1.RelayEventSource], error) {
 	dial := eventsource.BusDial(opts.Bus)
-	b := eventsource.NewBackend(eventsv1.RelayEventSourceKind, opts,
+	b := eventsource.NewBackend(ctx, eventsv1.RelayEventSourceKind, opts,
 		func(_ context.Context, req ctlruntime.Request, obj *eventsv1.RelayEventSource) (eventsource.Upstream, error) {
 			base, err := baseURL(req.Workspace, obj.Spec)
 			if err != nil {

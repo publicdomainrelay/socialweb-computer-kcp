@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/watch"
@@ -25,15 +26,15 @@ func Watch[T any](ctx context.Context, r Resource, opts metav1.ListOptions) (<-c
 		return nil, nil, err
 	}
 	out := make(chan Event[T])
-	done := make(chan struct{})
+	forwarder := supervise.New(ctx)
 	var once sync.Once
 	stop := func() {
 		once.Do(func() {
-			close(done)
 			w.Stop()
+			_ = forwarder.Stop()
 		})
 	}
-	go func() {
+	forwarder.Go("kube: watch", func(ctx context.Context) error {
 		defer close(out)
 		for ev := range w.ResultChan() {
 			e := Event[T]{Type: ev.Type}
@@ -48,13 +49,12 @@ func Watch[T any](ctx context.Context, r Resource, opts metav1.ListOptions) (<-c
 			}
 			select {
 			case out <- e:
-			case <-done:
-				return
 			case <-ctx.Done():
-				return
+				return nil
 			}
 		}
-	}()
+		return nil
+	})
 	return out, stop, nil
 }
 

@@ -96,7 +96,7 @@ type Server struct {
 	streams *streams
 }
 
-func New(opts Options) (*Server, error) {
+func New(ctx context.Context, opts Options) (*Server, error) {
 	if opts.Gateway == nil {
 		return nil, errors.New("xrpcserver: no gateway")
 	}
@@ -121,7 +121,7 @@ func New(opts Options) (*Server, error) {
 		catalog: cat,
 		inputs:  map[string]lexicon.SchemaObject{},
 		params:  map[string]lexicon.SchemaObject{},
-		streams: newStreams(opts.StreamsPerCaller),
+		streams: newStreams(ctx, opts.StreamsPerCaller),
 	}
 	if err := s.bindSubscription(nsidSubscribeClusters); err != nil {
 		return nil, err

@@ -24,8 +24,6 @@ const (
 	Name = "componentlink"
 
 	Export = "exposures"
-
-	EventBuffer = 1024
 )
 
 type Options struct {
@@ -47,7 +45,7 @@ type Controller struct {
 
 	targets *binding.Table[struct{}]
 
-	events chan ctlruntime.Request
+	events *ctlruntime.Queue
 }
 
 func New(opts Options) (*Controller, error) {
@@ -59,7 +57,7 @@ func New(opts Options) (*Controller, error) {
 		log = slog.New(slog.DiscardHandler)
 	}
 	return &Controller{policy: opts.Policy, registry: opts.Registry, log: log.With("component", "componentlink-controller"),
-		targets: binding.New[struct{}](), events: make(chan ctlruntime.Request, EventBuffer)}, nil
+		targets: binding.New[struct{}](), events: ctlruntime.NewQueue()}, nil
 }
 
 func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
@@ -70,7 +68,11 @@ func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
 	if err != nil {
 		return nil, err
 	}
-	options := []ctlruntime.Option{ctlruntime.Export(Export), ctlruntime.Events(ctl.events), ctlruntime.Gone(ctl.gone)}
+	events, err := ctl.events.Run(m, Name+": components")
+	if err != nil {
+		return nil, fmt.Errorf("%s: forwarding component changes: %w", Name, err)
+	}
+	options := []ctlruntime.Option{ctlruntime.Export(Export), ctlruntime.Events(events), ctlruntime.Gone(ctl.gone)}
 	if opts.Scope != nil {
 		options = append(options, ctlruntime.InWorkspaces(opts.Scope))
 	}
@@ -82,12 +84,7 @@ func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
 
 func (c *Controller) ComponentChanged(key component.Key) {
 	for _, t := range c.targets.Users(binding.Key(key.Workspace, key.Kind, key.Name)) {
-		r := ctlruntime.Request{Cluster: t.Cluster, Workspace: t.Workspace, Name: t.Name}
-		select {
-		case c.events <- r:
-		default:
-			go func() { c.events <- r }()
-		}
+		c.events.Add(ctlruntime.Request{Cluster: t.Cluster, Workspace: t.Workspace, Name: t.Name})
 	}
 }
 

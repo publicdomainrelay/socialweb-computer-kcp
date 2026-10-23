@@ -11,28 +11,12 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync"
 )
 
 const Version = "v2.9.3"
 
-var (
-	once   sync.Once
-	cached string
-	err    error
-)
-
 func Resolve(cacheDir string) (string, error) {
-	once.Do(func() {
-		cached, err = resolve(cacheDir)
-	})
-	return cached, err
-}
-
-func Reset() {
-	once = sync.Once{}
-	cached = ""
-	err = nil
+	return resolve(cacheDir)
 }
 
 func resolve(cacheDir string) (string, error) {
@@ -76,16 +60,21 @@ func extractEmbedded(cacheDir string, data []byte) (string, error) {
 		if openErr != nil {
 			return "", openErr
 		}
-		out, createErr := os.OpenFile(filepath.Join(dir, name), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
+		out, createErr := os.CreateTemp(dir, name+".*.tmp")
 		if createErr != nil {
 			rc.Close()
 			return "", createErr
 		}
 		_, copyErr := io.Copy(out, rc)
-		out.Close()
+		closeErr := out.Close()
 		rc.Close()
-		if copyErr != nil {
-			return "", copyErr
+		if err := errors.Join(copyErr, closeErr, os.Chmod(out.Name(), 0755)); err != nil {
+			os.Remove(out.Name())
+			return "", err
+		}
+		if err := os.Rename(out.Name(), filepath.Join(dir, name)); err != nil {
+			os.Remove(out.Name())
+			return "", err
 		}
 	}
 	os.Chmod(path, 0755)

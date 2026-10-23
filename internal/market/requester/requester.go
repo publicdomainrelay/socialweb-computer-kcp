@@ -504,6 +504,9 @@ func New(cfg Config, deps Deps) (*Requester, error) {
 }
 
 func (q *Requester) Start(ctx context.Context) error {
+	if ctx == nil {
+		return errors.New("requester: Start needs the run context")
+	}
 	q.mu.Lock()
 	if q.started {
 		q.mu.Unlock()
@@ -711,9 +714,6 @@ func (q *Requester) nowISO() string {
 func (q *Requester) runContext() context.Context {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	if q.ctx == nil {
-		return context.Background()
-	}
 	return q.ctx
 }
 

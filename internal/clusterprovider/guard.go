@@ -36,7 +36,7 @@ type GuardDeps struct {
 
 	Token func(cluster string) instance.Token
 
-	HasRow func(cluster string) bool
+	HasRow func(ctx context.Context, cluster string) bool
 
 	DeleteRow func(ctx context.Context, cluster string) error
 
@@ -77,7 +77,7 @@ func GuardFor(d GuardDeps) materialiser.IdentityGuard {
 			}
 		}
 
-		plan, err := instance.PlanFor(d.Token(cluster), d.HasRow != nil && d.HasRow(cluster))
+		plan, err := instance.PlanFor(d.Token(cluster), d.HasRow != nil && d.HasRow(ctx, cluster))
 		if err != nil {
 			return fmt.Errorf("clusterprovider: the token plan for %s: %w", cluster, err)
 		}

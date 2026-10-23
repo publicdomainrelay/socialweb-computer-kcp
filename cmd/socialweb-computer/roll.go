@@ -57,7 +57,7 @@ func runDevRoll(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 	} else if _, err := kcpserver.CheckPair(kcpserver.Asset(kcpExe), kcpserver.Asset(now), compat, false); err != nil {
 		return a.fail(exitRefused, "dev roll kcp: %s changed from %q to %q: %v", kcpExe.Path, kcpExe.Version, now.Version, err)
 	}
-	lock, err := lockFile(l.Lock, rollLockWait)
+	lock, err := lockFile(ctx, l.Lock, rollLockWait)
 	if err != nil {
 		return a.fail(exitFailed, "dev roll kcp: %v", err)
 	}

@@ -70,7 +70,7 @@ func (h *Host) vaultFor(ctx context.Context, server string) (*openbao.Client, er
 	if o == nil {
 		return nil, fmt.Errorf("no OpenBaoServer %s in this workspace", server)
 	}
-	client, _, err := openbaoctl.ClientLogin(ctx, o.Status, h.c.vaultClient())
+	client, _, err := openbaoctl.ClientLogin(ctx, h.c.Logins, o.Status, h.c.vaultClient())
 	if err != nil {
 		return nil, fmt.Errorf("the OpenBaoServer %s as client %s: %w", server, h.c.vaultClient(), err)
 	}

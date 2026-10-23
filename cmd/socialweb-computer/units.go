@@ -137,7 +137,7 @@ func runUnitsRollKcp(ctx context.Context, a *app, vals clicfg.Values, rest []str
 		return a.fail(exitFailed, "units roll kcp: %v", err)
 	}
 	p := bootstrap.InstallParams(app, state)
-	lock, err := lockFile(p.RollLock(), rollLockWait)
+	lock, err := lockFile(ctx, p.RollLock(), rollLockWait)
 	if err != nil {
 		return a.fail(exitFailed, "units roll kcp: %v", err)
 	}

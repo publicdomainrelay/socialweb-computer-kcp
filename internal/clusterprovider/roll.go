@@ -165,7 +165,7 @@ type Roller struct {
 
 	Leases func(cluster string) (materialiser.Leases, error)
 
-	Relet func(cluster string, p portallocator.Purpose) (portallocator.Lease, bool, error)
+	Relet func(ctx context.Context, cluster string, p portallocator.Purpose) (portallocator.Lease, bool, error)
 
 	Name string
 
@@ -600,7 +600,7 @@ func (r *Roller) RollCluster(ctx context.Context, key string, req RollRequest) (
 			return fail(err)
 		}
 		for _, p := range gp.All() {
-			lease, changed, err := r.Relet(key, p)
+			lease, changed, err := r.Relet(ctx, key, p)
 			if err != nil {
 				return fail(fmt.Errorf("clusterprovider: leasing %s for slot %s: %w", p, green, err))
 			}
