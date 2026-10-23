@@ -621,7 +621,7 @@ func (r *Roller) RollCluster(ctx context.Context, key string, req RollRequest) (
 		return fail(err)
 	}
 	abort := func(err error) RollReport {
-		sctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
 		defer cancel()
 		h.remove(sctx, ObjectName(key, StepMember(k3sStep)))
 		h.remove(sctx, ObjectName(key, StepMember(kineStep)))
@@ -814,7 +814,7 @@ func (r *Roller) RollLink(ctx context.Context, key string, req RollRequest) (rep
 	st.Spec = spec
 	o, err := h.placeGated(ctx, key, st, st.Ready)
 	if err != nil {
-		sctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
 		defer cancel()
 		h.remove(sctx, ObjectName(key, newMember))
 		return fail(err)
