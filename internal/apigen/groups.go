@@ -22,7 +22,7 @@ func Groups() []Group {
 	return []Group{
 		{
 			Dir:       "api/v1alpha1",
-			Package:   reflect.TypeOf(v1alpha1.APIResource{}).PkgPath(),
+			Package:   reflect.TypeOf(v1alpha1.Cluster{}).PkgPath(),
 			Group:     v1alpha1.GroupName,
 			Version:   v1alpha1.Version,
 			Resources: v1alpha1.APIResources,

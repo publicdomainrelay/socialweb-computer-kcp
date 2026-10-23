@@ -1,28 +1,15 @@
 package v1alpha1
 
+//go:generate bash ../../hack/codegen.sh
 //go:generate go run ../../cmd/socialweb-apigen -root ../..
 
-type PrinterColumn struct {
-	Name string
+import (
+	"github.com/johnandersen777/socialweb-computer-kcp/api/apiresource"
+)
 
-	Type string
+type PrinterColumn = apiresource.PrinterColumn
 
-	JSONPath string
-}
-
-type APIResource struct {
-	Kind string
-
-	Plural string
-
-	Revision int
-
-	Export string
-
-	Object any
-
-	PrinterColumns []PrinterColumn
-}
+type APIResource = apiresource.APIResource
 
 var APIResources = []APIResource{
 	{Kind: "Cluster", Plural: "clusters", Revision: 2, Export: "clusters", Object: Cluster{}},
