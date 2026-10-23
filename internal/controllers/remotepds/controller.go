@@ -6,40 +6,100 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
-	"reflect"
 	"strings"
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/syntax"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/dynamic"
 
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
+	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 )
 
-const statusUpdateAttempts = 5
+const (
+	Name = "remotepds"
 
-func (c *Controller) Reconcile(ctx context.Context, dyn dynamic.Interface, u *unstructured.Unstructured) error {
-	if u == nil || u.GetDeletionTimestamp() != nil {
-		return nil
+	Export = "pds"
+
+	ConditionReady = "Ready"
+
+	ConditionFailed = "Failed"
+
+	DefaultTimeout = 10 * time.Second
+
+	DefaultCheckInterval = 30 * time.Second
+)
+
+type CABundleFunc func(ref string) ([]byte, error)
+
+type SecretsFunc func(workspace string) pdsclient.SecretResolver
+
+type Options struct {
+	Log *slog.Logger
+
+	CABundle CABundleFunc
+
+	Secrets SecretsFunc
+
+	Timeout time.Duration
+
+	CheckInterval time.Duration
+}
+
+type Controller struct {
+	log *slog.Logger
+
+	caBundle CABundleFunc
+
+	secrets SecretsFunc
+
+	timeout time.Duration
+
+	checkInterval time.Duration
+}
+
+type transientError struct {
+	err error
+}
+
+func (e transientError) Error() string { return e.err.Error() }
+
+func (e transientError) Unwrap() error { return e.err }
+
+func New(opts Options) *Controller {
+	log := opts.Log
+	if log == nil {
+		log = slog.New(slog.DiscardHandler)
 	}
-	if dyn == nil {
-		return errors.New("remotepds: a dynamic client is required to reconcile")
+	timeout := opts.Timeout
+	if timeout <= 0 {
+		timeout = DefaultTimeout
 	}
-	var object pdsv1alpha1.RemotePDS
-	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &object); err != nil {
-		return fmt.Errorf("remotepds: decoding %s: %w", u.GetName(), err)
+	checkInterval := opts.CheckInterval
+	if checkInterval <= 0 {
+		checkInterval = DefaultCheckInterval
+	}
+	return &Controller{log: log.With("component", "remotepds-controller"), caBundle: opts.CABundle, secrets: opts.Secrets,
+		timeout: timeout, checkInterval: checkInterval}
+}
+
+func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
+	ctl := New(opts)
+	if err := ctlruntime.For[*pdsv1alpha1.RemotePDS](m, Name, ctl, ctlruntime.Export(Export)); err != nil {
+		return nil, fmt.Errorf("remotepds: registering the RemotePDS controller: %w", err)
+	}
+	return ctl, nil
+}
+
+func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, object *pdsv1alpha1.RemotePDS) (ctlruntime.Result, error) {
+	if object == nil || !object.DeletionTimestamp.IsZero() {
+		return ctlruntime.Result{}, nil
 	}
 	generation := object.Generation
-	if c.settled(object.Status, generation) {
-		return nil
-	}
 	status := object.Status
 	status.Phase = pdsv1alpha1.RemotePDSPending
 	status.Ready = false
@@ -47,25 +107,17 @@ func (c *Controller) Reconcile(ctx context.Context, dyn dynamic.Interface, u *un
 	if object.Spec.Suspend {
 		setCondition(&status, ConditionReady, false, "Suspended", "the RemotePDS is suspended", generation)
 		setCondition(&status, ConditionFailed, false, "Suspended", "the RemotePDS is suspended", generation)
-		return c.writeStatus(ctx, dyn, u, status)
+		return ctlruntime.Result{}, c.apply(ctx, req, object, status)
 	}
 	checkedAt := metav1.NewTime(time.Now().UTC().Truncate(time.Second))
 	status.LastCheckedAt = &checkedAt
-	pds, endpoint, reason, err := c.connect(object)
+	pds, endpoint, reason, err := c.connect(req, object)
 	if err != nil {
-		status.Phase = pdsv1alpha1.RemotePDSFailed
-		setCondition(&status, ConditionReady, false, reason, err.Error(), generation)
-		setCondition(&status, ConditionFailed, true, reason, err.Error(), generation)
-		c.log.Warn("checking a RemotePDS", "name", object.Name, "reason", reason, "err", err.Error())
-		return c.writeStatus(ctx, dyn, u, status)
+		return c.fail(ctx, req, object, status, reason, err)
 	}
 	info, err := pds.Describe(ctx)
 	if err != nil {
-		status.Phase = pdsv1alpha1.RemotePDSFailed
-		setCondition(&status, ConditionReady, false, "DescribeFailed", err.Error(), generation)
-		setCondition(&status, ConditionFailed, true, "DescribeFailed", err.Error(), generation)
-		c.log.Warn("describing a RemotePDS", "name", object.Name, "err", err.Error())
-		return c.writeStatus(ctx, dyn, u, status)
+		return c.fail(ctx, req, object, status, "DescribeFailed", transientError{err: err})
 	}
 	status.Phase = pdsv1alpha1.RemotePDSReady
 	status.Ready = true
@@ -73,22 +125,39 @@ func (c *Controller) Reconcile(ctx context.Context, dyn dynamic.Interface, u *un
 	message := fmt.Sprintf("the PDS at %s reports %s", endpoint, info.DID.String())
 	setCondition(&status, ConditionReady, true, "Ready", message, generation)
 	setCondition(&status, ConditionFailed, false, "DescribeSucceeded", "the PDS answered describeServer", generation)
-	return c.writeStatus(ctx, dyn, u, status)
+	if err := c.apply(ctx, req, object, status); err != nil {
+		return ctlruntime.Result{}, err
+	}
+	c.log.Info("the RemotePDS is ready", "cluster", req.Cluster, "workspace", req.Workspace, "name", req.Name,
+		"endpoint", endpoint, "fieldManager", req.FieldManager())
+	return ctlruntime.Result{RequeueAfter: c.checkInterval}, nil
 }
 
-func (c *Controller) settled(status pdsv1alpha1.RemotePDSStatus, generation int64) bool {
-	condition := meta.FindStatusCondition(status.Conditions, ConditionReady)
-	if condition == nil || condition.ObservedGeneration < generation {
-		return false
+func (c *Controller) fail(ctx context.Context, req ctlruntime.Request, object *pdsv1alpha1.RemotePDS, status pdsv1alpha1.RemotePDSStatus,
+	reason string, err error) (ctlruntime.Result, error) {
+	generation := object.Generation
+	status.Phase = pdsv1alpha1.RemotePDSFailed
+	setCondition(&status, ConditionReady, false, reason, err.Error(), generation)
+	setCondition(&status, ConditionFailed, true, reason, err.Error(), generation)
+	if applyErr := c.apply(ctx, req, object, status); applyErr != nil {
+		return ctlruntime.Result{}, errors.Join(err, applyErr)
 	}
-	if status.LastCheckedAt == nil {
-		return false
+	var transient transientError
+	if errors.As(err, &transient) {
+		return ctlruntime.Result{}, fmt.Errorf("remotepds: %s: %w", reason, err)
 	}
-	age := time.Since(status.LastCheckedAt.Time)
-	return age >= 0 && age < c.checkInterval
+	c.log.Warn("the RemotePDS spec is invalid; it waits for a spec change", "workspace", req.Workspace, "name", req.Name,
+		"reason", reason, "err", err.Error())
+	return ctlruntime.Result{}, nil
 }
 
-func (c *Controller) connect(object pdsv1alpha1.RemotePDS) (pdsclient.PDS, string, string, error) {
+func (c *Controller) apply(ctx context.Context, req ctlruntime.Request, object *pdsv1alpha1.RemotePDS, status pdsv1alpha1.RemotePDSStatus) error {
+	next := object.DeepCopy()
+	next.Status = status
+	return req.ApplyStatus(ctx, next)
+}
+
+func (c *Controller) connect(req ctlruntime.Request, object *pdsv1alpha1.RemotePDS) (pdsclient.PDS, string, string, error) {
 	baseURL, err := remoteURL(object.Spec.URL)
 	if err != nil {
 		return nil, "", "InvalidURL", err
@@ -103,11 +172,15 @@ func (c *Controller) connect(object pdsv1alpha1.RemotePDS) (pdsclient.PDS, strin
 	}
 	tlsConfig, err := c.tlsConfig(object.Spec.TLS, baseURL)
 	if err != nil {
-		return nil, "", "InvalidTLS", err
+		return nil, "", "InvalidTLS", transientError{err: err}
 	}
-	tokens, dpop, err := pdsclient.AuthSources(object.Spec.Auth, c.secrets)
+	var secrets pdsclient.SecretResolver
+	if c.secrets != nil {
+		secrets = c.secrets(req.Workspace)
+	}
+	tokens, dpop, err := pdsclient.AuthSources(object.Spec.Auth, secrets)
 	if err != nil {
-		return nil, "", "InvalidAuth", err
+		return nil, "", "InvalidAuth", transientError{err: err}
 	}
 	endpoint := strings.TrimRight(baseURL.String(), "/")
 	pds, err := pdsclient.NewRemote(pdsclient.RemoteConfig{
@@ -180,54 +253,6 @@ func (c *Controller) tlsConfig(spec pdsv1alpha1.RemotePDSTLS, baseURL *url.URL) 
 		config.ServerName = serverName
 	}
 	return config, nil
-}
-
-func (c *Controller) writeStatus(ctx context.Context, dyn dynamic.Interface, u *unstructured.Unstructured, status pdsv1alpha1.RemotePDSStatus) error {
-	desired, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&status)
-	if err != nil {
-		return fmt.Errorf("remotepds: encoding the status of %s: %w", u.GetName(), err)
-	}
-	if desired == nil {
-		desired = map[string]any{}
-	}
-	name := u.GetName()
-	ri := dyn.Resource(RemotePDSGVR)
-	var current *unstructured.Unstructured
-	for attempt := 0; attempt < statusUpdateAttempts; attempt++ {
-		if current == nil {
-			current, err = ri.Get(ctx, name, metav1.GetOptions{})
-			if apierrors.IsNotFound(err) {
-				return nil
-			}
-			if err != nil {
-				return fmt.Errorf("remotepds: reading %s: %w", name, err)
-			}
-		}
-		if current.GetDeletionTimestamp() != nil {
-			return nil
-		}
-		existing, _, err := unstructured.NestedMap(current.Object, "status")
-		if err != nil {
-			return fmt.Errorf("remotepds: reading the status of %s: %w", name, err)
-		}
-		if reflect.DeepEqual(existing, desired) {
-			return nil
-		}
-		next := current.DeepCopy()
-		next.Object["status"] = desired
-		_, err = ri.UpdateStatus(ctx, next, metav1.UpdateOptions{FieldManager: FieldManager})
-		if err == nil {
-			return nil
-		}
-		if apierrors.IsNotFound(err) {
-			return nil
-		}
-		if !apierrors.IsConflict(err) {
-			return fmt.Errorf("remotepds: updating the status of %s: %w", name, err)
-		}
-		current = nil
-	}
-	return fmt.Errorf("remotepds: the status of %s stayed in conflict", name)
 }
 
 func setCondition(status *pdsv1alpha1.RemotePDSStatus, conditionType string, value bool, reason, message string, generation int64) {
