@@ -33,8 +33,6 @@ const (
 
 	defaultMarketServiceID = market.DefaultMarketServiceID
 
-	defaultComputeEventServiceID = market.DefaultComputeEventServiceID
-
 	maxBidderServiceRefHops = 8
 )
 
@@ -147,6 +145,8 @@ type HTTPMarket struct {
 
 	discovered *ttlcache.Cache[struct{}, []Bidder]
 }
+
+var _ MarketClient = (*HTTPMarket)(nil)
 
 func (m *HTTPMarket) client() *http.Client {
 	if m.HTTPClient != nil {
@@ -615,10 +615,6 @@ func payloadRef(value map[string]any) market.RecordRef {
 		return market.RecordRef{}
 	}
 	return market.RecordRef{URI: stringOf(ref["uri"]), CID: stringOf(ref["cid"])}
-}
-
-func bidRef(value map[string]any) market.RecordRef {
-	return market.RecordRef{URI: stringOf(value["uri"]), CID: stringOf(value["cid"])}
 }
 
 var ErrParticipationSuspended = errors.New("requester: participation is suspended; no new RFP or accept is published")

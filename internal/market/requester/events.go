@@ -7,14 +7,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/bluesky-social/indigo/atproto/identity"
-
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/irohdial"
-
-	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 type GuestEvent struct {
@@ -45,7 +41,36 @@ func ValidateTicket(address string) (string, error) {
 	return ticket, nil
 }
 
-func parseGuestEvent(ctx context.Context, dir identity.Directory, badge func(context.Context, string, string) (bool, error), event MarketEvent, receiptURI string) (*GuestEvent, error) {
+func isGuestEventNSID(nsid string) bool {
+	switch nsid {
+	case market.ComputeEventsVMOnNetworkNSID, market.ComputeEventsVMHostKeysNSID, market.ComputeEventsVMTerminatedNSID:
+		return true
+	}
+	return false
+}
+
+func (q *Requester) badgeBlueBinding() func(ctx context.Context, did, key string) (bool, error) {
+	return func(ctx context.Context, did, key string) (bool, error) {
+		return market.KeyBoundByBadgeBlueKey(ctx, q.repo, did, key), nil
+	}
+}
+
+func (q *Requester) verifyOptions() market.VerifyRecordOptions {
+	return market.VerifyRecordOptions{
+		KeysForDID:             market.NewDirectoryKeyLister(q.deps.Directory),
+		KeyResolver:            market.DefaultKeyResolver,
+		KeyBoundByBadgeBlueKey: q.badgeBlueBinding(),
+	}
+}
+
+func (q *Requester) receiptOptions() market.VerifyRecordOptions {
+	return market.VerifyRecordOptions{
+		KeysForDID:  market.NewDirectoryKeyLister(q.deps.Directory),
+		KeyResolver: market.DefaultKeyResolver,
+	}
+}
+
+func (q *Requester) parseGuestEvent(ctx context.Context, event MarketEvent, receiptURI string) (*GuestEvent, error) {
 	if event.Event.URI == "" || event.Payload.URI == "" {
 		return nil, errors.New("requester: the market event has no event or payload record")
 	}
@@ -54,9 +79,7 @@ func parseGuestEvent(ctx context.Context, dir identity.Directory, badge func(con
 		return nil, err
 	}
 	payloadNSID := market.NSIDFromURI(event.Payload.URI)
-	switch payloadNSID {
-	case market.ComputeEventsVMOnNetworkNSID, market.ComputeEventsVMHostKeysNSID, market.ComputeEventsVMTerminatedNSID:
-	default:
+	if !isGuestEventNSID(payloadNSID) {
 		return nil, fmt.Errorf("requester: payload %s is not a guest event", payloadNSID)
 	}
 	ref, err := market.BindEventPayload(*envelope, event.Event.URI, receiptURI, payloadNSID)
@@ -66,12 +89,7 @@ func parseGuestEvent(ctx context.Context, dir identity.Directory, badge func(con
 	if market.ATURIAuthority(event.Event.URI) != market.ATURIAuthority(receiptURI) {
 		return nil, fmt.Errorf("requester: event author is not the bidder")
 	}
-	keys := market.NewDirectoryKeyLister(dir)
-	opts := market.VerifyRecordOptions{
-		KeysForDID:             keys,
-		KeyResolver:            market.DefaultKeyResolver,
-		KeyBoundByBadgeBlueKey: badge,
-	}
+	opts := q.verifyOptions()
 	issuer := market.ATURIAuthority(event.Event.URI)
 	if !market.VerifyRecordSignatures(ctx, event.Event.Value, issuer, opts) {
 		return nil, fmt.Errorf("requester: event %s has no valid signature", event.Event.URI)
@@ -92,56 +110,19 @@ func parseGuestEvent(ctx context.Context, dir identity.Directory, badge func(con
 		out.Address = address
 		out.ObservedAt = stringOf(event.Payload.Value["observedAt"])
 	case market.ComputeEventsVMHostKeysNSID:
-		list, ok := event.Payload.Value["keys"].([]any)
-		if !ok || len(list) == 0 {
-			return nil, errors.New("requester: the host-keys event carries no keys")
-		}
-		raw := make([]v1alpha1.ComputeVMHostKey, 0, len(list))
-		for _, item := range list {
-			entry, ok := item.(map[string]any)
-			if !ok {
-				return nil, errors.New("requester: a host key is not an object")
-			}
-			raw = append(raw, v1alpha1.ComputeVMHostKey{
-				Type:        stringOf(entry["type"]),
-				PublicKey:   stringOf(entry["publicKey"]),
-				Fingerprint: stringOf(entry["fingerprint"]),
-			})
-		}
-		checked, err := computevm.CheckHostKeys(raw)
+		keys, err := q.reportedHostKeys(event.Payload.Value)
 		if err != nil {
 			return nil, err
 		}
-		out.HostKeys = checked
+		out.HostKeys = keys
 		out.ObservedAt = stringOf(event.Payload.Value["observedAt"])
 	case market.ComputeEventsVMTerminatedNSID:
-		reason := stringOf(event.Payload.Value["reason"])
-		observedAt := stringOf(event.Payload.Value["observedAt"])
-		if reason == "" || observedAt == "" {
-			return nil, errors.New("requester: the termination event names no reason or time")
-		}
-		if _, err := market.ParseTime(observedAt); err != nil {
-			return nil, fmt.Errorf("requester: termination time: %w", err)
-		}
-		termination := &v1alpha1.ContractTermination{
-			Reason:     reason,
-			ObservedAt: observedAt,
-			Event:      commonv1.StrongRef{URI: event.Event.URI, CID: event.Event.CID},
-			Payload:    commonv1.StrongRef{URI: event.Payload.URI, CID: event.Payload.CID},
-		}
-		if code, ok := event.Payload.Value["exitCode"]; ok {
-			value := int(numberValue(code))
-			termination.ExitCode = &value
-		}
-		if request, ok := event.Payload.Value["request"].(map[string]any); ok {
-			uri := stringOf(request["uri"])
-			cid := stringOf(request["cid"])
-			if uri != "" {
-				termination.Request = &commonv1.StrongRef{URI: uri, CID: cid}
-			}
+		termination, err := reportedTermination(event)
+		if err != nil {
+			return nil, err
 		}
 		out.Termination = termination
-		out.ObservedAt = observedAt
+		out.ObservedAt = termination.ObservedAt
 	}
 	if out.ObservedAt != "" {
 		if _, err := market.ParseTime(out.ObservedAt); err != nil {
@@ -150,6 +131,55 @@ func parseGuestEvent(ctx context.Context, dir identity.Directory, badge func(con
 	}
 	out.Payload = market.ResolvedRecord{URI: ref.URI, CID: ref.CID, Value: event.Payload.Value}
 	return out, nil
+}
+
+func (q *Requester) reportedHostKeys(value map[string]any) ([]v1alpha1.ComputeVMHostKey, error) {
+	list, ok := value["keys"].([]any)
+	if !ok || len(list) == 0 {
+		return nil, errors.New("requester: the host-keys event carries no keys")
+	}
+	raw := make([]v1alpha1.ComputeVMHostKey, 0, len(list))
+	for _, item := range list {
+		entry, ok := item.(map[string]any)
+		if !ok {
+			return nil, errors.New("requester: a host key is not an object")
+		}
+		raw = append(raw, v1alpha1.ComputeVMHostKey{
+			Type:        stringOf(entry["type"]),
+			PublicKey:   stringOf(entry["publicKey"]),
+			Fingerprint: stringOf(entry["fingerprint"]),
+		})
+	}
+	return q.deps.Guests.CheckHostKeys(raw)
+}
+
+func reportedTermination(event MarketEvent) (*v1alpha1.ContractTermination, error) {
+	reason := stringOf(event.Payload.Value["reason"])
+	observedAt := stringOf(event.Payload.Value["observedAt"])
+	if reason == "" || observedAt == "" {
+		return nil, errors.New("requester: the termination event names no reason or time")
+	}
+	if _, err := market.ParseTime(observedAt); err != nil {
+		return nil, fmt.Errorf("requester: termination time: %w", err)
+	}
+	termination := &v1alpha1.ContractTermination{
+		Reason:     reason,
+		ObservedAt: observedAt,
+		Event:      commonv1.StrongRef{URI: event.Event.URI, CID: event.Event.CID},
+		Payload:    commonv1.StrongRef{URI: event.Payload.URI, CID: event.Payload.CID},
+	}
+	if code, ok := event.Payload.Value["exitCode"]; ok {
+		value := int(numberValue(code))
+		termination.ExitCode = &value
+	}
+	if request, ok := event.Payload.Value["request"].(map[string]any); ok {
+		uri := stringOf(request["uri"])
+		cid := stringOf(request["cid"])
+		if uri != "" {
+			termination.Request = &commonv1.StrongRef{URI: uri, CID: cid}
+		}
+	}
+	return termination, nil
 }
 
 func sameRecordRef(a, b commonv1.StrongRef) bool {
@@ -234,6 +264,21 @@ func guestEventRecorded(eventRef, payloadRef commonv1.StrongRef, parsed *GuestEv
 	}
 	return sameRecordRef(eventRef, commonv1.StrongRef{URI: parsed.Event.URI, CID: parsed.Event.CID}) ||
 		sameRecordRef(payloadRef, commonv1.StrongRef{URI: parsed.Payload.URI, CID: parsed.Payload.CID})
+}
+
+func guestEventApplied(state *v1alpha1.NodeClaimContract, parsed *GuestEvent) bool {
+	if state == nil || parsed == nil {
+		return false
+	}
+	switch parsed.Kind {
+	case market.ComputeEventsVMOnNetworkNSID:
+		return state.VMAddress != ""
+	case market.ComputeEventsVMHostKeysNSID:
+		return state.HostKeys != nil && guestEventRecorded(state.HostKeys.Event, state.HostKeys.Payload, parsed)
+	case market.ComputeEventsVMTerminatedNSID:
+		return terminationRecorded(state, parsed.Termination)
+	}
+	return false
 }
 
 func hostKeyLines(keys []v1alpha1.ComputeVMHostKey) []string {

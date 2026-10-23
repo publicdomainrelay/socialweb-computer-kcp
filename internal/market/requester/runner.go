@@ -3,7 +3,8 @@ package requester
 import (
 	"cmp"
 	"context"
-	"encoding/json"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -14,16 +15,25 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
+	contractmarket "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestseed"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/participant"
+)
 
-	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
+const (
+	bidPollPeriod = time.Second
+
+	guestEventPollPeriod = 500 * time.Millisecond
+
+	terminationPollPeriod = time.Second
 )
 
 type contractRunner struct {
-	svc *Service
+	q *Requester
 
 	name string
 
@@ -60,9 +70,9 @@ type contractRunner struct {
 	rbacRKey string
 }
 
-func newContractRunner(s *Service, contract v1alpha1.ComputeContract) *contractRunner {
+func newContractRunner(q *Requester, contract v1alpha1.ComputeContract) *contractRunner {
 	r := &contractRunner{
-		svc:       s,
+		q:         q,
 		name:      contract.Name,
 		contract:  contract,
 		bids:      append([]v1alpha1.ContractBid(nil), contract.Status.Bids...),
@@ -98,12 +108,9 @@ func recordedStage(state *v1alpha1.NodeClaimContract) bool {
 	return state.VMURI != "" || state.RFPURI != "" || state.AcceptURI != "" || state.ReceiptURI != "" || state.Release != nil
 }
 
-func (r *contractRunner) Update(contract *v1alpha1.ComputeContract) {
-	if contract == nil {
-		return
-	}
+func (r *contractRunner) Update(contract v1alpha1.ComputeContract) {
 	r.mu.Lock()
-	r.contract = *contract
+	r.contract = contract
 	r.mu.Unlock()
 	if contract.DeletionTimestamp != nil || contract.Spec.Release {
 		r.requestRelease()
@@ -153,12 +160,7 @@ func (r *contractRunner) snapshot() v1alpha1.ComputeContract {
 func (r *contractRunner) stateCopy() *v1alpha1.NodeClaimContract {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.state == nil {
-		return nil
-	}
-	out := new(v1alpha1.NodeClaimContract)
-	r.state.DeepCopyInto(out)
-	return out
+	return cloneNodeClaimContract(r.state)
 }
 
 func (r *contractRunner) setState(state *v1alpha1.NodeClaimContract) {
@@ -168,7 +170,7 @@ func (r *contractRunner) setState(state *v1alpha1.NodeClaimContract) {
 }
 
 func (r *contractRunner) log() *slog.Logger {
-	return r.svc.log.With("contract", r.name)
+	return r.q.log.With("contract", r.name)
 }
 
 func (r *contractRunner) Run(ctx context.Context) {
@@ -192,7 +194,7 @@ func (r *contractRunner) Run(ctx context.Context) {
 	}
 	state = r.stateCopy()
 	if state != nil && state.Receipt != nil {
-		if err := r.resumeReceipt(ctx, state); err != nil && r.svc.ctx.Err() == nil {
+		if err := r.resumeReceipt(ctx, state); err != nil && !r.q.stopping() {
 			r.recordFailure(ctx, r.stateCopy(), err, 1)
 		}
 		return
@@ -206,20 +208,15 @@ func (r *contractRunner) Run(ctx context.Context) {
 		if err == nil {
 			return
 		}
-		if r.svc.ctx.Err() != nil {
+		if r.q.stopping() {
 			r.log().Info("requester_contract_left_for_restart", "err", err)
 			return
 		}
 		if retry && !r.released() {
 			r.log().Info("requester_contract_capacity_retry", "delay", CapacityRetryDelay)
 			r.writeStatus(ctx, v1alpha1.ComputeContractPending, "every bidder declined the RFP with reason capacity; asking again in 60s", r.stateCopy(), nil, nil, true, "atCapacity", int32(attempt+1))
-			select {
-			case <-ctx.Done():
+			if !r.awaitCapacityRetry(ctx, int32(attempt+1)) {
 				return
-			case <-r.releaseCh:
-				r.writeStatus(ctx, v1alpha1.ComputeContractReleased, "released before a VM was held", r.stateCopy(), nil, nil, false, "released", int32(attempt+1))
-				return
-			case <-time.After(CapacityRetryDelay):
 			}
 			r.setState(nil)
 			continue
@@ -233,6 +230,20 @@ func (r *contractRunner) Run(ctx context.Context) {
 		}
 		r.recordFailure(ctx, r.stateCopy(), err, int32(attempt+1))
 		return
+	}
+}
+
+func (r *contractRunner) awaitCapacityRetry(ctx context.Context, attempts int32) bool {
+	timer := time.NewTimer(CapacityRetryDelay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-r.releaseCh:
+		r.writeStatus(ctx, v1alpha1.ComputeContractReleased, "released before a VM was held", r.stateCopy(), nil, nil, false, "released", attempts)
+		return false
+	case <-timer.C:
+		return true
 	}
 }
 
@@ -254,14 +265,23 @@ func (r *contractRunner) recordFailure(ctx context.Context, state *v1alpha1.Node
 	}
 }
 
+func (q *Requester) generatedVMName() string {
+	raw := make([]byte, 4)
+	if _, err := rand.Read(raw); err != nil {
+		return fmt.Sprintf("%s%d", DefaultVMNamePrefix, time.Now().UnixNano()%100000000)
+	}
+	return DefaultVMNamePrefix + hex.EncodeToString(raw)
+}
+
 func (r *contractRunner) requestOnce(ctx context.Context) (bool, error) {
+	q := r.q
 	contract := r.snapshot()
 	vmName := strings.TrimSpace(contract.Spec.VMName)
 	if vmName == "" {
-		vmName = r.svc.generatedVMName()
+		vmName = q.generatedVMName()
 	}
 	authorizedKeys := append([]string(nil), contract.Spec.SshAuthorizedKeys...)
-	authorizedKeys = append(authorizedKeys, r.svc.guestAuthorizedKeys...)
+	authorizedKeys = append(authorizedKeys, q.cfg.GuestAuthorizedKeys...)
 	userData := contract.Spec.UserData
 	if userData == "" {
 		userData = defaultUserData(authorizedKeys)
@@ -271,13 +291,13 @@ func (r *contractRunner) requestOnce(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("the guest iroh transport: %w", err)
 	}
-	userData = withGuestCACerts(userData, r.svc.guestCAPEM())
-	userData, err = r.contractModules(ctx, userData, contract)
+	userData = withGuestCACerts(userData, q.guestCAPEM())
+	userData, err = r.contractModules(userData, contract)
 	if err != nil {
 		return false, err
 	}
 	policyName := strings.TrimSpace(contract.Spec.Policy)
-	policyArgs, err := parsePolicyArgs(contract.Spec.PolicyArgs)
+	policyArgs, err := participant.ParsePolicyArgs(contract.Spec.PolicyArgs)
 	if err != nil {
 		return false, err
 	}
@@ -286,19 +306,17 @@ func (r *contractRunner) requestOnce(ctx context.Context) (bool, error) {
 		state = &v1alpha1.NodeClaimContract{
 			Version:    new(1),
 			Phase:      v1alpha1.ContractRequested,
-			Timestamps: &v1alpha1.ContractTimestamps{Requested: r.svc.nowISO()},
+			Timestamps: &v1alpha1.ContractTimestamps{Requested: q.nowISO()},
 		}
 	}
 	state.VMName = cmp.Or(state.VMName, vmName)
-	if state.RequesterDid == "" {
-		state.RequesterDid = r.svc.callbackDID()
-	}
-	state.MarketDid = cmp.Or(state.MarketDid, r.svc.marketDID)
+	state.RequesterDid = cmp.Or(state.RequesterDid, q.callbackDID())
+	state.MarketDid = cmp.Or(state.MarketDid, q.marketDID)
 	if state.Version == nil {
 		state.Version = new(1)
 	}
 	if state.Timestamps == nil {
-		state.Timestamps = &v1alpha1.ContractTimestamps{Requested: r.svc.nowISO()}
+		state.Timestamps = &v1alpha1.ContractTimestamps{Requested: q.nowISO()}
 	}
 	state.Phase = cmp.Or(state.Phase, v1alpha1.ContractRequested)
 	r.setState(state)
@@ -312,9 +330,9 @@ func (r *contractRunner) requestOnce(ctx context.Context) (bool, error) {
 			"mem":       DefaultComputeMem,
 			"disk":      DefaultComputeDisk,
 			"user_data": userData,
-			"createdAt": r.svc.nowISO(),
+			"createdAt": q.nowISO(),
 		}
-		payload, err := r.svc.repo.CreateRecord(ctx, r.svc.repoDID, market.ComputeVMNSID, payloadRecord)
+		payload, err := q.repo.CreateRecord(ctx, q.repoDID, market.ComputeVMNSID, payloadRecord)
 		if err != nil {
 			return false, fmt.Errorf("create the compute.vm record: %w", err)
 		}
@@ -342,8 +360,8 @@ func (r *contractRunner) requestOnce(ctx context.Context) (bool, error) {
 		if !ok {
 			return false, fmt.Errorf("policy %q names no bundled workflow", policyName)
 		}
-		policyRecord := BuildPolicyRecord(policyName, policyWorkflow, workflowText, r.svc.marketDID, policyArgs, r.svc.nowISO())
-		created, err := r.svc.repo.CreateRecord(ctx, r.svc.repoDID, PolicyGhaLiteNSID, policyRecord)
+		policyRecord := BuildPolicyRecord(policyName, policyWorkflow, workflowText, q.marketDID, policyArgs, q.nowISO())
+		created, err := q.repo.CreateRecord(ctx, q.repoDID, PolicyGhaLiteNSID, policyRecord)
 		if err != nil {
 			return false, fmt.Errorf("create the policy record: %w", err)
 		}
@@ -356,23 +374,23 @@ func (r *contractRunner) requestOnce(ctx context.Context) (bool, error) {
 	} else {
 		rfpOptions := market.RFPOptions{
 			Payload:   market.RecordRef{URI: state.Payload.URI, CID: state.Payload.CID},
-			SubmitBid: r.svc.submitBidRef(),
+			SubmitBid: q.submitBidRef(),
 			Domain:    "compute",
-			CreatedAt: r.svc.nowISO(),
+			CreatedAt: q.nowISO(),
 		}
 		if policyRef != nil {
 			rfpOptions.Policies = []market.RecordRef{{URI: policyRef.URI, CID: policyRef.CID}}
 		}
-		if r.svc.spec.SuspendParticipation {
+		if q.cfg.Spec.SuspendParticipation {
 			return false, ErrParticipationSuspended
 		}
-		rfp, err := market.CreateRFP(ctx, r.svc.repo, r.svc.repoDID, rfpOptions, r.svc.signer)
+		rfp, err := market.CreateRFP(ctx, q.repo, q.repoDID, rfpOptions, q.signer)
 		if err != nil {
 			return false, fmt.Errorf("create the market.rfp record: %w", err)
 		}
 		state.RFPURI = rfp.URI
 		state.RFP = &commonv1.StrongRef{URI: rfp.URI, CID: rfp.CID}
-		state.Timestamps.RFPSubmitted = r.svc.nowISO()
+		state.Timestamps.RFPSubmitted = q.nowISO()
 		rfpURI, rfpCID = rfp.URI, rfp.CID
 	}
 	r.writeStatus(ctx, v1alpha1.ComputeContractRequesting, "the RFP is submitted; collecting bids", state, nil, nil, false, "collectingBids", 1)
@@ -381,37 +399,13 @@ func (r *contractRunner) requestOnce(ctx context.Context) (bool, error) {
 		return r.resumeAccepted(ctx, state)
 	}
 
-	bidders, err := r.svc.market.Discover(ctx, r.svc.now())
+	bidders, err := q.market.Discover(ctx, q.now())
 	if err != nil {
 		r.log().Warn("requester_bidder_discovery_failed", "err", err)
 	}
 	bidders = withoutDeniedBidders(bidders, r.snapshot().Spec.DenyBidderDids)
-	r.svc.rememberBidders(bidders)
-	responseBids := []BidRecord{}
-	var submitWG sync.WaitGroup
-	var submitMu sync.Mutex
-	if r.svc.outboundXRPC() {
-		for _, bidder := range bidders {
-			if bidder.Endpoint == "" {
-				continue
-			}
-			bidder := bidder
-			submitWG.Go(func() {
-				timeout := max(r.svc.bidWindow, 5*time.Second)
-				cctx, cancel := context.WithTimeout(ctx, timeout)
-				defer cancel()
-				bids, err := r.svc.market.SubmitRFP(cctx, bidder, SubmitRFPRequest{URI: rfpURI, CID: rfpCID})
-				if err != nil {
-					r.log().Warn("requester_submit_rfp_failed", "bidder", bidder.DID, "err", err)
-					return
-				}
-				submitMu.Lock()
-				responseBids = append(responseBids, bids...)
-				submitMu.Unlock()
-			})
-		}
-		submitWG.Wait()
-	}
+	q.rememberBidders(bidders)
+	responseBids := r.solicitBids(ctx, bidders, rfpURI, rfpCID)
 
 	usePolicy := policyRef != nil
 	winner, allBids, retry, err := r.collectBids(ctx, rfpURI, responseBids, bidders, usePolicy, policyWorkflow)
@@ -431,7 +425,7 @@ func (r *contractRunner) requestOnce(ctx context.Context) (bool, error) {
 		}
 		if len(allBids) == 0 {
 			state.Outcome = v1alpha1.ContractOutcomeNoBids
-			state.Error = fmt.Sprintf("no bids received within %s", r.svc.bidWindow)
+			state.Error = fmt.Sprintf("no bids received within %s", q.cfg.BidWindow)
 			return false, errors.New(state.Error)
 		}
 		state.Outcome = v1alpha1.ContractOutcomeBidsDenied
@@ -451,7 +445,7 @@ func (r *contractRunner) requestOnce(ctx context.Context) (bool, error) {
 	}
 	winnerBidder, ok := bidderByDID[winner.DID]
 	if !ok {
-		winnerBidder, ok = r.svc.bidderForBid(ctx, *winner)
+		winnerBidder, ok = q.bidderForBid(ctx, *winner)
 	}
 	if !ok {
 		return false, fmt.Errorf("no endpoint is known for the winning bidder %s", winner.DID)
@@ -466,13 +460,13 @@ func (r *contractRunner) requestOnce(ctx context.Context) (bool, error) {
 		chosen.Reason = v1alpha1.ContractChosenFirstFree
 	}
 	if policyRef != nil && !winner.Free {
-		decision := r.svc.policy.Evaluate(ctx, PolicyInput{
-			SelfDid:          r.svc.marketDID,
+		decision := q.policy.Evaluate(ctx, PolicyInput{
+			SelfDid:          q.marketDID,
 			SubjectDid:       winner.DID,
 			CounterpartyDid:  winner.DID,
-			RootRequesterDid: r.svc.marketDID,
-			RFP:              &PolicyStrongRef{URI: rfpURI, CID: rfpCID},
-			Bid:              &PolicyStrongRef{URI: winner.URI, CID: winner.CID},
+			RootRequesterDid: q.marketDID,
+			RFP:              &PolicyRef{URI: rfpURI, CID: rfpCID},
+			Bid:              &PolicyRef{URI: winner.URI, CID: winner.CID},
 		})
 		if !decision.Allow {
 			state.Outcome = v1alpha1.ContractOutcomePolicyRejected
@@ -491,29 +485,29 @@ func (r *contractRunner) requestOnce(ctx context.Context) (bool, error) {
 	state.Bid = &commonv1.StrongRef{URI: winner.URI, CID: winner.CID}
 	state.Winner = &v1alpha1.ContractWinner{DID: winner.DID}
 	state.Bids = new(len(allBids))
-	state.Timestamps.WinnerSelected = r.svc.nowISO()
+	state.Timestamps.WinnerSelected = q.nowISO()
 	state.AcceptPending = &v1alpha1.ContractAcceptPending{BidURI: winner.URI}
 	r.writeStatus(ctx, v1alpha1.ComputeContractRequesting, "the winner is selected; accepting", state, allBids, chosen, false, "accepting", 1)
 
-	acceptRKey := sessionRKey("accept", r.svc.repoDID, r.name, rfpURI, rfpCID, winner.URI, winner.CID)
-	accept, found, err := r.svc.existingSignedRecord(ctx, market.AcceptNSID, acceptRKey)
+	acceptRKey := sessionRKey("accept", q.repoDID, r.name, rfpURI, rfpCID, winner.URI, winner.CID)
+	accept, found, err := q.existingSignedRecord(ctx, market.AcceptNSID, acceptRKey)
 	if err != nil {
 		return false, fmt.Errorf("read the market.accept record: %w", err)
 	}
-	if !found && r.svc.spec.SuspendParticipation {
+	if !found && q.cfg.Spec.SuspendParticipation {
 		return false, ErrParticipationSuspended
 	}
 	if !found {
 		acceptRecord, err := market.BuildAccept(market.AcceptOptions{
 			RFP:         market.RecordRef{URI: rfpURI, CID: rfpCID},
 			Bid:         market.RecordRef{URI: winner.URI, CID: winner.CID},
-			SubmitEvent: r.svc.submitEventRef(),
-			CreatedAt:   r.svc.nowISO(),
+			SubmitEvent: q.submitEventRef(),
+			CreatedAt:   q.nowISO(),
 		})
 		if err != nil {
 			return false, err
 		}
-		accept, err = market.CreateSignedRecordAt(ctx, r.svc.repo, r.svc.repoDID, market.AcceptNSID, acceptRKey, acceptRecord, r.svc.signer)
+		accept, err = market.CreateSignedRecordAt(ctx, q.repo, q.repoDID, market.AcceptNSID, acceptRKey, acceptRecord, q.signer)
 		if err != nil {
 			return false, fmt.Errorf("create the market.accept record: %w", err)
 		}
@@ -522,37 +516,42 @@ func (r *contractRunner) requestOnce(ctx context.Context) (bool, error) {
 	state.Accept = &commonv1.StrongRef{URI: accept.URI, CID: accept.CID}
 	state.AcceptPending = &v1alpha1.ContractAcceptPending{BidURI: winner.URI}
 	state.Phase = v1alpha1.ContractAccepted
-	state.Timestamps.Accepted = r.svc.nowISO()
+	state.Timestamps.Accepted = q.nowISO()
 	r.writeStatus(ctx, v1alpha1.ComputeContractRequesting, "the accept is submitted; waiting for the receipt", state, allBids, chosen, false, "awaitingReceipt", 1)
 
-	receipt, err := r.svc.submitAcceptAndWait(ctx, winnerBidder, accept.URI, accept.CID, winner.DID)
+	receipt, err := q.submitAcceptAndWait(ctx, winnerBidder, accept.URI, accept.CID, winner.DID)
 	if err != nil {
 		return false, err
 	}
 	if receipt == nil {
-		return false, fmt.Errorf("no receipt arrived within %s", r.svc.receiptTimeout)
+		return false, fmt.Errorf("no receipt arrived within %s", q.cfg.ReceiptTimeout)
 	}
-	verification := market.VerifyReceipt(ctx, receipt.Value, receipt.URI, accept.Record, accept.URI, market.VerifyRecordOptions{
-		KeysForDID:  market.NewDirectoryKeyLister(r.svc.directory),
-		KeyResolver: market.DefaultKeyResolver,
-	})
-	state.Receipt = &commonv1.StrongRef{URI: receipt.URI, CID: receipt.CID}
-	state.SubmitEventRef = stringOf(receipt.Value["submitEvent"])
-	state.ReceiptOk = new(verification.OK)
-	state.Phase = v1alpha1.ContractReceipt
-	state.Timestamps.Receipt = r.svc.nowISO()
-	if !verification.OK {
-		state.Outcome = v1alpha1.ContractOutcomeReceiptInvalid
-		state.Error = "the receipt signature or accept binding is invalid"
-		r.writeStatus(ctx, v1alpha1.ComputeContractFailed, state.Error, state, allBids, chosen, false, "receiptInvalid", 1)
-		return false, errors.New(state.Error)
-	}
-	r.writeStatus(ctx, v1alpha1.ComputeContractRequesting, "the receipt is verified; waiting for the guest", state, allBids, chosen, false, "awaitingGuestOnNetwork", 1)
+	return false, r.acceptReceipt(ctx, state, accept.Record, accept.URI, receipt)
+}
 
-	if state.Termination != nil {
-		return false, nil
+func (r *contractRunner) solicitBids(ctx context.Context, bidders []Bidder, rfpURI, rfpCID string) []BidRecord {
+	responseBids := []BidRecord{}
+	var submitWG sync.WaitGroup
+	var submitMu sync.Mutex
+	for _, bidder := range bidders {
+		if bidder.Endpoint == "" {
+			continue
+		}
+		submitWG.Go(func() {
+			cctx, cancel := context.WithTimeout(ctx, max(r.q.cfg.BidWindow, 5*time.Second))
+			defer cancel()
+			bids, err := r.q.market.SubmitRFP(cctx, bidder, SubmitRFPRequest{URI: rfpURI, CID: rfpCID})
+			if err != nil {
+				r.log().Warn("requester_submit_rfp_failed", "bidder", bidder.DID, "err", err)
+				return
+			}
+			submitMu.Lock()
+			responseBids = append(responseBids, bids...)
+			submitMu.Unlock()
+		})
 	}
-	return false, r.runGuestAndHold(ctx, state, receipt.URI, winner.DID)
+	submitWG.Wait()
+	return responseBids
 }
 
 func (r *contractRunner) runGuestAndHold(ctx context.Context, state *v1alpha1.NodeClaimContract, receiptURI, bidderDID string) error {
@@ -566,12 +565,13 @@ func (r *contractRunner) runGuestAndHold(ctx context.Context, state *v1alpha1.No
 		return nil
 	}
 	if r.secrets != nil && r.secretsFetched() == "" {
-		timeout := DefaultVMReadyTimeout
+		timer := time.NewTimer(DefaultVMReadyTimeout)
+		defer timer.Stop()
 		select {
 		case <-r.secrets.fetched:
 			r.setSecretsFetched(r.secrets.fetchedAtValue())
-		case <-time.After(timeout):
-			return fmt.Errorf("the guest did not fetch its join secrets within %s", timeout)
+		case <-timer.C:
+			return fmt.Errorf("the guest did not fetch its join secrets within %s", DefaultVMReadyTimeout)
 		case <-ctx.Done():
 			return ctx.Err()
 		}
@@ -579,7 +579,7 @@ func (r *contractRunner) runGuestAndHold(ctx context.Context, state *v1alpha1.No
 	state.Phase = v1alpha1.ContractNetwork
 	state.Outcome = v1alpha1.ContractOutcomeComplete
 	if state.Timestamps.Network == "" {
-		state.Timestamps.Network = r.svc.nowISO()
+		state.Timestamps.Network = r.q.nowISO()
 	}
 	r.writeStatus(ctx, v1alpha1.ComputeContractHeld, "held: the guest is on the network; set spec.release to release it", state, r.currentBids(), r.currentChosen(), false, "held", 1)
 	return r.waitForRelease(ctx, state, receiptURI, bidderDID)
@@ -590,36 +590,33 @@ func (r *contractRunner) resumeAccepted(ctx context.Context, state *v1alpha1.Nod
 	if bidderDID == "" {
 		return false, errors.New("the recorded contract names no winning bidder")
 	}
-	bidder, ok := r.svc.bidderForDID(ctx, bidderDID)
+	bidder, ok := r.q.bidderForDID(ctx, bidderDID)
 	if !ok {
 		return false, fmt.Errorf("no endpoint is known for the winning bidder %s", bidderDID)
 	}
 	acceptRef := market.RecordRef{URI: state.Accept.URI, CID: state.Accept.CID}
-	accept, err := r.svc.repo.Resolve(ctx, acceptRef)
+	accept, err := r.q.repo.Resolve(ctx, acceptRef)
 	if err != nil {
 		return false, fmt.Errorf("read the recorded market.accept record: %w", err)
 	}
 	r.writeStatus(ctx, v1alpha1.ComputeContractRequesting, "the accept is recorded; waiting for the receipt", state, r.currentBids(), r.currentChosen(), false, "awaitingReceipt", 1)
-	receipt, err := r.svc.submitAcceptAndWait(ctx, bidder, acceptRef.URI, acceptRef.CID, bidderDID)
+	receipt, err := r.q.submitAcceptAndWait(ctx, bidder, acceptRef.URI, acceptRef.CID, bidderDID)
 	if err != nil {
 		return false, err
 	}
 	if receipt == nil {
-		return false, fmt.Errorf("no receipt arrived within %s", r.svc.receiptTimeout)
+		return false, fmt.Errorf("no receipt arrived within %s", r.q.cfg.ReceiptTimeout)
 	}
 	return false, r.acceptReceipt(ctx, state, accept.Value, acceptRef.URI, receipt)
 }
 
 func (r *contractRunner) acceptReceipt(ctx context.Context, state *v1alpha1.NodeClaimContract, acceptRecord map[string]any, acceptURI string, receipt *market.ResolvedRecord) error {
-	verification := market.VerifyReceipt(ctx, receipt.Value, receipt.URI, acceptRecord, acceptURI, market.VerifyRecordOptions{
-		KeysForDID:  market.NewDirectoryKeyLister(r.svc.directory),
-		KeyResolver: market.DefaultKeyResolver,
-	})
+	verification := market.VerifyReceipt(ctx, receipt.Value, receipt.URI, acceptRecord, acceptURI, r.q.receiptOptions())
 	state.Receipt = &commonv1.StrongRef{URI: receipt.URI, CID: receipt.CID}
 	state.SubmitEventRef = stringOf(receipt.Value["submitEvent"])
 	state.ReceiptOk = new(verification.OK)
 	state.Phase = v1alpha1.ContractReceipt
-	state.Timestamps.Receipt = r.svc.nowISO()
+	state.Timestamps.Receipt = r.q.nowISO()
 	if !verification.OK {
 		state.Outcome = v1alpha1.ContractOutcomeReceiptInvalid
 		state.Error = "the receipt signature or accept binding is invalid"
@@ -627,6 +624,9 @@ func (r *contractRunner) acceptReceipt(ctx context.Context, state *v1alpha1.Node
 		return errors.New(state.Error)
 	}
 	r.writeStatus(ctx, v1alpha1.ComputeContractRequesting, "the receipt is verified; waiting for the guest", state, r.currentBids(), r.currentChosen(), false, "awaitingGuestOnNetwork", 1)
+	if state.Termination != nil {
+		return nil
+	}
 	return r.runGuestAndHold(ctx, state, receipt.URI, winnerDID(state))
 }
 
@@ -661,7 +661,7 @@ func (r *contractRunner) resumeReceipt(ctx context.Context, state *v1alpha1.Node
 		state.Timestamps = &v1alpha1.ContractTimestamps{}
 	}
 	if state.Timestamps.Receipt == "" {
-		state.Timestamps.Receipt = r.svc.nowISO()
+		state.Timestamps.Receipt = r.q.nowISO()
 	}
 	return r.runGuestAndHold(ctx, state, receiptRef.URI, bidderDID)
 }
@@ -686,7 +686,7 @@ func (r *contractRunner) refreshTermination(ctx context.Context, state *v1alpha1
 		state.Phase = v1alpha1.ContractReleased
 		return true
 	}
-	if state.Receipt == nil || state.Receipt.URI == "" || r.svc.market == nil {
+	if state.Receipt == nil || state.Receipt.URI == "" || r.q.market == nil {
 		return false
 	}
 	bidderDID := winnerDID(state)
@@ -695,7 +695,7 @@ func (r *contractRunner) refreshTermination(ctx context.Context, state *v1alpha1
 	}
 	readCtx, cancel := context.WithTimeout(ctx, DefaultHTTPTimeout)
 	defer cancel()
-	events, err := r.svc.market.FindTerminations(readCtx, bidderDID, state.Receipt.URI)
+	events, err := r.q.market.FindTerminations(readCtx, bidderDID, state.Receipt.URI)
 	if err != nil {
 		if ctx.Err() == nil {
 			r.log().Warn("requester_termination_resume_read_failed", "bidder", bidderDID, "receipt", state.Receipt.URI, "err", err)
@@ -703,7 +703,7 @@ func (r *contractRunner) refreshTermination(ctx context.Context, state *v1alpha1
 		return false
 	}
 	for _, event := range events {
-		parsed, err := parseGuestEvent(readCtx, r.svc.directory, r.svc.badgeBlueBinding(), event, state.Receipt.URI)
+		parsed, err := r.q.parseGuestEvent(readCtx, event, state.Receipt.URI)
 		if err != nil {
 			r.log().Warn("requester_termination_resume_refused", "uri", event.Event.URI, "err", err)
 			continue
@@ -711,7 +711,7 @@ func (r *contractRunner) refreshTermination(ctx context.Context, state *v1alpha1
 		if parsed.Kind != market.ComputeEventsVMTerminatedNSID {
 			continue
 		}
-		applyTermination(state, parsed.Termination, r.svc.nowISO())
+		applyTermination(state, parsed.Termination, r.q.nowISO())
 		r.log().Info("requester_termination_resumed", "bidder", bidderDID, "receipt", state.Receipt.URI, "event", parsed.Event.URI, "reason", parsed.Termination.Reason)
 		return true
 	}
@@ -719,7 +719,7 @@ func (r *contractRunner) refreshTermination(ctx context.Context, state *v1alpha1
 }
 
 func (r *contractRunner) verifyRecordedReceipt(ctx context.Context, state *v1alpha1.NodeClaimContract, receiptRef market.RecordRef) (bool, error) {
-	receipt, err := r.svc.repo.Resolve(ctx, receiptRef)
+	receipt, err := r.q.repo.Resolve(ctx, receiptRef)
 	if err != nil {
 		return false, fmt.Errorf("read the recorded market.receipt record: %w", err)
 	}
@@ -729,19 +729,18 @@ func (r *contractRunner) verifyRecordedReceipt(ctx context.Context, state *v1alp
 	if state.Accept == nil || state.Accept.URI == "" {
 		return true, nil
 	}
-	accept, err := r.svc.repo.Resolve(ctx, market.RecordRef{URI: state.Accept.URI, CID: state.Accept.CID})
+	accept, err := r.q.repo.Resolve(ctx, market.RecordRef{URI: state.Accept.URI, CID: state.Accept.CID})
 	if err != nil {
 		return false, fmt.Errorf("read the recorded market.accept record: %w", err)
 	}
-	verification := market.VerifyReceipt(ctx, receipt.Value, receipt.URI, accept.Value, state.Accept.URI, market.VerifyRecordOptions{
-		KeysForDID:  market.NewDirectoryKeyLister(r.svc.directory),
-		KeyResolver: market.DefaultKeyResolver,
-	})
+	verification := market.VerifyReceipt(ctx, receipt.Value, receipt.URI, accept.Value, state.Accept.URI, r.q.receiptOptions())
 	return verification.OK, nil
 }
 
 func (r *contractRunner) collectBids(ctx context.Context, rfpURI string, response []BidRecord, bidders []Bidder, usePolicy bool, workflow string) (*BidRecord, []v1alpha1.ContractBid, bool, error) {
-	deadline := time.Now().Add(r.svc.bidWindow)
+	q := r.q
+	window := time.NewTimer(max(q.cfg.BidWindow, 0))
+	defer window.Stop()
 	byURI := map[string]BidRecord{}
 	deny := r.snapshot().Spec.DenyBidderDids
 	add := func(bids []BidRecord) {
@@ -753,22 +752,18 @@ func (r *contractRunner) collectBids(ctx context.Context, rfpURI string, respons
 		}
 	}
 	add(response)
-	ticker := time.NewTicker(250 * time.Millisecond)
-	defer ticker.Stop()
-	pollTicker := time.NewTicker(time.Second)
-	defer pollTicker.Stop()
-	var early *BidRecord
+	poll := time.NewTicker(bidPollPeriod)
+	defer poll.Stop()
 	var selected *BidRecord
-	for {
-		add(r.svc.takeBids(rfpURI))
-		if early == nil {
-			if candidate := r.freeWinner(ctx, byURI, usePolicy, workflow); candidate != nil {
-				early = candidate
-				selected = candidate
-				break
-			}
+	open := q.cfg.BidWindow > 0
+	for selected == nil {
+		arrived := q.bids.arrived()
+		add(q.bids.take(rfpURI))
+		if candidate := r.freeWinner(ctx, byURI, usePolicy, workflow); candidate != nil {
+			selected = candidate
+			break
 		}
-		if !time.Now().Before(deadline) {
+		if !open {
 			break
 		}
 		select {
@@ -776,19 +771,19 @@ func (r *contractRunner) collectBids(ctx context.Context, rfpURI string, respons
 			return nil, nil, false, ctx.Err()
 		case <-r.releaseCh:
 			return nil, nil, false, nil
-		case <-ticker.C:
-		case <-pollTicker.C:
+		case <-window.C:
+			open = false
+		case <-arrived:
+		case <-poll.C:
 			for _, bidder := range bidders {
-				bids, err := r.svc.market.FindBids(ctx, bidder.DID, rfpURI)
-				if err != nil {
-					continue
+				if bids, err := q.market.FindBids(ctx, bidder.DID, rfpURI); err == nil {
+					add(bids)
 				}
-				add(bids)
 			}
 		}
 	}
-	add(r.svc.takeBids(rfpURI))
-	if early == nil {
+	add(q.bids.take(rfpURI))
+	if selected == nil {
 		selected = r.bestBid(ctx, byURI, usePolicy, workflow)
 	}
 	records := make([]v1alpha1.ContractBid, 0, len(byURI))
@@ -800,19 +795,18 @@ func (r *contractRunner) collectBids(ctx context.Context, rfpURI string, respons
 			Verdict:   v1alpha1.ContractBidConsidered,
 			ArrivedAt: bid.arrivedAtISO(),
 		}
-		if bid.Free {
-			entry.Cost = 0
-		} else {
+		if !bid.Free {
 			entry.Cost = int64(bid.Cost)
 		}
-		if selected != nil && selected.URI == bid.URI {
+		switch {
+		case selected != nil && selected.URI == bid.URI:
 			entry.Verdict = v1alpha1.ContractBidChosen
 			retryCapacity = false
-		} else if !r.svc.bidAllowedWithPolicy(ctx, bid, usePolicy, workflow) {
+		case !q.bidAllowedWithPolicy(ctx, bid, usePolicy, workflow):
 			entry.Verdict = v1alpha1.ContractBidPolicyRejected
-		} else if selected != nil {
+		case selected != nil:
 			entry.Verdict = v1alpha1.ContractBidNotChosen
-		} else {
+		default:
 			entry.Verdict = v1alpha1.ContractBidDenied
 			if !(bid.Free && strings.EqualFold(bid.Reason, "capacity")) {
 				retryCapacity = false
@@ -832,10 +826,10 @@ func (r *contractRunner) collectBids(ctx context.Context, rfpURI string, respons
 func (r *contractRunner) freeWinner(ctx context.Context, bids map[string]BidRecord, usePolicy bool, workflow string) *BidRecord {
 	for _, bid := range bids {
 		bidCopy := bid
-		if err := r.svc.classifyBid(ctx, &bidCopy); err != nil {
+		if err := r.q.classifyBid(ctx, &bidCopy); err != nil {
 			continue
 		}
-		if bidCopy.Free && r.svc.bidAllowedWithPolicy(ctx, bidCopy, usePolicy, workflow) {
+		if bidCopy.Free && r.q.bidAllowedWithPolicy(ctx, bidCopy, usePolicy, workflow) {
 			return &bidCopy
 		}
 	}
@@ -846,10 +840,10 @@ func (r *contractRunner) bestBid(ctx context.Context, bids map[string]BidRecord,
 	var best *BidRecord
 	for _, bid := range bids {
 		bidCopy := bid
-		if err := r.svc.classifyBid(ctx, &bidCopy); err != nil {
+		if err := r.q.classifyBid(ctx, &bidCopy); err != nil {
 			continue
 		}
-		if !r.svc.bidAllowedWithPolicy(ctx, bidCopy, usePolicy, workflow) {
+		if !r.q.bidAllowedWithPolicy(ctx, bidCopy, usePolicy, workflow) {
 			continue
 		}
 		if best == nil || bidCopy.Cost < best.Cost {
@@ -860,10 +854,13 @@ func (r *contractRunner) bestBid(ctx context.Context, bids map[string]BidRecord,
 }
 
 func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClaimContract, receiptURI, bidderDID string) error {
-	events, pending, closeEvents := r.svc.registerEventSink(receiptURI)
+	events, pending, closeEvents := r.q.registerEventSink(receiptURI)
 	defer closeEvents()
-	addressDeadline := time.Now().Add(DefaultVMReadyTimeout)
-	hostKeysDeadline := time.Now().Add(DefaultHostKeysTimeout)
+	addressDeadline := time.NewTimer(DefaultVMReadyTimeout)
+	defer addressDeadline.Stop()
+	hostKeysDeadline := time.NewTimer(DefaultHostKeysTimeout)
+	defer hostKeysDeadline.Stop()
+	addressLate, hostKeysLate := false, false
 	seen := map[string]bool{}
 	seedGuestEventSeen(seen, state)
 	emptyLogged := false
@@ -871,7 +868,7 @@ func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClai
 		if guestEventSeen(seen, event) {
 			return false
 		}
-		parsed, err := parseGuestEvent(ctx, r.svc.directory, r.svc.badgeBlueBinding(), event, receiptURI)
+		parsed, err := r.q.parseGuestEvent(ctx, event, receiptURI)
 		if err != nil {
 			r.log().Warn("requester_guest_event_refused", "uri", event.Event.URI, "err", err)
 			return false
@@ -886,7 +883,7 @@ func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClai
 			if state.Timestamps == nil {
 				state.Timestamps = &v1alpha1.ContractTimestamps{}
 			}
-			state.Timestamps.Network = r.svc.nowISO()
+			state.Timestamps.Network = r.q.nowISO()
 			r.log().Info("requester_guest_on_network", "address", parsed.Address)
 		case market.ComputeEventsVMHostKeysNSID:
 			if state.HostKeys != nil && guestEventRecorded(state.HostKeys.Event, state.HostKeys.Payload, parsed) {
@@ -900,7 +897,7 @@ func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClai
 			}
 			r.log().Info("requester_guest_host_keys", "keys", len(parsed.HostKeys))
 		case market.ComputeEventsVMTerminatedNSID:
-			applyTermination(state, parsed.Termination, r.svc.nowISO())
+			applyTermination(state, parsed.Termination, r.q.nowISO())
 			r.writeStatus(ctx, v1alpha1.ComputeContractReleased, terminationMessage(parsed.Termination), state, r.currentBids(), r.currentChosen(), false, "terminated", 1)
 			return true
 		}
@@ -910,7 +907,7 @@ func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClai
 	if slices.ContainsFunc(pending, handle) {
 		return nil
 	}
-	poll := time.NewTicker(500 * time.Millisecond)
+	poll := time.NewTicker(guestEventPollPeriod)
 	defer poll.Stop()
 	for {
 		if state.Termination != nil {
@@ -922,12 +919,11 @@ func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClai
 		if r.released() {
 			return nil
 		}
-		now := time.Now()
-		if state.VMAddress == "" && now.After(addressDeadline) {
+		if state.VMAddress == "" && addressLate {
 			state.Outcome = v1alpha1.ContractOutcomeNetworkTimeout
 			return fmt.Errorf("the guest did not come on network within %s", DefaultVMReadyTimeout)
 		}
-		if state.VMAddress != "" && state.HostKeys == nil && now.After(hostKeysDeadline) {
+		if state.VMAddress != "" && state.HostKeys == nil && hostKeysLate {
 			return fmt.Errorf("the guest reported no ssh host keys within %s", DefaultHostKeysTimeout)
 		}
 		select {
@@ -935,12 +931,16 @@ func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClai
 			return ctx.Err()
 		case <-r.releaseCh:
 			return nil
+		case <-addressDeadline.C:
+			addressLate = true
+		case <-hostKeysDeadline.C:
+			hostKeysLate = true
 		case event := <-events:
 			if handle(event) {
 				return nil
 			}
 		case <-poll.C:
-			found, err := r.svc.market.FindEvents(ctx, bidderDID, receiptURI)
+			found, err := r.q.market.FindEvents(ctx, bidderDID, receiptURI)
 			if err != nil {
 				r.log().Warn("requester_event_poll_failed", "bidder", bidderDID, "err", err)
 				continue
@@ -957,7 +957,7 @@ func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClai
 }
 
 func (r *contractRunner) waitForRelease(ctx context.Context, state *v1alpha1.NodeClaimContract, receiptURI, bidderDID string) error {
-	events, _, closeEvents := r.svc.registerEventSink(receiptURI)
+	events, _, closeEvents := r.q.registerEventSink(receiptURI)
 	defer closeEvents()
 	seen := map[string]bool{}
 	seedGuestEventSeen(seen, state)
@@ -968,23 +968,23 @@ func (r *contractRunner) waitForRelease(ctx context.Context, state *v1alpha1.Nod
 		if market.NSIDFromURI(event.Payload.URI) != market.ComputeEventsVMTerminatedNSID {
 			return false
 		}
-		parsed, err := parseGuestEvent(ctx, r.svc.directory, r.svc.badgeBlueBinding(), event, receiptURI)
+		parsed, err := r.q.parseGuestEvent(ctx, event, receiptURI)
 		if err != nil || parsed.Kind != market.ComputeEventsVMTerminatedNSID {
 			return false
 		}
-		applyTermination(state, parsed.Termination, r.svc.nowISO())
+		applyTermination(state, parsed.Termination, r.q.nowISO())
 		r.writeStatus(ctx, v1alpha1.ComputeContractReleased, terminationMessage(parsed.Termination), state, r.currentBids(), r.currentChosen(), false, "terminated", 1)
 		return true
 	}
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
+	poll := time.NewTicker(terminationPollPeriod)
+	defer poll.Stop()
 	for {
 		if state.Termination != nil {
 			return nil
 		}
 		select {
 		case <-ctx.Done():
-			if r.svc.ctx.Err() != nil {
+			if r.q.stopping() {
 				r.log().Info("requester_contract_left_for_restart")
 				return nil
 			}
@@ -995,8 +995,8 @@ func (r *contractRunner) waitForRelease(ctx context.Context, state *v1alpha1.Nod
 			if handle(event) {
 				return nil
 			}
-		case <-ticker.C:
-			found, err := r.svc.market.FindTerminations(ctx, bidderDID, receiptURI)
+		case <-poll.C:
+			found, err := r.q.market.FindTerminations(ctx, bidderDID, receiptURI)
 			if err != nil {
 				continue
 			}
@@ -1007,7 +1007,20 @@ func (r *contractRunner) waitForRelease(ctx context.Context, state *v1alpha1.Nod
 	}
 }
 
+func (r *contractRunner) finishRelease(ctx context.Context, state *v1alpha1.NodeClaimContract, release *v1alpha1.ComputeContractRelease, message string) {
+	state.Release.OK = true
+	state.Phase = v1alpha1.ContractReleased
+	if state.Timestamps != nil && state.Timestamps.Released == "" {
+		state.Timestamps.Released = r.q.nowISO()
+	}
+	release.LastError = ""
+	r.setRelease(release)
+	r.writeStatus(ctx, v1alpha1.ComputeContractReleased, message, state, r.currentBids(), r.currentChosen(), false, "released", int32(release.Attempts))
+	r.deleteRBAC(ctx)
+}
+
 func (r *contractRunner) releaseContract(ctx context.Context, state *v1alpha1.NodeClaimContract, bidderDID string) error {
+	q := r.q
 	if state == nil || state.Receipt == nil {
 		r.writeStatus(ctx, v1alpha1.ComputeContractReleased, "released before a VM was held", state, r.currentBids(), r.currentChosen(), false, "released", 1)
 		r.deleteRBAC(ctx)
@@ -1016,7 +1029,7 @@ func (r *contractRunner) releaseContract(ctx context.Context, state *v1alpha1.No
 	if state.Termination != nil {
 		state.Phase = v1alpha1.ContractReleased
 		if state.Timestamps != nil && state.Timestamps.Released == "" {
-			state.Timestamps.Released = r.svc.nowISO()
+			state.Timestamps.Released = q.nowISO()
 		}
 		r.writeStatus(ctx, v1alpha1.ComputeContractReleased, terminationMessage(state.Termination), state, r.currentBids(), r.currentChosen(), false, "terminated", 1)
 		r.deleteRBAC(ctx)
@@ -1038,9 +1051,9 @@ func (r *contractRunner) releaseContract(ctx context.Context, state *v1alpha1.No
 		release = &v1alpha1.ComputeContractRelease{}
 	}
 	if release.StartedAt == "" {
-		release.StartedAt = r.svc.nowISO()
+		release.StartedAt = q.nowISO()
 	}
-	deadline := r.svc.releaseDeadline(r.snapshot())
+	deadline := q.releaseDeadline(r.snapshot())
 	if release.Deadline != "" {
 		if parsed, err := time.Parse(time.RFC3339, release.Deadline); err == nil {
 			deadline = parsed
@@ -1050,13 +1063,9 @@ func (r *contractRunner) releaseContract(ctx context.Context, state *v1alpha1.No
 	}
 	r.setRelease(release)
 
-	var bidder Bidder
-	if r.svc.outboundXRPC() {
-		var ok bool
-		bidder, ok = r.svc.bidderForDID(ctx, bidderDID)
-		if !ok || bidder.Endpoint == "" {
-			bidder = Bidder{}
-		}
+	bidder, ok := q.bidderForDID(ctx, bidderDID)
+	if !ok {
+		bidder = Bidder{}
 	}
 
 	r.writeStatus(ctx, v1alpha1.ComputeContractReleasing, "destroying the guest", state, r.currentBids(), r.currentChosen(), false, "releasing", int32(release.Attempts))
@@ -1070,17 +1079,9 @@ func (r *contractRunner) releaseContract(ctx context.Context, state *v1alpha1.No
 	}
 	r.writeStatus(ctx, v1alpha1.ComputeContractReleasing, "the destroy is recorded; sending it", state, r.currentBids(), r.currentChosen(), false, "releasing", int32(release.Attempts))
 
-	if !r.svc.outboundXRPC() || bidder.Endpoint == "" {
+	if bidder.Endpoint == "" {
 		release.Attempts++
-		state.Release.OK = true
-		state.Phase = v1alpha1.ContractReleased
-		if state.Timestamps != nil && state.Timestamps.Released == "" {
-			state.Timestamps.Released = r.svc.nowISO()
-		}
-		release.LastError = ""
-		r.setRelease(release)
-		r.writeStatus(ctx, v1alpha1.ComputeContractReleased, "released; the firehose carries the destroy", state, r.currentBids(), r.currentChosen(), false, "released", int32(release.Attempts))
-		r.deleteRBAC(ctx)
+		r.finishRelease(ctx, state, release, "released; the firehose carries the destroy")
 		return nil
 	}
 
@@ -1088,18 +1089,10 @@ func (r *contractRunner) releaseContract(ctx context.Context, state *v1alpha1.No
 		release.Attempts++
 		r.setRelease(release)
 		r.writeStatus(ctx, v1alpha1.ComputeContractReleasing, fmt.Sprintf("destroying the guest: attempt %d", release.Attempts), state, r.currentBids(), r.currentChosen(), false, "releasing", int32(release.Attempts))
-		status, err := r.svc.market.SubmitEvent(ctx, bidder, SubmitEventRequest{URI: eventRef.URI, CID: eventRef.CID, Record: eventRecord})
+		status, err := q.market.SubmitEvent(ctx, bidder, SubmitEventRequest{URI: eventRef.URI, CID: eventRef.CID, Record: eventRecord})
 		if err == nil && status >= 200 && status <= 299 {
-			state.Release.OK = true
 			state.Release.Status = &status
-			state.Phase = v1alpha1.ContractReleased
-			if state.Timestamps != nil && state.Timestamps.Released == "" {
-				state.Timestamps.Released = r.svc.nowISO()
-			}
-			release.LastError = ""
-			r.setRelease(release)
-			r.writeStatus(ctx, v1alpha1.ComputeContractReleased, "released", state, r.currentBids(), r.currentChosen(), false, "released", int32(release.Attempts))
-			r.deleteRBAC(ctx)
+			r.finishRelease(ctx, state, release, "released")
 			return nil
 		}
 		detail := "no answer"
@@ -1112,64 +1105,104 @@ func (r *contractRunner) releaseContract(ctx context.Context, state *v1alpha1.No
 		release.LastError = detail
 		r.setRelease(release)
 		message := fmt.Sprintf("the destroy failed on attempt %d: %s", release.Attempts, detail)
-		if time.Now().After(deadline) {
+		if q.now().After(deadline) {
 			r.writeStatus(ctx, v1alpha1.ComputeContractReleasing, message+"; the deadline passed, the release intent stays recorded", state, r.currentBids(), r.currentChosen(), false, "releaseFailed", int32(release.Attempts))
 			return fmt.Errorf("the guest was not destroyed by %s: %s", deadline.UTC().Format(time.RFC3339), detail)
 		}
 		r.writeStatus(ctx, v1alpha1.ComputeContractReleasing, message+"; retrying", state, r.currentBids(), r.currentChosen(), false, "releaseFailed", int32(release.Attempts))
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(r.svc.releaseRetryDelay(release.Attempts)):
+		if err := sleepCtx(ctx, releaseRetryDelay(release.Attempts)); err != nil {
+			return err
 		}
 	}
+}
+
+func sleepCtx(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func (q *Requester) releaseDeadline(contract v1alpha1.ComputeContract) time.Time {
+	base := contract.CreationTimestamp.Time
+	if base.IsZero() {
+		base = q.now()
+	}
+	bound := DefaultReleaseBound
+	if ttl := contract.Spec.TTLSecondsAfterFinished; ttl != nil && *ttl > 0 {
+		bound = time.Duration(*ttl) * time.Second
+	}
+	return base.Add(bound)
+}
+
+func releaseRetryDelay(attempt int) time.Duration {
+	delay := DefaultReleaseRetryFirst
+	for i := 1; i < attempt; i++ {
+		delay *= 2
+		if delay >= DefaultReleaseRetryMax {
+			return DefaultReleaseRetryMax
+		}
+	}
+	return min(delay, DefaultReleaseRetryMax)
 }
 
 func (r *contractRunner) releaseEnvelope(ctx context.Context, state *v1alpha1.NodeClaimContract) (market.RecordRef, map[string]any, error) {
 	if state.Release != nil && state.Release.Event.URI != "" {
 		ref := market.RecordRef{URI: state.Release.Event.URI, CID: state.Release.Event.CID}
-		resolved, err := r.svc.repo.Resolve(ctx, ref)
+		resolved, err := r.q.repo.Resolve(ctx, ref)
 		if err != nil {
 			return market.RecordRef{}, nil, fmt.Errorf("read the recorded destroy event: %w", err)
 		}
 		return ref, resolved.Value, nil
 	}
-	payloadRKey := sessionRKey("delete", state.Receipt.URI)
-	payload, foundPayload, err := r.svc.existingSignedRecord(ctx, market.ComputeEventsVMDeleteNSID, payloadRKey)
+	envelope, payload, err := r.q.destroyEnvelope(ctx, state.Receipt, "released")
 	if err != nil {
-		return market.RecordRef{}, nil, fmt.Errorf("read the destroy payload: %w", err)
-	}
-	if !foundPayload {
-		payloadRecord := map[string]any{
-			"$type":     market.ComputeEventsVMDeleteNSID,
-			"reason":    "released",
-			"createdAt": r.svc.nowISO(),
-		}
-		payload, err = market.CreateSignedRecordAt(ctx, r.svc.repo, r.svc.repoDID, market.ComputeEventsVMDeleteNSID, payloadRKey, payloadRecord, r.svc.signer)
-		if err != nil {
-			return market.RecordRef{}, nil, fmt.Errorf("create the destroy payload: %w", err)
-		}
-	}
-	eventRKey := sessionRKey("event", state.Receipt.URI)
-	envelope, foundEvent, err := r.svc.existingSignedRecord(ctx, market.EventNSID, eventRKey)
-	if err != nil {
-		return market.RecordRef{}, nil, fmt.Errorf("read the destroy event: %w", err)
-	}
-	if !foundEvent {
-		envelope, err = market.PutEvent(ctx, r.svc.repo, r.svc.repoDID, eventRKey, market.EventOptions{
-			Receipt:   market.RecordRef{URI: state.Receipt.URI, CID: state.Receipt.CID},
-			Payload:   market.RecordRef{URI: payload.URI, CID: payload.CID},
-			CreatedAt: r.svc.nowISO(),
-		}, r.svc.signer)
-		if err != nil {
-			return market.RecordRef{}, nil, fmt.Errorf("create the destroy event: %w", err)
-		}
+		return market.RecordRef{}, nil, err
 	}
 	state.Release = &v1alpha1.ContractRelease{
 		Event:   commonv1.StrongRef{URI: envelope.URI, CID: envelope.CID},
 		Payload: commonv1.StrongRef{URI: payload.URI, CID: payload.CID},
 	}
 	return market.RecordRef{URI: envelope.URI, CID: envelope.CID}, envelope.Record, nil
+}
+
+func (q *Requester) destroyEnvelope(ctx context.Context, receipt *commonv1.StrongRef, reason string) (market.SignedRecord, market.SignedRecord, error) {
+	payloadRKey := sessionRKey("delete", receipt.URI)
+	payload, foundPayload, err := q.existingSignedRecord(ctx, market.ComputeEventsVMDeleteNSID, payloadRKey)
+	if err != nil {
+		return market.SignedRecord{}, market.SignedRecord{}, fmt.Errorf("read the destroy payload: %w", err)
+	}
+	if !foundPayload {
+		payloadRecord := map[string]any{
+			"$type":     market.ComputeEventsVMDeleteNSID,
+			"reason":    reason,
+			"createdAt": q.nowISO(),
+		}
+		payload, err = market.CreateSignedRecordAt(ctx, q.repo, q.repoDID, market.ComputeEventsVMDeleteNSID, payloadRKey, payloadRecord, q.signer)
+		if err != nil {
+			return market.SignedRecord{}, market.SignedRecord{}, fmt.Errorf("create the destroy payload: %w", err)
+		}
+	}
+	eventRKey := sessionRKey("event", receipt.URI)
+	envelope, foundEvent, err := q.existingSignedRecord(ctx, market.EventNSID, eventRKey)
+	if err != nil {
+		return market.SignedRecord{}, market.SignedRecord{}, fmt.Errorf("read the destroy event: %w", err)
+	}
+	if !foundEvent {
+		envelope, err = market.PutEvent(ctx, q.repo, q.repoDID, eventRKey, market.EventOptions{
+			Receipt:   market.RecordRef{URI: receipt.URI, CID: receipt.CID},
+			Payload:   market.RecordRef{URI: payload.URI, CID: payload.CID},
+			CreatedAt: q.nowISO(),
+		}, q.signer)
+		if err != nil {
+			return market.SignedRecord{}, market.SignedRecord{}, fmt.Errorf("create the destroy event: %w", err)
+		}
+	}
+	return envelope, payload, nil
 }
 
 func (r *contractRunner) runAdopt(ctx context.Context, contract v1alpha1.ComputeContract) {
@@ -1192,7 +1225,7 @@ func (r *contractRunner) runAdopt(ctx context.Context, contract v1alpha1.Compute
 	}
 	state.Phase = v1alpha1.ContractNetwork
 	r.writeStatus(ctx, v1alpha1.ComputeContractHeld, "adopted: no RFP was sent and no vm.delete was submitted", state, nil, nil, false, "adopted", 1)
-	if err := r.waitForRelease(ctx, state, state.Receipt.URI, winnerDID(state)); err != nil && r.svc.ctx.Err() == nil {
+	if err := r.waitForRelease(ctx, state, state.Receipt.URI, winnerDID(state)); err != nil && !r.q.stopping() {
 		r.recordFailure(ctx, r.stateCopy(), err, 1)
 	}
 }
@@ -1208,22 +1241,14 @@ func (r *contractRunner) writeStatus(ctx context.Context, phase v1alpha1.Compute
 		Conditions:         append([]metav1.Condition(nil), contract.Status.Conditions...),
 		Execution: &v1alpha1.ExecutionStatus{
 			Step:          step,
-			StepStartedAt: r.svc.nowISO(),
-			LastEventAt:   r.svc.nowISO(),
+			StepStartedAt: r.q.nowISO(),
+			LastEventAt:   r.q.nowISO(),
 			Attempts:      attempts,
 		},
-	}
-	if state != nil {
-		status.Contract = cloneNodeClaimContract(state)
-	}
-	if url := r.secretsURLValue(); url != "" {
-		status.SecretsURL = url
-	}
-	if fetched := r.secretsFetched(); fetched != "" {
-		status.SecretsFetchedAt = fetched
-	}
-	if grant := r.grantValue(); grant != nil {
-		status.Grant = grant
+		Contract:         cloneNodeClaimContract(state),
+		SecretsURL:       r.secretsURLValue(),
+		SecretsFetchedAt: r.secretsFetched(),
+		Grant:            r.grantValue(),
 	}
 	if release := r.releaseStatus(); release != nil {
 		status.Release = release
@@ -1232,15 +1257,17 @@ func (r *contractRunner) writeStatus(ctx context.Context, phase v1alpha1.Compute
 		status.Release = &preserved
 	}
 	r.applyConditions(&status, contract.Generation, phase, message, state, atCapacity)
-	if err := r.svc.contracts.PatchStatus(ctx, r.name, status); err != nil {
-		if !isNotFound(err) {
-			r.log().Warn("requester_contract_status_failed", "err", err)
-		}
+	if err := r.q.deps.Intents.MergeComputeContractStatus(ctx, r.name, status); err != nil && !notFound(err) {
+		r.log().Warn("requester_contract_status_failed", "err", err)
 	}
 }
 
+func notFound(err error) bool {
+	return err != nil && (errors.Is(err, contractmarket.ErrNotFound) || strings.Contains(err.Error(), "not found"))
+}
+
 func (r *contractRunner) applyConditions(status *v1alpha1.ComputeContractStatus, generation int64, phase v1alpha1.ComputeContractPhase, message string, state *v1alpha1.NodeClaimContract, atCapacity bool) {
-	now := r.svc.now()
+	now := r.q.now()
 	addContractConditions(status, generation, phase, message, now, atCapacity)
 	if r.resumed {
 		conds.SetStatusAt(&status.Conditions, generation, v1alpha1.ComputeContractConditionResumed, metav1.ConditionTrue, "Recovered", "the recorded status.contract was resumed", now)
@@ -1268,7 +1295,7 @@ func (r *contractRunner) step(ctx context.Context, step string, attempts int32) 
 }
 
 func (r *contractRunner) phaseOf(state *v1alpha1.NodeClaimContract) v1alpha1.ComputeContractPhase {
-	if r.svc.ctx.Err() != nil {
+	if r.q.stopping() {
 		return v1alpha1.ComputeContractReleasing
 	}
 	if state != nil && state.Termination != nil {
@@ -1289,13 +1316,8 @@ func (r *contractRunner) currentChosen() *v1alpha1.ContractChosen {
 	if r.chosen == nil {
 		return nil
 	}
-	copy := *r.chosen
-	return &copy
-}
-
-func (b BidRecord) RecordSubmitEvent() string {
-	value, _ := b.Record["submitAccept"].(string)
-	return value
+	chosen := *r.chosen
+	return &chosen
 }
 
 func (b BidRecord) arrivedAtISO() string {
@@ -1342,41 +1364,6 @@ func payloadKind(nsid string) string {
 	}
 }
 
-func parsePolicyArgs(raw string) (map[string]string, error) {
-	if strings.TrimSpace(raw) == "" {
-		return map[string]string{}, nil
-	}
-	var value any
-	if err := json.Unmarshal([]byte(raw), &value); err != nil {
-		return nil, fmt.Errorf("policyArgs is not JSON: %w", err)
-	}
-	if value == nil {
-		return map[string]string{}, nil
-	}
-	obj, ok := value.(map[string]any)
-	if !ok {
-		return nil, errors.New("policyArgs must be a JSON object")
-	}
-	out := make(map[string]string, len(obj))
-	for key, item := range obj {
-		switch typed := item.(type) {
-		case string:
-			out[key] = typed
-		case bool:
-			out[key] = fmt.Sprintf("%t", typed)
-		case float64:
-			out[key] = fmt.Sprintf("%v", typed)
-		default:
-			data, err := json.Marshal(typed)
-			if err != nil {
-				return nil, err
-			}
-			out[key] = string(data)
-		}
-	}
-	return out, nil
-}
-
 func defaultUserData(keys []string) string {
 	var b strings.Builder
 	b.WriteString("#cloud-config\n")
@@ -1419,14 +1406,4 @@ func withGuestCACerts(userData, pem string) string {
 		b.WriteByte('\n')
 	}
 	return b.String()
-}
-
-//go:fix inline
-func intPtr(value int) *int {
-	return new(value)
-}
-
-//go:fix inline
-func boolPtr(value bool) *bool {
-	return new(value)
 }
