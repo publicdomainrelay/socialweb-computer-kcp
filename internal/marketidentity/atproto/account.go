@@ -1,12 +1,10 @@
-package identitycontroller
+package atproto
 
 import (
 	"context"
 	"errors"
 	"fmt"
 	"strings"
-
-	"k8s.io/client-go/dynamic"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauthclient"
@@ -23,52 +21,56 @@ type pdsAccountCredential struct {
 	pdsURL string
 }
 
-func (c *Controller) reconcilePdsAccount(ctx context.Context, dyn dynamic.Interface, id *v1alpha1.MarketIdentity,
-	generation int64, status v1alpha1.MarketIdentityStatus) {
+var errVaultRead = errors.New("marketidentity: reading the vault")
+
+func (a *Accounts) pdsAccount(ctx context.Context, workspace string, id *v1alpha1.MarketIdentity,
+	generation int64, status v1alpha1.MarketIdentityStatus) (Result, error) {
+	vault := a.vaultFor(workspace)
 	ref := oauthSessionRef(id, &status)
 	if ref != nil {
 		status.SessionRef = ref
 	}
-	credential, err := c.pdsAccountCredential(ctx, id)
+	credential, err := pdsAccountCredentialOf(ctx, vault, id)
+	if errors.Is(err, errVaultRead) {
+		return failed(status, generation, "MissingCredential", err.Error()), err
+	}
 	if err != nil {
-		c.failed(ctx, dyn, id, generation, status, "MissingCredential", err.Error())
-		return
+		return failed(status, generation, "MissingCredential", err.Error()), nil
 	}
 	if ref != nil {
-		if session, ok := c.storedPdsSession(ctx, *ref, credential.pdsURL); ok {
-			c.signedIn(ctx, dyn, id, generation, status, session.DID.String(), firstNonEmpty(session.Handle, credential.handle), credential.pdsURL, ref)
-			return
+		if session, ok := a.storedPdsSession(ctx, vault, *ref, credential.pdsURL); ok {
+			return signedIn(status, generation, id, session.DID.String(), firstNonEmpty(session.Handle, credential.handle), credential.pdsURL, ref,
+				session.AccessJWT), nil
 		}
 	}
-	pds, err := c.remotePDS(credential.pdsURL, nil)
+	pds, err := a.remotePDS(credential.pdsURL, nil)
 	if err != nil {
-		c.failed(ctx, dyn, id, generation, status, "PdsUnavailable", err.Error())
-		return
+		return failed(status, generation, "PdsUnavailable", err.Error()), nil
 	}
 	session, err := pds.CreateSession(ctx, credential.handle, credential.password)
 	if err != nil {
-		c.failed(ctx, dyn, id, generation, status, "SignInFailed", fmt.Sprintf("com.atproto.server.createSession at %s: %v", credential.pdsURL, err))
-		return
+		message := fmt.Sprintf("com.atproto.server.createSession at %s: %v", credential.pdsURL, err)
+		return failed(status, generation, "SignInFailed", message), errors.New(message)
 	}
 	if ref != nil {
-		if err := c.savePdsSession(ctx, *ref, credential.pdsURL, session); err != nil {
-			c.pending(ctx, dyn, id, generation, status, "SessionStoreFailed", err.Error())
-			return
+		if err := savePdsSession(ctx, vault, *ref, credential.pdsURL, session); err != nil {
+			return pending(status, generation, "SessionStoreFailed", err.Error()), err
 		}
 	}
-	c.signedIn(ctx, dyn, id, generation, status, session.DID.String(), firstNonEmpty(session.Handle, credential.handle), credential.pdsURL, ref)
+	return signedIn(status, generation, id, session.DID.String(), firstNonEmpty(session.Handle, credential.handle), credential.pdsURL, ref,
+		session.AccessJWT), nil
 }
 
-func (c *Controller) pdsAccountCredential(ctx context.Context, id *v1alpha1.MarketIdentity) (pdsAccountCredential, error) {
+func pdsAccountCredentialOf(ctx context.Context, vault SecretStore, id *v1alpha1.MarketIdentity) (pdsAccountCredential, error) {
 	if id.Spec.KeysRef == nil {
 		return pdsAccountCredential{}, errors.New("mode pdsAccount names no spec.keysRef; the password stays in the vault and the controller does not fall back to a local repo")
 	}
-	if c.vault == nil {
+	if vault == nil {
 		return pdsAccountCredential{}, errors.New("mode pdsAccount has no vault to read spec.keysRef")
 	}
-	data, err := c.vault.Get(ctx, *id.Spec.KeysRef)
+	data, err := vault.Get(ctx, *id.Spec.KeysRef)
 	if err != nil {
-		return pdsAccountCredential{}, fmt.Errorf("reading spec.keysRef %s/%s: %w", id.Spec.KeysRef.Mount, id.Spec.KeysRef.Path, err)
+		return pdsAccountCredential{}, fmt.Errorf("%w spec.keysRef %s/%s: %w", errVaultRead, id.Spec.KeysRef.Mount, id.Spec.KeysRef.Path, err)
 	}
 	credential := pdsAccountCredential{
 		handle:   firstNonEmpty(id.Spec.Handle, firstString(data, "handle", "identifier", "user", "username")),
@@ -86,11 +88,11 @@ func (c *Controller) pdsAccountCredential(ctx context.Context, id *v1alpha1.Mark
 	return credential, nil
 }
 
-func (c *Controller) storedPdsSession(ctx context.Context, ref commonv1.SecretRef, pdsURL string) (pdsclient.Session, bool) {
-	if c.vault == nil {
+func (a *Accounts) storedPdsSession(ctx context.Context, vault SecretStore, ref commonv1.SecretRef, pdsURL string) (pdsclient.Session, bool) {
+	if vault == nil {
 		return pdsclient.Session{}, false
 	}
-	data, err := c.vault.Get(ctx, ref)
+	data, err := vault.Get(ctx, ref)
 	if err != nil {
 		return pdsclient.Session{}, false
 	}
@@ -99,7 +101,7 @@ func (c *Controller) storedPdsSession(ctx context.Context, ref commonv1.SecretRe
 		return pdsclient.Session{}, false
 	}
 	tokens := pdsclient.TokenSourceFunc(func(ctx context.Context) (string, error) { return access, nil })
-	pds, err := c.remotePDS(pdsURL, tokens)
+	pds, err := a.remotePDS(pdsURL, tokens)
 	if err != nil {
 		return pdsclient.Session{}, false
 	}
@@ -112,11 +114,11 @@ func (c *Controller) storedPdsSession(ctx context.Context, ref commonv1.SecretRe
 	return session, true
 }
 
-func (c *Controller) savePdsSession(ctx context.Context, ref commonv1.SecretRef, pdsURL string, session pdsclient.Session) error {
-	if c.vault == nil {
-		return errors.New("identitycontroller: no vault writes the pds account session")
+func savePdsSession(ctx context.Context, vault SecretStore, ref commonv1.SecretRef, pdsURL string, session pdsclient.Session) error {
+	if vault == nil {
+		return errors.New("marketidentity: no vault writes the pds account session")
 	}
-	return c.vault.Put(ctx, ref, map[string]any{
+	return vault.Put(ctx, ref, map[string]any{
 		"did":           session.DID.String(),
 		"handle":        session.Handle,
 		"pds":           pdsURL,
@@ -128,26 +130,21 @@ func (c *Controller) savePdsSession(ctx context.Context, ref commonv1.SecretRef,
 	})
 }
 
-func (c *Controller) remotePDS(endpoint string, tokens pdsclient.TokenSource) (pdsclient.PDS, error) {
+func (a *Accounts) remotePDS(endpoint string, tokens pdsclient.TokenSource) (pdsclient.PDS, error) {
 	endpoint = strings.TrimSpace(endpoint)
 	if endpoint == "" {
-		return nil, errors.New("identitycontroller: the remote PDS has no URL")
+		return nil, errors.New("marketidentity: the remote PDS has no URL")
 	}
 	if !strings.Contains(endpoint, "://") {
-		return nil, fmt.Errorf("identitycontroller: the remote PDS %q is not an absolute URL", endpoint)
+		return nil, fmt.Errorf("marketidentity: the remote PDS %q is not an absolute URL", endpoint)
 	}
-	r := c.resolver
-	cfg := pdsclient.RemoteConfig{BaseURL: endpoint, Tokens: tokens, Timeout: requestTimeout}
-	if r != nil {
-		cfg.HTTPClient = r.HTTPClient
-		cfg.TLS = r.TLS
-		cfg.DPoP = r.DPoP
-		if r.Timeout > 0 {
-			cfg.Timeout = r.Timeout
-		}
+	cfg := pdsclient.RemoteConfig{BaseURL: endpoint, Tokens: tokens, Timeout: requestTimeout, HTTPClient: a.resolver.HTTPClient,
+		TLS: a.resolver.TLS, DPoP: a.resolver.DPoP}
+	if a.resolver.Timeout > 0 {
+		cfg.Timeout = a.resolver.Timeout
 	}
 	if cfg.HTTPClient == nil {
-		cfg.HTTPClient = c.http
+		cfg.HTTPClient = a.http
 	}
 	return pdsclient.NewRemote(cfg)
 }

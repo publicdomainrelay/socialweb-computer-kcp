@@ -1,4 +1,4 @@
-package identitycontroller
+package atproto
 
 import (
 	"context"
@@ -9,12 +9,11 @@ import (
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauthclient"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
-var ErrSecretNotFound = errors.New("identitycontroller: secret not found")
+var ErrSecretNotFound = errors.New("marketidentity: secret not found")
 
 type SecretStore interface {
 	Get(ctx context.Context, ref commonv1.SecretRef) (map[string]any, error)
@@ -28,34 +27,32 @@ type VaultStateStore struct {
 	Vault SecretStore
 
 	Ref commonv1.SecretRef
-
-	ttl time.Duration
 }
 
-const defaultStateTTL = 15 * time.Minute
+var _ oauthclient.StateStore = (*VaultStateStore)(nil)
+
+const stateTTL = 15 * time.Minute
 
 func (s *VaultStateStore) Put(ctx context.Context, pending oauthclient.PendingAuth) error {
 	if s == nil || s.Vault == nil {
-		return errors.New("identitycontroller: no vault for the oauth callback state")
+		return errors.New("marketidentity: no vault for the oauth callback state")
 	}
 	if strings.TrimSpace(pending.State) == "" {
-		return errors.New("identitycontroller: the oauth callback state is empty")
+		return errors.New("marketidentity: the oauth callback state is empty")
 	}
 	raw, err := json.Marshal(pending)
 	if err != nil {
 		return err
 	}
-	ttl := s.ttl
-	ttl = opt.Positive(ttl, defaultStateTTL)
 	return s.Vault.Put(ctx, s.ref(pending.State), map[string]any{
 		"state":     string(raw),
-		"expiresAt": time.Now().Add(ttl).UTC().Format(time.RFC3339),
+		"expiresAt": time.Now().Add(stateTTL).UTC().Format(time.RFC3339),
 	})
 }
 
 func (s *VaultStateStore) Take(ctx context.Context, state string) (oauthclient.PendingAuth, bool, error) {
 	if s == nil || s.Vault == nil {
-		return oauthclient.PendingAuth{}, false, errors.New("identitycontroller: no vault for the oauth callback state")
+		return oauthclient.PendingAuth{}, false, errors.New("marketidentity: no vault for the oauth callback state")
 	}
 	data, err := s.Vault.Get(ctx, s.ref(state))
 	if errors.Is(err, ErrSecretNotFound) {
@@ -70,7 +67,7 @@ func (s *VaultStateStore) Take(ctx context.Context, state string) (oauthclient.P
 	if raw := firstString(data, "state"); raw != "" {
 		var pending oauthclient.PendingAuth
 		if err := json.Unmarshal([]byte(raw), &pending); err != nil {
-			return oauthclient.PendingAuth{}, false, fmt.Errorf("identitycontroller: the oauth callback state: %w", err)
+			return oauthclient.PendingAuth{}, false, fmt.Errorf("marketidentity: the oauth callback state: %w", err)
 		}
 		return pending, pending.State != "", nil
 	}
@@ -91,7 +88,7 @@ var _ oauthclient.SessionStore = (*vaultSessionStore)(nil)
 
 func (s *vaultSessionStore) List(ctx context.Context) ([]oauthclient.SessionData, error) {
 	if s == nil || s.vault == nil {
-		return nil, errors.New("identitycontroller: no vault for the oauth session")
+		return nil, errors.New("marketidentity: no vault for the oauth session")
 	}
 	data, err := s.vault.Get(ctx, s.ref)
 	if errors.Is(err, ErrSecretNotFound) {
@@ -112,17 +109,17 @@ func (s *vaultSessionStore) List(ctx context.Context) ([]oauthclient.SessionData
 
 func (s *vaultSessionStore) Save(ctx context.Context, session oauthclient.SessionData) error {
 	if s == nil || s.vault == nil {
-		return errors.New("identitycontroller: no vault for the oauth session")
+		return errors.New("marketidentity: no vault for the oauth session")
 	}
 	if session.AccountDID == "" {
-		return errors.New("identitycontroller: the oauth session names no account DID")
+		return errors.New("marketidentity: the oauth session names no account DID")
 	}
 	return s.vault.Put(ctx, s.ref, secretFromSession(session))
 }
 
 func (s *vaultSessionStore) Delete(ctx context.Context, did, sessionID string) error {
 	if s == nil || s.vault == nil {
-		return errors.New("identitycontroller: no vault for the oauth session")
+		return errors.New("marketidentity: no vault for the oauth session")
 	}
 	err := s.vault.Delete(ctx, s.ref)
 	if errors.Is(err, ErrSecretNotFound) {
@@ -160,7 +157,7 @@ func sessionFromSecret(data map[string]any) (oauthclient.SessionData, bool, erro
 	if raw := firstString(data, "session"); raw != "" {
 		var session oauthclient.SessionData
 		if err := json.Unmarshal([]byte(raw), &session); err != nil {
-			return oauthclient.SessionData{}, false, fmt.Errorf("identitycontroller: the oauth session: %w", err)
+			return oauthclient.SessionData{}, false, fmt.Errorf("marketidentity: the oauth session: %w", err)
 		}
 		if session.AccountDID == "" {
 			return oauthclient.SessionData{}, false, nil
