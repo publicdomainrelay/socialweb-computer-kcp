@@ -2,11 +2,17 @@ package clusterprovider
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	kcpv1alpha1 "github.com/kcp-dev/sdk/apis/tenancy/v1alpha1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -18,8 +24,13 @@ import (
 	"k8s.io/client-go/rest"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/apiserverfront"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterstack"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/materialiser"
 )
+
+const tenantProbeTimeout = 5 * time.Second
 
 var (
 	socialwebResource = v1alpha1.GroupVersion
@@ -40,16 +51,18 @@ func (r Ref) Key() (string, error) { return kcpclient.ClusterKey(r.Home) }
 type RegistryOptions struct {
 	Host string
 
+	StateDir string
+
 	RestConfig *rest.Config
 
 	Transport http.RoundTripper
 }
 
 type Registry struct {
-	cfg    *rest.Config
-	http   *http.Client
-	codecs runtime.NegotiatedSerializer
-	host   string
+	cfg      *rest.Config
+	http     *http.Client
+	codecs   runtime.NegotiatedSerializer
+	stateDir string
 }
 
 func NewRegistry(opts RegistryOptions) (*Registry, error) {
@@ -75,10 +88,10 @@ func NewRegistry(opts RegistryOptions) (*Registry, error) {
 		return nil, err
 	}
 	return &Registry{
-		cfg:    cfg,
-		http:   httpClient,
-		codecs: serializer.NewCodecFactory(scheme).WithoutConversion(),
-		host:   strings.TrimSuffix(opts.Host, "/"),
+		cfg:      cfg,
+		http:     httpClient,
+		codecs:   serializer.NewCodecFactory(scheme).WithoutConversion(),
+		stateDir: opts.StateDir,
 	}, nil
 }
 
@@ -231,18 +244,61 @@ func (r *Registry) RemoveFinalizer(ctx context.Context, ref Ref) error {
 	return nil
 }
 
-func (r *Registry) MountStatus(ctx context.Context, ref Ref) int {
-	url := fmt.Sprintf("%s/clusters/%s/version", r.host, ref.MountPath())
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return 0
+func (r *Registry) TenantPath(ctx context.Context, ref Ref) materialiser.PathProbe {
+	if r.stateDir == "" {
+		return materialiser.PathProbe{Err: "no cluster state dir to find the tenant front in"}
 	}
-	resp, err := r.http.Do(req)
+	key, err := ref.Key()
 	if err != nil {
-		return 0
+		return materialiser.PathProbe{Err: err.Error()}
+	}
+	dir, err := ClusterDataDir(r.stateDir, key)
+	if err != nil {
+		return materialiser.PathProbe{Err: err.Error()}
+	}
+	return ProbeTenantFront(ctx, dir)
+}
+
+func ProbeTenantFront(ctx context.Context, dataDir string) materialiser.PathProbe {
+	addr, err := tenantFrontAddress(dataDir)
+	if err != nil {
+		return materialiser.PathProbe{Err: err.Error()}
+	}
+	raw, err := loadServerCA(filepath.Join(clusterstack.TLSDir(dataDir), serverCACertName))
+	if err != nil {
+		return materialiser.PathProbe{Err: err.Error()}
+	}
+	pool := x509.NewCertPool()
+	pool.AppendCertsFromPEM(raw)
+	transport := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}}
+	defer transport.CloseIdleConnections()
+	pctx, cancel := context.WithTimeout(ctx, tenantProbeTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(pctx, http.MethodGet, "https://"+addr+"/readyz", nil)
+	if err != nil {
+		return materialiser.PathProbe{Err: err.Error()}
+	}
+	resp, err := (&http.Client{Transport: transport}).Do(req)
+	if err != nil {
+		return materialiser.PathProbe{Err: err.Error()}
 	}
 	defer resp.Body.Close()
-	return resp.StatusCode
+	return materialiser.PathProbe{Answered: true, Status: resp.StatusCode}
+}
+
+func tenantFrontAddress(dataDir string) (string, error) {
+	raw, err := os.ReadFile(FrontStatePath(dataDir))
+	if err != nil {
+		return "", err
+	}
+	var st apiserverfront.State
+	if err := json.Unmarshal(raw, &st); err != nil {
+		return "", fmt.Errorf("%s: %w", FrontStatePath(dataDir), err)
+	}
+	if _, _, err := net.SplitHostPort(st.Address); err != nil {
+		return "", fmt.Errorf("%s names no front address: %w", FrontStatePath(dataDir), err)
+	}
+	return st.Address, nil
 }
 
 func (r *Registry) IdentityState(ctx context.Context, ref Ref) (v1alpha1.IdentityState, error) {

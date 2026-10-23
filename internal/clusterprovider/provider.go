@@ -45,7 +45,7 @@ type Clusters interface {
 
 	WriteStatus(ctx context.Context, ref Ref, st v1alpha1.ClusterStatus) error
 
-	MountStatus(ctx context.Context, ref Ref) int
+	TenantPath(ctx context.Context, ref Ref) materialiser.PathProbe
 
 	IdentityState(ctx context.Context, ref Ref) (v1alpha1.IdentityState, error)
 
@@ -494,9 +494,9 @@ func (p *Provider) observe(ctx context.Context, ref Ref, cl *v1alpha1.Cluster) (
 		return materialiser.Observed{}, err
 	}
 	o := materialiser.Observed{
-		Cluster:    *cl,
-		PathStatus: p.opts.Registry.MountStatus(ctx, ref),
-		Now:        p.opts.Now(),
+		Cluster: *cl,
+		Path:    p.opts.Registry.TenantPath(ctx, ref),
+		Now:     p.opts.Now(),
 	}
 	o.Cluster.Name = key
 	if cl.Status.URL != "" {
