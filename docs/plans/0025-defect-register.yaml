@@ -211,3 +211,18 @@ items:
       A workspace created without the experimental.tenancy.kcp.io/owner
       annotation stalls with "no createdBy recorded". Seen in the plan 0026
       W0-RUNTIME live run (instance w0rt).
+  - id: D25-MOUNT-BEARER-KCP-MAIN
+    title: "Tenant bearer requests through the kcp mount fail on kcp main"
+    status: todo
+    defect: >
+      kcp main (#4427, pkg/server/mountproxy.go) verifies the mount target's
+      TLS certificate against the system roots plus
+      --mount-proxy-server-ca-file, authenticates the caller itself, strips
+      Authorization and forwards X-Remote-* headers. The tenant mount target
+      https://127.0.0.1:<advertisePort> (internal/materialiser/materialiser.go:635)
+      presents the cluster's own k3s CA, so every mount request gets 502;
+      a tenant service-account bearer token gets 401 at kcp. Registry.MountStatus
+      (internal/clusterprovider/registry.go:234) then always reads 502 and
+      materialiser.shut() (internal/materialiser/materialiser.go:595-602) counts
+      502 as shut while the tenant apiserver is up. The revoker's mount calls
+      (internal/kcpclient/kcpclient.go:794, 814) fail.

@@ -237,7 +237,7 @@ waves:
     title: "Contracts, codegen, refs, bus and runtime"
     status: doing
     serial: true
-    tracks: [W0-TESTS, W0-RULES, W0-CODEGEN, W0-REFS, W0-ABSTRACT, W0-CONTRACTS, W0-BUS, W0-RUNTIME]
+    tracks: [W0-TESTS, W0-RULES, W0-CODEGEN, W0-REFS, W0-ABSTRACT, W0-CONTRACTS, W0-BUS, W0-RUNTIME, W0-MOUNTS]
     gate: "all kinds registered; refs unified; contract packages pure; bus denies an unlinked call; the pilot controller runs on the runtime across root and a later-created root:<app> workspace with no ticker."
   - id: W1
     title: "Shared kit"
@@ -531,6 +531,35 @@ items:
       The pilot reconciles RemotePDS in root and in a root:<app> workspace
       created after the core started, retries a failing reconcile with
       backoff, writes status by SSA, and contains no ticker.
+
+  - id: W0-MOUNTS
+    title: "Tenant cluster requests go around the kcp mount proxy"
+    wave: W0
+    track: mounts
+    parallel_with: [W0-ABSTRACT]
+    depends_on: [W0-RUNTIME]
+    status: todo
+    closes: [D25]
+    decision: >
+      kcp main authenticates mount callers itself and verifies the mount
+      target CA, so tenant k3s bearer requests cannot pass through the kcp
+      mount. Tenant cluster API requests (/clusters/<home>:clusters/...)
+      are routed by our own front (internal/clientcertfront) directly to
+      the cluster's front, forwarding Authorization unchanged and verifying
+      the cluster server CA. Tenant liveness and shut checks probe the
+      tenant front directly; a 502 is never read as shut. The revoker
+      reaches tenants the same way. The kcp mount stays for kcp-side
+      discovery only.
+    files:
+      - internal/clientcertfront/**
+      - internal/materialiser/**
+      - internal/clusterprovider/registry.go
+      - internal/kcpclient/kcpclient.go
+      - scripts/deploy.sh
+      - docs/ARCHITECTURE.md
+    done_when: >
+      No tenant request depends on kcp mount forwarding; shut() never
+      treats a 502 as shut.
 
   - id: W1-MODERNIZE
     title: "go fix, stdlib idioms and shared helpers"
