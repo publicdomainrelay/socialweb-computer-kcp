@@ -44,7 +44,8 @@ GOPROXY=off. Its caches are content-addressed, so a warm build gives the same by
   cache/cargo-target, cache/gocache   the cargo target dir and the go build cache
 A step whose key did not change is not run again.
 
---update-pins stages the assets built from this repository (fetch kind go or script) and writes their
+--update-pins stages the assets built from this repository (fetch kind go or script) or from pinned
+upstream source (fetch kind gosrc, such as kcp) and writes their
 new tree and binary pins into versions.json in the clean checkout and in the working repository. Pins
 of downloaded assets are never changed; an upstream change still fails the build. make uses it by
 default; CI runs make check-pins and fails when versions.json differs from HEAD.
