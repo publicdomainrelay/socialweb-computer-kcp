@@ -34,6 +34,7 @@ type Driver struct {
 	mu     sync.Mutex
 	states map[string]scale.State
 	capped map[string]string
+	wakes  map[string]time.Time
 }
 
 func New(f Factory, opts Options) (*Driver, error) {
@@ -43,7 +44,7 @@ func New(f Factory, opts Options) (*Driver, error) {
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
-	return &Driver{factory: f, opts: opts, states: map[string]scale.State{}, capped: map[string]string{}}, nil
+	return &Driver{factory: f, opts: opts, states: map[string]scale.State{}, capped: map[string]string{}, wakes: map[string]time.Time{}}, nil
 }
 
 func (d *Driver) Pass(ctx context.Context, cluster string, o scale.Observation, observedNodes int) (scale.Decision, error) {
@@ -63,6 +64,7 @@ func (d *Driver) Pass(ctx context.Context, cluster string, o scale.Observation, 
 
 	dec := scale.Decide(o, st, now, d.opts.Scale)
 	d.reportCap(log, cluster, dec.Capped)
+	defer d.noteWake(cluster, o, now)
 
 	if dec.Action == scale.None {
 		d.advance(cluster, st.Next(dec, now))
@@ -148,6 +150,55 @@ func (d *Driver) reportCap(log *slog.Logger, cluster, capped string) {
 	}
 }
 
+func (d *Driver) hold() time.Duration {
+	switch h := d.opts.Scale.Hold; {
+	case h == 0:
+		return scale.DefaultHold
+	case h < 0:
+		return 0
+	default:
+		return h
+	}
+}
+
+func (d *Driver) noteWake(cluster string, o scale.Observation, now time.Time) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	st := d.states[cluster]
+	var at time.Time
+	next := func(t time.Time) {
+		if !t.After(now) {
+			return
+		}
+		if at.IsZero() || t.Before(at) {
+			at = t
+		}
+	}
+	if st.Backoff.Holds(now) {
+		next(st.Backoff.Until)
+	}
+	if st.Nodes > 0 && !st.IdleSince.IsZero() {
+		next(st.IdleSince.Add(d.hold()))
+	}
+	for _, since := range st.NodeIdleSince {
+		next(since.Add(d.hold()))
+	}
+	if scale.Intent(o) && scale.Wanted(o, d.opts.Scale, now).Hold != "" {
+		next(now.Add(scale.UnschedulableSettle))
+	}
+	if at.IsZero() {
+		delete(d.wakes, cluster)
+		return
+	}
+	d.wakes[cluster] = at
+}
+
+func (d *Driver) Wake(cluster string) time.Time {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.wakes[cluster]
+}
+
 func (d *Driver) State(cluster string) scale.State {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -159,6 +210,7 @@ func (d *Driver) Forget(cluster string) {
 	defer d.mu.Unlock()
 	delete(d.states, cluster)
 	delete(d.capped, cluster)
+	delete(d.wakes, cluster)
 }
 
 func (d *Driver) log() *slog.Logger {
