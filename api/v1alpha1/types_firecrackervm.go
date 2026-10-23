@@ -2,6 +2,8 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 type FirecrackerVM struct {
@@ -58,17 +60,29 @@ type FirecrackerVMImage struct {
 type FirecrackerVMRuntime struct {
 	Backend string `json:"backend,omitempty"`
 
-	Ref string `json:"ref,omitempty"`
+	Hypervisor string `json:"hypervisor,omitempty"`
 
-	Instance string `json:"instance,omitempty"`
+	Unit string `json:"unit,omitempty"`
+
+	InvocationID string `json:"invocationID,omitempty"`
 
 	Pid int64 `json:"pid,omitempty"`
+
+	StartTicks int64 `json:"startTicks,omitempty"`
 
 	StartTime string `json:"startTime,omitempty"`
 
 	HostBootID string `json:"hostBootID,omitempty"`
 
+	Manager string `json:"manager,omitempty"`
+
 	VMMID string `json:"vmmID,omitempty"`
+
+	VMMUID int64 `json:"vmmUID,omitempty"`
+
+	Slot int32 `json:"slot,omitempty"`
+
+	Socket string `json:"socket,omitempty"`
 }
 
 type FirecrackerVMStatus struct {
@@ -94,3 +108,15 @@ type FirecrackerVMStatus struct {
 }
 
 const FieldManagerFirecrackerVM = "socialweb.computer/firecrackervm"
+
+const FinalizerFirecrackerVM = "firecrackervm.socialweb.computer/release"
+
+const (
+	FirecrackerVMConditionReady = commonv1.ConditionReady
+
+	ConditionPrepared = "Prepared"
+
+	ConditionStarted = "Started"
+
+	ConditionRuntimeObserved = "RuntimeObserved"
+)

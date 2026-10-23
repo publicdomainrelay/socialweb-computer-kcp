@@ -41,17 +41,17 @@ var APIResources = []APIResource{
 		{Name: "Message", Type: "string", JSONPath: ".status.message"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "ComputeVM", Plural: "computevms", Revision: 7, Export: "computevms", Object: ComputeVM{}, PrinterColumns: []PrinterColumn{
+	{Kind: "ComputeVM", Plural: "computevms", Revision: 8, Export: "computevms", Object: ComputeVM{}, PrinterColumns: []PrinterColumn{
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "Backend", Type: "string", JSONPath: ".spec.backendRef.kind"},
 		{Name: "GuestIP", Type: "string", JSONPath: ".status.addresses.guest"},
 		{Name: "Requester", Type: "string", JSONPath: ".spec.requester.did"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "FirecrackerVM", Plural: "firecrackervms", Revision: 1, Export: "computevms", Object: FirecrackerVM{}, Contracts: []string{commonv1.ContractComputeVMs}, PrinterColumns: []PrinterColumn{
+	{Kind: "FirecrackerVM", Plural: "firecrackervms", Revision: 2, Export: "computevms", Object: FirecrackerVM{}, Contracts: []string{commonv1.ContractComputeVMs}, PrinterColumns: []PrinterColumn{
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "GuestIP", Type: "string", JSONPath: ".status.network.guestIP"},
-		{Name: "Unit", Type: "string", JSONPath: ".status.runtime.ref"},
+		{Name: "Unit", Type: "string", JSONPath: ".status.runtime.unit"},
 		{Name: "PID", Type: "integer", JSONPath: ".status.runtime.pid"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
