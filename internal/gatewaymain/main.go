@@ -97,7 +97,6 @@ func buildDeps(cfg Config) (Deps, error) {
 		NodeClaimQuota: cfg.NodeClaimQuota,
 
 		HostProcessWorkspace: cfg.HostProcessWorkspace,
-		RecordWorkspaceOwner: true,
 	})
 	if err != nil {
 		return Deps{}, err

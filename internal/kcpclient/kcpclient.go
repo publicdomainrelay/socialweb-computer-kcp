@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	authenticationv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -26,6 +25,8 @@ import (
 	kcpv1alpha1 "github.com/kcp-dev/sdk/apis/tenancy/v1alpha1"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kcpapply"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/manifests"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gateway"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/revocation"
 
@@ -79,8 +80,6 @@ type Options struct {
 	RestConfig *rest.Config
 
 	Transport http.RoundTripper
-
-	RecordWorkspaceOwner bool
 }
 
 type Client struct {
@@ -100,10 +99,7 @@ type Client struct {
 	certMu      sync.Mutex
 	certWatches map[string]*certWatch
 
-	recordOwner bool
-
-	ownerMu sync.Mutex
-	owner   *authenticationv1.UserInfo
+	applier *kcpapply.Applier
 }
 
 var ErrNoKubeconfigGranter = errors.New(
@@ -160,8 +156,12 @@ func New(opts Options) (*Client, error) {
 
 		hostProcessWorkspace: opts.HostProcessWorkspace,
 		nodeClaimQuota:       opts.NodeClaimQuota,
-		recordOwner:          opts.RecordWorkspaceOwner,
 	}
+	applier, err := kcpapply.New(cfg, kcpapply.Options{})
+	if err != nil {
+		return nil, fmt.Errorf("kcpclient: %w", err)
+	}
+	c.applier = applier
 	if c.hostProcessWorkspace == "" {
 		c.hostProcessWorkspace = RootWorkspace
 	}
@@ -391,35 +391,6 @@ func (c *Client) ensureWorkspace(ctx context.Context, parent, name string, spec 
 	return c.waitForWorkspaceReady(ctx, parent, name)
 }
 
-func (c *Client) workspaceOwner(ctx context.Context) (string, error) {
-	c.ownerMu.Lock()
-	defer c.ownerMu.Unlock()
-	if c.owner == nil {
-		r, err := c.resource(RootWorkspace, authenticationv1.SchemeGroupVersion)
-		if err != nil {
-			return "", err
-		}
-		review := []byte(`{"apiVersion":"authentication.k8s.io/v1","kind":"SelfSubjectReview"}`)
-		raw, err := r.Post().Resource("selfsubjectreviews").Body(review).Do(ctx).Raw()
-		if err != nil {
-			return "", fmt.Errorf("kcpclient: the identity the workspace owner is recorded as: %w. "+
-				"kcp records a workspace's creator from the request user, the initializing workspace "+
-				"virtual workspace impersonates exactly that user to bind the workspace type's "+
-				"defaultAPIBindings, and a workspace recorded without one never leaves Initializing", err)
-		}
-		var got authenticationv1.SelfSubjectReview
-		if err := json.Unmarshal(raw, &got); err != nil {
-			return "", fmt.Errorf("kcpclient: the self subject review of the workspace owner: %w", err)
-		}
-		c.owner = &got.Status.UserInfo
-	}
-	raw, err := json.Marshal(c.owner)
-	if err != nil {
-		return "", fmt.Errorf("kcpclient: the workspace owner annotation: %w", err)
-	}
-	return string(raw), nil
-}
-
 func (c *Client) waitForWorkspaceReady(ctx context.Context, parent, name string) error {
 	path := parent + ":" + name
 	r, err := c.resource(parent, tenancyResource)
@@ -514,29 +485,19 @@ func (c *Client) createGrant(ctx context.Context, logicalCluster, name, did stri
 }
 
 func (c *Client) createWorkspace(ctx context.Context, parent, name string, spec kcpv1alpha1.WorkspaceSpec) error {
-	r, err := c.resource(parent, tenancyResource)
+	body, err := json.Marshal(map[string]any{"apiVersion": tenancyResource.String(), "kind": "Workspace",
+		"metadata": map[string]any{"name": name}, "spec": spec})
 	if err != nil {
-		return err
+		return fmt.Errorf("kcpclient: workspace %s: marshal: %w", name, err)
 	}
-	annotations := map[string]string{}
-	if c.recordOwner {
-		owner, err := c.workspaceOwner(ctx)
-		if err != nil {
-			return err
-		}
-		annotations[kcpv1alpha1.ExperimentalWorkspaceOwnerAnnotationKey] = owner
+	objs, err := manifests.Decode("kcpclient workspace "+parent+":"+name, body)
+	if err != nil {
+		return fmt.Errorf("kcpclient: workspace %s: %w", name, err)
 	}
-	obj := &kcpv1alpha1.Workspace{
-		TypeMeta:   metav1.TypeMeta{APIVersion: tenancyResource.String(), Kind: "Workspace"},
-		ObjectMeta: metav1.ObjectMeta{Name: name, Annotations: annotations},
-		Spec:       spec,
+	if _, err := c.applier.ApplyObjects(ctx, parent, objs); err != nil {
+		return fmt.Errorf("kcpclient: workspace %s in %s: %w", name, parent, err)
 	}
-	var out kcpv1alpha1.Workspace
-	err = r.Post().Resource("workspaces").Body(obj).Do(ctx).Into(&out)
-	if apierrors.IsAlreadyExists(err) {
-		return nil
-	}
-	return err
+	return nil
 }
 
 func (c *Client) createCluster(ctx context.Context, home, name, did string) (bool, error) {

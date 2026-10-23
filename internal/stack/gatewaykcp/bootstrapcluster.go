@@ -3,6 +3,7 @@ package gatewaykcp
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -15,7 +16,9 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
 	appgateway "github.com/johnandersen777/socialweb-computer-kcp/internal/app/gateway"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kcpapply"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/manifests"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/sweepkcp"
 )
@@ -40,6 +43,19 @@ func ssa(ctx context.Context, r kube.Resource, obj kube.Doc) error {
 func workspace(name, typ string) kube.Doc {
 	return kube.Doc{"apiVersion": "tenancy.kcp.io/v1alpha1", "kind": "Workspace", "metadata": map[string]any{"name": name},
 		"spec": map[string]any{"type": map[string]any{"name": typ, "path": kcpclient.RootWorkspace}}}
+}
+
+func applyWorkspace(ctx context.Context, ap *kcpapply.Applier, parent, name, typ string) error {
+	body, err := json.Marshal(workspace(name, typ))
+	if err != nil {
+		return err
+	}
+	objs, err := manifests.Decode("gatewaykcp bootstrap workspace "+parent+":"+name, body)
+	if err != nil {
+		return err
+	}
+	_, err = ap.ApplyObjects(ctx, parent, objs)
+	return err
 }
 
 func retry(ctx context.Context, what string, f func() error) error {
@@ -91,13 +107,17 @@ func bootstrapCluster(ctx context.Context, kubeconfig, base, did, cluster string
 		return err
 	}
 	client := func(ws string) (*kube.Client, error) { return kube.New(clusterConfig(restCfg, ws)) }
+	ap, err := kcpapply.New(restCfg, kcpapply.Options{FieldManager: FieldManager, WaitTimeout: bootstrapWorkspaceTTL, Log: log})
+	if err != nil {
+		return err
+	}
 	account := kcpclient.AccountHash(did)
 	root, err := client(kcpclient.RootWorkspace)
 	if err != nil {
 		return err
 	}
 	if err := retry(ctx, "account workspace", func() error {
-		return ssa(ctx, root.Resource(workspaceGVR), workspace(account, string(kcpclient.AccountWorkspaceType)))
+		return applyWorkspace(ctx, ap, kcpclient.RootWorkspace, account, string(kcpclient.AccountWorkspaceType))
 	}); err != nil {
 		return err
 	}
@@ -116,7 +136,7 @@ func bootstrapCluster(ctx context.Context, kubeconfig, base, did, cluster string
 		return err
 	}
 	if err := retry(ctx, "home workspace", func() error {
-		return ssa(ctx, acct.Resource(workspaceGVR), workspace(cluster, string(kcpclient.HomeWorkspaceType)))
+		return applyWorkspace(ctx, ap, kcpclient.AccountPath(did), cluster, string(kcpclient.HomeWorkspaceType))
 	}); err != nil {
 		return err
 	}
