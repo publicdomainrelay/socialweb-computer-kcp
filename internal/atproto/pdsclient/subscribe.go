@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -31,6 +32,14 @@ const (
 	wsReadTimeout         = 2 * time.Minute
 	wsWriteTimeout        = 10 * time.Second
 )
+
+var repoFrameDecMode = func() cbor.DecMode {
+	mode, err := cbor.DecOptions{DefaultMapType: reflect.TypeOf(map[string]any{})}.DecMode()
+	if err != nil {
+		panic(err)
+	}
+	return mode
+}()
 
 func newLocalSubscribe(ctx context.Context, handlers *component.HandlerRegistry, base *url.URL, cursor *int64) (RepoEventStream, error) {
 	if handlers == nil {
@@ -353,7 +362,7 @@ type frameHeader struct {
 
 func decodeRepoFrame(data []byte) (RepoEvent, bool, error) {
 	var header frameHeader
-	rest, err := cbor.UnmarshalFirst(data, &header)
+	rest, err := repoFrameDecMode.UnmarshalFirst(data, &header)
 	if err != nil {
 		return RepoEvent{}, false, fmt.Errorf("%w: decoding frame header: %v", ErrProtocol, err)
 	}
@@ -377,7 +386,7 @@ func decodeRepoFrame(data []byte) (RepoEvent, bool, error) {
 		return RepoEvent{}, false, nil
 	}
 	var body map[string]any
-	if err := cbor.Unmarshal(rest, &body); err != nil {
+	if err := repoFrameDecMode.Unmarshal(rest, &body); err != nil {
 		return RepoEvent{}, false, fmt.Errorf("%w: decoding commit frame: %v", ErrProtocol, err)
 	}
 	event, err := commitFromMap(body)
