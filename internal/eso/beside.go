@@ -212,9 +212,7 @@ func runParallel(ctx context.Context, jobs []func(context.Context) error) error 
 		first error
 	)
 	for _, job := range jobs {
-		wg.Add(1)
-		go func(job func(context.Context) error) {
-			defer wg.Done()
+		wg.Go(func() {
 			select {
 			case sem <- struct{}{}:
 			case <-ctx.Done():
@@ -227,7 +225,7 @@ func runParallel(ctx context.Context, jobs []func(context.Context) error) error 
 					cancel()
 				})
 			}
-		}(job)
+		})
 	}
 	wg.Wait()
 	return first
