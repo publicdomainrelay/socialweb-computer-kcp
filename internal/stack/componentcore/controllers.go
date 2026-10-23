@@ -107,6 +107,7 @@ func (c *Core) runControllers(ctx context.Context) error {
 	g := supervise.New(ctx)
 	defer g.Stop()
 	ctx = g.Context()
+	c.scope.start(ctx)
 	c.registerLocal(ctx, mgr, clients)
 	if err := c.registerNetwork(mgr, clients, g); err != nil {
 		log.Warn("the network controllers are not wired", "err", err.Error())

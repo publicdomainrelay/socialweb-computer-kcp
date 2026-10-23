@@ -8,7 +8,13 @@ import (
 	"time"
 )
 
-const scopeCacheTTL = 10 * time.Second
+const (
+	scopeCacheTTL = 10 * time.Second
+
+	scopeRefreshMin = 500 * time.Millisecond
+
+	scopeLookupTimeout = 10 * time.Second
+)
 
 type workspaceScope struct {
 	static []string
@@ -16,6 +22,8 @@ type workspaceScope struct {
 	dynamic func(context.Context) []string
 
 	mu sync.Mutex
+
+	ctx context.Context
 
 	cached []string
 
@@ -30,6 +38,12 @@ func newWorkspaceScope(static []string, dynamic func(context.Context) []string) 
 		}
 	}
 	return &workspaceScope{static: out, dynamic: dynamic}
+}
+
+func (s *workspaceScope) start(ctx context.Context) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ctx, s.cached, s.at = ctx, nil, time.Time{}
 }
 
 func (s *workspaceScope) base() string {
@@ -53,11 +67,17 @@ func (s *workspaceScope) Contains(workspace string) bool {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.cached == nil || time.Since(s.at) > scopeCacheTTL {
-		ctx, cancel := context.WithTimeout(context.Background(), scopeCacheTTL)
-		s.cached = append([]string{}, s.dynamic(ctx)...)
-		cancel()
-		s.at = time.Now()
+	age := time.Since(s.at)
+	fresh := s.cached != nil && age <= scopeCacheTTL
+	if fresh && slices.Contains(s.cached, workspace) {
+		return true
 	}
+	if s.ctx == nil || s.ctx.Err() != nil || (fresh && age < scopeRefreshMin) {
+		return slices.Contains(s.cached, workspace)
+	}
+	ctx, cancel := context.WithTimeout(s.ctx, scopeLookupTimeout)
+	s.cached = append([]string{}, s.dynamic(ctx)...)
+	cancel()
+	s.at = time.Now()
 	return slices.Contains(s.cached, workspace)
 }
