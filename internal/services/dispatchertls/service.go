@@ -9,14 +9,15 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"net/http/httputil"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/vault"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/dispatcher/tlsproxy"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/servetls"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
@@ -29,9 +30,14 @@ const Kind = "DispatcherTLS"
 
 const shutdownTimeout = 5 * time.Second
 
+type Directory interface {
+	Endpoint(workspace, kind, name, endpoint string) (component.Endpoint, bool)
+	List(workspace string) []component.Entry
+}
+
 type Deps struct {
 	component.Instance
-	Registry *component.Registry
+	Registry Directory
 	TLS      *tls.Config
 }
 
@@ -39,11 +45,11 @@ type Service struct {
 	spec v1alpha1.DispatcherTLSSpec
 	deps Deps
 
-	workspace    string
-	allowedHosts []string
-	certFile     string
-	caBundle     string
-	upstreamURL  string
+	workspace   string
+	hostnames   []string
+	certFile    string
+	caRef       *commonv1.ObjectRef
+	upstreamURL string
 
 	mu       sync.Mutex
 	log      *slog.Logger
@@ -64,12 +70,12 @@ func New(spec v1alpha1.DispatcherTLSSpec, deps Deps) *Service {
 	hostnames := append([]string(nil), spec.Hostnames...)
 	if spec.TLS != nil {
 		hostnames = strs.AppendUniqueFold(hostnames, spec.TLS.Hostnames...)
-		s.caBundle = strings.TrimSpace(spec.TLS.CABundle)
+		s.caRef = spec.TLS.CARef
 		if spec.TLS.CertRef != "" || spec.TLS.Enabled {
 			s.certFile, _ = servetls.CertificateFiles(spec.TLS.CertRef, spec.Storage, hostnames)
 		}
 	}
-	s.allowedHosts = allowedHosts(hostnames)
+	s.hostnames = hostnames
 	if target, ok := upstreamEndpoint(deps.Registry, s.workspace, spec.UpstreamRef); ok {
 		s.upstreamURL = target
 	}
@@ -85,7 +91,7 @@ func (s *Service) listenAddress() string {
 	return hostport.Listen("", s.spec.Serve.Host, int(s.spec.Serve.Port))
 }
 
-func upstreamEndpoint(registry *component.Registry, workspace string, ref *commonv1.ObjectRef) (string, bool) {
+func upstreamEndpoint(registry Directory, workspace string, ref *commonv1.ObjectRef) (string, bool) {
 	if ref == nil || registry == nil {
 		return "", false
 	}
@@ -136,53 +142,20 @@ func (s *Service) Start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	hosts := s.allowedHosts
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.Proxy = nil
-	if s.caBundle != "" {
-		pool, err := tlsreload.PoolFromBundle(s.caBundle, log)
-		if err != nil {
-			return fmt.Errorf("dispatchertls: %w", err)
-		}
-		transport.DialTLSContext = pool.DialTLSContext(&tls.Config{MinVersion: tls.VersionTLS12})
+	dial, stopTrust, err := s.upstreamDial(ctx, log)
+	if err != nil {
+		return err
 	}
-	proxy := &httputil.ReverseProxy{
-		Rewrite: func(req *httputil.ProxyRequest) {
-			target, _ := req.In.Context().Value(upstreamTargetKey{}).(*url.URL)
-			if target == nil {
-				return
-			}
-			req.Out.URL.Scheme = target.Scheme
-			req.Out.URL.Host = target.Host
-			req.Out.Host = req.In.Host
-		},
-		Transport: transport,
-		ErrorHandler: func(w http.ResponseWriter, req *http.Request, proxyErr error) {
-			log.Warn("dispatcher_tls_upstream_failed", "host", req.Host, "path", req.URL.Path, "err", proxyErr)
-			http.Error(w, "upstream unreachable", http.StatusBadGateway)
-		},
-	}
-	handler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		host := hostport.HostnameOnly(req.Host)
-		if !hostAllowed(hosts, host) {
-			log.Info("dispatcher_tls_refused", "host", host, "path", req.URL.Path)
-			http.Error(w, "not a dispatcher name", http.StatusNotFound)
-			return
-		}
-		raw, ok := s.resolveUpstream(upstreamURL)
-		if !ok {
-			log.Warn("dispatcher_tls_upstream_unresolved", "host", req.Host, "path", req.URL.Path)
-			http.Error(w, "upstream unreachable", http.StatusBadGateway)
-			return
-		}
-		target, err := parseUpstream(raw)
-		if err != nil {
-			log.Warn("dispatcher_tls_upstream_invalid", "upstream", raw, "err", err)
-			http.Error(w, "upstream unreachable", http.StatusBadGateway)
-			return
-		}
-		proxy.ServeHTTP(w, req.WithContext(context.WithValue(req.Context(), upstreamTargetKey{}, target)))
+	defer stopTrust()
+	proxy, err := tlsproxy.New(tlsproxy.Config{Hostnames: s.hostnames}, tlsproxy.Deps{
+		Upstream: func() (string, bool) { return s.resolveUpstream(upstreamURL) },
+		DialTLS:  dial,
+		Log:      log,
 	})
+	if err != nil {
+		return fmt.Errorf("dispatchertls: %w", err)
+	}
+	hosts := proxy.Hosts()
 	listener, err := net.Listen("tcp", s.listenAddress())
 	if err != nil {
 		return fmt.Errorf("dispatchertls: listening: %w", err)
@@ -191,7 +164,7 @@ func (s *Service) Start(ctx context.Context) error {
 	conns := newConnSet()
 	trackedListener := &trackingListener{Listener: tlsListener, set: conns}
 	httpServer := &http.Server{
-		Handler:           handler,
+		Handler:           proxy,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	stopCh := make(chan struct{})
@@ -243,7 +216,7 @@ func (s *Service) Ready(ctx context.Context) error {
 	if s.listener != nil {
 		address = s.listener.Addr().String()
 	}
-	hosts := s.allowedHosts
+	hosts := tlsproxy.AllowedHosts(s.hostnames)
 	s.mu.Unlock()
 	if !ready || address == "" {
 		return errors.New("dispatchertls: the service is not listening")
@@ -252,7 +225,7 @@ func (s *Service) Ready(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	req.Host = probeHost(hosts)
+	req.Host = tlsproxy.ProbeHost(hosts)
 	resp, err := probeClient().Do(req)
 	if err != nil {
 		return fmt.Errorf("dispatchertls: health request: %w", err)
@@ -323,8 +296,6 @@ func (s *Service) finish() {
 	s.mu.Unlock()
 }
 
-type upstreamTargetKey struct{}
-
 func (s *Service) resolveUpstream(upstreamURL string) (string, bool) {
 	if raw := strings.TrimSpace(upstreamURL); raw != "" {
 		return raw, true
@@ -332,18 +303,20 @@ func (s *Service) resolveUpstream(upstreamURL string) (string, bool) {
 	return upstreamEndpoint(s.deps.Registry, s.workspace, s.spec.UpstreamRef)
 }
 
-func parseUpstream(raw string) (*url.URL, error) {
-	target, err := url.Parse(strings.TrimSpace(raw))
+func (s *Service) upstreamDial(ctx context.Context, log *slog.Logger) (func(context.Context, string, string) (net.Conn, error), func(), error) {
+	if s.caRef == nil {
+		return nil, func() {}, nil
+	}
+	if s.deps.Bus == nil {
+		return nil, nil, errors.New("dispatchertls: the CA bundle needs the bus")
+	}
+	trust, err := bus.Resolve[vault.Trust](s.deps.Caller(ctx), s.deps.Bus, s.deps.Self, *s.caRef,
+		bus.Capability{Name: vault.CapabilityRead, Scope: []string{vault.TrustScope}})
 	if err != nil {
-		return nil, fmt.Errorf("dispatchertls: parsing the upstream: %w", err)
+		return nil, nil, fmt.Errorf("dispatchertls: the CA bundle of %s/%s: %w", s.caRef.Kind, s.caRef.Name, err)
 	}
-	if target.Scheme != "http" && target.Scheme != "https" {
-		return nil, fmt.Errorf("dispatchertls: the upstream scheme %q is not http or https", target.Scheme)
-	}
-	if target.Host == "" {
-		return nil, errors.New("dispatchertls: the upstream has no host")
-	}
-	return target, nil
+	pool, stop := tlsreload.TrustPool(ctx, trust, log)
+	return pool.DialTLSContext(&tls.Config{MinVersion: tls.VersionTLS12}), stop, nil
 }
 
 func (s *Service) listenerTLS() (*tls.Config, error) {
@@ -362,48 +335,6 @@ func (s *Service) listenerTLS() (*tls.Config, error) {
 		tlsConfig.NextProtos = []string{"http/1.1"}
 	}
 	return tlsConfig, nil
-}
-
-func allowedHosts(hostnames []string) []string {
-	seen := map[string]struct{}{}
-	hosts := []string{}
-	add := func(host string) {
-		host = strings.ToLower(hostport.HostnameOnly(strings.TrimSpace(host)))
-		if host == "" {
-			return
-		}
-		if _, ok := seen[host]; ok {
-			return
-		}
-		seen[host] = struct{}{}
-		hosts = append(hosts, host)
-	}
-	for _, host := range hostnames {
-		add(host)
-	}
-	if len(hosts) == 0 {
-		hosts = []string{"localhost"}
-	}
-	return hosts
-}
-
-func hostAllowed(hosts []string, host string) bool {
-	host = strings.ToLower(hostport.HostnameOnly(host))
-	for _, allowed := range hosts {
-		if allowed == "*" || host == allowed || strings.HasSuffix(host, "."+allowed) {
-			return true
-		}
-	}
-	return false
-}
-
-func probeHost(hosts []string) string {
-	for _, host := range hosts {
-		if host != "*" {
-			return host
-		}
-	}
-	return "localhost"
 }
 
 func probeClient() *http.Client {

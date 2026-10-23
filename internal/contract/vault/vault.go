@@ -13,6 +13,8 @@ const (
 	CapabilityLease = "vault.lease"
 
 	CapabilityPKIIssue = "vault.pki.issue"
+
+	TrustScope = "ca"
 )
 
 type KV interface {

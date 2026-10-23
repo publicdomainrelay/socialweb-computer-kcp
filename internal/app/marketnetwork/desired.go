@@ -269,9 +269,11 @@ func networkDesired(o *v1alpha1.MarketNetwork, ws, stateRoot string, leases map[
 		}
 	}
 	ingress := compose.Desired{Kind: compose.ComponentKindIngressProxy, Name: compose.NetworkIngressName, Spec: ingressSpec}
-	dispatcherBase := compose.NewComponentSpec(compose.ComponentCRStateDir(netState, compose.ComponentKindDispatcherTLS, NetworkDispatcherTLSName), &value)
+	dispatcherValue := value
+	dispatcherValue.CABundle = ""
+	dispatcherBase := compose.NewComponentSpec(compose.ComponentCRStateDir(netState, compose.ComponentKindDispatcherTLS, NetworkDispatcherTLSName), &dispatcherValue)
 	dispatcherBase.TLS = &v1alpha1.ComponentTLS{Enabled: true, Hostnames: []string{GuestTLSHost, "*." + GuestTLSHost},
-		CertRef: filepath.Join(guestDir, guestLeafFile), CABundle: value.CABundle}
+		CertRef: filepath.Join(guestDir, guestLeafFile), CARef: &commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: Kind, Name: o.Name, Workspace: ws}}
 	dispatcher := compose.Desired{Kind: compose.ComponentKindDispatcherTLS, Name: NetworkDispatcherTLSName, Spec: v1alpha1.DispatcherTLSSpec{
 		ComponentSpec: dispatcherBase,
 		UpstreamRef:   compose.ComponentRefFor(compose.ComponentKindIngressProxy, compose.NetworkIngressName),
