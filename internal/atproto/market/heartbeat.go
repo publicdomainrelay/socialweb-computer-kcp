@@ -2,8 +2,9 @@ package market
 
 import (
 	"context"
-	"sync"
 	"time"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 )
 
 const HeartbeatEventDebounce = 15 * time.Second
@@ -16,12 +17,14 @@ type heartbeatEntry struct {
 
 type HeartbeatCache struct {
 	Getter RecordGetter
-	mu     sync.Mutex
-	held   map[string]heartbeatEntry
+	held   *ttlcache.Cache[string, heartbeatEntry]
 }
 
 func NewHeartbeatCache(getter RecordGetter) *HeartbeatCache {
-	return &HeartbeatCache{Getter: getter, held: map[string]heartbeatEntry{}}
+	return &HeartbeatCache{
+		Getter: getter,
+		held:   ttlcache.New[string, heartbeatEntry](ttlcache.Options{TTL: HeartbeatTTL + HeartbeatMaxSkew}),
+	}
 }
 
 func heartbeatFreshAt(entry heartbeatEntry, now time.Time) bool {
@@ -50,14 +53,10 @@ func (c *HeartbeatCache) read(ctx context.Context, did string, now time.Time) he
 func (c *HeartbeatCache) FreshDIDs(ctx context.Context, dids []string, now time.Time) []string {
 	out := make([]string, 0, len(dids))
 	for _, did := range dids {
-		c.mu.Lock()
-		entry, ok := c.held[did]
-		c.mu.Unlock()
+		entry, ok := c.held.Get(did)
 		if !ok || !(heartbeatFreshAt(entry, now) || now.Sub(entry.checkedAt) < HeartbeatInterval) {
 			entry = c.read(ctx, did, now)
-			c.mu.Lock()
-			c.held[did] = entry
-			c.mu.Unlock()
+			c.held.Set(did, entry)
 		}
 		if heartbeatFreshAt(entry, now) {
 			out = append(out, did)
@@ -72,19 +71,13 @@ func (c *HeartbeatCache) HandleEvent(ctx context.Context, event WatchEvent) {
 	}
 	now := time.Now()
 	if event.Operation == "delete" {
-		c.mu.Lock()
-		c.held[event.DID] = heartbeatEntry{checkedAt: now}
-		c.mu.Unlock()
+		c.held.Set(event.DID, heartbeatEntry{checkedAt: now})
 		return
 	}
-	c.mu.Lock()
-	held, ok := c.held[event.DID]
-	c.mu.Unlock()
+	held, ok := c.held.Get(event.DID)
 	if ok && now.Sub(held.checkedAt) < HeartbeatEventDebounce {
 		return
 	}
 	entry := c.read(ctx, event.DID, now)
-	c.mu.Lock()
-	c.held[event.DID] = entry
-	c.mu.Unlock()
+	c.held.Set(event.DID, entry)
 }
