@@ -97,9 +97,6 @@ func NewController(cfg ControllerConfig) (*Controller, error) {
 }
 
 func (c *Controller) Run(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	if err := c.runtime.Start(ctx); err != nil {
 		return err
 	}
@@ -108,24 +105,21 @@ func (c *Controller) Run(ctx context.Context) error {
 
 	events, err := c.source.Watch(runCtx)
 	if err != nil {
-		stopErr := c.shutdown()
+		stopErr := c.shutdown(ctx)
 		return errors.Join(fmt.Errorf("component: watching components: %w", err), stopErr)
 	}
 
 	var wg sync.WaitGroup
-	wg.Add(c.workers)
-	for i := 0; i < c.workers; i++ {
-		go func() {
-			defer wg.Done()
-			c.worker(runCtx)
-		}()
+	for range c.workers {
+		wg.Go(func() { c.worker(runCtx) })
 	}
 
 	specs, err := c.source.List(runCtx)
 	if err != nil {
 		cancel()
 		wg.Wait()
-		stopErr := c.shutdown()
+		drain(events)
+		stopErr := c.shutdown(ctx)
 		return errors.Join(fmt.Errorf("component: listing components: %w", err), stopErr)
 	}
 	for _, spec := range specs {
@@ -137,11 +131,17 @@ func (c *Controller) Run(ctx context.Context) error {
 	ticker.Stop()
 	cancel()
 	wg.Wait()
-	stopErr := c.shutdown()
+	drain(events)
+	stopErr := c.shutdown(ctx)
 	if runErr != nil {
 		return runErr
 	}
 	return stopErr
+}
+
+func drain(events <-chan Event) {
+	for range events {
+	}
 }
 
 func (c *Controller) Reconcile(ctx context.Context, spec ComponentSpec) error {
@@ -239,9 +239,6 @@ func (c *Controller) writeStatus(ctx context.Context, spec ComponentSpec, status
 	if c.status == nil {
 		return nil
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	if err := c.status.WriteStatus(ctx, spec, status); err != nil {
 		c.log.Warn("component: writing status failed",
 			"uid", spec.UID,
@@ -254,8 +251,8 @@ func (c *Controller) writeStatus(ctx context.Context, spec ComponentSpec, status
 	return nil
 }
 
-func (c *Controller) shutdown() error {
-	ctx, cancel := context.WithTimeout(context.Background(), DefaultStopTimeout)
+func (c *Controller) shutdown(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), DefaultStopTimeout)
 	defer cancel()
 	return c.runtime.Stop(ctx)
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
@@ -44,7 +45,13 @@ func runHostProcesses(ctx context.Context, a *app, vals clicfg.Values, rest []st
 	defer m.Close()
 	prefix := table.DevNames(vals.String("instance")).HostProcessPrefix()
 	log := a.log.With("component", "hostprocesses", "instance", vals.String("instance"), "workspace", ws)
-	go openbaoctl.Supervise(ctx, openbaoctl.Config{Kubeconfig: kubeconfig, Workspace: ws, StateDir: stateDir, Prefix: prefix, Log: log})
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	wg.Go(func() {
+		openbaoctl.Supervise(ctx, openbaoctl.Config{Kubeconfig: kubeconfig, Workspace: ws, StateDir: stateDir, Prefix: prefix, Log: log})
+	})
 	hostprocess.Supervise(ctx, hostprocess.Config{Kubeconfig: kubeconfig, Workspace: ws, Manager: m, Prefix: prefix,
 		Resolve: func(asset v1alpha1.HostProcessAsset) (string, error) {
 			if asset.Name == "bao" && bao != "" {

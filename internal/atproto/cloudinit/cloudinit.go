@@ -8,7 +8,6 @@ import (
 	"regexp"
 	"slices"
 	"strings"
-	"sync"
 
 	"gopkg.in/yaml.v3"
 )
@@ -107,17 +106,6 @@ var DefaultDNSFallbacks = []string{"1.1.1.1", "9.9.9.9"}
 
 var RemovedTransportModules = []string{"tunnel", "fedproxy-ssh", "fedproxy-web", "wootty"}
 
-var (
-	registryMu sync.Mutex
-	registry   = map[string]UserDataModule{}
-)
-
-func RegisterUserDataModule(id string, module UserDataModule) {
-	registryMu.Lock()
-	registry[id] = module
-	registryMu.Unlock()
-}
-
 func GetUserDataModules(ids []any) ([]UserDataModule, error) {
 	out := make([]UserDataModule, 0, len(ids))
 	for _, idOrFn := range ids {
@@ -129,9 +117,7 @@ func GetUserDataModules(ids []any) ([]UserDataModule, error) {
 			if removed {
 				return nil, &LegacyTransportError{Transport: v}
 			}
-			registryMu.Lock()
 			module, ok := registry[v]
-			registryMu.Unlock()
 			if !ok {
 				return nil, &UnknownModuleError{ID: v}
 			}
@@ -144,8 +130,6 @@ func GetUserDataModules(ids []any) ([]UserDataModule, error) {
 }
 
 func ListUserDataModules() []string {
-	registryMu.Lock()
-	defer registryMu.Unlock()
 	out := make([]string, 0, len(registry))
 	for id := range registry {
 		out = append(out, id)

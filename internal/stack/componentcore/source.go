@@ -110,11 +110,9 @@ func (s *source) Watch(ctx context.Context) (<-chan component.Event, error) {
 	var wg sync.WaitGroup
 	for _, workspace := range s.workspaces(ctx) {
 		for _, kind := range s.kinds {
-			wg.Add(1)
-			go func(workspace string, kind componentKind) {
-				defer wg.Done()
+			wg.Go(func() {
 				s.watch(ctx, workspace, kind, out)
-			}(workspace, kind)
+			})
 		}
 	}
 	go func() {

@@ -68,6 +68,8 @@ type custodySignIn struct {
 	closed bool
 
 	refreshing bool
+
+	wg sync.WaitGroup
 }
 
 type custodyIdentityEntry struct {
@@ -301,7 +303,7 @@ func (s *custodySignIn) ensureRefresherLocked() {
 		return
 	}
 	s.refreshing = true
-	go s.refreshLoop()
+	s.wg.Go(s.refreshLoop)
 }
 
 func (s *custodySignIn) wakeRefresherLocked() {
@@ -322,6 +324,7 @@ func (s *custodySignIn) Close() {
 		close(s.stopCh)
 	}
 	s.mu.Unlock()
+	s.wg.Wait()
 }
 
 func (s *custodySignIn) refreshLoop() {

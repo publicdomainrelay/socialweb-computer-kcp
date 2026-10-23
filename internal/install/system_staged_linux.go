@@ -209,7 +209,7 @@ func (s stagedSystem) User(ctx context.Context, a Account) (UserManager, error) 
 	if a.UID != os.Getuid() {
 		return nil, fmt.Errorf("install: the staged account %s is uid %d, not the invoking user", a.Name, a.UID)
 	}
-	um, err := liveSystem{}.User(ctx, a)
+	um, err := liveSystem{ctx: ctx}.User(ctx, a)
 	if err != nil {
 		return nil, err
 	}

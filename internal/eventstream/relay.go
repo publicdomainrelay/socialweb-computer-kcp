@@ -137,9 +137,6 @@ func openRelayStream(ctx context.Context, base string, cursor *int64, handlers *
 }
 
 func (s *relayEventStream) Next(ctx context.Context) (pdsclient.RepoEvent, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	if err := ctx.Err(); err != nil {
 		return pdsclient.RepoEvent{}, err
 	}

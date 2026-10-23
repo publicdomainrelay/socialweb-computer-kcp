@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
@@ -513,7 +514,8 @@ func (r *requestRun) ssh(ctx context.Context, c *v1alpha1.ComputeContract) (int,
 
 func (r *requestRun) whileHeld(ctx context.Context) (context.Context, func()) {
 	held, cancel := context.WithCancelCause(ctx)
-	go func() {
+	var wg sync.WaitGroup
+	wg.Go(func() {
 		for {
 			select {
 			case <-held.Done():
@@ -526,8 +528,11 @@ func (r *requestRun) whileHeld(ctx context.Context) (context.Context, func()) {
 				return
 			}
 		}
-	}()
-	return held, func() { cancel(nil) }
+	})
+	return held, func() {
+		cancel(nil)
+		wg.Wait()
+	}
 }
 
 func (r *requestRun) release(ctx context.Context) (*v1alpha1.ComputeContract, error) {
@@ -544,16 +549,16 @@ func (r *requestRun) release(ctx context.Context) (*v1alpha1.ComputeContract, er
 func (r *requestRun) carryOn(ctx context.Context) int {
 	if err := r.signIn(ctx); err != nil {
 		r.a.log.Error("signing in", "err", err.Error())
-		c, _ := r.kcp.Contract(context.Background())
+		c, _ := r.kcp.Contract(context.WithoutCancel(ctx))
 		r.writeSummary(c)
-		r.stop(context.Background(), false)
+		r.stop(context.WithoutCancel(ctx), false)
 		return exitFailed
 	}
 	c, err := r.kcp.WaitContract(ctx, r.contractTimeout, contractSettled, r.progress)
 	if err != nil {
 		r.a.log.Error("the contract did not settle", "err", err.Error())
 		r.writeSummary(c)
-		r.stop(context.Background(), false)
+		r.stop(context.WithoutCancel(ctx), false)
 		r.a.printJSON(r.summary)
 		return exitFailed
 	}
@@ -596,7 +601,7 @@ func (r *requestRun) carryOn(ctx context.Context) int {
 		}
 	}
 	r.writeSummary(c)
-	r.stop(context.Background(), remove)
+	r.stop(context.WithoutCancel(ctx), remove)
 	r.writeSummary(nil)
 	r.a.printJSON(r.summary)
 	return code
@@ -654,20 +659,20 @@ func runRequest(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 	r.log("a fresh kcp for this invocation", "mode", r.inv.Mode, "network", network)
 	if err := r.start(ctx, true); err != nil {
 		r.writeSummaryQuiet()
-		r.stop(context.Background(), false)
+		r.stop(context.WithoutCancel(ctx), false)
 		return a.fail(exitFailed, "run request: %v", err)
 	}
 	if bundle != nil {
 		ref, err := r.kcp.PutSecrets(ctx, bundle, r.networkTimeout)
 		if err != nil {
-			r.stop(context.Background(), false)
+			r.stop(context.WithoutCancel(ctx), false)
 			return a.fail(exitFailed, "run request: %v", err)
 		}
 		r.contract.SecretsRef = &ref
 		r.log("the secrets bundle is in the invocation's own OpenBao", "mount", ref.Mount, "path", ref.Path)
 	}
 	if err := r.kcp.CreateContract(ctx, r.contract, r.networkTimeout); err != nil {
-		r.stop(context.Background(), false)
+		r.stop(context.WithoutCancel(ctx), false)
 		return a.fail(exitFailed, "run request: %v", err)
 	}
 	return r.carryOn(ctx)
@@ -700,7 +705,7 @@ func (a *app) reopenRequest(ctx context.Context, vals clicfg.Values, rest []stri
 	}
 	r.log("starting the invocation's kcp again from its state dir", "verb", verb)
 	if err := r.start(ctx, false); err != nil {
-		r.stop(context.Background(), false)
+		r.stop(context.WithoutCancel(ctx), false)
 		return nil, a.fail(exitFailed, "run request %s: %v", verb, err)
 	}
 	return r, exitOK
@@ -727,13 +732,13 @@ func runRequestRelease(ctx context.Context, a *app, vals clicfg.Values, rest []s
 		}
 		r.a.log.Error("the release did not finish", "err", fmt.Sprint(err), "phase", phase)
 		r.writeSummary(c)
-		r.stop(context.Background(), false)
+		r.stop(context.WithoutCancel(ctx), false)
 		r.writeSummary(nil)
 		r.a.printJSON(r.summary)
 		return exitFailed
 	}
 	r.writeSummary(c)
-	r.stop(context.Background(), true)
+	r.stop(context.WithoutCancel(ctx), true)
 	r.writeSummary(nil)
 	r.a.printJSON(r.summary)
 	return exitOK

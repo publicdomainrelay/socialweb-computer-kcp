@@ -106,9 +106,6 @@ func NewController(cfg ControllerConfig) (*Controller, error) {
 }
 
 func (c *Controller) Run(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	if err := c.Reconcile(ctx); err != nil && ctx.Err() == nil {
 		c.log.Warn("policy controller reconcile failed", "err", err.Error())
 	}
@@ -119,7 +116,7 @@ func (c *Controller) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			c.cancelAll()
 			c.wg.Wait()
-			shutdownCtx, cancel := context.WithTimeout(context.Background(), DefaultStatusTimeout)
+			shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), DefaultStatusTimeout)
 			defer cancel()
 			if err := c.cfg.Manager.Shutdown(shutdownCtx); err != nil {
 				c.log.Warn("policy engine shutdown failed", "err", err.Error())
@@ -138,9 +135,6 @@ func (c *Controller) Engine(name string) (*Engine, bool) {
 }
 
 func (c *Controller) Reconcile(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	if err := ctx.Err(); err != nil {
 		return nil
 	}

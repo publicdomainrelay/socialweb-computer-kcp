@@ -16,6 +16,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterlink"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/procgroup"
 )
@@ -54,7 +55,11 @@ type Links struct {
 	Retry time.Duration
 
 	Log *slog.Logger
+
+	writes sync.WaitGroup
 }
+
+func (l *Links) Wait(ctx context.Context) error { return supervise.Join(ctx, l.writes.Wait) }
 
 type linkTarget struct {
 	component procgroup.Component
@@ -198,11 +203,11 @@ func (r *linkRun) ready(ctx context.Context, p procgroup.Member) error {
 				return err
 			}
 			link := clusterlink.Object(r.cluster, r.target.service, r.target.port, status)
-			go func() {
-				wctx, done := context.WithTimeout(context.Background(), time.Minute)
+			wctx, done := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
+			r.links.writes.Go(func() {
 				defer done()
 				r.retry(wctx, "Listening", func() error { return r.links.Recorder.WriteLink(wctx, link) })
-			}()
+			})
 			return nil
 		}
 		select {

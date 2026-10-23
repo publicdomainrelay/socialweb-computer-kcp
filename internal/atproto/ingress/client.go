@@ -55,6 +55,7 @@ type Subscriber struct {
 	ingressRef string
 	ctx        context.Context
 	cancel     context.CancelFunc
+	wg         sync.WaitGroup
 
 	mu      sync.Mutex
 	conn    *websocket.Conn
@@ -133,6 +134,7 @@ func (s *Subscriber) Close() {
 		_ = conn.Close()
 	}
 	s.cleanupSubscriptions()
+	s.wg.Wait()
 }
 
 func (s *Subscriber) openOnce(ctx context.Context) error {
@@ -227,8 +229,8 @@ func (s *Subscriber) openOnce(ctx context.Context) error {
 		return errors.New("ingress: subscriber closed")
 	}
 	s.conn = conn
+	s.wg.Go(func() { s.readLoop(conn) })
 	s.mu.Unlock()
-	go s.readLoop(conn)
 	return nil
 }
 
@@ -257,7 +259,7 @@ func (s *Subscriber) readLoop(conn *websocket.Conn) {
 	closed := s.closed
 	s.mu.Unlock()
 	if current && !closed {
-		go s.reconnect(0)
+		s.wg.Go(func() { s.reconnect(0) })
 	}
 }
 
@@ -348,7 +350,7 @@ func (s *Subscriber) handleRequest(msg frame) {
 	if msg.RawBody != nil {
 		req.RawBody = *msg.RawBody
 	}
-	go func() {
+	s.wg.Go(func() {
 		result, err := s.cfg.HandleRequest(s.ctx, req)
 		if err != nil {
 			_ = s.send(map[string]any{
@@ -371,7 +373,7 @@ func (s *Subscriber) handleRequest(msg frame) {
 			out["headers"] = result.Headers
 		}
 		_ = s.send(out)
-	}()
+	})
 }
 
 func (s *Subscriber) handleSubscribe(msg frame) {
@@ -434,7 +436,7 @@ func (s *Subscriber) handleSubscribe(msg frame) {
 		s.mu.Lock()
 		s.syntheticStops[id] = func() { once.Do(func() { close(stop) }) }
 		s.mu.Unlock()
-		go func() {
+		s.wg.Go(func() {
 			t := time.NewTicker(5 * time.Second)
 			defer t.Stop()
 			seq := int64(0)
@@ -458,7 +460,7 @@ func (s *Subscriber) handleSubscribe(msg frame) {
 					})
 				}
 			}
-		}()
+		})
 	}
 }
 
@@ -475,12 +477,12 @@ func (s *Subscriber) startTunnel(id string) {
 		t.mu.Lock()
 		t.cancel = cancel
 		t.mu.Unlock()
-		go func() {
+		s.wg.Go(func() {
 			defer cancel()
 			defer server.Close()
 			_ = s.cfg.TunnelHandler(ctx, server)
 			_ = client.Close()
-		}()
+		})
 	} else {
 		target := s.cfg.TunnelTarget
 		dialed, err := net.Dial("tcp", target.address())
@@ -519,7 +521,7 @@ func (s *Subscriber) startTunnel(id string) {
 		"$type":          frameType("subscriptionOpen"),
 		"subscriptionId": id,
 	})
-	go func() {
+	s.wg.Go(func() {
 		buf := make([]byte, 64*1024)
 		for {
 			n, err := conn.Read(buf)
@@ -544,7 +546,7 @@ func (s *Subscriber) startTunnel(id string) {
 			"subscriptionId": id,
 			"code":           1000,
 		})
-	}()
+	})
 }
 
 func (t *tunnel) write(data []byte) {
@@ -615,7 +617,7 @@ func (s *Subscriber) startWSSubscription(id, nsid string, params map[string]stri
 		"$type":          frameType("subscriptionOpen"),
 		"subscriptionId": id,
 	})
-	go func() {
+	s.wg.Go(func() {
 		for {
 			mt, data, err := conn.ReadMessage()
 			if err != nil {
@@ -655,7 +657,7 @@ func (s *Subscriber) startWSSubscription(id, nsid string, params map[string]stri
 				})
 			}
 		}
-	}()
+	})
 }
 
 func (s *Subscriber) closeSubscription(id string) {
@@ -790,6 +792,7 @@ type Caller struct {
 	cfg    CallerConfig
 	ctx    context.Context
 	cancel context.CancelFunc
+	wg     sync.WaitGroup
 	mu     sync.Mutex
 	conn   *websocket.Conn
 	closed bool
@@ -834,9 +837,14 @@ func (c *Caller) connect() error {
 		return err
 	}
 	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		_ = conn.Close()
+		return errors.New("ingress: caller closed")
+	}
 	c.conn = conn
+	c.wg.Go(func() { c.readLoop(conn) })
 	c.mu.Unlock()
-	go c.readLoop(conn)
 	return nil
 }
 
@@ -860,7 +868,7 @@ func (c *Caller) readLoop(conn *websocket.Conn) {
 	if !current || closed {
 		return
 	}
-	go c.reconnect()
+	c.wg.Go(c.reconnect)
 }
 
 func (c *Caller) reconnect() {
@@ -896,4 +904,5 @@ func (c *Caller) Close() {
 	if conn != nil {
 		_ = conn.Close()
 	}
+	c.wg.Wait()
 }

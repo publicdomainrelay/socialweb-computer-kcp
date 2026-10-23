@@ -24,6 +24,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/install"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/logcap"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/postgresctl"
@@ -148,17 +149,43 @@ func Run(ctx context.Context, cfg Config, m hostsvc.Manager) error {
 			return err
 		}
 	}
-	go logcap.Keep(ctx, LogCapConfig(l, log))
+	g := supervise.New(ctx)
+	defer g.Stop()
+	ctx = g.Context()
+	logCfg := LogCapConfig(l, log)
+	g.Go("logcap", func(ctx context.Context) error {
+		logcap.Keep(ctx, logCfg)
+		return nil
+	})
 	if len(rec.StandIns) == 0 && rec.AdminKubeconfig != "" {
-		go componentcore.Supervise(ctx, ComponentCoreConfig(ctx, cfg, rec, log))
-		go hostprocess.Supervise(ctx, HostProcessConfig(bcfg, rec, m, log))
+		coreCfg := ComponentCoreConfig(ctx, cfg, rec, log)
+		g.Go("componentcore", func(ctx context.Context) error {
+			componentcore.Supervise(ctx, coreCfg)
+			return nil
+		})
+		hpCfg := HostProcessConfig(bcfg, rec, m, log)
+		g.Go("hostprocess", func(ctx context.Context) error {
+			hostprocess.Supervise(ctx, hpCfg)
+			return nil
+		})
 		if cfg.ComputeVM != nil {
 			c := *cfg.ComputeVM
 			c.Kubeconfig, c.Workspace = rec.AdminKubeconfig, HostProcessConfig(bcfg, rec, m, log).Workspace
-			go computevm.Run(ctx, c)
+			g.Go("computevm", func(ctx context.Context) error {
+				computevm.Run(ctx, c)
+				return nil
+			})
 		}
-		go openbaoctl.Supervise(ctx, OpenBaoServerConfig(bcfg, rec, log))
-		go postgresctl.Run(ctx, PostgresConfig(bcfg, rec, log))
+		baoCfg := OpenBaoServerConfig(bcfg, rec, log)
+		g.Go("openbaoctl", func(ctx context.Context) error {
+			openbaoctl.Supervise(ctx, baoCfg)
+			return nil
+		})
+		pgCfg := PostgresConfig(bcfg, rec, log)
+		g.Go("postgresctl", func(ctx context.Context) error {
+			postgresctl.Run(ctx, pgCfg)
+			return nil
+		})
 		ac := AppConfig(bcfg, rec, m, log)
 		ac.Handlers, ac.RemotePDS = cfg.Handlers, cfg.RemotePDS
 		ac.Listeners, ac.WebApp, ac.OnComponents = cfg.Listeners, cfg.WebApp, cfg.OnComponents
@@ -167,7 +194,10 @@ func Run(ctx context.Context, cfg Config, m hostsvc.Manager) error {
 			log.Warn("the TTL controller does not start", "err", err.Error())
 		} else {
 			ac.TTLReport = tc.Report
-			go ttlctl.Supervise(ctx, tc)
+			g.Go("ttlctl", func(ctx context.Context) error {
+				ttlctl.Supervise(ctx, tc)
+				return nil
+			})
 		}
 		if rec.SharedKcp == "" {
 			if sc, err := StoreMaintConfig(bcfg, rec, log); err != nil {
@@ -175,18 +205,31 @@ func Run(ctx context.Context, cfg Config, m hostsvc.Manager) error {
 			} else {
 				mon := storemaint.New(sc)
 				ac.StoreUsage = mon.Usage
-				go mon.Run(ctx)
+				g.Go("storemaint", func(ctx context.Context) error {
+					mon.Run(ctx)
+					return nil
+				})
 			}
 		}
-		go appctl.Supervise(ctx, ac)
+		g.Go("appctl", func(ctx context.Context) error {
+			appctl.Supervise(ctx, ac)
+			return nil
+		})
 	}
 	members := make(chan error, 1)
 	if cfg.Members != nil {
 		launched := rec
-		go func() { members <- cfg.Members(ctx, launched) }()
+		g.Go("members", func(ctx context.Context) error {
+			members <- cfg.Members(ctx, launched)
+			return nil
+		})
 	}
 	if rec.Host && rec.AdminKubeconfig != "" {
-		go devinstance.RunHost(ctx, devinstance.HostConfig{Kubeconfig: rec.AdminKubeconfig, Manager: m, Own: devinstance.Prefixes(l.ID), Log: log})
+		hostCfg := devinstance.HostConfig{Kubeconfig: rec.AdminKubeconfig, Manager: m, Own: devinstance.Prefixes(l.ID), Log: log}
+		g.Go("devinstance-host", func(ctx context.Context) error {
+			devinstance.RunHost(ctx, hostCfg)
+			return nil
+		})
 	}
 	t := time.NewTicker(CheckInterval)
 	defer t.Stop()
@@ -194,7 +237,7 @@ func Run(ctx context.Context, cfg Config, m hostsvc.Manager) error {
 		select {
 		case <-ctx.Done():
 			log.Info("core stopping", "generation", core.Generation)
-			return nil
+			return g.Stop()
 		case err := <-members:
 			if ctx.Err() != nil {
 				return nil

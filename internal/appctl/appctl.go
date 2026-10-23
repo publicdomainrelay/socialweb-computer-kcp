@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -30,6 +31,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpapply"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 )
 
@@ -152,6 +154,8 @@ type Controller struct {
 
 	lastDesired map[string]map[string]any
 	drift       map[string]map[string]time.Time
+
+	pdsPublicURLs sync.Map
 }
 
 func clusterConfig(base *rest.Config, ws string) *rest.Config {
@@ -229,8 +233,10 @@ func Run(ctx context.Context, c Config) error {
 		}
 	}
 	log.Info("the application controller reconciles this instance's root objects", "workspace", c.workspace())
-	go ctl.sampleStateDir(ctx)
-	go ctl.sampleGC(ctx)
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	wg.Go(func() { ctl.sampleStateDir(ctx) })
+	wg.Go(func() { ctl.sampleGC(ctx) })
 	for {
 		ctl.Pass(ctx)
 		if !sleep(ctx, c.interval()) {
@@ -240,16 +246,9 @@ func Run(ctx context.Context, c Config) error {
 }
 
 func Supervise(ctx context.Context, c Config) {
-	for {
-		err := Run(ctx, c)
-		if ctx.Err() != nil {
-			return
-		}
+	supervise.Restart(ctx, "appctl", supervise.Backoff{Min: RetryAfter, Max: RetryAfter, OnError: func(err error, _ time.Duration) {
 		c.log().Error("the application controller stopped; starting it again", "err", fmt.Sprint(err))
-		if !sleep(ctx, RetryAfter) {
-			return
-		}
-	}
+	}}, func(ctx context.Context) error { return Run(ctx, c) })
 }
 
 func sleep(ctx context.Context, d time.Duration) bool {

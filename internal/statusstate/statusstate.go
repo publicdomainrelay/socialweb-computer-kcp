@@ -195,9 +195,6 @@ func Register(ctx context.Context, opts Options) error {
 }
 
 func (c *Controller) Run(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	kinds := []struct {
 		gvr       schema.GroupVersionResource
 		reconcile reconciler
@@ -211,11 +208,9 @@ func (c *Controller) Run(ctx context.Context) error {
 	}
 	var wg sync.WaitGroup
 	for _, kind := range kinds {
-		wg.Add(1)
-		go func(gvr schema.GroupVersionResource, reconcile reconciler) {
-			defer wg.Done()
-			c.runKind(ctx, gvr, reconcile)
-		}(kind.gvr, kind.reconcile)
+		wg.Go(func() {
+			c.runKind(ctx, kind.gvr, kind.reconcile)
+		})
 	}
 	wg.Wait()
 	return nil

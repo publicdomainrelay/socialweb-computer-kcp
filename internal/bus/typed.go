@@ -46,9 +46,6 @@ func Resolve[T any](ctx context.Context, b *Bus, from commonv1.ObjectRef, to com
 	if b == nil {
 		return zero, ErrHandlersStopped
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	if err := b.Ready(ctx); err != nil {
 		return zero, err
 	}

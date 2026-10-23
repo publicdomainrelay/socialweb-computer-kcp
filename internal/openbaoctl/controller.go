@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -28,6 +29,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/baosync"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostprocess"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/rootvault"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vaultcert"
@@ -808,8 +810,12 @@ func (c *Controller) Run(ctx context.Context) error {
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	kick := make(chan struct{}, 1)
-	go c.watchSpecs(ctx, kick)
-	go c.watchGrants(ctx, kick)
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	wg.Go(func() { c.watchSpecs(ctx, kick) })
+	wg.Go(func() { c.watchGrants(ctx, kick) })
 	for {
 		if err := c.Pass(ctx); err != nil {
 			return err
@@ -866,19 +872,13 @@ func (c *Controller) watchSpecs(ctx context.Context, kick chan<- struct{}) {
 
 func Supervise(ctx context.Context, c Config) {
 	log := c.log()
-	for {
+	supervise.Restart(ctx, "openbaoctl", supervise.Backoff{Min: RetryAfter, Max: RetryAfter, OnError: func(err error, after time.Duration) {
+		log.Info("the OpenBaoServer controller waits; starting it again", "err", fmt.Sprint(err), "after", after.String())
+	}}, func(ctx context.Context) error {
 		ctl, err := New(c)
-		if err == nil {
-			err = ctl.Run(ctx)
+		if err != nil {
+			return err
 		}
-		if ctx.Err() != nil {
-			return
-		}
-		log.Info("the OpenBaoServer controller waits; starting it again", "err", fmt.Sprint(err), "after", RetryAfter.String())
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(RetryAfter):
-		}
-	}
+		return ctl.Run(ctx)
+	})
 }

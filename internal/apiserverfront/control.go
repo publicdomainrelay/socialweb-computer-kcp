@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
@@ -61,6 +62,8 @@ func ServeControl(ctx context.Context, path string, f *Front, ready func()) erro
 	os.Chmod(path, 0o600)
 	stop := context.AfterFunc(ctx, func() { l.Close() })
 	defer stop()
+	var wg sync.WaitGroup
+	defer wg.Wait()
 	if ready != nil {
 		ready()
 	}
@@ -72,7 +75,7 @@ func ServeControl(ctx context.Context, path string, f *Front, ready func()) erro
 			}
 			return err
 		}
-		go serveOne(c, f)
+		wg.Go(func() { serveOne(c, f) })
 	}
 }
 

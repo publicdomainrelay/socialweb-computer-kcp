@@ -560,25 +560,24 @@ func (p *GuestSessionProvider) RunSession(ctx context.Context, privateKeyPath, t
 		_ = stdin.Close()
 	})
 	var copying sync.WaitGroup
-	copying.Add(2)
-	go func() {
-		defer copying.Done()
+	copying.Go(func() {
 		_, _ = io.Copy(writeFunc(commandIO.Write), stdout)
-	}()
-	go func() {
-		defer copying.Done()
+	})
+	copying.Go(func() {
 		_, _ = io.Copy(writeFunc(commandIO.WriteErr), stderr)
-	}()
+	})
 	done := make(chan struct{})
-	go func() {
+	var watching sync.WaitGroup
+	watching.Go(func() {
 		select {
 		case <-ctx.Done():
 			client.Close()
 		case <-done:
 		}
-	}()
+	})
 	err = session.Wait()
 	close(done)
+	watching.Wait()
 	copying.Wait()
 	if ctx.Err() != nil {
 		p.log().Info("guest_session_terminated", "target", target, "phase", "session")

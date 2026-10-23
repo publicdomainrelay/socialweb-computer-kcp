@@ -82,9 +82,6 @@ func (h *ComputeVMHandler) Dispatch(ctx context.Context, spec json.RawMessage, _
 	if h == nil || h.Store == nil {
 		return ErrNoStore
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	decoded, err := decodeComputeVMSpec(spec)
 	if err != nil {
 		return err

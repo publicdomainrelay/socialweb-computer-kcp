@@ -300,9 +300,6 @@ func Register(runtime *component.Runtime) error {
 }
 
 func (s *Service) Start(ctx context.Context, deps component.Deps) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	cfg := s.cfg
 	cfg.Deps = mergeDeps(cfg.Deps, deps)
 	if cfg.Workspace == "" {
@@ -438,12 +435,17 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	}
 	crawlCtx, crawlCancel := context.WithCancel(ctx)
 	defer crawlCancel()
-	go crawl(crawlCtx, log, relay, func() []string { return s.crawlHosts(cfg) }, cfg.CrawlInterval, stopCh)
+	var crawls sync.WaitGroup
+	crawls.Go(func() {
+		crawl(crawlCtx, log, relay, func() []string { return s.crawlHosts(cfg) }, cfg.CrawlInterval, stopCh)
+	})
 
 	select {
 	case <-ctx.Done():
 	case <-stopCh:
 	}
+	crawlCancel()
+	crawls.Wait()
 
 	relay.Close()
 	s.finish()
@@ -451,9 +453,6 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 }
 
 func (s *Service) Ready(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	s.mu.Lock()
 	ready := s.ready
 	baseURL := s.baseURL

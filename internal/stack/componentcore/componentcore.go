@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -32,6 +33,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/oauthcallback"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyaction"
 	policycontroller "github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/controller"
@@ -142,6 +144,8 @@ type Core struct {
 	runners []controllerRunner
 
 	eventHandlers *eventstream.HandlerRegistry
+
+	wg sync.WaitGroup
 }
 
 func AppWorkspaces(base string) []string {
@@ -315,15 +319,13 @@ func policyActionHandlers(store *kcpstore.Store, workspace string) (map[string]p
 }
 
 func (c *Core) Run(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	runCtx, cancel := context.WithCancel(ctx)
+	defer c.wg.Wait()
 	defer cancel()
 	if !c.cfg.DisablePolicy {
-		go c.runPolicy(runCtx)
+		c.runPolicy(runCtx)
 	}
-	go c.runExposure(runCtx)
+	c.wg.Go(func() { c.runExposure(runCtx) })
 	c.runIdentity(runCtx)
 	stopControllers := c.startControllers(runCtx)
 	defer stopControllers()
@@ -387,12 +389,12 @@ func (c *Core) runIdentity(ctx context.Context) {
 				})
 			}
 		}
-		go func() {
+		c.wg.Go(func() {
 			log.Info("the MarketIdentity controller writes its status in process", "workspace", workspace)
 			if err := ctl.Run(ctx); err != nil && ctx.Err() == nil {
 				log.Warn("the MarketIdentity controller stopped", "workspace", workspace, "err", err.Error())
 			}
-		}()
+		})
 	}
 }
 
@@ -419,7 +421,7 @@ func (c *Core) pdsEndpoint(workspace, kind, name string) (string, bool) {
 func (c *Core) runPolicy(ctx context.Context) {
 	log := c.cfg.Log.With("component", "policy-controller")
 	for _, workspace := range c.cfg.Workspaces {
-		go c.supervisePolicy(ctx, workspace, log.With("workspace", workspace))
+		c.wg.Go(func() { c.supervisePolicy(ctx, workspace, log.With("workspace", workspace)) })
 	}
 }
 
@@ -532,28 +534,23 @@ func (h registryHosts) Hosts() map[string]string {
 }
 
 func Supervise(ctx context.Context, cfg Config) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	log := cfg.Log
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
 	log = log.With("component", "component-controller")
-	for ctx.Err() == nil {
-		core, err := New(cfg)
-		if err == nil {
-			log.Info("the component controller reconciles the application workspaces", "workspaces", strings.Join(cfg.Workspaces, ", "))
-			err = core.Run(ctx)
-		}
-		if ctx.Err() != nil {
-			return
-		}
+	supervise.Restart(ctx, "componentcore", supervise.Backoff{Min: RetryAfter, Max: RetryAfter, OnError: func(err error, _ time.Duration) {
 		if err != nil {
 			log.Warn("the component controller stopped; starting it again", "err", fmt.Sprint(err))
 		}
-		sleep(ctx, RetryAfter)
-	}
+	}}, func(ctx context.Context) error {
+		core, err := New(cfg)
+		if err != nil {
+			return err
+		}
+		log.Info("the component controller reconciles the application workspaces", "workspaces", strings.Join(cfg.Workspaces, ", "))
+		return core.Run(ctx)
+	})
 }
 
 func sleep(ctx context.Context, d time.Duration) {

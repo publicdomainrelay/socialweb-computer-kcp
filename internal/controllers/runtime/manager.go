@@ -70,6 +70,8 @@ type Manager struct {
 
 	ctx context.Context
 
+	exportsWG sync.WaitGroup
+
 	paths sync.Map
 }
 
@@ -118,18 +120,22 @@ func NewManager(cfg Config) (*Manager, error) {
 }
 
 func (m *Manager) Start(ctx context.Context) error {
+	exportCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	m.log.Info("the controller manager starts", "exportWorkspace", m.exportWorkspace)
 	m.mu.Lock()
-	m.ctx = ctx
-	var names []string
+	m.ctx = exportCtx
 	for name := range m.exports {
-		names = append(names, name)
+		m.exportsWG.Go(func() { m.serveExport(exportCtx, name) })
 	}
 	m.mu.Unlock()
-	m.log.Info("the controller manager starts", "exportWorkspace", m.exportWorkspace)
-	for _, name := range names {
-		go m.serveExport(ctx, name)
-	}
-	return m.mgr.Start(ctx)
+	err := m.mgr.Start(ctx)
+	m.mu.Lock()
+	m.ctx = nil
+	m.mu.Unlock()
+	cancel()
+	m.exportsWG.Wait()
+	return err
 }
 
 func (m *Manager) addExport(name string) {
@@ -139,8 +145,8 @@ func (m *Manager) addExport(name string) {
 		return
 	}
 	m.exports[name] = true
-	if m.ctx != nil {
-		go m.serveExport(m.ctx, name)
+	if ctx := m.ctx; ctx != nil {
+		m.exportsWG.Go(func() { m.serveExport(ctx, name) })
 	}
 }
 

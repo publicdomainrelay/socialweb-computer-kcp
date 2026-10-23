@@ -467,9 +467,6 @@ func buildProvider(cfg Config) (Provider, string, error) {
 }
 
 func (s *Service) Start(ctx context.Context, deps component.Deps) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	cfg := s.cfg
 	cfg.Deps = mergeDeps(cfg.Deps, deps)
 	if cfg.Workspace == "" {
@@ -493,9 +490,6 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 }
 
 func (s *Service) Ready(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	s.mu.Lock()
 	provider := s.provider
 	s.mu.Unlock()

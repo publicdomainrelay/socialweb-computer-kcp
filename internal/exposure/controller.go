@@ -61,9 +61,6 @@ type watcher struct {
 }
 
 func (w *watcher) Run(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	for ctx.Err() == nil {
 		if err := w.round(ctx); err != nil && ctx.Err() == nil {
 			w.log.Warn("watching exposure resources", "gvr", w.gvr.Resource, "workspace", w.workspace, "err", err.Error())

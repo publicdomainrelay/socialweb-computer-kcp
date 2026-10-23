@@ -36,9 +36,6 @@ func WithCaller(ctx context.Context, ref commonv1.ObjectRef) context.Context {
 }
 
 func WithCallerLabels(ctx context.Context, ref commonv1.ObjectRef, labels map[string]string) context.Context {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	return context.WithValue(ctx, callerKey{}, Caller{Ref: ref, Labels: maps.Clone(labels)})
 }
 
@@ -47,9 +44,6 @@ func WithSystemCaller(ctx context.Context, name string) context.Context {
 }
 
 func CallerFrom(ctx context.Context) (Caller, bool) {
-	if ctx == nil {
-		return Caller{}, false
-	}
 	caller, ok := ctx.Value(callerKey{}).(Caller)
 	return caller, ok
 }

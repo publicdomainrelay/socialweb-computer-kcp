@@ -15,6 +15,7 @@ import (
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	contract "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 )
 
 const DefaultHandlerName = "http"
@@ -43,6 +44,7 @@ type Bus struct {
 	root   context.Context
 	cancel context.CancelFunc
 	closed bool
+	served sync.WaitGroup
 
 	transport *http.Transport
 }
@@ -315,9 +317,6 @@ func (r *Bus) DialStream(ctx context.Context, key Key, name ...string) (net.Conn
 		server.Close()
 		return nil, err
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	streamCtx, cancel := context.WithCancel(ctx)
 	stopRoot := context.AfterFunc(root, cancel)
 	clientConn.addHook(func() {
@@ -329,11 +328,16 @@ func (r *Bus) DialStream(ctx context.Context, key Key, name ...string) (net.Conn
 	clientConn.addHook(func() {
 		stopClient()
 	})
-	go func() {
+	if !r.goServe(func() {
 		defer cancel()
 		defer serverConn.Close()
 		_ = handler(streamCtx, serverConn)
-	}()
+	}) {
+		cancel()
+		clientConn.Close()
+		serverConn.Close()
+		return nil, ErrHandlersStopped
+	}
 	return clientConn, nil
 }
 
@@ -355,7 +359,7 @@ func (r *Bus) Ready(ctx ...context.Context) error {
 	if r == nil {
 		return ErrHandlersStopped
 	}
-	if len(ctx) > 0 && ctx[0] != nil {
+	if len(ctx) > 0 {
 		if err := ctx[0].Err(); err != nil {
 			return err
 		}
@@ -392,7 +396,21 @@ func (r *Bus) Stop(ctx ...context.Context) error {
 	r.aliases = map[string]handlerAlias{}
 	r.mu.Unlock()
 	closeTracked(stale)
+	if len(ctx) > 0 {
+		return supervise.Join(ctx[0], r.served.Wait)
+	}
+	r.served.Wait()
 	return nil
+}
+
+func (r *Bus) goServe(fn func()) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		return false
+	}
+	r.served.Go(fn)
+	return true
 }
 
 func (r *Bus) Close() error {
@@ -436,10 +454,15 @@ func (r *Bus) dialHTTP(ctx context.Context, _ string, address string) (net.Conn,
 	serverConn.caller = caller
 	serverConn.hasCaller = hasCaller
 	serveCtx, cancel := context.WithCancel(r.rootContext())
-	go func() {
+	if !r.goServe(func() {
 		defer cancel()
 		r.serveHTTP(serveCtx, serverConn, handler)
-	}()
+	}) {
+		cancel()
+		clientConn.Close()
+		serverConn.Close()
+		return nil, ErrHandlersStopped
+	}
 	return clientConn, nil
 }
 
@@ -477,9 +500,6 @@ func (r *Bus) handlerForHost(host string) (http.Handler, Key, string, bool) {
 func (r *Bus) rootContext() context.Context {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	if r.root == nil {
-		return context.Background()
-	}
 	return r.root
 }
 

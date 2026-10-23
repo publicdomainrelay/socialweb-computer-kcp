@@ -99,9 +99,6 @@ func openJetstreamStream(ctx context.Context, base string, cursor *int64, collec
 }
 
 func (s *jetstreamEventStream) Next(ctx context.Context) (pdsclient.RepoEvent, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	if err := ctx.Err(); err != nil {
 		return pdsclient.RepoEvent{}, err
 	}

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -186,6 +187,7 @@ type host struct {
 	c        HostConfig
 	ws       dynamic.ResourceInterface
 	children map[string]context.CancelFunc
+	wg       sync.WaitGroup
 }
 
 func applyHostSet(ctx context.Context, c HostConfig) error {
@@ -248,6 +250,7 @@ func RunHost(ctx context.Context, c HostConfig) {
 			for _, cancel := range h.children {
 				cancel()
 			}
+			h.wg.Wait()
 			return
 		case <-t.C:
 		}
@@ -274,8 +277,9 @@ func (h *host) pass(ctx context.Context, log *slog.Logger) error {
 		}
 		cctx, cancel := context.WithCancel(ctx)
 		h.children[id] = cancel
-		go hostprocess.Supervise(cctx, hostprocess.Config{Kubeconfig: h.c.Kubeconfig, Workspace: ChildWorkspace(id), Manager: h.c.Manager,
-			Prefixes: Prefixes(id), Bound: true, Resolve: h.c.Resolve, Interval: ChildInterval, Log: log.With("child", id)})
+		childCfg := hostprocess.Config{Kubeconfig: h.c.Kubeconfig, Workspace: ChildWorkspace(id), Manager: h.c.Manager,
+			Prefixes: Prefixes(id), Bound: true, Resolve: h.c.Resolve, Interval: ChildInterval, Log: log.With("child", id)}
+		h.wg.Go(func() { hostprocess.Supervise(cctx, childCfg) })
 		log.Info("a child instance's workspace is supervised", "child", id, "workspace", ChildWorkspace(id))
 	}
 	for id, cancel := range h.children {

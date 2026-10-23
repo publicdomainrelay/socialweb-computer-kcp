@@ -271,9 +271,8 @@ func (in *installer) wait(desc string, f func() error) error {
 	started := time.Now()
 	in.printf("%s\n", desc)
 	stop := make(chan struct{})
-	ticking := make(chan struct{})
-	go func() {
-		defer close(ticking)
+	var ticking sync.WaitGroup
+	ticking.Go(func() {
 		t := time.NewTicker(WaitReport)
 		defer t.Stop()
 		for {
@@ -284,10 +283,10 @@ func (in *installer) wait(desc string, f func() error) error {
 				in.printf("  ... %s\n", progress.Elapsed(time.Since(started)))
 			}
 		}
-	}()
+	})
 	err := f()
 	close(stop)
-	<-ticking
+	ticking.Wait()
 	if err != nil {
 		in.printf("  failed after %s\n", progress.Elapsed(time.Since(started)))
 		return fmt.Errorf("install: %s: %w", desc, err)

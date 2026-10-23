@@ -144,9 +144,6 @@ func NewSyncer(ctx context.Context, opts SyncerOptions) (*Syncer, error) {
 	if opts.RBAC == nil {
 		return nil, errors.New("guestidentity: the grant syncer has no RBAC source")
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	if opts.Log == nil {
 		opts.Log = slog.New(slog.DiscardHandler)
 	}
@@ -181,9 +178,8 @@ func (s *Syncer) Register(ctx context.Context, subject GrantSubject) error {
 	stateCtx, cancel := context.WithCancel(s.ctx)
 	state := &guestSync{subject: subject, ctx: stateCtx, cancel: cancel, kick: make(chan struct{}, 1)}
 	s.guests[subject.ComputeVM] = state
-	s.wg.Add(1)
+	s.wg.Go(func() { s.run(state) })
 	s.mu.Unlock()
-	go s.run(state)
 	return nil
 }
 
@@ -237,7 +233,6 @@ func (s *Syncer) Close() {
 }
 
 func (s *Syncer) run(state *guestSync) {
-	defer s.wg.Done()
 	failures := 0
 	for {
 		delay := s.opts.Resync

@@ -23,6 +23,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpapply"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/logcap"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 )
@@ -579,8 +580,10 @@ func (s *Supervisor) Run(ctx context.Context) error {
 	defer t.Stop()
 	wake := make(chan struct{}, 1)
 	changed := make(chan string, 1024)
+	var wg sync.WaitGroup
+	defer wg.Wait()
 	for range EventWorkers {
-		go func() {
+		wg.Go(func() {
 			for {
 				select {
 				case <-ctx.Done():
@@ -589,9 +592,9 @@ func (s *Supervisor) Run(ctx context.Context) error {
 					s.reconcileName(ctx, name)
 				}
 			}
-		}()
+		})
 	}
-	go s.watch(ctx, wake, changed)
+	wg.Go(func() { s.watch(ctx, wake, changed) })
 	for {
 		if err := s.Pass(ctx); err != nil {
 			s.c.log().Warn("a reconcile pass failed; units keep running", "err", err.Error())
@@ -673,21 +676,15 @@ func (s *Supervisor) watch(ctx context.Context, wake chan<- struct{}, changedCh 
 
 func Supervise(ctx context.Context, c Config) {
 	log := c.log()
-	for {
+	supervise.Restart(ctx, "hostprocess", supervise.Backoff{Min: RetryAfter, Max: RetryAfter, OnError: func(err error, after time.Duration) {
+		log.Error("the HostProcess supervisor stopped; starting it again", "err", fmt.Sprint(err), "after", after.String())
+	}}, func(ctx context.Context) error {
 		s, err := New(ctx, c)
-		if err == nil {
-			err = s.Run(ctx)
+		if err != nil {
+			return err
 		}
-		if ctx.Err() != nil {
-			return
-		}
-		log.Error("the HostProcess supervisor stopped; starting it again", "err", fmt.Sprint(err), "after", RetryAfter.String())
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(RetryAfter):
-		}
-	}
+		return s.Run(ctx)
+	})
 }
 
 func listenersOf(pid int) []v1alpha1.HostProcessListener {

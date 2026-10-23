@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
@@ -236,6 +237,10 @@ func BuildSnapshotFor(ctx context.Context, host Host, selfDid, counterpartyDid, 
 	if host == nil {
 		return snapshot, nil
 	}
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	roleResolver, _ := host.(ServiceOperatorResolver)
 	resolve := func(did, service string) (string, bool, error) {
 		if roleResolver != nil {
@@ -253,10 +258,10 @@ func BuildSnapshotFor(ctx context.Context, host Host, selfDid, counterpartyDid, 
 		if did == counterpartyDid {
 			service = counterpartyService
 		}
-		go func(value, roleService string) {
-			operator, found, err := resolve(value, roleService)
-			results <- opResult{did: value, operator: operator, found: found, err: err}
-		}(did, service)
+		wg.Go(func() {
+			operator, found, err := resolve(did, service)
+			results <- opResult{did: did, operator: operator, found: found, err: err}
+		})
 	}
 	operators := make(map[string]string, len(dids))
 	for range dids {
@@ -297,10 +302,10 @@ func BuildSnapshotFor(ctx context.Context, host Host, selfDid, counterpartyDid, 
 	}
 	vouchResults := make(chan vouchResult, len(vouchers))
 	for _, voucher := range vouchers {
-		go func(value string) {
-			vouches, err := host.GetVouchedDids(ctx, value)
-			vouchResults <- vouchResult{did: value, vouches: vouches, err: err}
-		}(voucher)
+		wg.Go(func() {
+			vouches, err := host.GetVouchedDids(ctx, voucher)
+			vouchResults <- vouchResult{did: voucher, vouches: vouches, err: err}
+		})
 	}
 	for range vouchers {
 		result := <-vouchResults

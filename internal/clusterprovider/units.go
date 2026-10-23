@@ -487,9 +487,11 @@ func (h *UnitsHost) Members(ctx context.Context, key string) ([]v1alpha1.HostPro
 }
 
 func (h *UnitsHost) gateAlive(ctx context.Context, key, member, inv string, gate func(context.Context) error) error {
+	var wg sync.WaitGroup
+	defer wg.Wait()
 	gctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
-	go func() {
+	wg.Go(func() {
 		for {
 			select {
 			case <-gctx.Done():
@@ -505,7 +507,7 @@ func (h *UnitsHost) gateAlive(ctx context.Context, key, member, inv string, gate
 				return
 			}
 		}
-	}()
+	})
 	err := gate(gctx)
 	if cause := context.Cause(gctx); err != nil && cause != nil && !errors.Is(cause, context.Canceled) && !errors.Is(cause, context.DeadlineExceeded) {
 		return fmt.Errorf("%w; the gate saw: %v", cause, err)
@@ -942,9 +944,7 @@ func runGraph(ctx context.Context, steps []procgroup.Step, run func(context.Cont
 		})
 	}
 	for i, st := range steps {
-		wg.Add(1)
-		go func(i int, st procgroup.Step) {
-			defer wg.Done()
+		wg.Go(func() {
 			for _, j := range stepNeeds(steps, i) {
 				select {
 				case <-done[j]:
@@ -957,7 +957,7 @@ func runGraph(ctx context.Context, steps []procgroup.Step, run func(context.Cont
 				return
 			}
 			close(done[i])
-		}(i, st)
+		})
 	}
 	wg.Wait()
 	if firstErr != nil {

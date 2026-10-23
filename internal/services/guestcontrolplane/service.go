@@ -25,6 +25,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestidentity"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 )
 
 type Service struct {
@@ -82,9 +83,6 @@ type Service struct {
 }
 
 func (s *Service) Start(ctx context.Context, deps component.Deps) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	s.cfg.Deps = deps
 	if deps.Log != nil {
 		s.log = deps.Log.With("component", "guestcontrolplane", "handle", s.cfg.Handle)
@@ -99,7 +97,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	s.started = true
 	s.cancel = cancel
 	s.mu.Unlock()
-	defer s.shutdown()
+	defer s.shutdown(ctx)
 
 	if err := s.prepare(runCtx); err != nil {
 		cancel()
@@ -130,14 +128,11 @@ func (s *Service) Endpoints() []component.Endpoint {
 }
 
 func (s *Service) Stop(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	return s.shutdownWith(ctx)
 }
 
-func (s *Service) shutdown() error {
-	ctx, cancel := context.WithTimeout(context.Background(), component.DefaultStopTimeout)
+func (s *Service) shutdown(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), component.DefaultStopTimeout)
 	defer cancel()
 	return s.shutdownWith(ctx)
 }
@@ -164,17 +159,8 @@ func (s *Service) shutdownWith(ctx context.Context) error {
 		if s.syncer != nil {
 			s.syncer.Close()
 		}
-		done := make(chan struct{})
-		go func() {
-			s.wg.Wait()
-			close(done)
-		}()
-		select {
-		case <-done:
-		case <-ctx.Done():
-			if s.stopErr == nil {
-				s.stopErr = ctx.Err()
-			}
+		if err := supervise.Join(ctx, s.wg.Wait); err != nil && s.stopErr == nil {
+			s.stopErr = err
 		}
 	})
 	return s.stopErr

@@ -270,9 +270,6 @@ func Open(ctx context.Context, srv Server) (*Session, error) {
 	if strings.TrimSpace(srv.Address) == "" {
 		return nil, errors.New("openbaosession: the OpenBaoServer has no address")
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	opts, err := clientOptions(srv)
 	if err != nil {
 		return nil, err

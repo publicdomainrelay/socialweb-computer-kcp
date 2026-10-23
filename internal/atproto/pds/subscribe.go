@@ -75,6 +75,10 @@ func (s *Server) handleSubscribeRepos(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}()
+	defer func() {
+		_ = conn.Close()
+		<-done
+	}()
 
 	last := int64(-1)
 	if hasCursor {

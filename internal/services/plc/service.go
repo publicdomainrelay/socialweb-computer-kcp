@@ -223,9 +223,6 @@ func Register(runtime *component.Runtime) error {
 }
 
 func (s *Service) Start(ctx context.Context, deps component.Deps) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	cfg := s.cfg
 	cfg.Deps = mergeDeps(cfg.Deps, deps)
 	log := cfg.Deps.Log
@@ -296,9 +293,6 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 }
 
 func (s *Service) Ready(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	s.mu.Lock()
 	ready := s.ready
 	baseURL := s.baseURL

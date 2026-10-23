@@ -81,12 +81,17 @@ func Run(ctx context.Context, c Config) error {
 		return err
 	}
 	log.Info("the iroh dialer listens; each connection names one guest's iroh ticket", "socket", c.Socket, "dumbpipe", c.Dumbpipe)
-	go func() {
-		<-ctx.Done()
-		ln.Close()
-	}()
 	var wg sync.WaitGroup
 	defer wg.Wait()
+	stop := make(chan struct{})
+	defer close(stop)
+	wg.Go(func() {
+		select {
+		case <-ctx.Done():
+		case <-stop:
+		}
+		ln.Close()
+	})
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
@@ -138,15 +143,18 @@ func serve(ctx context.Context, c Config, log *slog.Logger, conn net.Conn) {
 	}
 	id := ticket[:min(16, len(ticket))]
 	log.Info("dumbpipe connect started", "ticket", id, "pid", cmd.Process.Pid)
-	go func() {
+	var copyIn sync.WaitGroup
+	copyIn.Go(func() {
 		io.Copy(stdin, br)
 		stdin.Close()
-	}()
+	})
 	io.Copy(conn, stdout)
 	cancel()
 	err = cmd.Wait()
 	log.Info("dumbpipe connect ended", "ticket", id, "seconds", time.Since(started).Seconds(), "exit", fmt.Sprint(err),
 		"stderr", strings.TrimSpace(tail.String()))
+	conn.Close()
+	copyIn.Wait()
 }
 
 type tailBuffer struct {

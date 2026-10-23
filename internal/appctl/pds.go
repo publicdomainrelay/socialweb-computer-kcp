@@ -16,7 +16,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/atcrypto"
@@ -44,8 +43,6 @@ const (
 	RepoKeyField      = "repoKeyHex"
 	passwordBytes     = 24
 )
-
-var appPdsPublicURLs sync.Map
 
 type PdsSession struct {
 	Did string
@@ -153,20 +150,20 @@ func (ctl *Controller) pdsExposureURLOf(ctx context.Context, ws, name, suffix st
 	}
 	u, err := ri.Get(ctx, serviceNameFor(ComponentKindPds, name)+suffix, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
-		appPdsPublicURLs.Delete(key)
+		ctl.pdsPublicURLs.Delete(key)
 		return ""
 	}
 	if err != nil {
-		value, _ := appPdsPublicURLs.Load(key)
+		value, _ := ctl.pdsPublicURLs.Load(key)
 		raw, _ := value.(string)
 		return raw
 	}
 	var o exposurev1alpha1.Exposure
 	if err := fromUnstructured(u, &o); err == nil && o.Status.Address != "" {
-		appPdsPublicURLs.Store(key, o.Status.Address)
+		ctl.pdsPublicURLs.Store(key, o.Status.Address)
 		return o.Status.Address
 	}
-	value, _ := appPdsPublicURLs.Load(key)
+	value, _ := ctl.pdsPublicURLs.Load(key)
 	raw, _ := value.(string)
 	return raw
 }
@@ -239,7 +236,7 @@ func (ctl *Controller) ensurePdsAccountInVault(ctx context.Context, server, clie
 	if err != nil {
 		return PdsSession{}, err
 	}
-	defer client.RevokeSelf(context.Background())
+	defer client.RevokeSelf(context.WithoutCancel(ctx))
 	ctl.ensureVaultCredentialStatus(ctx, server, c.KVMount, path)
 	kvPath := c.KVMount + "/data/" + path
 	data, err := client.GetKV(ctx, kvPath)
@@ -508,7 +505,7 @@ func (ctl *Controller) bidderPassword(ctx context.Context) (string, manifests.Bi
 	if err != nil {
 		return "", manifests.BidderVault{}, err
 	}
-	defer client.RevokeSelf(context.Background())
+	defer client.RevokeSelf(context.WithoutCancel(ctx))
 	path := c.KVMount + "/data/" + identityKeysPath
 	data, err := client.GetKV(ctx, path)
 	var re *openbao.ResponseError
@@ -626,7 +623,7 @@ func (ctl *Controller) ensureRepoKey(ctx context.Context, server, clientName, ke
 	if err != nil {
 		return err
 	}
-	defer client.RevokeSelf(context.Background())
+	defer client.RevokeSelf(context.WithoutCancel(ctx))
 	ctl.ensureVaultCredentialStatus(ctx, server, c.KVMount, keysPath)
 	path := c.KVMount + "/data/" + keysPath
 	data, err := client.GetKV(ctx, path)

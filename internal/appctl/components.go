@@ -15,7 +15,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/atcrypto"
@@ -25,8 +24,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/watch"
-	"k8s.io/client-go/dynamic"
 
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
@@ -867,82 +864,6 @@ func (ctl *Controller) aggregateComponentsIn(ctx context.Context, ws string, st 
 	st.Components = append(st.Components, pass.Components...)
 	st.Listeners = append(st.Listeners, pass.Listeners...)
 	return nil
-}
-
-type ComponentEvent struct {
-	Type      watch.EventType
-	Component ComponentView
-	Err       error
-}
-
-func (ctl *Controller) WatchComponents(ctx context.Context, owner string) (<-chan ComponentEvent, error) {
-	return ctl.WatchComponentsIn(ctx, ctl.c.workspace(), owner)
-}
-
-func (ctl *Controller) WatchComponentsIn(ctx context.Context, ws, owner string) (<-chan ComponentEvent, error) {
-	out := make(chan ComponentEvent)
-	var wg sync.WaitGroup
-	for _, ct := range ComponentTypes {
-		ri, err := ctl.client(ws, ct.GVR)
-		if err != nil {
-			close(out)
-			return nil, err
-		}
-		wg.Add(1)
-		go func(ct ComponentType, ri dynamic.ResourceInterface) {
-			defer wg.Done()
-			ctl.watchComponentType(ctx, ws, ct, ri, owner, out)
-		}(ct, ri)
-	}
-	go func() {
-		wg.Wait()
-		close(out)
-	}()
-	return out, nil
-}
-
-func (ctl *Controller) watchComponentType(ctx context.Context, ws string, ct ComponentType, ri dynamic.ResourceInterface, owner string, out chan<- ComponentEvent) {
-	selector := OwnerLabel + "=" + owner
-	for ctx.Err() == nil {
-		w, err := ri.Watch(ctx, metav1.ListOptions{LabelSelector: selector})
-		if err != nil {
-			if apierrors.IsNotFound(err) {
-				if !sleep(ctx, RetryAfter) {
-					return
-				}
-				continue
-			}
-			select {
-			case out <- ComponentEvent{Type: watch.Error, Component: ComponentView{Kind: ct.Kind, Workspace: ws}, Err: err}:
-			case <-ctx.Done():
-				return
-			}
-			if !sleep(ctx, RetryAfter) {
-				return
-			}
-			continue
-		}
-		for event := range w.ResultChan() {
-			if event.Type == watch.Error {
-				continue
-			}
-			u, ok := event.Object.(*unstructured.Unstructured)
-			if !ok {
-				continue
-			}
-			v, err := componentViewOf(ws, ct.Kind, u)
-			select {
-			case out <- ComponentEvent{Type: event.Type, Component: v, Err: err}:
-			case <-ctx.Done():
-				w.Stop()
-				return
-			}
-		}
-		w.Stop()
-		if !sleep(ctx, RetryAfter) {
-			return
-		}
-	}
 }
 
 const (

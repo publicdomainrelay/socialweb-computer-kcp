@@ -211,7 +211,7 @@ func (ctl *Controller) seedPdsAccountPassword(ctx context.Context, plan accountP
 	if err != nil {
 		return err
 	}
-	defer client.RevokeSelf(context.Background())
+	defer client.RevokeSelf(context.WithoutCancel(ctx))
 	path := c.KVMount + "/data/" + plan.KeysPath
 	data, err := client.GetKV(ctx, path)
 	var re *openbao.ResponseError

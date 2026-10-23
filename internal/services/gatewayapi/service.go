@@ -46,9 +46,6 @@ func New(cfg Config) *Service {
 }
 
 func (s *Service) Start(ctx context.Context, deps component.Deps) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	cfg := s.cfg.withDefaults()
 	cfg.Deps = mergeDeps(cfg.Deps, deps)
 	if err := cfg.Check(); err != nil {
@@ -76,6 +73,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	if err != nil {
 		return err
 	}
+	defer vault.close()
 	signIn := cfg.Session.SignIn
 	if signIn == nil {
 		if vault == nil {
@@ -85,7 +83,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 		if cfg.Session.Timeout > 0 {
 			endpoint.Timeout = cfg.Session.Timeout
 		}
-		signIn, err = newCustodySignIn(custodySignInOptions{
+		custody, err := newCustodySignIn(custodySignInOptions{
 			Endpoint:       endpoint,
 			Role:           cfg.Session.AtprotoRole,
 			RenewBelow:     cfg.Session.RenewBelow,
@@ -97,6 +95,8 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 		if err != nil {
 			return err
 		}
+		defer custody.Close()
+		signIn = custody
 	}
 
 	pinned, err := loadDownloads(cfg)
@@ -160,15 +160,12 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	case <-stopCh:
 	}
 
-	s.shutdown()
+	s.shutdown(ctx)
 	s.finish()
 	return nil
 }
 
 func (s *Service) Ready(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	s.mu.Lock()
 	ready := s.ready
 	s.mu.Unlock()
@@ -190,9 +187,6 @@ func (s *Service) Endpoints() []component.Endpoint {
 }
 
 func (s *Service) Stop(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	s.mu.Lock()
 	stopCh := s.stopCh
 	stopOnce := s.stopOnce
@@ -201,7 +195,7 @@ func (s *Service) Stop(ctx context.Context) error {
 		return nil
 	}
 	stopOnce.Do(func() { close(stopCh) })
-	s.shutdown()
+	s.shutdown(ctx)
 	return nil
 }
 
@@ -458,7 +452,7 @@ func (r *gatewayURLResolver) baseURL(ctx context.Context) (string, error) {
 	return raw, nil
 }
 
-func (s *Service) shutdown() {
+func (s *Service) shutdown(ctx context.Context) {
 	s.mu.Lock()
 	mapper := s.mapper
 	timeout := s.cfg.ShutdownTimeout
@@ -466,7 +460,7 @@ func (s *Service) shutdown() {
 	if timeout <= 0 {
 		timeout = DefaultShutdownTimeout
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
 	defer cancel()
 	if mapper != nil {
 		if err := mapper.Stop(ctx); err != nil {

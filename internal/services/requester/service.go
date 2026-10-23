@@ -37,6 +37,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/oauthcallback"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/statesync"
@@ -171,9 +172,6 @@ func New(cfg Config) (*Service, error) {
 }
 
 func (s *Service) Start(ctx context.Context, deps component.Deps) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	s.mu.Lock()
 	if s.started {
 		s.mu.Unlock()
@@ -196,7 +194,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 
 	if err := s.setup(runCtx); err != nil {
 		cancel()
-		s.shutdown(context.Background())
+		s.shutdown(ctx)
 		s.mu.Lock()
 		s.started = false
 		s.mu.Unlock()
@@ -206,7 +204,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 
 	handler := s.handler()
 	if err := s.register(handler); err != nil {
-		s.shutdown(context.Background())
+		s.shutdown(ctx)
 		s.mu.Lock()
 		s.started = false
 		s.mu.Unlock()
@@ -216,7 +214,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	s.mu.Lock()
 	s.ready = true
 	s.mu.Unlock()
-	go s.loop(runCtx)
+	s.wg.Go(func() { s.loop(runCtx) })
 	if s.syncController != nil {
 		controller := s.syncController
 		s.wg.Go(func() {
@@ -228,7 +226,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	s.log.Info("requester_started", "handler", s.logicalURL(), "repo", s.cfg.RepoDID, "mode", s.cfg.IdentityMode)
 
 	<-runCtx.Done()
-	s.shutdown(context.Background())
+	s.shutdown(ctx)
 	close(s.done)
 	return nil
 }
@@ -478,7 +476,7 @@ func (s *Service) setup(ctx context.Context) error {
 	if err := s.startStateSync(); err != nil {
 		s.log.Warn("requester_does_not_run_statesync", "err", err)
 	}
-	go s.registerPDSWithRelays(ctx)
+	s.wg.Go(func() { s.registerPDSWithRelays(ctx) })
 	if s.cfg.Contracts == nil {
 		return errors.New("requester: no ComputeContract store is configured")
 	}
@@ -854,13 +852,11 @@ func (s *Service) reconcile(ctx context.Context) {
 			started.requestRelease()
 		}
 		s.runners[contract.Name] = started
-		s.wg.Add(1)
-		s.mu.Unlock()
-		go func() {
-			defer s.wg.Done()
+		s.wg.Go(func() {
 			started.Run(ctx)
 			s.runnerDone(started, account)
-		}()
+		})
+		s.mu.Unlock()
 	}
 	s.mu.Lock()
 	for name := range s.finished {
@@ -904,7 +900,7 @@ func (s *Service) runnerDone(runner *contractRunner, account string) {
 		s.finished[runner.name] = true
 	}
 	s.mu.Unlock()
-	go s.reconcile(s.ctx)
+	s.wg.Go(func() { s.reconcile(s.ctx) })
 }
 
 func (s *Service) Ready(ctx context.Context) error {
@@ -932,9 +928,6 @@ func (s *Service) Endpoints() []component.Endpoint {
 }
 
 func (s *Service) Stop(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	s.mu.Lock()
 	cancel := s.cancel
 	done := s.done
@@ -962,15 +955,9 @@ func (s *Service) shutdown(ctx context.Context) {
 	}
 	s.stopped = true
 	s.mu.Unlock()
-	wait := make(chan struct{})
-	go func() {
-		s.wg.Wait()
-		close(wait)
-	}()
-	select {
-	case <-wait:
-	case <-ctx.Done():
-	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), component.DefaultStopTimeout)
+	defer cancel()
+	_ = supervise.Join(ctx, s.wg.Wait)
 	s.releaseAllHeldSessions("shutdown")
 	if s.ownsRepo {
 		if closer, ok := s.repo.(io.Closer); ok {

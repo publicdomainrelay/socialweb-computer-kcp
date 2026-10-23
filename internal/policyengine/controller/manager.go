@@ -43,7 +43,7 @@ func (m *EngineManager) ReconcilePolicyEngine(ctx context.Context, engineCR *pol
 		return EngineReconcileState{}, fmt.Errorf("policy engine is required")
 	}
 	if engineCR.DeletionTimestamp != nil {
-		m.stop(engineCR.Name)
+		m.stop(ctx, engineCR.Name)
 		state := EngineReconcileState{Phase: policyv1alpha1.PolicyEnginePending}
 		meta.SetStatusCondition(&state.Conditions, metav1.Condition{
 			Type:    policyengine.ConditionReady,
@@ -54,7 +54,7 @@ func (m *EngineManager) ReconcilePolicyEngine(ctx context.Context, engineCR *pol
 		return state, nil
 	}
 	if engineCR.Spec.Suspend {
-		m.stop(engineCR.Name)
+		m.stop(ctx, engineCR.Name)
 		state := EngineReconcileState{Phase: policyv1alpha1.PolicyEnginePending}
 		meta.SetStatusCondition(&state.Conditions, metav1.Condition{
 			Type:    policyengine.ConditionSuspended,
@@ -73,7 +73,7 @@ func (m *EngineManager) ReconcilePolicyEngine(ctx context.Context, engineCR *pol
 	managed := m.engines[engineCR.Name]
 	if managed == nil || managed.hash != hash {
 		m.mu.Unlock()
-		m.stop(engineCR.Name)
+		m.stop(ctx, engineCR.Name)
 		if m.factory == nil {
 			return EngineReconcileState{Phase: policyv1alpha1.PolicyEngineFailed}, fmt.Errorf("policy engine factory is not configured")
 		}
@@ -91,7 +91,7 @@ func (m *EngineManager) ReconcilePolicyEngine(ctx context.Context, engineCR *pol
 		if engine == nil {
 			return EngineReconcileState{Phase: policyv1alpha1.PolicyEngineFailed}, fmt.Errorf("policy engine factory returned nil")
 		}
-		if startErr := engine.Start(context.Background()); startErr != nil {
+		if startErr := engine.Start(context.WithoutCancel(ctx)); startErr != nil {
 			return EngineReconcileState{Phase: policyv1alpha1.PolicyEngineFailed}, startErr
 		}
 		m.mu.Lock()
@@ -179,7 +179,7 @@ func (m *EngineManager) Delete(ctx context.Context, name string) error {
 	return managed.engine.Shutdown(shutdownCtx)
 }
 
-func (m *EngineManager) stop(name string) {
+func (m *EngineManager) stop(ctx context.Context, name string) {
 	m.mu.Lock()
 	managed := m.engines[name]
 	delete(m.engines, name)
@@ -187,7 +187,7 @@ func (m *EngineManager) stop(name string) {
 	if managed == nil {
 		return
 	}
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
 	managed.engine.Shutdown(shutdownCtx)
 }

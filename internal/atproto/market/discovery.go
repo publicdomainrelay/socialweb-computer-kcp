@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -310,7 +311,8 @@ func StartOfferingRefresh(ctx context.Context, interval time.Duration, refresh f
 		interval = HeartbeatInterval
 	}
 	runCtx, cancel := context.WithCancel(ctx)
-	go func() {
+	var wg sync.WaitGroup
+	wg.Go(func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
@@ -323,6 +325,9 @@ func StartOfferingRefresh(ctx context.Context, interval time.Duration, refresh f
 				}
 			}
 		}
-	}()
-	return cancel
+	})
+	return func() {
+		cancel()
+		wg.Wait()
+	}
 }

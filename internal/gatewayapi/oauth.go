@@ -371,7 +371,7 @@ func (o *OAuth) clientMetadata(w http.ResponseWriter, r *http.Request) {
 	}
 	if !o.metadataRefreshing && time.Since(o.metadataAt) >= o.metadataRefreshAfter() {
 		o.metadataRefreshing = true
-		go o.refreshClientMetadata()
+		go o.refreshClientMetadata(context.WithoutCancel(r.Context()))
 	}
 	cached := append(json.RawMessage(nil), o.metadata...)
 	o.mu.Unlock()
@@ -383,12 +383,12 @@ func (o *OAuth) metadataRefreshAfter() time.Duration {
 	return after
 }
 
-func (o *OAuth) refreshClientMetadata() {
+func (o *OAuth) refreshClientMetadata(ctx context.Context) {
 	timeout := o.metadataCache
 	if timeout <= 0 || timeout > clientMetadataRefreshTimeout {
 		timeout = clientMetadataRefreshTimeout
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	doc, err := o.opts.SignIn.ClientMetadata(ctx)
 	o.mu.Lock()

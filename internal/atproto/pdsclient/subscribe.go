@@ -111,9 +111,6 @@ type wsEventStream struct {
 }
 
 func (s *wsEventStream) Next(ctx context.Context) (RepoEvent, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	if err := ctx.Err(); err != nil {
 		return RepoEvent{}, err
 	}
@@ -174,9 +171,6 @@ func newRepoEventStream(parent context.Context, cursor *int64, open func(context
 	if open == nil {
 		return nil, fmt.Errorf("%w: subscription dial is not configured", ErrInvalidConfig)
 	}
-	if parent == nil {
-		parent = context.Background()
-	}
 	ctx, cancel := context.WithCancel(parent)
 	initial := int64(-1)
 	if cursor != nil {
@@ -198,9 +192,6 @@ func newRepoEventStream(parent context.Context, cursor *int64, open func(context
 }
 
 func (s *repoEventStream) Next(ctx context.Context) (RepoEvent, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	for {
 		s.mu.Lock()
 		if s.closed {

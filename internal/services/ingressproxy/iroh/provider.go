@@ -101,6 +101,8 @@ type Provider struct {
 	ready bool
 
 	registrations map[*registration]struct{}
+
+	wg sync.WaitGroup
 }
 
 func New(cfg Config) *Provider {
@@ -108,9 +110,6 @@ func New(cfg Config) *Provider {
 }
 
 func (p *Provider) Start(ctx context.Context, deps component.Deps) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	if err := p.cfg.Check(); err != nil {
 		return err
 	}
@@ -150,6 +149,7 @@ func (p *Provider) Start(ctx context.Context, deps component.Deps) error {
 	p.cancel = nil
 	p.mu.Unlock()
 	p.closeAll()
+	p.wg.Wait()
 	return nil
 }
 
@@ -233,16 +233,19 @@ func (p *Provider) Register(ctx context.Context, spec exposure.IngressSpec) (exp
 	reg.url = URLScheme + "://" + child.ticket
 	reg.mu.Unlock()
 	p.mu.Lock()
-	if p.registrations == nil {
-		p.registrations = map[*registration]struct{}{}
-	}
-	p.registrations[reg] = struct{}{}
 	running := p.ctx == root
+	if running {
+		if p.registrations == nil {
+			p.registrations = map[*registration]struct{}{}
+		}
+		p.registrations[reg] = struct{}{}
+		p.wg.Go(func() { reg.supervise(runCtx, child) })
+	}
 	p.mu.Unlock()
-	go reg.supervise(runCtx, child)
 	if !running {
 		cancel()
-		_ = reg.Close()
+		child.stop()
+		_ = bridge.Close()
 		return nil, errors.New("ingressproxy iroh: the provider stopped")
 	}
 	return reg, nil
@@ -361,6 +364,13 @@ type child struct {
 	tail *tailBuffer
 
 	started time.Time
+
+	output *sync.WaitGroup
+}
+
+func (c *child) stop() {
+	killChild(c.cmd)
+	c.output.Wait()
 }
 
 func (r *registration) startChild(ctx context.Context) (*child, error) {
@@ -376,32 +386,37 @@ func (r *registration) startChild(ctx context.Context) (*child, error) {
 	}
 	tail := &tailBuffer{}
 	found := make(chan string, 1)
-	go pump(stderr, tail, found)
+	output := &sync.WaitGroup{}
+	output.Go(func() { pump(stderr, tail, found) })
+	stop := func() {
+		killChild(cmd)
+		output.Wait()
+	}
 	timer := time.NewTimer(TicketTimeout)
 	defer timer.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-			killChild(cmd)
+			stop()
 			return nil, ctx.Err()
 		case <-timer.C:
-			killChild(cmd)
+			stop()
 			return nil, fmt.Errorf("ingressproxy iroh: dumbpipe printed no ticket within %s: %s", TicketTimeout, strings.TrimSpace(tail.String()))
 		case ticket, ok := <-found:
 			if !ok {
-				killChild(cmd)
+				stop()
 				return nil, fmt.Errorf("ingressproxy iroh: dumbpipe ended before printing a ticket: %s", strings.TrimSpace(tail.String()))
 			}
 			if err := irohdial.CheckTicket(ticket); err != nil {
-				killChild(cmd)
+				stop()
 				return nil, fmt.Errorf("ingressproxy iroh: dumbpipe printed %q: %w", ticket, err)
 			}
 			if _, err := clusterlink.ParseTicket(ticket); err != nil {
-				killChild(cmd)
+				stop()
 				return nil, fmt.Errorf("ingressproxy iroh: dumbpipe printed %q: %w", ticket, err)
 			}
 			r.log.Info("ingressproxy_iroh_dumbpipe_listening", "address", r.bridge.Address(), "ticket", ticket)
-			return &child{cmd: cmd, ticket: ticket, tail: tail, started: time.Now()}, nil
+			return &child{cmd: cmd, ticket: ticket, tail: tail, started: time.Now(), output: output}, nil
 		}
 	}
 }
@@ -432,6 +447,7 @@ func (r *registration) supervise(ctx context.Context, first *child) {
 		}
 		started := current.started
 		err := current.cmd.Wait()
+		current.output.Wait()
 		stderr := strings.TrimSpace(current.tail.String())
 		r.mu.Lock()
 		if r.cmd == current.cmd {

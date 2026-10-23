@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/exposure"
@@ -21,7 +22,7 @@ func (c *Core) runExposure(ctx context.Context) {
 				continue
 			}
 			seen[workspace] = true
-			go c.runWorkspaceExposure(ctx, workspace, log.With("workspace", workspace))
+			c.wg.Go(func() { c.runWorkspaceExposure(ctx, workspace, log.With("workspace", workspace)) })
 		}
 		sleep(ctx, exposureRescan)
 	}
@@ -72,16 +73,18 @@ func (c *Core) runWorkspaceExposure(ctx context.Context, workspace string, log *
 		log.Warn("the ComponentLink controller does not start", "err", err.Error())
 		return
 	}
-	go func() {
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	wg.Go(func() {
 		if err := services.Run(ctx); err != nil && ctx.Err() == nil {
 			log.Warn("the Service controller stopped", "err", err.Error())
 		}
-	}()
-	go func() {
+	})
+	wg.Go(func() {
 		if err := links.Run(ctx); err != nil && ctx.Err() == nil {
 			log.Warn("the ComponentLink controller stopped", "err", err.Error())
 		}
-	}()
+	})
 	log.Info("the Service, Exposure and ComponentLink controllers reconcile in process")
 	if err := exposures.Run(ctx); err != nil && ctx.Err() == nil {
 		log.Warn("the Exposure controller stopped", "err", err.Error())

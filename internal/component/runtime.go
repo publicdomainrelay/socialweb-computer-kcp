@@ -181,9 +181,6 @@ func (r *Runtime) Register(kind string, factory ServiceFactory) error {
 }
 
 func (r *Runtime) Start(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	switch {
@@ -198,9 +195,6 @@ func (r *Runtime) Start(ctx context.Context) error {
 }
 
 func (r *Runtime) Stop(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	r.mu.Lock()
 	if !r.started && !r.closed {
 		r.mu.Unlock()
@@ -238,9 +232,6 @@ func (r *Runtime) Stop(ctx context.Context) error {
 }
 
 func (r *Runtime) Reconcile(ctx context.Context, spec ComponentSpec) (ComponentStatus, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	if err := spec.Check(); err != nil {
 		st := statusFromSpec(spec)
 		st.Phase = PhaseFailed
@@ -301,9 +292,6 @@ func (r *Runtime) Reconcile(ctx context.Context, spec ComponentSpec) (ComponentS
 }
 
 func (r *Runtime) Remove(ctx context.Context, uid types.UID) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	r.mu.Lock()
 	inst := r.instances[uid]
 	r.mu.Unlock()
@@ -425,9 +413,6 @@ func (r *Runtime) startLocked(ctx context.Context, inst *instance, spec Componen
 }
 
 func (r *Runtime) stopInstanceLocked(ctx context.Context, inst *instance) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	inst.mu.Lock()
 	svc := inst.svc
 	cancel := inst.cancel
@@ -493,6 +478,8 @@ func (r *Runtime) supervise(inst *instance, spec ComponentSpec, deps Deps, svc S
 		inst.mu.Unlock()
 		close(done)
 	}()
+	var probes sync.WaitGroup
+	defer probes.Wait()
 	restarts := inst.restartsOf()
 	for {
 		if svc == nil {
@@ -538,7 +525,7 @@ func (r *Runtime) supervise(inst *instance, spec ComponentSpec, deps Deps, svc S
 			return
 		}
 		started := make(chan struct{})
-		ready := r.launchReady(inst, svc, runCtx, attempt, started)
+		ready := r.launchReady(&probes, inst, svc, runCtx, attempt, started)
 		close(started)
 		err := r.callStart(runCtx, svc, deps, spec)
 		if runCtx.Err() != nil || inst.isStopping() {
@@ -618,9 +605,9 @@ func (r *Runtime) waitRestart(ctx context.Context, restarts int32) bool {
 	}
 }
 
-func (r *Runtime) launchReady(inst *instance, svc Service, ctx context.Context, attempt uint64, started <-chan struct{}) chan struct{} {
+func (r *Runtime) launchReady(probes *sync.WaitGroup, inst *instance, svc Service, ctx context.Context, attempt uint64, started <-chan struct{}) chan struct{} {
 	ready := make(chan struct{})
-	go r.awaitReady(inst, svc, ctx, attempt, started, ready)
+	probes.Go(func() { r.awaitReady(inst, svc, ctx, attempt, started, ready) })
 	return ready
 }
 
@@ -778,9 +765,6 @@ func (r *Runtime) emit(ctx context.Context, spec ComponentSpec, status Component
 	if cb == nil {
 		return
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), StatusWriteTimeout)
 	defer cancel()
 	if err := cb(writeCtx, spec, status); err != nil {
@@ -909,9 +893,6 @@ func (r *Runtime) backoffFor(restarts int32) time.Duration {
 }
 
 func stopContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	if ctx == nil {
-		return context.WithTimeout(context.Background(), DefaultStopTimeout)
-	}
 	if _, ok := ctx.Deadline(); ok {
 		return context.WithCancel(ctx)
 	}

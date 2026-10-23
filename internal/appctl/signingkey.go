@@ -37,7 +37,7 @@ func (ctl *Controller) rotateSigningKey(ctx context.Context, o v1alpha1.MarketBi
 	if err != nil {
 		return err
 	}
-	defer client.RevokeSelf(context.Background())
+	defer client.RevokeSelf(context.WithoutCancel(ctx))
 	path := c.KVMount + "/data/" + oidcRotationPath + GuestOIDCKey
 	data, err := client.GetKV(ctx, path)
 	var re *openbao.ResponseError
