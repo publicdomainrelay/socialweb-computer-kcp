@@ -223,10 +223,14 @@ func serve(ctx context.Context, cfg Config, g *Gateway, log *slog.Logger, inv fo
 	}
 
 	g.Close()
-	drainCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+	drainCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cfg.ShutdownTimeout)
 	defer cancel()
-	if err := server.Shutdown(drainCtx); err != nil {
-		return fmt.Errorf("draining after %s: %w", cfg.ShutdownTimeout, err)
+	drainErr := server.Shutdown(drainCtx)
+	if serveErr == nil {
+		serveErr = <-served
+	}
+	if drainErr != nil {
+		return fmt.Errorf("draining after %s: %w", cfg.ShutdownTimeout, drainErr)
 	}
 	background.Wait()
 
