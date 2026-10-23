@@ -171,7 +171,7 @@ items:
       object.
   - id: D20-ERROR-RETRY-RESYNC
     title: "Watch-based loops retry errors only on the 30s resync"
-    status: todo
+    status: done
     defect: >
       The componentcore runtime reconciles inline with no queue or backoff
       (internal/stack/componentcore/controllers.go:104-215); a failed
@@ -198,7 +198,7 @@ items:
       generator writes it (scripts/regen-after-rebase.sh:21).
   - id: D23-APP-WORKSPACE-NO-COMPUTEVMS
     title: "socialweb-application workspaces never initialize in a network without bidders"
-    status: todo
+    status: done
     defect: >
       In a market network brought up with --bidders 0, a workspace of type
       socialweb-application never leaves initializing, because the
@@ -206,7 +206,7 @@ items:
       Seen in the plan 0026 W0-RUNTIME live run (instance w0rt).
   - id: D24-WORKSPACE-NO-CREATEDBY
     title: "A workspace created without the owner annotation stalls"
-    status: todo
+    status: done
     defect: >
       A workspace created without the experimental.tenancy.kcp.io/owner
       annotation stalls with "no createdBy recorded". Seen in the plan 0026
@@ -228,7 +228,7 @@ items:
       (internal/kcpclient/kcpclient.go:794, 814) fail.
   - id: D26-LEASE-MIRROR-ROOT-APP
     title: "The lease mirror looks for a root:app workspace that does not exist"
-    status: todo
+    status: done
     defect: >
       In a market network on kcp main the lease mirror keeps failing with
       'workspaces.tenancy.kcp.io "root:app" not found'. Seen in the plan
