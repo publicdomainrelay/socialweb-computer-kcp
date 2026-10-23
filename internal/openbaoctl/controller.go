@@ -478,6 +478,7 @@ func (c *Controller) reconcile(ctx context.Context, o v1alpha1.OpenBaoServer) v1
 	dir := ServerDir(c.c.StateDir, o.Name)
 	st.HostProcess = ChildName(o.Name)
 	st.Refs = refs(dir, o.Spec.TLS)
+	st.Ready = false
 	fail := func(format string, args ...any) v1alpha1.OpenBaoServerStatus {
 		st.Phase, st.Message = v1alpha1.OpenBaoServerPhaseFailed, fmt.Sprintf(format, args...)
 		conds.Set(&st.Conditions, gen, ConditionReady, false, "Failed", st.Message)
@@ -694,7 +695,10 @@ func (c *Controller) reconcile(ctx context.Context, o v1alpha1.OpenBaoServer) v1
 	if err != nil {
 		return starting("the server at %s stopped answering: %v", addr, err)
 	}
-	st.Initialized, st.Sealed = h.Initialized, h.Sealed
+	st.Initialized, st.Sealed, st.Version = h.Initialized, h.Sealed, h.Version
+	if ca, err := os.ReadFile(FileRef(st.Refs.CA)); err == nil {
+		st.CABundle = string(ca)
+	}
 	conds.Set(&st.Conditions, gen, ConditionInitialized, h.Initialized, "Health", "")
 	conds.Set(&st.Conditions, gen, ConditionUnsealed, !h.Sealed, "Health", "")
 	if !h.Initialized || h.Sealed {
@@ -702,7 +706,7 @@ func (c *Controller) reconcile(ctx context.Context, o v1alpha1.OpenBaoServer) v1
 		conds.Set(&st.Conditions, gen, ConditionReady, false, "Sealed", st.Message)
 		return st
 	}
-	st.Phase, st.Message = v1alpha1.OpenBaoServerPhaseReady, "initialized and unsealed"
+	st.Phase, st.Message, st.Ready = v1alpha1.OpenBaoServerPhaseReady, "initialized and unsealed", true
 	conds.Set(&st.Conditions, gen, ConditionReady, true, "Ready", st.Message)
 	return st
 }

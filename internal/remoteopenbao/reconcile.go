@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"reflect"
 	"strings"
 	"time"
@@ -20,7 +21,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/vaultaccess"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 )
 
 const statusUpdateAttempts = 5
@@ -49,15 +50,15 @@ func reasonOf(err error) string {
 		return probe.reason
 	}
 	switch {
-	case errors.Is(err, vaultaccess.ErrRemoteDisabled):
+	case errors.Is(err, openbao.ErrRemoteDisabled):
 		return "RemoteDisabled"
-	case errors.Is(err, vaultaccess.ErrUnsupported):
+	case errors.Is(err, openbao.ErrUnsupported):
 		return "Unsupported"
-	case errors.Is(err, vaultaccess.ErrSuspended):
+	case errors.Is(err, openbao.ErrSuspended):
 		return "Suspended"
-	case errors.Is(err, vaultaccess.ErrInvalidConfig):
+	case errors.Is(err, openbao.ErrInvalidConfig):
 		return "InvalidConfig"
-	case errors.Is(err, vaultaccess.ErrInvalidRef):
+	case errors.Is(err, openbao.ErrInvalidRef):
 		return "InvalidRef"
 	default:
 		return "Failed"
@@ -86,6 +87,9 @@ func (c *Controller) Reconcile(ctx context.Context, dyn dynamic.Interface, u *un
 	status.Phase = v1alpha1.RemoteOpenBaoPhasePending
 	status.Ready = false
 	status.Endpoint = ""
+	status.Address = ""
+	status.Initialized = false
+	status.CABundle = ""
 	status.Version = ""
 	status.Sealed = false
 	status.Message = ""
@@ -108,19 +112,26 @@ func (c *Controller) Reconcile(ctx context.Context, dyn dynamic.Interface, u *un
 	status.LastCheckedAt = &checkedAt
 	if c.resolver == nil {
 		return c.writeFailure(ctx, dyn, u, &status, generation, ConditionReachable,
-			errors.New("remoteopenbao: no vaultaccess resolver is configured"))
+			errors.New("remoteopenbao: no RemoteOpenBao options is configured"))
 	}
-	target, err := c.resolver.RemoteTarget(&object)
+	target, err := c.resolver.Target(&object)
 	if err != nil {
 		return c.writeFailure(ctx, dyn, u, &status, generation, ConditionReachable, err)
 	}
 	status.Endpoint = target.URL
+	status.Address = target.URL
+	if ref := strings.TrimSpace(object.Spec.TLS.CABundleRef); ref != "" {
+		if ca, err := os.ReadFile(strings.TrimPrefix(ref, "file:")); err == nil {
+			status.CABundle = string(ca)
+		}
+	}
 	health, err := probeHealth(ctx, target)
 	if err != nil {
 		return c.writeFailure(ctx, dyn, u, &status, generation, ConditionReachable, failed("HealthFailed", err))
 	}
 	status.Version = health.Version
 	status.Sealed = health.Sealed
+	status.Initialized = health.Initialized
 	conds.Set(&status.Conditions,
 		generation, ConditionReachable, true, "Reachable",
 		fmt.Sprintf("the OpenBao at %s answered sys/health", target.URL))
@@ -149,14 +160,9 @@ func (c *Controller) Reconcile(ctx context.Context, dyn dynamic.Interface, u *un
 		generation, ConditionUnsealed, true, "Unsealed",
 		fmt.Sprintf("the OpenBao at %s is unsealed", target.URL))
 
-	session, err := c.resolver.Resolve(ctx, vaultaccess.RemoteRef{Remote: &object})
+	inspector, err := c.resolver.Open(ctx, &object)
 	if err != nil {
 		return c.writeFailure(ctx, dyn, u, &status, generation, ConditionAuthenticated, err)
-	}
-	inspector, ok := session.(vaultaccess.RemoteInspector)
-	if !ok {
-		return c.writeFailure(ctx, dyn, u, &status, generation, ConditionAuthenticated,
-			failed("Unsupported", errors.New("remoteopenbao: the vaultaccess session cannot inspect the OpenBao")))
 	}
 	if err := inspector.Authenticated(ctx); err != nil {
 		return c.writeFailure(ctx, dyn, u, &status, generation, ConditionAuthenticated, failed("AuthenticationFailed", err))
@@ -208,7 +214,7 @@ func (c *Controller) settled(status v1alpha1.RemoteOpenBaoStatus, generation int
 	return age >= 0 && age < c.checkInterval
 }
 
-func checkMounts(ctx context.Context, inspector vaultaccess.RemoteInspector, mounts v1alpha1.RemoteOpenBaoMounts) error {
+func checkMounts(ctx context.Context, inspector *openbao.Client, mounts v1alpha1.RemoteOpenBaoMounts) error {
 	if path := strings.TrimSpace(mounts.KV); path != "" {
 		kind, found, err := inspector.MountType(ctx, path)
 		if err != nil {
@@ -245,7 +251,7 @@ func checkMounts(ctx context.Context, inspector vaultaccess.RemoteInspector, mou
 	return nil
 }
 
-func checkCapabilities(ctx context.Context, inspector vaultaccess.RemoteInspector, capabilities []string) error {
+func checkCapabilities(ctx context.Context, inspector *openbao.Client, capabilities []string) error {
 	if len(capabilities) == 0 {
 		return nil
 	}
@@ -284,7 +290,7 @@ type sealStatusResponse struct {
 	Version string `json:"version"`
 }
 
-func probeHealth(ctx context.Context, target vaultaccess.Target) (healthResponse, error) {
+func probeHealth(ctx context.Context, target openbao.Target) (healthResponse, error) {
 	var out healthResponse
 	body, status, err := get(ctx, target, "sys/health")
 	if err != nil {
@@ -301,7 +307,7 @@ func probeHealth(ctx context.Context, target vaultaccess.Target) (healthResponse
 	return out, nil
 }
 
-func probeSealStatus(ctx context.Context, target vaultaccess.Target) (sealStatusResponse, error) {
+func probeSealStatus(ctx context.Context, target openbao.Target) (sealStatusResponse, error) {
 	var out sealStatusResponse
 	body, status, err := get(ctx, target, "sys/seal-status")
 	if err != nil {
@@ -316,7 +322,7 @@ func probeSealStatus(ctx context.Context, target vaultaccess.Target) (sealStatus
 	return out, nil
 }
 
-func get(ctx context.Context, target vaultaccess.Target, path string) ([]byte, int, error) {
+func get(ctx context.Context, target openbao.Target, path string) ([]byte, int, error) {
 	url := strings.TrimRight(target.URL, "/") + "/v1/" + strings.TrimPrefix(path, "/")
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {

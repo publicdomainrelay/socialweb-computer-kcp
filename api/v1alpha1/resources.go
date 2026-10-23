@@ -86,7 +86,7 @@ var APIResources = []APIResource{
 		{Name: "PID", Type: "integer", JSONPath: ".status.runtime.pid"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "OpenBaoServer", Plural: "openbaoservers", Revision: 10, Export: "hostprocesses", Object: OpenBaoServer{}, Contracts: []string{commonv1.ContractVaults}, PrinterColumns: []PrinterColumn{
+	{Kind: "OpenBaoServer", Plural: "openbaoservers", Revision: 11, Export: "hostprocesses", Object: OpenBaoServer{}, Contracts: []string{commonv1.ContractVaults}, PrinterColumns: []PrinterColumn{
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "Address", Type: "string", JSONPath: ".status.address"},
 		{Name: "Initialized", Type: "boolean", JSONPath: ".status.initialized"},
@@ -94,7 +94,7 @@ var APIResources = []APIResource{
 		{Name: "Instance", Type: "string", JSONPath: ".status.runtime.instance"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "RemoteOpenBao", Plural: "remoteopenbaos", Revision: 1, Export: "hostprocesses", Object: RemoteOpenBao{}, Contracts: []string{commonv1.ContractVaults}, PrinterColumns: []PrinterColumn{
+	{Kind: "RemoteOpenBao", Plural: "remoteopenbaos", Revision: 2, Export: "hostprocesses", Object: RemoteOpenBao{}, Contracts: []string{commonv1.ContractVaults}, PrinterColumns: []PrinterColumn{
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "Ready", Type: "boolean", JSONPath: ".status.ready"},
 		{Name: "Endpoint", Type: "string", JSONPath: ".status.endpoint"},

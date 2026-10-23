@@ -354,6 +354,12 @@ type OpenBaoServerStatus struct {
 
 	Sealed bool `json:"sealed"`
 
+	Ready bool `json:"ready,omitempty"`
+
+	CABundle string `json:"caBundle,omitempty"`
+
+	Version string `json:"version,omitempty"`
+
 	HostProcess string `json:"hostProcess,omitempty"`
 
 	Runtime *OpenBaoServerRuntime `json:"runtime,omitempty"`

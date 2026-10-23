@@ -100,6 +100,12 @@ type RemoteOpenBaoStatus struct {
 
 	Endpoint string `json:"endpoint,omitempty"`
 
+	Address string `json:"address,omitempty"`
+
+	Initialized bool `json:"initialized,omitempty"`
+
+	CABundle string `json:"caBundle,omitempty"`
+
 	Version string `json:"version,omitempty"`
 
 	Sealed bool `json:"sealed,omitempty"`
