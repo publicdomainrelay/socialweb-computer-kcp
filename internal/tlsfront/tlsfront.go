@@ -21,6 +21,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsreload"
 )
 
 const (
@@ -171,11 +173,11 @@ func Run(ctx context.Context, c Config) error {
 	}
 	var tlsConfig *tls.Config
 	if c.CertFile != "" || c.KeyFile != "" {
-		pair, err := tls.LoadX509KeyPair(c.CertFile, c.KeyFile)
+		reloader, err := tlsreload.New(c.CertFile, []string{c.KeyFile}, c.log())
 		if err != nil {
 			return fmt.Errorf("tlsfront: the certificate %s and key %s: %w", c.CertFile, c.KeyFile, err)
 		}
-		tlsConfig = &tls.Config{Certificates: []tls.Certificate{pair}, MinVersion: tls.VersionTLS12}
+		tlsConfig = reloader.TLSConfig(&tls.Config{MinVersion: tls.VersionTLS12})
 	}
 	ln, err := net.Listen("tcp", c.Address)
 	if err != nil {

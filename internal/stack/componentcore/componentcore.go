@@ -46,6 +46,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/requester"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/sshserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsfront"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsreload"
 )
 
 const (
@@ -227,7 +228,14 @@ func New(cfg Config) (*Core, error) {
 	if err != nil {
 		return nil, fmt.Errorf("componentcore: the credential resolver: %w", err)
 	}
-	vault, err := component.NewOpenBaoVaultClients(store, base, cfg.VaultClient)
+	vaultClient := strings.TrimSpace(cfg.VaultClient)
+	if vaultClient == "" {
+		vaultClient = strings.TrimSpace(cfg.CredentialClient)
+	}
+	if vaultClient == "" && strings.TrimSpace(cfg.CredentialServer) != "" {
+		return nil, errors.New("componentcore: the vault clients need the named client certificate of the credential server")
+	}
+	vault, err := component.NewOpenBaoVaultClients(store, base, vaultClient)
 	if err != nil {
 		return nil, fmt.Errorf("componentcore: the vault clients: %w", err)
 	}
@@ -494,11 +502,11 @@ func serverTLS(cfg Config) (*tls.Config, error) {
 	} else if certFile == "" || keyFile == "" {
 		return nil, errors.New("componentcore: a TLS certificate and key are both required")
 	}
-	pair, err := tls.LoadX509KeyPair(certFile, keyFile)
+	reloader, err := tlsreload.New(certFile, []string{keyFile}, cfg.Log)
 	if err != nil {
 		return nil, fmt.Errorf("componentcore: the TLS certificate and key: %w", err)
 	}
-	return &tls.Config{Certificates: []tls.Certificate{pair}, MinVersion: tls.VersionTLS12}, nil
+	return reloader.TLSConfig(&tls.Config{MinVersion: tls.VersionTLS12}), nil
 }
 
 type registryHosts struct {

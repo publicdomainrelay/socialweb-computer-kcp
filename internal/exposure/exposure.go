@@ -25,6 +25,7 @@ import (
 
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsreload"
 )
 
 const (
@@ -488,11 +489,11 @@ func (c *ExposureController) localTLS(spec exposurev1alpha1.ExposureTLS) (*tls.C
 	switch {
 	case strings.TrimSpace(spec.CertRef) != "":
 		certFile := strings.TrimSpace(spec.CertRef)
-		pair, err := tls.LoadX509KeyPair(certFile, keyFileFor(certFile))
+		reloader, err := tlsreload.New(certFile, []string{keyFileFor(certFile)}, c.log)
 		if err != nil {
 			return nil, fmt.Errorf("loading the certificate %s: %w", certFile, err)
 		}
-		config = &tls.Config{Certificates: []tls.Certificate{pair}, MinVersion: tls.VersionTLS12}
+		config = reloader.TLSConfig(&tls.Config{MinVersion: tls.VersionTLS12})
 	case c.tls != nil:
 		config = c.tls.Clone()
 		if config.MinVersion == 0 {

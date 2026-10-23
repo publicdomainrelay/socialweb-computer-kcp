@@ -22,6 +22,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsreload"
 )
 
 const Kind = "Relay"
@@ -784,35 +785,21 @@ func keyFileFor(certFile string) string {
 	}
 }
 
-func loadKeyPair(certFile string) (tls.Certificate, error) {
+func keyFilesFor(certFile string) []string {
 	candidates := []string{keyFileFor(certFile)}
 	if strings.HasSuffix(certFile, ".pem") {
 		candidates = append(candidates, strings.TrimSuffix(certFile, ".pem")+"-key.pem")
 	}
-	candidates = append(candidates, certFile)
-	var firstErr error
-	for _, keyFile := range candidates {
-		if keyFile == "" {
-			continue
-		}
-		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
-		if err == nil {
-			return cert, nil
-		}
-		if firstErr == nil {
-			firstErr = err
-		}
-	}
-	return tls.Certificate{}, fmt.Errorf("loading the certificate %s: %w", certFile, firstErr)
+	return append(candidates, certFile)
 }
 
 func serverTLS(deps component.Deps, certFile string) (*tls.Config, error) {
 	if certFile != "" {
-		cert, err := loadKeyPair(certFile)
+		reloader, err := tlsreload.New(certFile, keyFilesFor(certFile), deps.Log)
 		if err != nil {
 			return nil, err
 		}
-		return &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12, NextProtos: []string{"http/1.1"}}, nil
+		return reloader.TLSConfig(&tls.Config{MinVersion: tls.VersionTLS12, NextProtos: []string{"http/1.1"}}), nil
 	}
 	if deps.TLS != nil {
 		tlsConfig := deps.TLS.Clone()

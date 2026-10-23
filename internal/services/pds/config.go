@@ -18,6 +18,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	atpds "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsreload"
 )
 
 const Kind = "Pds"
@@ -246,28 +247,14 @@ func buildTLSConfig(cfg Config) (*tls.Config, error) {
 		}
 		tlsConfig = cfg.Deps.TLS.Clone()
 	} else {
-		cert, err := tls.LoadX509KeyPair(cfg.CertFile, cfg.KeyFile)
+		reloader, err := tlsreload.New(cfg.CertFile, []string{cfg.KeyFile, cfg.CertFile}, cfg.Deps.Log)
 		if err != nil {
-			data, readErr := os.ReadFile(cfg.CertFile)
-			if readErr != nil {
-				if cfg.Deps.TLS != nil {
-					tlsConfig = cfg.Deps.TLS.Clone()
-				} else {
-					return nil, fmt.Errorf("pds: loading the tls certificate: %w", err)
-				}
-			} else {
-				cert, err = tls.X509KeyPair(data, data)
-				if err != nil {
-					if cfg.Deps.TLS != nil {
-						tlsConfig = cfg.Deps.TLS.Clone()
-					} else {
-						return nil, fmt.Errorf("pds: loading the tls certificate: %w", err)
-					}
-				}
+			if cfg.Deps.TLS == nil {
+				return nil, fmt.Errorf("pds: loading the tls certificate: %w", err)
 			}
-		}
-		if tlsConfig == nil {
-			tlsConfig = &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}
+			tlsConfig = cfg.Deps.TLS.Clone()
+		} else {
+			tlsConfig = reloader.TLSConfig(&tls.Config{MinVersion: tls.VersionTLS12})
 		}
 	}
 	if cfg.CABundleFile != "" {

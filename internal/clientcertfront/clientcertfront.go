@@ -32,6 +32,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/revocation"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsfront"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsreload"
 )
 
 const (
@@ -139,24 +140,26 @@ func Run(ctx context.Context, c Config) error {
 	if err != nil {
 		return err
 	}
-	pair, err := tls.LoadX509KeyPair(c.CertFile, c.KeyFile)
-	if err != nil {
-		return fmt.Errorf("clientcertfront: the certificate %s and key %s: %w", c.CertFile, c.KeyFile, err)
-	}
 	log := c.Log
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	s := &server{c: c, log: log.With("component", "client-cert-front"), edgePin: sha256.Sum256(edgeDER),
+	log = log.With("component", "client-cert-front")
+	reloader, err := tlsreload.New(c.CertFile, []string{c.KeyFile}, log)
+	if err != nil {
+		return fmt.Errorf("clientcertfront: the certificate %s and key %s: %w", c.CertFile, c.KeyFile, err)
+	}
+	s := &server{c: c, log: log, edgePin: sha256.Sum256(edgeDER),
 		trusts: map[string]*trust{}, revoked: map[string]*revokedEntry{}, refreshing: map[string]bool{},
 		denies: map[string]time.Time{}, wake: make(chan struct{}, 1)}
 	ln, err := net.Listen("tcp", c.Address)
 	if err != nil {
 		return fmt.Errorf("clientcertfront: listening on %s: %w", c.Address, err)
 	}
+	tlsConfig := reloader.TLSConfig(&tls.Config{ClientAuth: tls.RequireAnyClientCert,
+		MinVersion: tls.VersionTLS12, NextProtos: []string{"http/1.1"}})
 	srv := &http.Server{Handler: http.HandlerFunc(s.serve), ReadHeaderTimeout: readHeaderLimit,
-		TLSConfig: &tls.Config{Certificates: []tls.Certificate{pair}, ClientAuth: tls.RequireAnyClientCert,
-			MinVersion: tls.VersionTLS12, NextProtos: []string{"http/1.1"}}}
+		TLSConfig: tlsConfig}
 	s.log.Info("listening", "addr", ln.Addr().String())
 	if c.OnListen != nil {
 		c.OnListen(ln.Addr())

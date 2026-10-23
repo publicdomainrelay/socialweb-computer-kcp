@@ -21,6 +21,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsreload"
 )
 
 const Kind = "DispatcherTLS"
@@ -175,26 +176,12 @@ func keyFileFor(certFile string) string {
 	}
 }
 
-func loadKeyPair(certFile string) (tls.Certificate, error) {
+func keyFilesFor(certFile string) []string {
 	candidates := []string{keyFileFor(certFile)}
 	if strings.HasSuffix(certFile, ".pem") {
 		candidates = append(candidates, strings.TrimSuffix(certFile, ".pem")+"-key.pem")
 	}
-	candidates = append(candidates, certFile)
-	var firstErr error
-	for _, keyFile := range candidates {
-		if keyFile == "" {
-			continue
-		}
-		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
-		if err == nil {
-			return cert, nil
-		}
-		if firstErr == nil {
-			firstErr = err
-		}
-	}
-	return tls.Certificate{}, fmt.Errorf("loading the certificate %s: %w", certFile, firstErr)
+	return append(candidates, certFile)
 }
 
 func upstreamEndpoint(deps component.Deps, workspace string, ref *v1alpha1.ComponentRef) (string, bool) {
@@ -548,11 +535,11 @@ func parseUpstream(raw string) (*url.URL, error) {
 
 func serverTLS(cfg Config) (*tls.Config, error) {
 	if cfg.CertFile != "" {
-		cert, err := loadKeyPair(cfg.CertFile)
+		reloader, err := tlsreload.New(cfg.CertFile, keyFilesFor(cfg.CertFile), cfg.Deps.Log)
 		if err != nil {
 			return nil, err
 		}
-		return &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12, NextProtos: []string{"http/1.1"}}, nil
+		return reloader.TLSConfig(&tls.Config{MinVersion: tls.VersionTLS12, NextProtos: []string{"http/1.1"}}), nil
 	}
 	tlsConfig := cfg.TLS
 	if tlsConfig == nil {
