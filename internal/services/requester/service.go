@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -447,11 +446,14 @@ func (s *Service) setup(ctx context.Context) error {
 	}
 	if s.cfg.Market == nil {
 		var serviceAuth ServiceAuthSource
-		if s.oauth != nil {
+		switch {
+		case s.cfg.IdentityMode == IdentityModeOAuth:
 			serviceAuth = s.oauth
-		} else if s.ownerServiceAuth != nil {
+		case !s.cfg.LocalSigner && s.ownerServiceAuth != nil:
 			serviceAuth = s.ownerServiceAuth
 		}
+		s.log.Info("requester_service_auth", "identityMode", s.cfg.IdentityMode, "localSigner", s.cfg.LocalSigner,
+			"signing", serviceAuthName(serviceAuth))
 		s.market = &HTTPMarket{
 			Directory:      s.directory,
 			Reader:         s.repo,
@@ -503,6 +505,18 @@ func (s *Service) setup(ctx context.Context) error {
 }
 
 const ownerSessionSigningService = "market_requester"
+
+func serviceAuthName(source ServiceAuthSource) string {
+	switch source.(type) {
+	case nil:
+		return "local"
+	case *OAuthSession:
+		return "oauth"
+	case ownerSessionServiceAuth:
+		return "owner-session"
+	}
+	return "other"
+}
 
 func (s *Service) authenticateOwnerSession(ctx context.Context) error {
 	session, ok := s.cfg.OwnerSessions[s.cfg.RepoDID]
@@ -964,8 +978,10 @@ func (s *Service) handler() http.Handler {
 	mux.HandleFunc("GET /xrpc/com.atproto.repo.listRecords", s.repoListRecords)
 	mux.HandleFunc("GET /xrpc/com.atproto.repo.describeRepo", s.repoDescribe)
 	mux.HandleFunc("GET /xrpc/com.atproto.server.describeServer", s.serverDescribe)
-	mux.HandleFunc("POST /xrpc/"+market.SubmitBidNSID, s.submitBid)
-	mux.HandleFunc("POST /xrpc/"+market.SubmitEventNSID, s.submitEvent)
+	if s.cfg.inboundXRPC() {
+		mux.HandleFunc("POST /xrpc/"+market.SubmitBidNSID, s.submitBid)
+		mux.HandleFunc("POST /xrpc/"+market.SubmitEventNSID, s.submitEvent)
+	}
 	mux.HandleFunc("GET "+SecretsRoute+"/{contract}", s.getSecrets)
 	mux.HandleFunc("GET /oauth-client-metadata.json", s.oauthClientMetadata)
 	mux.HandleFunc("GET /oauth/callback/{identity}", s.oauthCallback)
@@ -1270,20 +1286,18 @@ func (s *Service) authorizeCallback(w http.ResponseWriter, r *http.Request, lxm,
 
 func (s *Service) callbackHostname(r *http.Request) string {
 	for _, raw := range []string{s.cfg.CallbackHostname, s.cfg.PublicHostname, s.cfg.Network.IngressProxyHost} {
-		if host := urlHost(raw); host != "" {
-			return host
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
 		}
-		if raw != "" && !strings.Contains(raw, "://") {
-			if host, _, err := net.SplitHostPort(raw); err == nil {
-				return host
-			}
-			return raw
+		if u, err := url.Parse(raw); err == nil && u.Host != "" {
+			return u.Host
+		}
+		if !strings.Contains(raw, "://") {
+			return strings.Trim(raw, "[]")
 		}
 	}
 	host := r.Host
-	if h, _, err := net.SplitHostPort(host); err == nil {
-		host = h
-	}
 	return host
 }
 
@@ -1376,37 +1390,8 @@ func (s *Service) bidderForBid(ctx context.Context, bid BidRecord) (Bidder, bool
 	if raw == "" {
 		return Bidder{}, false
 	}
-	if strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "https://") {
-		endpoint, audience, err := resolveBidderEndpoint(raw)
-		if err != nil {
-			return Bidder{}, false
-		}
-		bidder := Bidder{DID: bid.DID, Endpoint: endpoint, Audience: audience}
-		s.rememberBidders([]Bidder{bidder})
-		return bidder, true
-	}
-	did := raw
-	fragment := defaultMarketServiceID
-	if before, after, found := strings.Cut(raw, "#"); found {
-		did = before
-		if after != "" {
-			fragment = after
-		}
-	}
-	parsed, err := syntax.ParseDID(did)
-	if err != nil || s.directory == nil {
-		return Bidder{}, false
-	}
-	identityDoc, err := s.directory.LookupDID(ctx, parsed)
-	if err != nil || identityDoc == nil {
-		return Bidder{}, false
-	}
-	service, ok := identityDoc.Services[fragment]
-	if !ok || service.URL == "" {
-		return Bidder{}, false
-	}
-	endpoint, audience, err := resolveBidderEndpoint(service.URL)
-	if err != nil {
+	endpoint, audience, err := resolveBidderEndpoint(ctx, s.directory, raw)
+	if err != nil || endpoint == "" {
 		return Bidder{}, false
 	}
 	bidder := Bidder{DID: bid.DID, Endpoint: endpoint, Audience: audience}
@@ -1442,8 +1427,8 @@ func (s *Service) bidderForDID(ctx context.Context, did string) (Bidder, bool) {
 		if fragment != defaultMarketServiceID && !strings.Contains(fragment, "market") {
 			continue
 		}
-		endpoint, audience, err := resolveBidderEndpoint(service.URL)
-		if err != nil {
+		endpoint, audience, err := resolveBidderEndpoint(ctx, s.directory, service.URL)
+		if err != nil || endpoint == "" {
 			continue
 		}
 		bidder := Bidder{DID: did, Endpoint: endpoint, Audience: audience}
@@ -1458,7 +1443,7 @@ func (s *Service) submitAcceptAndWait(ctx context.Context, bidder Bidder, accept
 	if s.cfg.ReceiptTimeout > provisionTimeout {
 		provisionTimeout = s.cfg.ReceiptTimeout
 	}
-	if !s.marketXRPCEnabled() {
+	if !s.outboundXRPC() || bidder.Endpoint == "" {
 		timeout := s.cfg.ReceiptTimeout
 		if timeout <= 0 {
 			timeout = DefaultReceiptTimeout
@@ -1702,6 +1687,20 @@ func (s *Service) callbackDID() string {
 		return s.cfg.DID
 	}
 	return s.cfg.MarketDID
+}
+
+func (s *Service) submitBidRef() string {
+	if !s.cfg.inboundXRPC() || s.callbackDID() == "" {
+		return ""
+	}
+	return s.callbackDID() + "#" + defaultMarketServiceID
+}
+
+func (s *Service) submitEventRef() string {
+	if !s.cfg.inboundXRPC() || s.callbackDID() == "" {
+		return ""
+	}
+	return s.callbackDID() + "#" + defaultComputeEventServiceID
 }
 
 func (s *Service) generatedVMName() string {

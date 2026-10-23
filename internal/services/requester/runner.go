@@ -360,7 +360,7 @@ func (r *contractRunner) requestOnce(ctx context.Context) (bool, error) {
 	} else {
 		rfpOptions := market.RFPOptions{
 			Payload:   market.RecordRef{URI: state.Payload.URI, CID: state.Payload.CID},
-			SubmitBid: r.svc.callbackDID() + "#" + defaultMarketServiceID,
+			SubmitBid: r.svc.submitBidRef(),
 			Domain:    "compute",
 			CreatedAt: r.svc.nowISO(),
 		}
@@ -391,8 +391,11 @@ func (r *contractRunner) requestOnce(ctx context.Context) (bool, error) {
 	responseBids := []BidRecord{}
 	var submitWG sync.WaitGroup
 	var submitMu sync.Mutex
-	if r.svc.marketXRPCEnabled() {
+	if r.svc.outboundXRPC() {
 		for _, bidder := range bidders {
+			if bidder.Endpoint == "" {
+				continue
+			}
 			bidder := bidder
 			submitWG.Add(1)
 			go func() {
@@ -507,7 +510,7 @@ func (r *contractRunner) requestOnce(ctx context.Context) (bool, error) {
 		acceptRecord, err := market.BuildAccept(market.AcceptOptions{
 			RFP:         market.RecordRef{URI: rfpURI, CID: rfpCID},
 			Bid:         market.RecordRef{URI: winner.URI, CID: winner.CID},
-			SubmitEvent: r.svc.callbackDID() + "#" + defaultComputeEventServiceID,
+			SubmitEvent: r.svc.submitEventRef(),
 			CreatedAt:   r.svc.nowISO(),
 		})
 		if err != nil {
@@ -1060,14 +1063,11 @@ func (r *contractRunner) releaseContract(ctx context.Context, state *v1alpha1.No
 	r.setRelease(release)
 
 	var bidder Bidder
-	if r.svc.marketXRPCEnabled() {
+	if r.svc.outboundXRPC() {
 		var ok bool
 		bidder, ok = r.svc.bidderForDID(ctx, bidderDID)
-		if !ok {
-			release.LastError = fmt.Sprintf("no endpoint is known for the bidder %s", bidderDID)
-			r.setRelease(release)
-			r.writeStatus(ctx, v1alpha1.ComputeContractReleasing, "the destroy could not be sent: "+release.LastError, state, r.currentBids(), r.currentChosen(), false, "releaseFailed", int32(release.Attempts))
-			return errors.New(release.LastError)
+		if !ok || bidder.Endpoint == "" {
+			bidder = Bidder{}
 		}
 	}
 
@@ -1082,7 +1082,7 @@ func (r *contractRunner) releaseContract(ctx context.Context, state *v1alpha1.No
 	}
 	r.writeStatus(ctx, v1alpha1.ComputeContractReleasing, "the destroy is recorded; sending it", state, r.currentBids(), r.currentChosen(), false, "releasing", int32(release.Attempts))
 
-	if !r.svc.marketXRPCEnabled() {
+	if !r.svc.outboundXRPC() || bidder.Endpoint == "" {
 		release.Attempts++
 		state.Release.OK = true
 		state.Phase = v1alpha1.ContractReleased

@@ -160,8 +160,12 @@ func (a *inboxNoopAdapter) Delete(ctx context.Context, request statesync.Request
 	return nil
 }
 
-func (s *Service) marketXRPCEnabled() bool {
-	return s.cfg.marketXRPCEnabled()
+func (s *Service) inboundXRPC() bool {
+	return s.cfg.inboundXRPC()
+}
+
+func (s *Service) outboundXRPC() bool {
+	return s.cfg.outboundXRPC()
 }
 
 func (s *Service) startStateSync() error {

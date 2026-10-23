@@ -207,7 +207,7 @@ func (m *HTTPMarket) Discover(ctx context.Context, now time.Time) ([]Bidder, err
 			if !market.OfferingApplies(offering, market.ComputeVMNSID) {
 				continue
 			}
-			endpoint, audience, err := resolveBidderEndpoint(offering.EndpointURL)
+			endpoint, audience, err := resolveBidderEndpoint(ctx, m.Directory, offering.EndpointURL)
 			if err != nil {
 				m.log().Warn("requester_bidder_endpoint_refused", "did", did, "endpoint", offering.EndpointURL, "err", err)
 				continue
@@ -225,11 +225,17 @@ func (m *HTTPMarket) Discover(ctx context.Context, now time.Time) ([]Bidder, err
 	return bidders, nil
 }
 
-func resolveBidderEndpoint(raw string) (string, string, error) {
+func resolveBidderEndpoint(ctx context.Context, dir identity.Directory, raw string) (string, string, error) {
 	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", "", nil
+	}
+	if strings.HasPrefix(raw, "did:") {
+		return resolveBidderServiceRef(ctx, dir, raw)
+	}
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
-		return "", "", fmt.Errorf("offering endpoint %q is not an absolute http or https URL", raw)
+		return "", "", fmt.Errorf("offering endpoint %q is not an absolute http or https URL or a DID service ref", raw)
 	}
 	base := strings.TrimRight(raw, "/")
 	if !strings.HasSuffix(base, "/xrpc") {
@@ -238,7 +244,34 @@ func resolveBidderEndpoint(raw string) (string, string, error) {
 	if _, err := url.Parse(base); err != nil {
 		return "", "", err
 	}
-	return base, market.ServiceDIDForHost(u.Hostname()), nil
+	return base, market.ServiceDIDForHost(u.Host), nil
+}
+
+func resolveBidderServiceRef(ctx context.Context, dir identity.Directory, raw string) (string, string, error) {
+	didText := raw
+	fragment := defaultMarketServiceID
+	if before, after, found := strings.Cut(raw, "#"); found {
+		didText = before
+		if strings.TrimSpace(after) != "" {
+			fragment = strings.TrimSpace(after)
+		}
+	}
+	if dir == nil {
+		return "", "", fmt.Errorf("offering endpoint %q needs an identity directory", raw)
+	}
+	did, err := syntax.ParseDID(strings.TrimSpace(didText))
+	if err != nil {
+		return "", "", fmt.Errorf("offering endpoint %q: %w", raw, err)
+	}
+	doc, err := dir.LookupDID(ctx, did)
+	if err != nil || doc == nil {
+		return "", "", fmt.Errorf("offering endpoint %q cannot be resolved", raw)
+	}
+	service, ok := doc.Services[fragment]
+	if !ok || strings.TrimSpace(service.URL) == "" {
+		return "", "", fmt.Errorf("offering endpoint %q names no service %s", raw, fragment)
+	}
+	return resolveBidderEndpoint(ctx, dir, service.URL)
 }
 
 func (m *HTTPMarket) token(ctx context.Context, audience string, lxm string) (string, error) {
@@ -267,6 +300,9 @@ func (m *HTTPMarket) post(ctx context.Context, endpoint, lxm, audience string, b
 }
 
 func (m *HTTPMarket) postWithClient(ctx context.Context, client *http.Client, endpoint, lxm, audience string, body any, timeout time.Duration) (int, map[string]any, error) {
+	if strings.TrimSpace(endpoint) == "" {
+		return 0, nil, fmt.Errorf("requester: no inbound endpoint is advertised for %s", lxm)
+	}
 	token, err := m.token(ctx, audience, lxm)
 	if err != nil {
 		return 0, nil, err

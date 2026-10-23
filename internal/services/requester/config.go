@@ -131,6 +131,8 @@ type Config struct {
 
 	IdentityMode IdentityMode
 
+	LocalSigner bool
+
 	DID string
 
 	Handle string
@@ -333,7 +335,10 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 	cfg.PublicOrigin = strings.TrimRight(strings.TrimSpace(decoded.PublicOrigin), "/")
 	cfg.OAuthClientID = strings.TrimSpace(decoded.OAuthClientID)
 	cfg.OAuthRedirectURI = strings.TrimSpace(decoded.OAuthRedirectURI)
-	switch strings.ToLower(strings.TrimSpace(decoded.Mode)) {
+	modeText := strings.ToLower(strings.TrimSpace(decoded.Mode))
+	cfg.LocalSigner = modeText == "local" || modeText == "localrepo" ||
+		(modeText == "" && (decoded.PdsRef == nil || decoded.PdsRef.Name == ""))
+	switch modeText {
 	case "", "local", "localrepo":
 	case "callback":
 		cfg.IdentityMode = IdentityModeCallback
@@ -666,7 +671,10 @@ func validateMarketComms(prefix string, comms *v1alpha1.MarketComms) error {
 	}
 }
 
-func (c Config) marketXRPCEnabled() bool {
+func (c Config) inboundXRPC() bool {
+	if c.IdentityMode == IdentityModeOAuth {
+		return false
+	}
 	if c.Comms == nil {
 		return true
 	}
@@ -675,6 +683,10 @@ func (c Config) marketXRPCEnabled() bool {
 		return true
 	}
 	return false
+}
+
+func (c Config) outboundXRPC() bool {
+	return true
 }
 
 func (c Config) firstFree() bool {

@@ -604,7 +604,7 @@ func (s *Service) provisionSession(ctx context.Context, vmName, policyName strin
 	}
 	options := market.RFPOptions{
 		Payload:   market.RecordRef{URI: payload.URI, CID: payload.CID},
-		SubmitBid: s.callbackDID() + "#" + defaultMarketServiceID,
+		SubmitBid: s.submitBidRef(),
 		Domain:    "compute",
 		CreatedAt: s.nowISO(),
 	}
@@ -640,7 +640,7 @@ func (s *Service) provisionSession(ctx context.Context, vmName, policyName strin
 		acceptRecord, err := market.BuildAccept(market.AcceptOptions{
 			RFP:         market.RecordRef{URI: rfp.URI, CID: rfp.CID},
 			Bid:         market.RecordRef{URI: winner.URI, CID: winner.CID},
-			SubmitEvent: s.callbackDID() + "#" + defaultComputeEventServiceID,
+			SubmitEvent: s.submitEventRef(),
 			CreatedAt:   s.nowISO(),
 		})
 		if err != nil {
@@ -712,8 +712,11 @@ func (s *Service) provisionSession(ctx context.Context, vmName, policyName strin
 }
 
 func (s *Service) sessionWinner(ctx context.Context, rfp market.SignedRecord, bidders []Bidder, usePolicy bool, workflow string) (*BidRecord, Bidder, error) {
-	if s.marketXRPCEnabled() {
+	if s.outboundXRPC() {
 		for _, bidder := range bidders {
+			if bidder.Endpoint == "" {
+				continue
+			}
 			timeout := s.cfg.BidWindow
 			if timeout < 5*time.Second {
 				timeout = 5 * time.Second
@@ -919,7 +922,7 @@ func (s *Service) releaseSession(ctx context.Context, target *SessionTarget) err
 	if err := s.persistSessionRelease(ctx, state.Receipt.URI, release); err != nil {
 		return err
 	}
-	if !s.marketXRPCEnabled() {
+	if !s.outboundXRPC() || target.Bidder.Endpoint == "" {
 		release.OK = true
 		if err := s.persistSessionRelease(ctx, state.Receipt.URI, release); err != nil {
 			s.log.Warn("requester_session_release_status_failed", "receipt", state.Receipt.URI, "err", err)
