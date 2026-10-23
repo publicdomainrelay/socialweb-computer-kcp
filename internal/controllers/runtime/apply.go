@@ -31,6 +31,13 @@ func (r Request) Get(ctx context.Context, namespace, name string, obj Object) er
 	return r.scope.client.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, obj)
 }
 
+func (r Request) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	if r.scope == nil || r.scope.client == nil {
+		return errors.New("runtime: the request has no cluster client")
+	}
+	return r.scope.client.List(ctx, list, opts...)
+}
+
 func (r Request) ApplyStatus(ctx context.Context, obj Object) error {
 	if r.scope == nil || r.scope.client == nil {
 		return errors.New("runtime: the request has no cluster client")
@@ -44,8 +51,10 @@ func (r Request) ApplyStatus(ctx context.Context, obj Object) error {
 	if status == nil {
 		status = map[string]any{}
 	}
-	if live, err := r.liveStatus(ctx, obj); err == nil {
-		dropped(live, status)
+	if !r.scope.sharedStatus {
+		if live, err := r.liveStatus(ctx, obj); err == nil {
+			dropped(live, status)
+		}
 	}
 	u.Object["status"] = status
 	if err := r.scope.client.Status().Apply(ctx, client.ApplyConfigurationFromUnstructured(u),
