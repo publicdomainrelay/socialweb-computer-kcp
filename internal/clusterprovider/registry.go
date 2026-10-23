@@ -165,7 +165,7 @@ func (r *Registry) Nodes(ctx context.Context, ref Ref) ([]v1alpha1.Node, error) 
 	}
 	out := make([]v1alpha1.Node, 0, len(list.Items))
 	for i := range list.Items {
-		if list.Items[i].Spec.Cluster == ref.Name {
+		if list.Items[i].Spec.ClusterRef.Name == ref.Name {
 			out = append(out, list.Items[i])
 		}
 	}

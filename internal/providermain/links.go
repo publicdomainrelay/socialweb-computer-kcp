@@ -37,7 +37,7 @@ func (r linkRecorder) home(ctx context.Context, cluster string) (string, error) 
 }
 
 func (r linkRecorder) WriteLink(ctx context.Context, link v1alpha1.ClusterLink) error {
-	home, err := r.home(ctx, link.Spec.Cluster)
+	home, err := r.home(ctx, link.Spec.ClusterRef.Name)
 	if err != nil {
 		return err
 	}

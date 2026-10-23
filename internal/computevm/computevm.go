@@ -38,6 +38,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/statesync"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vmruntime"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 const (
@@ -488,7 +490,7 @@ func (ct *Controller) boot(ctx context.Context, o v1alpha1.ComputeVM) error {
 			return ct.fail(ctx, o, st, err)
 		}
 		if !ok {
-			st.Phase, st.Message = v1alpha1.ComputeVMPhasePending, "waiting for the user data at "+o.Spec.UserData.Vault.Server+" "+o.Spec.UserData.Vault.Mount+"/"+o.Spec.UserData.Vault.Path
+			st.Phase, st.Message = v1alpha1.ComputeVMPhasePending, "waiting for the user data at "+v1alpha1.VaultServer(o.Spec.UserData.Vault.Vault, "")+" "+o.Spec.UserData.Vault.Mount+"/"+o.Spec.UserData.Vault.Path
 			return ct.writeStatus(ctx, o, st)
 		}
 		if err := ct.ensureGuestLogin(ctx, o); err != nil {
@@ -706,7 +708,7 @@ func (ct *Controller) markTermination(ctx context.Context, o v1alpha1.ComputeVM,
 
 func terminationReportable(o v1alpha1.ComputeVM) bool {
 	contract := o.Spec.Contract
-	return contract != nil && contract.ReceiptURI != "" && contract.ReceiptCID != ""
+	return contract != nil && contract.Receipt.URI != "" && contract.Receipt.CID != ""
 }
 
 func (ct *Controller) reconcileReleaseRequest(ctx context.Context, o v1alpha1.ComputeVM) error {
@@ -786,7 +788,7 @@ func (ct *Controller) release(ctx context.Context, cur *unstructured.Unstructure
 		}
 	}
 	observedAt := time.Now().UTC().Format(time.RFC3339)
-	var terminationRequest *v1alpha1.RecordRef
+	var terminationRequest *commonv1.StrongRef
 	if marker := terminationMarker(&o); marker != nil {
 		if marker.ObservedAt != "" {
 			observedAt = marker.ObservedAt
@@ -879,7 +881,7 @@ func (ct *Controller) reconcile(ctx context.Context, name string) error {
 	switch o.Status.Phase {
 	case v1alpha1.ComputeVMPhaseLost, v1alpha1.ComputeVMPhaseFailed:
 		reason, observedAt := GoneReason(o.Status.LostReason), time.Now().UTC().Format(time.RFC3339)
-		var request *v1alpha1.RecordRef
+		var request *commonv1.StrongRef
 		if marker := terminationMarker(&o); marker != nil {
 			if marker.Reason != "" {
 				reason = marker.Reason

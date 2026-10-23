@@ -19,6 +19,8 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauthclient"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 const (
@@ -46,7 +48,7 @@ type OAuthOptions struct {
 
 	States oauthclient.StateStore
 
-	StateRef *v1alpha1.VaultRef
+	StateRef *commonv1.SecretRef
 
 	CLIKey atcrypto.PrivateKey
 
@@ -375,7 +377,7 @@ func (c *Controller) oauthPDSURL(ctx context.Context, id *v1alpha1.MarketIdentit
 }
 
 func (c *Controller) restoreOAuthSession(ctx context.Context, id *v1alpha1.MarketIdentity,
-	status *v1alpha1.MarketIdentityStatus) (*oauthclient.Session, *v1alpha1.VaultRef, error) {
+	status *v1alpha1.MarketIdentityStatus) (*oauthclient.Session, *commonv1.SecretRef, error) {
 	ref := oauthSessionRef(id, status)
 	if ref == nil {
 		return nil, nil, errNoSessionRef
@@ -387,7 +389,7 @@ func (c *Controller) restoreOAuthSession(ctx context.Context, id *v1alpha1.Marke
 	return session, ref, err
 }
 
-func (c *Controller) openSessionDataRef(ctx context.Context, id *v1alpha1.MarketIdentity, ref v1alpha1.VaultRef, did string) (*oauthclient.Session, error) {
+func (c *Controller) openSessionDataRef(ctx context.Context, id *v1alpha1.MarketIdentity, ref commonv1.SecretRef, did string) (*oauthclient.Session, error) {
 	store := &vaultSessionStore{vault: c.vault, ref: ref}
 	session, err := oauthclient.Open(ctx, oauthclient.Options{
 		DID:        did,
@@ -425,7 +427,7 @@ func (c *Controller) sessionWithEndpoints(ctx context.Context, data oauthclient.
 }
 
 func (c *Controller) openSessionData(ctx context.Context, id *v1alpha1.MarketIdentity, data oauthclient.SessionData,
-	ref *v1alpha1.VaultRef) (*oauthclient.Session, error) {
+	ref *commonv1.SecretRef) (*oauthclient.Session, error) {
 	opts := oauthclient.Options{
 		DID:        data.AccountDID,
 		Handle:     id.Spec.Handle,
@@ -450,7 +452,7 @@ func (c *Controller) openSessionData(ctx context.Context, id *v1alpha1.MarketIde
 	return session, nil
 }
 
-func (c *Controller) saveSession(ctx context.Context, ref *v1alpha1.VaultRef, data oauthclient.SessionData) error {
+func (c *Controller) saveSession(ctx context.Context, ref *commonv1.SecretRef, data oauthclient.SessionData) error {
 	if ref == nil {
 		return errNoSessionRef
 	}
@@ -461,7 +463,7 @@ func (c *Controller) saveSession(ctx context.Context, ref *v1alpha1.VaultRef, da
 }
 
 func (c *Controller) signedIn(ctx context.Context, dyn dynamic.Interface, id *v1alpha1.MarketIdentity, generation int64,
-	status v1alpha1.MarketIdentityStatus, did, handle, pdsURL string, ref *v1alpha1.VaultRef) {
+	status v1alpha1.MarketIdentityStatus, did, handle, pdsURL string, ref *commonv1.SecretRef) {
 	status.Phase = v1alpha1.MarketIdentityPhaseReady
 	status.ObservedGeneration = generation
 	status.Did = strings.TrimSpace(did)
@@ -498,7 +500,7 @@ func oauthExpired(err error) bool {
 	return errors.Is(err, oauthclient.ErrSessionExpired) || errors.Is(err, oauthclient.ErrNoRefreshToken)
 }
 
-func oauthSessionRef(id *v1alpha1.MarketIdentity, status *v1alpha1.MarketIdentityStatus) *v1alpha1.VaultRef {
+func oauthSessionRef(id *v1alpha1.MarketIdentity, status *v1alpha1.MarketIdentityStatus) *commonv1.SecretRef {
 	if id.Spec.SessionRef != nil {
 		return id.Spec.SessionRef
 	}

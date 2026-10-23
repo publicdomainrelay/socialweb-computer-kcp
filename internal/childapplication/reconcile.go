@@ -86,7 +86,7 @@ func (c *Controller) Reconcile(ctx context.Context, dyn dynamic.Interface, u *un
 
 func (c *Controller) observe(ctx context.Context, ca *v1alpha1.ChildApplication) (observed, error) {
 	var o observed
-	if ca.Spec.Network == "" {
+	if ca.Spec.NetworkRef.Name == "" {
 		o.invalid = "spec.network is required"
 		return o, nil
 	}
@@ -114,18 +114,18 @@ func (c *Controller) observe(ctx context.Context, ca *v1alpha1.ChildApplication)
 	if err != nil {
 		return o, err
 	}
-	nu, err := ndyn.Resource(MarketNetworkGVR).Get(ctx, ca.Spec.Network, metav1.GetOptions{})
+	nu, err := ndyn.Resource(MarketNetworkGVR).Get(ctx, ca.Spec.NetworkRef.Name, metav1.GetOptions{})
 	switch {
 	case apierrors.IsNotFound(err):
 		o.orphaned = true
 		o.orphanReason = "NetworkMissing"
-		o.orphanMessage = fmt.Sprintf("the MarketNetwork %s does not exist", ca.Spec.Network)
+		o.orphanMessage = fmt.Sprintf("the MarketNetwork %s does not exist", ca.Spec.NetworkRef.Name)
 	case err != nil:
 		return o, err
 	default:
 		var network v1alpha1.MarketNetwork
 		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(nu.Object, &network); err != nil {
-			return o, fmt.Errorf("childapplication: reading the MarketNetwork %s: %w", ca.Spec.Network, err)
+			return o, fmt.Errorf("childapplication: reading the MarketNetwork %s: %w", ca.Spec.NetworkRef.Name, err)
 		}
 		listed := false
 		for i := range network.Spec.Apps {
@@ -144,7 +144,7 @@ func (c *Controller) observe(ctx context.Context, ca *v1alpha1.ChildApplication)
 		if !listed {
 			o.orphaned = true
 			o.orphanReason = "AppMissing"
-			o.orphanMessage = fmt.Sprintf("the MarketNetwork %s lists no application %s", ca.Spec.Network, ca.Spec.App)
+			o.orphanMessage = fmt.Sprintf("the MarketNetwork %s lists no application %s", ca.Spec.NetworkRef.Name, ca.Spec.App)
 		}
 	}
 

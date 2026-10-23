@@ -20,6 +20,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 const (
@@ -66,7 +68,7 @@ type relayEventStream struct {
 	conn *websocket.Conn
 }
 
-func relayBaseURL(ref eventsv1alpha1.EventStreamRef) (string, error) {
+func relayBaseURL(ref commonv1.ObjectRef) (string, error) {
 	kind := strings.ToLower(strings.TrimSpace(ref.Kind))
 	if kind == "" {
 		kind = strings.ToLower(eventsv1alpha1.EventStreamDefaultRelayKind)

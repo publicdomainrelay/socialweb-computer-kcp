@@ -12,6 +12,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterprovider"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/nodemarket"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 type claimAdopter interface {
@@ -55,7 +57,7 @@ func (h *nodeHosts) adoptClaims(cluster string, claims []v1alpha1.NodeClaim) err
 	var live []v1alpha1.NodeClaim
 	for i := range claims {
 		claim := claims[i]
-		if claim.Spec.Cluster != cluster || !nodemarket.Adoptable(claim) {
+		if claim.Spec.ClusterRef.Name != cluster || !nodemarket.Adoptable(claim) {
 			continue
 		}
 		if _, ok := nodeOrdinalInName(prefix, claim.Name); !ok {
@@ -142,7 +144,7 @@ func (h *nodeHosts) releaseStranded(ctx context.Context, cluster string, claims 
 	var problems []error
 	for i := range claims {
 		claim := claims[i]
-		if claim.Spec.Cluster != cluster || claim.DeletionTimestamp != nil ||
+		if claim.Spec.ClusterRef.Name != cluster || claim.DeletionTimestamp != nil ||
 			(claim.Status.Phase != v1alpha1.NodeClaimFailed && claim.Status.Phase != v1alpha1.NodeClaimLost) ||
 			held[claim.Name] {
 			continue
@@ -241,7 +243,7 @@ func (h *nodeHosts) claimJoinedOrphans(ctx context.Context, cluster string, clai
 		claimed[node.Name] = true
 		claims = append(claims, v1alpha1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Name: node.Name,
 			Annotations: map[string]string{nodemarket.AnnotationAdoptJoinedNode: "true"}},
-			Spec: v1alpha1.NodeClaimSpec{Cluster: cluster, NodeName: node.Name}})
+			Spec: v1alpha1.NodeClaimSpec{ClusterRef: commonv1.LocalObjectRef{Name: cluster}, NodeName: node.Name}})
 		h.log.Info("cluster provider: a joined, Ready Node with no claim and a role in the cluster vault is claimed for adoption",
 			"cluster", cluster, "node", node.Name,
 			"next", "the door matches the claim to its receipt and vm.hostKeys record and moves it to Running, or fails it")

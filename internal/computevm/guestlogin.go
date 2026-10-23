@@ -77,7 +77,7 @@ func (ct *Controller) ensureGuestLogin(ctx context.Context, o v1alpha1.ComputeVM
 	if err != nil {
 		return err
 	}
-	client, err := ct.vaultFor(ctx, o.Spec.UserData.Vault.Server)
+	client, err := ct.vaultFor(ctx, v1alpha1.VaultServer(o.Spec.UserData.Vault.Vault, ""))
 	if err != nil {
 		return err
 	}
@@ -99,7 +99,7 @@ func (ct *Controller) ensureGuestLogin(ctx context.Context, o v1alpha1.ComputeVM
 	if err := client.Write(ctx, path, body); err != nil {
 		var re *openbao.ResponseError
 		if errors.As(err, &re) && re.Status == 403 {
-			ct.forgetLogin(o.Spec.UserData.Vault.Server)
+			ct.forgetLogin(v1alpha1.VaultServer(o.Spec.UserData.Vault.Vault, ""))
 		}
 		return fmt.Errorf("writing the guest login role %s: %w", path, err)
 	}
@@ -113,7 +113,7 @@ func (ct *Controller) dropGuestLogin(ctx context.Context, o v1alpha1.ComputeVM) 
 	if err != nil {
 		return
 	}
-	server := o.Spec.UserData.Vault.Server
+	server := v1alpha1.VaultServer(o.Spec.UserData.Vault.Vault, "")
 	client, err := ct.vaultFor(ctx, server)
 	if err == nil {
 		err = client.Delete(ctx, path)

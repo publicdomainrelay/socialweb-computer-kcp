@@ -70,9 +70,9 @@ type ComputeVMRequester struct {
 }
 
 type ComputeVMContract struct {
-	Receipt *commonv1.StrongRef `json:"receipt,omitempty"`
+	Receipt commonv1.StrongRef `json:"receipt,omitempty"`
 
-	Accept *commonv1.StrongRef `json:"accept,omitempty"`
+	Accept commonv1.StrongRef `json:"accept,omitempty"`
 
 	SubmitEventURL string `json:"submitEventUrl,omitempty" apigen:"userEndpoint"`
 

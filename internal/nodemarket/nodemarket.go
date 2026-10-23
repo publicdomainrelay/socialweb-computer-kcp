@@ -16,6 +16,8 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/scale"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 type Claims interface {
@@ -229,7 +231,7 @@ func (h *Host) claimLocked(target Cluster, passwordFile string) v1alpha1.NodeCla
 		},
 		ObjectMeta: metav1.ObjectMeta{Name: h.opts.NodeName, OwnerReferences: clusterOwner(target)},
 		Spec: v1alpha1.NodeClaimSpec{
-			Cluster:          h.opts.Cluster,
+			ClusterRef:       commonv1.LocalObjectRef{Name: h.opts.Cluster},
 			NodeName:         h.opts.NodeName,
 			OwnerDid:         target.OwnerDid,
 			ApiserverPort:    h.opts.ApiserverPort,

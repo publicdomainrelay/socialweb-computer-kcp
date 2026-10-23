@@ -11,6 +11,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauthclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 type pdsAccountCredential struct {
@@ -84,7 +86,7 @@ func (c *Controller) pdsAccountCredential(ctx context.Context, id *v1alpha1.Mark
 	return credential, nil
 }
 
-func (c *Controller) storedPdsSession(ctx context.Context, ref v1alpha1.VaultRef, pdsURL string) (pdsclient.Session, bool) {
+func (c *Controller) storedPdsSession(ctx context.Context, ref commonv1.SecretRef, pdsURL string) (pdsclient.Session, bool) {
 	if c.vault == nil {
 		return pdsclient.Session{}, false
 	}
@@ -110,7 +112,7 @@ func (c *Controller) storedPdsSession(ctx context.Context, ref v1alpha1.VaultRef
 	return session, true
 }
 
-func (c *Controller) savePdsSession(ctx context.Context, ref v1alpha1.VaultRef, pdsURL string, session pdsclient.Session) error {
+func (c *Controller) savePdsSession(ctx context.Context, ref commonv1.SecretRef, pdsURL string, session pdsclient.Session) error {
 	if c.vault == nil {
 		return errors.New("identitycontroller: no vault writes the pds account session")
 	}

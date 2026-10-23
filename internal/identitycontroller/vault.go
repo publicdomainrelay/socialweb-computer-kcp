@@ -8,24 +8,25 @@ import (
 	"strings"
 	"time"
 
-	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauthclient"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 var ErrSecretNotFound = errors.New("identitycontroller: secret not found")
 
 type SecretStore interface {
-	Get(ctx context.Context, ref v1alpha1.VaultRef) (map[string]any, error)
+	Get(ctx context.Context, ref commonv1.SecretRef) (map[string]any, error)
 
-	Put(ctx context.Context, ref v1alpha1.VaultRef, data map[string]any) error
+	Put(ctx context.Context, ref commonv1.SecretRef, data map[string]any) error
 
-	Delete(ctx context.Context, ref v1alpha1.VaultRef) error
+	Delete(ctx context.Context, ref commonv1.SecretRef) error
 }
 
 type VaultStateStore struct {
 	Vault SecretStore
 
-	Ref v1alpha1.VaultRef
+	Ref commonv1.SecretRef
 
 	ttl time.Duration
 }
@@ -77,14 +78,14 @@ func (s *VaultStateStore) Take(ctx context.Context, state string) (oauthclient.P
 	return oauthclient.PendingAuth{}, false, nil
 }
 
-func (s *VaultStateStore) ref(state string) v1alpha1.VaultRef {
-	return v1alpha1.VaultRef{Mount: s.Ref.Mount, Path: strings.Trim(s.Ref.Path, "/") + "/pending/" + state}
+func (s *VaultStateStore) ref(state string) commonv1.SecretRef {
+	return commonv1.SecretRef{Mount: s.Ref.Mount, Path: strings.Trim(s.Ref.Path, "/") + "/pending/" + state}
 }
 
 type vaultSessionStore struct {
 	vault SecretStore
 
-	ref v1alpha1.VaultRef
+	ref commonv1.SecretRef
 }
 
 var _ oauthclient.SessionStore = (*vaultSessionStore)(nil)

@@ -7,6 +7,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	policyv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/policy/v1alpha1"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 type EngineReconcileState struct {
@@ -49,8 +51,8 @@ type WorkflowSource interface {
 }
 
 type RecordSource interface {
-	ResolveRecord(ctx context.Context, ref policyv1alpha1.PolicyStrongRef) (map[string]any, error)
-	ResolveWorkflow(ctx context.Context, ref policyv1alpha1.PolicyStrongRef) (json.RawMessage, error)
+	ResolveRecord(ctx context.Context, ref commonv1.StrongRef) (map[string]any, error)
+	ResolveWorkflow(ctx context.Context, ref commonv1.StrongRef) (json.RawMessage, error)
 }
 
 type ActionHandler interface {

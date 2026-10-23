@@ -28,7 +28,7 @@ func WriteClusterLinkTo(ctx context.Context, r rest.Interface, link v1alpha1.Clu
 	switch {
 	case link.Name == "":
 		return errors.New("kcpclient: WriteClusterLink needs a link name")
-	case link.Spec.Cluster == "":
+	case link.Spec.ClusterRef.Name == "":
 		return errors.New("kcpclient: WriteClusterLink needs the cluster the link fronts")
 	case link.Spec.Service == "":
 		return errors.New("kcpclient: WriteClusterLink needs the service the link forwards to")

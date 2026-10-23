@@ -56,7 +56,7 @@ func liveNodeGrants(cluster string, claims []v1alpha1.NodeClaim, held map[string
 	live := map[string]*v1alpha1.NodeClaimGrant{}
 	for i := range claims {
 		claim := claims[i]
-		if claim.Spec.Cluster != cluster {
+		if claim.Spec.ClusterRef.Name != cluster {
 			continue
 		}
 		if _, ok := nodeOrdinalInName(prefix, claim.Name); !ok {

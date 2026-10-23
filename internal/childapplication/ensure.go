@@ -15,6 +15,8 @@ import (
 	"k8s.io/client-go/dynamic"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 const (
@@ -51,7 +53,7 @@ func (c *Controller) Ensure(ctx context.Context) error {
 	}
 	have := map[string]bool{}
 	for i := range existing.Items {
-		network, _, _ := unstructured.NestedString(existing.Items[i].Object, "spec", "network")
+		network, _, _ := unstructured.NestedString(existing.Items[i].Object, "spec", "networkRef", "name")
 		app, _, _ := unstructured.NestedString(existing.Items[i].Object, "spec", "app")
 		if network != "" && app != "" {
 			have[childKey(network, app)] = true
@@ -88,7 +90,7 @@ func (c *Controller) createChild(ctx context.Context, ri dynamic.ResourceInterfa
 	child := &v1alpha1.ChildApplication{
 		TypeMeta:   metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: "ChildApplication"},
 		ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{networkLabel: network, appLabel: app}},
-		Spec:       v1alpha1.ChildApplicationSpec{Network: network, App: app, Profile: profile},
+		Spec:       v1alpha1.ChildApplicationSpec{NetworkRef: commonv1.LocalObjectRef{Name: network}, App: app, Profile: profile},
 	}
 	object, err := runtime.DefaultUnstructuredConverter.ToUnstructured(child)
 	if err != nil {
@@ -105,7 +107,7 @@ func (c *Controller) createChild(ctx context.Context, ri dynamic.ResourceInterfa
 		if err != nil {
 			return err
 		}
-		gotNetwork, _, _ := unstructured.NestedString(cur.Object, "spec", "network")
+		gotNetwork, _, _ := unstructured.NestedString(cur.Object, "spec", "networkRef", "name")
 		gotApp, _, _ := unstructured.NestedString(cur.Object, "spec", "app")
 		if gotNetwork == network && gotApp == app {
 			return nil

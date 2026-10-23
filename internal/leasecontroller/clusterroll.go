@@ -32,7 +32,7 @@ func (c *Controller) ReconcileClusterRoll(ctx context.Context, workspace string,
 	generation := u.GetGeneration()
 	status.ObservedGeneration = generation
 
-	cluster := strings.TrimSpace(roll.Spec.Cluster)
+	cluster := strings.TrimSpace(roll.Spec.ClusterRef.Name)
 	if cluster == "" {
 		status.Phase = v1alpha1.ClusterRollPhasePending
 		status.StartedAt = ""

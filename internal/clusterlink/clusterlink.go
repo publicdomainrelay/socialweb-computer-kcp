@@ -15,6 +15,8 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/didkey"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 const Mount = "socialweb-links"
@@ -201,7 +203,7 @@ func Object(clusterKey string, service v1alpha1.ClusterLinkService, targetPort i
 			Name: Name(clusterKey, service),
 		},
 		Spec: v1alpha1.ClusterLinkSpec{
-			Cluster:    clusterKey,
+			ClusterRef: commonv1.LocalObjectRef{Name: clusterKey},
 			Service:    service,
 			TargetPort: targetPort,
 		},

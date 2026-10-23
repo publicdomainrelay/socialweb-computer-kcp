@@ -21,6 +21,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/nodemarket"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 const (
@@ -135,30 +137,30 @@ type ContractWatcher interface {
 }
 
 type Vault interface {
-	Write(ctx context.Context, ref v1alpha1.VaultRef, data map[string]any) error
+	Write(ctx context.Context, ref commonv1.SecretRef, data map[string]any) error
 
-	Remove(ctx context.Context, ref v1alpha1.VaultRef) error
+	Remove(ctx context.Context, ref commonv1.SecretRef) error
 }
 
 type OpenBaoVault struct {
 	Client *openbao.Client
 }
 
-func (v OpenBaoVault) Write(ctx context.Context, ref v1alpha1.VaultRef, data map[string]any) error {
+func (v OpenBaoVault) Write(ctx context.Context, ref commonv1.SecretRef, data map[string]any) error {
 	if v.Client == nil {
 		return errors.New("gatewayapi: no OpenBao client")
 	}
 	return v.Client.PutKV(ctx, kvDataPath(ref), data)
 }
 
-func (v OpenBaoVault) Remove(ctx context.Context, ref v1alpha1.VaultRef) error {
+func (v OpenBaoVault) Remove(ctx context.Context, ref commonv1.SecretRef) error {
 	if v.Client == nil {
 		return errors.New("gatewayapi: no OpenBao client")
 	}
 	return v.Client.Delete(ctx, strings.Trim(ref.Mount, "/")+"/metadata/"+strings.Trim(ref.Path, "/"))
 }
 
-func kvDataPath(ref v1alpha1.VaultRef) string {
+func kvDataPath(ref commonv1.SecretRef) string {
 	return strings.Trim(ref.Mount, "/") + "/data/" + strings.Trim(ref.Path, "/")
 }
 
@@ -601,7 +603,7 @@ func claimStatusCopy(status v1alpha1.NodeClaimStatus) *v1alpha1.NodeClaimStatus 
 
 func (m *NodeClaimMapper) buildBundle(ctx context.Context, claim NodeClaim) ([]SecretEntry, error) {
 	spec := claim.Claim.Spec
-	linkName := nodemarket.OpenBaoLinkName(spec.Cluster)
+	linkName := nodemarket.OpenBaoLinkName(spec.ClusterRef.Name)
 	link, err := m.opts.Links.Get(ctx, claim.Workspace, linkName)
 	if err != nil {
 		return nil, err
@@ -621,7 +623,7 @@ func (m *NodeClaimMapper) buildBundle(ctx context.Context, claim NodeClaim) ([]S
 		{Path: OpenBaoTicketPath, Value: link.Status.Ticket},
 		{Path: OpenBaoCAPath, Value: openBaoCA},
 	}
-	apiserverName := nodemarket.ApiserverLinkName(spec.Cluster)
+	apiserverName := nodemarket.ApiserverLinkName(spec.ClusterRef.Name)
 	apiserverLink, apiserverErr := m.opts.Links.Get(ctx, claim.Workspace, apiserverName)
 	linkEnv := ""
 	if apiserverErr == nil && apiserverLink != nil &&
@@ -680,8 +682,8 @@ func (m *NodeClaimMapper) specOf(claim NodeClaim, name string, adopt bool, meshB
 		out.Adopt = true
 		return out
 	}
-	out.SecretsRef = &v1alpha1.VaultRef{Mount: m.opts.VaultMount, Path: "contracts/" + name + "/bundle"}
-	join := &v1alpha1.ComputeContractNodeJoin{Cluster: spec.Cluster}
+	out.SecretsRef = &commonv1.SecretRef{Mount: m.opts.VaultMount, Path: "contracts/" + name + "/bundle"}
+	join := &v1alpha1.ComputeContractNodeJoin{ClusterRef: spec.ClusterRef}
 	if m.opts.Meshd != nil {
 		mesh := &v1alpha1.ComputeContractMeshd{DownloadBase: meshBase}
 		for _, arch := range MeshdArches {
@@ -902,8 +904,8 @@ func ContractNameOfClaim(claim NodeClaim) string {
 	return ContractNamePrefix + hex.EncodeToString(sum[:])[:20]
 }
 
-func bundleRef(mount, contractName string) v1alpha1.VaultRef {
-	return v1alpha1.VaultRef{Mount: mount, Path: "contracts/" + contractName + "/bundle"}
+func bundleRef(mount, contractName string) commonv1.SecretRef {
+	return commonv1.SecretRef{Mount: mount, Path: "contracts/" + contractName + "/bundle"}
 }
 
 func hasFinalizer(finalizers []string, wanted string) bool {
