@@ -47,8 +47,6 @@ const (
 
 	DefaultPolicyTimeout = 2 * time.Minute
 
-	DefaultPolicyPoll = 250 * time.Millisecond
-
 	DefaultBootTimeout = 2 * time.Minute
 
 	DefaultReleaseTimeout = 150 * time.Second
@@ -129,6 +127,8 @@ type Config struct {
 
 	ComponentName string
 
+	ComponentUID string
+
 	Network v1alpha1.MarketNetworkValue
 
 	Identity v1alpha1.ComponentIdentity
@@ -183,8 +183,6 @@ type Config struct {
 
 	PolicyTimeout time.Duration
 
-	PolicyPoll time.Duration
-
 	Heartbeat time.Duration
 
 	OfferingRefresh time.Duration
@@ -204,8 +202,6 @@ type Config struct {
 	Relay *RelayConfig
 
 	Records RecordStore
-
-	PolicyRuns PolicyRunClient
 
 	Vault GuestVault
 
@@ -248,6 +244,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		Workspace:         spec.Workspace,
 		Namespace:         spec.Namespace,
 		ComponentName:     spec.Name,
+		ComponentUID:      string(spec.UID),
 		IdentityRef:       bidderSpec.PdsRef,
 		PDSRef:            bidderSpec.PdsRef,
 		VaultRef:          bidderSpec.VaultRef,
@@ -262,7 +259,6 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		IdentityMode:      strings.TrimSpace(bidderSpec.Mode),
 		Comms:             bidderSpec.Comms,
 		PolicyTimeout:     DefaultPolicyTimeout,
-		PolicyPoll:        DefaultPolicyPoll,
 		OfferingRefresh:   DefaultOfferingRefresh,
 		BidTTL:            DefaultBidTTL,
 		VaultClient:       "bidder",
@@ -279,9 +275,6 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 	}
 	if bidderSpec.BidTTLSeconds != nil && *bidderSpec.BidTTLSeconds > 0 {
 		cfg.BidTTL = time.Duration(*bidderSpec.BidTTLSeconds) * time.Second
-	}
-	if bidderSpec.PolicyPollMilliseconds != nil && *bidderSpec.PolicyPollMilliseconds > 0 {
-		cfg.PolicyPoll = time.Duration(*bidderSpec.PolicyPollMilliseconds) * time.Millisecond
 	}
 	if bidderSpec.PolicyTimeoutSeconds != nil && *bidderSpec.PolicyTimeoutSeconds > 0 {
 		cfg.PolicyTimeout = time.Duration(*bidderSpec.PolicyTimeoutSeconds) * time.Second
@@ -665,7 +658,6 @@ func (c Config) withDeps(deps component.Deps) Config {
 func (c *Config) defaults() {
 	c.ServeHost = cmp.Or(c.ServeHost, DefaultServeHost)
 	c.PolicyTimeout = opt.Positive(c.PolicyTimeout, DefaultPolicyTimeout)
-	c.PolicyPoll = opt.Positive(c.PolicyPoll, DefaultPolicyPoll)
 	c.Provider.GuestLoginMount = cmp.Or(c.Provider.GuestLoginMount, DefaultGuestLoginMount)
 	c.Provider.GuestHostAddress = cmp.Or(c.Provider.GuestHostAddress, v1alpha1.GuestHostAddress)
 	c.Provider.GuestVaultServer = cmp.Or(c.Provider.GuestVaultServer, DefaultGuestVaultServer)

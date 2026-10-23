@@ -29,13 +29,13 @@ import (
 
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
-	policyv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/policy/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	atprotooauth "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/policy"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
@@ -43,6 +43,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/oauthcallback"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/runs"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/statesync"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
@@ -477,26 +478,8 @@ func (s *Service) setup(ctx context.Context) error {
 	if s.cfg.Contracts == nil {
 		return errors.New("requester: no ComputeContract store is configured")
 	}
-	if s.cfg.PolicyRuns == nil {
-		return errors.New("requester: no PolicyWorkflowRun store is configured")
-	}
 	s.contracts = s.cfg.Contracts
-	engineRef := ""
-	if s.cfg.PolicyEngineRef != nil {
-		engineRef = s.cfg.PolicyEngineRef.Name
-	}
-	s.policy = &PolicyEvaluator{
-		Runs:      s.cfg.PolicyRuns,
-		Namespace: s.cfg.Namespace,
-		EngineRef: engineRef,
-		Workflow:  PolicyWorkflowName(s.cfg.PolicyWorkflow),
-		Args:      s.cfg.PolicyArgs,
-		Timeout:   s.cfg.PolicyTimeout,
-		Poll:      s.cfg.PolicyPoll,
-		DID:       s.cfg.MarketDID,
-		Log:       s.log,
-		Now:       s.cfg.Now,
-	}
+	s.policy = &PolicyEvaluator{Runs: s.policyRuns(), Workflow: PolicyWorkflowName(s.cfg.PolicyWorkflow), DID: s.cfg.MarketDID}
 	return nil
 }
 
@@ -722,8 +705,26 @@ func pdsTokenSource(token string) pdsclient.TokenSource {
 	})
 }
 
+func (s *Service) policyRuns() *runs.Client {
+	if s.cfg.Deps.Handlers == nil {
+		return nil
+	}
+	return &runs.Client{
+		Bus:     s.cfg.Deps.Handlers,
+		Caller:  commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: Kind, Name: s.cfg.ComponentName, Workspace: s.cfg.Workspace},
+		Owner:   policy.Owner{APIVersion: v1alpha1.GroupVersion.String(), Kind: Kind, Name: s.cfg.ComponentName, UID: s.cfg.ComponentUID},
+		Engine:  runs.EngineRef(s.cfg.PolicyEngineRef, s.cfg.Workspace),
+		Role:    "requester",
+		Prefix:  "requester-policy",
+		Args:    s.cfg.PolicyArgs,
+		Timeout: s.cfg.PolicyTimeout,
+		Parser:  runs.Strict,
+		Now:     s.cfg.Now,
+	}
+}
+
 func (s *Service) setupKCP() error {
-	if s.cfg.Contracts != nil && s.cfg.PolicyRuns != nil {
+	if s.cfg.Contracts != nil {
 		return nil
 	}
 	store, err := kcpStore(s.cfg.Deps, s.cfg.Workspace)
@@ -733,9 +734,6 @@ func (s *Service) setupKCP() error {
 	s.inbox = kcpstore.OfClusterScoped[v1alpha1.StateSync](store, inboxGVR)
 	if s.cfg.Contracts == nil {
 		s.cfg.Contracts = NewKCPContracts(kcpstore.OfClusterScoped[v1alpha1.ComputeContract](store, ComputeContractGVR), s.cfg.Workspace, "")
-	}
-	if s.cfg.PolicyRuns == nil {
-		s.cfg.PolicyRuns = NewKCPPolicyRuns(kcpstore.Of[policyv1alpha1.PolicyWorkflowRun](store, PolicyWorkflowRunGVR), s.cfg.Workspace, s.cfg.Namespace)
 	}
 	s.contracts = s.cfg.Contracts
 	return nil

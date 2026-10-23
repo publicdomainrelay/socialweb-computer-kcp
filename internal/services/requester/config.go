@@ -53,8 +53,6 @@ const (
 
 	DefaultContractPoll = 2 * time.Second
 
-	DefaultPolicyPoll = 250 * time.Millisecond
-
 	DefaultPolicyTimeout = 2 * time.Minute
 
 	DefaultVMReadyTimeout = 120 * time.Second
@@ -95,8 +93,6 @@ const (
 
 	DefaultDirectoryKeys = 10_000
 
-	PolicyRunTTLSeconds = int64(3600)
-
 	ServiceAuthTTL = 5 * time.Minute
 
 	MaxRecordBids = 20
@@ -128,6 +124,8 @@ type Config struct {
 	Namespace string
 
 	ComponentName string
+
+	ComponentUID string
 
 	Network v1alpha1.MarketNetworkValue
 
@@ -197,8 +195,6 @@ type Config struct {
 
 	Contracts ContractStore
 
-	PolicyRuns PolicyRunStore
-
 	Market MarketClient
 
 	RepoKey atcrypto.PrivateKey
@@ -214,8 +210,6 @@ type Config struct {
 	PolicyArgs map[string]string
 
 	PolicyTimeout time.Duration
-
-	PolicyPoll time.Duration
 
 	MaxConcurrent int
 
@@ -296,6 +290,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		Workspace:         spec.Workspace,
 		Namespace:         spec.Namespace,
 		ComponentName:     spec.Name,
+		ComponentUID:      string(spec.UID),
 		PDSRef:            decoded.PdsRef,
 		PDSAccessTokenRef: accessTokenRef(decoded.PDSAccessToken, decoded.VaultRef),
 		PolicyEngineRef:   decoded.PolicyEngineRef,
@@ -435,9 +430,6 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 	if decoded.DirectoryKeys != nil && *decoded.DirectoryKeys > 0 {
 		cfg.DirectoryKeys = int(*decoded.DirectoryKeys)
 	}
-	if decoded.PolicyPollMilliseconds != nil && *decoded.PolicyPollMilliseconds > 0 {
-		cfg.PolicyPoll = time.Duration(*decoded.PolicyPollMilliseconds) * time.Millisecond
-	}
 	if decoded.PolicyTimeoutSeconds != nil && *decoded.PolicyTimeoutSeconds > 0 {
 		cfg.PolicyTimeout = time.Duration(*decoded.PolicyTimeoutSeconds) * time.Second
 	}
@@ -575,7 +567,6 @@ func (c *Config) defaults() {
 	c.MaxConcurrent = opt.Positive(c.MaxConcurrent, DefaultMaxConcurrent)
 	c.PerAccount = opt.Positive(c.PerAccount, DefaultPerAccount)
 	c.ContractPoll = opt.Positive(c.ContractPoll, DefaultContractPoll)
-	c.PolicyPoll = opt.Positive(c.PolicyPoll, DefaultPolicyPoll)
 	c.PolicyTimeout = opt.Positive(c.PolicyTimeout, DefaultPolicyTimeout)
 	c.VMReadyTimeout = opt.Positive(c.VMReadyTimeout, DefaultVMReadyTimeout)
 	c.HostKeysTimeout = opt.Positive(c.HostKeysTimeout, DefaultHostKeysTimeout)
