@@ -46,27 +46,27 @@ const (
 )
 
 var (
-	MarketNetworkGVR   = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "marketnetworks"}
-	MarketBidderGVR    = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "marketbidders"}
-	MarketRequesterGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "marketrequesters"}
-	GatewayGVR         = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "gateways"}
-	HostProcessGVR     = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "hostprocesses"}
+	MarketNetworkGVR   = v1alpha1.MarketNetworkGVR
+	MarketBidderGVR    = v1alpha1.MarketBidderGVR
+	MarketRequesterGVR = v1alpha1.MarketRequesterGVR
+	GatewayGVR         = v1alpha1.GatewayGVR
+	HostProcessGVR     = v1alpha1.HostProcessGVR
 
-	BidderGVR            = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "bidders"}
-	GuestControlPlaneGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "guestcontrolplanes"}
-	PdsGVR               = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "pds"}
-	RequesterGVR         = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "requesters"}
-	GatewayAPIGVR        = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "gatewayapis"}
-	SshServerGVR         = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "sshservers"}
-	PlcGVR               = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "plcs"}
-	RelayGVR             = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "relays"}
-	IngressProxyGVR      = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "ingressproxies"}
-	DispatcherTLSGVR     = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "dispatchertlses"}
+	BidderGVR            = v1alpha1.BidderGVR
+	GuestControlPlaneGVR = v1alpha1.GuestControlPlaneGVR
+	PdsGVR               = v1alpha1.PdsGVR
+	RequesterGVR         = v1alpha1.RequesterGVR
+	GatewayAPIGVR        = v1alpha1.GatewayAPIGVR
+	SshServerGVR         = v1alpha1.SshServerGVR
+	PlcGVR               = v1alpha1.PlcGVR
+	RelayGVR             = v1alpha1.RelayGVR
+	IngressProxyGVR      = v1alpha1.IngressProxyGVR
+	DispatcherTLSGVR     = v1alpha1.DispatcherTLSGVR
 
-	PolicyEngineGVR      = schema.GroupVersionResource{Group: policyv1alpha1.GroupName, Version: policyv1alpha1.Version, Resource: "policyengines"}
-	PolicyWorkflowGVR    = schema.GroupVersionResource{Group: policyv1alpha1.GroupName, Version: policyv1alpha1.Version, Resource: "policyworkflows"}
-	PolicyWorkflowRunGVR = schema.GroupVersionResource{Group: policyv1alpha1.GroupName, Version: policyv1alpha1.Version, Resource: "policyworkflowruns"}
-	PolicyTriggerGVR     = schema.GroupVersionResource{Group: policyv1alpha1.GroupName, Version: policyv1alpha1.Version, Resource: "policytriggers"}
+	PolicyEngineGVR      = policyv1alpha1.PolicyEngineGVR
+	PolicyWorkflowGVR    = policyv1alpha1.PolicyWorkflowGVR
+	PolicyWorkflowRunGVR = policyv1alpha1.PolicyWorkflowRunGVR
+	PolicyTriggerGVR     = policyv1alpha1.PolicyTriggerGVR
 )
 
 func GVRFor(k v1alpha1.ApplicationKind) (schema.GroupVersionResource, error) {

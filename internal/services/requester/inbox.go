@@ -10,7 +10,6 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
@@ -27,7 +26,7 @@ const (
 	maxPendingEvents = 256
 )
 
-var inboxGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "statesyncs"}
+var inboxGVR = v1alpha1.StateSyncGVR
 
 type inboxEventPayload struct {
 	Event v1alpha1.ComputeContractEvent `json:"event"`

@@ -29,9 +29,9 @@ const (
 )
 
 var (
-	KcpInstallationGVR = v1alpha1.GroupVersion.WithResource("kcpinstallations")
-	HostInstallGVR     = v1alpha1.GroupVersion.WithResource("hostinstalls")
-	HostReleaseGVR     = v1alpha1.GroupVersion.WithResource("hostreleases")
+	KcpInstallationGVR = v1alpha1.KcpInstallationGVR
+	HostInstallGVR     = v1alpha1.HostInstallGVR
+	HostReleaseGVR     = v1alpha1.HostReleaseGVR
 )
 
 type ReconcileFunc func(context.Context, dynamic.Interface, *unstructured.Unstructured) error

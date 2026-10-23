@@ -45,7 +45,7 @@ const (
 	maxBackoff = 5 * time.Minute
 )
 
-var StateSyncGVR = schema.GroupVersionResource{Group: GroupName, Version: Version, Resource: "statesyncs"}
+var StateSyncGVR = v1alpha1.StateSyncGVR
 
 type DynamicFactory func(workspace string) (dynamic.Interface, error)
 

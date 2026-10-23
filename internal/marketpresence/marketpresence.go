@@ -47,9 +47,9 @@ const (
 )
 
 var (
-	MarketPresenceGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "marketpresences"}
+	MarketPresenceGVR = v1alpha1.MarketPresenceGVR
 
-	BidderGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "bidders"}
+	BidderGVR = v1alpha1.BidderGVR
 )
 
 func PresenceName(bidder string) string {

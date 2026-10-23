@@ -28,17 +28,17 @@ type componentKind struct {
 }
 
 var childComponentKinds = []componentKind{
-	{kind: "Bidder", gvr: v1alpha1.GroupVersion.WithResource("bidders")},
-	{kind: "GuestControlPlane", gvr: v1alpha1.GroupVersion.WithResource("guestcontrolplanes")},
-	{kind: "Pds", gvr: v1alpha1.GroupVersion.WithResource("pds")},
-	{kind: "Requester", gvr: v1alpha1.GroupVersion.WithResource("requesters")},
-	{kind: "GatewayAPI", gvr: v1alpha1.GroupVersion.WithResource("gatewayapis")},
-	{kind: "SshServer", gvr: v1alpha1.GroupVersion.WithResource("sshservers")},
-	{kind: "Plc", gvr: v1alpha1.GroupVersion.WithResource("plcs")},
-	{kind: "Relay", gvr: v1alpha1.GroupVersion.WithResource("relays")},
-	{kind: "IngressProxy", gvr: v1alpha1.GroupVersion.WithResource("ingressproxies")},
-	{kind: "DispatcherTLS", gvr: v1alpha1.GroupVersion.WithResource("dispatchertlses")},
-	{kind: "PolicyEngine", gvr: policyv1alpha1.GroupVersion.WithResource("policyengines")},
+	{kind: "Bidder", gvr: v1alpha1.BidderGVR},
+	{kind: "GuestControlPlane", gvr: v1alpha1.GuestControlPlaneGVR},
+	{kind: "Pds", gvr: v1alpha1.PdsGVR},
+	{kind: "Requester", gvr: v1alpha1.RequesterGVR},
+	{kind: "GatewayAPI", gvr: v1alpha1.GatewayAPIGVR},
+	{kind: "SshServer", gvr: v1alpha1.SshServerGVR},
+	{kind: "Plc", gvr: v1alpha1.PlcGVR},
+	{kind: "Relay", gvr: v1alpha1.RelayGVR},
+	{kind: "IngressProxy", gvr: v1alpha1.IngressProxyGVR},
+	{kind: "DispatcherTLS", gvr: v1alpha1.DispatcherTLSGVR},
+	{kind: "PolicyEngine", gvr: policyv1alpha1.PolicyEngineGVR},
 }
 
 func (c *Controller) observeCore(ctx context.Context, instance string) (string, bool, bool, error) {

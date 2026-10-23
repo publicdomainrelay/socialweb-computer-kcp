@@ -172,19 +172,12 @@ type Resources struct {
 }
 
 func NewResources(store *kcpstore.Store, cluster string) *Resources {
-	gvr := func(resource string) schema.GroupVersionResource {
-		return schema.GroupVersionResource{
-			Group:    policyv1alpha1.GroupVersion.Group,
-			Version:  policyv1alpha1.GroupVersion.Version,
-			Resource: resource,
-		}
-	}
 	return &Resources{
 		Cluster:   cluster,
-		Engines:   NewResource[policyv1alpha1.PolicyEngine](store, gvr("policyengines"), "PolicyEngine"),
-		Workflows: NewResource[policyv1alpha1.PolicyWorkflow](store, gvr("policyworkflows"), "PolicyWorkflow"),
-		Runs:      NewResource[policyv1alpha1.PolicyWorkflowRun](store, gvr("policyworkflowruns"), "PolicyWorkflowRun"),
-		Triggers:  NewResource[policyv1alpha1.PolicyTrigger](store, gvr("policytriggers"), "PolicyTrigger"),
+		Engines:   NewResource[policyv1alpha1.PolicyEngine](store, policyv1alpha1.PolicyEngineGVR, "PolicyEngine"),
+		Workflows: NewResource[policyv1alpha1.PolicyWorkflow](store, policyv1alpha1.PolicyWorkflowGVR, "PolicyWorkflow"),
+		Runs:      NewResource[policyv1alpha1.PolicyWorkflowRun](store, policyv1alpha1.PolicyWorkflowRunGVR, "PolicyWorkflowRun"),
+		Triggers:  NewResource[policyv1alpha1.PolicyTrigger](store, policyv1alpha1.PolicyTriggerGVR, "PolicyTrigger"),
 	}
 }
 

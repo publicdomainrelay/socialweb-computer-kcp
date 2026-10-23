@@ -3,7 +3,6 @@ package hostprocess
 import (
 	"context"
 	"fmt"
-	"k8s.io/apimachinery/pkg/watch"
 	"log/slog"
 	"slices"
 	"strconv"
@@ -16,7 +15,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 
@@ -42,7 +41,7 @@ const (
 	AnnotationDescription = "socialweb.computer/unit-description"
 )
 
-var GVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "hostprocesses"}
+var GVR = v1alpha1.HostProcessGVR
 
 type Mirror struct {
 	Role  string

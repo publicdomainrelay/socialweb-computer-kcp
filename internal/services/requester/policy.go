@@ -27,7 +27,7 @@ const (
 	PolicyModeFull = "full"
 )
 
-var PolicyWorkflowRunGVR = policyv1alpha1.GroupVersion.WithResource("policyworkflowruns")
+var PolicyWorkflowRunGVR = policyv1alpha1.PolicyWorkflowRunGVR
 
 type PolicyStrongRef struct {
 	URI string

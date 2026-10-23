@@ -19,12 +19,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 
 	eventsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/events/v1alpha1"
+	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
+	v1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
 )
@@ -43,11 +44,11 @@ const (
 	pdsCacheTTL = 2 * time.Minute
 )
 
-var EventStreamGVR = schema.GroupVersionResource{Group: GroupName, Version: Version, Resource: "eventstreams"}
+var EventStreamGVR = eventsv1alpha1.EventStreamGVR
 
-var RemotePDSGVR = schema.GroupVersionResource{Group: "pds.socialweb.computer", Version: "v1alpha1", Resource: "remotepds"}
+var RemotePDSGVR = pdsv1alpha1.RemotePDSGVR
 
-var RecordWatchGVR = schema.GroupVersionResource{Group: "socialweb.computer", Version: "v1alpha1", Resource: "atprotorecordwatches"}
+var RecordWatchGVR = v1alpha1.AtprotoRecordWatchGVR
 
 type DynamicFactory func(workspace string) (dynamic.Interface, error)
 

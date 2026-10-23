@@ -13,7 +13,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
@@ -35,8 +34,8 @@ const (
 )
 
 var (
-	MarketIdentityGVR  = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "marketidentities"}
-	ComputeContractGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "computecontracts"}
+	MarketIdentityGVR  = v1alpha1.MarketIdentityGVR
+	ComputeContractGVR = v1alpha1.ComputeContractGVR
 )
 
 func GuestHostIP() (string, error) {

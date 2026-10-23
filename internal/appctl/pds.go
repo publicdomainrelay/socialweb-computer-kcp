@@ -26,7 +26,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
@@ -451,7 +450,7 @@ func (ctl *Controller) recordPdsIdentity(ctx context.Context, ws, name, handle, 
 	return fmt.Errorf("appctl: the status of the MarketIdentity %s stayed in conflict", name)
 }
 
-var OpenBaoServerGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "openbaoservers"}
+var OpenBaoServerGVR = v1alpha1.OpenBaoServerGVR
 
 func fileRef(ref string) string { return strings.TrimPrefix(ref, "file:") }
 

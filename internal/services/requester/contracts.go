@@ -10,7 +10,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
@@ -19,11 +18,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
 )
 
-var ComputeContractGVR = schema.GroupVersionResource{
-	Group:    v1alpha1.GroupName,
-	Version:  v1alpha1.Version,
-	Resource: "computecontracts",
-}
+var ComputeContractGVR = v1alpha1.ComputeContractGVR
 
 type ContractStore interface {
 	List(ctx context.Context) ([]v1alpha1.ComputeContract, error)

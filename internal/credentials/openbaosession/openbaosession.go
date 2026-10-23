@@ -10,8 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"k8s.io/apimachinery/pkg/runtime/schema"
-
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/abc/pki"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/ref"
@@ -22,7 +20,7 @@ import (
 
 const DefaultLoginFor = 10 * time.Minute
 
-var OpenBaoServerGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "openbaoservers"}
+var OpenBaoServerGVR = v1alpha1.OpenBaoServerGVR
 
 var (
 	ErrNotFound = openbao.ErrNotFound

@@ -17,7 +17,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
@@ -41,9 +40,9 @@ const (
 	requestTimeout = 5 * time.Second
 )
 
-var MarketIdentityGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "marketidentities"}
+var MarketIdentityGVR = v1alpha1.MarketIdentityGVR
 
-var RecordWatchGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "atprotorecordwatches"}
+var RecordWatchGVR = v1alpha1.AtprotoRecordWatchGVR
 
 const (
 	ConditionVerified = v1alpha1.ConditionVerified

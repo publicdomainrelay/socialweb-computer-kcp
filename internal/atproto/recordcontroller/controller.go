@@ -17,7 +17,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 
@@ -34,11 +33,11 @@ const (
 	ConditionInSync = v1alpha1.ConditionRecordInSync
 )
 
-var AtprotoRecordGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "atprotorecords"}
+var AtprotoRecordGVR = v1alpha1.AtprotoRecordGVR
 
-var AtprotoRepoGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "atprotorepos"}
+var AtprotoRepoGVR = v1alpha1.AtprotoRepoGVR
 
-var RemotePDSGVR = schema.GroupVersionResource{Group: pdsv1alpha1.GroupName, Version: pdsv1alpha1.Version, Resource: "remotepds"}
+var RemotePDSGVR = pdsv1alpha1.RemotePDSGVR
 
 type DynamicFactory func(workspace string) (dynamic.Interface, error)
 

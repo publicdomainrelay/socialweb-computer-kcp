@@ -61,20 +61,19 @@ func withComponentQuotas(entries []quotaEntry, rootKind string) []quotaEntry {
 }
 
 func quotaPlan(rootKind string) []quotaEntry {
-	apps := func(resource string) schema.GroupVersionResource { return gvr(v1alpha1.GroupName, resource) }
 	runs := []quotaEntry{
 		{"", PolicyWorkflowRunGVR, "policyWorkflowRuns", QuotaDefaults.PolicyWorkflowRuns, false},
 	}
 	switch rootKind {
 	case string(v1alpha1.ApplicationKindMarketBidder):
 		return withComponentQuotas(append([]quotaEntry{
-			{"", apps("bids"), "bids", QuotaDefaults.Bids, true},
-			{"", apps("computevms"), "computeVMs", QuotaDefaults.ComputeVMs, true},
+			{"", v1alpha1.BidGVR, "bids", QuotaDefaults.Bids, true},
+			{"", v1alpha1.ComputeVMGVR, "computeVMs", QuotaDefaults.ComputeVMs, true},
 		}, runs...), rootKind)
 	case string(v1alpha1.ApplicationKindMarketRequester):
-		return withComponentQuotas(append([]quotaEntry{{"", apps("computecontracts"), "computeContracts", QuotaDefaults.ComputeContracts, false}}, runs...), rootKind)
+		return withComponentQuotas(append([]quotaEntry{{"", v1alpha1.ComputeContractGVR, "computeContracts", QuotaDefaults.ComputeContracts, false}}, runs...), rootKind)
 	case string(v1alpha1.ApplicationKindGateway):
-		return withComponentQuotas(append([]quotaEntry{{ComponentWorkspace, apps("computecontracts"), "computeContracts", QuotaDefaults.ComputeContracts, false}}, runs...), rootKind)
+		return withComponentQuotas(append([]quotaEntry{{ComponentWorkspace, v1alpha1.ComputeContractGVR, "computeContracts", QuotaDefaults.ComputeContracts, false}}, runs...), rootKind)
 	case string(v1alpha1.ApplicationKindSshGateway):
 		return withComponentQuotas(runs, rootKind)
 	case "MarketNetwork":

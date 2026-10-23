@@ -321,7 +321,7 @@ func (ctl *Controller) ensureRemotePDS(ctx context.Context, ws string, desired *
 		return nil
 	}
 	name := desired.Name
-	ri, err := ctl.client(ws, pdsv1alpha1.GroupVersion.WithResource("remotepds"))
+	ri, err := ctl.client(ws, pdsv1alpha1.RemotePDSGVR)
 	if err != nil {
 		ctl.c.log().Warn("creating a RemotePDS", "name", name, "err", err.Error())
 		return nil

@@ -5,13 +5,12 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 )
 
-var AtprotoRecordGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "atprotorecords"}
+var AtprotoRecordGVR = v1alpha1.AtprotoRecordGVR
 
 func (ctl *Controller) releaseRecords(ctx context.Context, recordsWs, podsWs, owner string) (int, error) {
 	ri, err := ctl.client(recordsWs, AtprotoRecordGVR)
