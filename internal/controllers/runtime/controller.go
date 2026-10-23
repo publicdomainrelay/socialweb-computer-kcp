@@ -9,12 +9,16 @@ import (
 	"strings"
 	"time"
 
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
+
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	"sigs.k8s.io/controller-runtime/pkg/cluster"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -277,6 +281,11 @@ func (a *adapter[T]) Reconcile(ctx context.Context, mcreq mcreconcile.Request) (
 			return reconcile.Result{}, a.failed(mcreq, lc, req.Name, err)
 		}
 	}
+	gvk, err := apiutil.GVKForObject(obj, cl.GetScheme())
+	if err != nil {
+		return reconcile.Result{}, reconcile.TerminalError(err)
+	}
+	ctx = bus.WithCallerLabels(ctx, commonv1.ObjectRef{Group: gvk.Group, Kind: gvk.Kind, Name: obj.GetName(), Workspace: req.Workspace}, obj.GetLabels())
 	log.Debug("reconciling")
 	res, err := a.r.Reconcile(ctx, req, obj)
 	if err != nil {
