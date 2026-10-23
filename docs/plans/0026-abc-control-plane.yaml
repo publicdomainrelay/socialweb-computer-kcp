@@ -636,7 +636,7 @@ items:
     track: lifecycle
     parallel_with: [W1-MODERNIZE, W1-CACHE-LEASE, W1-XRPC]
     depends_on: [W0-RUNTIME]
-    status: doing
+    status: done
     closes: [D15, D16, D17]
     decision: >
       Every goroutine is started by an errgroup or a supervisor that is
