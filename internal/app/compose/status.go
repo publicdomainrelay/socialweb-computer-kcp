@@ -3,6 +3,7 @@ package compose
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -254,7 +255,7 @@ func (c *Composer) WriteStatus(ctx context.Context, r Root, gvr schema.GroupVers
 	for _, k := range componentOwnedStatus {
 		delete(m, k)
 	}
-	c.samples.into(ctx, c, m)
+	c.samples.into(ctx, c, m, jsonFields(status))
 	u := NewDoc(r.APIVersion, r.Kind, r.Name)
 	u["status"] = m
 	ri, err := c.Client(r.Workspace, gvr)
@@ -265,6 +266,24 @@ func (c *Composer) WriteStatus(ctx context.Context, r Root, gvr schema.GroupVers
 		return fmt.Errorf("compose: applying the status of %s %s: %w", r.Kind, r.Name, err)
 	}
 	return nil
+}
+
+func jsonFields(v any) map[string]bool {
+	t := reflect.TypeOf(v)
+	for t != nil && t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	out := map[string]bool{}
+	if t == nil || t.Kind() != reflect.Struct {
+		return out
+	}
+	for i := range t.NumField() {
+		name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
+		if name != "" && name != "-" {
+			out[name] = true
+		}
+	}
+	return out
 }
 
 func ApplicationStatusOf(u *Generic) (v1alpha1.ApplicationStatus, error) {
