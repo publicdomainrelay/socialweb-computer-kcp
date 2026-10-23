@@ -1,7 +1,6 @@
 package eventstream
 
 import (
-	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,91 +8,60 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/dynamic"
+	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 )
 
-type resolvedMatch struct {
+type Match struct {
 	FieldPath []string
 
 	Value string
 }
 
-func (c *Controller) resolveMatches(ctx context.Context, dyn dynamic.Interface, spec recordWatchSpec) ([]resolvedMatch, error) {
-	if len(spec.Match) == 0 {
+type ValueFunc func(ctx context.Context, from v1alpha1.AtprotoValueFrom) (map[string]any, error)
+
+func ResolveMatches(ctx context.Context, spec []v1alpha1.AtprotoRecordMatch, value ValueFunc) ([]Match, error) {
+	if len(spec) == 0 {
 		return nil, nil
 	}
-	out := make([]resolvedMatch, 0, len(spec.Match))
-	for _, match := range spec.Match {
+	out := make([]Match, 0, len(spec))
+	for _, match := range spec {
 		path := splitFieldPath(match.FieldPath)
 		if len(path) == 0 {
 			return nil, errors.New("eventstream: a match needs a fieldPath")
 		}
-		value, err := c.matchValue(ctx, dyn, match)
+		resolved, err := matchValue(ctx, match, value)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, resolvedMatch{FieldPath: path, Value: value})
+		out = append(out, Match{FieldPath: path, Value: resolved})
 	}
 	return out, nil
 }
 
-func (c *Controller) matchValue(ctx context.Context, dyn dynamic.Interface, match recordMatch) (string, error) {
+func matchValue(ctx context.Context, match v1alpha1.AtprotoRecordMatch, value ValueFunc) (string, error) {
 	if match.ValueFrom == nil {
 		return match.Value, nil
 	}
-	from := match.ValueFrom
-	name := strings.TrimSpace(from.Name)
-	if name == "" {
+	from := *match.ValueFrom
+	if strings.TrimSpace(from.Name) == "" {
 		return "", errors.New("eventstream: a match valueFrom needs a name")
-	}
-	workspace := strings.TrimSpace(from.Workspace)
-	workspace = cmp.Or(workspace, c.opts.Workspace)
-	client := dyn
-	if workspace != c.opts.Workspace {
-		var err error
-		client, err = c.opts.Dynamic(workspace)
-		if err != nil {
-			return "", err
-		}
-	}
-	gvr := gvrFor(from)
-	namespace := strings.TrimSpace(from.Namespace)
-	resource := client.Resource(gvr)
-	var getter dynamic.ResourceInterface = resource
-	if namespace != "" {
-		getter = resource.Namespace(namespace)
-	}
-	object, err := getter.Get(ctx, name, metav1.GetOptions{})
-	if apierrors.IsNotFound(err) {
-		return "", fmt.Errorf("eventstream: match valueFrom %s %s does not exist", from.Kind, name)
-	}
-	if err != nil {
-		return "", err
 	}
 	path := splitFieldPath(from.FieldPath)
 	if len(path) == 0 {
 		return "", errors.New("eventstream: a match valueFrom needs a fieldPath")
 	}
-	return fieldString(object, path)
-}
-
-func gvrFor(from *recordValueFrom) schema.GroupVersionResource {
-	gv := schema.GroupVersion{Group: "socialweb.computer", Version: "v1alpha1"}
-	if raw := strings.TrimSpace(from.ApiVersion); raw != "" {
-		if parsed, err := schema.ParseGroupVersion(raw); err == nil {
-			gv = parsed
-		}
+	if value == nil {
+		return "", fmt.Errorf("eventstream: match valueFrom %s %s has no reader", from.Kind, from.Name)
 	}
-	resource := strings.TrimSpace(from.Resource)
-	if resource == "" {
-		resource = strs.Pluralize(from.Kind)
+	object, err := value(ctx, from)
+	if err != nil {
+		return "", fmt.Errorf("eventstream: match valueFrom %s %s: %w", from.Kind, from.Name, err)
 	}
-	return gv.WithResource(resource)
+	resolved, ok := recordFieldString(object, path)
+	if !ok {
+		return "", fmt.Errorf("eventstream: field %s is missing", strings.Join(path, "."))
+	}
+	return resolved, nil
 }
 
 func splitFieldPath(path string) []string {
@@ -110,17 +78,6 @@ func splitFieldPath(path string) []string {
 		}
 	}
 	return out
-}
-
-func fieldString(object *unstructured.Unstructured, path []string) (string, error) {
-	value, ok, err := unstructured.NestedFieldNoCopy(object.Object, path...)
-	if err != nil {
-		return "", err
-	}
-	if !ok {
-		return "", fmt.Errorf("eventstream: field %s is missing", strings.Join(path, "."))
-	}
-	return scalarString(value), nil
 }
 
 func scalarString(value any) string {
@@ -166,7 +123,7 @@ func recordFieldString(value any, path []string) (string, bool) {
 	return scalarString(current), true
 }
 
-func matchesRecord(value json.RawMessage, matches []resolvedMatch) bool {
+func MatchesRecord(value json.RawMessage, matches []Match) bool {
 	var decoded any
 	if err := json.Unmarshal(value, &decoded); err != nil {
 		return false

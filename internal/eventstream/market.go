@@ -22,12 +22,14 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/client-go/dynamic"
 
 	v1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/events"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/events/relay"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/statesync"
 )
 
@@ -46,6 +48,12 @@ const (
 
 	computeEventsPrefix = "com.publicdomainrelay.temp.compute.events."
 )
+
+type DynamicFactory func(workspace string) (dynamic.Interface, error)
+
+func newDirectory(httpClient *http.Client, plcURL, workspace string) identity.Directory {
+	return directoryAt(httpClient, cmp.Or(strings.TrimSpace(plcURL), "http://"+kcp.ServiceFQDN("plc", "default", workspace, kcp.DefaultServiceDomain)))
+}
 
 type MarketOptions struct {
 	Workspace string

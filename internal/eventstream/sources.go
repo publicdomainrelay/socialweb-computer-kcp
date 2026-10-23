@@ -1,25 +1,21 @@
 package eventstream
 
 import (
-	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 
 	"github.com/bluesky-social/indigo/atproto/identity"
 	"github.com/bluesky-social/indigo/atproto/syntax"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/dynamic"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	eventsapi "github.com/johnandersen777/socialweb-computer-kcp/api/events/v1alpha1"
-	v1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 )
 
 const AtprotoRepoKind = "AtprotoRepo"
@@ -69,7 +65,7 @@ func (d fallbackDirectory) Purge(ctx context.Context, atid syntax.AtIdentifier) 
 	return last
 }
 
-type watchSourcePlan struct {
+type SourcePlan struct {
 	Name string
 
 	Key string
@@ -81,10 +77,10 @@ type watchSourcePlan struct {
 	Filter eventsapi.EventStreamFilter
 }
 
-type watchRepo struct {
-	Did string
+type WatchRepo struct {
+	DID string
 
-	RepoRef *commonv1.ObjectRef
+	Ref *commonv1.ObjectRef
 }
 
 func EventStreamNameForWatchSource(watchName, sourceKey string) string {
@@ -101,19 +97,26 @@ func EventStreamNameForWatchSource(watchName, sourceKey string) string {
 	return candidate[:keep] + "-" + suffix
 }
 
-func (c *Controller) planWatchSources(ctx context.Context, dyn dynamic.Interface, watchName string, spec recordWatchSpec) ([]watchSourcePlan, error) {
-	repo, err := c.resolveWatchRepo(ctx, dyn, spec)
-	if err != nil {
-		return nil, err
+func SpecRepo(spec v1alpha1.AtprotoRecordWatchSpec) (string, error) {
+	repo := strings.TrimSpace(spec.Repo)
+	switch {
+	case strings.HasPrefix(repo, "did:"):
+		return repo, nil
+	case repo == "" && len(spec.Source.EventSourceRefs) == 0:
+		return "", errors.New("eventstream: spec.repo or spec.repoRef is required")
 	}
+	return "", nil
+}
+
+func PlanSources(workspace, watchName string, spec v1alpha1.AtprotoRecordWatchSpec, repo WatchRepo) ([]SourcePlan, error) {
 	filter := eventsapi.EventStreamFilter{}
 	if collection := strings.TrimSpace(spec.Collection); collection != "" {
 		filter.Collections = []string{collection}
 	}
-	if repo.Did != "" {
-		filter.DIDs = []string{repo.Did}
+	if repo.DID != "" {
+		filter.DIDs = []string{repo.DID}
 	}
-	var plans []watchSourcePlan
+	var plans []SourcePlan
 	seen := map[string]bool{}
 	for _, ref := range spec.Source.EventSourceRefs {
 		name := strings.TrimSpace(ref.Name)
@@ -123,108 +126,59 @@ func (c *Controller) planWatchSources(ctx context.Context, dyn dynamic.Interface
 		if kind := strings.TrimSpace(ref.Kind); kind != "" && !strings.EqualFold(kind, eventsapi.EventSourceKind) {
 			return nil, fmt.Errorf("eventstream: source.eventSourceRefs must name EventSources, not %s %s", kind, name)
 		}
-		source := commonv1.ObjectRef{Group: eventsapi.GroupName, Kind: eventsapi.EventSourceKind, Name: name, Workspace: ref.InWorkspace(c.opts.Workspace)}
+		source := commonv1.ObjectRef{Group: eventsapi.GroupName, Kind: eventsapi.EventSourceKind, Name: name, Workspace: ref.InWorkspace(workspace)}
 		key := "source/" + source.Workspace + "/" + name
 		if seen[key] {
 			continue
 		}
 		seen[key] = true
-		plans = append(plans, watchSourcePlan{Name: EventStreamNameForWatchSource(watchName, key), Key: key, SourceRef: source, Filter: filter})
+		plans = append(plans, SourcePlan{Name: EventStreamNameForWatchSource(watchName, key), Key: key, SourceRef: source, Filter: filter})
 	}
 	if len(plans) > 0 {
 		return plans, nil
 	}
-	if repo.RepoRef == nil {
+	if repo.Ref == nil {
 		return nil, errors.New("eventstream: the record watch names no source.eventSourceRefs and no AtprotoRepo repoRef")
 	}
-	key := "pds/" + repo.RepoRef.Name
+	key := "pds/" + repo.Ref.Name
 	name := EventStreamNameForWatchSource(watchName, key)
-	plans = append(plans, watchSourcePlan{Name: name, Key: key, RepoRef: repo.RepoRef, Filter: filter,
-		SourceRef: commonv1.ObjectRef{Group: eventsapi.GroupName, Kind: eventsapi.EventSourceKind, Name: name, Workspace: c.opts.Workspace}})
+	plans = append(plans, SourcePlan{Name: name, Key: key, RepoRef: repo.Ref, Filter: filter,
+		SourceRef: commonv1.ObjectRef{Group: eventsapi.GroupName, Kind: eventsapi.EventSourceKind, Name: name, Workspace: workspace}})
 	return plans, nil
 }
 
-func (c *Controller) resolveWatchRepo(ctx context.Context, dyn dynamic.Interface, spec recordWatchSpec) (watchRepo, error) {
-	if spec.RepoRef != nil {
-		return c.resolveWatchRepoRef(ctx, dyn, spec.RepoRef)
+func EventStreamFor(owner metav1.OwnerReference, workspace string, plan SourcePlan) *eventsapi.EventStream {
+	source := plan.SourceRef
+	if source.Workspace == workspace {
+		source.Workspace = ""
 	}
-	repo := strings.TrimSpace(spec.Repo)
-	switch {
-	case strings.HasPrefix(repo, "did:"):
-		return watchRepo{Did: repo}, nil
-	case repo == "" && len(spec.Source.EventSourceRefs) == 0:
-		return watchRepo{}, errors.New("eventstream: spec.repo or spec.repoRef is required")
+	return &eventsapi.EventStream{
+		TypeMeta: metav1.TypeMeta{APIVersion: eventsapi.GroupVersion.String(), Kind: "EventStream"},
+		ObjectMeta: metav1.ObjectMeta{Name: plan.Name, Labels: map[string]string{RecordWatchLabel: owner.Name},
+			OwnerReferences: []metav1.OwnerReference{owner}},
+		Spec: eventsapi.EventStreamSpec{
+			SourceRef: source,
+			Filter:    plan.Filter,
+			Sink:      eventsapi.EventStreamSink{Kind: eventsapi.EventStreamSinkRecordWatch, Name: owner.Name, Namespace: workspace},
+		},
 	}
-	return watchRepo{}, nil
 }
 
-func (c *Controller) resolveWatchRepoRef(ctx context.Context, dyn dynamic.Interface, ref *recordRepoRef) (watchRepo, error) {
-	name := strings.TrimSpace(ref.Name)
-	if name == "" {
-		return watchRepo{}, errors.New("eventstream: spec.repoRef needs a name")
+func PdsSourcesFor(owner metav1.OwnerReference, workspace string, plan SourcePlan) (*eventsapi.PdsEventSource, *eventsapi.EventSource, bool) {
+	if plan.RepoRef == nil {
+		return nil, nil, false
 	}
-	if !strings.EqualFold(strings.TrimSpace(ref.Kind), AtprotoRepoKind) {
-		return watchRepo{}, fmt.Errorf("eventstream: spec.repoRef must name an AtprotoRepo, not %q", ref.Kind)
-	}
-	workspace := cmp.Or(strings.TrimSpace(ref.Workspace), c.opts.Workspace)
-	client := dyn
-	if workspace != c.opts.Workspace {
-		var err error
-		if client, err = c.opts.Dynamic(workspace); err != nil {
-			return watchRepo{}, err
-		}
-	}
-	object, err := client.Resource(AtprotoRepoGVR).Get(ctx, name, metav1.GetOptions{})
-	if err != nil {
-		return watchRepo{}, fmt.Errorf("eventstream: reading AtprotoRepo %s: %w", name, err)
-	}
-	var repo v1alpha1.AtprotoRepo
-	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(object.Object, &repo); err != nil {
-		return watchRepo{}, err
-	}
-	did := strings.TrimSpace(repo.Status.DID)
-	if did == "" {
-		backend, err := readRepoBackend(ctx, client, repo)
-		if err != nil {
-			return watchRepo{}, err
-		}
-		did = backend.DID
-	}
-	return watchRepo{Did: did, RepoRef: &commonv1.ObjectRef{Workspace: workspace, Group: v1alpha1.GroupName, Kind: AtprotoRepoKind, Name: name}}, nil
-}
-
-func (c *Controller) ensurePdsSource(ctx context.Context, dyn dynamic.Interface, watch *unstructured.Unstructured, name string, repo commonv1.ObjectRef) error {
-	owner := []metav1.OwnerReference{{APIVersion: watch.GetAPIVersion(), Kind: watch.GetKind(), Name: watch.GetName(), UID: watch.GetUID()}}
-	labels := map[string]string{RecordWatchLabel: watch.GetName()}
-	if repo.Workspace == c.opts.Workspace {
+	repo := *plan.RepoRef
+	if repo.Workspace == workspace {
 		repo.Workspace = ""
 	}
+	name := plan.SourceRef.Name
+	labels := map[string]string{RecordWatchLabel: owner.Name}
+	owners := []metav1.OwnerReference{owner}
 	backend := &eventsapi.PdsEventSource{TypeMeta: metav1.TypeMeta{APIVersion: eventsapi.GroupVersion.String(), Kind: eventsapi.PdsEventSourceKind},
-		ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels, OwnerReferences: owner}, Spec: eventsapi.PdsEventSourceSpec{RepoRef: repo}}
-	if err := applyObject(ctx, dyn.Resource(eventsapi.PdsEventSourceGVR), name, backend); err != nil {
-		return err
-	}
+		ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels, OwnerReferences: owners}, Spec: eventsapi.PdsEventSourceSpec{RepoRef: repo}}
 	abstract := &eventsapi.EventSource{TypeMeta: metav1.TypeMeta{APIVersion: eventsapi.GroupVersion.String(), Kind: eventsapi.EventSourceKind},
-		ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels, OwnerReferences: owner},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Labels: maps.Clone(labels), OwnerReferences: owners},
 		Spec:       eventsapi.EventSourceSpec{BackendRef: commonv1.ObjectRef{Group: eventsapi.GroupName, Kind: eventsapi.PdsEventSourceKind, Name: name}}}
-	return applyObject(ctx, dyn.Resource(EventSourceGVR), name, abstract)
-}
-
-func applyObject(ctx context.Context, ri dynamic.ResourceInterface, name string, obj any) error {
-	object, err := toUnstructured(obj)
-	if err != nil {
-		return err
-	}
-	u := &unstructured.Unstructured{Object: object}
-	unstructured.RemoveNestedField(u.Object, "status")
-	unstructured.RemoveNestedField(u.Object, "metadata", "creationTimestamp")
-	body, err := u.MarshalJSON()
-	if err != nil {
-		return err
-	}
-	force := true
-	if _, err := ri.Patch(ctx, name, types.ApplyPatchType, body, metav1.PatchOptions{FieldManager: FieldManager, Force: &force}); err != nil {
-		return fmt.Errorf("eventstream: applying %s %s: %w", u.GetKind(), name, err)
-	}
-	return nil
+	return backend, abstract, true
 }
