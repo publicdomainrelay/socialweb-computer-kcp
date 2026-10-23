@@ -2,7 +2,6 @@ package kcpclient
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -40,57 +39,30 @@ func WriteClusterLinkTo(ctx context.Context, r rest.Interface, link v1alpha1.Clu
 
 	var existing v1alpha1.ClusterLink
 	err := r.Get().Resource(clusterLinks).Name(link.Name).Do(ctx).Into(&existing)
-	switch {
-	case apierrors.IsNotFound(err):
-		return createClusterLink(ctx, r, link)
-	case err != nil:
+	found := err == nil
+	if err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("kcpclient: read clusterlink %s: %w", link.Name, err)
 	}
-	if existing.Spec != link.Spec {
-		body, err := json.Marshal(map[string]any{"spec": link.Spec})
-		if err != nil {
-			return fmt.Errorf("kcpclient: clusterlink %s: marshal: %w", link.Name, err)
-		}
-		if err := r.Patch(types.MergePatchType).Resource(clusterLinks).Name(link.Name).
-			Body(body).Do(ctx).Error(); err != nil {
-			return fmt.Errorf("kcpclient: patch clusterlink %s spec: %w", link.Name, err)
+	if !found || existing.Spec != link.Spec {
+		obj := v1alpha1.ClusterLink{TypeMeta: clusterLinkType, ObjectMeta: metav1.ObjectMeta{Name: link.Name}, Spec: link.Spec}
+		if err := applyDoc(ctx, r.Patch(types.ApplyPatchType).Resource(clusterLinks).Name(link.Name), fieldManagerClusterProvider, true, &obj, false); err != nil {
+			return fmt.Errorf("kcpclient: apply clusterlink %s spec: %w", link.Name, err)
 		}
 	}
-	if existing.Status == link.Status {
+	if found && existing.Status == link.Status {
 		return nil
 	}
-	return patchClusterLinkStatus(ctx, r, link.Name, link.Status)
+	return applyClusterLinkStatus(ctx, r, link.Name, link.Status)
 }
 
-func createClusterLink(ctx context.Context, r rest.Interface, link v1alpha1.ClusterLink) error {
-	created := v1alpha1.ClusterLink{
-		TypeMeta: metav1.TypeMeta{
-			APIVersion: v1alpha1.GroupVersion.String(),
-			Kind:       "ClusterLink",
-		},
-		ObjectMeta: metav1.ObjectMeta{Name: link.Name},
-		Spec:       link.Spec,
-	}
-	body, err := json.Marshal(created)
-	if err != nil {
-		return fmt.Errorf("kcpclient: clusterlink %s: marshal: %w", link.Name, err)
-	}
-	if err := r.Post().Resource(clusterLinks).Body(body).Do(ctx).Error(); err != nil {
-		return fmt.Errorf("kcpclient: create clusterlink %s: %w", link.Name, err)
-	}
-	if err := patchClusterLinkStatus(ctx, r, link.Name, link.Status); err != nil {
-		return fmt.Errorf("kcpclient: set the status of the clusterlink %s it just created: %w -- the "+
-			"schema declares a status subresource, so a status posted inline is DISCARDED", link.Name, err)
-	}
-	return nil
-}
+var clusterLinkType = metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: "ClusterLink"}
 
 func (c *Client) WriteClusterLinkStatus(ctx context.Context, logicalCluster, name string, status v1alpha1.ClusterLinkStatus) (bool, error) {
 	r, err := c.resource(logicalCluster, socialwebResource)
 	if err != nil {
 		return false, err
 	}
-	err = patchClusterLinkStatus(ctx, r, name, status)
+	err = applyClusterLinkStatus(ctx, r, name, status)
 	if apierrors.IsNotFound(err) {
 		return false, nil
 	}
@@ -100,32 +72,13 @@ func (c *Client) WriteClusterLinkStatus(ctx context.Context, logicalCluster, nam
 	return true, nil
 }
 
-func clusterLinkStatusPatch(status v1alpha1.ClusterLinkStatus) ([]byte, error) {
-	field := func(s string) any {
-		if s == "" {
-			return nil
-		}
-		return s
-	}
-	return json.Marshal(map[string]any{"status": map[string]any{
-		"phase":      field(string(status.Phase)),
-		"endpointId": field(status.EndpointID),
-		"did":        field(status.Did),
-		"ticket":     field(status.Ticket),
-		"message":    field(status.Message),
-	}})
-}
-
-func patchClusterLinkStatus(ctx context.Context, r rest.Interface, name string, status v1alpha1.ClusterLinkStatus) error {
+func applyClusterLinkStatus(ctx context.Context, r rest.Interface, name string, status v1alpha1.ClusterLinkStatus) error {
 	if name == "" {
 		return errors.New("kcpclient: a clusterlink status write needs a link name")
 	}
-	body, err := clusterLinkStatusPatch(status)
-	if err != nil {
-		return fmt.Errorf("kcpclient: clusterlink %s: marshal: %w", name, err)
-	}
-	return r.Patch(types.MergePatchType).SubResource("status").Resource(clusterLinks).Name(name).
-		Body(body).Do(ctx).Error()
+	obj := v1alpha1.ClusterLink{TypeMeta: clusterLinkType, ObjectMeta: metav1.ObjectMeta{Name: name}, Status: status}
+	return applyDoc(ctx, r.Patch(types.ApplyPatchType).SubResource("status").Resource(clusterLinks).Name(name),
+		fieldManagerClusterProvider, true, &obj, true)
 }
 
 func (c *Client) ReadClusterLink(ctx context.Context, logicalCluster, name string) (*v1alpha1.ClusterLink, error) {

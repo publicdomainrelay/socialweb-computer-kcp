@@ -86,26 +86,34 @@ func (c *Client) MarkCertificateRevoked(ctx context.Context, did, cluster, seria
 		return err
 	}
 	name := ClusterClientCertificateName(serial)
-	spec, err := json.Marshal(map[string]any{"spec": map[string]any{"revoked": true}})
-	if err != nil {
-		return err
+	err = r.Get().Resource(clusterClientCertificates).Name(name).Do(ctx).Error()
+	if apierrors.IsNotFound(err) {
+		return nil
 	}
-	err = r.Patch(types.MergePatchType).Resource(clusterClientCertificates).Name(name).Body(spec).Do(ctx).Error()
+	if err != nil {
+		return fmt.Errorf("kcpclient: read the certificate record %s in %s: %w", name, home, err)
+	}
+	doc := certificateDoc(name)
+	doc["spec"] = map[string]any{"revoked": true}
+	err = applyDoc(ctx, r.Patch(types.ApplyPatchType).Resource(clusterClientCertificates).Name(name), fieldManagerRevocation, true, doc, false)
 	if apierrors.IsNotFound(err) {
 		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("kcpclient: revoke the certificate record %s in %s: %w", name, home, err)
 	}
-	status, err := json.Marshal(map[string]any{"status": map[string]any{"revokedAt": time.Now().UTC().Format(time.RFC3339)}})
-	if err != nil {
-		return err
-	}
-	err = r.Patch(types.MergePatchType).SubResource("status").Resource(clusterClientCertificates).Name(name).Body(status).Do(ctx).Error()
+	doc = certificateDoc(name)
+	doc["status"] = map[string]any{"revokedAt": time.Now().UTC().Format(time.RFC3339)}
+	err = applyDoc(ctx, r.Patch(types.ApplyPatchType).SubResource("status").Resource(clusterClientCertificates).Name(name),
+		fieldManagerRevocation, true, doc, true)
 	if err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("kcpclient: the revokedAt of the certificate record %s in %s: %w", name, home, err)
 	}
 	return nil
+}
+
+func certificateDoc(name string) map[string]any {
+	return map[string]any{"apiVersion": socialwebResource.String(), "kind": "ClusterClientCertificate", "metadata": map[string]any{"name": name}}
 }
 
 func (c *Client) CertificateState(ctx context.Context, did, cluster, serial string) (CertificateState, error) {
