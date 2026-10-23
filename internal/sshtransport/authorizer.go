@@ -17,6 +17,7 @@ import (
 	"github.com/bluesky-social/indigo/atproto/identity"
 	"github.com/bluesky-social/indigo/atproto/syntax"
 
+	sshcontract "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/ssh"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 )
@@ -48,11 +49,7 @@ type PresentedKey struct {
 	Key  string
 }
 
-type AuthorizedAccount struct {
-	DID    string
-	Handle string
-	PDS    string
-}
+type AuthorizedAccount = sshcontract.Account
 
 type KeyAuthorizer interface {
 	Authorize(ctx context.Context, username string, key PresentedKey) (*AuthorizedAccount, error)
@@ -126,6 +123,8 @@ type RecordSource interface {
 type HTTPRecordSource struct {
 	TrustedHosts []string
 
+	Trust func(host string) bool
+
 	MaxBytes int64
 
 	Client *http.Client
@@ -148,6 +147,9 @@ func (s *HTTPRecordSource) ListRecords(ctx context.Context, pds, did, collection
 	u.RawQuery = q.Encode()
 	trusted := make(map[string]bool, len(s.TrustedHosts))
 	for _, host := range s.TrustedHosts {
+		trusted[host] = true
+	}
+	if host := u.Hostname(); s.Trust != nil && host != "" && s.Trust(host) {
 		trusted[host] = true
 	}
 	maxBytes := s.MaxBytes

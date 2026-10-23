@@ -9,20 +9,19 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"os"
-	"path/filepath"
 	"sync"
-	"time"
 
 	"github.com/bluesky-social/indigo/atproto/identity"
-	"k8s.io/utils/ptr"
 
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayhttp"
+	sshcontract "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/ssh"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/sshtransport"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/ssh/gateway"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/ssh/ownersession"
 )
 
 type Service struct {
@@ -30,21 +29,15 @@ type Service struct {
 
 	deps Deps
 
+	cfg gateway.Config
+
 	log *slog.Logger
 
-	stateDir string
-
-	hostKeyPath string
-
-	did string
-
-	ownerSessions map[string]OwnerSession
+	ownerSessions map[string]ownersession.Session
 
 	tls *tls.Config
 
 	directory identity.Directory
-
-	trustedHosts []string
 
 	mu sync.Mutex
 
@@ -66,73 +59,35 @@ type Service struct {
 
 	sshURL string
 
-	sshServer *sshtransport.Server
-
-	requester CommandRunner
+	gateway *gateway.Gateway
 }
 
-type runnerAdapter struct {
-	runner CommandRunner
+var (
+	_ component.Service  = (*Service)(nil)
+	_ sshcontract.Runner = requester{}
+)
+
+type requester struct {
+	service *Service
+
+	ref commonv1.ObjectRef
 }
 
-func (a runnerAdapter) Run(ctx context.Context, account sshtransport.AuthorizedAccount, command string, env map[string]string, io sshtransport.CommandIO) error {
-	return a.runner.RunCommand(ctx, account, command, env, io)
-}
-
-type denyAuth struct{}
-
-func (denyAuth) Authenticate(r *http.Request) (*gatewayhttp.WebCaller, error) {
-	return nil, nil
-}
-
-type unavailableAgent struct{}
-
-func (unavailableAgent) GetServiceAuth(ctx context.Context, aud, lxm string) (string, error) {
-	return "", errors.New("sshserver: no account session is configured")
-}
-
-func (unavailableAgent) ListRecords(ctx context.Context, did, collection string, limit int) ([]gatewayhttp.Record, error) {
-	return nil, errors.New("sshserver: no account session is configured")
-}
-
-func (unavailableAgent) CreateRecord(ctx context.Context, did, collection, rkey string, record map[string]any) (gatewayhttp.RecordRef, error) {
-	return gatewayhttp.RecordRef{}, errors.New("sshserver: no account session is configured")
-}
-
-func (unavailableAgent) ApplyWrites(ctx context.Context, did string, writes []gatewayhttp.Write) error {
-	return errors.New("sshserver: no account session is configured")
-}
-
-type unavailableAgents struct{}
-
-func (unavailableAgents) AgentFor(caller *gatewayhttp.WebCaller) gatewayhttp.WebAccountAgent {
-	return unavailableAgent{}
-}
-
-type memoryCocoreTokens struct {
-	mu sync.Mutex
-
-	tokens map[string]sshtransport.CocoreToken
-}
-
-func (m *memoryCocoreTokens) Get(ctx context.Context, did string) (*sshtransport.CocoreToken, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	token, ok := m.tokens[did]
-	if !ok {
-		return nil, nil
+func (r requester) RunCommand(ctx context.Context, account sshcontract.Account, command string, env map[string]string, io sshcontract.CommandIO) error {
+	runner, err := r.service.resolveRequester(ctx, r.ref)
+	if err != nil {
+		return err
 	}
-	return &token, nil
+	return runner.RunCommand(ctx, account, command, env, io)
 }
 
-func (m *memoryCocoreTokens) Set(ctx context.Context, did string, token *sshtransport.CocoreToken) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.tokens == nil {
-		m.tokens = map[string]sshtransport.CocoreToken{}
+func (s *Service) resolveRequester(ctx context.Context, ref commonv1.ObjectRef) (sshcontract.Runner, error) {
+	runner, err := bus.Resolve[sshcontract.Runner](s.deps.Caller(ctx), s.deps.Bus, s.deps.Self, ref,
+		bus.Capability{Name: sshcontract.CapabilityRun, Scope: []string{sshcontract.ScopeRun}})
+	if err != nil {
+		return nil, fmt.Errorf("sshserver: the Requester %s/%s: %w", ref.Workspace, ref.Name, err)
 	}
-	m.tokens[did] = *token
-	return nil
+	return runner, nil
 }
 
 func (s *Service) Start(ctx context.Context) error {
@@ -149,7 +104,7 @@ func (s *Service) Start(ctx context.Context) error {
 	s.cancel = cancel
 	s.mu.Unlock()
 
-	if err := s.setup(runCtx); err != nil {
+	fail := func(err error) error {
 		cancel()
 		s.shutdown(ctx)
 		s.mu.Lock()
@@ -158,41 +113,29 @@ func (s *Service) Start(ctx context.Context) error {
 		close(s.done)
 		return err
 	}
+	if err := s.setup(runCtx); err != nil {
+		return fail(err)
+	}
 	key := s.deps.Key()
 	key.Kind = cmp.Or(key.Kind, Kind)
 	key.Name = cmp.Or(key.Name, "default")
 	key.Workspace = s.workspace()
 	handlers := s.deps.Bus
 	if handlers == nil {
-		s.shutdown(ctx)
-		s.mu.Lock()
-		s.started = false
-		s.mu.Unlock()
-		close(s.done)
-		return errors.New("sshserver: no handler registry is available")
+		return fail(errors.New("sshserver: no handler registry is available"))
 	}
 	host := kcp.KindServiceHost(key.Kind, key.Workspace)
 	httpURL := "http://" + host
 	sshURL := "ssh://" + host
 	if err := handlers.RegisterHTTP(key, s.handler()); err != nil {
-		s.shutdown(ctx)
-		s.mu.Lock()
-		s.started = false
-		s.mu.Unlock()
-		close(s.done)
-		return fmt.Errorf("sshserver: registering the handler: %w", err)
+		return fail(fmt.Errorf("sshserver: registering the handler: %w", err))
 	}
 	stream := func(streamCtx context.Context, conn net.Conn) error {
-		return s.sshServer.ServeConn(streamCtx, conn)
+		return s.gateway.ServeConn(streamCtx, conn)
 	}
 	if err := handlers.RegisterStream(key, stream, "ssh"); err != nil {
 		handlers.Remove(key)
-		s.shutdown(ctx)
-		s.mu.Lock()
-		s.started = false
-		s.mu.Unlock()
-		close(s.done)
-		return fmt.Errorf("sshserver: registering the stream: %w", err)
+		return fail(fmt.Errorf("sshserver: registering the stream: %w", err))
 	}
 	s.mu.Lock()
 	s.key = key
@@ -209,87 +152,30 @@ func (s *Service) Start(ctx context.Context) error {
 }
 
 func (s *Service) setup(ctx context.Context) error {
-	if s.stateDir != "" {
-		if err := os.MkdirAll(s.stateDir, 0o700); err != nil {
-			return fmt.Errorf("sshserver: state dir: %w", err)
-		}
-	}
-	if dir := filepath.Dir(s.hostKeyPath); dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			return fmt.Errorf("sshserver: host key dir: %w", err)
-		}
-	}
-	runner, err := s.resolveRequester(ctx)
+	ref, err := s.requesterRef()
 	if err != nil {
 		return err
 	}
-	s.requester = runner
-	authorizer, err := s.authorizer()
-	if err != nil {
+	if _, err := s.resolveRequester(ctx, ref); err != nil {
 		return err
 	}
-	sshServer, err := sshtransport.NewServer(sshtransport.ServerOptions{
-		Config: sshtransport.Config{
-			Hostname:           DefaultSSHHost,
-			HostKeyPath:        s.hostKeyPath,
-			MaxConnections:     int(s.spec.MaxConnections),
-			MaxSessions:        int(s.spec.MaxSessions),
-			SessionsPerAccount: int(s.spec.SessionsPerAccount),
-			MaxAuthAttempts:    int(s.spec.MaxAuthAttempts),
-			AuthTimeout:        time.Duration(ptr.Deref(s.spec.AuthTimeoutSeconds, 0)) * time.Second,
-			SessionMax:         time.Duration(ptr.Deref(s.spec.SessionMaxSeconds, 0)) * time.Second,
-		},
-		Authorizer:     authorizer,
-		Runner:         runnerAdapter{runner: runner},
-		DefaultCommand: DefaultDefaultCommand,
-		Log:            s.log,
+	owners := ownersession.New(ownersession.Config{Sessions: s.ownerSessions}, ownersession.Deps{Open: s.openOwner})
+	g, err := gateway.New(s.cfg, gateway.Deps{
+		Runner:    requester{service: s, ref: ref},
+		Directory: s.directory,
+		Trust:     s.inProcess,
+		Client:    s.httpClient(requestTimeout),
+		Auth:      owners,
+		Agents:    owners,
+		Log:       s.log,
 	})
 	if err != nil {
 		return err
 	}
-	s.sshServer = sshServer
+	s.mu.Lock()
+	s.gateway = g
+	s.mu.Unlock()
 	return nil
-}
-
-func (s *Service) resolveRequester(ctx context.Context) (CommandRunner, error) {
-	ref := s.spec.RequesterRef
-	if ref == nil || ref.Name == "" {
-		return nil, errors.New("sshserver: no Requester is configured")
-	}
-	if s.deps.Registry == nil {
-		return nil, errors.New("sshserver: no component registry is available")
-	}
-	workspace := s.workspace()
-	kind := cmp.Or(ref.Kind, "Requester")
-	service, ok := s.deps.Registry.Service(workspace, kind, ref.Name)
-	if !ok {
-		return nil, fmt.Errorf("sshserver: the Requester %s/%s is not registered", workspace, ref.Name)
-	}
-	if runner, ok := service.(CommandRunner); ok {
-		return runner, nil
-	}
-	if runner, ok := service.(sshtransport.ComputeCommandRunner); ok {
-		return legacyCommandRunner{runner: runner}, nil
-	}
-	return nil, fmt.Errorf("sshserver: the Requester %s/%s does not run commands", workspace, ref.Name)
-}
-
-func (s *Service) authorizer() (sshtransport.KeyAuthorizer, error) {
-	directory := s.directory
-	if directory == nil {
-		directory = identity.DefaultDirectory()
-	}
-	trusted := append([]string(nil), s.trustedHosts...)
-	trusted = append(trusted, internalHosts(s.deps.Registry)...)
-	return sshtransport.NewPDSKeyAuthorizer(sshtransport.KeyAuthorizerOptions{
-		Resolver: sshtransport.DirectoryResolver{Directory: directory},
-		Records: &sshtransport.HTTPRecordSource{
-			TrustedHosts: trusted,
-			Client:       s.httpClient(30 * time.Second),
-		},
-		MaxCacheEntries: int(s.spec.CacheEntries),
-		Log:             s.log,
-	})
 }
 
 func (s *Service) handler() http.Handler {
@@ -297,63 +183,8 @@ func (s *Service) handler() http.Handler {
 	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("GET /connect.json", s.connect)
 	mux.HandleFunc("GET /.well-known/cocore-app.json", s.cocoreApp)
-	auth := s.authenticator()
-	agents := s.agents()
-	keys, err := sshtransport.NewKeys(sshtransport.KeysOptions{Agents: agents, Auth: auth, Log: s.log})
-	if err == nil {
-		keys.Register(mux)
-	}
-	pairing, err := s.cocorePairing()
-	if err == nil {
-		cocore, apiErr := sshtransport.NewCocoreAPI(sshtransport.CocoreOptions{Pairing: pairing, Auth: auth, Log: s.log})
-		if apiErr == nil {
-			cocore.Register(mux)
-		}
-	}
+	s.gateway.Register(mux)
 	return mux
-}
-
-func (s *Service) authenticator() sshtransport.Authenticator {
-	var auths multiAuth
-	if sessions := ownerSessionsFrom(s.ownerSessions); len(sessions) > 0 {
-		auths = append(auths, ownerSessionAuth{sessions: sessions})
-	}
-	if len(auths) == 0 {
-		return denyAuth{}
-	}
-	return auths
-}
-
-func (s *Service) agents() sshtransport.AgentProvider {
-	var providers combinedAgents
-	if sessions := ownerSessionsFrom(s.ownerSessions); len(sessions) > 0 {
-		providers = append(providers, &ownerSessionAgents{
-			sessions: sessions,
-			client:   s.httpClient(ownerSessionRequestTimeout),
-			log:      s.log,
-		})
-	}
-	if len(providers) == 0 {
-		return unavailableAgents{}
-	}
-	return providers
-}
-
-func (s *Service) cocorePairing() (*sshtransport.CocorePairing, error) {
-	var tokens sshtransport.CocoreTokenStore = &memoryCocoreTokens{}
-	if s.stateDir != "" {
-		tokens = sshtransport.NewFileCocoreTokenStore(filepath.Join(s.stateDir, "cocore-tokens.json"), s.log)
-	}
-	return sshtransport.NewCocorePairing(sshtransport.CocorePairingOptions{
-		APIBaseURL: DefaultCocoreAPIBaseURL,
-		Tokens:     tokens,
-		AppName:    DefaultCocoreAppName,
-		AppDID:     s.did,
-		KeyName:    DefaultCocoreAppName,
-		TTL:        DefaultCocoreTTL,
-		Client:     s.httpClient(30 * time.Second),
-		Log:        s.log,
-	})
 }
 
 func (s *Service) health(w http.ResponseWriter, r *http.Request) {
@@ -368,22 +199,22 @@ func (s *Service) health(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) connect(w http.ResponseWriter, r *http.Request) {
-	httpjson.Write(w, http.StatusOK, map[string]any{"sshHost": DefaultSSHHost})
+	httpjson.Write(w, http.StatusOK, map[string]any{"sshHost": s.cfg.Hostname})
 }
 
 func (s *Service) cocoreApp(w http.ResponseWriter, r *http.Request) {
-	if s.did == "" {
+	if s.cfg.DID == "" {
 		httpjson.Write(w, http.StatusNotFound, map[string]any{"error": "NotFound"})
 		return
 	}
-	httpjson.Write(w, http.StatusOK, map[string]any{"did": s.did})
+	httpjson.Write(w, http.StatusOK, map[string]any{"did": s.cfg.DID})
 }
 
 func (s *Service) Ready(ctx context.Context) error {
 	s.mu.Lock()
 	started := s.started
 	ready := s.ready
-	requester := s.requester
+	g := s.gateway
 	key := s.key
 	handlers := s.deps.Bus
 	s.mu.Unlock()
@@ -393,7 +224,7 @@ func (s *Service) Ready(ctx context.Context) error {
 	if !ready {
 		return errors.New("sshserver: the service is starting")
 	}
-	if requester == nil {
+	if g == nil {
 		return errors.New("sshserver: no Requester is configured")
 	}
 	if handlers == nil {
@@ -444,12 +275,12 @@ func (s *Service) shutdown(ctx context.Context) {
 		return
 	}
 	s.stopped = true
-	sshServer := s.sshServer
+	g := s.gateway
 	s.mu.Unlock()
 	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), DefaultShutdownTimeout)
 	defer cancel()
-	if sshServer != nil {
-		if err := sshServer.Shutdown(stopCtx); err != nil {
+	if g != nil {
+		if err := g.Shutdown(stopCtx); err != nil {
 			s.log.Warn("sshserver_shutdown_failed", "err", err)
 		}
 	}
@@ -459,5 +290,3 @@ func (s *Service) shutdown(ctx context.Context) {
 	s.ready = false
 	s.mu.Unlock()
 }
-
-var _ component.Service = (*Service)(nil)

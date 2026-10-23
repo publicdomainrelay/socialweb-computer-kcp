@@ -257,6 +257,7 @@ func New(cfg Config) (*Core, error) {
 }
 
 func (c *Core) register() error {
+	c.provideComponents()
 	kcp, creds, tlsConfig, hosts, registry, identity := c.cfg.KCP, c.credentials, c.tls, c.hosts, c.registry, c.cfg.ExposureIngressIdentity
 	egress := func(in component.Instance) component.Egress {
 		return component.Egress{Hosts: hosts, TLS: tlsConfig, Log: in.Log}
@@ -293,7 +294,7 @@ func (c *Core) register() error {
 			return requester.New(spec, requester.Deps{Instance: in, KCP: kcp, Credentials: creds, Egress: egress(in)})
 		})},
 		{sshserver.Kind, component.Typed(func(in component.Instance, spec v1alpha1.SshServerSpec) (*sshserver.Service, error) {
-			return sshserver.New(spec, sshserver.Deps{Instance: in, Registry: registry, Hosts: hosts, TLS: tlsConfig})
+			return sshserver.New(spec, sshserver.Deps{Instance: in, Hosts: hosts, TLS: tlsConfig})
 		})},
 	} {
 		if err := c.runtime.Register(entry.kind, entry.factory); err != nil {

@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	sshcontract "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/ssh"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"golang.org/x/crypto/ssh"
 
@@ -77,24 +78,9 @@ var (
 	newlinePattern = regexp.MustCompile(`\r?\n`)
 )
 
-type PTYSize struct {
-	Cols int
-	Rows int
-}
+type PTYSize = sshcontract.PTYSize
 
-type CommandIO interface {
-	Write(chunk []byte) error
-
-	WriteErr(chunk []byte) error
-
-	OnData(handler func(chunk []byte))
-
-	OnClose(handler func())
-
-	Exit(code int)
-
-	PTY() *PTYSize
-}
+type CommandIO = sshcontract.CommandIO
 
 type ComputeCommandRunner interface {
 	Run(ctx context.Context, account AuthorizedAccount, command string, env map[string]string, io CommandIO) error
@@ -159,6 +145,8 @@ type Server struct {
 }
 
 type Options = ServerOptions
+
+var _ sshcontract.Server = (*Server)(nil)
 
 func NewServer(opts ServerOptions) (*Server, error) {
 	if opts.Authorizer == nil {
