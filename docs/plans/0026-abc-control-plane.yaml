@@ -248,7 +248,7 @@ waves:
     gate: "no duplicate helper groups remain; one TTL cache, one lease source, one auth retry, one XRPC call path; no nil-context guards."
   - id: W2
     title: "Concept implementations"
-    status: todo
+    status: doing
     parallel: true
     tracks: [W2-REPO, W2-PDS, W2-VAULT, W2-EVENTS, W2-COMPUTE, W2-POLICY]
     depends_on: [W1]
@@ -657,7 +657,7 @@ items:
     track: repo
     parallel_with: [W2-PDS, W2-VAULT, W2-EVENTS, W2-COMPUTE, W2-POLICY]
     depends_on: [W1-CACHE-LEASE, W1-XRPC]
-    status: todo
+    status: doing
     closes: [D01]
     decision: >
       Controllers for AtprotoRepo (binds the backend, mirrors contract
@@ -688,7 +688,7 @@ items:
     track: pds
     parallel_with: [W2-REPO, W2-VAULT, W2-EVENTS, W2-COMPUTE, W2-POLICY]
     depends_on: [W1-CACHE-LEASE, W1-XRPC]
-    status: todo
+    status: doing
     decision: >
       internal/pds/local Provides the pds contracts from the in-process Pds
       component; internal/pds/remote from RemotePDS. Delete bidder
@@ -713,7 +713,7 @@ items:
     track: vault
     parallel_with: [W2-REPO, W2-PDS, W2-EVENTS, W2-COMPUTE, W2-POLICY]
     depends_on: [W1-CACHE-LEASE, W1-XRPC]
-    status: todo
+    status: doing
     closes: [D13]
     decision: >
       internal/vault/openbao implements contract/vault on
@@ -744,7 +744,7 @@ items:
     track: events
     parallel_with: [W2-REPO, W2-PDS, W2-VAULT, W2-COMPUTE, W2-POLICY]
     depends_on: [W1-CACHE-LEASE, W1-XRPC]
-    status: todo
+    status: doing
     closes: [D03]
     decision: >
       Controllers for EventSource and its three backends. PdsEventSource
@@ -767,7 +767,7 @@ items:
     track: compute
     parallel_with: [W2-REPO, W2-PDS, W2-VAULT, W2-EVENTS, W2-POLICY]
     depends_on: [W1-CACHE-LEASE, W1-XRPC]
-    status: todo
+    status: doing
     closes: [D08, D09]
     decision: >
       contract/compute.Provider with internal/compute/firecracker as the
@@ -795,7 +795,7 @@ items:
     track: policy
     parallel_with: [W2-REPO, W2-PDS, W2-VAULT, W2-EVENTS, W2-COMPUTE]
     depends_on: [W1-CACHE-LEASE, W1-XRPC]
-    status: todo
+    status: doing
     decision: >
       contract/policy.Runner Provided by the PolicyEngine component.
       PolicyEngine, PolicyWorkflow, PolicyWorkflowRun and PolicyTrigger
