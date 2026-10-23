@@ -615,7 +615,7 @@ items:
     track: xrpc
     parallel_with: [W1-MODERNIZE, W1-CACHE-LEASE, W1-LIFECYCLE]
     depends_on: [W0-RUNTIME]
-    status: doing
+    status: done
     decision: >
       internal/atproto/xrpc: Query[Out], Procedure[In,Out] with an Auth hook
       (Bearer, DPoP, service auth) built on lease.Source, a response size
