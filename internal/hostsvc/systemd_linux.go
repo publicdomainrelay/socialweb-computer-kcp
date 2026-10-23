@@ -287,16 +287,23 @@ func (m *systemd) drop(b bus) {
 func (m *systemd) do(ctx context.Context, f func(ctx context.Context, b bus) error) error {
 	ctx, cancel := withDeadline(ctx, m.timeout)
 	defer cancel()
-	b, err := m.conn(ctx)
-	if err != nil {
-		return err
-	}
-	err = f(ctx, b)
-	if err != nil && unreachable(err) {
+	for retried := false; ; retried = true {
+		b, err := m.conn(ctx)
+		if err != nil {
+			return err
+		}
+		err = f(ctx, b)
+		if err == nil || !unreachable(err) {
+			return err
+		}
+		if ctx.Err() != nil {
+			return fmt.Errorf("%w: %w", ErrUnreachable, err)
+		}
 		m.drop(b)
-		return fmt.Errorf("%w: %w", ErrUnreachable, err)
+		if retried {
+			return fmt.Errorf("%w: %w", ErrUnreachable, err)
+		}
 	}
-	return err
 }
 
 func unreachable(err error) bool {
