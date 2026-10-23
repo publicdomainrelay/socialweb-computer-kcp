@@ -59,6 +59,9 @@ func (r Request) ApplyStatus(ctx context.Context, obj Object) error {
 	u.Object["status"] = status
 	if err := r.scope.client.Status().Apply(ctx, client.ApplyConfigurationFromUnstructured(u),
 		client.FieldOwner(r.scope.fieldManager), client.ForceOwnership); err != nil {
+		if apierrors.IsMethodNotSupported(err) || apierrors.IsNotFound(err) {
+			return nil
+		}
 		return fmt.Errorf("runtime: applying the status of %s: %w", obj.GetName(), err)
 	}
 	return nil
