@@ -2,6 +2,7 @@ package hostprocess
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -11,6 +12,8 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 
@@ -21,7 +24,6 @@ import (
 )
 
 const (
-	RemotePoll    = 100 * time.Millisecond
 	RemoteTimeout = 2 * time.Minute
 	UnitLabel     = "socialweb.computer/unit"
 )
@@ -125,10 +127,6 @@ func SpecOf(u hostsvc.UnitSpec) v1alpha1.HostProcessSpec {
 	return s
 }
 
-func live(st hostsvc.UnitStatus) bool {
-	return st.State == hostsvc.Active || st.State == hostsvc.Activating || st.State == hostsvc.Deactivating
-}
-
 func (r *Remote) Start(ctx context.Context, spec hostsvc.UnitSpec) (hostsvc.UnitStatus, error) {
 	if err := hostsvc.ValidateSpec(spec); err != nil {
 		return hostsvc.UnitStatus{}, err
@@ -162,34 +160,109 @@ func (r *Remote) Start(ctx context.Context, spec hostsvc.UnitSpec) (hostsvc.Unit
 	return r.waitPlaced(ctx, name, spec.Name)
 }
 
-func (r *Remote) waitPlaced(ctx context.Context, name, unit string) (hostsvc.UnitStatus, error) {
-	deadline := time.Now().Add(r.timeout())
+var errWatchEnded = errors.New("hostprocess: a watch ended")
+
+func (r *Remote) follow(ctx context.Context, name, unit string, done func(o *v1alpha1.HostProcess) (bool, error)) error {
 	for {
-		cur, err := r.client.Get(ctx, name, metav1.GetOptions{})
-		if err == nil {
-			o, err := unstruct.From[v1alpha1.HostProcess](cur)
-			if err == nil && o.Status.Phase == v1alpha1.HostProcessPhaseFailed && o.Status.Runtime == nil {
-				return hostsvc.UnitStatus{}, fmt.Errorf("hostprocess: %s in %s failed to place: %s", name, r.c.Workspace, o.Status.Message)
-			}
-			if rt := o.Status.Runtime; err == nil && rt != nil && rt.InvocationID != "" {
-				st, err := r.Manager.Inspect(ctx, unit)
-				if err == nil && st.InvocationID == rt.InvocationID && st.State == hostsvc.Active {
-					return st, nil
-				}
-				if err == nil && st.State == hostsvc.Failed {
-					return st, fmt.Errorf("hostprocess: %s failed after placement (result %s, status %d)", unit, st.Result, st.ExecMainStatus)
-				}
-			}
-		}
-		if time.Now().After(deadline) {
-			return hostsvc.UnitStatus{}, fmt.Errorf("hostprocess: the supervisor of %s did not place %s within %s", r.c.Workspace, unit, r.timeout())
+		err := r.followOnce(ctx, name, unit, done)
+		if !errors.Is(err, errWatchEnded) {
+			return err
 		}
 		select {
 		case <-ctx.Done():
-			return hostsvc.UnitStatus{}, ctx.Err()
-		case <-time.After(RemotePoll):
+			return ctx.Err()
+		case <-time.After(RetryAfter):
 		}
 	}
+}
+
+func (r *Remote) followOnce(ctx context.Context, name, unit string, done func(o *v1alpha1.HostProcess) (bool, error)) error {
+	wctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	units, err := r.Manager.Watch(wctx, unit)
+	if errors.Is(err, hostsvc.ErrUnreachable) {
+		return fmt.Errorf("%w: %w", errWatchEnded, err)
+	}
+	if err != nil {
+		return err
+	}
+	w, err := r.client.Watch(wctx, metav1.ListOptions{FieldSelector: "metadata.name=" + name})
+	if err != nil {
+		return fmt.Errorf("%w: %w", errWatchEnded, err)
+	}
+	defer w.Stop()
+	var o *v1alpha1.HostProcess
+	if cur, err := r.client.Get(ctx, name, metav1.GetOptions{}); err == nil {
+		if obj, err := unstruct.From[v1alpha1.HostProcess](cur); err == nil {
+			o = &obj
+		}
+	}
+	for {
+		if ok, err := done(o); ok || err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case ev, ok := <-w.ResultChan():
+			if !ok || ev.Type == watch.Error {
+				return errWatchEnded
+			}
+			if ev.Type == watch.Deleted {
+				o = nil
+				continue
+			}
+			if u, ok := ev.Object.(*unstructured.Unstructured); ok {
+				if obj, err := unstruct.From[v1alpha1.HostProcess](u); err == nil {
+					o = &obj
+				}
+			}
+		case _, ok := <-units:
+			if !ok {
+				return errWatchEnded
+			}
+		}
+	}
+}
+
+func (r *Remote) waitPlaced(ctx context.Context, name, unit string) (hostsvc.UnitStatus, error) {
+	tctx, cancel := context.WithTimeout(ctx, r.timeout())
+	defer cancel()
+	var st hostsvc.UnitStatus
+	err := r.follow(tctx, name, unit, func(o *v1alpha1.HostProcess) (bool, error) {
+		if o == nil {
+			return false, nil
+		}
+		if o.Status.Phase == v1alpha1.HostProcessPhaseFailed && o.Status.Runtime == nil {
+			return true, fmt.Errorf("hostprocess: %s in %s failed to place: %s", name, r.c.Workspace, o.Status.Message)
+		}
+		rt := o.Status.Runtime
+		if rt == nil || rt.InvocationID == "" {
+			return false, nil
+		}
+		cur, err := r.Manager.Inspect(tctx, unit)
+		if err != nil {
+			return false, nil
+		}
+		if cur.InvocationID == rt.InvocationID && cur.State == hostsvc.Active {
+			st = cur
+			return true, nil
+		}
+		if cur.State == hostsvc.Failed {
+			st = cur
+			return true, fmt.Errorf("hostprocess: %s failed after placement (result %s, status %d)", unit, cur.Result, cur.ExecMainStatus)
+		}
+		return false, nil
+	})
+	switch {
+	case err == nil:
+		return st, nil
+	case ctx.Err() != nil:
+		return hostsvc.UnitStatus{}, ctx.Err()
+	case tctx.Err() != nil:
+		return hostsvc.UnitStatus{}, fmt.Errorf("hostprocess: the supervisor of %s did not place %s within %s", r.c.Workspace, unit, r.timeout())
+	}
+	return st, err
 }
 
 func (r *Remote) Stop(ctx context.Context, unit string) error {
@@ -198,22 +271,24 @@ func (r *Remote) Stop(ctx context.Context, unit string) error {
 	if err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("hostprocess: deleting %s in %s: %w", name, r.c.Workspace, err)
 	}
-	deadline := time.Now().Add(r.timeout())
-	for {
-		st, err := r.Manager.Inspect(ctx, unit)
-		if err == nil && !live(st) {
-			r.log().Info("stopped", "hostprocess", name, "unit", unit, "state", string(st.State))
-			return nil
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("hostprocess: the supervisor of %s did not stop %s within %s", r.c.Workspace, unit, r.timeout())
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(RemotePoll):
-		}
+	tctx, cancel := context.WithTimeout(ctx, r.timeout())
+	defer cancel()
+	var st hostsvc.UnitStatus
+	err = r.follow(tctx, name, unit, func(*v1alpha1.HostProcess) (bool, error) {
+		cur, err := r.Manager.Inspect(tctx, unit)
+		st = cur
+		return err == nil && !hostsvc.Live(cur), nil
+	})
+	switch {
+	case err == nil:
+		r.log().Info("stopped", "hostprocess", name, "unit", unit, "state", string(st.State))
+		return nil
+	case ctx.Err() != nil:
+		return ctx.Err()
+	case tctx.Err() != nil:
+		return fmt.Errorf("hostprocess: the supervisor of %s did not stop %s within %s", r.c.Workspace, unit, r.timeout())
 	}
+	return err
 }
 
 func (r *Remote) ResetFailed(ctx context.Context, unit string) error { return nil }
