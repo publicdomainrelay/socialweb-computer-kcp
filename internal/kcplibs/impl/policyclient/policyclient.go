@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/abc/policy"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/policy"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/outputs"
 )
 
@@ -20,7 +20,7 @@ type Client struct {
 	http *http.Client
 }
 
-var _ policy.Client = (*Client)(nil)
+var _ policy.Engine = (*Client)(nil)
 
 func New() *Client {
 	return &Client{http: &http.Client{Timeout: 30 * time.Second}}

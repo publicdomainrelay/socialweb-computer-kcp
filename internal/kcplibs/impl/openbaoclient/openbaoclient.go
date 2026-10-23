@@ -14,7 +14,7 @@ import (
 
 	openbao "github.com/openbao/openbao/api/v2"
 
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/abc/pki"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/vault"
 )
 
 var (
@@ -72,7 +72,7 @@ type Client struct {
 	client *openbao.Client
 }
 
-var _ pki.Client = (*Client)(nil)
+var _ vault.PKIBackend = (*Client)(nil)
 
 func New(opts Options) (*Client, error) {
 	if opts.Address == "" {
@@ -133,12 +133,12 @@ func (c *Client) scoped(namespace string) *openbao.Client {
 	return c.client.WithNamespace(namespace)
 }
 
-func (c *Client) Health(ctx context.Context) (pki.Health, error) {
+func (c *Client) Health(ctx context.Context) (vault.Health, error) {
 	health, err := c.client.Sys().HealthWithContext(ctx)
 	if err != nil {
-		return pki.Health{}, translate(err, http.MethodGet, "sys/health")
+		return vault.Health{}, translate(err, http.MethodGet, "sys/health")
 	}
-	return pki.Health{
+	return vault.Health{
 		Initialized: health.Initialized,
 		Sealed:      health.Sealed,
 		Standby:     health.Standby,
@@ -204,16 +204,16 @@ func (c *Client) EnsureMount(ctx context.Context, namespace, path, kind string) 
 	return nil
 }
 
-func (c *Client) GenerateRoot(ctx context.Context, namespace, mount, commonName, ttl string) (pki.RootCA, error) {
+func (c *Client) GenerateRoot(ctx context.Context, namespace, mount, commonName, ttl string) (vault.RootCA, error) {
 	body := map[string]any{"common_name": commonName}
 	if ttl != "" {
 		body["ttl"] = ttl
 	}
 	data, err := c.data(ctx, namespace, strings.Trim(mount, "/")+"/root/generate/internal", body)
 	if err != nil {
-		return pki.RootCA{}, err
+		return vault.RootCA{}, err
 	}
-	out := pki.RootCA{Certificate: stringField(data, "certificate"), Serial: stringField(data, "serial_number")}
+	out := vault.RootCA{Certificate: stringField(data, "certificate"), Serial: stringField(data, "serial_number")}
 	if out.Serial == "" {
 		out.Serial = serialOfPEM(out.Certificate)
 	}
@@ -227,12 +227,12 @@ func (c *Client) CASerial(ctx context.Context, namespace, mount string) (string,
 		if errors.Is(err, ErrNotFound) ||
 			(errors.As(err, &response) && response.Status == http.StatusBadRequest &&
 				strings.Contains(response.Body, "no default issuer")) {
-			return "", fmt.Errorf("%w: %w: no CA at %s", pki.ErrNoAuthority, ErrNotFound, mount)
+			return "", fmt.Errorf("%w: %w: no CA at %s", vault.ErrNoAuthority, ErrNotFound, mount)
 		}
 		return "", err
 	}
 	if data == nil {
-		return "", fmt.Errorf("%w: %w: no CA at %s", pki.ErrNoAuthority, ErrNotFound, mount)
+		return "", fmt.Errorf("%w: %w: no CA at %s", vault.ErrNoAuthority, ErrNotFound, mount)
 	}
 	return serialOfPEM(stringField(data, "certificate")), nil
 }
@@ -250,16 +250,16 @@ func (c *Client) CAChain(ctx context.Context, namespace, mount string) (string, 
 	return strings.TrimSpace(string(body)), nil
 }
 
-func (c *Client) GenerateIntermediate(ctx context.Context, namespace, mount, commonName string) (pki.IntermediateCSR, error) {
+func (c *Client) GenerateIntermediate(ctx context.Context, namespace, mount, commonName string) (vault.IntermediateCSR, error) {
 	data, err := c.data(ctx, namespace, strings.Trim(mount, "/")+"/intermediate/generate/internal", map[string]any{
 		"common_name": commonName,
 		"key_type":    "ec",
 		"key_bits":    256,
 	})
 	if err != nil {
-		return pki.IntermediateCSR{}, err
+		return vault.IntermediateCSR{}, err
 	}
-	return pki.IntermediateCSR{CSR: stringField(data, "csr"), PrivateKey: stringField(data, "private_key")}, nil
+	return vault.IntermediateCSR{CSR: stringField(data, "csr"), PrivateKey: stringField(data, "private_key")}, nil
 }
 
 func (c *Client) SignIntermediate(ctx context.Context, rootNamespace, mount, csr, commonName, ttl string) (string, error) {
@@ -284,7 +284,7 @@ func (c *Client) SetSignedIntermediate(ctx context.Context, namespace, mount, ch
 	})
 }
 
-func (c *Client) WriteRole(ctx context.Context, namespace, mount, name string, role pki.Role) error {
+func (c *Client) WriteRole(ctx context.Context, namespace, mount, name string, role vault.Role) error {
 	body := map[string]any{
 		"allow_subdomains":   role.AllowSubdomains,
 		"allow_bare_domains": role.AllowBareDomains,
@@ -307,7 +307,7 @@ func (c *Client) WriteRole(ctx context.Context, namespace, mount, name string, r
 	return c.write(ctx, namespace, strings.Trim(mount, "/")+"/roles/"+strings.Trim(name, "/"), body)
 }
 
-func (c *Client) Issue(ctx context.Context, namespace, mount, role string, req pki.CertRequest) (pki.Cert, error) {
+func (c *Client) Issue(ctx context.Context, namespace, mount, role string, req vault.CertRequest) (vault.Cert, error) {
 	body := map[string]any{"common_name": req.CommonName}
 	if len(req.AltNames) > 0 {
 		body["alt_names"] = strings.Join(req.AltNames, ",")
@@ -320,9 +320,9 @@ func (c *Client) Issue(ctx context.Context, namespace, mount, role string, req p
 	}
 	data, err := c.data(ctx, namespace, strings.Trim(mount, "/")+"/issue/"+strings.Trim(role, "/"), body)
 	if err != nil {
-		return pki.Cert{}, err
+		return vault.Cert{}, err
 	}
-	return pki.Cert{
+	return vault.Cert{
 		Certificate: stringField(data, "certificate"),
 		PrivateKey:  stringField(data, "private_key"),
 		IssuingCA:   stringField(data, "issuing_ca"),
