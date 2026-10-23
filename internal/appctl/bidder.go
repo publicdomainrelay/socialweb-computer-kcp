@@ -652,7 +652,7 @@ func (ctl *Controller) reconcileBidderAccount(ctx context.Context, u *unstructur
 	if err := ctl.pruneDesired(ctx, owner, desired); err != nil {
 		return err
 	}
-	ctl.ensureAccountRepo(ctx, ctl.c.workspace(), BidderIdentity, plan, id.Status.Did)
+	ctl.ensureAccountRepo(ctx, ctl.c.workspace(), BidderIdentity, plan, id.Status.Did, id.Status.PdsUrl)
 	if err := ctl.rotateSigningKey(ctx, o); err != nil {
 		ctl.c.log().Warn("rotating the bidder's OIDC signing key", "name", o.Name, "err", err.Error())
 	}
@@ -758,7 +758,11 @@ func (ctl *Controller) reconcileBidder(ctx context.Context, u *unstructured.Unst
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "applying its own OpenBaoServer and workspace"
 		ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
 		values := ctl.bidderInfraValues(o, stateRoot)
-		if err := ctl.applyInfra(ctx, BidderSet, o.Spec.Profile, owner, values, "association-watch"); err != nil {
+		associationPhases := []string{"association-watch"}
+		if oauthAccountMode(plan.Mode) {
+			associationPhases = nil
+		}
+		if err := ctl.applyInfra(ctx, BidderSet, o.Spec.Profile, owner, values, associationPhases...); err != nil {
 			st.Message = err.Error()
 			return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
 		}

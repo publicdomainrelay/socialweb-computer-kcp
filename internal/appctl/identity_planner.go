@@ -12,6 +12,7 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
@@ -250,14 +251,93 @@ func (ctl *Controller) remotePDSRef(ctx context.Context, ws string, ref *v1alpha
 	return &object, nil
 }
 
-func (ctl *Controller) ensureAccountRepo(ctx context.Context, ws, identityName string, plan accountPlan, did string) {
+func oauthAccountMode(mode v1alpha1.MarketIdentityMode) bool {
+	switch mode {
+	case v1alpha1.MarketIdentityModeOAuthBrowser, v1alpha1.MarketIdentityModeOAuthQr, v1alpha1.MarketIdentityModeOAuthDelegated:
+		return true
+	default:
+		return false
+	}
+}
+
+func (ctl *Controller) deleteAssociationObjects(ctx context.Context, ws string) {
+	for _, gvr := range []schema.GroupVersionResource{AtprotoRecordGVR,
+		{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "atprotorecordwatches"}} {
+		ri, err := ctl.client(ws, gvr)
+		if err != nil {
+			continue
+		}
+		if err := ri.Delete(ctx, AssociationWatch, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+			ctl.c.log().Warn("removing an association object", "resource", gvr.Resource, "err", err.Error())
+		}
+	}
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func (ctl *Controller) ensureRemotePDS(ctx context.Context, ws, name, did, pdsURL string) *pdsv1alpha1.RemotePDS {
+	ri, err := ctl.client(ws, pdsv1alpha1.GroupVersion.WithResource("remotepds"))
+	if err != nil {
+		ctl.c.log().Warn("creating a RemotePDS", "name", name, "err", err.Error())
+		return nil
+	}
+	object := &pdsv1alpha1.RemotePDS{ObjectMeta: metav1.ObjectMeta{Name: name},
+		Spec: pdsv1alpha1.RemotePDSSpec{URL: pdsURL, DID: did}}
+	existing, err := ri.Get(ctx, name, metav1.GetOptions{})
+	if err == nil {
+		var out pdsv1alpha1.RemotePDS
+		if fromUnstructured(existing, &out) == nil {
+			return &out
+		}
+		return nil
+	}
+	if !apierrors.IsNotFound(err) {
+		ctl.c.log().Warn("reading a RemotePDS", "name", name, "err", err.Error())
+		return nil
+	}
+	u, err := toUnstructured(object, "RemotePDS")
+	if err != nil {
+		ctl.c.log().Warn("encoding a RemotePDS", "name", name, "err", err.Error())
+		return nil
+	}
+	u.SetAPIVersion(pdsv1alpha1.GroupVersion.String())
+	created, err := ri.Create(ctx, u, metav1.CreateOptions{FieldManager: FieldManager})
+	if err != nil && !apierrors.IsAlreadyExists(err) {
+		ctl.c.log().Warn("creating a RemotePDS", "name", name, "err", err.Error())
+		return nil
+	}
+	if created != nil {
+		var out pdsv1alpha1.RemotePDS
+		if fromUnstructured(created, &out) == nil {
+			return &out
+		}
+	}
+	return object
+}
+
+func (ctl *Controller) ensureAccountRepo(ctx context.Context, ws, identityName string, plan accountPlan, did, pdsURL string) {
 	if plan.Local || strings.TrimSpace(did) == "" {
 		return
 	}
+	pdsURL = firstNonEmptyString(plan.PdsURL, plan.Identity.PdsUrl, pdsURL)
+	if plan.RemotePDS == nil && strings.TrimSpace(pdsURL) != "" {
+		plan.RemotePDS = ctl.ensureRemotePDS(ctx, ws, deterministicPdsName(pdsURL), did, pdsURL)
+	}
+	plan.PdsURL = pdsURL
 	pdsRef := plan.repoRef()
 	if pdsRef == nil {
 		ctl.c.log().Warn("the existing-account repo has no PDS ref", "identity", identityName)
 		return
+	}
+	if oauthAccountMode(plan.Mode) {
+		ctl.deleteAssociationObjects(ctx, ws)
 	}
 	spec := v1alpha1.AtprotoRepoSpec{DID: did, PdsRef: pdsRef,
 		IdentityRef: &v1alpha1.RepoRef{Kind: "MarketIdentity", Name: identityName},
