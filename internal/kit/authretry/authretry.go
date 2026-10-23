@@ -11,6 +11,10 @@ type Invalidator interface {
 	Invalidate()
 }
 
+type InvalidateFunc func()
+
+func (f InvalidateFunc) Invalidate() { f() }
+
 type StatusError interface {
 	error
 	HTTPStatus() int
@@ -30,6 +34,11 @@ func Do[T any](ctx context.Context, src Invalidator, call func(context.Context) 
 		src.Invalidate()
 	}
 	return call(ctx)
+}
+
+func Run(ctx context.Context, src Invalidator, call func(context.Context) error, isAuthErr func(error) bool) error {
+	_, err := Do(ctx, src, func(ctx context.Context) (struct{}, error) { return struct{}{}, call(ctx) }, isAuthErr)
+	return err
 }
 
 func Status(err error) int {
