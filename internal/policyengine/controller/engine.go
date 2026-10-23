@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/cache"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/deno"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/executor"
@@ -172,17 +173,7 @@ func (e *Engine) Shutdown(ctx context.Context) error {
 			runCancel()
 		}
 	}
-	done := make(chan struct{})
-	go func() {
-		e.wg.Wait()
-		close(done)
-	}()
-	select {
-	case <-done:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	return supervise.Join(ctx, e.wg.Wait)
 }
 
 func (e *Engine) Ready() bool {

@@ -116,7 +116,7 @@ func (c *Controller) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			c.cancelAll()
 			c.wg.Wait()
-			shutdownCtx, cancel := context.WithTimeout(context.Background(), DefaultStatusTimeout)
+			shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), DefaultStatusTimeout)
 			defer cancel()
 			if err := c.cfg.Manager.Shutdown(shutdownCtx); err != nil {
 				c.log.Warn("policy engine shutdown failed", "err", err.Error())
