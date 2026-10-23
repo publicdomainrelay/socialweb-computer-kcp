@@ -2,7 +2,6 @@ package statusstate
 
 import (
 	"context"
-	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/dynamic"
@@ -19,7 +18,7 @@ func (c *Controller) reconcileRelay(ctx context.Context, dyn dynamic.Interface, 
 	generation := u.GetGeneration()
 	status := obj.Status
 	status.ObservedGeneration = generation
-	ref := strings.TrimSpace(obj.Spec.RelayRef)
+	ref := refString(obj.Spec.RelayRef)
 	if ref == "" {
 		setReady(&status.Conditions, generation, false, ReasonWaiting, "the RelayStatus needs a relayRef")
 		c.write(ctx, dyn, RelayStatusGVR, u, &status)

@@ -20,7 +20,7 @@ func (c *Controller) reconcileAccount(ctx context.Context, dyn dynamic.Interface
 	status := obj.Status
 	status.ObservedGeneration = generation
 	did := strings.TrimSpace(obj.Spec.DID)
-	ref := strings.TrimSpace(obj.Spec.PdsRef)
+	ref := refString(obj.Spec.PdsRef)
 	if did == "" || ref == "" {
 		setReady(&status.Conditions, generation, false, ReasonWaiting, "the PdsAccount needs a did and a pdsRef")
 		c.write(ctx, dyn, PdsAccountGVR, u, &status)

@@ -23,6 +23,8 @@ import (
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 const (
@@ -308,7 +310,7 @@ func (c *Controller) repoBinding(ctx context.Context, dyn dynamic.Interface, wor
 	return pdsclient.RepoBinding{Workspace: workspace, Kind: "Pds", Name: repo}, nil
 }
 
-func (c *Controller) repoBindingForRef(ctx context.Context, dyn dynamic.Interface, workspace string, ref v1alpha1.RepoRef) (pdsclient.RepoBinding, error) {
+func (c *Controller) repoBindingForRef(ctx context.Context, dyn dynamic.Interface, workspace string, ref commonv1.ObjectRef) (pdsclient.RepoBinding, error) {
 	name := strings.TrimSpace(ref.Name)
 	if name == "" {
 		return pdsclient.RepoBinding{}, errors.New("the repoRef names no object")
@@ -344,7 +346,7 @@ func (c *Controller) repoBindingForRef(ctx context.Context, dyn dynamic.Interfac
 			binding.Workspace = ws
 		}
 		if repo.Spec.AuthRef != nil {
-			binding.AuthRef = strings.TrimSpace(repo.Spec.AuthRef.Name)
+			binding.AuthRef = repo.Spec.AuthRef.DeepCopy()
 		}
 		return binding, nil
 	case "remotepds", "remote", "remote-pds":
@@ -407,7 +409,7 @@ func localRepoBinding(ctx context.Context, dyn dynamic.Interface, workspace, kin
 		}
 		binding := &pdsclient.RepoBinding{Workspace: workspace, Kind: kind, Name: name, DID: strings.TrimSpace(repo.Spec.DID)}
 		if repo.Spec.AuthRef != nil {
-			binding.AuthRef = strings.TrimSpace(repo.Spec.AuthRef.Name)
+			binding.AuthRef = repo.Spec.AuthRef.DeepCopy()
 		}
 		return binding, nil
 	}
