@@ -28,6 +28,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -345,10 +346,12 @@ func (k *Kcp) WaitContract(ctx context.Context, timeout time.Duration, done func
 	progress func(*v1alpha1.ComputeContract)) (*v1alpha1.ComputeContract, error) {
 	wctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	watch := supervise.New(wctx)
+	defer func() { _ = watch.Stop() }()
 	var mu sync.Mutex
 	why := ""
-	go func() {
-		_, _ = kube.Await(wctx, k.dyn.Resource(compose.MarketRequesterGVR), RootName, 0, func(o *v1alpha1.MarketRequester) (bool, error) {
+	watch.Go("request: requester failure", func(ctx context.Context) error {
+		_, _ = kube.Await(ctx, k.dyn.Resource(compose.MarketRequesterGVR), RootName, 0, func(o *v1alpha1.MarketRequester) (bool, error) {
 			if o == nil {
 				return false, nil
 			}
@@ -361,7 +364,8 @@ func (k *Kcp) WaitContract(ctx context.Context, timeout time.Duration, done func
 			}
 			return w != "", nil
 		})
-	}()
+		return nil
+	})
 	failure := func() string {
 		mu.Lock()
 		defer mu.Unlock()

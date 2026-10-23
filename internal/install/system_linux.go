@@ -242,6 +242,7 @@ type liveUser struct {
 	mu       sync.Mutex
 	watchers map[chan struct{}]string
 	closed   chan struct{}
+	tasks    sync.WaitGroup
 }
 
 func (u *liveUser) Reload(ctx context.Context) error { return u.conn.ReloadContext(ctx) }
@@ -321,7 +322,7 @@ func (u *liveUser) subscribe() error {
 	updates := make(chan *sd.PropertiesUpdate, 64)
 	overflow := make(chan error, 1)
 	u.conn.SetPropertiesSubscriber(updates, overflow)
-	go func() {
+	u.tasks.Go(func() {
 		for {
 			unit := ""
 			select {
@@ -342,7 +343,7 @@ func (u *liveUser) subscribe() error {
 			}
 			u.mu.Unlock()
 		}
-	}()
+	})
 	return nil
 }
 
@@ -352,10 +353,15 @@ func (u *liveUser) Watch(ctx context.Context, unit string) (<-chan hostsvc.UnitS
 	}
 	sig := make(chan struct{}, 1)
 	u.mu.Lock()
-	u.watchers[sig] = unit
-	u.mu.Unlock()
+	select {
+	case <-u.closed:
+		u.mu.Unlock()
+		return nil, fmt.Errorf("%s: the user manager is closed", unit)
+	default:
+	}
 	out := make(chan hostsvc.UnitStatus, 1)
-	go func() {
+	u.watchers[sig] = unit
+	u.tasks.Go(func() {
 		defer close(out)
 		defer func() {
 			u.mu.Lock()
@@ -371,14 +377,19 @@ func (u *liveUser) Watch(ctx context.Context, unit string) (<-chan hostsvc.UnitS
 			case out <- st:
 			case <-ctx.Done():
 				return
+			case <-u.closed:
+				return
 			}
 			select {
 			case <-ctx.Done():
 				return
+			case <-u.closed:
+				return
 			case <-sig:
 			}
 		}
-	}()
+	})
+	u.mu.Unlock()
 	return out, nil
 }
 
@@ -465,6 +476,7 @@ func (u *liveUser) Close() {
 	}
 	u.mu.Unlock()
 	u.conn.Close()
+	u.tasks.Wait()
 }
 
 func (s liveSystem) CheckHost(ctx context.Context, a Account, binary string, role hostcontract.Role, stateDir string) error {

@@ -20,6 +20,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/gateway"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 )
 
 const (
@@ -180,6 +181,8 @@ type OAuthOptions struct {
 
 	OnSignedOut func(context.Context, *WebUser) error
 
+	Tasks *supervise.Group
+
 	Log *slog.Logger
 }
 
@@ -206,6 +209,9 @@ type OAuth struct {
 func NewOAuth(opts OAuthOptions) (*OAuth, error) {
 	if opts.SignIn == nil {
 		return nil, errors.New("gatewayhttp: OAuth has no sign-in backend")
+	}
+	if opts.Tasks == nil {
+		return nil, errors.New("gatewayhttp: OAuth has no task group")
 	}
 	opts.CookieName = cmp.Or(opts.CookieName, WebSessionCookie)
 	opts.CookieMaxAge = opt.Positive(opts.CookieMaxAge, DefaultCookieMaxAge)
@@ -312,7 +318,10 @@ func (o *OAuth) clientMetadata(w http.ResponseWriter, r *http.Request) {
 	}
 	if !o.metadataRefreshing && time.Since(o.metadataAt) >= o.metadataRefreshAfter() {
 		o.metadataRefreshing = true
-		go o.refreshClientMetadata(context.WithoutCancel(r.Context()))
+		o.opts.Tasks.Go("gatewayhttp: client metadata refresh", func(ctx context.Context) error {
+			o.refreshClientMetadata(ctx)
+			return nil
+		})
 	}
 	cached := append(json.RawMessage(nil), o.metadata...)
 	o.mu.Unlock()

@@ -35,6 +35,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/jsonx"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/kcprest"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/lease/local"
 )
 
@@ -137,33 +138,11 @@ func lockChild(ctx context.Context, path string) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := hostos.Lock(f, hostos.LockExclusive|hostos.LockNonBlocking); err == nil {
-		return f, nil
+	if err := hostos.LockWait(ctx, f, hostos.LockExclusive, ChildLockTimeout); err != nil {
+		f.Close()
+		return nil, fmt.Errorf("%s stayed locked: %w", path, err)
 	}
-	got := make(chan error, 1)
-	go func() { got <- hostos.Lock(f, hostos.LockExclusive) }()
-	abandon := func() {
-		go func() {
-			<-got
-			f.Close()
-		}()
-	}
-	timer := time.NewTimer(ChildLockTimeout)
-	defer timer.Stop()
-	select {
-	case err := <-got:
-		if err != nil {
-			f.Close()
-			return nil, err
-		}
-		return f, nil
-	case <-timer.C:
-		abandon()
-		return nil, fmt.Errorf("%s stayed locked", path)
-	case <-ctx.Done():
-		abandon()
-		return nil, ctx.Err()
-	}
+	return f, nil
 }
 
 func (ctl *Controller) coreLive(ctx context.Context, ch child) bool {
@@ -354,8 +333,9 @@ func unitLive(u hostsvc.UnitStatus) bool {
 
 func (ctl *Controller) awaitUnitsDown(ctx context.Context, ch child, timeout time.Duration) ([]hostsvc.UnitStatus, bool, error) {
 	m := ctl.c.Config().Manager
-	wctx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	watches := supervise.New(ctx)
+	defer func() { _ = watches.Stop() }()
+	wctx := watches.Context()
 	events := make(chan hostsvc.UnitEvent)
 	closed := make(chan struct{}, len(devinstance.Prefixes(ch.id)))
 	for _, prefix := range devinstance.Prefixes(ch.id) {
@@ -363,16 +343,17 @@ func (ctl *Controller) awaitUnitsDown(ctx context.Context, ch child, timeout tim
 		if err != nil {
 			return nil, false, fmt.Errorf("following the units of %s: %w", ch.id, err)
 		}
-		go func() {
+		watches.Go("marketnetwork: units "+prefix, func(ctx context.Context) error {
 			for ev := range src {
 				select {
 				case events <- ev:
-				case <-wctx.Done():
-					return
+				case <-ctx.Done():
+					return nil
 				}
 			}
 			closed <- struct{}{}
-		}()
+			return nil
+		})
 	}
 	units, err := devinstance.ChildUnits(wctx, m, ch.id)
 	if err != nil {

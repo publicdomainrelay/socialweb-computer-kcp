@@ -179,7 +179,7 @@ func runDevRestart(ctx context.Context, a *app, vals clicfg.Values, rest []strin
 	defer m.Close()
 	r := coreRestartReport{Instance: l.ID, Binary: bin}
 	fsx.ReadJSON(l.CoreRecord, &r.Before)
-	lock, err := lockFile(l.Lock, 30*time.Second)
+	lock, err := lockFile(ctx, l.Lock, 30*time.Second)
 	if err != nil {
 		return a.fail(exitFailed, "dev restart: %v", err)
 	}

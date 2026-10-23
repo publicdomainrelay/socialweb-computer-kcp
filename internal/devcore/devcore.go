@@ -103,32 +103,16 @@ func tryLockRecord(path string) (*os.File, bool) {
 	return f, true
 }
 
-func lockRecord(path string) (*os.File, error) {
+func lockRecord(ctx context.Context, path string) (*os.File, error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err
 	}
-	if err := hostos.Lock(f, hostos.LockExclusive|hostos.LockNonBlocking); err == nil {
-		return f, nil
+	if err := hostos.LockWait(ctx, f, hostos.LockExclusive, recordLockWait); err != nil {
+		f.Close()
+		return nil, fmt.Errorf("devcore: locking %s: %w", path, err)
 	}
-	locked := make(chan error, 1)
-	go func() { locked <- hostos.Lock(f, hostos.LockExclusive) }()
-	timer := time.NewTimer(recordLockWait)
-	defer timer.Stop()
-	select {
-	case err := <-locked:
-		if err != nil {
-			f.Close()
-			return nil, fmt.Errorf("devcore: locking %s: %w", path, err)
-		}
-		return f, nil
-	case <-timer.C:
-		go func() {
-			<-locked
-			f.Close()
-		}()
-		return nil, fmt.Errorf("devcore: %s stayed locked", path)
-	}
+	return f, nil
 }
 
 func Run(ctx context.Context, cfg Config, m hostsvc.Manager) error {
@@ -158,7 +142,7 @@ func Run(ctx context.Context, cfg Config, m hostsvc.Manager) error {
 	bcfg := bootstrap.Config{Layout: l, KcpPath: rec.Executables["kcp"].Path, KinePath: rec.Executables["kine"].Path, PostgresRoot: rec.Executables["postgres"].Path,
 		Exe: rec.Executables["socialweb-computer"].Path, ReadyTimeout: cfg.ReadyTimeout, Application: cfg.Application, FrontAddress: cfg.FrontAddress,
 		OnStep: cfg.OnStep, OnTick: cfg.OnTick, Log: log}
-	lk, err := lockRecord(l.Lock)
+	lk, err := lockRecord(ctx, l.Lock)
 	if err != nil {
 		return err
 	}

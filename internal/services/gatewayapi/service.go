@@ -23,6 +23,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayhttp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/kcp"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/xrpcserver"
 )
 
@@ -93,12 +94,14 @@ func (s *Service) Start(ctx context.Context) error {
 		return err
 	}
 	defer signIn.Close()
+	tasks := supervise.New(ctx)
+	defer func() { _ = tasks.Stop() }()
 
 	pinned, err := s.loadDownloads()
 	if err != nil {
 		return err
 	}
-	handler, oauth, surface, err := s.buildHandler(signIn, pinned)
+	handler, oauth, surface, err := s.buildHandler(signIn, pinned, tasks)
 	if err != nil {
 		return err
 	}
@@ -193,12 +196,13 @@ func (s *Service) OAuth() *gatewayhttp.OAuth {
 	return s.oauth
 }
 
-func (s *Service) buildHandler(signIn gatewayhttp.WebSignIn, pinned *gatewayhttp.PinnedDownloads) (http.Handler, *gatewayhttp.OAuth, *xrpcserver.Server, error) {
+func (s *Service) buildHandler(signIn gatewayhttp.WebSignIn, pinned *gatewayhttp.PinnedDownloads, tasks *supervise.Group) (http.Handler, *gatewayhttp.OAuth, *xrpcserver.Server, error) {
 	log := s.log
 	oauth, err := gatewayhttp.NewOAuth(gatewayhttp.OAuthOptions{
 		SignIn:        signIn,
 		PublicOrigin:  s.publicOrigin,
 		PostSignInURL: s.spec.PostSignInURL,
+		Tasks:         tasks,
 		Log:           log,
 	})
 	if err != nil {
