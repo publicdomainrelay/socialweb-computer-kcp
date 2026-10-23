@@ -368,7 +368,8 @@ func (s *Service) prepare(ctx context.Context) error {
 		log:             s.log,
 		now:             s.cfg.Now,
 	}
-	s.log.Info("the bidder serves the market", "handler", s.listeningURL(), "did", s.did, "guest", s.guestURL)
+	s.log.Info("the bidder serves the market", "handler", s.listeningURL(), "did", s.did, "guest", s.guestURL,
+		"offering", s.offeringEndpoint(), "serviceAuthHost", s.cfg.ServiceAuth.Hostname, "inboundXRPC", s.cfg.inboundXRPC())
 	go s.registerPDSWithRelays(ctx)
 	return nil
 }
@@ -742,12 +743,7 @@ func (s *Service) newAuthorizer() Authorizer {
 		return AuthorizerFunc(s.cfg.Authorize)
 	}
 	if s.cfg.ServiceAuth.Hostname == "" {
-		if endpoint, ok := s.relayEndpoint(); ok {
-			s.cfg.ServiceAuth.Hostname = hostOf(endpoint.URL)
-		}
-	}
-	if s.cfg.ServiceAuth.Hostname == "" && s.guestURL != "" {
-		s.cfg.ServiceAuth.Hostname = hostOf(s.guestURL)
+		s.cfg.ServiceAuth.Hostname = hostPortOf(s.publicMarketURL())
 	}
 	return &ServiceAuthAuthorizer{
 		Dir:          s.dir,
@@ -767,14 +763,28 @@ func (s *Service) listeningURL() string {
 	return handlerURL(s.cfg.Workspace, Kind, s.cfg.ComponentName)
 }
 
-func (s *Service) publicURL() string {
+func (s *Service) publicMarketURL() string {
+	if url := strings.TrimSpace(s.cfg.MarketURL); url != "" {
+		return strings.TrimRight(url, "/")
+	}
 	if endpoint, ok := s.relayEndpoint(); ok {
 		return strings.TrimRight(endpoint.URL, "/")
 	}
-	if s.publicNetwork() {
+	if s.guestURL != "" {
+		return strings.TrimRight(s.guestURL, "/")
+	}
+	return ""
+}
+
+func (s *Service) publicURL() string {
+	return s.inboundMarketURL()
+}
+
+func (s *Service) inboundMarketURL() string {
+	if !s.cfg.inboundXRPC() {
 		return ""
 	}
-	return s.listeningURL()
+	return s.publicMarketURL()
 }
 
 func (s *Service) submitEventURL(ctx context.Context, ref string) string {
@@ -804,16 +814,7 @@ func (s *Service) submitEventURL(ctx context.Context, ref string) string {
 }
 
 func (s *Service) offeringEndpoint() string {
-	if url := strings.TrimSpace(s.cfg.MarketURL); url != "" {
-		return url
-	}
-	if url := s.publicURL(); url != "" {
-		return url
-	}
-	if s.did != "" {
-		return s.did + "#" + market.DefaultMarketServiceID
-	}
-	return ""
+	return s.inboundMarketURL()
 }
 
 func (s *Service) startLoops(ctx context.Context) {

@@ -298,7 +298,7 @@ func (a *marketEventAdapter) Apply(ctx context.Context, request statesync.Reques
 	if submitEventURL == "" {
 		submitEventURL = strings.TrimSpace(request.Sink.SubmitEventUrl)
 	}
-	if submitEventURL != "" && a.call != nil && a.service.cfg.marketXRPCEnabled() {
+	if submitEventURL != "" && a.call != nil && a.service.cfg.outboundXRPC() {
 		body := map[string]any{"uri": event.URI, "cid": event.CID, "record": event.Record}
 		if err := a.call(ctx, submitEventURL, market.SubmitEventNSID, market.SubmitEventNSID, body); err != nil {
 			return statesync.Observation{}, classifyDeliveryError(err)
@@ -1183,12 +1183,16 @@ func (a *provisionAdapter) Apply(ctx context.Context, request statesync.Request)
 	if strings.TrimSpace(accept.SubmitEvent) != "" && submitEventURL == "" {
 		a.logf().Warn("the accept's submitEvent does not resolve; the firehose carries the event", "accept", payload.Accept.URI, "submitEvent", accept.SubmitEvent)
 	}
+	receiptSubmitEvent := ""
+	if service.cfg.inboundXRPC() {
+		receiptSubmitEvent = accept.SubmitEvent
+	}
 	receiptURI, receiptCID, err := service.createReceipt(ctx, market.ReceiptRefs{
 		RFP:         market.RecordRef{URI: accept.RFP.URI, CID: accept.RFP.CID},
 		Bid:         market.RecordRef{URI: accept.Bid.URI, CID: accept.Bid.CID},
 		Accept:      market.RecordRef{URI: payload.Accept.URI, CID: payload.Accept.CID},
 		Payload:     &market.RecordRef{URI: rfp.Payload.URI, CID: rfp.Payload.CID},
-		SubmitEvent: accept.SubmitEvent,
+		SubmitEvent: receiptSubmitEvent,
 	}, acceptResolved, payload.RequesterDID)
 	if err != nil {
 		return statesync.Observation{}, fmt.Errorf("bidder: writing the receipt: %w", err)

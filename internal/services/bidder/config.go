@@ -171,6 +171,8 @@ type Config struct {
 
 	MarketURL string
 
+	IdentityMode string
+
 	DenyBidderDIDs []string
 
 	PolicyTimeout time.Duration
@@ -243,6 +245,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		PolicyArgs:        policyArgs,
 		BidderDIDs:        append([]string(nil), bidderSpec.BidderDIDs...),
 		MarketURL:         strings.TrimRight(strings.TrimSpace(bidderSpec.MarketURL), "/"),
+		IdentityMode:      strings.TrimSpace(bidderSpec.Mode),
 		Comms:             bidderSpec.Comms,
 		PolicyTimeout:     DefaultPolicyTimeout,
 		PolicyPoll:        DefaultPolicyPoll,
@@ -521,12 +524,27 @@ func validateMarketComms(prefix string, comms *v1alpha1.MarketComms) error {
 	}
 }
 
-func (c Config) marketXRPCEnabled() bool {
+func (c Config) inboundXRPC() bool {
+	if c.oauthIdentity() {
+		return false
+	}
 	if c.Comms == nil {
 		return true
 	}
 	switch c.Comms.Mode {
 	case "", v1alpha1.MarketCommsModeXRPC, v1alpha1.MarketCommsModeBoth:
+		return true
+	}
+	return false
+}
+
+func (c Config) outboundXRPC() bool {
+	return true
+}
+
+func (c Config) oauthIdentity() bool {
+	switch strings.ToLower(strings.TrimSpace(c.IdentityMode)) {
+	case string(v1alpha1.MarketIdentityModeOAuthQr), string(v1alpha1.MarketIdentityModeOAuthBrowser), string(v1alpha1.MarketIdentityModeOAuthDelegated):
 		return true
 	}
 	return false
@@ -547,12 +565,12 @@ func portOf(raw string) int {
 	return port
 }
 
-func hostOf(raw string) string {
+func hostPortOf(raw string) string {
 	u, err := url.Parse(raw)
 	if err != nil {
 		return ""
 	}
-	return u.Hostname()
+	return u.Host
 }
 
 func (c Config) check() error {

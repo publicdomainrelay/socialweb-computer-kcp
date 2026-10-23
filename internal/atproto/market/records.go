@@ -72,7 +72,7 @@ type Event struct {
 
 type Offering struct {
 	Type        string   `json:"$type"`
-	EndpointURL string   `json:"endpointUrl"`
+	EndpointURL string   `json:"endpointUrl,omitempty"`
 	AppliesTo   []string `json:"appliesTo"`
 	CreatedAt   string   `json:"createdAt"`
 	RefreshedAt string   `json:"refreshedAt,omitempty"`
@@ -425,8 +425,11 @@ func ParseOffering(value map[string]any) (*Offering, error) {
 	if err := decodeInto(value, &out); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(out.EndpointURL) == "" {
-		return nil, fmt.Errorf("%w: offering missing endpointUrl", ErrInvalidRecord)
+	if endpoint := strings.TrimSpace(out.EndpointURL); endpoint != "" {
+		if err := ValidServiceRef(endpoint); err != nil {
+			return nil, err
+		}
+		out.EndpointURL = endpoint
 	}
 	if len(out.AppliesTo) == 0 {
 		return nil, fmt.Errorf("%w: offering missing appliesTo", ErrInvalidRecord)
@@ -869,8 +872,11 @@ func BuildEvent(opts EventOptions) (map[string]any, error) {
 }
 
 func BuildOffering(endpointURL string, appliesTo []string, createdAt, refreshedAt string) (map[string]any, error) {
-	if strings.TrimSpace(endpointURL) == "" {
-		return nil, fmt.Errorf("%w: offering missing endpointUrl", ErrInvalidRecord)
+	endpointURL = strings.TrimSpace(endpointURL)
+	if endpointURL != "" {
+		if err := ValidServiceRef(endpointURL); err != nil {
+			return nil, err
+		}
 	}
 	if len(appliesTo) == 0 {
 		return nil, fmt.Errorf("%w: offering missing appliesTo", ErrInvalidRecord)
@@ -883,10 +889,12 @@ func BuildOffering(endpointURL string, appliesTo []string, createdAt, refreshedA
 		list = append(list, nsid)
 	}
 	out := map[string]any{
-		"$type":       OfferingNSID,
-		"endpointUrl": endpointURL,
-		"appliesTo":   list,
-		"createdAt":   isoOrNow(createdAt),
+		"$type":     OfferingNSID,
+		"appliesTo": list,
+		"createdAt": isoOrNow(createdAt),
+	}
+	if endpointURL != "" {
+		out["endpointUrl"] = endpointURL
 	}
 	if refreshedAt != "" {
 		out["refreshedAt"] = refreshedAt

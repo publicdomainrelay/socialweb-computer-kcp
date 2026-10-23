@@ -64,7 +64,7 @@ type contractInfo struct {
 
 func (s *Service) routes() *http.ServeMux {
 	mux := http.NewServeMux()
-	if s.cfg.marketXRPCEnabled() {
+	if s.cfg.inboundXRPC() {
 		mux.HandleFunc("POST "+SubmitRFPPath, s.handleSubmitRFP)
 		mux.HandleFunc("POST "+SubmitBidPath, s.handleSubmitBid)
 		mux.HandleFunc("POST "+SubmitAcceptPath, s.handleSubmitAccept)
@@ -470,7 +470,7 @@ func (s *Service) postXRPC(ctx context.Context, endpoint, nsid string, body any)
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	host := hostnameOnly(endpoint)
+	host := hostPortOf(endpoint)
 	if host == "" {
 		s.log.Warn("the outbound XRPC call is unsigned: the endpoint has no hostname", "url", endpoint, "nsid", nsid)
 	} else if token, tokenErr := s.serviceAuthToken(ctx, host, nsid); tokenErr != nil {
