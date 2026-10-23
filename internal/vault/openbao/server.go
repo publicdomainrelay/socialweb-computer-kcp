@@ -13,8 +13,6 @@ import (
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/ref"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/lease"
 )
 
@@ -105,32 +103,6 @@ type SourceFunc func(ctx context.Context, workspace, name string) (Server, error
 
 func (f SourceFunc) Server(ctx context.Context, workspace, name string) (Server, error) {
 	return f(ctx, workspace, name)
-}
-
-type KCPStoreSource struct {
-	Store *kcpstore.Store
-
-	Client string
-}
-
-func (s *KCPStoreSource) Server(ctx context.Context, workspace, name string) (Server, error) {
-	if s == nil || s.Store == nil {
-		return Server{}, errors.New("openbao: the OpenBaoServer source needs a kcp store")
-	}
-	if name == "" {
-		return Server{}, ErrNoServer
-	}
-	if workspace == "" {
-		workspace = "root"
-	}
-	obj, err := kcpstore.OfClusterScoped[v1alpha1.OpenBaoServer](s.Store, v1alpha1.OpenBaoServerGVR).Get(ctx, ref.New(workspace, "", name))
-	if err != nil {
-		return Server{}, fmt.Errorf("openbao: reading OpenBaoServer %s/%s: %w", workspace, name, err)
-	}
-	if obj == nil {
-		return Server{}, fmt.Errorf("openbao: OpenBaoServer %s/%s is not there", workspace, name)
-	}
-	return ServerOf(workspace, name, obj.Status, s.Client)
 }
 
 func ServerOf(workspace, name string, st v1alpha1.OpenBaoServerStatus, clientName string) (Server, error) {

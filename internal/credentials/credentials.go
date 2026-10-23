@@ -52,7 +52,7 @@ var _ component.CredentialDeleter = (*Resolver)(nil)
 func New(opts Options) (*Resolver, error) {
 	logins := opts.Logins
 	if logins == nil && opts.Store != nil {
-		logins = openbao.NewLogins(&openbao.KCPStoreSource{Store: opts.Store, Client: opts.Client})
+		logins = openbao.NewLogins(&KCPStoreSource{Store: opts.Store, Client: opts.Client})
 	}
 	if logins == nil {
 		return nil, ErrNoSource

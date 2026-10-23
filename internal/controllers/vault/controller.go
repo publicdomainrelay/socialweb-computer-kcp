@@ -47,7 +47,7 @@ type backendKey struct {
 type Controller struct {
 	log *slog.Logger
 
-	provider *openbao.Provider
+	provider *Provider
 
 	mu sync.Mutex
 
@@ -59,7 +59,7 @@ func Register(m *ctlruntime.Manager, b *bus.Bus, opts Options) (*Controller, err
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	ctl := &Controller{log: log.With("component", "vault-controller"), provider: openbao.NewProvider(opts.Remote),
+	ctl := &Controller{log: log.With("component", "vault-controller"), provider: NewProvider(opts.Remote),
 		bound: map[backendKey]map[ctlruntime.Request]struct{}{}}
 	ctl.provider.Register(b)
 	err := ctlruntime.For[*v1alpha1.Vault](m, Name, ctl, ctlruntime.Export(Export), ctlruntime.Finalizer(Finalizer),
@@ -75,7 +75,7 @@ func Register(m *ctlruntime.Manager, b *bus.Bus, opts Options) (*Controller, err
 	return ctl, nil
 }
 
-func (c *Controller) Provider() *openbao.Provider { return c.provider }
+func (c *Controller) Provider() *Provider { return c.provider }
 
 func (c *Controller) vaultsOf(k backendKey) []ctlruntime.Request {
 	c.mu.Lock()
@@ -152,7 +152,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 		st := server.Status
 		status.Address, status.Initialized, status.Sealed, status.CABundle, status.Version = st.Address, st.Initialized, st.Sealed, st.CABundle, st.Version
 		status.Ready = st.Ready && st.ObservedGeneration == server.Generation
-		c.provider.Bind(openbao.Binding{Vault: self, Backend: backend, Server: st.DeepCopy()})
+		c.provider.Bind(Binding{Vault: self, Backend: backend, Server: st.DeepCopy()})
 	case KindRemoteOpenBao:
 		c.index(req, &key)
 		var remote v1alpha1.RemoteOpenBao
@@ -165,7 +165,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 		st := remote.Status
 		status.Address, status.Initialized, status.Sealed, status.CABundle, status.Version = st.Address, st.Initialized, st.Sealed, st.CABundle, st.Version
 		status.Ready = st.Ready && observedAt(st.Conditions, remote.Generation)
-		c.provider.Bind(openbao.Binding{Vault: self, Backend: backend, Remote: remote.DeepCopy()})
+		c.provider.Bind(Binding{Vault: self, Backend: backend, Remote: remote.DeepCopy()})
 	default:
 		c.index(req, nil)
 		return unbound("UnsupportedKind", fmt.Sprintf("spec.backendRef kind %q is not an OpenBaoServer or a RemoteOpenBao", ref.Kind))

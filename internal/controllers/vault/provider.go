@@ -1,4 +1,4 @@
-package openbao
+package vault
 
 import (
 	"context"
@@ -16,11 +16,12 @@ import (
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/vault"
+	contractvault "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/vault"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/lease"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 )
 
-var ErrUnbound = errors.New("openbao: the Vault is not bound to a ready backend")
+var ErrUnbound = errors.New("vault: the Vault is not bound to a ready backend")
 
 var VaultGroupKind = schema.GroupKind{Group: v1alpha1.GroupName, Kind: "Vault"}
 
@@ -53,13 +54,13 @@ func keyOf(ref commonv1.ObjectRef) vaultKey {
 type remoteLogin struct {
 	fingerprint string
 
-	client *lease.Source[*Client]
+	client *lease.Source[*openbao.Client]
 }
 
 type Provider struct {
-	remote *Remote
+	remote *openbao.Remote
 
-	logins *Logins
+	logins *openbao.Logins
 
 	mu sync.RWMutex
 
@@ -68,10 +69,10 @@ type Provider struct {
 	remotes map[vaultKey]remoteLogin
 }
 
-func NewProvider(remote *Remote) *Provider {
+func NewProvider(remote *openbao.Remote) *Provider {
 	p := &Provider{remote: remote, bindings: map[vaultKey]Binding{}, remotes: map[vaultKey]remoteLogin{}}
-	p.logins = NewLogins(SourceFunc(func(context.Context, string, string) (Server, error) {
-		return Server{}, errors.New("openbao: the provider opens servers from its bindings")
+	p.logins = openbao.NewLogins(openbao.SourceFunc(func(context.Context, string, string) (openbao.Server, error) {
+		return openbao.Server{}, errors.New("vault: the provider opens servers from its bindings")
 	}))
 	return p
 }
@@ -110,15 +111,15 @@ func (p *Provider) binding(ref commonv1.ObjectRef) (Binding, bool) {
 	return b, ok
 }
 
-func (p *Provider) clientFor(to commonv1.ObjectRef) ClientFor {
-	return func(ctx context.Context, mount string) (*Client, error) {
+func (p *Provider) clientFor(to commonv1.ObjectRef) openbao.ClientFor {
+	return func(ctx context.Context, mount string) (*openbao.Client, error) {
 		b, ok := p.binding(to)
 		if !ok {
 			return nil, fmt.Errorf("%w: %s/%s", ErrUnbound, to.Workspace, to.Name)
 		}
 		switch {
 		case b.Server != nil:
-			srv, err := ServerOf(b.Backend.Workspace, b.Backend.Name, *b.Server, ClientForMount(b.Server.Clients, mount))
+			srv, err := openbao.ServerOf(b.Backend.Workspace, b.Backend.Name, *b.Server, openbao.ClientForMount(b.Server.Clients, mount))
 			if err != nil {
 				return nil, err
 			}
@@ -132,13 +133,13 @@ func (p *Provider) clientFor(to commonv1.ObjectRef) ClientFor {
 	}
 }
 
-func (p *Provider) remoteClient(ctx context.Context, key vaultKey, b Binding) (*Client, error) {
+func (p *Provider) remoteClient(ctx context.Context, key vaultKey, b Binding) (*openbao.Client, error) {
 	fp := b.fingerprint()
 	p.mu.Lock()
 	entry, ok := p.remotes[key]
 	if !ok || entry.fingerprint != fp {
 		remote := b.Remote.DeepCopy()
-		entry = remoteLogin{fingerprint: fp, client: lease.New(func(ctx context.Context) (*Client, time.Time, error) {
+		entry = remoteLogin{fingerprint: fp, client: lease.New(func(ctx context.Context) (*openbao.Client, time.Time, error) {
 			c, err := p.remote.Open(ctx, remote)
 			return c, time.Time{}, err
 		})}
@@ -162,36 +163,38 @@ func (p *Provider) defaultMount(to commonv1.ObjectRef) string {
 	return ""
 }
 
-func (p *Provider) open(_ context.Context, to commonv1.ObjectRef, scope []string) (*Handle, error) {
+func (p *Provider) open(_ context.Context, to commonv1.ObjectRef, scope []string) (*openbao.Handle, error) {
 	if _, ok := p.binding(to); !ok {
 		return nil, fmt.Errorf("%w: %s/%s", ErrUnbound, to.Workspace, to.Name)
 	}
-	return NewHandle(p.clientFor(to), p.defaultMount(to), scope)
+	return openbao.NewHandle(p.clientFor(to), p.defaultMount(to), scope)
 }
 
 func (p *Provider) Register(b *bus.Bus) {
-	bus.Provide(b, VaultGroupKind, vault.CapabilityRead, func(ctx context.Context, to commonv1.ObjectRef, scope []string) (vault.KV, error) {
+	bus.Provide(b, VaultGroupKind, contractvault.CapabilityRead, func(ctx context.Context, to commonv1.ObjectRef, scope []string) (contractvault.KV, error) {
 		h, err := p.open(ctx, to, scope)
 		if err != nil {
 			return nil, err
 		}
 		return readOnly{h}, nil
 	})
-	bus.Provide(b, VaultGroupKind, vault.CapabilityWrite, func(ctx context.Context, to commonv1.ObjectRef, scope []string) (vault.KV, error) {
+	bus.Provide(b, VaultGroupKind, contractvault.CapabilityWrite, func(ctx context.Context, to commonv1.ObjectRef, scope []string) (contractvault.KV, error) {
 		return p.open(ctx, to, scope)
 	})
-	bus.Provide(b, VaultGroupKind, vault.CapabilityLease, func(ctx context.Context, to commonv1.ObjectRef, scope []string) (vault.Leases, error) {
+	bus.Provide(b, VaultGroupKind, contractvault.CapabilityLease, func(ctx context.Context, to commonv1.ObjectRef, scope []string) (contractvault.Leases, error) {
 		return p.open(ctx, to, scope)
 	})
-	bus.Provide(b, VaultGroupKind, vault.CapabilityPKIIssue, func(ctx context.Context, to commonv1.ObjectRef, scope []string) (vault.PKI, error) {
+	bus.Provide(b, VaultGroupKind, contractvault.CapabilityPKIIssue, func(ctx context.Context, to commonv1.ObjectRef, scope []string) (contractvault.PKI, error) {
 		return p.open(ctx, to, scope)
 	})
 }
 
-var ErrReadOnly = errors.New("openbao: the handle was granted vault.read only")
+var ErrReadOnly = errors.New("vault: the handle was granted vault.read only")
+
+var _ contractvault.KV = readOnly{}
 
 type readOnly struct {
-	h *Handle
+	h *openbao.Handle
 }
 
 func (r readOnly) Read(ctx context.Context, mount, path string, version int) (map[string]any, error) {

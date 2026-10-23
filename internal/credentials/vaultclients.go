@@ -1,4 +1,4 @@
-package openbao
+package credentials
 
 import (
 	"context"
@@ -6,12 +6,41 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/ref"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 )
 
+type KCPStoreSource struct {
+	Store *kcpstore.Store
+
+	Client string
+}
+
+func (s *KCPStoreSource) Server(ctx context.Context, workspace, name string) (openbao.Server, error) {
+	if s == nil || s.Store == nil {
+		return openbao.Server{}, errors.New("credentials: the OpenBaoServer source needs a kcp store")
+	}
+	if name == "" {
+		return openbao.Server{}, openbao.ErrNoServer
+	}
+	if workspace == "" {
+		workspace = "root"
+	}
+	obj, err := kcpstore.OfClusterScoped[v1alpha1.OpenBaoServer](s.Store, v1alpha1.OpenBaoServerGVR).Get(ctx, ref.New(workspace, "", name))
+	if err != nil {
+		return openbao.Server{}, fmt.Errorf("credentials: reading OpenBaoServer %s/%s: %w", workspace, name, err)
+	}
+	if obj == nil {
+		return openbao.Server{}, fmt.Errorf("credentials: OpenBaoServer %s/%s is not there", workspace, name)
+	}
+	return openbao.ServerOf(workspace, name, obj.Status, s.Client)
+}
+
 type Clients struct {
-	Logins *Logins
+	Logins *openbao.Logins
 
 	Workspace string
 }
@@ -20,12 +49,12 @@ var _ component.VaultClients = (*Clients)(nil)
 
 func NewClients(store *kcpstore.Store, workspace, client string) (*Clients, error) {
 	if store == nil {
-		return nil, errors.New("openbao: the OpenBao vault clients need a kcp store")
+		return nil, errors.New("credentials: the OpenBao vault clients need a kcp store")
 	}
-	return NewClientsWith(NewLogins(&KCPStoreSource{Store: store, Client: client}), workspace), nil
+	return NewClientsWith(openbao.NewLogins(&KCPStoreSource{Store: store, Client: client}), workspace), nil
 }
 
-func NewClientsWith(logins *Logins, workspace string) *Clients {
+func NewClientsWith(logins *openbao.Logins, workspace string) *Clients {
 	if workspace == "" {
 		workspace = "root"
 	}
@@ -37,11 +66,11 @@ func (c *Clients) Client(ctx context.Context, server string) (component.VaultCli
 		return nil, fmt.Errorf("%w: %s", component.ErrRemoteVaultDisabled, server)
 	}
 	if c == nil || c.Logins == nil {
-		return nil, errors.New("openbao: the OpenBao vault clients have no logins")
+		return nil, errors.New("credentials: the OpenBao vault clients have no logins")
 	}
-	workspace, name := ParseServer(server, c.Workspace)
+	workspace, name := openbao.ParseServer(server, c.Workspace)
 	if name == "" {
-		return nil, ErrNoServer
+		return nil, openbao.ErrNoServer
 	}
 	client, srv, err := c.Logins.Client(ctx, workspace, name)
 	if err != nil {
@@ -51,7 +80,7 @@ func (c *Clients) Client(ctx context.Context, server string) (component.VaultCli
 }
 
 type componentClient struct {
-	client *Client
+	client *openbao.Client
 
 	mount string
 }
@@ -90,9 +119,9 @@ func (c *componentClient) DeleteKV(ctx context.Context, mount, path string) erro
 
 func (c *componentClient) IssueCertificate(ctx context.Context, req component.CertificateRequest) (component.Certificate, error) {
 	if strings.TrimSpace(req.Mount) == "" || strings.TrimSpace(req.Role) == "" || strings.TrimSpace(req.CommonName) == "" {
-		return component.Certificate{}, errors.New("openbao: issuing a certificate needs a PKI mount, a role and a common name")
+		return component.Certificate{}, errors.New("credentials: issuing a certificate needs a PKI mount, a role and a common name")
 	}
-	in := CertRequest{CommonName: req.CommonName, AltNames: append([]string(nil), req.AltNames...), IPSANs: append([]string(nil), req.IPSANs...)}
+	in := openbao.CertRequest{CommonName: req.CommonName, AltNames: append([]string(nil), req.AltNames...), IPSANs: append([]string(nil), req.IPSANs...)}
 	if req.TTL > 0 {
 		in.TTL = req.TTL.String()
 	}

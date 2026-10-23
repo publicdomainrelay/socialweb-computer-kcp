@@ -1,1 +1,6 @@
 caller	package	reason
+openbaoctl	internal/openbaoctl	initializes, unseals and declares the OpenBaoServer it runs; as the backend owner it holds the root and unseal material, so it uses internal/vault/openbao directly
+vaultmain	internal/vaultmain	bootstraps the root vault before kcp serves any Vault object
+clusterprovider	internal/clusterprovider	bootstraps a member cluster vault (PKI roles, link keys) before the cluster has kcp objects
+nodeagent	internal/nodeagent	a joining node logs in with its claim JWT before it has a kcp identity
+vaultcert	internal/vaultcert	mints and checks the vault TLS and the ESO client certificate at host bootstrap
