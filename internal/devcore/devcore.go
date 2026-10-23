@@ -178,7 +178,7 @@ func Run(ctx context.Context, cfg Config, m hostsvc.Manager) error {
 				go mon.Run(ctx)
 			}
 		}
-		go appctl.Supervise(component.WithSystemCaller(ctx), ac)
+		go appctl.Supervise(ctx, ac)
 	}
 	members := make(chan error, 1)
 	if cfg.Members != nil {

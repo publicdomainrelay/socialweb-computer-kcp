@@ -70,7 +70,6 @@ func openJetstreamStream(ctx context.Context, base string, cursor *int64, collec
 		query.Set("cursor", strconv.FormatInt(*cursor, 10))
 	}
 	parsed.RawQuery = query.Encode()
-	ctx = component.WithSystemCaller(ctx)
 	dialer := &websocket.Dialer{
 		Proxy:            nil,
 		HandshakeTimeout: relayHandshakeTimeout,

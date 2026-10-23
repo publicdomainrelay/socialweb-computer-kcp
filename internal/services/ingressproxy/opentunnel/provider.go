@@ -306,6 +306,7 @@ func (p *Provider) Register(ctx context.Context, spec exposure.IngressSpec) (exp
 		Target:   spec.Target,
 		Handler:  spec.Handler,
 		Handlers: deps.Handlers,
+		Caller:   spec.Caller(),
 	})
 	if err != nil {
 		return nil, err

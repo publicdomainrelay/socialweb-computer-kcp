@@ -173,7 +173,7 @@ func checkHandler(ctx context.Context, handlers *component.Handlers, key compone
 		handler, ok := handlers.Handler(key, name)
 		return handler, ok, nil
 	case component.ProtocolTCP, component.ProtocolSSH:
-		conn, err := handlers.DialStream(component.WithSystemCaller(ctx), key, name)
+		conn, err := handlers.DialStream(ctx, key, name)
 		if err != nil {
 			if errors.Is(err, component.ErrNoStream) || errors.Is(err, component.ErrHandlersStopped) {
 				return nil, false, nil

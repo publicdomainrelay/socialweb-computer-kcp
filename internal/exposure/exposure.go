@@ -24,6 +24,7 @@ import (
 	"k8s.io/client-go/dynamic"
 
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsreload"
 )
@@ -409,7 +410,7 @@ func (c *ExposureController) startLocal(ctx context.Context, exp *exposurev1alph
 		scheme := httpScheme(protocol, tlsConfig != nil)
 		return rt, scheme + "://" + lease.Address() + path, lease.Address(), nil
 	case component.ProtocolTCP, component.ProtocolSSH:
-		runCtx, cancel := context.WithCancel(context.Background())
+		runCtx, cancel := context.WithCancel(bus.WithCaller(context.Background(), ExposureCaller(c.workspace, exp.Name)))
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
@@ -522,7 +523,7 @@ func bridge(ctx context.Context, handlers *component.Handlers, target component.
 	if handlers == nil {
 		return
 	}
-	stream, err := handlers.DialStream(component.WithSystemCaller(ctx), target, name)
+	stream, err := handlers.DialStream(ctx, target, name)
 	if err != nil {
 		return
 	}

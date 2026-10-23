@@ -16,8 +16,10 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/ingress"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
 )
@@ -25,6 +27,14 @@ import (
 const relayMaxBody = 8 << 20
 
 var ErrStableHostMismatch = errors.New("StableHostMismatch")
+
+func ExposureCaller(workspace, name string) commonv1.ObjectRef {
+	return commonv1.ObjectRef{Group: exposurev1alpha1.GroupVersion.Group, Kind: "Exposure", Name: name, Workspace: workspace}
+}
+
+func (s IngressSpec) Caller() commonv1.ObjectRef {
+	return ExposureCaller(s.Workspace, s.Exposure)
+}
 
 type IngressSpec struct {
 	Workspace string
@@ -136,7 +146,7 @@ func (r *SubscriberRegistrar) Register(ctx context.Context, spec IngressSpec) (I
 		return r.identity.ServiceAuthToken(ctx, spec.Workspace, spec.Exposure, aud, nsid)
 	}
 	handler := r.handler(spec.Target, spec.Handler)
-	tunnel := r.tunnel(spec.Target, spec.Handler)
+	tunnel := r.tunnel(spec.Target, spec.Handler, spec.Caller())
 	wsTarget := r.wsTarget(spec.Target)
 	subscriber, err := ingress.NewSubscriber(ctx, ingress.SubscriberConfig{
 		Label:               "exposure-" + spec.Exposure,
@@ -149,7 +159,7 @@ func (r *SubscriberRegistrar) Register(ctx context.Context, spec IngressSpec) (I
 		HandleRequest:       handler,
 		TunnelHandler:       tunnel,
 		WSTarget:            wsTarget,
-		WSTargetDialer:      r.wsDialer(spec.Target),
+		WSTargetDialer:      r.wsDialer(spec.Target, spec.Caller()),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("connecting the ingress subscriber: %w", err)
@@ -340,7 +350,7 @@ func (r *SubscriberRegistrar) wsTarget(target component.Key) func() *ingress.Tar
 	}
 }
 
-func (r *SubscriberRegistrar) wsDialer(target component.Key) *websocket.Dialer {
+func (r *SubscriberRegistrar) wsDialer(target component.Key, caller commonv1.ObjectRef) *websocket.Dialer {
 	if r == nil || r.deps.Registry == nil || r.deps.Handlers == nil {
 		return nil
 	}
@@ -363,12 +373,12 @@ func (r *SubscriberRegistrar) wsDialer(target component.Key) *websocket.Dialer {
 	return &websocket.Dialer{
 		HandshakeTimeout: 10 * time.Second,
 		NetDialContext: func(ctx context.Context, _, address string) (net.Conn, error) {
-			return r.deps.Handlers.DialHTTP(component.WithSystemCaller(ctx), address)
+			return r.deps.Handlers.DialHTTP(bus.WithCaller(ctx, caller), address)
 		},
 	}
 }
 
-func (r *SubscriberRegistrar) tunnel(target component.Key, name string) func(context.Context, net.Conn) error {
+func (r *SubscriberRegistrar) tunnel(target component.Key, name string, caller commonv1.ObjectRef) func(context.Context, net.Conn) error {
 	return func(ctx context.Context, conn net.Conn) error {
 		if conn == nil {
 			return errors.New("the tunnel connection is empty")
@@ -377,7 +387,7 @@ func (r *SubscriberRegistrar) tunnel(target component.Key, name string) func(con
 		if registry == nil {
 			return errors.New("the handler registry is not configured")
 		}
-		stream, err := registry.DialStream(component.WithSystemCaller(ctx), target, name)
+		stream, err := registry.DialStream(bus.WithCaller(ctx, caller), target, name)
 		if err != nil {
 			return err
 		}

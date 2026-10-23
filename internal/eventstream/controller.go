@@ -27,6 +27,7 @@ import (
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	v1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
 )
 
@@ -268,6 +269,7 @@ func (c *Controller) reconcile(ctx context.Context, dyn dynamic.Interface, u *un
 	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, es); err != nil {
 		return fmt.Errorf("eventstream: decoding EventStream %s: %w", u.GetName(), err)
 	}
+	ctx = bus.WithObject(ctx, c.opts.Workspace, u)
 	fingerprint, err := specFingerprint(es.Spec)
 	if err != nil {
 		return err

@@ -12,6 +12,9 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 )
 
 const (
@@ -391,7 +394,7 @@ func (r *Runtime) startLocked(ctx context.Context, inst *instance, spec Componen
 		r.emit(ctx, spec, st)
 		return st, err
 	}
-	runCtx, cancel := context.WithCancel(WithCaller(root, Key{Workspace: spec.Workspace, Kind: spec.Kind, Name: spec.Name}))
+	runCtx, cancel := context.WithCancel(specCaller(root, spec))
 	done := make(chan struct{})
 	startedAt := time.Now().UTC()
 	inst.mu.Lock()
@@ -792,7 +795,7 @@ func (r *Runtime) callStart(ctx context.Context, svc Service, deps Deps, spec Co
 			err = newPanicError(name, value)
 		}
 	}()
-	return svc.Start(WithCaller(ctx, Key{Workspace: spec.Workspace, Kind: spec.Kind, Name: spec.Name}), deps)
+	return svc.Start(specCaller(ctx, spec), deps)
 }
 
 func (r *Runtime) callReady(ctx context.Context, inst *instance, svc Service) (err error) {
@@ -802,7 +805,7 @@ func (r *Runtime) callReady(ctx context.Context, inst *instance, svc Service) (e
 			err = newPanicError(name, value)
 		}
 	}()
-	return svc.Ready(WithCaller(ctx, inst.keyOf()))
+	return svc.Ready(specCaller(ctx, inst.specSnapshot()))
 }
 
 func (r *Runtime) callEndpoints(inst *instance, svc Service) (endpoints []Endpoint, err error) {
@@ -833,7 +836,11 @@ func (r *Runtime) callFactory(ctx context.Context, spec ComponentSpec, factory S
 			err = newPanicError(name, value)
 		}
 	}()
-	return factory(WithCaller(ctx, Key{Workspace: spec.Workspace, Kind: spec.Kind, Name: spec.Name}), deps, spec)
+	return factory(specCaller(ctx, spec), deps, spec)
+}
+
+func specCaller(ctx context.Context, spec ComponentSpec) context.Context {
+	return bus.WithCallerLabels(ctx, commonv1.ObjectRef{Group: spec.Group, Kind: spec.Kind, Name: spec.Name, Workspace: spec.Workspace}, spec.Labels)
 }
 
 func newPanicError(name string, value any) *PanicError {

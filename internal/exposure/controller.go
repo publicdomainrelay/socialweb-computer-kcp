@@ -18,6 +18,7 @@ import (
 	"k8s.io/client-go/dynamic"
 
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 )
 
 const (
@@ -87,7 +88,7 @@ func (w *watcher) round(ctx context.Context) error {
 		return err
 	}
 	for i := range list.Items {
-		if err := w.reconcile(ctx, dyn, &list.Items[i]); err != nil && ctx.Err() == nil {
+		if err := w.reconcile(bus.WithObject(ctx, w.workspace, &list.Items[i]), dyn, &list.Items[i]); err != nil && ctx.Err() == nil {
 			w.log.Warn("reconciling an exposure resource", "gvr", w.gvr.Resource, "workspace", w.workspace,
 				"name", list.Items[i].GetName(), "err", err.Error())
 		}
@@ -126,7 +127,7 @@ func (w *watcher) round(ctx context.Context) error {
 				}
 				continue
 			}
-			if err := w.reconcile(ctx, dyn, u); err != nil && ctx.Err() == nil {
+			if err := w.reconcile(bus.WithObject(ctx, w.workspace, u), dyn, u); err != nil && ctx.Err() == nil {
 				w.log.Warn("reconciling an exposure resource", "gvr", w.gvr.Resource, "workspace", w.workspace,
 					"name", u.GetName(), "err", err.Error())
 			}

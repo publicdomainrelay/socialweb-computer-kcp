@@ -62,6 +62,7 @@ const (
 
 type ComponentSpec struct {
 	UID           types.UID
+	Group         string
 	Kind          string
 	Name          string
 	Namespace     string
@@ -73,6 +74,7 @@ type ComponentSpec struct {
 	StateDir      string
 	Spec          RawSpec
 	Annotations   map[string]string
+	Labels        map[string]string
 }
 
 func (s ComponentSpec) Check() error {

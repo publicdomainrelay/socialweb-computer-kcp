@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 )
 
@@ -26,6 +28,8 @@ type Config struct {
 	Handler string
 
 	Handlers *component.Handlers
+
+	Caller commonv1.ObjectRef
 }
 
 type Bridge struct {
@@ -53,7 +57,7 @@ func Start(cfg Config) (*Bridge, error) {
 	if err != nil {
 		return nil, fmt.Errorf("loopback: listening on %s: %w", host, err)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(bus.WithCaller(context.Background(), cfg.Caller))
 	bridge := &Bridge{cfg: cfg, listener: listener, ctx: ctx, cancel: cancel, done: make(chan struct{})}
 	switch strings.ToLower(strings.TrimSpace(cfg.Protocol)) {
 	case component.ProtocolHTTP, component.ProtocolWS:
@@ -103,7 +107,7 @@ func (b *Bridge) serveStreams() {
 
 func (b *Bridge) bridge(conn net.Conn) {
 	defer conn.Close()
-	stream, err := b.cfg.Handlers.DialStream(component.WithSystemCaller(b.ctx), b.cfg.Target, b.cfg.Handler)
+	stream, err := b.cfg.Handlers.DialStream(b.ctx, b.cfg.Target, b.cfg.Handler)
 	if err != nil {
 		return
 	}

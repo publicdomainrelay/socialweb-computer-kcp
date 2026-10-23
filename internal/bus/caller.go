@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 
+	"k8s.io/apimachinery/pkg/runtime/schema"
+
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/deploy"
 )
@@ -79,4 +81,18 @@ func ParseBootstrapCallers(data string) map[string]bool {
 
 func BootstrapCaller(name string) bool {
 	return bootstrap()[strings.TrimSpace(name)]
+}
+
+type Object interface {
+	GetName() string
+	GetLabels() map[string]string
+	GroupVersionKind() schema.GroupVersionKind
+}
+
+func WithObject(ctx context.Context, workspace string, obj Object) context.Context {
+	if obj == nil {
+		return ctx
+	}
+	gvk := obj.GroupVersionKind()
+	return WithCallerLabels(ctx, commonv1.ObjectRef{Group: gvk.Group, Kind: gvk.Kind, Name: obj.GetName(), Workspace: workspace}, obj.GetLabels())
 }

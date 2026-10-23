@@ -246,6 +246,7 @@ func New(cfg Config) (*Core, error) {
 	if handlers == nil {
 		handlers = component.NewHandlerRegistry()
 	}
+	handlers.SetLogger(cfg.Log.With("component", "bus"))
 	deps := component.Deps{
 		KCP:         cfg.KCP,
 		Credentials: resolver,
@@ -317,7 +318,7 @@ func (c *Core) Run(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	runCtx, cancel := context.WithCancel(component.WithSystemCaller(ctx))
+	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	if !c.cfg.DisablePolicy {
 		go c.runPolicy(runCtx)

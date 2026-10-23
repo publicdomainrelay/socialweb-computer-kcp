@@ -83,7 +83,6 @@ func relayBaseURL(ref eventsv1alpha1.EventStreamRef) (string, error) {
 }
 
 func openRelayStream(ctx context.Context, base string, cursor *int64, handlers *component.HandlerRegistry) (repoStream, error) {
-	ctx = component.WithSystemCaller(ctx)
 	parsed, err := url.Parse(base)
 	if err != nil {
 		return nil, fmt.Errorf("eventstream: relay URL %q: %w", base, err)

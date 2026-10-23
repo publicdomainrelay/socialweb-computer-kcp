@@ -827,7 +827,6 @@ func verifierTransport(req *http.Request, handlers *component.HandlerRegistry) h
 }
 
 func (n *networks) verify(ctx context.Context, snap componentSnapshot, apps []v1alpha1.NetworkAppStatus) error {
-	ctx = component.WithSystemCaller(ctx)
 	for _, check := range []struct{ kind, name, path string }{
 		{ComponentKindPlc, NetworkPLCName, "/health"},
 		{ComponentKindRelay, NetworkRelayName, "/xrpc/_health"},
