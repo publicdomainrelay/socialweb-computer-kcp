@@ -53,6 +53,7 @@ type Server struct {
 
 	closedCh  chan struct{}
 	closeOnce sync.Once
+	wg        sync.WaitGroup
 }
 
 type peer struct {
@@ -226,6 +227,7 @@ func (s *Server) Close() {
 	for _, sub := range subs {
 		sub.closeCaller(1001, "server shutting down")
 	}
+	s.wg.Wait()
 }
 
 func (s *Server) serveHTTP(w http.ResponseWriter, req *http.Request) {
@@ -424,8 +426,8 @@ func (s *Server) handleSubscribe(w http.ResponseWriter, req *http.Request) {
 	}
 	s.peers[subdomain] = p
 	s.mu.Unlock()
-	s.startKeepalive(p)
-	go s.watchPeerExpiry(p)
+	s.startKeepalive(req.Context(), p)
+	s.spawn(func() { s.watchPeerExpiry(p) })
 	s.log.Info("subscriber_connected", "subdomain", subdomain, "key", result.Key)
 	_ = p.writeJSON(map[string]any{
 		"$type":      frameType("registered"),
@@ -598,16 +600,28 @@ func (s *Server) evictPeer(p *peer, code int, reason string) {
 	s.dropPeer(p)
 }
 
-func (s *Server) startKeepalive(p *peer) {
+func (s *Server) spawn(fn func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
+	s.wg.Go(fn)
+}
+
+func (s *Server) startKeepalive(ctx context.Context, p *peer) {
 	k := &keepalive{stop: make(chan struct{})}
 	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return
+	}
 	if old := s.keepalives[p.subdomain]; old != nil {
 		delete(s.keepalives, p.subdomain)
 		old.close()
 	}
 	s.keepalives[p.subdomain] = k
-	s.mu.Unlock()
-	go func() {
+	s.wg.Go(func() {
 		t := time.NewTicker(s.cfg.KeepaliveInterval)
 		defer t.Stop()
 		for {
@@ -633,12 +647,13 @@ func (s *Server) startKeepalive(p *peer) {
 					"headers":   map[string]string{},
 				}
 				reqID := f["requestId"].(string)
-				go func() {
-					_, _ = s.dispatch(context.Background(), p.subdomain, f, s.cfg.KeepaliveTimeout, reqID)
-				}()
+				s.wg.Go(func() {
+					_, _ = s.dispatch(ctx, p.subdomain, f, s.cfg.KeepaliveTimeout, reqID)
+				})
 			}
 		}
-	}()
+	})
+	s.mu.Unlock()
 }
 
 func (s *Server) dispatch(ctx context.Context, subdomain string, f map[string]any, timeout time.Duration, requestID string) (Response, error) {
