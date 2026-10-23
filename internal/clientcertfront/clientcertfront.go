@@ -28,8 +28,10 @@ import (
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clientcert"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterprovider"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gateway"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/materialiser"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/revocation"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsfront"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsreload"
@@ -50,6 +52,8 @@ const (
 	revokedRefresh      = 2 * time.Second
 	revokedFetchTimeout = 5 * time.Second
 	denyTTL             = 2 * time.Second
+	gateTTL             = materialiser.PathGateGrace / 5
+	gateFetchTimeout    = 5 * time.Second
 	readHeaderLimit     = 10 * time.Second
 	shutdownTimeout     = 5 * time.Second
 	upstreamDialWait    = 5 * time.Second
@@ -60,6 +64,7 @@ var pathPattern = regexp.MustCompile(`^/clusters/root:([a-z0-9]+):([a-z0-9]([a-z
 
 type Records interface {
 	CertificateState(ctx context.Context, did, cluster, serial string) (kcpclient.CertificateState, error)
+	ClusterGate(ctx context.Context, home, name string) (kcpclient.ClusterGate, error)
 }
 
 type Config struct {
@@ -105,8 +110,16 @@ type trust struct {
 	clientCA  *x509.CertPool
 	front     string
 	transport *http.Transport
+	bearer    *http.Transport
 	loaded    time.Time
 }
+
+type gateEntry struct {
+	gate    kcpclient.ClusterGate
+	fetched time.Time
+}
+
+type openRequest struct{ cancel context.CancelFunc }
 
 type revokedEntry struct {
 	serials map[string]struct{}
@@ -122,6 +135,8 @@ type server struct {
 	revoked    map[string]*revokedEntry
 	refreshing map[string]bool
 	denies     map[string]time.Time
+	gates      map[string]*gateEntry
+	open       map[string]map[*openRequest]struct{}
 	wake       chan struct{}
 }
 
@@ -151,12 +166,13 @@ func Run(ctx context.Context, c Config) error {
 	}
 	s := &server{c: c, log: log, edgePin: sha256.Sum256(edgeDER),
 		trusts: map[string]*trust{}, revoked: map[string]*revokedEntry{}, refreshing: map[string]bool{},
-		denies: map[string]time.Time{}, wake: make(chan struct{}, 1)}
+		denies: map[string]time.Time{}, gates: map[string]*gateEntry{}, open: map[string]map[*openRequest]struct{}{},
+		wake: make(chan struct{}, 1)}
 	ln, err := net.Listen("tcp", c.Address)
 	if err != nil {
 		return fmt.Errorf("clientcertfront: listening on %s: %w", c.Address, err)
 	}
-	tlsConfig := reloader.TLSConfig(&tls.Config{ClientAuth: tls.RequireAnyClientCert,
+	tlsConfig := reloader.TLSConfig(&tls.Config{ClientAuth: tls.RequestClientCert,
 		MinVersion: tls.VersionTLS12, NextProtos: []string{"http/1.1"}})
 	srv := &http.Server{Handler: http.HandlerFunc(s.serve), ReadHeaderTimeout: readHeaderLimit,
 		TLSConfig: tlsConfig}
@@ -195,34 +211,45 @@ func (s *server) refuse(w http.ResponseWriter, r *http.Request, status int, did,
 	http.Error(w, http.StatusText(status), status)
 }
 
-func (s *server) serve(w http.ResponseWriter, r *http.Request) {
+func (s *server) caller(r *http.Request) (*x509.Certificate, int, string) {
+	header := r.Header.Get(HeaderClientCertificate)
 	if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
-		s.refuse(w, r, http.StatusUnauthorized, "", "", "", "no peer certificate")
-		return
+		if header != "" {
+			return nil, http.StatusBadRequest, "a certificate header from a peer that is not the edge"
+		}
+		return nil, 0, ""
 	}
 	peer := r.TLS.PeerCertificates[0]
-	user := peer
-	header := r.Header.Get(HeaderClientCertificate)
-	if sha256.Sum256(peer.Raw) == s.edgePin {
-		if header == "" {
-			s.refuse(w, r, http.StatusUnauthorized, "", "", "", "the edge sent no certificate")
-			return
+	if sha256.Sum256(peer.Raw) != s.edgePin {
+		if header != "" {
+			return nil, http.StatusBadRequest, "a certificate header from a peer that is not the edge"
 		}
-		der, err := base64.StdEncoding.DecodeString(header)
-		if err != nil {
-			s.refuse(w, r, http.StatusBadRequest, "", "", "", "the edge certificate header is not base64")
-			return
-		}
-		if user, err = x509.ParseCertificate(der); err != nil {
-			s.refuse(w, r, http.StatusBadRequest, "", "", "", "the edge certificate header is not a certificate")
-			return
-		}
-	} else if header != "" {
-		s.refuse(w, r, http.StatusBadRequest, "", "", "", "a certificate header from a peer that is not the edge")
+		return peer, 0, ""
+	}
+	if header == "" {
+		return nil, 0, ""
+	}
+	der, err := base64.StdEncoding.DecodeString(header)
+	if err != nil {
+		return nil, http.StatusBadRequest, "the edge certificate header is not base64"
+	}
+	user, err := x509.ParseCertificate(der)
+	if err != nil {
+		return nil, http.StatusBadRequest, "the edge certificate header is not a certificate"
+	}
+	return user, 0, ""
+}
+
+func (s *server) serve(w http.ResponseWriter, r *http.Request) {
+	user, status, reason := s.caller(r)
+	if status != 0 {
+		s.refuse(w, r, status, "", "", "", reason)
 		return
 	}
-	serial := user.SerialNumber.Text(16)
-
+	serial := ""
+	if user != nil {
+		serial = user.SerialNumber.Text(16)
+	}
 	m := pathPattern.FindStringSubmatch(r.URL.Path)
 	if m == nil {
 		s.refuse(w, r, http.StatusNotFound, "", "", serial, "path")
@@ -232,7 +259,60 @@ func (s *server) serve(w http.ResponseWriter, r *http.Request) {
 	if rest == "" {
 		rest = "/"
 	}
+	home := kcpclient.RootWorkspace + ":" + account + ":" + cluster
+	if user == nil {
+		s.serveBearer(w, r, account, home, cluster, rest)
+		return
+	}
+	s.serveCertificate(w, r, user, serial, account, home, cluster, rest)
+}
 
+func (s *server) serveBearer(w http.ResponseWriter, r *http.Request, account, home, cluster, rest string) {
+	if scheme, _, ok := strings.Cut(r.Header.Get("Authorization"), " "); !ok || !strings.EqualFold(scheme, "Bearer") {
+		s.refuse(w, r, http.StatusUnauthorized, "", cluster, "", "neither a client certificate nor a bearer token")
+		return
+	}
+	did, status, reason := s.admitGate(r.Context(), account, home, cluster)
+	if status != 0 {
+		s.refuse(w, r, status, did, cluster, "", reason)
+		return
+	}
+	key, err := kcpclient.ClusterKey(home)
+	if err != nil {
+		s.refuse(w, r, http.StatusNotFound, did, cluster, "", "cluster key")
+		return
+	}
+	dir, err := clusterprovider.ClusterDataDir(s.c.ClusterStateDir, key)
+	if err != nil {
+		s.refuse(w, r, http.StatusNotFound, did, cluster, "", "cluster key")
+		return
+	}
+	t, err := s.trustFor(dir)
+	if err != nil {
+		s.refuse(w, r, http.StatusServiceUnavailable, did, cluster, "", "cluster not reachable: "+err.Error())
+		return
+	}
+	if status, reason := s.admit(r.Context(), did); status != 0 {
+		s.refuse(w, r, status, did, cluster, "", reason)
+		return
+	}
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	defer s.hold(home, cancel)()
+	proxy := &httputil.ReverseProxy{
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			rewrite(pr, t.front, rest)
+		},
+		FlushInterval: -1,
+		Transport:     t.bearer,
+		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			s.refuse(w, r, http.StatusServiceUnavailable, did, cluster, "", "upstream: "+err.Error())
+		},
+	}
+	proxy.ServeHTTP(w, r.WithContext(ctx))
+}
+
+func (s *server) serveCertificate(w http.ResponseWriter, r *http.Request, user *x509.Certificate, serial, account, home, cluster, rest string) {
 	cn := user.Subject.CommonName
 	switch {
 	case !strings.HasPrefix(cn, "did:"):
@@ -289,23 +369,23 @@ func (s *server) serve(w http.ResponseWriter, r *http.Request) {
 		s.refuse(w, r, status, cn, cluster, serial, reason)
 		return
 	}
+	did, status, reason := s.admitGate(r.Context(), account, home, cluster)
+	switch {
+	case status != 0:
+		s.refuse(w, r, status, cn, cluster, serial, reason)
+		return
+	case did != cn:
+		s.refuse(w, r, http.StatusForbidden, cn, cluster, serial, "the Cluster belongs to another account")
+		return
+	}
 
 	ctx, cancel := context.WithDeadline(r.Context(), user.NotAfter)
 	defer cancel()
+	defer s.hold(home, cancel)()
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
-			pr.Out.URL.Scheme = "https"
-			pr.Out.URL.Host = t.front
-			pr.Out.URL.Path = rest
-			pr.Out.URL.RawPath = ""
-			pr.Out.Host = t.front
+			rewrite(pr, t.front, rest)
 			pr.Out.Header.Del("Authorization")
-			for k := range pr.Out.Header {
-				if strings.HasPrefix(http.CanonicalHeaderKey(k), "X-Remote-") {
-					delete(pr.Out.Header, k)
-				}
-			}
-			pr.Out.Header.Del(HeaderClientCertificate)
 			pr.Out.Header.Set("X-Remote-User", cn)
 			pr.Out.Header.Set("X-Remote-Group", kcpclient.OwnersGroup)
 		},
@@ -316,6 +396,105 @@ func (s *server) serve(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 	proxy.ServeHTTP(w, r.WithContext(ctx))
+}
+
+func rewrite(pr *httputil.ProxyRequest, front, rest string) {
+	pr.Out.URL.Scheme = "https"
+	pr.Out.URL.Host = front
+	pr.Out.URL.Path = rest
+	pr.Out.URL.RawPath = ""
+	pr.Out.Host = front
+	for k := range pr.Out.Header {
+		if strings.HasPrefix(http.CanonicalHeaderKey(k), "X-Remote-") {
+			delete(pr.Out.Header, k)
+		}
+	}
+	pr.Out.Header.Del(HeaderClientCertificate)
+}
+
+func (s *server) admitGate(ctx context.Context, account, home, cluster string) (string, int, string) {
+	g, err := s.gateFor(ctx, home, cluster)
+	switch {
+	case err != nil:
+		return "", http.StatusServiceUnavailable, "cluster state: " + err.Error()
+	case g.Account == "" || kcpclient.AccountHash(g.Account) != account:
+		return "", http.StatusNotFound, "no such cluster in this account"
+	case !g.Serving:
+		return g.Account, http.StatusServiceUnavailable, "the cluster is not serving"
+	}
+	return g.Account, 0, ""
+}
+
+func (s *server) gateFor(ctx context.Context, home, cluster string) (kcpclient.ClusterGate, error) {
+	s.mu.Lock()
+	e := s.gates[home]
+	s.mu.Unlock()
+	if e != nil && time.Since(e.fetched) < gateTTL {
+		return e.gate, nil
+	}
+	return s.fetchGate(ctx, home, cluster)
+}
+
+func (s *server) fetchGate(ctx context.Context, home, cluster string) (kcpclient.ClusterGate, error) {
+	fctx, cancel := context.WithTimeout(ctx, gateFetchTimeout)
+	defer cancel()
+	g, err := s.c.Records.ClusterGate(fctx, home, cluster)
+	if err != nil {
+		return g, err
+	}
+	s.mu.Lock()
+	s.gates[home] = &gateEntry{gate: g, fetched: time.Now()}
+	s.mu.Unlock()
+	return g, nil
+}
+
+func (s *server) hold(home string, cancel context.CancelFunc) func() {
+	o := &openRequest{cancel: cancel}
+	s.mu.Lock()
+	if s.open[home] == nil {
+		s.open[home] = map[*openRequest]struct{}{}
+	}
+	s.open[home][o] = struct{}{}
+	s.mu.Unlock()
+	return func() {
+		s.mu.Lock()
+		delete(s.open[home], o)
+		if len(s.open[home]) == 0 {
+			delete(s.open, home)
+		}
+		s.mu.Unlock()
+	}
+}
+
+func (s *server) recheckGates(ctx context.Context) {
+	s.mu.Lock()
+	homes := make([]string, 0, len(s.open))
+	for home := range s.open {
+		homes = append(homes, home)
+	}
+	s.mu.Unlock()
+	for _, home := range homes {
+		g, err := s.fetchGate(ctx, home, home[strings.LastIndex(home, ":")+1:])
+		if err != nil {
+			if ctx.Err() == nil {
+				s.log.Warn("the cluster gate recheck failed; open requests stay until the next pass", "home", home, "err", err.Error())
+			}
+			continue
+		}
+		if g.Serving {
+			continue
+		}
+		s.mu.Lock()
+		n := 0
+		for o := range s.open[home] {
+			o.cancel()
+			n++
+		}
+		s.mu.Unlock()
+		if n > 0 {
+			s.log.Info("the cluster stopped serving; its open requests are closed", "home", home, "closed", n)
+		}
+	}
 }
 
 func (s *server) admit(ctx context.Context, did string) (int, string) {
@@ -385,6 +564,7 @@ func (s *server) refreshLoop(ctx context.Context) {
 		case <-s.wake:
 		}
 		s.refreshStale(ctx)
+		s.recheckGates(ctx)
 	}
 }
 
@@ -450,6 +630,7 @@ func (s *server) trustFor(dir string) (*trust, error) {
 	s.mu.Unlock()
 	if old != nil {
 		old.transport.CloseIdleConnections()
+		old.bearer.CloseIdleConnections()
 	}
 	return fresh, nil
 }
@@ -481,6 +662,10 @@ func loadTrust(dir string) (*trust, error) {
 	}
 	return &trust{clientCA: clientCA, front: st.Address, loaded: time.Now(), transport: &http.Transport{
 		TLSClientConfig:   &tls.Config{RootCAs: serverCA, Certificates: []tls.Certificate{proxy}, MinVersion: tls.VersionTLS12},
+		ForceAttemptHTTP2: false,
+		DialContext:       (&net.Dialer{Timeout: upstreamDialWait}).DialContext,
+	}, bearer: &http.Transport{
+		TLSClientConfig:   &tls.Config{RootCAs: serverCA, MinVersion: tls.VersionTLS12},
 		ForceAttemptHTTP2: false,
 		DialContext:       (&net.Dialer{Timeout: upstreamDialWait}).DialContext,
 	}}, nil
