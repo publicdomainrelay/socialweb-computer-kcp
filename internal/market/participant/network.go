@@ -10,7 +10,7 @@ import (
 	contractcomponent "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpclient"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/networkdial"
 )
 
 type ChainedResolver []networkdial.Resolver

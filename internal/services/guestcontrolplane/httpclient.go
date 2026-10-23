@@ -11,7 +11,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpclient"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/networkdial"
 )
 
 func networkHTTPClient(hosts component.NetworkHosts, network v1alpha1.MarketNetworkValue, timeout time.Duration) *http.Client {

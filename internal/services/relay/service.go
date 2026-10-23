@@ -23,9 +23,9 @@ import (
 	contract "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/relay"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/kcp"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/networkdial"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/servetls"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/relay/local"
 )
 

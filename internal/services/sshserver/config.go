@@ -17,7 +17,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpclient"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/networkdial"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/ssh/gateway"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/sshtransport"
 )

@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/networkdial"
 )
 
 var ErrNoCA = errors.New("httpclient: the CA bundle holds no certificate")
