@@ -47,6 +47,8 @@ type Config struct {
 
 	AddToScheme []func(*kruntime.Scheme) error
 
+	Workspaces func(workspace string) bool
+
 	Log *slog.Logger
 }
 
@@ -54,6 +56,8 @@ type Manager struct {
 	base *rest.Config
 
 	exportWorkspace string
+
+	workspaces func(workspace string) bool
 
 	scheme *kruntime.Scheme
 
@@ -114,7 +118,7 @@ func NewManager(cfg Config) (*Manager, error) {
 	if err != nil {
 		return nil, fmt.Errorf("runtime: the multicluster manager: %w", err)
 	}
-	return &Manager{base: base, exportWorkspace: exportWorkspace, scheme: scheme, log: log, logr: logger,
+	return &Manager{base: base, exportWorkspace: exportWorkspace, workspaces: cfg.Workspaces, scheme: scheme, log: log, logr: logger,
 		providers: providers, mgr: mgr, exports: map[string]bool{}}, nil
 }
 

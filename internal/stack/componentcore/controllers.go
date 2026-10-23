@@ -94,7 +94,7 @@ func (c *Core) runControllers(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("componentcore: the controller manager: %w", err)
 	}
-	mgr, err := ctlruntime.NewManager(ctlruntime.Config{Rest: restCfg, AddToScheme: schemes, Log: log})
+	mgr, err := ctlruntime.NewManager(ctlruntime.Config{Rest: restCfg, AddToScheme: schemes, Workspaces: c.scope.Contains, Log: log})
 	if err != nil {
 		return fmt.Errorf("componentcore: the controller manager: %w", err)
 	}
@@ -106,10 +106,8 @@ func (c *Core) runControllers(ctx context.Context) error {
 	defer g.Stop()
 	ctx = g.Context()
 	c.registerLocal(ctx, mgr, clients)
-	if c.scope.base() == DefaultWorkspace {
-		if err := c.registerNetwork(mgr, clients, g); err != nil {
-			log.Warn("the network controllers are not wired", "err", err.Error())
-		}
+	if err := c.registerNetwork(mgr, clients, g); err != nil {
+		log.Warn("the network controllers are not wired", "err", err.Error())
 	}
 	if cfg.Compute != nil {
 		compute := *cfg.Compute

@@ -233,6 +233,9 @@ func For[T Object](m *Manager, name string, r Reconciler[T], opts ...Option) err
 		return fmt.Errorf("runtime: the controller %s names no APIExport", name)
 	}
 	o.workers = opt.Positive(o.workers, 1)
+	if o.inWorkspace == nil {
+		o.inWorkspace = m.workspaces
+	}
 	proto, err := newObject[T]()
 	if err != nil {
 		return fmt.Errorf("runtime: the controller %s: %w", name, err)
