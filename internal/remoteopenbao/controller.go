@@ -19,7 +19,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/vaultaccess"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 )
 
 const (
@@ -57,7 +57,7 @@ type Options struct {
 
 	Dynamic DynamicFactory
 
-	Resolver *vaultaccess.Resolver
+	Resolver *openbao.Remote
 
 	Log *slog.Logger
 
@@ -85,7 +85,7 @@ type Controller struct {
 
 	dynamic DynamicFactory
 
-	resolver *vaultaccess.Resolver
+	resolver *openbao.Remote
 
 	log *slog.Logger
 

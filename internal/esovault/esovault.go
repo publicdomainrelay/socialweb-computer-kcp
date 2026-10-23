@@ -11,7 +11,7 @@ import (
 	"k8s.io/client-go/dynamic"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/eso"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vaultcert"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vaultlayout"
 )

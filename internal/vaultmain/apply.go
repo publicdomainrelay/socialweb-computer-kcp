@@ -20,8 +20,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vaultlayout"
 )
 
@@ -99,11 +99,11 @@ func (a RootAccess) Client(ctx context.Context) (*openbao.Client, error) {
 		return nil, fmt.Errorf("the client certificate of %s: %w", vaultlayout.RootClient, err)
 	}
 	base := openbao.New(a.Address, "", openbao.WithCACertPool(pool), openbao.WithClientCertificate(pair))
-	tok, err := base.LoginCert(ctx, a.CertMount, a.CertRole)
+	client, err := base.LoginCert(ctx, a.CertMount, a.CertRole)
 	if err != nil {
 		return nil, fmt.Errorf("logging in to the root vault at %s as %s: %w", a.Address, a.CertRole, err)
 	}
-	return base.WithToken(tok), nil
+	return client, nil
 }
 
 func pkiRootPresent(ctx context.Context, c *openbao.Client, mount string) (bool, error) {

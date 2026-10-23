@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-1.remoteopenbaos.socialweb.computer
+  name: v1alpha1-2.remoteopenbaos.socialweb.computer
   labels:
     contracts.socialweb.computer/vaults: v1alpha1
 spec:
@@ -104,6 +104,12 @@ spec:
               ready:
                 type: boolean
               endpoint:
+                type: string
+              address:
+                type: string
+              initialized:
+                type: boolean
+              caBundle:
                 type: string
               version:
                 type: string

@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -68,6 +67,9 @@ type exposureRuntime struct {
 	fingerprint string
 
 	provider string
+
+	caPool   *tlsreload.Pool
+	caBundle string
 
 	once sync.Once
 
@@ -271,7 +273,19 @@ func (c *ExposureController) Reconcile(ctx context.Context, dyn dynamic.Interfac
 	}
 	fingerprint += fmt.Sprintf("|handler-%d", handlerRevision)
 	if current := c.current(name); current != nil && current.fingerprint == fingerprint {
-		return nil
+		rotated, err := c.rotateCA(name, current, exp.Spec.TLS.CABundle)
+		if err == nil && !rotated {
+			return nil
+		}
+		if err == nil {
+			conds.Set(&status.Conditions, generation, ConditionHandlerRegistered, true, "HandlerRegistered", "the target handler is registered")
+			if current.provider != "" {
+				conds.Set(&status.Conditions, generation, ConditionIngressProvider, true, "ProviderReady", current.provider)
+			}
+			conds.Set(&status.Conditions, generation, ConditionReady, true, "Ready", readyMessage(current))
+			return writeStatus(ctx, ri, name, &status)
+		}
+		c.log.Warn("rebuilding the Exposure after a bad CA bundle", "exposure", name, "err", err)
 	}
 	c.stop(name)
 	c.release(name)
@@ -299,6 +313,7 @@ func (c *ExposureController) Reconcile(ctx context.Context, dyn dynamic.Interfac
 		return writeStatus(ctx, ri, name, &status)
 	}
 	rt.fingerprint = fingerprint
+	rt.caBundle = strings.TrimSpace(exp.Spec.TLS.CABundle)
 	c.store(name, rt)
 	status.Phase = exposurev1alpha1.ExposureReady
 	status.Ready = true
@@ -332,8 +347,10 @@ func readService(ctx context.Context, dyn dynamic.Interface, name string) (*expo
 }
 
 func specFingerprint(exp *exposurev1alpha1.Exposure, svc *exposurev1alpha1.Service, target component.Key) (string, error) {
+	spec := exp.Spec
+	spec.TLS.CABundle = caBundleKey(spec.TLS.CABundle)
 	value := map[string]any{
-		"exposure": map[string]any{"spec": exp.Spec, "generation": exp.Generation},
+		"exposure": map[string]any{"spec": spec},
 		"service":  map[string]any{"spec": svc.Spec, "generation": svc.Generation},
 		"target":   target,
 	}
@@ -342,6 +359,35 @@ func specFingerprint(exp *exposurev1alpha1.Exposure, svc *exposurev1alpha1.Servi
 		return "", err
 	}
 	return string(raw), nil
+}
+
+func caBundleKey(bundle string) string {
+	bundle = strings.TrimSpace(bundle)
+	if isPEMBundle(bundle) {
+		return "pem"
+	}
+	return bundle
+}
+
+func isPEMBundle(bundle string) bool {
+	return strings.Contains(bundle, "-----BEGIN")
+}
+
+func (c *ExposureController) rotateCA(name string, rt *exposureRuntime, bundle string) (bool, error) {
+	bundle = strings.TrimSpace(bundle)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if bundle == rt.caBundle {
+		return false, nil
+	}
+	if rt.caPool != nil && isPEMBundle(bundle) {
+		if err := rt.caPool.Set([]byte(bundle)); err != nil {
+			return false, err
+		}
+		c.log.Info("rotated the Exposure client CA bundle", "exposure", name)
+	}
+	rt.caBundle = bundle
+	return true, nil
 }
 
 func (c *ExposureController) current(name string) *exposureRuntime {
@@ -388,7 +434,7 @@ func (c *ExposureController) startLocal(ctx context.Context, exp *exposurev1alph
 	if err != nil {
 		return nil, "", "", err
 	}
-	tlsConfig, err := c.localTLS(exp.Spec.TLS)
+	tlsConfig, caPool, err := c.localTLS(exp.Spec.TLS)
 	if err != nil {
 		_ = listener.Close()
 		return nil, "", "", err
@@ -398,7 +444,7 @@ func (c *ExposureController) startLocal(ctx context.Context, exp *exposurev1alph
 	}
 	protocol := protocolKind(svc.Spec.Protocol)
 	path := normalizePath(exp.Spec.Path)
-	rt := &exposureRuntime{}
+	rt := &exposureRuntime{caPool: caPool}
 	switch protocol {
 	case component.ProtocolHTTP, component.ProtocolWS:
 		if handler == nil {
@@ -498,9 +544,9 @@ func originURL(raw string) string {
 	return parsed.Scheme + "://" + parsed.Host
 }
 
-func (c *ExposureController) localTLS(spec exposurev1alpha1.ExposureTLS) (*tls.Config, error) {
+func (c *ExposureController) localTLS(spec exposurev1alpha1.ExposureTLS) (*tls.Config, *tlsreload.Pool, error) {
 	if !spec.Enabled && strings.TrimSpace(spec.CertRef) == "" {
-		return nil, nil
+		return nil, nil, nil
 	}
 	var config *tls.Config
 	switch {
@@ -508,24 +554,24 @@ func (c *ExposureController) localTLS(spec exposurev1alpha1.ExposureTLS) (*tls.C
 		certFile := strings.TrimSpace(spec.CertRef)
 		reloader, err := tlsreload.New(certFile, []string{servetls.KeyFileFor(certFile)}, c.log)
 		if err != nil {
-			return nil, fmt.Errorf("loading the certificate %s: %w", certFile, err)
+			return nil, nil, fmt.Errorf("loading the certificate %s: %w", certFile, err)
 		}
 		config = reloader.TLSConfig(&tls.Config{MinVersion: tls.VersionTLS12})
 	case c.tls != nil:
 		config = c.tls.Clone()
 		config.MinVersion = cmp.Or(config.MinVersion, tls.VersionTLS12)
 	default:
-		return nil, errors.New("TLS is enabled but no certificate is available")
+		return nil, nil, errors.New("TLS is enabled but no certificate is available")
 	}
-	if bundle := strings.TrimSpace(spec.CABundle); bundle != "" {
-		pool := x509.NewCertPool()
-		if !pool.AppendCertsFromPEM([]byte(bundle)) {
-			return nil, errors.New("the CA bundle holds no certificate")
-		}
-		config.ClientCAs = pool
-		config.ClientAuth = tls.VerifyClientCertIfGiven
+	bundle := strings.TrimSpace(spec.CABundle)
+	if bundle == "" {
+		return config, nil, nil
 	}
-	return config, nil
+	pool, err := tlsreload.PoolFromBundle(bundle, c.log)
+	if err != nil {
+		return nil, nil, err
+	}
+	return pool.ServerConfig(config, tls.VerifyClientCertIfGiven), pool, nil
 }
 
 func bridge(ctx context.Context, handlers *component.Handlers, target component.Key, name string, conn net.Conn) {

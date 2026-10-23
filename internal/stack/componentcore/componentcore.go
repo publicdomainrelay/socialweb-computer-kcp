@@ -47,7 +47,6 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/requester"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/sshserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsfront"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 )
 
 const (
@@ -236,7 +235,7 @@ func New(cfg Config) (*Core, error) {
 	if vaultClient == "" && strings.TrimSpace(cfg.CredentialServer) != "" {
 		return nil, errors.New("componentcore: the vault clients need the named client certificate of the credential server")
 	}
-	vault, err := openbao.New(store, base, vaultClient)
+	vault, err := credentials.NewClients(store, base, vaultClient)
 	if err != nil {
 		return nil, fmt.Errorf("componentcore: the vault clients: %w", err)
 	}

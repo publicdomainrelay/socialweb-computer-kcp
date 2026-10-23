@@ -16,9 +16,9 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/nodemarket"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/systemdunit"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/systemdunit/notify"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 )
 
 const openBaoLinkName = "openbao"
@@ -148,11 +148,11 @@ func prepare(ctx context.Context, cfg Config, log *slog.Logger) error {
 		return fmt.Errorf("nodeagent: %s: %w", cfg.ClaimCAPath, err)
 	}
 	client := openbao.New("https://"+cfg.OpenBaoLinkAddress, "", openbao.WithCACertPool(pool))
-	baoToken, err := loginOpenBao(ctx, cfg, client, doc, exchanged, log)
+	logged, err := loginOpenBao(ctx, cfg, client, doc, exchanged, log)
 	if err != nil {
 		return err
 	}
-	data, err := readNodeKV(ctx, cfg, client.WithToken(baoToken), doc, log)
+	data, err := readNodeKV(ctx, cfg, logged, doc, log)
 	if err != nil {
 		return err
 	}
@@ -257,23 +257,23 @@ func exchangeWorkloadToken(ctx context.Context, cfg Config, audience string, log
 	return token, nil
 }
 
-func loginOpenBao(ctx context.Context, cfg Config, client *openbao.Client, doc claimDocument, exchanged string, log *slog.Logger) (string, error) {
+func loginOpenBao(ctx context.Context, cfg Config, client *openbao.Client, doc claimDocument, exchanged string, log *slog.Logger) (*openbao.Client, error) {
 	for attempt := 1; attempt <= cfg.LinkWaitAttempts; attempt++ {
-		token, err := client.LoginJWT(ctx, doc.JWTMount, doc.Role, exchanged)
-		if err == nil && token != "" {
+		logged, err := client.LoginJWT(ctx, doc.JWTMount, doc.Role, exchanged)
+		if err == nil {
 			log.Info("logged in to the cluster OpenBao", "mount", doc.JWTMount, "role", doc.Role)
-			return token, nil
+			return logged, nil
 		}
 		if ctx.Err() != nil {
-			return "", ctx.Err()
+			return nil, ctx.Err()
 		}
 		log.Info("the OpenBao link has not answered yet", "address", cfg.OpenBaoLinkAddress,
 			"attempt", attempt, "of", cfg.LinkWaitAttempts, "err", errString(err))
 		if err := clock.SleepErr(ctx, cfg.LinkWaitInterval()); err != nil {
-			return "", err
+			return nil, err
 		}
 	}
-	return "", fmt.Errorf("nodeagent: OpenBao login at auth/%s as %s failed after %d attempts at the link on %s",
+	return nil, fmt.Errorf("nodeagent: OpenBao login at auth/%s as %s failed after %d attempts at the link on %s",
 		doc.JWTMount, doc.Role, cfg.LinkWaitAttempts, cfg.OpenBaoLinkAddress)
 }
 

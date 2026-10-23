@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -19,14 +18,12 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 )
 
 const (
 	DefaultTimeout = 10 * time.Second
-
-	ownTokenRenewBefore = time.Minute
 
 	maximumReplyBody = 1 << 20
 )
@@ -71,9 +68,8 @@ type Client struct {
 	mu      sync.Mutex
 	client  *http.Client
 	clientK string
-	own     string
+	own     *openbao.Client
 	ownKey  string
-	renewAt time.Time
 
 	endpointCached Endpoint
 	endpointHeld   bool
@@ -248,74 +244,49 @@ func (c *Client) ConfigureIssuer(ctx context.Context, ingressURL string) error {
 }
 
 func (c *Client) authed(ctx context.Context, method, path string, body any) (Reply, error) {
-	for attempt := 0; ; attempt++ {
-		token, err := c.ownToken(ctx)
-		if err != nil {
-			return Reply{}, err
-		}
-		reply, err := c.send(ctx, method, path, token, body)
-		if err != nil {
-			return Reply{}, err
-		}
-		if (reply.Status == http.StatusForbidden || reply.Status == http.StatusUnauthorized) && attempt == 0 {
-			c.forgetOwn()
-			continue
-		}
-		return reply, nil
+	own, err := c.ownClient(ctx)
+	if err != nil {
+		return Reply{}, err
 	}
+	return c.exchange(ctx, own, method, path, body)
 }
 
-func (c *Client) ownToken(ctx context.Context) (string, error) {
+func (c *Client) ownClient(ctx context.Context) (*openbao.Client, error) {
 	endpoint, err := c.resolveEndpoint(ctx)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if endpoint.CertLogin == nil {
-		return "", errors.New("guestidentity: the OpenBao endpoint names no certificate login for this process")
+		return nil, errors.New("guestidentity: the OpenBao endpoint names no certificate login for this process")
 	}
 	if !ValidMount(endpoint.CertLogin.Mount) || endpoint.CertLogin.Role == "" {
-		return "", errors.New("guestidentity: the OpenBao certificate login mount or role is not a name")
+		return nil, errors.New("guestidentity: the OpenBao certificate login mount or role is not a name")
 	}
 	key, err := endpointKey(endpoint)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	c.mu.Lock()
-	if c.own != "" && c.ownKey == key && time.Now().Before(c.renewAt) {
-		token := c.own
+	if c.own != nil && c.ownKey == key {
+		own := c.own
 		c.mu.Unlock()
-		return token, nil
+		return own, nil
 	}
 	c.mu.Unlock()
-
-	reply, err := c.send(ctx, http.MethodPost, "auth/"+endpoint.CertLogin.Mount+"/login", "", map[string]string{"name": endpoint.CertLogin.Role})
+	client, err := c.httpClient(endpoint)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	if !reply.OK() {
-		return "", fmt.Errorf("guestidentity: certificate login as %s returned HTTP %d: %s", endpoint.CertLogin.Role, reply.Status, bodyPreview(reply.Body))
+	attempt, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+	own, err := openbao.New(endpoint.Address, "", openbao.WithHTTPClient(client)).LoginCert(attempt, endpoint.CertLogin.Mount, endpoint.CertLogin.Role)
+	if err != nil {
+		return nil, fmt.Errorf("guestidentity: certificate login as %s: %w", endpoint.CertLogin.Role, err)
 	}
-	var payload struct {
-		Auth struct {
-			ClientToken   string `json:"client_token"`
-			LeaseDuration int64  `json:"lease_duration"`
-		} `json:"auth"`
-	}
-	if err := json.Unmarshal(reply.Body, &payload); err != nil || payload.Auth.ClientToken == "" {
-		return "", fmt.Errorf("guestidentity: certificate login as %s answered without a client token", endpoint.CertLogin.Role)
-	}
-	lease := time.Duration(payload.Auth.LeaseDuration) * time.Second
-	renew := max(max(lease-ownTokenRenewBefore, lease/2), 0)
 	c.mu.Lock()
-	c.own, c.ownKey, c.renewAt = payload.Auth.ClientToken, key, time.Now().Add(renew)
+	c.own, c.ownKey = own, key
 	c.mu.Unlock()
-	return payload.Auth.ClientToken, nil
-}
-
-func (c *Client) forgetOwn() {
-	c.mu.Lock()
-	c.own, c.ownKey, c.renewAt = "", "", time.Time{}
-	c.mu.Unlock()
+	return own, nil
 }
 
 func (c *Client) send(ctx context.Context, method, path, vaultToken string, body any) (Reply, error) {
@@ -327,38 +298,21 @@ func (c *Client) send(ctx context.Context, method, path, vaultToken string, body
 	if err != nil {
 		return Reply{}, err
 	}
-	var reader io.Reader
-	if body != nil {
-		raw, err := json.Marshal(body)
-		if err != nil {
-			return Reply{}, fmt.Errorf("guestidentity: encoding the %s request: %w", path, err)
-		}
-		reader = bytes.NewReader(raw)
-	}
+	return c.exchange(ctx, openbao.New(endpoint.Address, vaultToken, openbao.WithHTTPClient(client)), method, path, body)
+}
+
+func (c *Client) exchange(ctx context.Context, client *openbao.Client, method, path string, body any) (Reply, error) {
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(endpoint.Address, "/")+"/v1/"+path, reader)
-	if err != nil {
-		return Reply{}, fmt.Errorf("guestidentity: building the %s request: %w", path, err)
-	}
-	req.Header.Set("Accept", "application/json")
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	if vaultToken != "" {
-		req.Header.Set(VaultTokenHeader, vaultToken)
-	}
-	resp, err := client.Do(req)
+	status, raw, err := client.Raw(ctx, method, path, body)
 	if err != nil {
 		c.forgetEndpoint()
 		return Reply{}, fmt.Errorf("guestidentity: %s %s: %w", method, path, err)
 	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, maximumReplyBody))
-	if err != nil {
-		return Reply{}, fmt.Errorf("guestidentity: reading the %s reply: %w", path, err)
+	if len(raw) > maximumReplyBody {
+		raw = raw[:maximumReplyBody]
 	}
-	reply := Reply{Status: resp.StatusCode}
+	reply := Reply{Status: status}
 	if len(bytes.TrimSpace(raw)) > 0 {
 		reply.Body = json.RawMessage(append([]byte(nil), raw...))
 	}

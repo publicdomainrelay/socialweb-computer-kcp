@@ -12,7 +12,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/baosync"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vaultcert"
 )
 
@@ -360,11 +360,7 @@ func pkiCA(c *openbao.Client) caSource {
 }
 
 func loginCore(ctx context.Context, c *openbao.Client) (*openbao.Client, error) {
-	tok, err := c.LoginCert(ctx, CertAuthMount, CertAuthRole)
-	if err != nil {
-		return nil, err
-	}
-	return c.WithToken(tok), nil
+	return c.LoginCert(ctx, CertAuthMount, CertAuthRole)
 }
 
 func loginRefused(err error) bool {

@@ -15,8 +15,7 @@ import (
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpclient"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vaultlayout"
 )
 
@@ -263,18 +262,11 @@ func adminHTTPClient(pool *x509.CertPool) *http.Client {
 }
 
 func (c *rawClient) do(ctx context.Context, method, path string, in any) (int, []byte, error) {
-	req, err := httpjson.NewRequest(ctx, method, c.addr+"/v1/"+strings.Trim(path, "/"), in)
-	if err != nil {
-		return 0, nil, fmt.Errorf("vaultcert: building %s /v1/%s: %w", method, path, err)
-	}
-	if c.token != "" {
-		req.Header.Set("X-Vault-Token", c.token)
-	}
-	resp, err := httpjson.Exchange(ctx, c.http, req, httpjson.Unlimited)
+	status, body, err := openbao.New(c.addr, c.token, openbao.WithHTTPClient(c.http)).Raw(ctx, method, strings.Trim(path, "/"), in)
 	if err != nil {
 		return 0, nil, fmt.Errorf("vaultcert: %s /v1/%s: %w", method, path, err)
 	}
-	return resp.Status, resp.Body, nil
+	return status, body, nil
 }
 
 func (c *rawClient) listData(ctx context.Context, path string) (map[string]json.RawMessage, error) {

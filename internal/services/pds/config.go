@@ -2,7 +2,6 @@ package pds
 
 import (
 	"crypto/tls"
-	"crypto/x509"
 	"errors"
 	"fmt"
 	"net/http"
@@ -251,17 +250,12 @@ func buildTLSConfig(cfg Config) (*tls.Config, error) {
 		}
 	}
 	if cfg.CABundle != "" {
-		raw := []byte(cfg.CABundle)
-		pool := tlsConfig.RootCAs
-		if pool == nil {
-			pool = x509.NewCertPool()
+		pool, err := tlsreload.PoolFromBundle(cfg.CABundle, cfg.Deps.Log)
+		if err != nil {
+			return nil, fmt.Errorf("pds: the tls ca bundle: %w", err)
 		}
-		if !pool.AppendCertsFromPEM(raw) {
-			return nil, errors.New("pds: the tls ca bundle holds no certificate")
-		}
-		tlsConfig.RootCAs = pool
 		if tlsConfig.ClientCAs == nil {
-			tlsConfig.ClientCAs = pool
+			tlsConfig = pool.ServerConfig(tlsConfig, tlsConfig.ClientAuth)
 		}
 	}
 	return tlsConfig, nil

@@ -33,6 +33,7 @@ import (
 	policyctl "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/policy"
 	remotepdsctl "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/remotepds"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
+	vaultctl "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/vault"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/credentials"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/eventstream"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostlifecycle"
@@ -410,7 +411,7 @@ func (c *Core) buildManager(caBundle remotepdsctl.CABundleFunc) {
 		log.Warn("the controller manager is not wired", "err", err.Error())
 		return
 	}
-	mgr, err := ctlruntime.NewManager(ctlruntime.Config{Rest: restCfg, AddToScheme: []func(*runtime.Scheme) error{pdsv1alpha1.AddToScheme, policyv1alpha1.AddToScheme},
+	mgr, err := ctlruntime.NewManager(ctlruntime.Config{Rest: restCfg, AddToScheme: []func(*runtime.Scheme) error{pdsv1alpha1.AddToScheme, policyv1alpha1.AddToScheme, v1alpha1.AddToScheme},
 		Log: log})
 	if err != nil {
 		log.Warn("the controller manager is not wired", "err", err.Error())
@@ -428,6 +429,9 @@ func (c *Core) buildManager(caBundle remotepdsctl.CABundleFunc) {
 			return policyActionHandlers(c.store, workspace)
 		}}); err != nil {
 		log.Warn("the policy controllers are not wired", "err", err.Error())
+	}
+	if _, err := vaultctl.Register(mgr, c.handlers, vaultctl.Options{Log: log}); err != nil {
+		log.Warn("the vault controller is not wired", "err", err.Error())
 	}
 	c.runners = append(c.runners, controllerRunner{name: "controller-manager", run: mgr.Start})
 }

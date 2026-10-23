@@ -33,8 +33,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -492,11 +492,11 @@ func ServerClient(ctx context.Context, ri dynamic.ResourceInterface, server, cli
 		return nil, st, c, err
 	}
 	client := openbao.New(st.Address, "", openbao.WithCACertPool(pool), openbao.WithClientCertificate(cert))
-	token, err := client.LoginCert(ctx, c.CertAuthMount, c.CertAuthRole)
+	logged, err := client.LoginCert(ctx, c.CertAuthMount, c.CertAuthRole)
 	if err != nil {
 		return nil, st, c, err
 	}
-	return client.WithToken(token), st, c, nil
+	return logged, st, c, nil
 }
 
 func (ctl *Controller) bidderPassword(ctx context.Context) (string, manifests.BidderVault, error) {
