@@ -475,7 +475,7 @@ func (r *contractRunner) requestOnce(ctx context.Context) (bool, error) {
 	}
 	state.Phase = v1alpha1.ContractWinnerSelected
 	state.Bid = &commonv1.StrongRef{URI: winner.URI, CID: winner.CID}
-	state.Winner = &v1alpha1.ContractWinner{DID: winner.DID}
+	state.Winner = &v1alpha1.ContractWinner{DID: winner.DID, SubmitAccept: strings.TrimSpace(stringOf(winner.Record["submitAccept"]))}
 	state.Bids = new(len(allBids))
 	state.Timestamps.WinnerSelected = q.nowISO()
 	state.AcceptPending = &v1alpha1.ContractAcceptPending{BidURI: winner.URI}
@@ -1054,7 +1054,10 @@ func (r *contractRunner) releaseContract(ctx context.Context, state *v1alpha1.No
 	}
 	r.setRelease(release)
 
-	bidder, ok := q.bidderForDID(ctx, bidderDID)
+	bidder, ok := q.winnerBidder(ctx, state, bidderDID)
+	if !ok {
+		bidder, ok = q.bidderForDID(ctx, bidderDID)
+	}
 	if !ok {
 		bidder = Bidder{}
 	}
@@ -1105,6 +1108,21 @@ func (r *contractRunner) releaseContract(ctx context.Context, state *v1alpha1.No
 			return err
 		}
 	}
+}
+
+func (q *Requester) winnerBidder(ctx context.Context, state *v1alpha1.NodeClaimContract, bidderDID string) (Bidder, bool) {
+	if state.Winner == nil || state.Winner.DID != bidderDID {
+		return Bidder{}, false
+	}
+	ref := strings.TrimSpace(state.Winner.SubmitAccept)
+	if ref == "" {
+		return Bidder{}, false
+	}
+	endpoint, audience, err := resolveBidderEndpoint(ctx, q.deps.Directory, ref)
+	if err != nil || endpoint == "" {
+		return Bidder{}, false
+	}
+	return Bidder{DID: bidderDID, Endpoint: endpoint, Audience: audience}, true
 }
 
 func sleepCtx(ctx context.Context, delay time.Duration) error {
