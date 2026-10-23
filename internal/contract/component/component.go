@@ -57,8 +57,8 @@ func PrimaryEndpoint(endpoints []Endpoint) (Endpoint, bool) {
 	return Endpoint{}, false
 }
 
-type Service[D any] interface {
-	Start(ctx context.Context, deps D) error
+type Service interface {
+	Start(ctx context.Context) error
 	Ready(ctx context.Context) error
 	Endpoints() []Endpoint
 	Stop(ctx context.Context) error

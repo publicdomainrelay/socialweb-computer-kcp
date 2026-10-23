@@ -12,7 +12,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
-	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
@@ -35,20 +34,27 @@ var (
 	ErrNoFactory         = errors.New("component: no service factory is registered for kind")
 )
 
-type ServiceFactory func(ctx context.Context, deps Deps, spec ComponentSpec) (Service, error)
+type ServiceFactory func(ctx context.Context, in Instance, spec ComponentSpec) (Service, error)
 
-func FactoryOf[C any, S Service](configFrom func(Deps, ComponentSpec) (C, error), build func(C) S) ServiceFactory {
-	return FallibleFactoryOf(configFrom, func(cfg C) (S, error) { return build(cfg), nil })
-}
-
-func FallibleFactoryOf[C any, S Service](configFrom func(Deps, ComponentSpec) (C, error), build func(C) (S, error)) ServiceFactory {
-	return func(_ context.Context, deps Deps, spec ComponentSpec) (Service, error) {
-		cfg, err := configFrom(deps, spec)
+func Typed[S any, T Service](build func(in Instance, spec S) (T, error)) ServiceFactory {
+	return func(_ context.Context, in Instance, raw ComponentSpec) (Service, error) {
+		var spec S
+		if err := raw.Spec.Decode(&spec); err != nil {
+			return nil, fmt.Errorf("component: decoding the %s spec: %w", raw.Kind, err)
+		}
+		svc, err := build(in, spec)
 		if err != nil {
 			return nil, err
 		}
-		return build(cfg)
+		return svc, nil
 	}
+}
+
+type RuntimeConfig struct {
+	Log      *slog.Logger
+	StateDir string
+	Registry *Registry
+	Bus      *bus.Bus
 }
 
 type StatusCallback func(ctx context.Context, spec ComponentSpec, status ComponentStatus) error
@@ -71,7 +77,10 @@ func (e *PanicError) Unwrap() error {
 }
 
 type Runtime struct {
-	deps Deps
+	log      *slog.Logger
+	stateDir string
+	registry *Registry
+	bus      *bus.Bus
 
 	makeStateDir func(dir string) error
 
@@ -100,7 +109,7 @@ type instance struct {
 	key         Key
 	spec        ComponentSpec
 	svc         Service
-	deps        Deps
+	in          Instance
 	cancel      context.CancelFunc
 	done        chan struct{}
 	attempt     uint64
@@ -116,18 +125,21 @@ type instance struct {
 	supervising bool
 }
 
-func NewRuntime(deps Deps, onStatus StatusCallback) *Runtime {
-	if deps.Log == nil {
-		deps.Log = slog.New(slog.DiscardHandler)
+func NewRuntime(cfg RuntimeConfig, onStatus StatusCallback) *Runtime {
+	if cfg.Log == nil {
+		cfg.Log = slog.New(slog.DiscardHandler)
 	}
-	if deps.Registry == nil {
-		deps.Registry = NewRegistry()
+	if cfg.Registry == nil {
+		cfg.Registry = NewRegistry()
 	}
-	if deps.Handlers == nil {
-		deps.Handlers = NewHandlerRegistry()
+	if cfg.Bus == nil {
+		cfg.Bus = bus.New()
 	}
 	return &Runtime{
-		deps:              deps,
+		log:               cfg.Log,
+		stateDir:          cfg.StateDir,
+		registry:          cfg.Registry,
+		bus:               cfg.Bus,
 		instances:         map[types.UID]*instance{},
 		factories:         map[string]ServiceFactory{},
 		onStatus:          onStatus,
@@ -172,11 +184,11 @@ func (r *Runtime) prepareStateDir(dir string) error {
 }
 
 func (r *Runtime) Registry() *Registry {
-	return r.deps.Registry
+	return r.registry
 }
 
-func (r *Runtime) Handlers() *HandlerRegistry {
-	return r.deps.Handlers
+func (r *Runtime) Bus() *bus.Bus {
+	return r.bus
 }
 
 func (r *Runtime) Register(kind string, factory ServiceFactory) error {
@@ -238,8 +250,8 @@ func (r *Runtime) Stop(ctx context.Context) error {
 		r.forget(inst)
 		inst.opMu.Unlock()
 	}
-	if r.deps.Handlers != nil {
-		if err := r.deps.Handlers.Stop(stopCtx); err != nil {
+	if r.bus != nil {
+		if err := r.bus.Stop(stopCtx); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -370,21 +382,20 @@ func (r *Runtime) startLocked(ctx context.Context, inst *instance, spec Componen
 		r.emit(ctx, spec, st)
 		return st, err
 	}
-	deps := r.deps
-	deps.StateDir = spec.ComponentStateDir(deps.StateDir)
-	if deps.StateDir == "" {
+	in := r.instanceOf(spec)
+	if in.StateDir == "" {
 		err := fmt.Errorf("component: %s/%s has no state dir", spec.Kind, spec.Name)
 		st := failedStatus(spec, inst.restartsOf(), err)
 		r.emit(ctx, spec, st)
 		return st, err
 	}
-	if err := r.prepareStateDir(deps.StateDir); err != nil {
+	if err := r.prepareStateDir(in.StateDir); err != nil {
 		err := fmt.Errorf("component: creating the state dir for %s/%s: %w", spec.Kind, spec.Name, err)
 		st := failedStatus(spec, inst.restartsOf(), err)
 		r.emit(ctx, spec, st)
 		return st, err
 	}
-	svc, err := r.callFactory(ctx, spec, factory, deps)
+	svc, err := r.callFactory(ctx, spec, factory, in)
 	if err != nil {
 		err := fmt.Errorf("component: building %s/%s: %w", spec.Kind, spec.Name, err)
 		st := failedStatus(spec, inst.restartsOf(), err)
@@ -405,7 +416,7 @@ func (r *Runtime) startLocked(ctx context.Context, inst *instance, spec Componen
 	inst.key = Key{Workspace: spec.Workspace, Kind: spec.Kind, Name: spec.Name}
 	inst.spec = spec
 	inst.svc = svc
-	inst.deps = deps
+	inst.in = in
 	inst.cancel = cancel
 	inst.done = done
 	inst.startedAt = startedAt
@@ -423,7 +434,7 @@ func (r *Runtime) startLocked(ctx context.Context, inst *instance, spec Componen
 	inst.mu.Unlock()
 
 	r.emit(ctx, spec, st)
-	go r.supervise(inst, spec, deps, svc, runCtx, done, attempt)
+	go r.supervise(inst, spec, in, svc, runCtx, done, attempt)
 	return st, nil
 }
 
@@ -482,7 +493,7 @@ func (r *Runtime) stopInstanceLocked(ctx context.Context, inst *instance) error 
 	return stopErr
 }
 
-func (r *Runtime) supervise(inst *instance, spec ComponentSpec, deps Deps, svc Service, runCtx context.Context, done chan struct{}, attempt uint64) {
+func (r *Runtime) supervise(inst *instance, spec ComponentSpec, in Instance, svc Service, runCtx context.Context, done chan struct{}, attempt uint64) {
 	defer func() {
 		inst.mu.Lock()
 		inst.ended = true
@@ -498,7 +509,7 @@ func (r *Runtime) supervise(inst *instance, spec ComponentSpec, deps Deps, svc S
 	restarts := inst.restartsOf()
 	for {
 		if svc == nil {
-			next, ferr := r.buildService(runCtx, spec, deps)
+			next, ferr := r.buildService(runCtx, spec, in)
 			if ferr != nil {
 				restarts++
 				st := failedStatus(spec, restarts, ferr)
@@ -542,7 +553,7 @@ func (r *Runtime) supervise(inst *instance, spec ComponentSpec, deps Deps, svc S
 		started := make(chan struct{})
 		ready := r.launchReady(&probes, inst, svc, runCtx, attempt, started)
 		close(started)
-		err := r.callStart(runCtx, svc, deps, spec)
+		err := r.callStart(runCtx, svc, spec)
 		if runCtx.Err() != nil || inst.isStopping() {
 			inst.deactivate(attempt)
 			r.unregister(inst)
@@ -560,7 +571,7 @@ func (r *Runtime) supervise(inst *instance, spec ComponentSpec, deps Deps, svc S
 		if inst.claimStop() {
 			stopCtx, stopCancel := context.WithTimeout(context.WithoutCancel(runCtx), DefaultStopTimeout)
 			if stopErr := r.callStop(stopCtx, spec.Kind+"/"+spec.Name, Key{Workspace: spec.Workspace, Kind: spec.Kind, Name: spec.Name}, svc); stopErr != nil {
-				r.deps.Log.Warn("component: stopping the exited service failed", "component", spec.Kind+"/"+spec.Name, "workspace", spec.Workspace, "err", stopErr)
+				r.log.Warn("component: stopping the exited service failed", "component", spec.Kind+"/"+spec.Name, "workspace", spec.Workspace, "err", stopErr)
 			}
 			stopCancel()
 		}
@@ -569,10 +580,10 @@ func (r *Runtime) supervise(inst *instance, spec ComponentSpec, deps Deps, svc S
 		}
 		restarts++
 		if err != nil {
-			r.deps.Log.Warn("component: service exited", "component", spec.Kind+"/"+spec.Name, "workspace", spec.Workspace, "restarts", restarts, "err", err)
+			r.log.Warn("component: service exited", "component", spec.Kind+"/"+spec.Name, "workspace", spec.Workspace, "restarts", restarts, "err", err)
 			var panicErr *PanicError
 			if errors.As(err, &panicErr) && len(panicErr.Stack) > 0 {
-				r.deps.Log.Error("component: service panicked", "component", spec.Kind+"/"+spec.Name, "stack", string(panicErr.Stack))
+				r.log.Error("component: service panicked", "component", spec.Kind+"/"+spec.Name, "stack", string(panicErr.Stack))
 			}
 		}
 		st := statusFromSpec(spec)
@@ -594,12 +605,12 @@ func (r *Runtime) supervise(inst *instance, spec ComponentSpec, deps Deps, svc S
 	}
 }
 
-func (r *Runtime) buildService(ctx context.Context, spec ComponentSpec, deps Deps) (Service, error) {
+func (r *Runtime) buildService(ctx context.Context, spec ComponentSpec, in Instance) (Service, error) {
 	factory, err := r.factoryFor(spec.Kind)
 	if err != nil {
 		return nil, err
 	}
-	svc, err := r.callFactory(ctx, spec, factory, deps)
+	svc, err := r.callFactory(ctx, spec, factory, in)
 	if err != nil {
 		return nil, err
 	}
@@ -671,7 +682,7 @@ func (r *Runtime) awaitReady(inst *instance, svc Service, ctx context.Context, a
 		if err != nil {
 			var panicErr *PanicError
 			if errors.As(err, &panicErr) {
-				r.deps.Log.Error("component: service ready check panicked", "component", panicErr.Component, "stack", string(panicErr.Stack))
+				r.log.Error("component: service ready check panicked", "component", panicErr.Component, "stack", string(panicErr.Stack))
 				return
 			}
 			if !timedOut && time.Now().After(deadline) {
@@ -701,7 +712,7 @@ func (r *Runtime) awaitReady(inst *instance, svc Service, ctx context.Context, a
 		}
 		endpoints, err := r.callEndpoints(inst, svc)
 		if err != nil {
-			r.deps.Log.Error("component: reading service endpoints failed", "err", err)
+			r.log.Error("component: reading service endpoints failed", "err", err)
 			return
 		}
 		inst.mu.Lock()
@@ -730,7 +741,7 @@ func (r *Runtime) awaitReady(inst *instance, svc Service, ctx context.Context, a
 }
 
 func (r *Runtime) register(inst *instance, svc Service, endpoints []Endpoint) bool {
-	if r.deps.Registry == nil {
+	if r.registry == nil {
 		return false
 	}
 	inst.mu.Lock()
@@ -746,28 +757,28 @@ func (r *Runtime) register(inst *instance, svc Service, endpoints []Endpoint) bo
 		Service:    inst.svc,
 	}
 	inst.mu.Unlock()
-	r.deps.Registry.Put(entry)
+	r.registry.Put(entry)
 	return true
 }
 
 func (r *Runtime) unregister(inst *instance) {
-	if r.deps.Registry == nil {
+	if r.registry == nil {
 		return
 	}
 	inst.mu.Lock()
 	key := inst.key
 	uid := inst.uid
 	inst.mu.Unlock()
-	r.deps.Registry.Unregister(key, uid)
-	if r.deps.Handlers != nil {
-		r.deps.Handlers.Remove(key)
+	r.registry.Unregister(key, uid)
+	if r.bus != nil {
+		r.bus.Remove(key)
 	}
 }
 
 func (r *Runtime) emit(ctx context.Context, spec ComponentSpec, status ComponentStatus) {
 	defer func() {
 		if value := recover(); value != nil {
-			r.deps.Log.Error("component: status callback panicked",
+			r.log.Error("component: status callback panicked",
 				"component", spec.Kind+"/"+spec.Name,
 				"workspace", spec.Workspace,
 				"value", value,
@@ -783,18 +794,18 @@ func (r *Runtime) emit(ctx context.Context, spec ComponentSpec, status Component
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), StatusWriteTimeout)
 	defer cancel()
 	if err := cb(writeCtx, spec, status); err != nil {
-		r.deps.Log.Warn("component: status callback failed", "component", spec.Kind+"/"+spec.Name, "workspace", spec.Workspace, "err", err)
+		r.log.Warn("component: status callback failed", "component", spec.Kind+"/"+spec.Name, "workspace", spec.Workspace, "err", err)
 	}
 }
 
-func (r *Runtime) callStart(ctx context.Context, svc Service, deps Deps, spec ComponentSpec) (err error) {
+func (r *Runtime) callStart(ctx context.Context, svc Service, spec ComponentSpec) (err error) {
 	name := spec.Kind + "/" + spec.Name
 	defer func() {
 		if value := recover(); value != nil {
 			err = newPanicError(name, value)
 		}
 	}()
-	return svc.Start(specCaller(ctx, spec), deps)
+	return svc.Start(specCaller(ctx, spec))
 }
 
 func (r *Runtime) callReady(ctx context.Context, inst *instance, svc Service) (err error) {
@@ -827,7 +838,7 @@ func (r *Runtime) callStop(ctx context.Context, name string, key Key, svc Servic
 	return svc.Stop(WithCaller(ctx, key))
 }
 
-func (r *Runtime) callFactory(ctx context.Context, spec ComponentSpec, factory ServiceFactory, deps Deps) (svc Service, err error) {
+func (r *Runtime) callFactory(ctx context.Context, spec ComponentSpec, factory ServiceFactory, in Instance) (svc Service, err error) {
 	name := spec.Kind + "/" + spec.Name
 	defer func() {
 		if value := recover(); value != nil {
@@ -835,11 +846,23 @@ func (r *Runtime) callFactory(ctx context.Context, spec ComponentSpec, factory S
 			err = newPanicError(name, value)
 		}
 	}()
-	return factory(specCaller(ctx, spec), deps, spec)
+	return factory(specCaller(ctx, spec), in, spec)
+}
+
+func (r *Runtime) instanceOf(spec ComponentSpec) Instance {
+	return Instance{
+		Self:      spec.Self(),
+		UID:       spec.UID,
+		Namespace: spec.Namespace,
+		Labels:    spec.Labels,
+		Log:       r.log,
+		StateDir:  spec.ComponentStateDir(r.stateDir),
+		Bus:       r.bus,
+	}
 }
 
 func specCaller(ctx context.Context, spec ComponentSpec) context.Context {
-	return bus.WithCallerLabels(ctx, commonv1.ObjectRef{Group: spec.Group, Kind: spec.Kind, Name: spec.Name, Workspace: spec.Workspace}, spec.Labels)
+	return bus.WithCallerLabels(ctx, spec.Self(), spec.Labels)
 }
 
 func newPanicError(name string, value any) *PanicError {
