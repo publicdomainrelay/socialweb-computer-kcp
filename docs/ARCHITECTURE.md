@@ -1103,17 +1103,32 @@ kind; the tables after them are the contract of each one.
 | `spec.userData` | the SecretRef of the guest user data | creator |
 | `spec.contract` | the market contract refs (receipt, accept, submit endpoint) | creator |
 | `spec.image`, `spec.stopGraceSeconds`, `spec.guestLogin` | the image policy, the stop grace, the guest login | creator |
-| `spec.release` | the creator asks for the VM to be released | creator |
+| `spec.accept` | the market accept the VM serves | creator |
+| `spec.release` | `requestedAt` and the optional `request` StrongRef: the creator asks for the release | creator (field manager `socialweb.computer/bidder`) |
 | `status.phase`, `status.lostReason` | `Pending` to `Running` to `Releasing`, or `Lost` or `Failed` and why | ComputeVM controller, from the backend |
 | `status.addresses` | `guest` and `host` addresses of the VM | ComputeVM controller, from the backend |
 | `status.bootedAt`, `status.message` | when it booted; the last transition | ComputeVM controller, from the backend |
-| `status.conditions` | `Ready`, `BackendBound`, `GuestReported`, `MarketReported` | ComputeVM controller; a reporting controller writes only its own condition |
-| `status.market` | the guest's market report | the reporting controller, under its own field manager |
+| `status.conditions` | `Ready`, `BackendBound` | ComputeVM controller (field manager `socialweb.computer/computevm`) |
+| `status.market.guest` | the guest's own report: address, reportedAt, host keys | guestcontrolplane (field manager `socialweb.computer/guestcontrolplane`) |
+| `status.market.published` | the URIs of the market records published for the guest: onNetworkUri, hostKeysUri | bidder (field manager `socialweb.computer/bidder`) |
 
-- Release MUST be `spec.release` written by the creator; an annotation MUST NOT carry it.
+- Release MUST be `spec.release` written by the creator; an annotation MUST NOT carry it. The
+  ComputeVM controller answers `spec.release` by creating the termination StateSync and deleting the
+  ComputeVM; its finalizer deletes the FirecrackerVM, waits for it to go, then drops the guest login
+  and the guest identity grants.
+- The accept a VM serves MUST be `spec.accept`; an annotation MUST NOT carry it.
+- The ComputeVM controller creates the FirecrackerVM named by `spec.backendRef` from the ComputeVM
+  spec, owned by the ComputeVM (controller ownerReference), and mirrors its status on each backend
+  event. Each field manager above is a const beside the type in `api/v1alpha1/types_computevm.go`;
+  each writer applies only its own subfield.
 - FirecrackerVM `spec` (owner, vcpu, mem, disk, image, userData, stopGraceSeconds) and `status`
-  (network with tap, prefix and MAC, image, runtime unit and VMM, work dir) are the Firecracker
-  controller's; a ComputeVM consumer MUST NOT read them.
+  (network, image, runtime unit identity and VMM, work dir) are the FirecrackerVM controller's
+  (`internal/controllers/firecrackervm`); a ComputeVM consumer MUST NOT read them. The backend
+  `internal/compute/firecracker` implements `compute.Provider` and takes `host.Units`, a user data
+  reader and a Placement as dependencies; it imports no kcp client. Unit state follows systemd D-Bus
+  signals (`internal/hostsvc` Watch); no ticker drives it.
+- Bid status has one writer, the bidder, by server-side apply under `socialweb.computer/bidder`
+  (`v1alpha1.FieldManagerBid`); it binds a Won Bid to its ComputeVM and sets Complete or Failed.
 
 **EventSource** (`api/events/v1alpha1`, export `events`), over **PdsEventSource**,
 **RelayEventSource** and **JetstreamEventSource** (label `contracts.socialweb.computer/eventsources`).
