@@ -310,7 +310,7 @@ waves:
     gate: "scripts/check-architecture.sh passes with an empty ticker allowlist outside deploy/obligations.txt and no System caller outside deploy/bus-bootstrap-callers.txt."
   - id: W6
     title: "Market lexicons"
-    status: doing
+    status: done
     serial: true
     tracks: [W6-LEXICONS]
     depends_on: [W4]
@@ -1036,7 +1036,7 @@ items:
     track: lexicons
     parallel_with: []
     depends_on: [W4-MARKET]
-    status: doing
+    status: done
     decision: >
       Write lexicon JSON for every market and compute NSID in
       internal/atproto/market/nsid.go. Keep one embedded lexicon copy. A
