@@ -11,11 +11,12 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/identity"
 	"github.com/bluesky-social/indigo/atproto/syntax"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 )
 
 const (
@@ -317,7 +318,7 @@ type cacheEntry struct {
 
 	unknownAccount bool
 
-	expiresAt time.Time
+	ttl time.Duration
 
 	checkedAt time.Time
 }
@@ -325,9 +326,7 @@ type cacheEntry struct {
 type PDSKeyAuthorizer struct {
 	opts KeyAuthorizerOptions
 
-	mu    sync.Mutex
-	cache map[string]*cacheEntry
-	order []string
+	cache *ttlcache.Cache[string, *cacheEntry]
 }
 
 func NewPDSKeyAuthorizer(opts KeyAuthorizerOptions) (*PDSKeyAuthorizer, error) {
@@ -357,34 +356,12 @@ func NewPDSKeyAuthorizer(opts KeyAuthorizerOptions) (*PDSKeyAuthorizer, error) {
 	}
 	return &PDSKeyAuthorizer{
 		opts:  opts,
-		cache: map[string]*cacheEntry{},
+		cache: ttlcache.New[string, *cacheEntry](ttlcache.Options{MaxEntries: opts.MaxCacheEntries}),
 	}, nil
 }
 
 func (a *PDSKeyAuthorizer) remember(username string, entry *cacheEntry) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if _, exists := a.cache[username]; exists {
-		for i, name := range a.order {
-			if name == username {
-				a.order = append(a.order[:i], a.order[i+1:]...)
-				break
-			}
-		}
-	}
-	a.order = append(a.order, username)
-	a.cache[username] = entry
-	for len(a.cache) > a.opts.MaxCacheEntries && len(a.order) > 0 {
-		oldest := a.order[0]
-		a.order = a.order[1:]
-		delete(a.cache, oldest)
-	}
-}
-
-func (a *PDSKeyAuthorizer) cached(username string) *cacheEntry {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.cache[username]
+	a.cache.SetTTL(username, entry, entry.ttl)
 }
 
 func (a *PDSKeyAuthorizer) empty(lookupFailed, unknownAccount bool) *cacheEntry {
@@ -393,7 +370,7 @@ func (a *PDSKeyAuthorizer) empty(lookupFailed, unknownAccount bool) *cacheEntry 
 		lookupFailed:   lookupFailed,
 		unknownAccount: unknownAccount,
 		checkedAt:      now,
-		expiresAt:      now.Add(a.opts.NegativeCacheTTL),
+		ttl:            a.opts.NegativeCacheTTL,
 	}
 }
 
@@ -472,7 +449,7 @@ func (a *PDSKeyAuthorizer) load(ctx context.Context, username string) *cacheEntr
 		account:   account,
 		records:   records,
 		checkedAt: now,
-		expiresAt: now.Add(a.opts.CacheTTL),
+		ttl:       a.opts.CacheTTL,
 	}
 }
 
@@ -499,8 +476,8 @@ func entryMatches(entry *cacheEntry, key PresentedKey) bool {
 
 func (a *PDSKeyAuthorizer) Authorize(ctx context.Context, username string, key PresentedKey) (*AuthorizedAccount, error) {
 	now := time.Now()
-	entry := a.cached(username)
-	if entry == nil || !now.Before(entry.expiresAt) {
+	entry, ok := a.cache.Get(username)
+	if !ok {
 		entry = a.load(ctx, username)
 		a.remember(username, entry)
 	}

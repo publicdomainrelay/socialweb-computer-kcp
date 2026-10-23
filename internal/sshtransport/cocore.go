@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayapi"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 )
 
 const (
@@ -169,8 +170,6 @@ type pendingPair struct {
 	did string
 
 	deviceID string
-
-	expiresAt time.Time
 }
 
 type CocorePairing struct {
@@ -180,9 +179,7 @@ type CocorePairing struct {
 
 	log *slog.Logger
 
-	mu sync.Mutex
-
-	pending map[string]pendingPair
+	pending *ttlcache.Cache[string, pendingPair]
 }
 
 func NewCocorePairing(opts CocorePairingOptions) (*CocorePairing, error) {
@@ -202,7 +199,7 @@ func NewCocorePairing(opts CocorePairingOptions) (*CocorePairing, error) {
 		opts:    opts,
 		base:    strings.TrimRight(opts.APIBaseURL, "/"),
 		log:     opts.Log,
-		pending: map[string]pendingPair{},
+		pending: ttlcache.New[string, pendingPair](ttlcache.Options{}),
 	}, nil
 }
 
@@ -245,19 +242,7 @@ func (p *CocorePairing) do(ctx context.Context, method, target string, body any)
 	return out, resp.StatusCode, nil
 }
 
-func (p *CocorePairing) sweepLocked() {
-	now := time.Now()
-	for id, entry := range p.pending {
-		if !now.Before(entry.expiresAt) {
-			delete(p.pending, id)
-		}
-	}
-}
-
 func (p *CocorePairing) Start(ctx context.Context, did string) (CocorePairingStarted, error) {
-	p.mu.Lock()
-	p.sweepLocked()
-	p.mu.Unlock()
 	body, status, err := p.do(ctx, http.MethodPost, p.base+"/xrpc/"+DevicePairStartNSID, map[string]any{
 		"appName":   p.opts.AppName,
 		"appDid":    p.opts.AppDID,
@@ -296,9 +281,7 @@ func (p *CocorePairing) Start(ctx context.Context, did string) (CocorePairingSta
 		interval = int(seconds)
 	}
 	pairID := randomHex(16)
-	p.mu.Lock()
-	p.pending[pairID] = pendingPair{did: did, deviceID: deviceID, expiresAt: time.Now().Add(expires)}
-	p.mu.Unlock()
+	p.pending.SetTTL(pairID, pendingPair{did: did, deviceID: deviceID}, expires)
 	p.log.Info("cocore_pairing_started", "did", did, "hasUserCode", userCode != "")
 	return CocorePairingStarted{
 		PairID: pairID, UserCode: userCode, VerificationURI: verificationURI, IntervalSecs: interval,
@@ -306,18 +289,10 @@ func (p *CocorePairing) Start(ctx context.Context, did string) (CocorePairingSta
 }
 
 func (p *CocorePairing) Poll(ctx context.Context, pairID string) (string, error) {
-	p.mu.Lock()
-	entry, ok := p.pending[pairID]
+	entry, ok := p.pending.Get(pairID)
 	if !ok {
-		p.mu.Unlock()
 		return "expired", nil
 	}
-	if !time.Now().Before(entry.expiresAt) {
-		delete(p.pending, pairID)
-		p.mu.Unlock()
-		return "expired", nil
-	}
-	p.mu.Unlock()
 	target := p.base + "/xrpc/" + DevicePairPollNSID + "?deviceId=" + url.QueryEscape(entry.deviceID)
 	body, status, err := p.do(ctx, http.MethodGet, target, nil)
 	if err != nil {
@@ -325,9 +300,7 @@ func (p *CocorePairing) Poll(ctx context.Context, pairID string) (string, error)
 		return "pending", nil
 	}
 	if status == http.StatusNotFound || status == http.StatusGone {
-		p.mu.Lock()
-		delete(p.pending, pairID)
-		p.mu.Unlock()
+		p.pending.Delete(pairID)
 		return "expired", nil
 	}
 	if status < 200 || status > 299 || body == nil {
@@ -337,15 +310,11 @@ func (p *CocorePairing) Poll(ctx context.Context, pairID string) (string, error)
 	state, _ := body["status"].(string)
 	switch state {
 	case "denied":
-		p.mu.Lock()
-		delete(p.pending, pairID)
-		p.mu.Unlock()
+		p.pending.Delete(pairID)
 		p.log.Info("cocore_pairing_denied", "did", entry.did)
 		return "denied", nil
 	case "expired":
-		p.mu.Lock()
-		delete(p.pending, pairID)
-		p.mu.Unlock()
+		p.pending.Delete(pairID)
 		return "expired", nil
 	}
 	session, _ := body["session"].(map[string]any)
@@ -374,9 +343,7 @@ func (p *CocorePairing) Poll(ctx context.Context, pairID string) (string, error)
 	if err := p.opts.Tokens.Set(ctx, entry.did, stored); err != nil {
 		return "", err
 	}
-	p.mu.Lock()
-	delete(p.pending, pairID)
-	p.mu.Unlock()
+	p.pending.Delete(pairID)
 	p.log.Info("cocore_paired", "did", entry.did)
 	return "complete", nil
 }

@@ -30,6 +30,8 @@ type XRPCError struct {
 
 func (e *XRPCError) Error() string { return e.Name + ": " + e.Message }
 
+func (e *XRPCError) HTTPStatus() int { return e.Status }
+
 var (
 	ErrInvalidRequest  = &XRPCError{"InvalidRequest", "the request is malformed", 400}
 	ErrUnauthorized    = &XRPCError{"Unauthorized", "the caller is not authenticated", 401}

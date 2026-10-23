@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
-	"sync"
 	"time"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/atproto"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/cache"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/models"
@@ -40,25 +40,22 @@ type ResolverOptions struct {
 	Log    func(level, msg string, meta map[string]any)
 }
 
+type operatorKey struct {
+	did     string
+	service string
+}
+
 type operatorEntry struct {
 	value string
 	found bool
-	at    time.Time
-}
-
-type vouchEntry struct {
-	value map[string]bool
-	at    time.Time
 }
 
 type Resolver struct {
 	client *atproto.Client
 	store  *cache.Store
-	ttl    time.Duration
 	log    func(level, msg string, meta map[string]any)
-	mu     sync.Mutex
-	ops    map[string]operatorEntry
-	vouch  map[string]vouchEntry
+	ops    *ttlcache.Cache[operatorKey, operatorEntry]
+	vouch  *ttlcache.Cache[string, map[string]bool]
 }
 
 func NewResolver(opts ResolverOptions) *Resolver {
@@ -77,10 +74,9 @@ func NewResolver(opts ResolverOptions) *Resolver {
 	return &Resolver{
 		client: client,
 		store:  opts.Store,
-		ttl:    ttl,
 		log:    log,
-		ops:    make(map[string]operatorEntry),
-		vouch:  make(map[string]vouchEntry),
+		ops:    ttlcache.New[operatorKey, operatorEntry](ttlcache.Options{TTL: ttl}),
+		vouch:  ttlcache.New[string, map[string]bool](ttlcache.Options{TTL: ttl}),
 	}
 }
 
@@ -110,11 +106,8 @@ func (r *Resolver) ResolveOperatorDidFor(ctx context.Context, did, service strin
 	if did == "" {
 		return "", false, nil
 	}
-	key := did + "\x00" + service
-	r.mu.Lock()
-	entry, ok := r.ops[key]
-	r.mu.Unlock()
-	if ok && time.Since(entry.at) < r.ttl {
+	key := operatorKey{did: did, service: service}
+	if entry, ok := r.ops.Get(key); ok {
 		return entry.value, entry.found, nil
 	}
 	operator := ""
@@ -140,9 +133,7 @@ func (r *Resolver) ResolveOperatorDidFor(ctx context.Context, did, service strin
 			}
 		}
 	}
-	r.mu.Lock()
-	r.ops[key] = operatorEntry{value: operator, found: found, at: time.Now()}
-	r.mu.Unlock()
+	r.ops.Set(key, operatorEntry{value: operator, found: found})
 	return operator, found, nil
 }
 
@@ -158,12 +149,9 @@ func (r *Resolver) GetVouchedDids(ctx context.Context, did string) (map[string]b
 	if did == "" {
 		return map[string]bool{}, nil
 	}
-	r.mu.Lock()
-	entry, ok := r.vouch[did]
-	r.mu.Unlock()
-	if ok && time.Since(entry.at) < r.ttl {
-		out := make(map[string]bool, len(entry.value))
-		for value := range entry.value {
+	if entry, ok := r.vouch.Get(did); ok {
+		out := make(map[string]bool, len(entry))
+		for value := range entry {
 			out[value] = true
 		}
 		return out, nil
@@ -191,13 +179,11 @@ func (r *Resolver) GetVouchedDids(ctx context.Context, did string) (map[string]b
 			}
 		}
 	}
-	r.mu.Lock()
 	clone := make(map[string]bool, len(vouched))
 	for value := range vouched {
 		clone[value] = true
 	}
-	r.vouch[did] = vouchEntry{value: clone, at: time.Now()}
-	r.mu.Unlock()
+	r.vouch.Set(did, clone)
 	return vouched, nil
 }
 
@@ -206,26 +192,18 @@ func (r *Resolver) Log(level, msg string, meta map[string]any) {
 }
 
 func (r *Resolver) ApplyEvent(did, rkey string) {
-	r.mu.Lock()
-	for key := range r.ops {
-		if key == did || strings.HasPrefix(key, did+"\x00") {
-			delete(r.ops, key)
-		}
-	}
+	r.ops.DeleteKeys(func(key operatorKey) bool { return key.did == did })
 	for _, other := range []string{did, rkey} {
 		if other == "" {
 			continue
 		}
-		delete(r.vouch, other)
+		r.vouch.Delete(other)
 	}
-	r.mu.Unlock()
 }
 
 func (r *Resolver) Invalidate() {
-	r.mu.Lock()
-	r.ops = make(map[string]operatorEntry)
-	r.vouch = make(map[string]vouchEntry)
-	r.mu.Unlock()
+	r.ops.DeleteKeys(func(operatorKey) bool { return true })
+	r.vouch.DeleteKeys(func(string) bool { return true })
 }
 
 type opResult struct {

@@ -453,11 +453,8 @@ func (s *eventStream) watchMatches(ctx context.Context) []resolvedMatch {
 }
 
 func (c *Controller) authorPDS(ctx context.Context, did syntax.DID) (pdsclient.PDS, error) {
-	c.mu.Lock()
-	cached, ok := c.pdsCache[did]
-	c.mu.Unlock()
-	if ok && cached.pds != nil && time.Since(cached.fetchedAt) < pdsCacheTTL {
-		return cached.pds, nil
+	if pds, ok := c.pdsCache.Get(did); ok && pds != nil {
+		return pds, nil
 	}
 	return c.resolveAuthorPDS(ctx, did)
 }
@@ -483,19 +480,12 @@ func (c *Controller) resolveAuthorPDS(ctx context.Context, did syntax.DID) (pdsc
 	if err != nil {
 		return nil, err
 	}
-	c.mu.Lock()
-	if c.pdsCache == nil {
-		c.pdsCache = map[syntax.DID]pdsCacheEntry{}
-	}
-	c.pdsCache[did] = pdsCacheEntry{pds: pds, fetchedAt: time.Now()}
-	c.mu.Unlock()
+	c.pdsCache.Set(did, pds)
 	return pds, nil
 }
 
 func (c *Controller) forgetAuthorPDS(ctx context.Context, did syntax.DID) {
-	c.mu.Lock()
-	delete(c.pdsCache, did)
-	c.mu.Unlock()
+	c.pdsCache.Delete(did)
 	if c.directory != nil {
 		_ = c.directory.Purge(ctx, did.AtIdentifier())
 	}

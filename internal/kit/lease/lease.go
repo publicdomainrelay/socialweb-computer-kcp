@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"golang.org/x/sync/singleflight"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 )
 
 type Fetch[T any] func(context.Context) (T, time.Time, error)
@@ -106,4 +108,38 @@ func (s *Source[T]) load(ctx context.Context) (T, error) {
 		var zero T
 		return zero, ctx.Err()
 	}
+}
+
+type Keyed[K comparable, T any] struct {
+	fetch   func(context.Context, K) (T, time.Time, error)
+	sources *ttlcache.Cache[K, *Source[T]]
+}
+
+func NewKeyed[K comparable, T any](fetch func(context.Context, K) (T, time.Time, error)) *Keyed[K, T] {
+	return &Keyed[K, T]{fetch: fetch, sources: ttlcache.New[K, *Source[T]](ttlcache.Options{})}
+}
+
+func (k *Keyed[K, T]) Source(key K) *Source[T] {
+	src, _ := k.sources.GetOrLoad(context.Background(), key, func(context.Context) (*Source[T], time.Duration, error) {
+		return New(func(ctx context.Context) (T, time.Time, error) { return k.fetch(ctx, key) }), 0, nil
+	})
+	return src
+}
+
+func (k *Keyed[K, T]) Get(ctx context.Context, key K) (T, error) {
+	return k.Source(key).Get(ctx)
+}
+
+func (k *Keyed[K, T]) Invalidate(key K) {
+	if src, ok := k.sources.Get(key); ok {
+		src.Invalidate()
+	}
+}
+
+func (k *Keyed[K, T]) Delete(key K) {
+	k.sources.Delete(key)
+}
+
+func (k *Keyed[K, T]) DeleteKeys(drop func(K) bool) int {
+	return k.sources.DeleteKeys(drop)
 }

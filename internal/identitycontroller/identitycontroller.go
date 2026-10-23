@@ -9,7 +9,6 @@ import (
 	"reflect"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -25,6 +24,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauthclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 )
 
 const (
@@ -98,9 +98,7 @@ type Controller struct {
 
 	states oauthclient.StateStore
 
-	qrMu sync.Mutex
-
-	qr map[string]*qrTransfer
+	qr *ttlcache.Cache[string, *qrTransfer]
 }
 
 func New(opts Options) (*Controller, error) {
@@ -135,7 +133,7 @@ func New(opts Options) (*Controller, error) {
 		}
 	}
 	return &Controller{workspace: opts.Workspace, dynamic: opts.Dynamic, endpoints: opts.Endpoints, log: log.With("component", "identity-controller"),
-		http: client, resolver: resolver, retry: retry, vault: opts.Vault, oauth: opts.OAuth, states: states, qr: map[string]*qrTransfer{}}, nil
+		http: client, resolver: resolver, retry: retry, vault: opts.Vault, oauth: opts.OAuth, states: states, qr: ttlcache.New[string, *qrTransfer](ttlcache.Options{})}, nil
 }
 
 func Run(ctx context.Context, opts Options) error {

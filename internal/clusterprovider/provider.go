@@ -15,6 +15,7 @@ import (
 	"k8s.io/client-go/rest"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/materialiser"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/portallocator"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/revocation"
@@ -132,7 +133,7 @@ type Provider struct {
 
 	nodeBackoff map[string]NodeBackoff
 
-	addOns map[string]time.Time
+	addOns *ttlcache.Cache[string, struct{}]
 }
 
 type NodeBackoff struct {
@@ -248,7 +249,7 @@ func New(opts Options) (*Provider, error) {
 	if (opts.Tenant != nil) != (opts.GrantPath != "") {
 		return nil, ErrNoBootstrap
 	}
-	p := &Provider{opts: opts}
+	p := &Provider{opts: opts, addOns: ttlcache.New[string, struct{}](ttlcache.Options{TTL: opts.AddOnInterval, Now: opts.Now})}
 	if opts.Tenant != nil && opts.OnReady == nil {
 		p.opts.OnReady = p.Bootstrap
 	}
@@ -393,17 +394,7 @@ func (p *Provider) tenantAddOnsDue(ref Ref) bool {
 	if err != nil {
 		return false
 	}
-	now := p.opts.Now()
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if last, ok := p.addOns[key]; ok && now.Sub(last) < p.opts.AddOnInterval {
-		return false
-	}
-	if p.addOns == nil {
-		p.addOns = map[string]time.Time{}
-	}
-	p.addOns[key] = now
-	return true
+	return p.addOns.Add(key, struct{}{}, 0)
 }
 
 func (p *Provider) refreshTenantAddOns(ctx context.Context, ref Ref, cl *v1alpha1.Cluster) error {

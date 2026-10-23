@@ -14,12 +14,13 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/atcrypto"
 
 	"github.com/bluesky-social/indigo/util/ssrf"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 )
 
 const (
@@ -116,19 +117,13 @@ func containsString(values []string, want string) bool {
 	return false
 }
 
-type clientMetadataCacheEntry struct {
-	metadata *ClientMetadata
-	expires  time.Time
-}
-
 type ClientMetadataResolver struct {
 	Nonces         NonceStore
 	Client         *http.Client
 	CacheTTL       time.Duration
 	AllowLocalhost bool
 
-	mu    sync.Mutex
-	cache map[string]clientMetadataCacheEntry
+	cache *ttlcache.Cache[string, *ClientMetadata]
 }
 
 func NewClientMetadataResolver(nonces NonceStore) *ClientMetadataResolver {
@@ -137,7 +132,7 @@ func NewClientMetadataResolver(nonces NonceStore) *ClientMetadataResolver {
 		Client:         DefaultHTTPClient(),
 		CacheTTL:       DefaultClientMetadataTTL,
 		AllowLocalhost: true,
-		cache:          make(map[string]clientMetadataCacheEntry),
+		cache:          ttlcache.New[string, *ClientMetadata](ttlcache.Options{TTL: DefaultClientMetadataTTL}),
 	}
 }
 
@@ -203,14 +198,9 @@ func (r *ClientMetadataResolver) httpClientFor(target *url.URL) *http.Client {
 }
 
 func (r *ClientMetadataResolver) Resolve(ctx context.Context, clientID string) (*ClientMetadata, error) {
-	now := time.Now()
-	r.mu.Lock()
-	entry, ok := r.cache[clientID]
-	if ok && now.Before(entry.expires) {
-		r.mu.Unlock()
-		return entry.metadata, nil
+	if metadata, ok := r.cache.Get(clientID); ok {
+		return metadata, nil
 	}
-	r.mu.Unlock()
 
 	var metadata *ClientMetadata
 	var err error
@@ -230,12 +220,7 @@ func (r *ClientMetadataResolver) Resolve(ctx context.Context, clientID string) (
 	if ttl <= 0 {
 		ttl = DefaultClientMetadataTTL
 	}
-	r.mu.Lock()
-	if r.cache == nil {
-		r.cache = make(map[string]clientMetadataCacheEntry)
-	}
-	r.cache[clientID] = clientMetadataCacheEntry{metadata: metadata, expires: now.Add(ttl)}
-	r.mu.Unlock()
+	r.cache.SetTTL(clientID, metadata, ttl)
 	return metadata, nil
 }
 

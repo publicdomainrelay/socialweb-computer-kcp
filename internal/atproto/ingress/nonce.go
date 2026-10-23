@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"errors"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/atcrypto"
@@ -13,6 +12,7 @@ import (
 	"github.com/bluesky-social/indigo/atproto/syntax"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/didkey"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 )
 
 var errNoDirectory = errors.New("ingress: no identity directory to resolve a signing key")
@@ -23,58 +23,18 @@ type verifyResult struct {
 	Reason string
 }
 
-type nonceEntry struct {
-	key       string
-	expiresAt time.Time
-}
-
 type NonceStore struct {
-	mu      sync.Mutex
-	ttl     time.Duration
 	dir     identity.Directory
-	entries map[string]nonceEntry
-	stop    chan struct{}
-	once    sync.Once
+	entries *ttlcache.Cache[string, string]
 }
 
 func NewNonceStore(ttl time.Duration, dir identity.Directory) *NonceStore {
 	if ttl <= 0 {
 		ttl = 60 * time.Second
 	}
-	n := &NonceStore{
-		ttl:     ttl,
+	return &NonceStore{
 		dir:     dir,
-		entries: map[string]nonceEntry{},
-		stop:    make(chan struct{}),
-	}
-	go n.purge()
-	return n
-}
-
-func (n *NonceStore) Close() {
-	n.once.Do(func() { close(n.stop) })
-}
-
-func (n *NonceStore) purge() {
-	interval := min(n.ttl, 30*time.Second)
-	if interval <= 0 {
-		interval = time.Second
-	}
-	t := time.NewTicker(interval)
-	defer t.Stop()
-	for {
-		select {
-		case <-n.stop:
-			return
-		case now := <-t.C:
-			n.mu.Lock()
-			for nonce, entry := range n.entries {
-				if entry.expiresAt.Before(now) {
-					delete(n.entries, nonce)
-				}
-			}
-			n.mu.Unlock()
-		}
+		entries: ttlcache.New[string, string](ttlcache.Options{TTL: ttl}),
 	}
 }
 
@@ -82,9 +42,7 @@ func (n *NonceStore) Issue(key string) string {
 	b := make([]byte, 64)
 	_, _ = rand.Read(b)
 	nonce := b64encode(b)
-	n.mu.Lock()
-	n.entries[nonce] = nonceEntry{key: key, expiresAt: time.Now().Add(n.ttl)}
-	n.mu.Unlock()
+	n.entries.Set(nonce, key)
 	return nonce
 }
 
@@ -95,20 +53,12 @@ func (n *NonceStore) Verify(ctx context.Context, reg Registration) verifyResult 
 	if reg.Nonce == "" {
 		return verifyResult{Reason: "missing nonce"}
 	}
-	n.mu.Lock()
-	entry, ok := n.entries[reg.Nonce]
-	n.mu.Unlock()
+	key, ok := n.entries.Get(reg.Nonce)
 	if !ok {
 		return verifyResult{Reason: "unknown or expired nonce"}
 	}
-	if entry.key != reg.Key {
+	if key != reg.Key {
 		return verifyResult{Reason: "nonce was issued for a different key"}
-	}
-	if entry.expiresAt.Before(time.Now()) {
-		n.mu.Lock()
-		delete(n.entries, reg.Nonce)
-		n.mu.Unlock()
-		return verifyResult{Reason: "nonce expired"}
 	}
 	if len(reg.Signatures) == 0 {
 		return verifyResult{Reason: "no signatures provided"}
@@ -129,9 +79,7 @@ func (n *NonceStore) Verify(ctx context.Context, reg Registration) verifyResult 
 }
 
 func (n *NonceStore) consume(nonce string) {
-	n.mu.Lock()
-	delete(n.entries, nonce)
-	n.mu.Unlock()
+	n.entries.Delete(nonce)
 }
 
 func (n *NonceStore) verifySignatures(ctx context.Context, nonceBytes []byte, signatures []Signature) bool {

@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/atcrypto"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 )
 
 const (
@@ -294,20 +296,19 @@ func dpopOrigin(raw string) (string, bool) {
 type memoryNonceEntry struct {
 	current         string
 	previous        string
-	currentExpires  time.Time
 	previousExpires time.Time
 }
 
 type MemoryNonceStore struct {
-	mu      sync.Mutex
-	origins map[string]memoryNonceEntry
-	jtis    map[string]time.Time
+	issueMu sync.Mutex
+	origins *ttlcache.Cache[string, memoryNonceEntry]
+	jtis    *ttlcache.Cache[string, struct{}]
 }
 
 func NewMemoryNonceStore() *MemoryNonceStore {
 	return &MemoryNonceStore{
-		origins: make(map[string]memoryNonceEntry),
-		jtis:    make(map[string]time.Time),
+		origins: ttlcache.New[string, memoryNonceEntry](ttlcache.Options{TTL: DefaultNonceLifetime}),
+		jtis:    ttlcache.New[string, struct{}](ttlcache.Options{}),
 	}
 }
 
@@ -316,18 +317,15 @@ func (s *MemoryNonceStore) IssueNonce(_ context.Context, origin string) (string,
 	if err != nil {
 		return "", err
 	}
-	now := time.Now()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	entry := s.origins[origin]
+	s.issueMu.Lock()
+	defer s.issueMu.Unlock()
+	entry, _ := s.origins.Get(origin)
 	entry.previous = entry.current
-	entry.previousExpires = entry.currentExpires
 	if entry.current != "" {
-		entry.previousExpires = now.Add(DefaultNonceGrace)
+		entry.previousExpires = time.Now().Add(DefaultNonceGrace)
 	}
 	entry.current = nonce
-	entry.currentExpires = now.Add(DefaultNonceLifetime)
-	s.origins[origin] = entry
+	s.origins.Set(origin, entry)
 	return nonce, nil
 }
 
@@ -335,38 +333,25 @@ func (s *MemoryNonceStore) VerifyNonce(_ context.Context, origin, nonce string) 
 	if nonce == "" {
 		return false, nil
 	}
-	now := time.Now()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	entry, ok := s.origins[origin]
+	entry, ok := s.origins.Get(origin)
 	if !ok {
 		return false, nil
 	}
-	if entry.current == nonce && now.Before(entry.currentExpires) {
+	if entry.current == nonce {
 		return true, nil
 	}
-	if entry.previous != "" && entry.previous == nonce && now.Before(entry.previousExpires) {
+	if entry.previous != "" && entry.previous == nonce && time.Now().Before(entry.previousExpires) {
 		return true, nil
 	}
 	return false, nil
 }
 
 func (s *MemoryNonceStore) RecordJTI(_ context.Context, jti string, expiresAt time.Time) (bool, error) {
-	now := time.Now()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if len(s.jtis) > 10000 {
-		for key, expiry := range s.jtis {
-			if now.After(expiry) {
-				delete(s.jtis, key)
-			}
-		}
+	ttl := time.Until(expiresAt)
+	if ttl <= 0 {
+		ttl = -1
 	}
-	if expiry, ok := s.jtis[jti]; ok && now.Before(expiry) {
-		return false, nil
-	}
-	s.jtis[jti] = expiresAt
-	return true, nil
+	return s.jtis.Add(jti, struct{}{}, ttl), nil
 }
 
 var _ NonceStore = (*MemoryNonceStore)(nil)

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -22,6 +21,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/ref"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/lease"
 )
 
 var (
@@ -116,13 +116,11 @@ type homeIndex struct {
 
 	fallback []string
 
-	interval time.Duration
+	listed *lease.Source[homeListing]
+}
 
-	mu sync.Mutex
-
+type homeListing struct {
 	homes []string
-
-	at time.Time
 
 	err error
 }
@@ -136,18 +134,21 @@ func newHomeIndex(store *kcpstore.Store, workspace, namespace string, fallback [
 	if namespace == "" {
 		namespace = "default"
 	}
-	return &homeIndex{configmaps: kcpstore.Of[corev1.ConfigMap](store, configMapGVR), workspace: workspace,
-		namespace: namespace, fallback: append([]string(nil), fallback...), interval: homeIndexRefresh}
+	i := &homeIndex{configmaps: kcpstore.Of[corev1.ConfigMap](store, configMapGVR), workspace: workspace,
+		namespace: namespace, fallback: append([]string(nil), fallback...)}
+	i.listed = lease.New(i.list)
+	return i
 }
 
 func (i *homeIndex) Homes(ctx context.Context) ([]string, error) {
-	i.mu.Lock()
-	if !i.at.IsZero() && time.Since(i.at) < i.interval {
-		homes, err := append([]string(nil), i.homes...), i.err
-		i.mu.Unlock()
-		return homes, err
+	listed, err := i.listed.Get(ctx)
+	if err != nil {
+		return append([]string(nil), i.fallback...), err
 	}
-	i.mu.Unlock()
+	return append([]string(nil), listed.homes...), listed.err
+}
+
+func (i *homeIndex) list(ctx context.Context) (homeListing, time.Time, error) {
 	items, err := i.configmaps.ListIn(ctx, i.workspace, i.namespace)
 	homes := []string{}
 	if err == nil {
@@ -167,10 +168,7 @@ func (i *homeIndex) Homes(ctx context.Context) ([]string, error) {
 	} else {
 		homes = append([]string(nil), i.fallback...)
 	}
-	i.mu.Lock()
-	i.homes, i.err, i.at = homes, err, time.Now()
-	i.mu.Unlock()
-	return append([]string(nil), homes...), err
+	return homeListing{homes: homes, err: err}, time.Now().Add(homeIndexRefresh), nil
 }
 
 type claimStore struct {

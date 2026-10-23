@@ -29,6 +29,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 )
 
 const (
@@ -80,13 +81,8 @@ type Controller struct {
 
 	mu       sync.Mutex
 	streams  map[string]*streamRuntime
-	pdsCache map[syntax.DID]pdsCacheEntry
-	verifyAt map[string]time.Time
-}
-
-type pdsCacheEntry struct {
-	pds       pdsclient.PDS
-	fetchedAt time.Time
+	pdsCache *ttlcache.Cache[syntax.DID, pdsclient.PDS]
+	verifyAt *ttlcache.Cache[string, struct{}]
 }
 
 type streamRuntime struct {
@@ -165,8 +161,8 @@ func New(opts Options) (*Controller, error) {
 		streams:   map[string]*streamRuntime{},
 		directory: directory,
 		http:      httpClient,
-		pdsCache:  map[syntax.DID]pdsCacheEntry{},
-		verifyAt:  map[string]time.Time{},
+		pdsCache:  ttlcache.New[syntax.DID, pdsclient.PDS](ttlcache.Options{TTL: pdsCacheTTL}),
+		verifyAt:  ttlcache.New[string, struct{}](ttlcache.Options{TTL: watchVerifyInterval}),
 	}, nil
 }
 

@@ -23,6 +23,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/cloudprovider"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterprovider"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterstack"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/nodemarket"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/nodeprovider"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/portallocator"
@@ -256,40 +257,40 @@ func (o confirmOutcome) declinedReason() string {
 
 const BidderDenyWindow = 2 * time.Minute
 
+type bidderDenyKey struct {
+	cluster string
+	did     string
+}
+
 type bidderDenies struct {
-	mu    sync.Mutex
-	until map[string]map[string]time.Time
+	now   func() time.Time
+	until *ttlcache.Cache[bidderDenyKey, struct{}]
+}
+
+func newBidderDenies(now func() time.Time) *bidderDenies {
+	return &bidderDenies{now: now, until: ttlcache.New[bidderDenyKey, struct{}](ttlcache.Options{Now: now})}
 }
 
 func (d *bidderDenies) deny(cluster, did string, until time.Time) {
 	if d == nil || did == "" {
 		return
 	}
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if d.until == nil {
-		d.until = map[string]map[string]time.Time{}
+	if ttl := until.Sub(d.now()); ttl > 0 {
+		d.until.SetTTL(bidderDenyKey{cluster: cluster, did: did}, struct{}{}, ttl)
 	}
-	if d.until[cluster] == nil {
-		d.until[cluster] = map[string]time.Time{}
-	}
-	d.until[cluster][did] = until
 }
 
-func (d *bidderDenies) active(cluster string, now time.Time) []string {
+func (d *bidderDenies) active(cluster string) []string {
 	if d == nil {
 		return nil
 	}
-	d.mu.Lock()
-	defer d.mu.Unlock()
 	var out []string
-	for did, until := range d.until[cluster] {
-		if now.Before(until) {
-			out = append(out, did)
-		} else {
-			delete(d.until[cluster], did)
+	d.until.Range(func(k bidderDenyKey, _ struct{}) bool {
+		if k.cluster == cluster {
+			out = append(out, k.did)
 		}
-	}
+		return true
+	})
 	slices.Sort(out)
 	return out
 }
@@ -908,7 +909,7 @@ func newNodeHosts(opts nodeHostsOptions) (*nodeHosts, error) {
 		log = slog.Default()
 	}
 	if opts.Denies == nil {
-		opts.Denies = &bidderDenies{}
+		opts.Denies = newBidderDenies(opts.now)
 	}
 	return &nodeHosts{opts: opts, log: log, hosts: map[string]*tenantNodes{},
 		synced: map[string]time.Time{}}, nil
@@ -1186,7 +1187,7 @@ func newNodeHostOf(opts nodeHostsOptions, log *slog.Logger, cluster, name string
 		AdvertiseAddress: opts.AdvertiseAddress,
 		ApiserverPort:    apiserverPort,
 		DenyBidderDids:   opts.DenyBidderDids,
-		DenyMore:         func() []string { return opts.Denies.active(cluster, opts.now()) },
+		DenyMore:         func() []string { return opts.Denies.active(cluster) },
 		Claims:           opts.Claims,
 		ClusterSource:    claimClusterFor(opts.Registry, cluster),
 		ReleaseTimeout:   opts.ClaimReleaseTimeout,

@@ -29,6 +29,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/ref"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/statesync"
 )
 
@@ -168,9 +169,9 @@ type Service struct {
 
 	acceptLocks map[string]*sync.Mutex
 
-	serviceAuthMu sync.Mutex
+	serviceAuthOnce sync.Once
 
-	serviceAuth map[string]serviceAuthToken
+	serviceAuth *ttlcache.Cache[string, string]
 }
 
 func (s *Service) lockAccept(uri string) func() {

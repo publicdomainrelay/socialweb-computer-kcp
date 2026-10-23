@@ -11,14 +11,18 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/credentials/openbaosession"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/lease"
 )
 
 type cachedVaultSession struct {
 	client component.VaultSession
 
 	mount string
+}
 
-	until time.Time
+type vaultServerKey struct {
+	workspace string
+	name      string
 }
 
 type Clients struct {
@@ -32,7 +36,7 @@ type Clients struct {
 
 	mu sync.Mutex
 
-	sessions map[string]cachedVaultSession
+	sessions *lease.Keyed[vaultServerKey, cachedVaultSession]
 }
 
 var _ component.VaultClients = (*Clients)(nil)
@@ -55,7 +59,6 @@ func NewWithSource(source openbaosession.Source, workspace string) (*Clients, er
 		Source:    source,
 		Workspace: workspace,
 		LoginFor:  openbaosession.DefaultLoginFor,
-		sessions:  map[string]cachedVaultSession{},
 	}
 	out.Open = func(ctx context.Context, srv openbaosession.Server) (component.VaultSession, error) {
 		session, err := openbaosession.Open(ctx, srv)
@@ -81,20 +84,30 @@ func (c *Clients) Client(ctx context.Context, server string) (component.VaultCli
 	if name == "" {
 		return nil, openbaosession.ErrNoServer
 	}
-	key := workspace + "|" + name
+	cached, err := c.leases().Get(ctx, vaultServerKey{workspace: workspace, name: name})
+	if err != nil {
+		return nil, err
+	}
+	return &openBaoVaultClient{session: cached.client, mount: cached.mount}, nil
+}
+
+func (c *Clients) leases() *lease.Keyed[vaultServerKey, cachedVaultSession] {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.sessions == nil {
+		c.sessions = lease.NewKeyed(c.login)
+	}
+	return c.sessions
+}
+
+func (c *Clients) login(ctx context.Context, key vaultServerKey) (cachedVaultSession, time.Time, error) {
 	loginFor := c.LoginFor
 	if loginFor <= 0 {
 		loginFor = openbaosession.DefaultLoginFor
 	}
-	c.mu.Lock()
-	cached, ok := c.sessions[key]
-	c.mu.Unlock()
-	if ok && time.Now().Before(cached.until) {
-		return &openBaoVaultClient{session: cached.client, mount: cached.mount}, nil
-	}
-	srv, err := c.Source.Server(ctx, workspace, name)
+	srv, err := c.Source.Server(ctx, key.workspace, key.name)
 	if err != nil {
-		return nil, err
+		return cachedVaultSession{}, time.Time{}, err
 	}
 	open := c.Open
 	if open == nil {
@@ -108,19 +121,13 @@ func (c *Clients) Client(ctx context.Context, server string) (component.VaultCli
 	}
 	session, err := open(ctx, srv)
 	if err != nil {
-		return nil, err
+		return cachedVaultSession{}, time.Time{}, err
 	}
 	until := time.Now().Add(loginFor)
 	if at := vaultSessionRefreshAt(session); !at.IsZero() && at.Before(until) {
 		until = at
 	}
-	c.mu.Lock()
-	if c.sessions == nil {
-		c.sessions = map[string]cachedVaultSession{}
-	}
-	c.sessions[key] = cachedVaultSession{client: session, mount: srv.KVMount, until: until}
-	c.mu.Unlock()
-	return &openBaoVaultClient{session: session, mount: srv.KVMount}, nil
+	return cachedVaultSession{client: session, mount: srv.KVMount}, until, nil
 }
 
 func vaultSessionRefreshAt(session component.VaultSession) time.Time {

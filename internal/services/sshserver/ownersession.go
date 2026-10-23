@@ -16,6 +16,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	coreapi "github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayapi"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/lease"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/sshtransport"
 )
 
@@ -115,40 +116,34 @@ func (c combinedAgents) AgentFor(caller *coreapi.WebCaller) coreapi.WebAccountAg
 }
 
 type ownerSessionTokens struct {
-	mu sync.Mutex
-
 	did string
 
 	session OwnerSession
 
 	client *http.Client
 
-	access string
+	access *lease.Source[string]
 }
 
 func newOwnerSessionTokens(did string, session OwnerSession, client *http.Client) *ownerSessionTokens {
-	return &ownerSessionTokens{did: did, session: session, client: client}
+	t := &ownerSessionTokens{did: did, session: session, client: client}
+	t.access = lease.New(t.login)
+	return t
 }
 
 func (t *ownerSessionTokens) AccessToken(ctx context.Context) (string, error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if pdsclient.TokenLive(t.access) {
-		return t.access, nil
-	}
-	return t.loginLocked(ctx)
+	return t.access.Get(ctx)
 }
 
 func (t *ownerSessionTokens) RefreshAccessToken(ctx context.Context) (string, error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.loginLocked(ctx)
+	t.access.Invalidate()
+	return t.access.Get(ctx)
 }
 
-func (t *ownerSessionTokens) loginLocked(ctx context.Context) (string, error) {
+func (t *ownerSessionTokens) login(ctx context.Context) (string, time.Time, error) {
 	did, err := syntax.ParseDID(t.did)
 	if err != nil {
-		return "", fmt.Errorf("sshserver: the owner DID: %w", err)
+		return "", time.Time{}, fmt.Errorf("sshserver: the owner DID: %w", err)
 	}
 	pds, err := pdsclient.NewRemote(pdsclient.RemoteConfig{
 		BaseURL:    t.session.Service,
@@ -157,14 +152,17 @@ func (t *ownerSessionTokens) loginLocked(ctx context.Context) (string, error) {
 		Timeout:    ownerSessionRequestTimeout,
 	})
 	if err != nil {
-		return "", fmt.Errorf("sshserver: the owner PDS %s: %w", t.session.Service, err)
+		return "", time.Time{}, fmt.Errorf("sshserver: the owner PDS %s: %w", t.session.Service, err)
 	}
 	session, err := pds.CreateSession(ctx, t.session.Identifier, t.session.Password)
 	if err != nil {
-		return "", fmt.Errorf("sshserver: the owner session of %s: %w", t.did, err)
+		return "", time.Time{}, fmt.Errorf("sshserver: the owner session of %s: %w", t.did, err)
 	}
-	t.access = session.AccessJWT
-	return t.access, nil
+	expires, ok := pdsclient.TokenExpiry(session.AccessJWT)
+	if !ok {
+		return session.AccessJWT, time.Now(), nil
+	}
+	return session.AccessJWT, expires.Add(-pdsclient.TokenExpirySkew), nil
 }
 
 type ownerSessionAgent struct {

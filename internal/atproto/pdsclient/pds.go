@@ -208,6 +208,8 @@ type XRPCError struct {
 	Message    string
 }
 
+func (e *XRPCError) HTTPStatus() int { return e.StatusCode }
+
 func (e *XRPCError) Error() string {
 	if e == nil {
 		return "pdsclient: <nil>"

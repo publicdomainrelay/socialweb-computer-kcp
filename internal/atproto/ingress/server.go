@@ -187,7 +187,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 func (s *Server) Close() {
 	s.closeOnce.Do(func() { close(s.closedCh) })
-	s.nonces.Close()
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()

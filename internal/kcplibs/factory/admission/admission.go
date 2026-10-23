@@ -39,11 +39,11 @@ type Admitter struct {
 }
 
 func New(opts Options) *Admitter {
-	if opts.Leases == nil {
-		opts.Leases = queue.NewLeases(opts.LeaseTTL)
-	}
 	if opts.Now == nil {
 		opts.Now = time.Now
+	}
+	if opts.Leases == nil {
+		opts.Leases = queue.NewLeases(opts.LeaseTTL, opts.Now)
 	}
 	return &Admitter{opts: opts}
 }
@@ -68,18 +68,17 @@ func (a *Admitter) Admit(ctx context.Context, run queue.Run) (queue.Admission, e
 	if err != nil {
 		return queue.Admission{}, err
 	}
-	now := a.opts.Now()
 	observed := make(map[ref.Ref]string, len(runs))
 	for _, candidate := range runs {
 		observed[candidate.Ref] = candidate.Phase
 	}
-	reserved := a.opts.Leases.Count(parent, observed, now, a.opts.Lifecycle)
+	reserved := a.opts.Leases.Count(parent, observed, a.opts.Lifecycle)
 	if _, present := observed[run.Ref]; !present {
 		runs = append(append([]queue.Run(nil), runs...), run)
 	}
 	admission := queue.PlanIndex(runs, capacity, blocker, reserved, a.opts.Lifecycle)[run.Ref]
 	if admission.Gated && admission.Allowed {
-		a.opts.Leases.Grant(run.Ref, parent, now)
+		a.opts.Leases.Grant(run.Ref, parent)
 	}
 	return admission, nil
 }

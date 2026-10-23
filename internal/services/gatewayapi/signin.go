@@ -19,6 +19,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	coreapi "github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayapi"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
 )
 
@@ -58,7 +59,7 @@ type custodySignIn struct {
 
 	mu sync.Mutex
 
-	identities map[[sha256.Size]byte]*custodyIdentityEntry
+	identities *ttlcache.Cache[[sha256.Size]byte, *custodyIdentityEntry]
 
 	wake chan struct{}
 
@@ -124,7 +125,7 @@ func newCustodySignIn(opts custodySignInOptions) (*custodySignIn, error) {
 		renewIncrement:    opts.RenewIncrement,
 		allowInternalHTTP: opts.Network != nil,
 		log:               opts.Log,
-		identities:        map[[sha256.Size]byte]*custodyIdentityEntry{},
+		identities:        ttlcache.New[[sha256.Size]byte, *custodyIdentityEntry](ttlcache.Options{MaxEntries: identityCacheEntries}),
 		wake:              make(chan struct{}, 1),
 		stopCh:            make(chan struct{}),
 	}, nil
@@ -183,8 +184,7 @@ func (s *custodySignIn) Identify(ctx context.Context, token string) (*coreapi.We
 	key := sha256.Sum256([]byte(token))
 	now := time.Now()
 	s.mu.Lock()
-	entry := s.identities[key]
-	if entry != nil && now.Before(entry.leaseUntil) {
+	if entry, ok := s.identities.Get(key); ok {
 		user := entry.user
 		due := !entry.checkUntil.IsZero() && !entry.checkUntil.After(now)
 		if s.renewalDue(entry, now) {
@@ -197,9 +197,6 @@ func (s *custodySignIn) Identify(ctx context.Context, token string) (*coreapi.We
 		}
 		s.mu.Unlock()
 		return &user, nil
-	}
-	if entry != nil {
-		delete(s.identities, key)
 	}
 	s.mu.Unlock()
 	identity, err := s.client.identify(ctx, token)
@@ -267,10 +264,7 @@ func (s *custodySignIn) storeIdentity(key [sha256.Size]byte, token string, ident
 		return
 	}
 	s.mu.Lock()
-	s.pruneLocked(now)
-	if len(s.identities) >= identityCacheEntries {
-		s.evictLocked()
-	}
+	s.identities.Prune()
 	entry := &custodyIdentityEntry{
 		user:       coreapi.WebUser{DID: identity.DID, Handle: identity.Handle, PDS: identity.PDS},
 		token:      token,
@@ -280,50 +274,24 @@ func (s *custodySignIn) storeIdentity(key [sha256.Size]byte, token string, ident
 		lastSeen:   now,
 	}
 	entry.renewDue = s.renewalDue(entry, now)
-	s.identities[key] = entry
+	s.identities.SetTTL(key, entry, leaseUntil.Sub(now))
 	s.wakeRefresherLocked()
 	s.mu.Unlock()
-}
-
-func (s *custodySignIn) pruneLocked(now time.Time) {
-	for key, entry := range s.identities {
-		if !now.Before(entry.leaseUntil) {
-			delete(s.identities, key)
-		}
-	}
-}
-
-func (s *custodySignIn) evictLocked() {
-	var oldestKey [sha256.Size]byte
-	var oldest time.Time
-	found := false
-	for key, entry := range s.identities {
-		if !found || entry.leaseUntil.Before(oldest) {
-			oldestKey = key
-			oldest = entry.leaseUntil
-			found = true
-		}
-	}
-	if found {
-		delete(s.identities, oldestKey)
-	}
 }
 
 func (s *custodySignIn) forgetToken(token string) {
 	if token == "" {
 		return
 	}
-	key := sha256.Sum256([]byte(token))
 	s.mu.Lock()
-	delete(s.identities, key)
+	s.identities.Delete(sha256.Sum256([]byte(token)))
 	s.mu.Unlock()
 }
 
 func (s *custodySignIn) forgetKey(key [sha256.Size]byte, token string) {
 	s.mu.Lock()
-	entry := s.identities[key]
-	if entry != nil && entry.token == token {
-		delete(s.identities, key)
+	if entry, ok := s.identities.Get(key); ok && entry.token == token {
+		s.identities.Delete(key)
 	}
 	s.mu.Unlock()
 }
@@ -369,25 +337,22 @@ func (s *custodySignIn) refreshLoop() {
 		var pick *custodyIdentityEntry
 		var next time.Time
 		active := false
-		for key, entry := range s.identities {
-			if !now.Before(entry.leaseUntil) {
-				delete(s.identities, key)
-				continue
-			}
+		s.identities.Range(func(key [sha256.Size]byte, entry *custodyIdentityEntry) bool {
 			if now.Sub(entry.lastSeen) > identityActiveWindow {
-				continue
+				return true
 			}
 			active = true
 			due := s.dueAt(entry, now)
 			if !due.After(now) {
 				pickKey = key
 				pick = entry
-				break
+				return false
 			}
 			if next.IsZero() || due.Before(next) {
 				next = due
 			}
-		}
+			return true
+		})
 		if pick == nil {
 			if !active {
 				s.refreshing = false
@@ -454,13 +419,13 @@ func (s *custodySignIn) refreshFailed(key [sha256.Size]byte, token string, err e
 	var custody *custodyError
 	invalid := errors.As(err, &custody) && (custody.Status == http.StatusForbidden || custody.Status == http.StatusUnauthorized)
 	s.mu.Lock()
-	entry := s.identities[key]
-	if entry == nil || entry.token != token {
+	entry, ok := s.identities.Get(key)
+	if !ok || entry.token != token {
 		s.mu.Unlock()
 		return
 	}
 	if invalid || !now.Before(entry.leaseUntil) {
-		delete(s.identities, key)
+		s.identities.Delete(key)
 		s.mu.Unlock()
 		return
 	}
@@ -497,12 +462,12 @@ func (s *custodySignIn) refreshRenewed(key [sha256.Size]byte, token string, leas
 	leaseUntil, checkUntil := identityCacheWindow(now, leaseSeconds)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	entry := s.identities[key]
-	if entry == nil || entry.token != token {
+	entry, ok := s.identities.Get(key)
+	if !ok || entry.token != token {
 		return
 	}
 	if leaseUntil.IsZero() {
-		delete(s.identities, key)
+		s.identities.Delete(key)
 		return
 	}
 	entry.leaseUntil = leaseUntil
@@ -510,6 +475,7 @@ func (s *custodySignIn) refreshRenewed(key [sha256.Size]byte, token string, leas
 	entry.failures = 0
 	entry.nextTry = time.Time{}
 	entry.renewDue = s.renewalDue(entry, now)
+	s.identities.SetTTL(key, entry, leaseUntil.Sub(now))
 }
 
 func (s *custodySignIn) refreshIdentified(key [sha256.Size]byte, token string, identity *custodyIdentity) {
@@ -517,12 +483,12 @@ func (s *custodySignIn) refreshIdentified(key [sha256.Size]byte, token string, i
 	leaseUntil, checkUntil := identityCacheWindow(now, identity.TTLSeconds)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	entry := s.identities[key]
-	if entry == nil || entry.token != token {
+	entry, ok := s.identities.Get(key)
+	if !ok || entry.token != token {
 		return
 	}
 	if leaseUntil.IsZero() {
-		delete(s.identities, key)
+		s.identities.Delete(key)
 		return
 	}
 	entry.user = coreapi.WebUser{DID: identity.DID, Handle: identity.Handle, PDS: identity.PDS}
@@ -532,6 +498,7 @@ func (s *custodySignIn) refreshIdentified(key [sha256.Size]byte, token string, i
 	entry.failures = 0
 	entry.nextTry = time.Time{}
 	entry.renewDue = s.renewalDue(entry, now)
+	s.identities.SetTTL(key, entry, leaseUntil.Sub(now))
 }
 
 func (s *custodySignIn) SignOut(ctx context.Context, caller *coreapi.WebCaller) (coreapi.SignOutResult, error) {

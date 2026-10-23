@@ -26,6 +26,7 @@ type Cache[K comparable, V any] struct {
 	flights   map[K]*flight
 	seq       uint64
 	nextPrune int
+	onEvict   func(K, V)
 	group     singleflight.Group
 }
 
@@ -57,6 +58,14 @@ func New[K comparable, V any](opts Options) *Cache[K, V] {
 	}
 }
 
+// OnEvict sets f to run under the cache lock for every value that leaves or is replaced in the cache; f must not call the cache.
+func (c *Cache[K, V]) OnEvict(f func(K, V)) *Cache[K, V] {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.onEvict = f
+	return c
+}
+
 func (c *Cache[K, V]) Get(key K) (V, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -72,6 +81,17 @@ func (c *Cache[K, V]) SetTTL(key K, value V, ttl time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.setLocked(key, value, ttl)
+}
+
+// Add stores value only when key holds no live entry and reports whether it stored.
+func (c *Cache[K, V]) Add(key K, value V, ttl time.Duration) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, ok := c.getLocked(key); ok {
+		return false
+	}
+	c.setLocked(key, value, ttl)
+	return true
 }
 
 func (c *Cache[K, V]) Delete(key K) {
@@ -234,6 +254,9 @@ func (c *Cache[K, V]) setLocked(key K, value V, ttl time.Duration) {
 	}
 	if el, ok := c.items[key]; ok {
 		e := el.Value.(*entry[K, V])
+		if c.onEvict != nil {
+			c.onEvict(e.key, e.value)
+		}
 		e.value = value
 		e.expires = expires
 		c.order.MoveToFront(el)
@@ -264,8 +287,12 @@ func (c *Cache[K, V]) pruneLocked() int {
 }
 
 func (c *Cache[K, V]) removeLocked(el *list.Element) {
-	delete(c.items, el.Value.(*entry[K, V]).key)
+	e := el.Value.(*entry[K, V])
+	delete(c.items, e.key)
 	c.order.Remove(el)
+	if c.onEvict != nil {
+		c.onEvict(e.key, e.value)
+	}
 }
 
 func (e *entry[K, V]) expired(now time.Time) bool {
