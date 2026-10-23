@@ -2,6 +2,7 @@ package delivery
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"time"
@@ -161,6 +162,11 @@ func (l *Loop) consume(ctx context.Context, upstream events.Stream) {
 	for {
 		event, err := upstream.Next(ctx)
 		if err != nil {
+			if errors.Is(err, events.ErrFutureCursor) {
+				l.mu.Lock()
+				l.state.Started, l.state.Cursor = true, 0
+				l.mu.Unlock()
+			}
 			if ctx.Err() == nil {
 				l.set(PhaseFailed, false, true, ReasonStreamClosed, err.Error())
 			}

@@ -51,6 +51,9 @@ func decodeCBOR(data []byte) (events.Event, bool, error) {
 	if header.Op < 0 {
 		var body cborError
 		_ = cbor.Unmarshal(rest, &body)
+		if strings.TrimSpace(body.Error) == futureCursor {
+			return events.Event{}, false, fmt.Errorf("relay: %w: %s", events.ErrFutureCursor, strings.TrimSpace(body.Message))
+		}
 		return events.Event{}, false, fmt.Errorf("relay: %s: %s", cmp.Or(strings.TrimSpace(body.Error), "StreamError"),
 			cmp.Or(strings.TrimSpace(body.Message), "stream error"))
 	}
