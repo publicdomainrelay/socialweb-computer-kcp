@@ -129,26 +129,24 @@ func (b *txBlockstore) AllKeysChan(ctx context.Context) (<-chan cid.Cid, error) 
 	if err != nil {
 		return nil, err
 	}
-	out := make(chan cid.Cid)
-	go func() {
-		defer close(out)
-		defer rows.Close()
-		for rows.Next() {
-			var raw string
-			if err := rows.Scan(&raw); err != nil {
-				return
-			}
-			c, err := cid.Parse(raw)
-			if err != nil {
-				return
-			}
-			select {
-			case out <- c:
-			case <-ctx.Done():
-				return
-			}
+	defer rows.Close()
+	var keys []cid.Cid
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			break
 		}
-	}()
+		c, err := cid.Parse(raw)
+		if err != nil {
+			break
+		}
+		keys = append(keys, c)
+	}
+	out := make(chan cid.Cid, len(keys))
+	for _, c := range keys {
+		out <- c
+	}
+	close(out)
 	return out, nil
 }
 
