@@ -323,7 +323,7 @@ items:
     track: opentunnel
     parallel_with: [W1-XRPC, W1-EXPOSURE]
     depends_on: [W0-CONTRACTS]
-    status: doing
+    status: done
     evidence: []
     decision: >
       Add a pinned opentunnel binary asset or a deterministic host command

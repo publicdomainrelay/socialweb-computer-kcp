@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/assets"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/exposure"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/ingressproxy/loopback"
@@ -104,6 +105,25 @@ func (c Config) command() []string {
 	return []string{"opentunnel"}
 }
 
+func (p *Provider) usePinnedCommand(deps component.Deps, log *slog.Logger) error {
+	if len(p.cfg.Command) > 0 || strings.TrimSpace(os.Getenv("SOCIALWEB_OPENTUNNEL_PATH")) != "" {
+		return nil
+	}
+	if st, err := os.Stat(DefaultCommandPath); err == nil && !st.IsDir() && st.Mode().Perm()&0o111 != 0 {
+		return nil
+	}
+	cache := ""
+	if dir := strings.TrimSpace(deps.StateDir); dir != "" {
+		cache = filepath.Join(dir, "runtime")
+	}
+	executable, err := assets.Resolve(assets.Options{Cache: cache, Log: log}, "opentunnel")
+	if err != nil {
+		return fmt.Errorf("ingressproxy opentunnel: resolving the pinned asset: %w", err)
+	}
+	p.cfg.Command = []string{executable.Path}
+	return nil
+}
+
 func routeName(configured string, spec exposure.IngressSpec) string {
 	if name := strings.TrimSpace(configured); name != "" {
 		return name
@@ -175,6 +195,13 @@ func (p *Provider) Start(ctx context.Context, deps component.Deps) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	log := deps.Log
+	if log == nil {
+		log = slog.New(slog.DiscardHandler)
+	}
+	if err := p.usePinnedCommand(deps, log); err != nil {
+		return err
+	}
 	if err := p.cfg.Check(); err != nil {
 		return err
 	}
@@ -188,10 +215,6 @@ func (p *Provider) Start(ctx context.Context, deps component.Deps) error {
 		path = resolved
 	}
 	args[0] = path
-	log := deps.Log
-	if log == nil {
-		log = slog.New(slog.DiscardHandler)
-	}
 	runCtx, cancel := context.WithCancel(ctx)
 	p.mu.Lock()
 	if p.ctx != nil {
