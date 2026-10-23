@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"slices"
 	"sort"
 	"strings"
@@ -86,8 +87,12 @@ func (ct *Controller) vaultFor(ctx context.Context, server string) (*openbao.Cli
 	if err != nil {
 		return nil, fmt.Errorf("the OpenBaoServer %s as client %s: %w", server, ct.c.vaultClient(), err)
 	}
+	until := time.Now().Add(VaultLoginFor)
+	if at := client.RefreshAt(); !at.IsZero() && at.Before(until) {
+		until = at
+	}
 	ct.mu.Lock()
-	ct.logins[server] = vaultLogin{client: client, until: time.Now().Add(VaultLoginFor)}
+	ct.logins[server] = vaultLogin{client: client, until: until}
 	ct.mu.Unlock()
 	return client, nil
 }
@@ -119,11 +124,18 @@ func (ct *Controller) userData(ctx context.Context, o v1alpha1.ComputeVM) (strin
 	}
 	data, err := client.GetKV(ctx, path)
 	var re *openbao.ResponseError
+	if openbao.IsAuthError(err) {
+		ct.forgetLogin(ref.Server)
+		if client, err = ct.vaultFor(ctx, ref.Server); err != nil {
+			ct.c.log().Info("the user data waits for the bidder's vault", "computevm", o.Name, "err", err.Error())
+			return "", false, nil
+		}
+		data, err = client.GetKV(ctx, path)
+	}
 	switch {
 	case errors.As(err, &re) && re.Status == 404:
 		return "", false, nil
-	case errors.As(err, &re) && re.Status == 403:
-		ct.forgetLogin(ref.Server)
+	case errors.As(err, &re) && re.Status == http.StatusForbidden:
 		return "", false, nil
 	case err != nil:
 		return "", false, err

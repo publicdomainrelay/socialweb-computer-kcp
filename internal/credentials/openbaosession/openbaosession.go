@@ -251,8 +251,6 @@ type Certificate struct {
 type Session struct {
 	address string
 
-	token string
-
 	ca []byte
 
 	cert []byte
@@ -266,6 +264,8 @@ type Session struct {
 	mu sync.Mutex
 
 	pki *openbaoclient.Client
+
+	pkiToken string
 }
 
 func Open(ctx context.Context, srv Server) (*Session, error) {
@@ -280,24 +280,28 @@ func Open(ctx context.Context, srv Server) (*Session, error) {
 		return nil, err
 	}
 	token := srv.Token
+	var client *openbao.Client
 	if token == "" {
 		if srv.CertMount == "" || srv.CertRole == "" {
 			return nil, errors.New("openbaosession: the OpenBaoServer names no certificate auth mount and role")
 		}
 		anonymous := openbao.New(srv.Address, "", opts...)
-		token, err = anonymous.LoginCert(ctx, srv.CertMount, srv.CertRole)
+		auth, err := anonymous.LoginCertToken(ctx, srv.CertMount, srv.CertRole)
 		if err != nil {
 			return nil, fmt.Errorf("openbaosession: logging in to %s at %s/%s: %w", srv.Address, srv.CertMount, srv.CertRole, err)
 		}
+		token = auth.Token
+		client = anonymous.WithToken(token)
+	} else {
+		client = openbao.New(srv.Address, token, opts...)
 	}
 	return &Session{
 		address: strings.TrimRight(srv.Address, "/"),
-		token:   token,
 		ca:      append([]byte(nil), srv.CACert...),
 		cert:    append([]byte(nil), srv.ClientCert...),
 		key:     append([]byte(nil), srv.ClientKey...),
 		timeout: srv.Timeout,
-		client:  openbao.New(srv.Address, token, opts...),
+		client:  client,
 	}, nil
 }
 
@@ -375,7 +379,7 @@ func (s *Session) IssueCertificate(ctx context.Context, mount, role string, req 
 	if strings.TrimSpace(req.CommonName) == "" {
 		return Certificate{}, errors.New("openbaosession: issuing a certificate needs a common name")
 	}
-	client, err := s.pkiClient()
+	client, err := s.pkiClient(ctx)
 	if err != nil {
 		return Certificate{}, err
 	}
@@ -403,15 +407,23 @@ func (s *Session) IssueCertificate(ctx context.Context, mount, role string, req 
 	return certificate, nil
 }
 
-func (s *Session) pkiClient() (*openbaoclient.Client, error) {
+func (s *Session) RefreshAt() time.Time {
+	return s.client.RefreshAt()
+}
+
+func (s *Session) pkiClient(ctx context.Context) (*openbaoclient.Client, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.pki != nil {
+	if err := s.client.EnsureToken(ctx); err != nil {
+		return nil, fmt.Errorf("openbaosession: renewing the OpenBao token: %w", err)
+	}
+	token := s.client.Token()
+	if s.pki != nil && s.pkiToken == token {
 		return s.pki, nil
 	}
 	client, err := openbaoclient.New(openbaoclient.Options{
 		Address:    s.address,
-		Token:      s.token,
+		Token:      token,
 		CACert:     s.ca,
 		ClientCert: s.cert,
 		ClientKey:  s.key,
@@ -421,6 +433,7 @@ func (s *Session) pkiClient() (*openbaoclient.Client, error) {
 		return nil, fmt.Errorf("openbaosession: the OpenBao PKI client: %w", err)
 	}
 	s.pki = client
+	s.pkiToken = token
 	return client, nil
 }
 

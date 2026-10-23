@@ -8,35 +8,80 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 )
 
 func (c *Client) WithToken(token string) *Client {
-	return &Client{addr: c.addr, token: token, http: c.http, tls: c.tls}
+	c.tokenMu.RLock()
+	same := token != "" && token == c.token
+	until, renew := c.tokenUntil, c.renew
+	c.tokenMu.RUnlock()
+	if !same {
+		until, renew = time.Time{}, nil
+	}
+	return &Client{addr: c.addr, token: token, http: c.http, tls: c.tls, tokenUntil: until, renew: renew}
 }
 
 func (c *Client) Token() string { return c.currentToken() }
 
 func (c *Client) LoginCert(ctx context.Context, mount, role string) (string, error) {
-	path := "auth/" + strings.Trim(mount, "/") + "/login"
-	status, body, err := c.request(ctx, http.MethodPost, path, map[string]any{"name": role})
+	auth, err := c.LoginCertToken(ctx, mount, role)
 	if err != nil {
 		return "", err
 	}
+	return auth.Token, nil
+}
+
+func (c *Client) LoginCertToken(ctx context.Context, mount, role string) (TokenAuth, error) {
+	path := "auth/" + strings.Trim(mount, "/") + "/login"
+	auth, err := c.loginAuthToken(ctx, path, map[string]any{"name": role})
+	if err != nil {
+		return TokenAuth{}, err
+	}
+	c.setRenew(c.certRenewal(mount, role))
+	c.SetTokenAuth(auth)
+	return auth, nil
+}
+
+func (c *Client) certRenewal(mount, role string) func(context.Context) (TokenAuth, error) {
+	address, httpClient, tlsConfig := c.addr, c.http, c.tls
+	path := "auth/" + strings.Trim(mount, "/") + "/login"
+	return func(ctx context.Context) (TokenAuth, error) {
+		anonymous := &Client{addr: address, http: httpClient, tls: tlsConfig}
+		return anonymous.loginAuthToken(ctx, path, map[string]any{"name": role})
+	}
+}
+
+func (c *Client) loginAuthToken(ctx context.Context, path string, body map[string]any) (TokenAuth, error) {
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		return TokenAuth{}, fmt.Errorf("%w: encode %s: %v", ErrTransport, path, err)
+	}
+	status, raw, err := c.attempt(ctx, http.MethodPost, path, encoded, "")
+	if err != nil {
+		return TokenAuth{}, err
+	}
 	if status < 200 || status > 299 {
-		return "", &ResponseError{Method: http.MethodPost, Path: path, Status: status, Body: strings.TrimSpace(string(body))}
+		return TokenAuth{}, &ResponseError{Method: http.MethodPost, Path: path, Status: status, Body: strings.TrimSpace(string(raw))}
 	}
 	var payload struct {
 		Auth struct {
-			ClientToken string `json:"client_token"`
+			ClientToken   string `json:"client_token"`
+			LeaseDuration int64  `json:"lease_duration"`
+			Renewable     bool   `json:"renewable"`
 		} `json:"auth"`
 	}
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return "", fmt.Errorf("openbao: %s returned a body that is not JSON: %v", path, err)
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return TokenAuth{}, fmt.Errorf("openbao: %s returned a body that is not JSON: %v", path, err)
 	}
 	if payload.Auth.ClientToken == "" {
-		return "", fmt.Errorf("openbao: %s answered without a client token", path)
+		return TokenAuth{}, fmt.Errorf("openbao: %s answered without a client token", path)
 	}
-	return payload.Auth.ClientToken, nil
+	return TokenAuth{
+		Token:     payload.Auth.ClientToken,
+		Lease:     time.Duration(payload.Auth.LeaseDuration) * time.Second,
+		Renewable: payload.Auth.Renewable,
+	}, nil
 }
 
 func (c *Client) RevokeSelf(ctx context.Context) error {

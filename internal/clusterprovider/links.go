@@ -262,7 +262,7 @@ func VaultLinkKeys(ctx context.Context, dataDir string, vaultPort int) (clusterl
 		return nil, err
 	}
 	addr := VaultAddr(vaultPort)
-	return &vaultLinkKeys{client: client, admin: newVaultAdmin(addr, client.Token(), pool)}, nil
+	return &vaultLinkKeys{client: client, admin: newVaultAdmin(addr, client, pool)}, nil
 }
 
 func linkDataPath(path string) string { return clusterlink.Mount + "/data/" + strings.Trim(path, "/") }

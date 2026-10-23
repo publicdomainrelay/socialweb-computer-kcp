@@ -1,6 +1,7 @@
 package clusterprovider
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -52,12 +53,12 @@ func vaultCA(dataDir string) (*x509.CertPool, error) {
 }
 
 type vaultAdmin struct {
-	addr  string
-	token string
-	http  *http.Client
+	addr   string
+	client *openbao.Client
+	http   *http.Client
 }
 
-func newVaultAdmin(addr, token string, pool *x509.CertPool) *vaultAdmin {
+func newVaultAdmin(addr string, client *openbao.Client, pool *x509.CertPool) *vaultAdmin {
 	httpClient := http.DefaultClient
 	if pool != nil {
 		httpClient = &http.Client{Transport: &http.Transport{IdleConnTimeout: openbao.IdleConnTimeout, TLSClientConfig: &tls.Config{
@@ -65,24 +66,46 @@ func newVaultAdmin(addr, token string, pool *x509.CertPool) *vaultAdmin {
 			MinVersion: tls.VersionTLS12,
 		}}}
 	}
-	return &vaultAdmin{addr: strings.TrimRight(addr, "/"), token: token, http: httpClient}
+	return &vaultAdmin{addr: strings.TrimRight(addr, "/"), client: client, http: httpClient}
 }
 
 func (v *vaultAdmin) do(ctx context.Context, method, path string, body any) (int, []byte, error) {
+	if v.client != nil {
+		if err := v.client.EnsureToken(ctx); err != nil {
+			return 0, nil, fmt.Errorf("clusterprovider: renewing the vault token before %s /v1/%s: %w", method, path, err)
+		}
+	}
+	status, data, err := v.attempt(ctx, method, path, body)
+	if err != nil {
+		return 0, nil, err
+	}
+	if v.client != nil && (status == http.StatusUnauthorized || status == http.StatusForbidden) {
+		if rerr := v.client.RefreshToken(ctx); rerr == nil {
+			return v.attempt(ctx, method, path, body)
+		}
+	}
+	return status, data, nil
+}
+
+func (v *vaultAdmin) attempt(ctx context.Context, method, path string, body any) (int, []byte, error) {
 	var in io.Reader
 	if body != nil {
 		raw, err := json.Marshal(body)
 		if err != nil {
 			return 0, nil, fmt.Errorf("clusterprovider: encoding the vault request %s /v1/%s: %w", method, path, err)
 		}
-		in = strings.NewReader(string(raw))
+		in = bytes.NewReader(raw)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, v.addr+"/v1/"+path, in)
 	if err != nil {
 		return 0, nil, fmt.Errorf("clusterprovider: building the vault request %s /v1/%s: %w", method, path, err)
 	}
-	if v.token != "" {
-		req.Header.Set("X-Vault-Token", v.token)
+	token := ""
+	if v.client != nil {
+		token = v.client.Token()
+	}
+	if token != "" {
+		req.Header.Set("X-Vault-Token", token)
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")

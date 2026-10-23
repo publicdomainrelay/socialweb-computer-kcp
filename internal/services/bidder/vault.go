@@ -41,7 +41,11 @@ func (v *openBaoVault) withClient(ctx context.Context) (*openbao.Client, error) 
 	}
 	v.mu.Lock()
 	v.client = client
-	v.until = time.Now().Add(VaultLoginFor)
+	until := time.Now().Add(VaultLoginFor)
+	if at := client.RefreshAt(); !at.IsZero() && at.Before(until) {
+		until = at
+	}
+	v.until = until
 	v.mu.Unlock()
 	return client, nil
 }
@@ -54,36 +58,41 @@ func (v *openBaoVault) forget() {
 }
 
 func (v *openBaoVault) WriteKV(ctx context.Context, mount, path string, data map[string]any) error {
-	client, err := v.withClient(ctx)
-	if err != nil {
-		return err
-	}
-	err = client.PutKV(ctx, kvPath(mount, path), data)
-	if isForbidden(err) {
+	err := v.writeKV(ctx, mount, path, data)
+	if openbao.IsAuthError(err) {
 		v.forget()
+		err = v.writeKV(ctx, mount, path, data)
 	}
 	return err
 }
 
-func (v *openBaoVault) ReadKV(ctx context.Context, mount, path string) (map[string]any, error) {
+func (v *openBaoVault) writeKV(ctx context.Context, mount, path string, data map[string]any) error {
 	client, err := v.withClient(ctx)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	data, err := client.GetKV(ctx, kvPath(mount, path))
-	if isForbidden(err) {
+	return client.PutKV(ctx, kvPath(mount, path), data)
+}
+
+func (v *openBaoVault) ReadKV(ctx context.Context, mount, path string) (map[string]any, error) {
+	data, err := v.readKV(ctx, mount, path)
+	if openbao.IsAuthError(err) {
 		v.forget()
+		data, err = v.readKV(ctx, mount, path)
 	}
 	return data, err
 }
 
-func kvPath(mount, path string) string {
-	return strings.Trim(mount, "/") + "/data/" + strings.Trim(path, "/")
+func (v *openBaoVault) readKV(ctx context.Context, mount, path string) (map[string]any, error) {
+	client, err := v.withClient(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return client.GetKV(ctx, kvPath(mount, path))
 }
 
-func isForbidden(err error) bool {
-	var re *openbao.ResponseError
-	return errors.As(err, &re) && re.Status == 403
+func kvPath(mount, path string) string {
+	return strings.Trim(mount, "/") + "/data/" + strings.Trim(path, "/")
 }
 
 func kcpOpenBaoVault(store *kcpstore.Store, cluster, server, clientName string) (GuestVault, error) {

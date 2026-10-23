@@ -127,19 +127,20 @@ func buildVault(ctx context.Context, cfg Config, address, token string, ca, cert
 	if err != nil {
 		return nil, err
 	}
-	ownToken := token
-	if ownToken == "" && certMount != "" && certRole != "" {
-		ownToken, err = anonymous.LoginCert(ctx, certMount, certRole)
+	client := anonymous
+	switch {
+	case token == "" && certMount != "" && certRole != "":
+		auth, err := anonymous.LoginCertToken(ctx, certMount, certRole)
 		if err != nil {
 			return nil, fmt.Errorf("gatewayapi: logging in to the vault as %s/%s: %w", certMount, certRole, err)
 		}
-	}
-	client, err := newOpenBaoClient(address, ownToken, ca, cert, key)
-	if err != nil {
-		return nil, err
-	}
-	if token == "" && certMount != "" && certRole != "" {
-		go renewVaultToken(ctx, client, anonymous, certMount, certRole, cfg.Log)
+		client = anonymous.WithToken(auth.Token)
+		go renewVaultToken(ctx, client, certMount, certRole, auth.Lease, cfg.Log)
+	case token != "":
+		client, err = newOpenBaoClient(address, token, ca, cert, key)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return &vaultRuntime{
 		client: client,
@@ -157,25 +158,51 @@ func buildVault(ctx context.Context, cfg Config, address, token string, ca, cert
 	}, nil
 }
 
-func renewVaultToken(ctx context.Context, client, login *openbao.Client, mount, role string, log *slog.Logger) {
-	interval := 5 * time.Minute
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
+func renewVaultToken(ctx context.Context, client *openbao.Client, mount, role string, lease time.Duration, log *slog.Logger) {
+	if lease <= 0 {
+		return
+	}
+	timer := time.NewTimer(renewTokenDelay(lease))
+	defer timer.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
-			token, err := login.LoginCert(ctx, mount, role)
+		case <-timer.C:
+			auth, err := client.LoginCertToken(ctx, mount, role)
 			if err != nil {
 				if log != nil {
 					log.Warn("gatewayapi: renewing the vault token failed", "mount", mount, "role", role, "err", err)
 				}
+				timer.Reset(renewTokenRetryDelay(lease))
 				continue
 			}
-			client.SetToken(token)
+			if auth.Lease <= 0 {
+				return
+			}
+			lease = auth.Lease
+			timer.Reset(renewTokenDelay(lease))
 		}
 	}
+}
+
+func renewTokenDelay(lease time.Duration) time.Duration {
+	delay := lease * 2 / 3
+	if delay < time.Second {
+		delay = time.Second
+	}
+	return delay
+}
+
+func renewTokenRetryDelay(lease time.Duration) time.Duration {
+	delay := 30 * time.Second
+	if lease > 0 && lease/6 < delay {
+		delay = lease / 6
+	}
+	if delay < time.Second {
+		delay = time.Second
+	}
+	return delay
 }
 
 func custodyFromConfig(v VaultConfig) custodyEndpoint {

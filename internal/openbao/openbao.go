@@ -19,6 +19,8 @@ import (
 var (
 	ErrNotFound = errors.New("openbao: not configured (HTTP 404)")
 
+	ErrUnauthorized = errors.New("openbao: the token is not accepted (HTTP 401)")
+
 	ErrForbidden = errors.New("openbao: denied by policy (HTTP 403)")
 
 	ErrTransport = errors.New("openbao: transport failure")
@@ -39,11 +41,26 @@ func (e *ResponseError) Is(target error) bool {
 	switch e.Status {
 	case http.StatusNotFound:
 		return target == ErrNotFound
+	case http.StatusUnauthorized:
+		return target == ErrUnauthorized
 	case http.StatusForbidden:
 		return target == ErrForbidden
 	default:
 		return false
 	}
+}
+
+func IsAuthError(err error) bool {
+	var re *ResponseError
+	return errors.As(err, &re) && (re.Status == http.StatusUnauthorized || re.Status == http.StatusForbidden)
+}
+
+type TokenAuth struct {
+	Token string
+
+	Lease time.Duration
+
+	Renewable bool
 }
 
 type Client struct {
@@ -53,6 +70,12 @@ type Client struct {
 	tls   *tls.Config
 
 	tokenMu sync.RWMutex
+
+	tokenUntil time.Time
+
+	renew func(context.Context) (TokenAuth, error)
+
+	refreshMu sync.Mutex
 }
 
 func (c *Client) SetToken(token string) {
@@ -61,11 +84,81 @@ func (c *Client) SetToken(token string) {
 	c.tokenMu.Unlock()
 }
 
+func (c *Client) SetTokenAuth(auth TokenAuth) {
+	c.tokenMu.Lock()
+	c.token = auth.Token
+	c.tokenUntil = tokenRefreshAt(auth.Lease)
+	c.tokenMu.Unlock()
+}
+
+func (c *Client) RefreshAt() time.Time {
+	c.tokenMu.RLock()
+	until := c.tokenUntil
+	c.tokenMu.RUnlock()
+	return until
+}
+
+func (c *Client) EnsureToken(ctx context.Context) error {
+	token, until, renew := c.tokenState()
+	if renew == nil || token == "" || until.IsZero() || time.Now().Before(until) {
+		return nil
+	}
+	return c.refreshToken(ctx, token, renew)
+}
+
+func (c *Client) RefreshToken(ctx context.Context) error {
+	token, _, renew := c.tokenState()
+	if renew == nil {
+		return errors.New("openbao: the client has no token renewal")
+	}
+	if token == "" {
+		return errors.New("openbao: the client has no token to renew")
+	}
+	return c.refreshToken(ctx, token, renew)
+}
+
+func tokenRefreshAt(lease time.Duration) time.Time {
+	if lease <= 0 {
+		return time.Time{}
+	}
+	return time.Now().Add(lease * 2 / 3)
+}
+
 func (c *Client) currentToken() string {
 	c.tokenMu.RLock()
 	token := c.token
 	c.tokenMu.RUnlock()
 	return token
+}
+
+func (c *Client) tokenState() (string, time.Time, func(context.Context) (TokenAuth, error)) {
+	c.tokenMu.RLock()
+	token, until, renew := c.token, c.tokenUntil, c.renew
+	c.tokenMu.RUnlock()
+	return token, until, renew
+}
+
+func (c *Client) setRenew(renew func(context.Context) (TokenAuth, error)) {
+	c.tokenMu.Lock()
+	c.renew = renew
+	c.tokenMu.Unlock()
+}
+
+func (c *Client) refreshToken(ctx context.Context, stale string, renew func(context.Context) (TokenAuth, error)) error {
+	c.refreshMu.Lock()
+	defer c.refreshMu.Unlock()
+	if c.currentToken() != stale {
+		return nil
+	}
+	auth, err := renew(ctx)
+	if err != nil {
+		return err
+	}
+	if auth.Token == "" {
+		return errors.New("openbao: the token renewal returned no token")
+	}
+	c.SetTokenAuth(auth)
+	return nil
 }
 
 type Option func(*Client)
@@ -107,6 +200,12 @@ func WithHTTPClient(client *http.Client) Option {
 		if client != nil {
 			c.http = client
 		}
+	}
+}
+
+func WithTokenRenewal(renew func(context.Context) (TokenAuth, error)) Option {
+	return func(c *Client) {
+		c.setRenew(renew)
 	}
 }
 
@@ -471,7 +570,7 @@ func parseCert(raw json.RawMessage) (Cert, error) {
 	}, nil
 }
 
-// ponytail: one request per call, no retry or reuse policy; OpenBao returns 503 while sealed and a caller that needs resilience can wrap this client with bounded retry and its own backoff.
+// ponytail: one request per call with one token renewal and one retry on 401 or a 403 from a token past its refresh time; a caller that needs more resilience wraps this client with its own bounded retry and backoff.
 func (c *Client) do(ctx context.Context, method, path string, in any) (json.RawMessage, error) {
 	status, body, err := c.request(ctx, method, path, in)
 	if err != nil {
@@ -504,22 +603,50 @@ func (c *Client) topLevel(ctx context.Context, method, path string, in any) (jso
 }
 
 func (c *Client) request(ctx context.Context, method, path string, in any) (int, []byte, error) {
-	var body io.Reader
+	var encoded []byte
 	if in != nil {
-		encoded, err := json.Marshal(in)
+		var err error
+		encoded, err = json.Marshal(in)
 		if err != nil {
 			return 0, nil, fmt.Errorf("%w: encode %s /v1/%s: %v", ErrTransport, method, path, err)
 		}
+	}
+	token, until, renew := c.tokenState()
+	if renew != nil && token != "" && !until.IsZero() && !time.Now().Before(until) {
+		if err := c.refreshToken(ctx, token, renew); err != nil {
+			return 0, nil, fmt.Errorf("%w: renew the token for %s /v1/%s: %v", ErrTransport, method, path, err)
+		}
+		token, until, renew = c.tokenState()
+	}
+	status, body, err := c.attempt(ctx, method, path, encoded, token)
+	if err != nil {
+		return 0, nil, err
+	}
+	expired := !until.IsZero() && !time.Now().Before(until)
+	if renew != nil && token != "" && (status == http.StatusUnauthorized || (status == http.StatusForbidden && expired)) {
+		if rerr := c.refreshToken(ctx, token, renew); rerr == nil {
+			next, _, _ := c.tokenState()
+			if next != "" && next != token {
+				return c.attempt(ctx, method, path, encoded, next)
+			}
+		}
+	}
+	return status, body, nil
+}
+
+func (c *Client) attempt(ctx context.Context, method, path string, encoded []byte, token string) (int, []byte, error) {
+	var body io.Reader
+	if encoded != nil {
 		body = bytes.NewReader(encoded)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, c.addr+"/v1/"+path, body)
 	if err != nil {
 		return 0, nil, fmt.Errorf("%w: build %s /v1/%s: %v", ErrTransport, method, path, err)
 	}
-	if token := c.currentToken(); token != "" {
+	if token != "" {
 		req.Header.Set("X-Vault-Token", token)
 	}
-	if in != nil {
+	if encoded != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	resp, err := c.http.Do(req)

@@ -277,13 +277,24 @@ func (c *OpenBaoVaultClients) Client(ctx context.Context, server string) (VaultC
 	if err != nil {
 		return nil, err
 	}
+	until := time.Now().Add(loginFor)
+	if at := vaultSessionRefreshAt(session); !at.IsZero() && at.Before(until) {
+		until = at
+	}
 	c.mu.Lock()
 	if c.sessions == nil {
 		c.sessions = map[string]cachedVaultSession{}
 	}
-	c.sessions[key] = cachedVaultSession{client: session, mount: srv.KVMount, until: time.Now().Add(loginFor)}
+	c.sessions[key] = cachedVaultSession{client: session, mount: srv.KVMount, until: until}
 	c.mu.Unlock()
 	return &openBaoVaultClient{session: session, mount: srv.KVMount}, nil
+}
+
+func vaultSessionRefreshAt(session VaultSession) time.Time {
+	if refresh, ok := session.(interface{ RefreshAt() time.Time }); ok {
+		return refresh.RefreshAt()
+	}
+	return time.Time{}
 }
 
 type openBaoVaultClient struct {
@@ -317,6 +328,10 @@ func (c *openBaoVaultClient) mountOr(mount string) string {
 
 type openBaoVaultSession struct {
 	session *openbaosession.Session
+}
+
+func (s openBaoVaultSession) RefreshAt() time.Time {
+	return s.session.RefreshAt()
 }
 
 func (s openBaoVaultSession) ReadKV(ctx context.Context, mount, path string) (map[string]any, error) {

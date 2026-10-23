@@ -96,9 +96,9 @@ func writeVaultAccess(dataDir, client string, a VaultAccess) error {
 }
 
 type cachedToken struct {
-	token string
-	addr  string
-	until time.Time
+	client *openbao.Client
+	addr   string
+	until  time.Time
 }
 
 var vaultTokens = struct {
@@ -159,17 +159,20 @@ func clusterVaultAs(ctx context.Context, dataDir, client string) (*openbao.Clien
 	vaultTokens.Lock()
 	t, ok := vaultTokens.m[key]
 	vaultTokens.Unlock()
-	if ok && t.addr == a.Address && time.Now().Before(t.until) {
-		return base.WithToken(t.token), a, nil
+	if ok && t.addr == a.Address && t.client != nil && time.Now().Before(t.until) {
+		return t.client, a, nil
 	}
-	tok, err := base.LoginCert(ctx, a.CertMount, a.CertRole)
-	if err != nil {
+	if _, err := base.LoginCertToken(ctx, a.CertMount, a.CertRole); err != nil {
 		return nil, a, fmt.Errorf("clusterprovider: logging in to the cluster vault at %s as %s: %w", a.Address, a.CertRole, err)
 	}
+	until := time.Now().Add(vaultTokenReuse)
+	if refresh := base.RefreshAt(); !refresh.IsZero() && refresh.Before(until) {
+		until = refresh
+	}
 	vaultTokens.Lock()
-	vaultTokens.m[key] = cachedToken{token: tok, addr: a.Address, until: time.Now().Add(vaultTokenReuse)}
+	vaultTokens.m[key] = cachedToken{client: base, addr: a.Address, until: until}
 	vaultTokens.Unlock()
-	return base.WithToken(tok), a, nil
+	return base, a, nil
 }
 
 func (h *UnitsHost) VaultServerName(key string) string {

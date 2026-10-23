@@ -30,6 +30,8 @@ type loginResult struct {
 	token string
 
 	lease time.Duration
+
+	renewable bool
 }
 
 type remoteSession struct {
@@ -50,6 +52,8 @@ type remoteSession struct {
 	token string
 
 	lease time.Duration
+
+	renewable bool
 
 	renewAt time.Time
 }
@@ -82,11 +86,15 @@ func (s *remoteSession) apply(result loginResult) {
 	}
 	s.token = result.token
 	s.lease = result.lease
+	s.renewable = result.renewable
 	s.client = openbao.New(s.address, s.token, s.opts...)
-	if result.lease > 0 {
+	switch {
+	case result.lease <= 0:
+		s.renewAt = time.Time{}
+	case result.renewable:
 		s.renewAt = s.now().Add(result.lease / 2)
-	} else {
-		s.renewAt = s.now().Add(24 * time.Hour)
+	default:
+		s.renewAt = s.now().Add(result.lease)
 	}
 }
 
@@ -97,6 +105,17 @@ func (s *remoteSession) clientFor(ctx context.Context) (*openbao.Client, error) 
 		return nil, errors.New("vaultaccess: the remote session has no client")
 	}
 	if s.lease <= 0 || s.now().Before(s.renewAt) {
+		return s.client, nil
+	}
+	if !s.renewable {
+		if s.login == nil {
+			return nil, fmt.Errorf("vaultaccess: the static token of %s expired and has no renewal source; replace its tokenRef", s.address)
+		}
+		result, err := s.login(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("vaultaccess: logging in again: %w", err)
+		}
+		s.apply(result)
 		return s.client, nil
 	}
 	result, err := renewToken(ctx, s.httpClient, s.address, s.token)
@@ -217,18 +236,22 @@ func (s *remoteSession) Authenticated(ctx context.Context) error {
 }
 
 func (s *remoteSession) observeLease(data map[string]any) {
-	renewable, ok := data["renewable"].(bool)
-	if !ok || !renewable {
-		return
-	}
+	renewable, hasRenewable := data["renewable"].(bool)
 	ttl, ok := numberValue(data["ttl"])
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if hasRenewable {
+		s.renewable = renewable
+	}
 	if !ok || ttl <= 0 {
 		return
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.lease = time.Duration(ttl * float64(time.Second))
-	s.renewAt = s.now().Add(s.lease / 2)
+	if s.renewable {
+		s.renewAt = s.now().Add(s.lease / 2)
+	} else {
+		s.renewAt = s.now().Add(s.lease)
+	}
 }
 
 func numberValue(value any) (float64, bool) {
@@ -369,6 +392,7 @@ func postAuth(ctx context.Context, client *http.Client, address, path, token str
 		Auth struct {
 			ClientToken   string `json:"client_token"`
 			LeaseDuration int    `json:"lease_duration"`
+			Renewable     bool   `json:"renewable"`
 		} `json:"auth"`
 	}
 	if err := json.Unmarshal(raw, &payload); err != nil {
@@ -377,7 +401,25 @@ func postAuth(ctx context.Context, client *http.Client, address, path, token str
 	if payload.Auth.ClientToken == "" {
 		return loginResult{}, fmt.Errorf("vaultaccess: POST %s answered without a client token", path)
 	}
-	return loginResult{token: payload.Auth.ClientToken, lease: time.Duration(payload.Auth.LeaseDuration) * time.Second}, nil
+	return loginResult{
+		token:     payload.Auth.ClientToken,
+		lease:     time.Duration(payload.Auth.LeaseDuration) * time.Second,
+		renewable: payload.Auth.Renewable,
+	}, nil
+}
+
+func tokenLease(ctx context.Context, target Target, token string) (time.Duration, bool) {
+	client := openbao.New(target.URL, token, openbao.WithHTTPClient(target.HTTPClient))
+	data, err := client.Read(ctx, "auth/token/lookup-self")
+	if err != nil {
+		return 0, false
+	}
+	ttl, ok := numberValue(data["ttl"])
+	if !ok || ttl <= 0 {
+		return 0, false
+	}
+	renewable, _ := data["renewable"].(bool)
+	return time.Duration(ttl * float64(time.Second)), renewable
 }
 
 func kvDataPath(mount, path string) (string, error) {

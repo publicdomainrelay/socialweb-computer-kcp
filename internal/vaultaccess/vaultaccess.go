@@ -167,7 +167,8 @@ func (r *Resolver) ResolveRemote(ctx context.Context, ref RemoteRef) (Session, e
 		if len(token) == 0 {
 			return nil, fmt.Errorf("%w: RemoteOpenBao %s tokenRef %q is empty", ErrInvalidConfig, remote.Name, auth.TokenRef)
 		}
-		return newRemoteSession(target, loginResult{token: string(token)}, nil, r.now), nil
+		lease, renewable := tokenLease(ctx, target, string(token))
+		return newRemoteSession(target, loginResult{token: string(token), lease: lease, renewable: renewable}, nil, r.now), nil
 	case v1alpha1.RemoteOpenBaoAuthAppRole:
 		if auth.AppRole == nil {
 			return nil, fmt.Errorf("%w: RemoteOpenBao %s approle auth names no approle block", ErrInvalidConfig, remote.Name)
