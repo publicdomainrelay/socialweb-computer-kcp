@@ -26,6 +26,7 @@ import (
 	atprotooauth "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/oauthcallback"
 
@@ -518,40 +519,30 @@ func (s *Service) postXRPC(ctx context.Context, endpoint, nsid string, body any)
 	return nil
 }
 
-type serviceAuthToken struct {
-	token string
-
-	expires time.Time
+func (s *Service) serviceAuthCache() *ttlcache.Cache[string, string] {
+	s.serviceAuthOnce.Do(func() {
+		s.serviceAuth = ttlcache.New[string, string](ttlcache.Options{})
+	})
+	return s.serviceAuth
 }
 
 func (s *Service) serviceAuthToken(ctx context.Context, host, lxm string) (string, error) {
 	aud := market.ServiceDIDForHost(host)
-	key := aud + "\x00" + lxm
-	now := time.Now()
-	s.serviceAuthMu.Lock()
-	cached, ok := s.serviceAuth[key]
-	s.serviceAuthMu.Unlock()
-	if ok && now.Before(cached.expires) {
-		return cached.token, nil
-	}
-	token, expires, err := s.mintServiceAuth(ctx, aud, lxm, now)
-	if err != nil {
-		return "", err
-	}
-	s.serviceAuthMu.Lock()
-	if s.serviceAuth == nil {
-		s.serviceAuth = map[string]serviceAuthToken{}
-	}
-	s.serviceAuth[key] = serviceAuthToken{token: token, expires: expires}
-	s.serviceAuthMu.Unlock()
-	return token, nil
+	return s.serviceAuthCache().GetOrLoad(ctx, aud+"\x00"+lxm, func(ctx context.Context) (string, time.Duration, error) {
+		token, expires, err := s.mintServiceAuth(ctx, aud, lxm, time.Now())
+		if err != nil {
+			return "", 0, err
+		}
+		ttl := time.Until(expires)
+		if ttl <= 0 {
+			ttl = -1
+		}
+		return token, ttl, nil
+	})
 }
 
 func (s *Service) invalidateServiceAuth(host, lxm string) {
-	key := market.ServiceDIDForHost(host) + "\x00" + lxm
-	s.serviceAuthMu.Lock()
-	delete(s.serviceAuth, key)
-	s.serviceAuthMu.Unlock()
+	s.serviceAuthCache().Delete(market.ServiceDIDForHost(host) + "\x00" + lxm)
 }
 
 func (s *Service) mintServiceAuth(ctx context.Context, aud, lxm string, now time.Time) (string, time.Time, error) {
