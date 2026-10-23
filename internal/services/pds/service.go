@@ -20,9 +20,9 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
 	atpds "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/repo"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
 )
 
 const (
@@ -170,7 +170,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 		if handlers != nil && strings.HasPrefix(strings.ToLower(cfg.PLCURL), "http://") && !isLoopbackURL(cfg.PLCURL) {
 			cfg.PLCClient = handlers.HTTPClient()
 		} else {
-			cfg.PLCClient = externalHTTPClient(cfg.Deps, directoryTimeout)
+			cfg.PLCClient = cfg.Deps.ExternalHTTPClient(directoryTimeout)
 		}
 	}
 
@@ -387,7 +387,7 @@ func buildDirectory(plcURL string, client *http.Client, handlers *component.Hand
 	}
 	plcClient := client
 	if plcClient == nil {
-		plcClient = externalHTTPClient(deps, directoryTimeout)
+		plcClient = deps.ExternalHTTPClient(directoryTimeout)
 	}
 	return &identity.BaseDirectory{
 		PLCURL: plcURL,
@@ -410,18 +410,6 @@ func isLoopbackURL(raw string) bool {
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
-}
-
-func externalHTTPClient(deps component.Deps, timeout time.Duration) *http.Client {
-	transport, err := networkdial.NewHTTPTransportWithOptions(networkdial.DialOptions{
-		Hosts:          deps.Hosts,
-		TLSConfig:      deps.TLS,
-		AllowSystemDNS: true,
-	})
-	if err != nil {
-		return &http.Client{Timeout: timeout}
-	}
-	return &http.Client{Timeout: timeout, Transport: transport}
 }
 
 func logicalHost(key component.Key) string {
@@ -449,17 +437,8 @@ func (s *Service) Ready(ctx context.Context) error {
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, healthTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(probeCtx, http.MethodGet, rawURL+"/xrpc/_health", nil)
-	if err != nil {
-		return err
-	}
-	resp, err := handlers.HTTPClient().Do(req)
-	if err != nil {
-		return fmt.Errorf("pds: health request: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("pds: health returned HTTP %d", resp.StatusCode)
+	if err := xrpc.Health(probeCtx, &xrpc.Client{Host: rawURL, HTTP: handlers.HTTPClient()}); err != nil {
+		return fmt.Errorf("pds: health: %w", err)
 	}
 	return nil
 }
