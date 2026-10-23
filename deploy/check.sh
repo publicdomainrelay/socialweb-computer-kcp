@@ -52,6 +52,16 @@ if [ "$drift" -ne 0 ]; then
 fi
 echo "check.sh: ok apigen ($compared generated files, no drift from api/v1alpha1)"
 
+apisnap() { git ls-files -co --exclude-standard -- api | LC_ALL=C sort | xargs sha256sum 2>&1; }
+apibefore="$(apisnap)"
+go generate ./api/... >/dev/null || fail "go generate ./api/..."
+if [ "$(apisnap)" != "$apibefore" ]; then
+  git status --short -- api >&2
+  git diff -- api >&2
+  fail "codegen drift: go generate ./api/... changed api/; commit its output"
+fi
+echo "check.sh: ok codegen (go generate ./api/... leaves api/ unchanged)"
+
 go vet ./... || fail "go vet"
 echo "check.sh: ok go vet"
 

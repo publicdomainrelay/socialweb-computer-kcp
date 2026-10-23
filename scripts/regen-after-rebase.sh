@@ -14,12 +14,15 @@ onto), reruns the generators and stages the result:
 
   go generate ./api/...    deploy/*-apiresourceschema.yaml, deploy/*-apiexport.yaml,
                            deploy/apiresourceschema-revisions.txt, the TypeScript wire types and
-                           fixtures (cmd/socialweb-apigen -list names them all)
+                           fixtures, api/**/zz_generated.register.go and
+                           api/**/zz_generated.conditions.go (cmd/socialweb-apigen -list names
+                           them all), and api/**/zz_generated.deepcopy.go (deepcopy-gen through
+                           hack/codegen.sh)
 
 It never hand-merges generated output. The generators read api/v1alpha1, internal/apigen and
 cmd/socialweb-apigen, so a conflict there must be resolved first (the script says so and stops).
-It then prints the conflicts that remain (hand-written code, docs, plans, the zz_generated deepcopy
-files, which no generator writes) and, when none remain, the command to continue.
+It then prints the conflicts that remain (hand-written code, docs, plans) and, when none remain, the
+command to continue.
 EOF
   exit 2
 }
@@ -43,9 +46,11 @@ if [ ${#conflicted[@]} -eq 0 ]; then
 fi
 
 inputs=()
+codegen=()
 for p in "${conflicted[@]}"; do
   case "$p" in
-    api/*.go|api/*/*.go|internal/apigen/*|cmd/socialweb-apigen/*) inputs+=("$p") ;;
+    api/*zz_generated.*.go) codegen+=("$p") ;;
+    api/*.go|internal/apigen/*|cmd/socialweb-apigen/*|hack/codegen.sh) inputs+=("$p") ;;
   esac
 done
 if [ ${#inputs[@]} -gt 0 ]; then
@@ -66,6 +71,14 @@ if [ -f "$lockf" ] && [ -n "$(awk '{print $1}' "$lockf" | sort | uniq -d)" ]; th
   rm -rf "$tmp"
   say "$lockf named a revision twice (both sides changed one schema under one revision); kept the HEAD hash. If go generate now asks for a Revision bump, bump it in api/v1alpha1/resources.go and run this again"
 fi
+
+for p in "${codegen[@]}"; do
+  rm -f -- "$p"
+  say "dropped conflicted $p (regenerated below)"
+done
+find api \( -name zz_generated.register.go -o -name zz_generated.conditions.go \) -delete
+say "hack/codegen.sh"
+bash hack/codegen.sh || { say "hack/codegen.sh failed (above): fix the api types it names, git add them, run this again"; exit 1; }
 
 before_out="$(go run ./cmd/socialweb-apigen -root . -list)" || { say "cmd/socialweb-apigen failed (above): fix what it names (for example bump Revision in api/v1alpha1/resources.go), git add it, run this again"; exit 1; }
 mapfile -t before < <(echo "$before_out" | tr ' ' '\n' | grep .)
@@ -102,6 +115,7 @@ for p in "${outputs[@]}"; do
   [ -e "$p" ] && stage+=("$p")
 done
 git add -- "${stage[@]}"
+git add -A -- ':(glob)api/**/zz_generated.*.go'
 say "regenerated and staged ${#stage[@]} generated paths (${#generated[@]} were conflicted)"
 
 mapfile -t left < <(git diff --name-only --diff-filter=U)
