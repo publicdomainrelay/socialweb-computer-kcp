@@ -295,7 +295,7 @@ func (s *Service) writeBidRecord(ctx context.Context, bid *v1alpha1.Bid, now tim
 	if err != nil {
 		return market.StrongRef{}, err
 	}
-	configRef, err := s.records.PutRecord(ctx, s.did, guestidentity.WIFSimpleNSID, rkey+"-config", configRecord)
+	configRef, err := s.ensureRecordAt(ctx, guestidentity.WIFSimpleNSID, rkey+"-config", configRecord)
 	if err != nil {
 		return market.StrongRef{}, fmt.Errorf("writing the bid config: %w", err)
 	}
@@ -308,7 +308,7 @@ func (s *Service) writeBidRecord(ctx context.Context, bid *v1alpha1.Bid, now tim
 	if err != nil {
 		return market.StrongRef{}, err
 	}
-	payload, err := s.records.PutRecord(ctx, s.did, market.BidsFreeNSID, rkey+"-payload", payloadRecord)
+	payload, err := s.ensureRecordAt(ctx, market.BidsFreeNSID, rkey+"-payload", payloadRecord)
 	if err != nil {
 		return market.StrongRef{}, fmt.Errorf("writing the bid payload: %w", err)
 	}
@@ -326,12 +326,31 @@ func (s *Service) writeBidRecord(ctx context.Context, bid *v1alpha1.Bid, now tim
 	if err != nil {
 		return market.StrongRef{}, err
 	}
-	ref, err := s.records.PutRecord(ctx, s.did, market.BidNSID, rkey, signed)
+	ref, err := s.ensureRecordAt(ctx, market.BidNSID, rkey, signed)
 	if err != nil {
 		return market.StrongRef{}, fmt.Errorf("writing the bid: %w", err)
 	}
 	s.log.Info("the bidder published a bid", "rfp", bid.Spec.Rfp.Uri, "bid", ref.URI)
 	return ref, nil
+}
+
+func (s *Service) ensureRecordAt(ctx context.Context, collection, rkey string, record map[string]any) (market.StrongRef, error) {
+	if s.records == nil || s.did == "" {
+		return market.StrongRef{}, errors.New("the bidder has no record store or did")
+	}
+	if found, err := s.records.GetRecord(ctx, s.did, collection, rkey); err == nil {
+		return market.NewStrongRef(found.URI, found.CID), nil
+	} else if !errors.Is(err, market.ErrNotFound) {
+		return market.StrongRef{}, err
+	}
+	ref, err := s.records.CreateRecordAt(ctx, s.did, collection, rkey, record)
+	if err == nil {
+		return ref, nil
+	}
+	if found, getErr := s.records.GetRecord(ctx, s.did, collection, rkey); getErr == nil {
+		return market.NewStrongRef(found.URI, found.CID), nil
+	}
+	return market.StrongRef{}, err
 }
 
 func (s *Service) existingBidRecord(ctx context.Context, bid *v1alpha1.Bid) (market.StrongRef, bool, error) {

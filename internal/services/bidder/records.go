@@ -25,6 +25,8 @@ const (
 type RecordStore interface {
 	market.RecordWriter
 
+	CreateRecordAt(ctx context.Context, repo, collection, rkey string, record map[string]any) (market.StrongRef, error)
+
 	market.RecordGetter
 
 	market.RecordLister
@@ -123,6 +125,25 @@ func (p *PDSStore) CreateRecord(ctx context.Context, repo, collection string, re
 	result, err := p.pds.CreateRecord(ctx, path, raw, pdsclient.WriteOptions{})
 	if err != nil {
 		return market.StrongRef{}, pdsError("createRecord of "+repo+"/"+collection, err)
+	}
+	return market.NewStrongRef(result.URI.String(), result.CID.String()), nil
+}
+
+func (p *PDSStore) CreateRecordAt(ctx context.Context, repo, collection, rkey string, record map[string]any) (market.StrongRef, error) {
+	if p == nil || p.pds == nil {
+		return market.StrongRef{}, errors.New("bidder: the PDS store is not configured")
+	}
+	path, err := recordPath(repo, collection, rkey)
+	if err != nil {
+		return market.StrongRef{}, err
+	}
+	raw, err := encodeRecord(record)
+	if err != nil {
+		return market.StrongRef{}, err
+	}
+	result, err := p.pds.CreateRecord(ctx, path, raw, pdsclient.WriteOptions{})
+	if err != nil {
+		return market.StrongRef{}, pdsError("createRecord of "+repo+"/"+collection+"/"+rkey, err)
 	}
 	return market.NewStrongRef(result.URI.String(), result.CID.String()), nil
 }
@@ -259,6 +280,10 @@ func NewRoutedStore(did string, local *PDSStore, remote *market.HTTPReader) *rou
 
 func (r *routedStore) CreateRecord(ctx context.Context, repo, collection string, record map[string]any) (market.StrongRef, error) {
 	return r.local.CreateRecord(ctx, repo, collection, record)
+}
+
+func (r *routedStore) CreateRecordAt(ctx context.Context, repo, collection, rkey string, record map[string]any) (market.StrongRef, error) {
+	return r.local.CreateRecordAt(ctx, repo, collection, rkey, record)
 }
 
 func (r *routedStore) PutRecord(ctx context.Context, repo, collection, rkey string, record map[string]any) (market.StrongRef, error) {
