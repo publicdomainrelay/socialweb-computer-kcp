@@ -77,15 +77,19 @@ func (ctl *Controller) applyRBAC(ctx context.Context, r compose.Root, ws string,
 
 func (ctl *Controller) ensureAppWorkspace(ctx context.Context, r compose.Root, name string) error {
 	ws := ctl.c.Workspace()
-	u := ctl.c.Object(r, ws, "tenancy.kcp.io/v1alpha1", "Workspace", name, map[string]string{AppWorkspaceLabel: name})
-	compose.DocMeta(u)["annotations"] = map[string]string{kcpserver.WorkspaceOwnerAnnotation: kcpserver.ShardAdminOwner}
-	u["spec"] = map[string]any{"type": map[string]any{"name": AppWorkspaceType, "path": compose.DefaultWorkspace}}
-	if err := ctl.c.Apply(ctx, r, ws, compose.WorkspaceGVR, u); err != nil {
-		return fmt.Errorf("applying the workspace %s: %w", ctl.appWorkspace(name), err)
-	}
 	ri, err := ctl.c.Client(ws, compose.WorkspaceGVR)
 	if err != nil {
 		return err
+	}
+	u := ctl.c.Object(r, ws, "tenancy.kcp.io/v1alpha1", "Workspace", name, map[string]string{AppWorkspaceLabel: name})
+	if _, err := kube.Get[tenancyv1alpha1.Workspace](ctx, ri, name); apierrors.IsNotFound(err) {
+		compose.DocMeta(u)["annotations"] = map[string]string{kcpserver.WorkspaceOwnerAnnotation: kcpserver.ShardAdminOwner}
+	} else if err != nil {
+		return err
+	}
+	u["spec"] = map[string]any{"type": map[string]any{"name": AppWorkspaceType, "path": compose.DefaultWorkspace}}
+	if err := ctl.c.Apply(ctx, r, ws, compose.WorkspaceGVR, u); err != nil {
+		return fmt.Errorf("applying the workspace %s: %w", ctl.appWorkspace(name), err)
 	}
 	last, err := kube.Await(ctx, ri, name, compose.ApplyTimeout, func(cur *tenancyv1alpha1.Workspace) (bool, error) {
 		if cur == nil {
