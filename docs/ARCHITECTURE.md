@@ -673,7 +673,8 @@ by handle). Long-lived children are transient SERVICES (never scopes) started ov
 member units in `socialweb-cluster-<key>.slice` (kine and bao `After=` and `Wants=` the postgres unit, not
 `Requires=`), and
 kcp: on the gateway as alternating blue/green slot units (`socialweb-kcp-gw@a|b`) of the unpatched
-release kcp v0.33.0 asset, each on its own kine over a dedicated postgres unit on a unix socket
+kcp asset built here from kcp-dev/kcp main (commit 74e9fb9c, versions.json assets.kcp, fetch kind gosrc;
+the user decided 2026-10-22, plan 0026 W0-RUNTIME, to run kcp off main), each on its own kine over a dedicated postgres unit on a unix socket
 (`socialweb-kcp-gw-pg`, not a CRD object), behind our own L4 front (`socialweb-kcp-gw-front`,
 127.0.0.1:6443); on a bidder as ONE slot per handle
 (`socialweb-kcp-<hid>@a`) on one kine over sqlite behind a port-0 front, upgraded by a short restart that

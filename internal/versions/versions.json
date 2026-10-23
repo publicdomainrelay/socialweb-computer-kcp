@@ -6,8 +6,8 @@
       "invariant": "MEASURED, not read: a `server --disable-agent` binds *:https-listen-port AND 127.0.0.1:port+1 as a PAIR, and binds NOTHING on --advertise-port in steady state; /cacerts answers 200 on the listen port and 401 on the advertise port, so a node dialing the advertise port loops on 'failed to get CA certs'. Two --disable-agent servers DID run concurrently on one host, each with its own kine and store. The server still runs the agent bootstrap and so needs /etc/rancher/node/password readable and writable -- NOT under --data-dir, no flag moves it -- but its VALUE is never checked, because no node registers through it and the k3s-<node> Secret that would disagree is never created. An AGENT cannot share a host: 127.0.0.1:6444 collides FATALLY, one containerd socket, one flannel.1, one IPAM pool, one set of KUBE-* chains, and it is fatal as a non-root user ('agent requires additional privilege if not run with --rootless')."
     },
     "kcp": {
-      "version": "v1.36.0+kcp-v0.33.0",
-      "how": "release binary",
+      "version": "v1.36.0+kcp-v0.33.0-162-g74e9fb9c03f778",
+      "how": "built here from kcp-dev/kcp main at 74e9fb9c03f778c57d1a6a782d5adc9476ec1af5 (assets.kcp, fetch kind gosrc); kcp --version reports this string",
       "invariant": "MUST run --feature-gates=WorkspaceMounts=true. With the gate off, installWorkspaceMountsScheduler returns early (kcp/pkg/server/controllers.go:733-737) and EVERY TENANT'S MOUNTED API SILENTLY STOPS BEING SERVED -- objects survive, the mount does not."
     },
     "kine": {
@@ -67,17 +67,26 @@
   },
   "assets": {
     "kcp": {
-      "version": "v0.33.0",
-      "source": "github.com/kcp-dev/kcp release v0.33.0, the unpatched release binary",
-      "verify": "sha256 pinned here and matched against the release's kcp_0.33.0_checksums.txt; upstream publishes no signature",
+      "version": "v0.33.0-162-g74e9fb9c03f778",
+      "source": "github.com/kcp-dev/kcp main at commit 74e9fb9c03f778c57d1a6a782d5adc9476ec1af5 (2026-10-22, Merge pull request #4479), unpatched, built here by scripts/stage-assets.sh (fetch kind gosrc): the GitHub source archive of that commit, cmd/kcp with CGO_ENABLED=0 go build -trimpath -buildvcs=false -mod=readonly -ldflags='-s -w -buildid=' plus kcp's own Makefile version -X flags (values pinned in gosrc.versionVars, gitVersion from git describe --tags --match='v*' --abbrev=14 of the commit, buildDate the commit date), with the pinned toolchain; modules from proxy.golang.org, verified by the archive's go.sum",
+      "verify": "the source archive's sha256 is pinned here and its pax comment must name the pinned commit; the build is reproducible, so the unpacked tree must equal the treeSha256 pin (make pins writes it; a gosrc change re-pins it)",
       "executables": {"kcp": "kcp"},
+      "gosrc": {
+        "url": "https://github.com/kcp-dev/kcp/archive/74e9fb9c03f778c57d1a6a782d5adc9476ec1af5.tar.gz",
+        "sha256": "1f896ebc6193ef01cd82f0420a506bfe661e9ca8982ad2f72463363251eb8b70",
+        "commit": "74e9fb9c03f778c57d1a6a782d5adc9476ec1af5",
+        "toolchain": "go1.26.6",
+        "package": "./cmd/kcp",
+        "versionPackages": ["k8s.io/client-go/pkg/version", "k8s.io/component-base/version"],
+        "versionVars": {"gitVersion": "v1.36.0+kcp-v0.33.0-162-g74e9fb9c03f778", "gitCommit": "74e9fb9c03f778c57d1a6a782d5adc9476ec1af5", "gitTreeState": "clean", "gitMajor": "1", "gitMinor": "36", "buildDate": "2026-10-22T16:36:10Z"}
+      },
       "fetch": {
-        "linux/amd64": {"kind": "file", "url": "https://github.com/kcp-dev/kcp/releases/download/v0.33.0/kcp_0.33.0_linux_amd64.tar.gz", "sha256": "dc7c31a662989f07910f0f949ff5456dbee3793d17fbde4724be7a4c08e0c606", "archive": "tar.gz", "members": {"bin/kcp": "kcp"}, "checksums": {"url": "https://github.com/kcp-dev/kcp/releases/download/v0.33.0/kcp_0.33.0_checksums.txt", "name": "kcp_0.33.0_linux_amd64.tar.gz"}},
-        "linux/arm64": {"kind": "file", "url": "https://github.com/kcp-dev/kcp/releases/download/v0.33.0/kcp_0.33.0_linux_arm64.tar.gz", "sha256": "2d9420096ae0fbca74d5dc315a8a0ee3c15fd03eec5d838e41d7e688b87f66f3", "archive": "tar.gz", "members": {"bin/kcp": "kcp"}, "checksums": {"url": "https://github.com/kcp-dev/kcp/releases/download/v0.33.0/kcp_0.33.0_checksums.txt", "name": "kcp_0.33.0_linux_arm64.tar.gz"}}
+        "linux/amd64": {"kind": "gosrc", "members": {"kcp": "kcp"}},
+        "linux/arm64": {"kind": "gosrc", "members": {"kcp": "kcp"}}
       },
       "platforms": {
-        "linux/amd64": {"treeSha256": "49b173e9389eba63931997519378d3cd9d8482d163e4c64e0edbf408e485bd93", "rawBytes": 176825356, "zstdBytes": 59187036},
-        "linux/arm64": {"treeSha256": "b506847a8f7d9a3eb59de73ba9d74f01587dc6faefed3f15698877af52e46395", "rawBytes": 166018238, "zstdBytes": 54748311}
+        "linux/amd64": {"treeSha256": "2fc5be2b9418bbd7961e7e0913054f8db409ef66da25f465c3bf30f4eae4bdd4", "rawBytes": 123207806, "zstdBytes": 24419908},
+        "linux/arm64": {"treeSha256": "7b534b4865161f3d5b6b749f89cdc5fa64589d4d19ebd302c825b1865e2202e2", "rawBytes": 114032766, "zstdBytes": 21521584}
       }
     },
     "kine": {
@@ -380,6 +389,8 @@
     }
   },
   "kcpCompat": [
+    {"from": "v0.33.0", "to": "v0.33.0-162-g74e9fb9c03f778", "storageCompatible": false, "diffSHA256": "67c62fd4fc1a86aab2a71d9a2cc61d322ec8204c96d359c69b63db3326cd2e30"},
+    {"from": "v0.33.1", "to": "v0.33.0-162-g74e9fb9c03f778", "storageCompatible": false, "diffSHA256": "15dfc6be717f3e1dd3b4a9298b05ef7528f0289e4e00c1248a5970253037701a"},
     {"from": "v0.33.0", "to": "v0.33.1", "storageCompatible": true, "diffSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
     {"from": "v0.32.5", "to": "v0.33.0", "storageCompatible": false, "diffSHA256": "490da758445c62e6bcd5bd8e5d6e0affe39cd023051c73ce86848d572a1ac58e"}
   ],
