@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/fields"
@@ -192,10 +193,9 @@ func AwaitListWatch(ctx context.Context, lw cache.ListerWatcher, objType kruntim
 		ctx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
 	}
-	ctx, stop := context.WithCancel(ctx)
-	var informer sync.WaitGroup
-	defer informer.Wait()
-	defer stop()
+	informer := supervise.New(ctx)
+	defer informer.Stop()
+	ctx = informer.Context()
 	changed := make(chan struct{}, 1)
 	kick := func() {
 		select {
@@ -209,7 +209,10 @@ func AwaitListWatch(ctx context.Context, lw cache.ListerWatcher, objType kruntim
 			UpdateFunc: func(any, any) { kick() },
 			DeleteFunc: func(any) { kick() },
 		}})
-	informer.Go(func() { ctrl.RunWithContext(ctx) })
+	informer.Go("kube: await informer", func(ctx context.Context) error {
+		ctrl.RunWithContext(ctx)
+		return nil
+	})
 	timedOut := func() error {
 		if parent.Err() != nil {
 			return parent.Err()
