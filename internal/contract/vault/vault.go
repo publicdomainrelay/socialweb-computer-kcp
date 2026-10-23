@@ -52,3 +52,13 @@ type PKI interface {
 
 	CAChain(ctx context.Context, mount string) (string, error)
 }
+
+type Trust interface {
+	CABundle(ctx context.Context) ([]byte, error)
+
+	Watch(fn func(bundle []byte)) (cancel func())
+}
+
+type Keys interface {
+	RotateKey(ctx context.Context, name string) error
+}
