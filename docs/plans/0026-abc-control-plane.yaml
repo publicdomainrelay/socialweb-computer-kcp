@@ -1039,7 +1039,10 @@ risks: |
   Serving through APIExport virtual workspaces changes how the core reaches
   its own kinds. Permission claims and identity hashes must be correct or
   controllers see nothing. CVE-2025-29922 requires kcp 0.26.3 or 0.27.0 or
-  later; check the pinned kcp.
+  later. The pinned kcp, built from kcp-dev/kcp main at 74e9fb9c (after
+  v0.33.0), is past every published kcp advisory (the latest,
+  GHSA-c8w2-fgvx-vhv4 / CVE-2026-61682, is fixed in 0.32.2) and carries the
+  mount identity-header fix d0ecac6 that no release has yet.
 
   Removing the System caller can deny calls the composing roots do not yet
   link. W0-BUS logs every deny with from, to and capability; W3-ROOTS must

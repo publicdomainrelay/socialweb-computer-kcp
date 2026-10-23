@@ -18,13 +18,14 @@ usage() {
   echo "  where one is published), repacks it as internal/assets/blobs/<goos>_<goarch>/<asset>.tar.zst and" >&2
   echo "  checks the unpacked tree against its treeSha256 pin. --print-pins prints the measured pins and" >&2
   echo "  stages even when a tree pin differs. --update-pins does the same for the assets built from this" >&2
-  echo "  repository (fetch kind go or script) and writes their new pins into versions.json; pins of" >&2
+  echo "  repository (fetch kind go or script) or built here from pinned upstream source (fetch kind gosrc)" >&2
+  echo "  and writes their new pins into versions.json; pins of" >&2
   echo "  downloaded assets are never changed. --cache keeps" >&2
   echo "  the downloads (keyed by sha256) in DIR instead of internal/assets/blobs/.cache. --blobs writes" >&2
   echo "  <goos>_<goarch>/<asset>.tar.zst under DIR instead of internal/assets/blobs (the --dev build's cache)." >&2
-  echo "  --blob-cache keeps every zstd blob in DIR: a downloaded asset (kind file, oci, debs) by the sha256 of" >&2
-  echo "  its versions.json entry, this script, assetpack and the zstd version and flags (a hit skips its" >&2
-  echo "  download, verification and repack); an asset built from this checkout (kind go, script) is rebuilt" >&2
+  echo "  --blob-cache keeps every zstd blob in DIR: an asset of pinned inputs (kind file, oci, debs, gosrc) by" >&2
+  echo "  the sha256 of its versions.json entry, this script, assetpack and the zstd version and flags (a hit" >&2
+  echo "  skips its download or build, verification and repack); an asset built from this checkout (kind go, script) is rebuilt" >&2
   echo "  and checked against its pin every time, and only its zstd step is reused, keyed by the sha256 of" >&2
   echo "  its tar stream. --jobs stages up to N assets at once (default 6)." >&2
   exit 2
@@ -228,6 +229,38 @@ stage_go() {
   copy_members "$x/u" "$tree" "$(echo "$spec" | jq -c .members)"
 }
 
+gosrc_proxy="https://proxy.golang.org"
+
+stage_gosrc() {
+  local asset="$1" spec="$2" tree="$3" x="$4" plat="$5" src url want commit toolchain pkg file comment goroot ldflags p k out
+  src="$(jq -c --arg a "$asset" '.assets[$a].gosrc' "$versions")"
+  [ "$src" != "null" ] || die "$asset: fetch kind gosrc needs an asset-level gosrc object"
+  url="$(echo "$src" | jq -r .url)"
+  want="$(echo "$src" | jq -r .sha256)"
+  commit="$(echo "$src" | jq -r .commit)"
+  toolchain="$(echo "$src" | jq -r .toolchain)"
+  pkg="$(echo "$src" | jq -r .package)"
+  file="$(fetch_pinned "$url" "$want")"
+  comment="$(python3 -I -c 'import sys, tarfile; print(tarfile.open(sys.argv[1]).pax_headers.get("comment", ""))' "$file")"
+  [ "$comment" = "$commit" ] || die "$url: the archive names commit '$comment', pinned $commit"
+  mkdir -p "$x/src" "$x/u"
+  tar -xzf "$file" -C "$x/src" --strip-components=1
+  ldflags="-s -w -buildid="
+  for p in $(echo "$src" | jq -r '.versionPackages[]'); do
+    while IFS=$'\t' read -r k v; do
+      ldflags="$ldflags -X $p.$k=$v"
+    done < <(echo "$src" | jq -r '.versionVars | to_entries[] | "\(.key)\t\(.value)"')
+  done
+  out="$x/u/$(echo "$spec" | jq -r '.members | keys[0]')"
+  goroot="$(GOTOOLCHAIN="$toolchain" GOPROXY="$gosrc_proxy" GOSUMDB=sum.golang.org go env GOROOT)" || die "cannot get the toolchain $toolchain"
+  (cd "$x/src" && PATH="$goroot/bin:$PATH" GOTOOLCHAIN=local GOWORK=off GOFLAGS=-mod=readonly GOPROXY="$gosrc_proxy" \
+    GOSUMDB=sum.golang.org GONOSUMDB= GOPRIVATE= GONOPROXY= GOINSECURE= CGO_ENABLED=0 GOOS="${plat%/*}" GOARCH="${plat#*/}" \
+    go build -trimpath -buildvcs=false -ldflags="$ldflags" -o "$out" "$pkg")
+  [ "$(PATH="$goroot/bin:$PATH" GOTOOLCHAIN=local go version "$out" | awk '{print $2}')" = "$toolchain" ] || die "$asset $plat was not built by $toolchain"
+  say "$asset $plat built from $commit with $toolchain, binary sha256 $(sha_of "$out")"
+  copy_members "$x/u" "$tree" "$(echo "$spec" | jq -c .members)"
+}
+
 deb_arch() { case "$1" in linux/amd64) echo amd64 ;; linux/arm64) echo arm64 ;; *) die "no deb arch for $1" ;; esac; }
 
 fetch_index() {
@@ -373,7 +406,7 @@ stage_one() {
   spec="$(jq -c --arg a "$asset" --arg p "$plat" '.assets[$a].fetch[$p]' "$versions")"
   [ "$spec" != "null" ] || die "$asset has no fetch spec for $plat"
   kind="$(echo "$spec" | jq -r .kind)"
-  case "$kind" in go|script) owned=1 ;; esac
+  case "$kind" in go|script|gosrc) owned=1 ;; esac
   pin="$(jq -r --arg a "$asset" --arg p "$plat" '.assets[$a].platforms[$p].treeSha256 // ""' "$versions")"
   x="$work/$asset-${plat/\//_}"
   tree="$x/tree"
@@ -382,7 +415,7 @@ stage_one() {
   mkdir -m 0700 "$GNUPGHOME"
   if [ -n "$blob_cache" ] && [ -n "$pin" ] && [ "$print_pins" != 1 ]; then
     case "$kind" in
-      file|oci|debs)
+      file|oci|debs|gosrc)
         in_key="in-$(printf '%s\n' "$plat" "$asset" "$(jq -cS --arg a "$asset" '.assets[$a]' "$versions")" "$script_sha" "$pack_id" | sha256sum | cut -d' ' -f1)"
         if cache_get "$in_key" "$pdir/$asset.tar.zst"; then
           chmod -R u+w "$x" && rm -rf "$x"
@@ -399,6 +432,7 @@ stage_one() {
     debs) stage_debs "$asset" "$spec" "$tree" "$x" "$plat" ;;
     script) stage_script "$spec" "$tree" "$x" ;;
     go) stage_go "$spec" "$tree" "$x" "$plat" ;;
+    gosrc) stage_gosrc "$asset" "$spec" "$tree" "$x" "$plat" ;;
     *) die "$asset: unknown fetch kind" ;;
   esac
   digest="$("$work/assetpack" digest "$tree")"
@@ -419,7 +453,7 @@ stage_one() {
       cat "$x/tar" | zstd "${zstd_args[@]}" -o "$x/blob"
       cache_put "$out_key" "$x/blob"
     fi
-    [ -z "$in_key" ] || cache_put "$in_key" "$x/blob"
+    [ -z "$in_key" ] || [ "$pin" != "$digest" ] || cache_put "$in_key" "$x/blob"
   else
     "$work/assetpack" tar "$tree" | zstd "${zstd_args[@]}" -o "$x/blob"
   fi

@@ -120,7 +120,7 @@ func (h *HTTPAdmin) do(ctx context.Context, method, path string, body any) (int,
 	return resp.StatusCode, b, nil
 }
 
-const rootShardPath = "/clusters/root/apis/core.kcp.io/v1alpha1/shards/root"
+const rootShardPath = "/clusters/system:shard/apis/core.kcp.io/v1alpha1/shards/root"
 
 func (h *HTTPAdmin) SyncRootShard(ctx context.Context) (bool, error) {
 	code, b, err := h.do(ctx, http.MethodGet, rootShardPath, nil)

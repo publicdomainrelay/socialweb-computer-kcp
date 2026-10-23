@@ -6,7 +6,10 @@ from pathlib import Path
 
 
 def asset_block(text, asset):
-    start = text.find('\n    "%s": {\n' % asset)
+    assets = text.find('\n  "assets": {\n')
+    if assets < 0:
+        raise SystemExit("update-pins: no assets section")
+    start = text.find('\n    "%s": {\n' % asset, assets)
     if start < 0:
         raise SystemExit("update-pins: no asset %s" % asset)
     start += 1

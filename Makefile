@@ -3,7 +3,7 @@ SHELL := /bin/bash
 PLATFORMS ?= linux/amd64 linux/arm64
 BUILD_ROOT ?= $(HOME)/.tmp/socialweb-computer-build
 
-OWNED := $(shell jq -r '.assets | to_entries[] | select([.value.fetch[]?.kind] | any(. == "go" or . == "script")) | .key' internal/versions/versions.json)
+OWNED := $(shell jq -r '.assets | to_entries[] | select([.value.fetch[]?.kind] | any(. == "go" or . == "script" or . == "gosrc")) | .key' internal/versions/versions.json)
 PLATFORM_FLAGS := $(addprefix --platform ,$(PLATFORMS))
 ASSET_FLAGS := $(addprefix --asset ,$(OWNED))
 
