@@ -10,12 +10,14 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/bluesky-social/indigo/atproto/identity"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauthclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/lease"
 )
 
 type OAuthSession = oauthclient.Session
@@ -146,8 +148,6 @@ func credentialString(data map[string]any, keys ...string) string {
 }
 
 type pdsAccountTokens struct {
-	mu sync.Mutex
-
 	pdsURL string
 
 	identifier string
@@ -156,39 +156,38 @@ type pdsAccountTokens struct {
 
 	client *http.Client
 
-	access string
+	access *lease.Source[string]
 }
 
 func newPDSAccountTokens(pdsURL, identifier, password string, client *http.Client) *pdsAccountTokens {
-	return &pdsAccountTokens{pdsURL: pdsURL, identifier: identifier, password: password, client: client}
+	t := &pdsAccountTokens{pdsURL: pdsURL, identifier: identifier, password: password, client: client}
+	t.access = lease.New(t.login)
+	return t
 }
 
 func (t *pdsAccountTokens) AccessToken(ctx context.Context) (string, error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if pdsclient.TokenLive(t.access) {
-		return t.access, nil
-	}
-	return t.loginLocked(ctx)
+	return t.access.Get(ctx)
 }
 
 func (t *pdsAccountTokens) RefreshAccessToken(ctx context.Context) (string, error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.loginLocked(ctx)
+	t.access.Invalidate()
+	return t.access.Get(ctx)
 }
 
-func (t *pdsAccountTokens) loginLocked(ctx context.Context) (string, error) {
+func (t *pdsAccountTokens) login(ctx context.Context) (string, time.Time, error) {
 	pds, err := pdsclient.NewRemote(pdsclient.RemoteConfig{BaseURL: t.pdsURL, HTTPClient: t.client, Timeout: DefaultHTTPTimeout})
 	if err != nil {
-		return "", err
+		return "", time.Time{}, err
 	}
 	session, err := pds.CreateSession(ctx, t.identifier, t.password)
 	if err != nil {
-		return "", err
+		return "", time.Time{}, err
 	}
-	t.access = session.AccessJWT
-	return t.access, nil
+	expires, ok := pdsclient.TokenExpiry(session.AccessJWT)
+	if !ok {
+		return session.AccessJWT, time.Now(), nil
+	}
+	return session.AccessJWT, expires.Add(-pdsclient.TokenExpirySkew), nil
 }
 
 type credentialTokens struct {
