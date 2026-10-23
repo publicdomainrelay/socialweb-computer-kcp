@@ -68,7 +68,7 @@ func Resolve[T any](ctx context.Context, b *Bus, from commonv1.ObjectRef, to com
 	if current, ok := CallerFrom(ctx); ok && current.Ref == from {
 		caller.Labels = current.Labels
 	}
-	if err := b.authorizeCaller(caller, to, c); err != nil {
+	if err := b.authorizeCaller(ctx, caller, to, c); err != nil {
 		return zero, err
 	}
 	key := providerKey{kind: strings.ToLower(strings.TrimSpace(to.Kind)), capability: strings.ToLower(strings.TrimSpace(c.Name)), typ: reflect.TypeFor[T]()}
