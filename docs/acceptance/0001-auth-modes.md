@@ -14,6 +14,10 @@ Run it from a host with `goat`, `kubectl`, `ssh` to `socialweb.computer`, `hat-7
 and `hat-9`, and the credential files named below. It changes the prod gateway
 and the bidders. Do not run it without that authority.
 
+This runbook was validated end to end on `v0.0.0-rc81`: three pods on three
+distinct tenant nodes, one market VM on each bidder host, paused winners forcing
+the next placement, and every VM released when the cluster returned to zero.
+
 The authoritative OAuth role sets are in
 `internal/atproto/oauth/scope.go`, ported from
 `typescript-helpers/lib/oauth-scope/mod.ts` (the generator behind
@@ -41,6 +45,28 @@ LOCAL_K=$(sudo -n -u swc-bidder sh -c "ls /var/lib/socialweb-computer/swc-bidder
 The gateway account workspace name (`PROD_ACCOUNT`) appears in the cluster
 provider log line `home":"root:<account>:<cluster>"`. It is stable for a state
 dir.
+
+## Requester association
+
+The gateway requester must be associated before it accepts any bid. Check it
+before creating a cluster; a gateway restart can leave the operator claim
+missing.
+
+```bash
+ID_ARGS="--kubeconfig $PROD_K --server https://127.0.0.1:6443/clusters/root:app"
+ASSOC=$(ssh socialweb.computer "sudo -n -u socialweb env HOME=/var/lib/socialweb-computer/socialweb kubectl $ID_ARGS get marketidentity requester -o jsonpath='{.status.associated}'")
+RI_DID=$(ssh socialweb.computer "sudo -n -u socialweb env HOME=/var/lib/socialweb-computer/socialweb kubectl $ID_ARGS get marketidentity requester -o jsonpath='{.status.did}'")
+printf 'requester=%s associated=%s\n' "$RI_DID" "$ASSOC"
+if [ "$ASSOC" != True ]; then
+  OP_DID=$(deno run -A --no-lock scripts/associate-bidder.ts --creds ~/.aliceoa_bsky_social_source \
+    --account ALICE --requester-did "$RI_DID" | jq -r .operatorDid)
+  ssh socialweb.computer "sudo -n -u socialweb env HOME=/var/lib/socialweb-computer/socialweb kubectl $ID_ARGS patch marketidentity requester --type merge -p '{\"spec\":{\"approvedAssociations\":[\"$OP_DID\"]}}'"
+fi
+```
+
+Wait until `associated=True` and the `Requester` child reports
+`spec.operatorDID=$OP_DID`. Without that, every bid is denied by
+`requester-tangled-vouch` even though bidder policy runs succeed.
 
 ## Service auth for the gateway
 
@@ -93,6 +119,10 @@ receives `market.rfp` and `market.accept` from this stream.
 PDS_URL=$(ssh socialweb.computer "sudo -n -u socialweb env HOME=/var/lib/socialweb-computer/socialweb kubectl --kubeconfig $PROD_K get exposure svc-pds-pds-ingress -o jsonpath='{.status.url}'")
 ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl patch marketbidder app --type merge -p '{\"spec\":{\"suspend\":false,\"network\":{\"firehoseUrls\":[\"$PDS_URL\"]}}}'"
 ```
+
+Re-apply the patch after any bidder restart: the app root does not keep
+`network.firehoseUrls` across a restart, and without it the bidder fails closed
+with "comms mode Firehose has no relay or firehose URL".
 
 The root must become Ready and one EventStream must be running:
 

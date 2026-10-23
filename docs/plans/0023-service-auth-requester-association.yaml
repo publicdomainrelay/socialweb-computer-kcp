@@ -1,6 +1,6 @@
 plan: "0023"
 title: "Service auth and requester association: one offering host, one audience, one canonical requester_associate record"
-status: todo
+status: done
 source: >
   Old tree: /home/johnandersen777/.tmp/tmp.veSQ1orzKZ/socialweb-computer. The
   old bidder advertised relay.ingressUrl as the offering endpointUrl and the
@@ -235,7 +235,7 @@ waves:
 
   - id: W6
     title: "New bidder audience mismatch and fix"
-    status: blocked
+    status: done
     decision: >
       Two paths, one rule. XRPC-capable identities (localRepo, or any peer that
       advertises a reachable inbound service) use one publicMarketURL() source:
@@ -279,7 +279,7 @@ waves:
 
   - id: W7
     title: "New requester auth and discovery"
-    status: blocked
+    status: done
     decision: >
       The new verifier at internal/atproto/market/auth.go already implements
       the old contract: bare did:web:HOST, did:web:HOST#SERVICE_ID for each
@@ -310,7 +310,7 @@ waves:
 
   - id: W8
     title: "New association watch and record shape"
-    status: blocked
+    status: done
     decision: >
       The gateway records manifest writes requester_associate, but the bidder
       path writes bidder_associate into the requester side, and the generic
@@ -350,7 +350,7 @@ waves:
 
   - id: W9
     title: "Gateway identity mode"
-    status: blocked
+    status: done
     decision: >
       Default gateway: localRepo requester with RequireApproval. The gateway
       kcp signs market requests as the requester DID (local repo #atproto key),
@@ -384,7 +384,7 @@ waves:
 
   - id: W10
     title: "Exact fixes and acceptance"
-    status: blocked
+    status: done
     decision: >
       Two ordered tracks, one commit each. Track A restores XRPC-capable
       behavior: one publicMarketURL() source, requester signing by identity

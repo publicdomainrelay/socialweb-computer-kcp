@@ -1,6 +1,6 @@
 plan: "0024"
 title: "Per-component suspend and typed configuration overrides for app roots"
-status: doing
+status: done
 source: >
   Every app root has one spec.suspend and one set of root-wide fields. appctl
   passes that one suspend to every child it creates, including the shared
@@ -398,7 +398,7 @@ waves:
     gate: "types and schemas compile; invalid keys and setting blocks fail closed; no child behavior changes."
   - id: W1
     title: "Per-component suspend and truthful status"
-    status: doing
+    status: done
     serial: true
     tracks: [W1-SUSPEND]
     item: W1-SUSPEND
@@ -406,7 +406,7 @@ waves:
     gate: "local pause proof passes; hat-7/A1 reproduces it in W4; root Ready with one suspended child; resume advances heartbeat."
   - id: W2
     title: "Bidder and Requester typed tuning"
-    status: doing
+    status: done
     parallel: true
     tracks: [W2-TUNING]
     item: W2-TUNING
@@ -414,7 +414,7 @@ waves:
     gate: "heartbeat/offering and requester limits take effect from settings and are visible in status."
   - id: W3
     title: "Remaining components, overrides and immutability"
-    status: doing
+    status: done
     parallel: true
     tracks: [W3-COMPONENTS]
     item: W3-COMPONENTS
@@ -422,7 +422,7 @@ waves:
     gate: "every child kind has a verified override path or an explicit not-supported reason; immutable changes are rejected."
   - id: W4
     title: "Integration and live proof"
-    status: blocked
+    status: done
     serial: true
     tracks: [W4-PROOF]
     item: W4-PROOF
@@ -476,7 +476,7 @@ items:
     track: suspend
     parallel_with: []
     depends_on: [W0-CONTRACTS]
-    status: doing
+    status: done
     decision: >
       Replace each root's single suspend := o.Spec.Suspend with
       suspendFor(kind, name) = root.Spec.Suspend || override.Suspend, and
@@ -516,7 +516,7 @@ items:
     track: tuning
     parallel_with: []
     depends_on: [W1-SUSPEND]
-    status: doing
+    status: done
     decision: >
       Add the Bidder and Requester settings to their child specs and read them
       in the service configs. Bidder: heartbeatIntervalSeconds,
@@ -558,7 +558,7 @@ items:
     track: components
     parallel_with: []
     depends_on: [W2-TUNING]
-    status: doing
+    status: done
     decision: >
       Add typed settings and override translation for GuestControlPlane,
       Pds, SshServer, GatewayAPI and PolicyEngine. GuestControlPlane:
@@ -617,7 +617,7 @@ items:
     track: proof
     parallel_with: []
     depends_on: [W3-COMPONENTS]
-    status: blocked
+    status: done
     decision: >
       Run the live matrix on this host, hat-9, hat-7 and the prod gateway
       first. Only after that proof works, write the integration suite in
