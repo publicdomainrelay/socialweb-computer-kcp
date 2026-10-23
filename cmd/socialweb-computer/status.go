@@ -10,9 +10,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
@@ -20,6 +18,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/marketnetwork"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clicfg"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
@@ -53,6 +52,11 @@ type appStatusView struct {
 	Roots     []rootStatusView     `json:"roots,omitempty"`
 	Contracts []contractStatusView `json:"contracts,omitempty"`
 	Error     string               `json:"error,omitempty"`
+}
+
+type rootStatusObject struct {
+	metav1.ObjectMeta `json:"metadata"`
+	Status            v1alpha1.ApplicationStatus `json:"status"`
 }
 
 type appKcp struct {
@@ -142,7 +146,7 @@ func readAppStatus(ctx context.Context, ak appKcp) appStatusView {
 		gvr  schema.GroupVersionResource
 		kind string
 	}{{compose.MarketBidderGVR, "MarketBidder"}, {compose.MarketRequesterGVR, "MarketRequester"}, {compose.GatewayGVR, "Gateway"}} {
-		list, err := dc.Resource(r.gvr).List(ctx, metav1.ListOptions{})
+		list, err := kube.List[rootStatusObject](ctx, dc.Resource(r.gvr), metav1.ListOptions{})
 		if absentResource(err) {
 			continue
 		}
@@ -150,37 +154,22 @@ func readAppStatus(ctx context.Context, ak appKcp) appStatusView {
 			v.Error = fmt.Sprintf("listing %s: %v", r.gvr.Resource, err)
 			return v
 		}
-		for i := range list.Items {
-			var o struct {
-				metav1.ObjectMeta `json:"metadata"`
-				Status            v1alpha1.ApplicationStatus `json:"status"`
-			}
-			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(list.Items[i].Object, &o); err != nil {
-				v.Error = err.Error()
-				return v
-			}
+		for _, o := range list {
 			v.Roots = append(v.Roots, rootStatusView{Kind: r.kind, Name: o.Name, Phase: o.Status.Phase, Message: o.Status.Message,
 				Market: o.Status.Market, Store: o.Status.Store, GC: o.Status.GC, TTL: o.Status.TTL, Quotas: o.Status.Quotas})
 		}
 	}
-	list, err := dc.Resource(compose.ComputeContractGVR).Namespace("").List(ctx, metav1.ListOptions{})
+	list, err := kube.List[v1alpha1.ComputeContract](ctx, dc.Resource(compose.ComputeContractGVR), metav1.ListOptions{})
 	if err != nil && !absentResource(err) {
 		v.Error = fmt.Sprintf("listing computecontracts: %v", err)
 		return v
 	}
-	if list != nil {
-		for i := range list.Items {
-			var c v1alpha1.ComputeContract
-			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(list.Items[i].Object, &c); err != nil {
-				v.Error = err.Error()
-				return v
-			}
-			cv := contractStatusView{Name: c.Name, Phase: c.Status.Phase, Message: c.Status.Message, Execution: c.Status.Execution}
-			if ct := c.Status.Contract; ct != nil && ct.Winner != nil {
-				cv.Winner = ct.Winner.DID
-			}
-			v.Contracts = append(v.Contracts, cv)
+	for _, c := range list {
+		cv := contractStatusView{Name: c.Name, Phase: c.Status.Phase, Message: c.Status.Message, Execution: c.Status.Execution}
+		if ct := c.Status.Contract; ct != nil && ct.Winner != nil {
+			cv.Winner = ct.Winner.DID
 		}
+		v.Contracts = append(v.Contracts, cv)
 	}
 	return v
 }
@@ -189,16 +178,14 @@ func absentResource(err error) bool {
 	return err != nil && (apierrors.IsNotFound(err) || meta.IsNoMatchError(err))
 }
 
-func workspaceClient(kubeconfig, ws string) (dynamic.Interface, error) {
+func workspaceClient(kubeconfig, ws string) (*kube.Client, error) {
 	base, err := kcpserver.FrontRestConfig(kubeconfig)
 	if err != nil {
 		return nil, err
 	}
 	cfg := rest.CopyConfig(base)
-	host, _, _ := strings.Cut(strings.TrimSuffix(cfg.Host, "/"), "/clusters/")
-	cfg.Host = host + "/clusters/" + ws
 	cfg.Timeout = appStatusTimeout
-	return dynamic.NewForConfig(cfg)
+	return kube.ForWorkspace(cfg, ws)
 }
 
 func appStatuses(ctx context.Context, l devinstance.Layout, rec devinstance.Record) []appStatusView {
