@@ -279,9 +279,22 @@ ssh socialweb.computer "sudo -n -u socialweb env HOME=/var/lib/socialweb-compute
 Pass condition: three pods are Ready, the NodeClaims name three distinct
 winners, and the three `NODE` names in `get pods -o wide` are distinct.
 
-## 6. Scale to zero, resume all, delete the cluster
+## 6. Resume paused winners, scale to zero, delete the cluster
+
+A suspended Bidder stops bidding, but it also stops reading the market inbox.
+Resume every paused winner before scaling to zero, or that host cannot see the
+requester's `vm.delete` and its VM cannot be released.
 
 ```bash
+ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl patch marketbidder app --type merge -p '{\"spec\":{\"components\":null}}'"
+ssh hat-9 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H9_K kubectl patch marketbidder app --type merge -p '{\"spec\":{\"components\":null}}'"
+sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$LOCAL_K \
+  kubectl patch marketbidder app --type merge -p '{"spec":{"components":null}}'
+ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl wait --for=condition=Ready bidder/bidder --timeout=120s"
+ssh hat-9 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H9_K kubectl wait --for=condition=Ready bidder/bidder --timeout=120s"
+sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$LOCAL_K \
+  kubectl wait --for=condition=Ready bidder/bidder --timeout=120s
+
 kubectl --kubeconfig "$KC" delete deployment scale-check
 for i in $(seq 1 120); do
   nodes=$(kubectl --kubeconfig "$KC" get nodes --no-headers 2>/dev/null | wc -l)
@@ -303,13 +316,9 @@ sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG
   kubectl get computevms -o wide
 ```
 
-Remove the component override on every host:
+Delete the cluster and the scratch directory:
 
 ```bash
-ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl patch marketbidder app --type merge -p '{\"spec\":{\"components\":null}}'"
-ssh hat-9 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H9_K kubectl patch marketbidder app --type merge -p '{\"spec\":{\"components\":null}}'"
-sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$LOCAL_K \
-  kubectl patch marketbidder app --type merge -p '{"spec":{"components":null}}'
 xrpc procedure deleteCluster name="$CL"
 rm -rf "$W"
 ```
@@ -319,8 +328,8 @@ rm -rf "$W"
 On the oauthQr bidder, record the heartbeat `createdAt` before pausing:
 
 ```bash
-BOB=$(ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl get marketbidder app -o jsonpath='{.status.did}'")
-PDS=$(python3 -I -c 'import json,urllib.request,sys; d=json.load(urllib.request.urlopen("https://plc.directory/"+sys.argv[1])); print([s["serviceEndpoint"] for s in d.get("service",[]) if s.get("id")=="#atproto_pds"][0])' "$BOB")
+BOB=$(ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl get marketidentity bidder -o jsonpath='{.status.did}'")
+PDS=$(ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl get marketidentity bidder -o jsonpath='{.status.pdsUrl}'")
 hb() { curl -sS "$PDS/xrpc/com.atproto.repo.getRecord?repo=$BOB&collection=com.publicdomainrelay.temp.market.heartbeat&rkey=self" | jq -r .value.createdAt; }
 hb
 ```
