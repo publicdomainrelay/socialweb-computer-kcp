@@ -135,7 +135,16 @@ fi
 if [ "$run" != fast ]; then
   hostplat="$(go env GOOS)_$(go env GOARCH)"
   if [ -n "$(ls internal/assets/blobs/"$hostplat"/*.tar.zst 2>/dev/null)" ]; then
-    go test -tags release -count=1 -run TestEveryEmbeddedAssetExtractsAndVerifies ./internal/assets || fail "embedded assets extract and verify ($hostplat)"
+    verifydir="$(mktemp -d)"
+    if ! CGO_ENABLED=0 go build -tags release -trimpath -o "$verifydir/socialweb-computer" ./cmd/socialweb-computer; then
+      rm -rf "$verifydir"
+      fail "release build for the embedded asset check ($hostplat)"
+    fi
+    if ! "$verifydir/socialweb-computer" dev verify-assets >/dev/null; then
+      rm -rf "$verifydir"
+      fail "embedded assets extract and verify ($hostplat)"
+    fi
+    rm -rf "$verifydir"
     echo "check.sh: ok embedded assets extract and verify ($hostplat)"
   elif [ "$run" = full ]; then
     fail "no staged blobs for $hostplat; --full extracts every embedded asset: run scripts/stage-assets.sh"

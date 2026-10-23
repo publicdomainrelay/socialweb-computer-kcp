@@ -116,7 +116,7 @@ func Tree() []Verb {
 		{Path: "internal hostprocesses", Summary: "the HostProcess supervisor and the OpenBaoServer controller against a kcp the caller names (a market network's bidder vaults until plan 0007 M5-RUN-BIDDER)", Needs: []Need{NeedSystemdUser}, Hidden: true},
 		{Path: "internal cloud-controller-manager", Summary: "the tenant CCM, re-exec'd by the cluster provider", Hidden: true},
 		{Path: "internal tenantcredential", Summary: "mint a tenant credential (socialweb-tenantcredential)", Hidden: true},
-	}, devVerbs...)
+	}, buildVerbs...)
 }
 
 func Find(args []string) (Verb, []string, bool) {
