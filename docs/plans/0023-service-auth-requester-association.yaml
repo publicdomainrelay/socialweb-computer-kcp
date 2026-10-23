@@ -1,0 +1,469 @@
+plan: "0023"
+title: "Service auth and requester association: one offering host, one audience, one canonical requester_associate record"
+status: todo
+source: >
+  Old tree: /home/johnandersen777/.tmp/tmp.veSQ1orzKZ/socialweb-computer. The
+  old bidder advertised relay.ingressUrl as the offering endpointUrl and the
+  old verifier checked hostname relay.ingressHost; both came from the same
+  relay ingress value. The old requester callService accepted an absolute URL
+  or a DID service ref, derived the audience as did:web:HOST, and the verifier
+  accepted the bare service DID plus did:web:HOST#pdr_temp_market plus extra
+  audience DIDs. The old requester association wrote a badgeBlueKeys record
+  with challenge=operator, keyId=requester, service=requester_associate.
+  New tree: bidder offering uses Bidder.spec.marketURL (the ingress Exposure
+  URL) while ServiceAuthAuthorizer.Hostname falls back to the relay endpoint
+  URL or the guest URL. The two hosts differ, so submitRfp returns 401 invalid
+  service-auth token. New requester localRepo RequireApproval signs service
+  auth as its own local did:plc, but the association record path writes
+  bidder_associate and the gateway watch and ssh/tenant paths expect
+  requester_associate.
+principle: >
+  A service-auth token is valid only when its audience names the host that
+  receives the request and its issuer authored the record the request
+  references. The offering record is the discovery contract: the endpoint it
+  advertises and the audience the receiver verifies must derive from one
+  source value. A local requester is a first-class market identity: it signs
+  as its own DID and is associated by a canonical requester_associate record.
+  An OAuth primary-account requester is the only mode that signs as the
+  primary account.
+
+service_auth_contract:
+  jwt: >
+    Bearer JWT from com.atproto.server.getServiceAuth or signed locally with
+    the issuer repo key. Verified fields: signature against the issuer DID
+    document key with fragment #atproto, lxm equals the called NSID, exp is in
+    the future. The verifier passes no own DID to verifyJwt, so the token is
+    not bound to the receiver DID except through the audience allowlist.
+  audience_forms:
+    - "did:web:HOST (bare service DID)"
+    - "did:web:HOST#SERVICE_ID where SERVICE_ID is pdr_temp_market or another configured service id"
+    - "the same two forms for every extra audience DID the endpoint answers for"
+  direct_call: >
+    The caller POSTs https://HOST/xrpc/NSID with Authorization Bearer. The
+    audience is did:web:HOST. HOST is the URL host. The old code used
+    new URL(endpointUrl).host, so a port stays in the audience.
+  atproto_proxy: >
+    The caller sends the request through its PDS with the atproto-proxy header
+    naming did:web:HOST#SERVICE_ID. The PDS mints the token; the audience is
+    the bare did:web:HOST. The receiver still checks lxm and the allowlist.
+  did_key_resolution: >
+    The issuer DID document is resolved and the signing key is the entry whose
+    id ends #atproto. The token iss may carry a fragment, but the issuer DID is
+    the part before it.
+  issuer_authored_record: >
+    The issuer DID must equal the authority of the referenced record AT-URI.
+    A token minted by X for a record authored by Y is rejected even when the
+    signature and audience are valid.
+
+oauth_qr_transport_contract:
+  rule: >
+    oauthQr is receive-only for its own XRPC surface. It cannot publish
+    #pdr_temp_market, #pdr_compute_event or #requester_associate services in a
+    DID document it does not control. It MUST NOT write submit* advertisements
+    for itself. It MAY call the opposite side's advertised market XRPCs.
+  receive: "relay/firehose only"
+  send: "outbound XRPC to a peer that advertised a valid absolute URL or DID service ref"
+  bidder_oauth_qr:
+    receive: "RFP via firehose/relay"
+    may_call: "RFP.submitBid when the RFP advertises it"
+    must_not_advertise: ["offering.endpointUrl as an inbound market endpoint", "bid.submitAccept", "receipt.submitEvent"]
+  requester_oauth_qr:
+    receive: "bid, accept, receipt via firehose/relay"
+    may_call: "bid.submitAccept and receipt.submitEvent when the bid/receipt advertises them"
+    must_not_advertise: ["rfp.submitBid", "accept.submitEvent"]
+  both_oauth_qr: "firehose both directions; no submit* XRPC between them"
+  code_rule: >
+    Split marketXRPCEnabled into inboundXRPC and outboundXRPC. Inbound false
+    suppresses handlers and all self-advertising submit* fields. Outbound true
+    keeps calls to peers that advertise a valid endpoint. Do not reuse the
+    comms.mode=Firehose switch to disable outbound calls.
+
+association_record:
+  canonical: >
+    Collection com.publicdomainrelay.temp.badgeBlueKeys, one record per
+    association, deterministic rkey association-<subject-did-suffix> or a TID.
+    Requester association: challenge = operator DID, keyId = requester DID,
+    service = "requester_associate", plus name and createdAt. The operator
+    writes the claim in the operator repo; the requester or its app writes the
+    matching side in the requester repo.
+  bidder_shape: >
+    Bidder association uses the same fields with keyId = bidder DID and
+    service = "bidder_associate". A bidder attestation is a separate record
+    with service = "bidder_attestation" and must not be read as an association.
+  why_bidder_associate_is_wrong: >
+    service names the role of the associated subject, not the role of the
+    writer. A requester associated as bidder_associate asserts it is a bidder.
+    The gateway watch, the ssh transport (challenge == account DID and service
+    == requester_associate), the tenant NodeClaim join path, and operator
+    discovery for requesters look for requester_associate and skip or reject
+    bidder_associate. The generic association claim parser currently accepts
+    either direction and either service, which hides the error until a later
+    trust check fails. bidder_associate is correct only when the subject is a
+    bidder and the writer is its operator.
+
+gateway_identity_decision: >
+  Default gateway profile: the requester is a localRepo MarketIdentity with
+  Association RequireApproval. It owns a local PDS, DID and repo key. It signs
+  submitRfp and every market callback as its own did:plc with the #atproto key.
+  Its association to the operator is a requester_associate record with
+  challenge = operator and keyId = requester. The operator OAuth session is
+  never used to mint market service auth in this mode; it may only write
+  operator-side records. Alternative: oauthQr or oauthBrowser primary-account
+  mode. Then the account DID is the requester, the OAuth session mints
+  getServiceAuth, and no requester_associate record is required. A manually
+  patched spec.approvedAssociations is a workaround, not a mode and not the
+  acceptance path.
+
+waves:
+  - id: W1
+    title: "Old service-auth mechanics"
+    status: done
+    decision: >
+      The old receiver verifies signature, lxm and exp first, then applies an
+      audience allowlist keyed by the service hostname and its configured
+      service ids and extra audience DIDs. It strips the issuer fragment and
+      requires the issuer to author the referenced record. Direct calls and
+      atproto-proxy calls converge on the same bare did:web:HOST audience.
+    files:
+      - path: "atproto-market/lib/market-atproto/auth.ts:71-106"
+        note: "verifyMarketServiceAuth: verifyJwt with ownDid null, manual aud matrix, issuer fragment strip."
+      - path: "atproto-market/lib/atproto-helpers/agent.ts:156-190"
+        note: "callService: absolute URL -> URL/xrpc and did:web:new URL(URL).host; DID ref -> serviceEndpoint -> same audience."
+      - path: "atproto-market/lib/atproto-helpers/agent.ts:380-410"
+        note: "associateConfirm verifies with serviceIds associateServiceId and pdr_temp_market plus extraAudienceDids."
+    done_when: >
+      The JWT contract, audience forms, direct and proxy paths, #atproto key
+      resolution and issuer-authored-record rule are recorded and matched to
+      the new verifier at internal/atproto/market/auth.go.
+
+  - id: W2
+    title: "Old bidder offering and ingress invariant"
+    status: done
+    decision: >
+      Old bidder offering endpointUrl = relay.ingressUrl and verifier hostname
+      = relay.ingressHost. ingressUrl is https:// plus the ingressRef suffix;
+      ingressHost is that same suffix. One relay value feeds both, so the
+      advertised endpoint host and the verified audience host cannot diverge.
+      The offering lexicon tells the requester to route submitRfp to that
+      service DID ref.
+    files:
+      - path: "atproto-market/lib/market-bidder/mod.ts:322,351"
+        note: "endpointUrl: relay?.ingressUrl || did#pdr_temp_market."
+      - path: "atproto-market/hono-bidder/mod.ts:263,388,585"
+        note: "pdsHostname and relayHost use relay.ingressHost; getIssuerUrl uses relay.ingressUrl."
+      - path: "atproto-market/lib/common/market-lexicons/com/publicdomainrelay/temp/market/offering.defs.ts:16"
+        note: "endpointUrl is a did:web:HOST#temp_market service ref for atproto-proxy."
+      - path: "atproto-market/lib/common/market-lexicons/com/publicdomainrelay/temp/market/bidderDiscovery.defs.ts:16"
+        note: "Discovery returns the did:web:HOST#pdr_temp_market routing ref."
+    done_when: >
+      The invariant is stated for the new tree: one function returns the
+      public market URL, and both Bidder.spec.marketURL and ServiceAuth.Hostname
+      derive from it.
+
+  - id: W3
+    title: "Old requester association"
+    status: done
+    decision: >
+      The requester association is a badgeBlueKeys record written with
+      challenge = operator DID, keyId = requester DID, service =
+      requester_associate, plus name and createdAt. Operator discovery scans
+      records whose keyId is the subject and whose challenge is an operator
+      DID. The old webapp confirm path also wrote the association after
+      verifying an associateConfirm token; that older writer inverted challenge
+      and keyId in one revision, so the canonical direction is challenge =
+      operator and keyId = associated subject.
+    files:
+      - path: "atproto-market/lib/atproto-helpers/agent.ts:390-410"
+        note: "associateConfirm verifies service-auth and writes badgeBlueKeys in the requester repo."
+      - path: "atproto-market/lib/atproto-helpers/oauth-qr-session.ts:60-85"
+        note: "OAuth QR path inspects badgeBlueKeys to decide whether association exists."
+      - path: "atproto-market/lib/delegated-trust-badge-blue-keys/mod.ts:39"
+        note: "Delegated trust scans service requester_associate or bidder_associate."
+      - path: "atproto-market/lib/common/market-lexicons/com/publicdomainrelay/temp/requester/associateConfirm.defs.ts:31"
+        note: "associateConfirm is called via atproto-proxy to the requester #requester_associate service."
+    done_when: >
+      The canonical requester record shape is written in plan and the new
+      writer paths are identified.
+
+  - id: W4
+    title: "Old identity modes"
+    status: done
+    decision: >
+      Bidder: managed associated (localRepo plus operator claim), managed
+      unassociated (association Skip), existing account (oauthQr, oauthBrowser,
+      oauthDelegated or pdsAccount). Requester: localRepo with RequireApproval
+      association, or an existing account via oauthQr or oauthBrowser where
+      the OAuth session is the association proof and no badgeBlueKeys record is
+      written. LocalRepo identities sign as their own DID; existing-account
+      identities sign through the account PDS getServiceAuth.
+    files:
+      - path: "docs/plans/0021-account-and-comms-modes.yaml"
+        note: "Account matrix, localRepo RequireApproval, OAuth QR session transfer, inverted historical bidder shape."
+      - path: "internal/appctl/gateway.go:418-423"
+        note: "New gateway plans the requester with AssociationRequireApproval."
+      - path: "internal/appctl/requester.go:146-152"
+        note: "OperatorWatched sets AssociateWith and AssociationWatch for localRepo non-Skip."
+      - path: "internal/services/requester/config.go:31-38,325-371"
+        note: "New identity modes local, callback, oauth."
+    done_when: >
+      The mode matrix is mapped to the new gateway decision: localRepo
+      RequireApproval signs as itself; oauthQr is the only primary-account mode.
+
+  - id: W5
+    title: "Old node-market callbacks"
+    status: done
+    decision: >
+      All market callbacks (submitRfp, submitBid, submitAccept, submitEvent)
+      use one contract: resolve the target from an absolute URL or a DID
+      service ref, POST /xrpc/NSID directly or through atproto-proxy, and
+      require the token issuer to author the referenced RFP, bid, accept or
+      event record. The compute-event service DID ref on accept and receipt
+      is what lets the requester report lifecycle events the provider cannot
+      observe. The same contract carries tenant NodeClaim joins.
+    files:
+      - path: "atproto-market/lib/market-bidder-worker/mod.ts:165,286,341"
+        note: "Worker calls submitBid and serves pdr_temp_market callbacks."
+      - path: "atproto-market/lib/market-bidder-compute/mod.ts:182,432,629,786"
+        note: "Compute bidder calls submitBid, submitEvent and serves onRfp."
+      - path: "atproto-market/lib/common/market-lexicons/com/publicdomainrelay/temp/market/submitBid.defs.ts:35"
+        note: "Direct submitBid requires the issuer to author the referenced bid."
+      - path: "atproto-market/lib/common/market-lexicons/com/publicdomainrelay/temp/market/submitEvent.defs.ts:37"
+        note: "submitEvent issuer must author the event; receipt carries the compute-event service ref."
+    done_when: >
+      The callback contract is recorded and the new requester post paths and
+      bidder receivers are mapped to it.
+
+  - id: W6
+    title: "New bidder audience mismatch and fix"
+    status: blocked
+    decision: >
+      Two paths, one rule. XRPC-capable identities (localRepo, or any peer that
+      advertises a reachable inbound service) use one publicMarketURL() source:
+      MarketURL when set, else the relay ingress URL, else the guest URL.
+      offeringEndpoint and the authorizer hostname both call it; url.Host keeps
+      the port form used by the old new URL(...).host rule.
+      oauthQr identities have no inbound XRPC surface. They publish no
+      offering.endpointUrl as an inbound market endpoint and no submit* fields
+      for themselves. They receive through firehose/relay and MAY call the
+      opposite side's advertised XRPCs. Split marketXRPCEnabled into
+      inboundXRPC and outboundXRPC: oauthQr inbound=false, outbound=true.
+      Do not use comms.mode=Firehose to disable outbound calls.
+      Offering discovery for oauthQr must not claim an inbound URL: make
+      endpointUrl optional with a firehose-only meaning, or add an explicit
+      capability/transport field; readers must not build a Bidder from an
+      offering that has no inbound endpoint.
+    files:
+      - path: "internal/services/bidder/service.go:60-95"
+        note: "ServiceAuthAuthorizer.Hostname and VerifyServiceAuth options."
+      - path: "internal/services/bidder/service.go:744-757"
+        note: "newAuthorizer falls back to relayEndpoint then guestURL; use the offering source instead."
+      - path: "internal/services/bidder/service.go:805-815"
+        note: "offeringEndpoint uses MarketURL first; keep and share the source."
+      - path: "internal/services/bidder/config.go:172,245,524-533"
+        note: "MarketURL and marketXRPCEnabled; split inbound and outbound."
+      - path: "internal/appctl/bidder.go:530-540,594,625,742"
+        note: "bidderMarketURL reads the ingress Exposure status.url; wire the same host into ServiceAuth.Hostname."
+      - path: "internal/services/requester/market.go:231-263"
+        note: "resolveBidderEndpoint derives audience from the offering URL; align host and port rules."
+      - path: "internal/services/bidder/lifecycle.go:319"
+        note: "bid.submitAccept is an inbound advertisement; omit for oauthQr."
+      - path: "internal/services/requester/session.go:607,643"
+        note: "rfp.submitBid and accept.submitEvent are inbound advertisements; omit for oauthQr."
+    done_when: >
+      XRPC path: a live localRepo bidder's offering endpoint host equals the
+      authorizer hostname, a direct submitRfp returns 200, and a non-default
+      port matches on both sides. oauthQr path: no self submit* advertisements
+      are written, the peer receives the record through the firehose, and an
+      outbound submitBid/submitAccept to a peer that advertises a reachable
+      endpoint returns 200.
+
+  - id: W7
+    title: "New requester auth and discovery"
+    status: blocked
+    decision: >
+      The new verifier at internal/atproto/market/auth.go already implements
+      the old contract: bare did:web:HOST, did:web:HOST#SERVICE_ID for each
+      service id, extra audience DIDs, #atproto key resolution, issuer fragment
+      strip, and issuer-authored-record enforcement. The new requester only
+      accepts an absolute http or https offering endpoint; the old callService
+      also accepted a DID ref and resolved its serviceEndpoint. Restore DID ref
+      discovery and use the resolved endpoint host for the audience. Local
+      requester tokens are signed with the local repo DID and repo key. OAuth
+      mode tokens come from getServiceAuth. The owner PDS session must not
+      replace the local signer unless the identity mode is an OAuth
+      primary-account mode.
+    files:
+      - path: "internal/atproto/market/auth.go:24-102"
+        note: "New VerifyServiceAuth audience matrix and AuthorizeRecord."
+      - path: "internal/services/requester/market.go:231-263"
+        note: "resolveBidderEndpoint rejects DID refs and uses Hostname; add DID document serviceEndpoint resolution and align host."
+      - path: "internal/services/requester/service.go:447-462"
+        note: "ServiceAuth precedence is oauth, then ownerServiceAuth; localRepo must use the local signer instead."
+      - path: "internal/services/requester/service.go:530-580"
+        note: "ownerSessionServiceAuth mints via the owner PDS; restrict to primary-account modes."
+      - path: "internal/services/requester/config.go:31-38,325-371"
+        note: "Identity mode selection and validation."
+    done_when: >
+      A local requester with no owner session submits submitRfp and callbacks
+      signed as its own DID, and a DID-ref offering resolves to the same host
+      the bidder verifies.
+
+  - id: W8
+    title: "New association watch and record shape"
+    status: blocked
+    decision: >
+      The gateway records manifest writes requester_associate, but the bidder
+      path writes bidder_associate into the requester side, and the generic
+      association parser accepts either direction and either service. The
+      tenant and ssh paths require challenge = account DID and service =
+      requester_associate. Fix: role-specific service ids at every writer;
+      canonical direction challenge = operator, keyId = subject; the watch and
+      trust readers require the canonical direction and the role-specific
+      service; reject bidder_associate where a requester association is
+      required. Delete or replace a wrong record at the deterministic rkey
+      rather than leaving a misleading association.
+    files:
+      - path: "internal/appctl/association.go:19-99"
+        note: "BidderAssociate constant and writeClaim; add RequesterAssociate and choose the service from the role."
+      - path: "internal/appctl/gateway.go:44,697-698"
+        note: "RequesterAssociate constant and --associate-service-id."
+      - path: "internal/appctl/requester.go:146-152"
+        note: "AssociationWatch is shared by both roles; carry the expected service."
+      - path: "deploy/apps/gateway/records.yaml:1-16"
+        note: "Gateway record uses requester_associate; verify challenge/keyId direction."
+      - path: "deploy/apps/market-bidder/records.yaml:1-16"
+        note: "Bidder record uses bidder_associate; keep role-specific."
+      - path: "internal/identitycontroller/identitycontroller.go:309-395"
+        note: "associationClaimDid accepts both directions and ignores service; require role service and canonical direction."
+      - path: "internal/atproto/trust/trust.go:155-166"
+        note: "operatorOf accepts bidder_associate or requester_associate; parameterize by role."
+      - path: "internal/policyengine/trust/trust.go:125"
+        note: "Policy trust accepts both services; parameterize by role."
+      - path: "internal/sshtransport/authorizer.go:24,526"
+        note: "SSH requires challenge == account DID and service requester_associate."
+      - path: "internal/sshtransport/keys.go:128,206"
+        note: "Requester key lookup checks the same canonical shape."
+    done_when: >
+      A local requester's MarketIdentity reaches Associated True from a
+      requester_associate record; no bidder_associate record is written for a
+      requester; the tenant NodeClaim join path accepts the association.
+
+  - id: W9
+    title: "Gateway identity mode"
+    status: blocked
+    decision: >
+      Default gateway: localRepo requester with RequireApproval. The gateway
+      kcp signs market requests as the requester DID (local repo #atproto key),
+      and the association is the canonical requester_associate record between
+      the operator and the requester. The owner/operator OAuth session is only
+      for records the operator authors and for the operator-side claim. The
+      alternative is oauthQr (or oauthBrowser) primary-account mode: the
+      account is the requester, the OAuth session mints service auth, and no
+      requester_associate record is needed. A manual patch of
+      spec.approvedAssociations is a temporary workaround and must not be the
+      documented path.
+    files:
+      - path: "internal/appctl/gateway.go:410-423"
+        note: "Gateway always plans requester with AssociationRequireApproval."
+      - path: "internal/appctl/gateway.go:650-680"
+        note: "Awaiting-operator message and status; replace with canonical association status."
+      - path: "internal/appctl/requester.go:130-165"
+        note: "Requester identity spec, OperatorWatched and watch args."
+      - path: "internal/appctl/identity_planner.go:55-80"
+        note: "Account plan fields: MarketURL and identity mode wiring."
+      - path: "internal/services/requester/service.go:447-462,530-580"
+        note: "Choose oauth session only in oauth mode; localRepo uses the local signer."
+      - path: "docs/plans/0021-account-and-comms-modes.yaml"
+        note: "Update the requester mode text with the signing-authority decision."
+      - path: "docs/ARCHITECTURE.md"
+        note: "Record the invariant: local requester signs as itself; primary-account mode signs as the account."
+    done_when: >
+      A gateway with a local requester signs submitRfp as the requester DID and
+      is associated through a requester_associate record, with no owner-session
+      token on the wire.
+
+  - id: W10
+    title: "Exact fixes and acceptance"
+    status: blocked
+    decision: >
+      Two ordered tracks, one commit each. Track A restores XRPC-capable
+      behavior: one publicMarketURL() source, requester signing by identity
+      mode, DID-ref discovery, canonical requester_associate. Track B makes
+      oauthQr receive-only for itself and outbound-capable: split inbound and
+      outbound XRPC, suppress self submit* advertisements, make offering
+      discovery firehose-only when no inbound endpoint exists, and keep
+      outbound calls to peers that advertise.
+      Prove in this order: localRepo requester + hat-7 localRepo bidder over
+      XRPC; oauthQr bidder + localRepo requester over firehose receive plus
+      outbound call; oauthQr requester + localRepo bidder over the mirrored
+      path; both oauthQr firehose-only. Then prod: 3 nodes, one ComputeVM on
+      hat-7, Ready, scale to zero. No unit tests; integration only after prod
+      proof.
+    files:
+      - path: "internal/services/bidder/service.go"
+        note: "Single public market URL source for XRPC offering and authorizer host."
+      - path: "internal/services/bidder/config.go"
+        note: "Split inboundXRPC and outboundXRPC; oauthQr inbound false, outbound true."
+      - path: "internal/services/bidder/lifecycle.go"
+        note: "Omit bid.submitAccept for oauthQr."
+      - path: "internal/services/requester/session.go"
+        note: "Omit rfp.submitBid and accept.submitEvent for oauthQr; keep outbound calls."
+      - path: "internal/services/requester/runner.go"
+        note: "Same advertisement and outbound-call rules in the runner path."
+      - path: "internal/appctl/bidder.go"
+        note: "Pass the same host into the bidder ServiceAuth config."
+      - path: "internal/services/requester/market.go"
+        note: "DID-ref endpoint resolution, host/port audience parity, firehose-only offering discovery."
+      - path: "internal/services/requester/service.go"
+        note: "Signing authority by identity mode."
+      - path: "internal/appctl/association.go"
+        note: "Role-specific service id and canonical record."
+      - path: "internal/appctl/gateway.go"
+        note: "Requester association and identity mode."
+      - path: "internal/identitycontroller/identitycontroller.go"
+        note: "Strict canonical association parser."
+      - path: "internal/atproto/trust/trust.go"
+        note: "Role-aware operator discovery."
+      - path: "deploy/apps/gateway/records.yaml"
+        note: "Canonical requester_associate record."
+      - path: "deploy/apps/market-bidder/records.yaml"
+        note: "Canonical bidder_associate record."
+      - path: "test/integration"
+        note: "Integration acceptance only after prod proof; build tag integration."
+    done_when: >
+      The XRPC acceptance matrix is true for localRepo peers, the oauthQr
+      matrix is true for firehose receive plus outbound calls, both oauthQr
+      peers exchange records over the firehose only, and the prod 3-node proof
+      reaches one hat-7 ComputeVM, Ready, then scale zero.
+
+implementation_checklist:
+  - "1. Add one publicMarketURL() source in the bidder service; offering and authorizer hostname both use it."
+  - "2. Wire appctl bidder.go to pass that same host into ServiceAuth.Hostname; log both values at startup."
+  - "3. Make requester resolveBidderEndpoint accept a DID ref, resolve its serviceEndpoint, and derive did:web from the same host form (port preserved)."
+  - "4. Select requester service-auth authority by identity mode: oauth session only in oauth mode, local repo key otherwise; never ownerServiceAuth in localRepo RequireApproval."
+  - "5. Add RequesterAssociate to appctl association and choose the service by role; write challenge = operator, keyId = subject."
+  - "6. Fix deploy/apps/gateway/records.yaml and deploy/apps/market-bidder/records.yaml to the canonical direction and role service."
+  - "7. Make identitycontroller, trust, policyengine trust and ssh transport require the role-specific service and canonical direction."
+  - "8. Remove the manual approvedAssociations patch path from the acceptance story; document it as a workaround only."
+  - "9. Run the live proof on a fresh gateway and bidder, then write the integration test."
+
+acceptance_matrix:
+  - check: "Requester associated"
+    proof: "Requester MarketIdentity phase Ready, Condition Associated True, approvedAssociations contains the operator DID, and the record service is requester_associate."
+  - check: "Bidder offering host equals verifier host"
+    proof: "The offering endpointUrl host and the bidder ServiceAuth.Hostname are equal in status/log, and the requester audience derived from the offering equals both."
+  - check: "submitRfp 200"
+    proof: "Requester submits an RFP directly or through the offered service ref and receives 200, not 401 invalid service-auth token."
+  - check: "3 NodeClaims become a hat-7 ComputeVM"
+    proof: "Three NodeClaims are accepted, one ComputeVM is provisioned on the hat-7 bidder through the RFP flow, and the tenant nodes report Ready."
+  - check: "Scale to zero"
+    proof: "The tenant cluster scales back to zero, the guest is released, and the bidder reports the contract complete."
+  - check: "No secrets in status"
+    proof: "MarketIdentity, Application, NodeClaim and ComputeVM statuses contain no passwords, tokens, private keys or session material."
+
+open_questions:
+  - "Should the public market URL be Bidder.spec.marketURL (ingress Exposure) or the relay ingress URL when both exist? The invariant says one source; pick MarketURL when set."
+  - "Does the gateway localRepo requester submit directly with its repo #atproto key or through the local PDS getServiceAuth? Both yield a token; the decision here is direct local signing."
+  - "Should the requester keep DID-ref discovery for parity, or require an absolute offering URL only? Old accepted both; new rejects DID refs."
+  - "How is a did:web audience with a non-default port encoded and compared? Old used URL.host with the port; new uses URL.hostname and drops it."
+  - "Should existing wrong bidder_associate records in a requester repo be deleted on upgrade, or is a fresh install acceptable because a shape change permits it?"
