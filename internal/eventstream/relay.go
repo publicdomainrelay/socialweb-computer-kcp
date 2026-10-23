@@ -156,6 +156,16 @@ func (s *relayEventStream) Next(ctx context.Context) (pdsclient.RepoEvent, error
 			return pdsclient.RepoEvent{}, err
 		}
 		_ = s.conn.SetReadDeadline(time.Now().Add(relayReadTimeout))
+		if len(data) > 0 && data[0] != '{' {
+			event, ok, err := pdsclient.DecodeRepoFrame(data)
+			if err != nil {
+				return pdsclient.RepoEvent{}, fmt.Errorf("eventstream: decoding a relay CBOR frame: %w", err)
+			}
+			if !ok {
+				continue
+			}
+			return event, nil
+		}
 		var frame relayFrame
 		if err := json.Unmarshal(data, &frame); err != nil {
 			return pdsclient.RepoEvent{}, fmt.Errorf("eventstream: decoding a relay frame: %w", err)

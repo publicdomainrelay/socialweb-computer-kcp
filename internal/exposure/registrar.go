@@ -149,6 +149,7 @@ func (r *SubscriberRegistrar) Register(ctx context.Context, spec IngressSpec) (I
 		HandleRequest:       handler,
 		TunnelHandler:       tunnel,
 		WSTarget:            wsTarget,
+		WSTargetDialer:      r.wsDialer(spec.Target),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("connecting the ingress subscriber: %w", err)
@@ -312,15 +313,58 @@ func (r *SubscriberRegistrar) wsTarget(target component.Key) func() *ingress.Tar
 				break
 			}
 		}
-		host, port, err := net.SplitHostPort(address)
-		if err != nil || host == "" || port == "" {
+		if host, port, err := net.SplitHostPort(address); err == nil && host != "" && port != "" {
+			value, err := strconv.Atoi(port)
+			if err == nil && value > 0 {
+				return &ingress.Target{Hostname: host, Port: value}
+			}
+		}
+		if r.deps.Handlers == nil {
 			return nil
 		}
-		value, err := strconv.Atoi(port)
-		if err != nil || value <= 0 {
+		host := ""
+		for _, name := range []string{"http", "https", ""} {
+			endpoint, ok := r.deps.Registry.Endpoint(target.Workspace, target.Kind, target.Name, name)
+			if !ok || strings.TrimSpace(endpoint.URL) == "" {
+				continue
+			}
+			if parsed, err := url.Parse(endpoint.URL); err == nil && parsed.Hostname() != "" {
+				host = parsed.Hostname()
+				break
+			}
+		}
+		if host == "" {
 			return nil
 		}
-		return &ingress.Target{Hostname: host, Port: value}
+		return &ingress.Target{Hostname: host, Port: 80}
+	}
+}
+
+func (r *SubscriberRegistrar) wsDialer(target component.Key) *websocket.Dialer {
+	if r == nil || r.deps.Registry == nil || r.deps.Handlers == nil {
+		return nil
+	}
+	for _, name := range []string{"http", "https", ""} {
+		endpoint, ok := r.deps.Registry.Endpoint(target.Workspace, target.Kind, target.Name, name)
+		if !ok {
+			continue
+		}
+		address := strings.TrimSpace(endpoint.Address)
+		if address == "" && strings.TrimSpace(endpoint.URL) != "" {
+			if parsed, err := url.Parse(endpoint.URL); err == nil {
+				address = parsed.Host
+			}
+		}
+		if host, port, err := net.SplitHostPort(address); err == nil && host != "" && port != "" {
+			return nil
+		}
+		break
+	}
+	return &websocket.Dialer{
+		HandshakeTimeout: 10 * time.Second,
+		NetDialContext: func(ctx context.Context, _, address string) (net.Conn, error) {
+			return r.deps.Handlers.DialHTTP(component.WithSystemCaller(ctx), address)
+		},
 	}
 }
 

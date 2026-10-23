@@ -120,6 +120,9 @@ func (ctl *Controller) ensureMarketStreams(ctx context.Context, ws, role string,
 		if err != nil {
 			return err
 		}
+		if forceFirehose {
+			specMap["cursor"] = int64(0)
+		}
 		obj := &unstructured.Unstructured{Object: map[string]any{
 			"apiVersion": eventsv1alpha1.GroupVersion.String(),
 			"kind":       "EventStream",
@@ -138,6 +141,11 @@ func (ctl *Controller) ensureMarketStreams(ctx context.Context, ws, role string,
 		}
 		if err != nil {
 			return err
+		}
+		if !forceFirehose {
+			if cursor, ok, _ := unstructured.NestedInt64(existing.Object, "spec", "cursor"); ok {
+				specMap["cursor"] = cursor
+			}
 		}
 		obj.SetResourceVersion(existing.GetResourceVersion())
 		if _, err := ri.Update(ctx, obj, metav1.UpdateOptions{FieldManager: FieldManager}); err != nil {

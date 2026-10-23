@@ -41,6 +41,7 @@ type SubscriberConfig struct {
 	TunnelTarget              *Target
 	TunnelHandler             func(ctx context.Context, conn net.Conn) error
 	WSTarget                  func() *Target
+	WSTargetDialer            *websocket.Dialer
 	DirectSubscriptionHandler func(subscriptionID, nsid string, params map[string]string, onEvent func(json.RawMessage), onData func([]byte)) (func(), error)
 	Synthetic                 bool
 	Dialer                    *websocket.Dialer
@@ -589,7 +590,10 @@ func (s *Subscriber) startWSSubscription(id, nsid string, params map[string]stri
 		}
 		u += "?" + q.Encode()
 	}
-	dialer := s.cfg.Dialer
+	dialer := s.cfg.WSTargetDialer
+	if dialer == nil {
+		dialer = s.cfg.Dialer
+	}
 	if dialer == nil {
 		dialer = websocket.DefaultDialer
 	}

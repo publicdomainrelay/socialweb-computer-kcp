@@ -360,6 +360,10 @@ type frameHeader struct {
 	T  string `cbor:"t"`
 }
 
+func DecodeRepoFrame(data []byte) (RepoEvent, bool, error) {
+	return decodeRepoFrame(data)
+}
+
 func decodeRepoFrame(data []byte) (RepoEvent, bool, error) {
 	var header frameHeader
 	rest, err := repoFrameDecMode.UnmarshalFirst(data, &header)
