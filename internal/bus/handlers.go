@@ -1,4 +1,4 @@
-package component
+package bus
 
 import (
 	"context"
@@ -6,25 +6,28 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
 	"sync"
 
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
+	contract "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
 )
 
 const DefaultHandlerName = "http"
 
 var (
-	ErrNoHandler       = errors.New("component: no HTTP handler is registered")
-	ErrNoStream        = errors.New("component: no stream handler is registered")
-	ErrHandlersStopped = errors.New("component: the handler registry is stopped")
+	ErrNoHandler       = errors.New("bus: no HTTP handler is registered")
+	ErrNoStream        = errors.New("bus: no stream handler is registered")
+	ErrHandlersStopped = errors.New("bus: the handler registry is stopped")
 )
 
 type StreamHandler func(ctx context.Context, conn net.Conn) error
 
-type HandlerRegistry struct {
+type Bus struct {
 	mu sync.RWMutex
 
 	handlers  map[Key]map[string]http.Handler
@@ -32,7 +35,10 @@ type HandlerRegistry struct {
 	aliases   map[string]handlerAlias
 	streams   map[streamKey]StreamHandler
 	conns     map[*trackedConn]Key
-	links     []AccessLink
+	links     []Link
+	providers map[providerKey]provider
+
+	denials denials
 
 	root   context.Context
 	cancel context.CancelFunc
@@ -41,7 +47,11 @@ type HandlerRegistry struct {
 	transport *http.Transport
 }
 
-type Handlers = HandlerRegistry
+type HandlerRegistry = Bus
+
+type Handlers = Bus
+
+type Key = contract.Key
 
 type handlerAlias struct {
 	key       Key
@@ -54,14 +64,15 @@ type streamKey struct {
 	name string
 }
 
-func NewHandlerRegistry() *HandlerRegistry {
+func New() *Bus {
 	root, cancel := context.WithCancel(context.Background())
-	r := &HandlerRegistry{
+	r := &Bus{
 		handlers:  map[Key]map[string]http.Handler{},
 		revisions: map[Key]map[string]uint64{},
 		aliases:   map[string]handlerAlias{},
 		streams:   map[streamKey]StreamHandler{},
 		conns:     map[*trackedConn]Key{},
+		providers: map[providerKey]provider{},
 		root:      root,
 		cancel:    cancel,
 	}
@@ -74,11 +85,29 @@ func NewHandlerRegistry() *HandlerRegistry {
 	return r
 }
 
-func NewHandlers() *HandlerRegistry {
-	return NewHandlerRegistry()
+func NewHandlerRegistry() *Bus {
+	return New()
 }
 
-func (r *HandlerRegistry) Client() *http.Client {
+func NewHandlers() *Bus {
+	return New()
+}
+
+func (r *Bus) SetLogger(log *slog.Logger) {
+	if r == nil {
+		return
+	}
+	r.denials.log.Store(log)
+}
+
+func (r *Bus) Denied() uint64 {
+	if r == nil {
+		return 0
+	}
+	return r.denials.count.Load()
+}
+
+func (r *Bus) Client() *http.Client {
 	if r == nil {
 		return &http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
 			return nil, ErrHandlersStopped
@@ -87,21 +116,21 @@ func (r *HandlerRegistry) Client() *http.Client {
 	return &http.Client{Transport: r.RoundTripper()}
 }
 
-func (r *HandlerRegistry) HTTPClient() *http.Client {
+func (r *Bus) HTTPClient() *http.Client {
 	return r.Client()
 }
 
-func (r *HandlerRegistry) RoundTripper() http.RoundTripper {
+func (r *Bus) RoundTripper() http.RoundTripper {
 	return &handlerRoundTripper{registry: r}
 }
 
-func (r *HandlerRegistry) SetLinks(links []AccessLink) {
+func (r *Bus) SetLinks(links []Link) {
 	if r == nil {
 		return
 	}
 	next := cloneLinks(links)
 	r.mu.Lock()
-	if accessLinksEqual(r.links, next) {
+	if linksEqual(r.links, next) {
 		r.mu.Unlock()
 		return
 	}
@@ -115,7 +144,7 @@ func (r *HandlerRegistry) SetLinks(links []AccessLink) {
 	closeTracked(stale)
 }
 
-func (r *HandlerRegistry) Links() []AccessLink {
+func (r *Bus) Links() []Link {
 	if r == nil {
 		return nil
 	}
@@ -124,19 +153,19 @@ func (r *HandlerRegistry) Links() []AccessLink {
 	return cloneLinks(r.links)
 }
 
-func (r *HandlerRegistry) RegisterHTTP(key Key, handler http.Handler, name ...string) error {
+func (r *Bus) RegisterHTTP(key Key, handler http.Handler, name ...string) error {
 	return r.RegisterHTTPNamed(key, optionalName(name), handler)
 }
 
-func (r *HandlerRegistry) RegisterHTTPNamed(key Key, name string, handler http.Handler) error {
+func (r *Bus) RegisterHTTPNamed(key Key, name string, handler http.Handler) error {
 	if r == nil {
-		return errors.New("component: the handler registry is nil")
+		return errors.New("bus: the handler registry is nil")
 	}
 	if handler == nil {
-		return fmt.Errorf("component: the HTTP handler for %s/%s is nil", key.Kind, key.Name)
+		return fmt.Errorf("bus: the HTTP handler for %s/%s is nil", key.Kind, key.Name)
 	}
 	if strings.TrimSpace(key.Kind) == "" || strings.TrimSpace(key.Name) == "" {
-		return errors.New("component: an HTTP handler key needs a kind and a name")
+		return errors.New("bus: an HTTP handler key needs a kind and a name")
 	}
 	name = normalizeHandlerName(name)
 	r.mu.Lock()
@@ -166,11 +195,11 @@ func (r *HandlerRegistry) RegisterHTTPNamed(key Key, name string, handler http.H
 	return nil
 }
 
-func (r *HandlerRegistry) Handler(key Key, name ...string) (http.Handler, bool) {
+func (r *Bus) Handler(key Key, name ...string) (http.Handler, bool) {
 	return r.HandlerNamed(key, optionalName(name))
 }
 
-func (r *HandlerRegistry) HandlerRevision(key Key, name ...string) uint64 {
+func (r *Bus) HandlerRevision(key Key, name ...string) uint64 {
 	if r == nil {
 		return 0
 	}
@@ -179,7 +208,7 @@ func (r *HandlerRegistry) HandlerRevision(key Key, name ...string) uint64 {
 	return r.revisions[key][normalizeHandlerName(optionalName(name))]
 }
 
-func (r *HandlerRegistry) HandlerNamed(key Key, name string) (http.Handler, bool) {
+func (r *Bus) HandlerNamed(key Key, name string) (http.Handler, bool) {
 	if r == nil {
 		return nil, false
 	}
@@ -190,19 +219,19 @@ func (r *HandlerRegistry) HandlerNamed(key Key, name string) (http.Handler, bool
 	return handler, handler != nil
 }
 
-func (r *HandlerRegistry) HandlerForHost(host string) (http.Handler, bool) {
+func (r *Bus) HandlerForHost(host string) (http.Handler, bool) {
 	handler, _, _, ok := r.handlerForHost(host)
 	return handler, ok
 }
 
-func (r *HandlerRegistry) DialHTTP(ctx context.Context, address string) (net.Conn, error) {
+func (r *Bus) DialHTTP(ctx context.Context, address string) (net.Conn, error) {
 	if err := r.Ready(ctx); err != nil {
 		return nil, err
 	}
 	return r.dialHTTP(ctx, "tcp", address)
 }
 
-func (r *HandlerRegistry) Remove(key Key) bool {
+func (r *Bus) Remove(key Key) bool {
 	if r == nil {
 		return false
 	}
@@ -228,15 +257,15 @@ func (r *HandlerRegistry) Remove(key Key) bool {
 	return removed
 }
 
-func (r *HandlerRegistry) RegisterStream(key Key, handler StreamHandler, name ...string) error {
+func (r *Bus) RegisterStream(key Key, handler StreamHandler, name ...string) error {
 	if r == nil {
-		return errors.New("component: the handler registry is nil")
+		return errors.New("bus: the handler registry is nil")
 	}
 	if handler == nil {
-		return fmt.Errorf("component: the stream handler for %s/%s is nil", key.Kind, key.Name)
+		return fmt.Errorf("bus: the stream handler for %s/%s is nil", key.Kind, key.Name)
 	}
 	if strings.TrimSpace(key.Kind) == "" || strings.TrimSpace(key.Name) == "" {
-		return errors.New("component: a stream handler key needs a kind and a name")
+		return errors.New("bus: a stream handler key needs a kind and a name")
 	}
 	sk := streamKey{Key: key, name: normalizeHandlerName(optionalName(name))}
 	r.mu.Lock()
@@ -254,12 +283,12 @@ func (r *HandlerRegistry) RegisterStream(key Key, handler StreamHandler, name ..
 	return nil
 }
 
-func (r *HandlerRegistry) DialStream(ctx context.Context, key Key, name ...string) (net.Conn, error) {
+func (r *Bus) DialStream(ctx context.Context, key Key, name ...string) (net.Conn, error) {
 	if r == nil {
 		return nil, ErrHandlersStopped
 	}
 	handlerName := normalizeHandlerName(optionalName(name))
-	if err := r.authorize(ctx, key, handlerName); err != nil {
+	if err := r.authorize(ctx, key.Ref(), Capability{Name: CapabilityStream, Scope: []string{handlerName}}); err != nil {
 		return nil, err
 	}
 	sk := streamKey{Key: key, name: handlerName}
@@ -308,7 +337,7 @@ func (r *HandlerRegistry) DialStream(ctx context.Context, key Key, name ...strin
 	return clientConn, nil
 }
 
-func (r *HandlerRegistry) RemoveStream(key Key, name ...string) bool {
+func (r *Bus) RemoveStream(key Key, name ...string) bool {
 	if r == nil {
 		return false
 	}
@@ -322,7 +351,7 @@ func (r *HandlerRegistry) RemoveStream(key Key, name ...string) bool {
 	return ok
 }
 
-func (r *HandlerRegistry) Ready(ctx ...context.Context) error {
+func (r *Bus) Ready(ctx ...context.Context) error {
 	if r == nil {
 		return ErrHandlersStopped
 	}
@@ -340,7 +369,7 @@ func (r *HandlerRegistry) Ready(ctx ...context.Context) error {
 	return nil
 }
 
-func (r *HandlerRegistry) Stop(ctx ...context.Context) error {
+func (r *Bus) Stop(ctx ...context.Context) error {
 	if r == nil {
 		return nil
 	}
@@ -366,11 +395,11 @@ func (r *HandlerRegistry) Stop(ctx ...context.Context) error {
 	return nil
 }
 
-func (r *HandlerRegistry) Close() error {
+func (r *Bus) Close() error {
 	return r.Stop()
 }
 
-func (r *HandlerRegistry) Closed() bool {
+func (r *Bus) Closed() bool {
 	if r == nil {
 		return true
 	}
@@ -379,16 +408,16 @@ func (r *HandlerRegistry) Closed() bool {
 	return r.closed
 }
 
-func (r *HandlerRegistry) dialHTTP(ctx context.Context, _ string, address string) (net.Conn, error) {
+func (r *Bus) dialHTTP(ctx context.Context, _ string, address string) (net.Conn, error) {
 	if err := r.Ready(); err != nil {
 		return nil, err
 	}
 	host := normalizeHost(address)
-	handler, key, name, ok := r.handlerForHost(host)
+	handler, key, _, ok := r.handlerForHost(host)
 	if !ok {
 		return nil, fmt.Errorf("%w: %s", ErrNoHandler, host)
 	}
-	if err := r.authorize(ctx, key, name); err != nil {
+	if err := r.authorize(ctx, key.Ref(), Capability{Name: CapabilityXRPC}); err != nil {
 		return nil, err
 	}
 	caller, hasCaller := CallerFrom(ctx)
@@ -414,10 +443,10 @@ func (r *HandlerRegistry) dialHTTP(ctx context.Context, _ string, address string
 	return clientConn, nil
 }
 
-func (r *HandlerRegistry) serveHTTP(ctx context.Context, conn *trackedConn, handler http.Handler) {
+func (r *Bus) serveHTTP(ctx context.Context, conn *trackedConn, handler http.Handler) {
 	defer conn.Close()
 	if conn.hasCaller {
-		ctx = WithCaller(ctx, conn.caller)
+		ctx = context.WithValue(ctx, callerKey{}, conn.caller)
 	}
 	server := &http.Server{
 		Handler: handler,
@@ -429,7 +458,7 @@ func (r *HandlerRegistry) serveHTTP(ctx context.Context, conn *trackedConn, hand
 	_ = server.Serve(newSingleConnListener(conn))
 }
 
-func (r *HandlerRegistry) handlerForHost(host string) (http.Handler, Key, string, bool) {
+func (r *Bus) handlerForHost(host string) (http.Handler, Key, string, bool) {
 	if r == nil {
 		return nil, Key{}, "", false
 	}
@@ -445,7 +474,7 @@ func (r *HandlerRegistry) handlerForHost(host string) (http.Handler, Key, string
 	return nil, Key{}, "", false
 }
 
-func (r *HandlerRegistry) rootContext() context.Context {
+func (r *Bus) rootContext() context.Context {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if r.root == nil {
@@ -454,7 +483,7 @@ func (r *HandlerRegistry) rootContext() context.Context {
 	return r.root
 }
 
-func (r *HandlerRegistry) rebuildAliasesLocked() {
+func (r *Bus) rebuildAliasesLocked() {
 	aliases := make(map[string]handlerAlias, len(r.aliases))
 	for key, names := range r.handlers {
 		for name := range names {
@@ -474,7 +503,7 @@ func (r *HandlerRegistry) rebuildAliasesLocked() {
 	r.aliases = aliases
 }
 
-func (r *HandlerRegistry) trackConn(conn net.Conn, key Key) (*trackedConn, error) {
+func (r *Bus) trackConn(conn net.Conn, key Key) (*trackedConn, error) {
 	tracked := &trackedConn{Conn: conn, done: make(chan struct{})}
 	tracked.onClose = func() {
 		r.mu.Lock()
@@ -495,7 +524,7 @@ func (r *HandlerRegistry) trackConn(conn net.Conn, key Key) (*trackedConn, error
 	return tracked, nil
 }
 
-func (r *HandlerRegistry) takeConnsLocked(key Key) []*trackedConn {
+func (r *Bus) takeConnsLocked(key Key) []*trackedConn {
 	out := make([]*trackedConn, 0, len(r.conns))
 	for conn, connKey := range r.conns {
 		if connKey != key {
@@ -516,7 +545,7 @@ type trackedConn struct {
 	hooks  []func()
 	closed bool
 
-	caller    Key
+	caller    Caller
 	hasCaller bool
 
 	onClose func()
@@ -588,7 +617,7 @@ func (l *singleConnListener) Addr() net.Addr {
 }
 
 type handlerRoundTripper struct {
-	registry *HandlerRegistry
+	registry *Bus
 }
 
 func (t *handlerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -596,20 +625,20 @@ func (t *handlerRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 		return nil, ErrHandlersStopped
 	}
 	if req == nil || req.URL == nil {
-		return nil, errors.New("component: the HTTP request has no URL")
+		return nil, errors.New("bus: the HTTP request has no URL")
 	}
 	if req.URL.Scheme != "http" {
-		return nil, fmt.Errorf("component: the in-process transport does not serve the scheme %q", req.URL.Scheme)
+		return nil, fmt.Errorf("bus: the in-process transport does not serve the scheme %q", req.URL.Scheme)
 	}
 	if err := t.registry.Ready(); err != nil {
 		return nil, err
 	}
 	host := normalizeHost(requestHost(req))
-	_, key, name, ok := t.registry.handlerForHost(host)
+	_, key, _, ok := t.registry.handlerForHost(host)
 	if !ok {
 		return nil, fmt.Errorf("%w: %s", ErrNoHandler, host)
 	}
-	if err := t.registry.authorize(req.Context(), key, name); err != nil {
+	if err := t.registry.authorize(req.Context(), key.Ref(), xrpcCapability(req)); err != nil {
 		return nil, err
 	}
 	next := req.Clone(req.Context())
@@ -630,68 +659,45 @@ func requestHost(req *http.Request) string {
 	return req.Host
 }
 
-func (r *HandlerRegistry) authorize(ctx context.Context, to Key, handler string) error {
+func xrpcCapability(req *http.Request) Capability {
+	if req != nil && req.URL != nil {
+		if nsid, ok := strings.CutPrefix(req.URL.Path, "/xrpc/"); ok && nsid != "" && !strings.Contains(nsid, "/") {
+			return Capability{Name: CapabilityXRPC, Scope: []string{nsid}}
+		}
+	}
+	return Capability{Name: CapabilityXRPC}
+}
+
+func (r *Bus) authorize(ctx context.Context, to commonv1.ObjectRef, c Capability) error {
 	if r == nil {
 		return ErrHandlersStopped
 	}
-	handler = normalizeHandlerName(handler)
 	from, ok := CallerFrom(ctx)
 	if !ok {
-		return &LinkDeniedError{To: to, Handler: handler}
+		return r.denials.deny(Caller{}, to, c)
 	}
-	if SystemCaller(from) {
-		return nil
+	return r.authorizeCaller(from, to, c)
+}
+
+func (r *Bus) authorizeCaller(from Caller, to commonv1.ObjectRef, c Capability) error {
+	if from.System() {
+		if BootstrapCaller(from.Ref.Name) {
+			return nil
+		}
+		return r.denials.deny(from, to, c)
 	}
-	if strings.TrimSpace(from.Workspace) == "" || strings.TrimSpace(from.Kind) == "" || strings.TrimSpace(from.Name) == "" {
-		return &LinkDeniedError{From: from, To: to, Handler: handler}
-	}
-	if from.Workspace == to.Workspace {
-		return nil
+	if !from.Complete() {
+		return r.denials.deny(from, to, c)
 	}
 	r.mu.RLock()
 	links := r.links
 	r.mu.RUnlock()
 	for _, link := range links {
-		if AccessLinkAllows(link, from, to, handler) {
+		if LinkAllows(link, from, to, c) {
 			return nil
 		}
 	}
-	return &LinkDeniedError{From: from, To: to, Handler: handler}
-}
-
-func cloneLinks(links []AccessLink) []AccessLink {
-	if links == nil {
-		return nil
-	}
-	out := make([]AccessLink, len(links))
-	for i, link := range links {
-		out[i] = link
-		out[i].Handlers = append([]string(nil), link.Handlers...)
-	}
-	return out
-}
-
-func accessLinksEqual(a, b []AccessLink) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i].FromWorkspace != b[i].FromWorkspace || a[i].FromKind != b[i].FromKind || a[i].FromName != b[i].FromName {
-			return false
-		}
-		if a[i].ToWorkspace != b[i].ToWorkspace || a[i].ToKind != b[i].ToKind || a[i].ToName != b[i].ToName {
-			return false
-		}
-		if len(a[i].Handlers) != len(b[i].Handlers) {
-			return false
-		}
-		for j := range a[i].Handlers {
-			if a[i].Handlers[j] != b[i].Handlers[j] {
-				return false
-			}
-		}
-	}
-	return true
+	return r.denials.deny(from, to, c)
 }
 
 func handlerAliases(key Key, name string) []string {
