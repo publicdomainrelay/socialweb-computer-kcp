@@ -213,8 +213,10 @@ state_rules:
     even in a parallel wave.
   - Every item ends with gofmt, go build ./..., go vet ./...,
     deploy/check.sh --fast and scripts/check-architecture.sh once it
-    exists. No unit tests and no test-first work. Integration tests are
-    written only in W7, after the live proof. No push.
+    exists. W0-TESTS deletes every Go test; no item in this plan writes a
+    Go test of any kind. Proof is the build gates plus live runs. Tests
+    return in plan 0027 as specification tests written from
+    docs/spec/integration-catalog.yaml. No push.
   - Dev builds are tested before an rc build. Only the lead runs prod and
     cuts rc tags; task agents never touch prod.
   - Never put a secret, token, password, private key or credential value in
@@ -230,7 +232,7 @@ waves:
     title: "Contracts, codegen, refs, bus and runtime"
     status: todo
     serial: true
-    tracks: [W0-RULES, W0-CODEGEN, W0-REFS, W0-ABSTRACT, W0-CONTRACTS, W0-BUS, W0-RUNTIME]
+    tracks: [W0-TESTS, W0-RULES, W0-CODEGEN, W0-REFS, W0-ABSTRACT, W0-CONTRACTS, W0-BUS, W0-RUNTIME]
     gate: "all kinds registered; refs unified; contract packages pure; bus denies an unlinked call; the pilot controller runs on the runtime across root and a later-created root:<app> workspace with no ticker."
   - id: W1
     title: "Shared kit"
@@ -283,16 +285,52 @@ waves:
     gate: "rc build deployed to this host, hat-9, hat-7 and prod gateway passes the acceptance matrix."
 
 items:
+  - id: W0-TESTS
+    title: "Catalog the integration scenarios, then delete every Go test"
+    wave: W0
+    track: tests
+    parallel_with: []
+    depends_on: []
+    status: todo
+    decision: >
+      First write docs/spec/integration-catalog.yaml: one entry per
+      integration test in test/integration and per soak lane in test/soak,
+      naming the behavior it asserts (actors, inputs, observable outcome),
+      not how the code does it. Then move the release asset check out of
+      TestEveryEmbeddedAssetExtractsAndVerifies into a release-tagged
+      socialweb-computer dev verb and point deploy/check.sh at it. Then
+      delete every *_test.go file, test/integration, test/soak, and every
+      testdata file that only tests read. Remove the go test steps from
+      deploy/check.sh, the integration job from .gitlab-ci.yml and the
+      integration test build from scripts/dev-droplet.sh. Rust tests under
+      rust/ are out of scope and stay.
+    files:
+      - docs/spec/integration-catalog.yaml
+      - "**/*_test.go"
+      - test/**
+      - testdata/**
+      - internal/assets/**
+      - cmd/socialweb-computer/**
+      - deploy/check.sh
+      - .gitlab-ci.yml
+      - scripts/dev-droplet.sh
+    done_when: >
+      git ls-files '*_test.go' is empty; the catalog names every deleted
+      integration test and soak lane; deploy/check.sh --fast and --full
+      pass without go test and still verify the embedded assets.
+
   - id: W0-RULES
     title: "Record the codegen marker exception and the architecture rules"
     wave: W0
     track: rules
     parallel_with: []
-    depends_on: []
+    depends_on: [W0-TESTS]
     status: todo
     decision: >
       Add the comment exception from decisions.comment_exception to
-      AGENTS.md. Add the layout, no_polling, bus and writers rules from this
+      AGENTS.md. Replace the AGENTS.md integration test rules with: no Go
+      tests until plan 0027; tests then are specification tests from
+      docs/spec/integration-catalog.yaml. Add the layout, no_polling, bus and writers rules from this
       plan to AGENTS.md as short rules. Create deploy/obligations.txt and
       deploy/bus-bootstrap-callers.txt (empty headers only).
     files:
@@ -946,14 +984,17 @@ items:
     decision: >
       Fresh deploy from a dev build on this host first, then an rc build to
       this host, hat-9, hat-7 and the prod gateway. Repeat
-      docs/acceptance/0001-auth-modes.md end to end. Then write integration
-      tests under test/integration for the acceptance rows.
+      docs/acceptance/0001-auth-modes.md end to end, updated for the new
+      kinds. Add the acceptance rows of this plan to
+      docs/spec/integration-catalog.yaml so plan 0027 writes them as
+      specification tests. No Go tests are written here.
     files:
       - docs/acceptance/0001-auth-modes.md
-      - test/integration/**
+      - docs/spec/integration-catalog.yaml
     done_when: >
-      Every acceptance row passes on the rc; the lead flips the closed
-      defects in docs/plans/0025-defect-register.yaml; no push.
+      Every acceptance row passes on the rc; the catalog holds the old
+      scenarios plus this plan's rows; the lead flips the closed defects in
+      docs/plans/0025-defect-register.yaml; no push.
 
 acceptance_matrix:
   rule: >
@@ -1013,6 +1054,7 @@ risks: |
   the lead first.
 
 do_not_do:
+  - "No Go tests of any kind in this plan; no restoring deleted tests."
   - "No polling over kcp or component state; no resync-driven retries."
   - "No System caller outside deploy/bus-bootstrap-callers.txt."
   - "No token, session, DPoP key or credential handed to a caller; the callee authenticates."
