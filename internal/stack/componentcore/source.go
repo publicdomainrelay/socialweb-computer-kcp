@@ -3,6 +3,7 @@ package componentcore
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
+	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 )
 
 const RestartFieldManager = "socialweb.computer/dev-restart"
@@ -137,26 +139,23 @@ func WaitRestarted(ctx context.Context, dynamic DynamicFactory, ref ComponentRef
 	if err != nil {
 		return RestartStatus{}, err
 	}
-	deadline := time.Now().Add(timeout)
-	last := before
-	for {
-		cur, err := ReadStatus(ctx, dynamic, ref)
-		if err == nil {
-			last = cur
-			if cur.Ready && restartedAfter(cur, before, requested) {
-				return cur, nil
-			}
-		}
-		if time.Now().After(deadline) {
-			return last, fmt.Errorf("componentcore: %s/%s in %s did not restart within %s (phase %s, ready %v, restarts %d, startedAt %s)",
-				ref.Kind, ref.Name, ref.Workspace, timeout, last.Phase, last.Ready, last.Restarts, last.StartedAt)
-		}
-		select {
-		case <-ctx.Done():
-			return last, ctx.Err()
-		case <-time.After(200 * time.Millisecond):
-		}
+	dyn, err := dynamic(ref.Workspace)
+	if err != nil {
+		return RestartStatus{}, err
 	}
+	last := before
+	_, err = ctlruntime.Await(ctx, dyn.Resource(ref.GVR), ref.Name, timeout, func(u *unstructured.Unstructured) (bool, error) {
+		if u == nil {
+			return false, nil
+		}
+		last = statusOf(u)
+		return last.Ready && restartedAfter(last, before, requested), nil
+	})
+	if errors.Is(err, ctlruntime.ErrAwaitTimeout) {
+		return last, fmt.Errorf("componentcore: %s/%s in %s did not restart within %s (phase %s, ready %v, restarts %d, startedAt %s)",
+			ref.Kind, ref.Name, ref.Workspace, timeout, last.Phase, last.Ready, last.Restarts, last.StartedAt)
+	}
+	return last, err
 }
 
 func restartedAfter(cur, before RestartStatus, requested time.Time) bool {
