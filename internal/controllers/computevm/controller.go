@@ -151,7 +151,25 @@ func (c *Controller) write(ctx context.Context, req ctlruntime.Request, vm *v1al
 
 func now() string { return time.Now().UTC().Format(time.RFC3339) }
 
+func (c *Controller) declare(ctx context.Context, req ctlruntime.Request, drop string) {
+	var list v1alpha1.ComputeVMList
+	if err := req.List(ctx, &list); err != nil {
+		c.log.Warn("listing the ComputeVMs to declare their guest material", "err", err.Error())
+		return
+	}
+	names := make([]string, 0, len(list.Items))
+	for _, vm := range list.Items {
+		if vm.Spec.Owner.Handle == c.handle && vm.Name != drop {
+			names = append(names, vm.Name)
+		}
+	}
+	if err := c.host.DeclareGuests(ctx, names); err != nil {
+		c.log.Warn("declaring the live guests' material in the bidder's vault", "err", err.Error())
+	}
+}
+
 func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, vm *v1alpha1.ComputeVM) (ctlruntime.Result, error) {
+	c.declare(ctx, req, "")
 	if !vm.DeletionTimestamp.IsZero() {
 		return c.release(ctx, req, vm)
 	}
@@ -244,6 +262,7 @@ func (c *Controller) release(ctx context.Context, req ctlruntime.Request, vm *v1
 	}
 	c.host.DropGuestLogin(ctx, *vm)
 	c.host.DropGuestGrants(ctx, vm.Name)
+	c.declare(ctx, req, vm.Name)
 	c.log.Info("released: the backend is gone and the finalizer is dropped", "computevm", vm.Name)
 	return ctlruntime.Result{}, nil
 }

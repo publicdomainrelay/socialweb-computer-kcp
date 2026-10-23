@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"slices"
 	"sync"
 	"time"
 
@@ -144,22 +143,6 @@ func (c *Controller) live(ctx context.Context, req ctlruntime.Request) ([]v1alph
 	return out, nil
 }
 
-func (c *Controller) declare(ctx context.Context, req ctlruntime.Request) {
-	vms, err := c.live(ctx, req)
-	if err != nil {
-		c.log.Warn("listing the FirecrackerVMs to declare their guest material", "err", err.Error())
-		return
-	}
-	names := make([]string, 0, len(vms))
-	for _, vm := range vms {
-		names = append(names, vm.Name)
-	}
-	slices.Sort(names)
-	if err := c.host.DeclareGuests(ctx, names); err != nil {
-		c.log.Warn("declaring the live guests' material in the bidder's vault", "err", err.Error())
-	}
-}
-
 func (c *Controller) collectImages(ctx context.Context, req ctlruntime.Request) {
 	vms, err := c.live(ctx, req)
 	if err != nil {
@@ -200,7 +183,6 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, vm *
 			return ctlruntime.Result{}, err
 		}
 		c.forget(vm.Name)
-		c.declare(ctx, req)
 		c.collectImages(ctx, req)
 		c.mu.Lock()
 		none := len(c.clusters) == 0
@@ -210,10 +192,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, vm *
 		}
 		return ctlruntime.Result{}, nil
 	}
-	if _, known := c.clusterOf(vm.Name); !known {
-		c.remember(vm.Name, req.Cluster)
-		c.declare(ctx, req)
-	}
+	c.remember(vm.Name, req.Cluster)
 	switch vm.Status.Phase {
 	case v1alpha1.ComputeVMPhaseLost, v1alpha1.ComputeVMPhaseFailed:
 		return ctlruntime.Result{}, nil
