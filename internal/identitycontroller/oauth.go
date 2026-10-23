@@ -517,7 +517,7 @@ func (c *Controller) clearQr(name string) {
 }
 
 func (c *Controller) newQrState(id *v1alpha1.MarketIdentity) (*qrTransfer, error) {
-	did, signer, err := c.qrSigner(id)
+	did, signer, err := c.qrSigner()
 	if err != nil {
 		return nil, err
 	}
@@ -550,21 +550,13 @@ func (c *Controller) newQrState(id *v1alpha1.MarketIdentity) (*qrTransfer, error
 	return qr, nil
 }
 
-func (c *Controller) qrSigner(id *v1alpha1.MarketIdentity) (string, oauthclient.ServiceAuthSigner, error) {
+func (c *Controller) qrSigner() (string, oauthclient.ServiceAuthSigner, error) {
 	if c.oauth.CLIKey != nil {
-		did := strings.TrimSpace(c.oauth.CLIDID)
-		if did == "" && id != nil {
-			if parsed, err := url.Parse(strings.TrimSpace(id.Spec.OAuthClientID)); err == nil && parsed.Hostname() != "" {
-				did = "did:web:" + strings.ToLower(parsed.Hostname())
-			}
+		public, err := c.oauth.CLIKey.PublicKey()
+		if err != nil {
+			return "", nil, err
 		}
-		if did == "" {
-			public, err := c.oauth.CLIKey.PublicKey()
-			if err != nil {
-				return "", nil, err
-			}
-			did = public.DIDKey()
-		}
+		did := public.DIDKey()
 		return did, oauthclient.KeySigner{Issuer: syntax.DID(did), Key: c.oauth.CLIKey}, nil
 	}
 	if c.oauth.QRSigner != nil && strings.TrimSpace(c.oauth.CLIDID) != "" {

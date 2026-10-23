@@ -969,7 +969,6 @@ func (s *Service) handler() http.Handler {
 	mux.HandleFunc("GET "+SecretsRoute+"/{contract}", s.getSecrets)
 	mux.HandleFunc("GET /oauth-client-metadata.json", s.oauthClientMetadata)
 	mux.HandleFunc("GET /oauth/callback/{identity}", s.oauthCallback)
-	mux.HandleFunc("GET /.well-known/did.json", s.oauthDIDDocument)
 	return mux
 }
 
@@ -985,20 +984,6 @@ func (s *Service) oauthClientMetadata(w http.ResponseWriter, r *http.Request) {
 		"token_endpoint_auth_method": "none",
 		"application_type":           "web",
 		"dpop_bound_access_tokens":   true,
-	})
-}
-
-func (s *Service) oauthDIDDocument(w http.ResponseWriter, r *http.Request) {
-	key := oauthcallback.CLIPublicKey()
-	if key == "" {
-		http.Error(w, "no oauth cli key", http.StatusNotFound)
-		return
-	}
-	did := "did:web:" + strings.ToLower(r.Host)
-	writeJSON(w, http.StatusOK, map[string]any{
-		"@context":           []string{"https://www.w3.org/ns/did/v1", "https://w3id.org/security/multikey/v1"},
-		"id":                 did,
-		"verificationMethod": []map[string]any{{"id": did + "#atproto", "type": "Multikey", "controller": did, "publicKeyMultibase": key}},
 	})
 }
 

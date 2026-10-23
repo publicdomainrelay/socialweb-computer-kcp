@@ -30,20 +30,3 @@ func Lookup(name string) (Handler, bool) {
 	mu.RUnlock()
 	return handler, ok
 }
-
-var (
-	cliMu     sync.RWMutex
-	cliPublic string
-)
-
-func SetCLIPublicKey(multibase string) {
-	cliMu.Lock()
-	cliPublic = strings.TrimSpace(multibase)
-	cliMu.Unlock()
-}
-
-func CLIPublicKey() string {
-	cliMu.RLock()
-	defer cliMu.RUnlock()
-	return cliPublic
-}

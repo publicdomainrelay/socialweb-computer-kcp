@@ -40,7 +40,8 @@ old_behavior:
     --atproto-oauth -> oauthBrowser, --atproto-oauth-qr -> oauthQr, handle plus
     password/vault -> pdsAccount, otherwise localRepo.
 
-    OAuth QR: qrOrigin/#oauth=<cliDid>&n=<nonce>; browser posts the full DPoP
+    OAuth QR: cliDid is the did:key of the secp256k1 CLI key;
+    qrOrigin/#oauth=<cliDid>&n=<nonce>; browser posts the full DPoP
     session to com.fedfork.atprotoOauthQR; CLI polls with a service-auth JWT
     (aud did:web:<qr host>, lxm com.fedfork.atprotoOauthQR); session TTL 5m;
     session stored in a file or vault; refresh on access-token expiry;

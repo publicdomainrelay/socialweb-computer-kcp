@@ -69,9 +69,14 @@ type QRSession struct {
 
 	PDS string `json:"pds"`
 
-	DPoPPublicJWK map[string]string `json:"dpopPublicJwk"`
+	DPoPPublicJWK map[string]any `json:"dpopPublicJwk"`
 
-	DPoPPrivateJWK map[string]string `json:"dpopPrivateJwk"`
+	DPoPPrivateJWK map[string]any `json:"dpopPrivateJwk"`
+}
+
+func jwkString(jwk map[string]any, name string) string {
+	value, _ := jwk[name].(string)
+	return value
 }
 
 func (q QRSession) SessionData(clientID string, scopes []string) (SessionData, error) {
@@ -90,7 +95,7 @@ func (q QRSession) SessionData(clientID string, scopes []string) (SessionData, e
 		return SessionData{}, fmt.Errorf("oauthclient: the qr session PDS %q is not an absolute http or https URL", q.PDS)
 	}
 	host := strings.TrimRight(q.PDS, "/")
-	key, err := privateKeyFromJWK(q.DPoPPrivateJWK["kty"], q.DPoPPrivateJWK["d"])
+	key, err := privateKeyFromJWK(jwkString(q.DPoPPrivateJWK, "kty"), jwkString(q.DPoPPrivateJWK, "d"))
 	if err != nil {
 		return SessionData{}, err
 	}
