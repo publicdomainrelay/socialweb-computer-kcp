@@ -22,6 +22,7 @@ import (
 	"k8s.io/client-go/rest"
 
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
+	policyv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/policy/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/apiserverfront"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/appctl"
@@ -29,6 +30,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/recordcontroller"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/childapplication"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	policyctl "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/policy"
 	remotepdsctl "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/remotepds"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/credentials"
@@ -42,6 +44,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/leasecontroller"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/marketpresence"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
+	policycontroller "github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/controller"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/remotepds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/statusstate"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/subnetallocator"
@@ -407,7 +410,7 @@ func (c *Core) buildManager(caBundle remotepdsctl.CABundleFunc) {
 		log.Warn("the controller manager is not wired", "err", err.Error())
 		return
 	}
-	mgr, err := ctlruntime.NewManager(ctlruntime.Config{Rest: restCfg, AddToScheme: []func(*runtime.Scheme) error{pdsv1alpha1.AddToScheme},
+	mgr, err := ctlruntime.NewManager(ctlruntime.Config{Rest: restCfg, AddToScheme: []func(*runtime.Scheme) error{pdsv1alpha1.AddToScheme, policyv1alpha1.AddToScheme},
 		Log: log})
 	if err != nil {
 		log.Warn("the controller manager is not wired", "err", err.Error())
@@ -419,6 +422,12 @@ func (c *Core) buildManager(caBundle remotepdsctl.CABundleFunc) {
 	if _, err := remotepdsctl.Register(mgr, remotepdsctl.Options{Log: log, CABundle: caBundle, Secrets: secrets}); err != nil {
 		log.Warn("the remote pds controller is not wired", "err", err.Error())
 		return
+	}
+	if err := policyctl.Register(mgr, policyctl.Options{Bus: c.handlers, PLCURL: cfg.PLCBaseURL, Log: log, Disabled: cfg.DisablePolicy,
+		Actions: func(workspace string) (map[string]policycontroller.ActionHandler, error) {
+			return policyActionHandlers(c.store, workspace)
+		}}); err != nil {
+		log.Warn("the policy controllers are not wired", "err", err.Error())
 	}
 	c.runners = append(c.runners, controllerRunner{name: "controller-manager", run: mgr.Start})
 }

@@ -14,13 +14,10 @@ import (
 	"sync"
 	"time"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 
 	"github.com/bluesky-social/indigo/atproto/identity"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/appctl"
 	atprotooauth "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauthclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
@@ -34,7 +31,6 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/tlsreload"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/oauthcallback"
@@ -47,7 +43,6 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/ingressproxy"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/pds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/plc"
-	policyenginesvc "github.com/johnandersen777/socialweb-computer-kcp/internal/services/policyengine"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/relay"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/requester"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/sshserver"
@@ -273,12 +268,7 @@ func New(cfg Config) (*Core, error) {
 	dispatcher := newIngressDispatcher(registry, registrar, fallbackName, cfg.Log)
 	runtime := component.NewRuntime(deps, nil)
 	runtime.SetStateDirMaker(func(dir string) error { return os.MkdirAll(dir, 0o700) })
-	actionHandlers, err := policyActionHandlers(store, base)
-	if err != nil {
-		return nil, err
-	}
-	policyOptions := policyenginesvc.Options{Store: store, Cluster: base, PLCURL: cfg.PLCBaseURL, Log: cfg.Log, Handlers: actionHandlers}
-	if err := Register(runtime, policyOptions, cfg.ExposureIngressIdentity); err != nil {
+	if err := Register(runtime, cfg.ExposureIngressIdentity); err != nil {
 		return nil, err
 	}
 	ctl, err := component.NewController(component.ControllerConfig{Runtime: runtime, Source: newSource(cfg, factory),
@@ -292,7 +282,7 @@ func New(cfg Config) (*Core, error) {
 	return core, nil
 }
 
-func Register(runtime *component.Runtime, policyOptions policyenginesvc.Options, identity exposure.IngressIdentity) error {
+func Register(runtime *component.Runtime, identity exposure.IngressIdentity) error {
 	if err := ingressproxy.Register(runtime, identity); err != nil {
 		return err
 	}
@@ -314,7 +304,7 @@ func Register(runtime *component.Runtime, policyOptions policyenginesvc.Options,
 			return err
 		}
 	}
-	return policyenginesvc.Register(runtime, policyOptions)
+	return nil
 }
 
 func policyActionHandlers(store *kcpstore.Store, workspace string) (map[string]policycontroller.ActionHandler, error) {
@@ -333,9 +323,6 @@ func (c *Core) Run(ctx context.Context) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer c.wg.Wait()
 	defer cancel()
-	if !c.cfg.DisablePolicy {
-		c.runPolicy(runCtx)
-	}
 	c.wg.Go(func() { c.runExposure(runCtx) })
 	c.runIdentity(runCtx)
 	stopControllers := c.startControllers(runCtx)
@@ -425,54 +412,6 @@ func (c *Core) pdsEndpoint(workspace, kind, name string) (string, bool) {
 		return "http://" + endpoint.Address, true
 	}
 	return "", false
-}
-
-func (c *Core) runPolicy(ctx context.Context) {
-	log := c.cfg.Log.With("component", "policy-controller")
-	for _, workspace := range c.cfg.Workspaces {
-		c.wg.Go(func() { c.supervisePolicy(ctx, workspace, log.With("workspace", workspace)) })
-	}
-}
-
-func (c *Core) supervisePolicy(ctx context.Context, workspace string, log *slog.Logger) {
-	for ctx.Err() == nil {
-		if !c.policyBound(ctx, workspace) {
-			clock.Sleep(ctx, RetryAfter)
-			continue
-		}
-		handlers, err := policyActionHandlers(c.store, workspace)
-		if err != nil {
-			log.Warn("the policy controller has no action handlers", "err", err.Error())
-			clock.Sleep(ctx, RetryAfter)
-			continue
-		}
-		svc, err := policyenginesvc.New(policyenginesvc.Options{Store: c.store, Cluster: workspace, PLCURL: c.cfg.PLCBaseURL, Log: log, Handlers: handlers})
-		if err != nil {
-			log.Warn("the policy controller does not start", "err", err.Error())
-			clock.Sleep(ctx, RetryAfter)
-			continue
-		}
-		log.Info("the policy controller reconciles PolicyEngine, PolicyWorkflow, PolicyWorkflowRun and PolicyTrigger in process")
-		if err := svc.Controller().Run(ctx); ctx.Err() == nil {
-			log.Warn("the policy controller stopped; starting it again", "err", fmt.Sprint(err))
-		}
-		clock.Sleep(ctx, RetryAfter)
-	}
-}
-
-func (c *Core) policyBound(ctx context.Context, workspace string) bool {
-	dyn, err := c.dynamic(workspace)
-	if err != nil {
-		return false
-	}
-	_, err = dyn.Resource(appctl.PolicyEngineGVR).List(ctx, metav1.ListOptions{Limit: 1})
-	if err == nil {
-		return true
-	}
-	if apierrors.IsNotFound(err) || apierrors.IsForbidden(err) {
-		return false
-	}
-	return false
 }
 
 func (c *Core) dynamic(workspace string) (dynamic.Interface, error) {

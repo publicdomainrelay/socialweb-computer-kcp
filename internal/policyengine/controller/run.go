@@ -9,11 +9,11 @@ import (
 	"maps"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	policyv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/policy/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/atproto"
 	bundledactions "github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/bundled-actions"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/models"
@@ -122,7 +122,7 @@ func (r *RunReconciler) resolveWorkflow(ctx context.Context, run *policyv1alpha1
 				return raw, workflowCR, nil
 			}
 		}
-		if getErr != nil && !kcpstore.IsNotFound(getErr) {
+		if getErr != nil && !apierrors.IsNotFound(getErr) {
 			if _, ok := bundledWorkflow(run.Spec.WorkflowRef); !ok {
 				return nil, nil, fmt.Errorf("read policy workflow %s: %w", run.Spec.WorkflowRef, getErr)
 			}

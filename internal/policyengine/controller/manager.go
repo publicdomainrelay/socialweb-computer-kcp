@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -39,12 +40,12 @@ func NewDefaultEngineFactory(base Config) EngineFactory {
 	}
 }
 
-func (m *EngineManager) ReconcilePolicyEngine(ctx context.Context, engineCR *policyv1alpha1.PolicyEngine) (EngineReconcileState, error) {
+func (m *EngineManager) ReconcilePolicyEngine(ctx context.Context, key string, engineCR *policyv1alpha1.PolicyEngine) (EngineReconcileState, error) {
 	if engineCR == nil {
 		return EngineReconcileState{}, fmt.Errorf("policy engine is required")
 	}
 	if engineCR.DeletionTimestamp != nil {
-		m.stop(ctx, engineCR.Name)
+		m.stop(ctx, key)
 		state := EngineReconcileState{Phase: policyv1alpha1.PolicyEnginePending}
 		meta.SetStatusCondition(&state.Conditions, metav1.Condition{
 			Type:    policyengine.ConditionReady,
@@ -55,7 +56,7 @@ func (m *EngineManager) ReconcilePolicyEngine(ctx context.Context, engineCR *pol
 		return state, nil
 	}
 	if engineCR.Spec.Suspend {
-		m.stop(ctx, engineCR.Name)
+		m.stop(ctx, key)
 		state := EngineReconcileState{Phase: policyv1alpha1.PolicyEnginePending}
 		meta.SetStatusCondition(&state.Conditions, metav1.Condition{
 			Type:    policyengine.ConditionSuspended,
@@ -71,10 +72,10 @@ func (m *EngineManager) ReconcilePolicyEngine(ctx context.Context, engineCR *pol
 	}
 	hash := string(spec)
 	m.mu.Lock()
-	managed := m.engines[engineCR.Name]
+	managed := m.engines[key]
 	if managed == nil || managed.hash != hash {
 		m.mu.Unlock()
-		m.stop(ctx, engineCR.Name)
+		m.stop(ctx, key)
 		if m.factory == nil {
 			return EngineReconcileState{Phase: policyv1alpha1.PolicyEngineFailed}, fmt.Errorf("policy engine factory is not configured")
 		}
@@ -96,8 +97,8 @@ func (m *EngineManager) ReconcilePolicyEngine(ctx context.Context, engineCR *pol
 			return EngineReconcileState{Phase: policyv1alpha1.PolicyEngineFailed}, startErr
 		}
 		m.mu.Lock()
-		m.engines[engineCR.Name] = &managedEngine{engine: engine, hash: hash}
-		managed = m.engines[engineCR.Name]
+		m.engines[key] = &managedEngine{engine: engine, hash: hash}
+		managed = m.engines[key]
 		stored := *managed
 		m.mu.Unlock()
 		return reconcileState(&stored), nil
@@ -140,14 +141,20 @@ func (m *EngineManager) EngineFor(name string) (*Engine, bool) {
 	return managed.engine, true
 }
 
-func (m *EngineManager) Names() []string {
+func (m *EngineManager) Only(prefix string) (*Engine, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	out := make([]string, 0, len(m.engines))
-	for name := range m.engines {
-		out = append(out, name)
+	var found *Engine
+	for key, managed := range m.engines {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		if found != nil {
+			return nil, false
+		}
+		found = managed.engine
 	}
-	return out
+	return found, found != nil
 }
 
 func (m *EngineManager) Shutdown(ctx context.Context) error {
@@ -239,4 +246,8 @@ func EngineConfigFromCR(engineCR *policyv1alpha1.PolicyEngine, base Config) Conf
 	config.TrustTTL = opt.Positive(config.TrustTTL, 5*time.Minute)
 	config.DisableActions = false
 	return config
+}
+
+func EngineKey(cluster, name string) string {
+	return cluster + "/" + name
 }
