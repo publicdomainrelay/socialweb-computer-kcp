@@ -283,6 +283,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		PolicyEngineRef:   decoded.PolicyEngineRef,
 		VaultRef:          decoded.VaultRef,
 		Comms:             decoded.Comms,
+		BidderDIDs:        append([]string(nil), decoded.BidderDIDs...),
 		PolicyArgs:        map[string]string{},
 	}
 	if cfg.StateDir == "" {

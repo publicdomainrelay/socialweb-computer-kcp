@@ -353,6 +353,8 @@ type RequesterSpec struct {
 
 	GuestSSHKeysFile string `json:"guestSSHKeysFile,omitempty"`
 
+	BidderDIDs []string `json:"bidderDIDs,omitempty"`
+
 	OwnerSessionsFile string `json:"ownerSessionsFile,omitempty"`
 
 	IrohSocket string `json:"irohSocket,omitempty"`

@@ -331,6 +331,7 @@ func gatewayDesired(o v1alpha1.Gateway, plan accountPlan, id *v1alpha1.MarketIde
 		OAuthClientID:      oauthClientID,
 		OAuthRedirectURI:   oauthRedirectURI,
 		GuestSSHKeysFile:   guestSSHKeysFile,
+		BidderDIDs:         append([]string(nil), o.Spec.BidderDids...),
 		AcceptCopies:       int32(optionInt(o.Spec.Options, "accept-copies")),
 		Comms:              o.Spec.Comms,
 	}}
