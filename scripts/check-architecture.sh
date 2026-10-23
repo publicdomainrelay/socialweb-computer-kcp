@@ -3,7 +3,7 @@ set -euo pipefail
 
 strict_layers="api contract"
 
-backend_prefixes="internal/compute internal/vault internal/pds internal/atprotorepo internal/events internal/vmruntime internal/hostsvc internal/fcapi internal/guestnet internal/guestdisk internal/guestimage internal/policyengine/runs"
+backend_prefixes="internal/compute internal/vault internal/pds internal/atprotorepo internal/events internal/vmruntime internal/hostsvc internal/fcapi internal/guestnet internal/guestdisk internal/guestimage internal/policyengine/runs internal/relay internal/ingress internal/ssh internal/dispatcher internal/gateway internal/guestcp"
 
 backend_banned="k8s.io/client-go sigs.k8s.io/controller-runtime sigs.k8s.io/multicluster-runtime github.com/kcp-dev k8s.io/apimachinery/pkg/apis/meta/v1/unstructured internal/bus internal/controllers internal/app internal/appctl internal/kcpserver internal/kcpapply internal/kcpclient internal/kcpdatastore internal/stack"
 

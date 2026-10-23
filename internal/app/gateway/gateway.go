@@ -260,6 +260,7 @@ func (p *pass) baseLinks() []compose.Link {
 		compose.VaultLink(api, vault, true, WebAppVaultMount+"/*"),
 		compose.VaultPKILink(api, vault, "pki/*"),
 		compose.RootVaultLink(p.r, vault, RequesterVaultMount+"/identity/*"),
+		compose.NodeClaimVaultLink(p.r.Workspace, vault, WebAppVaultMount+"/contracts/*"),
 	}
 }
 

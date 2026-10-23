@@ -124,6 +124,11 @@ func ComputeVMVaultLink(ws, vaultName string, prefixes ...string) Link {
 	return SelectorLink(LinkName("computevms", vaultName), sel, VaultRefIn(vaultName, ws), Cap(vault.CapabilityRead, cleanPrefixes(prefixes)...))
 }
 
+func NodeClaimVaultLink(ws, vaultName string, prefixes ...string) Link {
+	sel := exposurev1alpha1.ComponentLinkSelector{Group: v1alpha1.GroupName, Kind: "NodeClaim", Workspace: bus.ScopeAll}
+	return SelectorLink(LinkName("nodeclaims", vaultName), sel, VaultRefIn(vaultName, ws), Cap(vault.CapabilityWrite, cleanPrefixes(prefixes)...))
+}
+
 func EventSourceRefIn(kind, name, ws string) commonv1.ObjectRef {
 	return Ref(eventsv1alpha1.GroupName, kind, name, ws)
 }

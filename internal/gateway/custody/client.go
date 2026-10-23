@@ -1,4 +1,4 @@
-package gatewayapi
+package custody
 
 import (
 	"bytes"
@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -18,7 +19,7 @@ import (
 
 const custodyMaxBody = 1 << 20
 
-type custodyEndpoint struct {
+type Endpoint struct {
 	Address string
 
 	CACert []byte
@@ -36,7 +37,7 @@ type custodyEndpoint struct {
 	Timeout time.Duration
 }
 
-func (e custodyEndpoint) check() error {
+func (e Endpoint) check() error {
 	if e.Address == "" {
 		return errors.New("gatewayapi: the custody endpoint has no address")
 	}
@@ -50,7 +51,7 @@ func (e custodyEndpoint) check() error {
 	if u.User != nil || (u.Path != "" && u.Path != "/") {
 		return fmt.Errorf("gatewayapi: the custody address %q carries user info or a path", e.Address)
 	}
-	if u.Scheme == "http" && !loopbackHost(u.Hostname()) {
+	if u.Scheme == "http" && !LoopbackHost(u.Hostname()) {
 		return fmt.Errorf("gatewayapi: the custody address %q is plain http on a non-loopback host", e.Address)
 	}
 	if e.Mount == "" {
@@ -90,12 +91,12 @@ func (e *custodyError) Error() string {
 }
 
 type custodyClient struct {
-	endpoint custodyEndpoint
+	endpoint Endpoint
 
 	http *http.Client
 }
 
-func newCustodyClient(endpoint custodyEndpoint) (*custodyClient, error) {
+func newCustodyClient(endpoint Endpoint) (*custodyClient, error) {
 	if err := endpoint.check(); err != nil {
 		return nil, err
 	}
@@ -110,7 +111,7 @@ func newCustodyClient(endpoint custodyEndpoint) (*custodyClient, error) {
 	transport.Proxy = nil
 	transport.TLSClientConfig = tlsConfig
 	timeout := endpoint.Timeout
-	timeout = opt.Positive(timeout, DefaultCustodyTimeout)
+	timeout = opt.Positive(timeout, DefaultTimeout)
 	return &custodyClient{
 		endpoint: endpoint,
 		http:     &http.Client{Timeout: timeout, Transport: transport},
@@ -373,4 +374,12 @@ func (c *custodyClient) proof(ctx context.Context, token, did, method, target, n
 		return custodyProof{}, errors.New("gatewayapi: the custody proof returned no token or DPoP proof")
 	}
 	return custodyProof{AccessToken: payload.AccessToken, DPoP: payload.DPoPProof}, nil
+}
+
+func LoopbackHost(host string) bool {
+	if host == "" || strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

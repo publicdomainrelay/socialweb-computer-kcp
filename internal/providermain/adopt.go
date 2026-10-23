@@ -241,9 +241,8 @@ func (h *nodeHosts) claimJoinedOrphans(ctx context.Context, cluster string, clai
 			continue
 		}
 		claimed[node.Name] = true
-		claims = append(claims, v1alpha1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Name: node.Name,
-			Annotations: map[string]string{nodemarket.AnnotationAdoptJoinedNode: "true"}},
-			Spec: v1alpha1.NodeClaimSpec{ClusterRef: commonv1.LocalObjectRef{Name: cluster}, NodeName: node.Name}})
+		claims = append(claims, v1alpha1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Name: node.Name},
+			Spec: v1alpha1.NodeClaimSpec{ClusterRef: commonv1.LocalObjectRef{Name: cluster}, NodeName: node.Name, AdoptJoinedNode: true}})
 		h.log.Info("cluster provider: a joined, Ready Node with no claim and a role in the cluster vault is claimed for adoption",
 			"cluster", cluster, "node", node.Name,
 			"next", "the door matches the claim to its receipt and vm.hostKeys record and moves it to Running, or fails it")

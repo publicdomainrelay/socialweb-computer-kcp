@@ -14,12 +14,12 @@ import (
 	"strings"
 	"time"
 
-	"k8s.io/utils/ptr"
-
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clientcert"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	contractnodeclaim "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/nodeclaim"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/gateway/custody"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayhttp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestnet"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
@@ -35,8 +35,8 @@ const (
 	DefaultDirectoryKeys   = 10_000
 	DefaultVMReadySec      = 120
 	DefaultAtprotoMount    = "atproto"
-	DefaultAtprotoRole     = "user"
-	DefaultCustodyTimeout  = 15 * time.Second
+	DefaultAtprotoRole     = custody.DefaultRole
+	DefaultCustodyTimeout  = custody.DefaultTimeout
 	DefaultVaultClient     = "socialweb-computer-k8s"
 	DefaultRenewBelow      = 30 * time.Minute
 	DefaultRenewIncrement  = time.Hour
@@ -50,6 +50,8 @@ type Deps struct {
 	TLS *tls.Config
 
 	NodeClaimAgent *kcpclient.ServiceAccountRef
+
+	NodeClaims contractnodeclaim.Binder
 }
 
 func New(spec v1alpha1.GatewayAPISpec, deps Deps) (*Service, error) {
@@ -81,10 +83,6 @@ func New(spec v1alpha1.GatewayAPISpec, deps Deps) (*Service, error) {
 			s.homeWorkspaces = []string{nm.HomeWorkspace}
 		}
 		s.contractWorkspace = cmp.Or(nm.ContractWorkspace, s.workspace)
-		s.pollInterval = time.Duration(nm.PollIntervalSeconds) * time.Second
-	}
-	if poll := ptr.Deref(spec.NodePollIntervalSeconds, 0); poll > 0 {
-		s.pollInterval = time.Duration(poll) * time.Second
 	}
 	if spec.ClusterProvider != nil {
 		if err := checkClusterProvider(*spec.ClusterProvider); err != nil {
@@ -220,7 +218,7 @@ func checkOrigin(raw string) error {
 	if (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return fmt.Errorf("%q is not an absolute http or https origin", raw)
 	}
-	if u.Scheme == "http" && !loopbackHost(u.Hostname()) {
+	if u.Scheme == "http" && !custody.LoopbackHost(u.Hostname()) {
 		return fmt.Errorf("%q is plain http on a non-loopback host, so the session cookie could not be Secure", raw)
 	}
 	if u.RawQuery != "" || u.Fragment != "" {
@@ -232,16 +230,8 @@ func checkOrigin(raw string) error {
 	return nil
 }
 
-func loopbackHost(host string) bool {
-	if host == "" || strings.EqualFold(host, "localhost") {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
-}
-
 func checkLoopbackHost(host string) error {
-	if loopbackHost(host) {
+	if custody.LoopbackHost(host) {
 		return nil
 	}
 	return fmt.Errorf("gatewayapi: host %q is not loopback; this listener carries session cookies and service-auth tokens, so it binds 127.0.0.1 or [::1] only", host)

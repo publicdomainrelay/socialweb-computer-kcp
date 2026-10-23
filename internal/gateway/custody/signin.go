@@ -1,4 +1,4 @@
-package gatewayapi
+package custody
 
 import (
 	"cmp"
@@ -27,9 +27,17 @@ import (
 )
 
 const (
+	DefaultRole = "user"
+
+	DefaultTimeout = 15 * time.Second
+)
+
+const (
 	agentMaxBody = 8 << 20
 	agentPageMax = 100
 )
+
+var _ gatewayhttp.WebSignIn = (*SignIn)(nil)
 
 const (
 	identityCacheEntries = 4096
@@ -45,7 +53,7 @@ const (
 	identityRefreshBackoffMax = 30 * time.Second
 )
 
-type custodySignIn struct {
+type SignIn struct {
 	client *custodyClient
 
 	pdsHTTP *http.Client
@@ -95,8 +103,8 @@ type custodyIdentityEntry struct {
 	nextTry time.Time
 }
 
-type custodySignInOptions struct {
-	Endpoint custodyEndpoint
+type Config struct {
+	Endpoint Endpoint
 
 	Role string
 
@@ -105,29 +113,31 @@ type custodySignInOptions struct {
 	RenewIncrement time.Duration
 
 	Network *v1alpha1.MarketNetworkValue
+}
 
-	TLSConfig *tls.Config
+type Deps struct {
+	TLS *tls.Config
 
 	Log *slog.Logger
 }
 
-func newCustodySignIn(opts custodySignInOptions) (*custodySignIn, error) {
-	client, err := newCustodyClient(opts.Endpoint)
+func New(cfg Config, deps Deps) (*SignIn, error) {
+	client, err := newCustodyClient(cfg.Endpoint)
 	if err != nil {
 		return nil, err
 	}
-	opts.Role = cmp.Or(opts.Role, DefaultAtprotoRole)
-	if opts.Log == nil {
-		opts.Log = slog.New(slog.DiscardHandler)
+	log := deps.Log
+	if log == nil {
+		log = slog.New(slog.DiscardHandler)
 	}
-	return &custodySignIn{
+	return &SignIn{
 		client:            client,
-		pdsHTTP:           &http.Client{Timeout: 30 * time.Second, Transport: pdsTransport(opts.Network, opts.TLSConfig)},
-		role:              opts.Role,
-		renewBelow:        opts.RenewBelow,
-		renewIncrement:    opts.RenewIncrement,
-		allowInternalHTTP: opts.Network != nil,
-		log:               opts.Log,
+		pdsHTTP:           &http.Client{Timeout: 30 * time.Second, Transport: pdsTransport(cfg.Network, deps.TLS)},
+		role:              cmp.Or(cfg.Role, DefaultRole),
+		renewBelow:        cfg.RenewBelow,
+		renewIncrement:    cfg.RenewIncrement,
+		allowInternalHTTP: cfg.Network != nil,
+		log:               log,
 		identities:        ttlcache.New[[sha256.Size]byte, *custodyIdentityEntry](ttlcache.Options{MaxEntries: identityCacheEntries}),
 		wake:              make(chan struct{}, 1),
 		stopCh:            make(chan struct{}),
@@ -156,11 +166,11 @@ func pdsTransport(network *v1alpha1.MarketNetworkValue, tlsConfig *tls.Config) *
 	return transport
 }
 
-func (s *custodySignIn) ClientMetadata(ctx context.Context) (json.RawMessage, error) {
+func (s *SignIn) ClientMetadata(ctx context.Context) (json.RawMessage, error) {
 	return s.client.clientMetadata(ctx)
 }
 
-func (s *custodySignIn) Start(ctx context.Context, identifier, redirectURI string) (gatewayhttp.SignInStart, error) {
+func (s *SignIn) Start(ctx context.Context, identifier, redirectURI string) (gatewayhttp.SignInStart, error) {
 	authorizationURL, state, err := s.client.start(ctx, s.role, identifier, redirectURI)
 	if err != nil {
 		return gatewayhttp.SignInStart{}, err
@@ -168,7 +178,7 @@ func (s *custodySignIn) Start(ctx context.Context, identifier, redirectURI strin
 	return gatewayhttp.SignInStart{AuthorizationURL: authorizationURL, State: state}, nil
 }
 
-func (s *custodySignIn) Complete(ctx context.Context, params gatewayhttp.SignInCompleteParams) (gatewayhttp.SignInGrant, error) {
+func (s *SignIn) Complete(ctx context.Context, params gatewayhttp.SignInCompleteParams) (gatewayhttp.SignInGrant, error) {
 	login, err := s.client.complete(ctx, params.State, params.Code, params.ISS)
 	if err != nil {
 		return gatewayhttp.SignInGrant{}, err
@@ -180,7 +190,7 @@ func (s *custodySignIn) Complete(ctx context.Context, params gatewayhttp.SignInC
 	}, nil
 }
 
-func (s *custodySignIn) Identify(ctx context.Context, token string) (*gatewayhttp.WebUser, error) {
+func (s *SignIn) Identify(ctx context.Context, token string) (*gatewayhttp.WebUser, error) {
 	if token == "" {
 		return nil, nil
 	}
@@ -235,11 +245,11 @@ func identityCacheWindow(now time.Time, ttlSeconds int64) (time.Time, time.Time)
 	return leaseUntil, now.Add(window)
 }
 
-func (s *custodySignIn) renewalDue(entry *custodyIdentityEntry, now time.Time) bool {
+func (s *SignIn) renewalDue(entry *custodyIdentityEntry, now time.Time) bool {
 	return entry.renewable && s.renewBelow > 0 && !entry.leaseUntil.Add(-s.renewBelow).After(now)
 }
 
-func (s *custodySignIn) dueAt(entry *custodyIdentityEntry, now time.Time) time.Time {
+func (s *SignIn) dueAt(entry *custodyIdentityEntry, now time.Time) time.Time {
 	if entry.renewDue {
 		return now
 	}
@@ -261,7 +271,7 @@ func (s *custodySignIn) dueAt(entry *custodyIdentityEntry, now time.Time) time.T
 	return next
 }
 
-func (s *custodySignIn) storeIdentity(key [sha256.Size]byte, token string, identity *custodyIdentity, now time.Time) {
+func (s *SignIn) storeIdentity(key [sha256.Size]byte, token string, identity *custodyIdentity, now time.Time) {
 	leaseUntil, checkUntil := identityCacheWindow(now, identity.TTLSeconds)
 	if leaseUntil.IsZero() {
 		return
@@ -282,7 +292,7 @@ func (s *custodySignIn) storeIdentity(key [sha256.Size]byte, token string, ident
 	s.mu.Unlock()
 }
 
-func (s *custodySignIn) forgetToken(token string) {
+func (s *SignIn) forgetToken(token string) {
 	if token == "" {
 		return
 	}
@@ -291,7 +301,7 @@ func (s *custodySignIn) forgetToken(token string) {
 	s.mu.Unlock()
 }
 
-func (s *custodySignIn) forgetKey(key [sha256.Size]byte, token string) {
+func (s *SignIn) forgetKey(key [sha256.Size]byte, token string) {
 	s.mu.Lock()
 	if entry, ok := s.identities.Get(key); ok && entry.token == token {
 		s.identities.Delete(key)
@@ -299,7 +309,7 @@ func (s *custodySignIn) forgetKey(key [sha256.Size]byte, token string) {
 	s.mu.Unlock()
 }
 
-func (s *custodySignIn) ensureRefresherLocked() {
+func (s *SignIn) ensureRefresherLocked() {
 	if s.closed || s.refreshing {
 		return
 	}
@@ -307,7 +317,7 @@ func (s *custodySignIn) ensureRefresherLocked() {
 	s.wg.Go(s.refreshLoop)
 }
 
-func (s *custodySignIn) wakeRefresherLocked() {
+func (s *SignIn) wakeRefresherLocked() {
 	if s.closed {
 		return
 	}
@@ -318,7 +328,7 @@ func (s *custodySignIn) wakeRefresherLocked() {
 	}
 }
 
-func (s *custodySignIn) Close() {
+func (s *SignIn) Close() {
 	s.mu.Lock()
 	if !s.closed {
 		s.closed = true
@@ -328,7 +338,7 @@ func (s *custodySignIn) Close() {
 	s.wg.Wait()
 }
 
-func (s *custodySignIn) refreshLoop() {
+func (s *SignIn) refreshLoop() {
 	for {
 		s.mu.Lock()
 		if s.closed {
@@ -386,9 +396,9 @@ func (s *custodySignIn) refreshLoop() {
 	}
 }
 
-func (s *custodySignIn) refreshIdentity(key [sha256.Size]byte, token string, renew bool) {
+func (s *SignIn) refreshIdentity(key [sha256.Size]byte, token string, renew bool) {
 	timeout := s.client.endpoint.Timeout
-	timeout = opt.Positive(timeout, DefaultCustodyTimeout)
+	timeout = opt.Positive(timeout, DefaultTimeout)
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	if renew {
@@ -416,7 +426,7 @@ func (s *custodySignIn) refreshIdentity(key [sha256.Size]byte, token string, ren
 	s.refreshIdentified(key, token, identity)
 }
 
-func (s *custodySignIn) refreshFailed(key [sha256.Size]byte, token string, err error) {
+func (s *SignIn) refreshFailed(key [sha256.Size]byte, token string, err error) {
 	now := time.Now()
 	var custody *custodyError
 	invalid := errors.As(err, &custody) && (custody.Status == http.StatusForbidden || custody.Status == http.StatusUnauthorized)
@@ -459,7 +469,7 @@ func identityRefreshBackoff(failures int) time.Duration {
 	return delay
 }
 
-func (s *custodySignIn) refreshRenewed(key [sha256.Size]byte, token string, leaseSeconds int64) {
+func (s *SignIn) refreshRenewed(key [sha256.Size]byte, token string, leaseSeconds int64) {
 	now := time.Now()
 	leaseUntil, checkUntil := identityCacheWindow(now, leaseSeconds)
 	s.mu.Lock()
@@ -480,7 +490,7 @@ func (s *custodySignIn) refreshRenewed(key [sha256.Size]byte, token string, leas
 	s.identities.SetTTL(key, entry, leaseUntil.Sub(now))
 }
 
-func (s *custodySignIn) refreshIdentified(key [sha256.Size]byte, token string, identity *custodyIdentity) {
+func (s *SignIn) refreshIdentified(key [sha256.Size]byte, token string, identity *custodyIdentity) {
 	now := time.Now()
 	leaseUntil, checkUntil := identityCacheWindow(now, identity.TTLSeconds)
 	s.mu.Lock()
@@ -503,7 +513,7 @@ func (s *custodySignIn) refreshIdentified(key [sha256.Size]byte, token string, i
 	s.identities.SetTTL(key, entry, leaseUntil.Sub(now))
 }
 
-func (s *custodySignIn) SignOut(ctx context.Context, caller *gatewayhttp.WebCaller) (gatewayhttp.SignOutResult, error) {
+func (s *SignIn) SignOut(ctx context.Context, caller *gatewayhttp.WebCaller) (gatewayhttp.SignOutResult, error) {
 	if caller == nil {
 		return gatewayhttp.SignOutResult{}, errors.New("gatewayapi: no caller to sign out")
 	}
@@ -518,7 +528,7 @@ func (s *custodySignIn) SignOut(ctx context.Context, caller *gatewayhttp.WebCall
 	return gatewayhttp.SignOutResult{Revoked: revoked, RevokeError: revokeError}, nil
 }
 
-func (s *custodySignIn) AgentFor(caller *gatewayhttp.WebCaller) gatewayhttp.WebAccountAgent {
+func (s *SignIn) AgentFor(caller *gatewayhttp.WebCaller) gatewayhttp.WebAccountAgent {
 	if caller == nil {
 		return nil
 	}
@@ -583,7 +593,7 @@ func (a *custodyAgent) pds() (*url.URL, error) {
 	if (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return nil, fmt.Errorf("gatewayapi: the account PDS URL %q is not absolute http or https", raw)
 	}
-	if u.Scheme == "http" && !loopbackHost(u.Hostname()) && !(a.allowInternalHTTP && hostport.IsInternalKCP(u.Hostname())) {
+	if u.Scheme == "http" && !LoopbackHost(u.Hostname()) && !(a.allowInternalHTTP && hostport.IsInternalKCP(u.Hostname())) {
 		return nil, fmt.Errorf("gatewayapi: the account PDS URL %q is plain http on a non-loopback host", raw)
 	}
 	return u, nil
