@@ -180,16 +180,21 @@ func Run(ctx context.Context, c Config) error {
 	if c.OnListen != nil {
 		c.OnListen(ln.Addr())
 	}
-	go s.refreshLoop(ctx)
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	loopCtx, stopLoop := context.WithCancel(ctx)
+	defer stopLoop()
+	wg.Go(func() { s.refreshLoop(loopCtx) })
 	done := make(chan error, 1)
 	go func() { done <- srv.ServeTLS(ln, "", "") }()
 	select {
 	case err := <-done:
 		return err
 	case <-ctx.Done():
-		sctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownTimeout)
 		defer cancel()
 		srv.Shutdown(sctx)
+		<-done
 		return nil
 	}
 }
@@ -570,11 +575,7 @@ func (s *server) refreshStale(ctx context.Context) {
 	s.mu.Unlock()
 	var wg sync.WaitGroup
 	for _, dir := range dirs {
-		wg.Add(1)
-		go func(dir string) {
-			defer wg.Done()
-			s.refresh(ctx, dir)
-		}(dir)
+		wg.Go(func() { s.refresh(ctx, dir) })
 	}
 	wg.Wait()
 }
