@@ -546,16 +546,12 @@ func firstNonEmpty(values ...string) string {
 }
 
 func (c *Controller) qrState(name string) (*qrTransfer, error) {
-	c.qrMu.Lock()
-	defer c.qrMu.Unlock()
-	qr := c.qr[name]
+	qr, _ := c.qr.Get(name)
 	return qr, nil
 }
 
 func (c *Controller) clearQr(name string) {
-	c.qrMu.Lock()
-	defer c.qrMu.Unlock()
-	delete(c.qr, name)
+	c.qr.Delete(name)
 }
 
 func (c *Controller) newQrState(id *v1alpha1.MarketIdentity) (*qrTransfer, error) {
@@ -583,12 +579,7 @@ func (c *Controller) newQrState(id *v1alpha1.MarketIdentity) (*qrTransfer, error
 		return nil, err
 	}
 	qr := &qrTransfer{transfer: transfer, url: url, expires: time.Now().Add(transfer.TTL)}
-	c.qrMu.Lock()
-	if c.qr == nil {
-		c.qr = map[string]*qrTransfer{}
-	}
-	c.qr[id.Name] = qr
-	c.qrMu.Unlock()
+	c.qr.SetTTL(id.Name, qr, transfer.TTL)
 	return qr, nil
 }
 
