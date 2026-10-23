@@ -17,6 +17,11 @@ and the bidders. Do not run it without that authority.
 This runbook was validated end to end on `v0.0.0-rc81`: three pods on three
 distinct tenant nodes, one market VM on each bidder host, paused winners forcing
 the next placement, and every VM released when the cluster returned to zero.
+Plan 0026 (abstract kinds, the bus with default-deny ComponentLinks) changed
+the object names and fields it reads; the commands below use the plan 0026
+names. Every kind is read by its full resource name (for example
+`marketbidders.socialweb.computer`), because a market kcp binds several
+exports that share short names.
 
 The authoritative OAuth role sets are in
 `internal/atproto/oauth/scope.go`, ported from
@@ -52,19 +57,35 @@ The gateway requester must be associated before it accepts any bid. Check it
 before creating a cluster; a gateway restart can leave the operator claim
 missing.
 
+The requester MarketIdentity lives in `root:app`; the gateway's components
+(`Pds/pds`, `Requester/requester`, `GatewayAPI/gateway-api`) live in `root`.
+The root composes the approved association into the identity's
+`spec.approvedAssociations` from `SOCIALWEB_GATEWAY_APPROVED_ASSOCIATIONS`
+(comma-separated DIDs in the gateway env). Do not patch the MarketIdentity
+spec: the Gateway root owns that field and server-side apply reverts the edit.
+The identity controller reports the result in `status.associations` and the
+`Associated` condition.
+
 ```bash
 ID_ARGS="--kubeconfig $PROD_K --server https://127.0.0.1:6443/clusters/root:app"
-ASSOC=$(ssh socialweb.computer "sudo -n -u socialweb env HOME=/var/lib/socialweb-computer/socialweb kubectl $ID_ARGS get marketidentity requester -o jsonpath='{.status.associated}'")
-RI_DID=$(ssh socialweb.computer "sudo -n -u socialweb env HOME=/var/lib/socialweb-computer/socialweb kubectl $ID_ARGS get marketidentity requester -o jsonpath='{.status.did}'")
+MI=marketidentities.socialweb.computer
+ASSOC=$(ssh socialweb.computer "sudo -n -u socialweb env HOME=/var/lib/socialweb-computer/socialweb kubectl $ID_ARGS get $MI requester -o jsonpath='{.status.conditions[?(@.type==\"Associated\")].status}'")
+RI_DID=$(ssh socialweb.computer "sudo -n -u socialweb env HOME=/var/lib/socialweb-computer/socialweb kubectl $ID_ARGS get $MI requester -o jsonpath='{.status.did}'")
 printf 'requester=%s associated=%s\n' "$RI_DID" "$ASSOC"
 if [ "$ASSOC" != True ]; then
   OP_DID=$(deno run -A --no-lock scripts/associate-bidder.ts --creds ~/.aliceoa_bsky_social_source \
     --account ALICE --requester-did "$RI_DID" | jq -r .operatorDid)
-  ssh socialweb.computer "sudo -n -u socialweb env HOME=/var/lib/socialweb-computer/socialweb kubectl $ID_ARGS patch marketidentity requester --type merge -p '{\"spec\":{\"approvedAssociations\":[\"$OP_DID\"]}}'"
+  GWENV=/var/lib/socialweb-computer/socialweb/gateway.env
+  ssh socialweb.computer "sudo -n -u socialweb sed -i '/^SOCIALWEB_GATEWAY_APPROVED_ASSOCIATIONS=/d' $GWENV && echo 'SOCIALWEB_GATEWAY_APPROVED_ASSOCIATIONS=$OP_DID' | sudo -n -u socialweb tee -a $GWENV >/dev/null"
+  ssh socialweb.computer "sudo systemctl --user -M socialweb@ restart socialweb-computer-gateway.service"
 fi
+ssh socialweb.computer "sudo -n -u socialweb env HOME=/var/lib/socialweb-computer/socialweb kubectl $ID_ARGS get $MI requester -o jsonpath='{.spec.approvedAssociations}{\"\n\"}{.status.associations}{\"\n\"}{.status.phase}{\"\n\"}'"
 ```
 
-Wait until `associated=True` and the `Requester` child reports
+`gateway.env` is the env file `scripts/deploy.sh` ships (`GATEWAY_ENV_FILE`;
+`deploy/socialweb-gateway.env.example` names the variable); put the DID there
+for the next deploy too. Wait until the identity phase is `Ready`,
+`status.associations` names `$OP_DID` and the `Requester` child reports
 `spec.operatorDID=$OP_DID`. Without that, every bid is denied by
 `requester-tangled-vouch` even though bidder policy runs succeed.
 
@@ -90,24 +111,36 @@ xrpc() {
 
 ## 1. Pause hat-9 and local, leave hat-7 receiving
 
-Pause only the `Bidder` child. The GuestControlPlane, Pds, IngressProxy, Services
-and Exposures stay Ready.
+Pause a bidder with the root's `spec.suspend`. The Bidder process keeps
+running with `spec.suspendParticipation=true`: it withdraws its offering,
+declines new RFPs and accepts, and still reads the market inbox, so it still
+releases the VMs it runs (acceptance row A2). The root reports `Suspended`; the
+GuestControlPlane, Pds, IngressProxy, Services and Exposures stay Ready.
 
 ```bash
-ssh hat-9 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H9_K kubectl patch marketbidder app --type merge -p '{\"spec\":{\"components\":{\"Bidder\":{\"suspend\":true}}}}'"
+ssh hat-9 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H9_K kubectl patch marketbidders.socialweb.computer app --type merge -p '{\"spec\":{\"suspend\":true}}'"
 sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$LOCAL_K \
-  kubectl patch marketbidder app --type merge -p '{"spec":{"components":{"Bidder":{"suspend":true}}}}'
+  kubectl patch marketbidders.socialweb.computer app --type merge -p '{"spec":{"suspend":true}}'
 ```
 
-Check both roots:
+Check both roots and the Bidder spec:
 
 ```bash
-ssh hat-9 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H9_K kubectl get marketbidder app -o jsonpath='{.status.phase}{\"\n\"}{.status.componentSummary}{\"\n\"}'"
+ssh hat-9 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H9_K kubectl get marketbidders.socialweb.computer app -o jsonpath='{.status.phase}{\"\n\"}{.status.componentSummary}{\"\n\"}'"
 sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$LOCAL_K \
-  kubectl get marketbidder app -o jsonpath='{.status.phase}{"\n"}{.status.componentSummary}{"\n"}'
+  kubectl get marketbidders.socialweb.computer app -o jsonpath='{.status.phase}{"\n"}{.status.componentSummary}{"\n"}'
+sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$LOCAL_K \
+  kubectl get bidders.socialweb.computer bidder -o jsonpath='{.spec.suspendParticipation} {.status.phase}{"\n"}'
 ```
 
-Both must be `Ready` with `{"desired":5,"notReady":0,"ready":4,"suspended":1}`.
+Both roots must be `Suspended`; the Bidder reports `true Ready`.
+
+A component override (`{"spec":{"components":{"Bidder":{"suspend":true}}}}`)
+is a different, stronger pause: it stops the Bidder process. The root stays
+`Ready` with `componentSummary` `{"desired":4,"notReady":0,"ready":3,"suspended":1}`
+on a localRepo bidder (Bidder, GuestControlPlane, Pds, PolicyEngine) and the
+Bidder reports phase `Suspended`; a component-suspended bidder cannot release
+its VMs until it is resumed. Section 7 uses it.
 
 ## 2. Resume hat-7 and point it at the gateway PDS firehose
 
@@ -116,7 +149,7 @@ RelayEventSource and name it in the root's `spec.comms.eventSourceRefs`. The oau
 receives `market.rfp` and `market.accept` from this stream.
 
 ```bash
-PDS_URL=$(ssh socialweb.computer "sudo -n -u socialweb env HOME=/var/lib/socialweb-computer/socialweb kubectl --kubeconfig $PROD_K get exposure svc-pds-pds-ingress -o jsonpath='{.status.url}'")
+PDS_URL=$(ssh socialweb.computer "sudo -n -u socialweb env HOME=/var/lib/socialweb-computer/socialweb kubectl --kubeconfig $PROD_K get exposures.exposure.socialweb.computer svc-pds-pds-ingress -o jsonpath='{.status.address}'")
 ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl apply -f -" <<YAML
 apiVersion: events.socialweb.computer/v1alpha1
 kind: RelayEventSource
@@ -128,7 +161,7 @@ kind: EventSource
 metadata: {name: gateway-pds}
 spec: {backendRef: {group: events.socialweb.computer, kind: RelayEventSource, name: gateway-pds}}
 YAML
-ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl patch marketbidder app --type merge -p '{\"spec\":{\"suspend\":false,\"comms\":{\"eventSourceRefs\":[{\"kind\":\"EventSource\",\"name\":\"gateway-pds\"}]}}}'"
+ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl patch marketbidders.socialweb.computer app --type merge -p '{\"spec\":{\"suspend\":false,\"comms\":{\"eventSourceRefs\":[{\"kind\":\"EventSource\",\"name\":\"gateway-pds\"}]}}}'"
 ```
 
 Both objects and `spec.comms.eventSourceRefs` survive a bidder restart: the run
@@ -138,8 +171,8 @@ operator's value (D03).
 The root must become Ready and one EventStream must be running:
 
 ```bash
-ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl get marketbidder app -o jsonpath='{.status.phase}{\"\n\"}{.status.message}{\"\n\"}'"
-ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl get eventstream -A"
+ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl get marketbidders.socialweb.computer app -o jsonpath='{.status.phase}{\"\n\"}{.status.message}{\"\n\"}'"
+ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl get eventstreams.events.socialweb.computer,eventsources.events.socialweb.computer"
 ```
 
 If the MarketIdentity is `AwaitingScan`, run the headless sign-in with Bob's
@@ -147,7 +180,7 @@ credential file. Read the current QR url immediately before the command; it
 expires after 5 minutes.
 
 ```bash
-U=$(ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl get marketidentity bidder -o jsonpath='{.status.pendingAction.url}'")
+U=$(ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl get marketidentities.socialweb.computer bidder -o jsonpath='{.status.pendingAction.url}'")
 deno run -A --no-lock scripts/oauth-signin.ts --creds ~/.bobvmbuilder_bsky_social_source \
   --account BOB --url "$U" --done "You can close this window"
 ```
@@ -156,7 +189,7 @@ A timeout waiting for the final page text is harmless when the identity is
 `Ready` afterwards. The stored scope must be the authoritative bidder set:
 
 ```bash
-ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl get marketidentity bidder -o jsonpath='{.status.phase}{\"\n\"}'"
+ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl get marketidentities.socialweb.computer bidder -o jsonpath='{.status.phase}{\"\n\"}'"
 ```
 
 ## 3. Create the tenant cluster
@@ -217,22 +250,25 @@ Read the winner and the VM:
 
 ```bash
 NC="https://127.0.0.1:6443/clusters/root:$PROD_ACCOUNT:$CL"
-ssh socialweb.computer "sudo -n -u socialweb env HOME=/var/lib/socialweb-computer/socialweb kubectl --kubeconfig $PROD_K --context root --server $NC get nodeclaims -o wide"
+ssh socialweb.computer "sudo -n -u socialweb env HOME=/var/lib/socialweb-computer/socialweb kubectl --kubeconfig $PROD_K --context root --server $NC get nodeclaims.socialweb.computer -o wide"
 ```
 
-The `WINNER` column is one of the bidder DIDs. Read the three DIDs once:
+`get nodeclaims -o wide` prints only the name and age; the winner is
+`status.contract.winner.did`, the phase `status.phase` (`Bidding`,
+`Provisioning`, `Joining`, `Running`, `Released`) and the node's workload
+grant `status.grant`. Read the three bidder DIDs once:
 
 ```bash
-D7=$(ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl get marketbidder app -o jsonpath='{.status.did}'")
-D9=$(ssh hat-9 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H9_K kubectl get marketbidder app -o jsonpath='{.status.did}'")
-DL=$(sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$LOCAL_K kubectl get marketbidder app -o jsonpath='{.status.did}')
+D7=$(ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl get marketbidders.socialweb.computer app -o jsonpath='{.status.did}'")
+D9=$(ssh hat-9 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H9_K kubectl get marketbidders.socialweb.computer app -o jsonpath='{.status.did}'")
+DL=$(sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$LOCAL_K kubectl get marketbidders.socialweb.computer app -o jsonpath='{.status.did}')
 printf 'hat-7=%s\nhat-9=%s\nlocal=%s\n' "$D7" "$D9" "$DL"
 ```
 
 Only hat-7 is unpaused, so the first winner must be `$D7`:
 
 ```bash
-WINNER=$(ssh socialweb.computer "sudo -n -u socialweb env HOME=/var/lib/socialweb-computer/socialweb kubectl --kubeconfig $PROD_K --context root --server $NC get nodeclaims -o jsonpath='{.items[0].status.contract.winner.did}'")
+WINNER=$(ssh socialweb.computer "sudo -n -u socialweb env HOME=/var/lib/socialweb-computer/socialweb kubectl --kubeconfig $PROD_K --context root --server $NC get nodeclaims.socialweb.computer -o jsonpath='{.items[0].status.contract.winner.did}'")
 [ "$WINNER" = "$D7" ] || { echo "first VM landed on $WINNER, not hat-7 ($D7)"; exit 1; }
 kubectl --kubeconfig "$KC" scale deployment scale-check --replicas=0
 for i in $(seq 1 120); do
@@ -253,7 +289,7 @@ The release is not complete until the bidder has destroyed the VM. Check that
 hat-7 holds no Running ComputeVM for this cluster:
 
 ```bash
-ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl get computevms -o wide"
+ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl get computevms.socialweb.computer -o wide"
 ```
 
 ## 5. One VM per host: resume hat-9 and local
@@ -263,16 +299,16 @@ After each VM is Ready, pause the bidder that won it; the next scale-up must use
 the next host.
 
 ```bash
-ssh hat-9 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H9_K kubectl patch marketbidder app --type merge -p '{\"spec\":{\"components\":null}}'"
+ssh hat-9 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H9_K kubectl patch marketbidders.socialweb.computer app --type merge -p '{\"spec\":{\"suspend\":false}}'"
 sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$LOCAL_K \
-  kubectl patch marketbidder app --type merge -p '{"spec":{"components":null}}'
-ssh hat-9 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H9_K kubectl wait --for=condition=Ready bidder/bidder --timeout=120s"
+  kubectl patch marketbidders.socialweb.computer app --type merge -p '{"spec":{"suspend":false}}'
+ssh hat-9 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H9_K kubectl wait --for=condition=Ready bidders.socialweb.computer/bidder --timeout=120s"
 sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$LOCAL_K \
-  kubectl wait --for=condition=Ready bidder/bidder --timeout=120s
+  kubectl wait --for=condition=Ready bidders.socialweb.computer/bidder --timeout=120s
 
 kubectl --kubeconfig "$KC" scale deployment scale-check --replicas=1
 kubectl --kubeconfig "$KC" wait --for=condition=Ready pod -l app=scale-check --timeout=15m
-WINNER=$(ssh socialweb.computer "sudo -n -u socialweb env HOME=/var/lib/socialweb-computer/socialweb kubectl --kubeconfig $PROD_K --context root --server $NC get nodeclaims -o jsonpath='{.items[0].status.contract.winner.did}'")
+WINNER=$(ssh socialweb.computer "sudo -n -u socialweb env HOME=/var/lib/socialweb-computer/socialweb kubectl --kubeconfig $PROD_K --context root --server $NC get nodeclaims.socialweb.computer -o jsonpath='{.items[0].status.contract.winner.did}'")
 case "$WINNER" in
   "$D7") HOST=hat-7 ;;
   "$D9") HOST=hat-9 ;;
@@ -287,14 +323,14 @@ Pause that winner:
 ```bash
 case "$HOST" in
   hat-7)
-    ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl patch marketbidder app --type merge -p '{\"spec\":{\"components\":{\"Bidder\":{\"suspend\":true}}}}'"
+    ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl patch marketbidders.socialweb.computer app --type merge -p '{\"spec\":{\"suspend\":true}}'"
     ;;
   hat-9)
-    ssh hat-9 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H9_K kubectl patch marketbidder app --type merge -p '{\"spec\":{\"components\":{\"Bidder\":{\"suspend\":true}}}}'"
+    ssh hat-9 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H9_K kubectl patch marketbidders.socialweb.computer app --type merge -p '{\"spec\":{\"suspend\":true}}'"
     ;;
   local)
     sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$LOCAL_K \
-      kubectl patch marketbidder app --type merge -p '{"spec":{"components":{"Bidder":{"suspend":true}}}}'
+      kubectl patch marketbidders.socialweb.computer app --type merge -p '{"spec":{"suspend":true}}'
     ;;
 esac
 ```
@@ -304,7 +340,7 @@ Scale to two; wait, read the second winner, and pause it too:
 ```bash
 kubectl --kubeconfig "$KC" scale deployment scale-check --replicas=2
 kubectl --kubeconfig "$KC" wait --for=condition=Ready pod -l app=scale-check --timeout=15m
-ssh socialweb.computer "sudo -n -u socialweb env HOME=/var/lib/socialweb-computer/socialweb kubectl --kubeconfig $PROD_K --context root --server $NC get nodeclaims -o wide"
+ssh socialweb.computer "sudo -n -u socialweb env HOME=/var/lib/socialweb-computer/socialweb kubectl --kubeconfig $PROD_K --context root --server $NC get nodeclaims.socialweb.computer -o wide"
 ```
 
 Repeat the host map/pause block for the new winner. Scale to three; the final
@@ -314,7 +350,7 @@ winner must be the one host still unpaused:
 kubectl --kubeconfig "$KC" scale deployment scale-check --replicas=3
 kubectl --kubeconfig "$KC" wait --for=condition=Ready pod -l app=scale-check --timeout=15m
 kubectl --kubeconfig "$KC" get pods -o wide
-ssh socialweb.computer "sudo -n -u socialweb env HOME=/var/lib/socialweb-computer/socialweb kubectl --kubeconfig $PROD_K --context root --server $NC get nodeclaims -o wide"
+ssh socialweb.computer "sudo -n -u socialweb env HOME=/var/lib/socialweb-computer/socialweb kubectl --kubeconfig $PROD_K --context root --server $NC get nodeclaims.socialweb.computer -o wide"
 ```
 
 Pass condition: three pods are Ready, the NodeClaims name three distinct
@@ -322,19 +358,21 @@ winners, and the three `NODE` names in `get pods -o wide` are distinct.
 
 ## 6. Resume paused winners, scale to zero, delete the cluster
 
-A suspended Bidder stops bidding, but it also stops reading the market inbox.
-Resume every paused winner before scaling to zero, or that host cannot see the
-requester's `vm.delete` and its VM cannot be released.
+A paused winner (root `spec.suspend`) still reads the market inbox and
+releases its VM on the requester's `vm.delete` (A2). To prove A2, run the
+scale to zero below before the resume block and check `computevms` on every
+paused host; otherwise resume first. (A winner paused with the component
+override cannot see `vm.delete`; resume it first.)
 
 ```bash
-ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl patch marketbidder app --type merge -p '{\"spec\":{\"components\":null}}'"
-ssh hat-9 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H9_K kubectl patch marketbidder app --type merge -p '{\"spec\":{\"components\":null}}'"
+ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl patch marketbidders.socialweb.computer app --type merge -p '{\"spec\":{\"suspend\":false}}'"
+ssh hat-9 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H9_K kubectl patch marketbidders.socialweb.computer app --type merge -p '{\"spec\":{\"suspend\":false}}'"
 sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$LOCAL_K \
-  kubectl patch marketbidder app --type merge -p '{"spec":{"components":null}}'
-ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl wait --for=condition=Ready bidder/bidder --timeout=120s"
-ssh hat-9 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H9_K kubectl wait --for=condition=Ready bidder/bidder --timeout=120s"
+  kubectl patch marketbidders.socialweb.computer app --type merge -p '{"spec":{"suspend":false}}'
+ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl wait --for=condition=Ready bidders.socialweb.computer/bidder --timeout=120s"
+ssh hat-9 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H9_K kubectl wait --for=condition=Ready bidders.socialweb.computer/bidder --timeout=120s"
 sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$LOCAL_K \
-  kubectl wait --for=condition=Ready bidder/bidder --timeout=120s
+  kubectl wait --for=condition=Ready bidders.socialweb.computer/bidder --timeout=120s
 
 kubectl --kubeconfig "$KC" delete deployment scale-check
 for i in $(seq 1 120); do
@@ -343,7 +381,7 @@ for i in $(seq 1 120); do
   sleep 5
 done
 [ "$nodes" = 0 ] || { echo "cluster still has $nodes nodes"; exit 1; }
-ssh socialweb.computer "sudo -n -u socialweb env HOME=/var/lib/socialweb-computer/socialweb kubectl --kubeconfig $PROD_K --context root --server $NC get nodeclaims -o wide"
+ssh socialweb.computer "sudo -n -u socialweb env HOME=/var/lib/socialweb-computer/socialweb kubectl --kubeconfig $PROD_K --context root --server $NC get nodeclaims.socialweb.computer -o wide"
 ```
 
 The claim list is empty (or every claim is `Released`). Check every bidder host:
@@ -351,10 +389,10 @@ no Running ComputeVM may remain, and no `socialweb-vm-*` unit may remain for
 this cluster.
 
 ```bash
-ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl get computevms -o wide"
-ssh hat-9 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H9_K kubectl get computevms -o wide"
+ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl get computevms.socialweb.computer -o wide"
+ssh hat-9 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H9_K kubectl get computevms.socialweb.computer -o wide"
 sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$LOCAL_K \
-  kubectl get computevms -o wide
+  kubectl get computevms.socialweb.computer -o wide
 ```
 
 Delete the cluster and the scratch directory:
@@ -369,8 +407,8 @@ rm -rf "$W"
 On the oauthQr bidder, record the heartbeat `createdAt` before pausing:
 
 ```bash
-BOB=$(ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl get marketidentity bidder -o jsonpath='{.status.did}'")
-PDS=$(ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl get marketidentity bidder -o jsonpath='{.status.pdsUrl}'")
+BOB=$(ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl get marketidentities.socialweb.computer bidder -o jsonpath='{.status.did}'")
+PDS=$(ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl get marketidentities.socialweb.computer bidder -o jsonpath='{.status.pdsUrl}'")
 hb() { curl -sS "$PDS/xrpc/com.atproto.repo.getRecord?repo=$BOB&collection=com.publicdomainrelay.temp.market.heartbeat&rkey=self" | jq -r .value.createdAt; }
 hb
 ```
@@ -378,7 +416,7 @@ hb
 Pause only Bidder, wait 180 s, and compare:
 
 ```bash
-ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl patch marketbidder app --type merge -p '{\"spec\":{\"components\":{\"Bidder\":{\"suspend\":true}}}}'"
+ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl patch marketbidders.socialweb.computer app --type merge -p '{\"spec\":{\"components\":{\"Bidder\":{\"suspend\":true}}}}'"
 sleep 180
 hb
 ```
@@ -388,16 +426,16 @@ hb
 Ready; the IngressProxy stays Ready; the GuestControlPlane ingress URL answers:
 
 ```bash
-ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl get marketbidder app -o jsonpath='{.status.phase}{\"\n\"}{.status.componentSummary}{\"\n\"}'"
-ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl get guestcontrolplane,ingressproxy -A"
-curl -sS "https://$(ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl get exposure svc-guestcontrolplane-guest-kcp-ingress -o jsonpath='{.status.url}'" | sed 's#https://##')/healthz"
+ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl get marketbidders.socialweb.computer app -o jsonpath='{.status.phase}{\"\n\"}{.status.componentSummary}{\"\n\"}'"
+ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl get guestcontrolplanes.socialweb.computer,ingressproxies.socialweb.computer"
+curl -sS "https://$(ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl get exposures.exposure.socialweb.computer svc-guestcontrolplane-guest-kcp-ingress -o jsonpath='{.status.address}'" | sed 's#https://##')/healthz"
 ```
 
 Resume, wait for Ready, and prove the heartbeat advances:
 
 ```bash
-ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl patch marketbidder app --type merge -p '{\"spec\":{\"components\":{\"Bidder\":{\"suspend\":false}}}}'"
-ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl wait --for=condition=Ready bidder/bidder --timeout=120s"
+ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl patch marketbidders.socialweb.computer app --type merge -p '{\"spec\":{\"components\":{\"Bidder\":{\"suspend\":false}}}}'"
+ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl wait --for=condition=Ready bidders.socialweb.computer/bidder --timeout=120s"
 hb
 ```
 
@@ -408,9 +446,9 @@ On any Ready bidder, set a 5 s heartbeat and disable offering refresh:
 ```bash
 K=$H7_K
 HOST=hat-7
-ssh "$HOST" "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$K kubectl patch marketbidder app --type merge -p '{\"spec\":{\"components\":{\"Bidder\":{\"suspend\":false,\"settings\":{\"bidder\":{\"heartbeatIntervalSeconds\":5,\"offeringRefreshSeconds\":0}}}}}}'"
-ssh "$HOST" "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$K kubectl wait --for=condition=Ready bidder/bidder --timeout=120s"
-ssh "$HOST" "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$K kubectl get marketbidder app -o jsonpath='{.status.componentOverrides}'"
+ssh "$HOST" "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$K kubectl patch marketbidders.socialweb.computer app --type merge -p '{\"spec\":{\"components\":{\"Bidder\":{\"suspend\":false,\"settings\":{\"bidder\":{\"heartbeatIntervalSeconds\":5,\"offeringRefreshSeconds\":0}}}}}}'"
+ssh "$HOST" "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$K kubectl wait --for=condition=Ready bidders.socialweb.computer/bidder --timeout=120s"
+ssh "$HOST" "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$K kubectl get marketbidders.socialweb.computer app -o jsonpath='{.status.componentOverrides}'"
 ```
 
 The override entry must show `"applied":true` and the child generation. Sample
@@ -421,23 +459,23 @@ offering record `cid` must not change for 10 minutes while
 A direct child edit is reverted and reported:
 
 ```bash
-ssh "$HOST" "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$K kubectl patch bidder bidder --type merge -p '{\"spec\":{\"suspend\":true}}'"
+ssh "$HOST" "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$K kubectl patch bidders.socialweb.computer bidder --type merge -p '{\"spec\":{\"suspend\":true}}'"
 sleep 5
-ssh "$HOST" "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$K kubectl get bidder bidder -o jsonpath='{.spec.suspend}{\"\n\"}'"
-ssh "$HOST" "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$K kubectl get marketbidder app -o jsonpath='{.status.conditions}' | jq -c '.[]|select(.type==\"ComponentDrift\")'"
+ssh "$HOST" "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$K kubectl get bidders.socialweb.computer bidder -o jsonpath='{.spec.suspend}{\"\n\"}'"
+ssh "$HOST" "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$K kubectl get marketbidders.socialweb.computer app -o jsonpath='{.status.conditions}' | jq -c '.[]|select(.type==\"ComponentDrift\")'"
 ```
 
 The child `suspend` is empty/false and `ComponentDrift=True` names
 `Bidder/bidder`. A typo key fails closed:
 
 ```bash
-ssh "$HOST" "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$K kubectl patch marketbidder app --type merge -p '{\"spec\":{\"components\":{\"Bldier\":{\"suspend\":true}}}}'"
-ssh "$HOST" "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$K kubectl get marketbidder app -o jsonpath='{.status.phase}{\"\n\"}{.status.conditions}' | jq -c '.[]|select(.type==\"ComponentOverridesValid\")'"
+ssh "$HOST" "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$K kubectl patch marketbidders.socialweb.computer app --type merge -p '{\"spec\":{\"components\":{\"Bldier\":{\"suspend\":true}}}}'"
+ssh "$HOST" "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$K kubectl get marketbidders.socialweb.computer app -o jsonpath='{.status.phase}{\"\n\"}{.status.conditions}' | jq -c '.[]|select(.type==\"ComponentOverridesValid\")'"
 ```
 
 The phase is `Failed` and the condition is `False/InvalidKey`; no child
 generation changed. Remove the typo and the test settings when done:
 
 ```bash
-ssh "$HOST" "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$K kubectl patch marketbidder app --type merge -p '{\"spec\":{\"components\":null}}'"
+ssh "$HOST" "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$K kubectl patch marketbidders.socialweb.computer app --type merge -p '{\"spec\":{\"components\":null}}'"
 ```
