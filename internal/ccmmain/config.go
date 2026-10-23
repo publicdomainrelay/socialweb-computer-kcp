@@ -8,9 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/cloudprovider"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterstack"
 )
 
@@ -24,8 +22,6 @@ const (
 	envMaxNodes = "SOCIALWEB_CLOUDCONTROLLERMANAGER_MAX_NODES"
 
 	envPodsPerNode = "SOCIALWEB_CLOUDCONTROLLERMANAGER_PODS_PER_NODE"
-
-	envResync = "SOCIALWEB_CLOUDCONTROLLERMANAGER_RESYNC"
 )
 
 const (
@@ -44,8 +40,6 @@ type Config struct {
 	MaxNodes int
 
 	PodsPerNode int
-
-	Resync time.Duration
 }
 
 func load(get func(string) string) (Config, error) {
@@ -55,7 +49,6 @@ func load(get func(string) string) (Config, error) {
 		InstancesFile:    strings.TrimSpace(get(envInstancesFile)),
 		MaxNodes:         DefaultMaxNodes,
 		PodsPerNode:      DefaultPodsPerNode,
-		Resync:           cloudprovider.DefaultResync,
 	}
 
 	for _, req := range []struct{ name, value string }{
@@ -99,17 +92,6 @@ func load(get func(string) string) (Config, error) {
 					"one is not a smaller node, it is no ratio at all", envPodsPerNode, raw)
 		}
 		cfg.PodsPerNode = n
-	}
-
-	if raw := strings.TrimSpace(get(envResync)); raw != "" {
-		d, err := time.ParseDuration(raw)
-		if err != nil {
-			return Config{}, fmt.Errorf("%s is %q, which is not a duration: %w", envResync, raw, err)
-		}
-		if d <= 0 {
-			return Config{}, fmt.Errorf("%s is %q, and a resync period must be positive", envResync, raw)
-		}
-		cfg.Resync = d
 	}
 
 	return cfg, nil

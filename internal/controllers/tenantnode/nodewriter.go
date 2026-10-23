@@ -1,4 +1,4 @@
-package cloudprovider
+package tenantnode
 
 import (
 	"context"
@@ -24,11 +24,11 @@ func (w *ClientNodeWriter) PatchProviderID(ctx context.Context, nodeName, provid
 		"spec": map[string]any{"providerID": providerID},
 	})
 	if err != nil {
-		return fmt.Errorf("cloudprovider: encoding the provider ID %s for the Node %s: %w",
+		return fmt.Errorf("tenantnode: encoding the provider ID %s for the Node %s: %w",
 			providerID, nodeName, err)
 	}
 	if _, err := w.client.CoreV1().Nodes().Patch(ctx, nodeName, types.MergePatchType, body, metav1.PatchOptions{}); err != nil {
-		return fmt.Errorf("cloudprovider: patching the provider ID of the Node %s: %w", nodeName, err)
+		return fmt.Errorf("tenantnode: patching the provider ID of the Node %s: %w", nodeName, err)
 	}
 	return nil
 }
@@ -48,10 +48,10 @@ func (w *ClientNodeWriter) SetLabels(ctx context.Context, nodeName string, set m
 		"metadata": map[string]any{"labels": labels},
 	})
 	if err != nil {
-		return fmt.Errorf("cloudprovider: encoding the labels of the Node %s: %w", nodeName, err)
+		return fmt.Errorf("tenantnode: encoding the labels of the Node %s: %w", nodeName, err)
 	}
 	if _, err := w.client.CoreV1().Nodes().Patch(ctx, nodeName, types.MergePatchType, body, metav1.PatchOptions{}); err != nil {
-		return fmt.Errorf("cloudprovider: patching the labels of the Node %s: %w", nodeName, err)
+		return fmt.Errorf("tenantnode: patching the labels of the Node %s: %w", nodeName, err)
 	}
 	return nil
 }
@@ -59,7 +59,7 @@ func (w *ClientNodeWriter) SetLabels(ctx context.Context, nodeName string, set m
 func (w *ClientNodeWriter) DeleteNode(ctx context.Context, nodeName string) error {
 	err := w.client.CoreV1().Nodes().Delete(ctx, nodeName, metav1.DeleteOptions{})
 	if err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("cloudprovider: deleting the Node %s: %w", nodeName, err)
+		return fmt.Errorf("tenantnode: deleting the Node %s: %w", nodeName, err)
 	}
 	return nil
 }

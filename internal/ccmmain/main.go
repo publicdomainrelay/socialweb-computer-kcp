@@ -13,6 +13,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/cloudprovider"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/tenantnode"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/foldmain"
 )
 
@@ -57,12 +58,23 @@ func run(ctx context.Context, inv foldmain.Invocation) error {
 				"from %s: %w", cfg.Cluster, cfg.TenantKubeconfig, err)
 	}
 
-	controller, err := cloudprovider.New(cloudprovider.Options{
+	reconciler, err := cloudprovider.NewReconciler(cloudprovider.Options{
 		Cluster:   cfg.Cluster,
 		Instances: cloudprovider.NewFileInstances(cfg.InstancesFile),
-		Nodes:     cloudprovider.NewClientNodeWriter(client),
+		Nodes:     tenantnode.NewClientNodeWriter(client),
 		Log:       log,
-		Resync:    cfg.Resync,
+	})
+	if err != nil {
+		return err
+	}
+	changes, err := cloudprovider.WatchSnapshot(ctx, cfg.InstancesFile)
+	if err != nil {
+		return err
+	}
+	controller, err := tenantnode.New(tenantnode.Options{
+		Reconciler:      reconciler,
+		InstanceChanges: changes,
+		Log:             log,
 	}, client)
 	if err != nil {
 		return err
@@ -75,7 +87,6 @@ func run(ctx context.Context, inv foldmain.Invocation) error {
 		"instancesFile": cfg.InstancesFile,
 		"maxNodes":      cfg.MaxNodes,
 		"podsPerNode":   cfg.PodsPerNode,
-		"resync":        cfg.Resync.String(),
 	})
 
 	if err := controller.Run(ctx); err != nil {
