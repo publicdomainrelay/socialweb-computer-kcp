@@ -166,6 +166,22 @@ decisions:
     cmd/                          CLI
     Imports point down the list only. scripts/check-architecture.sh
     enforces it.
+  testable_backends: >
+    Every backend package (internal/<concept>/<impl>, and the host
+    libraries it drives: vmruntime, hostsvc, fcapi, guestnet, guestdisk,
+    guestimage) runs without kcp, the bus or a controller runtime, so plan
+    0027 can test it directly: the firecracker Provider boots a VM from a
+    contract value with no kcp process. A backend takes and returns
+    internal/contract types and api value types only; the controller in
+    internal/controllers/<kind> translates objects to contract values and
+    writes status. Host effects (systemd units over D-Bus, process start
+    and wait, the filesystem root, the clock) sit behind small interfaces
+    in internal/contract/host, injected by the composer, so a test can
+    fake systemd and still run the real backend. scripts/check-architecture.sh
+    reports any backend whose transitive deps reach client-go,
+    controller-runtime, multicluster-runtime, kcp-dev, unstructured,
+    internal/bus, internal/controllers, internal/app, internal/appctl,
+    internal/kcp* or internal/stack; W5-GATES makes it strict.
   cutover: >
     Hard cutover and fresh deploy, per AGENTS.md. No migration, carry-over
     or rollback for a change of shape.
@@ -975,7 +991,7 @@ items:
     depends_on: [W5-NO-POLL]
     status: todo
     decision: >
-      scripts/check-architecture.sh enforces: import direction; no ticker
+      scripts/check-architecture.sh enforces: import direction; backend packages free of kcp, bus and controller runtime (decisions.testable_backends, strict); no ticker
       outside deploy/obligations.txt; no System caller outside
       deploy/bus-bootstrap-callers.txt; no dynamic client or unstructured
       outside internal/controllers/runtime and internal/apigen; no GVR

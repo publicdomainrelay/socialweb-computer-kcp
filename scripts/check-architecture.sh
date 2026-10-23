@@ -3,6 +3,10 @@ set -euo pipefail
 
 strict_layers="api contract"
 
+backend_prefixes="internal/compute internal/vault internal/pds internal/atprotorepo internal/events internal/vmruntime internal/hostsvc internal/fcapi internal/guestnet internal/guestdisk internal/guestimage internal/policyengine/runs"
+
+backend_banned="k8s.io/client-go sigs.k8s.io/controller-runtime sigs.k8s.io/multicluster-runtime github.com/kcp-dev k8s.io/apimachinery/pkg/apis/meta/v1/unstructured internal/bus internal/controllers internal/app internal/appctl internal/kcpserver internal/kcpapply internal/kcpclient internal/kcpdatastore internal/stack"
+
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 module="$(go list -m)"
@@ -85,6 +89,39 @@ while read -r pkg imports; do
     esac
   done
 done <<<"$listing"
+
+is_backend() {
+  local rel="${1#"$module"/}" p
+  for p in $backend_prefixes; do
+    case "$rel" in
+      "$p" | "$p"/*) return 0 ;;
+    esac
+  done
+  return 1
+}
+
+backend_listing=""
+for b in $backend_prefixes; do
+  if [ -d "$b" ]; then
+    backend_listing+="$(go list -e -f '{{.ImportPath}} {{join .Deps " "}}' "./$b/...")"$'\n'
+  fi
+done
+
+while read -r pkg deps; do
+  [ -n "$pkg" ] || continue
+  is_backend "$pkg" || continue
+  for banned in $backend_banned; do
+    for dep in $deps; do
+      rel="${dep#"$module"/}"
+      case "$rel" in
+        "$banned" | "$banned"/*)
+          report backend "$pkg depends on $banned (via $dep); a backend package runs without kcp, the bus or a controller runtime"
+          break
+          ;;
+      esac
+    done
+  done
+done <<<"$backend_listing"
 
 echo "check-architecture: strict layers: $strict_layers; $errors errors, $warnings warnings"
 if [ "$errors" -gt 0 ]; then

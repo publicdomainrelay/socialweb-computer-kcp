@@ -316,6 +316,11 @@ A prod deployment guarantees nothing; the routine path preserves most things.
   reconciled object or the component instance, never a controller and never System; System is allowed
   only for the callers in `deploy/bus-bootstrap-callers.txt`. The callee holds credentials; a handle
   never exposes a token. A call with no accepted ComponentLink fails with `ErrLinkDenied`.
+- Testable backends. A backend package (`internal/<concept>/<impl>` and the host libraries it drives)
+  runs without kcp, the bus or a controller runtime: it takes and returns `internal/contract` and api
+  value types, and host effects (systemd, processes, filesystem root, clock) come in through the small
+  interfaces of `internal/contract/host`. The controller translates objects to contract values.
+  `scripts/check-architecture.sh` reports a backend whose deps reach kcp.
 - Writers. Every write is server-side apply with field manager `socialweb.computer/<controller>`. A
   spec is written only by its composer; a status only by the controller of its kind; a field a second
   controller reports is its own status subfield with its own field manager. Every child and intent
