@@ -62,6 +62,14 @@ func (p *Pool) feed(bundle []byte) {
 }
 
 func (p *Pool) ClientConfig(base *tls.Config) *tls.Config {
+	return p.clientConfig(base, false)
+}
+
+func (p *Pool) PublicClientConfig(base *tls.Config) *tls.Config {
+	return p.clientConfig(base, true)
+}
+
+func (p *Pool) clientConfig(base *tls.Config, system bool) *tls.Config {
 	cfg := &tls.Config{MinVersion: tls.VersionTLS12}
 	if base != nil {
 		cfg = base.Clone()
@@ -70,7 +78,7 @@ func (p *Pool) ClientConfig(base *tls.Config) *tls.Config {
 	cfg.InsecureSkipVerify = true
 	inner := cfg.VerifyConnection
 	cfg.VerifyConnection = func(cs tls.ConnectionState) error {
-		if err := p.verify(cs); err != nil {
+		if err := p.verify(cs, system); err != nil {
 			return err
 		}
 		if inner != nil {
@@ -81,22 +89,29 @@ func (p *Pool) ClientConfig(base *tls.Config) *tls.Config {
 	return cfg
 }
 
-func (p *Pool) verify(cs tls.ConnectionState) error {
+func (p *Pool) verify(cs tls.ConnectionState, system bool) error {
 	if len(cs.PeerCertificates) == 0 {
 		return errors.New("tlsreload: the peer sent no certificate")
 	}
 	if cs.ServerName == "" {
 		return ErrNoServerName
 	}
-	roots, err := p.Current(context.Background())
-	if err != nil {
-		return err
-	}
 	intermediates := x509.NewCertPool()
 	for _, cert := range cs.PeerCertificates[1:] {
 		intermediates.AddCert(cert)
 	}
-	_, err = cs.PeerCertificates[0].Verify(x509.VerifyOptions{DNSName: cs.ServerName, Roots: roots, Intermediates: intermediates})
+	opts := x509.VerifyOptions{DNSName: cs.ServerName, Intermediates: intermediates}
+	if system {
+		if _, err := cs.PeerCertificates[0].Verify(opts); err == nil {
+			return nil
+		}
+	}
+	roots, err := p.Current(context.Background())
+	if err != nil {
+		return err
+	}
+	opts.Roots = roots
+	_, err = cs.PeerCertificates[0].Verify(opts)
 	return err
 }
 

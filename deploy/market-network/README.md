@@ -288,9 +288,12 @@ label `apps.socialweb.computer/record-repo: operator`, `sh.tangled.graph.vouch`,
 rkey and subject the bidder operator's DID from its MarketIdentity
 `approvedAssociations`). The gateway composes the AtprotoRepo `operator` beside it:
 a RemoteRepo on the owner account's RemotePDS whose credentials are a `pdsAccount`
-MarketIdentity `operator` (password and session in the root vault), and the
-ComponentLinks from the labelled records to the repo, the repo to the RemoteRepo
-and the RemoteRepo to the RemotePDS and the MarketIdentity. The AtprotoRecord
+MarketIdentity `operator` (password and session in the root vault; for an https
+PDS its `caRef` and the RemotePDS's name the root, which publishes the network CA,
+and both verify against the system roots plus that CA), and the ComponentLinks
+from the labelled records to the repo, the repo to the RemoteRepo, the RemoteRepo
+to the RemotePDS and the MarketIdentity, and the MarketIdentity to the root
+(vault.read on the CA). The AtprotoRecord
 controller writes the record and its status (Applied with the uri).
 The other direction is declared too: in each bidder's workspace one AtprotoRecord
 `operator-vouch-<gateway app>` (the bidder operator's vouch for the gateway

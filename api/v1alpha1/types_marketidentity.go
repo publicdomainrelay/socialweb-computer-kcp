@@ -71,6 +71,8 @@ type MarketIdentitySpec struct {
 	OAuthClientID string `json:"oauthClientID,omitempty"`
 
 	OAuthRedirectURI string `json:"oauthRedirectURI,omitempty" apigen:"userEndpoint"`
+
+	CARef *commonv1.ObjectRef `json:"caRef,omitempty"`
 }
 
 type MarketIdentityPhase string

@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-7.marketidentities.socialweb.computer
+  name: v1alpha1-8.marketidentities.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -123,6 +123,22 @@ spec:
                 type: string
               oauthRedirectURI:
                 type: string
+              caRef:
+                type: object
+                properties:
+                  group:
+                    type: string
+                  kind:
+                    type: string
+                    maxLength: 63
+                  name:
+                    type: string
+                    maxLength: 253
+                  workspace:
+                    type: string
+                required:
+                  - kind
+                  - name
             required:
               - mode
           status:

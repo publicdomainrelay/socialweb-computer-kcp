@@ -243,7 +243,7 @@ func (c *Controller) tlsConfig(ctx context.Context, from commonv1.ObjectRef, spe
 		return nil, err
 	}
 	if pool != nil {
-		config = pool.ClientConfig(config)
+		config = pool.PublicClientConfig(config)
 	}
 	return config, nil
 }
