@@ -1,6 +1,7 @@
 package credentials
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -19,7 +20,13 @@ type KCPStoreSource struct {
 	Client string
 }
 
+var _ openbao.MountSource = (*KCPStoreSource)(nil)
+
 func (s *KCPStoreSource) Server(ctx context.Context, workspace, name string) (openbao.Server, error) {
+	return s.ServerForMount(ctx, workspace, name, "")
+}
+
+func (s *KCPStoreSource) ServerForMount(ctx context.Context, workspace, name, mount string) (openbao.Server, error) {
 	if s == nil || s.Store == nil {
 		return openbao.Server{}, errors.New("credentials: the OpenBaoServer source needs a kcp store")
 	}
@@ -36,7 +43,7 @@ func (s *KCPStoreSource) Server(ctx context.Context, workspace, name string) (op
 	if obj == nil {
 		return openbao.Server{}, fmt.Errorf("credentials: OpenBaoServer %s/%s is not there", workspace, name)
 	}
-	return openbao.ServerOf(workspace, name, obj.Status, s.Client)
+	return openbao.ServerOf(workspace, name, obj.Status, cmp.Or(openbao.ClientForMount(obj.Status.Clients, mount), s.Client))
 }
 
 type Clients struct {

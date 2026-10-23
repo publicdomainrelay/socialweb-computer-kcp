@@ -105,6 +105,10 @@ func (f SourceFunc) Server(ctx context.Context, workspace, name string) (Server,
 	return f(ctx, workspace, name)
 }
 
+type MountSource interface {
+	ServerForMount(ctx context.Context, workspace, name, mount string) (Server, error)
+}
+
 func ServerOf(workspace, name string, st v1alpha1.OpenBaoServerStatus, clientName string) (Server, error) {
 	if strings.TrimSpace(st.Address) == "" || st.Refs == nil {
 		return Server{}, fmt.Errorf("openbao: OpenBaoServer %s/%s reports no address yet (phase %s)", workspace, name, st.Phase)
@@ -247,6 +251,21 @@ func (l *Logins) Client(ctx context.Context, workspace, name string) (*Client, S
 		return nil, Server{}, errors.New("openbao: the logins have no OpenBaoServer source")
 	}
 	srv, err := l.source.Server(ctx, workspace, name)
+	if err != nil {
+		return nil, Server{}, err
+	}
+	return l.Open(ctx, srv)
+}
+
+func (l *Logins) ClientForMount(ctx context.Context, workspace, name, mount string) (*Client, Server, error) {
+	if l == nil || strings.Trim(mount, "/") == "" {
+		return l.Client(ctx, workspace, name)
+	}
+	ms, ok := l.source.(MountSource)
+	if !ok {
+		return l.Client(ctx, workspace, name)
+	}
+	srv, err := ms.ServerForMount(ctx, workspace, name, mount)
 	if err != nil {
 		return nil, Server{}, err
 	}

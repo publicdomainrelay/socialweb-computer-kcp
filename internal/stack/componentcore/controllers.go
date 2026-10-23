@@ -72,6 +72,7 @@ import (
 	policycontroller "github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/controller"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/statusstate"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/subnetallocator"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vaultmain"
 )
 
@@ -419,7 +420,7 @@ func openBaoMetadata(store *kcpstore.Store, workspace string) statusstate.VaultS
 	if store == nil {
 		return nil
 	}
-	return &statusstate.OpenBaoMetadataSource{Open: func(ctx context.Context, server string) (statusstate.MetadataReader, error) {
+	return &statusstate.OpenBaoMetadataSource{Open: func(ctx context.Context, server, mount string) (statusstate.MetadataReader, error) {
 		server = strings.TrimSpace(server)
 		if server == "" {
 			return nil, errors.New("componentcore: the vault status object names no OpenBaoServer")
@@ -427,6 +428,13 @@ func openBaoMetadata(store *kcpstore.Store, workspace string) statusstate.VaultS
 		obj, err := kcpstore.OfClusterScoped[v1alpha1.OpenBaoServer](store, openbaoctl.GVR).Get(ctx, ref.New(workspace, "", server))
 		if err != nil {
 			return nil, fmt.Errorf("componentcore: reading OpenBaoServer %s: %w", server, err)
+		}
+		if client := openbao.ClientForMount(obj.Status.Clients, mount); client != "" {
+			srv, err := openbao.ServerOf(workspace, server, obj.Status, client)
+			if err != nil {
+				return nil, err
+			}
+			return openbao.Open(ctx, srv)
 		}
 		access, err := vaultmain.RootAccessOf(*obj)
 		if err != nil {
