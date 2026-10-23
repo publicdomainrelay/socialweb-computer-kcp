@@ -490,9 +490,9 @@ var poweroffEndsVmModule UserDataModule = func(Context) (UserDataPatch, error) {
 	}, nil
 }
 
-func init() {
-	RegisterUserDataModule("secrets", secretsModule)
-	RegisterUserDataModule("k3s", k3sModule)
-	RegisterUserDataModule("iroh", irohModule)
-	RegisterUserDataModule(PoweroffEndsVMModule, poweroffEndsVmModule)
+var registry = map[string]UserDataModule{
+	"secrets":            secretsModule,
+	"k3s":                k3sModule,
+	"iroh":               irohModule,
+	PoweroffEndsVMModule: poweroffEndsVmModule,
 }
