@@ -31,8 +31,7 @@ needs the argument behind it. Do not read it end to end.
 | The market network | `deploy/market-network/README.md` |
 | The operator handoff | `handoff.yaml` |
 | What CI runs on a push, and its runners | `.github/workflows/ci.yml`: the gate, the guest image and the Spaces publish on GitHub-hosted runners; the pin check (`pins`) and the release builds (`binaries`) on the self-hosted runner of `scripts/gh-runner-install.sh` (account socialweb-ci) |
-| Where the integration suite runs | a runner of `scripts/ci-runner-install.sh` (`.gitlab-ci.yml`, account socialweb-ci, tag socialweb-computer-kcp): on hat-8, or on the droplet gl-runner-1 (tag dev-work, `scripts/dev-droplet.sh create` + `setup`, then the install script). It needs kvm, `systemd --user`, an `/etc/subuid` range, `/usr/bin/google-chrome` and `/usr/local/bin/kubectl` (the pinned k3s minor), which a hosted runner has not. The droplet is off the tailnet: on hat-10 the user unit `gl-runner-1-tunnel.service` of johnandersen777 runs `ssh -N -R 127.0.0.1:8443:gitlab.dorper-matrix.ts.net:8443 root@<droplet>` (key `~/.ssh/gl-runner-1-tunnel`, allowed on the droplet only with `restrict,port-forwarding,permitlisten="127.0.0.1:8443"`), and the droplet's `/etc/hosts` maps gitlab.dorper-matrix.ts.net to 127.0.0.1, so TLS and clone URLs are unchanged |
-| A throwaway GitLab for integration runs | `scripts/gitlab-fixture.sh up` / `down`, `deploy/gitlab-fixture/template/` |
+| The integration scenarios (no Go tests until plan 0027) | `docs/spec/integration-catalog.yaml` |
 
 ## Layout
 
@@ -45,7 +44,6 @@ Go:
 | `api/` | the kcp API types; `go generate ./api/...` writes the schemas and the TypeScript wire types |
 | `deploy/` | manifests, sets, scripts, `check.sh`, `ts-entries.yaml` |
 | `docs/` | `ARCHITECTURE.md`, `plans/`, inventories, research notes |
-| `test/` | repository-wide Go tests (the auth chain, the bidder launcher and deploy) |
 | `rust/` | socialweb-meshd |
 
 TypeScript:
@@ -123,9 +121,9 @@ These rules come from the org-root CLAUDE.md. They apply to all TypeScript here.
   `user_data` (`buildUserData` and the module registry in `ts/atproto-market/lib/common/cloud-init-common`).
   The requester reaches the guest only through the relay. Never start a container or VM by hand in
   code or in a test, never install a guest agent outside cloud-init, never add a transport that the
-  RFP cloud-init does not install. A test that needs a live guest is an integration test in
-  `test/integration`: its own market network, and `socialweb-computer run request` (which keeps
-  `runComputeContract`) or a tenant cluster of the network's gateway rents the guest.
+  RFP cloud-init does not install. A live run that needs a guest brings up its own market network,
+  and `socialweb-computer run request` (which keeps `runComputeContract`) or a tenant cluster of the
+  network's gateway rents the guest.
 
 ## Tests: none until plan 0027
 
