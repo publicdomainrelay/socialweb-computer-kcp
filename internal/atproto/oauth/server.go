@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -17,6 +16,7 @@ import (
 
 	"github.com/bluesky-social/indigo/atproto/syntax"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
 )
 
 const (
@@ -221,19 +221,11 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) handleAuthorizationServerMetadata(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, s.AuthorizationServerMetadata())
+	httpjson.Write(w, http.StatusOK, s.AuthorizationServerMetadata())
 }
 
 func (s *Server) handleProtectedResourceMetadata(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, s.ProtectedResourceMetadata())
-}
-
-func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if value != nil {
-		_ = json.NewEncoder(w).Encode(value)
-	}
+	httpjson.Write(w, http.StatusOK, s.ProtectedResourceMetadata())
 }
 
 type oauthErrorBody struct {
@@ -244,7 +236,7 @@ type oauthErrorBody struct {
 func writeOAuthError(w http.ResponseWriter, status int, code, description string) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Pragma", "no-cache")
-	writeJSON(w, status, oauthErrorBody{Error: code, ErrorDescription: description})
+	httpjson.Write(w, status, oauthErrorBody{Error: code, ErrorDescription: description})
 }
 
 func parseOAuthForm(w http.ResponseWriter, r *http.Request) (url.Values, error) {

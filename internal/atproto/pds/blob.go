@@ -10,6 +10,7 @@ import (
 	"github.com/bluesky-social/indigo/atproto/syntax"
 	lexutil "github.com/bluesky-social/indigo/lex/util"
 	"github.com/ipfs/go-cid"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
 )
 
 type blobView struct {
@@ -48,7 +49,7 @@ func (s *Server) handleUploadBlob(w http.ResponseWriter, r *http.Request, info *
 		writeXRPCError(w, http.StatusInternalServerError, "InternalError", "failed to store blob")
 		return
 	}
-	writeJSON(w, http.StatusOK, uploadBlobOutput{
+	httpjson.Write(w, http.StatusOK, uploadBlobOutput{
 		Blob: blobView{
 			Type:     "blob",
 			Ref:      lexutil.LexLink(ref.CID),
@@ -56,6 +57,7 @@ func (s *Server) handleUploadBlob(w http.ResponseWriter, r *http.Request, info *
 			Size:     ref.Size,
 		},
 	})
+
 }
 
 func (s *Server) handleGetBlob(w http.ResponseWriter, r *http.Request) {

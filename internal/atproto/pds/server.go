@@ -17,6 +17,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/repo"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/serviceauth"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
 )
 
 const (
@@ -336,7 +337,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	if version == "" {
 		version = "socialweb-pds"
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"version": version})
+	httpjson.Write(w, http.StatusOK, map[string]string{"version": version})
 }
 
 func (s *Server) handleMethodNotFound(w http.ResponseWriter, _ *http.Request) {
@@ -348,16 +349,8 @@ type xrpcErrorBody struct {
 	Message string `json:"message,omitempty"`
 }
 
-func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if value != nil {
-		_ = json.NewEncoder(w).Encode(value)
-	}
-}
-
 func writeXRPCError(w http.ResponseWriter, status int, code, message string) {
-	writeJSON(w, status, xrpcErrorBody{Error: code, Message: message})
+	httpjson.Write(w, status, xrpcErrorBody{Error: code, Message: message})
 }
 
 func (s *Server) decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {

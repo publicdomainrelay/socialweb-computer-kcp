@@ -28,6 +28,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/oauthcallback"
@@ -78,26 +79,15 @@ func (s *Service) routes() *http.ServeMux {
 		mux.HandleFunc("POST "+SubmitEventPath, s.handleSubmitEvent)
 	}
 	mux.HandleFunc("GET "+HealthPath, func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		httpjson.Write(w, http.StatusOK, map[string]any{"ok": true})
 	})
 	mux.HandleFunc("GET "+OAuthMetadataPath, s.oauthClientMetadata)
 	mux.HandleFunc("GET /oauth/callback/{identity}", s.oauthCallback)
 	return mux
 }
 
-func writeJSON(w http.ResponseWriter, status int, body any) {
-	raw, err := json.Marshal(body)
-	if err != nil {
-		http.Error(w, `{"error":"InternalError"}`, http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_, _ = w.Write(raw)
-}
-
 func writeXRPCError(w http.ResponseWriter, status int, code, message string) {
-	writeJSON(w, status, map[string]any{"error": code, "message": message})
+	httpjson.Write(w, status, map[string]any{"error": code, "message": message})
 }
 
 type serviceCallError struct {
@@ -175,7 +165,7 @@ func (s *Service) handleSubmitRFP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.kickBids()
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "name": bid.Name, "phase": string(v1alpha1.BidPhaseDeciding)})
+	httpjson.Write(w, http.StatusOK, map[string]any{"ok": true, "name": bid.Name, "phase": string(v1alpha1.BidPhaseDeciding)})
 }
 
 func (s *Service) handleSubmitBid(w http.ResponseWriter, r *http.Request) {
@@ -200,7 +190,7 @@ func (s *Service) handleSubmitBid(w http.ResponseWriter, r *http.Request) {
 		writeXRPCError(w, http.StatusBadRequest, "InvalidRequest", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	httpjson.Write(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (s *Service) handleSubmitAccept(w http.ResponseWriter, r *http.Request) {
@@ -233,7 +223,7 @@ func (s *Service) handleSubmitAccept(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.kickStateSync()
-	writeJSON(w, http.StatusAccepted, map[string]any{"ok": true, "id": name, "acceptUri": body.AcceptURI, "acceptCid": body.AcceptCID})
+	httpjson.Write(w, http.StatusAccepted, map[string]any{"ok": true, "id": name, "acceptUri": body.AcceptURI, "acceptCid": body.AcceptCID})
 }
 
 func (s *Service) handleSubmitEvent(w http.ResponseWriter, r *http.Request) {
@@ -272,7 +262,7 @@ func (s *Service) handleSubmitEvent(w http.ResponseWriter, r *http.Request) {
 		writeXRPCError(w, http.StatusServiceUnavailable, "Unavailable", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	httpjson.Write(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 var errMarketEventForbidden = errors.New("bidder: not the accept author")
@@ -316,7 +306,7 @@ func (s *Service) applyMarketEvent(ctx context.Context, uri, cid string, record 
 
 func (s *Service) oauthClientMetadata(w http.ResponseWriter, r *http.Request) {
 	base := "https://" + r.Host
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpjson.Write(w, http.StatusOK, map[string]any{
 		"client_id":                  base + "/oauth-client-metadata.json",
 		"client_name":                "socialweb-computer bidder",
 		"redirect_uris":              []string{base + "/oauth/callback/bidder"},
@@ -327,6 +317,7 @@ func (s *Service) oauthClientMetadata(w http.ResponseWriter, r *http.Request) {
 		"application_type":           "web",
 		"dpop_bound_access_tokens":   true,
 	})
+
 }
 
 func (s *Service) oauthCallback(w http.ResponseWriter, r *http.Request) {

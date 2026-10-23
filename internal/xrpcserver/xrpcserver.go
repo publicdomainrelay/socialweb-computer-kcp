@@ -22,6 +22,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atprotoauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gateway"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/revocation"
 )
 
@@ -266,7 +267,7 @@ func (s *Server) xrpc(r route) http.HandlerFunc {
 			writeError(w, r.nsid, s.opts.RetryAfter, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, shape(r.nsid, out))
+		httpjson.Write(w, http.StatusOK, shape(r.nsid, out))
 	}
 }
 
@@ -497,20 +498,12 @@ func writeError(w http.ResponseWriter, nsid string, retryAfter time.Duration, er
 		}
 		w.Header().Set("Retry-After", strconv.Itoa(int(retryAfter.Seconds())))
 	}
-	writeJSON(w, xe.Status, errorBody{Error: xe.Name, Message: xe.Message})
+	httpjson.Write(w, xe.Status, errorBody{Error: xe.Name, Message: xe.Message})
 }
 
 type errorBody struct {
 	Error   string `json:"error"`
 	Message string `json:"message"`
-}
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(v); err != nil {
-		slog.Error("xrpc: writing the response", "err", err)
-	}
 }
 
 func bearer(h string) (string, bool) {

@@ -20,6 +20,7 @@ import (
 	"github.com/bluesky-social/indigo/atproto/identity"
 	"github.com/gorilla/websocket"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
 )
 
 var (
@@ -176,20 +177,21 @@ func (r *Relay) serveHTTP(w http.ResponseWriter, req *http.Request) {
 	path := req.URL.Path
 	switch {
 	case req.Method == http.MethodGet && path == "/xrpc/_health":
-		writeJSON(w, http.StatusOK, map[string]string{"version": r.cfg.Version})
+		httpjson.Write(w, http.StatusOK, map[string]string{"version": r.cfg.Version})
 	case req.Method == http.MethodGet && path == "/xrpc/com.atproto.server.describeServer":
-		writeJSON(w, http.StatusOK, map[string]any{
+		httpjson.Write(w, http.StatusOK, map[string]any{
 			"did":                  hostport.WebDID(r.cfg.Hostname),
 			"version":              r.cfg.Version,
 			"availableUserDomains": []string{},
 			"inviteCodeRequired":   false,
 		})
+
 	case req.Method == http.MethodGet && path == "/.well-known/atproto-did":
 		w.Header().Set("Content-Type", "text/plain")
 		_, _ = w.Write([]byte(hostport.WebDID(r.cfg.Hostname)))
 	case req.Method == http.MethodGet && path == "/.well-known/did.json":
 		host := hostport.HostnameOnly(hostport.FromRequest(req, r.cfg.Hostname))
-		writeJSON(w, http.StatusOK, map[string]any{
+		httpjson.Write(w, http.StatusOK, map[string]any{
 			"@context": []string{"https://www.w3.org/ns/did/v1"},
 			"id":       hostport.WebDID(host),
 			"service": []map[string]string{{
@@ -198,6 +200,7 @@ func (r *Relay) serveHTTP(w http.ResponseWriter, req *http.Request) {
 				"serviceEndpoint": "https://" + host,
 			}},
 		})
+
 	case req.Method == http.MethodPost && path == "/xrpc/com.atproto.sync.requestCrawl":
 		r.handleRequestCrawl(w, req)
 	case req.Method == http.MethodGet && path == "/xrpc/com.atproto.sync.subscribeRepos":
@@ -245,7 +248,7 @@ func (r *Relay) handleRequestCrawl(w http.ResponseWriter, req *http.Request) {
 		}
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{})
+	httpjson.Write(w, http.StatusOK, map[string]any{})
 }
 
 func (r *Relay) handleSubscribeRepos(w http.ResponseWriter, req *http.Request) {
@@ -330,7 +333,7 @@ func (r *Relay) handleGetRepo(w http.ResponseWriter, req *http.Request) {
 	}
 	account, ok := r.store.GetAccount(did)
 	if !ok {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "RepoNotFound"})
+		httpjson.Write(w, http.StatusNotFound, map[string]string{"error": "RepoNotFound"})
 		return
 	}
 	target := "https://" + account.HostHostname + "/xrpc/com.atproto.sync.getRepo?did=" + url.QueryEscape(did)
@@ -354,7 +357,7 @@ func (r *Relay) handleGetRepoStatus(w http.ResponseWriter, req *http.Request) {
 		"rev":      account.Rev,
 		"seq":      account.Seq,
 	}
-	writeJSON(w, http.StatusOK, out)
+	httpjson.Write(w, http.StatusOK, out)
 }
 
 func (r *Relay) handleListRepos(w http.ResponseWriter, req *http.Request) {
@@ -385,7 +388,7 @@ func (r *Relay) handleListRepos(w http.ResponseWriter, req *http.Request) {
 	if len(page) == limit && len(page) > 0 {
 		out["cursor"] = page[len(page)-1].DID
 	}
-	writeJSON(w, http.StatusOK, out)
+	httpjson.Write(w, http.StatusOK, out)
 }
 
 func (r *Relay) handleListReposByCollection(w http.ResponseWriter, req *http.Request) {
@@ -405,7 +408,7 @@ func (r *Relay) handleListReposByCollection(w http.ResponseWriter, req *http.Req
 	if next != "" {
 		out["cursor"] = next
 	}
-	writeJSON(w, http.StatusOK, out)
+	httpjson.Write(w, http.StatusOK, out)
 }
 
 func (r *Relay) handleGetLatestCommit(w http.ResponseWriter, req *http.Request) {
@@ -416,14 +419,14 @@ func (r *Relay) handleGetLatestCommit(w http.ResponseWriter, req *http.Request) 
 	}
 	account, ok := r.store.GetAccount(did)
 	if !ok || account.Rev == nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "RepoNotFound"})
+		httpjson.Write(w, http.StatusNotFound, map[string]string{"error": "RepoNotFound"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"cid": *account.Rev, "rev": *account.Rev})
+	httpjson.Write(w, http.StatusOK, map[string]string{"cid": *account.Rev, "rev": *account.Rev})
 }
 
 func (r *Relay) handleListHosts(w http.ResponseWriter, req *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"hosts": r.store.ListHosts()})
+	httpjson.Write(w, http.StatusOK, map[string]any{"hosts": r.store.ListHosts()})
 }
 
 func (r *Relay) handleGetHostStatus(w http.ResponseWriter, req *http.Request) {
@@ -434,10 +437,10 @@ func (r *Relay) handleGetHostStatus(w http.ResponseWriter, req *http.Request) {
 	}
 	host, ok := r.store.GetHost(hostname)
 	if !ok {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "HostNotFound"})
+		httpjson.Write(w, http.StatusNotFound, map[string]string{"error": "HostNotFound"})
 		return
 	}
-	writeJSON(w, http.StatusOK, host)
+	httpjson.Write(w, http.StatusOK, host)
 }
 
 func (r *Relay) emit(ctx context.Context, frame Frame, evt *comatproto.SyncSubscribeRepos_Commit) {
@@ -487,14 +490,8 @@ func parseLimit(raw string) int {
 	return limit
 }
 
-func writeJSON(w http.ResponseWriter, status int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
 func writeError(w http.ResponseWriter, status int, name, message string) {
-	writeJSON(w, status, map[string]string{"error": name, "message": message})
+	httpjson.Write(w, status, map[string]string{"error": name, "message": message})
 }
 
 func withCORS(next http.Handler) http.Handler {

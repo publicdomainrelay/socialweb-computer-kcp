@@ -13,6 +13,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/repo"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
 )
 
 type createAccountRequest struct {
@@ -105,7 +106,7 @@ func (s *Server) handleDescribeServer(w http.ResponseWriter, _ *http.Request) {
 	if s.cfg.ContactEmail != "" {
 		out.Contact = &serverContact{Email: s.cfg.ContactEmail}
 	}
-	writeJSON(w, http.StatusOK, out)
+	httpjson.Write(w, http.StatusOK, out)
 }
 
 func (s *Server) handleCreateAccount(w http.ResponseWriter, r *http.Request) {
@@ -227,7 +228,7 @@ func (s *Server) handleCreateAccount(w http.ResponseWriter, r *http.Request) {
 		writeXRPCError(w, http.StatusInternalServerError, "InternalError", "failed to create session")
 		return
 	}
-	writeJSON(w, http.StatusOK, sessionOutput{
+	httpjson.Write(w, http.StatusOK, sessionOutput{
 		AccessJWT:  pair.Access,
 		RefreshJWT: pair.Refresh,
 		Handle:     acct.Handle,
@@ -236,6 +237,7 @@ func (s *Server) handleCreateAccount(w http.ResponseWriter, r *http.Request) {
 		Active:     true,
 		DIDDoc:     s.didDocument(ctx, acct.DID),
 	})
+
 }
 
 func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
@@ -265,7 +267,7 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		writeXRPCError(w, http.StatusInternalServerError, "InternalError", "failed to create session")
 		return
 	}
-	writeJSON(w, http.StatusOK, sessionOutput{
+	httpjson.Write(w, http.StatusOK, sessionOutput{
 		AccessJWT:  pair.Access,
 		RefreshJWT: pair.Refresh,
 		Handle:     acct.Handle,
@@ -274,6 +276,7 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		Active:     true,
 		DIDDoc:     s.didDocument(ctx, acct.DID),
 	})
+
 }
 
 func (s *Server) handleRefreshSession(w http.ResponseWriter, r *http.Request) {
@@ -311,7 +314,7 @@ func (s *Server) handleRefreshSession(w http.ResponseWriter, r *http.Request) {
 		writeXRPCError(w, http.StatusUnauthorized, "AuthenticationRequired", "invalid refresh token")
 		return
 	}
-	writeJSON(w, http.StatusOK, sessionOutput{
+	httpjson.Write(w, http.StatusOK, sessionOutput{
 		AccessJWT:  pair.Access,
 		RefreshJWT: pair.Refresh,
 		Handle:     acct.Handle,
@@ -320,6 +323,7 @@ func (s *Server) handleRefreshSession(w http.ResponseWriter, r *http.Request) {
 		Active:     true,
 		DIDDoc:     s.didDocument(ctx, acct.DID),
 	})
+
 }
 
 func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
@@ -329,7 +333,7 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 			writeXRPCError(w, http.StatusInternalServerError, "InternalError", "failed to revoke session")
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{})
+		httpjson.Write(w, http.StatusOK, map[string]any{})
 		return
 	}
 	scheme, token, ok := bearerToken(r.Header.Get("Authorization"))
@@ -346,7 +350,7 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		writeXRPCError(w, http.StatusInternalServerError, "InternalError", "failed to revoke session")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{})
+	httpjson.Write(w, http.StatusOK, map[string]any{})
 }
 
 func (s *Server) handleGetSession(w http.ResponseWriter, r *http.Request, info *authInfo) {
@@ -356,7 +360,7 @@ func (s *Server) handleGetSession(w http.ResponseWriter, r *http.Request, info *
 		writeXRPCError(w, http.StatusUnauthorized, "AuthenticationRequired", "account not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, getSessionOutput{
+	httpjson.Write(w, http.StatusOK, getSessionOutput{
 		DID:            acct.DID.String(),
 		Handle:         acct.Handle,
 		Email:          acct.Email,
@@ -364,6 +368,7 @@ func (s *Server) handleGetSession(w http.ResponseWriter, r *http.Request, info *
 		Active:         acct.Active,
 		DIDDoc:         s.didDocument(ctx, acct.DID),
 	})
+
 }
 
 func (s *Server) handleCreateAppPassword(w http.ResponseWriter, r *http.Request, info *authInfo) {
@@ -391,12 +396,13 @@ func (s *Server) handleCreateAppPassword(w http.ResponseWriter, r *http.Request,
 		writeXRPCError(w, http.StatusBadRequest, "InvalidRequest", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, appPasswordOutput{
+	httpjson.Write(w, http.StatusOK, appPasswordOutput{
 		Name:       app.Name,
 		Password:   password,
 		Privileged: app.Privileged,
 		CreatedAt:  app.CreatedAt,
 	})
+
 }
 
 func (s *Server) handleListAppPasswords(w http.ResponseWriter, r *http.Request, info *authInfo) {
@@ -418,7 +424,7 @@ func (s *Server) handleListAppPasswords(w http.ResponseWriter, r *http.Request, 
 			CreatedAt:  app.CreatedAt,
 		})
 	}
-	writeJSON(w, http.StatusOK, out)
+	httpjson.Write(w, http.StatusOK, out)
 }
 
 func (s *Server) handleRevokeAppPassword(w http.ResponseWriter, r *http.Request, info *authInfo) {
@@ -440,5 +446,5 @@ func (s *Server) handleRevokeAppPassword(w http.ResponseWriter, r *http.Request,
 		writeXRPCError(w, http.StatusInternalServerError, "InternalError", "failed to revoke app password")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{})
+	httpjson.Write(w, http.StatusOK, map[string]any{})
 }

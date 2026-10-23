@@ -37,6 +37,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/oauthcallback"
@@ -989,7 +990,7 @@ func (s *Service) handler() http.Handler {
 
 func (s *Service) oauthClientMetadata(w http.ResponseWriter, r *http.Request) {
 	base := "https://" + r.Host
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpjson.Write(w, http.StatusOK, map[string]any{
 		"client_id":                  base + "/oauth-client-metadata.json",
 		"client_name":                "socialweb-computer requester",
 		"redirect_uris":              []string{base + "/oauth/callback/requester"},
@@ -1000,6 +1001,7 @@ func (s *Service) oauthClientMetadata(w http.ResponseWriter, r *http.Request) {
 		"application_type":           "web",
 		"dpop_bound_access_tokens":   true,
 	})
+
 }
 
 func (s *Service) oauthCallback(w http.ResponseWriter, r *http.Request) {
@@ -1131,10 +1133,10 @@ func (s *Service) health(w http.ResponseWriter, r *http.Request) {
 	did := s.cfg.DID
 	s.mu.Unlock()
 	if !ready {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false})
+		httpjson.Write(w, http.StatusServiceUnavailable, map[string]any{"ok": false})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "did": did})
+	httpjson.Write(w, http.StatusOK, map[string]any{"ok": true, "did": did})
 }
 
 func (s *Service) repoGetRecord(w http.ResponseWriter, r *http.Request) {
@@ -1149,10 +1151,10 @@ func (s *Service) repoGetRecord(w http.ResponseWriter, r *http.Request) {
 		if !errors.Is(err, market.ErrNotFound) {
 			status = http.StatusBadGateway
 		}
-		writeJSON(w, status, map[string]any{"error": "RecordNotFound", "message": err.Error()})
+		httpjson.Write(w, status, map[string]any{"error": "RecordNotFound", "message": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"uri": record.URI, "cid": record.CID, "value": record.Value})
+	httpjson.Write(w, http.StatusOK, map[string]any{"uri": record.URI, "cid": record.CID, "value": record.Value})
 }
 
 func (s *Service) repoListRecords(w http.ResponseWriter, r *http.Request) {
@@ -1167,7 +1169,7 @@ func (s *Service) repoListRecords(w http.ResponseWriter, r *http.Request) {
 	}
 	page, err := s.repo.ListRecords(r.Context(), repoDID, query.Get("collection"), limit, query.Get("cursor"))
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "RepoError", "message": err.Error()})
+		httpjson.Write(w, http.StatusBadGateway, map[string]any{"error": "RepoError", "message": err.Error()})
 		return
 	}
 	records := make([]any, 0, len(page.Records))
@@ -1178,15 +1180,15 @@ func (s *Service) repoListRecords(w http.ResponseWriter, r *http.Request) {
 	if page.Cursor != "" {
 		body["cursor"] = page.Cursor
 	}
-	writeJSON(w, http.StatusOK, body)
+	httpjson.Write(w, http.StatusOK, body)
 }
 
 func (s *Service) repoDescribe(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"did": s.cfg.RepoDID, "handle": s.cfg.Handle, "collections": []string{}})
+	httpjson.Write(w, http.StatusOK, map[string]any{"did": s.cfg.RepoDID, "handle": s.cfg.Handle, "collections": []string{}})
 }
 
 func (s *Service) serverDescribe(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"did": s.cfg.RepoDID, "version": "socialweb-computer"})
+	httpjson.Write(w, http.StatusOK, map[string]any{"did": s.cfg.RepoDID, "version": "socialweb-computer"})
 }
 
 func (s *Service) submitBid(w http.ResponseWriter, r *http.Request) {
@@ -1200,26 +1202,26 @@ func (s *Service) submitBid(w http.ResponseWriter, r *http.Request) {
 		Record map[string]any `json:"record"`
 	}
 	if err := decodeBody(r, &body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest", "message": err.Error()})
+		httpjson.Write(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest", "message": err.Error()})
 		return
 	}
 	if err := market.AuthorizeRecord(issuer, body.URI); err != nil {
-		writeJSON(w, http.StatusForbidden, map[string]any{"error": "Forbidden", "message": err.Error()})
+		httpjson.Write(w, http.StatusForbidden, map[string]any{"error": "Forbidden", "message": err.Error()})
 		return
 	}
 	bid, err := market.ParseBid(body.Record)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest", "message": err.Error()})
+		httpjson.Write(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest", "message": err.Error()})
 		return
 	}
 	if err := s.storeBidMailbox(r.Context(), issuer, body.URI, body.CID, body.Record); err != nil {
 		s.log.Warn("requester_bid_enqueue_failed", "uri", body.URI, "err", err)
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "Unavailable", "message": err.Error()})
+		httpjson.Write(w, http.StatusServiceUnavailable, map[string]any{"error": "Unavailable", "message": err.Error()})
 		return
 	}
 	s.queueBid(bid.RFP.URI, BidRecord{DID: issuer, URI: body.URI, CID: body.CID, Record: body.Record, ArrivedAt: s.now()})
 	s.log.Info("requester_bid_received", "bidder", issuer, "uri", body.URI, "rfp", bid.RFP.URI)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	httpjson.Write(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (s *Service) submitEvent(w http.ResponseWriter, r *http.Request) {
@@ -1233,43 +1235,43 @@ func (s *Service) submitEvent(w http.ResponseWriter, r *http.Request) {
 		Record map[string]any `json:"record"`
 	}
 	if err := decodeBody(r, &body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest", "message": err.Error()})
+		httpjson.Write(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest", "message": err.Error()})
 		return
 	}
 	if body.URI == "" || body.CID == "" || body.Record == nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest", "message": "missing uri, cid, or record"})
+		httpjson.Write(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest", "message": "missing uri, cid, or record"})
 		return
 	}
 	if err := market.AuthorizeRecord(issuer, body.URI); err != nil {
-		writeJSON(w, http.StatusForbidden, map[string]any{"error": "Forbidden", "message": err.Error()})
+		httpjson.Write(w, http.StatusForbidden, map[string]any{"error": "Forbidden", "message": err.Error()})
 		return
 	}
 	event, err := market.ParseEvent(body.Record)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest", "message": err.Error()})
+		httpjson.Write(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest", "message": err.Error()})
 		return
 	}
 	payloadNSID := market.NSIDFromURI(event.Payload.URI)
 	switch payloadNSID {
 	case market.ComputeEventsVMOnNetworkNSID, market.ComputeEventsVMHostKeysNSID, market.ComputeEventsVMTerminatedNSID:
 	default:
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest", "message": "the payload is not a guest event"})
+		httpjson.Write(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest", "message": "the payload is not a guest event"})
 		return
 	}
 	ref := v1alpha1.ComputeContractEvent{URI: body.URI, CID: body.CID, ReceiptURI: event.Receipt.URI, ReceivedAt: s.nowISO()}
 	if err := s.enqueueEvent(r.Context(), ref); err != nil {
 		s.log.Warn("requester_event_enqueue_failed", "uri", body.URI, "err", err)
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "Unavailable", "message": err.Error()})
+		httpjson.Write(w, http.StatusServiceUnavailable, map[string]any{"error": "Unavailable", "message": err.Error()})
 		return
 	}
 	s.log.Info("requester_event_queued", "uri", body.URI, "receipt", event.Receipt.URI)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	httpjson.Write(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (s *Service) authorizeCallback(w http.ResponseWriter, r *http.Request, lxm, serviceID string) (string, bool) {
 	hostname := s.callbackHostname(r)
 	if hostname == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest", "message": "no callback hostname"})
+		httpjson.Write(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest", "message": "no callback hostname"})
 		return "", false
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), serviceAuthTimeout)
@@ -1295,7 +1297,7 @@ func (s *Service) authorizeCallback(w http.ResponseWriter, r *http.Request, lxm,
 		ExtraAudienceDIDs: audiences,
 	})
 	if err != nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "Unauthorized", "message": err.Error()})
+		httpjson.Write(w, http.StatusUnauthorized, map[string]any{"error": "Unauthorized", "message": err.Error()})
 		return "", false
 	}
 	return result.IssuerDID, true
@@ -1785,12 +1787,6 @@ func decodeBody(r *http.Request, out any) error {
 		return err
 	}
 	return nil
-}
-
-func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(value)
 }
 
 func isNotFound(err error) bool {

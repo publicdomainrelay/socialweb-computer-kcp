@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
 )
 
 const requestURIPrefix = "urn:ietf:params:oauth:request_uri:"
@@ -131,10 +133,11 @@ func (s *Server) handlePAR(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Pragma", "no-cache")
-	writeJSON(w, http.StatusOK, struct {
+	httpjson.Write(w, http.StatusOK, struct {
 		RequestURI string `json:"request_uri"`
 		ExpiresIn  int64  `json:"expires_in"`
 	}{RequestURI: request.RequestURI, ExpiresIn: int64(s.config.PARTTL / time.Second)})
+
 }
 
 func (s *Server) handleAuthorizePage(w http.ResponseWriter, r *http.Request) {
@@ -332,10 +335,11 @@ func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Pragma", "no-cache")
-	writeJSON(w, http.StatusOK, struct {
+	httpjson.Write(w, http.StatusOK, struct {
 		RedirectURI string `json:"redirect_uri"`
 		Code        string `json:"code"`
 	}{RedirectURI: redirect, Code: codeID})
+
 }
 
 func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
@@ -448,7 +452,7 @@ func (s *Server) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http.Req
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Pragma", "no-cache")
-	writeJSON(w, http.StatusOK, tokenResponse{
+	httpjson.Write(w, http.StatusOK, tokenResponse{
 		AccessToken:  access.Token,
 		TokenType:    AuthSchemeDPoP,
 		RefreshToken: refresh.Token,
@@ -456,6 +460,7 @@ func (s *Server) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http.Req
 		Scope:        session.Scope,
 		Sub:          session.Account.DID.String(),
 	})
+
 }
 
 func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form url.Values, proof *DPoPProof, formClient, assertedClient, assertedKey string, now time.Time) {
@@ -519,13 +524,14 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Pragma", "no-cache")
-	writeJSON(w, http.StatusOK, tokenResponse{
+	httpjson.Write(w, http.StatusOK, tokenResponse{
 		AccessToken:  access.Token,
 		TokenType:    AuthSchemeDPoP,
 		RefreshToken: refresh.Token,
 		ExpiresIn:    int64(s.config.AccessTokenTTL / time.Second),
 		Scope:        session.Scope,
 	})
+
 }
 
 func (s *Server) handleRevoke(w http.ResponseWriter, r *http.Request) {
@@ -550,7 +556,7 @@ func (s *Server) handleRevoke(w http.ResponseWriter, r *http.Request) {
 	claims, kind, ok := parseRevocableToken(token, s.signer, now)
 	if !ok {
 		w.Header().Set("Cache-Control", "no-store")
-		writeJSON(w, http.StatusOK, map[string]any{})
+		httpjson.Write(w, http.StatusOK, map[string]any{})
 		return
 	}
 	record, err := s.tokens.GetToken(ctx, claims.JTI)
@@ -562,7 +568,7 @@ func (s *Server) handleRevoke(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, map[string]any{})
+	httpjson.Write(w, http.StatusOK, map[string]any{})
 }
 
 func parseRevocableToken(token string, signer Signer, now time.Time) (*tokenClaims, TokenKind, bool) {

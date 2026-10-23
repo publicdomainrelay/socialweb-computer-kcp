@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gateway"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/xrpcserver"
 )
 
@@ -415,11 +416,12 @@ func (a *ClusterAPI) config(w http.ResponseWriter, r *http.Request) {
 	if a.opts.KCPPublicHost != "" {
 		host = a.opts.KCPPublicHost
 	}
-	writeJSON(w, http.StatusOK, struct {
+	httpjson.Write(w, http.StatusOK, struct {
 		TTLChoicesSec       []int64 `json:"ttlChoicesSec"`
 		MaxKubeconfigTTLSec int64   `json:"maxKubeconfigTtlSec"`
 		KCPPublicHost       any     `json:"kcpPublicHost"`
 	}{a.ttlChoices, a.maxTTLSec, host})
+
 }
 
 func (a *ClusterAPI) caller(r *http.Request) (ClusterCaller, *apiFailure) {
@@ -498,9 +500,10 @@ func (a *ClusterAPI) list(w http.ResponseWriter, r *http.Request) {
 	if clusters == nil {
 		clusters = []ClusterSummary{}
 	}
-	writeJSON(w, http.StatusOK, struct {
+	httpjson.Write(w, http.StatusOK, struct {
 		Clusters []ClusterSummary `json:"clusters"`
 	}{clusters})
+
 }
 
 func (a *ClusterAPI) nameAction(action string) http.HandlerFunc {
@@ -526,10 +529,11 @@ func (a *ClusterAPI) nameAction(action string) http.HandlerFunc {
 			return
 		}
 		a.log().Info("cluster_api_ok", "did", req.Caller.DID(), "action", action, "name", req.Name, "phase", out.Phase)
-		writeJSON(w, http.StatusOK, struct {
+		httpjson.Write(w, http.StatusOK, struct {
 			Name  string `json:"name"`
 			Phase string `json:"phase"`
 		}{req.Name, out.Phase})
+
 	}
 }
 
@@ -572,11 +576,12 @@ func (a *ClusterAPI) kubeconfig(w http.ResponseWriter, r *http.Request) {
 	a.log().Info("cluster_api_ok", "did", req.Caller.DID(), "action", "kubeconfig", "name", req.Name,
 		"ttlSeconds", ttl, "noExpiry", noExpiry)
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, struct {
+	httpjson.Write(w, http.StatusOK, struct {
 		Name       string `json:"name"`
 		Filename   string `json:"filename"`
 		Kubeconfig string `json:"kubeconfig"`
 	}{req.Name, KubeconfigFilename(req.Name), grant.Kubeconfig})
+
 }
 
 func (a *ClusterAPI) allowedTTL(value int64) bool {
@@ -618,16 +623,11 @@ type apiFailure struct {
 }
 
 func writeFailure(w http.ResponseWriter, f *apiFailure) {
-	writeJSON(w, f.Status, struct {
+	httpjson.Write(w, f.Status, struct {
 		Error   string `json:"error"`
 		Message string `json:"message,omitempty"`
 	}{f.Error, f.Message})
-}
 
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
 }
 
 func IsClusterName(name string) bool {

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayhttp"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 )
 
@@ -429,11 +430,11 @@ func (c *Cocore) caller(w http.ResponseWriter, r *http.Request) (*gatewayhttp.We
 	who, err := c.opts.Auth.Authenticate(r)
 	if err != nil {
 		c.log.Error("cocore_identify_failed", "err", err)
-		writeSSHJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "the vault is not answering"})
+		httpjson.Write(w, http.StatusServiceUnavailable, map[string]any{"error": "the vault is not answering"})
 		return nil, false
 	}
 	if who == nil {
-		writeSSHJSON(w, http.StatusUnauthorized, map[string]any{"error": "Unauthorized"})
+		httpjson.Write(w, http.StatusUnauthorized, map[string]any{"error": "Unauthorized"})
 		return nil, false
 	}
 	return who, true
@@ -447,7 +448,7 @@ func (c *Cocore) status(w http.ResponseWriter, r *http.Request) {
 	token, err := c.opts.Pairing.Token(r.Context(), who.DID)
 	if err != nil {
 		c.log.Error("cocore_status_failed", "did", who.DID, "err", err)
-		writeSSHJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		httpjson.Write(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 		return
 	}
 	var accountDID any
@@ -458,11 +459,12 @@ func (c *Cocore) status(w http.ResponseWriter, r *http.Request) {
 		}
 		pairedAt = token.PairedAt
 	}
-	writeSSHJSON(w, http.StatusOK, struct {
+	httpjson.Write(w, http.StatusOK, struct {
 		Paired     bool `json:"paired"`
 		AccountDID any  `json:"accountDid"`
 		PairedAt   any  `json:"pairedAt"`
 	}{token != nil, accountDID, pairedAt})
+
 }
 
 func (c *Cocore) start(w http.ResponseWriter, r *http.Request) {
@@ -473,10 +475,10 @@ func (c *Cocore) start(w http.ResponseWriter, r *http.Request) {
 	started, err := c.opts.Pairing.Start(r.Context(), who.DID)
 	if err != nil {
 		c.log.Error("cocore_pairing_start_failed", "did", who.DID, "err", err)
-		writeSSHJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error()})
+		httpjson.Write(w, http.StatusBadGateway, map[string]any{"error": err.Error()})
 		return
 	}
-	writeSSHJSON(w, http.StatusOK, started)
+	httpjson.Write(w, http.StatusOK, started)
 }
 
 func (c *Cocore) poll(w http.ResponseWriter, r *http.Request) {
@@ -489,14 +491,14 @@ func (c *Cocore) poll(w http.ResponseWriter, r *http.Request) {
 	}
 	pairID, _ := body.PairID.(string)
 	if pairID == "" {
-		writeSSHJSON(w, http.StatusBadRequest, map[string]any{"error": "expected a pairId"})
+		httpjson.Write(w, http.StatusBadRequest, map[string]any{"error": "expected a pairId"})
 		return
 	}
 	status, err := c.opts.Pairing.Poll(r.Context(), pairID)
 	if err != nil {
 		c.log.Error("cocore_pairing_poll_failed", "err", err)
-		writeSSHJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		httpjson.Write(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 		return
 	}
-	writeSSHJSON(w, http.StatusOK, map[string]any{"status": status})
+	httpjson.Write(w, http.StatusOK, map[string]any{"status": status})
 }

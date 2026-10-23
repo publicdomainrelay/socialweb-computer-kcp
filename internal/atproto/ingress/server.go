@@ -16,6 +16,7 @@ import (
 	"github.com/bluesky-social/indigo/atproto/identity"
 	"github.com/gorilla/websocket"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
 )
 
 var (
@@ -245,7 +246,7 @@ func (s *Server) serveHTTP(w http.ResponseWriter, req *http.Request) {
 	control := s.isControlHost(host)
 
 	if control && req.Method == http.MethodGet && path == "/.well-known/did.json" {
-		writeJSON(w, http.StatusOK, map[string]any{
+		httpjson.Write(w, http.StatusOK, map[string]any{
 			"@context": []string{"https://www.w3.org/ns/did/v1"},
 			"id":       hostport.WebDID(host),
 			"service": []map[string]string{{
@@ -254,6 +255,7 @@ func (s *Server) serveHTTP(w http.ResponseWriter, req *http.Request) {
 				"serviceEndpoint": "https://" + s.cfg.Hostname,
 			}},
 		})
+
 		return
 	}
 	if control && path == "/xrpc/"+GetNonceNSID {
@@ -338,12 +340,12 @@ func (s *Server) handleNonce(w http.ResponseWriter, req *http.Request) {
 	}
 	token, err := BearerToken(req.Header.Get("Authorization"), "")
 	if err != nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "AuthenticationRequired", "message": err.Error()})
+		httpjson.Write(w, http.StatusUnauthorized, map[string]string{"error": "AuthenticationRequired", "message": err.Error()})
 		return
 	}
 	if _, err := VerifyServiceAuth(req.Context(), token, hostport.WebDID(s.cfg.Hostname), GetNonceNSID, s.dir); err != nil {
 		s.log.Warn("auth_denied", "nsid", GetNonceNSID, "err", err)
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "AuthenticationRequired", "message": err.Error()})
+		httpjson.Write(w, http.StatusUnauthorized, map[string]string{"error": "AuthenticationRequired", "message": err.Error()})
 		return
 	}
 	var input struct {
@@ -352,12 +354,12 @@ func (s *Server) handleNonce(w http.ResponseWriter, req *http.Request) {
 	}
 	_ = json.NewDecoder(io.LimitReader(req.Body, 1<<20)).Decode(&input)
 	if !strings.HasPrefix(input.Key, "did:") {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "InvalidRequest", "message": "key must be a DID"})
+		httpjson.Write(w, http.StatusBadRequest, map[string]string{"error": "InvalidRequest", "message": "key must be a DID"})
 		return
 	}
 	nonce := s.nonces.Issue(input.Key)
 	s.log.Info("nonce_issued", "key", input.Key)
-	writeJSON(w, http.StatusOK, map[string]any{"nonce": nonce, "signatures": []Signature{}})
+	httpjson.Write(w, http.StatusOK, map[string]any{"nonce": nonce, "signatures": []Signature{}})
 }
 
 func (s *Server) handleSubscribe(w http.ResponseWriter, req *http.Request) {
@@ -368,13 +370,13 @@ func (s *Server) handleSubscribe(w http.ResponseWriter, req *http.Request) {
 	authHeader := req.Header.Get("Authorization")
 	token, err := BearerToken(authHeader, req.URL.Query().Get("service_auth"))
 	if err != nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "AuthenticationRequired", "message": err.Error()})
+		httpjson.Write(w, http.StatusUnauthorized, map[string]string{"error": "AuthenticationRequired", "message": err.Error()})
 		return
 	}
 	auth, err := VerifyServiceAuth(req.Context(), token, hostport.WebDID(s.cfg.Hostname), SubscribeNSID, s.dir)
 	if err != nil {
 		s.log.Warn("auth_denied", "nsid", SubscribeNSID, "err", err)
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "AuthenticationRequired", "message": err.Error()})
+		httpjson.Write(w, http.StatusUnauthorized, map[string]string{"error": "AuthenticationRequired", "message": err.Error()})
 		return
 	}
 	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
@@ -819,11 +821,11 @@ func (s *Server) handleForward(w http.ResponseWriter, req *http.Request, subdoma
 	if err != nil {
 		msg := err.Error()
 		if strings.Contains(msg, errNoSubscriber.Error()) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "NotFound", "message": msg})
+			httpjson.Write(w, http.StatusNotFound, map[string]string{"error": "NotFound", "message": msg})
 			return
 		}
 		s.log.Error("relay_failed", "path", req.URL.Path, "subdomain", subdomain, "err", err)
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "RelayError", "message": msg})
+		httpjson.Write(w, http.StatusBadGateway, map[string]string{"error": "RelayError", "message": msg})
 		return
 	}
 
@@ -865,10 +867,4 @@ func lastQueryValues(values map[string][]string) map[string]string {
 		}
 	}
 	return out
-}
-
-func writeJSON(w http.ResponseWriter, status int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
 }

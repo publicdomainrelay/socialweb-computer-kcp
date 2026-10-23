@@ -2,7 +2,6 @@ package sshserver
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -19,6 +18,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayhttp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/sshtransport"
 )
 
@@ -428,10 +428,10 @@ func (s *Service) health(w http.ResponseWriter, r *http.Request) {
 	ready := s.ready
 	s.mu.Unlock()
 	if !ready {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false})
+		httpjson.Write(w, http.StatusServiceUnavailable, map[string]any{"ok": false})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	httpjson.Write(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (s *Service) connect(w http.ResponseWriter, r *http.Request) {
@@ -446,21 +446,21 @@ func (s *Service) connect(w http.ResponseWriter, r *http.Request) {
 	if _, _, err := net.SplitHostPort(host); err != nil && port > 0 {
 		host = net.JoinHostPort(host, fmt.Sprintf("%d", port))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"sshHost": host})
+	httpjson.Write(w, http.StatusOK, map[string]any{"sshHost": host})
 }
 
 func (s *Service) cocoreApp(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.CocoreAppDID == "" {
-		writeJSON(w, http.StatusNotFound, map[string]any{"error": "NotFound"})
+		httpjson.Write(w, http.StatusNotFound, map[string]any{"error": "NotFound"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"did": s.cfg.CocoreAppDID})
+	httpjson.Write(w, http.StatusOK, map[string]any{"did": s.cfg.CocoreAppDID})
 }
 
 func (s *Service) clientMetadata(w http.ResponseWriter, r *http.Request) {
 	raw, err := s.cfg.SignIn.ClientMetadata(r.Context())
 	if err != nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "the vault is not answering"})
+		httpjson.Write(w, http.StatusServiceUnavailable, map[string]any{"error": "the vault is not answering"})
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -556,10 +556,4 @@ func logicalHost(key component.Key) string {
 		return ""
 	}
 	return kcp.ServiceFQDN(kind, "default", key.Workspace, kcp.DefaultServiceDomain)
-}
-
-func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(value)
 }
