@@ -1,6 +1,7 @@
 package hostlifecycle
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -8,7 +9,6 @@ import (
 	"reflect"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -16,6 +16,7 @@ import (
 	"k8s.io/client-go/dynamic"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 )
 
 const DefaultFieldManager = "hostlifecycle"
@@ -70,9 +71,7 @@ func New(o Options) (*Controller, error) {
 		log = slog.New(slog.DiscardHandler)
 	}
 	fieldManager := o.FieldManager
-	if fieldManager == "" {
-		fieldManager = DefaultFieldManager
-	}
+	fieldManager = cmp.Or(fieldManager, DefaultFieldManager)
 	return &Controller{authority: o.Authority, log: log, fieldManager: fieldManager}, nil
 }
 
@@ -123,28 +122,11 @@ func specInto(u *unstructured.Unstructured, out any) error {
 	return runtime.DefaultUnstructuredConverter.FromUnstructured(spec, out)
 }
 
-func setCondition(conditions *[]metav1.Condition, generation int64, kind string, value metav1.ConditionStatus, reason, message string) {
-	meta.SetStatusCondition(conditions, metav1.Condition{
-		Type:               kind,
-		Status:             value,
-		Reason:             reason,
-		Message:            message,
-		ObservedGeneration: generation,
-	})
-}
-
-func condition(value bool) metav1.ConditionStatus {
-	if value {
-		return metav1.ConditionTrue
-	}
-	return metav1.ConditionFalse
-}
-
 func authorityFailure(conditions *[]metav1.Condition, generation int64, message string, kinds ...string) {
 	for _, kind := range kinds {
-		setCondition(conditions, generation, kind, metav1.ConditionUnknown, "AuthorityUnreadable", message)
+		conds.SetStatus(conditions, generation, kind, metav1.ConditionUnknown, "AuthorityUnreadable", message)
 	}
-	setCondition(conditions, generation, "Ready", metav1.ConditionFalse, "AuthorityUnreadable", message)
+	conds.SetStatus(conditions, generation, "Ready", metav1.ConditionFalse, "AuthorityUnreadable", message)
 }
 
 const authorityUnreadable = "the host authority could not be read; the controller retries"

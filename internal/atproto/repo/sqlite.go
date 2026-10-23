@@ -17,6 +17,7 @@ import (
 	"github.com/bluesky-social/indigo/atproto/syntax"
 	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	_ "modernc.org/sqlite"
 )
 
@@ -517,12 +518,7 @@ func (s *SQLiteStore) ListCommits(ctx context.Context, did syntax.DID, since *sy
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidRequest, err)
 	}
-	if limit <= 0 {
-		limit = DefaultCommits
-	}
-	if limit > MaxCommits {
-		limit = MaxCommits
-	}
+	limit = min(opt.Positive(limit, DefaultCommits), MaxCommits)
 	sinceRaw := ""
 	if since != nil {
 		r, err := syntax.ParseTID(string(*since))
@@ -568,12 +564,7 @@ func (s *SQLiteStore) ListCommits(ctx context.Context, did syntax.DID, since *sy
 }
 
 func (s *SQLiteStore) ListEvents(ctx context.Context, since int64, limit int) ([]*CommitEvent, error) {
-	if limit <= 0 {
-		limit = DefaultCommits
-	}
-	if limit > MaxCommits {
-		limit = MaxCommits
-	}
+	limit = min(opt.Positive(limit, DefaultCommits), MaxCommits)
 	rows, err := s.db.QueryContext(ctx,
 		"SELECT seq, did, rev, since_rev, commit_cid, data, prev_data, blocks, ops, blobs, created_at FROM atrepo_events WHERE seq > ? ORDER BY seq ASC LIMIT ?",
 		since, limit)
@@ -707,12 +698,7 @@ func (s *SQLiteStore) ListRecords(ctx context.Context, did syntax.DID, collectio
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: %v", ErrInvalidRequest, err)
 	}
-	if limit <= 0 {
-		limit = DefaultList
-	}
-	if limit > MaxList {
-		limit = MaxList
-	}
+	limit = min(opt.Positive(limit, DefaultList), MaxList)
 	cursorRaw := ""
 	if cursor != "" {
 		rk, err := syntax.ParseRecordKey(string(cursor))

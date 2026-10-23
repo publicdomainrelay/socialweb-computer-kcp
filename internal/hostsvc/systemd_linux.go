@@ -3,6 +3,7 @@
 package hostsvc
 
 import (
+	"cmp"
 	"context"
 	"encoding/hex"
 	"errors"
@@ -11,7 +12,6 @@ import (
 	"net"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -19,6 +19,7 @@ import (
 
 	sd "github.com/coreos/go-systemd/v22/dbus"
 	"github.com/godbus/dbus/v5"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
 )
 
 const (
@@ -206,17 +207,11 @@ type envFile struct {
 
 func unitProperties(spec UnitSpec) []sd.Property {
 	desc := spec.Description
-	if desc == "" {
-		desc = spec.Name
-	}
+	desc = cmp.Or(desc, spec.Name)
 	slice := spec.Slice
-	if slice == "" {
-		slice = DefaultSlice
-	}
+	slice = cmp.Or(slice, DefaultSlice)
 	oom := spec.OOMPolicy
-	if oom == "" {
-		oom = "stop"
-	}
+	oom = cmp.Or(oom, "stop")
 	str := func(name, v string) sd.Property { return sd.Property{Name: name, Value: dbus.MakeVariant(v)} }
 	u64 := func(name string, v uint64) sd.Property { return sd.Property{Name: name, Value: dbus.MakeVariant(v)} }
 	props := []sd.Property{
@@ -229,9 +224,7 @@ func unitProperties(spec UnitSpec) []sd.Property {
 		sd.PropSlice(slice),
 	}
 	restart := spec.Restart
-	if restart == "" {
-		restart = RestartNo
-	}
+	restart = cmp.Or(restart, RestartNo)
 	props = append(props, str("Restart", string(restart)))
 	if spec.KillSignal != 0 {
 		props = append(props, sd.Property{Name: "KillSignal", Value: dbus.MakeVariant(int32(spec.KillSignal))})
@@ -286,14 +279,6 @@ func unitProperties(spec UnitSpec) []sd.Property {
 	return props
 }
 
-func parseVersion(v string) (int, error) {
-	end := strings.IndexFunc(v, func(r rune) bool { return r < '0' || r > '9' })
-	if end < 0 {
-		end = len(v)
-	}
-	return strconv.Atoi(v[:end])
-}
-
 func (m *systemd) checkVersion(ctx context.Context) error {
 	var v string
 	err := m.do(ctx, func(ctx context.Context, b bus) (err error) {
@@ -303,7 +288,7 @@ func (m *systemd) checkVersion(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("hostsvc: reading the manager version: %w", err)
 	}
-	n, err := parseVersion(v)
+	n, err := strs.LeadingInt(v)
 	if err != nil {
 		return fmt.Errorf("%w: the manager reports version %q", ErrSystemdTooOld, v)
 	}
@@ -566,9 +551,7 @@ func (m *systemd) Identify(ctx context.Context, name string, pid int) (Identity,
 	if st.State != Active {
 		return Identity{}, fmt.Errorf("hostsvc: %s is %s, not active, and has no identity to record", name, st.State)
 	}
-	if pid == 0 {
-		pid = st.MainPID
-	}
+	pid = cmp.Or(pid, st.MainPID)
 	boot, err := m.procs.BootID()
 	if err != nil {
 		return Identity{}, err

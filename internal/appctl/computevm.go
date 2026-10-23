@@ -1,6 +1,7 @@
 package appctl
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -78,9 +79,7 @@ func ChildVM(app v1alpha1.NetworkApp, l devinstance.Layout, parent devinstance.R
 func BidderKcpOf(rec devinstance.Record) BidderKcp {
 	host, _, _ := strings.Cut(strings.TrimSuffix(rec.KcpURL, "/"), "/clusters/")
 	ws := rec.BaseWorkspace
-	if ws == "" {
-		ws = DefaultWorkspace
-	}
+	ws = cmp.Or(ws, DefaultWorkspace)
 	return BidderKcp{Server: host, Workspace: ws}
 }
 
@@ -99,9 +98,7 @@ func providerValues(v *manifests.MarketBidder, spec v1alpha1.MarketBidderSpec, k
 		return errors.New("appctl: spec.kcp: this instance records no kcp URL for the bidder's compute-provider-kcp")
 	}
 	handle := k.Handle
-	if handle == "" {
-		handle = spec.Identity.Handle
-	}
+	handle = cmp.Or(handle, spec.Identity.Handle)
 	args, err := fragment([]string{"--compute-provider-kcp", "--compute-provider-kcp-server", kcp.Server,
 		"--compute-provider-kcp-workspace", kcp.Workspace, "--compute-provider-kcp-handle", handle})
 	if err != nil {

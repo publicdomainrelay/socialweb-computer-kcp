@@ -15,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/scale"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
@@ -121,12 +122,8 @@ func New(opts Options) (*Host, error) {
 }
 
 func (o Options) withDefaults() Options {
-	if o.ReleaseTimeout <= 0 {
-		o.ReleaseTimeout = DefaultReleaseTimeout
-	}
-	if o.Poll <= 0 {
-		o.Poll = DefaultPoll
-	}
+	o.ReleaseTimeout = opt.Positive(o.ReleaseTimeout, DefaultReleaseTimeout)
+	o.Poll = opt.Positive(o.Poll, DefaultPoll)
 	return o
 }
 
@@ -376,7 +373,7 @@ func (h *Host) End() End {
 		}
 		return End{Message: claimGoneMessage}
 	}
-	if !endedClaimPhase(claim.Status.Phase) {
+	if !EndedClaimPhase(claim.Status.Phase) {
 		return End{}
 	}
 	end := End{Message: endedMessage(claim), Declined: MarketDeclined(claim),
@@ -476,7 +473,7 @@ func (h *Host) read(ctx context.Context) (*v1alpha1.NodeClaim, error) {
 	return claim, nil
 }
 
-func endedClaimPhase(phase v1alpha1.NodeClaimPhase) bool {
+func EndedClaimPhase(phase v1alpha1.NodeClaimPhase) bool {
 	return phase == v1alpha1.NodeClaimFailed || phase == v1alpha1.NodeClaimReleased ||
 		phase == v1alpha1.NodeClaimLost
 }

@@ -1,6 +1,7 @@
 package cloudinit
 
 import (
+	"cmp"
 	"regexp"
 	"strconv"
 	"strings"
@@ -146,13 +147,9 @@ var aliasRE = regexp.MustCompile(`^[A-Za-z0-9_.:-]+\s+[A-Za-z0-9_.-]+$`)
 
 var irohModule UserDataModule = func(ctx Context) (UserDataPatch, error) {
 	targetPort := ctx.TargetPort
-	if targetPort == 0 {
-		targetPort = 22
-	}
+	targetPort = cmp.Or(targetPort, 22)
 	version := ctx.DumbpipeVersion
-	if version == "" {
-		version = DumbpipeVersionDefault
-	}
+	version = cmp.Or(version, DumbpipeVersionDefault)
 	aliases := []string{}
 	for _, alias := range ctx.HostAliases {
 		if aliasRE.MatchString(alias) {
@@ -329,25 +326,15 @@ type GuestLoginOptions struct {
 
 func GuestLoginScript(opts GuestLoginOptions) string {
 	sshDir := opts.SSHDir
-	if sshDir == "" {
-		sshDir = "/etc/ssh"
-	}
+	sshDir = cmp.Or(sshDir, "/etc/ssh")
 	tokenPath := opts.TokenPath
-	if tokenPath == "" {
-		tokenPath = GuestLoginTokenPath
-	}
+	tokenPath = cmp.Or(tokenPath, GuestLoginTokenPath)
 	attempts := opts.Attempts
-	if attempts == 0 {
-		attempts = 30
-	}
+	attempts = cmp.Or(attempts, 30)
 	delay := opts.RetryDelaySec
-	if delay == 0 {
-		delay = 4
-	}
+	delay = cmp.Or(delay, 4)
 	mount := opts.Mount
-	if mount == "" {
-		mount = GuestLoginDefaultMount
-	}
+	mount = cmp.Or(mount, GuestLoginDefaultMount)
 	script := `#!/usr/bin/env bash
 set -uo pipefail
 URL="__URL__"

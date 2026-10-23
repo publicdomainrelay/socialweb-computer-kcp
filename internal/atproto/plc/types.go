@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
 )
 
 const (
@@ -109,9 +111,9 @@ func (o *Operation) object() map[string]any {
 	m := map[string]any{"type": o.Type}
 	switch o.Type {
 	case TypeOperation:
-		m["rotationKeys"] = stringsAsAny(o.RotationKeys)
-		m["verificationMethods"] = mapAsAny(o.VerificationMethods)
-		m["alsoKnownAs"] = stringsAsAny(o.AlsoKnownAs)
+		m["rotationKeys"] = strs.AnySlice(o.RotationKeys)
+		m["verificationMethods"] = strs.AnyMap(o.VerificationMethods)
+		m["alsoKnownAs"] = strs.AnySlice(o.AlsoKnownAs)
 		services := make(map[string]any, len(o.Services))
 		for k, v := range o.Services {
 			services[k] = map[string]any{"type": v.Type, "endpoint": v.Endpoint}
@@ -158,22 +160,6 @@ func (o *Operation) fromObject(raw map[string]any) {
 	o.RecoveryKey, _ = raw["recoveryKey"].(string)
 	o.Handle, _ = raw["handle"].(string)
 	o.Service, _ = raw["service"].(string)
-}
-
-func stringsAsAny(in []string) []any {
-	out := make([]any, len(in))
-	for i, s := range in {
-		out[i] = s
-	}
-	return out
-}
-
-func mapAsAny(in map[string]string) map[string]any {
-	out := make(map[string]any, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
-	return out
 }
 
 func stringsFromAny(v any) []string {

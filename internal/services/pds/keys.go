@@ -1,6 +1,7 @@
 package pds
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -102,9 +103,7 @@ func NewCredentialRepoKeyStore(resolver component.CredentialResolver, ref compon
 		return nil, err
 	}
 	field = strings.TrimSpace(field)
-	if field == "" {
-		field = "signingKey"
-	}
+	field = cmp.Or(field, "signingKey")
 	return &CredentialRepoKeyStore{Resolver: resolver, Ref: ref, Field: field}, nil
 }
 
@@ -309,9 +308,7 @@ func resolveSessionSecret(ctx context.Context, stateDir string, explicit []byte,
 }
 
 func resolveOAuthSigner(ctx context.Context, stateDir string, explicit atcrypto.PrivateKey, ref *component.CredentialRef, field string, credentials component.CredentialResolver) (atcrypto.PrivateKey, error) {
-	if field == "" {
-		field = "signingKey"
-	}
+	field = cmp.Or(field, "signingKey")
 	return resolvePrivateKey(ctx, stateDir, "oauth-signing.key", explicit, ref, field, credentials, func() (atcrypto.PrivateKeyExportable, error) {
 		return atcrypto.GeneratePrivateKeyP256()
 	})
@@ -328,9 +325,7 @@ func resolveRotationKey(ctx context.Context, stateDir string, explicit atcrypto.
 		}
 		return privateKeyFromData(data)
 	}
-	if field == "" {
-		field = "rotationKey"
-	}
+	field = cmp.Or(field, "rotationKey")
 	return resolvePrivateKey(ctx, stateDir, "plc-rotation.key", nil, ref, field, credentials, func() (atcrypto.PrivateKeyExportable, error) {
 		return atcrypto.GeneratePrivateKeyK256()
 	})

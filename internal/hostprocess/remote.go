@@ -17,6 +17,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 )
 
 const (
@@ -166,7 +167,7 @@ func (r *Remote) waitPlaced(ctx context.Context, name, unit string) (hostsvc.Uni
 	for {
 		cur, err := r.client.Get(ctx, name, metav1.GetOptions{})
 		if err == nil {
-			o, err := toObject(cur)
+			o, err := unstruct.From[v1alpha1.HostProcess](cur)
 			if err == nil && o.Status.Phase == v1alpha1.HostProcessPhaseFailed && o.Status.Runtime == nil {
 				return hostsvc.UnitStatus{}, fmt.Errorf("hostprocess: %s in %s failed to place: %s", name, r.c.Workspace, o.Status.Message)
 			}
@@ -226,7 +227,7 @@ func (r *Remote) StopSlice(ctx context.Context, slice string) error {
 		return err
 	}
 	for i := len(list.Items) - 1; i >= 0; i-- {
-		o, err := toObject(&list.Items[i])
+		o, err := unstruct.From[v1alpha1.HostProcess](&list.Items[i])
 		if err != nil || !hostsvc.SliceContains(slice, o.Spec.Slice) {
 			continue
 		}

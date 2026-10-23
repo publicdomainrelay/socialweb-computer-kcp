@@ -1,6 +1,7 @@
 package gatewaymain
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"log/slog"
@@ -62,9 +63,7 @@ func Build(cfg Config, d Deps, log *slog.Logger) (*Gateway, error) {
 	}
 
 	interval := d.SweepInterval
-	if interval == 0 {
-		interval = plcsweep.DefaultInterval
-	}
+	interval = cmp.Or(interval, plcsweep.DefaultInterval)
 	g := &Gateway{
 		handler:       surface.Handler(),
 		surface:       surface,

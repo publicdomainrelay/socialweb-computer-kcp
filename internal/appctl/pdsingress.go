@@ -12,6 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -214,7 +215,7 @@ func (ctl *Controller) pdsSpecIn(ctx context.Context, ws, pdsName string) (v1alp
 		return v1alpha1.PdsSpec{}, false, err
 	}
 	var o v1alpha1.Pds
-	if err := fromUnstructured(u, &o); err != nil {
+	if err := unstruct.Into(u, &o); err != nil {
 		return v1alpha1.PdsSpec{}, false, err
 	}
 	return o.Spec, true, nil

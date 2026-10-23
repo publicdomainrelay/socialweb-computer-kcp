@@ -1140,9 +1140,9 @@ entries:
       GET /metrics Prometheus text with kcp_reconciles_total counter, kcp_queue_depth gauge,
       kcp_reconcile_seconds summary, each family described once.
 
-  - id: internal/kcpserver/Test*+internal/kcpstore/Test*
+  - id: internal/kcpserver/Test*+internal/kcpdatastore/Test*
     kind: wire
-    source: internal/kcpserver/*_test.go, internal/kcpstore/kcpstore_test.go
+    source: internal/kcpserver/*_test.go, internal/kcpdatastore/kcpstore_test.go
     asserts: >
       kcp argv: start, leader election, the WorkspaceMounts gate, --secure-port=0,
       --experimental-bind-free-port, --etcd-servers=http://127.0.0.1:<kine>, --bind-address=127.0.0.1,

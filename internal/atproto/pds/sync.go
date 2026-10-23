@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/bluesky-social/indigo/atproto/syntax"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
 )
 
 type latestCommitOutput struct {
@@ -59,7 +60,7 @@ func (s *Server) handleGetLatestCommit(w http.ResponseWriter, r *http.Request) {
 		s.repoError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, latestCommitOutput{CID: head.CID.String(), Rev: head.Rev.String()})
+	httpjson.Write(w, http.StatusOK, latestCommitOutput{CID: head.CID.String(), Rev: head.Rev.String()})
 }
 
 func (s *Server) handleGetRepoStatus(w http.ResponseWriter, r *http.Request) {
@@ -74,7 +75,7 @@ func (s *Server) handleGetRepoStatus(w http.ResponseWriter, r *http.Request) {
 		s.repoError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, repoStatusOutput{DID: did.String(), Active: true, Rev: head.Rev.String()})
+	httpjson.Write(w, http.StatusOK, repoStatusOutput{DID: did.String(), Active: true, Rev: head.Rev.String()})
 }
 
 func (s *Server) handleSyncGetRecord(w http.ResponseWriter, r *http.Request) {
@@ -100,9 +101,10 @@ func (s *Server) handleSyncGetRecord(w http.ResponseWriter, r *http.Request) {
 		s.repoError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, recordView{
+	httpjson.Write(w, http.StatusOK, recordView{
 		URI:   fmt.Sprintf("at://%s/%s/%s", did, collection, rkey),
 		CID:   rec.CID.String(),
 		Value: rec.Value,
 	})
+
 }

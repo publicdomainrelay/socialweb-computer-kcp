@@ -1,6 +1,7 @@
 package oauth
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,9 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/serviceauth"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
 )
 
 const requestURIPrefix = "urn:ietf:params:oauth:request_uri:"
@@ -62,9 +66,7 @@ func (s *Server) handlePAR(w http.ResponseWriter, r *http.Request) {
 	state := form.Get("state")
 	challenge := form.Get("code_challenge")
 	method := form.Get("code_challenge_method")
-	if method == "" {
-		method = "S256"
-	}
+	method = cmp.Or(method, "S256")
 	if clientID == "" || redirectURI == "" || responseType == "" || state == "" || challenge == "" {
 		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "client_id, code_challenge, redirect_uri, response_type, and state required")
 		return
@@ -131,10 +133,11 @@ func (s *Server) handlePAR(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Pragma", "no-cache")
-	writeJSON(w, http.StatusOK, struct {
+	httpjson.Write(w, http.StatusOK, struct {
 		RequestURI string `json:"request_uri"`
 		ExpiresIn  int64  `json:"expires_in"`
 	}{RequestURI: request.RequestURI, ExpiresIn: int64(s.config.PARTTL / time.Second)})
+
 }
 
 func (s *Server) handleAuthorizePage(w http.ResponseWriter, r *http.Request) {
@@ -218,7 +221,7 @@ func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		}
 		account = authenticated
 	} else {
-		scheme, token, ok := authCredentials(r.Header.Get("Authorization"))
+		scheme, token, ok := serviceauth.SplitAuthorization(r.Header.Get("Authorization"))
 		if !ok || !strings.EqualFold(scheme, AuthSchemeDPoP) {
 			writeOAuthError(w, http.StatusUnauthorized, "invalid_request", "DPoP authorization required")
 			return
@@ -250,9 +253,7 @@ func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		redirectURI := form.Get("redirect_uri")
 		challenge := form.Get("code_challenge")
 		method := form.Get("code_challenge_method")
-		if method == "" {
-			method = "S256"
-		}
+		method = cmp.Or(method, "S256")
 		responseType := form.Get("response_type")
 		if clientID == "" || redirectURI == "" || challenge == "" {
 			writeOAuthError(w, http.StatusBadRequest, "invalid_request", "code_challenge and redirect_uri required")
@@ -280,9 +281,7 @@ func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 			writeOAuthError(w, http.StatusBadRequest, "invalid_scope", err.Error())
 			return
 		}
-		if responseType == "" {
-			responseType = "code"
-		}
+		responseType = cmp.Or(responseType, "code")
 		request = PARRequest{
 			ClientID:            clientID,
 			ClientAuthMethod:    metadata.TokenEndpointAuthMethod,
@@ -332,10 +331,11 @@ func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Pragma", "no-cache")
-	writeJSON(w, http.StatusOK, struct {
+	httpjson.Write(w, http.StatusOK, struct {
 		RedirectURI string `json:"redirect_uri"`
 		Code        string `json:"code"`
 	}{RedirectURI: redirect, Code: codeID})
+
 }
 
 func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
@@ -358,9 +358,7 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 	}
 	formClient := form.Get("client_id")
 	if assertedClient != "" {
-		if formClient == "" {
-			formClient = assertedClient
-		}
+		formClient = cmp.Or(formClient, assertedClient)
 		if formClient != assertedClient {
 			writeOAuthError(w, http.StatusUnauthorized, "invalid_client", "")
 			return
@@ -448,7 +446,7 @@ func (s *Server) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http.Req
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Pragma", "no-cache")
-	writeJSON(w, http.StatusOK, tokenResponse{
+	httpjson.Write(w, http.StatusOK, tokenResponse{
 		AccessToken:  access.Token,
 		TokenType:    AuthSchemeDPoP,
 		RefreshToken: refresh.Token,
@@ -456,6 +454,7 @@ func (s *Server) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http.Req
 		Scope:        session.Scope,
 		Sub:          session.Account.DID.String(),
 	})
+
 }
 
 func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form url.Values, proof *DPoPProof, formClient, assertedClient, assertedKey string, now time.Time) {
@@ -519,13 +518,14 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Pragma", "no-cache")
-	writeJSON(w, http.StatusOK, tokenResponse{
+	httpjson.Write(w, http.StatusOK, tokenResponse{
 		AccessToken:  access.Token,
 		TokenType:    AuthSchemeDPoP,
 		RefreshToken: refresh.Token,
 		ExpiresIn:    int64(s.config.AccessTokenTTL / time.Second),
 		Scope:        session.Scope,
 	})
+
 }
 
 func (s *Server) handleRevoke(w http.ResponseWriter, r *http.Request) {
@@ -550,7 +550,7 @@ func (s *Server) handleRevoke(w http.ResponseWriter, r *http.Request) {
 	claims, kind, ok := parseRevocableToken(token, s.signer, now)
 	if !ok {
 		w.Header().Set("Cache-Control", "no-store")
-		writeJSON(w, http.StatusOK, map[string]any{})
+		httpjson.Write(w, http.StatusOK, map[string]any{})
 		return
 	}
 	record, err := s.tokens.GetToken(ctx, claims.JTI)
@@ -562,7 +562,7 @@ func (s *Server) handleRevoke(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, map[string]any{})
+	httpjson.Write(w, http.StatusOK, map[string]any{})
 }
 
 func parseRevocableToken(token string, signer Signer, now time.Time) (*tokenClaims, TokenKind, bool) {

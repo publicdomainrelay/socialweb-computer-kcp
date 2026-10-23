@@ -22,6 +22,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/serviceauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 )
 
@@ -186,7 +187,7 @@ func (m *HTTPMarket) discover(ctx context.Context, now time.Time) []Bidder {
 	candidates := []string{}
 	add := func(did string) {
 		did = strings.TrimSpace(did)
-		if did == "" || seen[did] || containsString(m.DenyBidderDIDs, did) {
+		if did == "" || seen[did] || slices.Contains(m.DenyBidderDIDs, did) {
 			return
 		}
 		seen[did] = true
@@ -205,7 +206,7 @@ func (m *HTTPMarket) discover(ctx context.Context, now time.Time) []Bidder {
 	heartbeat := market.NewHeartbeatCache(m.Reader)
 	fresh := heartbeat.FreshDIDs(ctx, candidates, now)
 	for _, did := range candidates {
-		if explicit[did] && !containsString(fresh, did) {
+		if explicit[did] && !slices.Contains(fresh, did) {
 			fresh = append(fresh, did)
 		}
 	}
@@ -322,9 +323,7 @@ func (m *HTTPMarket) postWithClient(ctx context.Context, client *http.Client, en
 	if strings.TrimSpace(endpoint) == "" {
 		return 0, nil, fmt.Errorf("requester: no inbound endpoint is advertised for %s", lxm)
 	}
-	if timeout <= 0 {
-		timeout = DefaultReceiptTimeout
-	}
+	timeout = opt.Positive(timeout, DefaultReceiptTimeout)
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	auth := xrpc.NewServiceAuth(xrpc.MinterFunc(m.token), audience, lxm)
@@ -596,17 +595,13 @@ func numberValue(value any) float64 {
 	return 0
 }
 
-func containsString(values []string, want string) bool {
-	return slices.Contains(values, want)
-}
-
 func withoutDeniedBidders(bidders []Bidder, deny []string) []Bidder {
 	if len(deny) == 0 {
 		return bidders
 	}
 	out := bidders[:0]
 	for _, bidder := range bidders {
-		if containsString(deny, bidder.DID) {
+		if slices.Contains(deny, bidder.DID) {
 			continue
 		}
 		out = append(out, bidder)

@@ -4,6 +4,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	mcreconcile "sigs.k8s.io/multicluster-runtime/pkg/reconcile"
 )
 
@@ -24,9 +25,7 @@ type backoff struct {
 }
 
 func newBackoff(base, max time.Duration) *backoff {
-	if base <= 0 {
-		base = DefaultBackoffBase
-	}
+	base = opt.Positive(base, DefaultBackoffBase)
 	if max < base {
 		max = base
 	}

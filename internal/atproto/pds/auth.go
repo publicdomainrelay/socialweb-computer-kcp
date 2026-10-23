@@ -1,6 +1,7 @@
 package pds
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"net"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/repo"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/serviceauth"
 )
 
 const (
@@ -152,7 +154,7 @@ func (s *Server) authenticate(r *http.Request) (*authInfo, error) {
 			OAuth:     true,
 		}, nil
 	}
-	scheme, token, ok := bearerToken(r.Header.Get("Authorization"))
+	scheme, token, ok := serviceauth.SplitAuthorization(r.Header.Get("Authorization"))
 	if !ok || !strings.EqualFold(scheme, "Bearer") {
 		return nil, ErrAuthentication
 	}
@@ -190,14 +192,6 @@ func (s *Server) requireSession(next func(http.ResponseWriter, *http.Request, *a
 		}
 		next(w, r, info)
 	}
-}
-
-func bearerToken(header string) (string, string, bool) {
-	parts := strings.Fields(header)
-	if len(parts) != 2 {
-		return "", "", false
-	}
-	return parts[0], parts[1], true
 }
 
 func (s *Server) resolveRepo(ctx context.Context, raw string) (syntax.DID, error) {
@@ -297,9 +291,7 @@ func (s *Server) publicURL(r *http.Request) string {
 		scheme = strings.ToLower(proto)
 	}
 	host := r.Host
-	if host == "" {
-		host = "localhost"
-	}
+	host = cmp.Or(host, "localhost")
 	if scheme == "http" && !isLoopbackHost(host) && r.Header.Get("X-Forwarded-Proto") == "" {
 		scheme = "https"
 	}

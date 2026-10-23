@@ -1,6 +1,7 @@
 package component
 
 import (
+	"cmp"
 	"time"
 
 	v1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
@@ -23,9 +24,7 @@ func (s ComponentStatus) APIStatus() v1alpha1.ComponentStatus {
 	}
 	if primary, ok := s.PrimaryEndpoint(); ok {
 		out.Endpoint = primary.URL
-		if out.Endpoint == "" {
-			out.Endpoint = primary.Address
-		}
+		out.Endpoint = cmp.Or(out.Endpoint, primary.Address)
 	}
 	if len(s.Endpoints) > 0 {
 		out.Endpoints = make([]v1alpha1.Endpoint, 0, len(s.Endpoints))

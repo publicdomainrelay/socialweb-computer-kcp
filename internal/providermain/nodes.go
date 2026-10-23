@@ -1,6 +1,7 @@
 package providermain
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -400,9 +401,7 @@ func (n *tenantNodes) confirmHeld(ctx context.Context) (confirmOutcome, error) {
 		end := guestEnd(node.host)
 		if end.Message != "" && !end.Declined {
 			outcome.failed = append(outcome.failed, node.name)
-			if outcome.failedWords == "" {
-				outcome.failedWords = end.Message
-			}
+			outcome.failedWords = cmp.Or(outcome.failedWords, end.Message)
 			if end.Bidder != "" {
 				until := n.opts.now().Add(BidderDenyWindow)
 				n.opts.Denies.deny(n.cluster, end.Bidder, until)
@@ -428,9 +427,7 @@ func (n *tenantNodes) confirmHeld(ctx context.Context) (confirmOutcome, error) {
 			next := "the claim is released and the next pass may ask the market again"
 			if end.Declined {
 				outcome.declined = append(outcome.declined, node.name)
-				if outcome.declinedWords == "" {
-					outcome.declinedWords = end.Message
-				}
+				outcome.declinedWords = cmp.Or(outcome.declinedWords, end.Message)
 				next = "the claim is released, and the market asked for it and took no bid, so " +
 					"this cluster's next market provision waits out its back-off"
 			}
@@ -658,7 +655,7 @@ func (n *tenantNodes) nextOrdinal(ctx context.Context) (int, error) {
 				"old one's last words; nothing was provisioned", target.Workspace, n.cluster, err)
 		}
 		for i := range claims {
-			if !endedClaimPhase(claims[i].Status.Phase) {
+			if !nodemarket.EndedClaimPhase(claims[i].Status.Phase) {
 				continue
 			}
 			if ordinal, ok := nodeOrdinalInName(prefix, claims[i].Name); ok {
@@ -671,11 +668,6 @@ func (n *tenantNodes) nextOrdinal(ctx context.Context) (int, error) {
 			return ordinal, nil
 		}
 	}
-}
-
-func endedClaimPhase(phase v1alpha1.NodeClaimPhase) bool {
-	return phase == v1alpha1.NodeClaimFailed || phase == v1alpha1.NodeClaimReleased ||
-		phase == v1alpha1.NodeClaimLost
 }
 
 func (n *tenantNodes) Teardown(ctx context.Context) error {
@@ -754,7 +746,7 @@ func (n *tenantNodes) primaryNameSpent(ctx context.Context) (bool, error) {
 			"claim whose spec already matches is left exactly as it was, status included; nothing "+
 			"was provisioned", n.nodeName, n.cluster, err)
 	}
-	return claim != nil && endedClaimPhase(claim.Status.Phase), nil
+	return claim != nil && nodemarket.EndedClaimPhase(claim.Status.Phase), nil
 }
 
 func (n *tenantNodes) forgetHeld(name string) {

@@ -15,6 +15,8 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/kcprest"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 )
 
@@ -65,7 +67,7 @@ func (n *networks) ensureAppWorkspace(ctx context.Context, name string) error {
 		if time.Now().After(deadline) {
 			return fmt.Errorf("the workspace %s is not Ready within %s (phase %q): %v", n.appWorkspace(name), ApplyTimeout, phase, err)
 		}
-		if !sleep(ctx, ChildPoll) {
+		if !clock.Sleep(ctx, ChildPoll) {
 			return ctx.Err()
 		}
 	}
@@ -90,7 +92,7 @@ func (n *networks) deleteAppWorkspace(ctx context.Context, name string) error {
 		if time.Now().After(deadline) {
 			return fmt.Errorf("the workspace %s is still there %s after its delete", n.appWorkspace(name), ChildDeleteTimeout)
 		}
-		if !sleep(ctx, ChildPoll) {
+		if !clock.Sleep(ctx, ChildPoll) {
 			return ctx.Err()
 		}
 	}
@@ -125,7 +127,7 @@ func (n *networks) deleteAccountWorkspaces(ctx context.Context) error {
 		if time.Now().After(deadline) {
 			return fmt.Errorf("%d account workspace(s) are still there %s after their delete", left, ChildDeleteTimeout)
 		}
-		if !sleep(ctx, ChildPoll) {
+		if !clock.Sleep(ctx, ChildPoll) {
 			return ctx.Err()
 		}
 	}
@@ -171,7 +173,7 @@ func (n *networks) stopAppComponents(ctx context.Context, name string) error {
 		if time.Now().After(deadline) {
 			return fmt.Errorf("%d component(s) of %s still run %s after their delete", left, ws, ChildDeleteTimeout)
 		}
-		if !sleep(ctx, ChildPoll) {
+		if !clock.Sleep(ctx, ChildPoll) {
 			return ctx.Err()
 		}
 		seen = map[string]bool{}
@@ -227,7 +229,7 @@ func (n *networks) grantPeers(ctx context.Context, names []string) error {
 		}
 		slices.SortFunc(readers, func(a, b rbacv1.Subject) int { return strings.Compare(a.Name, b.Name) })
 		for ws := range own {
-			cs, err := kubernetes.NewForConfig(clusterConfig(n.ctl.restCfg, ws))
+			cs, err := kubernetes.NewForConfig(kcprest.ForCluster(n.ctl.restCfg, ws))
 			if err != nil {
 				return err
 			}

@@ -25,6 +25,9 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 const (
@@ -59,7 +62,7 @@ func (c *Controller) runRecordWatches(ctx context.Context) {
 		if err := c.recordWatchRound(ctx); err != nil && ctx.Err() == nil {
 			c.log.Warn("watching AtprotoRecordWatches", "workspace", c.opts.Workspace, "err", err.Error())
 		}
-		if !sleep(ctx, c.opts.RetryAfter) {
+		if !clock.Sleep(ctx, opt.Positive(c.opts.RetryAfter, DefaultRetryAfter)) {
 			return
 		}
 	}
@@ -135,20 +138,20 @@ func (c *Controller) reconcileRecordWatch(ctx context.Context, dyn dynamic.Inter
 	plans, err := c.planWatchSources(ctx, dyn, name, spec)
 	if err != nil {
 		c.writeRecordWatchConditions(ctx, dyn, name, []metav1.Condition{
-			condition(RecordWatchConditionReady, false, "InvalidSpec", err.Error(), u.GetGeneration()),
-			condition(RecordWatchConditionProgressing, false, "InvalidSpec", err.Error(), u.GetGeneration()),
-			condition(RecordWatchConditionFailed, true, "InvalidSpec", err.Error(), u.GetGeneration()),
-			condition(RecordWatchConditionVerified, false, "InvalidSpec", err.Error(), u.GetGeneration()),
+			conds.New(RecordWatchConditionReady, false, "InvalidSpec", err.Error(), u.GetGeneration()),
+			conds.New(RecordWatchConditionProgressing, false, "InvalidSpec", err.Error(), u.GetGeneration()),
+			conds.New(RecordWatchConditionFailed, true, "InvalidSpec", err.Error(), u.GetGeneration()),
+			conds.New(RecordWatchConditionVerified, false, "InvalidSpec", err.Error(), u.GetGeneration()),
 		})
 		return err
 	}
 	matches, err := c.resolveMatches(ctx, dyn, spec)
 	if err != nil {
 		c.writeRecordWatchConditions(ctx, dyn, name, []metav1.Condition{
-			condition(RecordWatchConditionReady, false, "MatchPending", err.Error(), u.GetGeneration()),
-			condition(RecordWatchConditionProgressing, true, "MatchPending", err.Error(), u.GetGeneration()),
-			condition(RecordWatchConditionFailed, false, "NoError", err.Error(), u.GetGeneration()),
-			condition(RecordWatchConditionVerified, false, "MatchPending", err.Error(), u.GetGeneration()),
+			conds.New(RecordWatchConditionReady, false, "MatchPending", err.Error(), u.GetGeneration()),
+			conds.New(RecordWatchConditionProgressing, true, "MatchPending", err.Error(), u.GetGeneration()),
+			conds.New(RecordWatchConditionFailed, false, "NoError", err.Error(), u.GetGeneration()),
+			conds.New(RecordWatchConditionVerified, false, "MatchPending", err.Error(), u.GetGeneration()),
 		})
 		return err
 	}
@@ -157,10 +160,10 @@ func (c *Controller) reconcileRecordWatch(ctx context.Context, dyn dynamic.Inter
 		wanted[plan.Name] = true
 		if err := c.ensureWatchEventStream(ctx, dyn, name, plan, status); err != nil {
 			c.writeRecordWatchConditions(ctx, dyn, name, []metav1.Condition{
-				condition(RecordWatchConditionReady, false, "ReconcileFailed", err.Error(), u.GetGeneration()),
-				condition(RecordWatchConditionProgressing, false, "ReconcileFailed", err.Error(), u.GetGeneration()),
-				condition(RecordWatchConditionFailed, true, "ReconcileFailed", err.Error(), u.GetGeneration()),
-				condition(RecordWatchConditionVerified, false, "ReconcileFailed", err.Error(), u.GetGeneration()),
+				conds.New(RecordWatchConditionReady, false, "ReconcileFailed", err.Error(), u.GetGeneration()),
+				conds.New(RecordWatchConditionProgressing, false, "ReconcileFailed", err.Error(), u.GetGeneration()),
+				conds.New(RecordWatchConditionFailed, true, "ReconcileFailed", err.Error(), u.GetGeneration()),
+				conds.New(RecordWatchConditionVerified, false, "ReconcileFailed", err.Error(), u.GetGeneration()),
 			})
 			return err
 		}
@@ -185,7 +188,7 @@ func (c *Controller) reconcileRecordWatch(ctx context.Context, dyn dynamic.Inter
 	} else {
 		verifyReason = "VerifyFailed"
 	}
-	conditions = append(conditions, condition(RecordWatchConditionVerified, verified, verifyReason, verifyMessage, u.GetGeneration()))
+	conditions = append(conditions, conds.New(RecordWatchConditionVerified, verified, verifyReason, verifyMessage, u.GetGeneration()))
 	return c.writeRecordWatchConditions(ctx, dyn, name, conditions)
 }
 
@@ -434,22 +437,22 @@ func (c *Controller) watchConditions(ctx context.Context, dyn dynamic.Interface,
 	}
 	if latestFailed != nil {
 		return []metav1.Condition{
-			condition(RecordWatchConditionReady, false, "StreamFailed", latestFailed.Message, generation),
-			condition(RecordWatchConditionProgressing, false, "StreamFailed", latestFailed.Message, generation),
-			condition(RecordWatchConditionFailed, true, "StreamFailed", latestFailed.Message, generation),
+			conds.New(RecordWatchConditionReady, false, "StreamFailed", latestFailed.Message, generation),
+			conds.New(RecordWatchConditionProgressing, false, "StreamFailed", latestFailed.Message, generation),
+			conds.New(RecordWatchConditionFailed, true, "StreamFailed", latestFailed.Message, generation),
 		}, nil
 	}
 	if readyCount == len(plans) && !starting {
 		return []metav1.Condition{
-			condition(RecordWatchConditionReady, true, "StreamReady", "every EventStream is open", generation),
-			condition(RecordWatchConditionProgressing, false, "StreamReady", "every EventStream is open", generation),
-			condition(RecordWatchConditionFailed, false, "NoError", "every EventStream is open", generation),
+			conds.New(RecordWatchConditionReady, true, "StreamReady", "every EventStream is open", generation),
+			conds.New(RecordWatchConditionProgressing, false, "StreamReady", "every EventStream is open", generation),
+			conds.New(RecordWatchConditionFailed, false, "NoError", "every EventStream is open", generation),
 		}, nil
 	}
 	return []metav1.Condition{
-		condition(RecordWatchConditionReady, false, "Starting", "the EventStreams are starting", generation),
-		condition(RecordWatchConditionProgressing, true, "Starting", "the EventStreams are starting", generation),
-		condition(RecordWatchConditionFailed, false, "NoError", "the EventStreams are starting", generation),
+		conds.New(RecordWatchConditionReady, false, "Starting", "the EventStreams are starting", generation),
+		conds.New(RecordWatchConditionProgressing, true, "Starting", "the EventStreams are starting", generation),
+		conds.New(RecordWatchConditionFailed, false, "NoError", "the EventStreams are starting", generation),
 	}, nil
 }
 
@@ -606,14 +609,6 @@ func watchCursorFromStatus(status recordWatchStatus, sourceKey string) *int64 {
 		return &value
 	}
 	return nil
-}
-
-func condition(kind string, ok bool, reason, message string, generation int64) metav1.Condition {
-	status := metav1.ConditionFalse
-	if ok {
-		status = metav1.ConditionTrue
-	}
-	return metav1.Condition{Type: kind, Status: status, Reason: reason, Message: message, ObservedGeneration: generation}
 }
 
 func mergeLabels(current, wanted map[string]string) map[string]string {

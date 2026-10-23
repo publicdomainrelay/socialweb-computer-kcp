@@ -1,6 +1,7 @@
 package ingress
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
 )
 
 type Keypair interface {
@@ -96,12 +98,12 @@ func NewSubscriber(ctx context.Context, cfg SubscriberConfig) (*Subscriber, erro
 		cfg.HTTPClient = &http.Client{Timeout: 30 * time.Second}
 	}
 	did := cfg.Keypair.DID()
-	host := hostnameOnly(cfg.IngressProxyHost)
+	host := hostport.HostnameOnly(cfg.IngressProxyHost)
 	s := &Subscriber{
 		cfg:            cfg,
 		did:            did,
-		subdomain:      didToSubdomain(did),
-		ingressRef:     "did:web:" + didToSubdomain(did) + "." + host,
+		subdomain:      hostport.DIDLabel(did),
+		ingressRef:     "did:web:" + hostport.DIDLabel(did) + "." + host,
 		tunnels:        map[string]*tunnel{},
 		wsSubs:         map[string]*wsSubscription{},
 		directSubs:     map[string]func(){},
@@ -719,9 +721,7 @@ type TunnelOptions struct {
 
 func TunnelOverRelay(ctx context.Context, opts TunnelOptions, readable io.Reader, writable io.Writer) error {
 	nsid := opts.NSID
-	if nsid == "" {
-		nsid = TunnelNSID
-	}
+	nsid = cmp.Or(nsid, TunnelNSID)
 	host := opts.SubscriberSubdomain + "." + opts.IngressProxyHost
 	scheme := "wss"
 	if opts.InsecureHTTP {
@@ -801,15 +801,13 @@ type Caller struct {
 func NewCaller(ctx context.Context, cfg CallerConfig) (*Caller, error) {
 	subdomain := cfg.SubscriberSubdomain
 	if subdomain == "" && cfg.SubscriberDID != "" {
-		subdomain = didToSubdomain(cfg.SubscriberDID)
+		subdomain = hostport.DIDLabel(cfg.SubscriberDID)
 	}
 	if subdomain == "" {
 		return nil, errors.New("ingress: subscriber DID or subdomain required")
 	}
 	cfg.SubscriberSubdomain = subdomain
-	if cfg.NSID == "" {
-		cfg.NSID = "com.atproto.sync.subscribeRepos"
-	}
+	cfg.NSID = cmp.Or(cfg.NSID, "com.atproto.sync.subscribeRepos")
 	c := &Caller{cfg: cfg}
 	c.ctx, c.cancel = context.WithCancel(ctx)
 	if err := c.connect(); err != nil {

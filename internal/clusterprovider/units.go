@@ -1,6 +1,7 @@
 package clusterprovider
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -22,13 +23,13 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/apiserverfront"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostprocess"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/pgunit"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/postgresctl"
@@ -203,21 +204,13 @@ func NewUnitsHost(c UnitsConfig) (*UnitsHost, error) {
 	if c.StateDir == "" {
 		return nil, errors.New("clusterprovider: the units host needs the state dir the cluster data dirs live in")
 	}
-	if c.Workspace == "" {
-		c.Workspace = hostprocess.DefaultWorkspace
-	}
+	c.Workspace = cmp.Or(c.Workspace, hostprocess.DefaultWorkspace)
 	if c.Resolve == nil {
 		c.Resolve = exec.LookPath
 	}
-	if c.PlaceTimeout == 0 {
-		c.PlaceTimeout = DefaultPlaceTimeout
-	}
-	if c.StoreTimeout == 0 {
-		c.StoreTimeout = DefaultStoreTimeout
-	}
-	if c.ReapTimeout == 0 {
-		c.ReapTimeout = DefaultReapTimeout
-	}
+	c.PlaceTimeout = cmp.Or(c.PlaceTimeout, DefaultPlaceTimeout)
+	c.StoreTimeout = cmp.Or(c.StoreTimeout, DefaultStoreTimeout)
+	c.ReapTimeout = cmp.Or(c.ReapTimeout, DefaultReapTimeout)
 	if c.Log == nil {
 		c.Log = slog.Default()
 	}
@@ -306,30 +299,13 @@ func (h *UnitsHost) StoreUnit(key string) string {
 	return h.c.Prefix + postgresctl.ChildPrefix + StoreName(key) + ".service"
 }
 
-func decodeObj[T any](u *unstructured.Unstructured) (T, error) {
-	var o T
-	err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &o)
-	return o, err
-}
-
-func encodeObj(o any, kind string) (*unstructured.Unstructured, error) {
-	m, err := runtime.DefaultUnstructuredConverter.ToUnstructured(o)
-	if err != nil {
-		return nil, err
-	}
-	u := &unstructured.Unstructured{Object: m}
-	u.SetAPIVersion(v1alpha1.GroupVersion.String())
-	u.SetKind(kind)
-	return u, nil
-}
-
 func (h *UnitsHost) StartStore(ctx context.Context, key string) error {
 	name := StoreName(key)
 	cur, err := h.pgs.Get(ctx, name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		o := v1alpha1.Postgres{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{LabelCluster: key}},
 			Spec: v1alpha1.PostgresSpec{Databases: []string{PostgresDatabase, PostgresVaultDatabase}}}
-		u, err := encodeObj(&o, "Postgres")
+		u, err := unstruct.To(&o, "Postgres")
 		if err != nil {
 			return err
 		}
@@ -345,7 +321,7 @@ func (h *UnitsHost) StartStore(ctx context.Context, key string) error {
 	}
 	if _, cached := h.Store(key); !cached {
 		if u, err := h.pgs.Get(ctx, name, metav1.GetOptions{}); err == nil {
-			if o, derr := decodeObj[v1alpha1.Postgres](u); derr == nil && o.Status.Phase == v1alpha1.PostgresPhaseReady && o.Status.SocketDir != "" {
+			if o, derr := unstruct.From[v1alpha1.Postgres](u); derr == nil && o.Status.Phase == v1alpha1.PostgresPhaseReady && o.Status.SocketDir != "" {
 				h.mu.Lock()
 				h.stores[key] = Store{Object: name, Unit: h.StoreUnit(key), SocketDir: o.Status.SocketDir, User: o.Status.User}
 				h.mu.Unlock()
@@ -364,7 +340,7 @@ func (h *UnitsHost) EnsureStore(ctx context.Context, key string) (Store, error) 
 	for {
 		u, err := h.pgs.Get(ctx, name, metav1.GetOptions{})
 		if err == nil {
-			o, derr := decodeObj[v1alpha1.Postgres](u)
+			o, derr := unstruct.From[v1alpha1.Postgres](u)
 			if derr != nil {
 				return Store{}, derr
 			}
@@ -402,7 +378,7 @@ func (h *UnitsHost) storeReady(ctx context.Context, key string) bool {
 	if err != nil {
 		return false
 	}
-	o, err := decodeObj[v1alpha1.Postgres](u)
+	o, err := unstruct.From[v1alpha1.Postgres](u)
 	return err == nil && o.Status.Phase == v1alpha1.PostgresPhaseReady
 }
 
@@ -439,7 +415,7 @@ func (h *UnitsHost) StoreRemoval(ctx context.Context, key string) (bool, string,
 	if err != nil {
 		return false, "", err
 	}
-	o, err := decodeObj[v1alpha1.Postgres](u)
+	o, err := unstruct.From[v1alpha1.Postgres](u)
 	if err != nil {
 		return false, "", err
 	}
@@ -477,7 +453,7 @@ func (h *UnitsHost) Members(ctx context.Context, key string) ([]v1alpha1.HostPro
 	}
 	out := make([]v1alpha1.HostProcess, 0, len(list.Items))
 	for i := range list.Items {
-		o, err := decodeObj[v1alpha1.HostProcess](&list.Items[i])
+		o, err := unstruct.From[v1alpha1.HostProcess](&list.Items[i])
 		if err != nil {
 			return nil, err
 		}
@@ -537,7 +513,7 @@ func (h *UnitsHost) member(ctx context.Context, key, member string) (*v1alpha1.H
 	if err != nil {
 		return nil, err
 	}
-	o, err := decodeObj[v1alpha1.HostProcess](u)
+	o, err := unstruct.From[v1alpha1.HostProcess](u)
 	return &o, err
 }
 
@@ -728,7 +704,7 @@ func (h *UnitsHost) place(ctx context.Context, key, member string, cur *v1alpha1
 			cur = nil
 		case !reflect.DeepEqual(cur.Spec, want):
 			cur.Spec = want
-			u, err := encodeObj(cur, "HostProcess")
+			u, err := unstruct.To(cur, "HostProcess")
 			if err != nil {
 				return nil, err
 			}
@@ -746,7 +722,7 @@ func (h *UnitsHost) place(ctx context.Context, key, member string, cur *v1alpha1
 		o := v1alpha1.HostProcess{ObjectMeta: metav1.ObjectMeta{Name: name,
 			Labels:     map[string]string{LabelCluster: key, LabelMember: memberLabel(member)},
 			Finalizers: []string{MemberFinalizer}}, Spec: want}
-		u, err := encodeObj(&o, "HostProcess")
+		u, err := unstruct.To(&o, "HostProcess")
 		if err != nil {
 			return nil, err
 		}

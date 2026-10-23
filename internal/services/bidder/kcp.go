@@ -1,6 +1,7 @@
 package bidder
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,6 +17,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/statuspatch"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 var (
@@ -36,9 +38,7 @@ func kcpStore(deps component.Deps, workspace string) (*kcpstore.Store, string, e
 	if deps.KCP == nil {
 		return nil, "", errors.New("bidder: the component has no kcp clients")
 	}
-	if workspace == "" {
-		workspace = "root"
-	}
+	workspace = cmp.Or(workspace, "root")
 	client, err := deps.KCP.Client(workspace)
 	if err != nil {
 		return nil, "", fmt.Errorf("bidder: kcp client for %s: %w", workspace, err)
@@ -67,7 +67,7 @@ func statusMap(status any) (map[string]any, error) {
 }
 
 type KCPBids struct {
-	Res *clusterResource[v1alpha1.Bid]
+	Res *kcpstore.ClusterResource[v1alpha1.Bid]
 
 	Cluster string
 
@@ -75,7 +75,7 @@ type KCPBids struct {
 }
 
 func NewKCPBids(store *kcpstore.Store, cluster string) *KCPBids {
-	return &KCPBids{Res: newClusterResource[v1alpha1.Bid](store, BidGVR), Cluster: cluster}
+	return &KCPBids{Res: kcpstore.NewClusterResource[v1alpha1.Bid](store, BidGVR), Cluster: cluster}
 }
 
 func (b *KCPBids) Create(ctx context.Context, bid *v1alpha1.Bid) error {
@@ -138,7 +138,7 @@ func (b *KCPBids) PatchStatus(ctx context.Context, name string, status v1alpha1.
 }
 
 type KCPVMs struct {
-	Res *clusterResource[v1alpha1.ComputeVM]
+	Res *kcpstore.ClusterResource[v1alpha1.ComputeVM]
 
 	Cluster string
 
@@ -148,7 +148,7 @@ type KCPVMs struct {
 }
 
 func NewKCPVMs(store *kcpstore.Store, cluster, handle string) *KCPVMs {
-	return &KCPVMs{Res: newClusterResource[v1alpha1.ComputeVM](store, ComputeVMGVR), Cluster: cluster, Handle: handle}
+	return &KCPVMs{Res: kcpstore.NewClusterResource[v1alpha1.ComputeVM](store, ComputeVMGVR), Cluster: cluster, Handle: handle}
 }
 
 func (v *KCPVMs) log() *slog.Logger {
@@ -287,9 +287,7 @@ func (v *KCPVMs) PatchAnnotations(ctx context.Context, name string, annotations 
 }
 
 func (v *KCPVMs) WaitRunning(ctx context.Context, name string, timeout time.Duration) (*v1alpha1.ComputeVM, error) {
-	if timeout <= 0 {
-		timeout = DefaultBootTimeout
-	}
+	timeout = opt.Positive(timeout, DefaultBootTimeout)
 	deadline := time.Now().Add(timeout)
 	for {
 		vm, err := v.Get(ctx, name)
@@ -316,9 +314,7 @@ func (v *KCPVMs) WaitRunning(ctx context.Context, name string, timeout time.Dura
 }
 
 func (v *KCPVMs) WaitAbsent(ctx context.Context, name string, timeout time.Duration) error {
-	if timeout <= 0 {
-		timeout = DefaultReleaseTimeout
-	}
+	timeout = opt.Positive(timeout, DefaultReleaseTimeout)
 	deadline := time.Now().Add(timeout)
 	for {
 		vm, err := v.Get(ctx, name)
@@ -340,13 +336,13 @@ func (v *KCPVMs) WaitAbsent(ctx context.Context, name string, timeout time.Durat
 }
 
 type KCPGrants struct {
-	Res *clusterResource[v1alpha1.GuestIdentityGrant]
+	Res *kcpstore.ClusterResource[v1alpha1.GuestIdentityGrant]
 
 	Cluster string
 }
 
 func NewKCPGrants(store *kcpstore.Store, cluster string) *KCPGrants {
-	return &KCPGrants{Res: newClusterResource[v1alpha1.GuestIdentityGrant](store, GuestIdentityGrantGVR), Cluster: cluster}
+	return &KCPGrants{Res: kcpstore.NewClusterResource[v1alpha1.GuestIdentityGrant](store, GuestIdentityGrantGVR), Cluster: cluster}
 }
 
 func (g *KCPGrants) Create(ctx context.Context, grant v1alpha1.GuestIdentityGrant) error {

@@ -14,14 +14,14 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/baosync"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 )
 
 const (
@@ -66,14 +66,6 @@ func splitGrantRefusal(why string) (string, bool) {
 		return s, true
 	}
 	return why, false
-}
-
-func grantCondition(st *v1alpha1.GuestIdentityGrantStatus, gen int64, t string, ok bool, reason, msg string) {
-	s := metav1.ConditionFalse
-	if ok {
-		s = metav1.ConditionTrue
-	}
-	meta.SetStatusCondition(&st.Conditions, metav1.Condition{Type: t, Status: s, Reason: reason, Message: msg, ObservedGeneration: gen})
 }
 
 func keepConditionTimes(next []metav1.Condition, held []metav1.Condition) {
@@ -201,7 +193,7 @@ func (c *Controller) listGrants(ctx context.Context) ([]v1alpha1.GuestIdentityGr
 	out := make([]v1alpha1.GuestIdentityGrant, 0, len(list.Items))
 	for i := range list.Items {
 		var g v1alpha1.GuestIdentityGrant
-		if err := fromUnstructured(&list.Items[i], &g); err != nil {
+		if err := unstruct.Into(&list.Items[i], &g); err != nil {
 			c.c.log().Warn("decoding a GuestIdentityGrant", "name", list.Items[i].GetName(), "err", err.Error())
 			continue
 		}
@@ -216,7 +208,7 @@ func (c *Controller) writeGrantStatus(ctx context.Context, g v1alpha1.GuestIdent
 		return
 	}
 	var held v1alpha1.GuestIdentityGrant
-	if fromUnstructured(cur, &held) == nil {
+	if unstruct.Into(cur, &held) == nil {
 		if st.Applied && held.Status.Applied && held.Status.Role == st.Role && held.Status.ObservedGeneration == st.ObservedGeneration {
 			st.AppliedAt = held.Status.AppliedAt
 		}
@@ -229,7 +221,7 @@ func (c *Controller) writeGrantStatus(ctx context.Context, g v1alpha1.GuestIdent
 		st.AppliedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	}
 	g.Status = st
-	u, err := unstructuredOf(&g, "GuestIdentityGrant")
+	u, err := unstruct.To(&g, "GuestIdentityGrant")
 	if err != nil {
 		return
 	}
@@ -255,16 +247,19 @@ func (c *Controller) recordGrants(ctx context.Context, roles map[string]grantRol
 				appliedReason = "RoleConflict"
 				appliedMsg = "another grant already declares this role for the audience"
 			}
-			grantCondition(&st, gen, v1alpha1.GuestIdentityGrantConditionApplied, false, appliedReason, appliedMsg)
+			conds.Set(&st.Conditions, gen, v1alpha1.GuestIdentityGrantConditionApplied, false, appliedReason, appliedMsg)
 			if conflict {
-				grantCondition(&st, gen, v1alpha1.GuestIdentityGrantConditionRoleConflict, true, "RoleConflict",
+				conds.Set(&st.Conditions, gen, v1alpha1.GuestIdentityGrantConditionRoleConflict, true, "RoleConflict",
 					"another grant already declares this role for the audience; this grant is not applied")
+
 			} else {
-				grantCondition(&st, gen, v1alpha1.GuestIdentityGrantConditionRoleConflict, false, "NotEvaluated",
+				conds.Set(&st.Conditions, gen, v1alpha1.GuestIdentityGrantConditionRoleConflict, false, "NotEvaluated",
 					"the grant is refused before its role is compared with an existing one")
+
 			}
-			grantCondition(&st, gen, v1alpha1.GuestIdentityGrantConditionDrifted, false, "NotObserved",
+			conds.Set(&st.Conditions, gen, v1alpha1.GuestIdentityGrantConditionDrifted, false, "NotObserved",
 				"the grant is not applied, so the live OpenBao state was not compared")
+
 			c.writeGrantStatus(ctx, g, st)
 			continue
 		}
@@ -275,12 +270,15 @@ func (c *Controller) recordGrants(ctx context.Context, roles map[string]grantRol
 		st.Role, st.Audience = r.role, r.audience
 		if synced {
 			st.Applied = true
-			grantCondition(&st, gen, v1alpha1.GuestIdentityGrantConditionApplied, true, "Applied",
+			conds.Set(&st.Conditions, gen, v1alpha1.GuestIdentityGrantConditionApplied, true, "Applied",
 				"the grant's role and policy are applied")
-			grantCondition(&st, gen, v1alpha1.GuestIdentityGrantConditionRoleConflict, false, "NoConflict",
+
+			conds.Set(&st.Conditions, gen, v1alpha1.GuestIdentityGrantConditionRoleConflict, false, "NoConflict",
 				"the desired role does not conflict with an existing role")
-			grantCondition(&st, gen, v1alpha1.GuestIdentityGrantConditionDrifted, false, "InSync",
+
+			conds.Set(&st.Conditions, gen, v1alpha1.GuestIdentityGrantConditionDrifted, false, "InSync",
 				"the live OpenBao role and policy match the grant")
+
 		} else {
 			st.LastError = syncErr
 			drift := syncErr == grantNotHeldReason
@@ -291,15 +289,18 @@ func (c *Controller) recordGrants(ctx context.Context, roles map[string]grantRol
 			} else if msg == "" {
 				msg = "the grant is not applied"
 			}
-			grantCondition(&st, gen, v1alpha1.GuestIdentityGrantConditionApplied, false, appliedReason, msg)
-			grantCondition(&st, gen, v1alpha1.GuestIdentityGrantConditionRoleConflict, false, "NoConflict",
+			conds.Set(&st.Conditions, gen, v1alpha1.GuestIdentityGrantConditionApplied, false, appliedReason, msg)
+			conds.Set(&st.Conditions, gen, v1alpha1.GuestIdentityGrantConditionRoleConflict, false, "NoConflict",
 				"the desired role does not conflict with an existing role")
+
 			if drift {
-				grantCondition(&st, gen, v1alpha1.GuestIdentityGrantConditionDrifted, true, "CorrectiveWrite",
+				conds.Set(&st.Conditions, gen, v1alpha1.GuestIdentityGrantConditionDrifted, true, "CorrectiveWrite",
 					"the live OpenBao role or policy differs from the grant; the controller writes the declaration on the next pass")
+
 			} else {
-				grantCondition(&st, gen, v1alpha1.GuestIdentityGrantConditionDrifted, false, "NotObserved",
+				conds.Set(&st.Conditions, gen, v1alpha1.GuestIdentityGrantConditionDrifted, false, "NotObserved",
 					"the live OpenBao state was not compared because the reconcile failed")
+
 			}
 		}
 		c.writeGrantStatus(ctx, g, st)
@@ -339,10 +340,6 @@ func (c *Controller) watchGrants(ctx context.Context, kick chan<- struct{}) {
 			}
 		}
 	}
-}
-
-func fromUnstructured(u *unstructured.Unstructured, out any) error {
-	return runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, out)
 }
 
 func desiredWithIdentity(ctx context.Context, in layoutInput, ca caSource) (baosync.Desired, []string, map[string]grantRole, map[string]string, error) {

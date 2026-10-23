@@ -1,6 +1,7 @@
 package dispatchertls
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -12,15 +13,16 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsreload"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/servetls"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -79,9 +81,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		stateDir = spec.StateDir
 	}
 	workspace := strings.TrimSpace(spec.Workspace)
-	if workspace == "" {
-		workspace = "root"
-	}
+	workspace = cmp.Or(workspace, "root")
 	cfg := Config{
 		Deps:        deps,
 		StateDir:    stateDir,
@@ -91,7 +91,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		UpstreamRef: decoded.UpstreamRef,
 	}
 	if decoded.TLS != nil {
-		cfg.Hostnames = appendValues(cfg.Hostnames, decoded.TLS.Hostnames...)
+		cfg.Hostnames = strs.AppendUniqueFold(cfg.Hostnames, decoded.TLS.Hostnames...)
 	}
 	if decoded.Storage != nil && decoded.Storage.DataDir != "" {
 		cfg.StateDir = decoded.Storage.DataDir
@@ -105,7 +105,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 	if decoded.TLS != nil {
 		cfg.CABundle = strings.TrimSpace(decoded.TLS.CABundle)
 		if decoded.TLS.CertRef != "" || decoded.TLS.Enabled {
-			certFile, keyFile := certificateFiles(decoded.TLS.CertRef, decoded.Storage, cfg.Hostnames)
+			certFile, keyFile := servetls.CertificateFiles(decoded.TLS.CertRef, decoded.Storage, cfg.Hostnames)
 			cfg.CertFile = certFile
 			cfg.KeyFile = keyFile
 		}
@@ -118,81 +118,12 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 	return cfg, nil
 }
 
-func appendValues(values []string, extra ...string) []string {
-	seen := make(map[string]struct{}, len(values)+len(extra))
-	out := make([]string, 0, len(values)+len(extra))
-	add := func(value string) {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			return
-		}
-		key := strings.ToLower(value)
-		if _, ok := seen[key]; ok {
-			return
-		}
-		seen[key] = struct{}{}
-		out = append(out, value)
-	}
-	for _, value := range values {
-		add(value)
-	}
-	for _, value := range extra {
-		add(value)
-	}
-	return out
-}
-
-func certificateFiles(certRef string, storage *v1alpha1.ComponentStorage, hostnames []string) (string, string) {
-	certFile := refPath(certRef, storage)
-	if certFile == "" && storage != nil && storage.CertsDir != "" && len(hostnames) > 0 {
-		name := hostnameOnly(hostnames[0])
-		if name != "" && name != "*" {
-			certFile = filepath.Join(storage.CertsDir, name+".crt")
-		}
-	}
-	return certFile, keyFileFor(certFile)
-}
-
-func refPath(ref string, storage *v1alpha1.ComponentStorage) string {
-	ref = strings.TrimSpace(ref)
-	if ref == "" {
-		return ""
-	}
-	if filepath.IsAbs(ref) || storage == nil || storage.CertsDir == "" {
-		return ref
-	}
-	return filepath.Join(storage.CertsDir, ref)
-}
-
-func keyFileFor(certFile string) string {
-	switch {
-	case certFile == "":
-		return ""
-	case strings.HasSuffix(certFile, ".crt"):
-		return strings.TrimSuffix(certFile, ".crt") + ".key"
-	case strings.HasSuffix(certFile, ".pem"):
-		return strings.TrimSuffix(certFile, ".pem") + ".key"
-	default:
-		return certFile + ".key"
-	}
-}
-
-func keyFilesFor(certFile string) []string {
-	candidates := []string{keyFileFor(certFile)}
-	if before, ok := strings.CutSuffix(certFile, ".pem"); ok {
-		candidates = append(candidates, before+"-key.pem")
-	}
-	return append(candidates, certFile)
-}
-
 func upstreamEndpoint(deps component.Deps, workspace string, ref *commonv1.ObjectRef) (string, bool) {
 	if ref == nil || deps.Registry == nil {
 		return "", false
 	}
 	kind := strings.TrimSpace(ref.Kind)
-	if kind == "" {
-		kind = "IngressProxy"
-	}
+	kind = cmp.Or(kind, "IngressProxy")
 	name := strings.TrimSpace(ref.Name)
 	if name == "" {
 		return "", false
@@ -200,7 +131,7 @@ func upstreamEndpoint(deps component.Deps, workspace string, ref *commonv1.Objec
 	if workspace != "" {
 		for _, wanted := range []string{"http", "control"} {
 			if endpoint, ok := deps.Registry.Endpoint(workspace, kind, name, wanted); ok {
-				return endpointURL(endpoint)
+				return hostport.EndpointURL(endpoint)
 			}
 		}
 	}
@@ -215,25 +146,11 @@ func upstreamEndpoint(deps component.Deps, workspace string, ref *commonv1.Objec
 		}
 		for _, endpoint := range entry.Endpoints {
 			if endpoint.Address != "" {
-				return endpointURL(endpoint)
+				return hostport.EndpointURL(endpoint)
 			}
 		}
 	}
 	return "", false
-}
-
-func endpointURL(endpoint component.Endpoint) (string, bool) {
-	if endpoint.URL != "" {
-		return endpoint.URL, true
-	}
-	if endpoint.Address == "" {
-		return "", false
-	}
-	scheme := strings.TrimSpace(endpoint.Protocol)
-	if scheme == "" {
-		scheme = "http"
-	}
-	return scheme + "://" + endpoint.Address, true
 }
 
 func loadCA(data []byte) (*x509.CertPool, error) {
@@ -252,24 +169,10 @@ func loadCA(data []byte) (*x509.CertPool, error) {
 	return pool, nil
 }
 
-func Factory(ctx context.Context, deps component.Deps, spec component.ComponentSpec) (component.Service, error) {
-	cfg, err := ConfigFrom(deps, spec)
-	if err != nil {
-		return nil, err
-	}
-	return New(cfg), nil
-}
-
-func Register(runtime *component.Runtime) error {
-	return runtime.Register(Kind, Factory)
-}
-
 func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	cfg := s.cfg
-	cfg.Deps = mergeDeps(cfg.Deps, deps)
-	if cfg.Workspace == "" {
-		cfg.Workspace = "root"
-	}
+	cfg.Deps = cfg.Deps.Or(deps)
+	cfg.Workspace = cmp.Or(cfg.Workspace, "root")
 	if !upstreamConfigured(cfg) {
 		return errors.New("dispatchertls: the upstream is required")
 	}
@@ -280,7 +183,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	tlsConfig, err := serverTLS(cfg)
+	tlsConfig, err := listenerTLS(cfg)
 	if err != nil {
 		return err
 	}
@@ -315,7 +218,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 		},
 	}
 	handler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		host := hostnameOnly(req.Host)
+		host := hostport.HostnameOnly(req.Host)
 		if !hostAllowed(hosts, host) {
 			log.Info("dispatcher_tls_refused", "host", host, "path", req.URL.Path)
 			http.Error(w, "not a dispatcher name", http.StatusNotFound)
@@ -335,7 +238,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 		}
 		proxy.ServeHTTP(w, req.WithContext(context.WithValue(req.Context(), upstreamTargetKey{}, target)))
 	})
-	listener, err := net.Listen("tcp", listenAddress(cfg.Address, cfg.Host, cfg.Port))
+	listener, err := net.Listen("tcp", hostport.Listen(cfg.Address, cfg.Host, cfg.Port))
 	if err != nil {
 		return fmt.Errorf("dispatchertls: listening: %w", err)
 	}
@@ -459,9 +362,7 @@ func (s *Service) shutdown(ctx context.Context) {
 	if httpServer == nil {
 		return
 	}
-	if timeout <= 0 {
-		timeout = DefaultShutdownTimeout
-	}
+	timeout = opt.Positive(timeout, DefaultShutdownTimeout)
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
 	defer cancel()
 	if err := httpServer.Shutdown(ctx); err != nil {
@@ -499,9 +400,7 @@ func resolveUpstream(cfg Config) (string, bool) {
 	}
 	if cfg.Upstream.Address != "" {
 		scheme := strings.TrimSpace(cfg.Upstream.Protocol)
-		if scheme == "" {
-			scheme = "http"
-		}
+		scheme = cmp.Or(scheme, "http")
 		return scheme + "://" + cfg.Upstream.Address, true
 	}
 	if cfg.UpstreamRef != nil {
@@ -524,13 +423,9 @@ func parseUpstream(raw string) (*url.URL, error) {
 	return target, nil
 }
 
-func serverTLS(cfg Config) (*tls.Config, error) {
+func listenerTLS(cfg Config) (*tls.Config, error) {
 	if cfg.CertFile != "" {
-		reloader, err := tlsreload.New(cfg.CertFile, keyFilesFor(cfg.CertFile), cfg.Deps.Log)
-		if err != nil {
-			return nil, err
-		}
-		return reloader.TLSConfig(&tls.Config{MinVersion: tls.VersionTLS12, NextProtos: []string{"http/1.1"}}), nil
+		return servetls.Config(cfg.CertFile, nil, cfg.Deps.Log)
 	}
 	tlsConfig := cfg.TLS
 	if tlsConfig == nil {
@@ -553,7 +448,7 @@ func allowedHosts(cfg Config) []string {
 	seen := map[string]struct{}{}
 	hosts := []string{}
 	add := func(host string) {
-		host = strings.ToLower(hostnameOnly(strings.TrimSpace(host)))
+		host = strings.ToLower(hostport.HostnameOnly(strings.TrimSpace(host)))
 		if host == "" {
 			return
 		}
@@ -576,7 +471,7 @@ func allowedHosts(cfg Config) []string {
 }
 
 func hostAllowed(hosts []string, host string) bool {
-	host = strings.ToLower(hostnameOnly(host))
+	host = strings.ToLower(hostport.HostnameOnly(host))
 	for _, allowed := range hosts {
 		if allowed == "*" || host == allowed || strings.HasSuffix(host, "."+allowed) {
 			return true
@@ -592,58 +487,6 @@ func probeHost(hosts []string) string {
 		}
 	}
 	return "localhost"
-}
-
-func hostnameOnly(host string) string {
-	h := host
-	if strings.HasPrefix(h, "[") {
-		if end := strings.Index(h, "]"); end != -1 {
-			h = h[1:end]
-		}
-	}
-	if idx := strings.LastIndex(h, ":"); idx != -1 && idx > strings.Index(h, "]") {
-		h = h[:idx]
-	}
-	return h
-}
-
-func listenAddress(address, host string, port int) string {
-	if address != "" {
-		return address
-	}
-	if host == "" {
-		host = "127.0.0.1"
-	}
-	return net.JoinHostPort(host, strconv.Itoa(port))
-}
-
-func mergeDeps(cfgDeps, deps component.Deps) component.Deps {
-	out := cfgDeps
-	if out.Log == nil {
-		out.Log = deps.Log
-	}
-	if out.TLS == nil {
-		out.TLS = deps.TLS
-	}
-	if out.StateDir == "" {
-		out.StateDir = deps.StateDir
-	}
-	if out.Registry == nil {
-		out.Registry = deps.Registry
-	}
-	if out.Hosts == nil {
-		out.Hosts = deps.Hosts
-	}
-	if out.KCP == nil {
-		out.KCP = deps.KCP
-	}
-	if out.Credentials == nil {
-		out.Credentials = deps.Credentials
-	}
-	if out.Vault == nil {
-		out.Vault = deps.Vault
-	}
-	return out
 }
 
 func probeClient() *http.Client {

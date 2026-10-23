@@ -8,6 +8,8 @@ import (
 	"os"
 	"sort"
 	"strings"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 )
 
 type crictlCondition struct {
@@ -50,7 +52,7 @@ func Diagnose(ctx context.Context, cfg Config, log *slog.Logger) error {
 			}
 			log.Warn("crictl info failed", "attempt", attempt, "of", cfg.DiagnoseAttempts, "err", err.Error())
 			if attempt < cfg.DiagnoseAttempts {
-				if err := sleep(ctx, cfg.DiagnoseInterval()); err != nil {
+				if err := clock.SleepErr(ctx, cfg.DiagnoseInterval()); err != nil {
 					return err
 				}
 			}
@@ -60,7 +62,7 @@ func Diagnose(ctx context.Context, cfg Config, log *slog.Logger) error {
 		if err := json.Unmarshal(out, &info); err != nil {
 			log.Warn("crictl info did not return JSON", "attempt", attempt, "of", cfg.DiagnoseAttempts, "err", err.Error())
 			if attempt < cfg.DiagnoseAttempts {
-				if err := sleep(ctx, cfg.DiagnoseInterval()); err != nil {
+				if err := clock.SleepErr(ctx, cfg.DiagnoseInterval()); err != nil {
 					return err
 				}
 			}
@@ -90,7 +92,7 @@ func Diagnose(ctx context.Context, cfg Config, log *slog.Logger) error {
 			"confDirHolds", dirNames(confDir), "binDirs", strings.Join(binDirs, ","),
 			"binDirsHold", binDirNames(binDirs), "attempt", attempt, "of", cfg.DiagnoseAttempts)
 		if attempt < cfg.DiagnoseAttempts {
-			if err := sleep(ctx, cfg.DiagnoseInterval()); err != nil {
+			if err := clock.SleepErr(ctx, cfg.DiagnoseInterval()); err != nil {
 				return err
 			}
 		}

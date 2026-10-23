@@ -1,6 +1,7 @@
 package openbaosession
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -93,9 +94,7 @@ func (s *KCPStoreSource) Server(ctx context.Context, workspace, name string) (Se
 	if name == "" {
 		return Server{}, ErrNoServer
 	}
-	if workspace == "" {
-		workspace = "root"
-	}
+	workspace = cmp.Or(workspace, "root")
 	servers := kcpstore.OfClusterScoped[v1alpha1.OpenBaoServer](s.Store, OpenBaoServerGVR)
 	obj, err := servers.Get(ctx, ref.New(workspace, "", name))
 	if err != nil {
@@ -212,9 +211,7 @@ func fileBytes(value string) ([]byte, error) {
 
 func ParseServer(value, defaultWorkspace string) (string, string) {
 	value = strings.TrimSpace(value)
-	if defaultWorkspace == "" {
-		defaultWorkspace = "root"
-	}
+	defaultWorkspace = cmp.Or(defaultWorkspace, "root")
 	if i := strings.LastIndex(value, "/"); i > 0 {
 		return strings.TrimSpace(value[:i]), strings.TrimSpace(value[i+1:])
 	}

@@ -15,8 +15,9 @@ import (
 	"github.com/bluesky-social/indigo/atproto/syntax"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
-	coreapi "github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayapi"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayhttp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/lease"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/sshtransport"
 )
 
@@ -26,7 +27,7 @@ type ownerSessionAuth struct {
 	sessions map[string]OwnerSession
 }
 
-func (a ownerSessionAuth) Authenticate(r *http.Request) (*coreapi.WebCaller, error) {
+func (a ownerSessionAuth) Authenticate(r *http.Request) (*gatewayhttp.WebCaller, error) {
 	if r == nil {
 		return nil, nil
 	}
@@ -40,14 +41,14 @@ func (a ownerSessionAuth) Authenticate(r *http.Request) (*coreapi.WebCaller, err
 		if !sameIdentifier || !samePassword {
 			continue
 		}
-		return &coreapi.WebCaller{WebUser: coreapi.WebUser{DID: did, Handle: session.Identifier, PDS: session.Service}}, nil
+		return &gatewayhttp.WebCaller{WebUser: gatewayhttp.WebUser{DID: did, Handle: session.Identifier, PDS: session.Service}}, nil
 	}
 	return nil, nil
 }
 
 type multiAuth []sshtransport.Authenticator
 
-func (m multiAuth) Authenticate(r *http.Request) (*coreapi.WebCaller, error) {
+func (m multiAuth) Authenticate(r *http.Request) (*gatewayhttp.WebCaller, error) {
 	var last error
 	for _, auth := range m {
 		if auth == nil {
@@ -76,7 +77,7 @@ type ownerSessionAgents struct {
 	tokens map[string]*ownerSessionTokens
 }
 
-func (a *ownerSessionAgents) AgentFor(caller *coreapi.WebCaller) coreapi.WebAccountAgent {
+func (a *ownerSessionAgents) AgentFor(caller *gatewayhttp.WebCaller) gatewayhttp.WebAccountAgent {
 	if caller == nil {
 		return nil
 	}
@@ -103,7 +104,7 @@ func (a *ownerSessionAgents) tokensFor(did string, session OwnerSession) *ownerS
 
 type combinedAgents []sshtransport.AgentProvider
 
-func (c combinedAgents) AgentFor(caller *coreapi.WebCaller) coreapi.WebAccountAgent {
+func (c combinedAgents) AgentFor(caller *gatewayhttp.WebCaller) gatewayhttp.WebAccountAgent {
 	for _, provider := range c {
 		if provider == nil {
 			continue
@@ -207,7 +208,7 @@ func (a *ownerSessionAgent) GetServiceAuth(ctx context.Context, aud, lxm string)
 	return "", errors.New("sshserver: the owner session agent does not mint service auth tokens")
 }
 
-func (a *ownerSessionAgent) ListRecords(ctx context.Context, did, collection string, limit int) ([]coreapi.Record, error) {
+func (a *ownerSessionAgent) ListRecords(ctx context.Context, did, collection string, limit int) ([]gatewayhttp.Record, error) {
 	pds, err := a.remote(ctx)
 	if err != nil {
 		return nil, err
@@ -220,49 +221,47 @@ func (a *ownerSessionAgent) ListRecords(ctx context.Context, did, collection str
 	if err != nil {
 		return nil, err
 	}
-	if limit <= 0 {
-		limit = 50
-	}
+	limit = opt.Positive(limit, 50)
 	page, err := pds.ListRecords(ctx, pdsclient.ListRecordsRequest{Repo: repo, Collection: nsid, Limit: limit})
 	if err != nil {
 		return nil, err
 	}
-	out := make([]coreapi.Record, 0, len(page.Records))
+	out := make([]gatewayhttp.Record, 0, len(page.Records))
 	for _, record := range page.Records {
 		var value map[string]any
 		if err := json.Unmarshal(record.Value, &value); err != nil {
 			continue
 		}
-		out = append(out, coreapi.Record{URI: record.URI.String(), CID: record.CID.String(), Value: value})
+		out = append(out, gatewayhttp.Record{URI: record.URI.String(), CID: record.CID.String(), Value: value})
 	}
 	return out, nil
 }
 
-func (a *ownerSessionAgent) CreateRecord(ctx context.Context, did, collection, rkey string, record map[string]any) (coreapi.RecordRef, error) {
+func (a *ownerSessionAgent) CreateRecord(ctx context.Context, did, collection, rkey string, record map[string]any) (gatewayhttp.RecordRef, error) {
 	pds, err := a.remote(ctx)
 	if err != nil {
-		return coreapi.RecordRef{}, err
+		return gatewayhttp.RecordRef{}, err
 	}
 	repo, err := syntax.ParseDID(did)
 	if err != nil {
-		return coreapi.RecordRef{}, err
+		return gatewayhttp.RecordRef{}, err
 	}
 	nsid, err := syntax.ParseNSID(collection)
 	if err != nil {
-		return coreapi.RecordRef{}, err
+		return gatewayhttp.RecordRef{}, err
 	}
 	raw, err := json.Marshal(record)
 	if err != nil {
-		return coreapi.RecordRef{}, err
+		return gatewayhttp.RecordRef{}, err
 	}
 	result, err := pds.CreateRecord(ctx, pdsclient.RepoPath{Repo: repo, Collection: nsid, Rkey: syntax.RecordKey(rkey)}, raw, pdsclient.WriteOptions{})
 	if err != nil {
-		return coreapi.RecordRef{}, err
+		return gatewayhttp.RecordRef{}, err
 	}
-	return coreapi.RecordRef{URI: result.URI.String(), CID: result.CID.String()}, nil
+	return gatewayhttp.RecordRef{URI: result.URI.String(), CID: result.CID.String()}, nil
 }
 
-func (a *ownerSessionAgent) ApplyWrites(ctx context.Context, did string, writes []coreapi.Write) error {
+func (a *ownerSessionAgent) ApplyWrites(ctx context.Context, did string, writes []gatewayhttp.Write) error {
 	pds, err := a.remote(ctx)
 	if err != nil {
 		return err

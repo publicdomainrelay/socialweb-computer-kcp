@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"slices"
@@ -14,6 +15,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/irohdial"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/gatewayssh"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/request"
 )
@@ -126,9 +128,7 @@ func runGatewaySsh(ctx context.Context, a *app, vals clicfg.Values, rest []strin
 	if r.network != "" && (r.profile == "" || r.profile == appctl.SshGatewayProfileDefault) {
 		r.profile = appctl.SshGatewayProfileNetwork
 	}
-	if r.profile == "" {
-		r.profile = appctl.SshGatewayProfileDefault
-	}
+	r.profile = cmp.Or(r.profile, appctl.SshGatewayProfileDefault)
 	if !slices.Contains(appctl.SshGatewayProfiles, r.profile) {
 		return a.fail(exitRefused, "run gateway ssh: --profile %q: want one of %s", r.profile, strings.Join(appctl.SshGatewayProfiles, ", "))
 	}
@@ -152,9 +152,7 @@ func runGatewaySsh(ctx context.Context, a *app, vals clicfg.Values, rest []strin
 
 func (r *gatewaySshRun) name() (string, error) {
 	name := r.vals.String("name")
-	if name == "" {
-		name = gatewayssh.DefaultName
-	}
+	name = cmp.Or(name, gatewayssh.DefaultName)
 	return name, request.CheckName(name)
 }
 
@@ -171,7 +169,7 @@ func (r *gatewaySshRun) inNetwork(ctx context.Context) int {
 		return r.a.fail(exitRefused, "run gateway ssh: %v", err)
 	}
 	var netRec devinstance.Record
-	if err := devinstance.ReadJSON(l.Record, &netRec); err != nil {
+	if err := fsx.ReadJSON(l.Record, &netRec); err != nil {
 		return r.a.fail(exitRefused, "run gateway ssh: market network %s has no instance record (dev up --profile market-network first): %v", r.network, err)
 	}
 	if netRec.Profile != bootstrap.ProfileMarketNetwork || netRec.AdminKubeconfig == "" {

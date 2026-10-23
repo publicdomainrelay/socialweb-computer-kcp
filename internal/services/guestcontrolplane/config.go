@@ -1,6 +1,7 @@
 package guestcontrolplane
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestidentity"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -187,12 +189,8 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 	if guestSpec.Storage != nil && guestSpec.Storage.DataDir != "" {
 		cfg.StateDir = guestSpec.Storage.DataDir
 	}
-	if cfg.Workspace == "" {
-		cfg.Workspace = "root"
-	}
-	if cfg.Namespace == "" {
-		cfg.Namespace = "default"
-	}
+	cfg.Workspace = cmp.Or(cfg.Workspace, "root")
+	cfg.Namespace = cmp.Or(cfg.Namespace, "default")
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
@@ -216,56 +214,22 @@ func (c Config) check() error {
 }
 
 func (c *Config) defaults() {
-	if c.ServeHost == "" {
-		c.ServeHost = DefaultServeHost
-	}
-	if c.GuestLoginMount == "" {
-		c.GuestLoginMount = DefaultGuestLoginMount
-	}
-	if c.VaultServer == "" {
-		c.VaultServer = DefaultVaultServer
-	}
-	if c.VaultClient == "" {
-		c.VaultClient = DefaultVaultClient
-	}
-	if c.KVClient == "" {
-		c.KVClient = DefaultKVClient
-	}
-	if c.Role == "" {
-		c.Role = DefaultRole
-	}
-	if c.GrantSync <= 0 {
-		c.GrantSync = DefaultGrantSync
-	}
-	if c.IssuerRetry <= 0 {
-		c.IssuerRetry = DefaultIssuerRetry
-	}
+	c.ServeHost = cmp.Or(c.ServeHost, DefaultServeHost)
+	c.GuestLoginMount = cmp.Or(c.GuestLoginMount, DefaultGuestLoginMount)
+	c.VaultServer = cmp.Or(c.VaultServer, DefaultVaultServer)
+	c.VaultClient = cmp.Or(c.VaultClient, DefaultVaultClient)
+	c.KVClient = cmp.Or(c.KVClient, DefaultKVClient)
+	c.Role = cmp.Or(c.Role, DefaultRole)
+	c.GrantSync = opt.Positive(c.GrantSync, DefaultGrantSync)
+	c.IssuerRetry = opt.Positive(c.IssuerRetry, DefaultIssuerRetry)
 	if c.Now == nil {
 		c.Now = time.Now
 	}
-	if c.Workspace == "" {
-		c.Workspace = "root"
-	}
+	c.Workspace = cmp.Or(c.Workspace, "root")
 	if c.Issuer != "" {
 		c.Issuer = strings.TrimRight(c.Issuer, "/")
 	}
-	if c.StateDir == "" {
-		c.StateDir = c.Deps.StateDir
-	}
-}
-
-func Factory() component.ServiceFactory {
-	return func(ctx context.Context, deps component.Deps, spec component.ComponentSpec) (component.Service, error) {
-		cfg, err := ConfigFrom(deps, spec)
-		if err != nil {
-			return nil, err
-		}
-		return New(cfg)
-	}
-}
-
-func Register(runtime *component.Runtime) error {
-	return runtime.Register(Kind, Factory())
+	c.StateDir = cmp.Or(c.StateDir, c.Deps.StateDir)
 }
 
 func New(cfg Config) (*Service, error) {

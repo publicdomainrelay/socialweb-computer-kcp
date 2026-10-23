@@ -1,6 +1,9 @@
 package kcp
 
-import "strings"
+import (
+	"cmp"
+	"strings"
+)
 
 const (
 	RootWorkspace = "root"
@@ -28,12 +31,26 @@ func ServiceLabels(logicalCluster string) string {
 
 func ServiceFQDN(name, namespace, logicalCluster, domain string) string {
 	labels := ServiceLabels(logicalCluster)
-	if namespace == "" {
-		namespace = "default"
-	}
+	namespace = cmp.Or(namespace, "default")
 	host := name + "." + namespace
 	if labels != "" {
 		host += "." + labels
 	}
 	return host + "." + ServiceSegment + "." + domain
+}
+
+func KindServiceHost(kind, logicalCluster string) string {
+	kind = strings.ToLower(strings.TrimSpace(kind))
+	if kind == "" {
+		return ""
+	}
+	return ServiceFQDN(kind, "default", logicalCluster, DefaultServiceDomain)
+}
+
+func HandlerURL(logicalCluster, kind, name string) string {
+	host := KindServiceHost(kind, logicalCluster)
+	if host == "" || strings.TrimSpace(name) == "" {
+		return ""
+	}
+	return "http://" + host
 }

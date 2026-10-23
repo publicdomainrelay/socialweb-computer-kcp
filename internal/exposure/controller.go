@@ -6,11 +6,9 @@ import (
 	"log/slog"
 	"reflect"
 	"slices"
-	"strings"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -20,6 +18,8 @@ import (
 
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 const (
@@ -65,7 +65,7 @@ func (w *watcher) Run(ctx context.Context) error {
 		if err := w.round(ctx); err != nil && ctx.Err() == nil {
 			w.log.Warn("watching exposure resources", "gvr", w.gvr.Resource, "workspace", w.workspace, "err", err.Error())
 		}
-		if !sleep(ctx, w.retry) {
+		if !clock.Sleep(ctx, opt.Positive(w.retry, DefaultRetryAfter)) {
 			return nil
 		}
 	}
@@ -145,7 +145,7 @@ func ensureMetadata(ctx context.Context, ri dynamic.ResourceInterface, name, fin
 		changed := false
 		if finalizer != "" {
 			finalizers := cur.GetFinalizers()
-			has := containsString(finalizers, finalizer)
+			has := slices.Contains(finalizers, finalizer)
 			switch {
 			case wantFinalizer && !has:
 				finalizers = append(finalizers, finalizer)
@@ -218,44 +218,4 @@ func writeStatus(ctx context.Context, ri dynamic.ResourceInterface, name string,
 		}
 	}
 	return fmt.Errorf("exposure: the status of %s stayed in conflict", name)
-}
-
-func setCondition(conditions *[]metav1.Condition, generation int64, kind string, ok bool, reason, message string) {
-	value := metav1.ConditionFalse
-	if ok {
-		value = metav1.ConditionTrue
-	}
-	meta.SetStatusCondition(conditions, metav1.Condition{
-		Type:               kind,
-		Status:             value,
-		Reason:             reason,
-		Message:            message,
-		ObservedGeneration: generation,
-	})
-}
-
-func containsString(values []string, want string) bool {
-	return slices.Contains(values, want)
-}
-
-func sleep(ctx context.Context, d time.Duration) bool {
-	if d <= 0 {
-		d = DefaultRetryAfter
-	}
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-timer.C:
-		return true
-	}
-}
-
-func normalizeName(value string) string {
-	value = strings.TrimSpace(value)
-	if index := strings.LastIndex(value, "/"); index >= 0 {
-		value = value[index+1:]
-	}
-	return strings.TrimSpace(value)
 }

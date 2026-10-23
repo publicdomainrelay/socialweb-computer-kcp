@@ -27,6 +27,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devsup"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostos"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/pgunit"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/bidder"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/gatewaykcp"
@@ -93,7 +94,7 @@ func writeEnvFiles(l devinstance.Layout, ex []devinstance.Export) error {
 	if err := os.WriteFile(filepath.Join(l.StateDir, devinstance.EnvFile), []byte(devinstance.ShellExports(ex)), 0o600); err != nil {
 		return err
 	}
-	return devinstance.WriteJSON(filepath.Join(l.StateDir, devinstance.EnvJSONFile), exportMap(ex))
+	return fsx.WriteJSON(filepath.Join(l.StateDir, devinstance.EnvJSONFile), exportMap(ex), 0o600)
 }
 
 func exportMap(ex []devinstance.Export) map[string]string {
@@ -297,7 +298,7 @@ func (a *app) parentOf(ctx context.Context, vals clicfg.Values, child devinstanc
 		return devinstance.Parent{}, hostsvc.ProcHello{}, fmt.Errorf("instance %s cannot be its own parent", child.ID)
 	}
 	var prec devinstance.Record
-	if err := devinstance.ReadJSON(pl.Record, &prec); err != nil {
+	if err := fsx.ReadJSON(pl.Record, &prec); err != nil {
 		return devinstance.Parent{}, hostsvc.ProcHello{}, fmt.Errorf("parent %s has no instance record (dev host first): %w", pl.ID, err)
 	}
 	if !prec.Host || !prec.Ready || prec.AdminKubeconfig == "" {
@@ -509,7 +510,7 @@ func bringUp(ctx context.Context, a *app, vals clicfg.Values, host bool) (upRepo
 	}
 	defer m.Close()
 	var rec devinstance.Record
-	if err := devinstance.ReadJSON(l.Record, &rec); err != nil {
+	if err := fsx.ReadJSON(l.Record, &rec); err != nil {
 		rec = devinstance.Record{Created: started}
 	}
 	rec.Layout, rec.Profile, rec.Backend, rec.Devsup, rec.StandIns = l, profile, hostsvc.BackendProc, sup, standIns
@@ -553,11 +554,11 @@ func bringUp(ctx context.Context, a *app, vals clicfg.Values, host bool) (upRepo
 	bcfg := bootstrap.Config{Layout: l, KcpPath: kcpExe.Path, KinePath: kineExe.Path, PostgresRoot: pgExe.Path, Exe: exe,
 		ReadyTimeout: readyTimeout, Log: a.log}
 	if err := bootstrap.Ensure(ctx, m, bcfg, &rec); err != nil {
-		devinstance.WriteJSON(l.Record, rec)
+		fsx.WriteJSON(l.Record, rec, 0o600)
 		lock.Close()
 		return upReport{}, a.fail(exitFailed, "dev up: %v", err)
 	}
-	if err := devinstance.WriteJSON(l.Record, rec); err != nil {
+	if err := fsx.WriteJSON(l.Record, rec, 0o600); err != nil {
 		lock.Close()
 		return upReport{}, a.fail(exitFailed, "dev up: %v", err)
 	}
@@ -574,7 +575,7 @@ func bringUp(ctx context.Context, a *app, vals clicfg.Values, host bool) (upRepo
 	if err != nil {
 		return upReport{}, a.fail(exitFailed, "dev up: %v", err)
 	}
-	devinstance.ReadJSON(l.Record, &rec)
+	fsx.ReadJSON(l.Record, &rec)
 	if host || composes {
 		if err := devinstance.WaitHost(ctx, rec.AdminKubeconfig, readyTimeout); err != nil {
 			return upReport{}, a.fail(exitFailed, "%s: %v", verb, err)
@@ -643,7 +644,7 @@ func waitCore(ctx context.Context, l devinstance.Layout, m hostsvc.Manager, unit
 	deadline := time.Now().Add(timeout)
 	for {
 		var c devinstance.Core
-		if err := devinstance.ReadJSON(l.CoreRecord, &c); err == nil && c.InvocationID == invocation && !c.AdoptedAt.IsZero() {
+		if err := fsx.ReadJSON(l.CoreRecord, &c); err == nil && c.InvocationID == invocation && !c.AdoptedAt.IsZero() {
 			return c, nil
 		}
 		if st, err := m.Inspect(ctx, unit); err == nil && ((st.InvocationID != "" && st.InvocationID != invocation) ||
@@ -688,7 +689,7 @@ func runDevStatus(ctx context.Context, a *app, vals clicfg.Values, rest []string
 	}
 	r := statusReport{Instance: l.ID}
 	var rec devinstance.Record
-	if err := devinstance.ReadJSON(l.Record, &rec); err == nil {
+	if err := fsx.ReadJSON(l.Record, &rec); err == nil {
 		r.Found, r.Record = true, &rec
 		r.Ports = map[string]int{}
 		for _, u := range rec.Units {
@@ -696,7 +697,7 @@ func runDevStatus(ctx context.Context, a *app, vals clicfg.Values, rest []string
 		}
 	}
 	var core devinstance.Core
-	if err := devinstance.ReadJSON(l.CoreRecord, &core); err == nil {
+	if err := fsx.ReadJSON(l.CoreRecord, &core); err == nil {
 		r.Core = &core
 	}
 	sl := l
@@ -769,7 +770,7 @@ func downInstance(ctx context.Context, a *app, l devinstance.Layout, keepState b
 	started := time.Now()
 	r := downReport{Instance: l.ID, LeftoverKilled: []int{}, Remaining: []int{}}
 	var rec devinstance.Record
-	devinstance.ReadJSON(l.Record, &rec)
+	fsx.ReadJSON(l.Record, &rec)
 	vmOwners := []devinstance.Record{rec}
 	if rec.Profile == bootstrap.ProfileMarketNetwork {
 		vmOwners = append(vmOwners, networkChildren(l)...)
@@ -843,7 +844,7 @@ func networkChildren(l devinstance.Layout) []devinstance.Record {
 			continue
 		}
 		var rec devinstance.Record
-		if devinstance.ReadJSON(cl.Record, &rec) == nil && rec.VM != nil {
+		if fsx.ReadJSON(cl.Record, &rec) == nil && rec.VM != nil {
 			out = append(out, rec)
 		}
 	}
@@ -910,7 +911,7 @@ func runDevCore(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 		return a.fail(exitRefused, "internal dev-core: %v", err)
 	}
 	var rec devinstance.Record
-	if err := devinstance.ReadJSON(filepath.Join(vals.String("instance-dir"), "instance.json"), &rec); err != nil {
+	if err := fsx.ReadJSON(filepath.Join(vals.String("instance-dir"), "instance.json"), &rec); err != nil {
 		return a.fail(exitFailed, "internal dev-core: %v", err)
 	}
 	timeout, err := time.ParseDuration(vals.String("ready-timeout"))

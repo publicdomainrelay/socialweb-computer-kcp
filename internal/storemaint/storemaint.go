@@ -10,7 +10,8 @@ import (
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpstore"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpdatastore"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 const (
@@ -19,7 +20,7 @@ const (
 )
 
 type Config struct {
-	Kind        kcpstore.Kind
+	Kind        kcpdatastore.Kind
 	SqliteDirs  []string
 	PgSocketDir string
 	Interval    time.Duration
@@ -37,12 +38,8 @@ type Monitor struct {
 }
 
 func New(cfg Config) *Monitor {
-	if cfg.Interval <= 0 {
-		cfg.Interval = DefaultInterval
-	}
-	if cfg.First <= 0 {
-		cfg.First = DefaultFirst
-	}
+	cfg.Interval = opt.Positive(cfg.Interval, DefaultInterval)
+	cfg.First = opt.Positive(cfg.First, DefaultFirst)
 	return &Monitor{cfg: cfg}
 }
 
@@ -70,16 +67,16 @@ func (m *Monitor) Run(ctx context.Context) {
 
 func (m *Monitor) Pass(ctx context.Context) {
 	switch m.cfg.Kind {
-	case kcpstore.KindKineSqlite:
+	case kcpdatastore.KindKineSqlite:
 		m.passSqlite(ctx)
-	case kcpstore.KindKinePostgres:
+	case kcpdatastore.KindKinePostgres:
 		m.passPostgres(ctx)
 	}
 }
 
 func (m *Monitor) passSqlite(ctx context.Context) {
 	for _, dir := range m.cfg.SqliteDirs {
-		path := filepath.Join(dir, kcpstore.SqliteFile)
+		path := filepath.Join(dir, kcpdatastore.SqliteFile)
 		res, err := MaintainSqlite(ctx, path)
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
@@ -98,7 +95,7 @@ func (m *Monitor) passSqlite(ctx context.Context) {
 			"rows", res.After.Rows, "fileBytesBefore", res.Before.FileBytes, "fileBytesAfter", res.After.FileBytes,
 			"walBytesAfter", res.After.WalBytes, "freePagesBefore", res.Before.FreePages, "freePagesAfter", res.After.FreePages,
 			"pagesFreed", res.PagesFreed, "checkpointed", res.Checkpointed)
-		m.usage.Store(&v1alpha1.StoreUsage{Kind: string(kcpstore.KindKineSqlite), Path: path, Bytes: res.After.FileBytes,
+		m.usage.Store(&v1alpha1.StoreUsage{Kind: string(kcpdatastore.KindKineSqlite), Path: path, Bytes: res.After.FileBytes,
 			FreeBytes: res.After.FreeBytes(), Rows: res.After.Rows, AutoVacuum: res.After.AutoVacuum, Vacuums: m.vacuums,
 			ReclaimedBytes: m.reclaimed, LastVacuumAt: m.lastVacuumAt, SampledAt: now})
 		return
@@ -121,7 +118,7 @@ func (m *Monitor) passPostgres(ctx context.Context) {
 	}
 	m.log().Info("postgres kine table read", "autovacuum", r.Autovacuum, "totalBytes", r.TotalBytes, "liveTuples", r.LiveTuples,
 		"deadTuples", r.DeadTuples, "autovacuums", r.AutovacuumCount, "lastAutovacuum", r.LastAutovacuum)
-	m.usage.Store(&v1alpha1.StoreUsage{Kind: string(kcpstore.KindKinePostgres), Path: KineTable, Bytes: r.TotalBytes, Rows: r.LiveTuples,
+	m.usage.Store(&v1alpha1.StoreUsage{Kind: string(kcpdatastore.KindKinePostgres), Path: KineTable, Bytes: r.TotalBytes, Rows: r.LiveTuples,
 		DeadTuples: r.DeadTuples, AutoVacuum: r.Autovacuum, Vacuums: r.AutovacuumCount, LastVacuumAt: r.LastAutovacuum,
 		SampledAt: time.Now().UTC().Format(time.RFC3339)})
 }

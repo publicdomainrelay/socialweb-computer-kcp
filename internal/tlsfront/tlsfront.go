@@ -22,7 +22,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsreload"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/tlsreload"
 )
 
 const (

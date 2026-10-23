@@ -1,6 +1,7 @@
 package requester
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,6 +17,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestseed"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -261,9 +264,7 @@ func (r *contractRunner) requestOnce(ctx context.Context) (bool, error) {
 	authorizedKeys := append([]string(nil), contract.Spec.SshAuthorizedKeys...)
 	authorizedKeys = append(authorizedKeys, r.svc.cfg.GuestAuthorizedKeys...)
 	userData := contract.Spec.UserData
-	if userData == "" {
-		userData = r.svc.cfg.GuestUserData
-	}
+	userData = cmp.Or(userData, r.svc.cfg.GuestUserData)
 	if userData == "" {
 		userData = defaultUserData(authorizedKeys)
 	}
@@ -290,24 +291,18 @@ func (r *contractRunner) requestOnce(ctx context.Context) (bool, error) {
 			Timestamps: &v1alpha1.ContractTimestamps{Requested: r.svc.nowISO()},
 		}
 	}
-	if state.VMName == "" {
-		state.VMName = vmName
-	}
+	state.VMName = cmp.Or(state.VMName, vmName)
 	if state.RequesterDid == "" {
 		state.RequesterDid = r.svc.callbackDID()
 	}
-	if state.MarketDid == "" {
-		state.MarketDid = r.svc.cfg.MarketDID
-	}
+	state.MarketDid = cmp.Or(state.MarketDid, r.svc.cfg.MarketDID)
 	if state.Version == nil {
 		state.Version = new(1)
 	}
 	if state.Timestamps == nil {
 		state.Timestamps = &v1alpha1.ContractTimestamps{Requested: r.svc.nowISO()}
 	}
-	if state.Phase == "" {
-		state.Phase = v1alpha1.ContractRequested
-	}
+	state.Phase = cmp.Or(state.Phase, v1alpha1.ContractRequested)
 	r.setState(state)
 	r.step(ctx, "preparing", 1)
 
@@ -568,9 +563,7 @@ func (r *contractRunner) runGuestAndHold(ctx context.Context, state *v1alpha1.No
 	}
 	if r.secrets != nil && r.secretsFetched() == "" {
 		timeout := r.svc.cfg.VMReadyTimeout
-		if timeout <= 0 {
-			timeout = DefaultSecretsFetchTimeout
-		}
+		timeout = opt.Positive(timeout, DefaultSecretsFetchTimeout)
 		select {
 		case <-r.secrets.fetched:
 			r.setSecretsFetched(r.secrets.fetchedAtValue())
@@ -750,7 +743,7 @@ func (r *contractRunner) collectBids(ctx context.Context, rfpURI string, respons
 	deny := r.snapshot().Spec.DenyBidderDids
 	add := func(bids []BidRecord) {
 		for _, bid := range bids {
-			if bid.URI == "" || containsString(deny, bid.DID) {
+			if bid.URI == "" || slices.Contains(deny, bid.DID) {
 				continue
 			}
 			byURI[bid.URI] = bid
@@ -1247,22 +1240,22 @@ func (r *contractRunner) applyConditions(status *v1alpha1.ComputeContractStatus,
 	now := r.svc.now()
 	addContractConditions(status, generation, phase, message, now, atCapacity)
 	if r.resumed {
-		setCondition(status, generation, v1alpha1.ComputeContractConditionResumed, metav1.ConditionTrue, "Recovered", "the recorded status.contract was resumed", now)
+		conds.SetStatusAt(&status.Conditions, generation, v1alpha1.ComputeContractConditionResumed, metav1.ConditionTrue, "Recovered", "the recorded status.contract was resumed", now)
 	}
 	if phase == v1alpha1.ComputeContractReleasing {
 		if release := r.releaseStatus(); release != nil && release.LastError != "" {
-			setCondition(status, generation, v1alpha1.ComputeContractConditionReleaseFailed, metav1.ConditionTrue, "DestroyFailed", release.LastError, now)
+			conds.SetStatusAt(&status.Conditions, generation, v1alpha1.ComputeContractConditionReleaseFailed, metav1.ConditionTrue, "DestroyFailed", release.LastError, now)
 		}
 	}
 	if phase == v1alpha1.ComputeContractReleased {
 		acknowledged := state != nil && ((state.Release != nil && state.Release.OK) || state.Termination != nil)
 		if acknowledged {
-			setCondition(status, generation, v1alpha1.ComputeContractConditionReleaseAcknowledged, metav1.ConditionTrue, "Acknowledged", message, now)
-			setCondition(status, generation, v1alpha1.ComputeContractConditionReleaseFailed, metav1.ConditionFalse, "Acknowledged", message, now)
+			conds.SetStatusAt(&status.Conditions, generation, v1alpha1.ComputeContractConditionReleaseAcknowledged, metav1.ConditionTrue, "Acknowledged", message, now)
+			conds.SetStatusAt(&status.Conditions, generation, v1alpha1.ComputeContractConditionReleaseFailed, metav1.ConditionFalse, "Acknowledged", message, now)
 		}
 	}
 	if state != nil && state.Termination != nil {
-		setCondition(status, generation, v1alpha1.ComputeContractConditionTerminated, metav1.ConditionTrue, "BidderTerminated", terminationMessage(state.Termination), now)
+		conds.SetStatusAt(&status.Conditions, generation, v1alpha1.ComputeContractConditionTerminated, metav1.ConditionTrue, "BidderTerminated", terminationMessage(state.Termination), now)
 	}
 }
 

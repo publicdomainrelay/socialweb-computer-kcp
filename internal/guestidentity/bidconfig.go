@@ -1,6 +1,7 @@
 package guestidentity
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"strings"
@@ -66,9 +67,7 @@ func BidConfigFor(issuerURL, bidderDID, acceptPath, createdAt string) (BidConfig
 		return BidConfig{}, fmt.Errorf("guestidentity: the bid config's issuer: %w", err)
 	}
 	issuer := OIDCIssuer(ingress)
-	if acceptPath == "" {
-		acceptPath = guestseed.AcceptPathVM
-	}
+	acceptPath = cmp.Or(acceptPath, guestseed.AcceptPathVM)
 	if createdAt == "" {
 		createdAt = time.Now().UTC().Format(time.RFC3339)
 	}

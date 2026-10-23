@@ -19,6 +19,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/irohdial"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
@@ -321,7 +322,7 @@ func sshGatewayDesired(o v1alpha1.SshGateway, plan accountPlan, ident *v1alpha1.
 
 func (ctl *Controller) reconcileSshGateway(ctx context.Context, u *unstructured.Unstructured) error {
 	var o v1alpha1.SshGateway
-	if err := fromUnstructured(u, &o); err != nil {
+	if err := unstruct.Into(u, &o); err != nil {
 		return err
 	}
 	owner := ownerOf(u)

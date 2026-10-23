@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/nodemarket"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/systemdunit"
@@ -241,7 +242,7 @@ func exchangeWorkloadToken(ctx context.Context, cfg Config, audience string, log
 		waited++
 		log.Info("waiting for the guest login helper", "path", cfg.GuestLoginHelperPath,
 			"attempt", waited, "of", cfg.GuestLoginWaitAttempts)
-		if err := sleep(ctx, cfg.GuestLoginWaitInterval()); err != nil {
+		if err := clock.SleepErr(ctx, cfg.GuestLoginWaitInterval()); err != nil {
 			return "", err
 		}
 	}
@@ -268,7 +269,7 @@ func loginOpenBao(ctx context.Context, cfg Config, client *openbao.Client, doc c
 		}
 		log.Info("the OpenBao link has not answered yet", "address", cfg.OpenBaoLinkAddress,
 			"attempt", attempt, "of", cfg.LinkWaitAttempts, "err", errString(err))
-		if err := sleep(ctx, cfg.LinkWaitInterval()); err != nil {
+		if err := clock.SleepErr(ctx, cfg.LinkWaitInterval()); err != nil {
 			return "", err
 		}
 	}
@@ -292,7 +293,7 @@ func readNodeKV(ctx context.Context, cfg Config, client *openbao.Client, doc cla
 		}
 		log.Info("the OpenBao link has not answered with the node secrets yet", "address", cfg.OpenBaoLinkAddress,
 			"attempt", attempt, "of", cfg.LinkWaitAttempts, "err", errString(err))
-		if err := sleep(ctx, cfg.LinkWaitInterval()); err != nil {
+		if err := clock.SleepErr(ctx, cfg.LinkWaitInterval()); err != nil {
 			return nil, err
 		}
 	}
@@ -396,7 +397,7 @@ func superviseLink(ctx context.Context, cfg Config, name string, log *slog.Logge
 		}
 		if err != nil {
 			log.Error("the link cannot start", "link", name, "err", err.Error())
-			if sleep(ctx, backoff.Next()) != nil {
+			if clock.SleepErr(ctx, backoff.Next()) != nil {
 				return
 			}
 			continue
@@ -414,23 +415,9 @@ func superviseLink(ctx context.Context, cfg Config, name string, log *slog.Logge
 		}
 		delay := backoff.Next()
 		log.Warn("the link child exited; restarting it", "link", name, "err", errString(err), "after", delay.String())
-		if sleep(ctx, delay) != nil {
+		if clock.SleepErr(ctx, delay) != nil {
 			return
 		}
-	}
-}
-
-func sleep(ctx context.Context, d time.Duration) error {
-	if d <= 0 {
-		return nil
-	}
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
 	}
 }
 

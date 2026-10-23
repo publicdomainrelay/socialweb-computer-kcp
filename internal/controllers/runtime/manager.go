@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -87,9 +88,7 @@ func NewManager(cfg Config) (*Manager, error) {
 	}
 	log = log.With("component", "controller-manager")
 	exportWorkspace := strings.TrimSpace(cfg.ExportWorkspace)
-	if exportWorkspace == "" {
-		exportWorkspace = DefaultExportWorkspace
-	}
+	exportWorkspace = cmp.Or(exportWorkspace, DefaultExportWorkspace)
 	base := rest.CopyConfig(cfg.Rest)
 	host, _, _ := strings.Cut(strings.TrimSuffix(base.Host, "/"), "/clusters/")
 	base.Host = host

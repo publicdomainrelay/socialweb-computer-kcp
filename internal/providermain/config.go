@@ -1,6 +1,7 @@
 package providermain
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -14,6 +15,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/foldmain"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostprocess"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/logx"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/portallocator"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/scale"
 )
@@ -214,33 +216,19 @@ func loadFor(get func(string) string, inv foldmain.Invocation) (Config, error) {
 		ScaleMaxNodes:          scale.DefaultMaxNodes,
 		ScalePodsPerNode:       scale.DefaultPodsPerNode,
 	}
-	if cfg.GrantPath == "" {
-		cfg.GrantPath = DefaultGrantPath
-	}
-	if cfg.UnitPrefix == "" {
-		cfg.UnitPrefix = DefaultUnitPrefix
-	}
-	if cfg.HostProcessWorkspace == "" {
-		cfg.HostProcessWorkspace = hostprocess.DefaultWorkspace
-	}
-	if cfg.MountContext == "" {
-		cfg.MountContext = kcpclient.ShardAdminContext
-	}
+	cfg.GrantPath = cmp.Or(cfg.GrantPath, DefaultGrantPath)
+	cfg.UnitPrefix = cmp.Or(cfg.UnitPrefix, DefaultUnitPrefix)
+	cfg.HostProcessWorkspace = cmp.Or(cfg.HostProcessWorkspace, hostprocess.DefaultWorkspace)
+	cfg.MountContext = cmp.Or(cfg.MountContext, kcpclient.ShardAdminContext)
 	cfg.CloudControllerManagerExec = inv.Reexec("internal", "cloud-controller-manager")
 	cfg.FrontExec = inv.Reexec("internal", "apiserver-front")
 	cfg.HostnameExec = inv.Reexec("internal", "ns-exec")
 	if cfg.CloudControllerManager != "" {
 		cfg.CloudControllerManagerExec = []string{cfg.CloudControllerManager}
 	}
-	if cfg.ESOManifestDir == "" {
-		cfg.ESOManifestDir = DefaultESOManifestDir
-	}
-	if cfg.ESONamespace == "" {
-		cfg.ESONamespace = eso.DefaultControllerNamespace
-	}
-	if cfg.MarketAdvertiseAddress == "" {
-		cfg.MarketAdvertiseAddress = portallocator.MarketAdvertiseAddress
-	}
+	cfg.ESOManifestDir = cmp.Or(cfg.ESOManifestDir, DefaultESOManifestDir)
+	cfg.ESONamespace = cmp.Or(cfg.ESONamespace, eso.DefaultControllerNamespace)
+	cfg.MarketAdvertiseAddress = cmp.Or(cfg.MarketAdvertiseAddress, portallocator.MarketAdvertiseAddress)
 	cfg.MarketDenyBidderDids = splitList(get(envMarketDenyBidderDids))
 	switch {
 	case cfg.StoreEndpoint != "" && cfg.Datastore != "" && cfg.StoreEndpoint != cfg.Datastore:
@@ -261,9 +249,7 @@ func loadFor(get func(string) string, inv foldmain.Invocation) (Config, error) {
 		if d < 0 {
 			return Config{}, fmt.Errorf("%s must not be negative", envScaleHold)
 		}
-		if d == 0 {
-			d = scale.NoHold
-		}
+		d = cmp.Or(d, scale.NoHold)
 		cfg.ScaleHold = d
 	}
 
@@ -393,8 +379,8 @@ func loadFor(get func(string) string, inv foldmain.Invocation) (Config, error) {
 	if cfg.MarketReleaseTimeout, err = optionalDuration(get, envMarketReleaseTimeout); err != nil {
 		return Config{}, err
 	}
-	if cfg.LogLevel, err = level(get(envLogLevel)); err != nil {
-		return Config{}, err
+	if cfg.LogLevel, err = logx.ParseLevel(get(envLogLevel)); err != nil {
+		return Config{}, fmt.Errorf("%s: %w", envLogLevel, err)
 	}
 	return cfg, nil
 }
@@ -487,19 +473,4 @@ func optionalDuration(get func(string) string, name string) (time.Duration, erro
 		return 0, fmt.Errorf("%s: %q must be positive", name, raw)
 	}
 	return d, nil
-}
-
-func level(raw string) (slog.Level, error) {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "", "info":
-		return slog.LevelInfo, nil
-	case "debug":
-		return slog.LevelDebug, nil
-	case "warn", "warning":
-		return slog.LevelWarn, nil
-	case "error":
-		return slog.LevelError, nil
-	default:
-		return 0, fmt.Errorf("%s: %q is not one of debug, info, warn, error", envLogLevel, raw)
-	}
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/bluesky-social/indigo/atproto/syntax"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/serviceauth"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
 )
 
 type getServiceAuthRequest struct {
@@ -82,5 +83,5 @@ func (s *Server) handleGetServiceAuth(w http.ResponseWriter, r *http.Request, in
 		writeXRPCError(w, http.StatusInternalServerError, "InternalError", "failed to sign service auth token")
 		return
 	}
-	writeJSON(w, http.StatusOK, getServiceAuthOutput{Token: token})
+	httpjson.Write(w, http.StatusOK, getServiceAuthOutput{Token: token})
 }

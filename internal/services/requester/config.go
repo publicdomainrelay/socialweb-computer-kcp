@@ -1,12 +1,12 @@
 package requester
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -19,11 +19,13 @@ import (
 
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	atprotooauth "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauthclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/sshtransport"
 
@@ -285,7 +287,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 	if err := spec.Spec.Decode(&decoded); err != nil {
 		return Config{}, fmt.Errorf("requester: decoding the component spec: %w", err)
 	}
-	if err := validateMarketComms("requester", decoded.Comms); err != nil {
+	if err := market.ValidateComms("requester", decoded.Comms); err != nil {
 		return Config{}, err
 	}
 	cfg := Config{
@@ -302,9 +304,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		BidderDIDs:        append([]string(nil), decoded.BidderDIDs...),
 		PolicyArgs:        map[string]string{},
 	}
-	if cfg.StateDir == "" {
-		cfg.StateDir = deps.StateDir
-	}
+	cfg.StateDir = cmp.Or(cfg.StateDir, deps.StateDir)
 	if decoded.Identity != nil {
 		cfg.Identity = *decoded.Identity
 		cfg.DID = decoded.Identity.Did
@@ -329,9 +329,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 	if decoded.Storage != nil && decoded.Storage.DataDir != "" {
 		cfg.StateDir = decoded.Storage.DataDir
 	}
-	if cfg.DID == "" {
-		cfg.DID = cfg.Identity.Did
-	}
+	cfg.DID = cmp.Or(cfg.DID, cfg.Identity.Did)
 	cfg.RepoDID = cfg.DID
 	cfg.MarketDID = cfg.DID
 	cfg.IdentityMode = IdentityModeLocal
@@ -369,7 +367,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 			if deps.Log != nil {
 				deps.Log.Warn("requester_could_not_read_the_oauth_session", "err", err)
 			}
-		} else if data, ok := credentialSessionData(credential.Data); ok {
+		} else if data, ok := oauthclient.SessionFromSecret(credential.Data); ok {
 			cfg.OAuthSessionData = &data
 			cfg.DID = data.AccountDID
 			cfg.RepoDID = data.AccountDID
@@ -453,12 +451,8 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		}
 		cfg.GuestAuthorizedKeys = keys
 	}
-	if cfg.Workspace == "" {
-		cfg.Workspace = "root"
-	}
-	if cfg.Namespace == "" {
-		cfg.Namespace = "default"
-	}
+	cfg.Workspace = cmp.Or(cfg.Workspace, "root")
+	cfg.Namespace = cmp.Or(cfg.Namespace, "default")
 	cfg.defaults()
 	return cfg, nil
 }
@@ -499,7 +493,7 @@ func networkResolver(n v1alpha1.MarketNetworkValue, fallback networkdial.Resolve
 		entries = append(entries, networkdial.Host{Name: host.Name, Address: host.Address})
 	}
 	if name := hostnameOf(n.GuestTLSURL()); name != "" {
-		if address := hostWithPort(n.GuestTLSURL(), n.Hosts); address != "" {
+		if address := hostport.ForURL(n.GuestTLSURL(), n.Hosts); address != "" {
 			entries = append(entries, networkdial.Host{Name: name, Address: address})
 		}
 	}
@@ -514,31 +508,6 @@ func networkResolver(n v1alpha1.MarketNetworkValue, fallback networkdial.Resolve
 		return nil
 	}
 	return chainedResolver(resolvers)
-}
-
-func hostWithPort(raw string, hosts []v1alpha1.NetworkHost) string {
-	parsed, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil {
-		return ""
-	}
-	port := parsed.Port()
-	if port == "" {
-		switch parsed.Scheme {
-		case "https":
-			port = "443"
-		case "http":
-			port = "80"
-		}
-	}
-	if port == "" {
-		return ""
-	}
-	for _, host := range hosts {
-		if _, candidate, splitErr := net.SplitHostPort(host.Address); splitErr == nil && candidate == port {
-			return host.Address
-		}
-	}
-	return ""
 }
 
 func networkTLSConfig(n v1alpha1.MarketNetworkValue) *tls.Config {
@@ -592,12 +561,8 @@ func (c Config) withDeps(deps component.Deps) Config {
 	if out.Deps.TLS == nil {
 		out.Deps.TLS = deps.TLS
 	}
-	if out.Deps.StateDir == "" {
-		out.Deps.StateDir = deps.StateDir
-	}
-	if out.StateDir == "" {
-		out.StateDir = out.Deps.StateDir
-	}
+	out.Deps.StateDir = cmp.Or(out.Deps.StateDir, deps.StateDir)
+	out.StateDir = cmp.Or(out.StateDir, out.Deps.StateDir)
 	if out.Log == nil {
 		out.Log = out.Deps.Log
 	}
@@ -606,72 +571,28 @@ func (c Config) withDeps(deps component.Deps) Config {
 }
 
 func (c *Config) defaults() {
-	if c.ServeHost == "" {
-		c.ServeHost = DefaultServeHost
-	}
-	if c.MaxConcurrent <= 0 {
-		c.MaxConcurrent = DefaultMaxConcurrent
-	}
-	if c.PerAccount <= 0 {
-		c.PerAccount = DefaultPerAccount
-	}
-	if c.ContractPoll <= 0 {
-		c.ContractPoll = DefaultContractPoll
-	}
-	if c.PolicyPoll <= 0 {
-		c.PolicyPoll = DefaultPolicyPoll
-	}
-	if c.PolicyTimeout <= 0 {
-		c.PolicyTimeout = DefaultPolicyTimeout
-	}
-	if c.VMReadyTimeout <= 0 {
-		c.VMReadyTimeout = DefaultVMReadyTimeout
-	}
-	if c.HostKeysTimeout <= 0 {
-		c.HostKeysTimeout = DefaultHostKeysTimeout
-	}
-	if c.BidWindow <= 0 {
-		c.BidWindow = DefaultBidWindow
-	}
-	if c.ReceiptTimeout <= 0 {
-		c.ReceiptTimeout = DefaultReceiptTimeout
-	}
-	if c.ReceiptPoll <= 0 {
-		c.ReceiptPoll = DefaultReceiptPoll
-	}
-	if c.ReleaseTimeout <= 0 {
-		c.ReleaseTimeout = DefaultReleaseTimeout
-	}
-	if c.ReleaseRetryFirst <= 0 {
-		c.ReleaseRetryFirst = DefaultReleaseRetryFirst
-	}
-	if c.ReleaseRetryMax <= 0 {
-		c.ReleaseRetryMax = DefaultReleaseRetryMax
-	}
-	if c.ReleaseBound <= 0 {
-		c.ReleaseBound = DefaultReleaseBound
-	}
-	if c.SessionCap <= 0 {
-		c.SessionCap = DefaultSessionCap
-	}
-	if c.SessionIdle <= 0 {
-		c.SessionIdle = DefaultSessionIdle
-	}
-	if c.DirectoryTTL <= 0 {
-		c.DirectoryTTL = DefaultDirectoryTTL
-	}
-	if c.DirectoryKeys <= 0 {
-		c.DirectoryKeys = DefaultDirectoryKeys
-	}
-	if c.ShutdownTimeout <= 0 {
-		c.ShutdownTimeout = DefaultShutdownTimeout
-	}
-	if c.PolicyWorkflow == "" {
-		c.PolicyWorkflow = DefaultPolicyWorkflow
-	}
-	if c.SSHDefaultCommand == "" {
-		c.SSHDefaultCommand = DefaultGuestSSHCommand
-	}
+	c.ServeHost = cmp.Or(c.ServeHost, DefaultServeHost)
+	c.MaxConcurrent = opt.Positive(c.MaxConcurrent, DefaultMaxConcurrent)
+	c.PerAccount = opt.Positive(c.PerAccount, DefaultPerAccount)
+	c.ContractPoll = opt.Positive(c.ContractPoll, DefaultContractPoll)
+	c.PolicyPoll = opt.Positive(c.PolicyPoll, DefaultPolicyPoll)
+	c.PolicyTimeout = opt.Positive(c.PolicyTimeout, DefaultPolicyTimeout)
+	c.VMReadyTimeout = opt.Positive(c.VMReadyTimeout, DefaultVMReadyTimeout)
+	c.HostKeysTimeout = opt.Positive(c.HostKeysTimeout, DefaultHostKeysTimeout)
+	c.BidWindow = opt.Positive(c.BidWindow, DefaultBidWindow)
+	c.ReceiptTimeout = opt.Positive(c.ReceiptTimeout, DefaultReceiptTimeout)
+	c.ReceiptPoll = opt.Positive(c.ReceiptPoll, DefaultReceiptPoll)
+	c.ReleaseTimeout = opt.Positive(c.ReleaseTimeout, DefaultReleaseTimeout)
+	c.ReleaseRetryFirst = opt.Positive(c.ReleaseRetryFirst, DefaultReleaseRetryFirst)
+	c.ReleaseRetryMax = opt.Positive(c.ReleaseRetryMax, DefaultReleaseRetryMax)
+	c.ReleaseBound = opt.Positive(c.ReleaseBound, DefaultReleaseBound)
+	c.SessionCap = opt.Positive(c.SessionCap, DefaultSessionCap)
+	c.SessionIdle = opt.Positive(c.SessionIdle, DefaultSessionIdle)
+	c.DirectoryTTL = opt.Positive(c.DirectoryTTL, DefaultDirectoryTTL)
+	c.DirectoryKeys = opt.Positive(c.DirectoryKeys, DefaultDirectoryKeys)
+	c.ShutdownTimeout = opt.Positive(c.ShutdownTimeout, DefaultShutdownTimeout)
+	c.PolicyWorkflow = cmp.Or(c.PolicyWorkflow, DefaultPolicyWorkflow)
+	c.SSHDefaultCommand = cmp.Or(c.SSHDefaultCommand, DefaultGuestSSHCommand)
 	if c.GuestKeyDir == "" {
 		if c.StateDir != "" {
 			c.GuestKeyDir = filepath.Join(c.StateDir, "guest-keys")
@@ -716,18 +637,6 @@ func (c *Config) defaults() {
 	}
 	if c.Log == nil && c.Deps.Log != nil {
 		c.Log = c.Deps.Log
-	}
-}
-
-func validateMarketComms(prefix string, comms *v1alpha1.MarketComms) error {
-	if comms == nil || strings.TrimSpace(string(comms.Mode)) == "" {
-		return nil
-	}
-	switch comms.Mode {
-	case v1alpha1.MarketCommsModeXRPC, v1alpha1.MarketCommsModeFirehose, v1alpha1.MarketCommsModeBoth:
-		return nil
-	default:
-		return fmt.Errorf("%s: unknown comms mode %q", prefix, comms.Mode)
 	}
 }
 
@@ -801,27 +710,6 @@ func loadGuestSSHKeys(path string) ([]string, error) {
 func absoluteHTTPURL(raw string) bool {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	return err == nil && u.Host != "" && (u.Scheme == "http" || u.Scheme == "https")
-}
-
-func handlerURL(workspace, kind, name string) string {
-	kind = strings.ToLower(strings.TrimSpace(kind))
-	name = strings.TrimSpace(name)
-	if kind == "" || name == "" {
-		return ""
-	}
-	return "http://" + kcp.ServiceFQDN(kind, "default", workspace, kcp.DefaultServiceDomain)
-}
-
-func Factory(ctx context.Context, deps component.Deps, spec component.ComponentSpec) (component.Service, error) {
-	cfg, err := ConfigFrom(deps, spec)
-	if err != nil {
-		return nil, err
-	}
-	return New(cfg)
-}
-
-func Register(runtime *component.Runtime) error {
-	return runtime.Register(Kind, Factory)
 }
 
 func directoryFor(raw string, keys int, ttl time.Duration) identity.Directory {

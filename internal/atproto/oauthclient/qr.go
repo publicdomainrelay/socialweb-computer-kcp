@@ -19,6 +19,7 @@ import (
 	"github.com/bluesky-social/indigo/atproto/syntax"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/serviceauth"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 const (
@@ -242,13 +243,9 @@ func (q *QRTransfer) Poll(ctx context.Context) (QRSession, error) {
 		return QRSession{}, errors.New("oauthclient: no qr transfer")
 	}
 	ttl := q.TTL
-	if ttl <= 0 {
-		ttl = DefaultQRTTL
-	}
+	ttl = opt.Positive(ttl, DefaultQRTTL)
 	interval := q.PollInterval
-	if interval <= 0 {
-		interval = DefaultQRPollInterval
-	}
+	interval = opt.Positive(interval, DefaultQRPollInterval)
 	deadline := time.Now().Add(ttl)
 	for {
 		session, ok, err := q.PollOnce(ctx)

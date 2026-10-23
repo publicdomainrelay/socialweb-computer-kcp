@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/atproto"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/cache"
@@ -65,9 +66,7 @@ func NewResolver(opts ResolverOptions) *Resolver {
 		client = atproto.NewClient()
 	}
 	ttl := opts.TTL
-	if ttl <= 0 {
-		ttl = defaultTrustCacheTTL
-	}
+	ttl = opt.Positive(ttl, defaultTrustCacheTTL)
 	log := opts.Log
 	if log == nil {
 		log = func(string, string, map[string]any) {}

@@ -1,6 +1,7 @@
 package bidder
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -27,6 +28,9 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/oauthcallback"
@@ -77,26 +81,15 @@ func (s *Service) routes() *http.ServeMux {
 		mux.HandleFunc("POST "+SubmitEventPath, s.handleSubmitEvent)
 	}
 	mux.HandleFunc("GET "+HealthPath, func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		httpjson.Write(w, http.StatusOK, map[string]any{"ok": true})
 	})
 	mux.HandleFunc("GET "+OAuthMetadataPath, s.oauthClientMetadata)
 	mux.HandleFunc("GET /oauth/callback/{identity}", s.oauthCallback)
 	return mux
 }
 
-func writeJSON(w http.ResponseWriter, status int, body any) {
-	raw, err := json.Marshal(body)
-	if err != nil {
-		http.Error(w, `{"error":"InternalError"}`, http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_, _ = w.Write(raw)
-}
-
 func writeXRPCError(w http.ResponseWriter, status int, code, message string) {
-	writeJSON(w, status, map[string]any{"error": code, "message": message})
+	httpjson.Write(w, status, map[string]any{"error": code, "message": message})
 }
 
 type serviceCallError struct {
@@ -174,7 +167,7 @@ func (s *Service) handleSubmitRFP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.kickBids()
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "name": bid.Name, "phase": string(v1alpha1.BidPhaseDeciding)})
+	httpjson.Write(w, http.StatusOK, map[string]any{"ok": true, "name": bid.Name, "phase": string(v1alpha1.BidPhaseDeciding)})
 }
 
 func (s *Service) handleSubmitBid(w http.ResponseWriter, r *http.Request) {
@@ -199,7 +192,7 @@ func (s *Service) handleSubmitBid(w http.ResponseWriter, r *http.Request) {
 		writeXRPCError(w, http.StatusBadRequest, "InvalidRequest", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	httpjson.Write(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (s *Service) handleSubmitAccept(w http.ResponseWriter, r *http.Request) {
@@ -232,7 +225,7 @@ func (s *Service) handleSubmitAccept(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.kickStateSync()
-	writeJSON(w, http.StatusAccepted, map[string]any{"ok": true, "id": name, "acceptUri": body.AcceptURI, "acceptCid": body.AcceptCID})
+	httpjson.Write(w, http.StatusAccepted, map[string]any{"ok": true, "id": name, "acceptUri": body.AcceptURI, "acceptCid": body.AcceptCID})
 }
 
 func (s *Service) handleSubmitEvent(w http.ResponseWriter, r *http.Request) {
@@ -271,7 +264,7 @@ func (s *Service) handleSubmitEvent(w http.ResponseWriter, r *http.Request) {
 		writeXRPCError(w, http.StatusServiceUnavailable, "Unavailable", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	httpjson.Write(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 var errMarketEventForbidden = errors.New("bidder: not the accept author")
@@ -315,7 +308,7 @@ func (s *Service) applyMarketEvent(ctx context.Context, uri, cid string, record 
 
 func (s *Service) oauthClientMetadata(w http.ResponseWriter, r *http.Request) {
 	base := "https://" + r.Host
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpjson.Write(w, http.StatusOK, map[string]any{
 		"client_id":                  base + "/oauth-client-metadata.json",
 		"client_name":                "socialweb-computer bidder",
 		"redirect_uris":              []string{base + "/oauth/callback/bidder"},
@@ -326,6 +319,7 @@ func (s *Service) oauthClientMetadata(w http.ResponseWriter, r *http.Request) {
 		"application_type":           "web",
 		"dpop_bound_access_tokens":   true,
 	})
+
 }
 
 func (s *Service) oauthCallback(w http.ResponseWriter, r *http.Request) {
@@ -516,9 +510,7 @@ func (s *Service) serviceAuthToken(ctx context.Context, host, lxm string) (strin
 			return "", 0, err
 		}
 		ttl := time.Until(expires)
-		if ttl <= 0 {
-			ttl = -1
-		}
+		ttl = opt.Positive(ttl, -1)
 		return token, ttl, nil
 	})
 }
@@ -787,23 +779,19 @@ func (s *Service) startRelay(ctx context.Context) error {
 		if signer == nil {
 			return errors.New("the relay has no service-auth token source")
 		}
-		aud := "did:web:" + hostnameOnly(relay.IngressProxyHost)
+		aud := "did:web:" + hostport.URLHostname(relay.IngressProxyHost)
 		getToken = func(ctx context.Context, nsid string) (string, error) {
 			return ingress.SignServiceAuth(signer.PrivateKey, did, aud, nsid, 5*time.Minute)
 		}
 	}
 	label := relay.Label
-	if label == "" {
-		label = "market"
-	}
+	label = cmp.Or(label, "market")
 	connectHost := relay.ConnectHost
-	if connectHost == "" {
-		connectHost = relay.IngressProxyHost
-	}
+	connectHost = cmp.Or(connectHost, relay.IngressProxyHost)
 	httpClient := relay.HTTPClient
 	var dialer *websocket.Dialer
 	if relay.DialAddress != "" && connectHost != "" {
-		hosts, hostErr := networkdial.NewHostMap([]networkdial.Host{{Name: hostnameOnly(connectHost), Address: relay.DialAddress}})
+		hosts, hostErr := networkdial.NewHostMap([]networkdial.Host{{Name: hostport.URLHostname(connectHost), Address: relay.DialAddress}})
 		if hostErr != nil {
 			return hostErr
 		}
@@ -869,9 +857,7 @@ func (s *Service) forwardRelay(ctx context.Context, request *ingress.Request) (*
 		return nil, errors.New("the relay request is empty")
 	}
 	path := request.Path
-	if path == "" {
-		path = "/"
-	}
+	path = cmp.Or(path, "/")
 	if !strings.HasPrefix(path, "/") {
 		path = "/" + path
 	}
@@ -902,17 +888,6 @@ func (s *Service) forwardRelay(ctx context.Context, request *ingress.Request) (*
 		return nil, err
 	}
 	return &ingress.Response{Status: result.StatusCode, Body: json.RawMessage(raw), ContentType: result.Header.Get("Content-Type")}, nil
-}
-
-func hostnameOnly(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if parsed, err := url.Parse(raw); err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Hostname() != "" {
-		return parsed.Hostname()
-	}
-	if parsed, err := url.Parse("//" + raw); err == nil && parsed.Hostname() != "" {
-		return parsed.Hostname()
-	}
-	return strings.Trim(raw, "[]")
 }
 
 type signerKeypair struct {

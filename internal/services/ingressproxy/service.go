@@ -1,14 +1,12 @@
 package ingressproxy
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
-	"net"
 	"net/url"
-	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -18,10 +16,12 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/exposure"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/servetls"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/ingressproxy/iroh"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/ingressproxy/opentunnel"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/ingressproxy/xrpcsubscription"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsreload"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -91,9 +91,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		stateDir = spec.StateDir
 	}
 	workspace := strings.TrimSpace(spec.Workspace)
-	if workspace == "" {
-		workspace = "root"
-	}
+	workspace = cmp.Or(workspace, "root")
 	cfg := Config{
 		Deps:             deps,
 		StateDir:         stateDir,
@@ -131,30 +129,30 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 			cfg.IngressProxyHost = strings.TrimSpace(decoded.Network.IngressProxyHost)
 		}
 		if cfg.Hostname == "" {
-			cfg.Hostname = hostnameOnly(strings.TrimSpace(decoded.Network.IngressProxyHost))
+			cfg.Hostname = hostport.HostnameOnly(strings.TrimSpace(decoded.Network.IngressProxyHost))
 		}
 		if cfg.RelayURL == "" && len(decoded.Network.RelayURLs) > 0 {
 			cfg.RelayURL = strings.TrimSpace(decoded.Network.RelayURLs[0])
 		}
 	}
 	if cfg.Hostname == "" {
-		cfg.Hostname = hostnameOnly(cfg.IngressProxyHost)
+		cfg.Hostname = hostport.HostnameOnly(cfg.IngressProxyHost)
 	}
 	if cfg.Hostname == "" && len(cfg.Hostnames) > 0 {
-		cfg.Hostname = hostnameOnly(strings.TrimSpace(cfg.Hostnames[0]))
+		cfg.Hostname = hostport.HostnameOnly(strings.TrimSpace(cfg.Hostnames[0]))
 	}
 	if cfg.Hostname == "" && decoded.Identity != nil {
-		cfg.Hostname = hostnameOnly(strings.TrimSpace(decoded.Identity.Handle))
+		cfg.Hostname = hostport.HostnameOnly(strings.TrimSpace(decoded.Identity.Handle))
 	}
 	if decoded.Identity != nil && strings.TrimSpace(decoded.Identity.Did) != "" {
-		cfg.AllowedDIDs = appendValues(cfg.AllowedDIDs, decoded.Identity.Did)
+		cfg.AllowedDIDs = strs.AppendUniqueFold(cfg.AllowedDIDs, decoded.Identity.Did)
 	}
-	if host := hostnameOnly(cfg.IngressProxyHost); host != "" {
-		cfg.AllowedHosts = appendValues(cfg.AllowedHosts, host, "*."+host)
+	if host := hostport.HostnameOnly(cfg.IngressProxyHost); host != "" {
+		cfg.AllowedHosts = strs.AppendUniqueFold(cfg.AllowedHosts, host, "*."+host)
 	}
-	if host := hostnameOnly(cfg.PublicHost); host != "" {
-		cfg.AllowedHosts = appendValues(cfg.AllowedHosts, host)
-		cfg.Hostnames = appendValues(cfg.Hostnames, host)
+	if host := hostport.HostnameOnly(cfg.PublicHost); host != "" {
+		cfg.AllowedHosts = strs.AppendUniqueFold(cfg.AllowedHosts, host)
+		cfg.Hostnames = strs.AppendUniqueFold(cfg.Hostnames, host)
 	}
 	if decoded.Storage != nil && decoded.Storage.DataDir != "" {
 		cfg.StateDir = decoded.Storage.DataDir
@@ -166,14 +164,14 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		cfg.Port = int(decoded.Serve.Port)
 	}
 	if decoded.TLS != nil {
-		cfg.Hostnames = appendValues(cfg.Hostnames, decoded.TLS.Hostnames...)
+		cfg.Hostnames = strs.AppendUniqueFold(cfg.Hostnames, decoded.TLS.Hostnames...)
 	}
 	if decoded.Network != nil {
-		cfg.Hostnames = appendValues(cfg.Hostnames, networkHostnames(decoded.Network, cfg.Port)...)
+		cfg.Hostnames = strs.AppendUniqueFold(cfg.Hostnames, hostport.NetworkHostnames(decoded.Network, cfg.Port)...)
 	}
-	cfg.AdditionalHosts = appendValues(cfg.AdditionalHosts, additionalHosts(primaryHostname(cfg.Hostname, cfg.Hostnames), cfg.Hostnames)...)
+	cfg.AdditionalHosts = strs.AppendUniqueFold(cfg.AdditionalHosts, additionalHosts(hostport.Primary(cfg.Hostname, cfg.Hostnames), cfg.Hostnames)...)
 	if wildcard := wildcardHost(cfg.Hostnames); wildcard != "" {
-		cfg.AllowedHosts = appendValues(cfg.AllowedHosts, wildcard)
+		cfg.AllowedHosts = strs.AppendUniqueFold(cfg.AllowedHosts, wildcard)
 	}
 	if decoded.RelayRef != nil {
 		if relayURL, ok := relayEndpoint(cfg.Deps, cfg.Workspace, decoded.RelayRef); ok {
@@ -181,10 +179,10 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		}
 	}
 	if decoded.TLS != nil && decoded.TLS.Enabled {
-		certFile, keyFile := certificateFiles(decoded.TLS.CertRef, decoded.Storage, cfg.Hostnames)
+		certFile, keyFile := servetls.CertificateFiles(decoded.TLS.CertRef, decoded.Storage, cfg.Hostnames)
 		cfg.CertFile = certFile
 		cfg.KeyFile = keyFile
-		tlsConfig, err := serverTLS(deps, cfg.CertFile)
+		tlsConfig, err := servetls.Config(cfg.CertFile, deps.TLS, deps.Log)
 		if err != nil {
 			return Config{}, fmt.Errorf("ingressproxy: %w", err)
 		}
@@ -210,35 +208,11 @@ func copyOpenTunnel(in *v1alpha1.IngressProxyOpenTunnel) *v1alpha1.IngressProxyO
 	return &out
 }
 
-func appendValues(values []string, extra ...string) []string {
-	seen := make(map[string]struct{}, len(values)+len(extra))
-	out := make([]string, 0, len(values)+len(extra))
-	add := func(value string) {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			return
-		}
-		key := strings.ToLower(value)
-		if _, ok := seen[key]; ok {
-			return
-		}
-		seen[key] = struct{}{}
-		out = append(out, value)
-	}
-	for _, value := range values {
-		add(value)
-	}
-	for _, value := range extra {
-		add(value)
-	}
-	return out
-}
-
 func additionalHosts(primary string, hostnames []string) []string {
-	wanted := strings.ToLower(hostnameOnly(primary))
+	wanted := strings.ToLower(hostport.HostnameOnly(primary))
 	var out []string
 	for _, host := range hostnames {
-		if strings.ToLower(hostnameOnly(host)) == wanted {
+		if strings.ToLower(hostport.HostnameOnly(host)) == wanted {
 			continue
 		}
 		out = append(out, host)
@@ -255,30 +229,12 @@ func wildcardHost(hostnames []string) string {
 	return ""
 }
 
-func networkHostnames(network *v1alpha1.MarketNetworkValue, port int) []string {
-	if network == nil || port <= 0 {
-		return nil
-	}
-	wanted := strconv.Itoa(port)
-	var out []string
-	for _, host := range network.Hosts {
-		_, value, err := net.SplitHostPort(host.Address)
-		if err != nil || value != wanted {
-			continue
-		}
-		out = append(out, host.Name)
-	}
-	return out
-}
-
 func relayEndpoint(deps component.Deps, workspace string, ref *commonv1.ObjectRef) (string, bool) {
 	if ref == nil {
 		return "", false
 	}
 	kind := strings.TrimSpace(ref.Kind)
-	if kind == "" {
-		kind = "Relay"
-	}
+	kind = cmp.Or(kind, "Relay")
 	name := strings.TrimSpace(ref.Name)
 	if name == "" {
 		return "", false
@@ -289,7 +245,7 @@ func relayEndpoint(deps component.Deps, workspace string, ref *commonv1.ObjectRe
 	if workspace != "" {
 		for _, wanted := range []string{"http", "relay", "subscribeRepos"} {
 			if endpoint, ok := deps.Registry.Endpoint(workspace, kind, name, wanted); ok {
-				return endpointURL(endpoint)
+				return hostport.EndpointURL(endpoint)
 			}
 		}
 	}
@@ -304,94 +260,11 @@ func relayEndpoint(deps component.Deps, workspace string, ref *commonv1.ObjectRe
 		}
 		for _, endpoint := range entry.Endpoints {
 			if endpoint.Address != "" {
-				return endpointURL(endpoint)
+				return hostport.EndpointURL(endpoint)
 			}
 		}
 	}
 	return "", false
-}
-
-func endpointURL(endpoint component.Endpoint) (string, bool) {
-	if endpoint.URL != "" {
-		return endpoint.URL, true
-	}
-	if endpoint.Address == "" {
-		return "", false
-	}
-	scheme := strings.TrimSpace(endpoint.Protocol)
-	if scheme == "" {
-		scheme = "http"
-	}
-	return scheme + "://" + endpoint.Address, true
-}
-
-func certificateFiles(certRef string, storage *v1alpha1.ComponentStorage, hostnames []string) (string, string) {
-	certFile := refPath(certRef, storage)
-	if certFile == "" && storage != nil && storage.CertsDir != "" && len(hostnames) > 0 {
-		name := hostnameOnly(hostnames[0])
-		if name != "" && name != "*" {
-			certFile = filepath.Join(storage.CertsDir, name+".crt")
-		}
-	}
-	return certFile, keyFileFor(certFile)
-}
-
-func refPath(ref string, storage *v1alpha1.ComponentStorage) string {
-	ref = strings.TrimSpace(ref)
-	if ref == "" {
-		return ""
-	}
-	if filepath.IsAbs(ref) || storage == nil || storage.CertsDir == "" {
-		return ref
-	}
-	return filepath.Join(storage.CertsDir, ref)
-}
-
-func keyFileFor(certFile string) string {
-	switch {
-	case certFile == "":
-		return ""
-	case strings.HasSuffix(certFile, ".crt"):
-		return strings.TrimSuffix(certFile, ".crt") + ".key"
-	case strings.HasSuffix(certFile, ".pem"):
-		return strings.TrimSuffix(certFile, ".pem") + ".key"
-	default:
-		return certFile + ".key"
-	}
-}
-
-func keyFilesFor(certFile string) []string {
-	candidates := []string{keyFileFor(certFile)}
-	if before, ok := strings.CutSuffix(certFile, ".pem"); ok {
-		candidates = append(candidates, before+"-key.pem")
-	}
-	return append(candidates, certFile)
-}
-
-func serverTLS(deps component.Deps, certFile string) (*tls.Config, error) {
-	if certFile != "" {
-		reloader, err := tlsreload.New(certFile, keyFilesFor(certFile), deps.Log)
-		if err != nil {
-			return nil, err
-		}
-		return reloader.TLSConfig(&tls.Config{MinVersion: tls.VersionTLS12, NextProtos: []string{"http/1.1"}}), nil
-	}
-	if deps.TLS != nil {
-		tlsConfig := deps.TLS.Clone()
-		if len(tlsConfig.NextProtos) == 0 {
-			tlsConfig.NextProtos = []string{"http/1.1"}
-		}
-		return tlsConfig, nil
-	}
-	return nil, errors.New("a TLS certificate is required")
-}
-
-func Factory(ctx context.Context, deps component.Deps, spec component.ComponentSpec) (component.Service, error) {
-	cfg, err := ConfigFrom(deps, spec)
-	if err != nil {
-		return nil, err
-	}
-	return New(cfg), nil
 }
 
 func Register(runtime *component.Runtime, identity exposure.IngressIdentity) error {
@@ -468,10 +341,8 @@ func buildProvider(cfg Config) (Provider, string, error) {
 
 func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	cfg := s.cfg
-	cfg.Deps = mergeDeps(cfg.Deps, deps)
-	if cfg.Workspace == "" {
-		cfg.Workspace = "root"
-	}
+	cfg.Deps = cfg.Deps.Or(deps)
+	cfg.Workspace = cmp.Or(cfg.Workspace, "root")
 	if cfg.RelayRef != nil {
 		if relayURL, ok := relayEndpoint(cfg.Deps, cfg.Workspace, cfg.RelayRef); ok {
 			cfg.RelayURL = relayURL
@@ -526,9 +397,9 @@ func (s *Service) publicURLLocked() string {
 		if parsed, err := url.Parse(value); err == nil && parsed.Host != "" {
 			return parsed.Scheme + "://" + parsed.Host
 		}
-		return "https://" + hostnameOnly(value)
+		return "https://" + hostport.HostnameOnly(value)
 	}
-	host := hostnameOnly(primaryHostname(s.cfg.Hostname, s.cfg.Hostnames))
+	host := hostport.HostnameOnly(hostport.Primary(s.cfg.Hostname, s.cfg.Hostnames))
 	if host == "" || host == "localhost" {
 		return ""
 	}
@@ -565,60 +436,6 @@ func (s *Service) IngressProvider() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.providerName
-}
-
-func mergeDeps(cfgDeps, deps component.Deps) component.Deps {
-	out := cfgDeps
-	if out.Log == nil {
-		out.Log = deps.Log
-	}
-	if out.TLS == nil {
-		out.TLS = deps.TLS
-	}
-	if out.StateDir == "" {
-		out.StateDir = deps.StateDir
-	}
-	if out.Registry == nil {
-		out.Registry = deps.Registry
-	}
-	if out.Hosts == nil {
-		out.Hosts = deps.Hosts
-	}
-	if out.KCP == nil {
-		out.KCP = deps.KCP
-	}
-	if out.Credentials == nil {
-		out.Credentials = deps.Credentials
-	}
-	if out.Vault == nil {
-		out.Vault = deps.Vault
-	}
-	return out
-}
-
-func primaryHostname(host string, hostnames []string) string {
-	if host != "" {
-		return host
-	}
-	for _, candidate := range hostnames {
-		if candidate != "" {
-			return candidate
-		}
-	}
-	return "localhost"
-}
-
-func hostnameOnly(host string) string {
-	h := host
-	if strings.HasPrefix(h, "[") {
-		if end := strings.Index(h, "]"); end != -1 {
-			h = h[1:end]
-		}
-	}
-	if idx := strings.LastIndex(h, ":"); idx != -1 && idx > strings.Index(h, "]") {
-		h = h[:idx]
-	}
-	return h
 }
 
 var _ Provider = (*xrpcsubscription.Provider)(nil)

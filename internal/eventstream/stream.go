@@ -1,6 +1,7 @@
 package eventstream
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,7 +17,6 @@ import (
 	"github.com/bluesky-social/indigo/atproto/syntax"
 	"github.com/ipfs/go-cid"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/dynamic"
@@ -25,6 +25,9 @@ import (
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	v1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 type eventStream struct {
@@ -91,7 +94,7 @@ func (s *eventStream) run(ctx context.Context) {
 		if err != nil {
 			s.set(eventsv1alpha1.EventStreamPhaseFailed, false, false, true, err.Error())
 			s.publish(ctx)
-			if !sleep(runCtx, delay) {
+			if !clock.Sleep(runCtx, opt.Positive(delay, DefaultRetryAfter)) {
 				return
 			}
 			delay = nextDelay(delay, s.ctl.opts.MaxReconnectWait)
@@ -109,7 +112,7 @@ func (s *eventStream) run(ctx context.Context) {
 		if err != nil {
 			s.set(eventsv1alpha1.EventStreamPhaseFailed, false, false, true, err.Error())
 			s.publish(ctx)
-			if !sleep(runCtx, delay) {
+			if !clock.Sleep(runCtx, opt.Positive(delay, DefaultRetryAfter)) {
 				return
 			}
 			delay = nextDelay(delay, s.ctl.opts.MaxReconnectWait)
@@ -137,7 +140,7 @@ func (s *eventStream) run(ctx context.Context) {
 			s.publish(ctx)
 			break
 		}
-		if !sleep(runCtx, delay) {
+		if !clock.Sleep(runCtx, opt.Positive(delay, DefaultRetryAfter)) {
 			return
 		}
 		delay = nextDelay(delay, s.ctl.opts.MaxReconnectWait)
@@ -190,9 +193,7 @@ func (s *eventStream) resolveSource(ctx context.Context) (resolvedSource, error)
 		kind := strings.ToLower(strings.TrimSpace(ref.Kind))
 		if kind == "remotepds" || kind == "remote" {
 			workspace := strings.TrimSpace(ref.Workspace)
-			if workspace == "" {
-				workspace = s.ctl.opts.Workspace
-			}
+			workspace = cmp.Or(workspace, s.ctl.opts.Workspace)
 			dyn, err := s.ctl.opts.Dynamic(workspace)
 			if err != nil {
 				return resolvedSource{}, err
@@ -420,9 +421,7 @@ func (s *eventStream) bufferRecords(ctx context.Context, source resolvedSource, 
 
 func (s *eventStream) watchMatches(ctx context.Context) []resolvedMatch {
 	workspace := strings.TrimSpace(s.es.Spec.Sink.Namespace)
-	if workspace == "" {
-		workspace = s.ctl.opts.Workspace
-	}
+	workspace = cmp.Or(workspace, s.ctl.opts.Workspace)
 	dyn := s.dyn
 	if workspace != s.ctl.opts.Workspace {
 		var err error
@@ -560,21 +559,21 @@ func (s *eventStream) conditionsLocked(conditions []metav1.Condition) []metav1.C
 	if s.phase == eventsv1alpha1.EventStreamPhaseSuspended {
 		readyReason = "Suspended"
 	}
-	setCondition(&conditions, eventsv1alpha1.EventStreamConditionReady, s.ready, readyReason, s.message)
+	conds.Set(&conditions, 0, eventsv1alpha1.EventStreamConditionReady, s.ready, readyReason, s.message)
 	lagReason := "UpToDate"
 	lagMessage := "the stream is current"
 	if s.lag > 0 {
 		lagReason = "CursorGap"
 		lagMessage = fmt.Sprintf("%d events behind", s.lag)
 	}
-	setCondition(&conditions, eventsv1alpha1.EventStreamConditionLagging, s.lagging, lagReason, lagMessage)
+	conds.Set(&conditions, 0, eventsv1alpha1.EventStreamConditionLagging, s.lagging, lagReason, lagMessage)
 	failedReason := "NoError"
 	failedMessage := "the stream is healthy"
 	if s.failed {
 		failedReason = "StreamError"
 		failedMessage = s.message
 	}
-	setCondition(&conditions, eventsv1alpha1.EventStreamConditionFailed, s.failed, failedReason, failedMessage)
+	conds.Set(&conditions, 0, eventsv1alpha1.EventStreamConditionFailed, s.failed, failedReason, failedMessage)
 	for i := range conditions {
 		conditions[i].ObservedGeneration = s.es.Generation
 	}
@@ -625,9 +624,7 @@ func (s *eventStream) flushWatch(ctx context.Context) error {
 	s.mu.Unlock()
 
 	workspace := strings.TrimSpace(s.es.Spec.Sink.Namespace)
-	if workspace == "" {
-		workspace = s.ctl.opts.Workspace
-	}
+	workspace = cmp.Or(workspace, s.ctl.opts.Workspace)
 	if err := s.writeWatchStatus(ctx, workspace, records, deletes, cursors); err != nil {
 		s.mu.Lock()
 		for uri, record := range records {
@@ -787,14 +784,6 @@ func toUnstructured(value any) (map[string]any, error) {
 		return nil, err
 	}
 	return object, nil
-}
-
-func setCondition(conditions *[]metav1.Condition, kind string, ok bool, reason, message string) {
-	status := metav1.ConditionFalse
-	if ok {
-		status = metav1.ConditionTrue
-	}
-	meta.SetStatusCondition(conditions, metav1.Condition{Type: kind, Status: status, Reason: reason, Message: message})
 }
 
 func filterOps(ops []pdsclient.RepoOp, collections []string) []pdsclient.RepoOp {

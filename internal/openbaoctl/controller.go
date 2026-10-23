@@ -2,6 +2,7 @@ package openbaoctl
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -17,7 +18,6 @@ import (
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -29,7 +29,9 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/baosync"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostprocess"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/rootvault"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vaultcert"
@@ -104,9 +106,7 @@ func New(c Config) (*Controller, error) {
 		return nil, err
 	}
 	ws := c.Workspace
-	if ws == "" {
-		ws = hostprocess.DefaultWorkspace
-	}
+	ws = cmp.Or(ws, hostprocess.DefaultWorkspace)
 	cfg := rest.CopyConfig(restCfg)
 	cfg.Host = strings.TrimSuffix(cfg.Host, "/") + "/clusters/" + ws
 	dc, err := dynamic.NewForConfig(cfg)
@@ -160,30 +160,11 @@ func toServer(u *unstructured.Unstructured) (v1alpha1.OpenBaoServer, error) {
 	return o, err
 }
 
-func toChild(u *unstructured.Unstructured) (v1alpha1.HostProcess, error) {
-	var o v1alpha1.HostProcess
-	err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &o)
-	return o, err
-}
-
-func unstructuredOf(o any, kind string) (*unstructured.Unstructured, error) {
-	m, err := runtime.DefaultUnstructuredConverter.ToUnstructured(o)
-	if err != nil {
-		return nil, err
-	}
-	u := &unstructured.Unstructured{Object: m}
-	u.SetAPIVersion(v1alpha1.GroupVersion.String())
-	u.SetKind(kind)
-	return u, nil
-}
-
 const MemoryMax = 512 << 20
 
 func (c *Controller) childSpec(o v1alpha1.OpenBaoServer, dir, key string) v1alpha1.HostProcessSpec {
 	rp := o.Spec.RestartPolicy
-	if rp == "" {
-		rp = v1alpha1.HostProcessRestartOnFailure
-	}
+	rp = cmp.Or(rp, v1alpha1.HostProcessRestartOnFailure)
 	spec := v1alpha1.HostProcessSpec{Unit: c.unit(o), Exec: o.Spec.Exec, Argv: []string{"server", "-config", rootvault.ConfigPath(dir)},
 		WorkDir: rootvault.Dir(dir), RestartPolicy: rp, Stop: &v1alpha1.HostProcessStop{Signal: "SIGTERM", GraceSeconds: 15},
 		Placement: v1alpha1.HostProcessPlacementSupervisor, Slice: o.Spec.Slice, RestartKey: key,
@@ -214,7 +195,7 @@ func (c *Controller) ensureChild(ctx context.Context, o v1alpha1.OpenBaoServer, 
 		hp := v1alpha1.HostProcess{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{OwnerLabel: o.Name},
 			OwnerReferences: []metav1.OwnerReference{{APIVersion: v1alpha1.GroupVersion.String(), Kind: "OpenBaoServer", Name: o.Name,
 				UID: o.UID, Controller: new(true)}}}, Spec: want}
-		u, err := unstructuredOf(&hp, "HostProcess")
+		u, err := unstruct.To(&hp, "HostProcess")
 		if err != nil {
 			return v1alpha1.HostProcess{}, err
 		}
@@ -223,12 +204,12 @@ func (c *Controller) ensureChild(ctx context.Context, o v1alpha1.OpenBaoServer, 
 			return v1alpha1.HostProcess{}, err
 		}
 		c.c.log().Info("placed the server's HostProcess", "openbaoserver", o.Name, "hostprocess", name, "unit", want.Unit)
-		return toChild(got)
+		return unstruct.From[v1alpha1.HostProcess](got)
 	}
 	if err != nil {
 		return v1alpha1.HostProcess{}, err
 	}
-	hp, err := toChild(cur)
+	hp, err := unstruct.From[v1alpha1.HostProcess](cur)
 	if err != nil {
 		return hp, err
 	}
@@ -237,7 +218,7 @@ func (c *Controller) ensureChild(ctx context.Context, o v1alpha1.OpenBaoServer, 
 	}
 	if !sameChild(hp.Spec, want) {
 		hp.Spec = want
-		u, err := unstructuredOf(&hp, "HostProcess")
+		u, err := unstruct.To(&hp, "HostProcess")
 		if err != nil {
 			return hp, err
 		}
@@ -245,7 +226,7 @@ func (c *Controller) ensureChild(ctx context.Context, o v1alpha1.OpenBaoServer, 
 		if err != nil {
 			return hp, err
 		}
-		return toChild(got)
+		return unstruct.From[v1alpha1.HostProcess](got)
 	}
 	return hp, nil
 }
@@ -262,14 +243,6 @@ func writeIfChanged(path string, data []byte, mode os.FileMode) error {
 		return err
 	}
 	return os.Rename(tmp, path)
-}
-
-func condition(st *v1alpha1.OpenBaoServerStatus, gen int64, t string, ok bool, reason, msg string) {
-	s := metav1.ConditionFalse
-	if ok {
-		s = metav1.ConditionTrue
-	}
-	meta.SetStatusCondition(&st.Conditions, metav1.Condition{Type: t, Status: s, Reason: reason, Message: msg, ObservedGeneration: gen})
 }
 
 func unseal(ctx context.Context, client *openbao.Client, k UnsealKeys) error {
@@ -401,9 +374,7 @@ func ensurePKIRoots(ctx context.Context, c *openbao.Client, d *v1alpha1.OpenBaoS
 			return false, err
 		}
 		ttl := strings.TrimSpace(m.MaxLeaseTTL)
-		if ttl == "" {
-			ttl = defaultPKIRootTTL
-		}
+		ttl = cmp.Or(ttl, defaultPKIRootTTL)
 		if _, err := c.GeneratePKIRoot(ctx, m.Path, defaultPKIRootCommonName, ttl); err != nil {
 			return false, fmt.Errorf("generating the pki root under %s: %w", m.Path, err)
 		}
@@ -471,7 +442,7 @@ func recordSync(st *v1alpha1.OpenBaoServerStatus, gen int64, s synced, err error
 		if prev != nil {
 			next.Declared, next.Pending, next.Conflicts = prev.Declared, prev.Pending, prev.Conflicts
 		}
-		condition(st, gen, ConditionSynced, false, "SyncFailed", err.Error())
+		conds.Set(&st.Conditions, gen, ConditionSynced, false, "SyncFailed", err.Error())
 		log.Warn("the reconcile of the server against its declaration did not run", "err", err.Error())
 		return
 	}
@@ -490,11 +461,11 @@ func recordSync(st *v1alpha1.OpenBaoServerStatus, gen int64, s synced, err error
 	st.Sync = next
 	switch {
 	case s.report.Err != nil:
-		condition(st, gen, ConditionSynced, false, "ApplyFailed", s.report.Summary())
+		conds.Set(&st.Conditions, gen, ConditionSynced, false, "ApplyFailed", s.report.Summary())
 	case len(s.report.Conflicts) > 0:
-		condition(st, gen, ConditionSynced, false, "Conflict", strings.Join(s.report.Conflicts, "; "))
+		conds.Set(&st.Conditions, gen, ConditionSynced, false, "Conflict", strings.Join(s.report.Conflicts, "; "))
 	default:
-		condition(st, gen, ConditionSynced, true, "InSync", "the server holds exactly its declaration: "+s.desired.String())
+		conds.Set(&st.Conditions, gen, ConditionSynced, true, "InSync", "the server holds exactly its declaration: "+s.desired.String())
 	}
 }
 
@@ -509,22 +480,18 @@ func (c *Controller) reconcile(ctx context.Context, o v1alpha1.OpenBaoServer) v1
 	st.Refs = refs(dir, o.Spec.TLS)
 	fail := func(format string, args ...any) v1alpha1.OpenBaoServerStatus {
 		st.Phase, st.Message = v1alpha1.OpenBaoServerPhaseFailed, fmt.Sprintf(format, args...)
-		condition(&st, gen, ConditionReady, false, "Failed", st.Message)
+		conds.Set(&st.Conditions, gen, ConditionReady, false, "Failed", st.Message)
 		log.Warn("failed", "msg", st.Message)
 		return st
 	}
 	starting := func(format string, args ...any) v1alpha1.OpenBaoServerStatus {
 		st.Phase, st.Message, st.Address = v1alpha1.OpenBaoServerPhaseStarting, fmt.Sprintf(format, args...), ""
-		condition(&st, gen, ConditionReady, false, "Starting", st.Message)
+		conds.Set(&st.Conditions, gen, ConditionReady, false, "Starting", st.Message)
 		return st
 	}
 	shares, threshold := int(o.Spec.Init.Shares), int(o.Spec.Init.Threshold)
-	if shares == 0 {
-		shares = DefaultShares
-	}
-	if threshold == 0 {
-		threshold = DefaultThreshold
-	}
+	shares = cmp.Or(shares, DefaultShares)
+	threshold = cmp.Or(threshold, DefaultThreshold)
 	if threshold > shares {
 		return fail("init.threshold %d is over init.shares %d", threshold, shares)
 	}
@@ -532,9 +499,7 @@ func (c *Controller) reconcile(ctx context.Context, o v1alpha1.OpenBaoServer) v1
 		return fail("name the bao executable: spec.asset (name bao) or spec.exec (an absolute path)")
 	}
 	listen := o.Spec.Listen
-	if listen == "" {
-		listen = DefaultListen
-	}
+	listen = cmp.Or(listen, DefaultListen)
 	if err := checkClients(o.Spec.Clients, o.Spec.Declared); err != nil {
 		return fail("spec.clients: %v", err)
 	}
@@ -730,21 +695,21 @@ func (c *Controller) reconcile(ctx context.Context, o v1alpha1.OpenBaoServer) v1
 		return starting("the server at %s stopped answering: %v", addr, err)
 	}
 	st.Initialized, st.Sealed = h.Initialized, h.Sealed
-	condition(&st, gen, ConditionInitialized, h.Initialized, "Health", "")
-	condition(&st, gen, ConditionUnsealed, !h.Sealed, "Health", "")
+	conds.Set(&st.Conditions, gen, ConditionInitialized, h.Initialized, "Health", "")
+	conds.Set(&st.Conditions, gen, ConditionUnsealed, !h.Sealed, "Health", "")
 	if !h.Initialized || h.Sealed {
 		st.Phase, st.Message = v1alpha1.OpenBaoServerPhaseSealed, "sealed"
-		condition(&st, gen, ConditionReady, false, "Sealed", st.Message)
+		conds.Set(&st.Conditions, gen, ConditionReady, false, "Sealed", st.Message)
 		return st
 	}
 	st.Phase, st.Message = v1alpha1.OpenBaoServerPhaseReady, "initialized and unsealed"
-	condition(&st, gen, ConditionReady, true, "Ready", st.Message)
+	conds.Set(&st.Conditions, gen, ConditionReady, true, "Ready", st.Message)
 	return st
 }
 
 func (c *Controller) writeStatus(ctx context.Context, cur *unstructured.Unstructured, o v1alpha1.OpenBaoServer, st v1alpha1.OpenBaoServerStatus) error {
 	o.Status = st
-	u, err := unstructuredOf(&o, "OpenBaoServer")
+	u, err := unstruct.To(&o, "OpenBaoServer")
 	if err != nil {
 		return err
 	}
@@ -803,9 +768,7 @@ func (c *Controller) Pass(ctx context.Context) error {
 
 func (c *Controller) Run(ctx context.Context) error {
 	interval := c.c.Interval
-	if interval == 0 {
-		interval = DefaultInterval
-	}
+	interval = cmp.Or(interval, DefaultInterval)
 	c.c.log().Info("the OpenBaoServer controller runs in the core", "workspace", c.c.Workspace, "stateDir", c.c.StateDir)
 	t := time.NewTicker(interval)
 	defer t.Stop()

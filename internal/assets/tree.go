@@ -12,6 +12,8 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/sha256sum"
 )
 
 func TreeDigest(dir string) (string, error) {
@@ -42,7 +44,7 @@ func TreeDigest(dir string) (string, error) {
 			}
 			fmt.Fprintf(h, "l %s %s\n", filepath.ToSlash(target), rel)
 		case info.Mode().IsRegular():
-			sum, err := fileSHA256(p)
+			sum, err := sha256sum.File(p)
 			if err != nil {
 				return err
 			}
@@ -57,19 +59,6 @@ func TreeDigest(dir string) (string, error) {
 		return nil
 	})
 	if err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
-}
-
-func fileSHA256(p string) (string, error) {
-	f, err := os.Open(p)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
 		return "", err
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil

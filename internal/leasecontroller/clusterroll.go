@@ -10,6 +10,8 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 )
 
 func (c *Controller) ReconcileClusterRoll(ctx context.Context, workspace string, u *unstructured.Unstructured) error {
@@ -21,7 +23,7 @@ func (c *Controller) ReconcileClusterRoll(ctx context.Context, workspace string,
 		return fmt.Errorf("leasecontroller: opening the dynamic client for workspace %q: %w", workspace, err)
 	}
 	var roll v1alpha1.ClusterRoll
-	if err := decodeObject(u, &roll); err != nil {
+	if err := unstruct.Into(u, &roll); err != nil {
 		return fmt.Errorf("leasecontroller: decoding ClusterRoll %s: %w", u.GetName(), err)
 	}
 
@@ -39,7 +41,7 @@ func (c *Controller) ReconcileClusterRoll(ctx context.Context, workspace string,
 		status.CompletedAt = ""
 		message := "the ClusterRoll names no cluster"
 		setReady(&status.Conditions, generation, false, "InvalidSpec", message)
-		setCondition(&status.Conditions, generation, ConditionRolling, metav1.ConditionFalse, "InvalidSpec", message)
+		conds.SetStatus(&status.Conditions, generation, ConditionRolling, metav1.ConditionFalse, "InvalidSpec", message)
 		return writeStatus(ctx, dyn, ClusterRollGVR, u, before, status)
 	}
 
@@ -49,7 +51,7 @@ func (c *Controller) ReconcileClusterRoll(ctx context.Context, workspace string,
 		status.StartedAt = ""
 		status.CompletedAt = ""
 		setReady(&status.Conditions, generation, false, "RollStateUnavailable", rollErr.Error())
-		setCondition(&status.Conditions, generation, ConditionRolling, metav1.ConditionFalse, "RollStateUnavailable", rollErr.Error())
+		conds.SetStatus(&status.Conditions, generation, ConditionRolling, metav1.ConditionFalse, "RollStateUnavailable", rollErr.Error())
 		if err := writeStatus(ctx, dyn, ClusterRollGVR, u, before, status); err != nil {
 			return err
 		}
@@ -63,7 +65,7 @@ func (c *Controller) ReconcileClusterRoll(ctx context.Context, workspace string,
 		status.CompletedAt = ""
 		message := fmt.Sprintf("the kcpserver records no active slot for cluster %s", cluster)
 		setReady(&status.Conditions, generation, false, "AwaitingRoll", message)
-		setCondition(&status.Conditions, generation, ConditionRolling, metav1.ConditionFalse, "AwaitingRoll", message)
+		conds.SetStatus(&status.Conditions, generation, ConditionRolling, metav1.ConditionFalse, "AwaitingRoll", message)
 		return writeStatus(ctx, dyn, ClusterRollGVR, u, before, status)
 	}
 
@@ -74,7 +76,7 @@ func (c *Controller) ReconcileClusterRoll(ctx context.Context, workspace string,
 		status.CompletedAt = ""
 		message := fmt.Sprintf("the kcpserver records active slot %q for cluster %s but no record for it", active, cluster)
 		setReady(&status.Conditions, generation, false, "RollStateInconsistent", message)
-		setCondition(&status.Conditions, generation, ConditionRolling, metav1.ConditionFalse, "RollStateInconsistent", message)
+		conds.SetStatus(&status.Conditions, generation, ConditionRolling, metav1.ConditionFalse, "RollStateInconsistent", message)
 		return writeStatus(ctx, dyn, ClusterRollGVR, u, before, status)
 	}
 
@@ -89,7 +91,7 @@ func (c *Controller) ReconcileClusterRoll(ctx context.Context, workspace string,
 		status.CompletedAt = ""
 		message := fmt.Sprintf("the kcpserver is bringing slot %s of cluster %s up on port %d", active, cluster, record.Port)
 		setReady(&status.Conditions, generation, false, "RollInProgress", message)
-		setCondition(&status.Conditions, generation, ConditionRolling, metav1.ConditionTrue, "RollInProgress", message)
+		conds.SetStatus(&status.Conditions, generation, ConditionRolling, metav1.ConditionTrue, "RollInProgress", message)
 		return writeStatus(ctx, dyn, ClusterRollGVR, u, before, status)
 	}
 
@@ -97,6 +99,6 @@ func (c *Controller) ReconcileClusterRoll(ctx context.Context, workspace string,
 	status.CompletedAt = formatTime(record.ReadyAt)
 	message := fmt.Sprintf("the kcpserver records slot %s of cluster %s ready on port %d", active, cluster, record.Port)
 	setReady(&status.Conditions, generation, true, "RollCompleted", message)
-	setCondition(&status.Conditions, generation, ConditionRolling, metav1.ConditionFalse, "RollCompleted", message)
+	conds.SetStatus(&status.Conditions, generation, ConditionRolling, metav1.ConditionFalse, "RollCompleted", message)
 	return writeStatus(ctx, dyn, ClusterRollGVR, u, before, status)
 }

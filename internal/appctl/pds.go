@@ -1,6 +1,7 @@
 package appctl
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -30,8 +31,10 @@ import (
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -109,9 +112,7 @@ func pdsHandle(workspace, suffix, explicit string) string {
 		}
 	}
 	label := strings.Trim(b.String(), "-")
-	if label == "" {
-		label = "app"
-	}
+	label = cmp.Or(label, "app")
 	return label + "." + suffix + ".local"
 }
 
@@ -159,7 +160,7 @@ func (ctl *Controller) pdsExposureURLOf(ctx context.Context, ws, name, suffix st
 		return raw
 	}
 	var o exposurev1alpha1.Exposure
-	if err := fromUnstructured(u, &o); err == nil && o.Status.Address != "" {
+	if err := unstruct.Into(u, &o); err == nil && o.Status.Address != "" {
 		ctl.pdsPublicURLs.Store(key, o.Status.Address)
 		return o.Status.Address
 	}
@@ -448,8 +449,6 @@ func (ctl *Controller) recordPdsIdentity(ctx context.Context, ws, name, handle, 
 
 var OpenBaoServerGVR = v1alpha1.OpenBaoServerGVR
 
-func fileRef(ref string) string { return strings.TrimPrefix(ref, "file:") }
-
 func (ctl *Controller) vaultClient(ctx context.Context, server, clientName string) (*openbao.Client, v1alpha1.OpenBaoServerStatus, v1alpha1.OpenBaoServerClientRefs, error) {
 	ri, err := ctl.client(ctl.c.workspace(), OpenBaoServerGVR)
 	if err != nil {
@@ -464,7 +463,7 @@ func ServerClient(ctx context.Context, ri dynamic.ResourceInterface, server, cli
 		return nil, v1alpha1.OpenBaoServerStatus{}, v1alpha1.OpenBaoServerClientRefs{}, err
 	}
 	var o v1alpha1.OpenBaoServer
-	if err := fromUnstructured(u, &o); err != nil {
+	if err := unstruct.Into(u, &o); err != nil {
 		return nil, v1alpha1.OpenBaoServerStatus{}, v1alpha1.OpenBaoServerClientRefs{}, err
 	}
 	st := o.Status
@@ -480,7 +479,7 @@ func ServerClient(ctx context.Context, ri dynamic.ResourceInterface, server, cli
 	if c.ClientCert == "" {
 		return nil, st, c, fmt.Errorf("the OpenBaoServer %s reports no client %s yet", server, clientName)
 	}
-	caPEM, err := os.ReadFile(fileRef(st.Refs.CA))
+	caPEM, err := os.ReadFile(openbaoctl.FileRef(st.Refs.CA))
 	if err != nil {
 		return nil, st, c, err
 	}
@@ -488,7 +487,7 @@ func ServerClient(ctx context.Context, ri dynamic.ResourceInterface, server, cli
 	if err != nil {
 		return nil, st, c, err
 	}
-	cert, err := tls.LoadX509KeyPair(fileRef(c.ClientCert), fileRef(c.ClientKey))
+	cert, err := tls.LoadX509KeyPair(openbaoctl.FileRef(c.ClientCert), openbaoctl.FileRef(c.ClientKey))
 	if err != nil {
 		return nil, st, c, err
 	}

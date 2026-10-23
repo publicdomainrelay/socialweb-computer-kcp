@@ -1,7 +1,6 @@
 package pds
 
 import (
-	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
@@ -17,7 +16,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	atpds "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsreload"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/tlsreload"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -103,18 +102,6 @@ type OAuthOptions struct {
 	AllowMissingDPoPNonce   bool
 	DisableLocalhostClients bool
 	Scopes                  []string
-}
-
-func Factory(ctx context.Context, deps component.Deps, spec component.ComponentSpec) (component.Service, error) {
-	cfg, err := ConfigFrom(deps, spec)
-	if err != nil {
-		return nil, err
-	}
-	return New(cfg)
-}
-
-func Register(runtime *component.Runtime) error {
-	return runtime.Register(Kind, Factory)
 }
 
 func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, error) {

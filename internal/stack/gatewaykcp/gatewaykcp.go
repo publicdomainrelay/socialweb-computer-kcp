@@ -1,6 +1,7 @@
 package gatewaykcp
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -37,6 +38,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpapply"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/providermain"
@@ -145,7 +147,7 @@ func (c Config) linkAssets(l devinstance.Layout) (map[string]devinstance.Executa
 
 func (c Config) record(l devinstance.Layout) (devinstance.Record, error) {
 	var rec devinstance.Record
-	if err := devinstance.ReadJSON(l.Record, &rec); err != nil {
+	if err := fsx.ReadJSON(l.Record, &rec); err != nil {
 		rec = devinstance.Record{Created: time.Now().UTC()}
 	}
 	exes, err := c.linkAssets(l)
@@ -244,7 +246,7 @@ func Run(ctx context.Context, c Config, m hostsvc.Manager) error {
 	if err != nil {
 		return err
 	}
-	if err := devinstance.WriteJSON(l.Record, rec); err != nil {
+	if err := fsx.WriteJSON(l.Record, rec, 0o600); err != nil {
 		return err
 	}
 	app := c.app()
@@ -258,9 +260,7 @@ func RunChild(ctx context.Context, c Config, l devinstance.Layout, m hostsvc.Man
 	if err := os.MkdirAll(l.KcpDir(), 0o700); err != nil {
 		return err
 	}
-	if c.RootName == "" {
-		c.RootName = appctl.ChildRootName
-	}
+	c.RootName = cmp.Or(c.RootName, appctl.ChildRootName)
 	c.log().Info("a gateway child application of a market network starts: its workspace of the network's kcp, sets, root vault, members",
 		"state", c.StateDir, "instance", l.ID, "root", c.RootName)
 	return run(ctx, c, l, nil, m)
@@ -317,9 +317,7 @@ func (g *gateway) adopt(rec devinstance.Record) {
 	if rec.SharedKcp != "" {
 		g.kcp = devinstance.Layout{StateDir: rec.SharedKcp}
 	}
-	if g.ws == "" {
-		g.ws = appctl.DefaultWorkspace
-	}
+	g.ws = cmp.Or(g.ws, appctl.DefaultWorkspace)
 }
 
 func clusterConfig(base *rest.Config, ws string) *rest.Config {
@@ -419,7 +417,7 @@ func (g *gateway) rootVault(ctx context.Context, rec devinstance.Record) (vaultm
 			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &o); err != nil {
 				return vaultmain.RootAccess{}, err
 			}
-			if appctl.RootVaultSynced(&o) {
+			if openbaoctl.Synced(&o) {
 				return vaultmain.RootAccessOf(o)
 			}
 			last = fmt.Sprintf("%s %s", o.Status.Phase, o.Status.Message)
@@ -538,9 +536,7 @@ func (g *gateway) members(ctx context.Context, rec devinstance.Record) error {
 		return err
 	}
 	certFrontAddress := g.c.CertFrontAddress
-	if certFrontAddress == "" {
-		certFrontAddress = DefaultAddress
-	}
+	certFrontAddress = cmp.Or(certFrontAddress, DefaultAddress)
 	start(member{"client certificate front", func(ctx context.Context) error {
 		return clientcertfront.Run(ctx, clientcertfront.Config{Address: certFrontAddress, CertFile: cert, KeyFile: key,
 			EdgeDir: filepath.Join(g.c.StateDir, "tls"), ClusterStateDir: env.get("SOCIALWEB_CLUSTERPROVIDER_STATE_DIR"), Deny: deny, Records: deny,

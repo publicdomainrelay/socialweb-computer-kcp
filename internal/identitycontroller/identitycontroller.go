@@ -24,6 +24,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauthclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 )
 
@@ -121,9 +123,7 @@ func New(opts Options) (*Controller, error) {
 		resolver = &pdsclient.Resolver{HTTPClient: client, Timeout: requestTimeout}
 	}
 	retry := opts.RetryAfter
-	if retry <= 0 {
-		retry = DefaultRetryAfter
-	}
+	retry = opt.Positive(retry, DefaultRetryAfter)
 	states := opts.OAuth.States
 	if states == nil {
 		if opts.Vault != nil && opts.OAuth.StateRef != nil {
@@ -149,7 +149,7 @@ func (c *Controller) Run(ctx context.Context) error {
 		if err := c.watch(ctx); err != nil && ctx.Err() == nil {
 			c.log.Warn("watching MarketIdentity objects", "workspace", c.workspace, "err", err.Error())
 		}
-		if !sleep(ctx, c.retry) {
+		if !clock.Sleep(ctx, c.retry) {
 			return nil
 		}
 	}
@@ -463,9 +463,7 @@ func (c *Controller) pdsAt(endpoint string) (pdsclient.PDS, error) {
 		r = &pdsclient.Resolver{HTTPClient: c.http, Timeout: requestTimeout}
 	}
 	timeout := r.Timeout
-	if timeout <= 0 {
-		timeout = requestTimeout
-	}
+	timeout = opt.Positive(timeout, requestTimeout)
 	return pdsclient.NewRemote(pdsclient.RemoteConfig{BaseURL: endpoint, HTTPClient: r.HTTPClient, TLS: r.TLS, Tokens: r.Tokens, DPoP: r.DPoP, Timeout: timeout})
 }
 
@@ -548,15 +546,4 @@ func setAssociated(status *v1alpha1.MarketIdentityStatus, generation int64, spec
 		return
 	}
 	meta.SetStatusCondition(&status.Conditions, metav1.Condition{Type: v1alpha1.ConditionAssociated, Status: metav1.ConditionFalse, Reason: "AwaitingAssociation", Message: "the PDS is ready; the association is pending", ObservedGeneration: generation})
-}
-
-func sleep(ctx context.Context, d time.Duration) bool {
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-timer.C:
-		return true
-	}
 }

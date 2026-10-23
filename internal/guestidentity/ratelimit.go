@@ -4,6 +4,8 @@ import (
 	"container/list"
 	"sync"
 	"time"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 const DefaultMaxBucketKeys = 4096
@@ -28,9 +30,7 @@ type tokenBucket struct {
 }
 
 func NewTokenBuckets(capacity, refillPerSecond float64, maxKeys int) *TokenBuckets {
-	if maxKeys <= 0 {
-		maxKeys = DefaultMaxBucketKeys
-	}
+	maxKeys = opt.Positive(maxKeys, DefaultMaxBucketKeys)
 	return &TokenBuckets{capacity: capacity, refill: refillPerSecond, maxKeys: maxKeys,
 		held: map[string]*tokenBucket{}, order: list.New()}
 }

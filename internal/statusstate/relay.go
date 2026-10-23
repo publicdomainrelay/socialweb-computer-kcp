@@ -1,17 +1,19 @@
 package statusstate
 
 import (
+	"cmp"
 	"context"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/dynamic"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 )
 
 func (c *Controller) reconcileRelay(ctx context.Context, dyn dynamic.Interface, u *unstructured.Unstructured) {
 	var obj v1alpha1.RelayStatus
-	if err := decode(u, &obj); err != nil {
+	if err := unstruct.Into(u, &obj); err != nil {
 		c.log.Warn("decoding a RelayStatus", "workspace", c.workspace, "name", u.GetName(), "err", err.Error())
 		return
 	}
@@ -36,9 +38,7 @@ func (c *Controller) reconcileRelay(ctx context.Context, dyn dynamic.Interface, 
 		return
 	}
 	status.Phase = observation.Phase
-	if status.Phase == "" {
-		status.Phase = v1alpha1.RelayStatusPhasePending
-	}
+	status.Phase = cmp.Or(status.Phase, v1alpha1.RelayStatusPhasePending)
 	status.Cursor = nonNegativeInt64(observation.Cursor)
 	status.LastEventAt = observation.LastEventAt
 	status.Events = nonNegativeInt64(observation.Events)

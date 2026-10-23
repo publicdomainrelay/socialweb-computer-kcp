@@ -17,6 +17,8 @@ import (
 	"k8s.io/client-go/dynamic"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vaultaccess"
 )
 
@@ -115,24 +117,13 @@ func New(opts Options) (*Controller, error) {
 		log = slog.New(slog.DiscardHandler)
 	}
 	timeout := opts.Timeout
-	if timeout <= 0 {
-		timeout = DefaultTimeout
-	}
+	timeout = opt.Positive(timeout, DefaultTimeout)
 	retry := opts.RetryAfter
-	if retry <= 0 {
-		retry = DefaultRetryAfter
-	}
+	retry = opt.Positive(retry, DefaultRetryAfter)
 	maxRetry := opts.MaxRetryAfter
-	if maxRetry <= 0 {
-		maxRetry = DefaultMaxRetryAfter
-	}
-	if maxRetry < retry {
-		maxRetry = retry
-	}
+	maxRetry = max(opt.Positive(maxRetry, DefaultMaxRetryAfter), retry)
 	checkInterval := opts.CheckInterval
-	if checkInterval <= 0 {
-		checkInterval = DefaultCheckInterval
-	}
+	checkInterval = opt.Positive(checkInterval, DefaultCheckInterval)
 	now := opts.Now
 	if now == nil {
 		now = time.Now
@@ -170,7 +161,7 @@ func (c *Controller) Run(ctx context.Context) error {
 		if err := c.watch(ctx); err != nil && ctx.Err() == nil {
 			c.log.Warn("watching RemoteOpenBao objects", "workspace", c.workspace, "err", err.Error())
 		}
-		if !sleep(ctx, c.retry) {
+		if !clock.Sleep(ctx, c.retry) {
 			return nil
 		}
 	}
@@ -265,15 +256,4 @@ func (c *Controller) succeed(name string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.attempts, name)
-}
-
-func sleep(ctx context.Context, d time.Duration) bool {
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-timer.C:
-		return true
-	}
 }

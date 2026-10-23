@@ -11,6 +11,7 @@ import (
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -177,9 +178,7 @@ func For[T Object](m *Manager, name string, r Reconciler[T], opts ...Option) err
 	if o.export == "" {
 		return fmt.Errorf("runtime: the controller %s names no APIExport", name)
 	}
-	if o.workers <= 0 {
-		o.workers = 1
-	}
+	o.workers = opt.Positive(o.workers, 1)
 	proto, err := newObject[T]()
 	if err != nil {
 		return fmt.Errorf("runtime: the controller %s: %w", name, err)

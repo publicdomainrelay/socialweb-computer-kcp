@@ -16,6 +16,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/kcprest"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vaultlayout"
 )
 
@@ -101,7 +102,7 @@ func RequesterRootRules() []rbacv1.PolicyRule {
 }
 
 func (ctl *Controller) grant(ctx context.Context, ws, owner, grantName, user string, rules []rbacv1.PolicyRule) error {
-	cs, err := kubernetes.NewForConfig(clusterConfig(ctl.restCfg, ws))
+	cs, err := kubernetes.NewForConfig(kcprest.ForCluster(ctl.restCfg, ws))
 	if err != nil {
 		return err
 	}
@@ -142,7 +143,7 @@ func (ctl *Controller) grant(ctx context.Context, ws, owner, grantName, user str
 }
 
 func (ctl *Controller) revokeWebApp(ctx context.Context) error {
-	cs, err := kubernetes.NewForConfig(clusterConfig(ctl.restCfg, ctl.c.workspace()))
+	cs, err := kubernetes.NewForConfig(kcprest.ForCluster(ctl.restCfg, ctl.c.workspace()))
 	if err != nil {
 		return err
 	}

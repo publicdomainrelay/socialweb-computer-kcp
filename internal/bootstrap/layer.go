@@ -11,8 +11,9 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap/table"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpdatastore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpstore"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/pgunit"
 )
 
@@ -108,7 +109,7 @@ func (p Params) FrontState() string { return filepath.Join(p.Dir, "front.json") 
 
 func (p Params) EnvFile(unit string) string { return filepath.Join(p.Dir, unit+hostsvc.EnvFileSuffix) }
 
-func (p Params) BackupsDir() string { return filepath.Join(p.Dir, kcpstore.BackupsDir) }
+func (p Params) BackupsDir() string { return filepath.Join(p.Dir, kcpdatastore.BackupsDir) }
 
 func (p Params) SlotsFile() string { return filepath.Join(p.Dir, "kcp-slots.json") }
 
@@ -116,8 +117,8 @@ func (p Params) SharedDir() string { return filepath.Join(p.Dir, "shared") }
 
 func (p Params) RollLock() string { return filepath.Join(p.Dir, "roll.lock") }
 
-func (p Params) storeConfig(unit string, in pgunit.Install) kcpstore.PostgresConfig {
-	return kcpstore.PostgresConfig{Unit: unit, Slice: p.App.Names().Slice(), Install: in, Data: p.PgData(), SocketDir: p.PgSocketDir()}
+func (p Params) storeConfig(unit string, in pgunit.Install) kcpdatastore.PostgresConfig {
+	return kcpdatastore.PostgresConfig{Unit: unit, Slice: p.App.Names().Slice(), Install: in, Data: p.PgData(), SocketDir: p.PgSocketDir()}
 }
 
 func (p Params) Postgres() (pgunit.Install, error) { return pgunit.FromRoot(p.PostgresRoot) }
@@ -145,15 +146,15 @@ func (p Params) Spec(e table.Entry, frontURL string) (hostsvc.UnitSpec, error) {
 	case table.KindStore:
 		var in pgunit.Install
 		if in, err = pgunit.At(p.PostgresRoot); err == nil {
-			spec, err = kcpstore.PostgresSpec(p.storeConfig(e.Unit, in))
+			spec, err = kcpdatastore.PostgresSpec(p.storeConfig(e.Unit, in))
 		}
 	case table.KindKine:
-		kc := kcpstore.KineConfig{Unit: e.Unit, Slice: n.Slice(), Exec: p.KinePath, Dir: p.KineDir(e.Slot),
+		kc := kcpdatastore.KineConfig{Unit: e.Unit, Slice: n.Slice(), Exec: p.KinePath, Dir: p.KineDir(e.Slot),
 			Socket: p.KineSocket(e.Slot), PostgresSocketDir: p.PgSocketDir()}
 		if p.App.Store == table.StorePostgres {
-			spec, err = kcpstore.KinePostgresSpec(kc, n.Store())
+			spec, err = kcpdatastore.KinePostgresSpec(kc, n.Store())
 		} else {
-			spec, err = kcpstore.KineSqliteSpec(kc)
+			spec, err = kcpdatastore.KineSqliteSpec(kc)
 		}
 	case table.KindFront:
 		spec, err = kcpserver.FrontSpec(kcpserver.FrontConfig{Unit: e.Unit, Slice: n.Slice(), Exe: p.Exe, Owner: p.Owner,
@@ -168,9 +169,7 @@ func (p Params) Spec(e table.Entry, frontURL string) (hostsvc.UnitSpec, error) {
 			return hostsvc.UnitSpec{}, errors.New("bootstrap: a production core is an installed unit of install's table, not a spec")
 		}
 		timeout := p.ReadyTimeout
-		if timeout <= 0 {
-			timeout = DefaultReadyTimeout
-		}
+		timeout = opt.Positive(timeout, DefaultReadyTimeout)
 		spec = hostsvc.UnitSpec{Name: e.Unit, Description: "dev core of " + p.Owner,
 			Exec:    []string{p.Exe, "internal", "dev-core", "--instance-dir", p.InstanceDir, "--ready-timeout", timeout.String()},
 			WorkDir: p.InstanceDir, Slice: n.CoreSlice(), Restart: hostsvc.RestartOnFailure, KillSignal: syscall.SIGTERM,

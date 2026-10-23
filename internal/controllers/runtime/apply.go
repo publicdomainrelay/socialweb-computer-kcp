@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	kruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -68,10 +69,10 @@ func (r Request) Apply(ctx context.Context, obj Object) error {
 	}
 	meta, _ := u.Object["metadata"].(map[string]any)
 	if labels := obj.GetLabels(); len(labels) > 0 {
-		meta["labels"] = toAny(labels)
+		meta["labels"] = strs.AnyMap(labels)
 	}
 	if annotations := obj.GetAnnotations(); len(annotations) > 0 {
-		meta["annotations"] = toAny(annotations)
+		meta["annotations"] = strs.AnyMap(annotations)
 	}
 	if owners, ok, _ := unstructured.NestedSlice(full.Object, "metadata", "ownerReferences"); ok && len(owners) > 0 {
 		meta["ownerReferences"] = owners
@@ -163,12 +164,4 @@ func dropped(live, desired map[string]any) {
 			dropped(liveMap, nextMap)
 		}
 	}
-}
-
-func toAny(in map[string]string) map[string]any {
-	out := make(map[string]any, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
-	return out
 }

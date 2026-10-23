@@ -2,6 +2,7 @@ package appcli
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	qrcode "github.com/skip2/go-qrcode"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 type MarketIdentityClient interface {
@@ -37,9 +39,7 @@ func actionKey(a *v1alpha1.MarketIdentityPendingAction) string {
 
 func (r IdentityRenderer) WaitReady(ctx context.Context, name string) (*v1alpha1.MarketIdentity, error) {
 	interval := r.Interval
-	if interval <= 0 {
-		interval = defaultIdentityInterval
-	}
+	interval = opt.Positive(interval, defaultIdentityInterval)
 	var in *bufio.Reader
 	if r.In != nil {
 		in = bufio.NewReader(r.In)
@@ -52,7 +52,7 @@ func (r IdentityRenderer) WaitReady(ctx context.Context, name string) (*v1alpha1
 		}
 		switch obj.Status.Phase {
 		case v1alpha1.MarketIdentityPhaseReady:
-			fmt.Fprintf(r.Out, "signed in as %s (%s)\n", orDash(obj.Status.Handle), orDash(obj.Status.Did))
+			fmt.Fprintf(r.Out, "signed in as %s (%s)\n", cmp.Or(obj.Status.Handle), cmp.Or(obj.Status.Did))
 			return obj, nil
 		case v1alpha1.MarketIdentityPhaseFailed:
 			return obj, fmt.Errorf("marketidentity %s failed: %s", name, obj.Status.Message)
@@ -116,11 +116,4 @@ func (r IdentityRenderer) showUrl(title string, a *v1alpha1.MarketIdentityPendin
 		fmt.Fprintf(r.Out, "  Expires at %s\n", a.ExpiresAt)
 	}
 	fmt.Fprintf(r.Out, "%s\n\n", rule)
-}
-
-func orDash(s string) string {
-	if s == "" {
-		return "-"
-	}
-	return s
 }

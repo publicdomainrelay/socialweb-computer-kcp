@@ -9,7 +9,6 @@ import (
 
 	"github.com/bluesky-social/indigo/atproto/syntax"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -17,6 +16,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/statusstate"
 )
 
@@ -61,29 +61,32 @@ func (c *AtprotoRepoController) Reconcile(ctx context.Context, dyn dynamic.Inter
 	status.ObservedGeneration = generation
 	backend, err := pdsclient.ReadRepoBackend(ctx, dyn, workspace, object)
 	if err != nil {
-		setRepoCondition(&status.Conditions, generation, statusstate.ConditionReady, false, statusstate.ReasonWaiting, err.Error())
+		conds.Set(&status.Conditions, generation, statusstate.ConditionReady, false, statusstate.ReasonWaiting, err.Error())
 		setRepoInSync(&status.Conditions, generation, false, statusstate.ReasonWaiting, err.Error())
 		return c.writeStatus(ctx, dyn, workspace, u, status)
 	}
 	didText := backend.DID
 	status.DID = didText
 	if didText == "" {
-		setRepoCondition(&status.Conditions, generation, statusstate.ConditionReady, false, statusstate.ReasonWaiting,
+		conds.Set(&status.Conditions, generation, statusstate.ConditionReady, false, statusstate.ReasonWaiting,
 			"the AtprotoRepo needs a did")
+
 		setRepoInSync(&status.Conditions, generation, false, statusstate.ReasonWaiting, "the AtprotoRepo has no did")
 		return c.writeStatus(ctx, dyn, workspace, u, status)
 	}
 	did, err := syntax.ParseDID(didText)
 	if err != nil {
-		setRepoCondition(&status.Conditions, generation, statusstate.ConditionReady, false, statusstate.ReasonSourceError,
+		conds.Set(&status.Conditions, generation, statusstate.ConditionReady, false, statusstate.ReasonSourceError,
 			"the AtprotoRepo did is invalid: "+err.Error())
+
 		setRepoInSync(&status.Conditions, generation, false, statusstate.ReasonSourceError, "the AtprotoRepo did is invalid")
 		return c.writeStatus(ctx, dyn, workspace, u, status)
 	}
 	binding, err := repoBindingFor(backend)
 	if err != nil {
-		setRepoCondition(&status.Conditions, generation, statusstate.ConditionReady, false, statusstate.ReasonWaiting,
+		conds.Set(&status.Conditions, generation, statusstate.ConditionReady, false, statusstate.ReasonWaiting,
 			err.Error())
+
 		setRepoInSync(&status.Conditions, generation, false, statusstate.ReasonWaiting, err.Error())
 		return c.writeStatus(ctx, dyn, workspace, u, status)
 	}
@@ -93,23 +96,25 @@ func (c *AtprotoRepoController) Reconcile(ctx context.Context, dyn dynamic.Inter
 		if errors.Is(err, pdsclient.ErrAuthenticationRequired) || errors.Is(err, pdsclient.ErrInvalidConfig) {
 			reason = statusstate.ReasonSourceUnavailable
 		}
-		setRepoCondition(&status.Conditions, generation, statusstate.ConditionReady, false, reason,
+		conds.Set(&status.Conditions, generation, statusstate.ConditionReady, false, reason,
 			"resolving the repo: "+err.Error())
+
 		setRepoInSync(&status.Conditions, generation, false, reason, "the repo binding does not resolve")
 		c.log.Warn("resolving an AtprotoRepo", "workspace", workspace, "name", object.Name, "err", err.Error())
 		return c.writeStatus(ctx, dyn, workspace, u, status)
 	}
 	observation, err := statusstate.ObserveRepo(ctx, resolved.PDS, did)
 	if err != nil {
-		setRepoCondition(&status.Conditions, generation, statusstate.ConditionReady, false, statusstate.ReasonSourceError,
+		conds.Set(&status.Conditions, generation, statusstate.ConditionReady, false, statusstate.ReasonSourceError,
 			"reading the repo: "+err.Error())
+
 		setRepoInSync(&status.Conditions, generation, false, statusstate.ReasonSourceError, "the repo head is unreadable")
 		return c.writeStatus(ctx, dyn, workspace, u, status)
 	}
 	status.Head = observation.Head
 	status.Rev = observation.Rev
 	message := "the repo head is " + observation.Head
-	setRepoCondition(&status.Conditions, generation, statusstate.ConditionReady, true, statusstate.ReasonReady, message)
+	conds.Set(&status.Conditions, generation, statusstate.ConditionReady, true, statusstate.ReasonReady, message)
 	setRepoInSync(&status.Conditions, generation, true, statusstate.ReasonReady, message)
 	return c.writeStatus(ctx, dyn, workspace, u, status)
 }
@@ -165,15 +170,6 @@ func (c *AtprotoRepoController) writeStatus(ctx context.Context, dyn dynamic.Int
 	return fmt.Errorf("appctl: the status of %s stayed in conflict", name)
 }
 
-func setRepoCondition(conditions *[]metav1.Condition, generation int64, conditionType string, ok bool, reason, message string) {
-	value := metav1.ConditionFalse
-	if ok {
-		value = metav1.ConditionTrue
-	}
-	meta.SetStatusCondition(conditions, metav1.Condition{Type: conditionType, Status: value, Reason: reason,
-		Message: message, ObservedGeneration: generation})
-}
-
 func setRepoInSync(conditions *[]metav1.Condition, generation int64, ok bool, reason, message string) {
-	setRepoCondition(conditions, generation, statusstate.ConditionInSync, ok, reason, message)
+	conds.Set(conditions, generation, statusstate.ConditionInSync, ok, reason, message)
 }

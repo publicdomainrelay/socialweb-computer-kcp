@@ -1,6 +1,7 @@
 package clientcert
 
 import (
+	"cmp"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -68,9 +69,7 @@ func (i *Issuer) Grant(ctx context.Context, in kcpclient.GrantInput) (string, er
 		return "", errors.New("clientcert: a caller, a cluster and a server are required")
 	}
 	ttl := in.TTL
-	if ttl == 0 {
-		ttl = gateway.DefaultClientCertTTL
-	}
+	ttl = cmp.Or(ttl, gateway.DefaultClientCertTTL)
 	if in.NoExpiry {
 		if in.TTL != 0 {
 			return "", errors.New("clientcert: a lifetime and no expiry are exclusive")

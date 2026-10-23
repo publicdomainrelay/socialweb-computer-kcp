@@ -1,6 +1,7 @@
 package clusterstack
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"net"
@@ -134,15 +135,9 @@ func (a Audit) Validate() error {
 
 func (a Audit) argv() []string {
 	size, age, backups := a.MaxSizeMB, a.MaxAgeDays, a.MaxBackups
-	if size == 0 {
-		size = DefaultAuditMaxSizeMB
-	}
-	if age == 0 {
-		age = DefaultAuditMaxAgeDays
-	}
-	if backups == 0 {
-		backups = DefaultAuditMaxBackups
-	}
+	size = cmp.Or(size, DefaultAuditMaxSizeMB)
+	age = cmp.Or(age, DefaultAuditMaxAgeDays)
+	backups = cmp.Or(backups, DefaultAuditMaxBackups)
 	return []string{
 		"--kube-apiserver-arg=audit-policy-file=" + a.PolicyPath,
 		"--kube-apiserver-arg=audit-log-path=" + a.LogPath,

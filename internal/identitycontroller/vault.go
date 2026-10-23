@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauthclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -45,9 +46,7 @@ func (s *VaultStateStore) Put(ctx context.Context, pending oauthclient.PendingAu
 		return err
 	}
 	ttl := s.ttl
-	if ttl <= 0 {
-		ttl = defaultStateTTL
-	}
+	ttl = opt.Positive(ttl, defaultStateTTL)
 	return s.Vault.Put(ctx, s.ref(pending.State), map[string]any{
 		"state":     string(raw),
 		"expiresAt": time.Now().Add(ttl).UTC().Format(time.RFC3339),

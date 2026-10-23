@@ -12,12 +12,13 @@ import (
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/syntax"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 const (
@@ -76,13 +77,9 @@ func New(opts Options) *Controller {
 		log = slog.New(slog.DiscardHandler)
 	}
 	timeout := opts.Timeout
-	if timeout <= 0 {
-		timeout = DefaultTimeout
-	}
+	timeout = opt.Positive(timeout, DefaultTimeout)
 	checkInterval := opts.CheckInterval
-	if checkInterval <= 0 {
-		checkInterval = DefaultCheckInterval
-	}
+	checkInterval = opt.Positive(checkInterval, DefaultCheckInterval)
 	return &Controller{log: log.With("component", "remotepds-controller"), caBundle: opts.CABundle, secrets: opts.Secrets,
 		timeout: timeout, checkInterval: checkInterval}
 }
@@ -105,8 +102,8 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 	status.Ready = false
 	status.Endpoint = ""
 	if object.Spec.Suspend {
-		setCondition(&status, ConditionReady, false, "Suspended", "the RemotePDS is suspended", generation)
-		setCondition(&status, ConditionFailed, false, "Suspended", "the RemotePDS is suspended", generation)
+		conds.Set(&status.Conditions, generation, ConditionReady, false, "Suspended", "the RemotePDS is suspended")
+		conds.Set(&status.Conditions, generation, ConditionFailed, false, "Suspended", "the RemotePDS is suspended")
 		return ctlruntime.Result{}, c.apply(ctx, req, object, status)
 	}
 	checkedAt := metav1.NewTime(time.Now().UTC().Truncate(time.Second))
@@ -123,8 +120,8 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 	status.Ready = true
 	status.Endpoint = endpoint
 	message := fmt.Sprintf("the PDS at %s reports %s", endpoint, info.DID.String())
-	setCondition(&status, ConditionReady, true, "Ready", message, generation)
-	setCondition(&status, ConditionFailed, false, "DescribeSucceeded", "the PDS answered describeServer", generation)
+	conds.Set(&status.Conditions, generation, ConditionReady, true, "Ready", message)
+	conds.Set(&status.Conditions, generation, ConditionFailed, false, "DescribeSucceeded", "the PDS answered describeServer")
 	if err := c.apply(ctx, req, object, status); err != nil {
 		return ctlruntime.Result{}, err
 	}
@@ -137,8 +134,8 @@ func (c *Controller) fail(ctx context.Context, req ctlruntime.Request, object *p
 	reason string, err error) (ctlruntime.Result, error) {
 	generation := object.Generation
 	status.Phase = pdsv1alpha1.RemotePDSFailed
-	setCondition(&status, ConditionReady, false, reason, err.Error(), generation)
-	setCondition(&status, ConditionFailed, true, reason, err.Error(), generation)
+	conds.Set(&status.Conditions, generation, ConditionReady, false, reason, err.Error())
+	conds.Set(&status.Conditions, generation, ConditionFailed, true, reason, err.Error())
 	if applyErr := c.apply(ctx, req, object, status); applyErr != nil {
 		return ctlruntime.Result{}, errors.Join(err, applyErr)
 	}
@@ -253,18 +250,4 @@ func (c *Controller) tlsConfig(spec pdsv1alpha1.RemotePDSTLS, baseURL *url.URL) 
 		config.ServerName = serverName
 	}
 	return config, nil
-}
-
-func setCondition(status *pdsv1alpha1.RemotePDSStatus, conditionType string, value bool, reason, message string, generation int64) {
-	conditionStatus := metav1.ConditionFalse
-	if value {
-		conditionStatus = metav1.ConditionTrue
-	}
-	meta.SetStatusCondition(&status.Conditions, metav1.Condition{
-		Type:               conditionType,
-		Status:             conditionStatus,
-		Reason:             reason,
-		Message:            message,
-		ObservedGeneration: generation,
-	})
 }

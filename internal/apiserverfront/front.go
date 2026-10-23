@@ -15,6 +15,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 const DefaultDialTimeout = 5 * time.Second
@@ -118,12 +120,8 @@ func ValidBackend(addr string) error {
 }
 
 func New(ln net.Listener, o Options) (*Front, error) {
-	if o.DialTimeout <= 0 {
-		o.DialTimeout = DefaultDialTimeout
-	}
-	if o.IdleTimeout <= 0 {
-		o.IdleTimeout = DefaultIdleTimeout
-	}
+	o.DialTimeout = opt.Positive(o.DialTimeout, DefaultDialTimeout)
+	o.IdleTimeout = opt.Positive(o.IdleTimeout, DefaultIdleTimeout)
 	log := o.Log
 	if log == nil {
 		log = slog.New(slog.NewJSONHandler(io.Discard, nil))

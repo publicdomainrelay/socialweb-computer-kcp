@@ -1,6 +1,7 @@
 package appctl
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,12 +12,15 @@ import (
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestnet"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/jsonx"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vaultlayout"
@@ -60,13 +64,6 @@ type WebApp struct {
 	DownloadsDir    string
 }
 
-func duration(d time.Duration) string {
-	if d <= 0 {
-		return ""
-	}
-	return d.String()
-}
-
 func keyType(kind string) string {
 	switch strings.ToLower(kind) {
 	case "ecdsa", "ec":
@@ -94,9 +91,7 @@ func RootVaultDeclared() *v1alpha1.OpenBaoServerDeclared {
 		sm := v1alpha1.OpenBaoSecretMount{Path: strings.Trim(m.Path, "/"), Type: string(m.Kind)}
 		if m.Kind == vaultlayout.MountPKI {
 			ttl := m.MaxLeaseTTL
-			if ttl <= 0 {
-				ttl = rootVaultPKIMaxTTL
-			}
+			ttl = opt.Positive(ttl, rootVaultPKIMaxTTL)
 			sm.MaxLeaseTTL = ttl.String()
 		}
 		d.SecretMounts = append(d.SecretMounts, sm)
@@ -111,7 +106,7 @@ func RootVaultDeclared() *v1alpha1.OpenBaoServerDeclared {
 	for _, r := range layout.AppRoles {
 		if r.Vault == vaultlayout.Root {
 			d.AppRoles = append(d.AppRoles, v1alpha1.OpenBaoAppRole{Mount: rootVaultAppRole, Name: r.Name, Policies: r.Policies,
-				TokenTTL: duration(r.TokenTTL), TokenMaxTTL: duration(r.TokenMaxTTL), SecretIDTTL: duration(r.SecretIDTTL)})
+				TokenTTL: clock.DurationString(r.TokenTTL), TokenMaxTTL: clock.DurationString(r.TokenMaxTTL), SecretIDTTL: clock.DurationString(r.SecretIDTTL)})
 		}
 	}
 	for _, r := range layout.PKIRoles {
@@ -122,7 +117,7 @@ func RootVaultDeclared() *v1alpha1.OpenBaoServerDeclared {
 			AllowedDomains: r.AllowedDomains, AllowSubdomains: r.AllowSubdomains, AllowBareDomains: r.AllowBareDomains,
 			AllowIPSANs: r.AllowIPSANs, EnforceHostnames: r.EnforceHostnames, RequireCN: r.RequireCN, ClientFlag: r.ClientAuth,
 			ServerFlag: r.ServerAuth, KeyType: keyType(r.KeyType), KeyBits: int32(r.KeyBits), KeyUsage: r.KeyUsage,
-			TTL: duration(r.TTL), MaxTTL: duration(r.MaxTTL), NoStore: true})
+			TTL: clock.DurationString(r.TTL), MaxTTL: clock.DurationString(r.MaxTTL), NoStore: true})
 	}
 	for _, m := range d.SecretMounts {
 		if m.Type == string(vaultlayout.MountPKI) {
@@ -177,12 +172,6 @@ func GatewayRequesterIdentity(g v1alpha1.GatewaySpec) v1alpha1.ApplicationIdenti
 	return id
 }
 
-func sameSpec(a, b any) bool {
-	x, err1 := json.Marshal(a)
-	y, err2 := json.Marshal(b)
-	return err1 == nil && err2 == nil && string(x) == string(y)
-}
-
 func (ctl *Controller) ensureRootVault(ctx context.Context, owner string, g v1alpha1.GatewaySpec) (*v1alpha1.OpenBaoServer, error) {
 	ri, err := ctl.client(ctl.c.workspace(), OpenBaoServerGVR)
 	if err != nil {
@@ -197,7 +186,7 @@ func (ctl *Controller) ensureRootVault(ctx context.Context, owner string, g v1al
 		if apierrors.IsNotFound(err) {
 			o := v1alpha1.OpenBaoServer{ObjectMeta: metav1.ObjectMeta{Name: vaultlayout.RootServerName,
 				Labels: map[string]string{OwnerLabel: owner}}, Spec: want}
-			nu, err := toUnstructured(&o, "OpenBaoServer")
+			nu, err := unstruct.To(&o, "OpenBaoServer")
 			if err != nil {
 				return nil, err
 			}
@@ -212,10 +201,10 @@ func (ctl *Controller) ensureRootVault(ctx context.Context, owner string, g v1al
 			return nil, err
 		}
 		var o v1alpha1.OpenBaoServer
-		if err := fromUnstructured(u, &o); err != nil {
+		if err := unstruct.Into(u, &o); err != nil {
 			return nil, err
 		}
-		if sameSpec(o.Spec, want) && o.Labels[OwnerLabel] == owner {
+		if jsonx.Equal(o.Spec, want) && o.Labels[OwnerLabel] == owner {
 			return &o, nil
 		}
 		o.Spec = want
@@ -223,7 +212,7 @@ func (ctl *Controller) ensureRootVault(ctx context.Context, owner string, g v1al
 			o.Labels = map[string]string{}
 		}
 		o.Labels[OwnerLabel] = owner
-		nu, err := toUnstructured(&o, "OpenBaoServer")
+		nu, err := unstruct.To(&o, "OpenBaoServer")
 		if err != nil {
 			return nil, err
 		}
@@ -236,14 +225,6 @@ func (ctl *Controller) ensureRootVault(ctx context.Context, owner string, g v1al
 		ctl.c.log().Info("the gateway's root vault declaration changed", "openbaoserver", vaultlayout.RootServerName)
 	}
 	return nil, fmt.Errorf("appctl: the OpenBaoServer %s stayed in conflict", vaultlayout.RootServerName)
-}
-
-func RootVaultSynced(o *v1alpha1.OpenBaoServer) bool {
-	if o == nil || o.Status.ObservedGeneration != o.Generation || o.Status.Phase != v1alpha1.OpenBaoServerPhaseReady {
-		return false
-	}
-	c := meta.FindStatusCondition(o.Status.Conditions, openbaoctl.ConditionSynced)
-	return c != nil && c.Status == metav1.ConditionTrue && c.ObservedGeneration == o.Generation
 }
 
 func gatewayNodeMarket(o v1alpha1.Gateway, workspace string) *v1alpha1.GatewayNodeMarket {
@@ -291,9 +272,7 @@ func (ctl *Controller) gatewayDesired(ctx context.Context, o v1alpha1.Gateway, p
 	}
 	publicOrigin := optionValue(o.Spec.Options, publicOriginOption)
 	audience := optionValue(o.Spec.Options, GatewayAudienceOption)
-	if audience == "" {
-		audience = ident.Did
-	}
+	audience = cmp.Or(audience, ident.Did)
 	postSignInURL := optionValue(o.Spec.Options, GatewayPostSignInOption)
 	if postSignInURL == "" && publicOrigin != "" {
 		postSignInURL = strings.TrimRight(publicOrigin, "/") + "/"
@@ -379,7 +358,7 @@ func (ctl *Controller) gatewayDesired(ctx context.Context, o v1alpha1.Gateway, p
 
 func (ctl *Controller) reconcileGateway(ctx context.Context, u *unstructured.Unstructured) error {
 	var o v1alpha1.Gateway
-	if err := fromUnstructured(u, &o); err != nil {
+	if err := unstruct.Into(u, &o); err != nil {
 		return err
 	}
 	owner := ownerOf(u)
@@ -435,7 +414,7 @@ func (ctl *Controller) reconcileGateway(ctx context.Context, u *unstructured.Uns
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "its root vault: "+err.Error()
 		return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
 	}
-	vaultReady := RootVaultSynced(vault)
+	vaultReady := openbaoctl.Synced(vault)
 	st.Components = append(st.Components, v1alpha1.ApplicationComponent{Kind: "OpenBaoServer", Name: vault.Name,
 		Workspace: ctl.c.workspace(), Phase: string(vault.Status.Phase), Ready: vaultReady})
 	stateRoot := ctl.c.Layout.StateDir
@@ -745,7 +724,7 @@ func listJSON(items []string) (string, error) {
 }
 
 func clientVaultOf(o *v1alpha1.OpenBaoServer, client string) (manifests.GatewayVault, bool) {
-	if o == nil || !RootVaultSynced(o) || o.Status.Refs == nil || o.Status.Refs.CA == "" {
+	if o == nil || !openbaoctl.Synced(o) || o.Status.Refs == nil || o.Status.Refs.CA == "" {
 		return manifests.GatewayVault{}, false
 	}
 	for _, c := range o.Status.Clients {

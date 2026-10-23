@@ -22,6 +22,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/exposure"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/irohdial"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/childproc"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/ingressproxy/loopback"
 )
 
@@ -361,7 +363,7 @@ type child struct {
 
 	ticket string
 
-	tail *tailBuffer
+	tail *childproc.Tail
 
 	started time.Time
 
@@ -369,7 +371,7 @@ type child struct {
 }
 
 func (c *child) stop() {
-	killChild(c.cmd)
+	childproc.Kill(c.cmd)
 	c.output.Wait()
 }
 
@@ -384,12 +386,12 @@ func (r *registration) startChild(ctx context.Context) (*child, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("ingressproxy iroh: starting dumbpipe: %w", err)
 	}
-	tail := &tailBuffer{}
+	tail := &childproc.Tail{}
 	found := make(chan string, 1)
 	output := &sync.WaitGroup{}
 	output.Go(func() { pump(stderr, tail, found) })
 	stop := func() {
-		killChild(cmd)
+		childproc.Kill(cmd)
 		output.Wait()
 	}
 	timer := time.NewTimer(TicketTimeout)
@@ -433,8 +435,8 @@ func (r *registration) supervise(ctx context.Context, first *child) {
 					return
 				}
 				r.log.Warn("ingressproxy_iroh_dumbpipe_restart_failed", "err", err.Error())
-				backoff = nextBackoff(backoff)
-				if !sleepCtx(ctx, backoff) {
+				backoff = childproc.NextBackoff(backoff, MinRestartBackoff, MaxRestartBackoff)
+				if !clock.Sleep(ctx, backoff) {
 					return
 				}
 				continue
@@ -462,14 +464,14 @@ func (r *registration) supervise(ctx context.Context, first *child) {
 			backoff = MinRestartBackoff
 		}
 		r.log.Warn("ingressproxy_iroh_dumbpipe_exited", "err", fmt.Sprint(err), "stderr", stderr)
-		if !sleepCtx(ctx, backoff) {
+		if !clock.Sleep(ctx, backoff) {
 			return
 		}
-		backoff = nextBackoff(backoff)
+		backoff = childproc.NextBackoff(backoff, MinRestartBackoff, MaxRestartBackoff)
 	}
 }
 
-func pump(reader io.Reader, tail *tailBuffer, found chan<- string) {
+func pump(reader io.Reader, tail *childproc.Tail, found chan<- string) {
 	defer close(found)
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 4096), 64*1024)
@@ -515,56 +517,4 @@ func childEnv(secret, relay string) []string {
 		env = append(env, "IROH_RELAY_URL="+relay)
 	}
 	return env
-}
-
-func killChild(cmd *exec.Cmd) {
-	if cmd == nil || cmd.Process == nil {
-		return
-	}
-	_ = cmd.Process.Kill()
-	_ = cmd.Wait()
-}
-
-func sleepCtx(ctx context.Context, d time.Duration) bool {
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-timer.C:
-		return true
-	}
-}
-
-func nextBackoff(current time.Duration) time.Duration {
-	if current <= 0 {
-		return MinRestartBackoff
-	}
-	next := current * 2
-	if next > MaxRestartBackoff {
-		return MaxRestartBackoff
-	}
-	return next
-}
-
-type tailBuffer struct {
-	mu sync.Mutex
-
-	buf []byte
-}
-
-func (t *tailBuffer) Write(p []byte) (int, error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.buf = append(t.buf, p...)
-	if len(t.buf) > 2048 {
-		t.buf = t.buf[len(t.buf)-2048:]
-	}
-	return len(p), nil
-}
-
-func (t *tailBuffer) String() string {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return string(t.buf)
 }

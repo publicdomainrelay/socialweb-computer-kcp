@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -16,6 +15,10 @@ import (
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/syntax"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/serviceauth"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 const (
@@ -87,24 +90,12 @@ func New(cfg Config) (*Server, error) {
 	if cfg.Accounts == nil || cfg.Sessions == nil || cfg.Codes == nil || cfg.Tokens == nil || cfg.PARs == nil {
 		return nil, fmt.Errorf("oauth: all stores are required")
 	}
-	if cfg.AccessTokenTTL <= 0 {
-		cfg.AccessTokenTTL = DefaultAccessTokenTTL
-	}
-	if cfg.RefreshTokenTTL <= 0 {
-		cfg.RefreshTokenTTL = DefaultRefreshTokenTTL
-	}
-	if cfg.AuthorizationCodeTTL <= 0 {
-		cfg.AuthorizationCodeTTL = DefaultAuthorizationCodeTTL
-	}
-	if cfg.PARTTL <= 0 {
-		cfg.PARTTL = DefaultPARTTL
-	}
-	if cfg.ClientMetadataTTL <= 0 {
-		cfg.ClientMetadataTTL = DefaultClientMetadataTTL
-	}
-	if cfg.DPoPLeeway <= 0 {
-		cfg.DPoPLeeway = DefaultDPoPLeeway
-	}
+	cfg.AccessTokenTTL = opt.Positive(cfg.AccessTokenTTL, DefaultAccessTokenTTL)
+	cfg.RefreshTokenTTL = opt.Positive(cfg.RefreshTokenTTL, DefaultRefreshTokenTTL)
+	cfg.AuthorizationCodeTTL = opt.Positive(cfg.AuthorizationCodeTTL, DefaultAuthorizationCodeTTL)
+	cfg.PARTTL = opt.Positive(cfg.PARTTL, DefaultPARTTL)
+	cfg.ClientMetadataTTL = opt.Positive(cfg.ClientMetadataTTL, DefaultClientMetadataTTL)
+	cfg.DPoPLeeway = opt.Positive(cfg.DPoPLeeway, DefaultDPoPLeeway)
 	if cfg.Nonces == nil {
 		cfg.Nonces = NewMemoryNonceStore()
 	}
@@ -152,7 +143,7 @@ func normalizeIssuer(raw string) (string, error) {
 	if parsed.Path != "" && parsed.Path != "/" {
 		return "", fmt.Errorf("oauth: issuer must not have a path")
 	}
-	if scheme == "http" && !isLoopbackHostname(parsed.Hostname()) && !isInternalKcpHostname(parsed.Hostname()) {
+	if scheme == "http" && !isLoopbackHostname(parsed.Hostname()) && !hostport.IsInternalKCP(parsed.Hostname()) {
 		return "", fmt.Errorf("oauth: http issuer is only allowed on loopback or the internal kcp service domain")
 	}
 	return scheme + "://" + strings.ToLower(parsed.Host), nil
@@ -164,11 +155,6 @@ func isLoopbackHostname(host string) bool {
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
-}
-
-func isInternalKcpHostname(host string) bool {
-	host = strings.ToLower(strings.TrimSuffix(host, "."))
-	return host == "svc.kcp.local" || strings.HasSuffix(host, ".svc.kcp.local")
 }
 
 func (s *Server) Issuer() string {
@@ -225,19 +211,11 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) handleAuthorizationServerMetadata(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, s.AuthorizationServerMetadata())
+	httpjson.Write(w, http.StatusOK, s.AuthorizationServerMetadata())
 }
 
 func (s *Server) handleProtectedResourceMetadata(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, s.ProtectedResourceMetadata())
-}
-
-func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if value != nil {
-		_ = json.NewEncoder(w).Encode(value)
-	}
+	httpjson.Write(w, http.StatusOK, s.ProtectedResourceMetadata())
 }
 
 type oauthErrorBody struct {
@@ -248,7 +226,7 @@ type oauthErrorBody struct {
 func writeOAuthError(w http.ResponseWriter, status int, code, description string) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Pragma", "no-cache")
-	writeJSON(w, status, oauthErrorBody{Error: code, ErrorDescription: description})
+	httpjson.Write(w, status, oauthErrorBody{Error: code, ErrorDescription: description})
 }
 
 func parseOAuthForm(w http.ResponseWriter, r *http.Request) (url.Values, error) {
@@ -310,7 +288,7 @@ func DIDFromContext(ctx context.Context) (syntax.DID, bool) {
 func (s *Server) ResourceHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authorization := r.Header.Get("Authorization")
-		scheme, token, ok := authCredentials(authorization)
+		scheme, token, ok := serviceauth.SplitAuthorization(authorization)
 		if !ok || !strings.EqualFold(scheme, AuthSchemeDPoP) {
 			next.ServeHTTP(w, r)
 			return
@@ -373,14 +351,6 @@ func writeResourceError(w http.ResponseWriter, status int, code, description, no
 		w.Header().Set(HeaderDPoPNonce, nonce)
 	}
 	writeOAuthError(w, status, code, description)
-}
-
-func authCredentials(header string) (string, string, bool) {
-	parts := strings.Fields(header)
-	if len(parts) != 2 {
-		return "", "", false
-	}
-	return parts[0], parts[1], true
 }
 
 func (s *Server) ValidateAccessToken(ctx context.Context, token string) (*Session, error) {

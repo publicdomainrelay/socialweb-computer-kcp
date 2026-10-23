@@ -1,6 +1,7 @@
 package requester
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -182,9 +183,7 @@ func applyTermination(state *v1alpha1.NodeClaimContract, termination *v1alpha1.C
 	if state.Timestamps == nil {
 		state.Timestamps = &v1alpha1.ContractTimestamps{}
 	}
-	if state.Timestamps.Released == "" {
-		state.Timestamps.Released = now
-	}
+	state.Timestamps.Released = cmp.Or(state.Timestamps.Released, now)
 	return true
 }
 

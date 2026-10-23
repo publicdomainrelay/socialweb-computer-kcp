@@ -1,6 +1,7 @@
 package plc
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,6 +15,7 @@ import (
 	"github.com/bluesky-social/indigo/atproto/atdata"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/didkey"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
 )
 
 type Error struct {
@@ -47,9 +49,7 @@ func NewServer(opts Options) *Server {
 		store = NewMemoryStore()
 	}
 	version := opts.Version
-	if version == "" {
-		version = "0.1.0"
-	}
+	version = cmp.Or(version, "0.1.0")
 	s := &Server{store: store, version: version, verifySig: opts.VerifySignature}
 	if s.verifySig == nil {
 		s.verifySig = func(ctx context.Context, did string, data, sig []byte) (bool, error) {
@@ -259,7 +259,7 @@ func validatePrevChain(prev *string, current []LogEntry) *Error {
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"version": s.version})
+	httpjson.Write(w, http.StatusOK, map[string]string{"version": s.version})
 }
 
 func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
@@ -268,7 +268,7 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	if v := q.Get("after"); v != "" {
 		t, err := time.Parse(time.RFC3339Nano, v)
 		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"message": "Invalid Query Parameter: after"})
+			httpjson.Write(w, http.StatusBadRequest, map[string]string{"message": "Invalid Query Parameter: after"})
 			return
 		}
 		after = &t
@@ -277,7 +277,7 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	if v := q.Get("count"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 0 {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"message": "Invalid Query Parameter: count"})
+			httpjson.Write(w, http.StatusBadRequest, map[string]string{"message": "Invalid Query Parameter: count"})
 			return
 		}
 		count = min(n, 1000)
@@ -287,7 +287,7 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, entries)
+	httpjson.Write(w, http.StatusOK, entries)
 }
 
 func (s *Server) handleResolve(w http.ResponseWriter, r *http.Request) {
@@ -296,23 +296,23 @@ func (s *Server) handleResolve(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, doc)
+	httpjson.Write(w, http.StatusOK, doc)
 }
 
 func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, 4<<20))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"message": "Invalid JSON body"})
+		httpjson.Write(w, http.StatusBadRequest, map[string]string{"message": "Invalid JSON body"})
 		return
 	}
 	var decoded any
 	if err := json.Unmarshal(body, &decoded); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"message": "Invalid JSON body"})
+		httpjson.Write(w, http.StatusBadRequest, map[string]string{"message": "Invalid JSON body"})
 		return
 	}
 	raw, ok := decoded.(map[string]any)
 	if !ok {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"message": "Operation must be an object"})
+		httpjson.Write(w, http.StatusBadRequest, map[string]string{"message": "Operation must be an object"})
 		return
 	}
 	entry, err := s.Submit(r.Context(), r.PathValue("did"), raw)
@@ -320,7 +320,7 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, entry)
+	httpjson.Write(w, http.StatusOK, entry)
 }
 
 func (s *Server) handleLog(w http.ResponseWriter, r *http.Request) {
@@ -329,7 +329,7 @@ func (s *Server) handleLog(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, ops)
+	httpjson.Write(w, http.StatusOK, ops)
 }
 
 func (s *Server) handleAudit(w http.ResponseWriter, r *http.Request) {
@@ -338,22 +338,16 @@ func (s *Server) handleAudit(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, entries)
-}
-
-func writeJSON(w http.ResponseWriter, status int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
+	httpjson.Write(w, http.StatusOK, entries)
 }
 
 func writeError(w http.ResponseWriter, err error) {
 	var pe *Error
 	if errors.As(err, &pe) {
-		writeJSON(w, pe.Status, map[string]string{"message": pe.Message})
+		httpjson.Write(w, pe.Status, map[string]string{"message": pe.Message})
 		return
 	}
-	writeJSON(w, http.StatusInternalServerError, map[string]string{"message": "Internal Server Error"})
+	httpjson.Write(w, http.StatusInternalServerError, map[string]string{"message": "Internal Server Error"})
 }
 
 func withCORS(next http.Handler) http.Handler {

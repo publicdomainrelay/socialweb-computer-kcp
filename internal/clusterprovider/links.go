@@ -16,6 +16,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterlink"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/procgroup"
@@ -224,9 +225,7 @@ func (r *linkRun) ready(ctx context.Context, p procgroup.Member) error {
 
 func (r *linkRun) retry(ctx context.Context, phase string, write func() error) {
 	wait := r.links.Retry
-	if wait <= 0 {
-		wait = DefaultLinkRetry
-	}
+	wait = opt.Positive(wait, DefaultLinkRetry)
 	for {
 		err := write()
 		if err == nil {

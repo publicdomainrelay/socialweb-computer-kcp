@@ -1,6 +1,7 @@
 package ingress
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,6 +16,9 @@ import (
 
 	"github.com/bluesky-social/indigo/atproto/identity"
 	"github.com/gorilla/websocket"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 var (
@@ -142,21 +146,11 @@ func NewServer(cfg Config) (*Server, error) {
 	if cfg.Hostname == "" {
 		return nil, errors.New("ingress: hostname is required")
 	}
-	if cfg.ServiceID == "" {
-		cfg.ServiceID = DefaultServiceID
-	}
-	if cfg.RelayTimeout <= 0 {
-		cfg.RelayTimeout = 30 * time.Second
-	}
-	if cfg.KeepaliveInterval <= 0 {
-		cfg.KeepaliveInterval = 5 * time.Second
-	}
-	if cfg.KeepaliveTimeout <= 0 {
-		cfg.KeepaliveTimeout = 5 * time.Second
-	}
-	if cfg.NonceTTL <= 0 {
-		cfg.NonceTTL = 60 * time.Second
-	}
+	cfg.ServiceID = cmp.Or(cfg.ServiceID, DefaultServiceID)
+	cfg.RelayTimeout = opt.Positive(cfg.RelayTimeout, 30*time.Second)
+	cfg.KeepaliveInterval = opt.Positive(cfg.KeepaliveInterval, 5*time.Second)
+	cfg.KeepaliveTimeout = opt.Positive(cfg.KeepaliveTimeout, 5*time.Second)
+	cfg.NonceTTL = opt.Positive(cfg.NonceTTL, 60*time.Second)
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
@@ -239,20 +233,21 @@ func (s *Server) serveHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	host := hostnameOnly(hostFromRequest(req, s.cfg.Hostname))
+	host := hostport.HostnameOnly(hostport.FromRequest(req, s.cfg.Hostname))
 	path := req.URL.Path
 	control := s.isControlHost(host)
 
 	if control && req.Method == http.MethodGet && path == "/.well-known/did.json" {
-		writeJSON(w, http.StatusOK, map[string]any{
+		httpjson.Write(w, http.StatusOK, map[string]any{
 			"@context": []string{"https://www.w3.org/ns/did/v1"},
-			"id":       hostnameToDID(host),
+			"id":       hostport.WebDID(host),
 			"service": []map[string]string{{
 				"id":              "#" + s.cfg.ServiceID,
 				"type":            "XrpcRelay",
 				"serviceEndpoint": "https://" + s.cfg.Hostname,
 			}},
 		})
+
 		return
 	}
 	if control && path == "/xrpc/"+GetNonceNSID {
@@ -307,7 +302,7 @@ func (s *Server) dataBases() []string {
 	seen := map[string]struct{}{}
 	out := []string{}
 	add := func(h string) {
-		h = hostnameOnly(h)
+		h = hostport.HostnameOnly(h)
 		if h == "" || h == "*" {
 			return
 		}
@@ -337,12 +332,12 @@ func (s *Server) handleNonce(w http.ResponseWriter, req *http.Request) {
 	}
 	token, err := BearerToken(req.Header.Get("Authorization"), "")
 	if err != nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "AuthenticationRequired", "message": err.Error()})
+		httpjson.Write(w, http.StatusUnauthorized, map[string]string{"error": "AuthenticationRequired", "message": err.Error()})
 		return
 	}
-	if _, err := VerifyServiceAuth(req.Context(), token, hostnameToDID(s.cfg.Hostname), GetNonceNSID, s.dir); err != nil {
+	if _, err := VerifyServiceAuth(req.Context(), token, hostport.WebDID(s.cfg.Hostname), GetNonceNSID, s.dir); err != nil {
 		s.log.Warn("auth_denied", "nsid", GetNonceNSID, "err", err)
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "AuthenticationRequired", "message": err.Error()})
+		httpjson.Write(w, http.StatusUnauthorized, map[string]string{"error": "AuthenticationRequired", "message": err.Error()})
 		return
 	}
 	var input struct {
@@ -351,12 +346,12 @@ func (s *Server) handleNonce(w http.ResponseWriter, req *http.Request) {
 	}
 	_ = json.NewDecoder(io.LimitReader(req.Body, 1<<20)).Decode(&input)
 	if !strings.HasPrefix(input.Key, "did:") {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "InvalidRequest", "message": "key must be a DID"})
+		httpjson.Write(w, http.StatusBadRequest, map[string]string{"error": "InvalidRequest", "message": "key must be a DID"})
 		return
 	}
 	nonce := s.nonces.Issue(input.Key)
 	s.log.Info("nonce_issued", "key", input.Key)
-	writeJSON(w, http.StatusOK, map[string]any{"nonce": nonce, "signatures": []Signature{}})
+	httpjson.Write(w, http.StatusOK, map[string]any{"nonce": nonce, "signatures": []Signature{}})
 }
 
 func (s *Server) handleSubscribe(w http.ResponseWriter, req *http.Request) {
@@ -367,13 +362,13 @@ func (s *Server) handleSubscribe(w http.ResponseWriter, req *http.Request) {
 	authHeader := req.Header.Get("Authorization")
 	token, err := BearerToken(authHeader, req.URL.Query().Get("service_auth"))
 	if err != nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "AuthenticationRequired", "message": err.Error()})
+		httpjson.Write(w, http.StatusUnauthorized, map[string]string{"error": "AuthenticationRequired", "message": err.Error()})
 		return
 	}
-	auth, err := VerifyServiceAuth(req.Context(), token, hostnameToDID(s.cfg.Hostname), SubscribeNSID, s.dir)
+	auth, err := VerifyServiceAuth(req.Context(), token, hostport.WebDID(s.cfg.Hostname), SubscribeNSID, s.dir)
 	if err != nil {
 		s.log.Warn("auth_denied", "nsid", SubscribeNSID, "err", err)
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "AuthenticationRequired", "message": err.Error()})
+		httpjson.Write(w, http.StatusUnauthorized, map[string]string{"error": "AuthenticationRequired", "message": err.Error()})
 		return
 	}
 	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
@@ -383,7 +378,7 @@ func (s *Server) handleSubscribe(w http.ResponseWriter, req *http.Request) {
 	}
 	conn.SetReadLimit(8_000_000)
 	clientDID := req.URL.Query().Get("did")
-	subdomain := didToSubdomain(clientDID)
+	subdomain := hostport.DIDLabel(clientDID)
 	if !strings.HasPrefix(clientDID, "did:") {
 		s.log.Warn("missing_did")
 		_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(1008, "did query param must be a DID"), time.Now().Add(time.Second))
@@ -432,7 +427,7 @@ func (s *Server) handleSubscribe(w http.ResponseWriter, req *http.Request) {
 	_ = p.writeJSON(map[string]any{
 		"$type":      frameType("registered"),
 		"subdomain":  subdomain,
-		"ingressRef": "did:web:" + subdomain + "." + hostnameOnly(s.cfg.Hostname),
+		"ingressRef": "did:web:" + subdomain + "." + hostport.HostnameOnly(s.cfg.Hostname),
 	})
 
 	for {
@@ -491,9 +486,7 @@ func (s *Server) handlePeerFrame(p *peer, msg frame) {
 			return
 		}
 		code := msg.Code
-		if code == 0 {
-			code = 1000
-		}
+		code = cmp.Or(code, 1000)
 		sub.closeCaller(code, msg.Reason)
 	}
 }
@@ -818,26 +811,22 @@ func (s *Server) handleForward(w http.ResponseWriter, req *http.Request, subdoma
 	if err != nil {
 		msg := err.Error()
 		if strings.Contains(msg, errNoSubscriber.Error()) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "NotFound", "message": msg})
+			httpjson.Write(w, http.StatusNotFound, map[string]string{"error": "NotFound", "message": msg})
 			return
 		}
 		s.log.Error("relay_failed", "path", req.URL.Path, "subdomain", subdomain, "err", err)
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "RelayError", "message": msg})
+		httpjson.Write(w, http.StatusBadGateway, map[string]string{"error": "RelayError", "message": msg})
 		return
 	}
 
 	contentType := result.ContentType
-	if contentType == "" {
-		contentType = "application/json"
-	}
+	contentType = cmp.Or(contentType, "application/json")
 	w.Header().Set("Content-Type", contentType)
 	for k, v := range result.Headers {
 		w.Header().Set(k, v)
 	}
 	status := result.Status
-	if status == 0 {
-		status = http.StatusOK
-	}
+	status = cmp.Or(status, http.StatusOK)
 	w.WriteHeader(status)
 	if len(result.Body) > 0 {
 		var str string
@@ -864,20 +853,4 @@ func lastQueryValues(values map[string][]string) map[string]string {
 		}
 	}
 	return out
-}
-
-func hostFromRequest(req *http.Request, fallback string) string {
-	if req.Host != "" {
-		return req.Host
-	}
-	if req.URL != nil && req.URL.Host != "" {
-		return req.URL.Host
-	}
-	return fallback
-}
-
-func writeJSON(w http.ResponseWriter, status int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
 }

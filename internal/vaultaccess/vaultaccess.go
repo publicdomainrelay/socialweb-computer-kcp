@@ -2,6 +2,7 @@ package vaultaccess
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -121,9 +122,7 @@ func (r *Resolver) ResolveLocal(ctx context.Context, ref LocalRef) (Session, err
 	if err != nil {
 		return nil, err
 	}
-	if srv.Timeout == 0 {
-		srv.Timeout = r.Timeout
-	}
+	srv.Timeout = cmp.Or(srv.Timeout, r.Timeout)
 	return openbaosession.Open(ctx, srv)
 }
 
@@ -173,9 +172,7 @@ func (r *Resolver) ResolveRemote(ctx context.Context, ref RemoteRef) (Session, e
 			return nil, fmt.Errorf("vaultaccess: RemoteOpenBao %s approle: %w", remote.Name, err)
 		}
 		mount := strings.Trim(strings.TrimSpace(remote.Spec.Mounts.Auth), "/")
-		if mount == "" {
-			mount = "approle"
-		}
+		mount = cmp.Or(mount, "approle")
 		login := func(ctx context.Context) (loginResult, error) {
 			return loginAppRole(ctx, target.HTTPClient, target.URL, mount, roleID, secretID)
 		}

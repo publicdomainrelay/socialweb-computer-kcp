@@ -1,6 +1,7 @@
 package kcpstore
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -226,12 +227,12 @@ func (r *Resource[T]) Create(ctx context.Context, logicalCluster string, obj *T)
 	}
 	response, err := r.withNamespace(c.Post(), namespace).Resource(r.gvr.Resource).Body(raw).Do(ctx).Raw()
 	if err != nil {
-		return fmt.Errorf("kcpstore: create %s %s in %s: %w%s", r.gvr.Resource, nameOf(raw), logicalCluster, err, detail(response))
+		return fmt.Errorf("kcpstore: create %s %s in %s: %w%s", r.gvr.Resource, NameOf(raw), logicalCluster, err, ResponseDetail(response))
 	}
 	return nil
 }
 
-func detail(response []byte) string {
+func ResponseDetail(response []byte) string {
 	if len(response) == 0 {
 		return ""
 	}
@@ -263,7 +264,7 @@ func (r *Resource[T]) PatchStatus(ctx context.Context, target ref.Ref, patch []b
 	response, err := r.withNamespace(c.Patch(mergePatch), target.Namespace).SubResource("status").Resource(r.gvr.Resource).
 		Name(target.Name).Body(body).Do(ctx).Raw()
 	if err != nil {
-		return fmt.Errorf("kcpstore: write %s status for %s in %s: %w%s", r.gvr.Resource, target.Name, target.LogicalCluster, err, detail(response))
+		return fmt.Errorf("kcpstore: write %s status for %s in %s: %w%s", r.gvr.Resource, target.Name, target.LogicalCluster, err, ResponseDetail(response))
 	}
 	return nil
 }
@@ -276,7 +277,7 @@ func (r *Resource[T]) PatchJSON(ctx context.Context, target ref.Ref, patch []byt
 	response, err := r.withNamespace(c.Patch(jsonPatch), target.Namespace).Resource(r.gvr.Resource).
 		Name(target.Name).Body(patch).Do(ctx).Raw()
 	if err != nil {
-		return fmt.Errorf("kcpstore: patch %s %s in %s: %w%s", r.gvr.Resource, target.Name, target.LogicalCluster, err, detail(response))
+		return fmt.Errorf("kcpstore: patch %s %s in %s: %w%s", r.gvr.Resource, target.Name, target.LogicalCluster, err, ResponseDetail(response))
 	}
 	return nil
 }
@@ -289,7 +290,7 @@ func (r *Resource[T]) PatchMerge(ctx context.Context, target ref.Ref, patch []by
 	response, err := r.withNamespace(c.Patch(mergePatch), target.Namespace).Resource(r.gvr.Resource).
 		Name(target.Name).Body(patch).Do(ctx).Raw()
 	if err != nil {
-		return fmt.Errorf("kcpstore: patch %s %s in %s: %w%s", r.gvr.Resource, target.Name, target.LogicalCluster, err, detail(response))
+		return fmt.Errorf("kcpstore: patch %s %s in %s: %w%s", r.gvr.Resource, target.Name, target.LogicalCluster, err, ResponseDetail(response))
 	}
 	return nil
 }
@@ -366,7 +367,7 @@ func namespaceOf(raw []byte) (string, error) {
 	return obj.Metadata.Namespace, nil
 }
 
-func nameOf(raw []byte) string {
+func NameOf(raw []byte) string {
 	var obj struct {
 		Metadata struct {
 			Name string `json:"name"`
@@ -401,9 +402,7 @@ func (s *Store) ClusterPath(ctx context.Context, logicalCluster string) (string,
 }
 
 func (s *Store) MintServiceAccountToken(ctx context.Context, logicalCluster, namespace, name string, ttl time.Duration) (string, error) {
-	if namespace == "" {
-		namespace = "default"
-	}
+	namespace = cmp.Or(namespace, "default")
 	c, err := s.ClientFor(logicalCluster, schema.GroupVersion{Group: "", Version: "v1"})
 	if err != nil {
 		return "", err

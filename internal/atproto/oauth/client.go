@@ -1,6 +1,7 @@
 package oauth
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
@@ -12,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +22,7 @@ import (
 
 	"github.com/bluesky-social/indigo/util/ssrf"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 )
 
@@ -64,13 +67,13 @@ func (m *ClientMetadata) Validate(clientID string) error {
 	if m.ApplicationType != nil && *m.ApplicationType != "web" && *m.ApplicationType != "native" {
 		return fmt.Errorf("application_type must be web or native")
 	}
-	if !containsString(m.GrantTypes, "authorization_code") {
+	if !slices.Contains(m.GrantTypes, "authorization_code") {
 		return fmt.Errorf("grant_types must include authorization_code")
 	}
-	if !containsString(strings.Fields(m.Scope), ScopeAtproto) {
+	if !slices.Contains(strings.Fields(m.Scope), ScopeAtproto) {
 		return fmt.Errorf("scope must include atproto")
 	}
-	if !containsString(m.ResponseTypes, "code") {
+	if !slices.Contains(m.ResponseTypes, "code") {
 		return fmt.Errorf("response_types must include code")
 	}
 	if len(m.RedirectURIs) == 0 {
@@ -106,15 +109,6 @@ func (m *ClientMetadata) Validate(clientID string) error {
 		}
 	}
 	return nil
-}
-
-func containsString(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
 }
 
 type ClientMetadataResolver struct {
@@ -217,9 +211,7 @@ func (r *ClientMetadataResolver) Resolve(ctx context.Context, clientID string) (
 	}
 
 	ttl := r.CacheTTL
-	if ttl <= 0 {
-		ttl = DefaultClientMetadataTTL
-	}
+	ttl = opt.Positive(ttl, DefaultClientMetadataTTL)
 	r.cache.SetTTL(clientID, metadata, ttl)
 	return metadata, nil
 }
@@ -253,9 +245,7 @@ func localhostClientMetadata(clientID string) (*ClientMetadata, error) {
 		}
 	}
 	scope := query.Get("scope")
-	if scope == "" {
-		scope = ScopeAtproto
-	}
+	scope = cmp.Or(scope, ScopeAtproto)
 	native := "native"
 	metadata := &ClientMetadata{
 		ClientID:                clientID,

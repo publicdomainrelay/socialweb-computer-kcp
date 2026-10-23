@@ -1,6 +1,7 @@
 package eventstream
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -220,9 +221,7 @@ func (c *Controller) resolveWatchRepoRef(ctx context.Context, dyn dynamic.Interf
 		return watchRepo{}, errors.New("eventstream: spec.repoRef needs a name")
 	}
 	workspace := strings.TrimSpace(ref.Workspace)
-	if workspace == "" {
-		workspace = c.opts.Workspace
-	}
+	workspace = cmp.Or(workspace, c.opts.Workspace)
 	switch strings.ToLower(strings.TrimSpace(ref.Kind)) {
 	case "", "pds", "remotepds", "remote":
 		kind := "Pds"
@@ -266,9 +265,7 @@ func watchRepoFromAtprotoRepo(ctx context.Context, dyn dynamic.Interface, worksp
 	out := watchRepo{Did: backend.DID}
 	if name := strings.TrimSpace(backend.PdsRef.Name); name != "" {
 		kind := strings.TrimSpace(backend.PdsRef.Kind)
-		if kind == "" {
-			kind = "Pds"
-		}
+		kind = cmp.Or(kind, "Pds")
 		out.PDSRef = &commonv1.ObjectRef{
 			Workspace: strings.TrimSpace(backend.PdsRef.Workspace),
 			Kind:      kind,

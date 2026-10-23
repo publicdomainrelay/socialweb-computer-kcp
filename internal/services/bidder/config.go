@@ -1,6 +1,7 @@
 package bidder
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -15,13 +16,15 @@ import (
 
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauthclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestseed"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
@@ -232,7 +235,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 	if err != nil {
 		return Config{}, err
 	}
-	if err := validateMarketComms("bidder", bidderSpec.Comms); err != nil {
+	if err := market.ValidateComms("bidder", bidderSpec.Comms); err != nil {
 		return Config{}, err
 	}
 	stateDir := deps.StateDir
@@ -337,9 +340,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 	if bidderSpec.Kcp != nil {
 		if bidderSpec.Kcp.Handle != "" {
 			cfg.Provider.Handle = bidderSpec.Kcp.Handle
-			if cfg.Handle == "" {
-				cfg.Handle = bidderSpec.Kcp.Handle
-			}
+			cfg.Handle = cmp.Or(cfg.Handle, bidderSpec.Kcp.Handle)
 		}
 		cfg.Provider.StopGraceSeconds = bidderSpec.Kcp.StopGraceSeconds
 	}
@@ -354,22 +355,16 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 	if port := portOf(cfg.Network.GuestTLSURL()); port > 0 {
 		cfg.Provider.GuestTLSPort = port
 	}
-	if cfg.Workspace == "" {
-		cfg.Workspace = "root"
-	}
-	if cfg.Namespace == "" {
-		cfg.Namespace = "default"
-	}
+	cfg.Workspace = cmp.Or(cfg.Workspace, "root")
+	cfg.Namespace = cmp.Or(cfg.Namespace, "default")
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
 	if cfg.PDSDPoP == nil && cfg.PDSAccessTokenRef != nil && deps.Credentials != nil {
 		if credential, err := deps.Credentials.Resolve(context.Background(), *cfg.PDSAccessTokenRef); err == nil {
-			if data, ok := credentialSessionData(credential.Data); ok {
+			if data, ok := oauthclient.SessionFromSecret(credential.Data); ok {
 				clientID := data.ClientID
-				if clientID == "" {
-					clientID = defaultBidderOAuthClientID
-				}
+				clientID = cmp.Or(clientID, defaultBidderOAuthClientID)
 				opts := oauthclient.Options{
 					DID:        data.AccountDID,
 					RepoDID:    data.AccountDID,
@@ -385,9 +380,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 				if err == nil {
 					cfg.PDSTokens = session
 					cfg.PDSDPoP = session
-					if cfg.PDSURL == "" {
-						cfg.PDSURL = data.HostURL
-					}
+					cfg.PDSURL = cmp.Or(cfg.PDSURL, data.HostURL)
 				} else {
 					if deps.Log != nil {
 						deps.Log.Warn("the bidder could not restore the oauth session", "err", err.Error())
@@ -461,8 +454,8 @@ func bidderNetworkResolver(n v1alpha1.MarketNetworkValue, fallback networkdial.R
 	for _, host := range n.Hosts {
 		entries = append(entries, networkdial.Host{Name: host.Name, Address: host.Address})
 	}
-	if name := hostnameOnly(n.GuestTLSURL()); name != "" {
-		if address := bidderHostWithPort(n.GuestTLSURL(), n.Hosts); address != "" {
+	if name := hostport.URLHostname(n.GuestTLSURL()); name != "" {
+		if address := hostport.ForURL(n.GuestTLSURL(), n.Hosts); address != "" {
 			entries = append(entries, networkdial.Host{Name: name, Address: address})
 		}
 	}
@@ -477,31 +470,6 @@ func bidderNetworkResolver(n v1alpha1.MarketNetworkValue, fallback networkdial.R
 		return nil
 	}
 	return bidderChainedResolver(resolvers)
-}
-
-func bidderHostWithPort(raw string, hosts []v1alpha1.NetworkHost) string {
-	parsed, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil {
-		return ""
-	}
-	port := parsed.Port()
-	if port == "" {
-		switch parsed.Scheme {
-		case "https":
-			port = "443"
-		case "http":
-			port = "80"
-		}
-	}
-	if port == "" {
-		return ""
-	}
-	for _, host := range hosts {
-		if _, candidate, splitErr := net.SplitHostPort(host.Address); splitErr == nil && candidate == port {
-			return host.Address
-		}
-	}
-	return ""
 }
 
 func bidderNetworkTLS(bundle string) (*tls.Config, error) {
@@ -591,18 +559,6 @@ func parsePolicyArgs(raw string) (map[string]string, error) {
 		}
 	}
 	return out, nil
-}
-
-func validateMarketComms(prefix string, comms *v1alpha1.MarketComms) error {
-	if comms == nil || strings.TrimSpace(string(comms.Mode)) == "" {
-		return nil
-	}
-	switch comms.Mode {
-	case v1alpha1.MarketCommsModeXRPC, v1alpha1.MarketCommsModeFirehose, v1alpha1.MarketCommsModeBoth:
-		return nil
-	default:
-		return fmt.Errorf("%s: unknown comms mode %q", prefix, comms.Mode)
-	}
 }
 
 func (c Config) inboundXRPC() bool {
@@ -701,52 +657,24 @@ func (c Config) withDeps(deps component.Deps) Config {
 	if out.Deps.Handlers == nil {
 		out.Deps.Handlers = deps.Handlers
 	}
-	if out.Deps.StateDir == "" {
-		out.Deps.StateDir = deps.StateDir
-	}
-	if out.StateDir == "" {
-		out.StateDir = out.Deps.StateDir
-	}
+	out.Deps.StateDir = cmp.Or(out.Deps.StateDir, deps.StateDir)
+	out.StateDir = cmp.Or(out.StateDir, out.Deps.StateDir)
 	return out
 }
 
 func (c *Config) defaults() {
-	if c.ServeHost == "" {
-		c.ServeHost = DefaultServeHost
-	}
-	if c.PolicyTimeout <= 0 {
-		c.PolicyTimeout = DefaultPolicyTimeout
-	}
-	if c.PolicyPoll <= 0 {
-		c.PolicyPoll = DefaultPolicyPoll
-	}
-	if c.Provider.GuestLoginMount == "" {
-		c.Provider.GuestLoginMount = DefaultGuestLoginMount
-	}
-	if c.Provider.GuestHostAddress == "" {
-		c.Provider.GuestHostAddress = v1alpha1.GuestHostAddress
-	}
-	if c.Provider.GuestVaultServer == "" {
-		c.Provider.GuestVaultServer = DefaultGuestVaultServer
-	}
-	if c.Provider.GuestVaultMount == "" {
-		c.Provider.GuestVaultMount = DefaultGuestVaultMount
-	}
-	if c.Provider.AcceptPath == "" {
-		c.Provider.AcceptPath = guestseed.AcceptPathVM
-	}
-	if c.Provider.BootTimeout <= 0 {
-		c.Provider.BootTimeout = DefaultBootTimeout
-	}
-	if c.Provider.ReleaseTimeout <= 0 {
-		c.Provider.ReleaseTimeout = DefaultReleaseTimeout
-	}
-	if c.Provider.Handle == "" {
-		c.Provider.Handle = c.Handle
-	}
-	if c.VaultClient == "" {
-		c.VaultClient = "bidder"
-	}
+	c.ServeHost = cmp.Or(c.ServeHost, DefaultServeHost)
+	c.PolicyTimeout = opt.Positive(c.PolicyTimeout, DefaultPolicyTimeout)
+	c.PolicyPoll = opt.Positive(c.PolicyPoll, DefaultPolicyPoll)
+	c.Provider.GuestLoginMount = cmp.Or(c.Provider.GuestLoginMount, DefaultGuestLoginMount)
+	c.Provider.GuestHostAddress = cmp.Or(c.Provider.GuestHostAddress, v1alpha1.GuestHostAddress)
+	c.Provider.GuestVaultServer = cmp.Or(c.Provider.GuestVaultServer, DefaultGuestVaultServer)
+	c.Provider.GuestVaultMount = cmp.Or(c.Provider.GuestVaultMount, DefaultGuestVaultMount)
+	c.Provider.AcceptPath = cmp.Or(c.Provider.AcceptPath, guestseed.AcceptPathVM)
+	c.Provider.BootTimeout = opt.Positive(c.Provider.BootTimeout, DefaultBootTimeout)
+	c.Provider.ReleaseTimeout = opt.Positive(c.Provider.ReleaseTimeout, DefaultReleaseTimeout)
+	c.Provider.Handle = cmp.Or(c.Provider.Handle, c.Handle)
+	c.VaultClient = cmp.Or(c.VaultClient, "bidder")
 	if c.GuestControlRef == nil {
 		c.GuestControlRef = &commonv1.ObjectRef{Kind: "GuestControlPlane", Name: DefaultGuestControlName}
 	}
@@ -756,26 +684,8 @@ func (c *Config) defaults() {
 	if c.PolicyArgs == nil {
 		c.PolicyArgs = map[string]string{}
 	}
-	if c.Workspace == "" {
-		c.Workspace = "root"
-	}
-	if c.StateDir == "" {
-		c.StateDir = c.Deps.StateDir
-	}
-}
-
-func Factory() component.ServiceFactory {
-	return func(ctx context.Context, deps component.Deps, spec component.ComponentSpec) (component.Service, error) {
-		cfg, err := ConfigFrom(deps, spec)
-		if err != nil {
-			return nil, err
-		}
-		return New(cfg)
-	}
-}
-
-func Register(runtime *component.Runtime) error {
-	return runtime.Register(Kind, Factory())
+	c.Workspace = cmp.Or(c.Workspace, "root")
+	c.StateDir = cmp.Or(c.StateDir, c.Deps.StateDir)
 }
 
 func New(cfg Config) (*Service, error) {
@@ -788,15 +698,6 @@ func New(cfg Config) (*Service, error) {
 		log = slog.New(slog.DiscardHandler)
 	}
 	return &Service{cfg: cfg, log: log.With("component", "bidder", "handle", cfg.Handle)}, nil
-}
-
-func handlerURL(workspace, kind, name string) string {
-	kind = strings.ToLower(strings.TrimSpace(kind))
-	name = strings.TrimSpace(name)
-	if kind == "" || name == "" {
-		return ""
-	}
-	return "http://" + kcp.ServiceFQDN(kind, "default", workspace, kcp.DefaultServiceDomain)
 }
 
 func isAbsoluteURL(raw string) bool {

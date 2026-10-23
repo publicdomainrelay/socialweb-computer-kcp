@@ -1,6 +1,7 @@
 package pds
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"github.com/bluesky-social/indigo/atproto/syntax"
 	lexutil "github.com/bluesky-social/indigo/lex/util"
 	"github.com/ipfs/go-cid"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
 )
 
 type blobView struct {
@@ -40,15 +42,13 @@ func (s *Server) handleUploadBlob(w http.ResponseWriter, r *http.Request, info *
 		return
 	}
 	mimeType := strings.TrimSpace(r.Header.Get("Content-Type"))
-	if mimeType == "" {
-		mimeType = "application/octet-stream"
-	}
+	mimeType = cmp.Or(mimeType, "application/octet-stream")
 	ref, err := s.blobs.PutBlob(ctx, info.DID, mimeType, data)
 	if err != nil {
 		writeXRPCError(w, http.StatusInternalServerError, "InternalError", "failed to store blob")
 		return
 	}
-	writeJSON(w, http.StatusOK, uploadBlobOutput{
+	httpjson.Write(w, http.StatusOK, uploadBlobOutput{
 		Blob: blobView{
 			Type:     "blob",
 			Ref:      lexutil.LexLink(ref.CID),
@@ -56,6 +56,7 @@ func (s *Server) handleUploadBlob(w http.ResponseWriter, r *http.Request, info *
 			Size:     ref.Size,
 		},
 	})
+
 }
 
 func (s *Server) handleGetBlob(w http.ResponseWriter, r *http.Request) {
@@ -84,9 +85,7 @@ func (s *Server) handleGetBlob(w http.ResponseWriter, r *http.Request) {
 		writeXRPCError(w, http.StatusInternalServerError, "InternalError", "failed to load blob")
 		return
 	}
-	if mimeType == "" {
-		mimeType = "application/octet-stream"
-	}
+	mimeType = cmp.Or(mimeType, "application/octet-stream")
 	w.Header().Set("Content-Type", mimeType)
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
 	w.WriteHeader(http.StatusOK)

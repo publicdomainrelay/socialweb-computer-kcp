@@ -13,6 +13,7 @@ import (
 	"github.com/ipfs/go-cid"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/repo"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
 )
 
 var errForbidden = errors.New("pds: forbidden")
@@ -145,11 +146,12 @@ func (s *Server) handleGetRecord(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	writeJSON(w, http.StatusOK, recordView{
+	httpjson.Write(w, http.StatusOK, recordView{
 		URI:   fmt.Sprintf("at://%s/%s/%s", did, collection, rkey),
 		CID:   rec.CID.String(),
 		Value: rec.Value,
 	})
+
 }
 
 func (s *Server) handleListRecords(w http.ResponseWriter, r *http.Request) {
@@ -217,7 +219,7 @@ func (s *Server) handleListRecords(w http.ResponseWriter, r *http.Request) {
 	if next != nil {
 		out.Cursor = next.String()
 	}
-	writeJSON(w, http.StatusOK, out)
+	httpjson.Write(w, http.StatusOK, out)
 }
 
 func (s *Server) listRecordsReverse(ctx context.Context, did syntax.DID, collection syntax.NSID, cursor syntax.RecordKey, limit int) ([]repo.Record, *syntax.RecordKey, error) {
@@ -300,13 +302,14 @@ func (s *Server) handleDescribeRepo(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.Strings(names)
 	handleName := s.accountHandle(ctx, did)
-	writeJSON(w, http.StatusOK, describeRepoOutput{
+	httpjson.Write(w, http.StatusOK, describeRepoOutput{
 		DID:             did.String(),
 		Handle:          handleName,
 		HandleIsCorrect: s.handleIsCorrect(ctx, did, handleName),
 		Collections:     names,
 		DIDDoc:          s.didDocument(ctx, did),
 	})
+
 }
 
 func (s *Server) handleCreateRecord(w http.ResponseWriter, r *http.Request, info *authInfo) {
@@ -358,11 +361,12 @@ func (s *Server) handleCreateRecord(w http.ResponseWriter, r *http.Request, info
 		writeXRPCError(w, http.StatusInternalServerError, "InternalServerError", "write produced no record")
 		return
 	}
-	writeJSON(w, http.StatusOK, createRecordOutput{
+	httpjson.Write(w, http.StatusOK, createRecordOutput{
 		URI:    uriForPath(did, op.Path),
 		CID:    op.CID.String(),
 		Commit: commitFromEvent(ev),
 	})
+
 }
 
 func (s *Server) handlePutRecord(w http.ResponseWriter, r *http.Request, info *authInfo) {
@@ -415,21 +419,23 @@ func (s *Server) handlePutRecord(w http.ResponseWriter, r *http.Request, info *a
 	op, ok := firstRecordOp(ev)
 	if !ok || op.CID == nil {
 		if rec, err := handle.GetRecord(ctx, collection, rkey); err == nil {
-			writeJSON(w, http.StatusOK, createRecordOutput{
+			httpjson.Write(w, http.StatusOK, createRecordOutput{
 				URI:    fmt.Sprintf("at://%s/%s/%s", did, collection, rkey),
 				CID:    rec.CID.String(),
 				Commit: commitFromEvent(ev),
 			})
+
 			return
 		}
 		writeXRPCError(w, http.StatusInternalServerError, "InternalServerError", "write produced no record")
 		return
 	}
-	writeJSON(w, http.StatusOK, createRecordOutput{
+	httpjson.Write(w, http.StatusOK, createRecordOutput{
 		URI:    uriForPath(did, op.Path),
 		CID:    op.CID.String(),
 		Commit: commitFromEvent(ev),
 	})
+
 }
 
 func (s *Server) handleDeleteRecord(w http.ResponseWriter, r *http.Request, info *authInfo) {
@@ -473,7 +479,7 @@ func (s *Server) handleDeleteRecord(w http.ResponseWriter, r *http.Request, info
 		s.repoError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{})
+	httpjson.Write(w, http.StatusOK, map[string]any{})
 }
 
 func (s *Server) handleApplyWrites(w http.ResponseWriter, r *http.Request, info *authInfo) {
@@ -589,7 +595,7 @@ func (s *Server) handleApplyWrites(w http.ResponseWriter, r *http.Request, info 
 	if commit := commitFromEvent(ev); commit != nil {
 		out.Commit = *commit
 	}
-	writeJSON(w, http.StatusOK, out)
+	httpjson.Write(w, http.StatusOK, out)
 }
 
 func (s *Server) applyWriteResults(ctx context.Context, did syntax.DID, handle repo.Repo, writes []repo.WriteOp, actions []repo.WriteAction, rkeys []syntax.RecordKey, ev *repo.CommitEvent) ([]any, error) {

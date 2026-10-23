@@ -1,6 +1,7 @@
-package gatewayapi
+package gatewayhttp
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -20,6 +21,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/nodemarket"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
@@ -60,7 +62,7 @@ const (
 )
 
 var (
-	ErrQuotaExceeded = errors.New("gatewayapi: the quota of ComputeContracts is used up")
+	ErrQuotaExceeded = errors.New("gatewayhttp: the quota of ComputeContracts is used up")
 
 	MeshdArches = []string{"x86_64", "aarch64"}
 
@@ -150,14 +152,14 @@ type OpenBaoVault struct {
 
 func (v OpenBaoVault) Write(ctx context.Context, ref commonv1.SecretRef, data map[string]any) error {
 	if v.Client == nil {
-		return errors.New("gatewayapi: no OpenBao client")
+		return errors.New("gatewayhttp: no OpenBao client")
 	}
 	return v.Client.PutKV(ctx, kvDataPath(ref), data)
 }
 
 func (v OpenBaoVault) Remove(ctx context.Context, ref commonv1.SecretRef) error {
 	if v.Client == nil {
-		return errors.New("gatewayapi: no OpenBao client")
+		return errors.New("gatewayhttp: no OpenBao client")
 	}
 	return v.Client.Delete(ctx, strings.Trim(ref.Mount, "/")+"/metadata/"+strings.Trim(ref.Path, "/"))
 }
@@ -230,26 +232,22 @@ type NodeClaimMapper struct {
 
 func NewNodeClaimMapper(opts NodeClaimMapperOptions) (*NodeClaimMapper, error) {
 	if opts.Store == nil {
-		return nil, errors.New("gatewayapi: node claim mapper has no claim store")
+		return nil, errors.New("gatewayhttp: node claim mapper has no claim store")
 	}
 	if opts.Links == nil {
-		return nil, errors.New("gatewayapi: node claim mapper has no cluster link reader")
+		return nil, errors.New("gatewayhttp: node claim mapper has no cluster link reader")
 	}
 	if opts.Contracts == nil {
-		return nil, errors.New("gatewayapi: node claim mapper has no contract client")
+		return nil, errors.New("gatewayhttp: node claim mapper has no contract client")
 	}
 	if opts.Vault == nil {
-		return nil, errors.New("gatewayapi: node claim mapper has no vault")
+		return nil, errors.New("gatewayhttp: node claim mapper has no vault")
 	}
 	if opts.VaultMount == "" {
-		return nil, errors.New("gatewayapi: node claim mapper has no vault mount")
+		return nil, errors.New("gatewayhttp: node claim mapper has no vault mount")
 	}
-	if opts.VMReadyTimeoutSec <= 0 {
-		opts.VMReadyTimeoutSec = DefaultNodeVMReadyTimeoutSec
-	}
-	if opts.PollInterval <= 0 {
-		opts.PollInterval = DefaultNodePollInterval
-	}
+	opts.VMReadyTimeoutSec = opt.Positive(opts.VMReadyTimeoutSec, DefaultNodeVMReadyTimeoutSec)
+	opts.PollInterval = opt.Positive(opts.PollInterval, DefaultNodePollInterval)
 	if opts.OpenBaoCAFileOf == nil {
 		opts.OpenBaoCAFileOf = DefaultOpenBaoCAFile
 	}
@@ -261,21 +259,21 @@ func NewNodeClaimMapper(opts NodeClaimMapperOptions) (*NodeClaimMapper, error) {
 	}
 	if opts.Meshd != nil {
 		if opts.Meshd.DownloadBase == "" && opts.MeshdDownloadBase == nil {
-			return nil, errors.New("gatewayapi: the meshd pin has no download base")
+			return nil, errors.New("gatewayhttp: the meshd pin has no download base")
 		}
 		for _, arch := range MeshdArches {
 			if opts.Meshd.Sha256[arch] == "" {
-				return nil, fmt.Errorf("gatewayapi: the meshd pin names no %s build", arch)
+				return nil, fmt.Errorf("gatewayhttp: the meshd pin names no %s build", arch)
 			}
 		}
 	}
 	if opts.NodeAgentPin != nil {
 		if opts.NodeAgentPin.DownloadBase == "" && opts.NodeAgentDownloadBase == nil {
-			return nil, errors.New("gatewayapi: the node agent pin has no download base")
+			return nil, errors.New("gatewayhttp: the node agent pin has no download base")
 		}
 		for _, arch := range MeshdArches {
 			if opts.NodeAgentPin.Sha256[arch] == "" {
-				return nil, fmt.Errorf("gatewayapi: the node agent pin names no %s build", arch)
+				return nil, fmt.Errorf("gatewayhttp: the node agent pin names no %s build", arch)
 			}
 		}
 	}
@@ -714,12 +712,8 @@ func desiredStatus(claim NodeClaim, contract *v1alpha1.ComputeContract) *v1alpha
 		var copyOf v1alpha1.NodeClaimContract
 		state.DeepCopyInto(&copyOf)
 		if copyOf.Receipt != nil {
-			if copyOf.ReceiptURI == "" {
-				copyOf.ReceiptURI = copyOf.Receipt.URI
-			}
-			if copyOf.ReceiptCid == "" {
-				copyOf.ReceiptCid = copyOf.Receipt.CID
-			}
+			copyOf.ReceiptURI = cmp.Or(copyOf.ReceiptURI, copyOf.Receipt.URI)
+			copyOf.ReceiptCid = cmp.Or(copyOf.ReceiptCid, copyOf.Receipt.CID)
 		}
 		next.Contract = copyOf
 		if state.VMAddress != "" {
@@ -751,9 +745,7 @@ func desiredStatus(claim NodeClaim, contract *v1alpha1.ComputeContract) *v1alpha
 		case adopt && (phase == v1alpha1.NodeClaimAdopting || inFlight):
 			next.Phase = v1alpha1.NodeClaimRunning
 			next.Message = status.Message
-			if next.Message == "" {
-				next.Message = "adopted"
-			}
+			next.Message = cmp.Or(next.Message, "adopted")
 		case status.SecretsFetchedAt != "" && inFlight:
 			next.Phase = v1alpha1.NodeClaimJoining
 			next.Message = "the node fetched its join secrets and is joining its cluster"
@@ -769,16 +761,12 @@ func desiredStatus(claim NodeClaim, contract *v1alpha1.ComputeContract) *v1alpha
 		} else {
 			next.Phase = v1alpha1.NodeClaimReleased
 			next.Message = status.Message
-			if next.Message == "" {
-				next.Message = "the contract was released"
-			}
+			next.Message = cmp.Or(next.Message, "the contract was released")
 		}
 	case v1alpha1.ComputeContractFailed:
 		next.Phase = v1alpha1.NodeClaimFailed
 		next.Message = status.Message
-		if next.Message == "" {
-			next.Message = "the contract failed"
-		}
+		next.Message = cmp.Or(next.Message, "the contract failed")
 	}
 	if reflect.DeepEqual(claim.Claim.Status, *next) {
 		return nil

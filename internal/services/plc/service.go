@@ -1,15 +1,14 @@
 package plc
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
 	"log/slog"
-	"net"
 	"net/http"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -18,7 +17,9 @@ import (
 	atplc "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/plc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsreload"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/servetls"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
 )
 
 const Kind = "Plc"
@@ -91,16 +92,16 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		cfg.Port = int(decoded.Serve.Port)
 	}
 	if decoded.TLS != nil {
-		cfg.Hostnames = appendHostnames(cfg.Hostnames, decoded.TLS.Hostnames...)
+		cfg.Hostnames = strs.AppendUniqueFold(cfg.Hostnames, decoded.TLS.Hostnames...)
 	}
 	if decoded.Network != nil {
-		cfg.Hostnames = appendHostnames(cfg.Hostnames, networkHostnames(decoded.Network, cfg.Port)...)
+		cfg.Hostnames = strs.AppendUniqueFold(cfg.Hostnames, hostport.NetworkHostnames(decoded.Network, cfg.Port)...)
 	}
 	if decoded.TLS != nil && decoded.TLS.Enabled {
-		certFile, keyFile := certificateFiles(decoded.TLS.CertRef, decoded.Storage, cfg.Hostnames)
+		certFile, keyFile := servetls.CertificateFiles(decoded.TLS.CertRef, decoded.Storage, cfg.Hostnames)
 		cfg.CertFile = certFile
 		cfg.KeyFile = keyFile
-		tlsConfig, err := serverTLS(deps, cfg.CertFile)
+		tlsConfig, err := servetls.Config(cfg.CertFile, deps.TLS, deps.Log)
 		if err != nil {
 			return Config{}, fmt.Errorf("plc: %w", err)
 		}
@@ -109,130 +110,15 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 	return cfg, nil
 }
 
-func appendHostnames(hostnames []string, extra ...string) []string {
-	seen := make(map[string]struct{}, len(hostnames)+len(extra))
-	out := make([]string, 0, len(hostnames)+len(extra))
-	add := func(host string) {
-		host = strings.TrimSpace(host)
-		if host == "" {
-			return
-		}
-		key := strings.ToLower(host)
-		if _, ok := seen[key]; ok {
-			return
-		}
-		seen[key] = struct{}{}
-		out = append(out, host)
-	}
-	for _, host := range hostnames {
-		add(host)
-	}
-	for _, host := range extra {
-		add(host)
-	}
-	return out
-}
-
-func networkHostnames(network *v1alpha1.MarketNetworkValue, port int) []string {
-	if network == nil || port <= 0 {
-		return nil
-	}
-	wanted := strconv.Itoa(port)
-	var out []string
-	for _, host := range network.Hosts {
-		_, value, err := net.SplitHostPort(host.Address)
-		if err != nil || value != wanted {
-			continue
-		}
-		out = append(out, host.Name)
-	}
-	return out
-}
-
-func certificateFiles(certRef string, storage *v1alpha1.ComponentStorage, hostnames []string) (string, string) {
-	certFile := refPath(certRef, storage)
-	if certFile == "" && storage != nil && storage.CertsDir != "" && len(hostnames) > 0 {
-		name := hostnameOnly(hostnames[0])
-		if name != "" && name != "*" {
-			certFile = filepath.Join(storage.CertsDir, name+".crt")
-		}
-	}
-	return certFile, keyFileFor(certFile)
-}
-
-func refPath(ref string, storage *v1alpha1.ComponentStorage) string {
-	ref = strings.TrimSpace(ref)
-	if ref == "" {
-		return ""
-	}
-	if filepath.IsAbs(ref) || storage == nil || storage.CertsDir == "" {
-		return ref
-	}
-	return filepath.Join(storage.CertsDir, ref)
-}
-
-func keyFileFor(certFile string) string {
-	switch {
-	case certFile == "":
-		return ""
-	case strings.HasSuffix(certFile, ".crt"):
-		return strings.TrimSuffix(certFile, ".crt") + ".key"
-	case strings.HasSuffix(certFile, ".pem"):
-		return strings.TrimSuffix(certFile, ".pem") + ".key"
-	default:
-		return certFile + ".key"
-	}
-}
-
-func keyFilesFor(certFile string) []string {
-	candidates := []string{keyFileFor(certFile)}
-	if before, ok := strings.CutSuffix(certFile, ".pem"); ok {
-		candidates = append(candidates, before+"-key.pem")
-	}
-	return append(candidates, certFile)
-}
-
-func serverTLS(deps component.Deps, certFile string) (*tls.Config, error) {
-	if certFile != "" {
-		reloader, err := tlsreload.New(certFile, keyFilesFor(certFile), deps.Log)
-		if err != nil {
-			return nil, err
-		}
-		return reloader.TLSConfig(&tls.Config{MinVersion: tls.VersionTLS12, NextProtos: []string{"http/1.1"}}), nil
-	}
-	if deps.TLS != nil {
-		tlsConfig := deps.TLS.Clone()
-		if len(tlsConfig.NextProtos) == 0 {
-			tlsConfig.NextProtos = []string{"http/1.1"}
-		}
-		return tlsConfig, nil
-	}
-	return nil, errors.New("a TLS certificate is required")
-}
-
-func Factory(ctx context.Context, deps component.Deps, spec component.ComponentSpec) (component.Service, error) {
-	cfg, err := ConfigFrom(deps, spec)
-	if err != nil {
-		return nil, err
-	}
-	return New(cfg), nil
-}
-
-func Register(runtime *component.Runtime) error {
-	return runtime.Register(Kind, Factory)
-}
-
 func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	cfg := s.cfg
-	cfg.Deps = mergeDeps(cfg.Deps, deps)
+	cfg.Deps = cfg.Deps.Or(deps)
 	log := cfg.Deps.Log
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
 	stateDir := cfg.StateDir
-	if stateDir == "" {
-		stateDir = cfg.Deps.StateDir
-	}
+	stateDir = cmp.Or(stateDir, cfg.Deps.StateDir)
 	var store atplc.Store = atplc.NewMemoryStore()
 	if stateDir != "" {
 		fs, err := atplc.NewFileStore(filepath.Join(stateDir, "plc.json"))
@@ -243,12 +129,8 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	}
 	server := atplc.NewServer(atplc.Options{Store: store, Version: cfg.Version})
 	key := cfg.Key
-	if key.Kind == "" {
-		key.Kind = Kind
-	}
-	if key.Name == "" {
-		key.Name = "default"
-	}
+	key.Kind = cmp.Or(key.Kind, Kind)
+	key.Name = cmp.Or(key.Name, "default")
 	handlers := cfg.Deps.Handlers
 	if handlers == nil {
 		return errors.New("plc: no handler registry is available")
@@ -261,7 +143,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	}
 	s.stopCh = stopCh
 	s.mu.Unlock()
-	host := logicalHost(key)
+	host := kcp.KindServiceHost(key.Kind, key.Workspace)
 	baseURL := "http://" + host
 	if err := handlers.RegisterHTTP(key, server.Handler()); err != nil {
 		s.mu.Lock()
@@ -282,7 +164,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	s.ready = true
 	s.mu.Unlock()
 
-	log.Info("plc_registered", "host", host, "hostname", primaryHostname(cfg.Host, cfg.Hostnames))
+	log.Info("plc_registered", "host", host, "hostname", hostport.Primary(cfg.Host, cfg.Hostnames))
 
 	select {
 	case <-ctx.Done():
@@ -364,69 +246,4 @@ func (s *Service) finish() {
 	s.ready = false
 	s.stopCh = nil
 	s.mu.Unlock()
-}
-
-func logicalHost(key component.Key) string {
-	kind := strings.ToLower(strings.TrimSpace(key.Kind))
-	if kind == "" {
-		return ""
-	}
-	return kcp.ServiceFQDN(kind, "default", key.Workspace, kcp.DefaultServiceDomain)
-}
-
-func mergeDeps(cfgDeps, deps component.Deps) component.Deps {
-	out := cfgDeps
-	if out.Log == nil {
-		out.Log = deps.Log
-	}
-	if out.TLS == nil {
-		out.TLS = deps.TLS
-	}
-	if out.StateDir == "" {
-		out.StateDir = deps.StateDir
-	}
-	if out.Registry == nil {
-		out.Registry = deps.Registry
-	}
-	if out.Handlers == nil {
-		out.Handlers = deps.Handlers
-	}
-	if out.Hosts == nil {
-		out.Hosts = deps.Hosts
-	}
-	if out.KCP == nil {
-		out.KCP = deps.KCP
-	}
-	if out.Credentials == nil {
-		out.Credentials = deps.Credentials
-	}
-	if out.Vault == nil {
-		out.Vault = deps.Vault
-	}
-	return out
-}
-
-func primaryHostname(host string, hostnames []string) string {
-	if host != "" {
-		return host
-	}
-	for _, candidate := range hostnames {
-		if candidate != "" {
-			return candidate
-		}
-	}
-	return "localhost"
-}
-
-func hostnameOnly(host string) string {
-	h := host
-	if strings.HasPrefix(h, "[") {
-		if end := strings.Index(h, "]"); end != -1 {
-			h = h[1:end]
-		}
-	}
-	if idx := strings.LastIndex(h, ":"); idx != -1 && idx > strings.Index(h, "]") {
-		h = h[:idx]
-	}
-	return h
 }

@@ -10,11 +10,12 @@ import (
 	"k8s.io/client-go/dynamic"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 )
 
 func (c *Controller) reconcileSession(ctx context.Context, dyn dynamic.Interface, u *unstructured.Unstructured) {
 	var obj v1alpha1.AtprotoSession
-	if err := decode(u, &obj); err != nil {
+	if err := unstruct.Into(u, &obj); err != nil {
 		c.log.Warn("decoding an AtprotoSession", "workspace", c.workspace, "name", u.GetName(), "err", err.Error())
 		return
 	}

@@ -1,4 +1,4 @@
-package gatewayapi
+package gatewayhttp
 
 import (
 	"errors"
@@ -19,7 +19,7 @@ type Server struct {
 
 func NewServer(opts ServerOptions) (*Server, error) {
 	if opts.Cluster == nil && opts.OAuth == nil && opts.Downloads == nil {
-		return nil, errors.New("gatewayapi: server has no routes")
+		return nil, errors.New("gatewayhttp: server has no routes")
 	}
 	mux := http.NewServeMux()
 	if opts.Cluster != nil {

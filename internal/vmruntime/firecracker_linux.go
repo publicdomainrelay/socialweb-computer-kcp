@@ -3,6 +3,7 @@
 package vmruntime
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -22,6 +23,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestnet"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostcontract"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 )
 
 type firecracker struct {
@@ -45,21 +47,13 @@ func ForHost(cfg Config) (Runtime, error) {
 			return nil, fmt.Errorf("vmruntime: %s path %q is not absolute", name, p)
 		}
 	}
-	if cfg.InnerID == 0 {
-		cfg.InnerID = DefaultInnerID
-	}
+	cfg.InnerID = cmp.Or(cfg.InnerID, DefaultInnerID)
 	if cfg.InnerID <= 0 || cfg.InnerID >= hostcontract.VMSlotIDs {
 		return nil, fmt.Errorf("vmruntime: inner id %d must be inside 1..%d: SELinux refuses pasta as uid 0 of the namespace", cfg.InnerID, hostcontract.VMSlotIDs-1)
 	}
-	if cfg.BootTimeout == 0 {
-		cfg.BootTimeout = DefaultBootTime
-	}
-	if cfg.StopGrace == 0 {
-		cfg.StopGrace = DefaultStopGrace
-	}
-	if cfg.ConsoleCap == 0 {
-		cfg.ConsoleCap = DefaultConsoleCap
-	}
+	cfg.BootTimeout = cmp.Or(cfg.BootTimeout, DefaultBootTime)
+	cfg.StopGrace = cmp.Or(cfg.StopGrace, DefaultStopGrace)
+	cfg.ConsoleCap = cmp.Or(cfg.ConsoleCap, DefaultConsoleCap)
 	target := ImageTarget()
 	if target == "" {
 		return nil, ErrUnsupported
@@ -161,9 +155,7 @@ func (r *firecracker) Prepare(ctx context.Context, spec VMSpec) (Prepared, error
 		return Prepared{}, err
 	}
 	meta := spec.MetaData
-	if meta == "" {
-		meta = "instance-id: " + spec.Name + "\nlocal-hostname: " + spec.Name + "\n"
-	}
+	meta = cmp.Or(meta, "instance-id: "+spec.Name+"\nlocal-hostname: "+spec.Name+"\n")
 	seed := filepath.Join(p.WorkDir, SeedFile)
 	if err := guestdisk.WriteSeed(seed, []byte(spec.UserData), []byte(meta), []byte(guestnet.NetworkConfig())); err != nil {
 		return Prepared{}, err
@@ -187,7 +179,7 @@ func (r *firecracker) Prepare(ctx context.Context, spec VMSpec) (Prepared, error
 		Argv:    fcapi.Argv("firecracker", p.VMMID, filepath.Join(p.WorkDir, ConfigFile), p.Socket),
 		Console: console,
 	}
-	if err := writeJSON(filepath.Join(p.WorkDir, ParamsFile), params, 0o600); err != nil {
+	if err := fsx.WriteJSON(filepath.Join(p.WorkDir, ParamsFile), params, 0o600); err != nil {
 		return Prepared{}, err
 	}
 	for _, f := range []string{console, filepath.Join(p.WorkDir, VMMLogFile)} {
@@ -381,7 +373,7 @@ func (r *firecracker) grant(p Prepared, vmmUID int) error {
 			outside = append(outside, gr)
 		}
 	}
-	return writeJSON(filepath.Join(p.WorkDir, GrantsFile), outside, 0o600)
+	return fsx.WriteJSON(filepath.Join(p.WorkDir, GrantsFile), outside, 0o600)
 }
 
 func (r *firecracker) Await(ctx context.Context, p Prepared, slot int) (RuntimeRef, error) {
@@ -433,7 +425,7 @@ func (r *firecracker) Await(ctx context.Context, p Prepared, slot int) (RuntimeR
 		GuestAddress: guestnet.GuestAddress, HostAddress: guestnet.HostAddress,
 		ImageSHA256: pin.Files[guestimage.ManifestName].SHA256,
 	}
-	if err := writeJSON(filepath.Join(p.WorkDir, RefFile), ref, 0o600); err != nil {
+	if err := fsx.WriteJSON(filepath.Join(p.WorkDir, RefFile), ref, 0o600); err != nil {
 		return RuntimeRef{}, err
 	}
 	return ref, nil
@@ -697,18 +689,6 @@ func readManifest(dir string) (imageManifest, error) {
 		return m, fmt.Errorf("vmruntime: the image manifest in %s names no boot args or machine size", dir)
 	}
 	return m, nil
-}
-
-func writeJSON(path string, v any, mode os.FileMode) error {
-	raw, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, append(raw, '\n'), mode); err != nil {
-		return fmt.Errorf("vmruntime: %w", err)
-	}
-	return os.Rename(tmp, path)
 }
 
 func tailOf(path string, n int64) string {

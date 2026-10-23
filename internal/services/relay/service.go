@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -10,7 +11,6 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -22,8 +22,10 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/servetls"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsreload"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -97,9 +99,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		stateDir = spec.StateDir
 	}
 	workspace := strings.TrimSpace(spec.Workspace)
-	if workspace == "" {
-		workspace = "root"
-	}
+	workspace = cmp.Or(workspace, "root")
 	cfg := Config{
 		Deps:      deps,
 		Key:       component.Key{Workspace: spec.Workspace, Kind: spec.Kind, Name: spec.Name},
@@ -125,10 +125,10 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		cfg.Port = int(decoded.Serve.Port)
 	}
 	if decoded.TLS != nil {
-		cfg.Hostnames = appendValues(cfg.Hostnames, decoded.TLS.Hostnames...)
+		cfg.Hostnames = strs.AppendUniqueFold(cfg.Hostnames, decoded.TLS.Hostnames...)
 	}
 	if decoded.Network != nil {
-		cfg.Hostnames = appendValues(cfg.Hostnames, networkHostnames(decoded.Network, cfg.Port)...)
+		cfg.Hostnames = strs.AppendUniqueFold(cfg.Hostnames, hostport.NetworkHostnames(decoded.Network, cfg.Port)...)
 	}
 	cfg.Upstreams = pdsEndpoints(cfg.Deps, cfg.Workspace, cfg.PdsRefs)
 	if allowsAnyPDS(cfg.PdsRefs) {
@@ -147,10 +147,10 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		cfg.CrawlInterval = DefaultCrawlInterval
 	}
 	if decoded.TLS != nil && decoded.TLS.Enabled {
-		certFile, keyFile := certificateFiles(decoded.TLS.CertRef, decoded.Storage, cfg.Hostnames)
+		certFile, keyFile := servetls.CertificateFiles(decoded.TLS.CertRef, decoded.Storage, cfg.Hostnames)
 		cfg.CertFile = certFile
 		cfg.KeyFile = keyFile
-		tlsConfig, err := serverTLS(deps, cfg.CertFile)
+		tlsConfig, err := servetls.Config(cfg.CertFile, deps.TLS, deps.Log)
 		if err != nil {
 			return Config{}, fmt.Errorf("relay: %w", err)
 		}
@@ -159,53 +159,11 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 	return cfg, nil
 }
 
-func appendValues(hostnames []string, extra ...string) []string {
-	seen := make(map[string]struct{}, len(hostnames)+len(extra))
-	out := make([]string, 0, len(hostnames)+len(extra))
-	add := func(host string) {
-		host = strings.TrimSpace(host)
-		if host == "" {
-			return
-		}
-		key := strings.ToLower(host)
-		if _, ok := seen[key]; ok {
-			return
-		}
-		seen[key] = struct{}{}
-		out = append(out, host)
-	}
-	for _, host := range hostnames {
-		add(host)
-	}
-	for _, host := range extra {
-		add(host)
-	}
-	return out
-}
-
-func networkHostnames(network *v1alpha1.MarketNetworkValue, port int) []string {
-	if network == nil || port <= 0 {
-		return nil
-	}
-	wanted := strconv.Itoa(port)
-	var out []string
-	for _, host := range network.Hosts {
-		_, value, err := net.SplitHostPort(host.Address)
-		if err != nil || value != wanted {
-			continue
-		}
-		out = append(out, host.Name)
-	}
-	return out
-}
-
 func pdsEndpoints(deps component.Deps, workspace string, refs []commonv1.ObjectRef) []component.Endpoint {
 	out := make([]component.Endpoint, 0, len(refs))
 	for _, ref := range refs {
 		kind := strings.TrimSpace(ref.Kind)
-		if kind == "" {
-			kind = "Pds"
-		}
+		kind = cmp.Or(kind, "Pds")
 		if ref.Name == "*" {
 			if deps.Registry == nil {
 				continue
@@ -287,24 +245,10 @@ func resolveEndpoint(deps component.Deps, workspace, kind, name string, names ..
 	return component.Endpoint{}, false
 }
 
-func Factory(ctx context.Context, deps component.Deps, spec component.ComponentSpec) (component.Service, error) {
-	cfg, err := ConfigFrom(deps, spec)
-	if err != nil {
-		return nil, err
-	}
-	return New(cfg), nil
-}
-
-func Register(runtime *component.Runtime) error {
-	return runtime.Register(Kind, Factory)
-}
-
 func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	cfg := s.cfg
-	cfg.Deps = mergeDeps(cfg.Deps, deps)
-	if cfg.Workspace == "" {
-		cfg.Workspace = "root"
-	}
+	cfg.Deps = cfg.Deps.Or(deps)
+	cfg.Workspace = cmp.Or(cfg.Workspace, "root")
 	cfg.Upstreams = pdsEndpoints(cfg.Deps, cfg.Workspace, cfg.PdsRefs)
 	if len(cfg.AllowedHosts) == 0 {
 		cfg.AllowedHosts = resolvedHosts(cfg.Upstreams, cfg.PdsRefs)
@@ -322,9 +266,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 		log = slog.New(slog.DiscardHandler)
 	}
 	stateDir := cfg.StateDir
-	if stateDir == "" {
-		stateDir = cfg.Deps.StateDir
-	}
+	stateDir = cmp.Or(stateDir, cfg.Deps.StateDir)
 	store := cfg.Store
 	var persistent *fileStore
 	if store == nil {
@@ -359,7 +301,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 		cfg.Directory = identity.NewCacheDirectory(base, 100_000, time.Hour, 2*time.Minute, 5*time.Minute)
 	}
 	relay := atrelay.New(atrelay.Config{
-		Hostname:      primaryHostname(cfg.Host, cfg.Hostnames),
+		Hostname:      hostport.Primary(cfg.Host, cfg.Hostnames),
 		Version:       cfg.Version,
 		Logger:        log,
 		Store:         store,
@@ -379,12 +321,8 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 		relay.AddSink(sink)
 	}
 	key := cfg.Key
-	if key.Kind == "" {
-		key.Kind = Kind
-	}
-	if key.Name == "" {
-		key.Name = "default"
-	}
+	key.Kind = cmp.Or(key.Kind, Kind)
+	key.Name = cmp.Or(key.Name, "default")
 	if handlers == nil {
 		relay.Close()
 		return errors.New("relay: no handler registry is available")
@@ -398,7 +336,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	}
 	s.stopCh = stopCh
 	s.mu.Unlock()
-	host := logicalHost(key)
+	host := kcp.KindServiceHost(key.Kind, key.Workspace)
 	baseURL := "http://" + host
 	if err := handlers.RegisterHTTP(key, relay.Handler()); err != nil {
 		s.mu.Lock()
@@ -420,7 +358,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	s.ready = true
 	s.mu.Unlock()
 
-	log.Info("relay_registered", "host", host, "hostname", primaryHostname(cfg.Host, cfg.Hostnames))
+	log.Info("relay_registered", "host", host, "hostname", hostport.Primary(cfg.Host, cfg.Hostnames))
 
 	flushDone := make(chan struct{})
 	flushStopped := make(chan struct{})
@@ -614,58 +552,8 @@ func endpointHost(endpoint component.Endpoint) string {
 	return endpoint.Address
 }
 
-func mergeDeps(cfgDeps, deps component.Deps) component.Deps {
-	out := cfgDeps
-	if out.Log == nil {
-		out.Log = deps.Log
-	}
-	if out.TLS == nil {
-		out.TLS = deps.TLS
-	}
-	if out.StateDir == "" {
-		out.StateDir = deps.StateDir
-	}
-	if out.Registry == nil {
-		out.Registry = deps.Registry
-	}
-	if out.Handlers == nil {
-		out.Handlers = deps.Handlers
-	}
-	if out.Hosts == nil {
-		out.Hosts = deps.Hosts
-	}
-	if out.KCP == nil {
-		out.KCP = deps.KCP
-	}
-	if out.Credentials == nil {
-		out.Credentials = deps.Credentials
-	}
-	if out.Vault == nil {
-		out.Vault = deps.Vault
-	}
-	return out
-}
-
-type handlerAwareRoundTripper struct {
-	handlers *component.HandlerRegistry
-	external http.RoundTripper
-}
-
-func (t handlerAwareRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	if req != nil && req.URL != nil && req.URL.Scheme == "http" && t.handlers != nil {
-		if _, ok := t.handlers.HandlerForHost(req.URL.Host); ok {
-			return t.handlers.RoundTripper().RoundTrip(req)
-		}
-	}
-	external := t.external
-	if external == nil {
-		external = http.DefaultTransport
-	}
-	return external.RoundTrip(req)
-}
-
 func handlerClient(handlers *component.HandlerRegistry, external http.RoundTripper) *http.Client {
-	return &http.Client{Transport: handlerAwareRoundTripper{handlers: handlers, external: external}}
+	return &http.Client{Transport: handlers.Transport(external)}
 }
 
 func externalDialContext(deps component.Deps) func(context.Context, string, string) (net.Conn, error) {
@@ -689,98 +577,4 @@ func handlerDialer(handlers *component.HandlerRegistry, external func(context.Co
 		}
 		return external(ctx, network, address)
 	}
-}
-
-func primaryHostname(host string, hostnames []string) string {
-	if host != "" {
-		return host
-	}
-	for _, candidate := range hostnames {
-		if candidate != "" {
-			return candidate
-		}
-	}
-	return "localhost"
-}
-
-func logicalHost(key component.Key) string {
-	kind := strings.ToLower(strings.TrimSpace(key.Kind))
-	if kind == "" {
-		return ""
-	}
-	return kcp.ServiceFQDN(kind, "default", key.Workspace, kcp.DefaultServiceDomain)
-}
-
-func certificateFiles(certRef string, storage *v1alpha1.ComponentStorage, hostnames []string) (string, string) {
-	certFile := refPath(certRef, storage)
-	if certFile == "" && storage != nil && storage.CertsDir != "" && len(hostnames) > 0 {
-		name := hostnameOnly(hostnames[0])
-		if name != "" && name != "*" {
-			certFile = filepath.Join(storage.CertsDir, name+".crt")
-		}
-	}
-	return certFile, keyFileFor(certFile)
-}
-
-func refPath(ref string, storage *v1alpha1.ComponentStorage) string {
-	ref = strings.TrimSpace(ref)
-	if ref == "" {
-		return ""
-	}
-	if filepath.IsAbs(ref) || storage == nil || storage.CertsDir == "" {
-		return ref
-	}
-	return filepath.Join(storage.CertsDir, ref)
-}
-
-func keyFileFor(certFile string) string {
-	switch {
-	case certFile == "":
-		return ""
-	case strings.HasSuffix(certFile, ".crt"):
-		return strings.TrimSuffix(certFile, ".crt") + ".key"
-	case strings.HasSuffix(certFile, ".pem"):
-		return strings.TrimSuffix(certFile, ".pem") + ".key"
-	default:
-		return certFile + ".key"
-	}
-}
-
-func keyFilesFor(certFile string) []string {
-	candidates := []string{keyFileFor(certFile)}
-	if before, ok := strings.CutSuffix(certFile, ".pem"); ok {
-		candidates = append(candidates, before+"-key.pem")
-	}
-	return append(candidates, certFile)
-}
-
-func serverTLS(deps component.Deps, certFile string) (*tls.Config, error) {
-	if certFile != "" {
-		reloader, err := tlsreload.New(certFile, keyFilesFor(certFile), deps.Log)
-		if err != nil {
-			return nil, err
-		}
-		return reloader.TLSConfig(&tls.Config{MinVersion: tls.VersionTLS12, NextProtos: []string{"http/1.1"}}), nil
-	}
-	if deps.TLS != nil {
-		tlsConfig := deps.TLS.Clone()
-		if len(tlsConfig.NextProtos) == 0 {
-			tlsConfig.NextProtos = []string{"http/1.1"}
-		}
-		return tlsConfig, nil
-	}
-	return nil, errors.New("a TLS certificate is required")
-}
-
-func hostnameOnly(host string) string {
-	h := host
-	if strings.HasPrefix(h, "[") {
-		if end := strings.Index(h, "]"); end != -1 {
-			h = h[1:end]
-		}
-	}
-	if idx := strings.LastIndex(h, ":"); idx != -1 && idx > strings.Index(h, "]") {
-		h = h[:idx]
-	}
-	return h
 }

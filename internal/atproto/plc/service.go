@@ -1,6 +1,7 @@
 package plc
 
 import (
+	"cmp"
 	"fmt"
 	"net/url"
 	"strings"
@@ -53,9 +54,7 @@ func CreateServiceUpdate(prev *Operation, prevCID string, endpoint string) (*Ope
 	}
 	services := copyServiceMap(prev.Services)
 	service := services[PDSServiceID]
-	if service.Type == "" {
-		service.Type = PDSServiceType
-	}
+	service.Type = cmp.Or(service.Type, PDSServiceType)
 	service.Endpoint = normalized
 	services[PDSServiceID] = service
 	previous := prevCID

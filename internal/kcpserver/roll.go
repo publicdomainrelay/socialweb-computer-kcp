@@ -14,6 +14,8 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/apiserverfront"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 const (
@@ -97,21 +99,11 @@ type RollReport struct {
 }
 
 func (c *RollConfig) defaults() {
-	if c.Poll <= 0 {
-		c.Poll = DefaultRollPoll
-	}
-	if c.ReadyTimeout <= 0 {
-		c.ReadyTimeout = DefaultRollReadyTimeout
-	}
-	if c.LeaseTimeout <= 0 {
-		c.LeaseTimeout = DefaultLeaseTimeout
-	}
-	if c.ProbeTimeout <= 0 {
-		c.ProbeTimeout = DefaultProbeTimeout
-	}
-	if c.DrainTimeout <= 0 {
-		c.DrainTimeout = DefaultDrainTimeout
-	}
+	c.Poll = opt.Positive(c.Poll, DefaultRollPoll)
+	c.ReadyTimeout = opt.Positive(c.ReadyTimeout, DefaultRollReadyTimeout)
+	c.LeaseTimeout = opt.Positive(c.LeaseTimeout, DefaultLeaseTimeout)
+	c.ProbeTimeout = opt.Positive(c.ProbeTimeout, DefaultProbeTimeout)
+	c.DrainTimeout = opt.Positive(c.DrainTimeout, DefaultDrainTimeout)
 	if c.ListenPort == nil {
 		c.ListenPort = func(ctx context.Context, pid int) (int, error) { return hostsvc.WaitListenPort(ctx, pid, PortPoll) }
 	}
@@ -159,8 +151,6 @@ func WaitNewHolder(ctx context.Context, admin ShardAdmin, old string, every time
 	}
 }
 
-func secs(a, b time.Time) float64 { return float64(b.Sub(a).Milliseconds()) / 1000 }
-
 func Roll(ctx context.Context, m hostsvc.Manager, front FrontSwitch, admin ShardAdmin, cfg RollConfig) (RollReport, Slots, error) {
 	cfg.defaults()
 	log := cfg.Log.With("component", "kcp-roll")
@@ -194,7 +184,7 @@ func Roll(ctx context.Context, m hostsvc.Manager, front FrontSwitch, admin Shard
 		if err != nil {
 			return rep, s, fmt.Errorf("kcpserver: the store backup before the roll: %w", err)
 		}
-		rep.StoreBackup, rep.BackupSeconds = path, secs(rep.StartedAt, time.Now().UTC())
+		rep.StoreBackup, rep.BackupSeconds = path, clock.SecondsBetween(rep.StartedAt, time.Now().UTC())
 		log.Info("store backed up before the roll", "path", path, "seconds", rep.BackupSeconds)
 	}
 	spec, root, err := cfg.SpecFor(to)
@@ -215,7 +205,7 @@ func Roll(ctx context.Context, m hostsvc.Manager, front FrontSwitch, admin Shard
 		}
 		m.ResetFailed(ctx, old.Unit)
 		rep.OldExitedAt = time.Now().UTC()
-		rep.OldExitSeconds = secs(rep.SigtermAt, rep.OldExitedAt)
+		rep.OldExitSeconds = clock.SecondsBetween(rep.SigtermAt, rep.OldExitedAt)
 		return nil
 	}
 	if outage {
@@ -298,7 +288,7 @@ func Roll(ctx context.Context, m hostsvc.Manager, front FrontSwitch, admin Shard
 		return fail(err)
 	}
 	rep.ReadyAt = time.Now().UTC()
-	rep.StartToReadySeconds = secs(rep.StartedAt, rep.ReadyAt)
+	rep.StartToReadySeconds = clock.SecondsBetween(rep.StartedAt, rep.ReadyAt)
 	prev := s
 	prev.Slots = map[string]SlotRecord{}
 	maps.Copy(prev.Slots, s.Slots)
@@ -339,7 +329,7 @@ func Roll(ctx context.Context, m hostsvc.Manager, front FrontSwitch, admin Shard
 	}
 	log.Info("front flipped", "from", backendOf(old.Port), "to", backendOf(port), "memberTokenAt", rep.MemberTokenAt)
 	if outage {
-		rep.OutageSeconds = secs(rep.SigtermAt, rep.FlippedAt)
+		rep.OutageSeconds = clock.SecondsBetween(rep.SigtermAt, rep.FlippedAt)
 	} else {
 		if err := stopOld(ctx); err != nil {
 			return rep, s, err
@@ -362,7 +352,7 @@ func Roll(ctx context.Context, m hostsvc.Manager, front FrontSwitch, admin Shard
 			return rep, s, err
 		}
 		rep.NewHolder, rep.LeaseHeldAt = l.Holder, time.Now().UTC()
-		rep.LeaseHandoverSeconds = secs(rep.OldExitedAt, rep.LeaseHeldAt)
+		rep.LeaseHandoverSeconds = clock.SecondsBetween(rep.OldExitedAt, rep.LeaseHeldAt)
 		log.Info("controller lease handed over", "from", rep.OldHolder, "to", rep.NewHolder, "seconds", rep.LeaseHandoverSeconds)
 	}
 	probe := "roll-probe-" + strconv.FormatInt(time.Now().UnixMilli(), 36)
@@ -372,7 +362,7 @@ func Roll(ctx context.Context, m hostsvc.Manager, front FrontSwitch, admin Shard
 		return rep, s, fmt.Errorf("kcpserver: the probe workspace did not reconcile after the roll: %w", err)
 	}
 	rep.ProbeReadyAt = time.Now().UTC()
-	rep.ProbeSeconds = secs(rep.LeaseHeldAt, rep.ProbeReadyAt)
+	rep.ProbeSeconds = clock.SecondsBetween(rep.LeaseHeldAt, rep.ProbeReadyAt)
 	deadline := time.Now().Add(cfg.DrainTimeout)
 	for !outage {
 		fst, err := front.Status(ctx)
@@ -398,6 +388,6 @@ func Roll(ctx context.Context, m hostsvc.Manager, front FrontSwitch, admin Shard
 		return rep, s, err
 	}
 	rep.DoneAt = time.Now().UTC()
-	rep.TotalSeconds = secs(rep.StartedAt, rep.DoneAt)
+	rep.TotalSeconds = clock.SecondsBetween(rep.StartedAt, rep.DoneAt)
 	return rep, s, nil
 }

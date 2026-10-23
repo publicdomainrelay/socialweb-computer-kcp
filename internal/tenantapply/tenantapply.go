@@ -1,6 +1,7 @@
 package tenantapply
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -123,9 +124,7 @@ func (c *Client) Apply(ctx context.Context, did, cluster string, req gateway.App
 	}
 
 	manager := req.FieldManager
-	if manager == "" {
-		manager = DefaultFieldManager
-	}
+	manager = cmp.Or(manager, DefaultFieldManager)
 	opts := metav1.ApplyOptions{FieldManager: manager, Force: req.Force}
 	if req.DryRun {
 		opts.DryRun = []string{metav1.DryRunAll}

@@ -8,6 +8,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestidentity"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 type grantLoop struct {
@@ -47,9 +48,7 @@ func (g *grantLoop) run(ctx context.Context) {
 		g.logf().Warn("syncing the guest identity grants failed", "err", err)
 	}
 	interval := g.interval
-	if interval <= 0 {
-		interval = DefaultGrantSync
-	}
+	interval = opt.Positive(interval, DefaultGrantSync)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {

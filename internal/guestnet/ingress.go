@@ -1,6 +1,7 @@
 package guestnet
 
 import (
+	"cmp"
 	"fmt"
 	"net/url"
 	"regexp"
@@ -63,9 +64,7 @@ func RelayTargets(userData, fallback string) []RelayTarget {
 		return targets
 	}
 	port := u.Port()
-	if port == "" {
-		port = "80"
-	}
+	port = cmp.Or(port, "80")
 	targets = append(targets, RelayTarget{URL: target, Resolve: u.Hostname() + ":" + port + ":" + address})
 	return targets
 }

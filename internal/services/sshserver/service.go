@@ -1,8 +1,8 @@
 package sshserver
 
 import (
+	"cmp"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -10,15 +10,15 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/identity"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
-	coreapi "github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayapi"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayhttp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/sshtransport"
 )
 
@@ -62,15 +62,15 @@ func (a runnerAdapter) Run(ctx context.Context, account sshtransport.AuthorizedA
 
 type denyAuth struct{}
 
-func (denyAuth) Authenticate(r *http.Request) (*coreapi.WebCaller, error) {
+func (denyAuth) Authenticate(r *http.Request) (*gatewayhttp.WebCaller, error) {
 	return nil, nil
 }
 
 type signInAgents struct {
-	signIn coreapi.WebSignIn
+	signIn gatewayhttp.WebSignIn
 }
 
-func (a signInAgents) AgentFor(caller *coreapi.WebCaller) coreapi.WebAccountAgent {
+func (a signInAgents) AgentFor(caller *gatewayhttp.WebCaller) gatewayhttp.WebAccountAgent {
 	if a.signIn == nil {
 		return unavailableAgent{}
 	}
@@ -83,21 +83,21 @@ func (unavailableAgent) GetServiceAuth(ctx context.Context, aud, lxm string) (st
 	return "", errors.New("sshserver: no account session is configured")
 }
 
-func (unavailableAgent) ListRecords(ctx context.Context, did, collection string, limit int) ([]coreapi.Record, error) {
+func (unavailableAgent) ListRecords(ctx context.Context, did, collection string, limit int) ([]gatewayhttp.Record, error) {
 	return nil, errors.New("sshserver: no account session is configured")
 }
 
-func (unavailableAgent) CreateRecord(ctx context.Context, did, collection, rkey string, record map[string]any) (coreapi.RecordRef, error) {
-	return coreapi.RecordRef{}, errors.New("sshserver: no account session is configured")
+func (unavailableAgent) CreateRecord(ctx context.Context, did, collection, rkey string, record map[string]any) (gatewayhttp.RecordRef, error) {
+	return gatewayhttp.RecordRef{}, errors.New("sshserver: no account session is configured")
 }
 
-func (unavailableAgent) ApplyWrites(ctx context.Context, did string, writes []coreapi.Write) error {
+func (unavailableAgent) ApplyWrites(ctx context.Context, did string, writes []gatewayhttp.Write) error {
 	return errors.New("sshserver: no account session is configured")
 }
 
 type unavailableAgents struct{}
 
-func (unavailableAgents) AgentFor(caller *coreapi.WebCaller) coreapi.WebAccountAgent {
+func (unavailableAgents) AgentFor(caller *gatewayhttp.WebCaller) gatewayhttp.WebAccountAgent {
 	return unavailableAgent{}
 }
 
@@ -167,18 +167,10 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 		return err
 	}
 	key := s.cfg.Key
-	if key.Kind == "" {
-		key.Kind = Kind
-	}
-	if key.Name == "" {
-		key.Name = s.cfg.ComponentName
-	}
-	if key.Name == "" {
-		key.Name = "default"
-	}
-	if key.Workspace == "" {
-		key.Workspace = s.cfg.Workspace
-	}
+	key.Kind = cmp.Or(key.Kind, Kind)
+	key.Name = cmp.Or(key.Name, s.cfg.ComponentName)
+	key.Name = cmp.Or(key.Name, "default")
+	key.Workspace = cmp.Or(key.Workspace, s.cfg.Workspace)
 	handlers := s.cfg.Deps.Handlers
 	if handlers == nil {
 		s.shutdown(ctx)
@@ -188,7 +180,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 		close(s.done)
 		return errors.New("sshserver: no handler registry is available")
 	}
-	host := logicalHost(key)
+	host := kcp.KindServiceHost(key.Kind, key.Workspace)
 	httpURL := "http://" + host
 	sshURL := "ssh://" + host
 	if err := handlers.RegisterHTTP(key, s.handler()); err != nil {
@@ -281,9 +273,7 @@ func (s *Service) resolveRequester(ctx context.Context) (CommandRunner, error) {
 	}
 	workspace := s.cfg.Workspace
 	kind := s.cfg.RequesterRef.Kind
-	if kind == "" {
-		kind = "Requester"
-	}
+	kind = cmp.Or(kind, "Requester")
 	service, ok := s.cfg.Deps.Registry.Service(workspace, kind, s.cfg.RequesterRef.Name)
 	if !ok {
 		return nil, fmt.Errorf("sshserver: the Requester %s/%s is not registered", workspace, s.cfg.RequesterRef.Name)
@@ -359,7 +349,7 @@ func (s *Service) authenticator() sshtransport.Authenticator {
 	}
 	var auths multiAuth
 	if s.cfg.SignIn != nil {
-		auth, err := coreapi.NewRequestAuth(coreapi.RequestAuthOptions{
+		auth, err := gatewayhttp.NewRequestAuth(gatewayhttp.RequestAuthOptions{
 			SignIn:       s.cfg.SignIn,
 			PublicOrigin: s.cfg.PublicOrigin,
 			CookieName:   s.cfg.SessionCookie,
@@ -428,39 +418,35 @@ func (s *Service) health(w http.ResponseWriter, r *http.Request) {
 	ready := s.ready
 	s.mu.Unlock()
 	if !ready {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false})
+		httpjson.Write(w, http.StatusServiceUnavailable, map[string]any{"ok": false})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	httpjson.Write(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (s *Service) connect(w http.ResponseWriter, r *http.Request) {
 	host := s.cfg.SSHPublicHost
-	if host == "" {
-		host = s.cfg.PublicHostname
-	}
-	if host == "" {
-		host = s.cfg.SSHHost
-	}
+	host = cmp.Or(host, s.cfg.PublicHostname)
+	host = cmp.Or(host, s.cfg.SSHHost)
 	port := s.cfg.SSHPort
 	if _, _, err := net.SplitHostPort(host); err != nil && port > 0 {
 		host = net.JoinHostPort(host, fmt.Sprintf("%d", port))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"sshHost": host})
+	httpjson.Write(w, http.StatusOK, map[string]any{"sshHost": host})
 }
 
 func (s *Service) cocoreApp(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.CocoreAppDID == "" {
-		writeJSON(w, http.StatusNotFound, map[string]any{"error": "NotFound"})
+		httpjson.Write(w, http.StatusNotFound, map[string]any{"error": "NotFound"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"did": s.cfg.CocoreAppDID})
+	httpjson.Write(w, http.StatusOK, map[string]any{"did": s.cfg.CocoreAppDID})
 }
 
 func (s *Service) clientMetadata(w http.ResponseWriter, r *http.Request) {
 	raw, err := s.cfg.SignIn.ClientMetadata(r.Context())
 	if err != nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "the vault is not answering"})
+		httpjson.Write(w, http.StatusServiceUnavailable, map[string]any{"error": "the vault is not answering"})
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -548,18 +534,4 @@ func (s *Service) shutdown(ctx context.Context) {
 	s.started = false
 	s.ready = false
 	s.mu.Unlock()
-}
-
-func logicalHost(key component.Key) string {
-	kind := strings.ToLower(strings.TrimSpace(key.Kind))
-	if kind == "" {
-		return ""
-	}
-	return kcp.ServiceFQDN(kind, "default", key.Workspace, kcp.DefaultServiceDomain)
-}
-
-func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(value)
 }

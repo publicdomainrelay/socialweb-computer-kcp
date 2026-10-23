@@ -1,6 +1,7 @@
 package market
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -111,9 +112,7 @@ func (h *HTTPReader) GetRecord(ctx context.Context, repo, collection, rkey strin
 	if body.Value == nil {
 		return ResolvedRecord{}, fmt.Errorf("%w: no record value", ErrNotFound)
 	}
-	if body.URI == "" {
-		body.URI = "at://" + repo + "/" + collection + "/" + rkey
-	}
+	body.URI = cmp.Or(body.URI, "at://"+repo+"/"+collection+"/"+rkey)
 	return ResolvedRecord{URI: body.URI, CID: body.CID, Value: body.Value}, nil
 }
 
@@ -248,9 +247,7 @@ func (r *recordResolver) Resolve(ctx context.Context, ref RecordRef) (ResolvedRe
 		if err != nil {
 			return ResolvedRecord{}, fmt.Errorf("getRecord failed: %s is not in the own repo: %w", ref.URI, err)
 		}
-		if rec.CID == "" {
-			rec.CID = ref.CID
-		}
+		rec.CID = cmp.Or(rec.CID, ref.CID)
 		return rec, nil
 	}
 	if r.remote == nil {
@@ -260,9 +257,7 @@ func (r *recordResolver) Resolve(ctx context.Context, ref RecordRef) (ResolvedRe
 	if err != nil {
 		return ResolvedRecord{}, err
 	}
-	if rec.CID == "" {
-		rec.CID = ref.CID
-	}
+	rec.CID = cmp.Or(rec.CID, ref.CID)
 	return rec, nil
 }
 
@@ -281,8 +276,6 @@ func (h *HTTPReader) Resolve(ctx context.Context, ref RecordRef) (ResolvedRecord
 	if err != nil {
 		return ResolvedRecord{}, err
 	}
-	if rec.CID == "" {
-		rec.CID = ref.CID
-	}
+	rec.CID = cmp.Or(rec.CID, ref.CID)
 	return rec, nil
 }

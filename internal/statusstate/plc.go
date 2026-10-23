@@ -10,11 +10,12 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/plc"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 )
 
 func (c *Controller) reconcilePLC(ctx context.Context, dyn dynamic.Interface, u *unstructured.Unstructured) {
 	var obj v1alpha1.PlcIdentity
-	if err := decode(u, &obj); err != nil {
+	if err := unstruct.Into(u, &obj); err != nil {
 		c.log.Warn("decoding a PlcIdentity", "workspace", c.workspace, "name", u.GetName(), "err", err.Error())
 		return
 	}

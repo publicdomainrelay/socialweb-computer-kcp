@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/atproto"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/models"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/trust"
@@ -39,9 +41,7 @@ func NewGhaLite(opts GhaLiteOptions) *GhaLite {
 		resolver = DefaultActionResolver()
 	}
 	timeout := opts.Timeout
-	if timeout <= 0 {
-		timeout = defaultGhaLiteTimeout
-	}
+	timeout = opt.Positive(timeout, defaultGhaLiteTimeout)
 	return &GhaLite{
 		denoPath:        opts.DenoPath,
 		resolveAction:   resolver,
@@ -282,9 +282,7 @@ func buildScopeRequest(workflowText string, record PolicyRecord, input ScopeInpu
 
 func requestContext(eval *EvalContext, snapshot *trust.Snapshot, permissions map[string]any) map[string]any {
 	repository := atproto.RepoFromURI(eval.PolicyRefURI())
-	if repository == "" {
-		repository = eval.SelfDid
-	}
+	repository = cmp.Or(repository, eval.SelfDid)
 	context := map[string]any{
 		"config": map[string]any{
 			"env": map[string]any{

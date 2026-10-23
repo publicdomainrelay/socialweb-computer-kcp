@@ -10,8 +10,9 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clicfg"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpdatastore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpstore"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/versions"
 )
 
@@ -36,7 +37,7 @@ func runDevRoll(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 	if err != nil {
 		return a.fail(exitRefused, "dev roll kcp: ready-timeout: %v", err)
 	}
-	retention, err := kcpstore.RetentionOf(vals.Int("store-backup-keep"), vals.Int("store-backup-keep-days"))
+	retention, err := kcpdatastore.RetentionOf(vals.Int("store-backup-keep"), vals.Int("store-backup-keep-days"))
 	if err != nil {
 		return a.fail(exitRefused, "dev roll kcp: %v", err)
 	}
@@ -45,7 +46,7 @@ func runDevRoll(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 		return a.fail(exitRefused, "dev roll kcp: %v", err)
 	}
 	var rec devinstance.Record
-	if err := devinstance.ReadJSON(l.Record, &rec); err != nil {
+	if err := fsx.ReadJSON(l.Record, &rec); err != nil {
 		return a.fail(exitRefused, "dev roll kcp: no instance %s here (dev up first): %v", l.ID, err)
 	}
 	kcpExe := rec.Executables["kcp"]
@@ -61,7 +62,7 @@ func runDevRoll(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 		return a.fail(exitFailed, "dev roll kcp: %v", err)
 	}
 	defer lock.Close()
-	if err := devinstance.ReadJSON(l.Record, &rec); err != nil {
+	if err := fsx.ReadJSON(l.Record, &rec); err != nil {
 		return a.fail(exitFailed, "dev roll kcp: %v", err)
 	}
 	m, _, err := helloDevsup(ctx, l)
@@ -72,7 +73,7 @@ func runDevRoll(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 	bcfg := bootstrap.Config{Layout: l, KcpPath: kcpExe.Path, KinePath: rec.Executables["kine"].Path, PostgresRoot: rec.Executables["postgres"].Path,
 		Exe: rec.Executables["socialweb-computer"].Path, ReadyTimeout: readyTimeout, Retention: retention, Log: a.log}
 	rep, rerr := bootstrap.Roll(ctx, m, bcfg, &rec)
-	werr := devinstance.WriteJSON(l.Record, rec)
+	werr := fsx.WriteJSON(l.Record, rec, 0o600)
 	out := rollReport{Instance: l.ID, Roll: rep, Units: rec.Units}
 	out.Slots, _ = kcpserver.ReadSlots(l.SlotsFile())
 	if err := errors.Join(rerr, werr); err != nil {

@@ -21,6 +21,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -141,13 +143,9 @@ func New(opts Options) (*Controller, error) {
 		log = slog.New(slog.DiscardHandler)
 	}
 	retry := opts.RetryAfter
-	if retry <= 0 {
-		retry = DefaultRetryAfter
-	}
+	retry = opt.Positive(retry, DefaultRetryAfter)
 	resync := opts.Resync
-	if resync <= 0 {
-		resync = DefaultResync
-	}
+	resync = opt.Positive(resync, DefaultResync)
 	plcClient := opts.PLC
 	if plcClient == nil && strings.TrimSpace(opts.PLCBaseURL) != "" {
 		built, err := NewHTTPPLCClient(opts.PLCBaseURL, opts.PLCHandlers)
@@ -221,7 +219,7 @@ func (c *Controller) runKind(ctx context.Context, gvr schema.GroupVersionResourc
 		if err := c.watchKind(ctx, gvr, reconcile); err != nil && ctx.Err() == nil {
 			c.log.Warn("watching status objects", "workspace", c.workspace, "resource", gvr.Resource, "err", err.Error())
 		}
-		if !sleep(ctx, c.retry) {
+		if !clock.Sleep(ctx, c.retry) {
 			return
 		}
 	}
@@ -306,10 +304,6 @@ func (c *Controller) write(ctx context.Context, dyn dynamic.Interface, gvr schem
 	}
 }
 
-func decode(u *unstructured.Unstructured, out any) error {
-	return runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, out)
-}
-
 func setReady(conditions *[]metav1.Condition, generation int64, ok bool, reason, message string) {
 	value := metav1.ConditionFalse
 	if ok {
@@ -329,17 +323,6 @@ func truncate(message string) string {
 		return message
 	}
 	return message[:maxMessage]
-}
-
-func sleep(ctx context.Context, d time.Duration) bool {
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-timer.C:
-		return true
-	}
 }
 
 func refString(r commonv1.ObjectRef) string {

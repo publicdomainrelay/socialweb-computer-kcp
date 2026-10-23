@@ -1,6 +1,7 @@
 package hostsvc
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -71,21 +72,13 @@ func RenderInstalled(spec UnitSpec, o InstallOptions) (InstalledFile, error) {
 		args = append(args, q)
 	}
 	desc := spec.Description
-	if desc == "" {
-		desc = spec.Name
-	}
+	desc = cmp.Or(desc, spec.Name)
 	slice := spec.Slice
-	if slice == "" {
-		slice = DefaultSlice
-	}
+	slice = cmp.Or(slice, DefaultSlice)
 	restart := spec.Restart
-	if restart == "" {
-		restart = RestartNo
-	}
+	restart = cmp.Or(restart, RestartNo)
 	oom := spec.OOMPolicy
-	if oom == "" {
-		oom = "stop"
-	}
+	oom = cmp.Or(oom, "stop")
 	var unitEntries []systemdunit.KeyValue
 	add := func(k, v string) {
 		unitEntries = append(unitEntries, systemdunit.KV(k, v))

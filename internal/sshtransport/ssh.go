@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"golang.org/x/crypto/ssh"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
@@ -201,21 +202,11 @@ func NewServer(opts ServerOptions) (*Server, error) {
 }
 
 func configWithDefaults(c Config) Config {
-	if c.MaxConnections <= 0 {
-		c.MaxConnections = DefaultMaxConnections
-	}
-	if c.MaxSessions <= 0 {
-		c.MaxSessions = DefaultMaxSessions
-	}
-	if c.SessionsPerAccount <= 0 {
-		c.SessionsPerAccount = DefaultSessionsPerAccount
-	}
-	if c.MaxAuthAttempts <= 0 {
-		c.MaxAuthAttempts = DefaultMaxAuthAttempts
-	}
-	if c.AuthTimeout <= 0 {
-		c.AuthTimeout = DefaultAuthTimeout
-	}
+	c.MaxConnections = opt.Positive(c.MaxConnections, DefaultMaxConnections)
+	c.MaxSessions = opt.Positive(c.MaxSessions, DefaultMaxSessions)
+	c.SessionsPerAccount = opt.Positive(c.SessionsPerAccount, DefaultSessionsPerAccount)
+	c.MaxAuthAttempts = opt.Positive(c.MaxAuthAttempts, DefaultMaxAuthAttempts)
+	c.AuthTimeout = opt.Positive(c.AuthTimeout, DefaultAuthTimeout)
 	return c
 }
 

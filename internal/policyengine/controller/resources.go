@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -87,7 +86,7 @@ func (r *Resource[T]) Create(ctx context.Context, cluster string, object *T) err
 	}
 	response, err := client.Post().Resource(r.gvr.Resource).Body(raw).Do(ctx).Raw()
 	if err != nil {
-		return fmt.Errorf("policy resource: create %s in %s: %w%s", r.gvr.Resource, cluster, err, responseDetail(response))
+		return fmt.Errorf("policy resource: create %s in %s: %w%s", r.gvr.Resource, cluster, err, kcpstore.ResponseDetail(response))
 	}
 	return nil
 }
@@ -115,7 +114,7 @@ func (r *Resource[T]) PatchStatus(ctx context.Context, cluster, name, resourceVe
 	}
 	response, err := client.Patch(types.MergePatchType).SubResource("status").Resource(r.gvr.Resource).Name(name).Body(body).Do(ctx).Raw()
 	if err != nil {
-		return fmt.Errorf("policy resource: write %s status for %s in %s: %w%s", r.gvr.Resource, name, cluster, err, responseDetail(response))
+		return fmt.Errorf("policy resource: write %s status for %s in %s: %w%s", r.gvr.Resource, name, cluster, err, kcpstore.ResponseDetail(response))
 	}
 	return nil
 }
@@ -127,7 +126,7 @@ func (r *Resource[T]) Patch(ctx context.Context, cluster, name string, patch []b
 	}
 	response, err := client.Patch(types.MergePatchType).Resource(r.gvr.Resource).Name(name).Body(patch).Do(ctx).Raw()
 	if err != nil {
-		return fmt.Errorf("policy resource: patch %s %s in %s: %w%s", r.gvr.Resource, name, cluster, err, responseDetail(response))
+		return fmt.Errorf("policy resource: patch %s %s in %s: %w%s", r.gvr.Resource, name, cluster, err, kcpstore.ResponseDetail(response))
 	}
 	return nil
 }
@@ -139,7 +138,7 @@ func (r *Resource[T]) PatchJSON(ctx context.Context, cluster, name string, patch
 	}
 	response, err := client.Patch(types.JSONPatchType).Resource(r.gvr.Resource).Name(name).Body(patch).Do(ctx).Raw()
 	if err != nil {
-		return fmt.Errorf("policy resource: patch %s %s in %s: %w%s", r.gvr.Resource, name, cluster, err, responseDetail(response))
+		return fmt.Errorf("policy resource: patch %s %s in %s: %w%s", r.gvr.Resource, name, cluster, err, kcpstore.ResponseDetail(response))
 	}
 	return nil
 }
@@ -150,13 +149,6 @@ func decodeObject[T any](raw []byte) (*T, error) {
 		return nil, fmt.Errorf("policy resource: decode object: %w", err)
 	}
 	return &out, nil
-}
-
-func responseDetail(response []byte) string {
-	if len(response) == 0 {
-		return ""
-	}
-	return ": " + strings.TrimSpace(string(response))
 }
 
 type Resources struct {

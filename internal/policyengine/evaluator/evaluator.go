@@ -1,11 +1,13 @@
 package evaluator
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
 	"time"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/atproto"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/cache"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/executor"
@@ -37,15 +39,9 @@ type Evaluator struct {
 }
 
 func NewScopeCache(positive, negative time.Duration, maxEntries int, log func(level, msg string, meta map[string]any)) *cache.Scope[executor.Verdict] {
-	if positive <= 0 {
-		positive = 5 * time.Minute
-	}
-	if negative <= 0 {
-		negative = 30 * time.Second
-	}
-	if maxEntries <= 0 {
-		maxEntries = 10000
-	}
+	positive = opt.Positive(positive, 5*time.Minute)
+	negative = opt.Positive(negative, 30*time.Second)
+	maxEntries = opt.Positive(maxEntries, 10000)
 	return cache.NewScope[executor.Verdict](cache.ScopeOptions[executor.Verdict]{
 		PositiveTTL: positive,
 		NegativeTTL: negative,
@@ -66,9 +62,7 @@ func New(opts Options) *Evaluator {
 		resolve = opts.Host.Resolve
 	}
 	ttl := opts.VerdictTTL
-	if ttl <= 0 {
-		ttl = 30 * time.Second
-	}
+	ttl = opt.Positive(ttl, 30*time.Second)
 	log := opts.Log
 	if log == nil {
 		log = func(string, string, map[string]any) {}
@@ -142,9 +136,7 @@ func (e *Evaluator) evaluateRecord(ctx context.Context, record executor.PolicyRe
 	local.PolicyName = policyName(record)
 	ref := record.Ref()
 	local.PolicyRef = &ref
-	if local.Perspective == "" {
-		local.Perspective = executor.PerspectiveRequester
-	}
+	local.Perspective = cmp.Or(local.Perspective, executor.PerspectiveRequester)
 	local.RFP = e.hydrateRecord(ctx, local.RFP)
 	local.Bid = e.hydrateRecord(ctx, local.Bid)
 	local.Accept = e.hydrateRecord(ctx, local.Accept)
@@ -296,9 +288,7 @@ func deriveDIDs(eval *executor.EvalContext) {
 			eval.SubjectDid = author(eval.Accept)
 		}
 	}
-	if eval.CounterpartyDid == "" {
-		eval.CounterpartyDid = eval.SubjectDid
-	}
+	eval.CounterpartyDid = cmp.Or(eval.CounterpartyDid, eval.SubjectDid)
 	if eval.RootRequesterDid == "" {
 		if eval.Perspective == executor.PerspectiveRequester {
 			eval.RootRequesterDid = eval.SelfDid

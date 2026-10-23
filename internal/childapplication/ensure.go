@@ -1,6 +1,7 @@
 package childapplication
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -126,9 +127,7 @@ func ChildName(network, app string) string {
 	if len(base) > limit {
 		base = strings.Trim(base[:limit], "-")
 	}
-	if base == "" {
-		base = "child"
-	}
+	base = cmp.Or(base, "child")
 	return base + "-" + suffix
 }
 

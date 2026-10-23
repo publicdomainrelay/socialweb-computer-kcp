@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -19,6 +20,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clicfg"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/request"
 )
 
@@ -205,12 +207,8 @@ func (r *requestRun) passthrough(args []string, network bool) error {
 		}
 	}
 	if nvSet {
-		if nv.PLCDirectoryURL == "" {
-			nv.PLCDirectoryURL = "https://plc.directory"
-		}
-		if nv.IngressProxyHost == "" {
-			nv.IngressProxyHost = "xrpc.fedproxy.com"
-		}
+		nv.PLCDirectoryURL = cmp.Or(nv.PLCDirectoryURL, "https://plc.directory")
+		nv.IngressProxyHost = cmp.Or(nv.IngressProxyHost, "xrpc.fedproxy.com")
 		if nv.RelayURLs == nil {
 			nv.RelayURLs = []string{}
 		}
@@ -255,7 +253,7 @@ func (r *requestRun) networkLayout() (devinstance.Layout, devinstance.Record, er
 		return l, devinstance.Record{}, err
 	}
 	var rec devinstance.Record
-	if err := devinstance.ReadJSON(l.Record, &rec); err != nil {
+	if err := fsx.ReadJSON(l.Record, &rec); err != nil {
 		return l, rec, fmt.Errorf("market network %s has no instance record (dev up --profile market-network first): %w", r.inv.Network, err)
 	}
 	if rec.Profile != bootstrap.ProfileMarketNetwork || rec.AdminKubeconfig == "" {
@@ -270,7 +268,7 @@ func (r *requestRun) childRecord(netLayout devinstance.Layout, instance string) 
 		return devinstance.Record{}, err
 	}
 	var rec devinstance.Record
-	if err := devinstance.ReadJSON(cl.Record, &rec); err != nil {
+	if err := fsx.ReadJSON(cl.Record, &rec); err != nil {
 		return rec, err
 	}
 	return rec, nil
@@ -766,8 +764,8 @@ func runRequestList(ctx context.Context, a *app, vals clicfg.Values, rest []stri
 		if s.Network != "" {
 			where = "network " + s.Network
 		}
-		fmt.Fprintf(a.stdout, "%-24s %-20s %-10s kcp=%-5t winner=%s guest=%s %s\n", s.Name, where, orDash(s.Phase), s.KcpRunning,
-			orDash(c.WinnerDid), orDash(c.VMAddress), s.Message)
+		fmt.Fprintf(a.stdout, "%-24s %-20s %-10s kcp=%-5t winner=%s guest=%s %s\n", s.Name, where, cmp.Or(s.Phase), s.KcpRunning,
+			cmp.Or(c.WinnerDid), cmp.Or(c.VMAddress), s.Message)
 	}
 	if len(list) == 0 {
 		fmt.Fprintln(a.stdout, "no invocations under", request.Root(root))
@@ -788,11 +786,4 @@ func (r *requestRun) keepLogs() {
 		return
 	}
 	os.WriteFile(filepath.Join(out, "core.log"), b, 0o600)
-}
-
-func orDash(s string) string {
-	if s == "" {
-		return "-"
-	}
-	return s
 }

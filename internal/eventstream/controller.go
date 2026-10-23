@@ -29,6 +29,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 )
@@ -115,15 +117,9 @@ func New(opts Options) (*Controller, error) {
 	if opts.Log == nil {
 		opts.Log = slog.New(slog.DiscardHandler)
 	}
-	if opts.RetryAfter <= 0 {
-		opts.RetryAfter = DefaultRetryAfter
-	}
-	if opts.StatusInterval <= 0 {
-		opts.StatusInterval = DefaultStatusInterval
-	}
-	if opts.ReconnectDelay <= 0 {
-		opts.ReconnectDelay = DefaultReconnectDelay
-	}
+	opts.RetryAfter = opt.Positive(opts.RetryAfter, DefaultRetryAfter)
+	opts.StatusInterval = opt.Positive(opts.StatusInterval, DefaultStatusInterval)
+	opts.ReconnectDelay = opt.Positive(opts.ReconnectDelay, DefaultReconnectDelay)
 	if opts.MaxReconnectWait < opts.ReconnectDelay {
 		opts.MaxReconnectWait = DefaultMaxReconnectWait
 	}
@@ -192,7 +188,7 @@ func (c *Controller) runEventStreams(ctx context.Context) {
 		if err := c.round(ctx); err != nil && ctx.Err() == nil {
 			c.log.Warn("watching EventStreams", "workspace", c.opts.Workspace, "err", err.Error())
 		}
-		if !sleep(ctx, c.opts.RetryAfter) {
+		if !clock.Sleep(ctx, opt.Positive(c.opts.RetryAfter, DefaultRetryAfter)) {
 			return
 		}
 	}
@@ -315,18 +311,4 @@ func specFingerprint(spec eventsv1alpha1.EventStreamSpec) (string, error) {
 	}
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:]), nil
-}
-
-func sleep(ctx context.Context, delay time.Duration) bool {
-	if delay <= 0 {
-		delay = DefaultRetryAfter
-	}
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-timer.C:
-		return true
-	}
 }

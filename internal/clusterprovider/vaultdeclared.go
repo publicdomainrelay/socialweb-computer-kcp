@@ -3,11 +3,11 @@ package clusterprovider
 import (
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterlink"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vaultcert"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vaultlayout"
 )
@@ -19,13 +19,6 @@ const (
 	VaultGatewayClientPolicy = "gateway-kubeconfig"
 	vaultAppRoleMount        = "approle"
 )
-
-func durationString(d time.Duration) string {
-	if d <= 0 {
-		return ""
-	}
-	return d.String()
-}
 
 func clusterProviderRules() []v1alpha1.OpenBaoPolicyRule {
 	cu := []string{"create", "update"}
@@ -61,7 +54,7 @@ func layoutPKIRole(r vaultlayout.PKIRole) v1alpha1.OpenBaoPKIRole {
 	return v1alpha1.OpenBaoPKIRole{Mount: VaultPKIPath, Name: r.Name, AllowedDomains: r.AllowedDomains, AllowSubdomains: r.AllowSubdomains,
 		AllowBareDomains: r.AllowBareDomains, AllowIPSANs: r.AllowIPSANs, EnforceHostnames: r.EnforceHostnames, RequireCN: r.RequireCN,
 		ClientFlag: r.ClientAuth, ServerFlag: r.ServerAuth, KeyType: vaultKeyType(r.KeyType), KeyBits: int32(r.KeyBits),
-		KeyUsage: r.KeyUsage, TTL: durationString(r.TTL), MaxTTL: durationString(r.MaxTTL), NoStore: true}
+		KeyUsage: r.KeyUsage, TTL: clock.DurationString(r.TTL), MaxTTL: clock.DurationString(r.MaxTTL), NoStore: true}
 }
 
 func staticClusterDeclared() *v1alpha1.OpenBaoServerDeclared {
@@ -92,7 +85,7 @@ func staticClusterDeclared() *v1alpha1.OpenBaoServerDeclared {
 	for _, r := range layout.AppRoles {
 		if r.Vault == vaultlayout.Cluster {
 			d.AppRoles = append(d.AppRoles, v1alpha1.OpenBaoAppRole{Mount: vaultAppRoleMount, Name: r.Name, Policies: r.Policies,
-				TokenTTL: durationString(r.TokenTTL), TokenMaxTTL: durationString(r.TokenMaxTTL), SecretIDTTL: durationString(r.SecretIDTTL)})
+				TokenTTL: clock.DurationString(r.TokenTTL), TokenMaxTTL: clock.DurationString(r.TokenMaxTTL), SecretIDTTL: clock.DurationString(r.SecretIDTTL)})
 		}
 	}
 	for _, r := range layout.PKIRoles {
@@ -102,7 +95,7 @@ func staticClusterDeclared() *v1alpha1.OpenBaoServerDeclared {
 		v1alpha1.OpenBaoPKIRole{Mount: VaultPKIPath, Name: VaultPKIRoleTenant, AllowAnyName: true, ClientFlag: true, RequireCN: true,
 			KeyType: "ec", KeyBits: 256, Organization: []string{SuperuserOrganization}, TTL: "8760h", MaxTTL: "87600h", NoStore: true},
 		v1alpha1.OpenBaoPKIRole{Mount: VaultPKIPath, Name: vaultcert.PKIRoleNode, AllowAnyName: true, ClientFlag: true, RequireCN: true,
-			KeyType: "ec", KeyBits: 256, TTL: durationString(vaultcert.NodeCertTTL), MaxTTL: durationString(vaultcert.NodeMaxTTL), NoStore: true},
+			KeyType: "ec", KeyBits: 256, TTL: clock.DurationString(vaultcert.NodeCertTTL), MaxTTL: clock.DurationString(vaultcert.NodeMaxTTL), NoStore: true},
 		v1alpha1.OpenBaoPKIRole{Mount: VaultPKIPath, Name: VaultPKIRoleKubeconfig, AllowAnyName: true, EnforceHostnames: false,
 			ClientFlag: true, ServerFlag: false, RequireCN: true, KeyType: "ec", KeyBits: 256, KeyUsage: []string{"DigitalSignature"},
 			Organization: []string{kcpclient.OwnersGroup}, CNValidations: []string{"disabled"}, TTL: "8h", MaxTTL: "24h"},

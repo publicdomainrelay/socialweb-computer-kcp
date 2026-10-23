@@ -1,6 +1,7 @@
 package gatewayapi
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -20,9 +21,11 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clientcert"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gateway"
-	coreapi "github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayapi"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayhttp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestnet"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
@@ -210,7 +213,7 @@ type NodeMarketConfig struct {
 }
 
 type SessionConfig struct {
-	SignIn coreapi.WebSignIn
+	SignIn gatewayhttp.WebSignIn
 
 	PublicOrigin string
 
@@ -226,9 +229,9 @@ type SessionConfig struct {
 
 	MaxBodyBytes int64
 
-	OnSignedIn func(context.Context, *coreapi.WebUser) error
+	OnSignedIn func(context.Context, *gatewayhttp.WebUser) error
 
-	OnSignedOut func(context.Context, *coreapi.WebUser) error
+	OnSignedOut func(context.Context, *gatewayhttp.WebUser) error
 
 	CustodyMount string
 
@@ -242,60 +245,30 @@ type SessionConfig struct {
 }
 
 func (c Config) withDefaults() Config {
-	if c.Vault.ClientName == "" {
-		c.Vault.ClientName = DefaultVaultClient
-	}
+	c.Vault.ClientName = cmp.Or(c.Vault.ClientName, DefaultVaultClient)
 	if c.Address == "" && c.Host == "" && c.Port == 0 {
 		c.Address = DefaultAddress
 	}
-	if c.ShutdownTimeout <= 0 {
-		c.ShutdownTimeout = DefaultShutdownTimeout
-	}
-	if c.Session.PublicOrigin == "" {
-		c.Session.PublicOrigin = c.PublicOrigin
-	}
-	if c.Session.CustodyMount == "" {
-		c.Session.CustodyMount = DefaultAtprotoMount
-	}
-	if c.Session.AtprotoRole == "" {
-		c.Session.AtprotoRole = DefaultAtprotoRole
-	}
-	if c.Session.Timeout <= 0 {
-		c.Session.Timeout = DefaultCustodyTimeout
-	}
-	if c.Session.RenewBelow <= 0 {
-		c.Session.RenewBelow = 30 * time.Minute
-	}
-	if c.Session.RenewIncrement <= 0 {
-		c.Session.RenewIncrement = time.Hour
-	}
-	if c.NodeMarket.VMReadyTimeoutSec <= 0 {
-		c.NodeMarket.VMReadyTimeoutSec = DefaultVMReadySec
-	}
-	if c.NodeMarket.PollInterval <= 0 {
-		c.NodeMarket.PollInterval = DefaultPollInterval
-	}
+	c.ShutdownTimeout = opt.Positive(c.ShutdownTimeout, DefaultShutdownTimeout)
+	c.Session.PublicOrigin = cmp.Or(c.Session.PublicOrigin, c.PublicOrigin)
+	c.Session.CustodyMount = cmp.Or(c.Session.CustodyMount, DefaultAtprotoMount)
+	c.Session.AtprotoRole = cmp.Or(c.Session.AtprotoRole, DefaultAtprotoRole)
+	c.Session.Timeout = opt.Positive(c.Session.Timeout, DefaultCustodyTimeout)
+	c.Session.RenewBelow = opt.Positive(c.Session.RenewBelow, 30*time.Minute)
+	c.Session.RenewIncrement = opt.Positive(c.Session.RenewIncrement, time.Hour)
+	c.NodeMarket.VMReadyTimeoutSec = opt.Positive(c.NodeMarket.VMReadyTimeoutSec, DefaultVMReadySec)
+	c.NodeMarket.PollInterval = opt.Positive(c.NodeMarket.PollInterval, DefaultPollInterval)
 	if c.NodeMarket.ContractWorkspace == "" {
 		c.NodeMarket.ContractWorkspace = c.Requester.kcpWorkspace(c.Workspace)
 	}
 	if len(c.NodeMarket.HomeWorkspaces) == 0 && c.Workspace != "" {
 		c.NodeMarket.HomeWorkspaces = []string{c.Workspace}
 	}
-	if c.Gateway.Ref.Kind == "" {
-		c.Gateway.Ref.Kind = DefaultGatewayKind
-	}
-	if c.Requester.Ref.Kind == "" {
-		c.Requester.Ref.Kind = DefaultRequesterKind
-	}
-	if c.Vault.Ref.Kind == "" {
-		c.Vault.Ref.Kind = DefaultVaultKind
-	}
-	if c.Vault.Ref.Workspace == "" {
-		c.Vault.Ref.Workspace = c.Workspace
-	}
-	if c.Vault.Timeout <= 0 {
-		c.Vault.Timeout = DefaultCustodyTimeout
-	}
+	c.Gateway.Ref.Kind = cmp.Or(c.Gateway.Ref.Kind, DefaultGatewayKind)
+	c.Requester.Ref.Kind = cmp.Or(c.Requester.Ref.Kind, DefaultRequesterKind)
+	c.Vault.Ref.Kind = cmp.Or(c.Vault.Ref.Kind, DefaultVaultKind)
+	c.Vault.Ref.Workspace = cmp.Or(c.Vault.Ref.Workspace, c.Workspace)
+	c.Vault.Timeout = opt.Positive(c.Vault.Timeout, DefaultCustodyTimeout)
 	return c
 }
 
@@ -387,7 +360,7 @@ func (g GatewayConfig) audiences() []string {
 
 func needsMeshd(required []string) bool {
 	for _, name := range required {
-		if strings.HasPrefix(name, coreapi.MeshdDownloadPrefix) {
+		if strings.HasPrefix(name, gatewayhttp.MeshdDownloadPrefix) {
 			return true
 		}
 	}
@@ -406,9 +379,7 @@ func (c Config) downloadBase() string {
 
 func (c Config) localDownloadBase(ctx context.Context, deps component.Deps) string {
 	workspace := c.Workspace
-	if workspace == "" {
-		workspace = "root"
-	}
+	workspace = cmp.Or(workspace, "root")
 	store, err := kcpStoreFor(deps, workspace)
 	if err != nil {
 		return ""
@@ -421,9 +392,7 @@ func (c Config) localDownloadBase(ctx context.Context, deps component.Deps) stri
 	for i := range services {
 		target := services[i].Spec.TargetRef
 		targetWorkspace := target.Workspace
-		if targetWorkspace == "" {
-			targetWorkspace = workspace
-		}
+		targetWorkspace = cmp.Or(targetWorkspace, workspace)
 		if target.Kind == Kind && target.Name == c.ComponentName && targetWorkspace == workspace {
 			serviceName = services[i].Name
 			break
@@ -441,7 +410,7 @@ func (c Config) localDownloadBase(ctx context.Context, deps component.Deps) stri
 		if exp.Spec.Mode != exposurev1alpha1.ExposureModeLocal {
 			continue
 		}
-		if exposureServiceRefName(exp.Spec.ServiceRef) != serviceName {
+		if strs.LastSegment(exp.Spec.ServiceRef) != serviceName {
 			continue
 		}
 		parsed, err := url.Parse(strings.TrimSpace(exp.Status.Address))
@@ -451,14 +420,6 @@ func (c Config) localDownloadBase(ctx context.Context, deps component.Deps) stri
 		return "http://" + guestnet.HostAddress + ":" + parsed.Port()
 	}
 	return ""
-}
-
-func exposureServiceRefName(value string) string {
-	value = strings.TrimSpace(value)
-	if index := strings.LastIndex(value, "/"); index >= 0 {
-		value = value[index+1:]
-	}
-	return strings.TrimSpace(value)
 }
 
 func checkOrigin(raw string) error {
@@ -553,9 +514,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		return Config{}, fmt.Errorf("gatewayapi: decoding the component spec: %w", err)
 	}
 	workspace := spec.Workspace
-	if workspace == "" {
-		workspace = "root"
-	}
+	workspace = cmp.Or(workspace, "root")
 	stateDir := deps.StateDir
 	if spec.StateDir != "" {
 		stateDir = spec.StateDir
@@ -803,16 +762,4 @@ func refFromComponent(ref *commonv1.ObjectRef) Ref {
 		return Ref{}
 	}
 	return Ref{Kind: ref.Kind, Name: ref.Name}
-}
-
-func Factory(ctx context.Context, deps component.Deps, spec component.ComponentSpec) (component.Service, error) {
-	cfg, err := ConfigFrom(deps, spec)
-	if err != nil {
-		return nil, err
-	}
-	return New(cfg), nil
-}
-
-func Register(runtime *component.Runtime) error {
-	return runtime.Register(Kind, Factory)
 }

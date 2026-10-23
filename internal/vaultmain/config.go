@@ -1,6 +1,7 @@
 package vaultmain
 
 import (
+	"cmp"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -45,11 +46,7 @@ func load(get func(string) string) (Config, error) {
 		}
 		cfg.KCPKubeconfig = filepath.Join(state, "kcp", "admin.kubeconfig")
 	}
-	if cfg.Workspace == "" {
-		cfg.Workspace = hostprocess.DefaultWorkspace
-	}
-	if cfg.Server == "" {
-		cfg.Server = vaultlayout.RootServerName
-	}
+	cfg.Workspace = cmp.Or(cfg.Workspace, hostprocess.DefaultWorkspace)
+	cfg.Server = cmp.Or(cfg.Server, vaultlayout.RootServerName)
 	return cfg, nil
 }

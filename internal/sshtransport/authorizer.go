@@ -1,6 +1,7 @@
 package sshtransport
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,6 +17,7 @@ import (
 	"github.com/bluesky-social/indigo/atproto/identity"
 	"github.com/bluesky-social/indigo/atproto/syntax"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 )
 
@@ -112,9 +114,7 @@ func (r DirectoryResolver) ResolveDID(ctx context.Context, did string) (*DIDDocu
 	if len(id.AlsoKnownAs) > 0 {
 		doc.Handle = strings.TrimPrefix(id.AlsoKnownAs[0], "at://")
 	}
-	if doc.Handle == "" {
-		doc.Handle = doc.DID
-	}
+	doc.Handle = cmp.Or(doc.Handle, doc.DID)
 	doc.PDS = id.PDSEndpoint()
 	return doc, nil
 }
@@ -132,9 +132,7 @@ type HTTPRecordSource struct {
 }
 
 func (s *HTTPRecordSource) ListRecords(ctx context.Context, pds, did, collection string, limit int, cursor string) ([]map[string]any, string, error) {
-	if limit <= 0 {
-		limit = 100
-	}
+	limit = opt.Positive(limit, 100)
 	base := strings.TrimRight(pds, "/") + "/xrpc/com.atproto.repo.listRecords"
 	u, err := url.Parse(base)
 	if err != nil {
@@ -153,9 +151,7 @@ func (s *HTTPRecordSource) ListRecords(ctx context.Context, pds, did, collection
 		trusted[host] = true
 	}
 	maxBytes := s.MaxBytes
-	if maxBytes <= 0 {
-		maxBytes = DefaultMaxResponseBytes
-	}
+	maxBytes = opt.Positive(maxBytes, DefaultMaxResponseBytes)
 	raw, err := GuardedFetch(ctx, s.Client, u.String(), maxBytes, trusted)
 	if err != nil {
 		return nil, "", err
@@ -278,9 +274,7 @@ func GuardedFetch(ctx context.Context, client *http.Client, rawURL string, maxBy
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return nil, fmt.Errorf("%d from %s", resp.StatusCode, target.Scheme+"://"+target.Host)
 	}
-	if maxBytes <= 0 {
-		maxBytes = DefaultMaxResponseBytes
-	}
+	maxBytes = opt.Positive(maxBytes, DefaultMaxResponseBytes)
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
 	if err != nil {
 		return nil, err
@@ -336,21 +330,11 @@ func NewPDSKeyAuthorizer(opts KeyAuthorizerOptions) (*PDSKeyAuthorizer, error) {
 	if opts.Records == nil {
 		return nil, errors.New("sshtransport: key authorizer has no record source")
 	}
-	if opts.CacheTTL <= 0 {
-		opts.CacheTTL = DefaultCacheTTL
-	}
-	if opts.PositiveCacheTTL <= 0 {
-		opts.PositiveCacheTTL = DefaultPositiveCacheTTL
-	}
-	if opts.NegativeCacheTTL <= 0 {
-		opts.NegativeCacheTTL = DefaultNegativeCacheTTL
-	}
-	if opts.MissRecheck <= 0 {
-		opts.MissRecheck = DefaultMissRecheck
-	}
-	if opts.MaxCacheEntries <= 0 {
-		opts.MaxCacheEntries = DefaultMaxCacheEntries
-	}
+	opts.CacheTTL = opt.Positive(opts.CacheTTL, DefaultCacheTTL)
+	opts.PositiveCacheTTL = opt.Positive(opts.PositiveCacheTTL, DefaultPositiveCacheTTL)
+	opts.NegativeCacheTTL = opt.Positive(opts.NegativeCacheTTL, DefaultNegativeCacheTTL)
+	opts.MissRecheck = opt.Positive(opts.MissRecheck, DefaultMissRecheck)
+	opts.MaxCacheEntries = opt.Positive(opts.MaxCacheEntries, DefaultMaxCacheEntries)
 	if opts.Log == nil {
 		opts.Log = slog.Default()
 	}
@@ -402,9 +386,7 @@ func (a *PDSKeyAuthorizer) resolveAccount(ctx context.Context, username string) 
 		return nil, false, errors.New("sshtransport: the identity names no PDS")
 	}
 	handle := doc.Handle
-	if handle == "" {
-		handle = did
-	}
+	handle = cmp.Or(handle, did)
 	return &AuthorizedAccount{DID: did, Handle: handle, PDS: doc.PDS}, false, nil
 }
 

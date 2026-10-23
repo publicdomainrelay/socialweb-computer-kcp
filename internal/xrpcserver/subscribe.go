@@ -15,6 +15,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atprotoauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gateway"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 )
 
@@ -124,13 +125,13 @@ var upgrader = websocket.Upgrader{
 func (s *Server) subscribeClusters(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
-		writeJSON(w, http.StatusMethodNotAllowed, errorBody{Error: "MethodNotAllowed", Message: "a subscription is opened with GET and a WebSocket upgrade"})
+		httpjson.Write(w, http.StatusMethodNotAllowed, errorBody{Error: "MethodNotAllowed", Message: "a subscription is opened with GET and a WebSocket upgrade"})
 		return
 	}
 	if !websocket.IsWebSocketUpgrade(req) {
 		w.Header().Set("Upgrade", "websocket")
 		w.Header().Set("Connection", "Upgrade")
-		writeJSON(w, http.StatusUpgradeRequired, errorBody{Error: "UpgradeRequired", Message: "this is an event stream: connect with a WebSocket upgrade"})
+		httpjson.Write(w, http.StatusUpgradeRequired, errorBody{Error: "UpgradeRequired", Message: "this is an event stream: connect with a WebSocket upgrade"})
 		return
 	}
 
@@ -143,8 +144,9 @@ func (s *Server) subscribeClusters(w http.ResponseWriter, req *http.Request) {
 	if refused == nil {
 		if !s.streams.acquire(caller) {
 			w.Header().Set("Retry-After", strconv.Itoa(int(s.opts.RetryAfter.Seconds())))
-			writeJSON(w, http.StatusTooManyRequests, errorBody{Error: "RateLimitExceeded",
+			httpjson.Write(w, http.StatusTooManyRequests, errorBody{Error: "RateLimitExceeded",
 				Message: fmt.Sprintf("this account already has %d open streams", s.streams.limit)})
+
 			return
 		}
 		defer s.streams.release(caller)

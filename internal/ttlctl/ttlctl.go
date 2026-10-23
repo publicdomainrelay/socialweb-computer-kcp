@@ -21,6 +21,7 @@ import (
 	policyv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/policy/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/kcprest"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 )
 
@@ -108,15 +109,8 @@ func New(c Config) (*Controller, error) {
 	return &Controller{c: c, restCfg: restCfg, timers: map[string]*time.Timer{}, deleted: map[string]*deletion{}, changedAt: c.now()}, nil
 }
 
-func clusterConfig(base *rest.Config, ws string) *rest.Config {
-	cfg := rest.CopyConfig(base)
-	host, _, _ := strings.Cut(strings.TrimSuffix(cfg.Host, "/"), "/clusters/")
-	cfg.Host = host + "/clusters/" + ws
-	return cfg
-}
-
 func (ct *Controller) client(ws string, gvr schema.GroupVersionResource) (dynamic.NamespaceableResourceInterface, error) {
-	dc, err := dynamic.NewForConfig(clusterConfig(ct.restCfg, ws))
+	dc, err := dynamic.NewForConfig(kcprest.ForCluster(ct.restCfg, ws))
 	if err != nil {
 		return nil, err
 	}

@@ -2,6 +2,8 @@ package pds
 
 import (
 	"net/http"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
 )
 
 func (s *Server) handleWellKnownDID(w http.ResponseWriter, _ *http.Request) {
@@ -40,5 +42,5 @@ func (s *Server) handleWellKnownDIDDocument(w http.ResponseWriter, r *http.Reque
 		"type":            "AtprotoPersonalDataServer",
 		"serviceEndpoint": endpoint,
 	}}
-	writeJSON(w, http.StatusOK, doc)
+	httpjson.Write(w, http.StatusOK, doc)
 }

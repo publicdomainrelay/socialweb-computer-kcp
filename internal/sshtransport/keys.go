@@ -1,6 +1,7 @@
 package sshtransport
 
 import (
+	"cmp"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -12,7 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayapi"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayhttp"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 const (
@@ -34,11 +37,11 @@ var (
 const tidAlphabet = "234567abcdefghijklmnopqrstuvwxyz"
 
 type Authenticator interface {
-	Authenticate(r *http.Request) (*gatewayapi.WebCaller, error)
+	Authenticate(r *http.Request) (*gatewayhttp.WebCaller, error)
 }
 
 type AgentProvider interface {
-	AgentFor(caller *gatewayapi.WebCaller) gatewayapi.WebAccountAgent
+	AgentFor(caller *gatewayhttp.WebCaller) gatewayhttp.WebAccountAgent
 }
 
 type KeysOptions struct {
@@ -67,12 +70,8 @@ func NewKeys(opts KeysOptions) (*Keys, error) {
 	if opts.Auth == nil {
 		return nil, fmt.Errorf("sshtransport: keys API has no authenticator")
 	}
-	if opts.MaxBodyBytes <= 0 {
-		opts.MaxBodyBytes = KeysDefaultMaxBodyBytes
-	}
-	if opts.MaxKeys <= 0 {
-		opts.MaxKeys = KeysDefaultMaxKeys
-	}
+	opts.MaxBodyBytes = opt.Positive(opts.MaxBodyBytes, KeysDefaultMaxBodyBytes)
+	opts.MaxKeys = opt.Positive(opts.MaxKeys, KeysDefaultMaxKeys)
 	if opts.Log == nil {
 		opts.Log = slog.Default()
 	}
@@ -91,15 +90,15 @@ func (k *Keys) Handler() http.Handler {
 	return mux
 }
 
-func (k *Keys) caller(w http.ResponseWriter, r *http.Request) (*gatewayapi.WebCaller, bool) {
+func (k *Keys) caller(w http.ResponseWriter, r *http.Request) (*gatewayhttp.WebCaller, bool) {
 	who, err := k.opts.Auth.Authenticate(r)
 	if err != nil {
 		k.log.Error("keys_identify_failed", "err", err)
-		writeSSHJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "the vault is not answering"})
+		httpjson.Write(w, http.StatusServiceUnavailable, map[string]any{"error": "the vault is not answering"})
 		return nil, false
 	}
 	if who == nil {
-		writeSSHJSON(w, http.StatusUnauthorized, map[string]any{"error": "Unauthorized", "message": "sign in again"})
+		httpjson.Write(w, http.StatusUnauthorized, map[string]any{"error": "Unauthorized", "message": "sign in again"})
 		return nil, false
 	}
 	return who, true
@@ -133,13 +132,11 @@ func (k *Keys) list(w http.ResponseWriter, r *http.Request) {
 			rkey = rkey[slash+1:]
 		}
 		name, _ := record.Value["name"].(string)
-		if name == "" {
-			name = "unnamed"
-		}
+		name = cmp.Or(name, "unnamed")
 		keys = append(keys, keyView{Rkey: rkey, Name: name, KeyID: stringOf(record.Value["keyId"])})
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeSSHJSON(w, http.StatusOK, map[string]any{"keys": keys})
+	httpjson.Write(w, http.StatusOK, map[string]any{"keys": keys})
 }
 
 type parsedPublicKey struct {
@@ -168,12 +165,12 @@ func (k *Keys) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if declared, err := strconv.ParseInt(r.Header.Get("Content-Length"), 10, 64); err == nil && declared > k.maxBody {
-		writeSSHJSON(w, http.StatusRequestEntityTooLarge, map[string]any{"error": "body too large"})
+		httpjson.Write(w, http.StatusRequestEntityTooLarge, map[string]any{"error": "body too large"})
 		return
 	}
 	raw, err := io.ReadAll(io.LimitReader(r.Body, k.maxBody+1))
 	if err != nil || int64(len(raw)) > k.maxBody {
-		writeSSHJSON(w, http.StatusRequestEntityTooLarge, map[string]any{"error": "body too large"})
+		httpjson.Write(w, http.StatusRequestEntityTooLarge, map[string]any{"error": "body too large"})
 		return
 	}
 	var body struct {
@@ -184,16 +181,14 @@ func (k *Keys) create(w http.ResponseWriter, r *http.Request) {
 	line, _ := body.PublicKey.(string)
 	parsed, valid := parsePublicKey(line)
 	if !valid {
-		writeSSHJSON(w, http.StatusBadRequest, map[string]any{"error": "that does not look like an OpenSSH public key"})
+		httpjson.Write(w, http.StatusBadRequest, map[string]any{"error": "that does not look like an OpenSSH public key"})
 		return
 	}
 	name := parsed.comment
 	if provided, ok := body.Name.(string); ok && strings.TrimSpace(provided) != "" {
 		name = strings.TrimSpace(provided)
 	}
-	if name == "" {
-		name = "key"
-	}
+	name = cmp.Or(name, "key")
 	if runes := []rune(name); len(runes) > MaxKeyNameLength {
 		name = string(runes[:MaxKeyNameLength])
 	}
@@ -212,14 +207,14 @@ func (k *Keys) create(w http.ResponseWriter, r *http.Request) {
 			k.failed(w, who.DID, "register the key", err)
 			return
 		}
-		writes := []gatewayapi.Write{{Action: "update", Collection: BadgeBlueKeysNSID, Rkey: rkey, Record: record}}
+		writes := []gatewayhttp.Write{{Action: "update", Collection: BadgeBlueKeysNSID, Rkey: rkey, Record: record}}
 		if err := agent.ApplyWrites(r.Context(), who.DID, writes); err != nil {
 			k.failed(w, who.DID, "register the key", err)
 			return
 		}
 	}
 	k.log.Info("keys_registered", "did", who.DID, "rkey", rkey)
-	writeSSHJSON(w, http.StatusOK, map[string]any{"rkey": rkey})
+	httpjson.Write(w, http.StatusOK, map[string]any{"rkey": rkey})
 }
 
 func (k *Keys) remove(w http.ResponseWriter, r *http.Request) {
@@ -229,21 +224,21 @@ func (k *Keys) remove(w http.ResponseWriter, r *http.Request) {
 	}
 	rkey := r.PathValue("rkey")
 	if !rkeyPattern.MatchString(rkey) {
-		writeSSHJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid key id"})
+		httpjson.Write(w, http.StatusBadRequest, map[string]any{"error": "invalid key id"})
 		return
 	}
-	writes := []gatewayapi.Write{{Action: "delete", Collection: BadgeBlueKeysNSID, Rkey: rkey}}
+	writes := []gatewayhttp.Write{{Action: "delete", Collection: BadgeBlueKeysNSID, Rkey: rkey}}
 	if err := k.opts.Agents.AgentFor(who).ApplyWrites(r.Context(), who.DID, writes); err != nil {
 		k.failed(w, who.DID, "remove the key", err)
 		return
 	}
 	k.log.Info("keys_removed", "did", who.DID, "rkey", rkey)
-	writeSSHJSON(w, http.StatusOK, map[string]any{"rkey": rkey})
+	httpjson.Write(w, http.StatusOK, map[string]any{"rkey": rkey})
 }
 
 func (k *Keys) failed(w http.ResponseWriter, did, action string, err error) {
 	k.log.Error("keys_failed", "did", did, "action", action, "err", err)
-	writeSSHJSON(w, http.StatusBadGateway, map[string]any{"error": "could not " + action + ": " + err.Error()})
+	httpjson.Write(w, http.StatusBadGateway, map[string]any{"error": "could not " + action + ": " + err.Error()})
 }
 
 func keyRkey(did string, parsed parsedPublicKey) string {
@@ -276,10 +271,4 @@ func stringOf(value any) string {
 	default:
 		return fmt.Sprint(v)
 	}
-}
-
-func writeSSHJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
 }

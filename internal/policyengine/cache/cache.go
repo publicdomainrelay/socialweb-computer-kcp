@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/atproto"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/models"
 )
@@ -285,9 +286,7 @@ func ReadVerdict(store *Store, key string) ([]byte, bool) {
 }
 
 func WriteVerdict(store *Store, key string, data []byte, ttl time.Duration) {
-	if ttl <= 0 {
-		ttl = 30 * time.Second
-	}
+	ttl = opt.Positive(ttl, 30*time.Second)
 	meta, err := json.Marshal(PolicyMeta{CachedAt: time.Now().UnixMilli(), TTLMs: ttl.Milliseconds()})
 	if err != nil {
 		return

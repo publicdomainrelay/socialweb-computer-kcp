@@ -1,6 +1,10 @@
 package systemdunit
 
-import "time"
+import (
+	"time"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
+)
 
 type RestartPolicy string
 
@@ -32,16 +36,9 @@ type Backoff struct {
 
 func (b *Backoff) Next() time.Duration {
 	minimum := b.Min
-	if minimum <= 0 {
-		minimum = time.Second
-	}
+	minimum = opt.Positive(minimum, time.Second)
 	maximum := b.Max
-	if maximum <= 0 {
-		maximum = 30 * time.Second
-	}
-	if maximum < minimum {
-		maximum = minimum
-	}
+	maximum = max(opt.Positive(maximum, 30*time.Second), minimum)
 	b.attempt++
 	delay := minimum
 	for i := 1; i < b.attempt && delay < maximum; i++ {
@@ -59,15 +56,8 @@ func RestartDelay(attempt int, minimum, maximum time.Duration) time.Duration {
 	if attempt < 1 {
 		attempt = 1
 	}
-	if minimum <= 0 {
-		minimum = time.Second
-	}
-	if maximum <= 0 {
-		maximum = 30 * time.Second
-	}
-	if maximum < minimum {
-		maximum = minimum
-	}
+	minimum = opt.Positive(minimum, time.Second)
+	maximum = max(opt.Positive(maximum, 30*time.Second), minimum)
 	delay := minimum
 	for i := 1; i < attempt && delay < maximum; i++ {
 		delay *= 2

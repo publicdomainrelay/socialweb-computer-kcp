@@ -1,6 +1,7 @@
 package component
 
 import (
+	"cmp"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -44,6 +45,27 @@ type Deps struct {
 	Handlers    *HandlerRegistry
 
 	NodeClaimAgent *kcpclient.ServiceAccountRef
+}
+
+func (d Deps) Or(fallback Deps) Deps {
+	if d.KCP == nil {
+		d.KCP = fallback.KCP
+	}
+	if d.Credentials == nil {
+		d.Credentials = fallback.Credentials
+	}
+	if d.Vault == nil {
+		d.Vault = fallback.Vault
+	}
+	if d.Hosts == nil {
+		d.Hosts = fallback.Hosts
+	}
+	d.TLS = cmp.Or(d.TLS, fallback.TLS)
+	d.Log = cmp.Or(d.Log, fallback.Log)
+	d.StateDir = cmp.Or(d.StateDir, fallback.StateDir)
+	d.Registry = cmp.Or(d.Registry, fallback.Registry)
+	d.Handlers = cmp.Or(d.Handlers, fallback.Handlers)
+	return d
 }
 
 type NetworkHosts = contract.NetworkHosts

@@ -1,6 +1,7 @@
 package childapplication
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -15,6 +16,8 @@ import (
 	"k8s.io/client-go/dynamic"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 const (
@@ -84,13 +87,9 @@ func New(o Options) (*Controller, error) {
 		return nil, errors.New("childapplication: a dynamic client factory is required")
 	}
 	workspace := o.Workspace
-	if workspace == "" {
-		workspace = DefaultWorkspace
-	}
+	workspace = cmp.Or(workspace, DefaultWorkspace)
 	networkWorkspace := o.NetworkWorkspace
-	if networkWorkspace == "" {
-		networkWorkspace = workspace
-	}
+	networkWorkspace = cmp.Or(networkWorkspace, workspace)
 	if !logicalCluster(workspace) {
 		return nil, fmt.Errorf("childapplication: workspace %q is not a logical cluster path", workspace)
 	}
@@ -98,17 +97,13 @@ func New(o Options) (*Controller, error) {
 		return nil, fmt.Errorf("childapplication: network workspace %q is not a logical cluster path", networkWorkspace)
 	}
 	fieldManager := o.FieldManager
-	if fieldManager == "" {
-		fieldManager = FieldManager
-	}
+	fieldManager = cmp.Or(fieldManager, FieldManager)
 	log := o.Log
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
 	retry := o.RetryAfter
-	if retry <= 0 {
-		retry = DefaultRetryAfter
-	}
+	retry = opt.Positive(retry, DefaultRetryAfter)
 	return &Controller{dynamic: o.Dynamic, workspace: workspace, networkWorkspace: networkWorkspace,
 		fieldManager: fieldManager, log: log, retry: retry}, nil
 }
@@ -132,7 +127,7 @@ func (c *Controller) Run(ctx context.Context) error {
 		if err := c.round(ctx); err != nil && ctx.Err() == nil {
 			c.log.Warn("watching child applications", "workspace", c.workspace, "err", err.Error())
 		}
-		if !sleep(ctx, c.retry) {
+		if !clock.Sleep(ctx, c.retry) {
 			return nil
 		}
 	}
@@ -206,15 +201,4 @@ func (c *Controller) client(workspace string) (dynamic.Interface, error) {
 		return nil, fmt.Errorf("childapplication: the client for %s is nil", workspace)
 	}
 	return dyn, nil
-}
-
-func sleep(ctx context.Context, d time.Duration) bool {
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-timer.C:
-		return true
-	}
 }

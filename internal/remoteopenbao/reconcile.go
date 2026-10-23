@@ -19,6 +19,7 @@ import (
 	"k8s.io/client-go/dynamic"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vaultaccess"
 )
 
@@ -88,15 +89,15 @@ func (c *Controller) Reconcile(ctx context.Context, dyn dynamic.Interface, u *un
 	status.Version = ""
 	status.Sealed = false
 	status.Message = ""
-	setCondition(&status, ConditionAuthenticated, false, "Unchecked", "the RemoteOpenBao has not been authenticated yet", generation)
-	setCondition(&status, ConditionUnsealed, false, "Unchecked", "the RemoteOpenBao has not been checked for a seal", generation)
-	setCondition(&status, ConditionAuthorized, false, "Unchecked", "the RemoteOpenBao has not been authorized", generation)
+	conds.Set(&status.Conditions, generation, ConditionAuthenticated, false, "Unchecked", "the RemoteOpenBao has not been authenticated yet")
+	conds.Set(&status.Conditions, generation, ConditionUnsealed, false, "Unchecked", "the RemoteOpenBao has not been checked for a seal")
+	conds.Set(&status.Conditions, generation, ConditionAuthorized, false, "Unchecked", "the RemoteOpenBao has not been authorized")
 	if object.Spec.Suspend {
 		status.Phase = v1alpha1.RemoteOpenBaoPhaseSuspended
-		setCondition(&status, ConditionReachable, false, "Suspended", "the RemoteOpenBao is suspended", generation)
-		setCondition(&status, ConditionAuthenticated, false, "Suspended", "the RemoteOpenBao is suspended", generation)
-		setCondition(&status, ConditionUnsealed, false, "Suspended", "the RemoteOpenBao is suspended", generation)
-		setCondition(&status, ConditionAuthorized, false, "Suspended", "the RemoteOpenBao is suspended", generation)
+		conds.Set(&status.Conditions, generation, ConditionReachable, false, "Suspended", "the RemoteOpenBao is suspended")
+		conds.Set(&status.Conditions, generation, ConditionAuthenticated, false, "Suspended", "the RemoteOpenBao is suspended")
+		conds.Set(&status.Conditions, generation, ConditionUnsealed, false, "Suspended", "the RemoteOpenBao is suspended")
+		conds.Set(&status.Conditions, generation, ConditionAuthorized, false, "Suspended", "the RemoteOpenBao is suspended")
 		status.Message = "the RemoteOpenBao is suspended"
 		return c.writeStatus(ctx, dyn, u, status)
 	}
@@ -120,8 +121,10 @@ func (c *Controller) Reconcile(ctx context.Context, dyn dynamic.Interface, u *un
 	}
 	status.Version = health.Version
 	status.Sealed = health.Sealed
-	setCondition(&status, ConditionReachable, true, "Reachable",
-		fmt.Sprintf("the OpenBao at %s answered sys/health", target.URL), generation)
+	conds.Set(&status.Conditions,
+		generation, ConditionReachable, true, "Reachable",
+		fmt.Sprintf("the OpenBao at %s answered sys/health", target.URL))
+
 	seal, err := probeSealStatus(ctx, target)
 	if err != nil {
 		return c.writeFailure(ctx, dyn, u, &status, generation, ConditionUnsealed, failed("SealStatusFailed", err))
@@ -135,15 +138,17 @@ func (c *Controller) Reconcile(ctx context.Context, dyn dynamic.Interface, u *un
 		status.Phase = v1alpha1.RemoteOpenBaoPhaseFailed
 		status.Ready = false
 		status.Message = message
-		setCondition(&status, ConditionUnsealed, false, "Sealed", message, generation)
-		setCondition(&status, ConditionAuthenticated, false, "Sealed", message, generation)
-		setCondition(&status, ConditionAuthorized, false, "Sealed", message, generation)
+		conds.Set(&status.Conditions, generation, ConditionUnsealed, false, "Sealed", message)
+		conds.Set(&status.Conditions, generation, ConditionAuthenticated, false, "Sealed", message)
+		conds.Set(&status.Conditions, generation, ConditionAuthorized, false, "Sealed", message)
 		c.fail(name, generation)
 		c.log.Warn("checking a RemoteOpenBao", "name", name, "reason", "Sealed", "err", message)
 		return c.writeStatus(ctx, dyn, u, status)
 	}
-	setCondition(&status, ConditionUnsealed, true, "Unsealed",
-		fmt.Sprintf("the OpenBao at %s is unsealed", target.URL), generation)
+	conds.Set(&status.Conditions,
+		generation, ConditionUnsealed, true, "Unsealed",
+		fmt.Sprintf("the OpenBao at %s is unsealed", target.URL))
+
 	session, err := c.resolver.Resolve(ctx, vaultaccess.RemoteRef{Remote: &object})
 	if err != nil {
 		return c.writeFailure(ctx, dyn, u, &status, generation, ConditionAuthenticated, err)
@@ -156,8 +161,10 @@ func (c *Controller) Reconcile(ctx context.Context, dyn dynamic.Interface, u *un
 	if err := inspector.Authenticated(ctx); err != nil {
 		return c.writeFailure(ctx, dyn, u, &status, generation, ConditionAuthenticated, failed("AuthenticationFailed", err))
 	}
-	setCondition(&status, ConditionAuthenticated, true, "Authenticated",
-		"the RemoteOpenBao token answered auth/token/lookup-self", generation)
+	conds.Set(&status.Conditions,
+		generation, ConditionAuthenticated, true, "Authenticated",
+		"the RemoteOpenBao token answered auth/token/lookup-self")
+
 	if err := checkMounts(ctx, inspector, object.Spec.Mounts); err != nil {
 		return c.writeFailure(ctx, dyn, u, &status, generation, ConditionAuthorized, err)
 	}
@@ -166,8 +173,10 @@ func (c *Controller) Reconcile(ctx context.Context, dyn dynamic.Interface, u *un
 	}
 	status.Phase = v1alpha1.RemoteOpenBaoPhaseReady
 	status.Ready = true
-	setCondition(&status, ConditionAuthorized, true, "Authorized",
-		"the RemoteOpenBao answered with its declared mounts and capabilities", generation)
+	conds.Set(&status.Conditions,
+		generation, ConditionAuthorized, true, "Authorized",
+		"the RemoteOpenBao answered with its declared mounts and capabilities")
+
 	status.Message = fmt.Sprintf("the OpenBao at %s reports %s", target.URL, versionOrUnknown(status.Version))
 	c.succeed(name)
 	return c.writeStatus(ctx, dyn, u, status)
@@ -178,7 +187,7 @@ func (c *Controller) writeFailure(ctx context.Context, dyn dynamic.Interface, u 
 	status.Phase = v1alpha1.RemoteOpenBaoPhaseFailed
 	status.Ready = false
 	status.Message = err.Error()
-	setCondition(status, condition, false, reason, err.Error(), generation)
+	conds.Set(&status.Conditions, generation, condition, false, reason, err.Error())
 	c.fail(u.GetName(), generation)
 	c.log.Warn("checking a RemoteOpenBao", "name", u.GetName(), "reason", reason, "err", err.Error())
 	return c.writeStatus(ctx, dyn, u, *status)
@@ -378,18 +387,4 @@ func (c *Controller) writeStatus(ctx context.Context, dyn dynamic.Interface, u *
 		current = nil
 	}
 	return fmt.Errorf("remoteopenbao: the status of %s stayed in conflict", name)
-}
-
-func setCondition(status *v1alpha1.RemoteOpenBaoStatus, conditionType string, value bool, reason, message string, generation int64) {
-	conditionStatus := metav1.ConditionFalse
-	if value {
-		conditionStatus = metav1.ConditionTrue
-	}
-	meta.SetStatusCondition(&status.Conditions, metav1.Condition{
-		Type:               conditionType,
-		Status:             conditionStatus,
-		Reason:             reason,
-		Message:            message,
-		ObservedGeneration: generation,
-	})
 }

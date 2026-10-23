@@ -13,6 +13,9 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/sha256sum"
 )
 
 func Hostname(ctx context.Context, cfg Config, log *slog.Logger) error {
@@ -110,7 +113,7 @@ func InstallMeshd(ctx context.Context, cfg Config, log *slog.Logger) error {
 	}
 	pin := cfg.Meshd.Sha256[arch]
 	if executable(cfg.MeshdPath) {
-		if got, err := fileSHA256(cfg.MeshdPath); err == nil && got == pin {
+		if got, err := sha256sum.File(cfg.MeshdPath); err == nil && got == pin {
 			log.Info("socialweb-meshd is already installed", "sha256", pin)
 			return nil
 		}
@@ -152,7 +155,7 @@ func InstallMeshd(ctx context.Context, cfg Config, log *slog.Logger) error {
 		if attempt < 5 {
 			log.Info("the socialweb-meshd download failed; retrying", "url", url, "attempt", attempt,
 				"of", 5, "err", err.Error())
-			if err := sleep(ctx, 2*time.Second); err != nil {
+			if err := clock.SleepErr(ctx, 2*time.Second); err != nil {
 				return err
 			}
 		}
@@ -176,19 +179,6 @@ func fetchSHA256(ctx context.Context, url string, out io.Writer) (string, error)
 	}
 	hash := sha256.New()
 	if _, err := io.Copy(io.MultiWriter(out, hash), response.Body); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(hash.Sum(nil)), nil
-}
-
-func fileSHA256(path string) (string, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer file.Close()
-	hash := sha256.New()
-	if _, err := io.Copy(hash, file); err != nil {
 		return "", err
 	}
 	return hex.EncodeToString(hash.Sum(nil)), nil

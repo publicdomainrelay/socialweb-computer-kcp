@@ -2,6 +2,7 @@ package xrpcserver
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -22,6 +23,8 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atprotoauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gateway"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/revocation"
 )
 
@@ -103,15 +106,9 @@ func New(opts Options) (*Server, error) {
 	if opts.Directory == nil {
 		return nil, errors.New("xrpcserver: no directory; did:plc and did:web issuers could not be resolved")
 	}
-	if opts.RetryAfter == 0 {
-		opts.RetryAfter = DefaultRetryAfter
-	}
-	if opts.StreamLifetime == 0 {
-		opts.StreamLifetime = DefaultStreamLifetime
-	}
-	if opts.StreamsPerCaller == 0 {
-		opts.StreamsPerCaller = DefaultStreamsPerCaller
-	}
+	opts.RetryAfter = cmp.Or(opts.RetryAfter, DefaultRetryAfter)
+	opts.StreamLifetime = cmp.Or(opts.StreamLifetime, DefaultStreamLifetime)
+	opts.StreamsPerCaller = cmp.Or(opts.StreamsPerCaller, DefaultStreamsPerCaller)
 
 	cat, err := loadCatalog()
 	if err != nil {
@@ -247,9 +244,7 @@ func (s *Server) xrpc(r route) http.HandlerFunc {
 			}
 		} else {
 			limit := r.maxBody
-			if limit == 0 {
-				limit = maxBody
-			}
+			limit = cmp.Or(limit, maxBody)
 			body, err := decodeBody(req, limit, r.nsid, s.catalog, s.inputs[r.nsid], in)
 			if err != nil {
 				writeError(w, r.nsid, s.opts.RetryAfter, gateway.ErrInvalidRequest)
@@ -266,7 +261,7 @@ func (s *Server) xrpc(r route) http.HandlerFunc {
 			writeError(w, r.nsid, s.opts.RetryAfter, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, shape(r.nsid, out))
+		httpjson.Write(w, http.StatusOK, shape(r.nsid, out))
 	}
 }
 
@@ -492,25 +487,15 @@ func writeError(w http.ResponseWriter, nsid string, retryAfter time.Duration, er
 		}
 	}
 	if retryable[xe.Name] {
-		if retryAfter <= 0 {
-			retryAfter = DefaultRetryAfter
-		}
+		retryAfter = opt.Positive(retryAfter, DefaultRetryAfter)
 		w.Header().Set("Retry-After", strconv.Itoa(int(retryAfter.Seconds())))
 	}
-	writeJSON(w, xe.Status, errorBody{Error: xe.Name, Message: xe.Message})
+	httpjson.Write(w, xe.Status, errorBody{Error: xe.Name, Message: xe.Message})
 }
 
 type errorBody struct {
 	Error   string `json:"error"`
 	Message string `json:"message"`
-}
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(v); err != nil {
-		slog.Error("xrpc: writing the response", "err", err)
-	}
 }
 
 func bearer(h string) (string, bool) {

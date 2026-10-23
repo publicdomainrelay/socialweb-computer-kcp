@@ -209,7 +209,7 @@ func (h *Host) SyncSecrets(ctx context.Context) error {
 		return fmt.Errorf("nodemarket: reading the claim for node %s of %s for its grant: %w",
 			h.opts.NodeName, h.opts.Cluster, err)
 	}
-	if claim == nil || claim.Status.Grant == nil || endedClaimPhase(claim.Status.Phase) {
+	if claim == nil || claim.Status.Grant == nil || EndedClaimPhase(claim.Status.Phase) {
 		return nil
 	}
 	grant := *claim.Status.Grant

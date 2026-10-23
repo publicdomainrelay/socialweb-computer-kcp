@@ -1,6 +1,7 @@
 package systemdunit
 
 import (
+	"cmp"
 	"fmt"
 	"io/fs"
 	"os"
@@ -107,9 +108,7 @@ func Install(root string, files []File) error {
 			return err
 		}
 		mode := file.Mode
-		if mode == 0 {
-			mode = 0o644
-		}
+		mode = cmp.Or(mode, 0o644)
 		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 			return fmt.Errorf("systemdunit: creating the directory of %s: %w", dest, err)
 		}

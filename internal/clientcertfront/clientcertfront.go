@@ -31,11 +31,11 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterprovider"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gateway"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/tlsreload"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/materialiser"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/revocation"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsfront"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsreload"
 )
 
 const (

@@ -1,6 +1,7 @@
 package bidder
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -21,6 +22,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/statesync"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
@@ -587,9 +589,7 @@ func (s *Service) ensureTerminationSync(ctx context.Context, info contractInfo, 
 			vm.Spec.Contract.Receipt.URI = info.receiptURI
 			vm.Spec.Contract.Receipt.CID = info.receiptCID
 		}
-		if vm.Spec.Contract.SubmitEventURL == "" {
-			vm.Spec.Contract.SubmitEventURL = submitEventURL
-		}
+		vm.Spec.Contract.SubmitEventURL = cmp.Or(vm.Spec.Contract.SubmitEventURL, submitEventURL)
 	}
 	object, err := computevm.TerminationStateSync(vm, s.cfg.Workspace, reason, observedAt, request)
 	if err != nil {
@@ -1206,7 +1206,7 @@ func (a *provisionAdapter) Apply(ctx context.Context, request statesync.Request)
 			status.Timings.AcceptedAt = now.Format(time.RFC3339)
 		}
 		status.Phase = v1alpha1.BidPhaseWon
-		setBidCondition(&status, bid.Generation, v1alpha1.BidConditionComplete, metav1.ConditionTrue, "ContractAccepted", "the guest contract is accepted")
+		conds.SetStatus(&status.Conditions, bid.Generation, v1alpha1.BidConditionComplete, metav1.ConditionTrue, "ContractAccepted", "the guest contract is accepted")
 		if err := service.bids.PatchStatus(ctx, bid.Name, status); err != nil {
 			return statesync.Observation{}, fmt.Errorf("bidder: recording the accepted contract: %w", err)
 		}
@@ -1304,9 +1304,7 @@ type releaseAdapter struct {
 func (a *releaseAdapter) Name() string { return ReleaseSyncAdapter }
 
 func releaseSettledObservation(payload releasePayload, request statesync.Request, ref string) statesync.Observation {
-	if ref == "" {
-		ref = "released:" + payload.ReceiptURI
-	}
+	ref = cmp.Or(ref, "released:"+payload.ReceiptURI)
 	return statesync.Observation{
 		Exists: true,
 		Ref:    ref,
@@ -1471,16 +1469,6 @@ func decodeMarketInboxPayload(raw json.RawMessage) (marketInboxPayload, error) {
 	return payload, nil
 }
 
-func marketInboxObservation(request statesync.Request, ref string) statesync.Observation {
-	sum := sha256.Sum256(request.Payload)
-	return statesync.Observation{
-		Exists: true,
-		Ref:    ref,
-		Hash:   "sha256:" + hex.EncodeToString(sum[:]),
-		At:     time.Now().UTC().Format(time.RFC3339),
-	}
-}
-
 type marketInboxAdapter struct {
 	service *Service
 
@@ -1508,7 +1496,7 @@ func (a *marketInboxAdapter) Observe(ctx context.Context, request statesync.Requ
 			return statesync.Observation{}, err
 		}
 		if bid != nil {
-			return marketInboxObservation(request, payload.URI), nil
+			return statesync.InboxObservation(request, payload.URI), nil
 		}
 	}
 	return statesync.Observation{At: time.Now().UTC().Format(time.RFC3339)}, nil
@@ -1552,7 +1540,7 @@ func (a *marketInboxAdapter) Apply(ctx context.Context, request statesync.Reques
 			return statesync.Observation{}, err
 		}
 	}
-	return marketInboxObservation(request, payload.URI), nil
+	return statesync.InboxObservation(request, payload.URI), nil
 }
 
 func (a *marketInboxAdapter) Delete(ctx context.Context, request statesync.Request) error {

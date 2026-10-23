@@ -1,6 +1,7 @@
 package eventstream
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -50,9 +52,7 @@ func (c *Controller) matchValue(ctx context.Context, dyn dynamic.Interface, matc
 		return "", errors.New("eventstream: a match valueFrom needs a name")
 	}
 	workspace := strings.TrimSpace(from.Workspace)
-	if workspace == "" {
-		workspace = c.opts.Workspace
-	}
+	workspace = cmp.Or(workspace, c.opts.Workspace)
 	client := dyn
 	if workspace != c.opts.Workspace {
 		var err error
@@ -91,24 +91,9 @@ func gvrFor(from *recordValueFrom) schema.GroupVersionResource {
 	}
 	resource := strings.TrimSpace(from.Resource)
 	if resource == "" {
-		resource = pluralize(from.Kind)
+		resource = strs.Pluralize(from.Kind)
 	}
 	return gv.WithResource(resource)
-}
-
-func pluralize(kind string) string {
-	name := strings.ToLower(strings.TrimSpace(kind))
-	switch {
-	case name == "":
-		return ""
-	case strings.HasSuffix(name, "y"):
-		return strings.TrimSuffix(name, "y") + "ies"
-	case strings.HasSuffix(name, "s"), strings.HasSuffix(name, "x"),
-		strings.HasSuffix(name, "ch"), strings.HasSuffix(name, "sh"):
-		return name + "es"
-	default:
-		return name + "s"
-	}
 }
 
 func splitFieldPath(path string) []string {

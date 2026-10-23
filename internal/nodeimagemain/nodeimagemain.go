@@ -18,6 +18,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/foldmain"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestimage"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestrootfs"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/sha256sum"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/versions"
 )
 
@@ -223,7 +224,7 @@ func guestManifest(stdout io.Writer, target, dir, reportPath string) error {
 	}
 	inputs := map[string]guestimage.Input{
 		"kernelSource": {URL: g.Kernel.Source.URL, SHA256: g.Kernel.Source.SHA256},
-		"kernelConfig": {Path: tg.KernelConfig, SHA256: digest(config)},
+		"kernelConfig": {Path: tg.KernelConfig, SHA256: sha256sum.Hex(config)},
 		"base":         {URL: tg.Base.URL, SHA256: tg.Base.SHA256},
 	}
 	for name, rel := range map[string]string{"builder": g.Builder["dockerfile"], "rootfsBuild": "deploy/guest-image/rootfs.json"} {
@@ -231,7 +232,7 @@ func guestManifest(stdout io.Writer, target, dir, reportPath string) error {
 		if err != nil {
 			return err
 		}
-		inputs[name] = guestimage.Input{Path: rel, SHA256: digest(body)}
+		inputs[name] = guestimage.Input{Path: rel, SHA256: sha256sum.Hex(body)}
 	}
 	kernel, err := fileRecord(dir, guestimage.KernelName)
 	if err != nil {
@@ -269,9 +270,4 @@ func guestManifest(stdout io.Writer, target, dir, reportPath string) error {
 	}
 	fmt.Fprintf(stdout, "manifest %s\n", path)
 	return nil
-}
-
-func digest(b []byte) string {
-	d := sha256.Sum256(b)
-	return hex.EncodeToString(d[:])
 }

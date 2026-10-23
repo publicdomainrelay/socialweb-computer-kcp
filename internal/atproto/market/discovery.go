@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 const (
@@ -95,13 +97,9 @@ func VerifyRelayVisibility(ctx context.Context, opts RelayVisibilityOptions) Rel
 		client = http.DefaultClient
 	}
 	timeout := opts.PollTimeout
-	if timeout <= 0 {
-		timeout = 15 * time.Second
-	}
+	timeout = opt.Positive(timeout, 15*time.Second)
 	interval := opts.PollInterval
-	if interval <= 0 {
-		interval = 2 * time.Second
-	}
+	interval = opt.Positive(interval, 2*time.Second)
 	collectionPath := "/xrpc/com.atproto.sync.listReposByCollection?collection=" +
 		url.QueryEscape(opts.Collection) + "&limit=1000"
 	result := RelayVisibilityResult{CapableRelays: []string{}, IndexedBy: []string{}, Failures: []RelayFailure{}}
@@ -307,9 +305,7 @@ func StartOfferingRefresh(ctx context.Context, interval time.Duration, refresh f
 	if logf == nil {
 		logf = NoopLog
 	}
-	if interval <= 0 {
-		interval = HeartbeatInterval
-	}
+	interval = opt.Positive(interval, HeartbeatInterval)
 	runCtx, cancel := context.WithCancel(ctx)
 	var wg sync.WaitGroup
 	wg.Go(func() {

@@ -12,6 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	policyv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/policy/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	policyengine "github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/status"
 )
 
@@ -232,21 +233,10 @@ func EngineConfigFromCR(engineCR *policyv1alpha1.PolicyEngine, base Config) Conf
 	if cacheConfig.RecordTTLSeconds != nil && *cacheConfig.RecordTTLSeconds > 0 {
 		config.RecordTTL = time.Duration(*cacheConfig.RecordTTLSeconds) * time.Second
 	}
-	if config.VerdictTTL <= 0 {
-		config.VerdictTTL = 30 * time.Second
-	}
-	if config.ScopeTTL <= 0 {
-		config.ScopeTTL = 5 * time.Minute
-	}
-	if config.NegativeScopeTTL <= 0 {
-		config.NegativeScopeTTL = 30 * time.Second
-	}
-	if config.NegativeScopeTTL > config.ScopeTTL {
-		config.NegativeScopeTTL = config.ScopeTTL
-	}
-	if config.TrustTTL <= 0 {
-		config.TrustTTL = 5 * time.Minute
-	}
+	config.VerdictTTL = opt.Positive(config.VerdictTTL, 30*time.Second)
+	config.ScopeTTL = opt.Positive(config.ScopeTTL, 5*time.Minute)
+	config.NegativeScopeTTL = min(opt.Positive(config.NegativeScopeTTL, 30*time.Second), config.ScopeTTL)
+	config.TrustTTL = opt.Positive(config.TrustTTL, 5*time.Minute)
 	config.DisableActions = false
 	return config
 }

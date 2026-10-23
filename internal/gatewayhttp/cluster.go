@@ -1,4 +1,4 @@
-package gatewayapi
+package gatewayhttp
 
 import (
 	"context"
@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gateway"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/xrpcserver"
 )
 
@@ -75,7 +77,7 @@ func (c caller) DID() string { return c.did }
 
 func (c caller) ServiceAuth(ctx context.Context, audience, lxm string) (string, error) {
 	if c.fn == nil {
-		return "", errors.New("gatewayapi: no service auth source")
+		return "", errors.New("gatewayhttp: no service auth source")
 	}
 	return c.fn(ctx, audience, lxm)
 }
@@ -100,7 +102,7 @@ type ClusterGatewayError struct {
 }
 
 func (e *ClusterGatewayError) Error() string {
-	return fmt.Sprintf("gatewayapi: cluster gateway: %s: %s", e.Code, e.Message)
+	return fmt.Sprintf("gatewayhttp: cluster gateway: %s: %s", e.Code, e.Message)
 }
 
 type DirectClusterGateway struct {
@@ -109,7 +111,7 @@ type DirectClusterGateway struct {
 
 func (d DirectClusterGateway) server() (*gateway.Server, error) {
 	if d.Server == nil {
-		return nil, errors.New("gatewayapi: no direct gateway server")
+		return nil, errors.New("gatewayhttp: no direct gateway server")
 	}
 	return d.Server, nil
 }
@@ -196,7 +198,7 @@ type XRPCClusterGateway struct {
 
 func (x *XRPCClusterGateway) base(ctx context.Context) (string, error) {
 	if x.BaseURL == nil {
-		return "", errors.New("gatewayapi: the cluster gateway has no URL")
+		return "", errors.New("gatewayhttp: the cluster gateway has no URL")
 	}
 	raw, err := x.BaseURL(ctx)
 	if err != nil {
@@ -230,7 +232,7 @@ func (x *XRPCClusterGateway) call(ctx context.Context, c ClusterCaller, nsid str
 	} else {
 		raw, err := json.Marshal(bodyOrEmpty(body))
 		if err != nil {
-			return fmt.Errorf("gatewayapi: encoding %s: %w", nsid, err)
+			return fmt.Errorf("gatewayhttp: encoding %s: %w", nsid, err)
 		}
 		reader = strings.NewReader(string(raw))
 	}
@@ -243,9 +245,7 @@ func (x *XRPCClusterGateway) call(ctx context.Context, c ClusterCaller, nsid str
 		req.Header.Set("Content-Type", "application/json")
 	}
 	timeout := x.Timeout
-	if timeout <= 0 {
-		timeout = 30 * time.Second
-	}
+	timeout = opt.Positive(timeout, 30*time.Second)
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	req = req.WithContext(cctx)
@@ -280,7 +280,7 @@ func (x *XRPCClusterGateway) call(ctx context.Context, c ClusterCaller, nsid str
 	}
 	if out != nil {
 		if err := json.Unmarshal(raw, out); err != nil {
-			return fmt.Errorf("gatewayapi: decoding %s: %w", nsid, err)
+			return fmt.Errorf("gatewayhttp: decoding %s: %w", nsid, err)
 		}
 	}
 	return nil
@@ -364,17 +364,13 @@ type ClusterAPI struct {
 
 func NewClusterAPI(opts ClusterOptions) (*ClusterAPI, error) {
 	if opts.Gateway == nil {
-		return nil, errors.New("gatewayapi: no cluster gateway")
+		return nil, errors.New("gatewayhttp: no cluster gateway")
 	}
 	if opts.Caller == nil {
-		return nil, errors.New("gatewayapi: no caller authenticator")
+		return nil, errors.New("gatewayhttp: no caller authenticator")
 	}
-	if opts.MaxKubeconfigTTLSec <= 0 {
-		opts.MaxKubeconfigTTLSec = DefaultMaxKubeconfigTTL
-	}
-	if opts.MaxBodyBytes <= 0 {
-		opts.MaxBodyBytes = DefaultMaxBodyBytes
-	}
+	opts.MaxKubeconfigTTLSec = opt.Positive(opts.MaxKubeconfigTTLSec, DefaultMaxKubeconfigTTL)
+	opts.MaxBodyBytes = opt.Positive(opts.MaxBodyBytes, DefaultMaxBodyBytes)
 	choices := make([]int64, 0, len(ttlChoices))
 	for _, c := range ttlChoices {
 		if c <= opts.MaxKubeconfigTTLSec {
@@ -415,11 +411,12 @@ func (a *ClusterAPI) config(w http.ResponseWriter, r *http.Request) {
 	if a.opts.KCPPublicHost != "" {
 		host = a.opts.KCPPublicHost
 	}
-	writeJSON(w, http.StatusOK, struct {
+	httpjson.Write(w, http.StatusOK, struct {
 		TTLChoicesSec       []int64 `json:"ttlChoicesSec"`
 		MaxKubeconfigTTLSec int64   `json:"maxKubeconfigTtlSec"`
 		KCPPublicHost       any     `json:"kcpPublicHost"`
 	}{a.ttlChoices, a.maxTTLSec, host})
+
 }
 
 func (a *ClusterAPI) caller(r *http.Request) (ClusterCaller, *apiFailure) {
@@ -498,9 +495,10 @@ func (a *ClusterAPI) list(w http.ResponseWriter, r *http.Request) {
 	if clusters == nil {
 		clusters = []ClusterSummary{}
 	}
-	writeJSON(w, http.StatusOK, struct {
+	httpjson.Write(w, http.StatusOK, struct {
 		Clusters []ClusterSummary `json:"clusters"`
 	}{clusters})
+
 }
 
 func (a *ClusterAPI) nameAction(action string) http.HandlerFunc {
@@ -526,10 +524,11 @@ func (a *ClusterAPI) nameAction(action string) http.HandlerFunc {
 			return
 		}
 		a.log().Info("cluster_api_ok", "did", req.Caller.DID(), "action", action, "name", req.Name, "phase", out.Phase)
-		writeJSON(w, http.StatusOK, struct {
+		httpjson.Write(w, http.StatusOK, struct {
 			Name  string `json:"name"`
 			Phase string `json:"phase"`
 		}{req.Name, out.Phase})
+
 	}
 }
 
@@ -572,11 +571,12 @@ func (a *ClusterAPI) kubeconfig(w http.ResponseWriter, r *http.Request) {
 	a.log().Info("cluster_api_ok", "did", req.Caller.DID(), "action", "kubeconfig", "name", req.Name,
 		"ttlSeconds", ttl, "noExpiry", noExpiry)
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, struct {
+	httpjson.Write(w, http.StatusOK, struct {
 		Name       string `json:"name"`
 		Filename   string `json:"filename"`
 		Kubeconfig string `json:"kubeconfig"`
 	}{req.Name, KubeconfigFilename(req.Name), grant.Kubeconfig})
+
 }
 
 func (a *ClusterAPI) allowedTTL(value int64) bool {
@@ -618,16 +618,11 @@ type apiFailure struct {
 }
 
 func writeFailure(w http.ResponseWriter, f *apiFailure) {
-	writeJSON(w, f.Status, struct {
+	httpjson.Write(w, f.Status, struct {
 		Error   string `json:"error"`
 		Message string `json:"message,omitempty"`
 	}{f.Error, f.Message})
-}
 
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
 }
 
 func IsClusterName(name string) bool {

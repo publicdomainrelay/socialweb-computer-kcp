@@ -12,6 +12,7 @@ import (
 	"github.com/bluesky-social/indigo/atproto/syntax"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/didkey"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 )
 
@@ -29,9 +30,7 @@ type NonceStore struct {
 }
 
 func NewNonceStore(ttl time.Duration, dir identity.Directory) *NonceStore {
-	if ttl <= 0 {
-		ttl = 60 * time.Second
-	}
+	ttl = opt.Positive(ttl, 60*time.Second)
 	return &NonceStore{
 		dir:     dir,
 		entries: ttlcache.New[string, string](ttlcache.Options{TTL: ttl}),

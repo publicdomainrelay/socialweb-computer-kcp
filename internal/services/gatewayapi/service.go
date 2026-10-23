@@ -1,6 +1,7 @@
 package gatewayapi
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -15,9 +16,10 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
-	coreapi "github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayapi"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayhttp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/xrpcserver"
 )
 
@@ -28,11 +30,11 @@ type Service struct {
 
 	log *slog.Logger
 
-	oauth *coreapi.OAuth
+	oauth *gatewayhttp.OAuth
 
 	surface *xrpcserver.Server
 
-	mapper *coreapi.NodeClaimMapper
+	mapper *gatewayhttp.NodeClaimMapper
 
 	stopCh chan struct{}
 
@@ -47,7 +49,7 @@ func New(cfg Config) *Service {
 
 func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	cfg := s.cfg.withDefaults()
-	cfg.Deps = mergeDeps(cfg.Deps, deps)
+	cfg.Deps = cfg.Deps.Or(deps)
 	if err := cfg.Check(); err != nil {
 		return err
 	}
@@ -59,9 +61,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 		log = slog.New(slog.DiscardHandler)
 	}
 	stateDir := cfg.StateDir
-	if stateDir == "" {
-		stateDir = cfg.Deps.StateDir
-	}
+	stateDir = cmp.Or(stateDir, cfg.Deps.StateDir)
 	if stateDir == "" {
 		return errors.New("gatewayapi: no state dir")
 	}
@@ -153,7 +153,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	if mapper != nil {
 		mapper.Start(ctx)
 	}
-	log.Info("gatewayapi_registered", "handler", handlerURL(cfg.Workspace, Kind, cfg.ComponentName), "network", networkName(cfg.Network))
+	log.Info("gatewayapi_registered", "handler", kcp.HandlerURL(cfg.Workspace, Kind, cfg.ComponentName), "network", networkName(cfg.Network))
 
 	select {
 	case <-ctx.Done():
@@ -199,15 +199,15 @@ func (s *Service) Stop(ctx context.Context) error {
 	return nil
 }
 
-func (s *Service) OAuth() *coreapi.OAuth {
+func (s *Service) OAuth() *gatewayhttp.OAuth {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.oauth
 }
 
-func (s *Service) buildHandler(cfg Config, log *slog.Logger, signIn coreapi.WebSignIn, pinned *coreapi.PinnedDownloads) (http.Handler, *coreapi.OAuth, *xrpcserver.Server, error) {
+func (s *Service) buildHandler(cfg Config, log *slog.Logger, signIn gatewayhttp.WebSignIn, pinned *gatewayhttp.PinnedDownloads) (http.Handler, *gatewayhttp.OAuth, *xrpcserver.Server, error) {
 	publicOrigin := cfg.Session.PublicOrigin
-	oauth, err := coreapi.NewOAuth(coreapi.OAuthOptions{
+	oauth, err := gatewayhttp.NewOAuth(gatewayhttp.OAuthOptions{
 		SignIn:              signIn,
 		PublicOrigin:        publicOrigin,
 		PostSignInURL:       cfg.Session.PostSignInURL,
@@ -228,9 +228,9 @@ func (s *Service) buildHandler(cfg Config, log *slog.Logger, signIn coreapi.WebS
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	cluster, err := coreapi.NewClusterAPI(coreapi.ClusterOptions{
+	cluster, err := gatewayhttp.NewClusterAPI(gatewayhttp.ClusterOptions{
 		Gateway: clusterGateway,
-		Caller: func(ctx context.Context, r *http.Request) (coreapi.ClusterCaller, error) {
+		Caller: func(ctx context.Context, r *http.Request) (gatewayhttp.ClusterCaller, error) {
 			return oauth.RequestCaller(r)
 		},
 		MaxKubeconfigTTLSec: cfg.Gateway.MaxKubeconfigTTLSec,
@@ -241,7 +241,7 @@ func (s *Service) buildHandler(cfg Config, log *slog.Logger, signIn coreapi.WebS
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	downloads := coreapi.NewDownloads(coreapi.DownloadsOptions{Downloads: pinned, Log: log})
+	downloads := gatewayhttp.NewDownloads(gatewayhttp.DownloadsOptions{Downloads: pinned, Log: log})
 
 	directory := cfg.Gateway.Directory
 	if directory == nil {
@@ -271,11 +271,11 @@ func (s *Service) buildHandler(cfg Config, log *slog.Logger, signIn coreapi.WebS
 	return securityHeaders(mux), oauth, surface, nil
 }
 
-func loadDownloads(cfg Config) (*coreapi.PinnedDownloads, error) {
+func loadDownloads(cfg Config) (*gatewayhttp.PinnedDownloads, error) {
 	if cfg.DownloadsDir == "" {
 		return nil, nil
 	}
-	pinned, err := coreapi.LoadPinnedDownloads(cfg.DownloadsDir)
+	pinned, err := gatewayhttp.LoadPinnedDownloads(cfg.DownloadsDir)
 	if err != nil {
 		return nil, fmt.Errorf("gatewayapi: the downloads dir: %w", err)
 	}
@@ -297,7 +297,7 @@ func loadDownloads(cfg Config) (*coreapi.PinnedDownloads, error) {
 	return pinned, nil
 }
 
-func buildMapper(cfg Config, deps component.Deps, vault *vaultRuntime, pinned *coreapi.PinnedDownloads, log *slog.Logger) (*coreapi.NodeClaimMapper, error) {
+func buildMapper(cfg Config, deps component.Deps, vault *vaultRuntime, pinned *gatewayhttp.PinnedDownloads, log *slog.Logger) (*gatewayhttp.NodeClaimMapper, error) {
 	if !cfg.NodeMarket.Enabled {
 		return nil, nil
 	}
@@ -327,17 +327,15 @@ func buildMapper(cfg Config, deps component.Deps, vault *vaultRuntime, pinned *c
 	log.Info("gatewayapi node market", "homes", homes, "indexWorkspace", indexWorkspace, "indexNamespace", indexNamespace,
 		"contractWorkspace", cfg.NodeMarket.ContractWorkspace)
 	mount := cfg.NodeMarket.VaultMount
-	if mount == "" {
-		mount = vault.mount
-	}
+	mount = cmp.Or(mount, vault.mount)
 	if mount == "" {
 		return nil, errors.New("gatewayapi: the node market needs a vault mount")
 	}
-	var policy *coreapi.NodePolicy
+	var policy *gatewayhttp.NodePolicy
 	if cfg.NodeMarket.PolicyName != "" {
 		args := map[string]any{}
 		maps.Copy(args, cfg.NodeMarket.PolicyArgs)
-		policy = &coreapi.NodePolicy{Name: cfg.NodeMarket.PolicyName, Args: args}
+		policy = &gatewayhttp.NodePolicy{Name: cfg.NodeMarket.PolicyName, Args: args}
 	}
 	var userData string
 	if cfg.NodeMarket.UserDataBaseFile != "" {
@@ -347,26 +345,26 @@ func buildMapper(cfg Config, deps component.Deps, vault *vaultRuntime, pinned *c
 		}
 		userData = string(raw)
 	}
-	caFileOf := coreapi.DefaultOpenBaoCAFile
+	caFileOf := gatewayhttp.DefaultOpenBaoCAFile
 	if cfg.NodeMarket.ClusterCADir != "" {
-		caFileOf = coreapi.PublishedOpenBaoCAFile(cfg.NodeMarket.ClusterCADir)
+		caFileOf = gatewayhttp.PublishedOpenBaoCAFile(cfg.NodeMarket.ClusterCADir)
 	}
-	var downloads []coreapi.PinnedDownload
+	var downloads []gatewayhttp.PinnedDownload
 	if pinned != nil {
 		downloads = pinned.List()
 	}
-	var mesh *coreapi.MeshdPin
+	var mesh *gatewayhttp.MeshdPin
 	var meshBase func(context.Context) (string, bool)
-	var nodeAgent *coreapi.MeshdPin
+	var nodeAgent *gatewayhttp.MeshdPin
 	var nodeAgentBase func(context.Context) (string, bool)
 	if cfg.Network != nil {
-		meshPins := coreapi.MeshdPinsOf(downloads)
-		agentPins := coreapi.NodeAgentPinsOf(downloads)
+		meshPins := gatewayhttp.MeshdPinsOf(downloads)
+		agentPins := gatewayhttp.NodeAgentPinsOf(downloads)
 		if meshPins != nil {
-			mesh = &coreapi.MeshdPin{Sha256: meshPins}
+			mesh = &gatewayhttp.MeshdPin{Sha256: meshPins}
 		}
 		if agentPins != nil {
-			nodeAgent = &coreapi.MeshdPin{Sha256: agentPins}
+			nodeAgent = &gatewayhttp.MeshdPin{Sha256: agentPins}
 		}
 		if mesh != nil || nodeAgent != nil {
 			var baseMu sync.Mutex
@@ -394,14 +392,14 @@ func buildMapper(cfg Config, deps component.Deps, vault *vaultRuntime, pinned *c
 			nodeAgentBase = baseOf
 		}
 	} else {
-		mesh = coreapi.MeshdPinOf(downloads, cfg.downloadBase())
-		nodeAgent = coreapi.NodeAgentPinOf(downloads, cfg.downloadBase())
+		mesh = gatewayhttp.MeshdPinOf(downloads, cfg.downloadBase())
+		nodeAgent = gatewayhttp.NodeAgentPinOf(downloads, cfg.downloadBase())
 	}
-	return coreapi.NewNodeClaimMapper(coreapi.NodeClaimMapperOptions{
+	return gatewayhttp.NewNodeClaimMapper(gatewayhttp.NodeClaimMapperOptions{
 		Store:                 newClaimStore(store, newHomeIndex(store, indexWorkspace, indexNamespace, homes)),
 		Links:                 newClusterLinkReader(store),
 		Contracts:             newContractClient(store, cfg.NodeMarket.ContractWorkspace, cfg.NodeMarket.ContractQuota),
-		Vault:                 coreapi.OpenBaoVault{Client: vault.client},
+		Vault:                 gatewayhttp.OpenBaoVault{Client: vault.client},
 		VaultMount:            mount,
 		VMReadyTimeoutSec:     cfg.NodeMarket.VMReadyTimeoutSec,
 		Policy:                policy,
@@ -417,7 +415,7 @@ func buildMapper(cfg Config, deps component.Deps, vault *vaultRuntime, pinned *c
 	})
 }
 
-func clusterGatewayFor(cfg Config) (coreapi.ClusterGateway, error) {
+func clusterGatewayFor(cfg Config) (gatewayhttp.ClusterGateway, error) {
 	if cfg.Gateway.URL != "" || cfg.Gateway.Ref.Name != "" {
 		if cfg.Gateway.Audience == "" {
 			return nil, errors.New("gatewayapi: a remote gateway needs Gateway.Audience for service auth")
@@ -427,14 +425,14 @@ func clusterGatewayFor(cfg Config) (coreapi.ClusterGateway, error) {
 		if client == nil && cfg.Deps.Handlers != nil {
 			client = cfg.Deps.Handlers.HTTPClient()
 		}
-		return &coreapi.XRPCClusterGateway{
+		return &gatewayhttp.XRPCClusterGateway{
 			BaseURL:  resolver.baseURL,
 			Audience: cfg.Gateway.Audience,
 			Client:   client,
 			Timeout:  cfg.Gateway.Timeout,
 		}, nil
 	}
-	return coreapi.DirectClusterGateway{Server: cfg.Gateway.Server}, nil
+	return gatewayhttp.DirectClusterGateway{Server: cfg.Gateway.Server}, nil
 }
 
 type gatewayURLResolver struct {
@@ -445,7 +443,7 @@ func (r *gatewayURLResolver) baseURL(ctx context.Context) (string, error) {
 	if r.cfg.URL != "" {
 		return r.cfg.URL, nil
 	}
-	raw := handlerURL(r.cfg.Ref.Workspace, r.cfg.Ref.Kind, r.cfg.Ref.Name)
+	raw := kcp.HandlerURL(r.cfg.Ref.Workspace, r.cfg.Ref.Kind, r.cfg.Ref.Name)
 	if raw == "" {
 		return "", fmt.Errorf("gatewayapi: the gateway ref %s/%s names no component", r.cfg.Ref.Kind, r.cfg.Ref.Name)
 	}
@@ -457,9 +455,7 @@ func (s *Service) shutdown(ctx context.Context) {
 	mapper := s.mapper
 	timeout := s.cfg.ShutdownTimeout
 	s.mu.Unlock()
-	if timeout <= 0 {
-		timeout = DefaultShutdownTimeout
-	}
+	timeout = opt.Positive(timeout, DefaultShutdownTimeout)
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
 	defer cancel()
 	if mapper != nil {
@@ -544,42 +540,4 @@ func directoryFor(raw string) identity.Directory {
 		}
 	}
 	return identity.NewCacheDirectory(inner, DefaultDirectoryKeys, DefaultDirectoryTTL, DefaultDirectoryTTL, DefaultDirectoryTTL)
-}
-
-func mergeDeps(cfgDeps, deps component.Deps) component.Deps {
-	out := cfgDeps
-	if out.Log == nil {
-		out.Log = deps.Log
-	}
-	if out.TLS == nil {
-		out.TLS = deps.TLS
-	}
-	if out.StateDir == "" {
-		out.StateDir = deps.StateDir
-	}
-	if out.Registry == nil {
-		out.Registry = deps.Registry
-	}
-	if out.Hosts == nil {
-		out.Hosts = deps.Hosts
-	}
-	if out.KCP == nil {
-		out.KCP = deps.KCP
-	}
-	if out.Credentials == nil {
-		out.Credentials = deps.Credentials
-	}
-	if out.Vault == nil {
-		out.Vault = deps.Vault
-	}
-	return out
-}
-
-func handlerURL(workspace, kind, name string) string {
-	kind = strings.ToLower(strings.TrimSpace(kind))
-	name = strings.TrimSpace(name)
-	if kind == "" || name == "" {
-		return ""
-	}
-	return "http://" + kcp.ServiceFQDN(kind, "default", workspace, kcp.DefaultServiceDomain)
 }

@@ -1,6 +1,7 @@
 package openbao
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/credentials/openbaosession"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/lease"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 type cachedVaultSession struct {
@@ -52,9 +54,7 @@ func NewWithSource(source openbaosession.Source, workspace string) (*Clients, er
 	if source == nil {
 		return nil, errors.New("openbao: the OpenBao vault clients need an OpenBaoServer source")
 	}
-	if workspace == "" {
-		workspace = "root"
-	}
+	workspace = cmp.Or(workspace, "root")
 	out := &Clients{
 		Source:    source,
 		Workspace: workspace,
@@ -99,9 +99,7 @@ func (c *Clients) leases() *lease.Keyed[vaultServerKey, cachedVaultSession] {
 
 func (c *Clients) login(ctx context.Context, key vaultServerKey) (cachedVaultSession, time.Time, error) {
 	loginFor := c.LoginFor
-	if loginFor <= 0 {
-		loginFor = openbaosession.DefaultLoginFor
-	}
+	loginFor = opt.Positive(loginFor, openbaosession.DefaultLoginFor)
 	srv, err := c.Source.Server(ctx, key.workspace, key.name)
 	if err != nil {
 		return cachedVaultSession{}, time.Time{}, err

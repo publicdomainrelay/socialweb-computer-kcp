@@ -12,6 +12,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 const (
@@ -112,12 +113,8 @@ func NewGuest(ctx context.Context, opts GuestOptions) (*Guest, error) {
 	if opts.PublicLimits == nil {
 		opts.PublicLimits = PublicRateLimits()
 	}
-	if opts.HostKeyAttempts <= 0 {
-		opts.HostKeyAttempts = DefaultHostKeyAttempts
-	}
-	if opts.HostKeyRetry <= 0 {
-		opts.HostKeyRetry = DefaultHostKeyRetry
-	}
+	opts.HostKeyAttempts = opt.Positive(opts.HostKeyAttempts, DefaultHostKeyAttempts)
+	opts.HostKeyRetry = opt.Positive(opts.HostKeyRetry, DefaultHostKeyRetry)
 	root, cancel := context.WithCancel(ctx)
 	g := &Guest{
 		handle: opts.Handle, identity: opts.Identity, verifier: opts.Verifier,

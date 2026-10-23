@@ -1,6 +1,7 @@
 package appctl
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -15,6 +16,9 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/kcprest"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 )
 
 const (
@@ -89,9 +93,7 @@ func (d BidderVMDefaults) fill(a *v1alpha1.NetworkApp) {
 	if a.Kcp == nil {
 		a.Kcp = &v1alpha1.KcpProvider{}
 	}
-	if a.Kcp.GuestImageSource == "" {
-		a.Kcp.GuestImageSource = d.GuestImageSource
-	}
+	a.Kcp.GuestImageSource = cmp.Or(a.Kcp.GuestImageSource, d.GuestImageSource)
 	if d.VmHostBackend != "" {
 		a.Kcp.VmHostBackend = d.VmHostBackend
 	}
@@ -143,7 +145,7 @@ func networkClient(kubeconfig string) (dynamic.ResourceInterface, error) {
 	if err != nil {
 		return nil, err
 	}
-	dc, err := dynamic.NewForConfig(clusterConfig(restCfg, DefaultWorkspace))
+	dc, err := dynamic.NewForConfig(kcprest.ForCluster(restCfg, DefaultWorkspace))
 	if err != nil {
 		return nil, err
 	}
@@ -155,7 +157,7 @@ func ApplyNetwork(ctx context.Context, kubeconfig string, spec v1alpha1.MarketNe
 	if err != nil {
 		return err
 	}
-	u, err := toUnstructured(&v1alpha1.MarketNetwork{ObjectMeta: metav1.ObjectMeta{Name: NetworkName}, Spec: spec}, "MarketNetwork")
+	u, err := unstruct.To(&v1alpha1.MarketNetwork{ObjectMeta: metav1.ObjectMeta{Name: NetworkName}, Spec: spec}, "MarketNetwork")
 	if err != nil {
 		return err
 	}
@@ -175,7 +177,7 @@ func ApplyNetwork(ctx context.Context, kubeconfig string, spec v1alpha1.MarketNe
 		if time.Now().After(deadline) {
 			return fmt.Errorf("appctl: applying the MarketNetwork (the core applies the applications set first): %w", err)
 		}
-		if !sleep(ctx, NetworkPoll) {
+		if !clock.Sleep(ctx, NetworkPoll) {
 			return ctx.Err()
 		}
 	}
@@ -191,7 +193,7 @@ func ReadNetwork(ctx context.Context, kubeconfig string) (v1alpha1.MarketNetwork
 		return v1alpha1.MarketNetwork{}, err
 	}
 	var o v1alpha1.MarketNetwork
-	return o, fromUnstructured(u, &o)
+	return o, unstruct.Into(u, &o)
 }
 
 func WaitNetwork(ctx context.Context, kubeconfig string, timeout time.Duration, progress func(v1alpha1.MarketNetworkStatus)) (v1alpha1.MarketNetwork, error) {
@@ -222,7 +224,7 @@ func WaitNetwork(ctx context.Context, kubeconfig string, timeout time.Duration, 
 		if time.Now().After(deadline) {
 			return o, fmt.Errorf("appctl: the MarketNetwork was not Ready within %s (phase %s: %s)", timeout, o.Status.Phase, o.Status.Message)
 		}
-		if !sleep(ctx, NetworkPoll) {
+		if !clock.Sleep(ctx, NetworkPoll) {
 			return o, ctx.Err()
 		}
 	}
@@ -248,7 +250,7 @@ func DeleteNetwork(ctx context.Context, kubeconfig string, timeout time.Duration
 		if time.Now().After(deadline) {
 			return fmt.Errorf("appctl: the MarketNetwork was not gone within %s", timeout)
 		}
-		if !sleep(ctx, NetworkPoll) {
+		if !clock.Sleep(ctx, NetworkPoll) {
 			return ctx.Err()
 		}
 	}

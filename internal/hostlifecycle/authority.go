@@ -1,6 +1,7 @@
 package hostlifecycle
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"os"
@@ -117,9 +118,7 @@ func (a *FileAuthority) ObserveKcpInstallation(ctx context.Context, _ v1alpha1.K
 func (a *FileAuthority) ObserveHostInstall(ctx context.Context, spec v1alpha1.HostInstallSpec) (HostInstallObservation, error) {
 	var out HostInstallObservation
 	account := spec.Account
-	if account == "" {
-		account = a.o.Account
-	}
+	account = cmp.Or(account, a.o.Account)
 	if !validAccount(account) {
 		return out, ErrAccount
 	}
@@ -141,9 +140,7 @@ func (a *FileAuthority) ObserveHostInstall(ctx context.Context, spec v1alpha1.Ho
 		out.Steps = append(out.Steps, v1alpha1.HostInstallStep{Name: name, Phase: rec.Steps[name]})
 	}
 	stateDir := rec.StateDir
-	if stateDir == "" {
-		stateDir = a.o.StateDir
-	}
+	stateDir = cmp.Or(stateDir, a.o.StateDir)
 	if stateDir != "" {
 		if asset, err := kcpserver.ReadAsset(ctx, filepath.Join(stateDir, "bin", "current", install.CoreName)); err == nil {
 			out.InstalledVersion = versionOf(asset)

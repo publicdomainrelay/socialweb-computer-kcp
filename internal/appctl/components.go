@@ -1,6 +1,7 @@
 package appctl
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -27,6 +28,7 @@ import (
 
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/pds"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
@@ -184,9 +186,7 @@ func (v ComponentView) Listeners() []v1alpha1.ApplicationListener {
 	out := make([]v1alpha1.ApplicationListener, 0, len(v.Status.Endpoints))
 	for _, e := range v.Status.Endpoints {
 		address := e.Address
-		if address == "" {
-			address = e.URL
-		}
+		address = cmp.Or(address, e.URL)
 		out = append(out, v1alpha1.ApplicationListener{Component: v.Name, Name: e.Name, Kind: e.Protocol, Address: address})
 	}
 	return out
@@ -216,7 +216,7 @@ func exposureViewOf(v ComponentView, kind string, m map[string]any) (ComponentVi
 	switch kind {
 	case ComponentKindService:
 		var st exposurev1alpha1.ServiceStatus
-		if err := fromUnstructured(&unstructured.Unstructured{Object: m}, &st); err != nil {
+		if err := unstruct.Into(&unstructured.Unstructured{Object: m}, &st); err != nil {
 			return v, err
 		}
 		v.Status.Phase = v1alpha1.ComponentPhase(st.Phase)
@@ -226,7 +226,7 @@ func exposureViewOf(v ComponentView, kind string, m map[string]any) (ComponentVi
 		}
 	case ComponentKindExposure:
 		var st exposurev1alpha1.ExposureStatus
-		if err := fromUnstructured(&unstructured.Unstructured{Object: m}, &st); err != nil {
+		if err := unstruct.Into(&unstructured.Unstructured{Object: m}, &st); err != nil {
 			return v, err
 		}
 		v.Status.Phase = v1alpha1.ComponentPhase(st.Phase)
@@ -251,7 +251,7 @@ func componentViewOf(ws, kind string, u *unstructured.Unstructured) (ComponentVi
 	if isExposureKind(kind) {
 		return exposureViewOf(v, kind, m)
 	}
-	if err := fromUnstructured(&unstructured.Unstructured{Object: m}, &v.Status); err != nil {
+	if err := unstruct.Into(&unstructured.Unstructured{Object: m}, &v.Status); err != nil {
 		return v, err
 	}
 	return v, nil

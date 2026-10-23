@@ -19,6 +19,8 @@ import (
 	"k8s.io/client-go/dynamic"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 )
 
 type MarketField string
@@ -165,7 +167,7 @@ func (v *VMs) Apply(ctx context.Context, o *v1alpha1.ComputeVM) (*v1alpha1.Compu
 	if o == nil || o.Name == "" {
 		return nil, errors.New("computevm: applying a ComputeVM with no name")
 	}
-	u, err := encode(o, "ComputeVM")
+	u, err := unstruct.To(o, "ComputeVM")
 	if err != nil {
 		return nil, err
 	}
@@ -257,9 +259,7 @@ func (v *VMs) RecordMarket(ctx context.Context, name string, patch v1alpha1.Comp
 }
 
 func (v *VMs) WaitAbsent(ctx context.Context, name string, timeout time.Duration) error {
-	if timeout <= 0 {
-		timeout = DefaultReleaseTimeout
-	}
+	timeout = opt.Positive(timeout, DefaultReleaseTimeout)
 	deadline := time.Now().Add(timeout)
 	for {
 		o, err := v.Get(ctx, name)

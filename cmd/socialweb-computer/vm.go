@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -129,9 +130,7 @@ func (a *app) devVM(vals clicfg.Values, l devinstance.Layout) (*devinstance.VMRu
 		}
 	}
 	rt := vals.String("vm-runtime-dir")
-	if rt == "" {
-		rt = l.RuntimeDir
-	}
+	rt = cmp.Or(rt, l.RuntimeDir)
 	if !filepath.IsAbs(rt) {
 		return nil, fmt.Errorf("vm-runtime-dir %q must be absolute: each VM's API socket lives under it", rt)
 	}

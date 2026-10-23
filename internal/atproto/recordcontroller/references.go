@@ -13,6 +13,7 @@ import (
 	"k8s.io/client-go/dynamic"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
 )
 
 type fieldStep struct {
@@ -153,24 +154,9 @@ func gvrFor(from v1alpha1.AtprotoValueFrom) schema.GroupVersionResource {
 	}
 	resource := strings.TrimSpace(from.Resource)
 	if resource == "" {
-		resource = pluralize(from.Kind)
+		resource = strs.Pluralize(from.Kind)
 	}
 	return schema.GroupVersionResource{Group: group, Version: version, Resource: resource}
-}
-
-func pluralize(kind string) string {
-	name := strings.ToLower(strings.TrimSpace(kind))
-	switch {
-	case name == "":
-		return ""
-	case strings.HasSuffix(name, "y"):
-		return strings.TrimSuffix(name, "y") + "ies"
-	case strings.HasSuffix(name, "s"), strings.HasSuffix(name, "x"),
-		strings.HasSuffix(name, "ch"), strings.HasSuffix(name, "sh"):
-		return name + "es"
-	default:
-		return name + "s"
-	}
 }
 
 func parseFieldPath(raw string) []fieldStep {

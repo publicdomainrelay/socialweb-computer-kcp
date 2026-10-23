@@ -1,6 +1,7 @@
 package devinstance
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"os"
@@ -8,6 +9,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 )
 
 const Marker = ".swc-dev"
@@ -85,9 +88,7 @@ func Exports(rec Record) []Export {
 	}
 	if rec.VM != nil {
 		ws := rec.BaseWorkspace
-		if ws == "" {
-			ws = "root"
-		}
+		ws = cmp.Or(ws, "root")
 		host, _, _ := strings.Cut(strings.TrimSuffix(rec.KcpURL, "/"), "/clusters/")
 		out = append(out,
 			Export{"COMPUTE_PROVIDER_KCP", "true"},
@@ -120,7 +121,7 @@ func List(stateRoot string) ([]Record, error) {
 			continue
 		}
 		var rec Record
-		if err := ReadJSON(filepath.Join(DevRoot(stateRoot), e.Name(), "instance.json"), &rec); err != nil {
+		if err := fsx.ReadJSON(filepath.Join(DevRoot(stateRoot), e.Name(), "instance.json"), &rec); err != nil {
 			continue
 		}
 		out = append(out, rec)

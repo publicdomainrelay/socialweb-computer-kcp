@@ -1,9 +1,9 @@
 package devinstance
 
 import (
+	"cmp"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -43,9 +43,7 @@ func sanitize(s string) string {
 	if len(out) > basenameChars {
 		out = strings.Trim(out[:basenameChars], "-")
 	}
-	if out == "" {
-		out = "dev"
-	}
+	out = cmp.Or(out, "dev")
 	return out
 }
 
@@ -300,29 +298,6 @@ type Core struct {
 	Adoptions    []Adoption `json:"adoptions"`
 	LastCheck    time.Time  `json:"lastCheck"`
 	Verdicts     []string   `json:"verdicts"`
-}
-
-func ReadJSON(path string, v any) error {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(b, v)
-}
-
-func WriteJSON(path string, v any) error {
-	b, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, append(b, '\n'), 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
 }
 
 func RefuseRoot(euid int) error {

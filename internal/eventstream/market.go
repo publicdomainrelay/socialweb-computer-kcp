@@ -1,6 +1,7 @@
 package eventstream
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -250,9 +251,7 @@ func (h *marketHandler) fetchMarketRecord(ctx context.Context, event Event, coll
 		if body.Value == nil {
 			continue
 		}
-		if body.CID == "" {
-			body.CID = cidText
-		}
+		body.CID = cmp.Or(body.CID, cidText)
 		return body.Value, body.CID, nil
 	}
 	return nil, "", errors.New("the author PDS is not reachable through its identity or the relay host list")

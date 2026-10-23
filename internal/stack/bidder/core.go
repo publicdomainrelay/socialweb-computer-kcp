@@ -17,6 +17,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/install"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/notify"
 )
 
@@ -58,7 +59,7 @@ func (c CoreConfig) app() table.App {
 
 func (c CoreConfig) record(l devinstance.Layout) (devinstance.Record, error) {
 	var rec devinstance.Record
-	if err := devinstance.ReadJSON(l.Record, &rec); err != nil {
+	if err := fsx.ReadJSON(l.Record, &rec); err != nil {
 		rec = devinstance.Record{Created: time.Now().UTC()}
 	}
 	p := bootstrap.InstallParams(c.app(), c.StateDir)
@@ -100,7 +101,7 @@ func RunCore(ctx context.Context, c CoreConfig, m hostsvc.Manager) error {
 	if err != nil {
 		return err
 	}
-	if err := devinstance.WriteJSON(l.Record, rec); err != nil {
+	if err := fsx.WriteJSON(l.Record, rec, 0o600); err != nil {
 		return err
 	}
 	app := c.app()

@@ -10,6 +10,7 @@ import (
 	"k8s.io/client-go/dynamic"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 )
 
 func (c *Controller) ReconcileHostRelease(ctx context.Context, dyn dynamic.Interface, u *unstructured.Unstructured) error {
@@ -40,12 +41,12 @@ func (c *Controller) ReconcileHostRelease(ctx context.Context, dyn dynamic.Inter
 	matches := spec.Version == "" || obs.Current == spec.Version
 	ready := obs.Current != "" && matches
 	message := hostReleaseMessage(obs, ready, matches)
-	setCondition(&status.Conditions, generation, "Ready", condition(ready), boolReason(ready, "Current", "NotCurrent"), message)
-	setCondition(&status.Conditions, generation, ConditionCurrent, condition(obs.Current != "" && matches), boolReason(obs.Current != "" && matches, "MatchesSpec", "DiffersFromSpec"), message)
+	conds.SetStatus(&status.Conditions, generation, "Ready", conds.Status(ready), boolReason(ready, "Current", "NotCurrent"), message)
+	conds.SetStatus(&status.Conditions, generation, ConditionCurrent, conds.Status(obs.Current != "" && matches), boolReason(obs.Current != "" && matches, "MatchesSpec", "DiffersFromSpec"), message)
 	value, reason, selfMessage := selfCheckCondition(obs.SelfCheck)
-	setCondition(&status.Conditions, generation, ConditionSelfCheck, value, reason, selfMessage)
+	conds.SetStatus(&status.Conditions, generation, ConditionSelfCheck, value, reason, selfMessage)
 	gcValue, gcReason, gcMessage := gcCondition(obs.GC)
-	setCondition(&status.Conditions, generation, ConditionGC, gcValue, gcReason, gcMessage)
+	conds.SetStatus(&status.Conditions, generation, ConditionGC, gcValue, gcReason, gcMessage)
 	return c.writeStatus(ctx, dyn, HostReleaseGVR, u.GetName(), &status)
 }
 

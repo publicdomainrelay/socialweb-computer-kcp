@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
 )
 
 func cmdlineIn(root string, pid int) ([]string, error) {
@@ -13,15 +15,7 @@ func cmdlineIn(root string, pid int) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("portscan: reading the command line of %d: %w", pid, err)
 	}
-	return parseProcCmdline(b), nil
-}
-
-func parseProcCmdline(b []byte) []string {
-	fields := strings.Split(string(b), "\x00")
-	if n := len(fields); n > 0 && fields[n-1] == "" {
-		return fields[:n-1]
-	}
-	return fields
+	return strs.SplitNUL(b), nil
 }
 
 func parsePSCommand(out []byte) []string {

@@ -2,6 +2,9 @@ package relay
 
 import (
 	"sync"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 const (
@@ -22,9 +25,7 @@ type Sequencer struct {
 }
 
 func NewSequencer(maxBacklog int) *Sequencer {
-	if maxBacklog <= 0 {
-		maxBacklog = DefaultMaxBacklog
-	}
+	maxBacklog = opt.Positive(maxBacklog, DefaultMaxBacklog)
 	return &Sequencer{
 		max:      maxBacklog,
 		maxBytes: DefaultMaxBacklogBytes,
@@ -37,7 +38,7 @@ func (s *Sequencer) Append(frame Frame) Frame {
 	defer s.mu.Unlock()
 	s.seq++
 	frame.Seq = s.seq
-	frame.Time = nowISO()
+	frame.Time = clock.NowISO()
 	size := len(frame.Blocks) + 512
 	s.backlog = append(s.backlog, frame)
 	s.sizes = append(s.sizes, size)

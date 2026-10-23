@@ -1,6 +1,7 @@
 package requester
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -9,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -36,7 +36,10 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/oauthcallback"
@@ -285,7 +288,7 @@ func (s *Service) registerPDSWithRelay(ctx context.Context) {
 }
 
 func (s *Service) logicalURL() string {
-	return handlerURL(s.cfg.Workspace, Kind, s.cfg.ComponentName)
+	return kcp.HandlerURL(s.cfg.Workspace, Kind, s.cfg.ComponentName)
 }
 
 func (s *Service) resolveIdentity(ctx context.Context) error {
@@ -334,19 +337,13 @@ func (s *Service) resolveIdentity(ctx context.Context) error {
 	handle, _, _ := unstructured.NestedString(u.Object, "status", "handle")
 	if did != "" {
 		s.cfg.DID = did
-		if s.cfg.RepoDID == "" {
-			s.cfg.RepoDID = did
-		}
-		if s.cfg.MarketDID == "" {
-			s.cfg.MarketDID = did
-		}
+		s.cfg.RepoDID = cmp.Or(s.cfg.RepoDID, did)
+		s.cfg.MarketDID = cmp.Or(s.cfg.MarketDID, did)
 	}
 	if pdsURL != "" {
 		s.cfg.PDSURL = pdsURL
 	}
-	if s.cfg.Handle == "" {
-		s.cfg.Handle = handle
-	}
+	s.cfg.Handle = cmp.Or(s.cfg.Handle, handle)
 	return nil
 }
 
@@ -696,9 +693,7 @@ func (s *Service) pdsRef() (pdsclient.Ref, error) {
 	}
 	if s.cfg.PDSRef != nil && s.cfg.PDSRef.Name != "" {
 		kind := s.cfg.PDSRef.Kind
-		if kind == "" {
-			kind = "Pds"
-		}
+		kind = cmp.Or(kind, "Pds")
 		return pdsclient.LocalRef{Workspace: s.cfg.Workspace, Kind: kind, Name: s.cfg.PDSRef.Name}, nil
 	}
 	return nil, nil
@@ -787,9 +782,7 @@ func (s *Service) reconcile(ctx context.Context) {
 			continue
 		}
 		phase := contract.Status.Phase
-		if phase == "" {
-			phase = v1alpha1.ComputeContractPending
-		}
+		phase = cmp.Or(phase, v1alpha1.ComputeContractPending)
 		terminal := phase == v1alpha1.ComputeContractReleased
 		if phase == v1alpha1.ComputeContractFailed {
 			terminal = contract.Status.Contract == nil || contract.Status.Contract.Receipt == nil
@@ -989,7 +982,7 @@ func (s *Service) handler() http.Handler {
 
 func (s *Service) oauthClientMetadata(w http.ResponseWriter, r *http.Request) {
 	base := "https://" + r.Host
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpjson.Write(w, http.StatusOK, map[string]any{
 		"client_id":                  base + "/oauth-client-metadata.json",
 		"client_name":                "socialweb-computer requester",
 		"redirect_uris":              []string{base + "/oauth/callback/requester"},
@@ -1000,6 +993,7 @@ func (s *Service) oauthClientMetadata(w http.ResponseWriter, r *http.Request) {
 		"application_type":           "web",
 		"dpop_bound_access_tokens":   true,
 	})
+
 }
 
 func (s *Service) oauthCallback(w http.ResponseWriter, r *http.Request) {
@@ -1131,43 +1125,39 @@ func (s *Service) health(w http.ResponseWriter, r *http.Request) {
 	did := s.cfg.DID
 	s.mu.Unlock()
 	if !ready {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false})
+		httpjson.Write(w, http.StatusServiceUnavailable, map[string]any{"ok": false})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "did": did})
+	httpjson.Write(w, http.StatusOK, map[string]any{"ok": true, "did": did})
 }
 
 func (s *Service) repoGetRecord(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	repoDID := query.Get("repo")
-	if repoDID == "" {
-		repoDID = s.cfg.RepoDID
-	}
+	repoDID = cmp.Or(repoDID, s.cfg.RepoDID)
 	record, err := s.repo.GetRecord(r.Context(), repoDID, query.Get("collection"), query.Get("rkey"))
 	if err != nil {
 		status := http.StatusNotFound
 		if !errors.Is(err, market.ErrNotFound) {
 			status = http.StatusBadGateway
 		}
-		writeJSON(w, status, map[string]any{"error": "RecordNotFound", "message": err.Error()})
+		httpjson.Write(w, status, map[string]any{"error": "RecordNotFound", "message": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"uri": record.URI, "cid": record.CID, "value": record.Value})
+	httpjson.Write(w, http.StatusOK, map[string]any{"uri": record.URI, "cid": record.CID, "value": record.Value})
 }
 
 func (s *Service) repoListRecords(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	repoDID := query.Get("repo")
-	if repoDID == "" {
-		repoDID = s.cfg.RepoDID
-	}
+	repoDID = cmp.Or(repoDID, s.cfg.RepoDID)
 	limit := 50
 	if raw := query.Get("limit"); raw != "" {
 		fmt.Sscanf(raw, "%d", &limit)
 	}
 	page, err := s.repo.ListRecords(r.Context(), repoDID, query.Get("collection"), limit, query.Get("cursor"))
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "RepoError", "message": err.Error()})
+		httpjson.Write(w, http.StatusBadGateway, map[string]any{"error": "RepoError", "message": err.Error()})
 		return
 	}
 	records := make([]any, 0, len(page.Records))
@@ -1178,15 +1168,15 @@ func (s *Service) repoListRecords(w http.ResponseWriter, r *http.Request) {
 	if page.Cursor != "" {
 		body["cursor"] = page.Cursor
 	}
-	writeJSON(w, http.StatusOK, body)
+	httpjson.Write(w, http.StatusOK, body)
 }
 
 func (s *Service) repoDescribe(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"did": s.cfg.RepoDID, "handle": s.cfg.Handle, "collections": []string{}})
+	httpjson.Write(w, http.StatusOK, map[string]any{"did": s.cfg.RepoDID, "handle": s.cfg.Handle, "collections": []string{}})
 }
 
 func (s *Service) serverDescribe(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"did": s.cfg.RepoDID, "version": "socialweb-computer"})
+	httpjson.Write(w, http.StatusOK, map[string]any{"did": s.cfg.RepoDID, "version": "socialweb-computer"})
 }
 
 func (s *Service) submitBid(w http.ResponseWriter, r *http.Request) {
@@ -1200,26 +1190,26 @@ func (s *Service) submitBid(w http.ResponseWriter, r *http.Request) {
 		Record map[string]any `json:"record"`
 	}
 	if err := decodeBody(r, &body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest", "message": err.Error()})
+		httpjson.Write(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest", "message": err.Error()})
 		return
 	}
 	if err := market.AuthorizeRecord(issuer, body.URI); err != nil {
-		writeJSON(w, http.StatusForbidden, map[string]any{"error": "Forbidden", "message": err.Error()})
+		httpjson.Write(w, http.StatusForbidden, map[string]any{"error": "Forbidden", "message": err.Error()})
 		return
 	}
 	bid, err := market.ParseBid(body.Record)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest", "message": err.Error()})
+		httpjson.Write(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest", "message": err.Error()})
 		return
 	}
 	if err := s.storeBidMailbox(r.Context(), issuer, body.URI, body.CID, body.Record); err != nil {
 		s.log.Warn("requester_bid_enqueue_failed", "uri", body.URI, "err", err)
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "Unavailable", "message": err.Error()})
+		httpjson.Write(w, http.StatusServiceUnavailable, map[string]any{"error": "Unavailable", "message": err.Error()})
 		return
 	}
 	s.queueBid(bid.RFP.URI, BidRecord{DID: issuer, URI: body.URI, CID: body.CID, Record: body.Record, ArrivedAt: s.now()})
 	s.log.Info("requester_bid_received", "bidder", issuer, "uri", body.URI, "rfp", bid.RFP.URI)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	httpjson.Write(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (s *Service) submitEvent(w http.ResponseWriter, r *http.Request) {
@@ -1233,43 +1223,43 @@ func (s *Service) submitEvent(w http.ResponseWriter, r *http.Request) {
 		Record map[string]any `json:"record"`
 	}
 	if err := decodeBody(r, &body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest", "message": err.Error()})
+		httpjson.Write(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest", "message": err.Error()})
 		return
 	}
 	if body.URI == "" || body.CID == "" || body.Record == nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest", "message": "missing uri, cid, or record"})
+		httpjson.Write(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest", "message": "missing uri, cid, or record"})
 		return
 	}
 	if err := market.AuthorizeRecord(issuer, body.URI); err != nil {
-		writeJSON(w, http.StatusForbidden, map[string]any{"error": "Forbidden", "message": err.Error()})
+		httpjson.Write(w, http.StatusForbidden, map[string]any{"error": "Forbidden", "message": err.Error()})
 		return
 	}
 	event, err := market.ParseEvent(body.Record)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest", "message": err.Error()})
+		httpjson.Write(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest", "message": err.Error()})
 		return
 	}
 	payloadNSID := market.NSIDFromURI(event.Payload.URI)
 	switch payloadNSID {
 	case market.ComputeEventsVMOnNetworkNSID, market.ComputeEventsVMHostKeysNSID, market.ComputeEventsVMTerminatedNSID:
 	default:
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest", "message": "the payload is not a guest event"})
+		httpjson.Write(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest", "message": "the payload is not a guest event"})
 		return
 	}
 	ref := v1alpha1.ComputeContractEvent{URI: body.URI, CID: body.CID, ReceiptURI: event.Receipt.URI, ReceivedAt: s.nowISO()}
 	if err := s.enqueueEvent(r.Context(), ref); err != nil {
 		s.log.Warn("requester_event_enqueue_failed", "uri", body.URI, "err", err)
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "Unavailable", "message": err.Error()})
+		httpjson.Write(w, http.StatusServiceUnavailable, map[string]any{"error": "Unavailable", "message": err.Error()})
 		return
 	}
 	s.log.Info("requester_event_queued", "uri", body.URI, "receipt", event.Receipt.URI)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	httpjson.Write(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (s *Service) authorizeCallback(w http.ResponseWriter, r *http.Request, lxm, serviceID string) (string, bool) {
 	hostname := s.callbackHostname(r)
 	if hostname == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest", "message": "no callback hostname"})
+		httpjson.Write(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest", "message": "no callback hostname"})
 		return "", false
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), serviceAuthTimeout)
@@ -1284,9 +1274,9 @@ func (s *Service) authorizeCallback(w http.ResponseWriter, r *http.Request, lxm,
 		if u, err := url.Parse(raw); err == nil && u.Host != "" {
 			host = u.Host
 		}
-		audiences = append(audiences, serviceAudienceDIDs(host)...)
+		audiences = append(audiences, market.ServiceAudienceDIDs(host)...)
 	}
-	audiences = append(audiences, serviceAudienceDIDs(hostname)...)
+	audiences = append(audiences, market.ServiceAudienceDIDs(hostname)...)
 	result, err := market.VerifyServiceAuth(ctx, s.directory, market.VerifyServiceAuthOptions{
 		AuthHeader:        r.Header.Get("Authorization"),
 		Hostname:          hostname,
@@ -1295,35 +1285,10 @@ func (s *Service) authorizeCallback(w http.ResponseWriter, r *http.Request, lxm,
 		ExtraAudienceDIDs: audiences,
 	})
 	if err != nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "Unauthorized", "message": err.Error()})
+		httpjson.Write(w, http.StatusUnauthorized, map[string]any{"error": "Unauthorized", "message": err.Error()})
 		return "", false
 	}
 	return result.IssuerDID, true
-}
-
-func serviceAudienceDIDs(host string) []string {
-	host = strings.TrimSpace(host)
-	if host == "" {
-		return nil
-	}
-	candidates := []string{host, strings.ToLower(host)}
-	if name, _, err := net.SplitHostPort(host); err == nil && name != "" {
-		candidates = append(candidates, name, strings.ToLower(name))
-	}
-	unique := []string{}
-	seen := map[string]bool{}
-	for _, candidate := range candidates {
-		if candidate == "" {
-			continue
-		}
-		did := market.ServiceDIDForHost(candidate)
-		if seen[did] {
-			continue
-		}
-		seen[did] = true
-		unique = append(unique, did)
-	}
-	return unique
 }
 
 func (s *Service) callbackHostname(r *http.Request) string {
@@ -1494,9 +1459,7 @@ func (s *Service) submitAcceptAndWait(ctx context.Context, bidder Bidder, accept
 	provisionTimeout := max(s.cfg.ReceiptTimeout, submitAcceptProvisionTimeout)
 	if !s.outboundXRPC() || bidder.Endpoint == "" {
 		timeout := s.cfg.ReceiptTimeout
-		if timeout <= 0 {
-			timeout = DefaultReceiptTimeout
-		}
+		timeout = opt.Positive(timeout, DefaultReceiptTimeout)
 		return s.waitReceiptWithin(ctx, winnerDID, acceptURI, timeout)
 	}
 	if receipt, err := s.findReceiptWithin(ctx, winnerDID, acceptURI, submitAcceptReceiptTimeout); err == nil && receipt != nil {
@@ -1533,9 +1496,7 @@ func (s *Service) submitAcceptAndWait(ctx context.Context, bidder Bidder, accept
 	}
 	deadline := time.Now().Add(s.cfg.ReceiptTimeout)
 	delay := s.cfg.ReceiptPoll
-	if delay <= 0 {
-		delay = DefaultReceiptPoll
-	}
+	delay = opt.Positive(delay, DefaultReceiptPoll)
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -1785,12 +1746,6 @@ func decodeBody(r *http.Request, out any) error {
 		return err
 	}
 	return nil
-}
-
-func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(value)
 }
 
 func isNotFound(err error) bool {

@@ -1,8 +1,8 @@
 package request
 
 import (
+	"cmp"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -24,6 +24,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/appctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -97,31 +99,8 @@ type Summary struct {
 	UpdatedAt        time.Time        `json:"updatedAt"`
 }
 
-func writeJSON(path string, v any) error {
-	b, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, append(b, '\n'), 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
-}
-
-func readJSON(path string, v any) error {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(b, v)
-}
-
 func WriteInvocation(inv Invocation) error {
-	return writeJSON(filepath.Join(Dir(inv.StateRoot, inv.Name), InvocationFile), inv)
+	return fsx.WriteJSON(filepath.Join(Dir(inv.StateRoot, inv.Name), InvocationFile), inv, 0o600)
 }
 
 func ReadInvocation(stateRoot, name string) (Invocation, error) {
@@ -129,7 +108,7 @@ func ReadInvocation(stateRoot, name string) (Invocation, error) {
 	if err := CheckName(name); err != nil {
 		return inv, err
 	}
-	if err := readJSON(filepath.Join(Dir(stateRoot, name), InvocationFile), &inv); err != nil {
+	if err := fsx.ReadJSON(filepath.Join(Dir(stateRoot, name), InvocationFile), &inv); err != nil {
 		return inv, fmt.Errorf("request: no invocation %s under %s: %w", name, Root(stateRoot), err)
 	}
 	return inv, nil
@@ -137,12 +116,12 @@ func ReadInvocation(stateRoot, name string) (Invocation, error) {
 
 func WriteSummary(stateRoot string, s Summary) error {
 	s.UpdatedAt = time.Now().UTC()
-	return writeJSON(filepath.Join(Dir(stateRoot, s.Name), SummaryFile), s)
+	return fsx.WriteJSON(filepath.Join(Dir(stateRoot, s.Name), SummaryFile), s, 0o600)
 }
 
 func ReadSummary(stateRoot, name string) (Summary, error) {
 	var s Summary
-	err := readJSON(filepath.Join(Dir(stateRoot, name), SummaryFile), &s)
+	err := fsx.ReadJSON(filepath.Join(Dir(stateRoot, name), SummaryFile), &s)
 	return s, err
 }
 
@@ -218,9 +197,7 @@ func OpenKcp(kubeconfig, workspace string) (*Kcp, error) {
 	if err != nil {
 		return nil, err
 	}
-	if workspace == "" {
-		workspace = appctl.DefaultWorkspace
-	}
+	workspace = cmp.Or(workspace, appctl.DefaultWorkspace)
 	root := rest.CopyConfig(cfg)
 	root.Host = strings.TrimSuffix(cfg.Host, "/") + "/clusters/" + workspace
 	dc, err := dynamic.NewForConfig(root)
@@ -228,10 +205,6 @@ func OpenKcp(kubeconfig, workspace string) (*Kcp, error) {
 		return nil, err
 	}
 	return &Kcp{rest: cfg, dyn: dc, workspace: workspace}, nil
-}
-
-func fromUnstructured(u *unstructured.Unstructured, into any) error {
-	return runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, into)
 }
 
 func applyBody(o any, kind string) ([]byte, error) {
@@ -264,7 +237,7 @@ func (k *Kcp) Root(ctx context.Context) (v1alpha1.ApplicationStatus, error) {
 		return v1alpha1.ApplicationStatus{}, err
 	}
 	var o v1alpha1.MarketRequester
-	err = fromUnstructured(u, &o)
+	err = unstruct.Into(u, &o)
 	return o.Status, err
 }
 
@@ -303,7 +276,7 @@ func (k *Kcp) Contract(ctx context.Context) (*v1alpha1.ComputeContract, error) {
 		return nil, err
 	}
 	var o v1alpha1.ComputeContract
-	if err := fromUnstructured(u, &o); err != nil {
+	if err := unstruct.Into(u, &o); err != nil {
 		return nil, err
 	}
 	return &o, nil
@@ -457,7 +430,7 @@ func editNetwork(ctx context.Context, kubeconfig string, edit func(*v1alpha1.Mar
 			return fmt.Errorf("request: the market network's MarketNetwork: %w", err)
 		}
 		var o v1alpha1.MarketNetwork
-		if err := fromUnstructured(u, &o); err != nil {
+		if err := unstruct.Into(u, &o); err != nil {
 			return err
 		}
 		if err := edit(&o.Spec); err != nil {
@@ -526,7 +499,7 @@ func NetworkApp(ctx context.Context, kubeconfig, name string) (v1alpha1.NetworkA
 		return v1alpha1.NetworkAppStatus{}, false, err
 	}
 	var o v1alpha1.MarketNetwork
-	if err := fromUnstructured(u, &o); err != nil {
+	if err := unstruct.Into(u, &o); err != nil {
 		return v1alpha1.NetworkAppStatus{}, false, err
 	}
 	for _, a := range o.Status.Apps {

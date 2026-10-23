@@ -1,6 +1,7 @@
 package eventstream
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -82,9 +83,7 @@ func openJetstreamStream(ctx context.Context, base string, cursor *int64, collec
 	if err != nil {
 		if response != nil {
 			message := http.StatusText(response.StatusCode)
-			if message == "" {
-				message = "jetstream websocket handshake failed"
-			}
+			message = cmp.Or(message, "jetstream websocket handshake failed")
 			return nil, fmt.Errorf("eventstream: jetstream websocket handshake: %s", message)
 		}
 		return nil, fmt.Errorf("eventstream: jetstream websocket dial: %w", err)
@@ -122,9 +121,7 @@ func (s *jetstreamEventStream) Next(ctx context.Context) (pdsclient.RepoEvent, e
 		}
 		if frame.Error != "" {
 			message := strings.TrimSpace(frame.Message)
-			if message == "" {
-				message = "jetstream error"
-			}
+			message = cmp.Or(message, "jetstream error")
 			return pdsclient.RepoEvent{}, fmt.Errorf("eventstream: jetstream %s: %s", frame.Error, message)
 		}
 		if strings.ToLower(strings.TrimSpace(frame.Kind)) != jetstreamCommitKind || frame.Commit == nil {

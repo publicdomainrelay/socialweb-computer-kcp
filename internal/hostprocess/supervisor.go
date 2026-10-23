@@ -1,6 +1,7 @@
 package hostprocess
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
@@ -11,7 +12,6 @@ import (
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -23,7 +23,9 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpapply"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/logcap"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 )
@@ -131,7 +133,7 @@ func (s *Supervisor) markAdopted(o v1alpha1.HostProcess, obs Observed) {
 func (s *Supervisor) reconcileObject(ctx context.Context, cur *unstructured.Unstructured) (v1alpha1.HostProcess, bool) {
 	unlock := s.lockObject(cur.GetName())
 	defer unlock()
-	o, err := toObject(cur)
+	o, err := unstruct.From[v1alpha1.HostProcess](cur)
 	if err != nil {
 		s.c.log().Warn("decoding", "name", cur.GetName(), "err", err.Error())
 		return o, false
@@ -238,12 +240,6 @@ func New(ctx context.Context, c Config) (*Supervisor, error) {
 	return &Supervisor{c: c, client: dc.Resource(GVR), placed: map[string]bool{}, backend: c.Manager.Capabilities().Backend}, nil
 }
 
-func toObject(u *unstructured.Unstructured) (v1alpha1.HostProcess, error) {
-	var o v1alpha1.HostProcess
-	err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &o)
-	return o, err
-}
-
 func toUnstructured(o *v1alpha1.HostProcess) (*unstructured.Unstructured, error) {
 	o.APIVersion = v1alpha1.GroupVersion.String()
 	o.Kind = "HostProcess"
@@ -283,7 +279,7 @@ func (s *Supervisor) syncMirrors(ctx context.Context) {
 			s.c.log().Warn("reading a bootstrap mirror", "name", name, "err", err.Error())
 			continue
 		}
-		o, err := toObject(cur)
+		o, err := unstruct.From[v1alpha1.HostProcess](cur)
 		if err != nil {
 			continue
 		}
@@ -330,15 +326,6 @@ func (s *Supervisor) observe(ctx context.Context, o v1alpha1.HostProcess) Observ
 		obs.Check = &c
 	}
 	return obs
-}
-
-func setCondition(o *v1alpha1.HostProcess, t string, ok bool, reason, msg string) {
-	st := metav1.ConditionFalse
-	if ok {
-		st = metav1.ConditionTrue
-	}
-	meta.SetStatusCondition(&o.Status.Conditions, metav1.Condition{Type: t, Status: st, Reason: reason, Message: msg,
-		ObservedGeneration: o.Generation})
 }
 
 func (s *Supervisor) apply(ctx context.Context, o v1alpha1.HostProcess, r Result) v1alpha1.HostProcess {
@@ -416,9 +403,9 @@ func (s *Supervisor) apply(ctx context.Context, o v1alpha1.HostProcess, r Result
 				At: time.Now().UTC().Format(time.RFC3339)}
 		}
 	}
-	setCondition(&next, ConditionReady, next.Status.Phase == v1alpha1.HostProcessPhaseRunning, string(next.Status.Phase), next.Status.Message)
+	conds.SetOn(&next, ConditionReady, next.Status.Phase == v1alpha1.HostProcessPhaseRunning, string(next.Status.Phase), next.Status.Message)
 	caps := m.Capabilities()
-	setCondition(&next, ConditionLimits, caps.EnforcesLimits, string(caps.Backend), "limits are enforced only where the backend has cgroups")
+	conds.SetOn(&next, ConditionLimits, caps.EnforcesLimits, string(caps.Backend), "limits are enforced only where the backend has cgroups")
 	return next
 }
 
@@ -548,9 +535,7 @@ func (s *Supervisor) capOutput(o v1alpha1.HostProcess) {
 		return
 	}
 	capBytes := out.CapBytes
-	if capBytes == 0 {
-		capBytes = logcap.DefaultCap
-	}
+	capBytes = cmp.Or(capBytes, logcap.DefaultCap)
 	files := []string{out.Stdout}
 	if out.Stderr != out.Stdout {
 		files = append(files, out.Stderr)
@@ -571,9 +556,7 @@ func (s *Supervisor) capOutput(o v1alpha1.HostProcess) {
 
 func (s *Supervisor) Run(ctx context.Context) error {
 	interval := s.c.Interval
-	if interval == 0 {
-		interval = DefaultInterval
-	}
+	interval = cmp.Or(interval, DefaultInterval)
 	s.c.log().Info("the HostProcess supervisor runs in the core", "workspace", s.c.workspace(), "backend", string(s.backend),
 		"prefixes", s.c.prefixes())
 	t := time.NewTicker(interval)

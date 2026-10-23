@@ -1,6 +1,7 @@
 package pdsclient
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -68,9 +69,7 @@ type RepoBinding struct {
 
 func (b RepoBinding) normalized() RepoBinding {
 	b.Workspace = strings.TrimSpace(b.Workspace)
-	if b.Workspace == "" {
-		b.Workspace = DefaultRepoWorkspace
-	}
+	b.Workspace = cmp.Or(b.Workspace, DefaultRepoWorkspace)
 	b.Kind = strings.TrimSpace(b.Kind)
 	b.Name = strings.TrimSpace(b.Name)
 	b.Endpoint = strings.TrimSpace(b.Endpoint)
@@ -225,9 +224,7 @@ func (r *RepoResolver) resolveRemote(ctx context.Context, binding RepoBinding) (
 	}
 	spec := object.Spec
 	name := object.Name
-	if name == "" {
-		name = binding.Name
-	}
+	name = cmp.Or(name, binding.Name)
 	if spec.Suspend {
 		return nil, nil, nil, fmt.Errorf("%w: RemotePDS %s is suspended", ErrUnavailable, name)
 	}
@@ -252,9 +249,7 @@ func (r *RepoResolver) resolveRemote(ctx context.Context, binding RepoBinding) (
 		return nil, nil, nil, err
 	}
 	didText := strings.TrimSpace(spec.DID)
-	if didText == "" {
-		didText = binding.DID
-	}
+	didText = cmp.Or(didText, binding.DID)
 	var did syntax.DID
 	if didText != "" {
 		parsed, err := syntax.ParseDID(didText)

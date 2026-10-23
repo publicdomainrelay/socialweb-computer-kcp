@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/exposure"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 )
 
 const exposureRescan = 30 * time.Second
@@ -24,7 +25,7 @@ func (c *Core) runExposure(ctx context.Context) {
 			seen[workspace] = true
 			c.wg.Go(func() { c.runWorkspaceExposure(ctx, workspace, log.With("workspace", workspace)) })
 		}
-		sleep(ctx, exposureRescan)
+		clock.Sleep(ctx, exposureRescan)
 	}
 }
 

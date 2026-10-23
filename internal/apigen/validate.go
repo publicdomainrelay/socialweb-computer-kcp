@@ -1,6 +1,7 @@
 package apigen
 
 import (
+	"cmp"
 	"fmt"
 	"math"
 	"regexp"
@@ -17,9 +18,7 @@ type Issue struct {
 
 func (i Issue) String() string {
 	path := i.Path
-	if path == "" {
-		path = "(root)"
-	}
+	path = cmp.Or(path, "(root)")
 	return path + ": " + i.Message
 }
 

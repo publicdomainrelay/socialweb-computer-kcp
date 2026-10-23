@@ -1,6 +1,7 @@
 package gatewayapi
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -57,9 +58,7 @@ func resolveVault(ctx context.Context, cfg Config, deps component.Deps) (*vaultR
 			cfg.Vault.CertAuthMount, cfg.Vault.CertAuthRole, cfg.Vault.Mount)
 	}
 	workspace := cfg.Vault.Ref.Workspace
-	if workspace == "" {
-		workspace = cfg.Workspace
-	}
+	workspace = cmp.Or(workspace, cfg.Workspace)
 	if strings.EqualFold(cfg.Vault.Ref.Kind, "RemoteOpenBao") {
 		return nil, fmt.Errorf("%w: %s/%s", component.ErrRemoteVaultDisabled, workspace, cfg.Vault.Ref.Name)
 	}
@@ -96,20 +95,12 @@ func resolveVault(ctx context.Context, cfg Config, deps component.Deps) (*vaultR
 		return nil, fmt.Errorf("gatewayapi: the OpenBao client key: %w", err)
 	}
 	certMount := cfg.Vault.CertAuthMount
-	if certMount == "" {
-		certMount = client.CertAuthMount
-	}
+	certMount = cmp.Or(certMount, client.CertAuthMount)
 	certRole := cfg.Vault.CertAuthRole
-	if certRole == "" {
-		certRole = client.CertAuthRole
-	}
+	certRole = cmp.Or(certRole, client.CertAuthRole)
 	mount := cfg.Vault.Mount
-	if mount == "" {
-		mount = client.KVMount
-	}
-	if mount == "" {
-		mount = status.Refs.KVMount
-	}
+	mount = cmp.Or(mount, client.KVMount)
+	mount = cmp.Or(mount, status.Refs.KVMount)
 	return buildVault(ctx, cfg, status.Address, cfg.Vault.Token, ca, cert, key, certMount, certRole, mount)
 }
 

@@ -1,6 +1,7 @@
 package exposure
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -19,6 +20,8 @@ import (
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 const (
@@ -136,9 +139,7 @@ func NewLinkController(opts LinkOptions) (*LinkController, error) {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	if opts.RetryAfter <= 0 {
-		opts.RetryAfter = DefaultRetryAfter
-	}
+	opts.RetryAfter = opt.Positive(opts.RetryAfter, DefaultRetryAfter)
 	return &LinkController{
 		workspace: workspace,
 		dynamic:   opts.Dynamic,
@@ -191,22 +192,25 @@ func (c *LinkController) Reconcile(ctx context.Context, dyn dynamic.Interface, u
 	switch {
 	case err != nil:
 		c.forget(name)
-		setCondition(&status.Conditions, generation, exposurev1alpha1.ComponentLinkConditionAccepted, false, reason, err.Error())
+		conds.Set(&status.Conditions, generation, exposurev1alpha1.ComponentLinkConditionAccepted, false, reason, err.Error())
 	case link.Spec.Suspend:
 		c.forget(name)
-		setCondition(&status.Conditions, generation, exposurev1alpha1.ComponentLinkConditionAccepted, false, "Suspended", "the ComponentLink is suspended")
+		conds.Set(&status.Conditions, generation, exposurev1alpha1.ComponentLinkConditionAccepted, false, "Suspended", "the ComponentLink is suspended")
 	default:
 		c.policy.Set(c.workspace, name, []bus.Link{compiled})
-		setCondition(&status.Conditions, generation, exposurev1alpha1.ComponentLinkConditionAccepted, true, "Accepted",
+		conds.Set(&status.Conditions, generation, exposurev1alpha1.ComponentLinkConditionAccepted, true, "Accepted",
 			fmt.Sprintf("the bus allows %s to call %s with %s", fromString(compiled.From), compiled.To.String(), capabilitiesString(compiled.Capabilities)))
+
 	}
 	to := linkTarget(c.workspace, link.Spec.To)
 	if c.targetRegistered(to) {
-		setCondition(&status.Conditions, generation, exposurev1alpha1.ComponentLinkConditionResolvedRefs, true, "TargetRegistered",
+		conds.Set(&status.Conditions, generation, exposurev1alpha1.ComponentLinkConditionResolvedRefs, true, "TargetRegistered",
 			fmt.Sprintf("the target %s is registered", to.String()))
+
 	} else {
-		setCondition(&status.Conditions, generation, exposurev1alpha1.ComponentLinkConditionResolvedRefs, false, "TargetMissing",
+		conds.Set(&status.Conditions, generation, exposurev1alpha1.ComponentLinkConditionResolvedRefs, false, "TargetMissing",
 			fmt.Sprintf("the target %s is not registered", to.String()))
+
 	}
 	return writeStatus(ctx, ri, name, &status)
 }
@@ -221,9 +225,7 @@ func (c *LinkController) targetRegistered(to commonv1.ObjectRef) bool {
 func linkTarget(workspace string, to commonv1.ObjectRef) commonv1.ObjectRef {
 	out := commonv1.ObjectRef{Group: strings.TrimSpace(to.Group), Kind: strings.TrimSpace(to.Kind), Name: strings.TrimSpace(to.Name),
 		Workspace: strings.TrimSpace(to.Workspace)}
-	if out.Workspace == "" {
-		out.Workspace = workspace
-	}
+	out.Workspace = cmp.Or(out.Workspace, workspace)
 	return out
 }
 
@@ -285,9 +287,7 @@ func compileFrom(workspace string, from exposurev1alpha1.ComponentLinkFrom) (bus
 			return bus.LinkFrom{}, fmt.Errorf("the ComponentLink from selector: %w", err)
 		}
 		ws := strings.TrimSpace(sel.Workspace)
-		if ws == "" {
-			ws = workspace
-		}
+		ws = cmp.Or(ws, workspace)
 		return bus.LinkFrom{Group: strings.TrimSpace(sel.Group), Kind: strings.TrimSpace(sel.Kind), Workspace: ws, Selector: selector}, nil
 	default:
 		return bus.LinkFrom{}, errors.New("the ComponentLink from needs a ref or a selector")

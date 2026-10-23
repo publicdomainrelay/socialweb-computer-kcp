@@ -2,13 +2,11 @@ package clusterprovider
 
 import (
 	"bytes"
+	"cmp"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -26,6 +24,10 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/apiserverfront"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterlink"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterstack"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/sha256sum"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/materialiser"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/portallocator"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/procgroup"
@@ -106,23 +108,6 @@ type RollReport struct {
 	Error string `json:"error,omitempty"`
 }
 
-func secsBetween(a, b time.Time) float64 { return float64(b.Sub(a).Milliseconds()) / 1000 }
-
-func writeJSONFile(path string, v any) error {
-	b, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, append(b, '\n'), 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
-}
-
 func RollRequestPath(stateDir, cluster string) (string, error) {
 	dir, err := ClusterDataDir(stateDir, cluster)
 	if err != nil {
@@ -150,7 +135,7 @@ func WriteRollRequest(stateDir, cluster string, r RollRequest) (string, error) {
 	if _, err := os.Stat(p); err == nil {
 		return "", fmt.Errorf("clusterprovider: %s already holds a roll request; the provider has not taken it yet", p)
 	}
-	return p, writeJSONFile(p, r)
+	return p, fsx.WriteJSON(p, r, 0o600)
 }
 
 func ReadRollReport(stateDir, cluster, id string) (RollReport, bool, error) {
@@ -200,9 +185,7 @@ func (r *Roller) log() *slog.Logger {
 
 func (r *Roller) Run(ctx context.Context) {
 	every := r.Interval
-	if every <= 0 {
-		every = DefaultRollInterval
-	}
+	every = opt.Positive(every, DefaultRollInterval)
 	t := time.NewTicker(every)
 	defer t.Stop()
 	for {
@@ -261,7 +244,7 @@ func (r *Roller) pass(ctx context.Context, key string) error {
 	}
 	rep.DoneAt = time.Now().UTC()
 	if rp, err := RollReportPath(r.Stack.StateDir, key, req.ID); err == nil {
-		if err := writeJSONFile(rp, rep); err != nil {
+		if err := fsx.WriteJSON(rp, rep, 0o600); err != nil {
 			r.log().Error("cluster provider: writing the roll report", "cluster", key, "err", err.Error())
 		}
 	}
@@ -323,28 +306,15 @@ func CheckSkew(active, target string, guests []string) error {
 	return nil
 }
 
-func fileSum(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
-}
-
 var sharedCAs = []string{"server-ca.crt", "client-ca.crt", "request-header-ca.crt"}
 
 func SameCAs(blueTLS, greenTLS string) error {
 	for _, n := range sharedCAs {
-		a, err := fileSum(filepath.Join(blueTLS, n))
+		a, err := sha256sum.File(filepath.Join(blueTLS, n))
 		if err != nil {
 			return err
 		}
-		b, err := fileSum(filepath.Join(greenTLS, n))
+		b, err := sha256sum.File(filepath.Join(greenTLS, n))
 		if err != nil {
 			return err
 		}
@@ -604,7 +574,7 @@ func (r *Roller) RollCluster(ctx context.Context, key string, req RollRequest) (
 		case <-time.After(idlePoll):
 		}
 	}
-	rep.IdleSeconds = secsBetween(idleStart, time.Now())
+	rep.IdleSeconds = clock.SecondsBetween(idleStart, time.Now())
 	if am, _ := minorOf(rep.FromVersion); func() bool { tm, _ := minorOf(rep.ToVersion); return tm != am }() {
 		store, ok := h.Store(key)
 		if !ok {
@@ -646,7 +616,7 @@ func (r *Roller) RollCluster(ctx context.Context, key string, req RollRequest) (
 		return abort(err)
 	}
 	rep.GreenReadyAt = time.Now().UTC()
-	rep.StartToReady = secsBetween(rep.StartedAt, rep.GreenReadyAt)
+	rep.StartToReady = clock.SecondsBetween(rep.StartedAt, rep.GreenReadyAt)
 	beforeNodes := nodeReadySince(ctx, core)
 	beforeLeases := leaseHolders(ctx, core)
 
@@ -690,7 +660,7 @@ func (r *Roller) RollCluster(ctx context.Context, key string, req RollRequest) (
 		return fail(err)
 	}
 	rep.OldStoppedAt = time.Now().UTC()
-	rep.OldStopSecs = secsBetween(rep.FlippedAt, rep.OldStoppedAt)
+	rep.OldStopSecs = clock.SecondsBetween(rep.FlippedAt, rep.OldStoppedAt)
 	if err := h.remove(ctx, ObjectName(key, "kine@"+blue)); err != nil {
 		return fail(err)
 	}
@@ -769,9 +739,7 @@ func (r *Roller) RollLink(ctx context.Context, key string, req RollRequest) (rep
 		return fail(err)
 	}
 	dumbpipe := req.Dumbpipe
-	if dumbpipe == "" {
-		dumbpipe = cur.Dumbpipe
-	}
+	dumbpipe = cmp.Or(dumbpipe, cur.Dumbpipe)
 	next := LinkRecord{Slot: to, Dumbpipe: dumbpipe}
 	cfg := r.Stack
 	prev := cfg.LinkSlot
@@ -820,7 +788,7 @@ func (r *Roller) RollLink(ctx context.Context, key string, req RollRequest) (rep
 		return fail(err)
 	}
 	rep.GreenReadyAt = time.Now().UTC()
-	rep.StartToReady = secsBetween(rep.StartedAt, rep.GreenReadyAt)
+	rep.StartToReady = clock.SecondsBetween(rep.StartedAt, rep.GreenReadyAt)
 	rep.NewListener = o.Spec.Unit
 	rep.Ticket = printedTicket(st.Spec.Log)
 	updated := cp
@@ -844,7 +812,7 @@ func (r *Roller) RollLink(ctx context.Context, key string, req RollRequest) (rep
 		return fail(err)
 	}
 	rep.OldStoppedAt = time.Now().UTC()
-	rep.OldStopSecs = secsBetween(rep.PersistedAt, rep.OldStoppedAt)
+	rep.OldStopSecs = clock.SecondsBetween(rep.PersistedAt, rep.OldStoppedAt)
 	return rep
 }
 
@@ -868,7 +836,7 @@ func (r *Roller) watch(ctx context.Context, core kubernetes.Interface, spec clus
 			}
 			if holder != p.From {
 				p.To = holder
-				p.Seconds = secsBetween(rep.OldStoppedAt, time.Now())
+				p.Seconds = clock.SecondsBetween(rep.OldStoppedAt, time.Now())
 			}
 		}
 		select {

@@ -1,6 +1,7 @@
 package clusterprovider
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -226,12 +227,8 @@ func (cfg StackConfig) SlotSpec(o materialiser.Observed, l materialiser.Leases, 
 }
 
 func (cfg StackConfig) resolveExe(path, configured, name string) (string, error) {
-	if path == "" {
-		path = configured
-	}
-	if path == "" {
-		path = name
-	}
+	path = cmp.Or(path, configured)
+	path = cmp.Or(path, name)
 	if filepath.IsAbs(path) {
 		return path, nil
 	}

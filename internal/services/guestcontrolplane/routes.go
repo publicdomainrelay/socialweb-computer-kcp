@@ -9,6 +9,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestidentity"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
 )
 
 const (
@@ -25,20 +26,9 @@ func (s *Service) routes() *http.ServeMux {
 	mux.HandleFunc("GET /v1/identity/oidc/.well-known/keys", s.handleKeys)
 	mux.HandleFunc("POST /v1/on-network", s.handleOnNetwork)
 	mux.HandleFunc("GET "+HealthPath, func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		httpjson.Write(w, http.StatusOK, map[string]any{"ok": true})
 	})
 	return mux
-}
-
-func writeJSON(w http.ResponseWriter, status int, body any) {
-	raw, err := json.Marshal(body)
-	if err != nil {
-		http.Error(w, `{"error":"InternalError"}`, http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_, _ = w.Write(raw)
 }
 
 func writeReply(w http.ResponseWriter, reply guestidentity.Reply) {
@@ -56,7 +46,7 @@ func writeReply(w http.ResponseWriter, reply guestidentity.Reply) {
 }
 
 func writeGuestError(w http.ResponseWriter, status int, message string) {
-	writeJSON(w, status, map[string]any{"errors": []string{message}})
+	httpjson.Write(w, status, map[string]any{"errors": []string{message}})
 }
 
 func readJSONMap(r *http.Request) (map[string]any, error) {
@@ -133,7 +123,7 @@ func (s *Service) handleOnNetwork(w http.ResponseWriter, r *http.Request) {
 	}
 	dec := json.NewDecoder(io.LimitReader(r.Body, MaxGuestBody+1))
 	if err := dec.Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest"})
+		httpjson.Write(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest"})
 		return
 	}
 	reply := s.guest.OnNetwork(r.Context(), r.Header.Get("Authorization"), guestidentity.OnNetworkReport{

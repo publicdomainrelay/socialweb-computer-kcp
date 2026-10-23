@@ -1,6 +1,7 @@
 package componentcore
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -33,7 +34,9 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/tlsreload"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/oauthcallback"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyaction"
 	policycontroller "github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/controller"
@@ -49,7 +52,6 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/requester"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/sshserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsfront"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsreload"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 )
 
@@ -150,9 +152,7 @@ type Core struct {
 
 func AppWorkspaces(base string) []string {
 	base = strings.TrimSpace(base)
-	if base == "" {
-		base = DefaultWorkspace
-	}
+	base = cmp.Or(base, DefaultWorkspace)
 	out := []string{base}
 	app := base + ":" + ComponentWorkspace
 	if app != base {
@@ -225,7 +225,7 @@ func New(cfg Config) (*Core, error) {
 	if cfg.FrontControl == "" {
 		cfg.FrontControl = filepath.Join(cfg.StateDir, "run", "front.sock")
 	}
-	tlsConfig, err := serverTLS(cfg)
+	tlsConfig, err := frontTLS(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -296,10 +296,21 @@ func Register(runtime *component.Runtime, policyOptions policyenginesvc.Options,
 	if err := ingressproxy.Register(runtime, identity); err != nil {
 		return err
 	}
-	for _, register := range []func(*component.Runtime) error{plc.Register, relay.Register,
-		dispatchertls.Register, gatewayapi.Register, bidder.Register, guestcontrolplane.Register, pds.Register,
-		requester.Register, sshserver.Register} {
-		if err := register(runtime); err != nil {
+	for _, entry := range []struct {
+		kind    string
+		factory component.ServiceFactory
+	}{
+		{plc.Kind, component.FactoryOf(plc.ConfigFrom, plc.New)},
+		{relay.Kind, component.FactoryOf(relay.ConfigFrom, relay.New)},
+		{dispatchertls.Kind, component.FactoryOf(dispatchertls.ConfigFrom, dispatchertls.New)},
+		{gatewayapi.Kind, component.FactoryOf(gatewayapi.ConfigFrom, gatewayapi.New)},
+		{bidder.Kind, component.FallibleFactoryOf(bidder.ConfigFrom, bidder.New)},
+		{guestcontrolplane.Kind, component.FallibleFactoryOf(guestcontrolplane.ConfigFrom, guestcontrolplane.New)},
+		{pds.Kind, component.FallibleFactoryOf(pds.ConfigFrom, pds.New)},
+		{requester.Kind, component.FallibleFactoryOf(requester.ConfigFrom, requester.New)},
+		{sshserver.Kind, component.FallibleFactoryOf(sshserver.ConfigFrom, sshserver.New)},
+	} {
+		if err := runtime.Register(entry.kind, entry.factory); err != nil {
 			return err
 		}
 	}
@@ -371,9 +382,7 @@ func (c *Core) runIdentity(ctx context.Context) {
 		if key, err := loadOAuthCLIKey(c.cfg.StateDir); err == nil {
 			oauth.CLIKey = key
 			oauth.QROrigin = strings.TrimSpace(os.Getenv("SOCIALWEB_QR_ORIGIN"))
-			if oauth.QROrigin == "" {
-				oauth.QROrigin = "https://qr.fedfork.com"
-			}
+			oauth.QROrigin = cmp.Or(oauth.QROrigin, "https://qr.fedfork.com")
 		}
 		ctl, err := identitycontroller.New(identitycontroller.Options{Workspace: workspace, Dynamic: identitycontroller.DynamicFactory(c.cfg.DynamicFactory),
 			Endpoints: c.pdsEndpoint, Resolver: &pdsclient.Resolver{Handlers: c.handlers, Timeout: 10 * time.Second},
@@ -428,26 +437,26 @@ func (c *Core) runPolicy(ctx context.Context) {
 func (c *Core) supervisePolicy(ctx context.Context, workspace string, log *slog.Logger) {
 	for ctx.Err() == nil {
 		if !c.policyBound(ctx, workspace) {
-			sleep(ctx, RetryAfter)
+			clock.Sleep(ctx, RetryAfter)
 			continue
 		}
 		handlers, err := policyActionHandlers(c.store, workspace)
 		if err != nil {
 			log.Warn("the policy controller has no action handlers", "err", err.Error())
-			sleep(ctx, RetryAfter)
+			clock.Sleep(ctx, RetryAfter)
 			continue
 		}
 		svc, err := policyenginesvc.New(policyenginesvc.Options{Store: c.store, Cluster: workspace, PLCURL: c.cfg.PLCBaseURL, Log: log, Handlers: handlers})
 		if err != nil {
 			log.Warn("the policy controller does not start", "err", err.Error())
-			sleep(ctx, RetryAfter)
+			clock.Sleep(ctx, RetryAfter)
 			continue
 		}
 		log.Info("the policy controller reconciles PolicyEngine, PolicyWorkflow, PolicyWorkflowRun and PolicyTrigger in process")
 		if err := svc.Controller().Run(ctx); ctx.Err() == nil {
 			log.Warn("the policy controller stopped; starting it again", "err", fmt.Sprint(err))
 		}
-		sleep(ctx, RetryAfter)
+		clock.Sleep(ctx, RetryAfter)
 	}
 }
 
@@ -496,7 +505,7 @@ func NewDynamicFactory(kubeconfig string) (DynamicFactory, error) {
 	}, nil
 }
 
-func serverTLS(cfg Config) (*tls.Config, error) {
+func frontTLS(cfg Config) (*tls.Config, error) {
 	certFile, keyFile := cfg.TLSCertFile, cfg.TLSKeyFile
 	if certFile == "" && keyFile == "" {
 		var err error
@@ -553,21 +562,12 @@ func Supervise(ctx context.Context, cfg Config) {
 	})
 }
 
-func sleep(ctx context.Context, d time.Duration) {
-	select {
-	case <-ctx.Done():
-	case <-time.After(d):
-	}
-}
-
 func dynamicForRestConfig(cfg *rest.Config, workspace string) (dynamic.Interface, error) {
 	if cfg == nil {
 		return nil, errors.New("componentcore: the kcp client has no rest config")
 	}
 	workspace = strings.TrimSpace(workspace)
-	if workspace == "" {
-		workspace = DefaultWorkspace
-	}
+	workspace = cmp.Or(workspace, DefaultWorkspace)
 	out := rest.CopyConfig(cfg)
 	host := strings.TrimSuffix(out.Host, "/")
 	if !strings.Contains(host, "/clusters/") {

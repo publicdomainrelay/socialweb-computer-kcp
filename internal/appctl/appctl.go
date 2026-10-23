@@ -16,7 +16,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
@@ -31,6 +30,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpapply"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/kcprest"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 )
@@ -158,18 +159,11 @@ type Controller struct {
 	pdsPublicURLs sync.Map
 }
 
-func clusterConfig(base *rest.Config, ws string) *rest.Config {
-	cfg := rest.CopyConfig(base)
-	host, _, _ := strings.Cut(strings.TrimSuffix(cfg.Host, "/"), "/clusters/")
-	cfg.Host = host + "/clusters/" + ws
-	return cfg
-}
-
 func (ctl *Controller) client(ws string, gvr schema.GroupVersionResource) (dynamic.NamespaceableResourceInterface, error) {
 	if ctl.c.Dynamic != nil {
 		return ctl.c.Dynamic.Resource(gvr), nil
 	}
-	dc, err := dynamic.NewForConfig(clusterConfig(ctl.restCfg, ws))
+	dc, err := dynamic.NewForConfig(kcprest.ForCluster(ctl.restCfg, ws))
 	if err != nil {
 		return nil, err
 	}
@@ -228,7 +222,7 @@ func Run(ctx context.Context, c Config) error {
 			return ctx.Err()
 		}
 		log.Warn("applying the applications set; retrying", "err", err.Error())
-		if !sleep(ctx, RetryAfter) {
+		if !clock.Sleep(ctx, RetryAfter) {
 			return ctx.Err()
 		}
 	}
@@ -239,7 +233,7 @@ func Run(ctx context.Context, c Config) error {
 	wg.Go(func() { ctl.sampleGC(ctx) })
 	for {
 		ctl.Pass(ctx)
-		if !sleep(ctx, c.interval()) {
+		if !clock.Sleep(ctx, c.interval()) {
 			return ctx.Err()
 		}
 	}
@@ -249,15 +243,6 @@ func Supervise(ctx context.Context, c Config) {
 	supervise.Restart(ctx, "appctl", supervise.Backoff{Min: RetryAfter, Max: RetryAfter, OnError: func(err error, _ time.Duration) {
 		c.log().Error("the application controller stopped; starting it again", "err", fmt.Sprint(err))
 	}}, func(ctx context.Context) error { return Run(ctx, c) })
-}
-
-func sleep(ctx context.Context, d time.Duration) bool {
-	select {
-	case <-ctx.Done():
-		return false
-	case <-time.After(d):
-		return true
-	}
 }
 
 func (ctl *Controller) Pass(ctx context.Context) {
@@ -294,21 +279,6 @@ func (ctl *Controller) Pass(ctx context.Context) {
 			ctl.ensureQuotas(objCtx, u)
 		}
 	}
-}
-
-func fromUnstructured(u *unstructured.Unstructured, into any) error {
-	return runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, into)
-}
-
-func toUnstructured(o any, kind string) (*unstructured.Unstructured, error) {
-	m, err := runtime.DefaultUnstructuredConverter.ToUnstructured(o)
-	if err != nil {
-		return nil, err
-	}
-	u := &unstructured.Unstructured{Object: m}
-	u.SetAPIVersion(v1alpha1.GroupVersion.String())
-	u.SetKind(kind)
-	return u, nil
 }
 
 func ownerOf(u *unstructured.Unstructured) string {

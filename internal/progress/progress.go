@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 const (
@@ -77,9 +79,7 @@ type Progress struct {
 }
 
 func New(name string, total int64, out io.Writer, tty bool, every time.Duration) *Progress {
-	if every <= 0 {
-		every = DefaultInterval
-	}
+	every = opt.Positive(every, DefaultInterval)
 	return &Progress{name: name, total: total, out: out, tty: tty, every: every, last: time.Now(),
 		quiet: out == nil || total < MinBytes}
 }

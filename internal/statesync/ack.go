@@ -1,6 +1,7 @@
 package statesync
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -66,9 +67,7 @@ func (c *Controller) acknowledge(ctx context.Context, dyn dynamic.Interface, obj
 		return err
 	}
 	fieldManager := strings.TrimSpace(ack.FieldManager)
-	if fieldManager == "" {
-		fieldManager = FieldManager
-	}
+	fieldManager = cmp.Or(fieldManager, FieldManager)
 	if _, err := ri.Patch(ctx, name, types.MergePatchType, body, metav1.PatchOptions{FieldManager: fieldManager}, "status"); err != nil {
 		return fmt.Errorf("statesync: patching the status of %s: %w", name, err)
 	}

@@ -2,6 +2,7 @@ package requester
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -282,26 +283,6 @@ func (p *PDSStore) DID() string {
 	return p.did
 }
 
-func recordPath(repo, collection, rkey string) (pdsclient.RepoPath, error) {
-	did, err := syntax.ParseDID(repo)
-	if err != nil {
-		return pdsclient.RepoPath{}, fmt.Errorf("%w: repo %q: %v", market.ErrInvalidRef, repo, err)
-	}
-	nsid, err := syntax.ParseNSID(collection)
-	if err != nil {
-		return pdsclient.RepoPath{}, fmt.Errorf("%w: collection %q: %v", market.ErrInvalidRef, collection, err)
-	}
-	path := pdsclient.RepoPath{Repo: did, Collection: nsid}
-	if rkey != "" {
-		key, err := syntax.ParseRecordKey(rkey)
-		if err != nil {
-			return pdsclient.RepoPath{}, fmt.Errorf("%w: rkey %q: %v", market.ErrInvalidRef, rkey, err)
-		}
-		path.Rkey = key
-	}
-	return path, nil
-}
-
 func pdsError(op string, err error) error {
 	var failure *pdsclient.XRPCError
 	if errors.As(err, &failure) && (failure.StatusCode == 404 || failure.Code == "RecordNotFound") {
@@ -336,7 +317,7 @@ func (p *PDSStore) CreateRecord(ctx context.Context, repoDID, collection string,
 	if p == nil || p.pds == nil {
 		return market.StrongRef{}, errors.New("requester: the PDS store is not configured")
 	}
-	path, err := recordPath(repoDID, collection, "")
+	path, err := pdsclient.ParseRepoPath(repoDID, collection, "")
 	if err != nil {
 		return market.StrongRef{}, err
 	}
@@ -358,7 +339,7 @@ func (p *PDSStore) PutRecord(ctx context.Context, repoDID, collection, rkey stri
 	if rkey == "" {
 		rkey = syntax.NewTIDNow(0).String()
 	}
-	path, err := recordPath(repoDID, collection, rkey)
+	path, err := pdsclient.ParseRepoPath(repoDID, collection, rkey)
 	if err != nil {
 		return market.StrongRef{}, err
 	}
@@ -371,9 +352,7 @@ func (p *PDSStore) PutRecord(ctx context.Context, repoDID, collection, rkey stri
 		return market.StrongRef{}, pdsError("putRecord of "+repoDID+"/"+collection+"/"+rkey, err)
 	}
 	uri := result.URI.String()
-	if uri == "" {
-		uri = "at://" + repoDID + "/" + collection + "/" + rkey
-	}
+	uri = cmp.Or(uri, "at://"+repoDID+"/"+collection+"/"+rkey)
 	if !result.CID.Defined() {
 		return market.StrongRef{}, fmt.Errorf("requester: putRecord of %s returned no cid", uri)
 	}
@@ -384,7 +363,7 @@ func (p *PDSStore) DeleteRecord(ctx context.Context, repoDID, collection, rkey s
 	if p == nil || p.pds == nil {
 		return errors.New("requester: the PDS store is not configured")
 	}
-	path, err := recordPath(repoDID, collection, rkey)
+	path, err := pdsclient.ParseRepoPath(repoDID, collection, rkey)
 	if err != nil {
 		return err
 	}
@@ -403,7 +382,7 @@ func (p *PDSStore) GetRecord(ctx context.Context, repoDID, collection, rkey stri
 			return reader.GetRecord(ctx, repoDID, collection, rkey)
 		}
 	}
-	path, err := recordPath(repoDID, collection, rkey)
+	path, err := pdsclient.ParseRepoPath(repoDID, collection, rkey)
 	if err != nil {
 		return market.ResolvedRecord{}, err
 	}
@@ -416,9 +395,7 @@ func (p *PDSStore) GetRecord(ctx context.Context, repoDID, collection, rkey stri
 		return market.ResolvedRecord{}, err
 	}
 	uri := record.URI.String()
-	if uri == "" {
-		uri = "at://" + repoDID + "/" + collection + "/" + rkey
-	}
+	uri = cmp.Or(uri, "at://"+repoDID+"/"+collection+"/"+rkey)
 	return market.ResolvedRecord{URI: uri, CID: record.CID.String(), Value: value}, nil
 }
 
@@ -434,7 +411,7 @@ func (p *PDSStore) ListRecords(ctx context.Context, repoDID, collection string, 
 	if limit <= 0 || limit > 100 {
 		limit = 100
 	}
-	path, err := recordPath(repoDID, collection, "")
+	path, err := pdsclient.ParseRepoPath(repoDID, collection, "")
 	if err != nil {
 		return market.ListPage{}, err
 	}

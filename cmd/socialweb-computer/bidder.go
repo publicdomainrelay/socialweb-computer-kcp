@@ -27,6 +27,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestimage"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestimagerelease"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/progress"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/bidder"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/request"
@@ -347,7 +348,7 @@ func (r *bidderRun) marketNetwork() (devinstance.Layout, devinstance.Record, err
 		return l, devinstance.Record{}, err
 	}
 	var rec devinstance.Record
-	if err := devinstance.ReadJSON(l.Record, &rec); err != nil {
+	if err := fsx.ReadJSON(l.Record, &rec); err != nil {
 		return l, rec, fmt.Errorf("market network %s has no instance record (dev up --profile market-network first): %w", r.network, err)
 	}
 	if rec.Profile != bootstrap.ProfileMarketNetwork || rec.AdminKubeconfig == "" {

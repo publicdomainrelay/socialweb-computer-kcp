@@ -142,6 +142,3 @@ func (p *Provider) Bootstrap(ctx context.Context, ref Ref, cl *v1alpha1.Cluster)
 	)
 	return nil
 }
-
-//go:fix inline
-func ptr[T any](v T) *T { return new(v) }

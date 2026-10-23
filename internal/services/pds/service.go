@@ -1,6 +1,7 @@
 package pds
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -53,9 +54,7 @@ var _ component.Service = (*Service)(nil)
 
 func New(cfg Config) (*Service, error) {
 	mode := cfg.Mode
-	if mode == "" {
-		mode = atpds.ModeFull
-	}
+	mode = cmp.Or(mode, atpds.ModeFull)
 	if mode != atpds.ModeFull && mode != atpds.ModeRepo {
 		return nil, fmt.Errorf("pds: unknown mode %q", mode)
 	}
@@ -111,9 +110,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	if cfg.Deps.Log == nil {
 		cfg.Deps.Log = deps.Log
 	}
-	if cfg.StateDir == "" {
-		cfg.StateDir = deps.StateDir
-	}
+	cfg.StateDir = cmp.Or(cfg.StateDir, deps.StateDir)
 	if cfg.StateDir == "" {
 		return errors.New("pds: a state directory is required")
 	}
@@ -148,17 +145,11 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	}()
 
 	key := cfg.Key
-	if key.Kind == "" {
-		key.Kind = Kind
-	}
-	if key.Name == "" {
-		key.Name = "default"
-	}
+	key.Kind = cmp.Or(key.Kind, Kind)
+	key.Name = cmp.Or(key.Name, "default")
 	logicalURL := "http://" + logicalHost(key)
 	baseURL := cfg.PublicBaseURL
-	if baseURL == "" {
-		baseURL = logicalURL
-	}
+	baseURL = cmp.Or(baseURL, logicalURL)
 	if cfg.PLCURL != "" && cfg.Deps.Log != nil {
 		cfg.Deps.Log.Info("pds plc directory", "url", cfg.PLCURL, "publicBaseURL", baseURL)
 	}
@@ -357,9 +348,7 @@ func (s *Service) oauthConfig(ctx context.Context, cfg Config, baseURL string, c
 		return nil, fmt.Errorf("pds: invalid service DID: %w", err)
 	}
 	issuer := opts.Issuer
-	if issuer == "" {
-		issuer = baseURL
-	}
+	issuer = cmp.Or(issuer, baseURL)
 	return &atpds.OAuthConfig{
 		Issuer:                  issuer,
 		Signer:                  oauth.Signer{DID: signerDID, Key: signerKey},
