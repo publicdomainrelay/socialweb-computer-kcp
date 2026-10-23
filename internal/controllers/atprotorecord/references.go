@@ -13,9 +13,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/atprotorepo/binding"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/binding"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
 )
 

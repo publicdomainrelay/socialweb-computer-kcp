@@ -23,12 +23,12 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
 	atpds "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pds"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pds/files"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pds/plcsubmit"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/repo"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/kcp"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/pds/files"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/pds/plcsubmit"
 )
 
 const (

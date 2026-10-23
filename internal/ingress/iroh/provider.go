@@ -21,10 +21,10 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterlink"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/ingress"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/ingress/loopback"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/irohdial"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/childproc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/loopback"
 )
 
 const (
