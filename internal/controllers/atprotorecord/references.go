@@ -9,14 +9,13 @@ import (
 	"strconv"
 	"strings"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/dynamic"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atprotorepo/binding"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
 )
 
@@ -135,16 +134,11 @@ func readReference(ctx context.Context, refs References, from v1alpha1.AtprotoVa
 	if client == nil {
 		return nil, errors.New("no dynamic client")
 	}
-	resource := client.Resource(ReferenceResource(from))
-	var getter dynamic.ResourceInterface = resource
-	if namespace := strings.TrimSpace(from.Namespace); namespace != "" {
-		getter = resource.Namespace(namespace)
-	}
-	object, err := getter.Get(ctx, strings.TrimSpace(from.Name), metav1.GetOptions{})
+	object, err := kube.Get[map[string]any](ctx, client.Resource(ReferenceResource(from)).In(strings.TrimSpace(from.Namespace)), strings.TrimSpace(from.Name))
 	if err != nil {
 		return nil, err
 	}
-	return object.Object, nil
+	return *object, nil
 }
 
 func ReadOwn(ctx context.Context, req ctlruntime.Request, from v1alpha1.AtprotoValueFrom) (map[string]any, bool, error) {
@@ -245,7 +239,7 @@ func ReferenceResource(from v1alpha1.AtprotoValueFrom) schema.GroupVersionResour
 	if resource == "" {
 		resource = strs.Pluralize(from.Kind)
 	}
-	return schema.GroupVersionResource{Group: group, Version: version, Resource: resource}
+	return schema.GroupVersion{Group: group, Version: version}.WithResource(resource)
 }
 
 func parseFieldPath(raw string) []fieldStep {

@@ -104,10 +104,7 @@ func (c *Controller) observeCore(ctx context.Context, instance string) (string, 
 	}
 	for i := range list.Items {
 		item := &list.Items[i]
-		unit := item.Annotations[hostProcessUnitAnnotation]
-		if unit == "" {
-			unit = item.Spec.Unit
-		}
+		unit := item.Spec.Unit
 		if !coreUnit(unit, item.Name) {
 			continue
 		}

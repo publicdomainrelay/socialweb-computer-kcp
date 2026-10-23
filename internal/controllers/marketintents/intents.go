@@ -11,8 +11,8 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	kruntime "k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -20,6 +20,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	market "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/market"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 )
 
 const (
@@ -77,14 +78,13 @@ func (h *handle) ownerRef(ctx context.Context) (metav1.OwnerReference, error) {
 	if err != nil {
 		return ref, err
 	}
-	u := &unstructured.Unstructured{}
-	u.SetGroupVersionKind(v1alpha1.GroupVersion.WithKind(h.owner.Kind))
-	if err := cl.Get(ctx, types.NamespacedName{Name: h.owner.Name}, u); err != nil {
+	live, err := h.meta(ctx, cl, h.owner.Kind, h.owner.Name)
+	if err != nil {
 		return ref, fmt.Errorf("marketintents: reading the owner %s: %w", h.owner.String(), err)
 	}
-	ref.UID = u.GetUID()
+	ref.UID = live.UID
 	h.c.mu.Lock()
-	h.c.owners[cacheKey] = ownerUID{uid: string(u.GetUID()), at: time.Now()}
+	h.c.owners[cacheKey] = ownerUID{uid: string(live.UID), at: time.Now()}
 	h.c.mu.Unlock()
 	return ref, nil
 }
@@ -103,10 +103,25 @@ func encode(kind string, value any) (map[string]any, error) {
 	return out, nil
 }
 
-func skeleton(kind, name string) *unstructured.Unstructured {
-	u := &unstructured.Unstructured{Object: map[string]any{"metadata": map[string]any{"name": name}}}
-	u.SetGroupVersionKind(v1alpha1.GroupVersion.WithKind(kind))
-	return u
+func kindOf(kind string) schema.GroupVersionKind {
+	return v1alpha1.GroupVersion.WithKind(kind)
+}
+
+func skeleton(kind, name string) kube.Doc {
+	return kube.Doc{"apiVersion": v1alpha1.GroupVersion.String(), "kind": kind, "metadata": map[string]any{"name": name}}
+}
+
+func metadataOf(doc kube.Doc) map[string]any {
+	meta, _ := doc["metadata"].(map[string]any)
+	return meta
+}
+
+func (h *handle) meta(ctx context.Context, cl client.Client, kind, name string) (*metav1.PartialObjectMetadata, error) {
+	doc, err := kube.GetWith(ctx, cl, kindOf(kind), types.NamespacedName{Name: name})
+	if err != nil {
+		return nil, err
+	}
+	return kube.Decode[metav1.PartialObjectMetadata](doc)
 }
 
 func (h *handle) exists(ctx context.Context, kind, name string) (bool, error) {
@@ -114,7 +129,7 @@ func (h *handle) exists(ctx context.Context, kind, name string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	err = cl.Get(ctx, types.NamespacedName{Name: name}, skeleton(kind, name))
+	_, err = kube.GetWith(ctx, cl, kindOf(kind), types.NamespacedName{Name: name})
 	switch {
 	case err == nil:
 		return true, nil
@@ -125,13 +140,13 @@ func (h *handle) exists(ctx context.Context, kind, name string) (bool, error) {
 	}
 }
 
-func (h *handle) apply(ctx context.Context, u *unstructured.Unstructured, manager string) error {
+func (h *handle) apply(ctx context.Context, kind, name string, doc kube.Doc, manager string) error {
 	cl, err := h.client()
 	if err != nil {
 		return err
 	}
-	if err := cl.Apply(ctx, client.ApplyConfigurationFromUnstructured(u), client.FieldOwner(manager), client.ForceOwnership); err != nil {
-		return fmt.Errorf("marketintents: applying %s %s: %w", u.GetKind(), u.GetName(), err)
+	if err := kube.ApplyWith(ctx, cl, doc, kube.ApplyOptions{FieldManager: manager, Force: true}); err != nil {
+		return fmt.Errorf("marketintents: applying %s %s: %w", kind, name, err)
 	}
 	return nil
 }
@@ -141,9 +156,9 @@ func (h *handle) applyStatus(ctx context.Context, kind, name string, status map[
 	if err != nil {
 		return err
 	}
-	u := skeleton(kind, name)
-	u.Object["status"] = status
-	if err := cl.Status().Apply(ctx, client.ApplyConfigurationFromUnstructured(u), client.FieldOwner(manager), client.ForceOwnership); err != nil {
+	doc := skeleton(kind, name)
+	doc["status"] = status
+	if err := kube.ApplyWith(ctx, cl, doc, kube.ApplyOptions{FieldManager: manager, Force: true, Status: true}); err != nil {
 		return fmt.Errorf("marketintents: applying the status of %s %s: %w", kind, name, err)
 	}
 	return nil
@@ -169,20 +184,29 @@ func (h *handle) create(ctx context.Context, kind string, meta metav1.ObjectMeta
 		}
 		owners = []metav1.OwnerReference{owner}
 	}
-	u := skeleton(kind, name)
+	doc := skeleton(kind, name)
+	held := metadataOf(doc)
 	if len(meta.Labels) > 0 {
-		u.SetLabels(meta.Labels)
+		held["labels"] = stringMap(meta.Labels)
 	}
 	if len(meta.Annotations) > 0 {
-		u.SetAnnotations(meta.Annotations)
+		held["annotations"] = stringMap(meta.Annotations)
 	}
-	u.SetOwnerReferences(owners)
+	refs := make([]any, 0, len(owners))
+	for i := range owners {
+		ref, err := kruntime.DefaultUnstructuredConverter.ToUnstructured(&owners[i])
+		if err != nil {
+			continue
+		}
+		refs = append(refs, ref)
+	}
+	held["ownerReferences"] = refs
 	value, err := encode(kind+" spec", spec)
 	if err != nil {
 		return err
 	}
-	u.Object["spec"] = value
-	return h.apply(ctx, u, manager)
+	doc["spec"] = value
+	return h.apply(ctx, kind, name, doc, manager)
 }
 
 func (h *handle) applySpecField(ctx context.Context, kind, name, field string, value any, manager string) error {
@@ -197,9 +221,9 @@ func (h *handle) applySpecField(ctx context.Context, kind, name, field string, v
 	if err != nil {
 		return err
 	}
-	u := skeleton(kind, name)
-	u.Object["spec"] = encoded
-	return h.apply(ctx, u, manager)
+	doc := skeleton(kind, name)
+	doc["spec"] = encoded
+	return h.apply(ctx, kind, name, doc, manager)
 }
 
 func (h *handle) remove(ctx context.Context, kind, name string) error {
@@ -207,7 +231,7 @@ func (h *handle) remove(ctx context.Context, kind, name string) error {
 	if err != nil {
 		return err
 	}
-	if err := cl.Delete(ctx, skeleton(kind, name), client.PropagationPolicy(metav1.DeletePropagationBackground)); err != nil && !apierrors.IsNotFound(err) {
+	if err := kube.DeleteWith(ctx, cl, kindOf(kind), types.NamespacedName{Name: name}, client.PropagationPolicy(metav1.DeletePropagationBackground)); err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("marketintents: deleting %s %s: %w", kind, name, err)
 	}
 	return nil
@@ -229,9 +253,9 @@ func (h *handle) ApplyBidSpec(ctx context.Context, name string, spec v1alpha1.Bi
 	if err != nil {
 		return err
 	}
-	u := skeleton(market.KindBid, name)
-	u.Object["spec"] = value
-	return h.apply(ctx, u, FieldManagerBidSpec)
+	doc := skeleton(market.KindBid, name)
+	doc["spec"] = value
+	return h.apply(ctx, market.KindBid, name, doc, FieldManagerBidSpec)
 }
 
 func (h *handle) ApplyBidStatus(ctx context.Context, name string, status v1alpha1.BidStatus) error {
@@ -295,15 +319,15 @@ func (h *handle) SetStateSyncFinalizer(ctx context.Context, name, finalizer stri
 	if err != nil {
 		return err
 	}
-	live := skeleton(market.KindStateSync, name)
-	if err := cl.Get(ctx, types.NamespacedName{Name: name}, live); err != nil {
+	live, err := h.meta(ctx, cl, market.KindStateSync, name)
+	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil
 		}
 		return err
 	}
 	has := false
-	for _, f := range live.GetFinalizers() {
+	for _, f := range live.Finalizers {
 		if f == finalizer {
 			has = true
 		}
@@ -311,11 +335,11 @@ func (h *handle) SetStateSyncFinalizer(ctx context.Context, name, finalizer stri
 	if has == present {
 		return nil
 	}
-	u := skeleton(market.KindStateSync, name)
+	doc := skeleton(market.KindStateSync, name)
 	if present {
-		u.SetFinalizers([]string{finalizer})
+		metadataOf(doc)["finalizers"] = []any{finalizer}
 	}
-	return h.apply(ctx, u, FieldManagerStateSyncFinalizer)
+	return h.apply(ctx, market.KindStateSync, name, doc, FieldManagerStateSyncFinalizer)
 }
 
 func (h *handle) CreateComputeContract(ctx context.Context, contract v1alpha1.ComputeContract) error {
@@ -354,13 +378,21 @@ func (h *handle) mergeStatus(ctx context.Context, kind, name string, patch map[s
 	if err != nil {
 		return err
 	}
-	live := skeleton(kind, name)
-	if err := cl.Get(ctx, types.NamespacedName{Name: name}, live); err != nil {
+	live, err := kube.GetWith(ctx, cl, kindOf(kind), types.NamespacedName{Name: name})
+	if err != nil {
 		return fmt.Errorf("marketintents: reading %s %s: %w", kind, name, err)
 	}
-	current, _, _ := unstructured.NestedMap(live.Object, "status")
+	current, _ := live["status"].(map[string]any)
 	merged := mergePatch(kruntime.DeepCopyJSON(current), patch)
 	return h.applyStatus(ctx, kind, name, merged, h.manager)
+}
+
+func stringMap(in map[string]string) map[string]any {
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 func mergePatch(target, patch map[string]any) map[string]any {

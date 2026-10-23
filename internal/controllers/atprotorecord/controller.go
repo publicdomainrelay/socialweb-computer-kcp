@@ -7,8 +7,6 @@ import (
 	"log/slog"
 	"strings"
 
-	"k8s.io/client-go/dynamic"
-
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
@@ -16,6 +14,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/atprotorepo"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 )
 
 const (
@@ -50,7 +49,7 @@ const (
 
 var OwnKinds = []string{MarketIdentityKind, Kind, RecordWatchKind}
 
-type DynamicFactory func(workspace string) (dynamic.Interface, error)
+type DynamicFactory = kube.Factory
 
 type Options struct {
 	Bus *bus.Bus
@@ -225,7 +224,7 @@ func (c *Controller) finalize(ctx context.Context, req ctlruntime.Request, objec
 	return deleteRecord(ctx, repo, strings.TrimSpace(object.Spec.Collection), strings.TrimSpace(object.Spec.Rkey))
 }
 
-func (c *Controller) client(workspace string) (dynamic.Interface, error) {
+func (c *Controller) client(workspace string) (*kube.Client, error) {
 	if c.dynamic == nil {
 		return nil, nil
 	}

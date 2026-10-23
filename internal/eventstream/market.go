@@ -21,13 +21,12 @@ import (
 	cid "github.com/ipfs/go-cid"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/client-go/dynamic"
 
 	v1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/events"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/events/relay"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/kcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/statesync"
@@ -49,7 +48,7 @@ const (
 	computeEventsPrefix = "com.publicdomainrelay.temp.compute.events."
 )
 
-type DynamicFactory func(workspace string) (dynamic.Interface, error)
+type DynamicFactory = kube.Factory
 
 func newDirectory(httpClient *http.Client, plcURL, workspace string) identity.Directory {
 	return directoryAt(httpClient, cmp.Or(strings.TrimSpace(plcURL), "http://"+kcp.ServiceFQDN("plc", "default", workspace, kcp.DefaultServiceDomain)))
@@ -215,7 +214,7 @@ func (h *marketHandler) createSync(ctx context.Context, adapter, did, uri, cid, 
 	if err != nil {
 		return fmt.Errorf("eventstream: opening workspace %s: %w", h.opts.Workspace, err)
 	}
-	if _, err := dyn.Resource(statesync.StateSyncGVR).Create(ctx, &unstructured.Unstructured{Object: stored}, metav1.CreateOptions{}); err != nil {
+	if _, err := kube.Create[kube.Doc](ctx, dyn.Resource(statesync.StateSyncGVR), stored, metav1.CreateOptions{}); err != nil {
 		if apierrors.IsAlreadyExists(err) {
 			return nil
 		}
