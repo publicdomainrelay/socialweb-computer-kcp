@@ -18,7 +18,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
@@ -34,21 +33,22 @@ import (
 )
 
 const (
-	RequestsDir              = "requests"
-	InvocationFile           = "invocation.json"
-	SummaryFile              = "summary.json"
-	SSHDir                   = "ssh"
-	ModeNetwork              = "network"
-	ModeStandalone           = "standalone"
-	RootName                 = "app"
-	FieldManager             = "socialweb-computer-run-request"
-	ContractTTLSeconds int32 = 8 * 24 * 60 * 60
-	SecretsPath              = "contracts/" + marketrequester.RequesterContract + "/secrets"
-	Poll                     = time.Second
-	RetryMax                 = 5 * time.Second
-	irohScheme               = "iroh://"
-	maxNameLength            = 30
-	networkConflicts         = 10
+	RequestsDir               = "requests"
+	InvocationFile            = "invocation.json"
+	SummaryFile               = "summary.json"
+	SSHDir                    = "ssh"
+	ModeNetwork               = "network"
+	ModeStandalone            = "standalone"
+	RootName                  = "app"
+	FieldManager              = "socialweb-computer-run-request"
+	ReleaseFieldManager       = "socialweb.computer/run-request"
+	ContractTTLSeconds  int32 = 8 * 24 * 60 * 60
+	SecretsPath               = "contracts/" + marketrequester.RequesterContract + "/secrets"
+	Poll                      = time.Second
+	RetryMax                  = 5 * time.Second
+	irohScheme                = "iroh://"
+	maxNameLength             = 30
+	networkConflicts          = 10
 )
 
 var nameRE = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
@@ -331,9 +331,13 @@ func (k *Kcp) CreateContract(ctx context.Context, spec v1alpha1.ComputeContractS
 }
 
 func (k *Kcp) Release(ctx context.Context) error {
-	patch := []byte(`{"spec":{"release":true}}`)
-	_, err := kube.Patch[kube.Doc](ctx, k.dyn.Resource(compose.ComputeContractGVR), marketrequester.RequesterContract, types.MergePatchType, patch,
-		metav1.PatchOptions{FieldManager: FieldManager})
+	contracts := k.dyn.Resource(compose.ComputeContractGVR)
+	if _, err := kube.Get[kube.Doc](ctx, contracts, marketrequester.RequesterContract); err != nil {
+		return err
+	}
+	doc := kube.Doc{"apiVersion": v1alpha1.GroupVersion.String(), "kind": "ComputeContract",
+		"metadata": map[string]any{"name": marketrequester.RequesterContract}, "spec": map[string]any{"release": true}}
+	_, err := kube.Apply[kube.Doc](ctx, contracts, doc, kube.ApplyOptions{FieldManager: ReleaseFieldManager, Force: true})
 	return err
 }
 
