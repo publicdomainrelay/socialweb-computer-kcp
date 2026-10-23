@@ -1,4 +1,4 @@
-package gatewayapi
+package gatewayhttp
 
 import (
 	"context"
@@ -75,7 +75,7 @@ func (c caller) DID() string { return c.did }
 
 func (c caller) ServiceAuth(ctx context.Context, audience, lxm string) (string, error) {
 	if c.fn == nil {
-		return "", errors.New("gatewayapi: no service auth source")
+		return "", errors.New("gatewayhttp: no service auth source")
 	}
 	return c.fn(ctx, audience, lxm)
 }
@@ -100,7 +100,7 @@ type ClusterGatewayError struct {
 }
 
 func (e *ClusterGatewayError) Error() string {
-	return fmt.Sprintf("gatewayapi: cluster gateway: %s: %s", e.Code, e.Message)
+	return fmt.Sprintf("gatewayhttp: cluster gateway: %s: %s", e.Code, e.Message)
 }
 
 type DirectClusterGateway struct {
@@ -109,7 +109,7 @@ type DirectClusterGateway struct {
 
 func (d DirectClusterGateway) server() (*gateway.Server, error) {
 	if d.Server == nil {
-		return nil, errors.New("gatewayapi: no direct gateway server")
+		return nil, errors.New("gatewayhttp: no direct gateway server")
 	}
 	return d.Server, nil
 }
@@ -196,7 +196,7 @@ type XRPCClusterGateway struct {
 
 func (x *XRPCClusterGateway) base(ctx context.Context) (string, error) {
 	if x.BaseURL == nil {
-		return "", errors.New("gatewayapi: the cluster gateway has no URL")
+		return "", errors.New("gatewayhttp: the cluster gateway has no URL")
 	}
 	raw, err := x.BaseURL(ctx)
 	if err != nil {
@@ -230,7 +230,7 @@ func (x *XRPCClusterGateway) call(ctx context.Context, c ClusterCaller, nsid str
 	} else {
 		raw, err := json.Marshal(bodyOrEmpty(body))
 		if err != nil {
-			return fmt.Errorf("gatewayapi: encoding %s: %w", nsid, err)
+			return fmt.Errorf("gatewayhttp: encoding %s: %w", nsid, err)
 		}
 		reader = strings.NewReader(string(raw))
 	}
@@ -280,7 +280,7 @@ func (x *XRPCClusterGateway) call(ctx context.Context, c ClusterCaller, nsid str
 	}
 	if out != nil {
 		if err := json.Unmarshal(raw, out); err != nil {
-			return fmt.Errorf("gatewayapi: decoding %s: %w", nsid, err)
+			return fmt.Errorf("gatewayhttp: decoding %s: %w", nsid, err)
 		}
 	}
 	return nil
@@ -364,10 +364,10 @@ type ClusterAPI struct {
 
 func NewClusterAPI(opts ClusterOptions) (*ClusterAPI, error) {
 	if opts.Gateway == nil {
-		return nil, errors.New("gatewayapi: no cluster gateway")
+		return nil, errors.New("gatewayhttp: no cluster gateway")
 	}
 	if opts.Caller == nil {
-		return nil, errors.New("gatewayapi: no caller authenticator")
+		return nil, errors.New("gatewayhttp: no caller authenticator")
 	}
 	if opts.MaxKubeconfigTTLSec <= 0 {
 		opts.MaxKubeconfigTTLSec = DefaultMaxKubeconfigTTL

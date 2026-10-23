@@ -18,8 +18,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap/table"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpdatastore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpstore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/pgunit"
 )
 
@@ -54,7 +54,7 @@ type Config struct {
 	OnStep       func(step string)
 	OnTick       func()
 	Application  *table.App
-	Retention    kcpstore.BackupRetention
+	Retention    kcpdatastore.BackupRetention
 	Log          *slog.Logger
 	silent       map[string]bool
 	portDeadline time.Time
@@ -154,9 +154,9 @@ func initdb(ctx context.Context, p Params) error {
 	return err
 }
 
-func (p Params) storeBackup(r kcpstore.BackupRetention, log *slog.Logger) func(ctx context.Context) (string, error) {
+func (p Params) storeBackup(r kcpdatastore.BackupRetention, log *slog.Logger) func(ctx context.Context) (string, error) {
 	prune := func(dir, prefix, suffix, newest string) {
-		removed, err := kcpstore.PruneBackups(dir, prefix, suffix, newest, r, time.Now())
+		removed, err := kcpdatastore.PruneBackups(dir, prefix, suffix, newest, r, time.Now())
 		if err != nil {
 			log.Warn("store backup prune incomplete", "dir", dir, "err", err)
 		}
@@ -167,11 +167,11 @@ func (p Params) storeBackup(r kcpstore.BackupRetention, log *slog.Logger) func(c
 	if p.App.Store != table.StorePostgres {
 		return func(context.Context) (string, error) {
 			kineDir := p.KineDir(p.App.KineOf(p.App.Slots[0]))
-			out, err := kcpstore.BackupSqlite(kineDir, time.Now())
+			out, err := kcpdatastore.BackupSqlite(kineDir, time.Now())
 			if err != nil {
 				return "", err
 			}
-			prune(filepath.Join(kineDir, kcpstore.BackupsDir), "", "", out)
+			prune(filepath.Join(kineDir, kcpdatastore.BackupsDir), "", "", out)
 			return out, nil
 		}
 	}
@@ -180,20 +180,20 @@ func (p Params) storeBackup(r kcpstore.BackupRetention, log *slog.Logger) func(c
 		if err != nil {
 			return "", err
 		}
-		out, err := in.Dump(ctx, p.PgSocketDir(), kcpstore.PostgresUser, kcpstore.KineDatabase, p.BackupsDir(), time.Now())
+		out, err := in.Dump(ctx, p.PgSocketDir(), kcpdatastore.PostgresUser, kcpdatastore.KineDatabase, p.BackupsDir(), time.Now())
 		if err != nil {
 			return "", err
 		}
-		prune(p.BackupsDir(), kcpstore.KineDatabase+"-", ".sql", out)
+		prune(p.BackupsDir(), kcpdatastore.KineDatabase+"-", ".sql", out)
 		return out, nil
 	}
 }
 
 func waitPostgres(ctx context.Context, p Params, progress ...func()) error {
-	if err := pgunit.WaitReady(ctx, p.PgSocketDir(), kcpstore.PostgresUser, progress...); err != nil {
+	if err := pgunit.WaitReady(ctx, p.PgSocketDir(), kcpdatastore.PostgresUser, progress...); err != nil {
 		return fmt.Errorf("bootstrap: %w", err)
 	}
-	if _, err := pgunit.CreateDatabase(ctx, p.PgSocketDir(), kcpstore.PostgresUser, kcpstore.KineDatabase); err != nil {
+	if _, err := pgunit.CreateDatabase(ctx, p.PgSocketDir(), kcpdatastore.PostgresUser, kcpdatastore.KineDatabase); err != nil {
 		return fmt.Errorf("bootstrap: creating the kine database before any kine starts: %w", err)
 	}
 	return nil

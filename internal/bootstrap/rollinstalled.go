@@ -12,8 +12,8 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/apiserverfront"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpdatastore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpstore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/versions"
 	"strings"
 )
@@ -22,7 +22,7 @@ type InstalledRoll struct {
 	Kcp           string
 	Kine          string
 	PlannedOutage bool
-	Retention     kcpstore.BackupRetention
+	Retention     kcpdatastore.BackupRetention
 	Compat        []versions.KcpCompat
 	ReadyTimeout  time.Duration
 	OnListen      func(name string, addr net.Addr)

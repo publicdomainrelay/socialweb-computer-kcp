@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpstore"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpdatastore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/pgunit"
 )
 
@@ -30,13 +30,13 @@ type PostgresReading struct {
 }
 
 func ApplyKineAutovacuum(ctx context.Context, socketDir string) error {
-	_, err := pgunit.Query(ctx, socketDir, kcpstore.PostgresUser, kcpstore.KineDatabase, KineTableAutovacuum)
+	_, err := pgunit.Query(ctx, socketDir, kcpdatastore.PostgresUser, kcpdatastore.KineDatabase, KineTableAutovacuum)
 	return err
 }
 
 func ReadPostgres(ctx context.Context, socketDir string) (PostgresReading, error) {
 	var r PostgresReading
-	rows, err := pgunit.Query(ctx, socketDir, kcpstore.PostgresUser, kcpstore.KineDatabase, "SHOW autovacuum")
+	rows, err := pgunit.Query(ctx, socketDir, kcpdatastore.PostgresUser, kcpdatastore.KineDatabase, "SHOW autovacuum")
 	if err != nil {
 		return r, err
 	}
@@ -44,7 +44,7 @@ func ReadPostgres(ctx context.Context, socketDir string) (PostgresReading, error
 		return r, fmt.Errorf("storemaint: SHOW autovacuum answered %v", rows)
 	}
 	r.Autovacuum = rows[0][0]
-	rows, err = pgunit.Query(ctx, socketDir, kcpstore.PostgresUser, kcpstore.KineDatabase, kineStatsSQL)
+	rows, err = pgunit.Query(ctx, socketDir, kcpdatastore.PostgresUser, kcpdatastore.KineDatabase, kineStatsSQL)
 	if err != nil {
 		return r, err
 	}

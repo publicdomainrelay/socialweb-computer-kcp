@@ -17,7 +17,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clientcert"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gateway"
-	coreapi "github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayapi"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayhttp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/ref"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
@@ -181,8 +181,8 @@ func newClaimStore(store *kcpstore.Store, homes homeSource) *claimStore {
 	return &claimStore{claims: kcpstore.OfClusterScoped[v1alpha1.NodeClaim](store, nodeClaimGVR), homes: homes}
 }
 
-func (s *claimStore) List(ctx context.Context) ([]coreapi.NodeClaim, error) {
-	out := []coreapi.NodeClaim{}
+func (s *claimStore) List(ctx context.Context) ([]gatewayhttp.NodeClaim, error) {
+	out := []gatewayhttp.NodeClaim{}
 	homes, err := s.homes.Homes(ctx)
 	if err != nil {
 		return nil, err
@@ -196,13 +196,13 @@ func (s *claimStore) List(ctx context.Context) ([]coreapi.NodeClaim, error) {
 			return nil, err
 		}
 		for i := range items {
-			out = append(out, coreapi.NodeClaim{Workspace: home, Claim: items[i]})
+			out = append(out, gatewayhttp.NodeClaim{Workspace: home, Claim: items[i]})
 		}
 	}
 	return out, nil
 }
 
-func (s *claimStore) Get(ctx context.Context, claim coreapi.NodeClaim) (*coreapi.NodeClaim, error) {
+func (s *claimStore) Get(ctx context.Context, claim gatewayhttp.NodeClaim) (*gatewayhttp.NodeClaim, error) {
 	obj, err := s.claims.Get(ctx, ref.New(claim.Workspace, "", claim.Name()))
 	if err != nil {
 		if kcpstore.IsNotFound(err) {
@@ -213,10 +213,10 @@ func (s *claimStore) Get(ctx context.Context, claim coreapi.NodeClaim) (*coreapi
 	if obj == nil {
 		return nil, nil
 	}
-	return &coreapi.NodeClaim{Workspace: claim.Workspace, Claim: *obj}, nil
+	return &gatewayhttp.NodeClaim{Workspace: claim.Workspace, Claim: *obj}, nil
 }
 
-func (s *claimStore) ReplaceStatus(ctx context.Context, claim coreapi.NodeClaim, status v1alpha1.NodeClaimStatus) error {
+func (s *claimStore) ReplaceStatus(ctx context.Context, claim gatewayhttp.NodeClaim, status v1alpha1.NodeClaimStatus) error {
 	raw, err := json.Marshal(map[string]any{"status": status})
 	if err != nil {
 		return fmt.Errorf("gatewayapi: encoding the NodeClaim status: %w", err)
@@ -241,7 +241,7 @@ func (s *claimStore) ReplaceStatus(ctx context.Context, claim coreapi.NodeClaim,
 	return lastErr
 }
 
-func (s *claimStore) AddFinalizer(ctx context.Context, claim coreapi.NodeClaim) error {
+func (s *claimStore) AddFinalizer(ctx context.Context, claim gatewayhttp.NodeClaim) error {
 	target := ref.New(claim.Workspace, "", claim.Claim.Name)
 	target.ResourceVersion = claim.Claim.ResourceVersion
 	seen := map[string]bool{}
@@ -259,7 +259,7 @@ func (s *claimStore) AddFinalizer(ctx context.Context, claim coreapi.NodeClaim) 
 	return s.claims.AddFinalizer(ctx, target, finalizers)
 }
 
-func (s *claimStore) RemoveFinalizer(ctx context.Context, claim coreapi.NodeClaim) error {
+func (s *claimStore) RemoveFinalizer(ctx context.Context, claim gatewayhttp.NodeClaim) error {
 	target := ref.New(claim.Workspace, "", claim.Claim.Name)
 	target.ResourceVersion = claim.Claim.ResourceVersion
 	return s.claims.RemoveKnownFinalizer(ctx, target, claim.Claim.Finalizers, v1alpha1.FinalizerNodeClaim)
@@ -273,7 +273,7 @@ func newClusterLinkReader(store *kcpstore.Store) *clusterLinkReader {
 	return &clusterLinkReader{links: kcpstore.OfClusterScoped[v1alpha1.ClusterLink](store, clusterLinkGVR)}
 }
 
-func (r *clusterLinkReader) Get(ctx context.Context, workspace, name string) (*coreapi.ClusterLinkView, error) {
+func (r *clusterLinkReader) Get(ctx context.Context, workspace, name string) (*gatewayhttp.ClusterLinkView, error) {
 	link, err := r.links.Get(ctx, ref.New(workspace, "", name))
 	if err != nil {
 		if kcpstore.IsNotFound(err) {
@@ -284,7 +284,7 @@ func (r *clusterLinkReader) Get(ctx context.Context, workspace, name string) (*c
 	if link == nil {
 		return nil, nil
 	}
-	return &coreapi.ClusterLinkView{Workspace: workspace, Name: link.Name, Status: link.Status}, nil
+	return &gatewayhttp.ClusterLinkView{Workspace: workspace, Name: link.Name, Status: link.Status}, nil
 }
 
 type contractClient struct {
@@ -335,7 +335,7 @@ func (c *contractClient) CreateIfAbsent(ctx context.Context, contract *v1alpha1.
 			return false, err
 		}
 		if int64(len(current)) >= c.quota {
-			return false, coreapi.ErrQuotaExceeded
+			return false, gatewayhttp.ErrQuotaExceeded
 		}
 	}
 	if err := c.contracts.Create(ctx, c.workspace, contract); err != nil {

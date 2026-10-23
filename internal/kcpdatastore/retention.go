@@ -1,4 +1,4 @@
-package kcpstore
+package kcpdatastore
 
 import (
 	"errors"
@@ -26,10 +26,10 @@ func DefaultRetention() BackupRetention {
 
 func RetentionOf(keep, keepDays int) (BackupRetention, error) {
 	if keep < 1 {
-		return BackupRetention{}, fmt.Errorf("kcpstore: store-backup-keep must be 1 or more, got %d", keep)
+		return BackupRetention{}, fmt.Errorf("kcpdatastore: store-backup-keep must be 1 or more, got %d", keep)
 	}
 	if keepDays < 1 {
-		return BackupRetention{}, fmt.Errorf("kcpstore: store-backup-keep-days must be 1 or more, got %d", keepDays)
+		return BackupRetention{}, fmt.Errorf("kcpdatastore: store-backup-keep-days must be 1 or more, got %d", keepDays)
 	}
 	return BackupRetention{Keep: keep, MaxAge: time.Duration(keepDays) * 24 * time.Hour}, nil
 }

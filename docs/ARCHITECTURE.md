@@ -2481,7 +2481,7 @@ marked "decided by Claude, user may veto".
    is a deadlock. A test asserts it on every `After`/`Wants`/`Requires`/`BindsTo`/`Requisite` line
    (watched to fail with meshd added to the agent's `After`).
 6. *Where the binary comes from.* The door serves pinned downloads at `/downloads/<sha256>/<name>`
-   (`internal/gatewayapi/downloads.go`, `LoadPinnedDownloads`):
+   (`internal/gatewayhttp/downloads.go`, `LoadPinnedDownloads`):
    every file in its downloads dir with a `sha256sum`-format `<name>.sha256` sidecar, held in memory,
    served only at its own hash and name with `cache-control: public, max-age=31536000, immutable`
    and `etag "<sha256>"`; a sidecar that names another file, or bytes that do not hash to it, stop
@@ -3757,7 +3757,7 @@ because it bounds a mechanism the rest of this document leans on.
     them. The row count and file size therefore plateau at about the live set plus the last 1000
     revisions, not at the live set.
   - sqlite (a bidder, and the dev instances that use kine-sqlite). The DSN carries `_auto_vacuum=incremental`
-    (`kcpstore.SqliteParams`; the driver sets it before `journal_mode`, so a new file gets it on its first
+    (`kcpdatastore.SqliteParams`; the driver sets it before `journal_mode`, so a new file gets it on its first
     connection). Compaction deletes rows and leaves free pages; with `auto_vacuum=NONE` the file never
     shrinks. `internal/storemaint` runs in the core (`devcore.Run`, every core: bidder, gateway, dev), first
     pass after 30 s and then every 5 minutes: it opens the file as a second connection (modernc.org/sqlite,
@@ -3771,7 +3771,7 @@ because it bounds a mechanism the rest of this document leans on.
     without a full `VACUUM`, and a prod deployment preserves nothing (AGENTS.md, Prod deployments), so no
     `VACUUM` runs: an old file reports `autoVacuum: none` in `status.store` and `incremental_vacuum` is
     skipped for it. The plan item's risk line, a one-time `VACUUM` at the next start, is not built.
-  - postgres (the gateway's kcp store). `kcpstore.PostgresSettings` (`autovacuum=on`, `track_counts=on`)
+  - postgres (the gateway's kcp store). `kcpdatastore.PostgresSettings` (`autovacuum=on`, `track_counts=on`)
     is in the store unit's argv and in `postgresctl.DefaultSettings` (tenant cluster postgres);
     the core sets the kine table's `autovacuum_vacuum_scale_factor=0.02` and `..._threshold=1000` on its
     first successful pass (`ALTER TABLE kine SET (...)`, once kine has made the table) and then reads
@@ -4896,7 +4896,7 @@ refutation.
   for darwin/arm64: vfkit v0.6.4 (66 MB universal x86_64+arm64, signed Red Hat Developer ID with
   `com.apple.security.virtualization`), gvproxy v0.9.0 (`gvproxy-darwin`, 27 MB), dumbpipe v0.39.0
   (`dumbpipe-v0.39.0-darwin-aarch64.tar.gz`), deno, bao, kcp. A unix socket path of 103 bytes binds and 104
-  fails with EINVAL on darwin (sun_path is 104), while `kcpstore`, `pgunit`, `devinstance`, `apiserverfront`,
+  fails with EINVAL on darwin (sun_path is 104), while `kcpdatastore`, `pgunit`, `devinstance`, `apiserverfront`,
   `irohdial` and `vmruntime` hold 107: every one of those constants and the install state dir
   (`/var/db/socialweb-computer/bidder/<h>/...` is long) must become OS-dependent. A home directory is mode 750
   (`drwxr-x---+`), so a daemon user cannot execute anything staged under the owner's `~/.tmp`: spike jobs run

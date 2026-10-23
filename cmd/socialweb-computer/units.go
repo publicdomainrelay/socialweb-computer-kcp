@@ -17,8 +17,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc/treeaudit"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/install"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpdatastore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpstore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/versions"
 )
 
@@ -117,7 +117,7 @@ func runUnitsRollKcp(ctx context.Context, a *app, vals clicfg.Values, rest []str
 	if err != nil {
 		return a.fail(exitRefused, "units roll kcp: ready-timeout: %v", err)
 	}
-	retention, err := kcpstore.RetentionOf(vals.Int("store-backup-keep"), vals.Int("store-backup-keep-days"))
+	retention, err := kcpdatastore.RetentionOf(vals.Int("store-backup-keep"), vals.Int("store-backup-keep-days"))
 	if err != nil {
 		return a.fail(exitRefused, "units roll kcp: %v", err)
 	}

@@ -16,7 +16,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
-	coreapi "github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayapi"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayhttp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/sshtransport"
@@ -177,7 +177,7 @@ type Config struct {
 
 	Agents sshtransport.AgentProvider
 
-	SignIn coreapi.WebSignIn
+	SignIn gatewayhttp.WebSignIn
 
 	SessionCookie string
 

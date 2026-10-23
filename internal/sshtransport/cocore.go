@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayapi"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayhttp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 )
 
@@ -425,7 +425,7 @@ func (c *Cocore) Handler() http.Handler {
 	return mux
 }
 
-func (c *Cocore) caller(w http.ResponseWriter, r *http.Request) (*gatewayapi.WebCaller, bool) {
+func (c *Cocore) caller(w http.ResponseWriter, r *http.Request) (*gatewayhttp.WebCaller, bool) {
 	who, err := c.opts.Auth.Authenticate(r)
 	if err != nil {
 		c.log.Error("cocore_identify_failed", "err", err)

@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayapi"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayhttp"
 )
 
 const (
@@ -34,11 +34,11 @@ var (
 const tidAlphabet = "234567abcdefghijklmnopqrstuvwxyz"
 
 type Authenticator interface {
-	Authenticate(r *http.Request) (*gatewayapi.WebCaller, error)
+	Authenticate(r *http.Request) (*gatewayhttp.WebCaller, error)
 }
 
 type AgentProvider interface {
-	AgentFor(caller *gatewayapi.WebCaller) gatewayapi.WebAccountAgent
+	AgentFor(caller *gatewayhttp.WebCaller) gatewayhttp.WebAccountAgent
 }
 
 type KeysOptions struct {
@@ -91,7 +91,7 @@ func (k *Keys) Handler() http.Handler {
 	return mux
 }
 
-func (k *Keys) caller(w http.ResponseWriter, r *http.Request) (*gatewayapi.WebCaller, bool) {
+func (k *Keys) caller(w http.ResponseWriter, r *http.Request) (*gatewayhttp.WebCaller, bool) {
 	who, err := k.opts.Auth.Authenticate(r)
 	if err != nil {
 		k.log.Error("keys_identify_failed", "err", err)
@@ -212,7 +212,7 @@ func (k *Keys) create(w http.ResponseWriter, r *http.Request) {
 			k.failed(w, who.DID, "register the key", err)
 			return
 		}
-		writes := []gatewayapi.Write{{Action: "update", Collection: BadgeBlueKeysNSID, Rkey: rkey, Record: record}}
+		writes := []gatewayhttp.Write{{Action: "update", Collection: BadgeBlueKeysNSID, Rkey: rkey, Record: record}}
 		if err := agent.ApplyWrites(r.Context(), who.DID, writes); err != nil {
 			k.failed(w, who.DID, "register the key", err)
 			return
@@ -232,7 +232,7 @@ func (k *Keys) remove(w http.ResponseWriter, r *http.Request) {
 		writeSSHJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid key id"})
 		return
 	}
-	writes := []gatewayapi.Write{{Action: "delete", Collection: BadgeBlueKeysNSID, Rkey: rkey}}
+	writes := []gatewayhttp.Write{{Action: "delete", Collection: BadgeBlueKeysNSID, Rkey: rkey}}
 	if err := k.opts.Agents.AgentFor(who).ApplyWrites(r.Context(), who.DID, writes); err != nil {
 		k.failed(w, who.DID, "remove the key", err)
 		return

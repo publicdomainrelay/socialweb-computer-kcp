@@ -1,4 +1,4 @@
-package gatewayapi
+package gatewayhttp
 
 import (
 	"context"
@@ -147,7 +147,7 @@ type RequestAuth struct {
 
 func NewRequestAuth(opts RequestAuthOptions) (*RequestAuth, error) {
 	if opts.SignIn == nil {
-		return nil, errors.New("gatewayapi: request auth has no sign-in backend")
+		return nil, errors.New("gatewayhttp: request auth has no sign-in backend")
 	}
 	if opts.CookieName == "" {
 		opts.CookieName = WebSessionCookie
@@ -255,7 +255,7 @@ type OAuth struct {
 
 func NewOAuth(opts OAuthOptions) (*OAuth, error) {
 	if opts.SignIn == nil {
-		return nil, errors.New("gatewayapi: OAuth has no sign-in backend")
+		return nil, errors.New("gatewayhttp: OAuth has no sign-in backend")
 	}
 	if opts.CookieName == "" {
 		opts.CookieName = WebSessionCookie

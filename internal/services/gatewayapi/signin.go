@@ -18,7 +18,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
-	coreapi "github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayapi"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayhttp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
 )
@@ -73,7 +73,7 @@ type custodySignIn struct {
 }
 
 type custodyIdentityEntry struct {
-	user coreapi.WebUser
+	user gatewayhttp.WebUser
 
 	token string
 
@@ -159,27 +159,27 @@ func (s *custodySignIn) ClientMetadata(ctx context.Context) (json.RawMessage, er
 	return s.client.clientMetadata(ctx)
 }
 
-func (s *custodySignIn) Start(ctx context.Context, identifier, redirectURI string) (coreapi.SignInStart, error) {
+func (s *custodySignIn) Start(ctx context.Context, identifier, redirectURI string) (gatewayhttp.SignInStart, error) {
 	authorizationURL, state, err := s.client.start(ctx, s.role, identifier, redirectURI)
 	if err != nil {
-		return coreapi.SignInStart{}, err
+		return gatewayhttp.SignInStart{}, err
 	}
-	return coreapi.SignInStart{AuthorizationURL: authorizationURL, State: state}, nil
+	return gatewayhttp.SignInStart{AuthorizationURL: authorizationURL, State: state}, nil
 }
 
-func (s *custodySignIn) Complete(ctx context.Context, params coreapi.SignInCompleteParams) (coreapi.SignInGrant, error) {
+func (s *custodySignIn) Complete(ctx context.Context, params gatewayhttp.SignInCompleteParams) (gatewayhttp.SignInGrant, error) {
 	login, err := s.client.complete(ctx, params.State, params.Code, params.ISS)
 	if err != nil {
-		return coreapi.SignInGrant{}, err
+		return gatewayhttp.SignInGrant{}, err
 	}
-	return coreapi.SignInGrant{
-		WebUser:      coreapi.WebUser{DID: login.DID, Handle: login.Handle, PDS: login.PDS},
+	return gatewayhttp.SignInGrant{
+		WebUser:      gatewayhttp.WebUser{DID: login.DID, Handle: login.Handle, PDS: login.PDS},
 		Token:        login.Token,
 		LeaseSeconds: login.LeaseSeconds,
 	}, nil
 }
 
-func (s *custodySignIn) Identify(ctx context.Context, token string) (*coreapi.WebUser, error) {
+func (s *custodySignIn) Identify(ctx context.Context, token string) (*gatewayhttp.WebUser, error) {
 	if token == "" {
 		return nil, nil
 	}
@@ -213,7 +213,7 @@ func (s *custodySignIn) Identify(ctx context.Context, token string) (*coreapi.We
 		return nil, nil
 	}
 	s.storeIdentity(key, token, identity, time.Now())
-	return &coreapi.WebUser{DID: identity.DID, Handle: identity.Handle, PDS: identity.PDS}, nil
+	return &gatewayhttp.WebUser{DID: identity.DID, Handle: identity.Handle, PDS: identity.PDS}, nil
 }
 
 func identityCacheWindow(now time.Time, ttlSeconds int64) (time.Time, time.Time) {
@@ -268,7 +268,7 @@ func (s *custodySignIn) storeIdentity(key [sha256.Size]byte, token string, ident
 	s.mu.Lock()
 	s.identities.Prune()
 	entry := &custodyIdentityEntry{
-		user:       coreapi.WebUser{DID: identity.DID, Handle: identity.Handle, PDS: identity.PDS},
+		user:       gatewayhttp.WebUser{DID: identity.DID, Handle: identity.Handle, PDS: identity.PDS},
 		token:      token,
 		leaseUntil: leaseUntil,
 		checkUntil: checkUntil,
@@ -494,7 +494,7 @@ func (s *custodySignIn) refreshIdentified(key [sha256.Size]byte, token string, i
 		s.identities.Delete(key)
 		return
 	}
-	entry.user = coreapi.WebUser{DID: identity.DID, Handle: identity.Handle, PDS: identity.PDS}
+	entry.user = gatewayhttp.WebUser{DID: identity.DID, Handle: identity.Handle, PDS: identity.PDS}
 	entry.leaseUntil = leaseUntil
 	entry.checkUntil = checkUntil
 	entry.renewable = identity.Renewable
@@ -504,9 +504,9 @@ func (s *custodySignIn) refreshIdentified(key [sha256.Size]byte, token string, i
 	s.identities.SetTTL(key, entry, leaseUntil.Sub(now))
 }
 
-func (s *custodySignIn) SignOut(ctx context.Context, caller *coreapi.WebCaller) (coreapi.SignOutResult, error) {
+func (s *custodySignIn) SignOut(ctx context.Context, caller *gatewayhttp.WebCaller) (gatewayhttp.SignOutResult, error) {
 	if caller == nil {
-		return coreapi.SignOutResult{}, errors.New("gatewayapi: no caller to sign out")
+		return gatewayhttp.SignOutResult{}, errors.New("gatewayapi: no caller to sign out")
 	}
 	s.forgetToken(caller.Token)
 	revoked, revokeError, signOutErr := s.client.signOut(ctx, caller.Token, caller.DID)
@@ -514,12 +514,12 @@ func (s *custodySignIn) SignOut(ctx context.Context, caller *coreapi.WebCaller) 
 		s.log.Warn("web_token_revoke_failed", "did", caller.DID, "err", err)
 	}
 	if signOutErr != nil {
-		return coreapi.SignOutResult{}, signOutErr
+		return gatewayhttp.SignOutResult{}, signOutErr
 	}
-	return coreapi.SignOutResult{Revoked: revoked, RevokeError: revokeError}, nil
+	return gatewayhttp.SignOutResult{Revoked: revoked, RevokeError: revokeError}, nil
 }
 
-func (s *custodySignIn) AgentFor(caller *coreapi.WebCaller) coreapi.WebAccountAgent {
+func (s *custodySignIn) AgentFor(caller *gatewayhttp.WebCaller) gatewayhttp.WebAccountAgent {
 	if caller == nil {
 		return nil
 	}
@@ -534,7 +534,7 @@ type custodyAgent struct {
 
 	http *http.Client
 
-	caller *coreapi.WebCaller
+	caller *gatewayhttp.WebCaller
 
 	allowInternalHTTP bool
 
@@ -639,11 +639,11 @@ func (a *custodyAgent) GetServiceAuth(ctx context.Context, aud, lxm string) (str
 	return token, custodyXRPCError(http.MethodGet, xrpc.ServiceAuthNSID, err)
 }
 
-func (a *custodyAgent) ListRecords(ctx context.Context, did, collection string, limit int) ([]coreapi.Record, error) {
+func (a *custodyAgent) ListRecords(ctx context.Context, did, collection string, limit int) ([]gatewayhttp.Record, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	out := make([]coreapi.Record, 0, limit)
+	out := make([]gatewayhttp.Record, 0, limit)
 	cursor := ""
 	for len(out) < limit {
 		page := min(limit-len(out), agentPageMax)
@@ -663,7 +663,7 @@ func (a *custodyAgent) ListRecords(ctx context.Context, did, collection string, 
 			return nil, err
 		}
 		for _, record := range payload.Records {
-			out = append(out, coreapi.Record{URI: record.URI, CID: record.CID, Value: record.Value})
+			out = append(out, gatewayhttp.Record{URI: record.URI, CID: record.CID, Value: record.Value})
 			if len(out) >= limit {
 				break
 			}
@@ -676,22 +676,22 @@ func (a *custodyAgent) ListRecords(ctx context.Context, did, collection string, 
 	return out, nil
 }
 
-func (a *custodyAgent) CreateRecord(ctx context.Context, did, collection, rkey string, record map[string]any) (coreapi.RecordRef, error) {
+func (a *custodyAgent) CreateRecord(ctx context.Context, did, collection, rkey string, record map[string]any) (gatewayhttp.RecordRef, error) {
 	body := map[string]any{"repo": did, "collection": collection, "rkey": rkey, "record": record}
 	payload, err := custodyProcedure[struct {
 		URI string `json:"uri"`
 		CID string `json:"cid"`
 	}](ctx, a, "com.atproto.repo.createRecord", body)
 	if err != nil {
-		return coreapi.RecordRef{}, err
+		return gatewayhttp.RecordRef{}, err
 	}
 	if payload.URI == "" {
-		return coreapi.RecordRef{}, errors.New("gatewayapi: createRecord returned no uri")
+		return gatewayhttp.RecordRef{}, errors.New("gatewayapi: createRecord returned no uri")
 	}
-	return coreapi.RecordRef{URI: payload.URI, CID: payload.CID}, nil
+	return gatewayhttp.RecordRef{URI: payload.URI, CID: payload.CID}, nil
 }
 
-func (a *custodyAgent) ApplyWrites(ctx context.Context, did string, writes []coreapi.Write) error {
+func (a *custodyAgent) ApplyWrites(ctx context.Context, did string, writes []gatewayhttp.Write) error {
 	encoded := make([]map[string]any, 0, len(writes))
 	for _, write := range writes {
 		entry := map[string]any{

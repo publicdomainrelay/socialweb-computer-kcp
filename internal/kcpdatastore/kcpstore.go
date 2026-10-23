@@ -1,4 +1,4 @@
-package kcpstore
+package kcpdatastore
 
 import (
 	"errors"
@@ -45,20 +45,20 @@ func (c PostgresConfig) Server() pgunit.Server {
 
 func checkSocket(path string) error {
 	if !filepath.IsAbs(path) {
-		return fmt.Errorf("kcpstore: socket path %q must be absolute", path)
+		return fmt.Errorf("kcpdatastore: socket path %q must be absolute", path)
 	}
 	if len(path) > MaxSocketPath {
-		return fmt.Errorf("kcpstore: socket path %s is %d bytes, over the %d-byte sun_path limit", path, len(path), MaxSocketPath)
+		return fmt.Errorf("kcpdatastore: socket path %s is %d bytes, over the %d-byte sun_path limit", path, len(path), MaxSocketPath)
 	}
 	return nil
 }
 
 func kineArgv(c KineConfig, endpoint string) ([]string, error) {
 	if !filepath.IsAbs(c.Exec) {
-		return nil, fmt.Errorf("kcpstore: the kine executable must be an absolute path, got %q (dev builds take it from kine-path, never PATH)", c.Exec)
+		return nil, fmt.Errorf("kcpdatastore: the kine executable must be an absolute path, got %q (dev builds take it from kine-path, never PATH)", c.Exec)
 	}
 	if !filepath.IsAbs(c.Dir) {
-		return nil, errors.New("kcpstore: the kine directory must be absolute")
+		return nil, errors.New("kcpdatastore: the kine directory must be absolute")
 	}
 	if err := checkSocket(c.Socket); err != nil {
 		return nil, err
@@ -121,7 +121,7 @@ func KinePostgresSpec(c KineConfig, store string) (hostsvc.UnitSpec, error) {
 
 func PostgresSpec(c PostgresConfig) (hostsvc.UnitSpec, error) {
 	if c.Install.Bin == "" || !filepath.IsAbs(c.Install.Bin) {
-		return hostsvc.UnitSpec{}, fmt.Errorf("kcpstore: the postgres asset tree is unset or relative (%q)", c.Install.Root)
+		return hostsvc.UnitSpec{}, fmt.Errorf("kcpdatastore: the postgres asset tree is unset or relative (%q)", c.Install.Root)
 	}
 	return c.Install.UnitSpec(c.Unit, c.Slice, "postgres holding one application instance's kcp store (unix socket only)", c.Server())
 }

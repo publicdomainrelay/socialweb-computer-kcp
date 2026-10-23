@@ -17,7 +17,7 @@ import (
 	"github.com/bluesky-social/indigo/atproto/identity"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
-	coreapi "github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayapi"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayhttp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/sshtransport"
 )
@@ -62,15 +62,15 @@ func (a runnerAdapter) Run(ctx context.Context, account sshtransport.AuthorizedA
 
 type denyAuth struct{}
 
-func (denyAuth) Authenticate(r *http.Request) (*coreapi.WebCaller, error) {
+func (denyAuth) Authenticate(r *http.Request) (*gatewayhttp.WebCaller, error) {
 	return nil, nil
 }
 
 type signInAgents struct {
-	signIn coreapi.WebSignIn
+	signIn gatewayhttp.WebSignIn
 }
 
-func (a signInAgents) AgentFor(caller *coreapi.WebCaller) coreapi.WebAccountAgent {
+func (a signInAgents) AgentFor(caller *gatewayhttp.WebCaller) gatewayhttp.WebAccountAgent {
 	if a.signIn == nil {
 		return unavailableAgent{}
 	}
@@ -83,21 +83,21 @@ func (unavailableAgent) GetServiceAuth(ctx context.Context, aud, lxm string) (st
 	return "", errors.New("sshserver: no account session is configured")
 }
 
-func (unavailableAgent) ListRecords(ctx context.Context, did, collection string, limit int) ([]coreapi.Record, error) {
+func (unavailableAgent) ListRecords(ctx context.Context, did, collection string, limit int) ([]gatewayhttp.Record, error) {
 	return nil, errors.New("sshserver: no account session is configured")
 }
 
-func (unavailableAgent) CreateRecord(ctx context.Context, did, collection, rkey string, record map[string]any) (coreapi.RecordRef, error) {
-	return coreapi.RecordRef{}, errors.New("sshserver: no account session is configured")
+func (unavailableAgent) CreateRecord(ctx context.Context, did, collection, rkey string, record map[string]any) (gatewayhttp.RecordRef, error) {
+	return gatewayhttp.RecordRef{}, errors.New("sshserver: no account session is configured")
 }
 
-func (unavailableAgent) ApplyWrites(ctx context.Context, did string, writes []coreapi.Write) error {
+func (unavailableAgent) ApplyWrites(ctx context.Context, did string, writes []gatewayhttp.Write) error {
 	return errors.New("sshserver: no account session is configured")
 }
 
 type unavailableAgents struct{}
 
-func (unavailableAgents) AgentFor(caller *coreapi.WebCaller) coreapi.WebAccountAgent {
+func (unavailableAgents) AgentFor(caller *gatewayhttp.WebCaller) gatewayhttp.WebAccountAgent {
 	return unavailableAgent{}
 }
 
@@ -359,7 +359,7 @@ func (s *Service) authenticator() sshtransport.Authenticator {
 	}
 	var auths multiAuth
 	if s.cfg.SignIn != nil {
-		auth, err := coreapi.NewRequestAuth(coreapi.RequestAuthOptions{
+		auth, err := gatewayhttp.NewRequestAuth(gatewayhttp.RequestAuthOptions{
 			SignIn:       s.cfg.SignIn,
 			PublicOrigin: s.cfg.PublicOrigin,
 			CookieName:   s.cfg.SessionCookie,

@@ -15,7 +15,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostprocess"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpstore"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpdatastore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/pgunit"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/postgresctl"
@@ -108,7 +108,7 @@ func StoreMaintConfig(bcfg bootstrap.Config, rec devinstance.Record, log *slog.L
 		return storemaint.Config{}, err
 	}
 	p := bcfg.Params(app)
-	c := storemaint.Config{Kind: kcpstore.Kind(app.Store), PgSocketDir: p.PgSocketDir(), Log: log}
+	c := storemaint.Config{Kind: kcpdatastore.Kind(app.Store), PgSocketDir: p.PgSocketDir(), Log: log}
 	for _, slot := range app.KineSlots() {
 		c.SqliteDirs = append(c.SqliteDirs, p.KineDir(slot))
 	}

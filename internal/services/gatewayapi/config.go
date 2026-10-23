@@ -20,7 +20,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clientcert"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gateway"
-	coreapi "github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayapi"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayhttp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestnet"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
@@ -210,7 +210,7 @@ type NodeMarketConfig struct {
 }
 
 type SessionConfig struct {
-	SignIn coreapi.WebSignIn
+	SignIn gatewayhttp.WebSignIn
 
 	PublicOrigin string
 
@@ -226,9 +226,9 @@ type SessionConfig struct {
 
 	MaxBodyBytes int64
 
-	OnSignedIn func(context.Context, *coreapi.WebUser) error
+	OnSignedIn func(context.Context, *gatewayhttp.WebUser) error
 
-	OnSignedOut func(context.Context, *coreapi.WebUser) error
+	OnSignedOut func(context.Context, *gatewayhttp.WebUser) error
 
 	CustodyMount string
 
@@ -387,7 +387,7 @@ func (g GatewayConfig) audiences() []string {
 
 func needsMeshd(required []string) bool {
 	for _, name := range required {
-		if strings.HasPrefix(name, coreapi.MeshdDownloadPrefix) {
+		if strings.HasPrefix(name, gatewayhttp.MeshdDownloadPrefix) {
 			return true
 		}
 	}

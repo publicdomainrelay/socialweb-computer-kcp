@@ -1,4 +1,4 @@
-package gatewayapi
+package gatewayhttp
 
 import (
 	"context"
@@ -60,7 +60,7 @@ const (
 )
 
 var (
-	ErrQuotaExceeded = errors.New("gatewayapi: the quota of ComputeContracts is used up")
+	ErrQuotaExceeded = errors.New("gatewayhttp: the quota of ComputeContracts is used up")
 
 	MeshdArches = []string{"x86_64", "aarch64"}
 
@@ -150,14 +150,14 @@ type OpenBaoVault struct {
 
 func (v OpenBaoVault) Write(ctx context.Context, ref commonv1.SecretRef, data map[string]any) error {
 	if v.Client == nil {
-		return errors.New("gatewayapi: no OpenBao client")
+		return errors.New("gatewayhttp: no OpenBao client")
 	}
 	return v.Client.PutKV(ctx, kvDataPath(ref), data)
 }
 
 func (v OpenBaoVault) Remove(ctx context.Context, ref commonv1.SecretRef) error {
 	if v.Client == nil {
-		return errors.New("gatewayapi: no OpenBao client")
+		return errors.New("gatewayhttp: no OpenBao client")
 	}
 	return v.Client.Delete(ctx, strings.Trim(ref.Mount, "/")+"/metadata/"+strings.Trim(ref.Path, "/"))
 }
@@ -230,19 +230,19 @@ type NodeClaimMapper struct {
 
 func NewNodeClaimMapper(opts NodeClaimMapperOptions) (*NodeClaimMapper, error) {
 	if opts.Store == nil {
-		return nil, errors.New("gatewayapi: node claim mapper has no claim store")
+		return nil, errors.New("gatewayhttp: node claim mapper has no claim store")
 	}
 	if opts.Links == nil {
-		return nil, errors.New("gatewayapi: node claim mapper has no cluster link reader")
+		return nil, errors.New("gatewayhttp: node claim mapper has no cluster link reader")
 	}
 	if opts.Contracts == nil {
-		return nil, errors.New("gatewayapi: node claim mapper has no contract client")
+		return nil, errors.New("gatewayhttp: node claim mapper has no contract client")
 	}
 	if opts.Vault == nil {
-		return nil, errors.New("gatewayapi: node claim mapper has no vault")
+		return nil, errors.New("gatewayhttp: node claim mapper has no vault")
 	}
 	if opts.VaultMount == "" {
-		return nil, errors.New("gatewayapi: node claim mapper has no vault mount")
+		return nil, errors.New("gatewayhttp: node claim mapper has no vault mount")
 	}
 	if opts.VMReadyTimeoutSec <= 0 {
 		opts.VMReadyTimeoutSec = DefaultNodeVMReadyTimeoutSec
@@ -261,21 +261,21 @@ func NewNodeClaimMapper(opts NodeClaimMapperOptions) (*NodeClaimMapper, error) {
 	}
 	if opts.Meshd != nil {
 		if opts.Meshd.DownloadBase == "" && opts.MeshdDownloadBase == nil {
-			return nil, errors.New("gatewayapi: the meshd pin has no download base")
+			return nil, errors.New("gatewayhttp: the meshd pin has no download base")
 		}
 		for _, arch := range MeshdArches {
 			if opts.Meshd.Sha256[arch] == "" {
-				return nil, fmt.Errorf("gatewayapi: the meshd pin names no %s build", arch)
+				return nil, fmt.Errorf("gatewayhttp: the meshd pin names no %s build", arch)
 			}
 		}
 	}
 	if opts.NodeAgentPin != nil {
 		if opts.NodeAgentPin.DownloadBase == "" && opts.NodeAgentDownloadBase == nil {
-			return nil, errors.New("gatewayapi: the node agent pin has no download base")
+			return nil, errors.New("gatewayhttp: the node agent pin has no download base")
 		}
 		for _, arch := range MeshdArches {
 			if opts.NodeAgentPin.Sha256[arch] == "" {
-				return nil, fmt.Errorf("gatewayapi: the node agent pin names no %s build", arch)
+				return nil, fmt.Errorf("gatewayhttp: the node agent pin names no %s build", arch)
 			}
 		}
 	}
