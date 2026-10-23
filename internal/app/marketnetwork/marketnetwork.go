@@ -202,10 +202,7 @@ func (p *pass) delete(ctx context.Context) (ctlruntime.Result, error) {
 }
 
 func (p *pass) ensure(ctx context.Context, desired []compose.Desired) error {
-	if err := p.c.ApplyLinks(ctx, p.r, "components", compose.ComponentLinks(p.r.Workspace, desired)); err != nil {
-		return err
-	}
-	return p.c.EnsureComponents(ctx, p.r, desired)
+	return p.c.EnsureLinked(ctx, p.r, desired, desired)
 }
 
 func (p *pass) prune(ctx context.Context, desired []compose.Desired) error {
@@ -320,7 +317,7 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 	if r.Suspend {
 		return p.suspended(ctx, desired, applyDesired)
 	}
-	if err := p.ensure(ctx, applyDesired); err != nil {
+	if err := p.c.EnsureLinked(ctx, p.r, desired, applyDesired); err != nil {
 		return p.retry(v1alpha1.ApplicationPhaseProvisioning, "", err)
 	}
 	if err := p.prune(ctx, desired); err != nil {

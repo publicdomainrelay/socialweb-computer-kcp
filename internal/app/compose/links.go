@@ -207,24 +207,14 @@ func appendSpecRefs(value any, out *[]specRef) {
 }
 
 func (c *Composer) ApplyLinks(ctx context.Context, r Root, set string, links []Link, prune ...string) error {
-	keep := map[string]map[string]bool{}
-	workspaces := map[string]bool{r.Workspace: true}
+	keep, workspaces, err := c.writeLinks(ctx, r, set, links)
+	if err != nil {
+		return err
+	}
+	workspaces[r.Workspace] = true
 	for _, ws := range prune {
 		if ws = strings.TrimSpace(ws); ws != "" {
 			workspaces[ws] = true
-		}
-	}
-	for _, l := range Dedupe(links) {
-		ws := workspaceOr(l.Workspace(), r.Workspace)
-		l.Spec.To.Workspace = ws
-		workspaces[ws] = true
-		if keep[ws] == nil {
-			keep[ws] = map[string]bool{}
-		}
-		keep[ws][l.Name] = true
-		obj := &exposurev1alpha1.ComponentLink{ObjectMeta: metav1.ObjectMeta{Name: l.Name, Labels: map[string]string{LinkSetLabel: set}}, Spec: l.Spec}
-		if err := c.ApplyTyped(ctx, r, ws, ComponentLinkGVR, exposurev1alpha1.GroupVersion.String(), ComponentKindComponentLink, obj); err != nil {
-			return fmt.Errorf("ComponentLink %s: %w", l.Name, err)
 		}
 	}
 	selector := OwnerLabel + "=" + r.Owner() + "," + LinkSetLabel + "=" + set
@@ -238,6 +228,44 @@ func (c *Composer) ApplyLinks(ctx context.Context, r Root, set string, links []L
 		}
 	}
 	return nil
+}
+
+func (c *Composer) AddLinks(ctx context.Context, r Root, set string, links []Link) error {
+	_, _, err := c.writeLinks(ctx, r, set, links)
+	return err
+}
+
+func (c *Composer) EnsureLinked(ctx context.Context, r Root, linked, components []Desired) error {
+	if err := c.ApplyLinks(ctx, r, ComponentLinkSet, ComponentLinks(r.Workspace, linked)); err != nil {
+		return err
+	}
+	return c.EnsureComponents(ctx, r, components)
+}
+
+func (c *Composer) EnsureAdding(ctx context.Context, r Root, components []Desired) error {
+	if err := c.AddLinks(ctx, r, ComponentLinkSet, ComponentLinks(r.Workspace, components)); err != nil {
+		return err
+	}
+	return c.EnsureComponents(ctx, r, components)
+}
+
+func (c *Composer) writeLinks(ctx context.Context, r Root, set string, links []Link) (map[string]map[string]bool, map[string]bool, error) {
+	keep := map[string]map[string]bool{}
+	workspaces := map[string]bool{}
+	for _, l := range Dedupe(links) {
+		ws := workspaceOr(l.Workspace(), r.Workspace)
+		l.Spec.To.Workspace = ws
+		workspaces[ws] = true
+		if keep[ws] == nil {
+			keep[ws] = map[string]bool{}
+		}
+		keep[ws][l.Name] = true
+		obj := &exposurev1alpha1.ComponentLink{ObjectMeta: metav1.ObjectMeta{Name: l.Name, Labels: map[string]string{LinkSetLabel: set}}, Spec: l.Spec}
+		if err := c.ApplyTyped(ctx, r, ws, ComponentLinkGVR, exposurev1alpha1.GroupVersion.String(), ComponentKindComponentLink, obj); err != nil {
+			return nil, nil, fmt.Errorf("ComponentLink %s: %w", l.Name, err)
+		}
+	}
+	return keep, workspaces, nil
 }
 
 func (c *Composer) DeleteLinks(ctx context.Context, r Root, workspaces ...string) error {

@@ -408,10 +408,7 @@ func (p *pass) desired(plan compose.AccountPlan, ident *v1alpha1.ComponentIdenti
 }
 
 func (p *pass) ensure(ctx context.Context, desired []compose.Desired) error {
-	if err := p.c.ApplyLinks(ctx, p.r, "components", compose.ComponentLinks(p.r.Workspace, desired)); err != nil {
-		return err
-	}
-	return p.c.EnsureComponents(ctx, p.r, desired)
+	return p.c.EnsureLinked(ctx, p.r, desired, desired)
 }
 
 func (p *pass) baseLinks(mount string) []compose.Link {
