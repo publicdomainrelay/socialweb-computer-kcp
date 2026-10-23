@@ -2,7 +2,6 @@ package guestcontrolplane
 
 import (
 	"crypto/tls"
-	"crypto/x509"
 	"net"
 	"net/http"
 	"net/url"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
 )
 
@@ -26,22 +26,11 @@ func networkHTTPClient(deps component.Deps, network v1alpha1.MarketNetworkValue,
 	if mapped, err := networkdial.NewHostMap(entries); err == nil && mapped.Len() > 0 {
 		resolver = mapped
 	}
-	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
-	if bundle := strings.TrimSpace(network.CABundle); bundle != "" {
-		pool := x509.NewCertPool()
-		if pool.AppendCertsFromPEM([]byte(bundle)) {
-			tlsConfig.RootCAs = pool
-		}
-	}
-	transport, err := networkdial.NewHTTPTransportWithOptions(networkdial.DialOptions{
-		Hosts:          resolver,
-		TLSConfig:      tlsConfig,
-		AllowSystemDNS: true,
-	})
+	tlsConfig, err := httpclient.TLSConfig(httpclient.TLSOptions{CAPEM: []byte(strings.TrimSpace(network.CABundle))})
 	if err != nil {
-		return &http.Client{Timeout: timeout}
+		tlsConfig = &tls.Config{MinVersion: tls.VersionTLS12}
 	}
-	return &http.Client{Timeout: timeout, Transport: transport}
+	return httpclient.External(httpclient.Options{Timeout: timeout, Hosts: resolver, TLS: tlsConfig})
 }
 
 func guestTLSHostAddress(network v1alpha1.MarketNetworkValue) (string, string) {

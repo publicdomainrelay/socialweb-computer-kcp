@@ -1,18 +1,17 @@
 package vaultaccess
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/credentials/openbaosession"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
 )
 
@@ -363,40 +362,26 @@ func renewToken(ctx context.Context, client *http.Client, address, token string)
 }
 
 func postAuth(ctx context.Context, client *http.Client, address, path, token string, body map[string]any) (loginResult, error) {
-	encoded, err := json.Marshal(body)
-	if err != nil {
-		return loginResult{}, fmt.Errorf("vaultaccess: encoding the request for %s: %w", path, err)
-	}
-	url := strings.TrimRight(address, "/") + "/v1/" + strings.TrimPrefix(path, "/")
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(encoded))
+	target := strings.TrimRight(address, "/") + "/v1/" + strings.TrimPrefix(path, "/")
+	req, err := httpjson.NewRequest(ctx, http.MethodPost, target, body)
 	if err != nil {
 		return loginResult{}, fmt.Errorf("vaultaccess: building the request for %s: %w", path, err)
 	}
-	req.Header.Set("Content-Type", "application/json")
 	if token != "" {
 		req.Header.Set("X-Vault-Token", token)
 	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return loginResult{}, fmt.Errorf("vaultaccess: POST %s: %w", path, err)
-	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return loginResult{}, fmt.Errorf("vaultaccess: reading the answer of %s: %w", path, err)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return loginResult{}, fmt.Errorf("vaultaccess: POST %s -> HTTP %d", path, resp.StatusCode)
-	}
-	var payload struct {
+	payload, err := httpjson.DoLimit[struct {
 		Auth struct {
 			ClientToken   string `json:"client_token"`
 			LeaseDuration int    `json:"lease_duration"`
 			Renewable     bool   `json:"renewable"`
 		} `json:"auth"`
+	}](ctx, client, req, 1<<20)
+	if status, ok := errors.AsType[*httpjson.StatusError](err); ok {
+		return loginResult{}, fmt.Errorf("vaultaccess: POST %s -> HTTP %d", path, status.Status)
 	}
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		return loginResult{}, fmt.Errorf("vaultaccess: POST %s returned a body that is not JSON", path)
+	if err != nil {
+		return loginResult{}, fmt.Errorf("vaultaccess: POST %s: %w", path, err)
 	}
 	if payload.Auth.ClientToken == "" {
 		return loginResult{}, fmt.Errorf("vaultaccess: POST %s answered without a client token", path)

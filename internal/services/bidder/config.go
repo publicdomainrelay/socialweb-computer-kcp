@@ -3,7 +3,6 @@ package bidder
 import (
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,6 +21,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestseed"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
@@ -376,7 +376,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 					PDSURL:     data.HostURL,
 					ClientID:   clientID,
 					Scopes:     data.Scopes,
-					HTTPClient: externalHTTPClient(deps, DefaultCallTimeout),
+					HTTPClient: deps.ExternalHTTPClient(DefaultCallTimeout),
 				}
 				if writer, ok := deps.Credentials.(component.CredentialWriter); ok {
 					opts.Store = &bidderSessionStore{resolver: deps.Credentials, writer: writer, ref: *cfg.PDSAccessTokenRef}
@@ -505,11 +505,11 @@ func bidderHostWithPort(raw string, hosts []v1alpha1.NetworkHost) string {
 }
 
 func bidderNetworkTLS(bundle string) (*tls.Config, error) {
-	pool := x509.NewCertPool()
-	if !pool.AppendCertsFromPEM([]byte(strings.TrimSpace(bundle))) {
+	cfg, err := httpclient.TLSConfig(httpclient.TLSOptions{CAPEM: []byte(strings.TrimSpace(bundle))})
+	if err != nil || cfg.RootCAs == nil {
 		return nil, errors.New("bidder: the network CA bundle has no certificates")
 	}
-	return &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}, nil
+	return cfg, nil
 }
 
 func ingressConnectHost(n v1alpha1.MarketNetworkValue) string {
@@ -797,21 +797,6 @@ func handlerURL(workspace, kind, name string) string {
 		return ""
 	}
 	return "http://" + kcp.ServiceFQDN(kind, "default", workspace, kcp.DefaultServiceDomain)
-}
-
-func externalHTTPClient(deps component.Deps, timeout time.Duration) *http.Client {
-	transport, err := networkdial.NewHTTPTransportWithOptions(networkdial.DialOptions{
-		Hosts:          deps.Hosts,
-		TLSConfig:      deps.TLS,
-		AllowSystemDNS: true,
-	})
-	if err != nil {
-		if deps.Log != nil {
-			deps.Log.Warn("the bidder's external HTTP transport is not configured", "err", err)
-		}
-		return &http.Client{Timeout: timeout}
-	}
-	return &http.Client{Timeout: timeout, Transport: transport}
 }
 
 func isAbsoluteURL(raw string) bool {

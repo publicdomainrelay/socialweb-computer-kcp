@@ -3,8 +3,6 @@ package kcpserver
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +17,8 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpclient"
 )
 
 const (
@@ -80,12 +80,18 @@ type HTTPAdmin struct {
 }
 
 func NewHTTPAdmin(a Admin, front string) (*HTTPAdmin, error) {
-	pool := x509.NewCertPool()
-	if !pool.AppendCertsFromPEM(a.CA) {
+	client, err := loopbackClient(a.CA, 10*time.Second)
+	if err != nil {
 		return nil, errors.New("kcpserver: the shared CA does not parse")
 	}
-	return &HTTPAdmin{Admin: a, Front: strings.TrimSuffix(front, "/"), http: &http.Client{Timeout: 10 * time.Second,
-		Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, ServerName: "127.0.0.1"}}}}, nil
+	return &HTTPAdmin{Admin: a, Front: strings.TrimSuffix(front, "/"), http: client}, nil
+}
+
+func loopbackClient(ca []byte, timeout time.Duration) (*http.Client, error) {
+	if len(ca) == 0 {
+		return nil, httpclient.ErrNoCA
+	}
+	return httpclient.TLSClient(httpclient.TLSOptions{CAPEM: ca, ServerName: "127.0.0.1", Timeout: timeout})
 }
 
 func (h *HTTPAdmin) Readyz(ctx context.Context, port int) (int, error) {

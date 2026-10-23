@@ -1,15 +1,11 @@
 package clusterprovider
 
 import (
-	"bytes"
 	"context"
-	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -19,6 +15,8 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterstack"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/identitybundle"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vaultlayout"
 )
@@ -61,10 +59,7 @@ type vaultAdmin struct {
 func newVaultAdmin(addr string, client *openbao.Client, pool *x509.CertPool) *vaultAdmin {
 	httpClient := http.DefaultClient
 	if pool != nil {
-		httpClient = &http.Client{Transport: &http.Transport{IdleConnTimeout: openbao.IdleConnTimeout, TLSClientConfig: &tls.Config{
-			RootCAs:    pool,
-			MinVersion: tls.VersionTLS12,
-		}}}
+		httpClient, _ = httpclient.TLSClient(httpclient.TLSOptions{Pool: pool, IdleConnTimeout: openbao.IdleConnTimeout})
 	}
 	return &vaultAdmin{addr: strings.TrimRight(addr, "/"), client: client, http: httpClient}
 }
@@ -88,15 +83,7 @@ func (v *vaultAdmin) do(ctx context.Context, method, path string, body any) (int
 }
 
 func (v *vaultAdmin) attempt(ctx context.Context, method, path string, body any) (int, []byte, error) {
-	var in io.Reader
-	if body != nil {
-		raw, err := json.Marshal(body)
-		if err != nil {
-			return 0, nil, fmt.Errorf("clusterprovider: encoding the vault request %s /v1/%s: %w", method, path, err)
-		}
-		in = bytes.NewReader(raw)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, v.addr+"/v1/"+path, in)
+	req, err := httpjson.NewRequest(ctx, method, v.addr+"/v1/"+path, body)
 	if err != nil {
 		return 0, nil, fmt.Errorf("clusterprovider: building the vault request %s /v1/%s: %w", method, path, err)
 	}
@@ -107,19 +94,11 @@ func (v *vaultAdmin) attempt(ctx context.Context, method, path string, body any)
 	if token != "" {
 		req.Header.Set("X-Vault-Token", token)
 	}
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	resp, err := v.http.Do(req)
+	resp, err := httpjson.Exchange(ctx, v.http, req, httpjson.Unlimited)
 	if err != nil {
 		return 0, nil, fmt.Errorf("clusterprovider: the vault request %s /v1/%s: %w", method, path, err)
 	}
-	defer resp.Body.Close()
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return 0, nil, fmt.Errorf("clusterprovider: reading the vault response %s /v1/%s: %w", method, path, err)
-	}
-	return resp.StatusCode, data, nil
+	return resp.Status, resp.Body, nil
 }
 
 func vaultTTL(d time.Duration) string {

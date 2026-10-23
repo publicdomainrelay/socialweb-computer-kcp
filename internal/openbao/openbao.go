@@ -8,12 +8,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
 )
 
 var (
@@ -637,28 +638,20 @@ func (c *Client) request(ctx context.Context, method, path string, in any) (int,
 }
 
 func (c *Client) attempt(ctx context.Context, method, path string, encoded []byte, token string) (int, []byte, error) {
-	var body io.Reader
+	var in any
 	if encoded != nil {
-		body = bytes.NewReader(encoded)
+		in = json.RawMessage(encoded)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, c.addr+"/v1/"+path, body)
+	req, err := httpjson.NewRequest(ctx, method, c.addr+"/v1/"+path, in)
 	if err != nil {
 		return 0, nil, fmt.Errorf("%w: build %s /v1/%s: %v", ErrTransport, method, path, err)
 	}
 	if token != "" {
 		req.Header.Set("X-Vault-Token", token)
 	}
-	if encoded != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	resp, err := c.http.Do(req)
+	resp, err := httpjson.Exchange(ctx, c.http, req, httpjson.Unlimited)
 	if err != nil {
 		return 0, nil, fmt.Errorf("%w: %s /v1/%s: %v", ErrTransport, method, path, err)
 	}
-	defer resp.Body.Close()
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return 0, nil, fmt.Errorf("%w: read %s /v1/%s: %v", ErrTransport, method, path, err)
-	}
-	return resp.StatusCode, data, nil
+	return resp.Status, resp.Body, nil
 }

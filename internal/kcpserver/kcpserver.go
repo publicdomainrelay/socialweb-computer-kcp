@@ -257,12 +257,10 @@ func PortOf(server string) (int, error) {
 }
 
 func Readyz(ctx context.Context, port int, a Admin) (int, string, error) {
-	pool := x509.NewCertPool()
-	if !pool.AppendCertsFromPEM(a.CA) {
+	c, err := loopbackClient(a.CA, 5*time.Second)
+	if err != nil {
 		return 0, "", errors.New("kcpserver: the kubeconfig CA does not parse")
 	}
-	c := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{
-		TLSClientConfig: &tls.Config{RootCAs: pool, ServerName: "127.0.0.1"}}}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://127.0.0.1:"+strconv.Itoa(port)+"/readyz", nil)
 	if err != nil {
 		return 0, "", err

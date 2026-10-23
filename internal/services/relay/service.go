@@ -19,6 +19,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	atrelay "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/relay"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
@@ -346,7 +347,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	}
 	handlers := cfg.Deps.Handlers
 	if cfg.HTTPClient == nil {
-		cfg.HTTPClient = handlerClient(handlers, externalRoundTripper(cfg.Deps))
+		cfg.HTTPClient = handlerClient(handlers, cfg.Deps.ExternalHTTPClient(0).Transport)
 	}
 	if cfg.DialContext == nil {
 		cfg.DialContext = handlerDialer(handlers, externalDialContext(cfg.Deps))
@@ -461,17 +462,8 @@ func (s *Service) Ready(ctx context.Context) error {
 	if !ready || baseURL == "" || handlers == nil {
 		return errors.New("relay: the service is not registered")
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/xrpc/_health", nil)
-	if err != nil {
-		return err
-	}
-	resp, err := handlers.HTTPClient().Do(req)
-	if err != nil {
-		return fmt.Errorf("relay: health request: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("relay: health returned %d", resp.StatusCode)
+	if err := xrpc.Health(ctx, &xrpc.Client{Host: baseURL, HTTP: handlers.HTTPClient()}); err != nil {
+		return fmt.Errorf("relay: health: %w", err)
 	}
 	return nil
 }
@@ -675,18 +667,6 @@ func (t handlerAwareRoundTripper) RoundTrip(req *http.Request) (*http.Response, 
 
 func handlerClient(handlers *component.HandlerRegistry, external http.RoundTripper) *http.Client {
 	return &http.Client{Transport: handlerAwareRoundTripper{handlers: handlers, external: external}}
-}
-
-func externalRoundTripper(deps component.Deps) http.RoundTripper {
-	transport, err := networkdial.NewHTTPTransportWithOptions(networkdial.DialOptions{
-		Hosts:          deps.Hosts,
-		TLSConfig:      deps.TLS,
-		AllowSystemDNS: true,
-	})
-	if err != nil {
-		return http.DefaultTransport
-	}
-	return transport
 }
 
 func externalDialContext(deps component.Deps) func(context.Context, string, string) (net.Conn, error) {
