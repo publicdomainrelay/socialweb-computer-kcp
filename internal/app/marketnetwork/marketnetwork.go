@@ -79,6 +79,10 @@ type Controller struct {
 
 	valueUID string
 
+	unservedMu sync.Mutex
+
+	unserved map[string]bool
+
 	roots sync.Map
 }
 
@@ -393,6 +397,7 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 		ctl.log().Warn("removing children the spec no longer names", "err", err.Error())
 	}
 	apps := ctl.ensureApps(ctx, r, o, published, pdsURL, aliceURL, false)
+	unserved := ctl.takeUnserved()
 	ctl.declareOperatorVouches(ctx, r, o.Spec.Apps)
 	p.st.Apps = apps
 	names := make([]string, 0, len(o.Spec.Apps))
@@ -411,6 +416,9 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 	}
 	if err := ctl.verify(ctx, snap, apps); err != nil {
 		conds.Set(&p.st.Conditions, o.Generation, ConditionVerifierPassed, false, "Probe", err.Error())
+		if unserved != nil {
+			return p.retry(v1alpha1.ApplicationPhaseProvisioning, "the network verifier: "+err.Error(), unserved)
+		}
 		return p.write(v1alpha1.ApplicationPhaseProvisioning, "the network verifier: "+err.Error())
 	}
 	conds.Set(&p.st.Conditions, o.Generation, ConditionVerifierPassed, true, "Verified",

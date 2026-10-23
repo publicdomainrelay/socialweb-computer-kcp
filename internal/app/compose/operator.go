@@ -67,17 +67,22 @@ func (o Operator) tls() bool {
 	return strings.HasPrefix(strings.TrimRight(strings.TrimSpace(o.PdsURL), "/"), "https://")
 }
 
-func (c *Composer) OperatorRepo(ctx context.Context, r Root, o Operator) (atprotorepo.Repo, string, error) {
-	if strings.TrimSpace(o.PdsURL) == "" || strings.TrimSpace(o.Identifier) == "" {
-		return nil, "", errors.New("compose: the operator account names no PDS URL or identifier")
-	}
+func (c *Composer) applyOperatorPDS(ctx context.Context, r Root, o Operator) error {
 	spec := pdsv1alpha1.RemotePDSSpec{URL: strings.TrimRight(strings.TrimSpace(o.PdsURL), "/"), DID: pdsServiceDID(o.PdsURL)}
 	if o.CARef != nil && o.tls() {
 		ca := *o.CARef
 		spec.TLS = pdsv1alpha1.RemotePDSTLS{Enabled: true, CARef: &ca}
 	}
 	remote := &pdsv1alpha1.RemotePDS{ObjectMeta: metav1.ObjectMeta{Name: o.remoteName()}, Spec: spec}
-	if _, err := c.ApplyRemotePDS(ctx, r, r.Workspace, remote); err != nil {
+	_, err := c.ApplyRemotePDS(ctx, r, r.Workspace, remote)
+	return err
+}
+
+func (c *Composer) OperatorRepo(ctx context.Context, r Root, o Operator) (atprotorepo.Repo, string, error) {
+	if strings.TrimSpace(o.PdsURL) == "" || strings.TrimSpace(o.Identifier) == "" {
+		return nil, "", errors.New("compose: the operator account names no PDS URL or identifier")
+	}
+	if err := c.applyOperatorPDS(ctx, r, o); err != nil {
 		return nil, "", err
 	}
 	if ok, msg := c.LinksAccepted(ctx, r, OperatorLinks(r, o)); !ok {

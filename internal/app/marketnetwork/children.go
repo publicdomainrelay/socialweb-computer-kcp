@@ -17,6 +17,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
@@ -270,6 +271,30 @@ func tail(b []byte, n int) []byte {
 
 func childWorkspace(rec devinstance.Record) string {
 	return cmp.Or(rec.BaseWorkspace, compose.DefaultWorkspace)
+}
+
+func (ctl *Controller) markUnserved(app string) {
+	ctl.unservedMu.Lock()
+	defer ctl.unservedMu.Unlock()
+	if ctl.unserved == nil {
+		ctl.unserved = map[string]bool{}
+	}
+	ctl.unserved[app] = true
+}
+
+func (ctl *Controller) takeUnserved() error {
+	ctl.unservedMu.Lock()
+	defer ctl.unservedMu.Unlock()
+	if len(ctl.unserved) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(ctl.unserved))
+	for name := range ctl.unserved {
+		names = append(names, name)
+	}
+	ctl.unserved = nil
+	slices.Sort(names)
+	return fmt.Errorf("the root API of %s is not served in its workspace yet", strings.Join(names, ", "))
 }
 
 func (ctl *Controller) applyRoot(ctx context.Context, r compose.Root, rec devinstance.Record, kind v1alpha1.ApplicationKind, obj any) error {
@@ -605,6 +630,9 @@ func (ctl *Controller) ensureApp(ctx context.Context, r compose.Root, app v1alph
 	}
 	if root != nil {
 		if err := ctl.applyRoot(ctx, r, rec, app.Kind, root); err != nil {
+			if apierrors.IsNotFound(err) || apimeta.IsNoMatchError(err) {
+				ctl.markUnserved(app.Name)
+			}
 			return fail(fmt.Errorf("applying the root object into %s's workspace %s: %w", ch.id, rec.BaseWorkspace, err))
 		}
 	}
