@@ -251,7 +251,6 @@ func (c *Core) registerLeases(ctx context.Context, mgr *ctlruntime.Manager, scop
 
 func (c *Core) registerStatus(mgr *ctlruntime.Manager, scope func(string) bool) error {
 	base := c.scope.base()
-	httpClient := c.handlers.HTTPClient()
 	plc := plcidentity.Options{Scope: scope}
 	if url := c.plcBaseURL(); url != "" {
 		directory, err := statusstate.NewHTTPPLCClient(url, c.busOrNetworkClient())
@@ -264,7 +263,7 @@ func (c *Core) registerStatus(mgr *ctlruntime.Manager, scope func(string) bool) 
 	_, accountErr := pdsaccount.Register(mgr, pdsaccount.Options{Bus: c.handlers, Scope: scope})
 	_, sessionErr := atprotosession.Register(mgr, atprotosession.Options{Bus: c.handlers, Scope: scope})
 	_, plcErr := plcidentity.Register(mgr, plc)
-	_, relayErr := relaystatus.Register(mgr, relaystatus.Options{Source: statusstate.NewHTTPRelayHealthSource(c.relayEndpoint(base), httpClient),
+	_, relayErr := relaystatus.Register(mgr, relaystatus.Options{Source: statusstate.NewHTTPRelayHealthSource(c.relayEndpoint(base), c.busOrNetworkClient()),
 		Scope: scope})
 	_, credentialErr := vaultcredential.Register(mgr, vaultcredential.Options{Source: vault, Scope: scope})
 	_, certificateErr := vaultcertificate.Register(mgr, vaultcertificate.Options{Source: vault, Scope: scope})
