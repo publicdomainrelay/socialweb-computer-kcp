@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"reflect"
-	"strings"
 
 	"github.com/bluesky-social/indigo/atproto/syntax"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -60,7 +59,14 @@ func (c *AtprotoRepoController) Reconcile(ctx context.Context, dyn dynamic.Inter
 	generation := object.Generation
 	status := object.Status
 	status.ObservedGeneration = generation
-	didText := strings.TrimSpace(object.Spec.DID)
+	backend, err := pdsclient.ReadRepoBackend(ctx, dyn, workspace, object)
+	if err != nil {
+		setRepoCondition(&status.Conditions, generation, statusstate.ConditionReady, false, statusstate.ReasonWaiting, err.Error())
+		setRepoInSync(&status.Conditions, generation, false, statusstate.ReasonWaiting, err.Error())
+		return c.writeStatus(ctx, dyn, workspace, u, status)
+	}
+	didText := backend.DID
+	status.DID = didText
 	if didText == "" {
 		setRepoCondition(&status.Conditions, generation, statusstate.ConditionReady, false, statusstate.ReasonWaiting,
 			"the AtprotoRepo needs a did")
@@ -74,7 +80,7 @@ func (c *AtprotoRepoController) Reconcile(ctx context.Context, dyn dynamic.Inter
 		setRepoInSync(&status.Conditions, generation, false, statusstate.ReasonSourceError, "the AtprotoRepo did is invalid")
 		return c.writeStatus(ctx, dyn, workspace, u, status)
 	}
-	binding, err := repoBindingFor(workspace, object.Spec)
+	binding, err := repoBindingFor(backend)
 	if err != nil {
 		setRepoCondition(&status.Conditions, generation, statusstate.ConditionReady, false, statusstate.ReasonWaiting,
 			err.Error())
@@ -102,29 +108,16 @@ func (c *AtprotoRepoController) Reconcile(ctx context.Context, dyn dynamic.Inter
 	}
 	status.Head = observation.Head
 	status.Rev = observation.Rev
-	status.Seq = observation.Seq
-	status.KeyFingerprint = observation.KeyFingerprint
 	message := "the repo head is " + observation.Head
 	setRepoCondition(&status.Conditions, generation, statusstate.ConditionReady, true, statusstate.ReasonReady, message)
 	setRepoInSync(&status.Conditions, generation, true, statusstate.ReasonReady, message)
 	return c.writeStatus(ctx, dyn, workspace, u, status)
 }
 
-func repoBindingFor(workspace string, spec v1alpha1.AtprotoRepoSpec) (pdsclient.RepoBinding, error) {
-	binding := pdsclient.RepoBinding{Workspace: workspace, DID: strings.TrimSpace(spec.DID)}
-	if spec.PdsRef == nil {
-		return pdsclient.RepoBinding{}, errors.New("the AtprotoRepo needs a pdsRef")
-	}
-	binding.Kind = strings.TrimSpace(spec.PdsRef.Kind)
-	binding.Name = strings.TrimSpace(spec.PdsRef.Name)
-	if binding.Workspace = strings.TrimSpace(spec.PdsRef.Workspace); binding.Workspace == "" {
-		binding.Workspace = workspace
-	}
+func repoBindingFor(backend pdsclient.RepoBackend) (pdsclient.RepoBinding, error) {
+	binding := backend.Binding()
 	if binding.Name == "" {
-		return pdsclient.RepoBinding{}, errors.New("the AtprotoRepo pdsRef has no name")
-	}
-	if spec.AuthRef != nil {
-		binding.AuthRef = spec.AuthRef.DeepCopy()
+		return pdsclient.RepoBinding{}, errors.New("the AtprotoRepo backend pdsRef has no name")
 	}
 	return binding, nil
 }

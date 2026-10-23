@@ -20,7 +20,6 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/remotepds"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/statusstate"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -401,8 +400,8 @@ func (ctl *Controller) ensureAccountRepo(ctx context.Context, ws, identityName s
 	if !plan.usesAssociation() {
 		ctl.deleteAssociationObjects(ctx, ws)
 	}
-	spec := v1alpha1.AtprotoRepoSpec{DID: binding.DID, PdsRef: binding.PDSRef,
-		IdentityRef: &commonv1.ObjectRef{Kind: "MarketIdentity", Name: identityName},
-		AuthRef:     binding.AuthRef}
-	ctl.ensureStatusObject(ctx, ws, statusstate.AtprotoRepoGVR, "AtprotoRepo", statusObjectName("repo", binding.DID), spec)
+	spec := v1alpha1.RemoteRepoSpec{DID: binding.DID, PdsRef: *binding.PDSRef,
+		CredentialsRef: commonv1.CredentialsRef{ObjectRef: commonv1.ObjectRef{Kind: "MarketIdentity", Name: identityName}},
+		AuthRef:        binding.AuthRef}
+	ctl.ensureRepoObjects(ctx, ws, statusObjectName("repo", binding.DID), "RemoteRepo", v1alpha1.RemoteRepoGVR, spec)
 }

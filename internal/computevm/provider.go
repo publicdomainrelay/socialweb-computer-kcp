@@ -81,6 +81,10 @@ func UserDataPath(name string) string {
 	return v1alpha1.GuestVaultPrefix + "/" + name + "/" + v1alpha1.GuestUserDataEntry
 }
 
+func BackendRef(name string) commonv1.ObjectRef {
+	return commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: v1alpha1.BackendKindFirecrackerVM, Name: name}
+}
+
 func UserDataRef(name string, vault GuestVaultRef) commonv1.SecretRef {
 	return commonv1.SecretRef{Vault: v1alpha1.VaultServerRef(vault.Server), Mount: vault.Mount, Path: UserDataPath(name)}
 }
@@ -113,10 +117,11 @@ func ComputeVMFor(in VMInput) (*v1alpha1.ComputeVM, error) {
 		TypeMeta:   metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: "ComputeVM"},
 		ObjectMeta: metav1.ObjectMeta{Name: in.Name},
 		Spec: v1alpha1.ComputeVMSpec{
-			VM:        in.VM,
-			Owner:     v1alpha1.ComputeVMOwner{Handle: in.Handle},
-			UserData:  v1alpha1.ComputeVMUserData{Vault: UserDataRef(in.Name, in.Vault)},
-			Requester: v1alpha1.ComputeVMRequester{Did: in.RequesterDID},
+			BackendRef: BackendRef(in.Name),
+			VM:         in.VM,
+			Owner:      v1alpha1.ComputeVMOwner{Handle: in.Handle},
+			UserData:   v1alpha1.ComputeVMUserData{Vault: UserDataRef(in.Name, in.Vault)},
+			Requester:  v1alpha1.ComputeVMRequester{Did: in.RequesterDID},
 		},
 	}
 	if key := in.Accept.Key(); key != "" {

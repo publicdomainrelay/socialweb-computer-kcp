@@ -1026,6 +1026,113 @@ VIEW (`workspace`, `name`, `finalizers`, `spec`, `status`) is `NodeClaim` in
 `assertNodeClaimStatus` before every status PATCH, so a status kcp would prune or refuse never leaves
 the door.
 
+### Abstract kinds and their contracts
+
+Plan 0026 W0-ABSTRACT. A concept with two or more implementations is an abstract kind plus
+concrete kinds (the Cluster API infrastructureRef pattern). The rules below hold for every abstract
+kind; the tables after them are the contract of each one.
+
+- A consumer MUST ref only the abstract kind, never a concrete kind.
+- An abstract kind MUST have `spec.backendRef`, a `common/v1alpha1.ObjectRef` to exactly one
+  concrete kind of its contract, and a contract status with the conditions `Ready` and
+  `BackendBound` (`commonv1.ConditionReady`, `commonv1.ConditionBackendBound`).
+- Every concrete kind MUST carry the label `contracts.socialweb.computer/<abstract-resource>:
+  v1alpha1` on its APIResourceSchema. `APIResource.Contracts` in the group's `resources.go` names
+  the abstract resources; apigen writes the label and refuses a contract that names no resource with
+  `spec.backendRef`. The keys are `commonv1.ContractLabelAtprotoRepos`, `ContractLabelVaults`,
+  `ContractLabelComputeVMs` and `ContractLabelEventSources`; `APIResource.ContractLabels()` returns
+  the map a controller sets or verifies.
+- The composer (the root for children, the creating component for intent objects) MUST write the
+  abstract kind's spec and the concrete kind's spec, and nothing else writes either.
+- The concrete kind's controller MUST be the only writer of the concrete kind's status.
+- The abstract kind's controller MUST be the only writer of the abstract kind's status. It MUST
+  mirror every contract field from the bound backend's status, and MUST NOT compute a contract
+  field the backend did not report.
+- `BackendBound` MUST be True exactly when `spec.backendRef` resolves to an existing object of a
+  kind that carries the contract label; otherwise it is False and `Ready` is False.
+- `Ready` on the abstract kind MUST equal `Ready` on the backend, observed at the backend's current
+  generation, and MUST be False while `BackendBound` is False.
+- A field that only one backend can report MUST live on that concrete kind, never on the abstract
+  kind.
+
+**AtprotoRepo** (`api/v1alpha1`, export `applications`), over **LocalRepo** and **RemoteRepo**
+(label `contracts.socialweb.computer/atprotorepos`).
+
+| Field | Meaning | Writer |
+| --- | --- | --- |
+| `spec.backendRef` | a LocalRepo or a RemoteRepo | composer |
+| `status.did` | the DID of the repo | AtprotoRepo controller, from the backend |
+| `status.head` | the CID of the repo's latest commit | AtprotoRepo controller, from the backend |
+| `status.rev` | the rev (TID) of that commit | AtprotoRepo controller, from the backend |
+| `status.writable` | true when a RecordWriter of the repo can write now | AtprotoRepo controller, from the backend |
+| `status.address` | the PDS base URL the repo is served from | AtprotoRepo controller, from the backend |
+| `status.conditions` | `Ready`, `BackendBound` | AtprotoRepo controller |
+
+- LocalRepo `spec.pdsRef` MUST ref the Pds component; it writes through the Pds signer handle and
+  holds no token. RemoteRepo `spec.pdsRef` MUST ref a RemotePDS and `spec.credentialsRef` the
+  credentials provider (a MarketIdentity) whose lease authenticates the writes.
+- Both carry `spec.did`; `spec.authRef` is the session the plan 0026 W2-REPO controllers replace.
+- Both report the contract fields plus `status.seq` and `status.keyFingerprint` in
+  `AtprotoRepoBackendStatus`, written only by their own controller.
+
+**Vault** (`api/v1alpha1`, export `hostprocesses`), over **OpenBaoServer** (local) and
+**RemoteOpenBao** (label `contracts.socialweb.computer/vaults`).
+
+| Field | Meaning | Writer |
+| --- | --- | --- |
+| `spec.backendRef` | an OpenBaoServer or a RemoteOpenBao | composer |
+| `status.address` | the vault API base URL a client dials | Vault controller, from the backend |
+| `status.ready` | the vault answers, is initialized and unsealed | Vault controller, from the backend |
+| `status.initialized` | the vault is initialized | Vault controller, from the backend |
+| `status.sealed` | the vault is sealed | Vault controller, from the backend |
+| `status.caBundle` | the PEM CA bundle that verifies `status.address` | Vault controller, from the backend |
+| `status.version` | the server version | Vault controller, from the backend |
+| `status.conditions` | `Ready`, `BackendBound` | Vault controller |
+
+- `status.caBundle` MUST hold only public CA certificates; a client MUST reload it when it changes.
+- No token, unseal key or credential is ever a Vault field; the callee holds them.
+
+**ComputeVM** (`api/v1alpha1`, export `computevms`), over **FirecrackerVM** (label
+`contracts.socialweb.computer/computevms`); HcsVM and VzVM join when plans 0011 and 0012 land.
+
+| Field | Meaning | Writer |
+| --- | --- | --- |
+| `spec.backendRef` | a FirecrackerVM | creator (the bidder) |
+| `spec.vm` | the size and role asked for: cpus, mem, disk, role | creator |
+| `spec.owner`, `spec.requester` | the account the VM runs under and the requester DID | creator |
+| `spec.userData` | the SecretRef of the guest user data | creator |
+| `spec.contract` | the market contract refs (receipt, accept, submit endpoint) | creator |
+| `spec.image`, `spec.stopGraceSeconds`, `spec.guestLogin` | the image policy, the stop grace, the guest login | creator |
+| `spec.release` | the creator asks for the VM to be released | creator |
+| `status.phase`, `status.lostReason` | `Pending` to `Running` to `Releasing`, or `Lost` or `Failed` and why | ComputeVM controller, from the backend |
+| `status.addresses` | `guest` and `host` addresses of the VM | ComputeVM controller, from the backend |
+| `status.bootedAt`, `status.message` | when it booted; the last transition | ComputeVM controller, from the backend |
+| `status.conditions` | `Ready`, `BackendBound`, `GuestReported`, `MarketReported` | ComputeVM controller; a reporting controller writes only its own condition |
+| `status.market` | the guest's market report | the reporting controller, under its own field manager |
+
+- Release MUST be `spec.release` written by the creator; an annotation MUST NOT carry it.
+- FirecrackerVM `spec` (owner, vcpu, mem, disk, image, userData, stopGraceSeconds) and `status`
+  (network with tap, prefix and MAC, image, runtime unit and VMM, work dir) are the Firecracker
+  controller's; a ComputeVM consumer MUST NOT read them.
+
+**EventSource** (`api/events/v1alpha1`, export `events`), over **PdsEventSource**,
+**RelayEventSource** and **JetstreamEventSource** (label `contracts.socialweb.computer/eventsources`).
+
+| Field | Meaning | Writer |
+| --- | --- | --- |
+| `spec.backendRef` | one of the three backends | composer |
+| `status.cursor` | the last sequence number the source delivered | EventSource controller, from the backend |
+| `status.lastEventAt` | when that event arrived | EventSource controller, from the backend |
+| `status.lag` | how far the cursor is behind the upstream head | EventSource controller, from the backend |
+| `status.address` | the upstream the source is subscribed to | EventSource controller, from the backend |
+| `status.conditions` | `Ready`, `BackendBound` | EventSource controller |
+
+- PdsEventSource `spec.repoRef` MUST ref an AtprotoRepo and subscribes through its Subscriber
+  handle. RelayEventSource refs a Relay component (`spec.relayRef`) or a user endpoint (`spec.url`).
+  JetstreamEventSource has a user endpoint (`spec.url`).
+- An EventStream MUST ref its source through `spec.sourceRef` (an EventSource) and carries only its
+  `filter` (collections, DIDs), cursor and sink; no URL of a source is an EventStream field.
+
 ### The XRPC surface
 
 How a user gets a kubeconfig. Seven procedures under `com.publicdomainrelay.temp.cluster.`:

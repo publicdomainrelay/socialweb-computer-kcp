@@ -28,7 +28,6 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestimage"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestnet"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostprocess"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpapply"
@@ -415,11 +414,7 @@ func tail(path string, n int64) string {
 
 func runningStatus(st v1alpha1.ComputeVMStatus, gen int64, ref vmruntime.RuntimeRef) v1alpha1.ComputeVMStatus {
 	st.Phase, st.LostReason = v1alpha1.ComputeVMPhaseRunning, ""
-	st.Network = &v1alpha1.ComputeVMNetwork{GuestIP: ref.GuestAddress, HostAddress: ref.HostAddress, Prefix: guestnet.Prefix, MAC: guestnet.GuestMAC}
-	st.Image = &v1alpha1.ComputeVMImage{Ref: vmruntime.ImageTarget(), Sha256: ref.ImageSHA256, Hypervisor: ref.Hypervisor}
-	st.Runtime = &v1alpha1.ComputeVMRuntime{Backend: string(ref.Backend), Ref: ref.Unit, Instance: ref.InvocationID, Pid: int64(ref.PID),
-		StartTime: strconv.FormatUint(ref.StartTicks, 10), HostBootID: ref.HostBootID, VMMID: ref.VMMID}
-	st.WorkDir = ref.WorkDir
+	st.Addresses = &v1alpha1.ComputeVMAddresses{Guest: ref.GuestAddress, Host: ref.HostAddress}
 	st.BootedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	st.Message = fmt.Sprintf("firecracker %s answers Running in unit %s (pid %d, slot %d)", ref.VMMID, ref.Unit, ref.PID, ref.Slot)
 	setCondition(&st, gen, v1alpha1.ConditionStarted, metav1.ConditionTrue, "UnitStarted", ref.Unit)
@@ -433,15 +428,7 @@ func (ct *Controller) refOf(o v1alpha1.ComputeVM) vmruntime.RuntimeRef {
 		return ref
 	}
 	p := ct.c.Runtime.Placed(h, n)
-	ref := vmruntime.RuntimeRef{Handle: h, Name: n, Unit: p.Unit, VMMID: p.VMMID, WorkDir: p.WorkDir, Socket: p.Socket}
-	if rt := o.Status.Runtime; rt != nil {
-		ticks, _ := strconv.ParseUint(rt.StartTime, 10, 64)
-		ref.Backend, ref.InvocationID, ref.PID, ref.StartTicks, ref.HostBootID = hostsvc.Backend(rt.Backend), rt.Instance, int(rt.Pid), ticks, rt.HostBootID
-		if rt.VMMID != "" {
-			ref.VMMID = rt.VMMID
-		}
-	}
-	return ref
+	return vmruntime.RuntimeRef{Handle: h, Name: n, Unit: p.Unit, VMMID: p.VMMID, WorkDir: p.WorkDir, Socket: p.Socket}
 }
 
 func (ct *Controller) fail(ctx context.Context, o v1alpha1.ComputeVM, st v1alpha1.ComputeVMStatus, why error) error {
@@ -898,7 +885,7 @@ func (ct *Controller) reconcile(ctx context.Context, name string) error {
 		}
 		return ct.observe(ctx, o)
 	}
-	if o.Status.Runtime != nil && o.Status.Runtime.Instance != "" {
+	if ref, err := ct.c.Runtime.Load(o.Spec.Owner.Handle, o.Name); err == nil && ref.InvocationID != "" {
 		return ct.observe(ctx, o)
 	}
 	return ct.boot(ctx, o)

@@ -11,6 +11,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 
 	eventsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/events/v1alpha1"
@@ -106,11 +107,8 @@ func (ctl *Controller) ensureMarketStreams(ctx context.Context, ws, role string,
 		name := marketStreamName(role, url)
 		keep[name] = true
 		spec := eventsv1alpha1.EventStreamSpec{
-			Source: eventsv1alpha1.EventStreamSource{
-				Kind:        eventsv1alpha1.EventStreamSourceRelay,
-				RelayURLs:   []string{url},
-				Collections: append([]string(nil), marketStreamCollections...),
-			},
+			SourceRef: eventstream.SourceRef(name),
+			Filter:    eventsv1alpha1.EventStreamFilter{Collections: append([]string(nil), marketStreamCollections...)},
 			Sink: eventsv1alpha1.EventStreamSink{
 				Kind: eventsv1alpha1.EventStreamSinkHandler,
 				Name: eventstream.MarketHandlerName(role, ws),
@@ -132,27 +130,42 @@ func (ctl *Controller) ensureMarketStreams(ctx context.Context, ws, role string,
 			},
 			"spec": specMap,
 		}}
-		existing, err := ri.Get(ctx, name, metav1.GetOptions{})
-		if apierrors.IsNotFound(err) {
-			if _, err := ri.Create(ctx, obj, metav1.CreateOptions{FieldManager: FieldManager}); err != nil && !apierrors.IsAlreadyExists(err) {
-				return err
-			}
-			continue
-		}
+		stream, err := ctl.applyMarketStream(ctx, ri, obj, specMap, forceFirehose)
 		if err != nil {
 			return err
 		}
-		if !forceFirehose {
-			if cursor, ok, _ := unstructured.NestedInt64(existing.Object, "spec", "cursor"); ok {
-				specMap["cursor"] = cursor
-			}
+		if stream == nil {
+			continue
 		}
-		obj.SetResourceVersion(existing.GetResourceVersion())
-		if _, err := ri.Update(ctx, obj, metav1.UpdateOptions{FieldManager: FieldManager}); err != nil {
+		source := eventstream.StreamSource{Kind: eventsv1alpha1.RelayEventSourceKind, URL: url}
+		resources := func(gvr schema.GroupVersionResource) (dynamic.ResourceInterface, error) { return ctl.client(ws, gvr) }
+		if err := eventstream.EnsureEventSource(ctx, resources, FieldManager, stream, source); err != nil {
 			return err
 		}
 	}
 	return ctl.deleteStaleMarketStreams(ctx, ri, role, keep)
+}
+
+func (ctl *Controller) applyMarketStream(ctx context.Context, ri dynamic.ResourceInterface, obj *unstructured.Unstructured,
+	specMap map[string]any, forceFirehose bool) (*unstructured.Unstructured, error) {
+	existing, err := ri.Get(ctx, obj.GetName(), metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		created, err := ri.Create(ctx, obj, metav1.CreateOptions{FieldManager: FieldManager})
+		if apierrors.IsAlreadyExists(err) {
+			return nil, nil
+		}
+		return created, err
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !forceFirehose {
+		if cursor, ok, _ := unstructured.NestedInt64(existing.Object, "spec", "cursor"); ok {
+			specMap["cursor"] = cursor
+		}
+	}
+	obj.SetResourceVersion(existing.GetResourceVersion())
+	return ri.Update(ctx, obj, metav1.UpdateOptions{FieldManager: FieldManager})
 }
 
 func (ctl *Controller) deleteMarketStreams(ctx context.Context, ws, role string) error {

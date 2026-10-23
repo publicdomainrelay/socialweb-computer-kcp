@@ -22,25 +22,29 @@ type AtprotoRepoList struct {
 }
 
 type AtprotoRepoSpec struct {
-	DID string `json:"did"`
-
-	PdsRef *commonv1.ObjectRef `json:"pdsRef,omitempty"`
-
-	IdentityRef *commonv1.ObjectRef `json:"identityRef,omitempty"`
-
-	AuthRef *commonv1.SecretRef `json:"authRef,omitempty"`
+	BackendRef commonv1.ObjectRef `json:"backendRef"`
 }
 
 type AtprotoRepoStatus struct {
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
+	DID string `json:"did,omitempty"`
+
 	Head string `json:"head,omitempty"`
 
 	Rev string `json:"rev,omitempty"`
 
-	Seq int64 `json:"seq,omitempty"`
+	Writable bool `json:"writable,omitempty"`
 
-	KeyFingerprint string `json:"keyFingerprint,omitempty"`
+	Address string `json:"address,omitempty"`
 
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
+
+const (
+	AtprotoRepoConditionReady = commonv1.ConditionReady
+
+	AtprotoRepoConditionBackendBound = commonv1.ConditionBackendBound
+)
+
+const FieldManagerAtprotoRepo = "socialweb.computer/atprotorepo"

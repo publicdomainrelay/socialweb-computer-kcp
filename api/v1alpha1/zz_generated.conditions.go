@@ -62,6 +62,14 @@ func (in *ComputeVM) SetConditions(conditions []metav1.Condition) {
 	in.Status.Conditions = conditions
 }
 
+func (in *FirecrackerVM) GetConditions() []metav1.Condition {
+	return in.Status.Conditions
+}
+
+func (in *FirecrackerVM) SetConditions(conditions []metav1.Condition) {
+	in.Status.Conditions = conditions
+}
+
 func (in *Bid) GetConditions() []metav1.Condition {
 	return in.Status.Conditions
 }
@@ -107,6 +115,14 @@ func (in *RemoteOpenBao) GetConditions() []metav1.Condition {
 }
 
 func (in *RemoteOpenBao) SetConditions(conditions []metav1.Condition) {
+	in.Status.Conditions = conditions
+}
+
+func (in *Vault) GetConditions() []metav1.Condition {
+	return in.Status.Conditions
+}
+
+func (in *Vault) SetConditions(conditions []metav1.Condition) {
 	in.Status.Conditions = conditions
 }
 
@@ -283,6 +299,22 @@ func (in *AtprotoRepo) GetConditions() []metav1.Condition {
 }
 
 func (in *AtprotoRepo) SetConditions(conditions []metav1.Condition) {
+	in.Status.Conditions = conditions
+}
+
+func (in *LocalRepo) GetConditions() []metav1.Condition {
+	return in.Status.Conditions
+}
+
+func (in *LocalRepo) SetConditions(conditions []metav1.Condition) {
+	in.Status.Conditions = conditions
+}
+
+func (in *RemoteRepo) GetConditions() []metav1.Condition {
+	return in.Status.Conditions
+}
+
+func (in *RemoteRepo) SetConditions(conditions []metav1.Condition) {
 	in.Status.Conditions = conditions
 }
 

@@ -1,5 +1,9 @@
 package apiresource
 
+import (
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
+)
+
 type PrinterColumn struct {
 	Name string
 
@@ -20,4 +24,10 @@ type APIResource struct {
 	Object any
 
 	PrinterColumns []PrinterColumn
+
+	Contracts []string
+}
+
+func (r APIResource) ContractLabels() map[string]string {
+	return commonv1.ContractLabels(r.Contracts...)
 }

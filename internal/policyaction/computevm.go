@@ -125,10 +125,11 @@ func (h *ComputeVMHandler) Dispatch(ctx context.Context, spec json.RawMessage, _
 		TypeMeta:   metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: "ComputeVM"},
 		ObjectMeta: metav1.ObjectMeta{Name: input.Name},
 		Spec: v1alpha1.ComputeVMSpec{
-			VM:        input.VM,
-			Owner:     v1alpha1.ComputeVMOwner{Handle: input.Handle},
-			UserData:  v1alpha1.ComputeVMUserData{Vault: computevm.UserDataRef(input.Name, input.Vault)},
-			Requester: v1alpha1.ComputeVMRequester{Did: input.RequesterDID, Plc: strings.TrimSpace(decoded.Requester.Plc)},
+			BackendRef: computevm.BackendRef(input.Name),
+			VM:         input.VM,
+			Owner:      v1alpha1.ComputeVMOwner{Handle: input.Handle},
+			UserData:   v1alpha1.ComputeVMUserData{Vault: computevm.UserDataRef(input.Name, input.Vault)},
+			Requester:  v1alpha1.ComputeVMRequester{Did: input.RequesterDID, Plc: strings.TrimSpace(decoded.Requester.Plc)},
 		},
 	}
 	if input.Accept != nil {

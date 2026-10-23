@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-6.computevms.socialweb.computer
+  name: v1alpha1-7.computevms.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -28,6 +28,22 @@ spec:
           spec:
             type: object
             properties:
+              backendRef:
+                type: object
+                properties:
+                  group:
+                    type: string
+                  kind:
+                    type: string
+                    maxLength: 63
+                  name:
+                    type: string
+                    maxLength: 253
+                  workspace:
+                    type: string
+                required:
+                  - kind
+                  - name
               vm:
                 type: object
                 properties:
@@ -139,7 +155,10 @@ spec:
                 required:
                   - mount
                   - bindSecretSha256
+              release:
+                type: boolean
             required:
+              - backendRef
               - vm
               - owner
               - userData
@@ -169,47 +188,13 @@ spec:
               observedGeneration:
                 type: integer
                 format: int64
-              network:
+              addresses:
                 type: object
                 properties:
-                  guestIP:
+                  guest:
                     type: string
-                  hostAddress:
+                  host:
                     type: string
-                  prefix:
-                    type: integer
-                    format: int32
-                  mac:
-                    type: string
-              image:
-                type: object
-                properties:
-                  ref:
-                    type: string
-                  sha256:
-                    type: string
-                  hypervisor:
-                    type: string
-              runtime:
-                type: object
-                properties:
-                  backend:
-                    type: string
-                  ref:
-                    type: string
-                  instance:
-                    type: string
-                  pid:
-                    type: integer
-                    format: int64
-                  startTime:
-                    type: string
-                  hostBootID:
-                    type: string
-                  vmmID:
-                    type: string
-              workDir:
-                type: string
               bootedAt:
                 type: string
               message:
@@ -275,9 +260,12 @@ spec:
         - name: Phase
           type: string
           jsonPath: .status.phase
+        - name: Backend
+          type: string
+          jsonPath: .spec.backendRef.kind
         - name: GuestIP
           type: string
-          jsonPath: .status.network.guestIP
+          jsonPath: .status.addresses.guest
         - name: Requester
           type: string
           jsonPath: .spec.requester.did
