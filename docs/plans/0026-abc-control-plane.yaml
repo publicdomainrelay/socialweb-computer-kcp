@@ -50,6 +50,11 @@ decisions:
     interface; the fallback is decided once, in W0, and recorded here by
     flipping W0-RUNTIME to done with the chosen backend in the commit
     message.
+  kcp: >
+    kcp is built by this repository from upstream kcp-dev/kcp main at a
+    pinned commit (first pin 74e9fb9c, 2026-10-22), not taken from a release
+    binary; kcp-dev/sdk and multicluster-provider are pinned to match.
+    Decided by the user on 2026-10-22.
   codegen: >
     deepcopy-gen through k8s.io/code-generator kube_codegen.sh gen_helpers
     writes zz_generated.deepcopy.go. internal/apigen additionally writes
