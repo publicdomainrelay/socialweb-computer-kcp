@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/identity"
@@ -40,9 +41,9 @@ const (
 
 	MarketInboxAdapter = "bidder.market-inbox"
 
-	DefaultSettle = 5 * time.Second
-
 	DefaultRetry = 30 * time.Second
+
+	BidSubmitRetry = 2 * time.Second
 
 	AwaitTimeout = 5 * time.Second
 
@@ -97,8 +98,6 @@ type Config struct {
 	Suspend bool
 
 	Relays []string
-
-	Settle time.Duration
 }
 
 type GuestVM struct {
@@ -212,7 +211,9 @@ type Bidder struct {
 
 	now func() time.Time
 
-	started time.Time
+	synced atomic.Bool
+
+	unsent sync.Map
 
 	bids *participant.Index[v1alpha1.Bid]
 
@@ -264,9 +265,6 @@ func New(cfg Config, deps Deps) (*Bidder, error) {
 	if now == nil {
 		now = time.Now
 	}
-	if cfg.Settle <= 0 {
-		cfg.Settle = DefaultSettle
-	}
 	b := &Bidder{
 		cfg:       cfg,
 		intents:   deps.Intents,
@@ -280,7 +278,6 @@ func New(cfg Config, deps Deps) (*Bidder, error) {
 		policy:    &policyEvaluator{runs: deps.Policy, scope: cfg.ScopePolicy, records: deps.Records},
 		log:       log,
 		now:       now,
-		started:   now(),
 		bids:      participant.NewIndex[v1alpha1.Bid](),
 		vms:       participant.NewIndex[v1alpha1.ComputeVM](),
 		syncs:     participant.NewIndex[v1alpha1.StateSync](),
@@ -314,8 +311,8 @@ func (b *Bidder) Observe(ctx context.Context, change contract.Change) (time.Dura
 	default:
 		return 0, nil
 	}
-	if wait := b.settling(); wait > 0 {
-		return wait, nil
+	if !b.synced.Load() {
+		return 0, nil
 	}
 	switch change.Kind {
 	case contract.KindBid:
@@ -334,6 +331,7 @@ func (b *Bidder) indexBid(change contract.Change) {
 	if change.Gone || change.Bid == nil {
 		b.bids.Remove(change.Name)
 		b.verified.Delete(change.Name)
+		b.unsent.Delete(change.Name)
 		b.retryMu.Lock()
 		delete(b.retryAt, change.Name)
 		b.retryMu.Unlock()
@@ -347,8 +345,8 @@ func (b *Bidder) indexBid(change contract.Change) {
 	b.bids.Put(change.Name, incoming)
 }
 
-func (b *Bidder) settling() time.Duration {
-	return max(b.started.Add(b.cfg.Settle).Sub(b.now()), 0)
+func (b *Bidder) Synced() {
+	b.synced.Store(true)
 }
 
 func (b *Bidder) observeVM(ctx context.Context, name string) (time.Duration, error) {

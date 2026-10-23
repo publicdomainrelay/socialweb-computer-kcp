@@ -52,10 +52,12 @@ func (b *Bidder) stepBid(ctx context.Context, bid *v1alpha1.Bid, now time.Time) 
 	switch bid.Status.Phase {
 	case v1alpha1.BidPhaseDeciding, v1alpha1.BidPhasePublished:
 	default:
+		b.unsent.Delete(bid.Name)
 		b.bindWonBid(ctx, bid)
 		return b.finishBid(ctx, bid, now), nil
 	}
 	if bidExpired(bid, now) {
+		b.unsent.Delete(bid.Name)
 		b.expireBid(ctx, bid, now)
 		return 0, nil
 	}
@@ -76,7 +78,7 @@ func (b *Bidder) stepBid(ctx context.Context, bid *v1alpha1.Bid, now time.Time) 
 	}
 	if bid.Status.Phase == v1alpha1.BidPhasePublished {
 		if _, ok := b.verified.Load(bid.Name); ok {
-			return untilExpiry(bid, now), nil
+			return b.sendBid(ctx, bid, now), nil
 		}
 		ref, found, err := b.existingBidRecord(ctx, bid)
 		if err != nil {
@@ -85,7 +87,7 @@ func (b *Bidder) stepBid(ctx context.Context, bid *v1alpha1.Bid, now time.Time) 
 		if found {
 			b.recordPublishedBid(ctx, bid, ref, now)
 			b.verified.Store(bid.Name, true)
-			return untilExpiry(bid, now), nil
+			return b.sendBid(ctx, bid, now), nil
 		}
 	}
 	if rfp == nil {
@@ -94,7 +96,26 @@ func (b *Bidder) stepBid(ctx context.Context, bid *v1alpha1.Bid, now time.Time) 
 	if err := b.publishBidRecord(ctx, bid, rfp, now, true); err != nil {
 		return 0, fmt.Errorf("resuming the bid publish: %w", err)
 	}
-	return untilExpiry(bid, now), nil
+	return b.sendBid(ctx, bid, now), nil
+}
+
+func (b *Bidder) sendBid(ctx context.Context, bid *v1alpha1.Bid, now time.Time) time.Duration {
+	wait := untilExpiry(bid, now)
+	value, ok := b.unsent.Load(bid.Name)
+	if !ok {
+		return wait
+	}
+	pending := value.(unsentBid)
+	err := b.submitBid(ctx, pending.endpoint, pending.ref)
+	if err != nil && !participant.Rejected(err) {
+		b.log.Warn("submitting the bid to the requester failed; it is retried", "bid", bid.Name, "url", pending.endpoint, "err", err)
+		return earliest(wait, BidSubmitRetry)
+	}
+	if err != nil {
+		b.log.Warn("the requester refused the bid", "bid", bid.Name, "url", pending.endpoint, "err", err)
+	}
+	b.unsent.Delete(bid.Name)
+	return wait
 }
 
 func untilExpiry(bid *v1alpha1.Bid, now time.Time) time.Duration {
@@ -231,7 +252,7 @@ func (b *Bidder) publishBidRecord(ctx context.Context, bid *v1alpha1.Bid, rfp *m
 	changed := b.recordPublishedBid(ctx, bid, ref, now)
 	b.verified.Store(bid.Name, true)
 	if changed && rfp != nil && rfp.SubmitBid != "" {
-		b.submitBid(ctx, rfp.SubmitBid, ref)
+		b.unsent.Store(bid.Name, unsentBid{endpoint: rfp.SubmitBid, ref: ref})
 	}
 	return nil
 }
