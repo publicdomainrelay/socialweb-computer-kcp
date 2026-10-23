@@ -18,7 +18,6 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	atrelay "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/relay"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	contract "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/relay"
@@ -64,6 +63,8 @@ type Service struct {
 	stopCh   chan struct{}
 	stopOnce sync.Once
 	ready    bool
+
+	readiness component.ReadySignal
 }
 
 func New(spec v1alpha1.RelaySpec, deps Deps) (*Service, error) {
@@ -249,6 +250,7 @@ func (s *Service) Start(ctx context.Context) error {
 	s.mu.Unlock()
 
 	log.Info("relay_registered", "host", host, "hostname", hostname)
+	s.readiness.Signal()
 
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -266,19 +268,8 @@ func (s *Service) Start(ctx context.Context) error {
 	return nil
 }
 
-func (s *Service) Ready(ctx context.Context) error {
-	s.mu.Lock()
-	ready := s.ready
-	baseURL := s.baseURL
-	handlers := s.deps.Bus
-	s.mu.Unlock()
-	if !ready || baseURL == "" || handlers == nil {
-		return errors.New("relay: the service is not registered")
-	}
-	if err := xrpc.Health(ctx, &xrpc.Client{Host: baseURL, HTTP: handlers.HTTPClient()}); err != nil {
-		return fmt.Errorf("relay: health: %w", err)
-	}
-	return nil
+func (s *Service) Ready() component.Readiness {
+	return &s.readiness
 }
 
 func (s *Service) Endpoints() []component.Endpoint {

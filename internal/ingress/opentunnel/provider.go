@@ -186,7 +186,7 @@ type Provider struct {
 
 	ready bool
 
-	failed error
+	readiness component.ReadySignal
 
 	registrations map[*registration]struct{}
 
@@ -232,13 +232,13 @@ func (p *Provider) Start(ctx context.Context) error {
 	p.stopCh = make(chan struct{})
 	p.stopOnce = sync.Once{}
 	p.ready = true
-	p.failed = nil
 	p.registrations = map[*registration]struct{}{}
 	stopCh := p.stopCh
 	p.mu.Unlock()
 
 	log.Info("ingressproxy_opentunnel_started", "provider", "opentunnel", "command", strings.Join(args, " "),
 		"localHost", p.cfg.localHost(), "route", p.cfg.RouteName, "proxyProtocol", p.cfg.ProxyProtocol)
+	p.readiness.Signal()
 
 	select {
 	case <-ctx.Done():
@@ -255,18 +255,8 @@ func (p *Provider) Start(ctx context.Context) error {
 	return nil
 }
 
-func (p *Provider) Ready(ctx context.Context) error {
-	p.mu.Lock()
-	ready := p.ready
-	failed := p.failed
-	p.mu.Unlock()
-	if !ready {
-		return errors.New("ingressproxy opentunnel: the provider is not started")
-	}
-	if failed != nil {
-		return failed
-	}
-	return nil
+func (p *Provider) Ready() component.Readiness {
+	return &p.readiness
 }
 
 func (p *Provider) Stop(ctx context.Context) error {
@@ -405,11 +395,7 @@ func (p *Provider) rememberURL(spec ingress.Spec, raw string) error {
 }
 
 func (p *Provider) rememberRestart(spec ingress.Spec, raw string) error {
-	err := p.rememberURL(spec, raw)
-	p.mu.Lock()
-	p.failed = err
-	p.mu.Unlock()
-	return err
+	return p.rememberURL(spec, raw)
 }
 
 func originOf(raw string) string {

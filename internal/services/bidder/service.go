@@ -125,7 +125,7 @@ type Service struct {
 
 	started bool
 
-	registered bool
+	readiness component.ReadySignal
 
 	endpoints []component.Endpoint
 
@@ -220,18 +220,13 @@ func (s *Service) Start(ctx context.Context) error {
 		cancel()
 		return err
 	}
+	s.readiness.Signal()
 	<-runCtx.Done()
 	return nil
 }
 
-func (s *Service) Ready(context.Context) error {
-	s.mu.Lock()
-	up := s.started && s.registered
-	s.mu.Unlock()
-	if !up {
-		return errors.New("bidder: the service is not registered")
-	}
-	return nil
+func (s *Service) Ready() component.Readiness {
+	return &s.readiness
 }
 
 func (s *Service) Endpoints() []component.Endpoint {
@@ -254,7 +249,7 @@ func (s *Service) stopWith(ctx context.Context) error {
 	s.stopOnce.Do(func() {
 		s.mu.Lock()
 		cancel, relay := s.cancel, s.relay
-		s.started, s.registered = false, false
+		s.started = false
 		s.mu.Unlock()
 		if cancel != nil {
 			cancel()
@@ -327,13 +322,7 @@ func (s *Service) register() error {
 	if err := s.deps.Bus.RegisterHTTP(key, s.mux); err != nil {
 		return err
 	}
-	if err := s.deps.Bus.RegisterHTTP(key, s.mux, "market"); err != nil {
-		return err
-	}
-	s.mu.Lock()
-	s.registered = true
-	s.mu.Unlock()
-	return nil
+	return s.deps.Bus.RegisterHTTP(key, s.mux, "market")
 }
 
 func (s *Service) addEndpoint(endpoint component.Endpoint) {

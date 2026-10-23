@@ -44,6 +44,8 @@ type Service struct {
 
 	registered bool
 
+	readiness component.ReadySignal
+
 	mux *http.ServeMux
 
 	cancel context.CancelFunc
@@ -78,23 +80,20 @@ func (s *Service) Start(ctx context.Context) error {
 		cancel()
 		return err
 	}
+	s.mu.Lock()
+	plane := s.plane
+	s.mu.Unlock()
+	if plane.Ready() != nil {
+		s.readiness.Fail(errors.New("guestcontrolplane: the guest identity proxy is not configured"))
+	} else {
+		s.readiness.Signal()
+	}
 	<-runCtx.Done()
 	return nil
 }
 
-func (s *Service) Ready(ctx context.Context) error {
-	s.mu.Lock()
-	started := s.started
-	registered := s.registered
-	plane := s.plane
-	s.mu.Unlock()
-	if !started || !registered {
-		return errors.New("guestcontrolplane: the service is not registered")
-	}
-	if plane.Ready() != nil {
-		return errors.New("guestcontrolplane: the guest identity proxy is not configured")
-	}
-	return nil
+func (s *Service) Ready() component.Readiness {
+	return &s.readiness
 }
 
 func (s *Service) Endpoints() []component.Endpoint {

@@ -72,7 +72,7 @@ type Provider struct {
 
 	stopOnce sync.Once
 
-	ready bool
+	readiness component.ReadySignal
 }
 
 func New(cfg Config) *Provider {
@@ -130,7 +130,6 @@ func (p *Provider) Start(ctx context.Context) error {
 	p.listener = listener
 	p.stopCh = stopCh
 	p.stopOnce = sync.Once{}
-	p.ready = true
 	p.mu.Unlock()
 
 	log.Info("ingressproxy_listening", "provider", "xrpc-subscription", "address", listener.Addr().String(),
@@ -138,6 +137,7 @@ func (p *Provider) Start(ctx context.Context) error {
 
 	errCh := make(chan error, 1)
 	go func() { errCh <- httpServer.Serve(listener) }()
+	p.readiness.Signal()
 
 	select {
 	case <-ctx.Done():
@@ -161,37 +161,8 @@ func (p *Provider) Start(ctx context.Context) error {
 	return nil
 }
 
-func (p *Provider) Ready(ctx context.Context) error {
-	p.mu.Lock()
-	ready := p.ready
-	address := ""
-	secure := p.cfg.TLS != nil
-	if p.listener != nil {
-		address = p.listener.Addr().String()
-	}
-	hostname := hostport.Primary(p.cfg.Hostname, p.cfg.Hostnames)
-	p.mu.Unlock()
-	if !ready || address == "" {
-		return errors.New("ingressproxy: the service is not listening")
-	}
-	scheme := "http"
-	if secure {
-		scheme = "https"
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, scheme+"://"+address+"/.well-known/did.json", nil)
-	if err != nil {
-		return err
-	}
-	req.Host = hostport.HostnameOnly(hostname)
-	resp, err := probeClient(secure).Do(req)
-	if err != nil {
-		return fmt.Errorf("ingressproxy: health request: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("ingressproxy: health returned %d", resp.StatusCode)
-	}
-	return nil
+func (p *Provider) Ready() component.Readiness {
+	return &p.readiness
 }
 
 func (p *Provider) Endpoints() []component.Endpoint {
@@ -242,17 +213,7 @@ func (p *Provider) shutdown(ctx context.Context) {
 
 func (p *Provider) finish() {
 	p.mu.Lock()
-	p.ready = false
 	p.listener = nil
 	p.http = nil
 	p.mu.Unlock()
-}
-
-func probeClient(secure bool) *http.Client {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.Proxy = nil
-	if secure {
-		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
-	}
-	return &http.Client{Timeout: 3 * time.Second, Transport: transport}
 }

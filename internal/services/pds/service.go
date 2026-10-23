@@ -24,7 +24,6 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
 	atpds "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/repo"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/kcp"
@@ -34,7 +33,6 @@ import (
 
 const (
 	shutdownTimeout  = 10 * time.Second
-	healthTimeout    = 2 * time.Second
 	directoryTimeout = 10 * time.Second
 )
 
@@ -55,6 +53,8 @@ type Service struct {
 	server   *atpds.Server
 	stopCh   chan struct{}
 	stopOnce sync.Once
+
+	readiness component.ReadySignal
 
 	closeOnce    sync.Once
 	repoStore    *repo.SQLiteStore
@@ -308,6 +308,7 @@ func (s *Service) Start(ctx context.Context) error {
 	s.accountStore = accountStore
 	s.keyStore = keyStore
 	s.mu.Unlock()
+	s.readiness.Signal()
 
 	success = true
 	syncCtx, cancelSync := context.WithCancel(ctx)
@@ -428,21 +429,8 @@ func logicalHost(key component.Key) string {
 	return kcp.ServiceFQDN(kind, "default", key.Workspace, kcp.DefaultServiceDomain)
 }
 
-func (s *Service) Ready(ctx context.Context) error {
-	s.mu.Lock()
-	started := s.started
-	rawURL := s.endpoint.URL
-	handlers := s.deps.Bus
-	s.mu.Unlock()
-	if !started || rawURL == "" || handlers == nil {
-		return errors.New("pds: the service is not registered")
-	}
-	probeCtx, cancel := context.WithTimeout(ctx, healthTimeout)
-	defer cancel()
-	if err := xrpc.Health(probeCtx, &xrpc.Client{Host: rawURL, HTTP: handlers.HTTPClient()}); err != nil {
-		return fmt.Errorf("pds: health: %w", err)
-	}
-	return nil
+func (s *Service) Ready() component.Readiness {
+	return &s.readiness
 }
 
 func (s *Service) Endpoints() []component.Endpoint {

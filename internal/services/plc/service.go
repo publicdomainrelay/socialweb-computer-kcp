@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -37,6 +36,8 @@ type Service struct {
 	stopCh   chan struct{}
 	stopOnce sync.Once
 	ready    bool
+
+	readiness component.ReadySignal
 }
 
 func New(spec v1alpha1.PlcSpec, in component.Instance) *Service {
@@ -118,6 +119,7 @@ func (s *Service) Start(ctx context.Context) error {
 	s.mu.Unlock()
 
 	log.Info("plc_registered", "host", host, "hostname", hostport.Primary(s.serveHost(), s.hostnames()))
+	s.readiness.Signal()
 
 	select {
 	case <-ctx.Done():
@@ -127,28 +129,8 @@ func (s *Service) Start(ctx context.Context) error {
 	return nil
 }
 
-func (s *Service) Ready(ctx context.Context) error {
-	s.mu.Lock()
-	ready := s.ready
-	baseURL := s.baseURL
-	handlers := s.in.Bus
-	s.mu.Unlock()
-	if !ready || baseURL == "" || handlers == nil {
-		return errors.New("plc: the service is not registered")
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/health", nil)
-	if err != nil {
-		return err
-	}
-	resp, err := handlers.HTTPClient().Do(req)
-	if err != nil {
-		return fmt.Errorf("plc: health request: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("plc: health returned %d", resp.StatusCode)
-	}
-	return nil
+func (s *Service) Ready() component.Readiness {
+	return &s.readiness
 }
 
 func (s *Service) Endpoints() []component.Endpoint {

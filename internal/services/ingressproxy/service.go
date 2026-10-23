@@ -58,6 +58,8 @@ type Service struct {
 	registrar exposure.IngressRegistrar
 
 	providerName string
+
+	readiness component.ReadySignal
 }
 
 func New(spec v1alpha1.IngressProxySpec, deps Deps) (*Service, error) {
@@ -239,17 +241,26 @@ func (s *Service) Start(ctx context.Context) error {
 	s.registrar = registrar
 	s.providerName = name
 	s.mu.Unlock()
+	followCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go s.follow(followCtx, provider.Ready())
 	return provider.Start(ctx)
 }
 
-func (s *Service) Ready(ctx context.Context) error {
-	s.mu.Lock()
-	provider := s.provider
-	s.mu.Unlock()
-	if provider == nil {
-		return errors.New("ingressproxy: the service is not started")
+func (s *Service) follow(ctx context.Context, ready component.Readiness) {
+	select {
+	case <-ctx.Done():
+	case <-ready.Done():
+		if err := ready.Err(); err != nil {
+			s.readiness.Fail(err)
+			return
+		}
+		s.readiness.Signal()
 	}
-	return provider.Ready(ctx)
+}
+
+func (s *Service) Ready() component.Readiness {
+	return &s.readiness
 }
 
 func (s *Service) Endpoints() []component.Endpoint {

@@ -55,6 +55,8 @@ type Service struct {
 
 	ready bool
 
+	readiness component.ReadySignal
+
 	cancel context.CancelFunc
 
 	done chan struct{}
@@ -114,6 +116,11 @@ func (s *Service) Start(ctx context.Context) error {
 	s.mu.Lock()
 	s.ready = true
 	s.mu.Unlock()
+	if core.Records() == nil {
+		s.readiness.Fail(errors.New("requester: the repo is not open"))
+	} else {
+		s.readiness.Signal()
+	}
 	s.log.Info("requester_started", "workspace", s.cfg.Workspace, "name", s.deps.Self.Name, "repo", core.RepoDID(), "mode", core.Mode())
 	<-runCtx.Done()
 	s.finish(ctx, core)
@@ -151,18 +158,8 @@ func (s *Service) healthy() *role.Requester {
 	return s.core
 }
 
-func (s *Service) Ready(ctx context.Context) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	switch {
-	case !s.started:
-		return errors.New("requester: the service is not started")
-	case !s.ready:
-		return errors.New("requester: the service is starting")
-	case s.core == nil || s.core.Records() == nil:
-		return errors.New("requester: the repo is not open")
-	}
-	return nil
+func (s *Service) Ready() component.Readiness {
+	return &s.readiness
 }
 
 func (s *Service) Endpoints() []component.Endpoint {
