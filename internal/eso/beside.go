@@ -3,7 +3,6 @@ package eso
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -13,12 +12,11 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	kruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/dynamic"
 
-	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
+	"github.com/johnandersen777/socialweb-computer-kcp/api/kcpgvr"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 )
 
 const (
@@ -53,16 +51,16 @@ var keptClusterRoles = map[string]bool{
 }
 
 var bundleResources = map[string]schema.GroupVersionResource{
-	"CustomResourceDefinition":       {Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions"},
-	"ValidatingWebhookConfiguration": {Group: "admissionregistration.k8s.io", Version: "v1", Resource: "validatingwebhookconfigurations"},
-	"ClusterRole":                    {Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "clusterroles"},
-	"ClusterRoleBinding":             {Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "clusterrolebindings"},
-	"Role":                           {Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "roles"},
-	"RoleBinding":                    {Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "rolebindings"},
-	"Deployment":                     {Group: "apps", Version: "v1", Resource: "deployments"},
-	"ServiceAccount":                 {Group: "", Version: "v1", Resource: "serviceaccounts"},
-	"Service":                        {Group: "", Version: "v1", Resource: "services"},
-	"Secret":                         {Group: "", Version: "v1", Resource: "secrets"},
+	"CustomResourceDefinition":       kcpgvr.CustomResourceDefinitions,
+	"ValidatingWebhookConfiguration": kcpgvr.ValidatingWebhookConfigurations,
+	"ClusterRole":                    kcpgvr.ClusterRoles,
+	"ClusterRoleBinding":             kcpgvr.ClusterRoleBindings,
+	"Role":                           kcpgvr.Roles,
+	"RoleBinding":                    kcpgvr.RoleBindings,
+	"Deployment":                     kcpgvr.Deployments,
+	"ServiceAccount":                 kcpgvr.ServiceAccounts,
+	"Service":                        kcpgvr.Services,
+	"Secret":                         kcpgvr.Secrets,
 }
 
 var namespacedBundleKinds = map[string]bool{
@@ -81,11 +79,11 @@ var ErrNoWebhookPath = errors.New(
 		"behind the loopback URL and the apiserver would call the webhook server's root")
 
 type Split struct {
-	Kept []unstructured.Unstructured
+	Kept []kube.Doc
 
-	Webhooks []unstructured.Unstructured
+	Webhooks []kube.Doc
 
-	Retired []unstructured.Unstructured
+	Retired []kube.Doc
 }
 
 type BesideOptions struct {
@@ -100,7 +98,7 @@ type BesideOptions struct {
 	FieldManager string
 }
 
-func LoadBundle(path string) ([]unstructured.Unstructured, error) {
+func LoadBundle(path string) ([]kube.Doc, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("eso: reading the External Secrets bundle %s: %w", path, err)
@@ -115,7 +113,7 @@ func LoadBundle(path string) ([]unstructured.Unstructured, error) {
 	return objs, nil
 }
 
-func SplitBundle(objs []unstructured.Unstructured, namespace string) (Split, error) {
+func SplitBundle(objs []kube.Doc, namespace string) (Split, error) {
 	if namespace == "" {
 		return Split{}, errors.New("eso: splitting the bundle needs the namespace the in-tenant " +
 			"install put its workloads in, which is where the migration deletes them from")
@@ -123,19 +121,19 @@ func SplitBundle(objs []unstructured.Unstructured, namespace string) (Split, err
 	var out Split
 	var unknown []string
 	for _, u := range objs {
-		u := *u.DeepCopy()
-		kind := u.GetKind()
+		u := kube.Doc(kruntime.DeepCopyJSON(u))
+		kind := kindOf(u)
 		if _, ok := bundleResources[kind]; !ok {
-			unknown = append(unknown, kind+" "+u.GetName())
+			unknown = append(unknown, kind+" "+nameOf(u))
 			continue
 		}
 		if namespacedBundleKinds[kind] {
-			u.SetNamespace(namespace)
+			setNamespace(u, namespace)
 		}
 		switch {
 		case kind == "CustomResourceDefinition":
 			out.Kept = append(out.Kept, u)
-		case kind == "ClusterRole" && keptClusterRoles[u.GetName()]:
+		case kind == "ClusterRole" && keptClusterRoles[nameOf(u)]:
 			out.Kept = append(out.Kept, u)
 		case kind == "ValidatingWebhookConfiguration":
 			out.Webhooks = append(out.Webhooks, u)
@@ -149,43 +147,39 @@ func SplitBundle(objs []unstructured.Unstructured, namespace string) (Split, err
 	return out, nil
 }
 
-func WebhookConfigurations(webhooks []unstructured.Unstructured, base string, caPEM []byte) ([]unstructured.Unstructured, error) {
+func WebhookConfigurations(webhooks []kube.Doc, base string, caPEM []byte) ([]kube.Doc, error) {
 	if base == "" || len(caPEM) == 0 {
 		return nil, errors.New("eso: registering the webhook by URL needs the loopback base URL " +
 			"and the CA that signed the webhook's serving certificate")
 	}
 	base = strings.TrimRight(base, "/")
 	bundle := base64.StdEncoding.EncodeToString(caPEM)
-	out := make([]unstructured.Unstructured, 0, len(webhooks))
+	out := make([]kube.Doc, 0, len(webhooks))
 	for _, in := range webhooks {
-		u := *in.DeepCopy()
-		hooks, found, err := unstructured.NestedSlice(u.Object, "webhooks")
+		u := kube.Doc(kruntime.DeepCopyJSON(in))
+		hooks, found, err := docSlice(u, "webhooks")
 		if err != nil || !found || len(hooks) == 0 {
-			return nil, fmt.Errorf("eso: the ValidatingWebhookConfiguration %s carries no webhooks: %v", u.GetName(), err)
+			return nil, fmt.Errorf("eso: the ValidatingWebhookConfiguration %s carries no webhooks: %v", nameOf(u), err)
 		}
 		for i, h := range hooks {
 			hook, ok := h.(map[string]any)
 			if !ok {
-				return nil, fmt.Errorf("eso: webhook %d of %s is %T", i, u.GetName(), h)
+				return nil, fmt.Errorf("eso: webhook %d of %s is %T", i, nameOf(u), h)
 			}
-			path, _, _ := unstructured.NestedString(hook, "clientConfig", "service", "path")
+			path := docString(hook, "clientConfig", "service", "path")
 			if path == "" {
-				return nil, fmt.Errorf("%w (%s/%v)", ErrNoWebhookPath, u.GetName(), hook["name"])
+				return nil, fmt.Errorf("%w (%s/%v)", ErrNoWebhookPath, nameOf(u), hook["name"])
 			}
 			hook["clientConfig"] = map[string]any{"url": base + path, "caBundle": bundle}
 			hook["failurePolicy"] = "Ignore"
-			hooks[i] = hook
-		}
-		if err := unstructured.SetNestedSlice(u.Object, hooks, "webhooks"); err != nil {
-			return nil, err
 		}
 		out = append(out, u)
 	}
 	return out, nil
 }
 
-func ControllerBindingObject() unstructured.Unstructured {
-	return unstructured.Unstructured{Object: map[string]any{
+func ControllerBindingObject() kube.Doc {
+	return kube.Doc{
 		"apiVersion": "rbac.authorization.k8s.io/v1",
 		"kind":       "ClusterRoleBinding",
 		"metadata":   map[string]any{"name": ControllerBinding},
@@ -199,7 +193,7 @@ func ControllerBindingObject() unstructured.Unstructured {
 			"kind":     "Group",
 			"name":     ControllerGroup,
 		}},
-	}}
+	}
 }
 
 const applyParallel = 8
@@ -233,7 +227,7 @@ func runParallel(ctx context.Context, jobs []func(context.Context) error) error 
 	return first
 }
 
-func InstallBeside(ctx context.Context, dyn dynamic.Interface, o BesideOptions) error {
+func InstallBeside(ctx context.Context, c *kube.Client, o BesideOptions) error {
 	if o.BundlePath == "" || o.LegacyNamespace == "" || o.FieldManager == "" {
 		return errors.New("eso: the beside install needs the pinned bundle, the namespace the " +
 			"in-tenant install used, and a field manager to apply under")
@@ -250,23 +244,21 @@ func InstallBeside(ctx context.Context, dyn dynamic.Interface, o BesideOptions) 
 	if err != nil {
 		return err
 	}
-	if err := Retire(ctx, dyn, split.Retired); err != nil {
+	if err := Retire(ctx, c, split.Retired); err != nil {
 		return err
 	}
 	jobs := make([]func(context.Context) error, 0, len(split.Kept)+1+len(webhooks))
-	for i := range split.Kept {
-		u := &split.Kept[i]
-		jobs = append(jobs, func(ctx context.Context) error { return applyBundleObject(ctx, dyn, u, o.FieldManager) })
+	for _, u := range split.Kept {
+		jobs = append(jobs, func(ctx context.Context) error { return applyBundleObject(ctx, c, u, o.FieldManager) })
 	}
 	binding := ControllerBindingObject()
-	jobs = append(jobs, func(ctx context.Context) error { return applyBundleObject(ctx, dyn, &binding, o.FieldManager) })
-	for i := range webhooks {
-		u := &webhooks[i]
+	jobs = append(jobs, func(ctx context.Context) error { return applyBundleObject(ctx, c, binding, o.FieldManager) })
+	for _, u := range webhooks {
 		jobs = append(jobs, func(ctx context.Context) error {
-			if err := replaceServiceRegistration(ctx, dyn, u.GetName()); err != nil {
+			if err := replaceServiceRegistration(ctx, c, nameOf(u)); err != nil {
 				return err
 			}
-			return applyBundleObject(ctx, dyn, u, o.FieldManager)
+			return applyBundleObject(ctx, c, u, o.FieldManager)
 		})
 	}
 	if err := runParallel(ctx, jobs); err != nil {
@@ -274,48 +266,45 @@ func InstallBeside(ctx context.Context, dyn dynamic.Interface, o BesideOptions) 
 	}
 	var crds []string
 	for _, u := range split.Kept {
-		if u.GetKind() == "CustomResourceDefinition" {
-			crds = append(crds, u.GetName())
+		if kindOf(u) == "CustomResourceDefinition" {
+			crds = append(crds, nameOf(u))
 		}
 	}
-	return waitEstablished(ctx, dyn, crds)
+	return waitEstablished(ctx, c, crds)
 }
 
 const defaultRetireTimeout = 2 * time.Minute
 
 var RetireTimeout = defaultRetireTimeout
 
-func Retire(ctx context.Context, dyn dynamic.Interface, retired []unstructured.Unstructured) error {
+func Retire(ctx context.Context, c *kube.Client, retired []kube.Doc) error {
 	foreground := metav1.DeletePropagationForeground
 	var problems []error
-	var deleted []dynamic.ResourceInterface
-	var deletedNames []unstructured.Unstructured
+	var deleted []kube.Resource
+	var deletedNames []kube.Doc
 	for _, u := range retired {
-		gvr, ok := bundleResources[u.GetKind()]
+		gvr, ok := bundleResources[kindOf(u)]
 		if !ok {
-			problems = append(problems, fmt.Errorf("%w: %s %s", ErrBundleKind, u.GetKind(), u.GetName()))
+			problems = append(problems, fmt.Errorf("%w: %s %s", ErrBundleKind, kindOf(u), nameOf(u)))
 			continue
 		}
-		var ri dynamic.ResourceInterface = dyn.Resource(gvr)
-		if u.GetNamespace() != "" {
-			ri = dyn.Resource(gvr).Namespace(u.GetNamespace())
-		}
-		err := ri.Delete(ctx, u.GetName(), metav1.DeleteOptions{PropagationPolicy: &foreground})
+		r := c.Resource(gvr).In(namespaceOf(u))
+		err := r.Delete(ctx, nameOf(u), metav1.DeleteOptions{PropagationPolicy: &foreground})
 		switch {
 		case apierrors.IsNotFound(err):
 		case err != nil:
-			problems = append(problems, fmt.Errorf("eso: retiring the in-tenant %s %s: %w", u.GetKind(), keyName(u), err))
+			problems = append(problems, fmt.Errorf("eso: retiring the in-tenant %s %s: %w", kindOf(u), keyName(u), err))
 		default:
-			deleted = append(deleted, ri)
+			deleted = append(deleted, r)
 			deletedNames = append(deletedNames, u)
 		}
 	}
 	rctx, cancel := context.WithTimeout(ctx, RetireTimeout)
 	defer cancel()
-	for i, ri := range deleted {
+	for i, r := range deleted {
 		u := deletedNames[i]
-		if _, err := ctlruntime.Await(rctx, ri, u.GetName(), 0, ctlruntime.Absent); err != nil {
-			if _, gerr := ri.Get(ctx, u.GetName(), metav1.GetOptions{}); apierrors.IsNotFound(gerr) {
+		if _, err := kube.Await(rctx, r, nameOf(u), 0, kube.Absent[kube.Doc]); err != nil {
+			if _, gerr := kube.Get[kube.Doc](ctx, r, nameOf(u)); apierrors.IsNotFound(gerr) {
 				continue
 			}
 			if ctx.Err() != nil {
@@ -324,74 +313,68 @@ func Retire(ctx context.Context, dyn dynamic.Interface, retired []unstructured.U
 			problems = append(problems, fmt.Errorf("eso: the in-tenant %s %s is still there %s after "+
 				"its foreground delete; its pods would read as tenant demand once the baseline no "+
 				"longer names it, so the install stops here and the next pass retries",
-				u.GetKind(), keyName(u), RetireTimeout))
+				kindOf(u), keyName(u), RetireTimeout))
 		}
 	}
 	return errors.Join(problems...)
 }
 
-func replaceServiceRegistration(ctx context.Context, dyn dynamic.Interface, name string) error {
-	ri := dyn.Resource(bundleResources["ValidatingWebhookConfiguration"])
-	live, err := ri.Get(ctx, name, metav1.GetOptions{})
+func replaceServiceRegistration(ctx context.Context, c *kube.Client, name string) error {
+	r := c.Resource(bundleResources["ValidatingWebhookConfiguration"])
+	live, err := kube.Get[kube.Doc](ctx, r, name)
 	if apierrors.IsNotFound(err) {
 		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("eso: reading the webhook registration %s: %w", name, err)
 	}
-	hooks, _, _ := unstructured.NestedSlice(live.Object, "webhooks")
+	hooks, _, _ := docSlice(*live, "webhooks")
 	byService := false
 	for _, h := range hooks {
 		hook, ok := h.(map[string]any)
 		if !ok {
 			continue
 		}
-		if _, found, _ := unstructured.NestedMap(hook, "clientConfig", "service"); found {
-			byService = true
+		if svc, found, _ := field(hook, "clientConfig", "service"); found {
+			if _, ok := svc.(map[string]any); ok {
+				byService = true
+			}
 		}
 	}
 	if !byService {
 		return nil
 	}
-	if err := ri.Delete(ctx, name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+	if err := r.Delete(ctx, name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("eso: deleting the webhook registration %s that still names a Service: %w", name, err)
 	}
 	return nil
 }
 
-func applyBundleObject(ctx context.Context, dyn dynamic.Interface, u *unstructured.Unstructured, manager string) error {
-	gvr, ok := bundleResources[u.GetKind()]
+func applyBundleObject(ctx context.Context, c *kube.Client, u kube.Doc, manager string) error {
+	gvr, ok := bundleResources[kindOf(u)]
 	if !ok {
-		return fmt.Errorf("%w: %s %s", ErrBundleKind, u.GetKind(), u.GetName())
+		return fmt.Errorf("%w: %s %s", ErrBundleKind, kindOf(u), nameOf(u))
 	}
-	body, err := json.Marshal(u.Object)
-	if err != nil {
-		return fmt.Errorf("eso: marshalling the %s %s: %w", u.GetKind(), u.GetName(), err)
-	}
-	var ri dynamic.ResourceInterface = dyn.Resource(gvr)
-	if u.GetNamespace() != "" {
-		ri = dyn.Resource(gvr).Namespace(u.GetNamespace())
-	}
-	if _, err := ri.Patch(ctx, u.GetName(), types.ApplyPatchType, body,
-		metav1.PatchOptions{FieldManager: manager, Force: new(true)}); err != nil {
-		return fmt.Errorf("eso: applying the %s %s: %w", u.GetKind(), u.GetName(), err)
+	if _, err := kube.Apply[kube.Doc](ctx, c.Resource(gvr).In(namespaceOf(u)), u,
+		kube.ApplyOptions{FieldManager: manager, Force: true}); err != nil {
+		return fmt.Errorf("eso: applying the %s %s: %w", kindOf(u), nameOf(u), err)
 	}
 	return nil
 }
 
-func waitEstablished(ctx context.Context, dyn dynamic.Interface, names []string) error {
+func waitEstablished(ctx context.Context, c *kube.Client, names []string) error {
 	ctx, cancel := context.WithTimeout(ctx, EstablishTimeout)
 	defer cancel()
-	ri := dyn.Resource(bundleResources["CustomResourceDefinition"])
+	r := c.Resource(bundleResources["CustomResourceDefinition"])
 	for _, name := range names {
 		last := "not read yet"
-		if _, err := ctlruntime.Await(ctx, ri, name, 0, func(u *unstructured.Unstructured) (bool, error) {
+		if _, err := kube.Await(ctx, r, name, 0, func(u *kube.Doc) (bool, error) {
 			if u == nil {
 				last = "the CRD is not there"
 				return false, nil
 			}
 			last = "the Established condition is not True"
-			return established(u), nil
+			return established(*u), nil
 		}); err != nil {
 			return fmt.Errorf("eso: the CRD %s never became Established (%s): the controller beside "+
 				"the control plane starts an informer per kind, and an informer for a kind the "+
@@ -401,8 +384,8 @@ func waitEstablished(ctx context.Context, dyn dynamic.Interface, names []string)
 	return nil
 }
 
-func established(u *unstructured.Unstructured) bool {
-	conditions, _, _ := unstructured.NestedSlice(u.Object, "status", "conditions")
+func established(u kube.Doc) bool {
+	conditions, _, _ := docSlice(u, "status", "conditions")
 	for _, c := range conditions {
 		m, ok := c.(map[string]any)
 		if ok && m["type"] == "Established" && m["status"] == "True" {
@@ -412,9 +395,9 @@ func established(u *unstructured.Unstructured) bool {
 	return false
 }
 
-func keyName(u unstructured.Unstructured) string {
-	if u.GetNamespace() != "" {
-		return u.GetNamespace() + "/" + u.GetName()
+func keyName(u kube.Doc) string {
+	if namespaceOf(u) != "" {
+		return namespaceOf(u) + "/" + nameOf(u)
 	}
-	return u.GetName()
+	return nameOf(u)
 }

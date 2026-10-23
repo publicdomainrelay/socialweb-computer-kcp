@@ -8,8 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	"k8s.io/client-go/dynamic"
-
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/eso"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vaultcert"
@@ -34,12 +33,12 @@ func StoreVaultURL(vaultPort int) string {
 	return "https://" + net.JoinHostPort("127.0.0.1", strconv.Itoa(vaultPort))
 }
 
-func ApplyVaultStore(ctx context.Context, dyn dynamic.Interface, o VaultStore) (string, error) {
+func ApplyVaultStore(ctx context.Context, c *kube.Client, o VaultStore) (string, error) {
 	if o.DataDir == "" || o.VaultPort == 0 || o.Client == nil || o.Namespace == "" {
 		return "", errors.New("esovault: the vault-backed store needs the cluster's data dir, its vault's " +
 			"leased port, a client logged in to it, and the tenant namespace the ExternalSecret is written into")
 	}
-	if err := eso.InstallOperator(ctx, dyn, nil); err != nil {
+	if err := eso.InstallOperator(ctx, c, nil); err != nil {
 		return "", fmt.Errorf("%w. The External Secrets controller runs beside the control plane and "+
 			"its process-group step installs the CRDs before it starts, so a tenant that serves none "+
 			"of them is one whose group came up without that step", err)
@@ -54,11 +53,11 @@ func ApplyVaultStore(ctx context.Context, dyn dynamic.Interface, o VaultStore) (
 		return "", fmt.Errorf("esovault: writing the demo value the tenant's ExternalSecret reads out of "+
 			"the cluster vault for %s: %w", o.Cluster, err)
 	}
-	cert, err := currentOrNewESOCertificate(ctx, dyn, o, vaultURL, vaultTLS.CAPEM)
+	cert, err := currentOrNewESOCertificate(ctx, c, o, vaultURL, vaultTLS.CAPEM)
 	if err != nil {
 		return "", fmt.Errorf("esovault: providing the store's client certificate for %s: %w", o.Cluster, err)
 	}
-	if err := eso.Apply(ctx, dyn, eso.Options{
+	if err := eso.Apply(ctx, c, eso.Options{
 		ManifestDir:   o.ManifestDir,
 		Namespace:     o.Namespace,
 		VaultServer:   vaultURL,
@@ -71,8 +70,8 @@ func ApplyVaultStore(ctx context.Context, dyn dynamic.Interface, o VaultStore) (
 	return vaultURL, nil
 }
 
-func currentOrNewESOCertificate(ctx context.Context, dyn dynamic.Interface, o VaultStore, vaultURL string, caPEM []byte) (vaultcert.ClientCertificate, error) {
-	heldCert, heldKey, found, err := eso.CurrentClientCertificate(ctx, dyn, o.Namespace)
+func currentOrNewESOCertificate(ctx context.Context, c *kube.Client, o VaultStore, vaultURL string, caPEM []byte) (vaultcert.ClientCertificate, error) {
+	heldCert, heldKey, found, err := eso.CurrentClientCertificate(ctx, c, o.Namespace)
 	if err != nil {
 		return vaultcert.ClientCertificate{}, err
 	}
