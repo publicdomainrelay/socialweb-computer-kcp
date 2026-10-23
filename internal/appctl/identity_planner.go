@@ -112,6 +112,9 @@ func (p accountPlan) binding(did, pdsURL string) (accountBinding, error) {
 			Spec: pdsv1alpha1.RemotePDSSpec{URL: url, DID: pdsServiceDID(url)}}
 	}
 	if binding.RemotePDS != nil {
+		if binding.AuthRef != nil && binding.RemotePDS.Spec.Auth == (pdsv1alpha1.RemotePDSAuth{}) {
+			binding.RemotePDS.Spec.Auth.DPoPKeyRef = binding.AuthRef.Name
+		}
 		binding.PDSRef = &v1alpha1.RepoRef{Kind: "RemotePDS", Name: binding.RemotePDS.Name}
 		return binding, nil
 	}
@@ -327,10 +330,11 @@ func (ctl *Controller) ensureRemotePDS(ctx context.Context, ws string, desired *
 		if fromUnstructured(existing, &current) != nil {
 			return nil
 		}
-		if strings.TrimRight(current.Spec.URL, "/") == strings.TrimRight(desired.Spec.URL, "/") && current.Spec.DID == desired.Spec.DID {
+		if strings.TrimRight(current.Spec.URL, "/") == strings.TrimRight(desired.Spec.URL, "/") && current.Spec.DID == desired.Spec.DID &&
+			current.Spec.Auth == desired.Spec.Auth {
 			return &current
 		}
-		current.Spec.URL, current.Spec.DID = desired.Spec.URL, desired.Spec.DID
+		current.Spec.URL, current.Spec.DID, current.Spec.Auth = desired.Spec.URL, desired.Spec.DID, desired.Spec.Auth
 		u, err := toUnstructured(&current, "RemotePDS")
 		if err != nil {
 			return nil
