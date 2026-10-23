@@ -67,7 +67,7 @@ func (s *server) openFDStore(u *unit) error {
 	}
 	st := &fdStore{path: path, conn: conn}
 	u.store = st
-	go s.readNotify(u, st)
+	s.wg.Go(func() { s.readNotify(u, st) })
 	return nil
 }
 

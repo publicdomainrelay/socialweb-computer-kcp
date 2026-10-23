@@ -72,7 +72,11 @@ type server struct {
 	spawn    chan spawnReq
 	done     chan struct{}
 	stopOnce sync.Once
+	conns    map[net.Conn]struct{}
+	wg       sync.WaitGroup
 }
+
+var errStopping = errors.New("devsup: devsup is stopping")
 
 func newID() string {
 	b := make([]byte, 16)
@@ -111,35 +115,45 @@ func Run(ctx context.Context, o Options) error {
 		return err
 	}
 	s := &server{o: o, log: log, id: newID(), boot: boot, units: map[string]*unit{},
-		watchers: map[*watcher]struct{}{}, spawn: make(chan spawnReq), done: make(chan struct{})}
+		watchers: map[*watcher]struct{}{}, spawn: make(chan spawnReq), done: make(chan struct{}), conns: map[net.Conn]struct{}{}}
 	ticks, _ := hostos.ProcStart(os.Getpid())
 	s.hello = hostsvc.ProcHello{Instance: s.id, PID: os.Getpid(), StartTicks: ticks, BootID: boot,
 		Started: time.Now().UTC(), State: o.State, Socket: o.Socket}
 	s.sweep()
-	go s.spawner()
+	abort := func(err error) error {
+		s.stopOnce.Do(func() { close(s.done) })
+		s.wg.Wait()
+		return err
+	}
+	s.wg.Go(s.spawner)
 	sigchld := make(chan os.Signal, 16)
 	signal.Notify(sigchld, syscall.SIGCHLD)
-	go s.reaper(sigchld)
+	s.wg.Go(func() { s.reaper(sigchld) })
 	os.Remove(o.Socket)
 	l, err := net.Listen("unix", o.Socket)
 	if err != nil {
-		return fmt.Errorf("devsup: listening on %s: %w", o.Socket, err)
+		return abort(fmt.Errorf("devsup: listening on %s: %w", o.Socket, err))
 	}
 	os.Chmod(o.Socket, 0o600)
 	if err := writeJSON(filepath.Join(o.State, "devsup.json"), s.hello); err != nil {
 		l.Close()
-		return err
+		return abort(err)
 	}
 	log.Info("devsup listening", "instance", s.id, "pid", os.Getpid(), "socket", o.Socket, "state", o.State,
 		"dieWith", o.DieWith, "label", o.Instance)
-	go s.orphanKiller()
+	s.wg.Go(s.orphanKiller)
 	term := make(chan os.Signal, 2)
 	signal.Notify(term, syscall.SIGTERM, syscall.SIGINT)
 	signal.Ignore(syscall.SIGHUP, syscall.SIGPIPE)
+	wake := [2]int{-1, -1}
 	if o.DieWith > 0 {
-		go s.dieWith(o.DieWith)
+		if err := unix.Pipe2(wake[:], unix.O_CLOEXEC); err != nil {
+			l.Close()
+			return abort(fmt.Errorf("devsup: the die-with wake pipe: %w", err))
+		}
+		s.wg.Go(func() { s.dieWith(o.DieWith, wake[0]) })
 	}
-	go func() {
+	s.wg.Go(func() {
 		select {
 		case sig := <-term:
 			log.Info("devsup stopping on a signal", "signal", sig.String())
@@ -148,10 +162,18 @@ func Run(ctx context.Context, o Options) error {
 			s.shutdown()
 		case <-s.done:
 		}
-	}()
-	go s.accept(l)
+	})
+	s.wg.Go(func() { s.accept(l) })
 	<-s.done
 	l.Close()
+	s.closeConns()
+	if wake[1] >= 0 {
+		unix.Close(wake[1])
+	}
+	s.wg.Wait()
+	if wake[0] >= 0 {
+		unix.Close(wake[0])
+	}
 	os.Remove(o.Socket)
 	os.Remove(filepath.Join(o.State, "devsup.json"))
 	log.Info("devsup stopped", "instance", s.id)
@@ -190,7 +212,7 @@ func (s *server) stopAll() {
 	}
 }
 
-func (s *server) dieWith(pid int) {
+func (s *server) dieWith(pid, wake int) {
 	fd, err := unix.PidfdOpen(pid, 0)
 	if err != nil {
 		s.log.Info("the watched pid is already gone", "pid", pid)
@@ -199,10 +221,13 @@ func (s *server) dieWith(pid int) {
 	}
 	defer unix.Close(fd)
 	for {
-		fds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
+		fds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}, {Fd: int32(wake), Events: unix.POLLIN}}
 		n, err := unix.Poll(fds, -1)
 		if err == unix.EINTR {
 			continue
+		}
+		if fds[0].Revents == 0 && fds[1].Revents != 0 {
+			return
 		}
 		if n > 0 || err != nil {
 			s.log.Info("the watched pid exited", "pid", pid)
@@ -214,7 +239,13 @@ func (s *server) dieWith(pid int) {
 
 func (s *server) spawner() {
 	runtime.LockOSThread()
-	for req := range s.spawn {
+	for {
+		var req spawnReq
+		select {
+		case <-s.done:
+			return
+		case req = <-s.spawn:
+		}
 		p, err := os.StartProcess(req.argv[0], req.argv, req.attr)
 		if err != nil {
 			req.reply <- spawnResult{err: err}
@@ -231,6 +262,8 @@ func (s *server) reaper(sigchld <-chan os.Signal) {
 	defer t.Stop()
 	for {
 		select {
+		case <-s.done:
+			return
 		case <-sigchld:
 		case <-t.C:
 		}
@@ -293,11 +326,11 @@ func (s *server) exited(pid int, ws unix.WaitStatus) {
 	u.exited = nil
 	pgid, sig, grace := u.pgid, u.killSignal(), u.stopTimeout()
 	inv := u.st.InvocationID
-	go s.killRemainder(u.spec.Name, inv, pgid, sig, grace)
+	name := u.spec.Name
+	s.wg.Go(func() { s.killRemainder(name, inv, pgid, sig, grace) })
 	if !u.stopping && s.shouldRestart(u, result) {
 		u.st.State, u.st.SubState = hostsvc.Activating, "auto-restart"
 		s.emit(u)
-		name := u.spec.Name
 		u.restartT = time.AfterFunc(RestartDelay, func() { s.restart(name, u) })
 		return
 	}
@@ -361,11 +394,16 @@ func (s *server) killRemainder(name, inv string, pgid int, sig syscall.Signal, g
 		syscall.Kill(pid, sig)
 	}
 	deadline := time.Now().Add(grace)
+wait:
 	for time.Now().Before(deadline) {
 		if len(s.members(name, inv, pgid)) == 0 {
 			return
 		}
-		time.Sleep(50 * time.Millisecond)
+		select {
+		case <-s.done:
+			break wait
+		case <-time.After(50 * time.Millisecond):
+		}
 	}
 	for _, pid := range s.members(name, inv, pgid) {
 		syscall.Kill(pid, syscall.SIGKILL)
@@ -538,12 +576,45 @@ func (s *server) accept(l net.Listener) {
 			}
 			continue
 		}
-		go s.serve(c)
+		if !s.track(c) {
+			c.Close()
+			return
+		}
+		s.wg.Go(func() { s.serve(c) })
+	}
+}
+
+func (s *server) track(c net.Conn) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	select {
+	case <-s.done:
+		return false
+	default:
+	}
+	s.conns[c] = struct{}{}
+	return true
+}
+
+func (s *server) closeConns() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for c := range s.conns {
+		c.Close()
+	}
+	for _, u := range s.units {
+		u.store.release()
+		u.store = nil
 	}
 }
 
 func (s *server) serve(c net.Conn) {
-	defer c.Close()
+	defer func() {
+		s.mu.Lock()
+		delete(s.conns, c)
+		s.mu.Unlock()
+		c.Close()
+	}()
 	line, err := bufio.NewReader(c).ReadBytes('\n')
 	if err != nil {
 		return
@@ -582,6 +653,10 @@ func (s *server) watch(c net.Conn, prefix string) {
 	go func() {
 		io.Copy(io.Discard, c)
 		close(gone)
+	}()
+	defer func() {
+		c.Close()
+		<-gone
 	}()
 	for {
 		select {
@@ -660,6 +735,11 @@ func (s *server) start(spec hostsvc.UnitSpec) (hostsvc.UnitStatus, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	select {
+	case <-s.done:
+		return hostsvc.UnitStatus{}, errStopping
+	default:
+	}
 	if u, ok := s.units[spec.Name]; ok {
 		st := u.st
 		st.Adopted = true
@@ -754,8 +834,13 @@ func (s *server) launch(u *unit) error {
 	attr := &os.ProcAttr{Dir: dir, Env: env, Files: files,
 		Sys: &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGKILL}}
 	reply := make(chan spawnResult, 1)
-	s.spawn <- spawnReq{argv: u.spec.Exec, attr: attr, reply: reply}
-	r := <-reply
+	var r spawnResult
+	select {
+	case s.spawn <- spawnReq{argv: u.spec.Exec, attr: attr, reply: reply}:
+		r = <-reply
+	case <-s.done:
+		r = spawnResult{err: errStopping}
+	}
 	u.stopping, u.timedOut = false, false
 	u.st.InvocationID = inv
 	u.st.ActiveSince = time.Now().UTC()
@@ -819,6 +904,7 @@ func (s *server) stop(name string) error {
 	deadline := time.Now().Add(grace)
 	select {
 	case <-exited:
+	case <-s.done:
 	case <-time.After(grace):
 		s.mu.Lock()
 		u.timedOut = true
@@ -826,7 +912,10 @@ func (s *server) stop(name string) error {
 		for _, pid := range s.members(name, inv, pgid) {
 			syscall.Kill(pid, syscall.SIGKILL)
 		}
-		<-exited
+		select {
+		case <-exited:
+		case <-s.done:
+		}
 	}
 	for time.Now().Before(deadline) && len(s.members(name, inv, pgid)) > 0 {
 		time.Sleep(50 * time.Millisecond)
