@@ -204,8 +204,10 @@ sudo "$B" install bidder --handle <handle>
 ### Bidder association
 
 A fresh install creates a new DID. Association is one `badgeBlueKeys` record in the operator's repo
-plus the operator DID in `MarketIdentity.spec.approvedAssociations`. The helper reads the handle and
-password from a mode-0600 credentials file and prints neither.
+with `challenge` the operator DID and `keyId` the bidder DID, service `bidder_associate`. The
+`AtprotoRecordWatch/association` of the application reads it and the identity controller writes the
+operator DID into `MarketIdentity.spec.approvedAssociations`; no manual patch is needed. The helper
+reads the handle and password from a mode-0600 credentials file and prints neither.
 
 ```bash
 HANDLE=bobvmbuilder.bsky.social
@@ -214,17 +216,31 @@ CREDS=$HOME/.bobvmbuilder_bsky_social_source
 STATE=/var/lib/socialweb-computer/swc-bidder
 K=$(sudo sh -c "ls $STATE/handles/*/kcp/admin.kubeconfig" | head -1)
 BIDDER_DID=$(sudo kubectl --kubeconfig "$K" get marketidentity bidder -o jsonpath='{.status.did}')
-OPERATOR_DID=$(curl -fsS "https://public.api.bsky.app/xrpc/com.atproto.identity.resolveHandle?handle=$HANDLE" | jq -r .did)
-echo "$BIDDER_DID $OPERATOR_DID"
 deno run -A --no-lock scripts/associate-bidder.ts --creds "$CREDS" --account "$ACCOUNT" --bidder-did "$BIDDER_DID"
-sudo kubectl --kubeconfig "$K" patch marketidentity bidder --type=merge \
-  -p "{\"spec\":{\"approvedAssociations\":[\"$OPERATOR_DID\"]}}"
 sudo kubectl --kubeconfig "$K" get marketidentity bidder \
   -o jsonpath='{.status.phase}{" "}{range .status.conditions[*]}{.type}={.status} {.reason}{"\n"}{end}'
 ```
 
-The bidder side declaration `AtprotoRecord/association` is rendered and reconciled through the app's
-PDS. If the helper wrote the operator record, the approved DID above completes the association.
+Wait for `Associated=True`. The bidder side declaration `AtprotoRecord/association` is rendered and
+reconciled through the app's PDS.
+
+A requester uses the same helper with its own service and DID. The operator writes it once in the
+operator's repo; the gateway's `AtprotoRecordWatch/association` (service `requester_associate`)
+verifies it and the identity controller approves the requester automatically. No manual
+`approvedAssociations` patch is needed. The gateway kcp is under its state dir (default
+`/var/lib/socialweb-computer/socialweb`); the requester MarketIdentity lives in the workspace
+`root:app`.
+
+```bash
+ACCOUNT=ALICE
+CREDS=$HOME/.aliceoa_bsky_social_source
+KGW=/var/lib/socialweb-computer/socialweb/kcp/admin.kubeconfig
+GW=https://127.0.0.1:6443/clusters/root:app
+REQUESTER_DID=$(sudo kubectl --kubeconfig "$KGW" --server "$GW" get marketidentity requester -o jsonpath='{.status.did}')
+deno run -A --no-lock scripts/associate-bidder.ts --creds "$CREDS" --account "$ACCOUNT" --requester-did "$REQUESTER_DID"
+sudo kubectl --kubeconfig "$KGW" --server "$GW" get marketidentity requester \
+  -o jsonpath='{.status.phase}{" "}{range .status.conditions[*]}{.type}={.status} {.reason}{"\n"}{end}'
+```
 
 Non-association mode: set the identity association to `Skip` and let the controller reconcile it. No
 `badgeBlueKeys` record is written.

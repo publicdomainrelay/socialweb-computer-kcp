@@ -2,9 +2,31 @@ const args = new Map<string, string>();
 for (let i = 0; i < Deno.args.length; i += 2) args.set(Deno.args[i].replace(/^--/, ""), Deno.args[i + 1]);
 const credsPath = args.get("creds");
 const account = args.get("account");
-const bidderDid = args.get("bidder-did");
-if (!credsPath || !account || !bidderDid) {
-  console.error("usage: associate-bidder.ts --creds FILE --account BOB --bidder-did did:plc:...");
+const subjectDid = args.get("bidder-did") ?? args.get("requester-did") ?? args.get("did");
+const roleArg = args.get("role")?.trim();
+const serviceArg = args.get("service")?.trim();
+const nonceArg = args.get("nonce")?.trim();
+if (!credsPath || !account || !subjectDid) {
+  console.error("usage: associate-bidder.ts --creds FILE --account BOB (--bidder-did DID | --requester-did DID) [--service bidder_associate|requester_associate] [--nonce N]");
+  Deno.exit(2);
+}
+const subjectFlag = args.has("requester-did") ? "requester" : args.has("bidder-did") ? "bidder" : "";
+const role = roleArg ?? (subjectFlag || (serviceArg === "requester_associate" ? "requester" : "bidder"));
+if (role !== "bidder" && role !== "requester") {
+  console.error(`unknown role ${role}; want bidder or requester`);
+  Deno.exit(2);
+}
+if (subjectFlag && roleArg && subjectFlag !== roleArg) {
+  console.error(`--${subjectFlag}-did does not match role ${roleArg}`);
+  Deno.exit(2);
+}
+const service = serviceArg ?? `${role}_associate`;
+if (service !== "bidder_associate" && service !== "requester_associate") {
+  console.error(`unknown service ${service}; want bidder_associate or requester_associate`);
+  Deno.exit(2);
+}
+if (service !== `${role}_associate`) {
+  console.error(`role ${role} does not match service ${service}`);
   Deno.exit(2);
 }
 
@@ -40,15 +62,15 @@ const session = await json(`${pds}/xrpc/com.atproto.server.createSession`, {
   body: JSON.stringify({ identifier: handle, password }),
 });
 
-const nonce = crypto.randomUUID().replace(/-/g, "");
-const rkey = `bidder_associate-${bidderDid.replace(/:/g, "-")}`;
+const nonce = nonceArg || crypto.randomUUID().replace(/-/g, "");
+const rkey = `${service}-${subjectDid.replace(/:/g, "-")}`;
 const record = {
   $type: "com.publicdomainrelay.temp.badgeBlueKeys",
-  keyId: bidderDid,
+  keyId: subjectDid,
   challenge: operatorDid,
-  service: "bidder_associate",
+  service,
   nonce,
-  name: `bidder-${bidderDid.slice(-8)}`,
+  name: `${role}-${subjectDid.slice(-8)}`,
   createdAt: new Date().toISOString(),
 };
 const written = await json(`${pds}/xrpc/com.atproto.repo.putRecord`, {
@@ -61,4 +83,4 @@ const written = await json(`${pds}/xrpc/com.atproto.repo.putRecord`, {
     record,
   }),
 });
-console.log(JSON.stringify({ operatorDid, handle, rkey, uri: written.uri, cid: written.cid }));
+console.log(JSON.stringify({ operatorDid, handle, service, rkey, uri: written.uri, cid: written.cid }));

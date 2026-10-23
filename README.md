@@ -109,7 +109,7 @@ Install, build, upgrade, associate, uninstall, PDS ingress, and troubleshooting 
 | To | Command | Long form |
 | --- | --- | --- |
 | Install a bidder from a release | `sudo socialweb-computer install bidder --handle <handle>` | [CONTRIBUTING: release bidder](CONTRIBUTING.md#install-a-release-bidder) |
-| Associate or skip association | `scripts/associate-bidder.ts` + `kubectl patch` | [CONTRIBUTING: association](CONTRIBUTING.md#bidder-association) |
+| Associate or skip association | `scripts/associate-bidder.ts` | [CONTRIBUTING: association](CONTRIBUTING.md#bidder-association) |
 | Upgrade a bidder | `upgrade --binary <path> --sha256 <digest>`, then `install bidder` | [CONTRIBUTING: upgrade](CONTRIBUTING.md#upgrade-reinstall-uninstall) |
 | Install or upgrade the gateway | `scripts/deploy.sh` | [CONTRIBUTING: gateway](CONTRIBUTING.md#deploy-the-gateway) |
 | Build a dev binary | `scripts/build-socialweb-computer.sh --dev --publish /var/tmp/swc` | [CONTRIBUTING: dev build](CONTRIBUTING.md#dev-build) |

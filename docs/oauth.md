@@ -23,7 +23,8 @@ The gateway web app is API-only. `--start-api` posts the handle to `POST /oauth/
 the given url directly.
 
 A bidder in `localRepo` mode does not sign in. Its association is one `badgeBlueKeys` record in the
-operator's repo plus the operator DID in `MarketIdentity.spec.approvedAssociations`; see
+operator's repo; the application's watch verifies the record and the identity controller writes the
+operator DID into `MarketIdentity.spec.approvedAssociations`. See
 [CONTRIBUTING.md](../CONTRIBUTING.md#bidder-association) for the `associate-bidder.ts` procedure.
 
 `oauth-signin.ts` options: `--creds`, `--account`, and `--url` (all required), `--start-api` (begin at

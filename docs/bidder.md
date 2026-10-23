@@ -71,9 +71,12 @@ The `prod-qr` profile uses a local repo: the bidder's own PDS, never the operato
 bidder` creates the PDS account and writes the DID into `MarketIdentity/bidder`, the session into the
 bidder's OpenBao and the repo key there too.
 
-Association is one `com.publicdomainrelay.temp.badgeBlueKeys` record in the operator's repo plus the
-operator DID in `MarketIdentity.spec.approvedAssociations`. `scripts/associate-bidder.ts` writes the
-record from a mode-0600 credentials file and prints neither handle nor password:
+Association is one `com.publicdomainrelay.temp.badgeBlueKeys` record in the operator's repo with
+`challenge` the operator DID, `keyId` the bidder DID and service `bidder_associate`.
+`scripts/associate-bidder.ts` writes the record from a mode-0600 credentials file and prints neither
+handle nor password. The application's `AtprotoRecordWatch/association` verifies it and the identity
+controller writes the operator DID into `MarketIdentity.spec.approvedAssociations`; no manual patch
+is needed.
 
 ```bash
 HANDLE=bobvmbuilder.bsky.social
@@ -82,11 +85,11 @@ CREDS=$HOME/.bobvmbuilder_bsky_social_source
 STATE=/var/lib/socialweb-computer/swc-bidder
 K=$(sudo sh -c "ls $STATE/handles/*/kcp/admin.kubeconfig" | head -1)
 BIDDER_DID=$(sudo kubectl --kubeconfig "$K" get marketidentity bidder -o jsonpath='{.status.did}')
-OPERATOR_DID=$(curl -fsS "https://public.api.bsky.app/xrpc/com.atproto.identity.resolveHandle?handle=$HANDLE" | jq -r .did)
 deno run -A --no-lock scripts/associate-bidder.ts --creds "$CREDS" --account "$ACCOUNT" --bidder-did "$BIDDER_DID"
-sudo kubectl --kubeconfig "$K" patch marketidentity bidder --type=merge \
-  -p "{\"spec\":{\"approvedAssociations\":[\"$OPERATOR_DID\"]}}"
 ```
+
+A requester association uses the same helper with `--requester-did`; the helper derives service
+`requester_associate`.
 
 Non-association mode: patch the root object and let the controller reconcile it. It sets
 `Associated=True` with reason `AssociationSkipped` and writes no record.
