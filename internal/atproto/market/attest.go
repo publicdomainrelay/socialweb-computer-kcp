@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/b64"
+
 	"github.com/bluesky-social/indigo/atproto/atcrypto"
 	"github.com/bluesky-social/indigo/atproto/atdata"
 	"github.com/bluesky-social/indigo/atproto/identity"
@@ -302,30 +304,14 @@ func normalizeSignatureBytes(value any) ([]byte, bool) {
 		if !ok {
 			return nil, false
 		}
-		return decodeBase64Loose(s)
+		return b64.Loose(s)
 	case string:
-		return decodeBase64Loose(v)
+		return b64.Loose(v)
 	case nil:
 		return nil, false
 	default:
 		return nil, false
 	}
-}
-
-func decodeBase64Loose(s string) ([]byte, bool) {
-	if b, err := base64.StdEncoding.DecodeString(s); err == nil {
-		return b, true
-	}
-	if b, err := base64.RawStdEncoding.DecodeString(s); err == nil {
-		return b, true
-	}
-	if b, err := base64.URLEncoding.DecodeString(s); err == nil {
-		return b, true
-	}
-	if b, err := base64.RawURLEncoding.DecodeString(s); err == nil {
-		return b, true
-	}
-	return nil, false
 }
 
 func SignInline(record map[string]any, repository string, signer *Signer) (map[string]any, error) {

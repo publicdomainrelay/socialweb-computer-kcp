@@ -8,6 +8,8 @@ import (
 	"fmt"
 
 	"github.com/bluesky-social/indigo/atproto/atdata"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/b64"
 )
 
 type Record interface {
@@ -26,7 +28,7 @@ func decodeRecord(value map[string]any, nsid string, out any) error {
 	if got, _ := value["$type"].(string); got != nsid {
 		return fmt.Errorf("%w: expected $type %s, got %q", ErrInvalidRecord, nsid, got)
 	}
-	b, err := json.Marshal(value)
+	b, err := json.Marshal(b64.NormalizeJSON(value))
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidRecord, err)
 	}

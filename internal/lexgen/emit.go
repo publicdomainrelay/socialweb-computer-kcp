@@ -25,7 +25,7 @@ func decodeRecord(value map[string]any, nsid string, out any) error {
 	if got, _ := value["$type"].(string); got != nsid {
 		return fmt.Errorf("%%w: expected $type %%s, got %%q", %[1]s, nsid, got)
 	}
-	b, err := json.Marshal(value)
+	b, err := json.Marshal(b64.NormalizeJSON(value))
 	if err != nil {
 		return fmt.Errorf("%%w: %%v", %[1]s, err)
 	}
@@ -98,7 +98,7 @@ func (g *gen) emit(pkg, errVar string) []byte {
 	var b strings.Builder
 	b.WriteString(header)
 	fmt.Fprintf(&b, "package %s\n\n", pkg)
-	b.WriteString("import (\n\t\"bytes\"\n\t\"encoding/json\"\n\t\"fmt\"\n\n\t\"github.com/bluesky-social/indigo/atproto/atdata\"\n)\n")
+	b.WriteString("import (\n\t\"bytes\"\n\t\"encoding/json\"\n\t\"fmt\"\n\n\t\"github.com/bluesky-social/indigo/atproto/atdata\"\n\n\t\"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/b64\"\n)\n")
 	fmt.Fprintf(&b, helpers, errVar)
 	types := slices.Clone(g.order)
 	slices.SortFunc(types, func(a, b *goType) int { return strings.Compare(a.name, b.name) })

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/b64"
+
 	"github.com/bluesky-social/indigo/atproto/atdata"
 	"github.com/bluesky-social/indigo/atproto/syntax"
 	"github.com/ipfs/go-cid"
@@ -41,7 +43,7 @@ func prepareRecord(collection syntax.NSID, record map[string]any) ([]byte, cid.C
 	if record == nil {
 		return nil, cid.Undef, nil, fmt.Errorf("%w: missing record", ErrInvalidRequest)
 	}
-	raw, err := json.Marshal(record)
+	raw, err := json.Marshal(b64.NormalizeJSON(record))
 	if err != nil {
 		return nil, cid.Undef, nil, fmt.Errorf("%w: encoding record: %v", ErrInvalidRequest, err)
 	}

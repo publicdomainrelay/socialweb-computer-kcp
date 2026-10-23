@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/b64"
+
 	"github.com/bluesky-social/indigo/atproto/atdata"
 	"github.com/bluesky-social/indigo/atproto/syntax"
 	"github.com/ipfs/go-cid"
@@ -104,7 +106,11 @@ func validateRecord(record []byte) error {
 	if len(bytes.TrimSpace(record)) == 0 {
 		return fmt.Errorf("%w: record is required", ErrInvalidRequest)
 	}
-	parsed, err := atdata.UnmarshalJSON(record)
+	normalized, err := b64.NormalizeJSONBytes(record)
+	if err != nil {
+		return fmt.Errorf("%w: invalid record: %v", ErrInvalidRequest, err)
+	}
+	parsed, err := atdata.UnmarshalJSON(normalized)
 	if err != nil {
 		return fmt.Errorf("%w: invalid record: %v", ErrInvalidRequest, err)
 	}
