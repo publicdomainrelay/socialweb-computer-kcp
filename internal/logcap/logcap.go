@@ -7,8 +7,14 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
+
+	"github.com/fsnotify/fsnotify"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/debounce"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 const (
@@ -87,19 +93,66 @@ func (c Config) Pass() []string {
 	return rotated
 }
 
+func (c Config) watched() []string {
+	dirs := append([]string(nil), c.Dirs...)
+	for _, f := range c.Files {
+		if d := filepath.Dir(f); !slices.Contains(dirs, d) {
+			dirs = append(dirs, d)
+		}
+	}
+	return dirs
+}
+
+func (c Config) tracked(path string) bool {
+	if slices.Contains(c.Files, path) {
+		return true
+	}
+	return strings.HasSuffix(path, ".log") && slices.Contains(c.Dirs, filepath.Dir(path))
+}
+
+func (c Config) warn(msg string, args ...any) {
+	if c.Log != nil {
+		c.Log.Warn(msg, args...)
+	}
+}
+
 func Keep(ctx context.Context, c Config) {
-	every := c.Every
-	every = cmp.Or(every, DefaultEvery)
-	t := time.NewTicker(every)
-	defer t.Stop()
-	for {
+	pass := func() {
 		if rotated := c.Pass(); len(rotated) > 0 && c.Log != nil {
 			c.Log.Info("log files over their cap were rotated; each keeps its newest bytes in a .1 copy", "files", rotated)
 		}
+	}
+	pass()
+	w, err := fsnotify.NewWatcher()
+	if err != nil {
+		c.warn("log files are not watched; they are capped only at start", "err", err.Error())
+		return
+	}
+	defer w.Close()
+	for _, d := range c.watched() {
+		if err := w.Add(d); err != nil {
+			c.warn("a log directory is not watched", "dir", d, "err", err.Error())
+		}
+	}
+	d := debounce.New(opt.Positive(c.Every, DefaultEvery), pass)
+	defer d.Stop()
+	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-t.C:
+		case ev, ok := <-w.Events:
+			if !ok {
+				return
+			}
+			if ev.Has(fsnotify.Write|fsnotify.Create) && c.tracked(ev.Name) {
+				d.Mark()
+			}
+		case err, ok := <-w.Errors:
+			if !ok {
+				return
+			}
+			c.warn("watching the log files", "err", err.Error())
+			d.Mark()
 		}
 	}
 }
