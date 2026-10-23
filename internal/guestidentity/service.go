@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
@@ -26,8 +25,6 @@ const (
 
 	oidcDocumentRetryMax = 30 * time.Second
 )
-
-type VMStore = computevm.GuestStore
 
 type OnNetworkReport struct {
 	AcceptURI string
@@ -67,7 +64,7 @@ type Guest struct {
 	handle   string
 	identity *Client
 	verifier *Verifier
-	recorder *computevm.GuestRecord
+	recorder *guestRecord
 	log      *slog.Logger
 	now      func() time.Time
 
@@ -118,7 +115,7 @@ func NewGuest(ctx context.Context, opts GuestOptions) (*Guest, error) {
 	root, cancel := context.WithCancel(ctx)
 	g := &Guest{
 		handle: opts.Handle, identity: opts.Identity, verifier: opts.Verifier,
-		recorder: &computevm.GuestRecord{Store: opts.VMs, Handle: "", Log: opts.Log, Now: opts.Now},
+		recorder: &guestRecord{store: opts.VMs, log: opts.Log, now: opts.Now},
 		log:      opts.Log, now: opts.Now,
 		loginLimits: opts.LoginLimits, tokenLimits: opts.TokenLimits, publicLimits: opts.PublicLimits,
 		hostKeyAttempts: opts.HostKeyAttempts, hostKeyRetry: opts.HostKeyRetry,
@@ -238,13 +235,13 @@ func (g *Guest) OnNetwork(ctx context.Context, authorization string, report OnNe
 		g.log.Info("guest.onNetwork recorded on the ComputeVM", "computevm", claims.ComputeVM,
 			"address", strings.TrimSpace(report.Address))
 		return jsonReply(200, map[string]any{"ok": true, "name": claims.ComputeVM})
-	case errors.Is(err, computevm.ErrUnknownGuest):
+	case errors.Is(err, ErrUnknownGuest):
 		g.log.Warn("guest.onNetwork: no live ComputeVM holds this token", "computevm", claims.ComputeVM, "acceptUri", report.AcceptURI)
 		return jsonReply(404, map[string]any{"error": "UnknownGuest"})
-	case errors.Is(err, computevm.ErrUnknownAccept):
+	case errors.Is(err, ErrUnknownAccept):
 		g.log.Warn("guest.onNetwork: the accept is not this guest's", "computevm", claims.ComputeVM, "acceptUri", report.AcceptURI)
 		return jsonReply(404, map[string]any{"error": "UnknownAccept"})
-	case errors.Is(err, computevm.ErrReportRefused):
+	case errors.Is(err, ErrReportRefused):
 		return jsonReply(400, map[string]any{"error": "InvalidRequest", "message": err.Error()})
 	default:
 		g.log.Warn("guest.onNetwork: the report could not be recorded", "computevm", claims.ComputeVM, "err", err.Error())
@@ -254,13 +251,13 @@ func (g *Guest) OnNetwork(ctx context.Context, authorization string, report OnNe
 
 func (g *Guest) RecordBoundHostKey(ctx context.Context, computevmName string) (bool, error) {
 	o, err := g.recorder.Live(ctx, computevmName)
-	if errors.Is(err, computevm.ErrUnknownGuest) {
+	if errors.Is(err, ErrUnknownGuest) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	if held := computevm.GuestReportOf(o); held != nil && len(held.HostKeys) > 0 {
+	if held := GuestReportOf(o); held != nil && len(held.HostKeys) > 0 {
 		return true, nil
 	}
 	line, err := g.identity.BoundHostKey(ctx, computevmName)
@@ -270,12 +267,12 @@ func (g *Guest) RecordBoundHostKey(ctx context.Context, computevmName string) (b
 	if line == "" {
 		return false, nil
 	}
-	key, err := computevm.ParseHostKey(line)
+	key, err := ParseHostKey(line)
 	if err != nil {
 		return false, err
 	}
 	if err := g.recorder.HostKeys(ctx, computevmName, []v1alpha1.ComputeVMHostKey{key}); err != nil {
-		if errors.Is(err, computevm.ErrUnknownGuest) {
+		if errors.Is(err, ErrUnknownGuest) {
 			return false, nil
 		}
 		return false, err

@@ -285,7 +285,7 @@ func (c *Core) register() error {
 			return bidder.New(spec, bidder.Deps{Instance: in, KCP: kcp, Credentials: creds, Egress: egress(in)})
 		})},
 		{guestcontrolplane.Kind, component.Typed(func(in component.Instance, spec v1alpha1.GuestControlPlaneSpec) (*guestcontrolplane.Service, error) {
-			return guestcontrolplane.New(spec, guestcontrolplane.Deps{Instance: in, KCP: kcp, Hosts: hosts})
+			return guestcontrolplane.New(spec, guestcontrolplane.Deps{Instance: in, Hosts: hosts})
 		})},
 		{pds.Kind, component.Typed(func(in component.Instance, spec v1alpha1.PdsSpec) (*pds.Service, error) {
 			return pds.New(spec, pds.Deps{Instance: in, Egress: egress(in)})

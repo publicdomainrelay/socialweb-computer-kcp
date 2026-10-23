@@ -12,6 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestidentity"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -262,17 +263,11 @@ func ContractReceipt(o *v1alpha1.ComputeVM) string {
 }
 
 func Ended(o *v1alpha1.ComputeVM) bool {
-	if o == nil {
-		return false
-	}
-	return o.Status.Phase == v1alpha1.ComputeVMPhaseLost || o.Status.Phase == v1alpha1.ComputeVMPhaseFailed
+	return guestidentity.Ended(o)
 }
 
 func Releasing(o *v1alpha1.ComputeVM) bool {
-	if o == nil {
-		return false
-	}
-	return o.DeletionTimestamp != nil || o.Status.Phase == v1alpha1.ComputeVMPhaseReleasing
+	return guestidentity.Releasing(o)
 }
 
 func GoneReason(lost v1alpha1.ComputeVMLostReason) string {

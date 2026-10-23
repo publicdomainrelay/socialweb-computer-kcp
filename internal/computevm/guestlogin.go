@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
-	"sort"
-	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -40,33 +38,6 @@ func guestLoginRole(o v1alpha1.ComputeVM) (string, error) {
 		return "", fmt.Errorf("%w: bindSecretSha256 is not a hex sha256", errBadSpec)
 	}
 	return "auth/" + g.Mount + "/role/" + o.Name, nil
-}
-
-type GuestLoginRefs struct {
-	Role string `json:"role"`
-
-	Mount string `json:"mount"`
-
-	Scopes []string `json:"scopes,omitempty"`
-}
-
-func GuestLoginRef(o v1alpha1.ComputeVM, scopes []string) (*GuestLoginRefs, error) {
-	role, err := guestLoginRole(o)
-	if err != nil {
-		return nil, err
-	}
-	seen := map[string]bool{}
-	ref := &GuestLoginRefs{Role: role, Mount: o.Spec.GuestLogin.Mount}
-	for _, scope := range scopes {
-		scope = strings.TrimSpace(scope)
-		if scope == "" || seen[scope] {
-			continue
-		}
-		seen[scope] = true
-		ref.Scopes = append(ref.Scopes, scope)
-	}
-	sort.Strings(ref.Scopes)
-	return ref, nil
 }
 
 func (h *Host) EnsureGuestLogin(ctx context.Context, o v1alpha1.ComputeVM) error {

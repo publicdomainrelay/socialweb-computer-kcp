@@ -134,6 +134,7 @@ func (c *Core) registerLocal(ctx context.Context, mgr *ctlruntime.Manager, clien
 	}
 	_, err = componentctl.Register(mgr, componentctl.Options{Runtime: c.runtime, Scope: local, Changed: exposures, Log: cfg.Log})
 	warn("components", err)
+	warn("GuestControlPlane inputs", c.registerGuestControlPlane(mgr, local))
 	warn("MarketIdentity", c.registerIdentity(mgr, local))
 	_, err = marketpresencectl.Register(mgr, marketpresencectl.Options{Heartbeats: presence.New(presence.Config{HTTPClient: c.handlers.Client()}),
 		Bidders: bidders{clients: clients}, Scope: local, Log: cfg.Log})
