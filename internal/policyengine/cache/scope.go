@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/atproto"
 )
@@ -45,12 +46,8 @@ type Scope[T any] struct {
 }
 
 func NewScope[T any](opts ScopeOptions[T]) *Scope[T] {
-	if opts.PositiveTTL <= 0 {
-		opts.PositiveTTL = 5 * time.Minute
-	}
-	if opts.MaxEntries <= 0 {
-		opts.MaxEntries = 10000
-	}
+	opts.PositiveTTL = opt.Positive(opts.PositiveTTL, 5*time.Minute)
+	opts.MaxEntries = opt.Positive(opts.MaxEntries, 10000)
 	if opts.TTLFor == nil {
 		opts.TTLFor = func(T) time.Duration { return opts.PositiveTTL }
 	}

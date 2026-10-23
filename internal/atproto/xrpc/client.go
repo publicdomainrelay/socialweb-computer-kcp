@@ -14,6 +14,7 @@ import (
 	"github.com/bluesky-social/indigo/atproto/syntax"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/authretry"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 const (
@@ -108,9 +109,7 @@ func (c *Client) do(ctx context.Context, method, nsid, target string, body []byt
 		client = http.DefaultClient
 	}
 	limit := c.Limit
-	if limit <= 0 {
-		limit = DefaultLimit
-	}
+	limit = opt.Positive(limit, DefaultLimit)
 	nonceRetried := false
 	var rejected error
 	send := func(ctx context.Context) (Reply, error) {

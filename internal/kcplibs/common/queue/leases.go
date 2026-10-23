@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/ref"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 )
 
@@ -18,9 +19,7 @@ type Leases struct {
 }
 
 func NewLeases(ttl time.Duration, now func() time.Time) *Leases {
-	if ttl <= 0 {
-		ttl = defaultLeaseTTL
-	}
+	ttl = opt.Positive(ttl, defaultLeaseTTL)
 	return &Leases{entries: ttlcache.New[ref.Ref, Lease](ttlcache.Options{TTL: ttl, Now: now})}
 }
 

@@ -30,6 +30,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/oauthcallback"
@@ -509,9 +510,7 @@ func (s *Service) serviceAuthToken(ctx context.Context, host, lxm string) (strin
 			return "", 0, err
 		}
 		ttl := time.Until(expires)
-		if ttl <= 0 {
-			ttl = -1
-		}
+		ttl = opt.Positive(ttl, -1)
 		return token, ttl, nil
 	})
 }
