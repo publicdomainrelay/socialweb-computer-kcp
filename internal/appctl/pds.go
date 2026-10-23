@@ -17,6 +17,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/bluesky-social/indigo/atproto/atcrypto"
 
@@ -68,6 +69,24 @@ func firstString(m map[string]any, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func pdsAccessTokenLive(token string) bool {
+	parts := strings.Split(strings.TrimSpace(token), ".")
+	if len(parts) != 3 {
+		return false
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return false
+	}
+	var claims struct {
+		Expires int64 `json:"exp"`
+	}
+	if json.Unmarshal(raw, &claims) != nil || claims.Expires == 0 {
+		return false
+	}
+	return time.Now().Add(30*time.Second).Unix() < claims.Expires
 }
 
 func pdsSessionOf(m map[string]any) PdsSession {
@@ -233,7 +252,7 @@ func (ctl *Controller) ensurePdsAccountInVault(ctx context.Context, server, clie
 	if data == nil {
 		data = map[string]any{}
 	}
-	if sess := pdsSessionOf(data); sess.Did != "" && sess.AccessJWT != "" {
+	if sess := pdsSessionOf(data); sess.Did != "" && sess.AccessJWT != "" && pdsAccessTokenLive(sess.AccessJWT) {
 		return sess, nil
 	}
 	password := firstString(data, "password")
