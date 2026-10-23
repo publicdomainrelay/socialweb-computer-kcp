@@ -32,43 +32,52 @@ type LocalAccount struct {
 	PLC bool
 }
 
-func (c *Composer) ApplyLocalAccount(ctx context.Context, r Root, ws string, acct LocalAccount) ([]Link, error) {
+func localAccountNames(acct LocalAccount) (repo, account, session string) {
+	return atprotorepo.RepoName(acct.DID), ObjectName("account", acct.Handle), ObjectName("session", acct.Handle)
+}
+
+func LocalAccountLinks(ws string, acct LocalAccount) []Link {
 	if strings.TrimSpace(acct.DID) == "" {
-		return nil, nil
+		return nil
+	}
+	pdsTarget := AppRef(ComponentKindPds, PdsComponent, ws)
+	name, accountName, sessionName := localAccountNames(acct)
+	localRef := AppRef(KindLocalRepo, name, ws)
+	links := []Link{RepoBackendLink(AppRef(KindAtprotoRepo, name, ws), localRef), LocalRepoLink(localRef, pdsTarget, acct.DID),
+		AccountStatusLink(AppRef("PdsAccount", accountName, ws), pdsTarget, acct.DID)}
+	if acct.SessionID != "" {
+		links = append(links, SessionStatusLink(AppRef("AtprotoSession", sessionName, ws), pdsTarget, acct.DID))
+	}
+	return links
+}
+
+func (c *Composer) ApplyLocalAccount(ctx context.Context, r Root, ws string, acct LocalAccount) error {
+	if strings.TrimSpace(acct.DID) == "" {
+		return nil
 	}
 	pdsRef := commonv1.ObjectRef{Kind: ComponentKindPds, Name: PdsComponent}
-	pdsTarget := AppRef(ComponentKindPds, PdsComponent, ws)
-	name := atprotorepo.RepoName(acct.DID)
+	name, accountName, sessionName := localAccountNames(acct)
 	local := &v1alpha1.LocalRepo{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: v1alpha1.LocalRepoSpec{DID: acct.DID, PdsRef: pdsRef}}
 	if err := c.ApplyRepo(ctx, r, ws, name, KindLocalRepo, v1alpha1.LocalRepoGVR, local); err != nil {
-		return nil, err
+		return err
 	}
-	repo := AppRef(KindAtprotoRepo, name, ws)
-	localRef := AppRef(KindLocalRepo, name, ws)
-	links := []Link{RepoBackendLink(repo, localRef), LocalRepoLink(localRef, pdsTarget, acct.DID)}
-	accountName := ObjectName("account", acct.Handle)
 	account := &v1alpha1.PdsAccount{ObjectMeta: metav1.ObjectMeta{Name: accountName},
 		Spec: v1alpha1.PdsAccountSpec{DID: acct.DID, Handle: acct.Handle, PdsRef: pdsRef}}
 	if err := c.ApplyTyped(ctx, r, ws, v1alpha1.PdsAccountGVR, v1alpha1.GroupVersion.String(), "PdsAccount", account); err != nil {
-		return nil, err
+		return err
 	}
-	links = append(links, AccountStatusLink(AppRef("PdsAccount", accountName, ws), pdsTarget, acct.DID))
 	if acct.PLC {
 		plc := &v1alpha1.PlcIdentity{ObjectMeta: metav1.ObjectMeta{Name: ObjectName("plc", acct.DID)}, Spec: v1alpha1.PlcIdentitySpec{DID: acct.DID}}
 		if err := c.ApplyTyped(ctx, r, ws, v1alpha1.PlcIdentityGVR, v1alpha1.GroupVersion.String(), "PlcIdentity", plc); err != nil {
-			return nil, err
+			return err
 		}
 	}
-	if acct.SessionID != "" {
-		sessionName := ObjectName("session", acct.Handle)
-		session := &v1alpha1.AtprotoSession{ObjectMeta: metav1.ObjectMeta{Name: sessionName},
-			Spec: v1alpha1.AtprotoSessionSpec{DID: acct.DID, AccountRef: commonv1.LocalObjectRef{Name: accountName}, PdsRef: pdsRef, SessionID: acct.SessionID}}
-		if err := c.ApplyTyped(ctx, r, ws, v1alpha1.AtprotoSessionGVR, v1alpha1.GroupVersion.String(), "AtprotoSession", session); err != nil {
-			return nil, err
-		}
-		links = append(links, SessionStatusLink(AppRef("AtprotoSession", sessionName, ws), pdsTarget, acct.DID))
+	if acct.SessionID == "" {
+		return nil
 	}
-	return links, nil
+	session := &v1alpha1.AtprotoSession{ObjectMeta: metav1.ObjectMeta{Name: sessionName},
+		Spec: v1alpha1.AtprotoSessionSpec{DID: acct.DID, AccountRef: commonv1.LocalObjectRef{Name: accountName}, PdsRef: pdsRef, SessionID: acct.SessionID}}
+	return c.ApplyTyped(ctx, r, ws, v1alpha1.AtprotoSessionGVR, v1alpha1.GroupVersion.String(), "AtprotoSession", session)
 }
 
 func (c *Composer) ApplyRelayStatus(ctx context.Context, r Root, relayName string) error {

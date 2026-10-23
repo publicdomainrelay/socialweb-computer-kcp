@@ -76,8 +76,19 @@ func (c *Core) credentialResolver(workspace string) (*credentials.Resolver, erro
 }
 
 func credentialRef(ref commonv1.SecretRef) component.CredentialRef {
-	return component.CredentialRef{Server: v1alpha1.VaultServer(ref.Vault, ""), Mount: strings.Trim(strings.TrimSpace(ref.Mount), "/"),
+	return component.CredentialRef{Server: vaultServerIn(ref.Vault), Mount: strings.Trim(strings.TrimSpace(ref.Mount), "/"),
 		Path: strings.Trim(strings.TrimSpace(ref.Path), "/")}
+}
+
+func vaultServerIn(r *commonv1.ObjectRef) string {
+	server := v1alpha1.VaultServer(r, "")
+	if server == "" || strings.EqualFold(strings.TrimSpace(r.Kind), v1alpha1.KindRemoteOpenBao) {
+		return server
+	}
+	if ws := strings.TrimSpace(r.Workspace); ws != "" {
+		return ws + "/" + server
+	}
+	return server
 }
 
 type vaultStore struct {

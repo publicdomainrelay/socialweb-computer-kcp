@@ -575,17 +575,16 @@ func (p *pass) local(ctx context.Context, plan compose.AccountPlan, id *v1alpha1
 	if err != nil {
 		return p.retry("its app Pds account", err)
 	}
-	repoLinks, err := c.ApplyLocalAccount(ctx, r, ws, compose.LocalAccount{DID: did, Handle: pdsHandle,
-		SessionID: BidderVaultServer + ":" + account.Path, PLC: o.Spec.Network != nil})
-	if err != nil {
-		return ctlruntime.Result{}, err
-	}
+	acct := compose.LocalAccount{DID: did, Handle: pdsHandle, SessionID: BidderVaultServer + ":" + account.Path, PLC: o.Spec.Network != nil}
 	repo := compose.RepoRefIn(did, ws)
-	repoLinks = append(repoLinks, compose.RepoWriteLink(p.self(), repo, compose.ScopeAll),
+	repoLinks := append(compose.LocalAccountLinks(ws, acct), compose.RepoWriteLink(p.self(), repo, compose.ScopeAll),
 		compose.RecordWriteLink(ws, r.Owner(), repo, compose.ScopeAll),
 		compose.ServiceAuthLink(p.self(), compose.AppRef(compose.ComponentKindPds, compose.PdsComponent, ws), did),
 		compose.ServiceAuthLink(p.guest(), compose.AppRef(compose.ComponentKindPds, compose.PdsComponent, ws), did))
 	if err := c.ApplyLinks(ctx, r, "repo", repoLinks); err != nil {
+		return ctlruntime.Result{}, err
+	}
+	if err := c.ApplyLocalAccount(ctx, r, ws, acct); err != nil {
 		return ctlruntime.Result{}, err
 	}
 	if err := c.ApplyAssociationRecord(ctx, r, ws, repo, BidderIdentity, compose.BidderAssociate); err != nil {

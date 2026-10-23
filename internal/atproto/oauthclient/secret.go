@@ -32,7 +32,7 @@ func SessionFromSecret(data map[string]any) (SessionData, bool) {
 		DPoPHostNonce:                strs.Lookup(data, "dpop_host_nonce"),
 		DPoPPrivateKeyMultibase:      strs.Lookup(data, "dpop_privatekey_multibase", "dpopPrivateKeyMultibase"),
 	}
-	if session.AccountDID == "" || session.HostURL == "" || session.AccessToken == "" {
+	if session.AccountDID == "" || session.HostURL == "" || session.AccessToken == "" || session.DPoPPrivateKeyMultibase == "" {
 		return SessionData{}, false
 	}
 	return session, true

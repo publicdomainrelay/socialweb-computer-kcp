@@ -517,6 +517,30 @@ func (r *contractRunner) requestOnce(ctx context.Context) (bool, error) {
 	return false, r.acceptReceipt(ctx, state, accept.Record, accept.URI, receipt)
 }
 
+const (
+	submitRetryFirst = 500 * time.Millisecond
+
+	submitRetryMax = 4 * time.Second
+)
+
+func submitRFPWithin(ctx context.Context, m MarketClient, bidder Bidder, req SubmitRFPRequest) ([]BidRecord, error) {
+	wait := submitRetryFirst
+	for {
+		bids, err := m.SubmitRFP(ctx, bidder, req)
+		if err == nil || !errors.Is(err, ErrBidderUnreachable) {
+			return bids, err
+		}
+		t := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return nil, err
+		case <-t.C:
+		}
+		wait = min(2*wait, submitRetryMax)
+	}
+}
+
 func (r *contractRunner) solicitBids(ctx context.Context, bidders []Bidder, rfpURI, rfpCID string) []BidRecord {
 	responseBids := []BidRecord{}
 	var submitWG sync.WaitGroup
@@ -528,7 +552,7 @@ func (r *contractRunner) solicitBids(ctx context.Context, bidders []Bidder, rfpU
 		submitWG.Go(func() {
 			cctx, cancel := context.WithTimeout(ctx, max(r.q.cfg.BidWindow, 5*time.Second))
 			defer cancel()
-			bids, err := r.q.market.SubmitRFP(cctx, bidder, SubmitRFPRequest{URI: rfpURI, CID: rfpCID})
+			bids, err := submitRFPWithin(cctx, r.q.market, bidder, SubmitRFPRequest{URI: rfpURI, CID: rfpCID})
 			if err != nil {
 				r.log().Warn("requester_submit_rfp_failed", "bidder", bidder.DID, "err", err)
 				return

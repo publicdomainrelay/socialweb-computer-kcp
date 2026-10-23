@@ -197,13 +197,13 @@ func GatewayRequesterIdentity(g v1alpha1.GatewaySpec) v1alpha1.ApplicationIdenti
 	return id
 }
 
-func gatewayNodeMarket(o *v1alpha1.Gateway, workspace string) *v1alpha1.GatewayNodeMarket {
+func gatewayNodeMarket(o *v1alpha1.Gateway, workspace, contracts string) *v1alpha1.GatewayNodeMarket {
 	m := o.Spec.MarketNetwork
 	if m == nil {
 		return nil
 	}
 	out := &v1alpha1.GatewayNodeMarket{OwnerSessionsFile: m.OwnerSessionsFile, UserDataBaseFile: m.NodeUserDataBaseFile,
-		HomeWorkspace: workspace, ContractWorkspace: workspace,
+		HomeWorkspace: workspace, ContractWorkspace: contracts,
 		NodePolicy: compose.OptionValue(o.Spec.Options, GatewayNodePolicy), NodePolicyArgs: compose.OptionValue(o.Spec.Options, GatewayNodePolicyArgs),
 		ExtraBidderDIDs: slices.Clone(o.Spec.BidderDids)}
 	return out
@@ -465,7 +465,7 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 		Audience:          audience,
 		RequiredDownloads: requiredDownloads,
 		PostSignInURL:     postSignInURL,
-		NodeMarket:        gatewayNodeMarket(o, p.ws),
+		NodeMarket:        gatewayNodeMarket(o, p.ws, p.r.Workspace),
 	}}
 	requester := compose.Desired{Kind: compose.ComponentKindRequester, Name: marketrequester.RequesterComponent, Spec: requesterSpec}
 	out := []compose.Desired{compose.PolicyEngineDesired(), requester, gatewayAPI}
@@ -576,15 +576,15 @@ func (p *pass) localAccount(ctx context.Context, plan compose.AccountPlan, id *v
 	if err != nil {
 		return nil, nil, "", false, fmt.Errorf("its app Pds account: %w", err)
 	}
-	repoLinks, err := c.ApplyLocalAccount(ctx, r, rws, compose.LocalAccount{DID: did, Handle: in.pdsHandle,
-		SessionID: vaultlayout.RootServerName + ":" + account.Path, PLC: o.Spec.Network != nil})
-	if err != nil {
-		return nil, nil, "", false, err
-	}
+	acct := compose.LocalAccount{DID: did, Handle: in.pdsHandle, SessionID: vaultlayout.RootServerName + ":" + account.Path, PLC: o.Spec.Network != nil}
 	repo := compose.RepoRefIn(did, rws)
-	repoLinks = append(repoLinks, compose.RepoWriteLink(p.self(compose.ComponentKindRequester, marketrequester.RequesterComponent), repo, compose.ScopeAll),
+	repoLinks := append(compose.LocalAccountLinks(rws, acct),
+		compose.RepoWriteLink(p.self(compose.ComponentKindRequester, marketrequester.RequesterComponent), repo, compose.ScopeAll),
 		compose.RecordWriteLink(p.ws, r.Owner(), repo, compose.ScopeAll))
 	if err := c.ApplyLinks(ctx, r, "repo", repoLinks, p.ws); err != nil {
+		return nil, nil, "", false, err
+	}
+	if err := c.ApplyLocalAccount(ctx, r, rws, acct); err != nil {
 		return nil, nil, "", false, err
 	}
 	if err := c.ApplyAssociationRecord(ctx, r, p.ws, repo, marketrequester.RequesterIdentity, RequesterAssociate); err != nil {

@@ -33,7 +33,7 @@ func newIdentityVaultStore(store *kcpstore.Store, workspace, client, server stri
 }
 
 func (s *identityVaultStore) ref(ref commonv1.SecretRef) component.CredentialRef {
-	return component.CredentialRef{Mount: strings.Trim(strings.TrimSpace(ref.Mount), "/"), Path: strings.Trim(strings.TrimSpace(ref.Path), "/")}
+	return credentialRef(ref)
 }
 
 func (s *identityVaultStore) Get(ctx context.Context, ref commonv1.SecretRef) (map[string]any, error) {
