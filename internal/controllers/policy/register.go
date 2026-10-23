@@ -3,6 +3,7 @@ package policy
 import (
 	"context"
 	"log/slog"
+	"net/http"
 	"strings"
 	"time"
 
@@ -27,6 +28,8 @@ type Options struct {
 	Actions policytrigger.ActionsFunc
 
 	PLCURL string
+
+	HTTP *http.Client
 
 	DefaultRunTTL time.Duration
 
@@ -61,6 +64,9 @@ func Register(m *ctlruntime.Manager, opts Options) error {
 	}
 	denoPath, _ := deno.Resolve("")
 	client := atproto.NewClient()
+	if opts.HTTP != nil {
+		client.HTTP = opts.HTTP
+	}
 	if plcURL := strings.TrimSpace(opts.PLCURL); plcURL != "" {
 		client.PLCURL = plcURL
 	}

@@ -30,8 +30,11 @@ func (t fallbackHTTPTransport) RoundTrip(req *http.Request) (*http.Response, err
 	return t.fallback.RoundTrip(req)
 }
 
-func httpClientWithFallback(primary *http.Client) *http.Client {
+func httpClientWithFallback(primary, external *http.Client) *http.Client {
 	if primary == nil {
+		if external != nil {
+			return external
+		}
 		return &http.Client{Timeout: 20 * time.Second}
 	}
 	fallback := http.RoundTripper(http.DefaultTransport)
@@ -39,6 +42,9 @@ func httpClientWithFallback(primary *http.Client) *http.Client {
 		cloned := transport.Clone()
 		cloned.Proxy = http.ProxyFromEnvironment
 		fallback = cloned
+	}
+	if external != nil && external.Transport != nil {
+		fallback = external.Transport
 	}
 	timeout := primary.Timeout
 	timeout = opt.Positive(timeout, 20*time.Second)

@@ -20,6 +20,8 @@ type WatchesConfig struct {
 
 	PLCDirectoryURL string
 
+	External *http.Client
+
 	HTTPClient *http.Client
 
 	FlushDelay time.Duration
@@ -44,7 +46,7 @@ func NewWatches(cfg WatchesConfig) *Watches {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	httpClient := httpClientWithFallback(cfg.HTTPClient)
+	httpClient := httpClientWithFallback(cfg.HTTPClient, cfg.External)
 	directory := cfg.Directory
 	if directory == nil {
 		directory = directoryAt(httpClient, cfg.PLCDirectoryURL)

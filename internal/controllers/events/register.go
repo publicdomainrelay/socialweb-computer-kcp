@@ -37,6 +37,8 @@ type Options struct {
 
 	PLCURL string
 
+	HTTPClient *http.Client
+
 	StateDir string
 
 	RecordWatchChildren atprotorecordwatch.Children
@@ -82,7 +84,8 @@ func Register(ctx context.Context, m *ctlruntime.Manager, opts Options) (func(co
 	if err != nil {
 		return nil, err
 	}
-	watches := eventstream.NewWatches(eventstream.WatchesConfig{PLCDirectoryURL: opts.PLCURL, HTTPClient: resolverHTTP(opts.Resolver), Log: log})
+	watches := eventstream.NewWatches(eventstream.WatchesConfig{PLCDirectoryURL: opts.PLCURL, HTTPClient: resolverHTTP(opts.Resolver),
+		External: opts.HTTPClient, Log: log})
 	if _, err := atprotorecordwatch.Register(m, atprotorecordwatch.Options{Bus: opts.Bus, Backend: watches, Children: opts.RecordWatchChildren,
 		Repos: opts.RecordWatchRepos, Values: opts.RecordWatchValues, Scope: opts.Scope, Log: log}); err != nil {
 		return nil, err
