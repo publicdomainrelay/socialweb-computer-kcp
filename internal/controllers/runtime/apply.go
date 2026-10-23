@@ -2,8 +2,10 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -109,18 +111,41 @@ func (r Request) Delete(ctx context.Context, obj Object) error {
 }
 
 func (r Request) applyFinalizer(ctx context.Context, obj Object, present bool) error {
+	if !present {
+		return r.releaseFinalizer(ctx, obj)
+	}
 	full, err := r.unstructured(obj)
 	if err != nil {
 		return err
 	}
 	u := r.skeleton(full, obj)
-	if present {
-		meta, _ := u.Object["metadata"].(map[string]any)
-		meta["finalizers"] = []any{r.scope.finalizer}
-	}
+	meta, _ := u.Object["metadata"].(map[string]any)
+	meta["finalizers"] = []any{r.scope.finalizer}
 	if err := r.scope.client.Apply(ctx, client.ApplyConfigurationFromUnstructured(u),
 		client.FieldOwner(r.scope.fieldManager+finalizerManagerSuffix), client.ForceOwnership); err != nil {
 		return fmt.Errorf("runtime: applying the finalizer of %s: %w", obj.GetName(), err)
+	}
+	return nil
+}
+
+func (r Request) releaseFinalizer(ctx context.Context, obj Object) error {
+	current := obj.GetFinalizers()
+	remaining := slices.DeleteFunc(slices.Clone(current), func(f string) bool { return f == r.scope.finalizer })
+	if len(remaining) == len(current) {
+		return nil
+	}
+	body, err := json.Marshal([]map[string]any{
+		{"op": "test", "path": "/metadata/finalizers", "value": current},
+		{"op": "replace", "path": "/metadata/finalizers", "value": remaining},
+	})
+	if err != nil {
+		return fmt.Errorf("runtime: encoding the finalizer release of %s: %w", obj.GetName(), err)
+	}
+	if err := r.scope.client.Patch(ctx, obj, client.RawPatch(types.JSONPatchType, body)); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("runtime: releasing the finalizer of %s: %w", obj.GetName(), err)
 	}
 	return nil
 }
