@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
-	"sync"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -19,7 +17,6 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/appctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 )
 
 type DynamicFactory func(workspace string) (dynamic.Interface, error)
@@ -27,22 +24,6 @@ type DynamicFactory func(workspace string) (dynamic.Interface, error)
 type componentKind struct {
 	Kind string
 	GVR  schema.GroupVersionResource
-}
-
-func ComponentKinds() []string {
-	out := make([]string, 0, len(appctl.ComponentTypes))
-	for _, kind := range appctl.ComponentTypes {
-		out = append(out, kind.Kind)
-	}
-	return out
-}
-
-func RuntimeKinds() []string {
-	out := make([]string, 0, len(runtimeKinds))
-	for _, kind := range runtimeKinds {
-		out = append(out, kind.Kind)
-	}
-	return out
 }
 
 var runtimeKinds = []componentKind{
@@ -56,208 +37,6 @@ var runtimeKinds = []componentKind{
 	{appctl.ComponentKindRelay, appctl.RelayGVR},
 	{appctl.ComponentKindIngressProxy, appctl.IngressProxyGVR},
 	{appctl.ComponentKindDispatcherTLS, appctl.DispatcherTLSGVR},
-}
-
-type source struct {
-	workspaces func(context.Context) []string
-	dynamic    DynamicFactory
-	log        *slog.Logger
-	kinds      []componentKind
-}
-
-func newSource(cfg Config, dynamic DynamicFactory) *source {
-	workspaces := cfg.WorkspacesFunc
-	if workspaces == nil {
-		list := append([]string(nil), cfg.Workspaces...)
-		workspaces = func(context.Context) []string { return list }
-	}
-	return &source{workspaces: workspaces, dynamic: dynamic, log: cfg.Log, kinds: runtimeKinds}
-}
-
-func (s *source) List(ctx context.Context) ([]component.ComponentSpec, error) {
-	var out []component.ComponentSpec
-	for _, workspace := range s.workspaces(ctx) {
-		dyn, err := s.dynamic(workspace)
-		if err != nil {
-			s.log.Warn("component: the dynamic client", "workspace", workspace, "err", err.Error())
-			continue
-		}
-		for _, kind := range s.kinds {
-			list, err := dyn.Resource(kind.GVR).List(ctx, metav1.ListOptions{})
-			if apierrors.IsNotFound(err) || apierrors.IsForbidden(err) {
-				continue
-			}
-			if err != nil {
-				if ctx.Err() == nil {
-					s.log.Warn("component: listing components", "workspace", workspace, "kind", kind.Kind, "err", err.Error())
-				}
-				continue
-			}
-			for i := range list.Items {
-				spec, err := specOf(kind.Kind, workspace, &list.Items[i])
-				if err != nil {
-					s.log.Warn("component: the component object", "workspace", workspace, "kind", kind.Kind, "name", list.Items[i].GetName(), "err", err.Error())
-					continue
-				}
-				out = append(out, spec)
-			}
-		}
-	}
-	return out, nil
-}
-
-func (s *source) Watch(ctx context.Context) (<-chan component.Event, error) {
-	out := make(chan component.Event, 256)
-	var wg sync.WaitGroup
-	for _, workspace := range s.workspaces(ctx) {
-		for _, kind := range s.kinds {
-			wg.Go(func() {
-				s.watch(ctx, workspace, kind, out)
-			})
-		}
-	}
-	go func() {
-		wg.Wait()
-		close(out)
-	}()
-	return out, nil
-}
-
-func (s *source) watch(ctx context.Context, workspace string, kind componentKind, out chan<- component.Event) {
-	for ctx.Err() == nil {
-		dyn, err := s.dynamic(workspace)
-		if err != nil {
-			clock.Sleep(ctx, RetryAfter)
-			continue
-		}
-		w, err := dyn.Resource(kind.GVR).Watch(ctx, metav1.ListOptions{})
-		if err != nil {
-			if !apierrors.IsNotFound(err) && !apierrors.IsForbidden(err) && ctx.Err() == nil {
-				s.log.Warn("component: watching components", "workspace", workspace, "kind", kind.Kind, "err", err.Error())
-			}
-			clock.Sleep(ctx, RetryAfter)
-			continue
-		}
-		for event := range w.ResultChan() {
-			if ctx.Err() != nil {
-				w.Stop()
-				return
-			}
-			u, ok := event.Object.(*unstructured.Unstructured)
-			if !ok {
-				continue
-			}
-			spec, err := specOf(kind.Kind, workspace, u)
-			if err != nil {
-				s.log.Warn("component: the watched component", "workspace", workspace, "kind", kind.Kind, "name", u.GetName(), "err", err.Error())
-				continue
-			}
-			var eventType component.EventType
-			switch event.Type {
-			case "ADDED":
-				eventType = component.EventAdded
-			case "MODIFIED":
-				eventType = component.EventModified
-			case "DELETED":
-				eventType = component.EventDeleted
-			default:
-				continue
-			}
-			select {
-			case out <- component.Event{Type: eventType, Spec: spec}:
-			case <-ctx.Done():
-				w.Stop()
-				return
-			}
-		}
-		w.Stop()
-		clock.Sleep(ctx, RetryAfter)
-	}
-}
-
-func specOf(kind, workspace string, u *unstructured.Unstructured) (component.ComponentSpec, error) {
-	spec := component.ComponentSpec{
-		UID:         u.GetUID(),
-		Kind:        kind,
-		Name:        u.GetName(),
-		Namespace:   u.GetNamespace(),
-		Workspace:   workspace,
-		Generation:  u.GetGeneration(),
-		Deleting:    u.GetDeletionTimestamp() != nil,
-		Annotations: u.GetAnnotations(),
-		Labels:      u.GetLabels(),
-		Group:       u.GroupVersionKind().Group,
-	}
-	object, ok := u.Object["spec"].(map[string]any)
-	if !ok {
-		return spec, nil
-	}
-	spec.Suspend, _, _ = unstructured.NestedBool(object, "suspend")
-	spec.RestartPolicy = component.RestartPolicy(nestedString(object, "restartPolicy"))
-	spec.StateDir = nestedString(object, "stateDir")
-	raw, err := json.Marshal(object)
-	if err != nil {
-		return spec, fmt.Errorf("component: the spec of %s/%s: %w", kind, spec.Name, err)
-	}
-	spec.Spec = component.RawSpec(raw)
-	return spec, nil
-}
-
-func nestedString(object map[string]any, field string) string {
-	value, _, _ := unstructured.NestedString(object, field)
-	return value
-}
-
-type statusWriter struct {
-	dynamic DynamicFactory
-	log     *slog.Logger
-}
-
-func (w *statusWriter) WriteStatus(ctx context.Context, spec component.ComponentSpec, status component.ComponentStatus) error {
-	if spec.Kind == appctl.ComponentKindPolicyEngine {
-		return nil
-	}
-	kind, ok := kindFor(spec.Kind)
-	if !ok {
-		return fmt.Errorf("component: %q is not a component kind", spec.Kind)
-	}
-	dyn, err := w.dynamic(spec.Workspace)
-	if err != nil {
-		return err
-	}
-	ri := dyn.Resource(kind.GVR)
-	apiStatus := status.APIStatus()
-	m, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&apiStatus)
-	if err != nil {
-		return fmt.Errorf("component: the status of %s/%s: %w", spec.Kind, spec.Name, err)
-	}
-	for range 5 {
-		cur, err := ri.Get(ctx, spec.Name, metav1.GetOptions{})
-		if apierrors.IsNotFound(err) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		cur.Object["status"] = m
-		_, err = ri.UpdateStatus(ctx, cur, metav1.UpdateOptions{FieldManager: appctl.FieldManager})
-		if err == nil {
-			return nil
-		}
-		if !apierrors.IsConflict(err) {
-			return err
-		}
-	}
-	return fmt.Errorf("component: the status of %s/%s stayed in conflict", spec.Kind, spec.Name)
-}
-
-func kindFor(name string) (componentKind, bool) {
-	for _, kind := range runtimeKinds {
-		if kind.Kind == name {
-			return kind, true
-		}
-	}
-	return componentKind{}, false
 }
 
 type ComponentRef struct {

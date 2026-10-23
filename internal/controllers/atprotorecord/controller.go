@@ -27,7 +27,13 @@ const (
 
 	LinkExport = "exposures"
 
+	Kind = "AtprotoRecord"
+
 	RepoKind = "AtprotoRepo"
+
+	MarketIdentityKind = "MarketIdentity"
+
+	RecordWatchKind = "AtprotoRecordWatch"
 
 	LegacyOperatorRepo = "operator"
 
@@ -42,12 +48,16 @@ const (
 	ReasonInvalidSpec = "InvalidSpec"
 )
 
+var OwnKinds = []string{MarketIdentityKind, Kind, RecordWatchKind}
+
 type DynamicFactory func(workspace string) (dynamic.Interface, error)
 
 type Options struct {
 	Bus *bus.Bus
 
 	Dynamic DynamicFactory
+
+	Scope func(workspace string) bool
 
 	Log *slog.Logger
 }
@@ -76,26 +86,42 @@ func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
 		return nil, err
 	}
 	ctl := New(opts)
-	if err := ctlruntime.For[*v1alpha1.AtprotoRecord](m, Name, ctl, ctlruntime.Export(Export),
+	options := []ctlruntime.Option{ctlruntime.Export(Export),
 		ctlruntime.Finalizer(v1alpha1.FinalizerAtprotoRecord),
 		ctlruntime.WatchesIn(RepoExport, func(_ context.Context, src ctlruntime.Request, obj *v1alpha1.AtprotoRepo) []ctlruntime.Request {
-			return ctl.users(src.Workspace, obj.Name)
+			return ctl.users(src.Workspace, RepoKind, obj.Name)
 		}),
 		ctlruntime.WatchesIn(LinkExport, func(_ context.Context, src ctlruntime.Request, obj *exposurev1alpha1.ComponentLink) []ctlruntime.Request {
 			to := obj.Spec.To
 			if !strings.EqualFold(strings.TrimSpace(to.Kind), RepoKind) {
 				return nil
 			}
-			return ctl.users(to.InWorkspace(src.Workspace), to.Name)
-		})); err != nil {
+			return ctl.users(to.InWorkspace(src.Workspace), RepoKind, to.Name)
+		}),
+		ctlruntime.Watches(func(_ context.Context, src ctlruntime.Request, obj *v1alpha1.MarketIdentity) []ctlruntime.Request {
+			return ctl.users(src.Workspace, MarketIdentityKind, obj.Name)
+		}),
+		ctlruntime.Watches(func(_ context.Context, src ctlruntime.Request, obj *v1alpha1.AtprotoRecord) []ctlruntime.Request {
+			return ctl.users(src.Workspace, Kind, obj.Name)
+		}),
+		ctlruntime.Watches(func(_ context.Context, src ctlruntime.Request, obj *v1alpha1.AtprotoRecordWatch) []ctlruntime.Request {
+			return ctl.users(src.Workspace, RecordWatchKind, obj.Name)
+		}),
+		ctlruntime.Gone(func(_ context.Context, req ctlruntime.Request) {
+			ctl.repos.Set(binding.Target{Cluster: req.Cluster, Workspace: req.Workspace, Name: req.Name}, nil)
+		})}
+	if opts.Scope != nil {
+		options = append(options, ctlruntime.InWorkspaces(opts.Scope))
+	}
+	if err := ctlruntime.For[*v1alpha1.AtprotoRecord](m, Name, ctl, options...); err != nil {
 		return nil, fmt.Errorf("atprotorecord: registering the AtprotoRecord controller: %w", err)
 	}
 	return ctl, nil
 }
 
-func (c *Controller) users(workspace, name string) []ctlruntime.Request {
+func (c *Controller) users(workspace, kind, name string) []ctlruntime.Request {
 	var out []ctlruntime.Request
-	for _, t := range c.repos.Users(binding.Key(workspace, RepoKind, name)) {
+	for _, t := range c.repos.Users(binding.Key(workspace, kind, name)) {
 		out = append(out, ctlruntime.Request{Cluster: t.Cluster, Workspace: t.Workspace, Name: t.Name})
 	}
 	return out
@@ -130,7 +156,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 		c.repos.Set(target, nil)
 		return ctlruntime.Result{}, c.fail(ctx, req, object, ReasonInvalidSpec, err)
 	}
-	c.repos.Set(target, &ref, binding.Key(ref.Workspace, RepoKind, ref.Name))
+	c.repos.Set(target, &ref, append([]string{binding.Key(ref.Workspace, RepoKind, ref.Name)}, referenceKeys(req.Workspace, object.Spec.Record)...)...)
 	repo, err := bus.Resolve[atprotorepo.Repo](ctx, c.bus, self(req, object), ref,
 		bus.Capability{Name: atprotorepo.CapabilityWrite, Scope: scopeOf(object.Spec)})
 	if err != nil {
@@ -140,7 +166,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 }
 
 func self(req ctlruntime.Request, object *v1alpha1.AtprotoRecord) commonv1.ObjectRef {
-	return commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: "AtprotoRecord", Name: object.Name, Workspace: req.Workspace}
+	return commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: Kind, Name: object.Name, Workspace: req.Workspace}
 }
 
 func (c *Controller) resolveFailed(ctx context.Context, req ctlruntime.Request, object *v1alpha1.AtprotoRecord, err error) error {
@@ -158,7 +184,10 @@ func (c *Controller) sync(ctx context.Context, req ctlruntime.Request, object *v
 	if err != nil {
 		return err
 	}
-	outcome, err := Apply(ctx, repo, object, References{Dynamic: dyn, Factory: c.dynamic, Workspace: req.Workspace})
+	own := func(ctx context.Context, from v1alpha1.AtprotoValueFrom) (map[string]any, bool, error) {
+		return ReadOwn(ctx, req, from)
+	}
+	outcome, err := Apply(ctx, repo, object, References{Own: own, Dynamic: dyn, Factory: c.dynamic, Workspace: req.Workspace})
 	if outcome.Written {
 		c.log.Info("an AtprotoRecord wrote its declared record", "workspace", req.Workspace, "name", object.Name, "uri", outcome.URI,
 			"cid", outcome.CID, "reason", outcome.Reason)

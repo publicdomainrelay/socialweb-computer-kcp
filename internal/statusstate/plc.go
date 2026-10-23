@@ -2,74 +2,109 @@ package statusstate
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"strings"
 
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/client-go/dynamic"
-
-	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/plc"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 )
 
-func (c *Controller) reconcilePLC(ctx context.Context, dyn dynamic.Interface, u *unstructured.Unstructured) {
-	var obj v1alpha1.PlcIdentity
-	if err := unstruct.Into(u, &obj); err != nil {
-		c.log.Warn("decoding a PlcIdentity", "workspace", c.workspace, "name", u.GetName(), "err", err.Error())
-		return
-	}
-	generation := u.GetGeneration()
-	status := obj.Status
-	status.ObservedGeneration = generation
-	did := strings.TrimSpace(obj.Spec.DID)
-	if did == "" {
-		setReady(&status.Conditions, generation, false, ReasonWaiting, "the PlcIdentity needs a did")
-		c.write(ctx, dyn, PlcIdentityGVR, u, &status)
-		return
-	}
-	if c.plc == nil {
-		setReady(&status.Conditions, generation, false, ReasonSourceUnavailable, "no PLC client is configured")
-		c.write(ctx, dyn, PlcIdentityGVR, u, &status)
-		return
-	}
-	entries, err := c.plc.AuditLog(ctx, did)
+type PLCIdentity struct {
+	Found bool
+
+	Head string
+
+	OpCount int64
+
+	Tombstoned bool
+}
+
+type HTTPPLCClient struct {
+	baseURL string
+
+	client *http.Client
+}
+
+func NewHTTPPLCClient(baseURL string, client *http.Client) (*HTTPPLCClient, error) {
+	parsed, err := sourceBaseURL(baseURL, "PLC")
 	if err != nil {
-		var plcErr *plc.Error
-		if errors.As(err, &plcErr) && plcErr.Status == 404 {
-			status.Head = ""
-			status.OpCount = 0
-			status.Tombstoned = false
-			setReady(&status.Conditions, generation, false, ReasonNotFound, "the PLC directory does not know "+did)
-			c.write(ctx, dyn, PlcIdentityGVR, u, &status)
-			return
-		}
-		setReady(&status.Conditions, generation, false, ReasonSourceError, "reading the PLC log: "+err.Error())
-		c.write(ctx, dyn, PlcIdentityGVR, u, &status)
-		return
+		return nil, err
 	}
-	var head string
-	var count int64
-	var tombstoned bool
+	return &HTTPPLCClient{baseURL: parsed, client: httpClient(client)}, nil
+}
+
+func (c *HTTPPLCClient) Identity(ctx context.Context, did string) (PLCIdentity, error) {
+	entries, err := c.auditLog(ctx, did)
+	var plcErr *plc.Error
+	if errors.As(err, &plcErr) && plcErr.Status == http.StatusNotFound {
+		return PLCIdentity{}, nil
+	}
+	if err != nil {
+		return PLCIdentity{}, err
+	}
+	return Summarize(entries), nil
+}
+
+func Summarize(entries []plc.LogEntry) PLCIdentity {
+	var out PLCIdentity
 	for i := range entries {
 		if entries[i].Nullified {
 			continue
 		}
-		count++
-		head = entries[i].CID
-		tombstoned = entries[i].Operation.Type == plc.TypeTombstone
+		out.OpCount++
+		out.Head = entries[i].CID
+		out.Tombstoned = entries[i].Operation.Type == plc.TypeTombstone
 	}
-	if count == 0 {
-		status.Head = ""
-		status.OpCount = 0
-		status.Tombstoned = false
-		setReady(&status.Conditions, generation, false, ReasonNotFound, "the PLC directory holds no current operation for "+did)
-		c.write(ctx, dyn, PlcIdentityGVR, u, &status)
-		return
+	out.Found = out.OpCount > 0
+	return out
+}
+
+func (c *HTTPPLCClient) auditLog(ctx context.Context, did string) ([]plc.LogEntry, error) {
+	if c == nil {
+		return nil, fmt.Errorf("statusstate: the HTTP PLC client is nil")
 	}
-	status.Head = head
-	status.OpCount = count
-	status.Tombstoned = tombstoned
-	setReady(&status.Conditions, generation, true, ReasonReady, "the PLC identity has current operations")
-	c.write(ctx, dyn, PlcIdentityGVR, u, &status)
+	did = strings.TrimSpace(did)
+	if did == "" {
+		return nil, fmt.Errorf("statusstate: the PLC audit source needs a did")
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/"+url.PathEscape(did)+"/log/audit", nil)
+	if err != nil {
+		return nil, err
+	}
+	response, err := c.client.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(response.Body, maxSourceBody))
+	if err != nil {
+		return nil, err
+	}
+	if response.StatusCode != http.StatusOK {
+		return nil, plcStatusError(response.StatusCode, body)
+	}
+	var entries []plc.LogEntry
+	if err := json.Unmarshal(body, &entries); err != nil {
+		return nil, fmt.Errorf("statusstate: the PLC audit log is not JSON: %w", err)
+	}
+	return entries, nil
+}
+
+func plcStatusError(status int, body []byte) error {
+	var payload struct {
+		Message string `json:"message"`
+	}
+	_ = json.Unmarshal(body, &payload)
+	message := strings.TrimSpace(payload.Message)
+	if message == "" {
+		message = strings.TrimSpace(string(body))
+	}
+	if message == "" {
+		message = fmt.Sprintf("HTTP %d", status)
+	}
+	return &plc.Error{Status: status, Message: message}
 }

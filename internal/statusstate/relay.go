@@ -1,54 +1,71 @@
 package statusstate
 
 import (
-	"cmp"
 	"context"
-
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/client-go/dynamic"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 )
 
-func (c *Controller) reconcileRelay(ctx context.Context, dyn dynamic.Interface, u *unstructured.Unstructured) {
-	var obj v1alpha1.RelayStatus
-	if err := unstruct.Into(u, &obj); err != nil {
-		c.log.Warn("decoding a RelayStatus", "workspace", c.workspace, "name", u.GetName(), "err", err.Error())
-		return
-	}
-	generation := u.GetGeneration()
-	status := obj.Status
-	status.ObservedGeneration = generation
-	ref := refString(obj.Spec.RelayRef)
-	if ref == "" {
-		setReady(&status.Conditions, generation, false, ReasonWaiting, "the RelayStatus needs a relayRef")
-		c.write(ctx, dyn, RelayStatusGVR, u, &status)
-		return
-	}
-	if c.relay == nil {
-		setReady(&status.Conditions, generation, false, ReasonSourceUnavailable, "no relay source is configured")
-		c.write(ctx, dyn, RelayStatusGVR, u, &status)
-		return
-	}
-	observation, err := c.relay.RelayStatus(ctx, ref)
-	if err != nil {
-		setReady(&status.Conditions, generation, false, ReasonSourceError, "reading the relay status: "+err.Error())
-		c.write(ctx, dyn, RelayStatusGVR, u, &status)
-		return
-	}
-	status.Phase = observation.Phase
-	status.Phase = cmp.Or(status.Phase, v1alpha1.RelayStatusPhasePending)
-	status.Cursor = nonNegativeInt64(observation.Cursor)
-	status.LastEventAt = observation.LastEventAt
-	status.Events = nonNegativeInt64(observation.Events)
-	setReady(&status.Conditions, generation, true, ReasonReady, "the relay status is observed")
-	c.write(ctx, dyn, RelayStatusGVR, u, &status)
+type RelayObservation struct {
+	Phase v1alpha1.RelayStatusPhase
+
+	Cursor int64
+
+	LastEventAt string
+
+	Events int64
 }
 
-func nonNegativeInt64(value int64) int64 {
-	if value < 0 {
-		return 0
+type RelayEndpointFunc func(ref string) (string, bool)
+
+type HTTPRelayHealthSource struct {
+	endpoint RelayEndpointFunc
+
+	client *http.Client
+}
+
+func NewHTTPRelayHealthSource(endpoint RelayEndpointFunc, client *http.Client) *HTTPRelayHealthSource {
+	return &HTTPRelayHealthSource{endpoint: endpoint, client: httpClient(client)}
+}
+
+func (s *HTTPRelayHealthSource) RelayStatus(ctx context.Context, ref string) (RelayObservation, error) {
+	if s == nil {
+		return RelayObservation{}, fmt.Errorf("statusstate: the relay health source is nil")
 	}
-	return value
+	base, err := s.baseURL(ref)
+	if err != nil {
+		return RelayObservation{}, err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/xrpc/_health", nil)
+	if err != nil {
+		return RelayObservation{}, err
+	}
+	response, err := s.client.Do(request)
+	if err != nil {
+		return RelayObservation{}, err
+	}
+	defer response.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, maxSourceBody))
+	phase := v1alpha1.RelayStatusPhaseRunning
+	if response.StatusCode < 200 || response.StatusCode > 299 {
+		phase = v1alpha1.RelayStatusPhaseFailed
+	}
+	return RelayObservation{Phase: phase}, nil
+}
+
+func (s *HTTPRelayHealthSource) baseURL(ref string) (string, error) {
+	ref = strings.TrimSpace(ref)
+	if s.endpoint != nil {
+		if resolved, ok := s.endpoint(ref); ok {
+			return sourceBaseURL(resolved, "relay")
+		}
+	}
+	if strings.Contains(ref, "://") {
+		return sourceBaseURL(ref, "relay")
+	}
+	return "", fmt.Errorf("statusstate: the relay ref %q has no endpoint and is not a URL", ref)
 }

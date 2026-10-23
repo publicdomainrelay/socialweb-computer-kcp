@@ -7,8 +7,8 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/credentials"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/identitycontroller"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/marketidentity/atproto"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
@@ -40,7 +40,7 @@ func (s *identityVaultStore) Get(ctx context.Context, ref commonv1.SecretRef) (m
 	credential, err := s.resolver.Resolve(ctx, s.ref(ref))
 	if err != nil {
 		if errors.Is(err, openbao.ErrNotFound) {
-			return nil, identitycontroller.ErrSecretNotFound
+			return nil, atproto.ErrSecretNotFound
 		}
 		return nil, err
 	}

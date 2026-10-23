@@ -18,6 +18,8 @@ import (
 )
 
 type References struct {
+	Own func(ctx context.Context, from v1alpha1.AtprotoValueFrom) (map[string]any, bool, error)
+
 	Dynamic dynamic.Interface
 
 	Factory DynamicFactory
@@ -75,7 +77,7 @@ func Apply(ctx context.Context, repo atprotorepo.Repo, object *v1alpha1.AtprotoR
 		err := errors.New("the record needs a collection and an rkey")
 		return failed(object, ReasonInvalidSpec, err), err
 	}
-	resolved, missing, err := resolveReferences(ctx, refs.Dynamic, refs.Factory, refs.Workspace, spec.Record)
+	resolved, missing, err := resolveReferences(ctx, refs, spec.Record)
 	if err != nil {
 		return failed(object, ReasonInvalidSpec, err), err
 	}

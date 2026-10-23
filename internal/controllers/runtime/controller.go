@@ -96,6 +96,10 @@ type options struct {
 
 	only func(client.Object) bool
 
+	inWorkspace func(string) bool
+
+	gone func(context.Context, Request)
+
 	events []<-chan Request
 
 	sharedStatus bool
@@ -147,6 +151,14 @@ func Events(ch <-chan Request) Option {
 			o.events = append(o.events, ch)
 		}
 	}
+}
+
+func InWorkspaces(keep func(workspace string) bool) Option {
+	return func(o *options) { o.inWorkspace = keep }
+}
+
+func Gone(fn func(ctx context.Context, req Request)) Option {
+	return func(o *options) { o.gone = fn }
 }
 
 func Only[T Object](keep func(T) bool) Option {
@@ -247,7 +259,7 @@ func For[T Object](m *Manager, name string, r Reconciler[T], opts ...Option) err
 	for _, ch := range o.events {
 		b = b.WatchesRawSource(eventSource(o.export, ch))
 	}
-	a := &adapter[T]{m: m, name: name, r: r, limiter: limiter, log: log, only: o.only,
+	a := &adapter[T]{m: m, name: name, r: r, limiter: limiter, log: log, only: o.only, inWorkspace: o.inWorkspace, gone: o.gone,
 		scope: scope{scheme: m.scheme, fieldManager: o.fieldManager, finalizer: o.finalizer, sharedStatus: o.sharedStatus, log: log}}
 	if err := b.Complete(a); err != nil {
 		return fmt.Errorf("runtime: building the controller %s: %w", name, err)
@@ -323,6 +335,10 @@ type adapter[T Object] struct {
 
 	only func(client.Object) bool
 
+	inWorkspace func(string) bool
+
+	gone func(context.Context, Request)
+
 	scope scope
 }
 
@@ -332,12 +348,22 @@ func (a *adapter[T]) Reconcile(ctx context.Context, mcreq mcreconcile.Request) (
 	if err != nil {
 		return reconcile.Result{}, err
 	}
+	workspace := a.m.path(ctx, lc)
+	if a.inWorkspace != nil && !a.inWorkspace(workspace) {
+		return reconcile.Result{}, nil
+	}
 	obj, err := newObject[T]()
 	if err != nil {
 		return reconcile.Result{}, reconcile.TerminalError(err)
 	}
+	s := a.scope
+	s.client = cl.GetClient()
+	req := Request{Cluster: lc, Workspace: workspace, Namespace: mcreq.Namespace, Name: mcreq.Name, scope: &s}
 	if err := cl.GetClient().Get(ctx, mcreq.NamespacedName, obj); err != nil {
 		if apierrors.IsNotFound(err) {
+			if a.gone != nil {
+				a.gone(ctx, req)
+			}
 			return reconcile.Result{}, nil
 		}
 		return reconcile.Result{}, a.failed(mcreq, lc, mcreq.Name, err)
@@ -345,9 +371,6 @@ func (a *adapter[T]) Reconcile(ctx context.Context, mcreq mcreconcile.Request) (
 	if a.only != nil && !a.only(obj) {
 		return reconcile.Result{}, nil
 	}
-	s := a.scope
-	s.client = cl.GetClient()
-	req := Request{Cluster: lc, Workspace: a.m.path(ctx, lc), Namespace: mcreq.Namespace, Name: mcreq.Name, scope: &s}
 	log := a.log.With("cluster", lc, "workspace", req.Workspace, "name", req.Name)
 	s.log = log
 	if s.finalizer != "" && obj.GetDeletionTimestamp().IsZero() && !controllerutil.ContainsFinalizer(obj, s.finalizer) {

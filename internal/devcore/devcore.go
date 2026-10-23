@@ -8,7 +8,9 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
@@ -32,7 +34,6 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/postgresctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/componentcore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/storemaint"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/ttlctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vaultlayout"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/versions"
 )
@@ -40,6 +41,16 @@ import (
 const CheckInterval = 5 * time.Second
 
 var TTLSkipWorkspaces = []string{"socialweb-provider"}
+
+func TTLScope(root string) func(workspace string) bool {
+	return func(workspace string) bool {
+		if workspace == root {
+			return true
+		}
+		rest, ok := strings.CutPrefix(workspace, root+":")
+		return ok && !strings.Contains(rest, ":") && !slices.Contains(TTLSkipWorkspaces, rest)
+	}
+}
 
 type Config struct {
 	Layout       devinstance.Layout
@@ -160,7 +171,26 @@ func Run(ctx context.Context, cfg Config, m hostsvc.Manager) error {
 		return nil
 	})
 	if len(rec.StandIns) == 0 && rec.AdminKubeconfig != "" {
+		ac := AppConfig(bcfg, rec, m, log)
+		ac.Handlers, ac.RemotePDS = cfg.Handlers, cfg.RemotePDS
+		ac.Listeners, ac.WebApp, ac.OnComponents = cfg.Listeners, cfg.WebApp, cfg.OnComponents
+		ac.SignInGuard = cfg.SignInGuard
+		var ttlReport atomic.Pointer[func() *v1alpha1.TTLStatus]
+		ac.TTLReport = func() *v1alpha1.TTLStatus {
+			if report := ttlReport.Load(); report != nil {
+				return (*report)()
+			}
+			return nil
+		}
 		coreCfg := ComponentCoreConfig(ctx, cfg, rec, log)
+		coreCfg.Postgres = postgresctl.New(PostgresConfig(bcfg, rec))
+		if servers, err := openbaoctl.New(OpenBaoServerConfig(bcfg, rec, log)); err != nil {
+			log.Warn("the OpenBaoServer controller does not start", "err", err.Error())
+		} else {
+			coreCfg.OpenBao = servers
+		}
+		coreCfg.TTLScope = TTLScope(cmp.Or(ac.Workspace, hostprocess.DefaultWorkspace))
+		coreCfg.OnTTL = func(report func() *v1alpha1.TTLStatus) { ttlReport.Store(&report) }
 		g.Go("componentcore", func(ctx context.Context) error {
 			componentcore.Supervise(ctx, coreCfg)
 			return nil
@@ -170,29 +200,6 @@ func Run(ctx context.Context, cfg Config, m hostsvc.Manager) error {
 			hostprocess.Supervise(ctx, hpCfg)
 			return nil
 		})
-		baoCfg := OpenBaoServerConfig(bcfg, rec, log)
-		g.Go("openbaoctl", func(ctx context.Context) error {
-			openbaoctl.Supervise(ctx, baoCfg)
-			return nil
-		})
-		pgCfg := PostgresConfig(bcfg, rec, log)
-		g.Go("postgresctl", func(ctx context.Context) error {
-			postgresctl.Run(ctx, pgCfg)
-			return nil
-		})
-		ac := AppConfig(bcfg, rec, m, log)
-		ac.Handlers, ac.RemotePDS = cfg.Handlers, cfg.RemotePDS
-		ac.Listeners, ac.WebApp, ac.OnComponents = cfg.Listeners, cfg.WebApp, cfg.OnComponents
-		ac.SignInGuard = cfg.SignInGuard
-		if tc, err := ttlctl.New(ttlctl.Config{Kubeconfig: rec.AdminKubeconfig, Root: ac.Workspace, Skip: TTLSkipWorkspaces, Log: log}); err != nil {
-			log.Warn("the TTL controller does not start", "err", err.Error())
-		} else {
-			ac.TTLReport = tc.Report
-			g.Go("ttlctl", func(ctx context.Context) error {
-				ttlctl.Supervise(ctx, tc)
-				return nil
-			})
-		}
 		if rec.SharedKcp == "" {
 			if sc, err := StoreMaintConfig(bcfg, rec, log); err != nil {
 				log.Warn("the store maintenance does not start", "err", err.Error())

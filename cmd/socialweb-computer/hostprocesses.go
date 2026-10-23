@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"path/filepath"
@@ -10,9 +11,13 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap/table"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clicfg"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/openbaoserver"
+	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostprocess"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
+	kruntime "k8s.io/apimachinery/pkg/runtime"
 )
 
 const hostProcessesApplyTimeout = time.Minute
@@ -49,8 +54,27 @@ func runHostProcesses(ctx context.Context, a *app, vals clicfg.Values, rest []st
 	defer wg.Wait()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	servers, err := openbaoctl.New(openbaoctl.Config{StateDir: stateDir, Prefix: prefix, Log: log})
+	if err != nil {
+		return a.fail(exitFailed, "internal hostprocesses: %v", err)
+	}
+	restCfg, err := kcpserver.FrontRestConfig(kubeconfig)
+	if err != nil {
+		return a.fail(exitFailed, "internal hostprocesses: %v", err)
+	}
+	mgr, err := ctlruntime.NewManager(ctlruntime.Config{Rest: restCfg, AddToScheme: []func(*kruntime.Scheme) error{v1alpha1.AddToScheme}, Log: log})
+	if err != nil {
+		return a.fail(exitFailed, "internal hostprocesses: %v", err)
+	}
+	base := cmp.Or(ws, hostprocess.DefaultWorkspace)
+	if _, err := openbaoserver.Register(mgr, openbaoserver.Options{Servers: servers, Scope: func(w string) bool { return w == base },
+		Log: log}); err != nil {
+		return a.fail(exitFailed, "internal hostprocesses: %v", err)
+	}
 	wg.Go(func() {
-		openbaoctl.Supervise(ctx, openbaoctl.Config{Kubeconfig: kubeconfig, Workspace: ws, StateDir: stateDir, Prefix: prefix, Log: log})
+		if err := mgr.Start(ctx); err != nil && ctx.Err() == nil {
+			log.Warn("the OpenBaoServer controller stopped", "err", err.Error())
+		}
 	})
 	hostprocess.Supervise(ctx, hostprocess.Config{Kubeconfig: kubeconfig, Workspace: ws, Manager: m, Prefix: prefix,
 		Resolve: func(asset v1alpha1.HostProcessAsset) (string, error) {

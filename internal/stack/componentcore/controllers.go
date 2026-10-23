@@ -5,385 +5,352 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/watch"
-	"k8s.io/client-go/dynamic"
+	"github.com/bluesky-social/indigo/atproto/identity"
 	"k8s.io/client-go/rest"
 
-	eventsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/events/v1alpha1"
-	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
-	policyv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/policy/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/apiserverfront"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/appctl"
+	atprotooauth "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauthclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/childapplication"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/component/ports"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/atprotosession"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/childapplication"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/cluster"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/clusterroll"
+	componentctl "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/componentlink"
+	computevmctl "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/computevm"
 	eventsctl "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/events"
+	exposurectl "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/exposure"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/guestidentitygrant"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/hostinstall"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/hostrelease"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/kcpinstallation"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/marketidentity"
+	marketpresencectl "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/marketpresence"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/openbaoserver"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/pdsaccount"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/plcidentity"
 	policyctl "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/policy"
-	remotepdsctl "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/remotepds"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/portlease"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/postgres"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/relaystatus"
+	remoteopenbaoctl "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/remoteopenbao"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/repos"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
+	servicectl "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/service"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/subnetlease"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/ttl"
 	vaultctl "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/vault"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/vaultcertificate"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/vaultcredential"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/credentials"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/eventstream"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/exposure"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostlifecycle"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/install"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/ref"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/leasecontroller"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/marketpresence"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/lease/local"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/marketidentity/atproto"
+	presence "github.com/johnandersen777/socialweb-computer-kcp/internal/marketpresence"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/oauthcallback"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/pds/remote"
 	policycontroller "github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/controller"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/statusstate"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/subnetallocator"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vaultmain"
 )
 
 const (
-	controllerResync = 30 * time.Second
-
 	pdsClientTimeout = 30 * time.Second
+
+	identityResolverTimeout = 10 * time.Second
+
+	identityHTTPTimeout = 20 * time.Second
+
+	defaultQROrigin = "https://qr.fedfork.com"
 )
 
-type controllerRunner struct {
-	name string
-
-	run func(context.Context) error
-}
-
-type reconcileFunc func(context.Context, dynamic.Interface, string, *unstructured.Unstructured) error
-
-type controllerEntry struct {
-	gvr schema.GroupVersionResource
-
-	core bool
-
-	reconcile reconcileFunc
-}
-
-type controllerRuntime struct {
-	dynamic DynamicFactory
-
-	workspaces func(context.Context) []string
-
-	coreWorkspace string
-
-	log *slog.Logger
-
-	retry time.Duration
-
-	resync time.Duration
-
-	mu sync.Mutex
-
-	entries []controllerEntry
-}
-
-func (r *controllerRuntime) add(entry controllerEntry) error {
-	if entry.gvr.Resource == "" {
-		return errors.New("componentcore: a controller entry needs a resource")
-	}
-	if entry.reconcile == nil {
-		return fmt.Errorf("componentcore: the controller for %s has no reconciler", entry.gvr.Resource)
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for _, existing := range r.entries {
-		if existing.gvr == entry.gvr {
-			return fmt.Errorf("componentcore: the controller for %s is registered twice", entry.gvr.Resource)
-		}
-	}
-	r.entries = append(r.entries, entry)
-	return nil
-}
-
-func (r *controllerRuntime) Run(ctx context.Context) error {
-	r.mu.Lock()
-	entries := append([]controllerEntry(nil), r.entries...)
-	r.mu.Unlock()
-	var workers sync.WaitGroup
-	for _, entry := range entries {
-		workspaces := r.workspaces(ctx)
-		if entry.core {
-			workspaces = []string{r.coreWorkspace}
-		}
-		seen := map[string]bool{}
-		for _, workspace := range workspaces {
-			workspace = strings.TrimSpace(workspace)
-			if workspace == "" || seen[workspace] {
-				continue
-			}
-			seen[workspace] = true
-			workers.Go(func() {
-				r.watch(ctx, entry, workspace)
-			})
-		}
-	}
-	workers.Wait()
-	return nil
-}
-
-func (r *controllerRuntime) watch(ctx context.Context, entry controllerEntry, workspace string) {
-	log := r.log.With("workspace", workspace, "resource", entry.gvr.Resource)
-	for ctx.Err() == nil {
-		dyn, err := r.dynamic(workspace)
-		if err != nil {
-			log.Warn("the controller has no dynamic client", "err", err.Error())
-			if !clock.Sleep(ctx, r.retry) {
-				return
-			}
-			continue
-		}
-		if dyn == nil {
-			log.Warn("the controller has a nil dynamic client")
-			if !clock.Sleep(ctx, r.retry) {
-				return
-			}
-			continue
-		}
-		if err := r.round(ctx, entry, workspace, dyn); err != nil && ctx.Err() == nil {
-			log.Warn("watching the resource", "err", err.Error())
-		}
-		if !clock.Sleep(ctx, r.retry) {
-			return
-		}
-	}
-}
-
-func (r *controllerRuntime) round(ctx context.Context, entry controllerEntry, workspace string, dyn dynamic.Interface) error {
-	ri := dyn.Resource(entry.gvr)
-	list, err := ri.List(ctx, metav1.ListOptions{})
-	if apierrors.IsNotFound(err) || apierrors.IsForbidden(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	for i := range list.Items {
-		r.reconcile(ctx, entry, workspace, dyn, &list.Items[i])
-	}
-	wc, err := ri.Watch(ctx, metav1.ListOptions{ResourceVersion: list.GetResourceVersion()})
-	if apierrors.IsNotFound(err) || apierrors.IsForbidden(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	defer wc.Stop()
-	timer := time.NewTimer(r.resync)
-	defer timer.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-timer.C:
-			return nil
-		case event, ok := <-wc.ResultChan():
-			if !ok {
-				return nil
-			}
-			if event.Type == watch.Bookmark || event.Type == watch.Deleted {
-				continue
-			}
-			u, ok := event.Object.(*unstructured.Unstructured)
-			if !ok || u == nil {
-				continue
-			}
-			r.reconcile(ctx, entry, workspace, dyn, u)
-		}
-	}
-}
-
-func (r *controllerRuntime) reconcile(ctx context.Context, entry controllerEntry, workspace string, dyn dynamic.Interface,
-	u *unstructured.Unstructured) {
-	if u == nil {
-		return
-	}
-	if err := entry.reconcile(ctx, dyn, workspace, u); err != nil && ctx.Err() == nil {
-		r.log.Warn("reconciling a controller object", "resource", entry.gvr.Resource, "workspace", workspace,
-			"name", u.GetName(), "err", err.Error())
-	}
-}
-
-type leaseRegistrar struct {
-	runtime *controllerRuntime
-}
-
-func (l leaseRegistrar) Register(gvr schema.GroupVersionResource, reconcile leasecontroller.ReconcileFunc) error {
-	core := gvr == leasecontroller.ClusterGVR || gvr == leasecontroller.ClusterRollGVR
-	return l.runtime.add(controllerEntry{gvr: gvr, core: core,
-		reconcile: func(ctx context.Context, _ dynamic.Interface, workspace string, u *unstructured.Unstructured) error {
-			return reconcile(ctx, workspace, u)
-		}})
-}
-
-type childRegistrar struct {
-	runtime *controllerRuntime
-}
-
-func (c childRegistrar) Register(gvr schema.GroupVersionResource, reconcile childapplication.ReconcileFunc) error {
-	return c.runtime.add(controllerEntry{gvr: gvr, core: true,
-		reconcile: func(ctx context.Context, dyn dynamic.Interface, _ string, u *unstructured.Unstructured) error {
-			return reconcile(ctx, dyn, u)
-		}})
-}
-
-type hostHooks struct {
-	runtime *controllerRuntime
-}
-
-func (h hostHooks) Add(gvr schema.GroupVersionResource, reconcile hostlifecycle.ReconcileFunc) {
-	err := h.runtime.add(controllerEntry{gvr: gvr, core: true,
-		reconcile: func(ctx context.Context, dyn dynamic.Interface, _ string, u *unstructured.Unstructured) error {
-			return reconcile(ctx, dyn, u)
-		}})
-	if err != nil {
-		h.runtime.log.Warn("the host lifecycle controller is not registered", "resource", gvr.Resource, "err", err.Error())
-	}
-}
-
-func (c *Core) workspaceList(ctx context.Context) []string {
-	if c.cfg.WorkspacesFunc != nil {
-		return c.cfg.WorkspacesFunc(ctx)
-	}
-	return c.cfg.Workspaces
-}
-
-func (c *Core) buildControllers() {
-	cfg := c.cfg
-	base := cfg.Workspaces[0]
-	log := cfg.Log
-	runtime := &controllerRuntime{dynamic: cfg.DynamicFactory, workspaces: c.workspaceList, coreWorkspace: base,
-		log: log.With("component", "controller-runtime"), retry: RetryAfter, resync: controllerResync}
-	c.controllers = runtime
-
-	subnets, err := subnetallocator.Open(subnetallocator.Config{LeasePath: filepath.Join(cfg.StateDir, "networks.json"),
-		AppInstance: cfg.InstallAccount})
-	if err != nil {
-		log.Warn("the lease controller is not wired: no subnet allocator", "err", err.Error())
-	} else {
-		leaseOptions := leasecontroller.Options{
-			Dynamic: leasecontroller.DynamicFactory(cfg.DynamicFactory),
-			Ports:   c.ports,
-			Subnets: subnets,
-			Rolls: func(string) (kcpserver.Slots, error) {
-				return kcpserver.ReadSlots(cfg.SlotsFile)
-			},
-			Front: func(string) (leasecontroller.FrontState, error) {
-				return apiserverfront.Client{Path: cfg.FrontControl}, nil
-			},
-		}
-		if err := leasecontroller.Register(leaseRegistrar{runtime: runtime}, leaseOptions); err != nil {
-			log.Warn("the lease controller is not wired", "err", err.Error())
-		}
-		if leaseCtl, err := leasecontroller.New(leaseOptions); err != nil {
-			log.Warn("the lease controller mirror is not wired", "err", err.Error())
-		} else {
-			c.runners = append(c.runners, controllerRunner{name: "lease-mirror",
-				run: func(ctx context.Context) error { return c.mirrorLeases(ctx, leaseCtl) }})
-		}
-	}
-
-	authority := cfg.HostAuthority
-	if authority == nil {
-		authority = hostlifecycle.NewFileAuthority(hostlifecycle.FileAuthorityOptions{
-			StateRoot:    cfg.InstallStateRoot,
-			StateDir:     cfg.StateDir,
-			Account:      cfg.InstallAccount,
-			SlotsFile:    cfg.SlotsFile,
-			FrontControl: cfg.FrontControl,
-		})
-	}
-	if ctl, err := hostlifecycle.New(hostlifecycle.Options{Authority: authority, Log: log}); err != nil {
-		log.Warn("the host lifecycle controller is not wired", "err", err.Error())
-	} else {
-		hostlifecycle.Register(hostHooks{runtime: runtime}, ctl)
-	}
-
-	if _, err := childapplication.Register(childRegistrar{runtime: runtime}, childapplication.Options{Dynamic: childapplication.DynamicFactory(cfg.DynamicFactory),
-		Workspace: base, NetworkWorkspace: base, Log: log}); err != nil {
-		log.Warn("the child application controller is not wired", "err", err.Error())
-	}
-
-	caBundle := func(ref string) ([]byte, error) { return os.ReadFile(openbaoctl.FileRef(ref)) }
-	if strings.TrimSpace(base) == DefaultWorkspace {
-		c.buildManager(caBundle)
-	}
-	c.buildCompute()
-
-	handlers := c.handlers
-	if handlers == nil {
-		handlers = component.NewHandlerRegistry()
-		c.handlers = handlers
-	}
-	if mp, err := marketpresence.NewController(marketpresence.Options{Workspaces: cfg.Workspaces, Dynamic: marketpresence.DynamicFactory(cfg.DynamicFactory),
-		HTTPClient: handlers.Client(), Log: log}); err != nil {
-		log.Warn("the market presence controller is not wired", "err", err.Error())
-	} else {
-		c.runners = append(c.runners, controllerRunner{name: "marketpresence", run: mp.Run})
-	}
-
-	plcBaseURL := c.plcBaseURL()
-	if ss, err := statusstate.New(statusstate.Options{Workspace: base, Dynamic: statusstate.DynamicFactory(cfg.DynamicFactory),
-		Bus: handlers, Vault: openBaoMetadata(c.store, base),
-		PLCBaseURL: plcBaseURL, PLCHandlers: handlers,
-		RelayEndpoint: c.relayEndpoint(base), RelayHandlers: handlers, Log: log}); err != nil {
-		log.Warn("the status state controller is not wired", "err", err.Error())
-	} else {
-		c.runners = append(c.runners, controllerRunner{name: "statusstate", run: ss.Run})
-	}
-}
-
-func (c *Core) buildManager(caBundle remotepdsctl.CABundleFunc) {
+func (c *Core) runControllers(ctx context.Context) error {
 	cfg := c.cfg
 	log := cfg.Log
 	restCfg, err := c.managerRestConfig()
 	if err != nil {
-		log.Warn("the controller manager is not wired", "err", err.Error())
-		return
+		return fmt.Errorf("componentcore: the controller manager: %w", err)
 	}
-	mgr, err := ctlruntime.NewManager(ctlruntime.Config{Rest: restCfg, AddToScheme: []func(*runtime.Scheme) error{pdsv1alpha1.AddToScheme, policyv1alpha1.AddToScheme, v1alpha1.AddToScheme,
-		eventsv1alpha1.AddToScheme},
-		Log: log})
+	mgr, err := ctlruntime.NewManager(ctlruntime.Config{Rest: restCfg, AddToScheme: schemes, Log: log})
 	if err != nil {
-		log.Warn("the controller manager is not wired", "err", err.Error())
-		return
+		return fmt.Errorf("componentcore: the controller manager: %w", err)
 	}
+	clients, err := newWorkspaceClients(restCfg)
+	if err != nil {
+		return fmt.Errorf("componentcore: the workspace clients: %w", err)
+	}
+	g := supervise.New(ctx)
+	defer g.Stop()
+	ctx = g.Context()
+	c.registerLocal(ctx, mgr, clients)
+	if c.scope.base() == DefaultWorkspace {
+		if err := c.registerNetwork(mgr, clients, g); err != nil {
+			log.Warn("the network controllers are not wired", "err", err.Error())
+		}
+	}
+	if cfg.Compute != nil {
+		compute := *cfg.Compute
+		g.Go("computevm", func(ctx context.Context) error { return computevmctl.Run(ctx, compute) })
+	}
+	g.Go("controller-manager", mgr.Start)
+	return g.Wait()
+}
+
+func (c *Core) registerLocal(ctx context.Context, mgr *ctlruntime.Manager, clients *workspaceClients) {
+	cfg := c.cfg
+	local := c.scope.Contains
+	base := c.scope.Base
+	warn := func(what string, err error) {
+		if err != nil {
+			cfg.Log.Warn("a controller is not wired", "controllers", what, "err", err.Error())
+		}
+	}
+	exposures, err := c.registerExposure(mgr, local)
+	warn("Service, Exposure, ComponentLink", err)
+	_, err = componentctl.Register(mgr, componentctl.Options{Runtime: c.runtime, Scope: local, Changed: exposures, Log: cfg.Log})
+	warn("components", err)
+	warn("MarketIdentity", c.registerIdentity(mgr, local))
+	_, err = marketpresencectl.Register(mgr, marketpresencectl.Options{Heartbeats: presence.New(presence.Config{HTTPClient: c.handlers.Client()}),
+		Bidders: bidders{clients: clients}, Scope: local, Log: cfg.Log})
+	warn("MarketPresence", err)
+	warn("leases", c.registerLeases(ctx, mgr, local, base))
+	warn("status objects", c.registerStatus(mgr, base))
+	warn("host lifecycle", c.registerHost(mgr, clients, base))
+	if cfg.TTLScope != nil {
+		tc, err := ttl.Register(mgr, ttl.Options{Log: cfg.Log, Scope: cfg.TTLScope})
+		warn("TTL", err)
+		if err == nil && cfg.OnTTL != nil {
+			cfg.OnTTL(tc.Report)
+		}
+	}
+}
+
+func (c *Core) registerExposure(mgr *ctlruntime.Manager, scope func(string) bool) ([]func(component.Key), error) {
+	log := c.cfg.Log
+	services, err := servicectl.Register(mgr, servicectl.Options{Handlers: c.handlers, Registry: c.registry, Scope: scope, Log: log})
+	if err != nil {
+		return nil, err
+	}
+	publisher := exposure.NewPublisher(exposure.PublisherConfig{Handlers: c.handlers, Ports: c.ports, TLS: c.tls,
+		Registrar: c.ingressRegistrar, Log: log})
+	exposures, err := exposurectl.Register(mgr, exposurectl.Options{Publisher: publisher, Scope: scope, Log: log})
+	if err != nil {
+		return nil, err
+	}
+	c.closers = append(c.closers, exposures.Close)
+	links, err := componentlink.Register(mgr, componentlink.Options{Policy: c.linkPolicy, Registry: c.registry, Scope: scope, Log: log})
+	if err != nil {
+		return nil, err
+	}
+	return []func(component.Key){services.ComponentChanged, exposures.ComponentChanged, links.ComponentChanged}, nil
+}
+
+func (c *Core) registerIdentity(mgr *ctlruntime.Manager, scope func(string) bool) error {
+	cfg := c.cfg
+	oauth := atproto.OAuthOptions{Directory: identity.DefaultDirectory(), HTTPClient: &http.Client{Timeout: identityHTTPTimeout},
+		States: &oauthclient.MemoryStateStore{}, Scopes: append([]string(nil), cfg.OAuthScopes...), QRScopes: atprotooauth.DIDKeyAssociatorOAuthScope}
+	if key, err := loadOAuthCLIKey(cfg.StateDir); err == nil {
+		oauth.CLIKey = key
+		oauth.QROrigin = cmp.Or(strings.TrimSpace(os.Getenv("SOCIALWEB_QR_ORIGIN")), defaultQROrigin)
+	}
+	var mu sync.Mutex
+	vaults := map[string]atproto.SecretStore{}
+	ctl, err := marketidentity.Register(mgr, marketidentity.Options{Scope: scope, Endpoints: c.pdsEndpoint,
+		Vault: func(workspace string) atproto.SecretStore {
+			mu.Lock()
+			defer mu.Unlock()
+			if store, ok := vaults[workspace]; ok {
+				return store
+			}
+			store, err := newIdentityVaultStore(c.store, workspace, cfg.CredentialClient, cfg.CredentialServer)
+			if err != nil {
+				return nil
+			}
+			vaults[workspace] = store
+			return store
+		},
+		Resolver: &pdsclient.Resolver{Handlers: c.handlers, Timeout: identityResolverTimeout}, OAuth: oauth, Log: cfg.Log})
+	if err != nil {
+		return err
+	}
+	base := c.scope.base()
+	for _, name := range []string{"bidder", "requester"} {
+		oauthcallback.Register(name, func(ctx context.Context, _ http.ResponseWriter, r *http.Request) error {
+			return ctl.CompleteBrowserAuthorization(ctx, base, name, r)
+		})
+	}
+	return nil
+}
+
+func (c *Core) registerLeases(ctx context.Context, mgr *ctlruntime.Manager, scope, base func(string) bool) error {
+	cfg := c.cfg
+	portsFile := filepath.Join(cfg.StateDir, PortsDir, ports.PortsFile)
+	networksFile := filepath.Join(cfg.StateDir, "networks.json")
+	watch := func(paths ...string) <-chan struct{} {
+		ch, err := local.Watch(ctx, paths...)
+		if err != nil {
+			cfg.Log.Warn("the lease controllers do not follow host file changes", "paths", strings.Join(paths, ", "), "err", err.Error())
+			return nil
+		}
+		return ch
+	}
+	if _, err := portlease.Register(mgr, portlease.Options{Ports: c.ports, Changes: watch(portsFile), Scope: scope, Log: cfg.Log}); err != nil {
+		return err
+	}
+	subnets, err := subnetallocator.Open(subnetallocator.Config{LeasePath: networksFile, AppInstance: cfg.InstallAccount})
+	if err != nil {
+		cfg.Log.Warn("the SubnetLease controller is not wired: no subnet allocator", "err", err.Error())
+	} else if _, err := subnetlease.Register(mgr, subnetlease.Options{Subnets: subnets, Changes: watch(networksFile), Scope: scope,
+		Log: cfg.Log}); err != nil {
+		return err
+	}
+	if _, err := cluster.Register(mgr, cluster.Options{Ports: c.ports, Front: apiserverfront.Client{Path: cfg.FrontControl},
+		Changes: watch(cfg.SlotsFile, portsFile), Scope: base}); err != nil {
+		return err
+	}
+	if _, err := clusterroll.Register(mgr, clusterroll.Options{Rolls: local.SlotFile{Path: cfg.SlotsFile}, Changes: watch(cfg.SlotsFile),
+		Scope: base}); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *Core) registerStatus(mgr *ctlruntime.Manager, scope func(string) bool) error {
+	base := c.scope.base()
+	httpClient := c.handlers.HTTPClient()
+	plc := plcidentity.Options{Scope: scope}
+	if url := c.plcBaseURL(); url != "" {
+		directory, err := statusstate.NewHTTPPLCClient(url, httpClient)
+		if err != nil {
+			return err
+		}
+		plc.Directory = directory
+	}
+	vault := openBaoMetadata(c.store, base)
+	_, accountErr := pdsaccount.Register(mgr, pdsaccount.Options{Bus: c.handlers, Scope: scope})
+	_, sessionErr := atprotosession.Register(mgr, atprotosession.Options{Bus: c.handlers, Scope: scope})
+	_, plcErr := plcidentity.Register(mgr, plc)
+	_, relayErr := relaystatus.Register(mgr, relaystatus.Options{Source: statusstate.NewHTTPRelayHealthSource(c.relayEndpoint(base), httpClient),
+		Scope: scope})
+	_, credentialErr := vaultcredential.Register(mgr, vaultcredential.Options{Source: vault, Scope: scope})
+	_, certificateErr := vaultcertificate.Register(mgr, vaultcertificate.Options{Source: vault, Scope: scope})
+	return errors.Join(accountErr, sessionErr, plcErr, relayErr, credentialErr, certificateErr)
+}
+
+func (c *Core) registerHost(mgr *ctlruntime.Manager, clients *workspaceClients, scope func(string) bool) error {
+	cfg := c.cfg
+	authority := cfg.HostAuthority
+	if authority == nil {
+		authority = c.fileAuthority()
+	}
+	_, kcpErr := kcpinstallation.Register(mgr, kcpinstallation.Options{Log: cfg.Log, Authority: authority, Scope: scope})
+	_, installErr := hostinstall.Register(mgr, hostinstall.Options{Log: cfg.Log, Authority: authority, Scope: scope})
+	_, releaseErr := hostrelease.Register(mgr, hostrelease.Options{Log: cfg.Log, Authority: authority, Scope: scope})
+	_, childErr := childapplication.Register(mgr, childapplication.Options{Log: cfg.Log, Workspaces: workspaceTree{clients: clients},
+		Objects: clients, Scope: scope})
+	if err := errors.Join(kcpErr, installErr, releaseErr, childErr); err != nil {
+		return err
+	}
+	if cfg.Postgres != nil {
+		if _, err := postgres.Register(mgr, postgres.Options{Log: cfg.Log, Host: cfg.Postgres, Scope: scope}); err != nil {
+			return err
+		}
+	}
+	if cfg.OpenBao != nil {
+		servers, err := openbaoserver.Register(mgr, openbaoserver.Options{Servers: cfg.OpenBao, Grants: guestGrants{clients: clients}, Scope: scope,
+			Log: cfg.Log})
+		if err != nil {
+			return err
+		}
+		if _, err := guestidentitygrant.Register(mgr, guestidentitygrant.Options{Outcomes: servers, Events: servers.GrantEvents(), Scope: scope,
+			Log: cfg.Log}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *Core) fileAuthority() *hostlifecycle.FileAuthority {
+	cfg := c.cfg
+	return hostlifecycle.NewFileAuthority(hostlifecycle.FileAuthorityOptions{
+		StateDir:     cfg.StateDir,
+		Account:      cfg.InstallAccount,
+		FrontControl: cfg.FrontControl,
+		Record: func(account string) (hostlifecycle.InstallRecord, error) {
+			rec, err := install.ReadRecord(cfg.InstallStateRoot, account)
+			if err != nil {
+				return hostlifecycle.InstallRecord{}, err
+			}
+			return hostlifecycle.InstallRecord{StateDir: rec.StateDir, Steps: rec.Steps}, nil
+		},
+		ActiveSlot: func(context.Context) (string, error) {
+			slots, err := kcpserver.ReadSlots(cfg.SlotsFile)
+			if err != nil {
+				return "", err
+			}
+			return slots.Active, nil
+		},
+		CoreVersion: func(ctx context.Context, stateDir, link string) (string, error) {
+			asset, err := kcpserver.ReadAsset(ctx, filepath.Join(stateDir, "bin", link, install.CoreName))
+			if err != nil {
+				return "", err
+			}
+			return cmp.Or(asset.Version, asset.SHA256), nil
+		},
+	})
+}
+
+func (c *Core) registerNetwork(mgr *ctlruntime.Manager, clients *workspaceClients, g *supervise.Group) error {
+	cfg := c.cfg
+	log := cfg.Log
+	caBundle := func(ref string) ([]byte, error) { return os.ReadFile(openbaoctl.FileRef(ref)) }
 	if err := repos.Register(mgr, c.repoOptions(caBundle)); err != nil {
-		log.Warn("the repo controllers are not wired", "err", err.Error())
-		return
+		return fmt.Errorf("componentcore: the repo controllers: %w", err)
 	}
 	if err := policyctl.Register(mgr, policyctl.Options{Bus: c.handlers, PLCURL: cfg.PLCBaseURL, Log: log, Disabled: cfg.DisablePolicy,
 		Actions: func(workspace string) (map[string]policycontroller.ActionHandler, error) {
 			return policyActionHandlers(c.store, workspace)
 		}}); err != nil {
-		log.Warn("the policy controllers are not wired", "err", err.Error())
+		return fmt.Errorf("componentcore: the policy controllers: %w", err)
 	}
 	if _, err := vaultctl.Register(mgr, c.handlers, vaultctl.Options{Log: log}); err != nil {
-		log.Warn("the vault controller is not wired", "err", err.Error())
+		return fmt.Errorf("componentcore: the vault controller: %w", err)
 	}
-	if run, err := eventsctl.Register(mgr, eventsctl.Options{Bus: c.handlers, Workspaces: cfg.Workspaces, Dynamic: eventstream.DynamicFactory(cfg.DynamicFactory),
-		Resolver: &pdsclient.Resolver{Handlers: c.handlers, Timeout: pdsClientTimeout}, PLCURL: c.plcBaseURL(), StateDir: cfg.StateDir, Log: log}); err != nil {
-		log.Warn("the event controllers are not wired", "err", err.Error())
-	} else {
-		c.runners = append(c.runners, controllerRunner{name: "events", run: run})
+	if _, err := remoteopenbaoctl.Register(mgr, remoteopenbaoctl.Options{Remote: &openbao.Remote{Enabled: true}, Log: log}); err != nil {
+		return fmt.Errorf("componentcore: the RemoteOpenBao controller: %w", err)
 	}
-	c.runners = append(c.runners, controllerRunner{name: "controller-manager", run: mgr.Start})
+	run, err := eventsctl.Register(mgr, eventsctl.Options{Bus: c.handlers, Dynamic: eventstream.DynamicFactory(cfg.DynamicFactory),
+		Resolver: &pdsclient.Resolver{Handlers: c.handlers, Timeout: pdsClientTimeout}, PLCURL: c.plcBaseURL(), StateDir: cfg.StateDir,
+		RecordWatchChildren: recordWatchChildren{clients: clients}, RecordWatchRepos: recordWatchRepos{clients: clients},
+		RecordWatchValues: recordWatchValues(clients), Log: log})
+	if err != nil {
+		return fmt.Errorf("componentcore: the event controllers: %w", err)
+	}
+	g.Go("events", run)
+	return nil
 }
 
 func (c *Core) plcBaseURL() string {
@@ -407,54 +374,6 @@ func (c *Core) managerRestConfig() (*rest.Config, error) {
 		return nil, errors.New("componentcore: the kcp client has no rest config")
 	}
 	return restCfg, nil
-}
-
-func (c *Core) mirrorLeases(ctx context.Context, ctl *leasecontroller.Controller) error {
-	if ctl == nil {
-		return errors.New("componentcore: the lease controller mirror has no controller")
-	}
-	log := c.cfg.Log.With("component", "lease-mirror")
-	for ctx.Err() == nil {
-		for _, workspace := range c.workspaceList(ctx) {
-			workspace = strings.TrimSpace(workspace)
-			if workspace == "" {
-				continue
-			}
-			if err := ctl.Mirror(ctx, workspace); err != nil && ctx.Err() == nil {
-				log.Warn("mirroring the allocator leases", "workspace", workspace, "err", err.Error())
-			}
-		}
-		if !clock.Sleep(ctx, controllerResync) {
-			return nil
-		}
-	}
-	return nil
-}
-
-func (c *Core) startControllers(ctx context.Context) func() {
-	if c.controllers == nil && len(c.runners) == 0 {
-		return func() {}
-	}
-	runCtx, cancel := context.WithCancel(ctx)
-	var workers sync.WaitGroup
-	if c.controllers != nil {
-		workers.Go(func() {
-			if err := c.controllers.Run(runCtx); err != nil && runCtx.Err() == nil {
-				c.cfg.Log.Warn("the core controllers stopped", "err", err.Error())
-			}
-		})
-	}
-	for _, runner := range c.runners {
-		workers.Go(func() {
-			if err := runner.run(runCtx); err != nil && runCtx.Err() == nil {
-				c.cfg.Log.Warn("a core controller stopped", "controller", runner.name, "err", err.Error())
-			}
-		})
-	}
-	return func() {
-		cancel()
-		workers.Wait()
-	}
 }
 
 func (c *Core) relayEndpoint(base string) statusstate.RelayEndpointFunc {

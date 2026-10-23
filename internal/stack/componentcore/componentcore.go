@@ -7,36 +7,30 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 
-	"github.com/bluesky-social/indigo/atproto/identity"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	atprotooauth "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauthclient"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component/kcpclients"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/credentials"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/exposure"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostlifecycle"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/identitycontroller"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/tlsreload"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/oauthcallback"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyaction"
 	policycontroller "github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/controller"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/postgresctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/bidder"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/dispatchertls"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/gatewayapi"
@@ -113,6 +107,14 @@ type Config struct {
 	OAuthScopes []string
 
 	Compute *computevm.Config
+
+	Postgres *postgresctl.Host
+
+	OpenBao *openbaoctl.Servers
+
+	TTLScope func(workspace string) bool
+
+	OnTTL func(report func() *v1alpha1.TTLStatus)
 }
 
 type Core struct {
@@ -126,7 +128,7 @@ type Core struct {
 
 	runtime *component.Runtime
 
-	controller *component.Controller
+	scope *workspaceScope
 
 	registry *component.Registry
 
@@ -140,11 +142,7 @@ type Core struct {
 
 	ingressRegistrar exposure.IngressRegistrar
 
-	controllers *controllerRuntime
-
-	runners []controllerRunner
-
-	wg sync.WaitGroup
+	closers []func()
 }
 
 func AppWorkspaces(base string) []string {
@@ -248,17 +246,10 @@ func New(cfg Config) (*Core, error) {
 	runtime.SetStateDirMaker(func(dir string) error { return os.MkdirAll(dir, 0o700) })
 	core := &Core{cfg: cfg, credentials: resolver, tls: tlsConfig, hosts: registryHosts{registry: registry}, runtime: runtime,
 		registry: registry, ports: ports, store: store, handlers: handlers, linkPolicy: exposure.NewLinkPolicy(handlers),
-		ingressRegistrar: dispatcher}
+		ingressRegistrar: dispatcher, scope: newWorkspaceScope(cfg.Workspaces, cfg.WorkspacesFunc)}
 	if err := core.register(); err != nil {
 		return nil, err
 	}
-	ctl, err := component.NewController(component.ControllerConfig{Runtime: runtime, Source: newSource(cfg, factory),
-		Status: &statusWriter{dynamic: factory, log: cfg.Log}, Log: cfg.Log, Workers: 4})
-	if err != nil {
-		return nil, err
-	}
-	core.controller = ctl
-	core.buildControllers()
 	return core, nil
 }
 
@@ -322,14 +313,16 @@ func policyActionHandlers(store *kcpstore.Store, workspace string) (map[string]p
 }
 
 func (c *Core) Run(ctx context.Context) error {
-	runCtx, cancel := context.WithCancel(ctx)
-	defer c.wg.Wait()
+	if err := c.runtime.Start(ctx); err != nil {
+		return err
+	}
+	err := c.runControllers(ctx)
+	for _, closer := range c.closers {
+		closer()
+	}
+	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), component.DefaultStopTimeout)
 	defer cancel()
-	c.wg.Go(func() { c.runExposure(runCtx) })
-	c.runIdentity(runCtx)
-	stopControllers := c.startControllers(runCtx)
-	defer stopControllers()
-	return c.controller.Run(runCtx)
+	return errors.Join(err, c.runtime.Stop(stopCtx))
 }
 
 func (c *Core) Registry() *component.Registry {
@@ -342,54 +335,6 @@ func (c *Core) Ports() *component.PortRegistry {
 
 func (c *Core) Runtime() *component.Runtime {
 	return c.runtime
-}
-
-func (c *Core) Controller() *component.Controller {
-	return c.controller
-}
-
-func (c *Core) runIdentity(ctx context.Context) {
-	log := c.cfg.Log.With("component", "identity-controller")
-	seen := map[string]bool{}
-	for _, workspace := range c.cfg.Workspaces {
-		if workspace == "" || seen[workspace] {
-			continue
-		}
-		seen[workspace] = true
-		workspace := workspace
-		var vault identitycontroller.SecretStore
-		if store, err := newIdentityVaultStore(c.store, workspace, c.cfg.CredentialClient, c.cfg.CredentialServer); err == nil {
-			vault = store
-		}
-		oauth := identitycontroller.OAuthOptions{Directory: identity.DefaultDirectory(), HTTPClient: &http.Client{Timeout: 20 * time.Second},
-			States: &oauthclient.MemoryStateStore{}, Scopes: append([]string(nil), c.cfg.OAuthScopes...),
-			QRScopes: atprotooauth.DIDKeyAssociatorOAuthScope}
-		if key, err := loadOAuthCLIKey(c.cfg.StateDir); err == nil {
-			oauth.CLIKey = key
-			oauth.QROrigin = strings.TrimSpace(os.Getenv("SOCIALWEB_QR_ORIGIN"))
-			oauth.QROrigin = cmp.Or(oauth.QROrigin, "https://qr.fedfork.com")
-		}
-		ctl, err := identitycontroller.New(identitycontroller.Options{Workspace: workspace, Dynamic: identitycontroller.DynamicFactory(c.cfg.DynamicFactory),
-			Endpoints: c.pdsEndpoint, Resolver: &pdsclient.Resolver{Handlers: c.handlers, Timeout: 10 * time.Second},
-			Vault: vault, OAuth: oauth, Log: log.With("workspace", workspace)})
-		if err != nil {
-			log.Warn("the MarketIdentity controller does not start", "workspace", workspace, "err", err.Error())
-			continue
-		}
-		if len(c.cfg.Workspaces) > 0 && workspace == strings.TrimSpace(c.cfg.Workspaces[0]) {
-			for _, name := range []string{"bidder", "requester"} {
-				oauthcallback.Register(name, func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-					return ctl.CompleteBrowserAuthorization(ctx, name, r)
-				})
-			}
-		}
-		c.wg.Go(func() {
-			log.Info("the MarketIdentity controller writes its status in process", "workspace", workspace)
-			if err := ctl.Run(ctx); err != nil && ctx.Err() == nil {
-				log.Warn("the MarketIdentity controller stopped", "workspace", workspace, "err", err.Error())
-			}
-		})
-	}
 }
 
 func (c *Core) pdsEndpoint(workspace, kind, name string) (string, bool) {
@@ -410,10 +355,6 @@ func (c *Core) pdsEndpoint(workspace, kind, name string) (string, bool) {
 		return "http://" + endpoint.Address, true
 	}
 	return "", false
-}
-
-func (c *Core) dynamic(workspace string) (dynamic.Interface, error) {
-	return c.cfg.DynamicFactory(workspace)
 }
 
 func DynamicFromKCP(kcp component.KCPClients) (DynamicFactory, error) {

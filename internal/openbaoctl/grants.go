@@ -12,16 +12,11 @@ import (
 	"strings"
 	"time"
 
-	"k8s.io/apimachinery/pkg/api/equality"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/watch"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/baosync"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 )
 
 const (
@@ -182,56 +177,8 @@ func identityOIDC(d baosync.Desired, id *v1alpha1.OpenBaoIdentityOIDC, grants []
 	return d, byGrant, refused
 }
 
-func (c *Controller) listGrants(ctx context.Context) ([]v1alpha1.GuestIdentityGrant, error) {
-	list, err := c.grants.List(ctx, metav1.ListOptions{})
-	if apierrors.IsNotFound(err) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	out := make([]v1alpha1.GuestIdentityGrant, 0, len(list.Items))
-	for i := range list.Items {
-		var g v1alpha1.GuestIdentityGrant
-		if err := unstruct.Into(&list.Items[i], &g); err != nil {
-			c.c.log().Warn("decoding a GuestIdentityGrant", "name", list.Items[i].GetName(), "err", err.Error())
-			continue
-		}
-		out = append(out, g)
-	}
-	return out, nil
-}
-
-func (c *Controller) writeGrantStatus(ctx context.Context, g v1alpha1.GuestIdentityGrant, st v1alpha1.GuestIdentityGrantStatus) {
-	cur, err := c.grants.Get(ctx, g.Name, metav1.GetOptions{})
-	if err != nil {
-		return
-	}
-	var held v1alpha1.GuestIdentityGrant
-	if unstruct.Into(cur, &held) == nil {
-		if st.Applied && held.Status.Applied && held.Status.Role == st.Role && held.Status.ObservedGeneration == st.ObservedGeneration {
-			st.AppliedAt = held.Status.AppliedAt
-		}
-		keepConditionTimes(st.Conditions, held.Status.Conditions)
-		if equality.Semantic.DeepEqual(held.Status, st) {
-			return
-		}
-	}
-	if st.Applied && st.AppliedAt == "" {
-		st.AppliedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	}
-	g.Status = st
-	u, err := unstruct.To(&g, "GuestIdentityGrant")
-	if err != nil {
-		return
-	}
-	u.SetResourceVersion(cur.GetResourceVersion())
-	if _, err := c.grants.UpdateStatus(ctx, u, metav1.UpdateOptions{}); err != nil && !apierrors.IsConflict(err) {
-		c.c.log().Warn("writing a GuestIdentityGrant status", "name", g.Name, "err", err.Error())
-	}
-}
-
-func (c *Controller) recordGrants(ctx context.Context, roles map[string]grantRole, refused map[string]string, grants []v1alpha1.GuestIdentityGrant, synced bool, syncErr string) {
+func grantOutcomes(roles map[string]grantRole, refused map[string]string, grants []v1alpha1.GuestIdentityGrant, synced bool, syncErr string) map[string]v1alpha1.GuestIdentityGrantStatus {
+	out := map[string]v1alpha1.GuestIdentityGrantStatus{}
 	for _, g := range grants {
 		if g.DeletionTimestamp != nil {
 			continue
@@ -260,7 +207,7 @@ func (c *Controller) recordGrants(ctx context.Context, roles map[string]grantRol
 			conds.Set(&st.Conditions, gen, v1alpha1.GuestIdentityGrantConditionDrifted, false, "NotObserved",
 				"the grant is not applied, so the live OpenBao state was not compared")
 
-			c.writeGrantStatus(ctx, g, st)
+			out[g.Name] = st
 			continue
 		}
 		r, ok := roles[g.Name]
@@ -303,43 +250,20 @@ func (c *Controller) recordGrants(ctx context.Context, roles map[string]grantRol
 
 			}
 		}
-		c.writeGrantStatus(ctx, g, st)
+		out[g.Name] = st
 	}
+	return out
 }
 
-func (c *Controller) watchGrants(ctx context.Context, kick chan<- struct{}) {
-	for ctx.Err() == nil {
-		opened := time.Now()
-		w, err := c.grants.Watch(ctx, metav1.ListOptions{})
-		if err == nil {
-			seen := map[string]int64{}
-			for ev := range w.ResultChan() {
-				o, ok := ev.Object.(*unstructured.Unstructured)
-				if !ok {
-					continue
-				}
-				changed := ev.Type == watch.Deleted || seen[o.GetName()] != o.GetGeneration()
-				seen[o.GetName()] = o.GetGeneration()
-				if ev.Type == watch.Deleted {
-					delete(seen, o.GetName())
-				}
-				if changed {
-					select {
-					case kick <- struct{}{}:
-					default:
-					}
-				}
-			}
-			w.Stop()
-		}
-		if time.Since(opened) < RetryAfter {
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(RetryAfter):
-			}
-		}
+func MergeGrantStatus(held, next v1alpha1.GuestIdentityGrantStatus, now time.Time) v1alpha1.GuestIdentityGrantStatus {
+	if next.Applied && held.Applied && held.Role == next.Role && held.ObservedGeneration == next.ObservedGeneration {
+		next.AppliedAt = held.AppliedAt
 	}
+	if next.Applied && next.AppliedAt == "" {
+		next.AppliedAt = now.UTC().Format(time.RFC3339Nano)
+	}
+	keepConditionTimes(next.Conditions, held.Conditions)
+	return next
 }
 
 func desiredWithIdentity(ctx context.Context, in layoutInput, ca caSource) (baosync.Desired, []string, map[string]grantRole, map[string]string, error) {

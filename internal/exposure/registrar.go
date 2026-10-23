@@ -26,9 +26,19 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
 )
 
-const relayMaxBody = 8 << 20
+const (
+	relayMaxBody = 8 << 20
 
-var ErrStableHostMismatch = errors.New("StableHostMismatch")
+	DefaultIngressName = "dispatcher"
+)
+
+var (
+	ErrStableHostMismatch = errors.New("StableHostMismatch")
+
+	ErrIngressNotReady = errors.New("the IngressProxy component is not ready")
+)
+
+var _ IngressRegistrar = (*SubscriberRegistrar)(nil)
 
 func ExposureCaller(workspace, name string) commonv1.ObjectRef {
 	return commonv1.ObjectRef{Group: exposurev1alpha1.GroupVersion.Group, Kind: "Exposure", Name: name, Workspace: workspace}
@@ -202,7 +212,7 @@ func (r *SubscriberRegistrar) proxyHost(spec IngressSpec) (string, bool, error) 
 			}
 		}
 	}
-	return "", false, fmt.Errorf("the IngressProxy component %s is not ready", name)
+	return "", false, fmt.Errorf("%w: %s", ErrIngressNotReady, name)
 }
 
 func ingressSecure(address string) bool {
@@ -247,7 +257,7 @@ func (r *SubscriberRegistrar) handler(target component.Key, name string) func(co
 		}
 		handler, ok := registry.Handler(target, name)
 		if !ok {
-			return nil, fmt.Errorf("no HTTP handler %q is registered for %s/%s", handlerName(name), target.Kind, target.Name)
+			return nil, fmt.Errorf("no HTTP handler %q is registered for %s/%s", HandlerName(name), target.Kind, target.Name)
 		}
 		path := request.Path
 		path = cmp.Or(path, "/")

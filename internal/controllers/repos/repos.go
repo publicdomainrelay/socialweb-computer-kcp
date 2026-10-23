@@ -41,6 +41,8 @@ type Options struct {
 	Vault remoterepo.VaultStore
 
 	HTTP *http.Client
+
+	Scope func(workspace string) bool
 }
 
 func Register(m *ctlruntime.Manager, opts Options) error {
@@ -57,8 +59,8 @@ func Register(m *ctlruntime.Manager, opts Options) error {
 	_, pdsErr := remotepds.Register(m, remotepds.Options{Log: opts.Log, Bus: opts.Bus, CABundle: opts.CABundle, Secrets: opts.SecretStrings,
 		SecretRefs: refs})
 	_, repoErr := atprotorepoctl.Register(m, atprotorepoctl.Options{Bus: opts.Bus, Log: opts.Log})
-	_, localErr := localrepo.Register(m, localrepo.Options{Bus: opts.Bus, Network: opts.Network, Log: opts.Log})
+	_, localErr := localrepo.Register(m, localrepo.Options{Bus: opts.Bus, Network: opts.Network, Pds: opts.Pds, Scope: opts.Scope, Log: opts.Log})
 	_, remoteErr := remoterepo.Register(m, remoterepo.Options{Bus: opts.Bus, Network: opts.Network, Log: opts.Log})
-	_, recordErr := atprotorecord.Register(m, atprotorecord.Options{Bus: opts.Bus, Dynamic: opts.Dynamic, Log: opts.Log})
+	_, recordErr := atprotorecord.Register(m, atprotorecord.Options{Bus: opts.Bus, Dynamic: opts.Dynamic, Scope: opts.Scope, Log: opts.Log})
 	return errors.Join(pdsErr, repoErr, localErr, remoteErr, recordErr)
 }

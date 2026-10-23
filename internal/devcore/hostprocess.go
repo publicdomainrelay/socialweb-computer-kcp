@@ -69,19 +69,17 @@ func HostProcessConfig(bcfg bootstrap.Config, rec devinstance.Record, m hostsvc.
 		ApplyTimeout: HostProcessApplyTimeout, Selector: "!" + computevm.LabelComputeVM, Log: log}
 }
 
-func PostgresConfig(bcfg bootstrap.Config, rec devinstance.Record, log *slog.Logger) postgresctl.Config {
+func PostgresConfig(bcfg bootstrap.Config, rec devinstance.Record) postgresctl.Config {
 	l := bcfg.Layout
-	ws := rec.BaseWorkspace
-	ws = cmp.Or(ws, hostprocess.DefaultWorkspace)
 	root := rec.Executables["postgres"].Path
-	return postgresctl.Config{Kubeconfig: rec.AdminKubeconfig, Workspace: ws, Prefix: l.Names().HostProcessPrefix(),
+	return postgresctl.Config{Prefix: l.Names().HostProcessPrefix(),
 		Install: func() (pgunit.Install, error) {
 			if root == "" {
 				return pgunit.Install{}, fmt.Errorf("devcore: dev up was given no postgres-root")
 			}
 			return pgunit.FromRoot(root)
 		},
-		DataRoot: filepath.Join(l.StateDir, "postgres"), SocketRoot: l.RuntimeDir, LogDir: l.Logs, Log: log}
+		DataRoot: filepath.Join(l.StateDir, "postgres"), SocketRoot: l.RuntimeDir, LogDir: l.Logs}
 }
 
 func AppConfig(bcfg bootstrap.Config, rec devinstance.Record, m hostsvc.Manager, log *slog.Logger) appctl.Config {
@@ -96,7 +94,7 @@ func AppConfig(bcfg bootstrap.Config, rec devinstance.Record, m hostsvc.Manager,
 
 func OpenBaoServerConfig(bcfg bootstrap.Config, rec devinstance.Record, log *slog.Logger) openbaoctl.Config {
 	hp := HostProcessConfig(bcfg, rec, nil, log)
-	return openbaoctl.Config{Kubeconfig: hp.Kubeconfig, Workspace: hp.Workspace, StateDir: bcfg.Layout.StateDir, Prefix: hp.Prefix,
+	return openbaoctl.Config{StateDir: bcfg.Layout.StateDir, Prefix: hp.Prefix,
 		Env: openbaoctl.OutboundEnv(os.Getenv), Resolve: hp.Resolve, Log: log}
 }
 
