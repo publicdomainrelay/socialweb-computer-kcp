@@ -13,15 +13,40 @@ import (
 	"strings"
 	"time"
 
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/client-go/dynamic"
-
-	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 )
 
-const maxCertificateScan = 256
+const (
+	DefaultRotationWindow = 30 * 24 * time.Hour
+
+	maxCertificateScan = 256
+)
+
+type VaultCredentialObservation struct {
+	Exists bool
+
+	ExpiresAt string
+
+	RotationDue bool
+}
+
+type VaultCertificateObservation struct {
+	Exists bool
+
+	SerialNumber string
+
+	Fingerprint string
+
+	ExpiresAt string
+
+	RotationDue bool
+}
+
+type VaultSource interface {
+	CredentialMetadata(ctx context.Context, server, mount, path string) (VaultCredentialObservation, error)
+
+	CertificateMetadata(ctx context.Context, server, mount, role, commonName string) (VaultCertificateObservation, error)
+}
 
 type MetadataReader interface {
 	Read(ctx context.Context, path string) (map[string]any, error)
@@ -35,78 +60,7 @@ type OpenBaoMetadataSource struct {
 	RotationWindow time.Duration
 }
 
-func (c *Controller) reconcileVaultCredential(ctx context.Context, dyn dynamic.Interface, u *unstructured.Unstructured) {
-	var obj v1alpha1.VaultCredential
-	if err := unstruct.Into(u, &obj); err != nil {
-		c.log.Warn("decoding a VaultCredential", "workspace", c.workspace, "name", u.GetName(), "err", err.Error())
-		return
-	}
-	generation := u.GetGeneration()
-	status := obj.Status
-	status.ObservedGeneration = generation
-	server := v1alpha1.VaultServer(obj.Spec.Vault, "")
-	mount := strings.TrimSpace(obj.Spec.Mount)
-	path := strings.TrimSpace(obj.Spec.Path)
-	if server == "" || mount == "" || path == "" {
-		setReady(&status.Conditions, generation, false, ReasonWaiting, "the VaultCredential needs a server, a mount and a path")
-		c.write(ctx, dyn, VaultCredentialGVR, u, &status)
-		return
-	}
-	if c.vault == nil {
-		setReady(&status.Conditions, generation, false, ReasonSourceUnavailable, "no vault source is configured")
-		c.write(ctx, dyn, VaultCredentialGVR, u, &status)
-		return
-	}
-	observation, err := c.vault.CredentialMetadata(ctx, server, mount, path)
-	if err != nil {
-		setReady(&status.Conditions, generation, false, ReasonSourceError, "reading the credential metadata: "+err.Error())
-		c.write(ctx, dyn, VaultCredentialGVR, u, &status)
-		return
-	}
-	status.Exists = observation.Exists
-	status.ExpiresAt = observation.ExpiresAt
-	status.RotationDue = observation.RotationDue
-	setReady(&status.Conditions, generation, true, ReasonReady, "the credential metadata is observed without the secret values")
-	c.write(ctx, dyn, VaultCredentialGVR, u, &status)
-}
-
-func (c *Controller) reconcileVaultCertificate(ctx context.Context, dyn dynamic.Interface, u *unstructured.Unstructured) {
-	var obj v1alpha1.VaultCertificate
-	if err := unstruct.Into(u, &obj); err != nil {
-		c.log.Warn("decoding a VaultCertificate", "workspace", c.workspace, "name", u.GetName(), "err", err.Error())
-		return
-	}
-	generation := u.GetGeneration()
-	status := obj.Status
-	status.ObservedGeneration = generation
-	server := v1alpha1.VaultServer(&obj.Spec.Vault, "")
-	mount := strings.TrimSpace(obj.Spec.Mount)
-	role := strings.TrimSpace(obj.Spec.Role)
-	commonName := strings.TrimSpace(obj.Spec.CommonName)
-	if server == "" || mount == "" || role == "" || commonName == "" {
-		setReady(&status.Conditions, generation, false, ReasonWaiting, "the VaultCertificate needs a server, a mount, a role and a commonName")
-		c.write(ctx, dyn, VaultCertificateGVR, u, &status)
-		return
-	}
-	if c.vault == nil {
-		setReady(&status.Conditions, generation, false, ReasonSourceUnavailable, "no vault source is configured")
-		c.write(ctx, dyn, VaultCertificateGVR, u, &status)
-		return
-	}
-	observation, err := c.vault.CertificateMetadata(ctx, server, mount, role, commonName)
-	if err != nil {
-		setReady(&status.Conditions, generation, false, ReasonSourceError, "reading the certificate metadata: "+err.Error())
-		c.write(ctx, dyn, VaultCertificateGVR, u, &status)
-		return
-	}
-	status.Exists = observation.Exists
-	status.SerialNumber = observation.SerialNumber
-	status.Fingerprint = observation.Fingerprint
-	status.ExpiresAt = observation.ExpiresAt
-	status.RotationDue = observation.RotationDue
-	setReady(&status.Conditions, generation, true, ReasonReady, "the certificate metadata is observed without private keys")
-	c.write(ctx, dyn, VaultCertificateGVR, u, &status)
-}
+var _ VaultSource = (*OpenBaoMetadataSource)(nil)
 
 func (s *OpenBaoMetadataSource) CredentialMetadata(ctx context.Context, server, mount, path string) (VaultCredentialObservation, error) {
 	reader, err := s.reader(ctx, server)
