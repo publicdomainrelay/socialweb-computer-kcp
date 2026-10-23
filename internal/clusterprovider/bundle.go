@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/identitybundle"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 )
 
 const bundleDirName = "identity-bundle"
@@ -69,8 +70,8 @@ func SeedBundle(stateDir, cluster string) error {
 	return nil
 }
 
-func SeedBundleForWake(ctx context.Context, stateDir, cluster string) error {
-	if err := SeedBundleFromVault(ctx, stateDir, cluster); err == nil {
+func SeedBundleForWake(ctx context.Context, logins *openbao.Logins, stateDir, cluster string) error {
+	if err := SeedBundleFromVault(ctx, logins, stateDir, cluster); err == nil {
 		return nil
 	} else if !errors.Is(err, ErrNoVaultBundle) {
 		return err

@@ -2,6 +2,7 @@ package openbaoctl
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -25,7 +26,10 @@ func ClientRefs(st v1alpha1.OpenBaoServerStatus, name string) (v1alpha1.OpenBaoS
 	return v1alpha1.OpenBaoServerClientRefs{}, fmt.Errorf("the OpenBaoServer reports no client %s yet", name)
 }
 
-func ClientLogin(ctx context.Context, st v1alpha1.OpenBaoServerStatus, name string) (*openbao.Client, v1alpha1.OpenBaoServerClientRefs, error) {
+func ClientLogin(ctx context.Context, logins *openbao.Logins, st v1alpha1.OpenBaoServerStatus, name string) (*openbao.Client, v1alpha1.OpenBaoServerClientRefs, error) {
+	if logins == nil {
+		return nil, v1alpha1.OpenBaoServerClientRefs{}, errors.New("openbaoctl: no OpenBao logins are configured")
+	}
 	c, err := ClientRefs(st, name)
 	if err != nil {
 		return nil, c, err
@@ -34,7 +38,7 @@ func ClientLogin(ctx context.Context, st v1alpha1.OpenBaoServerStatus, name stri
 	if err != nil {
 		return nil, c, err
 	}
-	logged, err := openbao.Login(ctx, srv)
+	logged, _, err := logins.Open(ctx, srv)
 	if err != nil {
 		return nil, c, err
 	}

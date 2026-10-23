@@ -16,6 +16,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/tenantnet"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 )
 
 const tenantAddOnTimeout = 60 * time.Second
@@ -24,7 +25,7 @@ func externalSecretsFor(cfg Config) *clusterprovider.ExternalSecrets {
 	return clusterkcp.ExternalSecrets(cfg.ExternalSecrets, cfg.ESOBundle, cfg.ESONamespace)
 }
 
-func tenantAddOns(cfg Config, log *slog.Logger) func(context.Context, string, *clusterprovider.Credential) error {
+func tenantAddOns(cfg Config, logins *openbao.Logins, log *slog.Logger) func(context.Context, string, *clusterprovider.Credential) error {
 	return func(ctx context.Context, cluster string, cred *clusterprovider.Credential) error {
 		restCfg := clusterkcp.RestConfig(cred)
 		dataDir, err := clusterprovider.ClusterDataDir(cfg.StateDir, cluster)
@@ -49,7 +50,7 @@ func tenantAddOns(cfg Config, log *slog.Logger) func(context.Context, string, *c
 			"item", "plan 0005 M5-DNS, M5-MESHD")
 		bounded, cancel := context.WithTimeout(ctx, tenantAddOnTimeout)
 		defer cancel()
-		client, access, err := clusterprovider.ClusterVaultClient(bounded, dataDir)
+		client, access, err := clusterprovider.ClusterVaultClient(bounded, logins, dataDir)
 		if err != nil {
 			return fmt.Errorf("clusterprovider: logging in to the cluster vault for the tenant add-ons of %s: %w", cluster, err)
 		}

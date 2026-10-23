@@ -68,7 +68,6 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/lease/local"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/marketidentity/atproto"
 	presence "github.com/johnandersen777/socialweb-computer-kcp/internal/marketpresence"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/oauthcallback"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
 	policycontroller "github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/controller"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/statusstate"
@@ -111,6 +110,7 @@ func (c *Core) runControllers(ctx context.Context) error {
 	}
 	if cfg.Compute != nil {
 		compute := *cfg.Compute
+		compute.Logins = c.logins
 		g.Go("computevm", func(ctx context.Context) error { return computevmctl.Run(ctx, compute) })
 	}
 	g.Go("controller-manager", mgr.Start)
@@ -206,7 +206,7 @@ func (c *Core) registerIdentity(mgr *ctlruntime.Manager, scope func(string) bool
 	}
 	base := c.scope.base()
 	for _, name := range []string{"bidder", "requester"} {
-		oauthcallback.Register(name, func(ctx context.Context, _ http.ResponseWriter, r *http.Request) error {
+		c.oauthCallbacks.Register(name, func(ctx context.Context, _ http.ResponseWriter, r *http.Request) error {
 			return ctl.CompleteBrowserAuthorization(ctx, base, name, r)
 		})
 	}

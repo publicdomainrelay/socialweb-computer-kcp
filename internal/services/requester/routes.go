@@ -13,7 +13,6 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/participant"
 	role "github.com/johnandersen777/socialweb-computer-kcp/internal/market/requester"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/oauthcallback"
 )
 
 const healthPath = "/xrpc/_health"
@@ -190,7 +189,7 @@ func (s *Service) oauthClientMetadata(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) oauthCallback(w http.ResponseWriter, r *http.Request) {
-	handler, ok := oauthcallback.Lookup(r.PathValue("identity"))
+	handler, ok := s.deps.OAuthCallbacks.Lookup(r.PathValue("identity"))
 	if !ok {
 		http.Error(w, "unknown identity", http.StatusNotFound)
 		return

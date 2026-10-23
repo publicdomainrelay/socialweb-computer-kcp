@@ -27,6 +27,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/plcsweep"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/sweepkcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/tenantapply"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/xrpcserver"
 )
 
@@ -85,7 +86,7 @@ func buildDeps(cfg Config) (Deps, error) {
 		return Deps{}, err
 	}
 
-	certs := &clientcert.Issuer{StateDir: cfg.ClusterStateDir, CAFile: cfg.KCPPublicCAFile, Log: slog.Default()}
+	certs := &clientcert.Issuer{StateDir: cfg.ClusterStateDir, CAFile: cfg.KCPPublicCAFile, Logins: openbao.NewLogins(nil), Log: slog.Default()}
 
 	client, err := kcpclient.New(kcpclient.Options{
 		Host:           cfg.KCPHost,

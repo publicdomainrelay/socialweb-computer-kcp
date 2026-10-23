@@ -56,7 +56,7 @@ func (v *NodeVault) EnsurePolicy(ctx context.Context, node string) error {
 }
 
 func (v *NodeVault) WriteSecret(ctx context.Context, node string, secret nodemarket.NodeSecret) error {
-	client, _, err := clusterVault(ctx, v.dataDir)
+	client, _, err := clusterVault(ctx, v.units.c.Logins, v.dataDir)
 	if err != nil {
 		return err
 	}

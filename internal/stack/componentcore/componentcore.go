@@ -29,6 +29,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/tlsreload"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/oauthcallback"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyaction"
 	policycontroller "github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/controller"
@@ -44,6 +45,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/requester"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/sshserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsfront"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 )
 
 const (
@@ -147,6 +149,10 @@ type Core struct {
 	ingressRegistrar exposure.IngressRegistrar
 
 	nodeClaims *nodeclaimctl.Controller
+
+	logins *openbao.Logins
+
+	oauthCallbacks *oauthcallback.Registry
 
 	closers []func()
 }
@@ -259,6 +265,7 @@ func New(ctx context.Context, cfg Config) (*Core, error) {
 	runtime := component.NewRuntime(component.RuntimeConfig{Log: cfg.Log, StateDir: cfg.StateDir, Registry: registry, Bus: handlers}, nil)
 	runtime.SetStateDirMaker(func(dir string) error { return os.MkdirAll(dir, 0o700) })
 	core := &Core{cfg: cfg, credentials: resolver, tls: tlsConfig, hosts: registryHosts{registry: registry}, runtime: runtime,
+		logins: openbao.NewLogins(nil), oauthCallbacks: oauthcallback.NewRegistry(),
 		registry: registry, ports: ports, store: store, handlers: handlers, linkPolicy: exposure.NewLinkPolicy(handlers),
 		ingressRegistrar: dispatcher, scope: newWorkspaceScope(cfg.Workspaces, cfg.WorkspacesFunc), nodeClaims: newNodeClaims(handlers, cfg.Log)}
 	if err := core.register(); err != nil {
@@ -290,10 +297,10 @@ func (c *Core) register() error {
 			return ingressproxy.New(spec, ingressproxy.Deps{Instance: in, Registry: registry, TLS: tlsConfig, Identity: identity})
 		})},
 		{gatewayapi.Kind, component.Typed(func(in component.Instance, spec v1alpha1.GatewayAPISpec) (*gatewayapi.Service, error) {
-			return gatewayapi.New(spec, gatewayapi.Deps{Instance: in, KCP: kcp, TLS: tlsConfig, NodeClaimAgent: c.cfg.NodeClaimAgent, NodeClaims: c.nodeClaims})
+			return gatewayapi.New(spec, gatewayapi.Deps{Instance: in, KCP: kcp, TLS: tlsConfig, NodeClaimAgent: c.cfg.NodeClaimAgent, NodeClaims: c.nodeClaims, Logins: c.logins})
 		})},
 		{bidder.Kind, component.Typed(func(in component.Instance, spec v1alpha1.BidderSpec) (*bidder.Service, error) {
-			return bidder.New(spec, bidder.Deps{Instance: in, Credentials: creds, Egress: egress(in)})
+			return bidder.New(spec, bidder.Deps{Instance: in, Credentials: creds, Egress: egress(in), OAuthCallbacks: c.oauthCallbacks})
 		})},
 		{guestcontrolplane.Kind, component.Typed(func(in component.Instance, spec v1alpha1.GuestControlPlaneSpec) (*guestcontrolplane.Service, error) {
 			return guestcontrolplane.New(spec, guestcontrolplane.Deps{Instance: in, Hosts: hosts})
@@ -302,7 +309,7 @@ func (c *Core) register() error {
 			return pds.New(spec, pds.Deps{Instance: in, Egress: egress(in)})
 		})},
 		{requester.Kind, component.Typed(func(in component.Instance, spec v1alpha1.RequesterSpec) (*requester.Service, error) {
-			return requester.New(spec, requester.Deps{Instance: in, Credentials: creds, Egress: egress(in)})
+			return requester.New(spec, requester.Deps{Instance: in, Credentials: creds, Egress: egress(in), OAuthCallbacks: c.oauthCallbacks})
 		})},
 		{sshserver.Kind, component.Typed(func(in component.Instance, spec v1alpha1.SshServerSpec) (*sshserver.Service, error) {
 			return sshserver.New(spec, sshserver.Deps{Instance: in, Hosts: hosts, TLS: tlsConfig})

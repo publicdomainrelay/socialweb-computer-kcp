@@ -9,24 +9,31 @@ import (
 
 type Handler func(ctx context.Context, w http.ResponseWriter, r *http.Request) error
 
-var (
+type Registry struct {
 	mu       sync.RWMutex
-	handlers = map[string]Handler{}
-)
-
-func Register(name string, handler Handler) {
-	name = strings.TrimSpace(name)
-	if name == "" || handler == nil {
-		return
-	}
-	mu.Lock()
-	handlers[name] = handler
-	mu.Unlock()
+	handlers map[string]Handler
 }
 
-func Lookup(name string) (Handler, bool) {
-	mu.RLock()
-	handler, ok := handlers[strings.TrimSpace(name)]
-	mu.RUnlock()
+func NewRegistry() *Registry {
+	return &Registry{handlers: map[string]Handler{}}
+}
+
+func (r *Registry) Register(name string, handler Handler) {
+	name = strings.TrimSpace(name)
+	if r == nil || name == "" || handler == nil {
+		return
+	}
+	r.mu.Lock()
+	r.handlers[name] = handler
+	r.mu.Unlock()
+}
+
+func (r *Registry) Lookup(name string) (Handler, bool) {
+	if r == nil {
+		return nil, false
+	}
+	r.mu.RLock()
+	handler, ok := r.handlers[strings.TrimSpace(name)]
+	r.mu.RUnlock()
 	return handler, ok
 }

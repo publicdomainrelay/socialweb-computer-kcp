@@ -36,6 +36,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/revocation"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsfront"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 )
 
 const (
@@ -77,6 +78,7 @@ type Config struct {
 	ClusterStateDir string
 	Deny            revocation.Deny
 	Records         Records
+	Logins          *openbao.Logins
 	OnListen        func(net.Addr)
 	Log             *slog.Logger
 }
@@ -161,6 +163,9 @@ func Run(ctx context.Context, c Config) error {
 	}
 	if c.Records == nil {
 		return errors.New("clientcertfront: no certificate records")
+	}
+	if c.Logins == nil {
+		return errors.New("clientcertfront: no OpenBao logins")
 	}
 	edgeCert, _, err := EnsureEdgeClient(c.EdgeDir)
 	if err != nil {
@@ -654,7 +659,7 @@ func (s *server) revokedFor(ctx context.Context, dir string) (map[string]struct{
 func (s *server) refresh(dir string, f *revokedFlight) {
 	ctx, cancel := context.WithTimeout(s.ctx, revokedFetchTimeout)
 	defer cancel()
-	serials, err := clientcert.FetchRevoked(ctx, dir)
+	serials, err := clientcert.FetchRevoked(ctx, s.c.Logins, dir)
 	s.mu.Lock()
 	f.serials, f.err = serials, err
 	if err == nil {

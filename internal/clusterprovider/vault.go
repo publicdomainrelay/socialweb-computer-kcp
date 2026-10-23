@@ -147,6 +147,8 @@ type CustodyOptions struct {
 	VaultPort int
 
 	PostgresDSN string
+
+	Logins *openbao.Logins
 }
 
 func CustodyClusterVault(ctx context.Context, o CustodyOptions) error {
@@ -160,7 +162,7 @@ func CustodyClusterVault(ctx context.Context, o CustodyOptions) error {
 	if err != nil {
 		return err
 	}
-	client, _, err := clusterVault(ctx, dataDir)
+	client, _, err := clusterVault(ctx, o.Logins, dataDir)
 	if err != nil {
 		return err
 	}
@@ -219,7 +221,7 @@ var ErrNoVaultBundle = errors.New(
 	"clusterprovider: the cluster vault holds no identity bundle to materialise, so this wake has " +
 		"no vault to restore from and the file tree is the store it falls back to")
 
-func SeedBundleFromVault(ctx context.Context, stateDir, cluster string) error {
+func SeedBundleFromVault(ctx context.Context, logins *openbao.Logins, stateDir, cluster string) error {
 	dataDir, err := ClusterDataDir(stateDir, cluster)
 	if err != nil {
 		return err
@@ -227,7 +229,7 @@ func SeedBundleFromVault(ctx context.Context, stateDir, cluster string) error {
 	if _, err := os.Stat(VaultAccessPath(dataDir)); errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("%w: %s names no way to the cluster vault", ErrNoVaultBundle, VaultAccessPath(dataDir))
 	}
-	client, a, err := clusterVault(ctx, dataDir)
+	client, a, err := clusterVault(ctx, logins, dataDir)
 	if err != nil {
 		return fmt.Errorf(
 			"clusterprovider: this cluster's vault is unreachable, so a bundle it may hold cannot be "+

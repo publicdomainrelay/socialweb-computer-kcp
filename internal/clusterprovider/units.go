@@ -29,6 +29,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/pgunit"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/postgresctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/procgroup"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 )
 
 const (
@@ -72,6 +73,8 @@ type UnitsConfig struct {
 	StoreTimeout time.Duration
 
 	ReapTimeout time.Duration
+
+	Logins *openbao.Logins
 
 	Log *slog.Logger
 }

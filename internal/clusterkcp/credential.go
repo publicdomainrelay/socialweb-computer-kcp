@@ -7,6 +7,7 @@ import (
 	"k8s.io/client-go/rest"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterprovider"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 )
 
 func RestConfig(cred *clusterprovider.Credential) *rest.Config {
@@ -30,8 +31,8 @@ func restConfig(cred *clusterprovider.Credential, err error) (*rest.Config, erro
 	return RestConfig(cred), nil
 }
 
-func MintTenantCredentialForCluster(ctx context.Context, stateDir, cluster, server string, source clusterprovider.CredentialSource) (*rest.Config, error) {
-	return restConfig(clusterprovider.MintTenantCredentialForCluster(ctx, stateDir, cluster, server, source))
+func MintTenantCredentialForCluster(ctx context.Context, logins *openbao.Logins, stateDir, cluster, server string, source clusterprovider.CredentialSource) (*rest.Config, error) {
+	return restConfig(clusterprovider.MintTenantCredentialForCluster(ctx, logins, stateDir, cluster, server, source))
 }
 
 func MintTenantCredentialForClusterAs(ctx context.Context, stateDir, cluster, server, commonName string, organizations []string, validFor time.Duration) (*rest.Config, error) {

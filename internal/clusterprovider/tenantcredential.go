@@ -221,15 +221,15 @@ func MintTenantCredential(o CredentialOptions) (*Credential, error) {
 	}, nil
 }
 
-func MintTenantCredentialForCluster(ctx context.Context, stateDir, cluster, server string, source CredentialSource) (*Credential, error) {
+func MintTenantCredentialForCluster(ctx context.Context, logins *openbao.Logins, stateDir, cluster, server string, source CredentialSource) (*Credential, error) {
 	dataDir, err := ClusterDataDir(stateDir, cluster)
 	if err != nil {
 		return nil, err
 	}
-	return MintTenantCredentialForDataDir(ctx, dataDir, server, source)
+	return MintTenantCredentialForDataDir(ctx, logins, dataDir, server, source)
 }
 
-func MintTenantCredentialForDataDir(ctx context.Context, dataDir, server string, source CredentialSource) (*Credential, error) {
+func MintTenantCredentialForDataDir(ctx context.Context, logins *openbao.Logins, dataDir, server string, source CredentialSource) (*Credential, error) {
 	o := CredentialOptions{
 		DataDir:       dataDir,
 		Server:        server,
@@ -240,7 +240,7 @@ func MintTenantCredentialForDataDir(ctx context.Context, dataDir, server string,
 	case CredentialSourceClusterCA:
 		return MintTenantCredential(o)
 	case CredentialSourceVaultIfSealed:
-		client, a, err := clusterVault(ctx, dataDir)
+		client, a, err := clusterVault(ctx, logins, dataDir)
 		if err == nil {
 			return mintTenantCredentialFromVault(ctx, o, client, a.Address)
 		}
