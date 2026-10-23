@@ -3,14 +3,17 @@ package remotepds
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/syntax"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
@@ -33,19 +36,17 @@ const (
 
 	ConditionFailed = "Failed"
 
+	ConditionSessionExpired = "SessionExpired"
+
 	DefaultTimeout = 10 * time.Second
 
 	DefaultCheckInterval = 30 * time.Second
 )
 
-type SecretRefsFunc func(workspace string) remote.Secrets
-
 type Options struct {
 	Log *slog.Logger
 
 	Bus *bus.Bus
-
-	SecretRefs SecretRefsFunc
 
 	Timeout time.Duration
 
@@ -59,7 +60,9 @@ type Controller struct {
 
 	bus *bus.Bus
 
-	secretRefs SecretRefsFunc
+	mu sync.Mutex
+
+	sessions map[binding.Target]heldSession
 
 	timeout time.Duration
 
@@ -86,7 +89,7 @@ func New(opts Options) *Controller {
 	checkInterval := opts.CheckInterval
 	checkInterval = ctlruntime.Period(checkInterval, DefaultCheckInterval)
 	return &Controller{log: log.With("component", "remotepds-controller"), roots: vaultctl.NewRoots(opts.Bus, log), bus: opts.Bus,
-		secretRefs: opts.SecretRefs, timeout: timeout, checkInterval: checkInterval, hosts: binding.New[*remote.Host]()}
+		sessions: map[binding.Target]heldSession{}, timeout: timeout, checkInterval: checkInterval, hosts: binding.New[*remote.Host]()}
 }
 
 func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
@@ -103,6 +106,9 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 	if !object.DeletionTimestamp.IsZero() {
 		c.hosts.Set(target, nil)
 		c.roots.Drop(self(req, object))
+		c.mu.Lock()
+		delete(c.sessions, target)
+		c.mu.Unlock()
 		return ctlruntime.Result{}, nil
 	}
 	generation := object.Generation
@@ -117,7 +123,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 	}
 	checkedAt := metav1.NewTime(time.Now().UTC().Truncate(time.Second))
 	status.LastCheckedAt = &checkedAt
-	host, endpoint, reason, err := c.connect(ctx, req, object)
+	host, session, endpoint, reason, err := c.connect(ctx, req, target, object)
 	if err != nil {
 		c.hosts.Set(target, nil)
 		return c.fail(ctx, req, object, status, reason, err)
@@ -133,6 +139,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 	message := fmt.Sprintf("the PDS at %s reports %s", endpoint, info.DID)
 	conds.Set(&status.Conditions, generation, ConditionReady, true, "Ready", message)
 	conds.Set(&status.Conditions, generation, ConditionFailed, false, "DescribeSucceeded", "the PDS answered describeServer")
+	sessionCondition(ctx, &status, generation, session)
 	if err := c.apply(ctx, req, object, status); err != nil {
 		return ctlruntime.Result{}, err
 	}
@@ -165,36 +172,86 @@ func (c *Controller) apply(ctx context.Context, req ctlruntime.Request, object *
 	return req.ApplyStatus(ctx, next)
 }
 
-func (c *Controller) connect(ctx context.Context, req ctlruntime.Request, object *pdsv1alpha1.RemotePDS) (*remote.Host, string, string, error) {
+func (c *Controller) connect(ctx context.Context, req ctlruntime.Request, target binding.Target,
+	object *pdsv1alpha1.RemotePDS) (*remote.Host, *remote.Session, string, string, error) {
 	baseURL, err := remoteURL(object.Spec.URL)
 	if err != nil {
-		return nil, "", "InvalidURL", err
+		return nil, nil, "", "InvalidURL", err
 	}
 	didText := strings.TrimSpace(object.Spec.DID)
 	if didText == "" {
-		return nil, "", "InvalidDID", errors.New("the RemotePDS has no did")
+		return nil, nil, "", "InvalidDID", errors.New("the RemotePDS has no did")
 	}
 	if _, err := syntax.ParseDID(didText); err != nil {
-		return nil, "", "InvalidDID", fmt.Errorf("the RemotePDS did %q is invalid", didText)
+		return nil, nil, "", "InvalidDID", fmt.Errorf("the RemotePDS did %q is invalid", didText)
 	}
-	tlsConfig, err := c.tlsConfig(ctx, self(req, object), object.Spec.TLS, baseURL)
+	from := self(req, object)
+	tlsConfig, err := c.tlsConfig(ctx, from, object.Spec.TLS, baseURL)
 	if err != nil {
-		return nil, "", "InvalidTLS", transientError{err: err}
-	}
-	var secrets remote.Secrets
-	if c.secretRefs != nil {
-		secrets = c.secretRefs(req.Workspace)
-	}
-	auth, err := remote.Credentials(ctx, object.Spec.Auth, c.vaultSecrets(self(req, object)))
-	if err != nil {
-		return nil, "", "InvalidAuth", transientError{err: err}
+		return nil, nil, "", "InvalidTLS", transientError{err: err}
 	}
 	endpoint := strings.TrimRight(baseURL.String(), "/")
-	host, err := remote.New(remote.Config{URL: endpoint, DID: didText, TLS: tlsConfig, Auth: auth, Secrets: secrets, Timeout: c.timeout})
+	session, err := c.session(ctx, target, from, object.Spec, endpoint, tlsConfig)
 	if err != nil {
-		return nil, "", "InvalidConfig", err
+		return nil, nil, "", "InvalidAuth", transientError{err: err}
 	}
-	return host, endpoint, "", nil
+	host, err := remote.New(remote.Config{URL: endpoint, DID: didText, TLS: tlsConfig, Auth: session.Auth(), Secrets: c.vaultSecrets(from),
+		Timeout: c.timeout})
+	if err != nil {
+		return nil, nil, "", "InvalidConfig", err
+	}
+	return host, session, endpoint, "", nil
+}
+
+type heldSession struct {
+	fingerprint string
+
+	session *remote.Session
+}
+
+func (c *Controller) session(ctx context.Context, target binding.Target, from commonv1.ObjectRef, spec pdsv1alpha1.RemotePDSSpec,
+	endpoint string, tlsConfig *tls.Config) (*remote.Session, error) {
+	raw, err := json.Marshal(struct {
+		Endpoint string
+		TLS      pdsv1alpha1.RemotePDSTLS
+		Auth     pdsv1alpha1.RemotePDSAuth
+	}{endpoint, spec.TLS, spec.Auth})
+	if err != nil {
+		return nil, err
+	}
+	fingerprint := string(raw)
+	c.mu.Lock()
+	held, ok := c.sessions[target]
+	c.mu.Unlock()
+	if ok && held.fingerprint == fingerprint {
+		return held.session, nil
+	}
+	session, err := remote.NewSession(ctx, remote.SessionConfig{Auth: spec.Auth, URL: endpoint, TLS: tlsConfig,
+		Read: c.vaultSecrets(from), Write: c.vaultWriter(from)})
+	if err != nil {
+		return nil, err
+	}
+	c.mu.Lock()
+	c.sessions[target] = heldSession{fingerprint: fingerprint, session: session}
+	c.mu.Unlock()
+	return session, nil
+}
+
+func sessionCondition(ctx context.Context, status *pdsv1alpha1.RemotePDSStatus, generation int64, session *remote.Session) {
+	if session == nil {
+		apimeta.RemoveStatusCondition(&status.Conditions, ConditionSessionExpired)
+		return
+	}
+	err := session.Check(ctx)
+	switch {
+	case err == nil:
+		conds.Set(&status.Conditions, generation, ConditionSessionExpired, false, "SessionLive", "the RemotePDS session holds a live access token")
+	case errors.Is(err, remote.ErrSessionExpired):
+		conds.Set(&status.Conditions, generation, ConditionSessionExpired, true, "RefreshRefused",
+			"the PDS refused the refresh token; the session secret needs a new sign-in: "+err.Error())
+	default:
+		conds.SetStatus(&status.Conditions, generation, ConditionSessionExpired, metav1.ConditionUnknown, "SessionUnchecked", err.Error())
+	}
 }
 
 func remoteURL(raw string) (*url.URL, error) {
@@ -250,6 +307,15 @@ func (c *Controller) tlsConfig(ctx context.Context, from commonv1.ObjectRef, spe
 
 func self(req ctlruntime.Request, object *pdsv1alpha1.RemotePDS) commonv1.ObjectRef {
 	return commonv1.ObjectRef{Group: pdsv1alpha1.GroupName, Kind: Kind, Name: object.Name, Workspace: req.Workspace}
+}
+
+func (c *Controller) vaultWriter(from commonv1.ObjectRef) remote.SecretWriter {
+	if c.bus == nil {
+		return nil
+	}
+	return func(ctx context.Context, ref commonv1.SecretRef, data map[string]any) error {
+		return vaultctl.WriteSecret(ctx, c.bus, from, ref, data)
+	}
 }
 
 func (c *Controller) vaultSecrets(from commonv1.ObjectRef) remote.Secrets {

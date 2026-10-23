@@ -54,7 +54,13 @@ func OperatorLinks(r Root, o Operator) []Link {
 	if o.CARef != nil && o.tls() {
 		links = append(links, TrustLink(o.ref(r.Workspace), *o.CARef))
 	}
-	return links
+	creds := o.credentials()
+	return append(links, SecretLinks(o.ref(r.Workspace), SecretUse{Ref: &creds})...)
+}
+
+func (o Operator) credentials() commonv1.SecretRef {
+	vaultRef := AppRef(KindVault, o.Vault, "")
+	return commonv1.SecretRef{Vault: &vaultRef, Mount: o.Mount, Path: OperatorKeysPath, Key: "password"}
 }
 
 func (o Operator) tls() bool {
@@ -109,7 +115,7 @@ func (c *Composer) OperatorRepo(ctx context.Context, r Root, o Operator) (atprot
 	if err != nil {
 		return nil, "", err
 	}
-	creds := commonv1.SecretRef{Vault: v1alpha1.VaultServerRef(o.Vault), Mount: o.Mount, Path: OperatorKeysPath, Key: "password"}
+	creds := o.credentials()
 	did := ""
 	sess, err := sessions.SignIn(ctx, pds.SessionRequest{Identifier: o.Identifier, Credentials: creds})
 	switch {
