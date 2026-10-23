@@ -138,6 +138,10 @@ func (c *Composer) ApplyOperatorRepo(ctx context.Context, r Root, ws string, op 
 		if _, did, err = c.OperatorRepo(ctx, r, op); err != nil {
 			return err
 		}
+	} else if strings.TrimSpace(op.PdsURL) != "" {
+		if err := c.applyOperatorPDS(ctx, r, op); err != nil {
+			return err
+		}
 	}
 	vault := func() *commonv1.ObjectRef {
 		return &commonv1.ObjectRef{Kind: v1alpha1.KindOpenBaoServer, Name: op.Vault, Workspace: r.Workspace}
