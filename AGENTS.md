@@ -127,32 +127,18 @@ These rules come from the org-root CLAUDE.md. They apply to all TypeScript here.
   `test/integration`: its own market network, and `socialweb-computer run request` (which keeps
   `runComputeContract`) or a tenant cluster of the network's gateway rents the guest.
 
-## Tests: no tests
+## Tests: none until plan 0027
 
-Write no tests, except integration tests, and write those only once the system works in prod.
+Plan 0026 deleted every Go test. Write no Go test of any kind until plan 0027.
 
 - No tests. Do not write unit tests, ratchets, allow-lists, inventories, golden files, snapshots,
   source-grep checks, size lines or any other check of an arbitrary rule. Do not work test-first.
-  Ignore the `test_first` field of a plan item.
-- Do not repair an old test. If a change breaks an existing test, delete that test in the same commit.
-- Prod means: the new gateway started from the `socialweb-computer` binary, and the local
-  bobvmbuilder bidder on hat-8 running the new bidder from that same binary
-  (`socialweb-computer run bidder`).
-- Integration tests come only at the end: after a tenant k3s cluster on that gateway scales to zero
-  and gets nodes as market RFP VMs from that bidder. Only integration tests get written then.
-- A manual live run is proof, not a test.
-- Integration tests are Go tests in `test/integration`, build tag `integration`, plan 0010 G2. Each
-  test brings up its own market network (`dev up`, a unique instance, port 0, VM slots of the VM
-  account under its slot lock), drives it with the `socialweb-computer` verbs, ends at once on a
-  failed network, child application, ComputeVM or NodeClaim, and runs `dev down` and checks that
-  nothing is left, also on failure. Run them as an account that may `sudo -n -u test-0001`:
-  `go test -tags integration -timeout 40m -v ./test/integration/`. `SOCIALWEB_IT_ACCOUNT` (the VM
-  account), `SOCIALWEB_IT_GUEST_IMAGE` (default `file:///var/lib/socialweb-computer/guest-image`),
-  `SOCIALWEB_IT_PUBLISH`, `SOCIALWEB_IT_SKIP_BUILD`, `SOCIALWEB_IT_RUN_ROOT` (default `/var/tmp/swcit`;
-  keep it short, a tenant cluster's front socket path must fit in 107 bytes) and
-  `SOCIALWEB_IT_ARTIFACTS` (the logs, default `~/.tmp/swc-it/<run>`) change the defaults. Each market
-  network takes a host live slot first through `SOCIALWEB_IT_LIVE_SLOT` (default the lead's
-  `~/.tmp/swc-lead/live-slot.ts` when it exists; `none` turns it off).
+  Ignore the `test_first` field of a plan item. Do not restore a deleted test.
+- Proof is the build gates plus live runs. A manual live run is proof, not a test.
+- From plan 0027 on, tests are specification tests written from `docs/spec/integration-catalog.yaml`:
+  each states what a component must do (actors, inputs, observable outcome), never how it does it.
+  Only high-level integration tests are written.
+- Rust tests under `rust/` are outside this rule and stay.
 
 ## Prod deployments
 
@@ -316,10 +302,33 @@ A prod deployment guarantees nothing; the routine path preserves most things.
 - One failed match is fixed by re-reading and retrying. Do not guess the same string again.
 - Do not revert another agent's work. Run `git status` first; the tree is shared.
 
+## Architecture rules (plan 0026)
+
+- Layout. Imports point down this list only; `scripts/check-architecture.sh` enforces it:
+  `api/<group>/v1alpha1` (types, contract status, refs), `internal/contract/<concept>` (small Go
+  interfaces and pure types; imports api and stdlib only), `internal/<concept>/<impl>` (one sibling
+  package per backend), `internal/controllers/<kind>` (one reconciler per kind on
+  `internal/controllers/runtime`), `internal/app/<root>` (one composition controller per app root),
+  `cmd/`. A new backend is a concrete kind and a sibling package, never a flag.
+- No polling. Controllers are driven by watches on their own kind and every kind they ref. Deadlines
+  use delayed requeue; errors use the runtime's rate-limited backoff. A ticker is allowed only for an
+  outbound obligation and must be listed in `deploy/obligations.txt` with its owner and period.
+  systemd units are followed through D-Bus signals, processes through wait.
+- Bus. Components and controllers get typed contract handles with `bus.Resolve[T]`. The caller is the
+  reconciled object or the component instance, never a controller and never System; System is allowed
+  only for the callers in `deploy/bus-bootstrap-callers.txt`. The callee holds credentials; a handle
+  never exposes a token. A call with no accepted ComponentLink fails with `ErrLinkDenied`.
+- Writers. Every write is server-side apply with field manager `socialweb.computer/<controller>`. A
+  spec is written only by its composer; a status only by the controller of its kind; a field a second
+  controller reports is its own status subfield with its own field manager. Every child and intent
+  object has an ownerReference to its composer or creator. No annotation carries a control signal.
+
 ## Standing constraints
 
 - No comments in code except the `ponytail:` form naming a ceiling and its upgrade path, and
   `//go:` directives.
+- One exception to the no-comments rule: the k8s code generator markers `// +k8s:deepcopy-gen=package`
+  and `// +groupName=` in `api/**/doc.go` only (plan 0026, approved 2026-10-22).
 - ASCII only, everywhere, including this file and `docs/ARCHITECTURE.md`.
 - Decisions, measurements and invariants live in `docs/ARCHITECTURE.md`, never in code comments.
   An item opens in section 14 and moves to section 15, with its before/after readings, when it

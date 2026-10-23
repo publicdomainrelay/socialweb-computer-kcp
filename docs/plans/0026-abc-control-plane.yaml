@@ -1,6 +1,6 @@
 plan: "0026"
 title: "ABC control plane: contracts, abstract kinds, a declared bus and watch-only controllers"
-status: todo
+status: doing
 source: >
   The 2026-10-22 architecture audit found that the tree has 197k non-test Go
   LOC, 203 packages, 57 kinds and about 25 controllers, and that only one
@@ -230,7 +230,7 @@ state_rules:
 waves:
   - id: W0
     title: "Contracts, codegen, refs, bus and runtime"
-    status: todo
+    status: doing
     serial: true
     tracks: [W0-TESTS, W0-RULES, W0-CODEGEN, W0-REFS, W0-ABSTRACT, W0-CONTRACTS, W0-BUS, W0-RUNTIME]
     gate: "all kinds registered; refs unified; contract packages pure; bus denies an unlinked call; the pilot controller runs on the runtime across root and a later-created root:<app> workspace with no ticker."
@@ -291,7 +291,7 @@ items:
     track: tests
     parallel_with: []
     depends_on: []
-    status: todo
+    status: doing
     decision: >
       First write docs/spec/integration-catalog.yaml: one entry per
       integration test in test/integration and per soak lane in test/soak,
@@ -325,7 +325,7 @@ items:
     track: rules
     parallel_with: []
     depends_on: [W0-TESTS]
-    status: todo
+    status: done
     decision: >
       Add the comment exception from decisions.comment_exception to
       AGENTS.md. Replace the AGENTS.md integration test rules with: no Go
@@ -346,7 +346,7 @@ items:
     track: codegen
     parallel_with: []
     depends_on: [W0-RULES]
-    status: todo
+    status: doing
     closes: [D22]
     decision: >
       Add api/<group>/v1alpha1/doc.go with the deepcopy-gen package marker
@@ -501,7 +501,7 @@ items:
     track: runtime
     parallel_with: []
     depends_on: [W0-CODEGEN, W0-BUS]
-    status: todo
+    status: doing
     decision: >
       Add sigs.k8s.io/multicluster-runtime and
       github.com/kcp-dev/multicluster-provider (apiexport provider), pinned.
