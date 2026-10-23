@@ -54,6 +54,7 @@ const (
 	gateFetchTimeout    = 5 * time.Second
 	gateIdle            = 10 * time.Minute
 	gateRetry           = time.Second
+	gateRetryMax        = 30 * time.Second
 	readHeaderLimit     = 10 * time.Second
 	shutdownTimeout     = 5 * time.Second
 	upstreamDialWait    = 5 * time.Second
@@ -134,6 +135,7 @@ type gateWatch struct {
 	used   time.Time
 	gate   kcpclient.ClusterGate
 	synced bool
+	seen   bool
 	err    error
 }
 
@@ -503,7 +505,9 @@ func (s *server) closeGates() {
 }
 
 func (s *server) followGate(ctx context.Context, w *gateWatch, home, cluster string) {
+	delay := gateRetry
 	for {
+		began := time.Now()
 		err := s.c.Records.FollowClusterGate(ctx, home, cluster, func(g kcpclient.ClusterGate) { s.setGate(home, w, g) })
 		if ctx.Err() != nil {
 			return
@@ -511,9 +515,15 @@ func (s *server) followGate(ctx context.Context, w *gateWatch, home, cluster str
 		if err == nil {
 			err = errors.New("the Cluster watch ended")
 		}
-		s.failGate(w, err)
-		s.log.Warn("the Cluster watch restarts; new requests are refused until it syncs again, open requests stay", "home", home, "err", err.Error())
-		retry := time.NewTimer(gateRetry)
+		if s.failGate(home, w, err) {
+			return
+		}
+		if time.Since(began) > gateRetryMax {
+			delay = gateRetry
+		}
+		s.log.Warn("the Cluster watch restarts; new requests are refused until it syncs again, open requests stay", "home", home, "after", delay.String(), "err", err.Error())
+		retry := time.NewTimer(delay)
+		delay = min(2*delay, gateRetryMax)
 		select {
 		case <-ctx.Done():
 			retry.Stop()
@@ -525,7 +535,7 @@ func (s *server) followGate(ctx context.Context, w *gateWatch, home, cluster str
 
 func (s *server) setGate(home string, w *gateWatch, g kcpclient.ClusterGate) {
 	s.mu.Lock()
-	w.gate, w.synced, w.err = g, true, nil
+	w.gate, w.synced, w.seen, w.err = g, true, true, nil
 	var cut []*openRequest
 	if !g.Serving && s.gates[home] == w {
 		for o := range s.open[home] {
@@ -542,11 +552,20 @@ func (s *server) setGate(home string, w *gateWatch, g kcpclient.ClusterGate) {
 	}
 }
 
-func (s *server) failGate(w *gateWatch, err error) {
+func (s *server) failGate(home string, w *gateWatch, err error) bool {
 	s.mu.Lock()
 	w.synced, w.err = false, err
+	never := !w.seen
+	if never && s.gates[home] == w {
+		delete(s.gates, home)
+		w.idle.Stop()
+	}
 	s.mu.Unlock()
 	w.once.Do(func() { close(w.ready) })
+	if never {
+		w.cancel()
+	}
+	return never
 }
 
 func (s *server) hold(home string, cancel context.CancelFunc) func() {
