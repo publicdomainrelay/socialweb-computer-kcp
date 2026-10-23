@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
@@ -26,6 +27,20 @@ type vaultRuntime struct {
 	mount string
 
 	endpoint custodyEndpoint
+
+	cancel context.CancelFunc
+
+	wg sync.WaitGroup
+}
+
+func (v *vaultRuntime) close() {
+	if v == nil {
+		return
+	}
+	if v.cancel != nil {
+		v.cancel()
+	}
+	v.wg.Wait()
 }
 
 func resolveVault(ctx context.Context, cfg Config, deps component.Deps) (*vaultRuntime, error) {
@@ -126,6 +141,8 @@ func buildVault(ctx context.Context, cfg Config, address, token string, ca, cert
 		return nil, err
 	}
 	client := anonymous
+	renew := false
+	var renewLease time.Duration
 	switch {
 	case token == "" && certMount != "" && certRole != "":
 		auth, err := anonymous.LoginCertToken(ctx, certMount, certRole)
@@ -133,14 +150,15 @@ func buildVault(ctx context.Context, cfg Config, address, token string, ca, cert
 			return nil, fmt.Errorf("gatewayapi: logging in to the vault as %s/%s: %w", certMount, certRole, err)
 		}
 		client = anonymous.WithToken(auth.Token)
-		go renewVaultToken(ctx, client, certMount, certRole, auth.Lease, cfg.Log)
+		renew = true
+		renewLease = auth.Lease
 	case token != "":
 		client, err = newOpenBaoClient(address, token, ca, cert, key)
 		if err != nil {
 			return nil, err
 		}
 	}
-	return &vaultRuntime{
+	runtime := &vaultRuntime{
 		client: client,
 		mount:  strings.Trim(mount, "/"),
 		endpoint: custodyEndpoint{
@@ -153,7 +171,13 @@ func buildVault(ctx context.Context, cfg Config, address, token string, ca, cert
 			Mount:      cfg.Session.CustodyMount,
 			Timeout:    cfg.Vault.Timeout,
 		},
-	}, nil
+	}
+	if renew {
+		renewCtx, cancel := context.WithCancel(ctx)
+		runtime.cancel = cancel
+		runtime.wg.Go(func() { renewVaultToken(renewCtx, client, certMount, certRole, renewLease, cfg.Log) })
+	}
+	return runtime, nil
 }
 
 func renewVaultToken(ctx context.Context, client *openbao.Client, mount, role string, lease time.Duration, log *slog.Logger) {
