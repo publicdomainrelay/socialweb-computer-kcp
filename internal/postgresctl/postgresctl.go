@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -453,7 +454,9 @@ func (ct *Controller) Run(ctx context.Context) error {
 	ct.c.log().Info("the Postgres controller runs in the core", "workspace", ct.c.Workspace, "dataRoot", ct.c.DataRoot,
 		"socketRoot", ct.c.SocketRoot)
 	wake := make(chan struct{}, 1)
-	go ct.watch(ctx, wake)
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	wg.Go(func() { ct.watch(ctx, wake) })
 	for {
 		if err := ct.Pass(ctx); err != nil {
 			ct.c.log().Warn("a reconcile pass failed; servers keep running", "err", err.Error())
