@@ -1276,12 +1276,16 @@ func (s *Service) authorizeCallback(w http.ResponseWriter, r *http.Request, lxm,
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), serviceAuthTimeout)
 	defer cancel()
+	audiences := []string{s.cfg.MarketDID, s.cfg.RepoDID, s.cfg.DID}
+	if u, err := url.Parse(s.cfg.MarketURL); err == nil && u.Host != "" {
+		audiences = append(audiences, market.ServiceDIDForHost(u.Host))
+	}
 	result, err := market.VerifyServiceAuth(ctx, s.directory, market.VerifyServiceAuthOptions{
 		AuthHeader:        r.Header.Get("Authorization"),
 		Hostname:          hostname,
 		LXM:               lxm,
 		ServiceIDs:        []string{serviceID},
-		ExtraAudienceDIDs: []string{s.cfg.MarketDID, s.cfg.RepoDID, s.cfg.DID},
+		ExtraAudienceDIDs: audiences,
 	})
 	if err != nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "Unauthorized", "message": err.Error()})
