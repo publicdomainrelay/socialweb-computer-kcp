@@ -34,15 +34,15 @@ func (c Crawl) Run(ctx context.Context) {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	period := c.Period
-	if period <= 0 {
-		period = CrawlPeriod
-	}
 	if len(c.Relays) == 0 || c.Address == nil {
 		log.Warn("the PDS is not registered with a relay", "relays", len(c.Relays))
 		return
 	}
-	ticker := time.NewTicker(period)
+	if c.Period <= 0 {
+		c.once(ctx, log)
+		return
+	}
+	ticker := time.NewTicker(c.Period)
 	defer ticker.Stop()
 	for {
 		c.once(ctx, log)
