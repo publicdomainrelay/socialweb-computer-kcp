@@ -740,6 +740,11 @@ func (q *Requester) callbackRef(fragment string) string {
 	if address := q.marketAddress(); address != "" {
 		return address
 	}
+	if name := q.marketExposure(); name != "" {
+		if address := q.deps.Inputs.AwaitAddress(q.runContext(), name, MarketExposureWait, nil); address != "" {
+			return strings.TrimRight(address, "/")
+		}
+	}
 	if q.callbackDID() == "" {
 		return ""
 	}

@@ -299,13 +299,6 @@ func (c *Composer) exposureAddress(ctx context.Context, ws, name string) string 
 	return o.Status.Address
 }
 
-func (c *Composer) PublishedExposure(ctx context.Context, ws, name string) *commonv1.LocalObjectRef {
-	if strings.TrimSpace(c.exposureAddress(ctx, ws, name)) == "" {
-		return nil
-	}
-	return &commonv1.LocalObjectRef{Name: name}
-}
-
 func (c *Composer) PdsSpec(ctx context.Context, ws, pdsName string) (v1alpha1.PdsSpec, bool, error) {
 	o, err := Get[v1alpha1.Pds](ctx, c, ws, PdsGVR, pdsName)
 	if apierrors.IsNotFound(err) {

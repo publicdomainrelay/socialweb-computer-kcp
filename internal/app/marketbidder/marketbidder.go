@@ -355,7 +355,7 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 	}
 	bidder := compose.Desired{Kind: compose.ComponentKindBidder, Name: BidderComponent, Spec: v1alpha1.BidderSpec{
 		ComponentSpec:        p.c.NetworkComponentSpec(p.r, compose.ComponentCRStateDir(stateRoot, compose.ComponentKindBidder, BidderComponent), network),
-		MarketExposureRef:    c.PublishedExposure(ctx, ws, compose.ServiceNameFor(compose.ComponentKindBidder, BidderComponent)+compose.ExposureIngressSuffix),
+		MarketExposureRef:    &commonv1.LocalObjectRef{Name: compose.ServiceNameFor(compose.ComponentKindBidder, BidderComponent) + compose.ExposureIngressSuffix},
 		Mode:                 string(plan.Mode),
 		Identity:             ident,
 		PdsRef:               plan.ComponentPdsRef(),
