@@ -1,0 +1,26 @@
+{
+  "lexicon": 1,
+  "id": "com.publicdomainrelay.temp.market.receipt",
+  "description": "The bidder's receipt for an accept. cid binds the receipt to the accept record in the requester's repository.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["rfp", "bid", "accept", "cid", "signatures"],
+        "nullable": ["payload"],
+        "properties": {
+          "rfp": { "type": "ref", "ref": "com.atproto.repo.strongRef", "description": "The market.rfp." },
+          "bid": { "type": "ref", "ref": "com.atproto.repo.strongRef", "description": "The market.bid." },
+          "accept": { "type": "ref", "ref": "com.atproto.repo.strongRef", "description": "The market.accept this receipt answers." },
+          "payload": { "type": "ref", "ref": "com.atproto.repo.strongRef", "description": "The receipt terms; null when there are none." },
+          "submitEvent": { "type": "string", "description": "Where the requester submits events: a DID service ref (did#serviceId) or an HTTP URL." },
+          "cid": { "type": "string", "format": "cid", "description": "The attestation CID binding this receipt to the accept record and the accept repository." },
+          "createdAt": { "type": "string", "format": "datetime" },
+          "signatures": { "type": "ref", "ref": "network.attested.signature#signatures" }
+        }
+      }
+    }
+  }
+}

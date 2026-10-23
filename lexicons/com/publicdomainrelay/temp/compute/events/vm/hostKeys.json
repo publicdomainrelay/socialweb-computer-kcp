@@ -1,0 +1,36 @@
+{
+  "lexicon": 1,
+  "id": "com.publicdomainrelay.temp.compute.events.vm.hostKeys",
+  "description": "The bidder reports the VM's SSH host keys; sent as the payload of a market.event.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["keys", "observedAt", "createdAt"],
+        "properties": {
+          "keys": {
+            "type": "array",
+            "items": { "type": "ref", "ref": "#hostKey" }
+          },
+          "observedAt": { "type": "string", "format": "datetime" },
+          "createdAt": { "type": "string", "format": "datetime" },
+          "signatures": { "type": "ref", "ref": "network.attested.signature#signatures" }
+        }
+      }
+    },
+    "hostKey": {
+      "type": "object",
+      "required": ["type", "publicKey", "fingerprint"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "knownValues": ["ssh-ed25519", "ecdsa-sha2-nistp256", "ssh-rsa"]
+        },
+        "publicKey": { "type": "string", "description": "The key in authorized_keys form." },
+        "fingerprint": { "type": "string", "description": "The SHA256 fingerprint of the key." }
+      }
+    }
+  }
+}

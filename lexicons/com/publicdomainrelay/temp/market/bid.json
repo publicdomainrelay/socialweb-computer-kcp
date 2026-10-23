@@ -1,0 +1,23 @@
+{
+  "lexicon": 1,
+  "id": "com.publicdomainrelay.temp.market.bid",
+  "description": "A bid on an RFP, written by the bidder.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["rfp", "payload", "signatures"],
+        "properties": {
+          "rfp": { "type": "ref", "ref": "com.atproto.repo.strongRef", "description": "The market.rfp this bid answers." },
+          "config": { "type": "ref", "ref": "com.atproto.repo.strongRef", "description": "The bid configuration, such as a compute.config.wif.simple record." },
+          "payload": { "type": "ref", "ref": "com.atproto.repo.strongRef", "description": "The terms: a market.bids.free or market.bids.x402 record." },
+          "submitAccept": { "type": "string", "description": "Where the requester submits the accept: a DID service ref (did#serviceId) or an HTTP URL." },
+          "createdAt": { "type": "string", "format": "datetime" },
+          "signatures": { "type": "ref", "ref": "network.attested.signature#signatures" }
+        }
+      }
+    }
+  }
+}

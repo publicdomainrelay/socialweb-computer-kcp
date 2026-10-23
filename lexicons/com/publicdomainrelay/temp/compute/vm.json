@@ -1,0 +1,32 @@
+{
+  "lexicon": 1,
+  "id": "com.publicdomainrelay.temp.compute.vm",
+  "description": "A requested virtual machine: the payload of a compute RFP.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["role"],
+        "properties": {
+          "role": { "type": "string", "description": "The VM name within the requester's contract." },
+          "cpus": { "type": "integer", "minimum": 1 },
+          "mem": { "type": "string", "description": "Memory size, such as 4G." },
+          "disk": { "type": "string", "description": "Disk size, such as 50G." },
+          "network": { "type": "string", "description": "Network transfer allowance, such as 500G." },
+          "location": { "type": "ref", "ref": "#location" },
+          "user_data": { "type": "string", "description": "cloud-init user data." },
+          "createdAt": { "type": "string", "format": "datetime" }
+        }
+      }
+    },
+    "location": {
+      "type": "object",
+      "properties": {
+        "country": { "type": "string" },
+        "region": { "type": "string" }
+      }
+    }
+  }
+}

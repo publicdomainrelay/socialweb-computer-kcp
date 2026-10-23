@@ -1,0 +1,25 @@
+{
+  "lexicon": 1,
+  "id": "com.publicdomainrelay.temp.market.offering",
+  "description": "A bidder announces the payload collections it bids on and where it takes RFPs.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["appliesTo", "createdAt"],
+        "properties": {
+          "endpointUrl": { "type": "string", "description": "Where requesters submit RFPs: a DID service ref (did#serviceId) or an HTTP URL." },
+          "appliesTo": {
+            "type": "array",
+            "description": "The payload collections the bidder bids on.",
+            "items": { "type": "string", "format": "nsid" }
+          },
+          "createdAt": { "type": "string", "format": "datetime" },
+          "refreshedAt": { "type": "string", "format": "datetime" }
+        }
+      }
+    }
+  }
+}

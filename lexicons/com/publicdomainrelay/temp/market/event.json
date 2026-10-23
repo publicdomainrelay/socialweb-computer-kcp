@@ -1,0 +1,21 @@
+{
+  "lexicon": 1,
+  "id": "com.publicdomainrelay.temp.market.event",
+  "description": "An event envelope under a receipt; the payload is a compute.events record.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["receipt", "payload", "signatures"],
+        "properties": {
+          "receipt": { "type": "ref", "ref": "com.atproto.repo.strongRef", "description": "The market.receipt the event belongs to." },
+          "payload": { "type": "ref", "ref": "com.atproto.repo.strongRef", "description": "The event record, such as compute.events.vm.delete." },
+          "createdAt": { "type": "string", "format": "datetime" },
+          "signatures": { "type": "ref", "ref": "network.attested.signature#signatures" }
+        }
+      }
+    }
+  }
+}

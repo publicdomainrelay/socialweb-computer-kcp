@@ -1,0 +1,20 @@
+{
+  "lexicon": 1,
+  "id": "com.publicdomainrelay.temp.compute.events.vm.started",
+  "description": "The bidder reports that the VM started; sent as the payload of a market.event.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["createdAt"],
+        "properties": {
+          "observedAt": { "type": "string", "format": "datetime" },
+          "createdAt": { "type": "string", "format": "datetime" },
+          "signatures": { "type": "ref", "ref": "network.attested.signature#signatures" }
+        }
+      }
+    }
+  }
+}

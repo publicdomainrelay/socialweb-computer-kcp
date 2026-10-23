@@ -1,0 +1,23 @@
+{
+  "lexicon": 1,
+  "id": "com.publicdomainrelay.temp.badgeBlueKeys",
+  "description": "Binds a signing key to the repository DID, so that records signed with the key verify as the DID's.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["keyId", "challenge", "service", "createdAt"],
+        "properties": {
+          "keyId": { "type": "string", "description": "The did:key of the bound key." },
+          "name": { "type": "string" },
+          "challenge": { "type": "string", "format": "did", "description": "The repository DID the key is bound to." },
+          "service": { "type": "string", "description": "The service the key signs for." },
+          "nonce": { "type": "string" },
+          "createdAt": { "type": "string", "format": "datetime" }
+        }
+      }
+    }
+  }
+}

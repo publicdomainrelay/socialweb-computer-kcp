@@ -1,0 +1,21 @@
+{
+  "lexicon": 1,
+  "id": "com.publicdomainrelay.temp.market.accepts.free",
+  "description": "Accept terms for a market.bids.free bid.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["bid", "signatures"],
+        "properties": {
+          "bid": { "type": "ref", "ref": "com.atproto.repo.strongRef", "description": "The accepted market.bid." },
+          "payload": { "type": "ref", "ref": "com.atproto.repo.strongRef" },
+          "createdAt": { "type": "string", "format": "datetime" },
+          "signatures": { "type": "ref", "ref": "network.attested.signature#signatures" }
+        }
+      }
+    }
+  }
+}

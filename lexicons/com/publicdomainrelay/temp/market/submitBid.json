@@ -1,0 +1,38 @@
+{
+  "lexicon": 1,
+  "id": "com.publicdomainrelay.temp.market.submitBid",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "A bidder submits a bid it wrote to the requester. Requires a service-auth JWT with lxm set to this NSID; the bidder is the token issuer.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["uri", "cid", "record"],
+          "properties": {
+            "uri": { "type": "string", "format": "at-uri", "description": "The market.bid record." },
+            "cid": { "type": "string", "format": "cid" },
+            "record": { "type": "ref", "ref": "com.publicdomainrelay.temp.market.bid", "description": "The market.bid record value." }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["ok"],
+          "properties": {
+            "ok": { "type": "boolean" }
+          }
+        }
+      },
+      "errors": [
+        { "name": "InvalidRequest" },
+        { "name": "Unauthorized" },
+        { "name": "Forbidden" },
+        { "name": "Unavailable" }
+      ]
+    }
+  }
+}

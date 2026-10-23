@@ -1,0 +1,38 @@
+{
+  "lexicon": 1,
+  "id": "com.publicdomainrelay.temp.market.submitEvent",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "A contract party submits a market.event it wrote to the other party. Requires a service-auth JWT with lxm set to this NSID; the sender is the token issuer and must be the accept author (to a bidder) or the receipt author (to a requester).",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["uri", "cid", "record"],
+          "properties": {
+            "uri": { "type": "string", "format": "at-uri", "description": "The market.event record." },
+            "cid": { "type": "string", "format": "cid" },
+            "record": { "type": "ref", "ref": "com.publicdomainrelay.temp.market.event", "description": "The market.event record value." }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["ok"],
+          "properties": {
+            "ok": { "type": "boolean" }
+          }
+        }
+      },
+      "errors": [
+        { "name": "InvalidRequest" },
+        { "name": "Unauthorized" },
+        { "name": "Forbidden" },
+        { "name": "Unavailable" }
+      ]
+    }
+  }
+}
