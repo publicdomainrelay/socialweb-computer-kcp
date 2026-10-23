@@ -19,15 +19,12 @@ import (
 	"github.com/bluesky-social/indigo/atproto/syntax"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/serviceauth"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 const (
 	QRNSID = "com.fedfork.atprotoOauthQR"
 
 	DefaultQRTTL = 5 * time.Minute
-
-	DefaultQRPollInterval = 3 * time.Second
 
 	QRServiceAuthTTL = time.Minute
 )
@@ -123,8 +120,6 @@ type QRTransfer struct {
 
 	HTTPClient *http.Client
 
-	PollInterval time.Duration
-
 	TTL time.Duration
 
 	mu sync.Mutex
@@ -148,12 +143,11 @@ func NewQRTransfer(origin, cliDID, nonce string, signer ServiceAuthSigner) (*QRT
 		return nil, errors.New("oauthclient: the qr transfer has no service auth signer")
 	}
 	return &QRTransfer{
-		Origin:       strings.TrimRight(parsed.String(), "/"),
-		CLIDID:       did.String(),
-		Nonce:        nonce,
-		Signer:       signer,
-		PollInterval: DefaultQRPollInterval,
-		TTL:          DefaultQRTTL,
+		Origin: strings.TrimRight(parsed.String(), "/"),
+		CLIDID: did.String(),
+		Nonce:  nonce,
+		Signer: signer,
+		TTL:    DefaultQRTTL,
 	}, nil
 }
 
@@ -235,36 +229,6 @@ func (q *QRTransfer) PollOnce(ctx context.Context) (QRSession, bool, error) {
 		return QRSession{}, false, nil
 	default:
 		return QRSession{}, false, fmt.Errorf("oauthclient: the qr poll returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
-	}
-}
-
-func (q *QRTransfer) Poll(ctx context.Context) (QRSession, error) {
-	if q == nil {
-		return QRSession{}, errors.New("oauthclient: no qr transfer")
-	}
-	ttl := q.TTL
-	ttl = opt.Positive(ttl, DefaultQRTTL)
-	interval := q.PollInterval
-	interval = opt.Positive(interval, DefaultQRPollInterval)
-	deadline := time.Now().Add(ttl)
-	for {
-		session, ok, err := q.PollOnce(ctx)
-		if err != nil {
-			return QRSession{}, err
-		}
-		if ok {
-			return session, nil
-		}
-		if !time.Now().Add(interval).Before(deadline) {
-			return QRSession{}, ErrQRTimeout
-		}
-		timer := time.NewTimer(interval)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return QRSession{}, ctx.Err()
-		case <-timer.C:
-		}
 	}
 }
 
