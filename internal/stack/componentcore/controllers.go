@@ -56,7 +56,6 @@ import (
 	vaultctl "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/vault"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/vaultcertificate"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/vaultcredential"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/credentials"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/eventstream"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/exposure"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostlifecycle"
@@ -71,11 +70,9 @@ import (
 	presence "github.com/johnandersen777/socialweb-computer-kcp/internal/marketpresence"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/oauthcallback"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/pds/remote"
 	policycontroller "github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/controller"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/statusstate"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/subnetallocator"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vaultmain"
 )
 
@@ -337,8 +334,8 @@ func (c *Core) fileAuthority() *hostlifecycle.FileAuthority {
 func (c *Core) registerNetwork(mgr *ctlruntime.Manager, clients *workspaceClients, g *supervise.Group) error {
 	cfg := c.cfg
 	log := cfg.Log
-	caBundle := func(ref string) ([]byte, error) { return os.ReadFile(openbaoctl.FileRef(ref)) }
-	if err := repos.Register(mgr, c.repoOptions(caBundle)); err != nil {
+	remoteBao := vaultctl.Remote(c.handlers, log)
+	if err := repos.Register(mgr, c.repoOptions()); err != nil {
 		return fmt.Errorf("componentcore: the repo controllers: %w", err)
 	}
 	if err := policyctl.Register(mgr, policyctl.Options{Bus: c.handlers, PLCURL: cfg.PLCBaseURL, Log: log, Disabled: cfg.DisablePolicy,
@@ -347,10 +344,10 @@ func (c *Core) registerNetwork(mgr *ctlruntime.Manager, clients *workspaceClient
 		}}); err != nil {
 		return fmt.Errorf("componentcore: the policy controllers: %w", err)
 	}
-	if _, err := vaultctl.Register(mgr, c.handlers, vaultctl.Options{Remote: &openbao.Remote{Enabled: true}, Log: log}); err != nil {
+	if _, err := vaultctl.Register(mgr, c.handlers, vaultctl.Options{Remote: remoteBao, Log: log}); err != nil {
 		return fmt.Errorf("componentcore: the vault controller: %w", err)
 	}
-	if _, err := remoteopenbaoctl.Register(mgr, remoteopenbaoctl.Options{Remote: &openbao.Remote{Enabled: true}, Log: log}); err != nil {
+	if _, err := remoteopenbaoctl.Register(mgr, remoteopenbaoctl.Options{Remote: remoteBao, Log: log}); err != nil {
 		return fmt.Errorf("componentcore: the RemoteOpenBao controller: %w", err)
 	}
 	run, err := eventsctl.Register(mgr, eventsctl.Options{Bus: c.handlers, Dynamic: eventstream.DynamicFactory(cfg.DynamicFactory),
@@ -416,52 +413,6 @@ func (c *Core) relayEndpoint(base string) statusstate.RelayEndpointFunc {
 		}
 		return "http://" + kcp.ServiceFQDN(strings.ToLower(kind), "default", base, kcp.DefaultServiceDomain), true
 	}
-}
-
-func coreSecretResolver(store *kcpstore.Store, workspace, client, server string) remote.Resolve {
-	if store == nil {
-		return nil
-	}
-	resolver, err := credentials.NewKCPResolver(store, workspace, client, server)
-	if err != nil {
-		return nil
-	}
-	return func(ctx context.Context, raw string) (map[string]any, error) {
-		ref, err := coreCredentialRef(raw)
-		if err != nil {
-			return nil, err
-		}
-		credential, err := resolver.Resolve(ctx, ref)
-		if err != nil {
-			return nil, err
-		}
-		return credential.Data, nil
-	}
-}
-
-func coreCredentialRef(raw string) (component.CredentialRef, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return component.CredentialRef{}, errors.New("componentcore: the secret ref is empty")
-	}
-	if path, ok := strings.CutPrefix(raw, "file:"); ok {
-		if path == "" {
-			return component.CredentialRef{}, errors.New("componentcore: the file secret ref has no path")
-		}
-		return component.CredentialRef{Mount: "file", Path: path}, nil
-	}
-	raw = strings.TrimPrefix(raw, "openbao:")
-	raw = strings.TrimPrefix(raw, "vault:")
-	server, path, ok := strings.Cut(raw, ":")
-	if !ok {
-		server = ""
-		path = raw
-	}
-	path = strings.Trim(path, "/")
-	if path == "" {
-		return component.CredentialRef{}, errors.New("componentcore: the secret ref has no path")
-	}
-	return component.CredentialRef{Server: strings.TrimSpace(server), Path: path}, nil
 }
 
 func openBaoMetadata(store *kcpstore.Store, workspace string) statusstate.VaultSource {

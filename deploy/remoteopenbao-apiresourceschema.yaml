@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-2.remoteopenbaos.socialweb.computer
+  name: v1alpha1-3.remoteopenbaos.socialweb.computer
   labels:
     contracts.socialweb.computer/vaults: v1alpha1
 spec:
@@ -37,8 +37,50 @@ spec:
                 properties:
                   enabled:
                     type: boolean
-                  caBundleRef:
-                    type: string
+                  caRef:
+                    type: object
+                    properties:
+                      group:
+                        type: string
+                      kind:
+                        type: string
+                        maxLength: 63
+                      name:
+                        type: string
+                        maxLength: 253
+                      workspace:
+                        type: string
+                    required:
+                      - kind
+                      - name
+                  caSecretRef:
+                    type: object
+                    properties:
+                      vault:
+                        type: object
+                        properties:
+                          group:
+                            type: string
+                          kind:
+                            type: string
+                            maxLength: 63
+                          name:
+                            type: string
+                            maxLength: 253
+                          workspace:
+                            type: string
+                        required:
+                          - kind
+                          - name
+                      mount:
+                        type: string
+                      path:
+                        type: string
+                      key:
+                        type: string
+                    required:
+                      - mount
+                      - path
                   serverName:
                     type: string
               auth:
@@ -51,14 +93,92 @@ spec:
                       - approle
                       - cert
                   tokenRef:
-                    type: string
+                    type: object
+                    properties:
+                      vault:
+                        type: object
+                        properties:
+                          group:
+                            type: string
+                          kind:
+                            type: string
+                            maxLength: 63
+                          name:
+                            type: string
+                            maxLength: 253
+                          workspace:
+                            type: string
+                        required:
+                          - kind
+                          - name
+                      mount:
+                        type: string
+                      path:
+                        type: string
+                      key:
+                        type: string
+                    required:
+                      - mount
+                      - path
                   approle:
                     type: object
                     properties:
                       roleIdRef:
-                        type: string
+                        type: object
+                        properties:
+                          vault:
+                            type: object
+                            properties:
+                              group:
+                                type: string
+                              kind:
+                                type: string
+                                maxLength: 63
+                              name:
+                                type: string
+                                maxLength: 253
+                              workspace:
+                                type: string
+                            required:
+                              - kind
+                              - name
+                          mount:
+                            type: string
+                          path:
+                            type: string
+                          key:
+                            type: string
+                        required:
+                          - mount
+                          - path
                       secretIdRef:
-                        type: string
+                        type: object
+                        properties:
+                          vault:
+                            type: object
+                            properties:
+                              group:
+                                type: string
+                              kind:
+                                type: string
+                                maxLength: 63
+                              name:
+                                type: string
+                                maxLength: 253
+                              workspace:
+                                type: string
+                            required:
+                              - kind
+                              - name
+                          mount:
+                            type: string
+                          path:
+                            type: string
+                          key:
+                            type: string
+                        required:
+                          - mount
+                          - path
                     required:
                       - roleIdRef
                       - secretIdRef
@@ -66,9 +186,61 @@ spec:
                     type: object
                     properties:
                       certRef:
-                        type: string
+                        type: object
+                        properties:
+                          vault:
+                            type: object
+                            properties:
+                              group:
+                                type: string
+                              kind:
+                                type: string
+                                maxLength: 63
+                              name:
+                                type: string
+                                maxLength: 253
+                              workspace:
+                                type: string
+                            required:
+                              - kind
+                              - name
+                          mount:
+                            type: string
+                          path:
+                            type: string
+                          key:
+                            type: string
+                        required:
+                          - mount
+                          - path
                       keyRef:
-                        type: string
+                        type: object
+                        properties:
+                          vault:
+                            type: object
+                            properties:
+                              group:
+                                type: string
+                              kind:
+                                type: string
+                                maxLength: 63
+                              name:
+                                type: string
+                                maxLength: 253
+                              workspace:
+                                type: string
+                            required:
+                              - kind
+                              - name
+                          mount:
+                            type: string
+                          path:
+                            type: string
+                          key:
+                            type: string
+                        required:
+                          - mount
+                          - path
                     required:
                       - certRef
                       - keyRef

@@ -70,8 +70,9 @@ func New(spec v1alpha1.SshServerSpec, deps Deps) (*Service, error) {
 		return nil, errors.New("sshserver: the component names no host key path")
 	}
 	network := s.network()
-	if tlsConfig := networkTLSConfig(network.CABundle); tlsConfig != nil {
-		s.tls = tlsConfig
+	s.trust = component.NewTrust(spec.TLS.CA(), deps.Log)
+	if s.trust.Enabled() {
+		s.tls = s.trust.Client(nil)
 	}
 	if network.PLCDirectoryURL != "" && deps.Bus != nil {
 		s.directory = s.directoryFor(network.PLCDirectoryURL)
@@ -195,18 +196,6 @@ func (c chainedHosts) Address(hostport string) (string, bool) {
 		}
 	}
 	return "", false
-}
-
-func networkTLSConfig(caBundle string) *tls.Config {
-	raw := strings.TrimSpace(caBundle)
-	if raw == "" {
-		return nil
-	}
-	cfg, err := httpclient.TLSConfig(httpclient.TLSOptions{CAPEM: []byte(raw)})
-	if err != nil {
-		return nil
-	}
-	return cfg
 }
 
 func networkHostsResolver(network v1alpha1.MarketNetworkValue, fallback networkdial.Resolver) networkdial.Resolver {

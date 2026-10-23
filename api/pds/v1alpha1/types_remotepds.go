@@ -2,6 +2,8 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 type RemotePDS struct {
@@ -36,19 +38,19 @@ type RemotePDSSpec struct {
 type RemotePDSTLS struct {
 	Enabled bool `json:"enabled,omitempty"`
 
-	CABundleRef string `json:"caBundleRef,omitempty"`
+	CARef *commonv1.ObjectRef `json:"caRef,omitempty"`
+
+	CASecretRef *commonv1.SecretRef `json:"caSecretRef,omitempty"`
 
 	ServerName string `json:"serverName,omitempty"`
 }
 
 type RemotePDSAuth struct {
-	AccountRef string `json:"accountRef,omitempty"`
+	AccessTokenRef *commonv1.SecretRef `json:"accessTokenRef,omitempty"`
 
-	AccessTokenRef string `json:"accessTokenRef,omitempty"`
+	RefreshTokenRef *commonv1.SecretRef `json:"refreshTokenRef,omitempty"`
 
-	RefreshTokenRef string `json:"refreshTokenRef,omitempty"`
-
-	DPoPKeyRef string `json:"dpopKeyRef,omitempty"`
+	DPoPKeyRef *commonv1.SecretRef `json:"dpopKeyRef,omitempty"`
 }
 
 type RemotePDSPhase string

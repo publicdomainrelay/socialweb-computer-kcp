@@ -9,7 +9,7 @@ type PrinterColumn = corev1alpha1.PrinterColumn
 type APIResource = corev1alpha1.APIResource
 
 var APIResources = []APIResource{
-	{Kind: "RemotePDS", Plural: "remotepds", Revision: 1, Export: "pds", Object: RemotePDS{}, PrinterColumns: []PrinterColumn{
+	{Kind: "RemotePDS", Plural: "remotepds", Revision: 3, Export: "pds", Object: RemotePDS{}, PrinterColumns: []PrinterColumn{
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "Ready", Type: "boolean", JSONPath: ".status.ready"},
 		{Name: "Endpoint", Type: "string", JSONPath: ".status.endpoint"},

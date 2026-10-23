@@ -21,7 +21,7 @@ spec:
         crd: {}
     - group: socialweb.computer
       name: remoteopenbaos
-      schema: v1alpha1-2.remoteopenbaos.socialweb.computer
+      schema: v1alpha1-3.remoteopenbaos.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
@@ -40,6 +41,7 @@ type Controller struct {
 
 func Register(m *ctlruntime.Manager, c *compose.Composer) error {
 	ctl := &Controller{c: c}
+	c.ProvideTrust(schema.GroupKind{Group: v1alpha1.GroupName, Kind: Kind})
 	opts := append([]ctlruntime.Option{ctlruntime.Export(compose.ExportApplications), ctlruntime.Finalizer(compose.Finalizer)}, c.Watches(Kind)...)
 	if err := ctlruntime.For[*v1alpha1.MarketRequester](m, Name, ctl, opts...); err != nil {
 		return fmt.Errorf("marketrequester: registering the MarketRequester controller: %w", err)
@@ -220,7 +222,7 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 	}
 	mode, publicOrigin, oauthClientID, oauthRedirectURI, guestSSHKeysFile := compose.RequesterComponentFields(o.Spec.Options, plan.Mode)
 	spec := v1alpha1.RequesterSpec{
-		ComponentSpec:        compose.NewComponentSpec(compose.ComponentCRStateDir(stateRoot, compose.ComponentKindRequester, RequesterComponent), network),
+		ComponentSpec:        p.c.NetworkComponentSpec(p.r, compose.ComponentCRStateDir(stateRoot, compose.ComponentKindRequester, RequesterComponent), network),
 		Identity:             ident,
 		PolicyEngineRef:      compose.ComponentRefFor(compose.ComponentKindPolicyEngine, compose.PolicyEngineComponent),
 		VaultRef:             vault,

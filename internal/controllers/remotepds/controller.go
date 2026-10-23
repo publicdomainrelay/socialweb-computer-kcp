@@ -3,7 +3,6 @@ package remotepds
 import (
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -14,9 +13,11 @@ import (
 	"github.com/bluesky-social/indigo/atproto/syntax"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
+	vaultctl "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/vault"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/binding"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
@@ -37,20 +38,12 @@ const (
 	DefaultCheckInterval = 30 * time.Second
 )
 
-type CABundleFunc func(ref string) ([]byte, error)
-
-type SecretsFunc func(workspace string) remote.Resolve
-
 type SecretRefsFunc func(workspace string) remote.Secrets
 
 type Options struct {
 	Log *slog.Logger
 
-	CABundle CABundleFunc
-
 	Bus *bus.Bus
-
-	Secrets SecretsFunc
 
 	SecretRefs SecretRefsFunc
 
@@ -62,11 +55,9 @@ type Options struct {
 type Controller struct {
 	log *slog.Logger
 
-	caBundle CABundleFunc
+	roots *vaultctl.Roots
 
 	bus *bus.Bus
-
-	secrets SecretsFunc
 
 	secretRefs SecretRefsFunc
 
@@ -94,7 +85,7 @@ func New(opts Options) *Controller {
 	timeout = opt.Positive(timeout, DefaultTimeout)
 	checkInterval := opts.CheckInterval
 	checkInterval = ctlruntime.Period(checkInterval, DefaultCheckInterval)
-	return &Controller{log: log.With("component", "remotepds-controller"), caBundle: opts.CABundle, bus: opts.Bus, secrets: opts.Secrets,
+	return &Controller{log: log.With("component", "remotepds-controller"), roots: vaultctl.NewRoots(opts.Bus, log), bus: opts.Bus,
 		secretRefs: opts.SecretRefs, timeout: timeout, checkInterval: checkInterval, hosts: binding.New[*remote.Host]()}
 }
 
@@ -111,6 +102,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 	target := binding.Target{Cluster: req.Cluster, Workspace: req.Workspace, Name: req.Name}
 	if !object.DeletionTimestamp.IsZero() {
 		c.hosts.Set(target, nil)
+		c.roots.Drop(self(req, object))
 		return ctlruntime.Result{}, nil
 	}
 	generation := object.Generation
@@ -185,21 +177,17 @@ func (c *Controller) connect(ctx context.Context, req ctlruntime.Request, object
 	if _, err := syntax.ParseDID(didText); err != nil {
 		return nil, "", "InvalidDID", fmt.Errorf("the RemotePDS did %q is invalid", didText)
 	}
-	tlsConfig, err := c.tlsConfig(object.Spec.TLS, baseURL)
+	tlsConfig, err := c.tlsConfig(ctx, self(req, object), object.Spec.TLS, baseURL)
 	if err != nil {
 		return nil, "", "InvalidTLS", transientError{err: err}
-	}
-	var resolve remote.Resolve
-	if c.secrets != nil {
-		resolve = c.secrets(req.Workspace)
-	}
-	auth, err := remote.Credentials(ctx, object.Spec.Auth, resolve)
-	if err != nil {
-		return nil, "", "InvalidAuth", transientError{err: err}
 	}
 	var secrets remote.Secrets
 	if c.secretRefs != nil {
 		secrets = c.secretRefs(req.Workspace)
+	}
+	auth, err := remote.Credentials(ctx, object.Spec.Auth, c.vaultSecrets(self(req, object)))
+	if err != nil {
+		return nil, "", "InvalidAuth", transientError{err: err}
 	}
 	endpoint := strings.TrimRight(baseURL.String(), "/")
 	host, err := remote.New(remote.Config{URL: endpoint, DID: didText, TLS: tlsConfig, Auth: auth, Secrets: secrets, Timeout: c.timeout})
@@ -234,11 +222,11 @@ func remoteURL(raw string) (*url.URL, error) {
 	return parsed, nil
 }
 
-func (c *Controller) tlsConfig(spec pdsv1alpha1.RemotePDSTLS, baseURL *url.URL) (*tls.Config, error) {
-	caRef := strings.TrimSpace(spec.CABundleRef)
+func (c *Controller) tlsConfig(ctx context.Context, from commonv1.ObjectRef, spec pdsv1alpha1.RemotePDSTLS, baseURL *url.URL) (*tls.Config, error) {
+	caSet := spec.CARef != nil || spec.CASecretRef != nil
 	serverName := strings.TrimSpace(spec.ServerName)
 	if !spec.Enabled {
-		if caRef != "" || serverName != "" {
+		if caSet || serverName != "" {
 			return nil, errors.New("tls fields are set but tls.enabled is false")
 		}
 		return nil, nil
@@ -247,22 +235,28 @@ func (c *Controller) tlsConfig(spec pdsv1alpha1.RemotePDSTLS, baseURL *url.URL) 
 		return nil, errors.New("tls is enabled but the RemotePDS url is not https")
 	}
 	config := &tls.Config{MinVersion: tls.VersionTLS12}
-	if caRef != "" {
-		if c.caBundle == nil {
-			return nil, errors.New("tls.caBundleRef is set but no CA bundle resolver is configured")
-		}
-		pem, err := c.caBundle(caRef)
-		if err != nil {
-			return nil, fmt.Errorf("reading the CA bundle %q: %w", caRef, err)
-		}
-		pool := x509.NewCertPool()
-		if !pool.AppendCertsFromPEM(pem) {
-			return nil, fmt.Errorf("the CA bundle %q does not parse", caRef)
-		}
-		config.RootCAs = pool
-	}
 	if serverName != "" {
 		config.ServerName = serverName
 	}
+	pool, err := c.roots.Pool(ctx, from, spec.CARef, spec.CASecretRef)
+	if err != nil {
+		return nil, err
+	}
+	if pool != nil {
+		config = pool.ClientConfig(config)
+	}
 	return config, nil
+}
+
+func self(req ctlruntime.Request, object *pdsv1alpha1.RemotePDS) commonv1.ObjectRef {
+	return commonv1.ObjectRef{Group: pdsv1alpha1.GroupName, Kind: Kind, Name: object.Name, Workspace: req.Workspace}
+}
+
+func (c *Controller) vaultSecrets(from commonv1.ObjectRef) remote.Secrets {
+	if c.bus == nil {
+		return nil
+	}
+	return func(ctx context.Context, ref commonv1.SecretRef) (map[string]any, error) {
+		return vaultctl.ReadSecret(ctx, c.bus, from, ref)
+	}
 }

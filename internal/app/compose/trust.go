@@ -11,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/vault"
 )
@@ -119,6 +120,23 @@ func (h trustHandle) Watch(fn func([]byte)) func() {
 			h.t.mu.Unlock()
 		})
 	}
+}
+
+func (c *Composer) PublishNetworkTrust(r Root, network *v1alpha1.MarketNetworkValue) *commonv1.ObjectRef {
+	if network == nil || strings.TrimSpace(network.CABundle) == "" {
+		return nil
+	}
+	ref := r.Ref()
+	c.PublishTrust(ref, []byte(strings.TrimSpace(network.CABundle)+"\n"))
+	return &ref
+}
+
+func (c *Composer) NetworkComponentSpec(r Root, stateDir string, network *v1alpha1.MarketNetworkValue) v1alpha1.ComponentSpec {
+	spec := NewComponentSpec(stateDir, network)
+	if ca := c.PublishNetworkTrust(r, network); ca != nil {
+		spec.TLS = &v1alpha1.ComponentTLS{CARef: ca}
+	}
+	return spec
 }
 
 func TrustLink(from, publisher commonv1.ObjectRef) Link {

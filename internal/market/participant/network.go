@@ -1,15 +1,12 @@
 package participant
 
 import (
-	"crypto/tls"
-	"errors"
 	"net/url"
 	"strings"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	contractcomponent "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/networkdial"
 )
 
@@ -64,18 +61,6 @@ func NetworkHosts(n v1alpha1.MarketNetworkValue, fallback networkdial.Resolver) 
 		return nil
 	}
 	return ChainedResolver(resolvers)
-}
-
-func NetworkTLS(bundle string) (*tls.Config, error) {
-	bundle = strings.TrimSpace(bundle)
-	if bundle == "" {
-		return nil, nil
-	}
-	cfg, err := httpclient.TLSConfig(httpclient.TLSOptions{CAPEM: []byte(bundle)})
-	if err != nil || cfg == nil || cfg.RootCAs == nil {
-		return nil, errors.New("participant: the network CA bundle has no certificates")
-	}
-	return cfg, nil
 }
 
 func AbsoluteHTTPURL(raw string) bool {

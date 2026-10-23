@@ -91,6 +91,13 @@ type ComponentTLS struct {
 	CARef *commonv1.ObjectRef `json:"caRef,omitempty"`
 }
 
+func (t *ComponentTLS) CA() *commonv1.ObjectRef {
+	if t == nil {
+		return nil
+	}
+	return t.CARef
+}
+
 type ComponentServiceAuth struct {
 	Issuer string `json:"issuer,omitempty"`
 

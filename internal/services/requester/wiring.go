@@ -51,17 +51,17 @@ func (s *Service) sessionStore() oauthclient.SessionStore {
 	return s.sessions
 }
 
-func egressFor(spec v1alpha1.RequesterSpec, deps Deps) component.Egress {
+func egressFor(spec v1alpha1.RequesterSpec, deps Deps, trust *component.Trust) component.Egress {
 	egress := deps.Egress
 	egress.Log = cmp.Or(egress.Log, deps.Log)
+	if trust.Enabled() {
+		egress.TLS = trust.Client(nil)
+	}
 	if spec.Network == nil {
 		return egress
 	}
 	if hosts := participant.NetworkHosts(*spec.Network, egress.Hosts); hosts != nil {
 		egress.Hosts = hosts
-	}
-	if tlsConfig, err := participant.NetworkTLS(spec.Network.CABundle); err == nil && tlsConfig != nil {
-		egress.TLS = tlsConfig
 	}
 	return egress
 }

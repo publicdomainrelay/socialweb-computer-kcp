@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-1.remotepds.pds.socialweb.computer
+  name: v1alpha1-3.remotepds.pds.socialweb.computer
 spec:
   group: pds.socialweb.computer
   names:
@@ -37,21 +37,139 @@ spec:
                 properties:
                   enabled:
                     type: boolean
-                  caBundleRef:
-                    type: string
+                  caRef:
+                    type: object
+                    properties:
+                      group:
+                        type: string
+                      kind:
+                        type: string
+                        maxLength: 63
+                      name:
+                        type: string
+                        maxLength: 253
+                      workspace:
+                        type: string
+                    required:
+                      - kind
+                      - name
+                  caSecretRef:
+                    type: object
+                    properties:
+                      vault:
+                        type: object
+                        properties:
+                          group:
+                            type: string
+                          kind:
+                            type: string
+                            maxLength: 63
+                          name:
+                            type: string
+                            maxLength: 253
+                          workspace:
+                            type: string
+                        required:
+                          - kind
+                          - name
+                      mount:
+                        type: string
+                      path:
+                        type: string
+                      key:
+                        type: string
+                    required:
+                      - mount
+                      - path
                   serverName:
                     type: string
               auth:
                 type: object
                 properties:
-                  accountRef:
-                    type: string
                   accessTokenRef:
-                    type: string
+                    type: object
+                    properties:
+                      vault:
+                        type: object
+                        properties:
+                          group:
+                            type: string
+                          kind:
+                            type: string
+                            maxLength: 63
+                          name:
+                            type: string
+                            maxLength: 253
+                          workspace:
+                            type: string
+                        required:
+                          - kind
+                          - name
+                      mount:
+                        type: string
+                      path:
+                        type: string
+                      key:
+                        type: string
+                    required:
+                      - mount
+                      - path
                   refreshTokenRef:
-                    type: string
+                    type: object
+                    properties:
+                      vault:
+                        type: object
+                        properties:
+                          group:
+                            type: string
+                          kind:
+                            type: string
+                            maxLength: 63
+                          name:
+                            type: string
+                            maxLength: 253
+                          workspace:
+                            type: string
+                        required:
+                          - kind
+                          - name
+                      mount:
+                        type: string
+                      path:
+                        type: string
+                      key:
+                        type: string
+                    required:
+                      - mount
+                      - path
                   dpopKeyRef:
-                    type: string
+                    type: object
+                    properties:
+                      vault:
+                        type: object
+                        properties:
+                          group:
+                            type: string
+                          kind:
+                            type: string
+                            maxLength: 63
+                          name:
+                            type: string
+                            maxLength: 253
+                          workspace:
+                            type: string
+                        required:
+                          - kind
+                          - name
+                      mount:
+                        type: string
+                      path:
+                        type: string
+                      key:
+                        type: string
+                    required:
+                      - mount
+                      - path
               capabilities:
                 type: array
                 items:

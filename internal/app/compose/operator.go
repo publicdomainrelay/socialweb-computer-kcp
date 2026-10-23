@@ -25,7 +25,7 @@ const OperatorKeysPath = "identity/operator/keys"
 type Operator struct {
 	PdsURL string
 
-	CAFile string
+	CARef *commonv1.ObjectRef
 
 	Identifier string
 
@@ -47,10 +47,18 @@ func (o Operator) ref(ws string) commonv1.ObjectRef {
 }
 
 func OperatorLinks(r Root, o Operator) []Link {
-	return []Link{
+	links := []Link{
 		RefLink(r.Ref(), o.ref(r.Workspace), Cap(pds.CapabilitySession, ScopeAll), Cap(pds.CapabilityAccount, ScopeAll)),
 		RootVaultLink(r, o.Vault, o.Mount+"/identity/*"),
 	}
+	if o.CARef != nil && o.tls() {
+		links = append(links, TrustLink(o.ref(r.Workspace), *o.CARef))
+	}
+	return links
+}
+
+func (o Operator) tls() bool {
+	return strings.HasPrefix(strings.TrimRight(strings.TrimSpace(o.PdsURL), "/"), "https://")
 }
 
 func (c *Composer) OperatorRepo(ctx context.Context, r Root, o Operator) (atprotorepo.Repo, string, error) {
@@ -58,8 +66,9 @@ func (c *Composer) OperatorRepo(ctx context.Context, r Root, o Operator) (atprot
 		return nil, "", errors.New("compose: the operator account names no PDS URL or identifier")
 	}
 	spec := pdsv1alpha1.RemotePDSSpec{URL: strings.TrimRight(strings.TrimSpace(o.PdsURL), "/"), DID: pdsServiceDID(o.PdsURL)}
-	if o.CAFile != "" && strings.HasPrefix(spec.URL, "https://") {
-		spec.TLS = pdsv1alpha1.RemotePDSTLS{Enabled: true, CABundleRef: "file:" + o.CAFile}
+	if o.CARef != nil && o.tls() {
+		ca := *o.CARef
+		spec.TLS = pdsv1alpha1.RemotePDSTLS{Enabled: true, CARef: &ca}
 	}
 	remote := &pdsv1alpha1.RemotePDS{ObjectMeta: metav1.ObjectMeta{Name: o.remoteName()}, Spec: spec}
 	if _, err := c.ApplyRemotePDS(ctx, r, r.Workspace, remote); err != nil {

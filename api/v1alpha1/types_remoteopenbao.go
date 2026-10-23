@@ -2,6 +2,8 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 type RemoteOpenBao struct {
@@ -36,7 +38,9 @@ type RemoteOpenBaoSpec struct {
 type RemoteOpenBaoTLS struct {
 	Enabled bool `json:"enabled,omitempty"`
 
-	CABundleRef string `json:"caBundleRef,omitempty"`
+	CARef *commonv1.ObjectRef `json:"caRef,omitempty"`
+
+	CASecretRef *commonv1.SecretRef `json:"caSecretRef,omitempty"`
 
 	ServerName string `json:"serverName,omitempty"`
 }
@@ -54,7 +58,7 @@ const (
 type RemoteOpenBaoAuth struct {
 	Method RemoteOpenBaoAuthMethod `json:"method"`
 
-	TokenRef string `json:"tokenRef,omitempty"`
+	TokenRef *commonv1.SecretRef `json:"tokenRef,omitempty"`
 
 	AppRole *RemoteOpenBaoAppRole `json:"approle,omitempty"`
 
@@ -62,15 +66,15 @@ type RemoteOpenBaoAuth struct {
 }
 
 type RemoteOpenBaoAppRole struct {
-	RoleIDRef string `json:"roleIdRef"`
+	RoleIDRef commonv1.SecretRef `json:"roleIdRef"`
 
-	SecretIDRef string `json:"secretIdRef"`
+	SecretIDRef commonv1.SecretRef `json:"secretIdRef"`
 }
 
 type RemoteOpenBaoCert struct {
-	CertRef string `json:"certRef"`
+	CertRef commonv1.SecretRef `json:"certRef"`
 
-	KeyRef string `json:"keyRef"`
+	KeyRef commonv1.SecretRef `json:"keyRef"`
 }
 
 type RemoteOpenBaoMounts struct {

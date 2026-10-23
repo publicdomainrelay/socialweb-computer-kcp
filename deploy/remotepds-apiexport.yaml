@@ -6,6 +6,6 @@ spec:
   resources:
     - group: pds.socialweb.computer
       name: remotepds
-      schema: v1alpha1-1.remotepds.pds.socialweb.computer
+      schema: v1alpha1-3.remotepds.pds.socialweb.computer
       storage:
         crd: {}
