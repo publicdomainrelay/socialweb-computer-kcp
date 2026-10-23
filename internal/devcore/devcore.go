@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
@@ -148,17 +149,26 @@ func Run(ctx context.Context, cfg Config, m hostsvc.Manager) error {
 			return err
 		}
 	}
-	go logcap.Keep(ctx, LogCapConfig(l, log))
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	logCfg := LogCapConfig(l, log)
+	wg.Go(func() { logcap.Keep(ctx, logCfg) })
 	if len(rec.StandIns) == 0 && rec.AdminKubeconfig != "" {
-		go componentcore.Supervise(ctx, ComponentCoreConfig(ctx, cfg, rec, log))
-		go hostprocess.Supervise(ctx, HostProcessConfig(bcfg, rec, m, log))
+		coreCfg := ComponentCoreConfig(ctx, cfg, rec, log)
+		wg.Go(func() { componentcore.Supervise(ctx, coreCfg) })
+		hpCfg := HostProcessConfig(bcfg, rec, m, log)
+		wg.Go(func() { hostprocess.Supervise(ctx, hpCfg) })
 		if cfg.ComputeVM != nil {
 			c := *cfg.ComputeVM
 			c.Kubeconfig, c.Workspace = rec.AdminKubeconfig, HostProcessConfig(bcfg, rec, m, log).Workspace
-			go computevm.Run(ctx, c)
+			wg.Go(func() { computevm.Run(ctx, c) })
 		}
-		go openbaoctl.Supervise(ctx, OpenBaoServerConfig(bcfg, rec, log))
-		go postgresctl.Run(ctx, PostgresConfig(bcfg, rec, log))
+		baoCfg := OpenBaoServerConfig(bcfg, rec, log)
+		wg.Go(func() { openbaoctl.Supervise(ctx, baoCfg) })
+		pgCfg := PostgresConfig(bcfg, rec, log)
+		wg.Go(func() { postgresctl.Run(ctx, pgCfg) })
 		ac := AppConfig(bcfg, rec, m, log)
 		ac.Handlers, ac.RemotePDS = cfg.Handlers, cfg.RemotePDS
 		ac.Listeners, ac.WebApp, ac.OnComponents = cfg.Listeners, cfg.WebApp, cfg.OnComponents
@@ -167,7 +177,7 @@ func Run(ctx context.Context, cfg Config, m hostsvc.Manager) error {
 			log.Warn("the TTL controller does not start", "err", err.Error())
 		} else {
 			ac.TTLReport = tc.Report
-			go ttlctl.Supervise(ctx, tc)
+			wg.Go(func() { ttlctl.Supervise(ctx, tc) })
 		}
 		if rec.SharedKcp == "" {
 			if sc, err := StoreMaintConfig(bcfg, rec, log); err != nil {
@@ -175,18 +185,19 @@ func Run(ctx context.Context, cfg Config, m hostsvc.Manager) error {
 			} else {
 				mon := storemaint.New(sc)
 				ac.StoreUsage = mon.Usage
-				go mon.Run(ctx)
+				wg.Go(func() { mon.Run(ctx) })
 			}
 		}
-		go appctl.Supervise(ctx, ac)
+		wg.Go(func() { appctl.Supervise(ctx, ac) })
 	}
 	members := make(chan error, 1)
 	if cfg.Members != nil {
 		launched := rec
-		go func() { members <- cfg.Members(ctx, launched) }()
+		wg.Go(func() { members <- cfg.Members(ctx, launched) })
 	}
 	if rec.Host && rec.AdminKubeconfig != "" {
-		go devinstance.RunHost(ctx, devinstance.HostConfig{Kubeconfig: rec.AdminKubeconfig, Manager: m, Own: devinstance.Prefixes(l.ID), Log: log})
+		hostCfg := devinstance.HostConfig{Kubeconfig: rec.AdminKubeconfig, Manager: m, Own: devinstance.Prefixes(l.ID), Log: log}
+		wg.Go(func() { devinstance.RunHost(ctx, hostCfg) })
 	}
 	t := time.NewTicker(CheckInterval)
 	defer t.Stop()
