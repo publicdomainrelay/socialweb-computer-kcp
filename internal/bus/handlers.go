@@ -438,8 +438,10 @@ func (r *Bus) dialHTTP(ctx context.Context, _ string, address string) (net.Conn,
 	if !ok {
 		return nil, fmt.Errorf("%w: %s", ErrNoHandler, host)
 	}
-	if err := r.authorize(ctx, key.Ref(), Capability{Name: CapabilityXRPC}); err != nil {
-		return nil, err
+	if authorized, _ := ctx.Value(authorizedDialKey{}).(Key); authorized != key {
+		if err := r.authorize(ctx, key.Ref(), Capability{Name: CapabilityXRPC}); err != nil {
+			return nil, err
+		}
 	}
 	caller, hasCaller := CallerFrom(ctx)
 	client, server := net.Pipe()
@@ -664,10 +666,12 @@ func (t *handlerRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 	if err := t.registry.authorize(req.Context(), key.Ref(), xrpcCapability(req)); err != nil {
 		return nil, err
 	}
-	next := req.Clone(req.Context())
+	next := req.Clone(context.WithValue(req.Context(), authorizedDialKey{}, key))
 	next.Close = true
 	return t.registry.transport.RoundTrip(next)
 }
+
+type authorizedDialKey struct{}
 
 type roundTripperFunc func(*http.Request) (*http.Response, error)
 
