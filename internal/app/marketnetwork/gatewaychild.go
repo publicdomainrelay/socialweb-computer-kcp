@@ -44,8 +44,16 @@ func ownerAccount(id, handle string) compose.PdsAccount {
 }
 
 func ensureOwner(ctx context.Context, c *compose.Composer, r compose.Root, id, path, pdsURL, handle string) (string, error) {
-	if did, err := readOwnerDid(path); err == nil {
-		return did, nil
+	if did, session, err := compose.FirstOwnerSession(path); err == nil {
+		if session.Service == pdsURL {
+			return did, nil
+		}
+		session.Service = pdsURL
+		b, err := json.Marshal(map[string]compose.OwnerSession{did: session})
+		if err != nil {
+			return "", err
+		}
+		return did, compose.WriteFileAtomic(path, b, 0o600)
 	} else if !os.IsNotExist(err) {
 		return "", err
 	}
