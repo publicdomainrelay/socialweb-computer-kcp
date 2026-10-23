@@ -13,6 +13,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"syscall"
 	"time"
 
@@ -232,11 +233,15 @@ func (liveSystem) User(ctx context.Context, a Account) (UserManager, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &liveUser{conn: conn}, nil
+	return &liveUser{conn: conn, closed: make(chan struct{})}, nil
 }
 
 type liveUser struct {
 	conn *sd.Conn
+
+	mu       sync.Mutex
+	watchers map[chan struct{}]string
+	closed   chan struct{}
 }
 
 func (u *liveUser) Reload(ctx context.Context) error { return u.conn.ReloadContext(ctx) }
@@ -303,17 +308,60 @@ func (u *liveUser) status(ctx context.Context, unit string) (hostsvc.UnitStatus,
 	return hostsvc.UnitStatus{Name: unit, State: hostsvc.NotFound}, nil
 }
 
-func (u *liveUser) Watch(ctx context.Context, unit string) (<-chan hostsvc.UnitStatus, error) {
-	if err := u.conn.Subscribe(); err != nil {
-		return nil, fmt.Errorf("%s: subscribing to unit signals: %w", unit, err)
+func (u *liveUser) subscribe() error {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.watchers != nil {
+		return nil
 	}
+	if err := u.conn.Subscribe(); err != nil {
+		return err
+	}
+	u.watchers = map[chan struct{}]string{}
 	updates := make(chan *sd.PropertiesUpdate, 64)
 	overflow := make(chan error, 1)
 	u.conn.SetPropertiesSubscriber(updates, overflow)
+	go func() {
+		for {
+			unit := ""
+			select {
+			case <-u.closed:
+				return
+			case up := <-updates:
+				unit = up.UnitName
+			case <-overflow:
+			}
+			u.mu.Lock()
+			for sig, name := range u.watchers {
+				if unit == "" || unit == name {
+					select {
+					case sig <- struct{}{}:
+					default:
+					}
+				}
+			}
+			u.mu.Unlock()
+		}
+	}()
+	return nil
+}
+
+func (u *liveUser) Watch(ctx context.Context, unit string) (<-chan hostsvc.UnitStatus, error) {
+	if err := u.subscribe(); err != nil {
+		return nil, fmt.Errorf("%s: subscribing to unit signals: %w", unit, err)
+	}
+	sig := make(chan struct{}, 1)
+	u.mu.Lock()
+	u.watchers[sig] = unit
+	u.mu.Unlock()
 	out := make(chan hostsvc.UnitStatus, 1)
 	go func() {
 		defer close(out)
-		defer u.conn.SetPropertiesSubscriber(nil, nil)
+		defer func() {
+			u.mu.Lock()
+			delete(u.watchers, sig)
+			u.mu.Unlock()
+		}()
 		for {
 			st, err := u.status(ctx, unit)
 			if err != nil {
@@ -324,15 +372,10 @@ func (u *liveUser) Watch(ctx context.Context, unit string) (<-chan hostsvc.UnitS
 			case <-ctx.Done():
 				return
 			}
-			for changed := false; !changed; {
-				select {
-				case <-ctx.Done():
-					return
-				case up := <-updates:
-					changed = up.UnitName == unit
-				case <-overflow:
-					changed = true
-				}
+			select {
+			case <-ctx.Done():
+				return
+			case <-sig:
 			}
 		}
 	}()
@@ -413,7 +456,16 @@ func (u *liveUser) Stop(ctx context.Context, unit string) error {
 	return err
 }
 
-func (u *liveUser) Close() { u.conn.Close() }
+func (u *liveUser) Close() {
+	u.mu.Lock()
+	select {
+	case <-u.closed:
+	default:
+		close(u.closed)
+	}
+	u.mu.Unlock()
+	u.conn.Close()
+}
 
 func (s liveSystem) CheckHost(ctx context.Context, a Account, binary string, role hostcontract.Role, stateDir string) error {
 	u, err := lookupWithin(ctx.Done(), strconv.Itoa(a.UID), func() (*user.User, error) { return user.LookupId(strconv.Itoa(a.UID)) })
