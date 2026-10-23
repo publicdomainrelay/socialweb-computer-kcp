@@ -19,6 +19,7 @@ import (
 	"github.com/bluesky-social/indigo/atproto/syntax"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
 )
 
 const (
@@ -26,7 +27,7 @@ const (
 
 	DefaultHTTPTimeout = 30 * time.Second
 
-	ServiceAuthNSID = "com.atproto.server.getServiceAuth"
+	ServiceAuthNSID = xrpc.ServiceAuthNSID
 )
 
 type Options struct {
@@ -345,37 +346,12 @@ func (s *Session) ServiceAuth(ctx context.Context, audience, lxm string) (string
 	if audience == "" {
 		return "", errors.New("oauthclient: no service auth audience")
 	}
-	query := url.Values{"aud": {audience}}
-	if lxm != "" {
-		query.Set("lxm", lxm)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.hostURL+"/xrpc/"+ServiceAuthNSID+"?"+query.Encode(), nil)
+	client := &xrpc.Client{Host: s.hostURL, HTTP: s.HTTPClient(s.client), Limit: ReplyLimit}
+	token, err := xrpc.GetServiceAuth(ctx, client, audience, lxm, time.Time{})
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("oauthclient: service auth: %w", err)
 	}
-	req.Header.Set("Accept", "application/json")
-	resp, err := s.doAuthorized(ctx, s.client, req)
-	if err != nil {
-		return "", fmt.Errorf("oauthclient: service auth request: %w", err)
-	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, ReplyLimit))
-	if err != nil {
-		return "", fmt.Errorf("oauthclient: reading the service auth reply: %w", err)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("oauthclient: service auth returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
-	}
-	var out struct {
-		Token string `json:"token"`
-	}
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return "", fmt.Errorf("oauthclient: decoding the service auth reply: %w", err)
-	}
-	if out.Token == "" {
-		return "", errors.New("oauthclient: service auth returned no token")
-	}
-	return out.Token, nil
+	return token, nil
 }
 
 func (s *Session) doAuthorized(ctx context.Context, client *http.Client, req *http.Request) (*http.Response, error) {
