@@ -60,8 +60,8 @@ const (
 )
 
 var (
-	ServiceGVR  = schema.GroupVersionResource{Group: exposurev1alpha1.GroupName, Version: exposurev1alpha1.Version, Resource: "services"}
-	ExposureGVR = schema.GroupVersionResource{Group: exposurev1alpha1.GroupName, Version: exposurev1alpha1.Version, Resource: "exposures"}
+	ServiceGVR  = exposurev1alpha1.ServiceGVR
+	ExposureGVR = exposurev1alpha1.ExposureGVR
 )
 
 type ComponentType struct {

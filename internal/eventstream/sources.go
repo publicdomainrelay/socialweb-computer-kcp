@@ -14,13 +14,13 @@ import (
 	"github.com/bluesky-social/indigo/atproto/syntax"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 
 	eventsapi "github.com/johnandersen777/socialweb-computer-kcp/api/events/v1alpha1"
+	v1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 )
 
-var AtprotoRepoGVR = schema.GroupVersionResource{Group: "socialweb.computer", Version: "v1alpha1", Resource: "atprotorepos"}
+var AtprotoRepoGVR = v1alpha1.AtprotoRepoGVR
 
 type fallbackDirectory []identity.Directory
 

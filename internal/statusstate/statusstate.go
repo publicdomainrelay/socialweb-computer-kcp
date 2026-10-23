@@ -48,19 +48,19 @@ const (
 )
 
 var (
-	AtprotoRepoGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "atprotorepos"}
+	AtprotoRepoGVR = v1alpha1.AtprotoRepoGVR
 
-	PdsAccountGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "pdsaccounts"}
+	PdsAccountGVR = v1alpha1.PdsAccountGVR
 
-	AtprotoSessionGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "atprotosessions"}
+	AtprotoSessionGVR = v1alpha1.AtprotoSessionGVR
 
-	PlcIdentityGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "plcidentities"}
+	PlcIdentityGVR = v1alpha1.PlcIdentityGVR
 
-	RelayStatusGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "relaystatuses"}
+	RelayStatusGVR = v1alpha1.RelayStatusGVR
 
-	VaultCredentialGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "vaultcredentials"}
+	VaultCredentialGVR = v1alpha1.VaultCredentialGVR
 
-	VaultCertificateGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "vaultcertificates"}
+	VaultCertificateGVR = v1alpha1.VaultCertificateGVR
 )
 
 type DynamicFactory func(workspace string) (dynamic.Interface, error)

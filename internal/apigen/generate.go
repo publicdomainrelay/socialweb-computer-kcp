@@ -46,6 +46,18 @@ func Generate(root string) ([]Output, error) {
 			}
 			out = append(out, Output{Path: SchemaFile(r), Data: data})
 		}
+		register, err := m.RegisterGo()
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, Output{Path: RegisterFile(m), Data: register})
+		conditions, ok, err := m.ConditionsGo()
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			out = append(out, Output{Path: ConditionsFile(m), Data: conditions})
+		}
 		for _, e := range m.Exports() {
 			data, err := m.APIExport(e)
 			if err != nil {

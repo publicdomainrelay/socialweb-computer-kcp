@@ -22,7 +22,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
@@ -61,7 +60,7 @@ const (
 )
 
 var (
-	GVR       = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "computevms"}
+	GVR       = v1alpha1.ComputeVMGVR
 	sizeRE    = regexp.MustCompile(`(?i)^\s*(\d+)\s*([KMGT])?i?B?\s*$`)
 	slotRE    = regexp.MustCompile(`slot=(\d+)`)
 	vmmExitRE = regexp.MustCompile(`Firecracker exiting[^\n]*exit_code=(\d+)`)

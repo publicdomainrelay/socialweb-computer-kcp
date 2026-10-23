@@ -40,7 +40,7 @@ const (
 	DefaultCheckInterval = 30 * time.Second
 )
 
-var RemoteOpenBaoGVR = v1alpha1.GroupVersion.WithResource("remoteopenbaos")
+var RemoteOpenBaoGVR = v1alpha1.RemoteOpenBaoGVR
 
 type DynamicFactory func(workspace string) (dynamic.Interface, error)
 

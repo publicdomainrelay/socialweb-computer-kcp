@@ -25,17 +25,17 @@ import (
 )
 
 var (
-	nodeClaimGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "nodeclaims"}
+	nodeClaimGVR = v1alpha1.NodeClaimGVR
 
-	clusterLinkGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "clusterlinks"}
+	clusterLinkGVR = v1alpha1.ClusterLinkGVR
 
-	computeContractGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "computecontracts"}
+	computeContractGVR = v1alpha1.ComputeContractGVR
 
 	configMapGVR = schema.GroupVersionResource{Group: "", Version: "v1", Resource: "configmaps"}
 
-	exposureGVR = schema.GroupVersionResource{Group: exposurev1alpha1.GroupName, Version: exposurev1alpha1.Version, Resource: "exposures"}
+	exposureGVR = exposurev1alpha1.ExposureGVR
 
-	exposureServiceGVR = schema.GroupVersionResource{Group: exposurev1alpha1.GroupName, Version: exposurev1alpha1.Version, Resource: "services"}
+	exposureServiceGVR = exposurev1alpha1.ServiceGVR
 )
 
 func gatewayServerFor(deps component.Deps, workspace string, certs *clientcert.Issuer, publicHost, clusterStateDir string) (*gateway.Server, error) {

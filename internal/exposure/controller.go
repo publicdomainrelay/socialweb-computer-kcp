@@ -16,6 +16,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
+
+	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
 )
 
 const (
@@ -39,9 +41,9 @@ const (
 )
 
 var (
-	ServiceGVR       = schema.GroupVersionResource{Group: GroupName, Version: Version, Resource: "services"}
-	ExposureGVR      = schema.GroupVersionResource{Group: GroupName, Version: Version, Resource: "exposures"}
-	ComponentLinkGVR = schema.GroupVersionResource{Group: GroupName, Version: Version, Resource: "componentlinks"}
+	ServiceGVR       = exposurev1alpha1.ServiceGVR
+	ExposureGVR      = exposurev1alpha1.ExposureGVR
+	ComponentLinkGVR = exposurev1alpha1.ComponentLinkGVR
 )
 
 type DynamicFactory func(workspace string) (dynamic.Interface, error)

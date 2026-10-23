@@ -33,7 +33,7 @@ const (
 	DefaultCheckInterval = 30 * time.Second
 )
 
-var RemotePDSGVR = pdsv1alpha1.GroupVersion.WithResource("remotepds")
+var RemotePDSGVR = pdsv1alpha1.RemotePDSGVR
 
 type DynamicFactory func(workspace string) (dynamic.Interface, error)
 

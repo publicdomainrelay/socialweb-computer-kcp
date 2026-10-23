@@ -16,10 +16,10 @@ import (
 	"github.com/bluesky-social/indigo/atproto/identity"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 
+	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
 	corev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/ingress"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
@@ -382,7 +382,7 @@ func (s *Service) setIssuer(ctx context.Context) {
 	s.issuer.Store("")
 }
 
-var exposureGVR = schema.GroupVersionResource{Group: "exposure.socialweb.computer", Version: "v1alpha1", Resource: "exposures"}
+var exposureGVR = exposurev1alpha1.ExposureGVR
 
 func (s *Service) exposureClient() (dynamic.Interface, error) {
 	if s.cfg.Deps.KCP == nil {

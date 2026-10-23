@@ -12,7 +12,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
@@ -23,13 +22,13 @@ import (
 )
 
 var (
-	ComputeVMGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "computevms"}
+	ComputeVMGVR = v1alpha1.ComputeVMGVR
 
-	GuestIdentityGrantGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "guestidentitygrants"}
+	GuestIdentityGrantGVR = v1alpha1.GuestIdentityGrantGVR
 
-	OpenBaoServerGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "openbaoservers"}
+	OpenBaoServerGVR = v1alpha1.OpenBaoServerGVR
 
-	MarketIdentityGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "marketidentities"}
+	MarketIdentityGVR = v1alpha1.MarketIdentityGVR
 )
 
 type OpenBaoSource interface {

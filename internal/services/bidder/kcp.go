@@ -10,7 +10,6 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	policyv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/policy/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
@@ -20,17 +19,17 @@ import (
 )
 
 var (
-	BidGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "bids"}
+	BidGVR = v1alpha1.BidGVR
 
-	ComputeVMGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "computevms"}
+	ComputeVMGVR = v1alpha1.ComputeVMGVR
 
-	GuestIdentityGrantGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "guestidentitygrants"}
+	GuestIdentityGrantGVR = v1alpha1.GuestIdentityGrantGVR
 
-	MarketIdentityGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "marketidentities"}
+	MarketIdentityGVR = v1alpha1.MarketIdentityGVR
 
-	OpenBaoServerGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "openbaoservers"}
+	OpenBaoServerGVR = v1alpha1.OpenBaoServerGVR
 
-	PolicyWorkflowRunGVR = schema.GroupVersionResource{Group: policyv1alpha1.GroupName, Version: policyv1alpha1.Version, Resource: "policyworkflowruns"}
+	PolicyWorkflowRunGVR = policyv1alpha1.PolicyWorkflowRunGVR
 )
 
 func kcpStore(deps component.Deps, workspace string) (*kcpstore.Store, string, error) {

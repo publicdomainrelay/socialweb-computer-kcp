@@ -36,13 +36,13 @@ const (
 )
 
 var (
-	PortLeaseGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "portleases"}
+	PortLeaseGVR = v1alpha1.PortLeaseGVR
 
-	SubnetLeaseGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "subnetleases"}
+	SubnetLeaseGVR = v1alpha1.SubnetLeaseGVR
 
-	ClusterRollGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "clusterrolls"}
+	ClusterRollGVR = v1alpha1.ClusterRollGVR
 
-	ClusterGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "clusters"}
+	ClusterGVR = v1alpha1.ClusterGVR
 )
 
 type DynamicFactory func(workspace string) (dynamic.Interface, error)

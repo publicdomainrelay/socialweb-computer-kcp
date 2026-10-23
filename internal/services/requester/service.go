@@ -21,13 +21,13 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 
 	"github.com/bluesky-social/indigo/atproto/identity"
 	"github.com/bluesky-social/indigo/atproto/syntax"
 
+	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	policyv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/policy/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
@@ -1103,9 +1103,9 @@ func (s *Service) getSecrets(w http.ResponseWriter, r *http.Request) {
 	state.serve(r.Context(), w, r)
 }
 
-var exposureGVR = schema.GroupVersionResource{Group: "exposure.socialweb.computer", Version: "v1alpha1", Resource: "exposures"}
+var exposureGVR = exposurev1alpha1.ExposureGVR
 
-var marketIdentityGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "marketidentities"}
+var marketIdentityGVR = v1alpha1.MarketIdentityGVR
 
 func (s *Service) ingressExposureURL(ctx context.Context) (string, error) {
 	name := "svc-" + strings.ToLower(Kind) + "-" + strings.TrimSpace(s.cfg.ComponentName) + "-ingress"

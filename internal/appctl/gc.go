@@ -36,25 +36,21 @@ const (
 	GCWorkspaceCap = 200
 )
 
-func gvr(group, resource string) schema.GroupVersionResource {
-	return schema.GroupVersionResource{Group: group, Version: "v1alpha1", Resource: resource}
-}
-
 type gcKind struct {
 	Kind string
 	GVR  schema.GroupVersionResource
 }
 
 var gcKinds = append([]gcKind{
-	{"Bid", gvr(v1alpha1.GroupName, "bids")},
-	{"ComputeVM", gvr(v1alpha1.GroupName, "computevms")},
-	{"GuestIdentityGrant", gvr(v1alpha1.GroupName, "guestidentitygrants")},
+	{"Bid", v1alpha1.BidGVR},
+	{"ComputeVM", v1alpha1.ComputeVMGVR},
+	{"GuestIdentityGrant", v1alpha1.GuestIdentityGrantGVR},
 	{"HostProcess", HostProcessGVR},
 	{"OpenBaoServer", OpenBaoServerGVR},
-	{"Postgres", gvr(v1alpha1.GroupName, "postgreses")},
+	{"Postgres", v1alpha1.PostgresGVR},
 	{"MarketIdentity", MarketIdentityGVR},
 	{"ComputeContract", ComputeContractGVR},
-	{"NodeClaim", gvr(v1alpha1.GroupName, "nodeclaims")},
+	{"NodeClaim", v1alpha1.NodeClaimGVR},
 }, gcComponentKinds()...)
 
 func gcComponentKinds() []gcKind {

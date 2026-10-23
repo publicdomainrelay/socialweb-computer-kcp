@@ -41,9 +41,9 @@ const (
 )
 
 var (
-	ChildApplicationGVR = v1alpha1.GroupVersion.WithResource("childapplications")
-	MarketNetworkGVR    = v1alpha1.GroupVersion.WithResource("marketnetworks")
-	HostProcessGVR      = v1alpha1.GroupVersion.WithResource("hostprocesses")
+	ChildApplicationGVR = v1alpha1.ChildApplicationGVR
+	MarketNetworkGVR    = v1alpha1.MarketNetworkGVR
+	HostProcessGVR      = v1alpha1.HostProcessGVR
 
 	WorkspaceGVR = schema.GroupVersionResource{Group: "tenancy.kcp.io", Version: "v1alpha1", Resource: "workspaces"}
 )

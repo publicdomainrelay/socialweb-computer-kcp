@@ -7,6 +7,7 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
+	"path"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -68,6 +69,7 @@ type Resource struct {
 	Export         string
 	Schema         *Schema
 	PrinterColumns []v1alpha1.PrinterColumn
+	Conditions     bool
 }
 
 func (r Resource) SchemaName(group, version string) string {
@@ -75,6 +77,8 @@ func (r Resource) SchemaName(group, version string) string {
 }
 
 type Model struct {
+	Dir       string
+	Package   string
 	Group     string
 	Version   string
 	Resources []Resource
@@ -84,6 +88,7 @@ type Model struct {
 
 var (
 	conditionType  = reflect.TypeOf(metav1.Condition{})
+	conditionsType = reflect.TypeOf([]metav1.Condition(nil))
 	timeType       = reflect.TypeOf(metav1.Time{})
 	rawJSONType    = reflect.TypeOf(json.RawMessage{})
 	objectMetaType = reflect.TypeOf(metav1.ObjectMeta{})
@@ -115,6 +120,8 @@ func BuildGroup(root string, g Group) (*Model, error) {
 	}
 	b := &builder{
 		model: &Model{
+			Dir:     g.Dir,
+			Package: path.Base(g.Package),
 			Group:   g.Group,
 			Version: g.Version,
 			Named:   map[string]*Schema{},
@@ -151,9 +158,19 @@ func BuildGroup(root string, g Group) (*Model, error) {
 			Export:         r.Export,
 			Schema:         root,
 			PrinterColumns: r.PrinterColumns,
+			Conditions:     hasStatusConditions(reflect.TypeOf(r.Object)),
 		})
 	}
 	return b.model, nil
+}
+
+func hasStatusConditions(t reflect.Type) bool {
+	status, ok := t.FieldByName("Status")
+	if !ok || status.Type.Kind() != reflect.Struct {
+		return false
+	}
+	conditions, ok := status.Type.FieldByName("Conditions")
+	return ok && conditions.Type == conditionsType
 }
 
 var columnTypes = map[string]string{

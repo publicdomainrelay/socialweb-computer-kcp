@@ -45,9 +45,9 @@ type Target struct {
 
 func DefaultTargets() []Target {
 	return []Target{
-		{"Bid", schema.GroupVersionResource{Group: groupApps, Version: "v1alpha1", Resource: "bids"}},
-		{"ComputeContract", schema.GroupVersionResource{Group: groupApps, Version: "v1alpha1", Resource: "computecontracts"}},
-		{"PolicyWorkflowRun", schema.GroupVersionResource{Group: policyv1alpha1.GroupName, Version: "v1alpha1", Resource: "policyworkflowruns"}},
+		{"Bid", v1alpha1.BidGVR},
+		{"ComputeContract", v1alpha1.ComputeContractGVR},
+		{"PolicyWorkflowRun", policyv1alpha1.PolicyWorkflowRunGVR},
 	}
 }
 

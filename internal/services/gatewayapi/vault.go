@@ -11,8 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"k8s.io/apimachinery/pkg/runtime/schema"
-
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/ref"
@@ -20,7 +18,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
 )
 
-var openBaoServerGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "openbaoservers"}
+var openBaoServerGVR = v1alpha1.OpenBaoServerGVR
 
 type vaultRuntime struct {
 	client *openbao.Client

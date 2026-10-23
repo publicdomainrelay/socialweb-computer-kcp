@@ -9,7 +9,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
@@ -22,7 +21,7 @@ const (
 	WonUnboundWait = time.Hour
 )
 
-var BidGVR = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "bids"}
+var BidGVR = v1alpha1.BidGVR
 
 func bidFinish(o *unstructured.Unstructured, vms map[string]bool, now time.Time) (string, time.Time, string, bool) {
 	phase, _, _ := unstructured.NestedString(o.Object, "status", "phase")

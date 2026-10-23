@@ -25,8 +25,8 @@ const (
 
 var (
 	workspaceGVR = schema.GroupVersionResource{Group: "tenancy.kcp.io", Version: "v1alpha1", Resource: "workspaces"}
-	identityGVR  = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "atprotoidentities"}
-	clusterGVR   = schema.GroupVersionResource{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "clusters"}
+	identityGVR  = v1alpha1.AtprotoIdentityGVR
+	clusterGVR   = v1alpha1.ClusterGVR
 )
 
 func ssa(ctx context.Context, ri dynamic.ResourceInterface, obj map[string]any) error {

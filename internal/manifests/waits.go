@@ -5,6 +5,8 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+
+	v1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 )
 
 type WaitKind struct {
@@ -27,7 +29,7 @@ var WaitKinds = map[string]WaitKind{
 		For:      map[string]string{"Ready": ""},
 	},
 	"OpenBaoServer": {
-		Resource: schema.GroupVersionResource{Group: "socialweb.computer", Version: "v1alpha1", Resource: "openbaoservers"},
+		Resource: v1alpha1.OpenBaoServerGVR,
 		For:      map[string]string{"Ready": ""},
 	},
 }
