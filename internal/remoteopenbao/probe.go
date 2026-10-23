@@ -6,25 +6,46 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
-	"reflect"
 	"strings"
 	"time"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/dynamic"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 )
 
-const statusUpdateAttempts = 5
+const (
+	ConditionReachable = "Reachable"
+
+	ConditionAuthenticated = "Authenticated"
+
+	ConditionUnsealed = "Unsealed"
+
+	ConditionAuthorized = "Authorized"
+
+	DefaultTimeout = 10 * time.Second
+)
+
+type Prober struct {
+	remote *openbao.Remote
+
+	timeout time.Duration
+
+	log *slog.Logger
+}
+
+func New(remote *openbao.Remote, timeout time.Duration, log *slog.Logger) *Prober {
+	if log == nil {
+		log = slog.New(slog.DiscardHandler)
+	}
+	return &Prober{remote: remote, timeout: opt.Positive(timeout, DefaultTimeout), log: log.With("component", "remoteopenbao")}
+}
 
 type probeError struct {
 	reason string
@@ -65,23 +86,10 @@ func reasonOf(err error) string {
 	}
 }
 
-func (c *Controller) Reconcile(ctx context.Context, dyn dynamic.Interface, u *unstructured.Unstructured) error {
-	if u == nil || u.GetDeletionTimestamp() != nil {
-		return nil
-	}
-	if dyn == nil {
-		return errors.New("remoteopenbao: a dynamic client is required to reconcile")
-	}
-	var object v1alpha1.RemoteOpenBao
-	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &object); err != nil {
-		return fmt.Errorf("remoteopenbao: decoding %s: %w", u.GetName(), err)
-	}
+func (p *Prober) Check(ctx context.Context, object *v1alpha1.RemoteOpenBao) (v1alpha1.RemoteOpenBaoStatus, error) {
 	generation := object.Generation
 	name := object.Name
-	if c.settled(object.Status, generation) {
-		return nil
-	}
-	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	ctx, cancel := context.WithTimeout(ctx, p.timeout)
 	defer cancel()
 	status := object.Status
 	status.Phase = v1alpha1.RemoteOpenBaoPhasePending
@@ -103,20 +111,17 @@ func (c *Controller) Reconcile(ctx context.Context, dyn dynamic.Interface, u *un
 		conds.Set(&status.Conditions, generation, ConditionUnsealed, false, "Suspended", "the RemoteOpenBao is suspended")
 		conds.Set(&status.Conditions, generation, ConditionAuthorized, false, "Suspended", "the RemoteOpenBao is suspended")
 		status.Message = "the RemoteOpenBao is suspended"
-		return c.writeStatus(ctx, dyn, u, status)
+		return status, nil
 	}
-	if c.waiting(name, generation) {
-		return nil
-	}
-	checkedAt := metav1.NewTime(c.now().UTC().Truncate(time.Second))
+	checkedAt := metav1.NewTime(time.Now().UTC().Truncate(time.Second))
 	status.LastCheckedAt = &checkedAt
-	if c.resolver == nil {
-		return c.writeFailure(ctx, dyn, u, &status, generation, ConditionReachable,
+	if p.remote == nil {
+		return p.failure(name, status, generation, ConditionReachable,
 			errors.New("remoteopenbao: no RemoteOpenBao options is configured"))
 	}
-	target, err := c.resolver.Target(&object)
+	target, err := p.remote.Target(object)
 	if err != nil {
-		return c.writeFailure(ctx, dyn, u, &status, generation, ConditionReachable, err)
+		return p.failure(name, status, generation, ConditionReachable, err)
 	}
 	status.Endpoint = target.URL
 	status.Address = target.URL
@@ -127,7 +132,7 @@ func (c *Controller) Reconcile(ctx context.Context, dyn dynamic.Interface, u *un
 	}
 	health, err := probeHealth(ctx, target)
 	if err != nil {
-		return c.writeFailure(ctx, dyn, u, &status, generation, ConditionReachable, failed("HealthFailed", err))
+		return p.failure(name, status, generation, ConditionReachable, failed("HealthFailed", err))
 	}
 	status.Version = health.Version
 	status.Sealed = health.Sealed
@@ -138,7 +143,7 @@ func (c *Controller) Reconcile(ctx context.Context, dyn dynamic.Interface, u *un
 
 	seal, err := probeSealStatus(ctx, target)
 	if err != nil {
-		return c.writeFailure(ctx, dyn, u, &status, generation, ConditionUnsealed, failed("SealStatusFailed", err))
+		return p.failure(name, status, generation, ConditionUnsealed, failed("SealStatusFailed", err))
 	}
 	if seal.Version != "" {
 		status.Version = seal.Version
@@ -152,30 +157,29 @@ func (c *Controller) Reconcile(ctx context.Context, dyn dynamic.Interface, u *un
 		conds.Set(&status.Conditions, generation, ConditionUnsealed, false, "Sealed", message)
 		conds.Set(&status.Conditions, generation, ConditionAuthenticated, false, "Sealed", message)
 		conds.Set(&status.Conditions, generation, ConditionAuthorized, false, "Sealed", message)
-		c.fail(name, generation)
-		c.log.Warn("checking a RemoteOpenBao", "name", name, "reason", "Sealed", "err", message)
-		return c.writeStatus(ctx, dyn, u, status)
+		p.log.Warn("checking a RemoteOpenBao", "name", name, "reason", "Sealed", "err", message)
+		return status, errors.New(message)
 	}
 	conds.Set(&status.Conditions,
 		generation, ConditionUnsealed, true, "Unsealed",
 		fmt.Sprintf("the OpenBao at %s is unsealed", target.URL))
 
-	inspector, err := c.resolver.Open(ctx, &object)
+	inspector, err := p.remote.Open(ctx, object)
 	if err != nil {
-		return c.writeFailure(ctx, dyn, u, &status, generation, ConditionAuthenticated, err)
+		return p.failure(name, status, generation, ConditionAuthenticated, err)
 	}
 	if err := inspector.Authenticated(ctx); err != nil {
-		return c.writeFailure(ctx, dyn, u, &status, generation, ConditionAuthenticated, failed("AuthenticationFailed", err))
+		return p.failure(name, status, generation, ConditionAuthenticated, failed("AuthenticationFailed", err))
 	}
 	conds.Set(&status.Conditions,
 		generation, ConditionAuthenticated, true, "Authenticated",
 		"the RemoteOpenBao token answered auth/token/lookup-self")
 
 	if err := checkMounts(ctx, inspector, object.Spec.Mounts); err != nil {
-		return c.writeFailure(ctx, dyn, u, &status, generation, ConditionAuthorized, err)
+		return p.failure(name, status, generation, ConditionAuthorized, err)
 	}
 	if err := checkCapabilities(ctx, inspector, object.Spec.Capabilities); err != nil {
-		return c.writeFailure(ctx, dyn, u, &status, generation, ConditionAuthorized, err)
+		return p.failure(name, status, generation, ConditionAuthorized, err)
 	}
 	status.Phase = v1alpha1.RemoteOpenBaoPhaseReady
 	status.Ready = true
@@ -184,34 +188,17 @@ func (c *Controller) Reconcile(ctx context.Context, dyn dynamic.Interface, u *un
 		"the RemoteOpenBao answered with its declared mounts and capabilities")
 
 	status.Message = fmt.Sprintf("the OpenBao at %s reports %s", target.URL, versionOrUnknown(status.Version))
-	c.succeed(name)
-	return c.writeStatus(ctx, dyn, u, status)
+	return status, nil
 }
 
-func (c *Controller) writeFailure(ctx context.Context, dyn dynamic.Interface, u *unstructured.Unstructured, status *v1alpha1.RemoteOpenBaoStatus, generation int64, condition string, err error) error {
+func (p *Prober) failure(name string, status v1alpha1.RemoteOpenBaoStatus, generation int64, condition string, err error) (v1alpha1.RemoteOpenBaoStatus, error) {
 	reason := reasonOf(err)
 	status.Phase = v1alpha1.RemoteOpenBaoPhaseFailed
 	status.Ready = false
 	status.Message = err.Error()
 	conds.Set(&status.Conditions, generation, condition, false, reason, err.Error())
-	c.fail(u.GetName(), generation)
-	c.log.Warn("checking a RemoteOpenBao", "name", u.GetName(), "reason", reason, "err", err.Error())
-	return c.writeStatus(ctx, dyn, u, *status)
-}
-
-func (c *Controller) settled(status v1alpha1.RemoteOpenBaoStatus, generation int64) bool {
-	condition := meta.FindStatusCondition(status.Conditions, ConditionReachable)
-	if condition == nil || condition.ObservedGeneration < generation {
-		return false
-	}
-	if status.Phase == v1alpha1.RemoteOpenBaoPhaseSuspended {
-		return true
-	}
-	if status.LastCheckedAt == nil {
-		return false
-	}
-	age := c.now().Sub(status.LastCheckedAt.Time)
-	return age >= 0 && age < c.checkInterval
+	p.log.Warn("checking a RemoteOpenBao", "name", name, "reason", reason, "err", err.Error())
+	return status, err
 }
 
 func checkMounts(ctx context.Context, inspector *openbao.Client, mounts v1alpha1.RemoteOpenBaoMounts) error {
@@ -345,52 +332,4 @@ func versionOrUnknown(version string) string {
 		return "an unknown version"
 	}
 	return version
-}
-
-func (c *Controller) writeStatus(ctx context.Context, dyn dynamic.Interface, u *unstructured.Unstructured, status v1alpha1.RemoteOpenBaoStatus) error {
-	desired, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&status)
-	if err != nil {
-		return fmt.Errorf("remoteopenbao: encoding the status of %s: %w", u.GetName(), err)
-	}
-	if desired == nil {
-		desired = map[string]any{}
-	}
-	name := u.GetName()
-	ri := dyn.Resource(RemoteOpenBaoGVR)
-	var current *unstructured.Unstructured
-	for range statusUpdateAttempts {
-		if current == nil {
-			current, err = ri.Get(ctx, name, metav1.GetOptions{})
-			if apierrors.IsNotFound(err) {
-				return nil
-			}
-			if err != nil {
-				return fmt.Errorf("remoteopenbao: reading %s: %w", name, err)
-			}
-		}
-		if current.GetDeletionTimestamp() != nil {
-			return nil
-		}
-		existing, _, err := unstructured.NestedMap(current.Object, "status")
-		if err != nil {
-			return fmt.Errorf("remoteopenbao: reading the status of %s: %w", name, err)
-		}
-		if reflect.DeepEqual(existing, desired) {
-			return nil
-		}
-		next := current.DeepCopy()
-		next.Object["status"] = desired
-		_, err = ri.UpdateStatus(ctx, next, metav1.UpdateOptions{FieldManager: FieldManager})
-		if err == nil {
-			return nil
-		}
-		if apierrors.IsNotFound(err) {
-			return nil
-		}
-		if !apierrors.IsConflict(err) {
-			return fmt.Errorf("remoteopenbao: updating the status of %s: %w", name, err)
-		}
-		current = nil
-	}
-	return fmt.Errorf("remoteopenbao: the status of %s stayed in conflict", name)
 }

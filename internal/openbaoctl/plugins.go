@@ -76,14 +76,14 @@ func checkPlugins(ps []v1alpha1.OpenBaoPlugin) error {
 	return nil
 }
 
-func (c *Controller) placePlugins(o v1alpha1.OpenBaoServer, dir string) ([]placedPlugin, error) {
+func (s *Servers) placePlugins(o v1alpha1.OpenBaoServer, dir string) ([]placedPlugin, error) {
 	if len(o.Spec.Plugins) == 0 {
 		return nil, nil
 	}
 	if err := checkPlugins(o.Spec.Plugins); err != nil {
 		return nil, err
 	}
-	if c.c.Resolve == nil {
+	if s.c.Resolve == nil {
 		return nil, fmt.Errorf("this core resolves no assets, so it cannot place plugin %s", o.Spec.Plugins[0].Name)
 	}
 	pdir := PluginDir(dir)
@@ -93,7 +93,7 @@ func (c *Controller) placePlugins(o v1alpha1.OpenBaoServer, dir string) ([]place
 	platform := runtime.GOOS + "/" + runtime.GOARCH
 	var out []placedPlugin
 	for _, p := range o.Spec.Plugins {
-		src, err := c.c.Resolve(p.Asset)
+		src, err := s.c.Resolve(p.Asset)
 		if err != nil {
 			return nil, fmt.Errorf("plugin %s: asset %s: %w", p.Name, p.Asset.Name, err)
 		}
@@ -118,7 +118,7 @@ func (c *Controller) placePlugins(o v1alpha1.OpenBaoServer, dir string) ([]place
 			if err := writeIfChanged(dst, body, 0o700); err != nil {
 				return nil, fmt.Errorf("plugin %s: %w", p.Name, err)
 			}
-			c.c.log().Info("placed an OpenBao plugin in the server's plugin directory", "openbaoserver", o.Name, "plugin", p.Name,
+			s.log.Info("placed an OpenBao plugin in the server's plugin directory", "openbaoserver", o.Name, "plugin", p.Name,
 				"path", dst, "sha256", sum)
 		}
 		out = append(out, placedPlugin{spec: p, plugin: baosync.Plugin{Type: p.Type, Name: p.Name, Command: command, SHA256: sum}})
