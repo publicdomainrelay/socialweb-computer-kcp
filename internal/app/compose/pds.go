@@ -26,7 +26,6 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/pds"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 	pdssvc "github.com/johnandersen777/socialweb-computer-kcp/internal/services/pds"
 )
 
@@ -293,12 +292,8 @@ func NetworkIngressSelection(spec *v1alpha1.IngressConfig) error {
 }
 
 func (c *Composer) exposureAddress(ctx context.Context, ws, name string) string {
-	u, err := c.Get(ctx, ws, ExposureGVR, name)
+	o, err := Get[exposurev1alpha1.Exposure](ctx, c, ws, ExposureGVR, name)
 	if err != nil {
-		return ""
-	}
-	var o exposurev1alpha1.Exposure
-	if err := unstruct.Into(u, &o); err != nil {
 		return ""
 	}
 	return o.Status.Address
@@ -312,15 +307,11 @@ func (c *Composer) PublishedExposure(ctx context.Context, ws, name string) *comm
 }
 
 func (c *Composer) PdsSpec(ctx context.Context, ws, pdsName string) (v1alpha1.PdsSpec, bool, error) {
-	u, err := c.Get(ctx, ws, PdsGVR, pdsName)
+	o, err := Get[v1alpha1.Pds](ctx, c, ws, PdsGVR, pdsName)
 	if apierrors.IsNotFound(err) {
 		return v1alpha1.PdsSpec{}, false, nil
 	}
 	if err != nil {
-		return v1alpha1.PdsSpec{}, false, err
-	}
-	var o v1alpha1.Pds
-	if err := unstruct.Into(u, &o); err != nil {
 		return v1alpha1.PdsSpec{}, false, err
 	}
 	return o.Spec, true, nil

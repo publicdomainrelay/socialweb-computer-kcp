@@ -8,12 +8,11 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 )
 
 const (
@@ -256,26 +255,21 @@ func (c *Composer) WriteStatus(ctx context.Context, r Root, gvr schema.GroupVers
 		delete(m, k)
 	}
 	c.samples.into(ctx, c, m)
-	u := &unstructured.Unstructured{Object: map[string]any{"apiVersion": r.APIVersion, "kind": r.Kind, "status": m}}
-	u.SetName(r.Name)
-	body, err := u.MarshalJSON()
-	if err != nil {
-		return err
-	}
+	u := NewDoc(r.APIVersion, r.Kind, r.Name)
+	u["status"] = m
 	ri, err := c.Client(r.Workspace, gvr)
 	if err != nil {
 		return err
 	}
-	force := true
-	if _, err := ri.Patch(ctx, r.Name, types.ApplyPatchType, body, metav1.PatchOptions{FieldManager: r.Manager(), Force: &force}, "status"); err != nil {
+	if _, err := kube.Apply[kube.Doc](ctx, ri, u, kube.ApplyOptions{FieldManager: r.Manager(), Force: true, Status: true}); err != nil {
 		return fmt.Errorf("compose: applying the status of %s %s: %w", r.Kind, r.Name, err)
 	}
 	return nil
 }
 
-func ApplicationStatusOf(u *unstructured.Unstructured) (v1alpha1.ApplicationStatus, error) {
+func ApplicationStatusOf(u *Generic) (v1alpha1.ApplicationStatus, error) {
 	var st v1alpha1.ApplicationStatus
-	m, _, _ := unstructured.NestedMap(u.Object, "status")
+	m := u.Status
 	if len(m) == 0 {
 		return st, nil
 	}

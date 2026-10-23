@@ -13,13 +13,12 @@ import (
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/dynamic"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	contractvault "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/vault"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 )
@@ -134,13 +133,9 @@ func (c *Composer) Password(ctx context.Context, r Root, vaultName, mount, path 
 }
 
 func (c *Composer) VaultRefs(ctx context.Context, ws, server, clientName string) (v1alpha1.OpenBaoServerStatus, v1alpha1.OpenBaoServerClientRefs, error) {
-	u, err := c.Get(ctx, ws, OpenBaoServerGVR, server)
+	o, err := Get[v1alpha1.OpenBaoServer](ctx, c, ws, OpenBaoServerGVR, server)
 	if err != nil {
 		return v1alpha1.OpenBaoServerStatus{}, v1alpha1.OpenBaoServerClientRefs{}, err
-	}
-	var o v1alpha1.OpenBaoServer
-	if err := unstruct.Into(u, &o); err != nil {
-		return o.Status, v1alpha1.OpenBaoServerClientRefs{}, err
 	}
 	st := o.Status
 	if st.Address == "" || st.Refs == nil {
@@ -162,13 +157,9 @@ func (c *Composer) KVMount(ctx context.Context, ws, server, clientName, fallback
 	return strings.Trim(refs.KVMount, "/")
 }
 
-func ServerClient(ctx context.Context, ri dynamic.ResourceInterface, server, clientName string) (*openbao.Client, v1alpha1.OpenBaoServerStatus, v1alpha1.OpenBaoServerClientRefs, error) {
-	u, err := ri.Get(ctx, server, metav1.GetOptions{})
+func ServerClient(ctx context.Context, r kube.Resource, server, clientName string) (*openbao.Client, v1alpha1.OpenBaoServerStatus, v1alpha1.OpenBaoServerClientRefs, error) {
+	o, err := kube.Get[v1alpha1.OpenBaoServer](ctx, r, server)
 	if err != nil {
-		return nil, v1alpha1.OpenBaoServerStatus{}, v1alpha1.OpenBaoServerClientRefs{}, err
-	}
-	var o v1alpha1.OpenBaoServer
-	if err := unstruct.Into(u, &o); err != nil {
 		return nil, v1alpha1.OpenBaoServerStatus{}, v1alpha1.OpenBaoServerClientRefs{}, err
 	}
 	st := o.Status

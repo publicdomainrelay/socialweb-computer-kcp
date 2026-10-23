@@ -9,7 +9,6 @@ import (
 	"strconv"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
@@ -17,6 +16,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
 	contractvault "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/vault"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/manifests"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 )
@@ -225,6 +225,14 @@ func (p *pass) rotateSigningKey(ctx context.Context, mount string) error {
 	return nil
 }
 
+type phased struct {
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Status struct {
+		Phase string `json:"phase,omitempty"`
+	} `json:"status,omitempty"`
+}
+
 func (p *pass) guestComponents(ctx context.Context) []v1alpha1.ApplicationComponent {
 	var out []v1alpha1.ApplicationComponent
 	for _, k := range []struct {
@@ -236,13 +244,12 @@ func (p *pass) guestComponents(ctx context.Context) []v1alpha1.ApplicationCompon
 		if err != nil {
 			continue
 		}
-		list, err := ri.List(ctx, metav1.ListOptions{LabelSelector: k.selector})
+		list, err := kube.List[phased](ctx, ri, metav1.ListOptions{LabelSelector: k.selector})
 		if err != nil {
 			continue
 		}
-		for _, o := range list.Items {
-			phase, _, _ := unstructured.NestedString(o.Object, "status", "phase")
-			out = append(out, v1alpha1.ApplicationComponent{Kind: k.kind, Name: o.GetName(), Workspace: p.r.Workspace, Phase: phase})
+		for _, o := range list {
+			out = append(out, v1alpha1.ApplicationComponent{Kind: k.kind, Name: o.Name, Workspace: p.r.Workspace, Phase: o.Status.Phase})
 		}
 	}
 	return out

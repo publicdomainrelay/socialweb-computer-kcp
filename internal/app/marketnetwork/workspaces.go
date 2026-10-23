@@ -10,16 +10,17 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/dynamic"
 
 	rbacv1 "k8s.io/api/rbac/v1"
 
+	tenancyv1alpha1 "github.com/kcp-dev/sdk/apis/tenancy/v1alpha1"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/api/kcpgvr"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
-	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/manifests"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
 )
@@ -34,9 +35,9 @@ const (
 )
 
 var (
-	clusterRoleGVR        = schema.GroupVersionResource{Group: rbacv1.GroupName, Version: "v1", Resource: "clusterroles"}
-	clusterRoleBindingGVR = schema.GroupVersionResource{Group: rbacv1.GroupName, Version: "v1", Resource: "clusterrolebindings"}
-	serviceAccountGVR     = schema.GroupVersionResource{Version: "v1", Resource: "serviceaccounts"}
+	clusterRoleGVR        = kcpgvr.ClusterRoles
+	clusterRoleBindingGVR = kcpgvr.ClusterRoleBindings
+	serviceAccountGVR     = kcpgvr.ServiceAccounts
 )
 
 var reservedAppNames = []string{"global", "relay", "alice", "bob", "dev", compose.ComponentWorkspace}
@@ -60,22 +61,26 @@ func (ctl *Controller) applyRBAC(ctx context.Context, r compose.Root, ws string,
 	if err != nil {
 		return err
 	}
-	u := &unstructured.Unstructured{Object: m}
-	u.SetAPIVersion(gvr.GroupVersion().String())
-	u.SetKind(kind)
+	u := kube.Doc(m)
+	u["apiVersion"], u["kind"] = gvr.GroupVersion().String(), kind
+	meta := compose.DocMeta(u)
 	labels := r.Labels(kind)
-	for k, v := range u.GetLabels() {
-		labels[k] = v
+	if own, ok := meta["labels"].(map[string]any); ok {
+		for k, v := range own {
+			if s, ok := v.(string); ok {
+				labels[k] = s
+			}
+		}
 	}
-	u.SetLabels(labels)
+	meta["labels"] = labels
 	return ctl.c.Apply(ctx, r, ws, gvr, u)
 }
 
 func (ctl *Controller) ensureAppWorkspace(ctx context.Context, r compose.Root, name string) error {
 	ws := ctl.c.Workspace()
 	u := ctl.c.Object(r, ws, "tenancy.kcp.io/v1alpha1", "Workspace", name, map[string]string{AppWorkspaceLabel: name})
-	u.SetAnnotations(map[string]string{kcpserver.WorkspaceOwnerAnnotation: kcpserver.ShardAdminOwner})
-	u.Object["spec"] = map[string]any{"type": map[string]any{"name": AppWorkspaceType, "path": compose.DefaultWorkspace}}
+	compose.DocMeta(u)["annotations"] = map[string]string{kcpserver.WorkspaceOwnerAnnotation: kcpserver.ShardAdminOwner}
+	u["spec"] = map[string]any{"type": map[string]any{"name": AppWorkspaceType, "path": compose.DefaultWorkspace}}
 	if err := ctl.c.Apply(ctx, r, ws, compose.WorkspaceGVR, u); err != nil {
 		return fmt.Errorf("applying the workspace %s: %w", ctl.appWorkspace(name), err)
 	}
@@ -83,17 +88,16 @@ func (ctl *Controller) ensureAppWorkspace(ctx context.Context, r compose.Root, n
 	if err != nil {
 		return err
 	}
-	last, err := ctlruntime.Await(ctx, ri, name, compose.ApplyTimeout, func(cur *unstructured.Unstructured) (bool, error) {
+	last, err := kube.Await(ctx, ri, name, compose.ApplyTimeout, func(cur *tenancyv1alpha1.Workspace) (bool, error) {
 		if cur == nil {
 			return false, nil
 		}
-		if cur.GetDeletionTimestamp() != nil {
+		if cur.DeletionTimestamp != nil {
 			return false, fmt.Errorf("the workspace %s is being deleted; the next reconcile places it again", ctl.appWorkspace(name))
 		}
-		phase, _, _ := unstructured.NestedString(cur.Object, "status", "phase")
-		return phase == "Ready", nil
+		return cur.Status.Phase == "Ready", nil
 	})
-	if !errors.Is(err, ctlruntime.ErrAwaitTimeout) {
+	if !errors.Is(err, kube.ErrAwaitTimeout) {
 		return err
 	}
 	phase := ""
@@ -101,7 +105,7 @@ func (ctl *Controller) ensureAppWorkspace(ctx context.Context, r compose.Root, n
 	if last == nil {
 		getErr = apierrors.NewNotFound(compose.WorkspaceGVR.GroupResource(), name)
 	} else {
-		phase, _, _ = unstructured.NestedString(last.Object, "status", "phase")
+		phase = string(last.Status.Phase)
 	}
 	return fmt.Errorf("the workspace %s is not Ready within %s (phase %q): %v", ctl.appWorkspace(name), compose.ApplyTimeout, phase, getErr)
 }
@@ -111,8 +115,8 @@ func (ctl *Controller) waitGone(ctx context.Context, ws string, gvr schema.Group
 	if err != nil {
 		return err
 	}
-	_, err = ctlruntime.Await(ctx, ri, name, ChildDeleteTimeout, ctlruntime.Absent)
-	if errors.Is(err, ctlruntime.ErrAwaitTimeout) {
+	_, err = kube.Await(ctx, ri, name, ChildDeleteTimeout, kube.Absent[metav1.PartialObjectMetadata])
+	if errors.Is(err, kube.ErrAwaitTimeout) {
 		return fmt.Errorf("%s is still there %s after its delete", what, ChildDeleteTimeout)
 	}
 	return err
@@ -139,23 +143,23 @@ func (ctl *Controller) deleteAccountWorkspaces(ctx context.Context) error {
 	}
 	deleted := map[string]bool{}
 	left := 0
-	_, err = ctlruntime.AwaitList(ctx, ri, metav1.ListOptions{}, ChildDeleteTimeout, func(items []*unstructured.Unstructured) (bool, error) {
+	_, err = kube.AwaitList(ctx, ri, metav1.ListOptions{}, ChildDeleteTimeout, func(items []tenancyv1alpha1.Workspace) (bool, error) {
 		left = 0
 		for _, w := range items {
-			if t, _, _ := unstructured.NestedString(w.Object, "spec", "type", "name"); t != accountWorkspaceType {
+			if w.Spec.Type == nil || w.Spec.Type.Name != accountWorkspaceType {
 				continue
 			}
 			left++
-			if w.GetDeletionTimestamp() == nil && !deleted[w.GetName()] {
-				if err := ri.Delete(ctx, w.GetName(), metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+			if w.DeletionTimestamp == nil && !deleted[w.Name] {
+				if err := ri.Delete(ctx, w.Name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
 					return false, err
 				}
-				deleted[w.GetName()] = true
+				deleted[w.Name] = true
 			}
 		}
 		return left == 0, nil
 	})
-	if errors.Is(err, ctlruntime.ErrAwaitTimeout) {
+	if errors.Is(err, kube.ErrAwaitTimeout) {
 		return fmt.Errorf("%d account workspace(s) are still there %s after their delete", left, ChildDeleteTimeout)
 	}
 	return err
@@ -165,7 +169,7 @@ func (ctl *Controller) stopAppComponents(ctx context.Context, name string) error
 	ws := ctl.appWorkspace(name) + ":" + compose.ComponentWorkspace
 	types := append(append([]compose.ComponentType{}, compose.ComponentTypes...), compose.PolicyTypes...)
 	deadline := time.Now().Add(ChildDeleteTimeout)
-	var pending []dynamic.ResourceInterface
+	var pending []kube.Resource
 	seen := map[string]bool{}
 	for _, ct := range types {
 		if seen[ct.Kind] {
@@ -176,18 +180,18 @@ func (ctl *Controller) stopAppComponents(ctx context.Context, name string) error
 		if err != nil {
 			return err
 		}
-		ri := nri.Namespace("default")
-		list, err := ri.List(ctx, metav1.ListOptions{})
+		ri := nri.In("default")
+		list, err := kube.List[metav1.PartialObjectMetadata](ctx, ri, metav1.ListOptions{})
 		if apierrors.IsNotFound(err) {
 			continue
 		}
 		if err != nil {
 			return err
 		}
-		if len(list.Items) == 0 {
+		if len(list) == 0 {
 			continue
 		}
-		if err := deleteListed(ctx, ri, list.Items, nil); err != nil {
+		if err := deleteListed(ctx, ri, list, nil); err != nil {
 			return err
 		}
 		pending = append(pending, ri)
@@ -196,24 +200,20 @@ func (ctl *Controller) stopAppComponents(ctx context.Context, name string) error
 	for _, ri := range pending {
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
-			list, err := ri.List(ctx, metav1.ListOptions{})
+			list, err := kube.List[metav1.PartialObjectMetadata](ctx, ri, metav1.ListOptions{})
 			if err != nil && !apierrors.IsNotFound(err) {
 				return err
 			}
 			if err == nil {
-				left += len(list.Items)
+				left += len(list)
 			}
 			continue
 		}
 		deleted := map[string]bool{}
-		items, err := ctlruntime.AwaitList(ctx, ri, metav1.ListOptions{}, remaining, func(items []*unstructured.Unstructured) (bool, error) {
-			listed := make([]unstructured.Unstructured, 0, len(items))
-			for _, it := range items {
-				listed = append(listed, *it)
-			}
-			return len(items) == 0, deleteListed(ctx, ri, listed, deleted)
+		items, err := kube.AwaitList(ctx, ri, metav1.ListOptions{}, remaining, func(items []metav1.PartialObjectMetadata) (bool, error) {
+			return len(items) == 0, deleteListed(ctx, ri, items, deleted)
 		})
-		if errors.Is(err, ctlruntime.ErrAwaitTimeout) {
+		if errors.Is(err, kube.ErrAwaitTimeout) {
 			left += len(items)
 			continue
 		}
@@ -227,28 +227,27 @@ func (ctl *Controller) stopAppComponents(ctx context.Context, name string) error
 	return nil
 }
 
-func deleteListed(ctx context.Context, ri dynamic.ResourceInterface, items []unstructured.Unstructured, deleted map[string]bool) error {
+func deleteListed(ctx context.Context, ri kube.Resource, items []metav1.PartialObjectMetadata, deleted map[string]bool) error {
 	for _, p := range items {
-		if p.GetDeletionTimestamp() != nil || deleted[p.GetName()] {
+		if p.DeletionTimestamp != nil || deleted[p.Name] {
 			continue
 		}
-		if err := ri.Delete(ctx, p.GetName(), metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+		if err := ri.Delete(ctx, p.Name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
 			return err
 		}
 		if deleted != nil {
-			deleted[p.GetName()] = true
+			deleted[p.Name] = true
 		}
 	}
 	return nil
 }
 
 func (ctl *Controller) clusterOf(ctx context.Context, parent, name string) string {
-	u, err := ctl.c.Get(ctx, parent, compose.WorkspaceGVR, name)
+	w, err := compose.Get[tenancyv1alpha1.Workspace](ctx, ctl.c, parent, compose.WorkspaceGVR, name)
 	if err != nil {
 		return ""
 	}
-	id, _, _ := unstructured.NestedString(u.Object, "spec", "cluster")
-	return id
+	return w.Spec.Cluster
 }
 
 func (ctl *Controller) grantPeers(ctx context.Context, r compose.Root, names []string) error {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"reflect"
 	"slices"
 	"sort"
@@ -12,10 +13,10 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/types"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 )
 
 const (
@@ -63,18 +64,49 @@ func SpecMap(spec any) (map[string]any, error) {
 	return m, nil
 }
 
-func (c *Composer) Object(r Root, ws, apiVersion, kind, name string, labels map[string]string) *unstructured.Unstructured {
-	u := &unstructured.Unstructured{Object: map[string]any{"apiVersion": apiVersion, "kind": kind}}
-	u.SetName(name)
+type Generic struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec kube.Doc `json:"spec,omitempty"`
+
+	Status kube.Doc `json:"status,omitempty"`
+}
+
+func DocMeta(d kube.Doc) map[string]any {
+	m, _ := d["metadata"].(map[string]any)
+	if m == nil {
+		m = map[string]any{}
+		d["metadata"] = m
+	}
+	return m
+}
+
+func docField(d kube.Doc, key string) string {
+	s, _ := d[key].(string)
+	return s
+}
+
+func docMetaField(d kube.Doc, key string) string {
+	m, _ := d["metadata"].(map[string]any)
+	s, _ := m[key].(string)
+	return s
+}
+
+func NewDoc(apiVersion, kind, name string) kube.Doc {
+	return kube.Doc{"apiVersion": apiVersion, "kind": kind, "metadata": map[string]any{"name": name}}
+}
+
+func (c *Composer) Object(r Root, ws, apiVersion, kind, name string, labels map[string]string) kube.Doc {
+	d := NewDoc(apiVersion, kind, name)
 	merged := r.Labels("")
-	for k, v := range labels {
-		merged[k] = v
-	}
-	u.SetLabels(merged)
+	maps.Copy(merged, labels)
+	meta := DocMeta(d)
+	meta["labels"] = merged
 	if ws == "" || ws == r.Workspace {
-		u.SetOwnerReferences([]metav1.OwnerReference{r.OwnerRef()})
+		meta["ownerReferences"] = []metav1.OwnerReference{r.OwnerRef()}
 	}
-	return u
+	return d
 }
 
 func (c *Composer) ApplyComponent(ctx context.Context, r Root, ws string, d Desired) error {
@@ -89,7 +121,7 @@ func (c *Composer) ApplyComponent(ctx context.Context, r Root, ws string, d Desi
 	ws = workspaceOr(ws, r.Workspace)
 	u := c.Object(r, ws, ct.APIVersion(), ct.Kind, d.Name, map[string]string{ComponentLabel: d.Kind})
 	if spec != nil {
-		u.Object["spec"] = spec
+		u["spec"] = spec
 	}
 	return c.Apply(ctx, r, ws, ct.GVR, u)
 }
@@ -110,43 +142,41 @@ func workspaceOr(ws, fallback string) string {
 	return fallback
 }
 
-func (c *Composer) Apply(ctx context.Context, r Root, ws string, gvr schema.GroupVersionResource, u *unstructured.Unstructured) error {
+func (c *Composer) Apply(ctx context.Context, r Root, ws string, gvr schema.GroupVersionResource, u kube.Doc) error {
 	return c.applyAs(ctx, r, r.Manager(), ws, gvr, u)
 }
 
-func (c *Composer) applyAs(ctx context.Context, r Root, manager, ws string, gvr schema.GroupVersionResource, u *unstructured.Unstructured) error {
+func (c *Composer) applyAs(ctx context.Context, r Root, manager, ws string, gvr schema.GroupVersionResource, u kube.Doc) error {
 	ws = workspaceOr(ws, r.Workspace)
 	ri, err := c.Client(ws, gvr)
 	if err != nil {
 		return err
 	}
-	unstructured.RemoveNestedField(u.Object, "status")
-	unstructured.RemoveNestedField(u.Object, "metadata", "creationTimestamp")
-	body, err := u.MarshalJSON()
-	if err != nil {
-		return err
+	delete(u, "status")
+	if m, ok := u["metadata"].(map[string]any); ok {
+		delete(m, "creationTimestamp")
 	}
-	var rc = ri.Namespace(u.GetNamespace())
-	force := false
-	_, err = rc.Patch(ctx, u.GetName(), types.ApplyPatchType, body, metav1.PatchOptions{FieldManager: manager, Force: &force})
+	rc := ri.In(docMetaField(u, "namespace"))
+	kind, name := docField(u, "kind"), docMetaField(u, "name")
+	_, err = kube.Apply[kube.Doc](ctx, rc, u, kube.ApplyOptions{FieldManager: manager})
 	if err == nil {
 		return nil
 	}
 	if !apierrors.IsConflict(err) {
-		return fmt.Errorf("compose: applying %s %s in %s: %w", u.GetKind(), u.GetName(), ws, err)
+		return fmt.Errorf("compose: applying %s %s in %s: %w", kind, name, ws, err)
 	}
 	c.recordConflict(ctx, r, ws, u, err)
-	force = true
-	if _, err := rc.Patch(ctx, u.GetName(), types.ApplyPatchType, body, metav1.PatchOptions{FieldManager: manager, Force: &force}); err != nil {
-		return fmt.Errorf("compose: applying %s %s in %s: %w", u.GetKind(), u.GetName(), ws, err)
+	if _, err := kube.Apply[kube.Doc](ctx, rc, u, kube.ApplyOptions{FieldManager: manager, Force: true}); err != nil {
+		return fmt.Errorf("compose: applying %s %s in %s: %w", kind, name, ws, err)
 	}
 	return nil
 }
 
-func (c *Composer) recordConflict(ctx context.Context, r Root, ws string, u *unstructured.Unstructured, cause error) {
-	message := fmt.Sprintf("%s %s: a field another manager set is reverted to the spec %s %s composes: %s", u.GetKind(), u.GetName(), r.Kind, r.Name, cause.Error())
-	c.log.Warn("a direct edit of a composed child is reverted", "root", r.Owner(), "kind", u.GetKind(), "name", u.GetName(), "workspace", ws, "err", cause.Error())
-	c.Event(ctx, r, ws, u.GetAPIVersion(), u.GetKind(), u.GetName(), "Warning", ReasonChildEditReverted, message)
+func (c *Composer) recordConflict(ctx context.Context, r Root, ws string, u kube.Doc, cause error) {
+	kind, name := docField(u, "kind"), docMetaField(u, "name")
+	message := fmt.Sprintf("%s %s: a field another manager set is reverted to the spec %s %s composes: %s", kind, name, r.Kind, r.Name, cause.Error())
+	c.log.Warn("a direct edit of a composed child is reverted", "root", r.Owner(), "kind", kind, "name", name, "workspace", ws, "err", cause.Error())
+	c.Event(ctx, r, ws, docField(u, "apiVersion"), kind, name, "Warning", ReasonChildEditReverted, message)
 }
 
 func (c *Composer) Event(ctx context.Context, r Root, ws, apiVersion, kind, name, eventType, reason, message string) {
@@ -158,7 +188,7 @@ func (c *Composer) Event(ctx context.Context, r Root, ws, apiVersion, kind, name
 	if len(message) > 1024 {
 		message = message[:1024]
 	}
-	ev := &unstructured.Unstructured{Object: map[string]any{
+	ev := kube.Doc{
 		"apiVersion":         "v1",
 		"kind":               "Event",
 		"metadata":           map[string]any{"generateName": strings.ToLower(kind) + "-" + name + "-", "namespace": eventNamespace},
@@ -171,8 +201,8 @@ func (c *Composer) Event(ctx context.Context, r Root, ws, apiVersion, kind, name
 		"firstTimestamp":     now,
 		"lastTimestamp":      now,
 		"count":              int64(1),
-	}}
-	if _, err := ri.Namespace(eventNamespace).Create(ctx, ev, metav1.CreateOptions{FieldManager: r.Manager()}); err != nil && ctx.Err() == nil {
+	}
+	if _, err := kube.Create[kube.Doc](ctx, ri.In(eventNamespace), ev, metav1.CreateOptions{FieldManager: r.Manager()}); err != nil && ctx.Err() == nil {
 		c.log.Warn("recording an event", "root", r.Owner(), "reason", reason, "err", err.Error())
 	}
 }
@@ -182,27 +212,31 @@ func (c *Composer) ApplyTyped(ctx context.Context, r Root, ws string, gvr schema
 	if err != nil {
 		return err
 	}
-	u := &unstructured.Unstructured{Object: m}
-	u.SetAPIVersion(apiVersion)
-	u.SetKind(kind)
+	u := kube.Doc(m)
+	u["apiVersion"], u["kind"] = apiVersion, kind
 	ws = workspaceOr(ws, r.Workspace)
+	meta := DocMeta(u)
 	labels := r.Labels(kind)
-	for k, v := range u.GetLabels() {
-		labels[k] = v
+	if own, ok := meta["labels"].(map[string]any); ok {
+		for k, v := range own {
+			if s, ok := v.(string); ok {
+				labels[k] = s
+			}
+		}
 	}
-	u.SetLabels(labels)
+	meta["labels"] = labels
 	if ws == r.Workspace {
-		u.SetOwnerReferences([]metav1.OwnerReference{r.OwnerRef()})
+		meta["ownerReferences"] = []metav1.OwnerReference{r.OwnerRef()}
 	}
 	return c.Apply(ctx, r, ws, gvr, u)
 }
 
-func (c *Composer) Get(ctx context.Context, ws string, gvr schema.GroupVersionResource, name string) (*unstructured.Unstructured, error) {
+func Get[T any](ctx context.Context, c *Composer, ws string, gvr schema.GroupVersionResource, name string) (*T, error) {
 	ri, err := c.Client(ws, gvr)
 	if err != nil {
 		return nil, err
 	}
-	return ri.Get(ctx, name, metav1.GetOptions{})
+	return kube.Get[T](ctx, ri, name)
 }
 
 func (c *Composer) GetComponent(ctx context.Context, ws, kind, name string) (ComponentView, bool, error) {
@@ -210,14 +244,14 @@ func (c *Composer) GetComponent(ctx context.Context, ws, kind, name string) (Com
 	if err != nil {
 		return ComponentView{}, false, err
 	}
-	u, err := c.Get(ctx, ws, ct.GVR, name)
+	o, err := Get[Generic](ctx, c, ws, ct.GVR, name)
 	if apierrors.IsNotFound(err) {
 		return ComponentView{Kind: kind, Name: name, Workspace: ws}, false, nil
 	}
 	if err != nil {
 		return ComponentView{}, false, err
 	}
-	v, err := ComponentViewOf(ws, kind, u)
+	v, err := ComponentViewOf(ws, kind, o)
 	return v, err == nil, err
 }
 
@@ -228,15 +262,15 @@ func (c *Composer) ListComponents(ctx context.Context, ws, owner string) ([]Comp
 		if err != nil {
 			return nil, err
 		}
-		list, err := ri.List(ctx, metav1.ListOptions{LabelSelector: OwnerLabel + "=" + owner})
+		items, err := kube.List[Generic](ctx, ri, metav1.ListOptions{LabelSelector: OwnerLabel + "=" + owner})
 		if apierrors.IsNotFound(err) {
 			continue
 		}
 		if err != nil {
 			return nil, err
 		}
-		for i := range list.Items {
-			v, err := ComponentViewOf(ws, ct.Kind, &list.Items[i])
+		for i := range items {
+			v, err := ComponentViewOf(ws, ct.Kind, &items[i])
 			if err != nil {
 				return nil, err
 			}
@@ -291,11 +325,8 @@ func (c *Composer) RestartComponent(ctx context.Context, r Root, ws, kind, name 
 	if err != nil {
 		return err
 	}
-	u := &unstructured.Unstructured{Object: map[string]any{"apiVersion": ct.APIVersion(), "kind": ct.Kind}}
-	u.SetName(name)
-	if err := unstructured.SetNestedField(u.Object, time.Now().UTC().Format(time.RFC3339Nano), "spec", "restartedAt"); err != nil {
-		return err
-	}
+	u := NewDoc(ct.APIVersion(), ct.Kind, name)
+	u["spec"] = map[string]any{"restartedAt": time.Now().UTC().Format(time.RFC3339Nano)}
 	return c.applyAs(ctx, r, r.Manager()+"/restart", ws, ct.GVR, u)
 }
 
@@ -304,15 +335,15 @@ func (c *Composer) Prune(ctx context.Context, ws string, gvr schema.GroupVersion
 	if err != nil {
 		return err
 	}
-	list, err := ri.List(ctx, metav1.ListOptions{LabelSelector: selector})
+	items, err := kube.List[metav1.PartialObjectMetadata](ctx, ri, metav1.ListOptions{LabelSelector: selector})
 	if apierrors.IsNotFound(err) || apierrors.IsForbidden(err) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	for i := range list.Items {
-		name := list.Items[i].GetName()
+	for i := range items {
+		name := items[i].Name
 		if keep[name] {
 			continue
 		}
@@ -328,21 +359,21 @@ func (c *Composer) DeleteOwned(ctx context.Context, ws string, gvr schema.GroupV
 	if err != nil {
 		return 0, err
 	}
-	list, err := ri.List(ctx, metav1.ListOptions{LabelSelector: OwnerLabel + "=" + owner})
+	items, err := kube.List[metav1.PartialObjectMetadata](ctx, ri, metav1.ListOptions{LabelSelector: OwnerLabel + "=" + owner})
 	if apierrors.IsNotFound(err) {
 		return 0, nil
 	}
 	if err != nil {
 		return 0, err
 	}
-	for _, o := range list.Items {
-		if o.GetDeletionTimestamp() == nil {
-			if err := ri.Delete(ctx, o.GetName(), metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
-				return len(list.Items), err
+	for _, o := range items {
+		if o.DeletionTimestamp == nil {
+			if err := ri.Delete(ctx, o.Name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+				return len(items), err
 			}
 		}
 	}
-	return len(list.Items), nil
+	return len(items), nil
 }
 
 func (c *Composer) DeleteAll(ctx context.Context, ws string, gvr schema.GroupVersionResource) (int, error) {
@@ -350,26 +381,26 @@ func (c *Composer) DeleteAll(ctx context.Context, ws string, gvr schema.GroupVer
 	if err != nil {
 		return 0, err
 	}
-	list, err := ri.List(ctx, metav1.ListOptions{})
+	items, err := kube.List[metav1.PartialObjectMetadata](ctx, ri, metav1.ListOptions{})
 	if apierrors.IsNotFound(err) {
 		return 0, nil
 	}
 	if err != nil {
 		return 0, err
 	}
-	for _, o := range list.Items {
-		if o.GetDeletionTimestamp() == nil {
-			if err := ri.Delete(ctx, o.GetName(), metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
-				return len(list.Items), err
+	for _, o := range items {
+		if o.DeletionTimestamp == nil {
+			if err := ri.Delete(ctx, o.Name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+				return len(items), err
 			}
 		}
 	}
-	return len(list.Items), nil
+	return len(items), nil
 }
 
 func (c *Composer) SetSpecField(ctx context.Context, r Root, ws string, gvr schema.GroupVersionResource, apiVersion, kind, name string, spec map[string]any) error {
-	u := &unstructured.Unstructured{Object: map[string]any{"apiVersion": apiVersion, "kind": kind, "spec": spec}}
-	u.SetName(name)
+	u := NewDoc(apiVersion, kind, name)
+	u["spec"] = spec
 	return c.Apply(ctx, r, ws, gvr, u)
 }
 

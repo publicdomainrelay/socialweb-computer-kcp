@@ -11,17 +11,16 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/kcprest"
 )
 
 const (
@@ -55,7 +54,7 @@ type Config struct {
 
 	TTLReport func() *v1alpha1.TTLStatus
 
-	Dynamic dynamic.Interface
+	Kube *kube.Client
 
 	Bus *bus.Bus
 
@@ -73,7 +72,7 @@ type Composer struct {
 
 	mu sync.Mutex
 
-	clients map[string]*dynamic.DynamicClient
+	clients map[string]*kube.Client
 
 	applied map[string]int64
 
@@ -86,7 +85,7 @@ type Composer struct {
 
 func New(cfg Config) (*Composer, error) {
 	var restCfg *rest.Config
-	if cfg.Dynamic == nil {
+	if cfg.Kube == nil {
 		var err error
 		restCfg, err = kcpserver.FrontRestConfig(cfg.Kubeconfig)
 		if err != nil {
@@ -97,7 +96,7 @@ func New(cfg Config) (*Composer, error) {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	return &Composer{cfg: cfg, restCfg: restCfg, log: log.With("component", "app-compose"), clients: map[string]*dynamic.DynamicClient{},
+	return &Composer{cfg: cfg, restCfg: restCfg, log: log.With("component", "app-compose"), clients: map[string]*kube.Client{},
 		applied: map[string]int64{}, roots: rootIndex{byCluster: map[string]map[string]map[string]bool{}}}, nil
 }
 
@@ -127,25 +126,33 @@ func (c *Composer) KcpServer() string {
 	return server
 }
 
-func (c *Composer) Client(ws string, gvr schema.GroupVersionResource) (dynamic.NamespaceableResourceInterface, error) {
-	if c.cfg.Dynamic != nil {
-		return c.cfg.Dynamic.Resource(gvr), nil
+func (c *Composer) Kube(ws string) (*kube.Client, error) {
+	if c.cfg.Kube != nil {
+		return c.cfg.Kube, nil
 	}
 	ws = cmp.Or(strings.TrimSpace(ws), c.Workspace())
 	c.mu.Lock()
-	dc, ok := c.clients[ws]
+	kc, ok := c.clients[ws]
 	c.mu.Unlock()
 	if !ok {
 		var err error
-		dc, err = dynamic.NewForConfig(kcprest.ForCluster(c.restCfg, ws))
+		kc, err = kube.ForWorkspace(c.restCfg, ws)
 		if err != nil {
 			return nil, err
 		}
 		c.mu.Lock()
-		c.clients[ws] = dc
+		c.clients[ws] = kc
 		c.mu.Unlock()
 	}
-	return dc.Resource(gvr), nil
+	return kc, nil
+}
+
+func (c *Composer) Client(ws string, gvr schema.GroupVersionResource) (kube.Resource, error) {
+	kc, err := c.Kube(ws)
+	if err != nil {
+		return kube.Resource{}, err
+	}
+	return kc.Resource(gvr), nil
 }
 
 func (c *Composer) Applied(r Root) bool {

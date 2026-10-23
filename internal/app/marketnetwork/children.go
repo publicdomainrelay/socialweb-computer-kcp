@@ -18,6 +18,7 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
@@ -26,6 +27,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/assets"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostos"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostprocess"
@@ -33,7 +35,6 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/jsonx"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/kcprest"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/lease/local"
 )
 
@@ -298,15 +299,22 @@ func (ctl *Controller) applyRoot(ctx context.Context, r compose.Root, rec devins
 	if err != nil {
 		return err
 	}
-	u, err := unstruct.To(obj, string(kind))
+	m, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
 	if err != nil {
 		return err
 	}
+	u := kube.Doc(m)
+	u["apiVersion"], u["kind"] = v1alpha1.GroupVersion.String(), string(kind)
+	meta := compose.DocMeta(u)
 	labels := r.Labels(string(kind))
-	for k, v := range u.GetLabels() {
-		labels[k] = v
+	if own, ok := meta["labels"].(map[string]any); ok {
+		for k, v := range own {
+			if s, ok := v.(string); ok {
+				labels[k] = s
+			}
+		}
 	}
-	u.SetLabels(labels)
+	meta["labels"] = labels
 	return ctl.c.Apply(ctx, r, childWorkspace(rec), gvr, u)
 }
 
@@ -315,7 +323,7 @@ func (ctl *Controller) readRoot(ctx context.Context, rec devinstance.Record, kin
 	if err != nil {
 		return v1alpha1.ApplicationStatus{}, false, err
 	}
-	u, err := ctl.c.Get(ctx, childWorkspace(rec), gvr, compose.ChildRootName)
+	u, err := compose.Get[compose.Generic](ctx, ctl.c, childWorkspace(rec), gvr, compose.ChildRootName)
 	if apierrors.IsNotFound(err) {
 		return v1alpha1.ApplicationStatus{}, false, nil
 	}

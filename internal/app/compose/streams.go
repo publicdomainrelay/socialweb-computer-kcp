@@ -10,7 +10,6 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
@@ -290,15 +289,11 @@ func (c *Composer) userSourceLink(ctx context.Context, role string, ref commonv1
 	if ref.Name == NetworkRelaySourceName || ref.Name == LocalRepoSourceName || ref.Name == JetstreamEastSourceName || ref.Name == JetstreamWestSourceName {
 		return nil, nil
 	}
-	u, err := c.Get(ctx, ref.Workspace, eventsv1alpha1.EventSourceGVR, ref.Name)
+	source, err := Get[eventsv1alpha1.EventSource](ctx, c, ref.Workspace, eventsv1alpha1.EventSourceGVR, ref.Name)
 	if apierrors.IsNotFound(err) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, err
-	}
-	var source eventsv1alpha1.EventSource
-	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &source); err != nil {
 		return nil, err
 	}
 	backend := source.Spec.BackendRef

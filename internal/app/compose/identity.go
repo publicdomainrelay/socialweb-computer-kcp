@@ -14,14 +14,12 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/atprotorepo"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 )
 
 const (
@@ -246,18 +244,14 @@ func (c *Composer) remotePDSRef(ctx context.Context, ws string, ref *commonv1.Ob
 		return nil, nil
 	}
 	target := cmp.Or(strings.TrimSpace(ref.Workspace), ws)
-	u, err := c.Get(ctx, target, RemotePDSGVR, strings.TrimSpace(ref.Name))
+	object, err := Get[pdsv1alpha1.RemotePDS](ctx, c, target, RemotePDSGVR, strings.TrimSpace(ref.Name))
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil, fmt.Errorf("compose: RemotePDS %s is absent in workspace %s; the existing-account mode fails closed", ref.Name, target)
 		}
 		return nil, err
 	}
-	var object pdsv1alpha1.RemotePDS
-	if err := unstruct.Into(u, &object); err != nil {
-		return nil, err
-	}
-	return &object, nil
+	return object, nil
 }
 
 func (c *Composer) DeleteAssociationObjects(ctx context.Context, ws string) {
@@ -298,15 +292,7 @@ func SecretRefString(ref *commonv1.SecretRef) string {
 }
 
 func (c *Composer) Identity(ctx context.Context, ws, name string) (*v1alpha1.MarketIdentity, error) {
-	u, err := c.Get(ctx, ws, MarketIdentityGVR, name)
-	if err != nil {
-		return nil, err
-	}
-	var id v1alpha1.MarketIdentity
-	if err := unstruct.Into(u, &id); err != nil {
-		return nil, err
-	}
-	return &id, nil
+	return Get[v1alpha1.MarketIdentity](ctx, c, ws, MarketIdentityGVR, name)
 }
 
 func (c *Composer) IdentityDid(ctx context.Context, ws, name string) string {
@@ -353,9 +339,8 @@ func (c *Composer) ApplyOAuthIdentityEndpoints(ctx context.Context, r Root, snap
 	default:
 		return nil
 	}
-	u := &unstructured.Unstructured{Object: map[string]any{"apiVersion": v1alpha1.GroupVersion.String(), "kind": KindMarketIdentity,
-		"spec": map[string]any{"oauthClientID": base + "/oauth-client-metadata.json", "oauthRedirectURI": base + "/oauth/callback/" + role}}}
-	u.SetName(identity)
+	u := NewDoc(v1alpha1.GroupVersion.String(), KindMarketIdentity, identity)
+	u["spec"] = map[string]any{"oauthClientID": base + "/oauth-client-metadata.json", "oauthRedirectURI": base + "/oauth/callback/" + role}
 	return c.applyAs(ctx, r, r.IdentityManager(), ws, MarketIdentityGVR, u)
 }
 

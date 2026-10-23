@@ -14,7 +14,6 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/manifests"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vaultlayout"
 )
@@ -119,7 +118,7 @@ func RootVaultSpec(g v1alpha1.GatewaySpec) (v1alpha1.OpenBaoServerSpec, error) {
 func (p *pass) rootVault(ctx context.Context, onlyExisting bool) (*v1alpha1.OpenBaoServer, error) {
 	c, r := p.c, p.r
 	if onlyExisting {
-		if _, err := c.Get(ctx, r.Workspace, compose.OpenBaoServerGVR, vaultlayout.RootServerName); apierrors.IsNotFound(err) {
+		if _, err := compose.Get[metav1.PartialObjectMetadata](ctx, c, r.Workspace, compose.OpenBaoServerGVR, vaultlayout.RootServerName); apierrors.IsNotFound(err) {
 			return nil, nil
 		} else if err != nil {
 			return nil, err
@@ -136,15 +135,7 @@ func (p *pass) rootVault(ctx context.Context, onlyExisting bool) (*v1alpha1.Open
 	if err := c.ApplyVault(ctx, r, vaultlayout.RootServerName); err != nil {
 		return nil, err
 	}
-	u, err := c.Get(ctx, r.Workspace, compose.OpenBaoServerGVR, vaultlayout.RootServerName)
-	if err != nil {
-		return nil, err
-	}
-	var o v1alpha1.OpenBaoServer
-	if err := unstruct.Into(u, &o); err != nil {
-		return nil, err
-	}
-	return &o, nil
+	return compose.Get[v1alpha1.OpenBaoServer](ctx, c, r.Workspace, compose.OpenBaoServerGVR, vaultlayout.RootServerName)
 }
 
 func clientVaultOf(o *v1alpha1.OpenBaoServer, client string) (manifests.GatewayVault, bool) {
