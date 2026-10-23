@@ -365,6 +365,12 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 	}
 	published.Ingress = netIngress
 	p.st.Network = &published
+	if o.Status.Network == nil || !jsonx.Equal(*o.Status.Network, published) {
+		p.st.Phase, p.st.Message = v1alpha1.ApplicationPhaseProvisioning, "publishing the network endpoints before the child applications start"
+		if err := c.WriteStatus(ctx, r, compose.MarketNetworkGVR, p.st); err != nil {
+			return ctlruntime.Result{}, err
+		}
+	}
 	pdsURL, _ := snap.ExposureURL(compose.ServiceNameFor(compose.ComponentKindPds, NetworkBobPdsName) + compose.ExposureLocalSuffix)
 	aliceURL, _ := snap.ExposureURL(compose.ServiceNameFor(compose.ComponentKindPds, NetworkAlicePdsName) + compose.ExposureLocalSuffix)
 	if pdsURL == "" {

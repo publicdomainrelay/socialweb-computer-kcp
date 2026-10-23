@@ -134,7 +134,7 @@ func NewMarketSink(opts MarketOptions) (*MarketSink, error) {
 	if opts.Log == nil {
 		opts.Log = slog.New(slog.DiscardHandler)
 	}
-	httpClient := httpClientWithFallback(opts.Resolver.HTTPClient)
+	httpClient := httpClientWithFallback(opts.Resolver.HTTPClient, nil)
 	return &marketHandler{
 		opts:      opts,
 		log:       opts.Log,
@@ -338,7 +338,7 @@ func (h *marketHandler) httpClient() *http.Client {
 	if h.client != nil {
 		return h.client
 	}
-	return httpClientWithFallback(nil)
+	return httpClientWithFallback(nil, nil)
 }
 
 func marketSyncName(uri, cid string) string {

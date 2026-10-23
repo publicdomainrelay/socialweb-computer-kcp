@@ -422,6 +422,8 @@ func ComponentCoreConfig(ctx context.Context, cfg Config, rec devinstance.Record
 		if n, err := marketnetwork.ReadNetwork(ctx, rec.AdminKubeconfig); err == nil && n.Status.Network != nil {
 			out.PLCBaseURL = n.Status.Network.PLCDirectoryURL
 			out.Relays = n.Status.Network.Relays()
+			network := *n.Status.Network
+			out.Network = &network
 		}
 	}
 	switch {

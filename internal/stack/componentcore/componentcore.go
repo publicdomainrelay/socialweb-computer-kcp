@@ -107,6 +107,8 @@ type Config struct {
 
 	Relays []string
 
+	Network *v1alpha1.MarketNetworkValue
+
 	NodeClaimAgent *kcpclient.ServiceAccountRef
 
 	OAuthScopes []string

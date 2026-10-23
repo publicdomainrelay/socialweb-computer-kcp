@@ -376,6 +376,15 @@ func Provision(opts ProvisionOptions) (string, error) {
 	acceptPath = cmp.Or(acceptPath, AcceptPathVM)
 	modules := []any{}
 	ctx := cloudinit.Context{SecretsAcceptPath: acceptPath}
+	if opts.TLSPort > 0 && opts.TLSPort <= 65535 {
+		opts.UserData = addGuestTLSPort(opts.UserData, opts.TLSPort)
+		opts.FallbackURL = addGuestTLSPort(opts.FallbackURL, opts.TLSPort)
+		if opts.Login != nil {
+			login := *opts.Login
+			login.URL = addGuestTLSPort(login.URL, opts.TLSPort)
+			opts.Login = &login
+		}
+	}
 	if opts.Login != nil {
 		module, err := GuestLoginModule(*opts.Login)
 		if err != nil {

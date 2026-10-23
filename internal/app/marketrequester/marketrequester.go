@@ -229,7 +229,7 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 		Hostnames:            hostnames,
 		Mode:                 mode,
 		PublicOrigin:         publicOrigin,
-		MarketExposureRef:    c.PublishedExposure(ctx, ws, compose.ServiceNameFor(compose.ComponentKindRequester, RequesterComponent)+compose.ExposureIngressSuffix),
+		MarketExposureRef:    &commonv1.LocalObjectRef{Name: compose.ServiceNameFor(compose.ComponentKindRequester, RequesterComponent) + compose.ExposureIngressSuffix},
 		OperatorDID:          compose.OperatorDID(o.Spec.Identity.ApprovedAssociations, id),
 		OAuthClientID:        oauthClientID,
 		OAuthRedirectURI:     oauthRedirectURI,

@@ -3,6 +3,8 @@ package componentcore
 import (
 	"cmp"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"net/http"
@@ -64,10 +66,10 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/kcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/lease/local"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/participant"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/marketidentity/atproto"
 	presence "github.com/johnandersen777/socialweb-computer-kcp/internal/marketpresence"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
@@ -340,7 +342,7 @@ func (c *Core) registerNetwork(mgr *ctlruntime.Manager, clients *workspaceClient
 	if err := repos.Register(mgr, c.repoOptions()); err != nil {
 		return fmt.Errorf("componentcore: the repo controllers: %w", err)
 	}
-	if err := policyctl.Register(mgr, policyctl.Options{Bus: c.handlers, PLCURL: cfg.PLCBaseURL, Log: log, Disabled: cfg.DisablePolicy,
+	if err := policyctl.Register(mgr, policyctl.Options{Bus: c.handlers, PLCURL: cfg.PLCBaseURL, HTTP: c.networkClient(networkReadTimeout), Log: log, Disabled: cfg.DisablePolicy,
 		Actions: func(workspace string) (map[string]policycontroller.ActionHandler, error) {
 			return policyActionHandlers(c.store, workspace)
 		}}); err != nil {
@@ -353,7 +355,7 @@ func (c *Core) registerNetwork(mgr *ctlruntime.Manager, clients *workspaceClient
 		return fmt.Errorf("componentcore: the RemoteOpenBao controller: %w", err)
 	}
 	run, err := eventsctl.Register(g.Context(), mgr, eventsctl.Options{Bus: c.handlers, Dynamic: eventstream.DynamicFactory(cfg.DynamicFactory),
-		Resolver: &pdsclient.Resolver{Handlers: c.handlers, Timeout: pdsClientTimeout}, PLCURL: c.plcBaseURL(), StateDir: cfg.StateDir,
+		Resolver: &pdsclient.Resolver{Handlers: c.handlers, Timeout: pdsClientTimeout}, PLCURL: c.plcBaseURL(), HTTPClient: c.networkClient(networkReadTimeout), StateDir: cfg.StateDir,
 		RecordWatchChildren: recordWatchChildren{clients: clients}, RecordWatchRepos: recordWatchRepos{clients: clients},
 		RecordWatchValues: recordWatchValues(clients), Log: log})
 	if err != nil {
@@ -363,8 +365,21 @@ func (c *Core) registerNetwork(mgr *ctlruntime.Manager, clients *workspaceClient
 	return nil
 }
 
+func (c *Core) networkClient(timeout time.Duration) *http.Client {
+	egress := component.Egress{Hosts: c.hosts, TLS: c.tls, Log: c.cfg.Log}
+	if n := c.cfg.Network; n != nil {
+		if hosts := participant.NetworkHosts(*n, c.hosts); hosts != nil {
+			egress.Hosts = hosts
+		}
+		if pool, err := x509.SystemCertPool(); err == nil && pool.AppendCertsFromPEM([]byte(n.CABundle)) {
+			egress.TLS = &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: pool}
+		}
+	}
+	return egress.Client(timeout)
+}
+
 func (c *Core) busOrNetworkClient() *http.Client {
-	external := httpclient.External(httpclient.Options{Timeout: networkReadTimeout}).Transport
+	external := c.networkClient(networkReadTimeout).Transport
 	if external == nil {
 		external = http.DefaultTransport
 	}
