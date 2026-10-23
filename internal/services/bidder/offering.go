@@ -29,6 +29,8 @@ type marketLoopStats struct {
 type marketLoop struct {
 	mu sync.Mutex
 
+	wg sync.WaitGroup
+
 	records RecordStore
 
 	signer *market.Signer
@@ -92,6 +94,7 @@ func (l *marketLoop) run(ctx context.Context) {
 		l.logf().Info("the bidder market loop waits for a record store and a DID")
 		return
 	}
+	defer l.wg.Wait()
 	if err := l.ensureOffering(ctx); err != nil {
 		l.logf().Warn("creating the market offering failed", "err", err)
 		l.setError(err)
@@ -252,7 +255,7 @@ func (l *marketLoop) verifyVisibility(ctx context.Context) {
 	if len(l.relays) == 0 || l.did == "" {
 		return
 	}
-	go func() {
+	l.wg.Go(func() {
 		result := market.VerifyRelayVisibility(ctx, market.RelayVisibilityOptions{
 			RelayURLs:  append([]string(nil), l.relays...),
 			BidderDID:  l.did,
@@ -263,7 +266,7 @@ func (l *marketLoop) verifyVisibility(ctx context.Context) {
 		l.statsV.RelayVisibility = &result
 		l.statsV.UpdatedAt = l.timestamp().UTC().Format(time.RFC3339)
 		l.mu.Unlock()
-	}()
+	})
 }
 
 func sameStrings(a, b []string) bool {

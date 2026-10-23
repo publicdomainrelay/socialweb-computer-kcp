@@ -30,6 +30,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/ref"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/statesync"
 )
@@ -206,7 +207,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	s.runCtx = runCtx
 	s.cancel = cancel
 	s.mu.Unlock()
-	defer s.shutdown()
+	defer s.shutdown(ctx)
 
 	if err := s.prepare(runCtx); err != nil {
 		cancel()
@@ -238,8 +239,8 @@ func (s *Service) Stop(ctx context.Context) error {
 	return s.shutdownWith(ctx)
 }
 
-func (s *Service) shutdown() error {
-	ctx, cancel := context.WithTimeout(context.Background(), component.DefaultStopTimeout)
+func (s *Service) shutdown(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), component.DefaultStopTimeout)
 	defer cancel()
 	return s.shutdownWith(ctx)
 }
@@ -260,17 +261,8 @@ func (s *Service) shutdownWith(ctx context.Context) error {
 		if relay != nil {
 			relay.Close()
 		}
-		done := make(chan struct{})
-		go func() {
-			s.wg.Wait()
-			close(done)
-		}()
-		select {
-		case <-done:
-		case <-ctx.Done():
-			if s.stopErr == nil {
-				s.stopErr = ctx.Err()
-			}
+		if err := supervise.Join(ctx, s.wg.Wait); err != nil && s.stopErr == nil {
+			s.stopErr = err
 		}
 	})
 	return s.stopErr
@@ -375,7 +367,7 @@ func (s *Service) prepare(ctx context.Context) error {
 	s.log.Info("the bidder serves the market", "handler", s.listeningURL(), "did", s.did, "guest", s.guestURL,
 		"offering", s.offeringEndpoint(), "serviceAuthHost", s.cfg.ServiceAuth.Hostname,
 		"identityMode", s.cfg.IdentityMode, "inboundXRPC", s.cfg.inboundXRPC())
-	go s.registerPDSWithRelays(ctx)
+	s.wg.Go(func() { s.registerPDSWithRelays(ctx) })
 	return nil
 }
 
