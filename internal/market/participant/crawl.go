@@ -38,14 +38,15 @@ func (c Crawl) Run(ctx context.Context) {
 		log.Warn("the PDS is not registered with a relay", "relays", len(c.Relays))
 		return
 	}
+	announced := ""
 	if c.Period <= 0 {
-		c.once(ctx, log)
+		c.once(ctx, log, &announced)
 		return
 	}
 	ticker := time.NewTicker(c.Period)
 	defer ticker.Stop()
 	for {
-		c.once(ctx, log)
+		c.once(ctx, log, &announced)
 		select {
 		case <-ctx.Done():
 			return
@@ -54,7 +55,7 @@ func (c Crawl) Run(ctx context.Context) {
 	}
 }
 
-func (c Crawl) once(ctx context.Context, log *slog.Logger) {
+func (c Crawl) once(ctx context.Context, log *slog.Logger, announced *string) {
 	raw := strings.TrimSpace(c.Address())
 	if raw == "" {
 		return
@@ -70,7 +71,13 @@ func (c Crawl) once(ctx context.Context, log *slog.Logger) {
 			registered = true
 		}
 	}
-	if registered && c.Crawled != nil {
-		c.Crawled(ctx)
+	if !registered {
+		*announced = ""
+		return
 	}
+	if *announced == parsed.Host || c.Crawled == nil {
+		return
+	}
+	*announced = parsed.Host
+	c.Crawled(ctx)
 }
