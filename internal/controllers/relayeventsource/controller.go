@@ -11,7 +11,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/eventsource"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/events/relay"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/kcp"
 )
 
 const (

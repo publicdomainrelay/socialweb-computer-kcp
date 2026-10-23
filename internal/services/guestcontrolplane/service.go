@@ -21,7 +21,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/guestcp"
 	guestplane "github.com/johnandersen777/socialweb-computer-kcp/internal/guestcp/openbao"
 	guestrelay "github.com/johnandersen777/socialweb-computer-kcp/internal/guestcp/relay"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/kcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 )
 

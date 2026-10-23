@@ -17,7 +17,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
 	contractvault "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/vault"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/manifests"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 )
 

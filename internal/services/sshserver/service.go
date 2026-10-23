@@ -18,8 +18,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	sshcontract "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/ssh"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/kcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/ssh/gateway"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/ssh/ownersession"
 )

@@ -15,10 +15,12 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/tools/cache"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	watchtools "k8s.io/client-go/tools/watch"
 )
 
-var ErrAwaitTimeout = errors.New("runtime: the condition did not hold in time")
+var ErrAwaitTimeout = kube.ErrAwaitTimeout
 
 type AwaitCondition func(obj *unstructured.Unstructured) (bool, error)
 

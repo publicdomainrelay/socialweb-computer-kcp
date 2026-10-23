@@ -73,7 +73,7 @@ cmd/socialweb-computer	dev.go:startOrAdoptDevsup	bounded	20ms within devsupReady
 internal/hostsvc	listenport.go:WaitListenPort	bounded	the caller's every (bootstrap.PortPoll, kcpserver.PortPoll 20ms) within the caller's ctx; one probe when <=0	read /proc/<pid>/fd and net/tcp{,6}; no kernel event for a socket entering LISTEN (sock_diag has no listen notification, inotify on /proc does not work)
 internal/vmruntime	firecracker_linux.go:firecracker.awaitBoot	bounded	DialRetryMin 10ms doubling to DialRetryMax 1s after a dial error once the socket file exists, within BootTimeout	firecracker GET / on the API socket; the socket file appears (fsnotify) before the VMM listens and a unix socket entering LISTEN has no event
 internal/bootstrap	bootstrap.go:waitUnixSocket	bounded	PortPoll 20ms within the caller's ReadyTimeout ctx	dial the kine unix socket; accept readiness has no event source
-internal/kcpapply	kcpapply.go:Applier.servedFor	bounded	opts.Poll (DefaultPoll 1s; <=0 uses the default) within WaitTimeout	discovery /apis/<gv> has no watch
+internal/controllers/runtime/kcpapply	kcpapply.go:Applier.servedFor	bounded	opts.Poll (DefaultPoll 1s; <=0 uses the default) within WaitTimeout	discovery /apis/<gv> has no watch
 internal/kcpserver	kcpserver.go:WaitReady	bounded	every (ReadyPoll or ProbePoll; <=0 uses ProbePoll) within the caller's ctx	kcp /readyz over HTTP; no event stream
 internal/kcpserver	roll.go:WaitOwnPortReady	bounded	every (cfg.Poll; <=0 uses DefaultRollPoll) within the caller's ctx	kcp /readyz on its own port; no event stream
 internal/kcpserver	roll.go:awaitDrained	bounded	cfg.Poll (<=0 uses DefaultRollPoll) within DrainTimeout	apiserverfront control socket Status (open connections); no event stream
