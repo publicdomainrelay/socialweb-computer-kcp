@@ -18,6 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/rest"
 
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
@@ -27,6 +28,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/recordcontroller"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/childapplication"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	remotepdsctl "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/remotepds"
+	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/credentials"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/eventstream"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostlifecycle"
@@ -262,17 +265,6 @@ func (h hostHooks) Add(gvr schema.GroupVersionResource, reconcile hostlifecycle.
 	}
 }
 
-type remotePDSRegistrar struct {
-	runtime *controllerRuntime
-}
-
-func (r remotePDSRegistrar) Register(gvr schema.GroupVersionResource, reconcile remotepds.ReconcileFunc) error {
-	return r.runtime.add(controllerEntry{gvr: gvr, core: true,
-		reconcile: func(ctx context.Context, dyn dynamic.Interface, _ string, u *unstructured.Unstructured) error {
-			return reconcile(ctx, dyn, u)
-		}})
-}
-
 func (c *Core) workspaceList(ctx context.Context) []string {
 	if c.cfg.WorkspacesFunc != nil {
 		return c.cfg.WorkspacesFunc(ctx)
@@ -338,9 +330,8 @@ func (c *Core) buildControllers() {
 
 	secrets := coreSecretResolver(c.store, base, cfg.CredentialClient, cfg.CredentialServer)
 	caBundle := func(ref string) ([]byte, error) { return os.ReadFile(openbaoctl.FileRef(ref)) }
-	if _, err := remotepds.Register(remotePDSRegistrar{runtime: runtime}, remotepds.Options{Workspace: base,
-		Dynamic: remotepds.DynamicFactory(cfg.DynamicFactory), Log: log, CABundle: caBundle, Secrets: secrets}); err != nil {
-		log.Warn("the remote pds controller is not wired", "err", err.Error())
+	if strings.TrimSpace(base) == DefaultWorkspace {
+		c.buildManager(caBundle)
 	}
 
 	handlers := c.handlers
@@ -420,6 +411,48 @@ func (c *Core) buildControllers() {
 			c.runners = append(c.runners, controllerRunner{name: "eventstream@" + workspace, run: es.Run})
 		}
 	}
+}
+
+func (c *Core) buildManager(caBundle remotepdsctl.CABundleFunc) {
+	cfg := c.cfg
+	log := cfg.Log
+	restCfg, err := c.managerRestConfig()
+	if err != nil {
+		log.Warn("the controller manager is not wired", "err", err.Error())
+		return
+	}
+	mgr, err := ctlruntime.NewManager(ctlruntime.Config{Rest: restCfg, AddToScheme: []func(*runtime.Scheme) error{remotepdsctl.AddToScheme},
+		Log: log})
+	if err != nil {
+		log.Warn("the controller manager is not wired", "err", err.Error())
+		return
+	}
+	secrets := func(workspace string) pdsclient.SecretResolver {
+		return coreSecretResolver(c.store, workspace, cfg.CredentialClient, cfg.CredentialServer)
+	}
+	if _, err := remotepdsctl.Register(mgr, remotepdsctl.Options{Log: log, CABundle: caBundle, Secrets: secrets}); err != nil {
+		log.Warn("the remote pds controller is not wired", "err", err.Error())
+		return
+	}
+	c.runners = append(c.runners, controllerRunner{name: "controller-manager", run: mgr.Start})
+}
+
+func (c *Core) managerRestConfig() (*rest.Config, error) {
+	if c.cfg.Kubeconfig != "" {
+		return kcpserver.FrontRestConfig(c.cfg.Kubeconfig)
+	}
+	if c.cfg.KCP == nil {
+		return nil, ErrNoKubeconfig
+	}
+	client, err := c.cfg.KCP.Client(c.cfg.Workspaces[0])
+	if err != nil {
+		return nil, err
+	}
+	restCfg := client.RESTConfig()
+	if restCfg == nil {
+		return nil, errors.New("componentcore: the kcp client has no rest config")
+	}
+	return restCfg, nil
 }
 
 func (c *Core) mirrorLeases(ctx context.Context, ctl *leasecontroller.Controller) error {
