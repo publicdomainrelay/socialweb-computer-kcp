@@ -13,7 +13,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 )
 
 const ComponentKindComponentLink = "ComponentLink"
@@ -164,8 +166,9 @@ func componentLinks(workspace string, desired []desiredComponent) []desiredLink 
 				continue
 			}
 			spec := exposurev1alpha1.ComponentLinkSpec{
-				From: exposurev1alpha1.ComponentLinkEndpoint{Workspace: workspace, Kind: d.Kind, Name: d.Name},
-				To:   exposurev1alpha1.ComponentLinkEndpoint{Workspace: workspace, Kind: ref.Kind, Name: ref.Name},
+				From:         exposurev1alpha1.ComponentLinkFrom{Ref: &commonv1.ObjectRef{Workspace: workspace, Kind: d.Kind, Name: d.Name}},
+				To:           commonv1.ObjectRef{Workspace: workspace, Kind: ref.Kind, Name: ref.Name},
+				Capabilities: []exposurev1alpha1.LinkCapability{{Name: bus.CapabilityXRPC}, {Name: bus.CapabilityStream}},
 			}
 			name := componentLinkName(d.Kind, d.Name, ref.Kind, ref.Name)
 			out[name] = desiredLink{Name: name, Spec: spec}

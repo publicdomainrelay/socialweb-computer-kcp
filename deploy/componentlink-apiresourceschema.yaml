@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-1.componentlinks.exposure.socialweb.computer
+  name: v1alpha1-2.componentlinks.exposure.socialweb.computer
 spec:
   group: exposure.socialweb.computer
   names:
@@ -31,68 +31,110 @@ spec:
               from:
                 type: object
                 properties:
-                  workspace:
-                    type: string
-                  kind:
-                    type: string
-                  name:
-                    type: string
-                required:
-                  - workspace
+                  ref:
+                    type: object
+                    properties:
+                      group:
+                        type: string
+                      kind:
+                        type: string
+                      name:
+                        type: string
+                      workspace:
+                        type: string
+                    required:
+                      - kind
+                      - name
+                  selector:
+                    type: object
+                    properties:
+                      group:
+                        type: string
+                      kind:
+                        type: string
+                      workspace:
+                        type: string
+                      matchLabels:
+                        type: object
+                        additionalProperties:
+                          type: string
+                      matchExpressions:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            key:
+                              type: string
+                            operator:
+                              type: string
+                              enum:
+                                - In
+                                - NotIn
+                                - Exists
+                                - DoesNotExist
+                            values:
+                              type: array
+                              items:
+                                type: string
+                          required:
+                            - key
+                            - operator
+                    required:
+                      - kind
               to:
                 type: object
                 properties:
-                  workspace:
+                  group:
                     type: string
                   kind:
                     type: string
                   name:
                     type: string
+                  workspace:
+                    type: string
                 required:
-                  - workspace
-              handlers:
+                  - kind
+                  - name
+              capabilities:
                 type: array
                 items:
-                  type: string
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    scope:
+                      type: array
+                      items:
+                        type: string
+                  required:
+                    - name
               suspend:
                 type: boolean
             required:
               - from
               - to
+              - capabilities
           status:
             type: object
             properties:
               observedGeneration:
                 type: integer
                 format: int64
-              phase:
-                type: string
-                enum:
-                  - Pending
-                  - Ready
-                  - Failed
-              ready:
-                type: boolean
-              message:
-                type: string
               conditions:
                 type: array
                 items:
                   type: object
                   x-kubernetes-preserve-unknown-fields: true
       additionalPrinterColumns:
-        - name: Phase
+        - name: To Kind
           type: string
-          jsonPath: .status.phase
-        - name: Ready
-          type: boolean
-          jsonPath: .status.ready
-        - name: From
-          type: string
-          jsonPath: .spec.from.workspace
+          jsonPath: .spec.to.kind
         - name: To
           type: string
-          jsonPath: .spec.to.workspace
+          jsonPath: .spec.to.name
+        - name: Suspend
+          type: boolean
+          jsonPath: .spec.suspend
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
