@@ -88,7 +88,6 @@ func (r *Relay) RequestCrawl(ctx context.Context, hostname string) error {
 		return ErrClosed
 	}
 	r.subs[hostname] = sub
-	r.wg.Add(1)
 	r.mu.Unlock()
 
 	r.updateHost(hostname, func(h *HostInfo) {
@@ -97,7 +96,11 @@ func (r *Relay) RequestCrawl(ctx context.Context, hostname string) error {
 		h.LastSeen = time.Now().UnixMilli()
 	})
 	r.log.Info("crawl_started", "hostname", hostname, "did", did)
-	go sub.run()
+	r.mu.Lock()
+	if !r.closed {
+		r.wg.Go(sub.run)
+	}
+	r.mu.Unlock()
 	return nil
 }
 
@@ -149,7 +152,6 @@ func (r *Relay) updateHost(hostname string, f func(*HostInfo)) {
 }
 
 func (s *hostSub) run() {
-	defer s.relay.wg.Done()
 	var cursor int64
 	if account, ok := s.relay.store.GetAccount(s.did); ok && account.Seq != nil {
 		cursor = *account.Seq
@@ -244,7 +246,9 @@ func (s *hostSub) dial(cursor int64) (*websocket.Conn, error) {
 func (s *hostSub) readLoop(conn *websocket.Conn) error {
 	conn.SetReadLimit(5_000_000)
 	stopPing := make(chan struct{})
-	go func() {
+	var ping sync.WaitGroup
+	defer ping.Wait()
+	ping.Go(func() {
 		t := time.NewTicker(30 * time.Second)
 		defer t.Stop()
 		for {
@@ -258,7 +262,7 @@ func (s *hostSub) readLoop(conn *websocket.Conn) error {
 				_ = conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(10*time.Second))
 			}
 		}
-	}()
+	})
 	defer close(stopPing)
 
 	for {

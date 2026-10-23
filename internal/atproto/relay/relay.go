@@ -286,6 +286,10 @@ func (r *Relay) handleSubscribeRepos(w http.ResponseWriter, req *http.Request) {
 			}
 		}
 	}()
+	defer func() {
+		_ = conn.Close()
+		<-done
+	}()
 
 	write := func(frame Frame) bool {
 		_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
