@@ -232,8 +232,10 @@ func Run(ctx context.Context, c Config) error {
 		}
 	}
 	log.Info("the application controller reconciles this instance's root objects", "workspace", c.workspace())
-	go ctl.sampleStateDir(ctx)
-	go ctl.sampleGC(ctx)
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	wg.Go(func() { ctl.sampleStateDir(ctx) })
+	wg.Go(func() { ctl.sampleGC(ctx) })
 	for {
 		ctl.Pass(ctx)
 		if !sleep(ctx, c.interval()) {

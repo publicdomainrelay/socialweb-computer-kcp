@@ -881,18 +881,20 @@ func (ctl *Controller) WatchComponents(ctx context.Context, owner string) (<-cha
 
 func (ctl *Controller) WatchComponentsIn(ctx context.Context, ws, owner string) (<-chan ComponentEvent, error) {
 	out := make(chan ComponentEvent)
-	var wg sync.WaitGroup
-	for _, ct := range ComponentTypes {
+	clients := make([]dynamic.ResourceInterface, len(ComponentTypes))
+	for i, ct := range ComponentTypes {
 		ri, err := ctl.client(ws, ct.GVR)
 		if err != nil {
 			close(out)
 			return nil, err
 		}
-		wg.Add(1)
-		go func(ct ComponentType, ri dynamic.ResourceInterface) {
-			defer wg.Done()
-			ctl.watchComponentType(ctx, ws, ct, ri, owner, out)
-		}(ct, ri)
+		clients[i] = ri
+	}
+	var wg sync.WaitGroup
+	for i, ct := range ComponentTypes {
+		wg.Go(func() {
+			ctl.watchComponentType(ctx, ws, ct, clients[i], owner, out)
+		})
 	}
 	go func() {
 		wg.Wait()

@@ -523,15 +523,14 @@ func (n *networks) teardownAll(ctx context.Context, keep []string) error {
 		if slices.Contains(keep, id) {
 			continue
 		}
-		wg.Add(1)
-		go func(c child) {
-			defer wg.Done()
+		c := n.childByID(id)
+		wg.Go(func() {
 			if err := n.teardownChild(ctx, c); err != nil {
 				mu.Lock()
 				errs = append(errs, c.id+": "+err.Error())
 				mu.Unlock()
 			}
-		}(n.childByID(id))
+		})
 	}
 	wg.Wait()
 	if len(errs) > 0 {
