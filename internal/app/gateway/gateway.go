@@ -638,7 +638,8 @@ func (p *pass) run(ctx context.Context, plan compose.AccountPlan, id *v1alpha1.M
 	if err := p.ensure(ctx, desired); err != nil {
 		return p.retry("", err)
 	}
-	streamLinks, err := c.ApplyMarketStreams(ctx, r, compose.Streams{Role: "requester", Workspace: ws, Comms: o.Spec.Comms,
+	streamLinks, err := c.ApplyMarketStreams(ctx, r, compose.Streams{Role: "requester", Workspace: ws,
+		Comms:   compose.OverrideComms(o.Spec.Components, compose.ComponentKindRequester, marketrequester.RequesterComponent, o.Spec.Comms),
 		Sources: compose.SourceInput{Network: o.Spec.Network}, ForceFirehose: compose.OAuthReceiveOnly(plan.Mode)})
 	if err != nil {
 		return p.fail(err)

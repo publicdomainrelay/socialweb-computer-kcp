@@ -139,7 +139,7 @@ func overrideSpec(kind string, spec any, ov v1alpha1.ComponentOverride) (map[str
 		}
 	}
 	if ov.Suspend != nil && *ov.Suspend {
-		out["suspend"] = true
+		out[suspendField(kind)] = true
 	}
 	if ov.RestartPolicy != "" {
 		out["restartPolicy"] = string(ov.RestartPolicy)
@@ -166,6 +166,23 @@ func overrideSpec(kind string, spec any, ov v1alpha1.ComponentOverride) (map[str
 		deepMerge(out, block)
 	}
 	return out, nil
+}
+
+func suspendField(kind string) string {
+	switch kind {
+	case ComponentKindBidder, ComponentKindRequester:
+		return "suspendParticipation"
+	}
+	return "suspend"
+}
+
+func OverrideComms(overrides v1alpha1.ComponentOverrides, kind, name string, base *v1alpha1.MarketComms) *v1alpha1.MarketComms {
+	for _, key := range []string{ComponentKey(kind, name), kind} {
+		if ov, ok := overrides[key]; ok && ov.Comms != nil {
+			return ov.Comms
+		}
+	}
+	return base
 }
 
 func ingressOverride(kind string, out map[string]any, ingress *v1alpha1.IngressConfig) error {
