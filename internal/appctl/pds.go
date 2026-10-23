@@ -30,6 +30,7 @@ import (
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
 
@@ -159,7 +160,7 @@ func (ctl *Controller) pdsExposureURLOf(ctx context.Context, ws, name, suffix st
 		return raw
 	}
 	var o exposurev1alpha1.Exposure
-	if err := fromUnstructured(u, &o); err == nil && o.Status.Address != "" {
+	if err := unstruct.Into(u, &o); err == nil && o.Status.Address != "" {
 		ctl.pdsPublicURLs.Store(key, o.Status.Address)
 		return o.Status.Address
 	}
@@ -464,7 +465,7 @@ func ServerClient(ctx context.Context, ri dynamic.ResourceInterface, server, cli
 		return nil, v1alpha1.OpenBaoServerStatus{}, v1alpha1.OpenBaoServerClientRefs{}, err
 	}
 	var o v1alpha1.OpenBaoServer
-	if err := fromUnstructured(u, &o); err != nil {
+	if err := unstruct.Into(u, &o); err != nil {
 		return nil, v1alpha1.OpenBaoServerStatus{}, v1alpha1.OpenBaoServerClientRefs{}, err
 	}
 	st := o.Status

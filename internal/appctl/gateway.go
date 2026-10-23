@@ -17,6 +17,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestnet"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vaultlayout"
@@ -197,7 +198,7 @@ func (ctl *Controller) ensureRootVault(ctx context.Context, owner string, g v1al
 		if apierrors.IsNotFound(err) {
 			o := v1alpha1.OpenBaoServer{ObjectMeta: metav1.ObjectMeta{Name: vaultlayout.RootServerName,
 				Labels: map[string]string{OwnerLabel: owner}}, Spec: want}
-			nu, err := toUnstructured(&o, "OpenBaoServer")
+			nu, err := unstruct.To(&o, "OpenBaoServer")
 			if err != nil {
 				return nil, err
 			}
@@ -212,7 +213,7 @@ func (ctl *Controller) ensureRootVault(ctx context.Context, owner string, g v1al
 			return nil, err
 		}
 		var o v1alpha1.OpenBaoServer
-		if err := fromUnstructured(u, &o); err != nil {
+		if err := unstruct.Into(u, &o); err != nil {
 			return nil, err
 		}
 		if sameSpec(o.Spec, want) && o.Labels[OwnerLabel] == owner {
@@ -223,7 +224,7 @@ func (ctl *Controller) ensureRootVault(ctx context.Context, owner string, g v1al
 			o.Labels = map[string]string{}
 		}
 		o.Labels[OwnerLabel] = owner
-		nu, err := toUnstructured(&o, "OpenBaoServer")
+		nu, err := unstruct.To(&o, "OpenBaoServer")
 		if err != nil {
 			return nil, err
 		}
@@ -379,7 +380,7 @@ func (ctl *Controller) gatewayDesired(ctx context.Context, o v1alpha1.Gateway, p
 
 func (ctl *Controller) reconcileGateway(ctx context.Context, u *unstructured.Unstructured) error {
 	var o v1alpha1.Gateway
-	if err := fromUnstructured(u, &o); err != nil {
+	if err := unstruct.Into(u, &o); err != nil {
 		return err
 	}
 	owner := ownerOf(u)

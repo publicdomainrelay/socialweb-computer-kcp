@@ -150,10 +150,6 @@ func Register(reg Registrar, opts Options) error {
 	return nil
 }
 
-func decodeObject(u *unstructured.Unstructured, out any) error {
-	return runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, out)
-}
-
 func writeStatus(ctx context.Context, dyn dynamic.Interface, gvr schema.GroupVersionResource, u *unstructured.Unstructured, before, after any) error {
 	if reflect.DeepEqual(before, after) {
 		return nil

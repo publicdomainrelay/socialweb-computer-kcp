@@ -10,6 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/subnetallocator"
 )
 
@@ -22,7 +23,7 @@ func (c *Controller) ReconcileSubnetLease(ctx context.Context, workspace string,
 		return fmt.Errorf("leasecontroller: opening the dynamic client for workspace %q: %w", workspace, err)
 	}
 	var lease v1alpha1.SubnetLease
-	if err := decodeObject(u, &lease); err != nil {
+	if err := unstruct.Into(u, &lease); err != nil {
 		return fmt.Errorf("leasecontroller: decoding SubnetLease %s: %w", u.GetName(), err)
 	}
 	key := leaseKey(lease.Spec.ClusterRef.Workspace, lease.Spec.ClusterRef.Name, lease.Spec.Purpose, u.GetName())

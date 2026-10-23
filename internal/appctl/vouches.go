@@ -16,6 +16,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/recordcontroller"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 )
 
 const (
@@ -92,7 +93,7 @@ func (ctl *Controller) applyOperatorVouch(ctx context.Context, ws string, op ope
 	}
 	obj := v1alpha1.AtprotoRecord{ObjectMeta: metav1.ObjectMeta{Name: operatorVouchPrefix + op.app},
 		Spec: v1alpha1.AtprotoRecordSpec{Repo: OperatorRepo, Collection: VouchNSID, Rkey: op.did, Record: record}}
-	u, err := toUnstructured(&obj, "AtprotoRecord")
+	u, err := unstruct.To(&obj, "AtprotoRecord")
 	if err != nil {
 		return err
 	}
@@ -148,7 +149,7 @@ func (ctl *Controller) reconcileOperatorRecords(ctx context.Context, ws string, 
 	var records []v1alpha1.AtprotoRecord
 	for i := range list.Items {
 		var o v1alpha1.AtprotoRecord
-		if err := fromUnstructured(&list.Items[i], &o); err != nil {
+		if err := unstruct.Into(&list.Items[i], &o); err != nil {
 			return err
 		}
 		if o.Spec.Repo == OperatorRepo && o.DeletionTimestamp == nil {
@@ -196,7 +197,7 @@ func (ctl *Controller) reconcileOperatorRecords(ctx context.Context, ws string, 
 		return err
 	}
 	for _, o := range records {
-		u, err := toUnstructured(&o, "AtprotoRecord")
+		u, err := unstruct.To(&o, "AtprotoRecord")
 		if err != nil {
 			return err
 		}

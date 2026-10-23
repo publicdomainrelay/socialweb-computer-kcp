@@ -30,6 +30,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/rootvault"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vaultcert"
@@ -160,23 +161,6 @@ func toServer(u *unstructured.Unstructured) (v1alpha1.OpenBaoServer, error) {
 	return o, err
 }
 
-func toChild(u *unstructured.Unstructured) (v1alpha1.HostProcess, error) {
-	var o v1alpha1.HostProcess
-	err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &o)
-	return o, err
-}
-
-func unstructuredOf(o any, kind string) (*unstructured.Unstructured, error) {
-	m, err := runtime.DefaultUnstructuredConverter.ToUnstructured(o)
-	if err != nil {
-		return nil, err
-	}
-	u := &unstructured.Unstructured{Object: m}
-	u.SetAPIVersion(v1alpha1.GroupVersion.String())
-	u.SetKind(kind)
-	return u, nil
-}
-
 const MemoryMax = 512 << 20
 
 func (c *Controller) childSpec(o v1alpha1.OpenBaoServer, dir, key string) v1alpha1.HostProcessSpec {
@@ -214,7 +198,7 @@ func (c *Controller) ensureChild(ctx context.Context, o v1alpha1.OpenBaoServer, 
 		hp := v1alpha1.HostProcess{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{OwnerLabel: o.Name},
 			OwnerReferences: []metav1.OwnerReference{{APIVersion: v1alpha1.GroupVersion.String(), Kind: "OpenBaoServer", Name: o.Name,
 				UID: o.UID, Controller: new(true)}}}, Spec: want}
-		u, err := unstructuredOf(&hp, "HostProcess")
+		u, err := unstruct.To(&hp, "HostProcess")
 		if err != nil {
 			return v1alpha1.HostProcess{}, err
 		}
@@ -223,12 +207,12 @@ func (c *Controller) ensureChild(ctx context.Context, o v1alpha1.OpenBaoServer, 
 			return v1alpha1.HostProcess{}, err
 		}
 		c.c.log().Info("placed the server's HostProcess", "openbaoserver", o.Name, "hostprocess", name, "unit", want.Unit)
-		return toChild(got)
+		return unstruct.From[v1alpha1.HostProcess](got)
 	}
 	if err != nil {
 		return v1alpha1.HostProcess{}, err
 	}
-	hp, err := toChild(cur)
+	hp, err := unstruct.From[v1alpha1.HostProcess](cur)
 	if err != nil {
 		return hp, err
 	}
@@ -237,7 +221,7 @@ func (c *Controller) ensureChild(ctx context.Context, o v1alpha1.OpenBaoServer, 
 	}
 	if !sameChild(hp.Spec, want) {
 		hp.Spec = want
-		u, err := unstructuredOf(&hp, "HostProcess")
+		u, err := unstruct.To(&hp, "HostProcess")
 		if err != nil {
 			return hp, err
 		}
@@ -245,7 +229,7 @@ func (c *Controller) ensureChild(ctx context.Context, o v1alpha1.OpenBaoServer, 
 		if err != nil {
 			return hp, err
 		}
-		return toChild(got)
+		return unstruct.From[v1alpha1.HostProcess](got)
 	}
 	return hp, nil
 }
@@ -736,7 +720,7 @@ func (c *Controller) reconcile(ctx context.Context, o v1alpha1.OpenBaoServer) v1
 
 func (c *Controller) writeStatus(ctx context.Context, cur *unstructured.Unstructured, o v1alpha1.OpenBaoServer, st v1alpha1.OpenBaoServerStatus) error {
 	o.Status = st
-	u, err := unstructuredOf(&o, "OpenBaoServer")
+	u, err := unstruct.To(&o, "OpenBaoServer")
 	if err != nil {
 		return err
 	}

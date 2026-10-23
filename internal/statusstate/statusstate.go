@@ -307,10 +307,6 @@ func (c *Controller) write(ctx context.Context, dyn dynamic.Interface, gvr schem
 	}
 }
 
-func decode(u *unstructured.Unstructured, out any) error {
-	return runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, out)
-}
-
 func setReady(conditions *[]metav1.Condition, generation int64, ok bool, reason, message string) {
 	value := metav1.ConditionFalse
 	if ok {

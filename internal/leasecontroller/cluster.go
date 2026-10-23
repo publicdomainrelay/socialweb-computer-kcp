@@ -11,6 +11,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 )
 
 func (c *Controller) ReconcileCluster(ctx context.Context, workspace string, u *unstructured.Unstructured) error {
@@ -22,7 +23,7 @@ func (c *Controller) ReconcileCluster(ctx context.Context, workspace string, u *
 		return fmt.Errorf("leasecontroller: opening the dynamic client for workspace %q: %w", workspace, err)
 	}
 	var cluster v1alpha1.Cluster
-	if err := decodeObject(u, &cluster); err != nil {
+	if err := unstruct.Into(u, &cluster); err != nil {
 		return fmt.Errorf("leasecontroller: decoding Cluster %s: %w", u.GetName(), err)
 	}
 	name := strings.TrimSpace(cluster.GetName())

@@ -31,6 +31,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 )
 
 const (
@@ -270,7 +271,7 @@ func applyRoot(ctx context.Context, rec devinstance.Record, kind v1alpha1.Applic
 	if err != nil {
 		return err
 	}
-	u, err := toUnstructured(obj, string(kind))
+	u, err := unstruct.To(obj, string(kind))
 	if err != nil {
 		return err
 	}
@@ -299,7 +300,7 @@ func readRoot(ctx context.Context, rec devinstance.Record, kind v1alpha1.Applica
 	}
 	m, _, _ := unstructured.NestedMap(u.Object, "status")
 	var st v1alpha1.ApplicationStatus
-	if err := fromUnstructured(&unstructured.Unstructured{Object: m}, &st); err != nil {
+	if err := unstruct.Into(&unstructured.Unstructured{Object: m}, &st); err != nil {
 		return st, true, err
 	}
 	return st, true, nil

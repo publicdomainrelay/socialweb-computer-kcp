@@ -16,6 +16,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/authretry"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
 
@@ -60,7 +61,7 @@ func (ct *Controller) server(ctx context.Context, name string) (*v1alpha1.OpenBa
 	if err != nil {
 		return nil, err
 	}
-	o, err := decode[v1alpha1.OpenBaoServer](u)
+	o, err := unstruct.From[v1alpha1.OpenBaoServer](u)
 	if err != nil {
 		return nil, err
 	}
@@ -165,7 +166,7 @@ func (ct *Controller) declareGuests(ctx context.Context, have map[string]bool) e
 		if u.GetDeletionTimestamp() != nil {
 			return nil
 		}
-		o, err := decode[v1alpha1.OpenBaoServer](u)
+		o, err := unstruct.From[v1alpha1.OpenBaoServer](u)
 		if err != nil {
 			return err
 		}
@@ -186,7 +187,7 @@ func (ct *Controller) declareGuests(ctx context.Context, have map[string]bool) e
 			d.KV = append(d.KV, want)
 		}
 		o.Spec.Declared = d
-		next, err := encode(&o, "OpenBaoServer")
+		next, err := unstruct.To(&o, "OpenBaoServer")
 		if err != nil {
 			return err
 		}

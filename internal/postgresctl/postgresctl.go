@@ -19,7 +19,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
@@ -27,6 +26,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostprocess"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/logcap"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/pgunit"
 )
@@ -121,23 +121,6 @@ func (ct *Controller) DataDir(o v1alpha1.Postgres) string {
 	return filepath.Join(ct.c.DataRoot, o.Name, "data")
 }
 
-func decode[T any](u *unstructured.Unstructured) (T, error) {
-	var o T
-	err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &o)
-	return o, err
-}
-
-func encode(o any, kind string) (*unstructured.Unstructured, error) {
-	m, err := runtime.DefaultUnstructuredConverter.ToUnstructured(o)
-	if err != nil {
-		return nil, err
-	}
-	u := &unstructured.Unstructured{Object: m}
-	u.SetAPIVersion(v1alpha1.GroupVersion.String())
-	u.SetKind(kind)
-	return u, nil
-}
-
 func (ct *Controller) childSpec(o v1alpha1.Postgres, in pgunit.Install, s pgunit.Server) (v1alpha1.HostProcessSpec, error) {
 	argv, err := in.Argv(s)
 	if err != nil {
@@ -175,7 +158,7 @@ func (ct *Controller) child(ctx context.Context, name string) (*v1alpha1.HostPro
 	if err != nil {
 		return nil, nil, err
 	}
-	hp, err := decode[v1alpha1.HostProcess](u)
+	hp, err := unstruct.From[v1alpha1.HostProcess](u)
 	return &hp, u, err
 }
 
@@ -190,7 +173,7 @@ func (ct *Controller) ensureChild(ctx context.Context, o v1alpha1.Postgres, spec
 			Labels: map[string]string{"socialweb.computer/postgres": o.Name},
 			OwnerReferences: []metav1.OwnerReference{{APIVersion: v1alpha1.GroupVersion.String(), Kind: "Postgres", Name: o.Name,
 				UID: o.UID, Controller: &ctrl}}}, Spec: spec}
-		nu, err := encode(&want, "HostProcess")
+		nu, err := unstruct.To(&want, "HostProcess")
 		if err != nil {
 			return nil, err
 		}
@@ -202,7 +185,7 @@ func (ct *Controller) ensureChild(ctx context.Context, o v1alpha1.Postgres, spec
 	}
 	if !reflect.DeepEqual(hp.Spec, spec) {
 		hp.Spec = spec
-		nu, err := encode(hp, "HostProcess")
+		nu, err := unstruct.To(hp, "HostProcess")
 		if err != nil {
 			return nil, err
 		}
@@ -259,7 +242,7 @@ func (ct *Controller) finalize(ctx context.Context, cur *unstructured.Unstructur
 }
 
 func (ct *Controller) reconcile(ctx context.Context, cur *unstructured.Unstructured) error {
-	o, err := decode[v1alpha1.Postgres](cur)
+	o, err := unstruct.From[v1alpha1.Postgres](cur)
 	if err != nil {
 		return err
 	}
@@ -380,7 +363,7 @@ func (ct *Controller) writeStatus(ctx context.Context, cur *unstructured.Unstruc
 		return nil
 	}
 	o.Status = next
-	u, err := encode(&o, "Postgres")
+	u, err := unstruct.To(&o, "Postgres")
 	if err != nil {
 		return err
 	}

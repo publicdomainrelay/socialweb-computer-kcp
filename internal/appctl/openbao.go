@@ -12,6 +12,7 @@ import (
 	"k8s.io/client-go/dynamic"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
 )
 
@@ -50,7 +51,7 @@ func readNetworkVault(ctx context.Context, ri dynamic.ResourceInterface) (networ
 		return networkVault{}, err
 	}
 	var o v1alpha1.OpenBaoServer
-	if err := fromUnstructured(u, &o); err != nil {
+	if err := unstruct.Into(u, &o); err != nil {
 		return networkVault{}, err
 	}
 	st := o.Status

@@ -23,6 +23,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpapply"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
@@ -707,7 +708,7 @@ func (ctl *Controller) reconcileBidderAccount(ctx context.Context, u *unstructur
 
 func (ctl *Controller) reconcileBidder(ctx context.Context, u *unstructured.Unstructured) error {
 	var o v1alpha1.MarketBidder
-	if err := fromUnstructured(u, &o); err != nil {
+	if err := unstruct.Into(u, &o); err != nil {
 		return err
 	}
 	owner := ownerOf(u)
@@ -1015,7 +1016,7 @@ func (ctl *Controller) bidderIdentity(ctx context.Context) (*v1alpha1.MarketIden
 		return nil, err
 	}
 	var id v1alpha1.MarketIdentity
-	if err := fromUnstructured(u, &id); err != nil {
+	if err := unstruct.Into(u, &id); err != nil {
 		return nil, err
 	}
 	return &id, nil

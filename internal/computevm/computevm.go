@@ -34,6 +34,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/lease"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
@@ -182,23 +183,6 @@ func applySets(ctx context.Context, c Config, restCfg *rest.Config) error {
 	return nil
 }
 
-func decode[T any](u *unstructured.Unstructured) (T, error) {
-	var o T
-	err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &o)
-	return o, err
-}
-
-func encode(o any, kind string) (*unstructured.Unstructured, error) {
-	m, err := runtime.DefaultUnstructuredConverter.ToUnstructured(o)
-	if err != nil {
-		return nil, err
-	}
-	u := &unstructured.Unstructured{Object: m}
-	u.SetAPIVersion(v1alpha1.GroupVersion.String())
-	u.SetKind(kind)
-	return u, nil
-}
-
 func ParseMiB(s string) (int, error) {
 	if strings.TrimSpace(s) == "" {
 		return 0, nil
@@ -337,7 +321,7 @@ func (ct *Controller) child(ctx context.Context, name string) (*unstructured.Uns
 	if err != nil {
 		return nil, nil, err
 	}
-	hp, err := decode[v1alpha1.HostProcess](u)
+	hp, err := unstruct.From[v1alpha1.HostProcess](u)
 	return u, &hp, err
 }
 
@@ -371,7 +355,7 @@ func (ct *Controller) placer(o v1alpha1.ComputeVM) vmruntime.Placer {
 			OwnerReferences: []metav1.OwnerReference{{APIVersion: v1alpha1.GroupVersion.String(), Kind: "ComputeVM", Name: o.Name,
 				UID: o.UID, Controller: &ctrl}}},
 			Spec: hostprocess.SpecOf(spec)}
-		u, err := encode(&hp, "HostProcess")
+		u, err := unstruct.To(&hp, "HostProcess")
 		if err != nil {
 			return err
 		}
@@ -842,7 +826,7 @@ func (ct *Controller) reconcile(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
-	o, err := decode[v1alpha1.ComputeVM](cur)
+	o, err := unstruct.From[v1alpha1.ComputeVM](cur)
 	if err != nil {
 		return err
 	}

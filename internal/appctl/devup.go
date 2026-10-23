@@ -16,6 +16,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 )
 
 const (
@@ -156,7 +157,7 @@ func ApplyNetwork(ctx context.Context, kubeconfig string, spec v1alpha1.MarketNe
 	if err != nil {
 		return err
 	}
-	u, err := toUnstructured(&v1alpha1.MarketNetwork{ObjectMeta: metav1.ObjectMeta{Name: NetworkName}, Spec: spec}, "MarketNetwork")
+	u, err := unstruct.To(&v1alpha1.MarketNetwork{ObjectMeta: metav1.ObjectMeta{Name: NetworkName}, Spec: spec}, "MarketNetwork")
 	if err != nil {
 		return err
 	}
@@ -192,7 +193,7 @@ func ReadNetwork(ctx context.Context, kubeconfig string) (v1alpha1.MarketNetwork
 		return v1alpha1.MarketNetwork{}, err
 	}
 	var o v1alpha1.MarketNetwork
-	return o, fromUnstructured(u, &o)
+	return o, unstruct.Into(u, &o)
 }
 
 func WaitNetwork(ctx context.Context, kubeconfig string, timeout time.Duration, progress func(v1alpha1.MarketNetworkStatus)) (v1alpha1.MarketNetwork, error) {

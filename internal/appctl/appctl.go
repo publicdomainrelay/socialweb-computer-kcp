@@ -16,7 +16,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
@@ -286,21 +285,6 @@ func (ctl *Controller) Pass(ctx context.Context) {
 			ctl.ensureQuotas(objCtx, u)
 		}
 	}
-}
-
-func fromUnstructured(u *unstructured.Unstructured, into any) error {
-	return runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, into)
-}
-
-func toUnstructured(o any, kind string) (*unstructured.Unstructured, error) {
-	m, err := runtime.DefaultUnstructuredConverter.ToUnstructured(o)
-	if err != nil {
-		return nil, err
-	}
-	u := &unstructured.Unstructured{Object: m}
-	u.SetAPIVersion(v1alpha1.GroupVersion.String())
-	u.SetKind(kind)
-	return u, nil
 }
 
 func ownerOf(u *unstructured.Unstructured) string {

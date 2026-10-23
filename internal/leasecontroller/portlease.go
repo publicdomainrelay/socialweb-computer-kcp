@@ -9,6 +9,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 )
 
 func (c *Controller) ReconcilePortLease(ctx context.Context, workspace string, u *unstructured.Unstructured) error {
@@ -20,7 +21,7 @@ func (c *Controller) ReconcilePortLease(ctx context.Context, workspace string, u
 		return fmt.Errorf("leasecontroller: opening the dynamic client for workspace %q: %w", workspace, err)
 	}
 	var lease v1alpha1.PortLease
-	if err := decodeObject(u, &lease); err != nil {
+	if err := unstruct.Into(u, &lease); err != nil {
 		return fmt.Errorf("leasecontroller: decoding PortLease %s: %w", u.GetName(), err)
 	}
 	key := leaseKey(lease.Spec.ClusterRef.Workspace, lease.Spec.ClusterRef.Name, lease.Spec.Purpose, u.GetName())

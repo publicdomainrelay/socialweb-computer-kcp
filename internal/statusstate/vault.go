@@ -17,6 +17,7 @@ import (
 	"k8s.io/client-go/dynamic"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
 )
 
@@ -36,7 +37,7 @@ type OpenBaoMetadataSource struct {
 
 func (c *Controller) reconcileVaultCredential(ctx context.Context, dyn dynamic.Interface, u *unstructured.Unstructured) {
 	var obj v1alpha1.VaultCredential
-	if err := decode(u, &obj); err != nil {
+	if err := unstruct.Into(u, &obj); err != nil {
 		c.log.Warn("decoding a VaultCredential", "workspace", c.workspace, "name", u.GetName(), "err", err.Error())
 		return
 	}
@@ -71,7 +72,7 @@ func (c *Controller) reconcileVaultCredential(ctx context.Context, dyn dynamic.I
 
 func (c *Controller) reconcileVaultCertificate(ctx context.Context, dyn dynamic.Interface, u *unstructured.Unstructured) {
 	var obj v1alpha1.VaultCertificate
-	if err := decode(u, &obj); err != nil {
+	if err := unstruct.Into(u, &obj); err != nil {
 		c.log.Warn("decoding a VaultCertificate", "workspace", c.workspace, "name", u.GetName(), "err", err.Error())
 		return
 	}

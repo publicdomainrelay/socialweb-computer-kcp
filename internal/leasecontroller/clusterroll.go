@@ -11,6 +11,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 )
 
 func (c *Controller) ReconcileClusterRoll(ctx context.Context, workspace string, u *unstructured.Unstructured) error {
@@ -22,7 +23,7 @@ func (c *Controller) ReconcileClusterRoll(ctx context.Context, workspace string,
 		return fmt.Errorf("leasecontroller: opening the dynamic client for workspace %q: %w", workspace, err)
 	}
 	var roll v1alpha1.ClusterRoll
-	if err := decodeObject(u, &roll); err != nil {
+	if err := unstruct.Into(u, &roll); err != nil {
 		return fmt.Errorf("leasecontroller: decoding ClusterRoll %s: %w", u.GetName(), err)
 	}
 

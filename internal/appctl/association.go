@@ -13,6 +13,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 )
 
 const (
@@ -187,7 +188,7 @@ func (ctl *Controller) identityIn(ctx context.Context, ws, name string) (*v1alph
 		return nil, err
 	}
 	var id v1alpha1.MarketIdentity
-	if err := fromUnstructured(u, &id); err != nil {
+	if err := unstruct.Into(u, &id); err != nil {
 		return nil, err
 	}
 	return &id, nil

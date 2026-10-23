@@ -20,6 +20,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterstack"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/lease"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/procgroup"
@@ -180,7 +181,7 @@ func (h *UnitsHost) vaultServer(ctx context.Context, key string) (*v1alpha1.Open
 	if err != nil {
 		return nil, err
 	}
-	o, err := decodeObj[v1alpha1.OpenBaoServer](u)
+	o, err := unstruct.From[v1alpha1.OpenBaoServer](u)
 	return &o, err
 }
 
@@ -264,7 +265,7 @@ func (h *UnitsHost) placeVault(ctx context.Context, key string, st procgroup.Ste
 		if cur == nil {
 			o := v1alpha1.OpenBaoServer{ObjectMeta: metav1.ObjectMeta{Name: name,
 				Labels: map[string]string{LabelCluster: key, LabelMember: memberLabel(MemberName(procgroup.ComponentOpenBao))}}, Spec: want}
-			u, err := encodeObj(&o, "OpenBaoServer")
+			u, err := unstruct.To(&o, "OpenBaoServer")
 			if err != nil {
 				return nil, err
 			}
@@ -282,7 +283,7 @@ func (h *UnitsHost) placeVault(ctx context.Context, key string, st procgroup.Ste
 			break
 		}
 		cur.Spec = want
-		u, err := encodeObj(cur, "OpenBaoServer")
+		u, err := unstruct.To(cur, "OpenBaoServer")
 		if err != nil {
 			return nil, err
 		}
@@ -379,7 +380,7 @@ func (h *UnitsHost) UpdateVaultDeclared(ctx context.Context, key string, mutate 
 			break
 		}
 		cur.Spec.Declared = next
-		u, err := encodeObj(cur, "OpenBaoServer")
+		u, err := unstruct.To(cur, "OpenBaoServer")
 		if err != nil {
 			return err
 		}

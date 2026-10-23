@@ -27,6 +27,7 @@ import (
 
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/pds"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
@@ -216,7 +217,7 @@ func exposureViewOf(v ComponentView, kind string, m map[string]any) (ComponentVi
 	switch kind {
 	case ComponentKindService:
 		var st exposurev1alpha1.ServiceStatus
-		if err := fromUnstructured(&unstructured.Unstructured{Object: m}, &st); err != nil {
+		if err := unstruct.Into(&unstructured.Unstructured{Object: m}, &st); err != nil {
 			return v, err
 		}
 		v.Status.Phase = v1alpha1.ComponentPhase(st.Phase)
@@ -226,7 +227,7 @@ func exposureViewOf(v ComponentView, kind string, m map[string]any) (ComponentVi
 		}
 	case ComponentKindExposure:
 		var st exposurev1alpha1.ExposureStatus
-		if err := fromUnstructured(&unstructured.Unstructured{Object: m}, &st); err != nil {
+		if err := unstruct.Into(&unstructured.Unstructured{Object: m}, &st); err != nil {
 			return v, err
 		}
 		v.Status.Phase = v1alpha1.ComponentPhase(st.Phase)
@@ -251,7 +252,7 @@ func componentViewOf(ws, kind string, u *unstructured.Unstructured) (ComponentVi
 	if isExposureKind(kind) {
 		return exposureViewOf(v, kind, m)
 	}
-	if err := fromUnstructured(&unstructured.Unstructured{Object: m}, &v.Status); err != nil {
+	if err := unstruct.Into(&unstructured.Unstructured{Object: m}, &v.Status); err != nil {
 		return v, err
 	}
 	return v, nil

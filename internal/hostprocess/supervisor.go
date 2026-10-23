@@ -24,6 +24,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/logcap"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 )
@@ -131,7 +132,7 @@ func (s *Supervisor) markAdopted(o v1alpha1.HostProcess, obs Observed) {
 func (s *Supervisor) reconcileObject(ctx context.Context, cur *unstructured.Unstructured) (v1alpha1.HostProcess, bool) {
 	unlock := s.lockObject(cur.GetName())
 	defer unlock()
-	o, err := toObject(cur)
+	o, err := unstruct.From[v1alpha1.HostProcess](cur)
 	if err != nil {
 		s.c.log().Warn("decoding", "name", cur.GetName(), "err", err.Error())
 		return o, false
@@ -238,12 +239,6 @@ func New(ctx context.Context, c Config) (*Supervisor, error) {
 	return &Supervisor{c: c, client: dc.Resource(GVR), placed: map[string]bool{}, backend: c.Manager.Capabilities().Backend}, nil
 }
 
-func toObject(u *unstructured.Unstructured) (v1alpha1.HostProcess, error) {
-	var o v1alpha1.HostProcess
-	err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &o)
-	return o, err
-}
-
 func toUnstructured(o *v1alpha1.HostProcess) (*unstructured.Unstructured, error) {
 	o.APIVersion = v1alpha1.GroupVersion.String()
 	o.Kind = "HostProcess"
@@ -283,7 +278,7 @@ func (s *Supervisor) syncMirrors(ctx context.Context) {
 			s.c.log().Warn("reading a bootstrap mirror", "name", name, "err", err.Error())
 			continue
 		}
-		o, err := toObject(cur)
+		o, err := unstruct.From[v1alpha1.HostProcess](cur)
 		if err != nil {
 			continue
 		}

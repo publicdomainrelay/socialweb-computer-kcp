@@ -16,12 +16,12 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/baosync"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 )
 
 const (
@@ -193,7 +193,7 @@ func (c *Controller) listGrants(ctx context.Context) ([]v1alpha1.GuestIdentityGr
 	out := make([]v1alpha1.GuestIdentityGrant, 0, len(list.Items))
 	for i := range list.Items {
 		var g v1alpha1.GuestIdentityGrant
-		if err := fromUnstructured(&list.Items[i], &g); err != nil {
+		if err := unstruct.Into(&list.Items[i], &g); err != nil {
 			c.c.log().Warn("decoding a GuestIdentityGrant", "name", list.Items[i].GetName(), "err", err.Error())
 			continue
 		}
@@ -208,7 +208,7 @@ func (c *Controller) writeGrantStatus(ctx context.Context, g v1alpha1.GuestIdent
 		return
 	}
 	var held v1alpha1.GuestIdentityGrant
-	if fromUnstructured(cur, &held) == nil {
+	if unstruct.Into(cur, &held) == nil {
 		if st.Applied && held.Status.Applied && held.Status.Role == st.Role && held.Status.ObservedGeneration == st.ObservedGeneration {
 			st.AppliedAt = held.Status.AppliedAt
 		}
@@ -221,7 +221,7 @@ func (c *Controller) writeGrantStatus(ctx context.Context, g v1alpha1.GuestIdent
 		st.AppliedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	}
 	g.Status = st
-	u, err := unstructuredOf(&g, "GuestIdentityGrant")
+	u, err := unstruct.To(&g, "GuestIdentityGrant")
 	if err != nil {
 		return
 	}
@@ -340,10 +340,6 @@ func (c *Controller) watchGrants(ctx context.Context, kick chan<- struct{}) {
 			}
 		}
 	}
-}
-
-func fromUnstructured(u *unstructured.Unstructured, out any) error {
-	return runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, out)
 }
 
 func desiredWithIdentity(ctx context.Context, in layoutInput, ca caSource) (baosync.Desired, []string, map[string]grantRole, map[string]string, error) {

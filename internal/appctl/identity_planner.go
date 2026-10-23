@@ -18,6 +18,7 @@ import (
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/remotepds"
 
@@ -273,7 +274,7 @@ func (ctl *Controller) remotePDSRef(ctx context.Context, ws string, ref *commonv
 		return nil, err
 	}
 	var object pdsv1alpha1.RemotePDS
-	if err := fromUnstructured(u, &object); err != nil {
+	if err := unstruct.Into(u, &object); err != nil {
 		return nil, err
 	}
 	return &object, nil
@@ -331,7 +332,7 @@ func (ctl *Controller) ensureRemotePDS(ctx context.Context, ws string, desired *
 	existing, err := ri.Get(ctx, name, metav1.GetOptions{})
 	if err == nil {
 		var current pdsv1alpha1.RemotePDS
-		if fromUnstructured(existing, &current) != nil {
+		if unstruct.Into(existing, &current) != nil {
 			return nil
 		}
 		if strings.TrimRight(current.Spec.URL, "/") == strings.TrimRight(desired.Spec.URL, "/") && current.Spec.DID == desired.Spec.DID &&
@@ -339,7 +340,7 @@ func (ctl *Controller) ensureRemotePDS(ctx context.Context, ws string, desired *
 			return &current
 		}
 		current.Spec.URL, current.Spec.DID, current.Spec.Auth = desired.Spec.URL, desired.Spec.DID, desired.Spec.Auth
-		u, err := toUnstructured(&current, "RemotePDS")
+		u, err := unstruct.To(&current, "RemotePDS")
 		if err != nil {
 			return nil
 		}
@@ -351,7 +352,7 @@ func (ctl *Controller) ensureRemotePDS(ctx context.Context, ws string, desired *
 			return nil
 		}
 		var result pdsv1alpha1.RemotePDS
-		if fromUnstructured(updated, &result) == nil {
+		if unstruct.Into(updated, &result) == nil {
 			return &result
 		}
 		return nil
@@ -360,7 +361,7 @@ func (ctl *Controller) ensureRemotePDS(ctx context.Context, ws string, desired *
 		ctl.c.log().Warn("reading a RemotePDS", "name", name, "err", err.Error())
 		return nil
 	}
-	u, err := toUnstructured(desired, "RemotePDS")
+	u, err := unstruct.To(desired, "RemotePDS")
 	if err != nil {
 		ctl.c.log().Warn("encoding a RemotePDS", "name", name, "err", err.Error())
 		return nil
@@ -373,7 +374,7 @@ func (ctl *Controller) ensureRemotePDS(ctx context.Context, ws string, desired *
 	}
 	if created != nil {
 		var out pdsv1alpha1.RemotePDS
-		if fromUnstructured(created, &out) == nil {
+		if unstruct.Into(created, &out) == nil {
 			return &out
 		}
 	}

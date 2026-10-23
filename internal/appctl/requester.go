@@ -16,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
@@ -163,7 +164,7 @@ func (ctl *Controller) ensureIdentitySpec(ctx context.Context, ws, owner, name s
 	if err != nil {
 		return err
 	}
-	u, err := toUnstructured(&v1alpha1.MarketIdentity{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{OwnerLabel: owner}}, Spec: spec}, "MarketIdentity")
+	u, err := unstruct.To(&v1alpha1.MarketIdentity{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{OwnerLabel: owner}}, Spec: spec}, "MarketIdentity")
 	if err != nil {
 		return err
 	}
@@ -220,7 +221,7 @@ func (ctl *Controller) vaultRefs(ctx context.Context, server, clientName string)
 		return "", v1alpha1.OpenBaoServerStatus{}, v1alpha1.OpenBaoServerClientRefs{}, err
 	}
 	var o v1alpha1.OpenBaoServer
-	if err := fromUnstructured(u, &o); err != nil {
+	if err := unstruct.Into(u, &o); err != nil {
 		return "", o.Status, v1alpha1.OpenBaoServerClientRefs{}, err
 	}
 	st := o.Status
@@ -365,7 +366,7 @@ func (ctl *Controller) reconcileRequesterAccount(ctx context.Context, u *unstruc
 
 func (ctl *Controller) reconcileRequester(ctx context.Context, u *unstructured.Unstructured) error {
 	var o v1alpha1.MarketRequester
-	if err := fromUnstructured(u, &o); err != nil {
+	if err := unstruct.Into(u, &o); err != nil {
 		return err
 	}
 	owner := ownerOf(u)

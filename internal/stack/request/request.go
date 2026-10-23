@@ -24,6 +24,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -207,10 +208,6 @@ func OpenKcp(kubeconfig, workspace string) (*Kcp, error) {
 	return &Kcp{rest: cfg, dyn: dc, workspace: workspace}, nil
 }
 
-func fromUnstructured(u *unstructured.Unstructured, into any) error {
-	return runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, into)
-}
-
 func applyBody(o any, kind string) ([]byte, error) {
 	m, err := runtime.DefaultUnstructuredConverter.ToUnstructured(o)
 	if err != nil {
@@ -241,7 +238,7 @@ func (k *Kcp) Root(ctx context.Context) (v1alpha1.ApplicationStatus, error) {
 		return v1alpha1.ApplicationStatus{}, err
 	}
 	var o v1alpha1.MarketRequester
-	err = fromUnstructured(u, &o)
+	err = unstruct.Into(u, &o)
 	return o.Status, err
 }
 
@@ -280,7 +277,7 @@ func (k *Kcp) Contract(ctx context.Context) (*v1alpha1.ComputeContract, error) {
 		return nil, err
 	}
 	var o v1alpha1.ComputeContract
-	if err := fromUnstructured(u, &o); err != nil {
+	if err := unstruct.Into(u, &o); err != nil {
 		return nil, err
 	}
 	return &o, nil
@@ -434,7 +431,7 @@ func editNetwork(ctx context.Context, kubeconfig string, edit func(*v1alpha1.Mar
 			return fmt.Errorf("request: the market network's MarketNetwork: %w", err)
 		}
 		var o v1alpha1.MarketNetwork
-		if err := fromUnstructured(u, &o); err != nil {
+		if err := unstruct.Into(u, &o); err != nil {
 			return err
 		}
 		if err := edit(&o.Spec); err != nil {
@@ -503,7 +500,7 @@ func NetworkApp(ctx context.Context, kubeconfig, name string) (v1alpha1.NetworkA
 		return v1alpha1.NetworkAppStatus{}, false, err
 	}
 	var o v1alpha1.MarketNetwork
-	if err := fromUnstructured(u, &o); err != nil {
+	if err := unstruct.Into(u, &o); err != nil {
 		return v1alpha1.NetworkAppStatus{}, false, err
 	}
 	for _, a := range o.Status.Apps {
