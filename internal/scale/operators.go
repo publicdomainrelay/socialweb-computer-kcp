@@ -1,9 +1,5 @@
 package scale
 
-import (
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-)
-
 type OperatorKind struct {
 	Group string
 
@@ -96,31 +92,4 @@ func (k OperatorKind) Reconciled(cr CustomResource) bool {
 		return c.Status == "True"
 	}
 	return false
-}
-
-func CustomResourceOf(u *unstructured.Unstructured) CustomResource {
-	gvk := u.GroupVersionKind()
-	cr := CustomResource{
-		Group:      gvk.Group,
-		Kind:       gvk.Kind,
-		Namespace:  u.GetNamespace(),
-		Name:       u.GetName(),
-		Generation: u.GetGeneration(),
-		Deleting:   u.GetDeletionTimestamp() != nil,
-		Finalizers: len(u.GetFinalizers()),
-	}
-	cr.ObservedGeneration, _, _ = unstructured.NestedInt64(u.Object, "status", "observedGeneration")
-	conditions, _, _ := unstructured.NestedSlice(u.Object, "status", "conditions")
-	for _, raw := range conditions {
-		m, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
-		c := CustomResourceCondition{}
-		c.Type, _, _ = unstructured.NestedString(m, "type")
-		c.Status, _, _ = unstructured.NestedString(m, "status")
-		c.ObservedGeneration, _, _ = unstructured.NestedInt64(m, "observedGeneration")
-		cr.Conditions = append(cr.Conditions, c)
-	}
-	return cr
 }

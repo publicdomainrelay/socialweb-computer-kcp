@@ -19,6 +19,7 @@ import (
 
 	sd "github.com/coreos/go-systemd/v22/dbus"
 	"github.com/godbus/dbus/v5"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/host"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
 )
 
@@ -29,6 +30,8 @@ const (
 	errNoSuchProcess        = "org.freedesktop.systemd1.NoSuchProcess"
 	errUnixProcessIDUnknown = "org.freedesktop.DBus.Error.UnixProcessIdUnknown"
 )
+
+var _ host.Units = (*systemd)(nil)
 
 type systemd struct {
 	dial    func(ctx context.Context) (bus, error)

@@ -6,10 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"syscall"
 	"time"
 
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/systemdunit"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/host"
 )
 
 const NamePrefix = "socialweb-"
@@ -30,11 +29,26 @@ var ErrNoBackend = errors.New("hostsvc: no placement backend chosen: set the hos
 
 var ErrSystemdTooOld = fmt.Errorf("hostsvc: systemd older than %d (GetUnitByPIDFD is required)", MinSystemdVersion)
 
-type Backend string
+type (
+	Backend      = host.Backend
+	Capabilities = host.Capabilities
+	Restart      = host.Restart
+	UnitEvent    = host.UnitEvent
+	ActiveState  = host.ActiveState
+	Output       = host.Output
+	Limits       = host.Limits
+	UnitSpec     = host.UnitSpec
+	UnitStatus   = host.UnitStatus
+	Verdict      = host.Verdict
+	LostReason   = host.LostReason
+	Identity     = host.Identity
+	Observation  = host.Observation
+	Manager      = host.Units
+)
 
 const (
-	BackendSystemdUser Backend = "systemd-user"
-	BackendProc        Backend = "proc"
+	BackendSystemdUser = host.BackendSystemdUser
+	BackendProc        = host.BackendProc
 )
 
 func ParseBackend(s string) (Backend, error) {
@@ -45,15 +59,6 @@ func ParseBackend(s string) (Backend, error) {
 		return "", ErrNoBackend
 	}
 	return "", fmt.Errorf("hostsvc: unknown placement backend %q: want %s or %s", s, BackendSystemdUser, BackendProc)
-}
-
-type Capabilities struct {
-	Backend         Backend
-	EnforcesLimits  bool
-	OOMKillReported bool
-	FDStore         bool
-	PrivateHostname bool
-	Journal         bool
 }
 
 type Config struct {
@@ -87,139 +92,36 @@ func (c Config) Validate() error {
 	return nil
 }
 
-type Restart string
-
 const (
-	RestartNo        Restart = Restart(systemdunit.RestartNo)
-	RestartOnFailure Restart = Restart(systemdunit.RestartOnFailure)
-	RestartAlways    Restart = Restart(systemdunit.RestartAlways)
+	RestartNo        = host.RestartNo
+	RestartOnFailure = host.RestartOnFailure
+	RestartAlways    = host.RestartAlways
 )
 
-type UnitEvent struct {
-	Name   string
-	Status UnitStatus
-}
-
-type ActiveState string
-
 const (
-	Active       ActiveState = "active"
-	Activating   ActiveState = "activating"
-	Deactivating ActiveState = "deactivating"
-	Reloading    ActiveState = "reloading"
-	Inactive     ActiveState = "inactive"
-	Failed       ActiveState = "failed"
-	NotFound     ActiveState = "not-found"
+	Active       = host.Active
+	Activating   = host.Activating
+	Deactivating = host.Deactivating
+	Reloading    = host.Reloading
+	Inactive     = host.Inactive
+	Failed       = host.Failed
+	NotFound     = host.NotFound
 )
 
-type Output struct {
-	StdoutFile string
-	StderrFile string
-}
-
-type Limits struct {
-	MemoryMax       uint64
-	CPUWeight       uint64
-	CPUQuotaPercent int
-	TasksMax        uint64
-}
-
-type UnitSpec struct {
-	Name            string
-	Description     string
-	Exec            []string
-	Env             []string
-	EnvFiles        []string
-	WorkDir         string
-	Output          Output
-	Limits          Limits
-	OOMPolicy       string
-	KillSignal      syscall.Signal
-	StopTimeout     time.Duration
-	After           []string
-	Wants           []string
-	Slice           string
-	Restart         Restart
-	PrivateHostname string
-	FDStore         int
-	Delegate        bool
-}
-
-type UnitStatus struct {
-	Name           string
-	State          ActiveState
-	SubState       string
-	Result         string
-	MainPID        int
-	InvocationID   string
-	ExecMainCode   int32
-	ExecMainStatus int32
-	ActiveSince    time.Time
-	Adopted        bool
-	Description    string
-	Backend        Backend
-}
-
-type Verdict int
-
 const (
-	VerdictUnknown Verdict = iota
-	VerdictRunning
-	VerdictLost
+	VerdictUnknown = host.VerdictUnknown
+	VerdictRunning = host.VerdictRunning
+	VerdictLost    = host.VerdictLost
 )
 
-func (v Verdict) String() string {
-	switch v {
-	case VerdictRunning:
-		return "Running"
-	case VerdictLost:
-		return "Lost"
-	}
-	return "Unknown"
-}
-
-type LostReason string
-
 const (
-	LostHostRebooted     LostReason = "HostRebooted"
-	LostUnitGone         LostReason = "UnitGone"
-	LostUnitExited       LostReason = "UnitExited"
-	LostUnitFailed       LostReason = "UnitFailed"
-	LostOOMKilled        LostReason = "OOMKilled"
-	LostIdentityMismatch LostReason = "IdentityMismatch"
+	LostHostRebooted     = host.LostHostRebooted
+	LostUnitGone         = host.LostUnitGone
+	LostUnitExited       = host.LostUnitExited
+	LostUnitFailed       = host.LostUnitFailed
+	LostOOMKilled        = host.LostOOMKilled
+	LostIdentityMismatch = host.LostIdentityMismatch
 )
-
-type Identity struct {
-	Unit         string
-	InvocationID string
-	PID          int
-	StartTicks   uint64
-	BootID       string
-	Backend      Backend
-	Manager      string
-}
-
-type Observation struct {
-	Verdict Verdict
-	Reason  LostReason
-	Detail  string
-	Status  UnitStatus
-	Stopped bool
-}
-
-type Manager interface {
-	Start(ctx context.Context, spec UnitSpec) (UnitStatus, error)
-	Inspect(ctx context.Context, name string) (UnitStatus, error)
-	Stop(ctx context.Context, name string) error
-	ResetFailed(ctx context.Context, name string) error
-	List(ctx context.Context, prefix string) ([]UnitStatus, error)
-	Identify(ctx context.Context, name string, pid int) (Identity, error)
-	Check(ctx context.Context, want Identity) (Observation, error)
-	StopSlice(ctx context.Context, slice string) error
-	Watch(ctx context.Context, prefix string) (<-chan UnitEvent, error)
-	Capabilities() Capabilities
-	Close() error
-}
 
 func Live(st UnitStatus) bool {
 	return st.State == Active || st.State == Activating || st.State == Deactivating
@@ -345,3 +247,11 @@ func ForeignIdentity(c Capabilities, want Identity) (Observation, bool) {
 		Detail: fmt.Sprintf("%s was placed by the %s backend and this manager is %s: never adopted across backends",
 			want.Unit, want.Backend, c.Backend)}, true
 }
+
+var _ host.Clock = SystemClock{}
+
+type SystemClock struct{}
+
+func (SystemClock) Now() time.Time { return time.Now() }
+
+func (SystemClock) After(d time.Duration) <-chan time.Time { return time.After(d) }

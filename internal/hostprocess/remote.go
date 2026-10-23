@@ -18,6 +18,7 @@ import (
 	"k8s.io/client-go/rest"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/host"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
@@ -35,6 +36,8 @@ type RemoteConfig struct {
 	Timeout    time.Duration
 	Log        *slog.Logger
 }
+
+var _ host.Units = (*Remote)(nil)
 
 type Remote struct {
 	hostsvc.Manager
