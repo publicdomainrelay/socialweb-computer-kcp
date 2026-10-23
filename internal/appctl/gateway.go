@@ -687,9 +687,12 @@ func (ctl *Controller) reconcileGateway(ctx context.Context, u *unstructured.Uns
 	if ctl.c.OnComponents != nil {
 		ctl.c.OnComponents(owner, snap.Listeners)
 	}
+	associationMessage := associationWait(plan, id, RequesterAssociate)
 	switch {
 	case awaitingOperator != "":
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, awaitingOperator
+	case associationMessage != "":
+		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, associationMessage
 	case snap.satisfied(allDesired) && st.Did != "":
 		st = ready(st, "the root vault is Ready and every component is ready")
 	default:

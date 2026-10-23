@@ -574,7 +574,10 @@ func (ctl *Controller) reconcileRequester(ctx context.Context, u *unstructured.U
 	st.Components, st.Listeners = snap.Components, snap.Listeners
 	st.Did = id.Status.Did
 	fillComponentStatus(&st, o.Generation, o.Spec.Suspend, o.Spec.Components, allDesired, snap, nil, ctl.componentDrift(string(o.UID)))
+	associationMessage := associationWait(plan, id, RequesterAssociate)
 	switch {
+	case associationMessage != "":
+		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, associationMessage
 	case snap.satisfied(allDesired) && st.Did != "":
 		st = ready(st, "the requester is signed in and its components are ready")
 	case st.Did == "":

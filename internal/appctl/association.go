@@ -24,7 +24,7 @@ const (
 
 func (ctl *Controller) associateNetworkOperator(ctx context.Context, spec v1alpha1.MarketBidderSpec) error {
 	id, err := ctl.bidderIdentity(ctx)
-	if err != nil || !claimOpen(id) || spec.Identity.Handle == "" {
+	if err != nil || !claimOpen(id) || spec.Identity.Handle == "" || spec.Network == nil {
 		return err
 	}
 	password, _, err := ctl.bidderPassword(ctx)
@@ -41,7 +41,7 @@ func (ctl *Controller) associateNetworkOperator(ctx context.Context, spec v1alph
 }
 
 func claimOpen(id *v1alpha1.MarketIdentity) bool {
-	if id == nil || id.Status.Phase != v1alpha1.MarketIdentityPhaseAwaitingScan || id.Status.Did == "" || id.Status.PendingAction == nil {
+	if id == nil || strings.TrimSpace(id.Status.Did) == "" {
 		return false
 	}
 	for _, c := range id.Status.Conditions {
@@ -49,7 +49,16 @@ func claimOpen(id *v1alpha1.MarketIdentity) bool {
 			return false
 		}
 	}
-	return true
+	if id.Spec.Mode == v1alpha1.MarketIdentityModeLocalRepo {
+		if id.Spec.Association == v1alpha1.AssociationSkip || associatedClaim(id) || len(id.Status.Associations) > 0 {
+			return false
+		}
+		if id.Status.Phase == v1alpha1.MarketIdentityPhaseAwaitingApproval {
+			return true
+		}
+		return id.Status.Phase == v1alpha1.MarketIdentityPhaseReady && len(id.Spec.ApprovedAssociations) == 0
+	}
+	return id.Status.Phase == v1alpha1.MarketIdentityPhaseAwaitingScan && id.Status.PendingAction != nil
 }
 
 func claimOf(rawURL string) (nonce, service string) {
@@ -59,8 +68,14 @@ func claimOf(rawURL string) (nonce, service string) {
 }
 
 func (ctl *Controller) writeClaim(ctx context.Context, id *v1alpha1.MarketIdentity, operatorPds, ca, identifier, password, namePrefix, service string) (string, error) {
-	nonce, pendingService := claimOf(id.Status.PendingAction.Url)
-	if nonce == "" || strings.TrimSpace(service) == "" {
+	if id == nil || strings.TrimSpace(service) == "" {
+		return "", nil
+	}
+	nonce, pendingService := "", ""
+	if action := id.Status.PendingAction; action != nil {
+		nonce, pendingService = claimOf(action.Url)
+	}
+	if id.Spec.Mode != v1alpha1.MarketIdentityModeLocalRepo && nonce == "" {
 		return "", nil
 	}
 	if pendingService != "" && pendingService != service {
@@ -83,12 +98,16 @@ func (ctl *Controller) writeClaim(ctx context.Context, id *v1alpha1.MarketIdenti
 	path := pdsclient.RepoPath{Repo: operator, Collection: syntax.NSID(BadgeBlueKeysNSID), Rkey: rkey}
 	if held, err := pds.GetRecord(ctx, path, nil); err == nil {
 		var value map[string]any
-		if json.Unmarshal(held.Value, &value) == nil && heldClaimMatches(value, nonce, operator.String(), didText) {
+		if json.Unmarshal(held.Value, &value) == nil && heldClaimMatches(value, nonce, operator.String(), didText, service) {
 			return "", nil
 		}
 	}
-	record, err := json.Marshal(map[string]any{"$type": BadgeBlueKeysNSID, "keyId": didText, "challenge": operator.String(), "service": service,
-		"nonce": nonce, "name": namePrefix + didText[len(didText)-8:], "createdAt": time.Now().UTC().Format(time.RFC3339)})
+	fields := map[string]any{"$type": BadgeBlueKeysNSID, "keyId": didText, "challenge": operator.String(), "service": service,
+		"name": namePrefix + didText[len(didText)-8:], "createdAt": time.Now().UTC().Format(time.RFC3339)}
+	if nonce != "" {
+		fields["nonce"] = nonce
+	}
+	record, err := json.Marshal(fields)
 	if err != nil {
 		return "", err
 	}
@@ -98,7 +117,7 @@ func (ctl *Controller) writeClaim(ctx context.Context, id *v1alpha1.MarketIdenti
 	return operator.String(), nil
 }
 
-func heldClaimMatches(value map[string]any, nonce, operator, subject string) bool {
+func heldClaimMatches(value map[string]any, nonce, operator, subject, service string) bool {
 	if value == nil {
 		return false
 	}
@@ -107,10 +126,55 @@ func heldClaimMatches(value map[string]any, nonce, operator, subject string) boo
 	if challenge != operator || keyID != subject {
 		return false
 	}
+	if got, _ := value["service"].(string); got != service {
+		return false
+	}
 	if got, _ := value["nonce"].(string); got != "" && got != nonce {
 		return false
 	}
 	return true
+}
+
+func associationRequired(plan accountPlan, id *v1alpha1.MarketIdentity) bool {
+	if plan.Mode != v1alpha1.MarketIdentityModeLocalRepo || plan.Identity.Association == v1alpha1.AssociationSkip || id == nil {
+		return false
+	}
+	return strings.TrimSpace(id.Spec.AssociationWatch) != "" || strings.TrimSpace(id.Spec.AssociateWith) != ""
+}
+
+func associationSatisfied(plan accountPlan, id *v1alpha1.MarketIdentity) bool {
+	if !associationRequired(plan, id) {
+		return true
+	}
+	if id == nil || id.Status.Phase != v1alpha1.MarketIdentityPhaseReady {
+		return false
+	}
+	return associatedClaim(id) || len(id.Status.Associations) > 0
+}
+
+func associationWait(plan accountPlan, id *v1alpha1.MarketIdentity, service string) string {
+	if !associationRequired(plan, id) || associationSatisfied(plan, id) {
+		return ""
+	}
+	keyID := "the requester DID"
+	if id != nil {
+		if did := strings.TrimSpace(id.Status.Did); did != "" {
+			keyID = did
+		}
+	}
+	return fmt.Sprintf("waiting for the operator's %s claim record (challenge=operator, keyId=%s, service=%s)", service, keyID, service)
+}
+
+func associatedClaim(id *v1alpha1.MarketIdentity) bool {
+	if id == nil {
+		return false
+	}
+	for _, c := range id.Status.Conditions {
+		if c.Type == v1alpha1.ConditionAssociated && c.Status == metav1.ConditionTrue {
+			return true
+		}
+	}
+	return false
 }
 
 func (ctl *Controller) identityIn(ctx context.Context, ws, name string) (*v1alpha1.MarketIdentity, error) {

@@ -6,8 +6,9 @@ const subjectDid = args.get("bidder-did") ?? args.get("requester-did") ?? args.g
 const roleArg = args.get("role")?.trim();
 const serviceArg = args.get("service")?.trim();
 const nonceArg = args.get("nonce")?.trim();
+const deleteStale = args.get("delete-stale-service") === "true";
 if (!credsPath || !account || !subjectDid) {
-  console.error("usage: associate-bidder.ts --creds FILE --account BOB (--bidder-did DID | --requester-did DID) [--service bidder_associate|requester_associate] [--nonce N]");
+  console.error("usage: associate-bidder.ts --creds FILE --account BOB (--bidder-did DID | --requester-did DID) [--service bidder_associate|requester_associate] [--nonce N] [--delete-stale-service true]");
   Deno.exit(2);
 }
 const subjectFlag = args.has("requester-did") ? "requester" : args.has("bidder-did") ? "bidder" : "";
@@ -83,4 +84,17 @@ const written = await json(`${pds}/xrpc/com.atproto.repo.putRecord`, {
     record,
   }),
 });
+if (deleteStale) {
+  const staleService = service === "bidder_associate" ? "requester_associate" : "bidder_associate";
+  const staleRkey = `${staleService}-${subjectDid.replace(/:/g, "-")}`;
+  try {
+    await json(`${pds}/xrpc/com.atproto.repo.deleteRecord`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.accessJwt}` },
+      body: JSON.stringify({ repo: operatorDid, collection: "com.publicdomainrelay.temp.badgeBlueKeys", rkey: staleRkey }),
+    });
+    console.error(JSON.stringify({ deletedStaleService: staleService, rkey: staleRkey }));
+  } catch {
+  }
+}
 console.log(JSON.stringify({ operatorDid, handle, service, rkey, uri: written.uri, cid: written.cid }));
