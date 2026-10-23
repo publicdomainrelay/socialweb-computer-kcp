@@ -21,6 +21,7 @@ import (
 	policyv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/policy/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 )
 
 const (
@@ -402,16 +403,7 @@ func (ct *Controller) Run(ctx context.Context) error {
 
 func Supervise(ctx context.Context, ct *Controller) {
 	log := ct.c.log()
-	for {
-		err := ct.Run(ctx)
-		if ctx.Err() != nil {
-			return
-		}
-		log.Warn("the TTL controller stopped; starting it again", "err", fmt.Sprint(err), "after", RetryAfter.String())
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(RetryAfter):
-		}
-	}
+	supervise.Restart(ctx, "ttlctl", supervise.Backoff{Min: RetryAfter, Max: RetryAfter, OnError: func(err error, after time.Duration) {
+		log.Warn("the TTL controller stopped; starting it again", "err", fmt.Sprint(err), "after", after.String())
+	}}, ct.Run)
 }
