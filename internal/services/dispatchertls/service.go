@@ -18,7 +18,6 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/servetls"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/tlsreload"
@@ -28,33 +27,23 @@ import (
 
 const Kind = "DispatcherTLS"
 
-const DefaultHost = "127.0.0.1"
+const shutdownTimeout = 5 * time.Second
 
-const DefaultShutdownTimeout = 5 * time.Second
-
-type Config struct {
-	Deps            component.Deps
-	StateDir        string
-	Workspace       string
-	Address         string
-	Host            string
-	Port            int
-	Hostnames       []string
-	AllowedHosts    []string
-	UpstreamRef     *commonv1.ObjectRef
-	Upstream        component.Endpoint
-	UpstreamURL     string
-	UpstreamAddress string
-	UpstreamTLS     *tls.Config
-	TLS             *tls.Config
-	CertFile        string
-	KeyFile         string
-	CABundle        string
-	ShutdownTimeout time.Duration
+type Deps struct {
+	component.Instance
+	Registry *component.Registry
+	TLS      *tls.Config
 }
 
 type Service struct {
-	cfg Config
+	spec v1alpha1.DispatcherTLSSpec
+	deps Deps
+
+	workspace    string
+	allowedHosts []string
+	certFile     string
+	caBundle     string
+	upstreamURL  string
 
 	mu       sync.Mutex
 	log      *slog.Logger
@@ -66,59 +55,38 @@ type Service struct {
 	ready    bool
 }
 
-func New(cfg Config) *Service {
-	return &Service{cfg: cfg}
+func New(spec v1alpha1.DispatcherTLSSpec, deps Deps) *Service {
+	s := &Service{
+		spec:      spec,
+		deps:      deps,
+		workspace: cmp.Or(strings.TrimSpace(deps.Self.Workspace), "root"),
+	}
+	hostnames := append([]string(nil), spec.Hostnames...)
+	if spec.TLS != nil {
+		hostnames = strs.AppendUniqueFold(hostnames, spec.TLS.Hostnames...)
+		s.caBundle = strings.TrimSpace(spec.TLS.CABundle)
+		if spec.TLS.CertRef != "" || spec.TLS.Enabled {
+			s.certFile, _ = servetls.CertificateFiles(spec.TLS.CertRef, spec.Storage, hostnames)
+		}
+	}
+	s.allowedHosts = allowedHosts(hostnames)
+	if target, ok := upstreamEndpoint(deps.Registry, s.workspace, spec.UpstreamRef); ok {
+		s.upstreamURL = target
+	}
+	return s
 }
 
-func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, error) {
-	var decoded v1alpha1.DispatcherTLSSpec
-	if err := spec.Spec.Decode(&decoded); err != nil {
-		return Config{}, fmt.Errorf("dispatchertls: decoding the component spec: %w", err)
+var _ component.Service = (*Service)(nil)
+
+func (s *Service) listenAddress() string {
+	if s.spec.Serve == nil {
+		return hostport.Listen("", "", 0)
 	}
-	stateDir := deps.StateDir
-	if spec.StateDir != "" {
-		stateDir = spec.StateDir
-	}
-	workspace := strings.TrimSpace(spec.Workspace)
-	workspace = cmp.Or(workspace, "root")
-	cfg := Config{
-		Deps:        deps,
-		StateDir:    stateDir,
-		Workspace:   workspace,
-		Host:        DefaultHost,
-		Hostnames:   append([]string(nil), decoded.Hostnames...),
-		UpstreamRef: decoded.UpstreamRef,
-	}
-	if decoded.TLS != nil {
-		cfg.Hostnames = strs.AppendUniqueFold(cfg.Hostnames, decoded.TLS.Hostnames...)
-	}
-	if decoded.Storage != nil && decoded.Storage.DataDir != "" {
-		cfg.StateDir = decoded.Storage.DataDir
-	}
-	if decoded.Serve != nil {
-		if decoded.Serve.Host != "" {
-			cfg.Host = decoded.Serve.Host
-		}
-		cfg.Port = int(decoded.Serve.Port)
-	}
-	if decoded.TLS != nil {
-		cfg.CABundle = strings.TrimSpace(decoded.TLS.CABundle)
-		if decoded.TLS.CertRef != "" || decoded.TLS.Enabled {
-			certFile, keyFile := servetls.CertificateFiles(decoded.TLS.CertRef, decoded.Storage, cfg.Hostnames)
-			cfg.CertFile = certFile
-			cfg.KeyFile = keyFile
-		}
-	}
-	if decoded.UpstreamRef != nil {
-		if target, ok := upstreamEndpoint(cfg.Deps, cfg.Workspace, decoded.UpstreamRef); ok {
-			cfg.UpstreamURL = target
-		}
-	}
-	return cfg, nil
+	return hostport.Listen("", s.spec.Serve.Host, int(s.spec.Serve.Port))
 }
 
-func upstreamEndpoint(deps component.Deps, workspace string, ref *commonv1.ObjectRef) (string, bool) {
-	if ref == nil || deps.Registry == nil {
+func upstreamEndpoint(registry *component.Registry, workspace string, ref *commonv1.ObjectRef) (string, bool) {
+	if ref == nil || registry == nil {
 		return "", false
 	}
 	kind := strings.TrimSpace(ref.Kind)
@@ -129,12 +97,12 @@ func upstreamEndpoint(deps component.Deps, workspace string, ref *commonv1.Objec
 	}
 	if workspace != "" {
 		for _, wanted := range []string{"http", "control"} {
-			if endpoint, ok := deps.Registry.Endpoint(workspace, kind, name, wanted); ok {
+			if endpoint, ok := registry.Endpoint(workspace, kind, name, wanted); ok {
 				return hostport.EndpointURL(endpoint)
 			}
 		}
 	}
-	for _, entry := range deps.Registry.List("") {
+	for _, entry := range registry.List("") {
 		if entry.Key.Kind != kind || entry.Key.Name != name {
 			continue
 		}
@@ -152,32 +120,27 @@ func upstreamEndpoint(deps component.Deps, workspace string, ref *commonv1.Objec
 	return "", false
 }
 
-func (s *Service) Start(ctx context.Context, deps component.Deps) error {
-	cfg := s.cfg
-	cfg.Deps = cfg.Deps.Or(deps)
-	cfg.Workspace = cmp.Or(cfg.Workspace, "root")
-	if !upstreamConfigured(cfg) {
+func (s *Service) Start(ctx context.Context) error {
+	if s.upstreamURL == "" && s.spec.UpstreamRef == nil {
 		return errors.New("dispatchertls: the upstream is required")
 	}
-	if target, ok := resolveUpstream(cfg); ok {
-		cfg.UpstreamURL = target
+	upstreamURL := s.upstreamURL
+	if target, ok := s.resolveUpstream(upstreamURL); ok {
+		upstreamURL = target
 	}
-	log := cfg.Deps.Log
+	log := s.deps.Log
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	tlsConfig, err := listenerTLS(cfg)
+	tlsConfig, err := s.listenerTLS()
 	if err != nil {
 		return err
 	}
-	hosts := allowedHosts(cfg)
+	hosts := s.allowedHosts
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Proxy = nil
-	switch {
-	case cfg.UpstreamTLS != nil:
-		transport.TLSClientConfig = cfg.UpstreamTLS
-	case cfg.CABundle != "":
-		pool, err := tlsreload.PoolFromBundle(cfg.CABundle, log)
+	if s.caBundle != "" {
+		pool, err := tlsreload.PoolFromBundle(s.caBundle, log)
 		if err != nil {
 			return fmt.Errorf("dispatchertls: %w", err)
 		}
@@ -206,7 +169,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 			http.Error(w, "not a dispatcher name", http.StatusNotFound)
 			return
 		}
-		raw, ok := resolveUpstream(cfg)
+		raw, ok := s.resolveUpstream(upstreamURL)
 		if !ok {
 			log.Warn("dispatcher_tls_upstream_unresolved", "host", req.Host, "path", req.URL.Path)
 			http.Error(w, "upstream unreachable", http.StatusBadGateway)
@@ -220,7 +183,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 		}
 		proxy.ServeHTTP(w, req.WithContext(context.WithValue(req.Context(), upstreamTargetKey{}, target)))
 	})
-	listener, err := net.Listen("tcp", hostport.Listen(cfg.Address, cfg.Host, cfg.Port))
+	listener, err := net.Listen("tcp", s.listenAddress())
 	if err != nil {
 		return fmt.Errorf("dispatchertls: listening: %w", err)
 	}
@@ -239,7 +202,6 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 		_ = listener.Close()
 		return errors.New("dispatchertls: the service already started")
 	}
-	s.cfg = cfg
 	s.log = log
 	s.http = httpServer
 	s.listener = listener
@@ -249,7 +211,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	s.ready = true
 	s.mu.Unlock()
 
-	log.Info("dispatcher_tls_listening", "address", listener.Addr().String(), "upstream", cfg.UpstreamURL, "hostnames", hosts)
+	log.Info("dispatcher_tls_listening", "address", listener.Addr().String(), "upstream", upstreamURL, "hostnames", hosts)
 
 	errCh := make(chan error, 1)
 	go func() { errCh <- httpServer.Serve(trackedListener) }()
@@ -281,7 +243,7 @@ func (s *Service) Ready(ctx context.Context) error {
 	if s.listener != nil {
 		address = s.listener.Addr().String()
 	}
-	hosts := allowedHosts(s.cfg)
+	hosts := s.allowedHosts
 	s.mu.Unlock()
 	if !ready || address == "" {
 		return errors.New("dispatchertls: the service is not listening")
@@ -339,13 +301,11 @@ func (s *Service) shutdown(ctx context.Context) {
 	s.mu.Lock()
 	httpServer := s.http
 	conns := s.conns
-	timeout := s.cfg.ShutdownTimeout
 	s.mu.Unlock()
 	if httpServer == nil {
 		return
 	}
-	timeout = opt.Positive(timeout, DefaultShutdownTimeout)
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownTimeout)
 	defer cancel()
 	if err := httpServer.Shutdown(ctx); err != nil {
 		_ = httpServer.Close()
@@ -365,30 +325,11 @@ func (s *Service) finish() {
 
 type upstreamTargetKey struct{}
 
-func upstreamConfigured(cfg Config) bool {
-	return cfg.UpstreamURL != "" || cfg.Upstream.URL != "" || cfg.UpstreamAddress != "" ||
-		cfg.Upstream.Address != "" || cfg.UpstreamRef != nil
-}
-
-func resolveUpstream(cfg Config) (string, bool) {
-	if raw := strings.TrimSpace(cfg.UpstreamURL); raw != "" {
+func (s *Service) resolveUpstream(upstreamURL string) (string, bool) {
+	if raw := strings.TrimSpace(upstreamURL); raw != "" {
 		return raw, true
 	}
-	if raw := strings.TrimSpace(cfg.Upstream.URL); raw != "" {
-		return raw, true
-	}
-	if cfg.UpstreamAddress != "" {
-		return "http://" + cfg.UpstreamAddress, true
-	}
-	if cfg.Upstream.Address != "" {
-		scheme := strings.TrimSpace(cfg.Upstream.Protocol)
-		scheme = cmp.Or(scheme, "http")
-		return scheme + "://" + cfg.Upstream.Address, true
-	}
-	if cfg.UpstreamRef != nil {
-		return upstreamEndpoint(cfg.Deps, cfg.Workspace, cfg.UpstreamRef)
-	}
-	return "", false
+	return upstreamEndpoint(s.deps.Registry, s.workspace, s.spec.UpstreamRef)
 }
 
 func parseUpstream(raw string) (*url.URL, error) {
@@ -405,14 +346,11 @@ func parseUpstream(raw string) (*url.URL, error) {
 	return target, nil
 }
 
-func listenerTLS(cfg Config) (*tls.Config, error) {
-	if cfg.CertFile != "" {
-		return servetls.Config(cfg.CertFile, nil, cfg.Deps.Log)
+func (s *Service) listenerTLS() (*tls.Config, error) {
+	if s.certFile != "" {
+		return servetls.Config(s.certFile, nil, s.deps.Log)
 	}
-	tlsConfig := cfg.TLS
-	if tlsConfig == nil {
-		tlsConfig = cfg.Deps.TLS
-	}
+	tlsConfig := s.deps.TLS
 	if tlsConfig == nil {
 		return nil, errors.New("dispatchertls: a TLS config or certificate is required")
 	}
@@ -426,7 +364,7 @@ func listenerTLS(cfg Config) (*tls.Config, error) {
 	return tlsConfig, nil
 }
 
-func allowedHosts(cfg Config) []string {
+func allowedHosts(hostnames []string) []string {
 	seen := map[string]struct{}{}
 	hosts := []string{}
 	add := func(host string) {
@@ -440,10 +378,7 @@ func allowedHosts(cfg Config) []string {
 		seen[host] = struct{}{}
 		hosts = append(hosts, host)
 	}
-	for _, host := range cfg.Hostnames {
-		add(host)
-	}
-	for _, host := range cfg.AllowedHosts {
+	for _, host := range hostnames {
 		add(host)
 	}
 	if len(hosts) == 0 {
