@@ -116,15 +116,19 @@ func NewKeyed[K comparable, T any](fetch func(context.Context, K) (T, time.Time,
 	return &Keyed[K, T]{fetch: fetch, sources: ttlcache.New[K, *Source[T]](ttlcache.Options{})}
 }
 
-func (k *Keyed[K, T]) Source(key K) *Source[T] {
-	src, _ := k.sources.GetOrLoad(context.Background(), key, func(context.Context) (*Source[T], time.Duration, error) {
+func (k *Keyed[K, T]) Source(ctx context.Context, key K) (*Source[T], error) {
+	return k.sources.GetOrLoad(ctx, key, func(context.Context) (*Source[T], time.Duration, error) {
 		return New(func(ctx context.Context) (T, time.Time, error) { return k.fetch(ctx, key) }), 0, nil
 	})
-	return src
 }
 
 func (k *Keyed[K, T]) Get(ctx context.Context, key K) (T, error) {
-	return k.Source(key).Get(ctx)
+	src, err := k.Source(ctx, key)
+	if err != nil {
+		var zero T
+		return zero, err
+	}
+	return src.Get(ctx)
 }
 
 func (k *Keyed[K, T]) Invalidate(key K) {

@@ -84,7 +84,7 @@ func Join(ctx context.Context, cfg Config, log *slog.Logger) error {
 		wg.Wait()
 		return err
 	}
-	if _, err := apiserverLinkArgs(cfg); err != nil {
+	if _, err := apiserverLinkArgs(ctx, cfg); err != nil {
 		cancel()
 		wg.Wait()
 		return err
@@ -324,7 +324,7 @@ func openBaoLinkArgs(cfg Config) ([]string, error) {
 	return []string{"connect-tcp", "--addr", cfg.OpenBaoLinkAddress, ticket}, nil
 }
 
-func apiserverLinkArgs(cfg Config) ([]string, error) {
+func apiserverLinkArgs(ctx context.Context, cfg Config) ([]string, error) {
 	env, err := readEnvFile(cfg.APIServerEnvPath)
 	if err != nil {
 		return nil, fmt.Errorf("nodeagent: reading %s: %w", cfg.APIServerEnvPath, err)
@@ -333,7 +333,7 @@ func apiserverLinkArgs(cfg Config) ([]string, error) {
 	if err := guardLinkEnv(address, port, ticket); err != nil {
 		return nil, err
 	}
-	if err := ensureLoopbackAlias(address); err != nil {
+	if err := ensureLoopbackAlias(ctx, address); err != nil {
 		return nil, err
 	}
 	return []string{"connect-tcp", "--addr", address + ":" + port, ticket}, nil
@@ -352,7 +352,7 @@ func guardLinkEnv(address, port, ticket string) error {
 	return nil
 }
 
-func ensureLoopbackAlias(address string) error {
+func ensureLoopbackAlias(ctx context.Context, address string) error {
 	iface, err := net.InterfaceByName("lo")
 	if err == nil {
 		addrs, err := iface.Addrs()
@@ -371,7 +371,7 @@ func ensureLoopbackAlias(address string) error {
 			}
 		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	if _, err := run(ctx, "ip", "addr", "add", address+"/32", "dev", "lo"); err != nil {
 		return fmt.Errorf("nodeagent: adding %s/32 to lo: %w", address, err)
@@ -391,7 +391,7 @@ func superviseLink(ctx context.Context, cfg Config, name string, log *slog.Logge
 		case openBaoLinkName:
 			args, err = openBaoLinkArgs(cfg)
 		case apiserverLinkName:
-			args, err = apiserverLinkArgs(cfg)
+			args, err = apiserverLinkArgs(ctx, cfg)
 		default:
 			err = fmt.Errorf("nodeagent: unknown link %s", name)
 		}

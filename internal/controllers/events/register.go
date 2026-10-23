@@ -68,13 +68,13 @@ func Register(ctx context.Context, m *ctlruntime.Manager, opts Options) (func(co
 	if _, err := eventsource.Register(m, eventsource.Options{Bus: opts.Bus, Log: log}); err != nil {
 		return nil, err
 	}
-	if _, err := pdseventsource.Register(m, backend); err != nil {
+	if _, err := pdseventsource.Register(ctx, m, backend); err != nil {
 		return nil, err
 	}
-	if _, err := relayeventsource.Register(m, backend); err != nil {
+	if _, err := relayeventsource.Register(ctx, m, backend); err != nil {
 		return nil, err
 	}
-	if _, err := jetstreameventsource.Register(m, backend); err != nil {
+	if _, err := jetstreameventsource.Register(ctx, m, backend); err != nil {
 		return nil, err
 	}
 	streams, err := eventstreamctl.Register(ctx, m, eventstreamctl.Options{Bus: opts.Bus, Log: log,

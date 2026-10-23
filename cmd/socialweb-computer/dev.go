@@ -43,6 +43,7 @@ const (
 	devsupExitTimeout  = 90 * time.Second
 	networkDownTimeout = 2 * time.Minute
 	coreStopTimeout    = 10 * time.Second
+	fgDownTimeout      = 5 * time.Minute
 )
 
 func (a *app) fail(code int, format string, args ...any) int {
@@ -629,7 +630,9 @@ func devUp(ctx context.Context, a *app, vals clicfg.Values, host bool) int {
 	}
 	a.log.Info("dev up --fg: the instance lives as long as this process; Ctrl-C is dev down", "instance", r.layout.ID)
 	<-ctx.Done()
-	d := downInstance(context.Background(), a, r.layout, vals.Bool("keep-state"))
+	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), fgDownTimeout)
+	defer cancel()
+	d := downInstance(dctx, a, r.layout, vals.Bool("keep-state"))
 	a.printJSON(d)
 	if len(d.Remaining) > 0 {
 		return exitFailed

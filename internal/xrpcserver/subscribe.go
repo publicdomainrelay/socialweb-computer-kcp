@@ -84,8 +84,8 @@ type streams struct {
 	shutdown context.CancelFunc
 }
 
-func newStreams(limit int) *streams {
-	ctx, cancel := context.WithCancel(context.Background())
+func newStreams(ctx context.Context, limit int) *streams {
+	ctx, cancel := context.WithCancel(ctx)
 	return &streams{open: map[gateway.Caller]int{}, limit: limit, ctx: ctx, shutdown: cancel}
 }
 
@@ -111,7 +111,7 @@ const closeWait = 3 * time.Second
 
 func (s *Server) Close() {
 	s.streams.shutdown()
-	ctx, cancel := context.WithTimeout(context.Background(), closeWait)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(s.streams.ctx), closeWait)
 	defer cancel()
 	_ = supervise.Join(ctx, s.streams.wg.Wait)
 }

@@ -44,7 +44,7 @@ type Bridge struct {
 	conns sync.WaitGroup
 }
 
-func Start(cfg Config, target ingress.Target) (*Bridge, error) {
+func Start(ctx context.Context, cfg Config, target ingress.Target) (*Bridge, error) {
 	if target == nil {
 		return nil, errors.New("loopback: the target is not configured")
 	}
@@ -54,7 +54,7 @@ func Start(cfg Config, target ingress.Target) (*Bridge, error) {
 	if err != nil {
 		return nil, fmt.Errorf("loopback: listening on %s: %w", host, err)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(ctx)
 	bridge := &Bridge{cfg: cfg, target: target, listener: listener, ctx: ctx, cancel: cancel, done: make(chan struct{})}
 	switch strings.ToLower(strings.TrimSpace(cfg.Protocol)) {
 	case component.ProtocolHTTP, component.ProtocolWS:

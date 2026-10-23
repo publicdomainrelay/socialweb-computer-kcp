@@ -125,11 +125,7 @@ func (p *Pool) ServerConfig(base *tls.Config, auth tls.ClientAuthType) *tls.Conf
 				next = got
 			}
 		}
-		ctx := context.Background()
-		if hello != nil {
-			ctx = hello.Context()
-		}
-		pool, err := p.Current(ctx)
+		pool, err := p.Current(hello.Context())
 		if err != nil {
 			return nil, err
 		}

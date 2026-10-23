@@ -213,7 +213,7 @@ func (s stagedSystem) User(ctx context.Context, a Account) (UserManager, error) 
 	if err != nil {
 		return nil, err
 	}
-	return &stagedUser{liveUser: um.(*liveUser), units: filepath.Join(a.Home, UserUnitDir),
+	return &stagedUser{ctx: ctx, liveUser: um.(*liveUser), units: filepath.Join(a.Home, UserUnitDir),
 		runtime: filepath.Join(OwnRuntimeDir(), "systemd", "user")}, nil
 }
 
@@ -226,6 +226,7 @@ func (s stagedSystem) CheckHost(ctx context.Context, a Account, binary string, r
 }
 
 type stagedUser struct {
+	ctx context.Context
 	*liveUser
 	units   string
 	runtime string
@@ -346,7 +347,9 @@ func (u *stagedUser) Close() {
 	if u.prune() {
 		os.Remove(filepath.Join(u.runtime, WantsDir))
 		os.Remove(u.runtime)
-		u.liveUser.Reload(context.Background())
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(u.ctx), jobTimeout)
+		u.liveUser.Reload(ctx)
+		cancel()
 	}
 	u.liveUser.Close()
 }

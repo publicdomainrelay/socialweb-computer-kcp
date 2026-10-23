@@ -193,12 +193,12 @@ func (s *Service) Start(ctx context.Context) error {
 		}
 	}
 
-	repoStore, err = repo.NewSQLiteStore(filepath.Join(stateDir, "repos.db"))
+	repoStore, err = repo.NewSQLiteStore(ctx, filepath.Join(stateDir, "repos.db"))
 	if err != nil {
 		return fmt.Errorf("pds: opening the repo store: %w", err)
 	}
 	if s.mode == atpds.ModeFull {
-		accountStore, err = atpds.NewStore(filepath.Join(stateDir, "accounts.db"))
+		accountStore, err = atpds.NewStore(ctx, filepath.Join(stateDir, "accounts.db"))
 		if err != nil {
 			return fmt.Errorf("pds: opening the account store: %w", err)
 		}

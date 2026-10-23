@@ -33,7 +33,7 @@ func VerifyCommitCAR(ctx context.Context, carBytes []byte, pub atcrypto.PublicKe
 	if len(carBytes) == 0 {
 		return nil, nil, fmt.Errorf("%w: empty car", ErrInvalidRequest)
 	}
-	root, err := VerifyCAR(carBytes)
+	root, err := VerifyCAR(ctx, carBytes)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -60,7 +60,7 @@ func VerifyCommitMessage(ctx context.Context, dir identity.Directory, msg *comat
 	if len(msg.Blocks) == 0 {
 		return nil, nil, fmt.Errorf("%w: empty commit blocks", ErrInvalidRequest)
 	}
-	root, err := VerifyCAR([]byte(msg.Blocks))
+	root, err := VerifyCAR(ctx, []byte(msg.Blocks))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -103,7 +103,7 @@ func VerifySyncMessage(ctx context.Context, dir identity.Directory, msg *comatpr
 	if len(msg.Blocks) == 0 {
 		return nil, fmt.Errorf("%w: empty sync blocks", ErrInvalidRequest)
 	}
-	if _, err := VerifyCAR([]byte(msg.Blocks)); err != nil {
+	if _, err := VerifyCAR(ctx, []byte(msg.Blocks)); err != nil {
 		return nil, err
 	}
 	commit, err := indigorepo.VerifySyncMessage(ctx, dir, msg)

@@ -301,14 +301,14 @@ func (p *Provider) reconcile(ctx context.Context, ref Ref, with func(*materialis
 		pass.Result = carryStatus(cl)
 		return pass, nil
 	}
-	if !p.opts.Host.Live(o.Cluster.Name) && o.Reachable && cl.Status.URL != "" {
+	if !p.opts.Host.Live(ctx, o.Cluster.Name) && o.Reachable && cl.Status.URL != "" {
 		pass.Foreign = true
 		pass.Result = carryStatus(cl)
 		return pass, nil
 	}
 
 	if p.opts.WriteStatus && cl.Spec.Running && cl.DeletionTimestamp == nil &&
-		(cl.Status.Phase == "" || cl.Status.Phase == v1alpha1.ClusterUnavailable) && !p.opts.Host.Live(o.Cluster.Name) {
+		(cl.Status.Phase == "" || cl.Status.Phase == v1alpha1.ClusterUnavailable) && !p.opts.Host.Live(ctx, o.Cluster.Name) {
 		early := cl.Status
 		early.Phase = v1alpha1.ClusterInitializing
 		if err := p.opts.Registry.WriteStatus(ctx, ref, early); err != nil {

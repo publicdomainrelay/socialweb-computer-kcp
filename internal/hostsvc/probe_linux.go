@@ -62,7 +62,7 @@ func Probe(ctx context.Context, socket string, spec UnitSpec, extra map[string]a
 		return r, fmt.Errorf("hostsvc: starting the probe %s: %w", spec.Name, err)
 	}
 	defer func() {
-		stopCtx, stopCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		stopCtx, stopCancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer stopCancel()
 		done := make(chan string, 1)
 		if b.StopUnit(stopCtx, spec.Name, done) == nil {

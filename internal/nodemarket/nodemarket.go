@@ -352,8 +352,8 @@ func MarketDeclined(claim *v1alpha1.NodeClaim) bool {
 	return claim.Status.Contract.RFPURI != "" && claim.Status.Contract.AcceptURI == ""
 }
 
-func (h *Host) End() End {
-	ctx, cancel := context.WithTimeout(context.Background(), fatalReadTimeout)
+func (h *Host) End(ctx context.Context) End {
+	ctx, cancel := context.WithTimeout(ctx, fatalReadTimeout)
 	defer cancel()
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -378,8 +378,8 @@ func (h *Host) End() End {
 	return end
 }
 
-func (h *Host) Terminal() string {
-	return h.End().Message
+func (h *Host) Terminal(ctx context.Context) string {
+	return h.End(ctx).Message
 }
 
 func (h *Host) Teardown(ctx context.Context) error {

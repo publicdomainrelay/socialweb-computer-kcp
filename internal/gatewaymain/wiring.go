@@ -43,7 +43,7 @@ type Gateway struct {
 	log           *slog.Logger
 }
 
-func Build(cfg Config, d Deps, log *slog.Logger) (*Gateway, error) {
+func Build(ctx context.Context, cfg Config, d Deps, log *slog.Logger) (*Gateway, error) {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -53,7 +53,7 @@ func Build(cfg Config, d Deps, log *slog.Logger) (*Gateway, error) {
 		Tenant: d.Tenant,
 	}
 
-	surface, err := xrpcserver.New(xrpcserver.Options{
+	surface, err := xrpcserver.New(ctx, xrpcserver.Options{
 		Gateway:   verbs,
 		Audiences: cfg.Audiences,
 		Directory: d.Directory,

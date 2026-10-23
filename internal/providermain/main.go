@@ -539,8 +539,8 @@ func guardDeps(cfg Config, tokens *tokenStore, units *clusterprovider.UnitsHost,
 	}
 }
 
-func bootstrapRowObserved(cfg Config, units *clusterprovider.UnitsHost, log *slog.Logger) func(cluster string) bool {
-	return func(cluster string) bool {
+func bootstrapRowObserved(cfg Config, units *clusterprovider.UnitsHost, log *slog.Logger) func(ctx context.Context, cluster string) bool {
+	return func(ctx context.Context, cluster string) bool {
 		if cfg.StoreEndpoint != "" {
 			log.Warn("cluster provider: the store is external, so whether it holds k3s's bootstrap "+
 				"row cannot be observed from here; falling back to the operator's declaration",
@@ -553,7 +553,7 @@ func bootstrapRowObserved(cfg Config, units *clusterprovider.UnitsHost, log *slo
 				"cluster", cluster)
 			return cfg.DatastoreHasRow
 		}
-		has, err := s.HasBootstrapRow(context.Background())
+		has, err := s.HasBootstrapRow(ctx)
 		if err != nil {
 			log.Info("cluster provider: reading the bootstrap row failed, so the operator's "+
 				"declaration is used instead", "cluster", cluster, "error", err.Error(),
@@ -609,7 +609,7 @@ func tenantFromClusterCA(alloc *portallocator.Allocator, logins *openbao.Logins,
 		if err != nil {
 			return nil, err
 		}
-		lease, err := alloc.Allocate(portallocator.Request{
+		lease, err := alloc.Allocate(ctx, portallocator.Request{
 			Cluster: key, Purpose: portallocator.PurposeK3sSecure,
 		})
 		if err != nil {

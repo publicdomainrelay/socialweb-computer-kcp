@@ -54,7 +54,7 @@ func run(ctx context.Context, inv foldmain.Invocation) error {
 	if err != nil {
 		return err
 	}
-	g, err := Build(cfg, deps, log)
+	g, err := Build(ctx, cfg, deps, log)
 	if err != nil {
 		return err
 	}

@@ -114,7 +114,7 @@ type StepBuilder func(o Observed, l Leases) ([]procgroup.Step, error)
 type IdentityGuard func(ctx context.Context, o Observed) error
 
 type Host interface {
-	Live(cluster string) bool
+	Live(ctx context.Context, cluster string) bool
 
 	Spawn(ctx context.Context, cluster string, steps []procgroup.Step) error
 
@@ -340,7 +340,7 @@ func (r *Reconciler) teardown(ctx context.Context, o Observed) (Result, error) {
 }
 
 func (r *Reconciler) on(ctx context.Context, o Observed) (Result, error) {
-	live := r.opts.Host.Live(o.Cluster.Name)
+	live := r.opts.Host.Live(ctx, o.Cluster.Name)
 	if live {
 		sick, err := r.opts.Host.Unhealthy(ctx, o.Cluster.Name)
 		if err != nil {
@@ -372,7 +372,7 @@ func (r *Reconciler) on(ctx context.Context, o Observed) (Result, error) {
 		})
 		return res, nil
 	}
-	if r.opts.Host.Live(o.Cluster.Name) {
+	if r.opts.Host.Live(ctx, o.Cluster.Name) {
 		return r.pending(o, "the process group is up and the apiserver has not answered yet")
 	}
 	return r.bringUp(ctx, o, false)
@@ -472,7 +472,7 @@ func (r *Reconciler) bringUp(ctx context.Context, o Observed, bump bool) (Result
 	}
 	leases := Leases{}
 	for _, p := range r.opts.Purposes {
-		l, err := r.opts.Ports.Allocate(portallocator.Request{
+		l, err := r.opts.Ports.Allocate(ctx, portallocator.Request{
 			Cluster:  o.Cluster.Name,
 			Account:  o.Cluster.Spec.Account,
 			Instance: instance,

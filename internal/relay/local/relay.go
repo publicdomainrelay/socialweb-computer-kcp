@@ -50,8 +50,6 @@ type Deps struct {
 	HTTPClient *http.Client
 
 	DialContext func(ctx context.Context, network, address string) (net.Conn, error)
-
-	BaseContext context.Context
 }
 
 type Relay struct {
@@ -78,7 +76,7 @@ type Relay struct {
 
 var _ contract.Relay = (*Relay)(nil)
 
-func New(cfg Config, deps Deps) (*Relay, error) {
+func New(ctx context.Context, cfg Config, deps Deps) (*Relay, error) {
 	log := deps.Log
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
@@ -106,7 +104,7 @@ func New(cfg Config, deps Deps) (*Relay, error) {
 		}
 		directory = identity.NewCacheDirectory(base, 100_000, time.Hour, 2*time.Minute, 5*time.Minute)
 	}
-	r.core = atrelay.New(atrelay.Config{
+	r.core = atrelay.New(ctx, atrelay.Config{
 		Hostname:     cfg.Hostname,
 		Logger:       log,
 		Store:        r.store,
@@ -117,7 +115,6 @@ func New(cfg Config, deps Deps) (*Relay, error) {
 		HTTPClient:   deps.HTTPClient,
 		DialContext:  deps.DialContext,
 		TLSConfig:    cfg.TLS,
-		BaseContext:  deps.BaseContext,
 	})
 	return r, nil
 }

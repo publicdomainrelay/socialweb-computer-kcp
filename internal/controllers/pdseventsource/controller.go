@@ -22,8 +22,8 @@ const (
 	AtprotoRepoKind = "AtprotoRepo"
 )
 
-func Register(m *ctlruntime.Manager, opts eventsource.BackendOptions) (*eventsource.Backend[*eventsv1.PdsEventSource], error) {
-	b := eventsource.NewBackend(eventsv1.PdsEventSourceKind, opts,
+func Register(ctx context.Context, m *ctlruntime.Manager, opts eventsource.BackendOptions) (*eventsource.Backend[*eventsv1.PdsEventSource], error) {
+	b := eventsource.NewBackend(ctx, eventsv1.PdsEventSourceKind, opts,
 		func(_ context.Context, req ctlruntime.Request, obj *eventsv1.PdsEventSource) (eventsource.Upstream, error) {
 			repo, err := repoRef(req.Workspace, obj.Spec.RepoRef)
 			if err != nil {

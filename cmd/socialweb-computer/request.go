@@ -29,6 +29,7 @@ import (
 const (
 	requestSSHReady     = time.Minute
 	requestIdentityWait = 5 * time.Minute
+	requestSummaryRead  = 10 * time.Second
 )
 
 var requestOptions = []string{"network", "name", "secrets", "hold", "exec", "skip-ssh", "contract-timeout", "state-dir",
@@ -379,14 +380,16 @@ func (r *requestRun) stop(ctx context.Context, remove bool) {
 	r.log("the invocation's kcp is stopped", "stateKept", !remove)
 }
 
-func (r *requestRun) writeSummary(c *v1alpha1.ComputeContract) {
+func (r *requestRun) writeSummary(ctx context.Context, c *v1alpha1.ComputeContract) {
 	r.summary.UpdatedAt = time.Now().UTC()
 	if c != nil {
 		r.summary.SecretsFetchedAt = c.Status.SecretsFetchedAt
 		r.summary.Phase, r.summary.Message, r.summary.SecretsUrl = string(c.Status.Phase), c.Status.Message, c.Status.SecretsURL
 		r.summary.Contract = request.SummaryOf(c)
 	}
-	if st, err := r.kcp.Root(context.Background()); err == nil && st.Did != "" {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), requestSummaryRead)
+	defer cancel()
+	if st, err := r.kcp.Root(ctx); err == nil && st.Did != "" {
 		r.summary.Did = st.Did
 	}
 	if err := request.WriteSummary(r.stateRoot, r.summary); err != nil {
@@ -518,14 +521,14 @@ func (r *requestRun) carryOn(ctx context.Context) int {
 	if err := r.signIn(ctx); err != nil {
 		r.a.log.Error("signing in", "err", err.Error())
 		c, _ := r.kcp.Contract(context.WithoutCancel(ctx))
-		r.writeSummary(c)
+		r.writeSummary(ctx, c)
 		r.stop(context.WithoutCancel(ctx), false)
 		return exitFailed
 	}
 	c, err := r.kcp.WaitContract(ctx, r.contractTimeout, contractSettled, r.progress)
 	if err != nil {
 		r.a.log.Error("the contract did not settle", "err", err.Error())
-		r.writeSummary(c)
+		r.writeSummary(ctx, c)
 		r.stop(context.WithoutCancel(ctx), false)
 		r.a.printJSON(r.summary)
 		return exitFailed
@@ -568,9 +571,9 @@ func (r *requestRun) carryOn(ctx context.Context) int {
 			remove = true
 		}
 	}
-	r.writeSummary(c)
+	r.writeSummary(ctx, c)
 	r.stop(context.WithoutCancel(ctx), remove)
-	r.writeSummary(nil)
+	r.writeSummary(ctx, nil)
 	r.a.printJSON(r.summary)
 	return code
 }
@@ -699,15 +702,15 @@ func runRequestRelease(ctx context.Context, a *app, vals clicfg.Values, rest []s
 			phase = string(c.Status.Phase)
 		}
 		r.a.log.Error("the release did not finish", "err", fmt.Sprint(err), "phase", phase)
-		r.writeSummary(c)
+		r.writeSummary(ctx, c)
 		r.stop(context.WithoutCancel(ctx), false)
-		r.writeSummary(nil)
+		r.writeSummary(ctx, nil)
 		r.a.printJSON(r.summary)
 		return exitFailed
 	}
-	r.writeSummary(c)
+	r.writeSummary(ctx, c)
 	r.stop(context.WithoutCancel(ctx), true)
-	r.writeSummary(nil)
+	r.writeSummary(ctx, nil)
 	r.a.printJSON(r.summary)
 	return exitOK
 }

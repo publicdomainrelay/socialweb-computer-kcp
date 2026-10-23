@@ -82,7 +82,7 @@ type repoRow struct {
 	pubkey string
 }
 
-func NewSQLiteStore(path string) (*SQLiteStore, error) {
+func NewSQLiteStore(ctx context.Context, path string) (*SQLiteStore, error) {
 	if path == "" {
 		return nil, fmt.Errorf("repo: empty sqlite path")
 	}
@@ -112,7 +112,7 @@ func NewSQLiteStore(path string) (*SQLiteStore, error) {
 		db:  db,
 		clk: syntax.NewTIDClock(0),
 	}
-	if err := s.init(context.Background()); err != nil {
+	if err := s.init(ctx); err != nil {
 		db.Close()
 		return nil, err
 	}

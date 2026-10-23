@@ -37,9 +37,9 @@ func (h *nodeHosts) adopt(ctx context.Context, cluster string) error {
 	}
 	claims, orphanErr := h.claimJoinedOrphans(ctx, cluster, claims)
 	if orphanErr != nil {
-		return errors.Join(orphanErr, h.adoptClaims(cluster, claims))
+		return errors.Join(orphanErr, h.adoptClaims(ctx, cluster, claims))
 	}
-	return errors.Join(h.adoptClaims(cluster, claims), h.reconcileVault(ctx, cluster, claims))
+	return errors.Join(h.adoptClaims(ctx, cluster, claims), h.reconcileVault(ctx, cluster, claims))
 }
 
 func (h *nodeHosts) adoptOnce(ctx context.Context, cluster string) error {
@@ -52,7 +52,7 @@ func (h *nodeHosts) adoptOnce(ctx context.Context, cluster string) error {
 	return h.adopt(ctx, cluster)
 }
 
-func (h *nodeHosts) adoptClaims(cluster string, claims []v1alpha1.NodeClaim) error {
+func (h *nodeHosts) adoptClaims(ctx context.Context, cluster string, claims []v1alpha1.NodeClaim) error {
 	prefix := strings.ToLower(cluster) + "-node"
 	var live []v1alpha1.NodeClaim
 	for i := range claims {
@@ -73,7 +73,7 @@ func (h *nodeHosts) adoptClaims(cluster string, claims []v1alpha1.NodeClaim) err
 	h.mu.Lock()
 	n, ok := h.hosts[cluster]
 	if !ok {
-		built, err := newNodeHost(h.opts, h.log, cluster, nodeID)
+		built, err := newNodeHost(ctx, h.opts, h.log, cluster, nodeID)
 		if err != nil {
 			h.mu.Unlock()
 			return err
@@ -100,7 +100,7 @@ func (h *nodeHosts) adoptClaims(cluster string, claims []v1alpha1.NodeClaim) err
 			continue
 		}
 		ordinal, _ := nodeOrdinalInName(prefix, claim.Name)
-		built, err := newNodeHost(h.opts, h.log, cluster, nodeIDFor(ordinal))
+		built, err := newNodeHost(ctx, h.opts, h.log, cluster, nodeIDFor(ordinal))
 		if err != nil {
 			problems = append(problems, err)
 			continue
@@ -153,7 +153,7 @@ func (h *nodeHosts) releaseStranded(ctx context.Context, cluster string, claims 
 		if !ok {
 			continue
 		}
-		built, err := newNodeHost(h.opts, h.log, cluster, nodeIDFor(ordinal))
+		built, err := newNodeHost(ctx, h.opts, h.log, cluster, nodeIDFor(ordinal))
 		if err != nil {
 			problems = append(problems, err)
 			continue
@@ -227,7 +227,7 @@ func (h *nodeHosts) claimJoinedOrphans(ctx context.Context, cluster string, clai
 				"cluster", cluster, "node", node.Name)
 			continue
 		}
-		built, err := newNodeHost(h.opts, h.log, cluster, nodeIDFor(ordinal))
+		built, err := newNodeHost(ctx, h.opts, h.log, cluster, nodeIDFor(ordinal))
 		if err != nil {
 			problems = append(problems, err)
 			continue

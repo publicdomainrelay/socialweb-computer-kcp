@@ -199,7 +199,7 @@ func (p *Provider) Register(ctx context.Context, spec ingress.Spec, target ingre
 	if target == nil {
 		return nil, errors.New("ingressproxy iroh: the handler registry is not configured")
 	}
-	bridge, err := loopback.Start(loopback.Config{
+	bridge, err := loopback.Start(root, loopback.Config{
 		Host:     p.cfg.listenHost(),
 		Protocol: spec.Protocol,
 	}, target)

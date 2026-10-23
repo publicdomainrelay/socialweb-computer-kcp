@@ -110,7 +110,7 @@ func Reload(pid int) error {
 	return nil
 }
 
-func Terminate(pid int, grace time.Duration) error {
+func Terminate(ctx context.Context, pid int, grace time.Duration) error {
 	ticks, err := ProcStart(pid)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
@@ -121,7 +121,7 @@ func Terminate(pid int, grace time.Duration) error {
 	if err := Signal(pid, false); err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), grace)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), grace)
 	defer cancel()
 	err = AwaitExit(ctx, pid, ticks)
 	if err == nil {

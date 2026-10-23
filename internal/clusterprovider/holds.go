@@ -52,8 +52,8 @@ func frontStep(spec clusterstack.Spec) (procgroup.Step, error) {
 	}, nil
 }
 
-func (h *UnitsHost) Hold(key string, p portallocator.Purpose) (int, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), HoldTimeout)
+func (h *UnitsHost) Hold(ctx context.Context, key string, p portallocator.Purpose) (int, error) {
+	ctx, cancel := context.WithTimeout(ctx, HoldTimeout)
 	defer cancel()
 	if p == portallocator.PurposeK3sSecure {
 		return h.frontPort(ctx, key)

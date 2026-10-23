@@ -83,7 +83,7 @@ func (s *Service) Start(ctx context.Context) error {
 	if vault == nil {
 		return errors.New("gatewayapi: no sign-in backend")
 	}
-	signIn, err := custody.New(custody.Config{
+	signIn, err := custody.New(ctx, custody.Config{
 		Endpoint:       vault.endpoint,
 		Role:           DefaultAtprotoRole,
 		RenewBelow:     DefaultRenewBelow,
@@ -101,7 +101,7 @@ func (s *Service) Start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	handler, oauth, surface, err := s.buildHandler(signIn, pinned, tasks)
+	handler, oauth, surface, err := s.buildHandler(ctx, signIn, pinned, tasks)
 	if err != nil {
 		return err
 	}
@@ -196,7 +196,7 @@ func (s *Service) OAuth() *gatewayhttp.OAuth {
 	return s.oauth
 }
 
-func (s *Service) buildHandler(signIn gatewayhttp.WebSignIn, pinned *gatewayhttp.PinnedDownloads, tasks *supervise.Group) (http.Handler, *gatewayhttp.OAuth, *xrpcserver.Server, error) {
+func (s *Service) buildHandler(ctx context.Context, signIn gatewayhttp.WebSignIn, pinned *gatewayhttp.PinnedDownloads, tasks *supervise.Group) (http.Handler, *gatewayhttp.OAuth, *xrpcserver.Server, error) {
 	log := s.log
 	oauth, err := gatewayhttp.NewOAuth(gatewayhttp.OAuthOptions{
 		SignIn:        signIn,
@@ -221,7 +221,7 @@ func (s *Service) buildHandler(signIn gatewayhttp.WebSignIn, pinned *gatewayhttp
 	}
 	downloads := gatewayhttp.NewDownloads(gatewayhttp.DownloadsOptions{Downloads: pinned, Log: log})
 
-	surface, err := xrpcserver.New(xrpcserver.Options{
+	surface, err := xrpcserver.New(ctx, xrpcserver.Options{
 		Gateway:   s.server,
 		Audiences: append([]string(nil), s.audiences...),
 		Directory: directoryFor(plcURL(s.spec.Network)),

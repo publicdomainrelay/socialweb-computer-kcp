@@ -48,7 +48,6 @@ type Config struct {
 	HTTPClient    *http.Client
 	DialContext   func(ctx context.Context, network, address string) (net.Conn, error)
 	TLSConfig     *tls.Config
-	BaseContext   context.Context
 }
 
 type EventSink interface {
@@ -85,7 +84,7 @@ type Relay struct {
 	hostMu sync.Mutex
 }
 
-func New(cfg Config) *Relay {
+func New(ctx context.Context, cfg Config) *Relay {
 	cfg.Hostname = cmp.Or(cfg.Hostname, "localhost")
 	cfg.Version = cmp.Or(cfg.Version, "0.0.0")
 	if cfg.Logger == nil {
@@ -113,11 +112,7 @@ func New(cfg Config) *Relay {
 			dir = identity.NewCacheDirectory(base, 100_000, time.Hour, 2*time.Minute, 5*time.Minute)
 		}
 	}
-	base := cfg.BaseContext
-	if base == nil {
-		base = context.Background()
-	}
-	ctx, cancel := context.WithCancel(context.WithoutCancel(base))
+	ctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	r := &Relay{
 		cfg:        cfg,
 		store:      cfg.Store,

@@ -3,6 +3,7 @@
 package hostos
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -97,7 +98,7 @@ func Reload(pid int) error {
 	return fmt.Errorf("hostos: pid %d cannot be asked to reload: Windows has no SIGHUP", pid)
 }
 
-func Terminate(pid int, grace time.Duration) error {
+func Terminate(_ context.Context, pid int, grace time.Duration) error {
 	handle, err := windows.OpenProcess(windows.SYNCHRONIZE, false, uint32(pid))
 	if err != nil {
 		if gone(err) {

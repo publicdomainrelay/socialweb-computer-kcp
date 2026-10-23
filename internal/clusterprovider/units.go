@@ -479,8 +479,8 @@ func Verified(o *v1alpha1.HostProcess) bool {
 	return inv != "" && o.Labels[LabelVerified] == inv
 }
 
-func (h *UnitsHost) Live(key string) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+func (h *UnitsHost) Live(ctx context.Context, key string) bool {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	m, err := h.Members(ctx, key)
 	return err == nil && len(m) > 0
