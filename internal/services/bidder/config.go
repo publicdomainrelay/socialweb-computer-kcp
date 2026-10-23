@@ -284,6 +284,17 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		cfg.ServiceAuth.Hostname = strings.TrimSpace(bidderSpec.ServiceAuth.Hostname)
 		cfg.ServiceAuth.AudienceDIDs = append([]string(nil), bidderSpec.ServiceAuth.Audience...)
 	}
+	if cfg.ServiceAuth.Hostname != "" && cfg.MarketURL != "" {
+		override := cfg.ServiceAuth.Hostname
+		if !strings.Contains(override, "://") {
+			override = "//" + override
+		}
+		got := strings.ToLower(hostPortOf(override))
+		want := strings.ToLower(hostPortOf(cfg.MarketURL))
+		if got == "" || want == "" || got != want {
+			return Config{}, fmt.Errorf("bidder: serviceAuth.hostname %q must match the market URL host %q; the offering and the verifier audience have one source", cfg.ServiceAuth.Hostname, want)
+		}
+	}
 	if bidderSpec.Identity != nil {
 		cfg.Identity = *bidderSpec.Identity
 		cfg.IdentityRef = bidderSpec.Identity.MarketIdentityRef
