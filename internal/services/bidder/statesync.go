@@ -1508,6 +1508,10 @@ func (a *marketInboxAdapter) Apply(ctx context.Context, request statesync.Reques
 		return statesync.Observation{}, errors.New("bidder: the market inbox adapter has no service")
 	}
 	a.logf().Info("market inbox applied", "collection", payload.Collection, "uri", payload.URI, "bids", service.bids != nil, "records", service.records != nil, "did", service.did)
+	if service.spec.SuspendParticipation && (payload.Collection == market.RFPNSID || payload.Collection == market.AcceptNSID) {
+		a.logf().Info("market inbox declined: the bidder's participation is suspended", "collection", payload.Collection, "uri", payload.URI)
+		return statesync.InboxObservation(request, payload.URI), nil
+	}
 	switch payload.Collection {
 	case market.RFPNSID:
 		if service.bids == nil || service.records == nil || service.did == "" {

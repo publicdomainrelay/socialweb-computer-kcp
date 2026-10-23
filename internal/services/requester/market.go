@@ -620,3 +620,5 @@ func payloadRef(value map[string]any) market.RecordRef {
 func bidRef(value map[string]any) market.RecordRef {
 	return market.RecordRef{URI: stringOf(value["uri"]), CID: stringOf(value["cid"])}
 }
+
+var ErrParticipationSuspended = errors.New("requester: participation is suspended; no new RFP or accept is published")

@@ -363,6 +363,9 @@ func (r *contractRunner) requestOnce(ctx context.Context) (bool, error) {
 		if policyRef != nil {
 			rfpOptions.Policies = []market.RecordRef{{URI: policyRef.URI, CID: policyRef.CID}}
 		}
+		if r.svc.spec.SuspendParticipation {
+			return false, ErrParticipationSuspended
+		}
 		rfp, err := market.CreateRFP(ctx, r.svc.repo, r.svc.repoDID, rfpOptions, r.svc.signer)
 		if err != nil {
 			return false, fmt.Errorf("create the market.rfp record: %w", err)
@@ -496,6 +499,9 @@ func (r *contractRunner) requestOnce(ctx context.Context) (bool, error) {
 	accept, found, err := r.svc.existingSignedRecord(ctx, market.AcceptNSID, acceptRKey)
 	if err != nil {
 		return false, fmt.Errorf("read the market.accept record: %w", err)
+	}
+	if !found && r.svc.spec.SuspendParticipation {
+		return false, ErrParticipationSuspended
 	}
 	if !found {
 		acceptRecord, err := market.BuildAccept(market.AcceptOptions{
