@@ -462,7 +462,7 @@ items:
     track: remote-identity
     parallel_with: [W2-IDENTITY-LOCAL, W2-STATUS, W2-FIXTURES]
     depends_on: [W1-OAUTH, W1-REPO, W2-RECORD]
-    status: blocked
+    status: done
     evidence: []
     decision: >
       Implement the pdsAccount password/session flow and the OAuth flow.
@@ -512,7 +512,7 @@ items:
     track: status-fixtures
     parallel_with: [W2-RECORD, W2-WATCH, W2-IDENTITY-LOCAL, W2-IDENTITY-REMOTE, W2-STATUS]
     depends_on: [W0-MATRIX]
-    status: doing
+    status: done
     evidence: []
     decision: >
       Add test fixtures: local PDS with account/session/repo; RemotePDS with
