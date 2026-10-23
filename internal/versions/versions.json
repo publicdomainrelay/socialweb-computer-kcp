@@ -329,8 +329,8 @@
         "linux/arm64": {"kind": "go", "package": "./cmd/socialweb-vmexec", "members": {"socialweb-vmexec": "socialweb-vmexec"}}
       },
       "platforms": {
-        "linux/amd64": {"treeSha256": "2627df6a4b1d64b71414a835e4abcc902e6a4e4bea82c5621ee138d4eadc0d2a", "rawBytes": 2535550, "zstdBytes": 951333},
-        "linux/arm64": {"treeSha256": "a948d23484c4442534d0fb3d84c550a4f7de517b82a51175726113eb734879c0", "rawBytes": 2490494, "zstdBytes": 851181}
+        "linux/amd64": {"treeSha256": "d0c1517250b7a9ea35e23196e7883a450cca7e6a1d87ce60edd6f1bb5faab535", "rawBytes": 2535550, "zstdBytes": 951325},
+        "linux/arm64": {"treeSha256": "c809ce7e2bb15049ef9dd21f5fba6fc256e0dd9efee30a734e8175d4fcf05e18", "rawBytes": 2490494, "zstdBytes": 851187}
       }
     },
     "openbao-plugin-auth-atproto": {
@@ -383,8 +383,8 @@
         "linux/arm64": {"kind": "script", "script": "scripts/build-web-app-downloads.sh", "members": {"socialweb-meshd-x86_64": "socialweb-meshd-x86_64", "socialweb-meshd-x86_64.sha256": "socialweb-meshd-x86_64.sha256", "socialweb-meshd-aarch64": "socialweb-meshd-aarch64", "socialweb-meshd-aarch64.sha256": "socialweb-meshd-aarch64.sha256", "socialweb-node-x86_64": "socialweb-node-x86_64", "socialweb-node-x86_64.sha256": "socialweb-node-x86_64.sha256", "socialweb-node-aarch64": "socialweb-node-aarch64", "socialweb-node-aarch64.sha256": "socialweb-node-aarch64.sha256"}}
       },
       "platforms": {
-        "linux/amd64": {"treeSha256": "9d9152585edcfed8443186505fd1d1fdc9812b4f5a1e56765afb0097f19bfc87", "rawBytes": 38130064, "zstdBytes": 11793026},
-        "linux/arm64": {"treeSha256": "9d9152585edcfed8443186505fd1d1fdc9812b4f5a1e56765afb0097f19bfc87", "rawBytes": 38130064, "zstdBytes": 11793026}
+        "linux/amd64": {"treeSha256": "fb7f6a7639ac642aea7809568fcf365ce7135199087c1fcfa8643c789578e74d", "rawBytes": 40362384, "zstdBytes": 12257208},
+        "linux/arm64": {"treeSha256": "fb7f6a7639ac642aea7809568fcf365ce7135199087c1fcfa8643c789578e74d", "rawBytes": 40362384, "zstdBytes": 12257208}
       }
     }
   },
