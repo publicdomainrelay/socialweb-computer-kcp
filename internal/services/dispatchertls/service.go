@@ -380,7 +380,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 		return nil
 	}
 
-	s.shutdown()
+	s.shutdown(ctx)
 	serveErr := <-errCh
 	s.finish()
 	if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
@@ -437,7 +437,7 @@ func (s *Service) Stop(ctx context.Context) error {
 		return nil
 	}
 	s.stopOnce.Do(func() { close(stopCh) })
-	s.shutdown()
+	s.shutdown(ctx)
 	return nil
 }
 
@@ -450,7 +450,7 @@ func (s *Service) Address() string {
 	return s.listener.Addr().String()
 }
 
-func (s *Service) shutdown() {
+func (s *Service) shutdown(ctx context.Context) {
 	s.mu.Lock()
 	httpServer := s.http
 	conns := s.conns
@@ -462,7 +462,7 @@ func (s *Service) shutdown() {
 	if timeout <= 0 {
 		timeout = DefaultShutdownTimeout
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
 	defer cancel()
 	if err := httpServer.Shutdown(ctx); err != nil {
 		_ = httpServer.Close()
