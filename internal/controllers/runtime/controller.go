@@ -112,6 +112,8 @@ type options struct {
 type watchInput struct {
 	object client.Object
 
+	export string
+
 	mapFunc func(ctx context.Context, src Request, obj client.Object) []Request
 }
 
@@ -171,6 +173,10 @@ func Owns[C Object]() Option {
 }
 
 func Watches[R Object](mapFunc func(ctx context.Context, src Request, obj R) []Request) Option {
+	return WatchesIn("", mapFunc)
+}
+
+func WatchesIn[R Object](export string, mapFunc func(ctx context.Context, src Request, obj R) []Request) Option {
 	return func(o *options) {
 		obj, err := newObject[R]()
 		if err != nil {
@@ -181,7 +187,7 @@ func Watches[R Object](mapFunc func(ctx context.Context, src Request, obj R) []R
 			o.err = errors.Join(o.err, fmt.Errorf("runtime: the watch of %T has no map func", obj))
 			return
 		}
-		o.watches = append(o.watches, watchInput{object: obj, mapFunc: func(ctx context.Context, src Request, obj client.Object) []Request {
+		o.watches = append(o.watches, watchInput{object: obj, export: strings.TrimSpace(export), mapFunc: func(ctx context.Context, src Request, obj client.Object) []Request {
 			typed, ok := obj.(R)
 			if !ok {
 				return nil
@@ -220,10 +226,7 @@ func For[T Object](m *Manager, name string, r Reconciler[T], opts ...Option) err
 		return fmt.Errorf("runtime: the controller %s: %w", name, err)
 	}
 	m.addExport(o.export)
-	prefix := o.export + clusterSeparator
-	inExport := mcbuilder.WithClusterFilter(func(cn multicluster.ClusterName, _ cluster.Cluster) bool {
-		return strings.HasPrefix(string(cn), prefix)
-	})
+	inExport := exportFilter(o.export)
 	limiter := newBackoff(o.backoffBase, o.backoffMax)
 	log := m.log.With("controller", name)
 	b := mcbuilder.ControllerManagedBy(m.mgr).Named(name).
@@ -234,7 +237,12 @@ func For[T Object](m *Manager, name string, r Reconciler[T], opts ...Option) err
 		b = b.Owns(owned, inExport)
 	}
 	for _, w := range o.watches {
-		b = b.Watches(w.object, m.mapHandler(o.export, w.mapFunc), inExport)
+		source := inExport
+		if w.export != "" && w.export != o.export {
+			m.addExport(w.export)
+			source = exportFilter(w.export)
+		}
+		b = b.Watches(w.object, m.mapHandler(o.export, w.mapFunc), source)
 	}
 	for _, ch := range o.events {
 		b = b.WatchesRawSource(eventSource(o.export, ch))
@@ -255,10 +263,11 @@ func (m *Manager) mapHandler(export string, mapFunc func(ctx context.Context, sr
 			src := Request{Cluster: lc, Workspace: m.path(ctx, lc), Namespace: obj.GetNamespace(), Name: obj.GetName()}
 			var out []mcreconcile.Request
 			for _, r := range mapFunc(ctx, src, obj) {
-				target := cn
-				if r.Cluster != "" && r.Cluster != lc {
-					target = multicluster.ClusterName(export + clusterSeparator + r.Cluster)
+				cluster := lc
+				if r.Cluster != "" {
+					cluster = r.Cluster
 				}
+				target := multicluster.ClusterName(export + clusterSeparator + cluster)
 				out = append(out, mcreconcile.Request{ClusterName: target,
 					Request: reconcile.Request{NamespacedName: types.NamespacedName{Namespace: r.Namespace, Name: r.Name}}})
 			}
@@ -281,6 +290,13 @@ func eventSource(export string, ch <-chan Request) source.TypedSource[mcreconcil
 		GenericFunc: func(_ context.Context, e event.TypedGenericEvent[mcreconcile.Request], q workqueue.TypedRateLimitingInterface[mcreconcile.Request]) {
 			q.Add(e.Object)
 		}})
+}
+
+func exportFilter(export string) mcbuilder.EngageOptions {
+	prefix := export + clusterSeparator
+	return mcbuilder.WithClusterFilter(func(cn multicluster.ClusterName, _ cluster.Cluster) bool {
+		return strings.HasPrefix(string(cn), prefix)
+	})
 }
 
 func specOrDeletion() predicate.Predicate {

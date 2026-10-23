@@ -118,6 +118,20 @@ func NewManager(cfg Config) (*Manager, error) {
 		providers: providers, mgr: mgr, exports: map[string]bool{}}, nil
 }
 
+func (m *Manager) AddToScheme(adders ...func(*kruntime.Scheme) error) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, add := range adders {
+		if add == nil {
+			continue
+		}
+		if err := add(m.scheme); err != nil {
+			return fmt.Errorf("runtime: extending the scheme: %w", err)
+		}
+	}
+	return nil
+}
+
 func (m *Manager) Start(ctx context.Context) error {
 	exportCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
