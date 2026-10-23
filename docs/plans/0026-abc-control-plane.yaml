@@ -155,17 +155,35 @@ decisions:
     types embedded in the component specs. component.Typed[S] registers a
     service from its Spec type.
   layout: |
+    The old TypeScript ABC layers, in Go:
     api/<group>/v1alpha1          common: types, contract status, refs
     internal/contract/<concept>   abc: small Go interfaces and pure types;
                                   imports api and stdlib only
-    internal/<concept>/<impl>     impl: one sibling package per backend
-    internal/controllers/<kind>   one reconciler per kind on
+    internal/kit/<name>           common helpers with no concept; imports
+                                  api, contract, kit and third-party only
+    internal/<concept>/<impl>     impl: one sibling package per backend;
+                                  the real work; no kcp (testable_backends)
+    internal/controllers/<kind>   adapter: kcp objects to contract calls,
+                                  one reconciler per kind on
                                   internal/controllers/runtime
+    internal/services/<svc>       adapter: XRPC and HTTP routes to contract
+                                  calls; no role logic of its own
     internal/app/<root>           factory: one composition controller per
-                                  app root
+                                  app root; wires impls into the bus with
+                                  bus.Provide and picks a backend by the
+                                  backendRef kind, never by a flag
     cmd/                          CLI
-    Imports point down the list only. scripts/check-architecture.sh
-    enforces it.
+    Imports point down the list only (adapters sit beside each other).
+    scripts/check-architecture.sh enforces it.
+  go_idiom: >
+    No factory types. A constructor takes its config and its dependencies
+    as explicit arguments (New(cfg, deps)) and returns a concrete struct;
+    callers accept the contract interface. Every impl states the contracts
+    it satisfies at compile time (var _ compute.Provider = (*Provider)(nil)).
+    One package holds one concept; no util or helpers package outside
+    internal/kit. kcp is a transport like XRPC or the CLI: an adapter
+    translates it, the impl never sees it. The component.Deps service
+    locator goes in W3-CONFIG.
   testable_backends: >
     Every backend package (internal/<concept>/<impl>, and the host
     libraries it drives: vmruntime, hostsvc, fcapi, guestnet, guestdisk,
@@ -916,7 +934,12 @@ items:
     depends_on: [W3-ROOTS, W3-CONFIG, W3-STATUS]
     status: todo
     decision: >
-      internal/market/participant holds the shared market loop pieces:
+      The core of each service moves out of internal/services: role logic
+    lives in impl packages (internal/market/participant,
+    internal/market/bidder, internal/market/requester and the like) that
+    obey testable_backends, and internal/services/<svc> keeps only the
+    XRPC/HTTP adapter and the component lifecycle.
+    internal/market/participant holds the shared market loop pieces:
       credential sessions, record encode/decode, comms validation, policy
       run handling, StateSync outbox, service-auth. Bidder and Requester
       keep only their role logic. Services create Bid, StateSync and
@@ -939,7 +962,8 @@ items:
     status: todo
     closes: [D18]
     decision: >
-      gatewayapi (NodeClaim manager on the runtime), guestcontrolplane,
+      Same core and adapter split as W4-MARKET for every service below.
+    gatewayapi (NodeClaim manager on the runtime), guestcontrolplane,
       sshserver, ingressproxy, plc, relay, dispatchertls and pds take typed
       specs and bus handles. bidder-dids, adopt-joined-node,
       initializer-nudge and restart-at signals become spec fields or
@@ -991,7 +1015,7 @@ items:
     depends_on: [W5-NO-POLL]
     status: todo
     decision: >
-      scripts/check-architecture.sh enforces: import direction; backend packages free of kcp, bus and controller runtime (decisions.testable_backends, strict); no ticker
+      scripts/check-architecture.sh enforces: import direction with kit as its own layer (strict); backend packages free of kcp, bus and controller runtime (decisions.testable_backends, strict); every impl package carries a compile-time assertion against an internal/contract interface; no ticker
       outside deploy/obligations.txt; no System caller outside
       deploy/bus-bootstrap-callers.txt; no dynamic client or unstructured
       outside internal/controllers/runtime and internal/apigen; no GVR

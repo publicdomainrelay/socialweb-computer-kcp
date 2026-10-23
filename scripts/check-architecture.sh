@@ -20,6 +20,7 @@ layer_of() {
   case "$rel" in
     api | api/*) echo api ;;
     internal/contract | internal/contract/*) echo contract ;;
+    internal/kit | internal/kit/*) echo kit ;;
     internal/controllers | internal/controllers/*) echo controllers ;;
     internal/app | internal/app/*) echo app ;;
     internal/*) echo impl ;;
@@ -32,10 +33,11 @@ rank_of() {
   case "$1" in
     api | assets) echo 0 ;;
     contract) echo 1 ;;
-    impl) echo 2 ;;
-    controllers) echo 3 ;;
-    app) echo 4 ;;
-    *) echo 5 ;;
+    kit) echo 2 ;;
+    impl) echo 3 ;;
+    controllers) echo 4 ;;
+    app) echo 5 ;;
+    *) echo 6 ;;
   esac
 }
 
@@ -77,7 +79,7 @@ while read -r pkg imports; do
         if [ "$from" = contract ] && [ "$to" != api ] && [ "$to" != contract ]; then
           report "$from" "$pkg imports $imp ($to); a contract imports api and the standard library only"
         elif [ "$to_rank" -gt "$from_rank" ]; then
-          report "$from" "$pkg imports $imp ($to); imports point down api <- contract <- impl <- controllers <- app <- cmd"
+          report "$from" "$pkg imports $imp ($to); imports point down api <- contract <- kit <- impl <- controllers <- app <- cmd"
         fi
         ;;
       *)

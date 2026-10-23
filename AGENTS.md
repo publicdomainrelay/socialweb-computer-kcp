@@ -302,12 +302,22 @@ A prod deployment guarantees nothing; the routine path preserves most things.
 
 ## Architecture rules (plan 0026)
 
-- Layout. Imports point down this list only; `scripts/check-architecture.sh` enforces it:
-  `api/<group>/v1alpha1` (types, contract status, refs), `internal/contract/<concept>` (small Go
-  interfaces and pure types; imports api and stdlib only), `internal/<concept>/<impl>` (one sibling
-  package per backend), `internal/controllers/<kind>` (one reconciler per kind on
-  `internal/controllers/runtime`), `internal/app/<root>` (one composition controller per app root),
-  `cmd/`. A new backend is a concrete kind and a sibling package, never a flag.
+- Layout: the TypeScript ABC layers in Go. Imports point down this list only;
+  `scripts/check-architecture.sh` enforces it:
+  - `api/<group>/v1alpha1` (common): types, contract status, refs.
+  - `internal/contract/<concept>` (abc): small Go interfaces and pure types; api and stdlib only.
+  - `internal/kit/<name>` (common helpers): no concept; api, contract, kit and third-party only.
+  - `internal/<concept>/<impl>` (impl): one sibling package per backend, the real work, no kcp.
+  - Adapters: `internal/controllers/<kind>` turns kcp objects into contract calls (one reconciler per
+    kind on `internal/controllers/runtime`); `internal/services/<svc>` turns XRPC/HTTP routes into
+    contract calls and holds no role logic.
+  - `internal/app/<root>` (factory): one composition controller per app root; wires impls into the
+    bus and picks a backend by the `backendRef` kind, never by a flag.
+  - `cmd/` (CLI).
+- Go idiom. No factory types: `New(cfg, deps)` takes explicit dependencies and returns a concrete
+  struct; callers accept the contract interface. Every impl states its contracts at compile time
+  (`var _ compute.Provider = (*Provider)(nil)`). One package, one concept; no util package outside
+  `internal/kit`. kcp is a transport like XRPC or the CLI: an adapter translates it.
 - No polling. Controllers are driven by watches on their own kind and every kind they ref. Deadlines
   use delayed requeue; errors use the runtime's rate-limited backoff. A ticker is allowed only for an
   outbound obligation and must be listed in `deploy/obligations.txt` with its owner and period.
