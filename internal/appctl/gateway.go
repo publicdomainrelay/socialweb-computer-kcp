@@ -663,7 +663,7 @@ func (ctl *Controller) reconcileGateway(ctx context.Context, u *unstructured.Uns
 	st.Components = append(st.Components, snap.Components...)
 	st.Listeners = snap.Listeners
 	st.Did = id.Status.Did
-	ctl.ensureAccountRepo(ctx, ws, RequesterIdentity, plan, id.Status.Did)
+	ctl.ensureAccountRepo(ctx, ws, RequesterIdentity, plan, id.Status.Did, id.Status.PdsUrl)
 	if a := id.Status.PendingAction; a != nil && id.Status.Phase == v1alpha1.MarketIdentityPhaseAwaitingScan {
 		awaitingOperator = "waiting for the operator's claim record (badgeBlueKeys keyId " + id.Status.Did + " with the nonce n of " + a.Url + ")"
 	}

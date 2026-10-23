@@ -308,7 +308,7 @@ func (ctl *Controller) reconcileRequesterAccount(ctx context.Context, u *unstruc
 	if err := ctl.pruneDesired(ctx, owner, desired); err != nil {
 		return err
 	}
-	ctl.ensureAccountRepo(ctx, ctl.c.workspace(), RequesterIdentity, plan, id.Status.Did)
+	ctl.ensureAccountRepo(ctx, ctl.c.workspace(), RequesterIdentity, plan, id.Status.Did, id.Status.PdsUrl)
 	snap, err := ctl.componentSnapshot(ctx, owner)
 	if err != nil {
 		return err
