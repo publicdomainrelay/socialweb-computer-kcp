@@ -105,6 +105,8 @@ type Controller struct {
 	imagesAt time.Time
 	bidsAt   time.Time
 	linksAt  time.Time
+
+	wg sync.WaitGroup
 }
 
 func (c Config) log() *slog.Logger {
@@ -903,7 +905,7 @@ func (ct *Controller) dispatch(ctx context.Context, name string) {
 	}
 	ct.busy[name] = true
 	ct.mu.Unlock()
-	go func() {
+	ct.wg.Go(func() {
 		defer func() {
 			ct.mu.Lock()
 			delete(ct.busy, name)
@@ -912,7 +914,7 @@ func (ct *Controller) dispatch(ctx context.Context, name string) {
 		if err := ct.reconcile(ctx, name); err != nil && !apierrors.IsConflict(err) && ctx.Err() == nil {
 			ct.c.log().Warn("reconcile", "computevm", name, "err", err.Error())
 		}
-	}()
+	})
 }
 
 func (ct *Controller) collect(ctx context.Context, have map[string]bool) {
@@ -1091,7 +1093,8 @@ func (ct *Controller) Run(ctx context.Context) error {
 	caps := ct.c.Runtime.Capabilities()
 	ct.c.log().Info("the ComputeVM controller runs in the core", "workspace", ct.c.Workspace, "backend", string(caps.Backend),
 		"hypervisor", caps.Hypervisor, "enforcesLimits", caps.EnforcesLimits, "gracefulStop", caps.GracefulStop)
-	go ct.watch(ctx)
+	defer ct.wg.Wait()
+	ct.wg.Go(func() { ct.watch(ctx) })
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
@@ -1119,7 +1122,9 @@ func Supervisor(c Config) hostprocess.Config {
 
 func Run(ctx context.Context, c Config) {
 	log := c.log()
-	go hostprocess.Supervise(ctx, Supervisor(c))
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	wg.Go(func() { hostprocess.Supervise(ctx, Supervisor(c)) })
 	for {
 		ct, err := New(ctx, c)
 		if err == nil {
