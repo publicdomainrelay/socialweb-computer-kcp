@@ -33,6 +33,10 @@ import (
 const Kind = "Bidder"
 
 const (
+	RecordReplyLimit = 8 << 20
+
+	RecordRequestTimeout = 30 * time.Second
+
 	DefaultServeHost = "127.0.0.1"
 
 	DefaultGuestLoginMount = computevm.GuestLoginDefaultMount
@@ -153,10 +157,6 @@ type Config struct {
 
 	PDSAccessTokenRef *component.CredentialRef
 
-	PDS pdsclient.PDS
-
-	PDSResolver *pdsclient.Resolver
-
 	PDSTokens pdsclient.TokenSource
 
 	PDSDPoP pdsclient.DPoPSource
@@ -201,7 +201,7 @@ type Config struct {
 
 	Relay *RelayConfig
 
-	Records RecordStore
+	Records *market.RepoStore
 
 	Vault GuestVault
 

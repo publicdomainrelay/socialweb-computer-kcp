@@ -32,7 +32,7 @@ type marketLoop struct {
 
 	wg sync.WaitGroup
 
-	records RecordStore
+	records *market.RepoStore
 
 	signer *market.Signer
 

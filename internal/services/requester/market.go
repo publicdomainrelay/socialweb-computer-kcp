@@ -121,7 +121,7 @@ type MarketClient interface {
 type HTTPMarket struct {
 	Directory identity.Directory
 
-	Reader RecordStore
+	Reader *market.RepoStore
 
 	RepoDID string
 

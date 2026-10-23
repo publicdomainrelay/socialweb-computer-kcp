@@ -14,6 +14,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	reporemote "github.com/johnandersen777/socialweb-computer-kcp/internal/atprotorepo/remote"
+
 	"github.com/bluesky-social/indigo/atproto/identity"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -199,10 +201,10 @@ func (s *Service) prepare(ctx context.Context) error {
 		return guestidentity.OIDCIssuer(s.issuerURL())
 	})
 	if s.cfg.RBAC == nil {
-		s.cfg.RBAC = &guestidentity.HTTPRBAC{
-			Resolver: guestidentity.DirectoryPDS{Directory: s.dir},
-			Client:   networkHTTPClient(s.cfg.Deps, s.cfg.Network, DefaultOpenBaoTimeout),
-			Log:      s.log,
+		s.cfg.RBAC = &guestidentity.RepoRBAC{
+			Reader: reporemote.NewNetwork(reporemote.NetworkConfig{Directory: s.dir,
+				HTTP: networkHTTPClient(s.cfg.Deps, s.cfg.Network, DefaultOpenBaoTimeout)}),
+			Log: s.log,
 		}
 	}
 	s.rbac = s.cfg.RBAC

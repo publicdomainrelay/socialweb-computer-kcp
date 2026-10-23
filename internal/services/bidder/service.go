@@ -22,7 +22,7 @@ import (
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
-	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	corev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/ingress"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
@@ -30,6 +30,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/atprotorepo"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/policy"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/ref"
@@ -134,7 +135,7 @@ type Service struct {
 
 	did string
 
-	records RecordStore
+	records *market.RepoStore
 
 	bids BidStore
 
@@ -473,55 +474,37 @@ func (s *Service) resolveIdentity(ctx context.Context) error {
 }
 
 func (s *Service) resolveRecords(ctx context.Context) error {
-	if s.cfg.Records != nil {
-		return nil
-	}
-	pds := s.cfg.PDS
-	if pds == nil {
-		tokens := s.cfg.PDSTokens
-		if tokens == nil {
-			tokens = s.credentialTokenSource()
-		}
+	if s.cfg.PDSTokens == nil {
+		tokens := s.credentialTokenSource()
 		if tokens == nil {
 			token, err := s.pdsAccessToken(ctx)
 			if err != nil {
 				return err
 			}
-			tokens = pdsclient.TokenSourceFunc(func(context.Context) (string, error) { return token, nil })
-		}
-		s.cfg.PDSTokens = tokens
-		resolver := s.cfg.PDSResolver
-		if resolver == nil {
-			resolver = &pdsclient.Resolver{
-				Handlers:   s.cfg.Deps.Handlers,
-				HTTPClient: s.cfg.Deps.ExternalHTTPClient(RecordRequestTimeout),
-				TLS:        s.cfg.Deps.TLS,
-				Tokens:     tokens,
-				DPoP:       s.cfg.PDSDPoP,
-				Timeout:    RecordRequestTimeout,
+			if token != "" {
+				tokens = pdsclient.TokenSourceFunc(func(context.Context) (string, error) { return token, nil })
 			}
 		}
-		ref, err := s.pdsRef()
-		if err != nil {
-			return err
-		}
-		pds, err = resolver.Resolve(ref)
-		if err != nil {
-			return err
-		}
+		s.cfg.PDSTokens = tokens
 	}
-	store, err := NewPDSStore(PDSOptions{PDS: pds, DID: s.did})
-	if err != nil {
-		return err
+	if s.cfg.Records != nil {
+		return nil
+	}
+	if s.did == "" {
+		return errors.New("bidder: the record store needs the bidder DID")
+	}
+	if s.cfg.Deps.Handlers == nil {
+		return errors.New("bidder: the record store needs the bus")
 	}
 	reader := market.NewHTTPReader(s.dir)
 	reader.Client = s.cfg.Deps.ExternalHTTPClient(RecordRequestTimeout)
-	if client, ok := reader.Client.(*http.Client); ok {
-		if transport, ok := client.Transport.(*http.Transport); ok && transport.TLSClientConfig != nil {
-			s.log.Info("the bidder's record reader trusts its roots", "rootCAs", transport.TLSClientConfig.RootCAs != nil)
-		}
-	}
-	s.cfg.Records = NewRoutedStore(s.did, store, reader)
+	self := commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: Kind, Name: s.cfg.ComponentName, Workspace: s.cfg.Workspace}
+	repo := commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: "AtprotoRepo", Name: atprotorepo.RepoName(s.did), Workspace: s.cfg.Workspace}
+	handlers := s.cfg.Deps.Handlers
+	s.cfg.Records = market.NewRepoStore(market.RepoStoreConfig{DID: s.did, Foreign: reader,
+		Open: func(ctx context.Context) (atprotorepo.Repo, error) {
+			return bus.Resolve[atprotorepo.Repo](ctx, handlers, self, repo, bus.Capability{Name: atprotorepo.CapabilityWrite})
+		}})
 	return nil
 }
 
@@ -560,27 +543,6 @@ func (s *Service) pdsAccessToken(ctx context.Context) (string, error) {
 		}
 	}
 	return token, nil
-}
-
-func (s *Service) pdsRef() (pdsclient.Ref, error) {
-	if s.cfg.RemotePDS != nil {
-		return pdsclient.CRRef{RemotePDS: s.cfg.RemotePDS}, nil
-	}
-	if s.cfg.PDSRef != nil {
-		kind := s.cfg.PDSRef.Kind
-		kind = cmp.Or(kind, "Pds")
-		return pdsclient.LocalRef{Workspace: s.cfg.Workspace, Kind: kind, Name: s.cfg.PDSRef.Name}, nil
-	}
-	if s.cfg.PDSURL != "" {
-		if s.pdsInternal {
-			return pdsclient.LocalRef{Endpoint: s.cfg.PDSURL}, nil
-		}
-		return pdsclient.CRRef{RemotePDS: &pdsv1alpha1.RemotePDS{
-			ObjectMeta: metav1.ObjectMeta{Name: "pds"},
-			Spec:       pdsv1alpha1.RemotePDSSpec{URL: s.cfg.PDSURL, DID: s.did},
-		}}, nil
-	}
-	return nil, errors.New("bidder: no PDS endpoint is resolved")
 }
 
 func (s *Service) resolveStores() error {
