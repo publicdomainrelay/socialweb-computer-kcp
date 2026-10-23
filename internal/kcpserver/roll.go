@@ -117,6 +117,7 @@ func backendOf(port int) string { return "127.0.0.1:" + strconv.Itoa(port) }
 
 func WaitOwnPortReady(ctx context.Context, admin ShardAdmin, port int, every time.Duration,
 	progress ...func(attempt int, last error)) error {
+	every = opt.Positive(every, DefaultRollPoll)
 	var last error
 	for attempt := 1; ; attempt++ {
 		code, err := admin.Readyz(ctx, port)
@@ -142,9 +143,7 @@ func WaitNewHolder(ctx context.Context, admin ShardAdmin, old string) (Lease, er
 }
 
 func awaitDrained(ctx context.Context, front FrontSwitch, backend string, timeout, every time.Duration) {
-	if every <= 0 {
-		return
-	}
+	every = opt.Positive(every, DefaultRollPoll)
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	for {

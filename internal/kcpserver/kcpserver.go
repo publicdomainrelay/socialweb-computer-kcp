@@ -26,6 +26,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 const WorkspaceMountsGate = "--feature-gates=WorkspaceMounts=true"
@@ -277,6 +278,7 @@ func Readyz(ctx context.Context, port int, a Admin) (int, string, error) {
 
 func WaitReady(ctx context.Context, port int, kubeconfig string, notBefore time.Time, every time.Duration,
 	progress ...func(attempt int, last error)) (time.Time, error) {
+	every = opt.Positive(every, ProbePoll)
 	var last error
 	for attempt := 1; ; attempt++ {
 		fi, err := os.Stat(kubeconfig)
