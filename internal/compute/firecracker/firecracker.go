@@ -62,6 +62,8 @@ type Deps struct {
 	UserData UserData
 
 	Placement Placement
+
+	Processes host.Processes
 }
 
 var (
@@ -82,10 +84,28 @@ type Provider struct {
 
 	log *slog.Logger
 
+	procs host.Processes
+
 	mu sync.Mutex
 
 	exits map[string]hostsvc.UnitStatus
+
+	follows map[string]*follow
+
+	vmmExits chan string
 }
+
+type follow struct {
+	pid int
+
+	ticks uint64
+
+	stop context.CancelFunc
+
+	exited bool
+}
+
+const VMMExitsBuffer = 64
 
 func New(cfg Config, deps Deps) (*Provider, error) {
 	if cfg.Handle == "" {
@@ -98,8 +118,9 @@ func New(cfg Config, deps Deps) (*Provider, error) {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	return &Provider{rt: deps.Runtime, m: deps.Units, userData: deps.UserData, placement: deps.Placement, handle: cfg.Handle,
-		log: log.With("backend", v1alpha1.BackendKindFirecrackerVM, "handle", cfg.Handle), exits: map[string]hostsvc.UnitStatus{}}, nil
+	return &Provider{rt: deps.Runtime, m: deps.Units, userData: deps.UserData, placement: deps.Placement, procs: deps.Processes, handle: cfg.Handle,
+		log: log.With("backend", v1alpha1.BackendKindFirecrackerVM, "handle", cfg.Handle), exits: map[string]hostsvc.UnitStatus{},
+		follows: map[string]*follow{}, vmmExits: make(chan string, VMMExitsBuffer)}, nil
 }
 
 func (p *Provider) Handle() string { return p.handle }
@@ -396,6 +417,12 @@ func (p *Provider) Observe(ctx context.Context, vm *v1alpha1.FirecrackerVM) v1al
 		if ex != nil {
 			msg = fmt.Sprintf("%s; the unit watch saw it %s (result %s, exit code %d status %d)", msg, ex.State, ex.Result, ex.ExecMainCode, ex.ExecMainStatus)
 		}
+		if p.vmmExited(vm.Name, ref.PID) {
+			msg = fmt.Sprintf("%s; the process wait saw firecracker pid %d exit", msg, ref.PID)
+			if reason == v1alpha1.ComputeVMLostIdentityMismatch {
+				reason = v1alpha1.ComputeVMLostVMMExited
+			}
+		}
 		if obs.Stopped {
 			msg += "; the unit was stopped at once"
 		}
@@ -485,6 +512,7 @@ func (p *Provider) Teardown(ctx context.Context, vm *v1alpha1.FirecrackerVM) err
 	p.mu.Lock()
 	delete(p.exits, vm.Name)
 	p.mu.Unlock()
+	p.Unfollow(vm.Name)
 	log.Info("released")
 	return nil
 }
@@ -574,4 +602,59 @@ func (p *Provider) Watch(ctx context.Context) (<-chan string, error) {
 		}
 	}()
 	return out, nil
+}
+
+func (p *Provider) VMMExits() <-chan string { return p.vmmExits }
+
+func (p *Provider) Follow(ctx context.Context, vm *v1alpha1.FirecrackerVM) {
+	rt := vm.Status.Runtime
+	if p.procs == nil || rt == nil || rt.Pid <= 0 {
+		return
+	}
+	name, pid, ticks := vm.Name, int(rt.Pid), uint64(rt.StartTicks)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if f, ok := p.follows[name]; ok {
+		if f.pid == pid && f.ticks == ticks {
+			return
+		}
+		f.stop()
+	}
+	fctx, stop := context.WithCancel(ctx)
+	f := &follow{pid: pid, ticks: ticks, stop: stop}
+	p.follows[name] = f
+	go p.await(fctx, name, f)
+}
+
+func (p *Provider) Unfollow(name string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if f, ok := p.follows[name]; ok {
+		f.stop()
+		delete(p.follows, name)
+	}
+}
+
+func (p *Provider) vmmExited(name string, pid int) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	f, ok := p.follows[name]
+	return ok && f.exited && f.pid == pid
+}
+
+func (p *Provider) await(ctx context.Context, name string, f *follow) {
+	if err := p.procs.Wait(ctx, f.pid, f.ticks); err != nil {
+		if ctx.Err() == nil {
+			p.log.Warn("waiting for the VMM process failed; its exit is seen through the unit watch alone", "firecrackervm", name, "pid", f.pid, "err", err.Error())
+		}
+		return
+	}
+	p.mu.Lock()
+	f.exited = true
+	p.mu.Unlock()
+	p.log.Info("the process wait saw the VMM exit", "firecrackervm", name, "pid", f.pid)
+	select {
+	case p.vmmExits <- name:
+	case <-ctx.Done():
+	}
 }
