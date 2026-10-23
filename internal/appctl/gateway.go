@@ -791,6 +791,7 @@ func GatewayValues(o v1alpha1.Gateway, workspace, stateDir, requesterStateDir st
 	}
 	if len(o.Spec.BidderDids) > 0 {
 		extra = append(extra, "--node-extra-bidder-dids", strings.Join(o.Spec.BidderDids, ","))
+		requesterExtra = append(requesterExtra, "--bidder-dids", strings.Join(o.Spec.BidderDids, ","))
 	}
 	opts, err := OptionArgs(GatewayApp, o.Spec.Options)
 	if err != nil {
