@@ -716,8 +716,8 @@ func desiredStatus(claim NodeClaim, contract *v1alpha1.ComputeContract) *v1alpha
 		var copyOf v1alpha1.NodeClaimContract
 		state.DeepCopyInto(&copyOf)
 		if copyOf.Receipt != nil {
-			if copyOf.ReceiptUri == "" {
-				copyOf.ReceiptUri = copyOf.Receipt.URI
+			if copyOf.ReceiptURI == "" {
+				copyOf.ReceiptURI = copyOf.Receipt.URI
 			}
 			if copyOf.ReceiptCid == "" {
 				copyOf.ReceiptCid = copyOf.Receipt.CID

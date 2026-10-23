@@ -103,8 +103,8 @@ func atprotoTrust(n *v1alpha1.MarketNetworkValue) (plc string, hosts []string, c
 	if u, uerr := url.Parse(n.GuestTlsUrl); n.GuestTlsUrl != "" && uerr == nil && u.Port() != "" {
 		hosts = append(hosts, "*."+u.Hostname()+"=127.0.0.1:"+u.Port())
 	}
-	if plc == "" && n.PlcDirectoryUrl != "" {
-		plc = n.PlcDirectoryUrl
+	if plc == "" && n.PLCDirectoryURL != "" {
+		plc = n.PLCDirectoryURL
 		if rest, ok := strings.CutPrefix(plc, "https://"); ok {
 			hosts = append(hosts, strings.TrimRight(rest, "/"))
 		}
@@ -154,7 +154,7 @@ func loopbackOriginHost(origin string) string {
 
 func plcScheme(n *v1alpha1.MarketNetworkValue) string {
 	if n != nil {
-		if parsed, err := url.Parse(n.PlcDirectoryUrl); err == nil && strings.EqualFold(parsed.Scheme, "http") {
+		if parsed, err := url.Parse(n.PLCDirectoryURL); err == nil && strings.EqualFold(parsed.Scheme, "http") {
 			return "http"
 		}
 	}

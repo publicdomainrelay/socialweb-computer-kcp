@@ -431,7 +431,7 @@ func (c *Controller) writeFailure(ctx context.Context, ri dynamic.ResourceInterf
 	object v1alpha1.AtprotoRecord, reason string, cause error) error {
 	message := cause.Error()
 	c.log.Warn("an AtprotoRecord failed", "name", object.Name, "reason", reason, "err", message)
-	return c.writeStatus(ctx, ri, u, object, v1alpha1.AtprotoRecordPhaseFailed, object.Status.Did, object.Status.Uri, object.Status.Cid,
+	return c.writeStatus(ctx, ri, u, object, v1alpha1.AtprotoRecordPhaseFailed, object.Status.Did, object.Status.URI, object.Status.Cid,
 		message,
 		condition(ConditionReferencesResolved, false, reason, message, object.Generation),
 		condition(ConditionInSync, false, reason, message, object.Generation))
@@ -444,7 +444,7 @@ func (c *Controller) writeStatus(ctx context.Context, ri dynamic.ResourceInterfa
 	status.Phase = phase
 	status.ObservedGeneration = object.Generation
 	status.Did = did
-	status.Uri = uri
+	status.URI = uri
 	status.Cid = cid
 	status.Message = message
 	status.Conditions = append([]metav1.Condition(nil), object.Status.Conditions...)

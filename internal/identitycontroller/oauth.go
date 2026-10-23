@@ -136,7 +136,7 @@ func (c *Controller) reconcileOAuthBrowser(ctx context.Context, dyn dynamic.Inte
 	status.Phase = phase
 	status.ObservedGeneration = generation
 	status.SessionRef = ref
-	status.PendingAction = &v1alpha1.MarketIdentityPendingAction{Kind: kind, Url: url, ExpiresAt: expires.UTC().Format(time.RFC3339)}
+	status.PendingAction = &v1alpha1.MarketIdentityPendingAction{Kind: kind, URL: url, ExpiresAt: expires.UTC().Format(time.RFC3339)}
 	status.Message = pendingMessage(phase)
 	setReady(&status, generation, false, string(phase), status.Message)
 	c.write(ctx, dyn, id.GetName(), status)
@@ -170,7 +170,7 @@ func (c *Controller) reconcileOAuthQr(ctx context.Context, dyn dynamic.Interface
 			return
 		}
 		status.SessionRef = ref
-		status.PendingAction = &v1alpha1.MarketIdentityPendingAction{Kind: v1alpha1.PendingActionScanQr, Url: qr.url,
+		status.PendingAction = &v1alpha1.MarketIdentityPendingAction{Kind: v1alpha1.PendingActionScanQr, URL: qr.url,
 			ExpiresAt: qr.expires.UTC().Format(time.RFC3339)}
 		if expired {
 			status.Phase = v1alpha1.MarketIdentityPhaseSessionExpired
@@ -227,7 +227,7 @@ func (c *Controller) writeQrPending(ctx context.Context, dyn dynamic.Interface, 
 	status v1alpha1.MarketIdentityStatus, qr *qrTransfer) {
 	status.Phase = v1alpha1.MarketIdentityPhaseAwaitingScan
 	status.ObservedGeneration = generation
-	status.PendingAction = &v1alpha1.MarketIdentityPendingAction{Kind: v1alpha1.PendingActionScanQr, Url: qr.url,
+	status.PendingAction = &v1alpha1.MarketIdentityPendingAction{Kind: v1alpha1.PendingActionScanQr, URL: qr.url,
 		ExpiresAt: qr.expires.UTC().Format(time.RFC3339)}
 	status.Message = "scan the qr url to sign in"
 	setReady(&status, generation, false, "AwaitingScan", status.Message)
@@ -352,7 +352,7 @@ func (c *Controller) beginBrowserAuthorization(ctx context.Context, id *v1alpha1
 }
 
 func (c *Controller) oauthPDSURL(ctx context.Context, id *v1alpha1.MarketIdentity) (string, error) {
-	if raw := strings.TrimSpace(id.Spec.PdsUrl); raw != "" {
+	if raw := strings.TrimSpace(id.Spec.PdsURL); raw != "" {
 		return raw, nil
 	}
 	handle := strings.TrimSpace(id.Spec.Handle)
@@ -393,7 +393,7 @@ func (c *Controller) openSessionDataRef(ctx context.Context, id *v1alpha1.Market
 		DID:        did,
 		Handle:     id.Spec.Handle,
 		RepoDID:    did,
-		PDSURL:     id.Spec.PdsUrl,
+		PDSURL:     id.Spec.PdsURL,
 		ClientID:   c.oauthClientID(id),
 		Scopes:     c.scopesFor(id.Spec.Mode),
 		Directory:  c.oauth.Directory,
@@ -466,7 +466,7 @@ func (c *Controller) signedIn(ctx context.Context, dyn dynamic.Interface, id *v1
 	status.ObservedGeneration = generation
 	status.Did = strings.TrimSpace(did)
 	status.Handle = firstNonEmpty(strings.TrimSpace(handle), strings.TrimSpace(id.Spec.Handle))
-	status.PdsUrl = strings.TrimSpace(pdsURL)
+	status.PdsURL = strings.TrimSpace(pdsURL)
 	status.SessionRef = ref
 	status.Associations = nil
 	status.PendingAction = nil
@@ -509,7 +509,7 @@ func oauthSessionRef(id *v1alpha1.MarketIdentity, status *v1alpha1.MarketIdentit
 }
 
 func pendingValid(action *v1alpha1.MarketIdentityPendingAction, kind v1alpha1.PendingActionKind, now time.Time) bool {
-	if action == nil || action.Kind != kind || strings.TrimSpace(action.Url) == "" {
+	if action == nil || action.Kind != kind || strings.TrimSpace(action.URL) == "" {
 		return false
 	}
 	if action.ExpiresAt == "" {
@@ -657,7 +657,7 @@ func (c *Controller) CompleteBrowserAuthorization(ctx context.Context, name stri
 	status.ObservedGeneration = id.Generation
 	status.Did = data.AccountDID
 	status.Handle = strings.TrimSpace(id.Spec.Handle)
-	status.PdsUrl = data.HostURL
+	status.PdsURL = data.HostURL
 	status.SessionRef = ref
 	status.PendingAction = nil
 	status.Message = ""

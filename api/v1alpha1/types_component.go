@@ -4,6 +4,8 @@ import (
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 type ComponentRestartPolicy string
@@ -34,26 +36,35 @@ const (
 	ComponentPhaseSuspended ComponentPhase = "Suspended"
 )
 
-type ComponentRef struct {
-	Kind string `json:"kind,omitempty"`
+const (
+	KindOpenBaoServer = "OpenBaoServer"
 
-	Name string `json:"name,omitempty"`
+	KindRemoteOpenBao = "RemoteOpenBao"
+)
 
-	Did string `json:"did,omitempty"`
+func VaultServerRef(server string) *commonv1.ObjectRef {
+	server = strings.TrimSpace(server)
+	if server == "" {
+		return nil
+	}
+	if name, ok := strings.CutPrefix(server, KindRemoteOpenBao+"/"); ok {
+		return &commonv1.ObjectRef{Kind: KindRemoteOpenBao, Name: strings.TrimSpace(name)}
+	}
+	return &commonv1.ObjectRef{Kind: KindOpenBaoServer, Name: server}
 }
 
-func (r *ComponentRef) VaultServer(fallback string) string {
+func VaultServer(r *commonv1.ObjectRef, fallback string) string {
 	if r == nil || strings.TrimSpace(r.Name) == "" {
 		return fallback
 	}
-	if strings.EqualFold(strings.TrimSpace(r.Kind), "RemoteOpenBao") {
-		return "RemoteOpenBao/" + strings.TrimSpace(r.Name)
+	if strings.EqualFold(strings.TrimSpace(r.Kind), KindRemoteOpenBao) {
+		return KindRemoteOpenBao + "/" + strings.TrimSpace(r.Name)
 	}
 	return strings.TrimSpace(r.Name)
 }
 
 type ComponentIdentity struct {
-	MarketIdentityRef *ComponentRef `json:"marketIdentityRef,omitempty"`
+	MarketIdentityRef *commonv1.ObjectRef `json:"marketIdentityRef,omitempty"`
 
 	Did string `json:"did,omitempty"`
 
@@ -75,7 +86,7 @@ type ComponentTLS struct {
 
 	CertRef string `json:"certRef,omitempty"`
 
-	CaBundleRef string `json:"caBundleRef,omitempty"`
+	CABundle string `json:"caBundle,omitempty"`
 }
 
 type ComponentServiceAuth struct {
@@ -297,9 +308,9 @@ type ComponentStorage struct {
 type ComponentServe struct {
 	Host string `json:"host,omitempty"`
 
-	Port int32 `json:"port,omitempty"`
+	Port int32 `json:"port,omitempty" apigen:"minimum=0,maximum=65535"`
 
-	HealthPath string `json:"healthPath,omitempty"`
+	HealthPath string `json:"healthPath,omitempty" apigen:"userEndpoint"`
 }
 
 type ComponentSpec struct {
@@ -321,7 +332,7 @@ type ComponentSpec struct {
 type Endpoint struct {
 	Name string `json:"name"`
 
-	Url string `json:"url,omitempty"`
+	URL string `json:"url,omitempty"`
 
 	Address string `json:"address,omitempty"`
 
@@ -368,13 +379,13 @@ type BidderSpec struct {
 
 	Identity *ComponentIdentity `json:"identity,omitempty"`
 
-	PdsRef *ComponentRef `json:"pdsRef,omitempty"`
+	PdsRef *commonv1.ObjectRef `json:"pdsRef,omitempty"`
 
-	PDSAccessTokenPath string `json:"pdsAccessTokenPath,omitempty"`
+	PDSAccessToken *commonv1.SecretRef `json:"pdsAccessToken,omitempty"`
 
-	PolicyEngineRef *ComponentRef `json:"policyEngineRef,omitempty"`
+	PolicyEngineRef *commonv1.ObjectRef `json:"policyEngineRef,omitempty"`
 
-	VaultRef *ComponentRef `json:"vaultRef,omitempty"`
+	VaultRef *commonv1.ObjectRef `json:"vaultRef,omitempty"`
 
 	Hostnames []string `json:"hostnames,omitempty"`
 
@@ -408,7 +419,7 @@ type BidderSpec struct {
 
 	BidderDIDs []string `json:"bidderDIDs,omitempty"`
 
-	MarketURL string `json:"marketURL,omitempty"`
+	MarketExposureRef *commonv1.LocalObjectRef `json:"marketExposureRef,omitempty"`
 
 	Mode string `json:"mode,omitempty"`
 
@@ -435,9 +446,9 @@ type GuestControlPlaneSpec struct {
 
 	Identity *ComponentIdentity `json:"identity,omitempty"`
 
-	PdsRef *ComponentRef `json:"pdsRef,omitempty"`
+	PdsRef *commonv1.ObjectRef `json:"pdsRef,omitempty"`
 
-	VaultRef *ComponentRef `json:"vaultRef,omitempty"`
+	VaultRef *commonv1.ObjectRef `json:"vaultRef,omitempty"`
 
 	Hostnames []string `json:"hostnames,omitempty"`
 
@@ -488,7 +499,7 @@ type PdsSpec struct {
 
 	Identity *ComponentIdentity `json:"identity,omitempty"`
 
-	VaultRef *ComponentRef `json:"vaultRef,omitempty"`
+	VaultRef *commonv1.ObjectRef `json:"vaultRef,omitempty"`
 
 	Hostnames []string `json:"hostnames,omitempty"`
 
@@ -498,23 +509,17 @@ type PdsSpec struct {
 
 	Mode PdsMode `json:"mode,omitempty"`
 
-	PlcURL string `json:"plcURL,omitempty"`
+	PlcURL string `json:"plcURL,omitempty" apigen:"userEndpoint"`
 
-	PublicBaseURL string `json:"publicBaseURL,omitempty"`
+	PublicBaseURL string `json:"publicBaseURL,omitempty" apigen:"userEndpoint"`
 
 	RequireIngress bool `json:"requireIngress,omitempty"`
 
-	IngressRef *ComponentRef `json:"ingressRef,omitempty"`
+	IngressRef *commonv1.ObjectRef `json:"ingressRef,omitempty"`
 
-	PublicURL string `json:"publicURL,omitempty"`
+	PublicURL string `json:"publicURL,omitempty" apigen:"userEndpoint"`
 
 	StableHost string `json:"stableHost,omitempty"`
-
-	RepoKeyPath string `json:"repoKeyPath,omitempty"`
-
-	SessionSecretPath string `json:"sessionSecretPath,omitempty"`
-
-	RotationKeyPath string `json:"rotationKeyPath,omitempty"`
 
 	AllowExplicitDID bool `json:"allowExplicitDID,omitempty"`
 
@@ -561,17 +566,19 @@ type RequesterSpec struct {
 
 	Identity *ComponentIdentity `json:"identity,omitempty"`
 
-	PdsRef *ComponentRef `json:"pdsRef,omitempty"`
+	PdsRef *commonv1.ObjectRef `json:"pdsRef,omitempty"`
 
-	PDSAccessTokenPath string `json:"pdsAccessTokenPath,omitempty"`
+	PdsDID string `json:"pdsDID,omitempty"`
 
-	MarketURL string `json:"marketURL,omitempty"`
+	PDSAccessToken *commonv1.SecretRef `json:"pdsAccessToken,omitempty"`
+
+	MarketExposureRef *commonv1.LocalObjectRef `json:"marketExposureRef,omitempty"`
 
 	OperatorDID string `json:"operatorDID,omitempty"`
 
-	PolicyEngineRef *ComponentRef `json:"policyEngineRef,omitempty"`
+	PolicyEngineRef *commonv1.ObjectRef `json:"policyEngineRef,omitempty"`
 
-	VaultRef *ComponentRef `json:"vaultRef,omitempty"`
+	VaultRef *commonv1.ObjectRef `json:"vaultRef,omitempty"`
 
 	Hostnames []string `json:"hostnames,omitempty"`
 
@@ -583,15 +590,15 @@ type RequesterSpec struct {
 
 	OAuthClientID string `json:"oauthClientID,omitempty"`
 
-	OAuthRedirectURI string `json:"oauthRedirectURI,omitempty"`
+	OAuthRedirectURI string `json:"oauthRedirectURI,omitempty" apigen:"userEndpoint"`
 
 	Mode string `json:"mode,omitempty"`
 
-	GuestSSHKeysFile string `json:"guestSSHKeysFile,omitempty"`
+	GuestSSHKeysFile string `json:"guestSSHKeysFile,omitempty" apigen:"userEndpoint"`
 
 	BidderDIDs []string `json:"bidderDIDs,omitempty"`
 
-	OwnerSessionsFile string `json:"ownerSessionsFile,omitempty"`
+	OwnerSessionsFile string `json:"ownerSessionsFile,omitempty" apigen:"userEndpoint"`
 
 	IrohSocket string `json:"irohSocket,omitempty"`
 
@@ -646,11 +653,11 @@ type GatewayAPISpec struct {
 
 	Identity *ComponentIdentity `json:"identity,omitempty"`
 
-	PdsRef *ComponentRef `json:"pdsRef,omitempty"`
+	PdsRef *commonv1.ObjectRef `json:"pdsRef,omitempty"`
 
-	RequesterRef *ComponentRef `json:"requesterRef,omitempty"`
+	RequesterRef *commonv1.ObjectRef `json:"requesterRef,omitempty"`
 
-	VaultRef *ComponentRef `json:"vaultRef,omitempty"`
+	VaultRef *commonv1.ObjectRef `json:"vaultRef,omitempty"`
 
 	Hostnames []string `json:"hostnames,omitempty"`
 
@@ -662,7 +669,7 @@ type GatewayAPISpec struct {
 
 	ClusterStateDir string `json:"clusterStateDir,omitempty"`
 
-	KubeconfigCAFile string `json:"kubeconfigCAFile,omitempty"`
+	KubeconfigCAFile string `json:"kubeconfigCAFile,omitempty" apigen:"userEndpoint"`
 
 	PublicOrigin string `json:"publicOrigin,omitempty"`
 
@@ -670,7 +677,7 @@ type GatewayAPISpec struct {
 
 	RequiredDownloads []string `json:"requiredDownloads,omitempty"`
 
-	PostSignInURL string `json:"postSignInURL,omitempty"`
+	PostSignInURL string `json:"postSignInURL,omitempty" apigen:"userEndpoint"`
 
 	NodeMarket *GatewayNodeMarket `json:"nodeMarket,omitempty"`
 
@@ -678,9 +685,9 @@ type GatewayAPISpec struct {
 }
 
 type GatewayNodeMarket struct {
-	OwnerSessionsFile string `json:"ownerSessionsFile,omitempty"`
+	OwnerSessionsFile string `json:"ownerSessionsFile,omitempty" apigen:"userEndpoint"`
 
-	UserDataBaseFile string `json:"userDataBaseFile,omitempty"`
+	UserDataBaseFile string `json:"userDataBaseFile,omitempty" apigen:"userEndpoint"`
 
 	HomeWorkspace string `json:"homeWorkspace,omitempty"`
 
@@ -715,9 +722,9 @@ type SshServerSpec struct {
 
 	Identity *ComponentIdentity `json:"identity,omitempty"`
 
-	RequesterRef *ComponentRef `json:"requesterRef,omitempty"`
+	RequesterRef *commonv1.ObjectRef `json:"requesterRef,omitempty"`
 
-	VaultRef *ComponentRef `json:"vaultRef,omitempty"`
+	VaultRef *commonv1.ObjectRef `json:"vaultRef,omitempty"`
 
 	Hostnames []string `json:"hostnames,omitempty"`
 
@@ -727,7 +734,7 @@ type SshServerSpec struct {
 
 	HostKeyRef string `json:"hostKeyRef,omitempty"`
 
-	OwnerSessionsFile string `json:"ownerSessionsFile,omitempty"`
+	OwnerSessionsFile string `json:"ownerSessionsFile,omitempty" apigen:"userEndpoint"`
 
 	MaxConnections int32 `json:"maxConnections,omitempty"`
 
@@ -764,7 +771,7 @@ type PlcSpec struct {
 
 	Identity *ComponentIdentity `json:"identity,omitempty"`
 
-	VaultRef *ComponentRef `json:"vaultRef,omitempty"`
+	VaultRef *commonv1.ObjectRef `json:"vaultRef,omitempty"`
 
 	Hostnames []string `json:"hostnames,omitempty"`
 
@@ -793,9 +800,9 @@ type RelaySpec struct {
 
 	Identity *ComponentIdentity `json:"identity,omitempty"`
 
-	VaultRef *ComponentRef `json:"vaultRef,omitempty"`
+	VaultRef *commonv1.ObjectRef `json:"vaultRef,omitempty"`
 
-	PdsRefs []ComponentRef `json:"pdsRefs,omitempty"`
+	PdsRefs []commonv1.ObjectRef `json:"pdsRefs,omitempty"`
 
 	Hostnames []string `json:"hostnames,omitempty"`
 
@@ -832,19 +839,19 @@ const (
 type IngressProxySpec struct {
 	ComponentSpec `json:",inline"`
 
-	Provider string `json:"provider,omitempty"`
+	Provider string `json:"provider,omitempty" apigen:"enum=xrpc-subscription|iroh|opentunnel"`
 
 	Identity *ComponentIdentity `json:"identity,omitempty"`
 
-	VaultRef *ComponentRef `json:"vaultRef,omitempty"`
+	VaultRef *commonv1.ObjectRef `json:"vaultRef,omitempty"`
 
-	RelayRef *ComponentRef `json:"relayRef,omitempty"`
+	RelayRef *commonv1.ObjectRef `json:"relayRef,omitempty"`
 
-	RelayURL string `json:"relayURL,omitempty"`
+	RelayURL string `json:"relayURL,omitempty" apigen:"userEndpoint"`
 
 	IngressProxyHost string `json:"ingressProxyHost,omitempty"`
 
-	IdentityRef *ComponentRef `json:"identityRef,omitempty"`
+	IdentityRef *commonv1.ObjectRef `json:"identityRef,omitempty"`
 
 	PublicHost string `json:"publicHost,omitempty"`
 
@@ -870,9 +877,9 @@ type IngressProxySpec struct {
 }
 
 type IngressProxyIroh struct {
-	DumbpipePath string `json:"dumbpipePath,omitempty"`
+	DumbpipePath string `json:"dumbpipePath,omitempty" apigen:"userEndpoint"`
 
-	RelayURL string `json:"relayURL,omitempty"`
+	RelayURL string `json:"relayURL,omitempty" apigen:"userEndpoint"`
 
 	ListenHost string `json:"listenHost,omitempty"`
 }
@@ -905,9 +912,9 @@ type DispatcherTLSList struct {
 type DispatcherTLSSpec struct {
 	ComponentSpec `json:",inline"`
 
-	VaultRef *ComponentRef `json:"vaultRef,omitempty"`
+	VaultRef *commonv1.ObjectRef `json:"vaultRef,omitempty"`
 
-	UpstreamRef *ComponentRef `json:"upstreamRef,omitempty"`
+	UpstreamRef *commonv1.ObjectRef `json:"upstreamRef,omitempty"`
 
 	Hostnames []string `json:"hostnames,omitempty"`
 

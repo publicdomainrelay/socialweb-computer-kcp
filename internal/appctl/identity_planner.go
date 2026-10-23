@@ -109,7 +109,7 @@ func (p accountPlan) binding(did, pdsURL string) (accountBinding, error) {
 	} else if p.PdsRef != nil && strings.EqualFold(p.PdsRef.Kind, "RemotePDS") && p.PdsRef.Name != "" {
 		binding.RemotePDS = &pdsv1alpha1.RemotePDS{ObjectMeta: metav1.ObjectMeta{Name: p.PdsRef.Name}}
 	}
-	if url := firstNonEmptyString(p.PdsURL, p.Identity.PdsUrl, pdsURL); binding.RemotePDS == nil && url != "" {
+	if url := firstNonEmptyString(p.PdsURL, p.Identity.PdsURL, pdsURL); binding.RemotePDS == nil && url != "" {
 		binding.RemotePDS = &pdsv1alpha1.RemotePDS{ObjectMeta: metav1.ObjectMeta{Name: deterministicPdsName(url)},
 			Spec: pdsv1alpha1.RemotePDSSpec{URL: url, DID: pdsServiceDID(url)}}
 	}
@@ -149,13 +149,13 @@ func (ctl *Controller) planAccount(ctx context.Context, ws string, id v1alpha1.A
 		}
 		plan.Local = true
 		plan.ComponentMode = "local"
-		plan.Identity = v1alpha1.MarketIdentitySpec{Mode: mode, Handle: id.Handle, PdsUrl: id.PdsUrl, Association: association}
+		plan.Identity = v1alpha1.MarketIdentitySpec{Mode: mode, Handle: id.Handle, PdsURL: id.PdsURL, Association: association}
 		plan.SessionPath = ""
 		plan.KeysPath = ""
 		return plan, nil
 	case v1alpha1.MarketIdentityModePdsAccount:
 		plan.ComponentMode = "callback"
-		plan.Identity = v1alpha1.MarketIdentitySpec{Mode: mode, Handle: id.Handle, PdsUrl: id.PdsUrl,
+		plan.Identity = v1alpha1.MarketIdentitySpec{Mode: mode, Handle: id.Handle, PdsURL: id.PdsURL,
 			KeysRef:    &v1alpha1.VaultRef{Mount: mount, Path: keysPath},
 			SessionRef: &v1alpha1.VaultRef{Mount: mount, Path: sessionPath}}
 		url, remote, err := ctl.resolveAccountPds(ctx, ws, id)
@@ -164,16 +164,16 @@ func (ctl *Controller) planAccount(ctx context.Context, ws string, id v1alpha1.A
 		}
 		plan.PdsURL = url
 		plan.RemotePDS = remote
-		plan.Identity.PdsUrl = url
+		plan.Identity.PdsURL = url
 		if remote != nil {
 			plan.PdsRef = &v1alpha1.ComponentRef{Kind: "RemotePDS", Name: remote.Name, Did: remote.Spec.DID}
 		}
 		return plan, nil
 	case v1alpha1.MarketIdentityModeOAuthBrowser, v1alpha1.MarketIdentityModeOAuthQr, v1alpha1.MarketIdentityModeOAuthDelegated:
 		plan.ComponentMode = "oauth"
-		plan.Identity = v1alpha1.MarketIdentitySpec{Mode: mode, Handle: id.Handle, PdsUrl: id.PdsUrl,
+		plan.Identity = v1alpha1.MarketIdentitySpec{Mode: mode, Handle: id.Handle, PdsURL: id.PdsURL,
 			SessionRef: &v1alpha1.VaultRef{Mount: mount, Path: sessionPath}}
-		plan.PdsURL = strings.TrimSpace(id.PdsUrl)
+		plan.PdsURL = strings.TrimSpace(id.PdsURL)
 		if remote, err := ctl.remotePDSRef(ctx, ws, id.PdsRef); err != nil {
 			return accountPlan{}, err
 		} else if remote != nil {
@@ -182,8 +182,8 @@ func (ctl *Controller) planAccount(ctx context.Context, ws string, id v1alpha1.A
 			if plan.PdsURL == "" {
 				plan.PdsURL = remote.Spec.URL
 			}
-			if plan.Identity.PdsUrl == "" {
-				plan.Identity.PdsUrl = remote.Spec.URL
+			if plan.Identity.PdsURL == "" {
+				plan.Identity.PdsURL = remote.Spec.URL
 			}
 		}
 		return plan, nil
@@ -231,7 +231,7 @@ func (ctl *Controller) seedPdsAccountPassword(ctx context.Context, plan accountP
 }
 
 func (ctl *Controller) resolveAccountPds(ctx context.Context, ws string, id v1alpha1.ApplicationIdentity) (string, *pdsv1alpha1.RemotePDS, error) {
-	if url := strings.TrimSpace(id.PdsUrl); url != "" {
+	if url := strings.TrimSpace(id.PdsURL); url != "" {
 		remote, err := ctl.remotePDSRef(ctx, ws, id.PdsRef)
 		if err != nil {
 			return "", nil, err

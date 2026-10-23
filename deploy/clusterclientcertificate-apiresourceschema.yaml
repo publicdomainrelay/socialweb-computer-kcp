@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-1.clusterclientcertificates.socialweb.computer
+  name: v1alpha1-2.clusterclientcertificates.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -28,8 +28,14 @@ spec:
           spec:
             type: object
             properties:
-              cluster:
-                type: string
+              clusterRef:
+                type: object
+                properties:
+                  name:
+                    type: string
+                    maxLength: 253
+                required:
+                  - name
               did:
                 type: string
               serial:
@@ -41,7 +47,7 @@ spec:
               revoked:
                 type: boolean
             required:
-              - cluster
+              - clusterRef
               - did
               - serial
               - notAfter
@@ -55,7 +61,7 @@ spec:
       additionalPrinterColumns:
         - name: Cluster
           type: string
-          jsonPath: .spec.cluster
+          jsonPath: .spec.clusterRef.name
         - name: DID
           type: string
           jsonPath: .spec.did

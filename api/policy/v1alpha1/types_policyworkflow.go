@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 type PolicyWorkflow struct {
@@ -26,7 +28,7 @@ type PolicyWorkflowSpec struct {
 
 	Workflow json.RawMessage `json:"workflow"`
 
-	RecordRef *PolicyStrongRef `json:"recordRef,omitempty"`
+	RecordRef *commonv1.StrongRef `json:"recordRef,omitempty"`
 
 	DefaultInputs map[string]string `json:"defaultInputs,omitempty"`
 

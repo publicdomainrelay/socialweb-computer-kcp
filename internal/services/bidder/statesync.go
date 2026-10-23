@@ -297,7 +297,7 @@ func (a *marketEventAdapter) Apply(ctx context.Context, request statesync.Reques
 	}
 	submitEventURL := strings.TrimSpace(payload.SubmitEventURL)
 	if submitEventURL == "" {
-		submitEventURL = strings.TrimSpace(request.Sink.SubmitEventUrl)
+		submitEventURL = strings.TrimSpace(request.Sink.SubmitEventURL)
 	}
 	if submitEventURL != "" && a.call != nil && a.service.cfg.outboundXRPC() {
 		body := map[string]any{"uri": event.URI, "cid": event.CID, "record": event.Record}
@@ -354,8 +354,8 @@ func (a *marketEventAdapter) applyInboundEvent(ctx context.Context, request stat
 	info := contractInfo{computeVM: vm.Name, receiptURI: payload.Receipt.URI, receiptCID: payload.Receipt.CID,
 		acceptAuthor: payload.RequesterDID}
 	if contract := vm.Spec.Contract; contract != nil {
-		info.acceptURI, info.acceptCID = contract.AcceptUri, contract.AcceptCid
-		info.submitEventURL = contract.SubmitEventUrl
+		info.acceptURI, info.acceptCID = contract.AcceptURI, contract.AcceptCID
+		info.submitEventURL = contract.SubmitEventURL
 	}
 	if bid != nil {
 		info.bidName = bid.Name
@@ -474,7 +474,7 @@ func (s *Service) ensureReportSync(ctx context.Context, vm *v1alpha1.ComputeVM, 
 		return "", errors.New("bidder: a report StateSync needs a contract")
 	}
 	contract := vm.Spec.Contract
-	if contract.ReceiptUri == "" || contract.ReceiptCid == "" {
+	if contract.ReceiptURI == "" || contract.ReceiptCID == "" {
 		return "", errors.New("bidder: a report StateSync needs a receipt")
 	}
 	if vm.UID == "" {
@@ -482,11 +482,11 @@ func (s *Service) ensureReportSync(ctx context.Context, vm *v1alpha1.ComputeVM, 
 	}
 	payload := map[string]any{
 		"collection": collection,
-		"receipt":    map[string]any{"uri": contract.ReceiptUri, "cid": contract.ReceiptCid},
+		"receipt":    map[string]any{"uri": contract.ReceiptURI, "cid": contract.ReceiptCID},
 		"record":     record,
 	}
-	if contract.SubmitEventUrl != "" {
-		payload["submitEventUrl"] = contract.SubmitEventUrl
+	if contract.SubmitEventURL != "" {
+		payload["submitEventUrl"] = contract.SubmitEventURL
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
@@ -525,7 +525,7 @@ func (s *Service) ensureReportSync(ctx context.Context, vm *v1alpha1.ComputeVM, 
 			"sink":           map[string]any{"adapter": computevm.TerminationSyncAdapter},
 			"direction":      string(v1alpha1.StateSyncDirectionOutbound),
 			"payload":        stored,
-			"idempotencyKey": reportSyncKey(collection, contract.ReceiptUri),
+			"idempotencyKey": reportSyncKey(collection, contract.ReceiptURI),
 			"conflictPolicy": string(v1alpha1.StateSyncConflictSourceWins),
 			"deletionPolicy": string(v1alpha1.StateSyncDeletionRetain),
 		},
@@ -576,18 +576,18 @@ func (s *Service) ensureTerminationSync(ctx context.Context, info contractInfo, 
 	if vm == nil {
 		return "", fmt.Errorf("bidder: the ComputeVM %s does not exist", info.computeVM)
 	}
-	if contract := vm.Spec.Contract; contract == nil || contract.ReceiptUri == "" || contract.SubmitEventUrl == "" {
+	if contract := vm.Spec.Contract; contract == nil || contract.ReceiptURI == "" || contract.SubmitEventURL == "" {
 		submitEventURL := info.submitEventURL
 		vm = vm.DeepCopy()
 		if vm.Spec.Contract == nil {
 			vm.Spec.Contract = &v1alpha1.ComputeVMContract{}
 		}
-		if vm.Spec.Contract.ReceiptUri == "" {
-			vm.Spec.Contract.ReceiptUri = info.receiptURI
-			vm.Spec.Contract.ReceiptCid = info.receiptCID
+		if vm.Spec.Contract.ReceiptURI == "" {
+			vm.Spec.Contract.ReceiptURI = info.receiptURI
+			vm.Spec.Contract.ReceiptCID = info.receiptCID
 		}
-		if vm.Spec.Contract.SubmitEventUrl == "" {
-			vm.Spec.Contract.SubmitEventUrl = submitEventURL
+		if vm.Spec.Contract.SubmitEventURL == "" {
+			vm.Spec.Contract.SubmitEventURL = submitEventURL
 		}
 	}
 	object, err := computevm.TerminationStateSync(vm, s.cfg.Workspace, reason, observedAt, request)
@@ -658,9 +658,9 @@ func (s *Service) acknowledgedTermination(ctx context.Context, name string) *v1a
 	return &v1alpha1.ComputeVMTermination{
 		Reason:     "deleted_on_request",
 		ObservedAt: at,
-		PayloadUri: payloadURI,
+		PayloadURI: payloadURI,
 		PayloadCid: payloadCID,
-		EventUri:   eventURI,
+		EventURI:   eventURI,
 		EventCid:   eventCID,
 	}
 }
@@ -920,7 +920,7 @@ func (s *Service) bidForVM(ctx context.Context, vm *v1alpha1.ComputeVM) (*v1alph
 	if contract := vm.Spec.Contract; contract != nil {
 		for i := range bids {
 			accept := bids[i].Status.Accept
-			if accept != nil && accept.Uri == contract.AcceptUri && accept.Cid == contract.AcceptCid {
+			if accept != nil && accept.URI == contract.AcceptURI && accept.CID == contract.AcceptCID {
 				return &bids[i], nil
 			}
 		}
@@ -938,7 +938,7 @@ func (s *Service) bidForAcceptStatus(ctx context.Context, acceptURI, acceptCID s
 	}
 	for i := range bids {
 		accept := bids[i].Status.Accept
-		if accept != nil && accept.Uri == acceptURI && accept.Cid == acceptCID {
+		if accept != nil && accept.URI == acceptURI && accept.CID == acceptCID {
 			return &bids[i], nil
 		}
 	}
@@ -996,7 +996,7 @@ func contractMatchesAccept(vm *v1alpha1.ComputeVM, payload provisionPayload) boo
 		return false
 	}
 	contract := vm.Spec.Contract
-	return contract.AcceptUri == payload.Accept.URI && contract.AcceptCid == payload.Accept.CID && contract.ReceiptUri != ""
+	return contract.AcceptURI == payload.Accept.URI && contract.AcceptCID == payload.Accept.CID && contract.ReceiptURI != ""
 }
 
 func provisionObservation(vm *v1alpha1.ComputeVM, payload provisionPayload, request statesync.Request, at time.Time) statesync.Observation {
@@ -1013,8 +1013,8 @@ func provisionObservation(vm *v1alpha1.ComputeVM, payload provisionPayload, requ
 		},
 	}
 	if contract := vm.Spec.Contract; contract != nil {
-		observation.Meta["receiptUri"] = contract.ReceiptUri
-		observation.Meta["receiptCid"] = contract.ReceiptCid
+		observation.Meta["receiptUri"] = contract.ReceiptURI
+		observation.Meta["receiptCid"] = contract.ReceiptCID
 	}
 	return observation
 }
@@ -1065,7 +1065,7 @@ func (a *provisionAdapter) Observe(ctx context.Context, request statesync.Reques
 		}
 	}
 	if bid != nil && bid.Status.Terminated != nil {
-		return provisionSettledObservation("terminated:"+bid.Status.Terminated.ReceiptUri, payload, request), nil
+		return provisionSettledObservation("terminated:"+bid.Status.Terminated.ReceiptURI, payload, request), nil
 	}
 	vm, err := a.findVM(ctx, payload, bid)
 	if err != nil {
@@ -1121,10 +1121,10 @@ func (a *provisionAdapter) Apply(ctx context.Context, request statesync.Request)
 		return statesync.Observation{}, errors.New("bidder: the accept is not from the requester that opened the contract")
 	}
 	if terminated := bid.Status.Terminated; terminated != nil {
-		if bid.Status.Accept == nil || bid.Status.Accept.Uri != payload.Accept.URI || bid.Status.Accept.Cid != payload.Accept.CID {
+		if bid.Status.Accept == nil || bid.Status.Accept.URI != payload.Accept.URI || bid.Status.Accept.CID != payload.Accept.CID {
 			return statesync.Observation{}, errors.New("bidder: the bid's contract was released")
 		}
-		return provisionSettledObservation("terminated:"+terminated.ReceiptUri, payload, request), nil
+		return provisionSettledObservation("terminated:"+terminated.ReceiptURI, payload, request), nil
 	}
 	if bid.Status.Phase == v1alpha1.BidPhaseFailed {
 		return statesync.Observation{}, errors.New("bidder: the bid failed: " + bid.Status.Message)
@@ -1199,8 +1199,8 @@ func (a *provisionAdapter) Apply(ctx context.Context, request statesync.Request)
 		return statesync.Observation{}, fmt.Errorf("bidder: writing the receipt: %w", err)
 	}
 	status := cloneBidStatus(bid.Status)
-	if status.Accept == nil || status.Accept.Uri != payload.Accept.URI || status.Accept.Cid != payload.Accept.CID {
-		status.Accept = &v1alpha1.BidRecordRef{Uri: payload.Accept.URI, Cid: payload.Accept.CID}
+	if status.Accept == nil || status.Accept.URI != payload.Accept.URI || status.Accept.CID != payload.Accept.CID {
+		status.Accept = &v1alpha1.BidRecordRef{URI: payload.Accept.URI, CID: payload.Accept.CID}
 		if status.Timings.AcceptedAt == "" {
 			status.Timings.AcceptedAt = now.Format(time.RFC3339)
 		}
@@ -1230,11 +1230,11 @@ func (a *provisionAdapter) Apply(ctx context.Context, request statesync.Request)
 		return statesync.Observation{}, err
 	}
 	contract := v1alpha1.ComputeVMContract{
-		ReceiptUri:     receiptURI,
-		ReceiptCid:     receiptCID,
-		AcceptUri:      payload.Accept.URI,
-		AcceptCid:      payload.Accept.CID,
-		SubmitEventUrl: submitEventURL,
+		ReceiptURI:     receiptURI,
+		ReceiptCID:     receiptCID,
+		AcceptURI:      payload.Accept.URI,
+		AcceptCID:      payload.Accept.CID,
+		SubmitEventURL: submitEventURL,
 		AcceptedAt:     now.Format(time.RFC3339),
 	}
 	if err := service.provider.BindContract(ctx, result.Name, contract); err != nil {
@@ -1272,14 +1272,14 @@ func (a *provisionAdapter) Apply(ctx context.Context, request statesync.Request)
 			if terminated := current.Status.Terminated; terminated != nil {
 				annotations := map[string]string{
 					computevm.ReleaseRequestedAnnotation: terminated.At,
-					computevm.ReleaseRequestAnnotation:   terminated.PayloadUri + "#" + terminated.PayloadCid,
+					computevm.ReleaseRequestAnnotation:   terminated.PayloadURI + "#" + terminated.PayloadCid,
 				}
 				if err := service.vms.PatchAnnotations(ctx, result.Name, annotations); err != nil {
 					return statesync.Observation{}, err
 				}
 				var requestRef *v1alpha1.RecordRef
-				if terminated.PayloadUri != "" {
-					requestRef = &v1alpha1.RecordRef{URI: terminated.PayloadUri, CID: terminated.PayloadCid}
+				if terminated.PayloadURI != "" {
+					requestRef = &v1alpha1.RecordRef{URI: terminated.PayloadURI, CID: terminated.PayloadCid}
 				}
 				observedAt := terminated.At
 				if observedAt == "" {
@@ -1356,7 +1356,7 @@ func (a *releaseAdapter) Observe(ctx context.Context, request statesync.Request)
 	if err != nil {
 		return statesync.Observation{}, err
 	}
-	if bid != nil && bid.Status.Terminated != nil && bid.Status.Terminated.ReceiptUri == payload.ReceiptURI {
+	if bid != nil && bid.Status.Terminated != nil && bid.Status.Terminated.ReceiptURI == payload.ReceiptURI {
 		return releaseSettledObservation(payload, request, ""), nil
 	}
 	return statesync.Observation{Exists: false}, nil

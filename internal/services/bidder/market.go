@@ -399,7 +399,7 @@ func (s *Service) enqueueBid(ctx context.Context, rfpURI, rfpCID, issuer string)
 	bid := &v1alpha1.Bid{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
 		Spec: v1alpha1.BidSpec{
-			Rfp:       v1alpha1.BidRecordRef{Uri: rfpURI, Cid: rfpCID},
+			Rfp:       v1alpha1.BidRecordRef{URI: rfpURI, CID: rfpCID},
 			Requester: issuer,
 			ExpiresAt: now.Add(s.cfg.bidTTL()).Format(time.RFC3339),
 		},
@@ -737,13 +737,13 @@ func (s *Service) bidForAccept(ctx context.Context, accept *market.Accept) (*v1a
 	rkey := lastSegment(accept.Bid.URI)
 	for i := range bids {
 		bid := &bids[i]
-		if bid.Spec.Rfp.Uri != accept.RFP.URI {
+		if bid.Spec.Rfp.URI != accept.RFP.URI {
 			continue
 		}
 		if bid.Name != rkey {
 			continue
 		}
-		if bid.Status.Bid != nil && bid.Status.Bid.Uri != "" && bid.Status.Bid.Uri != accept.Bid.URI {
+		if bid.Status.Bid != nil && bid.Status.Bid.URI != "" && bid.Status.Bid.URI != accept.Bid.URI {
 			continue
 		}
 		return bid, nil
@@ -775,12 +775,12 @@ func (s *Service) localContractForReceipt(ctx context.Context, receiptURI string
 	for i := range list {
 		vm := &list[i]
 		contract := vm.Spec.Contract
-		if contract == nil || contract.ReceiptUri != receiptURI {
+		if contract == nil || contract.ReceiptURI != receiptURI {
 			continue
 		}
-		info := contractInfo{computeVM: vm.Name, receiptURI: contract.ReceiptUri, receiptCID: contract.ReceiptCid,
-			acceptURI: contract.AcceptUri, acceptCID: contract.AcceptCid, acceptAuthor: vm.Spec.Requester.Did,
-			bidName: cached.bidName, submitEventURL: contract.SubmitEventUrl}
+		info := contractInfo{computeVM: vm.Name, receiptURI: contract.ReceiptURI, receiptCID: contract.ReceiptCID,
+			acceptURI: contract.AcceptURI, acceptCID: contract.AcceptCID, acceptAuthor: vm.Spec.Requester.Did,
+			bidName: cached.bidName, submitEventURL: contract.SubmitEventURL}
 		s.contracts.Store(receiptURI, info)
 		return info, vm, true, nil
 	}
@@ -797,7 +797,7 @@ func (s *Service) bidTerminatedByReceipt(ctx context.Context, receiptURI string)
 	}
 	for i := range bids {
 		terminated := bids[i].Status.Terminated
-		if terminated == nil || terminated.ReceiptUri != receiptURI {
+		if terminated == nil || terminated.ReceiptURI != receiptURI {
 			continue
 		}
 		condition := apimeta.FindStatusCondition(bids[i].Status.Conditions, BidConditionReleasing)

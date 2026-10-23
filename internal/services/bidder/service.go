@@ -291,7 +291,7 @@ func (s *Service) prepare(ctx context.Context) error {
 			s.log.Warn("the bidder runs without its kcp stores", "err", err)
 		}
 	}
-	s.dir = ingress.NewDirectory(s.cfg.Network.PlcDirectoryUrl)
+	s.dir = ingress.NewDirectory(s.cfg.Network.PLCDirectoryURL)
 	if err := s.resolveIdentity(ctx); err != nil {
 		s.log.Warn("the bidder identity is not resolved yet", "err", err)
 	}
@@ -363,7 +363,7 @@ func (s *Service) prepare(ctx context.Context) error {
 		signer:                  s.attestation,
 		did:                     s.did,
 		endpointURL:             s.offeringEndpoint(),
-		relays:                  append([]string(nil), s.cfg.Network.RelayUrls...),
+		relays:                  append([]string(nil), s.cfg.Network.RelayURLs...),
 		offeringRefresh:         s.cfg.OfferingRefresh,
 		offeringRefreshDisabled: s.cfg.OfferingRefreshDisabled,
 		heartbeat:               s.cfg.Heartbeat,
@@ -380,8 +380,8 @@ func (s *Service) prepare(ctx context.Context) error {
 var exposureGVR = exposurev1alpha1.ExposureGVR
 
 func (s *Service) registerPDSWithRelays(ctx context.Context) {
-	if s.cfg.Deps.KCP == nil || len(s.cfg.Network.RelayUrls) == 0 {
-		s.log.Warn("the bidder cannot register its PDS with the relay", "kcp", s.cfg.Deps.KCP != nil, "relays", len(s.cfg.Network.RelayUrls))
+	if s.cfg.Deps.KCP == nil || len(s.cfg.Network.RelayURLs) == 0 {
+		s.log.Warn("the bidder cannot register its PDS with the relay", "kcp", s.cfg.Deps.KCP != nil, "relays", len(s.cfg.Network.RelayURLs))
 		return
 	}
 	ticker := time.NewTicker(10 * time.Second)
@@ -415,7 +415,7 @@ func (s *Service) registerPDSWithRelay(ctx context.Context) {
 		s.log.Warn("the bidder cannot read its PDS Exposure", "err", err.Error())
 		return
 	}
-	raw, _, _ := unstructured.NestedString(u.Object, "status", "url")
+	raw, _, _ := unstructured.NestedString(u.Object, "status", "address")
 	parsed, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || parsed.Host == "" {
 		s.log.Warn("the bidder PDS Exposure has no URL", "url", raw)
@@ -423,7 +423,7 @@ func (s *Service) registerPDSWithRelay(ctx context.Context) {
 	}
 	body := strings.NewReader(fmt.Sprintf(`{"hostname":%q}`, parsed.Host))
 	registered := false
-	for _, relayURL := range s.cfg.Network.RelayUrls {
+	for _, relayURL := range s.cfg.Network.RelayURLs {
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 			strings.TrimRight(relayURL, "/")+"/xrpc/com.atproto.sync.requestCrawl", body)
 		if err != nil {
@@ -498,7 +498,7 @@ func (s *Service) resolveIdentity(ctx context.Context) error {
 		s.did = obj.Status.Did
 	}
 	if s.cfg.PDSURL == "" {
-		s.cfg.PDSURL = obj.Status.PdsUrl
+		s.cfg.PDSURL = obj.Status.PdsURL
 	}
 	if s.cfg.Handle == "" {
 		s.cfg.Handle = obj.Status.Handle
@@ -740,7 +740,7 @@ func (s *Service) guestExposureURL(ctx context.Context) string {
 	if err != nil {
 		return ""
 	}
-	raw, _, _ := unstructured.NestedString(u.Object, "status", "url")
+	raw, _, _ := unstructured.NestedString(u.Object, "status", "address")
 	raw = strings.TrimRight(strings.TrimSpace(raw), "/")
 	if !isAbsoluteURL(raw) {
 		return ""

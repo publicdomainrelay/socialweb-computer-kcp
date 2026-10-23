@@ -2,6 +2,8 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 type EventStream struct {
@@ -32,13 +34,13 @@ type EventStreamSpec struct {
 type EventStreamSource struct {
 	Kind EventStreamSourceKind `json:"kind"`
 
-	PDSRef *EventStreamRef `json:"pdsRef,omitempty"`
+	PDSRef *commonv1.ObjectRef `json:"pdsRef,omitempty"`
 
-	RelayRef *EventStreamRef `json:"relayRef,omitempty"`
+	RelayRef *commonv1.ObjectRef `json:"relayRef,omitempty"`
 
-	RelayUrls []string `json:"relayUrls,omitempty"`
+	RelayURLs []string `json:"relayUrls,omitempty" apigen:"userEndpoint"`
 
-	JetstreamUrls []string `json:"jetstreamUrls,omitempty"`
+	JetstreamURLs []string `json:"jetstreamUrls,omitempty" apigen:"userEndpoint"`
 
 	Collections []string `json:"collections,omitempty"`
 
@@ -54,14 +56,6 @@ const (
 
 	EventStreamSourceJetstream EventStreamSourceKind = "jetstream"
 )
-
-type EventStreamRef struct {
-	Workspace string `json:"workspace,omitempty"`
-
-	Kind string `json:"kind,omitempty"`
-
-	Name string `json:"name"`
-}
 
 type EventStreamSink struct {
 	Kind EventStreamSinkKind `json:"kind"`

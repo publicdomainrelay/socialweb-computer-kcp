@@ -11,21 +11,21 @@ spec:
         crd: {}
     - group: socialweb.computer
       name: nodes
-      schema: v1alpha1-1.nodes.socialweb.computer
+      schema: v1alpha1-2.nodes.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer
       name: nodeclaims
-      schema: v1alpha1-5.nodeclaims.socialweb.computer
+      schema: v1alpha1-6.nodeclaims.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer
       name: clusterlinks
-      schema: v1alpha1-1.clusterlinks.socialweb.computer
+      schema: v1alpha1-2.clusterlinks.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer
       name: clusterclientcertificates
-      schema: v1alpha1-1.clusterclientcertificates.socialweb.computer
+      schema: v1alpha1-2.clusterclientcertificates.socialweb.computer
       storage:
         crd: {}

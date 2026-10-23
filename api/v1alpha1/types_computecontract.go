@@ -2,6 +2,8 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 type ComputeContract struct {
@@ -36,7 +38,7 @@ type ComputeContractSpec struct {
 
 	VMReadyTimeoutSec int `json:"vmReadyTimeoutSec,omitempty"`
 
-	SecretsRef *VaultRef `json:"secretsRef,omitempty"`
+	SecretsRef *commonv1.SecretRef `json:"secretsRef,omitempty"`
 
 	Release bool `json:"release,omitempty"`
 
@@ -98,7 +100,7 @@ type ContractChosen struct {
 }
 
 type ComputeContractNodeJoin struct {
-	Cluster string `json:"cluster"`
+	ClusterRef commonv1.LocalObjectRef `json:"clusterRef"`
 
 	Meshd *ComputeContractMeshd `json:"meshd,omitempty"`
 
@@ -166,7 +168,7 @@ type ComputeContractStatus struct {
 
 	Message string `json:"message,omitempty"`
 
-	SecretsUrl string `json:"secretsUrl,omitempty"`
+	SecretsURL string `json:"secretsUrl,omitempty"`
 
 	SecretsFetchedAt string `json:"secretsFetchedAt,omitempty"`
 

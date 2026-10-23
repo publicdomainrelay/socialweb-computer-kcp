@@ -160,9 +160,9 @@ func (ctl *Controller) pdsExposureURLOf(ctx context.Context, ws, name, suffix st
 		return raw
 	}
 	var o exposurev1alpha1.Exposure
-	if err := fromUnstructured(u, &o); err == nil && o.Status.URL != "" {
-		appPdsPublicURLs.Store(key, o.Status.URL)
-		return o.Status.URL
+	if err := fromUnstructured(u, &o); err == nil && o.Status.Address != "" {
+		appPdsPublicURLs.Store(key, o.Status.Address)
+		return o.Status.Address
 	}
 	value, _ := appPdsPublicURLs.Load(key)
 	raw, _ := value.(string)
@@ -173,7 +173,7 @@ func appPdsSpec(stateRoot string, network *v1alpha1.MarketNetworkValue, handle s
 	hostnames []string, suspend bool, publicURL string, requireIngress bool, ingressRef *v1alpha1.ComponentRef) (v1alpha1.PdsSpec, error) {
 	plcURL := ""
 	if network != nil {
-		plcURL = strings.TrimSpace(network.PlcDirectoryUrl)
+		plcURL = strings.TrimSpace(network.PLCDirectoryURL)
 	}
 	if plcURL == "" {
 		return v1alpha1.PdsSpec{}, errors.New("appctl: the app-owned Pds needs the network value's plcDirectoryUrl; no PLC URL is available")
@@ -407,7 +407,7 @@ func (ctl *Controller) recordPdsIdentity(ctx context.Context, ws, name, handle, 
 			st.Handle = handle
 		}
 		if pdsURL != "" {
-			st.PdsUrl = pdsURL
+			st.PdsURL = pdsURL
 		}
 		approved, _, _ := unstructured.NestedStringSlice(u.Object, "spec", "approvedAssociations")
 		for _, did := range approved {
@@ -586,11 +586,11 @@ func (ctl *Controller) bidderVault(ctx context.Context, spec v1alpha1.MarketBidd
 		if err != nil {
 			return v, err
 		}
-		did, err := EnsurePdsAccount(ctx, spec.Identity.PdsUrl, spec.Network.CaBundleRef, spec.Identity.Handle, password)
+		did, err := EnsurePdsAccount(ctx, spec.Identity.PdsURL, spec.Network.CaBundleRef, spec.Identity.Handle, password)
 		if err != nil {
 			return v, err
 		}
-		ctl.c.log().Info("the bidder's PDS account", "handle", spec.Identity.Handle, "pds", spec.Identity.PdsUrl, "did", did)
+		ctl.c.log().Info("the bidder's PDS account", "handle", spec.Identity.Handle, "pds", spec.Identity.PdsURL, "did", did)
 		vault = v
 	} else {
 		if _, _, _, err := ctl.vaultRefs(ctx, BidderVaultServer, BidderVaultClient); err != nil {

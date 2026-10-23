@@ -68,9 +68,9 @@ func SshGatewayValues(spec v1alpha1.SshGatewaySpec, stateDir string, l devinstan
 	if n := spec.Network; n != nil {
 		v.CABundle = n.CaBundleRef
 		for _, kv := range [][2]string{
-			{"--plc-directory-url", n.PlcDirectoryUrl},
+			{"--plc-directory-url", n.PLCDirectoryURL},
 			{"--ingress-proxy-host", n.IngressProxyHost},
-			{"--relay-url", strings.Join(n.RelayUrls, ",")},
+			{"--relay-url", strings.Join(n.RelayURLs, ",")},
 			{"--network-hosts", NetworkHostsArg(n.Hosts)},
 		} {
 			if kv[1] != "" {
@@ -216,8 +216,8 @@ func sshGatewayAccountIdentity(o v1alpha1.SshGateway) v1alpha1.ApplicationIdenti
 	if id.Handle == "" {
 		id.Handle = optionValue(o.Spec.Options, "app-handle")
 	}
-	if id.PdsUrl == "" {
-		id.PdsUrl = optionValue(o.Spec.Options, "atproto-pds-url")
+	if id.PdsURL == "" {
+		id.PdsURL = optionValue(o.Spec.Options, "atproto-pds-url")
 	}
 	return id
 }

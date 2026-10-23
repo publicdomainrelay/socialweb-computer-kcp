@@ -2,6 +2,8 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 type VaultCredential struct {
@@ -20,11 +22,7 @@ type VaultCredentialList struct {
 }
 
 type VaultCredentialSpec struct {
-	Server string `json:"server"`
-
-	Mount string `json:"mount"`
-
-	Path string `json:"path"`
+	commonv1.SecretRef `json:",inline"`
 }
 
 type VaultCredentialStatus struct {

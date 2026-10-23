@@ -1,11 +1,5 @@
 package v1alpha1
 
-type PolicyStrongRef struct {
-	URI string `json:"uri"`
-
-	CID string `json:"cid"`
-}
-
 type PolicyCacheEncoding string
 
 const (

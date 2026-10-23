@@ -265,10 +265,10 @@ func reportConditions(st *v1alpha1.ComputeVMStatus, gen int64) {
 		setCondition(st, gen, v1alpha1.ConditionGuestReported, metav1.ConditionFalse, "AwaitingGuestReport",
 			"the guest has not reported its on-network address")
 	}
-	if m != nil && m.OnNetworkUri != "" {
-		msg := "the market holds the guest's on-network report at " + m.OnNetworkUri
-		if m.HostKeysUri != "" {
-			msg += " and its host-key report at " + m.HostKeysUri
+	if m != nil && m.OnNetworkURI != "" {
+		msg := "the market holds the guest's on-network report at " + m.OnNetworkURI
+		if m.HostKeysURI != "" {
+			msg += " and its host-key report at " + m.HostKeysURI
 		}
 		setCondition(st, gen, v1alpha1.ConditionMarketReported, metav1.ConditionTrue, "MarketReported", msg)
 		return
@@ -706,7 +706,7 @@ func (ct *Controller) markTermination(ctx context.Context, o v1alpha1.ComputeVM,
 
 func terminationReportable(o v1alpha1.ComputeVM) bool {
 	contract := o.Spec.Contract
-	return contract != nil && contract.ReceiptUri != "" && contract.ReceiptCid != ""
+	return contract != nil && contract.ReceiptURI != "" && contract.ReceiptCID != ""
 }
 
 func (ct *Controller) reconcileReleaseRequest(ctx context.Context, o v1alpha1.ComputeVM) error {

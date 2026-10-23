@@ -405,7 +405,7 @@ func (c *Controller) reconcile(ctx context.Context, dyn dynamic.Interface, u *un
 		setCondition(&status, gen, ConditionBidderReady, metav1.ConditionFalse, "BidderNotReady", message)
 	}
 
-	offering := strings.TrimSpace(presence.Spec.OfferingUri)
+	offering := strings.TrimSpace(presence.Spec.OfferingURI)
 	did := bidderDID(bidder)
 	if offering != "" {
 		aturi, err := syntax.ParseATURI(offering)

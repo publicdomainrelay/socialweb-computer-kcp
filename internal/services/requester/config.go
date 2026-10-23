@@ -903,8 +903,8 @@ func trustedHosts(network v1alpha1.MarketNetworkValue) []string {
 	add(network.IngressProxyHost)
 	add(network.GuestTlsUrl)
 	add(network.QrOrigin)
-	add(network.PlcDirectoryUrl)
-	for _, raw := range network.RelayUrls {
+	add(network.PLCDirectoryURL)
+	for _, raw := range network.RelayURLs {
 		add(raw)
 	}
 	return out

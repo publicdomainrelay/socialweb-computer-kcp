@@ -97,10 +97,10 @@ func RequesterValues(spec v1alpha1.MarketRequesterSpec, stateDir string) (manife
 	if n := spec.Network; n != nil {
 		v.CABundle = n.CaBundleRef
 		for _, kv := range [][2]string{
-			{"--plc-directory-url", n.PlcDirectoryUrl},
+			{"--plc-directory-url", n.PLCDirectoryURL},
 			{"--ingress-proxy-host", n.IngressProxyHost},
-			{"--relay-url", strings.Join(n.RelayUrls, ",")},
-			{"--firehose-url", strings.Join(n.FirehoseUrls, ",")},
+			{"--relay-url", strings.Join(n.RelayURLs, ",")},
+			{"--firehose-url", strings.Join(n.FirehoseURLs, ",")},
 			{"--qr-origin", n.QrOrigin},
 		} {
 			if kv[1] != "" {
@@ -256,7 +256,7 @@ func (ctl *Controller) requesterMarketURL(ctx context.Context, ws string) string
 	if err != nil {
 		return ""
 	}
-	url, _, _ := unstructured.NestedString(u.Object, "status", "url")
+	url, _, _ := unstructured.NestedString(u.Object, "status", "address")
 	return strings.TrimRight(strings.TrimSpace(url), "/")
 }
 
@@ -325,7 +325,7 @@ func (ctl *Controller) reconcileRequesterAccount(ctx context.Context, u *unstruc
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for its existing-account MarketIdentity to report a did"
 		return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
 	}
-	if plan.Mode == v1alpha1.MarketIdentityModePdsAccount && strings.TrimSpace(id.Status.PdsUrl) == "" {
+	if plan.Mode == v1alpha1.MarketIdentityModePdsAccount && strings.TrimSpace(id.Status.PdsURL) == "" {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, "the existing-account MarketIdentity reports no pdsUrl; it fails closed"
 		return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
 	}
@@ -347,7 +347,7 @@ func (ctl *Controller) reconcileRequesterAccount(ctx context.Context, u *unstruc
 	if err := ctl.pruneDesired(ctx, owner, desired); err != nil {
 		return err
 	}
-	ctl.ensureAccountRepo(ctx, ctl.c.workspace(), RequesterIdentity, plan, id.Status.Did, id.Status.PdsUrl)
+	ctl.ensureAccountRepo(ctx, ctl.c.workspace(), RequesterIdentity, plan, id.Status.Did, id.Status.PdsURL)
 	snap, err := ctl.componentSnapshot(ctx, owner)
 	if err != nil {
 		return err

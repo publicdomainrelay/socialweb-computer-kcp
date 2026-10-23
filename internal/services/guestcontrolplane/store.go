@@ -112,8 +112,8 @@ func (v *KCPVMs) RecordMarket(ctx context.Context, name string, patch v1alpha1.C
 	if reflect.DeepEqual(current.Status.Market, &merged) {
 		return nil
 	}
-	if current.Status.Market == nil && merged.OnNetworkUri == "" && merged.Address == "" && len(merged.HostKeys) == 0 &&
-		merged.HostKeysUri == "" && merged.ReportedAt == "" {
+	if current.Status.Market == nil && merged.OnNetworkURI == "" && merged.Address == "" && len(merged.HostKeys) == 0 &&
+		merged.HostKeysURI == "" && merged.ReportedAt == "" {
 		return nil
 	}
 	status, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&merged)

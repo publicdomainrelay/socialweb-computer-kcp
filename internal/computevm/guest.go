@@ -107,7 +107,7 @@ func (g *GuestRecord) OnNetwork(ctx context.Context, name, acceptURI, acceptCID,
 	if err != nil {
 		return err
 	}
-	if c := o.Spec.Contract; c != nil && c.AcceptUri != "" && (c.AcceptUri != acceptURI || c.AcceptCid != acceptCID) {
+	if c := o.Spec.Contract; c != nil && c.AcceptURI != "" && (c.AcceptURI != acceptURI || c.AcceptCID != acceptCID) {
 		return ErrUnknownAccept
 	}
 	if m := o.Status.Market; m != nil && m.Address == address && m.ReportedAt != "" {

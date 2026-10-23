@@ -124,15 +124,15 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 	if decoded.Network != nil {
 		network := *decoded.Network
 		cfg.Network = &network
-		cfg.PLCURL = strings.TrimRight(strings.TrimSpace(decoded.Network.PlcDirectoryUrl), "/")
+		cfg.PLCURL = strings.TrimRight(strings.TrimSpace(decoded.Network.PLCDirectoryURL), "/")
 		if cfg.IngressProxyHost == "" {
 			cfg.IngressProxyHost = strings.TrimSpace(decoded.Network.IngressProxyHost)
 		}
 		if cfg.Hostname == "" {
 			cfg.Hostname = hostnameOnly(strings.TrimSpace(decoded.Network.IngressProxyHost))
 		}
-		if cfg.RelayURL == "" && len(decoded.Network.RelayUrls) > 0 {
-			cfg.RelayURL = strings.TrimSpace(decoded.Network.RelayUrls[0])
+		if cfg.RelayURL == "" && len(decoded.Network.RelayURLs) > 0 {
+			cfg.RelayURL = strings.TrimSpace(decoded.Network.RelayURLs[0])
 		}
 	}
 	if cfg.Hostname == "" {

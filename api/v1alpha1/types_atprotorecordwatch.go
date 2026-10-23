@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 type AtprotoRecordWatch struct {
@@ -22,7 +24,7 @@ type AtprotoRecordWatchList struct {
 }
 
 type AtprotoRecordWatchSpec struct {
-	RepoRef *RepoRef `json:"repoRef,omitempty"`
+	RepoRef *commonv1.ObjectRef `json:"repoRef,omitempty"`
 
 	Repo string `json:"repo,omitempty"`
 
@@ -34,7 +36,7 @@ type AtprotoRecordWatchSpec struct {
 }
 
 type AtprotoRecordMatch struct {
-	FieldPath string `json:"fieldPath"`
+	FieldPath string `json:"fieldPath" apigen:"userEndpoint"`
 
 	Value string `json:"value,omitempty"`
 
@@ -50,7 +52,7 @@ type AtprotoValueFrom struct {
 
 	Name string `json:"name"`
 
-	FieldPath string `json:"fieldPath"`
+	FieldPath string `json:"fieldPath" apigen:"userEndpoint"`
 
 	Workspace string `json:"workspace,omitempty"`
 
@@ -58,9 +60,9 @@ type AtprotoValueFrom struct {
 }
 
 type AtprotoRecordWatchSource struct {
-	RelayUrls []string `json:"relayUrls,omitempty"`
+	RelayURLs []string `json:"relayUrls,omitempty" apigen:"userEndpoint"`
 
-	JetstreamUrls []string `json:"jetstreamUrls,omitempty"`
+	JetstreamURLs []string `json:"jetstreamUrls,omitempty" apigen:"userEndpoint"`
 }
 
 type WatchedRecord struct {
@@ -68,7 +70,7 @@ type WatchedRecord struct {
 
 	Handle string `json:"handle,omitempty"`
 
-	Uri string `json:"uri"`
+	URI string `json:"uri"`
 
 	Cid string `json:"cid,omitempty"`
 

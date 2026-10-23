@@ -71,7 +71,7 @@ func (c *Controller) pdsAccountCredential(ctx context.Context, id *v1alpha1.Mark
 	credential := pdsAccountCredential{
 		handle:   firstNonEmpty(id.Spec.Handle, firstString(data, "handle", "identifier", "user", "username")),
 		password: firstString(data, "password", "appPassword", "app_password"),
-		pdsURL:   firstNonEmpty(id.Spec.PdsUrl, firstString(data, "pdsUrl", "pds_url", "pds")),
+		pdsURL:   firstNonEmpty(id.Spec.PdsURL, firstString(data, "pdsUrl", "pds_url", "pds")),
 	}
 	switch {
 	case credential.handle == "":

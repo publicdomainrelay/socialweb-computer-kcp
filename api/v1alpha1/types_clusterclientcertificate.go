@@ -2,6 +2,8 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 type ClusterClientCertificate struct {
@@ -20,7 +22,7 @@ type ClusterClientCertificateList struct {
 }
 
 type ClusterClientCertificateSpec struct {
-	Cluster string `json:"cluster"`
+	ClusterRef commonv1.LocalObjectRef `json:"clusterRef"`
 
 	Did string `json:"did"`
 

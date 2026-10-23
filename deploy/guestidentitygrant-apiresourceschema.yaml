@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-2.guestidentitygrants.socialweb.computer
+  name: v1alpha1-3.guestidentitygrants.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -28,8 +28,14 @@ spec:
           spec:
             type: object
             properties:
-              computevm:
-                type: string
+              computeVMRef:
+                type: object
+                properties:
+                  name:
+                    type: string
+                    maxLength: 253
+                required:
+                  - name
               entity:
                 type: string
               api:
@@ -53,7 +59,7 @@ spec:
                     - name
                     - value
             required:
-              - computevm
+              - computeVMRef
               - entity
               - api
               - actx
@@ -83,7 +89,7 @@ spec:
       additionalPrinterColumns:
         - name: ComputeVM
           type: string
-          jsonPath: .spec.computevm
+          jsonPath: .spec.computeVMRef.name
         - name: API
           type: string
           jsonPath: .spec.api

@@ -93,8 +93,8 @@ func (g *gateway) defaults(e *env, rec devinstance.Record, cert, key string) err
 	e.set("SOCIALWEB_GATEWAY_NODECLAIM_AGENT", appctl.WebAppAccountRef(g.ws))
 	e.dflt("SOCIALWEB_GATEWAY_ADDR", DefaultAddress)
 	e.dflt("SOCIALWEB_GATEWAY_AUDIENCES", DefaultAudience)
-	if n := g.c.Spec.Network; n != nil && n.PlcDirectoryUrl != "" {
-		e.dflt("SOCIALWEB_GATEWAY_PLC_URL", n.PlcDirectoryUrl)
+	if n := g.c.Spec.Network; n != nil && n.PLCDirectoryURL != "" {
+		e.dflt("SOCIALWEB_GATEWAY_PLC_URL", n.PLCDirectoryURL)
 	}
 	e.dflt("SOCIALWEB_GATEWAY_PLC_URL", DefaultPLC)
 	e.set("SOCIALWEB_CLUSTERPROVIDER_UNIT_PREFIX", g.l.Names().HostProcessPrefix())

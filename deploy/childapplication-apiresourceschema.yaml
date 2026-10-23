@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-1.childapplications.socialweb.computer
+  name: v1alpha1-2.childapplications.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -28,8 +28,14 @@ spec:
           spec:
             type: object
             properties:
-              network:
-                type: string
+              networkRef:
+                type: object
+                properties:
+                  name:
+                    type: string
+                    maxLength: 253
+                required:
+                  - name
               app:
                 type: string
               profile:
@@ -37,7 +43,7 @@ spec:
               placement:
                 type: string
             required:
-              - network
+              - networkRef
               - app
           status:
             type: object
@@ -72,7 +78,7 @@ spec:
       additionalPrinterColumns:
         - name: Network
           type: string
-          jsonPath: .spec.network
+          jsonPath: .spec.networkRef.name
         - name: App
           type: string
           jsonPath: .spec.app

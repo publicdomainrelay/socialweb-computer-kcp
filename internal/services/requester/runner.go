@@ -77,7 +77,7 @@ func newContractRunner(s *Service, contract v1alpha1.ComputeContract) *contractR
 		r.resumed = recordedStage(contract.Status.Contract)
 	}
 	r.nodeJoin = contract.Spec.NodeJoin
-	r.secretsURL = contract.Status.SecretsUrl
+	r.secretsURL = contract.Status.SecretsURL
 	r.secretsFetchedAt = contract.Status.SecretsFetchedAt
 	if contract.Status.Grant != nil {
 		grant := *contract.Status.Grant
@@ -90,7 +90,7 @@ func recordedStage(state *v1alpha1.NodeClaimContract) bool {
 	if state == nil {
 		return false
 	}
-	return state.VMUri != "" || state.RFPUri != "" || state.AcceptUri != "" || state.ReceiptUri != "" || state.Release != nil
+	return state.VMURI != "" || state.RFPURI != "" || state.AcceptURI != "" || state.ReceiptURI != "" || state.Release != nil
 }
 
 func (r *contractRunner) Update(contract *v1alpha1.ComputeContract) {
@@ -322,11 +322,11 @@ func (r *contractRunner) requestOnce(ctx context.Context) (bool, error) {
 		if err != nil {
 			return false, fmt.Errorf("create the compute.vm record: %w", err)
 		}
-		state.VMUri = payload.URI
+		state.VMURI = payload.URI
 		state.Payload = &v1alpha1.RecordRef{URI: payload.URI, CID: payload.CID}
 		state.Phase = v1alpha1.ContractRFPSubmitted
 	} else {
-		state.VMUri = state.Payload.URI
+		state.VMURI = state.Payload.URI
 	}
 
 	r.step(ctx, "creatingRfp", 1)
@@ -371,7 +371,7 @@ func (r *contractRunner) requestOnce(ctx context.Context) (bool, error) {
 		if err != nil {
 			return false, fmt.Errorf("create the market.rfp record: %w", err)
 		}
-		state.RFPUri = rfp.URI
+		state.RFPURI = rfp.URI
 		state.RFP = &v1alpha1.RecordRef{URI: rfp.URI, CID: rfp.CID}
 		state.Timestamps.RFPSubmitted = r.svc.nowISO()
 		rfpURI, rfpCID = rfp.URI, rfp.CID
@@ -498,7 +498,7 @@ func (r *contractRunner) requestOnce(ctx context.Context) (bool, error) {
 	state.Winner = &v1alpha1.ContractWinner{DID: winner.DID}
 	state.Bids = intPtr(len(allBids))
 	state.Timestamps.WinnerSelected = r.svc.nowISO()
-	state.AcceptPending = &v1alpha1.ContractAcceptPending{BidUri: winner.URI}
+	state.AcceptPending = &v1alpha1.ContractAcceptPending{BidURI: winner.URI}
 	r.writeStatus(ctx, v1alpha1.ComputeContractRequesting, "the winner is selected; accepting", state, allBids, chosen, false, "accepting", 1)
 
 	acceptRKey := sessionRKey("accept", r.svc.cfg.RepoDID, r.name, rfpURI, rfpCID, winner.URI, winner.CID)
@@ -521,9 +521,9 @@ func (r *contractRunner) requestOnce(ctx context.Context) (bool, error) {
 			return false, fmt.Errorf("create the market.accept record: %w", err)
 		}
 	}
-	state.AcceptUri = accept.URI
+	state.AcceptURI = accept.URI
 	state.Accept = &v1alpha1.RecordRef{URI: accept.URI, CID: accept.CID}
-	state.AcceptPending = &v1alpha1.ContractAcceptPending{BidUri: winner.URI}
+	state.AcceptPending = &v1alpha1.ContractAcceptPending{BidURI: winner.URI}
 	state.Phase = v1alpha1.ContractAccepted
 	state.Timestamps.Accepted = r.svc.nowISO()
 	r.writeStatus(ctx, v1alpha1.ComputeContractRequesting, "the accept is submitted; waiting for the receipt", state, allBids, chosen, false, "awaitingReceipt", 1)
@@ -1229,7 +1229,7 @@ func (r *contractRunner) writeStatus(ctx context.Context, phase v1alpha1.Compute
 		status.Contract = cloneNodeClaimContract(state)
 	}
 	if url := r.secretsURLValue(); url != "" {
-		status.SecretsUrl = url
+		status.SecretsURL = url
 	}
 	if fetched := r.secretsFetched(); fetched != "" {
 		status.SecretsFetchedAt = fetched

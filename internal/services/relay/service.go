@@ -109,7 +109,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 	if decoded.Network != nil {
 		network := *decoded.Network
 		cfg.Network = &network
-		cfg.PLCURL = strings.TrimRight(strings.TrimSpace(decoded.Network.PlcDirectoryUrl), "/")
+		cfg.PLCURL = strings.TrimRight(strings.TrimSpace(decoded.Network.PLCDirectoryURL), "/")
 		cfg.InsecureHTTP = strings.HasPrefix(strings.ToLower(cfg.PLCURL), "http://")
 	}
 	if decoded.Storage != nil && decoded.Storage.DataDir != "" {

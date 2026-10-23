@@ -2,6 +2,8 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 type NodeClaim struct {
@@ -20,7 +22,7 @@ type NodeClaimList struct {
 }
 
 type NodeClaimSpec struct {
-	Cluster string `json:"cluster"`
+	ClusterRef commonv1.LocalObjectRef `json:"clusterRef"`
 
 	NodeName string `json:"nodeName"`
 
@@ -30,11 +32,11 @@ type NodeClaimSpec struct {
 
 	AdvertiseAddress string `json:"advertiseAddress"`
 
-	TokenFile string `json:"tokenFile"`
+	TokenFile string `json:"tokenFile" apigen:"userEndpoint"`
 
-	NodePasswordFile string `json:"nodePasswordFile"`
+	NodePasswordFile string `json:"nodePasswordFile" apigen:"userEndpoint"`
 
-	ServerCAFile string `json:"serverCAFile"`
+	ServerCAFile string `json:"serverCAFile" apigen:"userEndpoint"`
 
 	DenyBidderDids []string `json:"denyBidderDids,omitempty"`
 }
@@ -62,13 +64,13 @@ const (
 )
 
 type NodeClaimContract struct {
-	VMUri string `json:"vmUri,omitempty"`
+	VMURI string `json:"vmUri,omitempty"`
 
-	RFPUri string `json:"rfpUri,omitempty"`
+	RFPURI string `json:"rfpUri,omitempty"`
 
-	AcceptUri string `json:"acceptUri,omitempty"`
+	AcceptURI string `json:"acceptUri,omitempty"`
 
-	ReceiptUri string `json:"receiptUri,omitempty"`
+	ReceiptURI string `json:"receiptUri,omitempty"`
 
 	ReceiptCid string `json:"receiptCid,omitempty"`
 
@@ -84,21 +86,21 @@ type NodeClaimContract struct {
 
 	MarketDid string `json:"marketDid,omitempty"`
 
-	Payload *RecordRef `json:"payload,omitempty"`
+	Payload *commonv1.StrongRef `json:"payload,omitempty"`
 
-	RFP *RecordRef `json:"rfp,omitempty"`
+	RFP *commonv1.StrongRef `json:"rfp,omitempty"`
 
-	Policy *RecordRef `json:"policy,omitempty"`
+	Policy *commonv1.StrongRef `json:"policy,omitempty"`
 
-	Bid *RecordRef `json:"bid,omitempty"`
+	Bid *commonv1.StrongRef `json:"bid,omitempty"`
 
 	Winner *ContractWinner `json:"winner,omitempty"`
 
 	AcceptPending *ContractAcceptPending `json:"acceptPending,omitempty"`
 
-	Accept *RecordRef `json:"accept,omitempty"`
+	Accept *commonv1.StrongRef `json:"accept,omitempty"`
 
-	Receipt *RecordRef `json:"receipt,omitempty"`
+	Receipt *commonv1.StrongRef `json:"receipt,omitempty"`
 
 	ReceiptOk *bool `json:"receiptOk,omitempty"`
 
@@ -117,12 +119,6 @@ type NodeClaimContract struct {
 	Error string `json:"error,omitempty"`
 
 	Timestamps *ContractTimestamps `json:"timestamps,omitempty"`
-}
-
-type RecordRef struct {
-	URI string `json:"uri"`
-
-	CID string `json:"cid"`
 }
 
 type ContractPhase string
@@ -168,7 +164,7 @@ type ContractWinner struct {
 }
 
 type ContractAcceptPending struct {
-	BidUri string `json:"bidUri"`
+	BidURI string `json:"bidUri"`
 }
 
 type ContractTermination struct {
@@ -178,11 +174,11 @@ type ContractTermination struct {
 
 	ObservedAt string `json:"observedAt"`
 
-	Event RecordRef `json:"event"`
+	Event commonv1.StrongRef `json:"event"`
 
-	Payload RecordRef `json:"payload"`
+	Payload commonv1.StrongRef `json:"payload"`
 
-	Request *RecordRef `json:"request,omitempty"`
+	Request *commonv1.StrongRef `json:"request,omitempty"`
 }
 
 type ContractHostKey struct {
@@ -198,15 +194,15 @@ type ContractHostKeys struct {
 
 	ObservedAt string `json:"observedAt"`
 
-	Event RecordRef `json:"event"`
+	Event commonv1.StrongRef `json:"event"`
 
-	Payload RecordRef `json:"payload"`
+	Payload commonv1.StrongRef `json:"payload"`
 }
 
 type ContractRelease struct {
-	Event RecordRef `json:"event"`
+	Event commonv1.StrongRef `json:"event"`
 
-	Payload RecordRef `json:"payload"`
+	Payload commonv1.StrongRef `json:"payload"`
 
 	OK bool `json:"ok"`
 

@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-1.atprotoidentities.socialweb.computer
+  name: v1alpha1-2.atprotoidentities.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -35,8 +35,14 @@ spec:
                 enum:
                   - Account
                   - Cluster
-              cluster:
-                type: string
+              clusterRef:
+                type: object
+                properties:
+                  name:
+                    type: string
+                    maxLength: 253
+                required:
+                  - name
               revoked:
                 type: boolean
             required:

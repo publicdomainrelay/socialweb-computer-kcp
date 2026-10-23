@@ -667,10 +667,10 @@ func (s *Service) provisionSession(ctx context.Context, vmName, policyName strin
 	}
 	state := &v1alpha1.NodeClaimContract{
 		VMName:       vmName,
-		VMUri:        payload.URI,
-		RFPUri:       rfp.URI,
-		AcceptUri:    accept.URI,
-		ReceiptUri:   receipt.URI,
+		VMURI:        payload.URI,
+		RFPURI:       rfp.URI,
+		AcceptURI:    accept.URI,
+		ReceiptURI:   receipt.URI,
 		ReceiptCid:   receipt.CID,
 		RequesterDid: s.callbackDID(),
 		MarketDid:    s.cfg.MarketDID,

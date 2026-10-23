@@ -356,7 +356,7 @@ func MarketDeclined(claim *v1alpha1.NodeClaim) bool {
 	if claim == nil || claim.Status.Phase != v1alpha1.NodeClaimFailed {
 		return false
 	}
-	return claim.Status.Contract.RFPUri != "" && claim.Status.Contract.AcceptUri == ""
+	return claim.Status.Contract.RFPURI != "" && claim.Status.Contract.AcceptURI == ""
 }
 
 func (h *Host) End() End {

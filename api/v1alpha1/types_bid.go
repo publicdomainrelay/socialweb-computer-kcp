@@ -2,6 +2,8 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 type Bid struct {
@@ -19,12 +21,6 @@ type BidList struct {
 	Items []Bid `json:"items"`
 }
 
-type BidRecordRef struct {
-	Uri string `json:"uri"`
-
-	Cid string `json:"cid,omitempty"`
-}
-
 type BidOffer struct {
 	Kind string `json:"kind"`
 
@@ -34,13 +30,13 @@ type BidOffer struct {
 type BidPolicy struct {
 	Scope string `json:"scope,omitempty"`
 
-	Attached []BidRecordRef `json:"attached,omitempty"`
+	Attached []commonv1.StrongRef `json:"attached,omitempty"`
 
 	Verdict string `json:"verdict"`
 }
 
 type BidSpec struct {
-	Rfp BidRecordRef `json:"rfp"`
+	Rfp commonv1.StrongRef `json:"rfp"`
 
 	Requester string `json:"requester"`
 
@@ -84,7 +80,7 @@ type BidTimings struct {
 }
 
 type BidTerminated struct {
-	ReceiptUri string `json:"receiptUri"`
+	ReceiptURI string `json:"receiptUri"`
 
 	ReceiptCid string `json:"receiptCid,omitempty"`
 
@@ -94,11 +90,11 @@ type BidTerminated struct {
 
 	At string `json:"at"`
 
-	PayloadUri string `json:"payloadUri,omitempty"`
+	PayloadURI string `json:"payloadUri,omitempty"`
 
 	PayloadCid string `json:"payloadCid,omitempty"`
 
-	EventUri string `json:"eventUri,omitempty"`
+	EventURI string `json:"eventUri,omitempty"`
 
 	EventCid string `json:"eventCid,omitempty"`
 }
@@ -108,9 +104,9 @@ type BidStatus struct {
 
 	Message string `json:"message,omitempty"`
 
-	Bid *BidRecordRef `json:"bid,omitempty"`
+	Bid *commonv1.StrongRef `json:"bid,omitempty"`
 
-	Accept *BidRecordRef `json:"accept,omitempty"`
+	Accept *commonv1.StrongRef `json:"accept,omitempty"`
 
 	ClaimedBy string `json:"claimedBy,omitempty"`
 

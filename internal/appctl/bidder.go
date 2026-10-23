@@ -438,8 +438,8 @@ func BidderValues(spec v1alpha1.MarketBidderSpec, stateDir, guestStateDir string
 	} else if spec.Profile == BidderProfileNetwork {
 		return manifests.MarketBidder{}, errors.New("appctl: the network value names no guestTlsUrl; a market network bidder hands guests the dispatcher's TLS front")
 	}
-	v := manifests.MarketBidder{StateDir: stateDir, Handle: spec.Identity.Handle, PdsUrl: spec.Identity.PdsUrl,
-		PlcDirectoryUrl: n.PlcDirectoryUrl, IngressProxyHost: n.IngressProxyHost, RelayUrls: strings.Join(n.RelayUrls, ","),
+	v := manifests.MarketBidder{StateDir: stateDir, Handle: spec.Identity.Handle, PdsUrl: spec.Identity.PdsURL,
+		PlcDirectoryUrl: n.PLCDirectoryURL, IngressProxyHost: n.IngressProxyHost, RelayUrls: strings.Join(n.RelayURLs, ","),
 		GuestTLSPort: tlsPort, CABundle: n.CaBundleRef, Policy: spec.Policy}
 	if err := providerValues(&v, spec, kcp); err != nil {
 		return manifests.MarketBidder{}, err
@@ -462,8 +462,8 @@ func BidderValues(spec v1alpha1.MarketBidderSpec, stateDir, guestStateDir string
 	if v.GuestTLSPort != 0 {
 		extra = append(extra, "--guest-tls-port", strconv.Itoa(v.GuestTLSPort))
 	}
-	if len(n.FirehoseUrls) > 0 {
-		extra = append(extra, "--firehose-url", strings.Join(n.FirehoseUrls, ","))
+	if len(n.FirehoseURLs) > 0 {
+		extra = append(extra, "--firehose-url", strings.Join(n.FirehoseURLs, ","))
 	}
 	if n.QrOrigin != "" {
 		extra = append(extra, "--qr-origin", n.QrOrigin)
@@ -511,9 +511,9 @@ func BidderPds(v manifests.MarketBidder, stateDir string, n *v1alpha1.MarketNetw
 	p := manifests.RepoPds{StateDir: stateDir, Identity: BidderIdentity, KcpServer: v.Kcp.Server, KcpWorkspace: v.Kcp.Workspace,
 		VaultServer: v.Vault.Server, VaultClient: PdsVaultClient, VaultKcpServer: v.Vault.KcpServer, VaultMount: BidderVaultClient,
 		VaultMountClient: BidderVaultClient, VaultWorkspace: v.Kcp.Workspace,
-		PlcDirectoryUrl: n.PlcDirectoryUrl, IngressProxyHost: n.IngressProxyHost, Trust: v.Trust, Read: v.Read, AssociateService: BidderAssociate}
+		PlcDirectoryUrl: n.PLCDirectoryURL, IngressProxyHost: n.IngressProxyHost, Trust: v.Trust, Read: v.Read, AssociateService: BidderAssociate}
 	var err error
-	if p.WatchRelayUrls, err = listFragment(append(append([]string{}, n.RelayUrls...), n.FirehoseUrls...)...); err != nil {
+	if p.WatchRelayUrls, err = listFragment(append(append([]string{}, n.RelayURLs...), n.FirehoseURLs...)...); err != nil {
 		return p, err
 	}
 	if hosts := NetworkHostsArg(n.Hosts); hosts != "" {
@@ -537,7 +537,7 @@ func (ctl *Controller) bidderMarketURL(ctx context.Context, ws string) string {
 	if err != nil {
 		return ""
 	}
-	url, _, _ := unstructured.NestedString(u.Object, "status", "url")
+	url, _, _ := unstructured.NestedString(u.Object, "status", "address")
 	return strings.TrimRight(strings.TrimSpace(url), "/")
 }
 
@@ -654,7 +654,7 @@ func (ctl *Controller) reconcileBidderAccount(ctx context.Context, u *unstructur
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for its existing-account MarketIdentity to report a did"
 		return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
 	}
-	if plan.Mode == v1alpha1.MarketIdentityModePdsAccount && strings.TrimSpace(id.Status.PdsUrl) == "" {
+	if plan.Mode == v1alpha1.MarketIdentityModePdsAccount && strings.TrimSpace(id.Status.PdsURL) == "" {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, "the existing-account MarketIdentity reports no pdsUrl; it fails closed"
 		return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
 	}
@@ -676,7 +676,7 @@ func (ctl *Controller) reconcileBidderAccount(ctx context.Context, u *unstructur
 	if err := ctl.pruneDesired(ctx, owner, desired); err != nil {
 		return err
 	}
-	ctl.ensureAccountRepo(ctx, ctl.c.workspace(), BidderIdentity, plan, id.Status.Did, id.Status.PdsUrl)
+	ctl.ensureAccountRepo(ctx, ctl.c.workspace(), BidderIdentity, plan, id.Status.Did, id.Status.PdsURL)
 	if err := ctl.rotateSigningKey(ctx, o); err != nil {
 		ctl.c.log().Warn("rotating the bidder's OIDC signing key", "name", o.Name, "err", err.Error())
 	}
@@ -981,7 +981,7 @@ func (ctl *Controller) reconcileBidder(ctx context.Context, u *unstructured.Unst
 		}
 		if err := ctl.reconcileOperatorRecords(ctx, ctl.c.workspace(), o.Spec.Network, func() (ownerSession, error) {
 			password, _, err := ctl.bidderPassword(ctx)
-			return ownerSession{Service: o.Spec.Identity.PdsUrl, Identifier: o.Spec.Identity.Handle, Password: password}, err
+			return ownerSession{Service: o.Spec.Identity.PdsURL, Identifier: o.Spec.Identity.Handle, Password: password}, err
 		}); err != nil {
 			ctl.c.log().Warn("writing the declared records of the market network operator account", "err", err.Error())
 		}

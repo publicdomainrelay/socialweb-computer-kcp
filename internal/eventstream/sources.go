@@ -167,7 +167,7 @@ func (c *Controller) planWatchSources(ctx context.Context, dyn dynamic.Interface
 		}
 		add(relaySourceKey(raw), eventsapi.EventStreamSource{
 			Kind:        eventsapi.EventStreamSourceRelay,
-			RelayUrls:   []string{raw},
+			RelayURLs:   []string{raw},
 			Collections: collections,
 			DIDs:        dids,
 		})
@@ -179,7 +179,7 @@ func (c *Controller) planWatchSources(ctx context.Context, dyn dynamic.Interface
 		}
 		add(jetstreamSourceKey(raw), eventsapi.EventStreamSource{
 			Kind:          eventsapi.EventStreamSourceJetstream,
-			JetstreamUrls: []string{raw},
+			JetstreamURLs: []string{raw},
 			Collections:   collections,
 			DIDs:          dids,
 		})

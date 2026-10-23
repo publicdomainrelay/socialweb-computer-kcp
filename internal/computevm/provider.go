@@ -213,10 +213,10 @@ func checkContract(contract *v1alpha1.ComputeVMContract) error {
 	if contract == nil {
 		return nil
 	}
-	if (contract.AcceptUri == "") != (contract.AcceptCid == "") {
+	if (contract.AcceptURI == "") != (contract.AcceptCID == "") {
 		return errors.New("computevm: spec.contract names an accept uri and cid together or neither")
 	}
-	if (contract.ReceiptUri == "") != (contract.ReceiptCid == "") {
+	if (contract.ReceiptURI == "") != (contract.ReceiptCID == "") {
 		return errors.New("computevm: spec.contract names a receipt uri and cid together or neither")
 	}
 	return nil
@@ -262,7 +262,7 @@ func ContractReceipt(o *v1alpha1.ComputeVM) string {
 	if o == nil || o.Spec.Contract == nil {
 		return ""
 	}
-	return o.Spec.Contract.ReceiptUri
+	return o.Spec.Contract.ReceiptURI
 }
 
 func Ended(o *v1alpha1.ComputeVM) bool {

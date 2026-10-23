@@ -2,6 +2,8 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 type Service struct {
@@ -20,7 +22,7 @@ type ServiceList struct {
 }
 
 type ServiceSpec struct {
-	TargetRef ServiceTargetRef `json:"targetRef"`
+	TargetRef commonv1.ObjectRef `json:"targetRef"`
 
 	Protocol ServiceProtocol `json:"protocol"`
 
@@ -29,14 +31,6 @@ type ServiceSpec struct {
 	Auth ServiceAuth `json:"auth,omitempty"`
 
 	Suspend bool `json:"suspend,omitempty"`
-}
-
-type ServiceTargetRef struct {
-	Kind string `json:"kind"`
-
-	Name string `json:"name"`
-
-	Workspace string `json:"workspace,omitempty"`
 }
 
 type ServiceAuth struct {

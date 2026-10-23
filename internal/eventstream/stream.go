@@ -222,8 +222,8 @@ func (s *eventStream) resolveSource(ctx context.Context) (resolvedSource, error)
 			if err != nil {
 				return resolvedSource{}, err
 			}
-		} else if len(source.RelayUrls) > 0 {
-			base = normalizeStreamURL(source.RelayUrls[0])
+		} else if len(source.RelayURLs) > 0 {
+			base = normalizeStreamURL(source.RelayURLs[0])
 		}
 		if base == "" {
 			return resolvedSource{}, errors.New("eventstream: source.kind relay needs relayRef or relayUrls")
@@ -234,8 +234,8 @@ func (s *eventStream) resolveSource(ctx context.Context) (resolvedSource, error)
 		return resolvedSource{relayBase: normalizeStreamURL(base), key: relaySourceKey(normalizeStreamURL(base))}, nil
 	case eventsv1alpha1.EventStreamSourceJetstream:
 		base := ""
-		if len(source.JetstreamUrls) > 0 {
-			base = normalizeStreamURL(source.JetstreamUrls[0])
+		if len(source.JetstreamURLs) > 0 {
+			base = normalizeStreamURL(source.JetstreamURLs[0])
 		}
 		if base == "" {
 			return resolvedSource{}, errors.New("eventstream: source.kind jetstream needs jetstreamUrls")
@@ -392,7 +392,7 @@ func (s *eventStream) bufferRecords(ctx context.Context, source resolvedSource, 
 			}
 			records[uri] = v1alpha1.WatchedRecord{
 				Did:        event.Repo.String(),
-				Uri:        uri,
+				URI:        uri,
 				Cid:        record.CID.String(),
 				Value:      value,
 				VerifiedAt: now,
@@ -688,7 +688,7 @@ func (s *eventStream) writeWatchStatus(ctx context.Context, workspace string, re
 		for uri, record := range records {
 			replaced := false
 			for i := range watch.Records {
-				if watch.Records[i].Uri == uri {
+				if watch.Records[i].URI == uri {
 					watch.Records[i] = record
 					replaced = true
 					break
@@ -701,7 +701,7 @@ func (s *eventStream) writeWatchStatus(ctx context.Context, workspace string, re
 		for uri := range deletes {
 			kept := watch.Records[:0]
 			for _, record := range watch.Records {
-				if record.Uri != uri {
+				if record.URI != uri {
 					kept = append(kept, record)
 				}
 			}

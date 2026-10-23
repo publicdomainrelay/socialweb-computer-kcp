@@ -248,7 +248,7 @@ func (s *Service) register(handler http.Handler) error {
 }
 
 func (s *Service) registerPDSWithRelays(ctx context.Context) {
-	if s.cfg.Deps.KCP == nil || len(s.cfg.Network.RelayUrls) == 0 {
+	if s.cfg.Deps.KCP == nil || len(s.cfg.Network.RelayURLs) == 0 {
 		return
 	}
 	ticker := time.NewTicker(10 * time.Second)
@@ -282,12 +282,12 @@ func (s *Service) registerPDSWithRelay(ctx context.Context) {
 	if err != nil {
 		return
 	}
-	raw, _, _ := unstructured.NestedString(u.Object, "status", "url")
+	raw, _, _ := unstructured.NestedString(u.Object, "status", "address")
 	parsed, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || parsed.Host == "" {
 		return
 	}
-	for _, relayURL := range s.cfg.Network.RelayUrls {
+	for _, relayURL := range s.cfg.Network.RelayURLs {
 		body := strings.NewReader(fmt.Sprintf(`{"hostname":%q}`, parsed.Host))
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 			strings.TrimRight(relayURL, "/")+"/xrpc/com.atproto.sync.requestCrawl", body)
@@ -375,7 +375,7 @@ func (s *Service) setup(ctx context.Context) error {
 		}
 	}
 	if s.cfg.Directory == nil {
-		s.cfg.Directory = directoryFor(s.cfg.Network.PlcDirectoryUrl, s.cfg.DirectoryKeys, s.cfg.DirectoryTTL)
+		s.cfg.Directory = directoryFor(s.cfg.Network.PLCDirectoryURL, s.cfg.DirectoryKeys, s.cfg.DirectoryTTL)
 	}
 	s.directory = s.cfg.Directory
 	if s.cfg.IdentityMode == IdentityModeOAuth {
@@ -469,7 +469,7 @@ func (s *Service) setup(ctx context.Context) error {
 			Signer:         s.signer,
 			ServiceKey:     s.cfg.RepoKey,
 			ServiceAuth:    serviceAuth,
-			RelayURLs:      append([]string(nil), s.cfg.Network.RelayUrls...),
+			RelayURLs:      append([]string(nil), s.cfg.Network.RelayURLs...),
 			BidderDIDs:     append([]string(nil), s.cfg.BidderDIDs...),
 			DenyBidderDIDs: append([]string(nil), s.cfg.DenyBidderDIDs...),
 			HTTPClient:     s.cfg.HTTPClient,
@@ -1151,7 +1151,7 @@ func (s *Service) readExposureURL(ctx context.Context, name string) (string, err
 	if err != nil {
 		return "", err
 	}
-	raw, _, _ := unstructured.NestedString(u.Object, "status", "url")
+	raw, _, _ := unstructured.NestedString(u.Object, "status", "address")
 	return strings.TrimSpace(raw), nil
 }
 

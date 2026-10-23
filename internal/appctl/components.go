@@ -185,7 +185,7 @@ func (v ComponentView) Listeners() []v1alpha1.ApplicationListener {
 	for _, e := range v.Status.Endpoints {
 		address := e.Address
 		if address == "" {
-			address = e.Url
+			address = e.URL
 		}
 		out = append(out, v1alpha1.ApplicationListener{Component: v.Name, Name: e.Name, Kind: e.Protocol, Address: address})
 	}
@@ -222,7 +222,7 @@ func exposureViewOf(v ComponentView, kind string, m map[string]any) (ComponentVi
 		v.Status.Phase = v1alpha1.ComponentPhase(st.Phase)
 		v.Status.Ready = st.Ready
 		for i, endpoint := range st.Endpoints {
-			v.Status.Endpoints = append(v.Status.Endpoints, v1alpha1.Endpoint{Name: "endpoint-" + strconv.Itoa(i), Url: endpoint})
+			v.Status.Endpoints = append(v.Status.Endpoints, v1alpha1.Endpoint{Name: "endpoint-" + strconv.Itoa(i), URL: endpoint})
 		}
 	case ComponentKindExposure:
 		var st exposurev1alpha1.ExposureStatus
@@ -231,9 +231,9 @@ func exposureViewOf(v ComponentView, kind string, m map[string]any) (ComponentVi
 		}
 		v.Status.Phase = v1alpha1.ComponentPhase(st.Phase)
 		v.Status.Ready = st.Ready
-		if st.URL != "" {
-			v.Status.Endpoint = st.URL
-			v.Status.Endpoints = []v1alpha1.Endpoint{{Name: "url", Url: st.URL, Address: st.Endpoint}}
+		if st.Address != "" {
+			v.Status.Endpoint = st.Address
+			v.Status.Endpoints = []v1alpha1.Endpoint{{Name: "url", URL: st.Address, Address: st.Endpoint}}
 		}
 	}
 	return v, nil

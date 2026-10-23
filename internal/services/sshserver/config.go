@@ -401,8 +401,8 @@ func (c *Config) defaults() {
 	if tlsConfig := networkTLSConfig(c.Network.CaBundleRef); tlsConfig != nil {
 		c.Deps.TLS = tlsConfig
 	}
-	if c.Directory == nil && c.Network.PlcDirectoryUrl != "" && c.Deps.Handlers != nil {
-		c.Directory = directoryFor(*c, c.Network.PlcDirectoryUrl, c.DirectoryKeys, c.DirectoryTTL)
+	if c.Directory == nil && c.Network.PLCDirectoryURL != "" && c.Deps.Handlers != nil {
+		c.Directory = directoryFor(*c, c.Network.PLCDirectoryURL, c.DirectoryKeys, c.DirectoryTTL)
 	}
 	if len(c.TrustedHosts) == 0 {
 		c.TrustedHosts = networkTrustedHosts(c.Network, c.Hostnames, c.PublicHostname)
@@ -630,8 +630,8 @@ func networkTrustedHosts(network v1alpha1.MarketNetworkValue, hostnames []string
 	add(network.IngressProxyHost)
 	add(network.GuestTlsUrl)
 	add(network.QrOrigin)
-	add(network.PlcDirectoryUrl)
-	for _, raw := range network.RelayUrls {
+	add(network.PLCDirectoryURL)
+	for _, raw := range network.RelayURLs {
 		add(raw)
 	}
 	return out

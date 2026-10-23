@@ -166,8 +166,8 @@ func GatewayRequesterIdentity(g v1alpha1.GatewaySpec) v1alpha1.ApplicationIdenti
 	if id.Handle == "" {
 		id.Handle = optionValue(g.Options, "atproto-handle")
 	}
-	if id.PdsUrl == "" {
-		id.PdsUrl = optionValue(g.Options, "atproto-pds-url")
+	if id.PdsURL == "" {
+		id.PdsURL = optionValue(g.Options, "atproto-pds-url")
 	}
 	if id.Association == "" && optionValue(g.Options, "skip-association") == "true" {
 		id.Association = v1alpha1.AssociationSkip
@@ -674,9 +674,9 @@ func (ctl *Controller) reconcileGateway(ctx context.Context, u *unstructured.Uns
 	st.Listeners = snap.Listeners
 	st.Did = id.Status.Did
 	fillComponentStatus(&st, o.Generation, o.Spec.Suspend, o.Spec.Components, allDesired, snap, nil, ctl.componentDrift(string(o.UID)))
-	ctl.ensureAccountRepo(ctx, ws, RequesterIdentity, plan, id.Status.Did, id.Status.PdsUrl)
+	ctl.ensureAccountRepo(ctx, ws, RequesterIdentity, plan, id.Status.Did, id.Status.PdsURL)
 	if a := id.Status.PendingAction; a != nil && id.Status.Phase == v1alpha1.MarketIdentityPhaseAwaitingScan {
-		awaitingOperator = "waiting for the operator's claim record (badgeBlueKeys keyId " + id.Status.Did + " with the nonce n of " + a.Url + ")"
+		awaitingOperator = "waiting for the operator's claim record (badgeBlueKeys keyId " + id.Status.Did + " with the nonce n of " + a.URL + ")"
 	}
 	if m := o.Spec.MarketNetwork; o.Spec.Profile == ProfileGatewayNetwork && m != nil && m.OwnerSessionsFile != "" {
 		if err := ctl.associateGatewayOperator(ctx, id, m.OwnerSessionsFile, o.Spec.Network); err != nil {
@@ -712,8 +712,8 @@ func GatewayPds(v manifests.Gateway, stateDir string, n *v1alpha1.MarketNetworkV
 	var ca string
 	var err error
 	if n != nil {
-		p.PlcDirectoryUrl, p.IngressProxyHost, ca = n.PlcDirectoryUrl, n.IngressProxyHost, n.CaBundleRef
-		if p.WatchRelayUrls, err = listFragment(append(append([]string{}, n.RelayUrls...), n.FirehoseUrls...)...); err != nil {
+		p.PlcDirectoryUrl, p.IngressProxyHost, ca = n.PLCDirectoryURL, n.IngressProxyHost, n.CaBundleRef
+		if p.WatchRelayUrls, err = listFragment(append(append([]string{}, n.RelayURLs...), n.FirehoseURLs...)...); err != nil {
 			return p, err
 		}
 		if hosts := NetworkHostsArg(n.Hosts); hosts != "" {
@@ -782,9 +782,9 @@ func GatewayValues(o v1alpha1.Gateway, workspace, stateDir, requesterStateDir st
 			}
 		}
 		for _, kv := range [][2]string{
-			{"--plc-directory-url", n.PlcDirectoryUrl},
+			{"--plc-directory-url", n.PLCDirectoryURL},
 			{"--ingress-proxy-host", n.IngressProxyHost},
-			{"--relay-url", strings.Join(n.RelayUrls, ",")},
+			{"--relay-url", strings.Join(n.RelayURLs, ",")},
 			{"--network-hosts", NetworkHostsArg(n.Hosts)},
 		} {
 			if kv[1] != "" {

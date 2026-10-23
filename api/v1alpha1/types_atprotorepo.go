@@ -2,6 +2,8 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 type AtprotoRepo struct {
@@ -22,19 +24,11 @@ type AtprotoRepoList struct {
 type AtprotoRepoSpec struct {
 	DID string `json:"did"`
 
-	PdsRef *RepoRef `json:"pdsRef,omitempty"`
+	PdsRef *commonv1.ObjectRef `json:"pdsRef,omitempty"`
 
-	IdentityRef *RepoRef `json:"identityRef,omitempty"`
+	IdentityRef *commonv1.ObjectRef `json:"identityRef,omitempty"`
 
-	AuthRef *RepoRef `json:"authRef,omitempty"`
-}
-
-type RepoRef struct {
-	Workspace string `json:"workspace,omitempty"`
-
-	Kind string `json:"kind,omitempty"`
-
-	Name string `json:"name"`
+	AuthRef *commonv1.SecretRef `json:"authRef,omitempty"`
 }
 
 type AtprotoRepoStatus struct {

@@ -152,7 +152,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 	cfg.StableHost = strings.TrimSpace(decoded.StableHost)
 	cfg.PLCURL = strings.TrimRight(strings.TrimSpace(decoded.PlcURL), "/")
 	if cfg.PLCURL == "" && decoded.Network != nil {
-		cfg.PLCURL = strings.TrimRight(strings.TrimSpace(decoded.Network.PlcDirectoryUrl), "/")
+		cfg.PLCURL = strings.TrimRight(strings.TrimSpace(decoded.Network.PLCDirectoryURL), "/")
 	}
 	cfg.RepoKeyPath = strings.TrimSpace(decoded.RepoKeyPath)
 	cfg.SessionSecretPath = strings.TrimSpace(decoded.SessionSecretPath)

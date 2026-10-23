@@ -13,11 +13,11 @@ type APIResource = apiresource.APIResource
 
 var APIResources = []APIResource{
 	{Kind: "Cluster", Plural: "clusters", Revision: 2, Export: "clusters", Object: Cluster{}},
-	{Kind: "Node", Plural: "nodes", Revision: 1, Export: "clusters", Object: Node{}},
-	{Kind: "NodeClaim", Plural: "nodeclaims", Revision: 5, Export: "clusters", Object: NodeClaim{}},
-	{Kind: "ClusterLink", Plural: "clusterlinks", Revision: 1, Export: "clusters", Object: ClusterLink{}},
-	{Kind: "ClusterClientCertificate", Plural: "clusterclientcertificates", Revision: 1, Export: "clusters", Object: ClusterClientCertificate{}, PrinterColumns: []PrinterColumn{
-		{Name: "Cluster", Type: "string", JSONPath: ".spec.cluster"},
+	{Kind: "Node", Plural: "nodes", Revision: 2, Export: "clusters", Object: Node{}},
+	{Kind: "NodeClaim", Plural: "nodeclaims", Revision: 6, Export: "clusters", Object: NodeClaim{}},
+	{Kind: "ClusterLink", Plural: "clusterlinks", Revision: 2, Export: "clusters", Object: ClusterLink{}},
+	{Kind: "ClusterClientCertificate", Plural: "clusterclientcertificates", Revision: 2, Export: "clusters", Object: ClusterClientCertificate{}, PrinterColumns: []PrinterColumn{
+		{Name: "Cluster", Type: "string", JSONPath: ".spec.clusterRef.name"},
 		{Name: "DID", Type: "string", JSONPath: ".spec.did"},
 		{Name: "Serial", Type: "string", JSONPath: ".spec.serial"},
 		{Name: "NotAfter", Type: "string", JSONPath: ".spec.notAfter"},
@@ -25,28 +25,28 @@ var APIResources = []APIResource{
 		{Name: "Revoked", Type: "boolean", JSONPath: ".spec.revoked"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "AtprotoIdentity", Plural: "atprotoidentities", Revision: 1, Export: "atprotoidentities", Object: AtprotoIdentity{}},
-	{Kind: "MarketIdentity", Plural: "marketidentities", Revision: 4, Export: "marketidentities", Object: MarketIdentity{}},
-	{Kind: "AtprotoRecord", Plural: "atprotorecords", Revision: 3, Export: "marketidentities", Object: AtprotoRecord{}, PrinterColumns: []PrinterColumn{
+	{Kind: "AtprotoIdentity", Plural: "atprotoidentities", Revision: 2, Export: "atprotoidentities", Object: AtprotoIdentity{}},
+	{Kind: "MarketIdentity", Plural: "marketidentities", Revision: 5, Export: "marketidentities", Object: MarketIdentity{}},
+	{Kind: "AtprotoRecord", Plural: "atprotorecords", Revision: 4, Export: "marketidentities", Object: AtprotoRecord{}, PrinterColumns: []PrinterColumn{
 		{Name: "Repo", Type: "string", JSONPath: ".spec.repo"},
 		{Name: "Collection", Type: "string", JSONPath: ".spec.collection"},
 		{Name: "Rkey", Type: "string", JSONPath: ".spec.rkey"},
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "AtprotoRecordWatch", Plural: "atprotorecordwatches", Revision: 3, Export: "marketidentities", Object: AtprotoRecordWatch{}, PrinterColumns: []PrinterColumn{
+	{Kind: "AtprotoRecordWatch", Plural: "atprotorecordwatches", Revision: 4, Export: "marketidentities", Object: AtprotoRecordWatch{}, PrinterColumns: []PrinterColumn{
 		{Name: "Repo", Type: "string", JSONPath: ".spec.repo"},
 		{Name: "Collection", Type: "string", JSONPath: ".spec.collection"},
 		{Name: "Message", Type: "string", JSONPath: ".status.message"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "ComputeVM", Plural: "computevms", Revision: 5, Export: "computevms", Object: ComputeVM{}, PrinterColumns: []PrinterColumn{
+	{Kind: "ComputeVM", Plural: "computevms", Revision: 6, Export: "computevms", Object: ComputeVM{}, PrinterColumns: []PrinterColumn{
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "GuestIP", Type: "string", JSONPath: ".status.network.guestIP"},
 		{Name: "Requester", Type: "string", JSONPath: ".spec.requester.did"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "Bid", Plural: "bids", Revision: 6, Export: "computevms", Object: Bid{}, PrinterColumns: []PrinterColumn{
+	{Kind: "Bid", Plural: "bids", Revision: 7, Export: "computevms", Object: Bid{}, PrinterColumns: []PrinterColumn{
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "Requester", Type: "string", JSONPath: ".spec.requester"},
 		{Name: "Verdict", Type: "string", JSONPath: ".spec.policy.verdict"},
@@ -54,8 +54,8 @@ var APIResources = []APIResource{
 		{Name: "ComputeVM", Type: "string", JSONPath: ".status.computeVM"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "GuestIdentityGrant", Plural: "guestidentitygrants", Revision: 2, Export: "computevms", Object: GuestIdentityGrant{}, PrinterColumns: []PrinterColumn{
-		{Name: "ComputeVM", Type: "string", JSONPath: ".spec.computevm"},
+	{Kind: "GuestIdentityGrant", Plural: "guestidentitygrants", Revision: 3, Export: "computevms", Object: GuestIdentityGrant{}, PrinterColumns: []PrinterColumn{
+		{Name: "ComputeVM", Type: "string", JSONPath: ".spec.computeVMRef.name"},
 		{Name: "API", Type: "string", JSONPath: ".spec.api"},
 		{Name: "Actx", Type: "string", JSONPath: ".spec.actx"},
 		{Name: "Applied", Type: "boolean", JSONPath: ".status.applied"},
@@ -91,51 +91,51 @@ var APIResources = []APIResource{
 		{Name: "Endpoint", Type: "string", JSONPath: ".status.endpoint"},
 		{Name: "Sealed", Type: "boolean", JSONPath: ".status.sealed"},
 	}},
-	{Kind: "MarketNetwork", Plural: "marketnetworks", Revision: 14, Export: "applications", Object: MarketNetwork{}, PrinterColumns: []PrinterColumn{
+	{Kind: "MarketNetwork", Plural: "marketnetworks", Revision: 15, Export: "applications", Object: MarketNetwork{}, PrinterColumns: []PrinterColumn{
 		{Name: "Profile", Type: "string", JSONPath: ".spec.profile"},
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "PLC", Type: "string", JSONPath: ".status.network.plcDirectoryUrl"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "MarketBidder", Plural: "marketbidders", Revision: 17, Export: "applications", Object: MarketBidder{}, PrinterColumns: []PrinterColumn{
+	{Kind: "MarketBidder", Plural: "marketbidders", Revision: 18, Export: "applications", Object: MarketBidder{}, PrinterColumns: []PrinterColumn{
 		{Name: "Profile", Type: "string", JSONPath: ".spec.profile"},
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "DID", Type: "string", JSONPath: ".status.did"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "MarketRequester", Plural: "marketrequesters", Revision: 14, Export: "applications", Object: MarketRequester{}, PrinterColumns: []PrinterColumn{
+	{Kind: "MarketRequester", Plural: "marketrequesters", Revision: 15, Export: "applications", Object: MarketRequester{}, PrinterColumns: []PrinterColumn{
 		{Name: "Profile", Type: "string", JSONPath: ".spec.profile"},
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "DID", Type: "string", JSONPath: ".status.did"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "ComputeContract", Plural: "computecontracts", Revision: 7, Export: "computecontracts", Object: ComputeContract{}, PrinterColumns: []PrinterColumn{
+	{Kind: "ComputeContract", Plural: "computecontracts", Revision: 8, Export: "computecontracts", Object: ComputeContract{}, PrinterColumns: []PrinterColumn{
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "Contract", Type: "string", JSONPath: ".status.contract.phase"},
 		{Name: "Winner", Type: "string", JSONPath: ".status.contract.winner.did"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "Gateway", Plural: "gateways", Revision: 19, Export: "applications", Object: Gateway{}, PrinterColumns: []PrinterColumn{
+	{Kind: "Gateway", Plural: "gateways", Revision: 20, Export: "applications", Object: Gateway{}, PrinterColumns: []PrinterColumn{
 		{Name: "Profile", Type: "string", JSONPath: ".spec.profile"},
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "SshGateway", Plural: "sshgateways", Revision: 13, Export: "applications", Object: SshGateway{}, PrinterColumns: []PrinterColumn{
+	{Kind: "SshGateway", Plural: "sshgateways", Revision: 14, Export: "applications", Object: SshGateway{}, PrinterColumns: []PrinterColumn{
 		{Name: "Profile", Type: "string", JSONPath: ".spec.profile"},
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "Bidder", Plural: "bidders", Revision: 8, Export: "applications", Object: Bidder{}, PrinterColumns: componentPrinterColumns},
-	{Kind: "GuestControlPlane", Plural: "guestcontrolplanes", Revision: 3, Export: "applications", Object: GuestControlPlane{}, PrinterColumns: componentPrinterColumns},
-	{Kind: "Pds", Plural: "pds", Revision: 4, Export: "applications", Object: Pds{}, PrinterColumns: componentPrinterColumns},
-	{Kind: "Requester", Plural: "requesters", Revision: 11, Export: "applications", Object: Requester{}, PrinterColumns: componentPrinterColumns},
-	{Kind: "GatewayAPI", Plural: "gatewayapis", Revision: 5, Export: "applications", Object: GatewayAPI{}, PrinterColumns: componentPrinterColumns},
-	{Kind: "SshServer", Plural: "sshservers", Revision: 4, Export: "applications", Object: SshServer{}, PrinterColumns: componentPrinterColumns},
-	{Kind: "Plc", Plural: "plcs", Revision: 3, Export: "applications", Object: Plc{}, PrinterColumns: componentPrinterColumns},
-	{Kind: "Relay", Plural: "relays", Revision: 3, Export: "applications", Object: Relay{}, PrinterColumns: componentPrinterColumns},
-	{Kind: "IngressProxy", Plural: "ingressproxies", Revision: 4, Export: "applications", Object: IngressProxy{}, PrinterColumns: componentPrinterColumns},
-	{Kind: "DispatcherTLS", Plural: "dispatchertlses", Revision: 3, Export: "applications", Object: DispatcherTLS{}, PrinterColumns: componentPrinterColumns},
-	{Kind: "MarketPresence", Plural: "marketpresences", Revision: 1, Export: "applications", Object: MarketPresence{}, PrinterColumns: []PrinterColumn{
+	{Kind: "Bidder", Plural: "bidders", Revision: 9, Export: "applications", Object: Bidder{}, PrinterColumns: componentPrinterColumns},
+	{Kind: "GuestControlPlane", Plural: "guestcontrolplanes", Revision: 4, Export: "applications", Object: GuestControlPlane{}, PrinterColumns: componentPrinterColumns},
+	{Kind: "Pds", Plural: "pds", Revision: 5, Export: "applications", Object: Pds{}, PrinterColumns: componentPrinterColumns},
+	{Kind: "Requester", Plural: "requesters", Revision: 12, Export: "applications", Object: Requester{}, PrinterColumns: componentPrinterColumns},
+	{Kind: "GatewayAPI", Plural: "gatewayapis", Revision: 6, Export: "applications", Object: GatewayAPI{}, PrinterColumns: componentPrinterColumns},
+	{Kind: "SshServer", Plural: "sshservers", Revision: 5, Export: "applications", Object: SshServer{}, PrinterColumns: componentPrinterColumns},
+	{Kind: "Plc", Plural: "plcs", Revision: 4, Export: "applications", Object: Plc{}, PrinterColumns: componentPrinterColumns},
+	{Kind: "Relay", Plural: "relays", Revision: 4, Export: "applications", Object: Relay{}, PrinterColumns: componentPrinterColumns},
+	{Kind: "IngressProxy", Plural: "ingressproxies", Revision: 5, Export: "applications", Object: IngressProxy{}, PrinterColumns: componentPrinterColumns},
+	{Kind: "DispatcherTLS", Plural: "dispatchertlses", Revision: 4, Export: "applications", Object: DispatcherTLS{}, PrinterColumns: componentPrinterColumns},
+	{Kind: "MarketPresence", Plural: "marketpresences", Revision: 2, Export: "applications", Object: MarketPresence{}, PrinterColumns: []PrinterColumn{
 		{Name: "Offering", Type: "string", JSONPath: ".spec.offeringUri"},
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "Ready", Type: "boolean", JSONPath: ".status.ready"},
@@ -157,26 +157,26 @@ var APIResources = []APIResource{
 		{Name: "Current", Type: "string", JSONPath: ".status.current"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "ChildApplication", Plural: "childapplications", Revision: 1, Export: "applications", Object: ChildApplication{}, PrinterColumns: []PrinterColumn{
-		{Name: "Network", Type: "string", JSONPath: ".spec.network"},
+	{Kind: "ChildApplication", Plural: "childapplications", Revision: 2, Export: "applications", Object: ChildApplication{}, PrinterColumns: []PrinterColumn{
+		{Name: "Network", Type: "string", JSONPath: ".spec.networkRef.name"},
 		{Name: "App", Type: "string", JSONPath: ".spec.app"},
 		{Name: "Workspace", Type: "string", JSONPath: ".status.workspace"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "AtprotoRepo", Plural: "atprotorepos", Revision: 2, Export: "applications", Object: AtprotoRepo{}, PrinterColumns: []PrinterColumn{
+	{Kind: "AtprotoRepo", Plural: "atprotorepos", Revision: 3, Export: "applications", Object: AtprotoRepo{}, PrinterColumns: []PrinterColumn{
 		{Name: "DID", Type: "string", JSONPath: ".spec.did"},
 		{Name: "Head", Type: "string", JSONPath: ".status.head"},
 		{Name: "Seq", Type: "integer", JSONPath: ".status.seq"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "PdsAccount", Plural: "pdsaccounts", Revision: 1, Export: "applications", Object: PdsAccount{}, PrinterColumns: []PrinterColumn{
+	{Kind: "PdsAccount", Plural: "pdsaccounts", Revision: 2, Export: "applications", Object: PdsAccount{}, PrinterColumns: []PrinterColumn{
 		{Name: "DID", Type: "string", JSONPath: ".spec.did"},
 		{Name: "Handle", Type: "string", JSONPath: ".spec.handle"},
 		{Name: "Active", Type: "boolean", JSONPath: ".status.active"},
 		{Name: "Sessions", Type: "integer", JSONPath: ".status.sessionCount"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "AtprotoSession", Plural: "atprotosessions", Revision: 1, Export: "applications", Object: AtprotoSession{}, PrinterColumns: []PrinterColumn{
+	{Kind: "AtprotoSession", Plural: "atprotosessions", Revision: 2, Export: "applications", Object: AtprotoSession{}, PrinterColumns: []PrinterColumn{
 		{Name: "DID", Type: "string", JSONPath: ".spec.did"},
 		{Name: "Active", Type: "boolean", JSONPath: ".status.active"},
 		{Name: "Expires", Type: "string", JSONPath: ".status.expiresAt"},
@@ -188,39 +188,39 @@ var APIResources = []APIResource{
 		{Name: "Tombstoned", Type: "boolean", JSONPath: ".status.tombstoned"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "PortLease", Plural: "portleases", Revision: 1, Export: "applications", Object: PortLease{}, PrinterColumns: []PrinterColumn{
+	{Kind: "PortLease", Plural: "portleases", Revision: 2, Export: "applications", Object: PortLease{}, PrinterColumns: []PrinterColumn{
 		{Name: "Purpose", Type: "string", JSONPath: ".spec.purpose"},
 		{Name: "Port", Type: "integer", JSONPath: ".spec.port"},
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "Holder", Type: "string", JSONPath: ".status.holderRef"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "SubnetLease", Plural: "subnetleases", Revision: 1, Export: "applications", Object: SubnetLease{}, PrinterColumns: []PrinterColumn{
+	{Kind: "SubnetLease", Plural: "subnetleases", Revision: 2, Export: "applications", Object: SubnetLease{}, PrinterColumns: []PrinterColumn{
 		{Name: "Purpose", Type: "string", JSONPath: ".spec.purpose"},
 		{Name: "Prefix", Type: "string", JSONPath: ".spec.prefix"},
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "Holder", Type: "string", JSONPath: ".status.holderRef"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "ClusterRoll", Plural: "clusterrolls", Revision: 1, Export: "applications", Object: ClusterRoll{}, PrinterColumns: []PrinterColumn{
-		{Name: "Cluster", Type: "string", JSONPath: ".spec.cluster"},
+	{Kind: "ClusterRoll", Plural: "clusterrolls", Revision: 2, Export: "applications", Object: ClusterRoll{}, PrinterColumns: []PrinterColumn{
+		{Name: "Cluster", Type: "string", JSONPath: ".spec.clusterRef.name"},
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "Started", Type: "string", JSONPath: ".status.startedAt"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "RelayStatus", Plural: "relaystatuses", Revision: 1, Export: "applications", Object: RelayStatus{}, PrinterColumns: []PrinterColumn{
-		{Name: "Relay", Type: "string", JSONPath: ".spec.relayRef"},
+	{Kind: "RelayStatus", Plural: "relaystatuses", Revision: 2, Export: "applications", Object: RelayStatus{}, PrinterColumns: []PrinterColumn{
+		{Name: "Relay", Type: "string", JSONPath: ".spec.relayRef.name"},
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "Cursor", Type: "integer", JSONPath: ".status.cursor"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "VaultCredential", Plural: "vaultcredentials", Revision: 1, Export: "applications", Object: VaultCredential{}, PrinterColumns: []PrinterColumn{
-		{Name: "Server", Type: "string", JSONPath: ".spec.server"},
+	{Kind: "VaultCredential", Plural: "vaultcredentials", Revision: 2, Export: "applications", Object: VaultCredential{}, PrinterColumns: []PrinterColumn{
+		{Name: "Server", Type: "string", JSONPath: ".spec.vault.name"},
 		{Name: "Path", Type: "string", JSONPath: ".spec.path"},
 		{Name: "RotationDue", Type: "boolean", JSONPath: ".status.rotationDue"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "VaultCertificate", Plural: "vaultcertificates", Revision: 1, Export: "applications", Object: VaultCertificate{}, PrinterColumns: []PrinterColumn{
+	{Kind: "VaultCertificate", Plural: "vaultcertificates", Revision: 2, Export: "applications", Object: VaultCertificate{}, PrinterColumns: []PrinterColumn{
 		{Name: "CommonName", Type: "string", JSONPath: ".spec.commonName"},
 		{Name: "Serial", Type: "string", JSONPath: ".status.serialNumber"},
 		{Name: "Expires", Type: "string", JSONPath: ".status.expiresAt"},

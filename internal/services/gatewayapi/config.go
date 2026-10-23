@@ -442,7 +442,7 @@ func (c Config) localDownloadBase(ctx context.Context, deps component.Deps) stri
 		if exposureServiceRefName(exp.Spec.ServiceRef) != serviceName {
 			continue
 		}
-		parsed, err := url.Parse(strings.TrimSpace(exp.Status.URL))
+		parsed, err := url.Parse(strings.TrimSpace(exp.Status.Address))
 		if err != nil || parsed.Port() == "" {
 			continue
 		}

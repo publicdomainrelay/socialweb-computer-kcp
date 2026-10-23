@@ -40,7 +40,7 @@ func TerminationStateSync(o *v1alpha1.ComputeVM, workspace, reason, observedAt s
 		return nil, errors.New("computevm: a termination StateSync needs a contract")
 	}
 	contract := o.Spec.Contract
-	if contract.ReceiptUri == "" || contract.ReceiptCid == "" {
+	if contract.ReceiptURI == "" || contract.ReceiptCID == "" {
 		return nil, errors.New("computevm: a termination StateSync needs a receipt")
 	}
 	if reason == "" || observedAt == "" {
@@ -64,11 +64,11 @@ func TerminationStateSync(o *v1alpha1.ComputeVM, workspace, reason, observedAt s
 	}
 	payload := map[string]any{
 		"collection": market.ComputeEventsVMTerminatedNSID,
-		"receipt":    map[string]any{"uri": contract.ReceiptUri, "cid": contract.ReceiptCid},
+		"receipt":    map[string]any{"uri": contract.ReceiptURI, "cid": contract.ReceiptCID},
 		"record":     record,
 	}
-	if contract.SubmitEventUrl != "" {
-		payload["submitEventUrl"] = contract.SubmitEventUrl
+	if contract.SubmitEventURL != "" {
+		payload["submitEventUrl"] = contract.SubmitEventURL
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
@@ -113,7 +113,7 @@ func TerminationStateSync(o *v1alpha1.ComputeVM, workspace, reason, observedAt s
 			"sink":           map[string]any{"adapter": TerminationSyncAdapter},
 			"direction":      string(v1alpha1.StateSyncDirectionOutbound),
 			"payload":        stored,
-			"idempotencyKey": "terminated:" + contract.ReceiptUri,
+			"idempotencyKey": "terminated:" + contract.ReceiptURI,
 			"conflictPolicy": string(v1alpha1.StateSyncConflictSourceWins),
 			"deletionPolicy": string(v1alpha1.StateSyncDeletionRetain),
 		},

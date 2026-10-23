@@ -130,13 +130,13 @@ func (r *bidderRun) passthrough(args []string) error {
 			nvSet = true
 			switch p.To {
 			case "network.plcDirectoryUrl":
-				nv.PlcDirectoryUrl = p.Value
+				nv.PLCDirectoryURL = p.Value
 			case "network.ingressProxyHost":
 				nv.IngressProxyHost = p.Value
 			case "network.relayUrls":
-				nv.RelayUrls = splitList(p.Value)
+				nv.RelayURLs = splitList(p.Value)
 			case "network.firehoseUrls":
-				nv.FirehoseUrls = splitList(p.Value)
+				nv.FirehoseURLs = splitList(p.Value)
 			case "network.qrOrigin":
 				nv.QrOrigin = p.Value
 			case "network.guestTlsUrl":
@@ -275,13 +275,13 @@ func (r *bidderRun) readMarketNetwork(path string) error {
 	if err := json.Unmarshal(b, &st); err != nil {
 		return fmt.Errorf("%s is not a MarketNetwork status: %w", path, err)
 	}
-	if st.Network == nil || st.BidderPdsUrl == "" {
+	if st.Network == nil || st.BidderPdsURL == "" {
 		return fmt.Errorf("%s names no network value or bidderPdsUrl (dev status --instance <n> | jq .network.status, once the network is Ready)", path)
 	}
 	if _, err := os.Stat(st.Network.CaBundleRef); err != nil {
 		return fmt.Errorf("the network CA bundle: %w", err)
 	}
-	r.value, r.pdsURL = st.Network, st.BidderPdsUrl
+	r.value, r.pdsURL = st.Network, st.BidderPdsURL
 	return nil
 }
 
@@ -396,7 +396,7 @@ func (r *bidderRun) inNetwork(ctx context.Context) int {
 		r.log("network child", "name", name, "phase", string(a.Phase), "message", a.Message)
 	})
 	sum := bidderSummary{Profile: r.profile, Handle: name + "." + appctl.BidderAccountDomain, Network: r.network, Name: name, Instance: st.Instance,
-		KcpURL: st.KcpUrl, Did: st.Did, Phase: st.Phase, Message: st.Message, Listeners: st.Listeners, Seconds: time.Since(started).Seconds()}
+		KcpURL: st.KcpURL, Did: st.Did, Phase: st.Phase, Message: st.Message, Listeners: st.Listeners, Seconds: time.Since(started).Seconds()}
 	r.a.printJSON(sum)
 	if err != nil {
 		return r.a.fail(exitFailed, "run bidder: %v", err)

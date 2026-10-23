@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-8.bidders.socialweb.computer
+  name: v1alpha1-9.bidders.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -55,9 +55,7 @@ spec:
                       type: string
                   qrOrigin:
                     type: string
-                  guestTlsUrl:
-                    type: string
-                  caBundleRef:
+                  caBundle:
                     type: string
                   hosts:
                     type: array
@@ -71,6 +69,9 @@ spec:
                       required:
                         - name
                         - address
+                    x-kubernetes-list-type: map
+                    x-kubernetes-list-map-keys:
+                      - name
                   comms:
                     type: object
                     properties:
@@ -96,12 +97,19 @@ spec:
                       ingressRef:
                         type: object
                         properties:
+                          group:
+                            type: string
                           kind:
                             type: string
+                            maxLength: 63
                           name:
                             type: string
-                          did:
+                            maxLength: 253
+                          workspace:
                             type: string
+                        required:
+                          - kind
+                          - name
                       publicHost:
                         type: string
                       xrpc:
@@ -114,21 +122,35 @@ spec:
                           relayRef:
                             type: object
                             properties:
+                              group:
+                                type: string
                               kind:
                                 type: string
+                                maxLength: 63
                               name:
                                 type: string
-                              did:
+                                maxLength: 253
+                              workspace:
                                 type: string
+                            required:
+                              - kind
+                              - name
                           identityRef:
                             type: object
                             properties:
+                              group:
+                                type: string
                               kind:
                                 type: string
+                                maxLength: 63
                               name:
                                 type: string
-                              did:
+                                maxLength: 253
+                              workspace:
                                 type: string
+                            required:
+                              - kind
+                              - name
                       opentunnel:
                         type: object
                         properties:
@@ -171,7 +193,7 @@ spec:
                       type: string
                   certRef:
                     type: string
-                  caBundleRef:
+                  caBundle:
                     type: string
               serviceAuth:
                 type: object
@@ -192,12 +214,19 @@ spec:
                   marketIdentityRef:
                     type: object
                     properties:
+                      group:
+                        type: string
                       kind:
                         type: string
+                        maxLength: 63
                       name:
                         type: string
-                      did:
+                        maxLength: 253
+                      workspace:
                         type: string
+                    required:
+                      - kind
+                      - name
                   did:
                     type: string
                   handle:
@@ -205,32 +234,79 @@ spec:
               pdsRef:
                 type: object
                 properties:
+                  group:
+                    type: string
                   kind:
                     type: string
+                    maxLength: 63
                   name:
                     type: string
-                  did:
+                    maxLength: 253
+                  workspace:
                     type: string
-              pdsAccessTokenPath:
-                type: string
+                required:
+                  - kind
+                  - name
+              pdsAccessToken:
+                type: object
+                properties:
+                  vault:
+                    type: object
+                    properties:
+                      group:
+                        type: string
+                      kind:
+                        type: string
+                        maxLength: 63
+                      name:
+                        type: string
+                        maxLength: 253
+                      workspace:
+                        type: string
+                    required:
+                      - kind
+                      - name
+                  mount:
+                    type: string
+                  path:
+                    type: string
+                  key:
+                    type: string
+                required:
+                  - mount
+                  - path
               policyEngineRef:
                 type: object
                 properties:
+                  group:
+                    type: string
                   kind:
                     type: string
+                    maxLength: 63
                   name:
                     type: string
-                  did:
+                    maxLength: 253
+                  workspace:
                     type: string
+                required:
+                  - kind
+                  - name
               vaultRef:
                 type: object
                 properties:
+                  group:
+                    type: string
                   kind:
                     type: string
+                    maxLength: 63
                   name:
                     type: string
-                  did:
+                    maxLength: 253
+                  workspace:
                     type: string
+                required:
+                  - kind
+                  - name
               hostnames:
                 type: array
                 items:
@@ -252,6 +328,8 @@ spec:
                   port:
                     type: integer
                     format: int32
+                    minimum: 0
+                    maximum: 65535
                   healthPath:
                     type: string
               guestImageSource:
@@ -310,8 +388,14 @@ spec:
                 type: array
                 items:
                   type: string
-              marketURL:
-                type: string
+              marketExposureRef:
+                type: object
+                properties:
+                  name:
+                    type: string
+                    maxLength: 253
+                required:
+                  - name
               mode:
                 type: string
               comms:

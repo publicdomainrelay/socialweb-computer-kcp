@@ -203,11 +203,11 @@ func (v *KCPVMs) PatchMarket(ctx context.Context, name string, patch v1alpha1.Co
 		return errors.New("bidder: the ComputeVM store is not configured")
 	}
 	owned := map[string]any{}
-	if patch.OnNetworkUri != "" {
-		owned["onNetworkUri"] = patch.OnNetworkUri
+	if patch.OnNetworkURI != "" {
+		owned["onNetworkUri"] = patch.OnNetworkURI
 	}
-	if patch.HostKeysUri != "" {
-		owned["hostKeysUri"] = patch.HostKeysUri
+	if patch.HostKeysURI != "" {
+		owned["hostKeysUri"] = patch.HostKeysURI
 	}
 	if patch.Termination != nil {
 		termination := map[string]any{}
@@ -223,14 +223,14 @@ func (v *KCPVMs) PatchMarket(ctx context.Context, name string, patch v1alpha1.Co
 		if patch.Termination.Request != nil {
 			termination["request"] = map[string]any{"uri": patch.Termination.Request.URI, "cid": patch.Termination.Request.CID}
 		}
-		if patch.Termination.PayloadUri != "" {
-			termination["payloadUri"] = patch.Termination.PayloadUri
+		if patch.Termination.PayloadURI != "" {
+			termination["payloadUri"] = patch.Termination.PayloadURI
 		}
 		if patch.Termination.PayloadCid != "" {
 			termination["payloadCid"] = patch.Termination.PayloadCid
 		}
-		if patch.Termination.EventUri != "" {
-			termination["eventUri"] = patch.Termination.EventUri
+		if patch.Termination.EventURI != "" {
+			termination["eventUri"] = patch.Termination.EventURI
 		}
 		if patch.Termination.EventCid != "" {
 			termination["eventCid"] = patch.Termination.EventCid

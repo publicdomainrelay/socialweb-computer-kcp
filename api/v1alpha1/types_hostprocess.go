@@ -48,7 +48,7 @@ type HostProcessSpec struct {
 
 	Env []HostProcessEnv `json:"env,omitempty"`
 
-	EnvFiles []string `json:"envFiles,omitempty"`
+	EnvFiles []string `json:"envFiles,omitempty" apigen:"userEndpoint"`
 
 	WorkDir string `json:"workDir,omitempty"`
 
@@ -118,7 +118,7 @@ type HostProcessReadiness struct {
 
 	Tcp bool `json:"tcp,omitempty"`
 
-	HttpPath string `json:"httpPath,omitempty"`
+	HttpPath string `json:"httpPath,omitempty" apigen:"userEndpoint"`
 
 	PgxSocketDir string `json:"pgxSocketDir,omitempty"`
 

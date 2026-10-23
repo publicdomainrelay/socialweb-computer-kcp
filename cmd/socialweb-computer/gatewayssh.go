@@ -74,11 +74,11 @@ func (r *gatewaySshRun) passthrough(args []string) error {
 			nvSet = true
 			switch p.Name {
 			case "plc-directory-url":
-				nv.PlcDirectoryUrl = p.Value
+				nv.PLCDirectoryURL = p.Value
 			case "ingress-proxy-host":
 				nv.IngressProxyHost = p.Value
 			case "relay-url":
-				nv.RelayUrls = splitList(p.Value)
+				nv.RelayURLs = splitList(p.Value)
 			case "network-hosts":
 				for _, h := range splitList(p.Value) {
 					name, addr, ok := strings.Cut(h, "=")
@@ -208,7 +208,7 @@ func (r *gatewaySshRun) inNetwork(ctx context.Context) int {
 	}, func(a v1alpha1.NetworkAppStatus) {
 		r.log("network child", "name", name, "phase", string(a.Phase), "message", a.Message)
 	})
-	sum := r.report(gatewaySshSummary{Profile: r.profile, Network: r.network, Name: name, Instance: st.Instance, KcpURL: st.KcpUrl},
+	sum := r.report(gatewaySshSummary{Profile: r.profile, Network: r.network, Name: name, Instance: st.Instance, KcpURL: st.KcpURL},
 		v1alpha1.ApplicationStatus{Phase: st.Phase, Message: st.Message, Listeners: st.Listeners, Components: st.Components})
 	sum.Seconds = time.Since(started).Seconds()
 	r.a.printJSON(sum)

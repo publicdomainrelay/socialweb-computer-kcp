@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-2.eventstreams.events.socialweb.computer
+  name: v1alpha1-3.eventstreams.events.socialweb.computer
 spec:
   group: events.socialweb.computer
   names:
@@ -40,24 +40,34 @@ spec:
                   pdsRef:
                     type: object
                     properties:
-                      workspace:
+                      group:
                         type: string
                       kind:
                         type: string
+                        maxLength: 63
                       name:
                         type: string
+                        maxLength: 253
+                      workspace:
+                        type: string
                     required:
+                      - kind
                       - name
                   relayRef:
                     type: object
                     properties:
-                      workspace:
+                      group:
                         type: string
                       kind:
                         type: string
+                        maxLength: 63
                       name:
                         type: string
+                        maxLength: 253
+                      workspace:
+                        type: string
                     required:
+                      - kind
                       - name
                   relayUrls:
                     type: array

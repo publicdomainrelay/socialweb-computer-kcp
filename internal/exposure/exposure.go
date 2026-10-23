@@ -153,7 +153,7 @@ func (c *ExposureController) Reconcile(ctx context.Context, dyn dynamic.Interfac
 		c.release(name)
 		status.Phase = exposurev1alpha1.ExposurePending
 		status.Ready = false
-		status.URL = ""
+		status.Address = ""
 		status.Endpoint = ""
 		setCondition(&status.Conditions, generation, ConditionHandlerRegistered, false, "Suspended", "the Exposure is suspended")
 		setCondition(&status.Conditions, generation, ConditionReady, false, "Suspended", "the Exposure is suspended")
@@ -164,7 +164,7 @@ func (c *ExposureController) Reconcile(ctx context.Context, dyn dynamic.Interfac
 		c.release(name)
 		status.Phase = exposurev1alpha1.ExposureFailed
 		status.Ready = false
-		status.URL = ""
+		status.Address = ""
 		status.Endpoint = ""
 		message := fmt.Sprintf("unknown mode %q", exp.Spec.Mode)
 		setCondition(&status.Conditions, generation, ConditionHandlerRegistered, false, "InvalidMode", message)
@@ -177,7 +177,7 @@ func (c *ExposureController) Reconcile(ctx context.Context, dyn dynamic.Interfac
 		c.release(name)
 		status.Phase = exposurev1alpha1.ExposurePending
 		status.Ready = false
-		status.URL = ""
+		status.Address = ""
 		status.Endpoint = ""
 		message := "the Exposure has no serviceRef"
 		setCondition(&status.Conditions, generation, ConditionHandlerRegistered, false, "ServiceMissing", message)
@@ -193,7 +193,7 @@ func (c *ExposureController) Reconcile(ctx context.Context, dyn dynamic.Interfac
 		c.release(name)
 		status.Phase = exposurev1alpha1.ExposurePending
 		status.Ready = false
-		status.URL = ""
+		status.Address = ""
 		status.Endpoint = ""
 		message := "the Service " + serviceName + " is not present in workspace " + c.workspace
 		setCondition(&status.Conditions, generation, ConditionHandlerRegistered, false, "ServiceMissing", message)
@@ -205,7 +205,7 @@ func (c *ExposureController) Reconcile(ctx context.Context, dyn dynamic.Interfac
 		c.release(name)
 		status.Phase = exposurev1alpha1.ExposurePending
 		status.Ready = false
-		status.URL = ""
+		status.Address = ""
 		status.Endpoint = ""
 		message := "the Service " + serviceName + " is suspended"
 		setCondition(&status.Conditions, generation, ConditionHandlerRegistered, false, "ServiceSuspended", message)
@@ -218,7 +218,7 @@ func (c *ExposureController) Reconcile(ctx context.Context, dyn dynamic.Interfac
 		c.release(name)
 		status.Phase = exposurev1alpha1.ExposureFailed
 		status.Ready = false
-		status.URL = ""
+		status.Address = ""
 		status.Endpoint = ""
 		setCondition(&status.Conditions, generation, ConditionHandlerRegistered, false, "InvalidTarget", err.Error())
 		setCondition(&status.Conditions, generation, ConditionReady, false, "InvalidTarget", err.Error())
@@ -230,7 +230,7 @@ func (c *ExposureController) Reconcile(ctx context.Context, dyn dynamic.Interfac
 		c.release(name)
 		status.Phase = exposurev1alpha1.ExposureFailed
 		status.Ready = false
-		status.URL = ""
+		status.Address = ""
 		status.Endpoint = ""
 		setCondition(&status.Conditions, generation, ConditionHandlerRegistered, false, "InvalidProtocol", err.Error())
 		setCondition(&status.Conditions, generation, ConditionReady, false, "InvalidProtocol", err.Error())
@@ -241,7 +241,7 @@ func (c *ExposureController) Reconcile(ctx context.Context, dyn dynamic.Interfac
 		c.release(name)
 		status.Phase = exposurev1alpha1.ExposurePending
 		status.Ready = false
-		status.URL = ""
+		status.Address = ""
 		status.Endpoint = ""
 		message := fmt.Sprintf("no handler %q is registered for %s/%s in workspace %s", handlerName(svc.Spec.Handler), target.Kind, target.Name, target.Workspace)
 		setCondition(&status.Conditions, generation, ConditionHandlerRegistered, false, "HandlerMissing", message)
@@ -279,7 +279,7 @@ func (c *ExposureController) Reconcile(ctx context.Context, dyn dynamic.Interfac
 			status.Phase = exposurev1alpha1.ExposureFailed
 		}
 		status.Ready = false
-		status.URL = ""
+		status.Address = ""
 		status.Endpoint = ""
 		setCondition(&status.Conditions, generation, ConditionHandlerRegistered, true, "HandlerRegistered", "the target handler is registered")
 		setCondition(&status.Conditions, generation, ConditionReady, false, reason, err.Error())
@@ -289,7 +289,7 @@ func (c *ExposureController) Reconcile(ctx context.Context, dyn dynamic.Interfac
 	c.store(name, rt)
 	status.Phase = exposurev1alpha1.ExposureReady
 	status.Ready = true
-	status.URL = url
+	status.Address = url
 	status.Endpoint = endpoint
 	setCondition(&status.Conditions, generation, ConditionHandlerRegistered, true, "HandlerRegistered", "the target handler is registered")
 	if rt.provider != "" {

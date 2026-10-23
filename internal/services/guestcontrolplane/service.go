@@ -191,7 +191,7 @@ func (s *Service) prepare(ctx context.Context) error {
 			s.log.Warn("the guest control plane runs without some kcp stores", "err", err)
 		}
 	}
-	s.dir = ingress.NewDirectory(s.cfg.Network.PlcDirectoryUrl)
+	s.dir = ingress.NewDirectory(s.cfg.Network.PLCDirectoryURL)
 	if err := s.resolveIdentity(ctx); err != nil {
 		s.log.Warn("the bidder identity is not resolved yet", "err", err)
 	}
@@ -408,7 +408,7 @@ func (s *Service) exposureIssuerURL(ctx context.Context) string {
 	if err != nil {
 		return ""
 	}
-	raw, _, _ := unstructured.NestedString(u.Object, "status", "url")
+	raw, _, _ := unstructured.NestedString(u.Object, "status", "address")
 	raw = strings.TrimRight(strings.TrimSpace(raw), "/")
 	parsed, err := url.Parse(raw)
 	if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && parsed.Scheme != "http") {

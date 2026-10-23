@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-1.services.exposure.socialweb.computer
+  name: v1alpha1-2.services.exposure.socialweb.computer
 spec:
   group: exposure.socialweb.computer
   names:
@@ -31,10 +31,14 @@ spec:
               targetRef:
                 type: object
                 properties:
+                  group:
+                    type: string
                   kind:
                     type: string
+                    maxLength: 63
                   name:
                     type: string
+                    maxLength: 253
                   workspace:
                     type: string
                 required:
