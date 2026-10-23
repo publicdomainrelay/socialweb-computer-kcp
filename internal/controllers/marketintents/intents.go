@@ -374,6 +374,8 @@ func (h *handle) SetComputeContractPendingEvents(ctx context.Context, name strin
 }
 
 func (h *handle) mergeStatus(ctx context.Context, kind, name string, patch map[string]any) error {
+	unlock := h.c.lockStatus(h.owner.Workspace + "/" + kind + "/" + name)
+	defer unlock()
 	cl, err := h.client()
 	if err != nil {
 		return err
