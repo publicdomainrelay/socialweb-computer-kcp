@@ -566,9 +566,6 @@ func (s *Service) pdsAccessToken(ctx context.Context) (string, error) {
 			}
 		}
 	}
-	if token != "" {
-		s.log.Warn("bidder token selected", "len", len(token), "parts", strings.Count(token, ".")+1)
-	}
 	return token, nil
 }
 
