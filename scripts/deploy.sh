@@ -195,6 +195,19 @@ ${KCP_ORIGIN} {
       }
     }
   }
+  @tenant path_regexp ^/clusters/root:[a-z0-9]+:[a-z0-9]([a-z0-9-]*[a-z0-9])?:clusters(/.*)?\$
+  handle @tenant {
+    reverse_proxy https://127.0.0.1:${CERT_FRONT_PORT} {
+      header_up -X-Socialweb-Client-Certificate
+      flush_interval -1
+      transport http {
+        tls_trusted_ca_certs ${CA_DIR}/gateway.crt
+        tls_client_auth ${CA_DIR}/edge-client.crt ${CA_DIR}/edge-client.key
+        tls_server_name 127.0.0.1
+        versions 1.1
+      }
+    }
+  }
   handle {
     reverse_proxy https://127.0.0.1:${KCP_PORT} {
       header_up -X-Socialweb-Client-Certificate
@@ -224,7 +237,7 @@ fi
 caddy validate --config /etc/caddy/Caddyfile >/dev/null
 systemctl reload caddy || systemctl restart caddy
 
-say "https://${ORIGIN} -> web app, https://${KCP_ORIGIN} -> kcp front"
+say "https://${ORIGIN} -> web app, https://${KCP_ORIGIN} -> kcp front, tenant cluster paths -> client certificate front"
 REMOTE_EOF
 
 say "done: https://${ORIGIN} and https://${KCP_ORIGIN}"
