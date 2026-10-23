@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -329,6 +330,17 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 				}
 			} else {
 				cfg.PDSDPoP = source
+				if deps.Log != nil {
+					token, _ := credential.Value("accessJwt")
+					claims := map[string]any{}
+					if parts := strings.Split(token, "."); len(parts) == 3 {
+						if raw, err := base64.RawURLEncoding.DecodeString(parts[1]); err == nil {
+							_ = json.Unmarshal(raw, &claims)
+						}
+					}
+					deps.Log.Warn("bidder session debug", "tokenLen", len(token), "parts", strings.Count(token, ".")+1,
+						"iss", claims["iss"], "aud", claims["aud"], "exp", claims["exp"], "scope", claims["scope"])
+				}
 			}
 		}
 	}
