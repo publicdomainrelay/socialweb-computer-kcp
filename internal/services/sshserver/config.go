@@ -3,7 +3,6 @@ package sshserver
 import (
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -18,6 +17,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	coreapi "github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayapi"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/sshtransport"
 
@@ -496,13 +496,9 @@ func (t handlerAwareRoundTripper) RoundTrip(req *http.Request) (*http.Response, 
 }
 
 func serviceHTTPClient(cfg Config, timeout time.Duration) *http.Client {
-	var external http.RoundTripper = http.DefaultTransport
-	if transport, err := networkdial.NewHTTPTransportWithOptions(networkdial.DialOptions{
-		Hosts:          networkHostsResolver(cfg.Network, cfg.Deps.Hosts),
-		TLSConfig:      cfg.Deps.TLS,
-		AllowSystemDNS: true,
-	}); err == nil {
-		external = transport
+	external := httpclient.External(httpclient.Options{Hosts: networkHostsResolver(cfg.Network, cfg.Deps.Hosts), TLS: cfg.Deps.TLS}).Transport
+	if external == nil {
+		external = http.DefaultTransport
 	}
 	return &http.Client{
 		Timeout:   timeout,
@@ -529,11 +525,11 @@ func networkTLSConfig(caBundle string) *tls.Config {
 	if raw == "" {
 		return nil
 	}
-	pool := x509.NewCertPool()
-	if !pool.AppendCertsFromPEM([]byte(raw)) {
+	cfg, err := httpclient.TLSConfig(httpclient.TLSOptions{CAPEM: []byte(raw)})
+	if err != nil {
 		return nil
 	}
-	return &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
+	return cfg
 }
 
 func networkHostsResolver(network v1alpha1.MarketNetworkValue, fallback networkdial.Resolver) networkdial.Resolver {
