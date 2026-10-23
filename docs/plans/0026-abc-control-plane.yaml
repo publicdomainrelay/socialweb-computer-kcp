@@ -381,7 +381,7 @@ items:
     track: refs
     parallel_with: []
     depends_on: [W0-CODEGEN]
-    status: todo
+    status: done
     closes: [D02, D19]
     decision: >
       Create api/common/v1alpha1 with ObjectRef, LocalObjectRef, StrongRef,
