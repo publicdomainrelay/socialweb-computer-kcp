@@ -114,11 +114,15 @@ func (h *Host) EnsureTerminationSync(ctx context.Context, o v1alpha1.ComputeVM, 
 		return err
 	}
 	name := object.Name
-	if _, err := kube.Create[v1alpha1.StateSync](ctx, h.syncs, object, metav1.CreateOptions{}); err != nil {
-		if apierrors.IsAlreadyExists(err) {
-			return nil
-		}
-		return fmt.Errorf("computevm: creating the termination StateSync %s: %w", name, err)
+	_, err = kube.Get[v1alpha1.StateSync](ctx, h.syncs, name)
+	if err == nil {
+		return nil
+	}
+	if !apierrors.IsNotFound(err) {
+		return fmt.Errorf("computevm: reading the termination StateSync %s: %w", name, err)
+	}
+	if _, err := kube.Apply[v1alpha1.StateSync](ctx, h.syncs, object, kube.ApplyOptions{FieldManager: v1alpha1.FieldManagerComputeVMController, Force: true}); err != nil {
+		return fmt.Errorf("computevm: applying the termination StateSync %s: %w", name, err)
 	}
 	h.c.log().Info("a termination StateSync is created", "computevm", o.Name, "statesync", name)
 	return nil
