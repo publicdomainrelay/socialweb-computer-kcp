@@ -23,7 +23,7 @@ items:
       the CR status does not reflect what is on the PDS.
   - id: D02-AUTHREF-SHAPE
     title: "AtprotoRepo authRef carries a vault path in RepoRef.Name"
-    status: todo
+    status: done
     defect: >
       appctl writes AuthRef as RepoRef{Kind: "Vault", Name: "openbao:"+path}
       (internal/appctl/statusobjects.go:30). The record controller reads only
