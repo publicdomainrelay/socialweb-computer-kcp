@@ -60,7 +60,8 @@ func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
 		return nil, err
 	}
 	ctl := &Controller{ports: opts.Ports, front: opts.Front, known: map[ctlruntime.Request]bool{}}
-	options := []ctlruntime.Option{ctlruntime.Export(Export), ctlruntime.SharedStatus(), ctlruntime.Gone(ctl.gone),
+	options := []ctlruntime.Option{ctlruntime.Export(Export), ctlruntime.SharedStatus(), ctlruntime.FieldManager(v1alpha1.FieldManagerClusterFront),
+		ctlruntime.Gone(ctl.gone),
 		ctlruntime.WatchesIn(LeaseExport, ctl.holderOf)}
 	if opts.Scope != nil {
 		options = append(options, ctlruntime.InWorkspaces(opts.Scope))
@@ -87,26 +88,37 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 	c.remember(self)
 	name := strings.TrimSpace(object.Name)
 	registry := registryHeldPorts(c.ports.Leases(), req.Workspace, name)
+	front := object.Status.Front
+	if front == nil {
+		front = &v1alpha1.ClusterFrontStatus{}
+	}
 	state, err := c.front.Status(ctx)
 	if err != nil {
 		var kept []v1alpha1.ClusterHeldPort
-		for _, held := range object.Status.HeldPorts {
+		for _, held := range front.HeldPorts {
 			if held.HolderRef == name+FrontHolder {
 				kept = append(kept, held)
 			}
 		}
-		applyErr := c.apply(ctx, req, object, object.Status.FrontAddress, mergeHeldPorts(nil, name, kept, registry))
+		next := v1alpha1.ClusterFrontStatus{Address: front.Address, Message: "reading the apiserver front: " + err.Error(),
+			HeldPorts: mergeHeldPorts(nil, name, kept, registry)}
+		applyErr := c.apply(ctx, req, object, next)
 		return ctlruntime.Result{}, errors.Join(fmt.Errorf("cluster: reading the apiserver front of cluster %s: %w", name, err), applyErr)
 	}
-	return ctlruntime.Result{}, c.apply(ctx, req, object, strings.TrimSpace(state.Address), mergeHeldPorts(state.Holds, name, registry))
+	address := strings.TrimSpace(state.Address)
+	next := v1alpha1.ClusterFrontStatus{Address: address, Ready: address != "", HeldPorts: mergeHeldPorts(state.Holds, name, registry)}
+	if !next.Ready {
+		next.Message = "the apiserver front reports no address"
+	}
+	return ctlruntime.Result{}, c.apply(ctx, req, object, next)
 }
 
-func (c *Controller) apply(ctx context.Context, req ctlruntime.Request, object *v1alpha1.Cluster, address string, held []v1alpha1.ClusterHeldPort) error {
-	if object.Status.FrontAddress == address && reflect.DeepEqual(object.Status.HeldPorts, held) {
+func (c *Controller) apply(ctx context.Context, req ctlruntime.Request, object *v1alpha1.Cluster, front v1alpha1.ClusterFrontStatus) error {
+	if object.Status.Front != nil && reflect.DeepEqual(*object.Status.Front, front) {
 		return nil
 	}
 	next := &v1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: object.Name, Namespace: object.Namespace},
-		Status: v1alpha1.ClusterStatus{FrontAddress: address, HeldPorts: held}}
+		Status: v1alpha1.ClusterStatus{Front: &front}}
 	return req.ApplyStatus(ctx, next)
 }
 
