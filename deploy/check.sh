@@ -8,7 +8,7 @@ case "$mode" in
   --full) run=full ;;
   *)
     echo "usage: $0 [--fast|--local|--full]" >&2
-    echo "  --fast   the build gate: gofmt, go build, apigen, go vet, cross-OS and release builds" >&2
+    echo "  --fast   the build gate: gofmt, go build, apigen, codegen drift, go vet, architecture rules, cross-OS and release builds" >&2
     echo "  --local  --fast plus cargo test of rust/ and the embedded asset check (dev verify-assets); lists what it skipped" >&2
     echo "  --full   --local, and a skip is a failure; needs sudo -n, cargo and the staged assets on this host" >&2
     exit 2
@@ -20,7 +20,7 @@ fail() {
   exit 1
 }
 
-unformatted="$(gofmt -l api internal cmd)"
+unformatted="$(gofmt -l api internal cmd hack lexicons)"
 if [ -n "$unformatted" ]; then
   echo "$unformatted" >&2
   fail gofmt
@@ -52,18 +52,22 @@ if [ "$drift" -ne 0 ]; then
 fi
 echo "check.sh: ok apigen ($compared generated files, no drift from api/v1alpha1)"
 
-apisnap() { git ls-files -co --exclude-standard -- api | LC_ALL=C sort | xargs sha256sum 2>&1; }
-apibefore="$(apisnap)"
-go generate ./api/... >/dev/null || fail "go generate ./api/..."
-if [ "$(apisnap)" != "$apibefore" ]; then
-  git status --short -- api >&2
-  git diff -- api >&2
-  fail "codegen drift: go generate ./api/... changed api/; commit its output"
+generated="api internal/atproto/market deploy"
+gensnap() { git ls-files -co --exclude-standard -- $generated | LC_ALL=C sort | xargs sha256sum 2>&1; }
+genbefore="$(gensnap)"
+go generate ./... >/dev/null || fail "go generate ./..."
+if [ "$(gensnap)" != "$genbefore" ]; then
+  git status --short -- $generated >&2
+  git diff -- $generated >&2
+  fail "codegen drift: go generate ./... changed $generated; commit its output"
 fi
-echo "check.sh: ok codegen (go generate ./api/... leaves api/ unchanged)"
+echo "check.sh: ok codegen (go generate ./... leaves $generated unchanged)"
 
 go vet ./... || fail "go vet"
 echo "check.sh: ok go vet"
+
+scripts/check-architecture.sh || fail "architecture rules (scripts/check-architecture.sh)"
+echo "check.sh: ok architecture rules"
 
 for module in $(jq -r '[.assets[].fetch // {} | .[] | select(.kind == "go") | .module // empty] | unique[]' internal/versions/versions.json); do
   (cd "$module" && go build -o /dev/null ./... && go vet ./...) || fail "go build and go vet of the asset module $module"
