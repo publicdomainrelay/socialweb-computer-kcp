@@ -98,6 +98,15 @@ func DesiredSuspended(d Desired) bool {
 	return v
 }
 
+func ParticipationSuspended(d Desired) bool {
+	m, err := SpecMap(d.Spec)
+	if err != nil || m == nil {
+		return false
+	}
+	v, _ := m["suspendParticipation"].(bool)
+	return v
+}
+
 func (s Snapshot) Satisfied(desired []Desired) bool {
 	if len(desired) == 0 {
 		return false
@@ -160,7 +169,7 @@ func FillComponentStatus(conditions *[]metav1.Condition, summaryOut **v1alpha1.C
 			notReady = append(notReady, key)
 			continue
 		}
-		if DesiredSuspended(d) {
+		if DesiredSuspended(d) || (ParticipationSuspended(d) && v.Status.Ready) {
 			summary.Suspended++
 			suspended = append(suspended, key)
 			continue

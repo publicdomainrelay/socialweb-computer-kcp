@@ -192,6 +192,12 @@ func (r *contractRunner) Run(ctx context.Context) {
 		return
 	}
 	if r.released() {
+		if r.recoverReceipt(ctx, state) {
+			if err := r.releaseContract(ctx, state, winnerDID(state)); err != nil && !r.q.stopping() {
+				r.recordFailure(ctx, r.stateCopy(), err, 1)
+			}
+			return
+		}
 		r.writeStatus(ctx, v1alpha1.ComputeContractReleased, "released before a VM was held", state, r.currentBids(), r.currentChosen(), false, "released", 1)
 		return
 	}
@@ -215,6 +221,12 @@ func (r *contractRunner) Run(ctx context.Context) {
 		}
 		if r.released() {
 			st := r.stateCopy()
+			if st != nil && st.Receipt == nil && r.recoverReceipt(ctx, st) {
+				if err := r.releaseContract(ctx, st, winnerDID(st)); err != nil && !r.q.stopping() {
+					r.recordFailure(ctx, r.stateCopy(), err, int32(attempt+1))
+				}
+				return
+			}
 			if st == nil || st.Receipt == nil {
 				r.writeStatus(ctx, v1alpha1.ComputeContractReleased, "released before a VM was held", st, r.currentBids(), r.currentChosen(), false, "released", int32(attempt+1))
 				return
@@ -620,6 +632,33 @@ func (r *contractRunner) resumeAccepted(ctx context.Context, state *v1alpha1.Nod
 		return false, fmt.Errorf("no receipt arrived within %s", r.q.cfg.ReceiptTimeout)
 	}
 	return false, r.acceptReceipt(ctx, state, accept.Value, acceptRef.URI, receipt)
+}
+
+func (r *contractRunner) recoverReceipt(ctx context.Context, state *v1alpha1.NodeClaimContract) bool {
+	bidderDID := winnerDID(state)
+	if state == nil || state.Receipt != nil || state.Accept == nil || state.Accept.URI == "" || bidderDID == "" {
+		return false
+	}
+	receipt, err := r.q.readReceipt(ctx, bidderDID, state.Accept.URI)
+	if err != nil || receipt == nil {
+		r.log().Info("requester_release_no_receipt", "accept", state.Accept.URI, "bidder", bidderDID, "err", fmt.Sprint(err))
+		return false
+	}
+	accept, err := r.q.repo.Resolve(ctx, market.RecordRef{URI: state.Accept.URI, CID: state.Accept.CID})
+	if err != nil {
+		r.log().Warn("requester_release_accept_unread", "accept", state.Accept.URI, "err", err)
+		return false
+	}
+	if verification := market.VerifyReceipt(ctx, receipt.Value, receipt.URI, accept.Value, state.Accept.URI, r.q.receiptOptions()); !verification.OK {
+		r.log().Warn("requester_release_receipt_invalid", "receipt", receipt.URI)
+		return false
+	}
+	state.Receipt = &commonv1.StrongRef{URI: receipt.URI, CID: receipt.CID}
+	state.SubmitEventRef = stringOf(receipt.Value["submitEvent"])
+	state.ReceiptOk = new(true)
+	r.setState(state)
+	r.log().Info("requester_release_found_receipt", "receipt", receipt.URI, "bidder", bidderDID)
+	return true
 }
 
 func (r *contractRunner) acceptReceipt(ctx context.Context, state *v1alpha1.NodeClaimContract, acceptRecord map[string]any, acceptURI string, receipt *market.ResolvedRecord) error {

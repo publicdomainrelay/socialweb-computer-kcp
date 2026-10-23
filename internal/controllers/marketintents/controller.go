@@ -83,6 +83,15 @@ type Controller struct {
 	events map[string]*ctlruntime.Queue
 
 	owners map[string]ownerUID
+
+	statusLocks sync.Map
+}
+
+func (c *Controller) lockStatus(key string) func() {
+	held, _ := c.statusLocks.LoadOrStore(key, &sync.Mutex{})
+	lock := held.(*sync.Mutex)
+	lock.Lock()
+	return lock.Unlock
 }
 
 type ownerUID struct {

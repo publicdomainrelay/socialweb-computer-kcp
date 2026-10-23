@@ -136,11 +136,16 @@ sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG
 Both roots must be `Suspended`; the Bidder reports `true Ready`.
 
 A component override (`{"spec":{"components":{"Bidder":{"suspend":true}}}}`)
-is a different, stronger pause: it stops the Bidder process. The root stays
-`Ready` with `componentSummary` `{"desired":4,"notReady":0,"ready":3,"suspended":1}`
-on a localRepo bidder (Bidder, GuestControlPlane, Pds, PolicyEngine) and the
-Bidder reports phase `Suspended`; a component-suspended bidder cannot release
-its VMs until it is resumed. Section 7 uses it.
+pauses only the Bidder's participation: it sets the Bidder's
+`spec.suspendParticipation=true`, not `spec.suspend` (suspend stops
+participation, never obligations). The Bidder process keeps running: it
+withdraws its offering, stops its heartbeat, declines new RFPs and accepts, and
+still releases the VMs it runs on `vm.delete`, over XRPC or the firehose. The
+root stays `Ready` with `componentSummary`
+`{"desired":4,"notReady":0,"ready":3,"suspended":1}` on a localRepo bidder
+(Bidder, GuestControlPlane, Pds, PolicyEngine) and the Bidder reports
+`true Ready`. A Requester override works the same way. Other component kinds
+keep `spec.suspend`, which stops the component. Section 7 uses it.
 
 ## 2. Resume hat-7 and point it at the gateway PDS firehose
 
@@ -361,8 +366,8 @@ winners, and the three `NODE` names in `get pods -o wide` are distinct.
 A paused winner (root `spec.suspend`) still reads the market inbox and
 releases its VM on the requester's `vm.delete` (A2). To prove A2, run the
 scale to zero below before the resume block and check `computevms` on every
-paused host; otherwise resume first. (A winner paused with the component
-override cannot see `vm.delete`; resume it first.)
+paused host; otherwise resume first. A winner paused with the component
+override releases its VM the same way.
 
 ```bash
 ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl patch marketbidders.socialweb.computer app --type merge -p '{\"spec\":{\"suspend\":false}}'"
@@ -422,7 +427,8 @@ hb
 ```
 
 `createdAt` must be identical. On hat-7 the root must be Ready with
-`{"desired":3,"notReady":0,"ready":2,"suspended":1}`; GuestControlPlane stays
+`{"desired":3,"notReady":0,"ready":2,"suspended":1}`, the Bidder reports
+`spec.suspendParticipation=true` and phase `Ready`; GuestControlPlane stays
 Ready; the IngressProxy stays Ready; the GuestControlPlane ingress URL answers:
 
 ```bash

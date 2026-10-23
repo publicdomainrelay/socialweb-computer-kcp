@@ -155,7 +155,8 @@ func (c *Composer) ApplyOperatorRepo(ctx context.Context, r Root, ws string, op 
 		ca := *op.CARef
 		caRef, identity.CARef = &ca, &ca
 	}
-	if err := c.ApplyLinks(ctx, r, operatorRecordLinkSet, OperatorRecordLinks(ws, op.ref(r.Workspace), did, caRef), ws); err != nil {
+	links := OperatorRecordLinks(ws, op.ref(r.Workspace), did, caRef)
+	if err := c.AddLinks(ctx, r, operatorRecordLinkSet, links); err != nil {
 		return err
 	}
 	if err := c.ApplyIdentitySpec(ctx, r, ws, OperatorRepoName, identity); err != nil {
@@ -164,5 +165,8 @@ func (c *Composer) ApplyOperatorRepo(ctx context.Context, r Root, ws string, op 
 	pdsRef := op.ref(r.Workspace)
 	remote := &v1alpha1.RemoteRepo{ObjectMeta: metav1.ObjectMeta{Name: OperatorRepoName}, Spec: v1alpha1.RemoteRepoSpec{DID: did, PdsRef: pdsRef,
 		CredentialsRef: commonv1.CredentialsRef{ObjectRef: commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: KindMarketIdentity, Name: OperatorRepoName}}}}
-	return c.ApplyRepo(ctx, r, ws, OperatorRepoName, KindRemoteRepo, v1alpha1.RemoteRepoGVR, remote)
+	if err := c.ApplyRepo(ctx, r, ws, OperatorRepoName, KindRemoteRepo, v1alpha1.RemoteRepoGVR, remote); err != nil {
+		return err
+	}
+	return c.ApplyLinks(ctx, r, operatorRecordLinkSet, links, ws)
 }
