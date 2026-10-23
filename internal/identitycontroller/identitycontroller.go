@@ -24,6 +24,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauthclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 )
 
 const (
@@ -212,6 +213,7 @@ func (c *Controller) reconcile(ctx context.Context, dyn dynamic.Interface, u *un
 	if u == nil || u.GetDeletionTimestamp() != nil {
 		return
 	}
+	ctx = bus.WithObject(ctx, c.workspace, u)
 	var id v1alpha1.MarketIdentity
 	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &id); err != nil {
 		c.log.Warn("decoding a MarketIdentity", "workspace", c.workspace, "name", u.GetName(), "err", err.Error())

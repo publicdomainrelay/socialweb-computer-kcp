@@ -22,6 +22,7 @@ import (
 	policyv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/policy/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
@@ -284,11 +285,12 @@ func (ctl *Controller) Pass(ctx context.Context) {
 		}
 		for i := range list.Items {
 			u := &list.Items[i]
-			if err := k.reconcile(ctx, u); err != nil && ctx.Err() == nil {
+			objCtx := bus.WithObject(ctx, ctl.c.workspace(), u)
+			if err := k.reconcile(objCtx, u); err != nil && ctx.Err() == nil {
 				log.Warn("a reconcile pass failed; the next pass retries", "kind", u.GetKind(), "name", u.GetName(), "err", err.Error())
 			}
-			ctl.adoptChildren(ctx, u)
-			ctl.ensureQuotas(ctx, u)
+			ctl.adoptChildren(objCtx, u)
+			ctl.ensureQuotas(objCtx, u)
 		}
 	}
 }

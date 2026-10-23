@@ -1,16 +1,16 @@
-package pki
+package vault
 
 import (
 	"context"
 	"errors"
 )
 
-var ErrNoAuthority = errors.New("pki: the namespace holds no authority yet")
+var ErrNoAuthority = errors.New("vault: the namespace holds no authority yet")
 
 const (
-	DefaultMount = "pki"
+	DefaultPKIMount = "pki"
 
-	DefaultRole = "denopod"
+	DefaultPKIRole = "denopod"
 
 	DefaultRootCommonName = "kcp-mesh-root"
 
@@ -93,7 +93,7 @@ type Health struct {
 	Version string `json:"version"`
 }
 
-type Client interface {
+type PKIBackend interface {
 	EnsureNamespace(ctx context.Context, path string) error
 
 	EnsureMount(ctx context.Context, namespace, path, kind string) error
@@ -117,7 +117,7 @@ type Client interface {
 	DeleteNamespace(ctx context.Context, path string) error
 }
 
-type Provisioner interface {
+type PKIProvisioner interface {
 	EnsureRoot(ctx context.Context) (RootCA, error)
 
 	EnsureAuthority(ctx context.Context, path string) (Authority, error)

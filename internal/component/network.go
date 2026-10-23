@@ -1,8 +1,6 @@
 package component
 
 import (
-	"crypto/tls"
-	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -10,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
 )
 
 type NetworkHost struct {
@@ -250,37 +247,6 @@ func (m *NetworkHostMap) Lookup(key string) (NetworkHost, bool) {
 		return NetworkHost{}, false
 	}
 	return m.status[index], true
-}
-
-func (m *NetworkHostMap) DialHostMap() (*networkdial.HostMap, error) {
-	if m == nil {
-		return nil, errors.New("component: the network host map is nil")
-	}
-	return networkdial.HostMapFromPairs(m.Hosts())
-}
-
-func (m *NetworkHostMap) TLSConfig(caBundlePEM []byte, serverName string) (*tls.Config, error) {
-	return networkdial.TLSConfigFromCA(caBundlePEM, serverName)
-}
-
-func (m *NetworkHostMap) NetworkDial(caBundlePEM []byte, serverName string) (*networkdial.HostMap, *tls.Config, error) {
-	hosts, err := m.DialHostMap()
-	if err != nil {
-		return nil, nil, err
-	}
-	cfg, err := m.TLSConfig(caBundlePEM, serverName)
-	if err != nil {
-		return nil, nil, err
-	}
-	return hosts, cfg, nil
-}
-
-func NetworkDial(hosts []NetworkHost, caBundlePEM []byte, serverName string) (*networkdial.HostMap, *tls.Config, error) {
-	m, err := NewNetworkHostMap(hosts)
-	if err != nil {
-		return nil, nil, err
-	}
-	return m.NetworkDial(caBundlePEM, serverName)
 }
 
 func hostKey(value string) string {

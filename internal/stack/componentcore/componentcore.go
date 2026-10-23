@@ -23,6 +23,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauthclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/component/kcpclients"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/credentials"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/eventstream"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/exposure"
@@ -47,6 +48,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/sshserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsfront"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsreload"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 )
 
 const (
@@ -166,7 +168,7 @@ func New(cfg Config) (*Core, error) {
 		cfg.Workspaces = AppWorkspaces(DefaultWorkspace)
 	}
 	if cfg.KCP == nil {
-		set, err := component.NewKCPClientsFromKubeconfig(cfg.Kubeconfig)
+		set, err := kcpclients.FromKubeconfig(cfg.Kubeconfig)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrNoKubeconfig, err)
 		}
@@ -235,7 +237,7 @@ func New(cfg Config) (*Core, error) {
 	if vaultClient == "" && strings.TrimSpace(cfg.CredentialServer) != "" {
 		return nil, errors.New("componentcore: the vault clients need the named client certificate of the credential server")
 	}
-	vault, err := component.NewOpenBaoVaultClients(store, base, vaultClient)
+	vault, err := openbao.New(store, base, vaultClient)
 	if err != nil {
 		return nil, fmt.Errorf("componentcore: the vault clients: %w", err)
 	}
@@ -244,6 +246,7 @@ func New(cfg Config) (*Core, error) {
 	if handlers == nil {
 		handlers = component.NewHandlerRegistry()
 	}
+	handlers.SetLogger(cfg.Log.With("component", "bus"))
 	deps := component.Deps{
 		KCP:         cfg.KCP,
 		Credentials: resolver,
@@ -265,6 +268,7 @@ func New(cfg Config) (*Core, error) {
 	}
 	dispatcher := newIngressDispatcher(registry, registrar, fallbackName, cfg.Log)
 	runtime := component.NewRuntime(deps, nil)
+	runtime.SetStateDirMaker(func(dir string) error { return os.MkdirAll(dir, 0o700) })
 	actionHandlers, err := policyActionHandlers(store, base)
 	if err != nil {
 		return nil, err
@@ -314,7 +318,7 @@ func (c *Core) Run(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	runCtx, cancel := context.WithCancel(component.WithSystemCaller(ctx))
+	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	if !c.cfg.DisablePolicy {
 		go c.runPolicy(runCtx)

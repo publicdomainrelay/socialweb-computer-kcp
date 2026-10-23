@@ -16,6 +16,6 @@ spec:
         crd: {}
     - group: exposure.socialweb.computer
       name: componentlinks
-      schema: v1alpha1-1.componentlinks.exposure.socialweb.computer
+      schema: v1alpha1-2.componentlinks.exposure.socialweb.computer
       storage:
         crd: {}

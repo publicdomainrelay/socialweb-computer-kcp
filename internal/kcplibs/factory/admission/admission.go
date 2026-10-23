@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/abc/queue"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/queue"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/ref"
 )
 

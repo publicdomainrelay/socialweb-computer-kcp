@@ -186,6 +186,8 @@ func specOf(kind, workspace string, u *unstructured.Unstructured) (component.Com
 		Generation:  u.GetGeneration(),
 		Deleting:    u.GetDeletionTimestamp() != nil,
 		Annotations: u.GetAnnotations(),
+		Labels:      u.GetLabels(),
+		Group:       u.GroupVersionKind().Group,
 	}
 	object, ok := u.Object["spec"].(map[string]any)
 	if !ok {

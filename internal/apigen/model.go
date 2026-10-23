@@ -16,6 +16,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	v1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 )
 
@@ -93,6 +94,7 @@ var (
 	rawJSONType    = reflect.TypeOf(json.RawMessage{})
 	objectMetaType = reflect.TypeOf(metav1.ObjectMeta{})
 	typeMetaType   = reflect.TypeOf(metav1.TypeMeta{})
+	commonPkgPath  = reflect.TypeOf(commonv1.ObjectRef{}).PkgPath()
 )
 
 func BuildV1alpha1(root string) (*Model, error) {
@@ -373,7 +375,7 @@ func (b *builder) schema(t reflect.Type) (*Schema, error) {
 		}
 		return s, nil
 	case reflect.Struct:
-		if t.PkgPath() != b.pkgPath {
+		if t.PkgPath() != b.pkgPath && t.PkgPath() != commonPkgPath {
 			return nil, fmt.Errorf("struct %v is outside %s and has no mapping", t, b.pkgPath)
 		}
 		if s, ok := b.model.Named[t.Name()]; ok {

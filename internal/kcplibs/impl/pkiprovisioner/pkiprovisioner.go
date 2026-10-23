@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/abc/pki"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/vault"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/expiringmap"
 )
 
@@ -17,7 +17,7 @@ const DefaultAuthorityTTL = 5 * time.Minute
 var ErrNoClient = errors.New("pkiprovisioner: a client is required")
 
 type Options struct {
-	Client pki.Client
+	Client vault.PKIBackend
 
 	RootNamespace string
 
@@ -45,34 +45,34 @@ type Provisioner struct {
 
 	mu sync.Mutex
 
-	root *pki.RootCA
+	root *vault.RootCA
 
-	namespaces *expiringmap.Map[string, pki.Authority]
+	namespaces *expiringmap.Map[string, vault.Authority]
 }
 
-var _ pki.Provisioner = (*Provisioner)(nil)
+var _ vault.PKIProvisioner = (*Provisioner)(nil)
 
 func New(opts Options) (*Provisioner, error) {
 	if opts.Client == nil {
 		return nil, ErrNoClient
 	}
 	if opts.Mount == "" {
-		opts.Mount = pki.DefaultMount
+		opts.Mount = vault.DefaultPKIMount
 	}
 	if opts.Role == "" {
-		opts.Role = pki.DefaultRole
+		opts.Role = vault.DefaultPKIRole
 	}
 	if opts.RootCommonName == "" {
-		opts.RootCommonName = pki.DefaultRootCommonName
+		opts.RootCommonName = vault.DefaultRootCommonName
 	}
 	if opts.RootTTL == "" {
-		opts.RootTTL = pki.DefaultRootTTL
+		opts.RootTTL = vault.DefaultRootTTL
 	}
 	if opts.IntermediateTTL == "" {
-		opts.IntermediateTTL = pki.DefaultIntermediateTTL
+		opts.IntermediateTTL = vault.DefaultIntermediateTTL
 	}
 	if opts.LeafTTL == "" {
-		opts.LeafTTL = pki.DefaultLeafTTL
+		opts.LeafTTL = vault.DefaultLeafTTL
 	}
 	if opts.AuthorityTTL <= 0 {
 		opts.AuthorityTTL = DefaultAuthorityTTL
@@ -80,52 +80,52 @@ func New(opts Options) (*Provisioner, error) {
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
-	return &Provisioner{opts: opts, namespaces: expiringmap.NewMap[string, pki.Authority](opts.AuthorityTTL)}, nil
+	return &Provisioner{opts: opts, namespaces: expiringmap.NewMap[string, vault.Authority](opts.AuthorityTTL)}, nil
 }
 
-func (p *Provisioner) EnsureRoot(ctx context.Context) (pki.RootCA, error) {
+func (p *Provisioner) EnsureRoot(ctx context.Context) (vault.RootCA, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.ensureRootLocked(ctx)
 }
 
-func (p *Provisioner) ensureRootLocked(ctx context.Context) (pki.RootCA, error) {
+func (p *Provisioner) ensureRootLocked(ctx context.Context) (vault.RootCA, error) {
 	if p.root != nil {
 		return *p.root, nil
 	}
 	root, err := p.ensureRoot(ctx)
 	if err != nil {
-		return pki.RootCA{}, err
+		return vault.RootCA{}, err
 	}
 	p.root = &root
 	return root, nil
 }
 
-func (p *Provisioner) ensureRoot(ctx context.Context) (pki.RootCA, error) {
+func (p *Provisioner) ensureRoot(ctx context.Context) (vault.RootCA, error) {
 	if err := p.opts.Client.EnsureMount(ctx, p.opts.RootNamespace, p.opts.Mount, "pki"); err != nil {
-		return pki.RootCA{}, err
+		return vault.RootCA{}, err
 	}
 	serial, err := p.opts.Client.CASerial(ctx, p.opts.RootNamespace, p.opts.Mount)
-	if err != nil && !errors.Is(err, pki.ErrNoAuthority) {
-		return pki.RootCA{}, err
+	if err != nil && !errors.Is(err, vault.ErrNoAuthority) {
+		return vault.RootCA{}, err
 	}
 	if serial != "" {
 		chain, err := p.opts.Client.CAChain(ctx, p.opts.RootNamespace, p.opts.Mount)
 		if err != nil {
-			return pki.RootCA{}, err
+			return vault.RootCA{}, err
 		}
-		return pki.RootCA{Certificate: chain, Serial: serial}, nil
+		return vault.RootCA{Certificate: chain, Serial: serial}, nil
 	}
 	root, err := p.opts.Client.GenerateRoot(ctx, p.opts.RootNamespace, p.opts.Mount, p.opts.RootCommonName, p.opts.RootTTL)
 	if err != nil {
-		return pki.RootCA{}, fmt.Errorf("pkiprovisioner: generating the root CA in namespace %q: %w", p.opts.RootNamespace, err)
+		return vault.RootCA{}, fmt.Errorf("pkiprovisioner: generating the root CA in namespace %q: %w", p.opts.RootNamespace, err)
 	}
 	return root, nil
 }
 
-func (p *Provisioner) EnsureAuthority(ctx context.Context, path string) (pki.Authority, error) {
+func (p *Provisioner) EnsureAuthority(ctx context.Context, path string) (vault.Authority, error) {
 	if path == "" {
-		return pki.Authority{}, errors.New("pkiprovisioner: a namespace path is required")
+		return vault.Authority{}, errors.New("pkiprovisioner: a namespace path is required")
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -134,41 +134,41 @@ func (p *Provisioner) EnsureAuthority(ctx context.Context, path string) (pki.Aut
 	}
 	authority, err := p.ensureAuthority(ctx, path)
 	if err != nil {
-		return pki.Authority{}, err
+		return vault.Authority{}, err
 	}
 	p.namespaces.Set(path, authority, p.opts.Now())
 	return authority, nil
 }
 
-func (p *Provisioner) ensureAuthority(ctx context.Context, path string) (pki.Authority, error) {
+func (p *Provisioner) ensureAuthority(ctx context.Context, path string) (vault.Authority, error) {
 	if _, err := p.ensureRootLocked(ctx); err != nil {
-		return pki.Authority{}, err
+		return vault.Authority{}, err
 	}
 	if err := p.opts.Client.EnsureNamespace(ctx, path); err != nil {
-		return pki.Authority{}, fmt.Errorf("pkiprovisioner: creating the namespace %q: %w", path, err)
+		return vault.Authority{}, fmt.Errorf("pkiprovisioner: creating the namespace %q: %w", path, err)
 	}
 	if err := p.opts.Client.EnsureMount(ctx, path, p.opts.Mount, "pki"); err != nil {
-		return pki.Authority{}, fmt.Errorf("pkiprovisioner: mounting %s in namespace %q: %w", p.opts.Mount, path, err)
+		return vault.Authority{}, fmt.Errorf("pkiprovisioner: mounting %s in namespace %q: %w", p.opts.Mount, path, err)
 	}
 	commonName := path + ".intermediate"
 	serial, err := p.opts.Client.CASerial(ctx, path, p.opts.Mount)
-	if err != nil && !errors.Is(err, pki.ErrNoAuthority) {
-		return pki.Authority{}, fmt.Errorf("pkiprovisioner: reading the authority of namespace %q: %w", path, err)
+	if err != nil && !errors.Is(err, vault.ErrNoAuthority) {
+		return vault.Authority{}, fmt.Errorf("pkiprovisioner: reading the authority of namespace %q: %w", path, err)
 	}
 	if serial == "" {
 		serial, err = p.signIntermediate(ctx, path, commonName)
 		if err != nil {
-			return pki.Authority{}, err
+			return vault.Authority{}, err
 		}
 	}
 	chain, err := p.opts.Client.CAChain(ctx, path, p.opts.Mount)
 	if err != nil {
-		return pki.Authority{}, fmt.Errorf("pkiprovisioner: reading the chain for namespace %q: %w", path, err)
+		return vault.Authority{}, fmt.Errorf("pkiprovisioner: reading the chain for namespace %q: %w", path, err)
 	}
 	if err := p.writeRole(ctx, path); err != nil {
-		return pki.Authority{}, err
+		return vault.Authority{}, err
 	}
-	return pki.Authority{Namespace: path, CommonName: commonName, Serial: serial, Chain: strings.TrimSpace(chain)}, nil
+	return vault.Authority{Namespace: path, CommonName: commonName, Serial: serial, Chain: strings.TrimSpace(chain)}, nil
 }
 
 func (p *Provisioner) signIntermediate(ctx context.Context, path, commonName string) (string, error) {
@@ -191,7 +191,7 @@ func (p *Provisioner) signIntermediate(ctx context.Context, path, commonName str
 }
 
 func (p *Provisioner) writeRole(ctx context.Context, path string) error {
-	role := pki.Role{
+	role := vault.Role{
 		AllowSubdomains:  true,
 		AllowBareDomains: false,
 		EnforceHostnames: true,
@@ -209,21 +209,21 @@ func (p *Provisioner) writeRole(ctx context.Context, path string) error {
 	return nil
 }
 
-func (p *Provisioner) Issue(ctx context.Context, path, commonName string, altNames, ips []string) (pki.Cert, error) {
+func (p *Provisioner) Issue(ctx context.Context, path, commonName string, altNames, ips []string) (vault.Cert, error) {
 	if _, err := p.EnsureAuthority(ctx, path); err != nil {
-		return pki.Cert{}, err
+		return vault.Cert{}, err
 	}
 	if len(ips) == 0 {
 		ips = []string{"127.0.0.1", "::1"}
 	}
-	cert, err := p.opts.Client.Issue(ctx, path, p.opts.Mount, p.opts.Role, pki.CertRequest{
+	cert, err := p.opts.Client.Issue(ctx, path, p.opts.Mount, p.opts.Role, vault.CertRequest{
 		CommonName: commonName,
 		AltNames:   altNames,
 		IPSANs:     ips,
 		TTL:        p.opts.LeafTTL,
 	})
 	if err != nil {
-		return pki.Cert{}, fmt.Errorf("pkiprovisioner: issuing %s in namespace %q: %w", commonName, path, err)
+		return vault.Cert{}, fmt.Errorf("pkiprovisioner: issuing %s in namespace %q: %w", commonName, path, err)
 	}
 	return cert, nil
 }
@@ -250,7 +250,7 @@ func (p *Provisioner) CachedRootPEM() []byte {
 	return []byte(p.root.Certificate)
 }
 
-func LeafChain(cert pki.Cert) string {
+func LeafChain(cert vault.Cert) string {
 	var builder strings.Builder
 	builder.WriteString(cert.Certificate)
 	for _, entry := range cert.CAChain {

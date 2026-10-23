@@ -23,6 +23,7 @@ import (
 	eventsapi "github.com/johnandersen777/socialweb-computer-kcp/api/events/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 )
 
 const (
@@ -124,6 +125,7 @@ func (c *Controller) recordWatchRound(ctx context.Context) error {
 }
 
 func (c *Controller) reconcileRecordWatch(ctx context.Context, dyn dynamic.Interface, u *unstructured.Unstructured) error {
+	ctx = bus.WithObject(ctx, c.opts.Workspace, u)
 	name := u.GetName()
 	spec, status, err := decodeRecordWatch(u)
 	if err != nil {

@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/abc/pki"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/vault"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/ref"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/openbaoclient"
@@ -381,7 +381,7 @@ func (s *Session) IssueCertificate(ctx context.Context, mount, role string, req 
 	if err != nil {
 		return Certificate{}, err
 	}
-	request := pki.CertRequest{
+	request := vault.CertRequest{
 		CommonName: req.CommonName,
 		AltNames:   append([]string(nil), req.AltNames...),
 		IPSANs:     append([]string(nil), req.IPSANs...),

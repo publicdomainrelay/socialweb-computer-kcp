@@ -15,43 +15,43 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/dynamic"
 
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 )
 
 const (
 	ComponentLinkFinalizer = "exposure.socialweb.computer/componentlink"
-
-	ConditionTargetRegistered = "TargetRegistered"
 )
 
 type LinkPolicy struct {
 	mu sync.Mutex
 
-	handlers *component.HandlerRegistry
+	handlers *bus.Bus
 
-	sources map[string]map[string][]component.AccessLink
+	sources map[string]map[string][]bus.Link
 }
 
-func NewLinkPolicy(handlers *component.HandlerRegistry) *LinkPolicy {
-	policy := &LinkPolicy{handlers: handlers, sources: map[string]map[string][]component.AccessLink{}}
+func NewLinkPolicy(handlers *bus.Bus) *LinkPolicy {
+	policy := &LinkPolicy{handlers: handlers, sources: map[string]map[string][]bus.Link{}}
 	if handlers != nil {
 		handlers.SetLinks(nil)
 	}
 	return policy
 }
 
-func (p *LinkPolicy) Set(workspace, name string, links []component.AccessLink) {
+func (p *LinkPolicy) Set(workspace, name string, links []bus.Link) {
 	if p == nil {
 		return
 	}
 	p.mu.Lock()
 	byName := p.sources[workspace]
 	if byName == nil {
-		byName = map[string][]component.AccessLink{}
+		byName = map[string][]bus.Link{}
 		p.sources[workspace] = byName
 	}
-	byName[name] = cloneAccessLinks(links)
+	byName[name] = append([]bus.Link(nil), links...)
 	p.publishLocked()
 	p.mu.Unlock()
 }
@@ -71,7 +71,7 @@ func (p *LinkPolicy) Remove(workspace, name string) {
 	p.mu.Unlock()
 }
 
-func (p *LinkPolicy) Links() []component.AccessLink {
+func (p *LinkPolicy) Links() []bus.Link {
 	if p == nil {
 		return nil
 	}
@@ -87,47 +87,19 @@ func (p *LinkPolicy) publishLocked() {
 	p.handlers.SetLinks(p.mergedLocked())
 }
 
-func (p *LinkPolicy) mergedLocked() []component.AccessLink {
-	var out []component.AccessLink
+func (p *LinkPolicy) mergedLocked() []bus.Link {
+	var out []bus.Link
 	for _, byName := range p.sources {
 		for _, links := range byName {
 			out = append(out, links...)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool {
-		a, b := out[i], out[j]
-		if a.FromWorkspace != b.FromWorkspace {
-			return a.FromWorkspace < b.FromWorkspace
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Workspace != out[j].Workspace {
+			return out[i].Workspace < out[j].Workspace
 		}
-		if a.FromKind != b.FromKind {
-			return a.FromKind < b.FromKind
-		}
-		if a.FromName != b.FromName {
-			return a.FromName < b.FromName
-		}
-		if a.ToWorkspace != b.ToWorkspace {
-			return a.ToWorkspace < b.ToWorkspace
-		}
-		if a.ToKind != b.ToKind {
-			return a.ToKind < b.ToKind
-		}
-		if a.ToName != b.ToName {
-			return a.ToName < b.ToName
-		}
-		return strings.Join(a.Handlers, ",") < strings.Join(b.Handlers, ",")
+		return out[i].Name < out[j].Name
 	})
-	return out
-}
-
-func cloneAccessLinks(links []component.AccessLink) []component.AccessLink {
-	if links == nil {
-		return nil
-	}
-	out := make([]component.AccessLink, len(links))
-	for i, link := range links {
-		out[i] = link
-		out[i].Handlers = append([]string(nil), link.Handlers...)
-	}
 	return out
 }
 
@@ -215,85 +187,124 @@ func (c *LinkController) Reconcile(ctx context.Context, dyn dynamic.Interface, u
 	status := link.Status
 	status.ObservedGeneration = generation
 	status.Conditions = append([]metav1.Condition(nil), status.Conditions...)
-	if err := validateLinkSpec(link.Spec); err != nil {
+	compiled, reason, err := c.compileLink(name, link.Spec)
+	switch {
+	case err != nil:
 		c.forget(name)
-		status.Phase = exposurev1alpha1.ComponentLinkFailed
-		status.Ready = false
-		status.Message = err.Error()
-		setCondition(&status.Conditions, generation, ConditionTargetRegistered, false, "InvalidSpec", err.Error())
-		setCondition(&status.Conditions, generation, ConditionReady, false, "InvalidSpec", err.Error())
-		return writeStatus(ctx, ri, name, &status)
-	}
-	if link.Spec.Suspend {
+		setCondition(&status.Conditions, generation, exposurev1alpha1.ComponentLinkConditionAccepted, false, reason, err.Error())
+	case link.Spec.Suspend:
 		c.forget(name)
-		status.Phase = exposurev1alpha1.ComponentLinkPending
-		status.Ready = false
-		status.Message = "the ComponentLink is suspended"
-		setCondition(&status.Conditions, generation, ConditionTargetRegistered, false, "Suspended", status.Message)
-		setCondition(&status.Conditions, generation, ConditionReady, false, "Suspended", status.Message)
-		return writeStatus(ctx, ri, name, &status)
+		setCondition(&status.Conditions, generation, exposurev1alpha1.ComponentLinkConditionAccepted, false, "Suspended", "the ComponentLink is suspended")
+	default:
+		c.policy.Set(c.workspace, name, []bus.Link{compiled})
+		setCondition(&status.Conditions, generation, exposurev1alpha1.ComponentLinkConditionAccepted, true, "Accepted",
+			fmt.Sprintf("the bus allows %s to call %s with %s", fromString(compiled.From), compiled.To.String(), capabilitiesString(compiled.Capabilities)))
 	}
-	to := link.Spec.To
-	if !c.targetRegistered(to) {
-		c.forget(name)
-		status.Phase = exposurev1alpha1.ComponentLinkPending
-		status.Ready = false
-		status.Message = fmt.Sprintf("the target %s/%s in workspace %s is not registered", to.Kind, to.Name, to.Workspace)
-		setCondition(&status.Conditions, generation, ConditionTargetRegistered, false, "TargetMissing", status.Message)
-		setCondition(&status.Conditions, generation, ConditionReady, false, "TargetMissing", status.Message)
-		return writeStatus(ctx, ri, name, &status)
+	to := linkTarget(c.workspace, link.Spec.To)
+	if c.targetRegistered(to) {
+		setCondition(&status.Conditions, generation, exposurev1alpha1.ComponentLinkConditionResolvedRefs, true, "TargetRegistered",
+			fmt.Sprintf("the target %s is registered", to.String()))
+	} else {
+		setCondition(&status.Conditions, generation, exposurev1alpha1.ComponentLinkConditionResolvedRefs, false, "TargetMissing",
+			fmt.Sprintf("the target %s is not registered", to.String()))
 	}
-	compiled := compileLink(link.Spec)
-	c.policy.Set(c.workspace, name, []component.AccessLink{compiled})
-	status.Phase = exposurev1alpha1.ComponentLinkReady
-	status.Ready = true
-	status.Message = "the ComponentLink is compiled into the handler registry"
-	setCondition(&status.Conditions, generation, ConditionTargetRegistered, true, "TargetRegistered",
-		fmt.Sprintf("the target %s/%s in workspace %s is registered", to.Kind, to.Name, to.Workspace))
-	setCondition(&status.Conditions, generation, ConditionReady, true, "Ready", status.Message)
 	return writeStatus(ctx, ri, name, &status)
 }
 
-func (c *LinkController) targetRegistered(to exposurev1alpha1.ComponentLinkEndpoint) bool {
-	if c.registry == nil {
+func (c *LinkController) targetRegistered(to commonv1.ObjectRef) bool {
+	if c.registry == nil || strings.TrimSpace(to.Kind) == "" || strings.TrimSpace(to.Name) == "" {
 		return false
 	}
-	return c.registry.Has(strings.TrimSpace(to.Workspace), strings.TrimSpace(to.Kind), strings.TrimSpace(to.Name))
+	return c.registry.Has(to.Workspace, to.Kind, to.Name)
 }
 
-func validateLinkSpec(spec exposurev1alpha1.ComponentLinkSpec) error {
-	if strings.TrimSpace(spec.From.Workspace) == "" {
-		return errors.New("the ComponentLink from endpoint has no workspace")
+func linkTarget(workspace string, to commonv1.ObjectRef) commonv1.ObjectRef {
+	out := commonv1.ObjectRef{Group: strings.TrimSpace(to.Group), Kind: strings.TrimSpace(to.Kind), Name: strings.TrimSpace(to.Name),
+		Workspace: strings.TrimSpace(to.Workspace)}
+	if out.Workspace == "" {
+		out.Workspace = workspace
 	}
-	if strings.TrimSpace(spec.To.Workspace) == "" {
-		return errors.New("the ComponentLink to endpoint has no workspace")
-	}
-	for _, handler := range spec.Handlers {
-		if strings.TrimSpace(handler) == "" {
-			return errors.New("the ComponentLink handlers list has an empty name")
-		}
-	}
-	return nil
+	return out
 }
 
-func compileLink(spec exposurev1alpha1.ComponentLinkSpec) component.AccessLink {
-	handlers := make([]string, 0, len(spec.Handlers))
-	seen := map[string]bool{}
-	for _, handler := range spec.Handlers {
-		normalized := strings.ToLower(strings.TrimSpace(handler))
-		if seen[normalized] {
-			continue
+func (c *LinkController) compileLink(name string, spec exposurev1alpha1.ComponentLinkSpec) (bus.Link, string, error) {
+	to := linkTarget(c.workspace, spec.To)
+	switch {
+	case to.Kind == "" || to.Name == "":
+		return bus.Link{}, "InvalidSpec", errors.New("the ComponentLink to ref needs a kind and a name")
+	case to.Workspace != c.workspace:
+		return bus.Link{}, "NotProducerWorkspace", fmt.Errorf("the ComponentLink must live in the workspace of its target %s", to.String())
+	}
+	from, err := compileFrom(c.workspace, spec.From)
+	if err != nil {
+		return bus.Link{}, "InvalidSpec", err
+	}
+	if len(spec.Capabilities) == 0 {
+		return bus.Link{}, "InvalidSpec", errors.New("the ComponentLink grants no capability")
+	}
+	capabilities := make([]bus.Capability, 0, len(spec.Capabilities))
+	for _, capability := range spec.Capabilities {
+		capabilityName := strings.ToLower(strings.TrimSpace(capability.Name))
+		if capabilityName == "" {
+			return bus.Link{}, "InvalidSpec", errors.New("the ComponentLink capabilities list has an empty name")
 		}
-		seen[normalized] = true
-		handlers = append(handlers, normalized)
+		scope := make([]string, 0, len(capability.Scope))
+		for _, entry := range capability.Scope {
+			if entry = strings.TrimSpace(entry); entry == "" {
+				return bus.Link{}, "InvalidSpec", fmt.Errorf("the capability %s has an empty scope entry", capabilityName)
+			}
+			scope = append(scope, entry)
+		}
+		capabilities = append(capabilities, bus.Capability{Name: capabilityName, Scope: scope})
 	}
-	return component.AccessLink{
-		FromWorkspace: strings.TrimSpace(spec.From.Workspace),
-		FromKind:      strings.TrimSpace(spec.From.Kind),
-		FromName:      strings.TrimSpace(spec.From.Name),
-		ToWorkspace:   strings.TrimSpace(spec.To.Workspace),
-		ToKind:        strings.TrimSpace(spec.To.Kind),
-		ToName:        strings.TrimSpace(spec.To.Name),
-		Handlers:      handlers,
+	return bus.Link{Workspace: c.workspace, Name: name, From: from, To: to, Capabilities: capabilities}, "", nil
+}
+
+func compileFrom(workspace string, from exposurev1alpha1.ComponentLinkFrom) (bus.LinkFrom, error) {
+	switch {
+	case from.Ref != nil && from.Selector != nil:
+		return bus.LinkFrom{}, errors.New("the ComponentLink from names both a ref and a selector")
+	case from.Ref != nil:
+		ref := linkTarget(workspace, *from.Ref)
+		if ref.Kind == "" || ref.Name == "" {
+			return bus.LinkFrom{}, errors.New("the ComponentLink from ref needs a kind and a name")
+		}
+		return bus.LinkFrom{Ref: &ref}, nil
+	case from.Selector != nil:
+		sel := from.Selector
+		if strings.TrimSpace(sel.Kind) == "" {
+			return bus.LinkFrom{}, errors.New("the ComponentLink from selector needs a kind")
+		}
+		requirements := make([]metav1.LabelSelectorRequirement, 0, len(sel.MatchExpressions))
+		for _, r := range sel.MatchExpressions {
+			requirements = append(requirements, metav1.LabelSelectorRequirement{Key: r.Key, Operator: metav1.LabelSelectorOperator(r.Operator),
+				Values: append([]string(nil), r.Values...)})
+		}
+		selector, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{MatchLabels: sel.MatchLabels, MatchExpressions: requirements})
+		if err != nil {
+			return bus.LinkFrom{}, fmt.Errorf("the ComponentLink from selector: %w", err)
+		}
+		ws := strings.TrimSpace(sel.Workspace)
+		if ws == "" {
+			ws = workspace
+		}
+		return bus.LinkFrom{Group: strings.TrimSpace(sel.Group), Kind: strings.TrimSpace(sel.Kind), Workspace: ws, Selector: selector}, nil
+	default:
+		return bus.LinkFrom{}, errors.New("the ComponentLink from needs a ref or a selector")
 	}
+}
+
+func fromString(from bus.LinkFrom) string {
+	if from.Ref != nil {
+		return from.Ref.String()
+	}
+	return from.Workspace + ":" + from.Kind + "{" + from.Selector.String() + "}"
+}
+
+func capabilitiesString(capabilities []bus.Capability) string {
+	parts := make([]string, 0, len(capabilities))
+	for _, capability := range capabilities {
+		parts = append(parts, capability.String())
+	}
+	return strings.Join(parts, ", ")
 }

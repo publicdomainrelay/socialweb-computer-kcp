@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/abc/runner"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/runner"
 )
 
 type PodOptions struct {

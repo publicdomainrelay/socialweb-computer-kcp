@@ -5,6 +5,8 @@ import (
 
 	v1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	contract "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/component"
 )
 
 func (s ComponentStatus) APIStatus() v1alpha1.ComponentStatus {
@@ -48,18 +50,5 @@ func (s ComponentStatus) PrimaryEndpoint() (Endpoint, bool) {
 }
 
 func PrimaryEndpoint(endpoints []Endpoint) (Endpoint, bool) {
-	for _, endpoint := range endpoints {
-		if endpoint.Name == "http" {
-			return endpoint, true
-		}
-	}
-	for _, endpoint := range endpoints {
-		if endpoint.URL != "" {
-			return endpoint, true
-		}
-	}
-	if len(endpoints) > 0 {
-		return endpoints[0], true
-	}
-	return Endpoint{}, false
+	return contract.PrimaryEndpoint(endpoints)
 }

@@ -13,7 +13,6 @@ import (
 
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 )
 
 const pdsClientTimeout = 30 * time.Second
@@ -63,7 +62,7 @@ func (ctl *Controller) pdsForToken(endpoint, caFile, token string) (pdsclient.PD
 	tokens := pdsclient.TokenSourceFunc(func(context.Context) (string, error) { return token, nil })
 	if ctl.c.Handlers != nil && !strings.HasPrefix(endpoint, "https://") {
 		transport := &http.Transport{DialContext: func(ctx context.Context, _, address string) (net.Conn, error) {
-			return ctl.c.Handlers.DialHTTP(component.WithSystemCaller(ctx), address)
+			return ctl.c.Handlers.DialHTTP(ctx, address)
 		}}
 		return pdsclient.NewRemote(pdsclient.RemoteConfig{
 			BaseURL:    endpoint,
