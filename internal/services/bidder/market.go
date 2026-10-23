@@ -628,7 +628,7 @@ func (s *Service) createReceipt(ctx context.Context, refs market.ReceiptRefs, ac
 	if !errors.Is(err, market.ErrNotFound) {
 		return "", "", err
 	}
-	receipt, err := market.CreateReceiptRecordAt(ctx, s.records, s.did, rkey, refs, market.ReceiptSubject{
+	receipt, err := market.CreateReceiptRecordAt(ctx, createOnlyWriter{records: s.records, did: s.did}, s.did, rkey, refs, market.ReceiptSubject{
 		AcceptRecord:        value,
 		AcceptRepositoryDID: issuer,
 	}, s.attestation)

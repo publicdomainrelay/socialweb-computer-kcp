@@ -281,12 +281,13 @@ func (a *marketEventAdapter) Apply(ctx context.Context, request statesync.Reques
 	if err != nil {
 		return statesync.Observation{}, fmt.Errorf("bidder: signing the market event payload: %w", err)
 	}
-	written, err := a.records.PutRecord(ctx, a.did, payload.Collection, payloadRKey, signed)
+	writer := createOnlyWriter{records: a.records, did: a.did}
+	written, err := writer.PutRecord(ctx, a.did, payload.Collection, payloadRKey, signed)
 	if err != nil {
 		return statesync.Observation{}, fmt.Errorf("bidder: writing the market event payload: %w", err)
 	}
 	createdAt := recordObservedAt(record)
-	event, err := market.PutEvent(ctx, a.records, a.did, eventRKey, market.EventOptions{
+	event, err := market.PutEvent(ctx, writer, a.did, eventRKey, market.EventOptions{
 		Receipt:   market.RecordRef{URI: payload.Receipt.URI, CID: payload.Receipt.CID},
 		Payload:   market.RecordRef{URI: written.URI, CID: written.CID},
 		CreatedAt: createdAt,

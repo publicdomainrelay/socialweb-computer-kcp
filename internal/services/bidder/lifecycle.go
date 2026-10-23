@@ -338,19 +338,44 @@ func (s *Service) ensureRecordAt(ctx context.Context, collection, rkey string, r
 	if s.records == nil || s.did == "" {
 		return market.StrongRef{}, errors.New("the bidder has no record store or did")
 	}
-	if found, err := s.records.GetRecord(ctx, s.did, collection, rkey); err == nil {
+	return ensureStoreRecordAt(ctx, s.records, s.did, collection, rkey, record)
+}
+
+func ensureStoreRecordAt(ctx context.Context, records RecordStore, did, collection, rkey string, record map[string]any) (market.StrongRef, error) {
+	if records == nil || did == "" {
+		return market.StrongRef{}, errors.New("the bidder has no record store or did")
+	}
+	if found, err := records.GetRecord(ctx, did, collection, rkey); err == nil {
 		return market.NewStrongRef(found.URI, found.CID), nil
 	} else if !errors.Is(err, market.ErrNotFound) {
 		return market.StrongRef{}, err
 	}
-	ref, err := s.records.CreateRecordAt(ctx, s.did, collection, rkey, record)
+	ref, err := records.CreateRecordAt(ctx, did, collection, rkey, record)
 	if err == nil {
 		return ref, nil
 	}
-	if found, getErr := s.records.GetRecord(ctx, s.did, collection, rkey); getErr == nil {
+	if found, getErr := records.GetRecord(ctx, did, collection, rkey); getErr == nil {
 		return market.NewStrongRef(found.URI, found.CID), nil
 	}
 	return market.StrongRef{}, err
+}
+
+type createOnlyWriter struct {
+	records RecordStore
+
+	did string
+}
+
+func (w createOnlyWriter) CreateRecord(ctx context.Context, repo, collection string, record map[string]any) (market.StrongRef, error) {
+	return w.records.CreateRecord(ctx, repo, collection, record)
+}
+
+func (w createOnlyWriter) PutRecord(ctx context.Context, repo, collection, rkey string, record map[string]any) (market.StrongRef, error) {
+	return ensureStoreRecordAt(ctx, w.records, repo, collection, rkey, record)
+}
+
+func (w createOnlyWriter) DeleteRecord(ctx context.Context, repo, collection, rkey string) error {
+	return w.records.DeleteRecord(ctx, repo, collection, rkey)
 }
 
 func (s *Service) existingBidRecord(ctx context.Context, bid *v1alpha1.Bid) (market.StrongRef, bool, error) {
