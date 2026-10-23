@@ -177,6 +177,7 @@ type feed struct {
 	sent  map[string]string
 	homes map[string]context.CancelFunc
 	errc  chan error
+	wg    sync.WaitGroup
 }
 
 func stamp() string { return time.Now().UTC().Format("2006-01-02T15:04:05.000Z") }
@@ -293,9 +294,12 @@ func (c *Client) Follow(ctx context.Context, caller gateway.Caller, name string,
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
 	f := &feed{c: c, did: did, name: name, emit: emit,
 		sent: map[string]string{}, homes: map[string]context.CancelFunc{}, errc: make(chan error, 1)}
+	defer func() {
+		cancel()
+		f.wg.Wait()
+	}()
 
 	account := AccountPath(did)
 	rTenancy, err := c.resource(account, tenancyResource)
@@ -350,16 +354,16 @@ func (c *Client) Follow(ctx context.Context, caller gateway.Caller, name string,
 	for _, start := range starts {
 		start()
 	}
-	go func() {
+	f.wg.Go(func() {
 		f.fail(follow(ctx, identities, idRV, f.onIdentity, f.resyncIdentity))
-	}()
-	go func() {
+	})
+	f.wg.Go(func() {
 		f.fail(follow(ctx, workspaces, wsRV, func(deleted bool, ws kcpv1alpha1.Workspace) error {
 			return f.onWorkspace(ctx, deleted, ws)
 		}, func(items []kcpv1alpha1.Workspace) error {
 			return f.resyncWorkspaces(ctx, items)
 		}))
-	}()
+	})
 
 	select {
 	case err := <-f.errc:
@@ -597,11 +601,11 @@ func (f *feed) open(ctx context.Context, cluster string, snapshot bool) (func(),
 	})
 	return func() {
 		for _, run := range runs {
-			go func() {
+			f.wg.Go(func() {
 				if err := run(hctx); err != nil && hctx.Err() == nil {
 					f.fail(err)
 				}
-			}()
+			})
 		}
 	}, nil
 }
