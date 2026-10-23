@@ -321,9 +321,6 @@ func (c *Client) send(ctx context.Context, method, path string, in any, token st
 	if c.err != nil {
 		return 0, nil, c.err
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	clean, query, _ := strings.Cut(strings.TrimPrefix(path, "/"), "?")
 	r := c.api.NewRequest(method, "/v1/"+clean)
 	r.ClientToken = token

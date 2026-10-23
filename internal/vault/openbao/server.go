@@ -29,6 +29,8 @@ type Server struct {
 
 	Name string
 
+	Client string
+
 	Address string
 
 	CACert []byte
@@ -151,6 +153,7 @@ func ServerOf(workspace, name string, st v1alpha1.OpenBaoServerStatus, clientNam
 	client, ok := pickClient(st.Clients, clientName)
 	switch {
 	case ok:
+		out.Client = client.Name
 		if out.ClientCert, err = FileBytes(client.ClientCert); err != nil {
 			errs = append(errs, fmt.Errorf("client %s certificate: %w", client.Name, err))
 		}
@@ -245,6 +248,8 @@ type loginKey struct {
 	workspace string
 
 	name string
+
+	client string
 }
 
 type login struct {
@@ -277,7 +282,7 @@ func (l *Logins) Client(ctx context.Context, workspace, name string) (*Client, S
 }
 
 func (l *Logins) Open(ctx context.Context, srv Server) (*Client, Server, error) {
-	key := loginKey{workspace: srv.Workspace, name: srv.Name}
+	key := loginKey{workspace: srv.Workspace, name: srv.Name, client: srv.Client}
 	fp := srv.fingerprint()
 	l.mu.Lock()
 	entry, ok := l.clients[key]
@@ -299,6 +304,10 @@ func (l *Logins) Open(ctx context.Context, srv Server) (*Client, Server, error) 
 
 func (l *Logins) Forget(workspace, name string) {
 	l.mu.Lock()
-	delete(l.clients, loginKey{workspace: workspace, name: name})
+	for k := range l.clients {
+		if k.workspace == workspace && k.name == name {
+			delete(l.clients, k)
+		}
+	}
 	l.mu.Unlock()
 }
