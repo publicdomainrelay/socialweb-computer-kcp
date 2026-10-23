@@ -14,6 +14,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 )
 
 const (
@@ -78,14 +80,26 @@ func (a *agent) userName(ctx context.Context, c *Client) (string, error) {
 }
 
 func apply(ctx context.Context, req *rest.Request, where string, obj any) error {
-	body, err := json.Marshal(obj)
-	if err != nil {
-		return err
-	}
-	if err := req.Param("fieldManager", agentFieldManager).Param("force", "true").Body(body).Do(ctx).Error(); err != nil {
+	if err := applyDoc(ctx, req, agentFieldManager, true, obj, false); err != nil {
 		return fmt.Errorf("kcpclient: the node claim agent's grant in %s: %w", where, err)
 	}
 	return nil
+}
+
+func applyDoc(ctx context.Context, req *rest.Request, manager string, force bool, obj any, status bool) error {
+	doc, err := kube.ApplyBody(obj, status)
+	if err != nil {
+		return err
+	}
+	body, err := json.Marshal(doc)
+	if err != nil {
+		return err
+	}
+	req = req.Param("fieldManager", manager)
+	if force {
+		req = req.Param("force", "true")
+	}
+	return req.Body(body).Do(ctx).Error()
 }
 
 func (c *Client) grantAgentHome(ctx context.Context, home string) error {

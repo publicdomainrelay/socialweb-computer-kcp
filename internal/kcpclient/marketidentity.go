@@ -6,8 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
 
@@ -16,7 +17,11 @@ import (
 
 const marketIdentities = "marketidentities"
 
-const specListAttempts = 3
+const (
+	approvedField = "approvedAssociations"
+
+	rejectedField = "rejectedAssociations"
+)
 
 type MarketIdentities struct {
 	r rest.Interface
@@ -42,40 +47,67 @@ func (m *MarketIdentities) GetMarketIdentity(ctx context.Context, name string) (
 }
 
 func (m *MarketIdentities) ApproveAssociation(ctx context.Context, name, callerDid string) error {
-	return m.addToSpecList(ctx, name, "approvedAssociations", callerDid, func(s *v1alpha1.MarketIdentitySpec) []string { return s.ApprovedAssociations })
+	return m.decide(ctx, name, approvedField, callerDid)
 }
 
 func (m *MarketIdentities) RejectAssociation(ctx context.Context, name, callerDid string) error {
-	return m.addToSpecList(ctx, name, "rejectedAssociations", callerDid, func(s *v1alpha1.MarketIdentitySpec) []string { return s.RejectedAssociations })
+	return m.decide(ctx, name, rejectedField, callerDid)
 }
 
-func (m *MarketIdentities) addToSpecList(ctx context.Context, name, field, did string, current func(*v1alpha1.MarketIdentitySpec) []string) error {
+func (m *MarketIdentities) decide(ctx context.Context, name, field, did string) error {
+	did = strings.TrimSpace(did)
 	if did == "" {
 		return fmt.Errorf("kcpclient: marketidentity %s: an empty did cannot be added to spec.%s", name, field)
 	}
-	for range specListAttempts {
-		obj, err := m.GetMarketIdentity(ctx, name)
-		if err != nil {
-			return err
-		}
-		list := current(&obj.Spec)
-		if slices.Contains(list, did) {
-			return nil
-		}
-		body, err := json.Marshal([]map[string]any{
-			{"op": "test", "path": "/metadata/resourceVersion", "value": obj.ResourceVersion},
-			{"op": "add", "path": "/spec/" + field, "value": append(slices.Clone(list), did)},
-		})
-		if err != nil {
-			return err
-		}
-		err = m.r.Patch(types.JSONPatchType).Resource(marketIdentities).Name(name).Body(body).Do(ctx).Error()
-		if err == nil {
-			return nil
-		}
-		if !apierrors.IsConflict(err) && !apierrors.IsInvalid(err) {
-			return fmt.Errorf("kcpclient: marketidentity %s: patch spec.%s: %w", name, field, err)
+	obj, err := m.GetMarketIdentity(ctx, name)
+	if err != nil {
+		return err
+	}
+	owned := ownedSetItems(obj.ManagedFields, v1alpha1.FieldManagerMarketIdentityApproval, approvedField, rejectedField)
+	if slices.Contains(owned[field], did) {
+		return nil
+	}
+	owned[field] = append(owned[field], did)
+	spec := map[string]any{}
+	for _, f := range []string{approvedField, rejectedField} {
+		if len(owned[f]) > 0 {
+			spec[f] = owned[f]
 		}
 	}
-	return fmt.Errorf("kcpclient: marketidentity %s: spec.%s kept changing under %d attempts", name, field, specListAttempts)
+	doc := map[string]any{"apiVersion": v1alpha1.GroupVersion.String(), "kind": "MarketIdentity",
+		"metadata": map[string]any{"name": name}, "spec": spec}
+	req := m.r.Patch(types.ApplyPatchType).Resource(marketIdentities).Name(name)
+	if err := applyDoc(ctx, req, v1alpha1.FieldManagerMarketIdentityApproval, false, doc, false); err != nil {
+		return fmt.Errorf("kcpclient: marketidentity %s: apply spec.%s: %w", name, field, err)
+	}
+	return nil
+}
+
+func ownedSetItems(entries []metav1.ManagedFieldsEntry, manager string, fields ...string) map[string][]string {
+	out := map[string][]string{}
+	for _, e := range entries {
+		if e.Manager != manager || e.Operation != metav1.ManagedFieldsOperationApply || e.Subresource != "" || e.FieldsV1 == nil {
+			continue
+		}
+		var set map[string]map[string]map[string]any
+		if json.Unmarshal(e.FieldsV1.Raw, &set) != nil {
+			continue
+		}
+		for _, f := range fields {
+			for key := range set["f:spec"]["f:"+f] {
+				raw, ok := strings.CutPrefix(key, "v:")
+				if !ok {
+					continue
+				}
+				var item string
+				if json.Unmarshal([]byte(raw), &item) == nil && item != "" && !slices.Contains(out[f], item) {
+					out[f] = append(out[f], item)
+				}
+			}
+		}
+	}
+	for _, f := range fields {
+		slices.Sort(out[f])
+	}
+	return out
 }

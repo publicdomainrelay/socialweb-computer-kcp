@@ -56,9 +56,9 @@ type MarketIdentitySpec struct {
 
 	AssociateWith string `json:"associateWith,omitempty"`
 
-	ApprovedAssociations []string `json:"approvedAssociations,omitempty"`
+	ApprovedAssociations []string `json:"approvedAssociations,omitempty" apigen:"listType=set"`
 
-	RejectedAssociations []string `json:"rejectedAssociations,omitempty"`
+	RejectedAssociations []string `json:"rejectedAssociations,omitempty" apigen:"listType=set"`
 
 	AssociationWatch string `json:"associationWatch,omitempty"`
 
@@ -90,6 +90,8 @@ const (
 
 	MarketIdentityPhaseFailed MarketIdentityPhase = "Failed"
 )
+
+const FieldManagerMarketIdentityApproval = "socialweb.computer/approve"
 
 type PendingActionKind string
 
