@@ -1291,6 +1291,9 @@ func (s *Service) authorizeCallback(w http.ResponseWriter, r *http.Request, lxm,
 }
 
 func (s *Service) callbackHostname(r *http.Request) string {
+	if host := strings.TrimSpace(r.Host); host != "" {
+		return host
+	}
 	for _, raw := range []string{s.cfg.CallbackHostname, s.cfg.PublicHostname, s.cfg.Network.IngressProxyHost} {
 		raw = strings.TrimSpace(raw)
 		if raw == "" {
