@@ -181,16 +181,14 @@ func (v *Verifier) parse(ctx context.Context, token, issuer string, audience Aud
 	parser := jwt.NewParser(options...)
 	claims := jwt.MapClaims{}
 	parsed, err := parser.ParseWithClaims(token, claims, func(t *jwt.Token) (any, error) {
-		kid, _ := t.Header["kid"].(string)
-		if key, ok := set[kid]; ok {
-			return key, nil
+		key, err := selectKey(set, t)
+		if err != nil {
+			return nil, err
 		}
-		if kid == "" && len(set) == 1 {
-			for _, key := range set {
-				return key, nil
-			}
+		if _, ok := key.(*ecdsa.PublicKey); ok && t.Method.Alg() == jwt.SigningMethodES256.Alg() {
+			t.Method = jwt.SigningMethodES256
 		}
-		return nil, errNoKey
+		return key, nil
 	})
 	if err != nil {
 		return nil, err
@@ -199,6 +197,19 @@ func (v *Verifier) parse(ctx context.Context, token, issuer string, audience Aud
 		return nil, errors.New("the token is not valid")
 	}
 	return claims, nil
+}
+
+func selectKey(set map[string]any, t *jwt.Token) (any, error) {
+	kid, _ := t.Header["kid"].(string)
+	if key, ok := set[kid]; ok {
+		return key, nil
+	}
+	if kid == "" && len(set) == 1 {
+		for _, key := range set {
+			return key, nil
+		}
+	}
+	return nil, errNoKey
 }
 
 func refused(format string, args ...any) error {
