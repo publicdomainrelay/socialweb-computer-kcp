@@ -329,7 +329,8 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 				if json.Unmarshal([]byte(raw), &data) == nil && data.HostURL != "" {
 					if session, err := oauthclient.New(data, oauthclient.Options{DID: data.AccountDID, RepoDID: data.AccountDID,
 						PDSURL: data.HostURL, Scopes: data.Scopes}); err == nil {
-						if remote, err := pdsclient.NewRemote(pdsclient.RemoteConfig{BaseURL: data.HostURL, Tokens: session, DPoP: session}); err == nil {
+						if remote, err := pdsclient.NewRemote(pdsclient.RemoteConfig{BaseURL: data.HostURL,
+							HTTPClient: session.HTTPClient(nil)}); err == nil {
 							cfg.PDS = remote
 						}
 					}
