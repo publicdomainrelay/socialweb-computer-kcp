@@ -38,6 +38,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/hostrelease"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/kcpinstallation"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/marketidentity"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/marketintents"
 	marketpresencectl "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/marketpresence"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/openbaoserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/pdsaccount"
@@ -137,6 +138,8 @@ func (c *Core) registerLocal(ctx context.Context, mgr *ctlruntime.Manager, clien
 	warn("GuestControlPlane inputs", c.registerGuestControlPlane(mgr, local))
 	warn("MarketIdentity", c.registerIdentity(mgr, local))
 	warn("NodeClaim", c.registerNodeClaims(mgr, c.nodeClaims))
+	_, err = marketintents.Register(mgr, marketintents.Options{Bus: c.handlers, Clients: clients.client, Scope: local, Log: cfg.Log})
+	warn("market intents", err)
 	_, err = marketpresencectl.Register(mgr, marketpresencectl.Options{Heartbeats: presence.New(presence.Config{HTTPClient: c.handlers.Client()}),
 		Bidders: bidders{clients: clients}, Scope: local, Log: cfg.Log})
 	warn("MarketPresence", err)
