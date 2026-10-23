@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"flag"
 	"fmt"
 	"os"
@@ -43,8 +44,6 @@ func run(root, out string, list bool, hash string) error {
 		}
 		return nil
 	}
-	if out == "" {
-		out = root
-	}
+	out = cmp.Or(out, root)
 	return apigen.Write(out, outputs)
 }

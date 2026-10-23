@@ -207,12 +207,8 @@ func (r *requestRun) passthrough(args []string, network bool) error {
 		}
 	}
 	if nvSet {
-		if nv.PLCDirectoryURL == "" {
-			nv.PLCDirectoryURL = "https://plc.directory"
-		}
-		if nv.IngressProxyHost == "" {
-			nv.IngressProxyHost = "xrpc.fedproxy.com"
-		}
+		nv.PLCDirectoryURL = cmp.Or(nv.PLCDirectoryURL, "https://plc.directory")
+		nv.IngressProxyHost = cmp.Or(nv.IngressProxyHost, "xrpc.fedproxy.com")
 		if nv.RelayURLs == nil {
 			nv.RelayURLs = []string{}
 		}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"slices"
@@ -127,9 +128,7 @@ func runGatewaySsh(ctx context.Context, a *app, vals clicfg.Values, rest []strin
 	if r.network != "" && (r.profile == "" || r.profile == appctl.SshGatewayProfileDefault) {
 		r.profile = appctl.SshGatewayProfileNetwork
 	}
-	if r.profile == "" {
-		r.profile = appctl.SshGatewayProfileDefault
-	}
+	r.profile = cmp.Or(r.profile, appctl.SshGatewayProfileDefault)
 	if !slices.Contains(appctl.SshGatewayProfiles, r.profile) {
 		return a.fail(exitRefused, "run gateway ssh: --profile %q: want one of %s", r.profile, strings.Join(appctl.SshGatewayProfiles, ", "))
 	}
@@ -153,9 +152,7 @@ func runGatewaySsh(ctx context.Context, a *app, vals clicfg.Values, rest []strin
 
 func (r *gatewaySshRun) name() (string, error) {
 	name := r.vals.String("name")
-	if name == "" {
-		name = gatewayssh.DefaultName
-	}
+	name = cmp.Or(name, gatewayssh.DefaultName)
 	return name, request.CheckName(name)
 }
 
