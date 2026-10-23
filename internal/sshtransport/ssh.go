@@ -21,6 +21,8 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 )
 
 const (
@@ -309,13 +311,13 @@ func (s *Server) ServeConn(ctx context.Context, conn net.Conn) error {
 	s.connWG.Add(1)
 	s.mu.Unlock()
 	done := make(chan struct{})
-	go func() {
+	s.connWG.Go(func() {
 		select {
 		case <-ctx.Done():
 			conn.Close()
 		case <-done:
 		}
-	}()
+	})
 	s.handleConnection(ctx, conn)
 	close(done)
 	s.mu.Lock()
@@ -344,7 +346,7 @@ func (s *Server) handleConnection(ctx context.Context, raw net.Conn) {
 			noKeyUsername = conn.User()
 		}
 	}
-	go ssh.DiscardRequests(requests)
+	s.connWG.Go(func() { ssh.DiscardRequests(requests) })
 	for newChannel := range channels {
 		if newChannel.ChannelType() != "session" {
 			newChannel.Reject(ssh.UnknownChannelType, "only session channels are served")
@@ -355,7 +357,7 @@ func (s *Server) handleConnection(ctx context.Context, raw net.Conn) {
 			s.log.Warn("channel_accept_failed", "err", err)
 			continue
 		}
-		go s.serveSession(ctx, channel, channelRequests, account, conn.User(), noKeyUsername)
+		s.connWG.Go(func() { s.serveSession(ctx, channel, channelRequests, account, conn.User(), noKeyUsername) })
 	}
 }
 
@@ -397,7 +399,7 @@ type execRequest struct {
 
 func (s *Server) serveSession(ctx context.Context, channel ssh.Channel, requests <-chan *ssh.Request, account *AuthorizedAccount, username, noKeyUsername string) {
 	defer channel.Close()
-	io := newChannelIO(channel)
+	io := newChannelIO(channel, &s.connWG)
 	env := map[string]string{}
 	envBytes := 0
 	started := false
@@ -440,7 +442,8 @@ func (s *Server) serveSession(ctx context.Context, channel ssh.Channel, requests
 			}
 			started = true
 			req.Reply(true, nil)
-			go s.startSession(ctx, io, copyEnv(env), account, username, noKeyUsername, request.Command)
+			sessionEnv := copyEnv(env)
+			s.connWG.Go(func() { s.startSession(ctx, io, sessionEnv, account, username, noKeyUsername, request.Command) })
 		case "shell":
 			if started {
 				req.Reply(false, nil)
@@ -448,7 +451,8 @@ func (s *Server) serveSession(ctx context.Context, channel ssh.Channel, requests
 			}
 			started = true
 			req.Reply(true, nil)
-			go s.startSession(ctx, io, copyEnv(env), account, username, noKeyUsername, s.opts.DefaultCommand)
+			sessionEnv := copyEnv(env)
+			s.connWG.Go(func() { s.startSession(ctx, io, sessionEnv, account, username, noKeyUsername, s.opts.DefaultCommand) })
 		default:
 			req.Reply(false, nil)
 		}
@@ -559,17 +563,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		stop()
 	}
 	s.closeConnections()
-	done := make(chan struct{})
-	go func() {
-		s.connWG.Wait()
-		close(done)
-	}()
-	select {
-	case <-done:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	return supervise.Join(ctx, s.connWG.Wait)
 }
 
 func defaultNoKeyMessage(username string) string {
@@ -595,6 +589,8 @@ func randomHex(n int) string {
 type channelIO struct {
 	channel ssh.Channel
 
+	reader *sync.WaitGroup
+
 	mu sync.Mutex
 
 	deliverMu sync.Mutex
@@ -618,8 +614,8 @@ type channelIO struct {
 	exitedFlag bool
 }
 
-func newChannelIO(channel ssh.Channel) *channelIO {
-	return &channelIO{channel: channel}
+func newChannelIO(channel ssh.Channel, reader *sync.WaitGroup) *channelIO {
+	return &channelIO{channel: channel, reader: reader}
 }
 
 func (c *channelIO) Write(chunk []byte) error {
@@ -641,7 +637,7 @@ func (c *channelIO) OnData(handler func(chunk []byte)) {
 	c.pendingBytes = 0
 	if !c.readerStarted {
 		c.readerStarted = true
-		go c.readLoop()
+		c.reader.Go(c.readLoop)
 	}
 	c.mu.Unlock()
 	for _, chunk := range pending {
