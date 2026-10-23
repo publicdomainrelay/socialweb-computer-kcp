@@ -359,7 +359,7 @@ func (r *Bus) Ready(ctx ...context.Context) error {
 	if r == nil {
 		return ErrHandlersStopped
 	}
-	if len(ctx) > 0 && ctx[0] != nil {
+	if len(ctx) > 0 {
 		if err := ctx[0].Err(); err != nil {
 			return err
 		}
