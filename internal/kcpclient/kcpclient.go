@@ -5,9 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -228,16 +226,16 @@ func (c *Client) bind(logicalCluster string, gv schema.GroupVersion, endpoint st
 
 var (
 	workspaceReadyTimeout = 5 * time.Minute
-	workspaceReadyPoll    = 250 * time.Millisecond
-
-	workspaceNudgeAfter = 5 * time.Second
-	workspaceNudgeEvery = 10 * time.Second
+	workspaceReadyRetry   = 250 * time.Millisecond
 )
 
-const workspaceNudgeAnnotation = "socialweb.computer/initializer-nudge"
+var (
+	errWorkspaceReady = errors.New("kcpclient: the workspace is ready")
 
-var errNoWorkspaceType = errors.New(
-	"kcpclient: the workspace names no type, so no WorkspaceType exists to nudge; its initializer cannot be re-run")
+	errWorkspaceDeleting = errors.New("is being deleted; ask again once it is gone")
+
+	errNodeClaimGone = errors.New("kcpclient: the nodeclaim is gone")
+)
 
 func (c *Client) homePath(caller gateway.Caller, name string) (string, error) {
 	if caller == "" {
@@ -390,7 +388,7 @@ func (c *Client) ensureWorkspace(ctx context.Context, parent, name string, spec 
 	if err := c.createWorkspace(ctx, parent, name, spec); err != nil {
 		return err
 	}
-	return c.waitForWorkspaceReady(ctx, parent, name, spec)
+	return c.waitForWorkspaceReady(ctx, parent, name)
 }
 
 func (c *Client) workspaceOwner(ctx context.Context) (string, error) {
@@ -422,86 +420,69 @@ func (c *Client) workspaceOwner(ctx context.Context) (string, error) {
 	return string(raw), nil
 }
 
-func (c *Client) waitForWorkspaceReady(ctx context.Context, parent, name string, spec kcpv1alpha1.WorkspaceSpec) error {
+func (c *Client) waitForWorkspaceReady(ctx context.Context, parent, name string) error {
 	path := parent + ":" + name
-	deadline := time.Now().Add(workspaceReadyTimeout)
+	r, err := c.resource(parent, tenancyResource)
+	if err != nil {
+		return err
+	}
+	wctx, cancel := context.WithTimeout(ctx, workspaceReadyTimeout)
+	defer cancel()
+	src := source[kcpv1alpha1.Workspace]{r: r, resource: "workspaces", field: "metadata.name=" + name, where: parent}
 	last := "never read"
-	lastNudge := time.Time{}
-	started := time.Now()
-	for {
-		ws, err := c.readWorkspace(ctx, parent, name)
+	judge := func(deleted bool, ws kcpv1alpha1.Workspace) error {
 		switch {
-		case err == nil && ws.DeletionTimestamp != nil:
-			return fmt.Errorf("kcpclient: workspace %s is being deleted; ask again once it is gone", path)
-		case err == nil && ws.Status.Phase == corev1alpha1.LogicalClusterPhaseReady:
-			return nil
-		case err == nil:
-			last = "phase " + string(ws.Status.Phase)
-			if ws.Status.Phase == corev1alpha1.LogicalClusterPhaseInitializing &&
-				hasInitializer(ws.Status.Initializers, kcpv1alpha1.WorkspaceAPIBindingsInitializer) {
-				last = fmt.Sprintf("phase %s with initializers %v", ws.Status.Phase, ws.Status.Initializers)
-				if time.Since(started) >= workspaceNudgeAfter && time.Since(lastNudge) >= workspaceNudgeEvery {
-					if err := c.nudgeWorkspaceType(ctx, spec.Type); err != nil {
-						slog.Warn("kcpclient: the workspace stayed Initializing and its kcp APIBinding initializer could not be re-run",
-							"workspace", path, "initializers", ws.Status.Initializers, "err", err.Error())
-					} else {
-						lastNudge = time.Now()
-						slog.Warn("kcpclient: the workspace stayed Initializing with the kcp APIBinding initializer; re-ran it by updating the WorkspaceType so the apibinder queues every initializing workspace again",
-							"workspace", path, "type", workspaceTypeName(spec.Type), "initializers", ws.Status.Initializers)
-					}
-				}
-			}
+		case deleted:
+			last = "deleted"
+		case ws.DeletionTimestamp != nil:
+			return fmt.Errorf("kcpclient: workspace %s %w", path, errWorkspaceDeleting)
+		case ws.Status.Phase == corev1alpha1.LogicalClusterPhaseReady:
+			return errWorkspaceReady
+		case ws.Status.Phase == corev1alpha1.LogicalClusterPhaseInitializing && len(ws.Status.Initializers) > 0:
+			last = fmt.Sprintf("phase %s with initializers %v", ws.Status.Phase, ws.Status.Initializers)
 		default:
-			last = err.Error()
+			last = "phase " + string(ws.Status.Phase)
 		}
-		if !time.Now().Before(deadline) {
+		return nil
+	}
+	resync := func(items []kcpv1alpha1.Workspace) error {
+		if len(items) == 0 {
+			last = "not found"
+		}
+		for _, ws := range items {
+			if err := judge(false, ws); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	for {
+		items, rv, err := src.list(wctx)
+		if err == nil {
+			if err = resync(items); err == nil {
+				err = follow(wctx, src, rv, judge, resync)
+			}
+		}
+		switch {
+		case errors.Is(err, errWorkspaceReady):
+			return nil
+		case ctx.Err() != nil:
+			return ctx.Err()
+		case wctx.Err() != nil:
 			return fmt.Errorf("kcpclient: workspace %s did not become %s within %s "+
 				"(last read: %s). Nothing may be written into a workspace kcp cannot address, "+
 				"and the create would be refused with `workspaces.tenancy.kcp.io %q not found`",
 				path, corev1alpha1.LogicalClusterPhaseReady, workspaceReadyTimeout, last, path)
+		case errors.Is(err, errWorkspaceDeleting):
+			return err
+		case err != nil:
+			last = err.Error()
 		}
 		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(workspaceReadyPoll):
+		case <-wctx.Done():
+		case <-time.After(workspaceReadyRetry):
 		}
 	}
-}
-
-func hasInitializer(initializers []corev1alpha1.LogicalClusterInitializer, want corev1alpha1.LogicalClusterInitializer) bool {
-	return slices.Contains(initializers, want)
-}
-
-func workspaceTypeName(ref *kcpv1alpha1.WorkspaceTypeReference) string {
-	if ref == nil {
-		return ""
-	}
-	return ref.Path + ":" + string(ref.Name)
-}
-
-func (c *Client) nudgeWorkspaceType(ctx context.Context, ref *kcpv1alpha1.WorkspaceTypeReference) error {
-	if ref == nil || ref.Name == "" {
-		return errNoWorkspaceType
-	}
-	path := ref.Path
-	if path == "" {
-		path = RootWorkspace
-	}
-	r, err := c.resource(path, tenancyResource)
-	if err != nil {
-		return err
-	}
-	body, err := json.Marshal(map[string]any{"metadata": map[string]any{"annotations": map[string]string{
-		workspaceNudgeAnnotation: time.Now().UTC().Format(time.RFC3339Nano),
-	}}})
-	if err != nil {
-		return fmt.Errorf("kcpclient: nudge workspace type %s: marshal: %w", workspaceTypeName(ref), err)
-	}
-	if err := r.Patch(types.MergePatchType).Resource("workspacetypes").Name(string(ref.Name)).
-		Body(body).Do(ctx).Error(); err != nil {
-		return fmt.Errorf("kcpclient: nudge workspace type %s: %w", workspaceTypeName(ref), err)
-	}
-	return nil
 }
 
 func (c *Client) createGrant(ctx context.Context, logicalCluster, name, did string) error {
@@ -1159,6 +1140,39 @@ func (c *Client) MarkNodeClaimRunning(ctx context.Context, logicalCluster, name,
 	return nil
 }
 
+func (c *Client) AwaitNodeClaimGone(ctx context.Context, logicalCluster, name string) error {
+	if name == "" {
+		return errors.New("kcpclient: AwaitNodeClaimGone needs a claim name")
+	}
+	r, err := c.resource(logicalCluster, socialwebResource)
+	if err != nil {
+		return err
+	}
+	src := source[v1alpha1.NodeClaim]{r: r, resource: "nodeclaims", field: "metadata.name=" + name, where: logicalCluster}
+	gone := func(deleted bool, _ v1alpha1.NodeClaim) error {
+		if deleted {
+			return errNodeClaimGone
+		}
+		return nil
+	}
+	resync := func(items []v1alpha1.NodeClaim) error {
+		if len(items) == 0 {
+			return errNodeClaimGone
+		}
+		return nil
+	}
+	items, rv, err := src.list(ctx)
+	if err == nil {
+		if err = resync(items); err == nil {
+			err = follow(ctx, src, rv, gone, resync)
+		}
+	}
+	if errors.Is(err, errNodeClaimGone) {
+		return nil
+	}
+	return err
+}
+
 func (c *Client) DeleteNodeClaim(ctx context.Context, logicalCluster, name string) error {
 	r, err := c.resource(logicalCluster, socialwebResource)
 	if err != nil {
@@ -1196,6 +1210,9 @@ func sameNodeClaimSpec(have, want v1alpha1.NodeClaimSpec) bool {
 		have.NodePasswordFile != want.NodePasswordFile || have.ServerCAFile != want.ServerCAFile {
 		return false
 	}
+	if want.AdoptJoinedNode && !have.AdoptJoinedNode {
+		return false
+	}
 	if len(have.DenyBidderDids) != len(want.DenyBidderDids) {
 		return false
 	}
@@ -1212,7 +1229,7 @@ func nodeClaimSpecPatch(spec v1alpha1.NodeClaimSpec) ([]byte, error) {
 	if dids == nil {
 		dids = []string{}
 	}
-	return json.Marshal(map[string]any{"spec": map[string]any{
+	patch := map[string]any{
 		"clusterRef":       map[string]any{"name": spec.ClusterRef.Name},
 		"nodeName":         spec.NodeName,
 		"ownerDid":         spec.OwnerDid,
@@ -1222,7 +1239,11 @@ func nodeClaimSpecPatch(spec v1alpha1.NodeClaimSpec) ([]byte, error) {
 		"nodePasswordFile": spec.NodePasswordFile,
 		"serverCAFile":     spec.ServerCAFile,
 		"denyBidderDids":   dids,
-	}})
+	}
+	if spec.AdoptJoinedNode {
+		patch["adoptJoinedNode"] = true
+	}
+	return json.Marshal(map[string]any{"spec": patch})
 }
 
 func createNodeClaim(ctx context.Context, r rest.Interface, claim v1alpha1.NodeClaim) error {
