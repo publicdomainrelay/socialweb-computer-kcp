@@ -4,6 +4,7 @@ package hostos
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -13,6 +14,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"golang.org/x/sys/unix"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
 )
@@ -108,19 +111,83 @@ func Reload(pid int) error {
 }
 
 func Terminate(pid int, grace time.Duration) error {
+	ticks, err := ProcStart(pid)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
 	if err := Signal(pid, false); err != nil {
 		return err
 	}
-	deadline := time.Now().Add(grace)
-	for time.Now().Before(deadline) {
-		alive, err := Alive(pid)
+	ctx, cancel := context.WithTimeout(context.Background(), grace)
+	defer cancel()
+	err = AwaitExit(ctx, pid, ticks)
+	if err == nil {
+		return nil
+	}
+	if ctx.Err() == nil {
+		return err
+	}
+	return Signal(pid, true)
+}
+
+func AwaitExit(ctx context.Context, pid int, startTicks uint64) error {
+	if pid <= 0 {
+		return fmt.Errorf("hostos: no process at pid %d to wait for", pid)
+	}
+	fd, err := unix.PidfdOpen(pid, 0)
+	if errors.Is(err, unix.ESRCH) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("hostos: pidfd_open(%d): %w", pid, err)
+	}
+	if err := unix.SetNonblock(fd, true); err != nil {
+		unix.Close(fd)
+		return fmt.Errorf("hostos: the pidfd of pid %d: %w", pid, err)
+	}
+	f := os.NewFile(uintptr(fd), "pidfd:"+strconv.Itoa(pid))
+	defer f.Close()
+	if startTicks != 0 {
+		ticks, err := ProcStart(pid)
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
 		if err != nil {
 			return err
 		}
-		if !alive {
+		if ticks != startTicks {
 			return nil
 		}
-		time.Sleep(20 * time.Millisecond)
 	}
-	return Signal(pid, true)
+	if err := f.SetReadDeadline(time.Time{}); err != nil {
+		return fmt.Errorf("hostos: the pidfd of pid %d cannot be polled: %w", pid, err)
+	}
+	rc, err := f.SyscallConn()
+	if err != nil {
+		return fmt.Errorf("hostos: the pidfd of pid %d: %w", pid, err)
+	}
+	stop := context.AfterFunc(ctx, func() { f.SetReadDeadline(time.Unix(1, 0)) })
+	defer stop()
+	var perr error
+	err = rc.Read(func(fd uintptr) bool {
+		fds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
+		n, err := unix.Poll(fds, 0)
+		if err != nil && !errors.Is(err, unix.EINTR) {
+			perr = err
+			return true
+		}
+		return n > 0
+	})
+	switch {
+	case err == nil && perr == nil:
+		return nil
+	case err == nil:
+		return fmt.Errorf("hostos: polling the pidfd of pid %d: %w", pid, perr)
+	case ctx.Err() != nil:
+		return ctx.Err()
+	}
+	return fmt.Errorf("hostos: waiting on the pidfd of pid %d: %w", pid, err)
 }
