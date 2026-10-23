@@ -219,4 +219,3 @@ func ObjectName(prefix, subject string) string {
 	}
 	return name
 }
-

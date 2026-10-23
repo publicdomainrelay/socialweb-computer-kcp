@@ -159,10 +159,10 @@ func (c *Composer) Event(ctx context.Context, r Root, ws, apiVersion, kind, name
 		message = message[:1024]
 	}
 	ev := &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": "v1",
-		"kind":       "Event",
-		"metadata":   map[string]any{"generateName": strings.ToLower(kind) + "-" + name + "-", "namespace": eventNamespace},
-		"involvedObject": map[string]any{"apiVersion": apiVersion, "kind": kind, "name": name},
+		"apiVersion":         "v1",
+		"kind":               "Event",
+		"metadata":           map[string]any{"generateName": strings.ToLower(kind) + "-" + name + "-", "namespace": eventNamespace},
+		"involvedObject":     map[string]any{"apiVersion": apiVersion, "kind": kind, "name": name},
 		"reason":             reason,
 		"message":            message,
 		"type":               eventType,
