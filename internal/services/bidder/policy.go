@@ -17,6 +17,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/ref"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/policyrun"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -64,15 +65,7 @@ type PolicyInput struct {
 	Mode string
 }
 
-type PolicyDecision struct {
-	Allow bool
-
-	Violations []string
-
-	Reason string
-
-	Run string
-}
+type PolicyDecision = policyrun.Decision
 
 type PolicyRunClient interface {
 	CreatePolicyWorkflowRun(ctx context.Context, run *policyv1alpha1.PolicyWorkflowRun) error
@@ -112,7 +105,7 @@ func (c *KCPPolicyRuns) WaitPolicyWorkflowRun(ctx context.Context, target ref.Re
 	}
 	for {
 		run, err := c.Res.Get(ctx, target.LogicalCluster, target.Name)
-		if err == nil && run != nil && policyRunTerminal(run.Status.Phase) {
+		if err == nil && run != nil && policyrun.Terminal(run.Status.Phase) {
 			return run, nil
 		}
 		if err != nil && ctx.Err() != nil {
@@ -139,15 +132,6 @@ func (c *KCPPolicyRuns) cancel(target ref.Ref) {
 	defer cancel()
 	if err := c.Res.PatchJSON(ctx, target.LogicalCluster, target.Name, patch); err != nil && c.Log != nil {
 		c.Log.Warn("cancelling an abandoned policy run failed", "name", target.Name, "err", err)
-	}
-}
-
-func policyRunTerminal(phase policyv1alpha1.PolicyWorkflowRunPhase) bool {
-	switch phase {
-	case policyv1alpha1.PolicyWorkflowRunSucceeded, policyv1alpha1.PolicyWorkflowRunFailed, policyv1alpha1.PolicyWorkflowRunCancelled:
-		return true
-	default:
-		return false
 	}
 }
 
@@ -298,7 +282,7 @@ func (e *PolicyEvaluator) run(ctx context.Context, req PolicyRunRequest) PolicyD
 	if err != nil {
 		return PolicyDecision{Reason: "the policy run did not finish: " + err.Error(), Run: run.Name}
 	}
-	return decisionOfRun(finished)
+	return policyrun.Decide(finished, outputBoolValue, outputStringValues)
 }
 
 func (e *PolicyEvaluator) buildRun(req PolicyRunRequest) *policyv1alpha1.PolicyWorkflowRun {
@@ -370,93 +354,6 @@ func marshalArgs(args map[string]string) string {
 	return string(raw)
 }
 
-func decisionOfRun(run *policyv1alpha1.PolicyWorkflowRun) PolicyDecision {
-	if run == nil {
-		return PolicyDecision{Reason: "the policy run returned no status"}
-	}
-	name := run.Name
-	switch run.Status.Phase {
-	case policyv1alpha1.PolicyWorkflowRunSucceeded:
-	case policyv1alpha1.PolicyWorkflowRunFailed:
-		return PolicyDecision{Reason: policyRunFailure(run), Run: name}
-	case policyv1alpha1.PolicyWorkflowRunCancelled:
-		return PolicyDecision{Reason: "the policy run was cancelled", Run: name}
-	default:
-		return PolicyDecision{Reason: fmt.Sprintf("the policy run ended in phase %q", run.Status.Phase), Run: name}
-	}
-	if run.Status.ExitStatus != "" && run.Status.ExitStatus != policyv1alpha1.PolicyExitStatusSuccess {
-		return PolicyDecision{Reason: "the policy workflow failed", Run: name}
-	}
-	allow, ok := outputBool(run.Status.Outputs, "allow")
-	if !ok {
-		return PolicyDecision{Reason: "the policy run produced no allow output", Run: name}
-	}
-	violations := outputStrings(run.Status.Outputs, "violations")
-	if !allow {
-		reason := "policy rejected"
-		if len(violations) > 0 {
-			reason += ": " + strings.Join(violations, ", ")
-		}
-		return PolicyDecision{Violations: violations, Reason: reason, Run: name}
-	}
-	return PolicyDecision{Allow: true, Violations: violations, Run: name}
-}
-
-func policyRunFailure(run *policyv1alpha1.PolicyWorkflowRun) string {
-	for _, condition := range run.Status.Conditions {
-		if condition.Status == metav1.ConditionTrue && condition.Message != "" {
-			return condition.Message
-		}
-	}
-	if raw, ok := run.Status.Annotations["error"]; ok && len(raw) > 0 {
-		if message := policyAnnotationMessage(raw); message != "" {
-			return message
-		}
-		return strings.TrimSpace(string(raw))
-	}
-	return "the policy run failed"
-}
-
-func policyAnnotationMessage(raw json.RawMessage) string {
-	var envelope struct {
-		Items []map[string]any `json:"items"`
-	}
-	items := []map[string]any{}
-	if err := json.Unmarshal(raw, &envelope); err == nil && len(envelope.Items) > 0 {
-		items = envelope.Items
-	} else if err := json.Unmarshal(raw, &items); err != nil {
-		return ""
-	}
-	for _, item := range items {
-		for _, key := range []string{"message", "title", "msg"} {
-			if text, ok := item[key].(string); ok && text != "" {
-				return text
-			}
-		}
-	}
-	return ""
-}
-
-func outputBool(outputs map[string]json.RawMessage, key string) (bool, bool) {
-	values := outputValues(outputs, key)
-	found := false
-	allow := true
-	for _, raw := range values {
-		value, ok := outputBoolValue(raw)
-		if !ok {
-			continue
-		}
-		found = true
-		if !value {
-			allow = false
-		}
-	}
-	if !found {
-		return false, false
-	}
-	return allow, true
-}
-
 func outputBoolValue(raw json.RawMessage) (bool, bool) {
 	var value bool
 	if json.Unmarshal(raw, &value) == nil {
@@ -480,14 +377,6 @@ func outputBoolValue(raw json.RawMessage) (bool, bool) {
 		return *object.Allow, true
 	}
 	return false, false
-}
-
-func outputStrings(outputs map[string]json.RawMessage, key string) []string {
-	var out []string
-	for _, raw := range outputValues(outputs, key) {
-		out = append(out, outputStringValues(raw)...)
-	}
-	return out
 }
 
 func outputStringValues(raw json.RawMessage) []string {
@@ -515,24 +404,4 @@ func outputStringValues(raw json.RawMessage) []string {
 		return out
 	}
 	return nil
-}
-
-func outputValues(outputs map[string]json.RawMessage, key string) []json.RawMessage {
-	values := make([]json.RawMessage, 0, len(outputs))
-	if raw, ok := outputs[key]; ok && len(raw) > 0 {
-		values = append(values, raw)
-	}
-	for name, raw := range outputs {
-		if name == key || len(raw) == 0 {
-			continue
-		}
-		var job map[string]json.RawMessage
-		if json.Unmarshal(raw, &job) != nil {
-			continue
-		}
-		if value, ok := job[key]; ok && len(value) > 0 {
-			values = append(values, value)
-		}
-	}
-	return values
 }

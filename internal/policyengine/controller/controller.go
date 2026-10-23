@@ -18,6 +18,7 @@ import (
 
 	policyv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/policy/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/policyrun"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/models"
 	policyengine "github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/status"
 )
@@ -225,7 +226,7 @@ func (c *Controller) reconcileRun(ctx context.Context, run *policyv1alpha1.Polic
 		c.forgetTerminal(key)
 		return
 	}
-	if isTerminalPhase(run.Status.Phase) {
+	if policyrun.Terminal(run.Status.Phase) {
 		c.cancelActive(key)
 		c.forgetTerminal(key)
 		c.maybeDeleteRun(ctx, run)
@@ -661,15 +662,6 @@ func runCompletion(run *policyv1alpha1.PolicyWorkflowRun) time.Time {
 
 func runKey(run *policyv1alpha1.PolicyWorkflowRun) string {
 	return run.Namespace + "/" + run.Name
-}
-
-func isTerminalPhase(phase policyv1alpha1.PolicyWorkflowRunPhase) bool {
-	switch phase {
-	case policyv1alpha1.PolicyWorkflowRunSucceeded, policyv1alpha1.PolicyWorkflowRunFailed, policyv1alpha1.PolicyWorkflowRunCancelled:
-		return true
-	default:
-		return false
-	}
 }
 
 func (c *Controller) isActive(key string) bool {
