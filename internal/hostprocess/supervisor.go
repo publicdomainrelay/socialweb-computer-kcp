@@ -84,6 +84,7 @@ type Supervisor struct {
 	pending  map[string]bool
 	pids     map[string]int64
 	outputs  map[string]follower
+	follows  sync.WaitGroup
 	changed  chan string
 }
 
@@ -638,7 +639,7 @@ func (s *Supervisor) followOutput(ctx context.Context, o v1alpha1.HostProcess) {
 		s.outputs = map[string]follower{}
 	}
 	s.outputs[o.Name] = follower{key: key, stop: cancel}
-	go s.rotateOnWrite(fctx, w, o, key)
+	s.follows.Go(func() { s.rotateOnWrite(fctx, w, o, key) })
 }
 
 func (s *Supervisor) unfollowOutput(name string) {
@@ -700,6 +701,7 @@ func (s *Supervisor) capOutput(o v1alpha1.HostProcess) {
 func (s *Supervisor) Run(ctx context.Context) error {
 	s.c.log().Info("the HostProcess supervisor runs in the core", "workspace", s.c.workspace(), "backend", string(s.backend),
 		"prefixes", s.c.prefixes())
+	defer s.follows.Wait()
 	wake := make(chan struct{}, 1)
 	changed := make(chan string, 1024)
 	s.mu.Lock()

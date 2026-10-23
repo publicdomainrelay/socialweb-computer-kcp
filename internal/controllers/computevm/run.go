@@ -55,7 +55,8 @@ func run(ctx context.Context, c computevm.Config) error {
 	if err != nil {
 		return err
 	}
-	fc, err := firecrackervm.Register(mgr, provider, host, placement)
+	defer provider.Close()
+	fc, err := firecrackervm.Register(ctx, mgr, provider, host, placement)
 	if err != nil {
 		return err
 	}

@@ -253,14 +253,16 @@ func (s *Service) Start(ctx context.Context) error {
 	s.readiness.Signal()
 
 	runCtx, cancel := context.WithCancel(ctx)
+	var stopper sync.WaitGroup
+	defer stopper.Wait()
 	defer cancel()
-	go func() {
+	stopper.Go(func() {
 		select {
 		case <-stopCh:
 			cancel()
 		case <-runCtx.Done():
 		}
-	}()
+	})
 	unfollow := s.follow(relay)
 	_ = relay.Run(runCtx)
 	unfollow()

@@ -737,6 +737,7 @@ func TunnelOverRelay(ctx context.Context, opts TunnelOptions, readable io.Reader
 		return err
 	}
 	defer conn.Close()
+	defer context.AfterFunc(ctx, func() { _ = conn.Close() })()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
