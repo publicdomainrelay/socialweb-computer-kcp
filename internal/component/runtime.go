@@ -295,6 +295,9 @@ func (r *Runtime) Reconcile(ctx context.Context, spec ComponentSpec) (ComponentS
 		st.Message = "the component is suspended"
 		st.Restarts = restarts
 		conds.Set(&st.Conditions, spec.Generation, ConditionReady, false, "Suspended", st.Message)
+		inst.mu.Lock()
+		inst.spec, inst.status = spec, cloneStatus(st)
+		inst.mu.Unlock()
 		r.emit(ctx, spec, st)
 		return st, stopErr
 	}
