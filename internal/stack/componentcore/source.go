@@ -16,8 +16,9 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 )
+
+const RestartFieldManager = "socialweb.computer/dev-restart"
 
 type DynamicFactory func(workspace string) (dynamic.Interface, error)
 
@@ -118,12 +119,14 @@ func Restart(ctx context.Context, dynamic DynamicFactory, ref ComponentRef) (str
 		return "", err
 	}
 	stamp := time.Now().UTC().Format(time.RFC3339Nano)
-	body, err := json.Marshal(map[string]any{"metadata": map[string]any{"annotations": map[string]string{
-		component.AnnotationRestartAt: stamp}}})
+	body, err := json.Marshal(map[string]any{"apiVersion": ref.GVR.GroupVersion().String(), "kind": ref.Kind,
+		"metadata": map[string]any{"name": ref.Name}, "spec": map[string]any{"restartedAt": stamp}})
 	if err != nil {
 		return "", err
 	}
-	if _, err := dyn.Resource(ref.GVR).Patch(ctx, ref.Name, types.MergePatchType, body, metav1.PatchOptions{}); err != nil {
+	force := true
+	if _, err := dyn.Resource(ref.GVR).Patch(ctx, ref.Name, types.ApplyPatchType, body,
+		metav1.PatchOptions{FieldManager: RestartFieldManager, Force: &force}); err != nil {
 		return "", fmt.Errorf("componentcore: requesting the restart of %s/%s: %w", ref.Kind, ref.Name, err)
 	}
 	return stamp, nil

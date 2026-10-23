@@ -277,7 +277,7 @@ func (r *Runtime) Reconcile(ctx context.Context, spec ComponentSpec) (ComponentS
 	inst.mu.Lock()
 	running := inst.running
 	supervising := inst.supervising
-	changed := inst.spec.Generation != spec.Generation || inst.spec.RestartStamp() != spec.RestartStamp()
+	changed := inst.spec.Generation != spec.Generation
 	attempted := inst.started
 	current := cloneStatus(inst.status)
 	restarts := inst.restarts

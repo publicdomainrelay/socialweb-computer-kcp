@@ -57,8 +57,6 @@ type Controller struct {
 
 	keys map[types.UID]key
 
-	restarts map[key]string
-
 	applied map[types.UID]string
 
 	events map[string]chan ctlruntime.Request
@@ -73,7 +71,7 @@ func New(opts Options) (*Controller, error) {
 		log = slog.New(slog.DiscardHandler)
 	}
 	return &Controller{runtime: opts.Runtime, changed: opts.Changed, log: log.With("component", "component-controller"), uids: map[key]types.UID{},
-		keys: map[types.UID]key{}, restarts: map[key]string{}, applied: map[types.UID]string{}, events: map[string]chan ctlruntime.Request{}}, nil
+		keys: map[types.UID]key{}, applied: map[types.UID]string{}, events: map[string]chan ctlruntime.Request{}}, nil
 }
 
 func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
@@ -109,8 +107,7 @@ func register[T interface {
 	c.events[kind] = events
 	c.mu.Unlock()
 	r := &reconciler[T]{c: c, kind: kind, status: status}
-	opts := []ctlruntime.Option{ctlruntime.Export(Export), ctlruntime.Events(events), ctlruntime.Gone(r.gone),
-		ctlruntime.Watches(r.restarted)}
+	opts := []ctlruntime.Option{ctlruntime.Export(Export), ctlruntime.Events(events), ctlruntime.Gone(r.gone)}
 	if scope != nil {
 		opts = append(opts, ctlruntime.InWorkspaces(scope))
 	}
@@ -137,7 +134,7 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 		return ctlruntime.Result{}, err
 	}
 	k := key{kind: r.kind, cluster: req.Cluster, name: req.Name}
-	r.c.remember(k, spec.UID, spec.RestartStamp())
+	r.c.remember(k, spec.UID)
 	st, err := r.c.runtime.Reconcile(ctx, spec)
 	if errors.Is(err, svc.ErrRuntimeNotStarted) {
 		return ctlruntime.Result{}, err
@@ -175,27 +172,13 @@ func (r *reconciler[T]) gone(ctx context.Context, req ctlruntime.Request) {
 	}
 }
 
-func (r *reconciler[T]) restarted(_ context.Context, src ctlruntime.Request, obj T) []ctlruntime.Request {
-	stamp := obj.GetAnnotations()[svc.AnnotationRestartAt]
-	if stamp == "" {
-		return nil
-	}
-	r.c.mu.Lock()
-	seen := r.c.restarts[key{kind: r.kind, cluster: src.Cluster, name: obj.GetName()}]
-	r.c.mu.Unlock()
-	if seen == stamp {
-		return nil
-	}
-	return []ctlruntime.Request{{Cluster: src.Cluster, Namespace: obj.GetNamespace(), Name: obj.GetName()}}
-}
-
-func (c *Controller) remember(k key, uid types.UID, stamp string) {
+func (c *Controller) remember(k key, uid types.UID) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if old, ok := c.uids[k]; ok && old != uid {
 		delete(c.keys, old)
 	}
-	c.uids[k], c.keys[uid], c.restarts[k] = uid, k, stamp
+	c.uids[k], c.keys[uid] = uid, k
 }
 
 func (c *Controller) forget(k key) (types.UID, bool) {
@@ -203,7 +186,6 @@ func (c *Controller) forget(k key) (types.UID, bool) {
 	defer c.mu.Unlock()
 	uid, ok := c.uids[k]
 	delete(c.uids, k)
-	delete(c.restarts, k)
 	if ok {
 		delete(c.keys, uid)
 		delete(c.applied, uid)

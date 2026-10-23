@@ -16,11 +16,7 @@ import (
 	contract "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/component"
 )
 
-const (
-	AnnotationRestartAt = "component.socialweb.computer/restart-at"
-
-	ConditionReady = "Ready"
-)
+const ConditionReady = "Ready"
 
 const (
 	ProtocolHTTP  = contract.ProtocolHTTP
@@ -96,10 +92,6 @@ func (s ComponentSpec) Check() error {
 
 func (s ComponentSpec) Self() commonv1.ObjectRef {
 	return commonv1.ObjectRef{Group: s.Group, Kind: s.Kind, Name: s.Name, Workspace: s.Workspace}
-}
-
-func (s ComponentSpec) RestartStamp() string {
-	return s.Annotations[AnnotationRestartAt]
 }
 
 func (s ComponentSpec) ComponentStateDir(base string) string {
