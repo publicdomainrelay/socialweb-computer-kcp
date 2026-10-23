@@ -200,6 +200,8 @@ type BidderSpec struct {
 
 	MarketURL string `json:"marketURL,omitempty"`
 
+	Mode string `json:"mode,omitempty"`
+
 	Comms *MarketComms `json:"comms,omitempty"`
 }
 
