@@ -251,8 +251,13 @@ func (s *Session) oauthSession(ctx context.Context) (*oauthclient.Session, error
 	if held != nil {
 		return held, nil
 	}
-	opened, err := oauthclient.Open(ctx, oauthclient.Options{HTTPClient: &http.Client{Timeout: refreshTimeout},
-		Store: sessionStore{s: s}})
+	client := &http.Client{Timeout: refreshTimeout}
+	if s.cfg.TLS != nil {
+		config := s.cfg.TLS.Clone()
+		config.ServerName = ""
+		client.Transport = &http.Transport{TLSClientConfig: config}
+	}
+	opened, err := oauthclient.Open(ctx, oauthclient.Options{HTTPClient: client, Store: sessionStore{s: s}})
 	if err != nil {
 		return nil, err
 	}
