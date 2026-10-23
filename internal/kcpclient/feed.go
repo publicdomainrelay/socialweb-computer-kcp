@@ -21,6 +21,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gateway"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/revocation"
 )
 
@@ -179,8 +180,6 @@ type feed struct {
 	errc  chan error
 	wg    sync.WaitGroup
 }
-
-func stamp() string { return time.Now().UTC().Format("2006-01-02T15:04:05.000Z") }
 
 func (f *feed) fail(err error) {
 	select {
@@ -464,7 +463,7 @@ func (f *feed) closeHome(cluster string) error {
 
 func (f *feed) clusterGone(cluster string) error {
 	if err := f.gone("cluster/"+cluster, gateway.EventCluster, gateway.ClusterEvent{
-		Name: cluster, Phase: string(v1alpha1.ClusterUnavailable), Deleted: true, Time: stamp(),
+		Name: cluster, Phase: string(v1alpha1.ClusterUnavailable), Deleted: true, Time: clock.NowISO(),
 	}); err != nil {
 		return err
 	}
@@ -663,13 +662,13 @@ func (f *feed) forget(key string) error {
 	case gateway.EventMember:
 		var ev gateway.MemberEvent
 		if json.Unmarshal(stale.Payload, &ev) == nil {
-			ev.Deleted, ev.Snapshot, ev.Time = true, false, stamp()
+			ev.Deleted, ev.Snapshot, ev.Time = true, false, clock.NowISO()
 			return f.emitLocked(gateway.Event{Type: gateway.EventMember, Payload: ev})
 		}
 	case gateway.EventNodeClaim:
 		var ev gateway.NodeClaimEvent
 		if json.Unmarshal(stale.Payload, &ev) == nil {
-			ev.Deleted, ev.Snapshot, ev.Time = true, false, stamp()
+			ev.Deleted, ev.Snapshot, ev.Time = true, false, clock.NowISO()
 			return f.emitLocked(gateway.Event{Type: gateway.EventNodeClaim, Payload: ev})
 		}
 	}
@@ -707,7 +706,7 @@ func (f *feed) sendCluster(o v1alpha1.Cluster, snapshot bool) error {
 		TeardownBlocked: conditionTrue(o.Status.Conditions, v1alpha1.ConditionTeardownBlocked),
 	}
 	fp := fingerprint(gateway.EventCluster, ev)
-	ev.Snapshot, ev.Time = snapshot, stamp()
+	ev.Snapshot, ev.Time = snapshot, clock.NowISO()
 	return f.send("cluster/"+o.Name, gateway.EventCluster, fp, ev)
 }
 
@@ -731,11 +730,11 @@ func (f *feed) sendMember(key, cluster string, v memberView, deleted, snapshot b
 	}
 	ev := gateway.MemberEvent{Cluster: cluster, Member: v.member, Phase: phase, Reason: v.reason, Message: v.message}
 	if deleted {
-		ev.Deleted, ev.Time = true, stamp()
+		ev.Deleted, ev.Time = true, clock.NowISO()
 		return f.gone(key, gateway.EventMember, ev)
 	}
 	fp := fingerprint(gateway.EventMember, ev)
-	ev.Snapshot, ev.Time = snapshot, stamp()
+	ev.Snapshot, ev.Time = snapshot, clock.NowISO()
 	return f.send(key, gateway.EventMember, fp, ev)
 }
 
@@ -762,10 +761,10 @@ func (f *feed) sendClaim(cluster string, o v1alpha1.NodeClaim, deleted, snapshot
 	}
 	key := "claim/" + cluster + "/" + o.Name
 	if deleted {
-		ev.Deleted, ev.Time = true, stamp()
+		ev.Deleted, ev.Time = true, clock.NowISO()
 		return f.gone(key, gateway.EventNodeClaim, ev)
 	}
 	fp := fingerprint(gateway.EventNodeClaim, ev)
-	ev.Snapshot, ev.Time = snapshot, stamp()
+	ev.Snapshot, ev.Time = snapshot, clock.NowISO()
 	return f.send(key, gateway.EventNodeClaim, fp, ev)
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/servetls"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -90,7 +91,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		UpstreamRef: decoded.UpstreamRef,
 	}
 	if decoded.TLS != nil {
-		cfg.Hostnames = appendValues(cfg.Hostnames, decoded.TLS.Hostnames...)
+		cfg.Hostnames = strs.AppendUniqueFold(cfg.Hostnames, decoded.TLS.Hostnames...)
 	}
 	if decoded.Storage != nil && decoded.Storage.DataDir != "" {
 		cfg.StateDir = decoded.Storage.DataDir
@@ -115,30 +116,6 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		}
 	}
 	return cfg, nil
-}
-
-func appendValues(values []string, extra ...string) []string {
-	seen := make(map[string]struct{}, len(values)+len(extra))
-	out := make([]string, 0, len(values)+len(extra))
-	add := func(value string) {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			return
-		}
-		key := strings.ToLower(value)
-		if _, ok := seen[key]; ok {
-			return
-		}
-		seen[key] = struct{}{}
-		out = append(out, value)
-	}
-	for _, value := range values {
-		add(value)
-	}
-	for _, value := range extra {
-		add(value)
-	}
-	return out
 }
 
 func upstreamEndpoint(deps component.Deps, workspace string, ref *commonv1.ObjectRef) (string, bool) {

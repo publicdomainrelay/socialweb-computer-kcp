@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
 )
 
 type Role string
@@ -181,20 +182,12 @@ func account(f Facts) Result {
 	return ok(CheckAccount, fmt.Sprintf("%s (uid %d)", f.Account, f.UID))
 }
 
-func ParseSystemdVersion(v string) (int, error) {
-	end := strings.IndexFunc(v, func(r rune) bool { return r < '0' || r > '9' })
-	if end < 0 {
-		end = len(v)
-	}
-	return strconv.Atoi(v[:end])
-}
-
 func systemdVersion(f Facts) Result {
 	if f.VersionErr != "" {
 		return fail(CheckSystemdVersion, "the user manager's private socket did not answer: "+f.VersionErr,
 			"enable linger for the account so user@<uid> runs: "+installFix(f.Role))
 	}
-	n, err := ParseSystemdVersion(f.SystemdVersion)
+	n, err := strs.LeadingInt(f.SystemdVersion)
 	if err != nil || n < hostsvc.MinSystemdVersion {
 		return fail(CheckSystemdVersion,
 			fmt.Sprintf("the user manager reports systemd %q; %d or newer is required (GetUnitByPIDFD)", f.SystemdVersion, hostsvc.MinSystemdVersion),
@@ -276,7 +269,7 @@ func execPath(v any) string {
 	return fmt.Sprint(first.Interface())
 }
 
-func strs(v any) []string {
+func stringsOf(v any) []string {
 	rv := reflect.ValueOf(v)
 	if rv.Kind() != reflect.Slice {
 		return nil
@@ -290,10 +283,10 @@ func strs(v any) []string {
 
 func containsAll(got, want any) bool {
 	have := map[string]bool{}
-	for _, s := range strs(got) {
+	for _, s := range stringsOf(got) {
 		have[s] = true
 	}
-	for _, s := range strs(want) {
+	for _, s := range stringsOf(want) {
 		if !have[s] {
 			return false
 		}

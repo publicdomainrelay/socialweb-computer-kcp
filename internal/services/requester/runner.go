@@ -751,7 +751,7 @@ func (r *contractRunner) collectBids(ctx context.Context, rfpURI string, respons
 	deny := r.snapshot().Spec.DenyBidderDids
 	add := func(bids []BidRecord) {
 		for _, bid := range bids {
-			if bid.URI == "" || containsString(deny, bid.DID) {
+			if bid.URI == "" || slices.Contains(deny, bid.DID) {
 				continue
 			}
 			byURI[bid.URI] = bid

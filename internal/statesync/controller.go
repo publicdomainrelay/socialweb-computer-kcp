@@ -660,7 +660,7 @@ func ensureFinalizer(ctx context.Context, ri dynamic.ResourceInterface, name, fi
 			return err
 		}
 		finalizers := cur.GetFinalizers()
-		has := containsString(finalizers, finalizer)
+		has := slices.Contains(finalizers, finalizer)
 		if want == has {
 			return nil
 		}
@@ -683,10 +683,6 @@ func ensureFinalizer(ctx context.Context, ri dynamic.ResourceInterface, name, fi
 		}
 	}
 	return fmt.Errorf("statesync: the finalizers of %s stayed in conflict", name)
-}
-
-func containsString(values []string, want string) bool {
-	return slices.Contains(values, want)
 }
 
 func isNotFound(err error) bool {

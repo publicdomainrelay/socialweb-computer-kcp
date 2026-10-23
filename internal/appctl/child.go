@@ -31,6 +31,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/kcprest"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 )
 
@@ -82,7 +83,7 @@ func (n *networks) coreCredential(ctx context.Context, c child) (string, error) 
 		return path, nil
 	}
 	ws := devinstance.ChildWorkspace(c.id)
-	cs, err := kubernetes.NewForConfig(clusterConfig(n.ctl.restCfg, ws))
+	cs, err := kubernetes.NewForConfig(kcprest.ForCluster(n.ctl.restCfg, ws))
 	if err != nil {
 		return "", err
 	}
@@ -259,7 +260,7 @@ func childClient(rec devinstance.Record, kind v1alpha1.ApplicationKind) (dynamic
 	if ws == "" {
 		ws = DefaultWorkspace
 	}
-	dc, err := dynamic.NewForConfig(clusterConfig(restCfg, ws))
+	dc, err := dynamic.NewForConfig(kcprest.ForCluster(restCfg, ws))
 	if err != nil {
 		return nil, err
 	}

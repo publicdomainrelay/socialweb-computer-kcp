@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"reflect"
 	"slices"
-	"strings"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -146,7 +145,7 @@ func ensureMetadata(ctx context.Context, ri dynamic.ResourceInterface, name, fin
 		changed := false
 		if finalizer != "" {
 			finalizers := cur.GetFinalizers()
-			has := containsString(finalizers, finalizer)
+			has := slices.Contains(finalizers, finalizer)
 			switch {
 			case wantFinalizer && !has:
 				finalizers = append(finalizers, finalizer)
@@ -219,16 +218,4 @@ func writeStatus(ctx context.Context, ri dynamic.ResourceInterface, name string,
 		}
 	}
 	return fmt.Errorf("exposure: the status of %s stayed in conflict", name)
-}
-
-func containsString(values []string, want string) bool {
-	return slices.Contains(values, want)
-}
-
-func normalizeName(value string) string {
-	value = strings.TrimSpace(value)
-	if index := strings.LastIndex(value, "/"); index >= 0 {
-		value = value[index+1:]
-	}
-	return strings.TrimSpace(value)
 }

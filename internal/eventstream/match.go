@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -91,24 +92,9 @@ func gvrFor(from *recordValueFrom) schema.GroupVersionResource {
 	}
 	resource := strings.TrimSpace(from.Resource)
 	if resource == "" {
-		resource = pluralize(from.Kind)
+		resource = strs.Pluralize(from.Kind)
 	}
 	return gv.WithResource(resource)
-}
-
-func pluralize(kind string) string {
-	name := strings.ToLower(strings.TrimSpace(kind))
-	switch {
-	case name == "":
-		return ""
-	case strings.HasSuffix(name, "y"):
-		return strings.TrimSuffix(name, "y") + "ies"
-	case strings.HasSuffix(name, "s"), strings.HasSuffix(name, "x"),
-		strings.HasSuffix(name, "ch"), strings.HasSuffix(name, "sh"):
-		return name + "es"
-	default:
-		return name + "s"
-	}
 }
 
 func splitFieldPath(path string) []string {

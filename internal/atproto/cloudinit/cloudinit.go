@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
 	"gopkg.in/yaml.v3"
 )
 
@@ -278,7 +279,7 @@ func applyPatch(base map[string]any, p UserDataPatch) map[string]any {
 		ca := map[string]any{}
 		maps.Copy(ca, asObj(out["ca_certs"]))
 		existing := asArray(ca["trusted"])
-		merged := append(append([]any{}, existing...), stringSliceAny(p.CACertsTrusted)...)
+		merged := append(append([]any{}, existing...), strs.AnySlice(p.CACertsTrusted)...)
 		ca["trusted"] = dedupeAny(merged)
 		out["ca_certs"] = ca
 	}
@@ -293,14 +294,6 @@ func applyPatch(base map[string]any, p UserDataPatch) map[string]any {
 	}
 	if p.SSHPwAuth != nil {
 		out["ssh_pwauth"] = *p.SSHPwAuth
-	}
-	return out
-}
-
-func stringSliceAny(in []string) []any {
-	out := make([]any, len(in))
-	for i, s := range in {
-		out[i] = s
 	}
 	return out
 }

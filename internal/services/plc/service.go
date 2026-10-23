@@ -18,6 +18,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/servetls"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
 )
 
 const Kind = "Plc"
@@ -90,10 +91,10 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		cfg.Port = int(decoded.Serve.Port)
 	}
 	if decoded.TLS != nil {
-		cfg.Hostnames = appendHostnames(cfg.Hostnames, decoded.TLS.Hostnames...)
+		cfg.Hostnames = strs.AppendUniqueFold(cfg.Hostnames, decoded.TLS.Hostnames...)
 	}
 	if decoded.Network != nil {
-		cfg.Hostnames = appendHostnames(cfg.Hostnames, hostport.NetworkHostnames(decoded.Network, cfg.Port)...)
+		cfg.Hostnames = strs.AppendUniqueFold(cfg.Hostnames, hostport.NetworkHostnames(decoded.Network, cfg.Port)...)
 	}
 	if decoded.TLS != nil && decoded.TLS.Enabled {
 		certFile, keyFile := servetls.CertificateFiles(decoded.TLS.CertRef, decoded.Storage, cfg.Hostnames)
@@ -106,30 +107,6 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		cfg.TLS = tlsConfig
 	}
 	return cfg, nil
-}
-
-func appendHostnames(hostnames []string, extra ...string) []string {
-	seen := make(map[string]struct{}, len(hostnames)+len(extra))
-	out := make([]string, 0, len(hostnames)+len(extra))
-	add := func(host string) {
-		host = strings.TrimSpace(host)
-		if host == "" {
-			return
-		}
-		key := strings.ToLower(host)
-		if _, ok := seen[key]; ok {
-			return
-		}
-		seen[key] = struct{}{}
-		out = append(out, host)
-	}
-	for _, host := range hostnames {
-		add(host)
-	}
-	for _, host := range extra {
-		add(host)
-	}
-	return out
 }
 
 func Factory(ctx context.Context, deps component.Deps, spec component.ComponentSpec) (component.Service, error) {

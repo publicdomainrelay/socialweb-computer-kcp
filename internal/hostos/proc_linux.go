@@ -13,6 +13,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
 )
 
 const statFieldState = 3
@@ -71,15 +73,7 @@ func Cmdline(pid int) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("hostos: reading the command line of pid %d: %w", pid, err)
 	}
-	return ParseCmdline(b), nil
-}
-
-func ParseCmdline(b []byte) []string {
-	fields := strings.Split(string(b), "\x00")
-	if n := len(fields); n > 0 && fields[n-1] == "" {
-		return fields[:n-1]
-	}
-	return fields
+	return strs.SplitNUL(b), nil
 }
 
 func Alive(pid int) (bool, error) {

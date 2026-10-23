@@ -14,6 +14,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/foldmain"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostprocess"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/logx"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/portallocator"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/scale"
 )
@@ -393,8 +394,8 @@ func loadFor(get func(string) string, inv foldmain.Invocation) (Config, error) {
 	if cfg.MarketReleaseTimeout, err = optionalDuration(get, envMarketReleaseTimeout); err != nil {
 		return Config{}, err
 	}
-	if cfg.LogLevel, err = level(get(envLogLevel)); err != nil {
-		return Config{}, err
+	if cfg.LogLevel, err = logx.ParseLevel(get(envLogLevel)); err != nil {
+		return Config{}, fmt.Errorf("%s: %w", envLogLevel, err)
 	}
 	return cfg, nil
 }
@@ -487,19 +488,4 @@ func optionalDuration(get func(string) string, name string) (time.Duration, erro
 		return 0, fmt.Errorf("%s: %q must be positive", name, raw)
 	}
 	return d, nil
-}
-
-func level(raw string) (slog.Level, error) {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "", "info":
-		return slog.LevelInfo, nil
-	case "debug":
-		return slog.LevelDebug, nil
-	case "warn", "warning":
-		return slog.LevelWarn, nil
-	case "error":
-		return slog.LevelError, nil
-	default:
-		return 0, fmt.Errorf("%s: %q is not one of debug, info, warn, error", envLogLevel, raw)
-	}
 }

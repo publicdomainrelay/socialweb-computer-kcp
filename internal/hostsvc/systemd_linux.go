@@ -11,7 +11,6 @@ import (
 	"net"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -19,6 +18,7 @@ import (
 
 	sd "github.com/coreos/go-systemd/v22/dbus"
 	"github.com/godbus/dbus/v5"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
 )
 
 const (
@@ -286,14 +286,6 @@ func unitProperties(spec UnitSpec) []sd.Property {
 	return props
 }
 
-func parseVersion(v string) (int, error) {
-	end := strings.IndexFunc(v, func(r rune) bool { return r < '0' || r > '9' })
-	if end < 0 {
-		end = len(v)
-	}
-	return strconv.Atoi(v[:end])
-}
-
 func (m *systemd) checkVersion(ctx context.Context) error {
 	var v string
 	err := m.do(ctx, func(ctx context.Context, b bus) (err error) {
@@ -303,7 +295,7 @@ func (m *systemd) checkVersion(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("hostsvc: reading the manager version: %w", err)
 	}
-	n, err := parseVersion(v)
+	n, err := strs.LeadingInt(v)
 	if err != nil {
 		return fmt.Errorf("%w: the manager reports version %q", ErrSystemdTooOld, v)
 	}

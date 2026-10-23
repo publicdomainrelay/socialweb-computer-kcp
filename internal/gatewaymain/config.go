@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/logx"
 )
 
 const (
@@ -134,8 +135,8 @@ func load(get func(string) string) (Config, error) {
 	if cfg.ShutdownTimeout, err = duration(get, envShutdownTimeout, DefaultShutdownTimeout); err != nil {
 		return Config{}, err
 	}
-	if cfg.LogLevel, err = level(get(envLogLevel)); err != nil {
-		return Config{}, err
+	if cfg.LogLevel, err = logx.ParseLevel(get(envLogLevel)); err != nil {
+		return Config{}, fmt.Errorf("%s: %w", envLogLevel, err)
 	}
 	return cfg, nil
 }
@@ -198,19 +199,4 @@ func optionalHTTPSURL(get func(string) string, name string) (string, error) {
 			"that authenticates nothing", name, raw)
 	}
 	return strings.TrimSuffix(raw, "/"), nil
-}
-
-func level(raw string) (slog.Level, error) {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "", "info":
-		return slog.LevelInfo, nil
-	case "debug":
-		return slog.LevelDebug, nil
-	case "warn", "warning":
-		return slog.LevelWarn, nil
-	case "error":
-		return slog.LevelError, nil
-	default:
-		return 0, fmt.Errorf("%s: %q is not one of debug, info, warn, error", envLogLevel, raw)
-	}
 }

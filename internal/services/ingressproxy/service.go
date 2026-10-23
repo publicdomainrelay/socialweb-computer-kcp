@@ -17,6 +17,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/exposure"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/servetls"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/ingressproxy/iroh"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/ingressproxy/opentunnel"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/ingressproxy/xrpcsubscription"
@@ -145,14 +146,14 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		cfg.Hostname = hostport.HostnameOnly(strings.TrimSpace(decoded.Identity.Handle))
 	}
 	if decoded.Identity != nil && strings.TrimSpace(decoded.Identity.Did) != "" {
-		cfg.AllowedDIDs = appendValues(cfg.AllowedDIDs, decoded.Identity.Did)
+		cfg.AllowedDIDs = strs.AppendUniqueFold(cfg.AllowedDIDs, decoded.Identity.Did)
 	}
 	if host := hostport.HostnameOnly(cfg.IngressProxyHost); host != "" {
-		cfg.AllowedHosts = appendValues(cfg.AllowedHosts, host, "*."+host)
+		cfg.AllowedHosts = strs.AppendUniqueFold(cfg.AllowedHosts, host, "*."+host)
 	}
 	if host := hostport.HostnameOnly(cfg.PublicHost); host != "" {
-		cfg.AllowedHosts = appendValues(cfg.AllowedHosts, host)
-		cfg.Hostnames = appendValues(cfg.Hostnames, host)
+		cfg.AllowedHosts = strs.AppendUniqueFold(cfg.AllowedHosts, host)
+		cfg.Hostnames = strs.AppendUniqueFold(cfg.Hostnames, host)
 	}
 	if decoded.Storage != nil && decoded.Storage.DataDir != "" {
 		cfg.StateDir = decoded.Storage.DataDir
@@ -164,14 +165,14 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		cfg.Port = int(decoded.Serve.Port)
 	}
 	if decoded.TLS != nil {
-		cfg.Hostnames = appendValues(cfg.Hostnames, decoded.TLS.Hostnames...)
+		cfg.Hostnames = strs.AppendUniqueFold(cfg.Hostnames, decoded.TLS.Hostnames...)
 	}
 	if decoded.Network != nil {
-		cfg.Hostnames = appendValues(cfg.Hostnames, hostport.NetworkHostnames(decoded.Network, cfg.Port)...)
+		cfg.Hostnames = strs.AppendUniqueFold(cfg.Hostnames, hostport.NetworkHostnames(decoded.Network, cfg.Port)...)
 	}
-	cfg.AdditionalHosts = appendValues(cfg.AdditionalHosts, additionalHosts(hostport.Primary(cfg.Hostname, cfg.Hostnames), cfg.Hostnames)...)
+	cfg.AdditionalHosts = strs.AppendUniqueFold(cfg.AdditionalHosts, additionalHosts(hostport.Primary(cfg.Hostname, cfg.Hostnames), cfg.Hostnames)...)
 	if wildcard := wildcardHost(cfg.Hostnames); wildcard != "" {
-		cfg.AllowedHosts = appendValues(cfg.AllowedHosts, wildcard)
+		cfg.AllowedHosts = strs.AppendUniqueFold(cfg.AllowedHosts, wildcard)
 	}
 	if decoded.RelayRef != nil {
 		if relayURL, ok := relayEndpoint(cfg.Deps, cfg.Workspace, decoded.RelayRef); ok {
@@ -206,30 +207,6 @@ func copyOpenTunnel(in *v1alpha1.IngressProxyOpenTunnel) *v1alpha1.IngressProxyO
 	out := *in
 	out.Command = append([]string(nil), in.Command...)
 	return &out
-}
-
-func appendValues(values []string, extra ...string) []string {
-	seen := make(map[string]struct{}, len(values)+len(extra))
-	out := make([]string, 0, len(values)+len(extra))
-	add := func(value string) {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			return
-		}
-		key := strings.ToLower(value)
-		if _, ok := seen[key]; ok {
-			return
-		}
-		seen[key] = struct{}{}
-		out = append(out, value)
-	}
-	for _, value := range values {
-		add(value)
-	}
-	for _, value := range extra {
-		add(value)
-	}
-	return out
 }
 
 func additionalHosts(primary string, hostnames []string) []string {

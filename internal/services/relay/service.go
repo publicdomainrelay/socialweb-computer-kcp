@@ -23,6 +23,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/servetls"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
@@ -125,10 +126,10 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		cfg.Port = int(decoded.Serve.Port)
 	}
 	if decoded.TLS != nil {
-		cfg.Hostnames = appendValues(cfg.Hostnames, decoded.TLS.Hostnames...)
+		cfg.Hostnames = strs.AppendUniqueFold(cfg.Hostnames, decoded.TLS.Hostnames...)
 	}
 	if decoded.Network != nil {
-		cfg.Hostnames = appendValues(cfg.Hostnames, hostport.NetworkHostnames(decoded.Network, cfg.Port)...)
+		cfg.Hostnames = strs.AppendUniqueFold(cfg.Hostnames, hostport.NetworkHostnames(decoded.Network, cfg.Port)...)
 	}
 	cfg.Upstreams = pdsEndpoints(cfg.Deps, cfg.Workspace, cfg.PdsRefs)
 	if allowsAnyPDS(cfg.PdsRefs) {
@@ -157,30 +158,6 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		cfg.TLSConfig = tlsConfig
 	}
 	return cfg, nil
-}
-
-func appendValues(hostnames []string, extra ...string) []string {
-	seen := make(map[string]struct{}, len(hostnames)+len(extra))
-	out := make([]string, 0, len(hostnames)+len(extra))
-	add := func(host string) {
-		host = strings.TrimSpace(host)
-		if host == "" {
-			return
-		}
-		key := strings.ToLower(host)
-		if _, ok := seen[key]; ok {
-			return
-		}
-		seen[key] = struct{}{}
-		out = append(out, host)
-	}
-	for _, host := range hostnames {
-		add(host)
-	}
-	for _, host := range extra {
-		add(host)
-	}
-	return out
 }
 
 func pdsEndpoints(deps component.Deps, workspace string, refs []commonv1.ObjectRef) []component.Endpoint {

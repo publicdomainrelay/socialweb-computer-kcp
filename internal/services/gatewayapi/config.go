@@ -23,6 +23,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayhttp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestnet"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
@@ -441,7 +442,7 @@ func (c Config) localDownloadBase(ctx context.Context, deps component.Deps) stri
 		if exp.Spec.Mode != exposurev1alpha1.ExposureModeLocal {
 			continue
 		}
-		if exposureServiceRefName(exp.Spec.ServiceRef) != serviceName {
+		if strs.LastSegment(exp.Spec.ServiceRef) != serviceName {
 			continue
 		}
 		parsed, err := url.Parse(strings.TrimSpace(exp.Status.Address))
@@ -451,14 +452,6 @@ func (c Config) localDownloadBase(ctx context.Context, deps component.Deps) stri
 		return "http://" + guestnet.HostAddress + ":" + parsed.Port()
 	}
 	return ""
-}
-
-func exposureServiceRefName(value string) string {
-	value = strings.TrimSpace(value)
-	if index := strings.LastIndex(value, "/"); index >= 0 {
-		value = value[index+1:]
-	}
-	return strings.TrimSpace(value)
 }
 
 func checkOrigin(raw string) error {

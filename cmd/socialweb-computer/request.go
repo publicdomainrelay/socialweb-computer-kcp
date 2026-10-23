@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -767,8 +768,8 @@ func runRequestList(ctx context.Context, a *app, vals clicfg.Values, rest []stri
 		if s.Network != "" {
 			where = "network " + s.Network
 		}
-		fmt.Fprintf(a.stdout, "%-24s %-20s %-10s kcp=%-5t winner=%s guest=%s %s\n", s.Name, where, orDash(s.Phase), s.KcpRunning,
-			orDash(c.WinnerDid), orDash(c.VMAddress), s.Message)
+		fmt.Fprintf(a.stdout, "%-24s %-20s %-10s kcp=%-5t winner=%s guest=%s %s\n", s.Name, where, cmp.Or(s.Phase), s.KcpRunning,
+			cmp.Or(c.WinnerDid), cmp.Or(c.VMAddress), s.Message)
 	}
 	if len(list) == 0 {
 		fmt.Fprintln(a.stdout, "no invocations under", request.Root(root))
@@ -789,11 +790,4 @@ func (r *requestRun) keepLogs() {
 		return
 	}
 	os.WriteFile(filepath.Join(out, "core.log"), b, 0o600)
-}
-
-func orDash(s string) string {
-	if s == "" {
-		return "-"
-	}
-	return s
 }

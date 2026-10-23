@@ -23,6 +23,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/apiserverfront"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterlink"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterstack"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/sha256sum"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/materialiser"
@@ -104,8 +105,6 @@ type RollReport struct {
 
 	Error string `json:"error,omitempty"`
 }
-
-func secsBetween(a, b time.Time) float64 { return float64(b.Sub(a).Milliseconds()) / 1000 }
 
 func RollRequestPath(stateDir, cluster string) (string, error) {
 	dir, err := ClusterDataDir(stateDir, cluster)
@@ -575,7 +574,7 @@ func (r *Roller) RollCluster(ctx context.Context, key string, req RollRequest) (
 		case <-time.After(idlePoll):
 		}
 	}
-	rep.IdleSeconds = secsBetween(idleStart, time.Now())
+	rep.IdleSeconds = clock.SecondsBetween(idleStart, time.Now())
 	if am, _ := minorOf(rep.FromVersion); func() bool { tm, _ := minorOf(rep.ToVersion); return tm != am }() {
 		store, ok := h.Store(key)
 		if !ok {
@@ -617,7 +616,7 @@ func (r *Roller) RollCluster(ctx context.Context, key string, req RollRequest) (
 		return abort(err)
 	}
 	rep.GreenReadyAt = time.Now().UTC()
-	rep.StartToReady = secsBetween(rep.StartedAt, rep.GreenReadyAt)
+	rep.StartToReady = clock.SecondsBetween(rep.StartedAt, rep.GreenReadyAt)
 	beforeNodes := nodeReadySince(ctx, core)
 	beforeLeases := leaseHolders(ctx, core)
 
@@ -661,7 +660,7 @@ func (r *Roller) RollCluster(ctx context.Context, key string, req RollRequest) (
 		return fail(err)
 	}
 	rep.OldStoppedAt = time.Now().UTC()
-	rep.OldStopSecs = secsBetween(rep.FlippedAt, rep.OldStoppedAt)
+	rep.OldStopSecs = clock.SecondsBetween(rep.FlippedAt, rep.OldStoppedAt)
 	if err := h.remove(ctx, ObjectName(key, "kine@"+blue)); err != nil {
 		return fail(err)
 	}
@@ -791,7 +790,7 @@ func (r *Roller) RollLink(ctx context.Context, key string, req RollRequest) (rep
 		return fail(err)
 	}
 	rep.GreenReadyAt = time.Now().UTC()
-	rep.StartToReady = secsBetween(rep.StartedAt, rep.GreenReadyAt)
+	rep.StartToReady = clock.SecondsBetween(rep.StartedAt, rep.GreenReadyAt)
 	rep.NewListener = o.Spec.Unit
 	rep.Ticket = printedTicket(st.Spec.Log)
 	updated := cp
@@ -815,7 +814,7 @@ func (r *Roller) RollLink(ctx context.Context, key string, req RollRequest) (rep
 		return fail(err)
 	}
 	rep.OldStoppedAt = time.Now().UTC()
-	rep.OldStopSecs = secsBetween(rep.PersistedAt, rep.OldStoppedAt)
+	rep.OldStopSecs = clock.SecondsBetween(rep.PersistedAt, rep.OldStoppedAt)
 	return rep
 }
 
@@ -839,7 +838,7 @@ func (r *Roller) watch(ctx context.Context, core kubernetes.Interface, spec clus
 			}
 			if holder != p.From {
 				p.To = holder
-				p.Seconds = secsBetween(rep.OldStoppedAt, time.Now())
+				p.Seconds = clock.SecondsBetween(rep.OldStoppedAt, time.Now())
 			}
 		}
 		select {

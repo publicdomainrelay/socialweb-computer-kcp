@@ -27,6 +27,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/servetls"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/tlsreload"
 )
 
@@ -151,7 +152,7 @@ func (c *ExposureController) Reconcile(ctx context.Context, dyn dynamic.Interfac
 		return fmt.Errorf("exposure: decoding Exposure %s: %w", name, err)
 	}
 	labels := map[string]string{}
-	if serviceName := normalizeName(exp.Spec.ServiceRef); serviceName != "" {
+	if serviceName := strs.LastSegment(exp.Spec.ServiceRef); serviceName != "" {
 		labels[LabelService] = serviceName
 	}
 	if err := ensureMetadata(ctx, ri, name, ExposureFinalizer, true, labels); err != nil {
@@ -183,7 +184,7 @@ func (c *ExposureController) Reconcile(ctx context.Context, dyn dynamic.Interfac
 		conds.Set(&status.Conditions, generation, ConditionReady, false, "InvalidMode", message)
 		return writeStatus(ctx, ri, name, &status)
 	}
-	serviceName := normalizeName(exp.Spec.ServiceRef)
+	serviceName := strs.LastSegment(exp.Spec.ServiceRef)
 	if serviceName == "" {
 		c.stop(name)
 		c.release(name)
@@ -462,7 +463,7 @@ func (c *ExposureController) startIngress(ctx context.Context, exp *exposurev1al
 	registration, err := c.registrar.Register(ctx, IngressSpec{
 		Workspace:      c.workspace,
 		Exposure:       exp.Name,
-		Service:        normalizeName(exp.Spec.ServiceRef),
+		Service:        strs.LastSegment(exp.Spec.ServiceRef),
 		Protocol:       svc.Spec.Protocol,
 		Handler:        svc.Spec.Handler,
 		Target:         target,

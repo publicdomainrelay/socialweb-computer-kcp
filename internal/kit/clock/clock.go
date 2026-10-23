@@ -22,3 +22,16 @@ func SleepErr(ctx context.Context, d time.Duration) error {
 	}
 	return nil
 }
+
+func DurationString(d time.Duration) string {
+	if d <= 0 {
+		return ""
+	}
+	return d.String()
+}
+
+func SecondsBetween(a, b time.Time) float64 { return float64(b.Sub(a).Milliseconds()) / 1000 }
+
+func NowISO() string {
+	return time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
+}

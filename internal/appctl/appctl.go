@@ -31,6 +31,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpapply"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/kcprest"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 )
@@ -158,18 +159,11 @@ type Controller struct {
 	pdsPublicURLs sync.Map
 }
 
-func clusterConfig(base *rest.Config, ws string) *rest.Config {
-	cfg := rest.CopyConfig(base)
-	host, _, _ := strings.Cut(strings.TrimSuffix(cfg.Host, "/"), "/clusters/")
-	cfg.Host = host + "/clusters/" + ws
-	return cfg
-}
-
 func (ctl *Controller) client(ws string, gvr schema.GroupVersionResource) (dynamic.NamespaceableResourceInterface, error) {
 	if ctl.c.Dynamic != nil {
 		return ctl.c.Dynamic.Resource(gvr), nil
 	}
-	dc, err := dynamic.NewForConfig(clusterConfig(ctl.restCfg, ws))
+	dc, err := dynamic.NewForConfig(kcprest.ForCluster(ctl.restCfg, ws))
 	if err != nil {
 		return nil, err
 	}

@@ -10,6 +10,7 @@ import (
 
 	sd "github.com/coreos/go-systemd/v22/dbus"
 	"github.com/godbus/dbus/v5"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
 )
 
 type ProbeReading struct {
@@ -45,7 +46,7 @@ func Probe(ctx context.Context, socket string, spec UnitSpec, extra map[string]a
 	if r.Version, err = b.Version(ctx); err != nil {
 		return r, fmt.Errorf("hostsvc: reading the manager version: %w", err)
 	}
-	n, err := parseVersion(r.Version)
+	n, err := strs.LeadingInt(r.Version)
 	if err != nil || n < MinSystemdVersion {
 		return r, fmt.Errorf("%w: the manager reports %q", ErrSystemdTooOld, r.Version)
 	}

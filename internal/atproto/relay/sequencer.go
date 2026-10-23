@@ -2,6 +2,8 @@ package relay
 
 import (
 	"sync"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 )
 
 const (
@@ -37,7 +39,7 @@ func (s *Sequencer) Append(frame Frame) Frame {
 	defer s.mu.Unlock()
 	s.seq++
 	frame.Seq = s.seq
-	frame.Time = nowISO()
+	frame.Time = clock.NowISO()
 	size := len(frame.Blocks) + 512
 	s.backlog = append(s.backlog, frame)
 	s.sizes = append(s.sizes, size)

@@ -3,7 +3,6 @@ package relay
 import (
 	"encoding/json"
 	"errors"
-	"time"
 
 	comatproto "github.com/bluesky-social/indigo/api/atproto"
 	lexutil "github.com/bluesky-social/indigo/lex/util"
@@ -45,10 +44,6 @@ type Frame struct {
 
 func emptyBlocks() json.RawMessage {
 	return json.RawMessage(`{}`)
-}
-
-func nowISO() string {
-	return time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
 }
 
 func lexLink(l lexutil.LexLink) *Link {

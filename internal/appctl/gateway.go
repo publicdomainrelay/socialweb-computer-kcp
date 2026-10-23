@@ -17,6 +17,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestnet"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
@@ -59,13 +60,6 @@ type WebApp struct {
 	FrontKubeconfig string
 	ClusterCADir    string
 	DownloadsDir    string
-}
-
-func duration(d time.Duration) string {
-	if d <= 0 {
-		return ""
-	}
-	return d.String()
 }
 
 func keyType(kind string) string {
@@ -112,7 +106,7 @@ func RootVaultDeclared() *v1alpha1.OpenBaoServerDeclared {
 	for _, r := range layout.AppRoles {
 		if r.Vault == vaultlayout.Root {
 			d.AppRoles = append(d.AppRoles, v1alpha1.OpenBaoAppRole{Mount: rootVaultAppRole, Name: r.Name, Policies: r.Policies,
-				TokenTTL: duration(r.TokenTTL), TokenMaxTTL: duration(r.TokenMaxTTL), SecretIDTTL: duration(r.SecretIDTTL)})
+				TokenTTL: clock.DurationString(r.TokenTTL), TokenMaxTTL: clock.DurationString(r.TokenMaxTTL), SecretIDTTL: clock.DurationString(r.SecretIDTTL)})
 		}
 	}
 	for _, r := range layout.PKIRoles {
@@ -123,7 +117,7 @@ func RootVaultDeclared() *v1alpha1.OpenBaoServerDeclared {
 			AllowedDomains: r.AllowedDomains, AllowSubdomains: r.AllowSubdomains, AllowBareDomains: r.AllowBareDomains,
 			AllowIPSANs: r.AllowIPSANs, EnforceHostnames: r.EnforceHostnames, RequireCN: r.RequireCN, ClientFlag: r.ClientAuth,
 			ServerFlag: r.ServerAuth, KeyType: keyType(r.KeyType), KeyBits: int32(r.KeyBits), KeyUsage: r.KeyUsage,
-			TTL: duration(r.TTL), MaxTTL: duration(r.MaxTTL), NoStore: true})
+			TTL: clock.DurationString(r.TTL), MaxTTL: clock.DurationString(r.MaxTTL), NoStore: true})
 	}
 	for _, m := range d.SecretMounts {
 		if m.Type == string(vaultlayout.MountPKI) {

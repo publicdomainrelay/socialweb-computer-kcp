@@ -16,6 +16,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/kcprest"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 )
 
@@ -145,7 +146,7 @@ func networkClient(kubeconfig string) (dynamic.ResourceInterface, error) {
 	if err != nil {
 		return nil, err
 	}
-	dc, err := dynamic.NewForConfig(clusterConfig(restCfg, DefaultWorkspace))
+	dc, err := dynamic.NewForConfig(kcprest.ForCluster(restCfg, DefaultWorkspace))
 	if err != nil {
 		return nil, err
 	}

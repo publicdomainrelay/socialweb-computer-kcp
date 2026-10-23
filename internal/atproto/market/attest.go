@@ -519,7 +519,7 @@ func VerifyRecordSignatures(ctx context.Context, record map[string]any, reposito
 		}
 		if opts.KeysForDID != nil {
 			allowed, err := opts.KeysForDID.KeysForDID(ctx, entry.IssuerOr(repositoryDID))
-			bound := err == nil && containsString(allowed, entry.Key)
+			bound := err == nil && slices.Contains(allowed, entry.Key)
 			if !bound {
 				if opts.KeyBoundByBadgeBlueKey == nil {
 					continue
@@ -533,10 +533,6 @@ func VerifyRecordSignatures(ctx context.Context, record map[string]any, reposito
 		return true
 	}
 	return false
-}
-
-func containsString(values []string, want string) bool {
-	return slices.Contains(values, want)
 }
 
 func NewDIDKeyLister(dir DIDDocumentResolver) KeysForDID {

@@ -16,6 +16,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/kcprest"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 )
 
@@ -228,7 +229,7 @@ func (n *networks) grantPeers(ctx context.Context, names []string) error {
 		}
 		slices.SortFunc(readers, func(a, b rbacv1.Subject) int { return strings.Compare(a.Name, b.Name) })
 		for ws := range own {
-			cs, err := kubernetes.NewForConfig(clusterConfig(n.ctl.restCfg, ws))
+			cs, err := kubernetes.NewForConfig(kcprest.ForCluster(n.ctl.restCfg, ws))
 			if err != nil {
 				return err
 			}
