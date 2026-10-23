@@ -1076,14 +1076,22 @@ every caller that reaches it. It fails CLOSED, which reads as a gap rather than 
 answerability check in `cmd/socialweb-gateway` therefore drives every verb the lexicons declare past
 authentication and requires its ANSWER rather than its presence.
 
-**The mount requires `status.phase == "Ready"`, and that is a second, undocumented gate.** kcp's
-mount controller reads the referenced object's PHASE, not its conditions, before it will serve:
-measured, with `status.URL` written and `phase: Initializing`, the mount reports
-`WorkspaceMountReady=False(MountObjectNotReady)` and the front proxy answers **503** to the tenant -
-not an auth error. Setting `phase` to `Ready` alone, leaving the conditions still saying
-`Ready=False/Initializing`, flipped the mount to serving on the first poll. So a written `status.URL`
-is NOT sufficient for a user's `kubectl` to reach the apiserver, and a cluster whose phase is stuck is
-a cluster nobody can reach even while its apiserver answers.
+**The tenant path is gated on `status.phase == "Ready"`, and our front owns that gate.** kcp's
+mount controller reads the referenced object's PHASE, not its conditions, before it will serve
+(measured: `phase: Initializing` gave `WorkspaceMountReady=False(MountObjectNotReady)` and a 503).
+Tenant requests no longer cross the kcp mount (below), so the same gate is now ours and these are
+MUST rules:
+
+- The client certificate front MUST admit a tenant request only while the `Cluster`'s
+  `status.phase` is `Ready` and it has no `deletionTimestamp` (`kcpclient.ClusterGate`), answering
+  503 otherwise and 404 when the `Cluster` is absent or its `spec.account` hashes to another account.
+- The front MUST read that gate at most `materialiser.PathGateGrace / 5` old (`gateTTL`), MUST fail
+  closed on a read error, and MUST close every open request (watches included) for a cluster whose
+  gate it observes closed.
+- The tenant path is SHUT when, and only when, the `Cluster`'s own state has closed the gate for at
+  least `materialiser.PathGateGrace`: `deletionTimestamp` set, or `phase` not `Ready` with the `Ready`
+  condition non-True since its `lastTransitionTime`. `materialiser.shut` MUST NOT read an HTTP status
+  code; a 502, 503 or 404 from anything is never "shut".
 
 **The gateway acts in a tenant cluster as its owner.** `kubectlApplyServerSide` and `getJob` need a
 credential for the cluster's owner. The gateway signs one per call from the cluster's own client CA
@@ -1092,36 +1100,52 @@ under `<ClusterStateDir>/<key>/server/tls` (CN the owner's DID, O `socialweb.com
 ClusterRoleBinding of `deploy/tenant-grant.yaml` gives that group `cluster-admin`. No ServiceAccount
 token and no stored credential is involved, and the certificate is never written to disk.
 
-**A client certificate does not traverse the mount.** kcp terminates TLS, so only header credentials
-survive: a bearer works through the mount (verified with `auth whoami` returning
-`system:serviceaccount:default:default`), and a client-certificate kubeconfig aimed at a mount URL
-fails with "the server has asked for the client to provide credentials". The provider's own minted
-certificate credential is therefore LOOPBACK-ONLY by construction, and the only credential that can
-cross the mount is a bearer - which is exactly what section 7's "bearer only through the mount" requires,
-now with the measurement behind it.
+**No tenant request crosses the kcp mount.** kcp main (kcp-dev/kcp #4427, `pkg/server/mountproxy.go`)
+verifies the mount target's certificate against the system roots plus `--mount-proxy-server-ca-file`,
+authenticates the caller itself, strips `Authorization` and forwards `X-Remote-*` over its own mount
+proxy client certificate. A tenant k3s presents its own server CA and authenticates its own
+ServiceAccount tokens, so through the mount every tenant request is a 502 (target CA) or a 401 (the
+k3s token at kcp). The rules:
 
-**The mount's URL comes from the Cluster's status, and that dependency is load-bearing.** A tenant
-reaches its cluster through a `Workspace` whose `spec.mount.ref` names the `Cluster`; kcp populates
-that workspace's `spec.URL` FROM the `Cluster`'s `status.URL`. Measured against a live kcp: pointing
-the mount at a Cluster whose `status.URL` named a dead port made every request through the mount fail
-with `an error on the server ("") has prevented the request from succeeding`, and repointing
-`status.URL` at a live endpoint made it serve. So `status.URL` is not decorative - it is the only
-thing that decides where the mount goes, and a cluster whose status is not written is a cluster the
-user cannot reach even while its apiserver is answering.
+- Every request for `/clusters/root:<account>:<cluster>:clusters[/...]` MUST be served by
+  `internal/clientcertfront`, in dev (the front is `SOCIALWEB_GATEWAY_KCP_PUBLIC_HOST`) and in prod
+  (Caddy's `@clientcert` and `@tenant` matchers send it there over the edge client certificate; every
+  other path goes to kcp). The external URL is unchanged, so a kubeconfig's `server` is still
+  `<public host>/clusters/<home>:clusters`.
+- The front MUST forward to the address the cluster's `front.json` names, verifying the cluster's own
+  `server/tls/server-ca.crt`, with the path below `:clusters` and the query unchanged, and MUST strip
+  every inbound `X-Remote-*` and `X-Socialweb-Client-Certificate` header.
+- A request with a client certificate MUST pass the certificate checks of section 7 and goes by
+  request-header auth over `client-auth-proxy`, with `Authorization` removed.
+- A request without one (or from the edge without the certificate header) MUST carry
+  `Authorization: Bearer ...`, MUST pass the deny lookup of the `Cluster`'s `spec.account`, and is
+  forwarded with `Authorization` UNCHANGED over a transport that presents no client certificate, so
+  k3s authenticates the bearer itself.
+- The tenant liveness probe (`Registry.TenantPath`, `clusterprovider.ProbeTenantFront`) MUST dial the
+  `front.json` address directly, verifying the cluster's server CA; its result is reported, never
+  counted as shut.
+- The revoker (`kcpclient` `FanOut`, `DeleteServiceAccount`) MUST reach the tenant directly at its
+  front with a 10 minute owner credential signed from the cluster's client CA (`Options.Tenant`); a
+  tenant it cannot reach is `Cold`, never a completed delete.
+- The kcp mount (`Workspace` `clusters` with `spec.mount.ref` to the `Cluster`, `spec.URL` from
+  `status.URL`) MAY stay for kcp-side listing and discovery only; nothing may depend on kcp forwarding
+  through it.
 
-**The negative rule, which is a design invariant:** never configure a cluster's apiserver for
-request-header auth against the mount. The mount path authenticates NOTHING, so an apiserver trusting
-a request-header identity is forgeable.
+**The negative rule, which is a design invariant:** never configure a cluster's apiserver to
+trust request-header identities from the kcp mount proxy. The only request-header client a tenant
+trusts is its own `client-auth-proxy`, held by the front.
 
 ## 7. Identity and auth
 
-- **Bearer through the mount, certificates through the client certificate front.** A bearer crosses the
-  kcp mount as a header and nothing else. A client certificate never reaches kcp: Caddy (prod) or the
-  client certificate front itself (market network) ends TLS, the front (`internal/clientcertfront`)
-  checks the certificate against the cluster's client CA, the PKI CRL, the deny record and the
-  `ClusterClientCertificate` of its serial (it must exist and not be revoked), and forwards
-  to k3s by request-header authentication (client-auth-proxy, X-Remote-User = the CN, X-Remote-Group =
-  `socialweb.computer:cluster-owners`). No JWKS, no `--authentication-config`.
+- **Bearers and certificates both go through the client certificate front, never through the kcp
+  mount.** Caddy (prod) or the client certificate front itself (dev, market network) ends TLS for
+  every `/clusters/<home>:clusters/...` request. A client certificate MUST be checked by the front
+  (`internal/clientcertfront`) against the cluster's client CA, the PKI CRL, the deny record and the
+  `ClusterClientCertificate` of its serial (it must exist and not be revoked) and is forwarded to k3s
+  by request-header authentication (client-auth-proxy, X-Remote-User = the CN, X-Remote-Group =
+  `socialweb.computer:cluster-owners`). A bearer MUST be forwarded unchanged to the cluster's own
+  front and is authenticated by k3s alone; the front adds only the cluster gate and the deny lookup.
+  Both MUST pass the cluster gate of section 6. No JWKS, no `--authentication-config`.
 - **ServiceAccount tokens via TokenRequest** for the machine class.
 - **The DID to ServiceAccount mapping** is the tenancy boundary, and it has exactly ONE spelling: a
   DID's ServiceAccount is `did-` plus the lowercased unpadded base32 of the DID
@@ -3362,7 +3386,8 @@ A change must not break any of these. Each exists because something failed.
    left to release and nothing left to keep out of a list.
 9. **Absent `nodeExpiry` refuses teardown; explicit `0` proceeds.**
 10. **Nothing is read back out of a node.** The token and the name are ours.
-11. **Never request-header auth against the mount.** The mount authenticates nothing.
+11. **Never request-header auth against the mount, and no tenant request through it.** Tenant
+    requests go through the client certificate front to the cluster's own front.
 12. **A revocation needs a consultable deny record**, not just a deleted object.
 13. **Secrets never ride argv or `user_data`, and a market node's credentials cross only OpenBao JWT over
     the cluster link.** `user_data` is readable from inside the guest. The door hands a market guest
@@ -10051,6 +10076,20 @@ to `exec.LookPath("deno")`. The integration hosts hat-7 and hat-9 were prepared 
   `submitEvent` only when it names one. With no ref the firehose carries the event and no callback is
   sent. Every write carries an idempotency key, so a retry observes before it writes and a duplicate
   callback is a no-op.
+
+### Tenant requests go around the kcp mount proxy (2026-10-22, D25, W0-MOUNTS)
+
+- **The defect.** On kcp main 74e9fb9c the mount proxy verifies the target CA, authenticates the
+  caller and strips `Authorization`, so every tenant request through
+  `/clusters/<home>:clusters/...` answered 502 or 401, `Registry.MountStatus` read 502 for a serving
+  cluster, `materialiser.shut` counted that 502 as shut, and the revoker's ServiceAccount calls never
+  reached k3s.
+- **The decision.** The client certificate front serves the whole tenant path (certificate and
+  bearer), gated on the `Cluster`'s phase and deletion; the shut decision comes from that gate state
+  and `PathGateGrace`, never from a status code; the liveness probe and the revoker dial the
+  cluster's own front directly. The rules are in section 6 ("No tenant request crosses the kcp
+  mount", "The tenant path is gated") and section 7. The live proof at the end of plan 0026 is the
+  instrument.
 
 ## 16. Vocabulary
 

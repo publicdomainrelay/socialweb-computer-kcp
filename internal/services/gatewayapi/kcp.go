@@ -62,6 +62,9 @@ func gatewayServerFor(deps component.Deps, workspace string, certs *clientcert.I
 	}
 	opts := kcpclient.Options{Host: restConfig.Host, RestConfig: restConfig, PublicHost: publicHost,
 		HostProcessWorkspace: workspace, NodeClaimAgent: agent, RecordWorkspaceOwner: true}
+	if clusterStateDir != "" {
+		opts.Tenant = ownerCredentials(clusterStateDir)
+	}
 	if certs != nil {
 		opts.Kubeconfigs = certs
 	}

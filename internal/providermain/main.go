@@ -137,6 +137,7 @@ func buildInputs(cfg Config) (inputs, error) {
 	kcpserver.Throughput(restCfg)
 	registry, err := clusterprovider.NewRegistry(clusterprovider.RegistryOptions{
 		Host:       cfg.KCPHost,
+		StateDir:   cfg.StateDir,
 		RestConfig: restCfg,
 	})
 	if err != nil {

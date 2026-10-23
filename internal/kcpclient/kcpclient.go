@@ -61,12 +61,16 @@ type KubeconfigGranter interface {
 	Grant(ctx context.Context, in GrantInput) (string, error)
 }
 
+type TenantConfig func(ctx context.Context, did, cluster string) (*rest.Config, error)
+
 type Options struct {
 	Host string
 
 	PublicHost string
 
 	Kubeconfigs KubeconfigGranter
+
+	Tenant TenantConfig
 
 	NodeClaimAgent *ServiceAccountRef
 
@@ -88,6 +92,7 @@ type Client struct {
 	host        string
 	publicHost  string
 	kubeconfigs KubeconfigGranter
+	tenant      TenantConfig
 	agent       *agent
 
 	hostProcessWorkspace string
@@ -153,6 +158,7 @@ func New(opts Options) (*Client, error) {
 		cfg: cfg, http: httpClient, codecs: codecs, host: cfg.Host,
 		publicHost:  strings.TrimSuffix(opts.PublicHost, "/"),
 		kubeconfigs: opts.Kubeconfigs,
+		tenant:      opts.Tenant,
 
 		hostProcessWorkspace: opts.HostProcessWorkspace,
 		nodeClaimQuota:       opts.NodeClaimQuota,
@@ -185,6 +191,27 @@ func (c *Client) resource(logicalCluster string, gv schema.GroupVersion) (rest.I
 
 func (c *Client) coreResource(logicalCluster string) (rest.Interface, error) {
 	return c.bind(logicalCluster, corev1.SchemeGroupVersion, "/api")
+}
+
+var ErrNoTenantConfig = errors.New(
+	"kcpclient: no tenant credential source: a tenant apiserver is reached directly at its own " +
+		"front and never through the kcp mount, so without one no tenant call can be made")
+
+func (c *Client) tenantCore(ctx context.Context, did, cluster string) (rest.Interface, error) {
+	if c.tenant == nil {
+		return nil, ErrNoTenantConfig
+	}
+	cfg, err := c.tenant(ctx, did, cluster)
+	if err != nil {
+		return nil, err
+	}
+	cfg = rest.CopyConfig(cfg)
+	cfg.GroupVersion = &corev1.SchemeGroupVersion
+	cfg.APIPath = "/api"
+	cfg.ContentType = "application/json"
+	cfg.AcceptContentTypes = "application/json"
+	cfg.NegotiatedSerializer = c.codecs
+	return rest.RESTClientFor(cfg)
 }
 
 func (c *Client) bind(logicalCluster string, gv schema.GroupVersion, endpoint string) (rest.Interface, error) {
@@ -789,9 +816,13 @@ func (c *Client) FanOut(ctx context.Context, did string) ([]revocation.ClusterVi
 
 func (c *Client) observeServiceAccount(ctx context.Context, did, cluster string) (revocation.ClusterView, error) {
 	view := revocation.ClusterView{Name: cluster}
-	r, err := c.coreResource(MountPath(did, cluster))
+	r, err := c.tenantCore(ctx, did, cluster)
 	if err != nil {
-		return view, err
+		if errors.Is(err, ErrNoTenantConfig) {
+			return view, err
+		}
+		view.Cold = true
+		return view, nil
 	}
 	err = r.Get().Namespace(TenantNamespace).Resource("serviceaccounts").
 		Name(ServiceAccountName(did)).Do(ctx).Error()
@@ -809,9 +840,9 @@ func (c *Client) DeleteServiceAccount(ctx context.Context, did, cluster string) 
 	if did == "" {
 		return revocation.ErrNoDID
 	}
-	r, err := c.coreResource(MountPath(did, cluster))
+	r, err := c.tenantCore(ctx, did, cluster)
 	if err != nil {
-		return err
+		return fmt.Errorf("kcpclient: the tenant apiserver of %s: %w", cluster, err)
 	}
 	name := ServiceAccountName(did)
 	err = r.Delete().Namespace(TenantNamespace).Resource("serviceaccounts").
@@ -827,8 +858,8 @@ func (c *Client) DeleteServiceAccount(ctx context.Context, did, cluster string) 
 			}
 		}
 		return fmt.Errorf("kcpclient: %s in %s answered NotFound without naming the "+
-			"ServiceAccount, so the mount did NOT resolve and this is not a completed "+
-			"delete: %w", name, cluster, err)
+			"ServiceAccount, so the tenant apiserver did NOT answer for it and this is not a "+
+			"completed delete: %w", name, cluster, err)
 	default:
 		return fmt.Errorf("kcpclient: delete the ServiceAccount for %s in %s: %w", did, cluster, err)
 	}
@@ -856,6 +887,23 @@ func (c *Client) readIdentity(ctx context.Context, logicalCluster, name string) 
 		return nil, err
 	}
 	return &out, nil
+}
+
+type ClusterGate struct {
+	Account string
+	Serving bool
+}
+
+func (c *Client) ClusterGate(ctx context.Context, home, name string) (ClusterGate, error) {
+	cl, err := c.readCluster(ctx, home, name)
+	switch {
+	case apierrors.IsNotFound(err):
+		return ClusterGate{}, nil
+	case err != nil:
+		return ClusterGate{}, fmt.Errorf("kcpclient: the Cluster %s in %s: %w", name, home, err)
+	}
+	return ClusterGate{Account: cl.Spec.Account,
+		Serving: cl.Status.Phase == v1alpha1.ClusterReady && cl.DeletionTimestamp == nil}, nil
 }
 
 func (c *Client) readCluster(ctx context.Context, logicalCluster, name string) (*v1alpha1.Cluster, error) {

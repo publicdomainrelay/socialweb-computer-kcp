@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -19,6 +18,8 @@ import (
 )
 
 const ConditionReady = "Ready"
+
+const PathGateGrace = 10 * time.Second
 
 const (
 	ReasonInitializing  = "Initializing"
@@ -59,10 +60,26 @@ const (
 	OpInstanceBumped Op = "instance-bumped"
 )
 
+type PathProbe struct {
+	Answered bool
+	Status   int
+	Err      string
+}
+
+func (p PathProbe) String() string {
+	if p.Answered {
+		return fmt.Sprintf("the tenant front answered %d", p.Status)
+	}
+	if p.Err == "" {
+		return "the tenant front was not probed"
+	}
+	return "the tenant front did not answer: " + p.Err
+}
+
 type Observed struct {
 	Cluster v1alpha1.Cluster
 
-	PathStatus int
+	Path PathProbe
 
 	Reachable bool
 
@@ -227,7 +244,7 @@ func (r *Reconciler) off(ctx context.Context, o Observed) (Result, error) {
 			Type:               ConditionReady,
 			Status:             metav1.ConditionFalse,
 			Reason:             ReasonAwaitPathShut,
-			Message:            "phase is Unavailable; waiting for the tenant's apiserver to stop being reached through the mounted path before reaping",
+			Message:            "phase is Unavailable; waiting for the front to stop admitting tenant requests before reaping",
 			ObservedGeneration: o.Cluster.Generation,
 		})
 		res.RequeueAfter = RequeueAfter
@@ -239,7 +256,7 @@ func (r *Reconciler) off(ctx context.Context, o Observed) (Result, error) {
 		Type:               v1alpha1.ConditionTenantPathShut,
 		Status:             metav1.ConditionTrue,
 		Reason:             ReasonAwaitPathShut,
-		Message:            fmt.Sprintf("mounted path last answered %d", o.PathStatus),
+		Message:            "the front admits no tenant request; " + o.Path.String(),
 		ObservedGeneration: o.Cluster.Generation,
 	})
 	if err := r.opts.Host.Reap(ctx, o.Cluster.Name); err != nil {
@@ -287,7 +304,7 @@ func (r *Reconciler) teardown(ctx context.Context, o Observed) (Result, error) {
 				Type:               v1alpha1.ConditionTeardownBlocked,
 				Status:             metav1.ConditionTrue,
 				Reason:             ReasonTeardownStuck,
-				Message:            fmt.Sprintf("the mounted path still answers %d after %s", o.PathStatus, r.opts.GateTimeout),
+				Message:            fmt.Sprintf("the tenant path gate is not shut after %s; %s", r.opts.GateTimeout, o.Path),
 				ObservedGeneration: o.Cluster.Generation,
 			})
 			return res, nil
@@ -301,7 +318,7 @@ func (r *Reconciler) teardown(ctx context.Context, o Observed) (Result, error) {
 		Type:               v1alpha1.ConditionTenantPathShut,
 		Status:             metav1.ConditionTrue,
 		Reason:             ReasonAwaitPathShut,
-		Message:            fmt.Sprintf("mounted path last answered %d", o.PathStatus),
+		Message:            "the front admits no tenant request; " + o.Path.String(),
 		ObservedGeneration: o.Cluster.Generation,
 	})
 	if err := r.opts.Host.Reap(ctx, o.Cluster.Name); err != nil {
@@ -591,14 +608,32 @@ func (r *Reconciler) sessionCapRefuses(o Observed) (bool, string) {
 	return false, ""
 }
 
-// ponytail: a tenant-originated 503 reads shut because only the code is matched, not the body; upgrade by matching kcp's "Not available." body in Registry.MountStatus.
 func shut(o Observed) bool {
-	switch o.PathStatus {
-	case http.StatusNotFound, http.StatusBadGateway, http.StatusServiceUnavailable:
-		return true
-	default:
-		return false
+	since, closed := gateClosedSince(o)
+	return closed && o.Now.Sub(since) >= PathGateGrace
+}
+
+func gateClosedSince(o Observed) (time.Time, bool) {
+	var since time.Time
+	closed := false
+	if d := o.Cluster.DeletionTimestamp; d != nil {
+		since, closed = d.Time, true
 	}
+	if o.Cluster.Status.Phase == v1alpha1.ClusterReady {
+		return since, closed
+	}
+	c := meta.FindStatusCondition(o.Cluster.Status.Conditions, ConditionReady)
+	switch {
+	case c == nil:
+		return time.Time{}, true
+	case c.Status == metav1.ConditionTrue:
+		return since, closed
+	case c.LastTransitionTime.IsZero():
+		return time.Time{}, true
+	case !closed || c.LastTransitionTime.Time.Before(since):
+		return c.LastTransitionTime.Time, true
+	}
+	return since, closed
 }
 
 func readySince(o Observed, fallback time.Time) time.Time {
