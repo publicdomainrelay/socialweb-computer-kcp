@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -370,18 +369,11 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 			if deps.Log != nil {
 				deps.Log.Warn("requester_could_not_read_the_oauth_session", "err", err)
 			}
-		} else if raw, ok := credential.Value("session"); ok && raw != "" {
-			var data oauthclient.SessionData
-			if err := json.Unmarshal([]byte(raw), &data); err != nil {
-				if deps.Log != nil {
-					deps.Log.Warn("requester_could_not_decode_the_oauth_session", "err", err)
-				}
-			} else if data.AccountDID != "" && data.HostURL != "" {
-				cfg.OAuthSessionData = &data
-				cfg.DID = data.AccountDID
-				cfg.RepoDID = data.AccountDID
-				cfg.MarketDID = data.AccountDID
-			}
+		} else if data, ok := credentialSessionData(credential.Data); ok {
+			cfg.OAuthSessionData = &data
+			cfg.DID = data.AccountDID
+			cfg.RepoDID = data.AccountDID
+			cfg.MarketDID = data.AccountDID
 		}
 	}
 	if decoded.OwnerSessionsFile != "" {
@@ -570,7 +562,7 @@ func accessTokenRef(raw string, vaultRef *v1alpha1.ComponentRef) *component.Cred
 	if raw == "" {
 		return nil
 	}
-	ref := &component.CredentialRef{Keys: []string{"accessJwt", "accessToken", "access_token", "token", "value"}}
+	ref := &component.CredentialRef{Keys: []string{"session", "accessJwt", "accessToken", "access_token", "token", "value"}}
 	switch {
 	case strings.HasPrefix(raw, "openbao:"), strings.HasPrefix(raw, "vault:"):
 		raw = strings.TrimPrefix(strings.TrimPrefix(raw, "openbao:"), "vault:")

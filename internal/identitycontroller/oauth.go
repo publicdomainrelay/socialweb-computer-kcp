@@ -209,6 +209,7 @@ func (c *Controller) reconcileOAuthQr(ctx context.Context, dyn dynamic.Interface
 		c.failed(ctx, dyn, id, generation, status, "QRSessionInvalid", err.Error())
 		return
 	}
+	data = c.sessionWithEndpoints(ctx, data)
 	if err := c.saveSession(ctx, ref, data); err != nil {
 		c.pending(ctx, dyn, id, generation, status, "SessionStoreFailed", err.Error())
 		return
@@ -406,6 +407,23 @@ func (c *Controller) openSessionDataRef(ctx context.Context, id *v1alpha1.Market
 	return session, err
 }
 
+func (c *Controller) sessionWithEndpoints(ctx context.Context, data oauthclient.SessionData) oauthclient.SessionData {
+	if data.AuthServerURL != "" && data.AuthServerTokenEndpoint != "" {
+		return data
+	}
+	authServer, tokenEndpoint, revokeEndpoint, err := oauthclient.DiscoverAuthServer(ctx, c.oauthHTTP(), data.HostURL)
+	if err != nil {
+		c.log.Warn("oauth_session_endpoints_not_discovered", "did", data.AccountDID, "err", err.Error())
+		return data
+	}
+	data.AuthServerURL = authServer
+	data.AuthServerTokenEndpoint = tokenEndpoint
+	if revokeEndpoint != "" {
+		data.AuthServerRevocationEndpoint = revokeEndpoint
+	}
+	return data
+}
+
 func (c *Controller) openSessionData(ctx context.Context, id *v1alpha1.MarketIdentity, data oauthclient.SessionData,
 	ref *v1alpha1.VaultRef) (*oauthclient.Session, error) {
 	opts := oauthclient.Options{
@@ -425,6 +443,7 @@ func (c *Controller) openSessionData(ctx context.Context, id *v1alpha1.MarketIde
 	if err != nil {
 		return nil, err
 	}
+	_ = session.EnsureEndpoints(ctx)
 	if _, err := session.AccessToken(ctx); err != nil {
 		return nil, err
 	}

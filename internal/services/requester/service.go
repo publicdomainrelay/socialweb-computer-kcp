@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -71,6 +72,12 @@ type Service struct {
 	oauth *OAuthSession
 
 	ownerServiceAuth ServiceAuthSource
+
+	ownerTokens *pdsAccountTokens
+
+	tokenMu sync.Mutex
+
+	credentialTokens *credentialTokens
 
 	market MarketClient
 
@@ -513,7 +520,7 @@ func serviceAuthName(source ServiceAuthSource) string {
 		return "local"
 	case *OAuthSession:
 		return "oauth"
-	case ownerSessionServiceAuth:
+	case *ownerSessionServiceAuth:
 		return "owner-session"
 	}
 	return "other"
@@ -528,25 +535,26 @@ func (s *Service) authenticateOwnerSession(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("requester: owner DID: %w", err)
 	}
-	pds, err := pdsclient.NewRemote(pdsclient.RemoteConfig{
+	if _, err := pdsclient.NewRemote(pdsclient.RemoteConfig{
 		BaseURL:    session.Service,
 		DID:        did,
 		HTTPClient: s.cfg.HTTPClient,
 		Timeout:    DefaultHTTPTimeout,
-	})
-	if err != nil {
+	}); err != nil {
 		return fmt.Errorf("requester: the owner PDS %s: %w", session.Service, err)
 	}
-	opened, err := pds.CreateSession(ctx, session.Identifier, session.Password)
+	tokens := newPDSAccountTokens(session.Service, session.Identifier, session.Password, s.cfg.HTTPClient)
+	access, err := tokens.RefreshAccessToken(ctx)
 	if err != nil {
 		return fmt.Errorf("requester: the owner session of %s: %w", s.cfg.RepoDID, err)
 	}
-	s.cfg.PDSAccessToken = opened.AccessJWT
+	s.ownerTokens = tokens
+	s.cfg.PDSAccessToken = access
 	s.cfg.PDSURL = session.Service
-	s.ownerServiceAuth = ownerSessionServiceAuth{
-		pdsURL:      session.Service,
-		accessToken: opened.AccessJWT,
-		client:      s.cfg.HTTPClient,
+	s.ownerServiceAuth = &ownerSessionServiceAuth{
+		pdsURL: session.Service,
+		tokens: tokens,
+		client: s.cfg.HTTPClient,
 	}
 	return nil
 }
@@ -554,45 +562,63 @@ func (s *Service) authenticateOwnerSession(ctx context.Context) error {
 type ownerSessionServiceAuth struct {
 	pdsURL string
 
-	accessToken string
+	tokens pdsclient.TokenSource
 
 	client *http.Client
 }
 
-func (a ownerSessionServiceAuth) ServiceAuth(ctx context.Context, audience, lxm string) (string, error) {
+func (a *ownerSessionServiceAuth) ServiceAuth(ctx context.Context, audience, lxm string) (string, error) {
 	query := url.Values{"aud": {audience}}
 	if lxm != "" {
 		query.Set("lxm", lxm)
 	}
 	target := strings.TrimRight(a.pdsURL, "/") + "/xrpc/com.atproto.server.getServiceAuth?" + query.Encode()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
-	if err != nil {
-		return "", err
+	client := a.client
+	if client == nil {
+		client = &http.Client{Timeout: DefaultHTTPTimeout}
 	}
-	req.Header.Set("Authorization", "Bearer "+a.accessToken)
-	req.Header.Set("Accept", "application/json")
-	resp, err := a.client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("requester: getServiceAuth: %w", err)
+	for attempt := 0; attempt < 2; attempt++ {
+		token, err := a.tokens.AccessToken(ctx)
+		if err != nil {
+			return "", fmt.Errorf("requester: owner session token: %w", err)
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+		if err != nil {
+			return "", err
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Accept", "application/json")
+		resp, err := client.Do(req)
+		if err != nil {
+			return "", fmt.Errorf("requester: getServiceAuth: %w", err)
+		}
+		raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		resp.Body.Close()
+		if err != nil {
+			return "", err
+		}
+		if resp.StatusCode < 200 || resp.StatusCode > 299 {
+			if attempt == 0 && (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) {
+				if refresher, ok := a.tokens.(pdsclient.TokenRefresher); ok {
+					if _, refreshErr := refresher.RefreshAccessToken(ctx); refreshErr == nil {
+						continue
+					}
+				}
+			}
+			return "", fmt.Errorf("requester: getServiceAuth answered HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+		}
+		var out struct {
+			Token string `json:"token"`
+		}
+		if err := json.Unmarshal(raw, &out); err != nil {
+			return "", fmt.Errorf("requester: decoding getServiceAuth: %w", err)
+		}
+		if out.Token == "" {
+			return "", errors.New("requester: getServiceAuth returned no token")
+		}
+		return out.Token, nil
 	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return "", err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return "", fmt.Errorf("requester: getServiceAuth answered HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
-	}
-	var out struct {
-		Token string `json:"token"`
-	}
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return "", fmt.Errorf("requester: decoding getServiceAuth: %w", err)
-	}
-	if out.Token == "" {
-		return "", errors.New("requester: getServiceAuth returned no token")
-	}
-	return out.Token, nil
+	return "", errors.New("requester: getServiceAuth kept rejecting the owner session")
 }
 
 func (s *Service) bindSignerKey(ctx context.Context) error {
@@ -666,6 +692,12 @@ func (s *Service) pdsTarget(ctx context.Context) (pdsclient.Ref, pdsclient.Token
 		if err != nil || ref == nil {
 			return nil, nil, nil, err
 		}
+		if s.ownerTokens != nil {
+			return ref, s.ownerTokens, s.cfg.HTTPClient, nil
+		}
+		if source := s.pdsCredentialTokens(); source != nil {
+			return ref, source, s.cfg.HTTPClient, nil
+		}
 		token, err := s.pdsAccessToken(ctx)
 		if err != nil {
 			return nil, nil, nil, err
@@ -673,6 +705,34 @@ func (s *Service) pdsTarget(ctx context.Context) (pdsclient.Ref, pdsclient.Token
 		return ref, pdsTokenSource(token), s.cfg.HTTPClient, nil
 	}
 	return nil, nil, nil, nil
+}
+
+func (s *Service) pdsCredentialTokens() pdsclient.TokenSource {
+	if s.cfg.PDSAccessTokenRef == nil || s.cfg.Deps.Credentials == nil {
+		return nil
+	}
+	endpoint := strings.TrimSpace(s.cfg.PDSURL)
+	if endpoint == "" && s.cfg.RemotePDS != nil {
+		endpoint = strings.TrimSpace(s.cfg.RemotePDS.Spec.URL)
+	}
+	if endpoint == "" {
+		return nil
+	}
+	s.tokenMu.Lock()
+	defer s.tokenMu.Unlock()
+	if s.credentialTokens == nil {
+		source := &credentialTokens{
+			resolver: s.cfg.Deps.Credentials,
+			ref:      *s.cfg.PDSAccessTokenRef,
+			pdsURL:   endpoint,
+			client:   s.cfg.HTTPClient,
+		}
+		if writer, ok := s.cfg.Deps.Credentials.(component.CredentialWriter); ok {
+			source.writer = writer
+		}
+		s.credentialTokens = source
+	}
+	return s.credentialTokens
 }
 
 func (s *Service) pdsRef() (pdsclient.Ref, error) {
@@ -1277,9 +1337,18 @@ func (s *Service) authorizeCallback(w http.ResponseWriter, r *http.Request, lxm,
 	ctx, cancel := context.WithTimeout(r.Context(), serviceAuthTimeout)
 	defer cancel()
 	audiences := []string{s.cfg.MarketDID, s.cfg.RepoDID, s.cfg.DID}
-	if u, err := url.Parse(s.cfg.MarketURL); err == nil && u.Host != "" {
-		audiences = append(audiences, market.ServiceDIDForHost(u.Host))
+	for _, raw := range []string{s.cfg.MarketURL, s.cfg.CallbackHostname, s.cfg.PublicHostname, s.cfg.Network.IngressProxyHost} {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		host := raw
+		if u, err := url.Parse(raw); err == nil && u.Host != "" {
+			host = u.Host
+		}
+		audiences = append(audiences, serviceAudienceDIDs(host)...)
 	}
+	audiences = append(audiences, serviceAudienceDIDs(hostname)...)
 	result, err := market.VerifyServiceAuth(ctx, s.directory, market.VerifyServiceAuthOptions{
 		AuthHeader:        r.Header.Get("Authorization"),
 		Hostname:          hostname,
@@ -1292,6 +1361,31 @@ func (s *Service) authorizeCallback(w http.ResponseWriter, r *http.Request, lxm,
 		return "", false
 	}
 	return result.IssuerDID, true
+}
+
+func serviceAudienceDIDs(host string) []string {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return nil
+	}
+	candidates := []string{host, strings.ToLower(host)}
+	if name, _, err := net.SplitHostPort(host); err == nil && name != "" {
+		candidates = append(candidates, name, strings.ToLower(name))
+	}
+	unique := []string{}
+	seen := map[string]bool{}
+	for _, candidate := range candidates {
+		if candidate == "" {
+			continue
+		}
+		did := market.ServiceDIDForHost(candidate)
+		if seen[did] {
+			continue
+		}
+		seen[did] = true
+		unique = append(unique, did)
+	}
+	return unique
 }
 
 func (s *Service) callbackHostname(r *http.Request) string {

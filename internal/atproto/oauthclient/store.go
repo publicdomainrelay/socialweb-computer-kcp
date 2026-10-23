@@ -41,6 +41,8 @@ type SessionData struct {
 
 	HostURL string `json:"host_url"`
 
+	ClientID string `json:"client_id,omitempty"`
+
 	AuthServerURL string `json:"authserver_url"`
 
 	AuthServerTokenEndpoint string `json:"authserver_token_endpoint"`

@@ -70,6 +70,25 @@ func NewRemote(cfg RemoteConfig) (*RemotePDS, error) {
 	return &RemotePDS{basePDS: &basePDS{client: client, dial: dial}}, nil
 }
 
+func (p *RemotePDS) RefreshSession(ctx context.Context, refreshToken string) (Session, error) {
+	if p == nil || p.basePDS == nil || p.client == nil {
+		return Session{}, fmt.Errorf("%w: client is nil", ErrInvalidConfig)
+	}
+	if strings.TrimSpace(refreshToken) == "" {
+		return Session{}, fmt.Errorf("%w: no refresh token is available", ErrAuthenticationRequired)
+	}
+	var out sessionResponse
+	if err := p.client.postJSON(ctx, "com.atproto.server.refreshSession", nil, refreshToken, &out); err != nil {
+		return Session{}, err
+	}
+	session, err := sessionFromResponse(out)
+	if err != nil {
+		return Session{}, err
+	}
+	p.client.auth.set(session)
+	return session, nil
+}
+
 func newRemoteHTTPClient(tlsConfig *tls.Config) *http.Client {
 	transport := &http.Transport{
 		Proxy:                 nil,

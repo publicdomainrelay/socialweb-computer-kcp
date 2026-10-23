@@ -373,21 +373,61 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 	}
 	if cfg.PDSDPoP == nil && cfg.PDSAccessTokenRef != nil && deps.Credentials != nil {
 		if credential, err := deps.Credentials.Resolve(context.Background(), *cfg.PDSAccessTokenRef); err == nil {
-			if raw, ok := credential.Value("session"); ok && raw != "" {
-				var data oauthclient.SessionData
-				if json.Unmarshal([]byte(raw), &data) == nil && data.HostURL != "" {
-					if pds, err := indigoSessionPDS(data); err == nil {
+			if data, ok := credentialSessionData(credential.Data); ok {
+				clientID := data.ClientID
+				if clientID == "" {
+					clientID = defaultBidderOAuthClientID
+				}
+				opts := oauthclient.Options{
+					DID:        data.AccountDID,
+					RepoDID:    data.AccountDID,
+					PDSURL:     data.HostURL,
+					ClientID:   clientID,
+					Scopes:     data.Scopes,
+					HTTPClient: externalHTTPClient(deps, DefaultCallTimeout),
+				}
+				if writer, ok := deps.Credentials.(component.CredentialWriter); ok {
+					opts.Store = &bidderSessionStore{resolver: deps.Credentials, writer: writer, ref: *cfg.PDSAccessTokenRef}
+				}
+				session, err := oauthclient.New(data, opts)
+				if err == nil {
+					cfg.PDSTokens = session
+					cfg.PDSDPoP = session
+					if cfg.PDSURL == "" {
+						cfg.PDSURL = data.HostURL
+					}
+				} else {
+					if deps.Log != nil {
+						deps.Log.Warn("the bidder could not restore the oauth session", "err", err.Error())
+					}
+					if data.AuthServerURL == "" || data.AuthServerTokenEndpoint == "" {
+						authServer, tokenEndpoint, revokeEndpoint, discoverErr := oauthclient.DiscoverAuthServer(context.Background(), opts.HTTPClient, data.HostURL)
+						if discoverErr == nil {
+							data.AuthServerURL = authServer
+							data.AuthServerTokenEndpoint = tokenEndpoint
+							if revokeEndpoint != "" {
+								data.AuthServerRevocationEndpoint = revokeEndpoint
+							}
+							if opts.Store != nil {
+								_ = opts.Store.Save(context.Background(), data)
+							}
+						} else if deps.Log != nil {
+							deps.Log.Warn("the bidder could not discover the oauth auth server", "err", discoverErr.Error())
+						}
+					}
+					if pds, fallbackErr := indigoSessionPDS(data); fallbackErr == nil {
 						cfg.PDS = pds
 					}
 				}
-			}
-			source, err := pdsclient.DPoPSourceFromData(credential.Data)
-			if err != nil {
-				if deps.Log != nil {
-					deps.Log.Warn("the bidder could not read the session DPoP key", "err", err.Error())
-				}
 			} else {
-				cfg.PDSDPoP = source
+				source, err := pdsclient.DPoPSourceFromData(credential.Data)
+				if err != nil {
+					if deps.Log != nil {
+						deps.Log.Warn("the bidder could not read the session DPoP key", "err", err.Error())
+					}
+				} else {
+					cfg.PDSDPoP = source
+				}
 			}
 		}
 	}
@@ -587,7 +627,7 @@ func (c Config) outboundXRPC() bool {
 }
 
 func (c Config) oauthIdentity() bool {
-	switch strings.ToLower(strings.TrimSpace(c.IdentityMode)) {
+	switch strings.TrimSpace(c.IdentityMode) {
 	case string(v1alpha1.MarketIdentityModeOAuthQr), string(v1alpha1.MarketIdentityModeOAuthBrowser), string(v1alpha1.MarketIdentityModeOAuthDelegated):
 		return true
 	}

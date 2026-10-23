@@ -312,10 +312,6 @@ func (m *HTTPMarket) postWithClient(ctx context.Context, client *http.Client, en
 	if strings.TrimSpace(endpoint) == "" {
 		return 0, nil, fmt.Errorf("requester: no inbound endpoint is advertised for %s", lxm)
 	}
-	token, err := m.token(ctx, audience, lxm)
-	if err != nil {
-		return 0, nil, err
-	}
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return 0, nil, err
@@ -325,16 +321,29 @@ func (m *HTTPMarket) postWithClient(ctx context.Context, client *http.Client, en
 	}
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(cctx, http.MethodPost, endpoint+"/"+lxm, bytes.NewReader(raw))
-	if err != nil {
-		return 0, nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := client.Do(req)
-	if err != nil {
-		return 0, nil, err
+	var resp *http.Response
+	for attempt := 0; attempt < 2; attempt++ {
+		token, err := m.token(cctx, audience, lxm)
+		if err != nil {
+			return 0, nil, err
+		}
+		req, err := http.NewRequestWithContext(cctx, http.MethodPost, endpoint+"/"+lxm, bytes.NewReader(raw))
+		if err != nil {
+			return 0, nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json")
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp, err = client.Do(req)
+		if err != nil {
+			return 0, nil, err
+		}
+		if attempt == 0 && (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) {
+			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, marketReplyLimit))
+			resp.Body.Close()
+			continue
+		}
+		break
 	}
 	defer resp.Body.Close()
 	reply, err := io.ReadAll(io.LimitReader(resp.Body, marketReplyLimit))

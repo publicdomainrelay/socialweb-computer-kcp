@@ -101,15 +101,27 @@ func newXRPCClient(base *url.URL, httpClient *http.Client, tokens TokenSource, d
 }
 
 func (c *xrpcClient) accessToken(ctx context.Context) (string, error) {
+	if c.tokens != nil {
+		token, err := c.tokens.AccessToken(ctx)
+		if err != nil {
+			return "", fmt.Errorf("pdsclient: access token: %w", err)
+		}
+		return strings.TrimSpace(token), nil
+	}
 	if token := c.auth.access(); token != "" {
 		return token, nil
 	}
-	if c.tokens == nil {
+	return "", nil
+}
+
+func (c *xrpcClient) refreshAccessToken(ctx context.Context) (string, error) {
+	source, ok := c.tokens.(TokenRefresher)
+	if !ok {
 		return "", nil
 	}
-	token, err := c.tokens.AccessToken(ctx)
+	token, err := source.RefreshAccessToken(ctx)
 	if err != nil {
-		return "", fmt.Errorf("pdsclient: access token: %w", err)
+		return "", fmt.Errorf("pdsclient: refreshing the access token: %w", err)
 	}
 	return strings.TrimSpace(token), nil
 }
@@ -169,45 +181,75 @@ func (c *xrpcClient) do(ctx context.Context, method, nsid string, query url.Valu
 		return nil, fmt.Errorf("%w: missing xrpc method", ErrInvalidRequest)
 	}
 	endpoint := c.endpoint(nsid, query)
-	var reader io.Reader
-	if body != nil {
-		reader = bytes.NewReader(body)
-	}
-	request, err := http.NewRequestWithContext(ctx, method, endpoint.String(), reader)
-	if err != nil {
-		return nil, fmt.Errorf("%w: building request: %v", ErrInvalidRequest, err)
-	}
-	request.Header.Set("Accept", "application/json")
-	if body != nil {
-		request.Header.Set("Content-Type", "application/json")
-	}
-	if token != "" {
-		scheme := "Bearer"
-		if c.dpop != nil {
-			scheme = "DPoP"
+	var response *http.Response
+	refreshed := false
+	for attempt := 0; attempt < 3; attempt++ {
+		var reader io.Reader
+		if body != nil {
+			reader = bytes.NewReader(body)
 		}
-		request.Header.Set("Authorization", scheme+" "+token)
-		if c.dpop != nil {
-			dpopURL := *endpoint
-			dpopURL.RawQuery = ""
-			dpopURL.Fragment = ""
-			proof, err := c.dpop.DPoPProof(ctx, method, dpopURL.String(), token)
-			if err != nil {
-				return nil, fmt.Errorf("pdsclient: dpop proof: %w", err)
+		request, err := http.NewRequestWithContext(ctx, method, endpoint.String(), reader)
+		if err != nil {
+			return nil, fmt.Errorf("%w: building request: %v", ErrInvalidRequest, err)
+		}
+		request.Header.Set("Accept", "application/json")
+		if body != nil {
+			request.Header.Set("Content-Type", "application/json")
+		}
+		if token != "" {
+			scheme := "Bearer"
+			if c.dpop != nil {
+				scheme = "DPoP"
 			}
-			if proof != "" {
-				request.Header.Set("DPoP", proof)
+			request.Header.Set("Authorization", scheme+" "+token)
+			if c.dpop != nil {
+				dpopURL := *endpoint
+				dpopURL.RawQuery = ""
+				dpopURL.Fragment = ""
+				proof, err := c.dpop.DPoPProof(ctx, method, dpopURL.String(), token)
+				if err != nil {
+					return nil, fmt.Errorf("pdsclient: dpop proof: %w", err)
+				}
+				if proof != "" {
+					request.Header.Set("DPoP", proof)
+				}
 			}
 		}
+		response, err = c.httpClient.Do(request)
+		if err != nil {
+			return nil, fmt.Errorf("pdsclient: request %s: %w", nsid, err)
+		}
+		if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusBadRequest {
+			header := response.Header.Get("WWW-Authenticate")
+			nonce := response.Header.Get("DPoP-Nonce")
+			if nonce == "" {
+				nonce = response.Header.Get("Dpop-Nonce")
+			}
+			if nonce != "" && !strings.Contains(header, "invalid_token") {
+				if setter, ok := c.dpop.(DPoPNonceSetter); ok {
+					_ = setter.SetDPoPNonce(ctx, endpoint.Host, nonce)
+					_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, maxErrorBodyBytes))
+					_ = response.Body.Close()
+					continue
+				}
+			}
+		}
+		if !refreshed && token != "" && (response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden) {
+			refreshed = true
+			fresh, refreshErr := c.refreshAccessToken(ctx)
+			if refreshErr == nil && fresh != "" && fresh != token {
+				_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, maxErrorBodyBytes))
+				_ = response.Body.Close()
+				token = fresh
+				continue
+			}
+		}
+		if err := checkXRPCResponse(response); err != nil {
+			return nil, err
+		}
+		return response, nil
 	}
-	response, err := c.httpClient.Do(request)
-	if err != nil {
-		return nil, fmt.Errorf("pdsclient: request %s: %w", nsid, err)
-	}
-	if err := checkXRPCResponse(response); err != nil {
-		return nil, err
-	}
-	return response, nil
+	return nil, fmt.Errorf("%w: %s kept rejecting the access token", ErrAuthenticationRequired, nsid)
 }
 
 func checkXRPCResponse(response *http.Response) error {

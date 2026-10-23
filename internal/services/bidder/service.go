@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -370,7 +371,8 @@ func (s *Service) prepare(ctx context.Context) error {
 		now:                     s.cfg.Now,
 	}
 	s.log.Info("the bidder serves the market", "handler", s.listeningURL(), "did", s.did, "guest", s.guestURL,
-		"offering", s.offeringEndpoint(), "serviceAuthHost", s.cfg.ServiceAuth.Hostname, "inboundXRPC", s.cfg.inboundXRPC())
+		"offering", s.offeringEndpoint(), "serviceAuthHost", s.cfg.ServiceAuth.Hostname,
+		"identityMode", s.cfg.IdentityMode, "inboundXRPC", s.cfg.inboundXRPC())
 	go s.registerPDSWithRelays(ctx)
 	return nil
 }
@@ -512,12 +514,16 @@ func (s *Service) resolveRecords(ctx context.Context) error {
 	if pds == nil {
 		tokens := s.cfg.PDSTokens
 		if tokens == nil {
+			tokens = s.credentialTokenSource()
+		}
+		if tokens == nil {
 			token, err := s.pdsAccessToken(ctx)
 			if err != nil {
 				return err
 			}
 			tokens = pdsclient.TokenSourceFunc(func(context.Context) (string, error) { return token, nil })
 		}
+		s.cfg.PDSTokens = tokens
 		resolver := s.cfg.PDSResolver
 		if resolver == nil {
 			resolver = &pdsclient.Resolver{
@@ -552,6 +558,26 @@ func (s *Service) resolveRecords(ctx context.Context) error {
 	}
 	s.cfg.Records = NewRoutedStore(s.did, store, reader)
 	return nil
+}
+
+func (s *Service) credentialTokenSource() pdsclient.TokenSource {
+	if s.cfg.PDSAccessTokenRef == nil || s.cfg.Deps.Credentials == nil || strings.TrimSpace(s.cfg.PDSURL) == "" {
+		return nil
+	}
+	client := externalHTTPClient(s.cfg.Deps, DefaultCallTimeout)
+	if s.pdsInternal && s.cfg.Deps.Handlers != nil {
+		client = s.cfg.Deps.Handlers.HTTPClient()
+	}
+	source := &credentialPDSTokens{
+		resolver: s.cfg.Deps.Credentials,
+		ref:      *s.cfg.PDSAccessTokenRef,
+		pdsURL:   s.cfg.PDSURL,
+		client:   client,
+	}
+	if writer, ok := s.cfg.Deps.Credentials.(component.CredentialWriter); ok {
+		source.writer = writer
+	}
+	return source
 }
 
 func (s *Service) pdsAccessToken(ctx context.Context) (string, error) {
@@ -746,12 +772,39 @@ func (s *Service) newAuthorizer() Authorizer {
 	if s.cfg.ServiceAuth.Hostname == "" {
 		s.cfg.ServiceAuth.Hostname = hostPortOf(s.publicMarketURL())
 	}
+	audienceDIDs := append([]string(nil), s.cfg.ServiceAuth.AudienceDIDs...)
+	audienceDIDs = append(audienceDIDs, bidderAudienceDIDs(s.cfg.ServiceAuth.Hostname)...)
 	return &ServiceAuthAuthorizer{
 		Dir:          s.dir,
 		Hostname:     s.cfg.ServiceAuth.Hostname,
 		ServiceIDs:   []string{market.DefaultMarketServiceID, market.DefaultComputeEventServiceID},
-		AudienceDIDs: append([]string(nil), s.cfg.ServiceAuth.AudienceDIDs...),
+		AudienceDIDs: audienceDIDs,
 	}
+}
+
+func bidderAudienceDIDs(host string) []string {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return nil
+	}
+	candidates := []string{host, strings.ToLower(host)}
+	if name, _, err := net.SplitHostPort(host); err == nil && name != "" {
+		candidates = append(candidates, name, strings.ToLower(name))
+	}
+	unique := []string{}
+	seen := map[string]bool{}
+	for _, candidate := range candidates {
+		if candidate == "" {
+			continue
+		}
+		did := market.ServiceDIDForHost(candidate)
+		if seen[did] {
+			continue
+		}
+		seen[did] = true
+		unique = append(unique, did)
+	}
+	return unique
 }
 
 func (s *Service) addEndpoint(endpoint component.Endpoint) {

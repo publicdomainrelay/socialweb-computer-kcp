@@ -58,8 +58,6 @@ type Session struct {
 
 	client *http.Client
 
-	clientID string
-
 	store SessionStore
 
 	did string
@@ -111,12 +109,31 @@ func Open(ctx context.Context, opts Options) (*Session, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidSession, err)
 	}
+	_ = instance.EnsureEndpoints(ctx)
+	if session.ClientID == "" && strings.TrimSpace(opts.ClientID) != "" {
+		_ = instance.persist(ctx)
+	}
 	if !AccessTokenLive(session.AccessToken) {
 		if err := instance.refresh(ctx); err != nil {
 			return nil, fmt.Errorf("oauthclient: refreshing the oauth session for %s: %w", did, err)
 		}
 	}
 	return instance, nil
+}
+
+func (s *Session) EnsureEndpoints(ctx context.Context) error {
+	if s == nil {
+		return errors.New("oauthclient: no oauth session")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.data.AuthServerTokenEndpoint != "" {
+		return nil
+	}
+	if err := s.ensureEndpointsLocked(ctx); err != nil {
+		return err
+	}
+	return s.persistLocked(ctx)
 }
 
 func New(data SessionData, opts Options) (*Session, error) {
@@ -129,6 +146,9 @@ func New(data SessionData, opts Options) (*Session, error) {
 	}
 	if data.HostURL == "" {
 		return nil, errors.New("oauthclient: the oauth session names no PDS")
+	}
+	if data.ClientID == "" {
+		data.ClientID = strings.TrimSpace(opts.ClientID)
 	}
 	host, err := url.Parse(data.HostURL)
 	if err != nil || host.Host == "" || (host.Scheme != "http" && host.Scheme != "https") {
@@ -146,13 +166,12 @@ func New(data SessionData, opts Options) (*Session, error) {
 		client = &http.Client{Timeout: DefaultHTTPTimeout}
 	}
 	return &Session{
-		data:     data,
-		key:      key,
-		client:   client,
-		clientID: opts.ClientID,
-		store:    opts.Store,
-		did:      did.String(),
-		hostURL:  strings.TrimRight(data.HostURL, "/"),
+		data:    data,
+		key:     key,
+		client:  client,
+		store:   opts.Store,
+		did:     did.String(),
+		hostURL: strings.TrimRight(data.HostURL, "/"),
 	}, nil
 }
 
@@ -247,6 +266,37 @@ func (s *Session) AccessToken(ctx context.Context) (string, error) {
 	return token, nil
 }
 
+func (s *Session) RefreshAccessToken(ctx context.Context) (string, error) {
+	if s == nil {
+		return "", errors.New("oauthclient: no oauth session")
+	}
+	if err := s.refresh(ctx); err != nil {
+		return "", err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.data.AccessToken == "" {
+		return "", errors.New("oauthclient: the oauth session has no access token")
+	}
+	return s.data.AccessToken, nil
+}
+
+func (s *Session) SetDPoPNonce(ctx context.Context, host, nonce string) error {
+	if s == nil {
+		return errors.New("oauthclient: no oauth session")
+	}
+	if strings.TrimSpace(nonce) == "" {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.data.DPoPHostNonce == nonce {
+		return nil
+	}
+	s.data.DPoPHostNonce = nonce
+	return s.persistLocked(ctx)
+}
+
 func (s *Session) DPoPProof(ctx context.Context, method, target, accessToken string) (string, error) {
 	if s == nil {
 		return "", errors.New("oauthclient: no oauth session")
@@ -332,7 +382,7 @@ func (s *Session) doAuthorized(ctx context.Context, client *http.Client, req *ht
 	if client == nil {
 		client = &http.Client{Timeout: DefaultHTTPTimeout}
 	}
-	var resp *http.Response
+	refreshed := false
 	for attempt := 0; attempt < 3; attempt++ {
 		s.mu.Lock()
 		accessToken := s.data.AccessToken
@@ -352,35 +402,75 @@ func (s *Session) doAuthorized(ctx context.Context, client *http.Client, req *ht
 		}
 		current.Header.Set("Authorization", "DPoP "+accessToken)
 		current.Header.Set("DPoP", proof)
-		resp, err = client.Do(current)
+		resp, err := client.Do(current)
 		if err != nil {
 			return nil, err
 		}
-		if resp.StatusCode != http.StatusUnauthorized {
+		if resp.StatusCode != http.StatusUnauthorized && resp.StatusCode != http.StatusBadRequest {
 			return resp, nil
 		}
 		header := resp.Header.Get("WWW-Authenticate")
 		nextNonce := resp.Header.Get("DPoP-Nonce")
-		DrainAndClose(resp.Body)
-		switch {
-		case strings.Contains(header, "use_dpop_nonce") && nextNonce != "":
+		if nextNonce != "" && (strings.Contains(header, "use_dpop_nonce") || !strings.Contains(header, "invalid_token")) {
 			s.mu.Lock()
 			s.data.DPoPHostNonce = nextNonce
 			err = s.persistLocked(ctx)
 			s.mu.Unlock()
+			DrainAndClose(resp.Body)
 			if err != nil {
 				return nil, err
 			}
 			continue
-		case strings.Contains(header, "invalid_token"):
+		}
+		if resp.StatusCode == http.StatusUnauthorized && !refreshed {
+			refreshed = true
+			DrainAndClose(resp.Body)
 			if err := s.refresh(ctx); err != nil {
 				return nil, fmt.Errorf("oauthclient: refreshing the oauth session: %w", err)
 			}
 			continue
 		}
-		return nil, fmt.Errorf("oauthclient: %s %s answered HTTP 401", req.Method, req.URL.Path)
+		DrainAndClose(resp.Body)
+		return nil, fmt.Errorf("oauthclient: %s %s answered HTTP %d", req.Method, req.URL.Path, resp.StatusCode)
 	}
 	return nil, errors.New("oauthclient: the oauth session kept asking for a new DPoP nonce")
+}
+
+func (s *Session) reloadLocked(ctx context.Context) bool {
+	if s.store == nil {
+		return false
+	}
+	sessions, err := s.store.List(ctx)
+	if err != nil {
+		return false
+	}
+	for _, stored := range sessions {
+		if stored.AccountDID != s.data.AccountDID || stored.SessionID != s.data.SessionID {
+			continue
+		}
+		if stored.RefreshToken == "" || stored.RefreshToken == s.data.RefreshToken {
+			return false
+		}
+		s.data.AccessToken = stored.AccessToken
+		s.data.RefreshToken = stored.RefreshToken
+		if stored.ClientID != "" {
+			s.data.ClientID = stored.ClientID
+		}
+		if stored.AuthServerURL != "" {
+			s.data.AuthServerURL = stored.AuthServerURL
+		}
+		if stored.AuthServerTokenEndpoint != "" {
+			s.data.AuthServerTokenEndpoint = stored.AuthServerTokenEndpoint
+		}
+		if stored.DPoPAuthServerNonce != "" {
+			s.data.DPoPAuthServerNonce = stored.DPoPAuthServerNonce
+		}
+		if len(stored.Scopes) > 0 {
+			s.data.Scopes = append([]string(nil), stored.Scopes...)
+		}
+		return true
+	}
+	return false
 }
 
 func cloneRequest(req *http.Request) (*http.Request, error) {
@@ -406,8 +496,28 @@ func DrainAndClose(body io.ReadCloser) {
 func (s *Session) refresh(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	for round := 0; round < 2; round++ {
+		if s.data.RefreshToken == "" {
+			return ErrNoRefreshToken
+		}
+		err := s.refreshOnceLocked(ctx)
+		if err == nil {
+			return nil
+		}
+		if errors.Is(err, ErrSessionExpired) && round == 0 && s.reloadLocked(ctx) {
+			continue
+		}
+		return err
+	}
+	return ErrSessionExpired
+}
+
+func (s *Session) refreshOnceLocked(ctx context.Context) error {
 	if s.data.RefreshToken == "" {
 		return ErrNoRefreshToken
+	}
+	if s.data.ClientID == "" {
+		return errors.New("oauthclient: the oauth session names no client_id; the token refresh needs it")
 	}
 	if err := s.ensureEndpointsLocked(ctx); err != nil {
 		return err
@@ -415,7 +525,7 @@ func (s *Session) refresh(ctx context.Context) error {
 	form := url.Values{
 		"grant_type":    {"refresh_token"},
 		"refresh_token": {s.data.RefreshToken},
-		"client_id":     {s.clientID},
+		"client_id":     {s.data.ClientID},
 	}
 	client := s.client
 	if client == nil {
@@ -439,7 +549,7 @@ func (s *Session) refresh(ctx context.Context) error {
 			return err
 		}
 		nextNonce := resp.Header.Get("DPoP-Nonce")
-		if resp.StatusCode == http.StatusBadRequest && nextNonce != "" {
+		if attempt == 0 && (resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusUnauthorized) && nextNonce != "" {
 			raw, _ := io.ReadAll(io.LimitReader(resp.Body, ReplyLimit))
 			resp.Body.Close()
 			if strings.Contains(string(raw), "use_dpop_nonce") {
@@ -456,7 +566,7 @@ func (s *Session) refresh(ctx context.Context) error {
 		return err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		if resp.StatusCode == http.StatusBadRequest && strings.Contains(string(raw), "invalid_grant") {
+		if (resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusUnauthorized) && strings.Contains(string(raw), "invalid_grant") {
 			return fmt.Errorf("%w: %s", ErrSessionExpired, strings.TrimSpace(string(raw)))
 		}
 		return fmt.Errorf("oauthclient: the token refresh answered HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
@@ -480,6 +590,19 @@ func (s *Session) refresh(ctx context.Context) error {
 	if nextNonce := resp.Header.Get("DPoP-Nonce"); nextNonce != "" {
 		s.data.DPoPAuthServerNonce = nextNonce
 	}
+	return s.persistLocked(ctx)
+}
+
+func (s *Session) Sync(ctx context.Context) error {
+	if s == nil {
+		return errors.New("oauthclient: no oauth session")
+	}
+	return s.persist(ctx)
+}
+
+func (s *Session) persist(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.persistLocked(ctx)
 }
 

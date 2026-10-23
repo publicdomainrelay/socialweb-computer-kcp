@@ -69,6 +69,10 @@ type ownerSessionAgents struct {
 	client *http.Client
 
 	log *slog.Logger
+
+	mu sync.Mutex
+
+	tokens map[string]*ownerSessionTokens
 }
 
 func (a *ownerSessionAgents) AgentFor(caller *coreapi.WebCaller) coreapi.WebAccountAgent {
@@ -79,7 +83,21 @@ func (a *ownerSessionAgents) AgentFor(caller *coreapi.WebCaller) coreapi.WebAcco
 	if !ok {
 		return nil
 	}
-	return &ownerSessionAgent{did: caller.DID, session: session, client: a.client, log: a.log}
+	return &ownerSessionAgent{did: caller.DID, tokens: a.tokensFor(caller.DID, session), client: a.client, log: a.log}
+}
+
+func (a *ownerSessionAgents) tokensFor(did string, session OwnerSession) *ownerSessionTokens {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if tokens := a.tokens[did]; tokens != nil {
+		return tokens
+	}
+	if a.tokens == nil {
+		a.tokens = map[string]*ownerSessionTokens{}
+	}
+	tokens := newOwnerSessionTokens(did, session, a.client)
+	a.tokens[did] = tokens
+	return tokens
 }
 
 type combinedAgents []sshtransport.AgentProvider
@@ -96,10 +114,63 @@ func (c combinedAgents) AgentFor(caller *coreapi.WebCaller) coreapi.WebAccountAg
 	return unavailableAgent{}
 }
 
-type ownerSessionAgent struct {
+type ownerSessionTokens struct {
+	mu sync.Mutex
+
 	did string
 
 	session OwnerSession
+
+	client *http.Client
+
+	access string
+}
+
+func newOwnerSessionTokens(did string, session OwnerSession, client *http.Client) *ownerSessionTokens {
+	return &ownerSessionTokens{did: did, session: session, client: client}
+}
+
+func (t *ownerSessionTokens) AccessToken(ctx context.Context) (string, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if pdsclient.TokenLive(t.access) {
+		return t.access, nil
+	}
+	return t.loginLocked(ctx)
+}
+
+func (t *ownerSessionTokens) RefreshAccessToken(ctx context.Context) (string, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.loginLocked(ctx)
+}
+
+func (t *ownerSessionTokens) loginLocked(ctx context.Context) (string, error) {
+	did, err := syntax.ParseDID(t.did)
+	if err != nil {
+		return "", fmt.Errorf("sshserver: the owner DID: %w", err)
+	}
+	pds, err := pdsclient.NewRemote(pdsclient.RemoteConfig{
+		BaseURL:    t.session.Service,
+		DID:        did,
+		HTTPClient: t.client,
+		Timeout:    ownerSessionRequestTimeout,
+	})
+	if err != nil {
+		return "", fmt.Errorf("sshserver: the owner PDS %s: %w", t.session.Service, err)
+	}
+	session, err := pds.CreateSession(ctx, t.session.Identifier, t.session.Password)
+	if err != nil {
+		return "", fmt.Errorf("sshserver: the owner session of %s: %w", t.did, err)
+	}
+	t.access = session.AccessJWT
+	return t.access, nil
+}
+
+type ownerSessionAgent struct {
+	did string
+
+	tokens *ownerSessionTokens
 
 	client *http.Client
 
@@ -121,16 +192,14 @@ func (a *ownerSessionAgent) remote(ctx context.Context) (*pdsclient.RemotePDS, e
 		return nil, fmt.Errorf("sshserver: the owner DID: %w", err)
 	}
 	pds, err := pdsclient.NewRemote(pdsclient.RemoteConfig{
-		BaseURL:    a.session.Service,
+		BaseURL:    a.tokens.session.Service,
 		DID:        did,
 		HTTPClient: a.client,
+		Tokens:     a.tokens,
 		Timeout:    ownerSessionRequestTimeout,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("sshserver: the owner PDS %s: %w", a.session.Service, err)
-	}
-	if _, err := pds.CreateSession(ctx, a.session.Identifier, a.session.Password); err != nil {
-		return nil, fmt.Errorf("sshserver: the owner session of %s: %w", a.did, err)
+		return nil, fmt.Errorf("sshserver: the owner PDS %s: %w", a.tokens.session.Service, err)
 	}
 	a.pds = pds
 	return pds, nil

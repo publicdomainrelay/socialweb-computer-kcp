@@ -3,6 +3,7 @@ package market
 import (
 	"context"
 	"fmt"
+	"net"
 	"regexp"
 	"strings"
 
@@ -62,8 +63,11 @@ func VerifyServiceAuth(ctx context.Context, dir identity.Directory, opts VerifyS
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidAuth, err)
 	}
-	serviceDID := ServiceDIDForHost(opts.Hostname)
-	dids := append([]string{serviceDID}, opts.ExtraAudienceDIDs...)
+	serviceDID := ServiceDIDForHost(strings.ToLower(opts.Hostname))
+	dids := append([]string{serviceDID, ServiceDIDForHost(opts.Hostname)}, opts.ExtraAudienceDIDs...)
+	if name, _, err := net.SplitHostPort(opts.Hostname); err == nil && name != "" {
+		dids = append(dids, ServiceDIDForHost(strings.ToLower(name)))
+	}
 	audiences := make([]serviceAudience, 0, len(dids)*(len(opts.ServiceIDs)+1))
 	for _, did := range dids {
 		audiences = append(audiences, serviceAudience{aud: did})

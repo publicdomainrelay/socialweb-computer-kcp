@@ -103,6 +103,7 @@ func (q QRSession) SessionData(clientID string, scopes []string) (SessionData, e
 		AccountDID:              did.String(),
 		SessionID:               SessionID(did.String(), host),
 		HostURL:                 host,
+		ClientID:                strings.TrimSpace(clientID),
 		Scopes:                  append([]string(nil), scopes...),
 		AccessToken:             q.AccessJWT,
 		RefreshToken:            q.RefreshJWT,

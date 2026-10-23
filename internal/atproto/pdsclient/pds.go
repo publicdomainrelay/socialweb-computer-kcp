@@ -2,10 +2,12 @@ package pdsclient
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/syntax"
@@ -26,6 +28,42 @@ var (
 
 type TokenSource interface {
 	AccessToken(ctx context.Context) (string, error)
+}
+
+type TokenRefresher interface {
+	RefreshAccessToken(ctx context.Context) (string, error)
+}
+
+type DPoPNonceSetter interface {
+	SetDPoPNonce(ctx context.Context, host, nonce string) error
+}
+
+const TokenExpirySkew = 30 * time.Second
+
+func TokenExpiry(token string) (time.Time, bool) {
+	parts := strings.Split(token, ".")
+	if len(parts) < 2 {
+		return time.Time{}, false
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return time.Time{}, false
+	}
+	var claims struct {
+		ExpiresAt int64 `json:"exp"`
+	}
+	if json.Unmarshal(raw, &claims) != nil || claims.ExpiresAt == 0 {
+		return time.Time{}, false
+	}
+	return time.Unix(claims.ExpiresAt, 0), true
+}
+
+func TokenLive(token string) bool {
+	expires, ok := TokenExpiry(token)
+	if !ok {
+		return false
+	}
+	return time.Now().Add(TokenExpirySkew).Before(expires)
 }
 
 type DPoPSource interface {

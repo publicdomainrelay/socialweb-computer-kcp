@@ -579,6 +579,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 	}
 	cfg.Gateway.Audience = decoded.Audience
 	cfg.Gateway.Audiences = gatewayAudiences(cfg.Gateway.Audience, cfg.Gateway.Audiences, decoded.Identity)
+	cfg.Gateway.Audiences = uniqueStrings(append(cfg.Gateway.Audiences, gatewayHostAudiences(decoded.Hostnames, decoded.TLS, cfg.PublicOrigin, decoded.Network)...))
 	cfg.Session.PostSignInURL = decoded.PostSignInURL
 	if cfg.PublicOrigin == "" {
 		cfg.PublicOrigin = publicOriginFor(decoded.Hostnames, decoded.TLS)
@@ -724,6 +725,41 @@ func gatewayAudiences(audience string, audiences []string, identity *v1alpha1.Co
 		}
 	}
 	return uniqueStrings(out)
+}
+
+func gatewayHostAudiences(hostnames []string, tls *v1alpha1.ComponentTLS, publicOrigin string, network *v1alpha1.MarketNetworkValue) []string {
+	candidates := append([]string(nil), hostnames...)
+	if tls != nil {
+		candidates = append(candidates, tls.Hostnames...)
+	}
+	if publicOrigin != "" {
+		candidates = append(candidates, publicOrigin)
+	}
+	if network != nil {
+		candidates = append(candidates, network.IngressProxyHost)
+	}
+	out := []string{}
+	for _, raw := range candidates {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		host := raw
+		if parsed, err := url.Parse(raw); err == nil && parsed.Host != "" {
+			host = parsed.Host
+		}
+		hosts := []string{host, strings.ToLower(host)}
+		if name, _, err := net.SplitHostPort(host); err == nil && name != "" {
+			hosts = append(hosts, name, strings.ToLower(name))
+		}
+		for _, value := range hosts {
+			if value == "" {
+				continue
+			}
+			out = append(out, "did:web:"+value)
+		}
+	}
+	return out
 }
 
 func uniqueStrings(values []string) []string {

@@ -205,7 +205,7 @@ func ExchangeCode(ctx context.Context, client *http.Client, pending PendingAuth,
 			return SessionData{}, err
 		}
 		nextNonce := resp.Header.Get("DPoP-Nonce")
-		if resp.StatusCode == http.StatusBadRequest && nextNonce != "" {
+		if attempt == 0 && resp.StatusCode == http.StatusBadRequest && nextNonce != "" {
 			raw, _ := io.ReadAll(io.LimitReader(resp.Body, ReplyLimit))
 			resp.Body.Close()
 			if strings.Contains(string(raw), "use_dpop_nonce") {
@@ -252,6 +252,7 @@ func ExchangeCode(ctx context.Context, client *http.Client, pending PendingAuth,
 		AccountDID:              did.String(),
 		SessionID:               SessionID(did.String(), host),
 		HostURL:                 host,
+		ClientID:                pending.ClientID,
 		AuthServerURL:           pending.AuthServerURL,
 		AuthServerTokenEndpoint: pending.TokenEndpoint,
 		Scopes:                  append([]string(nil), scopes...),

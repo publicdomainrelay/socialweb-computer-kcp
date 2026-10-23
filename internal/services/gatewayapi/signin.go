@@ -560,7 +560,7 @@ func (s *custodySignIn) AgentFor(caller *coreapi.WebCaller) coreapi.WebAccountAg
 		return nil
 	}
 	return &custodyAgent{client: s.client, http: s.pdsHTTP, caller: caller, allowInternalHTTP: s.allowInternalHTTP,
-		log: s.log, nonces: map[string]string{}}
+		renewIncrement: s.renewIncrement, log: s.log, nonces: map[string]string{}}
 }
 
 type custodyAgent struct {
@@ -571,6 +571,8 @@ type custodyAgent struct {
 	caller *coreapi.WebCaller
 
 	allowInternalHTTP bool
+
+	renewIncrement time.Duration
 
 	log *slog.Logger
 
@@ -635,7 +637,9 @@ func (a *custodyAgent) request(ctx context.Context, method, target string, body 
 			return nil, fmt.Errorf("gatewayapi: encoding %s %s: %w", method, full.Path, err)
 		}
 	}
-	for attempt := 0; attempt < 2; attempt++ {
+	nonceRetried := false
+	authRetried := false
+	for attempt := 0; attempt < 3; attempt++ {
 		proof, err := a.client.proof(ctx, a.caller.Token, a.caller.DID, method, full.String(), a.nonce(origin))
 		if err != nil {
 			return nil, err
@@ -663,10 +667,23 @@ func (a *custodyAgent) request(ctx context.Context, method, target string, body 
 		if readErr != nil {
 			return nil, fmt.Errorf("gatewayapi: reading %s %s: %w", method, full.Path, readErr)
 		}
-		a.setNonce(origin, resp.Header.Get("DPoP-Nonce"))
-		if attempt == 0 && (resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusUnauthorized) &&
-			resp.Header.Get("DPoP-Nonce") != "" {
+		header := resp.Header.Get("WWW-Authenticate")
+		nonce := resp.Header.Get("DPoP-Nonce")
+		a.setNonce(origin, nonce)
+		if !nonceRetried && nonce != "" &&
+			(resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusUnauthorized) &&
+			!strings.Contains(header, "invalid_token") {
+			nonceRetried = true
 			a.log.Debug("web_account_nonce_retry", "did", a.caller.DID, "path", full.Path)
+			continue
+		}
+		if !authRetried && resp.StatusCode == http.StatusUnauthorized &&
+			(strings.Contains(header, "invalid_token") || nonce == "") {
+			authRetried = true
+			if _, renewErr := a.client.renew(ctx, a.caller.Token, a.renewIncrement); renewErr != nil {
+				a.log.Debug("web_account_renew_failed", "did", a.caller.DID, "err", renewErr.Error())
+			}
+			a.log.Debug("web_account_token_retry", "did", a.caller.DID, "path", full.Path)
 			continue
 		}
 		if resp.StatusCode < 200 || resp.StatusCode > 299 {
@@ -674,7 +691,7 @@ func (a *custodyAgent) request(ctx context.Context, method, target string, body 
 		}
 		return raw, nil
 	}
-	return nil, errors.New("gatewayapi: the PDS kept asking for a new DPoP nonce")
+	return nil, errors.New("gatewayapi: the PDS kept rejecting the account session")
 }
 
 func readLimited(body io.Reader, limit int64) ([]byte, error) {
