@@ -49,6 +49,8 @@ type Config struct {
 
 	AllowMissingDPoPNonce   bool
 	DisableLocalhostClients bool
+
+	Scopes []string
 }
 
 type Server struct {
@@ -175,6 +177,10 @@ func (s *Server) Issuer() string {
 
 func (s *Server) AuthorizationServerMetadata() AuthorizationServerMetadata {
 	issuer := s.issuer
+	scopes := s.config.Scopes
+	if len(scopes) == 0 {
+		scopes = []string{ScopeAtproto}
+	}
 	return AuthorizationServerMetadata{
 		Issuer:                                     issuer,
 		AuthorizationEndpoint:                      issuer + "/oauth/authorize",
@@ -191,7 +197,7 @@ func (s *Server) AuthorizationServerMetadata() AuthorizationServerMetadata {
 		ClientIDMetadataDocumentSupported:          true,
 		DPoPBoundAccessTokensSupported:             true,
 		CodeChallengeMethodsSupported:              []string{"S256"},
-		ScopesSupported:                            []string{ScopeAtproto},
+		ScopesSupported:                            append([]string(nil), scopes...),
 	}
 }
 

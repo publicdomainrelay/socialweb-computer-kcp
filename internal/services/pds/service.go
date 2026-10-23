@@ -369,6 +369,7 @@ func (s *Service) oauthConfig(ctx context.Context, cfg Config, baseURL string, c
 		PARTTL:                  opts.PARTTL,
 		AllowMissingDPoPNonce:   opts.AllowMissingDPoPNonce,
 		DisableLocalhostClients: opts.DisableLocalhostClients,
+		Scopes:                  append([]string(nil), opts.Scopes...),
 	}, nil
 }
 

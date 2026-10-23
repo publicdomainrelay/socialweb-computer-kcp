@@ -179,6 +179,14 @@ type Config struct {
 
 	PolicyPoll time.Duration
 
+	Heartbeat time.Duration
+
+	OfferingRefresh time.Duration
+
+	OfferingRefreshDisabled bool
+
+	BidTTL time.Duration
+
 	Provider ProviderConfig
 
 	ServiceAuth ServiceAuthConfig
@@ -249,7 +257,32 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		Comms:             bidderSpec.Comms,
 		PolicyTimeout:     DefaultPolicyTimeout,
 		PolicyPoll:        DefaultPolicyPoll,
+		OfferingRefresh:   DefaultOfferingRefresh,
+		BidTTL:            DefaultBidTTL,
 		VaultClient:       "bidder",
+	}
+	if bidderSpec.HeartbeatIntervalSeconds != nil && *bidderSpec.HeartbeatIntervalSeconds > 0 {
+		cfg.Heartbeat = time.Duration(*bidderSpec.HeartbeatIntervalSeconds) * time.Second
+	}
+	if bidderSpec.OfferingRefreshSeconds != nil {
+		if *bidderSpec.OfferingRefreshSeconds == 0 {
+			cfg.OfferingRefreshDisabled = true
+		} else {
+			cfg.OfferingRefresh = time.Duration(*bidderSpec.OfferingRefreshSeconds) * time.Second
+		}
+	}
+	if bidderSpec.BidTTLSeconds != nil && *bidderSpec.BidTTLSeconds > 0 {
+		cfg.BidTTL = time.Duration(*bidderSpec.BidTTLSeconds) * time.Second
+	}
+	if bidderSpec.PolicyPollMilliseconds != nil && *bidderSpec.PolicyPollMilliseconds > 0 {
+		cfg.PolicyPoll = time.Duration(*bidderSpec.PolicyPollMilliseconds) * time.Millisecond
+	}
+	if bidderSpec.PolicyTimeoutSeconds != nil && *bidderSpec.PolicyTimeoutSeconds > 0 {
+		cfg.PolicyTimeout = time.Duration(*bidderSpec.PolicyTimeoutSeconds) * time.Second
+	}
+	if bidderSpec.ServiceAuth != nil {
+		cfg.ServiceAuth.Hostname = strings.TrimSpace(bidderSpec.ServiceAuth.Hostname)
+		cfg.ServiceAuth.AudienceDIDs = append([]string(nil), bidderSpec.ServiceAuth.Audience...)
 	}
 	if bidderSpec.Identity != nil {
 		cfg.Identity = *bidderSpec.Identity
@@ -571,6 +604,13 @@ func hostPortOf(raw string) string {
 		return ""
 	}
 	return u.Host
+}
+
+func (c Config) bidTTL() time.Duration {
+	if c.BidTTL > 0 {
+		return c.BidTTL
+	}
+	return DefaultBidTTL
 }
 
 func (c Config) check() error {

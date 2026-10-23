@@ -211,6 +211,7 @@ func (s *Server) initOAuth(cfg *OAuthConfig) error {
 		PARTTL:                  cfg.PARTTL,
 		AllowMissingDPoPNonce:   cfg.AllowMissingDPoPNonce,
 		DisableLocalhostClients: cfg.DisableLocalhostClients,
+		Scopes:                  append([]string(nil), cfg.Scopes...),
 	})
 	if err != nil {
 		return fmt.Errorf("pds: initializing oauth: %w", err)

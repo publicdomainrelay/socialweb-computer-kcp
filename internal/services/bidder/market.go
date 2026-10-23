@@ -398,7 +398,7 @@ func (s *Service) enqueueBid(ctx context.Context, rfpURI, rfpCID, issuer string)
 		Spec: v1alpha1.BidSpec{
 			Rfp:       v1alpha1.BidRecordRef{Uri: rfpURI, Cid: rfpCID},
 			Requester: issuer,
-			ExpiresAt: now.Add(DefaultBidTTL).Format(time.RFC3339),
+			ExpiresAt: now.Add(s.cfg.bidTTL()).Format(time.RFC3339),
 		},
 	}
 	if err := s.bids.Create(ctx, bid); err != nil {

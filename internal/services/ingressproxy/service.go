@@ -105,6 +105,21 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		Iroh:             copyIroh(decoded.Iroh),
 		OpenTunnel:       copyOpenTunnel(decoded.OpenTunnel),
 	}
+	if decoded.RelayTimeoutMilliseconds != nil && *decoded.RelayTimeoutMilliseconds > 0 {
+		cfg.RelayTimeout = time.Duration(*decoded.RelayTimeoutMilliseconds) * time.Millisecond
+	}
+	if decoded.KeepaliveMilliseconds != nil && *decoded.KeepaliveMilliseconds > 0 {
+		cfg.KeepaliveInterval = time.Duration(*decoded.KeepaliveMilliseconds) * time.Millisecond
+	}
+	if decoded.KeepaliveTimeoutMilliseconds != nil && *decoded.KeepaliveTimeoutMilliseconds > 0 {
+		cfg.KeepaliveTimeout = time.Duration(*decoded.KeepaliveTimeoutMilliseconds) * time.Millisecond
+	}
+	if decoded.ReconnectGraceMilliseconds != nil && *decoded.ReconnectGraceMilliseconds > 0 {
+		cfg.ReconnectGrace = time.Duration(*decoded.ReconnectGraceMilliseconds) * time.Millisecond
+	}
+	if decoded.NonceTTLMilliseconds != nil && *decoded.NonceTTLMilliseconds > 0 {
+		cfg.NonceTTL = time.Duration(*decoded.NonceTTLMilliseconds) * time.Millisecond
+	}
 	if decoded.Network != nil {
 		network := *decoded.Network
 		cfg.Network = &network

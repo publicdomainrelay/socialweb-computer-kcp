@@ -166,6 +166,7 @@ type OAuthConfig struct {
 	PARTTL                  time.Duration
 	AllowMissingDPoPNonce   bool
 	DisableLocalhostClients bool
+	Scopes                  []string
 }
 
 type Config struct {

@@ -137,6 +137,9 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 			cfg.InsecureHTTP = true
 		}
 	}
+	if decoded.CrawlIntervalSeconds != nil && *decoded.CrawlIntervalSeconds > 0 {
+		cfg.CrawlInterval = time.Duration(*decoded.CrawlIntervalSeconds) * time.Second
+	}
 	if cfg.CrawlInterval <= 0 && len(cfg.PdsRefs) > 0 {
 		cfg.CrawlInterval = DefaultCrawlInterval
 	}

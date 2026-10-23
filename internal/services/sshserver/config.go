@@ -240,6 +240,27 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 	if decoded.Storage != nil && decoded.Storage.DataDir != "" {
 		cfg.StateDir = decoded.Storage.DataDir
 	}
+	if decoded.MaxConnections > 0 {
+		cfg.MaxConnections = int(decoded.MaxConnections)
+	}
+	if decoded.MaxSessions > 0 {
+		cfg.MaxSessions = int(decoded.MaxSessions)
+	}
+	if decoded.SessionsPerAccount > 0 {
+		cfg.SessionsPerAccount = int(decoded.SessionsPerAccount)
+	}
+	if decoded.MaxAuthAttempts > 0 {
+		cfg.MaxAuthAttempts = int(decoded.MaxAuthAttempts)
+	}
+	if decoded.AuthTimeoutSeconds != nil && *decoded.AuthTimeoutSeconds > 0 {
+		cfg.AuthTimeout = time.Duration(*decoded.AuthTimeoutSeconds) * time.Second
+	}
+	if decoded.SessionMaxSeconds != nil && *decoded.SessionMaxSeconds > 0 {
+		cfg.SessionMax = time.Duration(*decoded.SessionMaxSeconds) * time.Second
+	}
+	if decoded.CacheEntries > 0 {
+		cfg.CacheEntries = int(decoded.CacheEntries)
+	}
 	if decoded.OwnerSessionsFile != "" {
 		sessions, did, handle, err := sshtransport.LoadOwnerSessions(decoded.OwnerSessionsFile)
 		if err != nil {

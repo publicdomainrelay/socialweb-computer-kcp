@@ -358,15 +358,16 @@ func (s *Service) prepare(ctx context.Context) error {
 	}
 	s.authorizer = s.newAuthorizer()
 	s.loop = &marketLoop{
-		records:         s.records,
-		signer:          s.attestation,
-		did:             s.did,
-		endpointURL:     s.offeringEndpoint(),
-		relays:          append([]string(nil), s.cfg.Network.RelayUrls...),
-		offeringRefresh: DefaultOfferingRefresh,
-		heartbeat:       market.HeartbeatInterval,
-		log:             s.log,
-		now:             s.cfg.Now,
+		records:                 s.records,
+		signer:                  s.attestation,
+		did:                     s.did,
+		endpointURL:             s.offeringEndpoint(),
+		relays:                  append([]string(nil), s.cfg.Network.RelayUrls...),
+		offeringRefresh:         s.cfg.OfferingRefresh,
+		offeringRefreshDisabled: s.cfg.OfferingRefreshDisabled,
+		heartbeat:               s.cfg.Heartbeat,
+		log:                     s.log,
+		now:                     s.cfg.Now,
 	}
 	s.log.Info("the bidder serves the market", "handler", s.listeningURL(), "did", s.did, "guest", s.guestURL,
 		"offering", s.offeringEndpoint(), "serviceAuthHost", s.cfg.ServiceAuth.Hostname, "inboundXRPC", s.cfg.inboundXRPC())

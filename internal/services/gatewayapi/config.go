@@ -608,6 +608,9 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		}
 		cfg.NodeMarket = nodeMarket
 	}
+	if decoded.NodePollIntervalSeconds != nil && *decoded.NodePollIntervalSeconds > 0 {
+		cfg.NodeMarket.PollInterval = time.Duration(*decoded.NodePollIntervalSeconds) * time.Second
+	}
 	if decoded.ClusterProvider != nil {
 		clusterProvider := *decoded.ClusterProvider
 		if err := checkClusterProvider(clusterProvider); err != nil {

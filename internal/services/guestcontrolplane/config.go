@@ -162,6 +162,25 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		}
 		cfg.ServePort = int(guestSpec.Serve.Port)
 	}
+	if guestSpec.GuestLoginMount != "" {
+		cfg.GuestLoginMount = guestSpec.GuestLoginMount
+	}
+	if guestSpec.Role != "" {
+		cfg.Role = guestSpec.Role
+	}
+	if guestSpec.GrantSyncSeconds != nil && *guestSpec.GrantSyncSeconds > 0 {
+		cfg.GrantSync = time.Duration(*guestSpec.GrantSyncSeconds) * time.Second
+	}
+	if guestSpec.IssuerRetrySeconds != nil && *guestSpec.IssuerRetrySeconds > 0 {
+		cfg.IssuerRetry = time.Duration(*guestSpec.IssuerRetrySeconds) * time.Second
+	}
+	if guestSpec.HostKeyAttempts != nil && *guestSpec.HostKeyAttempts > 0 {
+		cfg.HostKeyAttempts = int(*guestSpec.HostKeyAttempts)
+	}
+	if guestSpec.RelayEnabled != nil && *guestSpec.RelayEnabled {
+		cfg.Relay = &RelayConfig{IngressProxyHost: strings.TrimSpace(cfg.Network.IngressProxyHost),
+			TLS: strings.HasPrefix(strings.ToLower(strings.TrimSpace(cfg.Network.GuestTlsUrl)), "https://")}
+	}
 	cfg.VaultServer = guestSpec.VaultRef.VaultServer(cfg.VaultServer)
 	if guestSpec.Storage != nil && guestSpec.Storage.DataDir != "" {
 		cfg.StateDir = guestSpec.Storage.DataDir

@@ -94,6 +94,7 @@ type OAuthOptions struct {
 	PARTTL                  time.Duration
 	AllowMissingDPoPNonce   bool
 	DisableLocalhostClients bool
+	Scopes                  []string
 }
 
 func Factory(ctx context.Context, deps component.Deps, spec component.ComponentSpec) (component.Service, error) {
@@ -192,7 +193,17 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 			AccessTokenTTL:          time.Duration(decoded.OAuth.AccessTokenTTLSeconds) * time.Second,
 			RefreshTokenTTL:         time.Duration(decoded.OAuth.RefreshTokenTTLSeconds) * time.Second,
 			DisableLocalhostClients: decoded.OAuth.DisableLocalhostClients || !decoded.OAuth.AllowLocalhostClients,
+			Scopes:                  append([]string(nil), decoded.OAuth.Scopes...),
 		}
+	}
+	if decoded.MaxBlobSize != nil {
+		cfg.MaxBlobSize = *decoded.MaxBlobSize
+	}
+	if decoded.MaxRequestBytes != nil {
+		cfg.MaxRequestBytes = *decoded.MaxRequestBytes
+	}
+	if decoded.ContactEmail != "" {
+		cfg.ContactEmail = strings.TrimSpace(decoded.ContactEmail)
 	}
 	cfg.StateDir = strings.TrimSpace(cfg.StateDir)
 	return cfg, nil

@@ -41,6 +41,8 @@ type marketLoop struct {
 
 	offeringRefresh time.Duration
 
+	offeringRefreshDisabled bool
+
 	heartbeat time.Duration
 
 	log *slog.Logger
@@ -110,8 +112,13 @@ func (l *marketLoop) run(ctx context.Context) {
 	}
 	heartbeatTicker := time.NewTicker(heartbeat)
 	defer heartbeatTicker.Stop()
-	refreshTicker := time.NewTicker(refresh)
-	defer refreshTicker.Stop()
+	var refreshTicker *time.Ticker
+	var refreshCh <-chan time.Time
+	if !l.offeringRefreshDisabled {
+		refreshTicker = time.NewTicker(refresh)
+		defer refreshTicker.Stop()
+		refreshCh = refreshTicker.C
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -123,7 +130,7 @@ func (l *marketLoop) run(ctx context.Context) {
 				}
 				l.setError(err)
 			}
-		case <-refreshTicker.C:
+		case <-refreshCh:
 			if err := l.ensureOffering(ctx); err != nil {
 				if ctx.Err() == nil {
 					l.logf().Warn("refreshing the market offering failed", "err", err)

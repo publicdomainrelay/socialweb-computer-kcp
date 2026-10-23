@@ -367,7 +367,7 @@ func (s *Service) setup(ctx context.Context) error {
 		}
 	}
 	if s.cfg.Directory == nil {
-		s.cfg.Directory = directoryFor(s.cfg.Network.PlcDirectoryUrl)
+		s.cfg.Directory = directoryFor(s.cfg.Network.PlcDirectoryUrl, s.cfg.DirectoryKeys, s.cfg.DirectoryTTL)
 	}
 	s.directory = s.cfg.Directory
 	if s.cfg.IdentityMode == IdentityModeOAuth {

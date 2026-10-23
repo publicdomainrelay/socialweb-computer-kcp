@@ -167,6 +167,10 @@ type Config struct {
 
 	Directory identity.Directory
 
+	DirectoryTTL time.Duration
+
+	DirectoryKeys int
+
 	HTTPClient *http.Client
 
 	ServeHost string
@@ -380,6 +384,45 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 	}
 	if decoded.AcceptCopies > 1 {
 		cfg.AcceptCopies = int(decoded.AcceptCopies)
+	}
+	if decoded.MaxConcurrent > 0 {
+		cfg.MaxConcurrent = int(decoded.MaxConcurrent)
+	}
+	if decoded.PerAccount > 0 {
+		cfg.PerAccount = int(decoded.PerAccount)
+	}
+	if decoded.ContractPollMilliseconds != nil && *decoded.ContractPollMilliseconds > 0 {
+		cfg.ContractPoll = time.Duration(*decoded.ContractPollMilliseconds) * time.Millisecond
+	}
+	if decoded.BidWindowSeconds != nil && *decoded.BidWindowSeconds > 0 {
+		cfg.BidWindow = time.Duration(*decoded.BidWindowSeconds) * time.Second
+	}
+	if decoded.ReceiptTimeoutSeconds != nil && *decoded.ReceiptTimeoutSeconds > 0 {
+		cfg.ReceiptTimeout = time.Duration(*decoded.ReceiptTimeoutSeconds) * time.Second
+	}
+	if decoded.ReceiptPollMilliseconds != nil && *decoded.ReceiptPollMilliseconds > 0 {
+		cfg.ReceiptPoll = time.Duration(*decoded.ReceiptPollMilliseconds) * time.Millisecond
+	}
+	if decoded.SessionCapSeconds != nil && *decoded.SessionCapSeconds > 0 {
+		cfg.SessionCap = time.Duration(*decoded.SessionCapSeconds) * time.Second
+	}
+	if decoded.SessionIdleSeconds != nil && *decoded.SessionIdleSeconds > 0 {
+		cfg.SessionIdle = time.Duration(*decoded.SessionIdleSeconds) * time.Second
+	}
+	if decoded.DirectoryTTLSeconds != nil && *decoded.DirectoryTTLSeconds > 0 {
+		cfg.DirectoryTTL = time.Duration(*decoded.DirectoryTTLSeconds) * time.Second
+	}
+	if decoded.DirectoryKeys != nil && *decoded.DirectoryKeys > 0 {
+		cfg.DirectoryKeys = int(*decoded.DirectoryKeys)
+	}
+	if decoded.PolicyPollMilliseconds != nil && *decoded.PolicyPollMilliseconds > 0 {
+		cfg.PolicyPoll = time.Duration(*decoded.PolicyPollMilliseconds) * time.Millisecond
+	}
+	if decoded.PolicyTimeoutSeconds != nil && *decoded.PolicyTimeoutSeconds > 0 {
+		cfg.PolicyTimeout = time.Duration(*decoded.PolicyTimeoutSeconds) * time.Second
+	}
+	if len(decoded.OAuthScopes) > 0 {
+		cfg.OAuthScopes = append([]string(nil), decoded.OAuthScopes...)
 	}
 	if decoded.GuestSSHKeysFile != "" {
 		keys, err := loadGuestSSHKeys(decoded.GuestSSHKeysFile)
@@ -603,6 +646,12 @@ func (c *Config) defaults() {
 	if c.SessionIdle <= 0 {
 		c.SessionIdle = DefaultSessionIdle
 	}
+	if c.DirectoryTTL <= 0 {
+		c.DirectoryTTL = DefaultDirectoryTTL
+	}
+	if c.DirectoryKeys <= 0 {
+		c.DirectoryKeys = DefaultDirectoryKeys
+	}
 	if c.ShutdownTimeout <= 0 {
 		c.ShutdownTimeout = DefaultShutdownTimeout
 	}
@@ -776,7 +825,7 @@ func Register(runtime *component.Runtime) error {
 	return runtime.Register(Kind, Factory)
 }
 
-func directoryFor(raw string) identity.Directory {
+func directoryFor(raw string, keys int, ttl time.Duration) identity.Directory {
 	base := identity.DefaultDirectory()
 	raw = strings.TrimRight(raw, "/")
 	if raw == "" || raw == strings.TrimRight(identity.DefaultPLCURL, "/") {
@@ -801,7 +850,7 @@ func directoryFor(raw string) identity.Directory {
 			UserAgent:              directory.UserAgent,
 		}
 	}
-	return identity.NewCacheDirectory(inner, DefaultDirectoryKeys, DefaultDirectoryTTL, DefaultDirectoryTTL, DefaultDirectoryTTL)
+	return identity.NewCacheDirectory(inner, keys, ttl, ttl, ttl)
 }
 
 func trustedHosts(network v1alpha1.MarketNetworkValue) []string {
