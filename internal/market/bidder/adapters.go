@@ -825,6 +825,9 @@ func (b *Bidder) applyInbox(ctx context.Context, request participant.OutboxReque
 		}
 		b.log.Info("market inbox enqueued a bid", "rfp", payload.URI, "bid", bid.Name, "phase", string(bid.Status.Phase))
 	case market.AcceptNSID:
+		if accept, err := market.ParseAccept(payload.Record); err == nil && market.ATURIAuthority(accept.Bid.URI) != b.cfg.DID {
+			break
+		}
 		provision := provisionPayload{RequesterDID: payload.DID, Accept: provisionRef{URI: payload.URI, CID: payload.CID}}
 		if _, err := b.ensureProvisionSync(ctx, provision); err != nil {
 			return participant.Observation{}, fmt.Errorf("bidder: recording the provision intent: %w", err)
