@@ -15,13 +15,14 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/childproc"
 )
 
 const (
 	MaxSocketPath  = 107
 	MaxTicketBytes = 4096
 	TicketTimeout  = 10 * time.Second
-	stderrTail     = 2048
 )
 
 var ticketPattern = regexp.MustCompile(`^[a-z0-9]+$`)
@@ -135,7 +136,7 @@ func serve(ctx context.Context, c Config, log *slog.Logger, conn net.Conn) {
 		log.Warn("dumbpipe stdout", "err", err.Error())
 		return
 	}
-	var tail tailBuffer
+	var tail childproc.Tail
 	cmd.Stderr = &tail
 	if err := cmd.Start(); err != nil {
 		log.Warn("starting dumbpipe connect", "err", err.Error())
@@ -155,25 +156,4 @@ func serve(ctx context.Context, c Config, log *slog.Logger, conn net.Conn) {
 		"stderr", strings.TrimSpace(tail.String()))
 	conn.Close()
 	copyIn.Wait()
-}
-
-type tailBuffer struct {
-	mu  sync.Mutex
-	buf []byte
-}
-
-func (t *tailBuffer) Write(p []byte) (int, error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.buf = append(t.buf, p...)
-	if len(t.buf) > stderrTail {
-		t.buf = t.buf[len(t.buf)-stderrTail:]
-	}
-	return len(p), nil
-}
-
-func (t *tailBuffer) String() string {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return string(t.buf)
 }

@@ -22,6 +22,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/assets"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/exposure"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/childproc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/ingressproxy/loopback"
 )
@@ -484,7 +485,7 @@ type child struct {
 
 	url string
 
-	tail *tailBuffer
+	tail *childproc.Tail
 
 	started time.Time
 
@@ -492,7 +493,7 @@ type child struct {
 }
 
 func (c *child) stop() {
-	killChild(c.cmd)
+	childproc.Kill(c.cmd)
 	c.output.Wait()
 }
 
@@ -520,7 +521,7 @@ func (r *registration) startChild(ctx context.Context) (*child, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("ingressproxy opentunnel: starting %s: %w", args[0], err)
 	}
-	tail := &tailBuffer{}
+	tail := &childproc.Tail{}
 	found := make(chan string, 1)
 	var pumps sync.WaitGroup
 	pumps.Go(func() { pump(stdout, tail, found) })
@@ -531,7 +532,7 @@ func (r *registration) startChild(ctx context.Context) (*child, error) {
 		close(found)
 	})
 	stop := func() {
-		killChild(cmd)
+		childproc.Kill(cmd)
 		output.Wait()
 	}
 	timer := time.NewTimer(URLTimeout)
@@ -567,7 +568,7 @@ func (r *registration) supervise(ctx context.Context, first *child) {
 					return
 				}
 				r.log.Warn("ingressproxy_opentunnel_restart_failed", "err", err.Error())
-				backoff = nextBackoff(backoff)
+				backoff = childproc.NextBackoff(backoff, MinRestartBackoff, MaxRestartBackoff)
 				if !clock.Sleep(ctx, backoff) {
 					return
 				}
@@ -605,11 +606,11 @@ func (r *registration) supervise(ctx context.Context, first *child) {
 		if !clock.Sleep(ctx, backoff) {
 			return
 		}
-		backoff = nextBackoff(backoff)
+		backoff = childproc.NextBackoff(backoff, MinRestartBackoff, MaxRestartBackoff)
 	}
 }
 
-func pump(reader io.Reader, tail *tailBuffer, found chan<- string) {
+func pump(reader io.Reader, tail *childproc.Tail, found chan<- string) {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 4096), 64*1024)
 	for scanner.Scan() {
@@ -637,45 +638,4 @@ func urlIn(line string) (string, bool) {
 		}
 	}
 	return "", false
-}
-
-func killChild(cmd *exec.Cmd) {
-	if cmd == nil || cmd.Process == nil {
-		return
-	}
-	_ = cmd.Process.Kill()
-	_ = cmd.Wait()
-}
-
-func nextBackoff(current time.Duration) time.Duration {
-	if current <= 0 {
-		return MinRestartBackoff
-	}
-	next := current * 2
-	if next > MaxRestartBackoff {
-		return MaxRestartBackoff
-	}
-	return next
-}
-
-type tailBuffer struct {
-	mu sync.Mutex
-
-	buf []byte
-}
-
-func (t *tailBuffer) Write(p []byte) (int, error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.buf = append(t.buf, p...)
-	if len(t.buf) > 2048 {
-		t.buf = t.buf[len(t.buf)-2048:]
-	}
-	return len(p), nil
-}
-
-func (t *tailBuffer) String() string {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return string(t.buf)
 }
