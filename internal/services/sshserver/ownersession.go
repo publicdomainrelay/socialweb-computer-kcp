@@ -2,155 +2,64 @@ package sshserver
 
 import (
 	"context"
-	"crypto/subtle"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
-	"strings"
-	"sync"
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/syntax"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayhttp"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atprotorepo/remote"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/lease"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/sshtransport"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/ssh/ownersession"
 )
 
-const ownerSessionRequestTimeout = 30 * time.Second
-
-type ownerSessionAuth struct {
-	sessions map[string]OwnerSession
+func (s *Service) openOwner(did string, session ownersession.Session) (ownersession.Repo, error) {
+	owner, err := syntax.ParseDID(did)
+	if err != nil {
+		return nil, fmt.Errorf("sshserver: the owner DID: %w", err)
+	}
+	client := s.httpClient(requestTimeout)
+	tokens := &ownerTokens{did: owner, session: session, client: client}
+	tokens.access = lease.New(tokens.login)
+	pds, err := pdsclient.NewRemote(pdsclient.RemoteConfig{
+		BaseURL:    session.Service,
+		DID:        owner,
+		HTTPClient: client,
+		Tokens:     tokens,
+		Timeout:    requestTimeout,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("sshserver: the owner PDS %s: %w", session.Service, err)
+	}
+	return remote.Wrap(pds, owner), nil
 }
 
-func (a ownerSessionAuth) Authenticate(r *http.Request) (*gatewayhttp.WebCaller, error) {
-	if r == nil {
-		return nil, nil
-	}
-	identifier, password, ok := r.BasicAuth()
-	if !ok {
-		return nil, nil
-	}
-	for did, session := range a.sessions {
-		sameIdentifier := subtle.ConstantTimeCompare([]byte(session.Identifier), []byte(identifier)) == 1
-		samePassword := subtle.ConstantTimeCompare([]byte(session.Password), []byte(password)) == 1
-		if !sameIdentifier || !samePassword {
-			continue
-		}
-		return &gatewayhttp.WebCaller{WebUser: gatewayhttp.WebUser{DID: did, Handle: session.Identifier, PDS: session.Service}}, nil
-	}
-	return nil, nil
-}
+type ownerTokens struct {
+	did syntax.DID
 
-type multiAuth []sshtransport.Authenticator
-
-func (m multiAuth) Authenticate(r *http.Request) (*gatewayhttp.WebCaller, error) {
-	var last error
-	for _, auth := range m {
-		if auth == nil {
-			continue
-		}
-		caller, err := auth.Authenticate(r)
-		if caller != nil {
-			return caller, nil
-		}
-		if err != nil {
-			last = err
-		}
-	}
-	return nil, last
-}
-
-type ownerSessionAgents struct {
-	sessions map[string]OwnerSession
-
-	client *http.Client
-
-	log *slog.Logger
-
-	mu sync.Mutex
-
-	tokens map[string]*ownerSessionTokens
-}
-
-func (a *ownerSessionAgents) AgentFor(caller *gatewayhttp.WebCaller) gatewayhttp.WebAccountAgent {
-	if caller == nil {
-		return nil
-	}
-	session, ok := a.sessions[caller.DID]
-	if !ok {
-		return nil
-	}
-	return &ownerSessionAgent{did: caller.DID, tokens: a.tokensFor(caller.DID, session), client: a.client, log: a.log}
-}
-
-func (a *ownerSessionAgents) tokensFor(did string, session OwnerSession) *ownerSessionTokens {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if tokens := a.tokens[did]; tokens != nil {
-		return tokens
-	}
-	if a.tokens == nil {
-		a.tokens = map[string]*ownerSessionTokens{}
-	}
-	tokens := newOwnerSessionTokens(did, session, a.client)
-	a.tokens[did] = tokens
-	return tokens
-}
-
-type combinedAgents []sshtransport.AgentProvider
-
-func (c combinedAgents) AgentFor(caller *gatewayhttp.WebCaller) gatewayhttp.WebAccountAgent {
-	for _, provider := range c {
-		if provider == nil {
-			continue
-		}
-		if agent := provider.AgentFor(caller); agent != nil {
-			return agent
-		}
-	}
-	return unavailableAgent{}
-}
-
-type ownerSessionTokens struct {
-	did string
-
-	session OwnerSession
+	session ownersession.Session
 
 	client *http.Client
 
 	access *lease.Source[string]
 }
 
-func newOwnerSessionTokens(did string, session OwnerSession, client *http.Client) *ownerSessionTokens {
-	t := &ownerSessionTokens{did: did, session: session, client: client}
-	t.access = lease.New(t.login)
-	return t
-}
-
-func (t *ownerSessionTokens) AccessToken(ctx context.Context) (string, error) {
+func (t *ownerTokens) AccessToken(ctx context.Context) (string, error) {
 	return t.access.Get(ctx)
 }
 
-func (t *ownerSessionTokens) RefreshAccessToken(ctx context.Context) (string, error) {
+func (t *ownerTokens) RefreshAccessToken(ctx context.Context) (string, error) {
 	t.access.Invalidate()
 	return t.access.Get(ctx)
 }
 
-func (t *ownerSessionTokens) login(ctx context.Context) (string, time.Time, error) {
-	did, err := syntax.ParseDID(t.did)
-	if err != nil {
-		return "", time.Time{}, fmt.Errorf("sshserver: the owner DID: %w", err)
-	}
+func (t *ownerTokens) login(ctx context.Context) (string, time.Time, error) {
 	pds, err := pdsclient.NewRemote(pdsclient.RemoteConfig{
 		BaseURL:    t.session.Service,
-		DID:        did,
+		DID:        t.did,
 		HTTPClient: t.client,
-		Timeout:    ownerSessionRequestTimeout,
+		Timeout:    requestTimeout,
 	})
 	if err != nil {
 		return "", time.Time{}, fmt.Errorf("sshserver: the owner PDS %s: %w", t.session.Service, err)
@@ -164,153 +73,4 @@ func (t *ownerSessionTokens) login(ctx context.Context) (string, time.Time, erro
 		return session.AccessJWT, time.Now(), nil
 	}
 	return session.AccessJWT, expires.Add(-pdsclient.TokenExpirySkew), nil
-}
-
-type ownerSessionAgent struct {
-	did string
-
-	tokens *ownerSessionTokens
-
-	client *http.Client
-
-	log *slog.Logger
-
-	mu sync.Mutex
-
-	pds *pdsclient.RemotePDS
-}
-
-func (a *ownerSessionAgent) remote(ctx context.Context) (*pdsclient.RemotePDS, error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.pds != nil {
-		return a.pds, nil
-	}
-	did, err := syntax.ParseDID(a.did)
-	if err != nil {
-		return nil, fmt.Errorf("sshserver: the owner DID: %w", err)
-	}
-	pds, err := pdsclient.NewRemote(pdsclient.RemoteConfig{
-		BaseURL:    a.tokens.session.Service,
-		DID:        did,
-		HTTPClient: a.client,
-		Tokens:     a.tokens,
-		Timeout:    ownerSessionRequestTimeout,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("sshserver: the owner PDS %s: %w", a.tokens.session.Service, err)
-	}
-	a.pds = pds
-	return pds, nil
-}
-
-func (a *ownerSessionAgent) GetServiceAuth(ctx context.Context, aud, lxm string) (string, error) {
-	return "", errors.New("sshserver: the owner session agent does not mint service auth tokens")
-}
-
-func (a *ownerSessionAgent) ListRecords(ctx context.Context, did, collection string, limit int) ([]gatewayhttp.Record, error) {
-	pds, err := a.remote(ctx)
-	if err != nil {
-		return nil, err
-	}
-	repo, err := syntax.ParseDID(did)
-	if err != nil {
-		return nil, err
-	}
-	nsid, err := syntax.ParseNSID(collection)
-	if err != nil {
-		return nil, err
-	}
-	limit = opt.Positive(limit, 50)
-	page, err := pds.ListRecords(ctx, pdsclient.ListRecordsRequest{Repo: repo, Collection: nsid, Limit: limit})
-	if err != nil {
-		return nil, err
-	}
-	out := make([]gatewayhttp.Record, 0, len(page.Records))
-	for _, record := range page.Records {
-		var value map[string]any
-		if err := json.Unmarshal(record.Value, &value); err != nil {
-			continue
-		}
-		out = append(out, gatewayhttp.Record{URI: record.URI.String(), CID: record.CID.String(), Value: value})
-	}
-	return out, nil
-}
-
-func (a *ownerSessionAgent) CreateRecord(ctx context.Context, did, collection, rkey string, record map[string]any) (gatewayhttp.RecordRef, error) {
-	pds, err := a.remote(ctx)
-	if err != nil {
-		return gatewayhttp.RecordRef{}, err
-	}
-	repo, err := syntax.ParseDID(did)
-	if err != nil {
-		return gatewayhttp.RecordRef{}, err
-	}
-	nsid, err := syntax.ParseNSID(collection)
-	if err != nil {
-		return gatewayhttp.RecordRef{}, err
-	}
-	raw, err := json.Marshal(record)
-	if err != nil {
-		return gatewayhttp.RecordRef{}, err
-	}
-	result, err := pds.CreateRecord(ctx, pdsclient.RepoPath{Repo: repo, Collection: nsid, Rkey: syntax.RecordKey(rkey)}, raw, pdsclient.WriteOptions{})
-	if err != nil {
-		return gatewayhttp.RecordRef{}, err
-	}
-	return gatewayhttp.RecordRef{URI: result.URI.String(), CID: result.CID.String()}, nil
-}
-
-func (a *ownerSessionAgent) ApplyWrites(ctx context.Context, did string, writes []gatewayhttp.Write) error {
-	pds, err := a.remote(ctx)
-	if err != nil {
-		return err
-	}
-	repo, err := syntax.ParseDID(did)
-	if err != nil {
-		return err
-	}
-	for _, write := range writes {
-		nsid, err := syntax.ParseNSID(write.Collection)
-		if err != nil {
-			return err
-		}
-		path := pdsclient.RepoPath{Repo: repo, Collection: nsid, Rkey: syntax.RecordKey(write.Rkey)}
-		switch write.Action {
-		case "delete":
-			if err := pds.DeleteRecord(ctx, path, pdsclient.WriteOptions{}); err != nil {
-				return err
-			}
-		case "create", "update":
-			raw, err := json.Marshal(write.Record)
-			if err != nil {
-				return err
-			}
-			if write.Action == "create" {
-				_, err = pds.CreateRecord(ctx, path, raw, pdsclient.WriteOptions{})
-			} else {
-				_, err = pds.PutRecord(ctx, path, raw, pdsclient.WriteOptions{})
-			}
-			if err != nil {
-				return err
-			}
-		default:
-			return fmt.Errorf("sshserver: unknown write action %q", write.Action)
-		}
-	}
-	return nil
-}
-
-func ownerSessionsFrom(sessions map[string]OwnerSession) map[string]OwnerSession {
-	if len(sessions) == 0 {
-		return nil
-	}
-	out := make(map[string]OwnerSession, len(sessions))
-	for did, session := range sessions {
-		if strings.TrimSpace(session.Service) == "" {
-			continue
-		}
-		out[did] = session
-	}
-	return out
 }

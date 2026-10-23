@@ -10,13 +10,16 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/bluesky-social/indigo/atproto/identity"
 
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	contractnodeclaim "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/nodeclaim"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gateway"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/gateway/custody"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/gateway/nodeclaim"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayhttp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
@@ -44,8 +47,6 @@ type Service struct {
 
 	contractWorkspace string
 
-	pollInterval time.Duration
-
 	server *gateway.Server
 
 	mu sync.Mutex
@@ -54,7 +55,7 @@ type Service struct {
 
 	surface *xrpcserver.Server
 
-	mapper *gatewayhttp.NodeClaimMapper
+	nodeClaims *contractnodeclaim.Binding
 
 	stopCh chan struct{}
 
@@ -79,29 +80,27 @@ func (s *Service) Start(ctx context.Context) error {
 	if vault == nil {
 		return errors.New("gatewayapi: no sign-in backend")
 	}
-	custody, err := newCustodySignIn(custodySignInOptions{
+	signIn, err := custody.New(custody.Config{
 		Endpoint:       vault.endpoint,
 		Role:           DefaultAtprotoRole,
 		RenewBelow:     DefaultRenewBelow,
 		RenewIncrement: DefaultRenewIncrement,
 		Network:        s.spec.Network,
-		TLSConfig:      s.deps.TLS,
-		Log:            log,
-	})
+	}, custody.Deps{TLS: s.deps.TLS, Log: log})
 	if err != nil {
 		return err
 	}
-	defer custody.Close()
+	defer signIn.Close()
 
 	pinned, err := s.loadDownloads()
 	if err != nil {
 		return err
 	}
-	handler, oauth, surface, err := s.buildHandler(custody, pinned)
+	handler, oauth, surface, err := s.buildHandler(signIn, pinned)
 	if err != nil {
 		return err
 	}
-	mapper, err := s.buildMapper(vault, pinned)
+	nodeClaims, err := s.buildNodeClaims(vault, pinned)
 	if err != nil {
 		if surface != nil {
 			surface.Close()
@@ -136,14 +135,14 @@ func (s *Service) Start(ctx context.Context) error {
 	}
 	s.oauth = oauth
 	s.surface = surface
-	s.mapper = mapper
+	s.nodeClaims = nodeClaims
 	s.stopCh = stopCh
 	s.stopOnce = &sync.Once{}
 	s.ready = true
 	s.mu.Unlock()
 
-	if mapper != nil {
-		mapper.Start(ctx)
+	if nodeClaims != nil {
+		s.deps.NodeClaims.Bind(*nodeClaims)
 	}
 	log.Info("gatewayapi_registered", "handler", kcp.HandlerURL(s.workspace, Kind, s.deps.Self.Name), "network", networkName(s.spec.Network))
 
@@ -272,24 +271,20 @@ func (s *Service) loadDownloads() (*gatewayhttp.PinnedDownloads, error) {
 	return pinned, nil
 }
 
-func (s *Service) buildMapper(vault *vaultRuntime, pinned *gatewayhttp.PinnedDownloads) (*gatewayhttp.NodeClaimMapper, error) {
+func (s *Service) buildNodeClaims(vault *vaultRuntime, pinned *gatewayhttp.PinnedDownloads) (*contractnodeclaim.Binding, error) {
 	nodeMarket := s.spec.NodeMarket
 	if nodeMarket == nil {
 		return nil, nil
 	}
 	log := s.log
-	if vault == nil || vault.client == nil {
-		return nil, errors.New("gatewayapi: the node market needs a resolved vault client")
+	if s.deps.NodeClaims == nil {
+		return nil, errors.New("gatewayapi: the node market needs the NodeClaim controller")
 	}
-	if !vault.authed {
-		return nil, errors.New("gatewayapi: the node market needs a vault token or a client cert login")
+	if vault == nil || vault.mount == "" {
+		return nil, errors.New("gatewayapi: the node market needs a vault mount")
 	}
 	homes := append([]string(nil), s.homeWorkspaces...)
-	store, err := kcpStoreFor(s.deps.KCP, homes[0])
-	if err != nil {
-		return nil, fmt.Errorf("gatewayapi: the node market store: %w", err)
-	}
-	indexWorkspace, indexNamespace := s.workspace+":app", "default"
+	indexWorkspace, indexNamespace := s.workspace+":"+contractnodeclaim.AgentWorkspace, contractnodeclaim.AgentNamespace
 	if ref, err := kcpclient.ParseServiceAccountRef(os.Getenv("SOCIALWEB_GATEWAY_NODECLAIM_AGENT")); err == nil && ref != nil {
 		indexWorkspace, indexNamespace = ref.Workspace, ref.Namespace
 	} else if os.Getenv("SOCIALWEB_GATEWAY_NODECLAIM_AGENT") != "" {
@@ -297,104 +292,90 @@ func (s *Service) buildMapper(vault *vaultRuntime, pinned *gatewayhttp.PinnedDow
 	}
 	log.Info("gatewayapi node market", "homes", homes, "indexWorkspace", indexWorkspace, "indexNamespace", indexNamespace,
 		"contractWorkspace", s.contractWorkspace)
-	mount := vault.mount
-	if mount == "" {
-		return nil, errors.New("gatewayapi: the node market needs a vault mount")
-	}
-	var policy *gatewayhttp.NodePolicy
+	cfg := nodeclaim.Config{VaultMount: vault.mount, VMReadyTimeoutSec: DefaultVMReadySec,
+		ExtraBidderDIDs: append([]string(nil), nodeMarket.ExtraBidderDIDs...)}
 	if nodeMarket.NodePolicy != "" {
 		args := map[string]any{}
 		maps.Copy(args, s.policyArgs)
-		policy = &gatewayhttp.NodePolicy{Name: nodeMarket.NodePolicy, Args: args}
+		cfg.Policy = &nodeclaim.Policy{Name: nodeMarket.NodePolicy, Args: args}
 	}
-	var userData string
 	if nodeMarket.UserDataBaseFile != "" {
 		raw, err := os.ReadFile(nodeMarket.UserDataBaseFile)
 		if err != nil {
 			return nil, fmt.Errorf("gatewayapi: reading the node user data base: %w", err)
 		}
-		userData = string(raw)
+		cfg.UserDataBase = string(raw)
 	}
-	caFileOf := gatewayhttp.DefaultOpenBaoCAFile
+	deps := nodeclaim.Deps{CAFileOf: nodeclaim.DefaultOpenBaoCAFile, Log: log}
 	if dir := s.clusterCADir(); dir != "" {
-		caFileOf = gatewayhttp.PublishedOpenBaoCAFile(dir)
+		deps.CAFileOf = nodeclaim.PublishedOpenBaoCAFile(dir)
 	}
 	var downloads []gatewayhttp.PinnedDownload
 	if pinned != nil {
 		downloads = pinned.List()
 	}
-	var mesh *gatewayhttp.MeshdPin
-	var meshBase func(context.Context) (string, bool)
-	var nodeAgent *gatewayhttp.MeshdPin
-	var nodeAgentBase func(context.Context) (string, bool)
+	meshPins, agentPins := gatewayhttp.MeshdPinsOf(downloads), gatewayhttp.NodeAgentPinsOf(downloads)
 	if s.spec.Network != nil {
-		meshPins := gatewayhttp.MeshdPinsOf(downloads)
-		agentPins := gatewayhttp.NodeAgentPinsOf(downloads)
 		if meshPins != nil {
-			mesh = &gatewayhttp.MeshdPin{Sha256: meshPins}
+			cfg.Meshd = &nodeclaim.Pin{Sha256: meshPins}
 		}
 		if agentPins != nil {
-			nodeAgent = &gatewayhttp.MeshdPin{Sha256: agentPins}
+			cfg.NodeAgent = &nodeclaim.Pin{Sha256: agentPins}
 		}
-		if mesh != nil || nodeAgent != nil {
-			var baseMu sync.Mutex
-			base := ""
-			baseOf := func(ctx context.Context) (string, bool) {
-				baseMu.Lock()
-				cached := base
-				baseMu.Unlock()
-				if cached != "" {
-					return cached, true
-				}
-				resolved := s.downloadBase()
-				if resolved == "" {
-					resolved = s.localDownloadBase(ctx)
-				}
-				if resolved == "" {
-					return "", false
-				}
-				baseMu.Lock()
-				base = resolved
-				baseMu.Unlock()
-				return resolved, true
-			}
-			meshBase = baseOf
-			nodeAgentBase = baseOf
+		if cfg.Meshd != nil || cfg.NodeAgent != nil {
+			baseOf := s.cachedDownloadBase()
+			deps.MeshdBase, deps.NodeAgentBase = baseOf, baseOf
 		}
-	} else {
-		mesh = gatewayhttp.MeshdPinOf(downloads, s.downloadBase())
-		nodeAgent = gatewayhttp.NodeAgentPinOf(downloads, s.downloadBase())
+	} else if base := s.downloadBase(); base != "" {
+		if meshPins != nil {
+			cfg.Meshd = &nodeclaim.Pin{DownloadBase: base, Sha256: meshPins}
+		}
+		if agentPins != nil {
+			cfg.NodeAgent = &nodeclaim.Pin{DownloadBase: base, Sha256: agentPins}
+		}
 	}
-	return gatewayhttp.NewNodeClaimMapper(gatewayhttp.NodeClaimMapperOptions{
-		Store:                 newClaimStore(store, newHomeIndex(store, indexWorkspace, indexNamespace, homes)),
-		Links:                 newClusterLinkReader(store),
-		Contracts:             newContractClient(store, s.contractWorkspace, 0),
-		Vault:                 gatewayhttp.OpenBaoVault{Client: vault.client},
-		VaultMount:            mount,
-		VMReadyTimeoutSec:     DefaultVMReadySec,
-		Policy:                policy,
-		ExtraBidderDIDs:       append([]string(nil), nodeMarket.ExtraBidderDIDs...),
-		UserDataBase:          userData,
-		PollInterval:          s.pollInterval,
-		OpenBaoCAFileOf:       caFileOf,
-		Meshd:                 mesh,
-		MeshdDownloadBase:     meshBase,
-		NodeAgentPin:          nodeAgent,
-		NodeAgentDownloadBase: nodeAgentBase,
-		Log:                   log,
-	})
+	mapper, err := nodeclaim.New(cfg, deps)
+	if err != nil {
+		return nil, fmt.Errorf("gatewayapi: %w", err)
+	}
+	return &contractnodeclaim.Binding{Owner: s.selfRef(), Mapper: mapper, Vault: s.vaultRef(), ContractWorkspace: s.contractWorkspace,
+		IndexWorkspace: indexWorkspace, IndexNamespace: indexNamespace, Homes: homes, Workspace: s.workspace}, nil
+}
+
+func (s *Service) cachedDownloadBase() func(context.Context) (string, bool) {
+	var mu sync.Mutex
+	base := ""
+	return func(ctx context.Context) (string, bool) {
+		mu.Lock()
+		cached := base
+		mu.Unlock()
+		if cached != "" {
+			return cached, true
+		}
+		resolved := s.downloadBase()
+		if resolved == "" {
+			resolved = s.localDownloadBase(ctx)
+		}
+		if resolved == "" {
+			return "", false
+		}
+		mu.Lock()
+		base = resolved
+		mu.Unlock()
+		return resolved, true
+	}
+}
+
+func (s *Service) selfRef() commonv1.ObjectRef {
+	return commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: Kind, Name: s.deps.Self.Name, Workspace: s.workspace}
 }
 
 func (s *Service) shutdown(ctx context.Context) {
 	s.mu.Lock()
-	mapper := s.mapper
+	nodeClaims := s.nodeClaims
 	s.mu.Unlock()
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), DefaultShutdownTimeout)
-	defer cancel()
-	if mapper != nil {
-		if err := mapper.Stop(ctx); err != nil {
-			s.log.Warn("gatewayapi_node_mapper_stop_failed", "err", err)
-		}
+	if nodeClaims != nil {
+		s.deps.NodeClaims.Unbind(nodeClaims.Owner)
 	}
 	s.mu.Lock()
 	surface := s.surface
@@ -409,7 +390,7 @@ func (s *Service) finish() {
 	s.ready = false
 	s.stopCh = nil
 	s.stopOnce = nil
-	s.mapper = nil
+	s.nodeClaims = nil
 	s.surface = nil
 	s.mu.Unlock()
 }

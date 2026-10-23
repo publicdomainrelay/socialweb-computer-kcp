@@ -11,7 +11,6 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	policyv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/policy/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/ttlctl"
@@ -23,8 +22,6 @@ const (
 	ExportBid = "computevms"
 
 	ExportComputeContract = "computecontracts"
-
-	ExportPolicyWorkflowRun = "policy"
 
 	ReportKindsLimit = 40
 )
@@ -71,19 +68,20 @@ func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
 	c := &Controller{log: log.With("component", "ttl-controller"), tracked: map[entry]struct{}{}, deleted: map[string]*deletion{},
 		changedAt: time.Now()}
 	err := errors.Join(
-		register(m, c, opts, "Bid", ExportBid, func(o *v1alpha1.Bid) []metav1.Condition { return o.Status.Conditions }),
-		register(m, c, opts, "ComputeContract", ExportComputeContract,
-			func(o *v1alpha1.ComputeContract) []metav1.Condition { return o.Status.Conditions }),
-		register(m, c, opts, "PolicyWorkflowRun", ExportPolicyWorkflowRun,
-			func(o *policyv1alpha1.PolicyWorkflowRun) []metav1.Condition { return o.Status.Conditions }))
+		register(m, c, opts, "Bid", ExportBid, func(o *v1alpha1.Bid) (*int32, []metav1.Condition) {
+			return o.Spec.TTLSecondsAfterFinished, o.Status.Conditions
+		}),
+		register(m, c, opts, "ComputeContract", ExportComputeContract, func(o *v1alpha1.ComputeContract) (*int32, []metav1.Condition) {
+			return o.Spec.TTLSecondsAfterFinished, o.Status.Conditions
+		}))
 	if err != nil {
 		return nil, err
 	}
 	return c, nil
 }
 
-func register[T ctlruntime.Object](m *ctlruntime.Manager, c *Controller, opts Options, kind, export string, conditions func(T) []metav1.Condition) error {
-	r := &expiry[T]{c: c, kind: kind, conditions: conditions}
+func register[T ctlruntime.Object](m *ctlruntime.Manager, c *Controller, opts Options, kind, export string, finish func(T) (*int32, []metav1.Condition)) error {
+	r := &expiry[T]{c: c, kind: kind, finish: finish}
 	options := []ctlruntime.Option{ctlruntime.Export(export),
 		ctlruntime.Watches(func(_ context.Context, src ctlruntime.Request, obj T) []ctlruntime.Request {
 			return []ctlruntime.Request{{Cluster: src.Cluster, Namespace: obj.GetNamespace(), Name: obj.GetName()}}
@@ -104,7 +102,7 @@ type expiry[T ctlruntime.Object] struct {
 
 	kind string
 
-	conditions func(T) []metav1.Condition
+	finish func(T) (*int32, []metav1.Condition)
 }
 
 func (r *expiry[T]) Reconcile(ctx context.Context, req ctlruntime.Request, obj T) (ctlruntime.Result, error) {
@@ -113,13 +111,8 @@ func (r *expiry[T]) Reconcile(ctx context.Context, req ctlruntime.Request, obj T
 		r.c.forget(key)
 		return ctlruntime.Result{}, nil
 	}
-	at, due, err := ttlctl.Expiry(obj.GetAnnotations(), r.conditions(obj))
-	if err != nil {
-		r.c.log.Warn("an object carries a TTL annotation that does not parse; it is left alone", "workspace", req.Workspace,
-			"kind", r.kind, "name", req.Name, "ttl", obj.GetAnnotations()[ttlctl.Annotation])
-		r.c.forget(key)
-		return ctlruntime.Result{}, nil
-	}
+	ttl, conditions := r.finish(obj)
+	at, due := ttlctl.Expiry(ttl, conditions)
 	if !due {
 		r.c.forget(key)
 		return ctlruntime.Result{}, nil
@@ -133,7 +126,7 @@ func (r *expiry[T]) Reconcile(ctx context.Context, req ctlruntime.Request, obj T
 	}
 	r.c.removed(key)
 	r.c.log.Info("an object finished more than its TTL ago is deleted", "workspace", req.Workspace, "kind", r.kind, "name", req.Name,
-		"ttl", obj.GetAnnotations()[ttlctl.Annotation])
+		"ttlSeconds", *ttl)
 	return ctlruntime.Result{}, nil
 }
 

@@ -29,6 +29,8 @@ type Claims interface {
 	DeleteNodeClaim(ctx context.Context, logicalCluster, name string) error
 
 	ListNodeClaims(ctx context.Context, logicalCluster string) ([]v1alpha1.NodeClaim, error)
+
+	AwaitNodeClaimGone(ctx context.Context, logicalCluster, name string) error
 }
 
 type Cluster struct {
@@ -72,8 +74,6 @@ type Options struct {
 
 	ReleaseTimeout time.Duration
 
-	Poll time.Duration
-
 	Secrets NodeSecrets
 
 	Links Links
@@ -81,11 +81,7 @@ type Options struct {
 
 const DefaultReleaseTimeout = 2 * time.Minute
 
-const DefaultPoll = 500 * time.Millisecond
-
 const fatalReadTimeout = 2 * time.Second
-
-const AnnotationAdoptJoinedNode = "socialweb.computer/adopt-joined-node"
 
 var ErrAwaitingAdoption = errors.New("nodemarket: the claim waits for the door to match the joined node to its receipt")
 
@@ -123,7 +119,6 @@ func New(opts Options) (*Host, error) {
 
 func (o Options) withDefaults() Options {
 	o.ReleaseTimeout = opt.Positive(o.ReleaseTimeout, DefaultReleaseTimeout)
-	o.Poll = opt.Positive(o.Poll, DefaultPoll)
 	return o
 }
 
@@ -272,7 +267,7 @@ func (h *Host) WriteAdoptionClaim(ctx context.Context) error {
 			h.opts.NodeName, h.opts.Cluster, err)
 	}
 	claim := h.claimLocked(target, NodePasswordPath(h.opts.DataDir))
-	claim.Annotations = map[string]string{AnnotationAdoptJoinedNode: "true"}
+	claim.Spec.AdoptJoinedNode = true
 	if err := h.opts.Claims.WriteNodeClaim(ctx, target.Workspace, claim); err != nil {
 		return fmt.Errorf("nodemarket: writing the adoption claim for node %s of %s into %s: %w",
 			h.opts.NodeName, h.opts.Cluster, target.Workspace, err)
@@ -304,7 +299,7 @@ func (h *Host) ConfirmJoined(ctx context.Context) error {
 	case v1alpha1.NodeClaimAdopting:
 		return ErrAwaitingAdoption
 	case "", v1alpha1.NodeClaimPending:
-		if claim.Annotations[AnnotationAdoptJoinedNode] == "true" {
+		if claim.Spec.AdoptJoinedNode {
 			return ErrAwaitingAdoption
 		}
 		return fmt.Errorf("nodemarket: node %s of %s is reported by its cluster while its claim is "+
@@ -428,32 +423,26 @@ func (h *Host) release(ctx context.Context) error {
 }
 
 func (h *Host) awaitRelease(ctx context.Context, workspace string) error {
-	deadline := time.Now().Add(h.opts.ReleaseTimeout)
-	for {
-		claim, err := h.opts.Claims.ReadNodeClaim(ctx, workspace, h.opts.NodeName)
-		if err != nil {
-			return fmt.Errorf("nodemarket: reading the claim for node %s of %s back while waiting "+
-				"for the door to release it: %w -- a read that failed is not a claim that is gone, "+
-				"and reporting a release nobody observed is how a machine that is still being paid "+
-				"for reads as closed", h.opts.NodeName, h.opts.Cluster, err)
-		}
-		if claim == nil {
-			return nil
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("nodemarket: the claim for node %s of %s is still there %s after it "+
-				"was deleted. The door removes its finalizer only once the market VM is gone, so "+
-				"this is a machine that has not been destroyed: closing is not destroying, and "+
-				"reporting this as a completed teardown would leave the rent running",
-				h.opts.NodeName, h.opts.Cluster, h.opts.ReleaseTimeout)
-		}
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("nodemarket: waiting for the door to release node %s of %s: %w",
-				h.opts.NodeName, h.opts.Cluster, ctx.Err())
-		case <-time.After(h.opts.Poll):
-		}
+	wctx, cancel := context.WithTimeout(ctx, h.opts.ReleaseTimeout)
+	defer cancel()
+	err := h.opts.Claims.AwaitNodeClaimGone(wctx, workspace, h.opts.NodeName)
+	switch {
+	case err == nil:
+		return nil
+	case ctx.Err() != nil:
+		return fmt.Errorf("nodemarket: waiting for the door to release node %s of %s: %w",
+			h.opts.NodeName, h.opts.Cluster, ctx.Err())
+	case errors.Is(err, context.DeadlineExceeded):
+		return fmt.Errorf("nodemarket: the claim for node %s of %s is still there %s after it "+
+			"was deleted. The door removes its finalizer only once the market VM is gone, so "+
+			"this is a machine that has not been destroyed: closing is not destroying, and "+
+			"reporting this as a completed teardown would leave the rent running",
+			h.opts.NodeName, h.opts.Cluster, h.opts.ReleaseTimeout)
 	}
+	return fmt.Errorf("nodemarket: watching the claim for node %s of %s while waiting "+
+		"for the door to release it: %w -- a watch that failed is not a claim that is gone, "+
+		"and reporting a release nobody observed is how a machine that is still being paid "+
+		"for reads as closed", h.opts.NodeName, h.opts.Cluster, err)
 }
 
 func (h *Host) read(ctx context.Context) (*v1alpha1.NodeClaim, error) {

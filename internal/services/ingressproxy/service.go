@@ -15,13 +15,14 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/ingress"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/exposure"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/ingress/opentunnel"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/ingress/xrpcsubscription"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/servetls"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/ingressproxy/iroh"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/ingressproxy/opentunnel"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/ingressproxy/xrpcsubscription"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -39,7 +40,6 @@ type Service struct {
 	spec v1alpha1.IngressProxySpec
 	deps Deps
 
-	workspace        string
 	ingressProxyHost string
 	publicHost       string
 	hostname         string
@@ -53,7 +53,9 @@ type Service struct {
 
 	mu sync.Mutex
 
-	provider Provider
+	provider ingress.Provider
+
+	registrar exposure.IngressRegistrar
 
 	providerName string
 }
@@ -62,7 +64,6 @@ func New(spec v1alpha1.IngressProxySpec, deps Deps) (*Service, error) {
 	s := &Service{
 		spec:             spec,
 		deps:             deps,
-		workspace:        cmp.Or(strings.TrimSpace(deps.Self.Workspace), "root"),
 		ingressProxyHost: strings.TrimSpace(spec.IngressProxyHost),
 		publicHost:       strings.TrimSpace(spec.PublicHost),
 		hostnames:        append([]string(nil), spec.Hostnames...),
@@ -107,7 +108,7 @@ func New(spec v1alpha1.IngressProxySpec, deps Deps) (*Service, error) {
 	if wildcard := wildcardHost(s.hostnames); wildcard != "" {
 		s.allowedHosts = strs.AppendUniqueFold(s.allowedHosts, wildcard)
 	}
-	if relayURL, ok := relayEndpoint(deps.Registry, s.workspace, spec.RelayRef); ok {
+	if relayURL, ok := relayEndpoint(deps.Self.Workspace, spec.RelayRef); ok {
 		s.relayURL = relayURL
 	}
 	if spec.TLS != nil && spec.TLS.Enabled {
@@ -160,45 +161,16 @@ func wildcardHost(hostnames []string) string {
 	return ""
 }
 
-func relayEndpoint(registry *component.Registry, workspace string, ref *commonv1.ObjectRef) (string, bool) {
+func relayEndpoint(workspace string, ref *commonv1.ObjectRef) (string, bool) {
 	if ref == nil {
 		return "", false
 	}
-	kind := strings.TrimSpace(ref.Kind)
-	kind = cmp.Or(kind, "Relay")
-	name := strings.TrimSpace(ref.Name)
-	if name == "" {
-		return "", false
-	}
-	if registry == nil {
-		return "", false
-	}
-	if workspace != "" {
-		for _, wanted := range []string{"http", "relay", "subscribeRepos"} {
-			if endpoint, ok := registry.Endpoint(workspace, kind, name, wanted); ok {
-				return hostport.EndpointURL(endpoint)
-			}
-		}
-	}
-	for _, entry := range registry.List("") {
-		if entry.Key.Kind != kind || entry.Key.Name != name {
-			continue
-		}
-		for _, endpoint := range entry.Endpoints {
-			if endpoint.URL != "" {
-				return endpoint.URL, true
-			}
-		}
-		for _, endpoint := range entry.Endpoints {
-			if endpoint.Address != "" {
-				return hostport.EndpointURL(endpoint)
-			}
-		}
-	}
-	return "", false
+	kind := cmp.Or(strings.TrimSpace(ref.Kind), "Relay")
+	target := kcp.HandlerURL(cmp.Or(strings.TrimSpace(ref.Workspace), strings.TrimSpace(workspace)), kind, strings.TrimSpace(ref.Name))
+	return target, target != ""
 }
 
-func (s *Service) buildProvider(relayURL string) (Provider, string, error) {
+func (s *Service) buildProvider(relayURL string) (ingress.Provider, exposure.IngressRegistrar, string, error) {
 	name := strings.ToLower(strings.TrimSpace(s.spec.Provider))
 	if name == "" {
 		switch {
@@ -207,7 +179,7 @@ func (s *Service) buildProvider(relayURL string) (Provider, string, error) {
 		case s.ingressProxyHost != "":
 			name = v1alpha1.IngressProviderXRPCSubscription
 		default:
-			return nil, "", errors.New("ingressproxy: no provider selected: set spec.provider, spec.xrpc.ingressProxyHost or spec.opentunnel")
+			return nil, nil, "", errors.New("ingressproxy: no provider selected: set spec.provider, spec.xrpc.ingressProxyHost or spec.opentunnel")
 		}
 	}
 	switch name {
@@ -228,18 +200,15 @@ func (s *Service) buildProvider(relayURL string) (Provider, string, error) {
 			KeepaliveTimeout:  milliseconds(s.spec.KeepaliveTimeoutMilliseconds),
 			ReconnectGrace:    milliseconds(s.spec.ReconnectGraceMilliseconds),
 			NonceTTL:          milliseconds(s.spec.NonceTTLMilliseconds),
-			Identity:          s.deps.Identity,
 			Log:               s.deps.Log,
-			Registry:          s.deps.Registry,
-			Bus:               s.deps.Bus,
 		})
-		return provider, v1alpha1.IngressProviderXRPCSubscription, nil
+		return provider, exposure.NewSubscriberRegistrar(s.deps.Registry, s.deps.Bus, s.deps.Identity), v1alpha1.IngressProviderXRPCSubscription, nil
 	case v1alpha1.IngressProviderIroh:
-		return nil, "", errors.New("ingressproxy: provider iroh is not supported yet; select xrpc-subscription or opentunnel")
+		return nil, nil, "", errors.New("ingressproxy: provider iroh is not supported yet; select xrpc-subscription or opentunnel")
 	case v1alpha1.IngressProviderOpenTunnel:
 		spec := s.spec.OpenTunnel
 		if spec == nil {
-			return nil, "", errors.New("ingressproxy: provider opentunnel requires spec.opentunnel")
+			return nil, nil, "", errors.New("ingressproxy: provider opentunnel requires spec.opentunnel")
 		}
 		providerCfg := opentunnel.Config{
 			Command:       append([]string(nil), spec.Command...),
@@ -248,29 +217,26 @@ func (s *Service) buildProvider(relayURL string) (Provider, string, error) {
 			LocalHost:     strings.TrimSpace(spec.LocalHost),
 			StateDir:      s.deps.StateDir,
 			Log:           s.deps.Log,
-			Bus:           s.deps.Bus,
 		}
 		if err := providerCfg.Check(); err != nil {
-			return nil, "", err
+			return nil, nil, "", err
 		}
-		return opentunnel.New(providerCfg), v1alpha1.IngressProviderOpenTunnel, nil
+		provider := opentunnel.New(providerCfg)
+		return provider, registrar{impl: provider, bus: s.deps.Bus}, v1alpha1.IngressProviderOpenTunnel, nil
 	default:
-		return nil, "", fmt.Errorf("ingressproxy: unknown provider %q (use %s, %s or %s)", s.spec.Provider,
+		return nil, nil, "", fmt.Errorf("ingressproxy: unknown provider %q (use %s, %s or %s)", s.spec.Provider,
 			v1alpha1.IngressProviderXRPCSubscription, v1alpha1.IngressProviderIroh, v1alpha1.IngressProviderOpenTunnel)
 	}
 }
 
 func (s *Service) Start(ctx context.Context) error {
-	relayURL := s.relayURL
-	if target, ok := relayEndpoint(s.deps.Registry, s.workspace, s.spec.RelayRef); ok {
-		relayURL = target
-	}
-	provider, name, err := s.buildProvider(relayURL)
+	provider, registrar, name, err := s.buildProvider(s.relayURL)
 	if err != nil {
 		return err
 	}
 	s.mu.Lock()
 	s.provider = provider
+	s.registrar = registrar
 	s.providerName = name
 	s.mu.Unlock()
 	return provider.Start(ctx)
@@ -283,10 +249,7 @@ func (s *Service) Ready(ctx context.Context) error {
 	if provider == nil {
 		return errors.New("ingressproxy: the service is not started")
 	}
-	if ready, ok := provider.(interface{ Ready(context.Context) error }); ok {
-		return ready.Ready(ctx)
-	}
-	return nil
+	return provider.Ready(ctx)
 }
 
 func (s *Service) Endpoints() []component.Endpoint {
@@ -340,12 +303,8 @@ func (s *Service) Stop(ctx context.Context) error {
 
 func (s *Service) IngressRegistrar() exposure.IngressRegistrar {
 	s.mu.Lock()
-	provider := s.provider
-	s.mu.Unlock()
-	if provider == nil {
-		return nil
-	}
-	return provider.IngressRegistrar()
+	defer s.mu.Unlock()
+	return s.registrar
 }
 
 func (s *Service) IngressProvider() string {
@@ -355,9 +314,3 @@ func (s *Service) IngressProvider() string {
 }
 
 var _ component.Service = (*Service)(nil)
-
-var _ Provider = (*xrpcsubscription.Provider)(nil)
-
-var _ Provider = (*iroh.Provider)(nil)
-
-var _ Provider = (*opentunnel.Provider)(nil)

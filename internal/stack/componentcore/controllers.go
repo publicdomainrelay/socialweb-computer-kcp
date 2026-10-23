@@ -129,9 +129,14 @@ func (c *Core) registerLocal(ctx context.Context, mgr *ctlruntime.Manager, clien
 	}
 	exposures, err := c.registerExposure(mgr, local)
 	warn("Service, Exposure, ComponentLink", err)
+	for _, changed := range exposures {
+		c.closers = append(c.closers, c.registry.Subscribe(changed))
+	}
 	_, err = componentctl.Register(mgr, componentctl.Options{Runtime: c.runtime, Scope: local, Changed: exposures, Log: cfg.Log})
 	warn("components", err)
+	warn("GuestControlPlane inputs", c.registerGuestControlPlane(mgr, local))
 	warn("MarketIdentity", c.registerIdentity(mgr, local))
+	warn("NodeClaim", c.registerNodeClaims(mgr, c.nodeClaims))
 	_, err = marketpresencectl.Register(mgr, marketpresencectl.Options{Heartbeats: presence.New(presence.Config{HTTPClient: c.handlers.Client()}),
 		Bidders: bidders{clients: clients}, Scope: local, Log: cfg.Log})
 	warn("MarketPresence", err)
@@ -338,7 +343,7 @@ func (c *Core) registerNetwork(mgr *ctlruntime.Manager, clients *workspaceClient
 		}}); err != nil {
 		return fmt.Errorf("componentcore: the policy controllers: %w", err)
 	}
-	if _, err := vaultctl.Register(mgr, c.handlers, vaultctl.Options{Log: log}); err != nil {
+	if _, err := vaultctl.Register(mgr, c.handlers, vaultctl.Options{Remote: &openbao.Remote{Enabled: true}, Log: log}); err != nil {
 		return fmt.Errorf("componentcore: the vault controller: %w", err)
 	}
 	if _, err := remoteopenbaoctl.Register(mgr, remoteopenbaoctl.Options{Remote: &openbao.Remote{Enabled: true}, Log: log}); err != nil {

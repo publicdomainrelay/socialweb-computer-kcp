@@ -2,7 +2,6 @@ package marketnetwork
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"net/http"
 	"os"
@@ -11,9 +10,9 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
+	contractvault "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/vault"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 )
 
 const (
@@ -26,80 +25,51 @@ const (
 
 func NetworkStateDir(instanceState string) string { return filepath.Join(instanceState, NetworkDir) }
 
-type networkVault struct {
-	address    string
-	certMount  string
-	certRole   string
-	caPEM      []byte
-	clientCert []byte
-	clientKey  []byte
-}
-
-func (ctl *Controller) vault(ctx context.Context, ws string) (networkVault, error) {
+func (ctl *Controller) vaultReady(ctx context.Context, ws string) error {
 	u, err := ctl.c.Get(ctx, ws, compose.OpenBaoServerGVR, NetworkVaultServer)
 	if err != nil {
-		return networkVault{}, err
+		return err
 	}
 	var o v1alpha1.OpenBaoServer
 	if err := unstruct.Into(u, &o); err != nil {
-		return networkVault{}, err
+		return err
 	}
 	st := o.Status
 	if st.Phase != v1alpha1.OpenBaoServerPhaseReady || st.Address == "" || st.Refs == nil {
-		return networkVault{}, fmt.Errorf("the OpenBaoServer %s is %s, not Ready", NetworkVaultServer, st.Phase)
+		return fmt.Errorf("the OpenBaoServer %s is %s, not Ready", NetworkVaultServer, st.Phase)
 	}
-	var cl v1alpha1.OpenBaoServerClientRefs
 	for _, x := range st.Clients {
-		if x.Name == NetworkVaultClient {
-			cl = x
+		if x.Name == NetworkVaultClient && x.ClientCert != "" {
+			return nil
 		}
 	}
-	if cl.ClientCert == "" {
-		return networkVault{}, fmt.Errorf("the OpenBaoServer %s reports no client %s yet", NetworkVaultServer, NetworkVaultClient)
-	}
-	v := networkVault{address: st.Address, certMount: cl.CertAuthMount, certRole: cl.CertAuthRole}
-	for _, f := range []struct {
-		dst *[]byte
-		ref string
-	}{{&v.caPEM, st.Refs.CA}, {&v.clientCert, cl.ClientCert}, {&v.clientKey, cl.ClientKey}} {
-		if *f.dst, err = os.ReadFile(openbaoctl.FileRef(f.ref)); err != nil {
-			return networkVault{}, err
-		}
-	}
-	return v, nil
+	return fmt.Errorf("the OpenBaoServer %s reports no client %s yet", NetworkVaultServer, NetworkVaultClient)
 }
 
-func pkiCA(ctx context.Context, v networkVault) ([]byte, error) {
-	pool, err := openbao.CertPoolFromPEM(v.caPEM)
+func vaultLinks(r compose.Root) []compose.Link {
+	return []compose.Link{compose.VaultPKILink(r.Ref(), NetworkVaultServer, NetworkPKIMount)}
+}
+
+func (ctl *Controller) pkiCA(ctx context.Context, r compose.Root) ([]byte, error) {
+	pki, err := bus.Resolve[contractvault.PKI](ctx, ctl.c.Bus(), r.Ref(), compose.VaultRefIn(NetworkVaultServer, r.Workspace),
+		bus.Capability{Name: contractvault.CapabilityPKIIssue, Scope: []string{NetworkPKIMount}})
 	if err != nil {
 		return nil, err
 	}
-	cert, err := tls.X509KeyPair(v.clientCert, v.clientKey)
-	if err != nil {
-		return nil, err
-	}
-	anon := openbao.New(v.address, "", openbao.WithCACertPool(pool), openbao.WithClientCertificate(cert))
-	cl, err := anon.LoginCert(ctx, v.certMount, v.certRole)
-	if err != nil {
-		return nil, err
-	}
-	defer cl.RevokeSelf(context.WithoutCancel(ctx))
-	pem, err := cl.CAPEM(ctx, NetworkPKIMount)
+	pem, err := pki.CA(ctx, NetworkPKIMount)
 	if err != nil {
 		return nil, fmt.Errorf("the network's PKI root CA: %w", err)
 	}
 	return []byte(pem), nil
 }
 
-func (ctl *Controller) caBundle(ctx context.Context, ws string) (string, error) {
+func (ctl *Controller) caBundle(ctx context.Context, r compose.Root) (string, error) {
 	if len(ctl.pkiPEM) == 0 {
-		v, err := ctl.vault(ctx, ws)
+		pem, err := ctl.pkiCA(ctx, r)
 		if err != nil {
 			return "", err
 		}
-		if ctl.pkiPEM, err = pkiCA(ctx, v); err != nil {
-			return "", err
-		}
+		ctl.pkiPEM = pem
 	}
 	guest, err := os.ReadFile(filepath.Join(NetworkStateDir(ctl.c.StateRoot()), GuestTLSDir, guestCAFile))
 	if err != nil {

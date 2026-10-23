@@ -26,8 +26,6 @@ const (
 	ManagedByLabel   = "app.kubernetes.io/managed-by"
 	LinkSetLabel     = "apps.socialweb.computer/link-set"
 
-	ComponentRestartAnnotation = "component.socialweb.computer/restart-at"
-
 	ComponentKindBidder            = "Bidder"
 	ComponentKindGuestControlPlane = "GuestControlPlane"
 	ComponentKindPds               = "Pds"

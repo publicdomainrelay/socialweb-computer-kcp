@@ -3,30 +3,27 @@ package gatewayapi
 import (
 	"cmp"
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"errors"
 	"fmt"
 	"os"
 	"strings"
 
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/gateway/custody"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/ref"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 )
 
 var openBaoServerGVR = v1alpha1.OpenBaoServerGVR
 
-type vaultRuntime struct {
-	client *openbao.Client
+const KindVault = "Vault"
 
+type vaultRuntime struct {
 	mount string
 
-	authed bool
-
-	endpoint custodyEndpoint
+	endpoint custody.Endpoint
 }
 
 func (s *Service) resolveVault(ctx context.Context) (*vaultRuntime, error) {
@@ -93,25 +90,10 @@ func readRef(path string) ([]byte, error) {
 	return os.ReadFile(strings.TrimPrefix(path, "file:"))
 }
 
-func buildVault(ctx context.Context, address string, ca, cert, key []byte, certMount, certRole, mount string) (*vaultRuntime, error) {
-	anonymous, err := newOpenBaoClient(address, "", ca, cert, key)
-	if err != nil {
-		return nil, err
-	}
-	client := anonymous
-	authed := false
-	if certMount != "" && certRole != "" {
-		client, err = anonymous.LoginCert(ctx, certMount, certRole)
-		if err != nil {
-			return nil, fmt.Errorf("gatewayapi: logging in to the vault as %s/%s: %w", certMount, certRole, err)
-		}
-		authed = true
-	}
+func buildVault(_ context.Context, address string, ca, cert, key []byte, certMount, certRole, mount string) (*vaultRuntime, error) {
 	return &vaultRuntime{
-		client: client,
-		authed: authed,
-		mount:  strings.Trim(mount, "/"),
-		endpoint: custodyEndpoint{
+		mount: strings.Trim(mount, "/"),
+		endpoint: custody.Endpoint{
 			Address:    address,
 			CACert:     append([]byte(nil), ca...),
 			ClientCert: append([]byte(nil), cert...),
@@ -124,21 +106,6 @@ func buildVault(ctx context.Context, address string, ca, cert, key []byte, certM
 	}, nil
 }
 
-func newOpenBaoClient(address, token string, ca, cert, key []byte) (*openbao.Client, error) {
-	opts := []openbao.Option{}
-	if len(ca) > 0 {
-		pool := x509.NewCertPool()
-		if !pool.AppendCertsFromPEM(ca) {
-			return nil, errors.New("gatewayapi: the OpenBao CA bundle holds no certificate")
-		}
-		opts = append(opts, openbao.WithCACertPool(pool))
-	}
-	if len(cert) > 0 || len(key) > 0 {
-		pair, err := tls.X509KeyPair(cert, key)
-		if err != nil {
-			return nil, fmt.Errorf("gatewayapi: the OpenBao client certificate: %w", err)
-		}
-		opts = append(opts, openbao.WithClientCertificate(pair))
-	}
-	return openbao.New(address, token, opts...), nil
+func (s *Service) vaultRef() commonv1.ObjectRef {
+	return commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: KindVault, Name: s.spec.VaultRef.Name, Workspace: cmp.Or(s.spec.VaultRef.Workspace, s.workspace)}
 }

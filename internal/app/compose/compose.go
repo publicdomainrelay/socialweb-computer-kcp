@@ -14,6 +14,7 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
@@ -81,6 +82,8 @@ type Composer struct {
 	samples samples
 
 	roots rootIndex
+
+	trusts Trusts
 }
 
 func New(cfg Config) (*Composer, error) {
@@ -105,6 +108,10 @@ func (c *Composer) Config() Config { return c.cfg }
 func (c *Composer) Log() *slog.Logger { return c.log }
 
 func (c *Composer) Bus() *bus.Bus { return c.cfg.Bus }
+
+func (c *Composer) ProvideTrust(gk schema.GroupKind) { c.trusts.Provide(c.cfg.Bus, gk) }
+
+func (c *Composer) PublishTrust(ref commonv1.ObjectRef, bundle []byte) { c.trusts.Publish(ref, bundle) }
 
 func (c *Composer) Workspace() string {
 	return cmp.Or(strings.TrimSpace(c.cfg.Workspace), DefaultWorkspace)

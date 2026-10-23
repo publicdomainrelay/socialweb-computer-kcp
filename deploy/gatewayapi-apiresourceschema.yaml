@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-8.gatewayapis.socialweb.computer
+  name: v1alpha1-10.gatewayapis.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -30,6 +30,8 @@ spec:
             properties:
               suspend:
                 type: boolean
+              restartedAt:
+                type: string
               restartPolicy:
                 type: string
                 enum:
@@ -200,6 +202,22 @@ spec:
                     type: string
                   caBundle:
                     type: string
+                  caRef:
+                    type: object
+                    properties:
+                      group:
+                        type: string
+                      kind:
+                        type: string
+                        maxLength: 63
+                      name:
+                        type: string
+                        maxLength: 253
+                      workspace:
+                        type: string
+                    required:
+                      - kind
+                      - name
               serviceAuth:
                 type: object
                 properties:
@@ -355,15 +373,6 @@ spec:
                     type: array
                     items:
                       type: string
-                  pollIntervalSeconds:
-                    type: integer
-                    format: int32
-                    default: 2
-                    minimum: 1
-              nodePollIntervalSeconds:
-                type: integer
-                format: int32
-                minimum: 0
           status:
             type: object
             properties:

@@ -35,8 +35,32 @@ type Binding struct {
 	Remote *v1alpha1.RemoteOpenBao
 }
 
+type bindingContract struct {
+	Vault commonv1.ObjectRef
+
+	Backend commonv1.ObjectRef
+
+	Address string
+
+	CABundle string
+
+	Refs *v1alpha1.OpenBaoServerRefs
+
+	Clients []v1alpha1.OpenBaoServerClientRefs
+
+	Remote *v1alpha1.RemoteOpenBaoSpec
+}
+
 func (b Binding) fingerprint() string {
-	raw, _ := json.Marshal(b)
+	c := bindingContract{Vault: b.Vault, Backend: b.Backend}
+	if b.Server != nil {
+		c.Address, c.CABundle, c.Refs, c.Clients = b.Server.Address, b.Server.CABundle, b.Server.Refs, b.Server.Clients
+	}
+	if b.Remote != nil {
+		spec := b.Remote.Spec
+		c.Remote = &spec
+	}
+	raw, _ := json.Marshal(c)
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])
 }
@@ -119,7 +143,7 @@ func (p *Provider) clientFor(to commonv1.ObjectRef) openbao.ClientFor {
 		}
 		switch {
 		case b.Server != nil:
-			srv, err := openbao.ServerOf(b.Backend.Workspace, b.Backend.Name, *b.Server, openbao.ClientForMount(b.Server.Clients, mount))
+			srv, err := openbao.ServerOf(b.Backend.Workspace, b.Backend.Name, *b.Server, clientName(b.Server.Clients, mount))
 			if err != nil {
 				return nil, err
 			}
@@ -131,6 +155,23 @@ func (p *Provider) clientFor(to commonv1.ObjectRef) openbao.ClientFor {
 			return nil, fmt.Errorf("%w: %s/%s", ErrUnbound, to.Workspace, to.Name)
 		}
 	}
+}
+
+func clientName(clients []v1alpha1.OpenBaoServerClientRefs, mount string) string {
+	if name := openbao.ClientForMount(clients, mount); name != "" || strings.Trim(mount, "/") != "" {
+		return name
+	}
+	name := ""
+	for _, c := range clients {
+		if c.ClientCert == "" || strings.TrimSpace(c.KVMount) != "" {
+			continue
+		}
+		if name != "" {
+			return ""
+		}
+		name = c.Name
+	}
+	return name
 }
 
 func (p *Provider) remoteClient(ctx context.Context, key vaultKey, b Binding) (*openbao.Client, error) {
@@ -182,6 +223,9 @@ func (p *Provider) Register(b *bus.Bus) {
 		return p.open(ctx, to, scope)
 	})
 	bus.Provide(b, VaultGroupKind, contractvault.CapabilityLease, func(ctx context.Context, to commonv1.ObjectRef, scope []string) (contractvault.Leases, error) {
+		return p.open(ctx, to, scope)
+	})
+	bus.Provide(b, VaultGroupKind, contractvault.CapabilityWrite, func(ctx context.Context, to commonv1.ObjectRef, scope []string) (contractvault.Keys, error) {
 		return p.open(ctx, to, scope)
 	})
 	bus.Provide(b, VaultGroupKind, contractvault.CapabilityPKIIssue, func(ctx context.Context, to commonv1.ObjectRef, scope []string) (contractvault.PKI, error) {

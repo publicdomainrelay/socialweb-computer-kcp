@@ -12,6 +12,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
@@ -82,6 +83,7 @@ type Controller struct {
 
 func Register(m *ctlruntime.Manager, c *compose.Composer) error {
 	ctl := &Controller{c: c}
+	c.ProvideTrust(schema.GroupKind{Group: v1alpha1.GroupName, Kind: Kind})
 	opts := append([]ctlruntime.Option{ctlruntime.Export(compose.ExportApplications), ctlruntime.Finalizer(compose.Finalizer)}, c.Watches(Kind)...)
 	opts = append(opts, childRootWatch[*v1alpha1.MarketBidder](ctl), childRootWatch[*v1alpha1.MarketRequester](ctl),
 		childRootWatch[*v1alpha1.SshGateway](ctl), childRootWatch[*v1alpha1.Gateway](ctl))
@@ -239,8 +241,11 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 		c.MarkApplied(r)
 		ctl.log().Info("applied the market network's OpenBaoServer", "set", NetworkSet)
 	}
-	if _, err := ctl.vault(ctx, ws); err != nil {
+	if err := ctl.vaultReady(ctx, ws); err != nil {
 		return p.write(v1alpha1.ApplicationPhaseProvisioning, "waiting for the network's OpenBaoServer: "+err.Error())
+	}
+	if err := c.ApplyLinks(ctx, r, "root", vaultLinks(r)); err != nil {
+		return ctlruntime.Result{}, err
 	}
 	if err := EnsureGuestTLS(filepath.Join(NetworkStateDir(stateRoot), GuestTLSDir)); err != nil {
 		return p.write(v1alpha1.ApplicationPhaseFailed, err.Error())
@@ -249,10 +254,11 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 	if err != nil {
 		return p.write(v1alpha1.ApplicationPhaseFailed, err.Error())
 	}
-	bundle, err := ctl.caBundle(ctx, ws)
+	bundle, err := ctl.caBundle(ctx, r)
 	if err != nil {
 		return p.retry(v1alpha1.ApplicationPhaseProvisioning, "the network CA bundle", err)
 	}
+	c.PublishTrust(r.Ref(), []byte(bundle))
 	value := networkValueFromLeases(leases, bundle)
 	if ctl.value != nil && ctl.valueUID == string(r.UID) {
 		value = *ctl.value

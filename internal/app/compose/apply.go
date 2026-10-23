@@ -293,7 +293,9 @@ func (c *Composer) RestartComponent(ctx context.Context, r Root, ws, kind, name 
 	}
 	u := &unstructured.Unstructured{Object: map[string]any{"apiVersion": ct.APIVersion(), "kind": ct.Kind}}
 	u.SetName(name)
-	u.SetAnnotations(map[string]string{ComponentRestartAnnotation: time.Now().UTC().Format(time.RFC3339Nano)})
+	if err := unstructured.SetNestedField(u.Object, time.Now().UTC().Format(time.RFC3339Nano), "spec", "restartedAt"); err != nil {
+		return err
+	}
 	return c.applyAs(ctx, r, r.Manager()+"/restart", ws, ct.GVR, u)
 }
 

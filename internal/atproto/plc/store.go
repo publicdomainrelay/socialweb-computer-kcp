@@ -29,6 +29,23 @@ func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{logs: map[string][]LogEntry{}}
 }
 
+var (
+	_ Store = (*MemoryStore)(nil)
+
+	_ Store = (*FileStore)(nil)
+)
+
+func OpenStore(path string) (Store, error) {
+	if path == "" {
+		return NewMemoryStore(), nil
+	}
+	fs, err := NewFileStore(path)
+	if err != nil {
+		return nil, err
+	}
+	return fs, nil
+}
+
 func (s *MemoryStore) GetCurrentOps(ctx context.Context, did string) ([]LogEntry, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

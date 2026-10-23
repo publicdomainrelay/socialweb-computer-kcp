@@ -32,9 +32,7 @@ const (
 	GCExamples          = 5
 	GCListCap           = 40
 	GCWorkspaceCap      = 200
-	TTLAnnotation       = "socialweb.computer/ttl-after-finished"
 	ClusterLabel        = "socialweb.computer/cluster"
-	NodeClaimNote       = "socialweb.computer/nodeclaim"
 	AppWorkspaceLabel   = "apps.socialweb.computer/application"
 	providerWS          = "socialweb-provider"
 	accountWorkspace    = "account"
@@ -169,7 +167,7 @@ func adoptable(rootKind, kind string, u *unstructured.Unstructured, owner string
 	case KindBid, KindStateSync, KindMarketPresence:
 		return rootKind == string(v1alpha1.ApplicationKindMarketBidder) || (kind != KindBid && rootKind == string(v1alpha1.ApplicationKindMarketRequester))
 	case KindComputeContract:
-		_, linked := u.GetAnnotations()[NodeClaimNote]
+		linked := specField(u, "nodeClaimRef")
 		return rootKind == string(v1alpha1.ApplicationKindMarketRequester) && !linked
 	}
 	return false
@@ -535,14 +533,16 @@ func (c *Composer) gcWorkspaces(ctx context.Context) []string {
 	return out
 }
 
+func specField(u *unstructured.Unstructured, field string) bool {
+	_, found, err := unstructured.NestedFieldNoCopy(u.Object, "spec", field)
+	return found && err == nil
+}
+
 func ownedByLink(u *unstructured.Unstructured) bool {
 	if len(u.GetOwnerReferences()) > 0 {
 		return true
 	}
-	if _, ok := u.GetAnnotations()[TTLAnnotation]; ok {
-		return true
-	}
-	if _, ok := u.GetAnnotations()[NodeClaimNote]; ok {
+	if specField(u, "ttlSecondsAfterFinished") || specField(u, "nodeClaimRef") {
 		return true
 	}
 	labels := u.GetLabels()

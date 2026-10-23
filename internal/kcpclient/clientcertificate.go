@@ -127,22 +127,19 @@ type certWatch struct {
 	once   sync.Once
 	cancel context.CancelFunc
 
-	mu      sync.Mutex
-	items   map[string]bool
-	lastUse time.Time
-	err     error
+	mu    sync.Mutex
+	items map[string]bool
+	idle  *time.Timer
+	err   error
 }
 
 func (w *certWatch) touch() {
 	w.mu.Lock()
-	w.lastUse = time.Now()
+	idle := w.idle
 	w.mu.Unlock()
-}
-
-func (w *certWatch) idle() bool {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return time.Since(w.lastUse) > certWatchIdle
+	if idle != nil {
+		idle.Reset(certWatchIdle)
+	}
 }
 
 func (w *certWatch) lastError() error {
@@ -195,32 +192,23 @@ func (c *Client) certWatcher(did, cluster string) *certWatch {
 		return w
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	w := &certWatch{home: home, ready: make(chan struct{}), cancel: cancel, items: map[string]bool{}, lastUse: time.Now()}
+	w := &certWatch{home: home, ready: make(chan struct{}), cancel: cancel, items: map[string]bool{}}
 	if c.certWatches == nil {
 		c.certWatches = map[string]*certWatch{}
 	}
 	c.certWatches[home] = w
-	go c.runCertWatch(ctx, w)
-	go func() {
-		t := time.NewTicker(time.Minute)
-		defer t.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-t.C:
-				if w.idle() {
-					c.certMu.Lock()
-					if c.certWatches[home] == w {
-						delete(c.certWatches, home)
-					}
-					c.certMu.Unlock()
-					cancel()
-					return
-				}
-			}
+	idle := time.AfterFunc(certWatchIdle, func() {
+		c.certMu.Lock()
+		if c.certWatches[home] == w {
+			delete(c.certWatches, home)
 		}
-	}()
+		c.certMu.Unlock()
+		cancel()
+	})
+	w.mu.Lock()
+	w.idle = idle
+	w.mu.Unlock()
+	go c.runCertWatch(ctx, w)
 	return w
 }
 

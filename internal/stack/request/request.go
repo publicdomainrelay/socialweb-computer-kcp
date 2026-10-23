@@ -33,20 +33,20 @@ import (
 )
 
 const (
-	RequestsDir      = "requests"
-	InvocationFile   = "invocation.json"
-	SummaryFile      = "summary.json"
-	SSHDir           = "ssh"
-	ModeNetwork      = "network"
-	ModeStandalone   = "standalone"
-	RootName         = "app"
-	FieldManager     = "socialweb-computer-run-request"
-	ContractTTL      = "8d"
-	SecretsPath      = "contracts/" + marketrequester.RequesterContract + "/secrets"
-	Poll             = time.Second
-	irohScheme       = "iroh://"
-	maxNameLength    = 30
-	networkConflicts = 10
+	RequestsDir              = "requests"
+	InvocationFile           = "invocation.json"
+	SummaryFile              = "summary.json"
+	SSHDir                   = "ssh"
+	ModeNetwork              = "network"
+	ModeStandalone           = "standalone"
+	RootName                 = "app"
+	FieldManager             = "socialweb-computer-run-request"
+	ContractTTLSeconds int32 = 8 * 24 * 60 * 60
+	SecretsPath              = "contracts/" + marketrequester.RequesterContract + "/secrets"
+	Poll                     = time.Second
+	irohScheme               = "iroh://"
+	maxNameLength            = 30
+	networkConflicts         = 10
 )
 
 var nameRE = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
@@ -310,8 +310,12 @@ func until(ctx context.Context, timeout time.Duration, what string, try func() (
 }
 
 func (k *Kcp) CreateContract(ctx context.Context, spec v1alpha1.ComputeContractSpec, timeout time.Duration) error {
-	body, err := applyBody(&v1alpha1.ComputeContract{ObjectMeta: metav1.ObjectMeta{Name: marketrequester.RequesterContract,
-		Annotations: map[string]string{v1alpha1.AnnotationTTLAfterFinished: ContractTTL}}, Spec: spec}, "ComputeContract")
+	if spec.TTLSecondsAfterFinished == nil {
+		ttl := ContractTTLSeconds
+		spec.TTLSecondsAfterFinished = &ttl
+	}
+	body, err := applyBody(&v1alpha1.ComputeContract{ObjectMeta: metav1.ObjectMeta{Name: marketrequester.RequesterContract}, Spec: spec},
+		"ComputeContract")
 	if err != nil {
 		return err
 	}

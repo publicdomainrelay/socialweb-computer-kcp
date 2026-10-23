@@ -73,14 +73,13 @@ func (s *Service) Start(ctx context.Context) error {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	stateDir := s.stateDir()
-	var store atplc.Store = atplc.NewMemoryStore()
-	if stateDir != "" {
-		fs, err := atplc.NewFileStore(filepath.Join(stateDir, "plc.json"))
-		if err != nil {
-			return fmt.Errorf("plc: opening the operation log: %w", err)
-		}
-		store = fs
+	path := ""
+	if dir := s.stateDir(); dir != "" {
+		path = filepath.Join(dir, "plc.json")
+	}
+	store, err := atplc.OpenStore(path)
+	if err != nil {
+		return fmt.Errorf("plc: opening the operation log: %w", err)
 	}
 	server := atplc.NewServer(atplc.Options{Store: store})
 	key := s.in.Key()

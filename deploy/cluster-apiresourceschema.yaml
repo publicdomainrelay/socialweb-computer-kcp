@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-2.clusters.socialweb.computer
+  name: v1alpha1-3.clusters.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -48,22 +48,29 @@ spec:
                 type: string
               instance:
                 type: string
-              frontAddress:
-                type: string
-              heldPorts:
-                type: array
-                items:
-                  type: object
-                  properties:
-                    port:
-                      type: integer
-                      format: int32
-                    purpose:
-                      type: string
-                    holderRef:
-                      type: string
-                  required:
-                    - port
+              front:
+                type: object
+                properties:
+                  address:
+                    type: string
+                  ready:
+                    type: boolean
+                  message:
+                    type: string
+                  heldPorts:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        port:
+                          type: integer
+                          format: int32
+                        purpose:
+                          type: string
+                        holderRef:
+                          type: string
+                      required:
+                        - port
               nodeExpiry:
                 type: integer
                 format: int64

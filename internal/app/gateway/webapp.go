@@ -4,13 +4,13 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/nodeclaim"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vaultlayout"
 )
 
 const (
-	WebAppAccount        = "socialweb-computer-k8s"
-	WebAppAccountNS      = "default"
+	WebAppAccount        = nodeclaim.AgentAccount
+	WebAppAccountNS      = nodeclaim.AgentNamespace
 	WebAppGrant          = "socialweb-computer-k8s-web-app"
 	RequesterGrant       = "socialweb-computer-k8s-requester"
 	foreignAccountPrefix = "system:kcp:serviceaccount:"
@@ -23,7 +23,7 @@ type WebApp struct {
 }
 
 func WebAppAccountRef(workspace string) string {
-	return workspace + ":" + compose.ComponentWorkspace + "/" + WebAppAccountNS + "/" + WebAppAccount
+	return nodeclaim.AgentRef(workspace)
 }
 
 func ForeignAccount(cluster, namespace, name string) string {

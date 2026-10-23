@@ -6,77 +6,77 @@ spec:
   resources:
     - group: socialweb.computer
       name: marketnetworks
-      schema: v1alpha1-18.marketnetworks.socialweb.computer
+      schema: v1alpha1-19.marketnetworks.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer
       name: marketbidders
-      schema: v1alpha1-21.marketbidders.socialweb.computer
+      schema: v1alpha1-22.marketbidders.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer
       name: marketrequesters
-      schema: v1alpha1-18.marketrequesters.socialweb.computer
+      schema: v1alpha1-19.marketrequesters.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer
       name: gateways
-      schema: v1alpha1-23.gateways.socialweb.computer
+      schema: v1alpha1-24.gateways.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer
       name: sshgateways
-      schema: v1alpha1-17.sshgateways.socialweb.computer
+      schema: v1alpha1-18.sshgateways.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer
       name: bidders
-      schema: v1alpha1-12.bidders.socialweb.computer
+      schema: v1alpha1-13.bidders.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer
       name: guestcontrolplanes
-      schema: v1alpha1-6.guestcontrolplanes.socialweb.computer
+      schema: v1alpha1-7.guestcontrolplanes.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer
       name: pds
-      schema: v1alpha1-7.pds.socialweb.computer
+      schema: v1alpha1-8.pds.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer
       name: requesters
-      schema: v1alpha1-15.requesters.socialweb.computer
+      schema: v1alpha1-16.requesters.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer
       name: gatewayapis
-      schema: v1alpha1-8.gatewayapis.socialweb.computer
+      schema: v1alpha1-10.gatewayapis.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer
       name: sshservers
-      schema: v1alpha1-7.sshservers.socialweb.computer
+      schema: v1alpha1-8.sshservers.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer
       name: plcs
-      schema: v1alpha1-6.plcs.socialweb.computer
+      schema: v1alpha1-7.plcs.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer
       name: relays
-      schema: v1alpha1-6.relays.socialweb.computer
+      schema: v1alpha1-7.relays.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer
       name: ingressproxies
-      schema: v1alpha1-7.ingressproxies.socialweb.computer
+      schema: v1alpha1-8.ingressproxies.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer
       name: dispatchertlses
-      schema: v1alpha1-6.dispatchertlses.socialweb.computer
+      schema: v1alpha1-7.dispatchertlses.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer

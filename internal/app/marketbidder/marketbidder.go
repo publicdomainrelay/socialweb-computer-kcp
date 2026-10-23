@@ -203,13 +203,17 @@ func (p *pass) self() commonv1.ObjectRef {
 	return compose.AppRef(compose.ComponentKindBidder, BidderComponent, p.r.Workspace)
 }
 
+func (p *pass) guest() commonv1.ObjectRef {
+	return compose.AppRef(compose.ComponentKindGuestControlPlane, GuestComponent, p.r.Workspace)
+}
+
 func (p *pass) baseLinks(mount string) []compose.Link {
 	self, ws := p.self(), p.r.Workspace
 	return []compose.Link{
 		compose.PolicyRunLink(self, compose.PolicyEngineRefIn(compose.PolicyEngineComponent, ws), cmp.Or(strings.TrimSpace(p.o.Spec.Policy), DefaultPolicy)),
 		compose.VaultLink(self, BidderVaultServer, true, mount+"/guests/*"),
 		compose.ComputeVMVaultLink(ws, BidderVaultServer, mount+"/guests/*"),
-		compose.RootVaultLink(p.r, BidderVaultServer, mount+"/identity/*", mount+"/oidc-rotation/*"),
+		compose.RootVaultLink(p.r, BidderVaultServer, mount+"/identity/*", mount+"/oidc-rotation/*", guestOIDCKeyPath),
 	}
 }
 
@@ -320,10 +324,7 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 	if ident.Handle != "" {
 		hostnames = []string{ident.Handle}
 	}
-	var guestPdsRef *commonv1.ObjectRef
-	if plan.Local {
-		guestPdsRef = compose.ComponentRefFor(compose.ComponentKindPds, compose.PdsComponent)
-	}
+	guestPdsRef := plan.ComponentPdsRef()
 	guest := compose.Desired{Kind: compose.ComponentKindGuestControlPlane, Name: GuestComponent, Spec: v1alpha1.GuestControlPlaneSpec{
 		ComponentSpec: compose.NewComponentSpec(compose.ComponentCRStateDir(stateRoot, compose.ComponentKindGuestControlPlane, GuestComponent), network),
 		Identity:      ident,
@@ -478,6 +479,9 @@ func (p *pass) account(ctx context.Context, plan compose.AccountPlan, id *v1alph
 		p.log().Warn("the existing-account repo", "err", err.Error())
 	}
 	repoLinks = append(repoLinks, compose.RepoWriteLink(p.self(), compose.RepoRefIn(id.Status.Did, ws), compose.ScopeAll))
+	if ref := plan.ComponentPdsRef(); ref != nil && strings.EqualFold(ref.Kind, compose.KindRemotePDS) && strings.TrimSpace(ref.Name) != "" {
+		repoLinks = append(repoLinks, compose.ServiceAuthLink(p.guest(), compose.RemotePDSRefIn(strings.TrimSpace(ref.Name), ws), id.Status.Did))
+	}
 	if err := c.ApplyLinks(ctx, r, "repo", repoLinks); err != nil {
 		return ctlruntime.Result{}, err
 	}
@@ -575,7 +579,8 @@ func (p *pass) local(ctx context.Context, plan compose.AccountPlan, id *v1alpha1
 	repo := compose.RepoRefIn(did, ws)
 	repoLinks = append(repoLinks, compose.RepoWriteLink(p.self(), repo, compose.ScopeAll),
 		compose.RecordWriteLink(ws, r.Owner(), repo, compose.ScopeAll),
-		compose.ServiceAuthLink(p.self(), compose.AppRef(compose.ComponentKindPds, compose.PdsComponent, ws), did))
+		compose.ServiceAuthLink(p.self(), compose.AppRef(compose.ComponentKindPds, compose.PdsComponent, ws), did),
+		compose.ServiceAuthLink(p.guest(), compose.AppRef(compose.ComponentKindPds, compose.PdsComponent, ws), did))
 	if err := c.ApplyLinks(ctx, r, "repo", repoLinks); err != nil {
 		return ctlruntime.Result{}, err
 	}

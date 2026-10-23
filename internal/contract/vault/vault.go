@@ -13,6 +13,8 @@ const (
 	CapabilityLease = "vault.lease"
 
 	CapabilityPKIIssue = "vault.pki.issue"
+
+	TrustScope = "ca"
 )
 
 type KV interface {
@@ -51,4 +53,16 @@ type PKI interface {
 	Issue(ctx context.Context, mount, role string, req CertRequest) (Cert, error)
 
 	CAChain(ctx context.Context, mount string) (string, error)
+
+	CA(ctx context.Context, mount string) (string, error)
+}
+
+type Trust interface {
+	CABundle(ctx context.Context) ([]byte, error)
+
+	Watch(fn func(bundle []byte)) (cancel func())
+}
+
+type Keys interface {
+	RotateKey(ctx context.Context, mount, name string) error
 }

@@ -29,6 +29,8 @@ var (
 	_ vault.Leases = (*Handle)(nil)
 
 	_ vault.PKI = (*Handle)(nil)
+
+	_ vault.Keys = (*Handle)(nil)
 )
 
 func NewHandle(clients ClientFor, defaultMount string, scope []string) (*Handle, error) {
@@ -179,6 +181,31 @@ func (h *Handle) CAChain(ctx context.Context, mount string) (string, error) {
 		return "", err
 	}
 	return client.CAChainPEM(ctx, mount)
+}
+
+func (h *Handle) CA(ctx context.Context, mount string) (string, error) {
+	client, err := h.clients(ctx, "")
+	if err != nil {
+		return "", err
+	}
+	return client.CAPEM(ctx, mount)
+}
+
+func (h *Handle) RotateKey(ctx context.Context, mount, name string) error {
+	name = strings.Trim(strings.TrimSpace(name), "/")
+	target := "identity/oidc/key/" + name
+	if name == "" || !h.allows(target) {
+		return fmt.Errorf("%w: OIDC key %q", ErrOutOfScope, name)
+	}
+	mount = strings.Trim(strings.TrimSpace(mount), "/")
+	if mount == "" {
+		mount = h.mount
+	}
+	client, err := h.clients(ctx, mount)
+	if err != nil {
+		return err
+	}
+	return client.Write(ctx, target+"/rotate", nil)
 }
 
 func (c *Client) authCall(ctx context.Context, path string, body map[string]any) (int, loginAuth, error) {

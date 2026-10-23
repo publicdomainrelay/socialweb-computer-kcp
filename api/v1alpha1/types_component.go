@@ -87,6 +87,8 @@ type ComponentTLS struct {
 	CertRef string `json:"certRef,omitempty"`
 
 	CABundle string `json:"caBundle,omitempty"`
+
+	CARef *commonv1.ObjectRef `json:"caRef,omitempty"`
 }
 
 type ComponentServiceAuth struct {
@@ -236,8 +238,6 @@ type SshServerSettings struct {
 }
 
 type GatewayAPISettings struct {
-	NodePollIntervalSeconds *int32 `json:"nodePollIntervalSeconds,omitempty"`
-
 	RequiredDownloads []string `json:"requiredDownloads,omitempty"`
 }
 
@@ -311,6 +311,8 @@ type ComponentServe struct {
 
 type ComponentSpec struct {
 	Suspend bool `json:"suspend,omitempty"`
+
+	RestartedAt string `json:"restartedAt,omitempty"`
 
 	RestartPolicy ComponentRestartPolicy `json:"restartPolicy,omitempty"`
 
@@ -676,8 +678,6 @@ type GatewayAPISpec struct {
 	PostSignInURL string `json:"postSignInURL,omitempty" apigen:"userEndpoint"`
 
 	NodeMarket *GatewayNodeMarket `json:"nodeMarket,omitempty"`
-
-	NodePollIntervalSeconds *int32 `json:"nodePollIntervalSeconds,omitempty" apigen:"minimum=0"`
 }
 
 type GatewayNodeMarket struct {
@@ -694,8 +694,6 @@ type GatewayNodeMarket struct {
 	NodePolicyArgs string `json:"nodePolicyArgs,omitempty"`
 
 	ExtraBidderDIDs []string `json:"extraBidderDIDs,omitempty"`
-
-	PollIntervalSeconds int32 `json:"pollIntervalSeconds,omitempty" apigen:"default=2,minimum=1"`
 }
 
 type SshServer struct {

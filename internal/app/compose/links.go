@@ -284,7 +284,7 @@ func ExposureLinks(ws string, desired []Desired) []Link {
 }
 
 func ComponentLinks(ws string, desired []Desired) []Link {
-	return append(SpecRefLinks(ws, desired), ExposureLinks(ws, desired)...)
+	return append(append(SpecRefLinks(ws, desired), ExposureLinks(ws, desired)...), TrustLinks(ws, desired)...)
 }
 
 func Existing(snap Snapshot, desired []Desired) []Desired {

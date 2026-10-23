@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-6.nodeclaims.socialweb.computer
+  name: v1alpha1-7.nodeclaims.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -54,6 +54,8 @@ spec:
                 type: array
                 items:
                   type: string
+              adoptJoinedNode:
+                type: boolean
             required:
               - clusterRef
               - nodeName

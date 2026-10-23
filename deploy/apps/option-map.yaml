@@ -131,7 +131,6 @@ apps:
       - {name: node-policy, to: options}
       - {name: node-policy-args, to: options}
       - {name: vm-ready-timeout-sec, to: options}
-      - {name: node-poll-interval-ms, to: options}
       - {name: test-owner-sessions-file, to: spec.marketNetwork.ownerSessionsFile}
       - {name: test-node-user-data-base-file, to: spec.marketNetwork.nodeUserDataBaseFile}
       - {name: record-retention-sec, to: requester}
