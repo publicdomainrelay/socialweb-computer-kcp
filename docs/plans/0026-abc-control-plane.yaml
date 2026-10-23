@@ -778,7 +778,7 @@ items:
     track: events
     parallel_with: [W2-REPO, W2-PDS, W2-VAULT, W2-COMPUTE, W2-POLICY]
     depends_on: [W1-CACHE-LEASE, W1-XRPC]
-    status: doing
+    status: done
     closes: [D03]
     decision: >
       Controllers for EventSource and its three backends. PdsEventSource
