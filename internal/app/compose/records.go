@@ -80,6 +80,23 @@ func (c *Composer) ApplyOperatorVouch(ctx context.Context, r Root, ws, app, subj
 	return c.ApplyTyped(ctx, r, ws, AtprotoRecordGVR, v1alpha1.GroupVersion.String(), "AtprotoRecord", obj)
 }
 
+const AssociationRecordName = "association"
+
+func (c *Composer) ApplyAssociationRecord(ctx context.Context, r Root, ws string, repo commonv1.ObjectRef, identity, service string) error {
+	from := func(path string) map[string]any {
+		return map[string]any{"valueFrom": map[string]any{"kind": KindMarketIdentity, "name": identity, "fieldPath": path}}
+	}
+	record, err := json.Marshal(map[string]any{"challenge": from("spec.approvedAssociations[0]"), "keyId": from("status.did"),
+		"service": service, "name": identity, "createdAt": from("metadata.creationTimestamp")})
+	if err != nil {
+		return err
+	}
+	obj := &v1alpha1.AtprotoRecord{ObjectMeta: metav1.ObjectMeta{Name: AssociationRecordName},
+		Spec: v1alpha1.AtprotoRecordSpec{RepoRef: &repo, Collection: BadgeBlueKeysNSID, Rkey: AssociationRecordName, Record: record,
+			OnMissingReference: v1alpha1.MissingReferenceDelete}}
+	return c.ApplyTyped(ctx, r, ws, AtprotoRecordGVR, v1alpha1.GroupVersion.String(), "AtprotoRecord", obj)
+}
+
 func OperatorRecordLinks(ws string, remotePDS commonv1.ObjectRef, did string, caRef *commonv1.ObjectRef) []Link {
 	repo := AppRef(KindAtprotoRepo, OperatorRepoName, ws)
 	remote := AppRef(KindRemoteRepo, OperatorRepoName, ws)

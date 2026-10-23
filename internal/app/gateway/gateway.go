@@ -587,6 +587,9 @@ func (p *pass) localAccount(ctx context.Context, plan compose.AccountPlan, id *v
 	if err := c.ApplyLinks(ctx, r, "repo", repoLinks, p.ws); err != nil {
 		return nil, nil, "", false, err
 	}
+	if err := c.ApplyAssociationRecord(ctx, r, p.ws, repo, marketrequester.RequesterIdentity, RequesterAssociate); err != nil {
+		return nil, nil, "", false, err
+	}
 	requesterDir := compose.ComponentCRStateDir(c.StateRoot(), compose.ComponentKindRequester, marketrequester.RequesterComponent)
 	changed, err := compose.SyncRequesterRepoKey(c.StateRoot(), did, requesterDir)
 	if err != nil {

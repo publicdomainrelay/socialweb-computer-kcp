@@ -588,6 +588,9 @@ func (p *pass) local(ctx context.Context, plan compose.AccountPlan, id *v1alpha1
 	if err := c.ApplyLinks(ctx, r, "repo", repoLinks); err != nil {
 		return ctlruntime.Result{}, err
 	}
+	if err := c.ApplyAssociationRecord(ctx, r, ws, repo, BidderIdentity, compose.BidderAssociate); err != nil {
+		return ctlruntime.Result{}, err
+	}
 	identity := compose.OperatorWatched(plan.Identity, o.Spec.Operator, compose.BidderAssociate)
 	identity.Did, identity.PdsURL, identity.Handle = did, pdsPublicURL, pdsHandle
 	if err := c.ApplyIdentitySpec(ctx, r, ws, BidderIdentity, identity); err != nil {
