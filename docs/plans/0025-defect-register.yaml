@@ -102,7 +102,7 @@ items:
       live writer is internal/appctl/atproto_repo.go:49.
   - id: D12-MISSING-OWNERREFS
     title: "StateSync, MarketPresence, Bid and ComputeContract have no ownerRefs"
-    status: todo
+    status: done
     defect: >
       None of these objects carry ownerReferences. Garbage collection relies
       on labels, ttlctl and finalizers. computevm termination creates a
@@ -111,7 +111,7 @@ items:
       be removed by hand during the rc81 proof.
   - id: D13-CA-POOL-STARTUP-ONLY
     title: "Some CA pools are read only at startup"
-    status: todo
+    status: done
     defect: >
       The dispatchertls upstream CA pool and the exposure and PDS client
       verification CA pools are loaded once at startup. Leaf certificates
@@ -164,7 +164,7 @@ items:
       status or conditions.
   - id: D19-CABUNDLEREF-FILE
     title: "caBundleRef is a host file path"
-    status: todo
+    status: done
     defect: >
       caBundleRef is read with os.ReadFile
       (internal/appctl/atprotoscope.go:113); it is not a reference to an
