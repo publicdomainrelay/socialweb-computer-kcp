@@ -19,6 +19,7 @@ import (
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 )
 
 const (
@@ -191,22 +192,25 @@ func (c *LinkController) Reconcile(ctx context.Context, dyn dynamic.Interface, u
 	switch {
 	case err != nil:
 		c.forget(name)
-		setCondition(&status.Conditions, generation, exposurev1alpha1.ComponentLinkConditionAccepted, false, reason, err.Error())
+		conds.Set(&status.Conditions, generation, exposurev1alpha1.ComponentLinkConditionAccepted, false, reason, err.Error())
 	case link.Spec.Suspend:
 		c.forget(name)
-		setCondition(&status.Conditions, generation, exposurev1alpha1.ComponentLinkConditionAccepted, false, "Suspended", "the ComponentLink is suspended")
+		conds.Set(&status.Conditions, generation, exposurev1alpha1.ComponentLinkConditionAccepted, false, "Suspended", "the ComponentLink is suspended")
 	default:
 		c.policy.Set(c.workspace, name, []bus.Link{compiled})
-		setCondition(&status.Conditions, generation, exposurev1alpha1.ComponentLinkConditionAccepted, true, "Accepted",
+		conds.Set(&status.Conditions, generation, exposurev1alpha1.ComponentLinkConditionAccepted, true, "Accepted",
 			fmt.Sprintf("the bus allows %s to call %s with %s", fromString(compiled.From), compiled.To.String(), capabilitiesString(compiled.Capabilities)))
+
 	}
 	to := linkTarget(c.workspace, link.Spec.To)
 	if c.targetRegistered(to) {
-		setCondition(&status.Conditions, generation, exposurev1alpha1.ComponentLinkConditionResolvedRefs, true, "TargetRegistered",
+		conds.Set(&status.Conditions, generation, exposurev1alpha1.ComponentLinkConditionResolvedRefs, true, "TargetRegistered",
 			fmt.Sprintf("the target %s is registered", to.String()))
+
 	} else {
-		setCondition(&status.Conditions, generation, exposurev1alpha1.ComponentLinkConditionResolvedRefs, false, "TargetMissing",
+		conds.Set(&status.Conditions, generation, exposurev1alpha1.ComponentLinkConditionResolvedRefs, false, "TargetMissing",
 			fmt.Sprintf("the target %s is not registered", to.String()))
+
 	}
 	return writeStatus(ctx, ri, name, &status)
 }

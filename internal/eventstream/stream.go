@@ -16,7 +16,6 @@ import (
 	"github.com/bluesky-social/indigo/atproto/syntax"
 	"github.com/ipfs/go-cid"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/dynamic"
@@ -25,6 +24,7 @@ import (
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	v1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 )
 
 type eventStream struct {
@@ -560,21 +560,21 @@ func (s *eventStream) conditionsLocked(conditions []metav1.Condition) []metav1.C
 	if s.phase == eventsv1alpha1.EventStreamPhaseSuspended {
 		readyReason = "Suspended"
 	}
-	setCondition(&conditions, eventsv1alpha1.EventStreamConditionReady, s.ready, readyReason, s.message)
+	conds.Set(&conditions, 0, eventsv1alpha1.EventStreamConditionReady, s.ready, readyReason, s.message)
 	lagReason := "UpToDate"
 	lagMessage := "the stream is current"
 	if s.lag > 0 {
 		lagReason = "CursorGap"
 		lagMessage = fmt.Sprintf("%d events behind", s.lag)
 	}
-	setCondition(&conditions, eventsv1alpha1.EventStreamConditionLagging, s.lagging, lagReason, lagMessage)
+	conds.Set(&conditions, 0, eventsv1alpha1.EventStreamConditionLagging, s.lagging, lagReason, lagMessage)
 	failedReason := "NoError"
 	failedMessage := "the stream is healthy"
 	if s.failed {
 		failedReason = "StreamError"
 		failedMessage = s.message
 	}
-	setCondition(&conditions, eventsv1alpha1.EventStreamConditionFailed, s.failed, failedReason, failedMessage)
+	conds.Set(&conditions, 0, eventsv1alpha1.EventStreamConditionFailed, s.failed, failedReason, failedMessage)
 	for i := range conditions {
 		conditions[i].ObservedGeneration = s.es.Generation
 	}
@@ -787,14 +787,6 @@ func toUnstructured(value any) (map[string]any, error) {
 		return nil, err
 	}
 	return object, nil
-}
-
-func setCondition(conditions *[]metav1.Condition, kind string, ok bool, reason, message string) {
-	status := metav1.ConditionFalse
-	if ok {
-		status = metav1.ConditionTrue
-	}
-	meta.SetStatusCondition(conditions, metav1.Condition{Type: kind, Status: status, Reason: reason, Message: message})
 }
 
 func filterOps(ops []pdsclient.RepoOp, collections []string) []pdsclient.RepoOp {

@@ -16,6 +16,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestseed"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -1247,22 +1248,22 @@ func (r *contractRunner) applyConditions(status *v1alpha1.ComputeContractStatus,
 	now := r.svc.now()
 	addContractConditions(status, generation, phase, message, now, atCapacity)
 	if r.resumed {
-		setCondition(status, generation, v1alpha1.ComputeContractConditionResumed, metav1.ConditionTrue, "Recovered", "the recorded status.contract was resumed", now)
+		conds.SetStatusAt(&status.Conditions, generation, v1alpha1.ComputeContractConditionResumed, metav1.ConditionTrue, "Recovered", "the recorded status.contract was resumed", now)
 	}
 	if phase == v1alpha1.ComputeContractReleasing {
 		if release := r.releaseStatus(); release != nil && release.LastError != "" {
-			setCondition(status, generation, v1alpha1.ComputeContractConditionReleaseFailed, metav1.ConditionTrue, "DestroyFailed", release.LastError, now)
+			conds.SetStatusAt(&status.Conditions, generation, v1alpha1.ComputeContractConditionReleaseFailed, metav1.ConditionTrue, "DestroyFailed", release.LastError, now)
 		}
 	}
 	if phase == v1alpha1.ComputeContractReleased {
 		acknowledged := state != nil && ((state.Release != nil && state.Release.OK) || state.Termination != nil)
 		if acknowledged {
-			setCondition(status, generation, v1alpha1.ComputeContractConditionReleaseAcknowledged, metav1.ConditionTrue, "Acknowledged", message, now)
-			setCondition(status, generation, v1alpha1.ComputeContractConditionReleaseFailed, metav1.ConditionFalse, "Acknowledged", message, now)
+			conds.SetStatusAt(&status.Conditions, generation, v1alpha1.ComputeContractConditionReleaseAcknowledged, metav1.ConditionTrue, "Acknowledged", message, now)
+			conds.SetStatusAt(&status.Conditions, generation, v1alpha1.ComputeContractConditionReleaseFailed, metav1.ConditionFalse, "Acknowledged", message, now)
 		}
 	}
 	if state != nil && state.Termination != nil {
-		setCondition(status, generation, v1alpha1.ComputeContractConditionTerminated, metav1.ConditionTrue, "BidderTerminated", terminationMessage(state.Termination), now)
+		conds.SetStatusAt(&status.Conditions, generation, v1alpha1.ComputeContractConditionTerminated, metav1.ConditionTrue, "BidderTerminated", terminationMessage(state.Termination), now)
 	}
 }
 

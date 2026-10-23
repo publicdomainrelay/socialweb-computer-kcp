@@ -25,6 +25,7 @@ import (
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/servetls"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/tlsreload"
 )
@@ -166,8 +167,8 @@ func (c *ExposureController) Reconcile(ctx context.Context, dyn dynamic.Interfac
 		status.Ready = false
 		status.Address = ""
 		status.Endpoint = ""
-		setCondition(&status.Conditions, generation, ConditionHandlerRegistered, false, "Suspended", "the Exposure is suspended")
-		setCondition(&status.Conditions, generation, ConditionReady, false, "Suspended", "the Exposure is suspended")
+		conds.Set(&status.Conditions, generation, ConditionHandlerRegistered, false, "Suspended", "the Exposure is suspended")
+		conds.Set(&status.Conditions, generation, ConditionReady, false, "Suspended", "the Exposure is suspended")
 		return writeStatus(ctx, ri, name, &status)
 	}
 	if exp.Spec.Mode != exposurev1alpha1.ExposureModeLocal && exp.Spec.Mode != exposurev1alpha1.ExposureModeIngress {
@@ -178,8 +179,8 @@ func (c *ExposureController) Reconcile(ctx context.Context, dyn dynamic.Interfac
 		status.Address = ""
 		status.Endpoint = ""
 		message := fmt.Sprintf("unknown mode %q", exp.Spec.Mode)
-		setCondition(&status.Conditions, generation, ConditionHandlerRegistered, false, "InvalidMode", message)
-		setCondition(&status.Conditions, generation, ConditionReady, false, "InvalidMode", message)
+		conds.Set(&status.Conditions, generation, ConditionHandlerRegistered, false, "InvalidMode", message)
+		conds.Set(&status.Conditions, generation, ConditionReady, false, "InvalidMode", message)
 		return writeStatus(ctx, ri, name, &status)
 	}
 	serviceName := normalizeName(exp.Spec.ServiceRef)
@@ -191,8 +192,8 @@ func (c *ExposureController) Reconcile(ctx context.Context, dyn dynamic.Interfac
 		status.Address = ""
 		status.Endpoint = ""
 		message := "the Exposure has no serviceRef"
-		setCondition(&status.Conditions, generation, ConditionHandlerRegistered, false, "ServiceMissing", message)
-		setCondition(&status.Conditions, generation, ConditionReady, false, "ServiceMissing", message)
+		conds.Set(&status.Conditions, generation, ConditionHandlerRegistered, false, "ServiceMissing", message)
+		conds.Set(&status.Conditions, generation, ConditionReady, false, "ServiceMissing", message)
 		return writeStatus(ctx, ri, name, &status)
 	}
 	svc, err := readService(ctx, dyn, serviceName)
@@ -207,8 +208,8 @@ func (c *ExposureController) Reconcile(ctx context.Context, dyn dynamic.Interfac
 		status.Address = ""
 		status.Endpoint = ""
 		message := "the Service " + serviceName + " is not present in workspace " + c.workspace
-		setCondition(&status.Conditions, generation, ConditionHandlerRegistered, false, "ServiceMissing", message)
-		setCondition(&status.Conditions, generation, ConditionReady, false, "ServiceMissing", message)
+		conds.Set(&status.Conditions, generation, ConditionHandlerRegistered, false, "ServiceMissing", message)
+		conds.Set(&status.Conditions, generation, ConditionReady, false, "ServiceMissing", message)
 		return writeStatus(ctx, ri, name, &status)
 	}
 	if svc.Spec.Suspend {
@@ -219,8 +220,8 @@ func (c *ExposureController) Reconcile(ctx context.Context, dyn dynamic.Interfac
 		status.Address = ""
 		status.Endpoint = ""
 		message := "the Service " + serviceName + " is suspended"
-		setCondition(&status.Conditions, generation, ConditionHandlerRegistered, false, "ServiceSuspended", message)
-		setCondition(&status.Conditions, generation, ConditionReady, false, "ServiceSuspended", message)
+		conds.Set(&status.Conditions, generation, ConditionHandlerRegistered, false, "ServiceSuspended", message)
+		conds.Set(&status.Conditions, generation, ConditionReady, false, "ServiceSuspended", message)
 		return writeStatus(ctx, ri, name, &status)
 	}
 	target, err := targetKey(svc.Spec.TargetRef, c.workspace)
@@ -231,8 +232,8 @@ func (c *ExposureController) Reconcile(ctx context.Context, dyn dynamic.Interfac
 		status.Ready = false
 		status.Address = ""
 		status.Endpoint = ""
-		setCondition(&status.Conditions, generation, ConditionHandlerRegistered, false, "InvalidTarget", err.Error())
-		setCondition(&status.Conditions, generation, ConditionReady, false, "InvalidTarget", err.Error())
+		conds.Set(&status.Conditions, generation, ConditionHandlerRegistered, false, "InvalidTarget", err.Error())
+		conds.Set(&status.Conditions, generation, ConditionReady, false, "InvalidTarget", err.Error())
 		return writeStatus(ctx, ri, name, &status)
 	}
 	handler, found, err := checkHandler(ctx, c.handlers, target, svc.Spec.Protocol, svc.Spec.Handler)
@@ -243,8 +244,8 @@ func (c *ExposureController) Reconcile(ctx context.Context, dyn dynamic.Interfac
 		status.Ready = false
 		status.Address = ""
 		status.Endpoint = ""
-		setCondition(&status.Conditions, generation, ConditionHandlerRegistered, false, "InvalidProtocol", err.Error())
-		setCondition(&status.Conditions, generation, ConditionReady, false, "InvalidProtocol", err.Error())
+		conds.Set(&status.Conditions, generation, ConditionHandlerRegistered, false, "InvalidProtocol", err.Error())
+		conds.Set(&status.Conditions, generation, ConditionReady, false, "InvalidProtocol", err.Error())
 		return writeStatus(ctx, ri, name, &status)
 	}
 	if !found {
@@ -255,8 +256,8 @@ func (c *ExposureController) Reconcile(ctx context.Context, dyn dynamic.Interfac
 		status.Address = ""
 		status.Endpoint = ""
 		message := fmt.Sprintf("no handler %q is registered for %s/%s in workspace %s", handlerName(svc.Spec.Handler), target.Kind, target.Name, target.Workspace)
-		setCondition(&status.Conditions, generation, ConditionHandlerRegistered, false, "HandlerMissing", message)
-		setCondition(&status.Conditions, generation, ConditionReady, false, "HandlerMissing", message)
+		conds.Set(&status.Conditions, generation, ConditionHandlerRegistered, false, "HandlerMissing", message)
+		conds.Set(&status.Conditions, generation, ConditionReady, false, "HandlerMissing", message)
 		return writeStatus(ctx, ri, name, &status)
 	}
 	fingerprint, err := specFingerprint(&exp, svc, target)
@@ -292,8 +293,8 @@ func (c *ExposureController) Reconcile(ctx context.Context, dyn dynamic.Interfac
 		status.Ready = false
 		status.Address = ""
 		status.Endpoint = ""
-		setCondition(&status.Conditions, generation, ConditionHandlerRegistered, true, "HandlerRegistered", "the target handler is registered")
-		setCondition(&status.Conditions, generation, ConditionReady, false, reason, err.Error())
+		conds.Set(&status.Conditions, generation, ConditionHandlerRegistered, true, "HandlerRegistered", "the target handler is registered")
+		conds.Set(&status.Conditions, generation, ConditionReady, false, reason, err.Error())
 		return writeStatus(ctx, ri, name, &status)
 	}
 	rt.fingerprint = fingerprint
@@ -302,11 +303,11 @@ func (c *ExposureController) Reconcile(ctx context.Context, dyn dynamic.Interfac
 	status.Ready = true
 	status.Address = url
 	status.Endpoint = endpoint
-	setCondition(&status.Conditions, generation, ConditionHandlerRegistered, true, "HandlerRegistered", "the target handler is registered")
+	conds.Set(&status.Conditions, generation, ConditionHandlerRegistered, true, "HandlerRegistered", "the target handler is registered")
 	if rt.provider != "" {
-		setCondition(&status.Conditions, generation, ConditionIngressProvider, true, "ProviderReady", rt.provider)
+		conds.Set(&status.Conditions, generation, ConditionIngressProvider, true, "ProviderReady", rt.provider)
 	}
-	setCondition(&status.Conditions, generation, ConditionReady, true, "Ready", readyMessage(rt))
+	conds.Set(&status.Conditions, generation, ConditionReady, true, "Ready", readyMessage(rt))
 	return writeStatus(ctx, ri, name, &status)
 }
 

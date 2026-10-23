@@ -21,6 +21,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/statesync"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
@@ -1206,7 +1207,7 @@ func (a *provisionAdapter) Apply(ctx context.Context, request statesync.Request)
 			status.Timings.AcceptedAt = now.Format(time.RFC3339)
 		}
 		status.Phase = v1alpha1.BidPhaseWon
-		setBidCondition(&status, bid.Generation, v1alpha1.BidConditionComplete, metav1.ConditionTrue, "ContractAccepted", "the guest contract is accepted")
+		conds.SetStatus(&status.Conditions, bid.Generation, v1alpha1.BidConditionComplete, metav1.ConditionTrue, "ContractAccepted", "the guest contract is accepted")
 		if err := service.bids.PatchStatus(ctx, bid.Name, status); err != nil {
 			return statesync.Observation{}, fmt.Errorf("bidder: recording the accepted contract: %w", err)
 		}

@@ -24,6 +24,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpapply"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 
@@ -417,14 +418,6 @@ const (
 	ConditionOneKcp         = "OneKcp"
 )
 
-func setCondition(conds *[]metav1.Condition, gen int64, t string, ok bool, reason, msg string) {
-	s := metav1.ConditionFalse
-	if ok {
-		s = metav1.ConditionTrue
-	}
-	meta.SetStatusCondition(conds, metav1.Condition{Type: t, Status: s, Reason: reason, Message: msg, ObservedGeneration: gen})
-}
-
 func (n *networks) oneKcp(apps []v1alpha1.NetworkAppStatus) []string {
 	front, _, _ := strings.Cut(strings.TrimSuffix(n.ctl.restCfg.Host, "/"), "/clusters/")
 	workspaces := map[string]string{n.ctl.c.workspace(): "the network"}
@@ -682,7 +675,7 @@ func (n *networks) reconcile(ctx context.Context, u *unstructured.Unstructured) 
 		st.Apps = apps
 		st.Components, st.Listeners = snap.Components, snap.Listeners
 		fillNetworkComponentStatus(&st, o.Generation, o.Spec.Suspend, o.Spec.Components, desired, snap, nil, n.ctl.componentDrift(string(o.UID)))
-		setCondition(&st.Conditions, o.Generation, ConditionVerifierPassed, false, "Suspended", "the network is suspended")
+		conds.Set(&st.Conditions, o.Generation, ConditionVerifierPassed, false, "Suspended", "the network is suspended")
 		return write(v1alpha1.ApplicationPhasePending, "suspended")
 	}
 	applyDesired := desired
@@ -718,7 +711,7 @@ func (n *networks) reconcile(ctx context.Context, u *unstructured.Unstructured) 
 				waiting = append(waiting, ComponentKey(d.Kind, d.Name))
 			}
 		}
-		setCondition(&st.Conditions, o.Generation, ConditionServicesReady, false, "Waiting", strings.Join(waiting, "; "))
+		conds.Set(&st.Conditions, o.Generation, ConditionServicesReady, false, "Waiting", strings.Join(waiting, "; "))
 		return write(v1alpha1.ApplicationPhaseProvisioning, "waiting for the network's components to report ready")
 	}
 	if alicePublicURL == "" || bobPublicURL == "" {
@@ -727,7 +720,7 @@ func (n *networks) reconcile(ctx context.Context, u *unstructured.Unstructured) 
 	published, err := networkValueFromExposures(snap, bundle)
 	if err != nil {
 		if n.value == nil || n.valueUID != string(o.UID) {
-			setCondition(&st.Conditions, o.Generation, ConditionServicesReady, false, "Endpoints", err.Error())
+			conds.Set(&st.Conditions, o.Generation, ConditionServicesReady, false, "Endpoints", err.Error())
 			return write(v1alpha1.ApplicationPhaseProvisioning, "the network's Exposure endpoints: "+err.Error())
 		}
 		published = *n.value
@@ -795,19 +788,21 @@ func (n *networks) reconcile(ctx context.Context, u *unstructured.Unstructured) 
 	if err := n.grantPeers(ctx, names); err != nil {
 		log.Warn("granting the child applications reads of each other's MarketIdentity objects", "err", err.Error())
 	}
-	setCondition(&st.Conditions, o.Generation, ConditionServicesReady, true, "Ready",
+	conds.Set(&st.Conditions, o.Generation, ConditionServicesReady, true, "Ready",
 		fmt.Sprintf("%d component(s) are ready and report their endpoints", len(snap.Views)))
+
 	if wrong := n.oneKcp(apps); len(wrong) > 0 {
-		setCondition(&st.Conditions, o.Generation, ConditionOneKcp, false, "Apart", strings.Join(wrong, "; "))
+		conds.Set(&st.Conditions, o.Generation, ConditionOneKcp, false, "Apart", strings.Join(wrong, "; "))
 	} else {
-		setCondition(&st.Conditions, o.Generation, ConditionOneKcp, true, "Workspaces", "every child application runs in its own workspace of the network's kcp")
+		conds.Set(&st.Conditions, o.Generation, ConditionOneKcp, true, "Workspaces", "every child application runs in its own workspace of the network's kcp")
 	}
 	if err := n.verify(ctx, snap, apps); err != nil {
-		setCondition(&st.Conditions, o.Generation, ConditionVerifierPassed, false, "Probe", err.Error())
+		conds.Set(&st.Conditions, o.Generation, ConditionVerifierPassed, false, "Probe", err.Error())
 		return write(v1alpha1.ApplicationPhaseProvisioning, "the network verifier: "+err.Error())
 	}
-	setCondition(&st.Conditions, o.Generation, ConditionVerifierPassed, true, "Verified",
+	conds.Set(&st.Conditions, o.Generation, ConditionVerifierPassed, true, "Verified",
 		"the PLC, relay, PDS, ingress and child application endpoints answer")
+
 	for _, t := range []string{ConditionServicesReady, ConditionOneKcp, ConditionVerifierPassed} {
 		if c := meta.FindStatusCondition(st.Conditions, t); c == nil || c.Status != metav1.ConditionTrue {
 			return write(v1alpha1.ApplicationPhaseProvisioning, "the child applications are ready; waiting for condition "+t)

@@ -8,6 +8,7 @@ import (
 	"k8s.io/client-go/dynamic"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 )
 
 func (c *Controller) ReconcileHostInstall(ctx context.Context, dyn dynamic.Interface, u *unstructured.Unstructured) error {
@@ -37,9 +38,9 @@ func (c *Controller) ReconcileHostInstall(ctx context.Context, dyn dynamic.Inter
 	ready := found && obs.InstalledVersion != "" && matches
 	progressing := found && !ready
 	message := hostInstallMessage(obs, ready, matches)
-	setCondition(&status.Conditions, generation, ConditionInstalled, condition(found), boolReason(found, "RecordFound", "NoRecord"), message)
-	setCondition(&status.Conditions, generation, "Ready", condition(ready), boolReason(ready, "Installed", "NotInstalled"), message)
-	setCondition(&status.Conditions, generation, ConditionProgressing, condition(progressing), boolReason(progressing, "AwaitingVersion", "Settled"), message)
+	conds.SetStatus(&status.Conditions, generation, ConditionInstalled, conds.Status(found), boolReason(found, "RecordFound", "NoRecord"), message)
+	conds.SetStatus(&status.Conditions, generation, "Ready", conds.Status(ready), boolReason(ready, "Installed", "NotInstalled"), message)
+	conds.SetStatus(&status.Conditions, generation, ConditionProgressing, conds.Status(progressing), boolReason(progressing, "AwaitingVersion", "Settled"), message)
 	return c.writeStatus(ctx, dyn, HostInstallGVR, u.GetName(), &status)
 }
 

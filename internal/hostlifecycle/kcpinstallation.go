@@ -8,6 +8,7 @@ import (
 	"k8s.io/client-go/dynamic"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 )
 
 func (c *Controller) ReconcileKcpInstallation(ctx context.Context, dyn dynamic.Interface, u *unstructured.Unstructured) error {
@@ -37,10 +38,10 @@ func (c *Controller) ReconcileKcpInstallation(ctx context.Context, dyn dynamic.I
 	rolling := spec.SelectedSlot != "" && obs.ActiveSlot != spec.SelectedSlot
 	ready := obs.ActiveSlot != "" && obs.FrontBackend != "" && !rolling && !obs.Drifted && !obs.LeaseStale
 	status.Message = kcpMessage(spec, obs, rolling, ready)
-	setCondition(&status.Conditions, generation, v1alpha1.KcpInstallationConditionReady, condition(ready), kcpReason(ready, rolling, obs.Drifted, obs.LeaseStale), status.Message)
-	setCondition(&status.Conditions, generation, v1alpha1.KcpInstallationConditionRolling, condition(rolling), boolReason(rolling, "SlotMismatch", "Steady"), rollingMessage(spec, obs))
-	setCondition(&status.Conditions, generation, v1alpha1.KcpInstallationConditionDrifted, condition(obs.Drifted), boolReason(obs.Drifted, "SlotDrift", "NoDrift"), driftMessage(obs))
-	setCondition(&status.Conditions, generation, v1alpha1.KcpInstallationConditionLeaseStale, condition(obs.LeaseStale), boolReason(obs.LeaseStale, "LeaseNotRenewing", "LeaseFresh"), leaseMessage(obs))
+	conds.SetStatus(&status.Conditions, generation, v1alpha1.KcpInstallationConditionReady, conds.Status(ready), kcpReason(ready, rolling, obs.Drifted, obs.LeaseStale), status.Message)
+	conds.SetStatus(&status.Conditions, generation, v1alpha1.KcpInstallationConditionRolling, conds.Status(rolling), boolReason(rolling, "SlotMismatch", "Steady"), rollingMessage(spec, obs))
+	conds.SetStatus(&status.Conditions, generation, v1alpha1.KcpInstallationConditionDrifted, conds.Status(obs.Drifted), boolReason(obs.Drifted, "SlotDrift", "NoDrift"), driftMessage(obs))
+	conds.SetStatus(&status.Conditions, generation, v1alpha1.KcpInstallationConditionLeaseStale, conds.Status(obs.LeaseStale), boolReason(obs.LeaseStale, "LeaseNotRenewing", "LeaseFresh"), leaseMessage(obs))
 	return c.writeStatus(ctx, dyn, KcpInstallationGVR, u.GetName(), &status)
 }
 

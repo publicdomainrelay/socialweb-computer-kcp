@@ -18,7 +18,6 @@ import (
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -33,6 +32,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpapply"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/statuspatch"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/lease"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
@@ -255,11 +255,6 @@ func capMessage(s string) string {
 	return s[:MessageCap/2] + "\n...\n" + s[len(s)-MessageCap/2:]
 }
 
-func setCondition(st *v1alpha1.ComputeVMStatus, gen int64, t string, status metav1.ConditionStatus, reason, msg string) {
-	meta.SetStatusCondition(&st.Conditions, metav1.Condition{Type: t, Status: status, Reason: reason, Message: capMessage(msg),
-		ObservedGeneration: gen})
-}
-
 func reportConditions(st *v1alpha1.ComputeVMStatus, gen int64) {
 	m := st.Market
 	if m != nil && (m.Address != "" || m.ReportedAt != "") {
@@ -267,21 +262,23 @@ func reportConditions(st *v1alpha1.ComputeVMStatus, gen int64) {
 		if m.Address != "" {
 			msg = "the guest reported its on-network address at " + m.Address
 		}
-		setCondition(st, gen, v1alpha1.ConditionGuestReported, metav1.ConditionTrue, "GuestReported", msg)
+		conds.SetStatus(&st.Conditions, gen, v1alpha1.ConditionGuestReported, metav1.ConditionTrue, "GuestReported", capMessage(msg))
 	} else {
-		setCondition(st, gen, v1alpha1.ConditionGuestReported, metav1.ConditionFalse, "AwaitingGuestReport",
-			"the guest has not reported its on-network address")
+		conds.SetStatus(&st.Conditions, gen, v1alpha1.ConditionGuestReported, metav1.ConditionFalse, "AwaitingGuestReport", capMessage(
+			"the guest has not reported its on-network address"))
+
 	}
 	if m != nil && m.OnNetworkURI != "" {
 		msg := "the market holds the guest's on-network report at " + m.OnNetworkURI
 		if m.HostKeysURI != "" {
 			msg += " and its host-key report at " + m.HostKeysURI
 		}
-		setCondition(st, gen, v1alpha1.ConditionMarketReported, metav1.ConditionTrue, "MarketReported", msg)
+		conds.SetStatus(&st.Conditions, gen, v1alpha1.ConditionMarketReported, metav1.ConditionTrue, "MarketReported", capMessage(msg))
 		return
 	}
-	setCondition(st, gen, v1alpha1.ConditionMarketReported, metav1.ConditionFalse, "AwaitingMarketReport",
-		"the market holds no on-network report for the guest")
+	conds.SetStatus(&st.Conditions, gen, v1alpha1.ConditionMarketReported, metav1.ConditionFalse, "AwaitingMarketReport", capMessage(
+		"the market holds no on-network report for the guest"))
+
 }
 
 func (ct *Controller) writeStatus(ctx context.Context, o v1alpha1.ComputeVM, next v1alpha1.ComputeVMStatus) error {
@@ -423,8 +420,8 @@ func runningStatus(st v1alpha1.ComputeVMStatus, gen int64, ref vmruntime.Runtime
 	st.Addresses = &v1alpha1.ComputeVMAddresses{Guest: ref.GuestAddress, Host: ref.HostAddress}
 	st.BootedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	st.Message = fmt.Sprintf("firecracker %s answers Running in unit %s (pid %d, slot %d)", ref.VMMID, ref.Unit, ref.PID, ref.Slot)
-	setCondition(&st, gen, v1alpha1.ConditionStarted, metav1.ConditionTrue, "UnitStarted", ref.Unit)
-	setCondition(&st, gen, v1alpha1.ConditionRuntimeObserved, metav1.ConditionTrue, conditionReasonOK, "the unit, the VMM pid and firecracker GET / match the record")
+	conds.SetStatus(&st.Conditions, gen, v1alpha1.ConditionStarted, metav1.ConditionTrue, "UnitStarted", capMessage(ref.Unit))
+	conds.SetStatus(&st.Conditions, gen, v1alpha1.ConditionRuntimeObserved, metav1.ConditionTrue, conditionReasonOK, capMessage("the unit, the VMM pid and firecracker GET / match the record"))
 	return st
 }
 
@@ -518,7 +515,7 @@ func (ct *Controller) boot(ctx context.Context, o v1alpha1.ComputeVM) error {
 		}
 		log.Info("prepared", "workDir", prep.WorkDir, "vcpu", prep.Vcpu, "memMiB", prep.MemMiB, "diskMiB", disk, "imageRootfsMiB", imageMiB,
 			"diskKeptAtImageSize", int64(disk) <= imageMiB, "seconds", time.Since(started).Seconds())
-		setCondition(&st, o.Generation, v1alpha1.ConditionPrepared, metav1.ConditionTrue, "Prepared", prep.WorkDir)
+		conds.SetStatus(&st.Conditions, o.Generation, v1alpha1.ConditionPrepared, metav1.ConditionTrue, "Prepared", capMessage(prep.WorkDir))
 		p = prep
 		slot, err = rt.Reserve(ctx, p, ct.placer(o))
 		if err != nil {
@@ -526,7 +523,7 @@ func (ct *Controller) boot(ctx context.Context, o v1alpha1.ComputeVM) error {
 		}
 	}
 	st.Phase, st.Message = v1alpha1.ComputeVMPhaseBooting, "unit "+p.Unit+" placed; waiting for firecracker GET / Running"
-	setCondition(&st, o.Generation, v1alpha1.ConditionStarted, metav1.ConditionTrue, "UnitStarted", p.Unit)
+	conds.SetStatus(&st.Conditions, o.Generation, v1alpha1.ConditionStarted, metav1.ConditionTrue, "UnitStarted", capMessage(p.Unit))
 	if err := ct.writeStatus(ctx, o, st); err != nil {
 		return err
 	}
@@ -544,12 +541,12 @@ func (ct *Controller) observe(ctx context.Context, o v1alpha1.ComputeVM) error {
 	ref := ct.refOf(o)
 	obs, err := ct.c.Runtime.Inspect(ctx, ref)
 	if err != nil && obs.Verdict != hostsvc.VerdictLost.String() {
-		setCondition(&st, o.Generation, v1alpha1.ConditionRuntimeObserved, metav1.ConditionUnknown, "Unknown", err.Error())
+		conds.SetStatus(&st.Conditions, o.Generation, v1alpha1.ConditionRuntimeObserved, metav1.ConditionUnknown, "Unknown", capMessage(err.Error()))
 		return ct.writeStatus(ctx, o, st)
 	}
 	switch obs.Verdict {
 	case hostsvc.VerdictRunning.String():
-		setCondition(&st, o.Generation, v1alpha1.ConditionRuntimeObserved, metav1.ConditionTrue, conditionReasonOK, "the unit, the VMM pid and firecracker GET / match the record")
+		conds.SetStatus(&st.Conditions, o.Generation, v1alpha1.ConditionRuntimeObserved, metav1.ConditionTrue, conditionReasonOK, capMessage("the unit, the VMM pid and firecracker GET / match the record"))
 		return ct.writeStatus(ctx, o, st)
 	case hostsvc.VerdictLost.String():
 		ct.mu.Lock()
@@ -578,7 +575,7 @@ func (ct *Controller) observe(ctx context.Context, o v1alpha1.ComputeVM) error {
 			ct.c.log().Info("reset-failed after a Lost verdict", "computevm", o.Name, "err", err.Error())
 		}
 		st.Phase, st.LostReason, st.Message = v1alpha1.ComputeVMPhaseLost, reason, msg
-		setCondition(&st, o.Generation, v1alpha1.ConditionRuntimeObserved, metav1.ConditionFalse, string(reason), msg)
+		conds.SetStatus(&st.Conditions, o.Generation, v1alpha1.ConditionRuntimeObserved, metav1.ConditionFalse, string(reason), capMessage(msg))
 		ct.c.log().Warn("lost", "computevm", o.Name, "reason", string(reason), "detail", msg)
 		if err := ct.ensureTerminationSync(ctx, o, GoneReason(reason), time.Now().UTC().Format(time.RFC3339), nil); err != nil {
 			ct.c.log().Warn("creating the termination StateSync of a lost ComputeVM failed", "computevm", o.Name, "err", err.Error())
@@ -589,7 +586,7 @@ func (ct *Controller) observe(ctx context.Context, o v1alpha1.ComputeVM) error {
 	if err != nil {
 		detail = err.Error()
 	}
-	setCondition(&st, o.Generation, v1alpha1.ConditionRuntimeObserved, metav1.ConditionUnknown, "Unknown", detail)
+	conds.SetStatus(&st.Conditions, o.Generation, v1alpha1.ConditionRuntimeObserved, metav1.ConditionUnknown, "Unknown", capMessage(detail))
 	return ct.writeStatus(ctx, o, st)
 }
 

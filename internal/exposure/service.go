@@ -16,6 +16,7 @@ import (
 
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -98,8 +99,8 @@ func (c *ServiceController) Reconcile(ctx context.Context, dyn dynamic.Interface
 		status.Phase = exposurev1alpha1.ServicePending
 		status.Ready = false
 		status.Endpoints = nil
-		setCondition(&status.Conditions, generation, ConditionHandlerRegistered, false, "Suspended", "the Service is suspended")
-		setCondition(&status.Conditions, generation, ConditionReady, false, "Suspended", "the Service is suspended")
+		conds.Set(&status.Conditions, generation, ConditionHandlerRegistered, false, "Suspended", "the Service is suspended")
+		conds.Set(&status.Conditions, generation, ConditionReady, false, "Suspended", "the Service is suspended")
 		return writeStatus(ctx, ri, name, &status)
 	}
 	target, err := targetKey(svc.Spec.TargetRef, c.workspace)
@@ -107,8 +108,8 @@ func (c *ServiceController) Reconcile(ctx context.Context, dyn dynamic.Interface
 		status.Phase = exposurev1alpha1.ServiceFailed
 		status.Ready = false
 		status.Endpoints = nil
-		setCondition(&status.Conditions, generation, ConditionHandlerRegistered, false, "InvalidTarget", err.Error())
-		setCondition(&status.Conditions, generation, ConditionReady, false, "InvalidTarget", err.Error())
+		conds.Set(&status.Conditions, generation, ConditionHandlerRegistered, false, "InvalidTarget", err.Error())
+		conds.Set(&status.Conditions, generation, ConditionReady, false, "InvalidTarget", err.Error())
 		return writeStatus(ctx, ri, name, &status)
 	}
 	_, found, err := checkHandler(ctx, c.handlers, target, svc.Spec.Protocol, svc.Spec.Handler)
@@ -116,8 +117,8 @@ func (c *ServiceController) Reconcile(ctx context.Context, dyn dynamic.Interface
 		status.Phase = exposurev1alpha1.ServiceFailed
 		status.Ready = false
 		status.Endpoints = nil
-		setCondition(&status.Conditions, generation, ConditionHandlerRegistered, false, "InvalidProtocol", err.Error())
-		setCondition(&status.Conditions, generation, ConditionReady, false, "InvalidProtocol", err.Error())
+		conds.Set(&status.Conditions, generation, ConditionHandlerRegistered, false, "InvalidProtocol", err.Error())
+		conds.Set(&status.Conditions, generation, ConditionReady, false, "InvalidProtocol", err.Error())
 		return writeStatus(ctx, ri, name, &status)
 	}
 	if !found {
@@ -125,16 +126,16 @@ func (c *ServiceController) Reconcile(ctx context.Context, dyn dynamic.Interface
 		status.Ready = false
 		status.Endpoints = nil
 		message := fmt.Sprintf("no handler %q is registered for %s/%s in workspace %s", handlerName(svc.Spec.Handler), target.Kind, target.Name, target.Workspace)
-		setCondition(&status.Conditions, generation, ConditionHandlerRegistered, false, "HandlerMissing", message)
-		setCondition(&status.Conditions, generation, ConditionReady, false, "HandlerMissing", message)
+		conds.Set(&status.Conditions, generation, ConditionHandlerRegistered, false, "HandlerMissing", message)
+		conds.Set(&status.Conditions, generation, ConditionReady, false, "HandlerMissing", message)
 		return writeStatus(ctx, ri, name, &status)
 	}
 	status.Phase = exposurev1alpha1.ServiceReady
 	status.Ready = true
 	status.Endpoints = endpointsFor(c.registry, target)
 	message := fmt.Sprintf("the handler %q is registered for %s/%s", handlerName(svc.Spec.Handler), target.Kind, target.Name)
-	setCondition(&status.Conditions, generation, ConditionHandlerRegistered, true, "HandlerRegistered", message)
-	setCondition(&status.Conditions, generation, ConditionReady, true, "Ready", message)
+	conds.Set(&status.Conditions, generation, ConditionHandlerRegistered, true, "HandlerRegistered", message)
+	conds.Set(&status.Conditions, generation, ConditionReady, true, "Ready", message)
 	return writeStatus(ctx, ri, name, &status)
 }
 

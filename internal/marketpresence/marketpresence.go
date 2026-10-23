@@ -14,7 +14,6 @@ import (
 	"github.com/bluesky-social/indigo/atproto/identity"
 	"github.com/bluesky-social/indigo/atproto/syntax"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -24,6 +23,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/ingress"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -378,13 +378,13 @@ func (c *Controller) reconcile(ctx context.Context, dyn dynamic.Interface, u *un
 	bidder, err := c.bidder(ctx, presence.Spec.BidderRef)
 	switch {
 	case apierrors.IsNotFound(err):
-		setCondition(&status, gen, ConditionBidderReady, metav1.ConditionFalse, "BidderMissing", "the Bidder named by the MarketPresence does not exist")
+		conds.SetStatus(&status.Conditions, gen, ConditionBidderReady, metav1.ConditionFalse, "BidderMissing", "the Bidder named by the MarketPresence does not exist")
 		c.expire(&status, gen, "BidderMissing", "the Bidder named by the MarketPresence does not exist")
 		c.write(ctx, dyn, presence.Name, &current, &status)
 		return
 	case err != nil:
 		c.log.Warn("reading the Bidder of a MarketPresence", "marketpresence", presence.Name, "err", err.Error())
-		setCondition(&status, gen, ConditionBidderReady, metav1.ConditionFalse, "BidderUnreadable", "the Bidder named by the MarketPresence could not be read")
+		conds.SetStatus(&status.Conditions, gen, ConditionBidderReady, metav1.ConditionFalse, "BidderUnreadable", "the Bidder named by the MarketPresence could not be read")
 		c.expire(&status, gen, "BidderUnreadable", "the Bidder named by the MarketPresence could not be read")
 		c.write(ctx, dyn, presence.Name, &current, &status)
 		return
@@ -392,13 +392,13 @@ func (c *Controller) reconcile(ctx context.Context, dyn dynamic.Interface, u *un
 
 	bidderReady, phase := bidderReadiness(bidder)
 	if bidderReady {
-		setCondition(&status, gen, ConditionBidderReady, metav1.ConditionTrue, "BidderReady", "the Bidder reports Ready")
+		conds.SetStatus(&status.Conditions, gen, ConditionBidderReady, metav1.ConditionTrue, "BidderReady", "the Bidder reports Ready")
 	} else {
 		message := "the Bidder is not Ready"
 		if phase != "" && phase != "Ready" {
 			message = "the Bidder is " + phase
 		}
-		setCondition(&status, gen, ConditionBidderReady, metav1.ConditionFalse, "BidderNotReady", message)
+		conds.SetStatus(&status.Conditions, gen, ConditionBidderReady, metav1.ConditionFalse, "BidderNotReady", message)
 	}
 
 	offering := strings.TrimSpace(presence.Spec.OfferingURI)
@@ -437,11 +437,11 @@ func (c *Controller) reconcile(ctx context.Context, dyn dynamic.Interface, u *un
 
 	switch {
 	case !observed.IsZero():
-		setCondition(&status, gen, ConditionHeartbeat, metav1.ConditionTrue, "HeartbeatFresh", "the market heartbeat is readable")
+		conds.SetStatus(&status.Conditions, gen, ConditionHeartbeat, metav1.ConditionTrue, "HeartbeatFresh", "the market heartbeat is readable")
 	case fresh:
-		setCondition(&status, gen, ConditionHeartbeat, metav1.ConditionTrue, "HeartbeatCached", "the market heartbeat is unreadable; the last observed heartbeat is within the TTL")
+		conds.SetStatus(&status.Conditions, gen, ConditionHeartbeat, metav1.ConditionTrue, "HeartbeatCached", "the market heartbeat is unreadable; the last observed heartbeat is within the TTL")
 	default:
-		setCondition(&status, gen, ConditionHeartbeat, metav1.ConditionFalse, heartbeatReason, "no fresh market heartbeat is readable")
+		conds.SetStatus(&status.Conditions, gen, ConditionHeartbeat, metav1.ConditionFalse, heartbeatReason, "no fresh market heartbeat is readable")
 	}
 
 	active := bidderReady && fresh
@@ -449,19 +449,19 @@ func (c *Controller) reconcile(ctx context.Context, dyn dynamic.Interface, u *un
 	case active:
 		status.Phase = v1alpha1.MarketPresencePhaseActive
 		status.Ready = true
-		setCondition(&status, gen, ConditionReady, metav1.ConditionTrue, "Active", "the Bidder is Ready and its heartbeat is within the TTL")
+		conds.SetStatus(&status.Conditions, gen, ConditionReady, metav1.ConditionTrue, "Active", "the Bidder is Ready and its heartbeat is within the TTL")
 	case !fresh && last != "":
 		status.Phase = v1alpha1.MarketPresencePhaseExpired
 		status.Ready = false
-		setCondition(&status, gen, ConditionReady, metav1.ConditionFalse, "HeartbeatExpired", "the last market heartbeat is older than ttlSeconds")
+		conds.SetStatus(&status.Conditions, gen, ConditionReady, metav1.ConditionFalse, "HeartbeatExpired", "the last market heartbeat is older than ttlSeconds")
 	case !fresh:
 		status.Phase = v1alpha1.MarketPresencePhaseExpired
 		status.Ready = false
-		setCondition(&status, gen, ConditionReady, metav1.ConditionFalse, heartbeatReason, "no fresh market heartbeat is readable")
+		conds.SetStatus(&status.Conditions, gen, ConditionReady, metav1.ConditionFalse, heartbeatReason, "no fresh market heartbeat is readable")
 	default:
 		status.Phase = v1alpha1.MarketPresencePhaseExpired
 		status.Ready = false
-		setCondition(&status, gen, ConditionReady, metav1.ConditionFalse, "BidderNotReady", "the Bidder is not Ready")
+		conds.SetStatus(&status.Conditions, gen, ConditionReady, metav1.ConditionFalse, "BidderNotReady", "the Bidder is not Ready")
 	}
 
 	c.write(ctx, dyn, presence.Name, &current, &status)
@@ -470,8 +470,8 @@ func (c *Controller) reconcile(ctx context.Context, dyn dynamic.Interface, u *un
 func (c *Controller) expire(status *v1alpha1.MarketPresenceStatus, gen int64, reason, message string) {
 	status.Phase = v1alpha1.MarketPresencePhaseExpired
 	status.Ready = false
-	setCondition(status, gen, ConditionReady, metav1.ConditionFalse, reason, message)
-	setCondition(status, gen, ConditionHeartbeat, metav1.ConditionFalse, reason, message)
+	conds.SetStatus(&status.Conditions, gen, ConditionReady, metav1.ConditionFalse, reason, message)
+	conds.SetStatus(&status.Conditions, gen, ConditionHeartbeat, metav1.ConditionFalse, reason, message)
 }
 
 func (c *Controller) heartbeat(ctx context.Context, did, offering string, bidder *unstructured.Unstructured, now time.Time) (time.Time, string) {
@@ -577,16 +577,6 @@ func bidderDID(bidder *unstructured.Unstructured) string {
 	}
 	did, _, _ := unstructured.NestedString(bidder.Object, "spec", "identity", "did")
 	return strings.TrimSpace(did)
-}
-
-func setCondition(status *v1alpha1.MarketPresenceStatus, gen int64, t string, value metav1.ConditionStatus, reason, message string) {
-	meta.SetStatusCondition(&status.Conditions, metav1.Condition{
-		Type:               t,
-		Status:             value,
-		Reason:             reason,
-		Message:            message,
-		ObservedGeneration: gen,
-	})
 }
 
 func (c *Controller) write(ctx context.Context, dyn dynamic.Interface, name string, current, status *v1alpha1.MarketPresenceStatus) {

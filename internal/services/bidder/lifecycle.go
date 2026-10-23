@@ -16,6 +16,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestidentity"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/statesync"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
@@ -201,7 +202,7 @@ func (s *Service) failBid(ctx context.Context, bid *v1alpha1.Bid, reason, messag
 	status.Phase = v1alpha1.BidPhaseFailed
 	status.Message = message
 	status.Timings.FinishedAt = now.Format(time.RFC3339)
-	setBidCondition(&status, bid.Generation, v1alpha1.BidConditionFailed, metav1.ConditionTrue, reason, message)
+	conds.SetStatus(&status.Conditions, bid.Generation, v1alpha1.BidConditionFailed, metav1.ConditionTrue, reason, message)
 	if s.applyBidStatus(ctx, bid, status) {
 		s.log.Info("a bid failed", "bid", bid.Name, "reason", reason, "message", message)
 	}
@@ -226,8 +227,9 @@ func (s *Service) expireBid(ctx context.Context, bid *v1alpha1.Bid, now time.Tim
 	status := cloneBidStatus(bid.Status)
 	status.Phase = v1alpha1.BidPhaseExpired
 	status.Timings.FinishedAt = now.Format(time.RFC3339)
-	setBidCondition(&status, bid.Generation, v1alpha1.BidConditionExpired, metav1.ConditionTrue, "Deadline",
+	conds.SetStatus(&status.Conditions, bid.Generation, v1alpha1.BidConditionExpired, metav1.ConditionTrue, "Deadline",
 		"the bid expired at "+bid.Spec.ExpiresAt)
+
 	s.applyBidStatus(ctx, bid, status)
 	s.log.Info("a bid expired", "bid", bid.Name, "expiresAt", bid.Spec.ExpiresAt)
 }
@@ -263,7 +265,7 @@ func (s *Service) recordPublishFailure(ctx context.Context, bid *v1alpha1.Bid, e
 	status.PublishAttempts++
 	status.LastError = statusError(err)
 	if status.PublishAttempts >= PublishStallThreshold {
-		setBidCondition(&status, bid.Generation, v1alpha1.BidConditionStalled, metav1.ConditionTrue, "PublishFailed", status.LastError)
+		conds.SetStatus(&status.Conditions, bid.Generation, v1alpha1.BidConditionStalled, metav1.ConditionTrue, "PublishFailed", status.LastError)
 	}
 	s.applyBidStatus(ctx, bid, status)
 }
@@ -279,8 +281,8 @@ func (s *Service) recordPublishedBid(ctx context.Context, bid *v1alpha1.Bid, ref
 		status.Timings.PublishedAt = now.Format(time.RFC3339)
 	}
 	status.LastError = ""
-	setBidCondition(&status, bid.Generation, v1alpha1.BidConditionPublished, metav1.ConditionTrue, "Published", "the bid record is published")
-	setBidCondition(&status, bid.Generation, v1alpha1.BidConditionStalled, metav1.ConditionFalse, "Published", "the bid publish recovered")
+	conds.SetStatus(&status.Conditions, bid.Generation, v1alpha1.BidConditionPublished, metav1.ConditionTrue, "Published", "the bid record is published")
+	conds.SetStatus(&status.Conditions, bid.Generation, v1alpha1.BidConditionStalled, metav1.ConditionFalse, "Published", "the bid publish recovered")
 	return s.applyBidStatus(ctx, bid, status)
 }
 
@@ -449,7 +451,7 @@ func (s *Service) markBidReleasing(ctx context.Context, bid *v1alpha1.Bid, info 
 		Reason:       "deleted_on_request",
 		At:           now.Format(time.RFC3339),
 	}
-	setBidCondition(&status, bid.Generation, BidConditionReleasing, metav1.ConditionTrue, reason, message)
+	conds.SetStatus(&status.Conditions, bid.Generation, BidConditionReleasing, metav1.ConditionTrue, reason, message)
 	s.applyBidStatus(ctx, bid, status)
 }
 
@@ -475,11 +477,13 @@ func (s *Service) markBidReleaseRequested(ctx context.Context, bid *v1alpha1.Bid
 	}
 	status.Terminated = terminated
 	if info.computeVM != "" {
-		setBidCondition(&status, bid.Generation, BidConditionReleasing, metav1.ConditionTrue, "ReleaseRequested",
+		conds.SetStatus(&status.Conditions, bid.Generation, BidConditionReleasing, metav1.ConditionTrue, "ReleaseRequested",
 			"the release of "+info.computeVM+" is requested")
+
 	} else {
-		setBidCondition(&status, bid.Generation, BidConditionReleasing, metav1.ConditionTrue, "ReleaseRequested",
+		conds.SetStatus(&status.Conditions, bid.Generation, BidConditionReleasing, metav1.ConditionTrue, "ReleaseRequested",
 			"the release of the accepted contract is requested")
+
 	}
 	s.applyBidStatus(ctx, bid, status)
 }
@@ -562,7 +566,7 @@ func (s *Service) completeBidRelease(ctx context.Context, bid *v1alpha1.Bid, inf
 		status.Terminated.EventURI = acked.EventURI
 		status.Terminated.EventCid = acked.EventCid
 	}
-	setBidCondition(&status, bid.Generation, BidConditionReleasing, metav1.ConditionFalse, "Released", "the guest is released")
+	conds.SetStatus(&status.Conditions, bid.Generation, BidConditionReleasing, metav1.ConditionFalse, "Released", "the guest is released")
 	if s.applyBidStatus(ctx, bid, status) {
 		s.log.Info("a released bid is marked terminated", "bid", bid.Name, "computevm", info.computeVM)
 	}
@@ -638,16 +642,6 @@ func cloneBidStatus(status v1alpha1.BidStatus) v1alpha1.BidStatus {
 		status.Conditions = append([]metav1.Condition(nil), status.Conditions...)
 	}
 	return status
-}
-
-func setBidCondition(status *v1alpha1.BidStatus, generation int64, conditionType string, conditionStatus metav1.ConditionStatus, reason, message string) {
-	apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{
-		Type:               conditionType,
-		Status:             conditionStatus,
-		Reason:             reason,
-		Message:            message,
-		ObservedGeneration: generation,
-	})
 }
 
 func statusError(err error) string {

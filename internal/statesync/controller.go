@@ -16,7 +16,6 @@ import (
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -25,6 +24,7 @@ import (
 	"k8s.io/client-go/dynamic"
 
 	v1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 )
 
 const (
@@ -157,23 +157,23 @@ func (c *Controller) Reconcile(ctx context.Context, dyn dynamic.Interface, u *un
 	if err := validateSpec(obj.Spec); err != nil {
 		status.Phase = v1alpha1.StateSyncPhaseFailed
 		status.LastError = err.Error()
-		setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionAcked, false, "InvalidSpec", err.Error())
-		setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionStalled, false, "InvalidSpec", err.Error())
+		conds.Set(&status.Conditions, generation, v1alpha1.StateSyncConditionAcked, false, "InvalidSpec", err.Error())
+		conds.Set(&status.Conditions, generation, v1alpha1.StateSyncConditionStalled, false, "InvalidSpec", err.Error())
 		return writeStatus(ctx, ri, name, &status)
 	}
 	if obj.Spec.Suspend {
 		status.Phase = v1alpha1.StateSyncPhasePending
-		setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionAcked, false, "Suspended", "the StateSync is suspended")
-		setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionDrifted, false, "Suspended", "the StateSync is suspended")
-		setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionStalled, false, "Suspended", "the StateSync is suspended")
+		conds.Set(&status.Conditions, generation, v1alpha1.StateSyncConditionAcked, false, "Suspended", "the StateSync is suspended")
+		conds.Set(&status.Conditions, generation, v1alpha1.StateSyncConditionDrifted, false, "Suspended", "the StateSync is suspended")
+		conds.Set(&status.Conditions, generation, v1alpha1.StateSyncConditionStalled, false, "Suspended", "the StateSync is suspended")
 		return writeStatus(ctx, ri, name, &status)
 	}
 	adapter, err := c.registry.Lookup(obj.Spec.Sink.Adapter)
 	if err != nil {
 		status.Phase = v1alpha1.StateSyncPhaseFailed
 		status.LastError = err.Error()
-		setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionAcked, false, "UnknownAdapter", err.Error())
-		setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionStalled, false, "UnknownAdapter", err.Error())
+		conds.Set(&status.Conditions, generation, v1alpha1.StateSyncConditionAcked, false, "UnknownAdapter", err.Error())
+		conds.Set(&status.Conditions, generation, v1alpha1.StateSyncConditionStalled, false, "UnknownAdapter", err.Error())
 		return writeStatus(ctx, ri, name, &status)
 	}
 	desiredHash := hashPayload(obj.Spec.Payload)
@@ -202,10 +202,10 @@ func (c *Controller) Reconcile(ctx context.Context, dyn dynamic.Interface, u *un
 		status.Phase = v1alpha1.StateSyncPhaseAcked
 		status.Attempts = 0
 		status.LastError = ""
-		setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionAcked, true, "Acked", "the observation matches the desired state")
-		setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionObserved, true, "Exists", "the target exists")
-		setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionDrifted, false, "NoDrift", "the observation matches the desired state")
-		setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionStalled, false, "NotStalled", "the target is current")
+		conds.Set(&status.Conditions, generation, v1alpha1.StateSyncConditionAcked, true, "Acked", "the observation matches the desired state")
+		conds.Set(&status.Conditions, generation, v1alpha1.StateSyncConditionObserved, true, "Exists", "the target exists")
+		conds.Set(&status.Conditions, generation, v1alpha1.StateSyncConditionDrifted, false, "NoDrift", "the observation matches the desired state")
+		conds.Set(&status.Conditions, generation, v1alpha1.StateSyncConditionStalled, false, "NotStalled", "the target is current")
 		return writeStatus(ctx, ri, name, &status)
 	}
 	direction := directionOf(obj.Spec)
@@ -218,22 +218,22 @@ func (c *Controller) Reconcile(ctx context.Context, dyn dynamic.Interface, u *un
 			status.Phase = v1alpha1.StateSyncPhaseAcked
 			status.Attempts = 0
 			status.LastError = ""
-			setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionAcked, true, "Acked", "the inbound observation is acknowledged")
-			setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionObserved, true, "Exists", "the target exists")
-			setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionDrifted, false, "Inbound", "an inbound StateSync does not apply its payload")
-			setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionStalled, false, "NotStalled", "the target exists")
+			conds.Set(&status.Conditions, generation, v1alpha1.StateSyncConditionAcked, true, "Acked", "the inbound observation is acknowledged")
+			conds.Set(&status.Conditions, generation, v1alpha1.StateSyncConditionObserved, true, "Exists", "the target exists")
+			conds.Set(&status.Conditions, generation, v1alpha1.StateSyncConditionDrifted, false, "Inbound", "an inbound StateSync does not apply its payload")
+			conds.Set(&status.Conditions, generation, v1alpha1.StateSyncConditionStalled, false, "NotStalled", "the target exists")
 		} else {
 			status.Phase = v1alpha1.StateSyncPhasePending
-			setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionAcked, false, "NotAcked", "the target does not exist")
-			setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionObserved, false, "NotFound", "the target does not exist")
-			setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionDrifted, false, "Inbound", "an inbound StateSync does not apply its payload")
-			setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionStalled, false, "NotStalled", "waiting for the target")
+			conds.Set(&status.Conditions, generation, v1alpha1.StateSyncConditionAcked, false, "NotAcked", "the target does not exist")
+			conds.Set(&status.Conditions, generation, v1alpha1.StateSyncConditionObserved, false, "NotFound", "the target does not exist")
+			conds.Set(&status.Conditions, generation, v1alpha1.StateSyncConditionDrifted, false, "Inbound", "an inbound StateSync does not apply its payload")
+			conds.Set(&status.Conditions, generation, v1alpha1.StateSyncConditionStalled, false, "NotStalled", "waiting for the target")
 		}
 		return writeStatus(ctx, ri, name, &status)
 	}
 	if observation.Exists {
-		setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionObserved, true, "Exists", "the target exists")
-		setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionDrifted, true, "HashMismatch", "the observed hash differs from the desired hash")
+		conds.Set(&status.Conditions, generation, v1alpha1.StateSyncConditionObserved, true, "Exists", "the target exists")
+		conds.Set(&status.Conditions, generation, v1alpha1.StateSyncConditionDrifted, true, "HashMismatch", "the observed hash differs from the desired hash")
 		switch conflictPolicyOf(obj.Spec) {
 		case v1alpha1.StateSyncConflictTargetWins:
 			if err := c.acknowledge(ctx, dyn, obj, observation); err != nil {
@@ -243,24 +243,24 @@ func (c *Controller) Reconcile(ctx context.Context, dyn dynamic.Interface, u *un
 			status.Phase = v1alpha1.StateSyncPhaseAcked
 			status.Attempts = 0
 			status.LastError = ""
-			setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionAcked, true, "TargetWins", "the target state is acknowledged")
-			setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionDrifted, true, "TargetWins", "the target state is kept")
-			setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionStalled, false, "NotStalled", "the target state is kept")
+			conds.Set(&status.Conditions, generation, v1alpha1.StateSyncConditionAcked, true, "TargetWins", "the target state is acknowledged")
+			conds.Set(&status.Conditions, generation, v1alpha1.StateSyncConditionDrifted, true, "TargetWins", "the target state is kept")
+			conds.Set(&status.Conditions, generation, v1alpha1.StateSyncConditionStalled, false, "NotStalled", "the target state is kept")
 			return writeStatus(ctx, ri, name, &status)
 		case v1alpha1.StateSyncConflictReportOnly:
 			status.Phase = v1alpha1.StateSyncPhaseDrifted
-			setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionAcked, false, "Drift", "report only: the target is not changed")
-			setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionStalled, false, "NotStalled", "drift is reported")
+			conds.Set(&status.Conditions, generation, v1alpha1.StateSyncConditionAcked, false, "Drift", "report only: the target is not changed")
+			conds.Set(&status.Conditions, generation, v1alpha1.StateSyncConditionStalled, false, "NotStalled", "drift is reported")
 			return writeStatus(ctx, ri, name, &status)
 		}
 	} else {
-		setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionObserved, false, "NotFound", "the target does not exist")
-		setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionDrifted, false, "NoDrift", "there is no observation to drift")
+		conds.Set(&status.Conditions, generation, v1alpha1.StateSyncConditionObserved, false, "NotFound", "the target does not exist")
+		conds.Set(&status.Conditions, generation, v1alpha1.StateSyncConditionDrifted, false, "NoDrift", "there is no observation to drift")
 	}
 	if status.Phase == v1alpha1.StateSyncPhaseStalled && priorGeneration == generation {
 		if !stallDue(status.LastAttemptAt, time.Now().UTC()) {
-			setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionAcked, false, "Stalled", "the attempts are exhausted")
-			setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionStalled, true, "AttemptsExhausted", "the attempts are exhausted")
+			conds.Set(&status.Conditions, generation, v1alpha1.StateSyncConditionAcked, false, "Stalled", "the attempts are exhausted")
+			conds.Set(&status.Conditions, generation, v1alpha1.StateSyncConditionStalled, true, "AttemptsExhausted", "the attempts are exhausted")
 			return writeStatus(ctx, ri, name, &status)
 		}
 		status.Attempts = 0
@@ -295,10 +295,10 @@ func (c *Controller) Reconcile(ctx context.Context, dyn dynamic.Interface, u *un
 	status.Phase = v1alpha1.StateSyncPhaseAcked
 	status.Attempts = 0
 	status.LastError = ""
-	setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionAcked, true, "Acked", "the applied state is observed")
-	setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionObserved, true, "Exists", "the target exists")
-	setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionDrifted, false, "NoDrift", "the observation matches the desired state")
-	setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionStalled, false, "NotStalled", "the target is current")
+	conds.Set(&status.Conditions, generation, v1alpha1.StateSyncConditionAcked, true, "Acked", "the applied state is observed")
+	conds.Set(&status.Conditions, generation, v1alpha1.StateSyncConditionObserved, true, "Exists", "the target exists")
+	conds.Set(&status.Conditions, generation, v1alpha1.StateSyncConditionDrifted, false, "NoDrift", "the observation matches the desired state")
+	conds.Set(&status.Conditions, generation, v1alpha1.StateSyncConditionStalled, false, "NotStalled", "the target is current")
 	return writeStatus(ctx, ri, name, &status)
 }
 
@@ -352,22 +352,22 @@ func (c *Controller) fail(ctx context.Context, ri dynamic.ResourceInterface, nam
 	if errors.Is(cause, ErrRejected) {
 		status.Attempts = retryMax
 		status.Phase = v1alpha1.StateSyncPhaseFailed
-		setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionAcked, false, "Rejected", cause.Error())
-		setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionStalled, false, "Rejected", cause.Error())
+		conds.Set(&status.Conditions, generation, v1alpha1.StateSyncConditionAcked, false, "Rejected", cause.Error())
+		conds.Set(&status.Conditions, generation, v1alpha1.StateSyncConditionStalled, false, "Rejected", cause.Error())
 		return writeStatus(ctx, ri, name, status)
 	}
 	if status.Attempts >= retryMax {
 		status.Phase = v1alpha1.StateSyncPhaseStalled
-		setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionAcked, false, "AttemptsExhausted", cause.Error())
-		setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionStalled, true, "AttemptsExhausted", cause.Error())
+		conds.Set(&status.Conditions, generation, v1alpha1.StateSyncConditionAcked, false, "AttemptsExhausted", cause.Error())
+		conds.Set(&status.Conditions, generation, v1alpha1.StateSyncConditionStalled, true, "AttemptsExhausted", cause.Error())
 		if err := writeStatus(ctx, ri, name, status); err != nil {
 			return err
 		}
 		return nil
 	}
 	status.Phase = v1alpha1.StateSyncPhaseFailed
-	setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionAcked, false, "AttemptFailed", cause.Error())
-	setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionStalled, false, "Retrying", cause.Error())
+	conds.Set(&status.Conditions, generation, v1alpha1.StateSyncConditionAcked, false, "AttemptFailed", cause.Error())
+	conds.Set(&status.Conditions, generation, v1alpha1.StateSyncConditionStalled, false, "Retrying", cause.Error())
 	if err := writeStatus(ctx, ri, name, status); err != nil {
 		return err
 	}
@@ -382,12 +382,12 @@ func (c *Controller) failDelete(ctx context.Context, ri dynamic.ResourceInterfac
 	}
 	if status.Attempts >= retryMax {
 		status.Phase = v1alpha1.StateSyncPhaseStalled
-		setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionStalled, true, "ReleaseFailed", cause.Error())
+		conds.Set(&status.Conditions, generation, v1alpha1.StateSyncConditionStalled, true, "ReleaseFailed", cause.Error())
 		_ = writeStatus(ctx, ri, name, status)
 		return ensureFinalizer(ctx, ri, name, Finalizer, false)
 	}
 	status.Phase = v1alpha1.StateSyncPhaseFailed
-	setCondition(&status.Conditions, generation, v1alpha1.StateSyncConditionStalled, false, "RetryingRelease", cause.Error())
+	conds.Set(&status.Conditions, generation, v1alpha1.StateSyncConditionStalled, false, "RetryingRelease", cause.Error())
 	if err := writeStatus(ctx, ri, name, status); err != nil {
 		return err
 	}
@@ -687,20 +687,6 @@ func ensureFinalizer(ctx context.Context, ri dynamic.ResourceInterface, name, fi
 
 func containsString(values []string, want string) bool {
 	return slices.Contains(values, want)
-}
-
-func setCondition(conditions *[]metav1.Condition, generation int64, kind string, ok bool, reason, message string) {
-	value := metav1.ConditionFalse
-	if ok {
-		value = metav1.ConditionTrue
-	}
-	meta.SetStatusCondition(conditions, metav1.Condition{
-		Type:               kind,
-		Status:             value,
-		Reason:             reason,
-		Message:            message,
-		ObservedGeneration: generation,
-	})
 }
 
 func isNotFound(err error) bool {

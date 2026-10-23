@@ -11,7 +11,6 @@ import (
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -23,6 +22,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpapply"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/logcap"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
@@ -332,15 +332,6 @@ func (s *Supervisor) observe(ctx context.Context, o v1alpha1.HostProcess) Observ
 	return obs
 }
 
-func setCondition(o *v1alpha1.HostProcess, t string, ok bool, reason, msg string) {
-	st := metav1.ConditionFalse
-	if ok {
-		st = metav1.ConditionTrue
-	}
-	meta.SetStatusCondition(&o.Status.Conditions, metav1.Condition{Type: t, Status: st, Reason: reason, Message: msg,
-		ObservedGeneration: o.Generation})
-}
-
 func (s *Supervisor) apply(ctx context.Context, o v1alpha1.HostProcess, r Result) v1alpha1.HostProcess {
 	m := s.c.Manager
 	log := s.c.log().With("hostprocess", o.Name, "unit", o.Spec.Unit)
@@ -416,9 +407,9 @@ func (s *Supervisor) apply(ctx context.Context, o v1alpha1.HostProcess, r Result
 				At: time.Now().UTC().Format(time.RFC3339)}
 		}
 	}
-	setCondition(&next, ConditionReady, next.Status.Phase == v1alpha1.HostProcessPhaseRunning, string(next.Status.Phase), next.Status.Message)
+	conds.SetOn(&next, ConditionReady, next.Status.Phase == v1alpha1.HostProcessPhaseRunning, string(next.Status.Phase), next.Status.Message)
 	caps := m.Capabilities()
-	setCondition(&next, ConditionLimits, caps.EnforcesLimits, string(caps.Backend), "limits are enforced only where the backend has cgroups")
+	conds.SetOn(&next, ConditionLimits, caps.EnforcesLimits, string(caps.Backend), "limits are enforced only where the backend has cgroups")
 	return next
 }
 

@@ -17,7 +17,6 @@ import (
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -29,6 +28,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/baosync"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostprocess"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/rootvault"
@@ -264,14 +264,6 @@ func writeIfChanged(path string, data []byte, mode os.FileMode) error {
 	return os.Rename(tmp, path)
 }
 
-func condition(st *v1alpha1.OpenBaoServerStatus, gen int64, t string, ok bool, reason, msg string) {
-	s := metav1.ConditionFalse
-	if ok {
-		s = metav1.ConditionTrue
-	}
-	meta.SetStatusCondition(&st.Conditions, metav1.Condition{Type: t, Status: s, Reason: reason, Message: msg, ObservedGeneration: gen})
-}
-
 func unseal(ctx context.Context, client *openbao.Client, k UnsealKeys) error {
 	for i := 0; i < k.Threshold; i++ {
 		sealed, err := client.Unseal(ctx, k.Keys[i])
@@ -471,7 +463,7 @@ func recordSync(st *v1alpha1.OpenBaoServerStatus, gen int64, s synced, err error
 		if prev != nil {
 			next.Declared, next.Pending, next.Conflicts = prev.Declared, prev.Pending, prev.Conflicts
 		}
-		condition(st, gen, ConditionSynced, false, "SyncFailed", err.Error())
+		conds.Set(&st.Conditions, gen, ConditionSynced, false, "SyncFailed", err.Error())
 		log.Warn("the reconcile of the server against its declaration did not run", "err", err.Error())
 		return
 	}
@@ -490,11 +482,11 @@ func recordSync(st *v1alpha1.OpenBaoServerStatus, gen int64, s synced, err error
 	st.Sync = next
 	switch {
 	case s.report.Err != nil:
-		condition(st, gen, ConditionSynced, false, "ApplyFailed", s.report.Summary())
+		conds.Set(&st.Conditions, gen, ConditionSynced, false, "ApplyFailed", s.report.Summary())
 	case len(s.report.Conflicts) > 0:
-		condition(st, gen, ConditionSynced, false, "Conflict", strings.Join(s.report.Conflicts, "; "))
+		conds.Set(&st.Conditions, gen, ConditionSynced, false, "Conflict", strings.Join(s.report.Conflicts, "; "))
 	default:
-		condition(st, gen, ConditionSynced, true, "InSync", "the server holds exactly its declaration: "+s.desired.String())
+		conds.Set(&st.Conditions, gen, ConditionSynced, true, "InSync", "the server holds exactly its declaration: "+s.desired.String())
 	}
 }
 
@@ -509,13 +501,13 @@ func (c *Controller) reconcile(ctx context.Context, o v1alpha1.OpenBaoServer) v1
 	st.Refs = refs(dir, o.Spec.TLS)
 	fail := func(format string, args ...any) v1alpha1.OpenBaoServerStatus {
 		st.Phase, st.Message = v1alpha1.OpenBaoServerPhaseFailed, fmt.Sprintf(format, args...)
-		condition(&st, gen, ConditionReady, false, "Failed", st.Message)
+		conds.Set(&st.Conditions, gen, ConditionReady, false, "Failed", st.Message)
 		log.Warn("failed", "msg", st.Message)
 		return st
 	}
 	starting := func(format string, args ...any) v1alpha1.OpenBaoServerStatus {
 		st.Phase, st.Message, st.Address = v1alpha1.OpenBaoServerPhaseStarting, fmt.Sprintf(format, args...), ""
-		condition(&st, gen, ConditionReady, false, "Starting", st.Message)
+		conds.Set(&st.Conditions, gen, ConditionReady, false, "Starting", st.Message)
 		return st
 	}
 	shares, threshold := int(o.Spec.Init.Shares), int(o.Spec.Init.Threshold)
@@ -730,15 +722,15 @@ func (c *Controller) reconcile(ctx context.Context, o v1alpha1.OpenBaoServer) v1
 		return starting("the server at %s stopped answering: %v", addr, err)
 	}
 	st.Initialized, st.Sealed = h.Initialized, h.Sealed
-	condition(&st, gen, ConditionInitialized, h.Initialized, "Health", "")
-	condition(&st, gen, ConditionUnsealed, !h.Sealed, "Health", "")
+	conds.Set(&st.Conditions, gen, ConditionInitialized, h.Initialized, "Health", "")
+	conds.Set(&st.Conditions, gen, ConditionUnsealed, !h.Sealed, "Health", "")
 	if !h.Initialized || h.Sealed {
 		st.Phase, st.Message = v1alpha1.OpenBaoServerPhaseSealed, "sealed"
-		condition(&st, gen, ConditionReady, false, "Sealed", st.Message)
+		conds.Set(&st.Conditions, gen, ConditionReady, false, "Sealed", st.Message)
 		return st
 	}
 	st.Phase, st.Message = v1alpha1.OpenBaoServerPhaseReady, "initialized and unsealed"
-	condition(&st, gen, ConditionReady, true, "Ready", st.Message)
+	conds.Set(&st.Conditions, gen, ConditionReady, true, "Ready", st.Message)
 	return st
 }
 

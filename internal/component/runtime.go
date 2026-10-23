@@ -9,12 +9,12 @@ import (
 	"sync"
 	"time"
 
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 )
 
 const (
@@ -236,7 +236,7 @@ func (r *Runtime) Reconcile(ctx context.Context, spec ComponentSpec) (ComponentS
 		st := statusFromSpec(spec)
 		st.Phase = PhaseFailed
 		st.Message = err.Error()
-		setReadyCondition(&st, spec.Generation, false, "InvalidSpec", err.Error())
+		conds.Set(&st.Conditions, spec.Generation, ConditionReady, false, "InvalidSpec", err.Error())
 		r.emit(ctx, spec, st)
 		return st, err
 	}
@@ -263,7 +263,7 @@ func (r *Runtime) Reconcile(ctx context.Context, spec ComponentSpec) (ComponentS
 		st.Phase = PhaseStopping
 		st.Message = "the component was deleted"
 		st.Restarts = restarts
-		setReadyCondition(&st, spec.Generation, false, "Deleted", st.Message)
+		conds.Set(&st.Conditions, spec.Generation, ConditionReady, false, "Deleted", st.Message)
 		r.emit(ctx, spec, st)
 		return st, stopErr
 	}
@@ -273,7 +273,7 @@ func (r *Runtime) Reconcile(ctx context.Context, spec ComponentSpec) (ComponentS
 		st.Phase = PhaseSuspended
 		st.Message = "the component is suspended"
 		st.Restarts = restarts
-		setReadyCondition(&st, spec.Generation, false, "Suspended", st.Message)
+		conds.Set(&st.Conditions, spec.Generation, ConditionReady, false, "Suspended", st.Message)
 		r.emit(ctx, spec, st)
 		return st, stopErr
 	}
@@ -569,7 +569,7 @@ func (r *Runtime) supervise(inst *instance, spec ComponentSpec, deps Deps, svc S
 		} else {
 			st.Message = "the service exited"
 		}
-		setReadyCondition(&st, spec.Generation, false, "ServiceExited", st.Message)
+		conds.Set(&st.Conditions, spec.Generation, ConditionReady, false, "ServiceExited", st.Message)
 		inst.updateStatus(attempt, st, restarts, false)
 		r.emit(context.WithoutCancel(runCtx), spec, st)
 		if !restartAllowed(spec.RestartPolicy, err) || !r.waitRestart(runCtx, restarts) {
@@ -666,7 +666,7 @@ func (r *Runtime) awaitReady(inst *instance, svc Service, ctx context.Context, a
 				st := startingStatus(spec, restarts)
 				st.StartedAt = inst.startedAtOf()
 				st.Message = fmt.Sprintf("the service is not ready after %s: %v", timeout, err)
-				setReadyCondition(&st, spec.Generation, false, "NotReady", st.Message)
+				conds.Set(&st.Conditions, spec.Generation, ConditionReady, false, "NotReady", st.Message)
 				inst.mu.Lock()
 				updated := inst.attempt == attempt && inst.running && inst.svc == svc && !inst.stopping
 				if updated {
@@ -702,7 +702,7 @@ func (r *Runtime) awaitReady(inst *instance, svc Service, ctx context.Context, a
 		st.Ready = true
 		st.Endpoints = cloneEndpoints(endpoints)
 		st.Message = ""
-		setReadyCondition(&st, spec.Generation, true, "Ready", "the service reports ready")
+		conds.Set(&st.Conditions, spec.Generation, ConditionReady, true, "Ready", "the service reports ready")
 		inst.status = st
 		inst.mu.Unlock()
 		if !r.register(inst, svc, endpoints) {
@@ -981,7 +981,7 @@ func startingStatus(spec ComponentSpec, restarts int32) ComponentStatus {
 	st := statusFromSpec(spec)
 	st.Phase = PhaseStarting
 	st.Restarts = restarts
-	setReadyCondition(&st, spec.Generation, false, "Starting", "the service is starting")
+	conds.Set(&st.Conditions, spec.Generation, ConditionReady, false, "Starting", "the service is starting")
 	return st
 }
 
@@ -992,22 +992,8 @@ func failedStatus(spec ComponentSpec, restarts int32, err error) ComponentStatus
 	if err != nil {
 		st.Message = err.Error()
 	}
-	setReadyCondition(&st, spec.Generation, false, "Failed", st.Message)
+	conds.Set(&st.Conditions, spec.Generation, ConditionReady, false, "Failed", st.Message)
 	return st
-}
-
-func setReadyCondition(st *ComponentStatus, generation int64, ready bool, reason, message string) {
-	status := metav1.ConditionFalse
-	if ready {
-		status = metav1.ConditionTrue
-	}
-	meta.SetStatusCondition(&st.Conditions, metav1.Condition{
-		Type:               ConditionReady,
-		Status:             status,
-		Reason:             reason,
-		Message:            message,
-		ObservedGeneration: generation,
-	})
 }
 
 func cloneStatus(status ComponentStatus) ComponentStatus {

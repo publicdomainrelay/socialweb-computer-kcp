@@ -10,13 +10,13 @@ import (
 	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/dynamic"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 )
 
 var dnsLabel = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
@@ -265,21 +265,12 @@ func statusOf(ca *v1alpha1.ChildApplication, o observed) v1alpha1.ChildApplicati
 		ready, reason, message = true, "Ready", "the child workspace, core and components are Ready"
 	}
 
-	setCondition(&status.Conditions, generation, ConditionReady, ready, reason, message)
-	setCondition(&status.Conditions, generation, ConditionProgressing, progressing, reason, message)
-	setCondition(&status.Conditions, generation, ConditionFailed, failed, reason, message)
-	setCondition(&status.Conditions, generation, ConditionOrphaned, orphaned, reason, message)
+	conds.Set(&status.Conditions, generation, ConditionReady, ready, reason, message)
+	conds.Set(&status.Conditions, generation, ConditionProgressing, progressing, reason, message)
+	conds.Set(&status.Conditions, generation, ConditionFailed, failed, reason, message)
+	conds.Set(&status.Conditions, generation, ConditionOrphaned, orphaned, reason, message)
 	sort.Slice(status.Conditions, func(i, j int) bool { return status.Conditions[i].Type < status.Conditions[j].Type })
 	return status
-}
-
-func setCondition(conditions *[]metav1.Condition, generation int64, conditionType string, ok bool, reason, message string) {
-	condStatus := metav1.ConditionFalse
-	if ok {
-		condStatus = metav1.ConditionTrue
-	}
-	meta.SetStatusCondition(conditions, metav1.Condition{Type: conditionType, Status: condStatus, Reason: reason,
-		Message: message, ObservedGeneration: generation})
 }
 
 func (c *Controller) writeStatus(ctx context.Context, dyn dynamic.Interface, name string, status v1alpha1.ChildApplicationStatus) error {

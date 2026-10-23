@@ -10,7 +10,6 @@ import (
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -218,20 +217,6 @@ func writeStatus(ctx context.Context, ri dynamic.ResourceInterface, name string,
 		}
 	}
 	return fmt.Errorf("exposure: the status of %s stayed in conflict", name)
-}
-
-func setCondition(conditions *[]metav1.Condition, generation int64, kind string, ok bool, reason, message string) {
-	value := metav1.ConditionFalse
-	if ok {
-		value = metav1.ConditionTrue
-	}
-	meta.SetStatusCondition(conditions, metav1.Condition{
-		Type:               kind,
-		Status:             value,
-		Reason:             reason,
-		Message:            message,
-		ObservedGeneration: generation,
-	})
 }
 
 func containsString(values []string, want string) bool {

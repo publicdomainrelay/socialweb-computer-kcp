@@ -23,6 +23,7 @@ import (
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -149,12 +150,12 @@ func (c *Controller) reconcileObject(ctx context.Context, ri dynamic.ResourceInt
 				return c.writeFailure(ctx, ri, u, object, "DeleteFailed", err)
 			}
 			return c.writeStatus(ctx, ri, u, object, v1alpha1.AtprotoRecordPhasePending, target.did.String(), "", "", message,
-				condition(ConditionReferencesResolved, false, "MissingReference", message, object.Generation),
-				condition(ConditionInSync, true, "Deleted", "the record is absent because a reference is missing", object.Generation))
+				conds.New(ConditionReferencesResolved, false, "MissingReference", message, object.Generation),
+				conds.New(ConditionInSync, true, "Deleted", "the record is absent because a reference is missing", object.Generation))
 		}
 		return c.writeStatus(ctx, ri, u, object, v1alpha1.AtprotoRecordPhasePending, target.did.String(), "", "", message,
-			condition(ConditionReferencesResolved, false, "MissingReference", message, object.Generation),
-			condition(ConditionInSync, false, "MissingReference", "a reference is missing", object.Generation))
+			conds.New(ConditionReferencesResolved, false, "MissingReference", message, object.Generation),
+			conds.New(ConditionInSync, false, "MissingReference", "a reference is missing", object.Generation))
 	}
 	observed, absent, err := getRecord(ctx, target.pds, path)
 	if err != nil {
@@ -186,8 +187,8 @@ func (c *Controller) reconcileObject(ctx context.Context, ri dynamic.ResourceInt
 		c.log.Info("an AtprotoRecord wrote its declared record", "name", object.Name, "uri", uri, "cid", cid, "reason", reason)
 	}
 	return c.writeStatus(ctx, ri, u, object, v1alpha1.AtprotoRecordPhaseApplied, target.did.String(), uri, cid, message,
-		condition(ConditionReferencesResolved, true, "Resolved", "every reference is resolved", object.Generation),
-		condition(ConditionInSync, true, reason, "the repo holds the declared record", object.Generation))
+		conds.New(ConditionReferencesResolved, true, "Resolved", "every reference is resolved", object.Generation),
+		conds.New(ConditionInSync, true, reason, "the repo holds the declared record", object.Generation))
 }
 
 func (c *Controller) reconcileDelete(ctx context.Context, ri dynamic.ResourceInterface, dyn dynamic.Interface, workspace string,
@@ -418,8 +419,8 @@ func (c *Controller) writeFailure(ctx context.Context, ri dynamic.ResourceInterf
 	c.log.Warn("an AtprotoRecord failed", "name", object.Name, "reason", reason, "err", message)
 	return c.writeStatus(ctx, ri, u, object, v1alpha1.AtprotoRecordPhaseFailed, object.Status.Did, object.Status.URI, object.Status.Cid,
 		message,
-		condition(ConditionReferencesResolved, false, reason, message, object.Generation),
-		condition(ConditionInSync, false, reason, message, object.Generation))
+		conds.New(ConditionReferencesResolved, false, reason, message, object.Generation),
+		conds.New(ConditionInSync, false, reason, message, object.Generation))
 }
 
 func (c *Controller) writeStatus(ctx context.Context, ri dynamic.ResourceInterface, u *unstructured.Unstructured,
@@ -480,12 +481,4 @@ func (c *Controller) patchFinalizers(ctx context.Context, ri dynamic.ResourceInt
 		return nil
 	}
 	return err
-}
-
-func condition(kind string, ok bool, reason, message string, generation int64) metav1.Condition {
-	status := metav1.ConditionFalse
-	if ok {
-		status = metav1.ConditionTrue
-	}
-	return metav1.Condition{Type: kind, Status: status, Reason: reason, Message: message, ObservedGeneration: generation}
 }
