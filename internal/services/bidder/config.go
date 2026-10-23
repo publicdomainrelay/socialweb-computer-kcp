@@ -169,6 +169,8 @@ type Config struct {
 
 	BidderDIDs []string
 
+	MarketURL string
+
 	DenyBidderDIDs []string
 
 	PolicyTimeout time.Duration
@@ -240,6 +242,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		Policy:            bidderSpec.Policy,
 		PolicyArgs:        policyArgs,
 		BidderDIDs:        append([]string(nil), bidderSpec.BidderDIDs...),
+		MarketURL:         strings.TrimRight(strings.TrimSpace(bidderSpec.MarketURL), "/"),
 		Comms:             bidderSpec.Comms,
 		PolicyTimeout:     DefaultPolicyTimeout,
 		PolicyPoll:        DefaultPolicyPoll,

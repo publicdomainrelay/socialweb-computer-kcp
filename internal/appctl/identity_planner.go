@@ -62,6 +62,8 @@ type accountPlan struct {
 
 	ComponentMode string
 
+	MarketURL string
+
 	Vault accountVault
 }
 

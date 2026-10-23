@@ -527,6 +527,20 @@ func ready(status v1alpha1.ApplicationStatus, msg string) v1alpha1.ApplicationSt
 	return status
 }
 
+func (ctl *Controller) bidderMarketURL(ctx context.Context, ws string) string {
+	ri, err := ctl.client(ws, ExposureGVR)
+	if err != nil {
+		return ""
+	}
+	name := serviceNameFor(ComponentKindBidder, BidderComponent) + ExposureIngressSuffix
+	u, err := ri.Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return ""
+	}
+	url, _, _ := unstructured.NestedString(u.Object, "status", "url")
+	return strings.TrimRight(strings.TrimSpace(url), "/")
+}
+
 func bidderDesired(o v1alpha1.MarketBidder, plan accountPlan, id *v1alpha1.MarketIdentity, ws, stateRoot string, bidderDIDs []string, pdsHandle, pdsPublicURL string,
 	ingress *v1alpha1.IngressConfig, requireIngress bool, ingressRef *v1alpha1.ComponentRef) ([]desiredComponent, error) {
 	suspend := o.Spec.Suspend
@@ -577,6 +591,7 @@ func bidderDesired(o v1alpha1.MarketBidder, plan accountPlan, id *v1alpha1.Marke
 	}
 	bidder := desiredComponent{Kind: ComponentKindBidder, Name: BidderComponent, Spec: v1alpha1.BidderSpec{
 		ComponentSpec:      NewComponentSpec(ComponentCRStateDir(stateRoot, ComponentKindBidder, BidderComponent), network, suspend),
+		MarketURL:          plan.MarketURL,
 		Identity:           ident,
 		PdsRef:             plan.componentPdsRef(),
 		PDSAccessTokenPath: pdsAccessTokenPathValue,
@@ -607,6 +622,7 @@ func bidderDesired(o v1alpha1.MarketBidder, plan accountPlan, id *v1alpha1.Marke
 func (ctl *Controller) reconcileBidderAccount(ctx context.Context, u *unstructured.Unstructured, o v1alpha1.MarketBidder,
 	plan accountPlan, id *v1alpha1.MarketIdentity, owner, stateRoot string, bidderDIDs []string) error {
 	st := v1alpha1.ApplicationStatus{ObservedGeneration: o.Generation, Profile: o.Spec.Profile}
+	plan.MarketURL = ctl.bidderMarketURL(ctx, ctl.c.workspace())
 	switch id.Status.Phase {
 	case v1alpha1.MarketIdentityPhaseFailed, v1alpha1.MarketIdentityPhaseSessionExpired:
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, "its MarketIdentity: "+id.Status.Message
@@ -723,6 +739,7 @@ func (ctl *Controller) reconcileBidder(ctx context.Context, u *unstructured.Unst
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
 		return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
 	}
+	plan.MarketURL = ctl.bidderMarketURL(ctx, ctl.c.workspace())
 	if o.Spec.Identity.Mode == "" {
 		o.Spec.Identity.Mode = plan.Mode
 	}

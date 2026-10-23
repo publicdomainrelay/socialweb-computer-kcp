@@ -138,7 +138,7 @@ var APIResources = []APIResource{
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "Bidder", Plural: "bidders", Revision: 5, Export: "applications", Object: Bidder{}, PrinterColumns: componentPrinterColumns},
+	{Kind: "Bidder", Plural: "bidders", Revision: 6, Export: "applications", Object: Bidder{}, PrinterColumns: componentPrinterColumns},
 	{Kind: "GuestControlPlane", Plural: "guestcontrolplanes", Revision: 2, Export: "applications", Object: GuestControlPlane{}, PrinterColumns: componentPrinterColumns},
 	{Kind: "Pds", Plural: "pds", Revision: 3, Export: "applications", Object: Pds{}, PrinterColumns: componentPrinterColumns},
 	{Kind: "Requester", Plural: "requesters", Revision: 7, Export: "applications", Object: Requester{}, PrinterColumns: componentPrinterColumns},

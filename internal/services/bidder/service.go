@@ -804,6 +804,9 @@ func (s *Service) submitEventURL(ctx context.Context, ref string) string {
 }
 
 func (s *Service) offeringEndpoint() string {
+	if url := strings.TrimSpace(s.cfg.MarketURL); url != "" {
+		return url
+	}
 	if url := s.publicURL(); url != "" {
 		return url
 	}

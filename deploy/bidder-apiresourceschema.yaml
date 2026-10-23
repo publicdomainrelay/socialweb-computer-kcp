@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-5.bidders.socialweb.computer
+  name: v1alpha1-6.bidders.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -293,6 +293,8 @@ spec:
                 type: array
                 items:
                   type: string
+              marketURL:
+                type: string
               comms:
                 type: object
                 properties:

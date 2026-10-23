@@ -198,6 +198,8 @@ type BidderSpec struct {
 
 	BidderDIDs []string `json:"bidderDIDs,omitempty"`
 
+	MarketURL string `json:"marketURL,omitempty"`
+
 	Comms *MarketComms `json:"comms,omitempty"`
 }
 
