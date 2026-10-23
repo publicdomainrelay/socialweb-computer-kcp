@@ -18,14 +18,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterlink"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/exposure"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/ingress"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/ingress/loopback"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/irohdial"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/childproc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/ingressproxy/loopback"
 )
 
 const (
@@ -50,9 +49,15 @@ type Config struct {
 	StateDir string
 
 	Log *slog.Logger
-
-	Bus *bus.Bus
 }
+
+var (
+	_ ingress.Provider = (*Provider)(nil)
+
+	_ ingress.Registrar = (*Provider)(nil)
+
+	_ ingress.Registration = (*registration)(nil)
+)
 
 func (c Config) Check() error {
 	path := strings.TrimSpace(c.DumbpipePath)
@@ -185,11 +190,7 @@ func (p *Provider) Endpoints() []component.Endpoint {
 	return nil
 }
 
-func (p *Provider) IngressRegistrar() exposure.IngressRegistrar {
-	return p
-}
-
-func (p *Provider) Register(ctx context.Context, spec exposure.IngressSpec) (exposure.IngressRegistration, error) {
+func (p *Provider) Register(ctx context.Context, spec ingress.Spec, target ingress.Target) (ingress.Registration, error) {
 	p.mu.Lock()
 	ready := p.ready
 	root := p.ctx
@@ -198,17 +199,13 @@ func (p *Provider) Register(ctx context.Context, spec exposure.IngressSpec) (exp
 	if !ready || root == nil {
 		return nil, errors.New("ingressproxy iroh: the provider is not started")
 	}
-	if p.cfg.Bus == nil {
+	if target == nil {
 		return nil, errors.New("ingressproxy iroh: the handler registry is not configured")
 	}
 	bridge, err := loopback.Start(loopback.Config{
 		Host:     p.cfg.listenHost(),
-		Protocol: string(spec.Protocol),
-		Target:   spec.Target,
-		Handler:  spec.Handler,
-		Handlers: p.cfg.Bus,
-		Caller:   spec.Caller(),
-	})
+		Protocol: spec.Protocol,
+	}, target)
 	if err != nil {
 		return nil, err
 	}
@@ -314,7 +311,7 @@ func validSecret(secret string) bool {
 type registration struct {
 	provider *Provider
 
-	spec exposure.IngressSpec
+	spec ingress.Spec
 
 	bridge *loopback.Bridge
 

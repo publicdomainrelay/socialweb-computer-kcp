@@ -20,12 +20,11 @@ import (
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/assets"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/exposure"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/ingress"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/ingress/loopback"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/childproc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/ingressproxy/loopback"
 )
 
 const (
@@ -58,9 +57,15 @@ type Config struct {
 	StateDir string
 
 	Log *slog.Logger
-
-	Bus *bus.Bus
 }
+
+var (
+	_ ingress.Provider = (*Provider)(nil)
+
+	_ ingress.Registrar = (*Provider)(nil)
+
+	_ ingress.Registration = (*registration)(nil)
+)
 
 func (c Config) Check() error {
 	command := c.command()
@@ -125,7 +130,7 @@ func (p *Provider) usePinnedCommand(log *slog.Logger) error {
 	return nil
 }
 
-func routeName(configured string, spec exposure.IngressSpec) string {
+func routeName(configured string, spec ingress.Spec) string {
 	if name := strings.TrimSpace(configured); name != "" {
 		return name
 	}
@@ -280,11 +285,7 @@ func (p *Provider) Endpoints() []component.Endpoint {
 	return nil
 }
 
-func (p *Provider) IngressRegistrar() exposure.IngressRegistrar {
-	return p
-}
-
-func (p *Provider) Register(ctx context.Context, spec exposure.IngressSpec) (exposure.IngressRegistration, error) {
+func (p *Provider) Register(ctx context.Context, spec ingress.Spec, target ingress.Target) (ingress.Registration, error) {
 	p.mu.Lock()
 	ready := p.ready
 	root := p.ctx
@@ -294,17 +295,13 @@ func (p *Provider) Register(ctx context.Context, spec exposure.IngressSpec) (exp
 	if !ready || root == nil || len(args) == 0 {
 		return nil, errors.New("ingressproxy opentunnel: the provider is not started")
 	}
-	if p.cfg.Bus == nil {
+	if target == nil {
 		return nil, errors.New("ingressproxy opentunnel: the handler registry is not configured")
 	}
 	bridge, err := loopback.Start(loopback.Config{
 		Host:     p.cfg.localHost(),
-		Protocol: string(spec.Protocol),
-		Target:   spec.Target,
-		Handler:  spec.Handler,
-		Handlers: p.cfg.Bus,
-		Caller:   spec.Caller(),
-	})
+		Protocol: spec.Protocol,
+	}, target)
 	if err != nil {
 		return nil, err
 	}
@@ -371,7 +368,7 @@ func (p *Provider) forget(registration *registration) {
 	p.mu.Unlock()
 }
 
-func (p *Provider) rememberURL(spec exposure.IngressSpec, raw string) error {
+func (p *Provider) rememberURL(spec ingress.Spec, raw string) error {
 	origin := originOf(raw)
 	if origin == "" {
 		return fmt.Errorf("ingressproxy opentunnel: printed URL %q has no https origin", raw)
@@ -387,7 +384,7 @@ func (p *Provider) rememberURL(spec exposure.IngressSpec, raw string) error {
 	case err == nil:
 		if previous := strings.TrimSpace(string(current)); previous != "" && !strings.EqualFold(previous, origin) {
 			return fmt.Errorf("%w: opentunnel route %q for %s/%s is %s, was %s",
-				exposure.ErrStableHostMismatch, routeName(p.cfg.RouteName, spec), spec.Workspace, spec.Exposure, origin, previous)
+				ingress.ErrStableHostMismatch, routeName(p.cfg.RouteName, spec), spec.Workspace, spec.Exposure, origin, previous)
 		}
 		return nil
 	case !errors.Is(err, os.ErrNotExist):
@@ -407,7 +404,7 @@ func (p *Provider) rememberURL(spec exposure.IngressSpec, raw string) error {
 	return nil
 }
 
-func (p *Provider) rememberRestart(spec exposure.IngressSpec, raw string) error {
+func (p *Provider) rememberRestart(spec ingress.Spec, raw string) error {
 	err := p.rememberURL(spec, raw)
 	p.mu.Lock()
 	p.failed = err
@@ -426,7 +423,7 @@ func originOf(raw string) string {
 type registration struct {
 	provider *Provider
 
-	spec exposure.IngressSpec
+	spec ingress.Spec
 
 	bridge *loopback.Bridge
 

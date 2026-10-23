@@ -12,9 +12,8 @@ import (
 	"sync"
 	"time"
 
-	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/ingress"
 )
 
 const DefaultHost = "127.0.0.1"
@@ -23,18 +22,12 @@ type Config struct {
 	Host string
 
 	Protocol string
-
-	Target component.Key
-
-	Handler string
-
-	Handlers *component.Handlers
-
-	Caller commonv1.ObjectRef
 }
 
 type Bridge struct {
 	cfg Config
+
+	target ingress.Target
 
 	listener net.Listener
 
@@ -51,23 +44,21 @@ type Bridge struct {
 	conns sync.WaitGroup
 }
 
-func Start(cfg Config) (*Bridge, error) {
+func Start(cfg Config, target ingress.Target) (*Bridge, error) {
+	if target == nil {
+		return nil, errors.New("loopback: the target is not configured")
+	}
 	host := strings.TrimSpace(cfg.Host)
 	host = cmp.Or(host, DefaultHost)
 	listener, err := net.Listen("tcp", net.JoinHostPort(host, "0"))
 	if err != nil {
 		return nil, fmt.Errorf("loopback: listening on %s: %w", host, err)
 	}
-	ctx, cancel := context.WithCancel(bus.WithCaller(context.Background(), cfg.Caller))
-	bridge := &Bridge{cfg: cfg, listener: listener, ctx: ctx, cancel: cancel, done: make(chan struct{})}
+	ctx, cancel := context.WithCancel(context.Background())
+	bridge := &Bridge{cfg: cfg, target: target, listener: listener, ctx: ctx, cancel: cancel, done: make(chan struct{})}
 	switch strings.ToLower(strings.TrimSpace(cfg.Protocol)) {
 	case component.ProtocolHTTP, component.ProtocolWS:
-		if cfg.Handlers == nil {
-			cancel()
-			_ = listener.Close()
-			return nil, errors.New("loopback: the handler registry is not configured")
-		}
-		bridge.server = &http.Server{Handler: bridge, ReadHeaderTimeout: 10 * time.Second}
+		bridge.server = &http.Server{Handler: target, ReadHeaderTimeout: 10 * time.Second}
 		go func() {
 			defer close(bridge.done)
 			_ = bridge.server.Serve(listener)
@@ -86,15 +77,6 @@ func (b *Bridge) Address() string {
 	return b.listener.Addr().String()
 }
 
-func (b *Bridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	handler, ok := b.cfg.Handlers.HandlerNamed(b.cfg.Target, b.cfg.Handler)
-	if !ok {
-		http.Error(w, "the target handler is not registered", http.StatusServiceUnavailable)
-		return
-	}
-	handler.ServeHTTP(w, r)
-}
-
 func (b *Bridge) serveStreams() {
 	defer close(b.done)
 	for {
@@ -110,7 +92,7 @@ func (b *Bridge) bridge(conn net.Conn) {
 	defer conn.Close()
 	stop := context.AfterFunc(b.ctx, func() { _ = conn.Close() })
 	defer stop()
-	stream, err := b.cfg.Handlers.DialStream(b.ctx, b.cfg.Target, b.cfg.Handler)
+	stream, err := b.target.DialStream(b.ctx)
 	if err != nil {
 		return
 	}

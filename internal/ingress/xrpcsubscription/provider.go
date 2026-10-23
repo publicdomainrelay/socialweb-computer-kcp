@@ -12,9 +12,8 @@ import (
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/ingress"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/exposure"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/component"
+	contract "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/ingress"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
 )
 
@@ -51,14 +50,10 @@ type Config struct {
 
 	NonceTTL time.Duration
 
-	Identity exposure.IngressIdentity
-
 	Log *slog.Logger
-
-	Registry *component.Registry
-
-	Bus *bus.Bus
 }
+
+var _ contract.Provider = (*Provider)(nil)
 
 type Provider struct {
 	cfg Config
@@ -78,8 +73,6 @@ type Provider struct {
 	stopOnce sync.Once
 
 	ready bool
-
-	registrar exposure.IngressRegistrar
 }
 
 func New(cfg Config) *Provider {
@@ -123,7 +116,6 @@ func (p *Provider) Start(ctx context.Context) error {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	stopCh := make(chan struct{})
-	registrar := exposure.NewSubscriberRegistrar(cfg.Registry, cfg.Bus, cfg.Identity)
 
 	p.mu.Lock()
 	if p.http != nil {
@@ -139,7 +131,6 @@ func (p *Provider) Start(ctx context.Context) error {
 	p.stopCh = stopCh
 	p.stopOnce = sync.Once{}
 	p.ready = true
-	p.registrar = registrar
 	p.mu.Unlock()
 
 	log.Info("ingressproxy_listening", "provider", "xrpc-subscription", "address", listener.Addr().String(),
@@ -233,12 +224,6 @@ func (p *Provider) Stop(ctx context.Context) error {
 	p.stopOnce.Do(func() { close(stopCh) })
 	p.shutdown(ctx)
 	return nil
-}
-
-func (p *Provider) IngressRegistrar() exposure.IngressRegistrar {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.registrar
 }
 
 func (p *Provider) shutdown(ctx context.Context) {
