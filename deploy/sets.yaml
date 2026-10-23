@@ -1,7 +1,7 @@
 sets:
   - name: provider
     scope: kcp
-    summary: the socialweb provider workspace, its cluster and identity schemas and exports, the policy schema files and export, the policy binding in root, and the account, cluster and application WorkspaceTypes (was install-provider.sh)
+    summary: the socialweb provider workspace, its cluster, identity, contract and ComputeVM schemas and exports, the policy schema files and export, the policy binding in root, and the account, cluster and application WorkspaceTypes (was install-provider.sh)
     values: None
     phases:
       - name: workspace
@@ -40,6 +40,11 @@ sets:
           - path: marketidentity-apiexport.yaml
           - path: computecontract-apiresourceschema.yaml
           - path: computecontract-apiexport.yaml
+          - path: computevm-apiresourceschema.yaml
+          - path: firecrackervm-apiresourceschema.yaml
+          - path: bid-apiresourceschema.yaml
+          - path: guestidentitygrant-apiresourceschema.yaml
+          - path: computevm-apiexport.yaml
       - name: policy
         workspace: root:socialweb-provider
         files:
@@ -91,6 +96,10 @@ sets:
             for: IdentityValid
           - kind: APIExport
             name: events
+            workspace: root:socialweb-provider
+            for: IdentityValid
+          - kind: APIExport
+            name: computevms
             workspace: root:socialweb-provider
             for: IdentityValid
   - name: permission-inventory
