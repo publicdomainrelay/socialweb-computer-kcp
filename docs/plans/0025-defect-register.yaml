@@ -185,3 +185,14 @@ items:
       and "scope denied" until scripts/associate-bidder.ts was rerun and
       spec.approvedAssociations was patched again on the requester
       MarketIdentity.
+  - id: D22-UNREGISTERED-KINDS
+    title: "Eleven kinds have no DeepCopyObject and are not in the scheme"
+    status: todo
+    defect: >
+      Bid, ComputeContract, Gateway, MarketBidder, MarketNetwork,
+      MarketRequester, SshGateway, AtprotoRecord, AtprotoRecordWatch,
+      ClusterClientCertificate and GuestIdentityGrant have no DeepCopyObject
+      in api/v1alpha1/zz_generated.deepcopy.go and are missing from
+      AddKnownTypes (api/v1alpha1/groupversion_info.go:19). 46 kinds are
+      registered against 57 schemas. The deepcopy file is kept by hand; no
+      generator writes it (scripts/regen-after-rebase.sh:21).
