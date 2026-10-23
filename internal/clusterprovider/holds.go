@@ -2,14 +2,10 @@ package clusterprovider
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
 	"strconv"
 	"time"
-
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/apiserverfront"
@@ -18,10 +14,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/procgroup"
 )
 
-const (
-	AnnotationHeldPorts = "socialweb.computer/held-ports"
-	HoldTimeout         = 15 * time.Second
-)
+const HoldTimeout = 15 * time.Second
 
 func (cfg StackConfig) FrontStep(cluster string) (procgroup.Step, error) {
 	dataDir, err := ClusterDataDir(cfg.StateDir, cluster)
@@ -73,9 +66,6 @@ func (h *UnitsHost) Hold(key string, p portallocator.Purpose) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("clusterprovider: the apiserver front of %s holds no port for %s: %w", key, p, err)
 	}
-	if err := h.recordHold(ctx, key, p, port); err != nil {
-		return 0, err
-	}
 	return port, nil
 }
 
@@ -83,7 +73,7 @@ func (h *UnitsHost) frontPort(ctx context.Context, key string) (int, error) {
 	member := MemberName(procgroup.ComponentApiserverFront)
 	last := "no answer"
 	port := 0
-	_, err := awaitObject(ctx, h.hps, ObjectName(key, member), 0, func(o *v1alpha1.HostProcess) (bool, error) {
+	_, err := h.hps.Await(ctx, ObjectName(key, member), 0, func(o *v1alpha1.HostProcess) (bool, error) {
 		switch {
 		case o == nil:
 			return false, fmt.Errorf("clusterprovider: %s has no apiserver front HostProcess, so nothing holds a port for its apiserver", key)
@@ -126,36 +116,4 @@ func tcpListenerPort(ls []v1alpha1.HostProcessListener) (int, bool) {
 		return port, true
 	}
 	return 0, false
-}
-
-func (h *UnitsHost) recordHold(ctx context.Context, key string, p portallocator.Purpose, port int) error {
-	name := ObjectName(key, MemberName(procgroup.ComponentApiserverFront))
-	for range 5 {
-		u, err := h.hps.Get(ctx, name, metav1.GetOptions{})
-		if err != nil {
-			return fmt.Errorf("clusterprovider: recording hold %s of %s on %s: %w", p, key, name, err)
-		}
-		ann := u.GetAnnotations()
-		if ann == nil {
-			ann = map[string]string{}
-		}
-		held := map[string]int{}
-		if raw := ann[AnnotationHeldPorts]; raw != "" {
-			_ = json.Unmarshal([]byte(raw), &held)
-		}
-		if held[string(p)] == port {
-			return nil
-		}
-		held[string(p)] = port
-		b, err := json.Marshal(held)
-		if err != nil {
-			return err
-		}
-		ann[AnnotationHeldPorts] = string(b)
-		u.SetAnnotations(ann)
-		if _, err = h.hps.Update(ctx, u, metav1.UpdateOptions{}); err == nil || !apierrors.IsConflict(err) {
-			return err
-		}
-	}
-	return fmt.Errorf("clusterprovider: recording hold %s of %s on %s kept conflicting", p, key, name)
 }

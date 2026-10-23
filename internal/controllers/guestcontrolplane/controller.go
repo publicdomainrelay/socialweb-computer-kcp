@@ -9,7 +9,6 @@ import (
 	"sync"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -19,6 +18,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/guestcp"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 )
 
 const (
@@ -48,7 +48,7 @@ type Store interface {
 
 	List(ctx context.Context, workspace string, list client.ObjectList) error
 
-	Apply(ctx context.Context, workspace, fieldManager string, obj *unstructured.Unstructured, status bool) error
+	Apply(ctx context.Context, workspace, fieldManager string, obj kube.Doc, status bool) error
 
 	Delete(ctx context.Context, workspace string, obj client.Object) error
 }

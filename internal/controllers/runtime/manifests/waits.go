@@ -6,6 +6,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/api/kcpgvr"
 	v1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 )
 
@@ -17,15 +18,15 @@ type WaitKind struct {
 
 var WaitKinds = map[string]WaitKind{
 	"Workspace": {
-		Resource: schema.GroupVersionResource{Group: "tenancy.kcp.io", Version: "v1alpha1", Resource: "workspaces"},
+		Resource: kcpgvr.Workspaces,
 		For:      map[string]string{"Ready": CaptureLogicalCluster},
 	},
 	"APIExport": {
-		Resource: schema.GroupVersionResource{Group: "apis.kcp.io", Version: "v1alpha2", Resource: "apiexports"},
+		Resource: kcpgvr.APIExports,
 		For:      map[string]string{"IdentityValid": ""},
 	},
 	"APIBinding": {
-		Resource: schema.GroupVersionResource{Group: "apis.kcp.io", Version: "v1alpha2", Resource: "apibindings"},
+		Resource: kcpgvr.APIBindings,
 		For:      map[string]string{"Ready": ""},
 	},
 	"OpenBaoServer": {

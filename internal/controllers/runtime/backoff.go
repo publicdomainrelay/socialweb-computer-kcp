@@ -69,3 +69,7 @@ func (b *backoff) peek(item mcreconcile.Request) (int, time.Duration) {
 	n := b.failures[item]
 	return n + 1, b.delay(n)
 }
+
+func BackoffDelay(base, max time.Duration, failures int) time.Duration {
+	return newBackoff(base, max).delay(failures)
+}

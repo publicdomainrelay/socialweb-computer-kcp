@@ -22,15 +22,9 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/rest"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/apiserverfront"
-	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostprocess"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/pgunit"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/postgresctl"
@@ -38,12 +32,12 @@ import (
 )
 
 const (
-	LabelCluster       = "socialweb.computer/cluster"
-	LabelMember        = "socialweb.computer/member"
-	AnnotationVerified = "socialweb.computer/verified-invocation"
-	MemberFinalizer    = "socialweb.computer/cluster-member"
-	ControlPlaneFile   = "controlplane.json"
-	ActiveSlot         = "a"
+	LabelCluster     = "socialweb.computer/cluster"
+	LabelMember      = "socialweb.computer/member"
+	LabelVerified    = "socialweb.computer/verified-invocation"
+	MemberFinalizer  = "socialweb.computer/cluster-member"
+	ControlPlaneFile = "controlplane.json"
+	ActiveSlot       = "a"
 
 	DefaultPlaceTimeout = time.Minute
 	DefaultStoreTimeout = time.Minute
@@ -59,11 +53,11 @@ const (
 var ErrMemberLost = errors.New("clusterprovider: a member unit was lost while it was being placed")
 
 type UnitsConfig struct {
-	RestConfig *rest.Config
+	HostProcesses Objects[v1alpha1.HostProcess]
 
-	Host string
+	Postgres Objects[v1alpha1.Postgres]
 
-	Workspace string
+	OpenBaoServers Objects[v1alpha1.OpenBaoServer]
 
 	Prefix string
 
@@ -84,9 +78,9 @@ type UnitsConfig struct {
 
 type UnitsHost struct {
 	c   UnitsConfig
-	hps dynamic.ResourceInterface
-	pgs dynamic.ResourceInterface
-	obs dynamic.ResourceInterface
+	hps Objects[v1alpha1.HostProcess]
+	pgs Objects[v1alpha1.Postgres]
+	obs Objects[v1alpha1.OpenBaoServer]
 
 	mu     sync.Mutex
 	stores map[string]Store
@@ -195,7 +189,7 @@ type ControlPlaneMember struct {
 }
 
 func NewUnitsHost(c UnitsConfig) (*UnitsHost, error) {
-	if c.RestConfig == nil || c.Host == "" {
+	if c.HostProcesses == nil || c.Postgres == nil || c.OpenBaoServers == nil {
 		return nil, errors.New("clusterprovider: the units host needs the kcp the HostProcess supervisor watches")
 	}
 	if c.Prefix == "" {
@@ -204,7 +198,6 @@ func NewUnitsHost(c UnitsConfig) (*UnitsHost, error) {
 	if c.StateDir == "" {
 		return nil, errors.New("clusterprovider: the units host needs the state dir the cluster data dirs live in")
 	}
-	c.Workspace = cmp.Or(c.Workspace, hostprocess.DefaultWorkspace)
 	if c.Resolve == nil {
 		c.Resolve = exec.LookPath
 	}
@@ -214,13 +207,7 @@ func NewUnitsHost(c UnitsConfig) (*UnitsHost, error) {
 	if c.Log == nil {
 		c.Log = slog.Default()
 	}
-	cfg := rest.CopyConfig(c.RestConfig)
-	cfg.Host = strings.TrimSuffix(c.Host, "/") + "/clusters/" + c.Workspace
-	dc, err := dynamic.NewForConfig(cfg)
-	if err != nil {
-		return nil, err
-	}
-	return &UnitsHost{c: c, hps: dc.Resource(hostprocess.GVR), pgs: dc.Resource(postgresctl.GVR), obs: dc.Resource(openbaoctl.GVR),
+	return &UnitsHost{c: c, hps: c.HostProcesses, pgs: c.Postgres, obs: c.OpenBaoServers,
 		stores: map[string]Store{}, keys: map[string]*sync.Mutex{}}, nil
 }
 
@@ -301,27 +288,23 @@ func (h *UnitsHost) StoreUnit(key string) string {
 
 func (h *UnitsHost) StartStore(ctx context.Context, key string) error {
 	name := StoreName(key)
-	cur, err := h.pgs.Get(ctx, name, metav1.GetOptions{})
+	cur, err := h.pgs.Get(ctx, name)
 	if apierrors.IsNotFound(err) {
 		o := v1alpha1.Postgres{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{LabelCluster: key}},
 			Spec: v1alpha1.PostgresSpec{Databases: []string{PostgresDatabase, PostgresVaultDatabase}}}
-		u, err := unstruct.To(&o, "Postgres")
-		if err != nil {
-			return err
-		}
-		if _, err := h.pgs.Create(ctx, u, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
+		if err := h.pgs.Create(ctx, &o); err != nil && !apierrors.IsAlreadyExists(err) {
 			return fmt.Errorf("clusterprovider: creating the Postgres object %s of %s: %w", name, key, err)
 		}
 		h.c.Log.Info("cluster provider: the cluster's store is a Postgres object", "cluster", key, "postgres", name,
 			"unit", h.StoreUnit(key))
 	} else if err != nil {
 		return err
-	} else if cur.GetDeletionTimestamp() != nil {
+	} else if cur.DeletionTimestamp != nil {
 		return fmt.Errorf("clusterprovider: the Postgres object %s of %s is being deleted", name, key)
 	}
 	if _, cached := h.Store(key); !cached {
-		if u, err := h.pgs.Get(ctx, name, metav1.GetOptions{}); err == nil {
-			if o, derr := unstruct.From[v1alpha1.Postgres](u); derr == nil && o.Status.Phase == v1alpha1.PostgresPhaseReady && o.Status.SocketDir != "" {
+		if o, err := h.pgs.Get(ctx, name); err == nil {
+			if o.Status.Phase == v1alpha1.PostgresPhaseReady && o.Status.SocketDir != "" {
 				h.mu.Lock()
 				h.stores[key] = Store{Object: name, Unit: h.StoreUnit(key), SocketDir: o.Status.SocketDir, User: o.Status.User}
 				h.mu.Unlock()
@@ -340,7 +323,7 @@ func (h *UnitsHost) EnsureStore(ctx context.Context, key string) (Store, error) 
 		return fmt.Errorf("%w: the Postgres object %s of %s is %s: %s", procgroup.ErrPostgresUnavailable,
 			name, key, o.Status.Phase, o.Status.Message)
 	}
-	o, err := awaitObject(ctx, h.pgs, name, h.c.StoreTimeout, func(o *v1alpha1.Postgres) (bool, error) {
+	o, err := h.pgs.Await(ctx, name, h.c.StoreTimeout, func(o *v1alpha1.Postgres) (bool, error) {
 		if o == nil {
 			return false, nil
 		}
@@ -373,11 +356,7 @@ func (h *UnitsHost) Store(key string) (Store, bool) {
 }
 
 func (h *UnitsHost) storeReady(ctx context.Context, key string) bool {
-	u, err := h.pgs.Get(ctx, StoreName(key), metav1.GetOptions{})
-	if err != nil {
-		return false
-	}
-	o, err := unstruct.From[v1alpha1.Postgres](u)
+	o, err := h.pgs.Get(ctx, StoreName(key))
 	return err == nil && o.Status.Phase == v1alpha1.PostgresPhaseReady
 }
 
@@ -386,20 +365,18 @@ func (h *UnitsHost) DeleteStore(ctx context.Context, key string) error {
 	delete(h.stores, key)
 	h.mu.Unlock()
 	name := StoreName(key)
-	cur, err := h.pgs.Get(ctx, name, metav1.GetOptions{})
+	cur, err := h.pgs.Get(ctx, name)
 	if apierrors.IsNotFound(err) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	if err := unstructured.SetNestedField(cur.Object, true, "spec", "deleteData"); err != nil {
+	cur.Spec.DeleteData = true
+	if err := h.pgs.Update(ctx, cur); err != nil && !apierrors.IsNotFound(err) {
 		return err
 	}
-	if _, err := h.pgs.Update(ctx, cur, metav1.UpdateOptions{}); err != nil && !apierrors.IsNotFound(err) {
-		return err
-	}
-	err = h.pgs.Delete(ctx, name, metav1.DeleteOptions{})
+	err = h.pgs.Delete(ctx, name)
 	if err != nil && !apierrors.IsNotFound(err) {
 		return err
 	}
@@ -407,14 +384,10 @@ func (h *UnitsHost) DeleteStore(ctx context.Context, key string) error {
 }
 
 func (h *UnitsHost) StoreRemoval(ctx context.Context, key string) (bool, string, error) {
-	u, err := h.pgs.Get(ctx, StoreName(key), metav1.GetOptions{})
+	o, err := h.pgs.Get(ctx, StoreName(key))
 	if apierrors.IsNotFound(err) {
 		return true, "", nil
 	}
-	if err != nil {
-		return false, "", err
-	}
-	o, err := unstruct.From[v1alpha1.Postgres](u)
 	if err != nil {
 		return false, "", err
 	}
@@ -446,19 +419,7 @@ func (h *UnitsHost) PurgeData(key string) error {
 }
 
 func (h *UnitsHost) Members(ctx context.Context, key string) ([]v1alpha1.HostProcess, error) {
-	list, err := h.hps.List(ctx, metav1.ListOptions{LabelSelector: LabelCluster + "=" + key})
-	if err != nil {
-		return nil, err
-	}
-	out := make([]v1alpha1.HostProcess, 0, len(list.Items))
-	for i := range list.Items {
-		o, err := unstruct.From[v1alpha1.HostProcess](&list.Items[i])
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, o)
-	}
-	return out, nil
+	return h.hps.List(ctx, LabelCluster+"="+key)
 }
 
 func (h *UnitsHost) gateAlive(ctx context.Context, key, member, inv string, gate func(context.Context) error) error {
@@ -467,7 +428,7 @@ func (h *UnitsHost) gateAlive(ctx context.Context, key, member, inv string, gate
 	gctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 	wg.Go(func() {
-		_, _ = awaitObject(gctx, h.hps, ObjectName(key, member), 0, func(o *v1alpha1.HostProcess) (bool, error) {
+		_, _ = h.hps.Await(gctx, ObjectName(key, member), 0, func(o *v1alpha1.HostProcess) (bool, error) {
 			if dead := memberDead(o, inv); dead != "" {
 				cancel(fmt.Errorf("clusterprovider: %s of %s %s", member, key, dead))
 				return true, nil
@@ -497,15 +458,14 @@ func memberDead(o *v1alpha1.HostProcess, inv string) string {
 }
 
 func (h *UnitsHost) member(ctx context.Context, key, member string) (*v1alpha1.HostProcess, error) {
-	u, err := h.hps.Get(ctx, ObjectName(key, member), metav1.GetOptions{})
+	o, err := h.hps.Get(ctx, ObjectName(key, member))
 	if apierrors.IsNotFound(err) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	o, err := unstruct.From[v1alpha1.HostProcess](u)
-	return &o, err
+	return o, nil
 }
 
 func Verified(o *v1alpha1.HostProcess) bool {
@@ -513,7 +473,7 @@ func Verified(o *v1alpha1.HostProcess) bool {
 		return false
 	}
 	inv := o.Status.Runtime.InvocationID
-	return inv != "" && o.Annotations[AnnotationVerified] == inv
+	return inv != "" && o.Labels[LabelVerified] == inv
 }
 
 func (h *UnitsHost) Live(key string) bool {
@@ -640,30 +600,30 @@ func (h *UnitsHost) memberSpec(key string, st procgroup.Step, spec procgroup.Spe
 
 func (h *UnitsHost) remove(ctx context.Context, name string) error {
 	for range 5 {
-		u, err := h.hps.Get(ctx, name, metav1.GetOptions{})
+		u, err := h.hps.Get(ctx, name)
 		if apierrors.IsNotFound(err) {
 			return nil
 		}
 		if err != nil {
 			return err
 		}
-		fin := slices.DeleteFunc(u.GetFinalizers(), func(f string) bool { return f == MemberFinalizer })
-		if len(fin) != len(u.GetFinalizers()) {
-			u.SetFinalizers(fin)
-			if _, err := h.hps.Update(ctx, u, metav1.UpdateOptions{}); err != nil {
+		fin := slices.DeleteFunc(slices.Clone(u.Finalizers), func(f string) bool { return f == MemberFinalizer })
+		if len(fin) != len(u.Finalizers) {
+			u.Finalizers = fin
+			if err := h.hps.Update(ctx, u); err != nil {
 				if apierrors.IsConflict(err) {
 					continue
 				}
 				return err
 			}
 		}
-		if u.GetDeletionTimestamp() == nil {
-			if err := h.hps.Delete(ctx, name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+		if u.DeletionTimestamp == nil {
+			if err := h.hps.Delete(ctx, name); err != nil && !apierrors.IsNotFound(err) {
 				return err
 			}
 		}
 	}
-	if _, err := ctlruntime.Await(ctx, h.hps, name, memberRemoveTimeout, ctlruntime.Absent); err != nil {
+	if _, err := h.hps.Await(ctx, name, memberRemoveTimeout, absent[v1alpha1.HostProcess]); err != nil {
 		if timedOut(err) {
 			return fmt.Errorf("clusterprovider: the HostProcess %s was not removed", name)
 		}
@@ -694,11 +654,7 @@ func (h *UnitsHost) place(ctx context.Context, key, member string, cur *v1alpha1
 			cur = nil
 		case !reflect.DeepEqual(cur.Spec, want):
 			cur.Spec = want
-			u, err := unstruct.To(cur, "HostProcess")
-			if err != nil {
-				return nil, err
-			}
-			if _, err := h.hps.Update(ctx, u, metav1.UpdateOptions{}); err != nil {
+			if err := h.hps.Update(ctx, cur); err != nil {
 				return nil, err
 			}
 			h.c.Log.Info("cluster provider: a member's spec changed; the running unit keeps the old one until it restarts",
@@ -712,17 +668,13 @@ func (h *UnitsHost) place(ctx context.Context, key, member string, cur *v1alpha1
 		o := v1alpha1.HostProcess{ObjectMeta: metav1.ObjectMeta{Name: name,
 			Labels:     map[string]string{LabelCluster: key, LabelMember: memberLabel(member)},
 			Finalizers: []string{MemberFinalizer}}, Spec: want}
-		u, err := unstruct.To(&o, "HostProcess")
-		if err != nil {
-			return nil, err
-		}
-		if _, err := h.hps.Create(ctx, u, metav1.CreateOptions{}); err != nil {
+		if err := h.hps.Create(ctx, &o); err != nil {
 			return nil, fmt.Errorf("clusterprovider: creating the HostProcess of %s of %s: %w", member, key, err)
 		}
 		h.c.Log.Info("cluster provider: member placed", "cluster", key, "member", member, "unit", want.Unit, "slice", want.Slice,
 			"after", want.After)
 	}
-	o, err := awaitObject(ctx, h.hps, name, h.c.PlaceTimeout, func(o *v1alpha1.HostProcess) (bool, error) {
+	o, err := h.hps.Await(ctx, name, h.c.PlaceTimeout, func(o *v1alpha1.HostProcess) (bool, error) {
 		if o == nil {
 			return false, nil
 		}
@@ -749,17 +701,15 @@ func (h *UnitsHost) place(ctx context.Context, key, member string, cur *v1alpha1
 
 func (h *UnitsHost) verify(ctx context.Context, key, member, inv string) error {
 	for range 5 {
-		u, err := h.hps.Get(ctx, ObjectName(key, member), metav1.GetOptions{})
+		u, err := h.hps.Get(ctx, ObjectName(key, member))
 		if err != nil {
 			return err
 		}
-		ann := u.GetAnnotations()
-		if ann == nil {
-			ann = map[string]string{}
+		if u.Labels == nil {
+			u.Labels = map[string]string{}
 		}
-		ann[AnnotationVerified] = inv
-		u.SetAnnotations(ann)
-		if _, err = h.hps.Update(ctx, u, metav1.UpdateOptions{}); err == nil || !apierrors.IsConflict(err) {
+		u.Labels[LabelVerified] = inv
+		if err = h.hps.Update(ctx, u); err == nil || !apierrors.IsConflict(err) {
 			return err
 		}
 	}
@@ -1049,7 +999,7 @@ func (h *UnitsHost) Reap(ctx context.Context, key string) error {
 		if o.DeletionTimestamp != nil {
 			continue
 		}
-		if err := h.hps.Delete(ctx, o.Name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+		if err := h.hps.Delete(ctx, o.Name); err != nil && !apierrors.IsNotFound(err) {
 			return err
 		}
 	}
@@ -1063,7 +1013,7 @@ func (h *UnitsHost) Reap(ctx context.Context, key string) error {
 		"cluster", key, "slice", h.Slice(key), "members", len(members))
 	pending := 0
 	removed := map[string]bool{}
-	err = awaitSelected(ctx, h.hps, LabelCluster+"="+key, h.c.ReapTimeout, func(members []v1alpha1.HostProcess) (bool, error) {
+	err = h.hps.AwaitSelected(ctx, LabelCluster+"="+key, h.c.ReapTimeout, func(members []v1alpha1.HostProcess) (bool, error) {
 		pending = 0
 		for _, o := range members {
 			switch o.Status.Phase {

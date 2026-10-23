@@ -21,9 +21,9 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/networkdial"
 	core "github.com/johnandersen777/socialweb-computer-kcp/internal/market/bidder"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/participant"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/oauthcallback"
 )
 

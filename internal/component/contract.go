@@ -29,6 +29,10 @@ const (
 
 type Service = contract.Service
 
+type Readiness = contract.Readiness
+
+type ReadySignal = contract.ReadySignal
+
 type Instance struct {
 	Self      commonv1.ObjectRef
 	UID       types.UID

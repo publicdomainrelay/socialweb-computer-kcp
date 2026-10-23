@@ -14,7 +14,7 @@ import (
 
 	"k8s.io/client-go/rest"
 
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterprovider"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterkcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/foldmain"
 )
 
@@ -43,7 +43,7 @@ func run(ctx context.Context, inv foldmain.Invocation) error {
 	if err := refuseExisting(cfg.OutDir); err != nil {
 		return err
 	}
-	restCfg, err := clusterprovider.MintTenantCredentialForClusterAs(
+	restCfg, err := clusterkcp.MintTenantCredentialForClusterAs(
 		ctx, cfg.StateDir, cfg.Cluster, cfg.Server, cfg.CommonName, cfg.Organizations, cfg.ValidFor)
 	if err != nil {
 		return err

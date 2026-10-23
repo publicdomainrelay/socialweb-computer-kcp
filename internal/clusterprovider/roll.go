@@ -21,18 +21,12 @@ import (
 	"github.com/fsnotify/fsnotify"
 	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
-	discoveryv1 "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	kruntime "k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/watch"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/cache"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/apiserverfront"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterlink"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterstack"
-	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/sha256sum"
@@ -406,30 +400,28 @@ func SameCAs(blueTLS, greenTLS string) error {
 	return nil
 }
 
-func workingPods(ctx context.Context, core kubernetes.Interface) (nodes, running int, guests []string, err error) {
-	nl, err := core.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+func workingPods(ctx context.Context, core Tenant) (nodes, running int, guests []string, err error) {
+	nl, err := core.Nodes(ctx)
 	if err != nil {
 		return 0, 0, nil, err
 	}
-	for _, n := range nl.Items {
+	for _, n := range nl {
 		guests = append(guests, n.Status.NodeInfo.KubeletVersion)
 	}
-	if len(nl.Items) == 0 {
+	if len(nl) == 0 {
 		return 0, 0, guests, nil
 	}
-	pl, err := core.CoreV1().Pods(metav1.NamespaceAll).List(ctx, metav1.ListOptions{FieldSelector: runningPodSelector})
+	pl, err := core.RunningPods(ctx)
 	if err != nil {
 		return 0, 0, nil, err
 	}
-	pods := make([]*corev1.Pod, 0, len(pl.Items))
-	for i := range pl.Items {
-		pods = append(pods, &pl.Items[i])
+	pods := make([]*corev1.Pod, 0, len(pl))
+	for i := range pl {
+		pods = append(pods, &pl[i])
 	}
 	running = working(pods)
-	return len(nl.Items), running, guests, nil
+	return len(nl), running, guests, nil
 }
-
-const runningPodSelector = "status.phase=Running"
 
 func working(pods []*corev1.Pod) int {
 	n := 0
@@ -441,37 +433,13 @@ func working(pods []*corev1.Pod) int {
 	return n
 }
 
-func runningPods(core kubernetes.Interface) cache.ListerWatcher {
-	return &cache.ListWatch{
-		ListWithContextFunc: func(ctx context.Context, o metav1.ListOptions) (kruntime.Object, error) {
-			o.FieldSelector = runningPodSelector
-			return core.CoreV1().Pods(metav1.NamespaceAll).List(ctx, o)
-		},
-		WatchFuncWithContext: func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) {
-			o.FieldSelector = runningPodSelector
-			return core.CoreV1().Pods(metav1.NamespaceAll).Watch(ctx, o)
-		},
-	}
-}
-
-func systemLeases(core kubernetes.Interface) cache.ListerWatcher {
-	return &cache.ListWatch{
-		ListWithContextFunc: func(ctx context.Context, o metav1.ListOptions) (kruntime.Object, error) {
-			return core.CoordinationV1().Leases(metav1.NamespaceSystem).List(ctx, o)
-		},
-		WatchFuncWithContext: func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) {
-			return core.CoordinationV1().Leases(metav1.NamespaceSystem).Watch(ctx, o)
-		},
-	}
-}
-
-func nodeReadySince(ctx context.Context, core kubernetes.Interface) map[string]string {
+func nodeReadySince(ctx context.Context, core Tenant) map[string]string {
 	out := map[string]string{}
-	nl, err := core.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	nl, err := core.Nodes(ctx)
 	if err != nil {
 		return out
 	}
-	for _, n := range nl.Items {
+	for _, n := range nl {
 		for _, c := range n.Status.Conditions {
 			if c.Type == corev1.NodeReady {
 				out[n.Name] = string(c.Status) + "@" + c.LastTransitionTime.UTC().Format(time.RFC3339)
@@ -481,13 +449,13 @@ func nodeReadySince(ctx context.Context, core kubernetes.Interface) map[string]s
 	return out
 }
 
-func leaseHolders(ctx context.Context, core kubernetes.Interface) map[string]string {
+func leaseHolders(ctx context.Context, core Tenant) map[string]string {
 	out := map[string]string{}
-	ll, err := core.CoordinationV1().Leases(metav1.NamespaceSystem).List(ctx, metav1.ListOptions{})
+	ll, err := core.SystemLeases(ctx)
 	if err != nil {
 		return out
 	}
-	for _, l := range ll.Items {
+	for _, l := range ll {
 		if strings.HasPrefix(l.Name, "apiserver-") || l.Spec.HolderIdentity == nil {
 			continue
 		}
@@ -678,7 +646,7 @@ func (r *Roller) RollCluster(ctx context.Context, key string, req RollRequest) (
 	}
 	if running > 0 {
 		r.log().Info("cluster provider: a swap waits for the market nodes to be idle", "cluster", key, "running", running, "bound", bound)
-		err := awaitTyped(ctx, runningPods(core), &corev1.Pod{}, bound, func(pods []*corev1.Pod) (bool, error) {
+		err := core.AwaitRunningPods(ctx, bound, func(pods []*corev1.Pod) (bool, error) {
 			return working(pods) == 0, nil
 		})
 		switch {
@@ -728,7 +696,7 @@ func (r *Roller) RollCluster(ctx context.Context, key string, req RollRequest) (
 		return abort(err)
 	}
 	so, err := h.placeGated(ctx, key, k3sStep, func(ctx context.Context, m procgroup.Member) error {
-		if err := WaitSlot(ctx, spec); err != nil {
+		if err := r.Stack.WaitSlot(ctx, spec); err != nil {
 			return err
 		}
 		return SameCAs(blueSpec.ServerTLSDir(), spec.ServerTLSDir())
@@ -936,7 +904,7 @@ func (r *Roller) RollLink(ctx context.Context, key string, req RollRequest) (rep
 	return rep
 }
 
-func (r *Roller) watch(ctx context.Context, core kubernetes.Interface, spec clusterstack.Spec, rep *RollReport, nodes, leases map[string]string) {
+func (r *Roller) watch(ctx context.Context, core Tenant, spec clusterstack.Spec, rep *RollReport, nodes, leases map[string]string) {
 	want := fmt.Sprintf("%s:%d", spec.AdvertiseAddress, spec.AdvertisePort)
 	pending := map[string]*LeaseHandover{}
 	for name, holder := range leases {
@@ -947,7 +915,7 @@ func (r *Roller) watch(ctx context.Context, core kubernetes.Interface, spec clus
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	wg.Go(func() {
-		ctlruntime.Follow(wctx, apiserverSlices(core), &discoveryv1.EndpointSlice{}, func(any) {
+		core.FollowAPIServerSlices(wctx, func() {
 			eps, err := AdvertisedEndpoints(wctx, core)
 			mu.Lock()
 			defer mu.Unlock()
@@ -961,9 +929,8 @@ func (r *Roller) watch(ctx context.Context, core kubernetes.Interface, spec clus
 		})
 	})
 	wg.Go(func() {
-		ctlruntime.Follow(wctx, systemLeases(core), &coordinationv1.Lease{}, func(obj any) {
-			l, ok := obj.(*coordinationv1.Lease)
-			if !ok || l.Spec.HolderIdentity == nil {
+		core.FollowSystemLeases(wctx, func(l *coordinationv1.Lease) {
+			if l.Spec.HolderIdentity == nil {
 				return
 			}
 			mu.Lock()

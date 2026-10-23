@@ -11,7 +11,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
 
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/kcp"
 )
 
 type LocalRef struct {

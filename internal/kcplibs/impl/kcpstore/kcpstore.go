@@ -19,9 +19,9 @@ import (
 	"k8s.io/client-go/rest"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/clientlimit"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/ref"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/statuspatch"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/kcp"
 )
 
 var (

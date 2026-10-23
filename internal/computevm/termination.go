@@ -10,10 +10,10 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -37,7 +37,7 @@ func TerminationSyncName(uid string) string {
 	return TerminationSyncPrefix + hex.EncodeToString(sum[:8])
 }
 
-func TerminationStateSync(o *v1alpha1.ComputeVM, workspace, reason, observedAt string, request *commonv1.StrongRef) (*unstructured.Unstructured, error) {
+func TerminationStateSync(o *v1alpha1.ComputeVM, workspace, reason, observedAt string, request *commonv1.StrongRef) (*v1alpha1.StateSync, error) {
 	if o == nil || o.Spec.Contract == nil {
 		return nil, errors.New("computevm: a termination StateSync needs a contract")
 	}
@@ -72,51 +72,32 @@ func TerminationStateSync(o *v1alpha1.ComputeVM, workspace, reason, observedAt s
 	if err != nil {
 		return nil, err
 	}
-	var stored map[string]any
-	if err := json.Unmarshal(raw, &stored); err != nil {
-		return nil, err
-	}
-	metadata := map[string]any{
-		"name": TerminationSyncName(string(o.UID)),
-		"labels": map[string]any{
+	sync := &v1alpha1.StateSync{
+		TypeMeta: metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: "StateSync"},
+		ObjectMeta: metav1.ObjectMeta{Name: TerminationSyncName(string(o.UID)), Labels: map[string]string{
 			TerminationSyncSourceLabel: TerminationSyncSource,
 			TerminationSyncUIDLabel:    string(o.UID),
 			TerminationSyncVMNameLabel: o.Name,
+		}},
+		Spec: v1alpha1.StateSyncSpec{
+			Source: &v1alpha1.StateSyncSource{Workspace: workspace, ApiVersion: v1alpha1.GroupVersion.String(), Kind: "ComputeVM",
+				Name: o.Name, UID: string(o.UID)},
+			Sink:           v1alpha1.StateSyncSink{Adapter: TerminationSyncAdapter},
+			Direction:      v1alpha1.StateSyncDirectionOutbound,
+			Payload:        raw,
+			IdempotencyKey: "terminated:" + contract.Receipt.URI,
+			ConflictPolicy: v1alpha1.StateSyncConflictSourceWins,
+			DeletionPolicy: v1alpha1.StateSyncDeletionRetain,
 		},
 	}
 	for _, owner := range o.OwnerReferences {
 		if owner.Kind != "Bid" || owner.UID == "" {
 			continue
 		}
-		metadata["ownerReferences"] = []any{map[string]any{
-			"apiVersion": owner.APIVersion,
-			"kind":       owner.Kind,
-			"name":       owner.Name,
-			"uid":        string(owner.UID),
-		}}
+		sync.OwnerReferences = []metav1.OwnerReference{{APIVersion: owner.APIVersion, Kind: owner.Kind, Name: owner.Name, UID: owner.UID}}
 		break
 	}
-	object := map[string]any{
-		"apiVersion": v1alpha1.GroupVersion.String(),
-		"kind":       "StateSync",
-		"metadata":   metadata,
-		"spec": map[string]any{
-			"source": map[string]any{
-				"workspace":  workspace,
-				"apiVersion": v1alpha1.GroupVersion.String(),
-				"kind":       "ComputeVM",
-				"name":       o.Name,
-				"uid":        string(o.UID),
-			},
-			"sink":           map[string]any{"adapter": TerminationSyncAdapter},
-			"direction":      string(v1alpha1.StateSyncDirectionOutbound),
-			"payload":        stored,
-			"idempotencyKey": "terminated:" + contract.Receipt.URI,
-			"conflictPolicy": string(v1alpha1.StateSyncConflictSourceWins),
-			"deletionPolicy": string(v1alpha1.StateSyncDeletionRetain),
-		},
-	}
-	return &unstructured.Unstructured{Object: object}, nil
+	return sync, nil
 }
 
 func TerminationReportable(o v1alpha1.ComputeVM) bool {
@@ -132,8 +113,8 @@ func (h *Host) EnsureTerminationSync(ctx context.Context, o v1alpha1.ComputeVM, 
 	if err != nil {
 		return err
 	}
-	name := object.GetName()
-	if _, err := h.syncs.Create(ctx, object, metav1.CreateOptions{}); err != nil {
+	name := object.Name
+	if _, err := kube.Create[v1alpha1.StateSync](ctx, h.syncs, object, metav1.CreateOptions{}); err != nil {
 		if apierrors.IsAlreadyExists(err) {
 			return nil
 		}

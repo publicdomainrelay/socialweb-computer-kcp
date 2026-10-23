@@ -10,12 +10,10 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 )
 
 type Link struct {
@@ -226,7 +224,7 @@ func (c *Composer) DeleteLinks(ctx context.Context, r Root, workspaces ...string
 func (c *Composer) LinksAccepted(ctx context.Context, r Root, links []Link) (bool, string) {
 	for _, l := range Dedupe(links) {
 		ws := workspaceOr(l.Workspace(), r.Workspace)
-		u, err := c.Get(ctx, ws, ComponentLinkGVR, l.Name)
+		u, err := Get[exposurev1alpha1.ComponentLink](ctx, c, ws, ComponentLinkGVR, l.Name)
 		if err != nil {
 			return false, "the ComponentLink " + l.Name + " is not readable yet"
 		}
@@ -237,11 +235,7 @@ func (c *Composer) LinksAccepted(ctx context.Context, r Root, links []Link) (boo
 	return true, ""
 }
 
-func linkAccepted(u *unstructured.Unstructured) bool {
-	var link exposurev1alpha1.ComponentLink
-	if err := unstruct.Into(u, &link); err != nil {
-		return false
-	}
+func linkAccepted(link *exposurev1alpha1.ComponentLink) bool {
 	if link.Status.ObservedGeneration < link.Generation {
 		return false
 	}

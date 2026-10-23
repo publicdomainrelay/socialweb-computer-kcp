@@ -17,13 +17,13 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	atpds "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pds"
 	atrepo "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/repo"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/atprotorepo/binding"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atprotorepo/scoped"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/atprotorepo"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/pds"
 	pdsctl "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/pds"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/binding"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 )
 

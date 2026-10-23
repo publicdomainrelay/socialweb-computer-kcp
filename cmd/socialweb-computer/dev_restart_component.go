@@ -11,9 +11,9 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/marketnetwork"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clicfg"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/manifests"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/componentcore"
 )
 
@@ -117,24 +117,8 @@ func (a *app) resolveComponentTarget(ctx context.Context, l devinstance.Layout, 
 			}
 			return t, fmt.Errorf("market network %s has no child application %s (it has: %s)", l.ID, t.App, strings.Join(names, ", "))
 		}
-	case rec.Profile == bootstrap.ProfileMarketNetwork && rec.AdminKubeconfig != "":
-		n, err := marketnetwork.ReadNetwork(ctx, rec.AdminKubeconfig)
-		if err == nil {
-			seen := map[string]bool{}
-			add := func(workspace string) {
-				if workspace == "" || seen[workspace] {
-					return
-				}
-				seen[workspace] = true
-				t.Workspaces = append(t.Workspaces, workspace)
-			}
-			for _, workspace := range componentcore.AppWorkspaces(baseWorkspace(rec)) {
-				add(workspace)
-			}
-			for _, c := range n.Status.Components {
-				add(c.Workspace)
-			}
-		}
+	default:
+		t.Workspaces = networkWorkspaces(ctx, rec)
 	}
 	if workspace != "" {
 		t.Workspaces = []string{workspaceName(t.Base, workspace)}
@@ -149,6 +133,32 @@ func (a *app) resolveComponentTarget(ctx context.Context, l devinstance.Layout, 
 		return t, fmt.Errorf("instance %s records no admin kubeconfig; dev up first", t.Instance)
 	}
 	return t, nil
+}
+
+func networkWorkspaces(ctx context.Context, rec devinstance.Record) []string {
+	if rec.Profile != bootstrap.ProfileMarketNetwork || rec.AdminKubeconfig == "" {
+		return nil
+	}
+	n, err := marketnetwork.ReadNetwork(ctx, rec.AdminKubeconfig)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	seen := map[string]bool{}
+	add := func(workspace string) {
+		if workspace == "" || seen[workspace] {
+			return
+		}
+		seen[workspace] = true
+		out = append(out, workspace)
+	}
+	for _, workspace := range componentcore.AppWorkspaces(baseWorkspace(rec)) {
+		add(workspace)
+	}
+	for _, c := range n.Status.Components {
+		add(c.Workspace)
+	}
+	return out
 }
 
 func runDevRestartComponent(ctx context.Context, a *app, vals clicfg.Values, target string) int {

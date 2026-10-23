@@ -40,7 +40,7 @@ type Registrar interface {
 type Provider interface {
 	Start(ctx context.Context) error
 
-	Ready(ctx context.Context) error
+	Ready() component.Readiness
 
 	Stop(ctx context.Context) error
 

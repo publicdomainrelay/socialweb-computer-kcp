@@ -307,13 +307,23 @@ A prod deployment guarantees nothing; the routine path preserves most things.
   - `api/<group>/v1alpha1` (common): types, contract status, refs.
   - `internal/contract/<concept>` (abc): small Go interfaces and pure types; api and stdlib only.
   - `internal/kit/<name>` (common helpers): no concept; api, contract, kit and third-party only.
+  - `internal/controllers/runtime/<pkg>` (transport): the kcp transport (`kube` typed client and
+    awaits, `kcpapply`, `manifests`); the only home of the dynamic client and unstructured objects.
   - `internal/<concept>/<impl>` (impl): one sibling package per backend, the real work, no kcp.
   - Adapters: `internal/controllers/<kind>` turns kcp objects into contract calls (one reconciler per
     kind on `internal/controllers/runtime`); `internal/services/<svc>` turns XRPC/HTTP routes into
     contract calls and holds no role logic.
   - `internal/app/<root>` (factory): one composition controller per app root; wires impls into the
-    bus and picks a backend by the `backendRef` kind, never by a flag.
-  - `cmd/` (CLI).
+    bus and picks a backend by the `backendRef` kind, never by a flag. Composition code
+    (`internal/stack/**`, `internal/devcore/**`, `internal/<x>main`) is this layer too.
+  - `cmd/` (CLI); tools (`hack/`, `internal/apigen`, `internal/lexgen`) rank with it.
+- Gate. `scripts/check-architecture.sh` (`go run ./hack/archcheck`) fails on any violation of: the
+  layer order; backend deps; a ticker or periodic requeue site missing from `deploy/obligations.txt`;
+  a System caller missing from `deploy/bus-bootstrap-callers.txt`; a dynamic client or unstructured
+  import outside the transport and apigen; a GroupVersionResource literal outside `api/` (foreign
+  groups are vars in `api/kcpgvr`); an annotation read as a signal (kcp and kubelet metadata
+  conventions are listed in the checker); an endpoint field in spec without `apigen:"userEndpoint"`;
+  an impl package without a compile-time assertion against an `internal/contract` interface.
 - Go idiom. No factory types: `New(cfg, deps)` takes explicit dependencies and returns a concrete
   struct; callers accept the contract interface. Every impl states its contracts at compile time
   (`var _ compute.Provider = (*Provider)(nil)`). One package, one concept; no util package outside

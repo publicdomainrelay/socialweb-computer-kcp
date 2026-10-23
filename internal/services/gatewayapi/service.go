@@ -22,7 +22,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gateway/nodeclaim"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayhttp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/kcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/xrpcserver"
 )
 
@@ -62,6 +62,8 @@ type Service struct {
 	stopOnce *sync.Once
 
 	ready bool
+
+	readiness component.ReadySignal
 }
 
 func (s *Service) Start(ctx context.Context) error {
@@ -145,6 +147,7 @@ func (s *Service) Start(ctx context.Context) error {
 		s.deps.NodeClaims.Bind(*nodeClaims)
 	}
 	log.Info("gatewayapi_registered", "handler", kcp.HandlerURL(s.workspace, Kind, s.deps.Self.Name), "network", networkName(s.spec.Network))
+	s.readiness.Signal()
 
 	select {
 	case <-ctx.Done():
@@ -156,14 +159,8 @@ func (s *Service) Start(ctx context.Context) error {
 	return nil
 }
 
-func (s *Service) Ready(ctx context.Context) error {
-	s.mu.Lock()
-	ready := s.ready
-	s.mu.Unlock()
-	if !ready {
-		return errors.New("gatewayapi: the service is not registered")
-	}
-	return nil
+func (s *Service) Ready() component.Readiness {
+	return &s.readiness
 }
 
 func (s *Service) Endpoints() []component.Endpoint {

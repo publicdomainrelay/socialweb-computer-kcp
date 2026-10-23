@@ -4,17 +4,15 @@ import (
 	"bytes"
 	"context"
 	"embed"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/types"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
-	"k8s.io/client-go/dynamic"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/api/kcpgvr"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 )
 
 //go:embed manifests/*.yaml
@@ -38,15 +36,15 @@ var ManifestOrder = []string{
 var ErrUnknownKind = errors.New("tenantnet: a manifest names a kind this package does not apply")
 
 var resources = map[string]schema.GroupVersionResource{
-	"ServiceAccount":     {Version: "v1", Resource: "serviceaccounts"},
-	"ConfigMap":          {Version: "v1", Resource: "configmaps"},
-	"ClusterRole":        {Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "clusterroles"},
-	"ClusterRoleBinding": {Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "clusterrolebindings"},
-	"DaemonSet":          {Group: "apps", Version: "v1", Resource: "daemonsets"},
+	"ServiceAccount":     kcpgvr.ServiceAccounts,
+	"ConfigMap":          kcpgvr.ConfigMaps,
+	"ClusterRole":        kcpgvr.ClusterRoles,
+	"ClusterRoleBinding": kcpgvr.ClusterRoleBindings,
+	"DaemonSet":          kcpgvr.DaemonSets,
 }
 
-func Objects() ([]unstructured.Unstructured, error) {
-	var out []unstructured.Unstructured
+func Objects() ([]kube.Doc, error) {
+	var out []kube.Doc
 	for _, name := range ManifestOrder {
 		raw, err := manifests.ReadFile(name)
 		if err != nil {
@@ -64,9 +62,9 @@ func Objects() ([]unstructured.Unstructured, error) {
 			if len(obj) == 0 {
 				continue
 			}
-			u := unstructured.Unstructured{Object: obj}
-			if _, ok := resources[u.GetKind()]; !ok {
-				return nil, fmt.Errorf("%w: %s %s in %s", ErrUnknownKind, u.GetKind(), u.GetName(), name)
+			u := kube.Doc(obj)
+			if _, ok := resources[str(u, "kind")]; !ok {
+				return nil, fmt.Errorf("%w: %s %s in %s", ErrUnknownKind, str(u, "kind"), str(u, "metadata", "name"), name)
 			}
 			out = append(out, u)
 		}
@@ -74,27 +72,30 @@ func Objects() ([]unstructured.Unstructured, error) {
 	return out, nil
 }
 
-func Apply(ctx context.Context, dyn dynamic.Interface, manager string) error {
+func Apply(ctx context.Context, c *kube.Client, manager string) error {
 	objs, err := Objects()
 	if err != nil {
 		return err
 	}
-	force := true
-	for i := range objs {
-		u := &objs[i]
-		gvr := resources[u.GetKind()]
-		body, err := json.Marshal(u.Object)
-		if err != nil {
-			return fmt.Errorf("tenantnet: marshalling the %s %s: %w", u.GetKind(), u.GetName(), err)
-		}
-		var ri dynamic.ResourceInterface = dyn.Resource(gvr)
-		if ns := u.GetNamespace(); ns != "" {
-			ri = dyn.Resource(gvr).Namespace(ns)
-		}
-		if _, err := ri.Patch(ctx, u.GetName(), types.ApplyPatchType, body,
-			metav1.PatchOptions{FieldManager: manager, Force: &force}); err != nil {
-			return fmt.Errorf("tenantnet: applying the %s %s: %w", u.GetKind(), u.GetName(), err)
+	for _, u := range objs {
+		kind, name := str(u, "kind"), str(u, "metadata", "name")
+		r := c.Resource(resources[kind]).In(str(u, "metadata", "namespace"))
+		if _, err := kube.Apply[kube.Doc](ctx, r, u, kube.ApplyOptions{FieldManager: manager, Force: true}); err != nil {
+			return fmt.Errorf("tenantnet: applying the %s %s: %w", kind, name, err)
 		}
 	}
 	return nil
+}
+
+func str(d kube.Doc, fields ...string) string {
+	var v any = map[string]any(d)
+	for _, f := range fields {
+		m, ok := v.(map[string]any)
+		if !ok {
+			return ""
+		}
+		v = m[f]
+	}
+	s, _ := v.(string)
+	return s
 }

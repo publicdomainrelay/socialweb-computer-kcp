@@ -5,10 +5,8 @@ import (
 	"fmt"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	kruntime "k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 
@@ -16,6 +14,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/atprotorecord"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/atprotorecordwatch"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/eventstream"
 )
 
@@ -73,19 +72,7 @@ func (r recordWatchChildren) apply(ctx context.Context, workspace string, obj cl
 	if err != nil {
 		return err
 	}
-	m, err := kruntime.DefaultUnstructuredConverter.ToUnstructured(obj)
-	if err != nil {
-		return err
-	}
-	u := &unstructured.Unstructured{Object: m}
-	u.SetGroupVersionKind(gvk)
-	delete(u.Object, "status")
-	unstructured.RemoveNestedField(u.Object, "metadata", "creationTimestamp")
-	unstructured.RemoveNestedField(u.Object, "metadata", "resourceVersion")
-	unstructured.RemoveNestedField(u.Object, "metadata", "managedFields")
-	unstructured.RemoveNestedField(u.Object, "metadata", "uid")
-	if err := c.Apply(ctx, client.ApplyConfigurationFromUnstructured(u), client.FieldOwner(atprotorecordwatch.FieldManager),
-		client.ForceOwnership); err != nil {
+	if err := kube.ApplyWith(ctx, c, obj, kube.ApplyOptions{FieldManager: atprotorecordwatch.FieldManager, Force: true}); err != nil {
 		return fmt.Errorf("componentcore: applying %s %s in %s: %w", gvk.Kind, obj.GetName(), workspace, err)
 	}
 	return nil
@@ -133,11 +120,22 @@ func recordWatchValues(clients *workspaceClients) atprotorecordwatch.ValueReader
 		if err != nil {
 			return nil, err
 		}
-		u := &unstructured.Unstructured{}
-		u.SetGroupVersionKind(schema.GroupVersionKind{Group: gvk.Group, Version: gvk.Version, Kind: gvk.Kind})
-		if err := c.Get(ctx, client.ObjectKey{Namespace: from.Namespace, Name: from.Name}, u); err != nil {
+		mapping, err := c.RESTMapper().RESTMapping(gvk.GroupKind(), gvk.Version)
+		if err != nil {
 			return nil, err
 		}
-		return u.Object, nil
+		dyn, err := clients.dynamic(workspace)
+		if err != nil {
+			return nil, err
+		}
+		r := dyn.Resource(mapping.Resource)
+		if mapping.Scope.Name() == meta.RESTScopeNameNamespace {
+			r = r.In(from.Namespace)
+		}
+		doc, err := kube.Get[kube.Doc](ctx, r, from.Name)
+		if err != nil {
+			return nil, err
+		}
+		return *doc, nil
 	}
 }

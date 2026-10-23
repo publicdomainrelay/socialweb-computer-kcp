@@ -34,8 +34,6 @@ const (
 	DevWorkspacePrefix = "root:dev"
 
 	ComponentWorkspace = "app"
-
-	hostProcessUnitAnnotation = "socialweb.computer/unit"
 )
 
 type Workspace struct {

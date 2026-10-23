@@ -15,15 +15,17 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	kruntime "k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	utiljson "k8s.io/apimachinery/pkg/util/json"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/discovery/cached/memory"
-	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/restmapper"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gateway"
 )
 
@@ -67,20 +69,24 @@ func (c *Client) config(ctx context.Context, did, cluster string) (*rest.Config,
 }
 
 func (c *Client) Apply(ctx context.Context, did, cluster string, req gateway.ApplyRequest) (*gateway.ApplyResponse, error) {
-	obj := &unstructured.Unstructured{}
-	if err := obj.UnmarshalJSON(req.Manifest); err != nil {
+	obj := kube.Doc{}
+	if err := utiljson.Unmarshal(req.Manifest, &obj); err != nil {
 		return nil, invalid("the manifest is not a Kubernetes object: %s", oneLine(err.Error()))
 	}
-	gvk := obj.GroupVersionKind()
+	gvk := groupVersionKind(obj)
+	if gvk.Kind == "" {
+		return nil, invalid("the manifest is not a Kubernetes object: %s", oneLine(kruntime.NewMissingKindErr(string(req.Manifest)).Error()))
+	}
+	name := docString(obj, "metadata", "name")
 	switch {
-	case gvk.Version == "" || gvk.Kind == "":
+	case gvk.Version == "":
 		return nil, invalid("the manifest needs apiVersion and kind")
 	case strings.HasSuffix(gvk.Kind, "List"):
 		return nil, invalid("one object per call; %s is a list", gvk.Kind)
-	case obj.GetName() == "":
+	case name == "":
 		return nil, invalid("the manifest needs metadata.name (server-side apply does not take generateName)")
-	case req.Name != "" && req.Name != obj.GetName():
-		return nil, invalid("name %q does not match metadata.name %q", req.Name, obj.GetName())
+	case req.Name != "" && req.Name != name:
+		return nil, invalid("name %q does not match metadata.name %q", req.Name, name)
 	}
 
 	cfg, err := c.config(ctx, did, cluster)
@@ -100,13 +106,13 @@ func (c *Client) Apply(ctx context.Context, did, cluster string, req gateway.App
 		return nil, kubeError(err)
 	}
 
-	dyn, err := dynamic.NewForConfig(cfg)
+	kc, err := kube.New(cfg)
 	if err != nil {
 		return nil, err
 	}
-	var target dynamic.ResourceInterface = dyn.Resource(mapping.Resource)
+	target := kc.Resource(mapping.Resource)
 	if mapping.Scope.Name() == meta.RESTScopeNameNamespace {
-		ns := obj.GetNamespace()
+		ns := docString(obj, "metadata", "namespace")
 		switch {
 		case ns == "" && req.Namespace != "":
 			ns = req.Namespace
@@ -115,39 +121,65 @@ func (c *Client) Apply(ctx context.Context, did, cluster string, req gateway.App
 		case req.Namespace != "" && req.Namespace != ns:
 			return nil, invalid("namespace %q does not match metadata.namespace %q", req.Namespace, ns)
 		}
-		obj.SetNamespace(ns)
-		target = dyn.Resource(mapping.Resource).Namespace(ns)
+		obj["metadata"].(map[string]any)["namespace"] = ns
+		target = target.In(ns)
 	} else {
-		if req.Namespace != "" || obj.GetNamespace() != "" {
+		if req.Namespace != "" || docString(obj, "metadata", "namespace") != "" {
 			return nil, invalid("%s is cluster-scoped and takes no namespace", gvk.Kind)
 		}
 	}
 
 	manager := req.FieldManager
 	manager = cmp.Or(manager, DefaultFieldManager)
-	opts := metav1.ApplyOptions{FieldManager: manager, Force: req.Force}
+	opts := kube.ApplyOptions{FieldManager: manager, Force: req.Force}
 	if req.DryRun {
 		opts.DryRun = []string{metav1.DryRunAll}
 	}
-	out, err := target.Apply(ctx, obj.GetName(), obj, opts)
+	out, err := kube.Apply[kube.Doc](ctx, target, obj, opts)
 	if err != nil {
 		return nil, kubeError(err)
 	}
-	raw, err := out.MarshalJSON()
+	raw, err := json.Marshal(*out)
 	if err != nil {
 		return nil, err
 	}
+	generation, _ := docField(*out, "metadata", "generation").(int64)
 	return &gateway.ApplyResponse{
-		APIVersion:      out.GetAPIVersion(),
-		Kind:            out.GetKind(),
-		Namespace:       out.GetNamespace(),
-		Name:            out.GetName(),
-		UID:             string(out.GetUID()),
-		ResourceVersion: out.GetResourceVersion(),
-		Generation:      out.GetGeneration(),
+		APIVersion:      docString(*out, "apiVersion"),
+		Kind:            docString(*out, "kind"),
+		Namespace:       docString(*out, "metadata", "namespace"),
+		Name:            docString(*out, "metadata", "name"),
+		UID:             docString(*out, "metadata", "uid"),
+		ResourceVersion: docString(*out, "metadata", "resourceVersion"),
+		Generation:      generation,
 		DryRun:          req.DryRun,
 		Object:          json.RawMessage(raw),
 	}, nil
+}
+
+func docField(d kube.Doc, fields ...string) any {
+	var v any = map[string]any(d)
+	for _, f := range fields {
+		m, ok := v.(map[string]any)
+		if !ok {
+			return nil
+		}
+		v = m[f]
+	}
+	return v
+}
+
+func docString(d kube.Doc, fields ...string) string {
+	s, _ := docField(d, fields...).(string)
+	return s
+}
+
+func groupVersionKind(d kube.Doc) schema.GroupVersionKind {
+	gv, err := schema.ParseGroupVersion(docString(d, "apiVersion"))
+	if err != nil {
+		return schema.GroupVersionKind{}
+	}
+	return gv.WithKind(docString(d, "kind"))
 }
 
 func (c *Client) Job(ctx context.Context, did, cluster string, req gateway.JobRequest) (*gateway.JobStatus, error) {

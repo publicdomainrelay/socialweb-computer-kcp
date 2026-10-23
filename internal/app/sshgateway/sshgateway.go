@@ -12,7 +12,6 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/yaml"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
@@ -20,9 +19,10 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/marketrequester"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/manifests"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/irohdial"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 )
 
 const (
@@ -548,7 +548,7 @@ func (p *pass) hostProcesses(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	list, err := ri.List(ctx, metav1.ListOptions{LabelSelector: compose.OwnerLabel + "=" + p.r.Owner()})
+	list, err := kube.List[v1alpha1.HostProcess](ctx, ri, metav1.ListOptions{LabelSelector: compose.OwnerLabel + "=" + p.r.Owner()})
 	if apierrors.IsNotFound(err) {
 		return false, nil
 	}
@@ -556,12 +556,12 @@ func (p *pass) hostProcesses(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	dialer := false
-	for _, h := range list.Items {
-		phase, _, _ := unstructured.NestedString(h.Object, "status", "phase")
+	for _, h := range list {
+		phase := string(h.Status.Phase)
 		running := phase == string(v1alpha1.HostProcessPhaseRunning)
-		p.st.Components = append(p.st.Components, v1alpha1.ApplicationComponent{Kind: compose.KindHostProcess, Name: h.GetName(),
+		p.st.Components = append(p.st.Components, v1alpha1.ApplicationComponent{Kind: compose.KindHostProcess, Name: h.Name,
 			Workspace: p.r.Workspace, Phase: phase, Ready: running})
-		dialer = dialer || (h.GetName() == SshGatewayIrohDial && running)
+		dialer = dialer || (h.Name == SshGatewayIrohDial && running)
 	}
 	return dialer, nil
 }

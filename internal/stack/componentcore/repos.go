@@ -3,14 +3,11 @@ package componentcore
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
 	atidentity "github.com/bluesky-social/indigo/atproto/identity"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
@@ -20,6 +17,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/atprotorecord"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/remotepds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/repos"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/credentials"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/pds/identity"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/pds/remote"
@@ -67,15 +65,7 @@ func (c *Core) repoOptions(caBundle remotepds.CABundleFunc) repos.Options {
 			if err != nil {
 				return nil, err
 			}
-			u, err := dyn.Resource(v1alpha1.MarketIdentityGVR).Get(ctx, name, metav1.GetOptions{})
-			if err != nil {
-				return nil, err
-			}
-			var id v1alpha1.MarketIdentity
-			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &id); err != nil {
-				return nil, fmt.Errorf("componentcore: decoding MarketIdentity %s: %w", name, err)
-			}
-			return &id, nil
+			return kube.Get[v1alpha1.MarketIdentity](ctx, dyn.Resource(v1alpha1.MarketIdentityGVR), name)
 		},
 		Vault: func(workspace string, ref commonv1.SecretRef) identity.Store {
 			return vaultStore{core: c, workspace: workspace, ref: ref}

@@ -10,6 +10,7 @@ import (
 	"k8s.io/client-go/rest"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clientcert"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterkcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterprovider"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gateway"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
@@ -44,7 +45,7 @@ func ownerCredentials(stateDir string) func(context.Context, string, string) (*r
 		if err := json.Unmarshal(raw, &front); err != nil || front.Address == "" {
 			return nil, fmt.Errorf("the apiserver front of cluster %q reports no address", cluster)
 		}
-		return clusterprovider.MintTenantCredentialForDataDirAs(dir, "https://"+front.Address, did,
+		return clusterkcp.MintTenantCredentialForDataDirAs(dir, "https://"+front.Address, did,
 			[]string{kcpclient.OwnersGroup}, ownerCredentialValidity)
 	}
 }

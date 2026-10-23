@@ -69,6 +69,7 @@ func builtVerbs() map[string]builtVerb {
 		"dev env":                {[]string{"instance", "state-dir", "json"}, runDevEnv},
 		"dev check":              {nil, runDevCheck},
 		"dev restart":            {[]string{"instance", "state-dir", "binary", "ready-timeout"}, runDevRestart},
+		"dev links":              {[]string{"instance", "state-dir", "json"}, runDevLinks},
 		"dev gc":                 {[]string{"asset-cache", "state-dir", "asset-gc-window"}, runDevGC},
 		"apply":                  {applyOptions, runApply},
 		"run bidder":             {bidderOptions, runBidder},

@@ -9,15 +9,15 @@ import (
 	"strings"
 	"time"
 
-	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kcpapply"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/manifests"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostprocess"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpapply"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/statesync"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vmruntime"
@@ -26,6 +26,7 @@ import (
 const (
 	ChildPrefix    = "vm-"
 	LabelComputeVM = "socialweb.computer/computevm"
+	LabelSlot      = "socialweb.computer/vm-slot"
 	BidderSet      = "bidder"
 	RetryAfter     = 3 * time.Second
 	OrphanGrace    = 2 * time.Minute
@@ -53,17 +54,17 @@ type Host struct {
 
 	Rest *rest.Config
 
-	VMs dynamic.ResourceInterface
+	VMs kube.Resource
 
-	Backends dynamic.ResourceInterface
+	Backends kube.Resource
 
-	HostProcesses dynamic.ResourceInterface
+	HostProcesses kube.Resource
 
-	servers dynamic.ResourceInterface
+	servers kube.Resource
 
-	grants dynamic.ResourceInterface
+	grants kube.Resource
 
-	syncs dynamic.ResourceInterface
+	syncs kube.Resource
 }
 
 func (c Config) log() *slog.Logger {
@@ -96,7 +97,7 @@ func Open(ctx context.Context, c Config) (*Host, error) {
 	}
 	cfg := rest.CopyConfig(restCfg)
 	cfg.Host = strings.TrimSuffix(cfg.Host, "/") + "/clusters/" + c.Workspace
-	dc, err := dynamic.NewForConfig(cfg)
+	dc, err := kube.New(cfg)
 	if err != nil {
 		return nil, err
 	}

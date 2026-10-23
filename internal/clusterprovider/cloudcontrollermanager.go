@@ -4,17 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
-	"os"
-	"path/filepath"
-
-	rbacv1 "k8s.io/api/rbac/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
-	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterstack"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/procgroup"
@@ -29,8 +18,6 @@ const CloudControllerManagerClusterRole = "socialweb-cloud-controller-manager"
 const CloudControllerManagerClusterRoleBinding = "socialweb-cloud-controller-manager"
 
 const cloudControllerManagerKubeconfigContext = "socialweb-cloud-controller-manager"
-
-const cloudControllerManagerKubeconfigMode = 0o600
 
 var ErrNoCloudControllerManagerSeam = errors.New(
 	"clusterprovider: this Stack puts no k3s step in the group, so the cloud controller manager's " +
@@ -49,132 +36,6 @@ var ErrCloudControllerManagerKubeconfigUnwritable = errors.New(
 		"disk before its step ran. The controller takes that file as its only credential and refuses " +
 		"to start without it, so a write that failed quietly would leave the component failing at " +
 		"start for a reason that is not in the controller's own log")
-
-func WriteCloudControllerManagerKubeconfig(path string, cfg *rest.Config) error {
-	return writeScopedKubeconfig(path, cfg, cloudControllerManagerKubeconfigContext,
-		ErrCloudControllerManagerKubeconfigUnwritable)
-}
-
-func writeScopedKubeconfig(path string, cfg *rest.Config, contextName string, unwritable error) error {
-	if cfg == nil {
-		return fmt.Errorf("%w: no credential was rendered for %s", unwritable, path)
-	}
-	if path == "" {
-		return fmt.Errorf("%w: the target path is empty", unwritable)
-	}
-	body, err := clientcmd.Write(clientcmdapi.Config{
-		Clusters: map[string]*clientcmdapi.Cluster{contextName: {
-			Server:                   cfg.Host,
-			CertificateAuthorityData: cfg.CAData,
-			InsecureSkipTLSVerify:    cfg.Insecure,
-		}},
-		AuthInfos: map[string]*clientcmdapi.AuthInfo{contextName: {
-			ClientCertificateData: cfg.CertData,
-			ClientKeyData:         cfg.KeyData,
-			Token:                 cfg.BearerToken,
-		}},
-		Contexts: map[string]*clientcmdapi.Context{contextName: {
-			Cluster:  contextName,
-			AuthInfo: contextName,
-		}},
-		CurrentContext: contextName,
-	})
-	if err != nil {
-		return fmt.Errorf("%w: rendering the credential for %s: %v", unwritable, path, err)
-	}
-
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("%w: the directory %s holding %s: %v",
-			unwritable, dir, path, err)
-	}
-	if info, err := os.Stat(path); err == nil {
-		current, err := os.ReadFile(path)
-		if err != nil {
-			return fmt.Errorf("%w: reading %s: %v", unwritable, path, err)
-		}
-		if string(current) == string(body) && info.Mode().Perm() == cloudControllerManagerKubeconfigMode {
-			return nil
-		}
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("%w: stat %s: %v", unwritable, path, err)
-	}
-
-	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".")
-	if err != nil {
-		return fmt.Errorf("%w: a temporary file beside %s: %v",
-			unwritable, path, err)
-	}
-	defer func() { _ = os.Remove(tmp.Name()) }()
-	if err := tmp.Chmod(cloudControllerManagerKubeconfigMode); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("%w: the mode of %s: %v", unwritable, tmp.Name(), err)
-	}
-	if _, err := tmp.Write(body); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("%w: writing %s: %v", unwritable, tmp.Name(), err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("%w: closing %s: %v", unwritable, tmp.Name(), err)
-	}
-	if err := os.Rename(tmp.Name(), path); err != nil {
-		return fmt.Errorf("%w: renaming %s over %s: %v",
-			unwritable, tmp.Name(), path, err)
-	}
-	return nil
-}
-
-func GrantCloudControllerManager(ctx context.Context, core kubernetes.Interface, cluster string) error {
-	if core == nil {
-		return fmt.Errorf("%w (cluster %s)", ErrNoCloudControllerManagerCredential, cluster)
-	}
-	role := cloudControllerManagerClusterRole()
-	if _, err := core.RbacV1().ClusterRoles().Create(ctx, role, metav1.CreateOptions{FieldManager: fieldManager}); err != nil {
-		if !apierrors.IsAlreadyExists(err) {
-			return fmt.Errorf("clusterprovider: creating the RBAC ClusterRole %s: %w", role.Name, err)
-		}
-		if _, err := core.RbacV1().ClusterRoles().Update(ctx, role, metav1.UpdateOptions{FieldManager: fieldManager}); err != nil {
-			return fmt.Errorf("clusterprovider: updating the RBAC ClusterRole %s: %w", role.Name, err)
-		}
-	}
-	binding := cloudControllerManagerClusterRoleBinding()
-	if _, err := core.RbacV1().ClusterRoleBindings().Create(ctx, binding, metav1.CreateOptions{FieldManager: fieldManager}); err != nil {
-		if !apierrors.IsAlreadyExists(err) {
-			return fmt.Errorf("clusterprovider: creating the RBAC ClusterRoleBinding %s: %w", binding.Name, err)
-		}
-		if _, err := core.RbacV1().ClusterRoleBindings().Update(ctx, binding, metav1.UpdateOptions{FieldManager: fieldManager}); err != nil {
-			return fmt.Errorf("clusterprovider: updating the RBAC ClusterRoleBinding %s: %w", binding.Name, err)
-		}
-	}
-	return nil
-}
-
-func cloudControllerManagerClusterRole() *rbacv1.ClusterRole {
-	return &rbacv1.ClusterRole{
-		ObjectMeta: metav1.ObjectMeta{Name: CloudControllerManagerClusterRole},
-		Rules: []rbacv1.PolicyRule{{
-			APIGroups: []string{""},
-			Resources: []string{"nodes"},
-			Verbs:     []string{"get", "list", "watch", "patch", "update", "delete"},
-		}},
-	}
-}
-
-func cloudControllerManagerClusterRoleBinding() *rbacv1.ClusterRoleBinding {
-	return &rbacv1.ClusterRoleBinding{
-		ObjectMeta: metav1.ObjectMeta{Name: CloudControllerManagerClusterRoleBinding},
-		RoleRef: rbacv1.RoleRef{
-			APIGroup: rbacv1.GroupName,
-			Kind:     "ClusterRole",
-			Name:     CloudControllerManagerClusterRole,
-		},
-		Subjects: []rbacv1.Subject{{
-			Kind:     rbacv1.GroupKind,
-			APIGroup: rbacv1.GroupName,
-			Name:     CloudControllerManagerGroup,
-		}},
-	}
-}
 
 func prepareCloudControllerManager(steps []procgroup.Step, cfg StackConfig, cluster, apiserver string) ([]procgroup.Step, error) {
 	idx := -1
@@ -208,14 +69,25 @@ func prepareCloudControllerManager(steps []procgroup.Step, cfg StackConfig, clus
 			return fmt.Errorf("clusterprovider: minting the scoped credential the cloud controller "+
 				"manager of %s authenticates with: %w", cluster, err)
 		}
-		if err := WriteCloudControllerManagerKubeconfig(kubeconfig, minted); err != nil {
+		if err := cfg.writeKubeconfig(kubeconfig, minted, cloudControllerManagerKubeconfigContext,
+			ErrCloudControllerManagerKubeconfigUnwritable); err != nil {
 			return err
 		}
 		core, err := cfg.Admin(ctx, cluster, apiserver)
 		if err != nil {
 			return err
 		}
-		return GrantCloudControllerManager(ctx, core, cluster)
+		if core == nil {
+			return fmt.Errorf("%w (cluster %s)", ErrNoCloudControllerManagerCredential, cluster)
+		}
+		return core.GrantCloudControllerManager(ctx, cluster)
 	}
 	return steps, nil
+}
+
+func (cfg StackConfig) writeKubeconfig(path string, cred *Credential, contextName string, unwritable error) error {
+	if cfg.WriteKubeconfig == nil {
+		return fmt.Errorf("%w: no kubeconfig writer was supplied for %s", unwritable, path)
+	}
+	return cfg.WriteKubeconfig(path, cred, contextName, unwritable)
 }

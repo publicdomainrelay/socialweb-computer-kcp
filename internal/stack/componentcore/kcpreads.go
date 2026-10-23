@@ -22,6 +22,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/childapplication"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/marketpresence"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/openbaoserver"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 )
 
 var schemes = []func(*kruntime.Scheme) error{v1alpha1.AddToScheme, pdsv1alpha1.AddToScheme, policyv1alpha1.AddToScheme,
@@ -35,6 +36,8 @@ type workspaceClients struct {
 	mu sync.Mutex
 
 	clients map[string]client.Client
+
+	dynamics map[string]*kube.Client
 }
 
 var (
@@ -54,7 +57,7 @@ func newWorkspaceClients(base *rest.Config) (*workspaceClients, error) {
 			return nil, err
 		}
 	}
-	return &workspaceClients{base: base, scheme: scheme, clients: map[string]client.Client{}}, nil
+	return &workspaceClients{base: base, scheme: scheme, clients: map[string]client.Client{}, dynamics: map[string]*kube.Client{}}, nil
 }
 
 func (w *workspaceClients) client(workspace string) (client.Client, error) {
@@ -75,6 +78,24 @@ func (w *workspaceClients) client(workspace string) (client.Client, error) {
 		return nil, err
 	}
 	w.clients[workspace] = c
+	return c, nil
+}
+
+func (w *workspaceClients) dynamic(workspace string) (*kube.Client, error) {
+	workspace = strings.TrimSpace(workspace)
+	if workspace == "" {
+		workspace = DefaultWorkspace
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if c, ok := w.dynamics[workspace]; ok {
+		return c, nil
+	}
+	c, err := kube.ForWorkspace(w.base, workspace)
+	if err != nil {
+		return nil, err
+	}
+	w.dynamics[workspace] = c
 	return c, nil
 }
 

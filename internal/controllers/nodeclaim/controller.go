@@ -16,12 +16,12 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/api/kcpgvr"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	contract "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/nodeclaim"
@@ -46,12 +46,6 @@ const (
 	lookupTimeout = 30 * time.Second
 
 	resyncTimeout = 2 * time.Minute
-)
-
-var (
-	configMapGVR = schema.GroupVersionResource{Version: "v1", Resource: "configmaps"}
-
-	workspaceGVR = kcpv1alpha1.SchemeGroupVersion.WithResource("workspaces")
 )
 
 var _ contract.Binder = (*Controller)(nil)
@@ -458,7 +452,7 @@ func (c *Controller) inScope(workspace string) bool {
 }
 
 func (c *Controller) listHomes(ctx context.Context, store *kcpstore.Store, b contract.Binding) []string {
-	items, err := kcpstore.Of[corev1.ConfigMap](store, configMapGVR).ListIn(ctx, b.IndexWorkspace, b.IndexNamespace)
+	items, err := kcpstore.Of[corev1.ConfigMap](store, kcpgvr.ConfigMaps).ListIn(ctx, b.IndexWorkspace, b.IndexNamespace)
 	if err != nil {
 		c.log.Warn("node_claim_home_index_unreadable", "workspace", b.IndexWorkspace, "namespace", b.IndexNamespace, "err", err)
 		return append([]string(nil), b.Homes...)
@@ -582,7 +576,7 @@ func (c *Controller) clusterOf(ctx context.Context, workspace string) (string, e
 	}
 	ctx, cancel := context.WithTimeout(ctx, lookupTimeout)
 	defer cancel()
-	ws, err := kcpstore.OfClusterScoped[kcpv1alpha1.Workspace](store, workspaceGVR).Get(ctx, ref.New(workspace[:i], "", workspace[i+1:]))
+	ws, err := kcpstore.OfClusterScoped[kcpv1alpha1.Workspace](store, kcpgvr.Workspaces).Get(ctx, ref.New(workspace[:i], "", workspace[i+1:]))
 	if err != nil {
 		return "", err
 	}

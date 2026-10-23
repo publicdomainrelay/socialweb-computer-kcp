@@ -11,22 +11,19 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/dynamic"
 	"sigs.k8s.io/yaml"
 
+	apisv1alpha2 "github.com/kcp-dev/sdk/apis/apis/v1alpha2"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/api/kcpgvr"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
-	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/kcprest"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 )
 
 var (
-	apiBindingGVR  = schema.GroupVersionResource{Group: "apis.kcp.io", Version: "v1alpha2", Resource: "apibindings"}
+	apiBindingGVR  = kcpgvr.APIBindings
 	networkBinding = compose.ExportApplications
 )
 
@@ -148,29 +145,28 @@ func NetworkSpec(label string, bidders int, withGateway bool, overlay []byte, vm
 	return spec, nil
 }
 
-func rootClient(kubeconfig string) (dynamic.Interface, error) {
+func rootClient(kubeconfig string) (*kube.Client, error) {
 	restCfg, err := kcpserver.FrontRestConfig(kubeconfig)
 	if err != nil {
 		return nil, err
 	}
-	return dynamic.NewForConfig(kcprest.ForCluster(restCfg, compose.DefaultWorkspace))
+	return kube.ForWorkspace(restCfg, compose.DefaultWorkspace)
 }
 
-func networkClient(kubeconfig string) (dynamic.ResourceInterface, error) {
+func networkClient(kubeconfig string) (kube.Resource, error) {
 	dc, err := rootClient(kubeconfig)
 	if err != nil {
-		return nil, err
+		return kube.Resource{}, err
 	}
 	return dc.Resource(compose.MarketNetworkGVR), nil
 }
 
-func bindingReady(u *unstructured.Unstructured) (bool, error) {
-	if u == nil {
+func bindingReady(b *apisv1alpha2.APIBinding) (bool, error) {
+	if b == nil {
 		return false, nil
 	}
-	conds, _, _ := unstructured.NestedSlice(u.Object, "status", "conditions")
-	for _, c := range conds {
-		if m, ok := c.(map[string]any); ok && m["type"] == "Ready" && m["status"] == "True" {
+	for _, c := range b.Status.Conditions {
+		if c.Type == "Ready" && c.Status == "True" {
 			return true, nil
 		}
 	}
@@ -183,24 +179,15 @@ func ApplyNetwork(ctx context.Context, kubeconfig string, spec v1alpha1.MarketNe
 		return err
 	}
 	ri := dc.Resource(compose.MarketNetworkGVR)
-	u, err := unstruct.To(&v1alpha1.MarketNetwork{ObjectMeta: metav1.ObjectMeta{Name: NetworkName}, Spec: spec}, "MarketNetwork")
-	if err != nil {
-		return err
-	}
-	delete(u.Object, "status")
-	delete(u.Object["metadata"].(map[string]any), "creationTimestamp")
-	body, err := u.MarshalJSON()
-	if err != nil {
-		return err
-	}
-	force := true
-	if _, err := ctlruntime.Await(ctx, dc.Resource(apiBindingGVR), networkBinding, timeout, bindingReady); err != nil {
+	obj := &v1alpha1.MarketNetwork{TypeMeta: metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: "MarketNetwork"},
+		ObjectMeta: metav1.ObjectMeta{Name: NetworkName}, Spec: spec}
+	if _, err := kube.Await(ctx, dc.Resource(apiBindingGVR), networkBinding, timeout, bindingReady); err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 		return fmt.Errorf("marketnetwork: applying the MarketNetwork (the core applies the applications set first): %w", err)
 	}
-	if _, err := ri.Patch(ctx, NetworkName, types.ApplyPatchType, body, metav1.PatchOptions{FieldManager: "socialweb-computer", Force: &force}); err != nil {
+	if _, err := kube.Apply[v1alpha1.MarketNetwork](ctx, ri, obj, kube.ApplyOptions{FieldManager: "socialweb-computer", Force: true}); err != nil {
 		return fmt.Errorf("marketnetwork: applying the MarketNetwork (the core applies the applications set first): %w", err)
 	}
 	return nil
@@ -211,12 +198,11 @@ func ReadNetwork(ctx context.Context, kubeconfig string) (v1alpha1.MarketNetwork
 	if err != nil {
 		return v1alpha1.MarketNetwork{}, err
 	}
-	u, err := ri.Get(ctx, NetworkName, metav1.GetOptions{})
+	o, err := kube.Get[v1alpha1.MarketNetwork](ctx, ri, NetworkName)
 	if err != nil {
 		return v1alpha1.MarketNetwork{}, err
 	}
-	var o v1alpha1.MarketNetwork
-	return o, unstruct.Into(u, &o)
+	return *o, nil
 }
 
 func WaitNetwork(ctx context.Context, kubeconfig string, timeout time.Duration, progress func(v1alpha1.MarketNetworkStatus)) (v1alpha1.MarketNetwork, error) {
@@ -226,12 +212,11 @@ func WaitNetwork(ctx context.Context, kubeconfig string, timeout time.Duration, 
 	}
 	last := ""
 	var o v1alpha1.MarketNetwork
-	_, err = ctlruntime.Await(ctx, ri, NetworkName, timeout, func(u *unstructured.Unstructured) (bool, error) {
-		var cur v1alpha1.MarketNetwork
-		if u == nil || unstruct.Into(u, &cur) != nil {
+	_, err = kube.Await(ctx, ri, NetworkName, timeout, func(cur *v1alpha1.MarketNetwork) (bool, error) {
+		if cur == nil {
 			return false, nil
 		}
-		o = cur
+		o = *cur
 		var key strings.Builder
 		key.WriteString(string(o.Status.Phase) + o.Status.Message)
 		for _, a := range o.Status.Apps {
@@ -252,7 +237,7 @@ func WaitNetwork(ctx context.Context, kubeconfig string, timeout time.Duration, 
 		}
 		return false, nil
 	})
-	if errors.Is(err, ctlruntime.ErrAwaitTimeout) {
+	if errors.Is(err, kube.ErrAwaitTimeout) {
 		return o, fmt.Errorf("marketnetwork: the MarketNetwork was not Ready within %s (phase %s: %s)", timeout, o.Status.Phase, o.Status.Message)
 	}
 	return o, err
@@ -269,8 +254,8 @@ func DeleteNetwork(ctx context.Context, kubeconfig string, timeout time.Duration
 		}
 		return err
 	}
-	_, err = ctlruntime.Await(ctx, ri, NetworkName, timeout, ctlruntime.Absent)
-	if errors.Is(err, ctlruntime.ErrAwaitTimeout) {
+	_, err = kube.Await(ctx, ri, NetworkName, timeout, kube.Absent[v1alpha1.MarketNetwork])
+	if errors.Is(err, kube.ErrAwaitTimeout) {
 		return fmt.Errorf("marketnetwork: the MarketNetwork was not gone within %s", timeout)
 	}
 	return err

@@ -18,7 +18,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/pds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/policy"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/vault"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/kcp"
 	core "github.com/johnandersen777/socialweb-computer-kcp/internal/market/bidder"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/participant"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/runs"

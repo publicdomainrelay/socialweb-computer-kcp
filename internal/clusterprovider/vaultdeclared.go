@@ -6,7 +6,6 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterlink"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vaultcert"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vaultlayout"
@@ -98,10 +97,10 @@ func staticClusterDeclared() *v1alpha1.OpenBaoServerDeclared {
 			KeyType: "ec", KeyBits: 256, TTL: clock.DurationString(vaultcert.NodeCertTTL), MaxTTL: clock.DurationString(vaultcert.NodeMaxTTL), NoStore: true},
 		v1alpha1.OpenBaoPKIRole{Mount: VaultPKIPath, Name: VaultPKIRoleKubeconfig, AllowAnyName: true, EnforceHostnames: false,
 			ClientFlag: true, ServerFlag: false, RequireCN: true, KeyType: "ec", KeyBits: 256, KeyUsage: []string{"DigitalSignature"},
-			Organization: []string{kcpclient.OwnersGroup}, CNValidations: []string{"disabled"}, TTL: "8h", MaxTTL: "24h"},
+			Organization: []string{ownersGroup}, CNValidations: []string{"disabled"}, TTL: "8h", MaxTTL: "24h"},
 		v1alpha1.OpenBaoPKIRole{Mount: VaultPKIPath, Name: VaultPKIRoleKubeconfigNoExpiry, AllowAnyName: true, EnforceHostnames: false,
 			ClientFlag: true, ServerFlag: false, RequireCN: true, KeyType: "ec", KeyBits: 256, KeyUsage: []string{"DigitalSignature"},
-			Organization: []string{kcpclient.OwnersGroup}, OrganizationalUnit: []string{NoExpiryOrganizationalUnit},
+			Organization: []string{ownersGroup}, OrganizationalUnit: []string{NoExpiryOrganizationalUnit},
 			CNValidations: []string{"disabled"}})
 	d.PKITidy = append(d.PKITidy, v1alpha1.OpenBaoPKITidy{Mount: VaultPKIPath})
 	return d

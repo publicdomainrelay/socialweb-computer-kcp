@@ -2,7 +2,6 @@ package clusterprovider
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -12,7 +11,6 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/rest"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
@@ -60,8 +58,6 @@ type MountChildWriter interface {
 	EnsureMountChild(ctx context.Context, home, name, url string) error
 }
 
-var _ Clusters = (*Registry)(nil)
-
 type NodeExpirySource func(cl *v1alpha1.Cluster, nodes []v1alpha1.Node) (expiry int64, reported bool)
 
 const NodeExpiryUnlimited int64 = 0
@@ -108,9 +104,11 @@ type Options struct {
 
 	OnReady func(ctx context.Context, ref Ref, cl *v1alpha1.Cluster) error
 
-	InstallTenant func(ctx context.Context, cluster string, cfg *rest.Config) error
+	InstallTenant func(ctx context.Context, cluster string, cred *Credential) error
 
-	Tenant func(ctx context.Context, ref Ref, cl *v1alpha1.Cluster) (*rest.Config, error)
+	Tenant func(ctx context.Context, ref Ref, cl *v1alpha1.Cluster) (*Credential, error)
+
+	Grant func(ctx context.Context, ref Ref, cred *Credential, doc []byte) (int, error)
 
 	GrantPath string
 
@@ -238,7 +236,7 @@ func New(opts Options) (*Provider, error) {
 	if opts.Log == nil {
 		opts.Log = slog.Default()
 	}
-	if (opts.Tenant != nil) != (opts.GrantPath != "") {
+	if (opts.Tenant != nil) != (opts.GrantPath != "") || (opts.Tenant != nil && opts.Grant == nil) {
 		return nil, ErrNoBootstrap
 	}
 	p := &Provider{opts: opts, addOns: ttlcache.New[string, time.Time](ttlcache.Options{TTL: opts.AddOnInterval, Now: opts.Now})}
@@ -569,26 +567,4 @@ func statusOf(cl *v1alpha1.Cluster, res materialiser.Result) v1alpha1.ClusterSta
 		NodeExpiry: cl.Status.NodeExpiry,
 		Conditions: res.Conditions,
 	}
-}
-
-type clusterStatusPatch struct {
-	Phase      v1alpha1.ClusterPhase `json:"phase,omitempty"`
-	URL        string                `json:"URL,omitempty"`
-	Instance   string                `json:"instance,omitempty"`
-	NodeExpiry *int64                `json:"nodeExpiry"`
-	Conditions []metav1.Condition    `json:"conditions,omitempty"`
-}
-
-func statusPatch(st v1alpha1.ClusterStatus) ([]byte, error) {
-	body, err := json.Marshal(map[string]any{"status": clusterStatusPatch{
-		Phase:      st.Phase,
-		URL:        st.URL,
-		Instance:   st.Instance,
-		NodeExpiry: st.NodeExpiry,
-		Conditions: st.Conditions,
-	}})
-	if err != nil {
-		return nil, fmt.Errorf("clusterprovider: status patch: %w", err)
-	}
-	return body, nil
 }

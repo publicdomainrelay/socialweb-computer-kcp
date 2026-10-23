@@ -21,10 +21,10 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterlink"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/ingress"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/ingress/loopback"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/irohdial"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/childproc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/loopback"
 )
 
 const (
@@ -112,6 +112,8 @@ type Provider struct {
 
 	ready bool
 
+	readiness component.ReadySignal
+
 	registrations map[*registration]struct{}
 
 	wg sync.WaitGroup
@@ -148,6 +150,7 @@ func (p *Provider) Start(ctx context.Context) error {
 
 	log.Info("ingressproxy_iroh_started", "provider", "iroh", "dumbpipe", p.cfg.DumbpipePath,
 		"listenHost", p.cfg.listenHost(), "relay", p.cfg.RelayURL)
+	p.readiness.Signal()
 
 	select {
 	case <-ctx.Done():
@@ -164,14 +167,8 @@ func (p *Provider) Start(ctx context.Context) error {
 	return nil
 }
 
-func (p *Provider) Ready(ctx context.Context) error {
-	p.mu.Lock()
-	ready := p.ready
-	p.mu.Unlock()
-	if !ready {
-		return errors.New("ingressproxy iroh: the provider is not started")
-	}
-	return nil
+func (p *Provider) Ready() component.Readiness {
+	return &p.readiness
 }
 
 func (p *Provider) Stop(ctx context.Context) error {

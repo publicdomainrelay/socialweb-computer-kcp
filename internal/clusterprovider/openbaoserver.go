@@ -15,13 +15,10 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/dynamic"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterstack"
-	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/jsonx"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/procgroup"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
@@ -160,15 +157,14 @@ func (h *UnitsHost) VaultServerName(key string) string {
 }
 
 func (h *UnitsHost) vaultServer(ctx context.Context, key string) (*v1alpha1.OpenBaoServer, error) {
-	u, err := h.obs.Get(ctx, h.VaultServerName(key), metav1.GetOptions{})
+	o, err := h.obs.Get(ctx, h.VaultServerName(key))
 	if apierrors.IsNotFound(err) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	o, err := unstruct.From[v1alpha1.OpenBaoServer](u)
-	return &o, err
+	return o, nil
 }
 
 func vaultState(o *v1alpha1.OpenBaoServer) string {
@@ -237,11 +233,7 @@ func (h *UnitsHost) placeVault(ctx context.Context, key string, st procgroup.Ste
 		if cur == nil {
 			o := v1alpha1.OpenBaoServer{ObjectMeta: metav1.ObjectMeta{Name: name,
 				Labels: map[string]string{LabelCluster: key, LabelMember: memberLabel(MemberName(procgroup.ComponentOpenBao))}}, Spec: want}
-			u, err := unstruct.To(&o, "OpenBaoServer")
-			if err != nil {
-				return nil, err
-			}
-			if _, err := h.obs.Create(ctx, u, metav1.CreateOptions{}); err != nil {
+			if err := h.obs.Create(ctx, &o); err != nil {
 				if apierrors.IsAlreadyExists(err) && attempt < 5 {
 					continue
 				}
@@ -255,11 +247,7 @@ func (h *UnitsHost) placeVault(ctx context.Context, key string, st procgroup.Ste
 			break
 		}
 		cur.Spec = want
-		u, err := unstruct.To(cur, "OpenBaoServer")
-		if err != nil {
-			return nil, err
-		}
-		if _, err := h.obs.Update(ctx, u, metav1.UpdateOptions{}); err != nil {
+		if err := h.obs.Update(ctx, cur); err != nil {
 			if apierrors.IsConflict(err) && attempt < 5 {
 				continue
 			}
@@ -304,7 +292,7 @@ func (h *UnitsHost) recordVaultAccess(key string, o *v1alpha1.OpenBaoServer) err
 }
 
 func (h *UnitsHost) waitVault(ctx context.Context, key string, timeout time.Duration) (*v1alpha1.OpenBaoServer, error) {
-	o, err := awaitObject(ctx, h.obs, h.VaultServerName(key), timeout, func(o *v1alpha1.OpenBaoServer) (bool, error) {
+	o, err := h.obs.Await(ctx, h.VaultServerName(key), timeout, func(o *v1alpha1.OpenBaoServer) (bool, error) {
 		if o == nil {
 			return false, fmt.Errorf("%w (cluster %s)", ErrNoClusterVault, key)
 		}
@@ -347,11 +335,7 @@ func (h *UnitsHost) UpdateVaultDeclared(ctx context.Context, key string, mutate 
 			break
 		}
 		cur.Spec.Declared = next
-		u, err := unstruct.To(cur, "OpenBaoServer")
-		if err != nil {
-			return err
-		}
-		if _, err := h.obs.Update(ctx, u, metav1.UpdateOptions{}); err != nil {
+		if err := h.obs.Update(ctx, cur); err != nil {
 			if apierrors.IsConflict(err) && attempt < 10 {
 				continue
 			}
@@ -380,17 +364,20 @@ func (h *UnitsHost) vaultSick(ctx context.Context, key string) string {
 
 func (h *UnitsHost) reapVault(ctx context.Context, key string) error {
 	name := h.VaultServerName(key)
-	if err := h.obs.Delete(ctx, name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+	if err := h.obs.Delete(ctx, name); err != nil && !apierrors.IsNotFound(err) {
 		return err
 	}
 	forgetVaultToken(func() string { d, _ := ClusterDataDir(h.c.StateDir, key); return d }())
 	ctx, cancel := context.WithTimeout(ctx, h.c.ReapTimeout)
 	defer cancel()
-	for _, gone := range []struct {
-		ri   dynamic.ResourceInterface
-		name string
-	}{{h.obs, name}, {h.hps, openbaoctl.ChildName(name)}} {
-		if _, err := ctlruntime.Await(ctx, gone.ri, gone.name, 0, ctlruntime.Absent); err != nil {
+	for _, gone := range []func() error{
+		func() error { _, err := h.obs.Await(ctx, name, 0, absent[v1alpha1.OpenBaoServer]); return err },
+		func() error {
+			_, err := h.hps.Await(ctx, openbaoctl.ChildName(name), 0, absent[v1alpha1.HostProcess])
+			return err
+		},
+	} {
+		if err := gone(); err != nil {
 			if ctx.Err() != nil {
 				return fmt.Errorf("clusterprovider: the vault of %s is still placed after %s", key, h.c.ReapTimeout)
 			}

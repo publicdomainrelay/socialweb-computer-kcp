@@ -11,9 +11,9 @@ import (
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/atprotorepo/binding"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/atprotorecord"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/eventstream"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/binding"
 )
 
 type transientError struct {

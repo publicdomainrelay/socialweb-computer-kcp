@@ -9,13 +9,11 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/atprotorecord"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 )
 
 const (
@@ -75,7 +73,7 @@ func (c *Composer) OperatorRecords(ctx context.Context, r Root, ws string, op Op
 	if err != nil {
 		return err
 	}
-	list, err := ri.List(ctx, metav1.ListOptions{})
+	list, err := kube.List[v1alpha1.AtprotoRecord](ctx, ri, metav1.ListOptions{})
 	if apierrors.IsNotFound(err) {
 		return nil
 	}
@@ -83,11 +81,7 @@ func (c *Composer) OperatorRecords(ctx context.Context, r Root, ws string, op Op
 		return err
 	}
 	var records []v1alpha1.AtprotoRecord
-	for i := range list.Items {
-		var o v1alpha1.AtprotoRecord
-		if err := unstruct.Into(&list.Items[i], &o); err != nil {
-			return err
-		}
+	for _, o := range list {
 		if o.Spec.Repo == OperatorRepoName && o.Spec.RepoRef == nil && o.DeletionTimestamp == nil &&
 			(o.Status.Phase != v1alpha1.AtprotoRecordPhaseApplied || o.Status.ObservedGeneration != o.Generation) {
 			records = append(records, o)
@@ -108,14 +102,9 @@ func (c *Composer) OperatorRecords(ctx context.Context, r Root, ws string, op Op
 		if err != nil {
 			return err
 		}
-		u := &unstructured.Unstructured{Object: map[string]any{"apiVersion": v1alpha1.GroupVersion.String(), "kind": "AtprotoRecord", "status": m}}
-		u.SetName(o.Name)
-		body, err := u.MarshalJSON()
-		if err != nil {
-			return err
-		}
-		force := true
-		if _, err := ri.Patch(ctx, o.Name, types.ApplyPatchType, body, metav1.PatchOptions{FieldManager: r.Manager() + "/records", Force: &force}, "status"); err != nil &&
+		u := NewDoc(v1alpha1.GroupVersion.String(), "AtprotoRecord", o.Name)
+		u["status"] = m
+		if _, err := kube.Apply[kube.Doc](ctx, ri, u, kube.ApplyOptions{FieldManager: r.Manager() + "/records", Force: true, Status: true}); err != nil &&
 			!apierrors.IsNotFound(err) {
 			return fmt.Errorf("AtprotoRecord %s: writing the status: %w", o.Name, err)
 		}

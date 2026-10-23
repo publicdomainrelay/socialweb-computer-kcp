@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -59,9 +60,66 @@ func PrimaryEndpoint(endpoints []Endpoint) (Endpoint, bool) {
 
 type Service interface {
 	Start(ctx context.Context) error
-	Ready(ctx context.Context) error
+	Ready() Readiness
 	Endpoints() []Endpoint
 	Stop(ctx context.Context) error
+}
+
+type Readiness interface {
+	Done() <-chan struct{}
+	Err() error
+}
+
+var ErrNotReady = errors.New("component: the service failed to become ready")
+
+type ReadySignal struct {
+	mu   sync.Mutex
+	done chan struct{}
+	err  error
+	set  bool
+}
+
+var _ Readiness = (*ReadySignal)(nil)
+
+func (r *ReadySignal) Done() <-chan struct{} {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.doneLocked()
+}
+
+func (r *ReadySignal) Err() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.err
+}
+
+func (r *ReadySignal) Signal() {
+	r.resolve(nil)
+}
+
+func (r *ReadySignal) Fail(err error) {
+	if err == nil {
+		err = ErrNotReady
+	}
+	r.resolve(err)
+}
+
+func (r *ReadySignal) resolve(err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.set {
+		return
+	}
+	r.set = true
+	r.err = err
+	close(r.doneLocked())
+}
+
+func (r *ReadySignal) doneLocked() chan struct{} {
+	if r.done == nil {
+		r.done = make(chan struct{})
+	}
+	return r.done
 }
 
 type NetworkHosts interface {

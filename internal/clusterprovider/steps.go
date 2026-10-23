@@ -17,11 +17,6 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	kruntime "k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/watch"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/cache"
-	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/apiserverfront"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterstack"
@@ -45,6 +40,8 @@ const (
 const cloudControllerManagerReadyMark = `"phase":"Ready"`
 
 var ErrNoLease = errors.New("clusterprovider: the cluster holds no lease for this component")
+
+var ErrNoTenantClient = errors.New("clusterprovider: no client for the cluster's own apiserver was supplied")
 
 var ErrNoVaultStore = errors.New(
 	"clusterprovider: the vault is in this Stack and no per-cluster postgres DSN was supplied " +
@@ -74,7 +71,8 @@ func componentLog(dataDir string, c procgroup.Component) (string, error) {
 
 func LogDir(dataDir string) string { return filepath.Join(dataDir, "logs") }
 
-func StepsFrom(spec clusterstack.Spec, leases materialiser.Leases, stack Stack) ([]procgroup.Step, error) {
+func (cfg StackConfig) StepsFrom(spec clusterstack.Spec, leases materialiser.Leases) ([]procgroup.Step, error) {
+	stack := cfg.Stack
 	if err := spec.Validate(); err != nil {
 		return nil, err
 	}
@@ -143,7 +141,7 @@ func StepsFrom(spec clusterstack.Spec, leases materialiser.Leases, stack Stack) 
 			Name:  c,
 			Slot:  slot,
 			Spec:  ps,
-			Ready: gate(c, spec, bao, api),
+			Ready: cfg.gate(c, spec, bao, api),
 		})
 	}
 	return steps, nil
@@ -163,7 +161,7 @@ func stepEnv(spec clusterstack.Spec, c procgroup.Component) []string {
 	}
 }
 
-func gate(c procgroup.Component, spec clusterstack.Spec, bao, api portallocator.Lease) func(context.Context, procgroup.Member) error {
+func (cfg StackConfig) gate(c procgroup.Component, spec clusterstack.Spec, bao, api portallocator.Lease) func(context.Context, procgroup.Member) error {
 	return func(ctx context.Context, p procgroup.Member) error {
 		ctx, cancel := context.WithTimeout(ctx, GateTimeout)
 		defer cancel()
@@ -182,7 +180,7 @@ func gate(c procgroup.Component, spec clusterstack.Spec, bao, api portallocator.
 				Port: spec.AdvertisePort, LinkTarget: spec.AdvertisePort, Front: api, SlotListen: []int{spec.K3sSecurePort}}); err != nil {
 				return err
 			}
-			if err := waitSlotUp(ctx, spec); err != nil {
+			if err := cfg.waitSlotUp(ctx, spec); err != nil {
 				return err
 			}
 			if _, err := (apiserverfront.Client{Path: spec.FrontControl}).Set(ctx, SlotBackend(spec)); err != nil {
@@ -191,11 +189,11 @@ func gate(c procgroup.Component, spec clusterstack.Spec, bao, api portallocator.
 			if err := waitK3s(ctx, spec.BindAddress, spec.AdvertisePort); err != nil {
 				return err
 			}
-			return CheckAdvertisedEndpoints(ctx, spec)
+			return cfg.CheckAdvertisedEndpoints(ctx, spec)
 		case procgroup.ComponentCloudControllerManager:
 			return waitCloudControllerManager(ctx, p)
 		case procgroup.ComponentExternalSecretsWebhook:
-			return waitExternalSecretsWebhook(ctx, spec, p)
+			return cfg.waitExternalSecretsWebhook(ctx, spec, p)
 		case procgroup.ComponentExternalSecrets:
 			return waitExternalSecretsController(ctx, spec, p)
 		}
@@ -288,22 +286,23 @@ func waitK3s(ctx context.Context, host string, port int) error {
 
 const readyzStreak = 5
 
-func waitK3sReadyz(ctx context.Context, kubeconfig string) error {
+func (cfg StackConfig) open(kubeconfig string, o OpenOptions) (Tenant, error) {
+	if cfg.Open == nil {
+		return nil, ErrNoTenantClient
+	}
+	return cfg.Open(kubeconfig, o)
+}
+
+func (cfg StackConfig) waitK3sReadyz(ctx context.Context, kubeconfig string) error {
 	last := "no answer"
 	streak := 0
 	return poll(ctx, func(ctx context.Context) (bool, error) {
-		cfg, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
+		core, err := cfg.open(kubeconfig, OpenOptions{Timeout: 3 * time.Second})
 		if err != nil {
 			last = err.Error()
 			return false, nil
 		}
-		cfg.Timeout = 3 * time.Second
-		core, err := kubernetes.NewForConfig(cfg)
-		if err != nil {
-			last = err.Error()
-			return false, nil
-		}
-		if _, err := core.Discovery().RESTClient().Get().AbsPath("/readyz").DoRaw(ctx); err != nil {
+		if err := core.Readyz(ctx); err != nil {
 			streak = 0
 			last = err.Error()
 			return false, nil
@@ -319,15 +318,11 @@ func waitK3sReadyz(ctx context.Context, kubeconfig string) error {
 	})
 }
 
-func adminClient(ctx context.Context, kubeconfig string, last *string) (kubernetes.Interface, error) {
-	var core kubernetes.Interface
+func (cfg StackConfig) adminClient(ctx context.Context, kubeconfig string, last *string) (Tenant, error) {
+	var core Tenant
 	err := untilOutput(ctx, unitMember{path: kubeconfig}, func(string) (bool, error) {
-		cfg, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
-		if err != nil {
-			*last = err.Error()
-			return false, nil
-		}
-		if core, err = kubernetes.NewForConfig(cfg); err != nil {
+		var err error
+		if core, err = cfg.open(kubeconfig, OpenOptions{}); err != nil {
 			*last = err.Error()
 			return false, nil
 		}
@@ -336,18 +331,7 @@ func adminClient(ctx context.Context, kubeconfig string, last *string) (kubernet
 	return core, err
 }
 
-func deploymentsIn(core kubernetes.Interface, namespace string) cache.ListerWatcher {
-	return &cache.ListWatch{
-		ListWithContextFunc: func(ctx context.Context, o metav1.ListOptions) (kruntime.Object, error) {
-			return core.AppsV1().Deployments(namespace).List(ctx, o)
-		},
-		WatchFuncWithContext: func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) {
-			return core.AppsV1().Deployments(namespace).Watch(ctx, o)
-		},
-	}
-}
-
-func waitK3sControllers(ctx context.Context, kubeconfig string) error {
+func (cfg StackConfig) waitK3sControllers(ctx context.Context, kubeconfig string) error {
 	last := "no answer"
 	notReady := func() error {
 		return &errNotReady{
@@ -364,7 +348,7 @@ func waitK3sControllers(ctx context.Context, kubeconfig string) error {
 			last: last,
 		}
 	}
-	core, err := adminClient(ctx, kubeconfig, &last)
+	core, err := cfg.adminClient(ctx, kubeconfig, &last)
 	if err != nil {
 		if ctx.Err() != nil {
 			return notReady()
@@ -372,7 +356,7 @@ func waitK3sControllers(ctx context.Context, kubeconfig string) error {
 		return err
 	}
 	last = "the apiserver answered and " + metav1.NamespaceSystem + " holds no Deployment yet"
-	err = awaitTyped(ctx, deploymentsIn(core, metav1.NamespaceSystem), &appsv1.Deployment{}, 0, func(addons []*appsv1.Deployment) (bool, error) {
+	err = core.AwaitDeployments(ctx, metav1.NamespaceSystem, 0, func(addons []*appsv1.Deployment) (bool, error) {
 		return len(addons) > 0, nil
 	})
 	if err != nil && ctx.Err() != nil {

@@ -6,7 +6,7 @@ spec:
   resources:
     - group: socialweb.computer
       name: hostprocesses
-      schema: v1alpha1-3.hostprocesses.socialweb.computer
+      schema: v1alpha1-4.hostprocesses.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer

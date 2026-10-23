@@ -58,7 +58,8 @@ type Service struct {
 	conns    *connSet
 	stopCh   chan struct{}
 	stopOnce sync.Once
-	ready    bool
+
+	readiness component.ReadySignal
 }
 
 func New(spec v1alpha1.DispatcherTLSSpec, deps Deps) *Service {
@@ -181,13 +182,13 @@ func (s *Service) Start(ctx context.Context) error {
 	s.conns = conns
 	s.stopCh = stopCh
 	s.stopOnce = sync.Once{}
-	s.ready = true
 	s.mu.Unlock()
 
 	log.Info("dispatcher_tls_listening", "address", listener.Addr().String(), "upstream", upstreamURL, "hostnames", hosts)
 
 	errCh := make(chan error, 1)
 	go func() { errCh <- httpServer.Serve(trackedListener) }()
+	s.readiness.Signal()
 
 	select {
 	case <-ctx.Done():
@@ -209,32 +210,8 @@ func (s *Service) Start(ctx context.Context) error {
 	return nil
 }
 
-func (s *Service) Ready(ctx context.Context) error {
-	s.mu.Lock()
-	ready := s.ready
-	address := ""
-	if s.listener != nil {
-		address = s.listener.Addr().String()
-	}
-	hosts := tlsproxy.AllowedHosts(s.hostnames)
-	s.mu.Unlock()
-	if !ready || address == "" {
-		return errors.New("dispatchertls: the service is not listening")
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+address+"/", nil)
-	if err != nil {
-		return err
-	}
-	req.Host = tlsproxy.ProbeHost(hosts)
-	resp, err := probeClient().Do(req)
-	if err != nil {
-		return fmt.Errorf("dispatchertls: health request: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= http.StatusInternalServerError {
-		return fmt.Errorf("dispatchertls: the upstream returned %d", resp.StatusCode)
-	}
-	return nil
+func (s *Service) Ready() component.Readiness {
+	return &s.readiness
 }
 
 func (s *Service) Endpoints() []component.Endpoint {
@@ -290,7 +267,6 @@ func (s *Service) shutdown(ctx context.Context) {
 
 func (s *Service) finish() {
 	s.mu.Lock()
-	s.ready = false
 	s.listener = nil
 	s.http = nil
 	s.mu.Unlock()
@@ -335,14 +311,4 @@ func (s *Service) listenerTLS() (*tls.Config, error) {
 		tlsConfig.NextProtos = []string{"http/1.1"}
 	}
 	return tlsConfig, nil
-}
-
-func probeClient() *http.Client {
-	transport := &http.Transport{
-		Proxy: nil,
-		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: true,
-		},
-	}
-	return &http.Client{Timeout: 3 * time.Second, Transport: transport}
 }

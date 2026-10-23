@@ -18,8 +18,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	sshcontract "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/ssh"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/kcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/ssh/gateway"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/ssh/ownersession"
 )
@@ -44,6 +44,8 @@ type Service struct {
 	started bool
 
 	ready bool
+
+	readiness component.ReadySignal
 
 	stopped bool
 
@@ -144,6 +146,7 @@ func (s *Service) Start(ctx context.Context) error {
 	s.ready = true
 	s.mu.Unlock()
 	s.log.Info("sshserver_registered", "http", host, "ssh", host)
+	s.readiness.Signal()
 
 	<-runCtx.Done()
 	s.shutdown(ctx)
@@ -210,30 +213,8 @@ func (s *Service) cocoreApp(w http.ResponseWriter, r *http.Request) {
 	httpjson.Write(w, http.StatusOK, map[string]any{"did": s.cfg.DID})
 }
 
-func (s *Service) Ready(ctx context.Context) error {
-	s.mu.Lock()
-	started := s.started
-	ready := s.ready
-	g := s.gateway
-	key := s.key
-	handlers := s.deps.Bus
-	s.mu.Unlock()
-	if !started {
-		return errors.New("sshserver: the service is not started")
-	}
-	if !ready {
-		return errors.New("sshserver: the service is starting")
-	}
-	if g == nil {
-		return errors.New("sshserver: no Requester is configured")
-	}
-	if handlers == nil {
-		return errors.New("sshserver: no handler registry is available")
-	}
-	if _, ok := handlers.Handler(key); !ok {
-		return errors.New("sshserver: the HTTP handler is not registered")
-	}
-	return nil
+func (s *Service) Ready() component.Readiness {
+	return &s.readiness
 }
 
 func (s *Service) Endpoints() []component.Endpoint {

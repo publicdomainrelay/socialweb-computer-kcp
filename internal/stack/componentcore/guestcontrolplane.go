@@ -6,11 +6,11 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	guestcontrolplanectl "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/guestcontrolplane"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 )
 
 type guestControlPlaneStore struct {
@@ -45,19 +45,16 @@ func (s guestControlPlaneStore) List(ctx context.Context, workspace string, list
 	return s.clients.List(ctx, workspace, list)
 }
 
-func (s guestControlPlaneStore) Apply(ctx context.Context, workspace, fieldManager string, obj *unstructured.Unstructured, status bool) error {
+func (s guestControlPlaneStore) Apply(ctx context.Context, workspace, fieldManager string, obj kube.Doc, status bool) error {
 	c, err := s.clients.client(workspace)
 	if err != nil {
 		return err
 	}
-	config := client.ApplyConfigurationFromUnstructured(obj)
-	if status {
-		err = c.Status().Apply(ctx, config, client.FieldOwner(fieldManager), client.ForceOwnership)
-	} else {
-		err = c.Apply(ctx, config, client.FieldOwner(fieldManager), client.ForceOwnership)
-	}
-	if err != nil {
-		return fmt.Errorf("componentcore: applying %s %s in %s: %w", obj.GetKind(), obj.GetName(), workspace, err)
+	if err := kube.ApplyWith(ctx, c, obj, kube.ApplyOptions{FieldManager: fieldManager, Force: true, Status: status}); err != nil {
+		meta, _ := obj["metadata"].(map[string]any)
+		kind, _ := obj["kind"].(string)
+		name, _ := meta["name"].(string)
+		return fmt.Errorf("componentcore: applying %s %s in %s: %w", kind, name, workspace, err)
 	}
 	return nil
 }

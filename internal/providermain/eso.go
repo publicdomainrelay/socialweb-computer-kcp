@@ -6,11 +6,12 @@ import (
 	"log/slog"
 	"time"
 
-	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterkcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterprovider"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/esovault"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
@@ -20,25 +21,22 @@ import (
 const tenantAddOnTimeout = 60 * time.Second
 
 func externalSecretsFor(cfg Config) *clusterprovider.ExternalSecrets {
-	return &clusterprovider.ExternalSecrets{
-		Binary:          cfg.ExternalSecrets,
-		Bundle:          cfg.ESOBundle,
-		LegacyNamespace: cfg.ESONamespace,
-	}
+	return clusterkcp.ExternalSecrets(cfg.ExternalSecrets, cfg.ESOBundle, cfg.ESONamespace)
 }
 
-func tenantAddOns(cfg Config, log *slog.Logger) func(context.Context, string, *rest.Config) error {
-	return func(ctx context.Context, cluster string, restCfg *rest.Config) error {
+func tenantAddOns(cfg Config, log *slog.Logger) func(context.Context, string, *clusterprovider.Credential) error {
+	return func(ctx context.Context, cluster string, cred *clusterprovider.Credential) error {
+		restCfg := clusterkcp.RestConfig(cred)
 		dataDir, err := clusterprovider.ClusterDataDir(cfg.StateDir, cluster)
 		if err != nil {
 			return err
 		}
-		dyn, err := dynamic.NewForConfig(kcpserver.Throughput(rest.CopyConfig(restCfg)))
+		kc, err := kube.New(kcpserver.Throughput(rest.CopyConfig(restCfg)))
 		if err != nil {
 			return fmt.Errorf("clusterprovider: a dynamic client for %s's tenant add-ons: %w", cluster, err)
 		}
 		netCtx, netCancel := context.WithTimeout(ctx, tenantAddOnTimeout)
-		err = tenantnet.Apply(netCtx, dyn, clusterprovider.AddOnFieldManager)
+		err = tenantnet.Apply(netCtx, kc, clusterprovider.AddOnFieldManager)
 		netCancel()
 		if err != nil {
 			return fmt.Errorf("clusterprovider: the node network add-ons of %s: %w", cluster, err)
@@ -55,7 +53,7 @@ func tenantAddOns(cfg Config, log *slog.Logger) func(context.Context, string, *r
 		if err != nil {
 			return fmt.Errorf("clusterprovider: logging in to the cluster vault for the tenant add-ons of %s: %w", cluster, err)
 		}
-		vaultURL, err := esovault.ApplyVaultStore(bounded, dyn, esovault.VaultStore{
+		vaultURL, err := esovault.ApplyVaultStore(bounded, kc, esovault.VaultStore{
 			Cluster:     cluster,
 			DataDir:     dataDir,
 			VaultPort:   access.Port(),
@@ -85,7 +83,7 @@ func tenantAddOns(cfg Config, log *slog.Logger) func(context.Context, string, *r
 }
 
 func measureTenantBaseline(ctx context.Context, cs kubernetes.Interface, dataDir, cluster string, log *slog.Logger) error {
-	b, err := clusterprovider.MeasureAddOnBaseline(ctx, cs, clusterprovider.AddOnFieldManager, time.Now())
+	b, err := clusterkcp.MeasureAddOnBaseline(ctx, cs, clusterprovider.AddOnFieldManager, time.Now())
 	if err != nil {
 		return fmt.Errorf("clusterprovider: measuring the add-on baseline of %s: %w", cluster, err)
 	}

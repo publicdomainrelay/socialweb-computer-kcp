@@ -19,11 +19,12 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/gateway"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayhttp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/networkdial"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
 )
 
 const (
@@ -37,7 +38,7 @@ const (
 	agentPageMax = 100
 )
 
-var _ gatewayhttp.WebSignIn = (*SignIn)(nil)
+var _ gateway.WebSignIn = (*SignIn)(nil)
 
 const (
 	identityCacheEntries = 4096

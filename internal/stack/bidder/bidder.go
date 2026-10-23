@@ -13,16 +13,12 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/marketbidder"
-	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostcontract"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/install"
@@ -153,7 +149,7 @@ func CheckAccount(backend hostsvc.Backend, handle, root string) error {
 
 type Kcp struct {
 	rest *rest.Config
-	dyn  dynamic.Interface
+	dyn  *kube.Client
 }
 
 func OpenKcp(kubeconfig string) (*Kcp, error) {
@@ -163,7 +159,7 @@ func OpenKcp(kubeconfig string) (*Kcp, error) {
 	}
 	root := rest.CopyConfig(cfg)
 	root.Host = strings.TrimSuffix(cfg.Host, "/") + "/clusters/" + compose.DefaultWorkspace
-	dc, err := dynamic.NewForConfig(root)
+	dc, err := kube.New(root)
 	if err != nil {
 		return nil, err
 	}
@@ -171,35 +167,14 @@ func OpenKcp(kubeconfig string) (*Kcp, error) {
 }
 
 func (k *Kcp) ApplyRoot(ctx context.Context, spec v1alpha1.MarketBidderSpec) error {
-	m, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&v1alpha1.MarketBidder{ObjectMeta: metav1.ObjectMeta{Name: RootName}, Spec: spec})
-	if err != nil {
-		return err
-	}
-	u := &unstructured.Unstructured{Object: m}
-	u.SetAPIVersion(v1alpha1.GroupVersion.String())
-	u.SetKind(string(v1alpha1.ApplicationKindMarketBidder))
-	unstructured.RemoveNestedField(u.Object, "status")
-	unstructured.RemoveNestedField(u.Object, "metadata", "creationTimestamp")
-	body, err := u.MarshalJSON()
-	if err != nil {
-		return err
-	}
-	force := true
-	_, err = k.dyn.Resource(compose.MarketBidderGVR).Patch(ctx, RootName, types.ApplyPatchType, body,
-		metav1.PatchOptions{FieldManager: FieldManager, Force: &force})
+	obj := &v1alpha1.MarketBidder{TypeMeta: metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: string(v1alpha1.ApplicationKindMarketBidder)},
+		ObjectMeta: metav1.ObjectMeta{Name: RootName}, Spec: spec}
+	_, err := kube.Apply[kube.Doc](ctx, k.dyn.Resource(compose.MarketBidderGVR), obj, kube.ApplyOptions{FieldManager: FieldManager, Force: true})
 	return err
 }
 
 func (k *Kcp) Root(ctx context.Context) (*v1alpha1.MarketBidder, error) {
-	u, err := k.dyn.Resource(compose.MarketBidderGVR).Get(ctx, RootName, metav1.GetOptions{})
-	if err != nil {
-		return nil, err
-	}
-	var o v1alpha1.MarketBidder
-	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &o); err != nil {
-		return nil, err
-	}
-	return &o, nil
+	return kube.Get[v1alpha1.MarketBidder](ctx, k.dyn.Resource(compose.MarketBidderGVR), RootName)
 }
 
 func (k *Kcp) Identities() (*kcpclient.MarketIdentities, error) {
@@ -211,8 +186,8 @@ func (k *Kcp) Identities() (*kcpclient.MarketIdentities, error) {
 }
 
 func (k *Kcp) WaitIdentityObject(ctx context.Context, timeout time.Duration) error {
-	_, err := ctlruntime.Await(ctx, k.dyn.Resource(compose.MarketIdentityGVR), marketbidder.BidderIdentity, timeout, ctlruntime.Present)
-	if errors.Is(err, ctlruntime.ErrAwaitTimeout) {
+	_, err := kube.Await(ctx, k.dyn.Resource(compose.MarketIdentityGVR), marketbidder.BidderIdentity, timeout, kube.Present[kube.Doc])
+	if errors.Is(err, kube.ErrAwaitTimeout) {
 		missing := apierrors.NewNotFound(compose.MarketIdentityGVR.GroupResource(), marketbidder.BidderIdentity)
 		return fmt.Errorf("bidder: the core created no MarketIdentity %s within %s: %w", marketbidder.BidderIdentity, timeout, missing)
 	}
@@ -221,7 +196,7 @@ func (k *Kcp) WaitIdentityObject(ctx context.Context, timeout time.Duration) err
 
 func (k *Kcp) WaitReady(ctx context.Context, timeout time.Duration, progress func(v1alpha1.ApplicationStatus)) (*v1alpha1.MarketBidder, error) {
 	last := ""
-	o, err := ctlruntime.AwaitAs(ctx, k.dyn.Resource(compose.MarketBidderGVR), RootName, timeout, func(o *v1alpha1.MarketBidder) (bool, error) {
+	o, err := kube.Await(ctx, k.dyn.Resource(compose.MarketBidderGVR), RootName, timeout, func(o *v1alpha1.MarketBidder) (bool, error) {
 		if o == nil {
 			return false, nil
 		}
@@ -232,7 +207,7 @@ func (k *Kcp) WaitReady(ctx context.Context, timeout time.Duration, progress fun
 		return o.Status.Phase == v1alpha1.ApplicationPhaseReady || o.Status.Phase == v1alpha1.ApplicationPhaseFailed, nil
 	})
 	switch {
-	case errors.Is(err, ctlruntime.ErrAwaitTimeout):
+	case errors.Is(err, kube.ErrAwaitTimeout):
 		return o, fmt.Errorf("bidder: the MarketBidder was not Ready within %s", timeout)
 	case err != nil:
 		return o, err
@@ -243,5 +218,5 @@ func (k *Kcp) WaitReady(ctx context.Context, timeout time.Duration, progress fun
 }
 
 func (k *Kcp) AwaitIdentity(ctx context.Context, name string, each func(*v1alpha1.MarketIdentity) (bool, error)) (*v1alpha1.MarketIdentity, error) {
-	return ctlruntime.AwaitAs(ctx, k.dyn.Resource(compose.MarketIdentityGVR), name, 0, each)
+	return kube.Await(ctx, k.dyn.Resource(compose.MarketIdentityGVR), name, 0, each)
 }

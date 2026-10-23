@@ -21,7 +21,6 @@ const (
 	DefaultRestartBackoff    = time.Second
 	DefaultMaxRestartBackoff = 30 * time.Second
 	DefaultStopTimeout       = 30 * time.Second
-	ReadyPollInterval        = 500 * time.Millisecond
 	ReadyTimeout             = 2 * time.Minute
 	DetachedReadyGrace       = 5 * time.Second
 	StatusWriteTimeout       = 10 * time.Second
@@ -97,7 +96,6 @@ type Runtime struct {
 
 	restartBackoff    time.Duration
 	maxRestartBackoff time.Duration
-	readyPoll         time.Duration
 	readyTimeout      time.Duration
 }
 
@@ -145,7 +143,6 @@ func NewRuntime(cfg RuntimeConfig, onStatus StatusCallback) *Runtime {
 		onStatus:          onStatus,
 		restartBackoff:    DefaultRestartBackoff,
 		maxRestartBackoff: DefaultMaxRestartBackoff,
-		readyPoll:         ReadyPollInterval,
 		readyTimeout:      ReadyTimeout,
 	}
 }
@@ -551,21 +548,25 @@ func (r *Runtime) supervise(inst *instance, spec ComponentSpec, in Instance, svc
 			return
 		}
 		started := make(chan struct{})
-		ready := r.launchReady(&probes, inst, svc, runCtx, attempt, started)
+		probeCtx, probeCancel := context.WithCancel(runCtx)
+		ready := r.launchReady(&probes, inst, svc, probeCtx, attempt, started)
 		close(started)
 		err := r.callStart(runCtx, svc, spec)
 		if runCtx.Err() != nil || inst.isStopping() {
+			probeCancel()
 			inst.deactivate(attempt)
 			r.unregister(inst)
 			return
 		}
 		if err == nil {
 			if r.awaitDetached(runCtx, inst, attempt, ready) {
+				probeCancel()
 				inst.deactivate(attempt)
 				r.unregister(inst)
 				return
 			}
 		}
+		probeCancel()
 		inst.deactivate(attempt)
 		r.unregister(inst)
 		if inst.claimStop() {
@@ -661,82 +662,81 @@ func (r *Runtime) awaitReady(inst *instance, svc Service, ctx context.Context, a
 		return
 	case <-started:
 	}
-	poll, timeout := r.readySettings()
-	deadline := time.Now().Add(timeout)
-	timedOut := false
-	ticker := time.NewTicker(poll)
-	defer ticker.Stop()
-	for {
-		inst.mu.Lock()
-		current := inst.attempt == attempt && inst.running && inst.svc == svc && !inst.stopping
-		inst.mu.Unlock()
-		if !current {
+	signal, done, err := r.callReady(inst, svc)
+	if err != nil {
+		var panicErr *PanicError
+		if errors.As(err, &panicErr) {
+			r.log.Error("component: service ready check panicked", "component", panicErr.Component, "stack", string(panicErr.Stack))
 			return
 		}
-		probeCtx, probeCancel := context.WithTimeout(ctx, poll*2)
-		err := r.callReady(probeCtx, inst, svc)
-		probeCancel()
-		if ctx.Err() != nil {
-			return
-		}
-		if err != nil {
-			var panicErr *PanicError
-			if errors.As(err, &panicErr) {
-				r.log.Error("component: service ready check panicked", "component", panicErr.Component, "stack", string(panicErr.Stack))
-				return
-			}
-			if !timedOut && time.Now().After(deadline) {
-				timedOut = true
-				spec := inst.specSnapshot()
-				restarts := inst.restartsOf()
-				st := startingStatus(spec, restarts)
-				st.StartedAt = inst.startedAtOf()
-				st.Message = fmt.Sprintf("the service is not ready after %s: %v", timeout, err)
-				conds.Set(&st.Conditions, spec.Generation, ConditionReady, false, "NotReady", st.Message)
-				inst.mu.Lock()
-				updated := inst.attempt == attempt && inst.running && inst.svc == svc && !inst.stopping
-				if updated {
-					inst.status = st
-				}
-				inst.mu.Unlock()
-				if updated {
-					r.emit(context.WithoutCancel(ctx), spec, st)
-				}
-			}
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-			}
-			continue
-		}
-		endpoints, err := r.callEndpoints(inst, svc)
-		if err != nil {
-			r.log.Error("component: reading service endpoints failed", "err", err)
-			return
-		}
-		inst.mu.Lock()
-		if inst.attempt != attempt || !inst.running || inst.svc != svc || inst.stopping {
-			inst.mu.Unlock()
-			return
-		}
-		spec := inst.spec
-		restarts := inst.restarts
-		st := startingStatus(spec, restarts)
-		st.StartedAt = inst.startedAt
-		st.Phase = PhaseReady
-		st.Ready = true
-		st.Endpoints = cloneEndpoints(endpoints)
-		st.Message = ""
-		conds.Set(&st.Conditions, spec.Generation, ConditionReady, true, "Ready", "the service reports ready")
-		inst.status = st
-		inst.mu.Unlock()
-		if !r.register(inst, svc, endpoints) {
-			return
-		}
-		r.emit(context.WithoutCancel(ctx), spec, st)
-		close(ready)
+		r.notReady(ctx, inst, svc, attempt, fmt.Sprintf("the service is not ready: %v", err))
 		return
+	}
+	timeout := r.readyTimeoutOf()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return
+	case <-done:
+	case <-timer.C:
+		r.notReady(ctx, inst, svc, attempt, fmt.Sprintf("the service is not ready after %s", timeout))
+		select {
+		case <-ctx.Done():
+			return
+		case <-done:
+		}
+	}
+	if ctx.Err() != nil {
+		return
+	}
+	if err := signal.Err(); err != nil {
+		r.notReady(ctx, inst, svc, attempt, fmt.Sprintf("the service is not ready: %v", err))
+		return
+	}
+	endpoints, err := r.callEndpoints(inst, svc)
+	if err != nil {
+		r.log.Error("component: reading service endpoints failed", "err", err)
+		return
+	}
+	inst.mu.Lock()
+	if inst.attempt != attempt || !inst.running || inst.svc != svc || inst.stopping {
+		inst.mu.Unlock()
+		return
+	}
+	spec := inst.spec
+	restarts := inst.restarts
+	st := startingStatus(spec, restarts)
+	st.StartedAt = inst.startedAt
+	st.Phase = PhaseReady
+	st.Ready = true
+	st.Endpoints = cloneEndpoints(endpoints)
+	st.Message = ""
+	conds.Set(&st.Conditions, spec.Generation, ConditionReady, true, "Ready", "the service reports ready")
+	inst.status = st
+	inst.mu.Unlock()
+	if !r.register(inst, svc, endpoints) {
+		return
+	}
+	r.emit(context.WithoutCancel(ctx), spec, st)
+	close(ready)
+}
+
+func (r *Runtime) notReady(ctx context.Context, inst *instance, svc Service, attempt uint64, message string) {
+	spec := inst.specSnapshot()
+	restarts := inst.restartsOf()
+	st := startingStatus(spec, restarts)
+	st.StartedAt = inst.startedAtOf()
+	st.Message = message
+	conds.Set(&st.Conditions, spec.Generation, ConditionReady, false, "NotReady", st.Message)
+	inst.mu.Lock()
+	updated := inst.attempt == attempt && inst.running && inst.svc == svc && !inst.stopping
+	if updated {
+		inst.status = st
+	}
+	inst.mu.Unlock()
+	if updated {
+		r.emit(context.WithoutCancel(ctx), spec, st)
 	}
 }
 
@@ -808,14 +808,19 @@ func (r *Runtime) callStart(ctx context.Context, svc Service, spec ComponentSpec
 	return svc.Start(specCaller(ctx, spec))
 }
 
-func (r *Runtime) callReady(ctx context.Context, inst *instance, svc Service) (err error) {
+func (r *Runtime) callReady(inst *instance, svc Service) (signal Readiness, done <-chan struct{}, err error) {
 	name := inst.name()
 	defer func() {
 		if value := recover(); value != nil {
+			signal, done = nil, nil
 			err = newPanicError(name, value)
 		}
 	}()
-	return svc.Ready(specCaller(ctx, inst.specSnapshot()))
+	signal = svc.Ready()
+	if signal == nil {
+		return nil, nil, fmt.Errorf("component: %s has no readiness signal", name)
+	}
+	return signal, signal.Done(), nil
 }
 
 func (r *Runtime) callEndpoints(inst *instance, svc Service) (endpoints []Endpoint, err error) {
@@ -892,14 +897,10 @@ func (r *Runtime) rootContext() (context.Context, error) {
 	return r.root, nil
 }
 
-func (r *Runtime) readySettings() (time.Duration, time.Duration) {
+func (r *Runtime) readyTimeoutOf() time.Duration {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	poll := r.readyPoll
-	poll = opt.Positive(poll, ReadyPollInterval)
-	timeout := r.readyTimeout
-	timeout = opt.Positive(timeout, ReadyTimeout)
-	return poll, timeout
+	return opt.Positive(r.readyTimeout, ReadyTimeout)
 }
 
 func (r *Runtime) backoffFor(restarts int32) time.Duration {

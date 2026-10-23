@@ -9,8 +9,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/kcp"
 )
 
 type NetworkHost struct {

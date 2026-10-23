@@ -31,8 +31,9 @@ import (
 	"k8s.io/client-go/tools/cache"
 	watchtools "k8s.io/client-go/tools/watch"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/api/kcpgvr"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/manifests"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 )
 
 const (
@@ -232,7 +233,7 @@ func (a *Applier) ClusterOf(ctx context.Context, path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	u, err := dyn.Resource(tenancyv1alpha1.SchemeGroupVersion.WithResource("workspaces")).Get(ctx, path[i+1:], metav1.GetOptions{})
+	u, err := dyn.Resource(kcpgvr.Workspaces).Get(ctx, path[i+1:], metav1.GetOptions{})
 	if err != nil {
 		return "", err
 	}
@@ -442,7 +443,7 @@ func (a *Applier) stampOwner(ctx context.Context, u *unstructured.Unstructured) 
 			return nil, err
 		}
 		review := &unstructured.Unstructured{Object: map[string]any{"apiVersion": "authentication.k8s.io/v1", "kind": "SelfSubjectReview"}}
-		got, err := dyn.Resource(authenticationv1.SchemeGroupVersion.WithResource("selfsubjectreviews")).Create(ctx, review, metav1.CreateOptions{})
+		got, err := dyn.Resource(kcpgvr.SelfSubjectReviews).Create(ctx, review, metav1.CreateOptions{})
 		if err != nil {
 			return nil, fmt.Errorf("reading the applying identity for the workspace owner: %w", err)
 		}

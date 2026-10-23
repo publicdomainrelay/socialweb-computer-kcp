@@ -1198,7 +1198,7 @@ entries:
     kind: wire
     source: internal/sweepkcp/sweepkcp_test.go
     asserts: >
-      The sweep worklist is the atprotoidentities with spec.scope Account; annotation
+      The sweep worklist is the atprotoidentities with spec.scope Account; the label
       socialweb.computer/sweep=exempt excludes one.
 
   - id: internal/nodemarket/Test*

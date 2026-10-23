@@ -25,7 +25,7 @@ var (
 	tenancyResource   = kcpv1alpha1.SchemeGroupVersion
 )
 
-const SweepExemptAnnotation = "socialweb.computer/sweep"
+const SweepExemptLabel = "socialweb.computer/sweep"
 
 const SweepExemptValue = "exempt"
 
@@ -127,7 +127,7 @@ func (w *Worklist) accountDIDs(ctx context.Context, logicalCluster string) ([]st
 		if rec.Spec.Scope != v1alpha1.IdentityScopeAccount {
 			continue
 		}
-		if rec.Annotations[SweepExemptAnnotation] == SweepExemptValue {
+		if rec.Labels[SweepExemptLabel] == SweepExemptValue {
 			continue
 		}
 		out = append(out, rec.Spec.DID)

@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/atprotorepo"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/gateway"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayhttp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/sshtransport"
@@ -49,10 +50,10 @@ type Owners struct {
 }
 
 var (
-	_ sshtransport.Authenticator  = (*Owners)(nil)
-	_ sshtransport.AgentProvider  = (*Owners)(nil)
-	_ gatewayhttp.WebAccountAgent = (*agent)(nil)
-	_ gatewayhttp.WebAccountAgent = Unavailable{}
+	_ sshtransport.Authenticator = (*Owners)(nil)
+	_ sshtransport.AgentProvider = (*Owners)(nil)
+	_ gateway.WebAccountAgent    = (*agent)(nil)
+	_ gateway.WebAccountAgent    = Unavailable{}
 )
 
 func New(cfg Config, deps Deps) *Owners {

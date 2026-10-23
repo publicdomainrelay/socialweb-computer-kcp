@@ -16,22 +16,19 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/marketnetwork"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/marketrequester"
-	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -195,7 +192,7 @@ func SummaryOf(c *v1alpha1.ComputeContract) *ContractSummary {
 
 type Kcp struct {
 	rest      *rest.Config
-	dyn       dynamic.Interface
+	dyn       *kube.Client
 	workspace string
 }
 
@@ -207,45 +204,29 @@ func OpenKcp(kubeconfig, workspace string) (*Kcp, error) {
 	workspace = cmp.Or(workspace, compose.DefaultWorkspace)
 	root := rest.CopyConfig(cfg)
 	root.Host = strings.TrimSuffix(cfg.Host, "/") + "/clusters/" + workspace
-	dc, err := dynamic.NewForConfig(root)
+	dc, err := kube.New(root)
 	if err != nil {
 		return nil, err
 	}
 	return &Kcp{rest: cfg, dyn: dc, workspace: workspace}, nil
 }
 
-func applyBody(o any, kind string) ([]byte, error) {
-	m, err := runtime.DefaultUnstructuredConverter.ToUnstructured(o)
-	if err != nil {
-		return nil, err
-	}
-	u := &unstructured.Unstructured{Object: m}
-	u.SetAPIVersion(v1alpha1.GroupVersion.String())
-	u.SetKind(kind)
-	unstructured.RemoveNestedField(u.Object, "status")
-	unstructured.RemoveNestedField(u.Object, "metadata", "creationTimestamp")
-	return u.MarshalJSON()
+func typeMeta(kind string) metav1.TypeMeta {
+	return metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: kind}
 }
 
 func (k *Kcp) ApplyRoot(ctx context.Context, spec v1alpha1.MarketRequesterSpec) error {
-	body, err := applyBody(&v1alpha1.MarketRequester{ObjectMeta: metav1.ObjectMeta{Name: RootName}, Spec: spec}, "MarketRequester")
-	if err != nil {
-		return err
-	}
-	force := true
-	_, err = k.dyn.Resource(compose.MarketRequesterGVR).Patch(ctx, RootName, types.ApplyPatchType, body,
-		metav1.PatchOptions{FieldManager: FieldManager, Force: &force})
+	obj := &v1alpha1.MarketRequester{TypeMeta: typeMeta("MarketRequester"), ObjectMeta: metav1.ObjectMeta{Name: RootName}, Spec: spec}
+	_, err := kube.Apply[kube.Doc](ctx, k.dyn.Resource(compose.MarketRequesterGVR), obj, kube.ApplyOptions{FieldManager: FieldManager, Force: true})
 	return err
 }
 
 func (k *Kcp) Root(ctx context.Context) (v1alpha1.ApplicationStatus, error) {
-	u, err := k.dyn.Resource(compose.MarketRequesterGVR).Get(ctx, RootName, metav1.GetOptions{})
+	o, err := kube.Get[v1alpha1.MarketRequester](ctx, k.dyn.Resource(compose.MarketRequesterGVR), RootName)
 	if err != nil {
 		return v1alpha1.ApplicationStatus{}, err
 	}
-	var o v1alpha1.MarketRequester
-	err = unstruct.Into(u, &o)
-	return o.Status, err
+	return o.Status, nil
 }
 
 func (k *Kcp) WaitReady(ctx context.Context, timeout time.Duration, progress func(v1alpha1.ApplicationStatus)) error {
@@ -279,20 +260,12 @@ func (k *Kcp) WaitReady(ctx context.Context, timeout time.Duration, progress fun
 }
 
 func (k *Kcp) Contract(ctx context.Context) (*v1alpha1.ComputeContract, error) {
-	u, err := k.dyn.Resource(compose.ComputeContractGVR).Get(ctx, marketrequester.RequesterContract, metav1.GetOptions{})
-	if err != nil {
-		return nil, err
-	}
-	var o v1alpha1.ComputeContract
-	if err := unstruct.Into(u, &o); err != nil {
-		return nil, err
-	}
-	return &o, nil
+	return kube.Get[v1alpha1.ComputeContract](ctx, k.dyn.Resource(compose.ComputeContractGVR), marketrequester.RequesterContract)
 }
 
-func await[T any](ctx context.Context, ri dynamic.ResourceInterface, gr schema.GroupResource, name string, timeout time.Duration, what string, done func(*T) bool) error {
+func await[T any](ctx context.Context, r kube.Resource, gr schema.GroupResource, name string, timeout time.Duration, what string, done func(*T) bool) error {
 	var missing error
-	_, err := ctlruntime.AwaitAs(ctx, ri, name, timeout, func(o *T) (bool, error) {
+	_, err := kube.Await(ctx, r, name, timeout, func(o *T) (bool, error) {
 		if o == nil {
 			missing = apierrors.NewNotFound(gr, name)
 			return false, nil
@@ -303,7 +276,7 @@ func await[T any](ctx context.Context, ri dynamic.ResourceInterface, gr schema.G
 }
 
 func awaitErr(err error, what string, timeout time.Duration, last error) error {
-	if !errors.Is(err, ctlruntime.ErrAwaitTimeout) {
+	if !errors.Is(err, kube.ErrAwaitTimeout) {
 		return err
 	}
 	if last != nil {
@@ -325,7 +298,7 @@ func retry(ctx context.Context, deadline time.Time, timeout time.Duration, what 
 		}
 		left := time.Until(deadline)
 		if left <= 0 {
-			return awaitErr(ctlruntime.ErrAwaitTimeout, what, timeout, last)
+			return awaitErr(kube.ErrAwaitTimeout, what, timeout, last)
 		}
 		t := time.NewTimer(min(delay, left))
 		select {
@@ -343,17 +316,13 @@ func (k *Kcp) CreateContract(ctx context.Context, spec v1alpha1.ComputeContractS
 		ttl := ContractTTLSeconds
 		spec.TTLSecondsAfterFinished = &ttl
 	}
-	body, err := applyBody(&v1alpha1.ComputeContract{ObjectMeta: metav1.ObjectMeta{Name: marketrequester.RequesterContract}, Spec: spec},
-		"ComputeContract")
+	body, err := kube.ApplyBody(&v1alpha1.ComputeContract{TypeMeta: typeMeta("ComputeContract"),
+		ObjectMeta: metav1.ObjectMeta{Name: marketrequester.RequesterContract}, Spec: spec}, false)
 	if err != nil {
 		return err
 	}
-	var u unstructured.Unstructured
-	if err := u.UnmarshalJSON(body); err != nil {
-		return err
-	}
 	return retry(ctx, time.Now().Add(timeout), timeout, "creating the ComputeContract (its schema is bound by the requester's core)", func() (bool, error) {
-		_, err := k.dyn.Resource(compose.ComputeContractGVR).Create(ctx, &u, metav1.CreateOptions{FieldManager: FieldManager})
+		_, err := kube.Create[kube.Doc](ctx, k.dyn.Resource(compose.ComputeContractGVR), body, metav1.CreateOptions{FieldManager: FieldManager})
 		if err == nil || apierrors.IsAlreadyExists(err) {
 			return true, nil
 		}
@@ -363,7 +332,7 @@ func (k *Kcp) CreateContract(ctx context.Context, spec v1alpha1.ComputeContractS
 
 func (k *Kcp) Release(ctx context.Context) error {
 	patch := []byte(`{"spec":{"release":true}}`)
-	_, err := k.dyn.Resource(compose.ComputeContractGVR).Patch(ctx, marketrequester.RequesterContract, types.MergePatchType, patch,
+	_, err := kube.Patch[kube.Doc](ctx, k.dyn.Resource(compose.ComputeContractGVR), marketrequester.RequesterContract, types.MergePatchType, patch,
 		metav1.PatchOptions{FieldManager: FieldManager})
 	return err
 }
@@ -375,7 +344,7 @@ func (k *Kcp) WaitContract(ctx context.Context, timeout time.Duration, done func
 	var mu sync.Mutex
 	why := ""
 	go func() {
-		_, _ = ctlruntime.AwaitAs(wctx, k.dyn.Resource(compose.MarketRequesterGVR), RootName, 0, func(o *v1alpha1.MarketRequester) (bool, error) {
+		_, _ = kube.Await(wctx, k.dyn.Resource(compose.MarketRequesterGVR), RootName, 0, func(o *v1alpha1.MarketRequester) (bool, error) {
 			if o == nil {
 				return false, nil
 			}
@@ -397,7 +366,7 @@ func (k *Kcp) WaitContract(ctx context.Context, timeout time.Duration, done func
 	var cur *v1alpha1.ComputeContract
 	var missing error
 	last := ""
-	_, err := ctlruntime.AwaitAs(wctx, k.dyn.Resource(compose.ComputeContractGVR), marketrequester.RequesterContract, timeout,
+	_, err := kube.Await(wctx, k.dyn.Resource(compose.ComputeContractGVR), marketrequester.RequesterContract, timeout,
 		func(c *v1alpha1.ComputeContract) (bool, error) {
 			if c == nil {
 				missing = apierrors.NewNotFound(compose.ComputeContractGVR.GroupResource(), marketrequester.RequesterContract)
@@ -442,7 +411,7 @@ func (k *Kcp) PutSecrets(ctx context.Context, bundle []byte, timeout time.Durati
 	ri := k.dyn.Resource(compose.OpenBaoServerGVR)
 	server, client := marketrequester.RequesterVaultServer, marketrequester.RequesterVaultClient
 	var pending error
-	_, err := ctlruntime.AwaitAs(ctx, ri, server, timeout, func(o *v1alpha1.OpenBaoServer) (bool, error) {
+	_, err := kube.Await(ctx, ri, server, timeout, func(o *v1alpha1.OpenBaoServer) (bool, error) {
 		pending = vaultPending(o, server, client)
 		return pending == nil, nil
 	})
@@ -494,23 +463,23 @@ func (k *Kcp) WaitIdentityObject(ctx context.Context, timeout time.Duration) err
 }
 
 func (k *Kcp) AwaitIdentity(ctx context.Context, name string, each func(*v1alpha1.MarketIdentity) (bool, error)) (*v1alpha1.MarketIdentity, error) {
-	return ctlruntime.AwaitAs(ctx, k.dyn.Resource(compose.MarketIdentityGVR), name, 0, each)
+	return kube.Await(ctx, k.dyn.Resource(compose.MarketIdentityGVR), name, 0, each)
 }
 
 func (k *Kcp) AwaitContract(ctx context.Context, timeout time.Duration, done func(*v1alpha1.ComputeContract) bool) (*v1alpha1.ComputeContract, error) {
-	return ctlruntime.AwaitAs(ctx, k.dyn.Resource(compose.ComputeContractGVR), marketrequester.RequesterContract, timeout,
+	return kube.Await(ctx, k.dyn.Resource(compose.ComputeContractGVR), marketrequester.RequesterContract, timeout,
 		func(c *v1alpha1.ComputeContract) (bool, error) { return c != nil && done(c), nil })
 }
 
-func networkClient(kubeconfig string) (dynamic.ResourceInterface, error) {
+func networkClient(kubeconfig string) (kube.Resource, error) {
 	cfg, err := kcpserver.FrontRestConfig(kubeconfig)
 	if err != nil {
-		return nil, err
+		return kube.Resource{}, err
 	}
 	cfg.Host = strings.TrimSuffix(cfg.Host, "/") + "/clusters/" + compose.DefaultWorkspace
-	dc, err := dynamic.NewForConfig(cfg)
+	dc, err := kube.New(cfg)
 	if err != nil {
-		return nil, err
+		return kube.Resource{}, err
 	}
 	return dc.Resource(compose.MarketNetworkGVR), nil
 }
@@ -521,12 +490,12 @@ func editNetwork(ctx context.Context, kubeconfig string, edit func(*v1alpha1.Mar
 		return err
 	}
 	for range networkConflicts {
-		u, err := ri.Get(ctx, marketnetwork.NetworkName, metav1.GetOptions{})
+		u, err := kube.Get[kube.Doc](ctx, ri, marketnetwork.NetworkName)
 		if err != nil {
 			return fmt.Errorf("request: the market network's MarketNetwork: %w", err)
 		}
-		var o v1alpha1.MarketNetwork
-		if err := unstruct.Into(u, &o); err != nil {
+		o, err := kube.Decode[v1alpha1.MarketNetwork](*u)
+		if err != nil {
 			return err
 		}
 		if err := edit(&o.Spec); err != nil {
@@ -536,8 +505,8 @@ func editNetwork(ctx context.Context, kubeconfig string, edit func(*v1alpha1.Mar
 		if err != nil {
 			return err
 		}
-		u.Object["spec"] = apps
-		_, err = ri.Update(ctx, u, metav1.UpdateOptions{FieldManager: FieldManager})
+		(*u)["spec"] = apps
+		_, err = kube.Update[kube.Doc](ctx, ri, *u, metav1.UpdateOptions{FieldManager: FieldManager})
 		if err == nil {
 			return nil
 		}
@@ -590,12 +559,8 @@ func NetworkApp(ctx context.Context, kubeconfig, name string) (v1alpha1.NetworkA
 	if err != nil {
 		return v1alpha1.NetworkAppStatus{}, false, err
 	}
-	u, err := ri.Get(ctx, marketnetwork.NetworkName, metav1.GetOptions{})
+	o, err := kube.Get[v1alpha1.MarketNetwork](ctx, ri, marketnetwork.NetworkName)
 	if err != nil {
-		return v1alpha1.NetworkAppStatus{}, false, err
-	}
-	var o v1alpha1.MarketNetwork
-	if err := unstruct.Into(u, &o); err != nil {
 		return v1alpha1.NetworkAppStatus{}, false, err
 	}
 	for _, a := range o.Status.Apps {
@@ -644,10 +609,10 @@ func WaitNetworkGone(ctx context.Context, kubeconfig, name string, timeout time.
 	if err != nil {
 		return err
 	}
-	_, err = ctlruntime.AwaitAs(ctx, ri, marketnetwork.NetworkName, timeout, func(o *v1alpha1.MarketNetwork) (bool, error) {
+	_, err = kube.Await(ctx, ri, marketnetwork.NetworkName, timeout, func(o *v1alpha1.MarketNetwork) (bool, error) {
 		return o != nil && !slices.ContainsFunc(o.Status.Apps, func(a v1alpha1.NetworkAppStatus) bool { return a.Name == name }), nil
 	})
-	if errors.Is(err, ctlruntime.ErrAwaitTimeout) {
+	if errors.Is(err, kube.ErrAwaitTimeout) {
 		return fmt.Errorf("the market network still lists %s", name)
 	}
 	return err

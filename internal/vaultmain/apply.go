@@ -12,12 +12,10 @@ import (
 	"strings"
 	"time"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
@@ -70,19 +68,15 @@ func ReadRootAccess(ctx context.Context, kubeconfig, workspace, server string) (
 	}
 	cfg := rest.CopyConfig(restCfg)
 	cfg.Host = strings.TrimSuffix(cfg.Host, "/") + "/clusters/" + workspace
-	dc, err := dynamic.NewForConfig(cfg)
+	kc, err := kube.New(cfg)
 	if err != nil {
 		return RootAccess{}, err
 	}
-	u, err := dc.Resource(openbaoctl.GVR).Get(ctx, server, metav1.GetOptions{})
+	o, err := kube.Get[v1alpha1.OpenBaoServer](ctx, kc.Resource(openbaoctl.GVR), server)
 	if err != nil {
 		return RootAccess{}, fmt.Errorf("the root vault's OpenBaoServer %s in %s: %w", server, workspace, err)
 	}
-	var o v1alpha1.OpenBaoServer
-	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &o); err != nil {
-		return RootAccess{}, err
-	}
-	return RootAccessOf(o)
+	return RootAccessOf(*o)
 }
 
 func (a RootAccess) Client(ctx context.Context) (*openbao.Client, error) {

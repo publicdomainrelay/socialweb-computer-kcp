@@ -10,17 +10,17 @@ import (
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/dynamic"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/atprotorepo"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 )
 
 type References struct {
 	Own func(ctx context.Context, from v1alpha1.AtprotoValueFrom) (map[string]any, bool, error)
 
-	Dynamic dynamic.Interface
+	Dynamic *kube.Client
 
 	Factory DynamicFactory
 

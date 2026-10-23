@@ -8,13 +8,13 @@ import (
 	"strings"
 	"sync"
 
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/guestcp"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 )
 
 func (c *Controller) Provide() {
@@ -134,13 +134,13 @@ func (g guests) RecordGuest(ctx context.Context, name string, report v1alpha1.Co
 	if err != nil {
 		return err
 	}
-	u := &unstructured.Unstructured{Object: map[string]any{
+	doc := kube.Doc{
 		"apiVersion": v1alpha1.GroupVersion.String(),
 		"kind":       "ComputeVM",
 		"metadata":   map[string]any{"name": name},
 		"status":     map[string]any{"market": map[string]any{"guest": guest}},
-	}}
-	return g.store.Apply(ctx, g.workspace, FieldManager, u, true)
+	}
+	return g.store.Apply(ctx, g.workspace, FieldManager, doc, true)
 }
 
 type grants struct {
@@ -160,19 +160,20 @@ func (g grants) Apply(ctx context.Context, grant v1alpha1.GuestIdentityGrant) er
 		return err
 	}
 	metadata := map[string]any{"name": grant.Name}
-	if owners, ok, _ := unstructured.NestedSlice(object, "metadata", "ownerReferences"); ok && len(owners) > 0 {
+	held, _ := object["metadata"].(map[string]any)
+	if owners, _ := held["ownerReferences"].([]any); len(owners) > 0 {
 		metadata["ownerReferences"] = owners
 	}
-	if labels, ok, _ := unstructured.NestedMap(object, "metadata", "labels"); ok && len(labels) > 0 {
+	if labels, _ := held["labels"].(map[string]any); len(labels) > 0 {
 		metadata["labels"] = labels
 	}
-	u := &unstructured.Unstructured{Object: map[string]any{
+	doc := kube.Doc{
 		"apiVersion": v1alpha1.GroupVersion.String(),
 		"kind":       "GuestIdentityGrant",
 		"metadata":   metadata,
 		"spec":       object["spec"],
-	}}
-	return g.store.Apply(ctx, g.workspace, FieldManager, u, false)
+	}
+	return g.store.Apply(ctx, g.workspace, FieldManager, doc, false)
 }
 
 func (g grants) Delete(ctx context.Context, name string) error {

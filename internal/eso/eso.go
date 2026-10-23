@@ -17,11 +17,12 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
-	"k8s.io/client-go/dynamic"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/api/kcpgvr"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 )
 
 const FieldManager = "socialweb-clusterprovider"
@@ -47,9 +48,8 @@ var ErrNoOperator = errors.New(
 		"and ExternalSecret have no kind to be applied as. That group is served by the External " +
 		"Secrets Operator, and no operator is installed in this cluster")
 
-func Installed(ctx context.Context, dyn dynamic.Interface) (bool, error) {
-	_, err := dyn.Resource(externalSecretsResources["ClusterSecretStore"]).
-		List(ctx, metav1.ListOptions{Limit: 1})
+func Installed(ctx context.Context, c *kube.Client) (bool, error) {
+	_, err := kube.List[kube.Doc](ctx, c.Resource(externalSecretsResources["ClusterSecretStore"]), metav1.ListOptions{Limit: 1})
 	if err == nil {
 		return true, nil
 	}
@@ -59,8 +59,8 @@ func Installed(ctx context.Context, dyn dynamic.Interface) (bool, error) {
 	return false, fmt.Errorf("eso: asking the cluster whether it serves %s: %w", OperatorGroupVersion, err)
 }
 
-func InstallOperator(ctx context.Context, dyn dynamic.Interface, install func(context.Context) error) error {
-	ok, err := Installed(ctx, dyn)
+func InstallOperator(ctx context.Context, c *kube.Client, install func(context.Context) error) error {
+	ok, err := Installed(ctx, c)
 	if err != nil {
 		return err
 	}
@@ -74,7 +74,7 @@ func InstallOperator(ctx context.Context, dyn dynamic.Interface, install func(co
 		return fmt.Errorf("eso: installing the External Secrets Operator, whose %s the store "+
 			"needs: %w", OperatorGroupVersion, err)
 	}
-	ok, err = Installed(ctx, dyn)
+	ok, err = Installed(ctx, c)
 	if err != nil {
 		return err
 	}
@@ -89,12 +89,12 @@ var ErrIncomplete = errors.New(
 		"namespace to write into, the cluster vault's tenant-facing https URL, the vault server CA " +
 		"and the ESO client certificate and key")
 
-var secretResource = schema.GroupVersionResource{Group: "", Version: "v1", Resource: "secrets"}
+var secretResource = kcpgvr.Secrets
 
 var externalSecretsResources = map[string]schema.GroupVersionResource{
-	"ClusterSecretStore": {Group: "external-secrets.io", Version: "v1", Resource: "clustersecretstores"},
-	"ExternalSecret":     {Group: "external-secrets.io", Version: "v1", Resource: "externalsecrets"},
-	"SecretStore":        {Group: "external-secrets.io", Version: "v1", Resource: "secretstores"},
+	"ClusterSecretStore": kcpgvr.ClusterSecretStores,
+	"ExternalSecret":     kcpgvr.ExternalSecrets,
+	"SecretStore":        kcpgvr.SecretStores,
 }
 
 type Options struct {
@@ -144,7 +144,7 @@ func (o Options) validate() error {
 	return nil
 }
 
-func Load(dir string) ([]unstructured.Unstructured, error) {
+func Load(dir string) ([]kube.Doc, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, fmt.Errorf("eso: reading the manifest directory %s: %w", dir, err)
@@ -160,7 +160,7 @@ func Load(dir string) ([]unstructured.Unstructured, error) {
 		names = append(names, e.Name())
 	}
 	sort.Strings(names)
-	var out []unstructured.Unstructured
+	var out []kube.Doc
 	for _, name := range names {
 		path := filepath.Join(dir, name)
 		raw, err := os.ReadFile(path)
@@ -179,8 +179,8 @@ func Load(dir string) ([]unstructured.Unstructured, error) {
 	return out, nil
 }
 
-func decodeObjects(raw []byte, source string) ([]unstructured.Unstructured, error) {
-	var out []unstructured.Unstructured
+func decodeObjects(raw []byte, source string) ([]kube.Doc, error) {
+	var out []kube.Doc
 	dec := utilyaml.NewYAMLOrJSONDecoder(bytes.NewReader(raw), 4096)
 	for {
 		var obj map[string]any
@@ -194,44 +194,44 @@ func decodeObjects(raw []byte, source string) ([]unstructured.Unstructured, erro
 		if len(obj) == 0 {
 			continue
 		}
-		u := unstructured.Unstructured{Object: obj}
-		if u.GetKind() == "" || u.GetAPIVersion() == "" {
+		u := kube.Doc(obj)
+		if kindOf(u) == "" || docString(u, "apiVersion") == "" {
 			return nil, fmt.Errorf("eso: %s holds an object with no apiVersion or kind", source)
 		}
-		if u.GetName() == "" {
-			return nil, fmt.Errorf("eso: %s holds a %s with no name", source, u.GetKind())
+		if nameOf(u) == "" {
+			return nil, fmt.Errorf("eso: %s holds a %s with no name", source, kindOf(u))
 		}
 		out = append(out, u)
 	}
 	return out, nil
 }
 
-func Resolve(u *unstructured.Unstructured, o Options) error {
-	switch u.GetKind() {
+func Resolve(u kube.Doc, o Options) error {
+	switch kindOf(u) {
 	case "ClusterSecretStore", "SecretStore":
-		if err := unstructured.SetNestedField(u.Object, o.VaultServer, "spec", "provider", "vault", "server"); err != nil {
+		if err := setField(u, o.VaultServer, "spec", "provider", "vault", "server"); err != nil {
 			return err
 		}
-		if err := unstructured.SetNestedField(u.Object, base64.StdEncoding.EncodeToString(o.ServerCAPEM), "spec", "provider", "vault", "caBundle"); err != nil {
+		if err := setField(u, base64.StdEncoding.EncodeToString(o.ServerCAPEM), "spec", "provider", "vault", "caBundle"); err != nil {
 			return err
 		}
 		cert := map[string]any{"name": ClientSecretName, "namespace": o.Namespace, "key": CertKey}
 		key := map[string]any{"name": ClientSecretName, "namespace": o.Namespace, "key": KeyKey}
-		if err := unstructured.SetNestedMap(u.Object, cert, "spec", "provider", "vault", "auth", "cert", "clientCert"); err != nil {
+		if err := setField(u, cert, "spec", "provider", "vault", "auth", "cert", "clientCert"); err != nil {
 			return err
 		}
-		if err := unstructured.SetNestedMap(u.Object, key, "spec", "provider", "vault", "auth", "cert", "secretRef"); err != nil {
+		if err := setField(u, key, "spec", "provider", "vault", "auth", "cert", "secretRef"); err != nil {
 			return err
 		}
 	case "ExternalSecret":
-		u.SetNamespace(o.Namespace)
+		setNamespace(u, o.Namespace)
 	default:
-		return fmt.Errorf("eso: %s %s is not a kind this installer applies", u.GetKind(), u.GetName())
+		return fmt.Errorf("eso: %s %s is not a kind this installer applies", kindOf(u), nameOf(u))
 	}
 	return nil
 }
 
-func Apply(ctx context.Context, dyn dynamic.Interface, o Options) error {
+func Apply(ctx context.Context, c *kube.Client, o Options) error {
 	if err := o.validate(); err != nil {
 		return err
 	}
@@ -239,28 +239,27 @@ func Apply(ctx context.Context, dyn dynamic.Interface, o Options) error {
 	if err != nil {
 		return err
 	}
-	for i := range objs {
-		if err := Resolve(&objs[i], o); err != nil {
+	for _, u := range objs {
+		if err := Resolve(u, o); err != nil {
 			return err
 		}
 	}
-	if err := applyClientSecret(ctx, dyn, o); err != nil {
+	if err := applyClientSecret(ctx, c, o); err != nil {
 		return err
 	}
-	for i := range objs {
-		u := &objs[i]
-		gvr, ok := externalSecretsResources[u.GetKind()]
+	for _, u := range objs {
+		gvr, ok := externalSecretsResources[kindOf(u)]
 		if !ok {
-			return fmt.Errorf("eso: no resource is known for the %s %s this installer loaded", u.GetKind(), u.GetName())
+			return fmt.Errorf("eso: no resource is known for the %s %s this installer loaded", kindOf(u), nameOf(u))
 		}
-		if err := applyObject(ctx, dyn.Resource(gvr).Namespace(u.GetNamespace()), u); err != nil {
+		if err := applyObject(ctx, c.Resource(gvr).In(namespaceOf(u)), u); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func Remove(ctx context.Context, dyn dynamic.Interface, o Options) error {
+func Remove(ctx context.Context, c *kube.Client, o Options) error {
 	if o.ManifestDir == "" {
 		return fmt.Errorf("%w: the manifest directory, which is what names the objects to remove",
 			ErrIncomplete)
@@ -274,38 +273,35 @@ func Remove(ctx context.Context, dyn dynamic.Interface, o Options) error {
 	}
 	var problems []error
 	for _, wantKind := range []string{"ExternalSecret", "ClusterSecretStore", "SecretStore"} {
-		for i := range objs {
-			u := &objs[i]
-			if u.GetKind() != wantKind {
+		for _, u := range objs {
+			if kindOf(u) != wantKind {
 				continue
 			}
-			gvr, ok := externalSecretsResources[u.GetKind()]
+			gvr, ok := externalSecretsResources[kindOf(u)]
 			if !ok {
 				problems = append(problems, fmt.Errorf(
 					"eso: %s %s is not a kind this installer writes, so it is not one it may remove",
-					u.GetKind(), u.GetName()))
+					kindOf(u), nameOf(u)))
 				continue
 			}
-			var del error
-			if u.GetKind() == "ExternalSecret" {
-				del = dyn.Resource(gvr).Namespace(o.Namespace).Delete(ctx, u.GetName(), metav1.DeleteOptions{})
-			} else {
-				del = dyn.Resource(gvr).Delete(ctx, u.GetName(), metav1.DeleteOptions{})
+			r := c.Resource(gvr)
+			if kindOf(u) == "ExternalSecret" {
+				r = r.In(o.Namespace)
 			}
-			if err := del; err != nil && !apierrors.IsNotFound(err) {
+			if err := r.Delete(ctx, nameOf(u), metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
 				problems = append(problems, fmt.Errorf("eso: removing the %s %s: %w -- an object this "+
 					"installer can no longer stand behind is one a reader keeps taking at face value, "+
 					"and a store whose vault address nothing answers reads as a broken ExternalSecret "+
-					"rather than as an address nothing binds", u.GetKind(), u.GetName(), err))
+					"rather than as an address nothing binds", kindOf(u), nameOf(u), err))
 			}
-			if u.GetKind() == "ExternalSecret" {
-				if err := releaseExternalSecret(ctx, dyn, o, u.GetName()); err != nil {
+			if kindOf(u) == "ExternalSecret" {
+				if err := releaseExternalSecret(ctx, c, o, nameOf(u)); err != nil {
 					problems = append(problems, err)
 				}
 			}
 		}
 	}
-	if err := dyn.Resource(secretResource).Namespace(o.Namespace).
+	if err := c.Resource(secretResource).In(o.Namespace).
 		Delete(ctx, ClientSecretName, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
 		problems = append(problems, fmt.Errorf("eso: removing the client certificate Secret %s/%s: %w",
 			o.Namespace, ClientSecretName, err))
@@ -313,9 +309,9 @@ func Remove(ctx context.Context, dyn dynamic.Interface, o Options) error {
 	return errors.Join(problems...)
 }
 
-func releaseExternalSecret(ctx context.Context, dyn dynamic.Interface, o Options, name string) error {
-	gvr := externalSecretsResources["ExternalSecret"]
-	live, err := dyn.Resource(gvr).Namespace(o.Namespace).Get(ctx, name, metav1.GetOptions{})
+func releaseExternalSecret(ctx context.Context, c *kube.Client, o Options, name string) error {
+	r := c.Resource(externalSecretsResources["ExternalSecret"]).In(o.Namespace)
+	live, err := kube.Get[metav1.PartialObjectMetadata](ctx, r, name)
 	if apierrors.IsNotFound(err) {
 		return nil
 	}
@@ -340,7 +336,7 @@ func releaseExternalSecret(ctx context.Context, dyn dynamic.Interface, o Options
 		return fmt.Errorf("eso: encoding the finalizers kept on %s/%s: %w", o.Namespace, name, err)
 	}
 	body := []byte(`{"metadata":{"finalizers":` + string(finalizers) + `}}`)
-	if _, err := dyn.Resource(gvr).Namespace(o.Namespace).Patch(ctx, name, types.MergePatchType,
+	if _, err := kube.Patch[kube.Doc](ctx, r, name, types.MergePatchType,
 		body, metav1.PatchOptions{}); err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("eso: releasing the External Secrets controller's finalizer on %s/%s, which "+
 			"is what lets the object go: the controller removes it after cleaning up the Secret it "+
@@ -351,7 +347,7 @@ func releaseExternalSecret(ctx context.Context, dyn dynamic.Interface, o Options
 	return nil
 }
 
-func clientSecretBody(o Options) ([]byte, error) {
+func applyClientSecret(ctx context.Context, c *kube.Client, o Options) error {
 	secret := &corev1.Secret{
 		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
 		Type:     corev1.SecretTypeTLS,
@@ -365,35 +361,21 @@ func clientSecretBody(o Options) ([]byte, error) {
 			CAKey:   o.ServerCAPEM,
 		},
 	}
-	body, err := json.Marshal(secret)
-	if err != nil {
-		return nil, fmt.Errorf("eso: marshalling the client certificate Secret: %w", err)
-	}
-	return body, nil
-}
-
-func applyClientSecret(ctx context.Context, dyn dynamic.Interface, o Options) error {
-	body, err := clientSecretBody(o)
-	if err != nil {
-		return err
-	}
-	if _, err := dyn.Resource(secretResource).Namespace(o.Namespace).Patch(
-		ctx, ClientSecretName, types.ApplyPatchType, body,
-		metav1.PatchOptions{FieldManager: FieldManager, Force: new(true)},
-	); err != nil {
+	if _, err := kube.Apply[kube.Doc](ctx, c.Resource(secretResource).In(o.Namespace), secret,
+		kube.ApplyOptions{FieldManager: FieldManager, Force: true}); err != nil {
 		return fmt.Errorf("eso: applying the client certificate Secret %s/%s: %w", o.Namespace, ClientSecretName, err)
 	}
 	return nil
 }
 
-func CurrentClientCertificate(ctx context.Context, dyn dynamic.Interface, namespace string) (certPEM, keyPEM []byte, found bool, err error) {
+func CurrentClientCertificate(ctx context.Context, c *kube.Client, namespace string) (certPEM, keyPEM []byte, found bool, err error) {
 	if namespace == "" {
 		return nil, nil, false, fmt.Errorf("%w: it names no tenant namespace to read the client certificate Secret from", ErrIncomplete)
 	}
-	if dyn == nil {
+	if c == nil {
 		return nil, nil, false, errors.New("eso: no dynamic client to read the client certificate Secret")
 	}
-	secret, err := dyn.Resource(secretResource).Namespace(namespace).Get(ctx, ClientSecretName, metav1.GetOptions{})
+	secret, err := kube.Get[kube.Doc](ctx, c.Resource(secretResource).In(namespace), ClientSecretName)
 	if apierrors.IsNotFound(err) {
 		return nil, nil, false, nil
 	}
@@ -401,8 +383,8 @@ func CurrentClientCertificate(ctx context.Context, dyn dynamic.Interface, namesp
 		return nil, nil, false, fmt.Errorf("eso: reading the client certificate Secret %s/%s: %w",
 			namespace, ClientSecretName, err)
 	}
-	certB64, _, _ := unstructured.NestedString(secret.Object, "data", CertKey)
-	keyB64, _, _ := unstructured.NestedString(secret.Object, "data", KeyKey)
+	certB64 := docString(*secret, "data", CertKey)
+	keyB64 := docString(*secret, "data", KeyKey)
 	if certB64 == "" || keyB64 == "" {
 		return nil, nil, true, nil
 	}
@@ -411,19 +393,83 @@ func CurrentClientCertificate(ctx context.Context, dyn dynamic.Interface, namesp
 	return certPEM, keyPEM, true, nil
 }
 
-func applyObject(ctx context.Context, ri dynamic.ResourceInterface, u *unstructured.Unstructured) error {
-	body, err := json.Marshal(u.Object)
-	if err != nil {
-		return fmt.Errorf("eso: marshalling the %s %s: %w", u.GetKind(), u.GetName(), err)
-	}
-	if _, err := ri.Patch(
-		ctx, u.GetName(), types.ApplyPatchType, body,
-		metav1.PatchOptions{FieldManager: FieldManager, Force: new(true)},
-	); err != nil {
-		return fmt.Errorf("eso: applying the %s %s: %w", u.GetKind(), u.GetName(), err)
+func applyObject(ctx context.Context, r kube.Resource, u kube.Doc) error {
+	if _, err := kube.Apply[kube.Doc](ctx, r, u, kube.ApplyOptions{FieldManager: FieldManager, Force: true}); err != nil {
+		return fmt.Errorf("eso: applying the %s %s: %w", kindOf(u), nameOf(u), err)
 	}
 	return nil
 }
+
+func field(d kube.Doc, fields ...string) (any, bool, error) {
+	var val any = map[string]any(d)
+	for i, f := range fields {
+		if val == nil {
+			return nil, false, nil
+		}
+		m, ok := val.(map[string]any)
+		if !ok {
+			return nil, false, fmt.Errorf("%v accessor error: %v is of the type %T, expected map[string]interface{}",
+				"."+strings.Join(fields[:i+1], "."), val, val)
+		}
+		if val, ok = m[f]; !ok {
+			return nil, false, nil
+		}
+	}
+	return val, true, nil
+}
+
+func docString(d kube.Doc, fields ...string) string {
+	v, _, _ := field(d, fields...)
+	s, _ := v.(string)
+	return s
+}
+
+func docSlice(d kube.Doc, fields ...string) ([]any, bool, error) {
+	v, found, err := field(d, fields...)
+	if !found || err != nil {
+		return nil, found, err
+	}
+	s, ok := v.([]any)
+	if !ok {
+		return nil, false, fmt.Errorf("%v accessor error: %v is of the type %T, expected []interface{}",
+			"."+strings.Join(fields, "."), v, v)
+	}
+	return s, true, nil
+}
+
+func setField(d kube.Doc, value any, fields ...string) error {
+	m := map[string]any(d)
+	for i, f := range fields[:len(fields)-1] {
+		v, ok := m[f]
+		if !ok {
+			next := map[string]any{}
+			m[f] = next
+			m = next
+			continue
+		}
+		if m, ok = v.(map[string]any); !ok {
+			return fmt.Errorf("value cannot be set because %v is not a map[string]interface{}", "."+strings.Join(fields[:i+1], "."))
+		}
+	}
+	m[fields[len(fields)-1]] = value
+	return nil
+}
+
+func setNamespace(d kube.Doc, namespace string) {
+	if namespace == "" {
+		if meta, ok := d["metadata"].(map[string]any); ok {
+			delete(meta, "namespace")
+		}
+		return
+	}
+	_ = setField(d, namespace, "metadata", "namespace")
+}
+
+func kindOf(d kube.Doc) string { return docString(d, "kind") }
+
+func nameOf(d kube.Doc) string { return docString(d, "metadata", "name") }
+
+func namespaceOf(d kube.Doc) string { return docString(d, "metadata", "namespace") }
 
 //go:fix inline
 func ptr[T any](v T) *T { return new(v) }

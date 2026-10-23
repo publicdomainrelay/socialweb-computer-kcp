@@ -9,16 +9,12 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/sshgateway"
-	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
 )
 
@@ -54,7 +50,7 @@ func InstanceID(name string) string {
 }
 
 type Kcp struct {
-	dyn dynamic.Interface
+	dyn *kube.Client
 }
 
 func OpenKcp(kubeconfig string) (*Kcp, error) {
@@ -64,7 +60,7 @@ func OpenKcp(kubeconfig string) (*Kcp, error) {
 	}
 	root := rest.CopyConfig(cfg)
 	root.Host = strings.TrimSuffix(cfg.Host, "/") + "/clusters/" + compose.DefaultWorkspace
-	dc, err := dynamic.NewForConfig(root)
+	dc, err := kube.New(root)
 	if err != nil {
 		return nil, err
 	}
@@ -72,40 +68,19 @@ func OpenKcp(kubeconfig string) (*Kcp, error) {
 }
 
 func (k *Kcp) ApplyRoot(ctx context.Context, spec v1alpha1.SshGatewaySpec) error {
-	m, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&v1alpha1.SshGateway{ObjectMeta: metav1.ObjectMeta{Name: RootName}, Spec: spec})
-	if err != nil {
-		return err
-	}
-	u := &unstructured.Unstructured{Object: m}
-	u.SetAPIVersion(v1alpha1.GroupVersion.String())
-	u.SetKind(string(v1alpha1.ApplicationKindSshGateway))
-	unstructured.RemoveNestedField(u.Object, "status")
-	unstructured.RemoveNestedField(u.Object, "metadata", "creationTimestamp")
-	body, err := u.MarshalJSON()
-	if err != nil {
-		return err
-	}
-	force := true
-	_, err = k.dyn.Resource(compose.SshGatewayGVR).Patch(ctx, RootName, types.ApplyPatchType, body,
-		metav1.PatchOptions{FieldManager: FieldManager, Force: &force})
+	obj := &v1alpha1.SshGateway{TypeMeta: metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: string(v1alpha1.ApplicationKindSshGateway)},
+		ObjectMeta: metav1.ObjectMeta{Name: RootName}, Spec: spec}
+	_, err := kube.Apply[kube.Doc](ctx, k.dyn.Resource(compose.SshGatewayGVR), obj, kube.ApplyOptions{FieldManager: FieldManager, Force: true})
 	return err
 }
 
 func (k *Kcp) Root(ctx context.Context) (*v1alpha1.SshGateway, error) {
-	u, err := k.dyn.Resource(compose.SshGatewayGVR).Get(ctx, RootName, metav1.GetOptions{})
-	if err != nil {
-		return nil, err
-	}
-	var o v1alpha1.SshGateway
-	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &o); err != nil {
-		return nil, err
-	}
-	return &o, nil
+	return kube.Get[v1alpha1.SshGateway](ctx, k.dyn.Resource(compose.SshGatewayGVR), RootName)
 }
 
 func (k *Kcp) WaitReady(ctx context.Context, timeout time.Duration, progress func(v1alpha1.ApplicationStatus)) (*v1alpha1.SshGateway, error) {
 	last := ""
-	o, err := ctlruntime.AwaitAs(ctx, k.dyn.Resource(compose.SshGatewayGVR), RootName, timeout, func(o *v1alpha1.SshGateway) (bool, error) {
+	o, err := kube.Await(ctx, k.dyn.Resource(compose.SshGatewayGVR), RootName, timeout, func(o *v1alpha1.SshGateway) (bool, error) {
 		if o == nil {
 			return false, nil
 		}
@@ -116,7 +91,7 @@ func (k *Kcp) WaitReady(ctx context.Context, timeout time.Duration, progress fun
 		return o.Status.Phase == v1alpha1.ApplicationPhaseReady || o.Status.Phase == v1alpha1.ApplicationPhaseFailed, nil
 	})
 	switch {
-	case errors.Is(err, ctlruntime.ErrAwaitTimeout):
+	case errors.Is(err, kube.ErrAwaitTimeout):
 		return o, fmt.Errorf("gatewayssh: the SshGateway was not Ready within %s", timeout)
 	case err != nil:
 		return o, err

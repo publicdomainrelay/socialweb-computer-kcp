@@ -13,7 +13,6 @@ import (
 	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kruntime "k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -24,6 +23,7 @@ import (
 	mcmanager "sigs.k8s.io/multicluster-runtime/pkg/manager"
 	"sigs.k8s.io/multicluster-runtime/providers/multi"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/api/kcpgvr"
 	"github.com/kcp-dev/multicluster-provider/apiexport"
 	apisv1alpha1 "github.com/kcp-dev/sdk/apis/apis/v1alpha1"
 )
@@ -37,8 +37,6 @@ const (
 
 	pathAnnotation = "kcp.io/path"
 )
-
-var logicalClusterGVR = schema.GroupVersionResource{Group: "core.kcp.io", Version: "v1alpha1", Resource: "logicalclusters"}
 
 type Config struct {
 	Rest *rest.Config
@@ -200,7 +198,7 @@ func (m *Manager) path(ctx context.Context, cluster string) string {
 	if err != nil {
 		return cluster
 	}
-	lc, err := dyn.Resource(logicalClusterGVR).Get(ctx, "cluster", metav1.GetOptions{})
+	lc, err := dyn.Resource(kcpgvr.LogicalClusters).Get(ctx, "cluster", metav1.GetOptions{})
 	if err != nil {
 		return cluster
 	}

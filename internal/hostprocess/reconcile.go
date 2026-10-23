@@ -85,7 +85,7 @@ func UnitSpec(o v1alpha1.HostProcess, exec string) (hostsvc.UnitSpec, error) {
 		return hostsvc.UnitSpec{}, fmt.Errorf("hostprocess %s: neither an exec path nor a resolvable asset", o.Name)
 	}
 	desc := "HostProcess " + o.Name
-	if d := o.Annotations[AnnotationDescription]; d != "" {
+	if d := s.Description; d != "" {
 		desc = d
 	}
 	spec := hostsvc.UnitSpec{Name: s.Unit, Description: desc, Exec: append([]string{exec}, s.Argv...),

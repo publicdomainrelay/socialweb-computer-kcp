@@ -12,7 +12,6 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	contractvault "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/vault"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 )
 
 const (
@@ -26,12 +25,8 @@ const (
 func NetworkStateDir(instanceState string) string { return filepath.Join(instanceState, NetworkDir) }
 
 func (ctl *Controller) vaultReady(ctx context.Context, ws string) error {
-	u, err := ctl.c.Get(ctx, ws, compose.OpenBaoServerGVR, NetworkVaultServer)
+	o, err := compose.Get[v1alpha1.OpenBaoServer](ctx, ctl.c, ws, compose.OpenBaoServerGVR, NetworkVaultServer)
 	if err != nil {
-		return err
-	}
-	var o v1alpha1.OpenBaoServer
-	if err := unstruct.Into(u, &o); err != nil {
 		return err
 	}
 	st := o.Status

@@ -15,14 +15,18 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 
+	tenancyv1alpha1 "github.com/kcp-dev/sdk/apis/tenancy/v1alpha1"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/api/kcpgvr"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kcpapply"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/manifests"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/diskusage"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostprocess"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpapply"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 )
 
 const (
@@ -41,7 +45,7 @@ const (
 	QuotaNamespace = "default"
 )
 
-var ResourceQuotaGVR = schema.GroupVersionResource{Version: "v1", Resource: "resourcequotas"}
+var ResourceQuotaGVR = kcpgvr.ResourceQuotas
 
 var QuotaDefaults = struct {
 	Bids, ComputeVMs, ComputeContracts, NodeClaims, PolicyWorkflowRuns, Components int64
@@ -153,14 +157,14 @@ var adoptKinds = []adoptKind{
 	{"Workspace", WorkspaceGVR},
 }
 
-func adoptable(rootKind, kind string, u *unstructured.Unstructured, owner string) bool {
-	if len(u.GetOwnerReferences()) > 0 || u.GetDeletionTimestamp() != nil {
+func adoptable(rootKind, kind string, u *Generic, owner string) bool {
+	if len(u.OwnerReferences) > 0 || u.DeletionTimestamp != nil {
 		return false
 	}
-	if kind == KindHostProcess && strings.HasPrefix(u.GetName(), hostprocess.MirrorPrefix) {
+	if kind == KindHostProcess && strings.HasPrefix(u.Name, hostprocess.MirrorPrefix) {
 		return false
 	}
-	if u.GetLabels()[OwnerLabel] == owner {
+	if u.Labels[OwnerLabel] == owner {
 		return true
 	}
 	switch kind {
@@ -182,27 +186,31 @@ func (c *Composer) Adopt(ctx context.Context, r Root) {
 		if err != nil {
 			continue
 		}
-		list, err := ri.List(ctx, metav1.ListOptions{})
+		items, err := kube.List[Generic](ctx, ri, metav1.ListOptions{})
 		if err != nil {
 			continue
 		}
-		for i := range list.Items {
-			u := &list.Items[i]
+		for i := range items {
+			u := &items[i]
 			if !adoptable(r.Kind, k.Kind, u, r.Owner()) {
 				continue
 			}
-			patch := &unstructured.Unstructured{Object: map[string]any{"apiVersion": u.GetAPIVersion(), "kind": u.GetKind()}}
-			patch.SetName(u.GetName())
-			patch.SetNamespace(u.GetNamespace())
-			patch.SetUID(u.GetUID())
-			patch.SetOwnerReferences([]metav1.OwnerReference{r.OwnerRef()})
+			patch := NewDoc(u.APIVersion, u.Kind, u.Name)
+			meta := DocMeta(patch)
+			if u.Namespace != "" {
+				meta["namespace"] = u.Namespace
+			}
+			if u.UID != "" {
+				meta["uid"] = string(u.UID)
+			}
+			meta["ownerReferences"] = []metav1.OwnerReference{r.OwnerRef()}
 			if err := c.applyAs(ctx, r, r.AdoptManager(), r.Workspace, k.GVR, patch); err != nil {
 				if !apierrors.IsNotFound(err) && !apierrors.IsConflict(err) {
-					c.log.Warn("adopting an intent object under its root", "root", r.Owner(), "kind", k.Kind, "name", u.GetName(), "err", err.Error())
+					c.log.Warn("adopting an intent object under its root", "root", r.Owner(), "kind", k.Kind, "name", u.Name, "err", err.Error())
 				}
 				continue
 			}
-			c.log.Info("an intent object hangs from its root", "root", r.Owner(), "kind", k.Kind, "name", u.GetName())
+			c.log.Info("an intent object hangs from its root", "root", r.Owner(), "kind", k.Kind, "name", u.Name)
 		}
 	}
 }
@@ -323,7 +331,7 @@ func (c *Composer) applyQuota(ctx context.Context, r Root, ws string, hard map[s
 		return err
 	}
 	if len(hard) == 0 {
-		if err := ri.Namespace(QuotaNamespace).Delete(ctx, QuotaName, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+		if err := ri.In(QuotaNamespace).Delete(ctx, QuotaName, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
 			return err
 		}
 		return nil
@@ -332,11 +340,12 @@ func (c *Composer) applyQuota(ctx context.Context, r Root, ws string, hard map[s
 	for k, v := range hard {
 		hardAny[k] = v
 	}
-	u := &unstructured.Unstructured{Object: map[string]any{"apiVersion": "v1", "kind": "ResourceQuota", "spec": map[string]any{"hard": hardAny}}}
-	u.SetName(QuotaName)
-	u.SetNamespace(QuotaNamespace)
+	u := NewDoc("v1", "ResourceQuota", QuotaName)
+	u["spec"] = map[string]any{"hard": hardAny}
+	meta := DocMeta(u)
+	meta["namespace"] = QuotaNamespace
 	if ws == r.Workspace {
-		u.SetOwnerReferences([]metav1.OwnerReference{r.OwnerRef()})
+		meta["ownerReferences"] = []metav1.OwnerReference{r.OwnerRef()}
 	}
 	return c.applyAs(ctx, r, r.Manager(), ws, ResourceQuotaGVR, u)
 }
@@ -421,20 +430,20 @@ func (c *Composer) countObjects(ctx context.Context, ws string, res schema.Group
 	if err != nil {
 		return 0, false
 	}
-	list, err := ri.List(ctx, metav1.ListOptions{Limit: 1})
+	items, meta, err := kube.ListPage[metav1.PartialObjectMetadata](ctx, ri, metav1.ListOptions{Limit: 1})
 	if err != nil {
 		return 0, false
 	}
-	n := int64(len(list.Items))
-	if rem := list.GetRemainingItemCount(); rem != nil {
+	n := int64(len(items))
+	if rem := meta.RemainingItemCount; rem != nil {
 		return n + *rem, true
 	}
-	if list.GetContinue() != "" {
-		all, err := ri.List(ctx, metav1.ListOptions{})
+	if meta.Continue != "" {
+		all, err := kube.List[metav1.PartialObjectMetadata](ctx, ri, metav1.ListOptions{})
 		if err != nil {
 			return 0, false
 		}
-		return int64(len(all.Items)), true
+		return int64(len(all)), true
 	}
 	return n, true
 }
@@ -501,31 +510,31 @@ func (c *Composer) gcWorkspaces(ctx context.Context) []string {
 	if err != nil {
 		return out
 	}
-	list, err := ri.List(ctx, metav1.ListOptions{})
+	list, err := kube.List[tenancyv1alpha1.Workspace](ctx, ri, metav1.ListOptions{})
 	if err != nil {
 		return out
 	}
-	for _, w := range list.Items {
-		name := w.GetName()
-		if _, app := w.GetLabels()[AppWorkspaceLabel]; app || name == providerWS || w.GetDeletionTimestamp() != nil {
+	for _, w := range list {
+		name := w.Name
+		if _, app := w.Labels[AppWorkspaceLabel]; app || name == providerWS || w.DeletionTimestamp != nil {
 			continue
 		}
-		if phase, _, _ := unstructured.NestedString(w.Object, "status", "phase"); phase != "Ready" {
+		if w.Status.Phase != "Ready" {
 			continue
 		}
 		out = append(out, root+":"+name)
-		if typeName, _, _ := unstructured.NestedString(w.Object, "spec", "type", "name"); typeName == accountWorkspace && len(out) < GCWorkspaceCap {
+		if w.Spec.Type != nil && w.Spec.Type.Name == accountWorkspace && len(out) < GCWorkspaceCap {
 			sub, err := c.Client(root+":"+name, WorkspaceGVR)
 			if err != nil {
 				continue
 			}
-			homes, err := sub.List(ctx, metav1.ListOptions{})
+			homes, err := kube.List[metav1.PartialObjectMetadata](ctx, sub, metav1.ListOptions{})
 			if err != nil {
 				continue
 			}
-			for _, h := range homes.Items {
-				if h.GetDeletionTimestamp() == nil && len(out) < GCWorkspaceCap {
-					out = append(out, root+":"+name+":"+h.GetName())
+			for _, h := range homes {
+				if h.DeletionTimestamp == nil && len(out) < GCWorkspaceCap {
+					out = append(out, root+":"+name+":"+h.Name)
 				}
 			}
 		}
@@ -533,19 +542,19 @@ func (c *Composer) gcWorkspaces(ctx context.Context) []string {
 	return out
 }
 
-func specField(u *unstructured.Unstructured, field string) bool {
-	_, found, err := unstructured.NestedFieldNoCopy(u.Object, "spec", field)
-	return found && err == nil
+func specField(u *Generic, field string) bool {
+	_, found := u.Spec[field]
+	return found
 }
 
-func ownedByLink(u *unstructured.Unstructured) bool {
-	if len(u.GetOwnerReferences()) > 0 {
+func ownedByLink(u *Generic) bool {
+	if len(u.OwnerReferences) > 0 {
 		return true
 	}
 	if specField(u, "ttlSecondsAfterFinished") || specField(u, "nodeClaimRef") {
 		return true
 	}
-	labels := u.GetLabels()
+	labels := u.Labels
 	if _, ok := labels[ClusterLabel]; ok {
 		return true
 	}
@@ -578,20 +587,20 @@ func (c *Composer) scanGC(ctx context.Context) *v1alpha1.GCStatus {
 			if err != nil {
 				continue
 			}
-			list, err := ri.List(ctx, metav1.ListOptions{})
+			items, err := kube.List[Generic](ctx, ri, metav1.ListOptions{})
 			if err != nil {
 				if ctx.Err() != nil {
 					return nil
 				}
 				continue
 			}
-			for i := range list.Items {
-				u := &list.Items[i]
+			for i := range items {
+				u := &items[i]
 				total++
-				ref := ws + "/" + u.GetName()
-				if dt := u.GetDeletionTimestamp(); dt != nil {
+				ref := ws + "/" + u.Name
+				if dt := u.DeletionTimestamp; dt != nil {
 					if time.Since(dt.Time) > GCStuckAfter {
-						for _, f := range u.GetFinalizers() {
+						for _, f := range u.Finalizers {
 							key := k.Kind + "|" + f
 							s := stuck[key]
 							if s == nil {
@@ -605,7 +614,7 @@ func (c *Composer) scanGC(ctx context.Context) *v1alpha1.GCStatus {
 					}
 					continue
 				}
-				if (k.Kind == KindHostProcess && strings.HasPrefix(u.GetName(), hostprocess.MirrorPrefix)) || ownedByLink(u) {
+				if (k.Kind == KindHostProcess && strings.HasPrefix(u.Name, hostprocess.MirrorPrefix)) || ownedByLink(u) {
 					continue
 				}
 				cnt := orphans[k.Kind]
@@ -688,26 +697,26 @@ func (c *Composer) ReleaseRecords(ctx context.Context, recordsWs string, pdsUp b
 	if err != nil {
 		return 0, err
 	}
-	list, err := ri.List(ctx, metav1.ListOptions{})
-	if apierrors.IsNotFound(err) || (err == nil && len(list.Items) == 0) {
+	items, err := kube.List[metav1.PartialObjectMetadata](ctx, ri, metav1.ListOptions{})
+	if apierrors.IsNotFound(err) || (err == nil && len(items) == 0) {
 		return 0, nil
 	}
 	if err != nil {
 		return 0, err
 	}
-	for i := range list.Items {
-		o := &list.Items[i]
+	for i := range items {
+		o := &items[i]
 		switch {
-		case o.GetDeletionTimestamp() == nil:
-			err = ri.Delete(ctx, o.GetName(), metav1.DeleteOptions{})
+		case o.DeletionTimestamp == nil:
+			err = ri.Delete(ctx, o.Name, metav1.DeleteOptions{})
 		case !pdsUp:
-			_, err = ri.Patch(ctx, o.GetName(), "application/merge-patch+json", []byte(`{"metadata":{"finalizers":null}}`), metav1.PatchOptions{})
+			_, err = kube.Patch[metav1.PartialObjectMetadata](ctx, ri, o.Name, types.MergePatchType, []byte(`{"metadata":{"finalizers":null}}`), metav1.PatchOptions{})
 		}
 		if err != nil && !apierrors.IsNotFound(err) {
-			return len(list.Items), err
+			return len(items), err
 		}
 	}
-	return len(list.Items), nil
+	return len(items), nil
 }
 
 func Stamp(parts ...string) string {

@@ -6,16 +6,16 @@ import (
 	"strconv"
 	"strings"
 
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	eventsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/events/v1alpha1"
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/api/kcpgvr"
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	policyv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/policy/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 )
 
 const (
@@ -106,8 +106,8 @@ var (
 	AtprotoRecordGVR   = v1alpha1.AtprotoRecordGVR
 	RecordWatchGVR     = v1alpha1.AtprotoRecordWatchGVR
 	RemotePDSGVR       = pdsv1alpha1.RemotePDSGVR
-	WorkspaceGVR       = schema.GroupVersionResource{Group: "tenancy.kcp.io", Version: "v1alpha1", Resource: "workspaces"}
-	EventGVR           = schema.GroupVersionResource{Version: "v1", Resource: "events"}
+	WorkspaceGVR       = kcpgvr.Workspaces
+	EventGVR           = kcpgvr.Events
 )
 
 type ComponentType struct {
@@ -232,11 +232,11 @@ func (v ComponentView) Listeners() []v1alpha1.ApplicationListener {
 	return out
 }
 
-func exposureViewOf(v ComponentView, kind string, m map[string]any) (ComponentView, error) {
+func exposureViewOf(v ComponentView, kind string, m kube.Doc) (ComponentView, error) {
 	switch kind {
 	case ComponentKindService:
-		var st exposurev1alpha1.ServiceStatus
-		if err := unstruct.Into(&unstructured.Unstructured{Object: m}, &st); err != nil {
+		st, err := kube.Decode[exposurev1alpha1.ServiceStatus](m)
+		if err != nil {
 			return v, err
 		}
 		v.Status.Phase = v1alpha1.ComponentPhase(st.Phase)
@@ -245,8 +245,8 @@ func exposureViewOf(v ComponentView, kind string, m map[string]any) (ComponentVi
 			v.Status.Endpoints = append(v.Status.Endpoints, v1alpha1.Endpoint{Name: "endpoint-" + strconv.Itoa(i), URL: endpoint})
 		}
 	case ComponentKindExposure:
-		var st exposurev1alpha1.ExposureStatus
-		if err := unstruct.Into(&unstructured.Unstructured{Object: m}, &st); err != nil {
+		st, err := kube.Decode[exposurev1alpha1.ExposureStatus](m)
+		if err != nil {
 			return v, err
 		}
 		v.Status.Phase = v1alpha1.ComponentPhase(st.Phase)
@@ -259,21 +259,20 @@ func exposureViewOf(v ComponentView, kind string, m map[string]any) (ComponentVi
 	return v, nil
 }
 
-func ComponentViewOf(ws, kind string, u *unstructured.Unstructured) (ComponentView, error) {
-	v := ComponentView{Kind: kind, Name: u.GetName(), Workspace: ws, Generation: u.GetGeneration()}
-	m, ok, err := unstructured.NestedMap(u.Object, "status")
-	if err != nil {
-		return v, err
-	}
-	if !ok || len(m) == 0 {
+func ComponentViewOf(ws, kind string, o *Generic) (ComponentView, error) {
+	v := ComponentView{Kind: kind, Name: o.Name, Workspace: ws, Generation: o.Generation}
+	m := o.Status
+	if len(m) == 0 {
 		return v, nil
 	}
 	if IsExposureKind(kind) {
 		return exposureViewOf(v, kind, m)
 	}
-	if err := unstruct.Into(&unstructured.Unstructured{Object: m}, &v.Status); err != nil {
+	st, err := kube.Decode[v1alpha1.ComponentStatus](m)
+	if err != nil {
 		return v, err
 	}
+	v.Status = *st
 	return v, nil
 }
 
