@@ -159,7 +159,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 
 	if err := s.setup(runCtx); err != nil {
 		cancel()
-		s.shutdown(context.Background())
+		s.shutdown(ctx)
 		s.mu.Lock()
 		s.started = false
 		s.mu.Unlock()
@@ -181,7 +181,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	}
 	handlers := s.cfg.Deps.Handlers
 	if handlers == nil {
-		s.shutdown(context.Background())
+		s.shutdown(ctx)
 		s.mu.Lock()
 		s.started = false
 		s.mu.Unlock()
@@ -192,7 +192,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	httpURL := "http://" + host
 	sshURL := "ssh://" + host
 	if err := handlers.RegisterHTTP(key, s.handler()); err != nil {
-		s.shutdown(context.Background())
+		s.shutdown(ctx)
 		s.mu.Lock()
 		s.started = false
 		s.mu.Unlock()
@@ -204,7 +204,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	}
 	if err := handlers.RegisterStream(key, stream, "ssh"); err != nil {
 		handlers.Remove(key)
-		s.shutdown(context.Background())
+		s.shutdown(ctx)
 		s.mu.Lock()
 		s.started = false
 		s.mu.Unlock()
@@ -220,7 +220,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	s.log.Info("sshserver_registered", "http", host, "ssh", host)
 
 	<-runCtx.Done()
-	s.shutdown(context.Background())
+	s.shutdown(ctx)
 	close(s.done)
 	return nil
 }
@@ -536,7 +536,7 @@ func (s *Service) shutdown(ctx context.Context) {
 	s.stopped = true
 	sshServer := s.sshServer
 	s.mu.Unlock()
-	stopCtx, cancel := context.WithTimeout(ctx, s.cfg.ShutdownTimeout)
+	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.cfg.ShutdownTimeout)
 	defer cancel()
 	if sshServer != nil {
 		if err := sshServer.Shutdown(stopCtx); err != nil {
