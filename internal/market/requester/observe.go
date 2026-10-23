@@ -115,8 +115,9 @@ func (q *Requester) reconcileContract(ctx context.Context, contract v1alpha1.Com
 		q.markFinished(contract.Name)
 		return
 	}
-	hasReceipt := contract.Status.Contract != nil && contract.Status.Contract.Receipt != nil
-	if !hasReceipt && (contract.Spec.Release || contract.DeletionTimestamp != nil) {
+	state := contract.Status.Contract
+	held := state != nil && (state.Receipt != nil || (state.Accept != nil && state.Accept.URI != "" && winnerDID(state) != ""))
+	if !held && (contract.Spec.Release || contract.DeletionTimestamp != nil) {
 		if contract.DeletionTimestamp == nil {
 			status := contract.Status
 			status.Phase = v1alpha1.ComputeContractReleased
