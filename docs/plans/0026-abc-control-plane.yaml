@@ -506,7 +506,7 @@ items:
     track: runtime
     parallel_with: []
     depends_on: [W0-CODEGEN, W0-BUS]
-    status: doing
+    status: done
     decision: >
       Add sigs.k8s.io/multicluster-runtime and
       github.com/kcp-dev/multicluster-provider (apiexport provider), pinned.

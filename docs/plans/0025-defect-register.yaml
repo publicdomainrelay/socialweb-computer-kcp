@@ -226,3 +226,10 @@ items:
       materialiser.shut() (internal/materialiser/materialiser.go:595-602) counts
       502 as shut while the tenant apiserver is up. The revoker's mount calls
       (internal/kcpclient/kcpclient.go:794, 814) fail.
+  - id: D26-LEASE-MIRROR-ROOT-APP
+    title: "The lease mirror looks for a root:app workspace that does not exist"
+    status: todo
+    defect: >
+      In a market network on kcp main the lease mirror keeps failing with
+      'workspaces.tenancy.kcp.io "root:app" not found'. Seen in the plan
+      0026 W0-RUNTIME rerun (instance w0rt2).
