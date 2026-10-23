@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 
@@ -269,8 +270,25 @@ func (ctl *Controller) deleteAssociationObjects(ctx context.Context, ws string) 
 		}
 		if err := ri.Delete(ctx, AssociationWatch, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
 			ctl.c.log().Warn("removing an association object", "resource", gvr.Resource, "err", err.Error())
+			continue
+		}
+		obj, err := ri.Get(ctx, AssociationWatch, metav1.GetOptions{})
+		if err != nil || len(obj.GetFinalizers()) == 0 {
+			continue
+		}
+		obj.SetFinalizers(nil)
+		if _, err := ri.Update(ctx, obj, metav1.UpdateOptions{FieldManager: FieldManager}); err != nil && !apierrors.IsNotFound(err) {
+			ctl.c.log().Warn("dropping an association finalizer", "resource", gvr.Resource, "err", err.Error())
 		}
 	}
+}
+
+func pdsServiceDID(raw string) string {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Host == "" {
+		return ""
+	}
+	return "did:web:" + strings.ReplaceAll(strings.ToLower(parsed.Host), ":", "%3A")
 }
 
 func firstNonEmptyString(values ...string) string {
@@ -293,8 +311,27 @@ func (ctl *Controller) ensureRemotePDS(ctx context.Context, ws, name, did, pdsUR
 	existing, err := ri.Get(ctx, name, metav1.GetOptions{})
 	if err == nil {
 		var out pdsv1alpha1.RemotePDS
-		if fromUnstructured(existing, &out) == nil {
+		if fromUnstructured(existing, &out) != nil {
+			return nil
+		}
+		if strings.TrimRight(out.Spec.URL, "/") == strings.TrimRight(pdsURL, "/") && out.Spec.DID == did {
 			return &out
+		}
+		out.Spec.URL, out.Spec.DID = pdsURL, did
+		u, err := toUnstructured(&out, "RemotePDS")
+		if err != nil {
+			return nil
+		}
+		u.SetAPIVersion(pdsv1alpha1.GroupVersion.String())
+		u.SetResourceVersion(existing.GetResourceVersion())
+		updated, err := ri.Update(ctx, u, metav1.UpdateOptions{FieldManager: FieldManager})
+		if err != nil {
+			ctl.c.log().Warn("updating a RemotePDS", "name", name, "err", err.Error())
+			return nil
+		}
+		var result pdsv1alpha1.RemotePDS
+		if fromUnstructured(updated, &result) == nil {
+			return &result
 		}
 		return nil
 	}
@@ -328,7 +365,7 @@ func (ctl *Controller) ensureAccountRepo(ctx context.Context, ws, identityName s
 	}
 	pdsURL = firstNonEmptyString(plan.PdsURL, plan.Identity.PdsUrl, pdsURL)
 	if plan.RemotePDS == nil && strings.TrimSpace(pdsURL) != "" {
-		plan.RemotePDS = ctl.ensureRemotePDS(ctx, ws, deterministicPdsName(pdsURL), did, pdsURL)
+		plan.RemotePDS = ctl.ensureRemotePDS(ctx, ws, deterministicPdsName(pdsURL), pdsServiceDID(pdsURL), pdsURL)
 	}
 	plan.PdsURL = pdsURL
 	pdsRef := plan.repoRef()
