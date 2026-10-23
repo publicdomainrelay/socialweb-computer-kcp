@@ -2140,6 +2140,11 @@ func (in *ComputeContractSpec) DeepCopyInto(out *ComputeContractSpec) {
 		*out = new(int32)
 		**out = **in
 	}
+	if in.NodeClaimRef != nil {
+		in, out := &in.NodeClaimRef, &out.NodeClaimRef
+		*out = new(commonv1alpha1.ObjectRef)
+		**out = **in
+	}
 	return
 }
 
