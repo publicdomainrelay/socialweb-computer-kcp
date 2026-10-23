@@ -178,10 +178,19 @@ func (c *ProviderController) claimOf(ctx context.Context, src ctlruntime.Request
 	if !claim.DeletionTimestamp.IsZero() {
 		c.pass.ClaimGone(ctx)
 	}
-	if name := strings.TrimSpace(claim.Spec.ClusterRef.Name); name != "" {
-		return []ctlruntime.Request{{Cluster: src.Cluster, Name: name}}
+	for _, owner := range claim.OwnerReferences {
+		if owner.Kind == "Cluster" && owner.Name != "" {
+			return []ctlruntime.Request{{Cluster: src.Cluster, Name: owner.Name}}
+		}
 	}
-	return nil
+	name := strings.TrimSpace(claim.Spec.ClusterRef.Name)
+	if name == "" {
+		return nil
+	}
+	if r, ok := c.request(name); ok {
+		return []ctlruntime.Request{r}
+	}
+	return []ctlruntime.Request{{Cluster: src.Cluster, Name: name}}
 }
 
 func (c *ProviderController) identityOf(_ context.Context, src ctlruntime.Request, _ *v1alpha1.AtprotoIdentity) []ctlruntime.Request {
