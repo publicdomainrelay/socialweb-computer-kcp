@@ -9,10 +9,15 @@ import (
 	"sync"
 	"time"
 
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+
+	kruntime "k8s.io/apimachinery/pkg/runtime"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterprovider"
+	clustercontroller "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/cluster"
+	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/materialiser"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/portallocator"
@@ -21,6 +26,8 @@ import (
 )
 
 type Deps struct {
+	Rest *rest.Config
+
 	Registry clusterprovider.Clusters
 
 	Decider *materialiser.Reconciler
@@ -42,6 +49,8 @@ type Deps struct {
 	NodeHosts *nodeHosts
 
 	Tenant func(ctx context.Context, ref clusterprovider.Ref, cl *v1alpha1.Cluster) (*rest.Config, error)
+
+	Tenants func(ctx context.Context, cluster string) (kubernetes.Interface, error)
 
 	InstallTenant func(ctx context.Context, cluster string, cfg *rest.Config) error
 
@@ -74,6 +83,7 @@ var ErrNoHost = errors.New(
 
 type Provider struct {
 	cfg      Config
+	rest     *rest.Config
 	provider *clusterprovider.Provider
 	alloc    *portallocator.Allocator
 	networks *subnetallocator.Allocator
@@ -91,16 +101,21 @@ type Provider struct {
 	links      *linkRecorder
 	linkWrites *clusterprovider.Links
 
-	homes   *kcpclient.Client
-	sweptAt time.Time
+	roller *clusterprovider.Roller
+
+	homes *kcpclient.Client
 
 	newInstance func() string
 	log         *slog.Logger
 
+	changes chan string
+
+	tenants *tenantWatch
+
+	sweeps chan struct{}
+
 	busyMu  sync.Mutex
-	busy    map[string]bool
 	deletes map[string]*deleteBackoff
-	workers sync.WaitGroup
 	bringUp chan struct{}
 }
 
@@ -239,8 +254,7 @@ func Build(cfg Config, d Deps, log *slog.Logger) (*Provider, error) {
 
 		NodeExpirySource: clusterprovider.NodeExpiryRollup,
 
-		Interval: cfg.Interval,
-		Log:      log,
+		Log: log,
 	}
 	if !cfg.ObserveOnly() {
 		opts.Tenant, opts.GrantPath = d.Tenant, cfg.GrantPath
@@ -253,6 +267,7 @@ func Build(cfg Config, d Deps, log *slog.Logger) (*Provider, error) {
 
 	p := &Provider{
 		cfg:         cfg,
+		rest:        d.Rest,
 		provider:    provider,
 		alloc:       d.Allocator,
 		networks:    d.Networks,
@@ -265,59 +280,163 @@ func Build(cfg Config, d Deps, log *slog.Logger) (*Provider, error) {
 		links:       d.Links,
 		linkWrites:  d.ClusterLinks,
 		homes:       d.Homes,
+		roller:      d.Roller,
 		newInstance: d.NewInstance,
 		log:         log,
+		changes:     make(chan string, ChangeBuffer),
+		sweeps:      make(chan struct{}, 1),
+	}
+	if d.Tenants != nil && d.NodeScale != nil {
+		p.tenants = newTenantWatch(d.Tenants, p.changed, log)
+	}
+	if d.Rest == nil {
+		return nil, errors.New("clusterprovider: Deps.Rest is required; the provider is a controller on the clusters APIExport")
 	}
 	p.report()
 	return p, nil
 }
 
+const ChangeBuffer = 256
+
 func (p *Provider) Run(ctx context.Context) error {
-	if p.cfg.ObserveOnly() {
+	mgr, err := ctlruntime.NewManager(ctlruntime.Config{Rest: p.rest, AddToScheme: []func(*kruntime.Scheme) error{v1alpha1.AddToScheme}, Log: p.log})
+	if err != nil {
+		return fmt.Errorf("clusterprovider: the controller manager: %w", err)
+	}
+	opts := clustercontroller.ProviderOptions{Pass: p, Changes: p.changes}
+	switch {
+	case p.cfg.ObserveOnly():
 		p.log.Info("cluster provider: observing only", "join", "unset: no process lifecycle is attached, so no pass may act or write")
-		return p.provider.Run(ctx)
+		p.reclaimAll(ctx)
+	case p.cfg.AllClusters():
+		if err := p.startAll(ctx); err != nil {
+			return err
+		}
+	default:
+		joined, err := p.startJoin(ctx)
+		if err != nil {
+			return err
+		}
+		opts.Keep = func(ref clusterprovider.Ref) bool { return ref.Home == joined.Home && ref.Name == joined.Name }
 	}
-	if p.cfg.AllClusters() {
-		return p.joinAll(ctx)
+	if _, err := clustercontroller.RegisterProvider(mgr, opts); err != nil {
+		return err
 	}
-	return p.join(ctx)
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	sctx, stop := context.WithCancel(ctx)
+	defer stop()
+	if p.homes != nil && !p.cfg.ObserveOnly() {
+		wg.Go(func() { p.sweeper(sctx) })
+	}
+	err = mgr.Start(ctx)
+	stop()
+	if p.tenants != nil {
+		p.tenants.stopAll()
+	}
+	if ctx.Err() != nil {
+		return nil
+	}
+	return err
 }
 
-func (p *Provider) join(ctx context.Context) error {
+func (p *Provider) changed(key string) {
+	select {
+	case p.changes <- key:
+	default:
+	}
+}
+
+func (p *Provider) Pass(ctx context.Context, ref clusterprovider.Ref, _ *v1alpha1.Cluster) (time.Duration, error) {
+	key, err := ref.Key()
+	if err != nil {
+		return 0, err
+	}
+	if p.roller != nil {
+		defer p.roller.Note(key)
+	}
+	switch {
+	case p.cfg.ObserveOnly():
+		return p.observe(ctx, ref)
+	case p.cfg.AllClusters():
+		return p.one(ctx, ref, key)
+	}
+	res, err := p.passes(ctx, ref, key)
+	return soonest(res.wake, p.scaled(ctx, key, ref.Name, res.phase)), err
+}
+
+func (p *Provider) scaled(ctx context.Context, key, name string, phase v1alpha1.ClusterPhase) time.Duration {
+	wake, failed := p.scale(ctx, key, name, true)
+	if failed && phase == v1alpha1.ClusterReady {
+		return soonest(wake, ScaleRetry)
+	}
+	return wake
+}
+
+func (p *Provider) Gone(ctx context.Context, ref clusterprovider.Ref) {
+	key, err := ref.Key()
+	if err == nil {
+		if p.tenants != nil {
+			p.tenants.stop(key)
+		}
+		p.provider.ForgetAddOns(key)
+	}
+	p.log.Info("cluster provider: the Cluster CR is gone", "cluster", ref.Name, "home", ref.Home, "key", key)
+	p.reclaimAll(ctx)
+	p.ClaimGone(ctx)
+}
+
+func (p *Provider) ClaimGone(context.Context) {
+	select {
+	case p.sweeps <- struct{}{}:
+	default:
+	}
+}
+
+func (p *Provider) observe(ctx context.Context, ref clusterprovider.Ref) (time.Duration, error) {
+	pass, err := p.provider.Reconcile(ctx, ref)
+	if err != nil {
+		p.log.Error("reconcile failed", "cluster", ref.Name, "home", ref.Home, "err", err)
+		return 0, err
+	}
+	p.log.Info("reconciled",
+		"cluster", ref.Name,
+		"home", ref.Home,
+		"did", ref.DID,
+		"running", pass.Cluster.Spec.Running,
+		"phase", pass.Result.Phase,
+		"url", pass.Result.URL,
+		"foreign", pass.Foreign,
+		"observeOnly", pass.ObserveOnly,
+		"wrote", pass.Wrote,
+		"alert", pass.Alert(),
+	)
+	return 0, nil
+}
+
+func (p *Provider) startJoin(ctx context.Context) (clusterprovider.Ref, error) {
 	ref, _, err := p.lookup(ctx, p.cfg.Join)
 	if err != nil {
-		return err
+		return ref, err
 	}
 	key, err := ref.Key()
 	if err != nil {
-		return err
+		return ref, err
 	}
 	dsn, err := p.store(ctx, key)
 	if err != nil {
-		return err
+		return ref, err
 	}
 	p.log.Info("cluster provider: joining", "cluster", ref.Name, "key", key, "home", ref.Home,
 		"datastore", dsn)
-
 	if err := p.resetSnapshots([]string{key}); err != nil {
-		return err
+		return ref, err
 	}
 	p.adoptNodes(ctx, []string{key})
-
 	if p.nodeScale == nil {
 		p.log.Warn("cluster provider: no node-scale driver; the cluster will not scale its nodes")
 	}
-	tick := time.NewTicker(p.cfg.Interval)
-	defer tick.Stop()
-	for {
-		p.pass(ctx, ref, key)
-		p.scale(ctx, key, ref.Name, true)
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-tick.C:
-		}
-	}
+	return ref, nil
 }
 
 func (p *Provider) resetSnapshots(keys []string) error {
@@ -347,10 +466,10 @@ func (p *Provider) adoptNodes(ctx context.Context, keys []string) {
 	}
 }
 
-func (p *Provider) joinAll(ctx context.Context) error {
+func (p *Provider) startAll(ctx context.Context) error {
 	p.log.Info("cluster provider: joining every Cluster in the tree", "join", p.cfg.Join,
-		"passes", "serial, one cluster at a time",
-		"reason", "a failure in one cluster is logged and the pass moves on, so one cluster that "+
+		"passes", "one reconcile per Cluster on the clusters APIExport, driven by watches",
+		"reason", "a failure in one cluster backs off that cluster alone, so one cluster that "+
 			"cannot come up never holds back the others")
 	refs, err := p.registry.Refs(ctx)
 	if err != nil {
@@ -369,59 +488,60 @@ func (p *Provider) joinAll(ctx context.Context) error {
 		return err
 	}
 	p.adoptNodes(ctx, keys)
+	p.provider.Reclaim(refs)
 	if p.nodeScale == nil {
 		p.log.Warn("cluster provider: no node-scale driver; no cluster will scale its nodes")
 	}
-	tick := time.NewTicker(p.cfg.Interval)
-	defer tick.Stop()
-	for {
-		p.passAll(ctx)
-		select {
-		case <-ctx.Done():
-			p.workers.Wait()
-			return nil
-		case <-tick.C:
-		}
-	}
+	return nil
 }
 
-func (p *Provider) passAll(ctx context.Context) {
+func (p *Provider) reclaimAll(ctx context.Context) {
 	refs, err := p.registry.Refs(ctx)
 	if err != nil {
-		p.log.Error("cluster provider: listing the Cluster CRs in the tree failed; no cluster was "+
-			"touched this pass", "error", err.Error())
+		p.log.Error("cluster provider: listing the Cluster CRs in the tree failed; no lease was "+
+			"reclaimed", "error", err.Error())
 		return
 	}
 	p.provider.Reclaim(refs)
-	p.sweepHomes(ctx, refs)
-	for _, ref := range refs {
-		key, err := ref.Key()
-		if err != nil {
-			p.log.Error("cluster provider: this cluster has no derivable key; its pass is skipped",
-				"cluster", ref.Name, "home", ref.Home, "error", err.Error())
-			continue
-		}
-		if !p.claim(key) {
-			continue
-		}
-		p.workers.Go(func() {
-			defer p.release(key)
-			p.runOne(ctx, ref)
-		})
-	}
 }
 
 const (
-	HomeSweepEvery = time.Minute
-
 	EmptyHomeGrace = 10 * time.Minute
 )
 
-func (p *Provider) sweepHomes(ctx context.Context, refs []clusterprovider.Ref) {
-	if p.homes == nil || time.Since(p.sweptAt) < HomeSweepEvery {
+func (p *Provider) sweeper(ctx context.Context) {
+	var grace *time.Timer
+	var graceC <-chan time.Time
+	defer func() {
+		if grace != nil {
+			grace.Stop()
+		}
+	}()
+	p.sweepHomes(ctx)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-p.sweeps:
+			if grace == nil {
+				grace = time.NewTimer(EmptyHomeGrace + time.Second)
+			} else {
+				grace.Reset(EmptyHomeGrace + time.Second)
+			}
+			graceC = grace.C
+		case <-graceC:
+			graceC = nil
+		}
+		p.sweepHomes(ctx)
+	}
+}
+
+func (p *Provider) sweepHomes(ctx context.Context) {
+	refs, err := p.registry.Refs(ctx)
+	if err != nil {
+		p.log.Warn("cluster provider: listing the Cluster CRs before the home sweep failed; nothing was swept", "error", err.Error())
 		return
 	}
-	p.sweptAt = time.Now()
 	live := make(map[string]bool, len(refs))
 	for _, ref := range refs {
 		if key, err := ref.Key(); err == nil {
@@ -446,32 +566,6 @@ func (p *Provider) sweepHomes(ctx context.Context, refs []clusterprovider.Ref) {
 	}
 }
 
-func (p *Provider) claim(key string) bool {
-	p.busyMu.Lock()
-	defer p.busyMu.Unlock()
-	if p.busy == nil {
-		p.busy = map[string]bool{}
-	}
-	if p.busy[key] {
-		return false
-	}
-	p.busy[key] = true
-	return true
-}
-
-func (p *Provider) release(key string) {
-	p.busyMu.Lock()
-	defer p.busyMu.Unlock()
-	delete(p.busy, key)
-}
-
-func (p *Provider) runOne(ctx context.Context, ref clusterprovider.Ref) {
-	if err := p.one(ctx, ref); err != nil {
-		p.log.Error("cluster provider: this cluster's pass failed and the others continue",
-			"cluster", ref.Name, "home", ref.Home, "error", err.Error())
-	}
-}
-
 func (p *Provider) bringUpSlot(ctx context.Context) (func(), bool) {
 	p.busyMu.Lock()
 	if p.bringUp == nil {
@@ -487,39 +581,72 @@ func (p *Provider) bringUpSlot(ctx context.Context) (func(), bool) {
 	}
 }
 
-func (p *Provider) one(ctx context.Context, ref clusterprovider.Ref) error {
-	key, err := ref.Key()
-	if err != nil {
-		return err
-	}
+func (p *Provider) one(ctx context.Context, ref clusterprovider.Ref, key string) (time.Duration, error) {
 	cl, err := p.registry.Read(ctx, ref)
 	if err != nil {
-		return fmt.Errorf("clusterprovider: reading the Cluster CR of %s out of %s: %w",
+		return 0, fmt.Errorf("clusterprovider: reading the Cluster CR of %s out of %s: %w",
 			ref.Name, ref.Home, err)
 	}
 	if cl.DeletionTimestamp != nil {
+		if p.tenants != nil {
+			p.tenants.stop(key)
+		}
 		return p.teardown(ctx, ref, key, cl)
 	}
 	if !cl.Spec.Running {
+		if p.tenants != nil {
+			p.tenants.stop(key)
+		}
 		p.log.Info("cluster provider: this cluster is not running, so its group is reaped and "+
 			"nothing is brought up for it", "cluster", ref.Name, "key", key, "home", ref.Home)
-		return p.reapOne(ctx, key)
+		return 0, p.reapOne(ctx, key)
 	}
 	if p.units != nil {
 		if err := p.units.StartStore(ctx, key); err != nil {
-			return err
+			return 0, err
 		}
 	}
 	done, ok := p.bringUpSlot(ctx)
 	if !ok {
-		return ctx.Err()
+		return 0, ctx.Err()
 	}
-	if p.pass(ctx, ref, key) {
-		p.pass(ctx, ref, key)
-	}
+	res, err := p.passes(ctx, ref, key)
 	done()
-	p.scale(ctx, key, ref.Name, true)
-	return nil
+	return soonest(res.wake, p.scaled(ctx, key, ref.Name, res.phase)), err
+}
+
+type passOutcome struct {
+	wake time.Duration
+
+	phase v1alpha1.ClusterPhase
+}
+
+func (p *Provider) passes(ctx context.Context, ref clusterprovider.Ref, key string) (passOutcome, error) {
+	out, again, err := p.pass(ctx, ref, key)
+	if again && err == nil {
+		out, _, err = p.pass(ctx, ref, key)
+	}
+	if p.tenants != nil && out.phase == v1alpha1.ClusterReady {
+		p.tenants.ensure(key)
+	}
+	return out, err
+}
+
+func soonest(a, b time.Duration) time.Duration {
+	switch {
+	case a <= 0:
+		return b
+	case b <= 0 || a < b:
+		return a
+	}
+	return b
+}
+
+func until(at time.Time) time.Duration {
+	if at.IsZero() {
+		return 0
+	}
+	return max(time.Until(at), time.Second)
 }
 
 func (p *Provider) reapOne(ctx context.Context, key string) error {
@@ -535,9 +662,9 @@ func (p *Provider) reapOne(ctx context.Context, key string) error {
 	return p.host.Reap(ctx, key)
 }
 
-func (p *Provider) scale(ctx context.Context, key, name string, running bool) {
+func (p *Provider) scale(ctx context.Context, key, name string, running bool) (time.Duration, bool) {
 	if p.nodeScale == nil || !running {
-		return
+		return 0, false
 	}
 	if p.nodes != nil {
 		if err := p.nodes.reconcile(ctx, key); err != nil {
@@ -559,10 +686,14 @@ func (p *Provider) scale(ctx context.Context, key, name string, running bool) {
 	dec, err := p.nodeScale.RunPass(ctx, key)
 	b := p.nodeScale.State(key).Backoff
 	p.provider.SetNodeBackoff(key, clusterprovider.NodeBackoff{Ends: b.Ends, Until: b.Until, Reason: b.Reason})
+	wake := until(p.nodeScale.Wake(key))
+	if p.nodes != nil {
+		wake = soonest(wake, until(p.nodes.wake(key)))
+	}
 	if err != nil {
 		p.log.Warn("cluster provider: the node-scale pass did not complete",
 			"cluster", name, "key", key, "error", err.Error())
-		return
+		return wake, true
 	}
 	args := []any{"cluster", name, "key", key,
 		"action", dec.Action.String(), "nodes", dec.Nodes, "reason", dec.Reason}
@@ -570,9 +701,12 @@ func (p *Provider) scale(ctx context.Context, key, name string, running bool) {
 		args = append(args, "backoffUntil", dec.BackoffUntil.UTC().Format(time.RFC3339))
 	}
 	p.log.Info("cluster provider: node scale", args...)
+	return wake, false
 }
 
-func (p *Provider) pass(ctx context.Context, ref clusterprovider.Ref, key string) bool {
+const ScaleRetry = 10 * time.Second
+
+func (p *Provider) pass(ctx context.Context, ref clusterprovider.Ref, key string) (passOutcome, bool, error) {
 	pass, err := p.provider.Reconcile(ctx, ref)
 	if pass.Result.Phase != "" {
 		args := []any{
@@ -593,11 +727,19 @@ func (p *Provider) pass(ctx context.Context, ref clusterprovider.Ref, key string
 				"cluster", ref.Name, "key", key, "error", err.Error())
 		}
 	}
+	out := passOutcome{wake: pass.Result.RequeueAfter, phase: pass.Result.Phase}
+	if due, ok := p.provider.AddOnsDueIn(ref); ok && pass.Result.Phase == v1alpha1.ClusterReady {
+		out.wake = soonest(out.wake, due)
+	}
 	if err != nil {
 		p.log.Error("cluster provider: the pass failed", "cluster", ref.Name, "key", key,
 			"error", err.Error())
+		return out, false, err
 	}
-	return slices.Contains(pass.Result.Ops, materialiser.OpSpawn)
+	if slices.Contains(pass.Result.Ops, materialiser.OpSpawnFailed) {
+		return out, false, fmt.Errorf("clusterprovider: the process group of %s did not come up: %s", ref.Name, pass.Result.Alert)
+	}
+	return out, pass.Result.Again || slices.Contains(pass.Result.Ops, materialiser.OpSpawn), nil
 }
 
 func (p *Provider) store(ctx context.Context, cluster string) (string, error) {

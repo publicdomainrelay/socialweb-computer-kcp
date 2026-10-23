@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-7.nodeclaims.socialweb.computer
+  name: v1alpha1-8.nodeclaims.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -378,3 +378,5 @@ spec:
                   - ingressDid
                   - keyRef
                   - url
+              joinedAt:
+                type: string

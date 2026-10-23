@@ -265,11 +265,11 @@ type bidderDenyKey struct {
 
 type bidderDenies struct {
 	now   func() time.Time
-	until *ttlcache.Cache[bidderDenyKey, struct{}]
+	until *ttlcache.Cache[bidderDenyKey, time.Time]
 }
 
 func newBidderDenies(now func() time.Time) *bidderDenies {
-	return &bidderDenies{now: now, until: ttlcache.New[bidderDenyKey, struct{}](ttlcache.Options{Now: now})}
+	return &bidderDenies{now: now, until: ttlcache.New[bidderDenyKey, time.Time](ttlcache.Options{Now: now})}
 }
 
 func (d *bidderDenies) deny(cluster, did string, until time.Time) {
@@ -277,7 +277,7 @@ func (d *bidderDenies) deny(cluster, did string, until time.Time) {
 		return
 	}
 	if ttl := until.Sub(d.now()); ttl > 0 {
-		d.until.SetTTL(bidderDenyKey{cluster: cluster, did: did}, struct{}{}, ttl)
+		d.until.SetTTL(bidderDenyKey{cluster: cluster, did: did}, until, ttl)
 	}
 }
 
@@ -286,7 +286,7 @@ func (d *bidderDenies) active(cluster string) []string {
 		return nil
 	}
 	var out []string
-	d.until.Range(func(k bidderDenyKey, _ struct{}) bool {
+	d.until.Range(func(k bidderDenyKey, _ time.Time) bool {
 		if k.cluster == cluster {
 			out = append(out, k.did)
 		}
@@ -294,6 +294,30 @@ func (d *bidderDenies) active(cluster string) []string {
 	})
 	slices.Sort(out)
 	return out
+}
+
+func (d *bidderDenies) next(cluster string) time.Time {
+	var out time.Time
+	if d == nil {
+		return out
+	}
+	d.until.Range(func(k bidderDenyKey, until time.Time) bool {
+		if k.cluster == cluster {
+			out = earliest(out, until)
+		}
+		return true
+	})
+	return out
+}
+
+func earliest(a, b time.Time) time.Time {
+	switch {
+	case a.IsZero():
+		return b
+	case b.IsZero() || a.Before(b):
+		return a
+	}
+	return b
 }
 
 type tenantNodes struct {
@@ -312,6 +336,7 @@ type tenantNodes struct {
 	live          map[string]bool
 	joined        map[string]bool
 	notReadySince map[string]time.Time
+	lossAt        map[string]time.Time
 	readySeen     map[string]bool
 	path          pathClock
 }
@@ -531,6 +556,10 @@ func (n *tenantNodes) lost(node *corev1.Node) (bool, time.Time) {
 		since = first
 	}
 	since = n.path.rebase(since)
+	if n.lossAt == nil {
+		n.lossAt = map[string]time.Time{}
+	}
+	n.lossAt[node.Name] = since.Add(grace)
 	return now.Sub(since) >= grace, since
 }
 
@@ -538,6 +567,17 @@ func (n *tenantNodes) clearNotReady(name string) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	delete(n.notReadySince, name)
+	delete(n.lossAt, name)
+}
+
+func (n *tenantNodes) wake() time.Time {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	var out time.Time
+	for _, at := range n.lossAt {
+		out = earliest(out, at)
+	}
+	return out
 }
 
 func (n *tenantNodes) markJoined(name string) bool {
@@ -820,7 +860,19 @@ type nodeHosts struct {
 	adopted   map[string]bool
 	released  map[string]map[string]bool
 	synced    map[string]time.Time
+	vaultDue  map[string]time.Time
 	seenReady map[string]map[string]time.Time
+}
+
+func (h *nodeHosts) wake(cluster string) time.Time {
+	h.mu.Lock()
+	n := h.hosts[cluster]
+	out := h.vaultDue[cluster]
+	h.mu.Unlock()
+	if n != nil {
+		out = earliest(out, n.wake())
+	}
+	return earliest(out, h.opts.Denies.next(cluster))
 }
 
 func (h *nodeHosts) observedReadySince(cluster, node string, ready bool, now time.Time) time.Time {

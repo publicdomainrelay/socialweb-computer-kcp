@@ -15,6 +15,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/firecrackervm"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostprocess"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 )
@@ -50,7 +51,7 @@ func run(ctx context.Context, c computevm.Config) error {
 	}
 	placement := firecrackervm.NewPlacement(host)
 	provider, err := firecracker.New(firecracker.Config{Handle: c.Handle, Log: c.Log},
-		firecracker.Deps{Runtime: c.Runtime, Units: c.Manager, UserData: host, Placement: placement})
+		firecracker.Deps{Runtime: c.Runtime, Units: c.Manager, UserData: host, Placement: placement, Processes: hostsvc.Processes{}})
 	if err != nil {
 		return err
 	}

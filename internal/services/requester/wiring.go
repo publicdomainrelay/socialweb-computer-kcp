@@ -150,7 +150,7 @@ func (s *Service) setup(ctx context.Context) (*role.Requester, error) {
 		return core, fmt.Errorf("requester: subscribing to the contracts: %w", err)
 	}
 	if relays := s.cfg.Relays(); len(relays) > 0 {
-		crawl := participant.Crawl{Relays: relays, Address: func() string { return inputs.Address(role.PDSExposure) }, Log: s.log}
+		crawl := participant.Crawl{Relays: relays, Address: func() string { return inputs.Address(role.PDSExposure) }, Period: participant.CrawlPeriod, Log: s.log}
 		s.wg.Go(func() { crawl.Run(ctx) })
 	}
 	return core, nil

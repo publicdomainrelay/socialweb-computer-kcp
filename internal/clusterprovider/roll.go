@@ -12,21 +12,29 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
+	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kruntime "k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/cache"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/apiserverfront"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterlink"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterstack"
+	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/sha256sum"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/materialiser"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/portallocator"
@@ -41,12 +49,10 @@ const (
 	RollKindCluster = "cluster"
 	RollKindLink    = "link"
 
-	DefaultIdleBound    = 30 * time.Minute
-	DefaultRollWatch    = 60 * time.Second
-	DefaultRollInterval = 5 * time.Second
-	idlePoll            = 10 * time.Second
-	drainWait           = 5 * time.Second
-	kineSchemaMark      = "tables and indexes are up to date"
+	DefaultIdleBound = 30 * time.Minute
+	DefaultRollWatch = 60 * time.Second
+	drainWait        = 5 * time.Second
+	kineSchemaMark   = "tables and indexes are up to date"
 )
 
 type RollRequest struct {
@@ -167,13 +173,19 @@ type Roller struct {
 
 	Relet func(cluster string, p portallocator.Purpose) (portallocator.Lease, bool, error)
 
-	Interval time.Duration
-
 	Name string
 
 	Log *slog.Logger
 
 	status RollerStatus
+
+	once sync.Once
+
+	mu sync.Mutex
+
+	pending map[string]bool
+
+	wake chan struct{}
 }
 
 func (r *Roller) log() *slog.Logger {
@@ -183,26 +195,95 @@ func (r *Roller) log() *slog.Logger {
 	return slog.Default()
 }
 
+func (r *Roller) init() {
+	r.once.Do(func() {
+		r.wake = make(chan struct{}, 1)
+		r.pending = map[string]bool{}
+	})
+}
+
+func (r *Roller) Note(key string) {
+	if key == "" {
+		return
+	}
+	r.init()
+	r.mu.Lock()
+	r.pending[key] = true
+	r.mu.Unlock()
+	select {
+	case r.wake <- struct{}{}:
+	default:
+	}
+}
+
+func (r *Roller) take() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	keys := make([]string, 0, len(r.pending))
+	for k := range r.pending {
+		keys = append(keys, k)
+	}
+	clear(r.pending)
+	slices.Sort(keys)
+	return keys
+}
+
 func (r *Roller) Run(ctx context.Context) {
-	every := r.Interval
-	every = opt.Positive(every, DefaultRollInterval)
-	t := time.NewTicker(every)
-	defer t.Stop()
-	for {
-		keys, err := r.Clusters(ctx)
-		if err == nil {
-			for _, key := range keys {
-				if perr := r.pass(ctx, key); perr != nil && err == nil {
-					err = perr
-				}
-			}
+	r.init()
+	w, err := fsnotify.NewWatcher()
+	if err != nil {
+		r.log().Error("cluster provider: the roller cannot watch for roll requests", "err", err.Error())
+		r.noteStatus(nil, err)
+		return
+	}
+	defer w.Close()
+	if keys, err := r.Clusters(ctx); err != nil {
+		r.noteStatus(nil, err)
+	} else {
+		for _, key := range keys {
+			r.Note(key)
 		}
-		r.noteStatus(keys, err)
+	}
+	dirs := map[string]string{}
+	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-t.C:
+		case ev, ok := <-w.Events:
+			if !ok {
+				return
+			}
+			if filepath.Base(ev.Name) != RollRequestFile || ev.Op == fsnotify.Chmod || ev.Has(fsnotify.Remove) {
+				continue
+			}
+			if key, known := dirs[filepath.Dir(ev.Name)]; known {
+				r.Note(key)
+			}
+			continue
+		case _, ok := <-w.Errors:
+			if !ok {
+				return
+			}
+			continue
+		case <-r.wake:
 		}
+		var err error
+		for _, key := range r.take() {
+			if dir, derr := ClusterDataDir(r.Stack.StateDir, key); derr == nil {
+				if _, watched := dirs[dir]; !watched && w.Add(dir) == nil {
+					dirs[dir] = key
+				}
+			}
+			if perr := r.pass(ctx, key); perr != nil && err == nil {
+				err = perr
+			}
+		}
+		keys := make([]string, 0, len(dirs))
+		for _, key := range dirs {
+			keys = append(keys, key)
+		}
+		slices.Sort(keys)
+		r.noteStatus(keys, err)
 	}
 }
 
@@ -336,16 +417,52 @@ func workingPods(ctx context.Context, core kubernetes.Interface) (nodes, running
 	if len(nl.Items) == 0 {
 		return 0, 0, guests, nil
 	}
-	pl, err := core.CoreV1().Pods(metav1.NamespaceAll).List(ctx, metav1.ListOptions{FieldSelector: "status.phase=Running"})
+	pl, err := core.CoreV1().Pods(metav1.NamespaceAll).List(ctx, metav1.ListOptions{FieldSelector: runningPodSelector})
 	if err != nil {
 		return 0, 0, nil, err
 	}
-	for _, p := range pl.Items {
+	pods := make([]*corev1.Pod, 0, len(pl.Items))
+	for i := range pl.Items {
+		pods = append(pods, &pl.Items[i])
+	}
+	running = working(pods)
+	return len(nl.Items), running, guests, nil
+}
+
+const runningPodSelector = "status.phase=Running"
+
+func working(pods []*corev1.Pod) int {
+	n := 0
+	for _, p := range pods {
 		if p.Namespace != metav1.NamespaceSystem && p.Spec.NodeName != "" {
-			running++
+			n++
 		}
 	}
-	return len(nl.Items), running, guests, nil
+	return n
+}
+
+func runningPods(core kubernetes.Interface) cache.ListerWatcher {
+	return &cache.ListWatch{
+		ListWithContextFunc: func(ctx context.Context, o metav1.ListOptions) (kruntime.Object, error) {
+			o.FieldSelector = runningPodSelector
+			return core.CoreV1().Pods(metav1.NamespaceAll).List(ctx, o)
+		},
+		WatchFuncWithContext: func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) {
+			o.FieldSelector = runningPodSelector
+			return core.CoreV1().Pods(metav1.NamespaceAll).Watch(ctx, o)
+		},
+	}
+}
+
+func systemLeases(core kubernetes.Interface) cache.ListerWatcher {
+	return &cache.ListWatch{
+		ListWithContextFunc: func(ctx context.Context, o metav1.ListOptions) (kruntime.Object, error) {
+			return core.CoordinationV1().Leases(metav1.NamespaceSystem).List(ctx, o)
+		},
+		WatchFuncWithContext: func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) {
+			return core.CoordinationV1().Leases(metav1.NamespaceSystem).Watch(ctx, o)
+		},
+	}
 }
 
 func nodeReadySince(ctx context.Context, core kubernetes.Interface) map[string]string {
@@ -436,8 +553,8 @@ func (h *UnitsHost) placeGated(ctx context.Context, key string, st procgroup.Ste
 }
 
 func waitOutput(ctx context.Context, m procgroup.Member, mark, what string) error {
-	return poll(ctx, func(context.Context) (bool, error) {
-		return strings.Contains(strings.ToLower(m.Output()), mark), nil
+	return untilOutput(ctx, m, func(out string) (bool, error) {
+		return strings.Contains(strings.ToLower(out), mark), nil
 	}, func() error { return &errNotReady{what: what, last: tail(m.Output())} })
 }
 
@@ -551,27 +668,31 @@ func (r *Roller) RollCluster(ctx context.Context, key string, req RollRequest) (
 		}
 	}
 	idleStart := time.Now()
-	for {
-		nodes, running, guests, err := workingPods(ctx, core)
-		if err != nil {
+	nodes, running, guests, err := workingPods(ctx, core)
+	if err != nil {
+		return fail(err)
+	}
+	rep.Nodes = nodes
+	if err := CheckSkew(rep.FromVersion, rep.ToVersion, guests); err != nil {
+		return fail(err)
+	}
+	if running > 0 {
+		r.log().Info("cluster provider: a swap waits for the market nodes to be idle", "cluster", key, "running", running, "bound", bound)
+		err := awaitTyped(ctx, runningPods(core), &corev1.Pod{}, bound, func(pods []*corev1.Pod) (bool, error) {
+			return working(pods) == 0, nil
+		})
+		switch {
+		case timedOut(err):
+			rep.IdleDeferred = true
+		case err != nil:
+			return fail(err)
+		}
+		if nodes, _, guests, err = workingPods(ctx, core); err != nil {
 			return fail(err)
 		}
 		rep.Nodes = nodes
 		if err := CheckSkew(rep.FromVersion, rep.ToVersion, guests); err != nil {
 			return fail(err)
-		}
-		if running == 0 {
-			break
-		}
-		if time.Since(idleStart) >= bound {
-			rep.IdleDeferred = true
-			break
-		}
-		r.log().Info("cluster provider: a swap waits for the market nodes to be idle", "cluster", key, "running", running, "bound", bound)
-		select {
-		case <-ctx.Done():
-			return fail(ctx.Err())
-		case <-time.After(idlePoll):
 		}
 	}
 	rep.IdleSeconds = clock.SecondsBetween(idleStart, time.Now())
@@ -664,17 +785,16 @@ func (r *Roller) RollCluster(ctx context.Context, key string, req RollRequest) (
 	if err := h.remove(ctx, ObjectName(key, "kine@"+blue)); err != nil {
 		return fail(err)
 	}
-	deadline := time.Now().Add(drainWait)
-	for {
+	dctx, cancelDrain := context.WithTimeout(ctx, drainWait)
+	_ = poll(dctx, func(ctx context.Context) (bool, error) {
 		st, err := front.Status(ctx)
-		if err == nil {
-			rep.OpenOnOld = st.Open[SlotBackend(blueSpec)]
+		if err != nil {
+			return true, nil
 		}
-		if err != nil || rep.OpenOnOld == 0 || time.Now().After(deadline) {
-			break
-		}
-		time.Sleep(PollInterval)
-	}
+		rep.OpenOnOld = st.Open[SlotBackend(blueSpec)]
+		return rep.OpenOnOld == 0, nil
+	}, func() error { return nil })
+	cancelDrain()
 	if n, err := front.Drain(ctx, SlotBackend(blueSpec)); err == nil {
 		rep.Drained = n
 	}
@@ -822,28 +942,46 @@ func (r *Roller) watch(ctx context.Context, core kubernetes.Interface, spec clus
 	for name, holder := range leases {
 		pending[name] = &LeaseHandover{Lease: name, From: holder}
 	}
-	end := time.Now().Add(DefaultRollWatch)
-	for time.Now().Before(end) {
-		if eps, err := AdvertisedEndpoints(ctx, core); err != nil || len(eps) != 1 || eps[0] != want {
-			rep.EndpointsLost++
-		} else {
-			rep.Endpoints = eps
-		}
-		for name, holder := range leaseHolders(ctx, core) {
-			p, ok := pending[name]
-			if !ok || p.To != "" {
-				continue
+	wctx, cancel := context.WithTimeout(ctx, DefaultRollWatch)
+	defer cancel()
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		ctlruntime.Follow(wctx, apiserverSlices(core), &discoveryv1.EndpointSlice{}, func(any) {
+			eps, err := AdvertisedEndpoints(wctx, core)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil || len(eps) != 1 || eps[0] != want {
+				if wctx.Err() == nil {
+					rep.EndpointsLost++
+				}
+				return
 			}
-			if holder != p.From {
+			rep.Endpoints = eps
+		})
+	})
+	wg.Go(func() {
+		ctlruntime.Follow(wctx, systemLeases(core), &coordinationv1.Lease{}, func(obj any) {
+			l, ok := obj.(*coordinationv1.Lease)
+			if !ok || l.Spec.HolderIdentity == nil {
+				return
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			p, ok := pending[l.Name]
+			if !ok || p.To != "" {
+				return
+			}
+			if holder := *l.Spec.HolderIdentity; holder != p.From {
 				p.To = holder
 				p.Seconds = clock.SecondsBetween(rep.OldStoppedAt, time.Now())
 			}
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(time.Second):
-		}
+		})
+	})
+	<-wctx.Done()
+	wg.Wait()
+	if ctx.Err() != nil {
+		return
 	}
 	for _, p := range pending {
 		rep.Leases = append(rep.Leases, *p)

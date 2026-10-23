@@ -33,7 +33,6 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/tlsreload"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/materialiser"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/revocation"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsfront"
 )
@@ -50,11 +49,12 @@ const (
 	trustTTL            = 30 * time.Second
 	revokedTTL          = 2 * time.Second
 	revokedStale        = 10 * time.Minute
-	revokedRefresh      = 2 * time.Second
 	revokedFetchTimeout = 5 * time.Second
 	denyTTL             = 2 * time.Second
-	gateTTL             = materialiser.PathGateGrace / 5
 	gateFetchTimeout    = 5 * time.Second
+	gateIdle            = 10 * time.Minute
+	gateRetry           = time.Second
+	gateRetryMax        = 30 * time.Second
 	readHeaderLimit     = 10 * time.Second
 	shutdownTimeout     = 5 * time.Second
 	upstreamDialWait    = 5 * time.Second
@@ -65,7 +65,7 @@ var pathPattern = regexp.MustCompile(`^/clusters/root:([a-z0-9]+):([a-z0-9]([a-z
 
 type Records interface {
 	CertificateState(ctx context.Context, did, cluster, serial string) (kcpclient.CertificateState, error)
-	ClusterGate(ctx context.Context, home, name string) (kcpclient.ClusterGate, error)
+	FollowClusterGate(ctx context.Context, home, name string, on func(kcpclient.ClusterGate)) error
 }
 
 type Config struct {
@@ -121,18 +121,36 @@ type revokedEntry struct {
 	fetched time.Time
 }
 
+type revokedFlight struct {
+	done    chan struct{}
+	serials map[string]struct{}
+	err     error
+}
+
+type gateWatch struct {
+	ready  chan struct{}
+	once   sync.Once
+	cancel context.CancelFunc
+	idle   *time.Timer
+	used   time.Time
+	gate   kcpclient.ClusterGate
+	synced bool
+	seen   bool
+	err    error
+}
+
 type server struct {
 	c          Config
 	log        *slog.Logger
 	edgePin    [32]byte
+	ctx        context.Context
 	mu         sync.Mutex
 	trusts     *ttlcache.Cache[string, *trust]
 	revoked    map[string]*revokedEntry
-	refreshing map[string]bool
+	refreshing map[string]*revokedFlight
 	admitted   *ttlcache.Cache[string, struct{}]
-	gates      *ttlcache.Cache[string, kcpclient.ClusterGate]
+	gates      map[string]*gateWatch
 	open       map[string]map[*openRequest]struct{}
-	wake       chan struct{}
 }
 
 func Run(ctx context.Context, c Config) error {
@@ -159,15 +177,17 @@ func Run(ctx context.Context, c Config) error {
 	if err != nil {
 		return fmt.Errorf("clientcertfront: the certificate %s and key %s: %w", c.CertFile, c.KeyFile, err)
 	}
-	s := &server{c: c, log: log, edgePin: sha256.Sum256(edgeDER),
+	loopCtx, stopLoop := context.WithCancel(ctx)
+	defer stopLoop()
+	s := &server{c: c, log: log, edgePin: sha256.Sum256(edgeDER), ctx: loopCtx,
 		trusts: ttlcache.New[string, *trust](ttlcache.Options{TTL: trustTTL}).OnEvict(func(_ string, t *trust) {
 			t.transport.CloseIdleConnections()
 			t.bearer.CloseIdleConnections()
 		}),
-		revoked: map[string]*revokedEntry{}, refreshing: map[string]bool{},
+		revoked: map[string]*revokedEntry{}, refreshing: map[string]*revokedFlight{},
 		admitted: ttlcache.New[string, struct{}](ttlcache.Options{TTL: denyTTL}),
-		gates:    ttlcache.New[string, kcpclient.ClusterGate](ttlcache.Options{TTL: gateTTL}), open: map[string]map[*openRequest]struct{}{},
-		wake: make(chan struct{}, 1)}
+		gates:    map[string]*gateWatch{}, open: map[string]map[*openRequest]struct{}{}}
+	defer s.closeGates()
 	ln, err := net.Listen("tcp", c.Address)
 	if err != nil {
 		return fmt.Errorf("clientcertfront: listening on %s: %w", c.Address, err)
@@ -180,11 +200,6 @@ func Run(ctx context.Context, c Config) error {
 	if c.OnListen != nil {
 		c.OnListen(ln.Addr())
 	}
-	var wg sync.WaitGroup
-	defer wg.Wait()
-	loopCtx, stopLoop := context.WithCancel(ctx)
-	defer stopLoop()
-	wg.Go(func() { s.refreshLoop(loopCtx) })
 	done := make(chan error, 1)
 	go func() { done <- srv.ServeTLS(ln, "", "") }()
 	select {
@@ -431,21 +446,126 @@ func (s *server) admitGate(ctx context.Context, account, home, cluster string) (
 }
 
 func (s *server) gateFor(ctx context.Context, home, cluster string) (kcpclient.ClusterGate, error) {
-	if g, ok := s.gates.Get(home); ok {
-		return g, nil
+	w := s.gateWatcher(home, cluster)
+	deadline := time.NewTimer(gateFetchTimeout)
+	defer deadline.Stop()
+	select {
+	case <-w.ready:
+	case <-deadline.C:
+	case <-ctx.Done():
+		return kcpclient.ClusterGate{}, ctx.Err()
 	}
-	return s.fetchGate(ctx, home, cluster)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	switch {
+	case w.synced:
+		return w.gate, nil
+	case w.err != nil:
+		return kcpclient.ClusterGate{}, w.err
+	}
+	return kcpclient.ClusterGate{}, errors.New("the Cluster watch has not synced")
 }
 
-func (s *server) fetchGate(ctx context.Context, home, cluster string) (kcpclient.ClusterGate, error) {
-	fctx, cancel := context.WithTimeout(ctx, gateFetchTimeout)
-	defer cancel()
-	g, err := s.c.Records.ClusterGate(fctx, home, cluster)
-	if err != nil {
-		return g, err
+func (s *server) gateWatcher(home, cluster string) *gateWatch {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if w := s.gates[home]; w != nil {
+		w.used = time.Now()
+		w.idle.Reset(gateIdle)
+		return w
 	}
-	s.gates.Set(home, g)
-	return g, nil
+	ctx, cancel := context.WithCancel(s.ctx)
+	w := &gateWatch{ready: make(chan struct{}), cancel: cancel, used: time.Now()}
+	w.idle = time.AfterFunc(gateIdle, func() { s.expireGate(home, w) })
+	s.gates[home] = w
+	go s.followGate(ctx, w, home, cluster)
+	return w
+}
+
+func (s *server) expireGate(home string, w *gateWatch) {
+	s.mu.Lock()
+	if s.gates[home] != w || len(s.open[home]) > 0 || time.Since(w.used) < gateIdle {
+		s.mu.Unlock()
+		return
+	}
+	delete(s.gates, home)
+	s.mu.Unlock()
+	w.cancel()
+}
+
+func (s *server) closeGates() {
+	s.mu.Lock()
+	gates := s.gates
+	s.gates = map[string]*gateWatch{}
+	s.mu.Unlock()
+	for _, w := range gates {
+		w.idle.Stop()
+		w.cancel()
+	}
+}
+
+func (s *server) followGate(ctx context.Context, w *gateWatch, home, cluster string) {
+	delay := gateRetry
+	for {
+		began := time.Now()
+		err := s.c.Records.FollowClusterGate(ctx, home, cluster, func(g kcpclient.ClusterGate) { s.setGate(home, w, g) })
+		if ctx.Err() != nil {
+			return
+		}
+		if err == nil {
+			err = errors.New("the Cluster watch ended")
+		}
+		if s.failGate(home, w, err) {
+			return
+		}
+		if time.Since(began) > gateRetryMax {
+			delay = gateRetry
+		}
+		s.log.Warn("the Cluster watch restarts; new requests are refused until it syncs again, open requests stay", "home", home, "after", delay.String(), "err", err.Error())
+		retry := time.NewTimer(delay)
+		delay = min(2*delay, gateRetryMax)
+		select {
+		case <-ctx.Done():
+			retry.Stop()
+			return
+		case <-retry.C:
+		}
+	}
+}
+
+func (s *server) setGate(home string, w *gateWatch, g kcpclient.ClusterGate) {
+	s.mu.Lock()
+	w.gate, w.synced, w.seen, w.err = g, true, true, nil
+	var cut []*openRequest
+	if !g.Serving && s.gates[home] == w {
+		for o := range s.open[home] {
+			cut = append(cut, o)
+		}
+	}
+	s.mu.Unlock()
+	w.once.Do(func() { close(w.ready) })
+	for _, o := range cut {
+		o.cancel()
+	}
+	if len(cut) > 0 {
+		s.log.Info("the cluster stopped serving; its open requests are closed", "home", home, "closed", len(cut))
+	}
+}
+
+func (s *server) failGate(home string, w *gateWatch, err error) bool {
+	s.mu.Lock()
+	w.synced, w.err = false, err
+	never := !w.seen
+	if never && s.gates[home] == w {
+		delete(s.gates, home)
+		w.idle.Stop()
+	}
+	s.mu.Unlock()
+	w.once.Do(func() { close(w.ready) })
+	if never {
+		w.cancel()
+	}
+	return never
 }
 
 func (s *server) hold(home string, cancel context.CancelFunc) func() {
@@ -455,45 +575,23 @@ func (s *server) hold(home string, cancel context.CancelFunc) func() {
 		s.open[home] = map[*openRequest]struct{}{}
 	}
 	s.open[home][o] = struct{}{}
+	w := s.gates[home]
+	stopped := w != nil && w.synced && !w.gate.Serving
 	s.mu.Unlock()
+	if stopped {
+		cancel()
+	}
 	return func() {
 		s.mu.Lock()
 		delete(s.open[home], o)
 		if len(s.open[home]) == 0 {
 			delete(s.open, home)
-		}
-		s.mu.Unlock()
-	}
-}
-
-func (s *server) recheckGates(ctx context.Context) {
-	s.mu.Lock()
-	homes := make([]string, 0, len(s.open))
-	for home := range s.open {
-		homes = append(homes, home)
-	}
-	s.mu.Unlock()
-	for _, home := range homes {
-		g, err := s.fetchGate(ctx, home, home[strings.LastIndex(home, ":")+1:])
-		if err != nil {
-			if ctx.Err() == nil {
-				s.log.Warn("the cluster gate recheck failed; open requests stay until the next pass", "home", home, "err", err.Error())
+			if w := s.gates[home]; w != nil {
+				w.used = time.Now()
+				w.idle.Reset(gateIdle)
 			}
-			continue
-		}
-		if g.Serving {
-			continue
-		}
-		s.mu.Lock()
-		n := 0
-		for o := range s.open[home] {
-			o.cancel()
-			n++
 		}
 		s.mu.Unlock()
-		if n > 0 {
-			s.log.Info("the cluster stopped serving; its open requests are closed", "home", home, "closed", n)
-		}
 	}
 }
 
@@ -517,87 +615,46 @@ func (s *server) admit(ctx context.Context, did string) (int, string) {
 func (s *server) revokedFor(ctx context.Context, dir string) (map[string]struct{}, error) {
 	s.mu.Lock()
 	e := s.revoked[dir]
-	s.mu.Unlock()
-	if e != nil {
-		age := time.Since(e.fetched)
-		if age >= revokedStale {
-			s.requestRefresh()
-			return nil, errors.New("the revocation list has not refreshed for ten minutes")
-		}
-		if age >= revokedTTL {
-			s.requestRefresh()
-		}
+	if e != nil && time.Since(e.fetched) < revokedTTL {
+		s.mu.Unlock()
 		return e.serials, nil
 	}
-	fctx, cancel := context.WithTimeout(ctx, revokedFetchTimeout)
-	defer cancel()
-	serials, err := clientcert.FetchRevoked(fctx, dir)
-	if err != nil {
-		return nil, err
+	f := s.refreshing[dir]
+	if f == nil {
+		f = &revokedFlight{done: make(chan struct{})}
+		s.refreshing[dir] = f
+		go s.refresh(dir, f)
 	}
-	s.mu.Lock()
-	s.revoked[dir] = &revokedEntry{serials: serials, fetched: time.Now()}
 	s.mu.Unlock()
-	return serials, nil
-}
-
-func (s *server) requestRefresh() {
 	select {
-	case s.wake <- struct{}{}:
-	default:
+	case <-f.done:
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
+	switch {
+	case f.err == nil:
+		return f.serials, nil
+	case e != nil && time.Since(e.fetched) < revokedStale:
+		s.log.Warn("the revocation list refresh failed; serving the last known list", "dir", dir, "err", f.err.Error())
+		return e.serials, nil
+	case e != nil:
+		return nil, fmt.Errorf("the revocation list has not refreshed for ten minutes: %w", f.err)
+	}
+	return nil, f.err
 }
 
-func (s *server) refreshLoop(ctx context.Context) {
-	ticker := time.NewTicker(revokedRefresh)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		case <-s.wake:
-		}
-		s.refreshStale(ctx)
-		s.recheckGates(ctx)
-	}
-}
-
-func (s *server) refreshStale(ctx context.Context) {
-	s.mu.Lock()
-	var dirs []string
-	for dir, e := range s.revoked {
-		if time.Since(e.fetched) >= revokedTTL && !s.refreshing[dir] {
-			s.refreshing[dir] = true
-			dirs = append(dirs, dir)
-		}
-	}
-	s.mu.Unlock()
-	var wg sync.WaitGroup
-	for _, dir := range dirs {
-		wg.Go(func() { s.refresh(ctx, dir) })
-	}
-	wg.Wait()
-}
-
-func (s *server) refresh(ctx context.Context, dir string) {
-	defer func() {
-		s.mu.Lock()
-		delete(s.refreshing, dir)
-		s.mu.Unlock()
-	}()
-	fctx, cancel := context.WithTimeout(ctx, revokedFetchTimeout)
+func (s *server) refresh(dir string, f *revokedFlight) {
+	ctx, cancel := context.WithTimeout(s.ctx, revokedFetchTimeout)
 	defer cancel()
-	serials, err := clientcert.FetchRevoked(fctx, dir)
-	if err != nil {
-		if ctx.Err() == nil {
-			s.log.Warn("the revocation list refresh failed; serving the last known list", "dir", dir, "err", err.Error())
-		}
-		return
-	}
+	serials, err := clientcert.FetchRevoked(ctx, dir)
 	s.mu.Lock()
-	s.revoked[dir] = &revokedEntry{serials: serials, fetched: time.Now()}
+	f.serials, f.err = serials, err
+	if err == nil {
+		s.revoked[dir] = &revokedEntry{serials: serials, fetched: time.Now()}
+	}
+	delete(s.refreshing, dir)
 	s.mu.Unlock()
+	close(f.done)
 }
 
 type frontState struct {

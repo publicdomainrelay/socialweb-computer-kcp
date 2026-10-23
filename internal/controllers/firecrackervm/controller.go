@@ -32,18 +32,24 @@ type Controller struct {
 
 	events chan ctlruntime.Request
 
+	life context.Context
+
+	end context.CancelFunc
+
 	mu sync.Mutex
 
 	clusters map[string]string
 }
 
 func Register(m *ctlruntime.Manager, p *firecracker.Provider, host *computevm.Host, placement *Placement) (*Controller, error) {
+	life, end := context.WithCancel(context.Background())
 	ctl := &Controller{p: p, host: host, placement: placement, log: host.Log().With("controller", Name), events: make(chan ctlruntime.Request, 256),
-		clusters: map[string]string{}}
+		life: life, end: end, clusters: map[string]string{}}
 	handle := p.Handle()
 	if err := ctlruntime.For[*v1alpha1.FirecrackerVM](m, Name, ctl, ctlruntime.Export(Export),
 		ctlruntime.Finalizer(v1alpha1.FinalizerFirecrackerVM), ctlruntime.Workers(Workers), ctlruntime.Events(ctl.events),
 		ctlruntime.Only(func(vm *v1alpha1.FirecrackerVM) bool { return vm.Spec.Owner.Handle == handle })); err != nil {
+		end()
 		return nil, fmt.Errorf("firecrackervm: registering the FirecrackerVM controller: %w", err)
 	}
 	return ctl, nil
@@ -70,20 +76,16 @@ func (c *Controller) clusterOf(name string) (string, bool) {
 
 func (c *Controller) Run(ctx context.Context) error {
 	defer close(c.events)
+	defer c.end()
 	sweep := time.NewTimer(c.host.Config().Grace())
 	defer sweep.Stop()
+	exits := c.p.VMMExits()
 	for ctx.Err() == nil {
 		names, err := c.p.Watch(ctx)
+		var retry <-chan time.Time
 		if err != nil {
 			c.log.Warn("watching the VM units; the watch is opened again", "err", err.Error(), "after", computevm.RetryAfter.String())
-			select {
-			case <-ctx.Done():
-				return nil
-			case <-sweep.C:
-				c.sweep(ctx)
-			case <-time.After(computevm.RetryAfter):
-			}
-			continue
+			retry = time.After(computevm.RetryAfter)
 		}
 	events:
 		for {
@@ -92,21 +94,36 @@ func (c *Controller) Run(ctx context.Context) error {
 				return nil
 			case <-sweep.C:
 				c.sweep(ctx)
+			case <-retry:
+				break events
+			case name := <-exits:
+				if !c.enqueue(ctx, name) {
+					return nil
+				}
 			case name, ok := <-names:
 				if !ok {
 					break events
 				}
-				if cluster, known := c.clusterOf(name); known {
-					select {
-					case c.events <- ctlruntime.Request{Cluster: cluster, Name: name}:
-					case <-ctx.Done():
-						return nil
-					}
+				if !c.enqueue(ctx, name) {
+					return nil
 				}
 			}
 		}
 	}
 	return nil
+}
+
+func (c *Controller) enqueue(ctx context.Context, name string) bool {
+	cluster, known := c.clusterOf(name)
+	if !known {
+		return true
+	}
+	select {
+	case c.events <- ctlruntime.Request{Cluster: cluster, Name: name}:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }
 
 func (c *Controller) sweep(ctx context.Context) {
@@ -197,11 +214,20 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, vm *
 	case v1alpha1.ComputeVMPhaseLost, v1alpha1.ComputeVMPhaseFailed:
 		return ctlruntime.Result{}, nil
 	case v1alpha1.ComputeVMPhaseRunning:
-		return ctlruntime.Result{}, c.write(ctx, req, vm, c.p.Observe(ctx, vm))
+		err := c.write(ctx, req, vm, c.p.Observe(ctx, vm))
+		c.follow(vm)
+		return ctlruntime.Result{}, err
 	}
 	st, err := c.p.Boot(ctx, vm, func(st v1alpha1.FirecrackerVMStatus) error { return c.write(ctx, req, vm, st) })
 	if werr := c.write(ctx, req, vm, st); werr != nil && err == nil {
 		err = werr
 	}
+	c.follow(vm)
 	return ctlruntime.Result{}, err
+}
+
+func (c *Controller) follow(vm *v1alpha1.FirecrackerVM) {
+	if vm.Status.Phase == v1alpha1.ComputeVMPhaseRunning {
+		c.p.Follow(c.life, vm)
+	}
 }

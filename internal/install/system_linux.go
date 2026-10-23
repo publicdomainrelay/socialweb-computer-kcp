@@ -13,6 +13,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"syscall"
 	"time"
 
@@ -27,7 +28,6 @@ const (
 	managerSocketWait = 30 * time.Second
 	jobTimeout        = 2 * time.Minute
 	restartRecovery   = 60 * time.Second
-	restartPollEvery  = 500 * time.Millisecond
 	hostPath          = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 )
 
@@ -233,11 +233,15 @@ func (liveSystem) User(ctx context.Context, a Account) (UserManager, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &liveUser{conn: conn}, nil
+	return &liveUser{conn: conn, closed: make(chan struct{})}, nil
 }
 
 type liveUser struct {
 	conn *sd.Conn
+
+	mu       sync.Mutex
+	watchers map[chan struct{}]string
+	closed   chan struct{}
 }
 
 func (u *liveUser) Reload(ctx context.Context) error { return u.conn.ReloadContext(ctx) }
@@ -268,33 +272,114 @@ func (e *jobEndedError) Error() string {
 	return fmt.Sprintf("%s: the job ended %q", e.unit, e.result)
 }
 
-func restartedOK(ctx context.Context, conn *sd.Conn, unit string) bool {
-	state, err := conn.GetUnitPropertyContext(ctx, unit, "ActiveState")
-	if err != nil {
-		return false
-	}
-	sub, err := conn.GetUnitPropertyContext(ctx, unit, "SubState")
-	if err != nil {
-		return false
-	}
-	active, _ := state.Value.Value().(string)
-	substate, _ := sub.Value.Value().(string)
-	return active == string(hostsvc.Active) || (active == string(hostsvc.Activating) && substate != "auto-restart")
+func restartedOK(st hostsvc.UnitStatus) bool {
+	return st.State == hostsvc.Active || (st.State == hostsvc.Activating && st.SubState != "auto-restart")
 }
 
 func (u *liveUser) awaitRestartRecovery(ctx context.Context, unit string, failure error) error {
 	ctx, cancel := context.WithTimeout(ctx, restartRecovery)
 	defer cancel()
-	for {
-		if restartedOK(ctx, u.conn, unit) {
+	statuses, err := u.Watch(ctx, unit)
+	if err != nil {
+		return failure
+	}
+	for st := range statuses {
+		if restartedOK(st) {
 			return nil
 		}
-		select {
-		case <-ctx.Done():
-			return failure
-		case <-time.After(restartPollEvery):
-		}
 	}
+	return failure
+}
+
+func (u *liveUser) status(ctx context.Context, unit string) (hostsvc.UnitStatus, error) {
+	units, err := u.conn.ListUnitsByNamesContext(ctx, []string{unit})
+	if err != nil {
+		return hostsvc.UnitStatus{}, err
+	}
+	for _, s := range units {
+		if s.Name != unit {
+			continue
+		}
+		if s.LoadState == "not-found" {
+			return hostsvc.UnitStatus{Name: unit, State: hostsvc.NotFound}, nil
+		}
+		return hostsvc.UnitStatus{Name: s.Name, State: hostsvc.ActiveState(s.ActiveState), SubState: s.SubState}, nil
+	}
+	return hostsvc.UnitStatus{Name: unit, State: hostsvc.NotFound}, nil
+}
+
+func (u *liveUser) subscribe() error {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.watchers != nil {
+		return nil
+	}
+	if err := u.conn.Subscribe(); err != nil {
+		return err
+	}
+	u.watchers = map[chan struct{}]string{}
+	updates := make(chan *sd.PropertiesUpdate, 64)
+	overflow := make(chan error, 1)
+	u.conn.SetPropertiesSubscriber(updates, overflow)
+	go func() {
+		for {
+			unit := ""
+			select {
+			case <-u.closed:
+				return
+			case up := <-updates:
+				unit = up.UnitName
+			case <-overflow:
+			}
+			u.mu.Lock()
+			for sig, name := range u.watchers {
+				if unit == "" || unit == name {
+					select {
+					case sig <- struct{}{}:
+					default:
+					}
+				}
+			}
+			u.mu.Unlock()
+		}
+	}()
+	return nil
+}
+
+func (u *liveUser) Watch(ctx context.Context, unit string) (<-chan hostsvc.UnitStatus, error) {
+	if err := u.subscribe(); err != nil {
+		return nil, fmt.Errorf("%s: subscribing to unit signals: %w", unit, err)
+	}
+	sig := make(chan struct{}, 1)
+	u.mu.Lock()
+	u.watchers[sig] = unit
+	u.mu.Unlock()
+	out := make(chan hostsvc.UnitStatus, 1)
+	go func() {
+		defer close(out)
+		defer func() {
+			u.mu.Lock()
+			delete(u.watchers, sig)
+			u.mu.Unlock()
+		}()
+		for {
+			st, err := u.status(ctx, unit)
+			if err != nil {
+				return
+			}
+			select {
+			case out <- st:
+			case <-ctx.Done():
+				return
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-sig:
+			}
+		}
+	}()
+	return out, nil
 }
 
 func waitJob(ctx context.Context, unit string, start func(chan<- string) error) error {
@@ -371,7 +456,16 @@ func (u *liveUser) Stop(ctx context.Context, unit string) error {
 	return err
 }
 
-func (u *liveUser) Close() { u.conn.Close() }
+func (u *liveUser) Close() {
+	u.mu.Lock()
+	select {
+	case <-u.closed:
+	default:
+		close(u.closed)
+	}
+	u.mu.Unlock()
+	u.conn.Close()
+}
 
 func (s liveSystem) CheckHost(ctx context.Context, a Account, binary string, role hostcontract.Role, stateDir string) error {
 	u, err := lookupWithin(ctx.Done(), strconv.Itoa(a.UID), func() (*user.User, error) { return user.LookupId(strconv.Itoa(a.UID)) })

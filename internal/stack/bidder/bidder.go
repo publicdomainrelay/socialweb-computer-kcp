@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -21,6 +22,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/marketbidder"
+	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostcontract"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/install"
@@ -209,47 +211,37 @@ func (k *Kcp) Identities() (*kcpclient.MarketIdentities, error) {
 }
 
 func (k *Kcp) WaitIdentityObject(ctx context.Context, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	for {
-		_, err := k.dyn.Resource(compose.MarketIdentityGVR).Get(ctx, marketbidder.BidderIdentity, metav1.GetOptions{})
-		if err == nil {
-			return nil
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("bidder: the core created no MarketIdentity %s within %s: %w", marketbidder.BidderIdentity, timeout, err)
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(Poll):
-		}
+	_, err := ctlruntime.Await(ctx, k.dyn.Resource(compose.MarketIdentityGVR), marketbidder.BidderIdentity, timeout, ctlruntime.Present)
+	if errors.Is(err, ctlruntime.ErrAwaitTimeout) {
+		missing := apierrors.NewNotFound(compose.MarketIdentityGVR.GroupResource(), marketbidder.BidderIdentity)
+		return fmt.Errorf("bidder: the core created no MarketIdentity %s within %s: %w", marketbidder.BidderIdentity, timeout, missing)
 	}
+	return err
 }
 
 func (k *Kcp) WaitReady(ctx context.Context, timeout time.Duration, progress func(v1alpha1.ApplicationStatus)) (*v1alpha1.MarketBidder, error) {
-	deadline := time.Now().Add(timeout)
 	last := ""
-	for {
-		o, err := k.Root(ctx)
-		if err == nil {
-			if key := string(o.Status.Phase) + o.Status.Message; key != last && progress != nil {
-				progress(o.Status)
-				last = key
-			}
-			switch o.Status.Phase {
-			case v1alpha1.ApplicationPhaseReady:
-				return o, nil
-			case v1alpha1.ApplicationPhaseFailed:
-				return o, fmt.Errorf("bidder: the MarketBidder failed: %s", o.Status.Message)
-			}
+	o, err := ctlruntime.AwaitAs(ctx, k.dyn.Resource(compose.MarketBidderGVR), RootName, timeout, func(o *v1alpha1.MarketBidder) (bool, error) {
+		if o == nil {
+			return false, nil
 		}
-		if time.Now().After(deadline) {
-			return o, fmt.Errorf("bidder: the MarketBidder was not Ready within %s", timeout)
+		if key := string(o.Status.Phase) + o.Status.Message; key != last && progress != nil {
+			progress(o.Status)
+			last = key
 		}
-		select {
-		case <-ctx.Done():
-			return o, ctx.Err()
-		case <-time.After(Poll):
-		}
+		return o.Status.Phase == v1alpha1.ApplicationPhaseReady || o.Status.Phase == v1alpha1.ApplicationPhaseFailed, nil
+	})
+	switch {
+	case errors.Is(err, ctlruntime.ErrAwaitTimeout):
+		return o, fmt.Errorf("bidder: the MarketBidder was not Ready within %s", timeout)
+	case err != nil:
+		return o, err
+	case o.Status.Phase == v1alpha1.ApplicationPhaseFailed:
+		return o, fmt.Errorf("bidder: the MarketBidder failed: %s", o.Status.Message)
 	}
+	return o, nil
+}
+
+func (k *Kcp) AwaitIdentity(ctx context.Context, name string, each func(*v1alpha1.MarketIdentity) (bool, error)) (*v1alpha1.MarketIdentity, error) {
+	return ctlruntime.AwaitAs(ctx, k.dyn.Resource(compose.MarketIdentityGVR), name, 0, each)
 }

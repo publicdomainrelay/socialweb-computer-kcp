@@ -141,7 +141,7 @@ func (p *pass) retry(phase v1alpha1.ApplicationPhase, what string, err error) (c
 
 func (p *pass) waiting(msg string) (ctlruntime.Result, error) {
 	p.st.Phase, p.st.Message = v1alpha1.ApplicationPhaseDeleting, msg
-	return ctlruntime.Result{Waiting: true, RequeueAfter: compose.WaitAfter}, p.c.WriteStatus(p.ctx, p.r, compose.MarketNetworkGVR, p.st)
+	return ctlruntime.Result{Waiting: true}, p.c.WriteStatus(p.ctx, p.r, compose.MarketNetworkGVR, p.st)
 }
 
 func (ctl *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, o *v1alpha1.MarketNetwork) (ctlruntime.Result, error) {
@@ -169,7 +169,8 @@ func (ctl *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, o 
 
 func (p *pass) delete(ctx context.Context) (ctlruntime.Result, error) {
 	if err := p.ctl.teardownAll(ctx, p.r, nil); err != nil {
-		return p.waiting(err.Error())
+		res, werr := p.waiting(err.Error())
+		return res, errors.Join(err, werr)
 	}
 	left, err := p.c.StopComponents(ctx, p.r, "")
 	if err != nil {

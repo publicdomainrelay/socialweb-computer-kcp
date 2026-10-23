@@ -286,7 +286,7 @@ func (p *pass) delete(ctx context.Context) (ctlruntime.Result, error) {
 	}
 	if left > 0 {
 		p.st.Phase, p.st.Message = v1alpha1.ApplicationPhaseDeleting, fmt.Sprintf("%d component(s) stopping", left)
-		return ctlruntime.Result{Waiting: true, RequeueAfter: compose.WaitAfter}, p.c.WriteStatus(ctx, p.r, compose.SshGatewayGVR, p.st)
+		return ctlruntime.Result{Waiting: true}, p.c.WriteStatus(ctx, p.r, compose.SshGatewayGVR, p.st)
 	}
 	p.c.Drop(p.r)
 	return ctlruntime.Result{}, nil

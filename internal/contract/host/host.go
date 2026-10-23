@@ -156,6 +156,10 @@ type Units interface {
 	Close() error
 }
 
+type Processes interface {
+	Wait(ctx context.Context, pid int, startTicks uint64) error
+}
+
 type Clock interface {
 	Now() time.Time
 	After(d time.Duration) <-chan time.Time

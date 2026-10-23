@@ -24,14 +24,6 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/participant"
 )
 
-const (
-	bidPollPeriod = time.Second
-
-	guestEventPollPeriod = 500 * time.Millisecond
-
-	terminationPollPeriod = time.Second
-)
-
 type contractRunner struct {
 	q *Requester
 
@@ -408,7 +400,7 @@ func (r *contractRunner) requestOnce(ctx context.Context) (bool, error) {
 	responseBids := r.solicitBids(ctx, bidders, rfpURI, rfpCID)
 
 	usePolicy := policyRef != nil
-	winner, allBids, retry, err := r.collectBids(ctx, rfpURI, responseBids, bidders, usePolicy, policyWorkflow)
+	winner, allBids, retry, err := r.collectBids(ctx, rfpURI, responseBids, usePolicy, policyWorkflow)
 	if err != nil {
 		return false, err
 	}
@@ -555,7 +547,7 @@ func (r *contractRunner) solicitBids(ctx context.Context, bidders []Bidder, rfpU
 }
 
 func (r *contractRunner) runGuestAndHold(ctx context.Context, state *v1alpha1.NodeClaimContract, receiptURI, bidderDID string) error {
-	if err := r.waitGuest(ctx, state, receiptURI, bidderDID); err != nil {
+	if err := r.waitGuest(ctx, state, receiptURI); err != nil {
 		return err
 	}
 	if r.released() {
@@ -737,7 +729,7 @@ func (r *contractRunner) verifyRecordedReceipt(ctx context.Context, state *v1alp
 	return verification.OK, nil
 }
 
-func (r *contractRunner) collectBids(ctx context.Context, rfpURI string, response []BidRecord, bidders []Bidder, usePolicy bool, workflow string) (*BidRecord, []v1alpha1.ContractBid, bool, error) {
+func (r *contractRunner) collectBids(ctx context.Context, rfpURI string, response []BidRecord, usePolicy bool, workflow string) (*BidRecord, []v1alpha1.ContractBid, bool, error) {
 	q := r.q
 	window := time.NewTimer(max(q.cfg.BidWindow, 0))
 	defer window.Stop()
@@ -752,8 +744,6 @@ func (r *contractRunner) collectBids(ctx context.Context, rfpURI string, respons
 		}
 	}
 	add(response)
-	poll := time.NewTicker(bidPollPeriod)
-	defer poll.Stop()
 	var selected *BidRecord
 	open := q.cfg.BidWindow > 0
 	for selected == nil {
@@ -774,12 +764,6 @@ func (r *contractRunner) collectBids(ctx context.Context, rfpURI string, respons
 		case <-window.C:
 			open = false
 		case <-arrived:
-		case <-poll.C:
-			for _, bidder := range bidders {
-				if bids, err := q.market.FindBids(ctx, bidder.DID, rfpURI); err == nil {
-					add(bids)
-				}
-			}
 		}
 	}
 	add(q.bids.take(rfpURI))
@@ -853,7 +837,7 @@ func (r *contractRunner) bestBid(ctx context.Context, bids map[string]BidRecord,
 	return best
 }
 
-func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClaimContract, receiptURI, bidderDID string) error {
+func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClaimContract, receiptURI string) error {
 	events, pending, closeEvents := r.q.registerEventSink(receiptURI)
 	defer closeEvents()
 	addressDeadline := time.NewTimer(DefaultVMReadyTimeout)
@@ -863,7 +847,6 @@ func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClai
 	addressLate, hostKeysLate := false, false
 	seen := map[string]bool{}
 	seedGuestEventSeen(seen, state)
-	emptyLogged := false
 	handle := func(event MarketEvent) bool {
 		if guestEventSeen(seen, event) {
 			return false
@@ -907,8 +890,9 @@ func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClai
 	if slices.ContainsFunc(pending, handle) {
 		return nil
 	}
-	poll := time.NewTicker(guestEventPollPeriod)
-	defer poll.Stop()
+	var retry eventRetry
+	defer retry.stop()
+	retryC := retry.after(r.q.drainEvents(ctx, r.name, receiptURI))
 	for {
 		if state.Termination != nil {
 			return nil
@@ -939,25 +923,14 @@ func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClai
 			if handle(event) {
 				return nil
 			}
-		case <-poll.C:
-			found, err := r.q.market.FindEvents(ctx, bidderDID, receiptURI)
-			if err != nil {
-				r.log().Warn("requester_event_poll_failed", "bidder", bidderDID, "err", err)
-				continue
-			}
-			if len(found) == 0 && !emptyLogged {
-				emptyLogged = true
-				r.log().Warn("requester_event_poll_empty", "bidder", bidderDID, "receipt", receiptURI)
-			}
-			if slices.ContainsFunc(found, handle) {
-				return nil
-			}
+		case <-retryC:
+			retryC = retry.after(r.q.drainEvents(ctx, r.name, receiptURI))
 		}
 	}
 }
 
 func (r *contractRunner) waitForRelease(ctx context.Context, state *v1alpha1.NodeClaimContract, receiptURI, bidderDID string) error {
-	events, _, closeEvents := r.q.registerEventSink(receiptURI)
+	events, pending, closeEvents := r.q.registerEventSink(receiptURI)
 	defer closeEvents()
 	seen := map[string]bool{}
 	seedGuestEventSeen(seen, state)
@@ -976,8 +949,12 @@ func (r *contractRunner) waitForRelease(ctx context.Context, state *v1alpha1.Nod
 		r.writeStatus(ctx, v1alpha1.ComputeContractReleased, terminationMessage(parsed.Termination), state, r.currentBids(), r.currentChosen(), false, "terminated", 1)
 		return true
 	}
-	poll := time.NewTicker(terminationPollPeriod)
-	defer poll.Stop()
+	if slices.ContainsFunc(pending, handle) {
+		return nil
+	}
+	var retry eventRetry
+	defer retry.stop()
+	retryC := retry.after(r.q.drainEvents(ctx, r.name, receiptURI))
 	for {
 		if state.Termination != nil {
 			return nil
@@ -995,14 +972,8 @@ func (r *contractRunner) waitForRelease(ctx context.Context, state *v1alpha1.Nod
 			if handle(event) {
 				return nil
 			}
-		case <-poll.C:
-			found, err := r.q.market.FindTerminations(ctx, bidderDID, receiptURI)
-			if err != nil {
-				continue
-			}
-			if slices.ContainsFunc(found, handle) {
-				return nil
-			}
+		case <-retryC:
+			retryC = retry.after(r.q.drainEvents(ctx, r.name, receiptURI))
 		}
 	}
 }

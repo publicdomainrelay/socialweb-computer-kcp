@@ -24,8 +24,12 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/cache"
+	watchtools "k8s.io/client-go/tools/watch"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
@@ -674,41 +678,122 @@ func (a *Applier) wait(ctx context.Context, set manifests.Set, p manifests.Phase
 		}
 	}
 	start := time.Now()
-	deadline := start.Add(a.opts.WaitTimeout)
+	var met bool
+	var captured string
 	var last error
-	for {
-		met, captured, err := a.check(ctx, dyn, kind.Resource, kind.Namespaced, w, names)
-		last = err
-		if errors.Is(err, ErrWaitFailed) && !w.BestEffort {
-			wr.Seconds = time.Since(start).Seconds()
-			return wr, fmt.Errorf("%s %v in %s for %s: %w", w.Kind, names, ws, w.For, err)
-		}
-		if met {
-			wr.Met, wr.Seconds = true, time.Since(start).Seconds()
-			if w.Capture != nil {
-				if err := manifests.SetCaptured(values, *w.Capture, captured); err != nil {
-					return wr, err
-				}
-				wr.Captured = captured
-			}
-			return wr, nil
-		}
-		if a.opts.DryRun || time.Now().After(deadline) {
-			wr.Seconds = time.Since(start).Seconds()
-			if a.opts.DryRun || w.BestEffort {
-				a.opts.Log.Warn("wait not met; continuing", "kind", w.Kind, "name", w.Name, "workspace", ws, "for", w.For, "dryRun", a.opts.DryRun, "err", last)
-				return wr, nil
-			}
-			return wr, fmt.Errorf("%w: %s %v in %s for %s after %s (last error: %v)", ErrWaitTimedOut, w.Kind, names, ws, w.For, a.opts.WaitTimeout, last)
-		}
-		t := time.NewTimer(a.opts.Poll)
-		select {
-		case <-ctx.Done():
-			t.Stop()
-			return wr, ctx.Err()
-		case <-t.C:
-		}
+	if a.opts.DryRun {
+		met, captured, last = a.check(ctx, dyn, kind.Resource, kind.Namespaced, w, names)
+	} else {
+		met, captured, last = a.watchFor(ctx, dyn, kind.Resource, kind.Namespaced, w, names)
 	}
+	wr.Seconds = time.Since(start).Seconds()
+	if errors.Is(last, ErrWaitFailed) && !w.BestEffort {
+		return wr, fmt.Errorf("%s %v in %s for %s: %w", w.Kind, names, ws, w.For, last)
+	}
+	if met {
+		wr.Met = true
+		if w.Capture != nil {
+			if err := manifests.SetCaptured(values, *w.Capture, captured); err != nil {
+				return wr, err
+			}
+			wr.Captured = captured
+		}
+		return wr, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return wr, err
+	}
+	if a.opts.DryRun || w.BestEffort {
+		a.opts.Log.Warn("wait not met; continuing", "kind", w.Kind, "name", w.Name, "workspace", ws, "for", w.For, "dryRun", a.opts.DryRun, "err", last)
+		return wr, nil
+	}
+	return wr, fmt.Errorf("%w: %s %v in %s for %s after %s (last error: %v)", ErrWaitTimedOut, w.Kind, names, ws, w.For, a.opts.WaitTimeout, last)
+}
+
+func (a *Applier) watchFor(ctx context.Context, dyn dynamic.Interface, gvr schema.GroupVersionResource, namespaced bool, w manifests.Wait, names []string) (bool, string, error) {
+	var ri dynamic.ResourceInterface = dyn.Resource(gvr)
+	if namespaced {
+		ri = dyn.Resource(gvr).Namespace(defaultNamespace)
+	}
+	wctx, cancel := context.WithTimeout(ctx, a.opts.WaitTimeout)
+	defer cancel()
+	lw := &cache.ListWatch{
+		ListWithContextFunc:  func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) { return ri.List(ctx, o) },
+		WatchFuncWithContext: func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) { return ri.Watch(ctx, o) },
+	}
+	seen := map[string]*unstructured.Unstructured{}
+	var met bool
+	var captured string
+	var last error = fmt.Errorf("no %s observed yet", w.Kind)
+	eval := func() (bool, error) {
+		met, captured, last = a.evaluate(w, names, seen)
+		if errors.Is(last, ErrWaitFailed) && !w.BestEffort {
+			return false, last
+		}
+		return met, nil
+	}
+	_, err := watchtools.UntilWithSync(wctx, lw, &unstructured.Unstructured{}, func(store cache.Store) (bool, error) {
+		for _, item := range store.List() {
+			if u, ok := item.(*unstructured.Unstructured); ok {
+				seen[u.GetName()] = u
+			}
+		}
+		return eval()
+	}, func(ev watch.Event) (bool, error) {
+		u, ok := ev.Object.(*unstructured.Unstructured)
+		if !ok {
+			return false, nil
+		}
+		switch ev.Type {
+		case watch.Deleted:
+			delete(seen, u.GetName())
+		case watch.Added, watch.Modified:
+			seen[u.GetName()] = u
+		default:
+			return false, nil
+		}
+		return eval()
+	})
+	if met {
+		return true, captured, nil
+	}
+	if errors.Is(last, ErrWaitFailed) {
+		return false, "", last
+	}
+	if err != nil && !wait.Interrupted(err) && !errors.Is(err, watchtools.ErrWatchClosed) {
+		last = err
+	}
+	return false, "", last
+}
+
+func (a *Applier) evaluate(w manifests.Wait, names []string, seen map[string]*unstructured.Unstructured) (bool, string, error) {
+	if w.Kind == "APIBinding" {
+		if len(seen) == 0 {
+			return false, "", errors.New("no APIBinding yet")
+		}
+		for name, u := range seen {
+			if met, _ := w.Met(u); !met {
+				return false, "", fmt.Errorf("APIBinding %s not Ready", name)
+			}
+		}
+		return true, "", nil
+	}
+	captured := ""
+	for _, n := range names {
+		u, ok := seen[n]
+		if !ok {
+			return false, "", fmt.Errorf("%s %s not found", w.Kind, n)
+		}
+		met, value := w.Met(u)
+		if !met {
+			if why := failedObject(u); why != "" {
+				return false, "", fmt.Errorf("%w: %s %s %s", ErrWaitFailed, w.Kind, n, why)
+			}
+			return false, "", fmt.Errorf("%s %s not %s", w.Kind, n, w.For)
+		}
+		captured = value
+	}
+	return true, captured, nil
 }
 
 func (a *Applier) check(ctx context.Context, dyn dynamic.Interface, gvr schema.GroupVersionResource, namespaced bool, w manifests.Wait, names []string) (bool, string, error) {

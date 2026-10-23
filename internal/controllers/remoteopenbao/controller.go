@@ -8,7 +8,6 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/remoteopenbao"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 )
@@ -51,7 +50,7 @@ func New(opts Options) *Controller {
 		log = slog.New(slog.DiscardHandler)
 	}
 	return &Controller{log: log.With("component", "remoteopenbao-controller"), prober: remoteopenbao.New(opts.Remote, opts.Timeout, log),
-		checkInterval: opt.Positive(opts.CheckInterval, DefaultCheckInterval)}
+		checkInterval: ctlruntime.Period(opts.CheckInterval, DefaultCheckInterval)}
 }
 
 func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
@@ -84,5 +83,5 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 	}
 	c.log.Debug("the RemoteOpenBao answered", "cluster", req.Cluster, "workspace", req.Workspace, "name", req.Name,
 		"address", status.Address, "fieldManager", req.FieldManager())
-	return ctlruntime.Result{RequeueAfter: c.checkInterval}, nil
+	return ctlruntime.RefreshAfter(c.checkInterval), nil
 }

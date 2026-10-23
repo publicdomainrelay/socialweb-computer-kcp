@@ -12,16 +12,22 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	kruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/cache"
+	watchtools "k8s.io/client-go/tools/watch"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap/table"
+	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostprocess"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpapply"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 )
 
@@ -35,7 +41,12 @@ const (
 	ChildWorkspaceReady = 30 * time.Second
 )
 
-var workspacesGVR = schema.GroupVersionResource{Group: "tenancy.kcp.io", Version: "v1alpha1", Resource: "workspaces"}
+var (
+	workspacesGVR  = schema.GroupVersionResource{Group: "tenancy.kcp.io", Version: "v1alpha1", Resource: "workspaces"}
+	apiBindingsGVR = schema.GroupVersionResource{Group: "apis.kcp.io", Version: "v1alpha2", Resource: "apibindings"}
+)
+
+const hostProcessExport = "hostprocesses"
 
 var sweptKinds = []string{hostsvc.NamePrefix + "kcp-", hostsvc.NamePrefix + "core-", hostsvc.NamePrefix + "hp-"}
 
@@ -69,25 +80,25 @@ func workspacePhase(u *unstructured.Unstructured) string {
 }
 
 func WaitHost(ctx context.Context, kubeconfig string, timeout time.Duration) error {
+	parent, name, _ := strings.Cut(DevWorkspace, ":")
+	root, err := clusterClient(kubeconfig, parent)
+	if err != nil {
+		return err
+	}
 	dc, err := clusterClient(kubeconfig, DevWorkspace)
 	if err != nil {
 		return err
 	}
-	deadline := time.Now().Add(timeout)
-	for {
-		_, err := dc.Resource(workspacesGVR).List(ctx, metav1.ListOptions{Limit: 1})
-		if err == nil {
-			return nil
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("devinstance: the dev host's %s did not serve workspaces within %s: %w", DevWorkspace, timeout, err)
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(200 * time.Millisecond):
-		}
+	_, err = ctlruntime.Await(ctx, root.Resource(workspacesGVR), name, timeout, func(u *unstructured.Unstructured) (bool, error) {
+		return u != nil && workspacePhase(u) == "Ready", nil
+	})
+	if err == nil {
+		_, err = dc.Resource(workspacesGVR).List(ctx, metav1.ListOptions{Limit: 1})
 	}
+	if err != nil {
+		return fmt.Errorf("devinstance: the dev host's %s did not serve workspaces within %s: %w", DevWorkspace, timeout, err)
+	}
+	return nil
 }
 
 func EnsureChildWorkspace(ctx context.Context, kubeconfig, id string, timeout time.Duration) error {
@@ -111,30 +122,54 @@ func EnsureChildWorkspace(ctx context.Context, kubeconfig, id string, timeout ti
 	if err != nil {
 		return err
 	}
-	deadline := time.Now().Add(timeout)
-	for {
-		cur, err := ws.Get(ctx, id, metav1.GetOptions{})
-		if err == nil && cur.GetDeletionTimestamp() != nil {
-			return fmt.Errorf("devinstance: workspace %s is being deleted in the parent; wait for it to go, then dev up again", ChildWorkspace(id))
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	cur, err := ctlruntime.Await(ctx, ws, id, 0, func(u *unstructured.Unstructured) (bool, error) {
+		if u != nil && u.GetDeletionTimestamp() != nil {
+			return false, fmt.Errorf("devinstance: workspace %s is being deleted in the parent; wait for it to go, then dev up again", ChildWorkspace(id))
 		}
-		phase := ""
-		if err == nil {
-			phase = workspacePhase(cur)
-		}
-		if phase == "Ready" {
-			if _, err = child.Resource(hostprocess.GVR).List(ctx, metav1.ListOptions{Limit: 1}); err == nil {
-				return nil
+		return u != nil && workspacePhase(u) == "Ready", nil
+	})
+	phase := ""
+	if cur != nil {
+		phase = workspacePhase(cur)
+	}
+	if err == nil {
+		err = awaitBound(ctx, child.Resource(apiBindingsGVR), hostProcessExport)
+	}
+	if err == nil {
+		_, err = child.Resource(hostprocess.GVR).List(ctx, metav1.ListOptions{Limit: 1})
+	}
+	if err != nil {
+		return fmt.Errorf("devinstance: workspace %s did not become Ready with the HostProcess API bound within %s (phase %q): %w", ChildWorkspace(id), timeout, phase, err)
+	}
+	return nil
+}
+
+func awaitBound(ctx context.Context, bindings dynamic.ResourceInterface, export string) error {
+	lw := &cache.ListWatch{
+		ListWithContextFunc: func(ctx context.Context, o metav1.ListOptions) (kruntime.Object, error) { return bindings.List(ctx, o) },
+		WatchFuncWithContext: func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) {
+			return bindings.Watch(ctx, o)
+		},
+	}
+	bound := func(u *unstructured.Unstructured) bool {
+		name, _, _ := unstructured.NestedString(u.Object, "spec", "reference", "export", "name")
+		phase, _, _ := unstructured.NestedString(u.Object, "status", "phase")
+		return name == export && phase == "Bound"
+	}
+	_, err := watchtools.UntilWithSync(ctx, lw, &unstructured.Unstructured{}, func(store cache.Store) (bool, error) {
+		for _, item := range store.List() {
+			if u, ok := item.(*unstructured.Unstructured); ok && bound(u) {
+				return true, nil
 			}
 		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("devinstance: workspace %s did not become Ready with the HostProcess API bound within %s (phase %q): %v", ChildWorkspace(id), timeout, phase, err)
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(200 * time.Millisecond):
-		}
-	}
+		return false, nil
+	}, func(ev watch.Event) (bool, error) {
+		u, ok := ev.Object.(*unstructured.Unstructured)
+		return ok && ev.Type != watch.Deleted && bound(u), nil
+	})
+	return err
 }
 
 func DeleteChildWorkspace(ctx context.Context, kubeconfig, id string) error {
@@ -184,7 +219,7 @@ type HostConfig struct {
 
 type host struct {
 	c        HostConfig
-	ws       dynamic.ResourceInterface
+	store    cache.Store
 	children map[string]context.CancelFunc
 	wg       sync.WaitGroup
 }
@@ -236,14 +271,44 @@ func RunHost(ctx context.Context, c HostConfig) {
 		log.Error("the root:dev client", "err", err.Error())
 		return
 	}
-	h := &host{c: c, ws: dc.Resource(workspacesGVR), children: map[string]context.CancelFunc{}}
-	log.Info("the dev host places its children's HostProcess objects", "workspace", DevWorkspace)
-	t := time.NewTicker(HostInterval)
-	defer t.Stop()
-	for {
-		if err := h.pass(ctx, log); err != nil {
-			log.Warn("a dev-host pass failed; children keep running", "err", err.Error())
+	kick := make(chan struct{}, 1)
+	nudge := func() {
+		select {
+		case kick <- struct{}{}:
+		default:
 		}
+	}
+	ws := dc.Resource(workspacesGVR)
+	informer := cache.NewSharedIndexInformer(&cache.ListWatch{
+		ListWithContextFunc:  func(ctx context.Context, o metav1.ListOptions) (kruntime.Object, error) { return ws.List(ctx, o) },
+		WatchFuncWithContext: func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) { return ws.Watch(ctx, o) },
+	}, &unstructured.Unstructured{}, 0, cache.Indexers{})
+	if _, err := informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc:    func(any) { nudge() },
+		UpdateFunc: func(any, any) { nudge() },
+		DeleteFunc: func(any) { nudge() },
+	}); err != nil {
+		log.Error("the root:dev workspace watch", "err", err.Error())
+		return
+	}
+	h := &host{c: c, store: informer.GetStore(), children: map[string]context.CancelFunc{}}
+	var watches sync.WaitGroup
+	wctx, stopWatches := context.WithCancel(ctx)
+	watches.Go(func() { informer.RunWithContext(wctx) })
+	for _, k := range sweptKinds {
+		watches.Go(func() { followUnits(wctx, c.Manager, k, nudge, log) })
+	}
+	defer func() {
+		stopWatches()
+		watches.Wait()
+	}()
+	if !cache.WaitForCacheSync(ctx.Done(), informer.HasSynced) {
+		return
+	}
+	log.Info("the dev host places its children's HostProcess objects", "workspace", DevWorkspace)
+	retry := time.NewTimer(0)
+	defer retry.Stop()
+	for {
 		select {
 		case <-ctx.Done():
 			for _, cancel := range h.children {
@@ -251,20 +316,41 @@ func RunHost(ctx context.Context, c HostConfig) {
 			}
 			h.wg.Wait()
 			return
-		case <-t.C:
+		case <-kick:
+		case <-retry.C:
+		}
+		if err := h.pass(ctx, log); err != nil {
+			log.Warn("a dev-host pass failed; children keep running", "err", err.Error())
+			retry.Reset(HostInterval)
+		}
+	}
+}
+
+func followUnits(ctx context.Context, m hostsvc.Manager, prefix string, changed func(), log *slog.Logger) {
+	for ctx.Err() == nil {
+		events, err := m.Watch(ctx, prefix)
+		if err != nil {
+			log.Warn("watching the units a dev host sweeps", "prefix", prefix, "err", err.Error())
+		} else {
+			changed()
+			for range events {
+				changed()
+			}
+		}
+		if !clock.Sleep(ctx, hostprocess.RetryAfter) {
+			return
 		}
 	}
 }
 
 func (h *host) pass(ctx context.Context, log *slog.Logger) error {
-	list, err := h.ws.List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return err
-	}
 	keep := append([]string(nil), h.c.Own...)
 	live := map[string]bool{}
-	for i := range list.Items {
-		w := &list.Items[i]
+	for _, item := range h.store.List() {
+		w, ok := item.(*unstructured.Unstructured)
+		if !ok {
+			continue
+		}
 		id := w.GetName()
 		if w.GetDeletionTimestamp() != nil {
 			continue

@@ -195,32 +195,29 @@ func (r *linkRun) ready(ctx context.Context, p procgroup.Member) error {
 	ctx, cancel := context.WithTimeout(ctx, GateTimeout)
 	defer cancel()
 	key := r.currentKey()
-	tick := time.NewTicker(PollInterval)
-	defer tick.Stop()
-	for {
-		if ticket, ok := clusterlink.TicketIn(p.Output()); ok {
-			status, err := clusterlink.Listening(key, ticket)
-			if err != nil {
-				return err
-			}
-			link := clusterlink.Object(r.cluster, r.target.service, r.target.port, status)
-			wctx, done := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
-			r.links.writes.Go(func() {
-				defer done()
-				r.retry(wctx, "Listening", func() error { return r.links.Recorder.WriteLink(wctx, link) })
-			})
-			return nil
+	return untilOutput(ctx, p, func(out string) (bool, error) {
+		ticket, ok := clusterlink.TicketIn(out)
+		if !ok {
+			return false, nil
 		}
-		select {
-		case <-ctx.Done():
-			return &errNotReady{
-				what: "the " + string(r.target.service) + " link of " + r.cluster + ". dumbpipe prints " +
-					"its ticket once its endpoint is bound, after one try at its home relay",
-				last: tail(p.Output()),
-			}
-		case <-tick.C:
+		status, err := clusterlink.Listening(key, ticket)
+		if err != nil {
+			return false, err
 		}
-	}
+		link := clusterlink.Object(r.cluster, r.target.service, r.target.port, status)
+		wctx, done := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
+		r.links.writes.Go(func() {
+			defer done()
+			r.retry(wctx, "Listening", func() error { return r.links.Recorder.WriteLink(wctx, link) })
+		})
+		return true, nil
+	}, func() error {
+		return &errNotReady{
+			what: "the " + string(r.target.service) + " link of " + r.cluster + ". dumbpipe prints " +
+				"its ticket once its endpoint is bound, after one try at its home relay",
+			last: tail(p.Output()),
+		}
+	})
 }
 
 func (r *linkRun) retry(ctx context.Context, phase string, write func() error) {

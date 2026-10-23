@@ -30,11 +30,11 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostos"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostprocess"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/jsonx"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/kcprest"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/lease/local"
 )
 
 const (
@@ -43,7 +43,8 @@ const (
 	CoreTokenTTL        = 30 * 24 * time.Hour
 	CoreTokenRenewAfter = 7 * 24 * time.Hour
 	ChildDeleteTimeout  = 2 * time.Minute
-	ChildPoll           = 200 * time.Millisecond
+	ChildKillGrace      = 5 * time.Second
+	ChildLockTimeout    = 2 * time.Minute
 
 	StoppedMessage = "stopped: its core and its components are down; its workspace and state dir are kept and clearing spec.apps[].stopped starts them again from it"
 )
@@ -135,19 +136,32 @@ func lockChild(ctx context.Context, path string) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	deadline := time.Now().Add(2 * time.Minute)
-	for {
-		if err := hostos.Lock(f, hostos.LockExclusive|hostos.LockNonBlocking); err == nil {
-			return f, nil
-		}
-		if time.Now().After(deadline) {
+	if err := hostos.Lock(f, hostos.LockExclusive|hostos.LockNonBlocking); err == nil {
+		return f, nil
+	}
+	got := make(chan error, 1)
+	go func() { got <- hostos.Lock(f, hostos.LockExclusive) }()
+	abandon := func() {
+		go func() {
+			<-got
 			f.Close()
-			return nil, fmt.Errorf("%s stayed locked", path)
-		}
-		if !clock.Sleep(ctx, 100*time.Millisecond) {
+		}()
+	}
+	timer := time.NewTimer(ChildLockTimeout)
+	defer timer.Stop()
+	select {
+	case err := <-got:
+		if err != nil {
 			f.Close()
-			return nil, ctx.Err()
+			return nil, err
 		}
+		return f, nil
+	case <-timer.C:
+		abandon()
+		return nil, fmt.Errorf("%s stayed locked", path)
+	case <-ctx.Done():
+		abandon()
+		return nil, ctx.Err()
 	}
 }
 
@@ -238,17 +252,31 @@ func (ctl *Controller) placeChild(ctx context.Context, r compose.Root, ch child,
 }
 
 func waitChildCore(ctx context.Context, l devinstance.Layout, invocation string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
+	wctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	changed, err := local.Watch(wctx, l.CoreRecord)
+	if err != nil {
+		return fmt.Errorf("the core of %s: following its record %s: %w", l.ID, l.CoreRecord, err)
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 	for {
 		var core devinstance.Core
 		if err := fsx.ReadJSON(l.CoreRecord, &core); err == nil && core.InvocationID == invocation && !core.AdoptedAt.IsZero() {
 			return nil
 		}
-		if time.Now().After(deadline) {
+		select {
+		case _, ok := <-changed:
+			if !ok {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				return fmt.Errorf("the core of %s: the watch of its record %s closed", l.ID, l.CoreRecord)
+			}
+		case <-timer.C:
 			b, _ := os.ReadFile(filepath.Join(l.Logs, "core.log"))
 			return fmt.Errorf("the core of %s (invocation %s) did not record its adoption within %s\n%s", l.ID, invocation, timeout, tail(b, 2048))
-		}
-		if !clock.Sleep(ctx, ChildPoll) {
+		case <-ctx.Done():
 			return ctx.Err()
 		}
 	}
@@ -305,11 +333,80 @@ func (ctl *Controller) liveUnits(ctx context.Context, ch child) ([]hostsvc.UnitS
 	}
 	var live []hostsvc.UnitStatus
 	for _, u := range units {
-		if u.State == hostsvc.Active || u.State == hostsvc.Activating || u.State == hostsvc.Deactivating {
+		if unitLive(u) {
 			live = append(live, u)
 		}
 	}
 	return live, nil
+}
+
+func unitLive(u hostsvc.UnitStatus) bool {
+	return u.State == hostsvc.Active || u.State == hostsvc.Activating || u.State == hostsvc.Deactivating
+}
+
+func (ctl *Controller) awaitUnitsDown(ctx context.Context, ch child, timeout time.Duration) ([]hostsvc.UnitStatus, bool, error) {
+	m := ctl.c.Config().Manager
+	wctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	events := make(chan hostsvc.UnitEvent)
+	closed := make(chan struct{}, len(devinstance.Prefixes(ch.id)))
+	for _, prefix := range devinstance.Prefixes(ch.id) {
+		src, err := m.Watch(wctx, prefix)
+		if err != nil {
+			return nil, false, fmt.Errorf("following the units of %s: %w", ch.id, err)
+		}
+		go func() {
+			for ev := range src {
+				select {
+				case events <- ev:
+				case <-wctx.Done():
+					return
+				}
+			}
+			closed <- struct{}{}
+		}()
+	}
+	units, err := devinstance.ChildUnits(wctx, m, ch.id)
+	if err != nil {
+		return nil, false, err
+	}
+	state := map[string]hostsvc.UnitStatus{}
+	for _, u := range units {
+		state[u.Name] = u
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	for {
+		var live []hostsvc.UnitStatus
+		for _, u := range state {
+			if unitLive(u) {
+				live = append(live, u)
+			}
+		}
+		if len(live) == 0 {
+			return nil, false, nil
+		}
+		slices.SortFunc(live, func(a, b hostsvc.UnitStatus) int { return strings.Compare(a.Name, b.Name) })
+		select {
+		case ev := <-events:
+			if ev.Status.State == hostsvc.NotFound {
+				delete(state, ev.Name)
+				continue
+			}
+			st := ev.Status
+			st.Name = cmp.Or(st.Name, ev.Name)
+			state[ev.Name] = st
+		case <-closed:
+			if ctx.Err() != nil {
+				return live, false, ctx.Err()
+			}
+			return live, false, fmt.Errorf("the watch of the units of %s closed with %d unit(s) still running", ch.id, len(live))
+		case <-timer.C:
+			return live, true, nil
+		case <-ctx.Done():
+			return live, false, ctx.Err()
+		}
+	}
 }
 
 func (ctl *Controller) stopChild(ctx context.Context, ch child) error {
@@ -318,7 +415,7 @@ func (ctl *Controller) stopChild(ctx context.Context, ch child) error {
 		return err
 	}
 	if len(live) == 0 {
-		KillUnder(ch.layout.StateDir, ChildPoll*25)
+		KillUnder(ch.layout.StateDir, ChildKillGrace)
 		return nil
 	}
 	log := ctl.log().With("child", ch.id)
@@ -328,24 +425,18 @@ func (ctl *Controller) stopChild(ctx context.Context, ch child) error {
 	if err := devinstance.DeleteChildWorkspace(ctx, ctl.c.Config().Kubeconfig, ch.id); err != nil {
 		return err
 	}
-	deadline := time.Now().Add(ChildDeleteTimeout)
-	for len(live) > 0 {
-		if time.Now().After(deadline) {
-			for _, u := range live {
-				if err := ctl.c.Config().Manager.Stop(ctx, u.Name); err != nil {
-					log.Warn("stopping a unit the supervisor left running", "unit", u.Name, "err", err.Error())
-				}
+	live, timedOut, err := ctl.awaitUnitsDown(ctx, ch, ChildDeleteTimeout)
+	if err != nil {
+		return err
+	}
+	if timedOut {
+		for _, u := range live {
+			if err := ctl.c.Config().Manager.Stop(ctx, u.Name); err != nil {
+				log.Warn("stopping a unit the supervisor left running", "unit", u.Name, "err", err.Error())
 			}
-			break
-		}
-		if !clock.Sleep(ctx, ChildPoll) {
-			return ctx.Err()
-		}
-		if live, err = ctl.liveUnits(ctx, ch); err != nil {
-			return err
 		}
 	}
-	if pids := KillUnder(ch.layout.StateDir, ChildPoll*25); len(pids) > 0 {
+	if pids := KillUnder(ch.layout.StateDir, ChildKillGrace); len(pids) > 0 {
 		log.Warn("stopped processes of the child its units left behind", "pids", fmt.Sprint(pids))
 	}
 	if err := os.Remove(filepath.Join(ch.layout.StateDir, CoreKubeconfig)); err != nil && !os.IsNotExist(err) {
@@ -389,29 +480,17 @@ func (ctl *Controller) teardownChild(ctx context.Context, ch child) error {
 	if err := devinstance.DeleteChildWorkspace(ctx, ctl.c.Config().Kubeconfig, ch.id); err != nil {
 		return err
 	}
-	deadline := time.Now().Add(ChildDeleteTimeout)
-	for {
-		units, err := devinstance.ChildUnits(ctx, ctl.c.Config().Manager, ch.id)
-		live := 0
-		for _, u := range units {
-			if u.State == hostsvc.Active || u.State == hostsvc.Activating || u.State == hostsvc.Deactivating {
-				live++
-			}
-		}
-		if err == nil && live == 0 {
-			break
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("%d unit(s) of %s still run after its workspace was deleted", live, ch.id)
-		}
-		if !clock.Sleep(ctx, ChildPoll) {
-			return ctx.Err()
-		}
+	live, timedOut, err := ctl.awaitUnitsDown(ctx, ch, ChildDeleteTimeout)
+	if err != nil {
+		return err
 	}
-	if pids := KillUnder(ch.layout.StateDir, ChildPoll*25); len(pids) > 0 {
+	if timedOut {
+		return fmt.Errorf("%d unit(s) of %s still run after its workspace was deleted", len(live), ch.id)
+	}
+	if pids := KillUnder(ch.layout.StateDir, ChildKillGrace); len(pids) > 0 {
 		log.Warn("stopped processes of the child its units left behind", "pids", fmt.Sprint(pids))
 	}
-	err := errors.Join(assets.RemoveTree(ch.layout.StateDir), assets.RemoveTree(ch.layout.RuntimeDir))
+	err = errors.Join(assets.RemoveTree(ch.layout.StateDir), assets.RemoveTree(ch.layout.RuntimeDir))
 	log.Info("a child application is gone: its root object, its workspace, its core and its state", "err", fmt.Sprint(err))
 	return err
 }

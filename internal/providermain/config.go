@@ -95,8 +95,6 @@ const DefaultGrantPath = "deploy/tenant-grant.yaml"
 
 const DefaultUnitPrefix = "socialweb-"
 
-const DefaultInterval = 2 * time.Second
-
 const DefaultReclaimGrace = 5 * time.Minute
 
 type Config struct {
@@ -174,8 +172,6 @@ type Config struct {
 
 	ScalePodsPerNode int
 
-	Interval time.Duration
-
 	LogLevel slog.Level
 }
 
@@ -211,7 +207,6 @@ func loadFor(get func(string) string, inv foldmain.Invocation) (Config, error) {
 		Bao:                    strings.TrimSpace(get(envBao)),
 		PgDump:                 strings.TrimSpace(get(envPgDump)),
 		GrantPath:              strings.TrimSpace(get(envGrant)),
-		Interval:               DefaultInterval,
 		LogLevel:               slog.LevelInfo,
 		ScaleMaxNodes:          scale.DefaultMaxNodes,
 		ScalePodsPerNode:       scale.DefaultPodsPerNode,

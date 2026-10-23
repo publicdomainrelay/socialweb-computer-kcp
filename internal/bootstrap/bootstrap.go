@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -218,14 +219,16 @@ func RSSKiB(pid int) int64 {
 
 func Observe(ctx context.Context, m hostsvc.Manager, want hostsvc.Identity) (hostsvc.Observation, bool, error) {
 	st, err := m.Inspect(ctx, want.Unit)
-	deadline := time.Now().Add(RestartSettle)
-	for err == nil && st.State == hostsvc.Activating && time.Now().Before(deadline) {
-		select {
-		case <-ctx.Done():
+	if err == nil && st.State == hostsvc.Activating {
+		sctx, cancel := context.WithTimeout(ctx, RestartSettle)
+		st, err = hostsvc.Await(sctx, m, want.Unit, func(st hostsvc.UnitStatus) bool { return st.State != hostsvc.Activating })
+		cancel()
+		if ctx.Err() != nil {
 			return hostsvc.Observation{}, false, ctx.Err()
-		case <-time.After(PortPoll):
 		}
-		st, err = m.Inspect(ctx, want.Unit)
+		if errors.Is(err, context.DeadlineExceeded) {
+			err = nil
+		}
 	}
 	if err == nil && st.State == hostsvc.Activating {
 		return hostsvc.Observation{Verdict: hostsvc.VerdictUnknown, Status: st,
@@ -373,29 +376,28 @@ func HandoverStaleLease(ctx context.Context, admin *kcpserver.HTTPAdmin, log *sl
 	if err != nil || !first.Found {
 		return "absent", err
 	}
-	deadline := time.Now().Add(LeaseWatchWindow)
-	for {
-		l, err := admin.Lease(ctx)
-		if err != nil {
-			return "", err
-		}
-		if !l.Found || l.Holder != first.Holder || l.RenewTime.After(first.RenewTime) {
+	live := func(l kcpserver.Lease) bool {
+		return !l.Found || l.Holder != first.Holder || l.RenewTime.After(first.RenewTime)
+	}
+	staleIn := time.Until(first.RenewTime.Add(LeaseStaleAfter))
+	if staleIn > 0 {
+		_, err := admin.AwaitLease(ctx, min(staleIn, LeaseWatchWindow), live)
+		switch {
+		case err == nil:
 			return "live", nil
-		}
-		if time.Since(l.RenewTime) > LeaseStaleAfter {
-			log.Info("the controller lease is held by a gone process; deleting it", "holder", l.Holder,
-				"renewed", l.RenewTime.UTC().Format(time.RFC3339Nano))
-			return "deleted", admin.DeleteLease(ctx)
-		}
-		if time.Now().After(deadline) {
+		case !errors.Is(err, kcpserver.ErrAwaitTimeout):
+			return "", err
+		case staleIn > LeaseWatchWindow:
 			return "unchanged", nil
 		}
-		select {
-		case <-ctx.Done():
-			return "", ctx.Err()
-		case <-time.After(ReadyPoll):
-		}
+	} else if l, err := admin.Lease(ctx); err != nil {
+		return "", err
+	} else if live(l) {
+		return "live", nil
 	}
+	log.Info("the controller lease is held by a gone process; deleting it", "holder", first.Holder,
+		"renewed", first.RenewTime.UTC().Format(time.RFC3339Nano))
+	return "deleted", admin.DeleteLease(ctx)
 }
 
 func Ensure(ctx context.Context, m hostsvc.Manager, cfg Config, rec *devinstance.Record) error {

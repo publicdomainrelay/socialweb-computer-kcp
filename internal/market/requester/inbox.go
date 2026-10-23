@@ -185,10 +185,69 @@ func (q *Requester) processBidMailbox(ctx context.Context, item v1alpha1.StateSy
 }
 
 func (q *Requester) contractForReceiptURI(receiptURI string) (v1alpha1.ComputeContract, bool) {
-	return q.contracts.Find(func(contract v1alpha1.ComputeContract) bool {
+	if contract, ok := q.contracts.Find(func(contract v1alpha1.ComputeContract) bool {
 		state := contract.Status.Contract
 		return state != nil && state.Receipt != nil && state.Receipt.URI == receiptURI
-	})
+	}); ok {
+		return contract, true
+	}
+	q.mu.Lock()
+	runners := make([]*contractRunner, 0, len(q.runners))
+	for _, runner := range q.runners {
+		runners = append(runners, runner)
+	}
+	q.mu.Unlock()
+	for _, runner := range runners {
+		if state := runner.stateCopy(); state != nil && state.Receipt != nil && state.Receipt.URI == receiptURI {
+			return q.contracts.Get(runner.name)
+		}
+	}
+	return v1alpha1.ComputeContract{}, false
+}
+
+const (
+	eventRetryFirst = 2 * time.Second
+
+	eventRetryAttempts = 5
+)
+
+type eventRetry struct {
+	timer *time.Timer
+
+	attempt int
+}
+
+func (e *eventRetry) after(err error) <-chan time.Time {
+	e.stop()
+	if err == nil {
+		e.attempt = 0
+		return nil
+	}
+	if e.attempt >= eventRetryAttempts {
+		return nil
+	}
+	e.attempt++
+	e.timer = time.NewTimer(eventRetryFirst << (e.attempt - 1))
+	return e.timer.C
+}
+
+func (e *eventRetry) stop() {
+	if e.timer != nil {
+		e.timer.Stop()
+		e.timer = nil
+	}
+}
+
+func (q *Requester) drainEvents(ctx context.Context, contract, receiptURI string) error {
+	var pendingErr error
+	if contract != "" {
+		pendingErr = q.processPendingEvents(ctx, contract)
+	}
+	err := errors.Join(pendingErr, q.mergeInboxForReceipt(ctx, receiptURI))
+	if err != nil && ctx.Err() == nil {
+		q.log.Warn("requester_event_drain_failed", "contract", contract, "receipt", receiptURI, "err", err)
+	}
+	return err
 }
 
 func (q *Requester) pendingOf(contract v1alpha1.ComputeContract) []v1alpha1.ComputeContractEvent {
@@ -245,59 +304,111 @@ func (q *Requester) enqueueEvent(ctx context.Context, event v1alpha1.ComputeCont
 		return errors.New("requester: the event ref is incomplete")
 	}
 	q.pendingMu.Lock()
-	defer q.pendingMu.Unlock()
 	contract, ok := q.contractForReceiptURI(event.ReceiptURI)
 	if !ok {
+		defer q.pendingMu.Unlock()
 		return q.storeInboxEvent(ctx, event)
 	}
 	_, err := q.appendPending(ctx, contract, event, errors.New("requester: the pending event inbox is full"))
-	return err
+	q.pendingMu.Unlock()
+	if err != nil {
+		return err
+	}
+	return q.deliverPending(ctx, contract.Name)
 }
 
-func (q *Requester) mergeInboxMailbox(ctx context.Context, item v1alpha1.StateSync) {
+func (q *Requester) deliverPending(ctx context.Context, name string) error {
+	if q.runnerFor(name) == nil {
+		return nil
+	}
+	return q.processPendingEvents(ctx, name)
+}
+
+func (q *Requester) mergeInboxMailbox(ctx context.Context, item v1alpha1.StateSync) error {
 	var payload inboxEventPayload
 	if err := json.Unmarshal(item.Spec.Payload, &payload); err != nil || payload.Event.URI == "" {
 		q.deleteMailbox(ctx, item.Name, "requester_inbox_delete_failed")
-		return
+		return nil
 	}
 	q.pendingMu.Lock()
 	contract, ok := q.contractForReceiptURI(payload.Event.ReceiptURI)
 	if !ok {
 		q.pendingMu.Unlock()
-		return
+		return q.dispatchMailbox(ctx, item, payload.Event)
 	}
 	merged, err := q.appendPending(ctx, contract, payload.Event, errInboxFull)
 	q.pendingMu.Unlock()
 	switch {
 	case errors.Is(err, errInboxFull):
 		q.log.Warn("requester_inbox_full", "contract", contract.Name, "event", payload.Event.URI)
-		return
+		return nil
 	case err != nil:
 		if ctx.Err() == nil {
 			q.log.Warn("requester_inbox_append_failed", "contract", contract.Name, "event", payload.Event.URI, "err", err)
 		}
-		return
+		return nil
 	}
-	if merged {
-		q.deleteMailbox(ctx, item.Name, "requester_inbox_delete_failed")
+	if !merged {
+		return nil
 	}
+	if err := q.deliverPending(ctx, contract.Name); err != nil {
+		return err
+	}
+	q.deleteMailbox(ctx, item.Name, "requester_inbox_delete_failed")
+	return nil
 }
+
+func (q *Requester) hasEventSink(receiptURI string) bool {
+	q.eventMu.Lock()
+	defer q.eventMu.Unlock()
+	_, ok := q.eventSinks[receiptURI]
+	return ok
+}
+
+func (q *Requester) dispatchMailbox(ctx context.Context, item v1alpha1.StateSync, entry v1alpha1.ComputeContractEvent) error {
+	receiptURI := strings.TrimSpace(entry.ReceiptURI)
+	if market.NSIDFromURI(entry.URI) != market.EventNSID || !q.hasEventSink(receiptURI) {
+		return nil
+	}
+	event, err := q.resolveInboxEvent(ctx, entry)
+	if err != nil {
+		if retryableResolve(ctx, err) {
+			return fmt.Errorf("requester: resolving the inbox event %s: %w", entry.URI, err)
+		}
+		q.log.Warn("requester_event_unavailable", "statesync", item.Name, "event", entry.URI, "err", err)
+		return nil
+	}
+	q.dispatchEvent(receiptURI, event)
+	q.deleteMailbox(ctx, item.Name, "requester_inbox_delete_failed")
+	return nil
+}
+
+func retryableResolve(ctx context.Context, err error) bool {
+	return err != nil && ctx.Err() == nil && !errors.Is(err, market.ErrNotFound) && !errors.Is(err, market.ErrInvalidRef) && !errors.Is(err, errEventMalformed)
+}
+
+var errEventMalformed = errors.New("requester: the event is malformed")
 
 var errInboxFull = errors.New("requester: the pending event inbox is full")
 
-func (q *Requester) mergeInboxFor(ctx context.Context, contract v1alpha1.ComputeContract) {
+func (q *Requester) mergeInboxFor(ctx context.Context, contract v1alpha1.ComputeContract) error {
 	state := contract.Status.Contract
 	if state == nil || state.Receipt == nil || state.Receipt.URI == "" {
-		return
+		return nil
 	}
-	receiptURI := state.Receipt.URI
+	return q.mergeInboxForReceipt(ctx, state.Receipt.URI)
+}
+
+func (q *Requester) mergeInboxForReceipt(ctx context.Context, receiptURI string) error {
+	var errs []error
 	for _, item := range q.syncs.Filter(func(sync v1alpha1.StateSync) bool { return sync.Spec.Sink.Adapter == InboxAdapter }) {
 		var payload inboxEventPayload
 		if json.Unmarshal(item.Spec.Payload, &payload) == nil && payload.Event.ReceiptURI != receiptURI {
 			continue
 		}
-		q.mergeInboxMailbox(ctx, item)
+		errs = append(errs, q.mergeInboxMailbox(ctx, item))
 	}
+	return errors.Join(errs...)
 }
 
 func (q *Requester) resolveInboxEvent(ctx context.Context, event v1alpha1.ComputeContractEvent) (MarketEvent, error) {
@@ -307,7 +418,7 @@ func (q *Requester) resolveInboxEvent(ctx context.Context, event v1alpha1.Comput
 	}
 	envelope, err := market.ParseEvent(resolved.Value)
 	if err != nil {
-		return MarketEvent{}, err
+		return MarketEvent{}, fmt.Errorf("%w: %v", errEventMalformed, err)
 	}
 	payload, err := q.repo.Resolve(ctx, market.RecordRef{URI: envelope.Payload.URI, CID: envelope.Payload.CID})
 	if err != nil {
@@ -316,19 +427,20 @@ func (q *Requester) resolveInboxEvent(ctx context.Context, event v1alpha1.Comput
 	return MarketEvent{Event: resolved, Payload: payload}, nil
 }
 
-func (q *Requester) processPendingEvents(ctx context.Context, name string) {
+func (q *Requester) processPendingEvents(ctx context.Context, name string) error {
 	q.pendingMu.Lock()
 	defer q.pendingMu.Unlock()
 	contract, ok := q.contracts.Get(name)
 	if !ok {
-		return
+		return nil
 	}
 	pending := q.pendingOf(contract)
 	if len(pending) == 0 {
-		return
+		return nil
 	}
 	remaining := make([]v1alpha1.ComputeContractEvent, 0, len(pending))
 	seen := map[string]bool{}
+	var unavailable []error
 	for _, entry := range pending {
 		key := entry.URI + "#" + entry.CID
 		if seen[key] {
@@ -338,9 +450,12 @@ func (q *Requester) processPendingEvents(ctx context.Context, name string) {
 		event, err := q.resolveInboxEvent(ctx, entry)
 		if err != nil {
 			if ctx.Err() != nil {
-				return
+				return ctx.Err()
 			}
 			q.log.Warn("requester_event_unavailable", "contract", contract.Name, "event", entry.URI, "err", err)
+			if retryableResolve(ctx, err) {
+				unavailable = append(unavailable, fmt.Errorf("requester: resolving the event %s: %w", entry.URI, err))
+			}
 			remaining = append(remaining, entry)
 			continue
 		}
@@ -364,12 +479,12 @@ func (q *Requester) processPendingEvents(ctx context.Context, name string) {
 		}
 		remaining = append(remaining, entry)
 	}
-	if samePendingEvents(remaining, pending) {
-		return
+	if !samePendingEvents(remaining, pending) {
+		if err := q.writePending(ctx, contract.Name, remaining); err != nil && ctx.Err() == nil {
+			q.log.Warn("requester_event_inbox_update_failed", "contract", contract.Name, "err", err)
+		}
 	}
-	if err := q.writePending(ctx, contract.Name, remaining); err != nil && ctx.Err() == nil {
-		q.log.Warn("requester_event_inbox_update_failed", "contract", contract.Name, "err", err)
-	}
+	return errors.Join(unavailable...)
 }
 
 func (q *Requester) registerEventSink(receiptURI string) (<-chan MarketEvent, []MarketEvent, func()) {

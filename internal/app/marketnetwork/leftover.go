@@ -33,15 +33,13 @@ func processesUnder(dir string) []int {
 
 func KillUnder(dir string, grace time.Duration) []int {
 	pids := processesUnder(dir)
+	exited := exits(pids)
 	for _, pid := range pids {
 		if p, err := os.FindProcess(pid); err == nil {
 			p.Signal(syscall.SIGTERM)
 		}
 	}
-	deadline := time.Now().Add(grace)
-	for len(processesUnder(dir)) > 0 && time.Now().Before(deadline) {
-		time.Sleep(ChildPoll)
-	}
+	awaitExits(exited, grace)
 	for _, pid := range processesUnder(dir) {
 		if p, err := os.FindProcess(pid); err == nil {
 			p.Kill()

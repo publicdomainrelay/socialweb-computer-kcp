@@ -1,14 +1,18 @@
 package nodeagent
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 )
@@ -74,28 +78,9 @@ func CNI(ctx context.Context, cfg Config, log *slog.Logger) error {
 	if !validName(nodeName) {
 		return fmt.Errorf("nodeagent: NODE_NAME %q is not a node name", nodeName)
 	}
-	cidr := ""
-	for attempt := 1; attempt <= cfg.CNIWaitAttempts; attempt++ {
-		if fileNonEmpty(cfg.KubeletKubeconfig) {
-			out, err := run(ctx, cfg.K3sPath, "kubectl", "--kubeconfig", cfg.KubeletKubeconfig,
-				"get", "node", nodeName, "-o", "jsonpath={.spec.podCIDR}")
-			if err == nil {
-				cidr = strings.TrimSpace(string(out))
-				if cidr != "" {
-					break
-				}
-			} else if ctx.Err() != nil {
-				return ctx.Err()
-			}
-		}
-		if attempt < cfg.CNIWaitAttempts {
-			if err := clock.SleepErr(ctx, cfg.CNIWaitInterval()); err != nil {
-				return err
-			}
-		}
-	}
-	if cidr == "" {
-		return fmt.Errorf("nodeagent: node %s has no podCIDR yet after %d attempts", nodeName, cfg.CNIWaitAttempts)
+	cidr, err := awaitPodCIDR(ctx, cfg, nodeName, log)
+	if err != nil {
+		return err
 	}
 	if err := validPodCIDR(cidr); err != nil {
 		return err
@@ -126,6 +111,66 @@ func CNI(ctx context.Context, cfg Config, log *slog.Logger) error {
 	}
 	log.Info("wrote the bridge CNI conflist", "path", conf, "podCIDR", cidr, "plugins", cfg.CNIPluginPath())
 	return nil
+}
+
+func awaitPodCIDR(ctx context.Context, cfg Config, nodeName string, log *slog.Logger) (string, error) {
+	limit := time.Duration(cfg.CNIWaitAttempts) * cfg.CNIWaitInterval()
+	wctx, cancel := context.WithTimeout(ctx, limit)
+	defer cancel()
+	last := "the kubelet kubeconfig " + cfg.KubeletKubeconfig + " is not written yet"
+	for {
+		if fileNonEmpty(cfg.KubeletKubeconfig) {
+			cidr, err := followPodCIDR(wctx, cfg, nodeName)
+			if cidr != "" {
+				return cidr, nil
+			}
+			if ctx.Err() != nil {
+				return "", ctx.Err()
+			}
+			if err != nil {
+				last = err.Error()
+				log.Info("the node watch ended before a podCIDR; it restarts", "node", nodeName, "err", last)
+			}
+		}
+		if err := clock.SleepErr(wctx, cfg.CNIWaitInterval()); err != nil {
+			if ctx.Err() != nil {
+				return "", ctx.Err()
+			}
+			return "", fmt.Errorf("nodeagent: node %s has no podCIDR yet after %s: %s", nodeName, limit, last)
+		}
+	}
+}
+
+func followPodCIDR(ctx context.Context, cfg Config, nodeName string) (string, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, cfg.K3sPath, "kubectl", "--kubeconfig", cfg.KubeletKubeconfig,
+		"get", "node", nodeName, "--watch", "-o", `jsonpath={.spec.podCIDR}{"\n"}`)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", err
+	}
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("nodeagent: watching node %s: %w", nodeName, err)
+	}
+	lines := bufio.NewScanner(out)
+	for lines.Scan() {
+		if cidr := strings.TrimSpace(lines.Text()); cidr != "" {
+			cancel()
+			_ = cmd.Wait()
+			return cidr, nil
+		}
+	}
+	err = cmd.Wait()
+	if msg := strings.TrimSpace(stderr.String()); msg != "" {
+		return "", fmt.Errorf("nodeagent: watching node %s: %s", nodeName, msg)
+	}
+	if err != nil {
+		return "", fmt.Errorf("nodeagent: watching node %s: %w", nodeName, err)
+	}
+	return "", fmt.Errorf("nodeagent: the watch of node %s closed", nodeName)
 }
 
 func validPodCIDR(cidr string) error {

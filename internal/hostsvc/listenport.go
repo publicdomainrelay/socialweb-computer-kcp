@@ -22,6 +22,9 @@ func WaitListenPort(ctx context.Context, pid int, every time.Duration, progress 
 		if !errors.Is(err, ErrNoListener) {
 			return port, err
 		}
+		if every <= 0 {
+			return 0, fmt.Errorf("hostsvc: no probe period to wait with: %w", err)
+		}
 		select {
 		case <-ctx.Done():
 			return 0, fmt.Errorf("hostsvc: pid %d bound no port before %w", pid, ctx.Err())

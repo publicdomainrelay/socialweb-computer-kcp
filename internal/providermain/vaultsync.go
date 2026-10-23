@@ -28,6 +28,13 @@ func (h *nodeHosts) reconcileVault(ctx context.Context, cluster string, claims [
 		return nil
 	}
 	h.synced[cluster] = now
+	if h.vaultDue == nil {
+		h.vaultDue = map[string]time.Time{}
+	}
+	delete(h.vaultDue, cluster)
+	if len(claims) > 0 {
+		h.vaultDue[cluster] = now.Add(VaultSyncInterval)
+	}
 	h.mu.Unlock()
 
 	dir, err := clusterprovider.ClusterDataDir(h.opts.StateDir, cluster)

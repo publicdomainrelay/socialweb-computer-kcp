@@ -8,14 +8,17 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
@@ -24,6 +27,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/marketnetwork"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/marketrequester"
+	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
@@ -44,6 +48,7 @@ const (
 	ContractTTLSeconds int32 = 8 * 24 * 60 * 60
 	SecretsPath              = "contracts/" + marketrequester.RequesterContract + "/secrets"
 	Poll                     = time.Second
+	RetryMax                 = 5 * time.Second
 	irohScheme               = "iroh://"
 	maxNameLength            = 30
 	networkConflicts         = 10
@@ -245,31 +250,32 @@ func (k *Kcp) Root(ctx context.Context) (v1alpha1.ApplicationStatus, error) {
 
 func (k *Kcp) WaitReady(ctx context.Context, timeout time.Duration, progress func(v1alpha1.ApplicationStatus)) error {
 	last := ""
-	return until(ctx, timeout, "waiting for the MarketRequester to be Ready", func() (bool, error) {
-		st, err := k.Root(ctx)
-		if err != nil {
-			return false, err
-		}
-		if key := string(st.Phase) + st.Message; key != last && progress != nil {
-			progress(st)
-			last = key
-		}
-		if st.Phase == v1alpha1.ApplicationPhaseFailed {
-			return true, fmt.Errorf("request: the MarketRequester failed: %s", st.Message)
-		}
-		if st.Phase != v1alpha1.ApplicationPhaseReady {
-			return false, nil
-		}
-		if len(st.Components) == 0 {
-			return false, nil
-		}
-		for _, c := range st.Components {
-			if !c.Ready {
-				return false, nil
+	var failed error
+	err := await(ctx, k.dyn.Resource(compose.MarketRequesterGVR), compose.MarketRequesterGVR.GroupResource(), RootName, timeout, "waiting for the MarketRequester to be Ready",
+		func(o *v1alpha1.MarketRequester) bool {
+			st := o.Status
+			if key := string(st.Phase) + st.Message; key != last && progress != nil {
+				progress(st)
+				last = key
 			}
-		}
-		return true, nil
-	})
+			if st.Phase == v1alpha1.ApplicationPhaseFailed {
+				failed = fmt.Errorf("request: the MarketRequester failed: %s", st.Message)
+				return true
+			}
+			if st.Phase != v1alpha1.ApplicationPhaseReady || len(st.Components) == 0 {
+				return false
+			}
+			for _, c := range st.Components {
+				if !c.Ready {
+					return false
+				}
+			}
+			return true
+		})
+	if err != nil {
+		return err
+	}
+	return failed
 }
 
 func (k *Kcp) Contract(ctx context.Context) (*v1alpha1.ComputeContract, error) {
@@ -284,8 +290,30 @@ func (k *Kcp) Contract(ctx context.Context) (*v1alpha1.ComputeContract, error) {
 	return &o, nil
 }
 
-func until(ctx context.Context, timeout time.Duration, what string, try func() (bool, error)) error {
-	deadline := time.Now().Add(timeout)
+func await[T any](ctx context.Context, ri dynamic.ResourceInterface, gr schema.GroupResource, name string, timeout time.Duration, what string, done func(*T) bool) error {
+	var missing error
+	_, err := ctlruntime.AwaitAs(ctx, ri, name, timeout, func(o *T) (bool, error) {
+		if o == nil {
+			missing = apierrors.NewNotFound(gr, name)
+			return false, nil
+		}
+		return done(o), nil
+	})
+	return awaitErr(err, what, timeout, missing)
+}
+
+func awaitErr(err error, what string, timeout time.Duration, last error) error {
+	if !errors.Is(err, ctlruntime.ErrAwaitTimeout) {
+		return err
+	}
+	if last != nil {
+		return fmt.Errorf("request: %s within %s: %w", what, timeout, last)
+	}
+	return fmt.Errorf("request: %s within %s", what, timeout)
+}
+
+func retry(ctx context.Context, deadline time.Time, timeout time.Duration, what string, try func() (bool, error)) error {
+	delay := Poll
 	var last error
 	for {
 		done, err := try()
@@ -295,17 +323,18 @@ func until(ctx context.Context, timeout time.Duration, what string, try func() (
 		if err != nil {
 			last = err
 		}
-		if time.Now().After(deadline) {
-			if last != nil {
-				return fmt.Errorf("request: %s within %s: %w", what, timeout, last)
-			}
-			return fmt.Errorf("request: %s within %s", what, timeout)
+		left := time.Until(deadline)
+		if left <= 0 {
+			return awaitErr(ctlruntime.ErrAwaitTimeout, what, timeout, last)
 		}
+		t := time.NewTimer(min(delay, left))
 		select {
 		case <-ctx.Done():
+			t.Stop()
 			return ctx.Err()
-		case <-time.After(Poll):
+		case <-t.C:
 		}
+		delay = min(2*delay, RetryMax)
 	}
 }
 
@@ -323,7 +352,7 @@ func (k *Kcp) CreateContract(ctx context.Context, spec v1alpha1.ComputeContractS
 	if err := u.UnmarshalJSON(body); err != nil {
 		return err
 	}
-	return until(ctx, timeout, "creating the ComputeContract (its schema is bound by the requester's core)", func() (bool, error) {
+	return retry(ctx, time.Now().Add(timeout), timeout, "creating the ComputeContract (its schema is bound by the requester's core)", func() (bool, error) {
 		_, err := k.dyn.Resource(compose.ComputeContractGVR).Create(ctx, &u, metav1.CreateOptions{FieldManager: FieldManager})
 		if err == nil || apierrors.IsAlreadyExists(err) {
 			return true, nil
@@ -341,30 +370,57 @@ func (k *Kcp) Release(ctx context.Context) error {
 
 func (k *Kcp) WaitContract(ctx context.Context, timeout time.Duration, done func(*v1alpha1.ComputeContract) bool,
 	progress func(*v1alpha1.ComputeContract)) (*v1alpha1.ComputeContract, error) {
-	var cur *v1alpha1.ComputeContract
-	last := ""
-	err := until(ctx, timeout, "waiting for the ComputeContract", func() (bool, error) {
-		c, err := k.Contract(ctx)
-		if err != nil {
-			return false, err
-		}
-		cur = c
-		if st, err := k.Root(ctx); err == nil {
-			if why := requesterFailure(st); why != "" && !done(c) {
-				return true, fmt.Errorf("request: the requester application cannot carry the contract: %s", why)
+	wctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var mu sync.Mutex
+	why := ""
+	go func() {
+		_, _ = ctlruntime.AwaitAs(wctx, k.dyn.Resource(compose.MarketRequesterGVR), RootName, 0, func(o *v1alpha1.MarketRequester) (bool, error) {
+			if o == nil {
+				return false, nil
 			}
-		}
-		key := string(c.Status.Phase) + "|" + c.Status.Message
-		if c.Status.Contract != nil {
-			key += "|" + string(c.Status.Contract.Phase)
-		}
-		if key != last && progress != nil {
-			progress(c)
-			last = key
-		}
-		return done(c), nil
-	})
-	return cur, err
+			w := requesterFailure(o.Status)
+			mu.Lock()
+			why = w
+			mu.Unlock()
+			if w != "" {
+				cancel()
+			}
+			return w != "", nil
+		})
+	}()
+	failure := func() string {
+		mu.Lock()
+		defer mu.Unlock()
+		return why
+	}
+	var cur *v1alpha1.ComputeContract
+	var missing error
+	last := ""
+	_, err := ctlruntime.AwaitAs(wctx, k.dyn.Resource(compose.ComputeContractGVR), marketrequester.RequesterContract, timeout,
+		func(c *v1alpha1.ComputeContract) (bool, error) {
+			if c == nil {
+				missing = apierrors.NewNotFound(compose.ComputeContractGVR.GroupResource(), marketrequester.RequesterContract)
+				return false, nil
+			}
+			cur = c
+			key := string(c.Status.Phase) + "|" + c.Status.Message
+			if c.Status.Contract != nil {
+				key += "|" + string(c.Status.Contract.Phase)
+			}
+			if key != last && progress != nil {
+				progress(c)
+				last = key
+			}
+			return done(c), nil
+		})
+	if cur != nil && done(cur) {
+		return cur, nil
+	}
+	if w := failure(); w != "" && ctx.Err() == nil {
+		return cur, fmt.Errorf("request: the requester application cannot carry the contract: %s", w)
+	}
+	return cur, awaitErr(err, "waiting for the ComputeContract", timeout, missing)
 }
 
 func requesterFailure(st v1alpha1.ApplicationStatus) string {
@@ -381,20 +437,47 @@ func requesterFailure(st v1alpha1.ApplicationStatus) string {
 
 func (k *Kcp) PutSecrets(ctx context.Context, bundle []byte, timeout time.Duration) (commonv1.SecretRef, error) {
 	ref := commonv1.SecretRef{Mount: marketrequester.RequesterVaultClient, Path: SecretsPath}
+	what := "writing the secrets bundle into the requester's own OpenBao"
+	deadline := time.Now().Add(timeout)
 	ri := k.dyn.Resource(compose.OpenBaoServerGVR)
-	err := until(ctx, timeout, "writing the secrets bundle into the requester's own OpenBao", func() (bool, error) {
-		client, _, c, err := compose.ServerClient(ctx, ri, marketrequester.RequesterVaultServer, marketrequester.RequesterVaultClient)
+	server, client := marketrequester.RequesterVaultServer, marketrequester.RequesterVaultClient
+	var pending error
+	_, err := ctlruntime.AwaitAs(ctx, ri, server, timeout, func(o *v1alpha1.OpenBaoServer) (bool, error) {
+		pending = vaultPending(o, server, client)
+		return pending == nil, nil
+	})
+	if err != nil {
+		return ref, awaitErr(err, what, timeout, pending)
+	}
+	err = retry(ctx, deadline, timeout, what, func() (bool, error) {
+		c, _, refs, err := compose.ServerClient(ctx, ri, server, client)
 		if err != nil {
 			return false, err
 		}
-		defer client.RevokeSelf(context.WithoutCancel(ctx))
-		ref.Mount = c.KVMount
-		if err := client.PutKV(ctx, c.KVMount+"/data/"+SecretsPath, map[string]any{"bundle": string(bundle)}); err != nil {
+		defer c.RevokeSelf(context.WithoutCancel(ctx))
+		ref.Mount = refs.KVMount
+		if err := c.PutKV(ctx, refs.KVMount+"/data/"+SecretsPath, map[string]any{"bundle": string(bundle)}); err != nil {
 			return false, err
 		}
 		return true, nil
 	})
 	return ref, err
+}
+
+func vaultPending(o *v1alpha1.OpenBaoServer, server, client string) error {
+	if o == nil {
+		return apierrors.NewNotFound(compose.OpenBaoServerGVR.GroupResource(), server)
+	}
+	st := o.Status
+	if st.Address == "" || st.Refs == nil {
+		return fmt.Errorf("the OpenBaoServer %s reports no address yet (phase %s)", server, st.Phase)
+	}
+	for _, x := range st.Clients {
+		if x.Name == client && x.ClientCert != "" {
+			return nil
+		}
+	}
+	return fmt.Errorf("the OpenBaoServer %s reports no client %s yet", server, client)
 }
 
 func (k *Kcp) Identities() (*kcpclient.MarketIdentities, error) {
@@ -406,10 +489,17 @@ func (k *Kcp) Identities() (*kcpclient.MarketIdentities, error) {
 }
 
 func (k *Kcp) WaitIdentityObject(ctx context.Context, timeout time.Duration) error {
-	return until(ctx, timeout, "waiting for the requester's MarketIdentity (its core creates it)", func() (bool, error) {
-		_, err := k.dyn.Resource(compose.MarketIdentityGVR).Get(ctx, marketrequester.RequesterIdentity, metav1.GetOptions{})
-		return err == nil, err
-	})
+	return await(ctx, k.dyn.Resource(compose.MarketIdentityGVR), compose.MarketIdentityGVR.GroupResource(), marketrequester.RequesterIdentity,
+		timeout, "waiting for the requester's MarketIdentity (its core creates it)", func(*v1alpha1.MarketIdentity) bool { return true })
+}
+
+func (k *Kcp) AwaitIdentity(ctx context.Context, name string, each func(*v1alpha1.MarketIdentity) (bool, error)) (*v1alpha1.MarketIdentity, error) {
+	return ctlruntime.AwaitAs(ctx, k.dyn.Resource(compose.MarketIdentityGVR), name, 0, each)
+}
+
+func (k *Kcp) AwaitContract(ctx context.Context, timeout time.Duration, done func(*v1alpha1.ComputeContract) bool) (*v1alpha1.ComputeContract, error) {
+	return ctlruntime.AwaitAs(ctx, k.dyn.Resource(compose.ComputeContractGVR), marketrequester.RequesterContract, timeout,
+		func(c *v1alpha1.ComputeContract) (bool, error) { return c != nil && done(c), nil })
 }
 
 func networkClient(kubeconfig string) (dynamic.ResourceInterface, error) {
@@ -518,24 +608,49 @@ func NetworkApp(ctx context.Context, kubeconfig, name string) (v1alpha1.NetworkA
 
 func WaitNetworkApp(ctx context.Context, kubeconfig, name string, timeout time.Duration, done func(v1alpha1.NetworkAppStatus) bool,
 	progress func(v1alpha1.NetworkAppStatus)) (v1alpha1.NetworkAppStatus, error) {
+	ri, err := networkClient(kubeconfig)
+	if err != nil {
+		return v1alpha1.NetworkAppStatus{}, err
+	}
 	var cur v1alpha1.NetworkAppStatus
+	var failed error
 	last := ""
-	err := until(ctx, timeout, "waiting for the market network to place "+name, func() (bool, error) {
-		a, found, err := NetworkApp(ctx, kubeconfig, name)
-		if err != nil || !found {
-			return false, err
-		}
-		cur = a
-		if key := string(a.Phase) + a.Message; key != last && progress != nil {
-			progress(a)
-			last = key
-		}
-		if a.Phase == v1alpha1.ApplicationPhaseFailed {
-			return true, fmt.Errorf("request: the market network failed %s: %s", name, a.Message)
-		}
-		return done(a), nil
+	err = await(ctx, ri, compose.MarketNetworkGVR.GroupResource(), marketnetwork.NetworkName, timeout, "waiting for the market network to place "+name,
+		func(o *v1alpha1.MarketNetwork) bool {
+			i := slices.IndexFunc(o.Status.Apps, func(a v1alpha1.NetworkAppStatus) bool { return a.Name == name })
+			if i < 0 {
+				return false
+			}
+			a := o.Status.Apps[i]
+			cur = a
+			if key := string(a.Phase) + a.Message; key != last && progress != nil {
+				progress(a)
+				last = key
+			}
+			if a.Phase == v1alpha1.ApplicationPhaseFailed {
+				failed = fmt.Errorf("request: the market network failed %s: %s", name, a.Message)
+				return true
+			}
+			return done(a)
+		})
+	if err != nil {
+		return cur, err
+	}
+	return cur, failed
+}
+
+func WaitNetworkGone(ctx context.Context, kubeconfig, name string, timeout time.Duration) error {
+	ri, err := networkClient(kubeconfig)
+	if err != nil {
+		return err
+	}
+	_, err = ctlruntime.AwaitAs(ctx, ri, marketnetwork.NetworkName, timeout, func(o *v1alpha1.MarketNetwork) (bool, error) {
+		return o != nil && !slices.ContainsFunc(o.Status.Apps, func(a v1alpha1.NetworkAppStatus) bool { return a.Name == name }), nil
 	})
-	return cur, err
+	if errors.Is(err, ctlruntime.ErrAwaitTimeout) {
+		return fmt.Errorf("the market network still lists %s", name)
+	}
+	return err
 }
 
 func HostKeyAlias(receiptURI string) string {

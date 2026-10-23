@@ -42,7 +42,10 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/versions"
 )
 
-const CheckInterval = 5 * time.Second
+const (
+	CheckInterval  = 5 * time.Second
+	recordLockWait = 2 * time.Minute
+)
 
 var TTLSkipWorkspaces = []string{"socialweb-provider"}
 
@@ -105,16 +108,26 @@ func lockRecord(path string) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	deadline := time.Now().Add(2 * time.Minute)
-	for {
-		if err := hostos.Lock(f, hostos.LockExclusive|hostos.LockNonBlocking); err == nil {
-			return f, nil
-		}
-		if time.Now().After(deadline) {
+	if err := hostos.Lock(f, hostos.LockExclusive|hostos.LockNonBlocking); err == nil {
+		return f, nil
+	}
+	locked := make(chan error, 1)
+	go func() { locked <- hostos.Lock(f, hostos.LockExclusive) }()
+	timer := time.NewTimer(recordLockWait)
+	defer timer.Stop()
+	select {
+	case err := <-locked:
+		if err != nil {
 			f.Close()
-			return nil, fmt.Errorf("devcore: %s stayed locked", path)
+			return nil, fmt.Errorf("devcore: locking %s: %w", path, err)
 		}
-		time.Sleep(100 * time.Millisecond)
+		return f, nil
+	case <-timer.C:
+		go func() {
+			<-locked
+			f.Close()
+		}()
+		return nil, fmt.Errorf("devcore: %s stayed locked", path)
 	}
 }
 
@@ -232,8 +245,12 @@ func Run(ctx context.Context, cfg Config, m hostsvc.Manager) error {
 			return nil
 		})
 	}
-	t := time.NewTicker(CheckInterval)
-	defer t.Stop()
+	var events <-chan hostsvc.UnitEvent
+	watched := ""
+	unwatch := context.CancelFunc(func() {})
+	defer func() { unwatch() }()
+	retry := time.NewTimer(0)
+	defer retry.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -248,56 +265,111 @@ func Run(ctx context.Context, cfg Config, m hostsvc.Manager) error {
 			}
 			log.Error("an in-process member ended; the core exits", "err", err.Error())
 			return err
-		case <-t.C:
-		}
-		if cfg.OnTick != nil {
-			cfg.OnTick()
-		}
-		lk, ok := tryLockRecord(l.Lock)
-		if !ok {
-			log.Info("a dev verb holds the instance; this check is skipped")
-			continue
-		}
-		cur := devinstance.Record{}
-		if err := fsx.ReadJSON(l.Record, &cur); err != nil {
-			lk.Close()
-			log.Error("re-reading the instance record", "err", err.Error())
-			continue
-		}
-		lost := false
-		core.Verdicts = nil
-		for _, u := range cur.Units {
-			obs, restarted, err := bootstrap.Observe(ctx, m, u.Identity)
-			if cfg.OnTick != nil {
-				cfg.OnTick()
+		case _, open := <-events:
+			if !open {
+				events, watched = nil, ""
 			}
-			if err != nil {
-				log.Error("check", "unit", u.Unit, "err", err.Error())
+			for drained := events == nil; !drained; {
+				select {
+				case _, open := <-events:
+					if !open {
+						events, watched, drained = nil, "", true
+					}
+				default:
+					drained = true
+				}
+			}
+		case <-retry.C:
+		}
+		if ctx.Err() != nil {
+			continue
+		}
+		cur, settled := check(ctx, m, bcfg, l, &core, cfg.OnTick, log)
+		if prefix := unitPrefix(cur.Units); prefix != "" && prefix != watched {
+			unwatch()
+			events, watched = nil, ""
+			wctx, cancel := context.WithCancel(ctx)
+			if ch, err := m.Watch(wctx, prefix); err != nil {
+				cancel()
+				log.Error("watching the bootstrap units", "prefix", prefix, "err", err.Error())
+				settled = false
+			} else {
+				events, watched, unwatch = ch, prefix, cancel
+				retry.Reset(0)
 				continue
 			}
-			if restarted {
-				lost = true
-				log.Warn("unit restarted in place by devsup; re-identifying it", "unit", u.Unit, "detail", obs.Detail)
-				core.Verdicts = append(core.Verdicts, fmt.Sprintf("%s=Restarted", u.Unit))
-				continue
-			}
-			core.Verdicts = append(core.Verdicts, fmt.Sprintf("%s=%s %s", u.Unit, obs.Verdict, obs.Reason))
-			if obs.Verdict == hostsvc.VerdictLost {
-				lost = true
-				log.Warn("unit lost", "unit", u.Unit, "reason", string(obs.Reason), "detail", obs.Detail)
-			}
 		}
-		core.LastCheck = time.Now().UTC()
-		if lost {
-			if err := ensure(ctx, m, bcfg, l, &cur, &core, log); err != nil {
-				log.Error("re-placing the bootstrap units", "err", err.Error())
-			}
-			lk.Close()
-			continue
+		if !settled {
+			retry.Reset(CheckInterval)
 		}
-		lk.Close()
-		fsx.WriteJSON(l.CoreRecord, core, 0o600)
 	}
+}
+
+func check(ctx context.Context, m hostsvc.Manager, bcfg bootstrap.Config, l devinstance.Layout, core *devinstance.Core,
+	onTick func(), log *slog.Logger) (devinstance.Record, bool) {
+	if onTick != nil {
+		onTick()
+	}
+	cur := devinstance.Record{}
+	lk, ok := tryLockRecord(l.Lock)
+	if !ok {
+		log.Info("a dev verb holds the instance; this check waits for it")
+		return cur, false
+	}
+	defer lk.Close()
+	if err := fsx.ReadJSON(l.Record, &cur); err != nil {
+		log.Error("re-reading the instance record", "err", err.Error())
+		return cur, false
+	}
+	lost := false
+	core.Verdicts = nil
+	for _, u := range cur.Units {
+		obs, restarted, err := bootstrap.Observe(ctx, m, u.Identity)
+		if onTick != nil {
+			onTick()
+		}
+		if err != nil {
+			log.Error("check", "unit", u.Unit, "err", err.Error())
+			continue
+		}
+		if restarted {
+			lost = true
+			log.Warn("unit restarted in place by devsup; re-identifying it", "unit", u.Unit, "detail", obs.Detail)
+			core.Verdicts = append(core.Verdicts, fmt.Sprintf("%s=Restarted", u.Unit))
+			continue
+		}
+		core.Verdicts = append(core.Verdicts, fmt.Sprintf("%s=%s %s", u.Unit, obs.Verdict, obs.Reason))
+		if obs.Verdict == hostsvc.VerdictLost {
+			lost = true
+			log.Warn("unit lost", "unit", u.Unit, "reason", string(obs.Reason), "detail", obs.Detail)
+		}
+	}
+	core.LastCheck = time.Now().UTC()
+	if lost {
+		if err := ensure(ctx, m, bcfg, l, &cur, core, log); err != nil {
+			log.Error("re-placing the bootstrap units", "err", err.Error())
+			return cur, false
+		}
+		return cur, true
+	}
+	fsx.WriteJSON(l.CoreRecord, *core, 0o600)
+	return cur, true
+}
+
+func unitPrefix(units []devinstance.Unit) string {
+	prefix := ""
+	for i, u := range units {
+		if i == 0 {
+			prefix = strings.TrimSuffix(u.Unit, hostsvc.ServiceSuffix)
+			continue
+		}
+		n := 0
+		for n < len(prefix) && n < len(u.Unit) && prefix[n] == u.Unit[n] {
+			n++
+		}
+		prefix = prefix[:n]
+	}
+	return prefix
 }
 
 func ensure(ctx context.Context, m hostsvc.Manager, bcfg bootstrap.Config, l devinstance.Layout, rec *devinstance.Record,

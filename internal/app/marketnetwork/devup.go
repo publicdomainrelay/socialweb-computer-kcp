@@ -4,27 +4,34 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	"sigs.k8s.io/yaml"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
+	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/kcprest"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 )
 
+var (
+	apiBindingGVR  = schema.GroupVersionResource{Group: "apis.kcp.io", Version: "v1alpha2", Resource: "apibindings"}
+	networkBinding = compose.ExportApplications
+)
+
 const (
 	NetworkName    = "network"
-	NetworkPoll    = time.Second
 	BidderPrefix   = "bidder-"
 	GatewayAppName = "gateway"
 )
@@ -141,23 +148,41 @@ func NetworkSpec(label string, bidders int, withGateway bool, overlay []byte, vm
 	return spec, nil
 }
 
-func networkClient(kubeconfig string) (dynamic.ResourceInterface, error) {
+func rootClient(kubeconfig string) (dynamic.Interface, error) {
 	restCfg, err := kcpserver.FrontRestConfig(kubeconfig)
 	if err != nil {
 		return nil, err
 	}
-	dc, err := dynamic.NewForConfig(kcprest.ForCluster(restCfg, compose.DefaultWorkspace))
+	return dynamic.NewForConfig(kcprest.ForCluster(restCfg, compose.DefaultWorkspace))
+}
+
+func networkClient(kubeconfig string) (dynamic.ResourceInterface, error) {
+	dc, err := rootClient(kubeconfig)
 	if err != nil {
 		return nil, err
 	}
 	return dc.Resource(compose.MarketNetworkGVR), nil
 }
 
+func bindingReady(u *unstructured.Unstructured) (bool, error) {
+	if u == nil {
+		return false, nil
+	}
+	conds, _, _ := unstructured.NestedSlice(u.Object, "status", "conditions")
+	for _, c := range conds {
+		if m, ok := c.(map[string]any); ok && m["type"] == "Ready" && m["status"] == "True" {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func ApplyNetwork(ctx context.Context, kubeconfig string, spec v1alpha1.MarketNetworkSpec, timeout time.Duration) error {
-	ri, err := networkClient(kubeconfig)
+	dc, err := rootClient(kubeconfig)
 	if err != nil {
 		return err
 	}
+	ri := dc.Resource(compose.MarketNetworkGVR)
 	u, err := unstruct.To(&v1alpha1.MarketNetwork{ObjectMeta: metav1.ObjectMeta{Name: NetworkName}, Spec: spec}, "MarketNetwork")
 	if err != nil {
 		return err
@@ -169,19 +194,16 @@ func ApplyNetwork(ctx context.Context, kubeconfig string, spec v1alpha1.MarketNe
 		return err
 	}
 	force := true
-	deadline := time.Now().Add(timeout)
-	for {
-		_, err := ri.Patch(ctx, NetworkName, types.ApplyPatchType, body, metav1.PatchOptions{FieldManager: "socialweb-computer", Force: &force})
-		if err == nil {
-			return nil
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("marketnetwork: applying the MarketNetwork (the core applies the applications set first): %w", err)
-		}
-		if !clock.Sleep(ctx, NetworkPoll) {
+	if _, err := ctlruntime.Await(ctx, dc.Resource(apiBindingGVR), networkBinding, timeout, bindingReady); err != nil {
+		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+		return fmt.Errorf("marketnetwork: applying the MarketNetwork (the core applies the applications set first): %w", err)
 	}
+	if _, err := ri.Patch(ctx, NetworkName, types.ApplyPatchType, body, metav1.PatchOptions{FieldManager: "socialweb-computer", Force: &force}); err != nil {
+		return fmt.Errorf("marketnetwork: applying the MarketNetwork (the core applies the applications set first): %w", err)
+	}
+	return nil
 }
 
 func ReadNetwork(ctx context.Context, kubeconfig string) (v1alpha1.MarketNetwork, error) {
@@ -198,37 +220,42 @@ func ReadNetwork(ctx context.Context, kubeconfig string) (v1alpha1.MarketNetwork
 }
 
 func WaitNetwork(ctx context.Context, kubeconfig string, timeout time.Duration, progress func(v1alpha1.MarketNetworkStatus)) (v1alpha1.MarketNetwork, error) {
-	deadline := time.Now().Add(timeout)
-	last := ""
-	for {
-		o, err := ReadNetwork(ctx, kubeconfig)
-		if err == nil {
-			var key strings.Builder
-			key.WriteString(string(o.Status.Phase) + o.Status.Message)
-			for _, a := range o.Status.Apps {
-				key.WriteString(a.Name + string(a.Phase))
-			}
-			if key.String() != last && progress != nil {
-				progress(o.Status)
-				last = key.String()
-			}
-			if o.Status.Phase == v1alpha1.ApplicationPhaseReady && o.Status.ObservedGeneration == o.Generation {
-				return o, nil
-			}
-			if o.Status.Phase == v1alpha1.ApplicationPhaseFailed {
-				return o, fmt.Errorf("marketnetwork: the MarketNetwork failed: %s", o.Status.Message)
-			}
-			if why := networkFailure(o.Status); why != "" {
-				return o, fmt.Errorf("marketnetwork: the MarketNetwork cannot become Ready: %s", why)
-			}
-		}
-		if time.Now().After(deadline) {
-			return o, fmt.Errorf("marketnetwork: the MarketNetwork was not Ready within %s (phase %s: %s)", timeout, o.Status.Phase, o.Status.Message)
-		}
-		if !clock.Sleep(ctx, NetworkPoll) {
-			return o, ctx.Err()
-		}
+	ri, err := networkClient(kubeconfig)
+	if err != nil {
+		return v1alpha1.MarketNetwork{}, err
 	}
+	last := ""
+	var o v1alpha1.MarketNetwork
+	_, err = ctlruntime.Await(ctx, ri, NetworkName, timeout, func(u *unstructured.Unstructured) (bool, error) {
+		var cur v1alpha1.MarketNetwork
+		if u == nil || unstruct.Into(u, &cur) != nil {
+			return false, nil
+		}
+		o = cur
+		var key strings.Builder
+		key.WriteString(string(o.Status.Phase) + o.Status.Message)
+		for _, a := range o.Status.Apps {
+			key.WriteString(a.Name + string(a.Phase))
+		}
+		if key.String() != last && progress != nil {
+			progress(o.Status)
+			last = key.String()
+		}
+		if o.Status.Phase == v1alpha1.ApplicationPhaseReady && o.Status.ObservedGeneration == o.Generation {
+			return true, nil
+		}
+		if o.Status.Phase == v1alpha1.ApplicationPhaseFailed {
+			return false, fmt.Errorf("marketnetwork: the MarketNetwork failed: %s", o.Status.Message)
+		}
+		if why := networkFailure(o.Status); why != "" {
+			return false, fmt.Errorf("marketnetwork: the MarketNetwork cannot become Ready: %s", why)
+		}
+		return false, nil
+	})
+	if errors.Is(err, ctlruntime.ErrAwaitTimeout) {
+		return o, fmt.Errorf("marketnetwork: the MarketNetwork was not Ready within %s (phase %s: %s)", timeout, o.Status.Phase, o.Status.Message)
+	}
+	return o, err
 }
 
 func DeleteNetwork(ctx context.Context, kubeconfig string, timeout time.Duration) error {
@@ -242,19 +269,11 @@ func DeleteNetwork(ctx context.Context, kubeconfig string, timeout time.Duration
 		}
 		return err
 	}
-	deadline := time.Now().Add(timeout)
-	for {
-		_, err := ri.Get(ctx, NetworkName, metav1.GetOptions{})
-		if apierrors.IsNotFound(err) {
-			return nil
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("marketnetwork: the MarketNetwork was not gone within %s", timeout)
-		}
-		if !clock.Sleep(ctx, NetworkPoll) {
-			return ctx.Err()
-		}
+	_, err = ctlruntime.Await(ctx, ri, NetworkName, timeout, ctlruntime.Absent)
+	if errors.Is(err, ctlruntime.ErrAwaitTimeout) {
+		return fmt.Errorf("marketnetwork: the MarketNetwork was not gone within %s", timeout)
 	}
+	return err
 }
 
 func networkFailure(st v1alpha1.MarketNetworkStatus) string {

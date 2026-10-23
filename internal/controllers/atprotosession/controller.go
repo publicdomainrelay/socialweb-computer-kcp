@@ -18,7 +18,6 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/pds"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 const (
@@ -68,7 +67,7 @@ type Controller struct {
 }
 
 func New(opts Options) *Controller {
-	return &Controller{bus: opts.Bus, refresh: opt.Positive(opts.Refresh, DefaultRefresh),
+	return &Controller{bus: opts.Bus, refresh: ctlruntime.Period(opts.Refresh, DefaultRefresh),
 		refs: binding.New[struct{}]()}
 }
 
@@ -138,7 +137,10 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 	if err := c.apply(ctx, req, object, status); err != nil {
 		return ctlruntime.Result{}, err
 	}
-	return ctlruntime.Result{RequeueAfter: c.refresh}, nil
+	if !strings.EqualFold(strings.TrimSpace(to.Kind), RemotePDSKind) {
+		return ctlruntime.Result{}, nil
+	}
+	return ctlruntime.RefreshAfter(c.refresh), nil
 }
 
 func (c *Controller) session(ctx context.Context, self, to commonv1.ObjectRef, did string) (pds.Session, error) {

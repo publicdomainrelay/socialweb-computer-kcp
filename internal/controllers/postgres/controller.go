@@ -7,10 +7,10 @@ import (
 	"log/slog"
 	"path/filepath"
 	"reflect"
+	"sync"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
@@ -33,9 +33,7 @@ const (
 
 	ProbeTimeout = 5 * time.Second
 
-	PendingInterval = 200 * time.Millisecond
-
-	MaxPendingInterval = 30 * time.Second
+	eventBuffer = 64
 )
 
 type Options struct {
@@ -50,6 +48,16 @@ type Controller struct {
 	log *slog.Logger
 
 	host *postgresctl.Host
+
+	events chan ctlruntime.Request
+
+	mu sync.Mutex
+
+	follows map[ctlruntime.Request]*follow
+}
+
+type follow struct {
+	cancel context.CancelFunc
 }
 
 func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
@@ -60,8 +68,10 @@ func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	c := &Controller{log: log.With("component", "postgres-controller"), host: opts.Host}
-	options := []ctlruntime.Option{ctlruntime.Export(Export), ctlruntime.Finalizer(Finalizer), ctlruntime.Owns[*v1alpha1.HostProcess]()}
+	c := &Controller{log: log.With("component", "postgres-controller"), host: opts.Host, events: make(chan ctlruntime.Request, eventBuffer),
+		follows: map[ctlruntime.Request]*follow{}}
+	options := []ctlruntime.Option{ctlruntime.Export(Export), ctlruntime.Finalizer(Finalizer), ctlruntime.Owns[*v1alpha1.HostProcess](),
+		ctlruntime.Events(c.events), ctlruntime.Gone(c.gone)}
 	if opts.Scope != nil {
 		options = append(options, ctlruntime.InWorkspaces(opts.Scope))
 	}
@@ -133,8 +143,15 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, o *v
 		if werr := c.apply(ctx, req, o, next); werr != nil {
 			return ctlruntime.Result{}, werr
 		}
-		return ctlruntime.Result{RequeueAfter: pending(next.Conditions)}, nil
+		if ferr := c.follow(ctx, req, o); ferr != nil {
+			return ctlruntime.Result{}, ferr
+		}
+		if c.host.Accepting(*o) {
+			return ctlruntime.Result{}, fmt.Errorf("postgres: %s reports ready and SELECT 1 fails: %w", o.Name, err)
+		}
+		return ctlruntime.Result{}, nil
 	}
+	c.unfollow(req)
 	created, err := s.Databases(pctx, o.Spec.Databases)
 	for _, db := range created {
 		log.Info("database created", "database", db)
@@ -202,9 +219,15 @@ func (c *Controller) finalize(ctx context.Context, req ctlruntime.Request, o *v1
 	pctx, cancel := context.WithTimeout(ctx, ProbeTimeout)
 	defer cancel()
 	if c.host.Serving(pctx, *o) {
-		next.Message = "waiting for the server to stop"
-		return ctlruntime.Result{Waiting: true, RequeueAfter: PendingInterval}, c.apply(ctx, req, o, next)
+		if err := c.follow(ctx, req, o); err != nil {
+			return waiting, err
+		}
+		if c.host.Serving(pctx, *o) {
+			next.Message = "waiting for the server to stop"
+			return waiting, c.apply(ctx, req, o, next)
+		}
 	}
+	c.unfollow(req)
 	removed, err := c.host.Remove(*o)
 	if err != nil {
 		return waiting, err
@@ -215,12 +238,56 @@ func (c *Controller) finalize(ctx context.Context, req ctlruntime.Request, o *v1
 	return ctlruntime.Result{}, nil
 }
 
-func pending(conditions []metav1.Condition) time.Duration {
-	ready := meta.FindStatusCondition(conditions, ConditionReady)
-	if ready == nil || ready.LastTransitionTime.IsZero() {
-		return PendingInterval
+func (c *Controller) follow(ctx context.Context, req ctlruntime.Request, o *v1alpha1.Postgres) error {
+	key := ctlruntime.Request{Cluster: req.Cluster, Name: req.Name}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, ok := c.follows[key]; ok {
+		return nil
 	}
-	return min(max(time.Since(ready.LastTransitionTime.Time)/4, PendingInterval), MaxPendingInterval)
+	fctx, cancel := context.WithCancel(ctx)
+	changes, err := c.host.PidChanges(fctx, *o)
+	if err != nil {
+		cancel()
+		return fmt.Errorf("postgres: following %s: %w", c.host.PidFile(*o), err)
+	}
+	f := &follow{cancel: cancel}
+	c.follows[key] = f
+	go func() {
+		defer c.drop(key, f)
+		for range changes {
+			select {
+			case c.events <- key:
+			case <-fctx.Done():
+				return
+			}
+		}
+	}()
+	return nil
+}
+
+func (c *Controller) drop(key ctlruntime.Request, f *follow) {
+	f.cancel()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.follows[key] == f {
+		delete(c.follows, key)
+	}
+}
+
+func (c *Controller) unfollow(req ctlruntime.Request) {
+	key := ctlruntime.Request{Cluster: req.Cluster, Name: req.Name}
+	c.mu.Lock()
+	f := c.follows[key]
+	delete(c.follows, key)
+	c.mu.Unlock()
+	if f != nil {
+		f.cancel()
+	}
+}
+
+func (c *Controller) gone(_ context.Context, req ctlruntime.Request) {
+	c.unfollow(req)
 }
 
 func (c *Controller) apply(ctx context.Context, req ctlruntime.Request, o *v1alpha1.Postgres, next *v1alpha1.PostgresStatus) error {

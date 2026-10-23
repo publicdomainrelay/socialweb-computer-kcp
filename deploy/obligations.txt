@@ -1,11 +1,98 @@
-ticker	owner	period	reason
-relay-crawl-refresh	internal/relay/local (Relay)	spec.crawlIntervalSeconds; none when unset	re-request a crawl of the upstream PDS hosts an operator names
-relay-ws-ping	internal/atproto/relay (Relay)	30s	websocket ping to each subscribed PDS
-ingress-keepalive	internal/atproto/ingress (IngressProxy)	spec.keepaliveMilliseconds	keepalive to connected subscription clients
-ingress-synthetic-events	internal/atproto/ingress (IngressProxy)	5s	synthetic subscription events to connected ingress clients
-guest-sshd-probe	internal/sshtransport (Requester)	5s until the session timeout	probe a guest sshd over SSH; a guest offers no watch
-guest-rbac-resync	internal/guestidentity (GuestControlPlane)	spec.grantSyncSeconds, 30s when 0	resync requester RBAC records held in a remote repo with no watch
-guest-oidc-refresh	internal/guestidentity (GuestControlPlane)	5m	refresh the OIDC discovery and keys OpenBao publishes with no watch
-custody-renew	internal/gateway/custody (GatewayAPI)	per session: renew below 30m left, by 1h	renew the custody sessions of signed-in web users
-market-heartbeat	internal/market/bidder (Bidder)	spec.heartbeatIntervalSeconds; none when 0	write the market heartbeat record; refresh the offering on a tick once spec.offeringRefreshSeconds has elapsed
-pds-relay-crawl	internal/market/participant (Bidder, Requester)	10s	requestCrawl of the component PDS (Exposure svc-pds-pds-local) at each network relay; a relay offers no watch
+# key: owner+site; owner = package dir from the module root; site = <file>.go:<Func> or <file>.go:<Type>.<Method> (closures under their enclosing declaration); one line per site, a declaration with n sites has n lines; kinds ticker (time.NewTicker, time.Tick), requeue and deadline (a ctlruntime.RefreshAfter call or a RequeueAfter value that is not 0 and not a pass-through x.RequeueAfter) are every such site in non-test Go under internal and cmd; kinds loop (periodic outbound timer loop), bounded (bounded wait with no event source) and origin (where the period of a requeue line elsewhere is chosen) are listed by hand
+owner	site	kind	period	reason
+internal/atproto/ingress	client.go:Subscriber.handleSubscribe	ticker	5s constant	synthetic subscription events to connected ingress clients
+internal/atproto/ingress	server.go:Server.startKeepalive	ticker	spec.keepaliveMilliseconds; <=0 uses 5s	keepalive to connected subscription clients
+internal/atproto/market	discovery.go:StartOfferingRefresh	ticker	interval; <=0 uses HeartbeatInterval	rewrite the offering record on the PDS; a liveness write has no event source
+internal/atproto/pds	subscribe.go:Server.handleSubscribeRepos	ticker	subscribePingInterval 30s constant	websocket ping to subscribeRepos clients
+internal/atproto/relay	slurper.go:hostSub.readLoop	ticker	30s constant	websocket ping to each subscribed PDS
+internal/component	runtime.go:Runtime.awaitReady	ticker	ReadyPollInterval 500ms; <=0 uses the default	calls Service.Ready until it answers; the component contract has no readiness signal and pds, plc and relay answer from their own HTTP health
+internal/devsup	server_linux.go:server.orphanKiller	ticker	OrphanScanInterval 1s; no ticker when <=0	scan /proc for SWC_DEVSUP processes of an inactive unit and SIGKILL them; no unprivileged kernel event for a process appearing or reparenting (the proc connector needs CAP_NET_ADMIN)
+internal/install	install.go:installer.wait	ticker	WaitReport constant	print elapsed progress to the operator; reads no state
+internal/install	system_linux.go:liveSystem.User	ticker	100ms constant, bounded by managerSocketWait 30s	wait for /run/user/<uid>/systemd/private after linger; its parent dir may not exist yet, so there is nothing to watch
+internal/market/bidder	offering.go:Bidder.serveMarket	ticker	spec.heartbeatIntervalSeconds; no ticker when <=0	write the market heartbeat record and refresh the offering once spec.offeringRefreshSeconds has elapsed; a liveness write has no event source
+internal/market/participant	crawl.go:Crawl.Run	ticker	participant.CrawlPeriod 10s; <=0 sends one crawl and runs no ticker	requestCrawl of the component PDS (Exposure svc-pds-pds-local) at each network relay; a relay offers no watch
+internal/plcsweep	plcsweep.go:Sweeper.Run	ticker	DefaultInterval 1h; <=0 is ErrNoInterval and no ticker	resolve each worklist DID at the PLC directory; PLC has no per-DID watch
+internal/relay/local	relay.go:Relay.refresh	ticker	spec.crawlIntervalSeconds; no ticker when <=0	re-request a crawl of the upstream PDS hosts an operator names
+internal/xrpcserver	subscribe.go:Server.stream	ticker	pingEvery 30s constant	websocket ping to subscribeClusters subscribers
+internal/controllers/atprotorecordwatch	controller.go:Controller.sync	requeue	VerifyInterval 5m, VerifyRetry 30s after a failed verify, floor 1s	getRecord read-back of the watched records at the author PDS to correct events the stream dropped; a PDS offers no point read-back watch
+internal/controllers/atprotosession	controller.go:Controller.Reconcile	requeue	DefaultRefresh 30s (Options.Refresh 0 is the default, <0 none); RemotePDS targets only	getSession on the session held at a RemotePDS; a remote PDS offers no session-status watch
+internal/controllers/cluster	provider.go:ProviderController.Reconcile	requeue	the soonest of the origin lines of internal/clusterprovider, internal/providermain and internal/materialiser and the scale, node and teardown deadlines; none when nothing is due	cluster provider pass: add-on renewal, cluster OpenBao node sync and tenant /readyz probe have no watch; the rest are deadlines
+internal/controllers/kcpinstallation	controller.go:Controller.Reconcile	deadline	obs.LeaseStaleIn	the time the observed kcp lease goes stale
+internal/controllers/marketintents	controller.go:forwarder.Reconcile	requeue	the soonest wait the market observers return; none when they return none	passes on the observers' deadlines, backoff and the outbox stall retry (origin internal/market/participant outbox.go:outboxRun.fail)
+internal/controllers/marketpresence	controller.go:Controller.Reconcile	requeue	DefaultRefresh 1m (Options.Refresh 0 is the default, <0 none); none when no DID	getRecord of the market heartbeat at the Bidder's PDS resolved through PLC; no subscription to that repo is wired
+internal/controllers/pdsaccount	controller.go:Controller.Reconcile	requeue	DefaultRefresh 30s (Options.Refresh 0 is the default, <0 none); RemotePDS targets only	reads the account from a RemotePDS over HTTP; a remote PDS gives no account-status watch
+internal/controllers/plcidentity	controller.go:Controller.Reconcile	requeue	DefaultRefresh 30s (Options.Refresh 0 is the default, <0 none)	reads the PLC directory audit log over HTTP; PLC offers no per-DID change stream
+internal/controllers/policyworkflowrun	controller.go:Controller.Reconcile	deadline	RunDeadline minus now	the workflow run deadline
+internal/controllers/policyworkflowrun	controller.go:Controller.expire	deadline	RunExpiry minus now	the run TTL
+internal/controllers/relaystatus	controller.go:Controller.Reconcile	requeue	DefaultRefresh 30s (Options.Refresh 0 is the default, <0 none)	health probe GET /xrpc/_health on the relay; no health event stream
+internal/controllers/remoteopenbao	controller.go:Controller.Reconcile	requeue	DefaultCheckInterval 30s (Options.CheckInterval 0 is the default, <0 none); none when spec.suspend	health probe of a remote OpenBao over HTTPS; no event stream
+internal/controllers/remotepds	controller.go:Controller.Reconcile	requeue	DefaultCheckInterval 30s (Options.CheckInterval 0 is the default, <0 none)	describeServer on a remote PDS; no health event stream
+internal/controllers/runtime	status.go:RefreshAfter	requeue	the caller's period; none when <=0	the guarded helper every RefreshAfter requeue line calls
+internal/controllers/ttl	controller.go:expiry.Reconcile	deadline	finish time plus the TTL	the object's TTL
+internal/controllers/vaultcertificate	controller.go:Controller.Reconcile	requeue	DefaultRefresh 30s (Options.Refresh 0 is the default, <0 none)	lists and reads PKI certificates on OpenBao; no change stream, rotationDue is computed against the clock
+internal/controllers/vaultcredential	controller.go:Controller.Reconcile	requeue	DefaultRefresh 30s (Options.Refresh 0 is the default, <0 none)	reads KV metadata from OpenBao; no change stream, rotationDue is computed against the clock
+internal/marketidentity/atproto	oauth.go:Accounts.oauthBrowser	deadline	the pending authorization expiry	browser authorization expiry
+internal/marketidentity/atproto	oauth.go:Accounts.oauthBrowser	deadline	the pending authorization expiry	browser authorization expiry
+internal/marketidentity/atproto	oauth.go:Accounts.oauthQr	requeue	QRPollInterval 3s constant, only until the QR state expires (TTL 5m)	GET com.fedfork.atprotoOauthQR at the QR origin; the origin pushes nothing
+internal/marketidentity/atproto	oauth.go:Accounts.oauthQr	requeue	QRPollInterval 3s constant, only until the QR state expires (TTL 5m)	GET com.fedfork.atprotoOauthQR at the QR origin; the origin pushes nothing
+internal/marketidentity/atproto	oauth.go:signedIn	deadline	access token exp minus AccessSkew	token refresh before expiry
+internal/materialiser	materialiser.go:Reconciler.bringUp	requeue	ProbeRetry 2s constant, capped at the time left before InitTimeout 3m	probe the tenant apiserver /readyz after its group is up; an HTTP endpoint has no event source
+internal/materialiser	materialiser.go:Reconciler.off	deadline	gate closed since plus PathGateGrace 10s	the shut deadline
+internal/materialiser	materialiser.go:Reconciler.pending	requeue	ProbeRetry 2s constant, capped at the time left before InitTimeout 3m	probe the tenant apiserver /readyz; an HTTP endpoint has no event source
+internal/materialiser	materialiser.go:Reconciler.teardown	deadline	gate closed since plus PathGateGrace 10s	the shut deadline
+internal/materialiser	materialiser.go:Reconciler.teardown	deadline	gate closed since plus PathGateGrace 10s	the shut deadline
+internal/openbaoctl	server.go:Servers.Reconcile	requeue	the starting wait: 0 (HostProcess watch) or RetryAfter 2s constant	the HostProcess runs and the OpenBao HTTPS health does not answer yet; an HTTPS endpoint has no event source
+internal/openbaoctl	server.go:Servers.Reconcile	requeue	RetryAfter 2s constant	the server stopped answering HTTPS health; no event source
+internal/openbaoctl	server.go:Servers.Reconcile	requeue	RetryAfter 2s constant	the server stays sealed after an unseal; OpenBao has no seal event
+internal/openbaoctl	server.go:Servers.Reconcile	requeue	spec.tidy.interval (DefaultTidyInterval 6h, validated >= 1m) from status.tidy.lastRunAt	auth/token/tidy and sys/leases/tidy on OpenBao and a resync of the declared layout; OpenBao has no watch
+internal/openbaoctl	server.go:Servers.Reconcile	requeue	TidyRetryAfter 1m constant	the tidy is due and has not run; retry it
+internal/clusterprovider	provider.go:Provider.AddOnsDueIn	origin	DefaultAddOnInterval 30m (Options.AddOnInterval <=0 uses 30m); only for a Ready cluster with Tenant and InstallTenant wired	reinstall tenant add-ons and reissue the External Secrets client certificate before it expires; a renewal with no watch
+internal/providermain	vaultsync.go:nodeHosts.reconcileVault	origin	VaultSyncInterval 30s constant, only while the cluster holds NodeClaims	make the cluster OpenBao match the live market nodes; OpenBao offers no watch
+internal/materialiser	materialiser.go:Reconciler.probeIn	origin	ProbeRetry 2s constant, capped at InitTimeout 3m	tenant apiserver /readyz probe; no event source
+internal/market/participant	outbox.go:outboxRun.fail	origin	outboxStallRetry 5m constant while the StateSync is Stalled	re-attempt an exhausted outbound delivery (a remote submitEvent POST or a PDS write); the target offers no watch
+internal/controllers/atprotosession	controller.go:New	origin	DefaultRefresh 30s	period of the requeue line of this package
+internal/controllers/marketpresence	controller.go:New	origin	DefaultRefresh 1m	period of the requeue line of this package
+internal/controllers/pdsaccount	controller.go:New	origin	DefaultRefresh 30s	period of the requeue line of this package
+internal/controllers/plcidentity	controller.go:New	origin	DefaultRefresh 30s	period of the requeue line of this package
+internal/controllers/relaystatus	controller.go:New	origin	DefaultRefresh 30s	period of the requeue line of this package
+internal/controllers/remoteopenbao	controller.go:New	origin	DefaultCheckInterval 30s	period of the requeue line of this package
+internal/controllers/remotepds	controller.go:New	origin	DefaultCheckInterval 30s	period of the requeue line of this package
+internal/controllers/vaultcertificate	controller.go:New	origin	DefaultRefresh 30s	period of the requeue line of this package
+internal/controllers/vaultcredential	controller.go:New	origin	DefaultRefresh 30s	period of the requeue line of this package
+internal/storemaint	storemaint.go:Monitor.Run	loop	cfg.Interval 5m after cfg.First 30s; <=0 uses the defaults	store maintenance (vacuum, usage); sqlite and postgres give no size event
+internal/guestidentity	grants.go:Syncer.run	loop	spec.grantSyncSeconds (opts.Resync); <=0 uses 30s	resync requester RBAC records held in a remote repo with no watch
+internal/guestidentity	service.go:Guest.refreshOIDCDocuments	loop	oidcDocumentRefresh 5m constant	refresh the OIDC discovery and keys OpenBao publishes with no watch
+internal/gateway/custody	signin.go:SignIn.refreshLoop	loop	per session: renew below 30m left, by 1h	renew the custody sessions of signed-in web users
+internal/market/requester	runner.go:contractRunner.awaitCapacityRetry	loop	CapacityRetryDelay 60s constant	re-send the RFP after every bidder declined with reason capacity; bidders publish no capacity event
+internal/market/requester	accept.go:Requester.submitAcceptAndWait	bounded	spec.receiptPollMilliseconds (<=0 uses a 500ms floor) doubling to 2s, bounded by receiptTimeoutSeconds (default 5m)	re-send submitAccept and read the bidder's market.receipt with listRecords; in XRPC mode nothing delivers the receipt (the submitAccept reply carries none, the bidder pushes none, submitEvent accepts only guest-event envelopes); firehose comms wake it from the market inbox
+internal/sshtransport	guest.go:GuestSessionProvider.PollReady	bounded	GuestPollInterval 5s until the session timeout	probe a guest sshd over SSH; a guest offers no watch
+internal/stack/request	ssh.go:SSH.WaitReady	bounded	SSHPollInterval 5s until the timeout	ssh over dumbpipe/iroh to the guest sshd; a guest sshd offers no watch
+internal/stack/request	request.go:Kcp.PutSecrets	bounded	Poll 1s doubling to RetryMax 5s within the timeout	OpenBao cert login and KV write after the watched OpenBaoServer status is complete; the OpenBao HTTP endpoint has no readiness event
+internal/stack/gatewaykcp	gatewaykcp.go:gateway.applyRoot	bounded	4*Poll (2s) within VaultTimeout 1m	vaultmain.ApplyRoot over HTTP to the root OpenBao; no event stream
+cmd/socialweb-computer	dev.go:startOrAdoptDevsup	bounded	20ms within devsupReadyTimeout 15s	dial devsup's unix socket and Hello; listen(2) emits no event and the detached devsup offers no readiness pipe
+internal/hostsvc	listenport.go:WaitListenPort	bounded	the caller's every (bootstrap.PortPoll, kcpserver.PortPoll 20ms) within the caller's ctx; one probe when <=0	read /proc/<pid>/fd and net/tcp{,6}; no kernel event for a socket entering LISTEN (sock_diag has no listen notification, inotify on /proc does not work)
+internal/vmruntime	firecracker_linux.go:firecracker.awaitBoot	bounded	DialRetryMin 10ms doubling to DialRetryMax 1s after a dial error once the socket file exists, within BootTimeout	firecracker GET / on the API socket; the socket file appears (fsnotify) before the VMM listens and a unix socket entering LISTEN has no event
+internal/bootstrap	bootstrap.go:waitUnixSocket	bounded	PortPoll 20ms within the caller's ReadyTimeout ctx	dial the kine unix socket; accept readiness has no event source
+internal/kcpapply	kcpapply.go:Applier.servedFor	bounded	opts.Poll (DefaultPoll 1s; <=0 uses the default) within WaitTimeout	discovery /apis/<gv> has no watch
+internal/kcpserver	kcpserver.go:WaitReady	bounded	every (ReadyPoll or ProbePoll; <=0 uses ProbePoll) within the caller's ctx	kcp /readyz over HTTP; no event stream
+internal/kcpserver	roll.go:WaitOwnPortReady	bounded	every (cfg.Poll; <=0 uses DefaultRollPoll) within the caller's ctx	kcp /readyz on its own port; no event stream
+internal/kcpserver	roll.go:awaitDrained	bounded	cfg.Poll (<=0 uses DefaultRollPoll) within DrainTimeout	apiserverfront control socket Status (open connections); no event stream
+internal/pgunit	pgunit.go:WaitReady	bounded	ReadyPoll 200ms within the caller's ctx	postgres SELECT 1 over the unix socket; no event source
+internal/vault/openbao	admin.go:Client.waitKVUpgraded	bounded	kvUpgradePoll 50ms within kvUpgradeLimit 30s	the OpenBao kv v1 to v2 upgrade has no event
+internal/guestidentity	service.go:Guest.recordBoundHostKeys	bounded	HostKeyRetry 5s x HostKeyAttempts 24 (<=0 uses the defaults)	read the host key the guest bound in OpenBao; no watch
+internal/atproto/market	discovery.go:VerifyRelayVisibility	bounded	opts.PollInterval (<=0 uses 2s) within PollTimeout (<=0 uses 15s)	relay listReposByCollection has no watch
+internal/nodeagent	diagnose.go:Diagnose	bounded	DiagnoseAttempts x DiagnoseIntervalSeconds (6 x 20s; <=0 uses the default)	crictl info NetworkReady from containerd CRI; the CRI has no event stream for runtime conditions; diagnostic only
+internal/nodeagent	join.go:exchangeWorkloadToken	bounded	GuestLoginWaitAttempts x GuestLoginWaitIntervalSeconds (60 x 2s; <=0 uses the default)	wait for the guest login helper file another unit installs; nothing signals that it appeared
+internal/nodeagent	join.go:loginOpenBao	bounded	LinkWaitAttempts x LinkWaitIntervalMS (120 x 500ms; <=0 uses the default)	wait for the cluster OpenBao to answer over the dumbpipe link; a TCP/HTTP endpoint has no event source
+internal/nodeagent	join.go:readNodeKV	bounded	LinkWaitAttempts x LinkWaitIntervalMS (120 x 500ms; <=0 uses the default)	the node KV read over the same link has no watch
+internal/nodeagent	cni.go:awaitPodCIDR	bounded	CNIWaitIntervalMS 2s until the kubelet kubeconfig exists, within CNIWaitAttempts x interval	wait for the kubeconfig file k3s writes; nothing signals it
+internal/clusterprovider	steps.go:waitOpenBaoTLS	bounded	PollInterval 250ms within the step gate ctx (GateTimeout 60s)	OpenBao /v1/sys/health after start; HTTP, no event source
+internal/clusterprovider	steps.go:waitDial	bounded	PollInterval 250ms within the step gate ctx	TCP dial of kine; a listening port has no event source
+internal/clusterprovider	steps.go:waitK3s	bounded	PollInterval 250ms within the step gate ctx	k3s /readyz over HTTPS; no event source
+internal/clusterprovider	steps.go:waitK3sReadyz	bounded	PollInterval 250ms within the step gate ctx	/readyz 200 five times in a row; HTTP, no event source
+internal/clusterprovider	front.go:waitFront	bounded	PollInterval 250ms within the step gate ctx	status of the apiserver front over its control socket; request/response, no event source
+internal/clusterprovider	externalsecrets.go:waitExternalSecretsWebhook	bounded	PollInterval 250ms within the step gate ctx	webhook /readyz and a TLS dial as the apiserver would; no event source
+internal/clusterprovider	externalsecrets.go:waitExternalSecretsController	bounded	PollInterval 250ms within the step gate ctx	controller /readyz (HTTP, no event source) plus its log line
+internal/clusterprovider	links.go:vaultLinkKeys.untilMounted	bounded	PollInterval 250ms within GateTimeout 60s	the OpenBao KV v2 mount finishing its upgrade; HTTP, no event source
+internal/clusterprovider	roll.go:Roller.RollCluster	bounded	PollInterval 250ms within drainWait 5s	open connections on the old slot via the front control socket; no event source
+internal/vaultcert	vaultreload.go:ServedVaultTLS.Ensure	bounded	vaultReloadPoll 100ms within Settle (DefaultVaultReloadSettle 10s; <=0 uses 10s)	TLS handshake to read the leaf the vault serves after SIGHUP; no event source

@@ -2,6 +2,7 @@ package gatewayssh
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/sshgateway"
+	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
 )
 
@@ -102,31 +104,26 @@ func (k *Kcp) Root(ctx context.Context) (*v1alpha1.SshGateway, error) {
 }
 
 func (k *Kcp) WaitReady(ctx context.Context, timeout time.Duration, progress func(v1alpha1.ApplicationStatus)) (*v1alpha1.SshGateway, error) {
-	deadline := time.Now().Add(timeout)
 	last := ""
-	for {
-		o, err := k.Root(ctx)
-		if err == nil {
-			if key := string(o.Status.Phase) + o.Status.Message; key != last && progress != nil {
-				progress(o.Status)
-				last = key
-			}
-			switch o.Status.Phase {
-			case v1alpha1.ApplicationPhaseReady:
-				return o, nil
-			case v1alpha1.ApplicationPhaseFailed:
-				return o, fmt.Errorf("gatewayssh: the SshGateway failed: %s", o.Status.Message)
-			}
+	o, err := ctlruntime.AwaitAs(ctx, k.dyn.Resource(compose.SshGatewayGVR), RootName, timeout, func(o *v1alpha1.SshGateway) (bool, error) {
+		if o == nil {
+			return false, nil
 		}
-		if time.Now().After(deadline) {
-			return o, fmt.Errorf("gatewayssh: the SshGateway was not Ready within %s", timeout)
+		if key := string(o.Status.Phase) + o.Status.Message; key != last && progress != nil {
+			progress(o.Status)
+			last = key
 		}
-		select {
-		case <-ctx.Done():
-			return o, ctx.Err()
-		case <-time.After(Poll):
-		}
+		return o.Status.Phase == v1alpha1.ApplicationPhaseReady || o.Status.Phase == v1alpha1.ApplicationPhaseFailed, nil
+	})
+	switch {
+	case errors.Is(err, ctlruntime.ErrAwaitTimeout):
+		return o, fmt.Errorf("gatewayssh: the SshGateway was not Ready within %s", timeout)
+	case err != nil:
+		return o, err
+	case o.Status.Phase == v1alpha1.ApplicationPhaseFailed:
+		return o, fmt.Errorf("gatewayssh: the SshGateway failed: %s", o.Status.Message)
 	}
+	return o, nil
 }
 
 func SshListener(ls []v1alpha1.ApplicationListener) string {

@@ -15,8 +15,12 @@ import (
 	"strings"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kruntime "k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/apiserverfront"
@@ -315,30 +319,37 @@ func waitK3sReadyz(ctx context.Context, kubeconfig string) error {
 	})
 }
 
-func waitK3sControllers(ctx context.Context, kubeconfig string) error {
-	last := "no answer"
-	return poll(ctx, func(ctx context.Context) (bool, error) {
+func adminClient(ctx context.Context, kubeconfig string, last *string) (kubernetes.Interface, error) {
+	var core kubernetes.Interface
+	err := untilOutput(ctx, unitMember{path: kubeconfig}, func(string) (bool, error) {
 		cfg, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
 		if err != nil {
-			last = err.Error()
+			*last = err.Error()
 			return false, nil
 		}
-		core, err := kubernetes.NewForConfig(cfg)
-		if err != nil {
-			last = err.Error()
-			return false, nil
-		}
-		addons, err := core.AppsV1().Deployments(metav1.NamespaceSystem).List(ctx, metav1.ListOptions{Limit: 1})
-		if err != nil {
-			last = err.Error()
-			return false, nil
-		}
-		if len(addons.Items) == 0 {
-			last = "the apiserver answered and " + metav1.NamespaceSystem + " holds no Deployment yet"
+		if core, err = kubernetes.NewForConfig(cfg); err != nil {
+			*last = err.Error()
 			return false, nil
 		}
 		return true, nil
-	}, func() error {
+	}, ctx.Err)
+	return core, err
+}
+
+func deploymentsIn(core kubernetes.Interface, namespace string) cache.ListerWatcher {
+	return &cache.ListWatch{
+		ListWithContextFunc: func(ctx context.Context, o metav1.ListOptions) (kruntime.Object, error) {
+			return core.AppsV1().Deployments(namespace).List(ctx, o)
+		},
+		WatchFuncWithContext: func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) {
+			return core.AppsV1().Deployments(namespace).Watch(ctx, o)
+		},
+	}
+}
+
+func waitK3sControllers(ctx context.Context, kubeconfig string) error {
+	last := "no answer"
+	notReady := func() error {
 		return &errNotReady{
 			what: "the k3s controllers of the server whose admin kubeconfig is " + kubeconfig +
 				". The apiserver answers /readyz before they start, and k3s registers the " +
@@ -352,13 +363,27 @@ func waitK3sControllers(ctx context.Context, kubeconfig string) error {
 				"takes a node's credentials, which this process does not hold",
 			last: last,
 		}
+	}
+	core, err := adminClient(ctx, kubeconfig, &last)
+	if err != nil {
+		if ctx.Err() != nil {
+			return notReady()
+		}
+		return err
+	}
+	last = "the apiserver answered and " + metav1.NamespaceSystem + " holds no Deployment yet"
+	err = awaitTyped(ctx, deploymentsIn(core, metav1.NamespaceSystem), &appsv1.Deployment{}, 0, func(addons []*appsv1.Deployment) (bool, error) {
+		return len(addons) > 0, nil
 	})
+	if err != nil && ctx.Err() != nil {
+		return notReady()
+	}
+	return err
 }
 
 func waitCloudControllerManager(ctx context.Context, p procgroup.Member) error {
 	last := "no output yet"
-	return poll(ctx, func(context.Context) (bool, error) {
-		out := p.Output()
+	return untilOutput(ctx, p, func(out string) (bool, error) {
 		if strings.Contains(out, cloudControllerManagerReadyMark) {
 			return true, nil
 		}

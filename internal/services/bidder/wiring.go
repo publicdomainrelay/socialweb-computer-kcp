@@ -29,7 +29,7 @@ func inputsSubscription(inputs *participant.Inputs) contract.Subscription {
 }
 
 func roleSubscription(bidder *core.Bidder) contract.Subscription {
-	return contract.Subscription{Kinds: []string{contract.KindBid, contract.KindComputeVM, contract.KindStateSync}, Observer: bidder}
+	return contract.Subscription{Kinds: []string{contract.KindBid, contract.KindComputeVM, contract.KindStateSync}, Observer: bidder, Synced: bidder.Synced}
 }
 
 func (s *Service) resolveIntents(ctx context.Context) (contract.Intents, error) {

@@ -156,22 +156,25 @@ func (b *Bidder) applyMarketEvent(ctx context.Context, uri, cid string, record m
 	return nil
 }
 
-func (b *Bidder) submitBid(ctx context.Context, endpoint string, ref market.StrongRef) {
+type unsentBid struct {
+	endpoint string
+
+	ref market.StrongRef
+}
+
+func (b *Bidder) submitBid(ctx context.Context, endpoint string, ref market.StrongRef) error {
 	raw := strings.TrimSpace(endpoint)
 	endpoint = b.submitEventURL(ctx, raw)
 	if endpoint == "" {
 		b.log.Warn("submitting the bid failed: the endpoint does not resolve", "url", raw, "bid", ref.URI)
-		return
+		return nil
 	}
 	record, err := b.records.GetRecord(ctx, market.ATURIAuthority(ref.URI), market.NSIDFromURI(ref.URI), participant.LastSegment(ref.URI))
 	if err != nil {
-		b.log.Warn("submitting the bid failed: the bid record cannot be read", "bid", ref.URI, "err", err)
-		return
+		return fmt.Errorf("reading the bid record %s: %w", ref.URI, err)
 	}
 	body := map[string]any{"uri": ref.URI, "cid": ref.CID, "record": record.Value}
-	if err := b.outbound.Post(ctx, endpoint, market.SubmitBidNSID, body); err != nil {
-		b.log.Warn("submitting the bid to the requester failed", "url", endpoint, "err", err)
-	}
+	return b.outbound.Post(ctx, endpoint, market.SubmitBidNSID, body)
 }
 
 func (b *Bidder) submitEventURL(ctx context.Context, ref string) string {

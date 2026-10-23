@@ -439,19 +439,24 @@ func (r *bidderRun) standalone(ctx context.Context) int {
 		return r.a.fail(exitFailed, "run bidder: %v", err)
 	}
 	deadline := time.Now().Add(3 * time.Minute)
+	delay := 2 * time.Second
 	var applyErr error
 	for {
 		if applyErr = k.ApplyRoot(ctx, spec); applyErr == nil {
 			break
 		}
-		if time.Now().After(deadline) {
+		left := time.Until(deadline)
+		if left <= 0 {
 			return r.a.fail(exitFailed, "run bidder: applying the MarketBidder root object: %v", applyErr)
 		}
+		again := time.NewTimer(min(delay, left))
 		select {
 		case <-ctx.Done():
+			again.Stop()
 			return r.a.fail(exitFailed, "run bidder: applying the MarketBidder root object: %v", ctx.Err())
-		case <-time.After(2 * time.Second):
+		case <-again.C:
 		}
+		delay = min(2*delay, bidder.RootRetryMax)
 	}
 	r.log("the MarketBidder root object is applied into the handle's own kcp", "instance", up.Instance, "kcp", up.KcpURL)
 	sum := bidderSummary{Profile: r.profile, Handle: r.handle, Instance: up.Instance, KcpURL: up.KcpURL}
@@ -502,7 +507,7 @@ func (r *bidderRun) signIn(ctx context.Context, k *bidder.Kcp, spec v1alpha1.Mar
 	}
 	wctx, cancel := context.WithTimeout(ctx, bidderIdentityWait)
 	defer cancel()
-	id, err := appcli.IdentityRenderer{Client: ids, Out: r.a.stderr, In: in}.WaitReady(wctx, marketbidder.BidderIdentity)
+	id, err := appcli.IdentityRenderer{Client: ids, Watch: k.AwaitIdentity, Out: r.a.stderr, In: in}.WaitReady(wctx, marketbidder.BidderIdentity)
 	if err != nil {
 		return id, err
 	}

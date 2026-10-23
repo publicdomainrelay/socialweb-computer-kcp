@@ -3,6 +3,7 @@ package requester
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -27,9 +28,8 @@ func (q *Requester) Observe(ctx context.Context, change contractmarket.Change) (
 		q.contracts.Put(change.Name, contract)
 		q.observePending(contract)
 		q.reconcileContract(ctx, contract)
-		q.mergeInboxFor(ctx, contract)
-		q.processPendingEvents(ctx, change.Name)
-		return 0, nil
+		mergeErr := q.mergeInboxFor(ctx, contract)
+		return 0, errors.Join(mergeErr, q.processPendingEvents(ctx, change.Name))
 	case contractmarket.KindStateSync:
 		if change.Gone || change.StateSync == nil {
 			q.syncs.Remove(change.Name)
@@ -59,7 +59,9 @@ func (q *Requester) observeSync(ctx context.Context, item v1alpha1.StateSync) (t
 			wait = retry
 		}
 	case InboxAdapter:
-		q.mergeInboxMailbox(ctx, item)
+		if err := q.mergeInboxMailbox(ctx, item); err != nil {
+			return wait, err
+		}
 	}
 	return wait, nil
 }

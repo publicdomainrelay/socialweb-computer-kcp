@@ -65,6 +65,8 @@ type Subscription struct {
 	Workspaces []string
 
 	Observer Observer
+
+	Synced func()
 }
 
 type Inputs interface {

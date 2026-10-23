@@ -35,7 +35,7 @@ const (
 	ReasonUnhealthy     = "MembersUnhealthy"
 )
 
-const RequeueAfter = 2 * time.Second
+const ProbeRetry = 2 * time.Second
 
 const GateTimeout = 10 * time.Second
 
@@ -99,6 +99,8 @@ type Result struct {
 	Ops        []Op
 
 	RequeueAfter time.Duration
+
+	Again bool
 
 	RemoveFinalizer bool
 
@@ -247,7 +249,7 @@ func (r *Reconciler) off(ctx context.Context, o Observed) (Result, error) {
 			Message:            "phase is Unavailable; waiting for the front to stop admitting tenant requests before reaping",
 			ObservedGeneration: o.Cluster.Generation,
 		})
-		res.RequeueAfter = RequeueAfter
+		res.RequeueAfter = shutIn(o)
 		return res, nil
 	}
 
@@ -283,7 +285,6 @@ func (r *Reconciler) teardown(ctx context.Context, o Observed) (Result, error) {
 	if refuse, why := r.sessionCapRefuses(o); refuse {
 		res.Ops = append(res.Ops, OpBlocked)
 		res.Alert = why
-		res.RequeueAfter = RequeueAfter
 		meta.SetStatusCondition(&res.Conditions, metav1.Condition{
 			Type:               v1alpha1.ConditionTeardownBlocked,
 			Status:             metav1.ConditionTrue,
@@ -299,7 +300,7 @@ func (r *Reconciler) teardown(ctx context.Context, o Observed) (Result, error) {
 		if o.Now.Sub(drainingSince(o, r.opts.Now())) >= r.opts.GateTimeout {
 			res.Ops = append(res.Ops, OpBlocked)
 			res.Alert = "teardown gate timed out; nothing is destroyed. Stuck-and-billing beats silent loss"
-			res.RequeueAfter = RequeueAfter
+			res.RequeueAfter = shutIn(o)
 			meta.SetStatusCondition(&res.Conditions, metav1.Condition{
 				Type:               v1alpha1.ConditionTeardownBlocked,
 				Status:             metav1.ConditionTrue,
@@ -309,7 +310,7 @@ func (r *Reconciler) teardown(ctx context.Context, o Observed) (Result, error) {
 			})
 			return res, nil
 		}
-		res.RequeueAfter = RequeueAfter
+		res.RequeueAfter = shutIn(o)
 		return res, nil
 	}
 
@@ -381,7 +382,6 @@ func (r *Reconciler) claimReady(res Result, o Observed) (Result, error) {
 	settled, err := revocation.WakeSettled(wakeEffect(o))
 	if err != nil {
 		res.Phase = v1alpha1.ClusterInitializing
-		res.RequeueAfter = RequeueAfter
 		meta.SetStatusCondition(&res.Conditions, metav1.Condition{
 			Type:               ConditionReady,
 			Status:             metav1.ConditionFalse,
@@ -394,7 +394,6 @@ func (r *Reconciler) claimReady(res Result, o Observed) (Result, error) {
 	phase, err := revocation.Ready(settled)
 	if err != nil {
 		res.Phase = v1alpha1.ClusterInitializing
-		res.RequeueAfter = RequeueAfter
 		return res, nil
 	}
 	res.Phase = phase
@@ -515,13 +514,12 @@ func (r *Reconciler) bringUp(ctx context.Context, o Observed, bump bool) (Result
 		res.Alert = fmt.Sprintf("the process group did not come up: %v. A spawn failure that "+
 			"reports only that it happened leaves the readiness gate's own reason -- and the "+
 			"component's log under the cluster's data dir -- as the only account of it", err)
-		res.RequeueAfter = RequeueAfter
 		return res, nil
 	}
 	res.Ops = append(res.Ops, OpSpawn)
 
 	if !o.Reachable {
-		res.RequeueAfter = RequeueAfter
+		res.RequeueAfter = r.probeIn(o)
 		return res, nil
 	}
 
@@ -535,11 +533,11 @@ func readyTrue(o Observed) bool {
 
 func (r *Reconciler) degraded(o Observed, sick []string) (Result, error) {
 	res := Result{
-		Phase:        v1alpha1.ClusterInitializing,
-		URL:          o.Cluster.Status.URL,
-		Instance:     o.Cluster.Status.Instance,
-		Conditions:   carry(o.Cluster.Status.Conditions),
-		RequeueAfter: RequeueAfter,
+		Phase:      v1alpha1.ClusterInitializing,
+		URL:        o.Cluster.Status.URL,
+		Instance:   o.Cluster.Status.Instance,
+		Conditions: carry(o.Cluster.Status.Conditions),
+		Again:      true,
 	}
 	meta.SetStatusCondition(&res.Conditions, metav1.Condition{
 		Type:               ConditionReady,
@@ -564,7 +562,7 @@ func (r *Reconciler) pending(o Observed, msg string) (Result, error) {
 			return r.park(res, o, fmt.Sprintf("still Initializing after %s; parking in Unavailable", since))
 		}
 	}
-	res.RequeueAfter = RequeueAfter
+	res.RequeueAfter = r.probeIn(o)
 	meta.SetStatusCondition(&res.Conditions, metav1.Condition{
 		Type:               ConditionReady,
 		Status:             metav1.ConditionFalse,
@@ -606,6 +604,25 @@ func (r *Reconciler) sessionCapRefuses(o Observed) (bool, string) {
 		return true, fmt.Sprintf("the gate would outlive status.nodeExpiry (%d); refusing and re-provisioning", *e)
 	}
 	return false, ""
+}
+
+func shutIn(o Observed) time.Duration {
+	since, closed := gateClosedSince(o)
+	if !closed {
+		return PathGateGrace
+	}
+	if left := since.Add(PathGateGrace).Sub(o.Now); left > 0 {
+		return left
+	}
+	return PathGateGrace
+}
+
+func (r *Reconciler) probeIn(o Observed) time.Duration {
+	left := readySince(o, o.Now).Add(r.opts.InitTimeout).Sub(o.Now)
+	if left > 0 && left < ProbeRetry {
+		return left
+	}
+	return ProbeRetry
 }
 
 func shut(o Observed) bool {

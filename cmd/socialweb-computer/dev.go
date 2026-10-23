@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
@@ -30,6 +31,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostos"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/lease/local"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/pgunit"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/bidder"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/gatewaykcp"
@@ -194,18 +196,22 @@ func lockFile(path string, wait time.Duration) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	deadline := time.Now().Add(wait)
-	for {
-		err := hostos.Lock(f, hostos.LockExclusive|hostos.LockNonBlocking)
+	if hostos.Lock(f, hostos.LockExclusive|hostos.LockNonBlocking) == nil {
+		return f, nil
+	}
+	locked := make(chan error, 1)
+	go func() { locked <- hostos.Lock(f, hostos.LockExclusive) }()
+	t := time.NewTimer(wait)
+	defer t.Stop()
+	select {
+	case err := <-locked:
 		if err == nil {
 			return f, nil
 		}
-		if time.Now().After(deadline) {
-			f.Close()
-			return nil, fmt.Errorf("%s is held by another dev up or dev down of this instance", path)
-		}
-		time.Sleep(100 * time.Millisecond)
+	case <-t.C:
 	}
+	f.Close()
+	return nil, fmt.Errorf("%s is held by another dev up or dev down of this instance", path)
 }
 
 func procConfig(l devinstance.Layout) hostsvc.Config {
@@ -643,26 +649,46 @@ func devUp(ctx context.Context, a *app, vals clicfg.Values, host bool) int {
 }
 
 func waitCore(ctx context.Context, l devinstance.Layout, m hostsvc.Manager, unit, invocation string, timeout time.Duration) (devinstance.Core, error) {
-	deadline := time.Now().Add(timeout)
+	wctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	records, err := local.Watch(wctx, l.CoreRecord)
+	if err != nil {
+		return devinstance.Core{}, err
+	}
+	units, err := m.Watch(wctx, unit)
+	if err != nil {
+		return devinstance.Core{}, err
+	}
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	st, stErr := m.Inspect(ctx, unit)
 	for {
 		var c devinstance.Core
 		if err := fsx.ReadJSON(l.CoreRecord, &c); err == nil && c.InvocationID == invocation && !c.AdoptedAt.IsZero() {
 			return c, nil
 		}
-		if st, err := m.Inspect(ctx, unit); err == nil && ((st.InvocationID != "" && st.InvocationID != invocation) ||
+		if stErr == nil && ((st.InvocationID != "" && st.InvocationID != invocation) ||
 			st.State == hostsvc.Failed || st.State == hostsvc.Inactive || st.State == hostsvc.NotFound) {
 			b, _ := os.ReadFile(filepath.Join(l.Logs, "core.log"))
 			return devinstance.Core{}, fmt.Errorf("the core (invocation %s) ended before it recorded its adoption: unit %s is %s %s (invocation %s, exit status %d)\n%s",
 				invocation, unit, st.State, st.Result, st.InvocationID, st.ExecMainStatus, lastLines(b, 40))
 		}
-		if time.Now().After(deadline) {
-			b, _ := os.ReadFile(filepath.Join(l.Logs, "core.log"))
-			return devinstance.Core{}, fmt.Errorf("the core (invocation %s) did not record its adoption within %s\n%s", invocation, timeout, b)
-		}
 		select {
 		case <-ctx.Done():
 			return devinstance.Core{}, ctx.Err()
-		case <-time.After(100 * time.Millisecond):
+		case <-deadline.C:
+			b, _ := os.ReadFile(filepath.Join(l.Logs, "core.log"))
+			return devinstance.Core{}, fmt.Errorf("the core (invocation %s) did not record its adoption within %s\n%s", invocation, timeout, b)
+		case _, ok := <-records:
+			if !ok {
+				records = nil
+			}
+		case ev, ok := <-units:
+			if !ok {
+				units = nil
+			} else if ev.Name == unit {
+				st, stErr = ev.Status, nil
+			}
 		}
 	}
 }
@@ -796,10 +822,7 @@ func downInstance(ctx context.Context, a *app, l devinstance.Layout, keepState b
 		if err := c.Shutdown(ctx); err != nil {
 			a.log.Warn("devsup shutdown", "err", err.Error())
 		}
-		deadline := time.Now().Add(devsupExitTimeout)
-		for devsup.Alive(h.PID) && time.Now().Before(deadline) {
-			time.Sleep(50 * time.Millisecond)
-		}
+		awaitExit([]int{h.PID}, devsupExitTimeout)
 		r.DevsupStopped = !devsup.Alive(h.PID)
 	} else {
 		a.log.Info("devsup unreachable; sweeping its records", "err", err.Error())
@@ -813,7 +836,7 @@ func downInstance(ctx context.Context, a *app, l devinstance.Layout, keepState b
 	if pids := marketnetwork.KillUnder(l.StateDir, 5*time.Second); len(pids) > 0 {
 		r.LeftoverKilled = append(r.LeftoverKilled, pids...)
 	}
-	time.Sleep(100 * time.Millisecond)
+	awaitExit(r.LeftoverKilled, 100*time.Millisecond)
 	if left := devsup.InstanceProcesses(l.ID); len(left) > 0 {
 		r.Remaining = left
 	}
@@ -865,11 +888,27 @@ func downChild(ctx context.Context, a *app, l devinstance.Layout, p devinstance.
 		return []int{}
 	}
 	defer m.Close()
-	deadline := time.Now().Add(devsupExitTimeout)
-	for {
+	wctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	events, werr := watchUnits(wctx, m, devinstance.Prefixes(l.ID))
+	state := map[string]hostsvc.UnitStatus{}
+	list := func() error {
 		units, err := devinstance.ChildUnits(ctx, m, l.ID)
-		var live []int
+		if err != nil {
+			return err
+		}
+		clear(state)
 		for _, u := range units {
+			state[u.Name] = u
+		}
+		return nil
+	}
+	err = list()
+	deadline := time.NewTimer(devsupExitTimeout)
+	defer deadline.Stop()
+	for {
+		var live []int
+		for _, u := range state {
 			if u.State == hostsvc.Active || u.State == hostsvc.Activating || u.State == hostsvc.Deactivating {
 				live = append(live, u.MainPID)
 			}
@@ -877,11 +916,53 @@ func downChild(ctx context.Context, a *app, l devinstance.Layout, p devinstance.
 		if err == nil && len(live) == 0 {
 			return []int{}
 		}
-		if time.Now().After(deadline) {
+		if werr != nil {
+			a.log.Warn("the parent devsup offers no unit watch; the child's units are left as listed", "parent", p.ID, "err", werr.Error())
 			return live
 		}
-		time.Sleep(200 * time.Millisecond)
+		select {
+		case <-deadline.C:
+			return live
+		case ev, ok := <-events:
+			if !ok {
+				return live
+			}
+			if err != nil {
+				err = list()
+			} else {
+				state[ev.Name] = ev.Status
+			}
+		}
 	}
+}
+
+func watchUnits(ctx context.Context, m hostsvc.Manager, prefixes []string) (<-chan hostsvc.UnitEvent, error) {
+	out := make(chan hostsvc.UnitEvent, 64)
+	var chans []<-chan hostsvc.UnitEvent
+	for _, prefix := range prefixes {
+		ch, err := m.Watch(ctx, prefix)
+		if err != nil {
+			return nil, err
+		}
+		chans = append(chans, ch)
+	}
+	var wg sync.WaitGroup
+	for _, ch := range chans {
+		wg.Go(func() {
+			for ev := range ch {
+				select {
+				case out <- ev:
+				case <-ctx.Done():
+					return
+				}
+			}
+		})
+	}
+	go func() {
+		wg.Wait()
+		close(out)
+	}()
+	return out, nil
 }
 
 func (a *app) instanceManager(ctx context.Context, rec devinstance.Record) (hostsvc.Manager, error) {

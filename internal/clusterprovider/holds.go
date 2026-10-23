@@ -82,31 +82,32 @@ func (h *UnitsHost) Hold(key string, p portallocator.Purpose) (int, error) {
 func (h *UnitsHost) frontPort(ctx context.Context, key string) (int, error) {
 	member := MemberName(procgroup.ComponentApiserverFront)
 	last := "no answer"
-	for {
-		o, err := h.member(ctx, key, member)
+	port := 0
+	_, err := awaitObject(ctx, h.hps, ObjectName(key, member), 0, func(o *v1alpha1.HostProcess) (bool, error) {
 		switch {
-		case err != nil:
-			last = err.Error()
 		case o == nil:
-			return 0, fmt.Errorf("clusterprovider: %s has no apiserver front HostProcess, so nothing holds a port for its apiserver", key)
+			return false, fmt.Errorf("clusterprovider: %s has no apiserver front HostProcess, so nothing holds a port for its apiserver", key)
 		case o.DeletionTimestamp != nil:
-			return 0, fmt.Errorf("clusterprovider: the apiserver front of %s is being deleted", key)
+			return false, fmt.Errorf("clusterprovider: the apiserver front of %s is being deleted", key)
 		case o.Status.Phase == v1alpha1.HostProcessPhaseFailed || o.Status.Phase == v1alpha1.HostProcessPhaseLost ||
 			o.Status.Phase == v1alpha1.HostProcessPhaseStopped:
-			return 0, fmt.Errorf("clusterprovider: the apiserver front of %s is %s %s: %s", key, o.Status.Phase,
+			return false, fmt.Errorf("clusterprovider: the apiserver front of %s is %s %s: %s", key, o.Status.Phase,
 				o.Status.LostReason, o.Status.Message)
-		default:
-			if port, ok := tcpListenerPort(o.Status.Listeners); ok {
-				return port, nil
-			}
-			last = fmt.Sprintf("phase %s, listeners %v", o.Status.Phase, o.Status.Listeners)
 		}
-		select {
-		case <-ctx.Done():
-			return 0, fmt.Errorf("clusterprovider: the apiserver front of %s reported no listener into its HostProcess status (last: %s)", key, last)
-		case <-time.After(unitPoll):
+		if p, ok := tcpListenerPort(o.Status.Listeners); ok {
+			port = p
+			return true, nil
 		}
+		last = fmt.Sprintf("phase %s, listeners %v", o.Status.Phase, o.Status.Listeners)
+		return false, nil
+	})
+	if err == nil {
+		return port, nil
 	}
+	if ctx.Err() != nil {
+		return 0, fmt.Errorf("clusterprovider: the apiserver front of %s reported no listener into its HostProcess status (last: %s)", key, last)
+	}
+	return 0, err
 }
 
 func tcpListenerPort(ls []v1alpha1.HostProcessListener) (int, bool) {

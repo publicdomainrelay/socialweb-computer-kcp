@@ -97,6 +97,8 @@ type rootIndex struct {
 	mu sync.Mutex
 
 	byCluster map[string]map[string]map[string]bool
+
+	deleting map[types.UID]Root
 }
 
 func (c *Composer) Observe(r Root) {
@@ -111,6 +113,14 @@ func (c *Composer) Observe(r Root) {
 		kinds[r.Kind] = map[string]bool{}
 	}
 	kinds[r.Kind][r.Name] = true
+	if r.Deleting && r.UID != "" {
+		if c.roots.deleting == nil {
+			c.roots.deleting = map[types.UID]Root{}
+		}
+		c.roots.deleting[r.UID] = r
+	} else {
+		delete(c.roots.deleting, r.UID)
+	}
 }
 
 func (c *Composer) Drop(r Root) {
@@ -119,6 +129,7 @@ func (c *Composer) Drop(r Root) {
 	if kinds := c.roots.byCluster[r.Cluster]; kinds != nil && kinds[r.Kind] != nil {
 		delete(kinds[r.Kind], r.Name)
 	}
+	delete(c.roots.deleting, r.UID)
 	c.mu.Lock()
 	delete(c.applied, string(r.UID))
 	c.mu.Unlock()
@@ -133,6 +144,30 @@ func (c *Composer) rootsIn(cluster, kind string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func (c *Composer) deletingIn(rootKind, workspace string) []ctlruntime.Request {
+	c.roots.mu.Lock()
+	defer c.roots.mu.Unlock()
+	var out []ctlruntime.Request
+	for _, r := range c.roots.deleting {
+		if r.Kind == rootKind && (r.Workspace == workspace || r.Workspace+":"+ComponentWorkspace == workspace) {
+			out = append(out, ctlruntime.Request{Cluster: r.Cluster, Name: r.Name})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Cluster != out[j].Cluster {
+			return out[i].Cluster < out[j].Cluster
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out
+}
+
+func DrainWatch[C ctlruntime.Object](c *Composer, export, rootKind string) ctlruntime.Option {
+	return ctlruntime.WatchesIn(export, func(_ context.Context, src ctlruntime.Request, _ C) []ctlruntime.Request {
+		return c.deletingIn(rootKind, src.Workspace)
+	})
 }
 
 func (c *Composer) Mine(req ctlruntime.Request) bool {

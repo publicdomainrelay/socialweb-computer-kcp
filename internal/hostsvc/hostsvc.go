@@ -255,3 +255,7 @@ type SystemClock struct{}
 func (SystemClock) Now() time.Time { return time.Now() }
 
 func (SystemClock) After(d time.Duration) <-chan time.Time { return time.After(d) }
+
+var _ host.Processes = Processes{}
+
+type Processes struct{}

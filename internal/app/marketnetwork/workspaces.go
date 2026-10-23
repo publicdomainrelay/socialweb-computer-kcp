@@ -2,6 +2,7 @@ package marketnetwork
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -12,13 +13,14 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
 
 	rbacv1 "k8s.io/api/rbac/v1"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
+	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 )
 
@@ -81,26 +83,27 @@ func (ctl *Controller) ensureAppWorkspace(ctx context.Context, r compose.Root, n
 	if err != nil {
 		return err
 	}
-	deadline := time.Now().Add(compose.ApplyTimeout)
-	for {
-		cur, err := ri.Get(ctx, name, metav1.GetOptions{})
-		phase := ""
-		if err == nil {
-			if cur.GetDeletionTimestamp() != nil {
-				return fmt.Errorf("the workspace %s is being deleted; the next reconcile places it again", ctl.appWorkspace(name))
-			}
-			phase, _, _ = unstructured.NestedString(cur.Object, "status", "phase")
+	last, err := ctlruntime.Await(ctx, ri, name, compose.ApplyTimeout, func(cur *unstructured.Unstructured) (bool, error) {
+		if cur == nil {
+			return false, nil
 		}
-		if phase == "Ready" {
-			return nil
+		if cur.GetDeletionTimestamp() != nil {
+			return false, fmt.Errorf("the workspace %s is being deleted; the next reconcile places it again", ctl.appWorkspace(name))
 		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("the workspace %s is not Ready within %s (phase %q): %v", ctl.appWorkspace(name), compose.ApplyTimeout, phase, err)
-		}
-		if !clock.Sleep(ctx, ChildPoll) {
-			return ctx.Err()
-		}
+		phase, _, _ := unstructured.NestedString(cur.Object, "status", "phase")
+		return phase == "Ready", nil
+	})
+	if !errors.Is(err, ctlruntime.ErrAwaitTimeout) {
+		return err
 	}
+	phase := ""
+	var getErr error
+	if last == nil {
+		getErr = apierrors.NewNotFound(compose.WorkspaceGVR.GroupResource(), name)
+	} else {
+		phase, _, _ = unstructured.NestedString(last.Object, "status", "phase")
+	}
+	return fmt.Errorf("the workspace %s is not Ready within %s (phase %q): %v", ctl.appWorkspace(name), compose.ApplyTimeout, phase, getErr)
 }
 
 func (ctl *Controller) waitGone(ctx context.Context, ws string, gvr schema.GroupVersionResource, name, what string) error {
@@ -108,18 +111,11 @@ func (ctl *Controller) waitGone(ctx context.Context, ws string, gvr schema.Group
 	if err != nil {
 		return err
 	}
-	deadline := time.Now().Add(ChildDeleteTimeout)
-	for {
-		if _, err := ri.Get(ctx, name, metav1.GetOptions{}); apierrors.IsNotFound(err) {
-			return nil
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("%s is still there %s after its delete", what, ChildDeleteTimeout)
-		}
-		if !clock.Sleep(ctx, ChildPoll) {
-			return ctx.Err()
-		}
+	_, err = ctlruntime.Await(ctx, ri, name, ChildDeleteTimeout, ctlruntime.Absent)
+	if errors.Is(err, ctlruntime.ErrAwaitTimeout) {
+		return fmt.Errorf("%s is still there %s after its delete", what, ChildDeleteTimeout)
 	}
+	return err
 }
 
 func (ctl *Controller) deleteAppWorkspace(ctx context.Context, name string) error {
@@ -141,79 +137,109 @@ func (ctl *Controller) deleteAccountWorkspaces(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	deadline := time.Now().Add(ChildDeleteTimeout)
-	for {
-		list, err := ri.List(ctx, metav1.ListOptions{})
-		if err != nil {
-			return err
-		}
-		left := 0
-		for _, w := range list.Items {
+	deleted := map[string]bool{}
+	left := 0
+	_, err = ctlruntime.AwaitList(ctx, ri, metav1.ListOptions{}, ChildDeleteTimeout, func(items []*unstructured.Unstructured) (bool, error) {
+		left = 0
+		for _, w := range items {
 			if t, _, _ := unstructured.NestedString(w.Object, "spec", "type", "name"); t != accountWorkspaceType {
 				continue
 			}
 			left++
-			if w.GetDeletionTimestamp() == nil {
+			if w.GetDeletionTimestamp() == nil && !deleted[w.GetName()] {
 				if err := ri.Delete(ctx, w.GetName(), metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
-					return err
+					return false, err
 				}
+				deleted[w.GetName()] = true
 			}
 		}
-		if left == 0 {
-			return nil
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("%d account workspace(s) are still there %s after their delete", left, ChildDeleteTimeout)
-		}
-		if !clock.Sleep(ctx, ChildPoll) {
-			return ctx.Err()
-		}
+		return left == 0, nil
+	})
+	if errors.Is(err, ctlruntime.ErrAwaitTimeout) {
+		return fmt.Errorf("%d account workspace(s) are still there %s after their delete", left, ChildDeleteTimeout)
 	}
+	return err
 }
 
 func (ctl *Controller) stopAppComponents(ctx context.Context, name string) error {
 	ws := ctl.appWorkspace(name) + ":" + compose.ComponentWorkspace
 	types := append(append([]compose.ComponentType{}, compose.ComponentTypes...), compose.PolicyTypes...)
 	deadline := time.Now().Add(ChildDeleteTimeout)
-	for {
-		left := 0
-		seen := map[string]bool{}
-		for _, ct := range types {
-			if seen[ct.Kind] {
-				continue
-			}
-			seen[ct.Kind] = true
-			ri, err := ctl.c.Client(ws, ct.GVR)
-			if err != nil {
+	var pending []dynamic.ResourceInterface
+	seen := map[string]bool{}
+	for _, ct := range types {
+		if seen[ct.Kind] {
+			continue
+		}
+		seen[ct.Kind] = true
+		nri, err := ctl.c.Client(ws, ct.GVR)
+		if err != nil {
+			return err
+		}
+		ri := nri.Namespace("default")
+		list, err := ri.List(ctx, metav1.ListOptions{})
+		if apierrors.IsNotFound(err) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if len(list.Items) == 0 {
+			continue
+		}
+		if err := deleteListed(ctx, ri, list.Items, nil); err != nil {
+			return err
+		}
+		pending = append(pending, ri)
+	}
+	left := 0
+	for _, ri := range pending {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			list, err := ri.List(ctx, metav1.ListOptions{})
+			if err != nil && !apierrors.IsNotFound(err) {
 				return err
 			}
-			list, err := ri.Namespace("default").List(ctx, metav1.ListOptions{})
-			if apierrors.IsNotFound(err) {
-				continue
+			if err == nil {
+				left += len(list.Items)
 			}
-			if err != nil {
-				return err
+			continue
+		}
+		deleted := map[string]bool{}
+		items, err := ctlruntime.AwaitList(ctx, ri, metav1.ListOptions{}, remaining, func(items []*unstructured.Unstructured) (bool, error) {
+			listed := make([]unstructured.Unstructured, 0, len(items))
+			for _, it := range items {
+				listed = append(listed, *it)
 			}
-			left += len(list.Items)
-			for _, p := range list.Items {
-				if p.GetDeletionTimestamp() != nil {
-					continue
-				}
-				if err := ri.Namespace("default").Delete(ctx, p.GetName(), metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
-					return err
-				}
-			}
+			return len(items) == 0, deleteListed(ctx, ri, listed, deleted)
+		})
+		if errors.Is(err, ctlruntime.ErrAwaitTimeout) {
+			left += len(items)
+			continue
 		}
-		if left == 0 {
-			return nil
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("%d component(s) of %s still run %s after their delete", left, ws, ChildDeleteTimeout)
-		}
-		if !clock.Sleep(ctx, ChildPoll) {
-			return ctx.Err()
+		if err != nil {
+			return err
 		}
 	}
+	if left > 0 {
+		return fmt.Errorf("%d component(s) of %s still run %s after their delete", left, ws, ChildDeleteTimeout)
+	}
+	return nil
+}
+
+func deleteListed(ctx context.Context, ri dynamic.ResourceInterface, items []unstructured.Unstructured, deleted map[string]bool) error {
+	for _, p := range items {
+		if p.GetDeletionTimestamp() != nil || deleted[p.GetName()] {
+			continue
+		}
+		if err := ri.Delete(ctx, p.GetName(), metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+			return err
+		}
+		if deleted != nil {
+			deleted[p.GetName()] = true
+		}
+	}
+	return nil
 }
 
 func (ctl *Controller) clusterOf(ctx context.Context, parent, name string) string {

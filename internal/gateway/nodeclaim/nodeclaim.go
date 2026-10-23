@@ -414,6 +414,10 @@ func (m *Mapper) Status(claim contract.Claim, cc v1alpha1.ComputeContract) *v1al
 		next.Phase = v1alpha1.NodeClaimFailed
 		next.Message = cmp.Or(status.Message, "the contract failed")
 	}
+	if !adopt && next.Phase == v1alpha1.NodeClaimJoining && next.JoinedAt != "" {
+		next.Phase = v1alpha1.NodeClaimRunning
+		next.Message = "the node joined its cluster and the cluster reports it"
+	}
 	if reflect.DeepEqual(current, next) {
 		return nil
 	}

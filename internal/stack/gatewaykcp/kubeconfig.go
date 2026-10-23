@@ -14,6 +14,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/lease/local"
 )
 
 const MemberKubeconfig = "members.kubeconfig"
@@ -33,19 +34,34 @@ const (
 	memberTokenGap = 5 * time.Second
 )
 
-func followMemberToken(ctx context.Context, slotRoot func() string, tokenFile string, log *slog.Logger) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(memberTokenGap):
+func followMemberToken(ctx context.Context, slotRoot func() string, slotsFile, tokenFile string, log *slog.Logger) {
+	for ctx.Err() == nil {
+		root := slotRoot()
+		wctx, cancel := context.WithCancel(ctx)
+		changes, err := local.Watch(wctx, slotsFile, filepath.Join(root, "admin.kubeconfig"), tokenFile)
+		if err != nil {
+			cancel()
+			log.Warn("the members' kcp-admin token files could not be watched", "err", err.Error())
+			again := time.NewTimer(memberTokenGap)
+			select {
+			case <-ctx.Done():
+				again.Stop()
+				return
+			case <-again.C:
+			}
+			continue
 		}
-		changed, err := kcpserver.RefreshMemberToken(slotRoot(), tokenFile)
+		changed, err := kcpserver.RefreshMemberToken(root, tokenFile)
 		if err != nil {
 			log.Warn("the members' kcp-admin token could not be read from the active slot", "err", err.Error())
 		} else if changed {
-			log.Warn("the members' kcp-admin token lagged the active kcp slot; the fallback check rewrote it, not the roll at its flip", "slotRoot", slotRoot(), "tokenFile", tokenFile)
+			log.Warn("the members' kcp-admin token lagged the active kcp slot; the fallback check rewrote it, not the roll at its flip", "slotRoot", root, "tokenFile", tokenFile)
 		}
+		select {
+		case <-ctx.Done():
+		case <-changes:
+		}
+		cancel()
 	}
 }
 

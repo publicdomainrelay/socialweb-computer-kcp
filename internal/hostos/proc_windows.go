@@ -98,19 +98,23 @@ func Reload(pid int) error {
 }
 
 func Terminate(pid int, grace time.Duration) error {
+	handle, err := windows.OpenProcess(windows.SYNCHRONIZE, false, uint32(pid))
+	if err != nil {
+		if gone(err) {
+			return nil
+		}
+		return fmt.Errorf("hostos: opening pid %d to wait for it: %w", pid, err)
+	}
+	defer windows.CloseHandle(handle)
 	if err := Signal(pid, false); err != nil {
 		return err
 	}
-	deadline := time.Now().Add(grace)
-	for time.Now().Before(deadline) {
-		alive, err := Alive(pid)
-		if err != nil {
-			return err
-		}
-		if !alive {
-			return nil
-		}
-		time.Sleep(20 * time.Millisecond)
+	ev, err := windows.WaitForSingleObject(handle, uint32(max(0, min(grace.Milliseconds(), int64(windows.INFINITE-1)))))
+	if err != nil {
+		return fmt.Errorf("hostos: waiting for pid %d: %w", pid, err)
+	}
+	if ev == windows.WAIT_OBJECT_0 {
+		return nil
 	}
 	return Signal(pid, true)
 }

@@ -36,6 +36,7 @@ type FrontSwitch interface {
 type ShardAdmin interface {
 	Readyz(ctx context.Context, port int) (int, error)
 	Lease(ctx context.Context) (Lease, error)
+	AwaitLease(ctx context.Context, timeout time.Duration, done func(Lease) bool) (Lease, error)
 	DeleteLease(ctx context.Context) error
 	ProbeWorkspace(ctx context.Context, name string) error
 }
@@ -116,6 +117,7 @@ func backendOf(port int) string { return "127.0.0.1:" + strconv.Itoa(port) }
 
 func WaitOwnPortReady(ctx context.Context, admin ShardAdmin, port int, every time.Duration,
 	progress ...func(attempt int, last error)) error {
+	every = opt.Positive(every, DefaultRollPoll)
 	var last error
 	for attempt := 1; ; attempt++ {
 		code, err := admin.Readyz(ctx, port)
@@ -132,21 +134,22 @@ func WaitOwnPortReady(ctx context.Context, admin ShardAdmin, port int, every tim
 	}
 }
 
-func WaitNewHolder(ctx context.Context, admin ShardAdmin, old string, every time.Duration) (Lease, error) {
-	var last error
+func WaitNewHolder(ctx context.Context, admin ShardAdmin, old string) (Lease, error) {
+	l, err := admin.AwaitLease(ctx, 0, func(l Lease) bool { return l.Found && l.Holder != "" && l.Holder != old })
+	if err != nil {
+		return Lease{}, fmt.Errorf("kcpserver: no new holder of %s/%s: holder %q (%w)", ControllerLeaseNamespace, ControllerLeaseName, l.Holder, err)
+	}
+	return l, nil
+}
+
+func awaitDrained(ctx context.Context, front FrontSwitch, backend string, timeout, every time.Duration) {
+	every = opt.Positive(every, DefaultRollPoll)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	for {
-		l, err := admin.Lease(ctx)
-		if err == nil && l.Found && l.Holder != "" && l.Holder != old {
-			return l, nil
-		}
-		last = err
-		if err == nil {
-			last = fmt.Errorf("holder %q", l.Holder)
-		}
-		select {
-		case <-ctx.Done():
-			return Lease{}, fmt.Errorf("kcpserver: no new holder of %s/%s: %v (%w)", ControllerLeaseNamespace, ControllerLeaseName, last, ctx.Err())
-		case <-time.After(every):
+		fst, err := front.Status(ctx)
+		if err != nil || fst.Open[backend] == 0 || !clock.Sleep(ctx, every) {
+			return
 		}
 	}
 }
@@ -347,7 +350,7 @@ func Roll(ctx context.Context, m hostsvc.Manager, front FrontSwitch, admin Shard
 		rep.LeaseDeletedAt = time.Now().UTC()
 		lctx, lcancel := context.WithTimeout(ctx, cfg.LeaseTimeout)
 		defer lcancel()
-		l, err := WaitNewHolder(lctx, admin, rep.OldHolder, cfg.Poll)
+		l, err := WaitNewHolder(lctx, admin, rep.OldHolder)
 		if err != nil {
 			return rep, s, err
 		}
@@ -363,13 +366,8 @@ func Roll(ctx context.Context, m hostsvc.Manager, front FrontSwitch, admin Shard
 	}
 	rep.ProbeReadyAt = time.Now().UTC()
 	rep.ProbeSeconds = clock.SecondsBetween(rep.LeaseHeldAt, rep.ProbeReadyAt)
-	deadline := time.Now().Add(cfg.DrainTimeout)
-	for !outage {
-		fst, err := front.Status(ctx)
-		if err != nil || fst.Open[backendOf(old.Port)] == 0 || time.Now().After(deadline) {
-			break
-		}
-		time.Sleep(cfg.Poll)
+	if !outage {
+		awaitDrained(ctx, front, backendOf(old.Port), cfg.DrainTimeout, cfg.Poll)
 	}
 	if n, err := front.Drain(ctx, backendOf(old.Port)); err == nil {
 		rep.Drained = n
