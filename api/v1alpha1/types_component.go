@@ -418,6 +418,8 @@ type BidderSpec struct {
 	Mode string `json:"mode,omitempty"`
 
 	Comms *MarketComms `json:"comms,omitempty"`
+
+	SuspendParticipation bool `json:"suspendParticipation,omitempty"`
 }
 
 type GuestControlPlane struct {
@@ -623,6 +625,8 @@ type RequesterSpec struct {
 	OAuthScopes []string `json:"oauthScopes,omitempty"`
 
 	Comms *MarketComms `json:"comms,omitempty"`
+
+	SuspendParticipation bool `json:"suspendParticipation,omitempty"`
 }
 
 type GatewayAPI struct {

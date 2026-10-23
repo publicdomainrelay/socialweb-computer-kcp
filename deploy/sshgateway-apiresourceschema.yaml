@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-16.sshgateways.socialweb.computer
+  name: v1alpha1-17.sshgateways.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -205,6 +205,11 @@ spec:
                     enum:
                       - RequireApproval
                       - Skip
+                  approvedAssociations:
+                    type: array
+                    items:
+                      type: string
+                    x-kubernetes-list-type: set
               comms:
                 type: object
                 properties:
@@ -716,6 +721,7 @@ spec:
                   - Ready
                   - Deleting
                   - Failed
+                  - Suspended
               message:
                 type: string
               profile:

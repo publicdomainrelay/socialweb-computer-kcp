@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-17.marketnetworks.socialweb.computer
+  name: v1alpha1-18.marketnetworks.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -933,6 +933,8 @@ spec:
                                       recordTTLSeconds:
                                         type: integer
                                         format: int64
+                    suspend:
+                      type: boolean
                     stopped:
                       type: boolean
                   required:
@@ -955,6 +957,7 @@ spec:
                   - Ready
                   - Deleting
                   - Failed
+                  - Suspended
               message:
                 type: string
               network:
@@ -1209,6 +1212,7 @@ spec:
                         - Ready
                         - Deleting
                         - Failed
+                        - Suspended
                     message:
                       type: string
                     did:
