@@ -166,8 +166,10 @@ func (m *HTTPMarket) Discover(ctx context.Context, now time.Time) ([]Bidder, err
 		seen[did] = true
 		candidates = append(candidates, did)
 	}
+	explicit := map[string]bool{}
 	for _, did := range m.BidderDIDs {
 		add(did)
+		explicit[strings.TrimSpace(did)] = true
 	}
 	if len(m.RelayURLs) > 0 {
 		for _, did := range market.DiscoverBiddersFromRelays(ctx, m.RelayURLs, market.OfferingNSID, bidderDiscoveryTimeout, m.client(), market.NoopLog) {
@@ -176,6 +178,11 @@ func (m *HTTPMarket) Discover(ctx context.Context, now time.Time) ([]Bidder, err
 	}
 	heartbeat := market.NewHeartbeatCache(m.Reader)
 	fresh := heartbeat.FreshDIDs(ctx, candidates, now)
+	for _, did := range candidates {
+		if explicit[did] && !containsString(fresh, did) {
+			fresh = append(fresh, did)
+		}
+	}
 	bidders := make([]Bidder, 0, len(fresh))
 	seenEndpoint := map[string]bool{}
 	for _, did := range fresh {
