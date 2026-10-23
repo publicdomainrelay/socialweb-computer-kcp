@@ -53,6 +53,8 @@ type PKI interface {
 	Issue(ctx context.Context, mount, role string, req CertRequest) (Cert, error)
 
 	CAChain(ctx context.Context, mount string) (string, error)
+
+	CA(ctx context.Context, mount string) (string, error)
 }
 
 type Trust interface {
@@ -62,5 +64,5 @@ type Trust interface {
 }
 
 type Keys interface {
-	RotateKey(ctx context.Context, name string) error
+	RotateKey(ctx context.Context, mount, name string) error
 }

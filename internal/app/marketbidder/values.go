@@ -14,15 +14,17 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
+	contractvault "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/vault"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 )
 
 const (
-	oidcRotationPath  = "oidc-rotation/"
-	GuestOIDCKey      = "guest"
-	guestOIDCRotation = "identity/oidc/key/" + GuestOIDCKey + "/rotate"
+	oidcRotationPath = "oidc-rotation/"
+	GuestOIDCKey     = "guest"
+	guestOIDCKeyPath = "identity/oidc/key/" + GuestOIDCKey
 )
 
 type BidderKcp struct {
@@ -200,12 +202,12 @@ func (p *pass) rotateSigningKey(ctx context.Context, mount string) error {
 		p.ctl.setRotated(r, held)
 		return nil
 	}
-	client, _, err := c.ServerClient(ctx, r.Workspace, BidderVaultServer, BidderVaultClient)
+	keys, err := bus.Resolve[contractvault.Keys](ctx, c.Bus(), r.Ref(), compose.VaultRefIn(BidderVaultServer, r.Workspace),
+		bus.Capability{Name: contractvault.CapabilityWrite, Scope: []string{guestOIDCKeyPath}})
 	if err != nil {
 		return err
 	}
-	defer client.RevokeSelf(context.WithoutCancel(ctx))
-	if err := client.Write(ctx, guestOIDCRotation, nil); err != nil {
+	if err := keys.RotateKey(ctx, mount, GuestOIDCKey); err != nil {
 		var re *openbao.ResponseError
 		if errors.As(err, &re) && (re.Status == http.StatusNotFound || re.Status == http.StatusBadRequest) {
 			c.Log().Info("no OIDC signing key to rotate yet; the server makes it from its declaration", "name", o.Name, "key", GuestOIDCKey)

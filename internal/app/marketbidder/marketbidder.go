@@ -209,7 +209,7 @@ func (p *pass) baseLinks(mount string) []compose.Link {
 		compose.PolicyRunLink(self, compose.PolicyEngineRefIn(compose.PolicyEngineComponent, ws), cmp.Or(strings.TrimSpace(p.o.Spec.Policy), DefaultPolicy)),
 		compose.VaultLink(self, BidderVaultServer, true, mount+"/guests/*"),
 		compose.ComputeVMVaultLink(ws, BidderVaultServer, mount+"/guests/*"),
-		compose.RootVaultLink(p.r, BidderVaultServer, mount+"/identity/*", mount+"/oidc-rotation/*"),
+		compose.RootVaultLink(p.r, BidderVaultServer, mount+"/identity/*", mount+"/oidc-rotation/*", guestOIDCKeyPath),
 	}
 }
 
