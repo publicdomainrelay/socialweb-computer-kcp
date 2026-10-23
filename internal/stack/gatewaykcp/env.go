@@ -1,7 +1,6 @@
 package gatewaykcp
 
 import (
-	"encoding/json"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -141,5 +140,3 @@ func (g *gateway) defaults(e *env, rec devinstance.Record, cert, key string) err
 	e.set("SOCIALWEB_TLS_KEY_FILE", key)
 	return nil
 }
-
-func jsonMarshal(v any) ([]byte, error) { return json.Marshal(v) }

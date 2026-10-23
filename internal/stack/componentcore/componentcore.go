@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
@@ -21,6 +20,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component/kcpclients"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
 	nodeclaimctl "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/nodeclaim"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/credentials"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/exposure"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostlifecycle"
@@ -368,7 +368,7 @@ func DynamicFromKCP(kcp component.KCPClients) (DynamicFactory, error) {
 	if kcp == nil {
 		return nil, ErrNoKubeconfig
 	}
-	return func(workspace string) (dynamic.Interface, error) {
+	return func(workspace string) (*kube.Client, error) {
 		client, err := kcp.Client(workspace)
 		if err != nil {
 			return nil, err
@@ -385,7 +385,7 @@ func NewDynamicFactory(kubeconfig string) (DynamicFactory, error) {
 	if err != nil {
 		return nil, fmt.Errorf("componentcore: the kcp front rest config: %w", err)
 	}
-	return func(workspace string) (dynamic.Interface, error) {
+	return func(workspace string) (*kube.Client, error) {
 		return dynamicForRestConfig(cfg, workspace)
 	}, nil
 }
@@ -447,7 +447,7 @@ func Supervise(ctx context.Context, cfg Config) {
 	})
 }
 
-func dynamicForRestConfig(cfg *rest.Config, workspace string) (dynamic.Interface, error) {
+func dynamicForRestConfig(cfg *rest.Config, workspace string) (*kube.Client, error) {
 	if cfg == nil {
 		return nil, errors.New("componentcore: the kcp client has no rest config")
 	}
@@ -458,7 +458,7 @@ func dynamicForRestConfig(cfg *rest.Config, workspace string) (dynamic.Interface
 	if !strings.Contains(host, "/clusters/") {
 		out.Host = host + "/clusters/" + workspace
 	}
-	dc, err := dynamic.NewForConfig(out)
+	dc, err := kube.New(out)
 	if err != nil {
 		return nil, fmt.Errorf("componentcore: the dynamic client for %s: %w", workspace, err)
 	}

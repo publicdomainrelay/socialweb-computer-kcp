@@ -19,9 +19,6 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
@@ -32,8 +29,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap/table"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clientcertfront"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterstack"
-	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kcpapply"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/manifests"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devcore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
@@ -392,27 +389,13 @@ func (g *gateway) rootName() string {
 }
 
 func applyRoot(ctx context.Context, restCfg *rest.Config, ws, name string, spec v1alpha1.GatewaySpec) error {
-	dc, err := dynamic.NewForConfig(clusterConfig(restCfg, ws))
+	dc, err := kube.New(clusterConfig(restCfg, ws))
 	if err != nil {
 		return err
 	}
 	o := v1alpha1.Gateway{TypeMeta: metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: string(v1alpha1.ApplicationKindGateway)},
 		ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: spec}
-	m, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&o)
-	if err != nil {
-		return err
-	}
-	delete(m, "status")
-	if md, ok := m["metadata"].(map[string]any); ok {
-		delete(md, "creationTimestamp")
-	}
-	body, err := jsonMarshal(m)
-	if err != nil {
-		return err
-	}
-	force := true
-	_, err = dc.Resource(compose.GatewayGVR).Patch(ctx, name, types.ApplyPatchType, body,
-		metav1.PatchOptions{FieldManager: FieldManager, Force: &force})
+	_, err = kube.Apply[kube.Doc](ctx, dc.Resource(compose.GatewayGVR), &o, kube.ApplyOptions{FieldManager: FieldManager, Force: true})
 	return err
 }
 
@@ -421,13 +404,13 @@ func (g *gateway) rootVault(ctx context.Context, rec devinstance.Record) (vaultm
 	if err != nil {
 		return vaultmain.RootAccess{}, err
 	}
-	dc, err := dynamic.NewForConfig(clusterConfig(restCfg, g.ws))
+	dc, err := kube.New(clusterConfig(restCfg, g.ws))
 	if err != nil {
 		return vaultmain.RootAccess{}, err
 	}
 	last := "not declared yet"
 	failed := false
-	o, err := ctlruntime.AwaitAs(ctx, dc.Resource(openbaoctl.GVR), vaultlayout.RootServerName, VaultTimeout, func(o *v1alpha1.OpenBaoServer) (bool, error) {
+	o, err := kube.Await(ctx, dc.Resource(openbaoctl.GVR), vaultlayout.RootServerName, VaultTimeout, func(o *v1alpha1.OpenBaoServer) (bool, error) {
 		if o == nil {
 			last = apierrors.NewNotFound(openbaoctl.GVR.GroupResource(), vaultlayout.RootServerName).Error()
 			return false, nil
@@ -440,7 +423,7 @@ func (g *gateway) rootVault(ctx context.Context, rec devinstance.Record) (vaultm
 		return failed, nil
 	})
 	switch {
-	case errors.Is(err, ctlruntime.ErrAwaitTimeout):
+	case errors.Is(err, kube.ErrAwaitTimeout):
 		return vaultmain.RootAccess{}, fmt.Errorf("gatewaykcp: the root vault %s was not Ready and synced within %s: %s",
 			vaultlayout.RootServerName, VaultTimeout, last)
 	case err != nil:

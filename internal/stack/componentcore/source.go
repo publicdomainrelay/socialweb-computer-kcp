@@ -2,27 +2,22 @@ package componentcore
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/dynamic"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
-	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 )
 
 const RestartFieldManager = "socialweb.computer/dev-restart"
 
-type DynamicFactory func(workspace string) (dynamic.Interface, error)
+type DynamicFactory = kube.Factory
 
 type componentKind struct {
 	Kind string
@@ -70,7 +65,7 @@ func FindComponents(ctx context.Context, dynamic DynamicFactory, workspaces []st
 			if kind != "" && candidate.Kind != kind {
 				continue
 			}
-			u, err := dyn.Resource(candidate.GVR).Get(ctx, name, metav1.GetOptions{})
+			u, err := kube.Get[metav1.PartialObjectMetadata](ctx, dyn.Resource(candidate.GVR), name)
 			if apierrors.IsNotFound(err) || apierrors.IsForbidden(err) {
 				continue
 			}
@@ -91,12 +86,12 @@ func DescribeComponents(ctx context.Context, dynamic DynamicFactory, workspaces 
 			continue
 		}
 		for _, kind := range runtimeKinds {
-			list, err := dyn.Resource(kind.GVR).List(ctx, metav1.ListOptions{})
+			list, err := kube.List[metav1.PartialObjectMetadata](ctx, dyn.Resource(kind.GVR), metav1.ListOptions{})
 			if err != nil {
 				continue
 			}
-			for i := range list.Items {
-				out = append(out, workspace+":"+kind.Kind+"/"+list.Items[i].GetName())
+			for i := range list {
+				out = append(out, workspace+":"+kind.Kind+"/"+list[i].GetName())
 			}
 		}
 	}
@@ -108,11 +103,11 @@ func ReadStatus(ctx context.Context, dynamic DynamicFactory, ref ComponentRef) (
 	if err != nil {
 		return RestartStatus{}, err
 	}
-	u, err := dyn.Resource(ref.GVR).Get(ctx, ref.Name, metav1.GetOptions{})
+	u, err := kube.Get[componentStatus](ctx, dyn.Resource(ref.GVR), ref.Name)
 	if err != nil {
 		return RestartStatus{}, err
 	}
-	return statusOf(u), nil
+	return u.Status, nil
 }
 
 func Restart(ctx context.Context, dynamic DynamicFactory, ref ComponentRef) (string, error) {
@@ -121,14 +116,10 @@ func Restart(ctx context.Context, dynamic DynamicFactory, ref ComponentRef) (str
 		return "", err
 	}
 	stamp := time.Now().UTC().Format(time.RFC3339Nano)
-	body, err := json.Marshal(map[string]any{"apiVersion": ref.GVR.GroupVersion().String(), "kind": ref.Kind,
-		"metadata": map[string]any{"name": ref.Name}, "spec": map[string]any{"restartedAt": stamp}})
-	if err != nil {
-		return "", err
-	}
-	force := true
-	if _, err := dyn.Resource(ref.GVR).Patch(ctx, ref.Name, types.ApplyPatchType, body,
-		metav1.PatchOptions{FieldManager: RestartFieldManager, Force: &force}); err != nil {
+	body := kube.Doc{"apiVersion": ref.GVR.GroupVersion().String(), "kind": ref.Kind,
+		"metadata": map[string]any{"name": ref.Name}, "spec": map[string]any{"restartedAt": stamp}}
+	if _, err := kube.Apply[kube.Doc](ctx, dyn.Resource(ref.GVR), body,
+		kube.ApplyOptions{FieldManager: RestartFieldManager, Force: true}); err != nil {
 		return "", fmt.Errorf("componentcore: requesting the restart of %s/%s: %w", ref.Kind, ref.Name, err)
 	}
 	return stamp, nil
@@ -144,14 +135,14 @@ func WaitRestarted(ctx context.Context, dynamic DynamicFactory, ref ComponentRef
 		return RestartStatus{}, err
 	}
 	last := before
-	_, err = ctlruntime.Await(ctx, dyn.Resource(ref.GVR), ref.Name, timeout, func(u *unstructured.Unstructured) (bool, error) {
+	_, err = kube.Await(ctx, dyn.Resource(ref.GVR), ref.Name, timeout, func(u *componentStatus) (bool, error) {
 		if u == nil {
 			return false, nil
 		}
-		last = statusOf(u)
+		last = u.Status
 		return last.Ready && restartedAfter(last, before, requested), nil
 	})
-	if errors.Is(err, ctlruntime.ErrAwaitTimeout) {
+	if errors.Is(err, kube.ErrAwaitTimeout) {
 		return last, fmt.Errorf("componentcore: %s/%s in %s did not restart within %s (phase %s, ready %v, restarts %d, startedAt %s)",
 			ref.Kind, ref.Name, ref.Workspace, timeout, last.Phase, last.Ready, last.Restarts, last.StartedAt)
 	}
@@ -172,30 +163,6 @@ func restartedAfter(cur, before RestartStatus, requested time.Time) bool {
 	return false
 }
 
-func statusOf(u *unstructured.Unstructured) RestartStatus {
-	var st RestartStatus
-	status, ok := u.Object["status"].(map[string]any)
-	if !ok {
-		return st
-	}
-	st.ObservedGeneration, _, _ = unstructured.NestedInt64(status, "observedGeneration")
-	st.Phase, _, _ = unstructured.NestedString(status, "phase")
-	st.Ready, _, _ = unstructured.NestedBool(status, "ready")
-	st.Message, _, _ = unstructured.NestedString(status, "message")
-	restarts, _, _ := unstructured.NestedInt64(status, "restarts")
-	st.Restarts = int32(restarts)
-	st.StartedAt, _, _ = unstructured.NestedString(status, "startedAt")
-	if endpoints, ok, _ := unstructured.NestedSlice(status, "endpoints"); ok {
-		for _, entry := range endpoints {
-			m, ok := entry.(map[string]any)
-			if !ok {
-				continue
-			}
-			var endpoint v1alpha1.Endpoint
-			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(m, &endpoint); err == nil {
-				st.Endpoints = append(st.Endpoints, endpoint)
-			}
-		}
-	}
-	return st
+type componentStatus struct {
+	Status RestartStatus `json:"status"`
 }

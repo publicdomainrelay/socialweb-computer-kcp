@@ -8,17 +8,14 @@ import (
 	"log/slog"
 	"time"
 
+	tenancyv1alpha1 "github.com/kcp-dev/sdk/apis/tenancy/v1alpha1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/dynamic"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/api/kcpgvr"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
 	appgateway "github.com/johnandersen777/socialweb-computer-kcp/internal/app/gateway"
-	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/sweepkcp"
 )
@@ -30,24 +27,18 @@ const (
 )
 
 var (
-	workspaceGVR = schema.GroupVersionResource{Group: "tenancy.kcp.io", Version: "v1alpha1", Resource: "workspaces"}
+	workspaceGVR = kcpgvr.Workspaces
 	identityGVR  = v1alpha1.AtprotoIdentityGVR
 	clusterGVR   = v1alpha1.ClusterGVR
 )
 
-func ssa(ctx context.Context, ri dynamic.ResourceInterface, obj map[string]any) error {
-	u := &unstructured.Unstructured{Object: obj}
-	body, err := u.MarshalJSON()
-	if err != nil {
-		return err
-	}
-	force := true
-	_, err = ri.Patch(ctx, u.GetName(), types.ApplyPatchType, body, metav1.PatchOptions{FieldManager: FieldManager, Force: &force})
+func ssa(ctx context.Context, r kube.Resource, obj kube.Doc) error {
+	_, err := kube.Apply[kube.Doc](ctx, r, obj, kube.ApplyOptions{FieldManager: FieldManager, Force: true})
 	return err
 }
 
-func workspace(name, typ string) map[string]any {
-	return map[string]any{"apiVersion": "tenancy.kcp.io/v1alpha1", "kind": "Workspace", "metadata": map[string]any{"name": name},
+func workspace(name, typ string) kube.Doc {
+	return kube.Doc{"apiVersion": "tenancy.kcp.io/v1alpha1", "kind": "Workspace", "metadata": map[string]any{"name": name},
 		"spec": map[string]any{"type": map[string]any{"name": typ, "path": kcpclient.RootWorkspace}}}
 }
 
@@ -74,20 +65,20 @@ func retry(ctx context.Context, what string, f func() error) error {
 	}
 }
 
-func waitReady(ctx context.Context, ri dynamic.ResourceInterface, name string) error {
+func waitReady(ctx context.Context, r kube.Resource, name string) error {
 	var last error
-	_, err := ctlruntime.Await(ctx, ri, name, bootstrapWorkspaceTTL, func(u *unstructured.Unstructured) (bool, error) {
-		if u == nil {
+	_, err := kube.Await(ctx, r, name, bootstrapWorkspaceTTL, func(ws *tenancyv1alpha1.Workspace) (bool, error) {
+		if ws == nil {
 			last = apierrors.NewNotFound(workspaceGVR.GroupResource(), name)
 			return false, nil
 		}
-		if p, _, _ := unstructured.NestedString(u.Object, "status", "phase"); p != "Ready" {
+		if p := string(ws.Status.Phase); p != "Ready" {
 			last = fmt.Errorf("phase %q", p)
 			return false, nil
 		}
 		return true, nil
 	})
-	if errors.Is(err, ctlruntime.ErrAwaitTimeout) && last != nil {
+	if errors.Is(err, kube.ErrAwaitTimeout) && last != nil {
 		return fmt.Errorf("gatewaykcp: bootstrap cluster: %s: %w", "workspace "+name+" Ready", last)
 	}
 	return err
@@ -99,7 +90,7 @@ func bootstrapCluster(ctx context.Context, kubeconfig, base, did, cluster string
 	if err != nil {
 		return err
 	}
-	client := func(ws string) (dynamic.Interface, error) { return dynamic.NewForConfig(clusterConfig(restCfg, ws)) }
+	client := func(ws string) (*kube.Client, error) { return kube.New(clusterConfig(restCfg, ws)) }
 	account := kcpclient.AccountHash(did)
 	root, err := client(kcpclient.RootWorkspace)
 	if err != nil {
@@ -117,9 +108,9 @@ func bootstrapCluster(ctx context.Context, kubeconfig, base, did, cluster string
 	if err != nil {
 		return err
 	}
-	identity := map[string]any{"apiVersion": v1alpha1.GroupVersion.String(), "kind": "AtprotoIdentity",
+	identity := kube.Doc{"apiVersion": v1alpha1.GroupVersion.String(), "kind": "AtprotoIdentity",
 		"metadata": map[string]any{"name": kcpclient.IdentityRecordName(did),
-			"annotations": map[string]any{sweepkcp.SweepExemptAnnotation: sweepkcp.SweepExemptValue}},
+			"labels": map[string]any{sweepkcp.SweepExemptLabel: sweepkcp.SweepExemptValue}},
 		"spec": map[string]any{"did": did, "scope": string(v1alpha1.IdentityScopeAccount), "revoked": false}}
 	if err := retry(ctx, "account identity", func() error { return ssa(ctx, acct.Resource(identityGVR), identity) }); err != nil {
 		return err
@@ -136,7 +127,7 @@ func bootstrapCluster(ctx context.Context, kubeconfig, base, did, cluster string
 	if err != nil {
 		return err
 	}
-	obj := map[string]any{"apiVersion": v1alpha1.GroupVersion.String(), "kind": "Cluster",
+	obj := kube.Doc{"apiVersion": v1alpha1.GroupVersion.String(), "kind": "Cluster",
 		"metadata": map[string]any{"name": cluster, "finalizers": []any{v1alpha1.FinalizerCluster}},
 		"spec":     map[string]any{"account": did, "running": true}}
 	if err := retry(ctx, "cluster", func() error { return ssa(ctx, home.Resource(clusterGVR), obj) }); err != nil {
