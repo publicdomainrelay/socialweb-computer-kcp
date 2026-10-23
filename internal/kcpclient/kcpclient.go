@@ -883,8 +883,7 @@ func (c *Client) ClusterGate(ctx context.Context, home, name string) (ClusterGat
 	case err != nil:
 		return ClusterGate{}, fmt.Errorf("kcpclient: the Cluster %s in %s: %w", name, home, err)
 	}
-	return ClusterGate{Account: cl.Spec.Account,
-		Serving: cl.Status.Phase == v1alpha1.ClusterReady && cl.DeletionTimestamp == nil}, nil
+	return gateOf(cl), nil
 }
 
 func (c *Client) readCluster(ctx context.Context, logicalCluster, name string) (*v1alpha1.Cluster, error) {
