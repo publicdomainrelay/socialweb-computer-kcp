@@ -55,7 +55,7 @@ type MetadataReader interface {
 }
 
 type OpenBaoMetadataSource struct {
-	Open func(ctx context.Context, server string) (MetadataReader, error)
+	Open func(ctx context.Context, server, mount string) (MetadataReader, error)
 
 	RotationWindow time.Duration
 }
@@ -63,7 +63,7 @@ type OpenBaoMetadataSource struct {
 var _ VaultSource = (*OpenBaoMetadataSource)(nil)
 
 func (s *OpenBaoMetadataSource) CredentialMetadata(ctx context.Context, server, mount, path string) (VaultCredentialObservation, error) {
-	reader, err := s.reader(ctx, server)
+	reader, err := s.reader(ctx, server, mount)
 	if err != nil {
 		return VaultCredentialObservation{}, err
 	}
@@ -95,7 +95,7 @@ func (s *OpenBaoMetadataSource) CredentialMetadata(ctx context.Context, server, 
 
 func (s *OpenBaoMetadataSource) CertificateMetadata(ctx context.Context, server, mount, role, commonName string) (VaultCertificateObservation, error) {
 	_ = role
-	reader, err := s.reader(ctx, server)
+	reader, err := s.reader(ctx, server, mount)
 	if err != nil {
 		return VaultCertificateObservation{}, err
 	}
@@ -146,11 +146,11 @@ func (s *OpenBaoMetadataSource) CertificateMetadata(ctx context.Context, server,
 	return VaultCertificateObservation{}, nil
 }
 
-func (s *OpenBaoMetadataSource) reader(ctx context.Context, server string) (MetadataReader, error) {
+func (s *OpenBaoMetadataSource) reader(ctx context.Context, server, mount string) (MetadataReader, error) {
 	if s == nil || s.Open == nil {
 		return nil, fmt.Errorf("statusstate: the OpenBao metadata source has no Open function")
 	}
-	return s.Open(ctx, server)
+	return s.Open(ctx, server, strings.Trim(mount, "/"))
 }
 
 func (s *OpenBaoMetadataSource) rotationWindow() time.Duration {

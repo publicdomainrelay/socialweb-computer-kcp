@@ -309,10 +309,6 @@ sets:
         workspace: root
         files:
           - path: apps/repo-pds/rbac.yaml
-      - name: records
-        workspace: root
-        files:
-          - path: apps/market-bidder/records.yaml
       - name: workspace
         workspace: root
         files:
@@ -403,10 +399,6 @@ sets:
         after:
           - kind: APIBinding
             for: Ready
-      - name: records
-        workspace: root:app
-        files:
-          - path: apps/gateway/records.yaml
       - name: association-watch@prod
         workspace: root:app
         files:

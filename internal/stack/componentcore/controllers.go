@@ -63,6 +63,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/ref"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/kcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/lease/local"
@@ -72,6 +74,7 @@ import (
 	policycontroller "github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/controller"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/statusstate"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/subnetallocator"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vaultmain"
 )
 
@@ -169,7 +172,7 @@ func (c *Core) registerExposure(mgr *ctlruntime.Manager, scope func(string) bool
 		return nil, err
 	}
 	c.closers = append(c.closers, exposures.Close)
-	links, err := componentlink.Register(mgr, componentlink.Options{Policy: c.linkPolicy, Registry: c.registry, Scope: scope, Log: log})
+	links, err := componentlink.Register(mgr, componentlink.Options{Policy: c.linkPolicy, Registry: c.registry, Providers: c.handlers, Scope: scope, Log: log})
 	if err != nil {
 		return nil, err
 	}
@@ -248,10 +251,9 @@ func (c *Core) registerLeases(ctx context.Context, mgr *ctlruntime.Manager, scop
 
 func (c *Core) registerStatus(mgr *ctlruntime.Manager, scope func(string) bool) error {
 	base := c.scope.base()
-	httpClient := c.handlers.HTTPClient()
 	plc := plcidentity.Options{Scope: scope}
 	if url := c.plcBaseURL(); url != "" {
-		directory, err := statusstate.NewHTTPPLCClient(url, httpClient)
+		directory, err := statusstate.NewHTTPPLCClient(url, c.busOrNetworkClient())
 		if err != nil {
 			return err
 		}
@@ -261,7 +263,7 @@ func (c *Core) registerStatus(mgr *ctlruntime.Manager, scope func(string) bool) 
 	_, accountErr := pdsaccount.Register(mgr, pdsaccount.Options{Bus: c.handlers, Scope: scope})
 	_, sessionErr := atprotosession.Register(mgr, atprotosession.Options{Bus: c.handlers, Scope: scope})
 	_, plcErr := plcidentity.Register(mgr, plc)
-	_, relayErr := relaystatus.Register(mgr, relaystatus.Options{Source: statusstate.NewHTTPRelayHealthSource(c.relayEndpoint(base), httpClient),
+	_, relayErr := relaystatus.Register(mgr, relaystatus.Options{Source: statusstate.NewHTTPRelayHealthSource(c.relayEndpoint(base), c.busOrNetworkClient()),
 		Scope: scope})
 	_, credentialErr := vaultcredential.Register(mgr, vaultcredential.Options{Source: vault, Scope: scope})
 	_, certificateErr := vaultcertificate.Register(mgr, vaultcertificate.Options{Source: vault, Scope: scope})
@@ -361,6 +363,24 @@ func (c *Core) registerNetwork(mgr *ctlruntime.Manager, clients *workspaceClient
 	return nil
 }
 
+func (c *Core) busOrNetworkClient() *http.Client {
+	external := httpclient.External(httpclient.Options{Timeout: networkReadTimeout}).Transport
+	if external == nil {
+		external = http.DefaultTransport
+	}
+	inProcess := c.handlers.RoundTripper()
+	return &http.Client{Timeout: networkReadTimeout, Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if _, ok := c.handlers.HandlerForHost(hostport.Normalize(req.URL.Host)); ok {
+			return inProcess.RoundTrip(req)
+		}
+		return external.RoundTrip(req)
+	})}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+
 func (c *Core) plcBaseURL() string {
 	return cmp.Or(strings.TrimSpace(c.cfg.PLCBaseURL),
 		"http://"+kcp.ServiceFQDN(compose.NetworkPLCName, "default", c.cfg.Workspaces[0], kcp.DefaultServiceDomain))
@@ -419,7 +439,7 @@ func openBaoMetadata(store *kcpstore.Store, workspace string) statusstate.VaultS
 	if store == nil {
 		return nil
 	}
-	return &statusstate.OpenBaoMetadataSource{Open: func(ctx context.Context, server string) (statusstate.MetadataReader, error) {
+	return &statusstate.OpenBaoMetadataSource{Open: func(ctx context.Context, server, mount string) (statusstate.MetadataReader, error) {
 		server = strings.TrimSpace(server)
 		if server == "" {
 			return nil, errors.New("componentcore: the vault status object names no OpenBaoServer")
@@ -427,6 +447,13 @@ func openBaoMetadata(store *kcpstore.Store, workspace string) statusstate.VaultS
 		obj, err := kcpstore.OfClusterScoped[v1alpha1.OpenBaoServer](store, openbaoctl.GVR).Get(ctx, ref.New(workspace, "", server))
 		if err != nil {
 			return nil, fmt.Errorf("componentcore: reading OpenBaoServer %s: %w", server, err)
+		}
+		if client := openbao.ClientForMount(obj.Status.Clients, mount); client != "" {
+			srv, err := openbao.ServerOf(workspace, server, obj.Status, client)
+			if err != nil {
+				return nil, err
+			}
+			return openbao.Open(ctx, srv)
 		}
 		access, err := vaultmain.RootAccessOf(*obj)
 		if err != nil {

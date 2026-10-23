@@ -31,6 +31,8 @@ type Options struct {
 
 	Registry *component.Registry
 
+	Providers *bus.Bus
+
 	Scope func(workspace string) bool
 
 	Log *slog.Logger
@@ -40,6 +42,8 @@ type Controller struct {
 	policy *exposure.LinkPolicy
 
 	registry *component.Registry
+
+	providers *bus.Bus
 
 	log *slog.Logger
 
@@ -56,7 +60,7 @@ func New(opts Options) (*Controller, error) {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	return &Controller{policy: opts.Policy, registry: opts.Registry, log: log.With("component", "componentlink-controller"),
+	return &Controller{policy: opts.Policy, registry: opts.Registry, providers: opts.Providers, log: log.With("component", "componentlink-controller"),
 		targets: binding.New[struct{}](), events: ctlruntime.NewQueue()}, nil
 }
 
@@ -138,10 +142,13 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 }
 
 func (c *Controller) targetRegistered(to commonv1.ObjectRef) bool {
-	if c.registry == nil || to.Kind == "" || to.Name == "" {
+	if to.Kind == "" || to.Name == "" {
 		return false
 	}
-	return c.registry.Has(to.Workspace, to.Kind, to.Name)
+	if c.registry != nil && c.registry.Has(to.Workspace, to.Kind, to.Name) {
+		return true
+	}
+	return c.providers.Provides(to.Group, to.Kind)
 }
 
 func linkTarget(workspace string, to commonv1.ObjectRef) commonv1.ObjectRef {

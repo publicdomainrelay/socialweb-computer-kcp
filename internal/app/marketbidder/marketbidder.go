@@ -149,7 +149,7 @@ func (ctl *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, o 
 	}
 	r := compose.RootOf(req, Kind, o, o.Spec.Suspend)
 	c.Observe(r)
-	p := &pass{ctx: ctx, ctl: ctl, c: c, r: r, o: o, st: compose.NewStatus(o.Generation, o.Spec.Profile, o.Status.Conditions)}
+	p := &pass{ctx: ctx, ctl: ctl, c: c, r: r, o: o, st: compose.NewStatus(o.Generation, o.Spec.Profile, o.Status)}
 	if r.Deleting {
 		return p.delete(ctx)
 	}
@@ -586,6 +586,9 @@ func (p *pass) local(ctx context.Context, plan compose.AccountPlan, id *v1alpha1
 		compose.ServiceAuthLink(p.self(), compose.AppRef(compose.ComponentKindPds, compose.PdsComponent, ws), did),
 		compose.ServiceAuthLink(p.guest(), compose.AppRef(compose.ComponentKindPds, compose.PdsComponent, ws), did))
 	if err := c.ApplyLinks(ctx, r, "repo", repoLinks); err != nil {
+		return ctlruntime.Result{}, err
+	}
+	if err := c.ApplyAssociationRecord(ctx, r, ws, repo, BidderIdentity, compose.BidderAssociate); err != nil {
 		return ctlruntime.Result{}, err
 	}
 	identity := compose.OperatorWatched(plan.Identity, o.Spec.Operator, compose.BidderAssociate)

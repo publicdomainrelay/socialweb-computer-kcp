@@ -106,6 +106,9 @@ func (a *Accounts) Reconcile(ctx context.Context, workspace string, id *v1alpha1
 	generation := id.Generation
 	if id.Spec.Mode == v1alpha1.MarketIdentityModeLocalRepo && strings.TrimSpace(status.Did) != "" && status.ObservedGeneration >= generation &&
 		status.Phase != "" && status.Phase != v1alpha1.MarketIdentityPhasePending {
+		if status.Phase == v1alpha1.MarketIdentityPhaseReady || status.Phase == v1alpha1.MarketIdentityPhaseAwaitingApproval {
+			settleAssociation(&status, generation, id.Spec.Association, "the PDS reports "+status.Did)
+		}
 		return Result{Status: status}, nil
 	}
 	switch id.Spec.Mode {
@@ -145,13 +148,14 @@ func (a *Accounts) localRepo(ctx context.Context, workspace string, id *v1alpha1
 		return pending(status, generation, "PdsNotReady", "waiting for the PDS at "+endpoint+": "+err.Error()),
 			fmt.Errorf("marketidentity: the PDS at %s: %w", endpoint, err)
 	}
+	composed := strings.TrimSpace(id.Spec.Did)
+	if composed == "" {
+		status.Did = ""
+		return pending(status, generation, "AccountPending", "the PDS at "+endpoint+" ("+did+") is ready; waiting for the root to compose the account DID"), nil
+	}
 	status.Phase = v1alpha1.MarketIdentityPhaseReady
 	status.ObservedGeneration = generation
-	if composed := strings.TrimSpace(id.Spec.Did); composed != "" {
-		status.Did = composed
-	} else if strings.TrimSpace(status.Did) == "" {
-		status.Did = did
-	}
+	status.Did = composed
 	if handle := strings.TrimSpace(id.Spec.Handle); handle != "" {
 		status.Handle = handle
 	}
@@ -159,15 +163,19 @@ func (a *Accounts) localRepo(ctx context.Context, workspace string, id *v1alpha1
 		status.PdsURL = pdsURL
 	}
 	setAssociated(&status, generation, id.Spec.Association)
-	if id.Spec.Association != v1alpha1.AssociationSkip && !associatedTrue(&status) {
+	settleAssociation(&status, generation, id.Spec.Association, "the PDS at "+endpoint+" reports "+did)
+	return Result{Status: status}, nil
+}
+
+func settleAssociation(status *v1alpha1.MarketIdentityStatus, generation int64, mode v1alpha1.AssociationMode, ready string) {
+	if mode != v1alpha1.AssociationSkip && !associatedTrue(status) {
 		status.Phase = v1alpha1.MarketIdentityPhaseAwaitingApproval
 		status.Message = "the PDS is ready; waiting for the operator's verified association claim"
-		setReady(&status, generation, false, "AwaitingAssociation", status.Message)
-		return Result{Status: status}, nil
+		setReady(status, generation, false, "AwaitingAssociation", status.Message)
+		return
 	}
-	status.Message = ""
-	setReady(&status, generation, true, "Ready", "the PDS at "+endpoint+" reports "+did)
-	return Result{Status: status}, nil
+	status.Phase, status.Message = v1alpha1.MarketIdentityPhaseReady, ""
+	setReady(status, generation, true, "Ready", ready)
 }
 
 func (a *Accounts) resolveDID(ctx context.Context, workspace, endpoint string) (string, error) {

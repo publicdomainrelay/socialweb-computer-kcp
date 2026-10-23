@@ -381,7 +381,7 @@ func (s *samples) recordQuotas(r Root, q *v1alpha1.ApplicationQuota) {
 	s.quotas[r.Owner()] = rootQuota{root: r, quota: q}
 }
 
-func (s *samples) into(ctx context.Context, c *Composer, m map[string]any) {
+func (s *samples) into(ctx context.Context, c *Composer, m map[string]any, declared map[string]bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := time.Now()
@@ -399,6 +399,9 @@ func (s *samples) into(ctx context.Context, c *Composer, m map[string]any) {
 		s.quotaUsage = c.readQuotas(ctx, s.quotas)
 	}
 	put := func(key string, v any) {
+		if !declared[key] {
+			return
+		}
 		var out any
 		if b, err := json.Marshal(v); err == nil && json.Unmarshal(b, &out) == nil {
 			m[key] = out

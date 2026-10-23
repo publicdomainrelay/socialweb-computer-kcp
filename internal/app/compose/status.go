@@ -3,6 +3,7 @@ package compose
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -242,19 +243,20 @@ func SetOverrideErrorIfAny(conditions *[]metav1.Condition, summary **v1alpha1.Co
 	}
 }
 
-func NewStatus(gen int64, profile string, previous []metav1.Condition) v1alpha1.ApplicationStatus {
-	return v1alpha1.ApplicationStatus{ObservedGeneration: gen, Profile: profile, Conditions: append([]metav1.Condition(nil), previous...)}
+func NewStatus(gen int64, profile string, previous v1alpha1.ApplicationStatus) v1alpha1.ApplicationStatus {
+	return v1alpha1.ApplicationStatus{ObservedGeneration: gen, Profile: profile, Did: previous.Did,
+		Conditions: append([]metav1.Condition(nil), previous.Conditions...)}
 }
 
 func (c *Composer) WriteStatus(ctx context.Context, r Root, gvr schema.GroupVersionResource, status any) error {
-	m, err := runtime.DefaultUnstructuredConverter.ToUnstructured(status)
+	m, err := ToMap(status)
 	if err != nil {
 		return err
 	}
 	for _, k := range componentOwnedStatus {
 		delete(m, k)
 	}
-	c.samples.into(ctx, c, m)
+	c.samples.into(ctx, c, m, jsonFields(status))
 	u := NewDoc(r.APIVersion, r.Kind, r.Name)
 	u["status"] = m
 	ri, err := c.Client(r.Workspace, gvr)
@@ -265,6 +267,24 @@ func (c *Composer) WriteStatus(ctx context.Context, r Root, gvr schema.GroupVers
 		return fmt.Errorf("compose: applying the status of %s %s: %w", r.Kind, r.Name, err)
 	}
 	return nil
+}
+
+func jsonFields(v any) map[string]bool {
+	t := reflect.TypeOf(v)
+	for t != nil && t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	out := map[string]bool{}
+	if t == nil || t.Kind() != reflect.Struct {
+		return out
+	}
+	for i := range t.NumField() {
+		name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
+		if name != "" && name != "-" {
+			out[name] = true
+		}
+	}
+	return out
 }
 
 func ApplicationStatusOf(u *Generic) (v1alpha1.ApplicationStatus, error) {

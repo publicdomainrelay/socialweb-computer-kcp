@@ -9,6 +9,7 @@ import (
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/atprotorepo"
 )
 
@@ -75,9 +76,14 @@ func (c *Composer) ApplyRelayStatus(ctx context.Context, r Root, relayName strin
 	if relayName == "" {
 		return nil
 	}
-	obj := &v1alpha1.RelayStatus{ObjectMeta: metav1.ObjectMeta{Name: ObjectName("relay", relayName)},
+	name := ObjectName("relay", relayName)
+	obj := &v1alpha1.RelayStatus{ObjectMeta: metav1.ObjectMeta{Name: name},
 		Spec: v1alpha1.RelayStatusSpec{RelayRef: commonv1.ObjectRef{Kind: ComponentKindRelay, Name: relayName}}}
-	return c.ApplyTyped(ctx, r, r.Workspace, v1alpha1.RelayStatusGVR, v1alpha1.GroupVersion.String(), "RelayStatus", obj)
+	if err := c.ApplyTyped(ctx, r, r.Workspace, v1alpha1.RelayStatusGVR, v1alpha1.GroupVersion.String(), "RelayStatus", obj); err != nil {
+		return err
+	}
+	return c.ApplyLinks(ctx, r, "relay-status", []Link{RefLink(AppRef("RelayStatus", name, r.Workspace),
+		AppRef(ComponentKindRelay, relayName, r.Workspace), Cap(bus.CapabilityXRPC, "_health"))})
 }
 
 func (c *Composer) ApplyVaultCredential(ctx context.Context, r Root, server, mount, path string) error {

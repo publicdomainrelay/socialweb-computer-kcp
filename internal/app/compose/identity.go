@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"slices"
@@ -19,6 +20,7 @@ import (
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/atprotorepo"
 )
 
@@ -283,7 +285,7 @@ func (c *Composer) DeleteAssociationObjects(ctx context.Context, ws string) {
 
 func pdsServiceDID(raw string) string {
 	parsed, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || parsed.Host == "" {
+	if err != nil || parsed.Host == "" || net.ParseIP(parsed.Hostname()) != nil {
 		return ""
 	}
 	return "did:web:" + strings.ReplaceAll(strings.ToLower(parsed.Host), ":", "%3A")
@@ -316,6 +318,13 @@ func (c *Composer) ApplyIdentitySpec(ctx context.Context, r Root, ws, name strin
 			if spec.Did != "" {
 				spec.PdsURL = live.Spec.PdsURL
 			}
+		}
+	}
+	if spec.Mode == v1alpha1.MarketIdentityModeLocalRepo {
+		probe := RefLink(AppRef(KindMarketIdentity, name, ws), AppRef(ComponentKindPds, PdsComponent, r.Workspace),
+			Cap(bus.CapabilityXRPC, "com.atproto.server.describeServer"))
+		if err := c.ApplyLinks(ctx, r, "identity-"+name, []Link{probe}); err != nil {
+			return err
 		}
 	}
 	obj := &v1alpha1.MarketIdentity{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: spec}

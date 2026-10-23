@@ -179,11 +179,10 @@ func (c *Controller) connect(ctx context.Context, req ctlruntime.Request, target
 		return nil, nil, "", "InvalidURL", err
 	}
 	didText := strings.TrimSpace(object.Spec.DID)
-	if didText == "" {
-		return nil, nil, "", "InvalidDID", errors.New("the RemotePDS has no did")
-	}
-	if _, err := syntax.ParseDID(didText); err != nil {
-		return nil, nil, "", "InvalidDID", fmt.Errorf("the RemotePDS did %q is invalid", didText)
+	if didText != "" {
+		if _, err := syntax.ParseDID(didText); err != nil {
+			return nil, nil, "", "InvalidDID", fmt.Errorf("the RemotePDS did %q is invalid", didText)
+		}
 	}
 	from := self(req, object)
 	tlsConfig, err := c.tlsConfig(ctx, from, object.Spec.TLS, baseURL)

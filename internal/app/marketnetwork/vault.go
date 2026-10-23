@@ -42,7 +42,7 @@ func (ctl *Controller) vaultReady(ctx context.Context, ws string) error {
 }
 
 func vaultLinks(r compose.Root) []compose.Link {
-	return []compose.Link{compose.VaultPKILink(r.Ref(), NetworkVaultServer, NetworkPKIMount)}
+	return append([]compose.Link{compose.VaultPKILink(r.Ref(), NetworkVaultServer, NetworkPKIMount)}, verifierLinks(r)...)
 }
 
 func (ctl *Controller) pkiCA(ctx context.Context, r compose.Root) ([]byte, error) {
@@ -111,14 +111,24 @@ func (ctl *Controller) verifierTransport(req *http.Request) http.RoundTripper {
 	return nil
 }
 
+var verifierChecks = []struct{ kind, name, path string }{
+	{compose.ComponentKindPlc, compose.NetworkPLCName, "/health"},
+	{compose.ComponentKindRelay, compose.NetworkRelayName, "/xrpc/_health"},
+	{compose.ComponentKindPds, NetworkAlicePdsName, "/xrpc/_health"},
+	{compose.ComponentKindPds, NetworkBobPdsName, "/xrpc/_health"},
+	{compose.ComponentKindIngressProxy, compose.NetworkIngressName, "/.well-known/did.json"},
+}
+
+func verifierLinks(r compose.Root) []compose.Link {
+	out := make([]compose.Link, 0, len(verifierChecks))
+	for _, check := range verifierChecks {
+		out = append(out, compose.RefLink(r.Ref(), compose.AppRef(check.kind, check.name, r.Workspace), compose.Cap(bus.CapabilityXRPC)))
+	}
+	return out
+}
+
 func (ctl *Controller) verify(ctx context.Context, snap compose.Snapshot, apps []v1alpha1.NetworkAppStatus) error {
-	for _, check := range []struct{ kind, name, path string }{
-		{compose.ComponentKindPlc, compose.NetworkPLCName, "/health"},
-		{compose.ComponentKindRelay, compose.NetworkRelayName, "/xrpc/_health"},
-		{compose.ComponentKindPds, NetworkAlicePdsName, "/xrpc/_health"},
-		{compose.ComponentKindPds, NetworkBobPdsName, "/xrpc/_health"},
-		{compose.ComponentKindIngressProxy, compose.NetworkIngressName, "/.well-known/did.json"},
-	} {
+	for _, check := range verifierChecks {
 		v, ok := snap.View(check.kind, check.name)
 		if !ok {
 			return fmt.Errorf("%s %s is not there", check.kind, check.name)

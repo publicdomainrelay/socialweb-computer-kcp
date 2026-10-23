@@ -181,7 +181,7 @@ func (r *Resolver) target(ref component.CredentialRef) (target, error) {
 }
 
 func (r *Resolver) client(ctx context.Context, t *target) (*openbao.Client, error) {
-	client, srv, err := r.logins.Client(ctx, t.workspace, t.name)
+	client, srv, err := r.logins.ClientForMount(ctx, t.workspace, t.name, t.mount)
 	if err != nil {
 		return nil, err
 	}

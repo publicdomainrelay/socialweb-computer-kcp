@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	contract "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/component"
@@ -38,6 +39,7 @@ type Bus struct {
 	streams   map[streamKey]StreamHandler
 	conns     map[*trackedConn]Key
 	links     []Link
+	changed   chan struct{}
 	providers map[providerKey]provider
 
 	denials denials
@@ -49,6 +51,8 @@ type Bus struct {
 
 	transport *http.Transport
 }
+
+const LinkSettle = 5 * time.Second
 
 type HandlerRegistry = Bus
 
@@ -140,11 +144,18 @@ func (r *Bus) SetLinks(links []Link) {
 		return
 	}
 	r.links = next
+	if r.changed != nil {
+		close(r.changed)
+		r.changed = nil
+	}
 	stale := make([]*trackedConn, 0, len(r.conns))
-	for conn := range r.conns {
+	for conn, key := range r.conns {
+		if conn.granted && allowed(next, conn.caller, key.Ref(), conn.grant) {
+			continue
+		}
+		delete(r.conns, conn)
 		stale = append(stale, conn)
 	}
-	r.conns = map[*trackedConn]Key{}
 	r.mu.Unlock()
 	closeTracked(stale)
 }
@@ -293,9 +304,11 @@ func (r *Bus) DialStream(ctx context.Context, key Key, name ...string) (net.Conn
 		return nil, ErrHandlersStopped
 	}
 	handlerName := normalizeHandlerName(optionalName(name))
-	if err := r.authorize(ctx, key.Ref(), Capability{Name: CapabilityStream, Scope: []string{handlerName}}); err != nil {
+	grant := Capability{Name: CapabilityStream, Scope: []string{handlerName}}
+	if err := r.authorize(ctx, key.Ref(), grant); err != nil {
 		return nil, err
 	}
+	caller, hasCaller := CallerFrom(ctx)
 	sk := streamKey{Key: key, name: handlerName}
 	r.mu.RLock()
 	if r.closed {
@@ -309,12 +322,12 @@ func (r *Bus) DialStream(ctx context.Context, key Key, name ...string) (net.Conn
 		return nil, fmt.Errorf("%w: %s/%s", ErrNoStream, key.Kind, key.Name)
 	}
 	client, server := net.Pipe()
-	clientConn, err := r.trackConn(client, key)
+	clientConn, err := r.trackGranted(client, key, caller, hasCaller, grant)
 	if err != nil {
 		server.Close()
 		return nil, err
 	}
-	serverConn, err := r.trackConn(server, key)
+	serverConn, err := r.trackGranted(server, key, caller, hasCaller, grant)
 	if err != nil {
 		clientConn.Close()
 		server.Close()
@@ -438,17 +451,20 @@ func (r *Bus) dialHTTP(ctx context.Context, _ string, address string) (net.Conn,
 	if !ok {
 		return nil, fmt.Errorf("%w: %s", ErrNoHandler, host)
 	}
-	if err := r.authorize(ctx, key.Ref(), Capability{Name: CapabilityXRPC}); err != nil {
+	grant := Capability{Name: CapabilityXRPC}
+	if authorized, ok := ctx.Value(authorizedDialKey{}).(authorizedDial); ok && authorized.key == key {
+		grant = authorized.grant
+	} else if err := r.authorize(ctx, key.Ref(), grant); err != nil {
 		return nil, err
 	}
 	caller, hasCaller := CallerFrom(ctx)
 	client, server := net.Pipe()
-	clientConn, err := r.trackConn(client, key)
+	clientConn, err := r.trackGranted(client, key, caller, hasCaller, grant)
 	if err != nil {
 		server.Close()
 		return nil, err
 	}
-	serverConn, err := r.trackConn(server, key)
+	serverConn, err := r.trackGranted(server, key, caller, hasCaller, grant)
 	if err != nil {
 		clientConn.Close()
 		server.Close()
@@ -547,6 +563,17 @@ func (r *Bus) trackConn(conn net.Conn, key Key) (*trackedConn, error) {
 	return tracked, nil
 }
 
+func (r *Bus) trackGranted(conn net.Conn, key Key, caller Caller, hasCaller bool, grant Capability) (*trackedConn, error) {
+	tracked, err := r.trackConn(conn, key)
+	if err != nil {
+		return nil, err
+	}
+	r.mu.Lock()
+	tracked.caller, tracked.grant, tracked.granted = caller, grant, hasCaller
+	r.mu.Unlock()
+	return tracked, nil
+}
+
 func (r *Bus) takeConnsLocked(key Key) []*trackedConn {
 	out := make([]*trackedConn, 0, len(r.conns))
 	for conn, connKey := range r.conns {
@@ -570,6 +597,9 @@ type trackedConn struct {
 
 	caller    Caller
 	hasCaller bool
+
+	grant   Capability
+	granted bool
 
 	onClose func()
 }
@@ -661,12 +691,21 @@ func (t *handlerRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 	if !ok {
 		return nil, fmt.Errorf("%w: %s", ErrNoHandler, host)
 	}
-	if err := t.registry.authorize(req.Context(), key.Ref(), xrpcCapability(req)); err != nil {
+	grant := xrpcCapability(req)
+	if err := t.registry.authorize(req.Context(), key.Ref(), grant); err != nil {
 		return nil, err
 	}
-	next := req.Clone(req.Context())
+	next := req.Clone(context.WithValue(req.Context(), authorizedDialKey{}, authorizedDial{key: key, grant: grant}))
 	next.Close = true
 	return t.registry.transport.RoundTrip(next)
+}
+
+type authorizedDialKey struct{}
+
+type authorizedDial struct {
+	key Key
+
+	grant Capability
 }
 
 type roundTripperFunc func(*http.Request) (*http.Response, error)
@@ -699,31 +738,52 @@ func (r *Bus) authorize(ctx context.Context, to commonv1.ObjectRef, c Capability
 	if !ok {
 		return r.denials.deny(Caller{}, to, c)
 	}
-	return r.authorizeCaller(from, to, c)
+	return r.authorizeCaller(ctx, from, to, c)
 }
 
-func (r *Bus) authorizeCaller(from Caller, to commonv1.ObjectRef, c Capability) error {
-	if from.System() {
-		if BootstrapCaller(from.Ref.Name) {
+func (r *Bus) authorizeCaller(ctx context.Context, from Caller, to commonv1.ObjectRef, c Capability) error {
+	wait := time.NewTimer(LinkSettle)
+	defer wait.Stop()
+	for {
+		r.mu.Lock()
+		links := r.links
+		if r.changed == nil {
+			r.changed = make(chan struct{})
+		}
+		changed := r.changed
+		r.mu.Unlock()
+		if allowed(links, from, to, c) {
 			return nil
 		}
-		return r.denials.deny(from, to, c)
+		if from.System() || !from.Complete() {
+			return r.denials.deny(from, to, c)
+		}
+		select {
+		case <-changed:
+		case <-wait.C:
+			return r.denials.deny(from, to, c)
+		case <-ctx.Done():
+			return r.denials.deny(from, to, c)
+		}
+	}
+}
+
+func allowed(links []Link, from Caller, to commonv1.ObjectRef, c Capability) bool {
+	if from.System() {
+		return BootstrapCaller(from.Ref.Name)
 	}
 	if !from.Complete() {
-		return r.denials.deny(from, to, c)
+		return false
 	}
 	if refMatches(from.Ref, to) {
-		return nil
+		return true
 	}
-	r.mu.RLock()
-	links := r.links
-	r.mu.RUnlock()
 	for _, link := range links {
 		if LinkAllows(link, from, to, c) {
-			return nil
+			return true
 		}
 	}
-	return r.denials.deny(from, to, c)
+	return false
 }
 
 func handlerAliases(key Key, name string) []string {

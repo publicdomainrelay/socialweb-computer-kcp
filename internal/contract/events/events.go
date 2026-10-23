@@ -2,6 +2,7 @@ package events
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"strings"
 	"time"
@@ -18,6 +19,8 @@ const (
 
 	ScopeAll = "*"
 )
+
+var ErrFutureCursor = errors.New("events: the cursor is past the source's newest event")
 
 type Op struct {
 	Action string

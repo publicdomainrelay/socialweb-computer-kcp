@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -228,7 +229,8 @@ func New(ctx context.Context, cfg Config) (*Core, error) {
 	ports := cfg.Ports
 	if ports == nil {
 		var err error
-		ports, err = component.OpenPortRegistry(component.PortRegistryOptions{StateDir: filepath.Join(cfg.StateDir, PortsDir)})
+		first, last := portBlock(cfg.StateDir)
+		ports, err = component.OpenPortRegistry(component.PortRegistryOptions{StateDir: filepath.Join(cfg.StateDir, PortsDir), First: first, Last: last})
 		if err != nil {
 			return nil, fmt.Errorf("componentcore: the port registry: %w", err)
 		}
@@ -363,6 +365,9 @@ func (c *Core) pdsEndpoint(workspace, kind, name string) (string, bool) {
 	if c.registry == nil {
 		return "", false
 	}
+	if root, ok := strings.CutSuffix(workspace, ":"+ComponentWorkspace); ok && !c.registry.Has(workspace, kind, name) {
+		workspace = root
+	}
 	if endpoint, ok := c.registry.Endpoint(workspace, kind, name, "http"); ok && endpoint.URL != "" {
 		return endpoint.URL, true
 	}
@@ -478,4 +483,18 @@ func dynamicForRestConfig(cfg *rest.Config, workspace string) (*kube.Client, err
 		return nil, fmt.Errorf("componentcore: the dynamic client for %s: %w", workspace, err)
 	}
 	return dc, nil
+}
+
+const (
+	portRangeFirst = 20000
+	portRangeLast  = 29999
+	portBlockSize  = 64
+)
+
+func portBlock(stateDir string) (int, int) {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(filepath.Clean(stateDir)))
+	blocks := uint32((portRangeLast - portRangeFirst + 1) / portBlockSize)
+	first := portRangeFirst + int(h.Sum32()%blocks)*portBlockSize
+	return first, first + portBlockSize - 1
 }

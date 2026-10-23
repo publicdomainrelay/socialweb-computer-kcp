@@ -128,7 +128,7 @@ func (ctl *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, o 
 	}
 	r := compose.RootOf(req, Kind, o, o.Spec.Suspend)
 	c.Observe(r)
-	st := compose.NewStatus(o.Generation, o.Spec.Profile, o.Status.Conditions)
+	st := compose.NewStatus(o.Generation, o.Spec.Profile, o.Status)
 	st.Components = []v1alpha1.ApplicationComponent{}
 	p := &pass{ctx: ctx, ctl: ctl, c: c, r: r, o: o, ws: r.Workspace + ":" + compose.ComponentWorkspace, st: st}
 	if r.Deleting {
@@ -585,6 +585,9 @@ func (p *pass) localAccount(ctx context.Context, plan compose.AccountPlan, id *v
 	repoLinks = append(repoLinks, compose.RepoWriteLink(p.self(compose.ComponentKindRequester, marketrequester.RequesterComponent), repo, compose.ScopeAll),
 		compose.RecordWriteLink(p.ws, r.Owner(), repo, compose.ScopeAll))
 	if err := c.ApplyLinks(ctx, r, "repo", repoLinks, p.ws); err != nil {
+		return nil, nil, "", false, err
+	}
+	if err := c.ApplyAssociationRecord(ctx, r, p.ws, repo, marketrequester.RequesterIdentity, RequesterAssociate); err != nil {
 		return nil, nil, "", false, err
 	}
 	requesterDir := compose.ComponentCRStateDir(c.StateRoot(), compose.ComponentKindRequester, marketrequester.RequesterComponent)

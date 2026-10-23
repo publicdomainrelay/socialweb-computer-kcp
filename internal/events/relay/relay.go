@@ -89,6 +89,8 @@ func Base(raw string) (string, error) {
 	return strings.TrimRight(parsed.String(), "/"), nil
 }
 
+const futureCursor = "FutureCursor"
+
 func (s *Source) Subscribe(ctx context.Context, filter events.Filter) (events.Stream, error) {
 	parsed, err := wsconn.Parse(s.base)
 	if err != nil {
@@ -144,6 +146,9 @@ func decode(data []byte) (events.Event, bool, error) {
 	var f frame
 	if err := json.Unmarshal(data, &f); err != nil {
 		return events.Event{}, false, fmt.Errorf("relay: decoding a frame: %w", err)
+	}
+	if f.Error == futureCursor {
+		return events.Event{}, false, fmt.Errorf("relay: %w: %s", events.ErrFutureCursor, strings.TrimSpace(f.Message))
 	}
 	if f.Error != "" {
 		return events.Event{}, false, fmt.Errorf("relay: %s: %s", f.Error, cmp.Or(strings.TrimSpace(f.Message), "relay stream error"))

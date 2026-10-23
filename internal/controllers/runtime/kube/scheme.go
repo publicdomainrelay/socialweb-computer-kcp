@@ -2,6 +2,7 @@ package kube
 
 import (
 	"fmt"
+	"reflect"
 	"sync"
 
 	kruntime "k8s.io/apimachinery/pkg/runtime"
@@ -51,6 +52,11 @@ func Encode(obj any) (Doc, error) {
 	}
 	if d, ok := asDoc(obj); ok {
 		return d, nil
+	}
+	if v := reflect.ValueOf(obj); v.Kind() != reflect.Pointer {
+		ptr := reflect.New(v.Type())
+		ptr.Elem().Set(v)
+		obj = ptr.Interface()
 	}
 	m, err := kruntime.DefaultUnstructuredConverter.ToUnstructured(obj)
 	if err != nil {
