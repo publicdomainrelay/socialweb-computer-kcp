@@ -31,6 +31,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpapply"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 )
 
@@ -245,16 +246,9 @@ func Run(ctx context.Context, c Config) error {
 }
 
 func Supervise(ctx context.Context, c Config) {
-	for {
-		err := Run(ctx, c)
-		if ctx.Err() != nil {
-			return
-		}
+	supervise.Restart(ctx, "appctl", supervise.Backoff{Min: RetryAfter, Max: RetryAfter, OnError: func(err error, _ time.Duration) {
 		c.log().Error("the application controller stopped; starting it again", "err", fmt.Sprint(err))
-		if !sleep(ctx, RetryAfter) {
-			return
-		}
-	}
+	}}, func(ctx context.Context) error { return Run(ctx, c) })
 }
 
 func sleep(ctx context.Context, d time.Duration) bool {
