@@ -418,7 +418,7 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 		pds = compose.Desired{Kind: compose.ComponentKindPds, Name: compose.PdsComponent, Spec: pdsSpec}
 	}
 	requesterSpec := v1alpha1.RequesterSpec{
-		ComponentSpec:        compose.NewComponentSpec(compose.ComponentCRStateDir(stateRoot, compose.ComponentKindRequester, marketrequester.RequesterComponent), network),
+		ComponentSpec:        p.c.NetworkComponentSpec(p.r, compose.ComponentCRStateDir(stateRoot, compose.ComponentKindRequester, marketrequester.RequesterComponent), network),
 		Identity:             ident,
 		PolicyEngineRef:      compose.ComponentRefFor(compose.ComponentKindPolicyEngine, compose.PolicyEngineComponent),
 		VaultRef:             vault,

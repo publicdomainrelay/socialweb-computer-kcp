@@ -12,6 +12,7 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/yaml"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
@@ -190,6 +191,7 @@ type Controller struct {
 
 func Register(m *ctlruntime.Manager, c *compose.Composer) error {
 	ctl := &Controller{c: c}
+	c.ProvideTrust(schema.GroupKind{Group: v1alpha1.GroupName, Kind: Kind})
 	opts := append([]ctlruntime.Option{ctlruntime.Export(compose.ExportApplications), ctlruntime.Finalizer(compose.Finalizer),
 		childHostProcesses()}, c.Watches(Kind)...)
 	if err := ctlruntime.For[*v1alpha1.SshGateway](m, Name, ctl, opts...); err != nil {
@@ -370,7 +372,7 @@ func (p *pass) desired(plan compose.AccountPlan, ident *v1alpha1.ComponentIdenti
 		requesterPdsRef = plan.PdsRef
 	}
 	requester := compose.Desired{Kind: compose.ComponentKindRequester, Name: marketrequester.RequesterComponent, Spec: v1alpha1.RequesterSpec{
-		ComponentSpec:        compose.NewComponentSpec(compose.ComponentCRStateDir(stateRoot, compose.ComponentKindRequester, marketrequester.RequesterComponent), network),
+		ComponentSpec:        p.c.NetworkComponentSpec(p.r, compose.ComponentCRStateDir(stateRoot, compose.ComponentKindRequester, marketrequester.RequesterComponent), network),
 		Identity:             ident,
 		PdsRef:               requesterPdsRef,
 		PdsDID:               plan.PdsDID,
@@ -391,7 +393,7 @@ func (p *pass) desired(plan compose.AccountPlan, ident *v1alpha1.ComponentIdenti
 		SuspendParticipation: o.Spec.Suspend,
 	}}
 	sshServer := compose.Desired{Kind: compose.ComponentKindSshServer, Name: SshServerComponent, Spec: v1alpha1.SshServerSpec{
-		ComponentSpec:     compose.NewComponentSpec(compose.ComponentCRStateDir(stateRoot, compose.ComponentKindSshServer, SshServerComponent), network),
+		ComponentSpec:     p.c.NetworkComponentSpec(p.r, compose.ComponentCRStateDir(stateRoot, compose.ComponentKindSshServer, SshServerComponent), network),
 		Identity:          ident,
 		RequesterRef:      compose.ComponentRefFor(compose.ComponentKindRequester, marketrequester.RequesterComponent),
 		VaultRef:          vault,

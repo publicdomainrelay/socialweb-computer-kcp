@@ -77,6 +77,8 @@ type Service struct {
 
 	egress component.Egress
 
+	trust *component.Trust
+
 	log *slog.Logger
 
 	workspace string
@@ -163,23 +165,21 @@ func New(spec v1alpha1.BidderSpec, deps Deps) (*Service, error) {
 		base.Log = deps.Log
 	}
 	egress := base
+	trust := component.NewTrust(spec.TLS.CA(), log)
 	if spec.Network != nil {
 		if hosts := participant.NetworkHosts(*spec.Network, egress.Hosts); hosts != nil {
 			egress.Hosts = hosts
 		}
-		if strings.TrimSpace(spec.Network.CABundle) != "" {
-			tlsConfig, err := participant.NetworkTLS(spec.Network.CABundle)
-			if err != nil {
-				return nil, err
-			}
-			egress.TLS = tlsConfig
-			log.Info("the bidder trusts the network CA")
-		}
+	}
+	if trust.Enabled() {
+		egress.TLS = trust.Client(nil)
+		log.Info("the bidder trusts the published network CA")
 	}
 	s := &Service{
 		spec:             spec,
 		deps:             deps,
 		egress:           egress,
+		trust:            trust,
 		workspace:        cmp.Or(deps.Self.Workspace, "root"),
 		handle:           handle,
 		providerHandle:   providerHandle,
@@ -216,6 +216,12 @@ func (s *Service) Start(ctx context.Context) error {
 	s.cancel = cancel
 	s.mu.Unlock()
 	defer s.halt(ctx)
+	stopTrust, err := s.trust.Follow(runCtx, s.deps.Instance)
+	if err != nil {
+		cancel()
+		return err
+	}
+	defer stopTrust()
 	if err := s.prepare(runCtx); err != nil {
 		cancel()
 		return err

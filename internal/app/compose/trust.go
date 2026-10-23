@@ -131,6 +131,14 @@ func (c *Composer) PublishNetworkTrust(r Root, network *v1alpha1.MarketNetworkVa
 	return &ref
 }
 
+func (c *Composer) NetworkComponentSpec(r Root, stateDir string, network *v1alpha1.MarketNetworkValue) v1alpha1.ComponentSpec {
+	spec := NewComponentSpec(stateDir, network)
+	if ca := c.PublishNetworkTrust(r, network); ca != nil {
+		spec.TLS = &v1alpha1.ComponentTLS{CARef: ca}
+	}
+	return spec
+}
+
 func TrustLink(from, publisher commonv1.ObjectRef) Link {
 	return RefLink(from, publisher, Cap(vault.CapabilityRead, TrustScope))
 }

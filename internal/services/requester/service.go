@@ -43,6 +43,8 @@ type Service struct {
 
 	client *http.Client
 
+	trust *component.Trust
+
 	directory identity.Directory
 
 	sessions *participant.SessionStore
@@ -85,7 +87,8 @@ func New(spec v1alpha1.RequesterSpec, deps Deps) (*Service, error) {
 		return nil, err
 	}
 	s.cfg = cfg
-	s.client = egressFor(spec, deps).Client(requestTimeout)
+	s.trust = component.NewTrust(spec.TLS.CA(), log)
+	s.client = egressFor(spec, deps, s.trust).Client(requestTimeout)
 	s.directory = directoryFor(cfg.Network().PLCDirectoryURL, int(ptr.Deref(spec.DirectoryKeys, 0)), time.Duration(ptr.Deref(spec.DirectoryTTLSeconds, 0))*time.Second)
 	s.log = log.With("component", "requester", "did", cfg.DID)
 	return s, nil
@@ -104,6 +107,13 @@ func (s *Service) Start(ctx context.Context) error {
 	s.cancel = cancel
 	s.mu.Unlock()
 
+	stopTrust, err := s.trust.Follow(runCtx, s.deps.Instance)
+	if err != nil {
+		cancel()
+		s.finish(ctx, nil)
+		return err
+	}
+	defer stopTrust()
 	core, err := s.setup(runCtx)
 	if err == nil {
 		err = s.deps.Bus.RegisterHTTP(component.Key{Workspace: s.cfg.Workspace, Kind: Kind, Name: s.deps.Self.Name}, s.handler())

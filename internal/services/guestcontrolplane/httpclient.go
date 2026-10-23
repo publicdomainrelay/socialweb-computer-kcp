@@ -14,7 +14,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/networkdial"
 )
 
-func networkHTTPClient(hosts component.NetworkHosts, network v1alpha1.MarketNetworkValue, timeout time.Duration) *http.Client {
+func networkHTTPClient(hosts component.NetworkHosts, network v1alpha1.MarketNetworkValue, trust *component.Trust, timeout time.Duration) *http.Client {
 	entries := []networkdial.Host{}
 	for _, host := range network.Hosts {
 		entries = append(entries, networkdial.Host{Name: host.Name, Address: host.Address})
@@ -26,10 +26,7 @@ func networkHTTPClient(hosts component.NetworkHosts, network v1alpha1.MarketNetw
 	if mapped, err := networkdial.NewHostMap(entries); err == nil && mapped.Len() > 0 {
 		resolver = mapped
 	}
-	tlsConfig, err := httpclient.TLSConfig(httpclient.TLSOptions{CAPEM: []byte(strings.TrimSpace(network.CABundle))})
-	if err != nil {
-		tlsConfig = &tls.Config{MinVersion: tls.VersionTLS12}
-	}
+	tlsConfig := trust.Client(&tls.Config{MinVersion: tls.VersionTLS12})
 	return httpclient.External(httpclient.Options{Timeout: timeout, Hosts: resolver, TLS: tlsConfig})
 }
 

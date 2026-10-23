@@ -330,7 +330,7 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 	}
 	guestPdsRef := plan.ComponentPdsRef()
 	guest := compose.Desired{Kind: compose.ComponentKindGuestControlPlane, Name: GuestComponent, Spec: v1alpha1.GuestControlPlaneSpec{
-		ComponentSpec: compose.NewComponentSpec(compose.ComponentCRStateDir(stateRoot, compose.ComponentKindGuestControlPlane, GuestComponent), network),
+		ComponentSpec: p.c.NetworkComponentSpec(p.r, compose.ComponentCRStateDir(stateRoot, compose.ComponentKindGuestControlPlane, GuestComponent), network),
 		Identity:      ident,
 		PdsRef:        guestPdsRef,
 		VaultRef:      vault,
@@ -354,7 +354,7 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 		accessToken = plan.AccessToken()
 	}
 	bidder := compose.Desired{Kind: compose.ComponentKindBidder, Name: BidderComponent, Spec: v1alpha1.BidderSpec{
-		ComponentSpec:        compose.NewComponentSpec(compose.ComponentCRStateDir(stateRoot, compose.ComponentKindBidder, BidderComponent), network),
+		ComponentSpec:        p.c.NetworkComponentSpec(p.r, compose.ComponentCRStateDir(stateRoot, compose.ComponentKindBidder, BidderComponent), network),
 		MarketExposureRef:    c.PublishedExposure(ctx, ws, compose.ServiceNameFor(compose.ComponentKindBidder, BidderComponent)+compose.ExposureIngressSuffix),
 		Mode:                 string(plan.Mode),
 		Identity:             ident,

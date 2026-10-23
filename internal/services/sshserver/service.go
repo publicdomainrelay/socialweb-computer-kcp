@@ -37,6 +37,8 @@ type Service struct {
 
 	tls *tls.Config
 
+	trust *component.Trust
+
 	directory identity.Directory
 
 	mu sync.Mutex
@@ -115,6 +117,11 @@ func (s *Service) Start(ctx context.Context) error {
 		close(s.done)
 		return err
 	}
+	stopTrust, err := s.trust.Follow(runCtx, s.deps.Instance)
+	if err != nil {
+		return fail(err)
+	}
+	defer stopTrust()
 	if err := s.setup(runCtx); err != nil {
 		return fail(err)
 	}

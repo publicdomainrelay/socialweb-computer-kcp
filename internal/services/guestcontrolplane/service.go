@@ -32,6 +32,8 @@ type Service struct {
 
 	log *slog.Logger
 
+	trust *component.Trust
+
 	stateDir string
 
 	grantSync time.Duration
@@ -76,6 +78,12 @@ func (s *Service) Start(ctx context.Context) error {
 	s.mu.Unlock()
 	defer s.shutdown(ctx)
 
+	stopTrust, err := s.trust.Follow(runCtx, s.deps.Instance)
+	if err != nil {
+		cancel()
+		return err
+	}
+	defer stopTrust()
 	if err := s.prepare(runCtx); err != nil {
 		cancel()
 		return err
@@ -183,7 +191,7 @@ func (s *Service) prepare(ctx context.Context) error {
 		Guests: guests,
 		Grants: grants,
 		RBAC: reporemote.NewNetwork(reporemote.NetworkConfig{Directory: ingress.NewDirectory(s.network().PLCDirectoryURL),
-			HTTP: networkHTTPClient(s.deps.Hosts, s.network(), DefaultOpenBaoTimeout)}),
+			HTTP: networkHTTPClient(s.deps.Hosts, s.network(), s.trust, DefaultOpenBaoTimeout)}),
 		FallbackIssuer: s.relayURL,
 		Log:            s.log,
 	})
