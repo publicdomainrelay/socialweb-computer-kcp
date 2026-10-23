@@ -1,7 +1,6 @@
 package vaultcert
 
 import (
-	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -9,13 +8,14 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vaultlayout"
 )
@@ -231,19 +231,17 @@ func (c ClientCertificate) FetchOwnSecret(ctx context.Context) (map[string]any, 
 }
 
 func (c ClientCertificate) tlsClient() (*http.Client, error) {
-	pair, err := tls.X509KeyPair(c.CertPEM, c.KeyPEM)
-	if err != nil {
+	if _, err := tls.X509KeyPair(c.CertPEM, c.KeyPEM); err != nil {
 		return nil, fmt.Errorf("vaultcert: the certificate and key are not a pair: %w", err)
 	}
-	pool := x509.NewCertPool()
-	if !pool.AppendCertsFromPEM(c.ServerCAPEM) {
+	if len(c.ServerCAPEM) == 0 {
 		return nil, errors.New("vaultcert: the vault server CA carries no CERTIFICATE PEM block")
 	}
-	return &http.Client{Transport: &http.Transport{IdleConnTimeout: openbao.IdleConnTimeout, TLSClientConfig: &tls.Config{
-		RootCAs:      pool,
-		Certificates: []tls.Certificate{pair},
-		MinVersion:   tls.VersionTLS12,
-	}}}, nil
+	client, err := httpclient.TLSClient(httpclient.TLSOptions{CAPEM: c.ServerCAPEM, CertPEM: c.CertPEM, KeyPEM: c.KeyPEM, IdleConnTimeout: openbao.IdleConnTimeout})
+	if errors.Is(err, httpclient.ErrNoCA) {
+		return nil, errors.New("vaultcert: the vault server CA carries no CERTIFICATE PEM block")
+	}
+	return client, err
 }
 
 type rawClient struct {
@@ -260,41 +258,23 @@ func newRawClient(addr, token string, hc *http.Client) *rawClient {
 }
 
 func adminHTTPClient(pool *x509.CertPool) *http.Client {
-	return &http.Client{Transport: &http.Transport{IdleConnTimeout: openbao.IdleConnTimeout, TLSClientConfig: &tls.Config{
-		RootCAs:    pool,
-		MinVersion: tls.VersionTLS12,
-	}}}
+	client, _ := httpclient.TLSClient(httpclient.TLSOptions{Pool: pool, IdleConnTimeout: openbao.IdleConnTimeout})
+	return client
 }
 
 func (c *rawClient) do(ctx context.Context, method, path string, in any) (int, []byte, error) {
-	var body io.Reader
-	if in != nil {
-		raw, err := json.Marshal(in)
-		if err != nil {
-			return 0, nil, fmt.Errorf("vaultcert: encoding %s /v1/%s: %w", method, path, err)
-		}
-		body = bytes.NewReader(raw)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, c.addr+"/v1/"+strings.Trim(path, "/"), body)
+	req, err := httpjson.NewRequest(ctx, method, c.addr+"/v1/"+strings.Trim(path, "/"), in)
 	if err != nil {
 		return 0, nil, fmt.Errorf("vaultcert: building %s /v1/%s: %w", method, path, err)
 	}
 	if c.token != "" {
 		req.Header.Set("X-Vault-Token", c.token)
 	}
-	if in != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	resp, err := c.http.Do(req)
+	resp, err := httpjson.Exchange(ctx, c.http, req, httpjson.Unlimited)
 	if err != nil {
 		return 0, nil, fmt.Errorf("vaultcert: %s /v1/%s: %w", method, path, err)
 	}
-	defer resp.Body.Close()
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return 0, nil, fmt.Errorf("vaultcert: reading %s /v1/%s: %w", method, path, err)
-	}
-	return resp.StatusCode, data, nil
+	return resp.Status, resp.Body, nil
 }
 
 func (c *rawClient) listData(ctx context.Context, path string) (map[string]json.RawMessage, error) {
