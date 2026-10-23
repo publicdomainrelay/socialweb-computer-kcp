@@ -12,6 +12,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 const ConditionPdsIngress = "PdsIngress"
@@ -57,7 +59,7 @@ func appIngressConfig(spec *v1alpha1.IngressConfig, network *v1alpha1.MarketNetw
 	return nil, false
 }
 
-func pdsIngressRef(cfg *v1alpha1.IngressConfig, fromNetwork bool) *v1alpha1.ComponentRef {
+func pdsIngressRef(cfg *v1alpha1.IngressConfig, fromNetwork bool) *commonv1.ObjectRef {
 	if cfg != nil && cfg.IngressRef != nil {
 		if name := strings.TrimSpace(cfg.IngressRef.Name); name != "" {
 			return ComponentRefFor(ComponentKindIngressProxy, name)
@@ -69,7 +71,7 @@ func pdsIngressRef(cfg *v1alpha1.IngressConfig, fromNetwork bool) *v1alpha1.Comp
 	return ComponentRefFor(ComponentKindIngressProxy, AppIngressName)
 }
 
-func pdsAppIngress(spec *v1alpha1.IngressConfig, network *v1alpha1.MarketNetworkValue, production bool) (bool, *v1alpha1.ComponentRef, *v1alpha1.IngressConfig, error) {
+func pdsAppIngress(spec *v1alpha1.IngressConfig, network *v1alpha1.MarketNetworkValue, production bool) (bool, *commonv1.ObjectRef, *v1alpha1.IngressConfig, error) {
 	cfg, fromNetwork := appIngressConfig(spec, network)
 	if IngressProviderFor(cfg) == v1alpha1.IngressProviderIroh {
 		return true, nil, nil, pdsIngressErr(PdsIngressReasonProviderUnsupported,
@@ -226,7 +228,7 @@ func (ctl *Controller) pdsPublicURLApplied(ctx context.Context, ws, pdsName stri
 	return strings.TrimSpace(spec.PublicBaseURL) != "", nil
 }
 
-func componentRefName(ref *v1alpha1.ComponentRef) string {
+func componentRefName(ref *commonv1.ObjectRef) string {
 	if ref == nil {
 		return ""
 	}
@@ -268,7 +270,7 @@ func pdsIngressPhase(err error) v1alpha1.ApplicationPhase {
 	return v1alpha1.ApplicationPhaseProvisioning
 }
 
-func (ctl *Controller) pdsIngressReady(snap componentSnapshot, pdsName string, ref *v1alpha1.ComponentRef) error {
+func (ctl *Controller) pdsIngressReady(snap componentSnapshot, pdsName string, ref *commonv1.ObjectRef) error {
 	if ref != nil {
 		if view, ok := snap.view(ComponentKindIngressProxy, ref.Name); ok && !view.Status.Ready {
 			return pdsIngressErr(PdsIngressReasonProviderNotReady,

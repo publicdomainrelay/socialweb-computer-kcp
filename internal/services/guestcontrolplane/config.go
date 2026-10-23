@@ -11,6 +11,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestidentity"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 const Kind = "GuestControlPlane"
@@ -68,11 +70,11 @@ type Config struct {
 
 	Identity v1alpha1.ComponentIdentity
 
-	IdentityRef *v1alpha1.ComponentRef
+	IdentityRef *commonv1.ObjectRef
 
-	PDSRef *v1alpha1.ComponentRef
+	PDSRef *commonv1.ObjectRef
 
-	VaultRef *v1alpha1.ComponentRef
+	VaultRef *commonv1.ObjectRef
 
 	HostKeyRef string
 
@@ -179,9 +181,9 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 	}
 	if guestSpec.RelayEnabled != nil && *guestSpec.RelayEnabled {
 		cfg.Relay = &RelayConfig{IngressProxyHost: strings.TrimSpace(cfg.Network.IngressProxyHost),
-			TLS: strings.HasPrefix(strings.ToLower(strings.TrimSpace(cfg.Network.GuestTlsUrl)), "https://")}
+			TLS: strings.HasPrefix(strings.ToLower(strings.TrimSpace(cfg.Network.GuestTLSURL())), "https://")}
 	}
-	cfg.VaultServer = guestSpec.VaultRef.VaultServer(cfg.VaultServer)
+	cfg.VaultServer = v1alpha1.VaultServer(guestSpec.VaultRef, cfg.VaultServer)
 	if guestSpec.Storage != nil && guestSpec.Storage.DataDir != "" {
 		cfg.StateDir = guestSpec.Storage.DataDir
 	}

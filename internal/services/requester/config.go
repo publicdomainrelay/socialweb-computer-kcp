@@ -26,6 +26,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/sshtransport"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 const Kind = "Requester"
@@ -141,13 +143,13 @@ type Config struct {
 
 	MarketDID string
 
-	PDSRef *v1alpha1.ComponentRef
+	PDSRef *commonv1.ObjectRef
 
 	RemotePDS *pdsv1alpha1.RemotePDS
 
-	PolicyEngineRef *v1alpha1.ComponentRef
+	PolicyEngineRef *commonv1.ObjectRef
 
-	VaultRef *v1alpha1.ComponentRef
+	VaultRef *commonv1.ObjectRef
 
 	PDSURL string
 
@@ -158,6 +160,8 @@ type Config struct {
 	PublicOrigin string
 
 	MarketURL string
+
+	MarketExposureRef *commonv1.LocalObjectRef
 
 	OperatorDID string
 
@@ -291,7 +295,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		Namespace:         spec.Namespace,
 		ComponentName:     spec.Name,
 		PDSRef:            decoded.PdsRef,
-		PDSAccessTokenRef: accessTokenRef(decoded.PDSAccessTokenPath, decoded.VaultRef),
+		PDSAccessTokenRef: accessTokenRef(decoded.PDSAccessToken, decoded.VaultRef),
 		PolicyEngineRef:   decoded.PolicyEngineRef,
 		VaultRef:          decoded.VaultRef,
 		Comms:             decoded.Comms,
@@ -314,11 +318,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		if tlsConfig := networkTLSConfig(cfg.Network); tlsConfig != nil {
 			cfg.Deps.TLS = tlsConfig
 		}
-		if path := strings.TrimSpace(cfg.Network.CaBundleRef); path != "" {
-			if pem, err := os.ReadFile(path); err == nil {
-				cfg.GuestCAPEM = strings.TrimSpace(string(pem))
-			}
-		}
+		cfg.GuestCAPEM = strings.TrimSpace(cfg.Network.CABundle)
 	}
 	if decoded.Serve != nil {
 		if decoded.Serve.Host != "" {
@@ -337,13 +337,13 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 	cfg.IdentityMode = IdentityModeLocal
 	if decoded.PdsRef != nil && decoded.PdsRef.Name != "" {
 		cfg.IdentityMode = IdentityModeCallback
-		if decoded.PdsRef.Did != "" {
-			cfg.RepoDID = decoded.PdsRef.Did
-			cfg.MarketDID = decoded.PdsRef.Did
+		if did := strings.TrimSpace(decoded.PdsDID); did != "" {
+			cfg.RepoDID = did
+			cfg.MarketDID = did
 		}
 	}
 	cfg.PublicOrigin = strings.TrimRight(strings.TrimSpace(decoded.PublicOrigin), "/")
-	cfg.MarketURL = strings.TrimRight(strings.TrimSpace(decoded.MarketURL), "/")
+	cfg.MarketExposureRef = decoded.MarketExposureRef
 	cfg.OperatorDID = strings.TrimSpace(decoded.OperatorDID)
 	cfg.OAuthClientID = strings.TrimSpace(decoded.OAuthClientID)
 	cfg.OAuthRedirectURI = strings.TrimSpace(decoded.OAuthRedirectURI)
@@ -498,8 +498,8 @@ func networkResolver(n v1alpha1.MarketNetworkValue, fallback networkdial.Resolve
 	for _, host := range n.Hosts {
 		entries = append(entries, networkdial.Host{Name: host.Name, Address: host.Address})
 	}
-	if name := hostnameOf(n.GuestTlsUrl); name != "" {
-		if address := hostWithPort(n.GuestTlsUrl, n.Hosts); address != "" {
+	if name := hostnameOf(n.GuestTLSURL()); name != "" {
+		if address := hostWithPort(n.GuestTLSURL(), n.Hosts); address != "" {
 			entries = append(entries, networkdial.Host{Name: name, Address: address})
 		}
 	}
@@ -542,40 +542,29 @@ func hostWithPort(raw string, hosts []v1alpha1.NetworkHost) string {
 }
 
 func networkTLSConfig(n v1alpha1.MarketNetworkValue) *tls.Config {
-	path := strings.TrimSpace(n.CaBundleRef)
-	if path == "" {
-		return nil
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
+	bundle := strings.TrimSpace(n.CABundle)
+	if bundle == "" {
 		return nil
 	}
 	pool := x509.NewCertPool()
-	if !pool.AppendCertsFromPEM(data) {
+	if !pool.AppendCertsFromPEM([]byte(bundle)) {
 		return nil
 	}
 	return &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
 }
 
-func accessTokenRef(raw string, vaultRef *v1alpha1.ComponentRef) *component.CredentialRef {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
+func accessTokenRef(secret *commonv1.SecretRef, vaultRef *commonv1.ObjectRef) *component.CredentialRef {
+	if secret == nil || strings.Trim(strings.TrimSpace(secret.Path), "/") == "" {
 		return nil
 	}
-	ref := &component.CredentialRef{Keys: []string{"session", "accessJwt", "accessToken", "access_token", "token", "value"}}
-	switch {
-	case strings.HasPrefix(raw, "openbao:"), strings.HasPrefix(raw, "vault:"):
-		raw = strings.TrimPrefix(strings.TrimPrefix(raw, "openbao:"), "vault:")
-		ref.Path = strings.Trim(raw, "/")
-		if vaultRef != nil {
-			ref.Server = strings.TrimSpace(vaultRef.Name)
-		}
-	case strings.HasPrefix(raw, "file:"):
-		ref.Server = "file:"
-		ref.Path = strings.TrimPrefix(raw, "file:")
-	default:
-		ref.Mount = "file"
-		ref.Path = raw
+	ref := &component.CredentialRef{Mount: strings.Trim(strings.TrimSpace(secret.Mount), "/"), Path: strings.Trim(strings.TrimSpace(secret.Path), "/"),
+		Keys: []string{"session", "accessJwt", "accessToken", "access_token", "token", "value"}}
+	if key := strings.TrimSpace(secret.Key); key != "" {
+		ref.Keys = []string{key}
+	}
+	ref.Server = v1alpha1.VaultServer(secret.Vault, "")
+	if ref.Server == "" && vaultRef != nil {
+		ref.Server = strings.TrimSpace(vaultRef.Name)
 	}
 	return ref
 }
@@ -901,10 +890,10 @@ func trustedHosts(network v1alpha1.MarketNetworkValue) []string {
 		add(host.Name)
 	}
 	add(network.IngressProxyHost)
-	add(network.GuestTlsUrl)
+	add(network.GuestTLSURL())
 	add(network.QrOrigin)
-	add(network.PlcDirectoryUrl)
-	for _, raw := range network.RelayUrls {
+	add(network.PLCDirectoryURL)
+	for _, raw := range network.RelayURLs {
 		add(raw)
 	}
 	return out

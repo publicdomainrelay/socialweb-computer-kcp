@@ -12,11 +12,13 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 )
 
 const (
 	GuestTLSDir     = "guest-tls"
-	GuestTLSHost    = "relay.localhost"
+	GuestTLSHost    = v1alpha1.GuestTLSHost
 	guestTLSDays    = 30
 	guestCAFile     = "ca.crt"
 	guestCAKeyFile  = "ca.key"

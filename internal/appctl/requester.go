@@ -17,6 +17,8 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 const (
@@ -64,7 +66,7 @@ func hostOf(raw string) string {
 
 func guestAliases(n *v1alpha1.MarketNetworkValue) ([]string, error) {
 	var names []string
-	for _, h := range []string{hostOf(n.IngressProxyHost), hostOf(n.GuestTlsUrl)} {
+	for _, h := range []string{hostOf(n.IngressProxyHost), hostOf(n.GuestTLSURL())} {
 		if h != "" && net.ParseIP(h) == nil && !slices.Contains(names, h) {
 			names = append(names, h)
 		}
@@ -95,20 +97,24 @@ func RequesterValues(spec v1alpha1.MarketRequesterSpec, stateDir string) (manife
 	v := manifests.MarketRequester{StateDir: stateDir}
 	var extra []string
 	if n := spec.Network; n != nil {
-		v.CABundle = n.CaBundleRef
+		caFile, err := NetworkCAFile(stateDir, n)
+		if err != nil {
+			return v, err
+		}
+		v.CABundle = caFile
 		for _, kv := range [][2]string{
-			{"--plc-directory-url", n.PlcDirectoryUrl},
+			{"--plc-directory-url", n.PLCDirectoryURL},
 			{"--ingress-proxy-host", n.IngressProxyHost},
-			{"--relay-url", strings.Join(n.RelayUrls, ",")},
-			{"--firehose-url", strings.Join(n.FirehoseUrls, ",")},
+			{"--relay-url", strings.Join(n.RelayURLs, ",")},
+			{"--firehose-url", strings.Join(n.FirehoseURLs, ",")},
 			{"--qr-origin", n.QrOrigin},
 		} {
 			if kv[1] != "" {
 				extra = append(extra, kv[0], kv[1])
 			}
 		}
-		if n.GuestTlsUrl != "" {
-			p, err := portOf(n.GuestTlsUrl)
+		if n.GuestTLSURL() != "" {
+			p, err := portOf(n.GuestTLSURL())
 			if err != nil {
 				return manifests.MarketRequester{}, fmt.Errorf("appctl: network guestTlsUrl: %w", err)
 			}
@@ -246,22 +252,12 @@ func requesterOperatorDID(id *v1alpha1.MarketIdentity) string {
 	return ""
 }
 
-func (ctl *Controller) requesterMarketURL(ctx context.Context, ws string) string {
-	ri, err := ctl.client(ws, ExposureGVR)
-	if err != nil {
-		return ""
-	}
-	name := serviceNameFor(ComponentKindRequester, RequesterComponent) + ExposureIngressSuffix
-	u, err := ri.Get(ctx, name, metav1.GetOptions{})
-	if err != nil {
-		return ""
-	}
-	url, _, _ := unstructured.NestedString(u.Object, "status", "url")
-	return strings.TrimRight(strings.TrimSpace(url), "/")
+func (ctl *Controller) requesterMarketExposure(ctx context.Context, ws string) *commonv1.LocalObjectRef {
+	return ctl.publishedExposure(ctx, ws, serviceNameFor(ComponentKindRequester, RequesterComponent)+ExposureIngressSuffix)
 }
 
 func (ctl *Controller) requesterDesired(ctx context.Context, o v1alpha1.MarketRequester, plan accountPlan, id *v1alpha1.MarketIdentity, ws, stateRoot, pdsHandle, pdsPublicURL string,
-	ingress *v1alpha1.IngressConfig, requireIngress bool, ingressRef *v1alpha1.ComponentRef) ([]desiredComponent, error) {
+	ingress *v1alpha1.IngressConfig, requireIngress bool, ingressRef *commonv1.ObjectRef) ([]desiredComponent, error) {
 	suspend := o.Spec.Suspend
 	network := o.Spec.Network
 	ident := componentIdentity(id, o.Spec.Identity.Handle)
@@ -273,20 +269,20 @@ func (ctl *Controller) requesterDesired(ctx context.Context, o v1alpha1.MarketRe
 	local := plan.Local
 	mode, publicOrigin, oauthClientID, oauthRedirectURI, guestSSHKeysFile := requesterComponentFields(o.Spec.Options, plan.Mode)
 	requesterSpec := v1alpha1.RequesterSpec{
-		ComponentSpec:    NewComponentSpec(ComponentCRStateDir(stateRoot, ComponentKindRequester, RequesterComponent), network, suspend),
-		Identity:         ident,
-		PolicyEngineRef:  ComponentRefFor(ComponentKindPolicyEngine, PolicyEngineComponent),
-		VaultRef:         vault,
-		Hostnames:        hostnames,
-		Mode:             mode,
-		PublicOrigin:     publicOrigin,
-		MarketURL:        ctl.requesterMarketURL(ctx, ws),
-		OperatorDID:      requesterOperatorDID(id),
-		OAuthClientID:    oauthClientID,
-		OAuthRedirectURI: oauthRedirectURI,
-		GuestSSHKeysFile: guestSSHKeysFile,
-		AcceptCopies:     int32(optionInt(o.Spec.Options, "accept-copies")),
-		Comms:            o.Spec.Comms,
+		ComponentSpec:     NewComponentSpec(ComponentCRStateDir(stateRoot, ComponentKindRequester, RequesterComponent), network, suspend),
+		Identity:          ident,
+		PolicyEngineRef:   ComponentRefFor(ComponentKindPolicyEngine, PolicyEngineComponent),
+		VaultRef:          vault,
+		Hostnames:         hostnames,
+		Mode:              mode,
+		PublicOrigin:      publicOrigin,
+		MarketExposureRef: ctl.requesterMarketExposure(ctx, ws),
+		OperatorDID:       requesterOperatorDID(id),
+		OAuthClientID:     oauthClientID,
+		OAuthRedirectURI:  oauthRedirectURI,
+		GuestSSHKeysFile:  guestSSHKeysFile,
+		AcceptCopies:      int32(optionInt(o.Spec.Options, "accept-copies")),
+		Comms:             o.Spec.Comms,
 	}
 	out := []desiredComponent{policyEngineDesired(suspend)}
 	if local {
@@ -296,10 +292,11 @@ func (ctl *Controller) requesterDesired(ctx context.Context, o v1alpha1.MarketRe
 		}
 		out = append(out, desiredComponent{Kind: ComponentKindPds, Name: PdsComponent, Spec: pdsSpec})
 		requesterSpec.PdsRef = ComponentRefFor(ComponentKindPds, PdsComponent)
-		requesterSpec.PDSAccessTokenPath = pdsAccessTokenPath("requester")
+		requesterSpec.PDSAccessToken = pdsAccessTokenFor("requester")
 	} else {
 		requesterSpec.PdsRef = plan.PdsRef
-		requesterSpec.PDSAccessTokenPath = plan.accessTokenPath()
+		requesterSpec.PdsDID = plan.PdsDID
+		requesterSpec.PDSAccessToken = plan.accessToken()
 	}
 	out = append(out, desiredComponent{Kind: ComponentKindRequester, Name: RequesterComponent, Spec: requesterSpec})
 	out = append(out, httpServiceExposures(ws, ComponentKindRequester, RequesterComponent, "http", network, hostnames, false, true, suspend)...)
@@ -325,7 +322,7 @@ func (ctl *Controller) reconcileRequesterAccount(ctx context.Context, u *unstruc
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for its existing-account MarketIdentity to report a did"
 		return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
 	}
-	if plan.Mode == v1alpha1.MarketIdentityModePdsAccount && strings.TrimSpace(id.Status.PdsUrl) == "" {
+	if plan.Mode == v1alpha1.MarketIdentityModePdsAccount && strings.TrimSpace(id.Status.PdsURL) == "" {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, "the existing-account MarketIdentity reports no pdsUrl; it fails closed"
 		return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
 	}
@@ -347,7 +344,7 @@ func (ctl *Controller) reconcileRequesterAccount(ctx context.Context, u *unstruc
 	if err := ctl.pruneDesired(ctx, owner, desired); err != nil {
 		return err
 	}
-	ctl.ensureAccountRepo(ctx, ctl.c.workspace(), RequesterIdentity, plan, id.Status.Did, id.Status.PdsUrl)
+	ctl.ensureAccountRepo(ctx, ctl.c.workspace(), RequesterIdentity, plan, id.Status.Did, id.Status.PdsURL)
 	snap, err := ctl.componentSnapshot(ctx, owner)
 	if err != nil {
 		return err
@@ -553,11 +550,11 @@ func (ctl *Controller) reconcileRequester(ctx context.Context, u *unstructured.U
 			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for the requester's app Pds endpoint"
 			return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
 		}
-		caFile := ""
+		caPEM := ""
 		if o.Spec.Network != nil {
-			caFile = o.Spec.Network.CaBundleRef
+			caPEM = o.Spec.Network.CABundle
 		}
-		sess, err := ctl.ensurePdsAccountInVault(ctx, RequesterVaultServer, RequesterVaultClient, pdsSessionPath("requester"), endpoint, caFile, pdsAccountHandle)
+		sess, err := ctl.ensurePdsAccountInVault(ctx, RequesterVaultServer, RequesterVaultClient, pdsSessionPath("requester"), endpoint, caPEM, pdsAccountHandle)
 		if err != nil {
 			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "its app Pds account: "+err.Error()
 			return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)

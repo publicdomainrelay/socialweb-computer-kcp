@@ -17,6 +17,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/ref"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
 	bundledactions "github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/bundled-actions"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 const (
@@ -35,11 +37,11 @@ type PolicyStrongRef struct {
 	CID string
 }
 
-func (r *PolicyStrongRef) api() *policyv1alpha1.PolicyStrongRef {
+func (r *PolicyStrongRef) api() *commonv1.StrongRef {
 	if r == nil || r.URI == "" {
 		return nil
 	}
-	return &policyv1alpha1.PolicyStrongRef{URI: r.URI, CID: r.CID}
+	return &commonv1.StrongRef{URI: r.URI, CID: r.CID}
 }
 
 func (r PolicyStrongRef) market() market.RecordRef {

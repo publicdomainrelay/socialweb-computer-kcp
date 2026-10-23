@@ -17,7 +17,9 @@ import (
 	"github.com/bluesky-social/indigo/atproto/atcrypto"
 	"github.com/bluesky-social/indigo/atproto/syntax"
 
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 )
 
@@ -59,7 +61,7 @@ type RepoBinding struct {
 
 	RemotePDS *pdsv1alpha1.RemotePDS
 
-	AuthRef string
+	AuthRef *commonv1.SecretRef
 
 	SessionRef string
 }
@@ -73,7 +75,6 @@ func (b RepoBinding) normalized() RepoBinding {
 	b.Name = strings.TrimSpace(b.Name)
 	b.Endpoint = strings.TrimSpace(b.Endpoint)
 	b.DID = strings.TrimSpace(b.DID)
-	b.AuthRef = strings.TrimSpace(b.AuthRef)
 	b.SessionRef = strings.TrimSpace(b.SessionRef)
 	return b
 }
@@ -235,13 +236,14 @@ func (r *RepoResolver) resolveRemote(ctx context.Context, binding RepoBinding) (
 	if tokenRef == "" && refreshRef == "" {
 		tokenRef = strings.TrimSpace(spec.Auth.AccountRef)
 	}
-	if tokenRef == "" && refreshRef == "" && binding.AuthRef != "" {
-		tokenRef = binding.AuthRef
+	key := ""
+	if tokenRef == "" && refreshRef == "" && binding.AuthRef != nil {
+		tokenRef, key = SecretRefString(binding.AuthRef), binding.AuthRef.Key
 	}
 	if tokenRef == "" && refreshRef == "" {
 		return nil, nil, nil, fmt.Errorf("%w: RemotePDS %s has no auth ref", ErrAuthenticationRequired, name)
 	}
-	tokens, err := r.tokenSource(ctx, tokenRef, refreshRef)
+	tokens, err := r.tokenSource(ctx, tokenRef, refreshRef, key)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -309,21 +311,38 @@ func (r *RepoResolver) resolveAnonymousRemote(ctx context.Context, binding RepoB
 }
 
 func (r *RepoResolver) bindingAuth(ctx context.Context, binding RepoBinding, tokens TokenSource, dpop DPoPSource) (TokenSource, DPoPSource, error) {
-	ref := binding.AuthRef
-	if ref == "" {
-		ref = binding.SessionRef
+	ref, key := binding.SessionRef, ""
+	if binding.AuthRef != nil {
+		ref, key = SecretRefString(binding.AuthRef), binding.AuthRef.Key
 	}
 	if ref == "" {
 		return tokens, dpop, nil
 	}
-	token, err := r.tokenSource(ctx, ref, "")
+	token, err := r.tokenSource(ctx, ref, "", key)
 	if err != nil {
 		return nil, nil, err
 	}
 	return token, dpop, nil
 }
 
-func (r *RepoResolver) tokenSource(ctx context.Context, accessRef, refreshRef string) (TokenSource, error) {
+func SecretRefString(ref *commonv1.SecretRef) string {
+	if ref == nil {
+		return ""
+	}
+	path := strings.Trim(strings.TrimSpace(ref.Path), "/")
+	if mount := strings.Trim(strings.TrimSpace(ref.Mount), "/"); mount != "" {
+		path = mount + "/" + path
+	}
+	if path == "" {
+		return ""
+	}
+	if server := v1alpha1.VaultServer(ref.Vault, ""); server != "" {
+		return "openbao:" + server + ":" + path
+	}
+	return "openbao:" + path
+}
+
+func (r *RepoResolver) tokenSource(ctx context.Context, accessRef, refreshRef, key string) (TokenSource, error) {
 	if r.Secrets == nil {
 		return nil, fmt.Errorf("%w: no secret resolver is configured", ErrInvalidConfig)
 	}
@@ -333,7 +352,11 @@ func (r *RepoResolver) tokenSource(ctx context.Context, accessRef, refreshRef st
 			if err != nil {
 				return "", fmt.Errorf("pdsclient: resolving the access token ref %s: %w", ref, err)
 			}
-			if token := firstString(data, "accessJwt", "accessToken", "access_token", "jwt", "token", "value"); token != "" {
+			keys := []string{"accessJwt", "accessToken", "access_token", "jwt", "token", "value"}
+			if key != "" {
+				keys = []string{key}
+			}
+			if token := firstString(data, keys...); token != "" {
 				return token, nil
 			}
 		}
@@ -422,7 +445,7 @@ func AuthSources(auth pdsv1alpha1.RemotePDSAuth, secrets SecretResolver) (TokenS
 	resolver := &RepoResolver{Secrets: secrets}
 	var tokens TokenSource
 	if accessRef != "" || refreshRef != "" {
-		token, err := resolver.tokenSource(context.Background(), accessRef, refreshRef)
+		token, err := resolver.tokenSource(context.Background(), accessRef, refreshRef, "")
 		if err != nil {
 			return nil, nil, err
 		}

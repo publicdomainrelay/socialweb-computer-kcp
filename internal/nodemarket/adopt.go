@@ -26,9 +26,9 @@ func (h *Host) Adopt(claim v1alpha1.NodeClaim) error {
 	if err := h.opts.Validate(); err != nil {
 		return fmt.Errorf("nodemarket: node %s of %s: %w", h.opts.NodeName, h.opts.Cluster, err)
 	}
-	if claim.Name != h.opts.NodeName || claim.Spec.Cluster != h.opts.Cluster || !Adoptable(claim) {
+	if claim.Name != h.opts.NodeName || claim.Spec.ClusterRef.Name != h.opts.Cluster || !Adoptable(claim) {
 		return fmt.Errorf("%w (claim %s of cluster %q, phase %q, deleting %v; this host is node %s of %s)",
-			ErrNotAdoptable, claim.Name, claim.Spec.Cluster, claim.Status.Phase,
+			ErrNotAdoptable, claim.Name, claim.Spec.ClusterRef.Name, claim.Status.Phase,
 			claim.DeletionTimestamp != nil, h.opts.NodeName, h.opts.Cluster)
 	}
 	h.provisioned = true

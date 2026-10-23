@@ -17,6 +17,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestidentity"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/statesync"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 const (
@@ -125,7 +127,7 @@ func (s *Service) validateBid(ctx context.Context, bid *v1alpha1.Bid, now time.T
 	if s.records == nil || s.attestation == nil || s.did == "" {
 		return nil
 	}
-	resolved, err := s.records.Resolve(ctx, market.RecordRef{URI: bid.Spec.Rfp.Uri, CID: bid.Spec.Rfp.Cid})
+	resolved, err := s.records.Resolve(ctx, market.RecordRef{URI: bid.Spec.Rfp.URI, CID: bid.Spec.Rfp.CID})
 	if err != nil {
 		if ctx.Err() == nil {
 			s.log.Warn("resolving the RFP of a bid failed", "bid", bid.Name, "err", err)
@@ -151,7 +153,7 @@ func (s *Service) validateBid(ctx context.Context, bid *v1alpha1.Bid, now time.T
 		SubjectDid:       s.did,
 		CounterpartyDid:  bid.Spec.Requester,
 		RootRequesterDid: bid.Spec.Requester,
-		RFP:              &PolicyStrongRef{URI: bid.Spec.Rfp.Uri, CID: bid.Spec.Rfp.Cid},
+		RFP:              &PolicyStrongRef{URI: bid.Spec.Rfp.URI, CID: bid.Spec.Rfp.CID},
 		Mode:             PolicyModeFull,
 	})
 	if !decision.Allow {
@@ -162,9 +164,9 @@ func (s *Service) validateBid(ctx context.Context, bid *v1alpha1.Bid, now time.T
 }
 
 func (s *Service) applyBidSpec(ctx context.Context, bid *v1alpha1.Bid, rfp *market.RFP, now time.Time) {
-	attached := make([]v1alpha1.BidRecordRef, 0, len(rfp.Policies))
+	attached := make([]commonv1.StrongRef, 0, len(rfp.Policies))
 	for _, policy := range rfp.Policies {
-		attached = append(attached, v1alpha1.BidRecordRef{Uri: policy.URI, Cid: policy.CID})
+		attached = append(attached, commonv1.StrongRef{URI: policy.URI, CID: policy.CID})
 	}
 	spec := bid.Spec
 	spec.PayloadNsid = market.NSIDFromURI(rfp.Payload.URI)
@@ -268,11 +270,11 @@ func (s *Service) recordPublishFailure(ctx context.Context, bid *v1alpha1.Bid, e
 
 func (s *Service) recordPublishedBid(ctx context.Context, bid *v1alpha1.Bid, ref market.StrongRef, now time.Time) bool {
 	status := cloneBidStatus(bid.Status)
-	if status.Phase == v1alpha1.BidPhasePublished && status.Bid != nil && status.Bid.Uri == ref.URI && status.Bid.Cid == ref.CID && status.LastError == "" {
+	if status.Phase == v1alpha1.BidPhasePublished && status.Bid != nil && status.Bid.URI == ref.URI && status.Bid.CID == ref.CID && status.LastError == "" {
 		return false
 	}
 	status.Phase = v1alpha1.BidPhasePublished
-	status.Bid = &v1alpha1.BidRecordRef{Uri: ref.URI, Cid: ref.CID}
+	status.Bid = &commonv1.StrongRef{URI: ref.URI, CID: ref.CID}
 	if status.Timings.PublishedAt == "" {
 		status.Timings.PublishedAt = now.Format(time.RFC3339)
 	}
@@ -313,7 +315,7 @@ func (s *Service) writeBidRecord(ctx context.Context, bid *v1alpha1.Bid, now tim
 		return market.StrongRef{}, fmt.Errorf("writing the bid payload: %w", err)
 	}
 	record, err := market.BuildBid(market.BidOptions{
-		RFP:          market.RecordRef{URI: bid.Spec.Rfp.Uri, CID: bid.Spec.Rfp.Cid},
+		RFP:          market.RecordRef{URI: bid.Spec.Rfp.URI, CID: bid.Spec.Rfp.CID},
 		Config:       &market.RecordRef{URI: configRef.URI, CID: configRef.CID},
 		Payload:      market.RecordRef{URI: payload.URI, CID: payload.CID},
 		SubmitAccept: s.publicURL(),
@@ -330,7 +332,7 @@ func (s *Service) writeBidRecord(ctx context.Context, bid *v1alpha1.Bid, now tim
 	if err != nil {
 		return market.StrongRef{}, fmt.Errorf("writing the bid: %w", err)
 	}
-	s.log.Info("the bidder published a bid", "rfp", bid.Spec.Rfp.Uri, "bid", ref.URI)
+	s.log.Info("the bidder published a bid", "rfp", bid.Spec.Rfp.URI, "bid", ref.URI)
 	return ref, nil
 }
 
@@ -382,8 +384,8 @@ func (s *Service) existingBidRecord(ctx context.Context, bid *v1alpha1.Bid) (mar
 	if s.records == nil || s.did == "" {
 		return market.StrongRef{}, false, nil
 	}
-	if bid.Status.Bid != nil && bid.Status.Bid.Uri != "" {
-		rec, err := s.records.Resolve(ctx, market.RecordRef{URI: bid.Status.Bid.Uri, CID: bid.Status.Bid.Cid})
+	if bid.Status.Bid != nil && bid.Status.Bid.URI != "" {
+		rec, err := s.records.Resolve(ctx, market.RecordRef{URI: bid.Status.Bid.URI, CID: bid.Status.Bid.CID})
 		switch {
 		case err == nil:
 			return market.NewStrongRef(rec.URI, rec.CID), true, nil
@@ -403,10 +405,10 @@ func (s *Service) existingBidRecord(ctx context.Context, bid *v1alpha1.Bid) (mar
 }
 
 func (s *Service) rfpForBid(ctx context.Context, bid *v1alpha1.Bid) *market.RFP {
-	if s.records == nil || bid.Spec.Rfp.Uri == "" {
+	if s.records == nil || bid.Spec.Rfp.URI == "" {
 		return nil
 	}
-	resolved, err := s.records.Resolve(ctx, market.RecordRef{URI: bid.Spec.Rfp.Uri, CID: bid.Spec.Rfp.Cid})
+	resolved, err := s.records.Resolve(ctx, market.RecordRef{URI: bid.Spec.Rfp.URI, CID: bid.Spec.Rfp.CID})
 	if err != nil {
 		return nil
 	}
@@ -441,7 +443,7 @@ func (s *Service) markBidReleasing(ctx context.Context, bid *v1alpha1.Bid, info 
 	now := s.cfg.Now().UTC()
 	status := cloneBidStatus(bid.Status)
 	status.Terminated = &v1alpha1.BidTerminated{
-		ReceiptUri:   info.receiptURI,
+		ReceiptURI:   info.receiptURI,
 		ReceiptCid:   info.receiptCID,
 		AcceptAuthor: info.acceptAuthor,
 		Reason:       "deleted_on_request",
@@ -451,24 +453,24 @@ func (s *Service) markBidReleasing(ctx context.Context, bid *v1alpha1.Bid, info 
 	s.applyBidStatus(ctx, bid, status)
 }
 
-func (s *Service) markBidReleaseRequested(ctx context.Context, bid *v1alpha1.Bid, info contractInfo, request, event *v1alpha1.RecordRef, at string) {
+func (s *Service) markBidReleaseRequested(ctx context.Context, bid *v1alpha1.Bid, info contractInfo, request, event *commonv1.StrongRef, at string) {
 	if bid == nil {
 		return
 	}
 	status := cloneBidStatus(bid.Status)
 	terminated := &v1alpha1.BidTerminated{
-		ReceiptUri:   info.receiptURI,
+		ReceiptURI:   info.receiptURI,
 		ReceiptCid:   info.receiptCID,
 		AcceptAuthor: info.acceptAuthor,
 		Reason:       "deleted_on_request",
 		At:           at,
 	}
 	if request != nil {
-		terminated.PayloadUri = request.URI
+		terminated.PayloadURI = request.URI
 		terminated.PayloadCid = request.CID
 	}
 	if event != nil {
-		terminated.EventUri = event.URI
+		terminated.EventURI = event.URI
 		terminated.EventCid = event.CID
 	}
 	status.Terminated = terminated
@@ -491,14 +493,14 @@ func (s *Service) finishRelease(ctx context.Context, bid *v1alpha1.Bid, now time
 	info := contractInfo{
 		bidName:      bid.Name,
 		computeVM:    bid.Status.ComputeVM,
-		receiptURI:   terminated.ReceiptUri,
+		receiptURI:   terminated.ReceiptURI,
 		receiptCID:   terminated.ReceiptCid,
 		acceptAuthor: terminated.AcceptAuthor,
 	}
 	if bid.Status.Accept != nil {
-		info.acceptURI, info.acceptCID = bid.Status.Accept.Uri, bid.Status.Accept.Cid
+		info.acceptURI, info.acceptCID = bid.Status.Accept.URI, bid.Status.Accept.CID
 	}
-	request := &v1alpha1.RecordRef{URI: terminated.PayloadUri, CID: terminated.PayloadCid}
+	request := &commonv1.StrongRef{URI: terminated.PayloadURI, CID: terminated.PayloadCid}
 	if request.URI == "" {
 		request = nil
 	}
@@ -547,7 +549,7 @@ func (s *Service) completeBidRelease(ctx context.Context, bid *v1alpha1.Bid, inf
 	status.Timings.FinishedAt = now.Format(time.RFC3339)
 	if status.Terminated == nil {
 		status.Terminated = &v1alpha1.BidTerminated{
-			ReceiptUri:   info.receiptURI,
+			ReceiptURI:   info.receiptURI,
 			ReceiptCid:   info.receiptCID,
 			AcceptAuthor: info.acceptAuthor,
 			Reason:       "deleted_on_request",
@@ -555,9 +557,9 @@ func (s *Service) completeBidRelease(ctx context.Context, bid *v1alpha1.Bid, inf
 		}
 	}
 	if acked != nil {
-		status.Terminated.PayloadUri = acked.PayloadUri
+		status.Terminated.PayloadURI = acked.PayloadURI
 		status.Terminated.PayloadCid = acked.PayloadCid
-		status.Terminated.EventUri = acked.EventUri
+		status.Terminated.EventURI = acked.EventURI
 		status.Terminated.EventCid = acked.EventCid
 	}
 	setBidCondition(&status, bid.Generation, BidConditionReleasing, metav1.ConditionFalse, "Released", "the guest is released")
@@ -624,9 +626,9 @@ func terminationOfStateSync(u *unstructured.Unstructured) (*v1alpha1.ComputeVMTe
 	return &v1alpha1.ComputeVMTermination{
 		Reason:     "deleted_on_request",
 		ObservedAt: at,
-		PayloadUri: payloadURI,
+		PayloadURI: payloadURI,
 		PayloadCid: payloadCID,
-		EventUri:   eventURI,
+		EventURI:   eventURI,
 		EventCid:   eventCID,
 	}, true
 }

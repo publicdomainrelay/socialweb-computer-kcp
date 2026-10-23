@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 type AtprotoRecord struct {
@@ -22,7 +24,7 @@ type AtprotoRecordList struct {
 }
 
 type AtprotoRecordSpec struct {
-	RepoRef *RepoRef `json:"repoRef,omitempty"`
+	RepoRef *commonv1.ObjectRef `json:"repoRef,omitempty"`
 
 	Repo string `json:"repo,omitempty"`
 
@@ -60,7 +62,7 @@ type AtprotoRecordStatus struct {
 
 	Did string `json:"did,omitempty"`
 
-	Uri string `json:"uri,omitempty"`
+	URI string `json:"uri,omitempty"`
 
 	Cid string `json:"cid,omitempty"`
 

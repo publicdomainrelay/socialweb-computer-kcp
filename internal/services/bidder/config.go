@@ -11,7 +11,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
@@ -24,6 +23,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestseed"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 const Kind = "Bidder"
@@ -129,15 +130,15 @@ type Config struct {
 
 	Identity v1alpha1.ComponentIdentity
 
-	IdentityRef *v1alpha1.ComponentRef
+	IdentityRef *commonv1.ObjectRef
 
-	PDSRef *v1alpha1.ComponentRef
+	PDSRef *commonv1.ObjectRef
 
-	VaultRef *v1alpha1.ComponentRef
+	VaultRef *commonv1.ObjectRef
 
-	PolicyEngineRef *v1alpha1.ComponentRef
+	PolicyEngineRef *commonv1.ObjectRef
 
-	GuestControlRef *v1alpha1.ComponentRef
+	GuestControlRef *commonv1.ObjectRef
 
 	Handle string
 
@@ -170,6 +171,8 @@ type Config struct {
 	BidderDIDs []string
 
 	MarketURL string
+
+	MarketExposureRef *commonv1.LocalObjectRef
 
 	IdentityMode string
 
@@ -245,14 +248,14 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		IdentityRef:       bidderSpec.PdsRef,
 		PDSRef:            bidderSpec.PdsRef,
 		VaultRef:          bidderSpec.VaultRef,
-		PDSAccessTokenRef: accessTokenRef(bidderSpec.PDSAccessTokenPath, bidderSpec.VaultRef),
+		PDSAccessTokenRef: accessTokenRef(bidderSpec.PDSAccessToken, bidderSpec.VaultRef),
 		PolicyEngineRef:   bidderSpec.PolicyEngineRef,
-		GuestControlRef:   &v1alpha1.ComponentRef{Kind: "GuestControlPlane", Name: DefaultGuestControlName},
+		GuestControlRef:   &commonv1.ObjectRef{Kind: "GuestControlPlane", Name: DefaultGuestControlName},
 		ServeHost:         DefaultServeHost,
 		Policy:            bidderSpec.Policy,
 		PolicyArgs:        policyArgs,
 		BidderDIDs:        append([]string(nil), bidderSpec.BidderDIDs...),
-		MarketURL:         strings.TrimRight(strings.TrimSpace(bidderSpec.MarketURL), "/"),
+		MarketExposureRef: bidderSpec.MarketExposureRef,
 		IdentityMode:      strings.TrimSpace(bidderSpec.Mode),
 		Comms:             bidderSpec.Comms,
 		PolicyTimeout:     DefaultPolicyTimeout,
@@ -284,17 +287,6 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		cfg.ServiceAuth.Hostname = strings.TrimSpace(bidderSpec.ServiceAuth.Hostname)
 		cfg.ServiceAuth.AudienceDIDs = append([]string(nil), bidderSpec.ServiceAuth.Audience...)
 	}
-	if cfg.ServiceAuth.Hostname != "" && cfg.MarketURL != "" {
-		override := cfg.ServiceAuth.Hostname
-		if !strings.Contains(override, "://") {
-			override = "//" + override
-		}
-		got := strings.ToLower(hostPortOf(override))
-		want := strings.ToLower(hostPortOf(cfg.MarketURL))
-		if got == "" || want == "" || got != want {
-			return Config{}, fmt.Errorf("bidder: serviceAuth.hostname %q must match the market URL host %q; the offering and the verifier audience have one source", cfg.ServiceAuth.Hostname, want)
-		}
-	}
 	if bidderSpec.Identity != nil {
 		cfg.Identity = *bidderSpec.Identity
 		cfg.IdentityRef = bidderSpec.Identity.MarketIdentityRef
@@ -306,14 +298,14 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		if hosts := bidderNetworkResolver(cfg.Network, cfg.Deps.Hosts); hosts != nil {
 			cfg.Deps.Hosts = hosts
 		}
-		if strings.TrimSpace(cfg.Network.CaBundleRef) != "" {
-			tlsConfig, err := bidderNetworkTLS(cfg.Network.CaBundleRef)
+		if strings.TrimSpace(cfg.Network.CABundle) != "" {
+			tlsConfig, err := bidderNetworkTLS(cfg.Network.CABundle)
 			if err != nil {
 				return Config{}, err
 			}
 			cfg.Deps.TLS = tlsConfig
 			if deps.Log != nil {
-				deps.Log.Info("the bidder trusts the network CA", "bundle", cfg.Network.CaBundleRef)
+				deps.Log.Info("the bidder trusts the network CA")
 			}
 		}
 		if cfg.Network.IngressProxyHost != "" {
@@ -321,7 +313,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 				IngressProxyHost: cfg.Network.IngressProxyHost,
 				ConnectHost:      cfg.Network.IngressProxyHost,
 				DialAddress:      ingressConnectHost(cfg.Network),
-				PublicURLBase:    cfg.Network.GuestTlsUrl,
+				PublicURLBase:    cfg.Network.GuestTLSURL(),
 				Label:            "market",
 			}
 		}
@@ -351,15 +343,15 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		}
 		cfg.Provider.StopGraceSeconds = bidderSpec.Kcp.StopGraceSeconds
 	}
-	cfg.Provider.GuestVaultServer = bidderSpec.VaultRef.VaultServer(cfg.Provider.GuestVaultServer)
+	cfg.Provider.GuestVaultServer = v1alpha1.VaultServer(bidderSpec.VaultRef, cfg.Provider.GuestVaultServer)
 	if bidderSpec.Storage != nil && bidderSpec.Storage.DataDir != "" {
 		cfg.StateDir = bidderSpec.Storage.DataDir
 	}
 	if bidderSpec.MaxConcurrentGuests > 0 {
 		cfg.Provider.MaxConcurrentGuests = bidderSpec.MaxConcurrentGuests
 	}
-	cfg.Provider.GuestTLSURL = cfg.Network.GuestTlsUrl
-	if port := portOf(cfg.Network.GuestTlsUrl); port > 0 {
+	cfg.Provider.GuestTLSURL = cfg.Network.GuestTLSURL()
+	if port := portOf(cfg.Network.GuestTLSURL()); port > 0 {
 		cfg.Provider.GuestTLSPort = port
 	}
 	if cfg.Workspace == "" {
@@ -469,8 +461,8 @@ func bidderNetworkResolver(n v1alpha1.MarketNetworkValue, fallback networkdial.R
 	for _, host := range n.Hosts {
 		entries = append(entries, networkdial.Host{Name: host.Name, Address: host.Address})
 	}
-	if name := hostnameOnly(n.GuestTlsUrl); name != "" {
-		if address := bidderHostWithPort(n.GuestTlsUrl, n.Hosts); address != "" {
+	if name := hostnameOnly(n.GuestTLSURL()); name != "" {
+		if address := bidderHostWithPort(n.GuestTLSURL(), n.Hosts); address != "" {
 			entries = append(entries, networkdial.Host{Name: name, Address: address})
 		}
 	}
@@ -512,14 +504,10 @@ func bidderHostWithPort(raw string, hosts []v1alpha1.NetworkHost) string {
 	return ""
 }
 
-func bidderNetworkTLS(path string) (*tls.Config, error) {
-	data, err := os.ReadFile(strings.TrimSpace(path))
-	if err != nil {
-		return nil, fmt.Errorf("bidder: the network CA bundle: %w", err)
-	}
+func bidderNetworkTLS(bundle string) (*tls.Config, error) {
 	pool := x509.NewCertPool()
-	if !pool.AppendCertsFromPEM(data) {
-		return nil, fmt.Errorf("bidder: the network CA bundle %s has no certificates", path)
+	if !pool.AppendCertsFromPEM([]byte(strings.TrimSpace(bundle))) {
+		return nil, errors.New("bidder: the network CA bundle has no certificates")
 	}
 	return &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}, nil
 }
@@ -537,28 +525,37 @@ func ingressConnectHost(n v1alpha1.MarketNetworkValue) string {
 	return n.IngressProxyHost
 }
 
-func accessTokenRef(raw string, vaultRef *v1alpha1.ComponentRef) *component.CredentialRef {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
+func accessTokenRef(secret *commonv1.SecretRef, vaultRef *commonv1.ObjectRef) *component.CredentialRef {
+	if secret == nil || strings.Trim(strings.TrimSpace(secret.Path), "/") == "" {
 		return nil
 	}
-	ref := &component.CredentialRef{Keys: []string{"session", "accessJwt", "accessToken", "access_token", "token", "value",
-		"dpop_privatekey_multibase", "dpopPrivateKeyMultibase"}}
-	switch {
-	case strings.HasPrefix(raw, "openbao:"), strings.HasPrefix(raw, "vault:"):
-		raw = strings.TrimPrefix(strings.TrimPrefix(raw, "openbao:"), "vault:")
-		ref.Path = strings.Trim(raw, "/")
-		if vaultRef != nil {
-			ref.Server = strings.TrimSpace(vaultRef.Name)
-		}
-	case strings.HasPrefix(raw, "file:"):
-		ref.Server = "file:"
-		ref.Path = strings.TrimPrefix(raw, "file:")
-	default:
-		ref.Mount = "file"
-		ref.Path = raw
+	ref := &component.CredentialRef{Mount: strings.Trim(strings.TrimSpace(secret.Mount), "/"), Path: strings.Trim(strings.TrimSpace(secret.Path), "/"),
+		Keys: []string{"session", "accessJwt", "accessToken", "access_token", "token", "value",
+			"dpop_privatekey_multibase", "dpopPrivateKeyMultibase"}}
+	if key := strings.TrimSpace(secret.Key); key != "" {
+		ref.Keys = []string{key}
+	}
+	ref.Server = v1alpha1.VaultServer(secret.Vault, "")
+	if ref.Server == "" && vaultRef != nil {
+		ref.Server = strings.TrimSpace(vaultRef.Name)
 	}
 	return ref
+}
+
+func (c Config) checkServiceAuthHost() error {
+	if c.ServiceAuth.Hostname == "" || c.MarketURL == "" {
+		return nil
+	}
+	override := c.ServiceAuth.Hostname
+	if !strings.Contains(override, "://") {
+		override = "//" + override
+	}
+	got := strings.ToLower(hostPortOf(override))
+	want := strings.ToLower(hostPortOf(c.MarketURL))
+	if got == "" || want == "" || got != want {
+		return fmt.Errorf("bidder: serviceAuth.hostname %q must match the market URL host %q; the offering and the verifier audience have one source", c.ServiceAuth.Hostname, want)
+	}
+	return nil
 }
 
 func parsePolicyArgs(raw string) (map[string]string, error) {
@@ -751,7 +748,7 @@ func (c *Config) defaults() {
 		c.VaultClient = "bidder"
 	}
 	if c.GuestControlRef == nil {
-		c.GuestControlRef = &v1alpha1.ComponentRef{Kind: "GuestControlPlane", Name: DefaultGuestControlName}
+		c.GuestControlRef = &commonv1.ObjectRef{Kind: "GuestControlPlane", Name: DefaultGuestControlName}
 	}
 	if c.Now == nil {
 		c.Now = time.Now

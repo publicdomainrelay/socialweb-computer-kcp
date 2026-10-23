@@ -16,6 +16,8 @@ import (
 	"k8s.io/client-go/dynamic"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 func (c *Controller) Mirror(ctx context.Context, workspace string) error {
@@ -54,10 +56,9 @@ func (c *Controller) mirrorPortLeases(ctx context.Context, dyn dynamic.Interface
 				Finalizers: []string{PortLeaseFinalizer},
 			},
 			Spec: v1alpha1.PortLeaseSpec{
-				Workspace: ws,
-				Cluster:   cluster,
-				Purpose:   purpose,
-				Port:      int32(lease.Port),
+				ClusterRef: commonv1.ObjectRef{Kind: "Cluster", Name: cluster, Workspace: ws},
+				Purpose:    purpose,
+				Port:       int32(lease.Port),
 			},
 		}
 		if err := createMirror(ctx, dyn, PortLeaseGVR, obj, key); err != nil {
@@ -96,10 +97,9 @@ func (c *Controller) mirrorSubnetLeases(ctx context.Context, dyn dynamic.Interfa
 				Finalizers: []string{SubnetLeaseFinalizer},
 			},
 			Spec: v1alpha1.SubnetLeaseSpec{
-				Workspace: ws,
-				Cluster:   cluster,
-				Purpose:   purpose,
-				Prefix:    lease.Block.Masked().String(),
+				ClusterRef: commonv1.ObjectRef{Kind: "Cluster", Name: cluster, Workspace: ws},
+				Purpose:    purpose,
+				Prefix:     lease.Block.Masked().String(),
 			},
 		}
 		if err := createMirror(ctx, dyn, SubnetLeaseGVR, obj, key); err != nil {
@@ -133,7 +133,7 @@ func portLeaseKeys(ctx context.Context, dyn dynamic.Interface) (map[string]bool,
 		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(list.Items[i].Object, &lease); err != nil {
 			continue
 		}
-		keys[leaseKey(lease.Spec.Workspace, lease.Spec.Cluster, lease.Spec.Purpose, list.Items[i].GetName())] = true
+		keys[leaseKey(lease.Spec.ClusterRef.Workspace, lease.Spec.ClusterRef.Name, lease.Spec.Purpose, list.Items[i].GetName())] = true
 	}
 	return keys, nil
 }
@@ -149,7 +149,7 @@ func subnetLeaseKeys(ctx context.Context, dyn dynamic.Interface) (map[string]boo
 		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(list.Items[i].Object, &lease); err != nil {
 			continue
 		}
-		keys[leaseKey(lease.Spec.Workspace, lease.Spec.Cluster, lease.Spec.Purpose, list.Items[i].GetName())] = true
+		keys[leaseKey(lease.Spec.ClusterRef.Workspace, lease.Spec.ClusterRef.Name, lease.Spec.Purpose, list.Items[i].GetName())] = true
 	}
 	return keys, nil
 }

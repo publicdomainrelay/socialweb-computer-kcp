@@ -27,6 +27,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/oauthcallback"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 const (
@@ -295,7 +297,7 @@ func (s *Service) applyMarketEvent(ctx context.Context, uri, cid string, record 
 		return errMarketEventForbidden
 	}
 	if found && vm != nil && vm.UID != "" {
-		request := &v1alpha1.RecordRef{URI: event.Payload.URI, CID: event.Payload.CID}
+		request := &commonv1.StrongRef{URI: event.Payload.URI, CID: event.Payload.CID}
 		if err := s.ensureInboundTerminationSync(ctx, vm, request, issuer, uri, cid, record); err != nil {
 			return fmt.Errorf("the termination intent could not be recorded: %w", err)
 		}
@@ -399,7 +401,7 @@ func (s *Service) enqueueBid(ctx context.Context, rfpURI, rfpCID, issuer string)
 	bid := &v1alpha1.Bid{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
 		Spec: v1alpha1.BidSpec{
-			Rfp:       v1alpha1.BidRecordRef{Uri: rfpURI, Cid: rfpCID},
+			Rfp:       commonv1.StrongRef{URI: rfpURI, CID: rfpCID},
 			Requester: issuer,
 			ExpiresAt: now.Add(s.cfg.bidTTL()).Format(time.RFC3339),
 		},
@@ -737,13 +739,13 @@ func (s *Service) bidForAccept(ctx context.Context, accept *market.Accept) (*v1a
 	rkey := lastSegment(accept.Bid.URI)
 	for i := range bids {
 		bid := &bids[i]
-		if bid.Spec.Rfp.Uri != accept.RFP.URI {
+		if bid.Spec.Rfp.URI != accept.RFP.URI {
 			continue
 		}
 		if bid.Name != rkey {
 			continue
 		}
-		if bid.Status.Bid != nil && bid.Status.Bid.Uri != "" && bid.Status.Bid.Uri != accept.Bid.URI {
+		if bid.Status.Bid != nil && bid.Status.Bid.URI != "" && bid.Status.Bid.URI != accept.Bid.URI {
 			continue
 		}
 		return bid, nil
@@ -775,12 +777,12 @@ func (s *Service) localContractForReceipt(ctx context.Context, receiptURI string
 	for i := range list {
 		vm := &list[i]
 		contract := vm.Spec.Contract
-		if contract == nil || contract.ReceiptUri != receiptURI {
+		if contract == nil || contract.Receipt.URI != receiptURI {
 			continue
 		}
-		info := contractInfo{computeVM: vm.Name, receiptURI: contract.ReceiptUri, receiptCID: contract.ReceiptCid,
-			acceptURI: contract.AcceptUri, acceptCID: contract.AcceptCid, acceptAuthor: vm.Spec.Requester.Did,
-			bidName: cached.bidName, submitEventURL: contract.SubmitEventUrl}
+		info := contractInfo{computeVM: vm.Name, receiptURI: contract.Receipt.URI, receiptCID: contract.Receipt.CID,
+			acceptURI: contract.Accept.URI, acceptCID: contract.Accept.CID, acceptAuthor: vm.Spec.Requester.Did,
+			bidName: cached.bidName, submitEventURL: contract.SubmitEventURL}
 		s.contracts.Store(receiptURI, info)
 		return info, vm, true, nil
 	}
@@ -797,7 +799,7 @@ func (s *Service) bidTerminatedByReceipt(ctx context.Context, receiptURI string)
 	}
 	for i := range bids {
 		terminated := bids[i].Status.Terminated
-		if terminated == nil || terminated.ReceiptUri != receiptURI {
+		if terminated == nil || terminated.ReceiptURI != receiptURI {
 			continue
 		}
 		condition := apimeta.FindStatusCondition(bids[i].Status.Conditions, BidConditionReleasing)

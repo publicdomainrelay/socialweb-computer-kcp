@@ -2,6 +2,8 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 type PdsAccount struct {
@@ -24,7 +26,7 @@ type PdsAccountSpec struct {
 
 	Handle string `json:"handle"`
 
-	PdsRef string `json:"pdsRef"`
+	PdsRef commonv1.ObjectRef `json:"pdsRef"`
 }
 
 type PdsAccountStatus struct {

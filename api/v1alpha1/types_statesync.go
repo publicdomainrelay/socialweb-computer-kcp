@@ -44,7 +44,7 @@ type StateSyncSink struct {
 
 	Target string `json:"target,omitempty"`
 
-	SubmitEventUrl string `json:"submitEventUrl,omitempty"`
+	SubmitEventURL string `json:"submitEventUrl,omitempty" apigen:"userEndpoint"`
 }
 
 type StateSyncDirection string
@@ -78,7 +78,7 @@ const (
 )
 
 type StateSyncAck struct {
-	Paths []string `json:"paths,omitempty"`
+	Paths []string `json:"paths,omitempty" apigen:"userEndpoint"`
 
 	FieldManager string `json:"fieldManager,omitempty"`
 }
@@ -148,7 +148,7 @@ type StateSyncAcknowledged struct {
 
 	At string `json:"at,omitempty"`
 
-	EventUri string `json:"eventUri,omitempty"`
+	EventURI string `json:"eventUri,omitempty"`
 
 	EventCid string `json:"eventCid,omitempty"`
 }

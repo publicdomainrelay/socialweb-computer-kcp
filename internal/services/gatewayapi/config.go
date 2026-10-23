@@ -24,6 +24,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestnet"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 const Kind = "GatewayAPI"
@@ -72,7 +74,7 @@ type Config struct {
 
 	Identity *v1alpha1.ComponentIdentity
 
-	PDSRef *v1alpha1.ComponentRef
+	PDSRef *commonv1.ObjectRef
 
 	Hostnames []string
 
@@ -442,7 +444,7 @@ func (c Config) localDownloadBase(ctx context.Context, deps component.Deps) stri
 		if exposureServiceRefName(exp.Spec.ServiceRef) != serviceName {
 			continue
 		}
-		parsed, err := url.Parse(strings.TrimSpace(exp.Status.URL))
+		parsed, err := url.Parse(strings.TrimSpace(exp.Status.Address))
 		if err != nil || parsed.Port() == "" {
 			continue
 		}
@@ -796,11 +798,11 @@ func publicOriginFor(hostnames []string, tls *v1alpha1.ComponentTLS) string {
 	return ""
 }
 
-func refFromComponent(ref *v1alpha1.ComponentRef) Ref {
+func refFromComponent(ref *commonv1.ObjectRef) Ref {
 	if ref == nil {
 		return Ref{}
 	}
-	return Ref{Kind: ref.Kind, Name: ref.Name, Did: ref.Did}
+	return Ref{Kind: ref.Kind, Name: ref.Name}
 }
 
 func Factory(ctx context.Context, deps component.Deps, spec component.ComponentSpec) (component.Service, error) {

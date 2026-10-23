@@ -2,6 +2,8 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 type MarketIdentity struct {
@@ -41,18 +43,12 @@ const (
 	AssociationSkip AssociationMode = "Skip"
 )
 
-type VaultRef struct {
-	Mount string `json:"mount"`
-
-	Path string `json:"path"`
-}
-
 type MarketIdentitySpec struct {
 	Mode MarketIdentityMode `json:"mode"`
 
 	Handle string `json:"handle,omitempty"`
 
-	PdsUrl string `json:"pdsUrl,omitempty"`
+	PdsURL string `json:"pdsUrl,omitempty" apigen:"userEndpoint"`
 
 	Association AssociationMode `json:"association,omitempty"`
 
@@ -66,13 +62,13 @@ type MarketIdentitySpec struct {
 
 	AssociationService string `json:"associationService,omitempty"`
 
-	KeysRef *VaultRef `json:"keysRef,omitempty"`
+	KeysRef *commonv1.SecretRef `json:"keysRef,omitempty"`
 
-	SessionRef *VaultRef `json:"sessionRef,omitempty"`
+	SessionRef *commonv1.SecretRef `json:"sessionRef,omitempty"`
 
 	OAuthClientID string `json:"oauthClientID,omitempty"`
 
-	OAuthRedirectURI string `json:"oauthRedirectURI,omitempty"`
+	OAuthRedirectURI string `json:"oauthRedirectURI,omitempty" apigen:"userEndpoint"`
 }
 
 type MarketIdentityPhase string
@@ -108,7 +104,7 @@ const (
 type MarketIdentityPendingAction struct {
 	Kind PendingActionKind `json:"kind"`
 
-	Url string `json:"url,omitempty"`
+	URL string `json:"url,omitempty"`
 
 	CallerDid string `json:"callerDid,omitempty"`
 
@@ -126,7 +122,7 @@ type MarketIdentityStatus struct {
 
 	Handle string `json:"handle,omitempty"`
 
-	PdsUrl string `json:"pdsUrl,omitempty"`
+	PdsURL string `json:"pdsUrl,omitempty"`
 
 	ServiceDid string `json:"serviceDid,omitempty"`
 
@@ -134,7 +130,7 @@ type MarketIdentityStatus struct {
 
 	Associations []string `json:"associations,omitempty"`
 
-	SessionRef *VaultRef `json:"sessionRef,omitempty"`
+	SessionRef *commonv1.SecretRef `json:"sessionRef,omitempty"`
 
 	OAuthClientID string `json:"oauthClientID,omitempty"`
 

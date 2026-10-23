@@ -13,6 +13,8 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/statusstate"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 func (ctl *Controller) ensureAppPdsStatus(ctx context.Context, handle string, sess PdsSession, sessionPath string, plc bool) {
@@ -20,16 +22,16 @@ func (ctl *Controller) ensureAppPdsStatus(ctx context.Context, handle string, se
 		return
 	}
 	ws := ctl.c.workspace()
-	pdsRef := ComponentKey(ComponentKindPds, PdsComponent)
+	pdsRef := commonv1.ObjectRef{Kind: ComponentKindPds, Name: PdsComponent}
 	authPath := strings.TrimSpace(sessionPath)
 	if strings.HasPrefix(authPath, "openbao:") {
 		authPath = strings.TrimPrefix(authPath, "openbao:")
 	} else if _, rest, ok := strings.Cut(authPath, ":"); ok {
 		authPath = rest
 	}
-	authRef := &v1alpha1.RepoRef{Kind: "Vault", Name: "openbao:" + strings.Trim(authPath, "/")}
+	authRef := &commonv1.SecretRef{Path: strings.Trim(authPath, "/")}
 	ctl.ensureStatusObject(ctx, ws, statusstate.AtprotoRepoGVR, "AtprotoRepo",
-		statusObjectName("repo", sess.Did), v1alpha1.AtprotoRepoSpec{DID: sess.Did, PdsRef: &v1alpha1.RepoRef{Kind: ComponentKindPds, Name: PdsComponent}, AuthRef: authRef})
+		statusObjectName("repo", sess.Did), v1alpha1.AtprotoRepoSpec{DID: sess.Did, PdsRef: &pdsRef, AuthRef: authRef})
 	accountName := statusObjectName("account", handle)
 	ctl.ensureStatusObject(ctx, ws, statusstate.PdsAccountGVR, "PdsAccount",
 		accountName, v1alpha1.PdsAccountSpec{DID: sess.Did, Handle: handle, PdsRef: pdsRef})
@@ -39,7 +41,7 @@ func (ctl *Controller) ensureAppPdsStatus(ctx context.Context, handle string, se
 	}
 	if strings.TrimSpace(sess.AccessJWT) != "" {
 		ctl.ensureStatusObject(ctx, ws, statusstate.AtprotoSessionGVR, "AtprotoSession",
-			statusObjectName("session", handle), v1alpha1.AtprotoSessionSpec{DID: sess.Did, AccountRef: accountName,
+			statusObjectName("session", handle), v1alpha1.AtprotoSessionSpec{DID: sess.Did, AccountRef: commonv1.LocalObjectRef{Name: accountName},
 				PdsRef: pdsRef, SessionID: sessionPath})
 	}
 }
@@ -50,7 +52,7 @@ func (ctl *Controller) ensureRelayStatus(ctx context.Context, relayRef string) {
 	}
 	name := statusObjectName("relay", strings.TrimPrefix(relayRef, ComponentKindRelay+"/"))
 	ctl.ensureStatusObject(ctx, ctl.c.workspace(), statusstate.RelayStatusGVR, "RelayStatus",
-		name, v1alpha1.RelayStatusSpec{RelayRef: relayRef})
+		name, v1alpha1.RelayStatusSpec{RelayRef: commonv1.ObjectRef{Kind: ComponentKindRelay, Name: strings.TrimPrefix(relayRef, ComponentKindRelay+"/")}})
 }
 
 func (ctl *Controller) ensureVaultCredentialStatus(ctx context.Context, server, mount, path string) {
@@ -61,7 +63,7 @@ func (ctl *Controller) ensureVaultCredentialStatus(ctx context.Context, server, 
 		return
 	}
 	ctl.ensureStatusObject(ctx, ctl.c.workspace(), statusstate.VaultCredentialGVR, "VaultCredential",
-		statusObjectName("credential", server+"-"+path), v1alpha1.VaultCredentialSpec{Server: server, Mount: mount, Path: path})
+		statusObjectName("credential", server+"-"+path), v1alpha1.VaultCredentialSpec{SecretRef: commonv1.SecretRef{Vault: v1alpha1.VaultServerRef(server), Mount: mount, Path: path}})
 }
 
 func (ctl *Controller) ensureStatusObject(ctx context.Context, ws string, gvr schema.GroupVersionResource, kind, name string, spec any) {

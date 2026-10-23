@@ -64,7 +64,7 @@ type OpenBaoPlugin struct {
 
 	Asset HostProcessAsset `json:"asset"`
 
-	MountPath string `json:"mountPath,omitempty"`
+	MountPath string `json:"mountPath,omitempty" apigen:"userEndpoint"`
 
 	Atproto *OpenBaoAtprotoPlugin `json:"atproto,omitempty"`
 }
@@ -78,13 +78,13 @@ type OpenBaoAtprotoPlugin struct {
 type OpenBaoAtprotoConfig struct {
 	ClientID string `json:"clientID,omitempty"`
 
-	RedirectURIs []string `json:"redirectURIs,omitempty"`
+	RedirectURIs []string `json:"redirectURIs,omitempty" apigen:"userEndpoint"`
 
 	ClientName string `json:"clientName,omitempty"`
 
 	Scope string `json:"scope,omitempty"`
 
-	PLCDirectoryURL string `json:"plcDirectoryURL,omitempty"`
+	PLCDirectoryURL string `json:"plcDirectoryURL,omitempty" apigen:"userEndpoint"`
 
 	TrustedHosts []string `json:"trustedHosts,omitempty"`
 
@@ -130,11 +130,11 @@ type OpenBaoServerPostgres struct {
 }
 
 type OpenBaoServerTLS struct {
-	CertFile string `json:"certFile"`
+	CertFile string `json:"certFile" apigen:"userEndpoint"`
 
-	KeyFile string `json:"keyFile"`
+	KeyFile string `json:"keyFile" apigen:"userEndpoint"`
 
-	CAFile string `json:"caFile"`
+	CAFile string `json:"caFile" apigen:"userEndpoint"`
 
 	ClientCertOptional bool `json:"clientCertOptional,omitempty"`
 }
@@ -182,7 +182,7 @@ type OpenBaoIdentityOIDC struct {
 }
 
 type OpenBaoSecretMount struct {
-	Path string `json:"path"`
+	Path string `json:"path" apigen:"userEndpoint"`
 
 	Type string `json:"type"`
 
@@ -192,7 +192,7 @@ type OpenBaoSecretMount struct {
 }
 
 type OpenBaoAuthMount struct {
-	Path string `json:"path"`
+	Path string `json:"path" apigen:"userEndpoint"`
 
 	Type string `json:"type"`
 
@@ -200,7 +200,7 @@ type OpenBaoAuthMount struct {
 }
 
 type OpenBaoJWTConfig struct {
-	DiscoveryURL string `json:"discoveryURL"`
+	DiscoveryURL string `json:"discoveryURL" apigen:"userEndpoint"`
 
 	BoundIssuer string `json:"boundIssuer,omitempty"`
 }
@@ -214,7 +214,7 @@ type OpenBaoPolicy struct {
 }
 
 type OpenBaoPolicyRule struct {
-	Path string `json:"path"`
+	Path string `json:"path" apigen:"userEndpoint"`
 
 	Capabilities []string `json:"capabilities"`
 }

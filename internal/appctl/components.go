@@ -30,6 +30,9 @@ import (
 
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/pds"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 const (
@@ -150,8 +153,8 @@ func ComponentKindsFor(rootKind string) []string {
 	return kinds
 }
 
-func ComponentRefFor(kind, name string) *v1alpha1.ComponentRef {
-	return &v1alpha1.ComponentRef{Kind: kind, Name: name}
+func ComponentRefFor(kind, name string) *commonv1.ObjectRef {
+	return &commonv1.ObjectRef{Kind: kind, Name: name}
 }
 
 func ComponentKey(kind, name string) string {
@@ -185,7 +188,7 @@ func (v ComponentView) Listeners() []v1alpha1.ApplicationListener {
 	for _, e := range v.Status.Endpoints {
 		address := e.Address
 		if address == "" {
-			address = e.Url
+			address = e.URL
 		}
 		out = append(out, v1alpha1.ApplicationListener{Component: v.Name, Name: e.Name, Kind: e.Protocol, Address: address})
 	}
@@ -222,7 +225,7 @@ func exposureViewOf(v ComponentView, kind string, m map[string]any) (ComponentVi
 		v.Status.Phase = v1alpha1.ComponentPhase(st.Phase)
 		v.Status.Ready = st.Ready
 		for i, endpoint := range st.Endpoints {
-			v.Status.Endpoints = append(v.Status.Endpoints, v1alpha1.Endpoint{Name: "endpoint-" + strconv.Itoa(i), Url: endpoint})
+			v.Status.Endpoints = append(v.Status.Endpoints, v1alpha1.Endpoint{Name: "endpoint-" + strconv.Itoa(i), URL: endpoint})
 		}
 	case ComponentKindExposure:
 		var st exposurev1alpha1.ExposureStatus
@@ -231,9 +234,9 @@ func exposureViewOf(v ComponentView, kind string, m map[string]any) (ComponentVi
 		}
 		v.Status.Phase = v1alpha1.ComponentPhase(st.Phase)
 		v.Status.Ready = st.Ready
-		if st.URL != "" {
-			v.Status.Endpoint = st.URL
-			v.Status.Endpoints = []v1alpha1.Endpoint{{Name: "url", Url: st.URL, Address: st.Endpoint}}
+		if st.Address != "" {
+			v.Status.Endpoint = st.Address
+			v.Status.Endpoints = []v1alpha1.Endpoint{{Name: "url", URL: st.Address, Address: st.Endpoint}}
 		}
 	}
 	return v, nil
@@ -267,7 +270,7 @@ func serviceDesired(ws, kind, name string, protocol exposurev1alpha1.ServiceProt
 
 func serviceDesiredNamed(ws, kind, name, serviceName string, protocol exposurev1alpha1.ServiceProtocol, handler string, suspend bool) desiredComponent {
 	return desiredComponent{Kind: ComponentKindService, Name: serviceName, Spec: exposurev1alpha1.ServiceSpec{
-		TargetRef: exposurev1alpha1.ServiceTargetRef{Workspace: ws, Kind: kind, Name: name},
+		TargetRef: commonv1.ObjectRef{Workspace: ws, Kind: kind, Name: name},
 		Protocol:  protocol,
 		Handler:   handler,
 		Suspend:   suspend,
@@ -295,7 +298,7 @@ func exposureDesiredForService(serviceName, suffix string, mode exposurev1alpha1
 func exposureTLS(network *v1alpha1.MarketNetworkValue, enabled bool) exposurev1alpha1.ExposureTLS {
 	out := exposurev1alpha1.ExposureTLS{Enabled: enabled}
 	if enabled && network != nil {
-		out.CABundleRef = network.CaBundleRef
+		out.CABundle = network.CABundle
 	}
 	return out
 }
@@ -944,9 +947,9 @@ func (ctl *Controller) watchComponentType(ctx context.Context, ws string, ct Com
 
 const (
 	ComponentStopWait    = 30 * time.Second
-	pdsRepoKeyDir        = "repo-keys"
-	pdsSessionSecretFile = "session-secret"
-	pdsRotationKeyFile   = "plc-rotation.key"
+	pdsRepoKeyDir        = pds.RepoKeyDir
+	pdsSessionSecretFile = pds.SessionSecretFile
+	pdsRotationKeyFile   = pds.RotationKeyFile
 )
 
 func optionInt(opts []v1alpha1.ApplicationOption, name string) int {

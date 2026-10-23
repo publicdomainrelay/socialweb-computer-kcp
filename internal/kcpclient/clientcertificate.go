@@ -15,6 +15,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 const (
@@ -63,7 +65,7 @@ func (c *Client) RecordCertificate(ctx context.Context, rec CertificateRecord) e
 			OwnerReferences: []metav1.OwnerReference{{APIVersion: socialwebResource.String(), Kind: "Cluster",
 				Name: cluster.Name, UID: cluster.UID}},
 		},
-		Spec: v1alpha1.ClusterClientCertificateSpec{Cluster: rec.Cluster, Did: rec.DID, Serial: CertSerialKey(rec.Serial),
+		Spec: v1alpha1.ClusterClientCertificateSpec{ClusterRef: commonv1.LocalObjectRef{Name: rec.Cluster}, Did: rec.DID, Serial: CertSerialKey(rec.Serial),
 			NotAfter: rec.NotAfter.UTC().Format(time.RFC3339), NoExpiry: rec.NoExpiry},
 	}
 	body, err := json.Marshal(obj)

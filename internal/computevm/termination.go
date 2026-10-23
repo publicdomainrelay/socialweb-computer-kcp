@@ -14,6 +14,8 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 const (
@@ -35,12 +37,12 @@ func TerminationSyncName(uid string) string {
 	return TerminationSyncPrefix + hex.EncodeToString(sum[:8])
 }
 
-func TerminationStateSync(o *v1alpha1.ComputeVM, workspace, reason, observedAt string, request *v1alpha1.RecordRef) (*unstructured.Unstructured, error) {
+func TerminationStateSync(o *v1alpha1.ComputeVM, workspace, reason, observedAt string, request *commonv1.StrongRef) (*unstructured.Unstructured, error) {
 	if o == nil || o.Spec.Contract == nil {
 		return nil, errors.New("computevm: a termination StateSync needs a contract")
 	}
 	contract := o.Spec.Contract
-	if contract.ReceiptUri == "" || contract.ReceiptCid == "" {
+	if contract.Receipt.URI == "" || contract.Receipt.CID == "" {
 		return nil, errors.New("computevm: a termination StateSync needs a receipt")
 	}
 	if reason == "" || observedAt == "" {
@@ -64,11 +66,11 @@ func TerminationStateSync(o *v1alpha1.ComputeVM, workspace, reason, observedAt s
 	}
 	payload := map[string]any{
 		"collection": market.ComputeEventsVMTerminatedNSID,
-		"receipt":    map[string]any{"uri": contract.ReceiptUri, "cid": contract.ReceiptCid},
+		"receipt":    map[string]any{"uri": contract.Receipt.URI, "cid": contract.Receipt.CID},
 		"record":     record,
 	}
-	if contract.SubmitEventUrl != "" {
-		payload["submitEventUrl"] = contract.SubmitEventUrl
+	if contract.SubmitEventURL != "" {
+		payload["submitEventUrl"] = contract.SubmitEventURL
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
@@ -113,7 +115,7 @@ func TerminationStateSync(o *v1alpha1.ComputeVM, workspace, reason, observedAt s
 			"sink":           map[string]any{"adapter": TerminationSyncAdapter},
 			"direction":      string(v1alpha1.StateSyncDirectionOutbound),
 			"payload":        stored,
-			"idempotencyKey": "terminated:" + contract.ReceiptUri,
+			"idempotencyKey": "terminated:" + contract.Receipt.URI,
 			"conflictPolicy": string(v1alpha1.StateSyncConflictSourceWins),
 			"deletionPolicy": string(v1alpha1.StateSyncDeletionRetain),
 		},
@@ -128,7 +130,7 @@ func terminationMarker(o *v1alpha1.ComputeVM) *v1alpha1.ComputeVMTermination {
 	return o.Status.Market.Termination
 }
 
-func (ct *Controller) ensureTerminationSync(ctx context.Context, o v1alpha1.ComputeVM, reason, observedAt string, request *v1alpha1.RecordRef) error {
+func (ct *Controller) ensureTerminationSync(ctx context.Context, o v1alpha1.ComputeVM, reason, observedAt string, request *commonv1.StrongRef) error {
 	if !terminationReportable(o) {
 		return nil
 	}

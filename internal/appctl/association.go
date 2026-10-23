@@ -31,7 +31,7 @@ func (ctl *Controller) associateNetworkOperator(ctx context.Context, spec v1alph
 	if err != nil {
 		return err
 	}
-	operator, err := ctl.writeClaim(ctx, id, spec.Identity.PdsUrl, spec.Network.CaBundleRef, spec.Identity.Handle, password, "bidder-", BidderAssociate)
+	operator, err := ctl.writeClaim(ctx, id, spec.Identity.PdsURL, spec.Network.CABundle, spec.Identity.Handle, password, "bidder-", BidderAssociate)
 	if err != nil || operator == "" {
 		return err
 	}
@@ -73,7 +73,7 @@ func (ctl *Controller) writeClaim(ctx context.Context, id *v1alpha1.MarketIdenti
 	}
 	nonce, pendingService := "", ""
 	if action := id.Status.PendingAction; action != nil {
-		nonce, pendingService = claimOf(action.Url)
+		nonce, pendingService = claimOf(action.URL)
 	}
 	if id.Spec.Mode != v1alpha1.MarketIdentityModeLocalRepo && nonce == "" {
 		return "", nil
@@ -201,7 +201,7 @@ func (ctl *Controller) associateGatewayOperator(ctx context.Context, id *v1alpha
 	if err != nil {
 		return err
 	}
-	operator, err := ctl.writeClaim(ctx, id, s.Service, n.CaBundleRef, s.Identifier, s.Password, "requester-", RequesterAssociate)
+	operator, err := ctl.writeClaim(ctx, id, s.Service, n.CABundle, s.Identifier, s.Password, "requester-", RequesterAssociate)
 	if err != nil || operator == "" {
 		return err
 	}

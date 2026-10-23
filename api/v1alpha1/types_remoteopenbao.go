@@ -20,7 +20,7 @@ type RemoteOpenBaoList struct {
 }
 
 type RemoteOpenBaoSpec struct {
-	URL string `json:"url"`
+	URL string `json:"url" apigen:"userEndpoint"`
 
 	TLS RemoteOpenBaoTLS `json:"tls,omitempty"`
 

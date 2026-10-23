@@ -18,6 +18,8 @@ import (
 
 	eventsapi "github.com/johnandersen777/socialweb-computer-kcp/api/events/v1alpha1"
 	v1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 var AtprotoRepoGVR = v1alpha1.AtprotoRepoGVR
@@ -105,7 +107,7 @@ type watchSourcePlan struct {
 type watchRepo struct {
 	Did string
 
-	PDSRef *eventsapi.EventStreamRef
+	PDSRef *commonv1.ObjectRef
 }
 
 func EventStreamNameForWatchSource(watchName, sourceKey string) string {
@@ -167,7 +169,7 @@ func (c *Controller) planWatchSources(ctx context.Context, dyn dynamic.Interface
 		}
 		add(relaySourceKey(raw), eventsapi.EventStreamSource{
 			Kind:        eventsapi.EventStreamSourceRelay,
-			RelayUrls:   []string{raw},
+			RelayURLs:   []string{raw},
 			Collections: collections,
 			DIDs:        dids,
 		})
@@ -179,7 +181,7 @@ func (c *Controller) planWatchSources(ctx context.Context, dyn dynamic.Interface
 		}
 		add(jetstreamSourceKey(raw), eventsapi.EventStreamSource{
 			Kind:          eventsapi.EventStreamSourceJetstream,
-			JetstreamUrls: []string{raw},
+			JetstreamURLs: []string{raw},
 			Collections:   collections,
 			DIDs:          dids,
 		})
@@ -213,7 +215,7 @@ func (c *Controller) resolveWatchRepo(ctx context.Context, dyn dynamic.Interface
 	if strings.HasPrefix(repo, "did:") {
 		return watchRepo{Did: repo}, nil
 	}
-	return watchRepo{PDSRef: &eventsapi.EventStreamRef{Workspace: c.opts.Workspace, Kind: "Pds", Name: repo}}, nil
+	return watchRepo{PDSRef: &commonv1.ObjectRef{Workspace: c.opts.Workspace, Kind: "Pds", Name: repo}}, nil
 }
 
 func (c *Controller) resolveWatchRepoRef(ctx context.Context, dyn dynamic.Interface, ref *recordRepoRef) (watchRepo, error) {
@@ -231,7 +233,7 @@ func (c *Controller) resolveWatchRepoRef(ctx context.Context, dyn dynamic.Interf
 		if strings.Contains(strings.ToLower(ref.Kind), "remote") {
 			kind = "RemotePDS"
 		}
-		return watchRepo{PDSRef: &eventsapi.EventStreamRef{Workspace: workspace, Kind: kind, Name: name}}, nil
+		return watchRepo{PDSRef: &commonv1.ObjectRef{Workspace: workspace, Kind: kind, Name: name}}, nil
 	case "atprotorepo":
 		client := dyn
 		if workspace != c.opts.Workspace {
@@ -275,7 +277,7 @@ func watchRepoFromAtprotoRepo(object *unstructured.Unstructured) (watchRepo, err
 		if kind == "" {
 			kind = "Pds"
 		}
-		out.PDSRef = &eventsapi.EventStreamRef{
+		out.PDSRef = &commonv1.ObjectRef{
 			Workspace: strings.TrimSpace(repo.Spec.PdsRef.Workspace),
 			Kind:      kind,
 			Name:      strings.TrimSpace(repo.Spec.PdsRef.Name),

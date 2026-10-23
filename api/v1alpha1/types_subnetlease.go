@@ -2,6 +2,8 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 type SubnetLease struct {
@@ -20,9 +22,7 @@ type SubnetLeaseList struct {
 }
 
 type SubnetLeaseSpec struct {
-	Workspace string `json:"workspace"`
-
-	Cluster string `json:"cluster"`
+	ClusterRef commonv1.ObjectRef `json:"clusterRef"`
 
 	Purpose string `json:"purpose"`
 

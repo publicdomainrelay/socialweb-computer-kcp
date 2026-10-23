@@ -128,7 +128,7 @@ func (r *requestRun) passthrough(args []string, network bool) error {
 		case p.To == "spec.identity.handle":
 			r.root.Identity.Handle = p.Value
 		case p.To == "spec.identity.pdsUrl":
-			r.root.Identity.PdsUrl = p.Value
+			r.root.Identity.PdsURL = p.Value
 		case p.To == "spec.identity.association":
 			if p.Value != "false" {
 				r.root.Identity.Association = v1alpha1.AssociationSkip
@@ -157,13 +157,13 @@ func (r *requestRun) passthrough(args []string, network bool) error {
 			nvSet = true
 			switch p.To {
 			case "network.plcDirectoryUrl":
-				nv.PlcDirectoryUrl = p.Value
+				nv.PLCDirectoryURL = p.Value
 			case "network.ingressProxyHost":
 				nv.IngressProxyHost = p.Value
 			case "network.relayUrls":
-				nv.RelayUrls = splitList(p.Value)
+				nv.RelayURLs = splitList(p.Value)
 			case "network.firehoseUrls":
-				nv.FirehoseUrls = splitList(p.Value)
+				nv.FirehoseURLs = splitList(p.Value)
 			case "network.qrOrigin":
 				nv.QrOrigin = p.Value
 			case "network.hosts":
@@ -204,17 +204,17 @@ func (r *requestRun) passthrough(args []string, network bool) error {
 		}
 	}
 	if nvSet {
-		if nv.PlcDirectoryUrl == "" {
-			nv.PlcDirectoryUrl = "https://plc.directory"
+		if nv.PLCDirectoryURL == "" {
+			nv.PLCDirectoryURL = "https://plc.directory"
 		}
 		if nv.IngressProxyHost == "" {
 			nv.IngressProxyHost = "xrpc.fedproxy.com"
 		}
-		if nv.RelayUrls == nil {
-			nv.RelayUrls = []string{}
+		if nv.RelayURLs == nil {
+			nv.RelayURLs = []string{}
 		}
-		if nv.FirehoseUrls == nil {
-			nv.FirehoseUrls = []string{}
+		if nv.FirehoseURLs == nil {
+			nv.FirehoseURLs = []string{}
 		}
 		r.root.Network = &nv
 	}
@@ -295,7 +295,7 @@ func (r *requestRun) start(ctx context.Context, fresh bool) error {
 		}
 		r.log("the market network places the invocation in its workspace of the network's kcp", "network", r.inv.Network)
 		app, err := request.WaitNetworkApp(ctx, netRec.AdminKubeconfig, r.inv.Name, r.networkTimeout, func(a v1alpha1.NetworkAppStatus) bool {
-			return a.Instance != "" && a.KcpUrl != "" && a.Message != appctl.StoppedMessage && a.Phase != v1alpha1.ApplicationPhasePending
+			return a.Instance != "" && a.KcpURL != "" && a.Message != appctl.StoppedMessage && a.Phase != v1alpha1.ApplicationPhasePending
 		}, func(a v1alpha1.NetworkAppStatus) {
 			r.log("network child", "phase", string(a.Phase), "message", a.Message)
 		})
@@ -402,7 +402,7 @@ func (r *requestRun) writeSummary(c *v1alpha1.ComputeContract) {
 	r.summary.UpdatedAt = time.Now().UTC()
 	if c != nil {
 		r.summary.SecretsFetchedAt = c.Status.SecretsFetchedAt
-		r.summary.Phase, r.summary.Message, r.summary.SecretsUrl = string(c.Status.Phase), c.Status.Message, c.Status.SecretsUrl
+		r.summary.Phase, r.summary.Message, r.summary.SecretsUrl = string(c.Status.Phase), c.Status.Message, c.Status.SecretsURL
 		r.summary.Contract = request.SummaryOf(c)
 	}
 	if st, err := r.kcp.Root(context.Background()); err == nil && st.Did != "" {

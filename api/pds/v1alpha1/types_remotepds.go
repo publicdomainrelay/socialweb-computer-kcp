@@ -20,7 +20,7 @@ type RemotePDSList struct {
 }
 
 type RemotePDSSpec struct {
-	URL string `json:"url"`
+	URL string `json:"url" apigen:"userEndpoint"`
 
 	DID string `json:"did"`
 

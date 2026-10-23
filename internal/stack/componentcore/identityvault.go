@@ -5,12 +5,13 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/credentials"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/identitycontroller"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 type identityVaultStore struct {
@@ -31,11 +32,11 @@ func newIdentityVaultStore(store *kcpstore.Store, workspace, client, server stri
 	return &identityVaultStore{resolver: resolver}, nil
 }
 
-func (s *identityVaultStore) ref(ref v1alpha1.VaultRef) component.CredentialRef {
+func (s *identityVaultStore) ref(ref commonv1.SecretRef) component.CredentialRef {
 	return component.CredentialRef{Mount: strings.Trim(strings.TrimSpace(ref.Mount), "/"), Path: strings.Trim(strings.TrimSpace(ref.Path), "/")}
 }
 
-func (s *identityVaultStore) Get(ctx context.Context, ref v1alpha1.VaultRef) (map[string]any, error) {
+func (s *identityVaultStore) Get(ctx context.Context, ref commonv1.SecretRef) (map[string]any, error) {
 	credential, err := s.resolver.Resolve(ctx, s.ref(ref))
 	if err != nil {
 		if errors.Is(err, openbao.ErrNotFound) {
@@ -46,10 +47,10 @@ func (s *identityVaultStore) Get(ctx context.Context, ref v1alpha1.VaultRef) (ma
 	return credential.Data, nil
 }
 
-func (s *identityVaultStore) Put(ctx context.Context, ref v1alpha1.VaultRef, data map[string]any) error {
+func (s *identityVaultStore) Put(ctx context.Context, ref commonv1.SecretRef, data map[string]any) error {
 	return s.resolver.WriteCredential(ctx, s.ref(ref), data)
 }
 
-func (s *identityVaultStore) Delete(ctx context.Context, ref v1alpha1.VaultRef) error {
+func (s *identityVaultStore) Delete(ctx context.Context, ref commonv1.SecretRef) error {
 	return s.resolver.DeleteCredential(ctx, s.ref(ref))
 }

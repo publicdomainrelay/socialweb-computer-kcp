@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-1.marketpresences.socialweb.computer
+  name: v1alpha1-2.marketpresences.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -31,19 +31,20 @@ spec:
               bidderRef:
                 type: object
                 properties:
-                  workspace:
+                  group:
                     type: string
                   kind:
                     type: string
+                    maxLength: 63
                   name:
                     type: string
+                    maxLength: 253
+                  workspace:
+                    type: string
                 required:
-                  - workspace
                   - kind
                   - name
               offeringUri:
-                type: string
-              relayUri:
                 type: string
               ttlSeconds:
                 type: integer

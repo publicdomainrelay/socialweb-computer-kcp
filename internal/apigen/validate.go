@@ -3,8 +3,10 @@ package apigen
 import (
 	"fmt"
 	"math"
+	"regexp"
 	"sort"
 	"strings"
+	"unicode/utf8"
 )
 
 type Issue struct {
@@ -122,11 +124,20 @@ func check(s *Schema, value any, path string, out *[]Issue) {
 		for i, v := range arr {
 			check(s.Items, v, fmt.Sprintf("%s[%d]", path, i), out)
 		}
+		checkList(s, arr, path, add)
 	case TypeString:
 		str, ok := value.(string)
 		if !ok {
 			add(path, expected("a string", value))
 			return
+		}
+		if s.MaxLength != nil && int64(utf8.RuneCountInString(str)) > *s.MaxLength {
+			add(path, fmt.Sprintf("%d characters is over the maxLength %d", utf8.RuneCountInString(str), *s.MaxLength))
+		}
+		if s.Pattern != "" {
+			if re, err := regexp.Compile(s.Pattern); err == nil && !re.MatchString(str) {
+				add(path, fmt.Sprintf("%q does not match the pattern %s", str, s.Pattern))
+			}
 		}
 		if len(s.Enum) == 0 {
 			return
@@ -141,6 +152,13 @@ func check(s *Schema, value any, path string, out *[]Issue) {
 		n, ok := value.(float64)
 		if !ok || n != math.Trunc(n) || math.IsInf(n, 0) {
 			add(path, expected("an integer", value))
+			return
+		}
+		if s.Minimum != nil && n < float64(*s.Minimum) {
+			add(path, fmt.Sprintf("%v is below the minimum %d", n, *s.Minimum))
+		}
+		if s.Maximum != nil && n > float64(*s.Maximum) {
+			add(path, fmt.Sprintf("%v is above the maximum %d", n, *s.Maximum))
 		}
 	case TypeBoolean:
 		if _, ok := value.(bool); !ok {
@@ -148,5 +166,34 @@ func check(s *Schema, value any, path string, out *[]Issue) {
 		}
 	default:
 		add(path, fmt.Sprintf("schema type %q has no validator", s.Type))
+	}
+}
+
+func checkList(s *Schema, arr []any, path string, add func(p, msg string)) {
+	switch s.ListType {
+	case ListTypeSet:
+		seen := map[any]bool{}
+		for i, v := range arr {
+			if seen[v] {
+				add(fmt.Sprintf("%s[%d]", path, i), "duplicate entry in a set")
+			}
+			seen[v] = true
+		}
+	case ListTypeMap:
+		seen := map[string]bool{}
+		for i, v := range arr {
+			obj, ok := v.(map[string]any)
+			if !ok {
+				continue
+			}
+			key := ""
+			for _, k := range s.ListMapKeys {
+				key += fmt.Sprintf("%v\x00", obj[k])
+			}
+			if seen[key] {
+				add(fmt.Sprintf("%s[%d]", path, i), "duplicate map key "+strings.Join(s.ListMapKeys, ","))
+			}
+			seen[key] = true
+		}
 	}
 }

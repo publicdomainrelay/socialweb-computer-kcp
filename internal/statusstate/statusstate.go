@@ -21,6 +21,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 const (
@@ -343,4 +345,15 @@ func sleep(ctx context.Context, d time.Duration) bool {
 	case <-timer.C:
 		return true
 	}
+}
+
+func refString(r commonv1.ObjectRef) string {
+	name := strings.TrimSpace(r.Name)
+	if name == "" {
+		return ""
+	}
+	if kind := strings.TrimSpace(r.Kind); kind != "" {
+		return kind + "/" + name
+	}
+	return name
 }

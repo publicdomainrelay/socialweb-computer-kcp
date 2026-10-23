@@ -2,6 +2,8 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 type VaultCertificate struct {
@@ -20,7 +22,7 @@ type VaultCertificateList struct {
 }
 
 type VaultCertificateSpec struct {
-	Server string `json:"server"`
+	Vault commonv1.ObjectRef `json:"vault"`
 
 	Mount string `json:"mount"`
 

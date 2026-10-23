@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -22,6 +21,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsreload"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 const Kind = "DispatcherTLS"
@@ -39,7 +40,7 @@ type Config struct {
 	Port            int
 	Hostnames       []string
 	AllowedHosts    []string
-	UpstreamRef     *v1alpha1.ComponentRef
+	UpstreamRef     *commonv1.ObjectRef
 	Upstream        component.Endpoint
 	UpstreamURL     string
 	UpstreamAddress string
@@ -47,7 +48,7 @@ type Config struct {
 	TLS             *tls.Config
 	CertFile        string
 	KeyFile         string
-	CAFile          string
+	CABundle        string
 	ShutdownTimeout time.Duration
 }
 
@@ -102,7 +103,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		cfg.Port = int(decoded.Serve.Port)
 	}
 	if decoded.TLS != nil {
-		cfg.CAFile = refPath(decoded.TLS.CaBundleRef, decoded.Storage)
+		cfg.CABundle = strings.TrimSpace(decoded.TLS.CABundle)
 		if decoded.TLS.CertRef != "" || decoded.TLS.Enabled {
 			certFile, keyFile := certificateFiles(decoded.TLS.CertRef, decoded.Storage, cfg.Hostnames)
 			cfg.CertFile = certFile
@@ -184,7 +185,7 @@ func keyFilesFor(certFile string) []string {
 	return append(candidates, certFile)
 }
 
-func upstreamEndpoint(deps component.Deps, workspace string, ref *v1alpha1.ComponentRef) (string, bool) {
+func upstreamEndpoint(deps component.Deps, workspace string, ref *commonv1.ObjectRef) (string, bool) {
 	if ref == nil || deps.Registry == nil {
 		return "", false
 	}
@@ -235,20 +236,16 @@ func endpointURL(endpoint component.Endpoint) (string, bool) {
 	return scheme + "://" + endpoint.Address, true
 }
 
-func loadCA(path string) (*x509.CertPool, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("dispatchertls: reading the CA bundle %s: %w", path, err)
-	}
+func loadCA(data []byte) (*x509.CertPool, error) {
 	pool := x509.NewCertPool()
 	if !pool.AppendCertsFromPEM(data) {
 		block, _ := pem.Decode(data)
 		if block == nil || block.Type != "CERTIFICATE" {
-			return nil, fmt.Errorf("dispatchertls: the CA bundle %s holds no certificate", path)
+			return nil, errors.New("dispatchertls: the CA bundle holds no certificate")
 		}
 		cert, err := x509.ParseCertificate(block.Bytes)
 		if err != nil {
-			return nil, fmt.Errorf("dispatchertls: parsing the CA certificate %s: %w", path, err)
+			return nil, fmt.Errorf("dispatchertls: parsing the CA certificate: %w", err)
 		}
 		pool.AddCert(cert)
 	}
@@ -294,8 +291,8 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Proxy = nil
 	upstreamTLS := cfg.UpstreamTLS
-	if upstreamTLS == nil && cfg.CAFile != "" {
-		pool, err := loadCA(cfg.CAFile)
+	if upstreamTLS == nil && cfg.CABundle != "" {
+		pool, err := loadCA([]byte(cfg.CABundle))
 		if err != nil {
 			return err
 		}

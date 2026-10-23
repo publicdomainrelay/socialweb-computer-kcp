@@ -23,6 +23,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpapply"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 const (
@@ -428,9 +430,13 @@ func BidderValues(spec v1alpha1.MarketBidderSpec, stateDir, guestStateDir string
 	if n == nil {
 		return manifests.MarketBidder{}, errors.New("appctl: the MarketBidder names no network value; its composer or its profile sets spec.network")
 	}
+	caFile, err := NetworkCAFile(stateDir, n)
+	if err != nil {
+		return manifests.MarketBidder{}, err
+	}
 	tlsPort := 0
-	if n.GuestTlsUrl != "" {
-		p, err := portOf(n.GuestTlsUrl)
+	if n.GuestTLSURL() != "" {
+		p, err := portOf(n.GuestTLSURL())
 		if err != nil {
 			return manifests.MarketBidder{}, fmt.Errorf("appctl: network guestTlsUrl: %w", err)
 		}
@@ -438,16 +444,16 @@ func BidderValues(spec v1alpha1.MarketBidderSpec, stateDir, guestStateDir string
 	} else if spec.Profile == BidderProfileNetwork {
 		return manifests.MarketBidder{}, errors.New("appctl: the network value names no guestTlsUrl; a market network bidder hands guests the dispatcher's TLS front")
 	}
-	v := manifests.MarketBidder{StateDir: stateDir, Handle: spec.Identity.Handle, PdsUrl: spec.Identity.PdsUrl,
-		PlcDirectoryUrl: n.PlcDirectoryUrl, IngressProxyHost: n.IngressProxyHost, RelayUrls: strings.Join(n.RelayUrls, ","),
-		GuestTLSPort: tlsPort, CABundle: n.CaBundleRef, Policy: spec.Policy}
+	v := manifests.MarketBidder{StateDir: stateDir, Handle: spec.Identity.Handle, PdsUrl: spec.Identity.PdsURL,
+		PlcDirectoryUrl: n.PLCDirectoryURL, IngressProxyHost: n.IngressProxyHost, RelayUrls: strings.Join(n.RelayURLs, ","),
+		GuestTLSPort: tlsPort, CABundle: caFile, Policy: spec.Policy}
 	if err := providerValues(&v, spec, kcp); err != nil {
 		return manifests.MarketBidder{}, err
 	}
 	if v.Policy == "" {
 		v.Policy = DefaultPolicy
 	}
-	trust, err := listFragment(n.CaBundleRef)
+	trust, err := listFragment(caFile)
 	if err != nil {
 		return manifests.MarketBidder{}, err
 	}
@@ -462,8 +468,8 @@ func BidderValues(spec v1alpha1.MarketBidderSpec, stateDir, guestStateDir string
 	if v.GuestTLSPort != 0 {
 		extra = append(extra, "--guest-tls-port", strconv.Itoa(v.GuestTLSPort))
 	}
-	if len(n.FirehoseUrls) > 0 {
-		extra = append(extra, "--firehose-url", strings.Join(n.FirehoseUrls, ","))
+	if len(n.FirehoseURLs) > 0 {
+		extra = append(extra, "--firehose-url", strings.Join(n.FirehoseURLs, ","))
 	}
 	if n.QrOrigin != "" {
 		extra = append(extra, "--qr-origin", n.QrOrigin)
@@ -511,9 +517,9 @@ func BidderPds(v manifests.MarketBidder, stateDir string, n *v1alpha1.MarketNetw
 	p := manifests.RepoPds{StateDir: stateDir, Identity: BidderIdentity, KcpServer: v.Kcp.Server, KcpWorkspace: v.Kcp.Workspace,
 		VaultServer: v.Vault.Server, VaultClient: PdsVaultClient, VaultKcpServer: v.Vault.KcpServer, VaultMount: BidderVaultClient,
 		VaultMountClient: BidderVaultClient, VaultWorkspace: v.Kcp.Workspace,
-		PlcDirectoryUrl: n.PlcDirectoryUrl, IngressProxyHost: n.IngressProxyHost, Trust: v.Trust, Read: v.Read, AssociateService: BidderAssociate}
+		PlcDirectoryUrl: n.PLCDirectoryURL, IngressProxyHost: n.IngressProxyHost, Trust: v.Trust, Read: v.Read, AssociateService: BidderAssociate}
 	var err error
-	if p.WatchRelayUrls, err = listFragment(append(append([]string{}, n.RelayUrls...), n.FirehoseUrls...)...); err != nil {
+	if p.WatchRelayUrls, err = listFragment(append(append([]string{}, n.RelayURLs...), n.FirehoseURLs...)...); err != nil {
 		return p, err
 	}
 	if hosts := NetworkHostsArg(n.Hosts); hosts != "" {
@@ -527,22 +533,27 @@ func ready(status v1alpha1.ApplicationStatus, msg string) v1alpha1.ApplicationSt
 	return status
 }
 
-func (ctl *Controller) bidderMarketURL(ctx context.Context, ws string) string {
+func (ctl *Controller) bidderMarketExposure(ctx context.Context, ws string) *commonv1.LocalObjectRef {
+	return ctl.publishedExposure(ctx, ws, serviceNameFor(ComponentKindBidder, BidderComponent)+ExposureIngressSuffix)
+}
+
+func (ctl *Controller) publishedExposure(ctx context.Context, ws, name string) *commonv1.LocalObjectRef {
 	ri, err := ctl.client(ws, ExposureGVR)
 	if err != nil {
-		return ""
+		return nil
 	}
-	name := serviceNameFor(ComponentKindBidder, BidderComponent) + ExposureIngressSuffix
 	u, err := ri.Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
-		return ""
+		return nil
 	}
-	url, _, _ := unstructured.NestedString(u.Object, "status", "url")
-	return strings.TrimRight(strings.TrimSpace(url), "/")
+	if address, _, _ := unstructured.NestedString(u.Object, "status", "address"); strings.TrimSpace(address) == "" {
+		return nil
+	}
+	return &commonv1.LocalObjectRef{Name: name}
 }
 
 func bidderDesired(o v1alpha1.MarketBidder, plan accountPlan, id *v1alpha1.MarketIdentity, ws, stateRoot string, bidderDIDs []string, pdsHandle, pdsPublicURL string,
-	ingress *v1alpha1.IngressConfig, requireIngress bool, ingressRef *v1alpha1.ComponentRef) ([]desiredComponent, error) {
+	ingress *v1alpha1.IngressConfig, requireIngress bool, ingressRef *commonv1.ObjectRef) ([]desiredComponent, error) {
 	suspend := o.Spec.Suspend
 	network := o.Spec.Network
 	ident := componentIdentity(id, o.Spec.Identity.Handle)
@@ -559,7 +570,7 @@ func bidderDesired(o v1alpha1.MarketBidder, plan accountPlan, id *v1alpha1.Marke
 		}
 		pds = desiredComponent{Kind: ComponentKindPds, Name: PdsComponent, Spec: pdsSpec}
 	}
-	var guestPdsRef *v1alpha1.ComponentRef
+	var guestPdsRef *commonv1.ObjectRef
 	if plan.Local {
 		guestPdsRef = ComponentRefFor(ComponentKindPds, PdsComponent)
 	}
@@ -583,30 +594,28 @@ func bidderDesired(o v1alpha1.MarketBidder, plan accountPlan, id *v1alpha1.Marke
 		f.VmruntimeCommand = append([]string(nil), f.VmruntimeCommand...)
 		firecracker = &f
 	}
-	var pdsAccessTokenPathValue string
+	pdsAccessToken := plan.accessToken()
 	if plan.Local {
-		pdsAccessTokenPathValue = pdsAccessTokenPath("bidder")
-	} else {
-		pdsAccessTokenPathValue = plan.accessTokenPath()
+		pdsAccessToken = pdsAccessTokenFor("bidder")
 	}
 	bidder := desiredComponent{Kind: ComponentKindBidder, Name: BidderComponent, Spec: v1alpha1.BidderSpec{
-		ComponentSpec:      NewComponentSpec(ComponentCRStateDir(stateRoot, ComponentKindBidder, BidderComponent), network, suspend),
-		MarketURL:          plan.MarketURL,
-		Mode:               string(plan.Mode),
-		Identity:           ident,
-		PdsRef:             plan.componentPdsRef(),
-		PDSAccessTokenPath: pdsAccessTokenPathValue,
-		PolicyEngineRef:    ComponentRefFor(ComponentKindPolicyEngine, PolicyEngineComponent),
-		VaultRef:           vault,
-		Hostnames:          hostnames,
-		GuestImageSource:   image,
-		Firecracker:        firecracker,
-		Kcp:                kcp,
-		Operator:           o.Spec.Operator,
-		Policy:             o.Spec.Policy,
-		PolicyArgs:         optionValue(o.Spec.Options, "policy-args"),
-		BidderDIDs:         append([]string(nil), bidderDIDs...),
-		Comms:              o.Spec.Comms,
+		ComponentSpec:     NewComponentSpec(ComponentCRStateDir(stateRoot, ComponentKindBidder, BidderComponent), network, suspend),
+		MarketExposureRef: plan.MarketExposure,
+		Mode:              string(plan.Mode),
+		Identity:          ident,
+		PdsRef:            plan.componentPdsRef(),
+		PDSAccessToken:    pdsAccessToken,
+		PolicyEngineRef:   ComponentRefFor(ComponentKindPolicyEngine, PolicyEngineComponent),
+		VaultRef:          vault,
+		Hostnames:         hostnames,
+		GuestImageSource:  image,
+		Firecracker:       firecracker,
+		Kcp:               kcp,
+		Operator:          o.Spec.Operator,
+		Policy:            o.Spec.Policy,
+		PolicyArgs:        optionValue(o.Spec.Options, "policy-args"),
+		BidderDIDs:        append([]string(nil), bidderDIDs...),
+		Comms:             o.Spec.Comms,
 	}}
 	out := []desiredComponent{policyEngineDesired(suspend), guest, bidder}
 	if plan.Local {
@@ -623,7 +632,7 @@ func bidderDesired(o v1alpha1.MarketBidder, plan accountPlan, id *v1alpha1.Marke
 func (ctl *Controller) reconcileBidderAccount(ctx context.Context, u *unstructured.Unstructured, o v1alpha1.MarketBidder,
 	plan accountPlan, id *v1alpha1.MarketIdentity, owner, stateRoot string, bidderDIDs []string) error {
 	st := v1alpha1.ApplicationStatus{ObservedGeneration: o.Generation, Profile: o.Spec.Profile}
-	plan.MarketURL = ctl.bidderMarketURL(ctx, ctl.c.workspace())
+	plan.MarketExposure = ctl.bidderMarketExposure(ctx, ctl.c.workspace())
 	switch id.Status.Phase {
 	case v1alpha1.MarketIdentityPhaseFailed, v1alpha1.MarketIdentityPhaseSessionExpired:
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, "its MarketIdentity: "+id.Status.Message
@@ -654,7 +663,7 @@ func (ctl *Controller) reconcileBidderAccount(ctx context.Context, u *unstructur
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for its existing-account MarketIdentity to report a did"
 		return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
 	}
-	if plan.Mode == v1alpha1.MarketIdentityModePdsAccount && strings.TrimSpace(id.Status.PdsUrl) == "" {
+	if plan.Mode == v1alpha1.MarketIdentityModePdsAccount && strings.TrimSpace(id.Status.PdsURL) == "" {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, "the existing-account MarketIdentity reports no pdsUrl; it fails closed"
 		return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
 	}
@@ -676,7 +685,7 @@ func (ctl *Controller) reconcileBidderAccount(ctx context.Context, u *unstructur
 	if err := ctl.pruneDesired(ctx, owner, desired); err != nil {
 		return err
 	}
-	ctl.ensureAccountRepo(ctx, ctl.c.workspace(), BidderIdentity, plan, id.Status.Did, id.Status.PdsUrl)
+	ctl.ensureAccountRepo(ctx, ctl.c.workspace(), BidderIdentity, plan, id.Status.Did, id.Status.PdsURL)
 	if err := ctl.rotateSigningKey(ctx, o); err != nil {
 		ctl.c.log().Warn("rotating the bidder's OIDC signing key", "name", o.Name, "err", err.Error())
 	}
@@ -749,7 +758,7 @@ func (ctl *Controller) reconcileBidder(ctx context.Context, u *unstructured.Unst
 		setOverrideErrorIfAny(&st, o.Generation, err)
 		return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
 	}
-	plan.MarketURL = ctl.bidderMarketURL(ctx, ctl.c.workspace())
+	plan.MarketExposure = ctl.bidderMarketExposure(ctx, ctl.c.workspace())
 	if o.Spec.Identity.Mode == "" {
 		o.Spec.Identity.Mode = plan.Mode
 	}
@@ -914,11 +923,11 @@ func (ctl *Controller) reconcileBidder(ctx context.Context, u *unstructured.Unst
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for the bidder's app Pds endpoint"
 		return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
 	}
-	caFile := ""
+	caPEM := ""
 	if o.Spec.Network != nil {
-		caFile = o.Spec.Network.CaBundleRef
+		caPEM = o.Spec.Network.CABundle
 	}
-	sess, err := ctl.ensurePdsAccountInVault(ctx, BidderVaultServer, BidderVaultClient, pdsSessionPath("bidder"), endpoint, caFile, pdsAccountHandle)
+	sess, err := ctl.ensurePdsAccountInVault(ctx, BidderVaultServer, BidderVaultClient, pdsSessionPath("bidder"), endpoint, caPEM, pdsAccountHandle)
 	if err != nil {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "its app Pds account: "+err.Error()
 		return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
@@ -981,7 +990,7 @@ func (ctl *Controller) reconcileBidder(ctx context.Context, u *unstructured.Unst
 		}
 		if err := ctl.reconcileOperatorRecords(ctx, ctl.c.workspace(), o.Spec.Network, func() (ownerSession, error) {
 			password, _, err := ctl.bidderPassword(ctx)
-			return ownerSession{Service: o.Spec.Identity.PdsUrl, Identifier: o.Spec.Identity.Handle, Password: password}, err
+			return ownerSession{Service: o.Spec.Identity.PdsURL, Identifier: o.Spec.Identity.Handle, Password: password}, err
 		}); err != nil {
 			ctl.c.log().Warn("writing the declared records of the market network operator account", "err", err.Error())
 		}

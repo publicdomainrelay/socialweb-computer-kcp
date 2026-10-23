@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-5.nodeclaims.socialweb.computer
+  name: v1alpha1-6.nodeclaims.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -28,8 +28,14 @@ spec:
           spec:
             type: object
             properties:
-              cluster:
-                type: string
+              clusterRef:
+                type: object
+                properties:
+                  name:
+                    type: string
+                    maxLength: 253
+                required:
+                  - name
               nodeName:
                 type: string
               ownerDid:
@@ -49,7 +55,7 @@ spec:
                 items:
                   type: string
             required:
-              - cluster
+              - clusterRef
               - nodeName
               - ownerDid
               - apiserverPort

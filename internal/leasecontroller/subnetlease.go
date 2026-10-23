@@ -25,7 +25,7 @@ func (c *Controller) ReconcileSubnetLease(ctx context.Context, workspace string,
 	if err := decodeObject(u, &lease); err != nil {
 		return fmt.Errorf("leasecontroller: decoding SubnetLease %s: %w", u.GetName(), err)
 	}
-	key := leaseKey(lease.Spec.Workspace, lease.Spec.Cluster, lease.Spec.Purpose, u.GetName())
+	key := leaseKey(lease.Spec.ClusterRef.Workspace, lease.Spec.ClusterRef.Name, lease.Spec.Purpose, u.GetName())
 	if u.GetDeletionTimestamp() != nil {
 		for _, held := range uniqueKeys(lease.Status.HolderRef, key) {
 			if err := c.subnets.Release(held); err != nil {

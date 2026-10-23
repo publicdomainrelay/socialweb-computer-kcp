@@ -43,7 +43,7 @@ func (c *Controller) reconcileVaultCredential(ctx context.Context, dyn dynamic.I
 	generation := u.GetGeneration()
 	status := obj.Status
 	status.ObservedGeneration = generation
-	server := strings.TrimSpace(obj.Spec.Server)
+	server := v1alpha1.VaultServer(obj.Spec.Vault, "")
 	mount := strings.TrimSpace(obj.Spec.Mount)
 	path := strings.TrimSpace(obj.Spec.Path)
 	if server == "" || mount == "" || path == "" {
@@ -78,7 +78,7 @@ func (c *Controller) reconcileVaultCertificate(ctx context.Context, dyn dynamic.
 	generation := u.GetGeneration()
 	status := obj.Status
 	status.ObservedGeneration = generation
-	server := strings.TrimSpace(obj.Spec.Server)
+	server := v1alpha1.VaultServer(&obj.Spec.Vault, "")
 	mount := strings.TrimSpace(obj.Spec.Mount)
 	role := strings.TrimSpace(obj.Spec.Role)
 	commonName := strings.TrimSpace(obj.Spec.CommonName)

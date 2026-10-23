@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-1.clusterrolls.socialweb.computer
+  name: v1alpha1-2.clusterrolls.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -28,15 +28,21 @@ spec:
           spec:
             type: object
             properties:
-              cluster:
-                type: string
+              clusterRef:
+                type: object
+                properties:
+                  name:
+                    type: string
+                    maxLength: 253
+                required:
+                  - name
               strategy:
                 type: string
               maxUnavailable:
                 type: integer
                 format: int32
             required:
-              - cluster
+              - clusterRef
               - strategy
               - maxUnavailable
           status:
@@ -64,7 +70,7 @@ spec:
       additionalPrinterColumns:
         - name: Cluster
           type: string
-          jsonPath: .spec.cluster
+          jsonPath: .spec.clusterRef.name
         - name: Phase
           type: string
           jsonPath: .status.phase

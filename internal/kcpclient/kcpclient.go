@@ -29,6 +29,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gateway"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/revocation"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 var (
@@ -887,7 +889,7 @@ func (c *Client) liveNodes(ctx context.Context, logicalCluster, cluster string) 
 	}
 	n := 0
 	for _, node := range list.Items {
-		if node.Spec.Cluster == cluster && node.Status.Phase != v1alpha1.NodeDraining {
+		if node.Spec.ClusterRef.Name == cluster && node.Status.Phase != v1alpha1.NodeDraining {
 			n++
 		}
 	}
@@ -985,7 +987,7 @@ func createNode(ctx context.Context, r rest.Interface, cluster, nodeName string,
 			Kind:       "Node",
 		},
 		ObjectMeta: metav1.ObjectMeta{Name: nodeName},
-		Spec:       v1alpha1.NodeSpec{Cluster: cluster},
+		Spec:       v1alpha1.NodeSpec{ClusterRef: commonv1.LocalObjectRef{Name: cluster}},
 	}
 	body, err := json.Marshal(node)
 	if err != nil {
@@ -1022,7 +1024,7 @@ func WriteNodeClaimTo(ctx context.Context, r rest.Interface, claim v1alpha1.Node
 	if claim.Name == "" {
 		return errors.New("kcpclient: WriteNodeClaim needs a claim name")
 	}
-	if claim.Spec.Cluster == "" {
+	if claim.Spec.ClusterRef.Name == "" {
 		return errors.New("kcpclient: WriteNodeClaim needs the cluster the claimed node belongs to")
 	}
 	if claim.Spec.NodeName == "" {
@@ -1144,7 +1146,7 @@ func (c *Client) ListNodeClaims(ctx context.Context, logicalCluster string) ([]v
 }
 
 func sameNodeClaimSpec(have, want v1alpha1.NodeClaimSpec) bool {
-	if have.Cluster != want.Cluster || have.NodeName != want.NodeName ||
+	if have.ClusterRef.Name != want.ClusterRef.Name || have.NodeName != want.NodeName ||
 		have.OwnerDid != want.OwnerDid || have.ApiserverPort != want.ApiserverPort ||
 		have.AdvertiseAddress != want.AdvertiseAddress || have.TokenFile != want.TokenFile ||
 		have.NodePasswordFile != want.NodePasswordFile || have.ServerCAFile != want.ServerCAFile {
@@ -1167,7 +1169,7 @@ func nodeClaimSpecPatch(spec v1alpha1.NodeClaimSpec) ([]byte, error) {
 		dids = []string{}
 	}
 	return json.Marshal(map[string]any{"spec": map[string]any{
-		"cluster":          spec.Cluster,
+		"clusterRef":       map[string]any{"name": spec.ClusterRef.Name},
 		"nodeName":         spec.NodeName,
 		"ownerDid":         spec.OwnerDid,
 		"apiserverPort":    spec.ApiserverPort,

@@ -17,6 +17,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/models"
 	policyengine "github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/status"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/trust"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 const (
@@ -218,7 +220,7 @@ func (r *RunReconciler) buildInputs(ctx context.Context, run *policyv1alpha1.Pol
 	return inputs, nil
 }
 
-func (r *RunReconciler) recordInput(ctx context.Context, ref *policyv1alpha1.PolicyStrongRef, seed models.Cache) string {
+func (r *RunReconciler) recordInput(ctx context.Context, ref *commonv1.StrongRef, seed models.Cache) string {
 	if ref == nil || ref.URI == "" {
 		return ""
 	}
@@ -235,14 +237,14 @@ func (r *RunReconciler) recordInput(ctx context.Context, ref *policyv1alpha1.Pol
 	return string(data)
 }
 
-func resolveRecordRef(ctx context.Context, source RecordSource, ref policyv1alpha1.PolicyStrongRef, seed models.Cache) (map[string]any, error) {
+func resolveRecordRef(ctx context.Context, source RecordSource, ref commonv1.StrongRef, seed models.Cache) (map[string]any, error) {
 	if cached, ok := source.(RecordCacheSource); ok {
 		return cached.ResolveRecordCached(ctx, ref, seed)
 	}
 	return source.ResolveRecord(ctx, ref)
 }
 
-func resolveWorkflowRef(ctx context.Context, source RecordSource, ref policyv1alpha1.PolicyStrongRef, seed models.Cache) (json.RawMessage, error) {
+func resolveWorkflowRef(ctx context.Context, source RecordSource, ref commonv1.StrongRef, seed models.Cache) (json.RawMessage, error) {
 	if cached, ok := source.(RecordCacheSource); ok {
 		return cached.ResolveWorkflowCached(ctx, ref, seed)
 	}

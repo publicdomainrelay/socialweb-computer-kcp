@@ -2,6 +2,8 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 type AtprotoSession struct {
@@ -22,9 +24,9 @@ type AtprotoSessionList struct {
 type AtprotoSessionSpec struct {
 	DID string `json:"did"`
 
-	AccountRef string `json:"accountRef"`
+	AccountRef commonv1.LocalObjectRef `json:"accountRef"`
 
-	PdsRef string `json:"pdsRef"`
+	PdsRef commonv1.ObjectRef `json:"pdsRef"`
 
 	SessionID string `json:"sessionId"`
 }

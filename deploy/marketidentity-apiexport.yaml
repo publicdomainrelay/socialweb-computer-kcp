@@ -6,16 +6,16 @@ spec:
   resources:
     - group: socialweb.computer
       name: marketidentities
-      schema: v1alpha1-4.marketidentities.socialweb.computer
+      schema: v1alpha1-5.marketidentities.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer
       name: atprotorecords
-      schema: v1alpha1-3.atprotorecords.socialweb.computer
+      schema: v1alpha1-4.atprotorecords.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer
       name: atprotorecordwatches
-      schema: v1alpha1-3.atprotorecordwatches.socialweb.computer
+      schema: v1alpha1-4.atprotorecordwatches.socialweb.computer
       storage:
         crd: {}

@@ -181,7 +181,7 @@ func (ctl *Controller) reconcileOperatorRecords(ctx context.Context, ws string, 
 	if err != nil {
 		return err
 	}
-	pds, err := ctl.pdsFor(s.Service, n.CaBundleRef)
+	pds, err := ctl.pdsFor(s.Service, n.CABundle)
 	if err != nil {
 		return err
 	}

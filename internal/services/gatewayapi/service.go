@@ -515,14 +515,14 @@ func networkName(network *v1alpha1.MarketNetworkValue) string {
 	if network == nil {
 		return ""
 	}
-	return network.PlcDirectoryUrl
+	return network.PLCDirectoryURL
 }
 
 func plcURL(network *v1alpha1.MarketNetworkValue) string {
-	if network == nil || network.PlcDirectoryUrl == "" {
+	if network == nil || network.PLCDirectoryURL == "" {
 		return identity.DefaultPLCURL
 	}
-	return strings.TrimRight(network.PlcDirectoryUrl, "/")
+	return strings.TrimRight(network.PLCDirectoryURL, "/")
 }
 
 func directoryFor(raw string) identity.Directory {

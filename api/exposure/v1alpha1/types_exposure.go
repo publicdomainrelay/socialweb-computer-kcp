@@ -26,7 +26,7 @@ type ExposureSpec struct {
 
 	Hostname string `json:"hostname,omitempty"`
 
-	Path string `json:"path,omitempty"`
+	Path string `json:"path,omitempty" apigen:"userEndpoint"`
 
 	TLS ExposureTLS `json:"tls,omitempty"`
 
@@ -48,7 +48,7 @@ type ExposureTLS struct {
 
 	CertRef string `json:"certRef,omitempty"`
 
-	CABundleRef string `json:"caBundleRef,omitempty"`
+	CABundle string `json:"caBundle,omitempty"`
 
 	Hostnames []string `json:"hostnames,omitempty"`
 }
@@ -82,7 +82,7 @@ type ExposureStatus struct {
 
 	Ready bool `json:"ready,omitempty"`
 
-	URL string `json:"url,omitempty"`
+	Address string `json:"address,omitempty"`
 
 	Endpoint string `json:"endpoint,omitempty"`
 

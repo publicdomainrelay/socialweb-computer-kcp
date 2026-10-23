@@ -57,7 +57,7 @@ func (r *contractRunner) ensureSecrets(ctx context.Context, contract v1alpha1.Co
 	if grant := contract.Status.Grant; grant != nil && contract.Spec.NodeJoin != nil {
 		audience := secretsAudience(r.svc.callbackDID())
 		state.install(grant.Issuer, audience, grant.Subject, newIssuerVerifier(grant.Issuer, r.svc.cfg.HTTPClient))
-		doc, err := json.Marshal(nodeClaimDocument(contract.Spec.NodeJoin.Cluster, grant.Role, grant.Issuer))
+		doc, err := json.Marshal(nodeClaimDocument(contract.Spec.NodeJoin.ClusterRef.Name, grant.Role, grant.Issuer))
 		if err != nil {
 			return err
 		}
@@ -120,7 +120,7 @@ func (r *contractRunner) prepareWorkloadGrant(ctx context.Context, state *v1alph
 	}
 	subject := ""
 	if r.nodeJoin != nil {
-		grant, err := nodeGrant(winner.DID, r.svc.callbackDID(), vmName, r.nodeJoin.Cluster, cfg)
+		grant, err := nodeGrant(winner.DID, r.svc.callbackDID(), vmName, r.nodeJoin.ClusterRef.Name, cfg)
 		if err != nil {
 			return err
 		}
@@ -140,7 +140,7 @@ func (r *contractRunner) prepareWorkloadGrant(ctx context.Context, state *v1alph
 	audience := secretsAudience(r.svc.callbackDID())
 	r.secrets.install(cfg.IssuerURI, audience, subject, newIssuerVerifier(cfg.IssuerURI, r.svc.cfg.HTTPClient))
 	if r.nodeJoin != nil {
-		doc, err := json.Marshal(nodeClaimDocument(r.nodeJoin.Cluster, vmName, cfg.IssuerURI))
+		doc, err := json.Marshal(nodeClaimDocument(r.nodeJoin.ClusterRef.Name, vmName, cfg.IssuerURI))
 		if err != nil {
 			return err
 		}
@@ -148,7 +148,7 @@ func (r *contractRunner) prepareWorkloadGrant(ctx context.Context, state *v1alph
 	}
 	nodeAud := ""
 	if r.nodeJoin != nil {
-		nodeAud = cloudinit.NodeAudience(r.nodeJoin.Cluster, vmName)
+		nodeAud = cloudinit.NodeAudience(r.nodeJoin.ClusterRef.Name, vmName)
 	}
 	record := nodeRBACRecord(vmName, cfg.IssuerURI, subject, audience, nodeAud, r.nodeJoin != nil)
 	key := secretsRBACKey(r.name)

@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-1.relaystatuses.socialweb.computer
+  name: v1alpha1-2.relaystatuses.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -29,7 +29,21 @@ spec:
             type: object
             properties:
               relayRef:
-                type: string
+                type: object
+                properties:
+                  group:
+                    type: string
+                  kind:
+                    type: string
+                    maxLength: 63
+                  name:
+                    type: string
+                    maxLength: 253
+                  workspace:
+                    type: string
+                required:
+                  - kind
+                  - name
             required:
               - relayRef
           status:
@@ -60,7 +74,7 @@ spec:
       additionalPrinterColumns:
         - name: Relay
           type: string
-          jsonPath: .spec.relayRef
+          jsonPath: .spec.relayRef.name
         - name: Phase
           type: string
           jsonPath: .status.phase

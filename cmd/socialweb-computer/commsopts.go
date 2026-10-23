@@ -26,9 +26,9 @@ func applyCommsOption(comms *v1alpha1.MarketComms, name, value string) (*v1alpha
 		}
 		comms.Mode = mode
 	case "comms-relay-url":
-		comms.RelayUrls = splitList(value)
+		comms.RelayURLs = splitList(value)
 	case "comms-firehose-url":
-		comms.FirehoseUrls = splitList(value)
+		comms.FirehoseURLs = splitList(value)
 	}
 	return comms, true, nil
 }

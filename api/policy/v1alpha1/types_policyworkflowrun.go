@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 type PolicyWorkflowRun struct {
@@ -42,11 +44,11 @@ type PolicyWorkflowRunSpec struct {
 
 	RootRequesterDid string `json:"rootRequesterDid,omitempty"`
 
-	RFP *PolicyStrongRef `json:"rfp,omitempty"`
+	RFP *commonv1.StrongRef `json:"rfp,omitempty"`
 
-	Bid *PolicyStrongRef `json:"bid,omitempty"`
+	Bid *commonv1.StrongRef `json:"bid,omitempty"`
 
-	Accept *PolicyStrongRef `json:"accept,omitempty"`
+	Accept *commonv1.StrongRef `json:"accept,omitempty"`
 
 	Cache PolicyCache `json:"cache,omitempty"`
 

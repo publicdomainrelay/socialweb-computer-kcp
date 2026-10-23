@@ -142,10 +142,7 @@ var systemCertFiles = []string{"/etc/ssl/certs/ca-certificates.crt", "/etc/pki/t
 	"/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem", "/etc/ssl/cert.pem"}
 
 func outboundCABundle(dir, networkCA string) (string, error) {
-	ca, err := os.ReadFile(networkCA)
-	if err != nil {
-		return "", fmt.Errorf("gatewaykcp: the market network's CA bundle: %w", err)
-	}
+	ca := []byte(strings.TrimSpace(networkCA) + "\n")
 	var system []byte
 	for _, f := range systemCertFiles {
 		if b, err := os.ReadFile(f); err == nil {

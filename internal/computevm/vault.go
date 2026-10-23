@@ -17,6 +17,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 const (
@@ -103,10 +105,10 @@ func (ct *Controller) forgetLogin(server string) {
 	ct.mu.Unlock()
 }
 
-func userDataPath(ref v1alpha1.ComputeVMVaultRef) (string, error) {
+func userDataPath(ref commonv1.SecretRef) (string, error) {
 	mount, path := strings.Trim(ref.Mount, "/"), strings.Trim(ref.Path, "/")
-	if ref.Server == "" || mount == "" || path == "" || strings.Contains(path, "..") {
-		return "", fmt.Errorf("spec.userData.vault names server %q, mount %q and path %q; all three are required", ref.Server, ref.Mount, ref.Path)
+	if v1alpha1.VaultServer(ref.Vault, "") == "" || mount == "" || path == "" || strings.Contains(path, "..") {
+		return "", fmt.Errorf("spec.userData.vault names server %q, mount %q and path %q; all three are required", v1alpha1.VaultServer(ref.Vault, ""), ref.Mount, ref.Path)
 	}
 	return mount + "/data/" + path, nil
 }
@@ -117,7 +119,7 @@ func (ct *Controller) userData(ctx context.Context, o v1alpha1.ComputeVM) (strin
 	if err != nil {
 		return "", false, err
 	}
-	client, err := ct.vaultFor(ctx, ref.Server)
+	client, err := ct.vaultFor(ctx, v1alpha1.VaultServer(ref.Vault, ""))
 	if err != nil {
 		ct.c.log().Info("the user data waits for the bidder's vault", "computevm", o.Name, "err", err.Error())
 		return "", false, nil
@@ -125,8 +127,8 @@ func (ct *Controller) userData(ctx context.Context, o v1alpha1.ComputeVM) (strin
 	data, err := client.GetKV(ctx, path)
 	var re *openbao.ResponseError
 	if openbao.IsAuthError(err) {
-		ct.forgetLogin(ref.Server)
-		if client, err = ct.vaultFor(ctx, ref.Server); err != nil {
+		ct.forgetLogin(v1alpha1.VaultServer(ref.Vault, ""))
+		if client, err = ct.vaultFor(ctx, v1alpha1.VaultServer(ref.Vault, "")); err != nil {
 			ct.c.log().Info("the user data waits for the bidder's vault", "computevm", o.Name, "err", err.Error())
 			return "", false, nil
 		}

@@ -2,6 +2,8 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 type AtprotoIdentity struct {
@@ -32,7 +34,7 @@ type AtprotoIdentitySpec struct {
 
 	Scope IdentityScope `json:"scope"`
 
-	Cluster string `json:"cluster,omitempty"`
+	ClusterRef *commonv1.LocalObjectRef `json:"clusterRef,omitempty"`
 
 	Revoked bool `json:"revoked,omitempty"`
 }

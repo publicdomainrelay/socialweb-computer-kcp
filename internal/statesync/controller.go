@@ -600,7 +600,7 @@ func storeAcknowledged(status *v1alpha1.StateSyncStatus, observation Observation
 		acknowledged.At = observation.At
 	}
 	if value, ok := observation.Meta["eventUri"]; ok && value != "" {
-		acknowledged.EventUri = value
+		acknowledged.EventURI = value
 	}
 	if value, ok := observation.Meta["eventCid"]; ok && value != "" {
 		acknowledged.EventCid = value

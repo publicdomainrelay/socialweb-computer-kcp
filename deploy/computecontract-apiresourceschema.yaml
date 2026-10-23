@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-7.computecontracts.socialweb.computer
+  name: v1alpha1-8.computecontracts.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -53,9 +53,27 @@ spec:
               secretsRef:
                 type: object
                 properties:
+                  vault:
+                    type: object
+                    properties:
+                      group:
+                        type: string
+                      kind:
+                        type: string
+                        maxLength: 63
+                      name:
+                        type: string
+                        maxLength: 253
+                      workspace:
+                        type: string
+                    required:
+                      - kind
+                      - name
                   mount:
                     type: string
                   path:
+                    type: string
+                  key:
                     type: string
                 required:
                   - mount
@@ -69,8 +87,14 @@ spec:
               nodeJoin:
                 type: object
                 properties:
-                  cluster:
-                    type: string
+                  clusterRef:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                        maxLength: 253
+                    required:
+                      - name
                   meshd:
                     type: object
                     properties:
@@ -112,7 +136,7 @@ spec:
                       - downloadBase
                       - pins
                 required:
-                  - cluster
+                  - clusterRef
           status:
             type: object
             properties:

@@ -24,6 +24,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/ingress"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 const (
@@ -277,9 +279,6 @@ func (c *Controller) ensure(ctx context.Context, dyn dynamic.Interface, workspac
 		},
 		"ttlSeconds": int64(market.HeartbeatTTL.Seconds()),
 	}
-	if relays, _, _ := unstructured.NestedStringSlice(bidder.Object, "spec", "network", "relayUrls"); len(relays) > 0 && strings.TrimSpace(relays[0]) != "" {
-		spec["relayUri"] = strings.TrimSpace(relays[0])
-	}
 	u := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": v1alpha1.GroupVersion.String(),
 		"kind":       "MarketPresence",
@@ -405,7 +404,7 @@ func (c *Controller) reconcile(ctx context.Context, dyn dynamic.Interface, u *un
 		setCondition(&status, gen, ConditionBidderReady, metav1.ConditionFalse, "BidderNotReady", message)
 	}
 
-	offering := strings.TrimSpace(presence.Spec.OfferingUri)
+	offering := strings.TrimSpace(presence.Spec.OfferingURI)
 	did := bidderDID(bidder)
 	if offering != "" {
 		aturi, err := syntax.ParseATURI(offering)
@@ -532,7 +531,7 @@ func (c *Controller) readerFor(bidder *unstructured.Unstructured) market.RecordG
 	return reader
 }
 
-func (c *Controller) bidder(ctx context.Context, ref v1alpha1.MarketPresenceBidderRef) (*unstructured.Unstructured, error) {
+func (c *Controller) bidder(ctx context.Context, ref commonv1.ObjectRef) (*unstructured.Unstructured, error) {
 	workspace := strings.TrimSpace(ref.Workspace)
 	if workspace == "" {
 		workspace = DefaultWorkspace

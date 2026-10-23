@@ -6,7 +6,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math"
 	"sort"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -64,6 +66,21 @@ func schemaNode(s *Schema) *yaml.Node {
 	if len(s.Enum) > 0 {
 		pairs = append(pairs, "enum", sequence(strings2nodes(s.Enum)...))
 	}
+	if s.Default != nil {
+		pairs = append(pairs, "default", valueNode(s.Default))
+	}
+	if s.Minimum != nil {
+		pairs = append(pairs, "minimum", integer(*s.Minimum))
+	}
+	if s.Maximum != nil {
+		pairs = append(pairs, "maximum", integer(*s.Maximum))
+	}
+	if s.MaxLength != nil {
+		pairs = append(pairs, "maxLength", integer(*s.MaxLength))
+	}
+	if s.Pattern != "" {
+		pairs = append(pairs, "pattern", str(s.Pattern))
+	}
 	if len(s.Properties) > 0 {
 		props := mapping()
 		props.Style = 0
@@ -81,10 +98,57 @@ func schemaNode(s *Schema) *yaml.Node {
 	if s.AdditionalProperties != nil {
 		pairs = append(pairs, "additionalProperties", schemaNode(s.AdditionalProperties))
 	}
+	if s.ListType != "" {
+		pairs = append(pairs, "x-kubernetes-list-type", str(s.ListType))
+	}
+	if len(s.ListMapKeys) > 0 {
+		pairs = append(pairs, "x-kubernetes-list-map-keys", sequence(strings2nodes(s.ListMapKeys)...))
+	}
 	if s.PreserveUnknown {
 		pairs = append(pairs, "x-kubernetes-preserve-unknown-fields", boolean(true))
 	}
 	return mapping(pairs...)
+}
+
+func integer(n int64) *yaml.Node {
+	return scalar("!!int", strconv.FormatInt(n, 10))
+}
+
+func valueNode(v any) *yaml.Node {
+	switch x := v.(type) {
+	case string:
+		return str(x)
+	case bool:
+		return boolean(x)
+	case float64:
+		if x == math.Trunc(x) {
+			return integer(int64(x))
+		}
+		return scalar("!!float", strconv.FormatFloat(x, 'g', -1, 64))
+	case []any:
+		items := make([]*yaml.Node, len(x))
+		for i, e := range x {
+			items[i] = valueNode(e)
+		}
+		n := sequence(items...)
+		n.Style = yaml.FlowStyle
+		return n
+	case map[string]any:
+		keys := make([]string, 0, len(x))
+		for k := range x {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		pairs := make([]any, 0, 2*len(keys))
+		for _, k := range keys {
+			pairs = append(pairs, k, valueNode(x[k]))
+		}
+		n := mapping(pairs...)
+		n.Style = yaml.FlowStyle
+		return n
+	default:
+		return scalar("!!null", "null")
+	}
 }
 
 func encodeYAML(doc *yaml.Node) ([]byte, error) {

@@ -22,6 +22,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/ingressproxy/opentunnel"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/ingressproxy/xrpcsubscription"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsreload"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 const Kind = "IngressProxy"
@@ -42,7 +44,7 @@ type Config struct {
 	IngressProxyHost  string
 	PublicHost        string
 	Network           *v1alpha1.MarketNetworkValue
-	RelayRef          *v1alpha1.ComponentRef
+	RelayRef          *commonv1.ObjectRef
 	RelayURL          string
 	ServiceID         string
 	AdditionalHosts   []string
@@ -124,15 +126,15 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 	if decoded.Network != nil {
 		network := *decoded.Network
 		cfg.Network = &network
-		cfg.PLCURL = strings.TrimRight(strings.TrimSpace(decoded.Network.PlcDirectoryUrl), "/")
+		cfg.PLCURL = strings.TrimRight(strings.TrimSpace(decoded.Network.PLCDirectoryURL), "/")
 		if cfg.IngressProxyHost == "" {
 			cfg.IngressProxyHost = strings.TrimSpace(decoded.Network.IngressProxyHost)
 		}
 		if cfg.Hostname == "" {
 			cfg.Hostname = hostnameOnly(strings.TrimSpace(decoded.Network.IngressProxyHost))
 		}
-		if cfg.RelayURL == "" && len(decoded.Network.RelayUrls) > 0 {
-			cfg.RelayURL = strings.TrimSpace(decoded.Network.RelayUrls[0])
+		if cfg.RelayURL == "" && len(decoded.Network.RelayURLs) > 0 {
+			cfg.RelayURL = strings.TrimSpace(decoded.Network.RelayURLs[0])
 		}
 	}
 	if cfg.Hostname == "" {
@@ -144,17 +146,8 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 	if cfg.Hostname == "" && decoded.Identity != nil {
 		cfg.Hostname = hostnameOnly(strings.TrimSpace(decoded.Identity.Handle))
 	}
-	if cfg.Hostname == "" && decoded.IdentityRef != nil {
-		cfg.Hostname = hostnameOnly(strings.TrimSpace(decoded.IdentityRef.Did))
-	}
 	if decoded.Identity != nil && strings.TrimSpace(decoded.Identity.Did) != "" {
 		cfg.AllowedDIDs = appendValues(cfg.AllowedDIDs, decoded.Identity.Did)
-	}
-	if decoded.IdentityRef != nil && strings.TrimSpace(decoded.IdentityRef.Did) != "" {
-		cfg.AllowedDIDs = appendValues(cfg.AllowedDIDs, decoded.IdentityRef.Did)
-	}
-	if decoded.RelayRef != nil && strings.TrimSpace(decoded.RelayRef.Did) != "" {
-		cfg.AllowedDIDs = appendValues(cfg.AllowedDIDs, decoded.RelayRef.Did)
 	}
 	if host := hostnameOnly(cfg.IngressProxyHost); host != "" {
 		cfg.AllowedHosts = appendValues(cfg.AllowedHosts, host, "*."+host)
@@ -183,9 +176,6 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		cfg.AllowedHosts = appendValues(cfg.AllowedHosts, wildcard)
 	}
 	if decoded.RelayRef != nil {
-		if did := strings.TrimSpace(decoded.RelayRef.Did); did != "" {
-			cfg.AllowedDIDs = appendValues(cfg.AllowedDIDs, did)
-		}
 		if relayURL, ok := relayEndpoint(cfg.Deps, cfg.Workspace, decoded.RelayRef); ok {
 			cfg.RelayURL = relayURL
 		}
@@ -281,7 +271,7 @@ func networkHostnames(network *v1alpha1.MarketNetworkValue, port int) []string {
 	return out
 }
 
-func relayEndpoint(deps component.Deps, workspace string, ref *v1alpha1.ComponentRef) (string, bool) {
+func relayEndpoint(deps component.Deps, workspace string, ref *commonv1.ObjectRef) (string, bool) {
 	if ref == nil {
 		return "", false
 	}

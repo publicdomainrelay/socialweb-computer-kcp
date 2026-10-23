@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-5.computevms.socialweb.computer
+  name: v1alpha1-6.computevms.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -58,14 +58,29 @@ spec:
                   vault:
                     type: object
                     properties:
-                      server:
-                        type: string
+                      vault:
+                        type: object
+                        properties:
+                          group:
+                            type: string
+                          kind:
+                            type: string
+                            maxLength: 63
+                          name:
+                            type: string
+                            maxLength: 253
+                          workspace:
+                            type: string
+                        required:
+                          - kind
+                          - name
                       mount:
                         type: string
                       path:
                         type: string
+                      key:
+                        type: string
                     required:
-                      - server
                       - mount
                       - path
                 required:
@@ -82,14 +97,26 @@ spec:
               contract:
                 type: object
                 properties:
-                  receiptUri:
-                    type: string
-                  receiptCid:
-                    type: string
-                  acceptUri:
-                    type: string
-                  acceptCid:
-                    type: string
+                  receipt:
+                    type: object
+                    properties:
+                      uri:
+                        type: string
+                      cid:
+                        type: string
+                    required:
+                      - uri
+                      - cid
+                  accept:
+                    type: object
+                    properties:
+                      uri:
+                        type: string
+                      cid:
+                        type: string
+                    required:
+                      - uri
+                      - cid
                   submitEventUrl:
                     type: string
                   acceptedAt:

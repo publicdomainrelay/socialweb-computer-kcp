@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-1.subnetleases.socialweb.computer
+  name: v1alpha1-2.subnetleases.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -28,17 +28,28 @@ spec:
           spec:
             type: object
             properties:
-              workspace:
-                type: string
-              cluster:
-                type: string
+              clusterRef:
+                type: object
+                properties:
+                  group:
+                    type: string
+                  kind:
+                    type: string
+                    maxLength: 63
+                  name:
+                    type: string
+                    maxLength: 253
+                  workspace:
+                    type: string
+                required:
+                  - kind
+                  - name
               purpose:
                 type: string
               prefix:
                 type: string
             required:
-              - workspace
-              - cluster
+              - clusterRef
               - purpose
               - prefix
           status:

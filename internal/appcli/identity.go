@@ -32,7 +32,7 @@ func actionKey(a *v1alpha1.MarketIdentityPendingAction) string {
 	if a == nil {
 		return ""
 	}
-	return strings.Join([]string{string(a.Kind), a.Url, a.CallerDid}, "|")
+	return strings.Join([]string{string(a.Kind), a.URL, a.CallerDid}, "|")
 }
 
 func (r IdentityRenderer) WaitReady(ctx context.Context, name string) (*v1alpha1.MarketIdentity, error) {
@@ -106,11 +106,11 @@ func (r IdentityRenderer) render(ctx context.Context, name string, a *v1alpha1.M
 func (r IdentityRenderer) showUrl(title string, a *v1alpha1.MarketIdentityPendingAction) {
 	rule := strings.Repeat("=", 60)
 	fmt.Fprintf(r.Out, "\n%s\n  %s\n\n", rule, title)
-	if a.Url != "" {
-		if q, err := qrcode.New(a.Url, qrcode.High); err == nil {
+	if a.URL != "" {
+		if q, err := qrcode.New(a.URL, qrcode.High); err == nil {
 			fmt.Fprint(r.Out, q.ToSmallString(false))
 		}
-		fmt.Fprintf(r.Out, "\n  Or open this URL:\n  %s\n", a.Url)
+		fmt.Fprintf(r.Out, "\n  Or open this URL:\n  %s\n", a.URL)
 	}
 	if a.ExpiresAt != "" {
 		fmt.Fprintf(r.Out, "  Expires at %s\n", a.ExpiresAt)

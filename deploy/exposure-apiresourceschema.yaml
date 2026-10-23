@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-3.exposures.exposure.socialweb.computer
+  name: v1alpha1-4.exposures.exposure.socialweb.computer
 spec:
   group: exposure.socialweb.computer
   names:
@@ -46,7 +46,7 @@ spec:
                     type: boolean
                   certRef:
                     type: string
-                  caBundleRef:
+                  caBundle:
                     type: string
                   hostnames:
                     type: array
@@ -85,7 +85,7 @@ spec:
                   - Failed
               ready:
                 type: boolean
-              url:
+              address:
                 type: string
               endpoint:
                 type: string
@@ -107,9 +107,9 @@ spec:
         - name: Ready
           type: boolean
           jsonPath: .status.ready
-        - name: URL
+        - name: Address
           type: string
-          jsonPath: .status.url
+          jsonPath: .status.address
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp

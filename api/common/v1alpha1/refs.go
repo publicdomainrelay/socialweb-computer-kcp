@@ -3,15 +3,15 @@ package v1alpha1
 type ObjectRef struct {
 	Group string `json:"group,omitempty"`
 
-	Kind string `json:"kind"`
+	Kind string `json:"kind" apigen:"maxLength=63"`
 
-	Name string `json:"name"`
+	Name string `json:"name" apigen:"maxLength=253"`
 
 	Workspace string `json:"workspace,omitempty"`
 }
 
 type LocalObjectRef struct {
-	Name string `json:"name"`
+	Name string `json:"name" apigen:"maxLength=253"`
 }
 
 type StrongRef struct {

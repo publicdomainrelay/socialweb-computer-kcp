@@ -25,13 +25,14 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpapply"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 const (
 	NetworkSet          = "market-network"
 	NetworkProfile      = "market-network"
 	BidderAccountDomain = "bob.test"
-	CABundleFile        = "ca-bundle.pem"
 	NetworkServiceState = "state"
 	NetworkPortsFile    = "ports.json"
 	NetworkPortFirst    = 30000
@@ -50,7 +51,7 @@ const (
 	NetworkPlcHost        = "plc.default.global.svc.kcp.local"
 	NetworkRelayHost      = "relay.default.relay.svc.kcp.local"
 	NetworkIngressHost    = "dispatcher.default.relay.svc.kcp.local"
-	NetworkDispatcherHost = "dispatcher-tls.default.relay.svc.kcp.local"
+	NetworkDispatcherHost = v1alpha1.NetworkDispatcherHost
 	NetworkAlicePdsHost   = "pds.default.alice.svc.kcp.local"
 	NetworkBobPdsHost     = "pds.default.bob.svc.kcp.local"
 	NetworkPortPlc        = "Global/plc"
@@ -116,12 +117,11 @@ func networkValueFromLeases(leases map[string]component.PortLease, caBundle stri
 	ingress, dispatcher := leases[NetworkPortIngress], leases[NetworkPortDispatcher]
 	alice, bob := leases[NetworkPortAlicePds], leases[NetworkPortBobPds]
 	return v1alpha1.MarketNetworkValue{
-		PlcDirectoryUrl:  "http://" + plc.Address(),
+		PLCDirectoryURL:  "http://" + plc.Address(),
 		IngressProxyHost: GuestTLSHost + ":" + strconv.Itoa(int(leasePort(ingress))),
-		RelayUrls:        []string{"http://" + relay.Address()},
-		FirehoseUrls:     []string{},
-		GuestTlsUrl:      "https://" + GuestTLSHost + ":" + strconv.Itoa(int(leasePort(dispatcher))),
-		CaBundleRef:      caBundle,
+		RelayURLs:        []string{"http://" + relay.Address()},
+		FirehoseURLs:     []string{},
+		CABundle:         caBundle,
 		Hosts: []v1alpha1.NetworkHost{
 			{Name: NetworkPlcHost, Address: plc.Address()},
 			{Name: NetworkRelayHost, Address: relay.Address()},
@@ -137,7 +137,7 @@ func endpointAddress(e v1alpha1.Endpoint) string {
 	if e.Address != "" {
 		return e.Address
 	}
-	u, err := url.Parse(e.Url)
+	u, err := url.Parse(e.URL)
 	if err != nil {
 		return ""
 	}
@@ -145,8 +145,8 @@ func endpointAddress(e v1alpha1.Endpoint) string {
 }
 
 func endpointURL(e v1alpha1.Endpoint) string {
-	if e.Url != "" {
-		return e.Url
+	if e.URL != "" {
+		return e.URL
 	}
 	if e.Address != "" {
 		return "http://" + e.Address
@@ -172,8 +172,8 @@ func exposureURL(snap componentSnapshot, name string) (string, bool) {
 		return "", false
 	}
 	for _, e := range v.Status.Endpoints {
-		if e.Url != "" {
-			return e.Url, true
+		if e.URL != "" {
+			return e.URL, true
 		}
 	}
 	return "", false
@@ -237,12 +237,11 @@ func networkValueFromExposures(snap componentSnapshot, caBundle string) (v1alpha
 		return v1alpha1.MarketNetworkValue{}, err
 	}
 	return v1alpha1.MarketNetworkValue{
-		PlcDirectoryUrl:  plcURL,
+		PLCDirectoryURL:  plcURL,
 		IngressProxyHost: GuestTLSHost + ":" + portFromValue(ingressHost),
-		RelayUrls:        []string{relayURL},
-		FirehoseUrls:     []string{},
-		GuestTlsUrl:      "https://" + GuestTLSHost + ":" + portFromValue(dispatcherHost),
-		CaBundleRef:      caBundle,
+		RelayURLs:        []string{relayURL},
+		FirehoseURLs:     []string{},
+		CABundle:         caBundle,
 		Hosts: []v1alpha1.NetworkHost{
 			{Name: NetworkPlcHost, Address: plcHost},
 			{Name: NetworkRelayHost, Address: relayHost},
@@ -272,7 +271,7 @@ func portFromValue(address string) string {
 }
 
 func networkPds(stateRoot string, value v1alpha1.MarketNetworkValue, lease component.PortLease, name, handle, host string,
-	vault *v1alpha1.ComponentRef, publicURL string, suspend bool) desiredComponent {
+	vault *commonv1.ObjectRef, publicURL string, suspend bool) desiredComponent {
 	stateDir := ComponentCRStateDir(NetworkStateDir(stateRoot), ComponentKindPds, name)
 	port := leasePort(lease)
 	publicURL = strings.TrimRight(strings.TrimSpace(publicURL), "/")
@@ -287,23 +286,20 @@ func networkPds(stateRoot string, value v1alpha1.MarketNetworkValue, lease compo
 		oauth = &v1alpha1.PdsOAuth{Issuer: publicURL, AllowLocalhostClients: true}
 	}
 	return desiredComponent{Kind: ComponentKindPds, Name: name, Spec: v1alpha1.PdsSpec{
-		ComponentSpec:     NewComponentSpec(stateDir, &value, suspend),
-		Identity:          &v1alpha1.ComponentIdentity{Handle: handle},
-		VaultRef:          vault,
-		Hostnames:         []string{host},
-		Serve:             componentServe("", port),
-		Mode:              v1alpha1.PdsModeFull,
-		PlcURL:            value.PlcDirectoryUrl,
-		PublicBaseURL:     publicURL,
-		RequireIngress:    true,
-		IngressRef:        ComponentRefFor(ComponentKindIngressProxy, NetworkIngressName),
-		PublicURL:         publicURL,
-		StableHost:        stableHost,
-		RepoKeyPath:       filepath.Join(stateDir, pdsRepoKeyDir),
-		SessionSecretPath: filepath.Join(stateDir, pdsSessionSecretFile),
-		RotationKeyPath:   filepath.Join(stateDir, pdsRotationKeyFile),
-		AllowExplicitDID:  false,
-		OAuth:             oauth,
+		ComponentSpec:    NewComponentSpec(stateDir, &value, suspend),
+		Identity:         &v1alpha1.ComponentIdentity{Handle: handle},
+		VaultRef:         vault,
+		Hostnames:        []string{host},
+		Serve:            componentServe("", port),
+		Mode:             v1alpha1.PdsModeFull,
+		PlcURL:           value.PLCDirectoryURL,
+		PublicBaseURL:    publicURL,
+		RequireIngress:   true,
+		IngressRef:       ComponentRefFor(ComponentKindIngressProxy, NetworkIngressName),
+		PublicURL:        publicURL,
+		StableHost:       stableHost,
+		AllowExplicitDID: false,
+		OAuth:            oauth,
 	}}
 }
 
@@ -318,7 +314,7 @@ func networkDesired(o v1alpha1.MarketNetwork, ws, stateRoot string, leases map[s
 	}}
 	relaySpec := v1alpha1.RelaySpec{
 		ComponentSpec: NewComponentSpec(ComponentCRStateDir(NetworkStateDir(stateRoot), ComponentKindRelay, NetworkRelayName), &value, suspend),
-		PdsRefs: []v1alpha1.ComponentRef{*ComponentRefFor(ComponentKindPds, NetworkAlicePdsName),
+		PdsRefs: []commonv1.ObjectRef{*ComponentRefFor(ComponentKindPds, NetworkAlicePdsName),
 			*ComponentRefFor(ComponentKindPds, NetworkBobPdsName), {Kind: ComponentKindPds, Name: "*"}},
 		Hostnames: []string{NetworkRelayHost},
 		Serve:     componentServe("", leasePort(leases[NetworkPortRelay])),
@@ -367,7 +363,7 @@ func networkDesired(o v1alpha1.MarketNetwork, ws, stateRoot string, leases map[s
 	ingress := desiredComponent{Kind: ComponentKindIngressProxy, Name: NetworkIngressName, Spec: ingressSpec}
 	dispatcherBase := NewComponentSpec(ComponentCRStateDir(NetworkStateDir(stateRoot), ComponentKindDispatcherTLS, NetworkDispatcherTLSName), &value, suspend)
 	dispatcherBase.TLS = &v1alpha1.ComponentTLS{Enabled: true, Hostnames: []string{GuestTLSHost, "*." + GuestTLSHost},
-		CertRef: filepath.Join(guestDir, guestLeafFile), CaBundleRef: value.CaBundleRef}
+		CertRef: filepath.Join(guestDir, guestLeafFile), CABundle: value.CABundle}
 	dispatcher := desiredComponent{Kind: ComponentKindDispatcherTLS, Name: NetworkDispatcherTLSName, Spec: v1alpha1.DispatcherTLSSpec{
 		ComponentSpec: dispatcherBase,
 		UpstreamRef:   ComponentRefFor(ComponentKindIngressProxy, NetworkIngressName),
@@ -433,10 +429,10 @@ func (n *networks) oneKcp(apps []v1alpha1.NetworkAppStatus) []string {
 	workspaces := map[string]string{n.ctl.c.workspace(): "the network"}
 	var wrong []string
 	for _, a := range apps {
-		if a.KcpUrl == "" {
+		if a.KcpURL == "" {
 			continue
 		}
-		if f, _, _ := strings.Cut(strings.TrimSuffix(a.KcpUrl, "/"), "/clusters/"); f != front {
+		if f, _, _ := strings.Cut(strings.TrimSuffix(a.KcpURL, "/"), "/clusters/"); f != front {
 			wrong = append(wrong, fmt.Sprintf("%s reports the kcp %s, not the network's %s", a.Name, f, front))
 		}
 		if a.Workspace == "" {
@@ -459,6 +455,23 @@ func portFrom(address string) (string, error) {
 	return p, nil
 }
 
+const NetworkCAFileName = "network-ca.pem"
+
+func NetworkCAFile(dir string, n *v1alpha1.MarketNetworkValue) (string, error) {
+	if n == nil || strings.TrimSpace(n.CABundle) == "" || strings.TrimSpace(dir) == "" {
+		return "", nil
+	}
+	path := filepath.Join(dir, NetworkCAFileName)
+	want := strings.TrimSpace(n.CABundle) + "\n"
+	if have, err := os.ReadFile(path); err == nil && string(have) == want {
+		return path, nil
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	return path, os.WriteFile(path, []byte(want), 0o644)
+}
+
 func (n *networks) caBundle(ctx context.Context) (string, error) {
 	dir := NetworkStateDir(n.ctl.c.Layout.StateDir)
 	if len(n.pkiPEM) == 0 {
@@ -475,12 +488,7 @@ func (n *networks) caBundle(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	path := filepath.Join(dir, CABundleFile)
-	want := strings.TrimSpace(string(pki)) + "\n" + strings.TrimSpace(string(guest)) + "\n"
-	if have, err := os.ReadFile(path); err == nil && string(have) == want {
-		return path, nil
-	}
-	return path, os.WriteFile(path, []byte(want), 0o644)
+	return strings.TrimSpace(string(pki)) + "\n" + strings.TrimSpace(string(guest)) + "\n", nil
 }
 
 func (n *networks) knownChildren() []string {
@@ -541,7 +549,7 @@ func (n *networks) reconcile(ctx context.Context, u *unstructured.Unstructured) 
 	}
 	owner := ownerOf(u)
 	log := n.ctl.c.log().With("marketnetwork", o.Name)
-	st := v1alpha1.MarketNetworkStatus{ObservedGeneration: o.Generation, Network: o.Status.Network, BidderPdsUrl: o.Status.BidderPdsUrl,
+	st := v1alpha1.MarketNetworkStatus{ObservedGeneration: o.Generation, Network: o.Status.Network, BidderPdsURL: o.Status.BidderPdsURL,
 		Apps: o.Status.Apps, Conditions: o.Status.Conditions}
 	write := func(phase v1alpha1.ApplicationPhase, msg string) error {
 		st.Phase, st.Message = phase, msg
@@ -754,7 +762,7 @@ func (n *networks) reconcile(ctx context.Context, u *unstructured.Unstructured) 
 	if pdsURL == "" || aliceURL == "" {
 		return write(v1alpha1.ApplicationPhaseProvisioning, "waiting for the network's PDS Exposure URLs")
 	}
-	st.BidderPdsUrl = pdsURL
+	st.BidderPdsURL = pdsURL
 	var keep []string
 	for _, app := range o.Spec.Apps {
 		if c, err := n.child(app); err == nil {
@@ -979,7 +987,7 @@ func (n *networks) ensureApp(ctx context.Context, app v1alpha1.NetworkApp, value
 	if err != nil {
 		return fail(err)
 	}
-	out.KcpUrl, out.Workspace = rec.KcpURL, rec.BaseWorkspace
+	out.KcpURL, out.Workspace = rec.KcpURL, rec.BaseWorkspace
 	meta := metav1.ObjectMeta{Name: ChildRootName}
 	var root any
 	switch app.Kind {
@@ -1001,7 +1009,7 @@ func (n *networks) ensureApp(ctx context.Context, app v1alpha1.NetworkApp, value
 			fc = nil
 		}
 		root = &v1alpha1.MarketBidder{ObjectMeta: meta, Spec: v1alpha1.MarketBidderSpec{Profile: app.Profile, Network: &value,
-			Identity: v1alpha1.ApplicationIdentity{Handle: handle, PdsUrl: pdsURL},
+			Identity: v1alpha1.ApplicationIdentity{Handle: handle, PdsURL: pdsURL},
 			Policy:   app.Policy, Firecracker: fc, Kcp: kcp, Options: app.Options, Quota: app.Quota, Comms: comms, Components: app.Components}}
 	case v1alpha1.ApplicationKindMarketRequester:
 		root = &v1alpha1.MarketRequester{ObjectMeta: meta, Spec: v1alpha1.MarketRequesterSpec{Profile: app.Profile, Network: &value,

@@ -57,7 +57,7 @@ func MergeMarket(held *v1alpha1.ComputeVMMarket, patch v1alpha1.ComputeVMMarket,
 	merged := v1alpha1.ComputeVMMarket{}
 	if held != nil {
 		if ownedMarketField(fields, MarketOnNetworkURI) {
-			merged.OnNetworkUri = held.OnNetworkUri
+			merged.OnNetworkURI = held.OnNetworkURI
 		}
 		if ownedMarketField(fields, MarketAddress) {
 			merged.Address = held.Address
@@ -66,14 +66,14 @@ func MergeMarket(held *v1alpha1.ComputeVMMarket, patch v1alpha1.ComputeVMMarket,
 			merged.HostKeys = append([]v1alpha1.ComputeVMHostKey(nil), held.HostKeys...)
 		}
 		if ownedMarketField(fields, MarketHostKeysURI) {
-			merged.HostKeysUri = held.HostKeysUri
+			merged.HostKeysURI = held.HostKeysURI
 		}
 		if ownedMarketField(fields, MarketReportedAt) {
 			merged.ReportedAt = held.ReportedAt
 		}
 	}
-	if ownedMarketField(fields, MarketOnNetworkURI) && patch.OnNetworkUri != "" {
-		merged.OnNetworkUri = patch.OnNetworkUri
+	if ownedMarketField(fields, MarketOnNetworkURI) && patch.OnNetworkURI != "" {
+		merged.OnNetworkURI = patch.OnNetworkURI
 	}
 	if ownedMarketField(fields, MarketAddress) && patch.Address != "" {
 		merged.Address = patch.Address
@@ -81,8 +81,8 @@ func MergeMarket(held *v1alpha1.ComputeVMMarket, patch v1alpha1.ComputeVMMarket,
 	if ownedMarketField(fields, MarketHostKeys) && len(patch.HostKeys) > 0 {
 		merged.HostKeys = append([]v1alpha1.ComputeVMHostKey(nil), patch.HostKeys...)
 	}
-	if ownedMarketField(fields, MarketHostKeysURI) && patch.HostKeysUri != "" {
-		merged.HostKeysUri = patch.HostKeysUri
+	if ownedMarketField(fields, MarketHostKeysURI) && patch.HostKeysURI != "" {
+		merged.HostKeysURI = patch.HostKeysURI
 	}
 	if ownedMarketField(fields, MarketReportedAt) && patch.ReportedAt != "" {
 		merged.ReportedAt = patch.ReportedAt
@@ -96,7 +96,7 @@ func MarketReportRKey(computevm, collection string) string {
 }
 
 func marketEmpty(m v1alpha1.ComputeVMMarket) bool {
-	return m.OnNetworkUri == "" && m.Address == "" && len(m.HostKeys) == 0 && m.HostKeysUri == "" && m.ReportedAt == ""
+	return m.OnNetworkURI == "" && m.Address == "" && len(m.HostKeys) == 0 && m.HostKeysURI == "" && m.ReportedAt == ""
 }
 
 type VMs struct {

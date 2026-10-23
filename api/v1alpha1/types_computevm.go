@@ -2,6 +2,8 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 type ComputeVM struct {
@@ -44,15 +46,7 @@ type ComputeVMGuestLogin struct {
 }
 
 type ComputeVMUserData struct {
-	Vault ComputeVMVaultRef `json:"vault"`
-}
-
-type ComputeVMVaultRef struct {
-	Server string `json:"server"`
-
-	Mount string `json:"mount"`
-
-	Path string `json:"path"`
+	Vault commonv1.SecretRef `json:"vault"`
 }
 
 type ComputeVMShape struct {
@@ -76,15 +70,11 @@ type ComputeVMRequester struct {
 }
 
 type ComputeVMContract struct {
-	ReceiptUri string `json:"receiptUri,omitempty"`
+	Receipt commonv1.StrongRef `json:"receipt,omitempty"`
 
-	ReceiptCid string `json:"receiptCid,omitempty"`
+	Accept commonv1.StrongRef `json:"accept,omitempty"`
 
-	AcceptUri string `json:"acceptUri,omitempty"`
-
-	AcceptCid string `json:"acceptCid,omitempty"`
-
-	SubmitEventUrl string `json:"submitEventUrl,omitempty"`
+	SubmitEventURL string `json:"submitEventUrl,omitempty" apigen:"userEndpoint"`
 
 	AcceptedAt string `json:"acceptedAt,omitempty"`
 }
@@ -170,13 +160,13 @@ type ComputeVMHostKey struct {
 }
 
 type ComputeVMMarket struct {
-	OnNetworkUri string `json:"onNetworkUri,omitempty"`
+	OnNetworkURI string `json:"onNetworkUri,omitempty"`
 
 	Address string `json:"address,omitempty"`
 
 	HostKeys []ComputeVMHostKey `json:"hostKeys,omitempty"`
 
-	HostKeysUri string `json:"hostKeysUri,omitempty"`
+	HostKeysURI string `json:"hostKeysUri,omitempty"`
 
 	ReportedAt string `json:"reportedAt,omitempty"`
 
@@ -190,13 +180,13 @@ type ComputeVMTermination struct {
 
 	ExitCode *int `json:"exitCode,omitempty"`
 
-	Request *RecordRef `json:"request,omitempty"`
+	Request *commonv1.StrongRef `json:"request,omitempty"`
 
-	PayloadUri string `json:"payloadUri,omitempty"`
+	PayloadURI string `json:"payloadUri,omitempty"`
 
 	PayloadCid string `json:"payloadCid,omitempty"`
 
-	EventUri string `json:"eventUri,omitempty"`
+	EventURI string `json:"eventUri,omitempty"`
 
 	EventCid string `json:"eventCid,omitempty"`
 }

@@ -88,7 +88,7 @@ func keepConditionTimes(next []metav1.Condition, held []metav1.Condition) {
 }
 
 func grantTemplate(g v1alpha1.GuestIdentityGrant) (string, error) {
-	claims := map[string]string{"computevm": g.Spec.Computevm, "api": g.Spec.Api, "actx": g.Spec.Actx}
+	claims := map[string]string{"computevm": g.Spec.ComputeVMRef.Name, "api": g.Spec.Api, "actx": g.Spec.Actx}
 	for _, c := range g.Spec.Claims {
 		if !grantClaimPattern.MatchString(c.Name) || reservedOIDCClaims[c.Name] {
 			return "", fmt.Errorf("claim %q is not a claim name a grant may set", c.Name)
@@ -105,10 +105,10 @@ func grantTemplate(g v1alpha1.GuestIdentityGrant) (string, error) {
 func checkGrant(g v1alpha1.GuestIdentityGrant) error {
 	s := g.Spec
 	switch {
-	case !grantNamePattern.MatchString(s.Computevm):
-		return fmt.Errorf("spec.computevm %q is not a ComputeVM name", s.Computevm)
-	case s.Entity != "guest-"+s.Computevm:
-		return fmt.Errorf("spec.entity %q is not guest-%s", s.Entity, s.Computevm)
+	case !grantNamePattern.MatchString(s.ComputeVMRef.Name):
+		return fmt.Errorf("spec.computevm %q is not a ComputeVM name", s.ComputeVMRef.Name)
+	case s.Entity != "guest-"+s.ComputeVMRef.Name:
+		return fmt.Errorf("spec.entity %q is not guest-%s", s.Entity, s.ComputeVMRef.Name)
 	case s.Api == "" || strings.ContainsAny(s.Api, "?/ \"{}"):
 		return fmt.Errorf("spec.api %q is not an api name", s.Api)
 	case s.Actx == "" || strings.ContainsAny(s.Actx, "&# \"{}"):

@@ -70,12 +70,12 @@ func marketTransportURLs(comms *v1alpha1.MarketComms, network *v1alpha1.MarketNe
 		}
 	}
 	if comms != nil {
-		add(comms.RelayUrls)
-		add(comms.FirehoseUrls)
+		add(comms.RelayURLs)
+		add(comms.FirehoseURLs)
 	}
 	if network != nil {
-		add(network.RelayUrls)
-		add(network.FirehoseUrls)
+		add(network.RelayURLs)
+		add(network.FirehoseURLs)
 	}
 	return out
 }
@@ -108,7 +108,7 @@ func (ctl *Controller) ensureMarketStreams(ctx context.Context, ws, role string,
 		spec := eventsv1alpha1.EventStreamSpec{
 			Source: eventsv1alpha1.EventStreamSource{
 				Kind:        eventsv1alpha1.EventStreamSourceRelay,
-				RelayUrls:   []string{url},
+				RelayURLs:   []string{url},
 				Collections: append([]string(nil), marketStreamCollections...),
 			},
 			Sink: eventsv1alpha1.EventStreamSink{

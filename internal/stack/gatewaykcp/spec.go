@@ -100,11 +100,11 @@ func Spec(s v1alpha1.GatewaySpec, profile string, environ []string) v1alpha1.Gat
 	if s.Network != nil {
 		n = *s.Network
 	}
-	if n.PlcDirectoryUrl == "" {
-		n.PlcDirectoryUrl = e.get("SOCIALWEB_GATEWAY_PLC_URL")
+	if n.PLCDirectoryURL == "" {
+		n.PLCDirectoryURL = e.get("SOCIALWEB_GATEWAY_PLC_URL")
 	}
-	if n.PlcDirectoryUrl == "" {
-		n.PlcDirectoryUrl = DefaultPLC
+	if n.PLCDirectoryURL == "" {
+		n.PLCDirectoryURL = DefaultPLC
 	}
 	if n.IngressProxyHost == "" {
 		n.IngressProxyHost = e.get("SOCIALWEB_GATEWAY_INGRESS_PROXY_HOST")
@@ -112,11 +112,11 @@ func Spec(s v1alpha1.GatewaySpec, profile string, environ []string) v1alpha1.Gat
 	if n.IngressProxyHost == "" {
 		n.IngressProxyHost = DefaultIngress
 	}
-	if n.RelayUrls == nil {
-		n.RelayUrls = []string{}
+	if n.RelayURLs == nil {
+		n.RelayURLs = []string{}
 	}
-	if n.FirehoseUrls == nil {
-		n.FirehoseUrls = []string{}
+	if n.FirehoseURLs == nil {
+		n.FirehoseURLs = []string{}
 	}
 	s.Network = &n
 	if s.Ingress == nil && profile == appctl.ProfileGatewayProd {

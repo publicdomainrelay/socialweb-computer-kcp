@@ -19,6 +19,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestseed"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/sshtransport"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 var vmNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`)
@@ -667,24 +669,24 @@ func (s *Service) provisionSession(ctx context.Context, vmName, policyName strin
 	}
 	state := &v1alpha1.NodeClaimContract{
 		VMName:       vmName,
-		VMUri:        payload.URI,
-		RFPUri:       rfp.URI,
-		AcceptUri:    accept.URI,
-		ReceiptUri:   receipt.URI,
+		VMURI:        payload.URI,
+		RFPURI:       rfp.URI,
+		AcceptURI:    accept.URI,
+		ReceiptURI:   receipt.URI,
 		ReceiptCid:   receipt.CID,
 		RequesterDid: s.callbackDID(),
 		MarketDid:    s.cfg.MarketDID,
-		Payload:      &v1alpha1.RecordRef{URI: payload.URI, CID: payload.CID},
-		RFP:          &v1alpha1.RecordRef{URI: rfp.URI, CID: rfp.CID},
-		Bid:          &v1alpha1.RecordRef{URI: winner.URI, CID: winner.CID},
+		Payload:      &commonv1.StrongRef{URI: payload.URI, CID: payload.CID},
+		RFP:          &commonv1.StrongRef{URI: rfp.URI, CID: rfp.CID},
+		Bid:          &commonv1.StrongRef{URI: winner.URI, CID: winner.CID},
 		Winner:       &v1alpha1.ContractWinner{DID: winner.DID},
-		Accept:       &v1alpha1.RecordRef{URI: accept.URI, CID: accept.CID},
-		Receipt:      &v1alpha1.RecordRef{URI: receipt.URI, CID: receipt.CID},
+		Accept:       &commonv1.StrongRef{URI: accept.URI, CID: accept.CID},
+		Receipt:      &commonv1.StrongRef{URI: receipt.URI, CID: receipt.CID},
 		ReceiptOk:    boolPtr(true),
 		Phase:        v1alpha1.ContractReceipt,
 	}
 	if policyRef != nil {
-		state.Policy = &v1alpha1.RecordRef{URI: policyRef.URI, CID: policyRef.CID}
+		state.Policy = &commonv1.StrongRef{URI: policyRef.URI, CID: policyRef.CID}
 	}
 	if submitEvent := stringOf(receipt.Value["submitEvent"]); submitEvent != "" {
 		state.SubmitEventRef = submitEvent
@@ -915,8 +917,8 @@ func (s *Service) releaseSession(ctx context.Context, target *SessionTarget) err
 		}
 	}
 	release := &v1alpha1.ContractRelease{
-		Event:   v1alpha1.RecordRef{URI: envelope.URI, CID: envelope.CID},
-		Payload: v1alpha1.RecordRef{URI: payload.URI, CID: payload.CID},
+		Event:   commonv1.StrongRef{URI: envelope.URI, CID: envelope.CID},
+		Payload: commonv1.StrongRef{URI: payload.URI, CID: payload.CID},
 	}
 	state.Release = release
 	if err := s.persistSessionRelease(ctx, state.Receipt.URI, release); err != nil {

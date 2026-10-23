@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -21,6 +20,8 @@ import (
 	coreapi "github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayapi"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/sshtransport"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 const Kind = "SshServer"
@@ -106,9 +107,9 @@ type Config struct {
 
 	Handle string
 
-	RequesterRef *v1alpha1.ComponentRef
+	RequesterRef *commonv1.ObjectRef
 
-	VaultRef *v1alpha1.ComponentRef
+	VaultRef *commonv1.ObjectRef
 
 	Hostnames []string
 
@@ -398,11 +399,11 @@ func (c *Config) defaults() {
 			c.HostKeyPath = filepath.Join(c.StateDir, "ssh_host_ed25519_key")
 		}
 	}
-	if tlsConfig := networkTLSConfig(c.Network.CaBundleRef); tlsConfig != nil {
+	if tlsConfig := networkTLSConfig(c.Network.CABundle); tlsConfig != nil {
 		c.Deps.TLS = tlsConfig
 	}
-	if c.Directory == nil && c.Network.PlcDirectoryUrl != "" && c.Deps.Handlers != nil {
-		c.Directory = directoryFor(*c, c.Network.PlcDirectoryUrl, c.DirectoryKeys, c.DirectoryTTL)
+	if c.Directory == nil && c.Network.PLCDirectoryURL != "" && c.Deps.Handlers != nil {
+		c.Directory = directoryFor(*c, c.Network.PLCDirectoryURL, c.DirectoryKeys, c.DirectoryTTL)
 	}
 	if len(c.TrustedHosts) == 0 {
 		c.TrustedHosts = networkTrustedHosts(c.Network, c.Hostnames, c.PublicHostname)
@@ -523,17 +524,13 @@ func (c chainedHosts) Address(hostport string) (string, bool) {
 	return "", false
 }
 
-func networkTLSConfig(caBundleRef string) *tls.Config {
-	raw := strings.TrimSpace(caBundleRef)
+func networkTLSConfig(caBundle string) *tls.Config {
+	raw := strings.TrimSpace(caBundle)
 	if raw == "" {
 		return nil
 	}
-	data, err := os.ReadFile(raw)
-	if err != nil {
-		return nil
-	}
 	pool := x509.NewCertPool()
-	if !pool.AppendCertsFromPEM(data) {
+	if !pool.AppendCertsFromPEM([]byte(raw)) {
 		return nil
 	}
 	return &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
@@ -628,10 +625,10 @@ func networkTrustedHosts(network v1alpha1.MarketNetworkValue, hostnames []string
 		add(host.Name)
 	}
 	add(network.IngressProxyHost)
-	add(network.GuestTlsUrl)
+	add(network.GuestTLSURL())
 	add(network.QrOrigin)
-	add(network.PlcDirectoryUrl)
-	for _, raw := range network.RelayUrls {
+	add(network.PLCDirectoryURL)
+	for _, raw := range network.RelayURLs {
 		add(raw)
 	}
 	return out

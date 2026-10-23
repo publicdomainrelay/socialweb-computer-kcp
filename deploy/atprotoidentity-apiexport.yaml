@@ -6,6 +6,6 @@ spec:
   resources:
     - group: socialweb.computer
       name: atprotoidentities
-      schema: v1alpha1-1.atprotoidentities.socialweb.computer
+      schema: v1alpha1-2.atprotoidentities.socialweb.computer
       storage:
         crd: {}

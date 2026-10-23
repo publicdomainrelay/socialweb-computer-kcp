@@ -39,7 +39,7 @@ func (s ComponentStatus) APIStatus() v1alpha1.ComponentStatus {
 func APIEndpoint(endpoint Endpoint) v1alpha1.Endpoint {
 	return v1alpha1.Endpoint{
 		Name:     endpoint.Name,
-		Url:      endpoint.URL,
+		URL:      endpoint.URL,
 		Address:  endpoint.Address,
 		Protocol: endpoint.Protocol,
 	}

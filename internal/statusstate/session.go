@@ -22,7 +22,7 @@ func (c *Controller) reconcileSession(ctx context.Context, dyn dynamic.Interface
 	status := obj.Status
 	status.ObservedGeneration = generation
 	didText := strings.TrimSpace(obj.Spec.DID)
-	ref := strings.TrimSpace(obj.Spec.PdsRef)
+	ref := refString(obj.Spec.PdsRef)
 	sessionID := strings.TrimSpace(obj.Spec.SessionID)
 	if didText == "" {
 		setReady(&status.Conditions, generation, false, ReasonWaiting, "the AtprotoSession needs a did")

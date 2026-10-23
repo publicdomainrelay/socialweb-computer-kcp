@@ -46,7 +46,7 @@ func (s *Service) reportOnce(ctx context.Context) {
 			continue
 		}
 		contract := vm.Spec.Contract
-		if contract == nil || contract.ReceiptUri == "" || contract.ReceiptCid == "" {
+		if contract == nil || contract.Receipt.URI == "" || contract.Receipt.CID == "" {
 			continue
 		}
 		held := vm.Status.Market
@@ -59,7 +59,7 @@ func (s *Service) reportOnce(ctx context.Context) {
 }
 
 func (s *Service) reportOnNetwork(ctx context.Context, vm *v1alpha1.ComputeVM, held *v1alpha1.ComputeVMMarket) {
-	if held.Address == "" || held.OnNetworkUri != "" {
+	if held.Address == "" || held.OnNetworkURI != "" {
 		return
 	}
 	createdAt := held.ReportedAt
@@ -80,7 +80,7 @@ func (s *Service) reportOnNetwork(ctx context.Context, vm *v1alpha1.ComputeVM, h
 }
 
 func (s *Service) reportHostKeys(ctx context.Context, vm *v1alpha1.ComputeVM, held *v1alpha1.ComputeVMMarket) {
-	if len(held.HostKeys) == 0 || held.HostKeysUri != "" {
+	if len(held.HostKeys) == 0 || held.HostKeysURI != "" {
 		return
 	}
 	observedAt := held.ReportedAt
@@ -112,9 +112,9 @@ func (s *Service) recordReportURI(ctx context.Context, vm *v1alpha1.ComputeVM, n
 	}
 	report := v1alpha1.ComputeVMMarket{}
 	if collection == market.ComputeEventsVMOnNetworkNSID {
-		report.OnNetworkUri = uri
+		report.OnNetworkURI = uri
 	} else {
-		report.HostKeysUri = uri
+		report.HostKeysURI = uri
 	}
 	if err := s.vms.PatchMarket(ctx, vm.Name, report); err != nil {
 		if ctx.Err() == nil {

@@ -1,25 +1,28 @@
 package v1alpha1
 
 import (
+	"net"
+	"strings"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 type MarketNetworkValue struct {
-	PlcDirectoryUrl string `json:"plcDirectoryUrl"`
+	PLCDirectoryURL string `json:"plcDirectoryUrl" apigen:"userEndpoint"`
 
 	IngressProxyHost string `json:"ingressProxyHost"`
 
-	RelayUrls []string `json:"relayUrls"`
+	RelayURLs []string `json:"relayUrls" apigen:"userEndpoint"`
 
-	FirehoseUrls []string `json:"firehoseUrls"`
+	FirehoseURLs []string `json:"firehoseUrls" apigen:"userEndpoint"`
 
 	QrOrigin string `json:"qrOrigin"`
 
-	GuestTlsUrl string `json:"guestTlsUrl,omitempty"`
+	CABundle string `json:"caBundle,omitempty"`
 
-	CaBundleRef string `json:"caBundleRef,omitempty"`
-
-	Hosts []NetworkHost `json:"hosts,omitempty"`
+	Hosts []NetworkHost `json:"hosts,omitempty" apigen:"listType=map,listMapKey=name"`
 
 	Comms *MarketComms `json:"comms,omitempty"`
 
@@ -30,6 +33,32 @@ type NetworkHost struct {
 	Name string `json:"name"`
 
 	Address string `json:"address"`
+}
+
+const (
+	NetworkDispatcherHost = "dispatcher-tls.default.relay.svc.kcp.local"
+
+	GuestTLSHost = "relay.localhost"
+)
+
+func (n *MarketNetworkValue) HostAddress(name string) string {
+	if n == nil {
+		return ""
+	}
+	for _, h := range n.Hosts {
+		if h.Name == name {
+			return strings.TrimSpace(h.Address)
+		}
+	}
+	return ""
+}
+
+func (n *MarketNetworkValue) GuestTLSURL() string {
+	_, port, err := net.SplitHostPort(n.HostAddress(NetworkDispatcherHost))
+	if err != nil || port == "" || port == "0" {
+		return ""
+	}
+	return "https://" + GuestTLSHost + ":" + port
 }
 
 type ApplicationKind string
@@ -69,11 +98,9 @@ type ApplicationIdentity struct {
 
 	Handle string `json:"handle,omitempty"`
 
-	PdsUrl string `json:"pdsUrl,omitempty"`
+	PdsURL string `json:"pdsUrl,omitempty" apigen:"userEndpoint"`
 
-	PdsRef *RepoRef `json:"pdsRef,omitempty"`
-
-	SessionRef *RepoRef `json:"sessionRef,omitempty"`
+	PdsRef *commonv1.ObjectRef `json:"pdsRef,omitempty"`
 
 	Association AssociationMode `json:"association,omitempty"`
 }
@@ -91,15 +118,15 @@ const (
 type MarketComms struct {
 	Mode MarketCommsMode `json:"mode,omitempty"`
 
-	RelayUrls []string `json:"relayUrls,omitempty"`
+	RelayURLs []string `json:"relayUrls,omitempty" apigen:"userEndpoint"`
 
-	FirehoseUrls []string `json:"firehoseUrls,omitempty"`
+	FirehoseURLs []string `json:"firehoseUrls,omitempty" apigen:"userEndpoint"`
 }
 
 type IngressConfig struct {
 	Provider string `json:"provider,omitempty"`
 
-	IngressRef *ComponentRef `json:"ingressRef,omitempty"`
+	IngressRef *commonv1.ObjectRef `json:"ingressRef,omitempty"`
 
 	PublicHost string `json:"publicHost,omitempty"`
 
@@ -111,11 +138,11 @@ type IngressConfig struct {
 type IngressXrpcConfig struct {
 	IngressProxyHost string `json:"ingressProxyHost,omitempty"`
 
-	RelayURL string `json:"relayURL,omitempty"`
+	RelayURL string `json:"relayURL,omitempty" apigen:"userEndpoint"`
 
-	RelayRef *ComponentRef `json:"relayRef,omitempty"`
+	RelayRef *commonv1.ObjectRef `json:"relayRef,omitempty"`
 
-	IdentityRef *ComponentRef `json:"identityRef,omitempty"`
+	IdentityRef *commonv1.ObjectRef `json:"identityRef,omitempty"`
 }
 
 type FirecrackerProvider struct {
@@ -381,7 +408,7 @@ type MarketLatencyStatus struct {
 }
 
 type MarketDecline struct {
-	RfpUri string `json:"rfpUri"`
+	RfpURI string `json:"rfpUri"`
 
 	Reason string `json:"reason"`
 
@@ -586,11 +613,11 @@ type GatewayClusterProvider struct {
 }
 
 type GatewayMarketNetwork struct {
-	OwnerSessionsFile string `json:"ownerSessionsFile,omitempty"`
+	OwnerSessionsFile string `json:"ownerSessionsFile,omitempty" apigen:"userEndpoint"`
 
 	NodeGuestHostAliases []string `json:"nodeGuestHostAliases,omitempty"`
 
-	NodeUserDataBaseFile string `json:"nodeUserDataBaseFile,omitempty"`
+	NodeUserDataBaseFile string `json:"nodeUserDataBaseFile,omitempty" apigen:"userEndpoint"`
 }
 
 type SshGateway struct {
@@ -627,7 +654,7 @@ type SshGatewaySpec struct {
 
 	Quota *ApplicationQuota `json:"quota,omitempty"`
 
-	OwnerSessionsFile string `json:"ownerSessionsFile,omitempty"`
+	OwnerSessionsFile string `json:"ownerSessionsFile,omitempty" apigen:"userEndpoint"`
 
 	Components ComponentOverrides `json:"components,omitempty"`
 }
@@ -680,7 +707,7 @@ type NetworkApp struct {
 
 	Quota *ApplicationQuota `json:"quota,omitempty"`
 
-	OwnerSessionsFile string `json:"ownerSessionsFile,omitempty"`
+	OwnerSessionsFile string `json:"ownerSessionsFile,omitempty" apigen:"userEndpoint"`
 
 	ClusterProvider *GatewayClusterProvider `json:"clusterProvider,omitempty"`
 
@@ -696,7 +723,7 @@ type NetworkAppStatus struct {
 
 	Instance string `json:"instance,omitempty"`
 
-	KcpUrl string `json:"kcpUrl,omitempty"`
+	KcpURL string `json:"kcpUrl,omitempty"`
 
 	Workspace string `json:"workspace,omitempty"`
 
@@ -720,7 +747,7 @@ type MarketNetworkStatus struct {
 
 	Network *MarketNetworkValue `json:"network,omitempty"`
 
-	BidderPdsUrl string `json:"bidderPdsUrl,omitempty"`
+	BidderPdsURL string `json:"bidderPdsUrl,omitempty"`
 
 	Components []ApplicationComponent `json:"components,omitempty"`
 

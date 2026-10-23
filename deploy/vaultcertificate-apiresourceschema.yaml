@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-1.vaultcertificates.socialweb.computer
+  name: v1alpha1-2.vaultcertificates.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -28,8 +28,22 @@ spec:
           spec:
             type: object
             properties:
-              server:
-                type: string
+              vault:
+                type: object
+                properties:
+                  group:
+                    type: string
+                  kind:
+                    type: string
+                    maxLength: 63
+                  name:
+                    type: string
+                    maxLength: 253
+                  workspace:
+                    type: string
+                required:
+                  - kind
+                  - name
               mount:
                 type: string
               role:
@@ -37,7 +51,7 @@ spec:
               commonName:
                 type: string
             required:
-              - server
+              - vault
               - mount
               - role
               - commonName

@@ -13,6 +13,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 const (
@@ -80,12 +82,12 @@ func GrantFor(subject GrantSubject, wish GrantWish) v1alpha1.GuestIdentityGrant 
 			Name: GrantName(subject.ComputeVM, wish),
 		},
 		Spec: v1alpha1.GuestIdentityGrantSpec{
-			Computevm: subject.ComputeVM,
-			Entity:    Entity(subject.ComputeVM),
-			Api:       wish.API,
-			Actx:      wish.Actx,
-			Scopes:    scopes,
-			Claims:    claims,
+			ComputeVMRef: commonv1.LocalObjectRef{Name: subject.ComputeVM},
+			Entity:       Entity(subject.ComputeVM),
+			Api:          wish.API,
+			Actx:         wish.Actx,
+			Scopes:       scopes,
+			Claims:       claims,
 		},
 	}
 	if subject.OwnerUID != "" {
@@ -289,7 +291,7 @@ func (s *Syncer) syncOnce(ctx context.Context, subject GrantSubject) error {
 	}
 	current := map[string]v1alpha1.GuestIdentityGrant{}
 	for _, g := range held {
-		if g.Spec.Computevm == subject.ComputeVM && g.DeletionTimestamp == nil {
+		if g.Spec.ComputeVMRef.Name == subject.ComputeVM && g.DeletionTimestamp == nil {
 			current[g.Name] = g
 		}
 	}

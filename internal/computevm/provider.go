@@ -12,6 +12,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 const (
@@ -79,8 +81,8 @@ func UserDataPath(name string) string {
 	return v1alpha1.GuestVaultPrefix + "/" + name + "/" + v1alpha1.GuestUserDataEntry
 }
 
-func UserDataRef(name string, vault GuestVaultRef) v1alpha1.ComputeVMVaultRef {
-	return v1alpha1.ComputeVMVaultRef{Server: vault.Server, Mount: vault.Mount, Path: UserDataPath(name)}
+func UserDataRef(name string, vault GuestVaultRef) commonv1.SecretRef {
+	return commonv1.SecretRef{Vault: v1alpha1.VaultServerRef(vault.Server), Mount: vault.Mount, Path: UserDataPath(name)}
 }
 
 func UserDataEntry(userData string) map[string]any {
@@ -179,7 +181,7 @@ func ValidateComputeVM(o *v1alpha1.ComputeVM) error {
 		return errors.New("computevm: spec.vm.role is empty")
 	case o.Spec.VM.Cpus < 0:
 		return errors.New("computevm: spec.vm.cpus is negative")
-	case o.Spec.UserData.Vault.Server == "":
+	case v1alpha1.VaultServer(o.Spec.UserData.Vault.Vault, "") == "":
 		return errors.New("computevm: spec.userData.vault.server is empty")
 	case strings.Trim(o.Spec.UserData.Vault.Mount, "/") == "":
 		return errors.New("computevm: spec.userData.vault.mount is empty")
@@ -213,10 +215,10 @@ func checkContract(contract *v1alpha1.ComputeVMContract) error {
 	if contract == nil {
 		return nil
 	}
-	if (contract.AcceptUri == "") != (contract.AcceptCid == "") {
+	if (contract.Accept.URI == "") != (contract.Accept.CID == "") {
 		return errors.New("computevm: spec.contract names an accept uri and cid together or neither")
 	}
-	if (contract.ReceiptUri == "") != (contract.ReceiptCid == "") {
+	if (contract.Receipt.URI == "") != (contract.Receipt.CID == "") {
 		return errors.New("computevm: spec.contract names a receipt uri and cid together or neither")
 	}
 	return nil
@@ -243,7 +245,7 @@ func ReleaseRequestedAt(o *v1alpha1.ComputeVM) string {
 	return strings.TrimSpace(o.Annotations[ReleaseRequestedAnnotation])
 }
 
-func ReleaseRequestRef(o *v1alpha1.ComputeVM) *v1alpha1.RecordRef {
+func ReleaseRequestRef(o *v1alpha1.ComputeVM) *commonv1.StrongRef {
 	if o == nil {
 		return nil
 	}
@@ -255,14 +257,14 @@ func ReleaseRequestRef(o *v1alpha1.ComputeVM) *v1alpha1.RecordRef {
 	if !found || strings.TrimSpace(uri) == "" {
 		return nil
 	}
-	return &v1alpha1.RecordRef{URI: strings.TrimSpace(uri), CID: strings.TrimSpace(cid)}
+	return &commonv1.StrongRef{URI: strings.TrimSpace(uri), CID: strings.TrimSpace(cid)}
 }
 
 func ContractReceipt(o *v1alpha1.ComputeVM) string {
 	if o == nil || o.Spec.Contract == nil {
 		return ""
 	}
-	return o.Spec.Contract.ReceiptUri
+	return o.Spec.Contract.Receipt.URI
 }
 
 func Ended(o *v1alpha1.ComputeVM) bool {

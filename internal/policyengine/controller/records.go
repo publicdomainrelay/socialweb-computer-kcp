@@ -7,31 +7,32 @@ import (
 	"fmt"
 	"strings"
 
-	policyv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/policy/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/atproto"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/cache"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/executor"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/models"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/registry"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 type RecordCacheSource interface {
-	ResolveRecordCached(ctx context.Context, ref policyv1alpha1.PolicyStrongRef, seed models.Cache) (map[string]any, error)
+	ResolveRecordCached(ctx context.Context, ref commonv1.StrongRef, seed models.Cache) (map[string]any, error)
 
-	ResolveWorkflowCached(ctx context.Context, ref policyv1alpha1.PolicyStrongRef, seed models.Cache) (json.RawMessage, error)
+	ResolveWorkflowCached(ctx context.Context, ref commonv1.StrongRef, seed models.Cache) (json.RawMessage, error)
 }
 
 type RecordResolver struct {
-	ResolveFunc func(ctx context.Context, ref policyv1alpha1.PolicyStrongRef) (map[string]any, error)
+	ResolveFunc func(ctx context.Context, ref commonv1.StrongRef) (map[string]any, error)
 
 	Registry *registry.Registry
 }
 
-func NewRecordResolver(resolve func(ctx context.Context, ref policyv1alpha1.PolicyStrongRef) (map[string]any, error), reg *registry.Registry) *RecordResolver {
+func NewRecordResolver(resolve func(ctx context.Context, ref commonv1.StrongRef) (map[string]any, error), reg *registry.Registry) *RecordResolver {
 	return &RecordResolver{ResolveFunc: resolve, Registry: reg}
 }
 
-func (r *RecordResolver) ResolveRecord(ctx context.Context, ref policyv1alpha1.PolicyStrongRef) (map[string]any, error) {
+func (r *RecordResolver) ResolveRecord(ctx context.Context, ref commonv1.StrongRef) (map[string]any, error) {
 	if r == nil || r.ResolveFunc == nil {
 		return nil, errors.New("the policy record resolver is not configured")
 	}
@@ -48,14 +49,14 @@ func (r *RecordResolver) ResolveRecord(ctx context.Context, ref policyv1alpha1.P
 	return value, nil
 }
 
-func (r *RecordResolver) ResolveRecordCached(ctx context.Context, ref policyv1alpha1.PolicyStrongRef, seed models.Cache) (map[string]any, error) {
+func (r *RecordResolver) ResolveRecordCached(ctx context.Context, ref commonv1.StrongRef, seed models.Cache) (map[string]any, error) {
 	if value, ok := cache.ReadRecordCache(seed, atproto.StrongRef{URI: ref.URI, CID: ref.CID}); ok {
 		return value, nil
 	}
 	return r.ResolveRecord(ctx, ref)
 }
 
-func (r *RecordResolver) ResolveWorkflow(ctx context.Context, ref policyv1alpha1.PolicyStrongRef) (json.RawMessage, error) {
+func (r *RecordResolver) ResolveWorkflow(ctx context.Context, ref commonv1.StrongRef) (json.RawMessage, error) {
 	value, err := r.ResolveRecord(ctx, ref)
 	if err != nil {
 		return nil, err
@@ -63,7 +64,7 @@ func (r *RecordResolver) ResolveWorkflow(ctx context.Context, ref policyv1alpha1
 	return r.workflowOfRecord(ref, value)
 }
 
-func (r *RecordResolver) ResolveWorkflowCached(ctx context.Context, ref policyv1alpha1.PolicyStrongRef, seed models.Cache) (json.RawMessage, error) {
+func (r *RecordResolver) ResolveWorkflowCached(ctx context.Context, ref commonv1.StrongRef, seed models.Cache) (json.RawMessage, error) {
 	value, err := r.ResolveRecordCached(ctx, ref, seed)
 	if err != nil {
 		return nil, err
@@ -71,7 +72,7 @@ func (r *RecordResolver) ResolveWorkflowCached(ctx context.Context, ref policyv1
 	return r.workflowOfRecord(ref, value)
 }
 
-func (r *RecordResolver) workflowOfRecord(ref policyv1alpha1.PolicyStrongRef, value map[string]any) (json.RawMessage, error) {
+func (r *RecordResolver) workflowOfRecord(ref commonv1.StrongRef, value map[string]any) (json.RawMessage, error) {
 	kind := executor.RecordType(ref.URI, value)
 	if r.Registry != nil {
 		item, ok := r.Registry.Get(kind)

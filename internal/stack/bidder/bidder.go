@@ -98,19 +98,19 @@ func Spec(in SpecInput) (v1alpha1.MarketBidderSpec, error) {
 	if n == nil {
 		n = &v1alpha1.MarketNetworkValue{}
 	}
-	if n.PlcDirectoryUrl == "" {
-		n.PlcDirectoryUrl = PublicPlc
+	if n.PLCDirectoryURL == "" {
+		n.PLCDirectoryURL = PublicPlc
 	}
 	if n.IngressProxyHost == "" {
 		n.IngressProxyHost = PublicIngress
 	}
-	if n.RelayUrls == nil {
-		n.RelayUrls = []string{}
+	if n.RelayURLs == nil {
+		n.RelayURLs = []string{}
 	}
-	if n.FirehoseUrls == nil {
-		n.FirehoseUrls = []string{}
+	if n.FirehoseURLs == nil {
+		n.FirehoseURLs = []string{}
 	}
-	if in.Profile == appctl.BidderProfileNetwork && (in.PdsUrl == "" || n.CaBundleRef == "" || n.GuestTlsUrl == "") {
+	if in.Profile == appctl.BidderProfileNetwork && (in.PdsUrl == "" || n.CABundle == "" || n.GuestTLSURL() == "") {
 		return v1alpha1.MarketBidderSpec{}, errors.New("bidder: profile market-network needs the market network's value and its bidders' PDS (--network, or --market-network-file)")
 	}
 	ingress := in.Ingress
@@ -121,7 +121,7 @@ func Spec(in SpecInput) (v1alpha1.MarketBidderSpec, error) {
 		}
 	}
 	return v1alpha1.MarketBidderSpec{Profile: in.Profile, Network: n, Ingress: ingress, Comms: in.Comms, Policy: in.Policy, Kcp: in.Kcp, Options: in.Options,
-		Identity: v1alpha1.ApplicationIdentity{Mode: mode, Handle: in.Handle, PdsUrl: in.PdsUrl}}, nil
+		Identity: v1alpha1.ApplicationIdentity{Mode: mode, Handle: in.Handle, PdsURL: in.PdsUrl}}, nil
 }
 
 func CheckSignIn(spec v1alpha1.MarketBidderSpec, id *v1alpha1.MarketIdentity) error {

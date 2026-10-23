@@ -1,10 +1,8 @@
 package appctl
 
 import (
-	"fmt"
 	"net"
 	"net/url"
-	"os"
 	"slices"
 	"strings"
 
@@ -100,21 +98,17 @@ func atprotoTrust(n *v1alpha1.MarketNetworkValue) (plc string, hosts []string, c
 			hosts = append(hosts, h.Name+"="+h.Address)
 		}
 	}
-	if u, uerr := url.Parse(n.GuestTlsUrl); n.GuestTlsUrl != "" && uerr == nil && u.Port() != "" {
+	if u, uerr := url.Parse(n.GuestTLSURL()); n.GuestTLSURL() != "" && uerr == nil && u.Port() != "" {
 		hosts = append(hosts, "*."+u.Hostname()+"=127.0.0.1:"+u.Port())
 	}
-	if plc == "" && n.PlcDirectoryUrl != "" {
-		plc = n.PlcDirectoryUrl
+	if plc == "" && n.PLCDirectoryURL != "" {
+		plc = n.PLCDirectoryURL
 		if rest, ok := strings.CutPrefix(plc, "https://"); ok {
 			hosts = append(hosts, strings.TrimRight(rest, "/"))
 		}
 	}
-	if n.CaBundleRef != "" && len(hosts) > 0 {
-		raw, rerr := os.ReadFile(n.CaBundleRef)
-		if rerr != nil {
-			return "", nil, "", fmt.Errorf("appctl: the network CA bundle for the atproto plugin: %w", rerr)
-		}
-		caPEM = strings.TrimSpace(string(raw))
+	if len(hosts) > 0 {
+		caPEM = strings.TrimSpace(n.CABundle)
 	}
 	return plc, hosts, caPEM, nil
 }
@@ -154,7 +148,7 @@ func loopbackOriginHost(origin string) string {
 
 func plcScheme(n *v1alpha1.MarketNetworkValue) string {
 	if n != nil {
-		if parsed, err := url.Parse(n.PlcDirectoryUrl); err == nil && strings.EqualFold(parsed.Scheme, "http") {
+		if parsed, err := url.Parse(n.PLCDirectoryURL); err == nil && strings.EqualFold(parsed.Scheme, "http") {
 			return "http"
 		}
 	}

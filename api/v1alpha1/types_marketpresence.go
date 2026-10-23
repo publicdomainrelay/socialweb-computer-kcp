@@ -2,6 +2,8 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 type MarketPresence struct {
@@ -19,14 +21,6 @@ type MarketPresenceList struct {
 	Items []MarketPresence `json:"items"`
 }
 
-type MarketPresenceBidderRef struct {
-	Workspace string `json:"workspace"`
-
-	Kind string `json:"kind"`
-
-	Name string `json:"name"`
-}
-
 type MarketPresencePhase string
 
 const (
@@ -36,11 +30,9 @@ const (
 )
 
 type MarketPresenceSpec struct {
-	BidderRef MarketPresenceBidderRef `json:"bidderRef"`
+	BidderRef commonv1.ObjectRef `json:"bidderRef"`
 
-	OfferingUri string `json:"offeringUri,omitempty"`
-
-	RelayUri string `json:"relayUri,omitempty"`
+	OfferingURI string `json:"offeringUri,omitempty" apigen:"userEndpoint"`
 
 	TtlSeconds int `json:"ttlSeconds,omitempty"`
 }
