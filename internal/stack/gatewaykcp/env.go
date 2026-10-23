@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/deploy"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/appctl"
+	appgateway "github.com/johnandersen777/socialweb-computer-kcp/internal/app/gateway"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/pgunit"
@@ -90,7 +90,7 @@ func (g *gateway) defaults(e *env, rec devinstance.Record, cert, key string) err
 	state := g.c.StateDir
 	e.set("SOCIALWEB_KCP_HOST", rec.KcpURL)
 	e.set("SOCIALWEB_KCP_KUBECONFIG", g.memberKubeconfig())
-	e.set("SOCIALWEB_GATEWAY_NODECLAIM_AGENT", appctl.WebAppAccountRef(g.ws))
+	e.set("SOCIALWEB_GATEWAY_NODECLAIM_AGENT", appgateway.WebAppAccountRef(g.ws))
 	e.dflt("SOCIALWEB_GATEWAY_ADDR", DefaultAddress)
 	e.dflt("SOCIALWEB_GATEWAY_AUDIENCES", DefaultAudience)
 	if n := g.c.Spec.Network; n != nil && n.PLCDirectoryURL != "" {

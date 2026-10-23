@@ -15,7 +15,11 @@ import (
 
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/appctl"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/app"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/gateway"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/marketbidder"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/marketnetwork"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/marketrequester"
 	atprotooauth "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap/table"
@@ -66,9 +70,9 @@ type Config struct {
 	Before       func(ctx context.Context, rec devinstance.Record) error
 	Members      func(ctx context.Context, rec devinstance.Record) error
 	Listeners    func(owner string) []v1alpha1.ApplicationListener
-	WebApp       *appctl.WebApp
+	WebApp       *gateway.WebApp
 	OnComponents func(owner string, listeners []v1alpha1.ApplicationListener)
-	SignInGuard  appctl.SignInGuard
+	SignInGuard  marketbidder.SignInGuard
 	Handlers     *component.HandlerRegistry
 	RemotePDS    *pdsv1alpha1.RemotePDS
 
@@ -172,9 +176,8 @@ func Run(ctx context.Context, cfg Config, m hostsvc.Manager) error {
 	})
 	if len(rec.StandIns) == 0 && rec.AdminKubeconfig != "" {
 		ac := AppConfig(bcfg, rec, m, log)
-		ac.Handlers, ac.RemotePDS = cfg.Handlers, cfg.RemotePDS
-		ac.Listeners, ac.WebApp, ac.OnComponents = cfg.Listeners, cfg.WebApp, cfg.OnComponents
-		ac.SignInGuard = cfg.SignInGuard
+		ac.Bus, ac.RemotePDS = cfg.Handlers, cfg.RemotePDS
+		ac.Listeners, ac.OnComponents = cfg.Listeners, cfg.OnComponents
 		var ttlReport atomic.Pointer[func() *v1alpha1.TTLStatus]
 		ac.TTLReport = func() *v1alpha1.TTLStatus {
 			if report := ttlReport.Load(); report != nil {
@@ -191,15 +194,6 @@ func Run(ctx context.Context, cfg Config, m hostsvc.Manager) error {
 		}
 		coreCfg.TTLScope = TTLScope(cmp.Or(ac.Workspace, hostprocess.DefaultWorkspace))
 		coreCfg.OnTTL = func(report func() *v1alpha1.TTLStatus) { ttlReport.Store(&report) }
-		g.Go("componentcore", func(ctx context.Context) error {
-			componentcore.Supervise(ctx, coreCfg)
-			return nil
-		})
-		hpCfg := HostProcessConfig(bcfg, rec, m, log)
-		g.Go("hostprocess", func(ctx context.Context) error {
-			hostprocess.Supervise(ctx, hpCfg)
-			return nil
-		})
 		if rec.SharedKcp == "" {
 			if sc, err := StoreMaintConfig(bcfg, rec, log); err != nil {
 				log.Warn("the store maintenance does not start", "err", err.Error())
@@ -212,8 +206,14 @@ func Run(ctx context.Context, cfg Config, m hostsvc.Manager) error {
 				})
 			}
 		}
-		g.Go("appctl", func(ctx context.Context) error {
-			appctl.Supervise(ctx, ac)
+		coreCfg.Apps = &app.Config{Compose: ac, WebApp: cfg.WebApp, SignInGuard: cfg.SignInGuard}
+		g.Go("componentcore", func(ctx context.Context) error {
+			componentcore.Supervise(ctx, coreCfg)
+			return nil
+		})
+		hpCfg := HostProcessConfig(bcfg, rec, m, log)
+		g.Go("hostprocess", func(ctx context.Context) error {
+			hostprocess.Supervise(ctx, hpCfg)
 			return nil
 		})
 	}
@@ -363,30 +363,30 @@ func ComponentCoreConfig(ctx context.Context, cfg Config, rec devinstance.Record
 		out.Compute = &c
 	}
 	if rec.AdminKubeconfig != "" {
-		if n, err := appctl.ReadNetwork(ctx, rec.AdminKubeconfig); err == nil && n.Status.Network != nil {
+		if n, err := marketnetwork.ReadNetwork(ctx, rec.AdminKubeconfig); err == nil && n.Status.Network != nil {
 			out.PLCBaseURL = n.Status.Network.PLCDirectoryURL
 			out.Relays = n.Status.Network.Relays()
 		}
 	}
 	switch {
 	case cfg.Application != nil && cfg.Application.Role == table.RoleBidder:
-		out.CredentialClient = appctl.BidderVaultClient
-		out.CredentialServer = appctl.BidderVaultServer
+		out.CredentialClient = marketbidder.BidderVaultClient
+		out.CredentialServer = marketbidder.BidderVaultServer
 		out.OAuthScopes = atprotooauth.BidderOAuthScope
 	case cfg.Application != nil && cfg.Application.Role == table.RoleGateway:
-		out.CredentialClient = appctl.RequesterVaultClient
+		out.CredentialClient = marketrequester.RequesterVaultClient
 		out.CredentialServer = vaultlayout.RootServerName
 		out.OAuthScopes = atprotooauth.RequesterOAuthScope
 	case strings.Contains(rec.BaseWorkspace, ":gateway"), strings.Contains(rec.BaseWorkspace, ":ssh"):
-		out.CredentialClient = appctl.RequesterVaultClient
+		out.CredentialClient = marketrequester.RequesterVaultClient
 		out.CredentialServer = vaultlayout.RootServerName
 		out.OAuthScopes = atprotooauth.RequesterOAuthScope
 	case strings.Contains(rec.BaseWorkspace, ":bidder"), strings.HasPrefix(rec.BaseWorkspace, "b-"), strings.HasPrefix(rec.Layout.ID, "b-"):
-		out.CredentialClient = appctl.BidderVaultClient
-		out.CredentialServer = appctl.BidderVaultServer
+		out.CredentialClient = marketbidder.BidderVaultClient
+		out.CredentialServer = marketbidder.BidderVaultServer
 		out.OAuthScopes = atprotooauth.BidderOAuthScope
 	case strings.HasPrefix(rec.BaseWorkspace, "r-"), strings.HasPrefix(rec.Layout.ID, "r-"):
-		out.CredentialClient = appctl.RequesterVaultClient
+		out.CredentialClient = marketrequester.RequesterVaultClient
 		out.CredentialServer = vaultlayout.RootServerName
 		out.OAuthScopes = atprotooauth.RequesterOAuthScope
 	}
@@ -397,7 +397,7 @@ func ComponentCoreConfig(ctx context.Context, cfg Config, rec devinstance.Record
 	}
 	if rec.Profile == bootstrap.ProfileMarketNetwork && rec.AdminKubeconfig != "" {
 		out.WorkspacesFunc = func(ctx context.Context) []string {
-			n, err := appctl.ReadNetwork(ctx, rec.AdminKubeconfig)
+			n, err := marketnetwork.ReadNetwork(ctx, rec.AdminKubeconfig)
 			if err != nil {
 				return out.Workspaces
 			}

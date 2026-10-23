@@ -16,7 +16,8 @@ import (
 	"k8s.io/client-go/rest"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/appctl"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/marketnetwork"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clicfg"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
@@ -99,7 +100,7 @@ func appKcps(ctx context.Context, l devinstance.Layout, rec devinstance.Record) 
 	if rec.Profile != bootstrap.ProfileMarketNetwork || rec.AdminKubeconfig == "" {
 		return []appKcp{{app: l.ID, instance: l.ID, kubeconfig: rec.AdminKubeconfig, workspace: baseWorkspace(rec)}}, nil
 	}
-	n, err := appctl.ReadNetwork(ctx, rec.AdminKubeconfig)
+	n, err := marketnetwork.ReadNetwork(ctx, rec.AdminKubeconfig)
 	if err != nil {
 		return nil, fmt.Errorf("reading the MarketNetwork of %s: %w", l.ID, err)
 	}
@@ -108,7 +109,7 @@ func appKcps(ctx context.Context, l devinstance.Layout, rec devinstance.Record) 
 		if ap.Instance == "" {
 			continue
 		}
-		cl, err := devinstance.NewLayout(ap.Instance, filepath.Join(l.StateDir, appctl.AppsDir), filepath.Join(l.RuntimeDir, appctl.AppsDir))
+		cl, err := devinstance.NewLayout(ap.Instance, filepath.Join(l.StateDir, compose.AppsDir), filepath.Join(l.RuntimeDir, compose.AppsDir))
 		if err != nil {
 			return nil, err
 		}
@@ -125,7 +126,7 @@ func baseWorkspace(rec devinstance.Record) string {
 	if rec.BaseWorkspace != "" {
 		return rec.BaseWorkspace
 	}
-	return appctl.DefaultWorkspace
+	return compose.DefaultWorkspace
 }
 
 func readAppStatus(ctx context.Context, ak appKcp) appStatusView {
@@ -140,7 +141,7 @@ func readAppStatus(ctx context.Context, ak appKcp) appStatusView {
 	for _, r := range []struct {
 		gvr  schema.GroupVersionResource
 		kind string
-	}{{appctl.MarketBidderGVR, "MarketBidder"}, {appctl.MarketRequesterGVR, "MarketRequester"}, {appctl.GatewayGVR, "Gateway"}} {
+	}{{compose.MarketBidderGVR, "MarketBidder"}, {compose.MarketRequesterGVR, "MarketRequester"}, {compose.GatewayGVR, "Gateway"}} {
 		list, err := dc.Resource(r.gvr).List(ctx, metav1.ListOptions{})
 		if absentResource(err) {
 			continue
@@ -162,7 +163,7 @@ func readAppStatus(ctx context.Context, ak appKcp) appStatusView {
 				Market: o.Status.Market, Store: o.Status.Store, GC: o.Status.GC, TTL: o.Status.TTL, Quotas: o.Status.Quotas})
 		}
 	}
-	list, err := dc.Resource(appctl.ComputeContractGVR).Namespace("").List(ctx, metav1.ListOptions{})
+	list, err := dc.Resource(compose.ComputeContractGVR).Namespace("").List(ctx, metav1.ListOptions{})
 	if err != nil && !absentResource(err) {
 		v.Error = fmt.Sprintf("listing computecontracts: %v", err)
 		return v

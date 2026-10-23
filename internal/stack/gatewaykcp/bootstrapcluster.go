@@ -14,7 +14,8 @@ import (
 	"k8s.io/client-go/dynamic"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/appctl"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
+	appgateway "github.com/johnandersen777/socialweb-computer-kcp/internal/app/gateway"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/sweepkcp"
 )
@@ -126,7 +127,7 @@ func bootstrapCluster(ctx context.Context, kubeconfig, base, did, cluster string
 	if err := retry(ctx, "cluster", func() error { return ssa(ctx, home.Resource(clusterGVR), obj) }); err != nil {
 		return err
 	}
-	agent, err := kcpclient.ParseServiceAccountRef(appctl.WebAppAccountRef(base))
+	agent, err := kcpclient.ParseServiceAccountRef(appgateway.WebAppAccountRef(base))
 	if err != nil {
 		return err
 	}
@@ -142,6 +143,6 @@ func bootstrapCluster(ctx context.Context, kubeconfig, base, did, cluster string
 }
 
 func BootstrapCluster(ctx context.Context, kubeconfig, base, did, cluster string, log *slog.Logger) error {
-	base = cmp.Or(base, appctl.DefaultWorkspace)
+	base = cmp.Or(base, compose.DefaultWorkspace)
 	return bootstrapCluster(ctx, kubeconfig, base, did, cluster, log)
 }

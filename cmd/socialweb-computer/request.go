@@ -15,8 +15,10 @@ import (
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/marketnetwork"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/marketrequester"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/appcli"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/appctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clicfg"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
@@ -95,22 +97,22 @@ func splitList(v string) []string {
 }
 
 func (r *requestRun) passthrough(args []string, network bool) error {
-	parsed, err := appctl.ParseAppArgs(appctl.RequesterApp, args)
+	parsed, err := compose.ParseAppArgs(marketrequester.RequesterApp, args)
 	if err != nil {
 		return err
 	}
-	r.root = v1alpha1.MarketRequesterSpec{Profile: appctl.RequesterProfileDefault,
+	r.root = v1alpha1.MarketRequesterSpec{Profile: marketrequester.RequesterProfileDefault,
 		Identity: v1alpha1.ApplicationIdentity{Mode: v1alpha1.MarketIdentityModeLocalRepo}}
 	var nv v1alpha1.MarketNetworkValue
 	nvSet := false
 	for _, p := range parsed {
-		if network && (strings.HasPrefix(p.To, appctl.MapToSpec) || strings.HasPrefix(p.To, appctl.MapToNetwork)) {
+		if network && (strings.HasPrefix(p.To, compose.MapToSpec) || strings.HasPrefix(p.To, compose.MapToNetwork)) {
 			return fmt.Errorf("--%s maps to %s, which the market network sets for its child applications", p.Name, p.To)
 		}
 		switch {
-		case p.To == appctl.MapToOptions:
+		case p.To == compose.MapToOptions:
 			r.appOptions = append(r.appOptions, v1alpha1.ApplicationOption{Name: p.Name, Value: p.Value})
-		case p.To == appctl.MapToCLI:
+		case p.To == compose.MapToCLI:
 			switch p.Name {
 			case "exec":
 				r.exec = p.Value
@@ -156,7 +158,7 @@ func (r *requestRun) passthrough(args []string, network bool) error {
 			if !applied {
 				return fmt.Errorf("--%s maps to %s, which run request does not take", p.Name, p.To)
 			}
-		case strings.HasPrefix(p.To, appctl.MapToNetwork):
+		case strings.HasPrefix(p.To, compose.MapToNetwork):
 			nvSet = true
 			switch p.To {
 			case "network.plcDirectoryUrl":
@@ -208,7 +210,7 @@ func (r *requestRun) passthrough(args []string, network bool) error {
 		r.root.Network = &nv
 	}
 	if !network && r.root.Ingress == nil {
-		r.root.Ingress = appctl.DefaultIngressConfig()
+		r.root.Ingress = compose.DefaultIngressConfig()
 		if nv.IngressProxyHost != "" {
 			r.root.Ingress.Xrpc.IngressProxyHost = nv.IngressProxyHost
 		}
@@ -253,7 +255,7 @@ func (r *requestRun) networkLayout() (devinstance.Layout, devinstance.Record, er
 }
 
 func (r *requestRun) childRecord(netLayout devinstance.Layout, instance string) (devinstance.Record, error) {
-	cl, err := devinstance.NewLayout(instance, filepath.Join(netLayout.StateDir, appctl.AppsDir), filepath.Join(netLayout.RuntimeDir, appctl.AppsDir))
+	cl, err := devinstance.NewLayout(instance, filepath.Join(netLayout.StateDir, compose.AppsDir), filepath.Join(netLayout.RuntimeDir, compose.AppsDir))
 	if err != nil {
 		return devinstance.Record{}, err
 	}
@@ -275,7 +277,7 @@ func (r *requestRun) start(ctx context.Context, fresh bool) error {
 		}
 		if fresh {
 			app := v1alpha1.NetworkApp{Name: r.inv.Name, Kind: v1alpha1.ApplicationKindMarketRequester,
-				Profile: appctl.RequesterProfileNetwork, Options: r.appOptions}
+				Profile: marketrequester.RequesterProfileNetwork, Options: r.appOptions}
 			if err := request.AddToNetwork(ctx, netRec.AdminKubeconfig, app); err != nil {
 				return err
 			}
@@ -284,7 +286,7 @@ func (r *requestRun) start(ctx context.Context, fresh bool) error {
 		}
 		r.log("the market network places the invocation in its workspace of the network's kcp", "network", r.inv.Network)
 		app, err := request.WaitNetworkApp(ctx, netRec.AdminKubeconfig, r.inv.Name, r.networkTimeout, func(a v1alpha1.NetworkAppStatus) bool {
-			return a.Instance != "" && a.KcpURL != "" && a.Message != appctl.StoppedMessage && a.Phase != v1alpha1.ApplicationPhasePending
+			return a.Instance != "" && a.KcpURL != "" && a.Message != marketnetwork.StoppedMessage && a.Phase != v1alpha1.ApplicationPhasePending
 		}, func(a v1alpha1.NetworkAppStatus) {
 			r.log("network child", "phase", string(a.Phase), "message", a.Message)
 		})
@@ -350,7 +352,7 @@ func (r *requestRun) stop(ctx context.Context, remove bool) {
 		}
 		if !remove {
 			_, err = request.WaitNetworkApp(ctx, netRec.AdminKubeconfig, r.inv.Name, r.networkTimeout, func(a v1alpha1.NetworkAppStatus) bool {
-				return a.Message == appctl.StoppedMessage
+				return a.Message == marketnetwork.StoppedMessage
 			}, nil)
 		} else {
 			for deadline := time.Now().Add(r.networkTimeout); ; {
@@ -416,7 +418,7 @@ func (r *requestRun) signIn(ctx context.Context) error {
 	}
 	wctx, cancel := context.WithTimeout(ctx, requestIdentityWait)
 	defer cancel()
-	_, err = appcli.IdentityRenderer{Client: ids, Out: r.a.stderr, In: in}.WaitReady(wctx, appctl.RequesterIdentity)
+	_, err = appcli.IdentityRenderer{Client: ids, Out: r.a.stderr, In: in}.WaitReady(wctx, marketrequester.RequesterIdentity)
 	return err
 }
 

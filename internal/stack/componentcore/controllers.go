@@ -17,7 +17,8 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/apiserverfront"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/appctl"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/app"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
 	atprotooauth "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauthclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
@@ -137,6 +138,9 @@ func (c *Core) registerLocal(ctx context.Context, mgr *ctlruntime.Manager, clien
 	warn("leases", c.registerLeases(ctx, mgr, local, base))
 	warn("status objects", c.registerStatus(mgr, base))
 	warn("host lifecycle", c.registerHost(mgr, clients, base))
+	if cfg.Apps != nil {
+		warn("application roots", app.Register(ctx, mgr, *cfg.Apps))
+	}
 	if cfg.TTLScope != nil {
 		tc, err := ttl.Register(mgr, ttl.Options{Log: cfg.Log, Scope: cfg.TTLScope})
 		warn("TTL", err)
@@ -353,7 +357,7 @@ func (c *Core) registerNetwork(mgr *ctlruntime.Manager, clients *workspaceClient
 
 func (c *Core) plcBaseURL() string {
 	return cmp.Or(strings.TrimSpace(c.cfg.PLCBaseURL),
-		"http://"+kcp.ServiceFQDN(appctl.NetworkPLCName, "default", c.cfg.Workspaces[0], kcp.DefaultServiceDomain))
+		"http://"+kcp.ServiceFQDN(compose.NetworkPLCName, "default", c.cfg.Workspaces[0], kcp.DefaultServiceDomain))
 }
 
 func (c *Core) managerRestConfig() (*rest.Config, error) {
@@ -377,17 +381,17 @@ func (c *Core) managerRestConfig() (*rest.Config, error) {
 func (c *Core) relayEndpoint(base string) statusstate.RelayEndpointFunc {
 	return func(ref string) (string, bool) {
 		ref = strings.TrimSpace(ref)
-		ref = cmp.Or(ref, appctl.ComponentKindRelay+"/"+appctl.NetworkRelayName)
+		ref = cmp.Or(ref, compose.ComponentKindRelay+"/"+compose.NetworkRelayName)
 		if strings.Contains(ref, "://") {
 			return ref, true
 		}
-		kind, name := appctl.ComponentKindRelay, ref
+		kind, name := compose.ComponentKindRelay, ref
 		if before, after, ok := strings.Cut(ref, "/"); ok {
 			kind, name = before, after
 		}
 		kind, name = strings.TrimSpace(kind), strings.TrimSpace(name)
-		kind = cmp.Or(kind, appctl.ComponentKindRelay)
-		name = cmp.Or(name, appctl.NetworkRelayName)
+		kind = cmp.Or(kind, compose.ComponentKindRelay)
+		name = cmp.Or(name, compose.NetworkRelayName)
 		if endpoint, ok := c.registry.Endpoint(base, kind, name, "http"); ok {
 			if endpoint.URL != "" {
 				return endpoint.URL, true

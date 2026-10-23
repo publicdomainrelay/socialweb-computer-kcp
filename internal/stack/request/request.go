@@ -21,7 +21,9 @@ import (
 	"k8s.io/client-go/rest"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/appctl"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/marketnetwork"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/marketrequester"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
@@ -40,7 +42,7 @@ const (
 	RootName         = "app"
 	FieldManager     = "socialweb-computer-run-request"
 	ContractTTL      = "8d"
-	SecretsPath      = "contracts/" + appctl.RequesterContract + "/secrets"
+	SecretsPath      = "contracts/" + marketrequester.RequesterContract + "/secrets"
 	Poll             = time.Second
 	irohScheme       = "iroh://"
 	maxNameLength    = 30
@@ -197,7 +199,7 @@ func OpenKcp(kubeconfig, workspace string) (*Kcp, error) {
 	if err != nil {
 		return nil, err
 	}
-	workspace = cmp.Or(workspace, appctl.DefaultWorkspace)
+	workspace = cmp.Or(workspace, compose.DefaultWorkspace)
 	root := rest.CopyConfig(cfg)
 	root.Host = strings.TrimSuffix(cfg.Host, "/") + "/clusters/" + workspace
 	dc, err := dynamic.NewForConfig(root)
@@ -226,13 +228,13 @@ func (k *Kcp) ApplyRoot(ctx context.Context, spec v1alpha1.MarketRequesterSpec) 
 		return err
 	}
 	force := true
-	_, err = k.dyn.Resource(appctl.MarketRequesterGVR).Patch(ctx, RootName, types.ApplyPatchType, body,
+	_, err = k.dyn.Resource(compose.MarketRequesterGVR).Patch(ctx, RootName, types.ApplyPatchType, body,
 		metav1.PatchOptions{FieldManager: FieldManager, Force: &force})
 	return err
 }
 
 func (k *Kcp) Root(ctx context.Context) (v1alpha1.ApplicationStatus, error) {
-	u, err := k.dyn.Resource(appctl.MarketRequesterGVR).Get(ctx, RootName, metav1.GetOptions{})
+	u, err := k.dyn.Resource(compose.MarketRequesterGVR).Get(ctx, RootName, metav1.GetOptions{})
 	if err != nil {
 		return v1alpha1.ApplicationStatus{}, err
 	}
@@ -271,7 +273,7 @@ func (k *Kcp) WaitReady(ctx context.Context, timeout time.Duration, progress fun
 }
 
 func (k *Kcp) Contract(ctx context.Context) (*v1alpha1.ComputeContract, error) {
-	u, err := k.dyn.Resource(appctl.ComputeContractGVR).Get(ctx, appctl.RequesterContract, metav1.GetOptions{})
+	u, err := k.dyn.Resource(compose.ComputeContractGVR).Get(ctx, marketrequester.RequesterContract, metav1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -308,7 +310,7 @@ func until(ctx context.Context, timeout time.Duration, what string, try func() (
 }
 
 func (k *Kcp) CreateContract(ctx context.Context, spec v1alpha1.ComputeContractSpec, timeout time.Duration) error {
-	body, err := applyBody(&v1alpha1.ComputeContract{ObjectMeta: metav1.ObjectMeta{Name: appctl.RequesterContract,
+	body, err := applyBody(&v1alpha1.ComputeContract{ObjectMeta: metav1.ObjectMeta{Name: marketrequester.RequesterContract,
 		Annotations: map[string]string{v1alpha1.AnnotationTTLAfterFinished: ContractTTL}}, Spec: spec}, "ComputeContract")
 	if err != nil {
 		return err
@@ -318,7 +320,7 @@ func (k *Kcp) CreateContract(ctx context.Context, spec v1alpha1.ComputeContractS
 		return err
 	}
 	return until(ctx, timeout, "creating the ComputeContract (its schema is bound by the requester's core)", func() (bool, error) {
-		_, err := k.dyn.Resource(appctl.ComputeContractGVR).Create(ctx, &u, metav1.CreateOptions{FieldManager: FieldManager})
+		_, err := k.dyn.Resource(compose.ComputeContractGVR).Create(ctx, &u, metav1.CreateOptions{FieldManager: FieldManager})
 		if err == nil || apierrors.IsAlreadyExists(err) {
 			return true, nil
 		}
@@ -328,7 +330,7 @@ func (k *Kcp) CreateContract(ctx context.Context, spec v1alpha1.ComputeContractS
 
 func (k *Kcp) Release(ctx context.Context) error {
 	patch := []byte(`{"spec":{"release":true}}`)
-	_, err := k.dyn.Resource(appctl.ComputeContractGVR).Patch(ctx, appctl.RequesterContract, types.MergePatchType, patch,
+	_, err := k.dyn.Resource(compose.ComputeContractGVR).Patch(ctx, marketrequester.RequesterContract, types.MergePatchType, patch,
 		metav1.PatchOptions{FieldManager: FieldManager})
 	return err
 }
@@ -374,10 +376,10 @@ func requesterFailure(st v1alpha1.ApplicationStatus) string {
 }
 
 func (k *Kcp) PutSecrets(ctx context.Context, bundle []byte, timeout time.Duration) (commonv1.SecretRef, error) {
-	ref := commonv1.SecretRef{Mount: appctl.RequesterVaultClient, Path: SecretsPath}
-	ri := k.dyn.Resource(appctl.OpenBaoServerGVR)
+	ref := commonv1.SecretRef{Mount: marketrequester.RequesterVaultClient, Path: SecretsPath}
+	ri := k.dyn.Resource(compose.OpenBaoServerGVR)
 	err := until(ctx, timeout, "writing the secrets bundle into the requester's own OpenBao", func() (bool, error) {
-		client, _, c, err := appctl.ServerClient(ctx, ri, appctl.RequesterVaultServer, appctl.RequesterVaultClient)
+		client, _, c, err := compose.ServerClient(ctx, ri, marketrequester.RequesterVaultServer, marketrequester.RequesterVaultClient)
 		if err != nil {
 			return false, err
 		}
@@ -401,7 +403,7 @@ func (k *Kcp) Identities() (*kcpclient.MarketIdentities, error) {
 
 func (k *Kcp) WaitIdentityObject(ctx context.Context, timeout time.Duration) error {
 	return until(ctx, timeout, "waiting for the requester's MarketIdentity (its core creates it)", func() (bool, error) {
-		_, err := k.dyn.Resource(appctl.MarketIdentityGVR).Get(ctx, appctl.RequesterIdentity, metav1.GetOptions{})
+		_, err := k.dyn.Resource(compose.MarketIdentityGVR).Get(ctx, marketrequester.RequesterIdentity, metav1.GetOptions{})
 		return err == nil, err
 	})
 }
@@ -411,12 +413,12 @@ func networkClient(kubeconfig string) (dynamic.ResourceInterface, error) {
 	if err != nil {
 		return nil, err
 	}
-	cfg.Host = strings.TrimSuffix(cfg.Host, "/") + "/clusters/" + appctl.DefaultWorkspace
+	cfg.Host = strings.TrimSuffix(cfg.Host, "/") + "/clusters/" + compose.DefaultWorkspace
 	dc, err := dynamic.NewForConfig(cfg)
 	if err != nil {
 		return nil, err
 	}
-	return dc.Resource(appctl.MarketNetworkGVR), nil
+	return dc.Resource(compose.MarketNetworkGVR), nil
 }
 
 func editNetwork(ctx context.Context, kubeconfig string, edit func(*v1alpha1.MarketNetworkSpec) error) error {
@@ -425,7 +427,7 @@ func editNetwork(ctx context.Context, kubeconfig string, edit func(*v1alpha1.Mar
 		return err
 	}
 	for range networkConflicts {
-		u, err := ri.Get(ctx, appctl.NetworkName, metav1.GetOptions{})
+		u, err := ri.Get(ctx, marketnetwork.NetworkName, metav1.GetOptions{})
 		if err != nil {
 			return fmt.Errorf("request: the market network's MarketNetwork: %w", err)
 		}
@@ -494,7 +496,7 @@ func NetworkApp(ctx context.Context, kubeconfig, name string) (v1alpha1.NetworkA
 	if err != nil {
 		return v1alpha1.NetworkAppStatus{}, false, err
 	}
-	u, err := ri.Get(ctx, appctl.NetworkName, metav1.GetOptions{})
+	u, err := ri.Get(ctx, marketnetwork.NetworkName, metav1.GetOptions{})
 	if err != nil {
 		return v1alpha1.NetworkAppStatus{}, false, err
 	}
