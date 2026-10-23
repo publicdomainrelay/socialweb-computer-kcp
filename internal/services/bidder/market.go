@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -474,7 +475,7 @@ func (s *Service) postXRPC(ctx context.Context, endpoint, nsid string, body any)
 	host := hostPortOf(endpoint)
 	client := externalHTTPClient(s.cfg.Deps, DefaultCallTimeout)
 	var resp *http.Response
-	for attempt := 0; attempt < 2; attempt++ {
+	for attempt := range 2 {
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, strings.NewReader(string(raw)))
 		if err != nil {
 			return err
@@ -576,7 +577,7 @@ func (s *Service) mintServiceAuth(ctx context.Context, aud, lxm string, now time
 	defer cancel()
 	var resp *http.Response
 	var raw []byte
-	for attempt := 0; attempt < 2; attempt++ {
+	for attempt := range 2 {
 		accessToken, err := s.pdsAccessTokenForServiceAuth(ctx)
 		if err != nil {
 			return "", time.Time{}, err
@@ -704,9 +705,7 @@ func (s *Service) createReceipt(ctx context.Context, refs market.ReceiptRefs, ac
 		return "", "", errors.New("the bidder has no record store or attestation key")
 	}
 	value := make(map[string]any, len(accept.Value))
-	for key, item := range accept.Value {
-		value[key] = item
-	}
+	maps.Copy(value, accept.Value)
 	rkey := market.ReceiptRKey(refs.Accept.URI, refs.Accept.CID)
 	existing, err := s.records.GetRecord(ctx, s.did, market.ReceiptNSID, rkey)
 	if err == nil {

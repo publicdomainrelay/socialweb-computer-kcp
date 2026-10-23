@@ -38,8 +38,8 @@ func (r Ref) WithNamespace(namespace string) Ref {
 
 func BaseHost(host string) string {
 	host = strings.TrimSuffix(host, "/")
-	if i := strings.Index(host, APIPathPrefix); i >= 0 {
-		return host[:i]
+	if before, _, ok := strings.Cut(host, APIPathPrefix); ok {
+		return before
 	}
 	return host
 }

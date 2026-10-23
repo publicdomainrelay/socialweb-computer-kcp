@@ -60,7 +60,7 @@ func (h *HTTPReader) get(ctx context.Context, rawURL string) (*http.Response, er
 	}
 	client := h.doer()
 	var lastErr error
-	for attempt := 0; attempt < 5; attempt++ {
+	for attempt := range 5 {
 		res, err := client.Do(req)
 		if err == nil {
 			if res.StatusCode < 500 {

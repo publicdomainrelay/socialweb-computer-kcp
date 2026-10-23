@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -269,9 +270,7 @@ func (e *PolicyEvaluator) buildRun(input PolicyInput, workflow string) (*policyv
 		inputs["root-requester-did"] = input.RootRequesterDid
 	}
 	args := map[string]string{}
-	for key, value := range e.Args {
-		args[key] = value
-	}
+	maps.Copy(args, e.Args)
 	rawArgs, err := json.Marshal(args)
 	if err != nil {
 		return nil, err

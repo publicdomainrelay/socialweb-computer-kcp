@@ -465,7 +465,7 @@ func (a *Allocator) Allocate(req Request) (Lease, error) {
 
 		blocks := a.pool.Blocks()
 		exhausted := &PoolExhaustedError{Pool: a.pool, Candidates: blocks}
-		for i := uint64(0); i < blocks; i++ {
+		for i := range blocks {
 			candidate := a.pool.BlockAt(i)
 			err := a.checkLocked(candidate, hosts)
 
@@ -588,7 +588,7 @@ func lessBlock(a, b netip.Prefix) bool {
 		return x.String() < y.String()
 	}
 	xa, ya := x.As4(), y.As4()
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		if xa[i] != ya[i] {
 			return xa[i] < ya[i]
 		}

@@ -127,14 +127,14 @@ type KcpRef struct {
 }
 
 var valueTypes = map[string]func() reflect.Type{
-	"None":                func() reflect.Type { return reflect.TypeOf(&None{}) },
-	"PermissionInventory": func() reflect.Type { return reflect.TypeOf(&PermissionInventory{}) },
-	"MarketIdentity":      func() reflect.Type { return reflect.TypeOf(&MarketIdentity{}) },
-	"MarketNetwork":       func() reflect.Type { return reflect.TypeOf(&MarketNetwork{}) },
-	"MarketBidder":        func() reflect.Type { return reflect.TypeOf(&MarketBidder{}) },
-	"Gateway":             func() reflect.Type { return reflect.TypeOf(&Gateway{}) },
-	"MarketRequester":     func() reflect.Type { return reflect.TypeOf(&MarketRequester{}) },
-	"SshGateway":          func() reflect.Type { return reflect.TypeOf(&SshGateway{}) },
+	"None":                func() reflect.Type { return reflect.TypeFor[*None]() },
+	"PermissionInventory": func() reflect.Type { return reflect.TypeFor[*PermissionInventory]() },
+	"MarketIdentity":      func() reflect.Type { return reflect.TypeFor[*MarketIdentity]() },
+	"MarketNetwork":       func() reflect.Type { return reflect.TypeFor[*MarketNetwork]() },
+	"MarketBidder":        func() reflect.Type { return reflect.TypeFor[*MarketBidder]() },
+	"Gateway":             func() reflect.Type { return reflect.TypeFor[*Gateway]() },
+	"MarketRequester":     func() reflect.Type { return reflect.TypeFor[*MarketRequester]() },
+	"SshGateway":          func() reflect.Type { return reflect.TypeFor[*SshGateway]() },
 }
 
 type Gateway struct {

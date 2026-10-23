@@ -138,7 +138,7 @@ func SshGatewayVaultExtra(spec v1alpha1.SshGatewaySpec) (string, error) {
 		return "", err
 	}
 	var b strings.Builder
-	for _, line := range strings.Split(strings.TrimRight(string(raw), "\n"), "\n") {
+	for line := range strings.SplitSeq(strings.TrimRight(string(raw), "\n"), "\n") {
 		b.WriteString("  " + line + "\n")
 	}
 	return b.String(), nil

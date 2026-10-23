@@ -247,10 +247,7 @@ func (s *Server) listRecordsReverse(ctx context.Context, did syntax.DID, collect
 	if len(all) == 0 {
 		return nil, nil, nil
 	}
-	start := len(all) - limit
-	if start < 0 {
-		start = 0
-	}
+	start := max(len(all)-limit, 0)
 	window := all[start:]
 	out := make([]repo.Record, len(window))
 	for i := range window {

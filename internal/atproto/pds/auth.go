@@ -241,8 +241,8 @@ func (s *Server) accountHandle(ctx context.Context, did syntax.DID) string {
 	if s.resolver != nil {
 		if doc, err := s.resolver.ResolveDID(ctx, did); err == nil && doc != nil {
 			for _, aka := range doc.AlsoKnownAs {
-				if strings.HasPrefix(aka, "at://") {
-					handle := strings.TrimPrefix(aka, "at://")
+				if after, ok := strings.CutPrefix(aka, "at://"); ok {
+					handle := after
 					if _, err := syntax.ParseHandle(handle); err == nil {
 						return handle
 					}

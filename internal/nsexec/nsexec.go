@@ -23,7 +23,7 @@ var ErrNoTarget = errors.New("nsexec: no command after --")
 
 func ParseBinds(raw string) ([]Bind, error) {
 	var out []Bind
-	for _, b := range strings.Split(raw, ",") {
+	for b := range strings.SplitSeq(raw, ",") {
 		b = strings.TrimSpace(b)
 		if b == "" {
 			continue

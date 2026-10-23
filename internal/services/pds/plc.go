@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -118,13 +120,9 @@ func (p *HTTPPLCSubmitter) UpdateHandle(ctx context.Context, did syntax.DID, han
 	prev := prevCID
 	rotationKeys := append([]string(nil), last.RotationKeys...)
 	verification := make(map[string]string, len(last.VerificationMethods))
-	for key, value := range last.VerificationMethods {
-		verification[key] = value
-	}
+	maps.Copy(verification, last.VerificationMethods)
 	services := make(map[string]plc.Service, len(last.Services))
-	for key, value := range last.Services {
-		services[key] = value
-	}
+	maps.Copy(services, last.Services)
 	op := &plc.Operation{
 		Type:                plc.TypeOperation,
 		Prev:                &prev,
@@ -163,13 +161,7 @@ func (p *HTTPPLCSubmitter) UpdateService(ctx context.Context, did syntax.DID, se
 	if last.Type != plc.TypeOperation {
 		return fmt.Errorf("pds: the PLC operation for %s is not updateable", did)
 	}
-	authorized := false
-	for _, key := range last.RotationKeys {
-		if key == p.rotationDID {
-			authorized = true
-			break
-		}
-	}
+	authorized := slices.Contains(last.RotationKeys, p.rotationDID)
 	if !authorized {
 		return fmt.Errorf("pds: the rotation key %s is not in the PLC log for %s", p.rotationDID, did)
 	}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -322,9 +323,7 @@ func (e *PolicyEvaluator) buildRun(req PolicyRunRequest) *policyv1alpha1.PolicyW
 		inputs["root-requester-did"] = input.RootRequesterDid
 	}
 	args := map[string]string{}
-	for key, value := range e.Args {
-		args[key] = value
-	}
+	maps.Copy(args, e.Args)
 	inputs["policy-args"] = marshalArgs(args)
 	deadline := int64(e.Timeout / time.Second)
 	if req.Timeout > 0 {

@@ -131,7 +131,7 @@ func (e *Executor) runAction(ctx context.Context, action *Action, env map[string
 func parseActionResult(stdout string) actionRunResult {
 	result := actionRunResult{}
 	found := false
-	for _, line := range strings.Split(stdout, "\n") {
+	for line := range strings.SplitSeq(stdout, "\n") {
 		line = strings.TrimSpace(line)
 		if !strings.HasPrefix(line, resultMarker) {
 			continue
@@ -154,14 +154,14 @@ func parseActionResult(stdout string) actionRunResult {
 }
 
 func (e *Executor) applyActionResult(step *models.WorkflowStep, result actionRunResult) {
-	for _, line := range strings.Split(result.Stderr, "\n") {
+	for line := range strings.SplitSeq(result.Stderr, "\n") {
 		if line == "" {
 			continue
 		}
 		e.emit(line)
 		e.parseAnnotations(line)
 	}
-	for _, line := range strings.Split(result.Stdout, "\n") {
+	for line := range strings.SplitSeq(result.Stdout, "\n") {
 		if line == "" || strings.HasPrefix(strings.TrimSpace(line), resultMarker) {
 			continue
 		}

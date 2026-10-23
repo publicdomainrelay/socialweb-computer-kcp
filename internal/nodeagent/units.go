@@ -3,6 +3,7 @@ package nodeagent
 import (
 	"context"
 	"log/slog"
+	"strings"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/systemdunit"
 )
@@ -171,14 +172,14 @@ func oneshotUnit(name, description string, after, wants []string, exec string, r
 }
 
 func joinStrings(values []string) string {
-	out := ""
+	var out strings.Builder
 	for i, value := range values {
 		if i > 0 {
-			out += " "
+			out.WriteString(" ")
 		}
-		out += value
+		out.WriteString(value)
 	}
-	return out
+	return out.String()
 }
 
 func UnitFiles(cfg Config) []systemdunit.File {

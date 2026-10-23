@@ -188,7 +188,7 @@ func ExchangeCode(ctx context.Context, client *http.Client, pending PendingAuth,
 	}
 	var resp *http.Response
 	nonce := ""
-	for attempt := 0; attempt < 2; attempt++ {
+	for attempt := range 2 {
 		proof, err := DPoPProof(key, http.MethodPost, pending.TokenEndpoint, "", nonce)
 		if err != nil {
 			return SessionData{}, err

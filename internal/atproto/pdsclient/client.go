@@ -183,7 +183,7 @@ func (c *xrpcClient) do(ctx context.Context, method, nsid string, query url.Valu
 	endpoint := c.endpoint(nsid, query)
 	var response *http.Response
 	refreshed := false
-	for attempt := 0; attempt < 3; attempt++ {
+	for range 3 {
 		var reader io.Reader
 		if body != nil {
 			reader = bytes.NewReader(body)

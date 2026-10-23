@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -173,12 +174,7 @@ func writeStatus(ctx context.Context, dyn dynamic.Interface, gvr schema.GroupVer
 }
 
 func hasFinalizer(u *unstructured.Unstructured, finalizer string) bool {
-	for _, held := range u.GetFinalizers() {
-		if held == finalizer {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(u.GetFinalizers(), finalizer)
 }
 
 func addFinalizer(ctx context.Context, dyn dynamic.Interface, gvr schema.GroupVersionResource, u *unstructured.Unstructured, finalizer string) (*unstructured.Unstructured, error) {

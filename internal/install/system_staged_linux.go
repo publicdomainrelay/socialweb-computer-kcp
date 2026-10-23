@@ -54,7 +54,7 @@ func (s stagedSystem) file(host string) string { return filepath.Join(s.root, ho
 func (s stagedSystem) lines(host string) []string {
 	b, _ := os.ReadFile(s.file(host))
 	var out []string
-	for _, l := range strings.Split(string(b), "\n") {
+	for l := range strings.SplitSeq(string(b), "\n") {
 		if l != "" {
 			out = append(out, l)
 		}
@@ -119,7 +119,7 @@ func (s stagedSystem) editGroup(account, group string, add bool) error {
 			continue
 		}
 		var members []string
-		for _, m := range strings.Split(f[3], ",") {
+		for m := range strings.SplitSeq(f[3], ",") {
 			if m != "" && m != account {
 				members = append(members, m)
 			}

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"strings"
 	"time"
 
@@ -144,9 +145,7 @@ func unsignedRecord(record map[string]any) map[string]any {
 
 func marketEventHash(envelope map[string]any, record map[string]any) (string, error) {
 	unsigned := make(map[string]any, len(envelope))
-	for key, value := range envelope {
-		unsigned[key] = value
-	}
+	maps.Copy(unsigned, envelope)
 	unsigned["record"] = record
 	raw, err := json.Marshal(unsigned)
 	if err != nil {

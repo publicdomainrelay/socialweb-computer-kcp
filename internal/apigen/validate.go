@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -142,10 +143,8 @@ func check(s *Schema, value any, path string, out *[]Issue) {
 		if len(s.Enum) == 0 {
 			return
 		}
-		for _, e := range s.Enum {
-			if e == str {
-				return
-			}
+		if slices.Contains(s.Enum, str) {
+			return
 		}
 		add(path, fmt.Sprintf("%q is not one of %s", str, strings.Join(s.Enum, ", ")))
 	case TypeInteger:
@@ -186,14 +185,14 @@ func checkList(s *Schema, arr []any, path string, add func(p, msg string)) {
 			if !ok {
 				continue
 			}
-			key := ""
+			var key strings.Builder
 			for _, k := range s.ListMapKeys {
-				key += fmt.Sprintf("%v\x00", obj[k])
+				key.WriteString(fmt.Sprintf("%v\x00", obj[k]))
 			}
-			if seen[key] {
+			if seen[key.String()] {
 				add(fmt.Sprintf("%s[%d]", path, i), "duplicate map key "+strings.Join(s.ListMapKeys, ","))
 			}
-			seen[key] = true
+			seen[key.String()] = true
 		}
 	}
 }

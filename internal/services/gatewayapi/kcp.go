@@ -221,7 +221,7 @@ func (s *claimStore) ReplaceStatus(ctx context.Context, claim coreapi.NodeClaim,
 		return fmt.Errorf("gatewayapi: encoding the NodeClaim status: %w", err)
 	}
 	var lastErr error
-	for attempt := 0; attempt < 5; attempt++ {
+	for range 5 {
 		target := ref.New(claim.Workspace, "", claim.Claim.Name)
 		target.ResourceVersion = claim.Claim.ResourceVersion
 		lastErr = s.claims.PatchStatus(ctx, target, raw)

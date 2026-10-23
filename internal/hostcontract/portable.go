@@ -10,7 +10,7 @@ import (
 )
 
 func GroupMembership(content, group, account string) (int, bool) {
-	for _, line := range strings.Split(content, "\n") {
+	for line := range strings.SplitSeq(content, "\n") {
 		f := strings.Split(strings.TrimSpace(line), ":")
 		if len(f) != 4 || f[0] != group {
 			continue
@@ -19,7 +19,7 @@ func GroupMembership(content, group, account string) (int, bool) {
 		if err != nil {
 			return -1, false
 		}
-		for _, m := range strings.Split(f[3], ",") {
+		for m := range strings.SplitSeq(f[3], ",") {
 			if m == account && account != "" {
 				return gid, true
 			}
@@ -58,7 +58,7 @@ func ParseGroups(status string) []int {
 			continue
 		}
 		var out []int
-		for _, g := range strings.Fields(v) {
+		for g := range strings.FieldsSeq(v) {
 			if n, err := strconv.Atoi(g); err == nil {
 				out = append(out, n)
 			}
@@ -69,7 +69,7 @@ func ParseGroups(status string) []int {
 }
 
 func AppArmorProfileLoaded(profiles, name string) bool {
-	for _, line := range strings.Split(profiles, "\n") {
+	for line := range strings.SplitSeq(profiles, "\n") {
 		if strings.HasPrefix(line, name+" ") || line == name {
 			return true
 		}

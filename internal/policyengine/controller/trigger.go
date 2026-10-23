@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strconv"
 	"strings"
 	"sync"
@@ -90,9 +91,7 @@ func (r *TriggerActionRegistry) Handlers() map[string]ActionHandler {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	out := make(map[string]ActionHandler, len(r.handlers))
-	for kind, handler := range r.handlers {
-		out[kind] = handler
-	}
+	maps.Copy(out, r.handlers)
 	return out
 }
 
@@ -259,7 +258,7 @@ func MatchesOutputs(outputs models.Outputs, match map[string]string) bool {
 
 func lookupOutput(outputs models.Outputs, path string) (any, bool) {
 	var current any = map[string]any(outputs)
-	for _, part := range strings.Split(path, ".") {
+	for part := range strings.SplitSeq(path, ".") {
 		switch object := current.(type) {
 		case map[string]any:
 			value, exists := object[part]

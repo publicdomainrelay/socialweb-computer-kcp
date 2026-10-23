@@ -271,11 +271,12 @@ func (c *Client) SignIntermediate(ctx context.Context, rootNamespace, mount, csr
 	if err != nil {
 		return "", err
 	}
-	chain := stringField(data, "certificate")
+	var chain strings.Builder
+	chain.WriteString(stringField(data, "certificate"))
 	for _, entry := range stringList(data, "ca_chain") {
-		chain += "\n" + entry
+		chain.WriteString("\n" + entry)
 	}
-	return chain, nil
+	return chain.String(), nil
 }
 
 func (c *Client) SetSignedIntermediate(ctx context.Context, namespace, mount, chain string) error {

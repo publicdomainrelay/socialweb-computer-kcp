@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -349,7 +350,7 @@ func delegation(f Facts) Result {
 		have[c] = true
 	}
 	var missing []string
-	for _, c := range strings.Fields(DelegatedControllers) {
+	for c := range strings.FieldsSeq(DelegatedControllers) {
 		if !have[c] {
 			missing = append(missing, c)
 		}
@@ -406,10 +407,8 @@ func managerKVM(f Facts) Result {
 		return fail(CheckManagerKVM, "reading user@"+strconv.Itoa(f.UID)+"'s groups: "+f.ManagerErr,
 			"enable linger for the account: "+installFix(RoleBidder))
 	}
-	for _, g := range f.ManagerGroups {
-		if g == f.KVMGid {
-			return ok(CheckManagerKVM, fmt.Sprintf("user@%d (pid %d) runs with kvm (gid %d)", f.UID, f.ManagerPID, f.KVMGid))
-		}
+	if slices.Contains(f.ManagerGroups, f.KVMGid) {
+		return ok(CheckManagerKVM, fmt.Sprintf("user@%d (pid %d) runs with kvm (gid %d)", f.UID, f.ManagerPID, f.KVMGid))
 	}
 	if f.AccountInKVM {
 		return fail(CheckManagerKVM,

@@ -899,37 +899,27 @@ func (s *Service) startLoops(ctx context.Context) {
 		s.bidKick = make(chan struct{}, 1)
 	}
 	if s.loop != nil {
-		s.wg.Add(1)
-		go func() {
-			defer s.wg.Done()
+		s.wg.Go(func() {
 			s.loop.run(ctx)
-		}()
+		})
 	}
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
+	s.wg.Go(func() {
 		s.bindBadgeBlueKeys(ctx)
-	}()
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
+	})
+	s.wg.Go(func() {
 		s.reportVMs(ctx)
-	}()
+	})
 	if s.syncController != nil {
 		controller := s.syncController
-		s.wg.Add(1)
-		go func() {
-			defer s.wg.Done()
+		s.wg.Go(func() {
 			if err := controller.Run(ctx); err != nil && ctx.Err() == nil {
 				s.log.Warn("the StateSync controller stopped", "err", err)
 			}
-		}()
+		})
 	}
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
+	s.wg.Go(func() {
 		s.reconcileBidsLoop(ctx)
-	}()
+	})
 }
 
 func (s *Service) kickBids() {

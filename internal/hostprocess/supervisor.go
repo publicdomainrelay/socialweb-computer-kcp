@@ -579,7 +579,7 @@ func (s *Supervisor) Run(ctx context.Context) error {
 	defer t.Stop()
 	wake := make(chan struct{}, 1)
 	changed := make(chan string, 1024)
-	for i := 0; i < EventWorkers; i++ {
+	for range EventWorkers {
 		go func() {
 			for {
 				select {

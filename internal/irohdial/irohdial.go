@@ -95,11 +95,9 @@ func Run(ctx context.Context, c Config) error {
 			}
 			return err
 		}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			serve(ctx, c, log, conn)
-		}()
+		})
 	}
 }
 

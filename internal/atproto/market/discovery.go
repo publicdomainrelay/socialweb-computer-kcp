@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 )
@@ -131,11 +132,8 @@ func VerifyRelayVisibility(ctx context.Context, opts RelayVisibilityOptions) Rel
 			if err != nil || status != http.StatusOK {
 				continue
 			}
-			for _, did := range relayDIDs(body) {
-				if did == opts.BidderDID {
-					result.IndexedBy = append(result.IndexedBy, relay)
-					break
-				}
+			if slices.Contains(relayDIDs(body), opts.BidderDID) {
+				result.IndexedBy = append(result.IndexedBy, relay)
 			}
 		}
 		if len(result.IndexedBy) == 0 {
@@ -271,12 +269,7 @@ func ListOfferings(ctx context.Context, lister RecordLister, did string) ([]Offe
 }
 
 func OfferingApplies(offering Offering, payloadNSID string) bool {
-	for _, nsid := range offering.AppliesTo {
-		if nsid == payloadNSID {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(offering.AppliesTo, payloadNSID)
 }
 
 func HeartbeatFresh(createdAt time.Time, now time.Time) bool {

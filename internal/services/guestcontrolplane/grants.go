@@ -129,9 +129,7 @@ func (g *grantLoop) recordHostKey(ctx context.Context, name string) {
 	if g.guest == nil {
 		return
 	}
-	g.wg.Add(1)
-	go func() {
-		defer g.wg.Done()
+	g.wg.Go(func() {
 		probe, cancel := context.WithTimeout(ctx, time.Minute)
 		defer cancel()
 		done, err := g.guest.RecordBoundHostKey(probe, name)
@@ -141,5 +139,5 @@ func (g *grantLoop) recordHostKey(ctx context.Context, name string) {
 		if done {
 			g.logf().Info("the guest's bound host key is recorded", "computevm", name)
 		}
-	}()
+	})
 }

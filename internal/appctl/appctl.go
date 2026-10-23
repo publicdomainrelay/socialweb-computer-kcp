@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -315,12 +317,7 @@ func ownerOf(u *unstructured.Unstructured) string {
 }
 
 func hasFinalizer(u *unstructured.Unstructured) bool {
-	for _, f := range u.GetFinalizers() {
-		if f == Finalizer {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(u.GetFinalizers(), Finalizer)
 }
 
 func (ctl *Controller) setFinalizer(ctx context.Context, gvr schema.GroupVersionResource, u *unstructured.Unstructured, want bool) error {
@@ -362,9 +359,7 @@ var componentOwnedStatus = []string{"market"}
 func withComponentOwnedStatus(next map[string]any, current any) map[string]any {
 	cur, _ := current.(map[string]any)
 	out := make(map[string]any, len(next)+len(componentOwnedStatus))
-	for k, v := range next {
-		out[k] = v
-	}
+	maps.Copy(out, next)
 	for _, k := range componentOwnedStatus {
 		if v, ok := cur[k]; ok {
 			out[k] = v

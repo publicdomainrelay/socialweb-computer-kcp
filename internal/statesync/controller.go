@@ -8,7 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -574,9 +576,7 @@ func storeObservation(status *v1alpha1.StateSyncStatus, observation Observation)
 	}
 	if observation.Meta != nil {
 		observed.Meta = make(map[string]string, len(observation.Meta))
-		for key, value := range observation.Meta {
-			observed.Meta[key] = value
-		}
+		maps.Copy(observed.Meta, observation.Meta)
 	}
 	status.Observed = observed
 	if observation.Cursor != nil {
@@ -686,12 +686,7 @@ func ensureFinalizer(ctx context.Context, ri dynamic.ResourceInterface, name, fi
 }
 
 func containsString(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(values, want)
 }
 
 func setCondition(conditions *[]metav1.Condition, generation int64, kind string, ok bool, reason, message string) {

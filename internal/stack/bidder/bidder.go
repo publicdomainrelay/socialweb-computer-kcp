@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/user"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -154,10 +155,8 @@ func CheckAccount(backend hostsvc.Backend, handle, root string) error {
 	if rec.Role != hostcontract.RoleBidder || rec.Account != u.Username {
 		return fmt.Errorf("bidder: host-backend=systemd-user: %s was installed as %s %s, not as a bidder account", u.Username, rec.Role, rec.Account)
 	}
-	for _, h := range rec.Handles {
-		if h == handle {
-			return nil
-		}
+	if slices.Contains(rec.Handles, handle) {
+		return nil
 	}
 	return fmt.Errorf("bidder: install bidder did not install handle %s (installed: %s)", handle, strings.Join(rec.Handles, ", "))
 }

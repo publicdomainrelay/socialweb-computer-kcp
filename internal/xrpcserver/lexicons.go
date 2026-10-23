@@ -3,6 +3,7 @@ package xrpcserver
 import (
 	"embed"
 	"fmt"
+	"maps"
 
 	"github.com/bluesky-social/indigo/atproto/lexicon"
 )
@@ -58,9 +59,7 @@ func paramsAsObject(p *lexicon.SchemaParams) lexicon.SchemaObject {
 
 func validate(where string, cat *lexicon.BaseCatalog, def lexicon.SchemaObject, data map[string]any) error {
 	v := make(map[string]any, len(data)+1)
-	for k, e := range data {
-		v[k] = e
-	}
+	maps.Copy(v, data)
 	v["$type"] = where
 	if err := lexicon.ValidateRecord(inline{nsid: where, obj: def, catalog: cat}, v, where, 0); err != nil {
 		return fmt.Errorf("%s: %w", where, err)

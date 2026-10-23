@@ -3,6 +3,7 @@ package plc
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 )
 
 const (
@@ -102,9 +103,7 @@ func (o *Operation) UnsignedObject() map[string]any {
 func (o *Operation) object() map[string]any {
 	if o.raw != nil {
 		out := make(map[string]any, len(o.raw))
-		for k, v := range o.raw {
-			out[k] = v
-		}
+		maps.Copy(out, o.raw)
 		return out
 	}
 	m := map[string]any{"type": o.Type}

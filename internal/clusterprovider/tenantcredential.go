@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"k8s.io/client-go/rest"
@@ -136,11 +137,9 @@ func MintTenantCredential(o CredentialOptions) (*rest.Config, error) {
 	if len(o.Organizations) == 0 {
 		return nil, fmt.Errorf("%w (none were given)", ErrNoCredentialOrganization)
 	}
-	for _, org := range o.Organizations {
-		if org == "" {
-			return nil, fmt.Errorf("%w (one of the %d given is empty)",
-				ErrNoCredentialOrganization, len(o.Organizations))
-		}
+	if slices.Contains(o.Organizations, "") {
+		return nil, fmt.Errorf("%w (one of the %d given is empty)",
+			ErrNoCredentialOrganization, len(o.Organizations))
 	}
 	server, err := credentialServer(o.Server)
 	if err != nil {
@@ -273,11 +272,9 @@ func mintTenantCredentialFromVault(ctx context.Context, o CredentialOptions, cli
 	if len(o.Organizations) == 0 {
 		return nil, fmt.Errorf("%w (none were given)", ErrNoCredentialOrganization)
 	}
-	for _, org := range o.Organizations {
-		if org == "" {
-			return nil, fmt.Errorf("%w (one of the %d given is empty)",
-				ErrNoCredentialOrganization, len(o.Organizations))
-		}
+	if slices.Contains(o.Organizations, "") {
+		return nil, fmt.Errorf("%w (one of the %d given is empty)",
+			ErrNoCredentialOrganization, len(o.Organizations))
 	}
 	server, err := credentialServer(o.Server)
 	if err != nil {

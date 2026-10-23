@@ -24,8 +24,8 @@ func (ctl *Controller) ensureAppPdsStatus(ctx context.Context, handle string, se
 	ws := ctl.c.workspace()
 	pdsRef := commonv1.ObjectRef{Kind: ComponentKindPds, Name: PdsComponent}
 	authPath := strings.TrimSpace(sessionPath)
-	if strings.HasPrefix(authPath, "openbao:") {
-		authPath = strings.TrimPrefix(authPath, "openbao:")
+	if after, ok := strings.CutPrefix(authPath, "openbao:"); ok {
+		authPath = after
 	} else if _, rest, ok := strings.Cut(authPath, ":"); ok {
 		authPath = rest
 	}

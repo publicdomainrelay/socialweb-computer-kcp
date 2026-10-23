@@ -12,6 +12,7 @@ import (
 	"path"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -909,12 +910,7 @@ func bundleRef(mount, contractName string) commonv1.SecretRef {
 }
 
 func hasFinalizer(finalizers []string, wanted string) bool {
-	for _, f := range finalizers {
-		if f == wanted {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(finalizers, wanted)
 }
 
 func MeshdPinsOf(downloads []PinnedDownload) map[string]string {

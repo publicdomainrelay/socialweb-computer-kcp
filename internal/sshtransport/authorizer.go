@@ -401,8 +401,8 @@ func (a *PDSKeyAuthorizer) resolveAccount(ctx context.Context, username string) 
 	if !strings.HasPrefix(username, "did:") && !strings.Contains(username, ".") {
 		return nil, true, nil
 	}
-	if strings.HasPrefix(username, "did:web:") {
-		rest := strings.TrimPrefix(username, "did:web:")
+	if after, ok := strings.CutPrefix(username, "did:web:"); ok {
+		rest := after
 		host, _, _ := strings.Cut(rest, ":")
 		decoded, err := url.PathUnescape(host)
 		if err != nil || decoded == "" || !ResolvesToPublicAddress(ctx, decoded) {
@@ -435,7 +435,7 @@ func (a *PDSKeyAuthorizer) listAllRecords(ctx context.Context, account *Authoriz
 	records := []map[string]any{}
 	seen := map[string]bool{}
 	cursor := ""
-	for page := 0; page < maxRecordPages; page++ {
+	for range maxRecordPages {
 		found, next, err := a.opts.Records.ListRecords(ctx, account.PDS, account.DID, BadgeBlueKeysNSID, 100, cursor)
 		if err != nil {
 			return nil, err

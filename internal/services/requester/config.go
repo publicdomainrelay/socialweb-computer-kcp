@@ -788,7 +788,7 @@ func loadGuestSSHKeys(path string) ([]string, error) {
 		return nil, fmt.Errorf("requester: the guest SSH keys file %s: %w", path, err)
 	}
 	keys := []string{}
-	for _, line := range strings.Split(string(raw), "\n") {
+	for line := range strings.SplitSeq(string(raw), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue

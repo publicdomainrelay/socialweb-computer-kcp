@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -365,10 +366,7 @@ func (r *Relay) handleListRepos(w http.ResponseWriter, req *http.Request) {
 			}
 		}
 	}
-	end := start + limit
-	if end > len(accounts) {
-		end = len(accounts)
-	}
+	end := min(start+limit, len(accounts))
 	page := accounts[start:end]
 	repos := make([]map[string]string, 0, len(page))
 	for _, a := range page {
@@ -468,12 +466,7 @@ func (r *Relay) didAllowed(did string) bool {
 	if len(r.cfg.AllowedDIDs) == 0 {
 		return true
 	}
-	for _, d := range r.cfg.AllowedDIDs {
-		if d == did {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(r.cfg.AllowedDIDs, did)
 }
 
 func parseLimit(raw string) int {

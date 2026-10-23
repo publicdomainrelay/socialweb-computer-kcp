@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -145,10 +146,8 @@ func splitAckPath(path string) ([]string, error) {
 		return nil, errors.New("statesync: an ack path is empty")
 	}
 	segments := strings.Split(trimmed, ".")
-	for _, segment := range segments {
-		if segment == "" {
-			return nil, fmt.Errorf("statesync: ack path %q has an empty segment", path)
-		}
+	if slices.Contains(segments, "") {
+		return nil, fmt.Errorf("statesync: ack path %q has an empty segment", path)
 	}
 	return segments, nil
 }

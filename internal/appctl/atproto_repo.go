@@ -138,7 +138,7 @@ func (c *AtprotoRepoController) writeStatus(ctx context.Context, dyn dynamic.Int
 	ri := dyn.Resource(statusstate.AtprotoRepoGVR)
 	name := u.GetName()
 	var current *unstructured.Unstructured
-	for attempt := 0; attempt < 5; attempt++ {
+	for range 5 {
 		if current == nil {
 			current, err = ri.Get(ctx, name, metav1.GetOptions{})
 			if apierrors.IsNotFound(err) {

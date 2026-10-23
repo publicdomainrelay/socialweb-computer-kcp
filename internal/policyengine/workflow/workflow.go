@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 	"time"
@@ -169,15 +170,11 @@ func (e *Executor) Execute(ctx context.Context, request *models.Request) (*model
 }
 
 func (e *Executor) initializeContext(request *models.Request) error {
-	for key, value := range request.Inputs {
-		e.Context.Inputs[key] = value
-	}
+	maps.Copy(e.Context.Inputs, request.Inputs)
 	if request.Context != nil {
 		if config, ok := request.Context["config"].(map[string]any); ok {
 			if env, ok := config["env"].(map[string]any); ok {
-				for key, value := range env {
-					e.Context.Env[key] = value
-				}
+				maps.Copy(e.Context.Env, env)
 			}
 		}
 		if secrets, ok := request.Context["secrets"].(map[string]any); ok {
@@ -302,15 +299,11 @@ func (e *Executor) executeJob(ctx context.Context, name string, job *models.Work
 		e.jobDeadline = time.Now().Add(time.Duration(job.TimeoutMinutes) * time.Minute)
 	}
 	envSnapshot := make(map[string]any, len(e.Context.Env))
-	for key, value := range e.Context.Env {
-		envSnapshot[key] = value
-	}
+	maps.Copy(envSnapshot, e.Context.Env)
 	for key, value := range job.Env {
 		evaluated, evalErr := e.evaluateExpression(ctx, fmt.Sprintf("%v", value))
 		if evalErr != nil {
-			for envKey, envValue := range envSnapshot {
-				e.Context.Env[envKey] = envValue
-			}
+			maps.Copy(e.Context.Env, envSnapshot)
 			result.Status = "failure"
 			result.Error = evalErr.Error()
 			return result, fmt.Errorf("job %s: %w", name, evalErr)
@@ -332,9 +325,7 @@ func (e *Executor) executeJob(ctx context.Context, name string, job *models.Work
 			delete(e.Context.Env, key)
 		}
 	}
-	for key, value := range envSnapshot {
-		e.Context.Env[key] = value
-	}
+	maps.Copy(e.Context.Env, envSnapshot)
 	result.Outputs = outputs
 	if err != nil {
 		result.Status = "failure"

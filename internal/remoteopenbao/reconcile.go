@@ -343,7 +343,7 @@ func (c *Controller) writeStatus(ctx context.Context, dyn dynamic.Interface, u *
 	name := u.GetName()
 	ri := dyn.Resource(RemoteOpenBaoGVR)
 	var current *unstructured.Unstructured
-	for attempt := 0; attempt < statusUpdateAttempts; attempt++ {
+	for range statusUpdateAttempts {
 		if current == nil {
 			current, err = ri.Get(ctx, name, metav1.GetOptions{})
 			if apierrors.IsNotFound(err) {

@@ -589,7 +589,7 @@ func readEventHeader(cr *cbg.CborReader) (int64, string, error) {
 	}
 	var op int64
 	var msgType string
-	for i := uint64(0); i < n; i++ {
+	for range n {
 		key, err := readCBORString(cr)
 		if err != nil {
 			return 0, "", err
@@ -631,7 +631,7 @@ func readErrorFrame(cr *cbg.CborReader, ef *errorFrame) error {
 	if major != 5 {
 		return fmt.Errorf("error frame is not a map")
 	}
-	for i := uint64(0); i < n; i++ {
+	for range n {
 		key, err := readCBORString(cr)
 		if err != nil {
 			return err
@@ -682,7 +682,7 @@ func skipCBORValue(cr *cbg.CborReader) error {
 		_, err := io.CopyN(io.Discard, cr, int64(n))
 		return err
 	case 4:
-		for i := uint64(0); i < n; i++ {
+		for range n {
 			if err := skipCBORValue(cr); err != nil {
 				return err
 			}

@@ -223,10 +223,7 @@ func identityCacheWindow(now time.Time, ttlSeconds int64) (time.Time, time.Time)
 	}
 	lease := time.Duration(ttlSeconds) * time.Second
 	leaseUntil := now.Add(lease)
-	window := lease
-	if window > identityCacheTTL {
-		window = identityCacheTTL
-	}
+	window := min(lease, identityCacheTTL)
 	margin := identityCacheMargin
 	if quarter := lease / 4; quarter < margin {
 		margin = quarter
@@ -397,10 +394,7 @@ func (s *custodySignIn) refreshLoop() {
 				s.mu.Unlock()
 				return
 			}
-			delay := next.Sub(now)
-			if delay < time.Millisecond {
-				delay = time.Millisecond
-			}
+			delay := max(next.Sub(now), time.Millisecond)
 			s.mu.Unlock()
 			timer := time.NewTimer(delay)
 			select {
@@ -639,7 +633,7 @@ func (a *custodyAgent) request(ctx context.Context, method, target string, body 
 	}
 	nonceRetried := false
 	authRetried := false
-	for attempt := 0; attempt < 3; attempt++ {
+	for range 3 {
 		proof, err := a.client.proof(ctx, a.caller.Token, a.caller.DID, method, full.String(), a.nonce(origin))
 		if err != nil {
 			return nil, err
@@ -751,10 +745,7 @@ func (a *custodyAgent) ListRecords(ctx context.Context, did, collection string, 
 	out := make([]coreapi.Record, 0, limit)
 	cursor := ""
 	for len(out) < limit {
-		page := limit - len(out)
-		if page > agentPageMax {
-			page = agentPageMax
-		}
+		page := min(limit-len(out), agentPageMax)
 		query := url.Values{"repo": {did}, "collection": {collection}, "limit": {strconv.Itoa(page)}}
 		if cursor != "" {
 			query.Set("cursor", cursor)

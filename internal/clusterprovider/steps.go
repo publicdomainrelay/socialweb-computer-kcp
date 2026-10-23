@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -53,12 +54,7 @@ var DesignedStack = Stack{procgroup.ComponentOpenBao, procgroup.ComponentKine, p
 var ProvenStack = Stack{procgroup.ComponentK3s}
 
 func (s Stack) Has(c procgroup.Component) bool {
-	for _, have := range s {
-		if have == c {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(s, c)
 }
 
 func (s Stack) NeedsLocalPostgres(localStore bool) bool {

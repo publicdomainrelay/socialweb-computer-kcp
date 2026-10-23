@@ -79,7 +79,7 @@ func procEnv(pid int, keys ...string) map[string]string {
 		return nil
 	}
 	out := map[string]string{}
-	for _, kv := range bytes.Split(b, []byte{0}) {
+	for kv := range bytes.SplitSeq(b, []byte{0}) {
 		for _, k := range keys {
 			if bytes.HasPrefix(kv, []byte(k+"=")) {
 				out[k] = string(kv[len(k)+1:])
@@ -100,7 +100,7 @@ func childrenOf(pid int) []int {
 		if err != nil {
 			continue
 		}
-		for _, f := range strings.Fields(string(b)) {
+		for f := range strings.FieldsSeq(string(b)) {
 			if n, err := strconv.Atoi(f); err == nil {
 				out = append(out, n)
 			}

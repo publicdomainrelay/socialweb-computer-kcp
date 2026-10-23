@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -284,7 +285,7 @@ func (r *contractRunner) requestOnce(ctx context.Context) (bool, error) {
 	state := r.stateCopy()
 	if state == nil {
 		state = &v1alpha1.NodeClaimContract{
-			Version:    intPtr(1),
+			Version:    new(1),
 			Phase:      v1alpha1.ContractRequested,
 			Timestamps: &v1alpha1.ContractTimestamps{Requested: r.svc.nowISO()},
 		}
@@ -299,7 +300,7 @@ func (r *contractRunner) requestOnce(ctx context.Context) (bool, error) {
 		state.MarketDid = r.svc.cfg.MarketDID
 	}
 	if state.Version == nil {
-		state.Version = intPtr(1)
+		state.Version = new(1)
 	}
 	if state.Timestamps == nil {
 		state.Timestamps = &v1alpha1.ContractTimestamps{Requested: r.svc.nowISO()}
@@ -399,13 +400,8 @@ func (r *contractRunner) requestOnce(ctx context.Context) (bool, error) {
 				continue
 			}
 			bidder := bidder
-			submitWG.Add(1)
-			go func() {
-				defer submitWG.Done()
-				timeout := r.svc.cfg.BidWindow
-				if timeout < 5*time.Second {
-					timeout = 5 * time.Second
-				}
+			submitWG.Go(func() {
+				timeout := max(r.svc.cfg.BidWindow, 5*time.Second)
 				cctx, cancel := context.WithTimeout(ctx, timeout)
 				defer cancel()
 				bids, err := r.svc.market.SubmitRFP(cctx, bidder, SubmitRFPRequest{URI: rfpURI, CID: rfpCID})
@@ -416,7 +412,7 @@ func (r *contractRunner) requestOnce(ctx context.Context) (bool, error) {
 				submitMu.Lock()
 				responseBids = append(responseBids, bids...)
 				submitMu.Unlock()
-			}()
+			})
 		}
 		submitWG.Wait()
 	}
@@ -498,7 +494,7 @@ func (r *contractRunner) requestOnce(ctx context.Context) (bool, error) {
 	state.Phase = v1alpha1.ContractWinnerSelected
 	state.Bid = &commonv1.StrongRef{URI: winner.URI, CID: winner.CID}
 	state.Winner = &v1alpha1.ContractWinner{DID: winner.DID}
-	state.Bids = intPtr(len(allBids))
+	state.Bids = new(len(allBids))
 	state.Timestamps.WinnerSelected = r.svc.nowISO()
 	state.AcceptPending = &v1alpha1.ContractAcceptPending{BidURI: winner.URI}
 	r.writeStatus(ctx, v1alpha1.ComputeContractRequesting, "the winner is selected; accepting", state, allBids, chosen, false, "accepting", 1)
@@ -543,7 +539,7 @@ func (r *contractRunner) requestOnce(ctx context.Context) (bool, error) {
 	})
 	state.Receipt = &commonv1.StrongRef{URI: receipt.URI, CID: receipt.CID}
 	state.SubmitEventRef = stringOf(receipt.Value["submitEvent"])
-	state.ReceiptOk = boolPtr(verification.OK)
+	state.ReceiptOk = new(verification.OK)
 	state.Phase = v1alpha1.ContractReceipt
 	state.Timestamps.Receipt = r.svc.nowISO()
 	if !verification.OK {
@@ -625,7 +621,7 @@ func (r *contractRunner) acceptReceipt(ctx context.Context, state *v1alpha1.Node
 	})
 	state.Receipt = &commonv1.StrongRef{URI: receipt.URI, CID: receipt.CID}
 	state.SubmitEventRef = stringOf(receipt.Value["submitEvent"])
-	state.ReceiptOk = boolPtr(verification.OK)
+	state.ReceiptOk = new(verification.OK)
 	state.Phase = v1alpha1.ContractReceipt
 	state.Timestamps.Receipt = r.svc.nowISO()
 	if !verification.OK {
@@ -654,13 +650,13 @@ func (r *contractRunner) resumeReceipt(ctx context.Context, state *v1alpha1.Node
 			return err
 		}
 	} else if !verified {
-		state.ReceiptOk = boolPtr(false)
+		state.ReceiptOk = new(false)
 		state.Outcome = v1alpha1.ContractOutcomeReceiptInvalid
 		state.Error = "the receipt signature or accept binding is invalid"
 		r.writeStatus(ctx, v1alpha1.ComputeContractFailed, state.Error, state, r.currentBids(), r.currentChosen(), false, "receiptInvalid", 1)
 		return errors.New(state.Error)
 	} else {
-		state.ReceiptOk = boolPtr(true)
+		state.ReceiptOk = new(true)
 	}
 	if state.Phase != v1alpha1.ContractNetwork && state.Phase != v1alpha1.ContractReleased {
 		state.Phase = v1alpha1.ContractReceipt
@@ -915,10 +911,8 @@ func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClai
 		r.writeStatus(ctx, v1alpha1.ComputeContractRequesting, "the guest reported "+payloadKind(parsed.Kind), state, r.currentBids(), r.currentChosen(), false, "awaitingGuestOnNetwork", 1)
 		return false
 	}
-	for _, event := range pending {
-		if handle(event) {
-			return nil
-		}
+	if slices.ContainsFunc(pending, handle) {
+		return nil
 	}
 	poll := time.NewTicker(500 * time.Millisecond)
 	defer poll.Stop()
@@ -959,10 +953,8 @@ func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClai
 				emptyLogged = true
 				r.log().Warn("requester_event_poll_empty", "bidder", bidderDID, "receipt", receiptURI)
 			}
-			for _, event := range found {
-				if handle(event) {
-					return nil
-				}
+			if slices.ContainsFunc(found, handle) {
+				return nil
 			}
 		}
 	}
@@ -1012,10 +1004,8 @@ func (r *contractRunner) waitForRelease(ctx context.Context, state *v1alpha1.Nod
 			if err != nil {
 				continue
 			}
-			for _, event := range found {
-				if handle(event) {
-					return nil
-				}
+			if slices.ContainsFunc(found, handle) {
+				return nil
 			}
 		}
 	}
@@ -1423,7 +1413,7 @@ func withGuestCACerts(userData, pem string) string {
 		b.WriteByte('\n')
 	}
 	b.WriteString("ca_certs:\n  trusted:\n    - |\n")
-	for _, line := range strings.Split(pem, "\n") {
+	for line := range strings.SplitSeq(pem, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -1435,10 +1425,12 @@ func withGuestCACerts(userData, pem string) string {
 	return b.String()
 }
 
+//go:fix inline
 func intPtr(value int) *int {
-	return &value
+	return new(value)
 }
 
+//go:fix inline
 func boolPtr(value bool) *bool {
-	return &value
+	return new(value)
 }

@@ -169,7 +169,7 @@ func newuidmap(h Host) Result {
 }
 
 func hasRange(content, user string, uid int) bool {
-	for _, line := range strings.Split(content, "\n") {
+	for line := range strings.SplitSeq(content, "\n") {
 		f := strings.Split(strings.TrimSpace(line), ":")
 		if len(f) == 3 && (f[0] == user || f[0] == strconv.Itoa(uid)) {
 			return true

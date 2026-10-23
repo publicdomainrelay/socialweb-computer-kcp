@@ -383,7 +383,7 @@ func (s *Session) doAuthorized(ctx context.Context, client *http.Client, req *ht
 		client = &http.Client{Timeout: DefaultHTTPTimeout}
 	}
 	refreshed := false
-	for attempt := 0; attempt < 3; attempt++ {
+	for attempt := range 3 {
 		s.mu.Lock()
 		accessToken := s.data.AccessToken
 		nonce := s.data.DPoPHostNonce
@@ -496,7 +496,7 @@ func DrainAndClose(body io.ReadCloser) {
 func (s *Session) refresh(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for round := 0; round < 2; round++ {
+	for round := range 2 {
 		if s.data.RefreshToken == "" {
 			return ErrNoRefreshToken
 		}
@@ -532,7 +532,7 @@ func (s *Session) refreshOnceLocked(ctx context.Context) error {
 		client = &http.Client{Timeout: DefaultHTTPTimeout}
 	}
 	var resp *http.Response
-	for attempt := 0; attempt < 2; attempt++ {
+	for attempt := range 2 {
 		proof, err := DPoPProof(s.key, http.MethodPost, s.data.AuthServerTokenEndpoint, "", s.data.DPoPAuthServerNonce)
 		if err != nil {
 			return err

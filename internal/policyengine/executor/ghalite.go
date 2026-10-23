@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -296,9 +297,7 @@ func requestContext(eval *EvalContext, snapshot *trust.Snapshot, permissions map
 		context["permissions"] = permissions
 	}
 	cache := make(models.Cache, len(eval.Cache)+1)
-	for key, entry := range eval.Cache {
-		cache[key] = entry
-	}
+	maps.Copy(cache, eval.Cache)
 	if snapshot != nil {
 		cache["trust/"+eval.CounterpartyDid] = snapshot.CacheFiles()
 	}

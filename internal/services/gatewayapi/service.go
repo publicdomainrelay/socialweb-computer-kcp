@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"os"
 	"strings"
@@ -341,9 +342,7 @@ func buildMapper(cfg Config, deps component.Deps, vault *vaultRuntime, pinned *c
 	var policy *coreapi.NodePolicy
 	if cfg.NodeMarket.PolicyName != "" {
 		args := map[string]any{}
-		for key, value := range cfg.NodeMarket.PolicyArgs {
-			args[key] = value
-		}
+		maps.Copy(args, cfg.NodeMarket.PolicyArgs)
 		policy = &coreapi.NodePolicy{Name: cfg.NodeMarket.PolicyName, Args: args}
 	}
 	var userData string

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net"
 	"net/http"
 	"strconv"
@@ -300,14 +301,10 @@ func Roll(ctx context.Context, m hostsvc.Manager, front FrontSwitch, admin Shard
 	rep.StartToReadySeconds = secs(rep.StartedAt, rep.ReadyAt)
 	prev := s
 	prev.Slots = map[string]SlotRecord{}
-	for k, v := range s.Slots {
-		prev.Slots[k] = v
-	}
+	maps.Copy(prev.Slots, s.Slots)
 	next := s
 	next.Slots = map[string]SlotRecord{}
-	for k, v := range s.Slots {
-		next.Slots[k] = v
-	}
+	maps.Copy(next.Slots, s.Slots)
 	next.Slots[to] = SlotRecord{Unit: spec.Name, Root: root, Port: port, PID: st.MainPID, InvocationID: st.InvocationID,
 		Exec: spec.Exec[0], StartedAt: rep.StartedAt, ReadyAt: rep.ReadyAt}
 	if cfg.KineFor != nil {

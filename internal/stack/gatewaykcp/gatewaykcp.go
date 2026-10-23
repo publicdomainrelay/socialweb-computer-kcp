@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net"
 	"net/url"
 	"os"
@@ -124,9 +125,7 @@ func (c Config) log() *slog.Logger {
 func (c Config) linkAssets(l devinstance.Layout) (map[string]devinstance.Executable, error) {
 	p := bootstrap.InstallParams(c.app(), c.StateDir)
 	out := map[string]devinstance.Executable{}
-	for k, v := range c.Executables {
-		out[k] = v
-	}
+	maps.Copy(out, c.Executables)
 	kcp, kine, pg := c.Executables[ExeKcp].Path, c.Executables[ExeKine].Path, c.Executables[ExePostgres].Path
 	if kcp != "" && kine != "" && pg != "" {
 		if err := bootstrap.LinkAssets(p, kcp, kine, pg); err != nil {

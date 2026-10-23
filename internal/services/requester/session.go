@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -682,7 +683,7 @@ func (s *Service) provisionSession(ctx context.Context, vmName, policyName strin
 		Winner:       &v1alpha1.ContractWinner{DID: winner.DID},
 		Accept:       &commonv1.StrongRef{URI: accept.URI, CID: accept.CID},
 		Receipt:      &commonv1.StrongRef{URI: receipt.URI, CID: receipt.CID},
-		ReceiptOk:    boolPtr(true),
+		ReceiptOk:    new(true),
 		Phase:        v1alpha1.ContractReceipt,
 	}
 	if policyRef != nil {
@@ -719,10 +720,7 @@ func (s *Service) sessionWinner(ctx context.Context, rfp market.SignedRecord, bi
 			if bidder.Endpoint == "" {
 				continue
 			}
-			timeout := s.cfg.BidWindow
-			if timeout < 5*time.Second {
-				timeout = 5 * time.Second
-			}
+			timeout := max(s.cfg.BidWindow, 5*time.Second)
 			cctx, cancel := context.WithTimeout(ctx, timeout)
 			bids, err := s.market.SubmitRFP(cctx, bidder, SubmitRFPRequest{URI: rfp.URI, CID: rfp.CID})
 			cancel()
@@ -844,10 +842,8 @@ func (s *Service) sessionGuest(ctx context.Context, receiptURI, bidderDID string
 		}
 		return address != "" && len(hostKeys) > 0
 	}
-	for _, event := range pending {
-		if handle(event) {
-			break
-		}
+	if slices.ContainsFunc(pending, handle) {
+
 	}
 	deadline := time.Now().Add(s.cfg.VMReadyTimeout)
 	ticker := time.NewTicker(500 * time.Millisecond)

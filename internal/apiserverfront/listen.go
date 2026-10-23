@@ -84,7 +84,7 @@ func AcquireAll(address string, fdStore bool, getenv func(string) string) (Acqui
 		}
 		return Acquired{}, err
 	}
-	for i := 0; i < n; i++ {
+	for i := range n {
 		fd := listenFDStart + i
 		switch name := names[i]; {
 		case name == FDName:

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -141,9 +142,7 @@ func (r *RunReconciler) buildInputs(ctx context.Context, run *policyv1alpha1.Pol
 		for key, value := range workflowCR.Spec.DefaultInputs {
 			inputs[key] = value
 		}
-		for key, value := range workflowCR.Spec.DefaultArgs {
-			defaultArgs[key] = value
-		}
+		maps.Copy(defaultArgs, workflowCR.Spec.DefaultArgs)
 		if selfDid == "" {
 			selfDid = workflowCR.Spec.DefaultSelfDid
 		}
@@ -152,12 +151,8 @@ func (r *RunReconciler) buildInputs(ctx context.Context, run *policyv1alpha1.Pol
 		}
 	}
 	args := make(map[string]string, len(defaultArgs)+len(run.Spec.Args))
-	for key, value := range defaultArgs {
-		args[key] = value
-	}
-	for key, value := range run.Spec.Args {
-		args[key] = value
-	}
+	maps.Copy(args, defaultArgs)
+	maps.Copy(args, run.Spec.Args)
 	argsJSON, err := json.Marshal(args)
 	if err != nil {
 		return nil, err

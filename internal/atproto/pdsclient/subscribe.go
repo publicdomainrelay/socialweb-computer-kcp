@@ -34,7 +34,7 @@ const (
 )
 
 var repoFrameDecMode = func() cbor.DecMode {
-	mode, err := cbor.DecOptions{DefaultMapType: reflect.TypeOf(map[string]any{})}.DecMode()
+	mode, err := cbor.DecOptions{DefaultMapType: reflect.TypeFor[map[string]any]()}.DecMode()
 	if err != nil {
 		panic(err)
 	}

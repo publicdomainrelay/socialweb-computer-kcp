@@ -203,13 +203,11 @@ func serve(ctx context.Context, cfg Config, g *Gateway, log *slog.Logger, inv fo
 	inv.Listened(ListenerName, ln.Addr())
 
 	var background sync.WaitGroup
-	background.Add(1)
-	go func() {
-		defer background.Done()
+	background.Go(func() {
 		if err := g.Run(ctx); err != nil {
 			log.Error("the background work stopped", "err", err)
 		}
-	}()
+	})
 
 	served := make(chan error, 1)
 	go func() { served <- server.Serve(ln) }()

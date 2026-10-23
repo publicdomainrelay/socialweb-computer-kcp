@@ -306,13 +306,7 @@ func (c *Client) ownToken(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("guestidentity: certificate login as %s answered without a client token", endpoint.CertLogin.Role)
 	}
 	lease := time.Duration(payload.Auth.LeaseDuration) * time.Second
-	renew := lease - ownTokenRenewBefore
-	if renew < lease/2 {
-		renew = lease / 2
-	}
-	if renew < 0 {
-		renew = 0
-	}
+	renew := max(max(lease-ownTokenRenewBefore, lease/2), 0)
 	c.mu.Lock()
 	c.own, c.ownKey, c.renewAt = payload.Auth.ClientToken, key, time.Now().Add(renew)
 	c.mu.Unlock()

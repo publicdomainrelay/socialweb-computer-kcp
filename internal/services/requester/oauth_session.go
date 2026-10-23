@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"os"
 	"strings"
@@ -258,9 +259,7 @@ func (t *credentialTokens) refreshLocked(ctx context.Context) (string, error) {
 	t.access = session.AccessJWT
 	if t.writer != nil {
 		updated := map[string]any{}
-		for key, value := range data.Data {
-			updated[key] = value
-		}
+		maps.Copy(updated, data.Data)
 		updated["accessJwt"] = session.AccessJWT
 		updated["refreshJwt"] = session.RefreshJWT
 		updated["access_token"] = session.AccessJWT

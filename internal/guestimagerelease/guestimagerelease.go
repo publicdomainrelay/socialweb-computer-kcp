@@ -56,10 +56,8 @@ func Source(ctx context.Context, o Options) (string, error) {
 	}
 	refs := make([]string, 0, 4)
 	add := func(ref string) {
-		for _, have := range refs {
-			if have == ref {
-				return
-			}
+		if slices.Contains(refs, ref) {
+			return
 		}
 		refs = append(refs, ref)
 	}
@@ -211,7 +209,7 @@ func newestRelease(ctx context.Context, client *http.Client, base string) (strin
 func compareVersion(a, b string) int {
 	an, ap := splitVersion(a)
 	bn, bp := splitVersion(b)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if an[i] != bn[i] {
 			return sign(an[i] - bn[i])
 		}

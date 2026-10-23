@@ -82,7 +82,7 @@ func applyGrant(ctx context.Context, dyn dynamic.Interface, objs []unstructured.
 		}
 		_, err = dyn.Resource(gvr).Namespace(u.GetNamespace()).Patch(
 			ctx, u.GetName(), types.ApplyPatchType, body,
-			metav1.PatchOptions{FieldManager: fieldManager, Force: ptr(true)},
+			metav1.PatchOptions{FieldManager: fieldManager, Force: new(true)},
 		)
 		if err != nil {
 			return fmt.Errorf("clusterprovider: applying the %s %s: %w", u.GetKind(), u.GetName(), err)
@@ -143,4 +143,5 @@ func (p *Provider) Bootstrap(ctx context.Context, ref Ref, cl *v1alpha1.Cluster)
 	return nil
 }
 
-func ptr[T any](v T) *T { return &v }
+//go:fix inline
+func ptr[T any](v T) *T { return new(v) }

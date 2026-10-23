@@ -331,14 +331,14 @@ func Default() Layout {
 
 func policyPaths(hcl string) []string {
 	var out []string
-	for _, line := range strings.Split(hcl, "\n") {
+	for line := range strings.SplitSeq(hcl, "\n") {
 		line = strings.TrimSpace(line)
 		if !strings.HasPrefix(line, "path \"") {
 			continue
 		}
 		rest := strings.TrimPrefix(line, "path \"")
-		if i := strings.Index(rest, "\""); i >= 0 {
-			out = append(out, rest[:i])
+		if before, _, ok := strings.Cut(rest, "\""); ok {
+			out = append(out, before)
 		}
 	}
 	return out

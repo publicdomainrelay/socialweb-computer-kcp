@@ -23,7 +23,7 @@ var uninstallOptions = []string{"account", "purge", "force", "json", "root"}
 
 func splitHandles(s string) []string {
 	var out []string
-	for _, h := range strings.Split(s, ",") {
+	for h := range strings.SplitSeq(s, ",") {
 		if h = strings.TrimSpace(h); h != "" {
 			out = append(out, h)
 		}

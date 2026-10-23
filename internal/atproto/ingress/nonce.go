@@ -56,10 +56,7 @@ func (n *NonceStore) Close() {
 }
 
 func (n *NonceStore) purge() {
-	interval := n.ttl
-	if interval > 30*time.Second {
-		interval = 30 * time.Second
-	}
+	interval := min(n.ttl, 30*time.Second)
 	if interval <= 0 {
 		interval = time.Second
 	}

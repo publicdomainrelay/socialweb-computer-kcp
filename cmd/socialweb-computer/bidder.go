@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -538,9 +539,7 @@ func (r *bidderRun) installedCore(ctx context.Context) int {
 	if err != nil {
 		return r.a.fail(exitRefused, "%s: %v", verb, err)
 	}
-	for name, e := range plugins {
-		exes[name] = e
-	}
+	maps.Copy(exes, plugins)
 	exe, err := selfExe()
 	if err != nil {
 		return r.a.fail(exitFailed, "%s: %v", verb, err)

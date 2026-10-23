@@ -104,10 +104,7 @@ func (a *Admitter) Wake(ctx context.Context, parent ref.Ref) error {
 				running++
 			}
 		}
-		free := limit - running
-		if free < 0 {
-			free = 0
-		}
+		free := max(limit-running, 0)
 		for _, run := range queue.WakeList(runs, a.opts.Lifecycle, free, unlimited) {
 			a.opts.Wake(a.opts.RunKind, run)
 		}

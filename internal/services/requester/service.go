@@ -225,13 +225,11 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	go s.loop(runCtx)
 	if s.syncController != nil {
 		controller := s.syncController
-		s.wg.Add(1)
-		go func() {
-			defer s.wg.Done()
+		s.wg.Go(func() {
 			if err := controller.Run(runCtx); err != nil && runCtx.Err() == nil {
 				s.log.Warn("requester_statesync_stopped", "err", err)
 			}
-		}()
+		})
 	}
 	s.log.Info("requester_started", "handler", s.logicalURL(), "repo", s.cfg.RepoDID, "mode", s.cfg.IdentityMode)
 
@@ -588,7 +586,7 @@ func (a *ownerSessionServiceAuth) ServiceAuth(ctx context.Context, audience, lxm
 	if client == nil {
 		client = &http.Client{Timeout: DefaultHTTPTimeout}
 	}
-	for attempt := 0; attempt < 2; attempt++ {
+	for attempt := range 2 {
 		token, err := a.tokens.AccessToken(ctx)
 		if err != nil {
 			return "", fmt.Errorf("requester: owner session token: %w", err)
@@ -1564,10 +1562,7 @@ func (s *Service) bidderForDID(ctx context.Context, did string) (Bidder, bool) {
 }
 
 func (s *Service) submitAcceptAndWait(ctx context.Context, bidder Bidder, acceptURI, acceptCID, winnerDID string) (*market.ResolvedRecord, error) {
-	provisionTimeout := submitAcceptProvisionTimeout
-	if s.cfg.ReceiptTimeout > provisionTimeout {
-		provisionTimeout = s.cfg.ReceiptTimeout
-	}
+	provisionTimeout := max(s.cfg.ReceiptTimeout, submitAcceptProvisionTimeout)
 	if !s.outboundXRPC() || bidder.Endpoint == "" {
 		timeout := s.cfg.ReceiptTimeout
 		if timeout <= 0 {
@@ -1586,12 +1581,10 @@ func (s *Service) submitAcceptAndWait(ctx context.Context, bidder Bidder, accept
 	if copies := s.cfg.AcceptCopies; copies > 1 {
 		copiesCtx, cancel := context.WithTimeout(ctx, provisionTimeout)
 		var wg sync.WaitGroup
-		for i := 0; i < copies; i++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+		for range copies {
+			wg.Go(func() {
 				_, _ = s.market.SubmitAccept(copiesCtx, bidder, acceptURI, acceptCID)
-			}()
+			})
 		}
 		wg.Wait()
 		cancel()

@@ -70,7 +70,7 @@ func labelsCarryPSA(labels map[string]string) bool {
 func hardenedServiceAccount(namespace string) *corev1.ServiceAccount {
 	return &corev1.ServiceAccount{
 		ObjectMeta:                   metav1.ObjectMeta{Name: DefaultServiceAccountName, Namespace: namespace},
-		AutomountServiceAccountToken: ptr(false),
+		AutomountServiceAccountToken: new(false),
 	}
 }
 
@@ -130,7 +130,7 @@ func ensureNamespace(ctx context.Context, core kubernetes.Interface, namespace s
 }
 
 func ensureDefaultServiceAccount(ctx context.Context, core kubernetes.Interface, namespace string) error {
-	for attempt := 0; attempt < serviceAccountAttempts; attempt++ {
+	for range serviceAccountAttempts {
 		sa, err := core.CoreV1().ServiceAccounts(namespace).Get(ctx, DefaultServiceAccountName, metav1.GetOptions{})
 		switch {
 		case apierrors.IsNotFound(err):
@@ -150,7 +150,7 @@ func ensureDefaultServiceAccount(ctx context.Context, core kubernetes.Interface,
 			return nil
 		}
 		sa = sa.DeepCopy()
-		sa.AutomountServiceAccountToken = ptr(false)
+		sa.AutomountServiceAccountToken = new(false)
 		if _, err := core.CoreV1().ServiceAccounts(namespace).Update(ctx, sa, metav1.UpdateOptions{FieldManager: fieldManager}); err != nil {
 			return fmt.Errorf("clusterprovider: setting automountServiceAccountToken=false on the default ServiceAccount in %s: %w", namespace, err)
 		}

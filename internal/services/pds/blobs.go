@@ -65,12 +65,12 @@ func (s *FileBlobStore) GetBlob(_ context.Context, _ syntax.DID, c cid.Cid) ([]b
 		}
 		return nil, "", fmt.Errorf("pds: reading the blob: %w", err)
 	}
-	i := bytes.IndexByte(payload, '\n')
-	if i < 0 {
+	before, after, ok := bytes.Cut(payload, []byte{'\n'})
+	if !ok {
 		return nil, "", fmt.Errorf("pds: the blob file is invalid")
 	}
-	mimeType := string(payload[:i])
-	data := payload[i+1:]
+	mimeType := string(before)
+	data := after
 	sum := sha256.Sum256(data)
 	mh, err := multihash.Encode(sum[:], multihash.SHA2_256)
 	if err != nil {

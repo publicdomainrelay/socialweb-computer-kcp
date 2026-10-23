@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -110,9 +111,7 @@ func New(opts Options) (*Resolver, error) {
 		}
 	}
 	vars := map[string]string{"workspace": opts.Workspace}
-	for key, value := range opts.Vars {
-		vars[key] = value
-	}
+	maps.Copy(vars, opts.Vars)
 	return &Resolver{
 		source:    source,
 		workspace: opts.Workspace,
@@ -132,12 +131,8 @@ func (r *Resolver) With(vars map[string]string) *Resolver {
 	}
 	out := *r
 	merged := make(map[string]string, len(r.vars)+len(vars))
-	for key, value := range r.vars {
-		merged[key] = value
-	}
-	for key, value := range vars {
-		merged[key] = value
-	}
+	maps.Copy(merged, r.vars)
+	maps.Copy(merged, vars)
 	out.vars = merged
 	return &out
 }
@@ -327,12 +322,8 @@ func (r *Resolver) session(ctx context.Context, srv openbaosession.Server) (Sess
 
 func (r *Resolver) expand(ref component.CredentialRef, vars map[string]string) component.CredentialRef {
 	merged := make(map[string]string, len(r.vars)+len(vars))
-	for key, value := range r.vars {
-		merged[key] = value
-	}
-	for key, value := range vars {
-		merged[key] = value
-	}
+	maps.Copy(merged, r.vars)
+	maps.Copy(merged, vars)
 	ref.Server = expandTemplate(ref.Server, merged)
 	ref.Mount = expandTemplate(ref.Mount, merged)
 	ref.Path = expandTemplate(ref.Path, merged)
@@ -471,7 +462,7 @@ func cutVersion(value string) (string, int) {
 	if !ok {
 		return value, 0
 	}
-	for _, pair := range strings.Split(query, "&") {
+	for pair := range strings.SplitSeq(query, "&") {
 		key, raw, ok := strings.Cut(pair, "=")
 		if !ok || key != "version" {
 			continue

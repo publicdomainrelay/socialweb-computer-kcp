@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"os"
 	"os/signal"
 	"runtime"
@@ -103,9 +104,7 @@ func builtVerbs() map[string]builtVerb {
 		"internal apiserver-front": {[]string{"owner", "kcp-front-address", "front-control", "front-state", "front-fd-store"},
 			runApiserverFront},
 	}
-	for path, v := range releaseBuiltVerbs() {
-		verbs[path] = v
-	}
+	maps.Copy(verbs, releaseBuiltVerbs())
 	return verbs
 }
 
@@ -124,9 +123,7 @@ func foldedVerbs() map[string]foldedVerb {
 		"internal cloud-controller-manager": {nil, ccmmain.Main},
 		"internal tenantcredential":         {nil, tenantcredentialmain.Main},
 	}
-	for path, v := range devFoldedVerbs() {
-		verbs[path] = v
-	}
+	maps.Copy(verbs, devFoldedVerbs())
 	return verbs
 }
 

@@ -50,10 +50,7 @@ func cloneInto(out, in *os.File) error {
 func copyExtent(out, in *os.File, offset, length int64) error {
 	buf := make([]byte, copyChunk)
 	for done := int64(0); done < length; {
-		want := length - done
-		if want > copyChunk {
-			want = copyChunk
-		}
+		want := min(length-done, copyChunk)
 		n, err := in.ReadAt(buf[:want], offset+done)
 		if n > 0 {
 			if _, writeErr := out.WriteAt(buf[:n], offset+done); writeErr != nil {

@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"sync"
 	"time"
 
@@ -54,9 +55,7 @@ func (s *Store) Snapshot() models.Cache {
 	out := make(models.Cache, len(s.entries))
 	for key, entry := range s.entries {
 		copied := make(models.CacheEntry, len(entry))
-		for path, file := range entry {
-			copied[path] = file
-		}
+		maps.Copy(copied, entry)
 		out[key] = copied
 	}
 	return out
@@ -85,9 +84,7 @@ func (s *Store) Get(key string) (models.CacheEntry, bool) {
 	}
 	s.touchLocked(key)
 	copied := make(models.CacheEntry, len(entry))
-	for path, file := range entry {
-		copied[path] = file
-	}
+	maps.Copy(copied, entry)
 	return copied, true
 }
 

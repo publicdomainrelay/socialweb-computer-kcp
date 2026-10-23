@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"reflect"
+	"slices"
 	"sync"
 	"time"
 
@@ -45,12 +46,7 @@ func GuestMarketFields() []MarketField {
 }
 
 func ownedMarketField(fields []MarketField, field MarketField) bool {
-	for _, f := range fields {
-		if f == field {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(fields, field)
 }
 
 func MergeMarket(held *v1alpha1.ComputeVMMarket, patch v1alpha1.ComputeVMMarket, fields []MarketField) v1alpha1.ComputeVMMarket {

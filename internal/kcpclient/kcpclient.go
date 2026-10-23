@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -441,12 +442,7 @@ func (c *Client) waitForWorkspaceReady(ctx context.Context, parent, name string,
 }
 
 func hasInitializer(initializers []corev1alpha1.LogicalClusterInitializer, want corev1alpha1.LogicalClusterInitializer) bool {
-	for _, initializer := range initializers {
-		if initializer == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(initializers, want)
 }
 
 func workspaceTypeName(ref *kcpv1alpha1.WorkspaceTypeReference) string {

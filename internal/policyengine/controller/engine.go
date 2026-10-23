@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -402,18 +403,12 @@ func (e *Engine) executeWithID(ctx context.Context, runID string, request *Polic
 func (e *Engine) seedRequest(request *PolicyEngineRequest, seed models.Cache) *PolicyEngineRequest {
 	copyRequest := *request
 	context := make(map[string]any, len(request.Context)+1)
-	for key, value := range request.Context {
-		context[key] = value
-	}
+	maps.Copy(context, request.Context)
 	merged := e.cacheStore.Snapshot()
 	if existing, ok := cacheFromAny(context["cache"]); ok {
-		for key, entry := range existing {
-			merged[key] = entry
-		}
+		maps.Copy(merged, existing)
 	}
-	for key, entry := range seed {
-		merged[key] = entry
-	}
+	maps.Copy(merged, seed)
 	context["cache"] = merged
 	copyRequest.Context = context
 	e.cacheStore.Merge(merged)

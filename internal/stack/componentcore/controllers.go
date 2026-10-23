@@ -484,23 +484,18 @@ func (c *Core) startControllers(ctx context.Context) func() {
 	runCtx, cancel := context.WithCancel(ctx)
 	var workers sync.WaitGroup
 	if c.controllers != nil {
-		workers.Add(1)
-		go func() {
-			defer workers.Done()
+		workers.Go(func() {
 			if err := c.controllers.Run(runCtx); err != nil && runCtx.Err() == nil {
 				c.cfg.Log.Warn("the core controllers stopped", "err", err.Error())
 			}
-		}()
+		})
 	}
 	for _, runner := range c.runners {
-		runner := runner
-		workers.Add(1)
-		go func() {
-			defer workers.Done()
+		workers.Go(func() {
 			if err := runner.run(runCtx); err != nil && runCtx.Err() == nil {
 				c.cfg.Log.Warn("a core controller stopped", "controller", runner.name, "err", err.Error())
 			}
-		}()
+		})
 	}
 	return func() {
 		cancel()
@@ -518,8 +513,8 @@ func (c *Core) relayEndpoint(base string) statusstate.RelayEndpointFunc {
 			return ref, true
 		}
 		kind, name := appctl.ComponentKindRelay, ref
-		if i := strings.IndexByte(ref, '/'); i >= 0 {
-			kind, name = ref[:i], ref[i+1:]
+		if before, after, ok := strings.Cut(ref, "/"); ok {
+			kind, name = before, after
 		}
 		kind, name = strings.TrimSpace(kind), strings.TrimSpace(name)
 		if kind == "" {

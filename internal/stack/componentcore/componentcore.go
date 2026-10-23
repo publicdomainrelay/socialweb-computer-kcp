@@ -382,7 +382,6 @@ func (c *Core) runIdentity(ctx context.Context) {
 		}
 		if len(c.cfg.Workspaces) > 0 && workspace == strings.TrimSpace(c.cfg.Workspaces[0]) {
 			for _, name := range []string{"bidder", "requester"} {
-				name := name
 				oauthcallback.Register(name, func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 					return ctl.CompleteBrowserAuthorization(ctx, name, r)
 				})
@@ -420,7 +419,6 @@ func (c *Core) pdsEndpoint(workspace, kind, name string) (string, bool) {
 func (c *Core) runPolicy(ctx context.Context) {
 	log := c.cfg.Log.With("component", "policy-controller")
 	for _, workspace := range c.cfg.Workspaces {
-		workspace := workspace
 		go c.supervisePolicy(ctx, workspace, log.With("workspace", workspace))
 	}
 }

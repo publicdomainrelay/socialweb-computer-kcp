@@ -92,7 +92,7 @@ func (h *HTTPRBAC) Records(ctx context.Context, requesterDID string) ([]RBACReco
 	out := []RBACRecord{}
 	cursor := ""
 	seen := map[string]bool{}
-	for page := 0; page < maximumRBACPages; page++ {
+	for range maximumRBACPages {
 		query := url.Values{"repo": {requesterDID}, "collection": {RBACCollection}, "limit": {"100"}}
 		if cursor != "" {
 			query.Set("cursor", cursor)

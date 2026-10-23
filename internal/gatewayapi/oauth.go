@@ -108,13 +108,13 @@ type WebSignIn interface {
 }
 
 func CookieValue(header, name string) string {
-	for _, part := range strings.Split(header, ";") {
-		eq := strings.Index(part, "=")
-		if eq < 0 {
+	for part := range strings.SplitSeq(header, ";") {
+		before, after, ok := strings.Cut(part, "=")
+		if !ok {
 			continue
 		}
-		if strings.TrimSpace(part[:eq]) == name {
-			return strings.TrimSpace(part[eq+1:])
+		if strings.TrimSpace(before) == name {
+			return strings.TrimSpace(after)
 		}
 	}
 	return ""
@@ -379,10 +379,7 @@ func (o *OAuth) clientMetadata(w http.ResponseWriter, r *http.Request) {
 }
 
 func (o *OAuth) metadataRefreshAfter() time.Duration {
-	after := o.metadataCache / 2
-	if after < time.Second {
-		after = time.Second
-	}
+	after := max(o.metadataCache/2, time.Second)
 	return after
 }
 

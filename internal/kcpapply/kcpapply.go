@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -401,9 +402,7 @@ func (a *Applier) applyOne(ctx context.Context, ri dynamic.ResourceInterface, u 
 		if labels == nil {
 			labels = map[string]string{}
 		}
-		for k, v := range a.opts.Labels {
-			labels[k] = v
-		}
+		maps.Copy(labels, a.opts.Labels)
 		u.SetLabels(labels)
 	}
 	if live == nil && u.GroupVersionKind().Group == tenancyv1alpha1.SchemeGroupVersion.Group && u.GetKind() == "Workspace" {

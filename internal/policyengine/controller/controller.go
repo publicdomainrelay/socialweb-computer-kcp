@@ -335,9 +335,7 @@ func (c *Controller) startRun(ctx context.Context, run *policyv1alpha1.PolicyWor
 	c.writeRunStatus(ctx, run, starting)
 	runCopy := run.DeepCopy()
 	runCopy.Status = starting
-	c.wg.Add(1)
-	go func() {
-		defer c.wg.Done()
+	c.wg.Go(func() {
 		reconciler := *c.cfg.Runs
 		reconciler.Engine = engine
 		outcome, err := reconciler.ReconcilePolicyWorkflowRun(runCtx, runCopy)
@@ -345,7 +343,7 @@ func (c *Controller) startRun(ctx context.Context, run *policyv1alpha1.PolicyWor
 			c.log.Warn("executing a policy run", "run", key, "err", err.Error())
 		}
 		c.finalizeRun(runCtx, key, handle, runCopy, outcome)
-	}()
+	})
 }
 
 func (c *Controller) finalizeRun(runCtx context.Context, key string, handle *activeRun, run *policyv1alpha1.PolicyWorkflowRun, outcome Outcome) {

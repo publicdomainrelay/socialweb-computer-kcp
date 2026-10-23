@@ -129,9 +129,7 @@ func New(ln net.Listener, o Options) (*Front, error) {
 		log = slog.New(slog.NewJSONHandler(io.Discard, nil))
 	}
 	f := &Front{ln: ln, o: o, log: log, conns: map[*pair]struct{}{}, holds: map[string]*Held{}}
-	for name, h := range o.Holds {
-		f.holds[name] = h
-	}
+	maps.Copy(f.holds, o.Holds)
 	if o.StatePath != "" {
 		b, err := os.ReadFile(o.StatePath)
 		switch {
@@ -164,9 +162,7 @@ func New(ln net.Listener, o Options) (*Front, error) {
 
 func (f *Front) restoreHolds() error {
 	want := map[string]int{}
-	for name, port := range f.state.Holds {
-		want[name] = port
-	}
+	maps.Copy(want, f.state.Holds)
 	for name, h := range f.holds {
 		want[name] = h.Port
 	}
@@ -246,11 +242,9 @@ func (f *Front) Serve(ctx context.Context) error {
 			break
 		}
 		f.accepted.Add(1)
-		f.wg.Add(1)
-		go func() {
-			defer f.wg.Done()
+		f.wg.Go(func() {
 			f.handle(c)
-		}()
+		})
 	}
 	f.closeAll()
 	f.wg.Wait()

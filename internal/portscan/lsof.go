@@ -10,7 +10,7 @@ import (
 func parseLsof(out []byte) (map[int][]int, error) {
 	byPort := map[int][]int{}
 	pid := 0
-	for _, line := range strings.Split(string(out), "\n") {
+	for line := range strings.SplitSeq(string(out), "\n") {
 		if line == "" {
 			continue
 		}

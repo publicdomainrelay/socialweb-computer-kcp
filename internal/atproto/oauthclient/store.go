@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -200,12 +201,8 @@ func (f *FileStore) readLocked() (map[string]json.RawMessage, map[string]Session
 		if err := json.Unmarshal(raw, &file); err != nil {
 			return nil, nil, false, fmt.Errorf("oauthclient: the oauth token store %s: %w", f.Path, err)
 		}
-		for key, request := range file.Requests {
-			requests[key] = request
-		}
-		for key, session := range file.Sessions {
-			sessions[key] = session
-		}
+		maps.Copy(requests, file.Requests)
+		maps.Copy(sessions, file.Sessions)
 		return requests, sessions, false, nil
 	}
 	if _, ok := probe["accessJwt"]; ok || probe["refreshJwt"] != nil {

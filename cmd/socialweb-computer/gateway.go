@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"time"
@@ -48,9 +49,7 @@ func (a *app) gatewayExecutables(ctx context.Context, vals clicfg.Values) (map[s
 	if err != nil {
 		return nil, err
 	}
-	for name, e := range plugins {
-		out[name] = e
-	}
+	maps.Copy(out, plugins)
 	if !assets.Release() && vals.String("postgres-root") == "" {
 		out[gatewaykcp.ExePostgres] = devinstance.Executable{}
 	} else {
@@ -185,9 +184,7 @@ func (a *app) runGatewayChild(ctx context.Context, rec devinstance.Record, m hos
 	}
 	environ := os.Environ()
 	exes := map[string]devinstance.Executable{}
-	for k, v := range rec.Executables {
-		exes[k] = v
-	}
+	maps.Copy(exes, rec.Executables)
 	unit, _ := a.env.LookupEnv(devsup.EnvUnit)
 	agent, err := a.nodeClaimAgent()
 	if err != nil {

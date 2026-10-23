@@ -209,11 +209,9 @@ func Run(ctx context.Context, c Config) error {
 			}
 			return fmt.Errorf("tlsfront: accept: %w", err)
 		}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			proxy(ctx, c, conn)
-		}()
+		})
 	}
 }
 

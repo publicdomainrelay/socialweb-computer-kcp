@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -579,12 +580,7 @@ func (a *ClusterAPI) kubeconfig(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *ClusterAPI) allowedTTL(value int64) bool {
-	for _, c := range a.ttlChoices {
-		if c == value {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(a.ttlChoices, value)
 }
 
 func (a *ClusterAPI) failure(w http.ResponseWriter, did, action string, err error) {

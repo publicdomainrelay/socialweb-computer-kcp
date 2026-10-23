@@ -179,7 +179,7 @@ func parseFieldPath(raw string) []fieldStep {
 		return nil
 	}
 	var out []fieldStep
-	for _, part := range strings.Split(raw, ".") {
+	for part := range strings.SplitSeq(raw, ".") {
 		part = strings.TrimSpace(part)
 		if part == "" {
 			continue

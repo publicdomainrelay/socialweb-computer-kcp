@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"sort"
 	"strconv"
@@ -114,12 +115,8 @@ func (v Values) Source(name string) string { return v.source[name] }
 
 func (v Values) With(name string, val any) Values {
 	out := Values{vals: map[string]any{}, source: map[string]string{}}
-	for k, x := range v.vals {
-		out.vals[k] = x
-	}
-	for k, x := range v.source {
-		out.source[k] = x
-	}
+	maps.Copy(out.vals, v.vals)
+	maps.Copy(out.source, v.source)
 	out.vals[name], out.source[name] = val, SourceFlag
 	return out
 }

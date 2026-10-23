@@ -65,13 +65,7 @@ func Target(p Pressure, current, maxNodes, podsPerNode int) int {
 	if maxNodes < 1 {
 		return current
 	}
-	want := (work + podsPerNode - 1) / podsPerNode
-	if want < 1 {
-		want = 1
-	}
-	if want > maxNodes {
-		want = maxNodes
-	}
+	want := min(max((work+podsPerNode-1)/podsPerNode, 1), maxNodes)
 	return want
 }
 

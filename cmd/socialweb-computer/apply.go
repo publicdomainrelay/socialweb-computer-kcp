@@ -130,7 +130,7 @@ func selectPhases(s manifests.Set, sel string) ([]manifests.Phase, error) {
 		index[p.Name] = i
 	}
 	pick := make([]bool, len(s.Phases))
-	for _, item := range strings.Split(sel, ",") {
+	for item := range strings.SplitSeq(sel, ",") {
 		from, to, isRange := strings.Cut(strings.TrimSpace(item), "..")
 		if !isRange {
 			to = from

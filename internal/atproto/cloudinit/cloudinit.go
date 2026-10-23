@@ -3,8 +3,10 @@ package cloudinit
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 
@@ -35,9 +37,7 @@ type WriteFileEntry struct {
 
 func (w WriteFileEntry) Map() map[string]any {
 	out := make(map[string]any, len(w.Extra)+4)
-	for k, v := range w.Extra {
-		out[k] = v
-	}
+	maps.Copy(out, w.Extra)
 	out["path"] = w.Path
 	if w.Owner != "" {
 		out["owner"] = w.Owner
@@ -125,13 +125,7 @@ func GetUserDataModules(ids []any) ([]UserDataModule, error) {
 		case UserDataModule:
 			out = append(out, v)
 		case string:
-			removed := false
-			for _, legacy := range RemovedTransportModules {
-				if legacy == v {
-					removed = true
-					break
-				}
-			}
+			removed := slices.Contains(RemovedTransportModules, v)
 			if removed {
 				return nil, &LegacyTransportError{Transport: v}
 			}
@@ -240,17 +234,11 @@ func dedupeStrings(values []string) []string {
 
 func applyPatch(base map[string]any, p UserDataPatch) map[string]any {
 	out := make(map[string]any, len(base)+8)
-	for k, v := range base {
-		out[k] = v
-	}
+	maps.Copy(out, base)
 	if p.Apt != nil {
 		apt := map[string]any{}
-		for k, v := range asObj(out["apt"]) {
-			apt[k] = v
-		}
-		for k, v := range p.Apt {
-			apt[k] = v
-		}
+		maps.Copy(apt, asObj(out["apt"]))
+		maps.Copy(apt, p.Apt)
 		out["apt"] = apt
 	}
 	if p.Packages != nil {
@@ -304,9 +292,7 @@ func applyPatch(base map[string]any, p UserDataPatch) map[string]any {
 	}
 	if p.CACertsTrusted != nil {
 		ca := map[string]any{}
-		for k, v := range asObj(out["ca_certs"]) {
-			ca[k] = v
-		}
+		maps.Copy(ca, asObj(out["ca_certs"]))
 		existing := asArray(ca["trusted"])
 		merged := append(append([]any{}, existing...), stringSliceAny(p.CACertsTrusted)...)
 		ca["trusted"] = dedupeAny(merged)
@@ -398,9 +384,7 @@ func guardPackages(base map[string]any) (map[string]any, error) {
 		return nil, err
 	}
 	out := make(map[string]any, len(base))
-	for k, v := range base {
-		out[k] = v
-	}
+	maps.Copy(out, base)
 	delete(out, "packages")
 	out["package_update"] = false
 	out["runcmd"] = append([]any{command}, asArray(out["runcmd"])...)
@@ -423,7 +407,7 @@ var nameserverRE = regexp.MustCompile(`^\s*nameserver\s+(\S+)`)
 
 func nameserversIn(content string) []string {
 	out := []string{}
-	for _, line := range strings.Split(content, "\n") {
+	for line := range strings.SplitSeq(content, "\n") {
 		if m := nameserverRE.FindStringSubmatch(line); m != nil {
 			out = append(out, m[1])
 		}
@@ -448,9 +432,7 @@ func trailingOnce(arr []any, item string) []any {
 
 func assertResolver(base map[string]any, gateway string, fallbacks []string) map[string]any {
 	out := make(map[string]any, len(base))
-	for k, v := range base {
-		out[k] = v
-	}
+	maps.Copy(out, base)
 	files := append([]any{}, asArray(out["write_files"])...)
 	idx := -1
 	for i, raw := range files {
@@ -474,13 +456,7 @@ func assertResolver(base map[string]any, gateway string, fallbacks []string) map
 		if n == gateway {
 			continue
 		}
-		skip := false
-		for _, f := range fallbacks {
-			if n == f {
-				skip = true
-				break
-			}
-		}
+		skip := slices.Contains(fallbacks, n)
 		if !skip {
 			extras = append(extras, n)
 		}
@@ -494,12 +470,8 @@ func assertResolver(base map[string]any, gateway string, fallbacks []string) map
 	}
 	if idx >= 0 {
 		merged := map[string]any{}
-		for k, v := range files[idx].(map[string]any) {
-			merged[k] = v
-		}
-		for k, v := range entry {
-			merged[k] = v
-		}
+		maps.Copy(merged, files[idx].(map[string]any))
+		maps.Copy(merged, entry)
 		files[idx] = merged
 	} else {
 		files = append(files, entry)

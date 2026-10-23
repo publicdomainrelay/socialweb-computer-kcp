@@ -138,10 +138,7 @@ func (s *MemoryStore) ListCollection(collection, cursor string, limit int) ([]st
 	if limit <= 0 {
 		limit = 50
 	}
-	end := start + limit
-	if end > len(all) {
-		end = len(all)
-	}
+	end := min(start+limit, len(all))
 	page := append([]string{}, all[start:end]...)
 	next := ""
 	if end < len(all) && len(page) > 0 {

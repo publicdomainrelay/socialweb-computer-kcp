@@ -275,7 +275,7 @@ func writeStatus[T any](ctx context.Context, resource *Resource[T], cluster, nam
 		return err
 	}
 	var lastErr error
-	for attempt := 0; attempt < 3; attempt++ {
+	for range 3 {
 		current, getErr := resource.Get(ctx, cluster, name)
 		if getErr != nil {
 			if kcpstore.IsNotFound(getErr) {

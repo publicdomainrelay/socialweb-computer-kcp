@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -241,7 +242,7 @@ func resolveBidderServiceRef(ctx context.Context, dir identity.Directory, raw st
 	}
 	seen := map[string]bool{}
 	current := strings.TrimSpace(raw)
-	for hop := 0; hop < maxBidderServiceRefHops; hop++ {
+	for range maxBidderServiceRefHops {
 		if !strings.HasPrefix(current, "did:") {
 			u, err := url.Parse(current)
 			if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
@@ -322,7 +323,7 @@ func (m *HTTPMarket) postWithClient(ctx context.Context, client *http.Client, en
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	var resp *http.Response
-	for attempt := 0; attempt < 2; attempt++ {
+	for attempt := range 2 {
 		token, err := m.token(cctx, audience, lxm)
 		if err != nil {
 			return 0, nil, err
@@ -549,7 +550,7 @@ func listAll(ctx context.Context, lister market.RecordLister, repoDID, collectio
 	out := []market.ListedRecord{}
 	cursor := ""
 	seen := map[string]bool{}
-	for page := 0; page < 20; page++ {
+	for range 20 {
 		found, err := lister.ListRecords(ctx, repoDID, collection, limit, cursor)
 		if err != nil {
 			return out, err
@@ -613,12 +614,7 @@ func numberValue(value any) float64 {
 }
 
 func containsString(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(values, want)
 }
 
 func withoutDeniedBidders(bidders []Bidder, deny []string) []Bidder {

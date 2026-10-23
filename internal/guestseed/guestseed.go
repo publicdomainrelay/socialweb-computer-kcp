@@ -66,10 +66,7 @@ func Image(seed Seed) ([]byte, error) {
 		for _, d := range docs {
 			need += (len(d.body) + perCluster*sectorBytes - 1) / (perCluster * sectorBytes)
 		}
-		clusters = need + 8
-		if clusters < minClusters {
-			clusters = minClusters
-		}
+		clusters = max(need+8, minClusters)
 		if clusters <= maxClusters {
 			break
 		}
@@ -123,7 +120,7 @@ func Image(seed Seed) ([]byte, error) {
 	for _, d := range docs {
 		n := (len(d.body) + clusterBytes - 1) / clusterBytes
 		d.first = next
-		for i := 0; i < n; i++ {
+		for i := range n {
 			c := next + i
 			link := uint16(c + 1)
 			if i == n-1 {
@@ -134,7 +131,7 @@ func Image(seed Seed) ([]byte, error) {
 		copy(img[dataStart+(next-2)*clusterBytes:], d.body)
 		next += n
 	}
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		copy(img[(1+i*fatSectors)*sectorBytes:], fat)
 	}
 
@@ -169,7 +166,7 @@ func padded(s string, n int) string {
 
 func shortChecksum(short string) byte {
 	var sum byte
-	for i := 0; i < 11; i++ {
+	for i := range 11 {
 		sum = (sum&1)<<7 + sum>>1 + short[i]
 	}
 	return sum

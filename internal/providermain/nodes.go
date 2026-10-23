@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -1081,9 +1082,7 @@ func (h *nodeHosts) reapCluster(ctx context.Context, cluster string) error {
 func (h *nodeHosts) reap(ctx context.Context) error {
 	h.mu.Lock()
 	held := make(map[string]*tenantNodes, len(h.hosts))
-	for cluster, n := range h.hosts {
-		held[cluster] = n
-	}
+	maps.Copy(held, h.hosts)
 	h.mu.Unlock()
 	clusters := make([]string, 0, len(held))
 	for cluster := range held {

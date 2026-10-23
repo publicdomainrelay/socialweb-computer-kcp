@@ -5,6 +5,7 @@ package hostsvc
 import (
 	"context"
 	"fmt"
+	"maps"
 	"time"
 
 	sd "github.com/coreos/go-systemd/v22/dbus"
@@ -79,11 +80,7 @@ func Probe(ctx context.Context, socket string, spec UnitSpec, extra map[string]a
 	if err != nil {
 		return r, fmt.Errorf("hostsvc: reading the probe's service properties: %w", err)
 	}
-	for k, v := range up {
-		r.ReadBack[k] = v
-	}
-	for k, v := range sp {
-		r.ReadBack[k] = v
-	}
+	maps.Copy(r.ReadBack, up)
+	maps.Copy(r.ReadBack, sp)
 	return r, nil
 }

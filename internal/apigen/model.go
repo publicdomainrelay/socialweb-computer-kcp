@@ -96,13 +96,13 @@ type Model struct {
 }
 
 var (
-	conditionType  = reflect.TypeOf(metav1.Condition{})
-	conditionsType = reflect.TypeOf([]metav1.Condition(nil))
-	timeType       = reflect.TypeOf(metav1.Time{})
-	rawJSONType    = reflect.TypeOf(json.RawMessage{})
-	objectMetaType = reflect.TypeOf(metav1.ObjectMeta{})
-	typeMetaType   = reflect.TypeOf(metav1.TypeMeta{})
-	commonPkgPath  = reflect.TypeOf(commonv1.ObjectRef{}).PkgPath()
+	conditionType  = reflect.TypeFor[metav1.Condition]()
+	conditionsType = reflect.TypeFor[[]metav1.Condition]()
+	timeType       = reflect.TypeFor[metav1.Time]()
+	rawJSONType    = reflect.TypeFor[json.RawMessage]()
+	objectMetaType = reflect.TypeFor[metav1.ObjectMeta]()
+	typeMetaType   = reflect.TypeFor[metav1.TypeMeta]()
+	commonPkgPath  = reflect.TypeFor[commonv1.ObjectRef]().PkgPath()
 )
 
 func BuildV1alpha1(root string) (*Model, error) {
@@ -206,7 +206,7 @@ func checkColumn(root *Schema, c v1alpha1.PrinterColumn) error {
 		return fmt.Errorf("jsonPath %q does not start with a dot", c.JSONPath)
 	}
 	s := root
-	for _, name := range strings.Split(c.JSONPath[1:], ".") {
+	for name := range strings.SplitSeq(c.JSONPath[1:], ".") {
 		if s.Ref == RefObjectMeta {
 			return nil
 		}
@@ -254,8 +254,7 @@ func (b *builder) root(t reflect.Type, kind string) (*Schema, error) {
 }
 
 func (b *builder) fields(s *Schema, t reflect.Type) error {
-	for i := 0; i < t.NumField(); i++ {
-		f := t.Field(i)
+	for f := range t.Fields() {
 		switch {
 		case f.Type == typeMetaType:
 			s.Properties = append(s.Properties,

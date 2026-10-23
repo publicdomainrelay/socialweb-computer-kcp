@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -59,14 +60,10 @@ func (s *bidderSessionStore) Save(ctx context.Context, session oauthclient.Sessi
 		fullRef := s.ref
 		fullRef.Keys = nil
 		if credential, err := s.resolver.Resolve(ctx, fullRef); err == nil {
-			for key, value := range credential.Data {
-				data[key] = value
-			}
+			maps.Copy(data, credential.Data)
 		}
 	}
-	for key, value := range credentialSessionSecret(session) {
-		data[key] = value
-	}
+	maps.Copy(data, credentialSessionSecret(session))
 	return s.writer.WriteCredential(ctx, s.ref, data)
 }
 
@@ -146,9 +143,7 @@ func (t *credentialPDSTokens) refreshLocked(ctx context.Context) (string, error)
 	t.access = session.AccessJWT
 	if t.writer != nil {
 		updated := map[string]any{}
-		for key, value := range credential.Data {
-			updated[key] = value
-		}
+		maps.Copy(updated, credential.Data)
 		updated["accessJwt"] = session.AccessJWT
 		updated["refreshJwt"] = session.RefreshJWT
 		updated["access_token"] = session.AccessJWT

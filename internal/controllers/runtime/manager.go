@@ -16,7 +16,6 @@ import (
 	"k8s.io/client-go/dynamic"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/config"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -109,7 +108,7 @@ func NewManager(cfg Config) (*Manager, error) {
 		Scheme:     scheme,
 		Logger:     logger,
 		Metrics:    metricsserver.Options{BindAddress: "0"},
-		Controller: config.Controller{SkipNameValidation: ptr.To(true)},
+		Controller: config.Controller{SkipNameValidation: new(true)},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("runtime: the multicluster manager: %w", err)

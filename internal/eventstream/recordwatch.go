@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"reflect"
 	"strings"
@@ -607,11 +608,7 @@ func condition(kind string, ok bool, reason, message string, generation int64) m
 
 func mergeLabels(current, wanted map[string]string) map[string]string {
 	out := map[string]string{}
-	for key, value := range current {
-		out[key] = value
-	}
-	for key, value := range wanted {
-		out[key] = value
-	}
+	maps.Copy(out, current)
+	maps.Copy(out, wanted)
 	return out
 }

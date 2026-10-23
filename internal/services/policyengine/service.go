@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"strings"
 	"sync"
 	"time"
@@ -153,9 +154,7 @@ func New(options Options) (*Service, error) {
 		Log:              logf,
 	}
 	handlers := make(map[string]controller.ActionHandler, len(options.Handlers))
-	for kind, handler := range options.Handlers {
-		handlers[kind] = handler
-	}
+	maps.Copy(handlers, options.Handlers)
 	runs := &controller.RunReconciler{
 		Workflows: resources.WorkflowSource(),
 		Records:   records,

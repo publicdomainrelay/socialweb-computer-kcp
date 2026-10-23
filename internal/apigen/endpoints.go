@@ -45,8 +45,7 @@ func endpointName(goName, jsonName string) bool {
 
 func (b *builder) checkCasing(t reflect.Type) error {
 	var errs []error
-	for i := 0; i < t.NumField(); i++ {
-		f := t.Field(i)
+	for f := range t.Fields() {
 		if f.Anonymous {
 			continue
 		}
@@ -87,8 +86,7 @@ func (b *builder) walkEndpoints(t reflect.Type, path string, seen map[reflect.Ty
 	}
 	seen[t] = true
 	defer delete(seen, t)
-	for i := 0; i < t.NumField(); i++ {
-		f := t.Field(i)
+	for f := range t.Fields() {
 		name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
 		if name == "-" {
 			continue

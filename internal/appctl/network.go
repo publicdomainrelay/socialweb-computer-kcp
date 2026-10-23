@@ -781,11 +781,9 @@ func (n *networks) reconcile(ctx context.Context, u *unstructured.Unstructured) 
 	apps := make([]v1alpha1.NetworkAppStatus, len(o.Spec.Apps))
 	var wg sync.WaitGroup
 	for i, app := range o.Spec.Apps {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			apps[i] = n.ensureApp(ctx, app, published, o.Spec.Comms, pdsURL, aliceURL, bidderDids)
-		}()
+		})
 	}
 	wg.Wait()
 	n.declareOperatorVouches(ctx, o.Spec.Apps)

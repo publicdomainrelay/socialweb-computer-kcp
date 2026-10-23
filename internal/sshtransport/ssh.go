@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net"
 	"os"
 	"path/filepath"
@@ -460,9 +461,7 @@ func (s *Server) serveSession(ctx context.Context, channel ssh.Channel, requests
 
 func copyEnv(env map[string]string) map[string]string {
 	out := make(map[string]string, len(env))
-	for key, value := range env {
-		out[key] = value
-	}
+	maps.Copy(out, env)
 	return out
 }
 

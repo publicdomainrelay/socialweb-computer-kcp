@@ -130,11 +130,9 @@ func NewGuest(ctx context.Context, opts GuestOptions) (*Guest, error) {
 		hostKeyAttempts: opts.HostKeyAttempts, hostKeyRetry: opts.HostKeyRetry,
 		ctx: root, cancel: cancel,
 	}
-	g.wg.Add(1)
-	go func() {
-		defer g.wg.Done()
+	g.wg.Go(func() {
 		g.refreshOIDCDocuments()
-	}()
+	})
 	return g, nil
 }
 
@@ -293,9 +291,7 @@ func (g *Guest) RecordBoundHostKey(ctx context.Context, computevmName string) (b
 }
 
 func (g *Guest) recordBoundHostKeys(computevmName string) {
-	g.wg.Add(1)
-	go func() {
-		defer g.wg.Done()
+	g.wg.Go(func() {
 		for attempt := 0; attempt < g.hostKeyAttempts; attempt++ {
 			done, err := g.RecordBoundHostKey(g.ctx, computevmName)
 			if done {
@@ -310,7 +306,7 @@ func (g *Guest) recordBoundHostKeys(computevmName string) {
 			case <-time.After(g.hostKeyRetry):
 			}
 		}
-	}()
+	})
 }
 
 type oidcCache struct {

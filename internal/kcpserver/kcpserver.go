@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -108,12 +109,7 @@ func SlotArgv(c SlotConfig) ([]string, error) {
 
 func CheckArgv(argv []string, shape Shape) error {
 	has := func(want string) bool {
-		for _, a := range argv {
-			if a == want {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(argv, want)
 	}
 	hasPrefix := func(want string) bool {
 		for _, a := range argv {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -129,7 +130,7 @@ func parseInt(key, value string) (*int64, error) {
 
 func splitValues(value string) []string {
 	var out []string
-	for _, v := range strings.Split(value, listValueSeparator) {
+	for v := range strings.SplitSeq(value, listValueSeparator) {
 		if v != "" {
 			out = append(out, v)
 		}
@@ -216,12 +217,7 @@ func (s *Schema) property(name string) *Property {
 }
 
 func contains(values []string, v string) bool {
-	for _, e := range values {
-		if e == v {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(values, v)
 }
 
 func defaultValue(s *Schema, raw string) (any, error) {

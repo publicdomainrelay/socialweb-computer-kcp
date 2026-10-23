@@ -280,10 +280,7 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"message": "Invalid Query Parameter: count"})
 			return
 		}
-		count = n
-		if count > 1000 {
-			count = 1000
-		}
+		count = min(n, 1000)
 	}
 	entries, err := s.store.ExportLogs(r.Context(), after, count)
 	if err != nil {

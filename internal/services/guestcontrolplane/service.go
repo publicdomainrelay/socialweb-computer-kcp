@@ -262,19 +262,15 @@ func (s *Service) prepare(ctx context.Context) error {
 			URL:      guestidentity.OIDCIssuer(raw),
 		})
 	}
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
+	s.wg.Go(func() {
 		s.configureIssuerLoop(ctx)
-	}()
+	})
 	if s.syncer != nil {
 		s.grantsLoop = &grantLoop{syncer: s.syncer, vms: s.vms, guest: s.guest, did: s.did, handle: "",
 			interval: s.cfg.GrantSync, log: s.log, known: map[string]string{}}
-		s.wg.Add(1)
-		go func() {
-			defer s.wg.Done()
+		s.wg.Go(func() {
 			s.grantsLoop.run(ctx)
-		}()
+		})
 	}
 	s.log.Info("the guest control plane serves guests", "handler", s.logicalURL(), "handle", s.cfg.Handle,
 		"issuer", s.issuerURL(), "mount", s.cfg.GuestLoginMount)

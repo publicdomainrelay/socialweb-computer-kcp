@@ -101,7 +101,7 @@ func (s *server) readNotify(u *unit, st *fdStore) {
 
 func notifyFields(msg []byte) map[string]string {
 	out := map[string]string{}
-	for _, line := range bytes.Split(msg, []byte{'\n'}) {
+	for line := range bytes.SplitSeq(msg, []byte{'\n'}) {
 		k, v, ok := strings.Cut(string(line), "=")
 		if ok {
 			out[k] = v

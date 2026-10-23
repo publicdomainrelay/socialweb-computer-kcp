@@ -5,6 +5,7 @@ package vmruntime
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
 	"time"
@@ -30,9 +31,7 @@ func (r *firecracker) imagesOfWorkDirs(keep map[string]string) {
 
 func (r *firecracker) CollectImages(ctx context.Context, keep map[string]string) (guestimage.GCReport, error) {
 	all := map[string]string{}
-	for k, v := range keep {
-		all[k] = v
-	}
+	maps.Copy(all, keep)
 	names, err := guestimage.Names()
 	if err != nil {
 		return guestimage.GCReport{}, err

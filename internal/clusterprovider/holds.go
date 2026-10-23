@@ -129,7 +129,7 @@ func tcpListenerPort(ls []v1alpha1.HostProcessListener) (int, bool) {
 
 func (h *UnitsHost) recordHold(ctx context.Context, key string, p portallocator.Purpose, port int) error {
 	name := ObjectName(key, MemberName(procgroup.ComponentApiserverFront))
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		u, err := h.hps.Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
 			return fmt.Errorf("clusterprovider: recording hold %s of %s on %s: %w", p, key, name, err)

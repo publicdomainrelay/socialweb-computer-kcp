@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os/exec"
 	"regexp"
 	"sort"
@@ -228,7 +229,7 @@ func (e *Executor) buildGitHubContext() map[string]any {
 
 func resolvePropertyPath(path string, data map[string]any) any {
 	var current any = data
-	for _, part := range strings.Split(path, ".") {
+	for part := range strings.SplitSeq(path, ".") {
 		object, ok := current.(map[string]any)
 		if !ok {
 			return nil
@@ -289,9 +290,7 @@ func (e *Executor) runDeno(ctx context.Context, script string, extraEnv map[stri
 	command := exec.CommandContext(ctx, e.opts.DenoPath, "run", "--quiet", "--no-prompt", "--no-config", "--allow-net", "-")
 	command.Stdin = strings.NewReader(script)
 	env := make(map[string]string, len(extraEnv)+2)
-	for key, value := range extraEnv {
-		env[key] = value
-	}
+	maps.Copy(env, extraEnv)
 	if _, exists := env["NO_COLOR"]; !exists {
 		env["NO_COLOR"] = "1"
 	}

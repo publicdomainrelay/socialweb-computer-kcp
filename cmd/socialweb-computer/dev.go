@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -525,12 +526,8 @@ func bringUp(ctx context.Context, a *app, vals clicfg.Values, host bool) (upRepo
 	if dumbpipeExe.Path != "" {
 		rec.Executables[appctl.DumbpipeExecutable] = dumbpipeExe
 	}
-	for name, e := range gatewayExes {
-		rec.Executables[name] = e
-	}
-	for name, e := range pluginExes {
-		rec.Executables[name] = e
-	}
+	maps.Copy(rec.Executables, gatewayExes)
+	maps.Copy(rec.Executables, pluginExes)
 	rec.OpenBao = nil
 	if addr := vals.String("openbao-addr"); addr != "" {
 		tokenFile := vals.String("openbao-token-file")
@@ -547,9 +544,7 @@ func bringUp(ctx context.Context, a *app, vals clicfg.Values, host bool) (upRepo
 			lock.Close()
 			return upReport{}, a.fail(exitRefused, "%s: %v", verb, err)
 		}
-		for name, e := range vmExes {
-			rec.Executables[name] = e
-		}
+		maps.Copy(rec.Executables, vmExes)
 		if rec.VM, err = a.devVM(vals, l); err != nil {
 			lock.Close()
 			return upReport{}, a.fail(exitRefused, "%s: %v", verb, err)

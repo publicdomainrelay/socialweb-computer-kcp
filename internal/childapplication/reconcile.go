@@ -374,7 +374,7 @@ func logicalCluster(s string) bool {
 	if s == "" {
 		return false
 	}
-	for _, segment := range strings.Split(s, ":") {
+	for segment := range strings.SplitSeq(s, ":") {
 		if len(segment) > 63 || !dnsLabel.MatchString(segment) {
 			return false
 		}

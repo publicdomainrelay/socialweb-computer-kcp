@@ -219,8 +219,8 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 func filePath(raw string) string {
 	raw = strings.TrimSpace(raw)
 	for _, prefix := range []string{"file://", "file:"} {
-		if strings.HasPrefix(raw, prefix) {
-			return strings.TrimPrefix(raw, prefix)
+		if after, ok := strings.CutPrefix(raw, prefix); ok {
+			return after
 		}
 	}
 	return raw

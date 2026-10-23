@@ -171,7 +171,7 @@ func RenderDropIn(after, wants []string) []byte {
 }
 
 func ParseArgsEnv(b []byte) ([]string, error) {
-	for _, l := range strings.Split(string(b), "\n") {
+	for l := range strings.SplitSeq(string(b), "\n") {
 		if v, ok := strings.CutPrefix(l, ArgsVar+"="); ok {
 			return strings.Fields(v), nil
 		}

@@ -362,8 +362,8 @@ func keyFileFor(certFile string) string {
 
 func keyFilesFor(certFile string) []string {
 	candidates := []string{keyFileFor(certFile)}
-	if strings.HasSuffix(certFile, ".pem") {
-		candidates = append(candidates, strings.TrimSuffix(certFile, ".pem")+"-key.pem")
+	if before, ok := strings.CutSuffix(certFile, ".pem"); ok {
+		candidates = append(candidates, before+"-key.pem")
 	}
 	return append(candidates, certFile)
 }

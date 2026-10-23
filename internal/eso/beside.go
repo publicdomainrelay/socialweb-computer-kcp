@@ -384,7 +384,7 @@ func applyBundleObject(ctx context.Context, dyn dynamic.Interface, u *unstructur
 		ri = dyn.Resource(gvr).Namespace(u.GetNamespace())
 	}
 	if _, err := ri.Patch(ctx, u.GetName(), types.ApplyPatchType, body,
-		metav1.PatchOptions{FieldManager: manager, Force: ptr(true)}); err != nil {
+		metav1.PatchOptions{FieldManager: manager, Force: new(true)}); err != nil {
 		return fmt.Errorf("eso: applying the %s %s: %w", u.GetKind(), u.GetName(), err)
 	}
 	return nil

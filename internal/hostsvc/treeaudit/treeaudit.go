@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -122,7 +123,7 @@ func (h Host) CgroupMembers(mainPID int, unit string) ([]int, error) {
 		return nil, err
 	}
 	var path string
-	for _, line := range strings.Split(string(b), "\n") {
+	for line := range strings.SplitSeq(string(b), "\n") {
 		if rest, ok := strings.CutPrefix(line, "0::"); ok {
 			path = rest
 		}
@@ -148,7 +149,7 @@ func (h Host) CgroupMembers(mainPID int, unit string) ([]int, error) {
 		if err != nil {
 			return err
 		}
-		for _, f := range strings.Fields(string(raw)) {
+		for f := range strings.FieldsSeq(string(raw)) {
 			if n, err := strconv.Atoi(f); err == nil {
 				pids = append(pids, n)
 			}
@@ -174,7 +175,7 @@ func statPGID(b []byte) (int, bool) {
 
 func environ(b []byte) map[string]string {
 	out := map[string]string{}
-	for _, kv := range bytes.Split(b, []byte{0}) {
+	for kv := range bytes.SplitSeq(b, []byte{0}) {
 		k, v, ok := strings.Cut(string(kv), "=")
 		if ok {
 			out[k] = v
@@ -368,12 +369,7 @@ func Pinned(runtimeRoot string, pins []versions.Pin, digest TreeDigest) (map[str
 }
 
 func isVMAsset(name string) bool {
-	for _, a := range VMAssets {
-		if a == name {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(VMAssets, name)
 }
 
 func fileSHA256(p string) (string, error) {

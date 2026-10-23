@@ -13,7 +13,7 @@ func parseGitHubActionsOutputs(content string) map[string]string {
 	currentKey := ""
 	currentDelimiter := ""
 	currentValue := strings.Builder{}
-	for _, line := range strings.Split(content, "\n") {
+	for line := range strings.SplitSeq(content, "\n") {
 		if currentDelimiter != "" {
 			if strings.HasPrefix(line, currentDelimiter) {
 				outputs[currentKey] = strings.TrimSuffix(currentValue.String(), "\n")
@@ -45,7 +45,7 @@ func parseGitHubActionsOutputs(content string) map[string]string {
 }
 
 func (e *Executor) parseAnnotations(output string) {
-	for _, line := range strings.Split(output, "\n") {
+	for line := range strings.SplitSeq(output, "\n") {
 		if !strings.HasPrefix(line, "::") {
 			continue
 		}

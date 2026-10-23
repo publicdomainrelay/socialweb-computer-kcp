@@ -664,7 +664,7 @@ func vmmPID(pastaPID int) (int, error) {
 		if err != nil {
 			continue
 		}
-		for _, f := range strings.Fields(string(raw)) {
+		for f := range strings.FieldsSeq(string(raw)) {
 			pid, err := strconv.Atoi(f)
 			if err != nil {
 				continue

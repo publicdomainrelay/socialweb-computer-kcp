@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -838,12 +839,7 @@ func (s *Server) didAllowed(did string) bool {
 	if len(s.cfg.AllowedDIDs) == 0 {
 		return true
 	}
-	for _, d := range s.cfg.AllowedDIDs {
-		if d == did {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(s.cfg.AllowedDIDs, did)
 }
 
 func lastQueryValues(values map[string][]string) map[string]string {

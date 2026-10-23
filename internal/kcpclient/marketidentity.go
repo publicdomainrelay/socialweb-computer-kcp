@@ -53,7 +53,7 @@ func (m *MarketIdentities) addToSpecList(ctx context.Context, name, field, did s
 	if did == "" {
 		return fmt.Errorf("kcpclient: marketidentity %s: an empty did cannot be added to spec.%s", name, field)
 	}
-	for attempt := 0; attempt < specListAttempts; attempt++ {
+	for range specListAttempts {
 		obj, err := m.GetMarketIdentity(ctx, name)
 		if err != nil {
 			return err

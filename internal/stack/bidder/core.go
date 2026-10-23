@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"time"
@@ -62,9 +63,7 @@ func (c CoreConfig) record(l devinstance.Layout) (devinstance.Record, error) {
 	}
 	p := bootstrap.InstallParams(c.app(), c.StateDir)
 	exes := map[string]devinstance.Executable{}
-	for k, v := range c.Executables {
-		exes[k] = v
-	}
+	maps.Copy(exes, c.Executables)
 	if kcp, kine := c.Executables[ExeKcp].Path, c.Executables[ExeKine].Path; kcp != "" && kine != "" {
 		if err := bootstrap.LinkAssets(p, kcp, kine, ""); err != nil {
 			return rec, err

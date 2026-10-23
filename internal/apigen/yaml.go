@@ -308,7 +308,7 @@ func (l RevisionLock) Admit(name, hash string) error {
 func RevisionOrder(data []byte) []string {
 	var order []string
 	seen := map[string]bool{}
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		name, _, _ := strings.Cut(strings.TrimSpace(line), " ")
 		if name != "" && !seen[name] {
 			seen[name] = true

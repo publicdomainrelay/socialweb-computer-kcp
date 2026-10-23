@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -582,10 +583,7 @@ func maxEnd(contents ...string) uint64 {
 }
 
 func NextRangeStart(subuid, subgid string) uint64 {
-	start := maxEnd(subuid, subgid)
-	if start < SubidFloor {
-		start = SubidFloor
-	}
+	start := max(maxEnd(subuid, subgid), SubidFloor)
 	return (start + hostcontract.VMSlotIDs - 1) / hostcontract.VMSlotIDs * hostcontract.VMSlotIDs
 }
 
@@ -680,10 +678,8 @@ func (in *installer) kvm() error {
 	if notRunning != "" {
 		return nil
 	}
-	for _, g := range groups {
-		if g == gid {
-			return nil
-		}
+	if slices.Contains(groups, gid) {
+		return nil
 	}
 	if err := in.saveRecord(); err != nil {
 		return err
@@ -1254,10 +1250,7 @@ func (in *installer) guestImage() error {
 	if err := in.ensureDir(images, 0o700, in.acct.UID, in.acct.GID, true); err != nil {
 		return err
 	}
-	lookup := in.networkBudget() / 3
-	if lookup < MinImageBudget {
-		lookup = MinImageBudget
-	}
+	lookup := max(in.networkBudget()/3, MinImageBudget)
 	lookupCtx, lookupCancel := context.WithTimeout(in.ctx, lookup)
 	defer lookupCancel()
 	dir := store.Dir(pin)

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -237,12 +238,7 @@ func setCondition(conditions *[]metav1.Condition, generation int64, kind string,
 }
 
 func containsString(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(values, want)
 }
 
 func sleep(ctx context.Context, d time.Duration) bool {

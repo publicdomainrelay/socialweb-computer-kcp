@@ -75,11 +75,9 @@ func Join(ctx context.Context, cfg Config, log *slog.Logger) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		superviseLink(runCtx, cfg, openBaoLinkName, log)
-	}()
+	})
 	if err := prepare(runCtx, cfg, log); err != nil {
 		cancel()
 		wg.Wait()
@@ -90,11 +88,9 @@ func Join(ctx context.Context, cfg Config, log *slog.Logger) error {
 		wg.Wait()
 		return err
 	}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		superviseLink(runCtx, cfg, apiserverLinkName, log)
-	}()
+	})
 	if err := notify.Ready("joined the cluster; supervising the OpenBao and apiserver links"); err != nil {
 		log.Warn("sd_notify READY failed", "err", err.Error())
 	}

@@ -988,7 +988,7 @@ func annotationList(raw string) []string {
 		return nil
 	}
 	var out []string
-	for _, value := range strings.Split(raw, ",") {
+	for value := range strings.SplitSeq(raw, ",") {
 		if value = strings.TrimSpace(value); value != "" {
 			out = append(out, value)
 		}

@@ -200,13 +200,14 @@ func WaitNetwork(ctx context.Context, kubeconfig string, timeout time.Duration, 
 	for {
 		o, err := ReadNetwork(ctx, kubeconfig)
 		if err == nil {
-			key := string(o.Status.Phase) + o.Status.Message
+			var key strings.Builder
+			key.WriteString(string(o.Status.Phase) + o.Status.Message)
 			for _, a := range o.Status.Apps {
-				key += a.Name + string(a.Phase)
+				key.WriteString(a.Name + string(a.Phase))
 			}
-			if key != last && progress != nil {
+			if key.String() != last && progress != nil {
 				progress(o.Status)
-				last = key
+				last = key.String()
 			}
 			if o.Status.Phase == v1alpha1.ApplicationPhaseReady && o.Status.ObservedGeneration == o.Generation {
 				return o, nil

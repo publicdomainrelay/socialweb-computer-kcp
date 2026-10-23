@@ -170,7 +170,7 @@ func StableTicket(k Key) string {
 
 func TicketIn(output string) (string, bool) {
 	found := ""
-	for _, line := range strings.Split(output, "\n") {
+	for line := range strings.SplitSeq(output, "\n") {
 		_, rest, ok := strings.Cut(line, connectLine)
 		if !ok {
 			continue

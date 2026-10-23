@@ -67,8 +67,8 @@ func (c *Client) ResolvePDS(ctx context.Context, did string) (string, error) {
 		return "", fmt.Errorf("did is empty")
 	}
 	var docURL string
-	if strings.HasPrefix(did, "did:web:") {
-		host := strings.TrimPrefix(did, "did:web:")
+	if after, ok := strings.CutPrefix(did, "did:web:"); ok {
+		host := after
 		host = strings.ReplaceAll(host, ":", "/")
 		docURL = "https://" + host + "/did.json"
 	} else {

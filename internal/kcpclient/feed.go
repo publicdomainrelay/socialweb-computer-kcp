@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -232,10 +233,8 @@ func (c *Client) waitForAccount(ctx context.Context, did string) error {
 		return ws.DeletionTimestamp == nil && ws.Status.Phase == corev1alpha1.LogicalClusterPhaseReady
 	}
 	anyReady := func(items []kcpv1alpha1.Workspace) error {
-		for _, ws := range items {
-			if ready(ws) {
-				return errAccountReady
-			}
+		if slices.ContainsFunc(items, ready) {
+			return errAccountReady
 		}
 		return nil
 	}

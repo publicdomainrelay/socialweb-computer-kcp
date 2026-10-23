@@ -16,7 +16,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	"sigs.k8s.io/controller-runtime/pkg/cluster"
@@ -195,7 +194,7 @@ func For[T Object](m *Manager, name string, r Reconciler[T], opts ...Option) err
 	b := mcbuilder.ControllerManagedBy(m.mgr).Named(name).
 		For(proto, inExport, mcbuilder.WithPredicates(specOrDeletion())).
 		WithOptions(controller.TypedOptions[mcreconcile.Request]{MaxConcurrentReconciles: o.workers, RateLimiter: limiter,
-			SkipNameValidation: ptr.To(true)})
+			SkipNameValidation: new(true)})
 	for _, owned := range o.owns {
 		b = b.Owns(owned, inExport)
 	}

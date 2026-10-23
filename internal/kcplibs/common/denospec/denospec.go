@@ -53,7 +53,7 @@ type Permissions struct {
 }
 
 type PodTemplate struct {
-	DenoJSON runtime.RawExtension `json:"denoJson,omitempty"`
+	DenoJSON runtime.RawExtension `json:"denoJson"`
 
 	DenoLock string `json:"denoLock,omitempty"`
 

@@ -158,10 +158,7 @@ func jobStillNeeds(j *batchv1.Job) int {
 	if j.Spec.Completions != nil {
 		want = int(*j.Spec.Completions)
 	}
-	needs := want - int(j.Status.Succeeded)
-	if needs < 1 {
-		needs = 1
-	}
+	needs := max(want-int(j.Status.Succeeded), 1)
 	return needs
 }
 

@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"sort"
 	"strings"
@@ -53,7 +54,7 @@ func HostMapFromPairs(pairs map[string]string) (*HostMap, error) {
 
 func ParseHostMap(value string) (*HostMap, error) {
 	m := &HostMap{hosts: map[string]string{}}
-	for _, pair := range strings.Split(value, ",") {
+	for pair := range strings.SplitSeq(value, ",") {
 		pair = strings.TrimSpace(pair)
 		if pair == "" {
 			continue
@@ -117,9 +118,7 @@ func (m *HostMap) Hosts() map[string]string {
 		return nil
 	}
 	out := make(map[string]string, len(m.hosts))
-	for name, address := range m.hosts {
-		out[name] = address
-	}
+	maps.Copy(out, m.hosts)
 	return out
 }
 

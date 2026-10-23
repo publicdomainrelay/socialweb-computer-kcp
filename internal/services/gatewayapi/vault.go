@@ -185,10 +185,7 @@ func renewVaultToken(ctx context.Context, client *openbao.Client, mount, role st
 }
 
 func renewTokenDelay(lease time.Duration) time.Duration {
-	delay := lease * 2 / 3
-	if delay < time.Second {
-		delay = time.Second
-	}
+	delay := max(lease*2/3, time.Second)
 	return delay
 }
 

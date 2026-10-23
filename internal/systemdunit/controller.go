@@ -193,7 +193,7 @@ func (c Controller) Status(ctx context.Context, name string) (Status, error) {
 		return Status{}, fmt.Errorf("systemdunit: reading the status of %s: %w", name, err)
 	}
 	status := Status{Name: name}
-	for _, line := range strings.Split(string(out), "\n") {
+	for line := range strings.SplitSeq(string(out), "\n") {
 		key, value, ok := strings.Cut(strings.TrimSpace(line), "=")
 		if !ok {
 			continue

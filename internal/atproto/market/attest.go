@@ -7,7 +7,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
+	"slices"
 	"strings"
 	"sync"
 
@@ -59,9 +61,7 @@ type InlineAttestation struct {
 
 func (e InlineAttestation) Metadata() map[string]any {
 	out := make(map[string]any, len(e.Fields)+4)
-	for k, v := range e.Fields {
-		out[k] = v
-	}
+	maps.Copy(out, e.Fields)
 	out["$type"] = e.Type
 	out["key"] = e.Key
 	out["cid"] = e.CID
@@ -365,9 +365,7 @@ func SignRecord(record map[string]any, repository string, signer *Signer) (map[s
 		return nil, err
 	}
 	out := make(map[string]any, len(record)+1)
-	for k, v := range record {
-		out[k] = v
-	}
+	maps.Copy(out, record)
 	existing := []any{}
 	switch v := out["signatures"].(type) {
 	case []any:
@@ -428,9 +426,7 @@ func CreateRemoteProofRecord(ctx context.Context, w RecordWriter, repo, collecti
 		return StrongRef{}, err
 	}
 	value := make(map[string]any, len(metadata)+1)
-	for k, v := range metadata {
-		value[k] = v
-	}
+	maps.Copy(value, metadata)
 	value["cid"] = bind.String()
 	entry, err := SignInline(value, repo, signer)
 	if err != nil {
@@ -450,9 +446,7 @@ func CreateReceiptRecordAt(ctx context.Context, w RecordWriter, repo, rkey strin
 		return StrongRef{}, err
 	}
 	value := make(map[string]any, len(metadata)+2)
-	for k, v := range metadata {
-		value[k] = v
-	}
+	maps.Copy(value, metadata)
 	value["cid"] = bind.String()
 	entry, err := SignInline(value, repo, signer)
 	if err != nil {
@@ -542,12 +536,7 @@ func VerifyRecordSignatures(ctx context.Context, record map[string]any, reposito
 }
 
 func containsString(values []string, want string) bool {
-	for _, v := range values {
-		if v == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(values, want)
 }
 
 func NewDIDKeyLister(dir DIDDocumentResolver) KeysForDID {

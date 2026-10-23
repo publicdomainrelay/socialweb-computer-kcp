@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostcontract"
@@ -93,19 +94,15 @@ func (r *Record) set(step, outcome string) {
 func (r *Record) created(step string) bool { return r.Steps[step] == OutcomeCreated }
 
 func (r *Record) addDir(p string) {
-	for _, d := range r.CreatedDirs {
-		if d == p {
-			return
-		}
+	if slices.Contains(r.CreatedDirs, p) {
+		return
 	}
 	r.CreatedDirs = append(r.CreatedDirs, p)
 }
 
 func (r *Record) addUnitFile(p string) {
-	for _, d := range r.UnitFiles {
-		if d == p {
-			return
-		}
+	if slices.Contains(r.UnitFiles, p) {
+		return
 	}
 	r.UnitFiles = append(r.UnitFiles, p)
 	sort.Strings(r.UnitFiles)

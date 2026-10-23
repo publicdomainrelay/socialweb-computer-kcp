@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"maps"
 	"net"
 	"os"
 	"path/filepath"
@@ -192,9 +193,7 @@ func (d *Resolver) Table(ctx context.Context) (map[string]string, []string) {
 		if address == "" {
 			address = AdvertisedAddress(envOf(pod, ArgsKey), envOf(pod, EnvKey))
 		}
-		for key, value := range podEntries(d.Name(ctx, pod.GetName(), pod.GetNamespace(), cluster), address, statusListeners(pod)) {
-			table[key] = value
-		}
+		maps.Copy(table, podEntries(d.Name(ctx, pod.GetName(), pod.GetNamespace(), cluster), address, statusListeners(pod)))
 	}
 	d.mu.Lock()
 	for name, entries := range d.observed {
@@ -203,9 +202,7 @@ func (d *Resolver) Table(ctx context.Context) (map[string]string, []string) {
 				delete(table, key)
 			}
 		}
-		for key, value := range entries {
-			table[key] = value
-		}
+		maps.Copy(table, entries)
 	}
 	d.mu.Unlock()
 	return table, workspaces

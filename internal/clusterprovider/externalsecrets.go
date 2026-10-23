@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -68,12 +69,7 @@ type ExternalSecrets struct {
 }
 
 func (cfg StackConfig) runsExternalSecrets() bool {
-	for _, c := range ExternalSecretsComponents {
-		if cfg.Stack.Has(c) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(ExternalSecretsComponents, cfg.Stack.Has)
 }
 
 func (cfg StackConfig) WithoutUnleasedExternalSecrets(l materialiser.Leases) StackConfig {
@@ -312,7 +308,7 @@ func waitExternalSecretsController(ctx context.Context, spec clusterstack.Spec, 
 }
 
 func externalSecretsWorkersStarted(out string) bool {
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if strings.Contains(line, externalSecretsReadyMark) && strings.Contains(line, externalSecretsReadyController) {
 			return true
 		}

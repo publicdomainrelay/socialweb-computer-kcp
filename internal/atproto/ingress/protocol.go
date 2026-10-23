@@ -136,8 +136,8 @@ func splitDataHost(host string, bases []string) (string, string, bool) {
 		if base == "" || base == "*" {
 			continue
 		}
-		if strings.HasSuffix(host, "."+base) {
-			sub := strings.TrimSuffix(host, "."+base)
+		if before, ok := strings.CutSuffix(host, "."+base); ok {
+			sub := before
 			if sub == "" {
 				continue
 			}

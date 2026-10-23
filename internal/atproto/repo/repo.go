@@ -251,7 +251,7 @@ func (h *repoHandle) apply(ctx context.Context, writes []WriteOp, swapCommit *ci
 		}
 		action := w.Action
 		if action == ActionCreate && rk == "" {
-			for i := 0; i < 100; i++ {
+			for i := range 100 {
 				rk = syntax.RecordKey(s.nextTID().String())
 				path := nsid.String() + "/" + rk.String()
 				existing, err := tree.Get([]byte(path))

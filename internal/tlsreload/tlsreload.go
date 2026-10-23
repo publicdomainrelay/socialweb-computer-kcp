@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"slices"
 	"sync"
 	"time"
 )
@@ -80,13 +81,7 @@ func (r *Reloader) watchPaths() []string {
 		if path == "" || path == r.certFile {
 			continue
 		}
-		dup := false
-		for _, seen := range out {
-			if seen == path {
-				dup = true
-				break
-			}
-		}
+		dup := slices.Contains(out, path)
 		if !dup {
 			out = append(out, path)
 		}

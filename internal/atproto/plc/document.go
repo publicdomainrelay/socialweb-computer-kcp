@@ -1,6 +1,7 @@
 package plc
 
 import (
+	"maps"
 	"sort"
 	"strings"
 )
@@ -26,18 +27,12 @@ func ResolveDocument(did string, current []LogEntry) *DIDDocument {
 		op := entry.Operation
 		switch op.Type {
 		case TypeOperation:
-			for k, v := range op.VerificationMethods {
-				verificationMethods[k] = v
-			}
+			maps.Copy(verificationMethods, op.VerificationMethods)
 			alsoKnownAs = dedupe(append(alsoKnownAs, op.AlsoKnownAs...))
-			for k, v := range op.Services {
-				services[k] = v
-			}
+			maps.Copy(services, op.Services)
 		case TypeCreate:
 			next := map[string]string{"atproto": op.SigningKey}
-			for k, v := range verificationMethods {
-				next[k] = v
-			}
+			maps.Copy(next, verificationMethods)
 			verificationMethods = next
 			if op.Handle != "" {
 				alsoKnownAs = dedupe(append(alsoKnownAs, op.Handle))
@@ -45,9 +40,7 @@ func ResolveDocument(did string, current []LogEntry) *DIDDocument {
 			nextServices := map[string]Service{
 				"atproto_pds": {Type: "AtprotoPersonalDataServer", Endpoint: op.Service},
 			}
-			for k, v := range services {
-				nextServices[k] = v
-			}
+			maps.Copy(nextServices, services)
 			services = nextServices
 		}
 	}

@@ -159,7 +159,7 @@ func requireLoopbackAddr(addr string) error {
 
 func splitList(raw string) []string {
 	out := []string{}
-	for _, part := range strings.Split(raw, ",") {
+	for part := range strings.SplitSeq(raw, ",") {
 		if p := strings.TrimSpace(part); p != "" {
 			out = append(out, p)
 		}

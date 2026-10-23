@@ -379,7 +379,7 @@ func applyClientSecret(ctx context.Context, dyn dynamic.Interface, o Options) er
 	}
 	if _, err := dyn.Resource(secretResource).Namespace(o.Namespace).Patch(
 		ctx, ClientSecretName, types.ApplyPatchType, body,
-		metav1.PatchOptions{FieldManager: FieldManager, Force: ptr(true)},
+		metav1.PatchOptions{FieldManager: FieldManager, Force: new(true)},
 	); err != nil {
 		return fmt.Errorf("eso: applying the client certificate Secret %s/%s: %w", o.Namespace, ClientSecretName, err)
 	}
@@ -418,11 +418,12 @@ func applyObject(ctx context.Context, ri dynamic.ResourceInterface, u *unstructu
 	}
 	if _, err := ri.Patch(
 		ctx, u.GetName(), types.ApplyPatchType, body,
-		metav1.PatchOptions{FieldManager: FieldManager, Force: ptr(true)},
+		metav1.PatchOptions{FieldManager: FieldManager, Force: new(true)},
 	); err != nil {
 		return fmt.Errorf("eso: applying the %s %s: %w", u.GetKind(), u.GetName(), err)
 	}
 	return nil
 }
 
-func ptr[T any](v T) *T { return &v }
+//go:fix inline
+func ptr[T any](v T) *T { return new(v) }

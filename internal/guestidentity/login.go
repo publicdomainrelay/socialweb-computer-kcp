@@ -2,6 +2,7 @@ package guestidentity
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -68,10 +69,5 @@ func LoginBody(step LoginStep, input map[string]any) (map[string]string, error) 
 }
 
 func contains(list []string, value string) bool {
-	for _, item := range list {
-		if item == value {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(list, value)
 }

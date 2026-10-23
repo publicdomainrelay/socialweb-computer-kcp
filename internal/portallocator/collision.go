@@ -16,10 +16,7 @@ const MarketAdvertiseAddress = "198.18.255.254"
 func FindDuplicatePorts(leases []Lease) []string {
 	byPort := map[int][]Lease{}
 	for _, l := range leases {
-		width := l.Width
-		if width < 1 {
-			width = 1
-		}
+		width := max(l.Width, 1)
 		for p := l.Port; p < l.Port+width; p++ {
 			byPort[p] = append(byPort[p], l)
 		}

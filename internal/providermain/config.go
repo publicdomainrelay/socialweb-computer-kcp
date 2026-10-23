@@ -456,7 +456,7 @@ func (c Config) checkHost() error {
 
 func splitList(raw string) []string {
 	out := []string{}
-	for _, part := range strings.Split(raw, ",") {
+	for part := range strings.SplitSeq(raw, ",") {
 		if trimmed := strings.TrimSpace(part); trimmed != "" {
 			out = append(out, trimmed)
 		}

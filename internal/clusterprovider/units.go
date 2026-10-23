@@ -670,7 +670,7 @@ func (h *UnitsHost) memberSpec(key string, st procgroup.Step, spec procgroup.Spe
 }
 
 func (h *UnitsHost) remove(ctx context.Context, name string) error {
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		u, err := h.hps.Get(ctx, name, metav1.GetOptions{})
 		if apierrors.IsNotFound(err) {
 			return nil
@@ -786,7 +786,7 @@ func (h *UnitsHost) place(ctx context.Context, key, member string, cur *v1alpha1
 }
 
 func (h *UnitsHost) verify(ctx context.Context, key, member, inv string) error {
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		u, err := h.hps.Get(ctx, ObjectName(key, member), metav1.GetOptions{})
 		if err != nil {
 			return err
@@ -909,7 +909,7 @@ func stepNeeds(steps []procgroup.Step, i int) []int {
 		names = []procgroup.Component{procgroup.ComponentOpenBao}
 	default:
 		out := make([]int, 0, i)
-		for j := 0; j < i; j++ {
+		for j := range i {
 			out = append(out, j)
 		}
 		return out

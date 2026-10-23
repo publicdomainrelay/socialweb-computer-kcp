@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"strings"
@@ -413,8 +414,6 @@ func recordType(record map[string]any, collection string) map[string]any {
 	}
 	out := make(map[string]any, len(record)+1)
 	out["$type"] = collection
-	for k, v := range record {
-		out[k] = v
-	}
+	maps.Copy(out, record)
 	return out
 }

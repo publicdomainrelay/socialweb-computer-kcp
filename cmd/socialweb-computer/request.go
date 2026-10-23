@@ -83,7 +83,7 @@ func newRequestRun(a *app, vals clicfg.Values) (*requestRun, error) {
 
 func splitList(v string) []string {
 	var out []string
-	for _, s := range strings.Split(v, ",") {
+	for s := range strings.SplitSeq(v, ",") {
 		if s = strings.TrimSpace(s); s != "" {
 			out = append(out, s)
 		}

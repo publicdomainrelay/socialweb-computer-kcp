@@ -2,6 +2,7 @@ package component
 
 import (
 	"fmt"
+	"maps"
 	"net"
 	"net/url"
 	"sort"
@@ -222,9 +223,7 @@ func (m *NetworkHostMap) Hosts() map[string]string {
 		return nil
 	}
 	out := make(map[string]string, len(m.hosts))
-	for name, address := range m.hosts {
-		out[name] = address
-	}
+	maps.Copy(out, m.hosts)
 	return out
 }
 
