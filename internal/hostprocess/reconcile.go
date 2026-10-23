@@ -1,6 +1,7 @@
 package hostprocess
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"strconv"
@@ -79,9 +80,7 @@ const DefaultMemoryMax = 2 << 30
 
 func UnitSpec(o v1alpha1.HostProcess, exec string) (hostsvc.UnitSpec, error) {
 	s := o.Spec
-	if exec == "" {
-		exec = s.Exec
-	}
+	exec = cmp.Or(exec, s.Exec)
 	if exec == "" {
 		return hostsvc.UnitSpec{}, fmt.Errorf("hostprocess %s: neither an exec path nor a resolvable asset", o.Name)
 	}

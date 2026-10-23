@@ -1,6 +1,7 @@
 package exposure
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -51,9 +53,7 @@ func NewServiceController(opts ServiceOptions) (*ServiceController, error) {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	if opts.RetryAfter <= 0 {
-		opts.RetryAfter = DefaultRetryAfter
-	}
+	opts.RetryAfter = opt.Positive(opts.RetryAfter, DefaultRetryAfter)
 	return &ServiceController{
 		workspace: workspace,
 		dynamic:   opts.Dynamic,
@@ -149,9 +149,7 @@ func targetKey(ref commonv1.ObjectRef, workspace string) (component.Key, error) 
 		return component.Key{}, errors.New("the targetRef has no name")
 	}
 	targetWorkspace := strings.TrimSpace(ref.Workspace)
-	if targetWorkspace == "" {
-		targetWorkspace = workspace
-	}
+	targetWorkspace = cmp.Or(targetWorkspace, workspace)
 	return component.Key{Workspace: targetWorkspace, Kind: kind, Name: name}, nil
 }
 

@@ -1,6 +1,7 @@
 package eventstream
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -120,9 +121,7 @@ func openRelayStream(ctx context.Context, base string, cursor *int64, handlers *
 	if err != nil {
 		if response != nil {
 			message := http.StatusText(response.StatusCode)
-			if message == "" {
-				message = "websocket handshake failed"
-			}
+			message = cmp.Or(message, "websocket handshake failed")
 			return nil, fmt.Errorf("eventstream: relay websocket handshake: %s", message)
 		}
 		return nil, fmt.Errorf("eventstream: relay websocket dial: %w", err)
@@ -170,9 +169,7 @@ func (s *relayEventStream) Next(ctx context.Context) (pdsclient.RepoEvent, error
 		}
 		if frame.Error != "" {
 			message := strings.TrimSpace(frame.Message)
-			if message == "" {
-				message = "relay stream error"
-			}
+			message = cmp.Or(message, "relay stream error")
 			return pdsclient.RepoEvent{}, fmt.Errorf("eventstream: relay %s: %s", frame.Error, message)
 		}
 		if frame.Type != "" && frame.Type != relayCommitType {

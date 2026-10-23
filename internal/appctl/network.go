@@ -1,6 +1,7 @@
 package appctl
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"net"
@@ -942,9 +943,7 @@ func (n *networks) suspendApp(ctx context.Context, app v1alpha1.NetworkApp) v1al
 		return out
 	}
 	out.Phase, out.Message, out.Did, out.Components, out.Listeners = rs.Phase, rs.Message, rs.Did, rs.Components, rs.Listeners
-	if out.Phase == "" {
-		out.Phase = v1alpha1.ApplicationPhasePending
-	}
+	out.Phase = cmp.Or(out.Phase, v1alpha1.ApplicationPhasePending)
 	return out
 }
 
@@ -1027,8 +1026,6 @@ func (n *networks) ensureApp(ctx context.Context, app v1alpha1.NetworkApp, value
 		return fail(fmt.Errorf("the root object of %s is not readable yet", c.id))
 	}
 	out.Phase, out.Message, out.Did, out.Components, out.Listeners = rs.Phase, rs.Message, rs.Did, rs.Components, rs.Listeners
-	if out.Phase == "" {
-		out.Phase = v1alpha1.ApplicationPhasePending
-	}
+	out.Phase = cmp.Or(out.Phase, v1alpha1.ApplicationPhasePending)
 	return out
 }

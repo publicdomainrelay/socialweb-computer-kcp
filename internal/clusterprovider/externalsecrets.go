@@ -1,6 +1,7 @@
 package clusterprovider
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -145,9 +146,7 @@ func prepareExternalSecrets(steps []procgroup.Step, cfg StackConfig, spec cluste
 	}
 	es := *cfg.ExternalSecrets
 	legacy := es.LegacyNamespace
-	if legacy == "" {
-		legacy = eso.DefaultControllerNamespace
-	}
+	legacy = cmp.Or(legacy, eso.DefaultControllerNamespace)
 	admin := es.Admin
 	if admin == nil {
 		admin = adminDynamicFromDataDir(cfg.StateDir)

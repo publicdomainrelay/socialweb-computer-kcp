@@ -1,6 +1,7 @@
 package credentials
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,6 +17,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/credentials/openbaosession"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/authretry"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
 )
@@ -88,12 +90,8 @@ func New(opts Options) (*Resolver, error) {
 	if source == nil {
 		return nil, ErrNoSource
 	}
-	if opts.Workspace == "" {
-		opts.Workspace = "root"
-	}
-	if opts.LoginFor <= 0 {
-		opts.LoginFor = DefaultLoginFor
-	}
+	opts.Workspace = cmp.Or(opts.Workspace, "root")
+	opts.LoginFor = opt.Positive(opts.LoginFor, DefaultLoginFor)
 	if opts.Open == nil {
 		opts.Open = func(ctx context.Context, srv openbaosession.Server) (Session, error) {
 			return openbaosession.Open(ctx, srv)
@@ -218,9 +216,7 @@ func (r *Resolver) target(ctx context.Context, ref component.CredentialRef) (str
 		return "", "", openbaosession.Server{}, errors.New("credentials: the credential ref has no path")
 	}
 	server := strings.TrimSpace(ref.Server)
-	if server == "" {
-		server = r.server
-	}
+	server = cmp.Or(server, r.server)
 	if server == "" {
 		return "", "", openbaosession.Server{}, openbaosession.ErrNoServer
 	}
@@ -229,12 +225,8 @@ func (r *Resolver) target(ctx context.Context, ref component.CredentialRef) (str
 	if err != nil {
 		return "", "", openbaosession.Server{}, err
 	}
-	if srv.Token == "" {
-		srv.Token = r.token
-	}
-	if srv.Timeout == 0 {
-		srv.Timeout = r.timeout
-	}
+	srv.Token = cmp.Or(srv.Token, r.token)
+	srv.Timeout = cmp.Or(srv.Timeout, r.timeout)
 	mount := strings.Trim(strings.TrimSpace(ref.Mount), "/")
 	if mount == "" || mount == "file" || mount == "file:" {
 		mount = strings.Trim(srv.KVMount, "/")

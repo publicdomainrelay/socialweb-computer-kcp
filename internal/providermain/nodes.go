@@ -1,6 +1,7 @@
 package providermain
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -400,9 +401,7 @@ func (n *tenantNodes) confirmHeld(ctx context.Context) (confirmOutcome, error) {
 		end := guestEnd(node.host)
 		if end.Message != "" && !end.Declined {
 			outcome.failed = append(outcome.failed, node.name)
-			if outcome.failedWords == "" {
-				outcome.failedWords = end.Message
-			}
+			outcome.failedWords = cmp.Or(outcome.failedWords, end.Message)
 			if end.Bidder != "" {
 				until := n.opts.now().Add(BidderDenyWindow)
 				n.opts.Denies.deny(n.cluster, end.Bidder, until)
@@ -428,9 +427,7 @@ func (n *tenantNodes) confirmHeld(ctx context.Context) (confirmOutcome, error) {
 			next := "the claim is released and the next pass may ask the market again"
 			if end.Declined {
 				outcome.declined = append(outcome.declined, node.name)
-				if outcome.declinedWords == "" {
-					outcome.declinedWords = end.Message
-				}
+				outcome.declinedWords = cmp.Or(outcome.declinedWords, end.Message)
 				next = "the claim is released, and the market asked for it and took no bid, so " +
 					"this cluster's next market provision waits out its back-off"
 			}

@@ -1,6 +1,7 @@
 package logcap
 
 import (
+	"cmp"
 	"context"
 	"io"
 	"log/slog"
@@ -72,9 +73,7 @@ func (c Config) paths() []string {
 
 func (c Config) Pass() []string {
 	capBytes := c.Cap
-	if capBytes == 0 {
-		capBytes = DefaultCap
-	}
+	capBytes = cmp.Or(capBytes, DefaultCap)
 	var rotated []string
 	for _, p := range c.paths() {
 		ok, err := Rotate(p, capBytes)
@@ -90,9 +89,7 @@ func (c Config) Pass() []string {
 
 func Keep(ctx context.Context, c Config) {
 	every := c.Every
-	if every == 0 {
-		every = DefaultEvery
-	}
+	every = cmp.Or(every, DefaultEvery)
 	t := time.NewTicker(every)
 	defer t.Stop()
 	for {

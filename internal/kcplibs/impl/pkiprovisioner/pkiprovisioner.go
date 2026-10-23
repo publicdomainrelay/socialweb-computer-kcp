@@ -1,6 +1,7 @@
 package pkiprovisioner
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/vault"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 )
 
@@ -56,27 +58,13 @@ func New(opts Options) (*Provisioner, error) {
 	if opts.Client == nil {
 		return nil, ErrNoClient
 	}
-	if opts.Mount == "" {
-		opts.Mount = vault.DefaultPKIMount
-	}
-	if opts.Role == "" {
-		opts.Role = vault.DefaultPKIRole
-	}
-	if opts.RootCommonName == "" {
-		opts.RootCommonName = vault.DefaultRootCommonName
-	}
-	if opts.RootTTL == "" {
-		opts.RootTTL = vault.DefaultRootTTL
-	}
-	if opts.IntermediateTTL == "" {
-		opts.IntermediateTTL = vault.DefaultIntermediateTTL
-	}
-	if opts.LeafTTL == "" {
-		opts.LeafTTL = vault.DefaultLeafTTL
-	}
-	if opts.AuthorityTTL <= 0 {
-		opts.AuthorityTTL = DefaultAuthorityTTL
-	}
+	opts.Mount = cmp.Or(opts.Mount, vault.DefaultPKIMount)
+	opts.Role = cmp.Or(opts.Role, vault.DefaultPKIRole)
+	opts.RootCommonName = cmp.Or(opts.RootCommonName, vault.DefaultRootCommonName)
+	opts.RootTTL = cmp.Or(opts.RootTTL, vault.DefaultRootTTL)
+	opts.IntermediateTTL = cmp.Or(opts.IntermediateTTL, vault.DefaultIntermediateTTL)
+	opts.LeafTTL = cmp.Or(opts.LeafTTL, vault.DefaultLeafTTL)
+	opts.AuthorityTTL = opt.Positive(opts.AuthorityTTL, DefaultAuthorityTTL)
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}

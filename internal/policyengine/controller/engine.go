@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/cache"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/deno"
@@ -89,15 +90,9 @@ type Engine struct {
 }
 
 func NewEngine(config Config) *Engine {
-	if config.Limits.MaxConcurrentRuns <= 0 {
-		config.Limits.MaxConcurrentRuns = 4
-	}
-	if config.Limits.QueueDepth <= 0 {
-		config.Limits.QueueDepth = 64
-	}
-	if config.Limits.MaxCacheEntries <= 0 {
-		config.Limits.MaxCacheEntries = 512
-	}
+	config.Limits.MaxConcurrentRuns = opt.Positive(config.Limits.MaxConcurrentRuns, 4)
+	config.Limits.QueueDepth = opt.Positive(config.Limits.QueueDepth, 64)
+	config.Limits.MaxCacheEntries = opt.Positive(config.Limits.MaxCacheEntries, 512)
 	if config.Limits.MaxCacheBytes < 0 {
 		config.Limits.MaxCacheBytes = 0
 	}

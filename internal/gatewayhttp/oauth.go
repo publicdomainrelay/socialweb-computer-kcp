@@ -1,6 +1,7 @@
 package gatewayhttp
 
 import (
+	"cmp"
 	"context"
 	"crypto/subtle"
 	"encoding/json"
@@ -17,6 +18,7 @@ import (
 	"unicode"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 const (
@@ -151,9 +153,7 @@ func NewRequestAuth(opts RequestAuthOptions) (*RequestAuth, error) {
 	if opts.SignIn == nil {
 		return nil, errors.New("gatewayhttp: request auth has no sign-in backend")
 	}
-	if opts.CookieName == "" {
-		opts.CookieName = WebSessionCookie
-	}
+	opts.CookieName = cmp.Or(opts.CookieName, WebSessionCookie)
 	log := opts.Log
 	if log == nil {
 		log = slog.Default()
@@ -259,21 +259,11 @@ func NewOAuth(opts OAuthOptions) (*OAuth, error) {
 	if opts.SignIn == nil {
 		return nil, errors.New("gatewayhttp: OAuth has no sign-in backend")
 	}
-	if opts.CookieName == "" {
-		opts.CookieName = WebSessionCookie
-	}
-	if opts.CookieMaxAge <= 0 {
-		opts.CookieMaxAge = DefaultCookieMaxAge
-	}
-	if opts.ClientMetadataPath == "" {
-		opts.ClientMetadataPath = "/oauth-client-metadata.json"
-	}
-	if opts.ClientMetadataCache <= 0 {
-		opts.ClientMetadataCache = DefaultClientMetadataCache
-	}
-	if opts.MaxBodyBytes <= 0 {
-		opts.MaxBodyBytes = DefaultMaxBodyBytes
-	}
+	opts.CookieName = cmp.Or(opts.CookieName, WebSessionCookie)
+	opts.CookieMaxAge = opt.Positive(opts.CookieMaxAge, DefaultCookieMaxAge)
+	opts.ClientMetadataPath = cmp.Or(opts.ClientMetadataPath, "/oauth-client-metadata.json")
+	opts.ClientMetadataCache = opt.Positive(opts.ClientMetadataCache, DefaultClientMetadataCache)
+	opts.MaxBodyBytes = opt.Positive(opts.MaxBodyBytes, DefaultMaxBodyBytes)
 	publicOrigin := strings.TrimRight(opts.PublicOrigin, "/")
 	log := opts.Log
 	if log == nil {
@@ -516,9 +506,7 @@ func (o *OAuth) callback(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	if denied := query.Get("error"); denied != "" {
 		description := query.Get("error_description")
-		if description == "" {
-			description = denied
-		}
+		description = cmp.Or(description, denied)
 		o.finish(w, r, http.StatusUnauthorized, nil, description)
 		return
 	}

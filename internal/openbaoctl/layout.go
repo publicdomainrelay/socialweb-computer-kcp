@@ -1,6 +1,7 @@
 package openbaoctl
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -176,9 +177,7 @@ func desired(ctx context.Context, in layoutInput, ca caSource) (baosync.Desired,
 	}
 	kvConfig := func(mount string) baosync.Object {
 		n := maxVersions[mount]
-		if n == 0 {
-			n = DefaultKVMaxVersions
-		}
+		n = cmp.Or(n, DefaultKVMaxVersions)
 		return baosync.Object{Path: mount + "/config", Data: map[string]any{"max_versions": int(n)}}
 	}
 	d.Objects = append(d.Objects, kvConfig(KVMount))

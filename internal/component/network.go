@@ -1,6 +1,7 @@
 package component
 
 import (
+	"cmp"
 	"fmt"
 	"maps"
 	"net"
@@ -42,13 +43,9 @@ type NetworkHostOptions struct {
 
 func BuildNetworkHosts(entries []Entry, opts NetworkHostOptions) []NetworkHost {
 	domain := strings.TrimSpace(opts.Domain)
-	if domain == "" {
-		domain = kcp.DefaultServiceDomain
-	}
+	domain = cmp.Or(domain, kcp.DefaultServiceDomain)
 	namespace := strings.TrimSpace(opts.Namespace)
-	if namespace == "" {
-		namespace = "default"
-	}
+	namespace = cmp.Or(namespace, "default")
 	out := make([]NetworkHost, 0, len(entries))
 	for _, entry := range entries {
 		primary, ok := PrimaryEndpoint(entry.Endpoints)

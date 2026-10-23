@@ -11,6 +11,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap/table"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 type Placed struct {
@@ -114,9 +115,7 @@ func StartLayer(ctx context.Context, m hostsvc.Manager, p Params) ([]Placed, err
 		}
 	}
 	timeout := p.ReadyTimeout
-	if timeout <= 0 {
-		timeout = DefaultReadyTimeout
-	}
+	timeout = opt.Positive(timeout, DefaultReadyTimeout)
 	rctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	var out []Placed

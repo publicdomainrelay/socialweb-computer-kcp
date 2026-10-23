@@ -2,6 +2,7 @@ package controller
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -14,7 +15,7 @@ import (
 	policyv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/policy/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/atproto"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/bundled-actions"
+	bundledactions "github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/bundled-actions"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/models"
 	policyengine "github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/status"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/trust"
@@ -143,12 +144,8 @@ func (r *RunReconciler) buildInputs(ctx context.Context, run *policyv1alpha1.Pol
 			inputs[key] = value
 		}
 		maps.Copy(defaultArgs, workflowCR.Spec.DefaultArgs)
-		if selfDid == "" {
-			selfDid = workflowCR.Spec.DefaultSelfDid
-		}
-		if perspective == "" {
-			perspective = workflowCR.Spec.DefaultPerspective
-		}
+		selfDid = cmp.Or(selfDid, workflowCR.Spec.DefaultSelfDid)
+		perspective = cmp.Or(perspective, workflowCR.Spec.DefaultPerspective)
 	}
 	args := make(map[string]string, len(defaultArgs)+len(run.Spec.Args))
 	maps.Copy(args, defaultArgs)
@@ -175,9 +172,7 @@ func (r *RunReconciler) buildInputs(ctx context.Context, run *policyv1alpha1.Pol
 			}
 		}
 	}
-	if subjectDid == "" {
-		subjectDid = counterpartyDid
-	}
+	subjectDid = cmp.Or(subjectDid, counterpartyDid)
 	if rootRequesterDid == "" {
 		if perspective == perspectiveRequester {
 			rootRequesterDid = selfDid
@@ -270,9 +265,7 @@ func (r *RunReconciler) requestContext(ctx context.Context, run *policyv1alpha1.
 	if workflowCR != nil && workflowCR.Spec.RecordRef != nil {
 		repository = atproto.RepoFromURI(workflowCR.Spec.RecordRef.URI)
 	}
-	if repository == "" {
-		repository = selfDid
-	}
+	repository = cmp.Or(repository, selfDid)
 	if repository != "" {
 		env["GITHUB_REPOSITORY"] = repository
 	}

@@ -1,6 +1,7 @@
 package ports
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -93,9 +94,7 @@ func Open(opts Options) (*Registry, error) {
 		return nil, fmt.Errorf("ports: the port registry range %d-%d is empty", opts.First, opts.Last)
 	}
 	host := strings.TrimSpace(opts.Host)
-	if host == "" {
-		host = DefaultPortHost
-	}
+	host = cmp.Or(host, DefaultPortHost)
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		return nil, fmt.Errorf("ports: creating the port registry state dir: %w", err)
 	}
@@ -252,9 +251,7 @@ func (r *Registry) load() error {
 		case ports[lease.Port] != "":
 			return fmt.Errorf("ports: the port registry %s gives the port %d to %s and %s", r.path, lease.Port, ports[lease.Port], lease.Name)
 		}
-		if lease.Host == "" {
-			lease.Host = r.host
-		}
+		lease.Host = cmp.Or(lease.Host, r.host)
 		names[lease.Name] = true
 		ports[lease.Port] = lease.Name
 		r.leases[lease.Name] = lease

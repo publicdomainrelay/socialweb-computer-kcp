@@ -21,6 +21,7 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/irohdial"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 const (
@@ -87,9 +88,7 @@ func (d UnixSocketDialer) Dial(ctx context.Context, target string) (net.Conn, er
 		return nil, &NonIrohGuestAddressError{Target: target}
 	}
 	timeout := d.Timeout
-	if timeout <= 0 {
-		timeout = DefaultGuestConnectTimeout
-	}
+	timeout = opt.Positive(timeout, DefaultGuestConnectTimeout)
 	dialer := net.Dialer{Timeout: timeout}
 	conn, err := dialer.DialContext(ctx, "unix", d.Socket)
 	if err != nil {

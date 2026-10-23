@@ -2,6 +2,7 @@ package openbaoctl
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -105,9 +106,7 @@ func New(c Config) (*Controller, error) {
 		return nil, err
 	}
 	ws := c.Workspace
-	if ws == "" {
-		ws = hostprocess.DefaultWorkspace
-	}
+	ws = cmp.Or(ws, hostprocess.DefaultWorkspace)
 	cfg := rest.CopyConfig(restCfg)
 	cfg.Host = strings.TrimSuffix(cfg.Host, "/") + "/clusters/" + ws
 	dc, err := dynamic.NewForConfig(cfg)
@@ -165,9 +164,7 @@ const MemoryMax = 512 << 20
 
 func (c *Controller) childSpec(o v1alpha1.OpenBaoServer, dir, key string) v1alpha1.HostProcessSpec {
 	rp := o.Spec.RestartPolicy
-	if rp == "" {
-		rp = v1alpha1.HostProcessRestartOnFailure
-	}
+	rp = cmp.Or(rp, v1alpha1.HostProcessRestartOnFailure)
 	spec := v1alpha1.HostProcessSpec{Unit: c.unit(o), Exec: o.Spec.Exec, Argv: []string{"server", "-config", rootvault.ConfigPath(dir)},
 		WorkDir: rootvault.Dir(dir), RestartPolicy: rp, Stop: &v1alpha1.HostProcessStop{Signal: "SIGTERM", GraceSeconds: 15},
 		Placement: v1alpha1.HostProcessPlacementSupervisor, Slice: o.Spec.Slice, RestartKey: key,
@@ -377,9 +374,7 @@ func ensurePKIRoots(ctx context.Context, c *openbao.Client, d *v1alpha1.OpenBaoS
 			return false, err
 		}
 		ttl := strings.TrimSpace(m.MaxLeaseTTL)
-		if ttl == "" {
-			ttl = defaultPKIRootTTL
-		}
+		ttl = cmp.Or(ttl, defaultPKIRootTTL)
 		if _, err := c.GeneratePKIRoot(ctx, m.Path, defaultPKIRootCommonName, ttl); err != nil {
 			return false, fmt.Errorf("generating the pki root under %s: %w", m.Path, err)
 		}
@@ -495,12 +490,8 @@ func (c *Controller) reconcile(ctx context.Context, o v1alpha1.OpenBaoServer) v1
 		return st
 	}
 	shares, threshold := int(o.Spec.Init.Shares), int(o.Spec.Init.Threshold)
-	if shares == 0 {
-		shares = DefaultShares
-	}
-	if threshold == 0 {
-		threshold = DefaultThreshold
-	}
+	shares = cmp.Or(shares, DefaultShares)
+	threshold = cmp.Or(threshold, DefaultThreshold)
 	if threshold > shares {
 		return fail("init.threshold %d is over init.shares %d", threshold, shares)
 	}
@@ -508,9 +499,7 @@ func (c *Controller) reconcile(ctx context.Context, o v1alpha1.OpenBaoServer) v1
 		return fail("name the bao executable: spec.asset (name bao) or spec.exec (an absolute path)")
 	}
 	listen := o.Spec.Listen
-	if listen == "" {
-		listen = DefaultListen
-	}
+	listen = cmp.Or(listen, DefaultListen)
 	if err := checkClients(o.Spec.Clients, o.Spec.Declared); err != nil {
 		return fail("spec.clients: %v", err)
 	}
@@ -779,9 +768,7 @@ func (c *Controller) Pass(ctx context.Context) error {
 
 func (c *Controller) Run(ctx context.Context) error {
 	interval := c.c.Interval
-	if interval == 0 {
-		interval = DefaultInterval
-	}
+	interval = cmp.Or(interval, DefaultInterval)
 	c.c.log().Info("the OpenBaoServer controller runs in the core", "workspace", c.c.Workspace, "stateDir", c.c.StateDir)
 	t := time.NewTicker(interval)
 	defer t.Stop()

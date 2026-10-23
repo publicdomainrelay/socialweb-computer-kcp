@@ -1,6 +1,7 @@
 package exposure
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -20,6 +21,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 const (
@@ -137,9 +139,7 @@ func NewLinkController(opts LinkOptions) (*LinkController, error) {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	if opts.RetryAfter <= 0 {
-		opts.RetryAfter = DefaultRetryAfter
-	}
+	opts.RetryAfter = opt.Positive(opts.RetryAfter, DefaultRetryAfter)
 	return &LinkController{
 		workspace: workspace,
 		dynamic:   opts.Dynamic,
@@ -225,9 +225,7 @@ func (c *LinkController) targetRegistered(to commonv1.ObjectRef) bool {
 func linkTarget(workspace string, to commonv1.ObjectRef) commonv1.ObjectRef {
 	out := commonv1.ObjectRef{Group: strings.TrimSpace(to.Group), Kind: strings.TrimSpace(to.Kind), Name: strings.TrimSpace(to.Name),
 		Workspace: strings.TrimSpace(to.Workspace)}
-	if out.Workspace == "" {
-		out.Workspace = workspace
-	}
+	out.Workspace = cmp.Or(out.Workspace, workspace)
 	return out
 }
 
@@ -289,9 +287,7 @@ func compileFrom(workspace string, from exposurev1alpha1.ComponentLinkFrom) (bus
 			return bus.LinkFrom{}, fmt.Errorf("the ComponentLink from selector: %w", err)
 		}
 		ws := strings.TrimSpace(sel.Workspace)
-		if ws == "" {
-			ws = workspace
-		}
+		ws = cmp.Or(ws, workspace)
 		return bus.LinkFrom{Group: strings.TrimSpace(sel.Group), Kind: strings.TrimSpace(sel.Kind), Workspace: ws, Selector: selector}, nil
 	default:
 		return bus.LinkFrom{}, errors.New("the ComponentLink from needs a ref or a selector")

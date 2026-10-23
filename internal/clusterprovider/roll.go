@@ -2,6 +2,7 @@ package clusterprovider
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -25,6 +26,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterstack"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/sha256sum"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/materialiser"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/portallocator"
@@ -183,9 +185,7 @@ func (r *Roller) log() *slog.Logger {
 
 func (r *Roller) Run(ctx context.Context) {
 	every := r.Interval
-	if every <= 0 {
-		every = DefaultRollInterval
-	}
+	every = opt.Positive(every, DefaultRollInterval)
 	t := time.NewTicker(every)
 	defer t.Stop()
 	for {
@@ -739,9 +739,7 @@ func (r *Roller) RollLink(ctx context.Context, key string, req RollRequest) (rep
 		return fail(err)
 	}
 	dumbpipe := req.Dumbpipe
-	if dumbpipe == "" {
-		dumbpipe = cur.Dumbpipe
-	}
+	dumbpipe = cmp.Or(dumbpipe, cur.Dumbpipe)
 	next := LinkRecord{Slot: to, Dumbpipe: dumbpipe}
 	cfg := r.Stack
 	prev := cfg.LinkSlot

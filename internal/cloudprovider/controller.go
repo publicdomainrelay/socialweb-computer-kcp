@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -85,9 +86,7 @@ func New(o Options, client kubernetes.Interface) (*Controller, error) {
 		log = func(string, map[string]any) {}
 	}
 	resync := o.Resync
-	if resync <= 0 {
-		resync = DefaultResync
-	}
+	resync = opt.Positive(resync, DefaultResync)
 
 	lw := &cache.ListWatch{
 		ListWithContextFunc: func(ctx context.Context, opts metav1.ListOptions) (runtime.Object, error) {

@@ -3,6 +3,7 @@
 package hostsvc
 
 import (
+	"cmp"
 	"context"
 	"encoding/hex"
 	"errors"
@@ -206,17 +207,11 @@ type envFile struct {
 
 func unitProperties(spec UnitSpec) []sd.Property {
 	desc := spec.Description
-	if desc == "" {
-		desc = spec.Name
-	}
+	desc = cmp.Or(desc, spec.Name)
 	slice := spec.Slice
-	if slice == "" {
-		slice = DefaultSlice
-	}
+	slice = cmp.Or(slice, DefaultSlice)
 	oom := spec.OOMPolicy
-	if oom == "" {
-		oom = "stop"
-	}
+	oom = cmp.Or(oom, "stop")
 	str := func(name, v string) sd.Property { return sd.Property{Name: name, Value: dbus.MakeVariant(v)} }
 	u64 := func(name string, v uint64) sd.Property { return sd.Property{Name: name, Value: dbus.MakeVariant(v)} }
 	props := []sd.Property{
@@ -229,9 +224,7 @@ func unitProperties(spec UnitSpec) []sd.Property {
 		sd.PropSlice(slice),
 	}
 	restart := spec.Restart
-	if restart == "" {
-		restart = RestartNo
-	}
+	restart = cmp.Or(restart, RestartNo)
 	props = append(props, str("Restart", string(restart)))
 	if spec.KillSignal != 0 {
 		props = append(props, sd.Property{Name: "KillSignal", Value: dbus.MakeVariant(int32(spec.KillSignal))})
@@ -558,9 +551,7 @@ func (m *systemd) Identify(ctx context.Context, name string, pid int) (Identity,
 	if st.State != Active {
 		return Identity{}, fmt.Errorf("hostsvc: %s is %s, not active, and has no identity to record", name, st.State)
 	}
-	if pid == 0 {
-		pid = st.MainPID
-	}
+	pid = cmp.Or(pid, st.MainPID)
 	boot, err := m.procs.BootID()
 	if err != nil {
 		return Identity{}, err

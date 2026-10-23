@@ -19,6 +19,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauthclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -571,9 +572,7 @@ func (c *Controller) newQrState(id *v1alpha1.MarketIdentity) (*qrTransfer, error
 		return nil, err
 	}
 	transfer.HTTPClient = c.oauthHTTP()
-	if transfer.TTL <= 0 {
-		transfer.TTL = oauthclient.DefaultQRTTL
-	}
+	transfer.TTL = opt.Positive(transfer.TTL, oauthclient.DefaultQRTTL)
 	url, err := transfer.URL()
 	if err != nil {
 		return nil, err

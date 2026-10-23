@@ -1,6 +1,7 @@
 package networkdial
 
 import (
+	"cmp"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
@@ -19,9 +20,7 @@ func NewTLSConfig(opts TLSConfigOptions) (*tls.Config, error) {
 		Certificates: append([]tls.Certificate(nil), opts.Certificates...),
 		MinVersion:   opts.MinVersion,
 	}
-	if cfg.MinVersion == 0 {
-		cfg.MinVersion = tls.VersionTLS12
-	}
+	cfg.MinVersion = cmp.Or(cfg.MinVersion, tls.VersionTLS12)
 	if len(opts.CABundle) > 0 {
 		pool := x509.NewCertPool()
 		if !pool.AppendCertsFromPEM(opts.CABundle) {

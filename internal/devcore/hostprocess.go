@@ -1,6 +1,7 @@
 package devcore
 
 import (
+	"cmp"
 	"fmt"
 	"log/slog"
 	"os"
@@ -56,9 +57,7 @@ func Mirrors(bcfg bootstrap.Config, l devinstance.Layout) []hostprocess.Mirror {
 func HostProcessConfig(bcfg bootstrap.Config, rec devinstance.Record, m hostsvc.Manager, log *slog.Logger) hostprocess.Config {
 	l := bcfg.Layout
 	ws := rec.BaseWorkspace
-	if ws == "" {
-		ws = hostprocess.DefaultWorkspace
-	}
+	ws = cmp.Or(ws, hostprocess.DefaultWorkspace)
 	return hostprocess.Config{Kubeconfig: rec.AdminKubeconfig, Workspace: ws, Manager: m, Prefix: l.Names().HostProcessPrefix(),
 		Resolve: func(a v1alpha1.HostProcessAsset) (string, error) {
 			if e, ok := rec.Executables[a.Name]; ok && e.Path != "" {
@@ -73,9 +72,7 @@ func HostProcessConfig(bcfg bootstrap.Config, rec devinstance.Record, m hostsvc.
 func PostgresConfig(bcfg bootstrap.Config, rec devinstance.Record, log *slog.Logger) postgresctl.Config {
 	l := bcfg.Layout
 	ws := rec.BaseWorkspace
-	if ws == "" {
-		ws = hostprocess.DefaultWorkspace
-	}
+	ws = cmp.Or(ws, hostprocess.DefaultWorkspace)
 	root := rec.Executables["postgres"].Path
 	return postgresctl.Config{Kubeconfig: rec.AdminKubeconfig, Workspace: ws, Prefix: l.Names().HostProcessPrefix(),
 		Install: func() (pgunit.Install, error) {

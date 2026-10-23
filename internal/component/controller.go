@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"k8s.io/apimachinery/pkg/types"
 )
 
@@ -73,15 +74,9 @@ func NewController(cfg ControllerConfig) (*Controller, error) {
 	if cfg.Log == nil {
 		cfg.Log = slog.New(slog.DiscardHandler)
 	}
-	if cfg.Workers <= 0 {
-		cfg.Workers = 1
-	}
-	if cfg.Resync <= 0 {
-		cfg.Resync = DefaultResync
-	}
-	if cfg.QueueSize <= 0 {
-		cfg.QueueSize = DefaultQueueSize
-	}
+	cfg.Workers = opt.Positive(cfg.Workers, 1)
+	cfg.Resync = opt.Positive(cfg.Resync, DefaultResync)
+	cfg.QueueSize = opt.Positive(cfg.QueueSize, DefaultQueueSize)
 	c := &Controller{
 		runtime: cfg.Runtime,
 		source:  cfg.Source,

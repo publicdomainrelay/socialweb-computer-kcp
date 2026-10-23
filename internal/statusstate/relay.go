@@ -1,6 +1,7 @@
 package statusstate
 
 import (
+	"cmp"
 	"context"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -37,9 +38,7 @@ func (c *Controller) reconcileRelay(ctx context.Context, dyn dynamic.Interface, 
 		return
 	}
 	status.Phase = observation.Phase
-	if status.Phase == "" {
-		status.Phase = v1alpha1.RelayStatusPhasePending
-	}
+	status.Phase = cmp.Or(status.Phase, v1alpha1.RelayStatusPhasePending)
 	status.Cursor = nonNegativeInt64(observation.Cursor)
 	status.LastEventAt = observation.LastEventAt
 	status.Events = nonNegativeInt64(observation.Events)

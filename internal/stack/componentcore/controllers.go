@@ -1,6 +1,7 @@
 package componentcore
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -491,9 +492,7 @@ func (c *Core) startControllers(ctx context.Context) func() {
 func (c *Core) relayEndpoint(base string) statusstate.RelayEndpointFunc {
 	return func(ref string) (string, bool) {
 		ref = strings.TrimSpace(ref)
-		if ref == "" {
-			ref = appctl.ComponentKindRelay + "/" + appctl.NetworkRelayName
-		}
+		ref = cmp.Or(ref, appctl.ComponentKindRelay+"/"+appctl.NetworkRelayName)
 		if strings.Contains(ref, "://") {
 			return ref, true
 		}
@@ -502,12 +501,8 @@ func (c *Core) relayEndpoint(base string) statusstate.RelayEndpointFunc {
 			kind, name = before, after
 		}
 		kind, name = strings.TrimSpace(kind), strings.TrimSpace(name)
-		if kind == "" {
-			kind = appctl.ComponentKindRelay
-		}
-		if name == "" {
-			name = appctl.NetworkRelayName
-		}
+		kind = cmp.Or(kind, appctl.ComponentKindRelay)
+		name = cmp.Or(name, appctl.NetworkRelayName)
 		if endpoint, ok := c.registry.Endpoint(base, kind, name, "http"); ok {
 			if endpoint.URL != "" {
 				return endpoint.URL, true

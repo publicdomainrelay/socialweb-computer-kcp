@@ -15,6 +15,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/apiserverfront"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 const (
@@ -98,21 +99,11 @@ type RollReport struct {
 }
 
 func (c *RollConfig) defaults() {
-	if c.Poll <= 0 {
-		c.Poll = DefaultRollPoll
-	}
-	if c.ReadyTimeout <= 0 {
-		c.ReadyTimeout = DefaultRollReadyTimeout
-	}
-	if c.LeaseTimeout <= 0 {
-		c.LeaseTimeout = DefaultLeaseTimeout
-	}
-	if c.ProbeTimeout <= 0 {
-		c.ProbeTimeout = DefaultProbeTimeout
-	}
-	if c.DrainTimeout <= 0 {
-		c.DrainTimeout = DefaultDrainTimeout
-	}
+	c.Poll = opt.Positive(c.Poll, DefaultRollPoll)
+	c.ReadyTimeout = opt.Positive(c.ReadyTimeout, DefaultRollReadyTimeout)
+	c.LeaseTimeout = opt.Positive(c.LeaseTimeout, DefaultLeaseTimeout)
+	c.ProbeTimeout = opt.Positive(c.ProbeTimeout, DefaultProbeTimeout)
+	c.DrainTimeout = opt.Positive(c.DrainTimeout, DefaultDrainTimeout)
 	if c.ListenPort == nil {
 		c.ListenPort = func(ctx context.Context, pid int) (int, error) { return hostsvc.WaitListenPort(ctx, pid, PortPoll) }
 	}

@@ -1,6 +1,7 @@
 package denospec
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"strings"
@@ -157,17 +158,13 @@ func ProbeCommand(runtime, shim, probe, name, path string, allowEnv []string) []
 }
 
 func ProbeCommandReading(runtime, shim, probe, name, path string, allowEnv, allowRead []string) []string {
-	if runtime == "" {
-		runtime = "deno"
-	}
+	runtime = cmp.Or(runtime, "deno")
 	args := []string{runtime, "run", "--allow-env=" + strings.Join(allowEnv, ","), "--allow-net"}
 	if len(allowRead) > 0 {
 		args = append(args, "--allow-read="+strings.Join(allowRead, ","))
 	}
 	args = append(args, "--preload", shim, probe, name)
-	if path == "" {
-		path = "/"
-	}
+	path = cmp.Or(path, "/")
 	return append(args, path)
 }
 

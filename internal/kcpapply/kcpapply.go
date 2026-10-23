@@ -1,6 +1,7 @@
 package kcpapply
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -26,6 +27,7 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 )
 
@@ -147,12 +149,8 @@ func New(cfg *rest.Config, o Options) (*Applier, error) {
 	if base.QPS == 0 {
 		base.QPS, base.Burst = 50, 100
 	}
-	if o.WaitTimeout <= 0 {
-		o.WaitTimeout = DefaultWaitTimeout
-	}
-	if o.Poll <= 0 {
-		o.Poll = DefaultPoll
-	}
+	o.WaitTimeout = opt.Positive(o.WaitTimeout, DefaultWaitTimeout)
+	o.Poll = opt.Positive(o.Poll, DefaultPoll)
 	if o.Log == nil {
 		o.Log = slog.New(slog.DiscardHandler)
 	}
@@ -166,9 +164,7 @@ func (a *Applier) ForWorkspace(path string) *rest.Config {
 }
 
 func (a *Applier) Apply(ctx context.Context, set manifests.Set, values any) (Report, error) {
-	if set.Base == "" {
-		set.Base = a.opts.Base
-	}
+	set.Base = cmp.Or(set.Base, a.opts.Base)
 	rep := Report{DryRun: a.opts.DryRun}
 	if set.BaseCluster == "" && set.Scope != manifests.ScopeKcp && set.Base != "" && set.Base != "root" {
 		id, err := a.ClusterOf(ctx, set.Base)
@@ -265,9 +261,7 @@ func (a *Applier) ApplyObjects(ctx context.Context, workspace string, objs []man
 		ns := ""
 		if m.namespaced {
 			ns = u.GetNamespace()
-			if ns == "" {
-				ns = defaultNamespace
-			}
+			ns = cmp.Or(ns, defaultNamespace)
 			ri = dyn.Resource(m.resource).Namespace(ns)
 		}
 		c, err := a.applyOne(ctx, ri, u)

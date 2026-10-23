@@ -1,6 +1,7 @@
 package componentcore
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -69,9 +70,7 @@ func (i *ExposureIngressIdentity) signer(workspace, name string) (*exposureIngre
 	if i == nil || i.stateDir == "" {
 		return nil, errors.New("componentcore: the exposure ingress identity has no state dir")
 	}
-	if workspace == "" {
-		workspace = DefaultWorkspace
-	}
+	workspace = cmp.Or(workspace, DefaultWorkspace)
 	key := workspace + "/" + name
 	i.mu.Lock()
 	defer i.mu.Unlock()

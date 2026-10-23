@@ -15,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/scale"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
@@ -121,12 +122,8 @@ func New(opts Options) (*Host, error) {
 }
 
 func (o Options) withDefaults() Options {
-	if o.ReleaseTimeout <= 0 {
-		o.ReleaseTimeout = DefaultReleaseTimeout
-	}
-	if o.Poll <= 0 {
-		o.Poll = DefaultPoll
-	}
+	o.ReleaseTimeout = opt.Positive(o.ReleaseTimeout, DefaultReleaseTimeout)
+	o.Poll = opt.Positive(o.Poll, DefaultPoll)
 	return o
 }
 

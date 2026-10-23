@@ -1,6 +1,7 @@
 package vaultaccess
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -80,9 +81,7 @@ func newRemoteSession(target Target, result loginResult, login func(context.Cont
 }
 
 func (s *remoteSession) apply(result loginResult) {
-	if result.token == "" {
-		result.token = s.token
-	}
+	result.token = cmp.Or(result.token, s.token)
 	s.token = result.token
 	s.lease = result.lease
 	s.renewable = result.renewable

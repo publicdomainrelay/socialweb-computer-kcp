@@ -10,12 +10,14 @@ import (
 	"path/filepath"
 	"time"
 
+	"strings"
+
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/apiserverfront"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpdatastore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/versions"
-	"strings"
 )
 
 type InstalledRoll struct {
@@ -121,9 +123,7 @@ func RollInstalled(ctx context.Context, m hostsvc.Manager, p Params, o Installed
 		return retarget(p.KinePath, kine)
 	}
 	timeout := o.ReadyTimeout
-	if timeout <= 0 {
-		timeout = DefaultReadyTimeout
-	}
+	timeout = opt.Positive(timeout, DefaultReadyTimeout)
 	start := func(ctx context.Context, slot string, spec hostsvc.UnitSpec) (hostsvc.UnitStatus, error) {
 		if (kcpChanged || kineChanged) && !retargeted && !aborted {
 			if err := point(out.KcpTo.Path, out.KineTo); err != nil {

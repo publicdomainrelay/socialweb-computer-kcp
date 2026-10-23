@@ -1,6 +1,7 @@
 package appctl
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestnet"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/jsonx"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
@@ -89,9 +91,7 @@ func RootVaultDeclared() *v1alpha1.OpenBaoServerDeclared {
 		sm := v1alpha1.OpenBaoSecretMount{Path: strings.Trim(m.Path, "/"), Type: string(m.Kind)}
 		if m.Kind == vaultlayout.MountPKI {
 			ttl := m.MaxLeaseTTL
-			if ttl <= 0 {
-				ttl = rootVaultPKIMaxTTL
-			}
+			ttl = opt.Positive(ttl, rootVaultPKIMaxTTL)
 			sm.MaxLeaseTTL = ttl.String()
 		}
 		d.SecretMounts = append(d.SecretMounts, sm)
@@ -272,9 +272,7 @@ func (ctl *Controller) gatewayDesired(ctx context.Context, o v1alpha1.Gateway, p
 	}
 	publicOrigin := optionValue(o.Spec.Options, publicOriginOption)
 	audience := optionValue(o.Spec.Options, GatewayAudienceOption)
-	if audience == "" {
-		audience = ident.Did
-	}
+	audience = cmp.Or(audience, ident.Did)
 	postSignInURL := optionValue(o.Spec.Options, GatewayPostSignInOption)
 	if postSignInURL == "" && publicOrigin != "" {
 		postSignInURL = strings.TrimRight(publicOrigin, "/") + "/"

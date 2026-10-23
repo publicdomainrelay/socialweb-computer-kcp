@@ -1,6 +1,7 @@
 package providermain
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -215,33 +216,19 @@ func loadFor(get func(string) string, inv foldmain.Invocation) (Config, error) {
 		ScaleMaxNodes:          scale.DefaultMaxNodes,
 		ScalePodsPerNode:       scale.DefaultPodsPerNode,
 	}
-	if cfg.GrantPath == "" {
-		cfg.GrantPath = DefaultGrantPath
-	}
-	if cfg.UnitPrefix == "" {
-		cfg.UnitPrefix = DefaultUnitPrefix
-	}
-	if cfg.HostProcessWorkspace == "" {
-		cfg.HostProcessWorkspace = hostprocess.DefaultWorkspace
-	}
-	if cfg.MountContext == "" {
-		cfg.MountContext = kcpclient.ShardAdminContext
-	}
+	cfg.GrantPath = cmp.Or(cfg.GrantPath, DefaultGrantPath)
+	cfg.UnitPrefix = cmp.Or(cfg.UnitPrefix, DefaultUnitPrefix)
+	cfg.HostProcessWorkspace = cmp.Or(cfg.HostProcessWorkspace, hostprocess.DefaultWorkspace)
+	cfg.MountContext = cmp.Or(cfg.MountContext, kcpclient.ShardAdminContext)
 	cfg.CloudControllerManagerExec = inv.Reexec("internal", "cloud-controller-manager")
 	cfg.FrontExec = inv.Reexec("internal", "apiserver-front")
 	cfg.HostnameExec = inv.Reexec("internal", "ns-exec")
 	if cfg.CloudControllerManager != "" {
 		cfg.CloudControllerManagerExec = []string{cfg.CloudControllerManager}
 	}
-	if cfg.ESOManifestDir == "" {
-		cfg.ESOManifestDir = DefaultESOManifestDir
-	}
-	if cfg.ESONamespace == "" {
-		cfg.ESONamespace = eso.DefaultControllerNamespace
-	}
-	if cfg.MarketAdvertiseAddress == "" {
-		cfg.MarketAdvertiseAddress = portallocator.MarketAdvertiseAddress
-	}
+	cfg.ESOManifestDir = cmp.Or(cfg.ESOManifestDir, DefaultESOManifestDir)
+	cfg.ESONamespace = cmp.Or(cfg.ESONamespace, eso.DefaultControllerNamespace)
+	cfg.MarketAdvertiseAddress = cmp.Or(cfg.MarketAdvertiseAddress, portallocator.MarketAdvertiseAddress)
 	cfg.MarketDenyBidderDids = splitList(get(envMarketDenyBidderDids))
 	switch {
 	case cfg.StoreEndpoint != "" && cfg.Datastore != "" && cfg.StoreEndpoint != cfg.Datastore:
@@ -262,9 +249,7 @@ func loadFor(get func(string) string, inv foldmain.Invocation) (Config, error) {
 		if d < 0 {
 			return Config{}, fmt.Errorf("%s must not be negative", envScaleHold)
 		}
-		if d == 0 {
-			d = scale.NoHold
-		}
+		d = cmp.Or(d, scale.NoHold)
 		cfg.ScaleHold = d
 	}
 

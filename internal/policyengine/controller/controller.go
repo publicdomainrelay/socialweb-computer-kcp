@@ -2,6 +2,7 @@ package controller
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -18,6 +19,7 @@ import (
 
 	policyv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/policy/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/policyrun"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/models"
 	policyengine "github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/status"
@@ -91,9 +93,7 @@ func NewController(cfg ControllerConfig) (*Controller, error) {
 	if cfg.Log == nil {
 		cfg.Log = slog.New(slog.DiscardHandler)
 	}
-	if cfg.PollInterval <= 0 {
-		cfg.PollInterval = DefaultPollInterval
-	}
+	cfg.PollInterval = opt.Positive(cfg.PollInterval, DefaultPollInterval)
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
@@ -365,9 +365,7 @@ func (c *Controller) finalizeRun(runCtx context.Context, key string, handle *act
 		cancelled := RunStatusFromOutcome(cancelledOutcome(current, policyengine.ConditionCancelled, "Cancelled", "the run was cancelled"))
 		status = preserveResult(cancelled, status)
 	}
-	if status.RunID == "" {
-		status.RunID = current.Status.RunID
-	}
+	status.RunID = cmp.Or(status.RunID, current.Status.RunID)
 	if status.StartTime == nil {
 		status.StartTime = current.Status.StartTime
 	}

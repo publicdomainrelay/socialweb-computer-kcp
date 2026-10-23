@@ -1,6 +1,7 @@
 package gatewaykcp
 
 import (
+	"cmp"
 	"fmt"
 	"os"
 	"slices"
@@ -103,15 +104,11 @@ func Spec(s v1alpha1.GatewaySpec, profile string, environ []string) v1alpha1.Gat
 	if n.PLCDirectoryURL == "" {
 		n.PLCDirectoryURL = e.get("SOCIALWEB_GATEWAY_PLC_URL")
 	}
-	if n.PLCDirectoryURL == "" {
-		n.PLCDirectoryURL = DefaultPLC
-	}
+	n.PLCDirectoryURL = cmp.Or(n.PLCDirectoryURL, DefaultPLC)
 	if n.IngressProxyHost == "" {
 		n.IngressProxyHost = e.get("SOCIALWEB_GATEWAY_INGRESS_PROXY_HOST")
 	}
-	if n.IngressProxyHost == "" {
-		n.IngressProxyHost = DefaultIngress
-	}
+	n.IngressProxyHost = cmp.Or(n.IngressProxyHost, DefaultIngress)
 	if n.RelayURLs == nil {
 		n.RelayURLs = []string{}
 	}

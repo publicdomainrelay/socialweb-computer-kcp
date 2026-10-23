@@ -1,6 +1,7 @@
 package componentcore
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -151,9 +152,7 @@ type Core struct {
 
 func AppWorkspaces(base string) []string {
 	base = strings.TrimSpace(base)
-	if base == "" {
-		base = DefaultWorkspace
-	}
+	base = cmp.Or(base, DefaultWorkspace)
 	out := []string{base}
 	app := base + ":" + ComponentWorkspace
 	if app != base {
@@ -383,9 +382,7 @@ func (c *Core) runIdentity(ctx context.Context) {
 		if key, err := loadOAuthCLIKey(c.cfg.StateDir); err == nil {
 			oauth.CLIKey = key
 			oauth.QROrigin = strings.TrimSpace(os.Getenv("SOCIALWEB_QR_ORIGIN"))
-			if oauth.QROrigin == "" {
-				oauth.QROrigin = "https://qr.fedfork.com"
-			}
+			oauth.QROrigin = cmp.Or(oauth.QROrigin, "https://qr.fedfork.com")
 		}
 		ctl, err := identitycontroller.New(identitycontroller.Options{Workspace: workspace, Dynamic: identitycontroller.DynamicFactory(c.cfg.DynamicFactory),
 			Endpoints: c.pdsEndpoint, Resolver: &pdsclient.Resolver{Handlers: c.handlers, Timeout: 10 * time.Second},
@@ -570,9 +567,7 @@ func dynamicForRestConfig(cfg *rest.Config, workspace string) (dynamic.Interface
 		return nil, errors.New("componentcore: the kcp client has no rest config")
 	}
 	workspace = strings.TrimSpace(workspace)
-	if workspace == "" {
-		workspace = DefaultWorkspace
-	}
+	workspace = cmp.Or(workspace, DefaultWorkspace)
 	out := rest.CopyConfig(cfg)
 	host := strings.TrimSuffix(out.Host, "/")
 	if !strings.Contains(host, "/clusters/") {

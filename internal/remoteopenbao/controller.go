@@ -18,6 +18,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vaultaccess"
 )
 
@@ -116,24 +117,16 @@ func New(opts Options) (*Controller, error) {
 		log = slog.New(slog.DiscardHandler)
 	}
 	timeout := opts.Timeout
-	if timeout <= 0 {
-		timeout = DefaultTimeout
-	}
+	timeout = opt.Positive(timeout, DefaultTimeout)
 	retry := opts.RetryAfter
-	if retry <= 0 {
-		retry = DefaultRetryAfter
-	}
+	retry = opt.Positive(retry, DefaultRetryAfter)
 	maxRetry := opts.MaxRetryAfter
-	if maxRetry <= 0 {
-		maxRetry = DefaultMaxRetryAfter
-	}
+	maxRetry = opt.Positive(maxRetry, DefaultMaxRetryAfter)
 	if maxRetry < retry {
 		maxRetry = retry
 	}
 	checkInterval := opts.CheckInterval
-	if checkInterval <= 0 {
-		checkInterval = DefaultCheckInterval
-	}
+	checkInterval = opt.Positive(checkInterval, DefaultCheckInterval)
 	now := opts.Now
 	if now == nil {
 		now = time.Now

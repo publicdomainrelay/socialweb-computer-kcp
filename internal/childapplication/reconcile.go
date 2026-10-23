@@ -1,6 +1,7 @@
 package childapplication
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"reflect"
@@ -152,9 +153,7 @@ func (c *Controller) observe(ctx context.Context, ca *v1alpha1.ChildApplication)
 	if appStatus != nil && appStatus.Workspace != "" {
 		workspace = appStatus.Workspace
 	}
-	if workspace == "" {
-		workspace = c.networkWorkspace + ":" + ca.Spec.App
-	}
+	workspace = cmp.Or(workspace, c.networkWorkspace+":"+ca.Spec.App)
 	if !logicalCluster(workspace) {
 		o.invalid = fmt.Sprintf("the child workspace %q is not a logical cluster path", workspace)
 		return o, nil

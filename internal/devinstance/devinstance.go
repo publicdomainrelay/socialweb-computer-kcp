@@ -1,6 +1,7 @@
 package devinstance
 
 import (
+	"cmp"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -42,9 +43,7 @@ func sanitize(s string) string {
 	if len(out) > basenameChars {
 		out = strings.Trim(out[:basenameChars], "-")
 	}
-	if out == "" {
-		out = "dev"
-	}
+	out = cmp.Or(out, "dev")
 	return out
 }
 

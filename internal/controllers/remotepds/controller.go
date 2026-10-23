@@ -18,6 +18,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 const (
@@ -76,13 +77,9 @@ func New(opts Options) *Controller {
 		log = slog.New(slog.DiscardHandler)
 	}
 	timeout := opts.Timeout
-	if timeout <= 0 {
-		timeout = DefaultTimeout
-	}
+	timeout = opt.Positive(timeout, DefaultTimeout)
 	checkInterval := opts.CheckInterval
-	if checkInterval <= 0 {
-		checkInterval = DefaultCheckInterval
-	}
+	checkInterval = opt.Positive(checkInterval, DefaultCheckInterval)
 	return &Controller{log: log.With("component", "remotepds-controller"), caBundle: opts.CABundle, secrets: opts.Secrets,
 		timeout: timeout, checkInterval: checkInterval}
 }

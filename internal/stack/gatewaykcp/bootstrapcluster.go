@@ -1,6 +1,7 @@
 package gatewaykcp
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
@@ -77,9 +78,7 @@ func waitReady(ctx context.Context, ri dynamic.ResourceInterface, name string) e
 }
 
 func bootstrapCluster(ctx context.Context, kubeconfig, base, did, cluster string, log *slog.Logger) error {
-	if did == "" {
-		did = DefaultBootstrapDID
-	}
+	did = cmp.Or(did, DefaultBootstrapDID)
 	restCfg, err := memberRestConfig(kubeconfig)
 	if err != nil {
 		return err
@@ -143,8 +142,6 @@ func bootstrapCluster(ctx context.Context, kubeconfig, base, did, cluster string
 }
 
 func BootstrapCluster(ctx context.Context, kubeconfig, base, did, cluster string, log *slog.Logger) error {
-	if base == "" {
-		base = appctl.DefaultWorkspace
-	}
+	base = cmp.Or(base, appctl.DefaultWorkspace)
 	return bootstrapCluster(ctx, kubeconfig, base, did, cluster, log)
 }

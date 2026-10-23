@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
 )
@@ -110,9 +111,7 @@ func NewClient(opts Options) (*Client, error) {
 		return nil, errors.New("guestidentity: no OpenBao endpoint resolver")
 	}
 	timeout := opts.Timeout
-	if timeout <= 0 {
-		timeout = DefaultTimeout
-	}
+	timeout = opt.Positive(timeout, DefaultTimeout)
 	return &Client{mount: opts.Mount, endpoint: opts.Endpoint, timeout: timeout}, nil
 }
 

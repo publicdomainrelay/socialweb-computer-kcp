@@ -19,6 +19,7 @@ import (
 	"k8s.io/client-go/dynamic"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 )
 
@@ -258,9 +259,7 @@ func (v *VMs) RecordMarket(ctx context.Context, name string, patch v1alpha1.Comp
 }
 
 func (v *VMs) WaitAbsent(ctx context.Context, name string, timeout time.Duration) error {
-	if timeout <= 0 {
-		timeout = DefaultReleaseTimeout
-	}
+	timeout = opt.Positive(timeout, DefaultReleaseTimeout)
 	deadline := time.Now().Add(timeout)
 	for {
 		o, err := v.Get(ctx, name)

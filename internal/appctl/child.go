@@ -1,6 +1,7 @@
 package appctl
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -258,9 +259,7 @@ func childClient(rec devinstance.Record, kind v1alpha1.ApplicationKind) (dynamic
 		return nil, err
 	}
 	ws := rec.BaseWorkspace
-	if ws == "" {
-		ws = DefaultWorkspace
-	}
+	ws = cmp.Or(ws, DefaultWorkspace)
 	dc, err := dynamic.NewForConfig(kcprest.ForCluster(restCfg, ws))
 	if err != nil {
 		return nil, err

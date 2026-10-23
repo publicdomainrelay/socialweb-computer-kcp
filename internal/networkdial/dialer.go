@@ -1,6 +1,7 @@
 package networkdial
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"fmt"
@@ -153,8 +154,6 @@ func cloneTLSConfig(cfg *tls.Config) *tls.Config {
 		return &tls.Config{MinVersion: tls.VersionTLS12}
 	}
 	out := cfg.Clone()
-	if out.MinVersion == 0 {
-		out.MinVersion = tls.VersionTLS12
-	}
+	out.MinVersion = cmp.Or(out.MinVersion, tls.VersionTLS12)
 	return out
 }

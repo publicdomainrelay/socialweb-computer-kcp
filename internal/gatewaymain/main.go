@@ -22,6 +22,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/foldmain"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/plcresolver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/plcsweep"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/sweepkcp"
@@ -167,9 +168,7 @@ func directory(cfg Config) (identity.Directory, error) {
 				"PLC, did:web and handle HTTP clients cannot be bounded", cached.Inner)
 	}
 	timeout := cfg.PLCTimeout
-	if timeout <= 0 {
-		timeout = DefaultPLCTimeout
-	}
+	timeout = opt.Positive(timeout, DefaultPLCTimeout)
 	if cfg.PLCURL != "" {
 		base.PLCURL = strings.TrimSuffix(cfg.PLCURL, "/")
 	}

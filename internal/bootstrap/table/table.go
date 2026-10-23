@@ -1,6 +1,7 @@
 package table
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"regexp"
@@ -83,9 +84,7 @@ func DevNames(key string) Names { return Names{Prefix: hostsvc.NamePrefix, Key: 
 
 func (a App) Names() Names {
 	p := a.Prefix
-	if p == "" {
-		p = hostsvc.NamePrefix
-	}
+	p = cmp.Or(p, hostsvc.NamePrefix)
 	return Names{Prefix: p, Key: a.Key}
 }
 
@@ -180,9 +179,7 @@ func (a App) CoreUnit() string {
 }
 
 func CoreTemplate(prefix, role string) string {
-	if prefix == "" {
-		prefix = hostsvc.NamePrefix
-	}
+	prefix = cmp.Or(prefix, hostsvc.NamePrefix)
 	if role == RoleBidder {
 		return prefix + BidderCore + hostsvc.ServiceSuffix
 	}

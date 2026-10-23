@@ -20,6 +20,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpdatastore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/pgunit"
 )
 
@@ -398,9 +399,7 @@ func HandoverStaleLease(ctx context.Context, admin *kcpserver.HTTPAdmin, log *sl
 }
 
 func Ensure(ctx context.Context, m hostsvc.Manager, cfg Config, rec *devinstance.Record) error {
-	if cfg.ReadyTimeout <= 0 {
-		cfg.ReadyTimeout = DefaultReadyTimeout
-	}
+	cfg.ReadyTimeout = opt.Positive(cfg.ReadyTimeout, DefaultReadyTimeout)
 	if len(rec.StandIns) > 0 {
 		return ensureStandIns(ctx, m, cfg, rec)
 	}

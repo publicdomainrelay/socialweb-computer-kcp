@@ -1,6 +1,7 @@
 package hostprocess
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
@@ -534,9 +535,7 @@ func (s *Supervisor) capOutput(o v1alpha1.HostProcess) {
 		return
 	}
 	capBytes := out.CapBytes
-	if capBytes == 0 {
-		capBytes = logcap.DefaultCap
-	}
+	capBytes = cmp.Or(capBytes, logcap.DefaultCap)
 	files := []string{out.Stdout}
 	if out.Stderr != out.Stdout {
 		files = append(files, out.Stderr)
@@ -557,9 +556,7 @@ func (s *Supervisor) capOutput(o v1alpha1.HostProcess) {
 
 func (s *Supervisor) Run(ctx context.Context) error {
 	interval := s.c.Interval
-	if interval == 0 {
-		interval = DefaultInterval
-	}
+	interval = cmp.Or(interval, DefaultInterval)
 	s.c.log().Info("the HostProcess supervisor runs in the core", "workspace", s.c.workspace(), "backend", string(s.backend),
 		"prefixes", s.c.prefixes())
 	t := time.NewTicker(interval)

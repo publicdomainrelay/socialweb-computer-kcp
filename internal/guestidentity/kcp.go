@@ -1,6 +1,7 @@
 package guestidentity
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -66,9 +67,7 @@ func (k *KCPGrants) Apply(ctx context.Context, g v1alpha1.GuestIdentityGrant) er
 	delete(m, "status")
 	u := &unstructured.Unstructured{Object: m}
 	fieldManager := k.FieldManager
-	if fieldManager == "" {
-		fieldManager = FieldManagerGuestIdentityGrant
-	}
+	fieldManager = cmp.Or(fieldManager, FieldManagerGuestIdentityGrant)
 	if _, err := k.Res.Apply(ctx, g.Name, u, metav1.ApplyOptions{FieldManager: fieldManager, Force: true}); err != nil {
 		return err
 	}

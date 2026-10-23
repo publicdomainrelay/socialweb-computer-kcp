@@ -1,6 +1,7 @@
 package guestseed
 
 import (
+	"cmp"
 	"fmt"
 	"net/netip"
 	"net/url"
@@ -155,9 +156,7 @@ func WithIrohTransport(userData string, authorizedKeys, hostAliases []string) (s
 }
 
 func AcceptBundle(acceptPath string, bundle map[string]any) (cloudinit.UserDataModule, error) {
-	if acceptPath == "" {
-		acceptPath = AcceptPathVM
-	}
+	acceptPath = cmp.Or(acceptPath, AcceptPathVM)
 	if err := checkAbsolute(acceptPath); err != nil {
 		return nil, err
 	}
@@ -168,9 +167,7 @@ func OnNetworkReporterModule(userData, fallbackURL, acceptPath, bearerAudience s
 	if strings.Contains(userData, OnNetworkUnit) {
 		return nil, false, nil
 	}
-	if acceptPath == "" {
-		acceptPath = AcceptPathVM
-	}
+	acceptPath = cmp.Or(acceptPath, AcceptPathVM)
 	if err := checkAbsolute(acceptPath); err != nil {
 		return nil, false, err
 	}
@@ -376,9 +373,7 @@ func WithOnNetworkBaseURL(userData, fallbackURL string) (string, error) {
 
 func Provision(opts ProvisionOptions) (string, error) {
 	acceptPath := opts.AcceptPath
-	if acceptPath == "" {
-		acceptPath = AcceptPathVM
-	}
+	acceptPath = cmp.Or(acceptPath, AcceptPathVM)
 	modules := []any{}
 	ctx := cloudinit.Context{SecretsAcceptPath: acceptPath}
 	if opts.Login != nil {
@@ -432,9 +427,7 @@ func validateGuestLogin(opts GuestLoginOptions) error {
 		return fmt.Errorf("guestseed: guest login bind secret is not 64 lowercase hex characters")
 	}
 	mount := opts.Mount
-	if mount == "" {
-		mount = GuestLoginDefaultMount
-	}
+	mount = cmp.Or(mount, GuestLoginDefaultMount)
 	if !guestLoginMountRE.MatchString(mount) {
 		return fmt.Errorf("guestseed: guest login mount %q is not an auth mount name", mount)
 	}

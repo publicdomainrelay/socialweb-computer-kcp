@@ -1,6 +1,7 @@
 package clusterprovider
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -203,21 +204,13 @@ func NewUnitsHost(c UnitsConfig) (*UnitsHost, error) {
 	if c.StateDir == "" {
 		return nil, errors.New("clusterprovider: the units host needs the state dir the cluster data dirs live in")
 	}
-	if c.Workspace == "" {
-		c.Workspace = hostprocess.DefaultWorkspace
-	}
+	c.Workspace = cmp.Or(c.Workspace, hostprocess.DefaultWorkspace)
 	if c.Resolve == nil {
 		c.Resolve = exec.LookPath
 	}
-	if c.PlaceTimeout == 0 {
-		c.PlaceTimeout = DefaultPlaceTimeout
-	}
-	if c.StoreTimeout == 0 {
-		c.StoreTimeout = DefaultStoreTimeout
-	}
-	if c.ReapTimeout == 0 {
-		c.ReapTimeout = DefaultReapTimeout
-	}
+	c.PlaceTimeout = cmp.Or(c.PlaceTimeout, DefaultPlaceTimeout)
+	c.StoreTimeout = cmp.Or(c.StoreTimeout, DefaultStoreTimeout)
+	c.ReapTimeout = cmp.Or(c.ReapTimeout, DefaultReapTimeout)
 	if c.Log == nil {
 		c.Log = slog.Default()
 	}

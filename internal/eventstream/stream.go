@@ -1,6 +1,7 @@
 package eventstream
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -192,9 +193,7 @@ func (s *eventStream) resolveSource(ctx context.Context) (resolvedSource, error)
 		kind := strings.ToLower(strings.TrimSpace(ref.Kind))
 		if kind == "remotepds" || kind == "remote" {
 			workspace := strings.TrimSpace(ref.Workspace)
-			if workspace == "" {
-				workspace = s.ctl.opts.Workspace
-			}
+			workspace = cmp.Or(workspace, s.ctl.opts.Workspace)
 			dyn, err := s.ctl.opts.Dynamic(workspace)
 			if err != nil {
 				return resolvedSource{}, err
@@ -422,9 +421,7 @@ func (s *eventStream) bufferRecords(ctx context.Context, source resolvedSource, 
 
 func (s *eventStream) watchMatches(ctx context.Context) []resolvedMatch {
 	workspace := strings.TrimSpace(s.es.Spec.Sink.Namespace)
-	if workspace == "" {
-		workspace = s.ctl.opts.Workspace
-	}
+	workspace = cmp.Or(workspace, s.ctl.opts.Workspace)
 	dyn := s.dyn
 	if workspace != s.ctl.opts.Workspace {
 		var err error
@@ -627,9 +624,7 @@ func (s *eventStream) flushWatch(ctx context.Context) error {
 	s.mu.Unlock()
 
 	workspace := strings.TrimSpace(s.es.Spec.Sink.Namespace)
-	if workspace == "" {
-		workspace = s.ctl.opts.Workspace
-	}
+	workspace = cmp.Or(workspace, s.ctl.opts.Workspace)
 	if err := s.writeWatchStatus(ctx, workspace, records, deletes, cursors); err != nil {
 		s.mu.Lock()
 		for uri, record := range records {

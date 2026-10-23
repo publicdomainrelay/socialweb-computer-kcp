@@ -19,6 +19,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayhttp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 )
 
@@ -190,9 +191,7 @@ func NewCocorePairing(opts CocorePairingOptions) (*CocorePairing, error) {
 	if opts.Tokens == nil {
 		return nil, errors.New("sshtransport: cocore pairing has no token store")
 	}
-	if opts.TTL <= 0 {
-		opts.TTL = DefaultCocorePairingTTL
-	}
+	opts.TTL = opt.Positive(opts.TTL, DefaultCocorePairingTTL)
 	if opts.Log == nil {
 		opts.Log = slog.Default()
 	}

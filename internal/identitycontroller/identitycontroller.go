@@ -25,6 +25,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 )
 
@@ -122,9 +123,7 @@ func New(opts Options) (*Controller, error) {
 		resolver = &pdsclient.Resolver{HTTPClient: client, Timeout: requestTimeout}
 	}
 	retry := opts.RetryAfter
-	if retry <= 0 {
-		retry = DefaultRetryAfter
-	}
+	retry = opt.Positive(retry, DefaultRetryAfter)
 	states := opts.OAuth.States
 	if states == nil {
 		if opts.Vault != nil && opts.OAuth.StateRef != nil {
@@ -464,9 +463,7 @@ func (c *Controller) pdsAt(endpoint string) (pdsclient.PDS, error) {
 		r = &pdsclient.Resolver{HTTPClient: c.http, Timeout: requestTimeout}
 	}
 	timeout := r.Timeout
-	if timeout <= 0 {
-		timeout = requestTimeout
-	}
+	timeout = opt.Positive(timeout, requestTimeout)
 	return pdsclient.NewRemote(pdsclient.RemoteConfig{BaseURL: endpoint, HTTPClient: r.HTTPClient, TLS: r.TLS, Tokens: r.Tokens, DPoP: r.DPoP, Timeout: timeout})
 }
 

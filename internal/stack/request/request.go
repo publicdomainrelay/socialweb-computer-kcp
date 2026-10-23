@@ -1,6 +1,7 @@
 package request
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -196,9 +197,7 @@ func OpenKcp(kubeconfig, workspace string) (*Kcp, error) {
 	if err != nil {
 		return nil, err
 	}
-	if workspace == "" {
-		workspace = appctl.DefaultWorkspace
-	}
+	workspace = cmp.Or(workspace, appctl.DefaultWorkspace)
 	root := rest.CopyConfig(cfg)
 	root.Host = strings.TrimSuffix(cfg.Host, "/") + "/clusters/" + workspace
 	dc, err := dynamic.NewForConfig(root)

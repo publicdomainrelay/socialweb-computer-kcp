@@ -12,6 +12,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterstack"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostos"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/portscan"
 )
 
@@ -67,9 +68,7 @@ func (s ServedVaultTLS) Ensure(ctx context.Context) (VaultTLS, error) {
 		return VaultTLS{}, fmt.Errorf("%w. Reloading it was refused: %w", first, err)
 	}
 	settle := s.Settle
-	if settle <= 0 {
-		settle = DefaultVaultReloadSettle
-	}
+	settle = opt.Positive(settle, DefaultVaultReloadSettle)
 	deadline := time.Now().Add(settle)
 	last := first
 	for time.Now().Before(deadline) {

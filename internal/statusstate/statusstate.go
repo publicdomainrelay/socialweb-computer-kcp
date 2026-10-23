@@ -22,6 +22,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -142,13 +143,9 @@ func New(opts Options) (*Controller, error) {
 		log = slog.New(slog.DiscardHandler)
 	}
 	retry := opts.RetryAfter
-	if retry <= 0 {
-		retry = DefaultRetryAfter
-	}
+	retry = opt.Positive(retry, DefaultRetryAfter)
 	resync := opts.Resync
-	if resync <= 0 {
-		resync = DefaultResync
-	}
+	resync = opt.Positive(resync, DefaultResync)
 	plcClient := opts.PLC
 	if plcClient == nil && strings.TrimSpace(opts.PLCBaseURL) != "" {
 		built, err := NewHTTPPLCClient(opts.PLCBaseURL, opts.PLCHandlers)

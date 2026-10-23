@@ -12,6 +12,7 @@ import (
 	qrcode "github.com/skip2/go-qrcode"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 type MarketIdentityClient interface {
@@ -38,9 +39,7 @@ func actionKey(a *v1alpha1.MarketIdentityPendingAction) string {
 
 func (r IdentityRenderer) WaitReady(ctx context.Context, name string) (*v1alpha1.MarketIdentity, error) {
 	interval := r.Interval
-	if interval <= 0 {
-		interval = defaultIdentityInterval
-	}
+	interval = opt.Positive(interval, defaultIdentityInterval)
 	var in *bufio.Reader
 	if r.In != nil {
 		in = bufio.NewReader(r.In)

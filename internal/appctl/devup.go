@@ -1,6 +1,7 @@
 package appctl
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -92,9 +93,7 @@ func (d BidderVMDefaults) fill(a *v1alpha1.NetworkApp) {
 	if a.Kcp == nil {
 		a.Kcp = &v1alpha1.KcpProvider{}
 	}
-	if a.Kcp.GuestImageSource == "" {
-		a.Kcp.GuestImageSource = d.GuestImageSource
-	}
+	a.Kcp.GuestImageSource = cmp.Or(a.Kcp.GuestImageSource, d.GuestImageSource)
 	if d.VmHostBackend != "" {
 		a.Kcp.VmHostBackend = d.VmHostBackend
 	}

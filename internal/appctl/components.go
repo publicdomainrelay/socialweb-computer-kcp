@@ -1,6 +1,7 @@
 package appctl
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -185,9 +186,7 @@ func (v ComponentView) Listeners() []v1alpha1.ApplicationListener {
 	out := make([]v1alpha1.ApplicationListener, 0, len(v.Status.Endpoints))
 	for _, e := range v.Status.Endpoints {
 		address := e.Address
-		if address == "" {
-			address = e.URL
-		}
+		address = cmp.Or(address, e.URL)
 		out = append(out, v1alpha1.ApplicationListener{Component: v.Name, Name: e.Name, Kind: e.Protocol, Address: address})
 	}
 	return out

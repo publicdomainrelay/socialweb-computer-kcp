@@ -1,6 +1,7 @@
 package exposure
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -26,6 +27,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/servetls"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/tlsreload"
@@ -95,9 +97,7 @@ func NewExposureController(opts ExposureOptions) (*ExposureController, error) {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	if opts.RetryAfter <= 0 {
-		opts.RetryAfter = DefaultRetryAfter
-	}
+	opts.RetryAfter = opt.Positive(opts.RetryAfter, DefaultRetryAfter)
 	return &ExposureController{
 		workspace: workspace,
 		dynamic:   opts.Dynamic,
@@ -446,9 +446,7 @@ func (c *ExposureController) startLocal(ctx context.Context, exp *exposurev1alph
 			conns.Wait()
 		}
 		scheme := protocol
-		if scheme == "" {
-			scheme = component.ProtocolTCP
-		}
+		scheme = cmp.Or(scheme, component.ProtocolTCP)
 		return rt, scheme + "://" + lease.Address(), lease.Address(), nil
 	default:
 		_ = listener.Close()
@@ -515,9 +513,7 @@ func (c *ExposureController) localTLS(spec exposurev1alpha1.ExposureTLS) (*tls.C
 		config = reloader.TLSConfig(&tls.Config{MinVersion: tls.VersionTLS12})
 	case c.tls != nil:
 		config = c.tls.Clone()
-		if config.MinVersion == 0 {
-			config.MinVersion = tls.VersionTLS12
-		}
+		config.MinVersion = cmp.Or(config.MinVersion, tls.VersionTLS12)
 	default:
 		return nil, errors.New("TLS is enabled but no certificate is available")
 	}

@@ -1,6 +1,7 @@
 package install
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -444,15 +445,11 @@ func validate(o *Options) error {
 	if !stateRE.MatchString(o.StateDir) || filepath.Clean(o.StateDir) != o.StateDir {
 		return fmt.Errorf("install: state dir %q must be a clean absolute path of [A-Za-z0-9._/-] (it is written into unit files)", o.StateDir)
 	}
-	if o.VMSlots == 0 {
-		o.VMSlots = DefaultVMSlots
-	}
+	o.VMSlots = cmp.Or(o.VMSlots, DefaultVMSlots)
 	if o.VMSlots < 1 {
 		return fmt.Errorf("install: --vm-slots %d: want at least 1", o.VMSlots)
 	}
-	if o.Root == "" {
-		o.Root = "/"
-	}
+	o.Root = cmp.Or(o.Root, "/")
 	if o.UnitPrefix != "" {
 		if err := hostsvc.ValidatePrefix(o.UnitPrefix); err != nil {
 			return fmt.Errorf("install: unit-prefix: %w", err)

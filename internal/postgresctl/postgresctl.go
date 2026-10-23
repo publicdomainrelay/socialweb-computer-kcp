@@ -1,6 +1,7 @@
 package postgresctl
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -84,9 +85,7 @@ func (c Config) user() string {
 }
 
 func New(c Config) (*Controller, error) {
-	if c.Workspace == "" {
-		c.Workspace = hostprocess.DefaultWorkspace
-	}
+	c.Workspace = cmp.Or(c.Workspace, hostprocess.DefaultWorkspace)
 	restCfg, err := kcpserver.FrontRestConfig(c.Kubeconfig)
 	if err != nil {
 		return nil, err
@@ -431,9 +430,7 @@ func (ct *Controller) watch(ctx context.Context, wake chan<- struct{}) {
 
 func (ct *Controller) Run(ctx context.Context) error {
 	interval := ct.c.Interval
-	if interval == 0 {
-		interval = DefaultInterval
-	}
+	interval = cmp.Or(interval, DefaultInterval)
 	ct.c.log().Info("the Postgres controller runs in the core", "workspace", ct.c.Workspace, "dataRoot", ct.c.DataRoot,
 		"socketRoot", ct.c.SocketRoot)
 	wake := make(chan struct{}, 1)

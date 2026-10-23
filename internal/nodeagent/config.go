@@ -1,11 +1,14 @@
 package nodeagent
 
 import (
+	"cmp"
 	"fmt"
 	"net"
 	"path/filepath"
 	"regexp"
 	"time"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 const (
@@ -189,9 +192,7 @@ type Config struct {
 }
 
 func (c Config) WithDefaults() Config {
-	if c.NodeDir == "" {
-		c.NodeDir = DefaultNodeDir
-	}
+	c.NodeDir = cmp.Or(c.NodeDir, DefaultNodeDir)
 	inDir := func(name string) string { return filepath.Join(c.NodeDir, name) }
 	if c.ClaimDocPath == "" {
 		c.ClaimDocPath = inDir("claim.json")
@@ -202,21 +203,11 @@ func (c Config) WithDefaults() Config {
 	if c.OpenBaoTicketPath == "" {
 		c.OpenBaoTicketPath = inDir("openbao-ticket")
 	}
-	if c.OpenBaoLinkAddress == "" {
-		c.OpenBaoLinkAddress = DefaultOpenBaoLinkAddress
-	}
-	if c.GuestLoginHelperPath == "" {
-		c.GuestLoginHelperPath = DefaultGuestLoginHelper
-	}
-	if c.K3sDataDir == "" {
-		c.K3sDataDir = DefaultK3sDataDir
-	}
-	if c.CNIConfDir == "" {
-		c.CNIConfDir = DefaultCNIConfDir
-	}
-	if c.CNIBinDir == "" {
-		c.CNIBinDir = DefaultCNIBinDir
-	}
+	c.OpenBaoLinkAddress = cmp.Or(c.OpenBaoLinkAddress, DefaultOpenBaoLinkAddress)
+	c.GuestLoginHelperPath = cmp.Or(c.GuestLoginHelperPath, DefaultGuestLoginHelper)
+	c.K3sDataDir = cmp.Or(c.K3sDataDir, DefaultK3sDataDir)
+	c.CNIConfDir = cmp.Or(c.CNIConfDir, DefaultCNIConfDir)
+	c.CNIBinDir = cmp.Or(c.CNIBinDir, DefaultCNIBinDir)
 	if c.KubeletKubeconfig == "" {
 		c.KubeletKubeconfig = filepath.Join(c.K3sDataDir, "agent", "kubelet.kubeconfig")
 	}
@@ -232,54 +223,32 @@ func (c Config) WithDefaults() Config {
 	if c.ServerCAPath == "" {
 		c.ServerCAPath = inDir("server-ca.pem")
 	}
-	if c.K3sNodePasswordPath == "" {
-		c.K3sNodePasswordPath = DefaultK3sNodePasswordPath
-	}
+	c.K3sNodePasswordPath = cmp.Or(c.K3sNodePasswordPath, DefaultK3sNodePasswordPath)
 	if c.MeshdEnvPath == "" {
 		c.MeshdEnvPath = inDir("meshd.env")
 	}
-	if c.DoneStamp == "" {
-		c.DoneStamp = DefaultDoneStamp
-	}
-	if c.K3sPath == "" {
-		c.K3sPath = DefaultK3sPath
-	}
-	if c.DumbpipePath == "" {
-		c.DumbpipePath = DefaultDumbpipePath
-	}
-	if c.MeshdPath == "" {
-		c.MeshdPath = DefaultMeshdPath
-	}
-	if c.HostnamePath == "" {
-		c.HostnamePath = DefaultHostnamePath
-	}
-	if c.NodeBinaryPath == "" {
-		c.NodeBinaryPath = DefaultNodeBinaryPath
-	}
+	c.DoneStamp = cmp.Or(c.DoneStamp, DefaultDoneStamp)
+	c.K3sPath = cmp.Or(c.K3sPath, DefaultK3sPath)
+	c.DumbpipePath = cmp.Or(c.DumbpipePath, DefaultDumbpipePath)
+	c.MeshdPath = cmp.Or(c.MeshdPath, DefaultMeshdPath)
+	c.HostnamePath = cmp.Or(c.HostnamePath, DefaultHostnamePath)
+	c.NodeBinaryPath = cmp.Or(c.NodeBinaryPath, DefaultNodeBinaryPath)
 	if c.ConfigPath == "" {
 		c.ConfigPath = inDir("join.json")
 	}
-	if c.LinkWaitAttempts <= 0 {
-		c.LinkWaitAttempts = DefaultLinkWaitAttempts
-	}
+	c.LinkWaitAttempts = opt.Positive(c.LinkWaitAttempts, DefaultLinkWaitAttempts)
 	if c.LinkWaitIntervalMS <= 0 {
 		c.LinkWaitIntervalMS = int(DefaultLinkWaitInterval / time.Millisecond)
 	}
-	if c.CNIWaitAttempts <= 0 {
-		c.CNIWaitAttempts = DefaultCNIWaitAttempts
-	}
+	c.CNIWaitAttempts = opt.Positive(c.CNIWaitAttempts, DefaultCNIWaitAttempts)
 	if c.CNIWaitIntervalMS <= 0 {
 		c.CNIWaitIntervalMS = int(DefaultCNIWaitInterval / time.Millisecond)
 	}
-	if c.DiagnoseAttempts <= 0 {
-		c.DiagnoseAttempts = DefaultDiagnoseAttempts
-	}
+	c.DiagnoseAttempts = opt.Positive(c.DiagnoseAttempts, DefaultDiagnoseAttempts)
 	if c.DiagnoseIntervalSeconds <= 0 {
 		c.DiagnoseIntervalSeconds = int(DefaultDiagnoseInterval / time.Second)
 	}
-	if c.GuestLoginWaitAttempts <= 0 {
-		c.GuestLoginWaitAttempts = DefaultGuestLoginWaitAttempts
-	}
+	c.GuestLoginWaitAttempts = opt.Positive(c.GuestLoginWaitAttempts, DefaultGuestLoginWaitAttempts)
 	if c.GuestLoginWaitIntervalSeconds <= 0 {
 		c.GuestLoginWaitIntervalSeconds = int(DefaultGuestLoginWaitInterval / time.Second)
 	}

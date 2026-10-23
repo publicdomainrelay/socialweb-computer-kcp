@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -147,15 +148,9 @@ func NewSyncer(ctx context.Context, opts SyncerOptions) (*Syncer, error) {
 	if opts.Log == nil {
 		opts.Log = slog.New(slog.DiscardHandler)
 	}
-	if opts.Resync <= 0 {
-		opts.Resync = DefaultResync
-	}
-	if opts.RetryDelay <= 0 {
-		opts.RetryDelay = DefaultRetryDelay
-	}
-	if opts.MaxRetry <= 0 {
-		opts.MaxRetry = DefaultMaxRetry
-	}
+	opts.Resync = opt.Positive(opts.Resync, DefaultResync)
+	opts.RetryDelay = opt.Positive(opts.RetryDelay, DefaultRetryDelay)
+	opts.MaxRetry = opt.Positive(opts.MaxRetry, DefaultMaxRetry)
 	root, cancel := context.WithCancel(ctx)
 	return &Syncer{opts: opts, ctx: root, cancel: cancel, guests: map[string]*guestSync{}}, nil
 }

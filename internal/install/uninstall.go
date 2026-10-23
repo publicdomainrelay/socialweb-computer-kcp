@@ -1,6 +1,7 @@
 package install
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -43,9 +44,7 @@ func Uninstall(ctx context.Context, uo UninstallOptions, sys System) (Report, er
 	if uo.Account == "" {
 		uo.Account = DefaultAccount(uo.Role)
 	}
-	if uo.Root == "" {
-		uo.Root = "/"
-	}
+	uo.Root = cmp.Or(uo.Root, "/")
 	recPath := filepath.Join(uo.Root, RecordPath(uo.Account))
 	rec, err := loadRecord(recPath)
 	if errors.Is(err, fs.ErrNotExist) {

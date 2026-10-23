@@ -11,6 +11,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpdatastore"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 const (
@@ -37,12 +38,8 @@ type Monitor struct {
 }
 
 func New(cfg Config) *Monitor {
-	if cfg.Interval <= 0 {
-		cfg.Interval = DefaultInterval
-	}
-	if cfg.First <= 0 {
-		cfg.First = DefaultFirst
-	}
+	cfg.Interval = opt.Positive(cfg.Interval, DefaultInterval)
+	cfg.First = opt.Positive(cfg.First, DefaultFirst)
 	return &Monitor{cfg: cfg}
 }
 

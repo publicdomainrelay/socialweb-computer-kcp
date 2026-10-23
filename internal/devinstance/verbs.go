@@ -1,6 +1,7 @@
 package devinstance
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"os"
@@ -87,9 +88,7 @@ func Exports(rec Record) []Export {
 	}
 	if rec.VM != nil {
 		ws := rec.BaseWorkspace
-		if ws == "" {
-			ws = "root"
-		}
+		ws = cmp.Or(ws, "root")
 		host, _, _ := strings.Cut(strings.TrimSuffix(rec.KcpURL, "/"), "/clusters/")
 		out = append(out,
 			Export{"COMPUTE_PROVIDER_KCP", "true"},

@@ -1,6 +1,7 @@
 package memoryrunner
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"sync"
@@ -42,9 +43,7 @@ func NewPod(opts PodOptions) *Pod {
 	if opts.Outcome.State == "" {
 		opts.Outcome = runner.PodStatus{State: runner.StateSucceeded}
 	}
-	if opts.PollsBeforeDone == 0 {
-		opts.PollsBeforeDone = 1
-	}
+	opts.PollsBeforeDone = cmp.Or(opts.PollsBeforeDone, 1)
 	return &Pod{opts: opts, runs: map[string]*podRun{}}
 }
 

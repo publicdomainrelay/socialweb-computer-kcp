@@ -1,6 +1,7 @@
 package appctl
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -208,17 +209,13 @@ func componentIdentity(id *v1alpha1.MarketIdentity, handle string) *v1alpha1.Com
 	if id != nil {
 		out.MarketIdentityRef = ComponentRefFor("MarketIdentity", id.Name)
 		out.Did = id.Status.Did
-		if out.Handle == "" {
-			out.Handle = id.Status.Handle
-		}
+		out.Handle = cmp.Or(out.Handle, id.Status.Handle)
 	}
 	return out
 }
 
 func componentServe(host string, port int32) *v1alpha1.ComponentServe {
-	if host == "" {
-		host = "127.0.0.1"
-	}
+	host = cmp.Or(host, "127.0.0.1")
 	return &v1alpha1.ComponentServe{Host: host, Port: port}
 }
 
@@ -452,9 +449,7 @@ func BidderValues(spec v1alpha1.MarketBidderSpec, stateDir, guestStateDir string
 	if err := providerValues(&v, spec, kcp); err != nil {
 		return manifests.MarketBidder{}, err
 	}
-	if v.Policy == "" {
-		v.Policy = DefaultPolicy
-	}
+	v.Policy = cmp.Or(v.Policy, DefaultPolicy)
 	trust, err := listFragment(caFile)
 	if err != nil {
 		return manifests.MarketBidder{}, err
@@ -761,9 +756,7 @@ func (ctl *Controller) reconcileBidder(ctx context.Context, u *unstructured.Unst
 		return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
 	}
 	plan.MarketExposure = ctl.bidderMarketExposure(ctx, ctl.c.workspace())
-	if o.Spec.Identity.Mode == "" {
-		o.Spec.Identity.Mode = plan.Mode
-	}
+	o.Spec.Identity.Mode = cmp.Or(o.Spec.Identity.Mode, plan.Mode)
 	stateRoot := ctl.c.Layout.StateDir
 	pdsAccountHandle := pdsHandle(ctl.c.workspace(), "bidder", o.Spec.Identity.Handle)
 	ingressSpec := AppIngressOrDefault(o.Spec.Profile, o.Spec.Ingress, o.Spec.Network)

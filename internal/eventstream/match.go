@@ -1,6 +1,7 @@
 package eventstream
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -51,9 +52,7 @@ func (c *Controller) matchValue(ctx context.Context, dyn dynamic.Interface, matc
 		return "", errors.New("eventstream: a match valueFrom needs a name")
 	}
 	workspace := strings.TrimSpace(from.Workspace)
-	if workspace == "" {
-		workspace = c.opts.Workspace
-	}
+	workspace = cmp.Or(workspace, c.opts.Workspace)
 	client := dyn
 	if workspace != c.opts.Workspace {
 		var err error

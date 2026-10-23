@@ -1,6 +1,7 @@
 package appctl
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -40,9 +41,7 @@ type accountVault struct {
 
 func (v accountVault) mount(fallback string) string {
 	mount := strings.Trim(strings.TrimSpace(v.Mount), "/")
-	if mount == "" {
-		mount = fallback
-	}
+	mount = cmp.Or(mount, fallback)
 	return mount
 }
 
@@ -134,9 +133,7 @@ func deterministicPdsName(url string) string {
 func (ctl *Controller) planAccount(ctx context.Context, ws string, id v1alpha1.ApplicationIdentity,
 	suffix string, vault accountVault, defaultAssociation v1alpha1.AssociationMode) (accountPlan, error) {
 	mode := id.Mode
-	if mode == "" {
-		mode = v1alpha1.MarketIdentityModeLocalRepo
-	}
+	mode = cmp.Or(mode, v1alpha1.MarketIdentityModeLocalRepo)
 	mount := vault.mount(suffix)
 	sessionPath := "identity/" + suffix + "/pds-session"
 	keysPath := "identity/" + suffix + "/keys"
@@ -144,12 +141,8 @@ func (ctl *Controller) planAccount(ctx context.Context, ws string, id v1alpha1.A
 	switch mode {
 	case v1alpha1.MarketIdentityModeLocalRepo:
 		association := id.Association
-		if association == "" {
-			association = defaultAssociation
-		}
-		if association == "" {
-			association = v1alpha1.AssociationRequireApproval
-		}
+		association = cmp.Or(association, defaultAssociation)
+		association = cmp.Or(association, v1alpha1.AssociationRequireApproval)
 		plan.Local = true
 		plan.ComponentMode = "local"
 		plan.Identity = v1alpha1.MarketIdentitySpec{Mode: mode, Handle: id.Handle, PdsURL: id.PdsURL, Association: association}
@@ -182,12 +175,8 @@ func (ctl *Controller) planAccount(ctx context.Context, ws string, id v1alpha1.A
 		} else if remote != nil {
 			plan.RemotePDS = remote
 			plan.PdsRef, plan.PdsDID = &commonv1.ObjectRef{Kind: "RemotePDS", Name: remote.Name}, remote.Spec.DID
-			if plan.PdsURL == "" {
-				plan.PdsURL = remote.Spec.URL
-			}
-			if plan.Identity.PdsURL == "" {
-				plan.Identity.PdsURL = remote.Spec.URL
-			}
+			plan.PdsURL = cmp.Or(plan.PdsURL, remote.Spec.URL)
+			plan.Identity.PdsURL = cmp.Or(plan.Identity.PdsURL, remote.Spec.URL)
 		}
 		return plan, nil
 	}
@@ -259,9 +248,7 @@ func (ctl *Controller) remotePDSRef(ctx context.Context, ws string, ref *commonv
 		return nil, nil
 	}
 	target := strings.TrimSpace(ref.Workspace)
-	if target == "" {
-		target = ws
-	}
+	target = cmp.Or(target, ws)
 	ri, err := ctl.client(target, remotepds.RemotePDSGVR)
 	if err != nil {
 		return nil, err

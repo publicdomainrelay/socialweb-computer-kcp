@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 func streamDialContext(handlers *component.HandlerRegistry) func(ctx context.Context, network, address string) (net.Conn, error) {
@@ -57,9 +58,7 @@ func httpClientWithFallback(primary *http.Client) *http.Client {
 		fallback = cloned
 	}
 	timeout := primary.Timeout
-	if timeout <= 0 {
-		timeout = 20 * time.Second
-	}
+	timeout = opt.Positive(timeout, 20*time.Second)
 	return &http.Client{
 		Transport: fallbackHTTPTransport{primary: primary.Transport, fallback: fallback},
 		Timeout:   timeout,

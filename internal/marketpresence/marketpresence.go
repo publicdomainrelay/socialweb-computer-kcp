@@ -1,6 +1,7 @@
 package marketpresence
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -24,6 +25,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/ingress"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -113,9 +115,7 @@ func NewController(opts Options) (*Controller, error) {
 	seen := map[string]bool{}
 	for _, workspace := range opts.Workspaces {
 		workspace = strings.TrimSpace(workspace)
-		if workspace == "" {
-			workspace = DefaultWorkspace
-		}
+		workspace = cmp.Or(workspace, DefaultWorkspace)
 		if seen[workspace] {
 			continue
 		}
@@ -134,9 +134,7 @@ func NewController(opts Options) (*Controller, error) {
 		now = time.Now
 	}
 	refresh := opts.Refresh
-	if refresh <= 0 {
-		refresh = DefaultRefresh
-	}
+	refresh = opt.Positive(refresh, DefaultRefresh)
 	return &Controller{
 		workspaces: workspaces,
 		dynamic:    opts.Dynamic,
@@ -416,9 +414,7 @@ func (c *Controller) reconcile(ctx context.Context, dyn dynamic.Interface, u *un
 	}
 
 	ttl := time.Duration(presence.Spec.TtlSeconds) * time.Second
-	if ttl <= 0 {
-		ttl = market.HeartbeatTTL
-	}
+	ttl = opt.Positive(ttl, market.HeartbeatTTL)
 
 	last := status.LastHeartbeatAt
 	observed, heartbeatReason := c.heartbeat(ctx, did, offering, bidder, now)
@@ -530,13 +526,9 @@ func (c *Controller) readerFor(bidder *unstructured.Unstructured) market.RecordG
 
 func (c *Controller) bidder(ctx context.Context, ref commonv1.ObjectRef) (*unstructured.Unstructured, error) {
 	workspace := strings.TrimSpace(ref.Workspace)
-	if workspace == "" {
-		workspace = DefaultWorkspace
-	}
+	workspace = cmp.Or(workspace, DefaultWorkspace)
 	kind := strings.TrimSpace(ref.Kind)
-	if kind == "" {
-		kind = DefaultKind
-	}
+	kind = cmp.Or(kind, DefaultKind)
 	if strings.TrimSpace(ref.Name) == "" {
 		return nil, apierrors.NewNotFound(schema.GroupResource{Group: v1alpha1.GroupName, Resource: resourceForKind(kind)}, "")
 	}

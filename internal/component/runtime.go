@@ -15,6 +15,7 @@ import (
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 const (
@@ -872,13 +873,9 @@ func (r *Runtime) readySettings() (time.Duration, time.Duration) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	poll := r.readyPoll
-	if poll <= 0 {
-		poll = ReadyPollInterval
-	}
+	poll = opt.Positive(poll, ReadyPollInterval)
 	timeout := r.readyTimeout
-	if timeout <= 0 {
-		timeout = ReadyTimeout
-	}
+	timeout = opt.Positive(timeout, ReadyTimeout)
 	return poll, timeout
 }
 
@@ -887,9 +884,7 @@ func (r *Runtime) backoffFor(restarts int32) time.Duration {
 	initial := r.restartBackoff
 	max := r.maxRestartBackoff
 	r.mu.Unlock()
-	if initial <= 0 {
-		initial = DefaultRestartBackoff
-	}
+	initial = opt.Positive(initial, DefaultRestartBackoff)
 	if max < initial {
 		max = initial
 	}

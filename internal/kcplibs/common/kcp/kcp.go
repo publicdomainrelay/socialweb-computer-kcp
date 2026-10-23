@@ -1,6 +1,9 @@
 package kcp
 
-import "strings"
+import (
+	"cmp"
+	"strings"
+)
 
 const (
 	RootWorkspace = "root"
@@ -28,9 +31,7 @@ func ServiceLabels(logicalCluster string) string {
 
 func ServiceFQDN(name, namespace, logicalCluster, domain string) string {
 	labels := ServiceLabels(logicalCluster)
-	if namespace == "" {
-		namespace = "default"
-	}
+	namespace = cmp.Or(namespace, "default")
 	host := name + "." + namespace
 	if labels != "" {
 		host += "." + labels

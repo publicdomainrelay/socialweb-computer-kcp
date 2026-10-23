@@ -1,6 +1,7 @@
 package kcpstore
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -401,9 +402,7 @@ func (s *Store) ClusterPath(ctx context.Context, logicalCluster string) (string,
 }
 
 func (s *Store) MintServiceAccountToken(ctx context.Context, logicalCluster, namespace, name string, ttl time.Duration) (string, error) {
-	if namespace == "" {
-		namespace = "default"
-	}
+	namespace = cmp.Or(namespace, "default")
 	c, err := s.ClientFor(logicalCluster, schema.GroupVersion{Group: "", Version: "v1"})
 	if err != nil {
 		return "", err

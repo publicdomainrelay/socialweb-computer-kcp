@@ -1,6 +1,7 @@
 package queue
 
 import (
+	"cmp"
 	"fmt"
 	"sort"
 	"time"
@@ -97,9 +98,7 @@ func Decision(policy Policy, maxConcurrent *int32, active, ahead int32) (bool, s
 		return true, "", ""
 	}
 	display := policy
-	if display == "" {
-		display = PolicyForbid
-	}
+	display = cmp.Or(display, PolicyForbid)
 	return false, ReasonAtCapacity,
 		fmt.Sprintf("waiting for a free slot (concurrencyPolicy=%s, maxConcurrent=%d)", display, limit)
 }

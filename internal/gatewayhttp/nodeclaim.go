@@ -1,6 +1,7 @@
 package gatewayhttp
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -20,6 +21,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/nodemarket"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
@@ -244,12 +246,8 @@ func NewNodeClaimMapper(opts NodeClaimMapperOptions) (*NodeClaimMapper, error) {
 	if opts.VaultMount == "" {
 		return nil, errors.New("gatewayhttp: node claim mapper has no vault mount")
 	}
-	if opts.VMReadyTimeoutSec <= 0 {
-		opts.VMReadyTimeoutSec = DefaultNodeVMReadyTimeoutSec
-	}
-	if opts.PollInterval <= 0 {
-		opts.PollInterval = DefaultNodePollInterval
-	}
+	opts.VMReadyTimeoutSec = opt.Positive(opts.VMReadyTimeoutSec, DefaultNodeVMReadyTimeoutSec)
+	opts.PollInterval = opt.Positive(opts.PollInterval, DefaultNodePollInterval)
 	if opts.OpenBaoCAFileOf == nil {
 		opts.OpenBaoCAFileOf = DefaultOpenBaoCAFile
 	}
@@ -714,12 +712,8 @@ func desiredStatus(claim NodeClaim, contract *v1alpha1.ComputeContract) *v1alpha
 		var copyOf v1alpha1.NodeClaimContract
 		state.DeepCopyInto(&copyOf)
 		if copyOf.Receipt != nil {
-			if copyOf.ReceiptURI == "" {
-				copyOf.ReceiptURI = copyOf.Receipt.URI
-			}
-			if copyOf.ReceiptCid == "" {
-				copyOf.ReceiptCid = copyOf.Receipt.CID
-			}
+			copyOf.ReceiptURI = cmp.Or(copyOf.ReceiptURI, copyOf.Receipt.URI)
+			copyOf.ReceiptCid = cmp.Or(copyOf.ReceiptCid, copyOf.Receipt.CID)
 		}
 		next.Contract = copyOf
 		if state.VMAddress != "" {
@@ -751,9 +745,7 @@ func desiredStatus(claim NodeClaim, contract *v1alpha1.ComputeContract) *v1alpha
 		case adopt && (phase == v1alpha1.NodeClaimAdopting || inFlight):
 			next.Phase = v1alpha1.NodeClaimRunning
 			next.Message = status.Message
-			if next.Message == "" {
-				next.Message = "adopted"
-			}
+			next.Message = cmp.Or(next.Message, "adopted")
 		case status.SecretsFetchedAt != "" && inFlight:
 			next.Phase = v1alpha1.NodeClaimJoining
 			next.Message = "the node fetched its join secrets and is joining its cluster"
@@ -769,16 +761,12 @@ func desiredStatus(claim NodeClaim, contract *v1alpha1.ComputeContract) *v1alpha
 		} else {
 			next.Phase = v1alpha1.NodeClaimReleased
 			next.Message = status.Message
-			if next.Message == "" {
-				next.Message = "the contract was released"
-			}
+			next.Message = cmp.Or(next.Message, "the contract was released")
 		}
 	case v1alpha1.ComputeContractFailed:
 		next.Phase = v1alpha1.NodeClaimFailed
 		next.Message = status.Message
-		if next.Message == "" {
-			next.Message = "the contract failed"
-		}
+		next.Message = cmp.Or(next.Message, "the contract failed")
 	}
 	if reflect.DeepEqual(claim.Claim.Status, *next) {
 		return nil

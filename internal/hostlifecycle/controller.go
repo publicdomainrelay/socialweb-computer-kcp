@@ -1,6 +1,7 @@
 package hostlifecycle
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -70,9 +71,7 @@ func New(o Options) (*Controller, error) {
 		log = slog.New(slog.DiscardHandler)
 	}
 	fieldManager := o.FieldManager
-	if fieldManager == "" {
-		fieldManager = DefaultFieldManager
-	}
+	fieldManager = cmp.Or(fieldManager, DefaultFieldManager)
 	return &Controller{authority: o.Authority, log: log, fieldManager: fieldManager}, nil
 }
 

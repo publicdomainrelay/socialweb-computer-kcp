@@ -2,6 +2,7 @@ package servicenames
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"maps"
@@ -90,12 +91,8 @@ type Resolver struct {
 }
 
 func New(opts Options) *Resolver {
-	if opts.Domain == "" {
-		opts.Domain = kcp.DefaultServiceDomain
-	}
-	if opts.ServiceAccountNamespace == "" {
-		opts.ServiceAccountNamespace = "default"
-	}
+	opts.Domain = cmp.Or(opts.Domain, kcp.DefaultServiceDomain)
+	opts.ServiceAccountNamespace = cmp.Or(opts.ServiceAccountNamespace, "default")
 	return &Resolver{opts: opts, observed: map[string]map[string]string{}}
 }
 
@@ -212,9 +209,7 @@ func (d *Resolver) Tokens(ctx context.Context, workspaces []string, account *den
 	out := map[string]string{}
 	if account != nil && d.opts.Minter != nil {
 		namespace := account.Namespace
-		if namespace == "" {
-			namespace = d.opts.ServiceAccountNamespace
-		}
+		namespace = cmp.Or(namespace, d.opts.ServiceAccountNamespace)
 		for _, cluster := range workspaces {
 			token, err := d.opts.Minter.MintServiceAccountToken(ctx, cluster, namespace, account.Name, d.opts.TokenTTL)
 			if err != nil {

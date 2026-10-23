@@ -1,6 +1,7 @@
 package hostsvc
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -280,9 +281,7 @@ func ValidateSlice(slice string) error {
 }
 
 func SliceContains(slice, unitSlice string) bool {
-	if unitSlice == "" {
-		unitSlice = DefaultSlice
-	}
+	unitSlice = cmp.Or(unitSlice, DefaultSlice)
 	if unitSlice == slice {
 		return true
 	}

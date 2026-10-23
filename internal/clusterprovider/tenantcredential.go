@@ -22,6 +22,7 @@ import (
 	"k8s.io/client-go/rest"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterstack"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
 )
 
@@ -146,9 +147,7 @@ func MintTenantCredential(o CredentialOptions) (*rest.Config, error) {
 		return nil, err
 	}
 	validFor := o.ValidFor
-	if validFor <= 0 {
-		validFor = DefaultCredentialValidity
-	}
+	validFor = opt.Positive(validFor, DefaultCredentialValidity)
 
 	tlsDir := clusterstack.TLSDir(o.DataDir)
 	caCert, caKey, caPool, err := loadClientCA(
@@ -281,9 +280,7 @@ func mintTenantCredentialFromVault(ctx context.Context, o CredentialOptions, cli
 		return nil, err
 	}
 	validFor := o.ValidFor
-	if validFor <= 0 {
-		validFor = DefaultCredentialValidity
-	}
+	validFor = opt.Positive(validFor, DefaultCredentialValidity)
 
 	tlsDir := clusterstack.TLSDir(o.DataDir)
 	serverCA, err := loadServerCA(filepath.Join(tlsDir, serverCACertName))

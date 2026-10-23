@@ -3,6 +3,7 @@
 package vmruntime
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -46,21 +47,13 @@ func ForHost(cfg Config) (Runtime, error) {
 			return nil, fmt.Errorf("vmruntime: %s path %q is not absolute", name, p)
 		}
 	}
-	if cfg.InnerID == 0 {
-		cfg.InnerID = DefaultInnerID
-	}
+	cfg.InnerID = cmp.Or(cfg.InnerID, DefaultInnerID)
 	if cfg.InnerID <= 0 || cfg.InnerID >= hostcontract.VMSlotIDs {
 		return nil, fmt.Errorf("vmruntime: inner id %d must be inside 1..%d: SELinux refuses pasta as uid 0 of the namespace", cfg.InnerID, hostcontract.VMSlotIDs-1)
 	}
-	if cfg.BootTimeout == 0 {
-		cfg.BootTimeout = DefaultBootTime
-	}
-	if cfg.StopGrace == 0 {
-		cfg.StopGrace = DefaultStopGrace
-	}
-	if cfg.ConsoleCap == 0 {
-		cfg.ConsoleCap = DefaultConsoleCap
-	}
+	cfg.BootTimeout = cmp.Or(cfg.BootTimeout, DefaultBootTime)
+	cfg.StopGrace = cmp.Or(cfg.StopGrace, DefaultStopGrace)
+	cfg.ConsoleCap = cmp.Or(cfg.ConsoleCap, DefaultConsoleCap)
 	target := ImageTarget()
 	if target == "" {
 		return nil, ErrUnsupported
@@ -162,9 +155,7 @@ func (r *firecracker) Prepare(ctx context.Context, spec VMSpec) (Prepared, error
 		return Prepared{}, err
 	}
 	meta := spec.MetaData
-	if meta == "" {
-		meta = "instance-id: " + spec.Name + "\nlocal-hostname: " + spec.Name + "\n"
-	}
+	meta = cmp.Or(meta, "instance-id: "+spec.Name+"\nlocal-hostname: "+spec.Name+"\n")
 	seed := filepath.Join(p.WorkDir, SeedFile)
 	if err := guestdisk.WriteSeed(seed, []byte(spec.UserData), []byte(meta), []byte(guestnet.NetworkConfig())); err != nil {
 		return Prepared{}, err

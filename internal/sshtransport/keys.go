@@ -1,6 +1,7 @@
 package sshtransport
 
 import (
+	"cmp"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayhttp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 const (
@@ -68,12 +70,8 @@ func NewKeys(opts KeysOptions) (*Keys, error) {
 	if opts.Auth == nil {
 		return nil, fmt.Errorf("sshtransport: keys API has no authenticator")
 	}
-	if opts.MaxBodyBytes <= 0 {
-		opts.MaxBodyBytes = KeysDefaultMaxBodyBytes
-	}
-	if opts.MaxKeys <= 0 {
-		opts.MaxKeys = KeysDefaultMaxKeys
-	}
+	opts.MaxBodyBytes = opt.Positive(opts.MaxBodyBytes, KeysDefaultMaxBodyBytes)
+	opts.MaxKeys = opt.Positive(opts.MaxKeys, KeysDefaultMaxKeys)
 	if opts.Log == nil {
 		opts.Log = slog.Default()
 	}
@@ -134,9 +132,7 @@ func (k *Keys) list(w http.ResponseWriter, r *http.Request) {
 			rkey = rkey[slash+1:]
 		}
 		name, _ := record.Value["name"].(string)
-		if name == "" {
-			name = "unnamed"
-		}
+		name = cmp.Or(name, "unnamed")
 		keys = append(keys, keyView{Rkey: rkey, Name: name, KeyID: stringOf(record.Value["keyId"])})
 	}
 	w.Header().Set("Cache-Control", "no-store")
@@ -192,9 +188,7 @@ func (k *Keys) create(w http.ResponseWriter, r *http.Request) {
 	if provided, ok := body.Name.(string); ok && strings.TrimSpace(provided) != "" {
 		name = strings.TrimSpace(provided)
 	}
-	if name == "" {
-		name = "key"
-	}
+	name = cmp.Or(name, "key")
 	if runes := []rune(name); len(runes) > MaxKeyNameLength {
 		name = string(runes[:MaxKeyNameLength])
 	}

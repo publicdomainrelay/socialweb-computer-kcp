@@ -1,6 +1,7 @@
 package gatewaykcp
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -259,9 +260,7 @@ func RunChild(ctx context.Context, c Config, l devinstance.Layout, m hostsvc.Man
 	if err := os.MkdirAll(l.KcpDir(), 0o700); err != nil {
 		return err
 	}
-	if c.RootName == "" {
-		c.RootName = appctl.ChildRootName
-	}
+	c.RootName = cmp.Or(c.RootName, appctl.ChildRootName)
 	c.log().Info("a gateway child application of a market network starts: its workspace of the network's kcp, sets, root vault, members",
 		"state", c.StateDir, "instance", l.ID, "root", c.RootName)
 	return run(ctx, c, l, nil, m)
@@ -318,9 +317,7 @@ func (g *gateway) adopt(rec devinstance.Record) {
 	if rec.SharedKcp != "" {
 		g.kcp = devinstance.Layout{StateDir: rec.SharedKcp}
 	}
-	if g.ws == "" {
-		g.ws = appctl.DefaultWorkspace
-	}
+	g.ws = cmp.Or(g.ws, appctl.DefaultWorkspace)
 }
 
 func clusterConfig(base *rest.Config, ws string) *rest.Config {
@@ -539,9 +536,7 @@ func (g *gateway) members(ctx context.Context, rec devinstance.Record) error {
 		return err
 	}
 	certFrontAddress := g.c.CertFrontAddress
-	if certFrontAddress == "" {
-		certFrontAddress = DefaultAddress
-	}
+	certFrontAddress = cmp.Or(certFrontAddress, DefaultAddress)
 	start(member{"client certificate front", func(ctx context.Context) error {
 		return clientcertfront.Run(ctx, clientcertfront.Config{Address: certFrontAddress, CertFile: cert, KeyFile: key,
 			EdgeDir: filepath.Join(g.c.StateDir, "tls"), ClusterStateDir: env.get("SOCIALWEB_CLUSTERPROVIDER_STATE_DIR"), Deny: deny, Records: deny,

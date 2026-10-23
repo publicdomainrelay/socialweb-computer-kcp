@@ -1,6 +1,7 @@
 package appctl
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -111,9 +112,7 @@ func pdsHandle(workspace, suffix, explicit string) string {
 		}
 	}
 	label := strings.Trim(b.String(), "-")
-	if label == "" {
-		label = "app"
-	}
+	label = cmp.Or(label, "app")
 	return label + "." + suffix + ".local"
 }
 

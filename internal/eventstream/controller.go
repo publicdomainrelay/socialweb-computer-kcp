@@ -117,15 +117,9 @@ func New(opts Options) (*Controller, error) {
 	if opts.Log == nil {
 		opts.Log = slog.New(slog.DiscardHandler)
 	}
-	if opts.RetryAfter <= 0 {
-		opts.RetryAfter = DefaultRetryAfter
-	}
-	if opts.StatusInterval <= 0 {
-		opts.StatusInterval = DefaultStatusInterval
-	}
-	if opts.ReconnectDelay <= 0 {
-		opts.ReconnectDelay = DefaultReconnectDelay
-	}
+	opts.RetryAfter = opt.Positive(opts.RetryAfter, DefaultRetryAfter)
+	opts.StatusInterval = opt.Positive(opts.StatusInterval, DefaultStatusInterval)
+	opts.ReconnectDelay = opt.Positive(opts.ReconnectDelay, DefaultReconnectDelay)
 	if opts.MaxReconnectWait < opts.ReconnectDelay {
 		opts.MaxReconnectWait = DefaultMaxReconnectWait
 	}

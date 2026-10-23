@@ -4,6 +4,7 @@ package devsup
 
 import (
 	"bytes"
+	"cmp"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -125,9 +126,7 @@ func (s *server) notified(u *unit, st *fdStore, pid int, msg []byte, fds []int) 
 	}
 	f := notifyFields(msg)
 	name := f["FDNAME"]
-	if name == "" {
-		name = "stored"
-	}
+	name = cmp.Or(name, "stored")
 	if f["FDSTOREREMOVE"] == "1" {
 		keep := st.fds[:0]
 		for _, sfd := range st.fds {

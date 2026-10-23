@@ -4,6 +4,7 @@ package devsup
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -786,12 +787,8 @@ func (s *server) unitEnv(u *unit, inv string) []string {
 func (s *server) launch(u *unit) error {
 	logPath := filepath.Join(s.o.State, "logs", u.spec.Name+".log")
 	outPath, errPath := u.spec.Output.StdoutFile, u.spec.Output.StderrFile
-	if outPath == "" {
-		outPath = logPath
-	}
-	if errPath == "" {
-		errPath = logPath
-	}
+	outPath = cmp.Or(outPath, logPath)
+	errPath = cmp.Or(errPath, logPath)
 	out, err := s.openOutput(outPath)
 	if err != nil {
 		return err
@@ -808,9 +805,7 @@ func (s *server) launch(u *unit) error {
 	}
 	defer null.Close()
 	dir := u.spec.WorkDir
-	if dir == "" {
-		dir = "/"
-	}
+	dir = cmp.Or(dir, "/")
 	inv := newID()
 	env := s.unitEnv(u, inv)
 	files := []*os.File{null, out, errf}
@@ -981,9 +976,7 @@ func (s *server) identify(name string, pid int) (hostsvc.Identity, error) {
 	if !ok || st.State != hostsvc.Active {
 		return hostsvc.Identity{}, fmt.Errorf("hostsvc: %s is %s, not active, and has no identity to record", name, s.inspect(name).State)
 	}
-	if pid == 0 {
-		pid = st.MainPID
-	}
+	pid = cmp.Or(pid, st.MainPID)
 	ticks, err := pin(pid)
 	if err != nil {
 		return hostsvc.Identity{}, fmt.Errorf("hostsvc: pinning pid %d of %s: %w", pid, name, err)

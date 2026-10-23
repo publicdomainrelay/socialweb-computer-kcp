@@ -1,6 +1,7 @@
 package clusterprovider
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,6 +16,7 @@ import (
 	"k8s.io/client-go/rest"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/materialiser"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/portallocator"
@@ -234,12 +236,8 @@ func New(opts Options) (*Provider, error) {
 	if opts.Probe == nil {
 		opts.Probe = Probe
 	}
-	if opts.Interval == 0 {
-		opts.Interval = DefaultInterval
-	}
-	if opts.AddOnInterval <= 0 {
-		opts.AddOnInterval = DefaultAddOnInterval
-	}
+	opts.Interval = cmp.Or(opts.Interval, DefaultInterval)
+	opts.AddOnInterval = opt.Positive(opts.AddOnInterval, DefaultAddOnInterval)
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}

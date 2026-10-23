@@ -1,6 +1,7 @@
 package exposure
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -170,9 +171,7 @@ func (r *SubscriberRegistrar) Register(ctx context.Context, spec IngressSpec) (I
 	if publicHost == "" {
 		publicHost = hostport.URLHostname(strings.TrimSpace(spec.IngressAddress))
 	}
-	if publicHost == "" {
-		publicHost = host
-	}
+	publicHost = cmp.Or(publicHost, host)
 	urlHost := hostport.DIDLabel(did) + "." + publicHost
 	path := normalizePath(spec.Path)
 	raw := scheme + "://" + urlHost + path
@@ -181,9 +180,7 @@ func (r *SubscriberRegistrar) Register(ctx context.Context, spec IngressSpec) (I
 
 func (r *SubscriberRegistrar) proxyHost(spec IngressSpec) (string, bool, error) {
 	name := strings.TrimSpace(spec.IngressRef)
-	if name == "" {
-		name = DefaultIngressName
-	}
+	name = cmp.Or(name, DefaultIngressName)
 	workspace := strings.TrimSpace(spec.Workspace)
 	for _, endpointName := range []string{"control", "http", "https"} {
 		endpoint, ok := r.deps.Registry.Endpoint(workspace, "IngressProxy", name, endpointName)
@@ -252,9 +249,7 @@ func (r *SubscriberRegistrar) handler(target component.Key, name string) func(co
 			return nil, fmt.Errorf("no HTTP handler %q is registered for %s/%s", handlerName(name), target.Kind, target.Name)
 		}
 		path := request.Path
-		if path == "" {
-			path = "/"
-		}
+		path = cmp.Or(path, "/")
 		if !strings.HasPrefix(path, "/") {
 			path = "/" + path
 		}

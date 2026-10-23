@@ -25,6 +25,7 @@ import (
 
 	v1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 const (
@@ -98,9 +99,7 @@ func NewController(opts Options) (*Controller, error) {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	if opts.RetryAfter <= 0 {
-		opts.RetryAfter = DefaultRetryAfter
-	}
+	opts.RetryAfter = opt.Positive(opts.RetryAfter, DefaultRetryAfter)
 	return &Controller{
 		workspace: workspace,
 		dynamic:   opts.Dynamic,
@@ -789,9 +788,7 @@ func (w *watcher) round(ctx context.Context) error {
 }
 
 func wait(ctx context.Context, d time.Duration, kick <-chan struct{}) bool {
-	if d <= 0 {
-		d = DefaultRetryAfter
-	}
+	d = opt.Positive(d, DefaultRetryAfter)
 	timer := time.NewTimer(d)
 	defer timer.Stop()
 	select {

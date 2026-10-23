@@ -1,6 +1,7 @@
 package bidder
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -60,9 +61,7 @@ func InstanceID(handle string) string {
 func AppName(handle string) string {
 	first, _, _ := strings.Cut(strings.ToLower(handle), ".")
 	name := strings.Trim(nonLabel.ReplaceAllString(first, "-"), "-")
-	if name == "" {
-		name = "bidder"
-	}
+	name = cmp.Or(name, "bidder")
 	return name
 }
 
@@ -81,9 +80,7 @@ type SpecInput struct {
 
 func Spec(in SpecInput) (v1alpha1.MarketBidderSpec, error) {
 	mode := in.Mode
-	if mode == "" {
-		mode = v1alpha1.MarketIdentityModeLocalRepo
-	}
+	mode = cmp.Or(mode, v1alpha1.MarketIdentityModeLocalRepo)
 	if in.Profile == appctl.BidderProfileProdQr && in.Handle == "" {
 		return v1alpha1.MarketBidderSpec{}, errors.New("bidder: profile prod-qr needs --handle: the QR sign-in is refused for any other account")
 	}
@@ -99,12 +96,8 @@ func Spec(in SpecInput) (v1alpha1.MarketBidderSpec, error) {
 	if n == nil {
 		n = &v1alpha1.MarketNetworkValue{}
 	}
-	if n.PLCDirectoryURL == "" {
-		n.PLCDirectoryURL = PublicPlc
-	}
-	if n.IngressProxyHost == "" {
-		n.IngressProxyHost = PublicIngress
-	}
+	n.PLCDirectoryURL = cmp.Or(n.PLCDirectoryURL, PublicPlc)
+	n.IngressProxyHost = cmp.Or(n.IngressProxyHost, PublicIngress)
 	if n.RelayURLs == nil {
 		n.RelayURLs = []string{}
 	}

@@ -16,6 +16,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gateway"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/xrpcserver"
 )
 
@@ -244,9 +245,7 @@ func (x *XRPCClusterGateway) call(ctx context.Context, c ClusterCaller, nsid str
 		req.Header.Set("Content-Type", "application/json")
 	}
 	timeout := x.Timeout
-	if timeout <= 0 {
-		timeout = 30 * time.Second
-	}
+	timeout = opt.Positive(timeout, 30*time.Second)
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	req = req.WithContext(cctx)
@@ -370,12 +369,8 @@ func NewClusterAPI(opts ClusterOptions) (*ClusterAPI, error) {
 	if opts.Caller == nil {
 		return nil, errors.New("gatewayhttp: no caller authenticator")
 	}
-	if opts.MaxKubeconfigTTLSec <= 0 {
-		opts.MaxKubeconfigTTLSec = DefaultMaxKubeconfigTTL
-	}
-	if opts.MaxBodyBytes <= 0 {
-		opts.MaxBodyBytes = DefaultMaxBodyBytes
-	}
+	opts.MaxKubeconfigTTLSec = opt.Positive(opts.MaxKubeconfigTTLSec, DefaultMaxKubeconfigTTL)
+	opts.MaxBodyBytes = opt.Positive(opts.MaxBodyBytes, DefaultMaxBodyBytes)
 	choices := make([]int64, 0, len(ttlChoices))
 	for _, c := range ttlChoices {
 		if c <= opts.MaxKubeconfigTTLSec {
