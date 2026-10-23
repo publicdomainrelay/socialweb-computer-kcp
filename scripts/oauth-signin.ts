@@ -4,6 +4,7 @@ import { parseArgs } from "jsr:@std/cli@1/parse-args";
 
 const args = parseArgs(Deno.args, {
   string: ["creds", "account", "url", "out", "done", "chrome", "sign-in-as", "cookie-file", "chrome-arg", "click"],
+  boolean: ["start-api"],
   collect: ["chrome-arg"],
 });
 const fail = (msg: string): never => {
@@ -50,8 +51,26 @@ const clickButton = (re: string) =>
   }, re);
 
 try {
-  await page.goto(args.url!, { waitUntil: "networkidle2" });
-  await step("start");
+  if (args["start-api"]) {
+    const res = await fetch(origin + "/oauth/start", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ handle }),
+    });
+    const body = await res.text();
+    if (res.status !== 200) throw new Error(`oauth start answered ${res.status}: ${body}`);
+    const cookie = res.headers.get("set-cookie")?.split(";")[0];
+    if (!cookie) throw new Error("oauth start returned no state cookie");
+    const eq = cookie.indexOf("=");
+    await page.setCookie({ name: cookie.slice(0, eq), value: cookie.slice(eq + 1), url: origin + "/" });
+    const authorizationUrl = JSON.parse(body).authorizationUrl;
+    if (typeof authorizationUrl !== "string" || !authorizationUrl) throw new Error("oauth start returned no authorizationUrl");
+    await page.goto(authorizationUrl, { waitUntil: "networkidle2" });
+    await step("start");
+  } else {
+    await page.goto(args.url!, { waitUntil: "networkidle2" });
+    await step("start");
+  }
 
   const handleInput = await page.$(
     '#handle, input[name="handle"], input[placeholder*="handle" i], input[type="text"]:not([hidden]), input:not([type]):not([hidden]), input[type="url"], input[type="email"]',

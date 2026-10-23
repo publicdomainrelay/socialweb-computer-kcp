@@ -385,7 +385,7 @@ sudo ls -l /etc/caddy/socialweb-computer
 
 After a fresh deploy the requester has no web app session, so cluster claims log
 `no oauth session stored`. Sign in with `scripts/oauth-signin.ts --creds <file> --account ALICE
---url https://k8s.socialweb.computer/`.
+--url https://k8s.socialweb.computer/ --start-api`.
 
 Upgrade a gateway: run the same `scripts/deploy.sh` with the new `BINARY` and `SHA256`. It runs
 `upgrade --binary --sha256` as the account, then `install gateway` again with `bin/current`. A routine

@@ -15,12 +15,8 @@ kcp objects such as `ComputeVM`, `ComputeContract`, `NodeClaim`, and `HostProces
 
 ## Use the hosted gateway
 
-`https://k8s.socialweb.computer` is the production gateway. No account with us, no API key. Sign in
-with your own atproto account.
-
-```bash
-open https://k8s.socialweb.computer
-```
+`https://k8s.socialweb.computer` is the production gateway. No account with us, no API key. It is
+API-only: authenticate each XRPC call with a service-auth token from your own atproto account.
 
 Create a cluster and download a kubeconfig over XRPC. `goat` is the Bluesky CLI.
 
