@@ -879,7 +879,7 @@ items:
     track: config
     parallel_with: [W3-ROOTS, W3-STATUS]
     depends_on: [W2-REPO, W2-PDS, W2-VAULT, W2-EVENTS, W2-COMPUTE, W2-POLICY]
-    status: doing
+    status: done
     decision: >
       Delete every ConfigFrom, every service Config struct that copies a
       spec, the overrides.go type switch and per-kind validation. Services
