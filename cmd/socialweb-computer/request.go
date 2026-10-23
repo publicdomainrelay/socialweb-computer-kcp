@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
@@ -513,7 +514,8 @@ func (r *requestRun) ssh(ctx context.Context, c *v1alpha1.ComputeContract) (int,
 
 func (r *requestRun) whileHeld(ctx context.Context) (context.Context, func()) {
 	held, cancel := context.WithCancelCause(ctx)
-	go func() {
+	var wg sync.WaitGroup
+	wg.Go(func() {
 		for {
 			select {
 			case <-held.Done():
@@ -526,8 +528,11 @@ func (r *requestRun) whileHeld(ctx context.Context) (context.Context, func()) {
 				return
 			}
 		}
-	}()
-	return held, func() { cancel(nil) }
+	})
+	return held, func() {
+		cancel(nil)
+		wg.Wait()
+	}
 }
 
 func (r *requestRun) release(ctx context.Context) (*v1alpha1.ComputeContract, error) {
