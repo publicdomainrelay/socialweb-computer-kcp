@@ -20,6 +20,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/irohdial"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 const (
@@ -66,7 +68,11 @@ func SshGatewayValues(spec v1alpha1.SshGatewaySpec, stateDir string, l devinstan
 	v.EnvAllow = string(env)
 	var extra, read []string
 	if n := spec.Network; n != nil {
-		v.CABundle = n.CaBundleRef
+		caFile, err := NetworkCAFile(stateDir, n)
+		if err != nil {
+			return v, err
+		}
+		v.CABundle = caFile
 		for _, kv := range [][2]string{
 			{"--plc-directory-url", n.PLCDirectoryURL},
 			{"--ingress-proxy-host", n.IngressProxyHost},
@@ -274,28 +280,29 @@ func sshGatewayDesired(o v1alpha1.SshGateway, plan accountPlan, ident *v1alpha1.
 		hostnames = []string{ident.Handle}
 	}
 	mode, publicOrigin, oauthClientID, oauthRedirectURI, guestSSHKeysFile := requesterComponentFields(o.Spec.Options, plan.Mode)
-	var requesterPdsRef *v1alpha1.ComponentRef
+	var requesterPdsRef *commonv1.ObjectRef
 	if plan.Local {
 		requesterPdsRef = nil
 	} else {
 		requesterPdsRef = plan.PdsRef
 	}
 	requester := desiredComponent{Kind: ComponentKindRequester, Name: RequesterComponent, Spec: v1alpha1.RequesterSpec{
-		ComponentSpec:      NewComponentSpec(ComponentCRStateDir(stateRoot, ComponentKindRequester, RequesterComponent), network, suspend),
-		Identity:           ident,
-		PdsRef:             requesterPdsRef,
-		PDSAccessTokenPath: plan.accessTokenPath(),
-		PolicyEngineRef:    ComponentRefFor(ComponentKindPolicyEngine, PolicyEngineComponent),
-		Hostnames:          hostnames,
-		Mode:               mode,
-		PublicOrigin:       publicOrigin,
-		OAuthClientID:      oauthClientID,
-		OAuthRedirectURI:   oauthRedirectURI,
-		GuestSSHKeysFile:   guestSSHKeysFile,
-		OwnerSessionsFile:  o.Spec.OwnerSessionsFile,
-		IrohSocket:         sshGatewayIrohSocket(stateRoot),
-		AcceptCopies:       int32(optionInt(o.Spec.Options, "accept-copies")),
-		Comms:              o.Spec.Comms,
+		ComponentSpec:     NewComponentSpec(ComponentCRStateDir(stateRoot, ComponentKindRequester, RequesterComponent), network, suspend),
+		Identity:          ident,
+		PdsRef:            requesterPdsRef,
+		PdsDID:            plan.PdsDID,
+		PDSAccessToken:    plan.accessToken(),
+		PolicyEngineRef:   ComponentRefFor(ComponentKindPolicyEngine, PolicyEngineComponent),
+		Hostnames:         hostnames,
+		Mode:              mode,
+		PublicOrigin:      publicOrigin,
+		OAuthClientID:     oauthClientID,
+		OAuthRedirectURI:  oauthRedirectURI,
+		GuestSSHKeysFile:  guestSSHKeysFile,
+		OwnerSessionsFile: o.Spec.OwnerSessionsFile,
+		IrohSocket:        sshGatewayIrohSocket(stateRoot),
+		AcceptCopies:      int32(optionInt(o.Spec.Options, "accept-copies")),
+		Comms:             o.Spec.Comms,
 	}}
 	sshServer := desiredComponent{Kind: ComponentKindSshServer, Name: SshServerComponent, Spec: v1alpha1.SshServerSpec{
 		ComponentSpec:     NewComponentSpec(ComponentCRStateDir(stateRoot, ComponentKindSshServer, SshServerComponent), network, suspend),

@@ -124,7 +124,7 @@ func repoBindingFor(workspace string, spec v1alpha1.AtprotoRepoSpec) (pdsclient.
 		return pdsclient.RepoBinding{}, errors.New("the AtprotoRepo pdsRef has no name")
 	}
 	if spec.AuthRef != nil {
-		binding.AuthRef = strings.TrimSpace(spec.AuthRef.Name)
+		binding.AuthRef = spec.AuthRef.DeepCopy()
 	}
 	return binding, nil
 }

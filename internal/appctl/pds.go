@@ -33,6 +33,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 const (
@@ -57,8 +59,8 @@ func pdsSessionPath(name string) string {
 	return "identity/" + name + "/pds-session"
 }
 
-func pdsAccessTokenPath(name string) string {
-	return "openbao:" + pdsSessionPath(name)
+func pdsAccessTokenFor(name string) *commonv1.SecretRef {
+	return &commonv1.SecretRef{Path: pdsSessionPath(name)}
 }
 
 func firstString(m map[string]any, keys ...string) string {
@@ -118,7 +120,7 @@ func pdsHandle(workspace, suffix, explicit string) string {
 
 func appPdsFallbackURL(network *v1alpha1.MarketNetworkValue, hostnames []string) string {
 	if network != nil {
-		if host := hostOf(network.GuestTlsUrl); host != "" {
+		if host := hostOf(network.GuestTLSURL()); host != "" {
 			return "https://" + host
 		}
 		if host := hostOf(network.IngressProxyHost); host != "" {
@@ -169,8 +171,8 @@ func (ctl *Controller) pdsExposureURLOf(ctx context.Context, ws, name, suffix st
 	return raw
 }
 
-func appPdsSpec(stateRoot string, network *v1alpha1.MarketNetworkValue, handle string, vault *v1alpha1.ComponentRef,
-	hostnames []string, suspend bool, publicURL string, requireIngress bool, ingressRef *v1alpha1.ComponentRef) (v1alpha1.PdsSpec, error) {
+func appPdsSpec(stateRoot string, network *v1alpha1.MarketNetworkValue, handle string, vault *commonv1.ObjectRef,
+	hostnames []string, suspend bool, publicURL string, requireIngress bool, ingressRef *commonv1.ObjectRef) (v1alpha1.PdsSpec, error) {
 	plcURL := ""
 	if network != nil {
 		plcURL = strings.TrimSpace(network.PLCDirectoryURL)
@@ -202,21 +204,18 @@ func appPdsSpec(stateRoot string, network *v1alpha1.MarketNetworkValue, handle s
 		oauth = &v1alpha1.PdsOAuth{Issuer: publicURL, AllowLocalhostClients: true}
 	}
 	return v1alpha1.PdsSpec{
-		ComponentSpec:     NewComponentSpec(stateDir, network, suspend),
-		Identity:          &v1alpha1.ComponentIdentity{Handle: handle},
-		VaultRef:          vault,
-		Hostnames:         hostnames,
-		Mode:              v1alpha1.PdsModeFull,
-		PlcURL:            plcURL,
-		PublicBaseURL:     publicURL,
-		RequireIngress:    requireIngress,
-		IngressRef:        ingressRef,
-		PublicURL:         publicURL,
-		StableHost:        stableHost,
-		RepoKeyPath:       filepath.Join(stateDir, pdsRepoKeyDir),
-		SessionSecretPath: filepath.Join(stateDir, pdsSessionSecretFile),
-		RotationKeyPath:   filepath.Join(stateDir, pdsRotationKeyFile),
-		OAuth:             oauth,
+		ComponentSpec:  NewComponentSpec(stateDir, network, suspend),
+		Identity:       &v1alpha1.ComponentIdentity{Handle: handle},
+		VaultRef:       vault,
+		Hostnames:      hostnames,
+		Mode:           v1alpha1.PdsModeFull,
+		PlcURL:         plcURL,
+		PublicBaseURL:  publicURL,
+		RequireIngress: requireIngress,
+		IngressRef:     ingressRef,
+		PublicURL:      publicURL,
+		StableHost:     stableHost,
+		OAuth:          oauth,
 	}, nil
 }
 
@@ -235,7 +234,7 @@ func (ctl *Controller) pdsEndpointIn(ctx context.Context, ws, name string) strin
 	return endpointURL(e)
 }
 
-func (ctl *Controller) ensurePdsAccountInVault(ctx context.Context, server, clientName, path, pdsURL, caFile, handle string) (PdsSession, error) {
+func (ctl *Controller) ensurePdsAccountInVault(ctx context.Context, server, clientName, path, pdsURL, caPEM, handle string) (PdsSession, error) {
 	client, _, c, err := ctl.vaultClient(ctx, server, clientName)
 	if err != nil {
 		return PdsSession{}, err
@@ -252,7 +251,7 @@ func (ctl *Controller) ensurePdsAccountInVault(ctx context.Context, server, clie
 		data = map[string]any{}
 	}
 	if sess := pdsSessionOf(data); sess.Did != "" && sess.AccessJWT != "" && pdsAccessTokenLive(sess.AccessJWT) {
-		if ctl.pdsSessionUsable(ctx, pdsURL, caFile, sess) {
+		if ctl.pdsSessionUsable(ctx, pdsURL, caPEM, sess) {
 			return sess, nil
 		}
 		ctl.c.log().Info("the application's stored PDS session is no longer accepted; signing in again", "did", sess.Did)
@@ -265,7 +264,7 @@ func (ctl *Controller) ensurePdsAccountInVault(ctx context.Context, server, clie
 		}
 		password = hex.EncodeToString(buf)
 	}
-	sess, err := ctl.ensurePdsAccountSession(ctx, pdsURL, caFile, handle, password)
+	sess, err := ctl.ensurePdsAccountSession(ctx, pdsURL, caPEM, handle, password)
 	if err != nil {
 		return PdsSession{}, err
 	}
@@ -282,11 +281,11 @@ func (ctl *Controller) ensurePdsAccountInVault(ctx context.Context, server, clie
 	return sess, nil
 }
 
-func (ctl *Controller) pdsSessionUsable(ctx context.Context, pdsURL, caFile string, sess PdsSession) bool {
+func (ctl *Controller) pdsSessionUsable(ctx context.Context, pdsURL, caPEM string, sess PdsSession) bool {
 	if strings.TrimSpace(sess.Did) == "" || strings.TrimSpace(sess.AccessJWT) == "" {
 		return false
 	}
-	pds, err := ctl.pdsForToken(pdsURL, caFile, sess.AccessJWT)
+	pds, err := ctl.pdsForToken(pdsURL, caPEM, sess.AccessJWT)
 	if err != nil {
 		return false
 	}
@@ -535,9 +534,9 @@ func (ctl *Controller) bidderPassword(ctx context.Context) (string, manifests.Bi
 	return password, manifests.BidderVault{Server: BidderVaultServer, Client: BidderVaultClient}, nil
 }
 
-func (ctl *Controller) ensurePdsAccountSession(ctx context.Context, pdsURL, caFile, handle, password string) (PdsSession, error) {
+func (ctl *Controller) ensurePdsAccountSession(ctx context.Context, pdsURL, caPEM, handle, password string) (PdsSession, error) {
 	domain := handle[strings.Index(handle, ".")+1:]
-	pds, err := ctl.pdsFor(pdsURL, caFile)
+	pds, err := ctl.pdsFor(pdsURL, caPEM)
 	if err != nil {
 		return PdsSession{}, err
 	}
@@ -551,9 +550,9 @@ func (ctl *Controller) ensurePdsAccountSession(ctx context.Context, pdsURL, caFi
 	return pdsSessionFromSession(sess), nil
 }
 
-func EnsurePdsAccountSession(ctx context.Context, pdsURL, caFile, handle, password string) (PdsSession, error) {
+func EnsurePdsAccountSession(ctx context.Context, pdsURL, caPEM, handle, password string) (PdsSession, error) {
 	domain := handle[strings.Index(handle, ".")+1:]
-	pds, err := pdsClientAt(pdsURL, caFile)
+	pds, err := pdsClientAt(pdsURL, caPEM)
 	if err != nil {
 		return PdsSession{}, err
 	}
@@ -571,8 +570,8 @@ func pdsSessionFromSession(sess pdsclient.Session) PdsSession {
 	return PdsSession{Did: sess.DID.String(), AccessJWT: sess.AccessJWT, RefreshJWT: sess.RefreshJWT}
 }
 
-func EnsurePdsAccount(ctx context.Context, pdsURL, caFile, handle, password string) (string, error) {
-	sess, err := EnsurePdsAccountSession(ctx, pdsURL, caFile, handle, password)
+func EnsurePdsAccount(ctx context.Context, pdsURL, caPEM, handle, password string) (string, error) {
+	sess, err := EnsurePdsAccountSession(ctx, pdsURL, caPEM, handle, password)
 	if err != nil {
 		return "", err
 	}
@@ -586,7 +585,7 @@ func (ctl *Controller) bidderVault(ctx context.Context, spec v1alpha1.MarketBidd
 		if err != nil {
 			return v, err
 		}
-		did, err := EnsurePdsAccount(ctx, spec.Identity.PdsURL, spec.Network.CaBundleRef, spec.Identity.Handle, password)
+		did, err := EnsurePdsAccount(ctx, spec.Identity.PdsURL, spec.Network.CABundle, spec.Identity.Handle, password)
 		if err != nil {
 			return v, err
 		}

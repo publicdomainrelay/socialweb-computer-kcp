@@ -20,6 +20,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vaultlayout"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 const (
@@ -260,7 +262,7 @@ func gatewayNodeMarket(o v1alpha1.Gateway, workspace string) *v1alpha1.GatewayNo
 }
 
 func (ctl *Controller) gatewayDesired(ctx context.Context, o v1alpha1.Gateway, plan accountPlan, id *v1alpha1.MarketIdentity, ws, stateRoot, downloadsDir, clusterCADir, workspace, pdsHandle, pdsPublicURL string,
-	ingress *v1alpha1.IngressConfig, requireIngress bool, ingressRef *v1alpha1.ComponentRef) ([]desiredComponent, error) {
+	ingress *v1alpha1.IngressConfig, requireIngress bool, ingressRef *commonv1.ObjectRef) ([]desiredComponent, error) {
 	suspend := o.Spec.Suspend
 	network := o.Spec.Network
 	ident := componentIdentity(id, o.Spec.Identity.Handle)
@@ -285,7 +287,7 @@ func (ctl *Controller) gatewayDesired(ctx context.Context, o v1alpha1.Gateway, p
 	}
 	var tlsSpec *v1alpha1.ComponentTLS
 	if network != nil {
-		tlsSpec = &v1alpha1.ComponentTLS{Enabled: true, Hostnames: hostnames, CaBundleRef: network.CaBundleRef}
+		tlsSpec = &v1alpha1.ComponentTLS{Enabled: true, Hostnames: hostnames, CABundle: network.CABundle}
 	}
 	publicOrigin := optionValue(o.Spec.Options, publicOriginOption)
 	audience := optionValue(o.Spec.Options, GatewayAudienceOption)
@@ -309,33 +311,34 @@ func (ctl *Controller) gatewayDesired(ctx context.Context, o v1alpha1.Gateway, p
 		}
 		pds = desiredComponent{Kind: ComponentKindPds, Name: PdsComponent, Spec: pdsSpec}
 	}
-	var requesterPdsRef *v1alpha1.ComponentRef
-	pdsAccessTokenPathValue := ""
+	var requesterPdsRef *commonv1.ObjectRef
+	requesterPdsDID := ""
+	pdsAccessToken := plan.accessToken()
 	if plan.Local {
 		requesterPdsRef = ComponentRefFor(ComponentKindPds, PdsComponent)
-		pdsAccessTokenPathValue = pdsAccessTokenPath("requester")
+		pdsAccessToken = pdsAccessTokenFor("requester")
 	} else {
-		requesterPdsRef = plan.PdsRef
-		pdsAccessTokenPathValue = plan.accessTokenPath()
+		requesterPdsRef, requesterPdsDID = plan.PdsRef, plan.PdsDID
 	}
 	requester := desiredComponent{Kind: ComponentKindRequester, Name: RequesterComponent, Spec: v1alpha1.RequesterSpec{
-		ComponentSpec:      NewComponentSpec(ComponentCRStateDir(stateRoot, ComponentKindRequester, RequesterComponent), network, suspend),
-		Identity:           ident,
-		PdsRef:             requesterPdsRef,
-		PDSAccessTokenPath: pdsAccessTokenPathValue,
-		PolicyEngineRef:    ComponentRefFor(ComponentKindPolicyEngine, PolicyEngineComponent),
-		VaultRef:           vault,
-		Hostnames:          hostnames,
-		Mode:               mode,
-		PublicOrigin:       requesterOrigin,
-		MarketURL:          ctl.requesterMarketURL(ctx, ws),
-		OperatorDID:        requesterOperatorDID(id),
-		OAuthClientID:      oauthClientID,
-		OAuthRedirectURI:   oauthRedirectURI,
-		GuestSSHKeysFile:   guestSSHKeysFile,
-		BidderDIDs:         append([]string(nil), o.Spec.BidderDids...),
-		AcceptCopies:       int32(optionInt(o.Spec.Options, "accept-copies")),
-		Comms:              o.Spec.Comms,
+		ComponentSpec:     NewComponentSpec(ComponentCRStateDir(stateRoot, ComponentKindRequester, RequesterComponent), network, suspend),
+		Identity:          ident,
+		PdsRef:            requesterPdsRef,
+		PdsDID:            requesterPdsDID,
+		PDSAccessToken:    pdsAccessToken,
+		PolicyEngineRef:   ComponentRefFor(ComponentKindPolicyEngine, PolicyEngineComponent),
+		VaultRef:          vault,
+		Hostnames:         hostnames,
+		Mode:              mode,
+		PublicOrigin:      requesterOrigin,
+		MarketExposureRef: ctl.requesterMarketExposure(ctx, ws),
+		OperatorDID:       requesterOperatorDID(id),
+		OAuthClientID:     oauthClientID,
+		OAuthRedirectURI:  oauthRedirectURI,
+		GuestSSHKeysFile:  guestSSHKeysFile,
+		BidderDIDs:        append([]string(nil), o.Spec.BidderDids...),
+		AcceptCopies:      int32(optionInt(o.Spec.Options, "accept-copies")),
+		Comms:             o.Spec.Comms,
 	}}
 	gatewayBase := NewComponentSpec(ComponentCRStateDir(stateRoot, ComponentKindGatewayAPI, GatewayAPIComponent), network, suspend)
 	gatewayBase.TLS = tlsSpec
@@ -343,7 +346,7 @@ func (ctl *Controller) gatewayDesired(ctx context.Context, o v1alpha1.Gateway, p
 	if kubeconfigCAFile == "" && o.Spec.Profile != ProfileGatewayProd {
 		kubeconfigCAFile = filepath.Join(stateRoot, "tls", "tls.crt")
 	}
-	var gatewayPdsRef *v1alpha1.ComponentRef
+	var gatewayPdsRef *commonv1.ObjectRef
 	if plan.Local {
 		gatewayPdsRef = ComponentRefFor(ComponentKindPds, PdsComponent)
 	}
@@ -615,11 +618,11 @@ func (ctl *Controller) reconcileGateway(ctx context.Context, u *unstructured.Uns
 			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for the requester's app Pds endpoint"
 			return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
 		}
-		caFile := ""
+		caPEM := ""
 		if o.Spec.Network != nil {
-			caFile = o.Spec.Network.CaBundleRef
+			caPEM = o.Spec.Network.CABundle
 		}
-		sess, err := ctl.ensurePdsAccountInVault(ctx, vaultlayout.RootServerName, RequesterVaultClient, pdsSessionPath("requester"), endpoint, caFile, pdsAccountHandle)
+		sess, err := ctl.ensurePdsAccountInVault(ctx, vaultlayout.RootServerName, RequesterVaultClient, pdsSessionPath("requester"), endpoint, caPEM, pdsAccountHandle)
 		if err != nil {
 			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "its app Pds account: "+err.Error()
 			return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
@@ -712,7 +715,10 @@ func GatewayPds(v manifests.Gateway, stateDir string, n *v1alpha1.MarketNetworkV
 	var ca string
 	var err error
 	if n != nil {
-		p.PlcDirectoryUrl, p.IngressProxyHost, ca = n.PLCDirectoryURL, n.IngressProxyHost, n.CaBundleRef
+		if ca, err = NetworkCAFile(stateDir, n); err != nil {
+			return p, err
+		}
+		p.PlcDirectoryUrl, p.IngressProxyHost = n.PLCDirectoryURL, n.IngressProxyHost
 		if p.WatchRelayUrls, err = listFragment(append(append([]string{}, n.RelayURLs...), n.FirehoseURLs...)...); err != nil {
 			return p, err
 		}
@@ -769,10 +775,14 @@ func GatewayValues(o v1alpha1.Gateway, workspace, stateDir, requesterStateDir st
 	var trust, read []string
 	var extra, requesterExtra []string
 	if n := o.Spec.Network; n != nil {
-		if n.CaBundleRef != "" {
-			v.TLS, trust = manifests.TLSTrust, []string{n.CaBundleRef}
+		caFile, err := NetworkCAFile(stateDir, n)
+		if err != nil {
+			return manifests.Gateway{}, err
+		}
+		if caFile != "" {
+			v.TLS, trust = manifests.TLSTrust, []string{caFile}
 			if o.Spec.Profile == ProfileGatewayNetwork {
-				q, err := json.Marshal(n.CaBundleRef)
+				q, err := json.Marshal(caFile)
 				if err != nil {
 					return manifests.Gateway{}, err
 				}
@@ -795,8 +805,8 @@ func GatewayValues(o v1alpha1.Gateway, workspace, stateDir, requesterStateDir st
 		if n.QrOrigin != "" {
 			requesterExtra = append(requesterExtra, "--qr-origin", n.QrOrigin)
 		}
-		if n.GuestTlsUrl != "" {
-			p, err := portOf(n.GuestTlsUrl)
+		if n.GuestTLSURL() != "" {
+			p, err := portOf(n.GuestTLSURL())
 			if err != nil {
 				return manifests.Gateway{}, fmt.Errorf("appctl: network guestTlsUrl: %w", err)
 			}

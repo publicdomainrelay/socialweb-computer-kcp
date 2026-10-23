@@ -17,9 +17,12 @@ import (
 
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/remotepds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/statusstate"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 const EnvPdsAccountPassword = "ATPROTO_PASSWORD"
@@ -50,7 +53,7 @@ type accountPlan struct {
 
 	Identity v1alpha1.MarketIdentitySpec
 
-	PdsRef *v1alpha1.ComponentRef
+	PdsRef *commonv1.ObjectRef
 
 	RemotePDS *pdsv1alpha1.RemotePDS
 
@@ -62,19 +65,21 @@ type accountPlan struct {
 
 	ComponentMode string
 
-	MarketURL string
+	MarketExposure *commonv1.LocalObjectRef
+
+	PdsDID string
 
 	Vault accountVault
 }
 
-func (p accountPlan) accessTokenPath() string {
+func (p accountPlan) accessToken() *commonv1.SecretRef {
 	if p.SessionPath == "" {
-		return ""
+		return nil
 	}
-	return "openbao:" + p.SessionPath
+	return &commonv1.SecretRef{Path: p.SessionPath}
 }
 
-func (p accountPlan) componentPdsRef() *v1alpha1.ComponentRef {
+func (p accountPlan) componentPdsRef() *commonv1.ObjectRef {
 	if p.Local {
 		return ComponentRefFor(ComponentKindPds, PdsComponent)
 	}
@@ -84,9 +89,9 @@ func (p accountPlan) componentPdsRef() *v1alpha1.ComponentRef {
 type accountBinding struct {
 	DID string
 
-	PDSRef *v1alpha1.RepoRef
+	PDSRef *commonv1.ObjectRef
 
-	AuthRef *v1alpha1.RepoRef
+	AuthRef *commonv1.SecretRef
 
 	RemotePDS *pdsv1alpha1.RemotePDS
 }
@@ -98,12 +103,10 @@ func (p accountPlan) usesAssociation() bool {
 func (p accountPlan) binding(did, pdsURL string) (accountBinding, error) {
 	binding := accountBinding{DID: strings.TrimSpace(did)}
 	if p.Local {
-		binding.PDSRef = &v1alpha1.RepoRef{Kind: ComponentKindPds, Name: PdsComponent}
+		binding.PDSRef = &commonv1.ObjectRef{Kind: ComponentKindPds, Name: PdsComponent}
 		return binding, nil
 	}
-	if token := p.accessTokenPath(); token != "" {
-		binding.AuthRef = &v1alpha1.RepoRef{Kind: "Vault", Name: token}
-	}
+	binding.AuthRef = p.accessToken()
 	if p.RemotePDS != nil && p.RemotePDS.Name != "" {
 		binding.RemotePDS = p.RemotePDS
 	} else if p.PdsRef != nil && strings.EqualFold(p.PdsRef.Kind, "RemotePDS") && p.PdsRef.Name != "" {
@@ -115,9 +118,9 @@ func (p accountPlan) binding(did, pdsURL string) (accountBinding, error) {
 	}
 	if binding.RemotePDS != nil {
 		if binding.AuthRef != nil && binding.RemotePDS.Spec.Auth == (pdsv1alpha1.RemotePDSAuth{}) {
-			binding.RemotePDS.Spec.Auth.DPoPKeyRef = binding.AuthRef.Name
+			binding.RemotePDS.Spec.Auth.DPoPKeyRef = pdsclient.SecretRefString(binding.AuthRef)
 		}
-		binding.PDSRef = &v1alpha1.RepoRef{Kind: "RemotePDS", Name: binding.RemotePDS.Name}
+		binding.PDSRef = &commonv1.ObjectRef{Kind: "RemotePDS", Name: binding.RemotePDS.Name}
 		return binding, nil
 	}
 	return accountBinding{}, errors.New("appctl: the existing-account repo names no PDS")
@@ -156,8 +159,8 @@ func (ctl *Controller) planAccount(ctx context.Context, ws string, id v1alpha1.A
 	case v1alpha1.MarketIdentityModePdsAccount:
 		plan.ComponentMode = "callback"
 		plan.Identity = v1alpha1.MarketIdentitySpec{Mode: mode, Handle: id.Handle, PdsURL: id.PdsURL,
-			KeysRef:    &v1alpha1.VaultRef{Mount: mount, Path: keysPath},
-			SessionRef: &v1alpha1.VaultRef{Mount: mount, Path: sessionPath}}
+			KeysRef:    &commonv1.SecretRef{Mount: mount, Path: keysPath},
+			SessionRef: &commonv1.SecretRef{Mount: mount, Path: sessionPath}}
 		url, remote, err := ctl.resolveAccountPds(ctx, ws, id)
 		if err != nil {
 			return accountPlan{}, err
@@ -166,19 +169,19 @@ func (ctl *Controller) planAccount(ctx context.Context, ws string, id v1alpha1.A
 		plan.RemotePDS = remote
 		plan.Identity.PdsURL = url
 		if remote != nil {
-			plan.PdsRef = &v1alpha1.ComponentRef{Kind: "RemotePDS", Name: remote.Name, Did: remote.Spec.DID}
+			plan.PdsRef, plan.PdsDID = &commonv1.ObjectRef{Kind: "RemotePDS", Name: remote.Name}, remote.Spec.DID
 		}
 		return plan, nil
 	case v1alpha1.MarketIdentityModeOAuthBrowser, v1alpha1.MarketIdentityModeOAuthQr, v1alpha1.MarketIdentityModeOAuthDelegated:
 		plan.ComponentMode = "oauth"
 		plan.Identity = v1alpha1.MarketIdentitySpec{Mode: mode, Handle: id.Handle, PdsURL: id.PdsURL,
-			SessionRef: &v1alpha1.VaultRef{Mount: mount, Path: sessionPath}}
+			SessionRef: &commonv1.SecretRef{Mount: mount, Path: sessionPath}}
 		plan.PdsURL = strings.TrimSpace(id.PdsURL)
 		if remote, err := ctl.remotePDSRef(ctx, ws, id.PdsRef); err != nil {
 			return accountPlan{}, err
 		} else if remote != nil {
 			plan.RemotePDS = remote
-			plan.PdsRef = &v1alpha1.ComponentRef{Kind: "RemotePDS", Name: remote.Name, Did: remote.Spec.DID}
+			plan.PdsRef, plan.PdsDID = &commonv1.ObjectRef{Kind: "RemotePDS", Name: remote.Name}, remote.Spec.DID
 			if plan.PdsURL == "" {
 				plan.PdsURL = remote.Spec.URL
 			}
@@ -251,7 +254,7 @@ func (ctl *Controller) resolveAccountPds(ctx context.Context, ws string, id v1al
 	return strings.TrimSpace(remote.Spec.URL), remote, nil
 }
 
-func (ctl *Controller) remotePDSRef(ctx context.Context, ws string, ref *v1alpha1.RepoRef) (*pdsv1alpha1.RemotePDS, error) {
+func (ctl *Controller) remotePDSRef(ctx context.Context, ws string, ref *commonv1.ObjectRef) (*pdsv1alpha1.RemotePDS, error) {
 	if ref == nil || !strings.EqualFold(strings.TrimSpace(ref.Kind), "RemotePDS") || strings.TrimSpace(ref.Name) == "" {
 		return nil, nil
 	}
@@ -393,13 +396,13 @@ func (ctl *Controller) ensureAccountRepo(ctx context.Context, ws, identityName s
 			return
 		}
 		binding.RemotePDS = ensured
-		binding.PDSRef = &v1alpha1.RepoRef{Kind: "RemotePDS", Name: ensured.Name}
+		binding.PDSRef = &commonv1.ObjectRef{Kind: "RemotePDS", Name: ensured.Name}
 	}
 	if !plan.usesAssociation() {
 		ctl.deleteAssociationObjects(ctx, ws)
 	}
 	spec := v1alpha1.AtprotoRepoSpec{DID: binding.DID, PdsRef: binding.PDSRef,
-		IdentityRef: &v1alpha1.RepoRef{Kind: "MarketIdentity", Name: identityName},
+		IdentityRef: &commonv1.ObjectRef{Kind: "MarketIdentity", Name: identityName},
 		AuthRef:     binding.AuthRef}
 	ctl.ensureStatusObject(ctx, ws, statusstate.AtprotoRepoGVR, "AtprotoRepo", statusObjectName("repo", binding.DID), spec)
 }

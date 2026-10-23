@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -140,9 +142,14 @@ func (r *bidderRun) passthrough(args []string) error {
 			case "network.qrOrigin":
 				nv.QrOrigin = p.Value
 			case "network.guestTlsUrl":
-				nv.GuestTlsUrl = p.Value
-			case "network.caBundleRef":
-				nv.CaBundleRef = p.Value
+				port := strings.TrimSpace(p.Value)
+				if u, err := url.Parse(port); err == nil && u.Port() != "" {
+					port = u.Port()
+				}
+				if _, err := strconv.Atoi(port); err != nil {
+					return fmt.Errorf("--%s %q: want the dispatcher's TLS port", p.Name, p.Value)
+				}
+				nv.Hosts = append(nv.Hosts, v1alpha1.NetworkHost{Name: v1alpha1.NetworkDispatcherHost, Address: "127.0.0.1:" + port})
 			case "network.hosts":
 				for _, h := range splitList(p.Value) {
 					name, addr, ok := strings.Cut(h, "=")
@@ -278,8 +285,8 @@ func (r *bidderRun) readMarketNetwork(path string) error {
 	if st.Network == nil || st.BidderPdsURL == "" {
 		return fmt.Errorf("%s names no network value or bidderPdsUrl (dev status --instance <n> | jq .network.status, once the network is Ready)", path)
 	}
-	if _, err := os.Stat(st.Network.CaBundleRef); err != nil {
-		return fmt.Errorf("the network CA bundle: %w", err)
+	if strings.TrimSpace(st.Network.CABundle) == "" {
+		return fmt.Errorf("%s names no network CA bundle", path)
 	}
 	r.value, r.pdsURL = st.Network, st.BidderPdsURL
 	return nil

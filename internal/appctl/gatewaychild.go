@@ -48,7 +48,7 @@ func readOwnerDid(path string) (string, error) {
 	return dids[0], nil
 }
 
-func ensureOwner(ctx context.Context, path, pdsURL, caFile, handle string) (string, error) {
+func ensureOwner(ctx context.Context, path, pdsURL, caPEM, handle string) (string, error) {
 	if did, err := readOwnerDid(path); err == nil {
 		return did, nil
 	} else if !os.IsNotExist(err) {
@@ -59,7 +59,7 @@ func ensureOwner(ctx context.Context, path, pdsURL, caFile, handle string) (stri
 		return "", err
 	}
 	password := hex.EncodeToString(buf)
-	did, err := EnsurePdsAccount(ctx, pdsURL, caFile, handle, password)
+	did, err := EnsurePdsAccount(ctx, pdsURL, caPEM, handle, password)
 	if err != nil {
 		return "", err
 	}
@@ -84,7 +84,7 @@ func GatewayChildOf(ctx context.Context, id, stateDir string, app v1alpha1.Netwo
 	var err error
 	if sessions == "" {
 		sessions = filepath.Join(stateDir, GatewayChildSessionsFile)
-		did, err = ensureOwner(ctx, sessions, aliceURL, value.CaBundleRef, id+"-owner."+OwnerAccountDomain)
+		did, err = ensureOwner(ctx, sessions, aliceURL, value.CABundle, id+"-owner."+OwnerAccountDomain)
 	} else {
 		did, err = readOwnerDid(sessions)
 	}
