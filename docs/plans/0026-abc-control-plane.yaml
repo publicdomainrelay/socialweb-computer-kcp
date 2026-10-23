@@ -241,7 +241,7 @@ waves:
     gate: "all kinds registered; refs unified; contract packages pure; bus denies an unlinked call; the pilot controller runs on the runtime across root and a later-created root:<app> workspace with no ticker."
   - id: W1
     title: "Shared kit"
-    status: doing
+    status: done
     parallel: true
     tracks: [W1-MODERNIZE, W1-CACHE-LEASE, W1-XRPC, W1-LIFECYCLE]
     depends_on: [W0]
@@ -567,7 +567,7 @@ items:
     track: modernize
     parallel_with: [W1-CACHE-LEASE, W1-XRPC, W1-LIFECYCLE]
     depends_on: [W0-RUNTIME]
-    status: doing
+    status: done
     decision: >
       Run go fix ./.... Replace option default blocks with cmp.Or or a
       Positive helper. Move the 89 byte-identical helper groups into shared
@@ -930,7 +930,7 @@ items:
       conditions.
     files:
       - internal/services/gatewayapi/**
-      - internal/gatewayapi/**
+      - internal/gatewayhttp/**
       - internal/services/guestcontrolplane/**
       - internal/services/sshserver/**
       - internal/services/ingressproxy/**
