@@ -221,6 +221,43 @@ type Manager interface {
 	Close() error
 }
 
+func Live(st UnitStatus) bool {
+	return st.State == Active || st.State == Activating || st.State == Deactivating
+}
+
+func Await(ctx context.Context, m Manager, unit string, done func(UnitStatus) bool) (UnitStatus, error) {
+	if err := ValidateName(unit); err != nil {
+		return UnitStatus{}, err
+	}
+	wctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	events, err := m.Watch(wctx, unit)
+	if err != nil {
+		return UnitStatus{}, err
+	}
+	st, err := m.Inspect(ctx, unit)
+	if err != nil {
+		return st, err
+	}
+	for !done(st) {
+		select {
+		case <-ctx.Done():
+			return st, ctx.Err()
+		case ev, ok := <-events:
+			if !ok {
+				if err := ctx.Err(); err != nil {
+					return st, err
+				}
+				return st, fmt.Errorf("%w: the watch of %s ended", ErrUnreachable, unit)
+			}
+			if ev.Name == unit {
+				st = ev.Status
+			}
+		}
+	}
+	return st, nil
+}
+
 func ValidateName(name string) error {
 	if !strings.HasPrefix(name, NamePrefix) || !strings.HasSuffix(name, ServiceSuffix) {
 		return fmt.Errorf("hostsvc: unit %q is not ours: every unit this package starts is named %s<kind>-<owner>-<name>%s",
