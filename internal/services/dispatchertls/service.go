@@ -4,8 +4,6 @@ import (
 	"cmp"
 	"context"
 	"crypto/tls"
-	"crypto/x509"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -23,6 +21,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/servetls"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/tlsreload"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -153,22 +152,6 @@ func upstreamEndpoint(deps component.Deps, workspace string, ref *commonv1.Objec
 	return "", false
 }
 
-func loadCA(data []byte) (*x509.CertPool, error) {
-	pool := x509.NewCertPool()
-	if !pool.AppendCertsFromPEM(data) {
-		block, _ := pem.Decode(data)
-		if block == nil || block.Type != "CERTIFICATE" {
-			return nil, errors.New("dispatchertls: the CA bundle holds no certificate")
-		}
-		cert, err := x509.ParseCertificate(block.Bytes)
-		if err != nil {
-			return nil, fmt.Errorf("dispatchertls: parsing the CA certificate: %w", err)
-		}
-		pool.AddCert(cert)
-	}
-	return pool, nil
-}
-
 func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	cfg := s.cfg
 	cfg.Deps = cfg.Deps.Or(deps)
@@ -190,16 +173,15 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	hosts := allowedHosts(cfg)
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Proxy = nil
-	upstreamTLS := cfg.UpstreamTLS
-	if upstreamTLS == nil && cfg.CABundle != "" {
-		pool, err := loadCA([]byte(cfg.CABundle))
+	switch {
+	case cfg.UpstreamTLS != nil:
+		transport.TLSClientConfig = cfg.UpstreamTLS
+	case cfg.CABundle != "":
+		pool, err := tlsreload.PoolFromBundle(cfg.CABundle, log)
 		if err != nil {
-			return err
+			return fmt.Errorf("dispatchertls: %w", err)
 		}
-		upstreamTLS = &tls.Config{RootCAs: pool}
-	}
-	if upstreamTLS != nil {
-		transport.TLSClientConfig = upstreamTLS
+		transport.DialTLSContext = pool.DialTLSContext(&tls.Config{MinVersion: tls.VersionTLS12})
 	}
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(req *httputil.ProxyRequest) {
