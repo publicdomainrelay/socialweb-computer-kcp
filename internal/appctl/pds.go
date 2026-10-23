@@ -287,16 +287,7 @@ func (ctl *Controller) pdsSessionUsable(ctx context.Context, pdsURL, caFile stri
 	if strings.TrimSpace(sess.Did) == "" || strings.TrimSpace(sess.AccessJWT) == "" {
 		return false
 	}
-	tlsConfig, err := pdsTLS(pdsURL, caFile)
-	if err != nil {
-		return false
-	}
-	pds, err := pdsclient.NewRemote(pdsclient.RemoteConfig{
-		BaseURL: pdsURL,
-		TLS:     tlsConfig,
-		Timeout: pdsClientTimeout,
-		Tokens:  pdsclient.TokenSourceFunc(func(context.Context) (string, error) { return sess.AccessJWT, nil }),
-	})
+	pds, err := ctl.pdsForToken(pdsURL, caFile, sess.AccessJWT)
 	if err != nil {
 		return false
 	}

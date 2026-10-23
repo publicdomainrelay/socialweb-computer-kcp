@@ -1703,14 +1703,26 @@ func (s *Service) callbackDID() string {
 }
 
 func (s *Service) submitBidRef() string {
-	if !s.cfg.inboundXRPC() || s.callbackDID() == "" {
+	if !s.cfg.inboundXRPC() {
+		return ""
+	}
+	if url := strings.TrimRight(strings.TrimSpace(s.cfg.MarketURL), "/"); url != "" {
+		return url
+	}
+	if s.callbackDID() == "" {
 		return ""
 	}
 	return s.callbackDID() + "#" + defaultMarketServiceID
 }
 
 func (s *Service) submitEventRef() string {
-	if !s.cfg.inboundXRPC() || s.callbackDID() == "" {
+	if !s.cfg.inboundXRPC() {
+		return ""
+	}
+	if url := strings.TrimRight(strings.TrimSpace(s.cfg.MarketURL), "/"); url != "" {
+		return url
+	}
+	if s.callbackDID() == "" {
 		return ""
 	}
 	return s.callbackDID() + "#" + defaultComputeEventServiceID

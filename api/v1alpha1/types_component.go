@@ -565,6 +565,8 @@ type RequesterSpec struct {
 
 	PDSAccessTokenPath string `json:"pdsAccessTokenPath,omitempty"`
 
+	MarketURL string `json:"marketURL,omitempty"`
+
 	PolicyEngineRef *ComponentRef `json:"policyEngineRef,omitempty"`
 
 	VaultRef *ComponentRef `json:"vaultRef,omitempty"`

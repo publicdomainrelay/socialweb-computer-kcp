@@ -5,12 +5,15 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"strings"
 	"time"
 
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 )
 
 const pdsClientTimeout = 30 * time.Second
@@ -53,6 +56,27 @@ func (ctl *Controller) pdsFor(endpoint, caFile string) (pdsclient.PDS, error) {
 		return resolver.ResolveLocal(pdsclient.LocalRef{Workspace: ctl.c.workspace(), Kind: ComponentKindPds, Name: PdsComponent, Endpoint: endpoint})
 	}
 	return pdsClientAt(endpoint, caFile)
+}
+
+func (ctl *Controller) pdsForToken(endpoint, caFile, token string) (pdsclient.PDS, error) {
+	endpoint = strings.TrimSuffix(strings.TrimSpace(endpoint), "/")
+	tokens := pdsclient.TokenSourceFunc(func(context.Context) (string, error) { return token, nil })
+	if ctl.c.Handlers != nil && !strings.HasPrefix(endpoint, "https://") {
+		transport := &http.Transport{DialContext: func(ctx context.Context, _, address string) (net.Conn, error) {
+			return ctl.c.Handlers.DialHTTP(component.WithSystemCaller(ctx), address)
+		}}
+		return pdsclient.NewRemote(pdsclient.RemoteConfig{
+			BaseURL:    endpoint,
+			HTTPClient: &http.Client{Transport: transport, Timeout: pdsClientTimeout},
+			Tokens:     tokens,
+			Timeout:    pdsClientTimeout,
+		})
+	}
+	tlsConfig, err := pdsTLS(endpoint, caFile)
+	if err != nil {
+		return nil, err
+	}
+	return pdsclient.NewRemote(pdsclient.RemoteConfig{BaseURL: endpoint, TLS: tlsConfig, Tokens: tokens, Timeout: pdsClientTimeout})
 }
 
 func pdsClientAt(endpoint, caFile string) (pdsclient.PDS, error) {

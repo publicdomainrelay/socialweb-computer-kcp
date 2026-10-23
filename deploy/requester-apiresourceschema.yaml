@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-9.requesters.socialweb.computer
+  name: v1alpha1-10.requesters.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -212,6 +212,8 @@ spec:
                   did:
                     type: string
               pdsAccessTokenPath:
+                type: string
+              marketURL:
                 type: string
               policyEngineRef:
                 type: object
