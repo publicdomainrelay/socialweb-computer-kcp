@@ -41,6 +41,15 @@ func DesiredKeys(desired []Desired) []string {
 	return out
 }
 
+func ToMap(obj any) (map[string]any, error) {
+	if v := reflect.ValueOf(obj); v.IsValid() && v.Kind() != reflect.Pointer {
+		ptr := reflect.New(v.Type())
+		ptr.Elem().Set(v)
+		obj = ptr.Interface()
+	}
+	return runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
+}
+
 func SpecMap(spec any) (map[string]any, error) {
 	if spec == nil {
 		return nil, nil
@@ -48,13 +57,7 @@ func SpecMap(spec any) (map[string]any, error) {
 	if m, ok := spec.(map[string]any); ok {
 		return m, nil
 	}
-	v := reflect.ValueOf(spec)
-	if v.Kind() != reflect.Pointer {
-		ptr := reflect.New(v.Type())
-		ptr.Elem().Set(v)
-		spec = ptr.Interface()
-	}
-	m, err := runtime.DefaultUnstructuredConverter.ToUnstructured(spec)
+	m, err := ToMap(spec)
 	if err != nil {
 		return nil, failf("the component spec: %w", err)
 	}
@@ -208,7 +211,7 @@ func (c *Composer) Event(ctx context.Context, r Root, ws, apiVersion, kind, name
 }
 
 func (c *Composer) ApplyTyped(ctx context.Context, r Root, ws string, gvr schema.GroupVersionResource, apiVersion, kind string, obj any) error {
-	m, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
+	m, err := ToMap(obj)
 	if err != nil {
 		return err
 	}

@@ -10,7 +10,6 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -57,7 +56,7 @@ func checkAppName(name string) error {
 func (ctl *Controller) appWorkspace(name string) string { return ctl.c.Workspace() + ":" + name }
 
 func (ctl *Controller) applyRBAC(ctx context.Context, r compose.Root, ws string, gvr schema.GroupVersionResource, obj any, kind string) error {
-	m, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
+	m, err := compose.ToMap(obj)
 	if err != nil {
 		return err
 	}

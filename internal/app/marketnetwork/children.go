@@ -18,7 +18,6 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
@@ -278,7 +277,7 @@ func (ctl *Controller) applyRoot(ctx context.Context, r compose.Root, rec devins
 	if err != nil {
 		return err
 	}
-	m, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
+	m, err := compose.ToMap(obj)
 	if err != nil {
 		return err
 	}

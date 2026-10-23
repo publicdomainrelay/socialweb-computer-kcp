@@ -247,7 +247,7 @@ func NewStatus(gen int64, profile string, previous []metav1.Condition) v1alpha1.
 }
 
 func (c *Composer) WriteStatus(ctx context.Context, r Root, gvr schema.GroupVersionResource, status any) error {
-	m, err := runtime.DefaultUnstructuredConverter.ToUnstructured(status)
+	m, err := ToMap(status)
 	if err != nil {
 		return err
 	}
