@@ -299,13 +299,17 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	s.mu.Unlock()
 
 	success = true
+	syncCtx, cancelSync := context.WithCancel(ctx)
+	var wg sync.WaitGroup
 	if cfg.RequireIngress && cfg.PublicBaseURL != "" && cfg.Mode == atpds.ModeFull && submitter != nil {
-		go s.syncServiceEndpoints(ctx, accountStore, submitter, cfg.PublicBaseURL)
+		wg.Go(func() { s.syncServiceEndpoints(syncCtx, accountStore, submitter, cfg.PublicBaseURL) })
 	}
 	select {
 	case <-ctx.Done():
 	case <-stopCh:
 	}
+	cancelSync()
+	wg.Wait()
 	s.mu.Lock()
 	s.started = false
 	s.stopCh = nil
