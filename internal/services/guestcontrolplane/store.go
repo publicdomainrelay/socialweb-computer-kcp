@@ -35,7 +35,7 @@ type OpenBaoSource interface {
 }
 
 type KCPOpenBao struct {
-	Res *clusterResource[v1alpha1.OpenBaoServer]
+	Res *kcpstore.ClusterResource[v1alpha1.OpenBaoServer]
 
 	Cluster string
 }
@@ -62,7 +62,7 @@ type VMStore interface {
 type GuestStore = guestidentity.GrantStore
 
 type KCPVMs struct {
-	Res *clusterResource[v1alpha1.ComputeVM]
+	Res *kcpstore.ClusterResource[v1alpha1.ComputeVM]
 
 	Cluster string
 
@@ -72,7 +72,7 @@ type KCPVMs struct {
 }
 
 func NewKCPVMs(store *kcpstore.Store, cluster, handle string) *KCPVMs {
-	return &KCPVMs{Res: newClusterResource[v1alpha1.ComputeVM](store, ComputeVMGVR), Cluster: cluster, Handle: handle}
+	return &KCPVMs{Res: kcpstore.NewClusterResource[v1alpha1.ComputeVM](store, ComputeVMGVR), Cluster: cluster, Handle: handle}
 }
 
 func (v *KCPVMs) Get(ctx context.Context, name string) (*v1alpha1.ComputeVM, error) {
@@ -127,13 +127,13 @@ func (v *KCPVMs) RecordMarket(ctx context.Context, name string, patch v1alpha1.C
 }
 
 type KCPGrants struct {
-	Res *clusterResource[v1alpha1.GuestIdentityGrant]
+	Res *kcpstore.ClusterResource[v1alpha1.GuestIdentityGrant]
 
 	Cluster string
 }
 
 func NewKCPGrants(store *kcpstore.Store, cluster string) *KCPGrants {
-	return &KCPGrants{Res: newClusterResource[v1alpha1.GuestIdentityGrant](store, GuestIdentityGrantGVR), Cluster: cluster}
+	return &KCPGrants{Res: kcpstore.NewClusterResource[v1alpha1.GuestIdentityGrant](store, GuestIdentityGrantGVR), Cluster: cluster}
 }
 
 func (g *KCPGrants) List(ctx context.Context) ([]v1alpha1.GuestIdentityGrant, error) {

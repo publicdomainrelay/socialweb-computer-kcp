@@ -76,7 +76,7 @@ type PolicyRunClient interface {
 }
 
 type KCPPolicyRuns struct {
-	Res *clusterResource[policyv1alpha1.PolicyWorkflowRun]
+	Res *kcpstore.ClusterResource[policyv1alpha1.PolicyWorkflowRun]
 
 	Cluster string
 
@@ -86,7 +86,7 @@ type KCPPolicyRuns struct {
 }
 
 func NewKCPPolicyRuns(store *kcpstore.Store, cluster string) *KCPPolicyRuns {
-	return &KCPPolicyRuns{Res: newClusterResource[policyv1alpha1.PolicyWorkflowRun](store, PolicyWorkflowRunGVR), Cluster: cluster}
+	return &KCPPolicyRuns{Res: kcpstore.NewClusterResource[policyv1alpha1.PolicyWorkflowRun](store, PolicyWorkflowRunGVR), Cluster: cluster}
 }
 
 func (c *KCPPolicyRuns) CreatePolicyWorkflowRun(ctx context.Context, run *policyv1alpha1.PolicyWorkflowRun) error {

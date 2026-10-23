@@ -67,7 +67,7 @@ func statusMap(status any) (map[string]any, error) {
 }
 
 type KCPBids struct {
-	Res *clusterResource[v1alpha1.Bid]
+	Res *kcpstore.ClusterResource[v1alpha1.Bid]
 
 	Cluster string
 
@@ -75,7 +75,7 @@ type KCPBids struct {
 }
 
 func NewKCPBids(store *kcpstore.Store, cluster string) *KCPBids {
-	return &KCPBids{Res: newClusterResource[v1alpha1.Bid](store, BidGVR), Cluster: cluster}
+	return &KCPBids{Res: kcpstore.NewClusterResource[v1alpha1.Bid](store, BidGVR), Cluster: cluster}
 }
 
 func (b *KCPBids) Create(ctx context.Context, bid *v1alpha1.Bid) error {
@@ -138,7 +138,7 @@ func (b *KCPBids) PatchStatus(ctx context.Context, name string, status v1alpha1.
 }
 
 type KCPVMs struct {
-	Res *clusterResource[v1alpha1.ComputeVM]
+	Res *kcpstore.ClusterResource[v1alpha1.ComputeVM]
 
 	Cluster string
 
@@ -148,7 +148,7 @@ type KCPVMs struct {
 }
 
 func NewKCPVMs(store *kcpstore.Store, cluster, handle string) *KCPVMs {
-	return &KCPVMs{Res: newClusterResource[v1alpha1.ComputeVM](store, ComputeVMGVR), Cluster: cluster, Handle: handle}
+	return &KCPVMs{Res: kcpstore.NewClusterResource[v1alpha1.ComputeVM](store, ComputeVMGVR), Cluster: cluster, Handle: handle}
 }
 
 func (v *KCPVMs) log() *slog.Logger {
@@ -336,13 +336,13 @@ func (v *KCPVMs) WaitAbsent(ctx context.Context, name string, timeout time.Durat
 }
 
 type KCPGrants struct {
-	Res *clusterResource[v1alpha1.GuestIdentityGrant]
+	Res *kcpstore.ClusterResource[v1alpha1.GuestIdentityGrant]
 
 	Cluster string
 }
 
 func NewKCPGrants(store *kcpstore.Store, cluster string) *KCPGrants {
-	return &KCPGrants{Res: newClusterResource[v1alpha1.GuestIdentityGrant](store, GuestIdentityGrantGVR), Cluster: cluster}
+	return &KCPGrants{Res: kcpstore.NewClusterResource[v1alpha1.GuestIdentityGrant](store, GuestIdentityGrantGVR), Cluster: cluster}
 }
 
 func (g *KCPGrants) Create(ctx context.Context, grant v1alpha1.GuestIdentityGrant) error {

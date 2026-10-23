@@ -302,7 +302,7 @@ func (s *Service) resolveIdentity(ctx context.Context) error {
 	if s.store == nil || s.cfg.IdentityRef == nil || s.cfg.IdentityRef.Name == "" {
 		return nil
 	}
-	identities := newClusterResource[corev1alpha1.MarketIdentity](s.store, MarketIdentityGVR)
+	identities := kcpstore.NewClusterResource[corev1alpha1.MarketIdentity](s.store, MarketIdentityGVR)
 	obj, err := identities.Get(ctx, s.cluster, s.cfg.IdentityRef.Name)
 	if err != nil {
 		return err
@@ -321,7 +321,7 @@ func (s *Service) resolveStores() {
 			s.cfg.Grants = NewKCPGrants(s.store, s.cluster)
 		}
 		if s.cfg.OpenBao == nil {
-			s.cfg.OpenBao = &KCPOpenBao{Res: newClusterResource[corev1alpha1.OpenBaoServer](s.store, OpenBaoServerGVR), Cluster: s.cluster}
+			s.cfg.OpenBao = &KCPOpenBao{Res: kcpstore.NewClusterResource[corev1alpha1.OpenBaoServer](s.store, OpenBaoServerGVR), Cluster: s.cluster}
 		}
 	}
 	s.vms = s.cfg.VMs
