@@ -296,21 +296,21 @@ waves:
     gate: "one composition controller per root; SSA single writer; ownerRefs on every child and intent object; links written by roots; ConfigFrom gone."
   - id: W4
     title: "Services"
-    status: doing
+    status: done
     parallel: true
     tracks: [W4-MARKET, W4-SERVICES]
     depends_on: [W3]
     gate: "bidder and requester share one participant core; services create intent objects only through bus handles; no service lists kcp objects."
   - id: W5
     title: "No polling, no signals, architecture gates"
-    status: todo
+    status: doing
     serial: true
     tracks: [W5-NO-POLL, W5-GATES]
     depends_on: [W4]
     gate: "scripts/check-architecture.sh passes with an empty ticker allowlist outside deploy/obligations.txt and no System caller outside deploy/bus-bootstrap-callers.txt."
   - id: W6
     title: "Market lexicons"
-    status: todo
+    status: doing
     serial: true
     tracks: [W6-LEXICONS]
     depends_on: [W4]
@@ -932,7 +932,7 @@ items:
     track: market
     parallel_with: [W4-SERVICES]
     depends_on: [W3-ROOTS, W3-CONFIG, W3-STATUS]
-    status: doing
+    status: done
     decision: >
       The core of each service moves out of internal/services: role logic
       lives in impl packages (internal/market/participant,
@@ -990,7 +990,7 @@ items:
     track: no-poll
     parallel_with: []
     depends_on: [W4-MARKET, W4-SERVICES]
-    status: todo
+    status: doing
     decision: >
       Includes the clientcertfront Cluster gate recheck (a 2s cache and
       recheck from W0-MOUNTS), which becomes a watch on Cluster.
@@ -1036,7 +1036,7 @@ items:
     track: lexicons
     parallel_with: []
     depends_on: [W4-MARKET]
-    status: todo
+    status: doing
     decision: >
       Write lexicon JSON for every market and compute NSID in
       internal/atproto/market/nsid.go. Keep one embedded lexicon copy. A
