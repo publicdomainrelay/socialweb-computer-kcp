@@ -36,6 +36,20 @@ var (
 
 type ServiceFactory func(ctx context.Context, deps Deps, spec ComponentSpec) (Service, error)
 
+func FactoryOf[C any, S Service](configFrom func(Deps, ComponentSpec) (C, error), build func(C) S) ServiceFactory {
+	return FallibleFactoryOf(configFrom, func(cfg C) (S, error) { return build(cfg), nil })
+}
+
+func FallibleFactoryOf[C any, S Service](configFrom func(Deps, ComponentSpec) (C, error), build func(C) (S, error)) ServiceFactory {
+	return func(_ context.Context, deps Deps, spec ComponentSpec) (Service, error) {
+		cfg, err := configFrom(deps, spec)
+		if err != nil {
+			return nil, err
+		}
+		return build(cfg)
+	}
+}
+
 type StatusCallback func(ctx context.Context, spec ComponentSpec, status ComponentStatus) error
 
 type PanicError struct {

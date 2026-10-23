@@ -270,14 +270,6 @@ func relayEndpoint(deps component.Deps, workspace string, ref *commonv1.ObjectRe
 	return "", false
 }
 
-func Factory(ctx context.Context, deps component.Deps, spec component.ComponentSpec) (component.Service, error) {
-	cfg, err := ConfigFrom(deps, spec)
-	if err != nil {
-		return nil, err
-	}
-	return New(cfg), nil
-}
-
 func Register(runtime *component.Runtime, identity exposure.IngressIdentity) error {
 	return runtime.Register(Kind, func(ctx context.Context, deps component.Deps, spec component.ComponentSpec) (component.Service, error) {
 		cfg, err := ConfigFrom(deps, spec)

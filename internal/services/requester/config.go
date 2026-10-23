@@ -766,18 +766,6 @@ func absoluteHTTPURL(raw string) bool {
 	return err == nil && u.Host != "" && (u.Scheme == "http" || u.Scheme == "https")
 }
 
-func Factory(ctx context.Context, deps component.Deps, spec component.ComponentSpec) (component.Service, error) {
-	cfg, err := ConfigFrom(deps, spec)
-	if err != nil {
-		return nil, err
-	}
-	return New(cfg)
-}
-
-func Register(runtime *component.Runtime) error {
-	return runtime.Register(Kind, Factory)
-}
-
 func directoryFor(raw string, keys int, ttl time.Duration) identity.Directory {
 	base := identity.DefaultDirectory()
 	raw = strings.TrimRight(raw, "/")

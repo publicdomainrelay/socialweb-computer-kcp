@@ -171,18 +171,6 @@ func loadCA(data []byte) (*x509.CertPool, error) {
 	return pool, nil
 }
 
-func Factory(ctx context.Context, deps component.Deps, spec component.ComponentSpec) (component.Service, error) {
-	cfg, err := ConfigFrom(deps, spec)
-	if err != nil {
-		return nil, err
-	}
-	return New(cfg), nil
-}
-
-func Register(runtime *component.Runtime) error {
-	return runtime.Register(Kind, Factory)
-}
-
 func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	cfg := s.cfg
 	cfg.Deps = cfg.Deps.Or(deps)

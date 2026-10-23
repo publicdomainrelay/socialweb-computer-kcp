@@ -297,10 +297,21 @@ func Register(runtime *component.Runtime, policyOptions policyenginesvc.Options,
 	if err := ingressproxy.Register(runtime, identity); err != nil {
 		return err
 	}
-	for _, register := range []func(*component.Runtime) error{plc.Register, relay.Register,
-		dispatchertls.Register, gatewayapi.Register, bidder.Register, guestcontrolplane.Register, pds.Register,
-		requester.Register, sshserver.Register} {
-		if err := register(runtime); err != nil {
+	for _, entry := range []struct {
+		kind    string
+		factory component.ServiceFactory
+	}{
+		{plc.Kind, component.FactoryOf(plc.ConfigFrom, plc.New)},
+		{relay.Kind, component.FactoryOf(relay.ConfigFrom, relay.New)},
+		{dispatchertls.Kind, component.FactoryOf(dispatchertls.ConfigFrom, dispatchertls.New)},
+		{gatewayapi.Kind, component.FactoryOf(gatewayapi.ConfigFrom, gatewayapi.New)},
+		{bidder.Kind, component.FallibleFactoryOf(bidder.ConfigFrom, bidder.New)},
+		{guestcontrolplane.Kind, component.FallibleFactoryOf(guestcontrolplane.ConfigFrom, guestcontrolplane.New)},
+		{pds.Kind, component.FallibleFactoryOf(pds.ConfigFrom, pds.New)},
+		{requester.Kind, component.FallibleFactoryOf(requester.ConfigFrom, requester.New)},
+		{sshserver.Kind, component.FallibleFactoryOf(sshserver.ConfigFrom, sshserver.New)},
+	} {
+		if err := runtime.Register(entry.kind, entry.factory); err != nil {
 			return err
 		}
 	}
