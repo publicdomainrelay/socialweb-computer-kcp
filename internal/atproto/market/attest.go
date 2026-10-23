@@ -437,8 +437,17 @@ func CreateRemoteProofRecord(ctx context.Context, w RecordWriter, repo, collecti
 	return w.CreateRecord(ctx, repo, collection, value)
 }
 
+type ReceiptSubject struct {
+	AcceptRecord        map[string]any
+	AcceptRepositoryDID string
+}
+
 func CreateReceiptRecordAt(ctx context.Context, w RecordWriter, repo, rkey string, refs ReceiptRefs, subject ReceiptSubject, signer *Signer) (StrongRef, error) {
-	metadata, err := BuildReceipt(refs, NowISO())
+	receipt, err := BuildReceipt(refs, NowISO())
+	if err != nil {
+		return StrongRef{}, err
+	}
+	metadata, err := EncodeRecord(receipt)
 	if err != nil {
 		return StrongRef{}, err
 	}
@@ -446,9 +455,11 @@ func CreateReceiptRecordAt(ctx context.Context, w RecordWriter, repo, rkey strin
 	if err != nil {
 		return StrongRef{}, err
 	}
-	value := make(map[string]any, len(metadata)+2)
-	maps.Copy(value, metadata)
-	value["cid"] = bind.String()
+	receipt.CID = bind.String()
+	value, err := EncodeRecord(receipt)
+	if err != nil {
+		return StrongRef{}, err
+	}
 	entry, err := SignInline(value, repo, signer)
 	if err != nil {
 		return StrongRef{}, err

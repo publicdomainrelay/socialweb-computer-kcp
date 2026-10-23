@@ -1,0 +1,44 @@
+{
+  "lexicon": 1,
+  "id": "com.publicdomainrelay.temp.market.submitAccept",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "A requester submits its accept of a bid to the bidder. The bidder records a provisioning intent and answers 202; the receipt follows as a market.receipt record. Requires a service-auth JWT with lxm set to this NSID; the requester is the token issuer.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["acceptUri", "acceptCid"],
+          "properties": {
+            "acceptUri": { "type": "string", "format": "at-uri", "description": "The market.accept record." },
+            "acceptCid": { "type": "string", "format": "cid" }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["ok"],
+          "properties": {
+            "ok": { "type": "boolean" },
+            "id": { "type": "string", "description": "The provisioning intent the bidder recorded." },
+            "acceptUri": { "type": "string", "format": "at-uri" },
+            "acceptCid": { "type": "string", "format": "cid" },
+            "uri": { "type": "string", "format": "at-uri", "description": "The market.receipt, when it is already written." },
+            "cid": { "type": "string", "format": "cid" },
+            "submitEvent": { "type": "string", "description": "Where the requester submits events: a DID service ref (did#serviceId) or an HTTP URL." }
+          }
+        }
+      },
+      "errors": [
+        { "name": "InvalidRequest" },
+        { "name": "Unauthorized" },
+        { "name": "Forbidden" },
+        { "name": "InternalError" },
+        { "name": "Unavailable" }
+      ]
+    }
+  }
+}

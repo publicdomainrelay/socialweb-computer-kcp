@@ -1,0 +1,23 @@
+{
+  "lexicon": 1,
+  "id": "com.publicdomainrelay.temp.market.accept",
+  "description": "The requester accepts one bid on its RFP.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["rfp", "bid", "signatures"],
+        "properties": {
+          "rfp": { "type": "ref", "ref": "com.atproto.repo.strongRef", "description": "The market.rfp." },
+          "bid": { "type": "ref", "ref": "com.atproto.repo.strongRef", "description": "The accepted market.bid." },
+          "payload": { "type": "ref", "ref": "com.atproto.repo.strongRef", "description": "The accept terms: a market.accepts.free or market.accepts.x402 record." },
+          "submitEvent": { "type": "string", "description": "Where the bidder submits events: a DID service ref (did#serviceId) or an HTTP URL." },
+          "createdAt": { "type": "string", "format": "datetime" },
+          "signatures": { "type": "ref", "ref": "network.attested.signature#signatures" }
+        }
+      }
+    }
+  }
+}

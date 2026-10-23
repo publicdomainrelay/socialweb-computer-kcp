@@ -320,7 +320,11 @@ func (b *Bidder) writeBidRecord(ctx context.Context, bid *v1alpha1.Bid, now time
 	if err != nil {
 		return market.StrongRef{}, err
 	}
-	signed, err := market.SignRecord(record, b.cfg.DID, b.signer)
+	value, err := market.EncodeRecord(record)
+	if err != nil {
+		return market.StrongRef{}, err
+	}
+	signed, err := market.SignRecord(value, b.cfg.DID, b.signer)
 	if err != nil {
 		return market.StrongRef{}, err
 	}

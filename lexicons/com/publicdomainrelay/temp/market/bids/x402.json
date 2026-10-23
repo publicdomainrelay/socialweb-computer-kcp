@@ -1,0 +1,24 @@
+{
+  "lexicon": 1,
+  "id": "com.publicdomainrelay.temp.market.bids.x402",
+  "description": "Bid terms paid over x402.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["cost", "currency", "frequency", "prepay", "url", "signatures"],
+        "properties": {
+          "cost": { "type": "integer", "minimum": 0, "description": "The price in the smallest unit of the currency." },
+          "currency": { "type": "string" },
+          "frequency": { "type": "string" },
+          "prepay": { "type": "boolean" },
+          "url": { "type": "string", "format": "uri", "description": "The x402 payment endpoint." },
+          "createdAt": { "type": "string", "format": "datetime" },
+          "signatures": { "type": "ref", "ref": "network.attested.signature#signatures" }
+        }
+      }
+    }
+  }
+}

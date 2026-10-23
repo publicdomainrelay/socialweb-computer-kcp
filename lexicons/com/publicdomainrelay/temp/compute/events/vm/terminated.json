@@ -1,0 +1,26 @@
+{
+  "lexicon": 1,
+  "id": "com.publicdomainrelay.temp.compute.events.vm.terminated",
+  "description": "The bidder reports that the VM stopped; sent as the payload of a market.event.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["reason", "observedAt", "createdAt"],
+        "properties": {
+          "reason": {
+            "type": "string",
+            "knownValues": ["guest_poweroff", "vmm_exited", "oom", "host_reboot", "identity_mismatch", "deleted_on_request"]
+          },
+          "exitCode": { "type": "integer" },
+          "observedAt": { "type": "string", "format": "datetime" },
+          "request": { "type": "ref", "ref": "com.atproto.repo.strongRef", "description": "The compute.events.vm.delete that asked for the stop." },
+          "createdAt": { "type": "string", "format": "datetime" },
+          "signatures": { "type": "ref", "ref": "network.attested.signature#signatures" }
+        }
+      }
+    }
+  }
+}

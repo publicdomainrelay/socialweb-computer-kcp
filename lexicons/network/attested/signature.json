@@ -1,0 +1,27 @@
+{
+  "lexicon": 1,
+  "id": "network.attested.signature",
+  "description": "Inline attestation signatures (badge.blue). The signed bytes are the attestation CID: the record without its signatures, with this entry (less cid and signature, plus repository = the authoring repo DID) under $sig, as DAG-CBOR, SHA-256, CIDv1 dag-cbor.",
+  "defs": {
+    "main": {
+      "type": "object",
+      "required": ["key", "cid", "signature"],
+      "properties": {
+        "key": { "type": "string", "description": "The did:key that verifies the signature." },
+        "cid": { "type": "string", "format": "cid", "description": "The attestation CID this entry signs." },
+        "signature": { "type": "bytes", "description": "Low-S ECDSA signature over the CID bytes." },
+        "issuer": { "type": "string", "description": "The DID the key signs for; the repository when absent or empty." },
+        "issuedAt": { "type": "string", "format": "datetime" },
+        "role": { "type": "string", "description": "The role this signature attests in a multi-party workflow." }
+      }
+    },
+    "signatures": {
+      "type": "array",
+      "description": "The signatures of a record: inline network.attested.signature entries or strong references to network.attested.proof records.",
+      "items": {
+        "type": "union",
+        "refs": ["network.attested.signature", "com.atproto.repo.strongRef"]
+      }
+    }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "lexicon": 1,
+  "id": "com.publicdomainrelay.temp.market.receipts.free",
+  "description": "Receipt terms for a market.accepts.free accept.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["accept", "cid", "signatures"],
+        "properties": {
+          "accept": { "type": "ref", "ref": "com.atproto.repo.strongRef", "description": "The market.accept." },
+          "cid": { "type": "string", "format": "cid", "description": "The attestation CID binding this receipt to the accept record." },
+          "createdAt": { "type": "string", "format": "datetime" },
+          "signatures": { "type": "ref", "ref": "network.attested.signature#signatures" }
+        }
+      }
+    }
+  }
+}

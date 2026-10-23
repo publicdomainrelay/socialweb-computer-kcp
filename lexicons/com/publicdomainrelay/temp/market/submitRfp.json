@@ -1,0 +1,39 @@
+{
+  "lexicon": 1,
+  "id": "com.publicdomainrelay.temp.market.submitRfp",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "A requester submits an RFP to a bidder. The bidder records a bid intent and answers before it bids. Requires a service-auth JWT with lxm set to this NSID; the requester is the token issuer.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["rfpUri", "rfpCid"],
+          "properties": {
+            "rfpUri": { "type": "string", "format": "at-uri", "description": "The market.rfp record." },
+            "rfpCid": { "type": "string", "format": "cid" }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["ok"],
+          "properties": {
+            "ok": { "type": "boolean" },
+            "name": { "type": "string", "description": "The bid intent the bidder recorded." },
+            "phase": { "type": "string", "description": "The phase of the bid intent." }
+          }
+        }
+      },
+      "errors": [
+        { "name": "InvalidRequest" },
+        { "name": "Unauthorized" },
+        { "name": "Forbidden" },
+        { "name": "Unavailable" }
+      ]
+    }
+  }
+}

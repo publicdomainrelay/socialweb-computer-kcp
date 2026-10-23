@@ -1,0 +1,27 @@
+{
+  "lexicon": 1,
+  "id": "com.publicdomainrelay.temp.market.rfp",
+  "description": "A request for proposals: the requester asks bidders to bid on the payload.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["payload", "signatures"],
+        "properties": {
+          "domain": { "type": "string", "description": "The market domain, such as compute." },
+          "payload": { "type": "ref", "ref": "com.atproto.repo.strongRef", "description": "The requested thing, such as a compute.vm record." },
+          "submitBid": { "type": "string", "description": "Where bidders submit bids: a DID service ref (did#serviceId) or an HTTP URL." },
+          "policies": {
+            "type": "array",
+            "description": "Policy records the bidder evaluates before it bids.",
+            "items": { "type": "ref", "ref": "com.atproto.repo.strongRef" }
+          },
+          "createdAt": { "type": "string", "format": "datetime" },
+          "signatures": { "type": "ref", "ref": "network.attested.signature#signatures" }
+        }
+      }
+    }
+  }
+}

@@ -68,18 +68,8 @@ type BadgeBlueKeysRecordOptions struct {
 	CreatedAt string
 }
 
-func BuildBadgeBlueKeysRecord(opts BadgeBlueKeysRecordOptions) map[string]any {
-	createdAt := opts.CreatedAt
-	if createdAt == "" {
-		createdAt = NowISO()
-	}
-	return map[string]any{
-		"$type":     BadgeBlueKeysNSID,
-		"keyId":     opts.KeyID,
-		"challenge": opts.DID,
-		"service":   opts.Service,
-		"createdAt": createdAt,
-	}
+func BuildBadgeBlueKeysRecord(opts BadgeBlueKeysRecordOptions) BadgeBlueKeys {
+	return BadgeBlueKeys{KeyID: opts.KeyID, Challenge: opts.DID, Service: opts.Service, CreatedAt: isoOrNow(opts.CreatedAt)}
 }
 
 func CreateBadgeBlueKeysRecord(ctx context.Context, w RecordWriter, opts BadgeBlueKeysRecordOptions) (StrongRef, error) {
@@ -89,6 +79,9 @@ func CreateBadgeBlueKeysRecord(ctx context.Context, w RecordWriter, opts BadgeBl
 	if opts.DID == "" || opts.KeyID == "" {
 		return StrongRef{}, fmt.Errorf("%w: badgeBlueKeys needs did and keyId", ErrInvalidRecord)
 	}
-	rkey := BadgeBlueKeysRkey(opts.DID, opts.KeyID)
-	return w.PutRecord(ctx, opts.DID, BadgeBlueKeysNSID, rkey, BuildBadgeBlueKeysRecord(opts))
+	record, err := EncodeRecord(BuildBadgeBlueKeysRecord(opts))
+	if err != nil {
+		return StrongRef{}, err
+	}
+	return w.PutRecord(ctx, opts.DID, BadgeBlueKeysNSID, BadgeBlueKeysRkey(opts.DID, opts.KeyID), record)
 }

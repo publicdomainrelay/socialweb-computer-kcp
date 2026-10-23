@@ -1,19 +1,17 @@
 package xrpcserver
 
 import (
-	"embed"
 	"fmt"
 	"maps"
 
 	"github.com/bluesky-social/indigo/atproto/lexicon"
-)
 
-//go:embed lexicons/*.json
-var lexiconFS embed.FS
+	"github.com/johnandersen777/socialweb-computer-kcp/lexicons"
+)
 
 func loadCatalog() (*lexicon.BaseCatalog, error) {
 	c := lexicon.NewBaseCatalog()
-	if err := c.LoadEmbedFS(lexiconFS); err != nil {
+	if err := c.LoadEmbedFS(lexicons.FS); err != nil {
 		return nil, fmt.Errorf("xrpcserver: loading the embedded lexicons: %w", err)
 	}
 	return c, nil

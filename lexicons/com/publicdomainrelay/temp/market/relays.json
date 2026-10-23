@@ -1,0 +1,23 @@
+{
+  "lexicon": 1,
+  "id": "com.publicdomainrelay.temp.market.relays",
+  "description": "The relays a participant crawls and asks others to crawl.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["relays", "createdAt"],
+        "properties": {
+          "relays": {
+            "type": "array",
+            "description": "HTTP or HTTPS relay base URLs.",
+            "items": { "type": "string", "format": "uri" }
+          },
+          "createdAt": { "type": "string", "format": "datetime" }
+        }
+      }
+    }
+  }
+}

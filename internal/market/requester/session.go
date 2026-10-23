@@ -615,16 +615,12 @@ func (q *Requester) provisionSession(ctx context.Context, vmName, policyName str
 		return nil, err
 	}
 	if !found {
-		acceptRecord, err := market.BuildAccept(market.AcceptOptions{
+		accept, err = market.CreateAcceptAt(ctx, q.repo, q.repoDID, acceptRKey, market.AcceptOptions{
 			RFP:         market.RecordRef{URI: rfp.URI, CID: rfp.CID},
 			Bid:         market.RecordRef{URI: winner.URI, CID: winner.CID},
 			SubmitEvent: q.submitEventRef(),
 			CreatedAt:   q.nowISO(),
-		})
-		if err != nil {
-			return nil, err
-		}
-		accept, err = market.CreateSignedRecordAt(ctx, q.repo, q.repoDID, market.AcceptNSID, acceptRKey, acceptRecord, q.signer)
+		}, q.signer)
 		if err != nil {
 			return nil, err
 		}
