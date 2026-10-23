@@ -20,7 +20,7 @@ fail() {
   exit 1
 }
 
-unformatted="$(gofmt -l api internal cmd test)"
+unformatted="$(gofmt -l api internal cmd)"
 if [ -n "$unformatted" ]; then
   echo "$unformatted" >&2
   fail gofmt
