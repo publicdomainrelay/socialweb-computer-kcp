@@ -15,6 +15,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atprotoauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gateway"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 )
 
 const (
@@ -109,15 +110,9 @@ const closeWait = 3 * time.Second
 
 func (s *Server) Close() {
 	s.streams.shutdown()
-	done := make(chan struct{})
-	go func() {
-		s.streams.wg.Wait()
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-time.After(closeWait):
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), closeWait)
+	defer cancel()
+	_ = supervise.Join(ctx, s.streams.wg.Wait)
 }
 
 var upgrader = websocket.Upgrader{
@@ -244,6 +239,10 @@ func (s *Server) stream(conn *websocket.Conn, caller gateway.Caller, name string
 				return
 			}
 		}
+	}()
+	defer func() {
+		_ = conn.Close()
+		<-clientGone
 	}()
 
 	done := make(chan error, 1)
