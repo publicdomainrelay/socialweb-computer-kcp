@@ -128,7 +128,7 @@ func (ctl *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, o 
 	}
 	r := compose.RootOf(req, Kind, o, o.Spec.Suspend)
 	c.Observe(r)
-	st := compose.NewStatus(o.Generation, o.Spec.Profile, o.Status.Conditions)
+	st := compose.NewStatus(o.Generation, o.Spec.Profile, o.Status)
 	st.Components = []v1alpha1.ApplicationComponent{}
 	p := &pass{ctx: ctx, ctl: ctl, c: c, r: r, o: o, ws: r.Workspace + ":" + compose.ComponentWorkspace, st: st}
 	if r.Deleting {

@@ -149,7 +149,7 @@ func (ctl *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, o 
 	}
 	r := compose.RootOf(req, Kind, o, o.Spec.Suspend)
 	c.Observe(r)
-	p := &pass{ctx: ctx, ctl: ctl, c: c, r: r, o: o, st: compose.NewStatus(o.Generation, o.Spec.Profile, o.Status.Conditions)}
+	p := &pass{ctx: ctx, ctl: ctl, c: c, r: r, o: o, st: compose.NewStatus(o.Generation, o.Spec.Profile, o.Status)}
 	if r.Deleting {
 		return p.delete(ctx)
 	}

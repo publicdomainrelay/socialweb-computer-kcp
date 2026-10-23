@@ -1,6 +1,7 @@
 package marketnetwork
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -451,7 +452,9 @@ func (p *pass) suspendStatus() v1alpha1.MarketNetworkStatus {
 func (ctl *Controller) ensureApps(ctx context.Context, r compose.Root, o *v1alpha1.MarketNetwork, value v1alpha1.MarketNetworkValue,
 	pdsURL, aliceURL string, placedOnly bool) []v1alpha1.NetworkAppStatus {
 	var bidderDids []string
+	known := map[string]string{}
 	for _, a := range o.Status.Apps {
+		known[a.Name] = a.Did
 		if a.Kind == v1alpha1.ApplicationKindMarketBidder && a.Did != "" {
 			bidderDids = append(bidderDids, a.Did)
 		}
@@ -461,6 +464,7 @@ func (ctl *Controller) ensureApps(ctx context.Context, r compose.Root, o *v1alph
 	for i, app := range o.Spec.Apps {
 		wg.Go(func() {
 			apps[i] = ctl.ensureApp(ctx, r, app, value, o.Spec.Comms, pdsURL, aliceURL, bidderDids, o.Spec.Suspend || app.Suspend, placedOnly)
+			apps[i].Did = cmp.Or(apps[i].Did, known[app.Name])
 		})
 	}
 	wg.Wait()

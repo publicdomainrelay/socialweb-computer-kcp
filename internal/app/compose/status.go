@@ -243,8 +243,9 @@ func SetOverrideErrorIfAny(conditions *[]metav1.Condition, summary **v1alpha1.Co
 	}
 }
 
-func NewStatus(gen int64, profile string, previous []metav1.Condition) v1alpha1.ApplicationStatus {
-	return v1alpha1.ApplicationStatus{ObservedGeneration: gen, Profile: profile, Conditions: append([]metav1.Condition(nil), previous...)}
+func NewStatus(gen int64, profile string, previous v1alpha1.ApplicationStatus) v1alpha1.ApplicationStatus {
+	return v1alpha1.ApplicationStatus{ObservedGeneration: gen, Profile: profile, Did: previous.Did,
+		Conditions: append([]metav1.Condition(nil), previous.Conditions...)}
 }
 
 func (c *Composer) WriteStatus(ctx context.Context, r Root, gvr schema.GroupVersionResource, status any) error {
