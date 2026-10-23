@@ -15,7 +15,7 @@ type APIResource = apiresource.APIResource
 var APIResources = []APIResource{
 	{Kind: "Cluster", Plural: "clusters", Revision: 3, Export: "clusters", Object: Cluster{}},
 	{Kind: "Node", Plural: "nodes", Revision: 2, Export: "clusters", Object: Node{}},
-	{Kind: "NodeClaim", Plural: "nodeclaims", Revision: 7, Export: "clusters", Object: NodeClaim{}},
+	{Kind: "NodeClaim", Plural: "nodeclaims", Revision: 8, Export: "clusters", Object: NodeClaim{}},
 	{Kind: "ClusterLink", Plural: "clusterlinks", Revision: 2, Export: "clusters", Object: ClusterLink{}},
 	{Kind: "ClusterClientCertificate", Plural: "clusterclientcertificates", Revision: 2, Export: "clusters", Object: ClusterClientCertificate{}, PrinterColumns: []PrinterColumn{
 		{Name: "Cluster", Type: "string", JSONPath: ".spec.clusterRef.name"},

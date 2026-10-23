@@ -124,12 +124,14 @@ func Register(m *ctlruntime.Manager, c *Controller, cfg *rest.Config) error {
 	if err := ctlruntime.For[*v1alpha1.NodeClaim](m, Name, c,
 		ctlruntime.Export(Export),
 		ctlruntime.FieldManager(contract.FieldManager),
+		ctlruntime.SharedStatus(),
 		ctlruntime.Finalizer(v1alpha1.FinalizerNodeClaim),
 		ctlruntime.InWorkspaces(c.inScope),
 		ctlruntime.Gone(c.gone),
 		ctlruntime.Events(c.events),
 		ctlruntime.WatchesIn(ContractExport, c.contractClaims),
 		ctlruntime.Watches(c.linkClaims),
+		ctlruntime.Watches(joinedClaims),
 		ctlruntime.WatchesIn(ExposureExport, c.exposureClaims),
 	); err != nil {
 		return fmt.Errorf("nodeclaim: registering the NodeClaim controller: %w", err)
@@ -345,7 +347,9 @@ func (c *Controller) status(ctx context.Context, req ctlruntime.Request, obj *v1
 	if reflect.DeepEqual(obj.Status, next) {
 		return nil
 	}
-	if err := req.ApplyStatus(ctx, &v1alpha1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Name: obj.Name}, Status: next}); err != nil {
+	own := next
+	own.JoinedAt = ""
+	if err := req.ApplyStatus(ctx, &v1alpha1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Name: obj.Name}, Status: own}); err != nil {
 		return err
 	}
 	obj.Status = next
@@ -538,6 +542,13 @@ func (c *Controller) linkClaims(_ context.Context, src ctlruntime.Request, obj *
 		}
 	}
 	return out
+}
+
+func joinedClaims(_ context.Context, src ctlruntime.Request, obj *v1alpha1.NodeClaim) []ctlruntime.Request {
+	if obj.Status.Phase != v1alpha1.NodeClaimJoining || obj.Status.JoinedAt == "" {
+		return nil
+	}
+	return []ctlruntime.Request{{Namespace: src.Namespace, Name: src.Name}}
 }
 
 func (c *Controller) exposureClaims(_ context.Context, src ctlruntime.Request, _ *exposurev1alpha1.Exposure) []ctlruntime.Request {

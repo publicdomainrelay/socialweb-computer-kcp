@@ -239,6 +239,8 @@ type NodeClaimStatus struct {
 	Grant *NodeClaimGrant `json:"grant,omitempty"`
 
 	Secrets *NodeClaimSecrets `json:"secrets,omitempty"`
+
+	JoinedAt string `json:"joinedAt,omitempty"`
 }
 
 type NodeClaimSecrets struct {
@@ -262,3 +264,5 @@ type NodeClaimGrant struct {
 }
 
 const FinalizerNodeClaim = "nodeclaim.socialweb.computer/release"
+
+const FieldManagerNodeClaimJoin = "socialweb.computer/nodemarket"

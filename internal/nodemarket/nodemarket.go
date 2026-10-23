@@ -318,12 +318,11 @@ func (h *Host) ConfirmJoined(ctx context.Context) error {
 		return fmt.Errorf("nodemarket: recording node %s of %s as Running after the door reported "+
 			"it: %w", h.opts.NodeName, h.opts.Cluster, err)
 	}
-	if claim.Status.Phase == v1alpha1.NodeClaimJoining {
-		if m, ok := h.opts.Claims.(claimRunningMarker); ok {
+	if claim.Status.Phase == v1alpha1.NodeClaimJoining && claim.Status.JoinedAt == "" {
+		if m, ok := h.opts.Claims.(claimJoinReporter); ok {
 			if target, err := h.opts.Resolve(ctx); err == nil {
-				if err := m.MarkNodeClaimRunning(ctx, target.Workspace, h.opts.NodeName,
-					"the node joined its cluster and the cluster reports it"); err != nil {
-					return fmt.Errorf("nodemarket: marking the claim for node %s of %s Running: %w",
+				if err := m.ReportNodeClaimJoined(ctx, target.Workspace, h.opts.NodeName); err != nil {
+					return fmt.Errorf("nodemarket: reporting the claim for node %s of %s joined: %w",
 						h.opts.NodeName, h.opts.Cluster, err)
 				}
 			}
@@ -332,8 +331,8 @@ func (h *Host) ConfirmJoined(ctx context.Context) error {
 	return nil
 }
 
-type claimRunningMarker interface {
-	MarkNodeClaimRunning(ctx context.Context, logicalCluster, name, message string) error
+type claimJoinReporter interface {
+	ReportNodeClaimJoined(ctx context.Context, logicalCluster, name string) error
 }
 
 type End struct {
