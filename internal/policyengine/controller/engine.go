@@ -435,9 +435,6 @@ func (e *Engine) release() {
 func (e *Engine) rootContext() context.Context {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.rootCtx == nil {
-		return context.Background()
-	}
 	return e.rootCtx
 }
 
