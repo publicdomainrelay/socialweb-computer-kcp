@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
@@ -126,6 +127,9 @@ func (p *Publisher) Publish(ctx context.Context, b Binding) (Published, error) {
 		err = fmt.Errorf("unknown mode %q", b.Spec.Mode)
 	}
 	if err != nil {
+		if errors.Is(err, syscall.EADDRINUSE) {
+			p.release(b.Workspace, b.Name)
+		}
 		return Published{}, err
 	}
 	pub.fingerprint = fingerprint
