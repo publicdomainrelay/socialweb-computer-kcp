@@ -239,7 +239,7 @@ func quotaPlan(rootKind string) []quotaEntry {
 	case string(v1alpha1.ApplicationKindMarketRequester):
 		entries = append([]quotaEntry{{"", ComputeContractGVR, "computeContracts", QuotaDefaults.ComputeContracts, false}}, runs...)
 	case string(v1alpha1.ApplicationKindGateway):
-		entries = append([]quotaEntry{{ComponentWorkspace, ComputeContractGVR, "computeContracts", QuotaDefaults.ComputeContracts, false}}, runs...)
+		entries = append([]quotaEntry{{"", ComputeContractGVR, "computeContracts", QuotaDefaults.ComputeContracts, false}}, runs...)
 	case string(v1alpha1.ApplicationKindSshGateway), "MarketNetwork":
 		entries = runs
 	default:

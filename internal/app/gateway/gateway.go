@@ -197,13 +197,13 @@ func GatewayRequesterIdentity(g v1alpha1.GatewaySpec) v1alpha1.ApplicationIdenti
 	return id
 }
 
-func gatewayNodeMarket(o *v1alpha1.Gateway, workspace string) *v1alpha1.GatewayNodeMarket {
+func gatewayNodeMarket(o *v1alpha1.Gateway, workspace, contracts string) *v1alpha1.GatewayNodeMarket {
 	m := o.Spec.MarketNetwork
 	if m == nil {
 		return nil
 	}
 	out := &v1alpha1.GatewayNodeMarket{OwnerSessionsFile: m.OwnerSessionsFile, UserDataBaseFile: m.NodeUserDataBaseFile,
-		HomeWorkspace: workspace, ContractWorkspace: workspace,
+		HomeWorkspace: workspace, ContractWorkspace: contracts,
 		NodePolicy: compose.OptionValue(o.Spec.Options, GatewayNodePolicy), NodePolicyArgs: compose.OptionValue(o.Spec.Options, GatewayNodePolicyArgs),
 		ExtraBidderDIDs: slices.Clone(o.Spec.BidderDids)}
 	return out
@@ -465,7 +465,7 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 		Audience:          audience,
 		RequiredDownloads: requiredDownloads,
 		PostSignInURL:     postSignInURL,
-		NodeMarket:        gatewayNodeMarket(o, p.ws),
+		NodeMarket:        gatewayNodeMarket(o, p.ws, p.r.Workspace),
 	}}
 	requester := compose.Desired{Kind: compose.ComponentKindRequester, Name: marketrequester.RequesterComponent, Spec: requesterSpec}
 	out := []compose.Desired{compose.PolicyEngineDesired(), requester, gatewayAPI}
