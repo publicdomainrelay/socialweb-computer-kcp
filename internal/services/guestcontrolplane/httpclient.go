@@ -14,7 +14,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
 )
 
-func networkHTTPClient(deps component.Deps, network v1alpha1.MarketNetworkValue, timeout time.Duration) *http.Client {
+func networkHTTPClient(hosts component.NetworkHosts, network v1alpha1.MarketNetworkValue, timeout time.Duration) *http.Client {
 	entries := []networkdial.Host{}
 	for _, host := range network.Hosts {
 		entries = append(entries, networkdial.Host{Name: host.Name, Address: host.Address})
@@ -22,7 +22,7 @@ func networkHTTPClient(deps component.Deps, network v1alpha1.MarketNetworkValue,
 	if name, address := guestTLSHostAddress(network); name != "" && address != "" {
 		entries = append(entries, networkdial.Host{Name: name, Address: address})
 	}
-	var resolver networkdial.Resolver = deps.Hosts
+	var resolver networkdial.Resolver = hosts
 	if mapped, err := networkdial.NewHostMap(entries); err == nil && mapped.Len() > 0 {
 		resolver = mapped
 	}

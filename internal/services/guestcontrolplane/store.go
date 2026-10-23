@@ -169,12 +169,12 @@ func (g *KCPGrants) Delete(ctx context.Context, name string) error {
 	return g.Res.Delete(ctx, g.Cluster, name)
 }
 
-func kcpStore(deps component.Deps, workspace string) (*kcpstore.Store, string, error) {
-	if deps.KCP == nil {
+func kcpStore(kcp component.KCPClients, workspace string) (*kcpstore.Store, string, error) {
+	if kcp == nil {
 		return nil, "", errors.New("guestcontrolplane: the component has no kcp clients")
 	}
 	workspace = cmp.Or(workspace, "root")
-	client, err := deps.KCP.Client(workspace)
+	client, err := kcp.Client(workspace)
 	if err != nil {
 		return nil, "", fmt.Errorf("guestcontrolplane: kcp client for %s: %w", workspace, err)
 	}
