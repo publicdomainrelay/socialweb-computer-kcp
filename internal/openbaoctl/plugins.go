@@ -1,10 +1,7 @@
 package openbaoctl
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -14,6 +11,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/baosync"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/sha256sum"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/versions"
 )
 
@@ -78,19 +76,6 @@ func checkPlugins(ps []v1alpha1.OpenBaoPlugin) error {
 	return nil
 }
 
-func fileSHA256(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
-}
-
 func (c *Controller) placePlugins(o v1alpha1.OpenBaoServer, dir string) ([]placedPlugin, error) {
 	if len(o.Spec.Plugins) == 0 {
 		return nil, nil
@@ -112,7 +97,7 @@ func (c *Controller) placePlugins(o v1alpha1.OpenBaoServer, dir string) ([]place
 		if err != nil {
 			return nil, fmt.Errorf("plugin %s: asset %s: %w", p.Name, p.Asset.Name, err)
 		}
-		sum, err := fileSHA256(src)
+		sum, err := sha256sum.File(src)
 		if err != nil {
 			return nil, fmt.Errorf("plugin %s: %w", p.Name, err)
 		}
@@ -125,7 +110,7 @@ func (c *Controller) placePlugins(o v1alpha1.OpenBaoServer, dir string) ([]place
 		}
 		command := p.Asset.Name + "-" + sum[:PluginCommandBytes]
 		dst := filepath.Join(pdir, command)
-		if have, err := fileSHA256(dst); err != nil || have != sum {
+		if have, err := sha256sum.File(dst); err != nil || have != sum {
 			body, err := os.ReadFile(src)
 			if err != nil {
 				return nil, fmt.Errorf("plugin %s: %w", p.Name, err)

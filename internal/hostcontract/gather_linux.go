@@ -24,6 +24,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/assets"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 )
 
 type Options struct {
@@ -70,12 +71,12 @@ func Gather(ctx context.Context, o Options) Facts {
 	if b, err := os.ReadFile("/proc/sys/kernel/random/boot_id"); err == nil {
 		f.BootID = strings.TrimSpace(string(b))
 	}
-	f.Tzdata = exists("/usr/share/zoneinfo/UTC")
+	f.Tzdata = fsx.Exists("/usr/share/zoneinfo/UTC")
 	f.OomdActive = nonEmpty("/sys/fs/cgroup/system.slice/systemd-oomd.service/cgroup.procs")
 	if o.Role != RoleBidder {
 		return f
 	}
-	f.KVMMissing = !exists("/dev/kvm")
+	f.KVMMissing = !fsx.Exists("/dev/kvm")
 	f.KVMErr = openRW("/dev/kvm")
 	f.TunErr = openRW("/dev/net/tun")
 	f.KVMGid, f.AccountInKVM = groupMembership("/etc/group", "kvm", f.Account)
@@ -135,11 +136,6 @@ func cgroup2() bool {
 		return false
 	}
 	return st.Type == unix.CGROUP2_SUPER_MAGIC
-}
-
-func exists(p string) bool {
-	_, err := os.Stat(p)
-	return err == nil
 }
 
 func nonEmpty(p string) bool {

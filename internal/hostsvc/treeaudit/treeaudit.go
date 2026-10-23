@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/sha256sum"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/versions"
 )
 
@@ -337,7 +338,7 @@ func Pinned(runtimeRoot string, pins []versions.Pin, digest TreeDigest) (map[str
 		asset, whole := trees[e.Name()]
 		if !whole {
 			for _, rel := range found {
-				sum, err := fileSHA256(filepath.Join(dir, rel))
+				sum, err := sha256sum.File(filepath.Join(dir, rel))
 				if err != nil {
 					notes = append(notes, err.Error())
 					continue
@@ -354,7 +355,7 @@ func Pinned(runtimeRoot string, pins []versions.Pin, digest TreeDigest) (map[str
 			if err != nil || info.Mode().Perm()&0o111 == 0 {
 				return err
 			}
-			sum, err := fileSHA256(p)
+			sum, err := sha256sum.File(p)
 			if err != nil {
 				return err
 			}
@@ -370,19 +371,6 @@ func Pinned(runtimeRoot string, pins []versions.Pin, digest TreeDigest) (map[str
 
 func isVMAsset(name string) bool {
 	return slices.Contains(VMAssets, name)
-}
-
-func fileSHA256(p string) (string, error) {
-	f, err := os.Open(p)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 func Write(w io.Writer, r Report) {

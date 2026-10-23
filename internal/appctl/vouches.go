@@ -15,6 +15,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/recordcontroller"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 )
 
 const (
@@ -50,7 +51,7 @@ func (n *networks) declareOperatorVouches(ctx context.Context, apps []v1alpha1.N
 			continue
 		}
 		var rec devinstance.Record
-		if devinstance.ReadJSON(c.layout.Record, &rec) != nil || rec.BaseWorkspace == "" {
+		if fsx.ReadJSON(c.layout.Record, &rec) != nil || rec.BaseWorkspace == "" {
 			continue
 		}
 		switch app.Kind {

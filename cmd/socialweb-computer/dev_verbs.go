@@ -13,6 +13,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clicfg"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devcheck"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 )
 
 const helloTimeout = 2 * time.Second
@@ -23,7 +24,7 @@ func (a *app) record(verb string, vals clicfg.Values) (devinstance.Layout, devin
 		return l, devinstance.Record{}, a.fail(exitRefused, "%s: %v", verb, err)
 	}
 	var rec devinstance.Record
-	if err := devinstance.ReadJSON(l.Record, &rec); err != nil {
+	if err := fsx.ReadJSON(l.Record, &rec); err != nil {
 		return l, rec, a.fail(exitFailed, "%s: instance %s has no record at %s; dev up first", verb, l.ID, l.Record)
 	}
 	return l, rec, exitOK
@@ -177,7 +178,7 @@ func runDevRestart(ctx context.Context, a *app, vals clicfg.Values, rest []strin
 	}
 	defer m.Close()
 	r := coreRestartReport{Instance: l.ID, Binary: bin}
-	devinstance.ReadJSON(l.CoreRecord, &r.Before)
+	fsx.ReadJSON(l.CoreRecord, &r.Before)
 	lock, err := lockFile(l.Lock, 30*time.Second)
 	if err != nil {
 		return a.fail(exitFailed, "dev restart: %v", err)
@@ -191,7 +192,7 @@ func runDevRestart(ctx context.Context, a *app, vals clicfg.Values, rest []strin
 		rec.Executables = map[string]devinstance.Executable{}
 	}
 	rec.Executables["socialweb-computer"] = bin
-	if err := devinstance.WriteJSON(l.Record, rec); err != nil {
+	if err := fsx.WriteJSON(l.Record, rec, 0o600); err != nil {
 		lock.Close()
 		return a.fail(exitFailed, "dev restart: %v", err)
 	}

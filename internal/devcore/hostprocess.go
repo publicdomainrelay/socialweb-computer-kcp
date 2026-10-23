@@ -16,6 +16,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostprocess"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpdatastore"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/pgunit"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/postgresctl"
@@ -26,7 +27,7 @@ const HostProcessApplyTimeout = time.Minute
 
 func Mirrors(bcfg bootstrap.Config, l devinstance.Layout) []hostprocess.Mirror {
 	var rec devinstance.Record
-	if err := devinstance.ReadJSON(l.Record, &rec); err != nil || rec.SharedKcp != "" {
+	if err := fsx.ReadJSON(l.Record, &rec); err != nil || rec.SharedKcp != "" {
 		return nil
 	}
 	app, err := bcfg.App(&rec)
@@ -91,7 +92,7 @@ func AppConfig(bcfg bootstrap.Config, rec devinstance.Record, m hostsvc.Manager,
 	return appctl.Config{Kubeconfig: rec.AdminKubeconfig, Workspace: rec.BaseWorkspace, Layout: l, Manager: m,
 		Record: func() (devinstance.Record, error) {
 			var r devinstance.Record
-			return r, devinstance.ReadJSON(l.Record, &r)
+			return r, fsx.ReadJSON(l.Record, &r)
 		},
 		ReadyTimeout: bcfg.ReadyTimeout, Log: log}
 }

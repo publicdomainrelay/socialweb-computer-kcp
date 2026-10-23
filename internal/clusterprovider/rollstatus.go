@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 )
 
 const (
@@ -80,7 +82,7 @@ func (r *Roller) noteStatus(clusters []string, err error) {
 	if err != nil {
 		r.status.Error, r.status.LastError, r.status.LastErrorAt = err.Error(), err.Error(), now
 	}
-	if werr := writeJSONFile(RollerStatusPath(r.Stack.StateDir), r.status); werr != nil {
+	if werr := fsx.WriteJSON(RollerStatusPath(r.Stack.StateDir), r.status, 0o600); werr != nil {
 		r.log().Warn("cluster provider: writing the roller status", "err", werr.Error())
 	}
 }
@@ -99,7 +101,7 @@ func (r *Roller) noteObserved(key string, req RollRequest, state string, err err
 	if err != nil {
 		o.Error = err.Error()
 	}
-	if werr := writeJSONFile(p, o); werr != nil {
+	if werr := fsx.WriteJSON(p, o, 0o600); werr != nil {
 		r.log().Warn("cluster provider: writing the roll observation", "cluster", key, "roll", req.ID, "err", werr.Error())
 	}
 }

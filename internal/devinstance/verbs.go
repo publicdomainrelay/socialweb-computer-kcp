@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 )
 
 const Marker = ".swc-dev"
@@ -120,7 +122,7 @@ func List(stateRoot string) ([]Record, error) {
 			continue
 		}
 		var rec Record
-		if err := ReadJSON(filepath.Join(DevRoot(stateRoot), e.Name(), "instance.json"), &rec); err != nil {
+		if err := fsx.ReadJSON(filepath.Join(DevRoot(stateRoot), e.Name(), "instance.json"), &rec); err != nil {
 			continue
 		}
 		out = append(out, rec)

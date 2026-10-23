@@ -17,6 +17,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/buildstamp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostcontract"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/sha256sum"
 )
 
 var (
@@ -93,7 +94,7 @@ func Upgrade(ctx context.Context, o UpgradeOptions) error {
 	if !digestName.MatchString(o.SHA256) {
 		return fmt.Errorf("upgrade: --sha256 must name the published 64-hex digest of the binary, got %q", o.SHA256)
 	}
-	sum, err := fileSHA256(o.Binary)
+	sum, err := sha256sum.File(o.Binary)
 	if err != nil {
 		return err
 	}
@@ -120,12 +121,12 @@ func Upgrade(ctx context.Context, o UpgradeOptions) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	if have, _ := fileSHA256(dst); have != sum {
+	if have, _ := sha256sum.File(dst); have != sum {
 		if err := copyFile(o.Binary, dst, 0o755); err != nil {
 			return err
 		}
 	}
-	if have, err := fileSHA256(dst); err != nil || have != sum {
+	if have, err := sha256sum.File(dst); err != nil || have != sum {
 		return fmt.Errorf("%w: the copy at %s is %s", ErrManifestMismatch, dst, have)
 	}
 	role := InstalledRole(o.Home)

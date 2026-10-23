@@ -21,6 +21,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clicfg"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 )
 
 const appStatusTimeout = 10 * time.Second
@@ -112,7 +113,7 @@ func appKcps(ctx context.Context, l devinstance.Layout, rec devinstance.Record) 
 			return nil, err
 		}
 		var crec devinstance.Record
-		if err := devinstance.ReadJSON(cl.Record, &crec); err != nil {
+		if err := fsx.ReadJSON(cl.Record, &crec); err != nil {
 			continue
 		}
 		out = append(out, appKcp{app: ap.Name, instance: ap.Instance, kubeconfig: crec.AdminKubeconfig, workspace: baseWorkspace(crec)})

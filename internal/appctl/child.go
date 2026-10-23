@@ -29,6 +29,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostprocess"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 )
 
 const (
@@ -139,7 +140,7 @@ func lockChild(path string) (*os.File, error) {
 
 func (n *networks) coreLive(ctx context.Context, c child) bool {
 	var core devinstance.Core
-	if devinstance.ReadJSON(c.layout.CoreRecord, &core) != nil || core.AdoptedAt.IsZero() {
+	if fsx.ReadJSON(c.layout.CoreRecord, &core) != nil || core.AdoptedAt.IsZero() {
 		return false
 	}
 	st, err := n.ctl.c.Manager.Inspect(ctx, c.layout.CoreUnit())
@@ -148,7 +149,7 @@ func (n *networks) coreLive(ctx context.Context, c child) bool {
 
 func (n *networks) placeChild(ctx context.Context, c child, gw *devinstance.GatewayChild) (devinstance.Record, error) {
 	var rec devinstance.Record
-	if devinstance.ReadJSON(c.layout.Record, &rec) == nil && rec.Ready && rec.SharedKcp != "" && n.coreLive(ctx, c) && sameSpec(rec.Gateway, gw) {
+	if fsx.ReadJSON(c.layout.Record, &rec) == nil && rec.Ready && rec.SharedKcp != "" && n.coreLive(ctx, c) && sameSpec(rec.Gateway, gw) {
 		return rec, nil
 	}
 	parent, err := n.ctl.c.Record()
@@ -175,7 +176,7 @@ func (n *networks) placeChild(ctx context.Context, c child, gw *devinstance.Gate
 		return rec, err
 	}
 	defer lk.Close()
-	if devinstance.ReadJSON(c.layout.Record, &rec) != nil {
+	if fsx.ReadJSON(c.layout.Record, &rec) != nil {
 		rec = devinstance.Record{Created: time.Now().UTC()}
 	}
 	rec.Layout, rec.Profile, rec.Backend, rec.Devsup = c.layout, bootstrap.ProfileQuick, hostsvc.BackendProc, parent.Devsup
@@ -198,7 +199,7 @@ func (n *networks) placeChild(ctx context.Context, c child, gw *devinstance.Gate
 	if err := bootstrap.Ensure(ctx, remote, bcfg, &rec); err != nil {
 		return rec, fmt.Errorf("the bootstrap layer of %s: %w", c.id, err)
 	}
-	if err := devinstance.WriteJSON(c.layout.Record, rec); err != nil {
+	if err := fsx.WriteJSON(c.layout.Record, rec, 0o600); err != nil {
 		return rec, err
 	}
 	spec, err := bcfg.CoreSpec(&rec)
@@ -213,7 +214,7 @@ func (n *networks) placeChild(ctx context.Context, c child, gw *devinstance.Gate
 	if err := waitChildCore(ctx, c.layout, st.InvocationID, n.ctl.c.ReadyTimeout); err != nil {
 		return rec, err
 	}
-	devinstance.ReadJSON(c.layout.Record, &rec)
+	fsx.ReadJSON(c.layout.Record, &rec)
 	n.ctl.c.log().Info("a child application runs in its workspace of the network's kcp", "child", c.id, "kind", c.app.Kind, "kcp", rec.KcpURL,
 		"workspace", rec.BaseWorkspace, "seconds", time.Since(started).Seconds())
 	return rec, nil
@@ -223,7 +224,7 @@ func waitChildCore(ctx context.Context, l devinstance.Layout, invocation string,
 	deadline := time.Now().Add(timeout)
 	for {
 		var c devinstance.Core
-		if err := devinstance.ReadJSON(l.CoreRecord, &c); err == nil && c.InvocationID == invocation && !c.AdoptedAt.IsZero() {
+		if err := fsx.ReadJSON(l.CoreRecord, &c); err == nil && c.InvocationID == invocation && !c.AdoptedAt.IsZero() {
 			return nil
 		}
 		if time.Now().After(deadline) {
@@ -365,7 +366,7 @@ func (n *networks) stopChild(ctx context.Context, c child) error {
 func (n *networks) teardownChild(ctx context.Context, c child) error {
 	log := n.ctl.c.log().With("child", c.id)
 	var rec devinstance.Record
-	recErr := devinstance.ReadJSON(c.layout.Record, &rec)
+	recErr := fsx.ReadJSON(c.layout.Record, &rec)
 	if rec.Gateway != nil {
 		if err := n.deleteAccountWorkspaces(ctx); err != nil {
 			log.Warn("the gateway's account workspaces did not go; its workspace is deleted anyway", "err", err.Error())

@@ -24,6 +24,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpapply"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
@@ -919,7 +920,7 @@ func (n *networks) suspendApp(ctx context.Context, app v1alpha1.NetworkApp) v1al
 	}
 	out.Instance = c.id
 	var rec devinstance.Record
-	if devinstance.ReadJSON(c.layout.Record, &rec) != nil || rec.AdminKubeconfig == "" {
+	if fsx.ReadJSON(c.layout.Record, &rec) != nil || rec.AdminKubeconfig == "" {
 		out.Phase, out.Message = v1alpha1.ApplicationPhasePending, "suspended"
 		return out
 	}

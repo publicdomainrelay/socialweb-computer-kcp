@@ -1,12 +1,11 @@
 package cloudinit
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/sha256sum"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/nodeagent"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/systemdunit"
 )
@@ -241,13 +240,8 @@ func NodeAudience(clusterKey, nodeName string) string {
 	return "api://socialweb-node?actx=" + clusterKey + "/" + nodeName
 }
 
-func sha256Hex(raw []byte) string {
-	sum := sha256.Sum256(raw)
-	return hex.EncodeToString(sum[:])
-}
-
 func NodeJWTMount(issuer string) string {
-	sum := sha256Hex([]byte(issuer))
+	sum := sha256sum.Hex([]byte(issuer))
 	return NodeJWTMountPrefix + sum[:NodeJWTMountHashHex]
 }
 

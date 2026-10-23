@@ -22,6 +22,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestnet"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostcontract"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 )
 
 type firecracker struct {
@@ -187,7 +188,7 @@ func (r *firecracker) Prepare(ctx context.Context, spec VMSpec) (Prepared, error
 		Argv:    fcapi.Argv("firecracker", p.VMMID, filepath.Join(p.WorkDir, ConfigFile), p.Socket),
 		Console: console,
 	}
-	if err := writeJSON(filepath.Join(p.WorkDir, ParamsFile), params, 0o600); err != nil {
+	if err := fsx.WriteJSON(filepath.Join(p.WorkDir, ParamsFile), params, 0o600); err != nil {
 		return Prepared{}, err
 	}
 	for _, f := range []string{console, filepath.Join(p.WorkDir, VMMLogFile)} {
@@ -381,7 +382,7 @@ func (r *firecracker) grant(p Prepared, vmmUID int) error {
 			outside = append(outside, gr)
 		}
 	}
-	return writeJSON(filepath.Join(p.WorkDir, GrantsFile), outside, 0o600)
+	return fsx.WriteJSON(filepath.Join(p.WorkDir, GrantsFile), outside, 0o600)
 }
 
 func (r *firecracker) Await(ctx context.Context, p Prepared, slot int) (RuntimeRef, error) {
@@ -433,7 +434,7 @@ func (r *firecracker) Await(ctx context.Context, p Prepared, slot int) (RuntimeR
 		GuestAddress: guestnet.GuestAddress, HostAddress: guestnet.HostAddress,
 		ImageSHA256: pin.Files[guestimage.ManifestName].SHA256,
 	}
-	if err := writeJSON(filepath.Join(p.WorkDir, RefFile), ref, 0o600); err != nil {
+	if err := fsx.WriteJSON(filepath.Join(p.WorkDir, RefFile), ref, 0o600); err != nil {
 		return RuntimeRef{}, err
 	}
 	return ref, nil
@@ -697,18 +698,6 @@ func readManifest(dir string) (imageManifest, error) {
 		return m, fmt.Errorf("vmruntime: the image manifest in %s names no boot args or machine size", dir)
 	}
 	return m, nil
-}
-
-func writeJSON(path string, v any, mode os.FileMode) error {
-	raw, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, append(raw, '\n'), mode); err != nil {
-		return fmt.Errorf("vmruntime: %w", err)
-	}
-	return os.Rename(tmp, path)
 }
 
 func tailOf(path string, n int64) string {

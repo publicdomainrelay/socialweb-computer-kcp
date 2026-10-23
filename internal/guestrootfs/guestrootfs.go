@@ -17,6 +17,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/sha256sum"
 )
 
 const RootfsLabel = "cloudimg-rootfs"
@@ -405,7 +407,7 @@ func Compose(base io.Reader, spec Spec, out io.Writer) (Report, error) {
 			h.ModTime = epoch
 			h.PAXRecords = nil
 			delete(replace, p)
-			report.Bake.Files[p] = shaOf(body)
+			report.Bake.Files[p] = sha256sum.Hex(body)
 		}
 		if err := emit(h, body); err != nil {
 			return Report{}, err
@@ -455,9 +457,9 @@ func Compose(base io.Reader, spec Spec, out io.Writer) (Report, error) {
 			return Report{}, err
 		}
 		if name, ok := spec.Assets[p]; ok {
-			report.Bake.Assets[name] = shaOf(f.Body)
+			report.Bake.Assets[name] = sha256sum.Hex(f.Body)
 		} else {
-			report.Bake.Files[p] = shaOf(f.Body)
+			report.Bake.Files[p] = sha256sum.Hex(f.Body)
 		}
 	}
 	if err := w.Close(); err != nil {
@@ -472,9 +474,4 @@ func Compose(base io.Reader, spec Spec, out io.Writer) (Report, error) {
 	sort.Slice(report.Entries, func(i, j int) bool { return report.Entries[i].Path < report.Entries[j].Path })
 	report.TarSHA256 = hex.EncodeToString(sum.Sum(nil))
 	return report, nil
-}
-
-func shaOf(b []byte) string {
-	d := sha256.Sum256(b)
-	return hex.EncodeToString(d[:])
 }

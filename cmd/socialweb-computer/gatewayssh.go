@@ -14,6 +14,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/irohdial"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/gatewayssh"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/request"
 )
@@ -171,7 +172,7 @@ func (r *gatewaySshRun) inNetwork(ctx context.Context) int {
 		return r.a.fail(exitRefused, "run gateway ssh: %v", err)
 	}
 	var netRec devinstance.Record
-	if err := devinstance.ReadJSON(l.Record, &netRec); err != nil {
+	if err := fsx.ReadJSON(l.Record, &netRec); err != nil {
 		return r.a.fail(exitRefused, "run gateway ssh: market network %s has no instance record (dev up --profile market-network first): %v", r.network, err)
 	}
 	if netRec.Profile != bootstrap.ProfileMarketNetwork || netRec.AdminKubeconfig == "" {

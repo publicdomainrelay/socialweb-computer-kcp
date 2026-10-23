@@ -11,6 +11,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clicfg"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/componentcore"
 )
@@ -103,7 +104,7 @@ func (a *app) resolveComponentTarget(ctx context.Context, l devinstance.Layout, 
 				return t, err
 			}
 			var crec devinstance.Record
-			if err := devinstance.ReadJSON(cl.Record, &crec); err != nil {
+			if err := fsx.ReadJSON(cl.Record, &crec); err != nil {
 				return t, fmt.Errorf("network child %s (instance %s) has no record: %w", t.App, ap.Instance, err)
 			}
 			t.Instance, t.Kubeconfig, t.Base = ap.Instance, crec.AdminKubeconfig, baseWorkspace(crec)

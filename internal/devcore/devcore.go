@@ -24,6 +24,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/install"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/logcap"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
@@ -118,11 +119,11 @@ func Run(ctx context.Context, cfg Config, m hostsvc.Manager) error {
 		return fmt.Errorf("devcore: another core holds %s: %w", l.CoreLock, err)
 	}
 	var rec devinstance.Record
-	if err := devinstance.ReadJSON(l.Record, &rec); err != nil {
+	if err := fsx.ReadJSON(l.Record, &rec); err != nil {
 		return fmt.Errorf("devcore: reading %s: %w", l.Record, err)
 	}
 	var prev devinstance.Core
-	devinstance.ReadJSON(l.CoreRecord, &prev)
+	fsx.ReadJSON(l.CoreRecord, &prev)
 	core := devinstance.Core{Generation: prev.Generation + 1, PID: os.Getpid(), InvocationID: os.Getenv("INVOCATION_ID"),
 		StartedAt: time.Now().UTC()}
 	bcfg := bootstrap.Config{Layout: l, KcpPath: rec.Executables["kcp"].Path, KinePath: rec.Executables["kine"].Path, PostgresRoot: rec.Executables["postgres"].Path,
@@ -132,7 +133,7 @@ func Run(ctx context.Context, cfg Config, m hostsvc.Manager) error {
 	if err != nil {
 		return err
 	}
-	if err := devinstance.ReadJSON(l.Record, &rec); err != nil {
+	if err := fsx.ReadJSON(l.Record, &rec); err != nil {
 		lk.Close()
 		return fmt.Errorf("devcore: reading %s: %w", l.Record, err)
 	}
@@ -258,7 +259,7 @@ func Run(ctx context.Context, cfg Config, m hostsvc.Manager) error {
 			continue
 		}
 		cur := devinstance.Record{}
-		if err := devinstance.ReadJSON(l.Record, &cur); err != nil {
+		if err := fsx.ReadJSON(l.Record, &cur); err != nil {
 			lk.Close()
 			log.Error("re-reading the instance record", "err", err.Error())
 			continue
@@ -295,7 +296,7 @@ func Run(ctx context.Context, cfg Config, m hostsvc.Manager) error {
 			continue
 		}
 		lk.Close()
-		devinstance.WriteJSON(l.CoreRecord, core)
+		fsx.WriteJSON(l.CoreRecord, core, 0o600)
 	}
 }
 
@@ -311,10 +312,10 @@ func ensure(ctx context.Context, m hostsvc.Manager, bcfg bootstrap.Config, l dev
 	}
 	core.AdoptedAt = time.Now().UTC()
 	core.LastCheck = core.AdoptedAt
-	if err := devinstance.WriteJSON(l.Record, *rec); err != nil {
+	if err := fsx.WriteJSON(l.Record, *rec, 0o600); err != nil {
 		return err
 	}
-	if err := devinstance.WriteJSON(l.CoreRecord, *core); err != nil {
+	if err := fsx.WriteJSON(l.CoreRecord, *core, 0o600); err != nil {
 		return err
 	}
 	log.Info("core holds the instance", "generation", core.Generation, "adoptions", core.Adoptions)

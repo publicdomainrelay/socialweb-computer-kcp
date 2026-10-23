@@ -19,6 +19,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clicfg"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/request"
 )
 
@@ -255,7 +256,7 @@ func (r *requestRun) networkLayout() (devinstance.Layout, devinstance.Record, er
 		return l, devinstance.Record{}, err
 	}
 	var rec devinstance.Record
-	if err := devinstance.ReadJSON(l.Record, &rec); err != nil {
+	if err := fsx.ReadJSON(l.Record, &rec); err != nil {
 		return l, rec, fmt.Errorf("market network %s has no instance record (dev up --profile market-network first): %w", r.inv.Network, err)
 	}
 	if rec.Profile != bootstrap.ProfileMarketNetwork || rec.AdminKubeconfig == "" {
@@ -270,7 +271,7 @@ func (r *requestRun) childRecord(netLayout devinstance.Layout, instance string) 
 		return devinstance.Record{}, err
 	}
 	var rec devinstance.Record
-	if err := devinstance.ReadJSON(cl.Record, &rec); err != nil {
+	if err := fsx.ReadJSON(cl.Record, &rec); err != nil {
 		return rec, err
 	}
 	return rec, nil

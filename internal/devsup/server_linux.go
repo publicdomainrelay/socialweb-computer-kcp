@@ -27,6 +27,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostos"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 )
 
 type unit struct {
@@ -135,7 +136,7 @@ func Run(ctx context.Context, o Options) error {
 		return abort(fmt.Errorf("devsup: listening on %s: %w", o.Socket, err))
 	}
 	os.Chmod(o.Socket, 0o600)
-	if err := writeJSON(filepath.Join(o.State, "devsup.json"), s.hello); err != nil {
+	if err := fsx.WriteJSON(filepath.Join(o.State, "devsup.json"), s.hello, 0o600); err != nil {
 		l.Close()
 		return abort(err)
 	}
@@ -484,7 +485,7 @@ func (s *server) recordPath(name string) string {
 func (s *server) persist(u *unit) {
 	rec := Record{Spec: u.spec, Status: u.st, PGID: u.pgid, LeaderTicks: u.leaderTicks, BootID: s.boot,
 		Devsup: s.id, Order: u.order}
-	if err := writeJSON(s.recordPath(u.spec.Name), rec); err != nil {
+	if err := fsx.WriteJSON(s.recordPath(u.spec.Name), rec, 0o600); err != nil {
 		s.log.Error("writing a unit record", "unit", u.spec.Name, "err", err.Error())
 	}
 }
@@ -508,18 +509,6 @@ func (s *server) emit(u *unit) {
 			}
 		}
 	}
-}
-
-func writeJSON(path string, v any) error {
-	b, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, append(b, '\n'), 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
 }
 
 func (s *server) sweep() {

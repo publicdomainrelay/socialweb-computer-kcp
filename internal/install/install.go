@@ -30,6 +30,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostcontract"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/sha256sum"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/progress"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vmruntime"
 )
@@ -825,19 +827,6 @@ func (in *installer) nodePassword() error {
 	return nil
 }
 
-func fileSHA256(p string) (string, error) {
-	f, err := os.Open(p)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
-}
-
 func (in *installer) stateLayout() error {
 	uid, gid := in.acct.UID, in.acct.GID
 	state := in.o.StateDir
@@ -865,7 +854,7 @@ func (in *installer) stateLayout() error {
 }
 
 func (in *installer) binary() error {
-	sum, err := fileSHA256(in.o.Binary)
+	sum, err := sha256sum.File(in.o.Binary)
 	if err != nil {
 		return fmt.Errorf("install: hashing %s: %w", in.o.Binary, err)
 	}
@@ -893,7 +882,7 @@ func (in *installer) binary() error {
 		return err
 	}
 	dst := filepath.Join(dir, CoreName)
-	if have, _ := fileSHA256(in.path(dst)); have != sum {
+	if have, _ := sha256sum.File(in.path(dst)); have != sum {
 		if err := in.change("copy "+in.o.Binary+" to "+dst, func() error { return copyFile(in.o.Binary, in.path(dst), 0o755) }); err != nil {
 			return err
 		}
@@ -1193,11 +1182,6 @@ func (in *installer) startBudget() time.Duration {
 	return StartTimeoutFor(in.readyBudget()) + StartJobGrace
 }
 
-func dirExists(p string) bool {
-	_, err := os.Stat(p)
-	return err == nil
-}
-
 func storeVerifies(store guestimage.Store, pin guestimage.Pin) bool {
 	_, err := store.Verify(pin)
 	return err == nil
@@ -1237,7 +1221,7 @@ func (in *installer) guestImage() error {
 	root := in.path(images)
 	store := guestimage.Store{Root: root, Out: in.out(), TTY: progress.IsTTYWriter(in.out())}
 	if in.o.DryRun {
-		if dir := store.Dir(pin); dirExists(dir) {
+		if dir := store.Dir(pin); fsx.Exists(dir) {
 			in.step(StepGuestImage, OutcomeFound, dir)
 			in.printf("the guest image for %s is already in %s\n", target, dir)
 			return nil
@@ -1253,14 +1237,14 @@ func (in *installer) guestImage() error {
 	lookupCtx, lookupCancel := context.WithTimeout(in.ctx, lookup)
 	defer lookupCancel()
 	dir := store.Dir(pin)
-	if dirExists(dir) && storeVerifies(store, pin) {
+	if fsx.Exists(dir) && storeVerifies(store, pin) {
 		if err := in.chownTree(images, in.acct.UID, in.acct.GID); err != nil {
 			return err
 		}
 		in.step(StepGuestImage, OutcomeFound, dir)
 		return nil
 	}
-	if dirExists(dir) {
+	if fsx.Exists(dir) {
 		in.printf("the stored guest image no longer matches its pin; fetching it again\n")
 	}
 	source := in.o.Settings[OptGuestImg]
@@ -1303,7 +1287,7 @@ func (in *installer) guestImage() error {
 				err, OptGuestImg, in.o.GuestImageBase)
 		}
 	}
-	if dirExists(dir) {
+	if fsx.Exists(dir) {
 		if err := removeImageTree(root, dir); err != nil {
 			return err
 		}

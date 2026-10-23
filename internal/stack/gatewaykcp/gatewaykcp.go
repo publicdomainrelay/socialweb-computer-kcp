@@ -37,6 +37,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpapply"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/providermain"
@@ -145,7 +146,7 @@ func (c Config) linkAssets(l devinstance.Layout) (map[string]devinstance.Executa
 
 func (c Config) record(l devinstance.Layout) (devinstance.Record, error) {
 	var rec devinstance.Record
-	if err := devinstance.ReadJSON(l.Record, &rec); err != nil {
+	if err := fsx.ReadJSON(l.Record, &rec); err != nil {
 		rec = devinstance.Record{Created: time.Now().UTC()}
 	}
 	exes, err := c.linkAssets(l)
@@ -244,7 +245,7 @@ func Run(ctx context.Context, c Config, m hostsvc.Manager) error {
 	if err != nil {
 		return err
 	}
-	if err := devinstance.WriteJSON(l.Record, rec); err != nil {
+	if err := fsx.WriteJSON(l.Record, rec, 0o600); err != nil {
 		return err
 	}
 	app := c.app()

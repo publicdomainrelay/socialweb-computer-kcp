@@ -2,7 +2,6 @@ package request
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -24,6 +23,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/appctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -97,31 +97,8 @@ type Summary struct {
 	UpdatedAt        time.Time        `json:"updatedAt"`
 }
 
-func writeJSON(path string, v any) error {
-	b, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, append(b, '\n'), 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
-}
-
-func readJSON(path string, v any) error {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(b, v)
-}
-
 func WriteInvocation(inv Invocation) error {
-	return writeJSON(filepath.Join(Dir(inv.StateRoot, inv.Name), InvocationFile), inv)
+	return fsx.WriteJSON(filepath.Join(Dir(inv.StateRoot, inv.Name), InvocationFile), inv, 0o600)
 }
 
 func ReadInvocation(stateRoot, name string) (Invocation, error) {
@@ -129,7 +106,7 @@ func ReadInvocation(stateRoot, name string) (Invocation, error) {
 	if err := CheckName(name); err != nil {
 		return inv, err
 	}
-	if err := readJSON(filepath.Join(Dir(stateRoot, name), InvocationFile), &inv); err != nil {
+	if err := fsx.ReadJSON(filepath.Join(Dir(stateRoot, name), InvocationFile), &inv); err != nil {
 		return inv, fmt.Errorf("request: no invocation %s under %s: %w", name, Root(stateRoot), err)
 	}
 	return inv, nil
@@ -137,12 +114,12 @@ func ReadInvocation(stateRoot, name string) (Invocation, error) {
 
 func WriteSummary(stateRoot string, s Summary) error {
 	s.UpdatedAt = time.Now().UTC()
-	return writeJSON(filepath.Join(Dir(stateRoot, s.Name), SummaryFile), s)
+	return fsx.WriteJSON(filepath.Join(Dir(stateRoot, s.Name), SummaryFile), s, 0o600)
 }
 
 func ReadSummary(stateRoot, name string) (Summary, error) {
 	var s Summary
-	err := readJSON(filepath.Join(Dir(stateRoot, name), SummaryFile), &s)
+	err := fsx.ReadJSON(filepath.Join(Dir(stateRoot, name), SummaryFile), &s)
 	return s, err
 }
 
