@@ -152,6 +152,11 @@ func New(addr, token string, opts ...Option) *Client {
 }
 
 func newAPI(addr string, hc *http.Client, timeout time.Duration) (*api.Client, error) {
+	own := *hc
+	if own.Transport == nil {
+		own.Transport = http.DefaultTransport
+	}
+	hc = &own
 	client, err := api.NewClient(&api.Config{Address: addr, HttpClient: hc, MaxRetries: 0, Timeout: timeout})
 	if err != nil {
 		return nil, fmt.Errorf("%w: the client for %s: %v", ErrTransport, addr, err)
