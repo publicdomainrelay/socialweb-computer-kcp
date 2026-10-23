@@ -27,8 +27,6 @@ type RemoteRepoSpec struct {
 	PdsRef commonv1.ObjectRef `json:"pdsRef"`
 
 	CredentialsRef commonv1.CredentialsRef `json:"credentialsRef"`
-
-	AuthRef *commonv1.SecretRef `json:"authRef,omitempty"`
 }
 
 const FieldManagerRemoteRepo = "socialweb.computer/remoterepo"

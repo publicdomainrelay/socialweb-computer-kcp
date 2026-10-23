@@ -111,12 +111,12 @@ spec:
         crd: {}
     - group: socialweb.computer
       name: localrepos
-      schema: v1alpha1-1.localrepos.socialweb.computer
+      schema: v1alpha1-2.localrepos.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer
       name: remoterepos
-      schema: v1alpha1-1.remoterepos.socialweb.computer
+      schema: v1alpha1-2.remoterepos.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer

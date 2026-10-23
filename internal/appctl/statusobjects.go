@@ -12,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/atprotorepo"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/statusstate"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
@@ -23,15 +24,8 @@ func (ctl *Controller) ensureAppPdsStatus(ctx context.Context, handle string, se
 	}
 	ws := ctl.c.workspace()
 	pdsRef := commonv1.ObjectRef{Kind: ComponentKindPds, Name: PdsComponent}
-	authPath := strings.TrimSpace(sessionPath)
-	if after, ok := strings.CutPrefix(authPath, "openbao:"); ok {
-		authPath = after
-	} else if _, rest, ok := strings.Cut(authPath, ":"); ok {
-		authPath = rest
-	}
-	authRef := &commonv1.SecretRef{Path: strings.Trim(authPath, "/")}
-	ctl.ensureRepoObjects(ctx, ws, statusObjectName("repo", sess.Did), "LocalRepo", v1alpha1.LocalRepoGVR,
-		v1alpha1.LocalRepoSpec{DID: sess.Did, PdsRef: pdsRef, AuthRef: authRef})
+	ctl.ensureRepoObjects(ctx, ws, atprotorepo.RepoName(sess.Did), "LocalRepo", v1alpha1.LocalRepoGVR,
+		v1alpha1.LocalRepoSpec{DID: sess.Did, PdsRef: pdsRef})
 	accountName := statusObjectName("account", handle)
 	ctl.ensureStatusObject(ctx, ws, statusstate.PdsAccountGVR, "PdsAccount",
 		accountName, v1alpha1.PdsAccountSpec{DID: sess.Did, Handle: handle, PdsRef: pdsRef})

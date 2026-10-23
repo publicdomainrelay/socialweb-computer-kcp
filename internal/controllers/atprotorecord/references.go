@@ -1,4 +1,4 @@
-package recordcontroller
+package atprotorecord
 
 import (
 	"context"

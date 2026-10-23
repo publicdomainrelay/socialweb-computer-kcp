@@ -1,12 +1,16 @@
 package pdsclient
 
 import (
+	"net"
+	"net/http"
+
 	"context"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
+
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
 )
 
@@ -17,11 +21,18 @@ type LocalRef struct {
 	Endpoint  string
 }
 
+type Handlers interface {
+	HTTPClient() *http.Client
+
+	DialHTTP(ctx context.Context, address string) (net.Conn, error)
+}
+
 type LocalConfig struct {
-	Handlers *component.HandlerRegistry
+	Handlers Handlers
 	BaseURL  string
 	Tokens   TokenSource
 	DPoP     DPoPSource
+	Auth     xrpc.Auth
 	Timeout  time.Duration
 }
 
@@ -41,7 +52,7 @@ func NewLocal(cfg LocalConfig) (*LocalPDS, error) {
 		return nil, err
 	}
 	httpClient := cloneNoRedirect(cfg.Handlers.HTTPClient())
-	client := newXRPCClient(baseURL, httpClient, cfg.Tokens, cfg.DPoP, cfg.Timeout)
+	client := newXRPCClient(baseURL, httpClient, cfg.Tokens, cfg.DPoP, cfg.Auth, cfg.Timeout)
 	handlers := cfg.Handlers
 	dial := func(ctx context.Context, cursor *int64) (RepoEventStream, error) {
 		return newLocalSubscribe(ctx, handlers, baseURL, cursor)

@@ -393,9 +393,6 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 							deps.Log.Warn("the bidder could not discover the oauth auth server", "err", discoverErr.Error())
 						}
 					}
-					if pds, fallbackErr := indigoSessionPDS(data); fallbackErr == nil {
-						cfg.PDS = pds
-					}
 				}
 			} else {
 				source, err := pdsclient.DPoPSourceFromData(credential.Data)

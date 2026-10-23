@@ -23,7 +23,6 @@ import (
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	policyv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/policy/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
@@ -106,7 +105,6 @@ type Config struct {
 	Dynamic      dynamic.Interface
 	Handlers     *component.HandlerRegistry
 	RemotePDS    *pdsv1alpha1.RemotePDS
-	RepoResolver *pdsclient.RepoResolver
 	Log          *slog.Logger
 }
 

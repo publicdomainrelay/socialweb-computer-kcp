@@ -21,8 +21,6 @@ import (
 	"github.com/fxamacker/cbor/v2"
 	"github.com/gorilla/websocket"
 	"github.com/ipfs/go-cid"
-
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 )
 
 const (
@@ -42,7 +40,7 @@ var repoFrameDecMode = func() cbor.DecMode {
 	return mode
 }()
 
-func newLocalSubscribe(ctx context.Context, handlers *component.HandlerRegistry, base *url.URL, cursor *int64) (RepoEventStream, error) {
+func newLocalSubscribe(ctx context.Context, handlers Handlers, base *url.URL, cursor *int64) (RepoEventStream, error) {
 	if handlers == nil {
 		return nil, fmt.Errorf("%w: local handler registry is required", ErrInvalidConfig)
 	}

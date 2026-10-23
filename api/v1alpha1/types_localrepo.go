@@ -27,8 +27,6 @@ type LocalRepoSpec struct {
 	PdsRef commonv1.ObjectRef `json:"pdsRef"`
 
 	IdentityRef *commonv1.ObjectRef `json:"identityRef,omitempty"`
-
-	AuthRef *commonv1.SecretRef `json:"authRef,omitempty"`
 }
 
 type AtprotoRepoBackendStatus struct {

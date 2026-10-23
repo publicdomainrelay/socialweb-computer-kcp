@@ -19,7 +19,7 @@ import (
 	"k8s.io/client-go/dynamic"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
@@ -74,9 +74,7 @@ type Options struct {
 
 	Dynamic DynamicFactory
 
-	PDS PDSResolver
-
-	RepoResolver *pdsclient.RepoResolver
+	Bus *bus.Bus
 
 	Accounts AccountSource
 
@@ -107,10 +105,6 @@ type Controller struct {
 	workspace string
 
 	dynamic DynamicFactory
-
-	pds PDSResolver
-
-	repo *pdsclient.RepoResolver
 
 	accounts AccountSource
 
@@ -160,19 +154,17 @@ func New(opts Options) (*Controller, error) {
 	}
 	accounts := opts.Accounts
 	sessions := opts.Sessions
-	if opts.RepoResolver != nil {
+	if opts.Bus != nil {
 		if accounts == nil {
-			accounts = RepoAccountSource{Resolver: opts.RepoResolver, Workspace: opts.Workspace}
+			accounts = BusAccounts{Bus: opts.Bus}
 		}
 		if sessions == nil {
-			sessions = RepoSessionSource{Resolver: opts.RepoResolver, Workspace: opts.Workspace}
+			sessions = BusSessions{Bus: opts.Bus}
 		}
 	}
 	return &Controller{
 		workspace: opts.Workspace,
 		dynamic:   opts.Dynamic,
-		pds:       opts.PDS,
-		repo:      opts.RepoResolver,
 		accounts:  accounts,
 		sessions:  sessions,
 		plc:       plcClient,
@@ -334,4 +326,8 @@ func refString(r commonv1.ObjectRef) string {
 		return kind + "/" + name
 	}
 	return name
+}
+
+func (c *Controller) self(kind, name string) commonv1.ObjectRef {
+	return commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: kind, Name: name, Workspace: c.workspace}
 }

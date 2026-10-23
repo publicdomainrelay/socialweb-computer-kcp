@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
@@ -153,4 +155,22 @@ type Transport interface {
 	Client() *http.Client
 
 	TLS() *tls.Config
+}
+
+func AccountDID(scope []string) (string, error) {
+	var did string
+	for _, entry := range scope {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		if did != "" && entry != did {
+			return "", fmt.Errorf("pds: a repo handle serves one account; the scope names %v", scope)
+		}
+		did = entry
+	}
+	if !strings.HasPrefix(did, "did:") {
+		return "", fmt.Errorf("pds: a repo handle needs the account DID as its pds.account scope, got %v", scope)
+	}
+	return did, nil
 }

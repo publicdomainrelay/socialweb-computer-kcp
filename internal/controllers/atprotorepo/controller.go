@@ -7,7 +7,6 @@ import (
 	"maps"
 	"slices"
 	"strings"
-	"sync"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -16,6 +15,7 @@ import (
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atprotorepo/binding"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/atprotorepo"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
@@ -54,7 +54,7 @@ type Options struct {
 	Log *slog.Logger
 }
 
-type binding struct {
+type repoBinding struct {
 	self commonv1.ObjectRef
 
 	backend commonv1.ObjectRef
@@ -67,11 +67,7 @@ type Controller struct {
 
 	log *slog.Logger
 
-	mu sync.RWMutex
-
-	bindings map[string]binding
-
-	users map[string]map[string]ctlruntime.Request
+	bindings *binding.Table[repoBinding]
 }
 
 func New(opts Options) *Controller {
@@ -79,8 +75,7 @@ func New(opts Options) *Controller {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	return &Controller{bus: opts.Bus, log: log.With("component", "atprotorepo-controller"), bindings: map[string]binding{},
-		users: map[string]map[string]ctlruntime.Request{}}
+	return &Controller{bus: opts.Bus, log: log.With("component", "atprotorepo-controller"), bindings: binding.New[repoBinding]()}
 }
 
 func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
@@ -90,8 +85,12 @@ func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
 	ctl := New(opts)
 	ctl.Provide()
 	if err := ctlruntime.For[*v1alpha1.AtprotoRepo](m, Name, ctl, ctlruntime.Export(Export),
-		ctlruntime.Watches(ctl.mapBackend(LocalRepoKind)),
-		ctlruntime.Watches(ctl.mapBackendRemote(RemoteRepoKind))); err != nil {
+		ctlruntime.Watches(func(_ context.Context, src ctlruntime.Request, obj *v1alpha1.LocalRepo) []ctlruntime.Request {
+			return ctl.users(src.Workspace, LocalRepoKind, obj.Name)
+		}),
+		ctlruntime.Watches(func(_ context.Context, src ctlruntime.Request, obj *v1alpha1.RemoteRepo) []ctlruntime.Request {
+			return ctl.users(src.Workspace, RemoteRepoKind, obj.Name)
+		})); err != nil {
 		return nil, fmt.Errorf("atprotorepo: registering the AtprotoRepo controller: %w", err)
 	}
 	return ctl, nil
@@ -107,7 +106,7 @@ func (c *Controller) Provide() {
 func provide[T any](c *Controller, capability string) {
 	bus.Provide(c.bus, GroupKind, capability, func(ctx context.Context, to commonv1.ObjectRef, scope []string) (T, error) {
 		var zero T
-		b, ok := c.binding(to)
+		b, ok := c.bindings.Get(to.Workspace, to.Name)
 		if !ok {
 			return zero, fmt.Errorf("%w: %s", atprotorepo.ErrNotBound, to.String())
 		}
@@ -116,65 +115,16 @@ func provide[T any](c *Controller, capability string) {
 	})
 }
 
-func key(workspace, name string) string {
-	return strings.TrimSpace(workspace) + "/" + strings.ToLower(strings.TrimSpace(name))
+func (c *Controller) users(workspace, kind, name string) []ctlruntime.Request {
+	var out []ctlruntime.Request
+	for _, t := range c.bindings.Users(binding.Key(workspace, kind, name)) {
+		out = append(out, ctlruntime.Request{Cluster: t.Cluster, Workspace: t.Workspace, Name: t.Name})
+	}
+	return out
 }
 
-func backendKey(workspace, kind, name string) string {
-	return strings.TrimSpace(workspace) + "/" + strings.ToLower(strings.TrimSpace(kind)) + "/" + strings.ToLower(strings.TrimSpace(name))
-}
-
-func (c *Controller) binding(to commonv1.ObjectRef) (binding, bool) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	b, ok := c.bindings[key(to.Workspace, to.Name)]
-	return b, ok
-}
-
-func (c *Controller) bind(req ctlruntime.Request, b *binding, backend string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	k := key(req.Workspace, req.Name)
-	if b == nil {
-		delete(c.bindings, k)
-	} else {
-		c.bindings[k] = *b
-	}
-	for bk, set := range c.users {
-		if bk != backend {
-			delete(set, k)
-			if len(set) == 0 {
-				delete(c.users, bk)
-			}
-		}
-	}
-	if backend == "" {
-		return
-	}
-	set := c.users[backend]
-	if set == nil {
-		set = map[string]ctlruntime.Request{}
-		c.users[backend] = set
-	}
-	set[k] = ctlruntime.Request{Cluster: req.Cluster, Workspace: req.Workspace, Name: req.Name}
-}
-
-func (c *Controller) mapped(workspace, kind, name string) []ctlruntime.Request {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return slices.Collect(maps.Values(c.users[backendKey(workspace, kind, name)]))
-}
-
-func (c *Controller) mapBackend(kind string) func(context.Context, ctlruntime.Request, *v1alpha1.LocalRepo) []ctlruntime.Request {
-	return func(_ context.Context, src ctlruntime.Request, obj *v1alpha1.LocalRepo) []ctlruntime.Request {
-		return c.mapped(src.Workspace, kind, obj.Name)
-	}
-}
-
-func (c *Controller) mapBackendRemote(kind string) func(context.Context, ctlruntime.Request, *v1alpha1.RemoteRepo) []ctlruntime.Request {
-	return func(_ context.Context, src ctlruntime.Request, obj *v1alpha1.RemoteRepo) []ctlruntime.Request {
-		return c.mapped(src.Workspace, kind, obj.Name)
-	}
+func (c *Controller) bind(req ctlruntime.Request, b *repoBinding, backend string) {
+	c.bindings.Set(binding.Target{Cluster: req.Cluster, Workspace: req.Workspace, Name: req.Name}, b, backend)
 }
 
 func contractKind(kind string) bool {
@@ -210,7 +160,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 		return ctlruntime.Result{}, c.unbound(ctx, req, object, status, ReasonInvalidBackend,
 			fmt.Sprintf("the backend lives in %s; an AtprotoRepo binds a backend in its own workspace %s", workspace, req.Workspace))
 	}
-	bk := backendKey(workspace, kind, name)
+	bk := binding.Key(workspace, kind, name)
 	backend, backendGeneration, err := c.readBackend(ctx, req, kind, name)
 	if apierrors.IsNotFound(err) {
 		c.bind(req, nil, bk)
@@ -220,7 +170,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 		return ctlruntime.Result{}, err
 	}
 	self := commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: Kind, Name: object.Name, Workspace: req.Workspace}
-	c.bind(req, &binding{self: self, backend: commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: kind, Name: name, Workspace: workspace},
+	c.bind(req, &repoBinding{self: self, backend: commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: kind, Name: name, Workspace: workspace},
 		labels: maps.Clone(object.Labels)}, bk)
 	status.DID = backend.DID
 	status.Head = backend.Head

@@ -21,29 +21,6 @@ const pdsClientTimeout = 30 * time.Second
 
 func (ctl *Controller) pdsFor(endpoint, caPEM string) (pdsclient.PDS, error) {
 	endpoint = strings.TrimSuffix(strings.TrimSpace(endpoint), "/")
-	if resolver := ctl.c.RepoResolver; resolver != nil {
-		binding := pdsclient.RepoBinding{Workspace: ctl.c.workspace(), Endpoint: endpoint}
-		if remote := ctl.c.RemotePDS; remote != nil {
-			binding.Kind = "RemotePDS"
-			binding.Name = remote.Name
-			binding.DID = remote.Spec.DID
-			binding.RemotePDS = remote
-		} else if strings.HasPrefix(endpoint, "https://") {
-			binding.Kind = "url"
-			binding.Endpoint = endpoint
-		} else if endpoint != "" {
-			binding.Kind = "pds"
-			binding.Name = PdsComponent
-			binding.Endpoint = endpoint
-		} else if ctl.c.Handlers != nil {
-			binding.Kind = ComponentKindPds
-			binding.Name = PdsComponent
-		} else {
-			return pdsClientAt(endpoint, caPEM)
-		}
-		pds, _, _, err := resolver.ResolvePDS(context.Background(), binding)
-		return pds, err
-	}
 	if ctl.c.RemotePDS != nil {
 		tlsConfig, err := remotePDSTLS(ctl.c.RemotePDS.Spec.TLS, caPEM)
 		if err != nil {

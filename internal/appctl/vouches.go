@@ -10,13 +10,14 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/recordcontroller"
+	reporemote "github.com/johnandersen777/socialweb-computer-kcp/internal/atprotorepo/remote"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/atprotorecord"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 const (
@@ -191,18 +192,20 @@ func (ctl *Controller) reconcileOperatorRecords(ctx context.Context, ws string, 
 	if err != nil {
 		return err
 	}
-	operator := sess.DID
-	rec, err := recordcontroller.New(recordcontroller.Options{Log: ctl.c.log()})
-	if err != nil {
-		return err
-	}
-	for _, o := range records {
-		u, err := unstruct.To(&o, "AtprotoRecord")
+	repo := reporemote.Wrap(pds, sess.DID)
+	for i := range records {
+		o := &records[i]
+		outcome, applyErr := atprotorecord.Apply(ctx, repo, o, atprotorecord.References{Workspace: ws})
+		body, err := json.Marshal(map[string]any{"status": outcome.Status(o)})
 		if err != nil {
 			return err
 		}
-		if err := rec.ReconcileWithPDS(ctx, ri, u, pds, operator); err != nil {
-			return fmt.Errorf("AtprotoRecord %s: %w", o.Name, err)
+		if _, err := ri.Patch(ctx, o.Name, types.MergePatchType, body, metav1.PatchOptions{FieldManager: FieldManager}, "status"); err != nil &&
+			!apierrors.IsNotFound(err) {
+			return fmt.Errorf("AtprotoRecord %s: writing the status: %w", o.Name, err)
+		}
+		if applyErr != nil {
+			return fmt.Errorf("AtprotoRecord %s: %w", o.Name, applyErr)
 		}
 	}
 	observedAll = true

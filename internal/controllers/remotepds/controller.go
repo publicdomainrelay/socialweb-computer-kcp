@@ -15,10 +15,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atprotorepo/binding"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/pds/remote"
 )
 
 const (
@@ -37,14 +39,20 @@ const (
 
 type CABundleFunc func(ref string) ([]byte, error)
 
-type SecretsFunc func(workspace string) pdsclient.SecretResolver
+type SecretsFunc func(workspace string) remote.Resolve
+
+type SecretRefsFunc func(workspace string) remote.Secrets
 
 type Options struct {
 	Log *slog.Logger
 
 	CABundle CABundleFunc
 
+	Bus *bus.Bus
+
 	Secrets SecretsFunc
+
+	SecretRefs SecretRefsFunc
 
 	Timeout time.Duration
 
@@ -56,11 +64,17 @@ type Controller struct {
 
 	caBundle CABundleFunc
 
+	bus *bus.Bus
+
 	secrets SecretsFunc
+
+	secretRefs SecretRefsFunc
 
 	timeout time.Duration
 
 	checkInterval time.Duration
+
+	hosts *binding.Table[*remote.Host]
 }
 
 type transientError struct {
@@ -80,12 +94,13 @@ func New(opts Options) *Controller {
 	timeout = opt.Positive(timeout, DefaultTimeout)
 	checkInterval := opts.CheckInterval
 	checkInterval = opt.Positive(checkInterval, DefaultCheckInterval)
-	return &Controller{log: log.With("component", "remotepds-controller"), caBundle: opts.CABundle, secrets: opts.Secrets,
-		timeout: timeout, checkInterval: checkInterval}
+	return &Controller{log: log.With("component", "remotepds-controller"), caBundle: opts.CABundle, bus: opts.Bus, secrets: opts.Secrets,
+		secretRefs: opts.SecretRefs, timeout: timeout, checkInterval: checkInterval, hosts: binding.New[*remote.Host]()}
 }
 
 func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
 	ctl := New(opts)
+	ctl.Provide()
 	if err := ctlruntime.For[*pdsv1alpha1.RemotePDS](m, Name, ctl, ctlruntime.Export(Export)); err != nil {
 		return nil, fmt.Errorf("remotepds: registering the RemotePDS controller: %w", err)
 	}
@@ -93,7 +108,9 @@ func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
 }
 
 func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, object *pdsv1alpha1.RemotePDS) (ctlruntime.Result, error) {
-	if object == nil || !object.DeletionTimestamp.IsZero() {
+	target := binding.Target{Cluster: req.Cluster, Workspace: req.Workspace, Name: req.Name}
+	if !object.DeletionTimestamp.IsZero() {
+		c.hosts.Set(target, nil)
 		return ctlruntime.Result{}, nil
 	}
 	generation := object.Generation
@@ -108,18 +125,20 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 	}
 	checkedAt := metav1.NewTime(time.Now().UTC().Truncate(time.Second))
 	status.LastCheckedAt = &checkedAt
-	pds, endpoint, reason, err := c.connect(req, object)
+	host, endpoint, reason, err := c.connect(ctx, req, object)
 	if err != nil {
+		c.hosts.Set(target, nil)
 		return c.fail(ctx, req, object, status, reason, err)
 	}
-	info, err := pds.Describe(ctx)
+	c.hosts.Set(target, &host)
+	info, err := host.Describe(ctx)
 	if err != nil {
 		return c.fail(ctx, req, object, status, "DescribeFailed", transientError{err: err})
 	}
 	status.Phase = pdsv1alpha1.RemotePDSReady
 	status.Ready = true
 	status.Endpoint = endpoint
-	message := fmt.Sprintf("the PDS at %s reports %s", endpoint, info.DID.String())
+	message := fmt.Sprintf("the PDS at %s reports %s", endpoint, info.DID)
 	conds.Set(&status.Conditions, generation, ConditionReady, true, "Ready", message)
 	conds.Set(&status.Conditions, generation, ConditionFailed, false, "DescribeSucceeded", "the PDS answered describeServer")
 	if err := c.apply(ctx, req, object, status); err != nil {
@@ -154,7 +173,7 @@ func (c *Controller) apply(ctx context.Context, req ctlruntime.Request, object *
 	return req.ApplyStatus(ctx, next)
 }
 
-func (c *Controller) connect(req ctlruntime.Request, object *pdsv1alpha1.RemotePDS) (pdsclient.PDS, string, string, error) {
+func (c *Controller) connect(ctx context.Context, req ctlruntime.Request, object *pdsv1alpha1.RemotePDS) (*remote.Host, string, string, error) {
 	baseURL, err := remoteURL(object.Spec.URL)
 	if err != nil {
 		return nil, "", "InvalidURL", err
@@ -163,35 +182,31 @@ func (c *Controller) connect(req ctlruntime.Request, object *pdsv1alpha1.RemoteP
 	if didText == "" {
 		return nil, "", "InvalidDID", errors.New("the RemotePDS has no did")
 	}
-	did, err := syntax.ParseDID(didText)
-	if err != nil {
+	if _, err := syntax.ParseDID(didText); err != nil {
 		return nil, "", "InvalidDID", fmt.Errorf("the RemotePDS did %q is invalid", didText)
 	}
 	tlsConfig, err := c.tlsConfig(object.Spec.TLS, baseURL)
 	if err != nil {
 		return nil, "", "InvalidTLS", transientError{err: err}
 	}
-	var secrets pdsclient.SecretResolver
+	var resolve remote.Resolve
 	if c.secrets != nil {
-		secrets = c.secrets(req.Workspace)
+		resolve = c.secrets(req.Workspace)
 	}
-	tokens, dpop, err := pdsclient.AuthSources(object.Spec.Auth, secrets)
+	auth, err := remote.Credentials(ctx, object.Spec.Auth, resolve)
 	if err != nil {
 		return nil, "", "InvalidAuth", transientError{err: err}
 	}
+	var secrets remote.Secrets
+	if c.secretRefs != nil {
+		secrets = c.secretRefs(req.Workspace)
+	}
 	endpoint := strings.TrimRight(baseURL.String(), "/")
-	pds, err := pdsclient.NewRemote(pdsclient.RemoteConfig{
-		BaseURL: endpoint,
-		DID:     did,
-		TLS:     tlsConfig,
-		Tokens:  tokens,
-		DPoP:    dpop,
-		Timeout: c.timeout,
-	})
+	host, err := remote.New(remote.Config{URL: endpoint, DID: didText, TLS: tlsConfig, Auth: auth, Secrets: secrets, Timeout: c.timeout})
 	if err != nil {
 		return nil, "", "InvalidConfig", err
 	}
-	return pds, endpoint, "", nil
+	return host, endpoint, "", nil
 }
 
 func remoteURL(raw string) (*url.URL, error) {

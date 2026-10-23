@@ -4626,11 +4626,6 @@ func (in *LocalRepoSpec) DeepCopyInto(out *LocalRepoSpec) {
 		*out = new(commonv1alpha1.ObjectRef)
 		**out = **in
 	}
-	if in.AuthRef != nil {
-		in, out := &in.AuthRef, &out.AuthRef
-		*out = new(commonv1alpha1.SecretRef)
-		(*in).DeepCopyInto(*out)
-	}
 	return
 }
 
@@ -7874,7 +7869,7 @@ func (in *RemoteRepo) DeepCopyInto(out *RemoteRepo) {
 	*out = *in
 	out.TypeMeta = in.TypeMeta
 	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
-	in.Spec.DeepCopyInto(&out.Spec)
+	out.Spec = in.Spec
 	in.Status.DeepCopyInto(&out.Status)
 	return
 }
@@ -7919,11 +7914,6 @@ func (in *RemoteRepoSpec) DeepCopyInto(out *RemoteRepoSpec) {
 	*out = *in
 	out.PdsRef = in.PdsRef
 	out.CredentialsRef = in.CredentialsRef
-	if in.AuthRef != nil {
-		in, out := &in.AuthRef, &out.AuthRef
-		*out = new(commonv1alpha1.SecretRef)
-		(*in).DeepCopyInto(*out)
-	}
 	return
 }
 

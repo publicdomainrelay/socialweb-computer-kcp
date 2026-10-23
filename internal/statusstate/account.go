@@ -32,7 +32,7 @@ func (c *Controller) reconcileAccount(ctx context.Context, dyn dynamic.Interface
 		c.write(ctx, dyn, PdsAccountGVR, u, &status)
 		return
 	}
-	observation, err := c.accounts.AccountStatus(ctx, ref, did)
+	observation, err := c.accounts.AccountStatus(ctx, c.self("PdsAccount", obj.Name), pdsTarget(c.workspace, obj.Spec.PdsRef), did)
 	if err != nil {
 		setReady(&status.Conditions, generation, false, ReasonSourceError, "reading the account: "+err.Error())
 		c.write(ctx, dyn, PdsAccountGVR, u, &status)

@@ -9,7 +9,6 @@ import (
 
 	"github.com/bluesky-social/indigo/atproto/syntax"
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 )
 
 type CRRef struct {
@@ -25,7 +24,7 @@ func (LocalRef) isPDSRef() {}
 func (CRRef) isPDSRef() {}
 
 type Resolver struct {
-	Handlers   *component.HandlerRegistry
+	Handlers   Handlers
 	HTTPClient *http.Client
 	TLS        *tls.Config
 	Tokens     TokenSource
