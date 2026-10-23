@@ -9,4 +9,4 @@ spec:
     - {fieldPath: keyId, valueFrom: {kind: MarketIdentity, name: "{{.Pds.Identity}}", fieldPath: status.did}}
     - {fieldPath: service, value: "{{.Pds.AssociateService}}"}
   source:
-    relayUrls: [{{.Pds.WatchRelayUrls}}]
+    eventSourceRefs: [{{.Pds.WatchEventSources}}]

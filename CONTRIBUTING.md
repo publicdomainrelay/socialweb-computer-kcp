@@ -520,25 +520,35 @@ whose host does not resolve.
 
 `spec.comms.mode` is `XRPC` (default), `Firehose` or `Both`. PDS writes happen in every mode.
 
-```bash
-# Firehose only: no submit XRPC; events come from the relay or firehose URLs
-socialweb-computer run bidder --profile prod-qr --handle <handle> \
-  -- --comms-mode Firehose --comms-relay-url https://relay.example
-# Both: XRPC first, durable inbox dedupe for the firehose copy
-socialweb-computer run request --name demo \
-  -- --comms-mode Both --comms-relay-url https://relay.example
-```
-
-Or patch the root object:
+An external relay or firehose is an `EventSource` over a `RelayEventSource` (or a
+`JetstreamEventSource`) whose `spec.url` is the endpoint; the root's `spec.comms.eventSourceRefs` names
+the EventSources. The root adds the network relay (from the network value's relay host) and, for an
+OAuth identity with no other source, the bsky JetStream source it composes itself.
 
 ```bash
 K=$(sudo sh -c "ls /var/lib/socialweb-computer/swc-bidder/handles/*/kcp/admin.kubeconfig" | head -1)
-sudo kubectl --kubeconfig "$K" patch marketbidder app --type=merge \
-  -p '{"spec":{"comms":{"mode":"Both","relayUrls":["https://relay.example"]}}}'
+sudo kubectl --kubeconfig "$K" apply -f - <<'YAML'
+apiVersion: events.socialweb.computer/v1alpha1
+kind: RelayEventSource
+metadata: {name: relay-example}
+spec: {url: https://relay.example}
+---
+apiVersion: events.socialweb.computer/v1alpha1
+kind: EventSource
+metadata: {name: relay-example}
+spec: {backendRef: {group: events.socialweb.computer, kind: RelayEventSource, name: relay-example}}
+YAML
+# Firehose only: no submit XRPC; events come from the named EventSources
+socialweb-computer run bidder --profile prod-qr --handle <handle> \
+  -- --comms-mode Firehose --comms-event-source relay-example
+# Both: XRPC first, durable inbox dedupe for the firehose copy
+socialweb-computer run request --name demo \
+  -- --comms-mode Both --comms-event-source relay-example
 ```
 
-Firehose and Both need at least one relay or firehose URL; otherwise the root reports `Failed`. The
-root creates one `EventStream` per URL with sink handler `market-<role>@<workspace>`. Incoming records
+Firehose and Both need at least one event source; otherwise the root reports `Failed`. The root
+creates one `EventStream` per EventSource with sink handler `market-<role>@<workspace>` and writes
+the ComponentLinks the streams resolve through (`events.subscribe`, `events.deliver`). Incoming records
 become deterministic `StateSync` inboxes keyed by `uri#cid`; duplicate delivery from both transports
 creates one object. Switching back to XRPC deletes the root's market EventStreams.
 

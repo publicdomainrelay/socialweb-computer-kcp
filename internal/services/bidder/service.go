@@ -349,7 +349,7 @@ func (s *Service) prepare(ctx context.Context) error {
 		signer:                  s.attestation,
 		did:                     s.did,
 		endpointURL:             s.offeringEndpoint(),
-		relays:                  append([]string(nil), s.cfg.Network.RelayURLs...),
+		relays:                  append([]string(nil), s.cfg.Network.Relays()...),
 		offeringRefresh:         s.cfg.OfferingRefresh,
 		offeringRefreshDisabled: s.cfg.OfferingRefreshDisabled,
 		heartbeat:               s.cfg.Heartbeat,
@@ -366,8 +366,8 @@ func (s *Service) prepare(ctx context.Context) error {
 var exposureGVR = exposurev1alpha1.ExposureGVR
 
 func (s *Service) registerPDSWithRelays(ctx context.Context) {
-	if s.cfg.Deps.KCP == nil || len(s.cfg.Network.RelayURLs) == 0 {
-		s.log.Warn("the bidder cannot register its PDS with the relay", "kcp", s.cfg.Deps.KCP != nil, "relays", len(s.cfg.Network.RelayURLs))
+	if s.cfg.Deps.KCP == nil || len(s.cfg.Network.Relays()) == 0 {
+		s.log.Warn("the bidder cannot register its PDS with the relay", "kcp", s.cfg.Deps.KCP != nil, "relays", len(s.cfg.Network.Relays()))
 		return
 	}
 	ticker := time.NewTicker(10 * time.Second)
@@ -408,7 +408,7 @@ func (s *Service) registerPDSWithRelay(ctx context.Context) {
 		return
 	}
 	registered := false
-	for _, relayURL := range s.cfg.Network.RelayURLs {
+	for _, relayURL := range s.cfg.Network.Relays() {
 		if xrpc.RequestCrawl(ctx, &xrpc.Client{Host: relayURL, HTTP: &http.Client{Timeout: 10 * time.Second}}, parsed.Host) == nil {
 			registered = true
 		}

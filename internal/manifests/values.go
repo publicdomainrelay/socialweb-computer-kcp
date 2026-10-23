@@ -46,7 +46,6 @@ type MarketBidder struct {
 	PdsUrl           string `json:",omitempty"`
 	PlcDirectoryUrl  string `json:",omitempty"`
 	IngressProxyHost string `json:",omitempty"`
-	RelayUrls        string `json:",omitempty"`
 	GuestTLSPort     int    `json:",omitempty"`
 	CABundle         string `json:",omitempty"`
 	Policy           string `json:",omitempty"`
@@ -61,23 +60,23 @@ type MarketBidder struct {
 }
 
 type RepoPds struct {
-	StateDir         string `json:",omitempty"`
-	Identity         string `json:",omitempty"`
-	KcpServer        string `json:",omitempty"`
-	KcpWorkspace     string `json:",omitempty"`
-	VaultServer      string `json:",omitempty"`
-	VaultClient      string `json:",omitempty"`
-	VaultKcpServer   string `json:",omitempty"`
-	VaultMount       string `json:",omitempty"`
-	VaultMountClient string `json:",omitempty"`
-	VaultWorkspace   string `json:",omitempty"`
-	PlcDirectoryUrl  string `json:",omitempty"`
-	IngressProxyHost string `json:",omitempty"`
-	AssociateService string `json:",omitempty"`
-	WatchRelayUrls   string
-	Trust            string
-	Read             string
-	ExtraArgs        string
+	StateDir          string `json:",omitempty"`
+	Identity          string `json:",omitempty"`
+	KcpServer         string `json:",omitempty"`
+	KcpWorkspace      string `json:",omitempty"`
+	VaultServer       string `json:",omitempty"`
+	VaultClient       string `json:",omitempty"`
+	VaultKcpServer    string `json:",omitempty"`
+	VaultMount        string `json:",omitempty"`
+	VaultMountClient  string `json:",omitempty"`
+	VaultWorkspace    string `json:",omitempty"`
+	PlcDirectoryUrl   string `json:",omitempty"`
+	IngressProxyHost  string `json:",omitempty"`
+	AssociateService  string `json:",omitempty"`
+	WatchEventSources string
+	Trust             string
+	Read              string
+	ExtraArgs         string
 }
 
 type BidderGuest struct {

@@ -25,7 +25,6 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component/kcpclients"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/credentials"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/eventstream"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/exposure"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostlifecycle"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/identitycontroller"
@@ -108,7 +107,7 @@ type Config struct {
 
 	PLCBaseURL string
 
-	RelayURLs []string
+	Relays []string
 
 	NodeClaimAgent *kcpclient.ServiceAccountRef
 
@@ -141,8 +140,6 @@ type Core struct {
 	controllers *controllerRuntime
 
 	runners []controllerRunner
-
-	eventHandlers *eventstream.HandlerRegistry
 
 	wg sync.WaitGroup
 }

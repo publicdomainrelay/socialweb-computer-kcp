@@ -131,8 +131,8 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		if cfg.Hostname == "" {
 			cfg.Hostname = hostport.HostnameOnly(strings.TrimSpace(decoded.Network.IngressProxyHost))
 		}
-		if cfg.RelayURL == "" && len(decoded.Network.RelayURLs) > 0 {
-			cfg.RelayURL = strings.TrimSpace(decoded.Network.RelayURLs[0])
+		if cfg.RelayURL == "" {
+			cfg.RelayURL = decoded.Network.RelayURL()
 		}
 	}
 	if cfg.Hostname == "" {

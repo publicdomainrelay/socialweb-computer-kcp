@@ -1,0 +1,204 @@
+package delivery
+
+import (
+	"context"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/events"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
+)
+
+type Phase string
+
+const (
+	PhasePending Phase = "Pending"
+
+	PhaseRunning Phase = "Running"
+
+	PhaseFailed Phase = "Failed"
+)
+
+const (
+	ReasonStarting = "Starting"
+
+	ReasonStreamOpen = "StreamOpen"
+
+	ReasonSubscribeFailed = "SubscribeFailed"
+
+	ReasonStreamClosed = "StreamClosed"
+
+	ReasonDeliverFailed = "DeliverFailed"
+
+	DefaultReconnectDelay = time.Second
+
+	DefaultMaxReconnectDelay = 30 * time.Second
+
+	gaplessPrefix = "jetstream/"
+)
+
+type State struct {
+	Phase Phase
+
+	Ready bool
+
+	Failed bool
+
+	Reason string
+
+	Message string
+
+	Started bool
+
+	Cursor int64
+
+	Lag int64
+
+	LastEventAt time.Time
+}
+
+type Config struct {
+	Filter events.Filter
+
+	ReconnectDelay time.Duration
+
+	MaxReconnectDelay time.Duration
+}
+
+type Deps struct {
+	Source events.Source
+
+	Sink events.Sink
+
+	Resume func() *int64
+
+	Changed func()
+}
+
+type Loop struct {
+	cfg Config
+
+	deps Deps
+
+	mu sync.Mutex
+
+	state State
+}
+
+func New(cfg Config, deps Deps) *Loop {
+	cfg.ReconnectDelay = opt.Positive(cfg.ReconnectDelay, DefaultReconnectDelay)
+	cfg.MaxReconnectDelay = opt.Positive(cfg.MaxReconnectDelay, DefaultMaxReconnectDelay)
+	return &Loop{cfg: cfg, deps: deps}
+}
+
+func (l *Loop) State() State {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	s := l.state
+	if s.Phase == "" {
+		s.Phase, s.Reason, s.Message = PhasePending, ReasonStarting, "the stream is starting"
+	}
+	return s
+}
+
+func (l *Loop) changed() {
+	if l.deps.Changed != nil {
+		l.deps.Changed()
+	}
+}
+
+func (l *Loop) set(phase Phase, ready, failed bool, reason, message string) {
+	l.mu.Lock()
+	l.state.Phase, l.state.Ready, l.state.Failed, l.state.Reason, l.state.Message = phase, ready, failed, reason, message
+	l.mu.Unlock()
+	l.changed()
+}
+
+func (l *Loop) cursor() *int64 {
+	l.mu.Lock()
+	started, cursor := l.state.Started, l.state.Cursor
+	l.mu.Unlock()
+	if started {
+		return &cursor
+	}
+	if l.deps.Resume != nil {
+		return l.deps.Resume()
+	}
+	return nil
+}
+
+func (l *Loop) Run(ctx context.Context) {
+	base, limit := l.cfg.ReconnectDelay, l.cfg.MaxReconnectDelay
+	delay := base
+	for ctx.Err() == nil {
+		filter := l.cfg.Filter
+		filter.Cursor = l.cursor()
+		upstream, err := l.deps.Source.Subscribe(ctx, filter)
+		if err != nil {
+			l.set(PhaseFailed, false, true, ReasonSubscribeFailed, err.Error())
+		} else {
+			delay = base
+			l.set(PhaseRunning, true, false, ReasonStreamOpen, "")
+			l.consume(ctx, upstream)
+			_ = upstream.Close()
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+		delay = min(delay*2, limit)
+	}
+}
+
+func (l *Loop) consume(ctx context.Context, upstream events.Stream) {
+	for {
+		event, err := upstream.Next(ctx)
+		if err != nil {
+			if ctx.Err() == nil {
+				l.set(PhaseFailed, false, true, ReasonStreamClosed, err.Error())
+			}
+			return
+		}
+		l.observe(event)
+		if len(event.Ops) == 0 {
+			l.changed()
+			continue
+		}
+		if err := l.deps.Sink.Deliver(ctx, event); err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			l.set(PhaseFailed, true, true, ReasonDeliverFailed, err.Error())
+			continue
+		}
+		l.mu.Lock()
+		recovered := l.state.Failed && l.state.Reason == ReasonDeliverFailed
+		l.mu.Unlock()
+		if recovered {
+			l.set(PhaseRunning, true, false, ReasonStreamOpen, "")
+		} else {
+			l.changed()
+		}
+	}
+}
+
+func (l *Loop) observe(e events.Event) {
+	at := e.Time
+	if at.IsZero() {
+		at = time.Now().UTC()
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.state.Lag = 0
+	if !strings.HasPrefix(e.Source, gaplessPrefix) && l.state.Started && e.Seq > l.state.Cursor+1 {
+		l.state.Lag = e.Seq - l.state.Cursor - 1
+	}
+	l.state.Started, l.state.Cursor, l.state.LastEventAt = true, e.Seq, at
+}

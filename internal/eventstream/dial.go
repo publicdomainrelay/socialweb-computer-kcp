@@ -1,30 +1,13 @@
 package eventstream
 
 import (
-	"context"
 	"errors"
-	"net"
 	"net/http"
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
-
-func streamDialContext(handlers *component.HandlerRegistry) func(ctx context.Context, network, address string) (net.Conn, error) {
-	return func(ctx context.Context, network, address string) (net.Conn, error) {
-		if handlers != nil {
-			conn, err := handlers.DialHTTP(ctx, address)
-			if err == nil {
-				return conn, nil
-			}
-			if !errors.Is(err, component.ErrNoHandler) {
-				return nil, err
-			}
-		}
-		return (&net.Dialer{Timeout: 20 * time.Second, KeepAlive: 30 * time.Second}).DialContext(ctx, network, address)
-	}
-}
 
 type fallbackHTTPTransport struct {
 	primary  http.RoundTripper

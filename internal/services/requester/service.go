@@ -245,7 +245,7 @@ func (s *Service) register(handler http.Handler) error {
 }
 
 func (s *Service) registerPDSWithRelays(ctx context.Context) {
-	if s.cfg.Deps.KCP == nil || len(s.cfg.Network.RelayURLs) == 0 {
+	if s.cfg.Deps.KCP == nil || len(s.cfg.Network.Relays()) == 0 {
 		return
 	}
 	ticker := time.NewTicker(10 * time.Second)
@@ -284,7 +284,7 @@ func (s *Service) registerPDSWithRelay(ctx context.Context) {
 	if err != nil || parsed.Host == "" {
 		return
 	}
-	for _, relayURL := range s.cfg.Network.RelayURLs {
+	for _, relayURL := range s.cfg.Network.Relays() {
 		_ = xrpc.RequestCrawl(ctx, &xrpc.Client{Host: relayURL, HTTP: &http.Client{Timeout: 10 * time.Second}}, parsed.Host)
 	}
 }
@@ -459,7 +459,7 @@ func (s *Service) setup(ctx context.Context) error {
 			Signer:         s.signer,
 			ServiceKey:     s.cfg.RepoKey,
 			ServiceAuth:    serviceAuth,
-			RelayURLs:      append([]string(nil), s.cfg.Network.RelayURLs...),
+			RelayURLs:      append([]string(nil), s.cfg.Network.Relays()...),
 			BidderDIDs:     append([]string(nil), s.cfg.BidderDIDs...),
 			DenyBidderDIDs: append([]string(nil), s.cfg.DenyBidderDIDs...),
 			HTTPClient:     s.cfg.HTTPClient,

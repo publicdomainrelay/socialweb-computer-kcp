@@ -60,9 +60,7 @@ type AtprotoValueFrom struct {
 }
 
 type AtprotoRecordWatchSource struct {
-	RelayURLs []string `json:"relayUrls,omitempty" apigen:"userEndpoint"`
-
-	JetstreamURLs []string `json:"jetstreamUrls,omitempty" apigen:"userEndpoint"`
+	EventSourceRefs []commonv1.ObjectRef `json:"eventSourceRefs,omitempty"`
 }
 
 type WatchedRecord struct {

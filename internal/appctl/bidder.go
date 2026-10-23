@@ -391,6 +391,18 @@ func portOf(rawURL string) (int, error) {
 	return n, nil
 }
 
+func refFragment(refs []commonv1.ObjectRef) (string, error) {
+	parts := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		q, err := json.Marshal(ref)
+		if err != nil {
+			return "", err
+		}
+		parts = append(parts, string(q))
+	}
+	return strings.Join(parts, ", "), nil
+}
+
 func listFragment(items ...string) (string, error) {
 	var parts []string
 	for _, it := range items {
@@ -444,7 +456,7 @@ func BidderValues(spec v1alpha1.MarketBidderSpec, stateDir, guestStateDir string
 		return manifests.MarketBidder{}, errors.New("appctl: the network value names no guestTlsUrl; a market network bidder hands guests the dispatcher's TLS front")
 	}
 	v := manifests.MarketBidder{StateDir: stateDir, Handle: spec.Identity.Handle, PdsUrl: spec.Identity.PdsURL,
-		PlcDirectoryUrl: n.PLCDirectoryURL, IngressProxyHost: n.IngressProxyHost, RelayUrls: strings.Join(n.RelayURLs, ","),
+		PlcDirectoryUrl: n.PLCDirectoryURL, IngressProxyHost: n.IngressProxyHost,
 		GuestTLSPort: tlsPort, CABundle: caFile, Policy: spec.Policy}
 	if err := providerValues(&v, spec, kcp); err != nil {
 		return manifests.MarketBidder{}, err
@@ -459,14 +471,8 @@ func BidderValues(spec v1alpha1.MarketBidderSpec, stateDir, guestStateDir string
 		return manifests.MarketBidder{}, err
 	}
 	var extra []string
-	if v.RelayUrls != "" {
-		extra = append(extra, "--relay-url", v.RelayUrls)
-	}
 	if v.GuestTLSPort != 0 {
 		extra = append(extra, "--guest-tls-port", strconv.Itoa(v.GuestTLSPort))
-	}
-	if len(n.FirehoseURLs) > 0 {
-		extra = append(extra, "--firehose-url", strings.Join(n.FirehoseURLs, ","))
 	}
 	if n.QrOrigin != "" {
 		extra = append(extra, "--qr-origin", n.QrOrigin)
@@ -516,7 +522,7 @@ func BidderPds(v manifests.MarketBidder, stateDir string, n *v1alpha1.MarketNetw
 		VaultMountClient: BidderVaultClient, VaultWorkspace: v.Kcp.Workspace,
 		PlcDirectoryUrl: n.PLCDirectoryURL, IngressProxyHost: n.IngressProxyHost, Trust: v.Trust, Read: v.Read, AssociateService: BidderAssociate}
 	var err error
-	if p.WatchRelayUrls, err = listFragment(append(append([]string{}, n.RelayURLs...), n.FirehoseURLs...)...); err != nil {
+	if p.WatchEventSources, err = refFragment(WatchEventSources(n)); err != nil {
 		return p, err
 	}
 	if hosts := NetworkHostsArg(n.Hosts); hosts != "" {
@@ -674,7 +680,7 @@ func (ctl *Controller) reconcileBidderAccount(ctx context.Context, u *unstructur
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, err.Error()
 		return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
 	}
-	if err := ctl.ensureMarketStreams(ctx, ctl.c.workspace(), "bidder", o.Spec.Comms, o.Spec.Network, oauthReceiveOnly(plan.Mode)); err != nil {
+	if err := ctl.ensureMarketStreams(ctx, u, ctl.c.workspace(), "bidder", o.Spec.Comms, o.Spec.Network, oauthReceiveOnly(plan.Mode)); err != nil {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
 		setOverrideErrorIfAny(&st, o.Generation, err)
 		return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
@@ -944,7 +950,7 @@ func (ctl *Controller) reconcileBidder(ctx context.Context, u *unstructured.Unst
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, err.Error()
 		return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
 	}
-	if err := ctl.ensureMarketStreams(ctx, ctl.c.workspace(), "bidder", o.Spec.Comms, o.Spec.Network, oauthReceiveOnly(plan.Mode)); err != nil {
+	if err := ctl.ensureMarketStreams(ctx, u, ctl.c.workspace(), "bidder", o.Spec.Comms, o.Spec.Network, oauthReceiveOnly(plan.Mode)); err != nil {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
 		setOverrideErrorIfAny(&st, o.Generation, err)
 		return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)

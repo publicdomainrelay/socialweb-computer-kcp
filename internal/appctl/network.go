@@ -54,7 +54,7 @@ const (
 	NetworkBobPdsName        = "bob"
 
 	NetworkPlcHost        = "plc.default.global.svc.kcp.local"
-	NetworkRelayHost      = "relay.default.relay.svc.kcp.local"
+	NetworkRelayHost      = v1alpha1.NetworkRelayHost
 	NetworkIngressHost    = "dispatcher.default.relay.svc.kcp.local"
 	NetworkDispatcherHost = v1alpha1.NetworkDispatcherHost
 	NetworkAlicePdsHost   = "pds.default.alice.svc.kcp.local"
@@ -124,8 +124,6 @@ func networkValueFromLeases(leases map[string]component.PortLease, caBundle stri
 	return v1alpha1.MarketNetworkValue{
 		PLCDirectoryURL:  "http://" + plc.Address(),
 		IngressProxyHost: GuestTLSHost + ":" + strconv.Itoa(int(leasePort(ingress))),
-		RelayURLs:        []string{"http://" + relay.Address()},
-		FirehoseURLs:     []string{},
 		CABundle:         caBundle,
 		Hosts: []v1alpha1.NetworkHost{
 			{Name: NetworkPlcHost, Address: plc.Address()},
@@ -213,7 +211,7 @@ func networkValueFromExposures(snap componentSnapshot, caBundle string) (v1alpha
 	if !ok {
 		return v1alpha1.MarketNetworkValue{}, fmt.Errorf("the Exposure %s is not ready", serviceNameFor(ComponentKindPlc, NetworkPLCName)+ExposureLocalSuffix)
 	}
-	relayURL, ok := exposureURL(snap, serviceNameFor(ComponentKindRelay, NetworkRelayName)+ExposureLocalSuffix)
+	_, ok = exposureURL(snap, serviceNameFor(ComponentKindRelay, NetworkRelayName)+ExposureLocalSuffix)
 	if !ok {
 		return v1alpha1.MarketNetworkValue{}, fmt.Errorf("the Exposure %s is not ready", serviceNameFor(ComponentKindRelay, NetworkRelayName)+ExposureLocalSuffix)
 	}
@@ -244,8 +242,6 @@ func networkValueFromExposures(snap componentSnapshot, caBundle string) (v1alpha
 	return v1alpha1.MarketNetworkValue{
 		PLCDirectoryURL:  plcURL,
 		IngressProxyHost: GuestTLSHost + ":" + portFromValue(ingressHost),
-		RelayURLs:        []string{relayURL},
-		FirehoseURLs:     []string{},
 		CABundle:         caBundle,
 		Hosts: []v1alpha1.NetworkHost{
 			{Name: NetworkPlcHost, Address: plcHost},

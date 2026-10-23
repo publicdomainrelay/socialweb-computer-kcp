@@ -9,5 +9,4 @@ spec:
     - {fieldPath: keyId, valueFrom: {kind: MarketIdentity, name: "{{.Pds.Identity}}", fieldPath: status.did}}
     - {fieldPath: service, value: "{{.Pds.AssociateService}}"}
   source:
-    relayUrls: [{{.Pds.WatchRelayUrls}}]
-    jetstreamUrls: ["wss://jetstream2.us-east.bsky.network/subscribe", "wss://jetstream1.us-west.bsky.network/subscribe"]
+    eventSourceRefs: [{{.Pds.WatchEventSources}}]

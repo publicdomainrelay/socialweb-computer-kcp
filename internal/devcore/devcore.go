@@ -358,7 +358,7 @@ func ComponentCoreConfig(ctx context.Context, cfg Config, rec devinstance.Record
 	if rec.AdminKubeconfig != "" {
 		if n, err := appctl.ReadNetwork(ctx, rec.AdminKubeconfig); err == nil && n.Status.Network != nil {
 			out.PLCBaseURL = n.Status.Network.PLCDirectoryURL
-			out.RelayURLs = append([]string(nil), n.Status.Network.RelayURLs...)
+			out.Relays = n.Status.Network.Relays()
 		}
 	}
 	switch {

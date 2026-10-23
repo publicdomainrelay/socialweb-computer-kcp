@@ -128,8 +128,6 @@ front, not an ingress Exposure.
 network:
   plcDirectoryUrl: https://plc.directory
   ingressProxyHost: xrpc.fedproxy.com
-  relayUrls: []
-  firehoseUrls: []
   qrOrigin: ""
 ingress:
   provider: xrpc-subscription

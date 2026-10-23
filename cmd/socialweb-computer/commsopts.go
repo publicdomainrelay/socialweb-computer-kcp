@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"strings"
 
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
+	eventsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/events/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 )
 
 func applyCommsOption(comms *v1alpha1.MarketComms, name, value string) (*v1alpha1.MarketComms, bool, error) {
 	switch name {
-	case "comms-mode", "comms-relay-url", "comms-firehose-url":
+	case "comms-mode", "comms-event-source":
 	default:
 		return comms, false, nil
 	}
@@ -25,10 +27,10 @@ func applyCommsOption(comms *v1alpha1.MarketComms, name, value string) (*v1alpha
 			return comms, true, fmt.Errorf("--comms-mode %s: want XRPC, Firehose or Both", value)
 		}
 		comms.Mode = mode
-	case "comms-relay-url":
-		comms.RelayURLs = splitList(value)
-	case "comms-firehose-url":
-		comms.FirehoseURLs = splitList(value)
+	case "comms-event-source":
+		for _, name := range splitList(value) {
+			comms.EventSourceRefs = append(comms.EventSourceRefs, commonv1.ObjectRef{Group: eventsv1alpha1.GroupName, Kind: eventsv1alpha1.EventSourceKind, Name: name})
+		}
 	}
 	return comms, true, nil
 }

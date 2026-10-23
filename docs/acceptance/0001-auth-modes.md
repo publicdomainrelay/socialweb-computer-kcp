@@ -111,18 +111,29 @@ Both must be `Ready` with `{"desired":5,"notReady":0,"ready":4,"suspended":1}`.
 
 ## 2. Resume hat-7 and point it at the gateway PDS firehose
 
-Read the gateway PDS ingress URL from its Exposure. Then set it as the hat-7
-receive transport. The oauthQr Bidder advertises no inbound market endpoint; it
+Read the gateway PDS ingress URL from its Exposure. Then apply it on hat-7 as a
+RelayEventSource and name it in the root's `spec.comms.eventSourceRefs`. The oauthQr Bidder advertises no inbound market endpoint; it
 receives `market.rfp` and `market.accept` from this stream.
 
 ```bash
 PDS_URL=$(ssh socialweb.computer "sudo -n -u socialweb env HOME=/var/lib/socialweb-computer/socialweb kubectl --kubeconfig $PROD_K get exposure svc-pds-pds-ingress -o jsonpath='{.status.url}'")
-ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl patch marketbidder app --type merge -p '{\"spec\":{\"suspend\":false,\"network\":{\"firehoseUrls\":[\"$PDS_URL\"]}}}'"
+ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl apply -f -" <<YAML
+apiVersion: events.socialweb.computer/v1alpha1
+kind: RelayEventSource
+metadata: {name: gateway-pds}
+spec: {url: "$PDS_URL"}
+---
+apiVersion: events.socialweb.computer/v1alpha1
+kind: EventSource
+metadata: {name: gateway-pds}
+spec: {backendRef: {group: events.socialweb.computer, kind: RelayEventSource, name: gateway-pds}}
+YAML
+ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl patch marketbidder app --type merge -p '{\"spec\":{\"suspend\":false,\"comms\":{\"eventSourceRefs\":[{\"kind\":\"EventSource\",\"name\":\"gateway-pds\"}]}}}'"
 ```
 
-Re-apply the patch after any bidder restart: the app root does not keep
-`network.firehoseUrls` across a restart, and without it the bidder fails closed
-with "comms mode Firehose has no relay or firehose URL".
+Both objects and `spec.comms.eventSourceRefs` survive a bidder restart: the run
+command applies the root without that field, so its server-side apply keeps the
+operator's value (D03).
 
 The root must become Ready and one EventStream must be running:
 
