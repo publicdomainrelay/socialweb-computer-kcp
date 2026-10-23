@@ -182,7 +182,11 @@ func (c *xrpcClient) do(ctx context.Context, method, nsid string, query url.Valu
 		request.Header.Set("Content-Type", "application/json")
 	}
 	if token != "" {
-		request.Header.Set("Authorization", "Bearer "+token)
+		scheme := "Bearer"
+		if c.dpop != nil {
+			scheme = "DPoP"
+		}
+		request.Header.Set("Authorization", scheme+" "+token)
 		if c.dpop != nil {
 			dpopURL := *endpoint
 			dpopURL.RawQuery = ""
