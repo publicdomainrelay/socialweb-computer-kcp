@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-3.eventstreams.events.socialweb.computer
+  name: v1alpha1-4.eventstreams.events.socialweb.computer
 spec:
   group: events.socialweb.computer
   names:
@@ -28,55 +28,25 @@ spec:
           spec:
             type: object
             properties:
-              source:
+              sourceRef:
                 type: object
                 properties:
+                  group:
+                    type: string
                   kind:
                     type: string
-                    enum:
-                      - pds
-                      - relay
-                      - jetstream
-                  pdsRef:
-                    type: object
-                    properties:
-                      group:
-                        type: string
-                      kind:
-                        type: string
-                        maxLength: 63
-                      name:
-                        type: string
-                        maxLength: 253
-                      workspace:
-                        type: string
-                    required:
-                      - kind
-                      - name
-                  relayRef:
-                    type: object
-                    properties:
-                      group:
-                        type: string
-                      kind:
-                        type: string
-                        maxLength: 63
-                      name:
-                        type: string
-                        maxLength: 253
-                      workspace:
-                        type: string
-                    required:
-                      - kind
-                      - name
-                  relayUrls:
-                    type: array
-                    items:
-                      type: string
-                  jetstreamUrls:
-                    type: array
-                    items:
-                      type: string
+                    maxLength: 63
+                  name:
+                    type: string
+                    maxLength: 253
+                  workspace:
+                    type: string
+                required:
+                  - kind
+                  - name
+              filter:
+                type: object
+                properties:
                   collections:
                     type: array
                     items:
@@ -85,8 +55,6 @@ spec:
                     type: array
                     items:
                       type: string
-                required:
-                  - kind
               cursor:
                 type: integer
                 format: int64
@@ -108,7 +76,7 @@ spec:
               suspend:
                 type: boolean
             required:
-              - source
+              - sourceRef
               - sink
           status:
             type: object
@@ -140,7 +108,7 @@ spec:
       additionalPrinterColumns:
         - name: Source
           type: string
-          jsonPath: .spec.source.kind
+          jsonPath: .spec.sourceRef.name
         - name: Sink
           type: string
           jsonPath: .spec.sink.kind

@@ -29,6 +29,10 @@ sets:
           - path: remotepds-apiresourceschema.yaml
           - path: remotepds-apiexport.yaml
           - path: eventstream-apiresourceschema.yaml
+          - path: eventsource-apiresourceschema.yaml
+          - path: pdseventsource-apiresourceschema.yaml
+          - path: relayeventsource-apiresourceschema.yaml
+          - path: jetstreameventsource-apiresourceschema.yaml
           - path: eventstream-apiexport.yaml
           - path: marketidentity-apiresourceschema.yaml
           - path: atprotorecord-apiresourceschema.yaml
@@ -121,6 +125,7 @@ sets:
         workspace: root:socialweb-provider
         files:
           - path: computevm-apiresourceschema.yaml
+          - path: firecrackervm-apiresourceschema.yaml
           - path: bid-apiresourceschema.yaml
           - path: guestidentitygrant-apiresourceschema.yaml
           - path: computevm-apiexport.yaml
@@ -153,6 +158,7 @@ sets:
           - path: postgres-apiresourceschema.yaml
           - path: openbaoserver-apiresourceschema.yaml
           - path: remoteopenbao-apiresourceschema.yaml
+          - path: vault-apiresourceschema.yaml
           - path: hostprocess-apiexport.yaml
         after:
           - kind: APIExport
@@ -232,6 +238,8 @@ sets:
           - path: hostrelease-apiresourceschema.yaml
           - path: childapplication-apiresourceschema.yaml
           - path: atprotorepo-apiresourceschema.yaml
+          - path: localrepo-apiresourceschema.yaml
+          - path: remoterepo-apiresourceschema.yaml
           - path: pdsaccount-apiresourceschema.yaml
           - path: atprotosession-apiresourceschema.yaml
           - path: plcidentity-apiresourceschema.yaml
@@ -331,6 +339,7 @@ sets:
         workspace: root:socialweb-provider
         files:
           - path: computevm-apiresourceschema.yaml
+          - path: firecrackervm-apiresourceschema.yaml
           - path: bid-apiresourceschema.yaml
           - path: guestidentitygrant-apiresourceschema.yaml
           - path: computevm-apiexport.yaml

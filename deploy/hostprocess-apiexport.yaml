@@ -24,3 +24,8 @@ spec:
       schema: v1alpha1-1.remoteopenbaos.socialweb.computer
       storage:
         crd: {}
+    - group: socialweb.computer
+      name: vaults
+      schema: v1alpha1-1.vaults.socialweb.computer
+      storage:
+        crd: {}

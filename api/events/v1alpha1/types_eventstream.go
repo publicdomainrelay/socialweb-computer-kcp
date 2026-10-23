@@ -22,7 +22,9 @@ type EventStreamList struct {
 }
 
 type EventStreamSpec struct {
-	Source EventStreamSource `json:"source"`
+	SourceRef commonv1.ObjectRef `json:"sourceRef"`
+
+	Filter EventStreamFilter `json:"filter,omitempty"`
 
 	Cursor *int64 `json:"cursor,omitempty"`
 
@@ -31,31 +33,11 @@ type EventStreamSpec struct {
 	Suspend bool `json:"suspend,omitempty"`
 }
 
-type EventStreamSource struct {
-	Kind EventStreamSourceKind `json:"kind"`
-
-	PDSRef *commonv1.ObjectRef `json:"pdsRef,omitempty"`
-
-	RelayRef *commonv1.ObjectRef `json:"relayRef,omitempty"`
-
-	RelayURLs []string `json:"relayUrls,omitempty" apigen:"userEndpoint"`
-
-	JetstreamURLs []string `json:"jetstreamUrls,omitempty" apigen:"userEndpoint"`
-
+type EventStreamFilter struct {
 	Collections []string `json:"collections,omitempty"`
 
 	DIDs []string `json:"dids,omitempty"`
 }
-
-type EventStreamSourceKind string
-
-const (
-	EventStreamSourcePDS EventStreamSourceKind = "pds"
-
-	EventStreamSourceRelay EventStreamSourceKind = "relay"
-
-	EventStreamSourceJetstream EventStreamSourceKind = "jetstream"
-)
 
 type EventStreamSink struct {
 	Kind EventStreamSinkKind `json:"kind"`

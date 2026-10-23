@@ -13,3 +13,35 @@ func (in *EventStream) GetConditions() []metav1.Condition {
 func (in *EventStream) SetConditions(conditions []metav1.Condition) {
 	in.Status.Conditions = conditions
 }
+
+func (in *EventSource) GetConditions() []metav1.Condition {
+	return in.Status.Conditions
+}
+
+func (in *EventSource) SetConditions(conditions []metav1.Condition) {
+	in.Status.Conditions = conditions
+}
+
+func (in *PdsEventSource) GetConditions() []metav1.Condition {
+	return in.Status.Conditions
+}
+
+func (in *PdsEventSource) SetConditions(conditions []metav1.Condition) {
+	in.Status.Conditions = conditions
+}
+
+func (in *RelayEventSource) GetConditions() []metav1.Condition {
+	return in.Status.Conditions
+}
+
+func (in *RelayEventSource) SetConditions(conditions []metav1.Condition) {
+	in.Status.Conditions = conditions
+}
+
+func (in *JetstreamEventSource) GetConditions() []metav1.Condition {
+	return in.Status.Conditions
+}
+
+func (in *JetstreamEventSource) SetConditions(conditions []metav1.Condition) {
+	in.Status.Conditions = conditions
+}

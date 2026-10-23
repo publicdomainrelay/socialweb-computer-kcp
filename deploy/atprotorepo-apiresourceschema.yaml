@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-3.atprotorepos.socialweb.computer
+  name: v1alpha1-4.atprotorepos.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -28,9 +28,7 @@ spec:
           spec:
             type: object
             properties:
-              did:
-                type: string
-              pdsRef:
+              backendRef:
                 type: object
                 properties:
                   group:
@@ -46,66 +44,23 @@ spec:
                 required:
                   - kind
                   - name
-              identityRef:
-                type: object
-                properties:
-                  group:
-                    type: string
-                  kind:
-                    type: string
-                    maxLength: 63
-                  name:
-                    type: string
-                    maxLength: 253
-                  workspace:
-                    type: string
-                required:
-                  - kind
-                  - name
-              authRef:
-                type: object
-                properties:
-                  vault:
-                    type: object
-                    properties:
-                      group:
-                        type: string
-                      kind:
-                        type: string
-                        maxLength: 63
-                      name:
-                        type: string
-                        maxLength: 253
-                      workspace:
-                        type: string
-                    required:
-                      - kind
-                      - name
-                  mount:
-                    type: string
-                  path:
-                    type: string
-                  key:
-                    type: string
-                required:
-                  - mount
-                  - path
             required:
-              - did
+              - backendRef
           status:
             type: object
             properties:
               observedGeneration:
                 type: integer
                 format: int64
+              did:
+                type: string
               head:
                 type: string
               rev:
                 type: string
-              seq:
-                type: integer
-                format: int64
-              keyFingerprint:
+              writable:
+                type: boolean
+              address:
                 type: string
               conditions:
                 type: array
@@ -113,15 +68,18 @@ spec:
                   type: object
                   x-kubernetes-preserve-unknown-fields: true
       additionalPrinterColumns:
+        - name: Backend
+          type: string
+          jsonPath: .spec.backendRef.kind
         - name: DID
           type: string
-          jsonPath: .spec.did
+          jsonPath: .status.did
         - name: Head
           type: string
           jsonPath: .status.head
-        - name: Seq
-          type: integer
-          jsonPath: .status.seq
+        - name: Writable
+          type: boolean
+          jsonPath: .status.writable
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp

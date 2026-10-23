@@ -22,6 +22,8 @@ type ComputeVMList struct {
 }
 
 type ComputeVMSpec struct {
+	BackendRef commonv1.ObjectRef `json:"backendRef"`
+
 	VM ComputeVMShape `json:"vm"`
 
 	Owner ComputeVMOwner `json:"owner"`
@@ -37,6 +39,8 @@ type ComputeVMSpec struct {
 	StopGraceSeconds int32 `json:"stopGraceSeconds,omitempty"`
 
 	GuestLogin *ComputeVMGuestLogin `json:"guestLogin,omitempty"`
+
+	Release bool `json:"release,omitempty"`
 }
 
 type ComputeVMGuestLogin struct {
@@ -117,38 +121,10 @@ const (
 	ComputeVMLostIdentityMismatch ComputeVMLostReason = "IdentityMismatch"
 )
 
-type ComputeVMNetwork struct {
-	GuestIP string `json:"guestIP,omitempty"`
+type ComputeVMAddresses struct {
+	Guest string `json:"guest,omitempty"`
 
-	HostAddress string `json:"hostAddress,omitempty"`
-
-	Prefix int32 `json:"prefix,omitempty"`
-
-	MAC string `json:"mac,omitempty"`
-}
-
-type ComputeVMImage struct {
-	Ref string `json:"ref,omitempty"`
-
-	Sha256 string `json:"sha256,omitempty"`
-
-	Hypervisor string `json:"hypervisor,omitempty"`
-}
-
-type ComputeVMRuntime struct {
-	Backend string `json:"backend,omitempty"`
-
-	Ref string `json:"ref,omitempty"`
-
-	Instance string `json:"instance,omitempty"`
-
-	Pid int64 `json:"pid,omitempty"`
-
-	StartTime string `json:"startTime,omitempty"`
-
-	HostBootID string `json:"hostBootID,omitempty"`
-
-	VMMID string `json:"vmmID,omitempty"`
+	Host string `json:"host,omitempty"`
 }
 
 type ComputeVMHostKey struct {
@@ -198,13 +174,7 @@ type ComputeVMStatus struct {
 
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
-	Network *ComputeVMNetwork `json:"network,omitempty"`
-
-	Image *ComputeVMImage `json:"image,omitempty"`
-
-	Runtime *ComputeVMRuntime `json:"runtime,omitempty"`
-
-	WorkDir string `json:"workDir,omitempty"`
+	Addresses *ComputeVMAddresses `json:"addresses,omitempty"`
 
 	BootedAt string `json:"bootedAt,omitempty"`
 
@@ -214,6 +184,12 @@ type ComputeVMStatus struct {
 
 	Market *ComputeVMMarket `json:"market,omitempty"`
 }
+
+const (
+	ComputeVMConditionReady = commonv1.ConditionReady
+
+	ComputeVMConditionBackendBound = commonv1.ConditionBackendBound
+)
 
 const (
 	ConditionPrepared = "Prepared"
@@ -226,6 +202,8 @@ const (
 
 	ConditionMarketReported = "MarketReported"
 )
+
+const BackendKindFirecrackerVM = "FirecrackerVM"
 
 const FinalizerComputeVM = "computevm.socialweb.computer/release"
 

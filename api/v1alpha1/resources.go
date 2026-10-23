@@ -5,6 +5,7 @@ package v1alpha1
 
 import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/apiresource"
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 type PrinterColumn = apiresource.PrinterColumn
@@ -40,10 +41,18 @@ var APIResources = []APIResource{
 		{Name: "Message", Type: "string", JSONPath: ".status.message"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "ComputeVM", Plural: "computevms", Revision: 6, Export: "computevms", Object: ComputeVM{}, PrinterColumns: []PrinterColumn{
+	{Kind: "ComputeVM", Plural: "computevms", Revision: 7, Export: "computevms", Object: ComputeVM{}, PrinterColumns: []PrinterColumn{
+		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
+		{Name: "Backend", Type: "string", JSONPath: ".spec.backendRef.kind"},
+		{Name: "GuestIP", Type: "string", JSONPath: ".status.addresses.guest"},
+		{Name: "Requester", Type: "string", JSONPath: ".spec.requester.did"},
+		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
+	}},
+	{Kind: "FirecrackerVM", Plural: "firecrackervms", Revision: 1, Export: "computevms", Object: FirecrackerVM{}, Contracts: []string{commonv1.ContractComputeVMs}, PrinterColumns: []PrinterColumn{
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "GuestIP", Type: "string", JSONPath: ".status.network.guestIP"},
-		{Name: "Requester", Type: "string", JSONPath: ".spec.requester.did"},
+		{Name: "Unit", Type: "string", JSONPath: ".status.runtime.ref"},
+		{Name: "PID", Type: "integer", JSONPath: ".status.runtime.pid"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
 	{Kind: "Bid", Plural: "bids", Revision: 7, Export: "computevms", Object: Bid{}, PrinterColumns: []PrinterColumn{
@@ -77,7 +86,7 @@ var APIResources = []APIResource{
 		{Name: "PID", Type: "integer", JSONPath: ".status.runtime.pid"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "OpenBaoServer", Plural: "openbaoservers", Revision: 10, Export: "hostprocesses", Object: OpenBaoServer{}, PrinterColumns: []PrinterColumn{
+	{Kind: "OpenBaoServer", Plural: "openbaoservers", Revision: 10, Export: "hostprocesses", Object: OpenBaoServer{}, Contracts: []string{commonv1.ContractVaults}, PrinterColumns: []PrinterColumn{
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "Address", Type: "string", JSONPath: ".status.address"},
 		{Name: "Initialized", Type: "boolean", JSONPath: ".status.initialized"},
@@ -85,11 +94,18 @@ var APIResources = []APIResource{
 		{Name: "Instance", Type: "string", JSONPath: ".status.runtime.instance"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "RemoteOpenBao", Plural: "remoteopenbaos", Revision: 1, Export: "hostprocesses", Object: RemoteOpenBao{}, PrinterColumns: []PrinterColumn{
+	{Kind: "RemoteOpenBao", Plural: "remoteopenbaos", Revision: 1, Export: "hostprocesses", Object: RemoteOpenBao{}, Contracts: []string{commonv1.ContractVaults}, PrinterColumns: []PrinterColumn{
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "Ready", Type: "boolean", JSONPath: ".status.ready"},
 		{Name: "Endpoint", Type: "string", JSONPath: ".status.endpoint"},
 		{Name: "Sealed", Type: "boolean", JSONPath: ".status.sealed"},
+	}},
+	{Kind: "Vault", Plural: "vaults", Revision: 1, Export: "hostprocesses", Object: Vault{}, PrinterColumns: []PrinterColumn{
+		{Name: "Backend", Type: "string", JSONPath: ".spec.backendRef.kind"},
+		{Name: "Address", Type: "string", JSONPath: ".status.address"},
+		{Name: "Ready", Type: "boolean", JSONPath: ".status.ready"},
+		{Name: "Sealed", Type: "boolean", JSONPath: ".status.sealed"},
+		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
 	{Kind: "MarketNetwork", Plural: "marketnetworks", Revision: 15, Export: "applications", Object: MarketNetwork{}, PrinterColumns: []PrinterColumn{
 		{Name: "Profile", Type: "string", JSONPath: ".spec.profile"},
@@ -163,10 +179,25 @@ var APIResources = []APIResource{
 		{Name: "Workspace", Type: "string", JSONPath: ".status.workspace"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "AtprotoRepo", Plural: "atprotorepos", Revision: 3, Export: "applications", Object: AtprotoRepo{}, PrinterColumns: []PrinterColumn{
+	{Kind: "AtprotoRepo", Plural: "atprotorepos", Revision: 4, Export: "applications", Object: AtprotoRepo{}, PrinterColumns: []PrinterColumn{
+		{Name: "Backend", Type: "string", JSONPath: ".spec.backendRef.kind"},
+		{Name: "DID", Type: "string", JSONPath: ".status.did"},
+		{Name: "Head", Type: "string", JSONPath: ".status.head"},
+		{Name: "Writable", Type: "boolean", JSONPath: ".status.writable"},
+		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
+	}},
+	{Kind: "LocalRepo", Plural: "localrepos", Revision: 1, Export: "applications", Object: LocalRepo{}, Contracts: []string{commonv1.ContractAtprotoRepos}, PrinterColumns: []PrinterColumn{
 		{Name: "DID", Type: "string", JSONPath: ".spec.did"},
+		{Name: "PDS", Type: "string", JSONPath: ".spec.pdsRef.name"},
 		{Name: "Head", Type: "string", JSONPath: ".status.head"},
 		{Name: "Seq", Type: "integer", JSONPath: ".status.seq"},
+		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
+	}},
+	{Kind: "RemoteRepo", Plural: "remoterepos", Revision: 1, Export: "applications", Object: RemoteRepo{}, Contracts: []string{commonv1.ContractAtprotoRepos}, PrinterColumns: []PrinterColumn{
+		{Name: "DID", Type: "string", JSONPath: ".spec.did"},
+		{Name: "PDS", Type: "string", JSONPath: ".spec.pdsRef.name"},
+		{Name: "Credentials", Type: "string", JSONPath: ".spec.credentialsRef.name"},
+		{Name: "Head", Type: "string", JSONPath: ".status.head"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
 	{Kind: "PdsAccount", Plural: "pdsaccounts", Revision: 2, Export: "applications", Object: PdsAccount{}, PrinterColumns: []PrinterColumn{

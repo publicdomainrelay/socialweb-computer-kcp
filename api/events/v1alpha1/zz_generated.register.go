@@ -13,11 +13,19 @@ var (
 )
 
 const (
-	EventStreamResource = "eventstreams"
+	EventStreamResource          = "eventstreams"
+	EventSourceResource          = "eventsources"
+	PdsEventSourceResource       = "pdseventsources"
+	RelayEventSourceResource     = "relayeventsources"
+	JetstreamEventSourceResource = "jetstreameventsources"
 )
 
 var (
-	EventStreamGVR = GroupVersion.WithResource(EventStreamResource)
+	EventStreamGVR          = GroupVersion.WithResource(EventStreamResource)
+	EventSourceGVR          = GroupVersion.WithResource(EventSourceResource)
+	PdsEventSourceGVR       = GroupVersion.WithResource(PdsEventSourceResource)
+	RelayEventSourceGVR     = GroupVersion.WithResource(RelayEventSourceResource)
+	JetstreamEventSourceGVR = GroupVersion.WithResource(JetstreamEventSourceResource)
 )
 
 func addKnownTypes(scheme *runtime.Scheme) error {
@@ -25,6 +33,14 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		GroupVersion,
 		&EventStream{},
 		&EventStreamList{},
+		&EventSource{},
+		&EventSourceList{},
+		&PdsEventSource{},
+		&PdsEventSourceList{},
+		&RelayEventSource{},
+		&RelayEventSourceList{},
+		&JetstreamEventSource{},
+		&JetstreamEventSourceList{},
 	)
 	metav1.AddToGroupVersion(scheme, GroupVersion)
 	return nil
@@ -38,6 +54,62 @@ func (in *EventStream) DeepCopyObject() runtime.Object {
 }
 
 func (in *EventStreamList) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *EventSource) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *EventSourceList) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *PdsEventSource) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *PdsEventSourceList) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *RelayEventSource) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *RelayEventSourceList) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *JetstreamEventSource) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *JetstreamEventSourceList) DeepCopyObject() runtime.Object {
 	if c := in.DeepCopy(); c != nil {
 		return c
 	}

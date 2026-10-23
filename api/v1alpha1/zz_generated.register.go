@@ -23,12 +23,14 @@ const (
 	AtprotoRecordResource            = "atprotorecords"
 	AtprotoRecordWatchResource       = "atprotorecordwatches"
 	ComputeVMResource                = "computevms"
+	FirecrackerVMResource            = "firecrackervms"
 	BidResource                      = "bids"
 	GuestIdentityGrantResource       = "guestidentitygrants"
 	HostProcessResource              = "hostprocesses"
 	PostgresResource                 = "postgreses"
 	OpenBaoServerResource            = "openbaoservers"
 	RemoteOpenBaoResource            = "remoteopenbaos"
+	VaultResource                    = "vaults"
 	MarketNetworkResource            = "marketnetworks"
 	MarketBidderResource             = "marketbidders"
 	MarketRequesterResource          = "marketrequesters"
@@ -51,6 +53,8 @@ const (
 	HostReleaseResource              = "hostreleases"
 	ChildApplicationResource         = "childapplications"
 	AtprotoRepoResource              = "atprotorepos"
+	LocalRepoResource                = "localrepos"
+	RemoteRepoResource               = "remoterepos"
 	PdsAccountResource               = "pdsaccounts"
 	AtprotoSessionResource           = "atprotosessions"
 	PlcIdentityResource              = "plcidentities"
@@ -74,12 +78,14 @@ var (
 	AtprotoRecordGVR            = GroupVersion.WithResource(AtprotoRecordResource)
 	AtprotoRecordWatchGVR       = GroupVersion.WithResource(AtprotoRecordWatchResource)
 	ComputeVMGVR                = GroupVersion.WithResource(ComputeVMResource)
+	FirecrackerVMGVR            = GroupVersion.WithResource(FirecrackerVMResource)
 	BidGVR                      = GroupVersion.WithResource(BidResource)
 	GuestIdentityGrantGVR       = GroupVersion.WithResource(GuestIdentityGrantResource)
 	HostProcessGVR              = GroupVersion.WithResource(HostProcessResource)
 	PostgresGVR                 = GroupVersion.WithResource(PostgresResource)
 	OpenBaoServerGVR            = GroupVersion.WithResource(OpenBaoServerResource)
 	RemoteOpenBaoGVR            = GroupVersion.WithResource(RemoteOpenBaoResource)
+	VaultGVR                    = GroupVersion.WithResource(VaultResource)
 	MarketNetworkGVR            = GroupVersion.WithResource(MarketNetworkResource)
 	MarketBidderGVR             = GroupVersion.WithResource(MarketBidderResource)
 	MarketRequesterGVR          = GroupVersion.WithResource(MarketRequesterResource)
@@ -102,6 +108,8 @@ var (
 	HostReleaseGVR              = GroupVersion.WithResource(HostReleaseResource)
 	ChildApplicationGVR         = GroupVersion.WithResource(ChildApplicationResource)
 	AtprotoRepoGVR              = GroupVersion.WithResource(AtprotoRepoResource)
+	LocalRepoGVR                = GroupVersion.WithResource(LocalRepoResource)
+	RemoteRepoGVR               = GroupVersion.WithResource(RemoteRepoResource)
 	PdsAccountGVR               = GroupVersion.WithResource(PdsAccountResource)
 	AtprotoSessionGVR           = GroupVersion.WithResource(AtprotoSessionResource)
 	PlcIdentityGVR              = GroupVersion.WithResource(PlcIdentityResource)
@@ -137,6 +145,8 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&AtprotoRecordWatchList{},
 		&ComputeVM{},
 		&ComputeVMList{},
+		&FirecrackerVM{},
+		&FirecrackerVMList{},
 		&Bid{},
 		&BidList{},
 		&GuestIdentityGrant{},
@@ -149,6 +159,8 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&OpenBaoServerList{},
 		&RemoteOpenBao{},
 		&RemoteOpenBaoList{},
+		&Vault{},
+		&VaultList{},
 		&MarketNetwork{},
 		&MarketNetworkList{},
 		&MarketBidder{},
@@ -193,6 +205,10 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&ChildApplicationList{},
 		&AtprotoRepo{},
 		&AtprotoRepoList{},
+		&LocalRepo{},
+		&LocalRepoList{},
+		&RemoteRepo{},
+		&RemoteRepoList{},
 		&PdsAccount{},
 		&PdsAccountList{},
 		&AtprotoSession{},
@@ -358,6 +374,20 @@ func (in *ComputeVMList) DeepCopyObject() runtime.Object {
 	return nil
 }
 
+func (in *FirecrackerVM) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *FirecrackerVMList) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
 func (in *Bid) DeepCopyObject() runtime.Object {
 	if c := in.DeepCopy(); c != nil {
 		return c
@@ -436,6 +466,20 @@ func (in *RemoteOpenBao) DeepCopyObject() runtime.Object {
 }
 
 func (in *RemoteOpenBaoList) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *Vault) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *VaultList) DeepCopyObject() runtime.Object {
 	if c := in.DeepCopy(); c != nil {
 		return c
 	}
@@ -744,6 +788,34 @@ func (in *AtprotoRepo) DeepCopyObject() runtime.Object {
 }
 
 func (in *AtprotoRepoList) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *LocalRepo) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *LocalRepoList) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *RemoteRepo) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *RemoteRepoList) DeepCopyObject() runtime.Object {
 	if c := in.DeepCopy(); c != nil {
 		return c
 	}
