@@ -33,7 +33,9 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpapply"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/statuspatch"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/lease"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/statesync"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vmruntime"
@@ -98,7 +100,7 @@ type Controller struct {
 	exits    map[string]hostsvc.UnitStatus
 	orphans  map[string]time.Time
 	foreign  map[string]bool
-	logins   map[string]vaultLogin
+	logins   *lease.Keyed[string, *openbao.Client]
 	slice    bool
 	imagesAt time.Time
 	bidsAt   time.Time
@@ -144,11 +146,13 @@ func New(ctx context.Context, c Config) (*Controller, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Controller{c: c, vms: dc.Resource(GVR), hps: dc.Resource(hostprocess.GVR),
+	ct := &Controller{c: c, vms: dc.Resource(GVR), hps: dc.Resource(hostprocess.GVR),
 		servers: dc.Resource(openbaoctl.GVR), bids: dc.Resource(BidGVR), grants: dc.Resource(openbaoctl.GrantGVR),
 		syncs: dc.Resource(statesync.StateSyncGVR), kick: make(chan string, 256),
 		busy: map[string]bool{}, exits: map[string]hostsvc.UnitStatus{}, orphans: map[string]time.Time{}, foreign: map[string]bool{},
-		logins: map[string]vaultLogin{}, slice: true}, nil
+		slice: true}
+	ct.logins = lease.NewKeyed(ct.login)
+	return ct, nil
 }
 
 func applySets(ctx context.Context, c Config, restCfg *rest.Config) error {
