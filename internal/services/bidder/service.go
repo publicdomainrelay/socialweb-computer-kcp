@@ -559,12 +559,15 @@ func (s *Service) pdsAccessToken(ctx context.Context) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		for _, key := range []string{"token", "accessToken", "access_token", "value"} {
+		for _, key := range []string{"accessJwt", "accessToken", "access_token", "token", "value"} {
 			if value, ok := credential.Value(key); ok && value != "" {
 				token = value
 				break
 			}
 		}
+	}
+	if token != "" {
+		s.log.Warn("bidder token selected", "len", len(token), "parts", strings.Count(token, ".")+1)
 	}
 	return token, nil
 }
