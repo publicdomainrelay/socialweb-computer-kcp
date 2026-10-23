@@ -233,6 +233,8 @@ type Bidder struct {
 
 	released sync.Map
 
+	inboxed sync.Map
+
 	offerMu sync.Mutex
 
 	offerWrite sync.Mutex
@@ -306,6 +308,9 @@ func (b *Bidder) Observe(ctx context.Context, change contract.Change) (time.Dura
 		}
 	case contract.KindStateSync:
 		if change.Gone || change.StateSync == nil {
+			if old, ok := b.syncs.Get(change.Name); ok {
+				b.inboxed.Delete(string(old.UID) + "#" + old.Spec.IdempotencyKey)
+			}
 			b.syncs.Remove(change.Name)
 		} else {
 			b.syncs.Put(change.Name, *change.StateSync)
