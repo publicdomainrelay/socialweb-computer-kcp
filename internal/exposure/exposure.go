@@ -119,7 +119,18 @@ func (c *ExposureController) Run(ctx context.Context) error {
 		reconcile: c.Reconcile,
 		deleted:   c.forget,
 	}
+	defer c.stopAll()
 	return w.Run(ctx)
+}
+
+func (c *ExposureController) stopAll() {
+	c.mu.Lock()
+	running := c.running
+	c.running = map[string]*exposureRuntime{}
+	c.mu.Unlock()
+	for _, rt := range running {
+		rt.shutdown()
+	}
 }
 
 func (c *ExposureController) Reconcile(ctx context.Context, dyn dynamic.Interface, u *unstructured.Unstructured) error {
@@ -400,17 +411,21 @@ func (c *ExposureController) startLocal(ctx context.Context, exp *exposurev1alph
 			h.ServeHTTP(w, r.WithContext(component.WithCaller(r.Context(), target)))
 		})
 		server := &http.Server{Handler: current, ReadHeaderTimeout: 10 * time.Second}
+		done := make(chan struct{})
 		go func() {
+			defer close(done)
 			_ = server.Serve(listener)
 		}()
 		rt.close = func() {
 			_ = server.Close()
+			<-done
 		}
 		scheme := httpScheme(protocol, tlsConfig != nil)
 		return rt, scheme + "://" + lease.Address() + path, lease.Address(), nil
 	case component.ProtocolTCP, component.ProtocolSSH:
-		runCtx, cancel := context.WithCancel(bus.WithCaller(context.Background(), ExposureCaller(c.workspace, exp.Name)))
+		runCtx, cancel := context.WithCancel(bus.WithCaller(ctx, ExposureCaller(c.workspace, exp.Name)))
 		done := make(chan struct{})
+		var conns sync.WaitGroup
 		go func() {
 			defer close(done)
 			for {
@@ -418,13 +433,14 @@ func (c *ExposureController) startLocal(ctx context.Context, exp *exposurev1alph
 				if err != nil {
 					return
 				}
-				go bridge(runCtx, c.handlers, target, svc.Spec.Handler, conn)
+				conns.Go(func() { bridge(runCtx, c.handlers, target, svc.Spec.Handler, conn) })
 			}
 		}()
 		rt.close = func() {
 			cancel()
 			_ = listener.Close()
 			<-done
+			conns.Wait()
 		}
 		scheme := protocol
 		if scheme == "" {
@@ -518,6 +534,8 @@ func bridge(ctx context.Context, handlers *component.Handlers, target component.
 	if handlers == nil {
 		return
 	}
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
 	stream, err := handlers.DialStream(ctx, target, name)
 	if err != nil {
 		return
