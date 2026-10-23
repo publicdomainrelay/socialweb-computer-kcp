@@ -764,3 +764,26 @@ func closeTracked(conns []*trackedConn) {
 		conn.Close()
 	}
 }
+
+func (r *Bus) Transport(external http.RoundTripper) http.RoundTripper {
+	return handlerTransport{bus: r, external: external}
+}
+
+type handlerTransport struct {
+	bus *Bus
+
+	external http.RoundTripper
+}
+
+func (t handlerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req != nil && req.URL != nil && req.URL.Scheme == "http" && t.bus != nil {
+		if _, ok := t.bus.HandlerForHost(req.URL.Host); ok {
+			return t.bus.RoundTripper().RoundTrip(req)
+		}
+	}
+	external := t.external
+	if external == nil {
+		external = http.DefaultTransport
+	}
+	return external.RoundTrip(req)
+}

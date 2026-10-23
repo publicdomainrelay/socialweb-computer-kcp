@@ -407,24 +407,6 @@ func directoryFor(cfg Config, raw string, capacity int, ttl time.Duration) ident
 	return identity.NewCacheDirectory(inner, capacity, ttl, ttl, ttl)
 }
 
-type handlerAwareRoundTripper struct {
-	handlers *component.HandlerRegistry
-	external http.RoundTripper
-}
-
-func (t handlerAwareRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	if req != nil && req.URL != nil && req.URL.Scheme == "http" && t.handlers != nil {
-		if _, ok := t.handlers.HandlerForHost(req.URL.Host); ok {
-			return t.handlers.RoundTripper().RoundTrip(req)
-		}
-	}
-	external := t.external
-	if external == nil {
-		external = http.DefaultTransport
-	}
-	return external.RoundTrip(req)
-}
-
 func serviceHTTPClient(cfg Config, timeout time.Duration) *http.Client {
 	external := httpclient.External(httpclient.Options{Hosts: networkHostsResolver(cfg.Network, cfg.Deps.Hosts), TLS: cfg.Deps.TLS}).Transport
 	if external == nil {
@@ -432,7 +414,7 @@ func serviceHTTPClient(cfg Config, timeout time.Duration) *http.Client {
 	}
 	return &http.Client{
 		Timeout:   timeout,
-		Transport: handlerAwareRoundTripper{handlers: cfg.Deps.Handlers, external: external},
+		Transport: cfg.Deps.Handlers.Transport(external),
 	}
 }
 

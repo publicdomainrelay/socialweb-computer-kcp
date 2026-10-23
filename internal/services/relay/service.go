@@ -552,26 +552,8 @@ func endpointHost(endpoint component.Endpoint) string {
 	return endpoint.Address
 }
 
-type handlerAwareRoundTripper struct {
-	handlers *component.HandlerRegistry
-	external http.RoundTripper
-}
-
-func (t handlerAwareRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	if req != nil && req.URL != nil && req.URL.Scheme == "http" && t.handlers != nil {
-		if _, ok := t.handlers.HandlerForHost(req.URL.Host); ok {
-			return t.handlers.RoundTripper().RoundTrip(req)
-		}
-	}
-	external := t.external
-	if external == nil {
-		external = http.DefaultTransport
-	}
-	return external.RoundTrip(req)
-}
-
 func handlerClient(handlers *component.HandlerRegistry, external http.RoundTripper) *http.Client {
-	return &http.Client{Transport: handlerAwareRoundTripper{handlers: handlers, external: external}}
+	return &http.Client{Transport: handlers.Transport(external)}
 }
 
 func externalDialContext(deps component.Deps) func(context.Context, string, string) (net.Conn, error) {
