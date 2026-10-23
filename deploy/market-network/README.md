@@ -283,13 +283,18 @@ to it, mode 0600), and the gateway brings up the tenant cluster `tenant` of that
 owner at zero nodes. A pod applied to that cluster gets a node through the RFP
 flow from the network's bidders. The gateway's requester trusts a bidder through
 its operator's vouches: the network declares, in the gateway's `root:gateway:app`,
-one AtprotoRecord `operator-vouch-<bidder app>` (`spec.repo: operator`,
-`sh.tangled.graph.vouch`, rkey and subject the bidder operator's DID from its
-MarketIdentity `approvedAssociations`), and the gateway writes it into the owner
-account's repo through `owner-sessions.json` (status Applied with the uri).
+one AtprotoRecord `operator-vouch-<bidder app>` (`spec.repoRef: AtprotoRepo/operator`,
+label `apps.socialweb.computer/record-repo: operator`, `sh.tangled.graph.vouch`,
+rkey and subject the bidder operator's DID from its MarketIdentity
+`approvedAssociations`). The gateway composes the AtprotoRepo `operator` beside it:
+a RemoteRepo on the owner account's RemotePDS whose credentials are a `pdsAccount`
+MarketIdentity `operator` (password and session in the root vault), and the
+ComponentLinks from the labelled records to the repo, the repo to the RemoteRepo
+and the RemoteRepo to the RemotePDS and the MarketIdentity. The AtprotoRecord
+controller writes the record and its status (Applied with the uri).
 The other direction is declared too: in each bidder's workspace one AtprotoRecord
 `operator-vouch-<gateway app>` (the bidder operator's vouch for the gateway
-operator), which the bidder core writes into its operator account's repo, so a
+operator), written the same way through the bidder's AtprotoRepo `operator`, so a
 bidder under `bidder-tangled-vouch` (`dev up --app-values` with
 `bidder: {policy: bidder-tangled-vouch}`) bids on the gateway's RFPs.
 

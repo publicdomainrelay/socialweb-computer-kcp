@@ -18,6 +18,14 @@ const (
 	ChildLabel = "clusters"
 )
 
+const (
+	fieldManagerClusterProvider = "socialweb.computer/clusterprovider"
+
+	fieldManagerGateway = "socialweb.computer/gateway"
+
+	fieldManagerRevocation = "socialweb.computer/revocation"
+)
+
 func AccountHash(did string) string {
 	sum := sha256.Sum256([]byte(did))
 	return new(big.Int).SetBytes(sum[:]).Text(36)[:8]

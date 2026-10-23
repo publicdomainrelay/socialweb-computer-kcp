@@ -1102,14 +1102,14 @@ entries:
       is running; completed with exit_status success/failure maps outcome; verdict read from
       policy/<name>/result.json; an unreachable engine counts as running.
 
-  - id: internal/kcplibs/impl/kcpstore/Test*+internal/kcplibs/common/statuspatch/Test*
+  - id: internal/kcplibs/impl/kcpstore/Test*
     kind: wire
-    source: internal/kcplibs/impl/kcpstore/*_test.go, internal/kcplibs/common/statuspatch/statuspatch_test.go
+    source: internal/kcplibs/impl/kcpstore/*_test.go
     asserts: >
       /clusters/<path>/apis/policy.socialweb.computer/v1alpha1/[namespaces/<ns>/]policyworkflowruns,
-      status by merge-patch on /status with body {"status":{...}}; token mint POST
+      status by server-side apply on /status under the caller's field manager; token mint POST
       .../serviceaccounts/<sa>/token; workspace path from the kcp.io/path annotation of the
-      LogicalCluster "cluster"; finalizer removal is a JSON patch [test, add].
+      LogicalCluster "cluster".
 
   - id: internal/kcplibs/common/kcp/Test*+internal/kcplibs/common/ref/Test*
     kind: wire

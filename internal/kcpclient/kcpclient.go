@@ -373,13 +373,10 @@ func (c *Client) patchWorkspaceURL(ctx context.Context, parent, name, url string
 	if err != nil {
 		return err
 	}
-	body, err := json.Marshal(map[string]any{"spec": map[string]any{"URL": url}})
-	if err != nil {
-		return fmt.Errorf("kcpclient: workspace %s: marshal: %w", name, err)
-	}
-	if err := r.Patch(types.MergePatchType).Resource("workspaces").Name(name).
-		Body(body).Do(ctx).Error(); err != nil {
-		return fmt.Errorf("kcpclient: patch workspace %s spec.URL: %w", name, err)
+	doc := map[string]any{"apiVersion": tenancyResource.String(), "kind": "Workspace", "metadata": map[string]any{"name": name},
+		"spec": map[string]any{"URL": url}}
+	if err := applyDoc(ctx, r.Patch(types.ApplyPatchType).Resource("workspaces").Name(name), fieldManagerClusterProvider, true, doc, false); err != nil {
+		return fmt.Errorf("kcpclient: apply workspace %s spec.URL: %w", name, err)
 	}
 	return nil
 }
@@ -592,19 +589,23 @@ func (c *Client) SetRunning(ctx context.Context, caller gateway.Caller, name str
 	if err != nil {
 		return gateway.ClusterView{}, err
 	}
-	body, err := json.Marshal(map[string]any{"spec": map[string]any{"running": running}})
-	if err != nil {
-		return gateway.ClusterView{}, fmt.Errorf("kcpclient: set running: %w", err)
+	if _, err := c.readCluster(ctx, home, name); err != nil {
+		return gateway.ClusterView{}, fmt.Errorf("kcpclient: set running %s: %w", name, err)
 	}
-	var out v1alpha1.Cluster
-	if err := r.Patch(types.MergePatchType).Resource("clusters").Name(name).Body(body).Do(ctx).Into(&out); err != nil {
+	doc := map[string]any{"apiVersion": socialwebResource.String(), "kind": "Cluster", "metadata": map[string]any{"name": name},
+		"spec": map[string]any{"running": running}}
+	if err := applyDoc(ctx, r.Patch(types.ApplyPatchType).Resource("clusters").Name(name), fieldManagerGateway, true, doc, false); err != nil {
+		return gateway.ClusterView{}, fmt.Errorf("kcpclient: set running %s: %w", name, err)
+	}
+	out, err := c.readCluster(ctx, home, name)
+	if err != nil {
 		return gateway.ClusterView{}, fmt.Errorf("kcpclient: set running %s: %w", name, err)
 	}
 	n, err := c.liveNodes(ctx, home, name)
 	if err != nil {
 		return gateway.ClusterView{}, err
 	}
-	return viewOf(&out, n), nil
+	return viewOf(out, n), nil
 }
 
 func (c *Client) Delete(ctx context.Context, caller gateway.Caller, name string) (gateway.ClusterView, error) {
@@ -692,47 +693,21 @@ func (c *Client) WriteDeny(ctx context.Context, did string) error {
 	}
 
 	name := IdentityRecordName(did)
+	scope := v1alpha1.IdentityScopeAccount
 	rec, err := c.readIdentity(ctx, AccountPath(did), name)
 	switch {
 	case apierrors.IsNotFound(err):
-		return c.createDeny(ctx, r, name, did)
 	case err != nil:
 		return fmt.Errorf("kcpclient: deny: read %s: %w", name, err)
-	}
-	if rec.Spec.Revoked {
+	case rec.Spec.Revoked:
 		return nil
+	case rec.Spec.Scope != "":
+		scope = rec.Spec.Scope
 	}
-
-	body, err := json.Marshal(map[string]any{"spec": map[string]any{"revoked": true}})
-	if err != nil {
-		return fmt.Errorf("kcpclient: deny: marshal: %w", err)
-	}
-	if err := r.Patch(types.MergePatchType).Resource("atprotoidentities").Name(name).
-		Body(body).Do(ctx).Error(); err != nil {
-		return fmt.Errorf("kcpclient: deny: patch %s: %w", name, err)
-	}
-	return nil
-}
-
-func (c *Client) createDeny(ctx context.Context, r rest.Interface, name, did string) error {
-	rec := v1alpha1.AtprotoIdentity{
-		TypeMeta: metav1.TypeMeta{
-			APIVersion: v1alpha1.GroupVersion.String(),
-			Kind:       "AtprotoIdentity",
-		},
-		ObjectMeta: metav1.ObjectMeta{Name: name},
-		Spec: v1alpha1.AtprotoIdentitySpec{
-			DID:     did,
-			Scope:   v1alpha1.IdentityScopeAccount,
-			Revoked: true,
-		},
-	}
-	body, err := json.Marshal(rec)
-	if err != nil {
-		return fmt.Errorf("kcpclient: deny: marshal: %w", err)
-	}
-	if err := r.Post().Resource("atprotoidentities").Body(body).Do(ctx).Error(); err != nil {
-		return fmt.Errorf("kcpclient: deny: create %s: %w", name, err)
+	doc := map[string]any{"apiVersion": v1alpha1.GroupVersion.String(), "kind": "AtprotoIdentity", "metadata": map[string]any{"name": name},
+		"spec": map[string]any{"did": did, "scope": string(scope), "revoked": true}}
+	if err := applyDoc(ctx, r.Patch(types.ApplyPatchType).Resource("atprotoidentities").Name(name), fieldManagerRevocation, true, doc, false); err != nil {
+		return fmt.Errorf("kcpclient: deny: apply %s: %w", name, err)
 	}
 	return nil
 }
@@ -930,13 +905,8 @@ func WriteNodeTo(ctx context.Context, r rest.Interface, cluster, nodeName string
 	if sameNodeStatus(existing.Status, status) {
 		return nil
 	}
-	body, err := nodeStatusPatch(status)
-	if err != nil {
-		return fmt.Errorf("kcpclient: node %s: marshal: %w", nodeName, err)
-	}
-	if err := r.Patch(types.MergePatchType).SubResource("status").Resource("nodes").Name(nodeName).
-		Body(body).Do(ctx).Error(); err != nil {
-		return fmt.Errorf("kcpclient: patch node %s to phase %q: %w", nodeName, status.Phase, err)
+	if err := applyNodeStatus(ctx, r, nodeName, status); err != nil {
+		return fmt.Errorf("kcpclient: apply node %s to phase %q: %w", nodeName, status.Phase, err)
 	}
 	return nil
 }
@@ -954,42 +924,24 @@ func sameNodeStatus(have, want v1alpha1.NodeStatus) bool {
 	return *have.NodeExpiry == *want.NodeExpiry
 }
 
-func nodeStatusPatch(status v1alpha1.NodeStatus) ([]byte, error) {
-	fields := map[string]any{}
-	if status.Phase != "" {
-		fields["phase"] = string(status.Phase)
-	}
-	if status.NodeExpiry != nil {
-		fields["nodeExpiry"] = *status.NodeExpiry
-	}
-	return json.Marshal(map[string]any{"status": fields})
+var nodeType = metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: "Node"}
+
+func applyNodeStatus(ctx context.Context, r rest.Interface, nodeName string, status v1alpha1.NodeStatus) error {
+	obj := v1alpha1.Node{TypeMeta: nodeType, ObjectMeta: metav1.ObjectMeta{Name: nodeName}, Status: status}
+	return applyDoc(ctx, r.Patch(types.ApplyPatchType).SubResource("status").Resource("nodes").Name(nodeName),
+		fieldManagerClusterProvider, true, &obj, true)
 }
 
 func createNode(ctx context.Context, r rest.Interface, cluster, nodeName string, status v1alpha1.NodeStatus) error {
-	node := v1alpha1.Node{
-		TypeMeta: metav1.TypeMeta{
-			APIVersion: v1alpha1.GroupVersion.String(),
-			Kind:       "Node",
-		},
-		ObjectMeta: metav1.ObjectMeta{Name: nodeName},
-		Spec:       v1alpha1.NodeSpec{ClusterRef: commonv1.LocalObjectRef{Name: cluster}},
-	}
-	body, err := json.Marshal(node)
-	if err != nil {
-		return fmt.Errorf("kcpclient: node %s: marshal: %w", nodeName, err)
-	}
-	if err := r.Post().Resource("nodes").Body(body).Do(ctx).Error(); err != nil {
+	node := v1alpha1.Node{TypeMeta: nodeType, ObjectMeta: metav1.ObjectMeta{Name: nodeName},
+		Spec: v1alpha1.NodeSpec{ClusterRef: commonv1.LocalObjectRef{Name: cluster}}}
+	if err := applyDoc(ctx, r.Patch(types.ApplyPatchType).Resource("nodes").Name(nodeName), fieldManagerClusterProvider, true, &node, false); err != nil {
 		return fmt.Errorf("kcpclient: create node %s: %w", nodeName, err)
 	}
 	if status.Phase == "" && status.NodeExpiry == nil {
 		return nil
 	}
-	written, err := nodeStatusPatch(status)
-	if err != nil {
-		return fmt.Errorf("kcpclient: node %s: marshal: %w", nodeName, err)
-	}
-	if err := r.Patch(types.MergePatchType).SubResource("status").Resource("nodes").Name(nodeName).
-		Body(written).Do(ctx).Error(); err != nil {
+	if err := applyNodeStatus(ctx, r, nodeName, status); err != nil {
 		return fmt.Errorf("kcpclient: set the status of the node %s it just created: %w -- the "+
 			"schema declares a status subresource, so a status posted inline is DISCARDED and the "+
 			"node exists with neither a phase nor an expiry at all", nodeName, err)
@@ -1024,25 +976,11 @@ func WriteNodeClaimTo(ctx context.Context, r rest.Interface, claim v1alpha1.Node
 	case err != nil:
 		return fmt.Errorf("kcpclient: read nodeclaim %s: %w", claim.Name, err)
 	}
-	if len(existing.OwnerReferences) == 0 && len(claim.OwnerReferences) > 0 {
-		owner, err := json.Marshal(map[string]any{"metadata": map[string]any{"uid": string(existing.UID), "ownerReferences": claim.OwnerReferences}})
-		if err != nil {
-			return fmt.Errorf("kcpclient: nodeclaim %s: marshal: %w", claim.Name, err)
-		}
-		if err := r.Patch(types.MergePatchType).Resource("nodeclaims").Name(claim.Name).Body(owner).Do(ctx).Error(); err != nil && !apierrors.IsConflict(err) {
-			return fmt.Errorf("kcpclient: hang nodeclaim %s from its Cluster: %w", claim.Name, err)
-		}
-	}
-	if sameNodeClaimSpec(existing.Spec, claim.Spec) {
+	if sameNodeClaimSpec(existing.Spec, claim.Spec) && (len(existing.OwnerReferences) > 0 || len(claim.OwnerReferences) == 0) {
 		return nil
 	}
-	body, err := nodeClaimSpecPatch(claim.Spec)
-	if err != nil {
-		return fmt.Errorf("kcpclient: nodeclaim %s: marshal: %w", claim.Name, err)
-	}
-	if err := r.Patch(types.MergePatchType).Resource("nodeclaims").Name(claim.Name).
-		Body(body).Do(ctx).Error(); err != nil {
-		return fmt.Errorf("kcpclient: patch nodeclaim %s: %w -- the claim is the only handle on a "+
+	if err := applyNodeClaim(ctx, r, claim); err != nil {
+		return fmt.Errorf("kcpclient: apply nodeclaim %s: %w -- the claim is the only handle on a "+
 			"machine the market is being asked to rent, so a spec that did not land is a node "+
 			"nobody can account for", claim.Name, err)
 	}
@@ -1086,7 +1024,7 @@ func (c *Client) ReportNodeClaimJoined(ctx context.Context, logicalCluster, name
 		return err
 	}
 	err = r.Patch(types.ApplyPatchType).SubResource("status").Resource("nodeclaims").Name(name).
-		Param("fieldManager", v1alpha1.FieldManagerNodeClaimJoin).Param("force", "true").Body(body).Do(ctx).Error()
+		Param("fieldManager", v1alpha1.FieldManagerNodeMarket).Param("force", "true").Body(body).Do(ctx).Error()
 	if apierrors.IsNotFound(err) {
 		return nil
 	}
@@ -1180,42 +1118,17 @@ func sameNodeClaimSpec(have, want v1alpha1.NodeClaimSpec) bool {
 	return true
 }
 
-func nodeClaimSpecPatch(spec v1alpha1.NodeClaimSpec) ([]byte, error) {
-	dids := spec.DenyBidderDids
-	if dids == nil {
-		dids = []string{}
-	}
-	patch := map[string]any{
-		"clusterRef":       map[string]any{"name": spec.ClusterRef.Name},
-		"nodeName":         spec.NodeName,
-		"ownerDid":         spec.OwnerDid,
-		"apiserverPort":    spec.ApiserverPort,
-		"advertiseAddress": spec.AdvertiseAddress,
-		"tokenFile":        spec.TokenFile,
-		"nodePasswordFile": spec.NodePasswordFile,
-		"serverCAFile":     spec.ServerCAFile,
-		"denyBidderDids":   dids,
-	}
-	if spec.AdoptJoinedNode {
-		patch["adoptJoinedNode"] = true
-	}
-	return json.Marshal(map[string]any{"spec": patch})
-}
-
-func createNodeClaim(ctx context.Context, r rest.Interface, claim v1alpha1.NodeClaim) error {
-	created := v1alpha1.NodeClaim{
-		TypeMeta: metav1.TypeMeta{
-			APIVersion: v1alpha1.GroupVersion.String(),
-			Kind:       "NodeClaim",
-		},
+func applyNodeClaim(ctx context.Context, r rest.Interface, claim v1alpha1.NodeClaim) error {
+	obj := v1alpha1.NodeClaim{
+		TypeMeta:   metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: "NodeClaim"},
 		ObjectMeta: metav1.ObjectMeta{Name: claim.Name, Annotations: claim.Annotations, OwnerReferences: claim.OwnerReferences},
 		Spec:       claim.Spec,
 	}
-	body, err := json.Marshal(created)
-	if err != nil {
-		return fmt.Errorf("kcpclient: nodeclaim %s: marshal: %w", claim.Name, err)
-	}
-	if err := r.Post().Resource("nodeclaims").Body(body).Do(ctx).Error(); err != nil {
+	return applyDoc(ctx, r.Patch(types.ApplyPatchType).Resource("nodeclaims").Name(claim.Name), v1alpha1.FieldManagerNodeMarket, true, &obj, false)
+}
+
+func createNodeClaim(ctx context.Context, r rest.Interface, claim v1alpha1.NodeClaim) error {
+	if err := applyNodeClaim(ctx, r, claim); err != nil {
 		if apierrors.IsForbidden(err) && strings.Contains(err.Error(), "exceeded quota") {
 			return fmt.Errorf("kcpclient: AtCapacity: the home workspace's NodeClaim quota is used up, so nodeclaim %s is not created and the next pass asks again: %w", claim.Name, err)
 		}

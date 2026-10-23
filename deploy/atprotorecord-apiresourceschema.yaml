@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-4.atprotorecords.socialweb.computer
+  name: v1alpha1-5.atprotorecords.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -44,8 +44,6 @@ spec:
                 required:
                   - kind
                   - name
-              repo:
-                type: string
               collection:
                 type: string
               rkey:
@@ -90,7 +88,7 @@ spec:
       additionalPrinterColumns:
         - name: Repo
           type: string
-          jsonPath: .spec.repo
+          jsonPath: .spec.repoRef.name
         - name: Collection
           type: string
           jsonPath: .spec.collection

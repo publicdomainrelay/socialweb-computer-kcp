@@ -265,4 +265,4 @@ type NodeClaimGrant struct {
 
 const FinalizerNodeClaim = "nodeclaim.socialweb.computer/release"
 
-const FieldManagerNodeClaimJoin = "socialweb.computer/nodemarket"
+const FieldManagerNodeMarket = "socialweb.computer/nodemarket"

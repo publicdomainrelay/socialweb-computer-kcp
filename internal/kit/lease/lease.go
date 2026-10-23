@@ -12,9 +12,6 @@ import (
 
 type Fetch[T any] func(context.Context) (T, time.Time, error)
 
-// Source holds one leased value. A zero expiry from fetch never expires.
-// Get renews at 2/3 of the lifetime; inside that window one caller renews
-// while the others keep the current value, and a failed renewal keeps it.
 type Source[T any] struct {
 	fetch    Fetch[T]
 	now      func() time.Time
