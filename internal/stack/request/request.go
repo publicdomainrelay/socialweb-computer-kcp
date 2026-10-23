@@ -408,7 +408,7 @@ func (k *Kcp) PutSecrets(ctx context.Context, bundle []byte, timeout time.Durati
 		if err != nil {
 			return false, err
 		}
-		defer client.RevokeSelf(context.Background())
+		defer client.RevokeSelf(context.WithoutCancel(ctx))
 		ref.Mount = c.KVMount
 		if err := client.PutKV(ctx, c.KVMount+"/data/"+SecretsPath, map[string]any{"bundle": string(bundle)}); err != nil {
 			return false, err
