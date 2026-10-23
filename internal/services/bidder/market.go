@@ -727,13 +727,20 @@ func (s *Service) bidForAccept(ctx context.Context, accept *market.Accept) (*v1a
 	if s.bids == nil {
 		return nil, errors.New("the bidder has no Bid store")
 	}
+	if market.ATURIAuthority(accept.Bid.URI) != s.did {
+		return nil, fmt.Errorf("the accepted bid %s is not this bidder's", accept.Bid.URI)
+	}
 	bids, err := s.bids.List(ctx)
 	if err != nil {
 		return nil, err
 	}
+	rkey := lastSegment(accept.Bid.URI)
 	for i := range bids {
 		bid := &bids[i]
 		if bid.Spec.Rfp.Uri != accept.RFP.URI {
+			continue
+		}
+		if bid.Name != rkey {
 			continue
 		}
 		if bid.Status.Bid != nil && bid.Status.Bid.Uri != "" && bid.Status.Bid.Uri != accept.Bid.URI {
