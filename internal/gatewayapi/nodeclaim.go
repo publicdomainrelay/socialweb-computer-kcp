@@ -20,6 +20,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/nodemarket"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
 
@@ -218,7 +219,7 @@ type NodeClaimMapper struct {
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
-	done   chan struct{}
+	wg     *sync.WaitGroup
 
 	signal chan struct{}
 
@@ -302,20 +303,19 @@ func (m *NodeClaimMapper) Start(ctx context.Context) {
 	}
 	cctx, cancel := context.WithCancel(ctx)
 	m.cancel = cancel
-	done := make(chan struct{})
-	m.done = done
+	wg := &sync.WaitGroup{}
+	m.wg = wg
 	m.mu.Unlock()
 	if w, ok := m.opts.Store.(NodeClaimWatcher); ok {
-		go w.Watch(cctx, m.wake)
+		wg.Go(func() { w.Watch(cctx, m.wake) })
 	}
 	if w, ok := m.opts.Contracts.(ContractWatcher); ok {
-		go w.Watch(cctx, m.wake)
+		wg.Go(func() { w.Watch(cctx, m.wake) })
 	}
-	go m.loop(cctx, done)
+	wg.Go(func() { m.loop(cctx) })
 }
 
-func (m *NodeClaimMapper) loop(ctx context.Context, done chan struct{}) {
-	defer close(done)
+func (m *NodeClaimMapper) loop(ctx context.Context) {
 	ticker := time.NewTicker(m.opts.PollInterval)
 	defer ticker.Stop()
 	if err := m.Pass(ctx); err != nil {
@@ -337,20 +337,15 @@ func (m *NodeClaimMapper) loop(ctx context.Context, done chan struct{}) {
 func (m *NodeClaimMapper) Stop(ctx context.Context) error {
 	m.mu.Lock()
 	cancel := m.cancel
-	done := m.done
+	wg := m.wg
 	m.cancel = nil
-	m.done = nil
+	m.wg = nil
 	m.mu.Unlock()
 	if cancel == nil {
 		return nil
 	}
 	cancel()
-	select {
-	case <-done:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	return supervise.Join(ctx, wg.Wait)
 }
 
 func (m *NodeClaimMapper) Pass(ctx context.Context) error {
