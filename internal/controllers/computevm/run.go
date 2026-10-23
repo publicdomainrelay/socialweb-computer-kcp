@@ -48,7 +48,13 @@ func run(ctx context.Context, c computevm.Config) error {
 	if _, err := Register(mgr, host); err != nil {
 		return err
 	}
-	fc, err := firecrackervm.Register(mgr, firecracker.New(host))
+	placement := firecrackervm.NewPlacement(host)
+	provider, err := firecracker.New(firecracker.Config{Handle: c.Handle, Log: c.Log},
+		firecracker.Deps{Runtime: c.Runtime, Units: c.Manager, UserData: host, Placement: placement})
+	if err != nil {
+		return err
+	}
+	fc, err := firecrackervm.Register(mgr, provider, host, placement)
 	if err != nil {
 		return err
 	}

@@ -25,6 +25,10 @@ const (
 type Controller struct {
 	p *firecracker.Provider
 
+	host *computevm.Host
+
+	placement *Placement
+
 	log *slog.Logger
 
 	events chan ctlruntime.Request
@@ -34,8 +38,8 @@ type Controller struct {
 	clusters map[string]string
 }
 
-func Register(m *ctlruntime.Manager, p *firecracker.Provider) (*Controller, error) {
-	ctl := &Controller{p: p, log: p.Host().Log().With("controller", Name), events: make(chan ctlruntime.Request, 256),
+func Register(m *ctlruntime.Manager, p *firecracker.Provider, host *computevm.Host, placement *Placement) (*Controller, error) {
+	ctl := &Controller{p: p, host: host, placement: placement, log: host.Log().With("controller", Name), events: make(chan ctlruntime.Request, 256),
 		clusters: map[string]string{}}
 	handle := p.Handle()
 	if err := ctlruntime.For[*v1alpha1.FirecrackerVM](m, Name, ctl, ctlruntime.Export(Export),
@@ -67,7 +71,7 @@ func (c *Controller) clusterOf(name string) (string, bool) {
 
 func (c *Controller) Run(ctx context.Context) error {
 	defer close(c.events)
-	sweep := time.NewTimer(c.p.Host().Config().Grace())
+	sweep := time.NewTimer(c.host.Config().Grace())
 	defer sweep.Stop()
 	for ctx.Err() == nil {
 		names, err := c.p.Watch(ctx)
@@ -107,14 +111,17 @@ func (c *Controller) Run(ctx context.Context) error {
 }
 
 func (c *Controller) sweep(ctx context.Context) {
-	for _, l := range c.p.Orphans(ctx) {
+	for _, l := range c.p.Listed(ctx) {
+		if ok, err := c.placement.exists(ctx, l.Name); ok || err != nil {
+			continue
+		}
 		c.log.Warn("a VM unit or work dir with no FirecrackerVM of this handle outlived the grace; collecting it", "name", l.Name,
 			"unit", l.Unit, "loaded", l.Loaded, "state", string(l.Status.State), "workDir", l.WorkDir)
 		if err := c.p.Collect(ctx, l); err != nil {
 			c.log.Warn("collecting an orphan VM", "name", l.Name, "err", err.Error())
 		}
 	}
-	c.p.CollectChildren(ctx)
+	c.placement.collectChildren(ctx, c.p.Live)
 	c.mu.Lock()
 	none := len(c.clusters) == 0
 	c.mu.Unlock()
@@ -148,7 +155,7 @@ func (c *Controller) declare(ctx context.Context, req ctlruntime.Request) {
 		names = append(names, vm.Name)
 	}
 	slices.Sort(names)
-	if err := c.p.Host().DeclareGuests(ctx, names); err != nil {
+	if err := c.host.DeclareGuests(ctx, names); err != nil {
 		c.log.Warn("declaring the live guests' material in the bidder's vault", "err", err.Error())
 	}
 }

@@ -15,34 +15,68 @@ import (
 	"sync"
 	"time"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/host"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestimage"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostprocess"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vmruntime"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
-const conditionReasonOK = "Observed"
+const (
+	conditionReasonOK = "Observed"
+
+	PlaceTimeout = 20 * time.Second
+
+	ReleaseKillAfter = 30 * time.Second
+
+	MessageCap = 4000
+)
+
+type UserData interface {
+	UserData(ctx context.Context, name string, ref commonv1.SecretRef) (string, bool, error)
+}
+
+type Placement interface {
+	Place(ctx context.Context, vm *v1alpha1.FirecrackerVM, slot int, spec host.UnitSpec) error
+	Placed(ctx context.Context, name string) (slot int, placed bool, err error)
+	Unplace(ctx context.Context, name string) error
+	Settle(ctx context.Context, name string) error
+}
+
+type Config struct {
+	Handle string
+
+	Log *slog.Logger
+}
+
+type Deps struct {
+	Runtime vmruntime.Runtime
+
+	Units host.Units
+
+	UserData UserData
+
+	Placement Placement
+}
 
 var (
 	sizeRE    = regexp.MustCompile(`(?i)^\s*(\d+)\s*([KMGT])?i?B?\s*$`)
-	slotRE    = regexp.MustCompile(`slot=(\d+)`)
 	vmmExitRE = regexp.MustCompile(`Firecracker exiting[^\n]*exit_code=(\d+)`)
 )
 
 type Provider struct {
-	host *computevm.Host
-
 	rt vmruntime.Runtime
 
-	m hostsvc.Manager
+	m host.Units
+
+	userData UserData
+
+	placement Placement
 
 	handle string
 
@@ -53,15 +87,29 @@ type Provider struct {
 	exits map[string]hostsvc.UnitStatus
 }
 
-func New(h *computevm.Host) *Provider {
-	c := h.Config()
-	return &Provider{host: h, rt: c.Runtime, m: c.Manager, handle: c.Handle, log: h.Log().With("backend", v1alpha1.BackendKindFirecrackerVM),
-		exits: map[string]hostsvc.UnitStatus{}}
+func New(cfg Config, deps Deps) (*Provider, error) {
+	if cfg.Handle == "" {
+		return nil, errors.New("firecracker: the provider names no handle; VM units and work dirs are namespaced by it")
+	}
+	if deps.Runtime == nil || deps.Units == nil || deps.UserData == nil || deps.Placement == nil {
+		return nil, errors.New("firecracker: the provider needs a VM runtime, host units, a user data reader and a placement")
+	}
+	log := cfg.Log
+	if log == nil {
+		log = slog.New(slog.DiscardHandler)
+	}
+	return &Provider{rt: deps.Runtime, m: deps.Units, userData: deps.UserData, placement: deps.Placement, handle: cfg.Handle,
+		log: log.With("backend", v1alpha1.BackendKindFirecrackerVM, "handle", cfg.Handle), exits: map[string]hostsvc.UnitStatus{}}, nil
 }
 
 func (p *Provider) Handle() string { return p.handle }
 
-func (p *Provider) Host() *computevm.Host { return p.host }
+func CapMessage(s string) string {
+	if len(s) <= MessageCap {
+		return s
+	}
+	return s[:MessageCap/2] + "\n...\n" + s[len(s)-MessageCap/2:]
+}
 
 func ParseMiB(s string) (int, error) {
 	if strings.TrimSpace(s) == "" {
@@ -113,7 +161,7 @@ func lostReason(r hostsvc.LostReason, exit *hostsvc.UnitStatus) v1alpha1.Compute
 }
 
 func setCondition(st *v1alpha1.FirecrackerVMStatus, gen int64, t string, status metav1.ConditionStatus, reason, msg string) {
-	conds.SetStatus(&st.Conditions, gen, t, status, reason, computevm.CapMessage(msg))
+	conds.SetStatus(&st.Conditions, gen, t, status, reason, CapMessage(msg))
 }
 
 func ready(st *v1alpha1.FirecrackerVMStatus, gen int64) {
@@ -128,7 +176,7 @@ func ready(st *v1alpha1.FirecrackerVMStatus, gen int64) {
 func Finish(st v1alpha1.FirecrackerVMStatus, gen int64) v1alpha1.FirecrackerVMStatus {
 	st.Conditions = append([]metav1.Condition(nil), st.Conditions...)
 	st.ObservedGeneration = gen
-	st.Message = computevm.CapMessage(st.Message)
+	st.Message = CapMessage(st.Message)
 	ready(&st, gen)
 	return st
 }
@@ -194,30 +242,6 @@ func runningStatus(st v1alpha1.FirecrackerVMStatus, gen int64, ref vmruntime.Run
 	return st
 }
 
-func (p *Provider) child(ctx context.Context, name string) (*unstructured.Unstructured, *v1alpha1.HostProcess, error) {
-	u, err := p.host.HostProcesses.Get(ctx, computevm.ChildName(name), metav1.GetOptions{})
-	if apierrors.IsNotFound(err) {
-		return nil, nil, nil
-	}
-	if err != nil {
-		return nil, nil, err
-	}
-	hp, err := unstruct.From[v1alpha1.HostProcess](u)
-	return u, &hp, err
-}
-
-func slotOf(hp *v1alpha1.HostProcess) int {
-	if hp == nil {
-		return 0
-	}
-	m := slotRE.FindStringSubmatch(hp.Annotations[hostprocess.AnnotationDescription])
-	if m == nil {
-		return 0
-	}
-	k, _ := strconv.Atoi(m[1])
-	return k
-}
-
 func (p *Provider) live(ctx context.Context, unit string) (bool, error) {
 	st, err := p.m.Inspect(ctx, unit)
 	if err != nil {
@@ -228,32 +252,16 @@ func (p *Provider) live(ctx context.Context, unit string) (bool, error) {
 
 func (p *Provider) placer(vm *v1alpha1.FirecrackerVM) vmruntime.Placer {
 	return func(ctx context.Context, slot int, spec hostsvc.UnitSpec) error {
-		ctrl := true
-		hp := v1alpha1.HostProcess{ObjectMeta: metav1.ObjectMeta{Name: computevm.ChildName(vm.Name),
-			Labels:      map[string]string{computevm.LabelComputeVM: vm.Name},
-			Annotations: map[string]string{hostprocess.AnnotationDescription: spec.Description},
-			Finalizers:  []string{v1alpha1.FinalizerFirecrackerVM},
-			OwnerReferences: []metav1.OwnerReference{{APIVersion: v1alpha1.GroupVersion.String(), Kind: v1alpha1.BackendKindFirecrackerVM,
-				Name: vm.Name, UID: vm.UID, Controller: &ctrl}}},
-			Spec: hostprocess.SpecOf(spec)}
-		u, err := unstruct.To(&hp, "HostProcess")
-		if err != nil {
+		if err := p.placement.Place(ctx, vm, slot, spec); err != nil {
 			return err
 		}
-		if _, err := p.host.HostProcesses.Create(ctx, u, metav1.CreateOptions{}); err != nil {
-			return fmt.Errorf("firecracker: creating the HostProcess child %s: %w", hp.Name, err)
-		}
-		p.log.Info("HostProcess child created", "firecrackervm", vm.Name, "hostprocess", hp.Name, "unit", spec.Name, "slot", slot)
-		pctx, cancel := context.WithTimeout(ctx, computevm.PlaceTimeout)
+		p.log.Info("the VM unit is handed to its placement", "firecrackervm", vm.Name, "unit", spec.Name, "slot", slot)
+		pctx, cancel := context.WithTimeout(ctx, PlaceTimeout)
 		defer cancel()
 		if _, err := hostsvc.Await(pctx, p.m, spec.Name, func(st hostsvc.UnitStatus) bool {
 			return st.State != hostsvc.NotFound && st.State != ""
 		}); err != nil {
-			if _, child, cerr := p.child(ctx, vm.Name); cerr == nil && child != nil && child.Status.Message != "" {
-				return fmt.Errorf("firecracker: the supervisor did not place %s within %s: HostProcess %s is %s: %s: %w", spec.Name,
-					computevm.PlaceTimeout, child.Name, child.Status.Phase, child.Status.Message, err)
-			}
-			return fmt.Errorf("firecracker: the supervisor did not place %s within %s: %w", spec.Name, computevm.PlaceTimeout, err)
+			return fmt.Errorf("firecracker: %s was not placed within %s: %w", spec.Name, PlaceTimeout, err)
 		}
 		return nil
 	}
@@ -281,14 +289,12 @@ func (p *Provider) Boot(ctx context.Context, vm *v1alpha1.FirecrackerVM, write f
 		return runningStatus(st, vm.Generation, ref), nil
 	}
 	placed := p.rt.Placed(h, vm.Name)
-	_, hp, err := p.child(ctx, vm.Name)
+	slot, placedBefore, err := p.placement.Placed(ctx, vm.Name)
 	if err != nil {
 		return st, err
 	}
-	slot := 0
-	if hp != nil {
-		slot = slotOf(hp)
-		log.Info("a HostProcess child exists from before this core; awaiting its VMM", "hostprocess", hp.Name)
+	if placedBefore {
+		log.Info("the VM unit was placed before this core; awaiting its VMM", "slot", slot)
 	} else {
 		if live, err := p.live(ctx, placed.Unit); err != nil {
 			return st, err
@@ -301,7 +307,7 @@ func (p *Provider) Boot(ctx context.Context, vm *v1alpha1.FirecrackerVM, write f
 				return st, err
 			}
 		}
-		userData, ok, err := p.host.UserData(ctx, vm.Name, vm.Spec.UserData.Vault)
+		userData, ok, err := p.userData.UserData(ctx, vm.Name, vm.Spec.UserData.Vault)
 		if err != nil {
 			return p.fail(ctx, vm, st, err), nil
 		}
@@ -422,56 +428,25 @@ func dirSize(path string) int64 {
 	return n
 }
 
-func (p *Provider) dropChildFinalizer(ctx context.Context, cu *unstructured.Unstructured) error {
-	fin := cu.GetFinalizers()
-	keep := fin[:0:0]
-	for _, f := range fin {
-		if f != v1alpha1.FinalizerFirecrackerVM && f != v1alpha1.FinalizerComputeVM {
-			keep = append(keep, f)
-		}
-	}
-	if len(keep) == len(fin) {
-		return nil
-	}
-	next := cu.DeepCopy()
-	next.SetFinalizers(keep)
-	_, err := p.host.HostProcesses.Update(ctx, next, metav1.UpdateOptions{})
-	if apierrors.IsNotFound(err) {
-		return nil
-	}
-	return err
-}
-
 func (p *Provider) teardown(ctx context.Context, name, unit string) error {
-	cu, hp, err := p.child(ctx, name)
-	if err != nil {
+	if err := p.placement.Unplace(ctx, name); err != nil {
 		return err
 	}
-	if hp != nil && cu.GetDeletionTimestamp() == nil {
-		if err := p.host.HostProcesses.Delete(ctx, computevm.ChildName(name), metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
-			return err
-		}
-		p.log.Info("HostProcess child deleted; its supervisor stops the unit", "firecrackervm", name, "unit", unit)
-	}
-	wctx, cancel := context.WithTimeout(ctx, computevm.ReleaseKillAfter)
-	_, err = hostsvc.Await(wctx, p.m, unit, func(st hostsvc.UnitStatus) bool { return !hostsvc.Live(st) && st.State != hostsvc.Reloading })
+	wctx, cancel := context.WithTimeout(ctx, ReleaseKillAfter)
+	_, err := hostsvc.Await(wctx, p.m, unit, func(st hostsvc.UnitStatus) bool { return !hostsvc.Live(st) && st.State != hostsvc.Reloading })
 	cancel()
 	if err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		p.log.Warn("the unit outlived its HostProcess child; stopping it here", "firecrackervm", name, "unit", unit, "err", err.Error())
+		p.log.Warn("the unit outlived its placement; stopping it here", "firecrackervm", name, "unit", unit, "err", err.Error())
 		if err := p.m.Stop(ctx, unit); err != nil {
 			return err
 		}
 	}
 	p.m.ResetFailed(ctx, unit)
-	if cu, hp, err = p.child(ctx, name); err != nil {
+	if err := p.placement.Settle(ctx, name); err != nil {
 		return err
-	} else if hp != nil {
-		if err := p.dropChildFinalizer(ctx, cu); err != nil {
-			return err
-		}
 	}
 	placed := p.rt.Placed(p.handle, name)
 	size := dirSize(placed.WorkDir)
@@ -544,7 +519,7 @@ func (p *Provider) CollectImages(ctx context.Context, keep map[string]string) {
 	}
 }
 
-func (p *Provider) Orphans(ctx context.Context) []vmruntime.Listed {
+func (p *Provider) Listed(ctx context.Context) []vmruntime.Listed {
 	listed, err := p.rt.List(ctx, p.handle)
 	if err != nil {
 		p.log.Warn("listing VM units and work dirs", "err", err.Error())
@@ -552,15 +527,15 @@ func (p *Provider) Orphans(ctx context.Context) []vmruntime.Listed {
 	}
 	var out []vmruntime.Listed
 	for _, l := range listed {
-		if l.WorkDir == "" {
-			continue
-		}
-		_, err := p.host.Backends.Get(ctx, l.Name, metav1.GetOptions{})
-		if apierrors.IsNotFound(err) {
+		if l.WorkDir != "" {
 			out = append(out, l)
 		}
 	}
 	return out
+}
+
+func (p *Provider) Live(ctx context.Context, name string) (bool, error) {
+	return p.live(ctx, vmruntime.UnitName(p.handle, name))
 }
 
 func (p *Provider) Collect(ctx context.Context, l vmruntime.Listed) error {
@@ -599,25 +574,4 @@ func (p *Provider) Watch(ctx context.Context) (<-chan string, error) {
 		}
 	}()
 	return out, nil
-}
-
-func (p *Provider) CollectChildren(ctx context.Context) {
-	children, err := p.host.HostProcesses.List(ctx, metav1.ListOptions{LabelSelector: computevm.LabelComputeVM})
-	if err != nil {
-		return
-	}
-	for i := range children.Items {
-		c := &children.Items[i]
-		owner := c.GetLabels()[computevm.LabelComputeVM]
-		if _, err := p.host.Backends.Get(ctx, owner, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
-			continue
-		}
-		if c.GetDeletionTimestamp() == nil {
-			p.host.HostProcesses.Delete(ctx, c.GetName(), metav1.DeleteOptions{})
-		}
-		if live, err := p.live(ctx, vmruntime.UnitName(p.handle, owner)); err == nil && !live {
-			p.dropChildFinalizer(ctx, c)
-			p.log.Info("a HostProcess child with no FirecrackerVM is removed", "hostprocess", c.GetName())
-		}
-	}
 }
