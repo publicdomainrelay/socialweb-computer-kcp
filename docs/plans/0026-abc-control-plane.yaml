@@ -901,7 +901,7 @@ items:
     track: status
     parallel_with: [W3-ROOTS, W3-CONFIG]
     depends_on: [W2-REPO, W2-PDS, W2-VAULT, W2-EVENTS, W2-COMPUTE, W2-POLICY]
-    status: doing
+    status: done
     closes: [D11, D20]
     decision: >
       Move statusstate, marketpresence, leasecontroller, hostlifecycle,
