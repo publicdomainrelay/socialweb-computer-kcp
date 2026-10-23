@@ -9,8 +9,8 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/abc/store"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/ref"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/store"
 )
 
 var WidgetGVR = schema.GroupVersionResource{Group: Group, Version: Version, Resource: Resource}
