@@ -1,0 +1,280 @@
+package bidder
+
+import (
+	"cmp"
+	"context"
+	"errors"
+	"strings"
+	"sync"
+	"time"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/atprotorepo"
+	contract "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/market"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/pds"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/policy"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/vault"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
+	core "github.com/johnandersen777/socialweb-computer-kcp/internal/market/bidder"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/participant"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/runs"
+)
+
+func inputsSubscription(inputs *participant.Inputs) contract.Subscription {
+	return contract.Subscription{Kinds: []string{contract.KindExposure, contract.KindMarketIdentity}, Observer: inputs}
+}
+
+func roleSubscription(bidder *core.Bidder) contract.Subscription {
+	return contract.Subscription{Kinds: []string{contract.KindBid, contract.KindComputeVM, contract.KindStateSync}, Observer: bidder}
+}
+
+func (s *Service) resolveIntents(ctx context.Context) (contract.Intents, error) {
+	if s.deps.Bus == nil {
+		return nil, errors.New("bidder: the bus is not available")
+	}
+	self := s.self()
+	return bus.Resolve[contract.Intents](s.deps.Caller(ctx), s.deps.Bus, self, self, bus.Capability{Name: contract.CapabilityIntents})
+}
+
+func (s *Service) awaitInputs(ctx context.Context) {
+	var wg sync.WaitGroup
+	if ref := s.spec.MarketExposureRef; ref != nil && strings.TrimSpace(ref.Name) != "" {
+		wg.Go(func() {
+			if s.marketURL = s.inputs.AwaitAddress(ctx, ref.Name, inputWait, nil); s.marketURL == "" {
+				s.log.Warn("the bidder market URL is not resolved yet", "exposure", ref.Name)
+			}
+		})
+	}
+	wg.Go(func() { s.guestURL = s.resolveGuestURL(ctx) })
+	wg.Go(func() { s.resolveIdentity(ctx) })
+	wg.Wait()
+}
+
+func (s *Service) resolveGuestURL(ctx context.Context) string {
+	if !s.publicNetwork() {
+		return kcp.HandlerURL(s.workspace, guestControlKind, guestControlName)
+	}
+	raw := s.inputs.AwaitAddress(ctx, guestExposure, guestExposureWait, participant.AbsoluteHTTPURL)
+	if raw == "" {
+		s.log.Warn("the bidder cannot read the guest control plane ingress URL; guest provisioning fails closed")
+		return ""
+	}
+	s.log.Info("the bidder uses the guest control plane ingress URL", "url", raw)
+	return raw
+}
+
+func (s *Service) resolveIdentity(ctx context.Context) {
+	if s.spec.Identity != nil {
+		s.did = s.spec.Identity.Did
+	}
+	if s.pdsURL == "" && s.spec.PdsRef != nil {
+		s.pdsURL = kcp.HandlerURL(s.workspace, cmp.Or(s.spec.PdsRef.Kind, "Pds"), s.spec.PdsRef.Name)
+		s.pdsInternal = s.pdsURL != ""
+	}
+	ref := s.identityRef()
+	if (s.did != "" && s.pdsURL != "") || ref == nil || ref.Name == "" {
+		return
+	}
+	found, ok := s.inputs.AwaitIdentity(ctx, []string{s.workspace}, ref.Name, inputWait)
+	if !ok {
+		s.log.Warn("the bidder identity is not resolved yet", "marketIdentity", ref.Name)
+		return
+	}
+	s.did = cmp.Or(s.did, found.Status.Did)
+	s.pdsURL = cmp.Or(s.pdsURL, found.Status.PdsURL)
+}
+
+func (s *Service) newBidder(intents contract.Intents) (*core.Bidder, error) {
+	if s.did == "" {
+		return nil, errors.New("bidder: the record store needs the bidder DID")
+	}
+	self := s.self()
+	repo := commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: "AtprotoRepo", Name: atprotorepo.RepoName(s.did), Workspace: s.workspace}
+	handlers := s.deps.Bus
+	records, err := participant.NewRepoStore(participant.RepoConfig{DID: s.did, Directory: s.dir, HTTP: s.egress.Client(RecordRequestTimeout),
+		Open: func(ctx context.Context) (atprotorepo.Repo, error) {
+			return bus.Resolve[atprotorepo.Repo](ctx, handlers, self, repo, bus.Capability{Name: atprotorepo.CapabilityWrite})
+		}})
+	if err != nil {
+		return nil, err
+	}
+	if s.stateDir() == "" {
+		return nil, errors.New("bidder: the attestation key needs a state dir")
+	}
+	signer, err := market.LoadOrCreateSignerFile(s.stateDir() + "/attestation.jwk")
+	if err != nil {
+		return nil, err
+	}
+	cfg := core.Config{
+		DID:                 s.did,
+		Workspace:           s.workspace,
+		ClaimedBy:           s.deps.Self.Name,
+		ProviderHandle:      s.providerHandle,
+		GuestURL:            s.guestURL,
+		EndpointURL:         s.inboundMarketURL(),
+		InboundXRPC:         s.inboundXRPC(),
+		ScopePolicy:         s.spec.Policy,
+		GuestTLSPort:        portOf(s.spec.Network.GuestTLSURL()),
+		GuestVaultServer:    s.guestVaultServer,
+		GuestVaultMount:     DefaultGuestVaultMount,
+		GuestLoginMount:     DefaultGuestLoginMount,
+		MaxConcurrentGuests: s.spec.MaxConcurrentGuests,
+		Heartbeat:           seconds(s.spec.HeartbeatIntervalSeconds),
+		OfferingRefresh:     seconds(s.spec.OfferingRefreshSeconds),
+		BidTTL:              seconds(s.spec.BidTTLSeconds),
+		Suspend:             s.spec.SuspendParticipation,
+		Relays:              append([]string(nil), s.spec.Network.Relays()...),
+	}
+	if s.spec.Kcp != nil {
+		cfg.StopGraceSeconds = s.spec.Kcp.StopGraceSeconds
+	}
+	return core.New(cfg, core.Deps{
+		Intents:   intents,
+		Records:   records,
+		Signer:    signer,
+		Vault:     s.guestVault(),
+		Guests:    guests{},
+		Tokens:    participant.NewTokens(s.minter(), DefaultCallTimeout),
+		HTTP:      s.egress.Client(DefaultCallTimeout),
+		Directory: s.dir,
+		Policy:    s.policyRuns(),
+		Log:       s.log,
+	})
+}
+
+func seconds(value *int32) time.Duration {
+	if value == nil {
+		return 0
+	}
+	return time.Duration(*value) * time.Second
+}
+
+func (s *Service) minter() xrpc.Minter {
+	if strings.TrimSpace(s.pdsURL) == "" {
+		return nil
+	}
+	if s.pdsTokens == nil {
+		s.pdsTokens = s.credentialTokens()
+	}
+	if minter, ok := s.pdsTokens.(xrpc.Minter); ok {
+		return minter
+	}
+	if s.pdsTokens != nil {
+		return participant.SessionServiceAuth{Endpoint: s.pdsEndpoint(), HTTP: s.pdsHTTPClient(), Auth: s.pdsAuth()}
+	}
+	if s.deps.Bus == nil || s.spec.PdsRef == nil || !strings.EqualFold(strings.TrimSpace(s.spec.PdsRef.Kind), "Pds") {
+		return nil
+	}
+	handlers, self, did := s.deps.Bus, s.self(), s.did
+	target := commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: "Pds", Name: s.spec.PdsRef.Name, Workspace: s.workspace}
+	return participant.PDSServiceAuth{DID: did, Open: func(ctx context.Context) (pds.ServiceAuth, error) {
+		return bus.Resolve[pds.ServiceAuth](ctx, handlers, self, target, bus.Capability{Name: pds.CapabilityServiceAuth, Scope: []string{did}})
+	}}
+}
+
+type guestVault struct {
+	handlers *bus.Bus
+
+	caller func(context.Context) context.Context
+
+	self commonv1.ObjectRef
+
+	target commonv1.ObjectRef
+
+	scope []string
+}
+
+var _ vault.KV = guestVault{}
+
+func (s *Service) guestVault() vault.KV {
+	if s.deps.Bus == nil {
+		return nil
+	}
+	return guestVault{handlers: s.deps.Bus, caller: s.deps.Caller, self: s.self(),
+		target: commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: "Vault", Name: s.guestVaultServer, Workspace: s.workspace},
+		scope:  []string{DefaultGuestVaultMount + "/" + v1alpha1.GuestVaultPrefix + "/*"}}
+}
+
+func (v guestVault) open(ctx context.Context) (vault.KV, error) {
+	return bus.Resolve[vault.KV](v.caller(ctx), v.handlers, v.self, v.target, bus.Capability{Name: vault.CapabilityWrite, Scope: v.scope})
+}
+
+func (v guestVault) Read(ctx context.Context, mount, path string, version int) (map[string]any, error) {
+	kv, err := v.open(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return kv.Read(ctx, mount, path, version)
+}
+
+func (v guestVault) Write(ctx context.Context, mount, path string, data map[string]any) error {
+	kv, err := v.open(ctx)
+	if err != nil {
+		return err
+	}
+	return kv.Write(ctx, mount, path, data)
+}
+
+func (v guestVault) Delete(ctx context.Context, mount, path string) error {
+	kv, err := v.open(ctx)
+	if err != nil {
+		return err
+	}
+	return kv.Delete(ctx, mount, path)
+}
+
+func (s *Service) resolvePolicyRunner(ctx context.Context, engine commonv1.ObjectRef, workflow string) (policy.Runner, error) {
+	return bus.Resolve[policy.Runner](ctx, s.deps.Bus, s.self(), engine, bus.Capability{Name: policy.CapabilityRun, Scope: []string{workflow}})
+}
+
+func (s *Service) policyRuns() *runs.Client {
+	engine := runs.EngineRef(s.spec.PolicyEngineRef, s.workspace)
+	if s.deps.Bus == nil || engine.Name == "" {
+		return nil
+	}
+	return participant.NewPolicyRuns(participant.PolicyConfig{
+		Resolve: s.resolvePolicyRunner,
+		Owner:   policy.Owner{APIVersion: v1alpha1.GroupVersion.String(), Kind: Kind, Name: s.deps.Self.Name, UID: string(s.deps.UID)},
+		Engine:  engine,
+		Role:    core.PerspectiveBidder,
+		Prefix:  "policy",
+		Args:    s.policyArgs,
+		Timeout: seconds(s.spec.PolicyTimeoutSeconds),
+		Parser:  runs.Lenient,
+	})
+}
+
+func (s *Service) newAuthorizer() *participant.Authorizer {
+	if s.serviceAuthHost == "" {
+		s.serviceAuthHost = participant.HostPort(s.publicMarketURL())
+	}
+	var audiences []string
+	if s.spec.ServiceAuth != nil {
+		audiences = append(audiences, s.spec.ServiceAuth.Audience...)
+	}
+	audiences = append(audiences, market.ServiceAudienceDIDs(s.serviceAuthHost)...)
+	return &participant.Authorizer{
+		Directory:    s.dir,
+		Hostname:     s.serviceAuthHost,
+		ServiceIDs:   []string{market.DefaultMarketServiceID, market.DefaultComputeEventServiceID},
+		AudienceDIDs: audiences,
+	}
+}
+
+func (s *Service) crawl() participant.Crawl {
+	return participant.Crawl{
+		Relays:  append([]string(nil), s.spec.Network.Relays()...),
+		Address: func() string { return s.inputs.Address(pdsExposure) },
+		Crawled: func(ctx context.Context) {
+			if bidder := s.bidder.Load(); bidder != nil {
+				bidder.TouchOffering(ctx)
+			}
+		},
+		Period: participant.CrawlPeriod,
+		Log:    s.log,
+	}
+}

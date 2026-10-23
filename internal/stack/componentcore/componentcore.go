@@ -285,7 +285,7 @@ func (c *Core) register() error {
 			return gatewayapi.New(spec, gatewayapi.Deps{Instance: in, KCP: kcp, TLS: tlsConfig, NodeClaimAgent: c.cfg.NodeClaimAgent, NodeClaims: c.nodeClaims})
 		})},
 		{bidder.Kind, component.Typed(func(in component.Instance, spec v1alpha1.BidderSpec) (*bidder.Service, error) {
-			return bidder.New(spec, bidder.Deps{Instance: in, KCP: kcp, Credentials: creds, Egress: egress(in)})
+			return bidder.New(spec, bidder.Deps{Instance: in, Credentials: creds, Egress: egress(in)})
 		})},
 		{guestcontrolplane.Kind, component.Typed(func(in component.Instance, spec v1alpha1.GuestControlPlaneSpec) (*guestcontrolplane.Service, error) {
 			return guestcontrolplane.New(spec, guestcontrolplane.Deps{Instance: in, Hosts: hosts})
@@ -294,7 +294,7 @@ func (c *Core) register() error {
 			return pds.New(spec, pds.Deps{Instance: in, Egress: egress(in)})
 		})},
 		{requester.Kind, component.Typed(func(in component.Instance, spec v1alpha1.RequesterSpec) (*requester.Service, error) {
-			return requester.New(spec, requester.Deps{Instance: in, KCP: kcp, Credentials: creds, Egress: egress(in)})
+			return requester.New(spec, requester.Deps{Instance: in, Credentials: creds, Egress: egress(in)})
 		})},
 		{sshserver.Kind, component.Typed(func(in component.Instance, spec v1alpha1.SshServerSpec) (*sshserver.Service, error) {
 			return sshserver.New(spec, sshserver.Deps{Instance: in, Hosts: hosts, TLS: tlsConfig})
