@@ -28,6 +28,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/apiserverfront"
+	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostprocess"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
@@ -52,8 +53,7 @@ const (
 	FrontFDStore        = 32
 	frontStopGrace      = 10
 	memberOutputTail    = 1 << 20
-	unitPoll            = 500 * time.Millisecond
-	placePoll           = 100 * time.Millisecond
+	memberRemoveTimeout = 30 * time.Second
 )
 
 var ErrMemberLost = errors.New("clusterprovider: a member unit was lost while it was being placed")
@@ -336,34 +336,33 @@ func (h *UnitsHost) EnsureStore(ctx context.Context, key string) (Store, error) 
 	if err := h.StartStore(ctx, key); err != nil {
 		return Store{}, err
 	}
-	deadline := time.Now().Add(h.c.StoreTimeout)
-	for {
-		u, err := h.pgs.Get(ctx, name, metav1.GetOptions{})
-		if err == nil {
-			o, derr := unstruct.From[v1alpha1.Postgres](u)
-			if derr != nil {
-				return Store{}, derr
-			}
-			if o.Status.Phase == v1alpha1.PostgresPhaseReady && o.Status.SocketDir != "" {
-				s := Store{Object: name, Unit: h.StoreUnit(key), SocketDir: o.Status.SocketDir, User: o.Status.User}
-				h.mu.Lock()
-				h.stores[key] = s
-				h.mu.Unlock()
-				return s, nil
-			}
-			if (o.Status.Phase == v1alpha1.PostgresPhaseFailed && o.Status.ObservedGeneration == o.Generation) || time.Now().After(deadline) {
-				return Store{}, fmt.Errorf("%w: the Postgres object %s of %s is %s: %s", procgroup.ErrPostgresUnavailable,
-					name, key, o.Status.Phase, o.Status.Message)
-			}
-		} else if time.Now().After(deadline) {
-			return Store{}, err
-		}
-		select {
-		case <-ctx.Done():
-			return Store{}, ctx.Err()
-		case <-time.After(unitPoll):
-		}
+	unavailable := func(o *v1alpha1.Postgres) error {
+		return fmt.Errorf("%w: the Postgres object %s of %s is %s: %s", procgroup.ErrPostgresUnavailable,
+			name, key, o.Status.Phase, o.Status.Message)
 	}
+	o, err := awaitObject(ctx, h.pgs, name, h.c.StoreTimeout, func(o *v1alpha1.Postgres) (bool, error) {
+		if o == nil {
+			return false, nil
+		}
+		if o.Status.Phase == v1alpha1.PostgresPhaseReady && o.Status.SocketDir != "" {
+			return true, nil
+		}
+		if o.Status.Phase == v1alpha1.PostgresPhaseFailed && o.Status.ObservedGeneration == o.Generation {
+			return false, unavailable(o)
+		}
+		return false, nil
+	})
+	if err != nil {
+		if timedOut(err) && o != nil {
+			return Store{}, unavailable(o)
+		}
+		return Store{}, err
+	}
+	s := Store{Object: name, Unit: h.StoreUnit(key), SocketDir: o.Status.SocketDir, User: o.Status.User}
+	h.mu.Lock()
+	h.stores[key] = s
+	h.mu.Unlock()
+	return s, nil
 }
 
 func (h *UnitsHost) Store(key string) (Store, bool) {
@@ -468,21 +467,13 @@ func (h *UnitsHost) gateAlive(ctx context.Context, key, member, inv string, gate
 	gctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 	wg.Go(func() {
-		for {
-			select {
-			case <-gctx.Done():
-				return
-			case <-time.After(unitPoll):
-			}
-			o, err := h.member(gctx, key, member)
-			if err != nil {
-				continue
-			}
+		_, _ = awaitObject(gctx, h.hps, ObjectName(key, member), 0, func(o *v1alpha1.HostProcess) (bool, error) {
 			if dead := memberDead(o, inv); dead != "" {
 				cancel(fmt.Errorf("clusterprovider: %s of %s %s", member, key, dead))
-				return
+				return true, nil
 			}
-		}
+			return false, nil
+		})
 	})
 	err := gate(gctx)
 	if cause := context.Cause(gctx); err != nil && cause != nil && !errors.Is(cause, context.Canceled) && !errors.Is(cause, context.DeadlineExceeded) {
@@ -672,14 +663,13 @@ func (h *UnitsHost) remove(ctx context.Context, name string) error {
 			}
 		}
 	}
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) {
-		if _, err := h.hps.Get(ctx, name, metav1.GetOptions{}); apierrors.IsNotFound(err) {
-			return nil
+	if _, err := ctlruntime.Await(ctx, h.hps, name, memberRemoveTimeout, ctlruntime.Absent); err != nil {
+		if timedOut(err) {
+			return fmt.Errorf("clusterprovider: the HostProcess %s was not removed", name)
 		}
-		time.Sleep(unitPoll)
+		return err
 	}
-	return fmt.Errorf("clusterprovider: the HostProcess %s was not removed", name)
+	return nil
 }
 
 func rotateLog(path string) {
@@ -732,35 +722,29 @@ func (h *UnitsHost) place(ctx context.Context, key, member string, cur *v1alpha1
 		h.c.Log.Info("cluster provider: member placed", "cluster", key, "member", member, "unit", want.Unit, "slice", want.Slice,
 			"after", want.After)
 	}
-	deadline := time.Now().Add(h.c.PlaceTimeout)
-	for {
-		o, err := h.member(ctx, key, member)
-		if err != nil {
-			return nil, err
+	o, err := awaitObject(ctx, h.hps, name, h.c.PlaceTimeout, func(o *v1alpha1.HostProcess) (bool, error) {
+		if o == nil {
+			return false, nil
 		}
-		if o != nil {
-			switch o.Status.Phase {
-			case v1alpha1.HostProcessPhaseRunning:
-				if o.Status.Runtime != nil && o.Status.Runtime.InvocationID != "" {
-					return o, nil
-				}
-			case v1alpha1.HostProcessPhaseLost:
-				return nil, fmt.Errorf("%w: %s of %s is Lost %s: %s", ErrMemberLost, member, key, o.Status.LostReason, o.Status.Message)
-			case v1alpha1.HostProcessPhaseFailed:
-				return nil, fmt.Errorf("clusterprovider: %s of %s is Failed: %s", member, key, o.Status.Message)
-			}
-			if time.Now().After(deadline) {
-				return nil, fmt.Errorf("clusterprovider: %s of %s is %s after %s: %s", member, key, o.Status.Phase, h.c.PlaceTimeout, o.Status.Message)
-			}
-		} else if time.Now().After(deadline) {
-			return nil, fmt.Errorf("clusterprovider: the HostProcess of %s of %s vanished while it was placed", member, key)
+		switch o.Status.Phase {
+		case v1alpha1.HostProcessPhaseRunning:
+			return o.Status.Runtime != nil && o.Status.Runtime.InvocationID != "", nil
+		case v1alpha1.HostProcessPhaseLost:
+			return false, fmt.Errorf("%w: %s of %s is Lost %s: %s", ErrMemberLost, member, key, o.Status.LostReason, o.Status.Message)
+		case v1alpha1.HostProcessPhaseFailed:
+			return false, fmt.Errorf("clusterprovider: %s of %s is Failed: %s", member, key, o.Status.Message)
 		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(placePoll):
-		}
+		return false, nil
+	})
+	switch {
+	case err == nil:
+		return o, nil
+	case !timedOut(err):
+		return nil, err
+	case o == nil:
+		return nil, fmt.Errorf("clusterprovider: the HostProcess of %s of %s vanished while it was placed", member, key)
 	}
+	return nil, fmt.Errorf("clusterprovider: %s of %s is %s after %s: %s", member, key, o.Status.Phase, h.c.PlaceTimeout, o.Status.Message)
 }
 
 func (h *UnitsHost) verify(ctx context.Context, key, member, inv string) error {
@@ -1077,34 +1061,31 @@ func (h *UnitsHost) Reap(ctx context.Context, key string) error {
 	}
 	h.c.Log.Info("cluster provider: the cluster's slice is stopped; waiting for every member to be inactive",
 		"cluster", key, "slice", h.Slice(key), "members", len(members))
-	deadline := time.Now().Add(h.c.ReapTimeout)
-	for {
-		members, err = h.Members(ctx, key)
-		if err != nil {
-			return err
-		}
-		pending := 0
+	pending := 0
+	removed := map[string]bool{}
+	err = awaitSelected(ctx, h.hps, LabelCluster+"="+key, h.c.ReapTimeout, func(members []v1alpha1.HostProcess) (bool, error) {
+		pending = 0
 		for _, o := range members {
 			switch o.Status.Phase {
 			case v1alpha1.HostProcessPhaseStopped, v1alpha1.HostProcessPhaseLost, v1alpha1.HostProcessPhaseFailed:
-				if err := h.remove(ctx, o.Name); err != nil {
-					return err
+				if removed[o.Name] {
+					continue
 				}
+				if err := h.remove(ctx, o.Name); err != nil {
+					return false, err
+				}
+				removed[o.Name] = true
 			default:
 				pending++
 			}
 		}
-		if pending == 0 {
-			break
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("clusterprovider: %d members of %s are still active after %s", pending, key, h.c.ReapTimeout)
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(unitPoll):
-		}
+		return pending == 0, nil
+	})
+	if timedOut(err) {
+		return fmt.Errorf("clusterprovider: %d members of %s are still active after %s", pending, key, h.c.ReapTimeout)
+	}
+	if err != nil {
+		return err
 	}
 	if p, err := h.controlPlanePath(key); err == nil {
 		os.Remove(p)

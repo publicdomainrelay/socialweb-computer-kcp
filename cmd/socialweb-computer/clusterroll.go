@@ -11,12 +11,12 @@ import (
 	"slices"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
+
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clicfg"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterprovider"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/nsexec"
 )
-
-const rollReportPoll = time.Second
 
 func runNsExec(ctx context.Context, a *app, vals clicfg.Values, rest []string) int {
 	binds, err := nsexec.ParseBinds(vals.String("bind"))
@@ -121,8 +121,16 @@ func runUnitsRoll(kind string) verbFunc {
 			return a.fail(exitFailed, "%s: %v", verb, err)
 		}
 		a.log.Info("roll requested; the cluster provider carries it out", "cluster", key, "roll", req.ID, "request", path)
-		deadline := time.Now().Add(wait)
-		for time.Now().Before(deadline) {
+		rolls, err := rollWatch(path, state, key, req.ID)
+		if err != nil {
+			return a.fail(exitFailed, "%s: %v", verb, err)
+		}
+		defer rolls.Close()
+		deadline := time.NewTimer(wait)
+		defer deadline.Stop()
+		stall := time.NewTimer(rollStallCheck(state, key, req, wait))
+		defer stall.Stop()
+		for {
 			rep, ok, err := clusterprovider.ReadRollReport(state, key, req.ID)
 			if err != nil {
 				return a.fail(exitFailed, "%s: %v", verb, err)
@@ -141,9 +149,46 @@ func runUnitsRoll(kind string) verbFunc {
 			select {
 			case <-ctx.Done():
 				return a.fail(exitFailed, "%s: interrupted; the request at %s stays for the provider", verb, path)
-			case <-time.After(rollReportPoll):
+			case <-deadline.C:
+				return a.fail(exitFailed, "%s: no report for %s after %s; the request at %s stays for the provider", verb, req.ID, wait, path)
+			case <-stall.C:
+				stall.Reset(rollStallCheck(state, key, req, wait))
+			case ev, open := <-rolls.Events:
+				if !open {
+					return a.fail(exitFailed, "%s: the watch of %s closed", verb, path)
+				}
+				if ev.Has(fsnotify.Create) && filepath.Base(ev.Name) == clusterprovider.RollsDirName {
+					_ = rolls.Add(ev.Name)
+				}
+			case <-rolls.Errors:
 			}
 		}
-		return a.fail(exitFailed, "%s: no report for %s after %s; the request at %s stays for the provider", verb, req.ID, wait, path)
 	}
+}
+
+func rollWatch(request, state, key, id string) (*fsnotify.Watcher, error) {
+	w, err := fsnotify.NewWatcher()
+	if err != nil {
+		return nil, err
+	}
+	if err := w.Add(filepath.Dir(request)); err != nil {
+		w.Close()
+		return nil, err
+	}
+	if report, err := clusterprovider.RollReportPath(state, key, id); err == nil {
+		_ = w.Add(filepath.Dir(report))
+	}
+	return w, nil
+}
+
+func rollStallCheck(state, key string, req clusterprovider.RollRequest, wait time.Duration) time.Duration {
+	bound := clusterprovider.DefaultRollObserveBound
+	since := req.RequestedAt
+	if o, ok, err := clusterprovider.ReadRollObserved(state, key, req.ID); err == nil && ok {
+		since = o.FirstAt
+	}
+	if next := time.Until(since.Add(bound)); next > 0 {
+		return next + time.Second
+	}
+	return wait
 }

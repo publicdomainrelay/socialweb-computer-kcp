@@ -17,6 +17,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
+
+	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 )
 
 const (
@@ -279,15 +281,9 @@ func InstallBeside(ctx context.Context, dyn dynamic.Interface, o BesideOptions) 
 	return waitEstablished(ctx, dyn, crds)
 }
 
-const (
-	defaultRetirePoll    = time.Second
-	defaultRetireTimeout = 2 * time.Minute
-)
+const defaultRetireTimeout = 2 * time.Minute
 
-var (
-	RetirePoll    = defaultRetirePoll
-	RetireTimeout = defaultRetireTimeout
-)
+var RetireTimeout = defaultRetireTimeout
 
 func Retire(ctx context.Context, dyn dynamic.Interface, retired []unstructured.Unstructured) error {
 	foreground := metav1.DeletePropagationForeground
@@ -314,26 +310,21 @@ func Retire(ctx context.Context, dyn dynamic.Interface, retired []unstructured.U
 			deletedNames = append(deletedNames, u)
 		}
 	}
-	deadline := time.Now().Add(RetireTimeout)
+	rctx, cancel := context.WithTimeout(ctx, RetireTimeout)
+	defer cancel()
 	for i, ri := range deleted {
 		u := deletedNames[i]
-		for {
-			_, err := ri.Get(ctx, u.GetName(), metav1.GetOptions{})
-			if apierrors.IsNotFound(err) {
-				break
+		if _, err := ctlruntime.Await(rctx, ri, u.GetName(), 0, ctlruntime.Absent); err != nil {
+			if _, gerr := ri.Get(ctx, u.GetName(), metav1.GetOptions{}); apierrors.IsNotFound(gerr) {
+				continue
 			}
-			if time.Now().After(deadline) {
-				problems = append(problems, fmt.Errorf("eso: the in-tenant %s %s is still there %s after "+
-					"its foreground delete; its pods would read as tenant demand once the baseline no "+
-					"longer names it, so the install stops here and the next pass retries",
-					u.GetKind(), keyName(u), RetireTimeout))
-				break
-			}
-			select {
-			case <-ctx.Done():
+			if ctx.Err() != nil {
 				return errors.Join(append(problems, ctx.Err())...)
-			case <-time.After(RetirePoll):
 			}
+			problems = append(problems, fmt.Errorf("eso: the in-tenant %s %s is still there %s after "+
+				"its foreground delete; its pods would read as tenant demand once the baseline no "+
+				"longer names it, so the install stops here and the next pass retries",
+				u.GetKind(), keyName(u), RetireTimeout))
 		}
 	}
 	return errors.Join(problems...)
@@ -394,22 +385,17 @@ func waitEstablished(ctx context.Context, dyn dynamic.Interface, names []string)
 	ri := dyn.Resource(bundleResources["CustomResourceDefinition"])
 	for _, name := range names {
 		last := "not read yet"
-		for {
-			u, err := ri.Get(ctx, name, metav1.GetOptions{})
-			if err != nil {
-				last = err.Error()
-			} else if established(u) {
-				break
-			} else {
-				last = "the Established condition is not True"
+		if _, err := ctlruntime.Await(ctx, ri, name, 0, func(u *unstructured.Unstructured) (bool, error) {
+			if u == nil {
+				last = "the CRD is not there"
+				return false, nil
 			}
-			select {
-			case <-ctx.Done():
-				return fmt.Errorf("eso: the CRD %s never became Established (%s): the controller beside "+
-					"the control plane starts an informer per kind, and an informer for a kind the "+
-					"apiserver does not serve fails the controller's start", name, last)
-			case <-time.After(250 * time.Millisecond):
-			}
+			last = "the Established condition is not True"
+			return established(u), nil
+		}); err != nil {
+			return fmt.Errorf("eso: the CRD %s never became Established (%s): the controller beside "+
+				"the control plane starts an informer per kind, and an informer for a kind the "+
+				"apiserver does not serve fails the controller's start", name, last)
 		}
 	}
 	return nil

@@ -15,9 +15,11 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/dynamic"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterstack"
+	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/jsonx"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
@@ -302,31 +304,26 @@ func (h *UnitsHost) recordVaultAccess(key string, o *v1alpha1.OpenBaoServer) err
 }
 
 func (h *UnitsHost) waitVault(ctx context.Context, key string, timeout time.Duration) (*v1alpha1.OpenBaoServer, error) {
-	deadline := time.Now().Add(timeout)
-	for {
-		o, err := h.vaultServer(ctx, key)
-		if err != nil {
-			return nil, err
-		}
+	o, err := awaitObject(ctx, h.obs, h.VaultServerName(key), timeout, func(o *v1alpha1.OpenBaoServer) (bool, error) {
 		if o == nil {
-			return nil, fmt.Errorf("%w (cluster %s)", ErrNoClusterVault, key)
+			return false, fmt.Errorf("%w (cluster %s)", ErrNoClusterVault, key)
 		}
 		if openbaoctl.Synced(o) {
-			return o, nil
+			return true, nil
 		}
 		if o.Status.Phase == v1alpha1.OpenBaoServerPhaseFailed && o.Status.ObservedGeneration == o.Generation {
-			return nil, fmt.Errorf("clusterprovider: the OpenBaoServer %s of %s failed: %s", o.Name, key, vaultState(o))
+			return false, fmt.Errorf("clusterprovider: the OpenBaoServer %s of %s failed: %s", o.Name, key, vaultState(o))
 		}
-		if time.Now().After(deadline) {
-			return nil, fmt.Errorf("clusterprovider: the OpenBaoServer %s of %s is not Ready and synced to generation %d after %s: %s",
-				o.Name, key, o.Generation, timeout, vaultState(o))
-		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(unitPoll):
-		}
+		return false, nil
+	})
+	if timedOut(err) && o != nil {
+		return nil, fmt.Errorf("clusterprovider: the OpenBaoServer %s of %s is not Ready and synced to generation %d after %s: %s",
+			o.Name, key, o.Generation, timeout, vaultState(o))
 	}
+	if err != nil {
+		return nil, err
+	}
+	return o, nil
 }
 
 func (h *UnitsHost) UpdateVaultDeclared(ctx context.Context, key string, mutate func(*v1alpha1.OpenBaoServerDeclared)) error {
@@ -387,20 +384,18 @@ func (h *UnitsHost) reapVault(ctx context.Context, key string) error {
 		return err
 	}
 	forgetVaultToken(func() string { d, _ := ClusterDataDir(h.c.StateDir, key); return d }())
-	deadline := time.Now().Add(h.c.ReapTimeout)
-	for {
-		_, err := h.hps.Get(ctx, openbaoctl.ChildName(name), metav1.GetOptions{})
-		_, oerr := h.obs.Get(ctx, name, metav1.GetOptions{})
-		if apierrors.IsNotFound(err) && apierrors.IsNotFound(oerr) {
-			return nil
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("clusterprovider: the vault of %s is still placed after %s", key, h.c.ReapTimeout)
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(unitPoll):
+	ctx, cancel := context.WithTimeout(ctx, h.c.ReapTimeout)
+	defer cancel()
+	for _, gone := range []struct {
+		ri   dynamic.ResourceInterface
+		name string
+	}{{h.obs, name}, {h.hps, openbaoctl.ChildName(name)}} {
+		if _, err := ctlruntime.Await(ctx, gone.ri, gone.name, 0, ctlruntime.Absent); err != nil {
+			if ctx.Err() != nil {
+				return fmt.Errorf("clusterprovider: the vault of %s is still placed after %s", key, h.c.ReapTimeout)
+			}
+			return err
 		}
 	}
+	return nil
 }
