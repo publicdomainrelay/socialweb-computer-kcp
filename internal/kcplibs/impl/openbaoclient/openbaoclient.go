@@ -43,6 +43,8 @@ func (e *ResponseError) Error() string {
 	return fmt.Sprintf("openbao: %s /v1/%s -> HTTP %d: %s", e.Method, e.Path, e.Status, e.Body)
 }
 
+func (e *ResponseError) HTTPStatus() int { return e.Status }
+
 func (e *ResponseError) Is(target error) bool {
 	switch e.Status {
 	case http.StatusNotFound:

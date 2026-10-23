@@ -106,6 +106,8 @@ type serviceCallError struct {
 	Err error
 }
 
+func (e *serviceCallError) HTTPStatus() int { return e.Status }
+
 func (e *serviceCallError) Error() string {
 	if e == nil {
 		return ""
