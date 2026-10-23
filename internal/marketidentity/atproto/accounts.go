@@ -148,13 +148,14 @@ func (a *Accounts) localRepo(ctx context.Context, workspace string, id *v1alpha1
 		return pending(status, generation, "PdsNotReady", "waiting for the PDS at "+endpoint+": "+err.Error()),
 			fmt.Errorf("marketidentity: the PDS at %s: %w", endpoint, err)
 	}
+	composed := strings.TrimSpace(id.Spec.Did)
+	if composed == "" {
+		status.Did = ""
+		return pending(status, generation, "AccountPending", "the PDS at "+endpoint+" ("+did+") is ready; waiting for the root to compose the account DID"), nil
+	}
 	status.Phase = v1alpha1.MarketIdentityPhaseReady
 	status.ObservedGeneration = generation
-	if composed := strings.TrimSpace(id.Spec.Did); composed != "" {
-		status.Did = composed
-	} else if strings.TrimSpace(status.Did) == "" {
-		status.Did = did
-	}
+	status.Did = composed
 	if handle := strings.TrimSpace(id.Spec.Handle); handle != "" {
 		status.Handle = handle
 	}
