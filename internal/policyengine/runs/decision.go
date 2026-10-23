@@ -8,18 +8,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	policyv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/policy/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/policy"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/executor"
 )
 
-type Decision struct {
-	Allow bool
-
-	Violations []string
-
-	Reason string
-
-	Run string
-}
+type Decision = policy.Verdict
 
 type Parser struct {
 	Bool func(json.RawMessage) (bool, bool)

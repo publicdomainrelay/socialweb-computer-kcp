@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/dispatcher"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
 )
 
@@ -36,7 +37,7 @@ type Proxy struct {
 	proxy *httputil.ReverseProxy
 }
 
-var _ http.Handler = (*Proxy)(nil)
+var _ dispatcher.Proxy = (*Proxy)(nil)
 
 type targetKey struct{}
 
@@ -139,13 +140,4 @@ func HostAllowed(hosts []string, host string) bool {
 		}
 	}
 	return false
-}
-
-func ProbeHost(hosts []string) string {
-	for _, host := range hosts {
-		if host != "*" {
-			return host
-		}
-	}
-	return "localhost"
 }

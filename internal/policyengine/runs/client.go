@@ -28,37 +28,13 @@ const (
 	DefaultTimeout = 2 * time.Minute
 )
 
-type Input struct {
-	Perspective string
+type (
+	Input = policy.EvaluationInput
 
-	Mode string
+	Request = policy.Evaluation
+)
 
-	SelfDid string
-
-	SubjectDid string
-
-	CounterpartyDid string
-
-	RootRequesterDid string
-
-	RFP *commonv1.StrongRef
-
-	Bid *commonv1.StrongRef
-
-	Accept *commonv1.StrongRef
-}
-
-type Request struct {
-	WorkflowRef string
-
-	Workflow json.RawMessage
-
-	Source string
-
-	Input Input
-
-	Timeout time.Duration
-}
+var _ policy.Evaluator = (*Client)(nil)
 
 type ResolveFunc func(ctx context.Context, engine commonv1.ObjectRef, workflow string) (policy.Runner, error)
 
