@@ -253,7 +253,10 @@ func (ctl *Controller) ensurePdsAccountInVault(ctx context.Context, server, clie
 		data = map[string]any{}
 	}
 	if sess := pdsSessionOf(data); sess.Did != "" && sess.AccessJWT != "" && pdsAccessTokenLive(sess.AccessJWT) {
-		return sess, nil
+		if ctl.pdsSessionUsable(ctx, pdsURL, caFile, sess) {
+			return sess, nil
+		}
+		ctl.c.log().Info("the application's stored PDS session is no longer accepted; signing in again", "did", sess.Did)
 	}
 	password := firstString(data, "password")
 	if password == "" {
@@ -278,6 +281,27 @@ func (ctl *Controller) ensurePdsAccountInVault(ctx context.Context, server, clie
 	}
 	ctl.c.log().Info("the application's PDS session is in its own OpenBao", "server", server, "path", path, "did", sess.Did)
 	return sess, nil
+}
+
+func (ctl *Controller) pdsSessionUsable(ctx context.Context, pdsURL, caFile string, sess PdsSession) bool {
+	if strings.TrimSpace(sess.Did) == "" || strings.TrimSpace(sess.AccessJWT) == "" {
+		return false
+	}
+	tlsConfig, err := pdsTLS(pdsURL, caFile)
+	if err != nil {
+		return false
+	}
+	pds, err := pdsclient.NewRemote(pdsclient.RemoteConfig{
+		BaseURL: pdsURL,
+		TLS:     tlsConfig,
+		Timeout: pdsClientTimeout,
+		Tokens:  pdsclient.TokenSourceFunc(func(context.Context) (string, error) { return sess.AccessJWT, nil }),
+	})
+	if err != nil {
+		return false
+	}
+	got, err := pds.GetSession(ctx)
+	return err == nil && got.DID.String() == sess.Did
 }
 
 func (ctl *Controller) syncRequesterRepoKey(stateRoot, did string) (bool, error) {
