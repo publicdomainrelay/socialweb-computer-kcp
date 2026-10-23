@@ -300,7 +300,7 @@ restart or upgrade restarts no member.
 - **Bring-up.** `internal/clusterprovider/units.go` (`UnitsHost`) walks the steps in
   `procgroup.StackOrder` order and then the two links. For each member: run its Prepare, write its
   HostProcess, wait for Running, run its readiness gate against the member's log file, then record the
-  gated invocation in the annotation `socialweb.computer/verified-invocation`. A member whose object is
+  gated invocation in the label `socialweb.computer/verified-invocation`. A member whose object is
   Running with that invocation is adopted and not touched. `<dataDir>/controlplane.json` records the
   active slot, the slice, the store unit and each member's unit and invocation.
 - **Readiness follows member health.** A pass first asks the host which members are unhealthy: a
@@ -1494,8 +1494,8 @@ from there. Every other purpose below is a HOLD: the provider asks the front (co
 front binds `[::]:0` dual-stack with `SO_REUSEADDR` off, sets `SO_REUSEADDR` after the bind, never
 listens, and stores the socket in its fd store (`FDNAME=hold.<purpose>`, `FDPOLL=0`). The member
 (k3s, kine, openbao, external-secrets: third-party binaries that take a port flag and accept no
-socket) binds that number beside the hold. The holds are mirrored to the front HostProcess annotation
-`socialweb.computer/held-ports`; every member's own listeners are in its HostProcess
+socket) binds that number beside the hold. The holds are reported in the Cluster
+`status.front.heldPorts`; every member's own listeners are in its HostProcess
 `status.listeners`. `internal/portallocator` only records which port the front holds for which
 purpose (`leases.json`); there is no port range and no probe.
 
@@ -5624,8 +5624,8 @@ the run made (canary-dry, the leaked canary-to and canary-dry2) and never again,
   `did:web:example.com`, the DID the shipped tenant grant scopes, so the account's ServiceAccount and
   the grant's `resourceNames` are one name.
   (2) the gateway's PLC sweep revoked the very account the deployment had just provisioned -- a `did:web`
-  whose document 404s reads "the account is gone" -- so the bootstrapped record is marked
-  `socialweb.computer/sweep: exempt` and `sweepkcp`'s worklist skips it. Pinned by
+  whose document 404s reads "the account is gone" -- so the bootstrapped record is labelled
+  `socialweb.computer/sweep=exempt` and `sweepkcp`'s worklist skips it. Pinned by
   `TestASweepExemptIdentityIsNotSwept`, which failed before the skip existed.
   (3) the tenant grant named a `did-*` ServiceAccount nothing created, so the mint proof's TokenRequest
   404'd; `clusterprovider.Bootstrap` now creates the ServiceAccounts the grant's token rule names,
