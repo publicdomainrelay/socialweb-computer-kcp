@@ -333,10 +333,10 @@ func (ct *Controller) follow(ctx context.Context, ws string, t Target) {
 
 func (ct *Controller) skipped(name string) bool { return slices.Contains(ct.c.Skip, name) }
 
-func (ct *Controller) startWorkspace(ctx context.Context, ws string) context.CancelFunc {
+func (ct *Controller) startWorkspace(ctx context.Context, wg *sync.WaitGroup, ws string) context.CancelFunc {
 	wctx, cancel := context.WithCancel(ctx)
 	for _, t := range ct.c.Targets {
-		go ct.follow(wctx, ws, t)
+		wg.Go(func() { ct.follow(wctx, ws, t) })
 	}
 	ct.c.log().Info("watching the objects of a workspace for TTLs", "workspace", ws, "kinds", len(ct.c.Targets))
 	return cancel
@@ -344,11 +344,13 @@ func (ct *Controller) startWorkspace(ctx context.Context, ws string) context.Can
 
 func (ct *Controller) Run(ctx context.Context) error {
 	root := ct.c.root()
-	active := map[string]context.CancelFunc{root: ct.startWorkspace(ctx, root)}
+	var wg sync.WaitGroup
+	active := map[string]context.CancelFunc{root: ct.startWorkspace(ctx, &wg, root)}
 	defer func() {
 		for _, cancel := range active {
 			cancel()
 		}
+		wg.Wait()
 	}()
 	for ctx.Err() == nil {
 		ri, err := ct.client(root, WorkspaceGVR)
@@ -383,7 +385,7 @@ func (ct *Controller) Run(ctx context.Context) error {
 				continue
 			}
 			if _, ok := active[ws]; !ok {
-				active[ws] = ct.startWorkspace(ctx, ws)
+				active[ws] = ct.startWorkspace(ctx, &wg, ws)
 			}
 		}
 		w.Stop()
