@@ -259,7 +259,7 @@ func gatewayNodeMarket(o v1alpha1.Gateway, workspace string) *v1alpha1.GatewayNo
 	return out
 }
 
-func gatewayDesired(o v1alpha1.Gateway, plan accountPlan, id *v1alpha1.MarketIdentity, ws, stateRoot, downloadsDir, clusterCADir, workspace, pdsHandle, pdsPublicURL string,
+func (ctl *Controller) gatewayDesired(ctx context.Context, o v1alpha1.Gateway, plan accountPlan, id *v1alpha1.MarketIdentity, ws, stateRoot, downloadsDir, clusterCADir, workspace, pdsHandle, pdsPublicURL string,
 	ingress *v1alpha1.IngressConfig, requireIngress bool, ingressRef *v1alpha1.ComponentRef) ([]desiredComponent, error) {
 	suspend := o.Spec.Suspend
 	network := o.Spec.Network
@@ -328,6 +328,7 @@ func gatewayDesired(o v1alpha1.Gateway, plan accountPlan, id *v1alpha1.MarketIde
 		Hostnames:          hostnames,
 		Mode:               mode,
 		PublicOrigin:       requesterOrigin,
+		MarketURL:          ctl.requesterMarketURL(ctx, ws),
 		OAuthClientID:      oauthClientID,
 		OAuthRedirectURI:   oauthRedirectURI,
 		GuestSSHKeysFile:   guestSSHKeysFile,
@@ -443,7 +444,7 @@ func (ctl *Controller) reconcileGateway(ctx context.Context, u *unstructured.Uns
 	}
 	if o.Spec.Suspend {
 		id, _ := ctl.identityIn(ctx, ws, RequesterIdentity)
-		desired, err := gatewayDesired(o, plan, id, ctl.c.workspace(), stateRoot, downloadsDir, clusterCADir, ws, pdsAccountHandle, pdsPublicURL, ingressConfig, requireIngress, ingressRef)
+		desired, err := ctl.gatewayDesired(ctx, o, plan, id, ctl.c.workspace(), stateRoot, downloadsDir, clusterCADir, ws, pdsAccountHandle, pdsPublicURL, ingressConfig, requireIngress, ingressRef)
 		if err != nil {
 			st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
 			setOverrideErrorIfAny(&st, o.Generation, err)
@@ -529,7 +530,7 @@ func (ctl *Controller) reconcileGateway(ctx context.Context, u *unstructured.Uns
 			return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
 		}
 	}
-	desired, err := gatewayDesired(o, plan, id, ctl.c.workspace(), stateRoot, downloadsDir, clusterCADir, ws, pdsAccountHandle, pdsPublicURL, ingressConfig, requireIngress, ingressRef)
+	desired, err := ctl.gatewayDesired(ctx, o, plan, id, ctl.c.workspace(), stateRoot, downloadsDir, clusterCADir, ws, pdsAccountHandle, pdsPublicURL, ingressConfig, requireIngress, ingressRef)
 	if err != nil {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
 		setOverrideErrorIfAny(&st, o.Generation, err)
@@ -590,7 +591,7 @@ func (ctl *Controller) reconcileGateway(ctx context.Context, u *unstructured.Uns
 			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "waiting for the app Pds public URL"
 			return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
 		}
-		if desired, err = gatewayDesired(o, plan, id, ctl.c.workspace(), stateRoot, downloadsDir, clusterCADir, ws, pdsAccountHandle, pdsPublicURL, ingressConfig, requireIngress, ingressRef); err != nil {
+		if desired, err = ctl.gatewayDesired(ctx, o, plan, id, ctl.c.workspace(), stateRoot, downloadsDir, clusterCADir, ws, pdsAccountHandle, pdsPublicURL, ingressConfig, requireIngress, ingressRef); err != nil {
 			st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
 			setOverrideErrorIfAny(&st, o.Generation, err)
 			return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
@@ -641,7 +642,7 @@ func (ctl *Controller) reconcileGateway(ctx context.Context, u *unstructured.Uns
 		if id, err = ctl.identityIn(ctx, ws, RequesterIdentity); err != nil {
 			return err
 		}
-		if desired, err = gatewayDesired(o, plan, id, ctl.c.workspace(), stateRoot, downloadsDir, clusterCADir, ws, pdsAccountHandle, pdsPublicURL, ingressConfig, requireIngress, ingressRef); err != nil {
+		if desired, err = ctl.gatewayDesired(ctx, o, plan, id, ctl.c.workspace(), stateRoot, downloadsDir, clusterCADir, ws, pdsAccountHandle, pdsPublicURL, ingressConfig, requireIngress, ingressRef); err != nil {
 			st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
 			setOverrideErrorIfAny(&st, o.Generation, err)
 			return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
