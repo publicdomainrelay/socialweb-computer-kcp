@@ -29,6 +29,7 @@ const (
 	ApplyTimeout      = time.Minute
 	RootApplyDeadline = 3 * time.Minute
 	RootRetryLogEvery = time.Minute
+	RootRetryMax      = 15 * time.Second
 )
 
 type CoreConfig struct {
@@ -146,6 +147,7 @@ func (c CoreConfig) applyRoot(ctx context.Context, k *Kcp, log *slog.Logger) err
 	started := time.Now()
 	last := started
 	var lastErr error
+	delay := Poll
 	for attempt := 1; ; attempt++ {
 		remaining := RootApplyDeadline - time.Since(started)
 		if remaining <= 0 {
@@ -167,10 +169,13 @@ func (c CoreConfig) applyRoot(ctx context.Context, k *Kcp, log *slog.Logger) err
 				"deadline", RootApplyDeadline.String(), "err", err.Error())
 			last = time.Now()
 		}
+		retry := time.NewTimer(min(delay, max(RootApplyDeadline-time.Since(started), 0)))
 		select {
 		case <-ctx.Done():
+			retry.Stop()
 			return ctx.Err()
-		case <-time.After(Poll):
+		case <-retry.C:
 		}
+		delay = min(2*delay, RootRetryMax)
 	}
 }
