@@ -2,6 +2,7 @@ package atproto
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"strings"
@@ -37,13 +38,17 @@ func (a *Accounts) pdsAccount(ctx context.Context, workspace string, id *v1alpha
 	if err != nil {
 		return failed(status, generation, "MissingCredential", err.Error()), nil
 	}
+	tlsConfig, err := a.tlsFor(ctx, workspace, id)
+	if err != nil {
+		return pending(status, generation, "TrustUnavailable", err.Error()), err
+	}
 	if ref != nil {
-		if session, ok := a.storedPdsSession(ctx, vault, *ref, credential.pdsURL); ok {
+		if session, ok := a.storedPdsSession(ctx, vault, *ref, credential.pdsURL, tlsConfig); ok {
 			return signedIn(status, generation, id, session.DID.String(), firstNonEmpty(session.Handle, credential.handle), credential.pdsURL, ref,
 				session.AccessJWT), nil
 		}
 	}
-	pds, err := a.remotePDS(credential.pdsURL, nil)
+	pds, err := a.remotePDS(credential.pdsURL, nil, tlsConfig)
 	if err != nil {
 		return failed(status, generation, "PdsUnavailable", err.Error()), nil
 	}
@@ -88,7 +93,7 @@ func pdsAccountCredentialOf(ctx context.Context, vault SecretStore, id *v1alpha1
 	return credential, nil
 }
 
-func (a *Accounts) storedPdsSession(ctx context.Context, vault SecretStore, ref commonv1.SecretRef, pdsURL string) (pdsclient.Session, bool) {
+func (a *Accounts) storedPdsSession(ctx context.Context, vault SecretStore, ref commonv1.SecretRef, pdsURL string, tlsConfig *tls.Config) (pdsclient.Session, bool) {
 	if vault == nil {
 		return pdsclient.Session{}, false
 	}
@@ -101,7 +106,7 @@ func (a *Accounts) storedPdsSession(ctx context.Context, vault SecretStore, ref 
 		return pdsclient.Session{}, false
 	}
 	tokens := pdsclient.TokenSourceFunc(func(ctx context.Context) (string, error) { return access, nil })
-	pds, err := a.remotePDS(pdsURL, tokens)
+	pds, err := a.remotePDS(pdsURL, tokens, tlsConfig)
 	if err != nil {
 		return pdsclient.Session{}, false
 	}
@@ -130,7 +135,17 @@ func savePdsSession(ctx context.Context, vault SecretStore, ref commonv1.SecretR
 	})
 }
 
-func (a *Accounts) remotePDS(endpoint string, tokens pdsclient.TokenSource) (pdsclient.PDS, error) {
+func (a *Accounts) tlsFor(ctx context.Context, workspace string, id *v1alpha1.MarketIdentity) (*tls.Config, error) {
+	if id.Spec.CARef == nil || id.Spec.CARef.IsZero() {
+		return nil, nil
+	}
+	if a.tls == nil {
+		return nil, errors.New("marketidentity: spec.caRef is set but no CA source is configured")
+	}
+	return a.tls(ctx, workspace, id)
+}
+
+func (a *Accounts) remotePDS(endpoint string, tokens pdsclient.TokenSource, tlsConfig *tls.Config) (pdsclient.PDS, error) {
 	endpoint = strings.TrimSpace(endpoint)
 	if endpoint == "" {
 		return nil, errors.New("marketidentity: the remote PDS has no URL")
@@ -143,7 +158,10 @@ func (a *Accounts) remotePDS(endpoint string, tokens pdsclient.TokenSource) (pds
 	if a.resolver.Timeout > 0 {
 		cfg.Timeout = a.resolver.Timeout
 	}
-	if cfg.HTTPClient == nil {
+	switch {
+	case tlsConfig != nil:
+		cfg.HTTPClient, cfg.TLS = nil, tlsConfig
+	case cfg.HTTPClient == nil:
 		cfg.HTTPClient = a.http
 	}
 	return pdsclient.NewRemote(cfg)

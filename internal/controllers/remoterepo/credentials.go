@@ -14,6 +14,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/pds"
+	vaultctl "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/vault"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/pds/identity"
 )
 
@@ -38,13 +39,15 @@ type CredentialOptions struct {
 type credentials struct {
 	opts CredentialOptions
 
+	roots *vaultctl.Roots
+
 	mu sync.Mutex
 
 	held map[string]*identity.Authenticator
 }
 
 func ProvideCredentials(opts CredentialOptions) {
-	c := &credentials{opts: opts, held: map[string]*identity.Authenticator{}}
+	c := &credentials{opts: opts, roots: vaultctl.NewRoots(opts.Bus, nil), held: map[string]*identity.Authenticator{}}
 	bus.Provide(opts.Bus, IdentityGroupKind, pds.CapabilitySession, c.open)
 }
 
@@ -70,7 +73,11 @@ func (c *credentials) open(ctx context.Context, to commonv1.ObjectRef, scope []s
 	if ref == nil {
 		return nil, fmt.Errorf("%w: the MarketIdentity %s names no session", pds.ErrNotFound, to.String())
 	}
-	key := strings.Join([]string{to.Workspace, strings.ToLower(to.Name), did, ref.Mount, ref.Path, ref.Key}, "/")
+	caRef := ""
+	if id.Spec.CARef != nil {
+		caRef = id.Spec.CARef.String()
+	}
+	key := strings.Join([]string{to.Workspace, strings.ToLower(to.Name), did, ref.Mount, ref.Path, ref.Key, caRef}, "/")
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if held, ok := c.held[key]; ok {
@@ -80,11 +87,31 @@ func (c *credentials) open(ctx context.Context, to commonv1.ObjectRef, scope []s
 	if clientID == "" {
 		clientID = id.Spec.OAuthClientID
 	}
+	client, err := c.client(ctx, to, id)
+	if err != nil {
+		return nil, err
+	}
 	auth, err := identity.New(ctx, identity.Config{DID: did, PDSURL: id.Status.PdsURL, ClientID: clientID,
-		Store: c.opts.Vault(to.Workspace, *ref), HTTP: c.opts.HTTP})
+		Store: c.opts.Vault(to.Workspace, *ref), HTTP: client})
 	if err != nil {
 		return nil, errors.Join(pds.ErrNotFound, err)
 	}
 	c.held[key] = auth
 	return auth, nil
+}
+
+func (c *credentials) client(ctx context.Context, to commonv1.ObjectRef, id *v1alpha1.MarketIdentity) (*http.Client, error) {
+	if id.Spec.CARef == nil || id.Spec.CARef.IsZero() {
+		return c.opts.HTTP, nil
+	}
+	from := commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: IdentityKind, Name: to.Name, Workspace: to.Workspace}
+	pool, err := c.roots.Pool(ctx, from, id.Spec.CARef, nil)
+	if err != nil {
+		return nil, fmt.Errorf("%w: the CA of the MarketIdentity %s: %v", pds.ErrNotFound, to.String(), err)
+	}
+	client := &http.Client{Transport: &http.Transport{TLSClientConfig: pool.PublicClientConfig(nil)}}
+	if c.opts.HTTP != nil {
+		client.Timeout = c.opts.HTTP.Timeout
+	}
+	return client, nil
 }

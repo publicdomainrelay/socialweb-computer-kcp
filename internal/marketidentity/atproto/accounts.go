@@ -2,6 +2,7 @@ package atproto
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -36,6 +37,8 @@ type EndpointFunc func(workspace, kind, name string) (string, bool)
 
 type VaultFunc func(workspace string) SecretStore
 
+type TLSFunc func(ctx context.Context, workspace string, id *v1alpha1.MarketIdentity) (*tls.Config, error)
+
 type Config struct {
 	Endpoints EndpointFunc
 
@@ -44,6 +47,8 @@ type Config struct {
 	Resolver *pdsclient.Resolver
 
 	HTTPClient *http.Client
+
+	TLS TLSFunc
 
 	OAuth OAuthOptions
 
@@ -66,6 +71,8 @@ type Accounts struct {
 	http *http.Client
 
 	resolver *pdsclient.Resolver
+
+	tls TLSFunc
 
 	oauth OAuthOptions
 
@@ -91,7 +98,7 @@ func New(cfg Config) *Accounts {
 	if states == nil {
 		states = &oauthclient.MemoryStateStore{}
 	}
-	return &Accounts{endpoints: cfg.Endpoints, vault: cfg.Vault, log: log, http: client, resolver: resolver, oauth: cfg.OAuth,
+	return &Accounts{endpoints: cfg.Endpoints, vault: cfg.Vault, log: log, http: client, resolver: resolver, tls: cfg.TLS, oauth: cfg.OAuth,
 		states: states, qr: ttlcache.New[string, *qrTransfer](ttlcache.Options{})}
 }
 

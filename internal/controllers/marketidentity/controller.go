@@ -2,6 +2,7 @@ package marketidentity
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -10,9 +11,12 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
+	vaultctl "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/vault"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/binding"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/marketidentity/atproto"
 )
@@ -40,6 +44,8 @@ type Options struct {
 
 	HTTPClient *http.Client
 
+	Bus *bus.Bus
+
 	OAuth atproto.OAuthOptions
 
 	Log *slog.Logger
@@ -54,6 +60,8 @@ type known struct {
 type Controller struct {
 	accounts *atproto.Accounts
 
+	roots *vaultctl.Roots
+
 	log *slog.Logger
 
 	identities *binding.Table[known]
@@ -67,9 +75,17 @@ func New(opts Options) *Controller {
 		log = slog.New(slog.DiscardHandler)
 	}
 	log = log.With("component", "marketidentity-controller")
+	roots := vaultctl.NewRoots(opts.Bus, log)
+	trust := func(ctx context.Context, workspace string, id *v1alpha1.MarketIdentity) (*tls.Config, error) {
+		pool, err := roots.Pool(ctx, Self(workspace, id.Name), id.Spec.CARef, nil)
+		if err != nil || pool == nil {
+			return nil, err
+		}
+		return pool.PublicClientConfig(nil), nil
+	}
 	accounts := atproto.New(atproto.Config{Endpoints: opts.Endpoints, Vault: opts.Vault, Resolver: opts.Resolver, HTTPClient: opts.HTTPClient,
-		OAuth: opts.OAuth, Log: log})
-	return &Controller{accounts: accounts, log: log, identities: binding.New[known](), events: make(chan ctlruntime.Request, eventBuffer)}
+		TLS: trust, OAuth: opts.OAuth, Log: log})
+	return &Controller{accounts: accounts, roots: roots, log: log, identities: binding.New[known](), events: make(chan ctlruntime.Request, eventBuffer)}
 }
 
 func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
@@ -166,6 +182,11 @@ func (c *Controller) remember(req ctlruntime.Request, object *v1alpha1.MarketIde
 func (c *Controller) gone(_ context.Context, req ctlruntime.Request) {
 	c.identities.Set(binding.Target{Cluster: req.Cluster, Workspace: req.Workspace, Name: req.Name}, nil)
 	c.accounts.Forget(req.Workspace, req.Name)
+	c.roots.Drop(Self(req.Workspace, req.Name))
+}
+
+func Self(workspace, name string) commonv1.ObjectRef {
+	return commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: "MarketIdentity", Name: name, Workspace: workspace}
 }
 
 func (c *Controller) users(ref string) []ctlruntime.Request {

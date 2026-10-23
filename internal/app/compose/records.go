@@ -80,7 +80,7 @@ func (c *Composer) ApplyOperatorVouch(ctx context.Context, r Root, ws, app, subj
 	return c.ApplyTyped(ctx, r, ws, AtprotoRecordGVR, v1alpha1.GroupVersion.String(), "AtprotoRecord", obj)
 }
 
-func OperatorRecordLinks(ws string, remotePDS commonv1.ObjectRef, did string) []Link {
+func OperatorRecordLinks(ws string, remotePDS commonv1.ObjectRef, did string, caRef *commonv1.ObjectRef) []Link {
 	repo := AppRef(KindAtprotoRepo, OperatorRepoName, ws)
 	remote := AppRef(KindRemoteRepo, OperatorRepoName, ws)
 	records := exposurev1alpha1.ComponentLinkSelector{Group: v1alpha1.GroupName, Kind: "AtprotoRecord", Workspace: ws,
@@ -89,7 +89,11 @@ func OperatorRecordLinks(ws string, remotePDS commonv1.ObjectRef, did string) []
 		SelectorLink(LinkName("records", OperatorRepoName), records, repo, Cap(atprotorepo.CapabilityWrite, VouchNSID)),
 		RepoBackendLink(repo, remote),
 	}
-	return append(links, RemoteRepoLinks(remote, remotePDS, AppRef(KindMarketIdentity, OperatorRepoName, ws), did)...)
+	identity := AppRef(KindMarketIdentity, OperatorRepoName, ws)
+	if caRef != nil {
+		links = append(links, TrustLink(identity, *caRef))
+	}
+	return append(links, RemoteRepoLinks(remote, remotePDS, identity, did)...)
 }
 
 func (c *Composer) ApplyOperatorRepo(ctx context.Context, r Root, ws string, op Operator) error {
@@ -122,14 +126,19 @@ func (c *Composer) ApplyOperatorRepo(ctx context.Context, r Root, ws string, op 
 		PdsURL: strings.TrimRight(strings.TrimSpace(op.PdsURL), "/"), Association: v1alpha1.AssociationSkip,
 		KeysRef:    &commonv1.SecretRef{Mount: op.Mount, Path: OperatorKeysPath},
 		SessionRef: &commonv1.SecretRef{Mount: op.Mount, Path: OperatorSessionPath}}
+	var caRef *commonv1.ObjectRef
+	if op.CARef != nil && op.tls() {
+		ca := *op.CARef
+		caRef, identity.CARef = &ca, &ca
+	}
+	if err := c.ApplyLinks(ctx, r, operatorRecordLinkSet, OperatorRecordLinks(ws, op.ref(r.Workspace), did, caRef), ws); err != nil {
+		return err
+	}
 	if err := c.ApplyIdentitySpec(ctx, r, ws, OperatorRepoName, identity); err != nil {
 		return err
 	}
 	pdsRef := op.ref(r.Workspace)
 	remote := &v1alpha1.RemoteRepo{ObjectMeta: metav1.ObjectMeta{Name: OperatorRepoName}, Spec: v1alpha1.RemoteRepoSpec{DID: did, PdsRef: pdsRef,
 		CredentialsRef: commonv1.CredentialsRef{ObjectRef: commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: KindMarketIdentity, Name: OperatorRepoName}}}}
-	if err := c.ApplyRepo(ctx, r, ws, OperatorRepoName, KindRemoteRepo, v1alpha1.RemoteRepoGVR, remote); err != nil {
-		return err
-	}
-	return c.ApplyLinks(ctx, r, operatorRecordLinkSet, OperatorRecordLinks(ws, pdsRef, did), ws)
+	return c.ApplyRepo(ctx, r, ws, OperatorRepoName, KindRemoteRepo, v1alpha1.RemoteRepoGVR, remote)
 }

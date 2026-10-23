@@ -4911,6 +4911,11 @@ func (in *MarketIdentitySpec) DeepCopyInto(out *MarketIdentitySpec) {
 		*out = new(commonv1alpha1.SecretRef)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.CARef != nil {
+		in, out := &in.CARef, &out.CARef
+		*out = new(commonv1alpha1.ObjectRef)
+		**out = **in
+	}
 	return
 }
 

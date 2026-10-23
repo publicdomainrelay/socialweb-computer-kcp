@@ -200,7 +200,7 @@ func (c *Core) registerIdentity(mgr *ctlruntime.Manager, scope func(string) bool
 			vaults[workspace] = store
 			return store
 		},
-		Resolver: &pdsclient.Resolver{Handlers: c.handlers, Timeout: identityResolverTimeout}, OAuth: oauth, Log: cfg.Log})
+		Resolver: &pdsclient.Resolver{Handlers: c.handlers, Timeout: identityResolverTimeout}, Bus: c.handlers, OAuth: oauth, Log: cfg.Log})
 	if err != nil {
 		return err
 	}
