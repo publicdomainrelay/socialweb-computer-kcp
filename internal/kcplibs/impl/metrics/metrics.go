@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -95,6 +96,7 @@ type Server struct {
 	listener net.Listener
 
 	server *http.Server
+	wg     sync.WaitGroup
 }
 
 func (r *Registry) Listen(address string) (*Server, error) {
@@ -102,11 +104,11 @@ func (r *Registry) Listen(address string) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("metrics: bind %s: %w", address, err)
 	}
-	server := &http.Server{Handler: r.Handler()}
-	go func() {
-		_ = server.Serve(listener)
-	}()
-	return &Server{listener: listener, server: server}, nil
+	s := &Server{listener: listener, server: &http.Server{Handler: r.Handler()}}
+	s.wg.Go(func() {
+		_ = s.server.Serve(listener)
+	})
+	return s, nil
 }
 
 func (s *Server) Address() string {
@@ -120,5 +122,7 @@ func (s *Server) Close() error {
 	if s == nil || s.server == nil {
 		return nil
 	}
-	return s.server.Close()
+	err := s.server.Close()
+	s.wg.Wait()
+	return err
 }
