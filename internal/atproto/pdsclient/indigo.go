@@ -133,9 +133,12 @@ func (r rawWriteOutput) result() (WriteResult, error) {
 
 func (p *IndigoPDS) CreateRecord(ctx context.Context, path RepoPath, record []byte, opts WriteOptions) (WriteResult, error) {
 	input := map[string]any{"repo": path.Repo.String(), "collection": path.Collection.String(),
-		"rkey": path.Rkey.String(), "record": json.RawMessage(record), "validate": opts.Validate}
+		"rkey": path.Rkey.String(), "record": json.RawMessage(record)}
 	if opts.SwapCommit != nil {
 		input["swapCommit"] = opts.SwapCommit.String()
+	}
+	if opts.Validate != nil {
+		input["validate"] = *opts.Validate
 	}
 	var out rawWriteOutput
 	if err := p.API.LexDo(ctx, lexutil.Procedure, "application/json", "com.atproto.repo.createRecord", nil, input, &out); err != nil {
@@ -146,12 +149,15 @@ func (p *IndigoPDS) CreateRecord(ctx context.Context, path RepoPath, record []by
 
 func (p *IndigoPDS) PutRecord(ctx context.Context, path RepoPath, record []byte, opts WriteOptions) (WriteResult, error) {
 	input := map[string]any{"repo": path.Repo.String(), "collection": path.Collection.String(),
-		"rkey": path.Rkey.String(), "record": json.RawMessage(record), "validate": opts.Validate}
+		"rkey": path.Rkey.String(), "record": json.RawMessage(record)}
 	if opts.SwapCommit != nil {
 		input["swapCommit"] = opts.SwapCommit.String()
 	}
 	if opts.SwapRecord != nil {
 		input["swapRecord"] = opts.SwapRecord.String()
+	}
+	if opts.Validate != nil {
+		input["validate"] = *opts.Validate
 	}
 	var out rawWriteOutput
 	if err := p.API.LexDo(ctx, lexutil.Procedure, "application/json", "com.atproto.repo.putRecord", nil, input, &out); err != nil {
