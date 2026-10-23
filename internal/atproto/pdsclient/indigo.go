@@ -64,74 +64,130 @@ func (p *IndigoPDS) Describe(ctx context.Context) (Info, error) {
 }
 
 func (p *IndigoPDS) GetRecord(ctx context.Context, path RepoPath, expected *cid.Cid) (Record, error) {
-	cidText := ""
+	params := map[string]any{"repo": path.Repo.String(), "collection": path.Collection.String(), "rkey": path.Rkey.String()}
 	if expected != nil {
-		cidText = expected.String()
+		params["cid"] = expected.String()
 	}
-	out, err := atproto.RepoGetRecord(ctx, p.API, cidText, path.Collection.String(), path.Repo.String(), path.Rkey.String())
-	if err != nil {
+	var out rawRecord
+	if err := p.API.LexDo(ctx, lexutil.Query, "", "com.atproto.repo.getRecord", params, nil, &out); err != nil {
 		return Record{}, indigoError(err)
 	}
-	return recordFromIndigo(out.Uri, out.Cid, out.Value)
+	return out.record()
 }
 
-func recordFromIndigo(uri string, cidText *string, value *lexutil.LexiconTypeDecoder) (Record, error) {
-	parsedURI, err := syntax.ParseATURI(uri)
+type rawRecord struct {
+	Uri   string          `json:"uri"`
+	Cid   *string         `json:"cid,omitempty"`
+	Value json.RawMessage `json:"value"`
+}
+
+func (r rawRecord) record() (Record, error) {
+	parsedURI, err := syntax.ParseATURI(r.Uri)
 	if err != nil {
-		return Record{}, fmt.Errorf("%w: record uri %q", ErrProtocol, uri)
+		return Record{}, fmt.Errorf("%w: record uri %q", ErrProtocol, r.Uri)
 	}
 	var recordCID cid.Cid
-	if cidText != nil && *cidText != "" {
-		recordCID, err = cid.Decode(*cidText)
+	if r.Cid != nil && *r.Cid != "" {
+		recordCID, err = cid.Decode(*r.Cid)
 		if err != nil {
-			return Record{}, fmt.Errorf("%w: record cid %q", ErrProtocol, *cidText)
+			return Record{}, fmt.Errorf("%w: record cid %q", ErrProtocol, *r.Cid)
 		}
 	}
-	raw, err := json.Marshal(value)
+	return Record{URI: parsedURI, CID: recordCID, Value: r.Value}, nil
+}
+
+type rawWriteOutput struct {
+	Uri    string             `json:"uri"`
+	Cid    string             `json:"cid"`
+	Commit *rawCommitMetadata `json:"commit,omitempty"`
+}
+
+type rawCommitMetadata struct {
+	Cid string `json:"cid"`
+	Rev string `json:"rev"`
+}
+
+func (r rawWriteOutput) result() (WriteResult, error) {
+	parsed, err := syntax.ParseATURI(r.Uri)
 	if err != nil {
-		return Record{}, fmt.Errorf("%w: encoding the record value: %v", ErrProtocol, err)
+		return WriteResult{}, fmt.Errorf("%w: record uri %q", ErrProtocol, r.Uri)
 	}
-	return Record{URI: parsedURI, CID: recordCID, Value: raw}, nil
+	recordCID, err := cid.Decode(r.Cid)
+	if err != nil {
+		return WriteResult{}, fmt.Errorf("%w: record cid %q", ErrProtocol, r.Cid)
+	}
+	result := WriteResult{URI: parsed, CID: recordCID}
+	if r.Commit != nil {
+		commitCID, err := cid.Decode(r.Commit.Cid)
+		if err != nil {
+			return WriteResult{}, fmt.Errorf("%w: commit cid %q", ErrProtocol, r.Commit.Cid)
+		}
+		rev, err := syntax.ParseTID(r.Commit.Rev)
+		if err != nil {
+			return WriteResult{}, fmt.Errorf("%w: commit rev %q", ErrProtocol, r.Commit.Rev)
+		}
+		result.Commit = &CommitRef{CID: commitCID, Rev: rev}
+	}
+	return result, nil
 }
 
 func (p *IndigoPDS) CreateRecord(ctx context.Context, path RepoPath, record []byte, opts WriteOptions) (WriteResult, error) {
-	value, err := recordValue(record)
-	if err != nil {
-		return WriteResult{}, err
+	input := map[string]any{"repo": path.Repo.String(), "collection": path.Collection.String(),
+		"rkey": path.Rkey.String(), "record": json.RawMessage(record), "validate": opts.Validate}
+	if opts.SwapCommit != nil {
+		input["swapCommit"] = opts.SwapCommit.String()
 	}
-	input := &atproto.RepoCreateRecord_Input{Collection: path.Collection.String(), Repo: path.Repo.String(),
-		Rkey: stringPtr(path.Rkey.String()), Record: value, Validate: opts.Validate, SwapCommit: cidText(opts.SwapCommit)}
-	out, err := atproto.RepoCreateRecord(ctx, p.API, input)
-	if err != nil {
+	var out rawWriteOutput
+	if err := p.API.LexDo(ctx, lexutil.Procedure, "application/json", "com.atproto.repo.createRecord", nil, input, &out); err != nil {
 		return WriteResult{}, indigoError(err)
 	}
-	return writeResult(out.Uri, out.Cid, out.Commit)
+	return out.result()
 }
 
 func (p *IndigoPDS) PutRecord(ctx context.Context, path RepoPath, record []byte, opts WriteOptions) (WriteResult, error) {
-	value, err := recordValue(record)
-	if err != nil {
-		return WriteResult{}, err
+	input := map[string]any{"repo": path.Repo.String(), "collection": path.Collection.String(),
+		"rkey": path.Rkey.String(), "record": json.RawMessage(record), "validate": opts.Validate}
+	if opts.SwapCommit != nil {
+		input["swapCommit"] = opts.SwapCommit.String()
 	}
-	input := &atproto.RepoPutRecord_Input{Collection: path.Collection.String(), Repo: path.Repo.String(),
-		Rkey: path.Rkey.String(), Record: value, Validate: opts.Validate, SwapCommit: cidText(opts.SwapCommit), SwapRecord: cidText(opts.SwapRecord)}
-	out, err := atproto.RepoPutRecord(ctx, p.API, input)
-	if err != nil {
+	if opts.SwapRecord != nil {
+		input["swapRecord"] = opts.SwapRecord.String()
+	}
+	var out rawWriteOutput
+	if err := p.API.LexDo(ctx, lexutil.Procedure, "application/json", "com.atproto.repo.putRecord", nil, input, &out); err != nil {
 		return WriteResult{}, indigoError(err)
 	}
-	return writeResult(out.Uri, out.Cid, out.Commit)
+	return out.result()
 }
 
 func (p *IndigoPDS) DeleteRecord(ctx context.Context, path RepoPath, opts WriteOptions) error {
-	input := &atproto.RepoDeleteRecord_Input{Collection: path.Collection.String(), Repo: path.Repo.String(),
-		Rkey: path.Rkey.String(), SwapCommit: cidText(opts.SwapCommit), SwapRecord: cidText(opts.SwapRecord)}
-	_, err := atproto.RepoDeleteRecord(ctx, p.API, input)
-	return indigoError(err)
+	input := map[string]any{"repo": path.Repo.String(), "collection": path.Collection.String(), "rkey": path.Rkey.String()}
+	if opts.SwapCommit != nil {
+		input["swapCommit"] = opts.SwapCommit.String()
+	}
+	if opts.SwapRecord != nil {
+		input["swapRecord"] = opts.SwapRecord.String()
+	}
+	var out struct{}
+	return indigoError(p.API.LexDo(ctx, lexutil.Procedure, "application/json", "com.atproto.repo.deleteRecord", nil, input, &out))
 }
 
 func (p *IndigoPDS) ListRecords(ctx context.Context, req ListRecordsRequest) (ListRecordsResult, error) {
-	out, err := atproto.RepoListRecords(ctx, p.API, req.Collection.String(), req.Cursor, int64(req.Limit), req.Repo.String(), req.Reverse)
-	if err != nil {
+	params := map[string]any{"repo": req.Repo.String(), "collection": req.Collection.String()}
+	if req.Cursor != "" {
+		params["cursor"] = req.Cursor
+	}
+	if req.Limit > 0 {
+		params["limit"] = req.Limit
+	}
+	if req.Reverse {
+		params["reverse"] = true
+	}
+	var out struct {
+		Cursor  *string     `json:"cursor,omitempty"`
+		Records []rawRecord `json:"records"`
+	}
+	if err := p.API.LexDo(ctx, lexutil.Query, "", "com.atproto.repo.listRecords", params, nil, &out); err != nil {
 		return ListRecordsResult{}, indigoError(err)
 	}
 	result := ListRecordsResult{Records: make([]Record, 0, len(out.Records))}
@@ -139,7 +195,7 @@ func (p *IndigoPDS) ListRecords(ctx context.Context, req ListRecordsRequest) (Li
 		result.Cursor = *out.Cursor
 	}
 	for _, item := range out.Records {
-		record, err := recordFromIndigo(item.Uri, &item.Cid, item.Value)
+		record, err := item.record()
 		if err != nil {
 			return ListRecordsResult{}, err
 		}
@@ -212,51 +268,11 @@ func (p *IndigoPDS) DeleteSession(ctx context.Context) error {
 	return indigoError(atproto.ServerDeleteSession(ctx, p.API))
 }
 
-func recordValue(raw []byte) (*lexutil.LexiconTypeDecoder, error) {
-	var value lexutil.LexiconTypeDecoder
-	if err := json.Unmarshal(raw, &value); err != nil {
-		return nil, fmt.Errorf("%w: decoding the record: %v", ErrInvalidRequest, err)
-	}
-	return &value, nil
-}
-
-func cidText(value *cid.Cid) *string {
-	if value == nil {
-		return nil
-	}
-	text := value.String()
-	return &text
-}
-
 func stringPtr(value string) *string {
 	if value == "" {
 		return nil
 	}
 	return &value
-}
-
-func writeResult(uri, cidText string, commit *atproto.RepoDefs_CommitMeta) (WriteResult, error) {
-	parsed, err := syntax.ParseATURI(uri)
-	if err != nil {
-		return WriteResult{}, fmt.Errorf("%w: record uri %q", ErrProtocol, uri)
-	}
-	recordCID, err := cid.Decode(cidText)
-	if err != nil {
-		return WriteResult{}, fmt.Errorf("%w: record cid %q", ErrProtocol, cidText)
-	}
-	result := WriteResult{URI: parsed, CID: recordCID}
-	if commit != nil {
-		commitCID, err := cid.Decode(commit.Cid)
-		if err != nil {
-			return WriteResult{}, fmt.Errorf("%w: commit cid %q", ErrProtocol, commit.Cid)
-		}
-		rev, err := syntax.ParseTID(commit.Rev)
-		if err != nil {
-			return WriteResult{}, fmt.Errorf("%w: commit rev %q", ErrProtocol, commit.Rev)
-		}
-		result.Commit = &CommitRef{CID: commitCID, Rev: rev}
-	}
-	return result, nil
 }
 
 func sessionFromIndigo(didText, handle, access, refresh string, active *bool) (Session, error) {
