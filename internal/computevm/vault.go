@@ -15,10 +15,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/authretry"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -28,7 +27,6 @@ const (
 	VaultClient     = "computevm"
 	VaultMount      = "bidder"
 	VaultGrace      = 2 * time.Minute
-	VaultLoginFor   = 10 * time.Minute
 	VaultConflictOf = 10
 )
 
@@ -69,30 +67,18 @@ func (ct *Controller) server(ctx context.Context, name string) (*v1alpha1.OpenBa
 }
 
 func (ct *Controller) vaultFor(ctx context.Context, server string) (*openbao.Client, error) {
-	return ct.logins.Get(ctx, server)
-}
-
-func (ct *Controller) login(ctx context.Context, server string) (*openbao.Client, time.Time, error) {
 	o, err := ct.server(ctx, server)
 	if err != nil {
-		return nil, time.Time{}, err
+		return nil, err
 	}
 	if o == nil {
-		return nil, time.Time{}, fmt.Errorf("no OpenBaoServer %s in this workspace", server)
+		return nil, fmt.Errorf("no OpenBaoServer %s in this workspace", server)
 	}
 	client, _, err := openbaoctl.ClientLogin(ctx, o.Status, ct.c.vaultClient())
 	if err != nil {
-		return nil, time.Time{}, fmt.Errorf("the OpenBaoServer %s as client %s: %w", server, ct.c.vaultClient(), err)
+		return nil, fmt.Errorf("the OpenBaoServer %s as client %s: %w", server, ct.c.vaultClient(), err)
 	}
-	until := time.Now().Add(VaultLoginFor)
-	if at := client.RefreshAt(); !at.IsZero() && at.Before(until) {
-		until = at
-	}
-	return client, until, nil
-}
-
-func (ct *Controller) forgetLogin(server string) {
-	ct.logins.Invalidate(server)
+	return client, nil
 }
 
 func userDataPath(ref commonv1.SecretRef) (string, error) {
@@ -110,18 +96,12 @@ func (ct *Controller) userData(ctx context.Context, o v1alpha1.ComputeVM) (strin
 		return "", false, err
 	}
 	server := v1alpha1.VaultServer(ref.Vault, "")
-	var loginErr error
-	data, err := authretry.Do(ctx, ct.logins.Source(server), func(ctx context.Context) (map[string]any, error) {
-		client, err := ct.vaultFor(ctx, server)
-		if loginErr = err; err != nil {
-			return nil, err
-		}
-		return client.GetKV(ctx, path)
-	}, openbao.IsAuthError)
-	if loginErr != nil {
-		ct.c.log().Info("the user data waits for the bidder's vault", "computevm", o.Name, "err", loginErr.Error())
+	client, err := ct.vaultFor(ctx, server)
+	if err != nil {
+		ct.c.log().Info("the user data waits for the bidder's vault", "computevm", o.Name, "err", err.Error())
 		return "", false, nil
 	}
+	data, err := client.GetKV(ctx, path)
 	var re *openbao.ResponseError
 	switch {
 	case errors.As(err, &re) && re.Status == 404:

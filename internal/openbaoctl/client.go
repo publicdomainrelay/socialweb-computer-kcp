@@ -2,13 +2,11 @@ package openbaoctl
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -32,24 +30,15 @@ func ClientLogin(ctx context.Context, st v1alpha1.OpenBaoServerStatus, name stri
 	if err != nil {
 		return nil, c, err
 	}
-	caPEM, err := os.ReadFile(FileRef(st.Refs.CA))
+	srv, err := openbao.ServerOf(st.Address, "", st, name)
 	if err != nil {
 		return nil, c, err
 	}
-	pool, err := openbao.CertPoolFromPEM(caPEM)
+	logged, err := openbao.Login(ctx, srv)
 	if err != nil {
 		return nil, c, err
 	}
-	cert, err := tls.LoadX509KeyPair(FileRef(c.ClientCert), FileRef(c.ClientKey))
-	if err != nil {
-		return nil, c, err
-	}
-	client := openbao.New(st.Address, "", openbao.WithCACertPool(pool), openbao.WithClientCertificate(cert))
-	token, err := client.LoginCert(ctx, c.CertAuthMount, c.CertAuthRole)
-	if err != nil {
-		return nil, c, err
-	}
-	return client.WithToken(token), c, nil
+	return logged, c, nil
 }
 
 func Synced(o *v1alpha1.OpenBaoServer) bool {

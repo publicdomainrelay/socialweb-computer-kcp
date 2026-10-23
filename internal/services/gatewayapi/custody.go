@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpclient"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 )
 
 const custodyMaxBody = 1 << 20
@@ -118,29 +118,20 @@ func newCustodyClient(endpoint custodyEndpoint) (*custodyClient, error) {
 }
 
 func (c *custodyClient) call(ctx context.Context, operation, method, path, token string, body any) (*custodyEnvelope, int, error) {
-	target := strings.TrimRight(c.endpoint.Address, "/") + "/v1/" + strings.TrimLeft(path, "/")
-	req, err := httpjson.NewRequest(ctx, method, target, body)
-	if err != nil {
-		return nil, 0, fmt.Errorf("gatewayapi: building custody %s: %w", operation, err)
-	}
-	req.Header.Set("Accept", "application/json")
-	if token != "" {
-		req.Header.Set("X-Vault-Token", token)
-	}
-	resp, err := httpjson.Exchange(ctx, c.http, req, custodyMaxBody)
-	if tooLarge, ok := errors.AsType[*httpjson.TooLargeError](err); ok {
-		return nil, 0, &custodyError{Operation: operation, Status: tooLarge.Status, Message: "the answer is too large"}
-	}
+	status, raw, err := openbao.New(c.endpoint.Address, token, openbao.WithHTTPClient(c.http)).Raw(ctx, method, strings.TrimLeft(path, "/"), body)
 	if err != nil {
 		return nil, 0, fmt.Errorf("gatewayapi: custody %s: %w", operation, err)
 	}
+	if len(raw) > custodyMaxBody {
+		return nil, 0, &custodyError{Operation: operation, Status: status, Message: "the answer is too large"}
+	}
 	var envelope custodyEnvelope
-	if len(bytes.TrimSpace(resp.Body)) > 0 {
-		if err := json.Unmarshal(resp.Body, &envelope); err != nil {
-			return nil, resp.Status, &custodyError{Operation: operation, Status: resp.Status, Message: "the answer is not JSON: " + truncate(string(resp.Body), 200)}
+	if len(bytes.TrimSpace(raw)) > 0 {
+		if err := json.Unmarshal(raw, &envelope); err != nil {
+			return nil, status, &custodyError{Operation: operation, Status: status, Message: "the answer is not JSON: " + truncate(string(raw), 200)}
 		}
 	}
-	return &envelope, resp.Status, nil
+	return &envelope, status, nil
 }
 
 func (c *custodyClient) expect(ctx context.Context, operation, method, path, token string, body any) (json.RawMessage, *custodyEnvelope, error) {

@@ -7,17 +7,14 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/ref"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 )
 
 var openBaoServerGVR = v1alpha1.OpenBaoServerGVR
@@ -27,21 +24,9 @@ type vaultRuntime struct {
 
 	mount string
 
+	authed bool
+
 	endpoint custodyEndpoint
-
-	cancel context.CancelFunc
-
-	wg sync.WaitGroup
-}
-
-func (v *vaultRuntime) close() {
-	if v == nil {
-		return
-	}
-	if v.cancel != nil {
-		v.cancel()
-	}
-	v.wg.Wait()
 }
 
 func resolveVault(ctx context.Context, cfg Config, deps component.Deps) (*vaultRuntime, error) {
@@ -132,25 +117,24 @@ func buildVault(ctx context.Context, cfg Config, address, token string, ca, cert
 		return nil, err
 	}
 	client := anonymous
-	renew := false
-	var renewLease time.Duration
+	authed := false
 	switch {
 	case token == "" && certMount != "" && certRole != "":
-		auth, err := anonymous.LoginCertToken(ctx, certMount, certRole)
+		client, err = anonymous.LoginCert(ctx, certMount, certRole)
 		if err != nil {
 			return nil, fmt.Errorf("gatewayapi: logging in to the vault as %s/%s: %w", certMount, certRole, err)
 		}
-		client = anonymous.WithToken(auth.Token)
-		renew = true
-		renewLease = auth.Lease
+		authed = true
 	case token != "":
 		client, err = newOpenBaoClient(address, token, ca, cert, key)
 		if err != nil {
 			return nil, err
 		}
+		authed = true
 	}
-	runtime := &vaultRuntime{
+	return &vaultRuntime{
 		client: client,
+		authed: authed,
 		mount:  strings.Trim(mount, "/"),
 		endpoint: custodyEndpoint{
 			Address:    address,
@@ -162,57 +146,7 @@ func buildVault(ctx context.Context, cfg Config, address, token string, ca, cert
 			Mount:      cfg.Session.CustodyMount,
 			Timeout:    cfg.Vault.Timeout,
 		},
-	}
-	if renew {
-		renewCtx, cancel := context.WithCancel(ctx)
-		runtime.cancel = cancel
-		runtime.wg.Go(func() { renewVaultToken(renewCtx, client, certMount, certRole, renewLease, cfg.Log) })
-	}
-	return runtime, nil
-}
-
-func renewVaultToken(ctx context.Context, client *openbao.Client, mount, role string, lease time.Duration, log *slog.Logger) {
-	if lease <= 0 {
-		return
-	}
-	timer := time.NewTimer(renewTokenDelay(lease))
-	defer timer.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-timer.C:
-			auth, err := client.LoginCertToken(ctx, mount, role)
-			if err != nil {
-				if log != nil {
-					log.Warn("gatewayapi: renewing the vault token failed", "mount", mount, "role", role, "err", err)
-				}
-				timer.Reset(renewTokenRetryDelay(lease))
-				continue
-			}
-			if auth.Lease <= 0 {
-				return
-			}
-			lease = auth.Lease
-			timer.Reset(renewTokenDelay(lease))
-		}
-	}
-}
-
-func renewTokenDelay(lease time.Duration) time.Duration {
-	delay := max(lease*2/3, time.Second)
-	return delay
-}
-
-func renewTokenRetryDelay(lease time.Duration) time.Duration {
-	delay := 30 * time.Second
-	if lease > 0 && lease/6 < delay {
-		delay = lease / 6
-	}
-	if delay < time.Second {
-		delay = time.Second
-	}
-	return delay
+	}, nil
 }
 
 func custodyFromConfig(v VaultConfig) custodyEndpoint {

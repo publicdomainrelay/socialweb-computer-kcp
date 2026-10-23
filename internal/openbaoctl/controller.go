@@ -32,8 +32,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/rootvault"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vaultcert"
 )
 
@@ -419,11 +419,10 @@ func (c *Controller) syncCore(ctx context.Context, client *openbao.Client, keysP
 	if kerr != nil {
 		return synced{}, fmt.Errorf("the core cannot reconcile (%v) and %w", err, kerr)
 	}
-	tok, gerr := client.GenerateRoot(ctx, k.Keys, k.Threshold)
+	root, gerr := client.GenerateRoot(ctx, k.Keys, k.Threshold)
 	if gerr != nil {
 		return synced{}, fmt.Errorf("the core cannot reconcile (%v) and %w", err, gerr)
 	}
-	root := client.WithToken(tok)
 	defer root.RevokeSelf(context.WithoutCancel(ctx))
 	s, serr := syncWith(ctx, root, in)
 	s.how = fmt.Sprintf("a root token generated from the unseal keys and revoked after the pass, because the core's own token could not reconcile (%v)", err)
@@ -625,7 +624,7 @@ func (c *Controller) reconcile(ctx context.Context, o v1alpha1.OpenBaoServer) v1
 			return fail("the storage at %s is not initialized and unseal keys already exist at %s: refusing to initialize over them",
 				rootvault.StorageDir(dir), keysPath)
 		}
-		res, err := client.Init(ctx, shares, threshold)
+		res, root, err := client.Init(ctx, shares, threshold)
 		if err != nil {
 			return fail("init: %v", err)
 		}
@@ -640,7 +639,6 @@ func (c *Controller) reconcile(ctx context.Context, o v1alpha1.OpenBaoServer) v1
 			return fail("%v", err)
 		}
 		st.UnsealedInstance, st.UnsealedAt = instance, time.Now().UTC().Format(time.RFC3339Nano)
-		root := client.WithToken(res.RootToken)
 		s, serr := syncWith(ctx, root, layout)
 		s.how = "the initial root token"
 		if err := root.RevokeSelf(ctx); err != nil {

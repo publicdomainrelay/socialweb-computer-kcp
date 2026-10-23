@@ -12,8 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/authretry"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 )
 
 const (
@@ -98,10 +97,6 @@ func (ct *Controller) ensureGuestLogin(ctx context.Context, o v1alpha1.ComputeVM
 		"token_policies":   []string{GuestAliasPrefix + o.Name},
 	}
 	if err := client.Write(ctx, path, body); err != nil {
-		var re *openbao.ResponseError
-		if errors.As(err, &re) && re.Status == 403 {
-			ct.forgetLogin(v1alpha1.VaultServer(o.Spec.UserData.Vault.Vault, ""))
-		}
 		return fmt.Errorf("writing the guest login role %s: %w", path, err)
 	}
 	ct.c.log().Info("the guest's login role is in the bidder's OpenBao; the guest binds its ssh host key to it once",
@@ -115,13 +110,10 @@ func (ct *Controller) dropGuestLogin(ctx context.Context, o v1alpha1.ComputeVM) 
 		return
 	}
 	server := v1alpha1.VaultServer(o.Spec.UserData.Vault.Vault, "")
-	err = authretry.Run(ctx, ct.logins.Source(server), func(ctx context.Context) error {
-		client, err := ct.vaultFor(ctx, server)
-		if err != nil {
-			return err
-		}
-		return client.Delete(ctx, path)
-	}, openbao.IsAuthError)
+	client, err := ct.vaultFor(ctx, server)
+	if err == nil {
+		err = client.Delete(ctx, path)
+	}
 	if err != nil {
 		ct.c.log().Warn("the guest login role stays in the bidder's OpenBao", "computevm", o.Name, "role", path, "err", err.Error())
 		return

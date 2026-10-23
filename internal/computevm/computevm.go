@@ -34,10 +34,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/statuspatch"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/lease"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/manifests"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/statesync"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vmruntime"
@@ -102,7 +100,6 @@ type Controller struct {
 	exits    map[string]hostsvc.UnitStatus
 	orphans  map[string]time.Time
 	foreign  map[string]bool
-	logins   *lease.Keyed[string, *openbao.Client]
 	slice    bool
 	imagesAt time.Time
 	bidsAt   time.Time
@@ -153,7 +150,6 @@ func New(ctx context.Context, c Config) (*Controller, error) {
 		syncs: dc.Resource(statesync.StateSyncGVR), kick: make(chan string, 256),
 		busy: map[string]bool{}, exits: map[string]hostsvc.UnitStatus{}, orphans: map[string]time.Time{}, foreign: map[string]bool{},
 		slice: true}
-	ct.logins = lease.NewKeyed(ct.login)
 	return ct, nil
 }
 

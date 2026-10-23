@@ -13,8 +13,8 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 )
 
 const (
@@ -80,7 +80,7 @@ func readNetworkVault(ctx context.Context, ri dynamic.ResourceInterface) (networ
 	return v, nil
 }
 
-func (v networkVault) client(token string) (*openbao.Client, error) {
+func (v networkVault) client() (*openbao.Client, error) {
 	pool, err := openbao.CertPoolFromPEM(v.caPEM)
 	if err != nil {
 		return nil, err
@@ -89,7 +89,7 @@ func (v networkVault) client(token string) (*openbao.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return openbao.New(v.address, token, openbao.WithCACertPool(pool), openbao.WithClientCertificate(cert)), nil
+	return openbao.New(v.address, "", openbao.WithCACertPool(pool), openbao.WithClientCertificate(cert)), nil
 }
 
 func (n *networks) vault(ctx context.Context) (networkVault, error) {
@@ -121,15 +121,11 @@ func (n *networks) deleteVault(ctx context.Context) (bool, error) {
 }
 
 func pkiCA(ctx context.Context, v networkVault) ([]byte, error) {
-	anon, err := v.client("")
+	anon, err := v.client()
 	if err != nil {
 		return nil, err
 	}
-	token, err := anon.LoginCert(ctx, v.certMount, v.certRole)
-	if err != nil {
-		return nil, err
-	}
-	c, err := v.client(token)
+	c, err := anon.LoginCert(ctx, v.certMount, v.certRole)
 	if err != nil {
 		return nil, err
 	}

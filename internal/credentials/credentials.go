@@ -11,31 +11,16 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/credentials/openbaosession"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/authretry"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 )
-
-const DefaultLoginFor = 10 * time.Minute
 
 var ErrNoSource = errors.New("credentials: a resolver needs an OpenBaoServer source")
 
-type Session interface {
-	ReadKV(ctx context.Context, mount, path string, version int) (map[string]any, error)
-
-	WriteKV(ctx context.Context, mount, path string, data map[string]any) error
-
-	DeleteKV(ctx context.Context, mount, path string) error
-}
-
 type Options struct {
-	Source openbaosession.Source
+	Logins *openbao.Logins
 
 	Store *kcpstore.Store
 
@@ -45,35 +30,17 @@ type Options struct {
 
 	Server string
 
-	Token string
-
 	Vars map[string]string
-
-	Timeout time.Duration
-
-	LoginFor time.Duration
-
-	Open func(ctx context.Context, srv openbaosession.Server) (Session, error)
 }
 
 type Resolver struct {
-	source openbaosession.Source
+	logins *openbao.Logins
 
 	workspace string
 
 	server string
 
-	token string
-
 	vars map[string]string
-
-	timeout time.Duration
-
-	loginFor time.Duration
-
-	open func(ctx context.Context, srv openbaosession.Server) (Session, error)
-
-	sessions *ttlcache.Cache[string, Session]
 }
 
 var _ component.CredentialResolver = (*Resolver)(nil)
@@ -83,33 +50,17 @@ var _ component.CredentialWriter = (*Resolver)(nil)
 var _ component.CredentialDeleter = (*Resolver)(nil)
 
 func New(opts Options) (*Resolver, error) {
-	source := opts.Source
-	if source == nil && opts.Store != nil {
-		source = &openbaosession.KCPStoreSource{Store: opts.Store, Client: opts.Client, Token: opts.Token}
+	logins := opts.Logins
+	if logins == nil && opts.Store != nil {
+		logins = openbao.NewLogins(&openbao.KCPStoreSource{Store: opts.Store, Client: opts.Client})
 	}
-	if source == nil {
+	if logins == nil {
 		return nil, ErrNoSource
 	}
 	opts.Workspace = cmp.Or(opts.Workspace, "root")
-	opts.LoginFor = opt.Positive(opts.LoginFor, DefaultLoginFor)
-	if opts.Open == nil {
-		opts.Open = func(ctx context.Context, srv openbaosession.Server) (Session, error) {
-			return openbaosession.Open(ctx, srv)
-		}
-	}
 	vars := map[string]string{"workspace": opts.Workspace}
 	maps.Copy(vars, opts.Vars)
-	return &Resolver{
-		source:    source,
-		workspace: opts.Workspace,
-		server:    opts.Server,
-		token:     opts.Token,
-		vars:      vars,
-		timeout:   opts.Timeout,
-		loginFor:  opts.LoginFor,
-		open:      opts.Open,
-		sessions:  ttlcache.New[string, Session](ttlcache.Options{}),
-	}, nil
+	return &Resolver{logins: logins, workspace: opts.Workspace, server: opts.Server, vars: vars}, nil
 }
 
 func (r *Resolver) With(vars map[string]string) *Resolver {
@@ -128,10 +79,6 @@ func NewKCPResolver(store *kcpstore.Store, workspace, client, server string) (*R
 	return New(Options{Store: store, Workspace: workspace, Client: client, Server: server})
 }
 
-func NewOpenBaoResolver(store *kcpstore.Store, workspace, client, server string) (*Resolver, error) {
-	return NewKCPResolver(store, workspace, client, server)
-}
-
 func (r *Resolver) Resolve(ctx context.Context, ref component.CredentialRef) (component.Credential, error) {
 	return r.ResolveVars(ctx, ref, nil)
 }
@@ -145,16 +92,16 @@ func (r *Resolver) ResolveVars(ctx context.Context, ref component.CredentialRef,
 		}
 		return component.Credential{Ref: ref, Data: filterKeys(data, ref.Keys)}, nil
 	}
-	mount, path, srv, err := r.target(ctx, ref)
+	t, err := r.target(ref)
 	if err != nil {
 		return component.Credential{}, err
 	}
-	data, err := r.readKV(ctx, srv, mount, path, ref.Version)
+	data, err := r.readKV(ctx, &t, ref.Version)
 	if err != nil {
-		return component.Credential{}, fmt.Errorf("credentials: reading %s/data/%s: %w", mount, path, err)
+		return component.Credential{}, fmt.Errorf("credentials: reading %s/data/%s: %w", t.mount, t.path, err)
 	}
 	if len(data) == 0 {
-		return component.Credential{}, fmt.Errorf("credentials: %s/data/%s: %w", mount, path, openbao.ErrNotFound)
+		return component.Credential{}, fmt.Errorf("credentials: %s/data/%s: %w", t.mount, t.path, openbao.ErrNotFound)
 	}
 	return component.Credential{Ref: ref, Data: filterKeys(data, ref.Keys)}, nil
 }
@@ -170,20 +117,18 @@ func (r *Resolver) WriteCredential(ctx context.Context, ref component.Credential
 	if data == nil {
 		return errors.New("credentials: a credential write needs data")
 	}
-	mount, path, srv, err := r.target(ctx, ref)
+	t, err := r.target(ref)
 	if err != nil {
 		return err
 	}
-	return authretry.Run(ctx, r.forgetter(srv), func(ctx context.Context) error {
-		session, err := r.session(ctx, srv)
-		if err != nil {
-			return err
-		}
-		if err := session.WriteKV(ctx, mount, path, data); err != nil {
-			return fmt.Errorf("credentials: writing %s/data/%s: %w", mount, path, err)
-		}
-		return nil
-	}, openbao.IsAuthError)
+	client, err := r.client(ctx, &t)
+	if err != nil {
+		return err
+	}
+	if err := client.PutKV(ctx, t.mount+"/data/"+t.path, data); err != nil {
+		return fmt.Errorf("credentials: writing %s/data/%s: %w", t.mount, t.path, err)
+	}
+	return nil
 }
 
 func (r *Resolver) DeleteCredential(ctx context.Context, ref component.CredentialRef) error {
@@ -194,81 +139,69 @@ func (r *Resolver) DeleteCredential(ctx context.Context, ref component.Credentia
 		}
 		return nil
 	}
-	mount, path, srv, err := r.target(ctx, ref)
+	t, err := r.target(ref)
 	if err != nil {
 		return err
 	}
-	return authretry.Run(ctx, r.forgetter(srv), func(ctx context.Context) error {
-		session, err := r.session(ctx, srv)
-		if err != nil {
-			return err
-		}
-		if err := session.DeleteKV(ctx, mount, path); err != nil {
-			return fmt.Errorf("credentials: deleting %s/metadata/%s: %w", mount, path, err)
-		}
-		return nil
-	}, openbao.IsAuthError)
+	client, err := r.client(ctx, &t)
+	if err != nil {
+		return err
+	}
+	if err := client.Delete(ctx, t.mount+"/metadata/"+t.path); err != nil {
+		return fmt.Errorf("credentials: deleting %s/metadata/%s: %w", t.mount, t.path, err)
+	}
+	return nil
 }
 
-func (r *Resolver) target(ctx context.Context, ref component.CredentialRef) (string, string, openbaosession.Server, error) {
+type target struct {
+	workspace string
+
+	name string
+
+	mount string
+
+	path string
+}
+
+func (r *Resolver) target(ref component.CredentialRef) (target, error) {
 	path := strings.Trim(strings.TrimSpace(ref.Path), "/")
 	if path == "" {
-		return "", "", openbaosession.Server{}, errors.New("credentials: the credential ref has no path")
+		return target{}, errors.New("credentials: the credential ref has no path")
 	}
-	server := strings.TrimSpace(ref.Server)
-	server = cmp.Or(server, r.server)
+	server := cmp.Or(strings.TrimSpace(ref.Server), r.server)
 	if server == "" {
-		return "", "", openbaosession.Server{}, openbaosession.ErrNoServer
+		return target{}, openbao.ErrNoServer
 	}
-	workspace, name := openbaosession.ParseServer(server, r.workspace)
-	srv, err := r.source.Server(ctx, workspace, name)
-	if err != nil {
-		return "", "", openbaosession.Server{}, err
-	}
-	srv.Token = cmp.Or(srv.Token, r.token)
-	srv.Timeout = cmp.Or(srv.Timeout, r.timeout)
+	workspace, name := openbao.ParseServer(server, r.workspace)
 	mount := strings.Trim(strings.TrimSpace(ref.Mount), "/")
-	if mount == "" || mount == "file" || mount == "file:" {
-		mount = strings.Trim(srv.KVMount, "/")
+	if mount == "file" || mount == "file:" {
+		mount = ""
 	}
-	if mount == "" {
-		return "", "", openbaosession.Server{}, errors.New("credentials: the credential ref has no mount and the OpenBaoServer names no KV mount")
+	return target{workspace: workspace, name: name, mount: mount, path: path}, nil
+}
+
+func (r *Resolver) client(ctx context.Context, t *target) (*openbao.Client, error) {
+	client, srv, err := r.logins.Client(ctx, t.workspace, t.name)
+	if err != nil {
+		return nil, err
 	}
-	return mount, path, srv, nil
+	t.mount = cmp.Or(t.mount, strings.Trim(srv.KVMount, "/"))
+	if t.mount == "" {
+		return nil, errors.New("credentials: the credential ref has no mount and the OpenBaoServer names no KV mount")
+	}
+	return client, nil
 }
 
-func (r *Resolver) readKV(ctx context.Context, srv openbaosession.Server, mount, path string, version int) (map[string]any, error) {
-	return authretry.Do(ctx, r.forgetter(srv), func(ctx context.Context) (map[string]any, error) {
-		session, err := r.session(ctx, srv)
-		if err != nil {
-			return nil, err
-		}
-		return session.ReadKV(ctx, mount, path, version)
-	}, openbao.IsAuthError)
-}
-
-func sessionKey(srv openbaosession.Server) string {
-	return srv.Workspace + "|" + srv.Name
-}
-
-func (r *Resolver) forgetter(srv openbaosession.Server) authretry.InvalidateFunc {
-	return func() { r.sessions.Delete(sessionKey(srv)) }
-}
-
-func (r *Resolver) session(ctx context.Context, srv openbaosession.Server) (Session, error) {
-	return r.sessions.GetOrLoad(ctx, sessionKey(srv), func(ctx context.Context) (Session, time.Duration, error) {
-		session, err := r.open(ctx, srv)
-		if err != nil {
-			return nil, 0, err
-		}
-		until := time.Now().Add(r.loginFor)
-		if refresh, ok := session.(interface{ RefreshAt() time.Time }); ok {
-			if at := refresh.RefreshAt(); !at.IsZero() && at.Before(until) {
-				until = at
-			}
-		}
-		return session, time.Until(until), nil
-	})
+func (r *Resolver) readKV(ctx context.Context, t *target, version int) (map[string]any, error) {
+	client, err := r.client(ctx, t)
+	if err != nil {
+		return nil, err
+	}
+	kvPath := t.mount + "/data/" + t.path
+	if version > 0 {
+		kvPath = fmt.Sprintf("%s?version=%d", kvPath, version)
+	}
+	return client.GetKV(ctx, kvPath)
 }
 
 func (r *Resolver) expand(ref component.CredentialRef, vars map[string]string) component.CredentialRef {

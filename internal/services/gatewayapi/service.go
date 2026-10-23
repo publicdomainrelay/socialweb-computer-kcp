@@ -73,7 +73,6 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	if err != nil {
 		return err
 	}
-	defer vault.close()
 	signIn := cfg.Session.SignIn
 	if signIn == nil {
 		if vault == nil {
@@ -304,7 +303,7 @@ func buildMapper(cfg Config, deps component.Deps, vault *vaultRuntime, pinned *g
 	if vault == nil || vault.client == nil {
 		return nil, errors.New("gatewayapi: the node market needs a resolved vault client")
 	}
-	if vault.client.Token() == "" {
+	if !vault.authed {
 		return nil, errors.New("gatewayapi: the node market needs a vault token or a client cert login")
 	}
 	homes := append([]string(nil), cfg.NodeMarket.HomeWorkspaces...)

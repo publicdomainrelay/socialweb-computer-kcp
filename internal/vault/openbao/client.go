@@ -354,3 +354,7 @@ func (c *Client) send(ctx context.Context, method, path string, in any, token st
 	}
 	return resp.StatusCode, body, nil
 }
+
+func (c *Client) Raw(ctx context.Context, method, path string, body any) (int, []byte, error) {
+	return c.request(ctx, method, path, body)
+}

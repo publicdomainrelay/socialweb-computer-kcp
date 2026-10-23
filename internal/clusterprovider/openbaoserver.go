@@ -2,7 +2,6 @@ package clusterprovider
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,11 +19,10 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterstack"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/jsonx"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/lease"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbao"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/procgroup"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 )
 
 const (
@@ -97,16 +95,8 @@ func writeVaultAccess(dataDir, client string, a VaultAccess) error {
 	return os.Rename(tmp, path)
 }
 
-type vaultLoginKey struct {
-	dataDir string
-	client  string
-	addr    string
-}
-
-var vaultTokens = lease.NewKeyed(loginClusterVault)
-
 func forgetVaultToken(dataDir string) {
-	vaultTokens.DeleteKeys(func(k vaultLoginKey) bool { return k.dataDir == dataDir })
+	openbao.ForgetLogins(dataDir)
 }
 
 func (a VaultAccess) Port() int {
@@ -135,39 +125,32 @@ func clusterVaultAs(ctx context.Context, dataDir, client string) (*openbao.Clien
 	if err != nil {
 		return nil, a, err
 	}
-	c, err := vaultTokens.Get(ctx, vaultLoginKey{dataDir: dataDir, client: client, addr: a.Address})
+	c, err := loginClusterVault(ctx, dataDir, client, a)
 	if err != nil {
 		return nil, a, err
 	}
 	return c, a, nil
 }
 
-func loginClusterVault(ctx context.Context, k vaultLoginKey) (*openbao.Client, time.Time, error) {
-	a, err := readVaultAccessFor(k.dataDir, k.client)
+func loginClusterVault(ctx context.Context, dataDir, client string, a VaultAccess) (*openbao.Client, error) {
+	ca, err := os.ReadFile(a.CAFile)
 	if err != nil {
-		return nil, time.Time{}, err
+		return nil, fmt.Errorf("clusterprovider: the cluster vault's TLS CA: %w", err)
 	}
-	raw, err := os.ReadFile(a.CAFile)
+	cert, err := os.ReadFile(a.ClientCert)
 	if err != nil {
-		return nil, time.Time{}, fmt.Errorf("clusterprovider: the cluster vault's TLS CA: %w", err)
+		return nil, fmt.Errorf("clusterprovider: the client certificate of %s: %w", client, err)
 	}
-	pool, err := openbao.CertPoolFromPEM(raw)
+	key, err := os.ReadFile(a.ClientKey)
 	if err != nil {
-		return nil, time.Time{}, err
+		return nil, fmt.Errorf("clusterprovider: the client key of %s: %w", client, err)
 	}
-	pair, err := tls.LoadX509KeyPair(a.ClientCert, a.ClientKey)
+	c, err := openbao.Login(ctx, openbao.Server{Workspace: dataDir, Name: a.Server, Client: client, Address: a.Address,
+		CACert: ca, ClientCert: cert, ClientKey: key, CertMount: a.CertMount, CertRole: a.CertRole})
 	if err != nil {
-		return nil, time.Time{}, fmt.Errorf("clusterprovider: the client certificate of %s: %w", k.client, err)
+		return nil, fmt.Errorf("clusterprovider: logging in to the cluster vault at %s as %s: %w", a.Address, a.CertRole, err)
 	}
-	base := openbao.New(k.addr, "", openbao.WithCACertPool(pool), openbao.WithClientCertificate(pair))
-	if _, err := base.LoginCertToken(ctx, a.CertMount, a.CertRole); err != nil {
-		return nil, time.Time{}, fmt.Errorf("clusterprovider: logging in to the cluster vault at %s as %s: %w", k.addr, a.CertRole, err)
-	}
-	until := time.Now().Add(vaultTokenReuse)
-	if refresh := base.RefreshAt(); !refresh.IsZero() && refresh.Before(until) {
-		until = refresh
-	}
-	return base, until, nil
+	return c, nil
 }
 
 func (h *UnitsHost) VaultServerName(key string) string {
