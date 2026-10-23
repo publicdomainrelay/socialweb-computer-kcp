@@ -322,7 +322,12 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 	}
 	if cfg.PDSDPoP == nil && cfg.PDSAccessTokenRef != nil && deps.Credentials != nil {
 		if credential, err := deps.Credentials.Resolve(context.Background(), *cfg.PDSAccessTokenRef); err == nil {
-			if source, err := pdsclient.DPoPSourceFromData(credential.Data); err == nil {
+			source, err := pdsclient.DPoPSourceFromData(credential.Data)
+			if err != nil {
+				if deps.Log != nil {
+					deps.Log.Warn("the bidder could not read the session DPoP key", "err", err.Error())
+				}
+			} else {
 				cfg.PDSDPoP = source
 			}
 		}
