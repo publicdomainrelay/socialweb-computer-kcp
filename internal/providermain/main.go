@@ -391,6 +391,8 @@ func buildDeps(ctx context.Context, cfg Config, log *slog.Logger) (Deps, error) 
 		"maxNodes", cfg.ScaleMaxNodes, "podsPerNode", cfg.ScalePodsPerNode)
 
 	deps := Deps{
+		Rest:        restCfg,
+		Tenants:     tenant,
 		Registry:    registry,
 		Decider:     decider,
 		Allocator:   alloc,

@@ -1,7 +1,6 @@
 package clusterprovider
 
 import (
-	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -34,8 +33,6 @@ var readyPhase = func() v1alpha1.ClusterPhase {
 	}
 	return phase
 }()
-
-const DefaultInterval = 2 * time.Second
 
 const DefaultAddOnInterval = 30 * time.Minute
 
@@ -119,8 +116,6 @@ type Options struct {
 
 	Probe func(ctx context.Context, url string) (int, bool)
 
-	Interval time.Duration
-
 	AddOnInterval time.Duration
 
 	Now func() time.Time
@@ -135,7 +130,7 @@ type Provider struct {
 
 	nodeBackoff map[string]NodeBackoff
 
-	addOns *ttlcache.Cache[string, struct{}]
+	addOns *ttlcache.Cache[string, time.Time]
 }
 
 type NodeBackoff struct {
@@ -236,7 +231,6 @@ func New(opts Options) (*Provider, error) {
 	if opts.Probe == nil {
 		opts.Probe = Probe
 	}
-	opts.Interval = cmp.Or(opts.Interval, DefaultInterval)
 	opts.AddOnInterval = opt.Positive(opts.AddOnInterval, DefaultAddOnInterval)
 	if opts.Now == nil {
 		opts.Now = time.Now
@@ -247,7 +241,7 @@ func New(opts Options) (*Provider, error) {
 	if (opts.Tenant != nil) != (opts.GrantPath != "") {
 		return nil, ErrNoBootstrap
 	}
-	p := &Provider{opts: opts, addOns: ttlcache.New[string, struct{}](ttlcache.Options{TTL: opts.AddOnInterval, Now: opts.Now})}
+	p := &Provider{opts: opts, addOns: ttlcache.New[string, time.Time](ttlcache.Options{TTL: opts.AddOnInterval, Now: opts.Now})}
 	if opts.Tenant != nil && opts.OnReady == nil {
 		p.opts.OnReady = p.Bootstrap
 	}
@@ -392,8 +386,25 @@ func (p *Provider) tenantAddOnsDue(ref Ref) bool {
 	if err != nil {
 		return false
 	}
-	return p.addOns.Add(key, struct{}{}, 0)
+	return p.addOns.Add(key, p.opts.Now(), 0)
 }
+
+func (p *Provider) AddOnsDueIn(ref Ref) (time.Duration, bool) {
+	if p.opts.InstallTenant == nil || p.opts.Tenant == nil {
+		return 0, false
+	}
+	key, err := ref.Key()
+	if err != nil {
+		return 0, false
+	}
+	at, ok := p.addOns.Get(key)
+	if !ok {
+		return 0, false
+	}
+	return max(at.Add(p.opts.AddOnInterval).Sub(p.opts.Now()), time.Second), true
+}
+
+func (p *Provider) ForgetAddOns(key string) { p.addOns.Delete(key) }
 
 func (p *Provider) refreshTenantAddOns(ctx context.Context, ref Ref, cl *v1alpha1.Cluster) error {
 	key, err := ref.Key()
@@ -505,40 +516,6 @@ func (p *Provider) observe(ctx context.Context, ref Ref, cl *v1alpha1.Cluster) (
 				"deny that may not have landed")
 	}
 	return o, nil
-}
-
-func (p *Provider) Run(ctx context.Context) error {
-	for {
-		refs, err := p.opts.Registry.Refs(ctx)
-		if err != nil {
-			return err
-		}
-		p.reclaim(refs)
-		for _, ref := range refs {
-			pass, err := p.Reconcile(ctx, ref)
-			if err != nil {
-				p.opts.Log.Error("reconcile failed", "cluster", ref.Name, "home", ref.Home, "err", err)
-				continue
-			}
-			p.opts.Log.Info("reconciled",
-				"cluster", ref.Name,
-				"home", ref.Home,
-				"did", ref.DID,
-				"running", pass.Cluster.Spec.Running,
-				"phase", pass.Result.Phase,
-				"url", pass.Result.URL,
-				"foreign", pass.Foreign,
-				"observeOnly", pass.ObserveOnly,
-				"wrote", pass.Wrote,
-				"alert", pass.Alert(),
-			)
-		}
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-time.After(p.opts.Interval):
-		}
-	}
 }
 
 func (p *Provider) Reclaim(refs []Ref) { p.reclaim(refs) }

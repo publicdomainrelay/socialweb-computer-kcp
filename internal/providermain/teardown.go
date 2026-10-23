@@ -37,6 +37,15 @@ func (p *Provider) deleteDue(key string) bool {
 	return b == nil || !time.Now().Before(b.next)
 }
 
+func (p *Provider) deleteNext(key string) time.Time {
+	p.busyMu.Lock()
+	defer p.busyMu.Unlock()
+	if b := p.deletes[key]; b != nil {
+		return b.next
+	}
+	return time.Time{}
+}
+
 func (p *Provider) deleteDone(key string) {
 	p.busyMu.Lock()
 	defer p.busyMu.Unlock()
@@ -66,26 +75,27 @@ func (p *Provider) deleteFailed(key string) (attempts int, since, next time.Time
 	return b.attempts, b.since, b.next
 }
 
-func (p *Provider) teardown(ctx context.Context, ref clusterprovider.Ref, key string, cl *v1alpha1.Cluster) error {
+func (p *Provider) teardown(ctx context.Context, ref clusterprovider.Ref, key string, cl *v1alpha1.Cluster) (time.Duration, error) {
 	if !p.deleteDue(key) {
-		return nil
+		return until(p.deleteNext(key)), nil
 	}
 	p.log.Info("cluster provider: this cluster is being deleted, so its group is reaped and its store removed",
 		"cluster", ref.Name, "key", key, "home", ref.Home)
 	step, err := p.teardownSteps(ctx, ref, key)
 	if err == nil {
 		p.deleteDone(key)
-		return nil
+		return 0, nil
 	}
 	attempts, since, next := p.deleteFailed(key)
+	retry := max(time.Until(next), TeardownBackoffBase)
 	if attempts < TeardownFreeAttempts || time.Since(since) < TeardownBlockedAfter {
-		return nil
+		return retry, nil
 	}
 	p.log.Warn("cluster provider: a step of deleting this cluster has not completed; the next attempt waits",
 		"cluster", ref.Name, "key", key, "home", ref.Home, "step", step, "attempts", attempts,
 		"next", next.UTC().Format(time.RFC3339), "error", err.Error())
 	p.reportTeardown(ctx, ref, cl, step, attempts, next, err)
-	return nil
+	return retry, nil
 }
 
 func (p *Provider) teardownSteps(ctx context.Context, ref clusterprovider.Ref, key string) (string, error) {
