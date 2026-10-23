@@ -158,6 +158,12 @@ func networkWorkspaces(ctx context.Context, rec devinstance.Record) []string {
 	for _, c := range n.Status.Components {
 		add(c.Workspace)
 	}
+	for _, app := range n.Status.Apps {
+		if app.Workspace != "" {
+			add(app.Workspace)
+			add(app.Workspace + ":" + componentcore.ComponentWorkspace)
+		}
+	}
 	return out
 }
 
