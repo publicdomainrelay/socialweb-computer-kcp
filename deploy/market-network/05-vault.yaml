@@ -11,6 +11,8 @@ spec:
       policies: ["network-pki"]
       tokenTTL: 768h
       tokenMaxTTL: 768h
+    - name: owner
+      kvMount: owner
   declared:
     secretMounts:
       - path: pki

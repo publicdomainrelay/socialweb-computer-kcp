@@ -35,7 +35,7 @@ const (
 	TTLAnnotation       = "socialweb.computer/ttl-after-finished"
 	ClusterLabel        = "socialweb.computer/cluster"
 	NodeClaimNote       = "socialweb.computer/nodeclaim"
-	AppWorkspaceLabel   = "apps.socialweb.computer/app"
+	AppWorkspaceLabel   = "apps.socialweb.computer/application"
 	providerWS          = "socialweb-provider"
 	accountWorkspace    = "account"
 
