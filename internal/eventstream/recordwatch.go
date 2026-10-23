@@ -158,7 +158,7 @@ func (c *Controller) reconcileRecordWatch(ctx context.Context, dyn dynamic.Inter
 	wanted := map[string]bool{}
 	for _, plan := range plans {
 		wanted[plan.Name] = true
-		if err := c.ensureWatchEventStream(ctx, dyn, name, plan, status); err != nil {
+		if err := c.ensureWatchEventStream(ctx, dyn, u, plan); err != nil {
 			c.writeRecordWatchConditions(ctx, dyn, name, []metav1.Condition{
 				conds.New(RecordWatchConditionReady, false, "ReconcileFailed", err.Error(), u.GetGeneration()),
 				conds.New(RecordWatchConditionProgressing, false, "ReconcileFailed", err.Error(), u.GetGeneration()),
@@ -306,97 +306,28 @@ func (c *Controller) writeWatchRecords(ctx context.Context, dyn dynamic.Interfac
 	return fmt.Errorf("eventstream: the re-verified status of AtprotoRecordWatch %s stayed in conflict", name)
 }
 
-func (c *Controller) ensureWatchEventStream(ctx context.Context, dyn dynamic.Interface, name string, plan watchSourcePlan, status recordWatchStatus) error {
-	if err := c.ensureWatchEventStreamObject(ctx, dyn, name, plan, status); err != nil {
-		return err
+func (c *Controller) ensureWatchEventStream(ctx context.Context, dyn dynamic.Interface, watch *unstructured.Unstructured, plan watchSourcePlan) error {
+	name := watch.GetName()
+	if plan.RepoRef != nil {
+		if err := c.ensurePdsSource(ctx, dyn, watch, plan.SourceRef.Name, *plan.RepoRef); err != nil {
+			return err
+		}
 	}
-	stream, err := dyn.Resource(EventStreamGVR).Get(ctx, plan.Name, metav1.GetOptions{})
-	if apierrors.IsNotFound(err) {
-		return nil
+	source := plan.SourceRef
+	if source.Workspace == c.opts.Workspace {
+		source.Workspace = ""
 	}
-	if err != nil {
-		return err
-	}
-	return EnsureEventSource(ctx, DynamicResources(dyn), FieldManager, stream, plan.Source)
-}
-
-func (c *Controller) ensureWatchEventStreamObject(ctx context.Context, dyn dynamic.Interface, name string, plan watchSourcePlan, status recordWatchStatus) error {
-	eventStreamName := plan.Name
-	desiredSpec := eventsapi.EventStreamSpec{
-		SourceRef: SourceRef(plan.Name),
-		Filter:    plan.Filter,
-		Sink: eventsapi.EventStreamSink{
-			Kind:      eventsapi.EventStreamSinkRecordWatch,
-			Name:      name,
-			Namespace: c.opts.Workspace,
+	stream := &eventsapi.EventStream{
+		TypeMeta: metav1.TypeMeta{APIVersion: GroupName + "/" + Version, Kind: "EventStream"},
+		ObjectMeta: metav1.ObjectMeta{Name: plan.Name, Labels: map[string]string{RecordWatchLabel: name},
+			OwnerReferences: []metav1.OwnerReference{{APIVersion: watch.GetAPIVersion(), Kind: watch.GetKind(), Name: name, UID: watch.GetUID()}}},
+		Spec: eventsapi.EventStreamSpec{
+			SourceRef: source,
+			Filter:    plan.Filter,
+			Sink:      eventsapi.EventStreamSink{Kind: eventsapi.EventStreamSinkRecordWatch, Name: name, Namespace: c.opts.Workspace},
 		},
 	}
-	if cursor := watchCursorFromStatus(status, plan.Key); cursor != nil {
-		desiredSpec.Cursor = cursor
-	}
-	labels := map[string]string{RecordWatchLabel: name}
-	ri := dyn.Resource(EventStreamGVR)
-	if _, err := ri.Get(ctx, eventStreamName, metav1.GetOptions{}); apierrors.IsNotFound(err) {
-		desired := &eventsapi.EventStream{
-			TypeMeta:   metav1.TypeMeta{APIVersion: GroupName + "/" + Version, Kind: "EventStream"},
-			ObjectMeta: metav1.ObjectMeta{Name: eventStreamName, Labels: labels},
-			Spec:       desiredSpec,
-		}
-		object, err := toUnstructured(desired)
-		if err != nil {
-			return err
-		}
-		if _, err := ri.Create(ctx, &unstructured.Unstructured{Object: object}, metav1.CreateOptions{FieldManager: FieldManager}); err != nil {
-			if !apierrors.IsAlreadyExists(err) {
-				return fmt.Errorf("eventstream: creating the EventStream for AtprotoRecordWatch %s: %w", name, err)
-			}
-		} else {
-			return nil
-		}
-	} else if err != nil {
-		return err
-	}
-	for range 5 {
-		existing, err := ri.Get(ctx, eventStreamName, metav1.GetOptions{})
-		if apierrors.IsNotFound(err) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		specMap, _, _ := unstructured.NestedMap(existing.Object, "spec")
-		var currentSpec eventsapi.EventStreamSpec
-		if len(specMap) > 0 {
-			raw, err := json.Marshal(specMap)
-			if err != nil {
-				return err
-			}
-			if err := json.Unmarshal(raw, &currentSpec); err != nil {
-				return err
-			}
-		}
-		desiredSpec.Cursor = currentSpec.Cursor
-		desiredSpec.Suspend = currentSpec.Suspend
-		desiredMap, err := toUnstructured(desiredSpec)
-		if err != nil {
-			return err
-		}
-		changed := !reflect.DeepEqual(specMap, desiredMap)
-		if existing.GetLabels()[RecordWatchLabel] != name {
-			existing.SetLabels(mergeLabels(existing.GetLabels(), labels))
-			changed = true
-		}
-		if !changed {
-			return nil
-		}
-		existing.Object["spec"] = desiredMap
-		if _, err := ri.Update(ctx, existing, metav1.UpdateOptions{FieldManager: FieldManager}); err == nil {
-			return nil
-		} else if !apierrors.IsConflict(err) {
-			return fmt.Errorf("eventstream: updating the EventStream for AtprotoRecordWatch %s: %w", name, err)
-		}
-	}
-	return fmt.Errorf("eventstream: the EventStream for AtprotoRecordWatch %s stayed in conflict", name)
+	return applyObject(ctx, dyn.Resource(EventStreamGVR), plan.Name, stream)
 }
 
 func (c *Controller) watchConditions(ctx context.Context, dyn dynamic.Interface, plans []watchSourcePlan, generation int64) ([]metav1.Condition, error) {
@@ -594,21 +525,6 @@ func decodeRecordWatch(u *unstructured.Unstructured) (recordWatchSpec, recordWat
 		}
 	}
 	return spec, status, nil
-}
-
-func watchCursorFromStatus(status recordWatchStatus, sourceKey string) *int64 {
-	want := strings.TrimSpace(sourceKey)
-	for _, cursor := range status.Cursors {
-		if cursor.Source == want {
-			value := cursor.Cursor
-			return &value
-		}
-	}
-	if len(status.Cursors) == 1 && want == "" {
-		value := status.Cursors[0].Cursor
-		return &value
-	}
-	return nil
 }
 
 func mergeLabels(current, wanted map[string]string) map[string]string {

@@ -21,6 +21,7 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 
+	eventsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/events/v1alpha1"
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	policyv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/policy/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
@@ -30,6 +31,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/recordcontroller"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/childapplication"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	eventsctl "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/events"
 	policyctl "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/policy"
 	remotepdsctl "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/remotepds"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
@@ -357,10 +359,7 @@ func (c *Core) buildControllers() {
 	}
 
 	resolver := &pdsclient.Resolver{Handlers: handlers, Timeout: pdsClientTimeout}
-	plcBaseURL := strings.TrimSpace(cfg.PLCBaseURL)
-	if plcBaseURL == "" {
-		plcBaseURL = "http://" + kcp.ServiceFQDN(appctl.NetworkPLCName, "default", base, kcp.DefaultServiceDomain)
-	}
+	plcBaseURL := c.plcBaseURL()
 	if ss, err := statusstate.New(statusstate.Options{Workspace: base, Dynamic: statusstate.DynamicFactory(cfg.DynamicFactory),
 		PDS: statusPDSResolver(resolver, base), RepoResolver: repoResolver, Vault: openBaoMetadata(c.store, base),
 		PLCBaseURL: plcBaseURL, PLCHandlers: handlers,
@@ -368,39 +367,6 @@ func (c *Core) buildControllers() {
 		log.Warn("the status state controller is not wired", "err", err.Error())
 	} else {
 		c.runners = append(c.runners, controllerRunner{name: "statusstate", run: ss.Run})
-	}
-
-	if c.eventHandlers == nil {
-		c.eventHandlers = eventstream.NewHandlerRegistry()
-	}
-	for _, workspace := range cfg.Workspaces {
-		workspace = strings.TrimSpace(workspace)
-		if workspace == "" {
-			continue
-		}
-		for _, role := range []string{"bidder", "requester"} {
-			handler, err := eventstream.NewMarketHandler(eventstream.MarketOptions{Workspace: workspace, Role: role,
-				Dynamic: eventstream.DynamicFactory(cfg.DynamicFactory), Resolver: resolver, PLCDirectoryURL: plcBaseURL, Log: log})
-			if err != nil {
-				log.Warn("the market event handler is not wired", "workspace", workspace, "role", role, "err", err.Error())
-				continue
-			}
-			if err := c.eventHandlers.Register(eventstream.MarketHandlerName(role, workspace), handler); err != nil {
-				log.Warn("the market event handler is not registered", "workspace", workspace, "role", role, "err", err.Error())
-			}
-		}
-	}
-	for _, workspace := range cfg.Workspaces {
-		workspace = strings.TrimSpace(workspace)
-		if workspace == "" {
-			continue
-		}
-		if es, err := eventstream.New(eventstream.Options{Workspace: workspace, Dynamic: eventstream.DynamicFactory(cfg.DynamicFactory),
-			Resolver: resolver, Handlers: c.eventHandlers, Log: log}); err != nil {
-			log.Warn("the event stream controller is not wired", "workspace", workspace, "err", err.Error())
-		} else {
-			c.runners = append(c.runners, controllerRunner{name: "eventstream@" + workspace, run: es.Run})
-		}
 	}
 }
 
@@ -412,7 +378,8 @@ func (c *Core) buildManager(caBundle remotepdsctl.CABundleFunc) {
 		log.Warn("the controller manager is not wired", "err", err.Error())
 		return
 	}
-	mgr, err := ctlruntime.NewManager(ctlruntime.Config{Rest: restCfg, AddToScheme: []func(*runtime.Scheme) error{pdsv1alpha1.AddToScheme, policyv1alpha1.AddToScheme, v1alpha1.AddToScheme},
+	mgr, err := ctlruntime.NewManager(ctlruntime.Config{Rest: restCfg, AddToScheme: []func(*runtime.Scheme) error{pdsv1alpha1.AddToScheme, policyv1alpha1.AddToScheme, v1alpha1.AddToScheme,
+		eventsv1alpha1.AddToScheme},
 		Log: log})
 	if err != nil {
 		log.Warn("the controller manager is not wired", "err", err.Error())
@@ -434,7 +401,18 @@ func (c *Core) buildManager(caBundle remotepdsctl.CABundleFunc) {
 	if _, err := vaultctl.Register(mgr, c.handlers, vaultctl.Options{Log: log}); err != nil {
 		log.Warn("the vault controller is not wired", "err", err.Error())
 	}
+	if run, err := eventsctl.Register(mgr, eventsctl.Options{Bus: c.handlers, Workspaces: cfg.Workspaces, Dynamic: eventstream.DynamicFactory(cfg.DynamicFactory),
+		Resolver: &pdsclient.Resolver{Handlers: c.handlers, Timeout: pdsClientTimeout}, PLCURL: c.plcBaseURL(), StateDir: cfg.StateDir, Log: log}); err != nil {
+		log.Warn("the event controllers are not wired", "err", err.Error())
+	} else {
+		c.runners = append(c.runners, controllerRunner{name: "events", run: run})
+	}
 	c.runners = append(c.runners, controllerRunner{name: "controller-manager", run: mgr.Start})
+}
+
+func (c *Core) plcBaseURL() string {
+	return cmp.Or(strings.TrimSpace(c.cfg.PLCBaseURL),
+		"http://"+kcp.ServiceFQDN(appctl.NetworkPLCName, "default", c.cfg.Workspaces[0], kcp.DefaultServiceDomain))
 }
 
 func (c *Core) managerRestConfig() (*rest.Config, error) {
@@ -525,7 +503,7 @@ func (c *Core) relayEndpoint(base string) statusstate.RelayEndpointFunc {
 				return "http://" + endpoint.Address, true
 			}
 		}
-		for _, url := range c.cfg.RelayURLs {
+		for _, url := range c.cfg.Relays {
 			if url = strings.TrimSpace(url); url != "" {
 				return url, true
 			}

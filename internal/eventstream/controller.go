@@ -1,12 +1,9 @@
 package eventstream
 
 import (
+	"cmp"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -15,23 +12,13 @@ import (
 
 	"github.com/bluesky-social/indigo/atproto/identity"
 	"github.com/bluesky-social/indigo/atproto/syntax"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 
 	eventsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/events/v1alpha1"
-	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	v1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 )
 
@@ -41,19 +28,18 @@ const (
 
 	FieldManager = "eventstream-controller"
 
-	DefaultRetryAfter       = 2 * time.Second
-	DefaultStatusInterval   = 5 * time.Second
-	DefaultReconnectDelay   = time.Second
-	DefaultMaxReconnectWait = 30 * time.Second
+	DefaultRetryAfter = 2 * time.Second
 
 	pdsCacheTTL = 2 * time.Minute
 )
 
 var EventStreamGVR = eventsv1alpha1.EventStreamGVR
 
-var RemotePDSGVR = pdsv1alpha1.RemotePDSGVR
+var EventSourceGVR = eventsv1alpha1.EventSourceGVR
 
 var RecordWatchGVR = v1alpha1.AtprotoRecordWatchGVR
+
+var AtprotoRepoGVR = v1alpha1.AtprotoRepoGVR
 
 type DynamicFactory func(workspace string) (dynamic.Interface, error)
 
@@ -61,43 +47,29 @@ type Options struct {
 	Workspace string
 	Dynamic   DynamicFactory
 	Resolver  *pdsclient.Resolver
-	Handlers  *HandlerRegistry
 	Log       *slog.Logger
 
 	Directory       identity.Directory
 	PLCDirectoryURL string
 	HTTPClient      *http.Client
 
-	RetryAfter       time.Duration
-	StatusInterval   time.Duration
-	ReconnectDelay   time.Duration
-	MaxReconnectWait time.Duration
+	RetryAfter time.Duration
+
+	FlushDelay time.Duration
 }
 
 type Controller struct {
-	opts     Options
-	log      *slog.Logger
-	handlers *HandlerRegistry
+	opts Options
+	log  *slog.Logger
 
 	directory identity.Directory
 	http      *http.Client
 
-	mu       sync.Mutex
-	streams  map[string]*streamRuntime
-	running  sync.WaitGroup
 	pdsCache *ttlcache.Cache[syntax.DID, pdsclient.PDS]
 	verifyAt *ttlcache.Cache[string, struct{}]
-}
 
-type streamRuntime struct {
-	uid         types.UID
-	generation  int64
-	fingerprint string
-	cancel      context.CancelFunc
-}
-
-func Register(opts Options) (*Controller, error) {
-	return New(opts)
+	mu    sync.Mutex
+	sinks map[string]*watchSink
 }
 
 func New(opts Options) (*Controller, error) {
@@ -111,204 +83,51 @@ func New(opts Options) (*Controller, error) {
 	if opts.Resolver == nil {
 		return nil, errors.New("eventstream: a pdsclient resolver is required")
 	}
-	if opts.Handlers == nil {
-		opts.Handlers = NewHandlerRegistry()
-	}
 	if opts.Log == nil {
 		opts.Log = slog.New(slog.DiscardHandler)
 	}
 	opts.RetryAfter = opt.Positive(opts.RetryAfter, DefaultRetryAfter)
-	opts.StatusInterval = opt.Positive(opts.StatusInterval, DefaultStatusInterval)
-	opts.ReconnectDelay = opt.Positive(opts.ReconnectDelay, DefaultReconnectDelay)
-	if opts.MaxReconnectWait < opts.ReconnectDelay {
-		opts.MaxReconnectWait = DefaultMaxReconnectWait
-	}
 	httpClient := opts.HTTPClient
-	if httpClient == nil && opts.Resolver != nil && opts.Resolver.Handlers != nil {
+	if httpClient == nil && opts.Resolver.Handlers != nil {
 		httpClient = opts.Resolver.Handlers.HTTPClient()
-	}
-	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 20 * time.Second}
 	}
 	httpClient = httpClientWithFallback(httpClient)
 	directory := opts.Directory
 	if directory == nil {
-		plcURL := strings.TrimSpace(opts.PLCDirectoryURL)
-		if plcURL == "" {
-			plcURL = "http://" + kcp.ServiceFQDN("plc", "default", opts.Workspace, kcp.DefaultServiceDomain)
-		}
-		local := &identity.BaseDirectory{
-			PLCURL:                 plcURL,
-			HTTPClient:             *httpClient,
-			PLCClient:              httpClient,
-			SkipHandleVerification: true,
-		}
-		public := &identity.BaseDirectory{
-			PLCURL:                 identity.DefaultPLCURL,
-			HTTPClient:             *httpClient,
-			PLCClient:              httpClient,
-			SkipHandleVerification: true,
-		}
-		directory = fallbackDirectory{local, public}
+		directory = newDirectory(httpClient, opts.PLCDirectoryURL, opts.Workspace)
 	}
 	return &Controller{
 		opts:      opts,
-		log:       opts.Log.With("component", "eventstream-controller"),
-		handlers:  opts.Handlers,
-		streams:   map[string]*streamRuntime{},
+		log:       opts.Log.With("component", "atprotorecordwatch-controller", "workspace", opts.Workspace),
 		directory: directory,
 		http:      httpClient,
 		pdsCache:  ttlcache.New[syntax.DID, pdsclient.PDS](ttlcache.Options{TTL: pdsCacheTTL}),
 		verifyAt:  ttlcache.New[string, struct{}](ttlcache.Options{TTL: watchVerifyInterval}),
+		sinks:     map[string]*watchSink{},
 	}, nil
 }
 
-func (c *Controller) Handlers() *HandlerRegistry {
-	return c.handlers
+func newDirectory(httpClient *http.Client, plcURL, workspace string) identity.Directory {
+	plcURL = cmp.Or(strings.TrimSpace(plcURL), "http://"+kcp.ServiceFQDN("plc", "default", workspace, kcp.DefaultServiceDomain))
+	local := &identity.BaseDirectory{PLCURL: plcURL, HTTPClient: *httpClient, PLCClient: httpClient, SkipHandleVerification: true}
+	public := &identity.BaseDirectory{PLCURL: identity.DefaultPLCURL, HTTPClient: *httpClient, PLCClient: httpClient, SkipHandleVerification: true}
+	return fallbackDirectory{local, public}
+}
+
+func (c *Controller) Workspace() string {
+	return c.opts.Workspace
 }
 
 func (c *Controller) Run(ctx context.Context) error {
-	runCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	var workers sync.WaitGroup
-	workers.Go(func() {
-		c.runEventStreams(runCtx)
-	})
-	workers.Go(func() {
-		c.runRecordWatches(runCtx)
-	})
-	<-runCtx.Done()
-	workers.Wait()
-	c.stopAll(ctx)
+	c.runRecordWatches(ctx)
+	c.mu.Lock()
+	sinks := make([]*watchSink, 0, len(c.sinks))
+	for _, s := range c.sinks {
+		sinks = append(sinks, s)
+	}
+	c.mu.Unlock()
+	for _, s := range sinks {
+		s.close()
+	}
 	return nil
-}
-
-func (c *Controller) runEventStreams(ctx context.Context) {
-	for ctx.Err() == nil {
-		if err := c.round(ctx); err != nil && ctx.Err() == nil {
-			c.log.Warn("watching EventStreams", "workspace", c.opts.Workspace, "err", err.Error())
-		}
-		if !clock.Sleep(ctx, opt.Positive(c.opts.RetryAfter, DefaultRetryAfter)) {
-			return
-		}
-	}
-}
-
-func (c *Controller) round(ctx context.Context) error {
-	dyn, err := c.opts.Dynamic(c.opts.Workspace)
-	if err != nil {
-		return err
-	}
-	ri := dyn.Resource(EventStreamGVR)
-	list, err := ri.List(ctx, metav1.ListOptions{})
-	if apierrors.IsNotFound(err) || apierrors.IsForbidden(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	for i := range list.Items {
-		item := &list.Items[i]
-		if err := c.reconcile(ctx, dyn, item); err != nil && ctx.Err() == nil {
-			c.log.Warn("reconciling an EventStream", "name", item.GetName(), "err", err.Error())
-		}
-	}
-	wc, err := ri.Watch(ctx, metav1.ListOptions{ResourceVersion: list.GetResourceVersion()})
-	if apierrors.IsNotFound(err) || apierrors.IsForbidden(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	defer wc.Stop()
-	timer := time.NewTimer(c.opts.RetryAfter)
-	defer timer.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-timer.C:
-			return nil
-		case event, ok := <-wc.ResultChan():
-			if !ok {
-				return nil
-			}
-			if event.Type == watch.Bookmark {
-				continue
-			}
-			u, ok := event.Object.(*unstructured.Unstructured)
-			if !ok || u == nil {
-				continue
-			}
-			if event.Type == watch.Deleted {
-				c.forget(u.GetName())
-				continue
-			}
-			if err := c.reconcile(ctx, dyn, u); err != nil && ctx.Err() == nil {
-				c.log.Warn("reconciling an EventStream", "name", u.GetName(), "err", err.Error())
-			}
-		}
-	}
-}
-
-func (c *Controller) reconcile(ctx context.Context, dyn dynamic.Interface, u *unstructured.Unstructured) error {
-	es := &eventsv1alpha1.EventStream{}
-	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, es); err != nil {
-		return fmt.Errorf("eventstream: decoding EventStream %s: %w", u.GetName(), err)
-	}
-	ctx = bus.WithObject(ctx, c.opts.Workspace, u)
-	fingerprint, err := specFingerprint(es.Spec)
-	if err != nil {
-		return err
-	}
-	c.mu.Lock()
-	current := c.streams[es.Name]
-	if current != nil && current.uid == es.UID && current.generation == es.Generation && current.fingerprint == fingerprint {
-		c.mu.Unlock()
-		return nil
-	}
-	if current != nil {
-		current.cancel()
-	}
-	streamCtx, cancel := context.WithCancel(ctx)
-	state := &streamRuntime{uid: es.UID, generation: es.Generation, fingerprint: fingerprint, cancel: cancel}
-	c.streams[es.Name] = state
-	stream := newEventStream(c, es, dyn)
-	c.mu.Unlock()
-	c.running.Go(func() {
-		stream.run(streamCtx)
-	})
-	return nil
-}
-
-func (c *Controller) forget(name string) {
-	c.mu.Lock()
-	runtime := c.streams[name]
-	delete(c.streams, name)
-	c.mu.Unlock()
-	if runtime != nil {
-		runtime.cancel()
-	}
-}
-
-func (c *Controller) stopAll(ctx context.Context) {
-	c.mu.Lock()
-	streams := c.streams
-	c.streams = map[string]*streamRuntime{}
-	c.mu.Unlock()
-	for _, runtime := range streams {
-		runtime.cancel()
-	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), DefaultStatusInterval)
-	defer cancel()
-	_ = supervise.Join(ctx, c.running.Wait)
-}
-
-func specFingerprint(spec eventsv1alpha1.EventStreamSpec) (string, error) {
-	raw, err := json.Marshal(spec)
-	if err != nil {
-		return "", fmt.Errorf("eventstream: fingerprinting the spec: %w", err)
-	}
-	sum := sha256.Sum256(raw)
-	return hex.EncodeToString(sum[:]), nil
 }

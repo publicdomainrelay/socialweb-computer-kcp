@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 type recordWatchSpec struct {
@@ -51,9 +53,7 @@ type recordValueFrom struct {
 }
 
 type recordWatchSource struct {
-	RelayUrls []string `json:"relayUrls,omitempty"`
-
-	JetstreamUrls []string `json:"jetstreamUrls,omitempty"`
+	EventSourceRefs []commonv1.ObjectRef `json:"eventSourceRefs,omitempty"`
 }
 
 type recordWatchCursor struct {

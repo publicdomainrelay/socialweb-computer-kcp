@@ -26,7 +26,8 @@ import (
 	v1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/events"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/events/relay"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/statesync"
 )
 
@@ -89,7 +90,24 @@ type marketPayload struct {
 	Record map[string]any `json:"record"`
 }
 
-func NewMarketHandler(opts MarketOptions) (Handler, error) {
+var _ events.Sink = (*MarketSink)(nil)
+
+func MarketRole(name string) (string, bool) {
+	rest, ok := strings.CutPrefix(strings.TrimSpace(name), marketNamePrefix)
+	if !ok {
+		return "", false
+	}
+	role, _, _ := strings.Cut(rest, "@")
+	switch role {
+	case "bidder", "requester":
+		return role, true
+	}
+	return "", false
+}
+
+type MarketSink = marketHandler
+
+func NewMarketSink(opts MarketOptions) (*MarketSink, error) {
 	opts.Workspace = strings.TrimSpace(opts.Workspace)
 	if opts.Workspace == "" {
 		return nil, errors.New("eventstream: a market handler needs a workspace")
@@ -109,37 +127,21 @@ func NewMarketHandler(opts MarketOptions) (Handler, error) {
 	if opts.Log == nil {
 		opts.Log = slog.New(slog.DiscardHandler)
 	}
-	httpClient := opts.Resolver.HTTPClient
-	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 20 * time.Second}
-	}
-	httpClient = httpClientWithFallback(httpClient)
-	plcURL := strings.TrimSpace(opts.PLCDirectoryURL)
-	if plcURL == "" {
-		plcURL = "http://" + kcp.ServiceFQDN("plc", "default", opts.Workspace, kcp.DefaultServiceDomain)
-	}
-	local := &identity.BaseDirectory{
-		PLCURL:                 plcURL,
-		HTTPClient:             *httpClient,
-		PLCClient:              httpClient,
-		SkipHandleVerification: true,
-	}
-	public := &identity.BaseDirectory{
-		PLCURL:                 identity.DefaultPLCURL,
-		HTTPClient:             *httpClient,
-		PLCClient:              httpClient,
-		SkipHandleVerification: true,
-	}
+	httpClient := httpClientWithFallback(opts.Resolver.HTTPClient)
 	return &marketHandler{
 		opts:      opts,
 		log:       opts.Log,
-		directory: fallbackDirectory{local, public},
+		directory: newDirectory(httpClient, opts.PLCDirectoryURL, opts.Workspace),
 		client:    httpClient,
 		pdses:     map[syntax.DID]pdsclient.PDS{},
 	}, nil
 }
 
-func (h *marketHandler) HandleEvent(ctx context.Context, event Event) error {
+func (h *marketHandler) Deliver(ctx context.Context, event events.Event) error {
+	repo, err := syntax.ParseDID(event.Repo)
+	if err != nil {
+		return fmt.Errorf("eventstream: the event repo %q is not a DID: %w", event.Repo, err)
+	}
 	for _, op := range event.Ops {
 		switch strings.ToLower(strings.TrimSpace(op.Action)) {
 		case "create", "update":
@@ -154,12 +156,20 @@ func (h *marketHandler) HandleEvent(ctx context.Context, event Event) error {
 		if adapter == "" {
 			continue
 		}
-		uri := "at://" + event.Repo.String() + "/" + collection + "/" + rkey
-		value, cid, err := h.fetchMarketRecord(ctx, event, collection, rkey, op.CID)
+		uri := "at://" + event.Repo + "/" + collection + "/" + rkey
+		var expected *cid.Cid
+		if op.CID != "" {
+			parsed, err := cid.Decode(op.CID)
+			if err != nil {
+				return fmt.Errorf("eventstream: the market op %s has an invalid cid: %w", uri, err)
+			}
+			expected = &parsed
+		}
+		value, recordCID, err := h.fetchMarketRecord(ctx, event.Source, repo, collection, rkey, expected)
 		if err != nil {
 			return fmt.Errorf("eventstream: fetching the market record %s: %w", uri, err)
 		}
-		if err := h.createSync(ctx, adapter, event.Repo.String(), uri, cid, collection, value); err != nil {
+		if err := h.createSync(ctx, adapter, event.Repo, uri, recordCID, collection, value); err != nil {
 			return err
 		}
 	}
@@ -206,13 +216,13 @@ func (h *marketHandler) createSync(ctx context.Context, adapter, did, uri, cid, 
 	return nil
 }
 
-func (h *marketHandler) fetchMarketRecord(ctx context.Context, event Event, collection, rkey string, cidPtr *cid.Cid) (map[string]any, string, error) {
+func (h *marketHandler) fetchMarketRecord(ctx context.Context, source string, repo syntax.DID, collection, rkey string, cidPtr *cid.Cid) (map[string]any, string, error) {
 	cidText := ""
 	if cidPtr != nil {
 		cidText = cidPtr.String()
 	}
-	if pds, err := h.authorPDS(ctx, event.Repo); err == nil {
-		record, err := pds.GetRecord(ctx, pdsclient.RepoPath{Repo: event.Repo, Collection: syntax.NSID(collection), Rkey: syntax.RecordKey(rkey)}, cidPtr)
+	if pds, err := h.authorPDS(ctx, repo); err == nil {
+		record, err := pds.GetRecord(ctx, pdsclient.RepoPath{Repo: repo, Collection: syntax.NSID(collection), Rkey: syntax.RecordKey(rkey)}, cidPtr)
 		if err == nil {
 			value := map[string]any{}
 			if err := json.Unmarshal(record.Value, &value); err != nil {
@@ -221,12 +231,12 @@ func (h *marketHandler) fetchMarketRecord(ctx context.Context, event Event, coll
 			return value, record.CID.String(), nil
 		}
 	}
-	hostname, err := h.relayHost(ctx, event.Source, event.Repo.String())
+	hostname, err := h.relayHost(ctx, source, repo.String())
 	if err != nil {
 		return nil, "", err
 	}
 	for _, scheme := range []string{"http", "https"} {
-		target := scheme + "://" + hostname + "/xrpc/com.atproto.repo.getRecord?repo=" + url.QueryEscape(event.Repo.String()) +
+		target := scheme + "://" + hostname + "/xrpc/com.atproto.repo.getRecord?repo=" + url.QueryEscape(repo.String()) +
 			"&collection=" + url.QueryEscape(collection) + "&rkey=" + url.QueryEscape(rkey) + "&cid=" + url.QueryEscape(cidText)
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 		if err != nil {
@@ -258,7 +268,7 @@ func (h *marketHandler) fetchMarketRecord(ctx context.Context, event Event, coll
 }
 
 func (h *marketHandler) relayHost(ctx context.Context, source, did string) (string, error) {
-	base, ok := strings.CutPrefix(strings.TrimSpace(source), "relay/")
+	base, ok := strings.CutPrefix(strings.TrimSpace(source), relay.SourcePrefix)
 	if !ok || base == "" {
 		return "", errors.New("no relay source names the author PDS")
 	}
