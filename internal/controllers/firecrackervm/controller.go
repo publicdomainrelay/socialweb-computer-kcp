@@ -39,12 +39,14 @@ type Controller struct {
 	mu sync.Mutex
 
 	clusters map[string]string
+
+	ended map[string]bool
 }
 
 func Register(ctx context.Context, m *ctlruntime.Manager, p *firecracker.Provider, host *computevm.Host, placement *Placement) (*Controller, error) {
 	life, end := context.WithCancel(ctx)
 	ctl := &Controller{p: p, host: host, placement: placement, log: host.Log().With("controller", Name), events: make(chan ctlruntime.Request, 256),
-		life: life, end: end, clusters: map[string]string{}}
+		life: life, end: end, clusters: map[string]string{}, ended: map[string]bool{}}
 	handle := p.Handle()
 	if err := ctlruntime.For[*v1alpha1.FirecrackerVM](m, Name, ctl, ctlruntime.Export(Export),
 		ctlruntime.Finalizer(v1alpha1.FinalizerFirecrackerVM), ctlruntime.Workers(Workers), ctlruntime.Events(ctl.events),
@@ -65,6 +67,22 @@ func (c *Controller) forget(name string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.clusters, name)
+}
+
+func (c *Controller) markEnded(uid string, ended bool) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if ended {
+		c.ended[uid] = true
+		return true
+	}
+	return c.ended[uid]
+}
+
+func (c *Controller) dropEnded(uid string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.ended, uid)
 }
 
 func (c *Controller) clusterOf(name string) (string, bool) {
@@ -200,6 +218,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, vm *
 			return ctlruntime.Result{}, err
 		}
 		c.forget(vm.Name)
+		c.dropEnded(string(vm.UID))
 		c.collectImages(ctx, req)
 		c.mu.Lock()
 		none := len(c.clusters) == 0
@@ -210,6 +229,9 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, vm *
 		return ctlruntime.Result{}, nil
 	}
 	c.remember(vm.Name, req.Cluster)
+	if c.markEnded(string(vm.UID), false) {
+		return ctlruntime.Result{}, nil
+	}
 	switch vm.Status.Phase {
 	case v1alpha1.ComputeVMPhaseLost, v1alpha1.ComputeVMPhaseFailed:
 		return ctlruntime.Result{}, nil
@@ -219,7 +241,16 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, vm *
 		return ctlruntime.Result{}, err
 	}
 	st, err := c.p.Boot(ctx, vm, func(st v1alpha1.FirecrackerVMStatus) error { return c.write(ctx, req, vm, st) })
-	if werr := c.write(ctx, req, vm, st); werr != nil && err == nil {
+	werr := c.write(ctx, req, vm, st)
+	switch st.Phase {
+	case v1alpha1.ComputeVMPhaseLost, v1alpha1.ComputeVMPhaseFailed:
+		c.markEnded(string(vm.UID), true)
+		if err != nil {
+			c.log.Warn("the boot failed; the FirecrackerVM stays Failed and is not booted again", "firecrackervm", vm.Name, "err", err.Error())
+		}
+		return ctlruntime.Result{}, werr
+	}
+	if werr != nil && err == nil {
 		err = werr
 	}
 	c.follow(vm)
