@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"strings"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
 )
 
 const (
@@ -106,29 +108,8 @@ func wsOrigin(host string, tls bool) string {
 	return "wss://" + host
 }
 
-func hostnameOnly(host string) string {
-	h := host
-	if strings.HasPrefix(h, "[") {
-		if end := strings.Index(h, "]"); end != -1 {
-			h = h[1:end]
-		}
-	}
-	if idx := strings.LastIndex(h, ":"); idx != -1 && idx > strings.Index(h, "]") {
-		h = h[:idx]
-	}
-	return h
-}
-
-func hostnameToDID(host string) string {
-	return "did:web:" + hostnameOnly(host)
-}
-
-func didToSubdomain(did string) string {
-	return strings.ToLower(strings.ReplaceAll(did, ":", "-"))
-}
-
 func IngressURL(did, host string) string {
-	return "https://" + didToSubdomain(did) + "." + hostnameOnly(host)
+	return "https://" + hostport.DIDLabel(did) + "." + hostport.HostnameOnly(host)
 }
 
 func splitDataHost(host string, bases []string) (string, string, bool) {

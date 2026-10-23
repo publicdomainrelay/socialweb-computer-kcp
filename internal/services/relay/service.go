@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +21,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsreload"
 
@@ -128,7 +128,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		cfg.Hostnames = appendValues(cfg.Hostnames, decoded.TLS.Hostnames...)
 	}
 	if decoded.Network != nil {
-		cfg.Hostnames = appendValues(cfg.Hostnames, networkHostnames(decoded.Network, cfg.Port)...)
+		cfg.Hostnames = appendValues(cfg.Hostnames, hostport.NetworkHostnames(decoded.Network, cfg.Port)...)
 	}
 	cfg.Upstreams = pdsEndpoints(cfg.Deps, cfg.Workspace, cfg.PdsRefs)
 	if allowsAnyPDS(cfg.PdsRefs) {
@@ -179,22 +179,6 @@ func appendValues(hostnames []string, extra ...string) []string {
 	}
 	for _, host := range extra {
 		add(host)
-	}
-	return out
-}
-
-func networkHostnames(network *v1alpha1.MarketNetworkValue, port int) []string {
-	if network == nil || port <= 0 {
-		return nil
-	}
-	wanted := strconv.Itoa(port)
-	var out []string
-	for _, host := range network.Hosts {
-		_, value, err := net.SplitHostPort(host.Address)
-		if err != nil || value != wanted {
-			continue
-		}
-		out = append(out, host.Name)
 	}
 	return out
 }
@@ -359,7 +343,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 		cfg.Directory = identity.NewCacheDirectory(base, 100_000, time.Hour, 2*time.Minute, 5*time.Minute)
 	}
 	relay := atrelay.New(atrelay.Config{
-		Hostname:      primaryHostname(cfg.Host, cfg.Hostnames),
+		Hostname:      hostport.Primary(cfg.Host, cfg.Hostnames),
 		Version:       cfg.Version,
 		Logger:        log,
 		Store:         store,
@@ -420,7 +404,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	s.ready = true
 	s.mu.Unlock()
 
-	log.Info("relay_registered", "host", host, "hostname", primaryHostname(cfg.Host, cfg.Hostnames))
+	log.Info("relay_registered", "host", host, "hostname", hostport.Primary(cfg.Host, cfg.Hostnames))
 
 	flushDone := make(chan struct{})
 	flushStopped := make(chan struct{})
@@ -691,18 +675,6 @@ func handlerDialer(handlers *component.HandlerRegistry, external func(context.Co
 	}
 }
 
-func primaryHostname(host string, hostnames []string) string {
-	if host != "" {
-		return host
-	}
-	for _, candidate := range hostnames {
-		if candidate != "" {
-			return candidate
-		}
-	}
-	return "localhost"
-}
-
 func logicalHost(key component.Key) string {
 	kind := strings.ToLower(strings.TrimSpace(key.Kind))
 	if kind == "" {
@@ -714,7 +686,7 @@ func logicalHost(key component.Key) string {
 func certificateFiles(certRef string, storage *v1alpha1.ComponentStorage, hostnames []string) (string, string) {
 	certFile := refPath(certRef, storage)
 	if certFile == "" && storage != nil && storage.CertsDir != "" && len(hostnames) > 0 {
-		name := hostnameOnly(hostnames[0])
+		name := hostport.HostnameOnly(hostnames[0])
 		if name != "" && name != "*" {
 			certFile = filepath.Join(storage.CertsDir, name+".crt")
 		}
@@ -770,17 +742,4 @@ func serverTLS(deps component.Deps, certFile string) (*tls.Config, error) {
 		return tlsConfig, nil
 	}
 	return nil, errors.New("a TLS certificate is required")
-}
-
-func hostnameOnly(host string) string {
-	h := host
-	if strings.HasPrefix(h, "[") {
-		if end := strings.Index(h, "]"); end != -1 {
-			h = h[1:end]
-		}
-	}
-	if idx := strings.LastIndex(h, ":"); idx != -1 && idx > strings.Index(h, "]") {
-		h = h[:idx]
-	}
-	return h
 }

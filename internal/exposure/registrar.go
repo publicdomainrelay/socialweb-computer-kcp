@@ -21,6 +21,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/ingress"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
 )
 
@@ -118,9 +119,9 @@ func (r *SubscriberRegistrar) Register(ctx context.Context, spec IngressSpec) (I
 	if address := strings.TrimSpace(spec.IngressAddress); address != "" {
 		connectHost, secure = address, ingressSecure(address)
 	}
-	audienceHost := hostnameOnly(connectHost)
+	audienceHost := hostport.URLHostname(connectHost)
 	if dial := strings.TrimSpace(spec.IngressDial); dial != "" && connectHost != "" {
-		hosts, err := networkdial.NewHostMap([]networkdial.Host{{Name: hostnameOnly(connectHost), Address: dial}})
+		hosts, err := networkdial.NewHostMap([]networkdial.Host{{Name: hostport.URLHostname(connectHost), Address: dial}})
 		if err != nil {
 			return nil, fmt.Errorf("the ingress dial address %q: %w", dial, err)
 		}
@@ -167,12 +168,12 @@ func (r *SubscriberRegistrar) Register(ctx context.Context, spec IngressSpec) (I
 	scheme := "https"
 	publicHost := strings.TrimSpace(spec.PublicHost)
 	if publicHost == "" {
-		publicHost = hostnameOnly(strings.TrimSpace(spec.IngressAddress))
+		publicHost = hostport.URLHostname(strings.TrimSpace(spec.IngressAddress))
 	}
 	if publicHost == "" {
 		publicHost = host
 	}
-	urlHost := didToSubdomain(did) + "." + publicHost
+	urlHost := hostport.DIDLabel(did) + "." + publicHost
 	path := normalizePath(spec.Path)
 	raw := scheme + "://" + urlHost + path
 	return &subscriberRegistration{url: raw, subscriber: subscriber}, nil
@@ -428,22 +429,4 @@ func (r *subscriberRegistration) Close() error {
 	}
 	r.subscriber.Close()
 	return nil
-}
-
-func hostnameOnly(host string) string {
-	host = strings.TrimSpace(host)
-	if host == "" {
-		return ""
-	}
-	if parsed, err := url.Parse("//" + host); err == nil && parsed.Hostname() != "" {
-		return parsed.Hostname()
-	}
-	if name, _, err := net.SplitHostPort(host); err == nil {
-		return name
-	}
-	return strings.Trim(host, "[]")
-}
-
-func didToSubdomain(did string) string {
-	return strings.ToLower(strings.ReplaceAll(did, ":", "-"))
 }

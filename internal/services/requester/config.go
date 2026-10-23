@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -23,6 +22,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauthclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/sshtransport"
@@ -499,7 +499,7 @@ func networkResolver(n v1alpha1.MarketNetworkValue, fallback networkdial.Resolve
 		entries = append(entries, networkdial.Host{Name: host.Name, Address: host.Address})
 	}
 	if name := hostnameOf(n.GuestTLSURL()); name != "" {
-		if address := hostWithPort(n.GuestTLSURL(), n.Hosts); address != "" {
+		if address := hostport.ForURL(n.GuestTLSURL(), n.Hosts); address != "" {
 			entries = append(entries, networkdial.Host{Name: name, Address: address})
 		}
 	}
@@ -514,31 +514,6 @@ func networkResolver(n v1alpha1.MarketNetworkValue, fallback networkdial.Resolve
 		return nil
 	}
 	return chainedResolver(resolvers)
-}
-
-func hostWithPort(raw string, hosts []v1alpha1.NetworkHost) string {
-	parsed, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil {
-		return ""
-	}
-	port := parsed.Port()
-	if port == "" {
-		switch parsed.Scheme {
-		case "https":
-			port = "443"
-		case "http":
-			port = "80"
-		}
-	}
-	if port == "" {
-		return ""
-	}
-	for _, host := range hosts {
-		if _, candidate, splitErr := net.SplitHostPort(host.Address); splitErr == nil && candidate == port {
-			return host.Address
-		}
-	}
-	return ""
 }
 
 func networkTLSConfig(n v1alpha1.MarketNetworkValue) *tls.Config {

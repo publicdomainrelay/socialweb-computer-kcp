@@ -13,13 +13,13 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsreload"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
@@ -145,7 +145,7 @@ func appendValues(values []string, extra ...string) []string {
 func certificateFiles(certRef string, storage *v1alpha1.ComponentStorage, hostnames []string) (string, string) {
 	certFile := refPath(certRef, storage)
 	if certFile == "" && storage != nil && storage.CertsDir != "" && len(hostnames) > 0 {
-		name := hostnameOnly(hostnames[0])
+		name := hostport.HostnameOnly(hostnames[0])
 		if name != "" && name != "*" {
 			certFile = filepath.Join(storage.CertsDir, name+".crt")
 		}
@@ -200,7 +200,7 @@ func upstreamEndpoint(deps component.Deps, workspace string, ref *commonv1.Objec
 	if workspace != "" {
 		for _, wanted := range []string{"http", "control"} {
 			if endpoint, ok := deps.Registry.Endpoint(workspace, kind, name, wanted); ok {
-				return endpointURL(endpoint)
+				return hostport.EndpointURL(endpoint)
 			}
 		}
 	}
@@ -215,25 +215,11 @@ func upstreamEndpoint(deps component.Deps, workspace string, ref *commonv1.Objec
 		}
 		for _, endpoint := range entry.Endpoints {
 			if endpoint.Address != "" {
-				return endpointURL(endpoint)
+				return hostport.EndpointURL(endpoint)
 			}
 		}
 	}
 	return "", false
-}
-
-func endpointURL(endpoint component.Endpoint) (string, bool) {
-	if endpoint.URL != "" {
-		return endpoint.URL, true
-	}
-	if endpoint.Address == "" {
-		return "", false
-	}
-	scheme := strings.TrimSpace(endpoint.Protocol)
-	if scheme == "" {
-		scheme = "http"
-	}
-	return scheme + "://" + endpoint.Address, true
 }
 
 func loadCA(data []byte) (*x509.CertPool, error) {
@@ -315,7 +301,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 		},
 	}
 	handler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		host := hostnameOnly(req.Host)
+		host := hostport.HostnameOnly(req.Host)
 		if !hostAllowed(hosts, host) {
 			log.Info("dispatcher_tls_refused", "host", host, "path", req.URL.Path)
 			http.Error(w, "not a dispatcher name", http.StatusNotFound)
@@ -335,7 +321,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 		}
 		proxy.ServeHTTP(w, req.WithContext(context.WithValue(req.Context(), upstreamTargetKey{}, target)))
 	})
-	listener, err := net.Listen("tcp", listenAddress(cfg.Address, cfg.Host, cfg.Port))
+	listener, err := net.Listen("tcp", hostport.Listen(cfg.Address, cfg.Host, cfg.Port))
 	if err != nil {
 		return fmt.Errorf("dispatchertls: listening: %w", err)
 	}
@@ -553,7 +539,7 @@ func allowedHosts(cfg Config) []string {
 	seen := map[string]struct{}{}
 	hosts := []string{}
 	add := func(host string) {
-		host = strings.ToLower(hostnameOnly(strings.TrimSpace(host)))
+		host = strings.ToLower(hostport.HostnameOnly(strings.TrimSpace(host)))
 		if host == "" {
 			return
 		}
@@ -576,7 +562,7 @@ func allowedHosts(cfg Config) []string {
 }
 
 func hostAllowed(hosts []string, host string) bool {
-	host = strings.ToLower(hostnameOnly(host))
+	host = strings.ToLower(hostport.HostnameOnly(host))
 	for _, allowed := range hosts {
 		if allowed == "*" || host == allowed || strings.HasSuffix(host, "."+allowed) {
 			return true
@@ -592,29 +578,6 @@ func probeHost(hosts []string) string {
 		}
 	}
 	return "localhost"
-}
-
-func hostnameOnly(host string) string {
-	h := host
-	if strings.HasPrefix(h, "[") {
-		if end := strings.Index(h, "]"); end != -1 {
-			h = h[1:end]
-		}
-	}
-	if idx := strings.LastIndex(h, ":"); idx != -1 && idx > strings.Index(h, "]") {
-		h = h[:idx]
-	}
-	return h
-}
-
-func listenAddress(address, host string, port int) string {
-	if address != "" {
-		return address
-	}
-	if host == "" {
-		host = "127.0.0.1"
-	}
-	return net.JoinHostPort(host, strconv.Itoa(port))
 }
 
 func mergeDeps(cfgDeps, deps component.Deps) component.Deps {

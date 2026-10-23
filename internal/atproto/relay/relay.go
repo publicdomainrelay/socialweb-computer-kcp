@@ -19,6 +19,7 @@ import (
 	comatproto "github.com/bluesky-social/indigo/api/atproto"
 	"github.com/bluesky-social/indigo/atproto/identity"
 	"github.com/gorilla/websocket"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
 )
 
 var (
@@ -178,19 +179,19 @@ func (r *Relay) serveHTTP(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"version": r.cfg.Version})
 	case req.Method == http.MethodGet && path == "/xrpc/com.atproto.server.describeServer":
 		writeJSON(w, http.StatusOK, map[string]any{
-			"did":                  hostnameToDID(r.cfg.Hostname),
+			"did":                  hostport.WebDID(r.cfg.Hostname),
 			"version":              r.cfg.Version,
 			"availableUserDomains": []string{},
 			"inviteCodeRequired":   false,
 		})
 	case req.Method == http.MethodGet && path == "/.well-known/atproto-did":
 		w.Header().Set("Content-Type", "text/plain")
-		_, _ = w.Write([]byte(hostnameToDID(r.cfg.Hostname)))
+		_, _ = w.Write([]byte(hostport.WebDID(r.cfg.Hostname)))
 	case req.Method == http.MethodGet && path == "/.well-known/did.json":
-		host := hostnameOnly(hostFromRequest(req, r.cfg.Hostname))
+		host := hostport.HostnameOnly(hostport.FromRequest(req, r.cfg.Hostname))
 		writeJSON(w, http.StatusOK, map[string]any{
 			"@context": []string{"https://www.w3.org/ns/did/v1"},
-			"id":       hostnameToDID(host),
+			"id":       hostport.WebDID(host),
 			"service": []map[string]string{{
 				"id":              "#atproto_relay",
 				"type":            "AtprotoRelay",
@@ -507,31 +508,4 @@ func withCORS(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, req)
 	})
-}
-
-func hostFromRequest(req *http.Request, fallback string) string {
-	if req.Host != "" {
-		return req.Host
-	}
-	if req.URL != nil && req.URL.Host != "" {
-		return req.URL.Host
-	}
-	return fallback
-}
-
-func hostnameOnly(host string) string {
-	h := host
-	if strings.HasPrefix(h, "[") {
-		if end := strings.Index(h, "]"); end != -1 {
-			h = h[1:end]
-		}
-	}
-	if idx := strings.LastIndex(h, ":"); idx != -1 && idx > strings.Index(h, "]") {
-		h = h[:idx]
-	}
-	return h
-}
-
-func hostnameToDID(host string) string {
-	return "did:web:" + hostnameOnly(host)
 }

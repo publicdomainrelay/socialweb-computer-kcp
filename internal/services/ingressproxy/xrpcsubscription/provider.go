@@ -8,8 +8,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -18,6 +16,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/ingress"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/exposure"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
 )
 
 const DefaultShutdownTimeout = 5 * time.Second
@@ -100,7 +99,7 @@ func (p *Provider) Start(ctx context.Context, deps component.Deps) error {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	hostname := primaryHostname(cfg.Hostname, cfg.Hostnames)
+	hostname := hostport.Primary(cfg.Hostname, cfg.Hostnames)
 	server, err := ingress.NewServer(ingress.Config{
 		Hostname:          hostname,
 		ServiceID:         cfg.ServiceID,
@@ -119,7 +118,7 @@ func (p *Provider) Start(ctx context.Context, deps component.Deps) error {
 	if err != nil {
 		return fmt.Errorf("ingressproxy: building the server: %w", err)
 	}
-	rawListener, err := net.Listen("tcp", listenAddress(cfg.Address, cfg.Host, cfg.Port))
+	rawListener, err := net.Listen("tcp", hostport.Listen(cfg.Address, cfg.Host, cfg.Port))
 	if err != nil {
 		server.Close()
 		return fmt.Errorf("ingressproxy: listening: %w", err)
@@ -189,7 +188,7 @@ func (p *Provider) Ready(ctx context.Context) error {
 	if p.listener != nil {
 		address = p.listener.Addr().String()
 	}
-	hostname := primaryHostname(p.cfg.Hostname, p.cfg.Hostnames)
+	hostname := hostport.Primary(p.cfg.Hostname, p.cfg.Hostnames)
 	p.mu.Unlock()
 	if !ready || address == "" {
 		return errors.New("ingressproxy: the service is not listening")
@@ -202,7 +201,7 @@ func (p *Provider) Ready(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	req.Host = hostnameOnly(hostname)
+	req.Host = hostport.HostnameOnly(hostname)
 	resp, err := probeClient(secure).Do(req)
 	if err != nil {
 		return fmt.Errorf("ingressproxy: health request: %w", err)
@@ -221,16 +220,16 @@ func (p *Provider) Endpoints() []component.Endpoint {
 		return nil
 	}
 	address := p.listener.Addr().String()
-	hostname := primaryHostname(p.cfg.Hostname, p.cfg.Hostnames)
+	hostname := hostport.Primary(p.cfg.Hostname, p.cfg.Hostnames)
 	if p.cfg.TLS != nil {
 		return []component.Endpoint{
 			{Name: "https", Protocol: component.ProtocolHTTPS, URL: "https://" + address, Address: address},
-			{Name: "control", Protocol: component.ProtocolHTTPS, URL: "https://" + hostnameOnly(hostname), Address: address},
+			{Name: "control", Protocol: component.ProtocolHTTPS, URL: "https://" + hostport.HostnameOnly(hostname), Address: address},
 		}
 	}
 	return []component.Endpoint{
 		{Name: "http", Protocol: component.ProtocolHTTP, URL: "http://" + address, Address: address},
-		{Name: "control", Protocol: component.ProtocolHTTP, URL: "http://" + hostnameOnly(hostname), Address: address},
+		{Name: "control", Protocol: component.ProtocolHTTP, URL: "http://" + hostport.HostnameOnly(hostname), Address: address},
 	}
 }
 
@@ -276,41 +275,6 @@ func (p *Provider) finish() {
 	p.listener = nil
 	p.http = nil
 	p.mu.Unlock()
-}
-
-func listenAddress(address, host string, port int) string {
-	if address != "" {
-		return address
-	}
-	if host == "" {
-		host = "127.0.0.1"
-	}
-	return net.JoinHostPort(host, strconv.Itoa(port))
-}
-
-func primaryHostname(host string, hostnames []string) string {
-	if host != "" {
-		return host
-	}
-	for _, candidate := range hostnames {
-		if candidate != "" {
-			return candidate
-		}
-	}
-	return "localhost"
-}
-
-func hostnameOnly(host string) string {
-	h := host
-	if strings.HasPrefix(h, "[") {
-		if end := strings.Index(h, "]"); end != -1 {
-			h = h[1:end]
-		}
-	}
-	if idx := strings.LastIndex(h, ":"); idx != -1 && idx > strings.Index(h, "]") {
-		h = h[:idx]
-	}
-	return h
 }
 
 func probeClient(secure bool) *http.Client {

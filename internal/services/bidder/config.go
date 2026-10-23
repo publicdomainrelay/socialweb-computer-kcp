@@ -21,6 +21,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestseed"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
 
@@ -461,8 +462,8 @@ func bidderNetworkResolver(n v1alpha1.MarketNetworkValue, fallback networkdial.R
 	for _, host := range n.Hosts {
 		entries = append(entries, networkdial.Host{Name: host.Name, Address: host.Address})
 	}
-	if name := hostnameOnly(n.GuestTLSURL()); name != "" {
-		if address := bidderHostWithPort(n.GuestTLSURL(), n.Hosts); address != "" {
+	if name := hostport.URLHostname(n.GuestTLSURL()); name != "" {
+		if address := hostport.ForURL(n.GuestTLSURL(), n.Hosts); address != "" {
 			entries = append(entries, networkdial.Host{Name: name, Address: address})
 		}
 	}
@@ -477,31 +478,6 @@ func bidderNetworkResolver(n v1alpha1.MarketNetworkValue, fallback networkdial.R
 		return nil
 	}
 	return bidderChainedResolver(resolvers)
-}
-
-func bidderHostWithPort(raw string, hosts []v1alpha1.NetworkHost) string {
-	parsed, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil {
-		return ""
-	}
-	port := parsed.Port()
-	if port == "" {
-		switch parsed.Scheme {
-		case "https":
-			port = "443"
-		case "http":
-			port = "80"
-		}
-	}
-	if port == "" {
-		return ""
-	}
-	for _, host := range hosts {
-		if _, candidate, splitErr := net.SplitHostPort(host.Address); splitErr == nil && candidate == port {
-			return host.Address
-		}
-	}
-	return ""
 }
 
 func bidderNetworkTLS(bundle string) (*tls.Config, error) {

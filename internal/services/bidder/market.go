@@ -27,6 +27,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/oauthcallback"
@@ -787,7 +788,7 @@ func (s *Service) startRelay(ctx context.Context) error {
 		if signer == nil {
 			return errors.New("the relay has no service-auth token source")
 		}
-		aud := "did:web:" + hostnameOnly(relay.IngressProxyHost)
+		aud := "did:web:" + hostport.URLHostname(relay.IngressProxyHost)
 		getToken = func(ctx context.Context, nsid string) (string, error) {
 			return ingress.SignServiceAuth(signer.PrivateKey, did, aud, nsid, 5*time.Minute)
 		}
@@ -803,7 +804,7 @@ func (s *Service) startRelay(ctx context.Context) error {
 	httpClient := relay.HTTPClient
 	var dialer *websocket.Dialer
 	if relay.DialAddress != "" && connectHost != "" {
-		hosts, hostErr := networkdial.NewHostMap([]networkdial.Host{{Name: hostnameOnly(connectHost), Address: relay.DialAddress}})
+		hosts, hostErr := networkdial.NewHostMap([]networkdial.Host{{Name: hostport.URLHostname(connectHost), Address: relay.DialAddress}})
 		if hostErr != nil {
 			return hostErr
 		}
@@ -902,17 +903,6 @@ func (s *Service) forwardRelay(ctx context.Context, request *ingress.Request) (*
 		return nil, err
 	}
 	return &ingress.Response{Status: result.StatusCode, Body: json.RawMessage(raw), ContentType: result.Header.Get("Content-Type")}, nil
-}
-
-func hostnameOnly(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if parsed, err := url.Parse(raw); err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Hostname() != "" {
-		return parsed.Hostname()
-	}
-	if parsed, err := url.Parse("//" + raw); err == nil && parsed.Hostname() != "" {
-		return parsed.Hostname()
-	}
-	return strings.Trim(raw, "[]")
 }
 
 type signerKeypair struct {

@@ -15,6 +15,7 @@ import (
 
 	"github.com/bluesky-social/indigo/atproto/identity"
 	"github.com/gorilla/websocket"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
 )
 
 var (
@@ -239,14 +240,14 @@ func (s *Server) serveHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	host := hostnameOnly(hostFromRequest(req, s.cfg.Hostname))
+	host := hostport.HostnameOnly(hostport.FromRequest(req, s.cfg.Hostname))
 	path := req.URL.Path
 	control := s.isControlHost(host)
 
 	if control && req.Method == http.MethodGet && path == "/.well-known/did.json" {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"@context": []string{"https://www.w3.org/ns/did/v1"},
-			"id":       hostnameToDID(host),
+			"id":       hostport.WebDID(host),
 			"service": []map[string]string{{
 				"id":              "#" + s.cfg.ServiceID,
 				"type":            "XrpcRelay",
@@ -307,7 +308,7 @@ func (s *Server) dataBases() []string {
 	seen := map[string]struct{}{}
 	out := []string{}
 	add := func(h string) {
-		h = hostnameOnly(h)
+		h = hostport.HostnameOnly(h)
 		if h == "" || h == "*" {
 			return
 		}
@@ -340,7 +341,7 @@ func (s *Server) handleNonce(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "AuthenticationRequired", "message": err.Error()})
 		return
 	}
-	if _, err := VerifyServiceAuth(req.Context(), token, hostnameToDID(s.cfg.Hostname), GetNonceNSID, s.dir); err != nil {
+	if _, err := VerifyServiceAuth(req.Context(), token, hostport.WebDID(s.cfg.Hostname), GetNonceNSID, s.dir); err != nil {
 		s.log.Warn("auth_denied", "nsid", GetNonceNSID, "err", err)
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "AuthenticationRequired", "message": err.Error()})
 		return
@@ -370,7 +371,7 @@ func (s *Server) handleSubscribe(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "AuthenticationRequired", "message": err.Error()})
 		return
 	}
-	auth, err := VerifyServiceAuth(req.Context(), token, hostnameToDID(s.cfg.Hostname), SubscribeNSID, s.dir)
+	auth, err := VerifyServiceAuth(req.Context(), token, hostport.WebDID(s.cfg.Hostname), SubscribeNSID, s.dir)
 	if err != nil {
 		s.log.Warn("auth_denied", "nsid", SubscribeNSID, "err", err)
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "AuthenticationRequired", "message": err.Error()})
@@ -383,7 +384,7 @@ func (s *Server) handleSubscribe(w http.ResponseWriter, req *http.Request) {
 	}
 	conn.SetReadLimit(8_000_000)
 	clientDID := req.URL.Query().Get("did")
-	subdomain := didToSubdomain(clientDID)
+	subdomain := hostport.DIDLabel(clientDID)
 	if !strings.HasPrefix(clientDID, "did:") {
 		s.log.Warn("missing_did")
 		_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(1008, "did query param must be a DID"), time.Now().Add(time.Second))
@@ -432,7 +433,7 @@ func (s *Server) handleSubscribe(w http.ResponseWriter, req *http.Request) {
 	_ = p.writeJSON(map[string]any{
 		"$type":      frameType("registered"),
 		"subdomain":  subdomain,
-		"ingressRef": "did:web:" + subdomain + "." + hostnameOnly(s.cfg.Hostname),
+		"ingressRef": "did:web:" + subdomain + "." + hostport.HostnameOnly(s.cfg.Hostname),
 	})
 
 	for {
@@ -864,16 +865,6 @@ func lastQueryValues(values map[string][]string) map[string]string {
 		}
 	}
 	return out
-}
-
-func hostFromRequest(req *http.Request, fallback string) string {
-	if req.Host != "" {
-		return req.Host
-	}
-	if req.URL != nil && req.URL.Host != "" {
-		return req.URL.Host
-	}
-	return fallback
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {

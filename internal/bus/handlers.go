@@ -15,6 +15,7 @@ import (
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	contract "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 )
 
@@ -430,7 +431,7 @@ func (r *Bus) dialHTTP(ctx context.Context, _ string, address string) (net.Conn,
 	if err := r.Ready(); err != nil {
 		return nil, err
 	}
-	host := normalizeHost(address)
+	host := hostport.Normalize(address)
 	handler, key, _, ok := r.handlerForHost(host)
 	if !ok {
 		return nil, fmt.Errorf("%w: %s", ErrNoHandler, host)
@@ -485,7 +486,7 @@ func (r *Bus) handlerForHost(host string) (http.Handler, Key, string, bool) {
 	if r == nil {
 		return nil, Key{}, "", false
 	}
-	host = normalizeHost(host)
+	host = hostport.Normalize(host)
 	r.mu.RLock()
 	alias, ok := r.aliases[host]
 	if ok && !alias.ambiguous {
@@ -653,7 +654,7 @@ func (t *handlerRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 	if err := t.registry.Ready(); err != nil {
 		return nil, err
 	}
-	host := normalizeHost(requestHost(req))
+	host := hostport.Normalize(requestHost(req))
 	_, key, _, ok := t.registry.handlerForHost(host)
 	if !ok {
 		return nil, fmt.Errorf("%w: %s", ErrNoHandler, host)
@@ -724,8 +725,8 @@ func (r *Bus) authorizeCaller(from Caller, to commonv1.ObjectRef, c Capability) 
 }
 
 func handlerAliases(key Key, name string) []string {
-	kind := normalizeHost(key.Kind)
-	component := normalizeHost(key.Name)
+	kind := hostport.Normalize(key.Kind)
+	component := hostport.Normalize(key.Name)
 	if kind == "" || component == "" {
 		return nil
 	}
@@ -738,19 +739,9 @@ func handlerAliases(key Key, name string) []string {
 		if name != DefaultHandlerName {
 			base = "_" + name + "." + base
 		}
-		out = append(out, normalizeHost(base))
+		out = append(out, hostport.Normalize(base))
 	}
 	return out
-}
-
-func normalizeHost(value string) string {
-	value = strings.TrimSpace(value)
-	if host, _, err := net.SplitHostPort(value); err == nil {
-		value = host
-	}
-	value = strings.Trim(value, "[]")
-	value = strings.TrimSuffix(value, ".")
-	return strings.ToLower(value)
 }
 
 func normalizeHandlerName(name string) string {

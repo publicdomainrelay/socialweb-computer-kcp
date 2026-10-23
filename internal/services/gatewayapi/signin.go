@@ -19,6 +19,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayhttp"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
 )
@@ -584,15 +585,10 @@ func (a *custodyAgent) pds() (*url.URL, error) {
 	if (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return nil, fmt.Errorf("gatewayapi: the account PDS URL %q is not absolute http or https", raw)
 	}
-	if u.Scheme == "http" && !loopbackHost(u.Hostname()) && !(a.allowInternalHTTP && internalServiceHost(u.Hostname())) {
+	if u.Scheme == "http" && !loopbackHost(u.Hostname()) && !(a.allowInternalHTTP && hostport.IsInternalKCP(u.Hostname())) {
 		return nil, fmt.Errorf("gatewayapi: the account PDS URL %q is plain http on a non-loopback host", raw)
 	}
 	return u, nil
-}
-
-func internalServiceHost(host string) bool {
-	host = strings.ToLower(strings.TrimSuffix(host, "."))
-	return host == "svc.kcp.local" || strings.HasSuffix(host, ".svc.kcp.local")
 }
 
 func (a *custodyAgent) xrpcClient() (*xrpc.Client, error) {

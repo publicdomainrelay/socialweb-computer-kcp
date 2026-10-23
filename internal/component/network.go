@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
 )
 
 type NetworkHost struct {
@@ -148,7 +149,7 @@ func NewNetworkHostMap(hosts []NetworkHost) (*NetworkHostMap, error) {
 		if _, _, err := net.SplitHostPort(host.Address); err != nil {
 			return nil, fmt.Errorf("component: the network host %s address %q is not host:port: %w", networkHostLabel(host), host.Address, err)
 		}
-		name := hostKey(host.Host)
+		name := hostport.Normalize(host.Host)
 		if name == "" {
 			return nil, fmt.Errorf("component: the network host %s has no host name", networkHostLabel(host))
 		}
@@ -202,15 +203,15 @@ func networkHostAliases(host NetworkHost) []string {
 	return aliases
 }
 
-func (m *NetworkHostMap) Address(hostport string) (string, bool) {
+func (m *NetworkHostMap) Address(target string) (string, bool) {
 	if m == nil {
 		return "", false
 	}
-	value := strings.TrimSpace(hostport)
+	value := strings.TrimSpace(target)
 	if address, ok := m.aliases[strings.ToLower(value)]; ok {
 		return address, true
 	}
-	name := hostKey(value)
+	name := hostport.Normalize(value)
 	if address, ok := m.aliases[name]; ok {
 		return address, true
 	}
@@ -246,14 +247,4 @@ func (m *NetworkHostMap) Lookup(key string) (NetworkHost, bool) {
 		return NetworkHost{}, false
 	}
 	return m.status[index], true
-}
-
-func hostKey(value string) string {
-	value = strings.TrimSpace(value)
-	if host, _, err := net.SplitHostPort(value); err == nil {
-		value = host
-	}
-	value = strings.Trim(value, "[]")
-	value = strings.TrimSuffix(value, ".")
-	return strings.ToLower(value)
 }

@@ -6,10 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net"
 	"net/http"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -18,6 +16,7 @@ import (
 	atplc "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/plc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsreload"
 )
 
@@ -94,7 +93,7 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 		cfg.Hostnames = appendHostnames(cfg.Hostnames, decoded.TLS.Hostnames...)
 	}
 	if decoded.Network != nil {
-		cfg.Hostnames = appendHostnames(cfg.Hostnames, networkHostnames(decoded.Network, cfg.Port)...)
+		cfg.Hostnames = appendHostnames(cfg.Hostnames, hostport.NetworkHostnames(decoded.Network, cfg.Port)...)
 	}
 	if decoded.TLS != nil && decoded.TLS.Enabled {
 		certFile, keyFile := certificateFiles(decoded.TLS.CertRef, decoded.Storage, cfg.Hostnames)
@@ -133,26 +132,10 @@ func appendHostnames(hostnames []string, extra ...string) []string {
 	return out
 }
 
-func networkHostnames(network *v1alpha1.MarketNetworkValue, port int) []string {
-	if network == nil || port <= 0 {
-		return nil
-	}
-	wanted := strconv.Itoa(port)
-	var out []string
-	for _, host := range network.Hosts {
-		_, value, err := net.SplitHostPort(host.Address)
-		if err != nil || value != wanted {
-			continue
-		}
-		out = append(out, host.Name)
-	}
-	return out
-}
-
 func certificateFiles(certRef string, storage *v1alpha1.ComponentStorage, hostnames []string) (string, string) {
 	certFile := refPath(certRef, storage)
 	if certFile == "" && storage != nil && storage.CertsDir != "" && len(hostnames) > 0 {
-		name := hostnameOnly(hostnames[0])
+		name := hostport.HostnameOnly(hostnames[0])
 		if name != "" && name != "*" {
 			certFile = filepath.Join(storage.CertsDir, name+".crt")
 		}
@@ -282,7 +265,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	s.ready = true
 	s.mu.Unlock()
 
-	log.Info("plc_registered", "host", host, "hostname", primaryHostname(cfg.Host, cfg.Hostnames))
+	log.Info("plc_registered", "host", host, "hostname", hostport.Primary(cfg.Host, cfg.Hostnames))
 
 	select {
 	case <-ctx.Done():
@@ -404,29 +387,4 @@ func mergeDeps(cfgDeps, deps component.Deps) component.Deps {
 		out.Vault = deps.Vault
 	}
 	return out
-}
-
-func primaryHostname(host string, hostnames []string) string {
-	if host != "" {
-		return host
-	}
-	for _, candidate := range hostnames {
-		if candidate != "" {
-			return candidate
-		}
-	}
-	return "localhost"
-}
-
-func hostnameOnly(host string) string {
-	h := host
-	if strings.HasPrefix(h, "[") {
-		if end := strings.Index(h, "]"); end != -1 {
-			h = h[1:end]
-		}
-	}
-	if idx := strings.LastIndex(h, ":"); idx != -1 && idx > strings.Index(h, "]") {
-		h = h[:idx]
-	}
-	return h
 }

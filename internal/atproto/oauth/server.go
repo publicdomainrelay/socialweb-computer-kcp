@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/syntax"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
 )
 
 const (
@@ -152,7 +153,7 @@ func normalizeIssuer(raw string) (string, error) {
 	if parsed.Path != "" && parsed.Path != "/" {
 		return "", fmt.Errorf("oauth: issuer must not have a path")
 	}
-	if scheme == "http" && !isLoopbackHostname(parsed.Hostname()) && !isInternalKcpHostname(parsed.Hostname()) {
+	if scheme == "http" && !isLoopbackHostname(parsed.Hostname()) && !hostport.IsInternalKCP(parsed.Hostname()) {
 		return "", fmt.Errorf("oauth: http issuer is only allowed on loopback or the internal kcp service domain")
 	}
 	return scheme + "://" + strings.ToLower(parsed.Host), nil
@@ -164,11 +165,6 @@ func isLoopbackHostname(host string) bool {
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
-}
-
-func isInternalKcpHostname(host string) bool {
-	host = strings.ToLower(strings.TrimSuffix(host, "."))
-	return host == "svc.kcp.local" || strings.HasSuffix(host, ".svc.kcp.local")
 }
 
 func (s *Server) Issuer() string {
