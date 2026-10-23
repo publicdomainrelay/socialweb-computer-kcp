@@ -466,7 +466,7 @@ func dpopKey(data map[string]any) (atcrypto.PrivateKeyExportable, error) {
 			return key, nil
 		}
 	}
-	for _, name := range []string{"dpopPrivateKeyMultibase", "privateKeyMultibase", "dpopPrivateKey", "privateKey", "key", "value"} {
+	for _, name := range []string{"dpopPrivateKeyMultibase", "dpop_privatekey_multibase", "privateKeyMultibase", "private_key_multibase", "dpopPrivateKey", "privateKey", "key", "value"} {
 		value, ok := data[name]
 		if !ok {
 			continue

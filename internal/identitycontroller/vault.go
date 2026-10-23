@@ -151,6 +151,7 @@ func secretFromSession(session oauthclient.SessionData) map[string]any {
 		"dpop_authserver_nonce":     session.DPoPAuthServerNonce,
 		"dpop_host_nonce":           session.DPoPHostNonce,
 		"dpop_privatekey_multibase": session.DPoPPrivateKeyMultibase,
+		"dpopPrivateKeyMultibase":   session.DPoPPrivateKeyMultibase,
 	}
 }
 
