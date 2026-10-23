@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -116,8 +117,12 @@ func New(o Options, client kubernetes.Interface) (*Controller, error) {
 }
 
 func (c *Controller) Run(ctx context.Context) error {
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	defer c.queue.ShutDown()
-	go c.informer.Run(ctx.Done())
+	wg.Go(func() { c.informer.Run(runCtx.Done()) })
 	if !cache.WaitForCacheSync(ctx.Done(), c.informer.HasSynced) {
 		return errors.New(
 			"cloudprovider: the Node informer did not sync before shutdown, so no Node was ever " +
@@ -128,10 +133,10 @@ func (c *Controller) Run(ctx context.Context) error {
 		"cluster": c.cluster,
 		"nodes":   len(c.informer.GetStore().List()),
 	})
-	go func() {
-		<-ctx.Done()
+	wg.Go(func() {
+		<-runCtx.Done()
 		c.queue.ShutDown()
-	}()
+	})
 	for {
 		nodeName, shutdown := c.queue.Get()
 		if shutdown {
