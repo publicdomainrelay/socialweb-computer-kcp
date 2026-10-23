@@ -33,6 +33,10 @@ import (
 const Kind = "Bidder"
 
 const (
+	RecordReplyLimit = 8 << 20
+
+	RecordRequestTimeout = 30 * time.Second
+
 	DefaultServeHost = "127.0.0.1"
 
 	DefaultGuestLoginMount = computevm.GuestLoginDefaultMount
@@ -153,10 +157,6 @@ type Config struct {
 
 	PDSAccessTokenRef *component.CredentialRef
 
-	PDS pdsclient.PDS
-
-	PDSResolver *pdsclient.Resolver
-
 	PDSTokens pdsclient.TokenSource
 
 	PDSDPoP pdsclient.DPoPSource
@@ -201,7 +201,7 @@ type Config struct {
 
 	Relay *RelayConfig
 
-	Records RecordStore
+	Records *market.RepoStore
 
 	Vault GuestVault
 
@@ -392,9 +392,6 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 						} else if deps.Log != nil {
 							deps.Log.Warn("the bidder could not discover the oauth auth server", "err", discoverErr.Error())
 						}
-					}
-					if pds, fallbackErr := indigoSessionPDS(data); fallbackErr == nil {
-						cfg.PDS = pds
 					}
 				}
 			} else {

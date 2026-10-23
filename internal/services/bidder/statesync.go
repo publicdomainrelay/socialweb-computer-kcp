@@ -205,7 +205,7 @@ func verifyInboundDeleteEvent(ctx context.Context, service *Service, event marke
 type marketEventAdapter struct {
 	service *Service
 
-	records RecordStore
+	records *market.RepoStore
 
 	did string
 

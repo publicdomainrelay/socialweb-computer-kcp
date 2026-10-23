@@ -20,7 +20,6 @@ import (
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	eventsapi "github.com/johnandersen777/socialweb-computer-kcp/api/events/v1alpha1"
 	v1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 )
 
 const AtprotoRepoKind = "AtprotoRepo"
@@ -185,7 +184,7 @@ func (c *Controller) resolveWatchRepoRef(ctx context.Context, dyn dynamic.Interf
 	}
 	did := strings.TrimSpace(repo.Status.DID)
 	if did == "" {
-		backend, err := pdsclient.ReadRepoBackend(ctx, client, workspace, repo)
+		backend, err := readRepoBackend(ctx, client, repo)
 		if err != nil {
 			return watchRepo{}, err
 		}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
@@ -17,7 +18,13 @@ const (
 	CapabilitySubscribe = "repo.subscribe"
 )
 
-var ErrNotFound = errors.New("atprotorepo: record not found")
+var (
+	ErrNotFound = errors.New("atprotorepo: record not found")
+
+	ErrOutOfScope = errors.New("atprotorepo: the collection is outside the granted scope")
+
+	ErrNotBound = errors.New("atprotorepo: the repo has no bound backend")
+)
 
 type Record struct {
 	URI string
@@ -103,4 +110,32 @@ type Repo interface {
 	RecordWriter
 
 	Subscriber
+}
+
+func RepoName(did string) string {
+	raw := strings.ToLower("repo-" + did)
+	var b strings.Builder
+	lastDash := false
+	for _, r := range raw {
+		if !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '.') {
+			r = '-'
+		}
+		if r == '-' {
+			if lastDash {
+				continue
+			}
+			lastDash = true
+		} else {
+			lastDash = false
+		}
+		b.WriteRune(r)
+	}
+	name := strings.Trim(b.String(), "-.")
+	if name == "" {
+		name = "repo"
+	}
+	if len(name) > 253 {
+		name = strings.TrimRight(name[:253], "-.")
+	}
+	return name
 }

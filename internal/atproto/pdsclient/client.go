@@ -2,7 +2,6 @@ package pdsclient
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -10,314 +9,11 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/bluesky-social/indigo/atproto/atdata"
 	"github.com/bluesky-social/indigo/atproto/syntax"
 	"github.com/ipfs/go-cid"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
-
-const (
-	defaultCallTimeout   = 30 * time.Second
-	maxJSONResponseBytes = 64 << 20
-	maxErrorBodyBytes    = 64 << 10
-	maxListRecordsLimit  = 100
-)
-
-type authStore struct {
-	mu      sync.RWMutex
-	session Session
-	present bool
-}
-
-func (a *authStore) set(session Session) {
-	a.mu.Lock()
-	a.session = session
-	a.present = true
-	a.mu.Unlock()
-}
-
-func (a *authStore) access() string {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	if !a.present {
-		return ""
-	}
-	return a.session.AccessJWT
-}
-
-func (a *authStore) refresh() string {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	if !a.present {
-		return ""
-	}
-	return a.session.RefreshJWT
-}
-
-func (a *authStore) snapshot() Session {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	if !a.present {
-		return Session{}
-	}
-	return a.session
-}
-
-func (a *authStore) clear() {
-	a.mu.Lock()
-	a.session = Session{}
-	a.present = false
-	a.mu.Unlock()
-}
-
-type xrpcClient struct {
-	base        *url.URL
-	httpClient  *http.Client
-	timeout     time.Duration
-	tokens      TokenSource
-	dpop        DPoPSource
-	auth        *authStore
-	expectedDID syntax.DID
-}
-
-func newXRPCClient(base *url.URL, httpClient *http.Client, tokens TokenSource, dpop DPoPSource, timeout time.Duration) *xrpcClient {
-	timeout = opt.Positive(timeout, defaultCallTimeout)
-	if dpop == nil {
-		if combined, ok := tokens.(DPoPSource); ok {
-			dpop = combined
-		}
-	}
-	return &xrpcClient{
-		base:       base,
-		httpClient: httpClient,
-		timeout:    timeout,
-		tokens:     tokens,
-		dpop:       dpop,
-		auth:       &authStore{},
-	}
-}
-
-func (c *xrpcClient) accessToken(ctx context.Context) (string, error) {
-	if c.tokens != nil {
-		token, err := c.tokens.AccessToken(ctx)
-		if err != nil {
-			return "", fmt.Errorf("pdsclient: access token: %w", err)
-		}
-		return strings.TrimSpace(token), nil
-	}
-	if token := c.auth.access(); token != "" {
-		return token, nil
-	}
-	return "", nil
-}
-
-func (c *xrpcClient) refreshAccessToken(ctx context.Context) (string, error) {
-	source, ok := c.tokens.(TokenRefresher)
-	if !ok {
-		return "", nil
-	}
-	token, err := source.RefreshAccessToken(ctx)
-	if err != nil {
-		return "", fmt.Errorf("pdsclient: refreshing the access token: %w", err)
-	}
-	return strings.TrimSpace(token), nil
-}
-
-func (c *xrpcClient) deleteToken(ctx context.Context) (string, error) {
-	if token := c.auth.refresh(); token != "" {
-		return token, nil
-	}
-	if token := c.auth.access(); token != "" {
-		return token, nil
-	}
-	if c.tokens == nil {
-		return "", nil
-	}
-	token, err := c.tokens.AccessToken(ctx)
-	if err != nil {
-		return "", fmt.Errorf("pdsclient: access token: %w", err)
-	}
-	return strings.TrimSpace(token), nil
-}
-
-func (c *xrpcClient) requireToken(ctx context.Context) (string, error) {
-	token, err := c.accessToken(ctx)
-	if err != nil {
-		return "", err
-	}
-	if token == "" {
-		return "", fmt.Errorf("%w: no access token is available", ErrAuthenticationRequired)
-	}
-	return token, nil
-}
-
-func (c *xrpcClient) endpoint(nsid string, query url.Values) *url.URL {
-	out := *c.base
-	out.Path = strings.TrimRight(c.base.Path, "/") + "/xrpc/" + nsid
-	out.RawPath = ""
-	out.RawQuery = query.Encode()
-	out.Fragment = ""
-	return &out
-}
-
-func (c *xrpcClient) callContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	if c.timeout <= 0 {
-		return context.WithCancel(ctx)
-	}
-	return context.WithTimeout(ctx, c.timeout)
-}
-
-func (c *xrpcClient) do(ctx context.Context, method, nsid string, query url.Values, body []byte, token string) (*http.Response, error) {
-	if c == nil || c.base == nil {
-		return nil, fmt.Errorf("%w: client has no base URL", ErrInvalidConfig)
-	}
-	if c.httpClient == nil {
-		return nil, fmt.Errorf("%w: client has no HTTP client", ErrInvalidConfig)
-	}
-	if strings.TrimSpace(nsid) == "" {
-		return nil, fmt.Errorf("%w: missing xrpc method", ErrInvalidRequest)
-	}
-	endpoint := c.endpoint(nsid, query)
-	var response *http.Response
-	refreshed := false
-	for range 3 {
-		var reader io.Reader
-		if body != nil {
-			reader = bytes.NewReader(body)
-		}
-		request, err := http.NewRequestWithContext(ctx, method, endpoint.String(), reader)
-		if err != nil {
-			return nil, fmt.Errorf("%w: building request: %v", ErrInvalidRequest, err)
-		}
-		request.Header.Set("Accept", "application/json")
-		if body != nil {
-			request.Header.Set("Content-Type", "application/json")
-		}
-		if token != "" {
-			scheme := "Bearer"
-			if c.dpop != nil {
-				scheme = "DPoP"
-			}
-			request.Header.Set("Authorization", scheme+" "+token)
-			if c.dpop != nil {
-				dpopURL := *endpoint
-				dpopURL.RawQuery = ""
-				dpopURL.Fragment = ""
-				proof, err := c.dpop.DPoPProof(ctx, method, dpopURL.String(), token)
-				if err != nil {
-					return nil, fmt.Errorf("pdsclient: dpop proof: %w", err)
-				}
-				if proof != "" {
-					request.Header.Set("DPoP", proof)
-				}
-			}
-		}
-		response, err = c.httpClient.Do(request)
-		if err != nil {
-			return nil, fmt.Errorf("pdsclient: request %s: %w", nsid, err)
-		}
-		if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusBadRequest {
-			header := response.Header.Get("WWW-Authenticate")
-			nonce := response.Header.Get("DPoP-Nonce")
-			if nonce == "" {
-				nonce = response.Header.Get("Dpop-Nonce")
-			}
-			if nonce != "" && !strings.Contains(header, "invalid_token") {
-				if setter, ok := c.dpop.(DPoPNonceSetter); ok {
-					_ = setter.SetDPoPNonce(ctx, endpoint.Host, nonce)
-					_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, maxErrorBodyBytes))
-					_ = response.Body.Close()
-					continue
-				}
-			}
-		}
-		if !refreshed && token != "" && (response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden) {
-			refreshed = true
-			fresh, refreshErr := c.refreshAccessToken(ctx)
-			if refreshErr == nil && fresh != "" && fresh != token {
-				_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, maxErrorBodyBytes))
-				_ = response.Body.Close()
-				token = fresh
-				continue
-			}
-		}
-		if err := checkXRPCResponse(response); err != nil {
-			return nil, err
-		}
-		return response, nil
-	}
-	return nil, fmt.Errorf("%w: %s kept rejecting the access token", ErrAuthenticationRequired, nsid)
-}
-
-func checkXRPCResponse(response *http.Response) error {
-	if response == nil {
-		return fmt.Errorf("%w: nil response", ErrUnexpectedResponse)
-	}
-	if response.StatusCode >= 200 && response.StatusCode < 300 {
-		return nil
-	}
-	defer response.Body.Close()
-	var body struct {
-		Error   string `json:"error"`
-		Message string `json:"message"`
-	}
-	_ = json.NewDecoder(io.LimitReader(response.Body, maxErrorBodyBytes)).Decode(&body)
-	code := strings.TrimSpace(body.Error)
-	message := strings.TrimSpace(body.Message)
-	code = cmp.Or(code, "HTTPError")
-	if message == "" {
-		message = http.StatusText(response.StatusCode)
-	}
-	return &XRPCError{StatusCode: response.StatusCode, Code: code, Message: message}
-}
-
-func decodeJSONBody(reader io.Reader, out any) error {
-	if err := json.NewDecoder(io.LimitReader(reader, maxJSONResponseBytes)).Decode(out); err != nil {
-		return fmt.Errorf("%w: decoding response: %v", ErrUnexpectedResponse, err)
-	}
-	return nil
-}
-
-func (c *xrpcClient) getJSON(ctx context.Context, nsid string, query url.Values, token string, out any) error {
-	callCtx, cancel := c.callContext(ctx)
-	defer cancel()
-	response, err := c.do(callCtx, http.MethodGet, nsid, query, nil, token)
-	if err != nil {
-		return err
-	}
-	defer response.Body.Close()
-	return decodeJSONBody(response.Body, out)
-}
-
-func (c *xrpcClient) postJSON(ctx context.Context, nsid string, in any, token string, out any) error {
-	var payload []byte
-	if in != nil {
-		encoded, err := json.Marshal(in)
-		if err != nil {
-			return fmt.Errorf("%w: encoding request: %v", ErrInvalidRequest, err)
-		}
-		payload = encoded
-	}
-	callCtx, cancel := c.callContext(ctx)
-	defer cancel()
-	response, err := c.do(callCtx, http.MethodPost, nsid, nil, payload, token)
-	if err != nil {
-		return err
-	}
-	defer response.Body.Close()
-	if out == nil {
-		_, err := io.Copy(io.Discard, io.LimitReader(response.Body, maxJSONResponseBytes))
-		return err
-	}
-	return decodeJSONBody(response.Body, out)
-}
-
-func (c *xrpcClient) getStream(ctx context.Context, nsid string, query url.Values) (*http.Response, error) {
-	return c.do(ctx, http.MethodGet, nsid, query, nil, "")
-}
 
 func parseBaseURL(raw string, schemes ...string) (*url.URL, error) {
 	raw = strings.TrimSpace(raw)
@@ -374,7 +70,7 @@ func (b *basePDS) Describe(ctx context.Context) (Info, error) {
 		AvailableUserDomains []string `json:"availableUserDomains"`
 		Version              string   `json:"version"`
 	}
-	if err := b.client.getJSON(ctx, "com.atproto.server.describeServer", nil, "", &out); err != nil {
+	if err := b.client.getJSON(ctx, "com.atproto.server.describeServer", nil, nil, &out); err != nil {
 		return Info{}, err
 	}
 	did, err := syntax.ParseDID(strings.TrimSpace(out.DID))
@@ -463,7 +159,7 @@ func (b *basePDS) GetRecord(ctx context.Context, path RepoPath, expected *cid.Ci
 		query.Set("cid", expected.String())
 	}
 	var out recordView
-	if err := b.client.getJSON(ctx, "com.atproto.repo.getRecord", query, "", &out); err != nil {
+	if err := b.client.getJSON(ctx, "com.atproto.repo.getRecord", query, nil, &out); err != nil {
 		return Record{}, err
 	}
 	return parseRecordView(out)
@@ -555,7 +251,7 @@ func (b *basePDS) writeRecord(ctx context.Context, nsid string, path RepoPath, r
 	if err != nil {
 		return WriteResult{}, err
 	}
-	token, err := b.client.requireToken(ctx)
+	auth, err := b.client.credential()
 	if err != nil {
 		return WriteResult{}, err
 	}
@@ -569,7 +265,7 @@ func (b *basePDS) writeRecord(ctx context.Context, nsid string, path RepoPath, r
 		Validate:   opts.Validate,
 	}
 	var out writeResponse
-	if err := b.client.postJSON(ctx, nsid, request, token, &out); err != nil {
+	if err := b.client.postJSON(ctx, nsid, request, auth, &out); err != nil {
 		return WriteResult{}, err
 	}
 	return parseWriteResponse(out)
@@ -595,7 +291,7 @@ func (b *basePDS) DeleteRecord(ctx context.Context, path RepoPath, opts WriteOpt
 	if err != nil {
 		return err
 	}
-	token, err := b.client.requireToken(ctx)
+	auth, err := b.client.credential()
 	if err != nil {
 		return err
 	}
@@ -606,7 +302,7 @@ func (b *basePDS) DeleteRecord(ctx context.Context, path RepoPath, opts WriteOpt
 		SwapCommit: swapCommit,
 		SwapRecord: swapRecord,
 	}
-	return b.client.postJSON(ctx, "com.atproto.repo.deleteRecord", request, token, nil)
+	return b.client.postJSON(ctx, "com.atproto.repo.deleteRecord", request, auth, nil)
 }
 
 func (b *basePDS) ListRecords(ctx context.Context, req ListRecordsRequest) (ListRecordsResult, error) {
@@ -635,7 +331,7 @@ func (b *basePDS) ListRecords(ctx context.Context, req ListRecordsRequest) (List
 		Records []recordView `json:"records"`
 		Cursor  string       `json:"cursor"`
 	}
-	if err := b.client.getJSON(ctx, "com.atproto.repo.listRecords", query, "", &out); err != nil {
+	if err := b.client.getJSON(ctx, "com.atproto.repo.listRecords", query, nil, &out); err != nil {
 		return ListRecordsResult{}, err
 	}
 	result := ListRecordsResult{
@@ -661,11 +357,11 @@ func (b *basePDS) GetRepo(ctx context.Context, did syntax.DID, since *syntax.TID
 	if since != nil {
 		query.Set("since", since.String())
 	}
-	response, err := b.client.getStream(ctx, "com.atproto.sync.getRepo", query)
+	body, err := b.client.get(ctx, "com.atproto.sync.getRepo", query, nil, maxRepoBytes)
 	if err != nil {
 		return nil, err
 	}
-	return response.Body, nil
+	return io.NopCloser(bytes.NewReader(body)), nil
 }
 
 func (b *basePDS) GetLatestCommit(ctx context.Context, did syntax.DID) (cid.Cid, syntax.TID, error) {
@@ -678,7 +374,7 @@ func (b *basePDS) GetLatestCommit(ctx context.Context, did syntax.DID) (cid.Cid,
 		CID string `json:"cid"`
 		Rev string `json:"rev"`
 	}
-	if err := b.client.getJSON(ctx, "com.atproto.sync.getLatestCommit", query, "", &out); err != nil {
+	if err := b.client.getJSON(ctx, "com.atproto.sync.getLatestCommit", query, nil, &out); err != nil {
 		return cid.Undef, "", err
 	}
 	commitCID, err := parseCID(out.CID)
@@ -733,14 +429,14 @@ func (b *basePDS) CreateSession(ctx context.Context, identifier, password string
 	}
 	var out sessionResponse
 	request := createSessionRequest{Identifier: identifier, Password: password}
-	if err := b.client.postJSON(ctx, "com.atproto.server.createSession", request, "", &out); err != nil {
+	if err := b.client.postJSON(ctx, "com.atproto.server.createSession", request, nil, &out); err != nil {
 		return Session{}, err
 	}
 	session, err := sessionFromResponse(out)
 	if err != nil {
 		return Session{}, err
 	}
-	b.client.auth.set(session)
+	b.client.session.set(session)
 	return session, nil
 }
 
@@ -756,14 +452,14 @@ func (b *basePDS) CreateAccount(ctx context.Context, req CreateAccountRequest) (
 		InviteCode: strings.TrimSpace(req.InviteCode),
 	}
 	var out sessionResponse
-	if err := b.client.postJSON(ctx, "com.atproto.server.createAccount", request, "", &out); err != nil {
+	if err := b.client.postJSON(ctx, "com.atproto.server.createAccount", request, nil, &out); err != nil {
 		return Session{}, err
 	}
 	session, err := sessionFromResponse(out)
 	if err != nil {
 		return Session{}, err
 	}
-	b.client.auth.set(session)
+	b.client.session.set(session)
 	return session, nil
 }
 
@@ -786,19 +482,19 @@ func sessionFromResponse(out sessionResponse) (Session, error) {
 }
 
 func (b *basePDS) GetSession(ctx context.Context) (Session, error) {
-	token, err := b.client.requireToken(ctx)
+	auth, err := b.client.credential()
 	if err != nil {
 		return Session{}, err
 	}
 	var out getSessionResponse
-	if err := b.client.getJSON(ctx, "com.atproto.server.getSession", nil, token, &out); err != nil {
+	if err := b.client.getJSON(ctx, "com.atproto.server.getSession", nil, auth, &out); err != nil {
 		return Session{}, err
 	}
 	did, err := syntax.ParseDID(strings.TrimSpace(out.DID))
 	if err != nil {
 		return Session{}, fmt.Errorf("%w: getSession returned an invalid did", ErrUnexpectedResponse)
 	}
-	stored := b.client.auth.snapshot()
+	stored := b.client.session.snapshot()
 	return Session{
 		DID:        did,
 		Handle:     out.Handle,
@@ -810,16 +506,18 @@ func (b *basePDS) GetSession(ctx context.Context) (Session, error) {
 }
 
 func (b *basePDS) DeleteSession(ctx context.Context) error {
-	token, err := b.client.deleteToken(ctx)
-	if err != nil {
-		return err
+	auth := b.client.auth
+	if stored := b.client.session.snapshot(); stored.RefreshJWT != "" {
+		auth = bearer(stored.RefreshJWT)
+	} else if stored.AccessJWT != "" {
+		auth = bearer(stored.AccessJWT)
 	}
-	if token == "" {
+	if auth == nil {
 		return fmt.Errorf("%w: no refresh or access token is available", ErrAuthenticationRequired)
 	}
-	if err := b.client.postJSON(ctx, "com.atproto.server.deleteSession", nil, token, nil); err != nil {
+	if err := b.client.postJSON(ctx, "com.atproto.server.deleteSession", nil, auth, nil); err != nil {
 		return err
 	}
-	b.client.auth.clear()
+	b.client.session.clear()
 	return nil
 }

@@ -2,47 +2,18 @@ package statusstate
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/bluesky-social/indigo/atproto/syntax"
+	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/plc"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/pds"
 )
-
-type PDSResolver interface {
-	ResolvePDS(ctx context.Context, ref string) (pdsclient.PDS, error)
-}
-
-type PDSResolverFunc func(ctx context.Context, ref string) (pdsclient.PDS, error)
-
-func (f PDSResolverFunc) ResolvePDS(ctx context.Context, ref string) (pdsclient.PDS, error) {
-	return f(ctx, ref)
-}
-
-type RepoObservation struct {
-	Head string
-
-	Rev string
-
-	Seq int64
-
-	KeyFingerprint string
-}
-
-type RepoDetails struct {
-	Seq int64
-
-	KeyFingerprint string
-}
-
-type RepoDetailsSource interface {
-	RepoDetails(ctx context.Context, did syntax.DID) (RepoDetails, error)
-}
 
 type AccountObservation struct {
 	Active bool
@@ -55,13 +26,7 @@ type AccountObservation struct {
 }
 
 type AccountSource interface {
-	AccountStatus(ctx context.Context, ref, did string) (AccountObservation, error)
-}
-
-type AccountSourceFunc func(ctx context.Context, ref, did string) (AccountObservation, error)
-
-func (f AccountSourceFunc) AccountStatus(ctx context.Context, ref, did string) (AccountObservation, error) {
-	return f(ctx, ref, did)
+	AccountStatus(ctx context.Context, from, pds commonv1.ObjectRef, did string) (AccountObservation, error)
 }
 
 type SessionObservation struct {
@@ -73,100 +38,54 @@ type SessionObservation struct {
 }
 
 type SessionSource interface {
-	SessionStatus(ctx context.Context, ref, did, sessionID string) (SessionObservation, error)
+	SessionStatus(ctx context.Context, from, pds commonv1.ObjectRef, did, sessionID string) (SessionObservation, error)
 }
 
-type SessionSourceFunc func(ctx context.Context, ref, did, sessionID string) (SessionObservation, error)
-
-func (f SessionSourceFunc) SessionStatus(ctx context.Context, ref, did, sessionID string) (SessionObservation, error) {
-	return f(ctx, ref, did, sessionID)
+type BusAccounts struct {
+	Bus *bus.Bus
 }
 
-func RepoBindingFor(workspace, ref, did string) pdsclient.RepoBinding {
-	binding := pdsclient.RepoBinding{Workspace: workspace, DID: strings.TrimSpace(did)}
-	ref = strings.TrimSpace(ref)
-	switch {
-	case ref == "":
-	case strings.Contains(ref, "://"):
-		binding.Kind = "url"
-		binding.Endpoint = ref
-	default:
-		if kind, name, ok := strings.Cut(ref, "/"); ok {
-			binding.Kind = strings.TrimSpace(kind)
-			binding.Name = strings.TrimSpace(name)
-		} else {
-			binding.Kind = "pds"
-			binding.Name = ref
-		}
-	}
-	return binding
-}
-
-type RepoAccountSource struct {
-	Resolver *pdsclient.RepoResolver
-
-	Workspace string
-}
-
-func (s RepoAccountSource) AccountStatus(ctx context.Context, ref, did string) (AccountObservation, error) {
-	if s.Resolver == nil {
-		return AccountObservation{}, errors.New("statusstate: no repo resolver is configured")
-	}
-	binding := RepoBindingFor(s.Workspace, ref, did)
-	resolved, err := s.Resolver.Resolve(ctx, binding)
+func (s BusAccounts) AccountStatus(ctx context.Context, from, to commonv1.ObjectRef, did string) (AccountObservation, error) {
+	accounts, err := bus.Resolve[pds.Accounts](ctx, s.Bus, from, to, bus.Capability{Name: pds.CapabilityAccount, Scope: []string{did}})
 	if err != nil {
 		return AccountObservation{}, err
 	}
-	if resolved.Tokens != nil {
-		session, err := resolved.PDS.GetSession(ctx)
-		if err == nil {
-			if session.DID.String() != "" && session.DID.String() != did {
-				return AccountObservation{}, fmt.Errorf("statusstate: the session is for %s, not %s", session.DID.String(), did)
-			}
-			return AccountObservation{Active: session.Active}, nil
-		}
-		if !errors.Is(err, pdsclient.ErrAuthenticationRequired) {
-			return AccountObservation{}, err
-		}
-	}
-	if _, _, err := resolved.PDS.GetLatestCommit(ctx, mustDID(did)); err != nil {
+	account, err := accounts.Account(ctx, did)
+	if err != nil {
 		return AccountObservation{}, err
 	}
-	return AccountObservation{Active: true}, nil
+	return AccountObservation{Active: account.Active}, nil
 }
 
-type RepoSessionSource struct {
-	Resolver *pdsclient.RepoResolver
-
-	Workspace string
+type BusSessions struct {
+	Bus *bus.Bus
 }
 
-func (s RepoSessionSource) SessionStatus(ctx context.Context, ref, did, sessionID string) (SessionObservation, error) {
-	if s.Resolver == nil {
-		return SessionObservation{}, errors.New("statusstate: no repo resolver is configured")
-	}
-	binding := RepoBindingFor(s.Workspace, ref, did)
-	binding.SessionRef = strings.TrimSpace(sessionID)
-	resolved, err := s.Resolver.Resolve(ctx, binding)
+func (s BusSessions) SessionStatus(ctx context.Context, from, to commonv1.ObjectRef, did, _ string) (SessionObservation, error) {
+	sessions, err := bus.Resolve[pds.Sessions](ctx, s.Bus, from, to, bus.Capability{Name: pds.CapabilitySession, Scope: []string{did}})
 	if err != nil {
 		return SessionObservation{}, err
 	}
-	session, err := resolved.PDS.GetSession(ctx)
+	session, err := sessions.Session(ctx, did)
 	if err != nil {
 		return SessionObservation{}, err
 	}
-	if session.DID.String() != "" && session.DID.String() != did {
-		return SessionObservation{}, fmt.Errorf("statusstate: the session is for %s, not %s", session.DID.String(), did)
+	if session.DID != "" && session.DID != did {
+		return SessionObservation{}, fmt.Errorf("statusstate: the session is for %s, not %s", session.DID, did)
 	}
 	return SessionObservation{Active: session.Active}, nil
 }
 
-func mustDID(raw string) syntax.DID {
-	did, err := syntax.ParseDID(strings.TrimSpace(raw))
-	if err != nil {
-		return syntax.DID(raw)
+func pdsTarget(workspace string, ref commonv1.ObjectRef) commonv1.ObjectRef {
+	out := ref
+	out.Workspace = ref.InWorkspace(workspace)
+	if out.Group == "" {
+		out.Group = v1alpha1.GroupName
+		if strings.EqualFold(strings.TrimSpace(ref.Kind), "RemotePDS") {
+			out.Group = pdsv1alpha1.GroupName
+		}
 	}
-	return did
+	return out
 }
 
 type PLCClient interface {

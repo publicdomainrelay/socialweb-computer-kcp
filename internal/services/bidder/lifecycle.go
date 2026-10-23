@@ -347,7 +347,7 @@ func (s *Service) ensureRecordAt(ctx context.Context, collection, rkey string, r
 	return ensureStoreRecordAt(ctx, s.records, s.did, collection, rkey, record)
 }
 
-func ensureStoreRecordAt(ctx context.Context, records RecordStore, did, collection, rkey string, record map[string]any) (market.StrongRef, error) {
+func ensureStoreRecordAt(ctx context.Context, records *market.RepoStore, did, collection, rkey string, record map[string]any) (market.StrongRef, error) {
 	if records == nil || did == "" {
 		return market.StrongRef{}, errors.New("the bidder has no record store or did")
 	}
@@ -367,7 +367,7 @@ func ensureStoreRecordAt(ctx context.Context, records RecordStore, did, collecti
 }
 
 type createOnlyWriter struct {
-	records RecordStore
+	records *market.RepoStore
 
 	did string
 }

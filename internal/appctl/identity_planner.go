@@ -18,7 +18,7 @@ import (
 
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/atprotorepo"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/remotepds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
@@ -117,7 +117,7 @@ func (p accountPlan) binding(did, pdsURL string) (accountBinding, error) {
 	}
 	if binding.RemotePDS != nil {
 		if binding.AuthRef != nil && binding.RemotePDS.Spec.Auth == (pdsv1alpha1.RemotePDSAuth{}) {
-			binding.RemotePDS.Spec.Auth.DPoPKeyRef = pdsclient.SecretRefString(binding.AuthRef)
+			binding.RemotePDS.Spec.Auth.DPoPKeyRef = secretRefString(binding.AuthRef)
 		}
 		binding.PDSRef = &commonv1.ObjectRef{Kind: "RemotePDS", Name: binding.RemotePDS.Name}
 		return binding, nil
@@ -389,7 +389,23 @@ func (ctl *Controller) ensureAccountRepo(ctx context.Context, ws, identityName s
 		ctl.deleteAssociationObjects(ctx, ws)
 	}
 	spec := v1alpha1.RemoteRepoSpec{DID: binding.DID, PdsRef: *binding.PDSRef,
-		CredentialsRef: commonv1.CredentialsRef{ObjectRef: commonv1.ObjectRef{Kind: "MarketIdentity", Name: identityName}},
-		AuthRef:        binding.AuthRef}
-	ctl.ensureRepoObjects(ctx, ws, statusObjectName("repo", binding.DID), "RemoteRepo", v1alpha1.RemoteRepoGVR, spec)
+		CredentialsRef: commonv1.CredentialsRef{ObjectRef: commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: "MarketIdentity", Name: identityName}}}
+	ctl.ensureRepoObjects(ctx, ws, atprotorepo.RepoName(binding.DID), "RemoteRepo", v1alpha1.RemoteRepoGVR, spec)
+}
+
+func secretRefString(ref *commonv1.SecretRef) string {
+	if ref == nil {
+		return ""
+	}
+	path := strings.Trim(strings.TrimSpace(ref.Path), "/")
+	if mount := strings.Trim(strings.TrimSpace(ref.Mount), "/"); mount != "" {
+		path = mount + "/" + path
+	}
+	if path == "" {
+		return ""
+	}
+	if server := v1alpha1.VaultServer(ref.Vault, ""); server != "" {
+		return "openbao:" + server + ":" + path
+	}
+	return "openbao:" + path
 }

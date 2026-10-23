@@ -2,14 +2,11 @@ package requester
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"net/http"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/identity"
@@ -18,7 +15,6 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/lease"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
 )
 
 type OAuthSession = oauthclient.Session
@@ -110,94 +106,6 @@ func (t *pdsAccountTokens) login(ctx context.Context) (string, time.Time, error)
 		return session.AccessJWT, time.Now(), nil
 	}
 	return session.AccessJWT, expires.Add(-pdsclient.TokenExpirySkew), nil
-}
-
-type credentialTokens struct {
-	mu sync.Mutex
-
-	resolver component.CredentialResolver
-
-	writer component.CredentialWriter
-
-	ref component.CredentialRef
-
-	pdsURL string
-
-	client *http.Client
-
-	access string
-}
-
-func (t *credentialTokens) AccessToken(ctx context.Context) (string, error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if pdsclient.TokenLive(t.access) {
-		return t.access, nil
-	}
-	return t.refreshLocked(ctx)
-}
-
-func (t *credentialTokens) RefreshAccessToken(ctx context.Context) (string, error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.refreshLocked(ctx)
-}
-
-func (t *credentialTokens) refreshLocked(ctx context.Context) (string, error) {
-	if t.resolver == nil || t.pdsURL == "" {
-		return t.access, nil
-	}
-	fullRef := t.ref
-	fullRef.Keys = nil
-	data, err := t.resolver.Resolve(ctx, fullRef)
-	if err != nil {
-		if t.access != "" {
-			return t.access, nil
-		}
-		return "", err
-	}
-	access := strs.Lookup(data.Data, "accessJwt", "accessToken", "access_token", "token", "value")
-	refresh := strs.Lookup(data.Data, "refreshJwt", "refreshToken", "refresh_token")
-	if pdsclient.TokenLive(access) {
-		t.access = access
-		return access, nil
-	}
-	if refresh == "" {
-		t.access = access
-		return access, nil
-	}
-	pds, err := pdsclient.NewRemote(pdsclient.RemoteConfig{BaseURL: t.pdsURL, HTTPClient: t.client, Timeout: DefaultHTTPTimeout})
-	if err != nil {
-		return "", err
-	}
-	session, err := pds.RefreshSession(ctx, refresh)
-	if err != nil {
-		if t.access != "" {
-			return t.access, nil
-		}
-		return "", err
-	}
-	t.access = session.AccessJWT
-	if t.writer != nil {
-		updated := map[string]any{}
-		maps.Copy(updated, data.Data)
-		updated["accessJwt"] = session.AccessJWT
-		updated["refreshJwt"] = session.RefreshJWT
-		updated["access_token"] = session.AccessJWT
-		updated["refresh_token"] = session.RefreshJWT
-		if raw := strs.Lookup(data.Data, "session"); raw != "" {
-			var stored oauthclient.SessionData
-			if json.Unmarshal([]byte(raw), &stored) == nil {
-				stored.AccessToken = session.AccessJWT
-				stored.RefreshToken = session.RefreshJWT
-				if encoded, err := json.Marshal(stored); err == nil {
-					updated["session"] = string(encoded)
-				}
-			}
-		}
-		_ = t.writer.WriteCredential(ctx, t.ref, updated)
-	}
-	return t.access, nil
 }
 
 func openOAuthSession(ctx context.Context, cfg Config, dir identity.Directory) (*OAuthSession, error) {

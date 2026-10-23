@@ -2,7 +2,12 @@ package pds
 
 import (
 	"context"
+	"crypto/tls"
+	"errors"
+	"fmt"
 	"io"
+	"net/http"
+	"strings"
 	"time"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
@@ -12,6 +17,14 @@ const (
 	CapabilityAccount = "pds.account"
 
 	CapabilitySession = "pds.session"
+
+	CapabilitySync = "repo.read"
+)
+
+var (
+	ErrNotFound = errors.New("pds: not found")
+
+	ErrUnsupported = errors.New("pds: the backend does not support this call")
 )
 
 type Info struct {
@@ -20,6 +33,8 @@ type Info struct {
 	AvailableUserDomains []string
 
 	Version string
+
+	URL string
 }
 
 type AccountRequest struct {
@@ -38,6 +53,8 @@ type Account struct {
 	Email string
 
 	Active bool
+
+	SigningKey string
 }
 
 type SessionRequest struct {
@@ -110,4 +127,50 @@ type Sync interface {
 	GetRepo(ctx context.Context, did, since string) (io.ReadCloser, error)
 
 	SubscribeRepos(ctx context.Context, cursor *int64, fn func(Event) error) error
+}
+
+type Verdict int
+
+const (
+	VerdictDone Verdict = iota
+
+	VerdictRetryNonce
+
+	VerdictRetryAuth
+)
+
+type Authenticator interface {
+	DID() string
+
+	Apply(req *http.Request) error
+
+	Invalidate()
+
+	Challenge(resp *http.Response) Verdict
+}
+
+type Transport interface {
+	Address() string
+
+	Client() *http.Client
+
+	TLS() *tls.Config
+}
+
+func AccountDID(scope []string) (string, error) {
+	var did string
+	for _, entry := range scope {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		if did != "" && entry != did {
+			return "", fmt.Errorf("pds: a repo handle serves one account; the scope names %v", scope)
+		}
+		did = entry
+	}
+	if !strings.HasPrefix(did, "did:") {
+		return "", fmt.Errorf("pds: a repo handle needs the account DID as its pds.account scope, got %v", scope)
+	}
+	return did, nil
 }

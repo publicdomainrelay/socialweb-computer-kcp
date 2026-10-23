@@ -4,8 +4,8 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -13,6 +13,7 @@ import (
 
 	"github.com/bluesky-social/indigo/atproto/identity"
 	"github.com/bluesky-social/indigo/atproto/syntax"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
 )
 
 type HTTPDoer interface {
@@ -54,32 +55,36 @@ func (h *HTTPReader) PDSEndpoint(ctx context.Context, did string) (string, error
 	return strings.TrimRight(endpoint, "/"), nil
 }
 
-func (h *HTTPReader) get(ctx context.Context, rawURL string) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
-	if err != nil {
-		return nil, err
-	}
-	client := h.doer()
+type doerTransport struct {
+	doer HTTPDoer
+}
+
+func (t doerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	return t.doer.Do(req)
+}
+
+func (h *HTTPReader) query(ctx context.Context, pds, nsid string, params url.Values, out any) error {
+	client := &xrpc.Client{Host: pds, HTTP: &http.Client{Transport: doerTransport{doer: h.doer()}}}
 	var lastErr error
 	for attempt := range 5 {
-		res, err := client.Do(req)
+		reply, err := xrpc.Query[xrpc.Reply](ctx, client, nsid, params)
 		if err == nil {
-			if res.StatusCode < 500 {
-				return res, nil
+			if err := json.Unmarshal(reply.Body, out); err != nil {
+				return fmt.Errorf("%w: %v", ErrInvalidRecord, err)
 			}
-			io.Copy(io.Discard, res.Body)
-			res.Body.Close()
-			lastErr = fmt.Errorf("market: GET %s: HTTP %d", rawURL, res.StatusCode)
-		} else {
-			lastErr = err
+			return nil
 		}
+		if failure, ok := errors.AsType[*xrpc.Error](err); ok && failure.Status < 500 {
+			return fmt.Errorf("%w: %s: HTTP %d", ErrNotFound, nsid, failure.Status)
+		}
+		lastErr = err
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return ctx.Err()
 		case <-time.After(time.Duration(attempt+1) * 100 * time.Millisecond):
 		}
 	}
-	return nil, lastErr
+	return lastErr
 }
 
 func (h *HTTPReader) GetRecord(ctx context.Context, repo, collection, rkey string) (ResolvedRecord, error) {
@@ -87,27 +92,14 @@ func (h *HTTPReader) GetRecord(ctx context.Context, repo, collection, rkey strin
 	if err != nil {
 		return ResolvedRecord{}, err
 	}
-	u := pds + "/xrpc/com.atproto.repo.getRecord"
-	values := url.Values{}
-	values.Set("repo", repo)
-	values.Set("collection", collection)
-	values.Set("rkey", rkey)
-	res, err := h.get(ctx, u+"?"+values.Encode())
-	if err != nil {
-		return ResolvedRecord{}, err
-	}
-	defer res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		io.Copy(io.Discard, res.Body)
-		return ResolvedRecord{}, fmt.Errorf("%w: %s/%s/%s: HTTP %d", ErrNotFound, repo, collection, rkey, res.StatusCode)
-	}
 	var body struct {
 		URI   string         `json:"uri"`
 		CID   string         `json:"cid"`
 		Value map[string]any `json:"value"`
 	}
-	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
-		return ResolvedRecord{}, fmt.Errorf("%w: %v", ErrInvalidRecord, err)
+	params := url.Values{"repo": {repo}, "collection": {collection}, "rkey": {rkey}}
+	if err := h.query(ctx, pds, "com.atproto.repo.getRecord", params, &body); err != nil {
+		return ResolvedRecord{}, fmt.Errorf("%s/%s/%s: %w", repo, collection, rkey, err)
 	}
 	if body.Value == nil {
 		return ResolvedRecord{}, fmt.Errorf("%w: no record value", ErrNotFound)
@@ -124,22 +116,9 @@ func (h *HTTPReader) ListRecords(ctx context.Context, repo, collection string, l
 	if limit <= 0 || limit > 100 {
 		limit = 100
 	}
-	u := pds + "/xrpc/com.atproto.repo.listRecords"
-	values := url.Values{}
-	values.Set("repo", repo)
-	values.Set("collection", collection)
-	values.Set("limit", fmt.Sprintf("%d", limit))
+	params := url.Values{"repo": {repo}, "collection": {collection}, "limit": {fmt.Sprintf("%d", limit)}}
 	if cursor != "" {
-		values.Set("cursor", cursor)
-	}
-	res, err := h.get(ctx, u+"?"+values.Encode())
-	if err != nil {
-		return ListPage{}, err
-	}
-	defer res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		io.Copy(io.Discard, res.Body)
-		return ListPage{}, fmt.Errorf("%w: list %s/%s: HTTP %d", ErrNotFound, repo, collection, res.StatusCode)
+		params.Set("cursor", cursor)
 	}
 	var body struct {
 		Records []struct {
@@ -149,8 +128,8 @@ func (h *HTTPReader) ListRecords(ctx context.Context, repo, collection string, l
 		} `json:"records"`
 		Cursor string `json:"cursor"`
 	}
-	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
-		return ListPage{}, fmt.Errorf("%w: %v", ErrInvalidRecord, err)
+	if err := h.query(ctx, pds, "com.atproto.repo.listRecords", params, &body); err != nil {
+		return ListPage{}, fmt.Errorf("list %s/%s: %w", repo, collection, err)
 	}
 	page := ListPage{Cursor: body.Cursor, Records: make([]ListedRecord, 0, len(body.Records))}
 	for _, rec := range body.Records {

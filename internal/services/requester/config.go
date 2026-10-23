@@ -191,7 +191,7 @@ type Config struct {
 
 	CallbackHostname string
 
-	Repo RecordStore
+	Repo *market.RepoStore
 
 	Contracts ContractStore
 

@@ -158,10 +158,6 @@ type RelayLookup interface {
 	ListReposByCollection(ctx context.Context, relayURL, collection string) ([]string, error)
 }
 
-type PDSResolver interface {
-	PDSEndpoint(ctx context.Context, did string) (string, error)
-}
-
 type WatchEvent struct {
 	DID        string
 	Collection string

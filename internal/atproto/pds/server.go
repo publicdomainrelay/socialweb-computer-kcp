@@ -309,6 +309,18 @@ func (s *Server) OAuthServer() *oauth.Server {
 	return s.oauthServer
 }
 
+func (s *Server) PublicBaseURL() string {
+	return s.cfg.PublicBaseURL
+}
+
+func (s *Server) Version() string {
+	return s.cfg.Version
+}
+
+func (s *Server) AvailableUserDomains() []string {
+	return append([]string(nil), s.cfg.AvailableUserDomains...)
+}
+
 func (s *Server) ServiceDID() string {
 	return s.serviceDID
 }

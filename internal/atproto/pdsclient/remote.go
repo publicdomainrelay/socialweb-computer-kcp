@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
+
 	"github.com/bluesky-social/indigo/atproto/syntax"
 )
 
@@ -27,6 +29,7 @@ type RemoteConfig struct {
 	TLS        *tls.Config
 	Tokens     TokenSource
 	DPoP       DPoPSource
+	Auth       xrpc.Auth
 	Timeout    time.Duration
 }
 
@@ -62,7 +65,7 @@ func NewRemote(cfg RemoteConfig) (*RemotePDS, error) {
 	} else {
 		httpClient = cloneNoRedirect(httpClient)
 	}
-	client := newXRPCClient(baseURL, httpClient, cfg.Tokens, cfg.DPoP, cfg.Timeout)
+	client := newXRPCClient(baseURL, httpClient, cfg.Tokens, cfg.DPoP, cfg.Auth, cfg.Timeout)
 	client.expectedDID = expectedDID
 	dial := func(ctx context.Context, cursor *int64) (RepoEventStream, error) {
 		return newRemoteSubscribe(ctx, baseURL, tlsConfig, cursor)
@@ -78,14 +81,14 @@ func (p *RemotePDS) RefreshSession(ctx context.Context, refreshToken string) (Se
 		return Session{}, fmt.Errorf("%w: no refresh token is available", ErrAuthenticationRequired)
 	}
 	var out sessionResponse
-	if err := p.client.postJSON(ctx, "com.atproto.server.refreshSession", nil, refreshToken, &out); err != nil {
+	if err := p.client.postJSON(ctx, "com.atproto.server.refreshSession", nil, bearer(refreshToken), &out); err != nil {
 		return Session{}, err
 	}
 	session, err := sessionFromResponse(out)
 	if err != nil {
 		return Session{}, err
 	}
-	p.client.auth.set(session)
+	p.client.session.set(session)
 	return session, nil
 }
 

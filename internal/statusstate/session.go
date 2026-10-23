@@ -9,6 +9,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/dynamic"
 
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 )
@@ -23,7 +24,6 @@ func (c *Controller) reconcileSession(ctx context.Context, dyn dynamic.Interface
 	status := obj.Status
 	status.ObservedGeneration = generation
 	didText := strings.TrimSpace(obj.Spec.DID)
-	ref := refString(obj.Spec.PdsRef)
 	sessionID := strings.TrimSpace(obj.Spec.SessionID)
 	if didText == "" {
 		setReady(&status.Conditions, generation, false, ReasonWaiting, "the AtprotoSession needs a did")
@@ -36,7 +36,7 @@ func (c *Controller) reconcileSession(ctx context.Context, dyn dynamic.Interface
 		c.write(ctx, dyn, AtprotoSessionGVR, u, &status)
 		return
 	}
-	observation, err := c.observeSession(ctx, ref, did, sessionID)
+	observation, err := c.observeSession(ctx, c.self("AtprotoSession", obj.Name), pdsTarget(c.workspace, obj.Spec.PdsRef), did, sessionID)
 	if err != nil {
 		setReady(&status.Conditions, generation, false, ReasonSourceError, "reading the session: "+err.Error())
 		c.write(ctx, dyn, AtprotoSessionGVR, u, &status)
@@ -49,20 +49,12 @@ func (c *Controller) reconcileSession(ctx context.Context, dyn dynamic.Interface
 	c.write(ctx, dyn, AtprotoSessionGVR, u, &status)
 }
 
-func (c *Controller) observeSession(ctx context.Context, ref string, did syntax.DID, sessionID string) (SessionObservation, error) {
-	if c.sessions != nil {
-		return c.sessions.SessionStatus(ctx, ref, did.String(), sessionID)
+func (c *Controller) observeSession(ctx context.Context, from, to commonv1.ObjectRef, did syntax.DID, sessionID string) (SessionObservation, error) {
+	if c.sessions == nil {
+		return SessionObservation{}, fmt.Errorf("no session source is configured")
 	}
-	if c.repo == nil && (c.pds == nil || ref == "") {
-		return SessionObservation{}, fmt.Errorf("no session source and no pdsRef are configured")
+	if strings.TrimSpace(to.Name) == "" {
+		return SessionObservation{}, fmt.Errorf("the AtprotoSession names no pdsRef")
 	}
-	pds, err := c.resolveRepoPDS(ctx, ref, did.String())
-	if err != nil {
-		return SessionObservation{}, fmt.Errorf("resolving the pdsRef: %w", err)
-	}
-	session, err := pds.GetSession(ctx)
-	if err != nil {
-		return SessionObservation{}, err
-	}
-	return SessionObservation{Active: session.Active}, nil
+	return c.sessions.SessionStatus(ctx, from, to, did.String(), sessionID)
 }

@@ -186,14 +186,14 @@ var APIResources = []APIResource{
 		{Name: "Writable", Type: "boolean", JSONPath: ".status.writable"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "LocalRepo", Plural: "localrepos", Revision: 1, Export: "applications", Object: LocalRepo{}, Contracts: []string{commonv1.ContractAtprotoRepos}, PrinterColumns: []PrinterColumn{
+	{Kind: "LocalRepo", Plural: "localrepos", Revision: 2, Export: "applications", Object: LocalRepo{}, Contracts: []string{commonv1.ContractAtprotoRepos}, PrinterColumns: []PrinterColumn{
 		{Name: "DID", Type: "string", JSONPath: ".spec.did"},
 		{Name: "PDS", Type: "string", JSONPath: ".spec.pdsRef.name"},
 		{Name: "Head", Type: "string", JSONPath: ".status.head"},
 		{Name: "Seq", Type: "integer", JSONPath: ".status.seq"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "RemoteRepo", Plural: "remoterepos", Revision: 1, Export: "applications", Object: RemoteRepo{}, Contracts: []string{commonv1.ContractAtprotoRepos}, PrinterColumns: []PrinterColumn{
+	{Kind: "RemoteRepo", Plural: "remoterepos", Revision: 2, Export: "applications", Object: RemoteRepo{}, Contracts: []string{commonv1.ContractAtprotoRepos}, PrinterColumns: []PrinterColumn{
 		{Name: "DID", Type: "string", JSONPath: ".spec.did"},
 		{Name: "PDS", Type: "string", JSONPath: ".spec.pdsRef.name"},
 		{Name: "Credentials", Type: "string", JSONPath: ".spec.credentialsRef.name"},

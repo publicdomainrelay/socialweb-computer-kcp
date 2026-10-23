@@ -28,7 +28,6 @@ import (
 	"github.com/bluesky-social/indigo/atproto/syntax"
 
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
-	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	atprotooauth "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
@@ -36,6 +35,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/atprotorepo"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/policy"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
@@ -73,9 +73,7 @@ type Service struct {
 
 	directory identity.Directory
 
-	repo RecordStore
-
-	ownsRepo bool
+	repo *market.RepoStore
 
 	signer *market.Signer
 
@@ -84,10 +82,6 @@ type Service struct {
 	ownerServiceAuth ServiceAuthSource
 
 	ownerTokens *pdsAccountTokens
-
-	tokenMu sync.Mutex
-
-	credentialTokens *credentialTokens
 
 	market MarketClient
 
@@ -428,12 +422,11 @@ func (s *Service) setup(ctx context.Context) error {
 	remote := market.NewHTTPReader(s.directory)
 	remote.Client = s.cfg.HTTPClient
 	if s.cfg.Repo == nil {
-		repoStore, err := s.openRepo(ctx, remote)
+		repoStore, err := s.openRepo(remote)
 		if err != nil {
 			return err
 		}
 		s.repo = repoStore
-		s.ownsRepo = true
 	} else {
 		s.repo = s.cfg.Repo
 	}
@@ -573,137 +566,20 @@ func (s *Service) bindSignerKey(ctx context.Context) error {
 	return nil
 }
 
-func (s *Service) openRepo(ctx context.Context, remote market.RecordResolver) (RecordStore, error) {
-	ref, tokens, client, err := s.pdsTarget(ctx)
-	if err != nil {
-		return nil, err
+func (s *Service) openRepo(remote market.Foreign) (*market.RepoStore, error) {
+	if s.cfg.RepoDID == "" {
+		return nil, errors.New("requester: the record store needs the repo DID")
 	}
-	if ref != nil {
-		resolver := &pdsclient.Resolver{
-			Handlers:   s.cfg.Deps.Handlers,
-			HTTPClient: client,
-			TLS:        s.cfg.Deps.TLS,
-			Tokens:     tokens,
-			Timeout:    RecordRequestTimeout,
-		}
-		pds, err := resolver.Resolve(ref)
-		if err != nil {
-			return nil, err
-		}
-		return NewPDSStore(PDSOptions{PDS: pds, DID: s.cfg.RepoDID, Remote: remote})
+	if s.cfg.Deps.Handlers == nil {
+		return nil, errors.New("requester: the record store needs the bus")
 	}
-	if s.cfg.RepoKey == nil {
-		return nil, errors.New("requester: no repo signing key")
-	}
-	path := repoPath(s.cfg.StateDir)
-	if s.cfg.StateDir == "" {
-		return nil, errors.New("requester: the local repo needs a state dir")
-	}
-	return NewLocalRepo(ctx, path, s.cfg.RepoDID, s.cfg.RepoKey, remote)
-}
-
-func (s *Service) pdsTarget(ctx context.Context) (pdsclient.Ref, pdsclient.TokenSource, *http.Client, error) {
-	switch s.cfg.IdentityMode {
-	case IdentityModeOAuth:
-		if s.oauth == nil {
-			return nil, nil, nil, errors.New("requester: oauth identity mode has no session")
-		}
-		did, err := syntax.ParseDID(s.oauth.DID())
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("requester: oauth PDS did: %w", err)
-		}
-		ref := pdsclient.CRRef{RemotePDS: &pdsv1alpha1.RemotePDS{
-			ObjectMeta: metav1.ObjectMeta{Name: "pds"},
-			Spec:       pdsv1alpha1.RemotePDSSpec{URL: s.oauth.HostURL(), DID: did.String()},
-		}}
-		return ref, s.oauth, s.oauth.HTTPClient(s.cfg.HTTPClient), nil
-	case IdentityModeCallback:
-		ref, err := s.pdsRef()
-		if err != nil || ref == nil {
-			return nil, nil, nil, err
-		}
-		if s.ownerTokens != nil {
-			return ref, s.ownerTokens, s.cfg.HTTPClient, nil
-		}
-		if source := s.pdsCredentialTokens(); source != nil {
-			return ref, source, s.cfg.HTTPClient, nil
-		}
-		token, err := s.pdsAccessToken(ctx)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		return ref, pdsTokenSource(token), s.cfg.HTTPClient, nil
-	}
-	return nil, nil, nil, nil
-}
-
-func (s *Service) pdsCredentialTokens() pdsclient.TokenSource {
-	if s.cfg.PDSAccessTokenRef == nil || s.cfg.Deps.Credentials == nil {
-		return nil
-	}
-	endpoint := strings.TrimSpace(s.cfg.PDSURL)
-	if endpoint == "" && s.cfg.RemotePDS != nil {
-		endpoint = strings.TrimSpace(s.cfg.RemotePDS.Spec.URL)
-	}
-	if endpoint == "" {
-		return nil
-	}
-	s.tokenMu.Lock()
-	defer s.tokenMu.Unlock()
-	if s.credentialTokens == nil {
-		source := &credentialTokens{
-			resolver: s.cfg.Deps.Credentials,
-			ref:      *s.cfg.PDSAccessTokenRef,
-			pdsURL:   endpoint,
-			client:   s.cfg.HTTPClient,
-		}
-		if writer, ok := s.cfg.Deps.Credentials.(component.CredentialWriter); ok {
-			source.writer = writer
-		}
-		s.credentialTokens = source
-	}
-	return s.credentialTokens
-}
-
-func (s *Service) pdsRef() (pdsclient.Ref, error) {
-	if s.cfg.RemotePDS != nil {
-		return pdsclient.CRRef{RemotePDS: s.cfg.RemotePDS}, nil
-	}
-	if s.cfg.PDSURL != "" {
-		return pdsclient.CRRef{RemotePDS: &pdsv1alpha1.RemotePDS{
-			ObjectMeta: metav1.ObjectMeta{Name: "pds"},
-			Spec:       pdsv1alpha1.RemotePDSSpec{URL: s.cfg.PDSURL, DID: s.cfg.RepoDID},
-		}}, nil
-	}
-	if s.cfg.PDSRef != nil && s.cfg.PDSRef.Name != "" {
-		kind := s.cfg.PDSRef.Kind
-		kind = cmp.Or(kind, "Pds")
-		return pdsclient.LocalRef{Workspace: s.cfg.Workspace, Kind: kind, Name: s.cfg.PDSRef.Name}, nil
-	}
-	return nil, nil
-}
-
-func (s *Service) pdsAccessToken(ctx context.Context) (string, error) {
-	token := s.cfg.PDSAccessToken
-	if token != "" || s.cfg.PDSAccessTokenRef == nil || s.cfg.Deps.Credentials == nil {
-		return token, nil
-	}
-	credential, err := s.cfg.Deps.Credentials.Resolve(ctx, *s.cfg.PDSAccessTokenRef)
-	if err != nil {
-		return "", fmt.Errorf("requester: PDS token: %w", err)
-	}
-	for _, key := range s.cfg.PDSAccessTokenRef.Keys {
-		if value, ok := credential.Value(key); ok && value != "" {
-			return value, nil
-		}
-	}
-	return "", nil
-}
-
-func pdsTokenSource(token string) pdsclient.TokenSource {
-	return pdsclient.TokenSourceFunc(func(context.Context) (string, error) {
-		return token, nil
-	})
+	self := commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: Kind, Name: s.cfg.ComponentName, Workspace: s.cfg.Workspace}
+	repo := commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: "AtprotoRepo", Name: atprotorepo.RepoName(s.cfg.RepoDID), Workspace: s.cfg.Workspace}
+	handlers := s.cfg.Deps.Handlers
+	return market.NewRepoStore(market.RepoStoreConfig{DID: s.cfg.RepoDID, Foreign: remote,
+		Open: func(ctx context.Context) (atprotorepo.Repo, error) {
+			return bus.Resolve[atprotorepo.Repo](ctx, handlers, self, repo, bus.Capability{Name: atprotorepo.CapabilityWrite})
+		}}), nil
 }
 
 func (s *Service) resolvePolicyRunner(ctx context.Context, engine commonv1.ObjectRef, workflow string) (policy.Runner, error) {
@@ -955,11 +831,6 @@ func (s *Service) shutdown(ctx context.Context) {
 	defer cancel()
 	_ = supervise.Join(ctx, s.wg.Wait)
 	s.releaseAllHeldSessions("shutdown")
-	if s.ownsRepo {
-		if closer, ok := s.repo.(io.Closer); ok {
-			_ = closer.Close()
-		}
-	}
 	s.mu.Lock()
 	s.started = false
 	s.ready = false
