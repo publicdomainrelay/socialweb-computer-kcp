@@ -67,8 +67,10 @@ type streamKey struct {
 	name string
 }
 
-func New() *Bus {
-	root, cancel := context.WithCancel(context.Background())
+// New returns a bus that serves until Stop. Its root keeps the values of ctx
+// but not its cancel, so calls made while the caller shuts down still run.
+func New(ctx context.Context) *Bus {
+	root, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	r := &Bus{
 		handlers:  map[Key]map[string]http.Handler{},
 		revisions: map[Key]map[string]uint64{},
@@ -88,12 +90,12 @@ func New() *Bus {
 	return r
 }
 
-func NewHandlerRegistry() *Bus {
-	return New()
+func NewHandlerRegistry(ctx context.Context) *Bus {
+	return New(ctx)
 }
 
-func NewHandlers() *Bus {
-	return New()
+func NewHandlers(ctx context.Context) *Bus {
+	return New(ctx)
 }
 
 func (r *Bus) SetLogger(log *slog.Logger) {

@@ -31,6 +31,8 @@ type tenantWatch struct {
 
 	mu sync.Mutex
 
+	life context.Context
+
 	running map[string]context.CancelFunc
 
 	wg sync.WaitGroup
@@ -40,13 +42,19 @@ func newTenantWatch(tenant func(ctx context.Context, cluster string) (kubernetes
 	return &tenantWatch{tenant: tenant, notify: notify, log: log, running: map[string]context.CancelFunc{}}
 }
 
+func (t *tenantWatch) start(ctx context.Context) {
+	t.mu.Lock()
+	t.life = ctx
+	t.mu.Unlock()
+}
+
 func (t *tenantWatch) ensure(cluster string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if _, ok := t.running[cluster]; ok {
+	if _, ok := t.running[cluster]; ok || t.life == nil || t.life.Err() != nil {
 		return
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.life)
 	t.running[cluster] = cancel
 	t.wg.Go(func() { t.run(ctx, cluster) })
 }

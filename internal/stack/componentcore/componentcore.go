@@ -170,7 +170,7 @@ func NetworkWorkspaces(base string) []string {
 	return AppWorkspaces(base)
 }
 
-func New(cfg Config) (*Core, error) {
+func New(ctx context.Context, cfg Config) (*Core, error) {
 	if cfg.Log == nil {
 		cfg.Log = slog.New(slog.DiscardHandler)
 	}
@@ -246,7 +246,7 @@ func New(cfg Config) (*Core, error) {
 	registry := component.NewRegistry()
 	handlers := cfg.Handlers
 	if handlers == nil {
-		handlers = component.NewHandlerRegistry()
+		handlers = component.NewHandlerRegistry(ctx)
 	}
 	handlers.SetLogger(cfg.Log.With("component", "bus"))
 	registrar := cfg.ExposureIngressRegistrar
@@ -446,7 +446,7 @@ func Supervise(ctx context.Context, cfg Config) {
 			log.Warn("the component controller stopped; starting it again", "err", fmt.Sprint(err))
 		}
 	}}, func(ctx context.Context) error {
-		core, err := New(cfg)
+		core, err := New(ctx, cfg)
 		if err != nil {
 			return err
 		}

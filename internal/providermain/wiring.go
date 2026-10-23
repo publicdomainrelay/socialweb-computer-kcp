@@ -328,6 +328,9 @@ func (p *Provider) Run(ctx context.Context) error {
 	defer wg.Wait()
 	sctx, stop := context.WithCancel(ctx)
 	defer stop()
+	if p.tenants != nil {
+		p.tenants.start(sctx)
+	}
 	if p.homes != nil && !p.cfg.ObserveOnly() {
 		wg.Go(func() { p.sweeper(sctx) })
 	}

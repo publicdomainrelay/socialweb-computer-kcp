@@ -22,12 +22,12 @@ var (
 	ErrLinkDenied      = bus.ErrLinkDenied
 )
 
-func NewHandlerRegistry() *HandlerRegistry {
-	return bus.New()
+func NewHandlerRegistry(ctx context.Context) *HandlerRegistry {
+	return bus.New(ctx)
 }
 
-func NewHandlers() *HandlerRegistry {
-	return bus.New()
+func NewHandlers(ctx context.Context) *HandlerRegistry {
+	return bus.New(ctx)
 }
 
 func WithCaller(ctx context.Context, key Key) context.Context {

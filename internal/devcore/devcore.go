@@ -120,7 +120,7 @@ func Run(ctx context.Context, cfg Config, m hostsvc.Manager) error {
 	log := cfg.Log.With("component", "dev-core", "instance", l.ID)
 	handlers := cfg.Handlers
 	if handlers == nil {
-		handlers = component.NewHandlerRegistry()
+		handlers = component.NewHandlerRegistry(ctx)
 	}
 	cfg.Handlers = handlers
 	lf, err := os.OpenFile(l.CoreLock, os.O_CREATE|os.O_RDWR, 0o600)

@@ -350,7 +350,7 @@ func (c *Core) registerNetwork(mgr *ctlruntime.Manager, clients *workspaceClient
 	if _, err := remoteopenbaoctl.Register(mgr, remoteopenbaoctl.Options{Remote: remoteBao, Log: log}); err != nil {
 		return fmt.Errorf("componentcore: the RemoteOpenBao controller: %w", err)
 	}
-	run, err := eventsctl.Register(mgr, eventsctl.Options{Bus: c.handlers, Dynamic: eventstream.DynamicFactory(cfg.DynamicFactory),
+	run, err := eventsctl.Register(g.Context(), mgr, eventsctl.Options{Bus: c.handlers, Dynamic: eventstream.DynamicFactory(cfg.DynamicFactory),
 		Resolver: &pdsclient.Resolver{Handlers: c.handlers, Timeout: pdsClientTimeout}, PLCURL: c.plcBaseURL(), StateDir: cfg.StateDir,
 		RecordWatchChildren: recordWatchChildren{clients: clients}, RecordWatchRepos: recordWatchRepos{clients: clients},
 		RecordWatchValues: recordWatchValues(clients), Log: log})

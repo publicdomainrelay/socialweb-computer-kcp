@@ -114,7 +114,6 @@ func NewEngine(config Config) *Engine {
 	if log == nil {
 		log = func(string, string, map[string]any) {}
 	}
-	rootCtx, cancel := context.WithCancel(context.Background())
 	config.DenoPath = denoPath
 	return &Engine{
 		config:     config,
@@ -124,8 +123,6 @@ func NewEngine(config Config) *Engine {
 		sem:        make(chan struct{}, config.Limits.MaxConcurrentRuns),
 		queueDepth: config.Limits.QueueDepth,
 		runs:       make(map[string]*runState),
-		rootCtx:    rootCtx,
-		cancel:     cancel,
 	}
 }
 
@@ -220,6 +217,10 @@ func (e *Engine) Submit(ctx context.Context, request *PolicyEngineRequest, opts 
 	if e.stopping {
 		e.mu.Unlock()
 		return "", fmt.Errorf("policy engine is shutting down")
+	}
+	if e.rootCtx == nil {
+		e.mu.Unlock()
+		return "", fmt.Errorf("policy engine is not started")
 	}
 	e.wg.Add(1)
 	e.mu.Unlock()

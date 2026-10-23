@@ -81,12 +81,12 @@ type Controller struct {
 	sourceOf map[string]string
 }
 
-func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
+func Register(ctx context.Context, m *ctlruntime.Manager, opts Options) (*Controller, error) {
 	log := opts.Log
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	root, cancel := context.WithCancel(context.Background())
+	root, cancel := context.WithCancel(ctx)
 	c := &Controller{bus: opts.Bus, cursors: opts.Cursors, flushDelay: opts.FlushDelay, log: log.With("component", "eventstream-controller"),
 		root: root, cancelRoot: cancel, streams: map[string]*stream{}, bySource: map[string]map[string]ctlruntime.Request{}, sourceOf: map[string]string{}}
 	err := ctlruntime.For[*eventsv1.EventStream](m, Name, c, ctlruntime.Export(Export), ctlruntime.Finalizer(Finalizer),
@@ -371,7 +371,7 @@ func (s *stream) resume() *int64 {
 }
 
 func (s *stream) flushNow() {
-	ctx, cancel := context.WithTimeout(context.Background(), statusTimeout)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(s.c.root), statusTimeout)
 	defer cancel()
 	if err := s.publish(ctx); err != nil {
 		s.c.log.Warn("writing the EventStream status", "stream", s.key, "err", err.Error())

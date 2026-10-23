@@ -130,9 +130,6 @@ func NewRuntime(cfg RuntimeConfig, onStatus StatusCallback) *Runtime {
 	if cfg.Registry == nil {
 		cfg.Registry = NewRegistry()
 	}
-	if cfg.Bus == nil {
-		cfg.Bus = bus.New()
-	}
 	return &Runtime{
 		log:               cfg.Log,
 		stateDir:          cfg.StateDir,

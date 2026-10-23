@@ -58,7 +58,7 @@ type sinks struct {
 	markets map[string]*eventstream.MarketSink
 }
 
-func Register(m *ctlruntime.Manager, opts Options) (func(context.Context) error, error) {
+func Register(ctx context.Context, m *ctlruntime.Manager, opts Options) (func(context.Context) error, error) {
 	log := opts.Log
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
@@ -77,7 +77,7 @@ func Register(m *ctlruntime.Manager, opts Options) (func(context.Context) error,
 	if _, err := jetstreameventsource.Register(m, backend); err != nil {
 		return nil, err
 	}
-	streams, err := eventstreamctl.Register(m, eventstreamctl.Options{Bus: opts.Bus, Log: log,
+	streams, err := eventstreamctl.Register(ctx, m, eventstreamctl.Options{Bus: opts.Bus, Log: log,
 		Cursors: delivery.NewCursorStore(filepath.Join(opts.StateDir, CursorDir))})
 	if err != nil {
 		return nil, err
