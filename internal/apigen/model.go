@@ -2,6 +2,7 @@ package apigen
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -43,6 +44,13 @@ type Schema struct {
 	Items                *Schema
 	AdditionalProperties *Schema
 	PreserveUnknown      bool
+	Default              any
+	Minimum              *int64
+	Maximum              *int64
+	MaxLength            *int64
+	Pattern              string
+	ListType             string
+	ListMapKeys          []string
 }
 
 type Property struct {
@@ -130,6 +138,7 @@ func BuildGroup(root string, g Group) (*Model, error) {
 		},
 		enumValues: enumValues,
 		pkgPath:    g.Package,
+		types:      map[string]reflect.Type{},
 	}
 	b.model.Named[RefObjectMeta] = &Schema{Type: TypeObject, Ref: RefObjectMeta}
 	b.model.Named[RefCondition] = &Schema{Type: TypeObject, Ref: RefCondition, PreserveUnknown: true}
@@ -145,6 +154,9 @@ func BuildGroup(root string, g Group) (*Model, error) {
 		root, err := b.root(reflect.TypeOf(r.Object), r.Kind)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", r.Kind, err)
+		}
+		if err := b.checkSpecEndpoints(reflect.TypeOf(r.Object)); err != nil {
+			b.errs = append(b.errs, fmt.Errorf("%s: %w", r.Kind, err))
 		}
 		for _, c := range r.PrinterColumns {
 			if err := checkColumn(root, c); err != nil {
@@ -162,6 +174,9 @@ func BuildGroup(root string, g Group) (*Model, error) {
 			PrinterColumns: r.PrinterColumns,
 			Conditions:     hasStatusConditions(reflect.TypeOf(r.Object)),
 		})
+	}
+	if err := errors.Join(b.errs...); err != nil {
+		return nil, err
 	}
 	return b.model, nil
 }
@@ -216,6 +231,9 @@ type builder struct {
 	model      *Model
 	enumValues map[string][]string
 	pkgPath    string
+	types      map[string]reflect.Type
+	errs       []error
+	reported   map[string]bool
 }
 
 func (b *builder) name(s *Schema) {
@@ -282,15 +300,9 @@ func (b *builder) properties(f reflect.StructField) ([]Property, error) {
 			omitempty = true
 		}
 	}
-	optional := false
-	for _, o := range strings.Split(f.Tag.Get("apigen"), ",") {
-		switch o {
-		case "":
-		case optionalTag:
-			optional = true
-		default:
-			return nil, fmt.Errorf("field %s: unknown apigen tag option %q", f.Name, o)
-		}
+	opts, err := parseTag(f.Tag.Get("apigen"))
+	if err != nil {
+		return nil, fmt.Errorf("field %s: %w", f.Name, err)
 	}
 	if f.Type.Kind() == reflect.Pointer && !omitempty {
 		return nil, fmt.Errorf("field %s is a pointer without omitempty, which writes null", f.Name)
@@ -299,7 +311,11 @@ func (b *builder) properties(f reflect.StructField) ([]Property, error) {
 	if err != nil {
 		return nil, fmt.Errorf("field %s: %w", f.Name, err)
 	}
-	return []Property{{Name: name, Required: !omitempty && !optional, Schema: s}}, nil
+	if s, err = opts.apply(s); err != nil {
+		return nil, fmt.Errorf("field %s: %w", f.Name, err)
+	}
+	required := !omitempty && !opts.Optional && opts.Default == nil
+	return []Property{{Name: name, Required: required, Schema: s}}, nil
 }
 
 func (b *builder) schema(t reflect.Type) (*Schema, error) {
@@ -376,10 +392,19 @@ func (b *builder) schema(t reflect.Type) (*Schema, error) {
 		return s, nil
 	case reflect.Struct:
 		if t.PkgPath() != b.pkgPath && t.PkgPath() != commonPkgPath {
-			return nil, fmt.Errorf("struct %v is outside %s and has no mapping", t, b.pkgPath)
+			return nil, fmt.Errorf("struct %v is outside %s and %s and has no mapping", t, b.pkgPath, commonPkgPath)
 		}
+		if prior, ok := b.types[t.Name()]; ok && prior != t {
+			return nil, fmt.Errorf("struct %v and %v share the schema name %s", prior, t, t.Name())
+		}
+		b.types[t.Name()] = t
 		if s, ok := b.model.Named[t.Name()]; ok {
 			return s, nil
+		}
+		if t.PkgPath() == b.pkgPath {
+			if err := b.checkCasing(t); err != nil {
+				b.errs = append(b.errs, err)
+			}
 		}
 		s := &Schema{Type: TypeObject, Ref: t.Name(), Closed: true}
 		b.name(s)
