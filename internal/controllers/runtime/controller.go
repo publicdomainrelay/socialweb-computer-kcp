@@ -1,0 +1,313 @@
+package runtime
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"reflect"
+	"strings"
+	"time"
+
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kruntime "k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/cluster"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	mcbuilder "sigs.k8s.io/multicluster-runtime/pkg/builder"
+	mchandler "sigs.k8s.io/multicluster-runtime/pkg/handler"
+	"sigs.k8s.io/multicluster-runtime/pkg/multicluster"
+	mcreconcile "sigs.k8s.io/multicluster-runtime/pkg/reconcile"
+)
+
+type Object interface {
+	metav1.Object
+	kruntime.Object
+}
+
+type Result struct {
+	RequeueAfter time.Duration
+}
+
+type Reconciler[T Object] interface {
+	Reconcile(ctx context.Context, req Request, obj T) (Result, error)
+}
+
+type ReconcilerFunc[T Object] func(ctx context.Context, req Request, obj T) (Result, error)
+
+func (f ReconcilerFunc[T]) Reconcile(ctx context.Context, req Request, obj T) (Result, error) {
+	return f(ctx, req, obj)
+}
+
+type Request struct {
+	Cluster string
+
+	Workspace string
+
+	Namespace string
+
+	Name string
+
+	scope *scope
+}
+
+type scope struct {
+	client client.Client
+
+	scheme *kruntime.Scheme
+
+	fieldManager string
+
+	finalizer string
+
+	log *slog.Logger
+}
+
+type Option func(*options)
+
+type options struct {
+	export string
+
+	fieldManager string
+
+	finalizer string
+
+	owns []client.Object
+
+	watches []watchInput
+
+	backoffBase time.Duration
+
+	backoffMax time.Duration
+
+	workers int
+
+	err error
+}
+
+type watchInput struct {
+	object client.Object
+
+	mapFunc func(ctx context.Context, src Request, obj client.Object) []Request
+}
+
+func Export(name string) Option {
+	return func(o *options) { o.export = strings.TrimSpace(name) }
+}
+
+func FieldManager(name string) Option {
+	return func(o *options) { o.fieldManager = strings.TrimSpace(name) }
+}
+
+func Finalizer(name string) Option {
+	return func(o *options) { o.finalizer = strings.TrimSpace(name) }
+}
+
+func Backoff(base, max time.Duration) Option {
+	return func(o *options) { o.backoffBase, o.backoffMax = base, max }
+}
+
+func Workers(n int) Option {
+	return func(o *options) { o.workers = n }
+}
+
+func Owns[C Object]() Option {
+	return func(o *options) {
+		obj, err := newObject[C]()
+		if err != nil {
+			o.err = errors.Join(o.err, err)
+			return
+		}
+		o.owns = append(o.owns, obj)
+	}
+}
+
+func Watches[R Object](mapFunc func(ctx context.Context, src Request, obj R) []Request) Option {
+	return func(o *options) {
+		obj, err := newObject[R]()
+		if err != nil {
+			o.err = errors.Join(o.err, err)
+			return
+		}
+		if mapFunc == nil {
+			o.err = errors.Join(o.err, fmt.Errorf("runtime: the watch of %T has no map func", obj))
+			return
+		}
+		o.watches = append(o.watches, watchInput{object: obj, mapFunc: func(ctx context.Context, src Request, obj client.Object) []Request {
+			typed, ok := obj.(R)
+			if !ok {
+				return nil
+			}
+			return mapFunc(ctx, src, typed)
+		}})
+	}
+}
+
+func For[T Object](m *Manager, name string, r Reconciler[T], opts ...Option) error {
+	name = strings.TrimSpace(name)
+	if m == nil {
+		return errors.New("runtime: a manager is required")
+	}
+	if name == "" {
+		return errors.New("runtime: a controller needs a name")
+	}
+	if r == nil {
+		return fmt.Errorf("runtime: the controller %s has no reconciler", name)
+	}
+	o := options{fieldManager: FieldManagerPrefix + name, backoffBase: DefaultBackoffBase, backoffMax: DefaultBackoffMax, workers: 1}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&o)
+		}
+	}
+	if o.err != nil {
+		return fmt.Errorf("runtime: the controller %s: %w", name, o.err)
+	}
+	if o.export == "" {
+		return fmt.Errorf("runtime: the controller %s names no APIExport", name)
+	}
+	if o.workers <= 0 {
+		o.workers = 1
+	}
+	proto, err := newObject[T]()
+	if err != nil {
+		return fmt.Errorf("runtime: the controller %s: %w", name, err)
+	}
+	if err := m.addExport(o.export); err != nil {
+		return err
+	}
+	prefix := o.export + clusterSeparator
+	inExport := mcbuilder.WithClusterFilter(func(cn multicluster.ClusterName, _ cluster.Cluster) bool {
+		return strings.HasPrefix(string(cn), prefix)
+	})
+	limiter := newBackoff(o.backoffBase, o.backoffMax)
+	log := m.log.With("controller", name)
+	b := mcbuilder.ControllerManagedBy(m.mgr).Named(name).
+		For(proto, inExport, mcbuilder.WithPredicates(specOrDeletion())).
+		WithOptions(controller.TypedOptions[mcreconcile.Request]{MaxConcurrentReconciles: o.workers, RateLimiter: limiter,
+			SkipNameValidation: ptr.To(true)})
+	for _, owned := range o.owns {
+		b = b.Owns(owned, inExport)
+	}
+	for _, w := range o.watches {
+		b = b.Watches(w.object, m.mapHandler(o.export, w.mapFunc), inExport)
+	}
+	a := &adapter[T]{m: m, name: name, r: r, limiter: limiter, log: log,
+		scope: scope{scheme: m.scheme, fieldManager: o.fieldManager, finalizer: o.finalizer, log: log}}
+	if err := b.Complete(a); err != nil {
+		return fmt.Errorf("runtime: building the controller %s: %w", name, err)
+	}
+	log.Info("the controller is registered", "kind", fmt.Sprintf("%T", proto), "export", o.export, "fieldManager", o.fieldManager)
+	return nil
+}
+
+func (m *Manager) mapHandler(export string, mapFunc func(ctx context.Context, src Request, obj client.Object) []Request) mchandler.TypedEventHandlerFunc[client.Object, mcreconcile.Request] {
+	return func(cn multicluster.ClusterName, _ cluster.Cluster) handler.TypedEventHandler[client.Object, mcreconcile.Request] {
+		_, lc := splitCluster(string(cn))
+		return handler.TypedEnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []mcreconcile.Request {
+			src := Request{Cluster: lc, Workspace: m.path(ctx, lc), Namespace: obj.GetNamespace(), Name: obj.GetName()}
+			var out []mcreconcile.Request
+			for _, r := range mapFunc(ctx, src, obj) {
+				target := cn
+				if r.Cluster != "" && r.Cluster != lc {
+					target = multicluster.ClusterName(export + clusterSeparator + r.Cluster)
+				}
+				out = append(out, mcreconcile.Request{ClusterName: target,
+					Request: reconcile.Request{NamespacedName: types.NamespacedName{Namespace: r.Namespace, Name: r.Name}}})
+			}
+			return out
+		})
+	}
+}
+
+func specOrDeletion() predicate.Predicate {
+	return predicate.Or(predicate.GenerationChangedPredicate{}, predicate.Funcs{
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			if e.ObjectOld == nil || e.ObjectNew == nil {
+				return false
+			}
+			return e.ObjectOld.GetDeletionTimestamp().IsZero() != e.ObjectNew.GetDeletionTimestamp().IsZero()
+		},
+	})
+}
+
+type adapter[T Object] struct {
+	m *Manager
+
+	name string
+
+	r Reconciler[T]
+
+	limiter *backoff
+
+	log *slog.Logger
+
+	scope scope
+}
+
+func (a *adapter[T]) Reconcile(ctx context.Context, mcreq mcreconcile.Request) (reconcile.Result, error) {
+	_, lc := splitCluster(string(mcreq.ClusterName))
+	cl, err := a.m.mgr.GetCluster(ctx, mcreq.ClusterName)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+	obj, err := newObject[T]()
+	if err != nil {
+		return reconcile.Result{}, reconcile.TerminalError(err)
+	}
+	if err := cl.GetClient().Get(ctx, mcreq.NamespacedName, obj); err != nil {
+		if apierrors.IsNotFound(err) {
+			return reconcile.Result{}, nil
+		}
+		return reconcile.Result{}, a.failed(mcreq, lc, mcreq.Name, err)
+	}
+	s := a.scope
+	s.client = cl.GetClient()
+	req := Request{Cluster: lc, Workspace: a.m.path(ctx, lc), Namespace: mcreq.Namespace, Name: mcreq.Name, scope: &s}
+	log := a.log.With("cluster", lc, "workspace", req.Workspace, "name", req.Name)
+	s.log = log
+	if s.finalizer != "" && obj.GetDeletionTimestamp().IsZero() && !controllerutil.ContainsFinalizer(obj, s.finalizer) {
+		if err := req.applyFinalizer(ctx, obj, true); err != nil {
+			return reconcile.Result{}, a.failed(mcreq, lc, req.Name, err)
+		}
+	}
+	log.Debug("reconciling")
+	res, err := a.r.Reconcile(ctx, req, obj)
+	if err != nil {
+		return reconcile.Result{}, a.failed(mcreq, req.Workspace, req.Name, err)
+	}
+	if s.finalizer != "" && !obj.GetDeletionTimestamp().IsZero() && controllerutil.ContainsFinalizer(obj, s.finalizer) {
+		if err := req.applyFinalizer(ctx, obj, false); err != nil {
+			return reconcile.Result{}, a.failed(mcreq, req.Workspace, req.Name, err)
+		}
+	}
+	return reconcile.Result{RequeueAfter: res.RequeueAfter}, nil
+}
+
+func (a *adapter[T]) failed(item mcreconcile.Request, workspace, name string, err error) error {
+	failures, retryIn := a.limiter.peek(item)
+	a.log.Warn("the reconcile failed; it retries with backoff", "workspace", workspace, "name", name,
+		"failures", failures, "retryIn", retryIn.String(), "err", err.Error())
+	return err
+}
+
+func newObject[T Object]() (T, error) {
+	var zero T
+	t := reflect.TypeOf(zero)
+	if t == nil || t.Kind() != reflect.Pointer || t.Elem().Kind() != reflect.Struct {
+		return zero, fmt.Errorf("runtime: %v is not a pointer to a struct", t)
+	}
+	obj, ok := reflect.New(t.Elem()).Interface().(T)
+	if !ok {
+		return zero, fmt.Errorf("runtime: %v does not implement the object interface", t)
+	}
+	return obj, nil
+}
