@@ -42,6 +42,12 @@ func ForWorkspace(base *rest.Config, workspace string) (*Client, error) {
 	return New(kcprest.ForCluster(base, workspace))
 }
 
+type Factory func(workspace string) (*Client, error)
+
+func NewFactory(base *rest.Config) Factory {
+	return func(workspace string) (*Client, error) { return ForWorkspace(base, workspace) }
+}
+
 type Resource struct {
 	ri  dynamic.NamespaceableResourceInterface
 	gvr schema.GroupVersionResource
