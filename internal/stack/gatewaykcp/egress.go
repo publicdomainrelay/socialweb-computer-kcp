@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -118,22 +119,25 @@ func listenEgress(record string) (net.Listener, error) {
 	return ln, nil
 }
 
-func runEgress(ctx context.Context, m egressMap, record string, log *slog.Logger) (net.Addr, error) {
+func runEgress(ctx context.Context, m egressMap, record string, log *slog.Logger) (net.Addr, func(), error) {
 	ln, err := listenEgress(record)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	srv := &http.Server{Handler: m, ReadHeaderTimeout: egressDialTime}
-	go func() {
-		<-ctx.Done()
-		srv.Close()
-	}()
-	go func() {
+	closeOnDone := context.AfterFunc(ctx, func() { srv.Close() })
+	var wg sync.WaitGroup
+	wg.Go(func() {
 		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("the egress proxy stopped", "err", err.Error())
 		}
-	}()
-	return ln.Addr(), nil
+	})
+	stop := func() {
+		closeOnDone()
+		srv.Close()
+		wg.Wait()
+	}
+	return ln.Addr(), stop, nil
 }
 
 const outboundCAFile = "outbound-ca-bundle.pem"

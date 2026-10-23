@@ -284,10 +284,11 @@ func run(ctx context.Context, c Config, l devinstance.Layout, app *table.App, m 
 			return err
 		}
 		if ok {
-			addr, err := runEgress(ctx, m, filepath.Join(l.KcpDir(), egressRecord), c.log())
+			addr, stopEgress, err := runEgress(ctx, m, filepath.Join(l.KcpDir(), egressRecord), c.log())
 			if err != nil {
 				return err
 			}
+			defer stopEgress()
 			reg.set(ListenerEgress, "http", addr)
 			os.Setenv("HTTPS_PROXY", "http://"+addr.String())
 			c.log().Info("the market network's guest TLS front is this gateway's egress for its port-less names: every vault it places fetches a bidder's issuer through it",
@@ -509,12 +510,14 @@ func (g *gateway) members(ctx context.Context, rec devinstance.Record) error {
 	if code := providermain.Main(ctx, g.invocation(env, []string{"migrate"}, "migrate")); code != 0 {
 		log.Warn("the legacy-key migration did not complete; the gateway starts anyway, the clusterprovider runs the same migration itself", "exit", code)
 	}
+	var wg sync.WaitGroup
+	defer wg.Wait()
 	mctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	go followMemberToken(mctx, g.activeSlotRoot, filepath.Join(g.l.KcpDir(), MemberToken), log)
+	wg.Go(func() { followMemberToken(mctx, g.activeSlotRoot, filepath.Join(g.l.KcpDir(), MemberToken), log) })
 	ended := make(chan error, 8)
 	start := func(m member) {
-		go func() {
+		wg.Go(func() {
 			err := m.run(mctx)
 			if err == nil && mctx.Err() == nil {
 				err = errors.New("returned")
@@ -523,7 +526,7 @@ func (g *gateway) members(ctx context.Context, rec devinstance.Record) error {
 				err = fmt.Errorf("%s: %w", m.name, err)
 			}
 			ended <- err
-		}()
+		})
 	}
 	denyCfg, err := clientcmd.BuildConfigFromFlags("", g.memberKubeconfig())
 	if err != nil {
