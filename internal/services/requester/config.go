@@ -21,7 +21,6 @@ import (
 	atprotooauth "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauthclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
@@ -776,15 +775,6 @@ func loadGuestSSHKeys(path string) ([]string, error) {
 func absoluteHTTPURL(raw string) bool {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	return err == nil && u.Host != "" && (u.Scheme == "http" || u.Scheme == "https")
-}
-
-func handlerURL(workspace, kind, name string) string {
-	kind = strings.ToLower(strings.TrimSpace(kind))
-	name = strings.TrimSpace(name)
-	if kind == "" || name == "" {
-		return ""
-	}
-	return "http://" + kcp.ServiceFQDN(kind, "default", workspace, kcp.DefaultServiceDomain)
 }
 
 func Factory(ctx context.Context, deps component.Deps, spec component.ComponentSpec) (component.Service, error) {

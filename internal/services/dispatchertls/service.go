@@ -208,7 +208,7 @@ func Register(runtime *component.Runtime) error {
 
 func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	cfg := s.cfg
-	cfg.Deps = mergeDeps(cfg.Deps, deps)
+	cfg.Deps = cfg.Deps.Or(deps)
 	if cfg.Workspace == "" {
 		cfg.Workspace = "root"
 	}
@@ -530,35 +530,6 @@ func probeHost(hosts []string) string {
 		}
 	}
 	return "localhost"
-}
-
-func mergeDeps(cfgDeps, deps component.Deps) component.Deps {
-	out := cfgDeps
-	if out.Log == nil {
-		out.Log = deps.Log
-	}
-	if out.TLS == nil {
-		out.TLS = deps.TLS
-	}
-	if out.StateDir == "" {
-		out.StateDir = deps.StateDir
-	}
-	if out.Registry == nil {
-		out.Registry = deps.Registry
-	}
-	if out.Hosts == nil {
-		out.Hosts = deps.Hosts
-	}
-	if out.KCP == nil {
-		out.KCP = deps.KCP
-	}
-	if out.Credentials == nil {
-		out.Credentials = deps.Credentials
-	}
-	if out.Vault == nil {
-		out.Vault = deps.Vault
-	}
-	return out
 }
 
 func probeClient() *http.Client {

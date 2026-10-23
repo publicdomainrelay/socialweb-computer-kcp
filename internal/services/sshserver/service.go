@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -188,7 +187,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 		close(s.done)
 		return errors.New("sshserver: no handler registry is available")
 	}
-	host := logicalHost(key)
+	host := kcp.KindServiceHost(key.Kind, key.Workspace)
 	httpURL := "http://" + host
 	sshURL := "ssh://" + host
 	if err := handlers.RegisterHTTP(key, s.handler()); err != nil {
@@ -548,12 +547,4 @@ func (s *Service) shutdown(ctx context.Context) {
 	s.started = false
 	s.ready = false
 	s.mu.Unlock()
-}
-
-func logicalHost(key component.Key) string {
-	kind := strings.ToLower(strings.TrimSpace(key.Kind))
-	if kind == "" {
-		return ""
-	}
-	return kcp.ServiceFQDN(kind, "default", key.Workspace, kcp.DefaultServiceDomain)
 }

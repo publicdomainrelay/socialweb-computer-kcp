@@ -20,7 +20,6 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestseed"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
@@ -764,15 +763,6 @@ func New(cfg Config) (*Service, error) {
 		log = slog.New(slog.DiscardHandler)
 	}
 	return &Service{cfg: cfg, log: log.With("component", "bidder", "handle", cfg.Handle)}, nil
-}
-
-func handlerURL(workspace, kind, name string) string {
-	kind = strings.ToLower(strings.TrimSpace(kind))
-	name = strings.TrimSpace(name)
-	if kind == "" || name == "" {
-		return ""
-	}
-	return "http://" + kcp.ServiceFQDN(kind, "default", workspace, kcp.DefaultServiceDomain)
 }
 
 func isAbsoluteURL(raw string) bool {

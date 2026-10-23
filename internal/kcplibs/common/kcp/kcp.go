@@ -37,3 +37,19 @@ func ServiceFQDN(name, namespace, logicalCluster, domain string) string {
 	}
 	return host + "." + ServiceSegment + "." + domain
 }
+
+func KindServiceHost(kind, logicalCluster string) string {
+	kind = strings.ToLower(strings.TrimSpace(kind))
+	if kind == "" {
+		return ""
+	}
+	return ServiceFQDN(kind, "default", logicalCluster, DefaultServiceDomain)
+}
+
+func HandlerURL(logicalCluster, kind, name string) string {
+	host := KindServiceHost(kind, logicalCluster)
+	if host == "" || strings.TrimSpace(name) == "" {
+		return ""
+	}
+	return "http://" + host
+}

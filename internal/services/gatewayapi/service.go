@@ -47,7 +47,7 @@ func New(cfg Config) *Service {
 
 func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	cfg := s.cfg.withDefaults()
-	cfg.Deps = mergeDeps(cfg.Deps, deps)
+	cfg.Deps = cfg.Deps.Or(deps)
 	if err := cfg.Check(); err != nil {
 		return err
 	}
@@ -153,7 +153,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	if mapper != nil {
 		mapper.Start(ctx)
 	}
-	log.Info("gatewayapi_registered", "handler", handlerURL(cfg.Workspace, Kind, cfg.ComponentName), "network", networkName(cfg.Network))
+	log.Info("gatewayapi_registered", "handler", kcp.HandlerURL(cfg.Workspace, Kind, cfg.ComponentName), "network", networkName(cfg.Network))
 
 	select {
 	case <-ctx.Done():
@@ -445,7 +445,7 @@ func (r *gatewayURLResolver) baseURL(ctx context.Context) (string, error) {
 	if r.cfg.URL != "" {
 		return r.cfg.URL, nil
 	}
-	raw := handlerURL(r.cfg.Ref.Workspace, r.cfg.Ref.Kind, r.cfg.Ref.Name)
+	raw := kcp.HandlerURL(r.cfg.Ref.Workspace, r.cfg.Ref.Kind, r.cfg.Ref.Name)
 	if raw == "" {
 		return "", fmt.Errorf("gatewayapi: the gateway ref %s/%s names no component", r.cfg.Ref.Kind, r.cfg.Ref.Name)
 	}
@@ -544,42 +544,4 @@ func directoryFor(raw string) identity.Directory {
 		}
 	}
 	return identity.NewCacheDirectory(inner, DefaultDirectoryKeys, DefaultDirectoryTTL, DefaultDirectoryTTL, DefaultDirectoryTTL)
-}
-
-func mergeDeps(cfgDeps, deps component.Deps) component.Deps {
-	out := cfgDeps
-	if out.Log == nil {
-		out.Log = deps.Log
-	}
-	if out.TLS == nil {
-		out.TLS = deps.TLS
-	}
-	if out.StateDir == "" {
-		out.StateDir = deps.StateDir
-	}
-	if out.Registry == nil {
-		out.Registry = deps.Registry
-	}
-	if out.Hosts == nil {
-		out.Hosts = deps.Hosts
-	}
-	if out.KCP == nil {
-		out.KCP = deps.KCP
-	}
-	if out.Credentials == nil {
-		out.Credentials = deps.Credentials
-	}
-	if out.Vault == nil {
-		out.Vault = deps.Vault
-	}
-	return out
-}
-
-func handlerURL(workspace, kind, name string) string {
-	kind = strings.ToLower(strings.TrimSpace(kind))
-	name = strings.TrimSpace(name)
-	if kind == "" || name == "" {
-		return ""
-	}
-	return "http://" + kcp.ServiceFQDN(kind, "default", workspace, kcp.DefaultServiceDomain)
 }

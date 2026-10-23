@@ -285,7 +285,7 @@ func Register(runtime *component.Runtime) error {
 
 func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	cfg := s.cfg
-	cfg.Deps = mergeDeps(cfg.Deps, deps)
+	cfg.Deps = cfg.Deps.Or(deps)
 	if cfg.Workspace == "" {
 		cfg.Workspace = "root"
 	}
@@ -382,7 +382,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	}
 	s.stopCh = stopCh
 	s.mu.Unlock()
-	host := logicalHost(key)
+	host := kcp.KindServiceHost(key.Kind, key.Workspace)
 	baseURL := "http://" + host
 	if err := handlers.RegisterHTTP(key, relay.Handler()); err != nil {
 		s.mu.Lock()
@@ -598,38 +598,6 @@ func endpointHost(endpoint component.Endpoint) string {
 	return endpoint.Address
 }
 
-func mergeDeps(cfgDeps, deps component.Deps) component.Deps {
-	out := cfgDeps
-	if out.Log == nil {
-		out.Log = deps.Log
-	}
-	if out.TLS == nil {
-		out.TLS = deps.TLS
-	}
-	if out.StateDir == "" {
-		out.StateDir = deps.StateDir
-	}
-	if out.Registry == nil {
-		out.Registry = deps.Registry
-	}
-	if out.Handlers == nil {
-		out.Handlers = deps.Handlers
-	}
-	if out.Hosts == nil {
-		out.Hosts = deps.Hosts
-	}
-	if out.KCP == nil {
-		out.KCP = deps.KCP
-	}
-	if out.Credentials == nil {
-		out.Credentials = deps.Credentials
-	}
-	if out.Vault == nil {
-		out.Vault = deps.Vault
-	}
-	return out
-}
-
 type handlerAwareRoundTripper struct {
 	handlers *component.HandlerRegistry
 	external http.RoundTripper
@@ -673,12 +641,4 @@ func handlerDialer(handlers *component.HandlerRegistry, external func(context.Co
 		}
 		return external(ctx, network, address)
 	}
-}
-
-func logicalHost(key component.Key) string {
-	kind := strings.ToLower(strings.TrimSpace(key.Kind))
-	if kind == "" {
-		return ""
-	}
-	return kcp.ServiceFQDN(kind, "default", key.Workspace, kcp.DefaultServiceDomain)
 }

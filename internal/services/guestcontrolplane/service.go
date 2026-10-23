@@ -24,6 +24,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/ingress"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestidentity"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 )
@@ -278,7 +279,7 @@ func (s *Service) register() error {
 }
 
 func (s *Service) logicalURL() string {
-	return handlerURL(s.cfg.Workspace, Kind, s.cfg.ComponentName)
+	return kcp.HandlerURL(s.cfg.Workspace, Kind, s.cfg.ComponentName)
 }
 
 func (s *Service) resolveKCP(ctx context.Context) error {

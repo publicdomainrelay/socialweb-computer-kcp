@@ -28,6 +28,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/ref"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
@@ -465,7 +466,7 @@ func (s *Service) resolveIdentity(ctx context.Context) error {
 		if kind == "" {
 			kind = "Pds"
 		}
-		s.cfg.PDSURL = handlerURL(s.cfg.Workspace, kind, s.cfg.PDSRef.Name)
+		s.cfg.PDSURL = kcp.HandlerURL(s.cfg.Workspace, kind, s.cfg.PDSRef.Name)
 		s.pdsInternal = s.cfg.PDSURL != ""
 	}
 	if s.store == nil || s.cfg.IdentityRef == nil || s.cfg.IdentityRef.Name == "" {
@@ -681,7 +682,7 @@ func (s *Service) resolveGuestURL(ctx context.Context) string {
 	if kind == "" {
 		kind = "GuestControlPlane"
 	}
-	return handlerURL(s.cfg.Workspace, kind, s.cfg.GuestControlRef.Name)
+	return kcp.HandlerURL(s.cfg.Workspace, kind, s.cfg.GuestControlRef.Name)
 }
 
 func (s *Service) publicNetwork() bool {
@@ -813,7 +814,7 @@ func (s *Service) addEndpoint(endpoint component.Endpoint) {
 }
 
 func (s *Service) listeningURL() string {
-	return handlerURL(s.cfg.Workspace, Kind, s.cfg.ComponentName)
+	return kcp.HandlerURL(s.cfg.Workspace, Kind, s.cfg.ComponentName)
 }
 
 func (s *Service) publicMarketURL() string {
