@@ -289,7 +289,7 @@ waves:
     gate: "each abstract kind resolves to a concrete backend; every consumer reaches it through a bus handle; no credentials outside the callee."
   - id: W3
     title: "Composition roots"
-    status: todo
+    status: doing
     parallel: true
     tracks: [W3-ROOTS, W3-CONFIG, W3-STATUS]
     depends_on: [W2]
@@ -850,7 +850,7 @@ items:
     track: roots
     parallel_with: [W3-CONFIG, W3-STATUS]
     depends_on: [W2-REPO, W2-PDS, W2-VAULT, W2-EVENTS, W2-COMPUTE, W2-POLICY]
-    status: todo
+    status: doing
     closes: [D04, D05, D06, D07, D10, D12, D21]
     decision: >
       Split internal/appctl into internal/app/{marketbidder,marketrequester,
@@ -879,7 +879,7 @@ items:
     track: config
     parallel_with: [W3-ROOTS, W3-STATUS]
     depends_on: [W2-REPO, W2-PDS, W2-VAULT, W2-EVENTS, W2-COMPUTE, W2-POLICY]
-    status: todo
+    status: doing
     decision: >
       Delete every ConfigFrom, every service Config struct that copies a
       spec, the overrides.go type switch and per-kind validation. Services
@@ -901,7 +901,7 @@ items:
     track: status
     parallel_with: [W3-ROOTS, W3-CONFIG]
     depends_on: [W2-REPO, W2-PDS, W2-VAULT, W2-EVENTS, W2-COMPUTE, W2-POLICY]
-    status: todo
+    status: doing
     closes: [D11, D20]
     decision: >
       Move statusstate, marketpresence, leasecontroller, hostlifecycle,
