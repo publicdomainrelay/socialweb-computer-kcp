@@ -17,7 +17,7 @@ require (
 	github.com/ipfs/go-ipld-cbor v0.1.0
 	github.com/ipfs/go-ipld-format v0.6.0
 	github.com/ipld/go-car v0.6.1-0.20230509095817-92d28eb23ba4
-	github.com/kcp-dev/multicluster-provider v0.8.0
+	github.com/kcp-dev/multicluster-provider v0.8.1-0.20260813225908-bfda949c3fd1
 	github.com/kcp-dev/sdk v0.33.1
 	github.com/klauspost/compress v1.19.2
 	github.com/mr-tron/base58 v1.3.0
@@ -161,3 +161,5 @@ require (
 )
 
 tool k8s.io/code-generator/cmd/deepcopy-gen
+
+replace github.com/kcp-dev/sdk => github.com/kcp-dev/sdk v0.28.1-0.20261021074416-91bab06689ae

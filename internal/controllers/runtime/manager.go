@@ -14,7 +14,6 @@ import (
 	kruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
-	clientfeatures "k8s.io/client-go/features"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/utils/ptr"
@@ -75,22 +74,7 @@ type Manager struct {
 	paths sync.Map
 }
 
-var (
-	setLogger sync.Once
-
-	setGates sync.Once
-)
-
-type noWatchList struct {
-	clientfeatures.Gates
-}
-
-func (g noWatchList) Enabled(key clientfeatures.Feature) bool {
-	if key == clientfeatures.WatchListClient {
-		return false
-	}
-	return g.Gates.Enabled(key)
-}
+var setLogger sync.Once
 
 func NewManager(cfg Config) (*Manager, error) {
 	if cfg.Rest == nil {
@@ -120,11 +104,6 @@ func NewManager(cfg Config) (*Manager, error) {
 	}
 	logger := logr.FromSlogHandler(log.Handler())
 	setLogger.Do(func() { ctrllog.SetLogger(logger) })
-	setGates.Do(func() {
-		if clientfeatures.FeatureGates().Enabled(clientfeatures.WatchListClient) {
-			clientfeatures.ReplaceFeatureGates(noWatchList{Gates: clientfeatures.FeatureGates()})
-		}
-	})
 	providers := multi.New(multi.Options{Separator: clusterSeparator})
 	mgr, err := mcmanager.New(clusterConfig(base, exportWorkspace), providers, manager.Options{
 		Scheme:     scheme,
