@@ -228,17 +228,17 @@ func selectorString(s labels.Selector) string {
 	return s.String()
 }
 
-var deniedTotal = expvar.NewMap("socialweb_bus_link_denied_total")
-
 type denials struct {
 	count atomic.Uint64
+
+	byCapability expvar.Map
 
 	log atomic.Pointer[slog.Logger]
 }
 
 func (d *denials) deny(from Caller, to commonv1.ObjectRef, c Capability) error {
 	d.count.Add(1)
-	deniedTotal.Add(c.Name, 1)
+	d.byCapability.Add(c.Name, 1)
 	log := d.log.Load()
 	if log == nil {
 		log = slog.Default()
