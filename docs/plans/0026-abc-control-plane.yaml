@@ -1068,6 +1068,10 @@ acceptance_matrix:
       check: "Tenant clusters work around the kcp mount on kcp main: a ServiceAccount-token kubeconfig and a client-certificate kubeconfig both get and watch through <public host>/clusters/root:<acct>:<home>:clusters; a revoked certificate gets 401 and a revoked DID bearer 403; caddy validate accepts the @tenant matcher; a stopped or deleted cluster answers 503 within one gate change and cuts open watches; shut and reap follow the Cluster's own state, never a 502; a Ready cluster with its apiserver down is not reaped; revocation deletes the did- ServiceAccount through the direct path and defers a stopped one; kcp mount-proxy logs show no tenant traffic."
       hosts: [this host, prod gateway]
 
+    - id: A10
+      check: "W1 wire changes hold against the live counterparties: every XRPC call sends Accept application/json; a bidder whose service-auth re-mint fails returns the first 401/403 without an unsigned retry; custody DPoP calls omit an empty DPoP header and fail when custody returns no access token; requester market and vaultaccess reject an oversized 2xx body; requestCrawl bodies are accepted by the relay; an expired ingress nonce is refused; OpenBao logins are shared by concurrent callers and renew before expiry."
+      hosts: [this host, hat-7, prod gateway]
+
 risks: |
   multicluster-runtime and the kcp multicluster-provider are marked
   experimental. The W0 pilot decides the backend before any fan-out; the
