@@ -102,6 +102,7 @@ type UserManager interface {
 	Restart(ctx context.Context, units []string) error
 	DisableStop(ctx context.Context, units []string) error
 	List(ctx context.Context) ([]hostsvc.UnitStatus, error)
+	Watch(ctx context.Context, unit string) (<-chan hostsvc.UnitStatus, error)
 	Stop(ctx context.Context, unit string) error
 	Close()
 }
@@ -1127,41 +1128,43 @@ func (in *installer) waitStarted(um UserManager, unit string) error {
 	ctx, cancel := context.WithTimeout(in.ctx, in.startBudget())
 	defer cancel()
 	flags := journalHint(in.o.Account, in.acct.UID, unit)
-	var endedSince time.Time
 	return in.wait("waiting for "+unit+" to finish starting", func() error {
+		statuses, err := um.Watch(ctx, unit)
+		if err != nil {
+			return err
+		}
+		grace := time.NewTimer(StartEndedGrace)
+		grace.Stop()
+		defer grace.Stop()
+		var ended hostsvc.UnitStatus
 		for {
-			listed, err := um.List(ctx)
-			if err != nil {
-				return err
-			}
-			found := false
-			for _, s := range listed {
-				if s.Name != unit {
-					continue
-				}
-				found = true
-				if s.State == hostsvc.Active {
-					return nil
-				}
-				if s.State != hostsvc.Activating {
-					if endedSince.IsZero() {
-						endedSince = time.Now()
-					}
-					if time.Since(endedSince) < StartEndedGrace {
-						break
-					}
-					return fmt.Errorf("install: %s ended %s %s and stayed there for %s; read %s",
-						unit, s.State, s.SubState, StartEndedGrace, flags)
-				}
-				endedSince = time.Time{}
-			}
-			if !found {
-				return fmt.Errorf("install: %s is no longer known to systemd; read %s", unit, flags)
-			}
 			select {
 			case <-ctx.Done():
 				return fmt.Errorf("install: %s is still starting after %s; read %s", unit, in.startBudget(), flags)
-			case <-time.After(kcpserver.ProbePoll):
+			case <-grace.C:
+				return fmt.Errorf("install: %s ended %s %s and stayed there for %s; read %s",
+					unit, ended.State, ended.SubState, StartEndedGrace, flags)
+			case s, open := <-statuses:
+				if !open {
+					if ctx.Err() != nil {
+						continue
+					}
+					return fmt.Errorf("install: the watch of %s ended; read %s", unit, flags)
+				}
+				switch s.State {
+				case hostsvc.Active:
+					return nil
+				case hostsvc.NotFound:
+					return fmt.Errorf("install: %s is no longer known to systemd; read %s", unit, flags)
+				case hostsvc.Activating:
+					grace.Stop()
+					ended = hostsvc.UnitStatus{}
+				default:
+					if ended.State == "" {
+						grace.Reset(StartEndedGrace)
+					}
+					ended = s
+				}
 			}
 		}
 	})

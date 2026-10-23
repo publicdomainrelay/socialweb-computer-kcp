@@ -27,7 +27,6 @@ const (
 	managerSocketWait = 30 * time.Second
 	jobTimeout        = 2 * time.Minute
 	restartRecovery   = 60 * time.Second
-	restartPollEvery  = 500 * time.Millisecond
 	hostPath          = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 )
 
@@ -268,33 +267,76 @@ func (e *jobEndedError) Error() string {
 	return fmt.Sprintf("%s: the job ended %q", e.unit, e.result)
 }
 
-func restartedOK(ctx context.Context, conn *sd.Conn, unit string) bool {
-	state, err := conn.GetUnitPropertyContext(ctx, unit, "ActiveState")
-	if err != nil {
-		return false
-	}
-	sub, err := conn.GetUnitPropertyContext(ctx, unit, "SubState")
-	if err != nil {
-		return false
-	}
-	active, _ := state.Value.Value().(string)
-	substate, _ := sub.Value.Value().(string)
-	return active == string(hostsvc.Active) || (active == string(hostsvc.Activating) && substate != "auto-restart")
+func restartedOK(st hostsvc.UnitStatus) bool {
+	return st.State == hostsvc.Active || (st.State == hostsvc.Activating && st.SubState != "auto-restart")
 }
 
 func (u *liveUser) awaitRestartRecovery(ctx context.Context, unit string, failure error) error {
 	ctx, cancel := context.WithTimeout(ctx, restartRecovery)
 	defer cancel()
-	for {
-		if restartedOK(ctx, u.conn, unit) {
+	statuses, err := u.Watch(ctx, unit)
+	if err != nil {
+		return failure
+	}
+	for st := range statuses {
+		if restartedOK(st) {
 			return nil
 		}
-		select {
-		case <-ctx.Done():
-			return failure
-		case <-time.After(restartPollEvery):
-		}
 	}
+	return failure
+}
+
+func (u *liveUser) status(ctx context.Context, unit string) (hostsvc.UnitStatus, error) {
+	units, err := u.conn.ListUnitsByNamesContext(ctx, []string{unit})
+	if err != nil {
+		return hostsvc.UnitStatus{}, err
+	}
+	for _, s := range units {
+		if s.Name != unit {
+			continue
+		}
+		if s.LoadState == "not-found" {
+			return hostsvc.UnitStatus{Name: unit, State: hostsvc.NotFound}, nil
+		}
+		return hostsvc.UnitStatus{Name: s.Name, State: hostsvc.ActiveState(s.ActiveState), SubState: s.SubState}, nil
+	}
+	return hostsvc.UnitStatus{Name: unit, State: hostsvc.NotFound}, nil
+}
+
+func (u *liveUser) Watch(ctx context.Context, unit string) (<-chan hostsvc.UnitStatus, error) {
+	if err := u.conn.Subscribe(); err != nil {
+		return nil, fmt.Errorf("%s: subscribing to unit signals: %w", unit, err)
+	}
+	updates := make(chan *sd.PropertiesUpdate, 64)
+	overflow := make(chan error, 1)
+	u.conn.SetPropertiesSubscriber(updates, overflow)
+	out := make(chan hostsvc.UnitStatus, 1)
+	go func() {
+		defer close(out)
+		defer u.conn.SetPropertiesSubscriber(nil, nil)
+		for {
+			st, err := u.status(ctx, unit)
+			if err != nil {
+				return
+			}
+			select {
+			case out <- st:
+			case <-ctx.Done():
+				return
+			}
+			for changed := false; !changed; {
+				select {
+				case <-ctx.Done():
+					return
+				case up := <-updates:
+					changed = up.UnitName == unit
+				case <-overflow:
+					changed = true
+				}
+			}
+		}
+	}()
+	return out, nil
 }
 
 func waitJob(ctx context.Context, unit string, start func(chan<- string) error) error {
