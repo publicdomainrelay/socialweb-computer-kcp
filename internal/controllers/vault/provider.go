@@ -35,8 +35,32 @@ type Binding struct {
 	Remote *v1alpha1.RemoteOpenBao
 }
 
+type bindingContract struct {
+	Vault commonv1.ObjectRef
+
+	Backend commonv1.ObjectRef
+
+	Address string
+
+	CABundle string
+
+	Refs *v1alpha1.OpenBaoServerRefs
+
+	Clients []v1alpha1.OpenBaoServerClientRefs
+
+	Remote *v1alpha1.RemoteOpenBaoSpec
+}
+
 func (b Binding) fingerprint() string {
-	raw, _ := json.Marshal(b)
+	c := bindingContract{Vault: b.Vault, Backend: b.Backend}
+	if b.Server != nil {
+		c.Address, c.CABundle, c.Refs, c.Clients = b.Server.Address, b.Server.CABundle, b.Server.Refs, b.Server.Clients
+	}
+	if b.Remote != nil {
+		spec := b.Remote.Spec
+		c.Remote = &spec
+	}
+	raw, _ := json.Marshal(c)
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])
 }

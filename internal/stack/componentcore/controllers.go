@@ -341,7 +341,7 @@ func (c *Core) registerNetwork(mgr *ctlruntime.Manager, clients *workspaceClient
 		}}); err != nil {
 		return fmt.Errorf("componentcore: the policy controllers: %w", err)
 	}
-	if _, err := vaultctl.Register(mgr, c.handlers, vaultctl.Options{Log: log}); err != nil {
+	if _, err := vaultctl.Register(mgr, c.handlers, vaultctl.Options{Remote: &openbao.Remote{Enabled: true}, Log: log}); err != nil {
 		return fmt.Errorf("componentcore: the vault controller: %w", err)
 	}
 	if _, err := remoteopenbaoctl.Register(mgr, remoteopenbaoctl.Options{Remote: &openbao.Remote{Enabled: true}, Log: log}); err != nil {
