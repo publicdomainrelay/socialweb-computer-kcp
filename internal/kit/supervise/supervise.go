@@ -86,32 +86,29 @@ type Backoff struct {
 	OnError func(err error, delay time.Duration)
 }
 
-// GoRestart runs fn again after each return until the group context ends.
-// The delay starts at Min, doubles up to Max, and resets when fn ran for
-// longer than Max.
-func (g *Group) GoRestart(name string, b Backoff, fn func(context.Context) error) {
-	g.Go(name, func(ctx context.Context) error {
-		delay := b.Min
-		for {
-			started := time.Now()
-			err := Run(ctx, name, fn)
-			if ctx.Err() != nil {
-				return nil
-			}
-			if time.Since(started) > b.Max {
-				delay = b.Min
-			}
-			if b.OnError != nil {
-				b.OnError(err, delay)
-			}
-			t := time.NewTimer(delay)
-			select {
-			case <-ctx.Done():
-				t.Stop()
-				return nil
-			case <-t.C:
-			}
-			delay = min(delay*2, b.Max)
+// Restart runs fn again after each return until ctx ends. The delay starts
+// at Min, doubles up to Max, and resets when fn ran for longer than Max.
+func Restart(ctx context.Context, name string, b Backoff, fn func(context.Context) error) {
+	delay := b.Min
+	for {
+		started := time.Now()
+		err := Run(ctx, name, fn)
+		if ctx.Err() != nil {
+			return
 		}
-	})
+		if time.Since(started) > b.Max {
+			delay = b.Min
+		}
+		if b.OnError != nil {
+			b.OnError(err, delay)
+		}
+		t := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return
+		case <-t.C:
+		}
+		delay = min(delay*2, b.Max)
+	}
 }
