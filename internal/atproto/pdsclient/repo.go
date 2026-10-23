@@ -459,6 +459,32 @@ func firstString(data map[string]any, keys ...string) string {
 	return ""
 }
 
+func DPoPThumbprint(data map[string]any) (string, error) {
+	key, err := dpopKey(data)
+	if err != nil {
+		return "", err
+	}
+	public, err := key.PublicKey()
+	if err != nil {
+		return "", err
+	}
+	jwk, err := public.JWK()
+	if err != nil {
+		return "", err
+	}
+	canonical, err := json.Marshal(struct {
+		Crv string `json:"crv"`
+		Kty string `json:"kty"`
+		X   string `json:"x"`
+		Y   string `json:"y"`
+	}{Crv: jwk.Curve, Kty: jwk.KeyType, X: jwk.X, Y: jwk.Y})
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(canonical)
+	return base64.RawURLEncoding.EncodeToString(sum[:]), nil
+}
+
 func DPoPSourceFromData(data map[string]any) (DPoPSource, error) {
 	key, err := dpopKey(data)
 	if err != nil {

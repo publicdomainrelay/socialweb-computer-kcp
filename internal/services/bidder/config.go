@@ -338,8 +338,10 @@ func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, erro
 							_ = json.Unmarshal(raw, &claims)
 						}
 					}
+					jkt, _ := pdsclient.DPoPThumbprint(credential.Data)
 					deps.Log.Warn("bidder session debug", "tokenLen", len(token), "parts", strings.Count(token, ".")+1,
-						"iss", claims["iss"], "aud", claims["aud"], "exp", claims["exp"], "scope", claims["scope"])
+						"iss", claims["iss"], "aud", claims["aud"], "exp", claims["exp"], "scope", claims["scope"],
+						"cnf", claims["cnf"], "jkt", jkt)
 				}
 			}
 		}
