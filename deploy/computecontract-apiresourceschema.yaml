@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-8.computecontracts.socialweb.computer
+  name: v1alpha1-9.computecontracts.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -137,6 +137,11 @@ spec:
                       - pins
                 required:
                   - clusterRef
+              ttlSecondsAfterFinished:
+                type: integer
+                format: int32
+                default: 691200
+                minimum: 0
           status:
             type: object
             properties:

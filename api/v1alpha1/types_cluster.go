@@ -44,14 +44,24 @@ type ClusterStatus struct {
 
 	Instance string `json:"instance,omitempty"`
 
-	FrontAddress string `json:"frontAddress,omitempty"`
-
-	HeldPorts []ClusterHeldPort `json:"heldPorts,omitempty"`
+	Front *ClusterFrontStatus `json:"front,omitempty"`
 
 	NodeExpiry *int64 `json:"nodeExpiry,omitempty"`
 
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
+
+type ClusterFrontStatus struct {
+	Address string `json:"address,omitempty"`
+
+	Ready bool `json:"ready,omitempty"`
+
+	Message string `json:"message,omitempty"`
+
+	HeldPorts []ClusterHeldPort `json:"heldPorts,omitempty"`
+}
+
+const FieldManagerClusterFront = "socialweb.computer/cluster-front"
 
 type ClusterHeldPort struct {
 	Port int32 `json:"port"`

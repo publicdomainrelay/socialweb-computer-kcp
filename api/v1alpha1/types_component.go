@@ -87,6 +87,8 @@ type ComponentTLS struct {
 	CertRef string `json:"certRef,omitempty"`
 
 	CABundle string `json:"caBundle,omitempty"`
+
+	CARef *commonv1.ObjectRef `json:"caRef,omitempty"`
 }
 
 type ComponentServiceAuth struct {
@@ -311,6 +313,8 @@ type ComponentServe struct {
 
 type ComponentSpec struct {
 	Suspend bool `json:"suspend,omitempty"`
+
+	RestartedAt string `json:"restartedAt,omitempty"`
 
 	RestartPolicy ComponentRestartPolicy `json:"restartPolicy,omitempty"`
 

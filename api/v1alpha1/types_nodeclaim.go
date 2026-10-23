@@ -39,6 +39,8 @@ type NodeClaimSpec struct {
 	ServerCAFile string `json:"serverCAFile" apigen:"userEndpoint"`
 
 	DenyBidderDids []string `json:"denyBidderDids,omitempty"`
+
+	AdoptJoinedNode bool `json:"adoptJoinedNode,omitempty"`
 }
 
 type NodeClaimPhase string

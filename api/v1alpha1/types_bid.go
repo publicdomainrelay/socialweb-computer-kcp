@@ -49,6 +49,8 @@ type BidSpec struct {
 	Policy BidPolicy `json:"policy"`
 
 	ExpiresAt string `json:"expiresAt"`
+
+	TTLSecondsAfterFinished *int32 `json:"ttlSecondsAfterFinished,omitempty" apigen:"default=86400,minimum=0"`
 }
 
 type BidPhase string
