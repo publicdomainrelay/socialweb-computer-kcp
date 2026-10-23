@@ -85,9 +85,6 @@ func (p *Pool) Set(data []byte) error {
 }
 
 func (p *Pool) Current(ctx context.Context) (*x509.CertPool, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	p.mu.Lock()
 	source := p.source
 	if source == nil && p.path != "" {
