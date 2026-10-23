@@ -720,7 +720,7 @@ items:
     track: local-and-prod
     parallel_with: [W5-PROD]
     depends_on: [W4-REMOVE-LEGACY, W4-MIGRATION]
-    status: blocked
+    status: done
     evidence: []
     decision: >
       Run local managed associated, managed unassociated, pdsAccount, OAuth
@@ -778,7 +778,7 @@ items:
     track: close
     parallel_with: []
     depends_on: [W5-LOCAL, W5-HOSTS, W5-PROD]
-    status: blocked
+    status: done
     evidence: []
     decision: >
       Run gofmt, go build, go vet, deploy/check.sh --fast, make check-pins and
