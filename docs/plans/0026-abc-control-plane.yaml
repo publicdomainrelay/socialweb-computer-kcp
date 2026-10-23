@@ -589,7 +589,7 @@ items:
     track: cache-lease
     parallel_with: [W1-MODERNIZE, W1-XRPC, W1-LIFECYCLE]
     depends_on: [W0-RUNTIME]
-    status: doing
+    status: done
     closes: [D14]
     decision: >
       internal/kit/ttlcache.Cache[K,V] with GetOrLoad (single-flight,
@@ -954,6 +954,8 @@ items:
     decision: >
       Includes the clientcertfront Cluster gate recheck (a 2s cache and
       recheck from W0-MOUNTS), which becomes a watch on Cluster.
+      Includes the clientcertfront revoked-list refresh (a 2s background
+      refresh served stale up to 10m), which becomes a watch.
       Delete every remaining ticker or time.After loop that reads state.
       List the remaining outbound obligations in deploy/obligations.txt.
       clusterprovider, providermain and cloudprovider move to the runtime.
