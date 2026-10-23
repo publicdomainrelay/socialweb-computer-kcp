@@ -78,6 +78,7 @@ type Supervisor struct {
 	mu       sync.Mutex
 	locks    sync.Map
 	placedAt map[string]time.Time
+	keys     map[string]string
 	slices   map[string]bool
 	units    map[string]string
 	backoff  map[string]time.Duration
@@ -164,7 +165,24 @@ func (s *Supervisor) setPlaced(unit string, on bool) {
 	} else {
 		delete(s.placed, unit)
 		delete(s.placedAt, unit)
+		delete(s.keys, unit)
 	}
+}
+
+func (s *Supervisor) setStartedKey(unit, key string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.keys == nil {
+		s.keys = map[string]string{}
+	}
+	s.keys[unit] = key
+}
+
+func (s *Supervisor) startedKey(unit string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key, ok := s.keys[unit]
+	return key, ok
 }
 
 func (s *Supervisor) placedAfter(unit string, t time.Time) bool {
@@ -412,6 +430,7 @@ func (s *Supervisor) apply(ctx context.Context, o v1alpha1.HostProcess, r Result
 				continue
 			}
 			s.setPlaced(op.Unit, true)
+			s.setStartedKey(op.Unit, o.Spec.RestartKey)
 			started = true
 			log.Info("placed", "state", string(st.State), "adopted", st.Adopted, "restartKey", o.Spec.RestartKey)
 		case OpStop:
@@ -433,6 +452,8 @@ func (s *Supervisor) apply(ctx context.Context, o v1alpha1.HostProcess, r Result
 	next.Status.ObservedGeneration = o.Generation
 	if started {
 		next.Status.RestartKey = o.Spec.RestartKey
+	} else if key, ok := s.startedKey(o.Spec.Unit); ok && next.Status.RestartKey == "" {
+		next.Status.RestartKey = key
 	}
 	if r.Identify {
 		if id, err := m.Identify(ctx, o.Spec.Unit, 0); err == nil {
