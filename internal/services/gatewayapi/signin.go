@@ -1,23 +1,23 @@
 package gatewayapi
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
 	coreapi "github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayapi"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
 )
@@ -553,8 +553,10 @@ func (s *custodySignIn) AgentFor(caller *coreapi.WebCaller) coreapi.WebAccountAg
 	if caller == nil {
 		return nil
 	}
-	return &custodyAgent{client: s.client, http: s.pdsHTTP, caller: caller, allowInternalHTTP: s.allowInternalHTTP,
-		renewIncrement: s.renewIncrement, log: s.log, nonces: map[string]string{}}
+	agent := &custodyAgent{client: s.client, http: s.pdsHTTP, caller: caller, allowInternalHTTP: s.allowInternalHTTP,
+		renewIncrement: s.renewIncrement, log: s.log}
+	agent.auth = &xrpc.DPoP{Tokens: &custodySession{agent: agent}, Prover: xrpc.DPoPProverFunc(agent.prove)}
+	return agent
 }
 
 type custodyAgent struct {
@@ -570,25 +572,35 @@ type custodyAgent struct {
 
 	log *slog.Logger
 
-	mu sync.Mutex
-
-	nonces map[string]string
+	auth *xrpc.DPoP
 }
 
-func (a *custodyAgent) nonce(origin string) string {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.nonces[origin]
-}
-
-func (a *custodyAgent) setNonce(origin, nonce string) {
-	if nonce == "" {
-		return
+func (a *custodyAgent) prove(ctx context.Context, method, target, _, nonce string) (xrpc.DPoPProof, error) {
+	proof, err := a.client.proof(ctx, a.caller.Token, a.caller.DID, method, target, nonce)
+	if err != nil {
+		return xrpc.DPoPProof{}, err
 	}
-	a.mu.Lock()
-	a.nonces[origin] = nonce
-	a.mu.Unlock()
+	return xrpc.DPoPProof{AccessToken: proof.AccessToken, Proof: proof.DPoP}, nil
 }
+
+type custodySession struct {
+	agent *custodyAgent
+
+	stale atomic.Bool
+}
+
+func (s *custodySession) Get(ctx context.Context) (string, error) {
+	a := s.agent
+	if s.stale.Swap(false) {
+		if _, err := a.client.renew(ctx, a.caller.Token, a.renewIncrement); err != nil {
+			a.log.Debug("web_account_renew_failed", "did", a.caller.DID, "err", err.Error())
+		}
+		a.log.Debug("web_account_token_retry", "did", a.caller.DID)
+	}
+	return "", nil
+}
+
+func (s *custodySession) Invalidate() { s.stale.Store(true) }
 
 func (a *custodyAgent) pds() (*url.URL, error) {
 	raw := strings.TrimSpace(a.caller.PDS)
@@ -613,129 +625,48 @@ func internalServiceHost(host string) bool {
 	return host == "svc.kcp.local" || strings.HasSuffix(host, ".svc.kcp.local")
 }
 
-func (a *custodyAgent) request(ctx context.Context, method, target string, body any) ([]byte, error) {
+func (a *custodyAgent) xrpcClient() (*xrpc.Client, error) {
 	base, err := a.pds()
 	if err != nil {
 		return nil, err
 	}
-	ref, err := url.Parse(target)
-	if err != nil {
-		return nil, err
-	}
-	full := base.ResolveReference(ref)
-	origin := full.Scheme + "://" + full.Host
-	var encoded []byte
-	if body != nil {
-		encoded, err = json.Marshal(body)
-		if err != nil {
-			return nil, fmt.Errorf("gatewayapi: encoding %s %s: %w", method, full.Path, err)
-		}
-	}
-	nonceRetried := false
-	authRetried := false
-	for range 3 {
-		proof, err := a.client.proof(ctx, a.caller.Token, a.caller.DID, method, full.String(), a.nonce(origin))
-		if err != nil {
-			return nil, err
-		}
-		var reader io.Reader
-		if encoded != nil {
-			reader = bytes.NewReader(encoded)
-		}
-		req, err := http.NewRequestWithContext(ctx, method, full.String(), reader)
-		if err != nil {
-			return nil, err
-		}
-		req.Header.Set("Authorization", "DPoP "+proof.AccessToken)
-		req.Header.Set("DPoP", proof.DPoP)
-		req.Header.Set("Accept", "application/json")
-		if encoded != nil {
-			req.Header.Set("Content-Type", "application/json")
-		}
-		resp, err := a.http.Do(req)
-		if err != nil {
-			return nil, fmt.Errorf("gatewayapi: %s %s: %w", method, full.Path, err)
-		}
-		raw, readErr := readLimited(resp.Body, agentMaxBody)
-		resp.Body.Close()
-		if readErr != nil {
-			return nil, fmt.Errorf("gatewayapi: reading %s %s: %w", method, full.Path, readErr)
-		}
-		header := resp.Header.Get("WWW-Authenticate")
-		nonce := resp.Header.Get("DPoP-Nonce")
-		a.setNonce(origin, nonce)
-		if !nonceRetried && nonce != "" &&
-			(resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusUnauthorized) &&
-			!strings.Contains(header, "invalid_token") {
-			nonceRetried = true
-			a.log.Debug("web_account_nonce_retry", "did", a.caller.DID, "path", full.Path)
-			continue
-		}
-		if !authRetried && resp.StatusCode == http.StatusUnauthorized &&
-			(strings.Contains(header, "invalid_token") || nonce == "") {
-			authRetried = true
-			if _, renewErr := a.client.renew(ctx, a.caller.Token, a.renewIncrement); renewErr != nil {
-				a.log.Debug("web_account_renew_failed", "did", a.caller.DID, "err", renewErr.Error())
-			}
-			a.log.Debug("web_account_token_retry", "did", a.caller.DID, "path", full.Path)
-			continue
-		}
-		if resp.StatusCode < 200 || resp.StatusCode > 299 {
-			return nil, &custodyError{Operation: method + " " + full.Path, Status: resp.StatusCode, Message: xrpcError(raw)}
-		}
-		return raw, nil
-	}
-	return nil, errors.New("gatewayapi: the PDS kept rejecting the account session")
+	return &xrpc.Client{Host: base.Scheme + "://" + base.Host, HTTP: a.http, Auth: a.auth, Limit: agentMaxBody}, nil
 }
 
-func readLimited(body io.Reader, limit int64) ([]byte, error) {
-	raw, err := io.ReadAll(io.LimitReader(body, limit+1))
-	if err != nil {
-		return nil, err
+func custodyXRPCError(method, nsid string, err error) error {
+	if xerr, ok := errors.AsType[*xrpc.Error](err); ok {
+		return &custodyError{Operation: method + " " + xrpc.Prefix + nsid, Status: xerr.Status, Message: xerr.Detail()}
 	}
-	if int64(len(raw)) > limit {
-		return nil, errors.New("the body is too large")
-	}
-	return raw, nil
+	return err
 }
 
-func xrpcError(raw []byte) string {
-	var payload struct {
-		Error   string `json:"error"`
-		Message string `json:"message"`
+func custodyQuery[Out any](ctx context.Context, a *custodyAgent, nsid string, params url.Values) (Out, error) {
+	client, err := a.xrpcClient()
+	if err != nil {
+		var out Out
+		return out, err
 	}
-	if json.Unmarshal(raw, &payload) == nil {
-		switch {
-		case payload.Error != "" && payload.Message != "":
-			return payload.Error + ": " + payload.Message
-		case payload.Error != "":
-			return payload.Error
-		case payload.Message != "":
-			return payload.Message
-		}
+	out, err := xrpc.Query[Out](ctx, client, nsid, params)
+	return out, custodyXRPCError(http.MethodGet, nsid, err)
+}
+
+func custodyProcedure[Out any](ctx context.Context, a *custodyAgent, nsid string, body any) (Out, error) {
+	client, err := a.xrpcClient()
+	if err != nil {
+		var out Out
+		return out, err
 	}
-	return truncate(string(raw), 300)
+	out, err := xrpc.Procedure[any, Out](ctx, client, nsid, body)
+	return out, custodyXRPCError(http.MethodPost, nsid, err)
 }
 
 func (a *custodyAgent) GetServiceAuth(ctx context.Context, aud, lxm string) (string, error) {
-	query := url.Values{"aud": {aud}}
-	if lxm != "" {
-		query.Set("lxm", lxm)
-	}
-	raw, err := a.request(ctx, http.MethodGet, "/xrpc/com.atproto.server.getServiceAuth?"+query.Encode(), nil)
+	client, err := a.xrpcClient()
 	if err != nil {
 		return "", err
 	}
-	var payload struct {
-		Token string `json:"token"`
-	}
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		return "", fmt.Errorf("gatewayapi: decoding getServiceAuth: %w", err)
-	}
-	if payload.Token == "" {
-		return "", errors.New("gatewayapi: getServiceAuth returned no token")
-	}
-	return payload.Token, nil
+	token, err := xrpc.GetServiceAuth(ctx, client, aud, lxm, time.Time{})
+	return token, custodyXRPCError(http.MethodGet, xrpc.ServiceAuthNSID, err)
 }
 
 func (a *custodyAgent) ListRecords(ctx context.Context, did, collection string, limit int) ([]coreapi.Record, error) {
@@ -750,20 +681,16 @@ func (a *custodyAgent) ListRecords(ctx context.Context, did, collection string, 
 		if cursor != "" {
 			query.Set("cursor", cursor)
 		}
-		raw, err := a.request(ctx, http.MethodGet, "/xrpc/com.atproto.repo.listRecords?"+query.Encode(), nil)
-		if err != nil {
-			return nil, err
-		}
-		var payload struct {
+		payload, err := custodyQuery[struct {
 			Records []struct {
 				URI   string         `json:"uri"`
 				CID   string         `json:"cid"`
 				Value map[string]any `json:"value"`
 			} `json:"records"`
 			Cursor string `json:"cursor"`
-		}
-		if err := json.Unmarshal(raw, &payload); err != nil {
-			return nil, fmt.Errorf("gatewayapi: decoding listRecords: %w", err)
+		}](ctx, a, "com.atproto.repo.listRecords", query)
+		if err != nil {
+			return nil, err
 		}
 		for _, record := range payload.Records {
 			out = append(out, coreapi.Record{URI: record.URI, CID: record.CID, Value: record.Value})
@@ -781,16 +708,12 @@ func (a *custodyAgent) ListRecords(ctx context.Context, did, collection string, 
 
 func (a *custodyAgent) CreateRecord(ctx context.Context, did, collection, rkey string, record map[string]any) (coreapi.RecordRef, error) {
 	body := map[string]any{"repo": did, "collection": collection, "rkey": rkey, "record": record}
-	raw, err := a.request(ctx, http.MethodPost, "/xrpc/com.atproto.repo.createRecord", body)
-	if err != nil {
-		return coreapi.RecordRef{}, err
-	}
-	var payload struct {
+	payload, err := custodyProcedure[struct {
 		URI string `json:"uri"`
 		CID string `json:"cid"`
-	}
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		return coreapi.RecordRef{}, fmt.Errorf("gatewayapi: decoding createRecord: %w", err)
+	}](ctx, a, "com.atproto.repo.createRecord", body)
+	if err != nil {
+		return coreapi.RecordRef{}, err
 	}
 	if payload.URI == "" {
 		return coreapi.RecordRef{}, errors.New("gatewayapi: createRecord returned no uri")
@@ -812,6 +735,6 @@ func (a *custodyAgent) ApplyWrites(ctx context.Context, did string, writes []cor
 		encoded = append(encoded, entry)
 	}
 	body := map[string]any{"repo": did, "writes": encoded}
-	_, err := a.request(ctx, http.MethodPost, "/xrpc/com.atproto.repo.applyWrites", body)
+	_, err := custodyProcedure[struct{}](ctx, a, "com.atproto.repo.applyWrites", body)
 	return err
 }
