@@ -115,7 +115,7 @@ func (p *Publisher) Publish(ctx context.Context, b Binding) (Published, error) {
 		}
 		p.log.Warn("rebuilding the Exposure after a bad CA bundle", "workspace", b.Workspace, "exposure", b.Name, "err", err)
 	}
-	p.Withdraw(b.Workspace, b.Name)
+	p.stop(key)
 	var pub *publication
 	switch b.Spec.Mode {
 	case exposurev1alpha1.ExposureModeLocal:
@@ -126,7 +126,6 @@ func (p *Publisher) Publish(ctx context.Context, b Binding) (Published, error) {
 		err = fmt.Errorf("unknown mode %q", b.Spec.Mode)
 	}
 	if err != nil {
-		p.release(b.Workspace, b.Name)
 		return Published{}, err
 	}
 	pub.fingerprint = fingerprint
@@ -138,13 +137,16 @@ func (p *Publisher) Publish(ctx context.Context, b Binding) (Published, error) {
 }
 
 func (p *Publisher) Withdraw(workspace, name string) {
-	key := publicationKey(workspace, name)
+	p.stop(publicationKey(workspace, name))
+	p.release(workspace, name)
+}
+
+func (p *Publisher) stop(key string) {
 	p.mu.Lock()
 	pub := p.running[key]
 	delete(p.running, key)
 	p.mu.Unlock()
 	pub.shutdown()
-	p.release(workspace, name)
 }
 
 func (p *Publisher) Close() {
