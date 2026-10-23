@@ -185,6 +185,8 @@ type Provider struct {
 	failed error
 
 	registrations map[*registration]struct{}
+
+	wg sync.WaitGroup
 }
 
 func New(cfg Config) *Provider {
@@ -246,6 +248,7 @@ func (p *Provider) Start(ctx context.Context, deps component.Deps) error {
 	p.cancel = nil
 	p.mu.Unlock()
 	p.closeAll()
+	p.wg.Wait()
 	return nil
 }
 
@@ -325,7 +328,7 @@ func (p *Provider) Register(ctx context.Context, spec exposure.IngressSpec) (exp
 		return nil, err
 	}
 	if err := p.rememberURL(spec, child.url); err != nil {
-		killChild(child.cmd)
+		child.stop()
 		cancel()
 		_ = bridge.Close()
 		return nil, err
@@ -335,16 +338,19 @@ func (p *Provider) Register(ctx context.Context, spec exposure.IngressSpec) (exp
 	reg.url = child.url + spec.Path
 	reg.mu.Unlock()
 	p.mu.Lock()
-	if p.registrations == nil {
-		p.registrations = map[*registration]struct{}{}
-	}
-	p.registrations[reg] = struct{}{}
 	running := p.ctx == root
+	if running {
+		if p.registrations == nil {
+			p.registrations = map[*registration]struct{}{}
+		}
+		p.registrations[reg] = struct{}{}
+		p.wg.Go(func() { reg.supervise(runCtx, child) })
+	}
 	p.mu.Unlock()
-	go reg.supervise(runCtx, child)
 	if !running {
 		cancel()
-		_ = reg.Close()
+		child.stop()
+		_ = bridge.Close()
 		return nil, errors.New("ingressproxy opentunnel: the provider stopped")
 	}
 	return reg, nil
@@ -480,6 +486,13 @@ type child struct {
 	tail *tailBuffer
 
 	started time.Time
+
+	output *sync.WaitGroup
+}
+
+func (c *child) stop() {
+	killChild(c.cmd)
+	c.output.Wait()
 }
 
 func (r *registration) startChild(ctx context.Context) (*child, error) {
@@ -509,30 +522,34 @@ func (r *registration) startChild(ctx context.Context) (*child, error) {
 	tail := &tailBuffer{}
 	found := make(chan string, 1)
 	var pumps sync.WaitGroup
-	pumps.Add(2)
-	go pump(stdout, tail, found, pumps.Done)
-	go pump(stderr, tail, found, pumps.Done)
-	go func() {
+	pumps.Go(func() { pump(stdout, tail, found) })
+	pumps.Go(func() { pump(stderr, tail, found) })
+	output := &sync.WaitGroup{}
+	output.Go(func() {
 		pumps.Wait()
 		close(found)
-	}()
+	})
+	stop := func() {
+		killChild(cmd)
+		output.Wait()
+	}
 	timer := time.NewTimer(URLTimeout)
 	defer timer.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-			killChild(cmd)
+			stop()
 			return nil, ctx.Err()
 		case <-timer.C:
-			killChild(cmd)
+			stop()
 			return nil, fmt.Errorf("ingressproxy opentunnel: %s printed no URL within %s: %s", args[0], URLTimeout, strings.TrimSpace(tail.String()))
 		case raw, ok := <-found:
 			if !ok {
-				killChild(cmd)
+				stop()
 				return nil, fmt.Errorf("ingressproxy opentunnel: %s ended before printing a URL: %s", args[0], strings.TrimSpace(tail.String()))
 			}
 			r.log.Info("ingressproxy_opentunnel_route_added", "address", r.bridge.Address(), "url", raw)
-			return &child{cmd: cmd, url: raw, tail: tail, started: time.Now()}, nil
+			return &child{cmd: cmd, url: raw, tail: tail, started: time.Now(), output: output}, nil
 		}
 	}
 }
@@ -556,7 +573,7 @@ func (r *registration) supervise(ctx context.Context, first *child) {
 				continue
 			}
 			if err := r.provider.rememberRestart(r.spec, next.url); err != nil {
-				killChild(next.cmd)
+				next.stop()
 				r.log.Error("ingressproxy_opentunnel_url_changed", "workspace", r.spec.Workspace,
 					"exposure", r.spec.Exposure, "err", err.Error())
 				return
@@ -569,6 +586,7 @@ func (r *registration) supervise(ctx context.Context, first *child) {
 		}
 		started := current.started
 		err := current.cmd.Wait()
+		current.output.Wait()
 		stderr := strings.TrimSpace(current.tail.String())
 		r.mu.Lock()
 		if r.cmd == current.cmd {
@@ -590,8 +608,7 @@ func (r *registration) supervise(ctx context.Context, first *child) {
 	}
 }
 
-func pump(reader io.Reader, tail *tailBuffer, found chan<- string, done func()) {
-	defer done()
+func pump(reader io.Reader, tail *tailBuffer, found chan<- string) {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 4096), 64*1024)
 	for scanner.Scan() {
