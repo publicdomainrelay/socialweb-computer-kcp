@@ -181,7 +181,7 @@ func (p *Provider) remoteClient(ctx context.Context, key vaultKey, b Binding) (*
 	if !ok || entry.fingerprint != fp {
 		remote := b.Remote.DeepCopy()
 		entry = remoteLogin{fingerprint: fp, client: lease.New(func(ctx context.Context) (*openbao.Client, time.Time, error) {
-			c, err := p.remote.Open(ctx, remote)
+			c, err := p.remote.Open(ctx, b.Backend.Workspace, remote)
 			return c, time.Time{}, err
 		})}
 		p.remotes[key] = entry

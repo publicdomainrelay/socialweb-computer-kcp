@@ -115,7 +115,7 @@ func (r *Resolver) remoteTLS(spec pdsv1alpha1.RemotePDSSpec, name string) (*tls.
 	if !spec.TLS.Enabled {
 		return config, nil
 	}
-	if config == nil && strings.TrimSpace(spec.TLS.CABundleRef) != "" && r.HTTPClient == nil {
+	if config == nil && (spec.TLS.CARef != nil || spec.TLS.CASecretRef != nil) && r.HTTPClient == nil {
 		return nil, fmt.Errorf("%w: RemotePDS %s needs a TLS config for its CA bundle", ErrInvalidConfig, name)
 	}
 	if config == nil {

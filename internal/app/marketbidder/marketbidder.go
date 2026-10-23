@@ -11,6 +11,7 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
@@ -58,6 +59,7 @@ type Controller struct {
 
 func Register(m *ctlruntime.Manager, c *compose.Composer, guard SignInGuard) error {
 	ctl := &Controller{c: c, guard: guard, rotated: map[string]int64{}}
+	c.ProvideTrust(schema.GroupKind{Group: v1alpha1.GroupName, Kind: Kind})
 	opts := append([]ctlruntime.Option{ctlruntime.Export(compose.ExportApplications), ctlruntime.Finalizer(compose.Finalizer)}, c.Watches(Kind)...)
 	opts = append(opts, compose.DrainWatch[*v1alpha1.ComputeVM](c, compose.ExportComputeVMs, Kind),
 		compose.DrainWatch[*v1alpha1.AtprotoRecord](c, compose.ExportMarketIdentities, Kind))
@@ -640,12 +642,7 @@ func (p *pass) operator(ctx context.Context, id *v1alpha1.MarketIdentity, mount 
 	if o.Spec.Network == nil || o.Spec.Identity.Handle == "" || o.Spec.Identity.PdsURL == "" {
 		return
 	}
-	caFile, err := compose.NetworkCAFile(c.StateRoot(), o.Spec.Network)
-	if err != nil {
-		p.log().Warn("the network CA file of the operator account", "err", err.Error())
-		return
-	}
-	op := compose.Operator{PdsURL: o.Spec.Identity.PdsURL, CAFile: caFile, Identifier: o.Spec.Identity.Handle,
+	op := compose.Operator{PdsURL: o.Spec.Identity.PdsURL, CARef: c.PublishNetworkTrust(r, o.Spec.Network), Identifier: o.Spec.Identity.Handle,
 		Vault: BidderVaultServer, Mount: mount, Create: true}
 	if err := c.ApplyLinks(ctx, r, "operator", compose.OperatorLinks(r, op)); err != nil {
 		p.log().Warn("the operator account links", "err", err.Error())

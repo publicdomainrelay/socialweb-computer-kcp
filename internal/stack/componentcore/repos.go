@@ -15,7 +15,6 @@ import (
 	reporemote "github.com/johnandersen777/socialweb-computer-kcp/internal/atprotorepo/remote"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/atprotorecord"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/remotepds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/repos"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/credentials"
@@ -24,7 +23,7 @@ import (
 
 const networkReadTimeout = 30 * time.Second
 
-func (c *Core) repoOptions(caBundle remotepds.CABundleFunc) repos.Options {
+func (c *Core) repoOptions() repos.Options {
 	cfg := c.cfg
 	external := &http.Client{Timeout: networkReadTimeout}
 	return repos.Options{
@@ -55,7 +54,6 @@ func (c *Core) repoOptions(caBundle remotepds.CABundleFunc) repos.Options {
 			}
 			return credential.Data, nil
 		},
-		CABundle: caBundle,
 		Identities: func(ctx context.Context, workspace, name string) (*v1alpha1.MarketIdentity, error) {
 			dyn, err := cfg.DynamicFactory(workspace)
 			if err != nil {

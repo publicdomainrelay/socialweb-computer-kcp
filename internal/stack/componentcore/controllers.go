@@ -73,7 +73,6 @@ import (
 	policycontroller "github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/controller"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/statusstate"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/subnetallocator"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vaultmain"
 )
 
@@ -335,8 +334,8 @@ func (c *Core) fileAuthority() *hostlifecycle.FileAuthority {
 func (c *Core) registerNetwork(mgr *ctlruntime.Manager, clients *workspaceClients, g *supervise.Group) error {
 	cfg := c.cfg
 	log := cfg.Log
-	caBundle := func(ref string) ([]byte, error) { return os.ReadFile(openbaoctl.FileRef(ref)) }
-	if err := repos.Register(mgr, c.repoOptions(caBundle)); err != nil {
+	remoteBao := vaultctl.Remote(c.handlers, log)
+	if err := repos.Register(mgr, c.repoOptions()); err != nil {
 		return fmt.Errorf("componentcore: the repo controllers: %w", err)
 	}
 	if err := policyctl.Register(mgr, policyctl.Options{Bus: c.handlers, PLCURL: cfg.PLCBaseURL, Log: log, Disabled: cfg.DisablePolicy,
@@ -345,10 +344,10 @@ func (c *Core) registerNetwork(mgr *ctlruntime.Manager, clients *workspaceClient
 		}}); err != nil {
 		return fmt.Errorf("componentcore: the policy controllers: %w", err)
 	}
-	if _, err := vaultctl.Register(mgr, c.handlers, vaultctl.Options{Remote: &openbao.Remote{Enabled: true}, Log: log}); err != nil {
+	if _, err := vaultctl.Register(mgr, c.handlers, vaultctl.Options{Remote: remoteBao, Log: log}); err != nil {
 		return fmt.Errorf("componentcore: the vault controller: %w", err)
 	}
-	if _, err := remoteopenbaoctl.Register(mgr, remoteopenbaoctl.Options{Remote: &openbao.Remote{Enabled: true}, Log: log}); err != nil {
+	if _, err := remoteopenbaoctl.Register(mgr, remoteopenbaoctl.Options{Remote: remoteBao, Log: log}); err != nil {
 		return fmt.Errorf("componentcore: the RemoteOpenBao controller: %w", err)
 	}
 	run, err := eventsctl.Register(mgr, eventsctl.Options{Bus: c.handlers, Dynamic: eventstream.DynamicFactory(cfg.DynamicFactory),

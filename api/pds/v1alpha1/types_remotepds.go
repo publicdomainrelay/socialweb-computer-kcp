@@ -38,7 +38,9 @@ type RemotePDSSpec struct {
 type RemotePDSTLS struct {
 	Enabled bool `json:"enabled,omitempty"`
 
-	CABundleRef string `json:"caBundleRef,omitempty"`
+	CARef *commonv1.ObjectRef `json:"caRef,omitempty"`
+
+	CASecretRef *commonv1.SecretRef `json:"caSecretRef,omitempty"`
 
 	ServerName string `json:"serverName,omitempty"`
 }

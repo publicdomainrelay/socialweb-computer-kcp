@@ -41,6 +41,8 @@ type Controller struct {
 
 	prober *remoteopenbao.Prober
 
+	remote *openbao.Remote
+
 	checkInterval time.Duration
 }
 
@@ -49,7 +51,7 @@ func New(opts Options) *Controller {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	return &Controller{log: log.With("component", "remoteopenbao-controller"), prober: remoteopenbao.New(opts.Remote, opts.Timeout, log),
+	return &Controller{log: log.With("component", "remoteopenbao-controller"), prober: remoteopenbao.New(opts.Remote, opts.Timeout, log), remote: opts.Remote,
 		checkInterval: ctlruntime.Period(opts.CheckInterval, DefaultCheckInterval)}
 }
 
@@ -67,9 +69,10 @@ func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
 
 func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, object *v1alpha1.RemoteOpenBao) (ctlruntime.Result, error) {
 	if !object.DeletionTimestamp.IsZero() {
+		c.remote.Forget(req.Workspace, req.Name)
 		return ctlruntime.Result{}, nil
 	}
-	status, err := c.prober.Check(ctx, object)
+	status, err := c.prober.Check(ctx, req.Workspace, object)
 	next := object.DeepCopy()
 	next.Status = status
 	if applyErr := req.ApplyStatus(ctx, next); applyErr != nil {

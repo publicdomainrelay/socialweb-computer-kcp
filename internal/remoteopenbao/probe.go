@@ -8,7 +8,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -86,7 +85,7 @@ func reasonOf(err error) string {
 	}
 }
 
-func (p *Prober) Check(ctx context.Context, object *v1alpha1.RemoteOpenBao) (v1alpha1.RemoteOpenBaoStatus, error) {
+func (p *Prober) Check(ctx context.Context, workspace string, object *v1alpha1.RemoteOpenBao) (v1alpha1.RemoteOpenBaoStatus, error) {
 	generation := object.Generation
 	name := object.Name
 	ctx, cancel := context.WithTimeout(ctx, p.timeout)
@@ -119,17 +118,12 @@ func (p *Prober) Check(ctx context.Context, object *v1alpha1.RemoteOpenBao) (v1a
 		return p.failure(name, status, generation, ConditionReachable,
 			errors.New("remoteopenbao: no RemoteOpenBao options is configured"))
 	}
-	target, err := p.remote.Target(object)
+	target, err := p.remote.Target(ctx, workspace, object)
 	if err != nil {
 		return p.failure(name, status, generation, ConditionReachable, err)
 	}
 	status.Endpoint = target.URL
 	status.Address = target.URL
-	if ref := strings.TrimSpace(object.Spec.TLS.CABundleRef); ref != "" {
-		if ca, err := os.ReadFile(strings.TrimPrefix(ref, "file:")); err == nil {
-			status.CABundle = string(ca)
-		}
-	}
 	health, err := probeHealth(ctx, target)
 	if err != nil {
 		return p.failure(name, status, generation, ConditionReachable, failed("HealthFailed", err))
@@ -164,7 +158,7 @@ func (p *Prober) Check(ctx context.Context, object *v1alpha1.RemoteOpenBao) (v1a
 		generation, ConditionUnsealed, true, "Unsealed",
 		fmt.Sprintf("the OpenBao at %s is unsealed", target.URL))
 
-	inspector, err := p.remote.Open(ctx, object)
+	inspector, err := p.remote.Open(ctx, workspace, object)
 	if err != nil {
 		return p.failure(name, status, generation, ConditionAuthenticated, err)
 	}

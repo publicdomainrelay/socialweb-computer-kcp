@@ -3,7 +3,6 @@ package remotepds
 import (
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -39,14 +38,10 @@ const (
 	DefaultCheckInterval = 30 * time.Second
 )
 
-type CABundleFunc func(ref string) ([]byte, error)
-
 type SecretRefsFunc func(workspace string) remote.Secrets
 
 type Options struct {
 	Log *slog.Logger
-
-	CABundle CABundleFunc
 
 	Bus *bus.Bus
 
@@ -60,7 +55,7 @@ type Options struct {
 type Controller struct {
 	log *slog.Logger
 
-	caBundle CABundleFunc
+	roots *vaultctl.Roots
 
 	bus *bus.Bus
 
@@ -90,7 +85,7 @@ func New(opts Options) *Controller {
 	timeout = opt.Positive(timeout, DefaultTimeout)
 	checkInterval := opts.CheckInterval
 	checkInterval = ctlruntime.Period(checkInterval, DefaultCheckInterval)
-	return &Controller{log: log.With("component", "remotepds-controller"), caBundle: opts.CABundle, bus: opts.Bus,
+	return &Controller{log: log.With("component", "remotepds-controller"), roots: vaultctl.NewRoots(opts.Bus, log), bus: opts.Bus,
 		secretRefs: opts.SecretRefs, timeout: timeout, checkInterval: checkInterval, hosts: binding.New[*remote.Host]()}
 }
 
@@ -107,6 +102,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 	target := binding.Target{Cluster: req.Cluster, Workspace: req.Workspace, Name: req.Name}
 	if !object.DeletionTimestamp.IsZero() {
 		c.hosts.Set(target, nil)
+		c.roots.Drop(self(req, object))
 		return ctlruntime.Result{}, nil
 	}
 	generation := object.Generation
@@ -181,7 +177,7 @@ func (c *Controller) connect(ctx context.Context, req ctlruntime.Request, object
 	if _, err := syntax.ParseDID(didText); err != nil {
 		return nil, "", "InvalidDID", fmt.Errorf("the RemotePDS did %q is invalid", didText)
 	}
-	tlsConfig, err := c.tlsConfig(object.Spec.TLS, baseURL)
+	tlsConfig, err := c.tlsConfig(ctx, self(req, object), object.Spec.TLS, baseURL)
 	if err != nil {
 		return nil, "", "InvalidTLS", transientError{err: err}
 	}
@@ -226,11 +222,11 @@ func remoteURL(raw string) (*url.URL, error) {
 	return parsed, nil
 }
 
-func (c *Controller) tlsConfig(spec pdsv1alpha1.RemotePDSTLS, baseURL *url.URL) (*tls.Config, error) {
-	caRef := strings.TrimSpace(spec.CABundleRef)
+func (c *Controller) tlsConfig(ctx context.Context, from commonv1.ObjectRef, spec pdsv1alpha1.RemotePDSTLS, baseURL *url.URL) (*tls.Config, error) {
+	caSet := spec.CARef != nil || spec.CASecretRef != nil
 	serverName := strings.TrimSpace(spec.ServerName)
 	if !spec.Enabled {
-		if caRef != "" || serverName != "" {
+		if caSet || serverName != "" {
 			return nil, errors.New("tls fields are set but tls.enabled is false")
 		}
 		return nil, nil
@@ -239,22 +235,15 @@ func (c *Controller) tlsConfig(spec pdsv1alpha1.RemotePDSTLS, baseURL *url.URL) 
 		return nil, errors.New("tls is enabled but the RemotePDS url is not https")
 	}
 	config := &tls.Config{MinVersion: tls.VersionTLS12}
-	if caRef != "" {
-		if c.caBundle == nil {
-			return nil, errors.New("tls.caBundleRef is set but no CA bundle resolver is configured")
-		}
-		pem, err := c.caBundle(caRef)
-		if err != nil {
-			return nil, fmt.Errorf("reading the CA bundle %q: %w", caRef, err)
-		}
-		pool := x509.NewCertPool()
-		if !pool.AppendCertsFromPEM(pem) {
-			return nil, fmt.Errorf("the CA bundle %q does not parse", caRef)
-		}
-		config.RootCAs = pool
-	}
 	if serverName != "" {
 		config.ServerName = serverName
+	}
+	pool, err := c.roots.Pool(ctx, from, spec.CARef, spec.CASecretRef)
+	if err != nil {
+		return nil, err
+	}
+	if pool != nil {
+		config = pool.ClientConfig(config)
 	}
 	return config, nil
 }

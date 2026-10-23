@@ -1,7 +1,6 @@
 package openbao
 
 import (
-	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -9,12 +8,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/lease"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/tlsreload"
 )
 
 var (
@@ -39,6 +39,44 @@ type Remote struct {
 	AllowInsecureHTTP bool
 
 	Timeout time.Duration
+
+	Secrets func(ctx context.Context, from commonv1.ObjectRef, ref commonv1.SecretRef) (map[string]any, error)
+
+	Roots func(ctx context.Context, from commonv1.ObjectRef, caRef *commonv1.ObjectRef, caSecret *commonv1.SecretRef) (*tlsreload.Pool, error)
+
+	Release func(from commonv1.ObjectRef)
+}
+
+func RemoteRef(workspace, name string) commonv1.ObjectRef {
+	return commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: "RemoteOpenBao", Name: name, Workspace: workspace}
+}
+
+func (r *Remote) Forget(workspace, name string) {
+	if r != nil && r.Release != nil {
+		r.Release(RemoteRef(workspace, name))
+	}
+}
+
+func (r *Remote) secret(ctx context.Context, from commonv1.ObjectRef, ref *commonv1.SecretRef, keys ...string) (string, error) {
+	if ref == nil {
+		return "", errors.New("the secret ref is empty")
+	}
+	if r.Secrets == nil {
+		return "", errors.New("no secret reader is configured")
+	}
+	data, err := r.Secrets(ctx, from, *ref)
+	if err != nil {
+		return "", err
+	}
+	if key := strings.TrimSpace(ref.Key); key != "" {
+		keys = []string{key}
+	}
+	for _, key := range keys {
+		if value, ok := data[key].(string); ok && strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value), nil
+		}
+	}
+	return "", fmt.Errorf("the secret %s/%s holds none of %s", strings.Trim(ref.Mount, "/"), strings.Trim(ref.Path, "/"), strings.Join(keys, ", "))
 }
 
 type Target struct {
@@ -47,7 +85,7 @@ type Target struct {
 	HTTPClient *http.Client
 }
 
-func (r *Remote) Open(ctx context.Context, remote *v1alpha1.RemoteOpenBao) (*Client, error) {
+func (r *Remote) Open(ctx context.Context, workspace string, remote *v1alpha1.RemoteOpenBao) (*Client, error) {
 	if r == nil {
 		return nil, fmt.Errorf("%w: the remote options are nil", ErrInvalidConfig)
 	}
@@ -60,20 +98,21 @@ func (r *Remote) Open(ctx context.Context, remote *v1alpha1.RemoteOpenBao) (*Cli
 	if remote.Spec.Suspend {
 		return nil, fmt.Errorf("%w: RemoteOpenBao %s", ErrSuspended, remote.Name)
 	}
-	target, err := r.Target(remote)
+	target, err := r.Target(ctx, workspace, remote)
 	if err != nil {
 		return nil, err
 	}
+	from := RemoteRef(workspace, remote.Name)
 	base := New(target.URL, "", WithHTTPClient(target.HTTPClient))
 	auth := remote.Spec.Auth
 	switch auth.Method {
 	case v1alpha1.RemoteOpenBaoAuthToken:
-		if strings.TrimSpace(auth.TokenRef) == "" {
+		if auth.TokenRef == nil {
 			return nil, fmt.Errorf("%w: RemoteOpenBao %s token auth names no tokenRef", ErrInvalidConfig, remote.Name)
 		}
-		tokenRef := auth.TokenRef
+		tokenRef := *auth.TokenRef
 		src := lease.New(func(ctx context.Context) (string, time.Time, error) {
-			token, err := refValue(tokenRef)
+			token, err := r.secret(ctx, from, &tokenRef, "token", "value")
 			if err != nil {
 				return "", time.Time{}, fmt.Errorf("openbao: RemoteOpenBao %s: %w", remote.Name, err)
 			}
@@ -87,11 +126,11 @@ func (r *Remote) Open(ctx context.Context, remote *v1alpha1.RemoteOpenBao) (*Cli
 		if auth.AppRole == nil {
 			return nil, fmt.Errorf("%w: RemoteOpenBao %s approle auth names no approle block", ErrInvalidConfig, remote.Name)
 		}
-		roleID, err := refValue(auth.AppRole.RoleIDRef)
+		roleID, err := r.secret(ctx, from, &auth.AppRole.RoleIDRef, "role_id", "roleId", "value")
 		if err != nil {
 			return nil, fmt.Errorf("openbao: RemoteOpenBao %s approle: %w", remote.Name, err)
 		}
-		secretID, err := refValue(auth.AppRole.SecretIDRef)
+		secretID, err := r.secret(ctx, from, &auth.AppRole.SecretIDRef, "secret_id", "secretId", "value")
 		if err != nil {
 			return nil, fmt.Errorf("openbao: RemoteOpenBao %s approle: %w", remote.Name, err)
 		}
@@ -101,7 +140,7 @@ func (r *Remote) Open(ctx context.Context, remote *v1alpha1.RemoteOpenBao) (*Cli
 		}
 		return client, nil
 	case v1alpha1.RemoteOpenBaoAuthCert:
-		if auth.Cert == nil || strings.TrimSpace(auth.Cert.CertRef) == "" || strings.TrimSpace(auth.Cert.KeyRef) == "" {
+		if auth.Cert == nil || strings.TrimSpace(auth.Cert.CertRef.Path) == "" || strings.TrimSpace(auth.Cert.KeyRef.Path) == "" {
 			return nil, fmt.Errorf("%w: RemoteOpenBao %s cert auth names no certRef and keyRef", ErrInvalidConfig, remote.Name)
 		}
 		return nil, fmt.Errorf("%w: RemoteOpenBao %s uses cert auth, which needs a cert auth role this object does not name", ErrUnsupported, remote.Name)
@@ -124,7 +163,7 @@ func (c *Client) tokenTTL(ctx context.Context) time.Duration {
 	return time.Duration(ttl * float64(time.Second))
 }
 
-func (r *Remote) Target(remote *v1alpha1.RemoteOpenBao) (Target, error) {
+func (r *Remote) Target(ctx context.Context, workspace string, remote *v1alpha1.RemoteOpenBao) (Target, error) {
 	if remote == nil {
 		return Target{}, fmt.Errorf("%w: the RemoteOpenBao is nil", ErrInvalidRef)
 	}
@@ -132,7 +171,7 @@ func (r *Remote) Target(remote *v1alpha1.RemoteOpenBao) (Target, error) {
 	if err != nil {
 		return Target{}, fmt.Errorf("%w: RemoteOpenBao %s: %v", ErrInvalidConfig, remote.Name, err)
 	}
-	tlsConfig, err := r.remoteTLS(remote.Spec.TLS, base)
+	tlsConfig, err := r.remoteTLS(ctx, RemoteRef(workspace, remote.Name), remote.Spec.TLS, base)
 	if err != nil {
 		return Target{}, fmt.Errorf("%w: RemoteOpenBao %s: %v", ErrInvalidConfig, remote.Name, err)
 	}
@@ -143,11 +182,11 @@ func (r *Remote) Target(remote *v1alpha1.RemoteOpenBao) (Target, error) {
 	return Target{URL: strings.TrimRight(base.String(), "/"), HTTPClient: client}, nil
 }
 
-func (r *Remote) remoteTLS(spec v1alpha1.RemoteOpenBaoTLS, base *url.URL) (*tls.Config, error) {
-	caRef := strings.TrimSpace(spec.CABundleRef)
+func (r *Remote) remoteTLS(ctx context.Context, from commonv1.ObjectRef, spec v1alpha1.RemoteOpenBaoTLS, base *url.URL) (*tls.Config, error) {
+	caSet := spec.CARef != nil || spec.CASecretRef != nil
 	serverName := strings.TrimSpace(spec.ServerName)
 	if !spec.Enabled {
-		if caRef != "" || serverName != "" {
+		if caSet || serverName != "" {
 			return nil, errors.New("tls fields are set but tls.enabled is false")
 		}
 		return r.baseTLS(), nil
@@ -162,19 +201,20 @@ func (r *Remote) remoteTLS(spec v1alpha1.RemoteOpenBaoTLS, base *url.URL) (*tls.
 	if config.MinVersion < tls.VersionTLS12 {
 		config.MinVersion = tls.VersionTLS12
 	}
-	if caRef != "" {
-		data, err := readRef(caRef)
-		if err != nil {
-			return nil, fmt.Errorf("reading the CA bundle: %w", err)
-		}
-		pool, err := CertPoolFromPEM(data)
-		if err != nil {
-			return nil, fmt.Errorf("the CA bundle %q does not parse", caRef)
-		}
-		config.RootCAs = pool
-	}
 	if serverName != "" {
 		config.ServerName = serverName
+	}
+	if caSet {
+		if r.Roots == nil {
+			return nil, errors.New("tls names a CA ref but no CA resolver is configured")
+		}
+		pool, err := r.Roots(ctx, from, spec.CARef, spec.CASecretRef)
+		if err != nil {
+			return nil, fmt.Errorf("the CA bundle: %w", err)
+		}
+		if pool != nil {
+			config = pool.ClientConfig(config)
+		}
 	}
 	return config, nil
 }
@@ -247,30 +287,6 @@ func parseRemoteURL(raw string, allowHTTP bool) (*url.URL, error) {
 	parsed.RawQuery = ""
 	parsed.Fragment = ""
 	return parsed, nil
-}
-
-func readRef(ref string) ([]byte, error) {
-	value := strings.TrimSpace(ref)
-	if value == "" {
-		return nil, errors.New("the reference is empty")
-	}
-	path := strings.TrimPrefix(value, "file:")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("reading %s: %w", path, err)
-	}
-	return bytes.TrimSpace(data), nil
-}
-
-func refValue(ref string) (string, error) {
-	data, err := readRef(ref)
-	if err != nil {
-		return "", err
-	}
-	if len(data) == 0 {
-		return "", fmt.Errorf("%s is empty", ref)
-	}
-	return string(data), nil
 }
 
 func (c *Client) Authenticated(ctx context.Context) error {

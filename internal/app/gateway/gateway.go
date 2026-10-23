@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
@@ -58,6 +59,7 @@ type Controller struct {
 
 func Register(m *ctlruntime.Manager, c *compose.Composer, web *WebApp) error {
 	ctl := &Controller{c: c, web: web}
+	c.ProvideTrust(schema.GroupKind{Group: v1alpha1.GroupName, Kind: Kind})
 	opts := append([]ctlruntime.Option{ctlruntime.Export(compose.ExportApplications), ctlruntime.Finalizer(compose.Finalizer)}, c.Watches(Kind)...)
 	opts = append(opts, compose.DrainWatch[*v1alpha1.AtprotoRecord](c, compose.ExportMarketIdentities, Kind))
 	if err := ctlruntime.For[*v1alpha1.Gateway](m, Name, ctl, opts...); err != nil {
@@ -694,12 +696,7 @@ func (p *pass) operatorWrites(ctx context.Context, id *v1alpha1.MarketIdentity, 
 		log.Warn("reading the market network operator session", "err", err.Error())
 		return
 	}
-	caFile, err := compose.NetworkCAFile(c.StateRoot(), o.Spec.Network)
-	if err != nil {
-		log.Warn("the market network CA file", "err", err.Error())
-		return
-	}
-	op := compose.Operator{PdsURL: s.Service, CAFile: caFile, Identifier: s.Identifier, Password: s.Password,
+	op := compose.Operator{PdsURL: s.Service, CARef: c.PublishNetworkTrust(r, o.Spec.Network), Identifier: s.Identifier, Password: s.Password,
 		Vault: vaultlayout.RootServerName, Mount: RequesterVaultMount}
 	if err := c.ApplyLinks(ctx, r, "operator", compose.OperatorLinks(r, op)); err != nil {
 		log.Warn("the market network operator links", "err", err.Error())
