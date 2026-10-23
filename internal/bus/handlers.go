@@ -689,6 +689,9 @@ func (r *Bus) authorizeCaller(from Caller, to commonv1.ObjectRef, c Capability) 
 	if !from.Complete() {
 		return r.denials.deny(from, to, c)
 	}
+	if refMatches(from.Ref, to) {
+		return nil
+	}
 	r.mu.RLock()
 	links := r.links
 	r.mu.RUnlock()
