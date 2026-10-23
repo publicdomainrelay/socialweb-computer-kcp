@@ -4,24 +4,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"time"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/lease"
 )
 
-type Slot struct {
-	Port int `json:"port"`
+type (
+	Slot = lease.Slot
 
-	StartedAt time.Time `json:"startedAt,omitzero"`
-
-	ReadyAt time.Time `json:"readyAt,omitzero"`
-}
-
-type Slots struct {
-	Active string `json:"active"`
-
-	Slots map[string]Slot `json:"slots"`
-
-	Updated time.Time `json:"updated"`
-}
+	Slots = lease.Slots
+)
 
 type SlotFile struct {
 	Path string

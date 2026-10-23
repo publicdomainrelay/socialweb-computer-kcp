@@ -8,6 +8,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/apiserverfront"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component/ports"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/lease"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/subnetallocator"
 )
 
@@ -31,9 +32,7 @@ type Front interface {
 	Status(ctx context.Context) (apiserverfront.Status, error)
 }
 
-type Rolls interface {
-	Slots() (Slots, error)
-}
+type Rolls = lease.Rolls
 
 var (
 	_ Ports = (*ports.Registry)(nil)
@@ -42,7 +41,7 @@ var (
 
 	_ Front = apiserverfront.Client{}
 
-	_ Rolls = SlotFile{}
+	_ lease.Rolls = SlotFile{}
 )
 
 type Home struct {
