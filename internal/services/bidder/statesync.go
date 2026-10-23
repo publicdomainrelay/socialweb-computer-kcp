@@ -211,7 +211,7 @@ type marketEventAdapter struct {
 
 	attestation *market.Signer
 
-	call ServiceCall
+	call func(ctx context.Context, endpoint, nsid, lxm string, body map[string]any) error
 
 	log *slog.Logger
 }
@@ -301,7 +301,7 @@ func (a *marketEventAdapter) Apply(ctx context.Context, request statesync.Reques
 	if submitEventURL == "" {
 		submitEventURL = strings.TrimSpace(request.Sink.SubmitEventURL)
 	}
-	if submitEventURL != "" && a.call != nil && a.service.cfg.outboundXRPC() {
+	if submitEventURL != "" && a.call != nil && a.service.outboundXRPC() {
 		body := map[string]any{"uri": event.URI, "cid": event.CID, "record": event.Record}
 		if err := a.call(ctx, submitEventURL, market.SubmitEventNSID, market.SubmitEventNSID, body); err != nil {
 			return statesync.Observation{}, classifyDeliveryError(err)
@@ -390,7 +390,7 @@ func (a *marketEventAdapter) Delete(ctx context.Context, request statesync.Reque
 }
 
 func (s *Service) startStateSync() error {
-	if s.cfg.Deps.KCP == nil {
+	if s.deps.KCP == nil {
 		return errors.New("bidder: the component has no kcp clients")
 	}
 	registry := statesync.NewRegistry()
@@ -412,7 +412,7 @@ func (s *Service) startStateSync() error {
 	}
 	kick := make(chan struct{}, 1)
 	controller, err := statesync.NewController(statesync.Options{
-		Workspace: s.cfg.Workspace,
+		Workspace: s.workspace,
 		Dynamic:   s.syncDynamic,
 		Registry:  registry,
 		Log:       s.log,
@@ -428,10 +428,10 @@ func (s *Service) startStateSync() error {
 }
 
 func (s *Service) syncDynamic(workspace string) (dynamic.Interface, error) {
-	if s.cfg.Deps.KCP == nil {
+	if s.deps.KCP == nil {
 		return nil, errors.New("bidder: the component has no kcp clients")
 	}
-	client, err := s.cfg.Deps.KCP.Client(workspace)
+	client, err := s.deps.KCP.Client(workspace)
 	if err != nil {
 		return nil, err
 	}
@@ -518,7 +518,7 @@ func (s *Service) ensureReportSync(ctx context.Context, vm *v1alpha1.ComputeVM, 
 		},
 		"spec": map[string]any{
 			"source": map[string]any{
-				"workspace":  s.cfg.Workspace,
+				"workspace":  s.workspace,
 				"apiVersion": v1alpha1.GroupVersion.String(),
 				"kind":       "ComputeVM",
 				"name":       vm.Name,
@@ -532,7 +532,7 @@ func (s *Service) ensureReportSync(ctx context.Context, vm *v1alpha1.ComputeVM, 
 			"deletionPolicy": string(v1alpha1.StateSyncDeletionRetain),
 		},
 	}}
-	dyn, err := s.syncDynamic(s.cfg.Workspace)
+	dyn, err := s.syncDynamic(s.workspace)
 	if err != nil {
 		return "", err
 	}
@@ -551,7 +551,7 @@ func (s *Service) observedReportURI(ctx context.Context, name string) string {
 	if name == "" {
 		return ""
 	}
-	dyn, err := s.syncDynamic(s.cfg.Workspace)
+	dyn, err := s.syncDynamic(s.workspace)
 	if err != nil {
 		return ""
 	}
@@ -590,11 +590,11 @@ func (s *Service) ensureTerminationSync(ctx context.Context, info contractInfo, 
 		}
 		vm.Spec.Contract.SubmitEventURL = cmp.Or(vm.Spec.Contract.SubmitEventURL, submitEventURL)
 	}
-	object, err := computevm.TerminationStateSync(vm, s.cfg.Workspace, reason, observedAt, request)
+	object, err := computevm.TerminationStateSync(vm, s.workspace, reason, observedAt, request)
 	if err != nil {
 		return "", err
 	}
-	dyn, err := s.syncDynamic(s.cfg.Workspace)
+	dyn, err := s.syncDynamic(s.workspace)
 	if err != nil {
 		return "", err
 	}
@@ -607,7 +607,7 @@ func (s *Service) ensureTerminationSync(ctx context.Context, info contractInfo, 
 }
 
 func (s *Service) waitTerminationSync(ctx context.Context, name string, timeout time.Duration) error {
-	dyn, err := s.syncDynamic(s.cfg.Workspace)
+	dyn, err := s.syncDynamic(s.workspace)
 	if err != nil {
 		return err
 	}
@@ -639,7 +639,7 @@ func (s *Service) waitTerminationSync(ctx context.Context, name string, timeout 
 }
 
 func (s *Service) acknowledgedTermination(ctx context.Context, name string) *v1alpha1.ComputeVMTermination {
-	dyn, err := s.syncDynamic(s.cfg.Workspace)
+	dyn, err := s.syncDynamic(s.workspace)
 	if err != nil {
 		return nil
 	}
@@ -713,9 +713,6 @@ func provisionBidHintKey(payload provisionPayload) string {
 }
 
 func (s *Service) nowUTC() time.Time {
-	if s.cfg.Now != nil {
-		return s.cfg.Now().UTC()
-	}
 	return time.Now().UTC()
 }
 
@@ -742,7 +739,7 @@ func (s *Service) ensureProvisionSync(ctx context.Context, payload provisionPayl
 			},
 		},
 		"spec": map[string]any{
-			"source":         map[string]any{"workspace": s.cfg.Workspace},
+			"source":         map[string]any{"workspace": s.workspace},
 			"sink":           map[string]any{"adapter": ProvisionSyncAdapter},
 			"direction":      string(v1alpha1.StateSyncDirectionOutbound),
 			"payload":        stored,
@@ -751,7 +748,7 @@ func (s *Service) ensureProvisionSync(ctx context.Context, payload provisionPayl
 			"deletionPolicy": string(v1alpha1.StateSyncDeletionRetain),
 		},
 	}}
-	dyn, err := s.syncDynamic(s.cfg.Workspace)
+	dyn, err := s.syncDynamic(s.workspace)
 	if err != nil {
 		return "", err
 	}
@@ -770,7 +767,7 @@ func (s *Service) ensureInboundTerminationSync(ctx context.Context, vm *v1alpha1
 		return errors.New("bidder: an inbound termination StateSync needs a ComputeVM")
 	}
 	observedAt := s.nowUTC().Format(time.RFC3339)
-	object, err := computevm.TerminationStateSync(vm, s.cfg.Workspace, "deleted_on_request", observedAt, request)
+	object, err := computevm.TerminationStateSync(vm, s.workspace, "deleted_on_request", observedAt, request)
 	if err != nil {
 		return err
 	}
@@ -784,7 +781,7 @@ func (s *Service) ensureInboundTerminationSync(ctx context.Context, vm *v1alpha1
 	}
 	payloadMap["requestEvent"] = map[string]any{"uri": eventURI, "cid": eventCID, "record": record}
 	payloadMap["requesterDid"] = requesterDID
-	dyn, err := s.syncDynamic(s.cfg.Workspace)
+	dyn, err := s.syncDynamic(s.workspace)
 	if err != nil {
 		return err
 	}
@@ -857,7 +854,7 @@ func (s *Service) ensureReleaseSync(ctx context.Context, receiptURI, requesterDI
 			},
 		},
 		"spec": map[string]any{
-			"source":         map[string]any{"workspace": s.cfg.Workspace},
+			"source":         map[string]any{"workspace": s.workspace},
 			"sink":           map[string]any{"adapter": ReleaseSyncAdapter},
 			"direction":      string(v1alpha1.StateSyncDirectionOutbound),
 			"payload":        stored,
@@ -866,7 +863,7 @@ func (s *Service) ensureReleaseSync(ctx context.Context, receiptURI, requesterDI
 			"deletionPolicy": string(v1alpha1.StateSyncDeletionRetain),
 		},
 	}}
-	dyn, err := s.syncDynamic(s.cfg.Workspace)
+	dyn, err := s.syncDynamic(s.workspace)
 	if err != nil {
 		return err
 	}
@@ -1185,7 +1182,7 @@ func (a *provisionAdapter) Apply(ctx context.Context, request statesync.Request)
 		a.logf().Warn("the accept's submitEvent does not resolve; the firehose carries the event", "accept", payload.Accept.URI, "submitEvent", accept.SubmitEvent)
 	}
 	receiptSubmitEvent := ""
-	if service.cfg.inboundXRPC() {
+	if service.inboundXRPC() {
 		receiptSubmitEvent = accept.SubmitEvent
 	}
 	receiptURI, receiptCID, err := service.createReceipt(ctx, market.ReceiptRefs{

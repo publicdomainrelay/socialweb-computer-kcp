@@ -39,7 +39,7 @@ func (s *Service) reportOnce(ctx context.Context) {
 	}
 	for i := range vms {
 		vm := &vms[i]
-		if vm.Spec.Owner.Handle != s.cfg.Provider.Handle {
+		if vm.Spec.Owner.Handle != s.providerHandle {
 			continue
 		}
 		if vm.DeletionTimestamp != nil || computevm.Ended(vm) {
@@ -68,7 +68,7 @@ func (s *Service) reportOnNetwork(ctx context.Context, vm *v1alpha1.ComputeVM, h
 	}
 	createdAt := held.ReportedAt
 	if createdAt == "" {
-		createdAt = s.cfg.Now().UTC().Format(time.RFC3339)
+		createdAt = time.Now().UTC().Format(time.RFC3339)
 	}
 	record := map[string]any{
 		"$type":     market.ComputeEventsVMOnNetworkNSID,
@@ -89,7 +89,7 @@ func (s *Service) reportHostKeys(ctx context.Context, vm *v1alpha1.ComputeVM, he
 	}
 	observedAt := held.ReportedAt
 	if observedAt == "" {
-		observedAt = s.cfg.Now().UTC().Format(time.RFC3339)
+		observedAt = time.Now().UTC().Format(time.RFC3339)
 	}
 	keys := make([]any, 0, len(held.HostKeys))
 	for _, key := range held.HostKeys {
@@ -99,7 +99,7 @@ func (s *Service) reportHostKeys(ctx context.Context, vm *v1alpha1.ComputeVM, he
 		"$type":      market.ComputeEventsVMHostKeysNSID,
 		"keys":       keys,
 		"observedAt": observedAt,
-		"createdAt":  s.cfg.Now().UTC().Format(time.RFC3339),
+		"createdAt":  time.Now().UTC().Format(time.RFC3339),
 	}
 	name, err := s.ensureReportSync(ctx, vm, market.ComputeEventsVMHostKeysNSID, record)
 	if err != nil {

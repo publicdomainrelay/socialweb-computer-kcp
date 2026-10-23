@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-21.gateways.socialweb.computer
+  name: v1alpha1-22.gateways.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -156,8 +156,13 @@ spec:
                               type: string
                           routeName:
                             type: string
+                            maxLength: 63
+                            pattern: ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$
                           proxyProtocol:
                             type: string
+                            enum:
+                              - v1
+                              - v2
                           localHost:
                             type: string
                 required:
@@ -298,8 +303,13 @@ spec:
                           type: string
                       routeName:
                         type: string
+                        maxLength: 63
+                        pattern: ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$
                       proxyProtocol:
                         type: string
+                        enum:
+                          - v1
+                          - v2
                       localHost:
                         type: string
               bidderDids:
@@ -467,8 +477,13 @@ spec:
                                 type: string
                             routeName:
                               type: string
+                              maxLength: 63
+                              pattern: ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$
                             proxyProtocol:
                               type: string
+                              enum:
+                                - v1
+                                - v2
                             localHost:
                               type: string
                     settings:
@@ -487,9 +502,6 @@ spec:
                               type: integer
                               format: int32
                             maxConcurrentGuests:
-                              type: integer
-                              format: int32
-                            policyPollMilliseconds:
                               type: integer
                               format: int32
                             policyTimeoutSeconds:
@@ -526,9 +538,6 @@ spec:
                               type: integer
                               format: int32
                             directoryKeys:
-                              type: integer
-                              format: int32
-                            policyPollMilliseconds:
                               type: integer
                               format: int32
                             policyTimeoutSeconds:

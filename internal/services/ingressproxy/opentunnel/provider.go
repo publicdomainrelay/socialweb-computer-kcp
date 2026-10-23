@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/assets"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/exposure"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/childproc"
@@ -53,6 +54,12 @@ type Config struct {
 	ProxyProtocol string
 
 	LocalHost string
+
+	StateDir string
+
+	Log *slog.Logger
+
+	Bus *bus.Bus
 }
 
 func (c Config) Check() error {
@@ -73,14 +80,6 @@ func (c Config) Check() error {
 		if _, err := exec.LookPath(path); err != nil {
 			return fmt.Errorf("ingressproxy opentunnel: command %q: %w", path, err)
 		}
-	}
-	if name := strings.TrimSpace(c.RouteName); name != "" && !routePattern.MatchString(name) {
-		return fmt.Errorf("ingressproxy opentunnel: routeName %q is not a lowercase DNS label", c.RouteName)
-	}
-	switch strings.ToLower(strings.TrimSpace(c.ProxyProtocol)) {
-	case "", "v1", "v2":
-	default:
-		return fmt.Errorf("ingressproxy opentunnel: proxyProtocol %q is not v1 or v2", c.ProxyProtocol)
 	}
 	host := strings.TrimSpace(c.LocalHost)
 	if host != "" {
@@ -107,7 +106,7 @@ func (c Config) command() []string {
 	return []string{"opentunnel"}
 }
 
-func (p *Provider) usePinnedCommand(deps component.Deps, log *slog.Logger) error {
+func (p *Provider) usePinnedCommand(log *slog.Logger) error {
 	if len(p.cfg.Command) > 0 || strings.TrimSpace(os.Getenv("SOCIALWEB_OPENTUNNEL_PATH")) != "" {
 		return nil
 	}
@@ -115,7 +114,7 @@ func (p *Provider) usePinnedCommand(deps component.Deps, log *slog.Logger) error
 		return nil
 	}
 	cache := ""
-	if dir := strings.TrimSpace(deps.StateDir); dir != "" {
+	if dir := strings.TrimSpace(p.cfg.StateDir); dir != "" {
 		cache = filepath.Join(dir, "runtime")
 	}
 	executable, err := assets.Resolve(assets.Options{Cache: cache, Log: log}, "opentunnel")
@@ -170,8 +169,6 @@ type Provider struct {
 
 	log *slog.Logger
 
-	deps component.Deps
-
 	args []string
 
 	ctx context.Context
@@ -195,12 +192,12 @@ func New(cfg Config) *Provider {
 	return &Provider{cfg: cfg}
 }
 
-func (p *Provider) Start(ctx context.Context, deps component.Deps) error {
-	log := deps.Log
+func (p *Provider) Start(ctx context.Context) error {
+	log := p.cfg.Log
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	if err := p.usePinnedCommand(deps, log); err != nil {
+	if err := p.usePinnedCommand(log); err != nil {
 		return err
 	}
 	if err := p.cfg.Check(); err != nil {
@@ -223,7 +220,6 @@ func (p *Provider) Start(ctx context.Context, deps component.Deps) error {
 		cancel()
 		return errors.New("ingressproxy opentunnel: the provider already started")
 	}
-	p.deps = deps
 	p.log = log
 	p.args = args
 	p.ctx = runCtx
@@ -292,14 +288,13 @@ func (p *Provider) Register(ctx context.Context, spec exposure.IngressSpec) (exp
 	p.mu.Lock()
 	ready := p.ready
 	root := p.ctx
-	deps := p.deps
 	args := append([]string(nil), p.args...)
 	log := p.log
 	p.mu.Unlock()
 	if !ready || root == nil || len(args) == 0 {
 		return nil, errors.New("ingressproxy opentunnel: the provider is not started")
 	}
-	if deps.Handlers == nil {
+	if p.cfg.Bus == nil {
 		return nil, errors.New("ingressproxy opentunnel: the handler registry is not configured")
 	}
 	bridge, err := loopback.Start(loopback.Config{
@@ -307,7 +302,7 @@ func (p *Provider) Register(ctx context.Context, spec exposure.IngressSpec) (exp
 		Protocol: string(spec.Protocol),
 		Target:   spec.Target,
 		Handler:  spec.Handler,
-		Handlers: deps.Handlers,
+		Handlers: p.cfg.Bus,
 		Caller:   spec.Caller(),
 	})
 	if err != nil {
@@ -381,9 +376,7 @@ func (p *Provider) rememberURL(spec exposure.IngressSpec, raw string) error {
 	if origin == "" {
 		return fmt.Errorf("ingressproxy opentunnel: printed URL %q has no https origin", raw)
 	}
-	p.mu.Lock()
-	dir := strings.TrimSpace(p.deps.StateDir)
-	p.mu.Unlock()
+	dir := strings.TrimSpace(p.cfg.StateDir)
 	if dir == "" {
 		return nil
 	}

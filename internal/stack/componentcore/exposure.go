@@ -43,7 +43,7 @@ func (c *Core) runWorkspaceExposure(ctx context.Context, workspace string, log *
 		Handlers:  c.handlers,
 		Registry:  c.registry,
 		Ports:     c.ports,
-		TLS:       c.deps.TLS,
+		TLS:       c.tls,
 		Registrar: c.ingressRegistrar,
 		Log:       log,
 	}

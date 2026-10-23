@@ -202,7 +202,6 @@ func validateSettings(key, kind string, settings *v1alpha1.ComponentSettings) er
 				"offeringRefreshSeconds":   s.OfferingRefreshSeconds,
 				"bidTtlSeconds":            s.BidTTLSeconds,
 				"maxConcurrentGuests":      s.MaxConcurrentGuests,
-				"policyPollMilliseconds":   s.PolicyPollMilliseconds,
 				"policyTimeoutSeconds":     s.PolicyTimeoutSeconds,
 			} {
 				if err := validateCount(key, name, value); err != nil {
@@ -223,7 +222,6 @@ func validateSettings(key, kind string, settings *v1alpha1.ComponentSettings) er
 				"sessionIdleSeconds":       s.SessionIdleSeconds,
 				"directoryTTLSeconds":      s.DirectoryTTLSeconds,
 				"directoryKeys":            s.DirectoryKeys,
-				"policyPollMilliseconds":   s.PolicyPollMilliseconds,
 				"policyTimeoutSeconds":     s.PolicyTimeoutSeconds,
 			} {
 				if err := validateCount(key, name, value); err != nil {
@@ -439,7 +437,6 @@ func overrideComponentSpec(kind string, spec any, ov v1alpha1.ComponentOverride,
 			if s.MaxConcurrentGuests != nil {
 				typed.MaxConcurrentGuests = *s.MaxConcurrentGuests
 			}
-			typed.PolicyPollMilliseconds = s.PolicyPollMilliseconds
 			typed.PolicyTimeoutSeconds = s.PolicyTimeoutSeconds
 		}
 		if ov.Comms != nil {
@@ -464,7 +461,6 @@ func overrideComponentSpec(kind string, spec any, ov v1alpha1.ComponentOverride,
 			typed.SessionIdleSeconds = s.SessionIdleSeconds
 			typed.DirectoryTTLSeconds = s.DirectoryTTLSeconds
 			typed.DirectoryKeys = s.DirectoryKeys
-			typed.PolicyPollMilliseconds = s.PolicyPollMilliseconds
 			typed.PolicyTimeoutSeconds = s.PolicyTimeoutSeconds
 			typed.OAuthScopes = append([]string(nil), s.OAuthScopes...)
 		}

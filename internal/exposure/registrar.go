@@ -91,19 +91,20 @@ type IngressIdentity interface {
 }
 
 type SubscriberRegistrar struct {
-	deps     component.Deps
+	registry *component.Registry
+	bus      *bus.Bus
 	identity IngressIdentity
 }
 
-func NewSubscriberRegistrar(deps component.Deps, identity IngressIdentity) *SubscriberRegistrar {
-	return &SubscriberRegistrar{deps: deps, identity: identity}
+func NewSubscriberRegistrar(registry *component.Registry, b *bus.Bus, identity IngressIdentity) *SubscriberRegistrar {
+	return &SubscriberRegistrar{registry: registry, bus: b, identity: identity}
 }
 
 func (r *SubscriberRegistrar) Register(ctx context.Context, spec IngressSpec) (IngressRegistration, error) {
 	if r == nil || r.identity == nil {
 		return nil, errors.New("no ingress identity is configured")
 	}
-	if r.deps.Registry == nil {
+	if r.registry == nil {
 		return nil, errors.New("the component registry is not configured")
 	}
 	host, secure, err := r.proxyHost(spec)
@@ -183,7 +184,7 @@ func (r *SubscriberRegistrar) proxyHost(spec IngressSpec) (string, bool, error) 
 	name = cmp.Or(name, DefaultIngressName)
 	workspace := strings.TrimSpace(spec.Workspace)
 	for _, endpointName := range []string{"control", "http", "https"} {
-		endpoint, ok := r.deps.Registry.Endpoint(workspace, "IngressProxy", name, endpointName)
+		endpoint, ok := r.registry.Endpoint(workspace, "IngressProxy", name, endpointName)
 		if !ok {
 			continue
 		}
@@ -191,7 +192,7 @@ func (r *SubscriberRegistrar) proxyHost(spec IngressSpec) (string, bool, error) 
 			return host, secure, nil
 		}
 	}
-	for _, entry := range r.deps.Registry.List("") {
+	for _, entry := range r.registry.List("") {
 		if entry.Key.Kind != "IngressProxy" || entry.Key.Name != name {
 			continue
 		}
@@ -240,7 +241,7 @@ func (r *SubscriberRegistrar) handler(target component.Key, name string) func(co
 		if request == nil {
 			return nil, errors.New("the ingress request is empty")
 		}
-		registry := r.deps.Handlers
+		registry := r.bus
 		if registry == nil {
 			return nil, errors.New("the handler registry is not configured")
 		}
@@ -300,12 +301,12 @@ func (r *SubscriberRegistrar) handler(target component.Key, name string) func(co
 
 func (r *SubscriberRegistrar) wsTarget(target component.Key) func() *ingress.Target {
 	return func() *ingress.Target {
-		if r == nil || r.deps.Registry == nil {
+		if r == nil || r.registry == nil {
 			return nil
 		}
 		address := ""
 		for _, name := range []string{"http", "https", ""} {
-			endpoint, ok := r.deps.Registry.Endpoint(target.Workspace, target.Kind, target.Name, name)
+			endpoint, ok := r.registry.Endpoint(target.Workspace, target.Kind, target.Name, name)
 			if !ok {
 				continue
 			}
@@ -325,12 +326,12 @@ func (r *SubscriberRegistrar) wsTarget(target component.Key) func() *ingress.Tar
 				return &ingress.Target{Hostname: host, Port: value}
 			}
 		}
-		if r.deps.Handlers == nil {
+		if r.bus == nil {
 			return nil
 		}
 		host := ""
 		for _, name := range []string{"http", "https", ""} {
-			endpoint, ok := r.deps.Registry.Endpoint(target.Workspace, target.Kind, target.Name, name)
+			endpoint, ok := r.registry.Endpoint(target.Workspace, target.Kind, target.Name, name)
 			if !ok || strings.TrimSpace(endpoint.URL) == "" {
 				continue
 			}
@@ -347,11 +348,11 @@ func (r *SubscriberRegistrar) wsTarget(target component.Key) func() *ingress.Tar
 }
 
 func (r *SubscriberRegistrar) wsDialer(target component.Key, caller commonv1.ObjectRef) *websocket.Dialer {
-	if r == nil || r.deps.Registry == nil || r.deps.Handlers == nil {
+	if r == nil || r.registry == nil || r.bus == nil {
 		return nil
 	}
 	for _, name := range []string{"http", "https", ""} {
-		endpoint, ok := r.deps.Registry.Endpoint(target.Workspace, target.Kind, target.Name, name)
+		endpoint, ok := r.registry.Endpoint(target.Workspace, target.Kind, target.Name, name)
 		if !ok {
 			continue
 		}
@@ -369,7 +370,7 @@ func (r *SubscriberRegistrar) wsDialer(target component.Key, caller commonv1.Obj
 	return &websocket.Dialer{
 		HandshakeTimeout: 10 * time.Second,
 		NetDialContext: func(ctx context.Context, _, address string) (net.Conn, error) {
-			return r.deps.Handlers.DialHTTP(bus.WithCaller(ctx, caller), address)
+			return r.bus.DialHTTP(bus.WithCaller(ctx, caller), address)
 		},
 	}
 }
@@ -379,7 +380,7 @@ func (r *SubscriberRegistrar) tunnel(target component.Key, name string, caller c
 		if conn == nil {
 			return errors.New("the tunnel connection is empty")
 		}
-		registry := r.deps.Handlers
+		registry := r.bus
 		if registry == nil {
 			return errors.New("the handler registry is not configured")
 		}

@@ -13,7 +13,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -23,7 +22,9 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
+	"k8s.io/utils/ptr"
 
+	"github.com/bluesky-social/indigo/atproto/atcrypto"
 	"github.com/bluesky-social/indigo/atproto/identity"
 	"github.com/bluesky-social/indigo/atproto/syntax"
 
@@ -31,20 +32,22 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	atprotooauth "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauthclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/atprotorepo"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/policy"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/vault"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/oauthcallback"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/runs"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/sshtransport"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/statesync"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
@@ -66,10 +69,76 @@ const (
 	serviceAuthTimeout = 5 * time.Second
 )
 
+type Deps struct {
+	component.Instance
+
+	KCP component.KCPClients
+
+	Credentials component.CredentialResolver
+
+	Egress component.Egress
+}
+
 type Service struct {
-	cfg Config
+	spec v1alpha1.RequesterSpec
+
+	deps Deps
 
 	log *slog.Logger
+
+	httpClient *http.Client
+
+	identityMode IdentityMode
+
+	localSigner bool
+
+	did string
+
+	handle string
+
+	repoDID string
+
+	marketDID string
+
+	pdsURL string
+
+	marketURL string
+
+	pdsAccessTokenRef *component.CredentialRef
+
+	oauthClientID string
+
+	oauthRedirectURI string
+
+	oauthScopes []string
+
+	oauthSessionData *oauthclient.SessionData
+
+	ownerSessions map[string]sshtransport.OwnerSession
+
+	policyWorkflow string
+
+	guestAuthorizedKeys []string
+
+	repoKey atcrypto.PrivateKey
+
+	attestationKey atcrypto.PrivateKey
+
+	contractPoll time.Duration
+
+	bidWindow time.Duration
+
+	receiptTimeout time.Duration
+
+	receiptPoll time.Duration
+
+	sessionCap time.Duration
+
+	sessionIdle time.Duration
+
+	directoryTTL time.Duration
+
+	policyTimeout time.Duration
 
 	directory identity.Directory
 
@@ -144,18 +213,15 @@ type Service struct {
 	syncController *statesync.Controller
 }
 
-func New(cfg Config) (*Service, error) {
-	cfg.defaults()
-	if err := cfg.check(); err != nil {
-		return nil, err
+func New(spec v1alpha1.RequesterSpec, deps Deps) (*Service, error) {
+	base := deps.Log
+	if base == nil {
+		base = slog.New(slog.DiscardHandler)
 	}
-	log := cfg.Log
-	if log == nil {
-		log = slog.New(slog.DiscardHandler)
-	}
-	return &Service{
-		cfg:           cfg,
-		log:           log.With("component", "requester", "did", cfg.DID),
+	s := &Service{
+		spec:          spec,
+		deps:          deps,
+		log:           base,
 		runners:       map[string]*contractRunner{},
 		finished:      map[string]bool{},
 		waiting:       map[string]bool{},
@@ -167,21 +233,26 @@ func New(cfg Config) (*Service, error) {
 		scopeCache:    ttlcache.New[string, PolicyDecision](ttlcache.Options{TTL: 30 * time.Second}),
 		secrets:       map[string]*secretsState{},
 		heldSessions:  map[string]*heldSession{},
-	}, nil
+	}
+	if err := s.derive(); err != nil {
+		return nil, err
+	}
+	s.log = base.With("component", "requester", "did", s.did)
+	return s, nil
 }
 
-func (s *Service) Start(ctx context.Context, deps component.Deps) error {
+func (s *Service) baseLog() *slog.Logger {
+	if s.deps.Log == nil {
+		return slog.New(slog.DiscardHandler)
+	}
+	return s.deps.Log
+}
+
+func (s *Service) Start(ctx context.Context) error {
 	s.mu.Lock()
 	if s.started {
 		s.mu.Unlock()
 		return errors.New("requester: the service is already started")
-	}
-	s.cfg = s.cfg.withDeps(deps)
-	if s.cfg.Log == nil {
-		s.cfg.Log = deps.Log
-	}
-	if s.cfg.Log != nil {
-		s.log = s.cfg.Log.With("component", "requester", "did", s.cfg.DID)
 	}
 	s.started = true
 	s.ready = false
@@ -222,7 +293,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 			}
 		})
 	}
-	s.log.Info("requester_started", "handler", s.logicalURL(), "repo", s.cfg.RepoDID, "mode", s.cfg.IdentityMode)
+	s.log.Info("requester_started", "handler", s.logicalURL(), "repo", s.repoDID, "mode", s.identityMode)
 
 	<-runCtx.Done()
 	s.shutdown(ctx)
@@ -231,15 +302,15 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 }
 
 func (s *Service) register(handler http.Handler) error {
-	if s.cfg.Deps.Handlers == nil {
+	if s.deps.Bus == nil {
 		return errors.New("requester: the handler registry is not available")
 	}
-	key := component.Key{Workspace: s.cfg.Workspace, Kind: Kind, Name: s.cfg.ComponentName}
-	return s.cfg.Deps.Handlers.RegisterHTTP(key, handler)
+	key := component.Key{Workspace: s.workspace(), Kind: Kind, Name: s.deps.Self.Name}
+	return s.deps.Bus.RegisterHTTP(key, handler)
 }
 
 func (s *Service) registerPDSWithRelays(ctx context.Context) {
-	if s.cfg.Deps.KCP == nil || len(s.cfg.Network.Relays()) == 0 {
+	if s.deps.KCP == nil || len(s.spec.Network.Relays()) == 0 {
 		return
 	}
 	ticker := time.NewTicker(10 * time.Second)
@@ -255,7 +326,7 @@ func (s *Service) registerPDSWithRelays(ctx context.Context) {
 }
 
 func (s *Service) registerPDSWithRelay(ctx context.Context) {
-	client, err := s.cfg.Deps.KCP.Client(s.cfg.Workspace)
+	client, err := s.deps.KCP.Client(s.workspace())
 	if err != nil {
 		return
 	}
@@ -264,7 +335,7 @@ func (s *Service) registerPDSWithRelay(ctx context.Context) {
 		return
 	}
 	baseHost, _, _ := strings.Cut(strings.TrimSuffix(restCfg.Host, "/"), "/clusters/")
-	restCfg.Host = baseHost + "/clusters/" + s.cfg.Workspace
+	restCfg.Host = baseHost + "/clusters/" + s.workspace()
 	dyn, err := dynamic.NewForConfig(restCfg)
 	if err != nil {
 		return
@@ -278,30 +349,33 @@ func (s *Service) registerPDSWithRelay(ctx context.Context) {
 	if err != nil || parsed.Host == "" {
 		return
 	}
-	for _, relayURL := range s.cfg.Network.Relays() {
+	for _, relayURL := range s.spec.Network.Relays() {
 		_ = xrpc.RequestCrawl(ctx, &xrpc.Client{Host: relayURL, HTTP: &http.Client{Timeout: 10 * time.Second}}, parsed.Host)
 	}
 }
 
 func (s *Service) logicalURL() string {
-	return kcp.HandlerURL(s.cfg.Workspace, Kind, s.cfg.ComponentName)
+	return kcp.HandlerURL(s.workspace(), Kind, s.deps.Self.Name)
 }
 
 func (s *Service) resolveIdentity(ctx context.Context) error {
-	if s.cfg.PDSURL != "" && s.cfg.DID != "" {
+	if s.pdsURL != "" && s.did != "" {
 		return nil
 	}
-	ref := s.cfg.Identity.MarketIdentityRef
-	if ref == nil || ref.Name == "" || s.cfg.Deps.KCP == nil {
+	if s.spec.Identity == nil {
 		return nil
 	}
-	workspaces := []string{s.cfg.Workspace}
-	if !strings.Contains(s.cfg.Workspace, ":") {
-		workspaces = append(workspaces, s.cfg.Workspace+":app")
+	ref := s.spec.Identity.MarketIdentityRef
+	if ref == nil || ref.Name == "" || s.deps.KCP == nil {
+		return nil
+	}
+	workspaces := []string{s.workspace()}
+	if !strings.Contains(s.workspace(), ":") {
+		workspaces = append(workspaces, s.workspace()+":app")
 	}
 	var u *unstructured.Unstructured
 	for i, ws := range workspaces {
-		client, err := s.cfg.Deps.KCP.Client(ws)
+		client, err := s.deps.KCP.Client(ws)
 		if err != nil {
 			return fmt.Errorf("requester: kcp client for its MarketIdentity: %w", err)
 		}
@@ -332,135 +406,113 @@ func (s *Service) resolveIdentity(ctx context.Context) error {
 	pdsURL, _, _ := unstructured.NestedString(u.Object, "status", "pdsUrl")
 	handle, _, _ := unstructured.NestedString(u.Object, "status", "handle")
 	if did != "" {
-		s.cfg.DID = did
-		s.cfg.RepoDID = cmp.Or(s.cfg.RepoDID, did)
-		s.cfg.MarketDID = cmp.Or(s.cfg.MarketDID, did)
+		s.did = did
+		s.repoDID = cmp.Or(s.repoDID, did)
+		s.marketDID = cmp.Or(s.marketDID, did)
 	}
 	if pdsURL != "" {
-		s.cfg.PDSURL = pdsURL
+		s.pdsURL = pdsURL
 	}
-	s.cfg.Handle = cmp.Or(s.cfg.Handle, handle)
+	s.handle = cmp.Or(s.handle, handle)
 	return nil
 }
 
 func (s *Service) setup(ctx context.Context) error {
-	if s.cfg.StateDir != "" {
-		if err := os.MkdirAll(s.cfg.StateDir, 0o700); err != nil {
+	if s.stateDir() != "" {
+		if err := os.MkdirAll(s.stateDir(), 0o700); err != nil {
 			return fmt.Errorf("requester: state dir: %w", err)
 		}
 	}
-	if ref := s.cfg.MarketExposureRef; s.cfg.MarketURL == "" && ref != nil && strings.TrimSpace(ref.Name) != "" {
+	if ref := s.spec.MarketExposureRef; s.marketURL == "" && ref != nil && strings.TrimSpace(ref.Name) != "" {
 		if raw, err := s.readExposureURL(ctx, strings.TrimSpace(ref.Name)); err != nil {
 			if s.log != nil {
 				s.log.Warn("the requester market URL is not resolved yet", "exposure", ref.Name, "err", err)
 			}
 		} else {
-			s.cfg.MarketURL = strings.TrimRight(raw, "/")
+			s.marketURL = strings.TrimRight(raw, "/")
 		}
 	}
-	if s.cfg.Directory == nil {
-		s.cfg.Directory = directoryFor(s.cfg.Network.PLCDirectoryURL, s.cfg.DirectoryKeys, s.cfg.DirectoryTTL)
-	}
-	s.directory = s.cfg.Directory
-	if s.cfg.IdentityMode == IdentityModeOAuth {
-		session, err := openOAuthSession(ctx, s.cfg, s.directory)
+	s.directory = directoryFor(s.network().PLCDirectoryURL, int(ptr.Deref(s.spec.DirectoryKeys, 0)), s.directoryTTL)
+	if s.identityMode == IdentityModeOAuth {
+		session, err := openOAuthSession(ctx, s, s.directory)
 		if err != nil {
 			return err
 		}
 		s.oauth = session
-		s.cfg.DID = session.DID()
-		s.cfg.RepoDID = session.DID()
-		s.cfg.MarketDID = session.DID()
-		if s.cfg.PDSURL == "" {
-			s.cfg.PDSURL = session.HostURL()
+		s.did = session.DID()
+		s.repoDID = session.DID()
+		s.marketDID = session.DID()
+		if s.pdsURL == "" {
+			s.pdsURL = session.HostURL()
 		}
-		if s.cfg.Log != nil {
-			s.log = s.cfg.Log.With("component", "requester", "did", s.cfg.DID)
-		}
+		s.log = s.baseLog().With("component", "requester", "did", s.did)
 	}
 	if err := s.resolveIdentity(ctx); err != nil {
 		return err
 	}
-	if s.cfg.RepoKey == nil {
-		keyPath := s.cfg.RepoKeyPath
-		if keyPath == "" && s.cfg.StateDir != "" {
-			keyPath = filepath.Join(s.cfg.StateDir, "repo-key.json")
-		}
-		if keyPath != "" {
+	if s.repoKey == nil {
+		if keyPath := s.stateFile("repo-key.json"); keyPath != "" {
 			signer, err := market.LoadOrCreateSignerFile(keyPath)
 			if err != nil {
 				return fmt.Errorf("requester: repo key: %w", err)
 			}
-			s.cfg.RepoKey = signer.PrivateKey
+			s.repoKey = signer.PrivateKey
 		}
 	}
-	if s.cfg.AttestationKey == nil {
-		keyPath := s.cfg.AttestationKeyPath
-		if keyPath == "" && s.cfg.StateDir != "" {
-			keyPath = filepath.Join(s.cfg.StateDir, "attestation-key.json")
-		}
-		if keyPath != "" {
+	if s.attestationKey == nil {
+		if keyPath := s.stateFile("attestation-key.json"); keyPath != "" {
 			signer, err := market.LoadOrCreateSignerFile(keyPath)
 			if err != nil {
 				return fmt.Errorf("requester: attestation key: %w", err)
 			}
-			s.cfg.AttestationKey = signer.PrivateKey
+			s.attestationKey = signer.PrivateKey
 		}
 	}
-	if s.cfg.AttestationKey == nil {
-		if s.cfg.RepoKey == nil {
+	if s.attestationKey == nil {
+		if s.repoKey == nil {
 			return errors.New("requester: no attestation or repo key")
 		}
-		s.cfg.AttestationKey = s.cfg.RepoKey
+		s.attestationKey = s.repoKey
 	}
-	if len(s.cfg.OwnerSessions) > 0 {
+	if len(s.ownerSessions) > 0 {
 		if err := s.authenticateOwnerSession(ctx); err != nil {
 			return err
 		}
 	}
-	s.signer = market.NewSigner(s.cfg.AttestationKey, s.cfg.MarketDID)
+	s.signer = market.NewSigner(s.attestationKey, s.marketDID)
 	remote := market.NewHTTPReader(s.directory)
-	remote.Client = s.cfg.HTTPClient
-	if s.cfg.Repo == nil {
-		repoStore, err := s.openRepo(remote)
-		if err != nil {
-			return err
-		}
-		s.repo = repoStore
-	} else {
-		s.repo = s.cfg.Repo
+	remote.Client = s.httpClient
+	repoStore, err := s.openRepo(remote)
+	if err != nil {
+		return err
 	}
-	if len(s.cfg.OwnerSessions) > 0 || s.cfg.IdentityMode == IdentityModeOAuth {
+	s.repo = repoStore
+	if len(s.ownerSessions) > 0 || s.identityMode == IdentityModeOAuth {
 		if err := s.bindSignerKey(ctx); err != nil {
 			return err
 		}
 	}
-	if s.cfg.Market == nil {
-		var serviceAuth ServiceAuthSource
-		switch {
-		case s.cfg.IdentityMode == IdentityModeOAuth:
-			serviceAuth = s.oauth
-		case !s.cfg.LocalSigner && s.ownerServiceAuth != nil:
-			serviceAuth = s.ownerServiceAuth
-		}
-		s.log.Info("requester_service_auth", "identityMode", s.cfg.IdentityMode, "localSigner", s.cfg.LocalSigner,
-			"signing", serviceAuthName(serviceAuth))
-		s.market = &HTTPMarket{
-			Directory:      s.directory,
-			Reader:         s.repo,
-			RepoDID:        s.cfg.RepoDID,
-			Signer:         s.signer,
-			ServiceKey:     s.cfg.RepoKey,
-			ServiceAuth:    serviceAuth,
-			RelayURLs:      append([]string(nil), s.cfg.Network.Relays()...),
-			BidderDIDs:     append([]string(nil), s.cfg.BidderDIDs...),
-			DenyBidderDIDs: append([]string(nil), s.cfg.DenyBidderDIDs...),
-			HTTPClient:     s.cfg.HTTPClient,
-			Timeout:        s.cfg.BidWindow,
-			Log:            s.log,
-		}
-	} else {
-		s.market = s.cfg.Market
+	var serviceAuth ServiceAuthSource
+	switch {
+	case s.identityMode == IdentityModeOAuth:
+		serviceAuth = s.oauth
+	case !s.localSigner && s.ownerServiceAuth != nil:
+		serviceAuth = s.ownerServiceAuth
+	}
+	s.log.Info("requester_service_auth", "identityMode", s.identityMode, "localSigner", s.localSigner,
+		"signing", serviceAuthName(serviceAuth))
+	s.market = &HTTPMarket{
+		Directory:   s.directory,
+		Reader:      s.repo,
+		RepoDID:     s.repoDID,
+		Signer:      s.signer,
+		ServiceKey:  s.repoKey,
+		ServiceAuth: serviceAuth,
+		RelayURLs:   append([]string(nil), s.spec.Network.Relays()...),
+		BidderDIDs:  append([]string(nil), s.spec.BidderDIDs...),
+		HTTPClient:  s.httpClient,
+		Timeout:     s.bidWindow,
+		Log:         s.log,
 	}
 	if err := s.setupKCP(); err != nil {
 		return err
@@ -469,11 +521,10 @@ func (s *Service) setup(ctx context.Context) error {
 		s.log.Warn("requester_does_not_run_statesync", "err", err)
 	}
 	s.wg.Go(func() { s.registerPDSWithRelays(ctx) })
-	if s.cfg.Contracts == nil {
+	if s.contracts == nil {
 		return errors.New("requester: no ComputeContract store is configured")
 	}
-	s.contracts = s.cfg.Contracts
-	s.policy = &PolicyEvaluator{Runs: s.policyRuns(), Workflow: PolicyWorkflowName(s.cfg.PolicyWorkflow), DID: s.cfg.MarketDID}
+	s.policy = &PolicyEvaluator{Runs: s.policyRuns(), Workflow: PolicyWorkflowName(s.policyWorkflow), DID: s.marketDID}
 	return nil
 }
 
@@ -492,31 +543,29 @@ func serviceAuthName(source ServiceAuthSource) string {
 }
 
 func (s *Service) authenticateOwnerSession(ctx context.Context) error {
-	session, ok := s.cfg.OwnerSessions[s.cfg.RepoDID]
+	session, ok := s.ownerSessions[s.repoDID]
 	if !ok {
-		return fmt.Errorf("requester: the owner sessions file names no account %s", s.cfg.RepoDID)
+		return fmt.Errorf("requester: the owner sessions file names no account %s", s.repoDID)
 	}
-	did, err := syntax.ParseDID(s.cfg.RepoDID)
+	did, err := syntax.ParseDID(s.repoDID)
 	if err != nil {
 		return fmt.Errorf("requester: owner DID: %w", err)
 	}
 	if _, err := pdsclient.NewRemote(pdsclient.RemoteConfig{
 		BaseURL:    session.Service,
 		DID:        did,
-		HTTPClient: s.cfg.HTTPClient,
+		HTTPClient: s.httpClient,
 		Timeout:    DefaultHTTPTimeout,
 	}); err != nil {
 		return fmt.Errorf("requester: the owner PDS %s: %w", session.Service, err)
 	}
-	tokens := newPDSAccountTokens(session.Service, session.Identifier, session.Password, s.cfg.HTTPClient)
-	access, err := tokens.RefreshAccessToken(ctx)
-	if err != nil {
-		return fmt.Errorf("requester: the owner session of %s: %w", s.cfg.RepoDID, err)
+	tokens := newPDSAccountTokens(session.Service, session.Identifier, session.Password, s.httpClient)
+	if _, err := tokens.RefreshAccessToken(ctx); err != nil {
+		return fmt.Errorf("requester: the owner session of %s: %w", s.repoDID, err)
 	}
 	s.ownerTokens = tokens
-	s.cfg.PDSAccessToken = access
-	s.cfg.PDSURL = session.Service
-	s.ownerServiceAuth = newOwnerSessionServiceAuth(session.Service, tokens, s.cfg.HTTPClient)
+	s.pdsURL = session.Service
+	s.ownerServiceAuth = newOwnerSessionServiceAuth(session.Service, tokens, s.httpClient)
 	return nil
 }
 
@@ -553,75 +602,71 @@ func (s *Service) bindSignerKey(ctx context.Context) error {
 		return fmt.Errorf("requester: the signer key: %w", err)
 	}
 	record := market.BuildBadgeBlueKeysRecord(market.BadgeBlueKeysRecordOptions{
-		DID:       s.cfg.RepoDID,
+		DID:       s.repoDID,
 		KeyID:     key,
 		Service:   ownerSessionSigningService,
 		CreatedAt: s.nowISO(),
 	})
-	rkey := market.BadgeBlueKeysRkey(s.cfg.RepoDID, key)
-	if _, err := s.repo.PutRecord(ctx, s.cfg.RepoDID, market.BadgeBlueKeysNSID, rkey, record); err != nil {
+	rkey := market.BadgeBlueKeysRkey(s.repoDID, key)
+	if _, err := s.repo.PutRecord(ctx, s.repoDID, market.BadgeBlueKeysNSID, rkey, record); err != nil {
 		return fmt.Errorf("requester: publishing the signer key binding: %w", err)
 	}
-	s.log.Info("requester_signer_key_bound", "did", s.cfg.RepoDID, "key", key, "rkey", rkey)
+	s.log.Info("requester_signer_key_bound", "did", s.repoDID, "key", key, "rkey", rkey)
 	return nil
 }
 
 func (s *Service) openRepo(remote market.Foreign) (*market.RepoStore, error) {
-	if s.cfg.RepoDID == "" {
+	if s.repoDID == "" {
 		return nil, errors.New("requester: the record store needs the repo DID")
 	}
-	if s.cfg.Deps.Handlers == nil {
+	if s.deps.Bus == nil {
 		return nil, errors.New("requester: the record store needs the bus")
 	}
-	self := commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: Kind, Name: s.cfg.ComponentName, Workspace: s.cfg.Workspace}
-	repo := commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: "AtprotoRepo", Name: atprotorepo.RepoName(s.cfg.RepoDID), Workspace: s.cfg.Workspace}
-	handlers := s.cfg.Deps.Handlers
-	return market.NewRepoStore(market.RepoStoreConfig{DID: s.cfg.RepoDID, Foreign: remote,
+	self := commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: Kind, Name: s.deps.Self.Name, Workspace: s.workspace()}
+	repo := commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: "AtprotoRepo", Name: atprotorepo.RepoName(s.repoDID), Workspace: s.workspace()}
+	handlers := s.deps.Bus
+	return market.NewRepoStore(market.RepoStoreConfig{DID: s.repoDID, Foreign: remote,
 		Open: func(ctx context.Context) (atprotorepo.Repo, error) {
 			return bus.Resolve[atprotorepo.Repo](ctx, handlers, self, repo, bus.Capability{Name: atprotorepo.CapabilityWrite})
 		}}), nil
 }
 
 func (s *Service) resolvePolicyRunner(ctx context.Context, engine commonv1.ObjectRef, workflow string) (policy.Runner, error) {
-	caller := commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: Kind, Name: s.cfg.ComponentName, Workspace: s.cfg.Workspace}
-	return bus.Resolve[policy.Runner](ctx, s.cfg.Deps.Handlers, caller, engine, bus.Capability{Name: policy.CapabilityRun, Scope: []string{workflow}})
+	caller := commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: Kind, Name: s.deps.Self.Name, Workspace: s.workspace()}
+	return bus.Resolve[policy.Runner](ctx, s.deps.Bus, caller, engine, bus.Capability{Name: policy.CapabilityRun, Scope: []string{workflow}})
 }
 
 func (s *Service) policyRuns() *runs.Client {
-	if s.cfg.Deps.Handlers == nil {
+	if s.deps.Bus == nil {
 		return nil
 	}
 	return &runs.Client{
 		Resolve: s.resolvePolicyRunner,
-		Owner:   policy.Owner{APIVersion: v1alpha1.GroupVersion.String(), Kind: Kind, Name: s.cfg.ComponentName, UID: s.cfg.ComponentUID},
-		Engine:  runs.EngineRef(s.cfg.PolicyEngineRef, s.cfg.Workspace),
+		Owner:   policy.Owner{APIVersion: v1alpha1.GroupVersion.String(), Kind: Kind, Name: s.deps.Self.Name, UID: string(s.deps.UID)},
+		Engine:  runs.EngineRef(s.spec.PolicyEngineRef, s.workspace()),
 		Role:    "requester",
 		Prefix:  "requester-policy",
-		Args:    s.cfg.PolicyArgs,
-		Timeout: s.cfg.PolicyTimeout,
+		Timeout: s.policyTimeout,
 		Parser:  runs.Strict,
-		Now:     s.cfg.Now,
+		Now:     time.Now,
 	}
 }
 
 func (s *Service) setupKCP() error {
-	if s.cfg.Contracts != nil {
+	if s.contracts != nil {
 		return nil
 	}
-	store, err := kcpStore(s.cfg.Deps, s.cfg.Workspace)
+	store, err := kcpStore(s.deps.KCP, s.workspace())
 	if err != nil {
 		return err
 	}
 	s.inbox = kcpstore.OfClusterScoped[v1alpha1.StateSync](store, inboxGVR)
-	if s.cfg.Contracts == nil {
-		s.cfg.Contracts = NewKCPContracts(kcpstore.OfClusterScoped[v1alpha1.ComputeContract](store, ComputeContractGVR), s.cfg.Workspace, "")
-	}
-	s.contracts = s.cfg.Contracts
+	s.contracts = NewKCPContracts(kcpstore.OfClusterScoped[v1alpha1.ComputeContract](store, ComputeContractGVR), s.workspace(), "")
 	return nil
 }
 
 func (s *Service) loop(ctx context.Context) {
-	ticker := time.NewTicker(s.cfg.ContractPoll)
+	ticker := time.NewTicker(s.contractPoll)
 	defer ticker.Stop()
 	for {
 		s.reconcile(ctx)
@@ -638,7 +683,7 @@ func (s *Service) loop(ctx context.Context) {
 func (s *Service) reconcile(ctx context.Context) {
 	s.reconcileMu.Lock()
 	defer s.reconcileMu.Unlock()
-	contracts, err := s.cfg.Contracts.List(ctx)
+	contracts, err := s.contracts.List(ctx)
 	if err != nil {
 		if ctx.Err() == nil {
 			s.log.Warn("requester_contracts_list_failed", "err", err)
@@ -685,7 +730,7 @@ func (s *Service) reconcile(ctx context.Context) {
 				status.Phase = v1alpha1.ComputeContractReleased
 				status.Message = "the contract was released before it started"
 				addContractConditions(&status, contract.Generation, status.Phase, status.Message, s.now(), false)
-				if err := s.cfg.Contracts.PatchStatus(ctx, contract.Name, status); err != nil {
+				if err := s.contracts.PatchStatus(ctx, contract.Name, status); err != nil {
 					s.log.Warn("requester_contract_status_failed", "contract", contract.Name, "err", err)
 				}
 			}
@@ -708,7 +753,7 @@ func (s *Service) reconcile(ctx context.Context) {
 				status.Phase = v1alpha1.ComputeContractPending
 				status.Message = reason
 				addContractConditions(&status, contract.Generation, status.Phase, reason, s.now(), true)
-				if err := s.cfg.Contracts.PatchStatus(ctx, contract.Name, status); err != nil {
+				if err := s.contracts.PatchStatus(ctx, contract.Name, status); err != nil {
 					s.log.Warn("requester_contract_status_failed", "contract", contract.Name, "err", err)
 				}
 			}
@@ -745,11 +790,11 @@ func (s *Service) reconcile(ctx context.Context) {
 }
 
 func (s *Service) admitLocked(account string) (bool, string) {
-	if s.running >= s.cfg.MaxConcurrent {
-		return false, fmt.Sprintf("waiting for admission: %d of %d contracts are running", s.running, s.cfg.MaxConcurrent)
+	if maxConcurrent := int(s.spec.MaxConcurrent); s.running >= maxConcurrent {
+		return false, fmt.Sprintf("waiting for admission: %d of %d contracts are running", s.running, maxConcurrent)
 	}
-	if account != "" && s.perAccount[account] >= s.cfg.PerAccount {
-		return false, fmt.Sprintf("this account has %d of %d contracts running", s.perAccount[account], s.cfg.PerAccount)
+	if perAccount := int(s.spec.PerAccount); account != "" && s.perAccount[account] >= perAccount {
+		return false, fmt.Sprintf("this account has %d of %d contracts running", s.perAccount[account], perAccount)
 	}
 	return true, ""
 }
@@ -844,7 +889,7 @@ func (s *Service) handler() http.Handler {
 	mux.HandleFunc("GET /xrpc/com.atproto.repo.listRecords", s.repoListRecords)
 	mux.HandleFunc("GET /xrpc/com.atproto.repo.describeRepo", s.repoDescribe)
 	mux.HandleFunc("GET /xrpc/com.atproto.server.describeServer", s.serverDescribe)
-	if s.cfg.inboundXRPC() {
+	if s.inboundXRPC() {
 		mux.HandleFunc("POST /xrpc/"+market.SubmitBidNSID, s.submitBid)
 		mux.HandleFunc("POST /xrpc/"+market.SubmitEventNSID, s.submitEvent)
 	}
@@ -914,7 +959,7 @@ var exposureGVR = exposurev1alpha1.ExposureGVR
 var marketIdentityGVR = v1alpha1.MarketIdentityGVR
 
 func (s *Service) ingressExposureURL(ctx context.Context) (string, error) {
-	name := "svc-" + strings.ToLower(Kind) + "-" + strings.TrimSpace(s.cfg.ComponentName) + "-ingress"
+	name := "svc-" + strings.ToLower(Kind) + "-" + strings.TrimSpace(s.deps.Self.Name) + "-ingress"
 	deadline := time.Now().Add(DefaultExposureWait)
 	for {
 		raw, err := s.readExposureURL(ctx, name)
@@ -936,10 +981,10 @@ func (s *Service) ingressExposureURL(ctx context.Context) (string, error) {
 }
 
 func (s *Service) readExposureURL(ctx context.Context, name string) (string, error) {
-	if s.cfg.Deps.KCP == nil {
+	if s.deps.KCP == nil {
 		return "", errors.New("requester: no kcp clients")
 	}
-	client, err := s.cfg.Deps.KCP.Client(s.cfg.Workspace)
+	client, err := s.deps.KCP.Client(s.workspace())
 	if err != nil {
 		return "", err
 	}
@@ -948,7 +993,7 @@ func (s *Service) readExposureURL(ctx context.Context, name string) (string, err
 		return "", errors.New("requester: the kcp client has no rest config")
 	}
 	baseHost, _, _ := strings.Cut(strings.TrimSuffix(cfg.Host, "/"), "/clusters/")
-	cfg.Host = baseHost + "/clusters/" + s.cfg.Workspace
+	cfg.Host = baseHost + "/clusters/" + s.workspace()
 	dc, err := dynamic.NewForConfig(cfg)
 	if err != nil {
 		return "", err
@@ -962,18 +1007,16 @@ func (s *Service) readExposureURL(ctx context.Context, name string) (string, err
 }
 
 func (s *Service) readSecretsBundle(ctx context.Context, ref commonv1.SecretRef) ([]secretEntry, error) {
-	if s.cfg.Deps.Vault == nil {
-		return nil, errors.New("requester: no vault clients")
-	}
-	if s.cfg.VaultRef == nil || s.cfg.VaultRef.Name == "" {
+	vaultRef := s.spec.VaultRef
+	if vaultRef == nil || vaultRef.Name == "" {
 		return nil, errors.New("requester: the contract names a secrets bundle and the component names no OpenBaoServer")
 	}
-	server := v1alpha1.VaultServer(s.cfg.VaultRef, "")
-	client, err := s.cfg.Deps.Vault.Client(ctx, server)
+	target := commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: "Vault", Name: vaultRef.Name, Workspace: cmp.Or(vaultRef.Workspace, s.deps.Self.Workspace)}
+	kv, err := bus.Resolve[vault.KV](s.deps.Caller(ctx), s.deps.Bus, s.deps.Self, target, bus.Capability{Name: vault.CapabilityRead, Scope: []string{ref.Mount + "/" + ref.Path}})
 	if err != nil {
 		return nil, fmt.Errorf("requester: the vault client: %w", err)
 	}
-	data, err := client.ReadKV(ctx, ref.Mount, ref.Path)
+	data, err := kv.Read(ctx, ref.Mount, ref.Path, 0)
 	if err != nil {
 		return nil, fmt.Errorf("requester: reading the secrets bundle %s/%s: %w", ref.Mount, ref.Path, err)
 	}
@@ -996,7 +1039,7 @@ func (s *Service) readSecretsBundle(ctx context.Context, ref commonv1.SecretRef)
 func (s *Service) health(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	ready := s.ready && s.repo != nil
-	did := s.cfg.DID
+	did := s.did
 	s.mu.Unlock()
 	if !ready {
 		httpjson.Write(w, http.StatusServiceUnavailable, map[string]any{"ok": false})
@@ -1008,7 +1051,7 @@ func (s *Service) health(w http.ResponseWriter, r *http.Request) {
 func (s *Service) repoGetRecord(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	repoDID := query.Get("repo")
-	repoDID = cmp.Or(repoDID, s.cfg.RepoDID)
+	repoDID = cmp.Or(repoDID, s.repoDID)
 	record, err := s.repo.GetRecord(r.Context(), repoDID, query.Get("collection"), query.Get("rkey"))
 	if err != nil {
 		status := http.StatusNotFound
@@ -1024,7 +1067,7 @@ func (s *Service) repoGetRecord(w http.ResponseWriter, r *http.Request) {
 func (s *Service) repoListRecords(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	repoDID := query.Get("repo")
-	repoDID = cmp.Or(repoDID, s.cfg.RepoDID)
+	repoDID = cmp.Or(repoDID, s.repoDID)
 	limit := 50
 	if raw := query.Get("limit"); raw != "" {
 		fmt.Sscanf(raw, "%d", &limit)
@@ -1046,11 +1089,11 @@ func (s *Service) repoListRecords(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) repoDescribe(w http.ResponseWriter, r *http.Request) {
-	httpjson.Write(w, http.StatusOK, map[string]any{"did": s.cfg.RepoDID, "handle": s.cfg.Handle, "collections": []string{}})
+	httpjson.Write(w, http.StatusOK, map[string]any{"did": s.repoDID, "handle": s.handle, "collections": []string{}})
 }
 
 func (s *Service) serverDescribe(w http.ResponseWriter, r *http.Request) {
-	httpjson.Write(w, http.StatusOK, map[string]any{"did": s.cfg.RepoDID, "version": "socialweb-computer"})
+	httpjson.Write(w, http.StatusOK, map[string]any{"did": s.repoDID, "version": "socialweb-computer"})
 }
 
 func (s *Service) submitBid(w http.ResponseWriter, r *http.Request) {
@@ -1138,8 +1181,8 @@ func (s *Service) authorizeCallback(w http.ResponseWriter, r *http.Request, lxm,
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), serviceAuthTimeout)
 	defer cancel()
-	audiences := []string{s.cfg.MarketDID, s.cfg.RepoDID, s.cfg.DID}
-	for _, raw := range []string{s.cfg.MarketURL, s.cfg.CallbackHostname, s.cfg.PublicHostname, s.cfg.Network.IngressProxyHost} {
+	audiences := []string{s.marketDID, s.repoDID, s.did}
+	for _, raw := range []string{s.marketURL, s.network().IngressProxyHost} {
 		raw = strings.TrimSpace(raw)
 		if raw == "" {
 			continue
@@ -1169,7 +1212,7 @@ func (s *Service) callbackHostname(r *http.Request) string {
 	if host := strings.TrimSpace(r.Host); host != "" {
 		return host
 	}
-	for _, raw := range []string{s.cfg.CallbackHostname, s.cfg.PublicHostname, s.cfg.Network.IngressProxyHost} {
+	for _, raw := range []string{s.network().IngressProxyHost} {
 		raw = strings.TrimSpace(raw)
 		if raw == "" {
 			continue
@@ -1330,11 +1373,9 @@ func (s *Service) bidderForDID(ctx context.Context, did string) (Bidder, bool) {
 }
 
 func (s *Service) submitAcceptAndWait(ctx context.Context, bidder Bidder, acceptURI, acceptCID, winnerDID string) (*market.ResolvedRecord, error) {
-	provisionTimeout := max(s.cfg.ReceiptTimeout, submitAcceptProvisionTimeout)
+	provisionTimeout := max(s.receiptTimeout, submitAcceptProvisionTimeout)
 	if !s.outboundXRPC() || bidder.Endpoint == "" {
-		timeout := s.cfg.ReceiptTimeout
-		timeout = opt.Positive(timeout, DefaultReceiptTimeout)
-		return s.waitReceiptWithin(ctx, winnerDID, acceptURI, timeout)
+		return s.waitReceiptWithin(ctx, winnerDID, acceptURI, s.receiptTimeout)
 	}
 	if receipt, err := s.findReceiptWithin(ctx, winnerDID, acceptURI, submitAcceptReceiptTimeout); err == nil && receipt != nil {
 		return receipt, nil
@@ -1344,7 +1385,7 @@ func (s *Service) submitAcceptAndWait(ctx context.Context, bidder Bidder, accept
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
-	if copies := s.cfg.AcceptCopies; copies > 1 {
+	if copies := int(s.spec.AcceptCopies); copies > 1 {
 		copiesCtx, cancel := context.WithTimeout(ctx, provisionTimeout)
 		var wg sync.WaitGroup
 		for range copies {
@@ -1368,9 +1409,8 @@ func (s *Service) submitAcceptAndWait(ctx context.Context, bidder Bidder, accept
 			return receipt, nil
 		}
 	}
-	deadline := time.Now().Add(s.cfg.ReceiptTimeout)
-	delay := s.cfg.ReceiptPoll
-	delay = opt.Positive(delay, DefaultReceiptPoll)
+	deadline := time.Now().Add(s.receiptTimeout)
+	delay := s.receiptPoll
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -1467,9 +1507,9 @@ func (s *Service) bidAllowedWithPolicy(ctx context.Context, bid BidRecord, usePo
 	if s.policy == nil || (s.policy.Workflow == "" && workflow == "") {
 		return true
 	}
-	self := s.cfg.MarketDID
-	if s.cfg.OperatorDID != "" {
-		self = s.cfg.OperatorDID
+	self := s.marketDID
+	if operator := strings.TrimSpace(s.spec.OperatorDID); operator != "" {
+		self = operator
 	}
 	input := PolicyInput{
 		SelfDid:          self,
@@ -1501,7 +1541,7 @@ func (s *Service) releaseDeadline(contract v1alpha1.ComputeContract) time.Time {
 	if base.IsZero() {
 		base = s.now()
 	}
-	bound := s.cfg.ReleaseBound
+	bound := DefaultReleaseBound
 	if raw := contract.Annotations["socialweb.computer/ttl-after-finished"]; raw != "" {
 		if parsed, ok := parseDuration(raw); ok && parsed > 0 {
 			bound = parsed
@@ -1511,15 +1551,15 @@ func (s *Service) releaseDeadline(contract v1alpha1.ComputeContract) time.Time {
 }
 
 func (s *Service) releaseRetryDelay(attempt int) time.Duration {
-	delay := s.cfg.ReleaseRetryFirst
+	delay := DefaultReleaseRetryFirst
 	for i := 1; i < attempt; i++ {
 		delay *= 2
-		if delay >= s.cfg.ReleaseRetryMax {
-			return s.cfg.ReleaseRetryMax
+		if delay >= DefaultReleaseRetryMax {
+			return DefaultReleaseRetryMax
 		}
 	}
-	if delay > s.cfg.ReleaseRetryMax {
-		delay = s.cfg.ReleaseRetryMax
+	if delay > DefaultReleaseRetryMax {
+		delay = DefaultReleaseRetryMax
 	}
 	return delay
 }
@@ -1553,9 +1593,6 @@ func parseDuration(raw string) (time.Duration, bool) {
 }
 
 func (s *Service) now() time.Time {
-	if s.cfg.Now != nil {
-		return s.cfg.Now()
-	}
 	return time.Now()
 }
 
@@ -1564,17 +1601,17 @@ func (s *Service) nowISO() string {
 }
 
 func (s *Service) callbackDID() string {
-	if s.cfg.DID != "" {
-		return s.cfg.DID
+	if s.did != "" {
+		return s.did
 	}
-	return s.cfg.MarketDID
+	return s.marketDID
 }
 
 func (s *Service) submitBidRef() string {
-	if !s.cfg.inboundXRPC() {
+	if !s.inboundXRPC() {
 		return ""
 	}
-	if url := strings.TrimRight(strings.TrimSpace(s.cfg.MarketURL), "/"); url != "" {
+	if url := strings.TrimRight(strings.TrimSpace(s.marketURL), "/"); url != "" {
 		return url
 	}
 	if s.callbackDID() == "" {
@@ -1584,10 +1621,10 @@ func (s *Service) submitBidRef() string {
 }
 
 func (s *Service) submitEventRef() string {
-	if !s.cfg.inboundXRPC() {
+	if !s.inboundXRPC() {
 		return ""
 	}
-	if url := strings.TrimRight(strings.TrimSpace(s.cfg.MarketURL), "/"); url != "" {
+	if url := strings.TrimRight(strings.TrimSpace(s.marketURL), "/"); url != "" {
 		return url
 	}
 	if s.callbackDID() == "" {

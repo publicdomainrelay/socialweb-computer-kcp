@@ -11,42 +11,37 @@ import (
 	"net/url"
 	"strings"
 
+	"k8s.io/utils/ptr"
+
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/ingress"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 )
 
 func (s *Service) startRelay(ctx context.Context) error {
-	if s.cfg.Relay == nil {
+	if !ptr.Deref(s.spec.RelayEnabled, false) {
 		return nil
 	}
-	relay := s.cfg.Relay
-	keypair := relay.Keypair
-	if keypair == nil {
-		if s.cfg.StateDir == "" {
-			return errors.New("guestcontrolplane: the relay names no keypair and there is no state dir")
-		}
-		signer, err := market.LoadOrCreateSignerFile(s.cfg.StateDir + "/guest-relay.jwk")
-		if err != nil {
-			return err
-		}
-		did, err := signer.PublicDID()
-		if err != nil {
-			return err
-		}
-		keypair = signerKeypair{signer: signer, did: did}
+	if s.stateDir == "" {
+		return errors.New("guestcontrolplane: the relay names no keypair and there is no state dir")
 	}
-	if relay.GetServiceAuthToken == nil {
+	signer, err := market.LoadOrCreateSignerFile(s.stateDir + "/guest-relay.jwk")
+	if err != nil {
+		return err
+	}
+	did, err := signer.PublicDID()
+	if err != nil {
+		return err
+	}
+	if s.deps.RelayServiceAuth == nil {
 		return errors.New("guestcontrolplane: the relay has no service-auth token source")
 	}
-	label := relay.Label
-	label = cmp.Or(label, "guest-"+s.cfg.Role)
 	subscriber, err := ingress.NewSubscriber(ctx, ingress.SubscriberConfig{
-		Label:               label,
-		Keypair:             keypair,
-		GetServiceAuthToken: relay.GetServiceAuthToken,
-		IngressProxyHost:    relay.IngressProxyHost,
-		TLS:                 relay.TLS,
+		Label:               "guest-" + s.spec.Role,
+		Keypair:             signerKeypair{signer: signer, did: did},
+		GetServiceAuthToken: s.deps.RelayServiceAuth,
+		IngressProxyHost:    s.relayHost(),
+		TLS:                 s.relayTLS(),
 		HandleRequest:       s.forwardRelay,
 	})
 	if err != nil {
@@ -60,15 +55,15 @@ func (s *Service) startRelay(ctx context.Context) error {
 }
 
 func (s *Service) relayEndpoint() (component.Endpoint, bool) {
-	if s.relay == nil || s.cfg.Relay == nil {
+	if s.relay == nil {
 		return component.Endpoint{}, false
 	}
-	host := s.cfg.Relay.IngressProxyHost
+	host := s.relayHost()
 	if host == "" {
 		return component.Endpoint{}, false
 	}
 	scheme := "https"
-	if !s.cfg.Relay.TLS && (strings.HasPrefix(host, "127.0.0.1") || strings.HasPrefix(host, "localhost")) {
+	if !s.relayTLS() && (strings.HasPrefix(host, "127.0.0.1") || strings.HasPrefix(host, "localhost")) {
 		scheme = "http"
 	}
 	raw := scheme + "://" + s.relay.Subdomain() + "." + host

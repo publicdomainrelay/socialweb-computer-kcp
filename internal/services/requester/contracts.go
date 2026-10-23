@@ -174,12 +174,12 @@ func (c *KCPContracts) SetPendingEvents(ctx context.Context, name string, events
 	return c.Res.PatchStatus(ctx, ref.New(c.Cluster, "", name), patch)
 }
 
-func kcpStore(deps component.Deps, workspace string) (*kcpstore.Store, error) {
-	if deps.KCP == nil {
+func kcpStore(kcp component.KCPClients, workspace string) (*kcpstore.Store, error) {
+	if kcp == nil {
 		return nil, errors.New("requester: the component has no kcp clients")
 	}
 	workspace = cmp.Or(workspace, "root")
-	client, err := deps.KCP.Client(workspace)
+	client, err := kcp.Client(workspace)
 	if err != nil {
 		return nil, fmt.Errorf("requester: kcp client for %s: %w", workspace, err)
 	}

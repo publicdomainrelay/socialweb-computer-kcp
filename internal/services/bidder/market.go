@@ -74,7 +74,7 @@ type contractInfo struct {
 
 func (s *Service) routes() *http.ServeMux {
 	mux := http.NewServeMux()
-	if s.cfg.inboundXRPC() {
+	if s.inboundXRPC() {
 		mux.HandleFunc("POST "+SubmitRFPPath, s.handleSubmitRFP)
 		mux.HandleFunc("POST "+SubmitBidPath, s.handleSubmitBid)
 		mux.HandleFunc("POST "+SubmitAcceptPath, s.handleSubmitAccept)
@@ -379,7 +379,7 @@ func (s *Service) enqueueBid(ctx context.Context, rfpURI, rfpCID, issuer string)
 	if s.did == "" {
 		return nil, errors.New("the bidder has no DID")
 	}
-	now := s.cfg.Now().UTC()
+	now := time.Now().UTC()
 	name := bidName(s.did, rfpURI, rfpCID)
 	existing, err := s.bids.Get(ctx, name)
 	if err != nil {
@@ -387,7 +387,7 @@ func (s *Service) enqueueBid(ctx context.Context, rfpURI, rfpCID, issuer string)
 	}
 	if existing != nil {
 		if existing.Status.Phase == "" {
-			status := decidingBidStatus(now, s.cfg.ComponentName)
+			status := decidingBidStatus(now, s.deps.Self.Name)
 			if err := s.bids.PatchStatus(ctx, name, status); err != nil {
 				return nil, err
 			}
@@ -400,7 +400,7 @@ func (s *Service) enqueueBid(ctx context.Context, rfpURI, rfpCID, issuer string)
 		Spec: v1alpha1.BidSpec{
 			Rfp:       commonv1.StrongRef{URI: rfpURI, CID: rfpCID},
 			Requester: issuer,
-			ExpiresAt: now.Add(s.cfg.bidTTL()).Format(time.RFC3339),
+			ExpiresAt: now.Add(s.bidTTL).Format(time.RFC3339),
 		},
 	}
 	if err := s.bids.Create(ctx, bid); err != nil {
@@ -410,7 +410,7 @@ func (s *Service) enqueueBid(ctx context.Context, rfpURI, rfpCID, issuer string)
 				return nil, getErr
 			}
 			if again != nil && again.Status.Phase == "" {
-				status := decidingBidStatus(now, s.cfg.ComponentName)
+				status := decidingBidStatus(now, s.deps.Self.Name)
 				if err := s.bids.PatchStatus(ctx, name, status); err != nil {
 					return nil, err
 				}
@@ -420,7 +420,7 @@ func (s *Service) enqueueBid(ctx context.Context, rfpURI, rfpCID, issuer string)
 		}
 		return nil, err
 	}
-	status := decidingBidStatus(now, s.cfg.ComponentName)
+	status := decidingBidStatus(now, s.deps.Self.Name)
 	if err := s.bids.PatchStatus(ctx, name, status); err != nil {
 		return nil, err
 	}
@@ -456,15 +456,12 @@ func (s *Service) submitBid(ctx context.Context, endpoint string, ref market.Str
 }
 
 func (s *Service) callService(ctx context.Context, endpoint, nsid, lxm string, body map[string]any) error {
-	if s.cfg.CallService != nil {
-		return s.cfg.CallService(ctx, endpoint, nsid, lxm, body)
-	}
 	return s.postXRPC(ctx, endpoint, nsid, body)
 }
 
 func (s *Service) postXRPC(ctx context.Context, endpoint, nsid string, body any) error {
 	host := hostPortOf(endpoint)
-	client := &xrpc.Client{Host: endpoint, HTTP: s.cfg.Deps.ExternalHTTPClient(DefaultCallTimeout), Limit: 4096}
+	client := &xrpc.Client{Host: endpoint, HTTP: s.egress.Client(DefaultCallTimeout), Limit: 4096}
 	if host == "" {
 		s.log.Warn("the outbound XRPC call is unsigned: the endpoint has no hostname", "url", endpoint, "nsid", nsid)
 	} else if _, tokenErr := s.serviceAuthToken(ctx, host, nsid); tokenErr != nil {
@@ -525,7 +522,7 @@ func (s *Service) mintServiceAuth(ctx context.Context, aud, lxm string, now time
 		return "", time.Time{}, errors.New("the bidder has no PDS URL")
 	}
 	expires := now.Add(serviceAuthTokenLifetime)
-	if minter, ok := s.cfg.PDSTokens.(interface {
+	if minter, ok := s.pdsTokens.(interface {
 		ServiceAuth(ctx context.Context, audience, lxm string) (string, error)
 	}); ok {
 		callCtx, cancel := context.WithTimeout(ctx, DefaultCallTimeout)
@@ -548,7 +545,7 @@ func (s *Service) mintServiceAuth(ctx context.Context, aud, lxm string, now time
 
 func (s *Service) pdsAuth() xrpc.Auth {
 	var refresh xrpc.TokenFunc
-	if refresher, ok := s.cfg.PDSTokens.(pdsclient.TokenRefresher); ok {
+	if refresher, ok := s.pdsTokens.(pdsclient.TokenRefresher); ok {
 		refresh = refresher.RefreshAccessToken
 	}
 	tokens := xrpc.Refreshing(func(ctx context.Context) (string, error) {
@@ -561,10 +558,10 @@ func (s *Service) pdsAuth() xrpc.Auth {
 		}
 		return token, nil
 	}, refresh)
-	if s.cfg.PDSDPoP == nil {
+	if s.pdsDPoP == nil {
 		return &xrpc.Bearer{Tokens: tokens}
 	}
-	dpop := s.cfg.PDSDPoP
+	dpop := s.pdsDPoP
 	return xrpc.StatusRetry(&xrpc.DPoP{Tokens: tokens, Prover: xrpc.DPoPProverFunc(func(ctx context.Context, method, target, accessToken, _ string) (xrpc.DPoPProof, error) {
 		proof, err := dpop.DPoPProof(ctx, method, target, accessToken)
 		return xrpc.DPoPProof{Proof: proof}, err
@@ -594,8 +591,8 @@ func serviceAuthCacheExpiry(token string, requested time.Time) time.Time {
 }
 
 func (s *Service) pdsAccessTokenForServiceAuth(ctx context.Context) (string, error) {
-	if s.cfg.PDSTokens != nil {
-		token, err := s.cfg.PDSTokens.AccessToken(ctx)
+	if s.pdsTokens != nil {
+		token, err := s.pdsTokens.AccessToken(ctx)
 		if err != nil {
 			return "", err
 		}
@@ -609,10 +606,7 @@ func (s *Service) pdsAccessTokenForServiceAuth(ctx context.Context) (string, err
 }
 
 func (s *Service) pdsServiceAuthEndpoint() string {
-	raw := strings.TrimSpace(s.cfg.PDSURL)
-	if raw == "" && s.cfg.RemotePDS != nil {
-		raw = strings.TrimSpace(s.cfg.RemotePDS.Spec.URL)
-	}
+	raw := strings.TrimSpace(s.pdsURL)
 	if raw == "" {
 		return ""
 	}
@@ -623,10 +617,10 @@ func (s *Service) pdsServiceAuthEndpoint() string {
 }
 
 func (s *Service) pdsHTTPClient() *http.Client {
-	if s.pdsInternal && s.cfg.Deps.Handlers != nil {
-		return s.cfg.Deps.Handlers.HTTPClient()
+	if s.pdsInternal && s.deps.Bus != nil {
+		return s.deps.Bus.HTTPClient()
 	}
-	return s.cfg.Deps.ExternalHTTPClient(DefaultCallTimeout)
+	return s.egress.Client(DefaultCallTimeout)
 }
 
 func (s *Service) createReceipt(ctx context.Context, refs market.ReceiptRefs, accept market.ResolvedRecord, issuer string) (string, string, error) {
@@ -751,14 +745,14 @@ func structMap(value any) (map[string]any, error) {
 }
 
 func (s *Service) startRelay(ctx context.Context) error {
-	if s.cfg.Relay == nil {
+	ingressHost := s.network().IngressProxyHost
+	if ingressHost == "" {
 		return nil
 	}
-	relay := s.cfg.Relay
 	var signer *market.Signer
 	var did string
-	if s.cfg.StateDir != "" {
-		loaded, err := market.LoadOrCreateSignerFile(s.cfg.StateDir + "/market-relay.jwk")
+	if s.stateDir() != "" {
+		loaded, err := market.LoadOrCreateSignerFile(s.stateDir() + "/market-relay.jwk")
 		if err != nil {
 			return err
 		}
@@ -767,31 +761,19 @@ func (s *Service) startRelay(ctx context.Context) error {
 			return err
 		}
 	}
-	keypair := relay.Keypair
-	if keypair == nil {
-		if signer == nil {
-			return errors.New("the relay names no keypair and there is no state dir")
-		}
-		keypair = signerKeypair{signer: signer, did: did}
+	if signer == nil {
+		return errors.New("the relay names no keypair and there is no state dir")
 	}
-	getToken := relay.GetServiceAuthToken
-	if getToken == nil {
-		if signer == nil {
-			return errors.New("the relay has no service-auth token source")
-		}
-		aud := "did:web:" + hostport.URLHostname(relay.IngressProxyHost)
-		getToken = func(ctx context.Context, nsid string) (string, error) {
-			return ingress.SignServiceAuth(signer.PrivateKey, did, aud, nsid, 5*time.Minute)
-		}
+	keypair := signerKeypair{signer: signer, did: did}
+	aud := "did:web:" + hostport.URLHostname(ingressHost)
+	getToken := func(ctx context.Context, nsid string) (string, error) {
+		return ingress.SignServiceAuth(signer.PrivateKey, did, aud, nsid, 5*time.Minute)
 	}
-	label := relay.Label
-	label = cmp.Or(label, "market")
-	connectHost := relay.ConnectHost
-	connectHost = cmp.Or(connectHost, relay.IngressProxyHost)
-	httpClient := relay.HTTPClient
+	dialAddress := ingressConnectHost(s.network())
+	var httpClient *http.Client
 	var dialer *websocket.Dialer
-	if relay.DialAddress != "" && connectHost != "" {
-		hosts, hostErr := networkdial.NewHostMap([]networkdial.Host{{Name: hostport.URLHostname(connectHost), Address: relay.DialAddress}})
+	if dialAddress != "" {
+		hosts, hostErr := networkdial.NewHostMap([]networkdial.Host{{Name: hostport.URLHostname(ingressHost), Address: dialAddress}})
 		if hostErr != nil {
 			return hostErr
 		}
@@ -799,19 +781,16 @@ func (s *Service) startRelay(ctx context.Context) error {
 		if transportErr != nil {
 			return transportErr
 		}
-		if httpClient == nil {
-			httpClient = &http.Client{Transport: transport, Timeout: DefaultCallTimeout}
-		}
+		httpClient = &http.Client{Transport: transport, Timeout: DefaultCallTimeout}
 		if dialer, hostErr = networkdial.NewWebSocketDialerWithOptions(networkdial.DialOptions{Hosts: hosts}); hostErr != nil {
 			return hostErr
 		}
 	}
 	subscriber, err := ingress.NewSubscriber(ctx, ingress.SubscriberConfig{
-		Label:               label,
+		Label:               "market",
 		Keypair:             keypair,
 		GetServiceAuthToken: getToken,
-		IngressProxyHost:    connectHost,
-		TLS:                 relay.TLS,
+		IngressProxyHost:    ingressHost,
 		HTTPClient:          httpClient,
 		Dialer:              dialer,
 		HandleRequest:       s.forwardRelay,
@@ -827,21 +806,21 @@ func (s *Service) startRelay(ctx context.Context) error {
 }
 
 func (s *Service) relayEndpoint() (component.Endpoint, bool) {
-	if s.relay == nil || s.cfg.Relay == nil {
+	if s.relay == nil {
 		return component.Endpoint{}, false
 	}
-	host := s.cfg.Relay.IngressProxyHost
+	host := s.network().IngressProxyHost
 	if host == "" {
 		return component.Endpoint{}, false
 	}
 	scheme := "https"
-	if base := strings.TrimSpace(s.cfg.Relay.PublicURLBase); base != "" {
+	if base := strings.TrimSpace(s.spec.Network.GuestTLSURL()); base != "" {
 		parsed, err := url.Parse(base)
 		if err != nil || parsed.Host == "" {
 			return component.Endpoint{}, false
 		}
 		scheme, host = parsed.Scheme, parsed.Host
-	} else if !s.cfg.Relay.TLS && (strings.HasPrefix(host, "127.0.0.1") || strings.HasPrefix(host, "localhost")) {
+	} else if strings.HasPrefix(host, "127.0.0.1") || strings.HasPrefix(host, "localhost") {
 		scheme = "http"
 	}
 	raw := scheme + "://" + s.relay.Subdomain() + "." + host

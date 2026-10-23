@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-6.sshservers.socialweb.computer
+  name: v1alpha1-7.sshservers.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -162,8 +162,13 @@ spec:
                               type: string
                           routeName:
                             type: string
+                            maxLength: 63
+                            pattern: ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$
                           proxyProtocol:
                             type: string
+                            enum:
+                              - v1
+                              - v2
                           localHost:
                             type: string
                 required:
@@ -278,9 +283,11 @@ spec:
                     type: string
               serve:
                 type: object
+                default: {}
                 properties:
                   host:
                     type: string
+                    default: 127.0.0.1
                   port:
                     type: integer
                     format: int32
@@ -295,24 +302,38 @@ spec:
               maxConnections:
                 type: integer
                 format: int32
+                default: 10000
+                minimum: 1
               maxSessions:
                 type: integer
                 format: int32
+                default: 1000
+                minimum: 1
               sessionsPerAccount:
                 type: integer
                 format: int32
+                default: 1000
+                minimum: 1
               maxAuthAttempts:
                 type: integer
                 format: int32
+                default: 6
+                minimum: 1
               authTimeoutSeconds:
                 type: integer
                 format: int32
+                default: 120
+                minimum: 1
               sessionMaxSeconds:
                 type: integer
                 format: int32
+                default: 3600
+                minimum: 1
               cacheEntries:
                 type: integer
                 format: int32
+                default: 1024
+                minimum: 1
           status:
             type: object
             properties:

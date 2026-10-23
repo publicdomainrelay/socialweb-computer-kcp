@@ -975,11 +975,6 @@ func (in *BidderSettings) DeepCopyInto(out *BidderSettings) {
 		*out = new(int32)
 		**out = **in
 	}
-	if in.PolicyPollMilliseconds != nil {
-		in, out := &in.PolicyPollMilliseconds, &out.PolicyPollMilliseconds
-		*out = new(int32)
-		**out = **in
-	}
 	if in.PolicyTimeoutSeconds != nil {
 		in, out := &in.PolicyTimeoutSeconds, &out.PolicyTimeoutSeconds
 		*out = new(int32)
@@ -1064,11 +1059,6 @@ func (in *BidderSpec) DeepCopyInto(out *BidderSpec) {
 	}
 	if in.BidTTLSeconds != nil {
 		in, out := &in.BidTTLSeconds, &out.BidTTLSeconds
-		*out = new(int32)
-		**out = **in
-	}
-	if in.PolicyPollMilliseconds != nil {
-		in, out := &in.PolicyPollMilliseconds, &out.PolicyPollMilliseconds
 		*out = new(int32)
 		**out = **in
 	}
@@ -8025,11 +8015,6 @@ func (in *RequesterSettings) DeepCopyInto(out *RequesterSettings) {
 		*out = new(int32)
 		**out = **in
 	}
-	if in.PolicyPollMilliseconds != nil {
-		in, out := &in.PolicyPollMilliseconds, &out.PolicyPollMilliseconds
-		*out = new(int32)
-		**out = **in
-	}
 	if in.PolicyTimeoutSeconds != nil {
 		in, out := &in.PolicyTimeoutSeconds, &out.PolicyTimeoutSeconds
 		*out = new(int32)
@@ -8144,11 +8129,6 @@ func (in *RequesterSpec) DeepCopyInto(out *RequesterSpec) {
 	}
 	if in.DirectoryKeys != nil {
 		in, out := &in.DirectoryKeys, &out.DirectoryKeys
-		*out = new(int32)
-		**out = **in
-	}
-	if in.PolicyPollMilliseconds != nil {
-		in, out := &in.PolicyPollMilliseconds, &out.PolicyPollMilliseconds
 		*out = new(int32)
 		**out = **in
 	}

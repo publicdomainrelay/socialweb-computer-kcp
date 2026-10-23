@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-13.requesters.socialweb.computer
+  name: v1alpha1-14.requesters.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -162,8 +162,13 @@ spec:
                               type: string
                           routeName:
                             type: string
+                            maxLength: 63
+                            pattern: ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$
                           proxyProtocol:
                             type: string
+                            enum:
+                              - v1
+                              - v2
                           localHost:
                             type: string
                 required:
@@ -334,9 +339,11 @@ spec:
                     type: string
               serve:
                 type: object
+                default: {}
                 properties:
                   host:
                     type: string
+                    default: 127.0.0.1
                   port:
                     type: integer
                     format: int32
@@ -352,6 +359,13 @@ spec:
                 type: string
               mode:
                 type: string
+                enum:
+                  - local
+                  - localrepo
+                  - callback
+                  - oauth
+                  - oauthbrowser
+                  - oauthqr
               guestSSHKeysFile:
                 type: string
               bidderDIDs:
@@ -368,39 +382,58 @@ spec:
               maxConcurrent:
                 type: integer
                 format: int32
+                default: 64
+                minimum: 1
               perAccount:
                 type: integer
                 format: int32
+                default: 16
+                minimum: 1
               contractPollMilliseconds:
                 type: integer
                 format: int32
+                default: 2000
+                minimum: 1
               bidWindowSeconds:
                 type: integer
                 format: int32
+                default: 30
+                minimum: 1
               receiptTimeoutSeconds:
                 type: integer
                 format: int32
+                default: 300
+                minimum: 1
               receiptPollMilliseconds:
                 type: integer
                 format: int32
+                default: 500
+                minimum: 1
               sessionCapSeconds:
                 type: integer
                 format: int32
+                default: 3600
+                minimum: 1
               sessionIdleSeconds:
                 type: integer
                 format: int32
+                default: 300
+                minimum: 1
               directoryTTLSeconds:
                 type: integer
                 format: int32
+                default: 60
+                minimum: 1
               directoryKeys:
                 type: integer
                 format: int32
-              policyPollMilliseconds:
-                type: integer
-                format: int32
+                default: 10000
+                minimum: 1
               policyTimeoutSeconds:
                 type: integer
                 format: int32
+                default: 120
+                minimum: 1
               oauthScopes:
                 type: array
                 items:

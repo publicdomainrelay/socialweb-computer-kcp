@@ -64,7 +64,7 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	mount := r.PathValue("mount")
-	if mount != s.cfg.GuestLoginMount {
+	if mount != s.spec.GuestLoginMount {
 		writeGuestError(w, http.StatusNotFound, "no such mount")
 		return
 	}

@@ -6,26 +6,21 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
-	"log/slog"
-	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/bluesky-social/indigo/atproto/atcrypto"
 	"github.com/bluesky-social/indigo/atproto/identity"
+	"k8s.io/utils/ptr"
 
-	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	atprotooauth "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauthclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpclient"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/sshtransport"
 
@@ -45,25 +40,11 @@ const (
 )
 
 const (
-	DefaultServeHost = "127.0.0.1"
-
-	DefaultMaxConcurrent = 64
-
-	DefaultPerAccount = 16
-
-	DefaultContractPoll = 2 * time.Second
-
-	DefaultPolicyTimeout = 2 * time.Minute
-
 	DefaultVMReadyTimeout = 120 * time.Second
 
 	DefaultHostKeysTimeout = 120 * time.Second
 
-	DefaultBidWindow = 30 * time.Second
-
 	DefaultReceiptTimeout = 5 * time.Minute
-
-	DefaultReceiptPoll = 500 * time.Millisecond
 
 	DefaultReleaseTimeout = 30 * time.Second
 
@@ -84,14 +65,6 @@ const (
 	DefaultGuestSSHCommand = "bash"
 
 	DefaultShutdownTimeout = 30 * time.Second
-
-	DefaultSessionCap = time.Hour
-
-	DefaultSessionIdle = 5 * time.Minute
-
-	DefaultDirectoryTTL = 60 * time.Second
-
-	DefaultDirectoryKeys = 10_000
 
 	ServiceAuthTTL = 5 * time.Minute
 
@@ -114,339 +87,188 @@ const (
 	DefaultOAuthSessionFile = "oauth-session.json"
 )
 
-type Config struct {
-	Deps component.Deps
-
-	StateDir string
-
-	Workspace string
-
-	Namespace string
-
-	ComponentName string
-
-	ComponentUID string
-
-	Network v1alpha1.MarketNetworkValue
-
-	Identity v1alpha1.ComponentIdentity
-
-	IdentityMode IdentityMode
-
-	LocalSigner bool
-
-	DID string
-
-	Handle string
-
-	RepoDID string
-
-	MarketDID string
-
-	PDSRef *commonv1.ObjectRef
-
-	RemotePDS *pdsv1alpha1.RemotePDS
-
-	PolicyEngineRef *commonv1.ObjectRef
-
-	VaultRef *commonv1.ObjectRef
-
-	PDSURL string
-
-	PDSAccessToken string
-
-	PDSAccessTokenRef *component.CredentialRef
-
-	PublicOrigin string
-
-	MarketURL string
-
-	MarketExposureRef *commonv1.LocalObjectRef
-
-	OperatorDID string
-
-	OAuthClientID string
-
-	OAuthRedirectURI string
-
-	OAuthSessionPath string
-
-	OAuthSessionData *oauthclient.SessionData
-
-	OAuthScopes []string
-
-	Directory identity.Directory
-
-	DirectoryTTL time.Duration
-
-	DirectoryKeys int
-
-	HTTPClient *http.Client
-
-	ServeHost string
-
-	ServePort int
-
-	PublicHostname string
-
-	CallbackHostname string
-
-	Repo *market.RepoStore
-
-	Contracts ContractStore
-
-	Market MarketClient
-
-	RepoKey atcrypto.PrivateKey
-
-	RepoKeyPath string
-
-	AttestationKey atcrypto.PrivateKey
-
-	AttestationKeyPath string
-
-	PolicyWorkflow string
-
-	PolicyArgs map[string]string
-
-	PolicyTimeout time.Duration
-
-	MaxConcurrent int
-
-	PerAccount int
-
-	ContractPoll time.Duration
-
-	VMReadyTimeout time.Duration
-
-	HostKeysTimeout time.Duration
-
-	BidWindow time.Duration
-
-	ReceiptTimeout time.Duration
-
-	ReceiptPoll time.Duration
-
-	FirstFree *bool
-
-	BidderDIDs []string
-
-	DenyBidderDIDs []string
-
-	AcceptCopies int
-
-	GuestAuthorizedKeys []string
-
-	GuestUserData string
-
-	GuestCAPEM string
-
-	GuestHostAliases []string
-
-	GuestKeyDir string
-
-	OwnerSessionsFile string
-
-	OwnerSessions map[string]sshtransport.OwnerSession
-
-	IrohSocket string
-
-	DumbpipePath string
-
-	SSHDefaultCommand string
-
-	ReleaseTimeout time.Duration
-
-	ReleaseRetryFirst time.Duration
-
-	ReleaseRetryMax time.Duration
-
-	ReleaseBound time.Duration
-
-	SessionCap time.Duration
-
-	SessionIdle time.Duration
-
-	ShutdownTimeout time.Duration
-
-	Comms *v1alpha1.MarketComms
-
-	Now func() time.Time
-
-	Log *slog.Logger
-}
-
-func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, error) {
-	var decoded v1alpha1.RequesterSpec
-	if err := spec.Spec.Decode(&decoded); err != nil {
-		return Config{}, fmt.Errorf("requester: decoding the component spec: %w", err)
-	}
-	if err := market.ValidateComms("requester", decoded.Comms); err != nil {
-		return Config{}, err
-	}
-	cfg := Config{
-		Deps:              deps,
-		StateDir:          spec.StateDir,
-		Workspace:         spec.Workspace,
-		Namespace:         spec.Namespace,
-		ComponentName:     spec.Name,
-		ComponentUID:      string(spec.UID),
-		PDSRef:            decoded.PdsRef,
-		PDSAccessTokenRef: accessTokenRef(decoded.PDSAccessToken, decoded.VaultRef),
-		PolicyEngineRef:   decoded.PolicyEngineRef,
-		VaultRef:          decoded.VaultRef,
-		Comms:             decoded.Comms,
-		BidderDIDs:        append([]string(nil), decoded.BidderDIDs...),
-		PolicyArgs:        map[string]string{},
-	}
-	cfg.StateDir = cmp.Or(cfg.StateDir, deps.StateDir)
-	if decoded.Identity != nil {
-		cfg.Identity = *decoded.Identity
-		cfg.DID = decoded.Identity.Did
-		cfg.Handle = decoded.Identity.Handle
-	}
-	if decoded.Network != nil {
-		cfg.Network = *decoded.Network
-		if hosts := networkResolver(cfg.Network, cfg.Deps.Hosts); hosts != nil {
-			cfg.Deps.Hosts = hosts
+func (s *Service) derive() error {
+	spec := s.spec
+	egress := s.deps.Egress
+	egress.Log = cmp.Or(egress.Log, s.deps.Log)
+	if spec.Network != nil {
+		if hosts := networkResolver(*spec.Network, egress.Hosts); hosts != nil {
+			egress.Hosts = hosts
 		}
-		if tlsConfig := networkTLSConfig(cfg.Network); tlsConfig != nil {
-			cfg.Deps.TLS = tlsConfig
-		}
-		cfg.GuestCAPEM = strings.TrimSpace(cfg.Network.CABundle)
-	}
-	if decoded.Serve != nil {
-		if decoded.Serve.Host != "" {
-			cfg.ServeHost = decoded.Serve.Host
-		}
-		cfg.ServePort = int(decoded.Serve.Port)
-	}
-	if decoded.Storage != nil && decoded.Storage.DataDir != "" {
-		cfg.StateDir = decoded.Storage.DataDir
-	}
-	cfg.DID = cmp.Or(cfg.DID, cfg.Identity.Did)
-	cfg.RepoDID = cfg.DID
-	cfg.MarketDID = cfg.DID
-	cfg.IdentityMode = IdentityModeLocal
-	if decoded.PdsRef != nil && decoded.PdsRef.Name != "" {
-		cfg.IdentityMode = IdentityModeCallback
-		if did := strings.TrimSpace(decoded.PdsDID); did != "" {
-			cfg.RepoDID = did
-			cfg.MarketDID = did
+		if tlsConfig := networkTLSConfig(*spec.Network); tlsConfig != nil {
+			egress.TLS = tlsConfig
 		}
 	}
-	cfg.PublicOrigin = strings.TrimRight(strings.TrimSpace(decoded.PublicOrigin), "/")
-	cfg.MarketExposureRef = decoded.MarketExposureRef
-	cfg.OperatorDID = strings.TrimSpace(decoded.OperatorDID)
-	cfg.OAuthClientID = strings.TrimSpace(decoded.OAuthClientID)
-	cfg.OAuthRedirectURI = strings.TrimSpace(decoded.OAuthRedirectURI)
-	modeText := strings.ToLower(strings.TrimSpace(decoded.Mode))
-	cfg.LocalSigner = modeText == "local" || modeText == "localrepo" ||
-		(modeText == "" && (decoded.PdsRef == nil || decoded.PdsRef.Name == ""))
+	s.httpClient = egress.Client(DefaultHTTPTimeout)
+	s.pdsAccessTokenRef = accessTokenRef(spec.PDSAccessToken, spec.VaultRef)
+	if spec.Identity != nil {
+		s.did = spec.Identity.Did
+		s.handle = spec.Identity.Handle
+	}
+	s.repoDID = s.did
+	s.marketDID = s.did
+	s.identityMode = IdentityModeLocal
+	callback := spec.PdsRef != nil && spec.PdsRef.Name != ""
+	if callback {
+		s.identityMode = IdentityModeCallback
+		if did := strings.TrimSpace(spec.PdsDID); did != "" {
+			s.repoDID = did
+			s.marketDID = did
+		}
+	}
+	publicOrigin := strings.TrimRight(strings.TrimSpace(spec.PublicOrigin), "/")
+	s.oauthClientID = strings.TrimSpace(spec.OAuthClientID)
+	s.oauthRedirectURI = strings.TrimSpace(spec.OAuthRedirectURI)
+	modeText := strings.ToLower(strings.TrimSpace(spec.Mode))
+	s.localSigner = modeText == "local" || modeText == "localrepo" || (modeText == "" && !callback)
 	switch modeText {
-	case "", "local", "localrepo":
 	case "callback":
-		cfg.IdentityMode = IdentityModeCallback
+		s.identityMode = IdentityModeCallback
 	case "oauth", "oauthbrowser", "oauthqr":
-		cfg.IdentityMode = IdentityModeOAuth
-	default:
-		return Config{}, fmt.Errorf("requester: unknown identity mode %q", decoded.Mode)
+		s.identityMode = IdentityModeOAuth
 	}
-	if cfg.IdentityMode == IdentityModeOAuth {
-		cfg.RepoDID = cfg.DID
-		cfg.MarketDID = cfg.DID
+	if s.identityMode == IdentityModeOAuth {
+		s.repoDID = s.did
+		s.marketDID = s.did
 	}
-	if cfg.IdentityMode == IdentityModeOAuth && deps.Credentials != nil && cfg.PDSAccessTokenRef != nil {
-		credential, err := deps.Credentials.Resolve(context.Background(), *cfg.PDSAccessTokenRef)
+	if s.identityMode == IdentityModeOAuth && s.deps.Credentials != nil && s.pdsAccessTokenRef != nil {
+		credential, err := s.deps.Credentials.Resolve(context.Background(), *s.pdsAccessTokenRef)
 		if err != nil {
-			if deps.Log != nil {
-				deps.Log.Warn("requester_could_not_read_the_oauth_session", "err", err)
-			}
+			s.log.Warn("requester_could_not_read_the_oauth_session", "err", err)
 		} else if data, ok := oauthclient.SessionFromSecret(credential.Data); ok {
-			cfg.OAuthSessionData = &data
-			cfg.DID = data.AccountDID
-			cfg.RepoDID = data.AccountDID
-			cfg.MarketDID = data.AccountDID
+			s.oauthSessionData = &data
+			s.did = data.AccountDID
+			s.repoDID = data.AccountDID
+			s.marketDID = data.AccountDID
 		}
 	}
-	if decoded.OwnerSessionsFile != "" {
-		if cfg.IdentityMode == IdentityModeOAuth {
-			return Config{}, errors.New("requester: ownerSessionsFile and the oauth identity mode exclude each other")
+	s.policyWorkflow = DefaultPolicyWorkflow
+	if spec.OwnerSessionsFile != "" {
+		if s.identityMode == IdentityModeOAuth {
+			return errors.New("requester: ownerSessionsFile and the oauth identity mode exclude each other")
 		}
-		sessions, did, handle, err := sshtransport.LoadOwnerSessions(decoded.OwnerSessionsFile)
+		sessions, did, handle, err := sshtransport.LoadOwnerSessions(spec.OwnerSessionsFile)
 		if err != nil {
-			return Config{}, err
+			return err
 		}
 		session := sessions[did]
 		if strings.TrimSpace(session.Service) == "" {
-			return Config{}, fmt.Errorf("requester: the owner session of %s names no service", did)
+			return fmt.Errorf("requester: the owner session of %s names no service", did)
 		}
-		cfg.OwnerSessionsFile = decoded.OwnerSessionsFile
-		cfg.OwnerSessions = sessions
-		cfg.DID = did
-		cfg.Handle = handle
-		cfg.RepoDID = did
-		cfg.MarketDID = did
-		if cfg.PolicyWorkflow == "" || cfg.PolicyWorkflow == DefaultPolicyWorkflow {
-			cfg.PolicyWorkflow = "open"
-		}
-		cfg.PDSURL = session.Service
-		cfg.IdentityMode = IdentityModeCallback
-		cfg.LocalSigner = false
+		s.ownerSessions = sessions
+		s.did = did
+		s.handle = handle
+		s.repoDID = did
+		s.marketDID = did
+		s.policyWorkflow = "open"
+		s.pdsURL = session.Service
+		s.identityMode = IdentityModeCallback
+		s.localSigner = false
 	}
-	if decoded.IrohSocket != "" {
-		cfg.IrohSocket = strings.TrimSpace(decoded.IrohSocket)
+	s.contractPoll = time.Duration(ptr.Deref(spec.ContractPollMilliseconds, 0)) * time.Millisecond
+	s.bidWindow = time.Duration(ptr.Deref(spec.BidWindowSeconds, 0)) * time.Second
+	s.receiptTimeout = time.Duration(ptr.Deref(spec.ReceiptTimeoutSeconds, 0)) * time.Second
+	s.receiptPoll = time.Duration(ptr.Deref(spec.ReceiptPollMilliseconds, 0)) * time.Millisecond
+	s.sessionCap = time.Duration(ptr.Deref(spec.SessionCapSeconds, 0)) * time.Second
+	s.sessionIdle = time.Duration(ptr.Deref(spec.SessionIdleSeconds, 0)) * time.Second
+	s.directoryTTL = time.Duration(ptr.Deref(spec.DirectoryTTLSeconds, 0)) * time.Second
+	s.policyTimeout = time.Duration(ptr.Deref(spec.PolicyTimeoutSeconds, 0)) * time.Second
+	s.oauthScopes = append([]string(nil), spec.OAuthScopes...)
+	if len(s.oauthScopes) == 0 {
+		s.oauthScopes = append([]string(nil), atprotooauth.RequesterOAuthScope...)
 	}
-	if decoded.AcceptCopies > 1 {
-		cfg.AcceptCopies = int(decoded.AcceptCopies)
-	}
-	if decoded.MaxConcurrent > 0 {
-		cfg.MaxConcurrent = int(decoded.MaxConcurrent)
-	}
-	if decoded.PerAccount > 0 {
-		cfg.PerAccount = int(decoded.PerAccount)
-	}
-	if decoded.ContractPollMilliseconds != nil && *decoded.ContractPollMilliseconds > 0 {
-		cfg.ContractPoll = time.Duration(*decoded.ContractPollMilliseconds) * time.Millisecond
-	}
-	if decoded.BidWindowSeconds != nil && *decoded.BidWindowSeconds > 0 {
-		cfg.BidWindow = time.Duration(*decoded.BidWindowSeconds) * time.Second
-	}
-	if decoded.ReceiptTimeoutSeconds != nil && *decoded.ReceiptTimeoutSeconds > 0 {
-		cfg.ReceiptTimeout = time.Duration(*decoded.ReceiptTimeoutSeconds) * time.Second
-	}
-	if decoded.ReceiptPollMilliseconds != nil && *decoded.ReceiptPollMilliseconds > 0 {
-		cfg.ReceiptPoll = time.Duration(*decoded.ReceiptPollMilliseconds) * time.Millisecond
-	}
-	if decoded.SessionCapSeconds != nil && *decoded.SessionCapSeconds > 0 {
-		cfg.SessionCap = time.Duration(*decoded.SessionCapSeconds) * time.Second
-	}
-	if decoded.SessionIdleSeconds != nil && *decoded.SessionIdleSeconds > 0 {
-		cfg.SessionIdle = time.Duration(*decoded.SessionIdleSeconds) * time.Second
-	}
-	if decoded.DirectoryTTLSeconds != nil && *decoded.DirectoryTTLSeconds > 0 {
-		cfg.DirectoryTTL = time.Duration(*decoded.DirectoryTTLSeconds) * time.Second
-	}
-	if decoded.DirectoryKeys != nil && *decoded.DirectoryKeys > 0 {
-		cfg.DirectoryKeys = int(*decoded.DirectoryKeys)
-	}
-	if decoded.PolicyTimeoutSeconds != nil && *decoded.PolicyTimeoutSeconds > 0 {
-		cfg.PolicyTimeout = time.Duration(*decoded.PolicyTimeoutSeconds) * time.Second
-	}
-	if len(decoded.OAuthScopes) > 0 {
-		cfg.OAuthScopes = append([]string(nil), decoded.OAuthScopes...)
-	}
-	if decoded.GuestSSHKeysFile != "" {
-		keys, err := loadGuestSSHKeys(decoded.GuestSSHKeysFile)
+	if spec.GuestSSHKeysFile != "" {
+		keys, err := loadGuestSSHKeys(spec.GuestSSHKeysFile)
 		if err != nil {
-			return Config{}, err
+			return err
 		}
-		cfg.GuestAuthorizedKeys = keys
+		s.guestAuthorizedKeys = keys
 	}
-	cfg.Workspace = cmp.Or(cfg.Workspace, "root")
-	cfg.Namespace = cmp.Or(cfg.Namespace, "default")
-	cfg.defaults()
-	return cfg, nil
+	if s.identityMode == IdentityModeOAuth && publicOrigin != "" {
+		if s.oauthClientID == "" {
+			s.oauthClientID = publicOrigin + "/oauth-client-metadata.json"
+		}
+		if s.oauthRedirectURI == "" {
+			s.oauthRedirectURI = publicOrigin + "/oauth/callback"
+		}
+	}
+	return s.check(publicOrigin)
+}
+
+func (s *Service) check(publicOrigin string) error {
+	if s.did == "" && s.handle == "" && s.identityMode != IdentityModeOAuth {
+		return errors.New("requester: the component names no identity DID or handle")
+	}
+	if s.identityMode != IdentityModeOAuth {
+		return nil
+	}
+	switch {
+	case s.oauthClientID == "":
+		return errors.New("requester: oauth identity mode names no OAuthClientID and no PublicOrigin")
+	case s.oauthRedirectURI == "":
+		return errors.New("requester: oauth identity mode names no OAuthRedirectURI and no PublicOrigin")
+	case !absoluteHTTPURL(s.oauthClientID):
+		return fmt.Errorf("requester: oauth client id %q is not an absolute http or https URL", s.oauthClientID)
+	case !absoluteHTTPURL(s.oauthRedirectURI):
+		return fmt.Errorf("requester: oauth redirect uri %q is not an absolute http or https URL", s.oauthRedirectURI)
+	case publicOrigin != "" && !absoluteHTTPURL(publicOrigin):
+		return fmt.Errorf("requester: oauth public origin %q is not an absolute http or https URL", publicOrigin)
+	case s.oauthSessionPath() == "" && s.oauthSessionData == nil:
+		return errors.New("requester: oauth identity mode needs a state dir or an OAuthSessionPath")
+	}
+	return nil
+}
+
+func (s *Service) workspace() string {
+	return cmp.Or(s.deps.Self.Workspace, "root")
+}
+
+func (s *Service) network() v1alpha1.MarketNetworkValue {
+	return ptr.Deref(s.spec.Network, v1alpha1.MarketNetworkValue{})
+}
+
+func (s *Service) stateDir() string {
+	if s.spec.Storage != nil && s.spec.Storage.DataDir != "" {
+		return s.spec.Storage.DataDir
+	}
+	return s.deps.StateDir
+}
+
+func (s *Service) stateFile(name string) string {
+	if dir := s.stateDir(); dir != "" {
+		return filepath.Join(dir, name)
+	}
+	return ""
+}
+
+func (s *Service) oauthSessionPath() string {
+	return s.stateFile(DefaultOAuthSessionFile)
+}
+
+func (s *Service) guestKeyDir() string {
+	return s.stateFile("guest-keys")
+}
+
+func (s *Service) guestCAPEM() string {
+	return strings.TrimSpace(s.network().CABundle)
+}
+
+func (s *Service) inboundXRPC() bool {
+	if s.identityMode == IdentityModeOAuth {
+		return false
+	}
+	if s.spec.Comms == nil {
+		return true
+	}
+	switch s.spec.Comms.Mode {
+	case "", v1alpha1.MarketCommsModeXRPC, v1alpha1.MarketCommsModeBoth:
+		return true
+	}
+	return false
+}
+
+func (s *Service) outboundXRPC() bool {
+	return true
 }
 
 type chainedResolver []networkdial.Resolver
@@ -528,158 +350,6 @@ func accessTokenRef(secret *commonv1.SecretRef, vaultRef *commonv1.ObjectRef) *c
 		ref.Server = strings.TrimSpace(vaultRef.Name)
 	}
 	return ref
-}
-
-func (c Config) withDeps(deps component.Deps) Config {
-	out := c
-	if out.Deps.Log == nil {
-		out.Deps.Log = deps.Log
-	}
-	if out.Deps.Registry == nil {
-		out.Deps.Registry = deps.Registry
-	}
-	if out.Deps.KCP == nil {
-		out.Deps.KCP = deps.KCP
-	}
-	if out.Deps.Credentials == nil {
-		out.Deps.Credentials = deps.Credentials
-	}
-	if out.Deps.Vault == nil {
-		out.Deps.Vault = deps.Vault
-	}
-	if out.Deps.Hosts == nil {
-		out.Deps.Hosts = deps.Hosts
-	}
-	if out.Deps.TLS == nil {
-		out.Deps.TLS = deps.TLS
-	}
-	out.Deps.StateDir = cmp.Or(out.Deps.StateDir, deps.StateDir)
-	out.StateDir = cmp.Or(out.StateDir, out.Deps.StateDir)
-	if out.Log == nil {
-		out.Log = out.Deps.Log
-	}
-	out.defaults()
-	return out
-}
-
-func (c *Config) defaults() {
-	c.ServeHost = cmp.Or(c.ServeHost, DefaultServeHost)
-	c.MaxConcurrent = opt.Positive(c.MaxConcurrent, DefaultMaxConcurrent)
-	c.PerAccount = opt.Positive(c.PerAccount, DefaultPerAccount)
-	c.ContractPoll = opt.Positive(c.ContractPoll, DefaultContractPoll)
-	c.PolicyTimeout = opt.Positive(c.PolicyTimeout, DefaultPolicyTimeout)
-	c.VMReadyTimeout = opt.Positive(c.VMReadyTimeout, DefaultVMReadyTimeout)
-	c.HostKeysTimeout = opt.Positive(c.HostKeysTimeout, DefaultHostKeysTimeout)
-	c.BidWindow = opt.Positive(c.BidWindow, DefaultBidWindow)
-	c.ReceiptTimeout = opt.Positive(c.ReceiptTimeout, DefaultReceiptTimeout)
-	c.ReceiptPoll = opt.Positive(c.ReceiptPoll, DefaultReceiptPoll)
-	c.ReleaseTimeout = opt.Positive(c.ReleaseTimeout, DefaultReleaseTimeout)
-	c.ReleaseRetryFirst = opt.Positive(c.ReleaseRetryFirst, DefaultReleaseRetryFirst)
-	c.ReleaseRetryMax = opt.Positive(c.ReleaseRetryMax, DefaultReleaseRetryMax)
-	c.ReleaseBound = opt.Positive(c.ReleaseBound, DefaultReleaseBound)
-	c.SessionCap = opt.Positive(c.SessionCap, DefaultSessionCap)
-	c.SessionIdle = opt.Positive(c.SessionIdle, DefaultSessionIdle)
-	c.DirectoryTTL = opt.Positive(c.DirectoryTTL, DefaultDirectoryTTL)
-	c.DirectoryKeys = opt.Positive(c.DirectoryKeys, DefaultDirectoryKeys)
-	c.ShutdownTimeout = opt.Positive(c.ShutdownTimeout, DefaultShutdownTimeout)
-	c.PolicyWorkflow = cmp.Or(c.PolicyWorkflow, DefaultPolicyWorkflow)
-	c.SSHDefaultCommand = cmp.Or(c.SSHDefaultCommand, DefaultGuestSSHCommand)
-	if c.GuestKeyDir == "" {
-		if c.StateDir != "" {
-			c.GuestKeyDir = filepath.Join(c.StateDir, "guest-keys")
-		}
-	}
-	if c.RepoKeyPath == "" {
-		if c.StateDir != "" {
-			c.RepoKeyPath = filepath.Join(c.StateDir, "repo-key.json")
-		}
-	}
-	if c.AttestationKeyPath == "" {
-		if c.StateDir != "" {
-			c.AttestationKeyPath = filepath.Join(c.StateDir, "attestation-key.json")
-		}
-	}
-	if c.OAuthSessionPath == "" && c.StateDir != "" {
-		c.OAuthSessionPath = filepath.Join(c.StateDir, DefaultOAuthSessionFile)
-	}
-	if len(c.OAuthScopes) == 0 {
-		c.OAuthScopes = append([]string(nil), atprotooauth.RequesterOAuthScope...)
-	}
-	if c.IdentityMode == IdentityModeOAuth {
-		if c.OAuthClientID == "" && c.PublicOrigin != "" {
-			c.OAuthClientID = c.PublicOrigin + "/oauth-client-metadata.json"
-		}
-		if c.OAuthRedirectURI == "" && c.PublicOrigin != "" {
-			c.OAuthRedirectURI = c.PublicOrigin + "/oauth/callback"
-		}
-	}
-	if c.HTTPClient == nil {
-		c.HTTPClient = c.Deps.ExternalHTTPClient(DefaultHTTPTimeout)
-	}
-	if c.PolicyArgs == nil {
-		c.PolicyArgs = map[string]string{}
-	}
-	if c.FirstFree == nil {
-		value := true
-		c.FirstFree = &value
-	}
-	if c.Now == nil {
-		c.Now = time.Now
-	}
-	if c.Log == nil && c.Deps.Log != nil {
-		c.Log = c.Deps.Log
-	}
-}
-
-func (c Config) inboundXRPC() bool {
-	if c.IdentityMode == IdentityModeOAuth {
-		return false
-	}
-	if c.Comms == nil {
-		return true
-	}
-	switch c.Comms.Mode {
-	case "", v1alpha1.MarketCommsModeXRPC, v1alpha1.MarketCommsModeBoth:
-		return true
-	}
-	return false
-}
-
-func (c Config) outboundXRPC() bool {
-	return true
-}
-
-func (c Config) firstFree() bool {
-	return c.FirstFree == nil || *c.FirstFree
-}
-
-func (c Config) check() error {
-	switch {
-	case c.DID == "" && c.Handle == "" && c.IdentityMode != IdentityModeOAuth:
-		return errors.New("requester: the component names no identity DID or handle")
-	case c.ServeHost == "":
-		return errors.New("requester: the component names no serve host")
-	case c.IdentityMode != IdentityModeLocal && c.IdentityMode != IdentityModeCallback && c.IdentityMode != IdentityModeOAuth:
-		return fmt.Errorf("requester: unknown identity mode %q", c.IdentityMode)
-	}
-	if c.IdentityMode != IdentityModeOAuth {
-		return nil
-	}
-	switch {
-	case c.OAuthClientID == "":
-		return errors.New("requester: oauth identity mode names no OAuthClientID and no PublicOrigin")
-	case c.OAuthRedirectURI == "":
-		return errors.New("requester: oauth identity mode names no OAuthRedirectURI and no PublicOrigin")
-	case !absoluteHTTPURL(c.OAuthClientID):
-		return fmt.Errorf("requester: oauth client id %q is not an absolute http or https URL", c.OAuthClientID)
-	case !absoluteHTTPURL(c.OAuthRedirectURI):
-		return fmt.Errorf("requester: oauth redirect uri %q is not an absolute http or https URL", c.OAuthRedirectURI)
-	case c.PublicOrigin != "" && !absoluteHTTPURL(c.PublicOrigin):
-		return fmt.Errorf("requester: oauth public origin %q is not an absolute http or https URL", c.PublicOrigin)
-	case c.OAuthSessionPath == "" && c.OAuthSessionData == nil:
-		return errors.New("requester: oauth identity mode needs a state dir or an OAuthSessionPath")
-	}
-	return nil
 }
 
 func loadGuestSSHKeys(path string) ([]string, error) {

@@ -1,7 +1,6 @@
 package gatewayapi
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -11,24 +10,45 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/bluesky-social/indigo/atproto/identity"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/gateway"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayhttp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/xrpcserver"
 )
 
 type Service struct {
-	cfg Config
+	spec v1alpha1.GatewayAPISpec
 
-	mu sync.Mutex
+	deps Deps
 
 	log *slog.Logger
+
+	workspace string
+
+	stateDir string
+
+	publicOrigin string
+
+	audiences []string
+
+	policyArgs map[string]any
+
+	homeWorkspaces []string
+
+	contractWorkspace string
+
+	pollInterval time.Duration
+
+	server *gateway.Server
+
+	mu sync.Mutex
 
 	oauth *gatewayhttp.OAuth
 
@@ -43,70 +63,45 @@ type Service struct {
 	ready bool
 }
 
-func New(cfg Config) *Service {
-	return &Service{cfg: cfg}
-}
-
-func (s *Service) Start(ctx context.Context, deps component.Deps) error {
-	cfg := s.cfg.withDefaults()
-	cfg.Deps = cfg.Deps.Or(deps)
-	if err := cfg.Check(); err != nil {
-		return err
-	}
-	if cfg.Log != nil {
-		cfg.Deps.Log = cfg.Log
-	}
-	log := cfg.Deps.Log
-	if log == nil {
-		log = slog.New(slog.DiscardHandler)
-	}
-	stateDir := cfg.StateDir
-	stateDir = cmp.Or(stateDir, cfg.Deps.StateDir)
-	if stateDir == "" {
+func (s *Service) Start(ctx context.Context) error {
+	log := s.log
+	if s.stateDir == "" {
 		return errors.New("gatewayapi: no state dir")
 	}
-	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+	if err := os.MkdirAll(s.stateDir, 0o700); err != nil {
 		return fmt.Errorf("gatewayapi: creating the state dir: %w", err)
 	}
 
-	vault, err := resolveVault(ctx, cfg, cfg.Deps)
+	vault, err := s.resolveVault(ctx)
 	if err != nil {
 		return err
 	}
-	signIn := cfg.Session.SignIn
-	if signIn == nil {
-		if vault == nil {
-			return errors.New("gatewayapi: no sign-in backend")
-		}
-		endpoint := vault.endpoint
-		if cfg.Session.Timeout > 0 {
-			endpoint.Timeout = cfg.Session.Timeout
-		}
-		custody, err := newCustodySignIn(custodySignInOptions{
-			Endpoint:       endpoint,
-			Role:           cfg.Session.AtprotoRole,
-			RenewBelow:     cfg.Session.RenewBelow,
-			RenewIncrement: cfg.Session.RenewIncrement,
-			Network:        cfg.Network,
-			TLSConfig:      cfg.Deps.TLS,
-			Log:            log,
-		})
-		if err != nil {
-			return err
-		}
-		defer custody.Close()
-		signIn = custody
+	if vault == nil {
+		return errors.New("gatewayapi: no sign-in backend")
 	}
+	custody, err := newCustodySignIn(custodySignInOptions{
+		Endpoint:       vault.endpoint,
+		Role:           DefaultAtprotoRole,
+		RenewBelow:     DefaultRenewBelow,
+		RenewIncrement: DefaultRenewIncrement,
+		Network:        s.spec.Network,
+		TLSConfig:      s.deps.TLS,
+		Log:            log,
+	})
+	if err != nil {
+		return err
+	}
+	defer custody.Close()
 
-	pinned, err := loadDownloads(cfg)
+	pinned, err := s.loadDownloads()
 	if err != nil {
 		return err
 	}
-	handler, oauth, surface, err := s.buildHandler(cfg, log, signIn, pinned)
+	handler, oauth, surface, err := s.buildHandler(custody, pinned)
 	if err != nil {
 		return err
 	}
-	mapper, err := buildMapper(cfg, cfg.Deps, vault, pinned, log)
+	mapper, err := s.buildMapper(vault, pinned)
 	if err != nil {
 		if surface != nil {
 			surface.Close()
@@ -124,23 +119,21 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 		}
 		return errors.New("gatewayapi: the service already started")
 	}
-	if cfg.Deps.Handlers == nil {
+	if s.deps.Bus == nil {
 		s.mu.Unlock()
 		if surface != nil {
 			surface.Close()
 		}
 		return errors.New("gatewayapi: the handler registry is not available")
 	}
-	key := component.Key{Workspace: cfg.Workspace, Kind: Kind, Name: cfg.ComponentName}
-	if err := cfg.Deps.Handlers.RegisterHTTP(key, handler); err != nil {
+	key := component.Key{Workspace: s.workspace, Kind: Kind, Name: s.deps.Self.Name}
+	if err := s.deps.Bus.RegisterHTTP(key, handler); err != nil {
 		s.mu.Unlock()
 		if surface != nil {
 			surface.Close()
 		}
 		return err
 	}
-	s.cfg = cfg
-	s.log = log
 	s.oauth = oauth
 	s.surface = surface
 	s.mapper = mapper
@@ -152,7 +145,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	if mapper != nil {
 		mapper.Start(ctx)
 	}
-	log.Info("gatewayapi_registered", "handler", kcp.HandlerURL(cfg.Workspace, Kind, cfg.ComponentName), "network", networkName(cfg.Network))
+	log.Info("gatewayapi_registered", "handler", kcp.HandlerURL(s.workspace, Kind, s.deps.Self.Name), "network", networkName(s.spec.Network))
 
 	select {
 	case <-ctx.Done():
@@ -204,52 +197,34 @@ func (s *Service) OAuth() *gatewayhttp.OAuth {
 	return s.oauth
 }
 
-func (s *Service) buildHandler(cfg Config, log *slog.Logger, signIn gatewayhttp.WebSignIn, pinned *gatewayhttp.PinnedDownloads) (http.Handler, *gatewayhttp.OAuth, *xrpcserver.Server, error) {
-	publicOrigin := cfg.Session.PublicOrigin
+func (s *Service) buildHandler(signIn gatewayhttp.WebSignIn, pinned *gatewayhttp.PinnedDownloads) (http.Handler, *gatewayhttp.OAuth, *xrpcserver.Server, error) {
+	log := s.log
 	oauth, err := gatewayhttp.NewOAuth(gatewayhttp.OAuthOptions{
-		SignIn:              signIn,
-		PublicOrigin:        publicOrigin,
-		PostSignInURL:       cfg.Session.PostSignInURL,
-		CookieName:          cfg.Session.CookieName,
-		CookieMaxAge:        cfg.Session.CookieMaxAge,
-		ClientMetadataPath:  cfg.Session.ClientMetadataPath,
-		ClientMetadataCache: cfg.Session.ClientMetadataCache,
-		MaxBodyBytes:        cfg.Session.MaxBodyBytes,
-		OnSignedIn:          cfg.Session.OnSignedIn,
-		OnSignedOut:         cfg.Session.OnSignedOut,
-		Log:                 log,
+		SignIn:        signIn,
+		PublicOrigin:  s.publicOrigin,
+		PostSignInURL: s.spec.PostSignInURL,
+		Log:           log,
 	})
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
-	clusterGateway, err := clusterGatewayFor(cfg)
-	if err != nil {
-		return nil, nil, nil, err
-	}
 	cluster, err := gatewayhttp.NewClusterAPI(gatewayhttp.ClusterOptions{
-		Gateway: clusterGateway,
+		Gateway: gatewayhttp.DirectClusterGateway{Server: s.server},
 		Caller: func(ctx context.Context, r *http.Request) (gatewayhttp.ClusterCaller, error) {
 			return oauth.RequestCaller(r)
 		},
-		MaxKubeconfigTTLSec: cfg.Gateway.MaxKubeconfigTTLSec,
-		KCPPublicHost:       cfg.Gateway.KCPPublicHost,
-		MaxBodyBytes:        cfg.Gateway.MaxBodyBytes,
-		Log:                 log,
+		Log: log,
 	})
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	downloads := gatewayhttp.NewDownloads(gatewayhttp.DownloadsOptions{Downloads: pinned, Log: log})
 
-	directory := cfg.Gateway.Directory
-	if directory == nil {
-		directory = directoryFor(plcURL(cfg.Network))
-	}
 	surface, err := xrpcserver.New(xrpcserver.Options{
-		Gateway:   cfg.Gateway.Server,
-		Audiences: cfg.Gateway.audiences(),
-		Directory: directory,
+		Gateway:   s.server,
+		Audiences: append([]string(nil), s.audiences...),
+		Directory: directoryFor(plcURL(s.spec.Network)),
 	})
 	if err != nil {
 		return nil, nil, nil, err
@@ -270,83 +245,79 @@ func (s *Service) buildHandler(cfg Config, log *slog.Logger, signIn gatewayhttp.
 	return securityHeaders(mux), oauth, surface, nil
 }
 
-func loadDownloads(cfg Config) (*gatewayhttp.PinnedDownloads, error) {
-	if cfg.DownloadsDir == "" {
+func (s *Service) loadDownloads() (*gatewayhttp.PinnedDownloads, error) {
+	dir := s.downloadsDir()
+	if dir == "" {
 		return nil, nil
 	}
-	pinned, err := gatewayhttp.LoadPinnedDownloads(cfg.DownloadsDir)
+	pinned, err := gatewayhttp.LoadPinnedDownloads(dir)
 	if err != nil {
 		return nil, fmt.Errorf("gatewayapi: the downloads dir: %w", err)
 	}
-	if len(cfg.RequiredDownloads) > 0 {
+	if len(s.spec.RequiredDownloads) > 0 {
 		have := map[string]bool{}
 		for _, download := range pinned.List() {
 			have[download.Name] = true
 		}
 		missing := []string{}
-		for _, name := range cfg.RequiredDownloads {
+		for _, name := range s.spec.RequiredDownloads {
 			if !have[name] {
 				missing = append(missing, name)
 			}
 		}
 		if len(missing) > 0 {
-			return nil, fmt.Errorf("gatewayapi: required pinned downloads are missing from %s: %s", cfg.DownloadsDir, strings.Join(missing, ", "))
+			return nil, fmt.Errorf("gatewayapi: required pinned downloads are missing from %s: %s", dir, strings.Join(missing, ", "))
 		}
 	}
 	return pinned, nil
 }
 
-func buildMapper(cfg Config, deps component.Deps, vault *vaultRuntime, pinned *gatewayhttp.PinnedDownloads, log *slog.Logger) (*gatewayhttp.NodeClaimMapper, error) {
-	if !cfg.NodeMarket.Enabled {
+func (s *Service) buildMapper(vault *vaultRuntime, pinned *gatewayhttp.PinnedDownloads) (*gatewayhttp.NodeClaimMapper, error) {
+	nodeMarket := s.spec.NodeMarket
+	if nodeMarket == nil {
 		return nil, nil
 	}
+	log := s.log
 	if vault == nil || vault.client == nil {
 		return nil, errors.New("gatewayapi: the node market needs a resolved vault client")
 	}
 	if !vault.authed {
 		return nil, errors.New("gatewayapi: the node market needs a vault token or a client cert login")
 	}
-	homes := append([]string(nil), cfg.NodeMarket.HomeWorkspaces...)
-	if len(homes) == 0 {
-		homes = []string{cfg.Workspace}
-	}
-	store, err := kcpStoreFor(deps, homes[0])
+	homes := append([]string(nil), s.homeWorkspaces...)
+	store, err := kcpStoreFor(s.deps.KCP, homes[0])
 	if err != nil {
 		return nil, fmt.Errorf("gatewayapi: the node market store: %w", err)
 	}
-	indexWorkspace, indexNamespace := homes[0], "default"
-	if cfg.Workspace != "" {
-		indexWorkspace, indexNamespace = cfg.Workspace+":app", "default"
-	}
+	indexWorkspace, indexNamespace := s.workspace+":app", "default"
 	if ref, err := kcpclient.ParseServiceAccountRef(os.Getenv("SOCIALWEB_GATEWAY_NODECLAIM_AGENT")); err == nil && ref != nil {
 		indexWorkspace, indexNamespace = ref.Workspace, ref.Namespace
 	} else if os.Getenv("SOCIALWEB_GATEWAY_NODECLAIM_AGENT") != "" {
 		log.Warn("gatewayapi: the node claim agent ref did not parse", "ref", os.Getenv("SOCIALWEB_GATEWAY_NODECLAIM_AGENT"), "err", err)
 	}
 	log.Info("gatewayapi node market", "homes", homes, "indexWorkspace", indexWorkspace, "indexNamespace", indexNamespace,
-		"contractWorkspace", cfg.NodeMarket.ContractWorkspace)
-	mount := cfg.NodeMarket.VaultMount
-	mount = cmp.Or(mount, vault.mount)
+		"contractWorkspace", s.contractWorkspace)
+	mount := vault.mount
 	if mount == "" {
 		return nil, errors.New("gatewayapi: the node market needs a vault mount")
 	}
 	var policy *gatewayhttp.NodePolicy
-	if cfg.NodeMarket.PolicyName != "" {
+	if nodeMarket.NodePolicy != "" {
 		args := map[string]any{}
-		maps.Copy(args, cfg.NodeMarket.PolicyArgs)
-		policy = &gatewayhttp.NodePolicy{Name: cfg.NodeMarket.PolicyName, Args: args}
+		maps.Copy(args, s.policyArgs)
+		policy = &gatewayhttp.NodePolicy{Name: nodeMarket.NodePolicy, Args: args}
 	}
 	var userData string
-	if cfg.NodeMarket.UserDataBaseFile != "" {
-		raw, err := os.ReadFile(cfg.NodeMarket.UserDataBaseFile)
+	if nodeMarket.UserDataBaseFile != "" {
+		raw, err := os.ReadFile(nodeMarket.UserDataBaseFile)
 		if err != nil {
 			return nil, fmt.Errorf("gatewayapi: reading the node user data base: %w", err)
 		}
 		userData = string(raw)
 	}
 	caFileOf := gatewayhttp.DefaultOpenBaoCAFile
-	if cfg.NodeMarket.ClusterCADir != "" {
-		caFileOf = gatewayhttp.PublishedOpenBaoCAFile(cfg.NodeMarket.ClusterCADir)
+	if dir := s.clusterCADir(); dir != "" {
+		caFileOf = gatewayhttp.PublishedOpenBaoCAFile(dir)
 	}
 	var downloads []gatewayhttp.PinnedDownload
 	if pinned != nil {
@@ -356,7 +327,7 @@ func buildMapper(cfg Config, deps component.Deps, vault *vaultRuntime, pinned *g
 	var meshBase func(context.Context) (string, bool)
 	var nodeAgent *gatewayhttp.MeshdPin
 	var nodeAgentBase func(context.Context) (string, bool)
-	if cfg.Network != nil {
+	if s.spec.Network != nil {
 		meshPins := gatewayhttp.MeshdPinsOf(downloads)
 		agentPins := gatewayhttp.NodeAgentPinsOf(downloads)
 		if meshPins != nil {
@@ -375,9 +346,9 @@ func buildMapper(cfg Config, deps component.Deps, vault *vaultRuntime, pinned *g
 				if cached != "" {
 					return cached, true
 				}
-				resolved := cfg.downloadBase()
+				resolved := s.downloadBase()
 				if resolved == "" {
-					resolved = cfg.localDownloadBase(ctx, deps)
+					resolved = s.localDownloadBase(ctx)
 				}
 				if resolved == "" {
 					return "", false
@@ -391,20 +362,20 @@ func buildMapper(cfg Config, deps component.Deps, vault *vaultRuntime, pinned *g
 			nodeAgentBase = baseOf
 		}
 	} else {
-		mesh = gatewayhttp.MeshdPinOf(downloads, cfg.downloadBase())
-		nodeAgent = gatewayhttp.NodeAgentPinOf(downloads, cfg.downloadBase())
+		mesh = gatewayhttp.MeshdPinOf(downloads, s.downloadBase())
+		nodeAgent = gatewayhttp.NodeAgentPinOf(downloads, s.downloadBase())
 	}
 	return gatewayhttp.NewNodeClaimMapper(gatewayhttp.NodeClaimMapperOptions{
 		Store:                 newClaimStore(store, newHomeIndex(store, indexWorkspace, indexNamespace, homes)),
 		Links:                 newClusterLinkReader(store),
-		Contracts:             newContractClient(store, cfg.NodeMarket.ContractWorkspace, cfg.NodeMarket.ContractQuota),
+		Contracts:             newContractClient(store, s.contractWorkspace, 0),
 		Vault:                 gatewayhttp.OpenBaoVault{Client: vault.client},
 		VaultMount:            mount,
-		VMReadyTimeoutSec:     cfg.NodeMarket.VMReadyTimeoutSec,
+		VMReadyTimeoutSec:     DefaultVMReadySec,
 		Policy:                policy,
-		ExtraBidderDIDs:       append([]string(nil), cfg.NodeMarket.ExtraBidderDIDs...),
+		ExtraBidderDIDs:       append([]string(nil), nodeMarket.ExtraBidderDIDs...),
 		UserDataBase:          userData,
-		PollInterval:          cfg.NodeMarket.PollInterval,
+		PollInterval:          s.pollInterval,
 		OpenBaoCAFileOf:       caFileOf,
 		Meshd:                 mesh,
 		MeshdDownloadBase:     meshBase,
@@ -414,48 +385,11 @@ func buildMapper(cfg Config, deps component.Deps, vault *vaultRuntime, pinned *g
 	})
 }
 
-func clusterGatewayFor(cfg Config) (gatewayhttp.ClusterGateway, error) {
-	if cfg.Gateway.URL != "" || cfg.Gateway.Ref.Name != "" {
-		if cfg.Gateway.Audience == "" {
-			return nil, errors.New("gatewayapi: a remote gateway needs Gateway.Audience for service auth")
-		}
-		resolver := &gatewayURLResolver{cfg: cfg.Gateway}
-		client := cfg.Gateway.HTTPClient
-		if client == nil && cfg.Deps.Handlers != nil {
-			client = cfg.Deps.Handlers.HTTPClient()
-		}
-		return &gatewayhttp.XRPCClusterGateway{
-			BaseURL:  resolver.baseURL,
-			Audience: cfg.Gateway.Audience,
-			Client:   client,
-			Timeout:  cfg.Gateway.Timeout,
-		}, nil
-	}
-	return gatewayhttp.DirectClusterGateway{Server: cfg.Gateway.Server}, nil
-}
-
-type gatewayURLResolver struct {
-	cfg GatewayConfig
-}
-
-func (r *gatewayURLResolver) baseURL(ctx context.Context) (string, error) {
-	if r.cfg.URL != "" {
-		return r.cfg.URL, nil
-	}
-	raw := kcp.HandlerURL(r.cfg.Ref.Workspace, r.cfg.Ref.Kind, r.cfg.Ref.Name)
-	if raw == "" {
-		return "", fmt.Errorf("gatewayapi: the gateway ref %s/%s names no component", r.cfg.Ref.Kind, r.cfg.Ref.Name)
-	}
-	return raw, nil
-}
-
 func (s *Service) shutdown(ctx context.Context) {
 	s.mu.Lock()
 	mapper := s.mapper
-	timeout := s.cfg.ShutdownTimeout
 	s.mu.Unlock()
-	timeout = opt.Positive(timeout, DefaultShutdownTimeout)
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), DefaultShutdownTimeout)
 	defer cancel()
 	if mapper != nil {
 		if err := mapper.Stop(ctx); err != nil {

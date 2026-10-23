@@ -108,27 +108,24 @@ func (t *pdsAccountTokens) login(ctx context.Context) (string, time.Time, error)
 	return session.AccessJWT, expires.Add(-pdsclient.TokenExpirySkew), nil
 }
 
-func openOAuthSession(ctx context.Context, cfg Config, dir identity.Directory) (*OAuthSession, error) {
-	if dir == nil {
-		dir = cfg.Directory
-	}
-	if cfg.OAuthSessionData != nil {
-		data := *cfg.OAuthSessionData
+func openOAuthSession(ctx context.Context, s *Service, dir identity.Directory) (*OAuthSession, error) {
+	if s.oauthSessionData != nil {
+		data := *s.oauthSessionData
 		if data.ClientID == "" {
-			data.ClientID = strings.TrimSpace(cfg.OAuthClientID)
+			data.ClientID = strings.TrimSpace(s.oauthClientID)
 		}
 		opts := oauthclient.Options{
 			DID:        data.AccountDID,
 			RepoDID:    data.AccountDID,
 			PDSURL:     data.HostURL,
-			ClientID:   cfg.OAuthClientID,
-			Scopes:     cfg.OAuthScopes,
+			ClientID:   s.oauthClientID,
+			Scopes:     s.oauthScopes,
 			Directory:  dir,
-			HTTPClient: cfg.HTTPClient,
+			HTTPClient: s.httpClient,
 		}
-		if cfg.PDSAccessTokenRef != nil && cfg.Deps.Credentials != nil {
-			if writer, ok := cfg.Deps.Credentials.(component.CredentialWriter); ok {
-				opts.Store = &credentialSessionStore{resolver: cfg.Deps.Credentials, writer: writer, ref: *cfg.PDSAccessTokenRef}
+		if s.pdsAccessTokenRef != nil && s.deps.Credentials != nil {
+			if writer, ok := s.deps.Credentials.(component.CredentialWriter); ok {
+				opts.Store = &credentialSessionStore{resolver: s.deps.Credentials, writer: writer, ref: *s.pdsAccessTokenRef}
 			}
 		}
 		session, err := oauthclient.New(data, opts)
@@ -141,22 +138,23 @@ func openOAuthSession(ctx context.Context, cfg Config, dir identity.Directory) (
 		}
 		return session, nil
 	}
-	if cfg.OAuthSessionPath == "" {
+	path := s.oauthSessionPath()
+	if path == "" {
 		return nil, errors.New("requester: oauth identity mode has no token store path")
 	}
-	session, err := oauthclient.OpenFile(ctx, cfg.OAuthSessionPath, oauthclient.Options{
-		DID:        cfg.DID,
-		Handle:     cfg.Handle,
-		RepoDID:    cfg.RepoDID,
-		PDSURL:     cfg.PDSURL,
-		ClientID:   cfg.OAuthClientID,
-		Scopes:     cfg.OAuthScopes,
+	session, err := oauthclient.OpenFile(ctx, path, oauthclient.Options{
+		DID:        s.did,
+		Handle:     s.handle,
+		RepoDID:    s.repoDID,
+		PDSURL:     s.pdsURL,
+		ClientID:   s.oauthClientID,
+		Scopes:     s.oauthScopes,
 		Directory:  dir,
-		HTTPClient: cfg.HTTPClient,
+		HTTPClient: s.httpClient,
 	})
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, fmt.Errorf("requester: no oauth token store at %s", cfg.OAuthSessionPath)
+			return nil, fmt.Errorf("requester: no oauth token store at %s", path)
 		}
 		return nil, err
 	}

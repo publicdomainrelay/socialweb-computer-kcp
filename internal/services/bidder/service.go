@@ -61,12 +61,6 @@ type Authorizer interface {
 	Authorize(ctx context.Context, header, lxm, recordURI string) (string, error)
 }
 
-type AuthorizerFunc func(ctx context.Context, header, lxm, recordURI string) (string, error)
-
-func (f AuthorizerFunc) Authorize(ctx context.Context, header, lxm, recordURI string) (string, error) {
-	return f(ctx, header, lxm, recordURI)
-}
-
 type ServiceAuthAuthorizer struct {
 	Dir identity.Directory
 
@@ -101,9 +95,45 @@ func (a *ServiceAuthAuthorizer) Authorize(ctx context.Context, header, lxm, reco
 }
 
 type Service struct {
-	cfg Config
+	spec v1alpha1.BidderSpec
+
+	deps Deps
+
+	egress component.Egress
 
 	log *slog.Logger
+
+	workspace string
+
+	handle string
+
+	providerHandle string
+
+	guestVaultServer string
+
+	guestTLSPort int
+
+	tokenRef *component.CredentialRef
+
+	policyArgs map[string]string
+
+	policyTimeout time.Duration
+
+	heartbeat time.Duration
+
+	offeringRefresh time.Duration
+
+	bidTTL time.Duration
+
+	pdsURL string
+
+	pdsTokens pdsclient.TokenSource
+
+	pdsDPoP pdsclient.DPoPSource
+
+	marketURL string
+
+	serviceAuthHost string
 
 	mu sync.Mutex
 
@@ -197,11 +227,7 @@ func (s *Service) lockAccept(uri string) func() {
 	return lock.Unlock
 }
 
-func (s *Service) Start(ctx context.Context, deps component.Deps) error {
-	s.cfg = s.cfg.withDeps(deps)
-	if deps.Log != nil {
-		s.log = deps.Log.With("component", "bidder", "handle", s.cfg.Handle)
-	}
+func (s *Service) Start(ctx context.Context) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	s.mu.Lock()
 	if s.started {
@@ -275,21 +301,19 @@ func (s *Service) shutdownWith(ctx context.Context) error {
 }
 
 func (s *Service) prepare(ctx context.Context) error {
-	if s.cfg.StateDir != "" {
-		if err := os.MkdirAll(s.cfg.StateDir, 0o700); err != nil {
+	if s.stateDir() != "" {
+		if err := os.MkdirAll(s.stateDir(), 0o700); err != nil {
 			return fmt.Errorf("bidder: creating the state dir: %w", err)
 		}
 	}
-	if s.cfg.Records == nil || s.cfg.Bids == nil || s.cfg.VMs == nil || s.cfg.Grants == nil {
-		if err := s.resolveKCP(ctx); err != nil {
-			s.log.Warn("the bidder runs without its kcp stores", "err", err)
-		}
+	if err := s.resolveKCP(ctx); err != nil {
+		s.log.Warn("the bidder runs without its kcp stores", "err", err)
 	}
-	s.dir = ingress.NewDirectory(s.cfg.Network.PLCDirectoryURL)
+	s.dir = ingress.NewDirectory(s.network().PLCDirectoryURL)
 	if err := s.resolveMarketURL(ctx); err != nil {
 		s.log.Warn("the bidder market URL is not resolved yet", "err", err)
 	}
-	if err := s.cfg.checkServiceAuthHost(); err != nil {
+	if err := s.checkServiceAuthHost(); err != nil {
 		return err
 	}
 	if err := s.resolveIdentity(ctx); err != nil {
@@ -305,9 +329,8 @@ func (s *Service) prepare(ctx context.Context) error {
 		s.log.Warn("the bidder runs without a guest vault", "err", err)
 	}
 	s.guestURL = s.resolveGuestURL(ctx)
-	s.records = s.cfg.Records
-	if s.did != "" && s.records != nil && s.attestation == nil && s.cfg.StateDir != "" {
-		signer, err := market.LoadOrCreateSignerFile(s.cfg.StateDir + "/attestation.jwk")
+	if s.did != "" && s.records != nil && s.attestation == nil && s.stateDir() != "" {
+		signer, err := market.LoadOrCreateSignerFile(s.stateDir() + "/attestation.jwk")
 		if err != nil {
 			s.log.Warn("loading the bidder attestation key failed", "err", err)
 		} else {
@@ -320,18 +343,23 @@ func (s *Service) prepare(ctx context.Context) error {
 		}
 	}
 	s.provider = &ComputeProvider{
-		Config:         s.cfg.Provider,
+		Config: ProviderConfig{
+			Handle:              s.providerHandle,
+			GuestTLSPort:        s.guestTLSPort,
+			GuestVaultServer:    s.guestVaultServer,
+			StopGraceSeconds:    s.stopGraceSeconds(),
+			MaxConcurrentGuests: s.spec.MaxConcurrentGuests,
+		},
 		VMs:            s.vms,
 		Grants:         s.grants,
 		Vault:          s.vault,
 		DID:            s.did,
 		IssuerURL:      s.guestURL,
 		Log:            s.log,
-		Now:            s.cfg.Now,
+		Now:            time.Now,
 		WaitForRunning: false,
 	}
-	s.provider.Config.Handle = cmp.Or(s.provider.Config.Handle, s.cfg.Handle)
-	s.policy = &PolicyEvaluator{Runs: s.policyRuns(), ScopePolicy: s.cfg.Policy, Records: s.records}
+	s.policy = &PolicyEvaluator{Runs: s.policyRuns(), ScopePolicy: s.spec.Policy, Records: s.records}
 	s.mux = s.routes()
 	if err := s.register(ctx); err != nil {
 		return err
@@ -350,16 +378,16 @@ func (s *Service) prepare(ctx context.Context) error {
 		signer:                  s.attestation,
 		did:                     s.did,
 		endpointURL:             s.offeringEndpoint(),
-		relays:                  append([]string(nil), s.cfg.Network.Relays()...),
-		offeringRefresh:         s.cfg.OfferingRefresh,
-		offeringRefreshDisabled: s.cfg.OfferingRefreshDisabled,
-		heartbeat:               s.cfg.Heartbeat,
+		relays:                  append([]string(nil), s.spec.Network.Relays()...),
+		offeringRefresh:         s.offeringRefresh,
+		offeringRefreshDisabled: s.offeringRefresh <= 0,
+		heartbeat:               s.heartbeat,
 		log:                     s.log,
-		now:                     s.cfg.Now,
+		now:                     time.Now,
 	}
 	s.log.Info("the bidder serves the market", "handler", s.listeningURL(), "did", s.did, "guest", s.guestURL,
-		"offering", s.offeringEndpoint(), "serviceAuthHost", s.cfg.ServiceAuth.Hostname,
-		"identityMode", s.cfg.IdentityMode, "inboundXRPC", s.cfg.inboundXRPC())
+		"offering", s.offeringEndpoint(), "serviceAuthHost", s.serviceAuthHost,
+		"identityMode", strings.TrimSpace(s.spec.Mode), "inboundXRPC", s.inboundXRPC())
 	s.wg.Go(func() { s.registerPDSWithRelays(ctx) })
 	return nil
 }
@@ -367,8 +395,8 @@ func (s *Service) prepare(ctx context.Context) error {
 var exposureGVR = exposurev1alpha1.ExposureGVR
 
 func (s *Service) registerPDSWithRelays(ctx context.Context) {
-	if s.cfg.Deps.KCP == nil || len(s.cfg.Network.Relays()) == 0 {
-		s.log.Warn("the bidder cannot register its PDS with the relay", "kcp", s.cfg.Deps.KCP != nil, "relays", len(s.cfg.Network.Relays()))
+	if s.deps.KCP == nil || len(s.spec.Network.Relays()) == 0 {
+		s.log.Warn("the bidder cannot register its PDS with the relay", "kcp", s.deps.KCP != nil, "relays", len(s.spec.Network.Relays()))
 		return
 	}
 	ticker := time.NewTicker(10 * time.Second)
@@ -384,14 +412,14 @@ func (s *Service) registerPDSWithRelays(ctx context.Context) {
 }
 
 func (s *Service) registerPDSWithRelay(ctx context.Context) {
-	client, err := s.cfg.Deps.KCP.Client(s.cfg.Workspace)
+	client, err := s.deps.KCP.Client(s.workspace)
 	if err != nil {
-		s.log.Warn("the bidder cannot read its kcp client", "workspace", s.cfg.Workspace, "err", err.Error())
+		s.log.Warn("the bidder cannot read its kcp client", "workspace", s.workspace, "err", err.Error())
 		return
 	}
 	restCfg := rest.CopyConfig(client.RESTConfig())
 	baseHost, _, _ := strings.Cut(strings.TrimSuffix(restCfg.Host, "/"), "/clusters/")
-	restCfg.Host = baseHost + "/clusters/" + s.cfg.Workspace
+	restCfg.Host = baseHost + "/clusters/" + s.workspace
 	dyn, err := dynamic.NewForConfig(restCfg)
 	if err != nil {
 		s.log.Warn("the bidder cannot build its dynamic client", "err", err.Error())
@@ -409,7 +437,7 @@ func (s *Service) registerPDSWithRelay(ctx context.Context) {
 		return
 	}
 	registered := false
-	for _, relayURL := range s.cfg.Network.Relays() {
+	for _, relayURL := range s.spec.Network.Relays() {
 		if xrpc.RequestCrawl(ctx, &xrpc.Client{Host: relayURL, HTTP: &http.Client{Timeout: 10 * time.Second}}, parsed.Host) == nil {
 			registered = true
 		}
@@ -422,14 +450,14 @@ func (s *Service) registerPDSWithRelay(ctx context.Context) {
 }
 
 func (s *Service) register(ctx context.Context) error {
-	if s.cfg.Deps.Handlers == nil {
+	if s.deps.Bus == nil {
 		return errors.New("bidder: the handler registry is not available")
 	}
-	key := component.Key{Workspace: s.cfg.Workspace, Kind: Kind, Name: s.cfg.ComponentName}
-	if err := s.cfg.Deps.Handlers.RegisterHTTP(key, s.mux); err != nil {
+	key := component.Key{Workspace: s.workspace, Kind: Kind, Name: s.deps.Self.Name}
+	if err := s.deps.Bus.RegisterHTTP(key, s.mux); err != nil {
 		return err
 	}
-	if err := s.cfg.Deps.Handlers.RegisterHTTP(key, s.mux, "market"); err != nil {
+	if err := s.deps.Bus.RegisterHTTP(key, s.mux, "market"); err != nil {
 		return err
 	}
 	s.mu.Lock()
@@ -439,10 +467,10 @@ func (s *Service) register(ctx context.Context) error {
 }
 
 func (s *Service) resolveKCP(ctx context.Context) error {
-	if s.cfg.Deps.KCP == nil {
+	if s.deps.KCP == nil {
 		return nil
 	}
-	store, cluster, err := kcpStore(s.cfg.Deps, s.cfg.Workspace)
+	store, cluster, err := kcpStore(s.deps.KCP, s.workspace)
 	if err != nil {
 		return err
 	}
@@ -452,29 +480,31 @@ func (s *Service) resolveKCP(ctx context.Context) error {
 }
 
 func (s *Service) resolveIdentity(ctx context.Context) error {
-	s.did = s.cfg.DID
-	if s.cfg.PDSURL == "" && s.cfg.PDSRef != nil {
-		kind := s.cfg.PDSRef.Kind
-		kind = cmp.Or(kind, "Pds")
-		s.cfg.PDSURL = kcp.HandlerURL(s.cfg.Workspace, kind, s.cfg.PDSRef.Name)
-		s.pdsInternal = s.cfg.PDSURL != ""
+	if s.spec.Identity != nil {
+		s.did = s.spec.Identity.Did
 	}
-	if s.store == nil || s.cfg.IdentityRef == nil || s.cfg.IdentityRef.Name == "" {
+	if s.pdsURL == "" && s.spec.PdsRef != nil {
+		kind := s.spec.PdsRef.Kind
+		kind = cmp.Or(kind, "Pds")
+		s.pdsURL = kcp.HandlerURL(s.workspace, kind, s.spec.PdsRef.Name)
+		s.pdsInternal = s.pdsURL != ""
+	}
+	identityRef := s.identityRef()
+	if s.store == nil || identityRef == nil || identityRef.Name == "" {
 		return nil
 	}
 	identities := kcpstore.OfClusterScoped[corev1alpha1.MarketIdentity](s.store, MarketIdentityGVR)
-	obj, err := identities.Get(ctx, ref.New(s.cluster, "", s.cfg.IdentityRef.Name))
+	obj, err := identities.Get(ctx, ref.New(s.cluster, "", identityRef.Name))
 	if err != nil {
 		return err
 	}
 	s.did = cmp.Or(s.did, obj.Status.Did)
-	s.cfg.PDSURL = cmp.Or(s.cfg.PDSURL, obj.Status.PdsURL)
-	s.cfg.Handle = cmp.Or(s.cfg.Handle, obj.Status.Handle)
+	s.pdsURL = cmp.Or(s.pdsURL, obj.Status.PdsURL)
 	return nil
 }
 
 func (s *Service) resolveRecords(ctx context.Context) error {
-	if s.cfg.PDSTokens == nil {
+	if s.pdsTokens == nil {
 		tokens := s.credentialTokenSource()
 		if tokens == nil {
 			token, err := s.pdsAccessToken(ctx)
@@ -485,23 +515,20 @@ func (s *Service) resolveRecords(ctx context.Context) error {
 				tokens = pdsclient.TokenSourceFunc(func(context.Context) (string, error) { return token, nil })
 			}
 		}
-		s.cfg.PDSTokens = tokens
-	}
-	if s.cfg.Records != nil {
-		return nil
+		s.pdsTokens = tokens
 	}
 	if s.did == "" {
 		return errors.New("bidder: the record store needs the bidder DID")
 	}
-	if s.cfg.Deps.Handlers == nil {
+	if s.deps.Bus == nil {
 		return errors.New("bidder: the record store needs the bus")
 	}
 	reader := market.NewHTTPReader(s.dir)
-	reader.Client = s.cfg.Deps.ExternalHTTPClient(RecordRequestTimeout)
-	self := commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: Kind, Name: s.cfg.ComponentName, Workspace: s.cfg.Workspace}
-	repo := commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: "AtprotoRepo", Name: atprotorepo.RepoName(s.did), Workspace: s.cfg.Workspace}
-	handlers := s.cfg.Deps.Handlers
-	s.cfg.Records = market.NewRepoStore(market.RepoStoreConfig{DID: s.did, Foreign: reader,
+	reader.Client = s.egress.Client(RecordRequestTimeout)
+	self := commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: Kind, Name: s.deps.Self.Name, Workspace: s.workspace}
+	repo := commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: "AtprotoRepo", Name: atprotorepo.RepoName(s.did), Workspace: s.workspace}
+	handlers := s.deps.Bus
+	s.records = market.NewRepoStore(market.RepoStoreConfig{DID: s.did, Foreign: reader,
 		Open: func(ctx context.Context) (atprotorepo.Repo, error) {
 			return bus.Resolve[atprotorepo.Repo](ctx, handlers, self, repo, bus.Capability{Name: atprotorepo.CapabilityWrite})
 		}})
@@ -509,29 +536,29 @@ func (s *Service) resolveRecords(ctx context.Context) error {
 }
 
 func (s *Service) credentialTokenSource() pdsclient.TokenSource {
-	if s.cfg.PDSAccessTokenRef == nil || s.cfg.Deps.Credentials == nil || strings.TrimSpace(s.cfg.PDSURL) == "" {
+	if s.tokenRef == nil || s.deps.Credentials == nil || strings.TrimSpace(s.pdsURL) == "" {
 		return nil
 	}
-	client := s.cfg.Deps.ExternalHTTPClient(DefaultCallTimeout)
-	if s.pdsInternal && s.cfg.Deps.Handlers != nil {
-		client = s.cfg.Deps.Handlers.HTTPClient()
+	client := s.egress.Client(DefaultCallTimeout)
+	if s.pdsInternal && s.deps.Bus != nil {
+		client = s.deps.Bus.HTTPClient()
 	}
 	source := &credentialPDSTokens{
-		resolver: s.cfg.Deps.Credentials,
-		ref:      *s.cfg.PDSAccessTokenRef,
-		pdsURL:   s.cfg.PDSURL,
+		resolver: s.deps.Credentials,
+		ref:      *s.tokenRef,
+		pdsURL:   s.pdsURL,
 		client:   client,
 	}
-	if writer, ok := s.cfg.Deps.Credentials.(component.CredentialWriter); ok {
+	if writer, ok := s.deps.Credentials.(component.CredentialWriter); ok {
 		source.writer = writer
 	}
 	return source
 }
 
 func (s *Service) pdsAccessToken(ctx context.Context) (string, error) {
-	token := s.cfg.PDSAccessToken
-	if token == "" && s.cfg.PDSAccessTokenRef != nil && s.cfg.Deps.Credentials != nil {
-		credential, err := s.cfg.Deps.Credentials.Resolve(ctx, *s.cfg.PDSAccessTokenRef)
+	token := ""
+	if s.tokenRef != nil && s.deps.Credentials != nil {
+		credential, err := s.deps.Credentials.Resolve(ctx, *s.tokenRef)
 		if err != nil {
 			return "", err
 		}
@@ -547,57 +574,26 @@ func (s *Service) pdsAccessToken(ctx context.Context) (string, error) {
 
 func (s *Service) resolveStores() error {
 	if s.store != nil {
-		if s.cfg.Bids == nil {
-			s.cfg.Bids = NewKCPBids(s.store, s.cluster)
-		}
-		if s.cfg.VMs == nil {
-			s.cfg.VMs = NewKCPVMs(s.store, s.cluster, s.cfg.Provider.Handle)
-		}
-		if s.cfg.Grants == nil {
-			s.cfg.Grants = NewKCPGrants(s.store, s.cluster)
-		}
+		s.bids = NewKCPBids(s.store, s.cluster)
+		s.vms = NewKCPVMs(s.store, s.cluster, s.providerHandle)
+		s.grants = NewKCPGrants(s.store, s.cluster)
 	}
-	s.bids = s.cfg.Bids
-	s.vms = s.cfg.VMs
-	s.grants = s.cfg.Grants
 	return nil
 }
 
 func (s *Service) resolveVault(ctx context.Context) error {
-	if s.cfg.Vault != nil {
-		s.vault = s.cfg.Vault
-		return nil
+	if s.store == nil {
+		return errors.New("bidder: no guest vault is available")
 	}
-	if s.store != nil {
-		clientName := s.cfg.VaultClient
-		clientName = cmp.Or(clientName, "bidder")
-		vault, err := kcpOpenBaoVault(s.store, s.cluster, s.cfg.Provider.GuestVaultServer, clientName)
-		if err != nil {
-			return err
-		}
-		s.vault = vault
-		return nil
+	vault, err := kcpOpenBaoVault(s.store, s.cluster, s.guestVaultServer, vaultClientName)
+	if err != nil {
+		return err
 	}
-	if s.cfg.Deps.Vault != nil {
-		client, err := s.cfg.Deps.Vault.Client(ctx, s.cfg.Provider.GuestVaultServer)
-		if err == nil {
-			if guest, ok := client.(GuestVault); ok {
-				s.vault = guest
-				return nil
-			}
-		}
-	}
-	return errors.New("bidder: no guest vault is available")
+	s.vault = vault
+	return nil
 }
 
 func (s *Service) resolveGuestURL(ctx context.Context) string {
-	if raw := strings.TrimSpace(s.cfg.GuestURL); raw != "" {
-		if !isAbsoluteURL(raw) {
-			s.log.Warn("the bidder guest URL is not an absolute URL", "url", raw)
-			return ""
-		}
-		return strings.TrimRight(raw, "/")
-	}
 	if s.publicNetwork() {
 		deadline := time.Now().Add(guestExposureWait)
 		for {
@@ -616,22 +612,17 @@ func (s *Service) resolveGuestURL(ctx context.Context) string {
 			}
 		}
 	}
-	if s.cfg.GuestControlRef == nil {
-		return ""
-	}
-	kind := s.cfg.GuestControlRef.Kind
-	kind = cmp.Or(kind, "GuestControlPlane")
-	return kcp.HandlerURL(s.cfg.Workspace, kind, s.cfg.GuestControlRef.Name)
+	return kcp.HandlerURL(s.workspace, guestControlKind, guestControlName)
 }
 
 func (s *Service) publicNetwork() bool {
-	return strings.TrimSpace(s.cfg.Network.IngressProxyHost) != "" ||
-		strings.TrimSpace(s.cfg.Network.GuestTLSURL()) != ""
+	return strings.TrimSpace(s.network().IngressProxyHost) != "" ||
+		strings.TrimSpace(s.spec.Network.GuestTLSURL()) != ""
 }
 
 func (s *Service) resolveMarketURL(ctx context.Context) error {
-	ref := s.cfg.MarketExposureRef
-	if s.cfg.MarketURL != "" || ref == nil || strings.TrimSpace(ref.Name) == "" {
+	ref := s.spec.MarketExposureRef
+	if s.marketURL != "" || ref == nil || strings.TrimSpace(ref.Name) == "" {
 		return nil
 	}
 	client, err := s.exposureClient()
@@ -643,32 +634,26 @@ func (s *Service) resolveMarketURL(ctx context.Context) error {
 		return fmt.Errorf("bidder: reading the market Exposure %s: %w", ref.Name, err)
 	}
 	raw, _, _ := unstructured.NestedString(u.Object, "status", "address")
-	s.cfg.MarketURL = strings.TrimRight(strings.TrimSpace(raw), "/")
+	s.marketURL = strings.TrimRight(strings.TrimSpace(raw), "/")
 	return nil
 }
 
 func (s *Service) exposureClient() (dynamic.Interface, error) {
-	if s.cfg.Deps.KCP == nil {
+	if s.deps.KCP == nil {
 		return nil, errors.New("bidder: the component has no kcp clients")
 	}
-	client, err := s.cfg.Deps.KCP.Client(s.cfg.Workspace)
+	client, err := s.deps.KCP.Client(s.workspace)
 	if err != nil {
 		return nil, err
 	}
 	restCfg := rest.CopyConfig(client.RESTConfig())
 	baseHost, _, _ := strings.Cut(strings.TrimSuffix(restCfg.Host, "/"), "/clusters/")
-	restCfg.Host = baseHost + "/clusters/" + s.cfg.Workspace
+	restCfg.Host = baseHost + "/clusters/" + s.workspace
 	return dynamic.NewForConfig(restCfg)
 }
 
 func (s *Service) guestExposureURL(ctx context.Context) string {
-	ref := s.cfg.GuestControlRef
-	if ref == nil || strings.TrimSpace(ref.Name) == "" {
-		return ""
-	}
-	kind := ref.Kind
-	kind = cmp.Or(kind, "GuestControlPlane")
-	name := "svc-" + strings.ToLower(kind) + "-" + strings.TrimSpace(ref.Name) + "-ingress"
+	name := "svc-" + strings.ToLower(guestControlKind) + "-" + guestControlName + "-ingress"
 	client, err := s.exposureClient()
 	if err != nil {
 		return ""
@@ -686,40 +671,40 @@ func (s *Service) guestExposureURL(ctx context.Context) string {
 }
 
 func (s *Service) resolvePolicyRunner(ctx context.Context, engine commonv1.ObjectRef, workflow string) (policy.Runner, error) {
-	caller := commonv1.ObjectRef{Group: corev1alpha1.GroupName, Kind: Kind, Name: s.cfg.ComponentName, Workspace: s.cfg.Workspace}
-	return bus.Resolve[policy.Runner](ctx, s.cfg.Deps.Handlers, caller, engine, bus.Capability{Name: policy.CapabilityRun, Scope: []string{workflow}})
+	caller := commonv1.ObjectRef{Group: corev1alpha1.GroupName, Kind: Kind, Name: s.deps.Self.Name, Workspace: s.workspace}
+	return bus.Resolve[policy.Runner](ctx, s.deps.Bus, caller, engine, bus.Capability{Name: policy.CapabilityRun, Scope: []string{workflow}})
 }
 
 func (s *Service) policyRuns() *runs.Client {
-	engine := runs.EngineRef(s.cfg.PolicyEngineRef, s.cfg.Workspace)
-	if s.cfg.Deps.Handlers == nil || engine.Name == "" {
+	engine := runs.EngineRef(s.spec.PolicyEngineRef, s.workspace)
+	if s.deps.Bus == nil || engine.Name == "" {
 		return nil
 	}
 	return &runs.Client{
 		Resolve: s.resolvePolicyRunner,
-		Owner:   policy.Owner{APIVersion: corev1alpha1.GroupVersion.String(), Kind: Kind, Name: s.cfg.ComponentName, UID: s.cfg.ComponentUID},
+		Owner:   policy.Owner{APIVersion: corev1alpha1.GroupVersion.String(), Kind: Kind, Name: s.deps.Self.Name, UID: string(s.deps.UID)},
 		Engine:  engine,
 		Role:    "bidder",
 		Prefix:  "policy",
-		Args:    s.cfg.PolicyArgs,
-		Timeout: s.cfg.PolicyTimeout,
+		Args:    s.policyArgs,
+		Timeout: s.policyTimeout,
 		Parser:  runs.Lenient,
-		Now:     s.cfg.Now,
+		Now:     time.Now,
 	}
 }
 
 func (s *Service) newAuthorizer() Authorizer {
-	if s.cfg.Authorize != nil {
-		return AuthorizerFunc(s.cfg.Authorize)
+	if s.serviceAuthHost == "" {
+		s.serviceAuthHost = hostPortOf(s.publicMarketURL())
 	}
-	if s.cfg.ServiceAuth.Hostname == "" {
-		s.cfg.ServiceAuth.Hostname = hostPortOf(s.publicMarketURL())
+	var audienceDIDs []string
+	if s.spec.ServiceAuth != nil {
+		audienceDIDs = append(audienceDIDs, s.spec.ServiceAuth.Audience...)
 	}
-	audienceDIDs := append([]string(nil), s.cfg.ServiceAuth.AudienceDIDs...)
-	audienceDIDs = append(audienceDIDs, market.ServiceAudienceDIDs(s.cfg.ServiceAuth.Hostname)...)
+	audienceDIDs = append(audienceDIDs, market.ServiceAudienceDIDs(s.serviceAuthHost)...)
 	return &ServiceAuthAuthorizer{
 		Dir:          s.dir,
-		Hostname:     s.cfg.ServiceAuth.Hostname,
+		Hostname:     s.serviceAuthHost,
 		ServiceIDs:   []string{market.DefaultMarketServiceID, market.DefaultComputeEventServiceID},
 		AudienceDIDs: audienceDIDs,
 	}
@@ -732,11 +717,11 @@ func (s *Service) addEndpoint(endpoint component.Endpoint) {
 }
 
 func (s *Service) listeningURL() string {
-	return kcp.HandlerURL(s.cfg.Workspace, Kind, s.cfg.ComponentName)
+	return kcp.HandlerURL(s.workspace, Kind, s.deps.Self.Name)
 }
 
 func (s *Service) publicMarketURL() string {
-	if url := strings.TrimSpace(s.cfg.MarketURL); url != "" {
+	if url := strings.TrimSpace(s.marketURL); url != "" {
 		return strings.TrimRight(url, "/")
 	}
 	if endpoint, ok := s.relayEndpoint(); ok {
@@ -753,7 +738,7 @@ func (s *Service) publicURL() string {
 }
 
 func (s *Service) inboundMarketURL() string {
-	if !s.cfg.inboundXRPC() {
+	if !s.inboundXRPC() {
 		return ""
 	}
 	return s.publicMarketURL()

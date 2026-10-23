@@ -1,8 +1,7 @@
 package component
 
 import (
-	"cmp"
-	"crypto/tls"
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -12,8 +11,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	contract "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/component"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 )
 
 const (
@@ -31,41 +31,24 @@ const (
 	ProtocolSSH   = contract.ProtocolSSH
 )
 
-type Service = contract.Service[Deps]
+type Service = contract.Service
 
-type Deps struct {
-	KCP         KCPClients
-	Credentials CredentialResolver
-	Vault       VaultClients
-	TLS         *tls.Config
-	Log         *slog.Logger
-	StateDir    string
-	Hosts       NetworkHosts
-	Registry    *Registry
-	Handlers    *HandlerRegistry
-
-	NodeClaimAgent *kcpclient.ServiceAccountRef
+type Instance struct {
+	Self      commonv1.ObjectRef
+	UID       types.UID
+	Namespace string
+	Labels    map[string]string
+	Log       *slog.Logger
+	StateDir  string
+	Bus       *bus.Bus
 }
 
-func (d Deps) Or(fallback Deps) Deps {
-	if d.KCP == nil {
-		d.KCP = fallback.KCP
-	}
-	if d.Credentials == nil {
-		d.Credentials = fallback.Credentials
-	}
-	if d.Vault == nil {
-		d.Vault = fallback.Vault
-	}
-	if d.Hosts == nil {
-		d.Hosts = fallback.Hosts
-	}
-	d.TLS = cmp.Or(d.TLS, fallback.TLS)
-	d.Log = cmp.Or(d.Log, fallback.Log)
-	d.StateDir = cmp.Or(d.StateDir, fallback.StateDir)
-	d.Registry = cmp.Or(d.Registry, fallback.Registry)
-	d.Handlers = cmp.Or(d.Handlers, fallback.Handlers)
-	return d
+func (i Instance) Key() Key {
+	return Key{Workspace: i.Self.Workspace, Kind: i.Self.Kind, Name: i.Self.Name}
+}
+
+func (i Instance) Caller(ctx context.Context) context.Context {
+	return bus.WithCallerLabels(ctx, i.Self, i.Labels)
 }
 
 type NetworkHosts = contract.NetworkHosts
@@ -109,6 +92,10 @@ func (s ComponentSpec) Check() error {
 		return fmt.Errorf("component: the %s spec has no name", s.Kind)
 	}
 	return nil
+}
+
+func (s ComponentSpec) Self() commonv1.ObjectRef {
+	return commonv1.ObjectRef{Group: s.Group, Kind: s.Kind, Name: s.Name, Workspace: s.Workspace}
 }
 
 func (s ComponentSpec) RestartStamp() string {

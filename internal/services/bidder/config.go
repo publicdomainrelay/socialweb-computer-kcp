@@ -9,22 +9,19 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
-	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
-	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
+	"k8s.io/utils/ptr"
+
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauthclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestseed"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpclient"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/networkdial"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
@@ -37,376 +34,190 @@ const (
 
 	RecordRequestTimeout = 30 * time.Second
 
-	DefaultServeHost = "127.0.0.1"
-
 	DefaultGuestLoginMount = computevm.GuestLoginDefaultMount
 
 	DefaultGuestVaultServer = computevm.VaultServer
 
 	DefaultGuestVaultMount = computevm.VaultMount
 
-	DefaultGuestControlName = "guest-kcp"
-
-	DefaultBidTTL = 24 * time.Hour
-
-	DefaultPolicyTimeout = 2 * time.Minute
-
 	DefaultBootTimeout = 2 * time.Minute
 
 	DefaultReleaseTimeout = 150 * time.Second
 
-	DefaultOfferingRefresh = 5 * time.Minute
+	guestControlKind = "GuestControlPlane"
+
+	guestControlName = "guest-kcp"
+
+	vaultClientName = "bidder"
 )
-
-type RelayConfig struct {
-	IngressProxyHost string
-
-	ConnectHost string
-
-	DialAddress string
-
-	PublicURLBase string
-
-	Label string
-
-	Keypair RelayKeypair
-
-	GetServiceAuthToken func(ctx context.Context, nsid string) (string, error)
-
-	HTTPClient *http.Client
-
-	TLS bool
-}
-
-type RelayKeypair interface {
-	DID() string
-
-	Sign(data []byte) ([]byte, error)
-}
 
 type ProviderConfig struct {
 	Handle string
-
-	GuestLoginMount string
-
-	GuestHostAddress string
-
-	GuestTLSURL string
 
 	GuestTLSPort int
 
 	GuestVaultServer string
 
-	GuestVaultMount string
-
-	AcceptPath string
-
-	ReuseStale bool
-
 	StopGraceSeconds int32
-
-	BootTimeout time.Duration
-
-	ReleaseTimeout time.Duration
 
 	MaxConcurrentGuests int32
 }
 
-type ServiceCall func(ctx context.Context, endpoint, nsid, lxm string, body map[string]any) error
+type Deps struct {
+	component.Instance
 
-type ServiceAuthConfig struct {
-	Hostname string
+	KCP component.KCPClients
 
-	AudienceDIDs []string
+	Credentials component.CredentialResolver
+
+	Egress component.Egress
 }
 
-type Config struct {
-	Deps component.Deps
-
-	StateDir string
-
-	Workspace string
-
-	Namespace string
-
-	ComponentName string
-
-	ComponentUID string
-
-	Network v1alpha1.MarketNetworkValue
-
-	Identity v1alpha1.ComponentIdentity
-
-	IdentityRef *commonv1.ObjectRef
-
-	PDSRef *commonv1.ObjectRef
-
-	VaultRef *commonv1.ObjectRef
-
-	PolicyEngineRef *commonv1.ObjectRef
-
-	GuestControlRef *commonv1.ObjectRef
-
-	Handle string
-
-	DID string
-
-	PDSURL string
-
-	PDSAccessToken string
-
-	PDSAccessTokenRef *component.CredentialRef
-
-	PDSTokens pdsclient.TokenSource
-
-	PDSDPoP pdsclient.DPoPSource
-
-	RemotePDS *pdsv1alpha1.RemotePDS
-
-	VaultClient string
-
-	RepoDID string
-
-	Policy string
-
-	PolicyArgs map[string]string
-
-	BidderDIDs []string
-
-	MarketURL string
-
-	MarketExposureRef *commonv1.LocalObjectRef
-
-	IdentityMode string
-
-	DenyBidderDIDs []string
-
-	PolicyTimeout time.Duration
-
-	Heartbeat time.Duration
-
-	OfferingRefresh time.Duration
-
-	OfferingRefreshDisabled bool
-
-	BidTTL time.Duration
-
-	Provider ProviderConfig
-
-	ServiceAuth ServiceAuthConfig
-
-	ServeHost string
-
-	ServePort int
-
-	Relay *RelayConfig
-
-	Records *market.RepoStore
-
-	Vault GuestVault
-
-	Bids BidStore
-
-	VMs VMStore
-
-	Grants GrantStore
-
-	GuestURL string
-
-	Authorize func(ctx context.Context, header, lxm, recordURI string) (string, error)
-
-	CallService ServiceCall
-
-	Comms *v1alpha1.MarketComms
-
-	Now func() time.Time
-}
-
-func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, error) {
-	var bidderSpec v1alpha1.BidderSpec
-	if err := spec.Spec.Decode(&bidderSpec); err != nil {
-		return Config{}, err
-	}
-	policyArgs, err := parsePolicyArgs(bidderSpec.PolicyArgs)
+func New(spec v1alpha1.BidderSpec, deps Deps) (*Service, error) {
+	policyArgs, err := parsePolicyArgs(spec.PolicyArgs)
 	if err != nil {
-		return Config{}, err
+		return nil, err
 	}
-	if err := market.ValidateComms("bidder", bidderSpec.Comms); err != nil {
-		return Config{}, err
+	handle := ""
+	if spec.Identity != nil {
+		handle = spec.Identity.Handle
 	}
-	stateDir := deps.StateDir
-	if spec.StateDir != "" {
-		stateDir = spec.StateDir
+	providerHandle := handle
+	if spec.Kcp != nil && spec.Kcp.Handle != "" {
+		providerHandle = spec.Kcp.Handle
+		handle = cmp.Or(handle, spec.Kcp.Handle)
 	}
-	cfg := Config{
-		Deps:              deps,
-		StateDir:          stateDir,
-		Workspace:         spec.Workspace,
-		Namespace:         spec.Namespace,
-		ComponentName:     spec.Name,
-		ComponentUID:      string(spec.UID),
-		IdentityRef:       bidderSpec.PdsRef,
-		PDSRef:            bidderSpec.PdsRef,
-		VaultRef:          bidderSpec.VaultRef,
-		PDSAccessTokenRef: accessTokenRef(bidderSpec.PDSAccessToken, bidderSpec.VaultRef),
-		PolicyEngineRef:   bidderSpec.PolicyEngineRef,
-		GuestControlRef:   &commonv1.ObjectRef{Kind: "GuestControlPlane", Name: DefaultGuestControlName},
-		ServeHost:         DefaultServeHost,
-		Policy:            bidderSpec.Policy,
-		PolicyArgs:        policyArgs,
-		BidderDIDs:        append([]string(nil), bidderSpec.BidderDIDs...),
-		MarketExposureRef: bidderSpec.MarketExposureRef,
-		IdentityMode:      strings.TrimSpace(bidderSpec.Mode),
-		Comms:             bidderSpec.Comms,
-		PolicyTimeout:     DefaultPolicyTimeout,
-		OfferingRefresh:   DefaultOfferingRefresh,
-		BidTTL:            DefaultBidTTL,
-		VaultClient:       "bidder",
+	log := deps.Log
+	if log == nil {
+		log = slog.New(slog.DiscardHandler)
 	}
-	if bidderSpec.HeartbeatIntervalSeconds != nil && *bidderSpec.HeartbeatIntervalSeconds > 0 {
-		cfg.Heartbeat = time.Duration(*bidderSpec.HeartbeatIntervalSeconds) * time.Second
+	base := deps.Egress
+	if base.Log == nil {
+		base.Log = deps.Log
 	}
-	if bidderSpec.OfferingRefreshSeconds != nil {
-		if *bidderSpec.OfferingRefreshSeconds == 0 {
-			cfg.OfferingRefreshDisabled = true
-		} else {
-			cfg.OfferingRefresh = time.Duration(*bidderSpec.OfferingRefreshSeconds) * time.Second
+	egress := base
+	if spec.Network != nil {
+		if hosts := bidderNetworkResolver(*spec.Network, egress.Hosts); hosts != nil {
+			egress.Hosts = hosts
 		}
-	}
-	if bidderSpec.BidTTLSeconds != nil && *bidderSpec.BidTTLSeconds > 0 {
-		cfg.BidTTL = time.Duration(*bidderSpec.BidTTLSeconds) * time.Second
-	}
-	if bidderSpec.PolicyTimeoutSeconds != nil && *bidderSpec.PolicyTimeoutSeconds > 0 {
-		cfg.PolicyTimeout = time.Duration(*bidderSpec.PolicyTimeoutSeconds) * time.Second
-	}
-	if bidderSpec.ServiceAuth != nil {
-		cfg.ServiceAuth.Hostname = strings.TrimSpace(bidderSpec.ServiceAuth.Hostname)
-		cfg.ServiceAuth.AudienceDIDs = append([]string(nil), bidderSpec.ServiceAuth.Audience...)
-	}
-	if bidderSpec.Identity != nil {
-		cfg.Identity = *bidderSpec.Identity
-		cfg.IdentityRef = bidderSpec.Identity.MarketIdentityRef
-		cfg.Handle = bidderSpec.Identity.Handle
-		cfg.DID = bidderSpec.Identity.Did
-	}
-	if bidderSpec.Network != nil {
-		cfg.Network = *bidderSpec.Network
-		if hosts := bidderNetworkResolver(cfg.Network, cfg.Deps.Hosts); hosts != nil {
-			cfg.Deps.Hosts = hosts
-		}
-		if strings.TrimSpace(cfg.Network.CABundle) != "" {
-			tlsConfig, err := bidderNetworkTLS(cfg.Network.CABundle)
+		if strings.TrimSpace(spec.Network.CABundle) != "" {
+			tlsConfig, err := bidderNetworkTLS(spec.Network.CABundle)
 			if err != nil {
-				return Config{}, err
+				return nil, err
 			}
-			cfg.Deps.TLS = tlsConfig
-			if deps.Log != nil {
-				deps.Log.Info("the bidder trusts the network CA")
-			}
-		}
-		if cfg.Network.IngressProxyHost != "" {
-			cfg.Relay = &RelayConfig{
-				IngressProxyHost: cfg.Network.IngressProxyHost,
-				ConnectHost:      cfg.Network.IngressProxyHost,
-				DialAddress:      ingressConnectHost(cfg.Network),
-				PublicURLBase:    cfg.Network.GuestTLSURL(),
-				Label:            "market",
-			}
+			egress.TLS = tlsConfig
+			log.Info("the bidder trusts the network CA")
 		}
 	}
-	if bidderSpec.Serve != nil {
-		if bidderSpec.Serve.Host != "" {
-			cfg.ServeHost = bidderSpec.Serve.Host
+	s := &Service{
+		spec:             spec,
+		deps:             deps,
+		egress:           egress,
+		workspace:        cmp.Or(deps.Self.Workspace, "root"),
+		handle:           handle,
+		providerHandle:   providerHandle,
+		guestVaultServer: v1alpha1.VaultServer(spec.VaultRef, DefaultGuestVaultServer),
+		guestTLSPort:     portOf(spec.Network.GuestTLSURL()),
+		tokenRef:         accessTokenRef(spec.PDSAccessToken, spec.VaultRef),
+		policyArgs:       policyArgs,
+		policyTimeout:    time.Duration(ptr.Deref(spec.PolicyTimeoutSeconds, 0)) * time.Second,
+		heartbeat:        time.Duration(ptr.Deref(spec.HeartbeatIntervalSeconds, 0)) * time.Second,
+		offeringRefresh:  time.Duration(ptr.Deref(spec.OfferingRefreshSeconds, 0)) * time.Second,
+		bidTTL:           time.Duration(ptr.Deref(spec.BidTTLSeconds, 0)) * time.Second,
+	}
+	if spec.ServiceAuth != nil {
+		s.serviceAuthHost = strings.TrimSpace(spec.ServiceAuth.Hostname)
+	}
+	s.restoreSession(base, log)
+	switch {
+	case s.handle == "":
+		return nil, errors.New("bidder: the component names no handle")
+	case s.guestVaultServer == "":
+		return nil, errors.New("bidder: the provider names no guest vault server")
+	}
+	s.log = log.With("component", "bidder", "handle", s.handle)
+	return s, nil
+}
+
+func (s *Service) restoreSession(egress component.Egress, log *slog.Logger) {
+	credentials := s.deps.Credentials
+	if s.tokenRef == nil || credentials == nil {
+		return
+	}
+	credential, err := credentials.Resolve(context.Background(), *s.tokenRef)
+	if err != nil {
+		return
+	}
+	data, ok := oauthclient.SessionFromSecret(credential.Data)
+	if !ok {
+		source, err := pdsclient.DPoPSourceFromData(credential.Data)
+		if err != nil {
+			log.Warn("the bidder could not read the session DPoP key", "err", err.Error())
+			return
 		}
-		cfg.ServePort = int(bidderSpec.Serve.Port)
+		s.pdsDPoP = source
+		return
 	}
-	cfg.Provider = ProviderConfig{
-		Handle:           cfg.Handle,
-		GuestLoginMount:  DefaultGuestLoginMount,
-		GuestHostAddress: v1alpha1.GuestHostAddress,
-		GuestVaultServer: DefaultGuestVaultServer,
-		GuestVaultMount:  DefaultGuestVaultMount,
-		AcceptPath:       guestseed.AcceptPathVM,
-		BootTimeout:      DefaultBootTimeout,
-		ReleaseTimeout:   DefaultReleaseTimeout,
+	opts := oauthclient.Options{
+		DID:        data.AccountDID,
+		RepoDID:    data.AccountDID,
+		PDSURL:     data.HostURL,
+		ClientID:   cmp.Or(data.ClientID, defaultBidderOAuthClientID),
+		Scopes:     data.Scopes,
+		HTTPClient: egress.Client(DefaultCallTimeout),
 	}
-	if bidderSpec.Kcp != nil {
-		if bidderSpec.Kcp.Handle != "" {
-			cfg.Provider.Handle = bidderSpec.Kcp.Handle
-			cfg.Handle = cmp.Or(cfg.Handle, bidderSpec.Kcp.Handle)
-		}
-		cfg.Provider.StopGraceSeconds = bidderSpec.Kcp.StopGraceSeconds
+	if writer, ok := credentials.(component.CredentialWriter); ok {
+		opts.Store = &bidderSessionStore{resolver: credentials, writer: writer, ref: *s.tokenRef}
 	}
-	cfg.Provider.GuestVaultServer = v1alpha1.VaultServer(bidderSpec.VaultRef, cfg.Provider.GuestVaultServer)
-	if bidderSpec.Storage != nil && bidderSpec.Storage.DataDir != "" {
-		cfg.StateDir = bidderSpec.Storage.DataDir
+	session, err := oauthclient.New(data, opts)
+	if err == nil {
+		s.pdsTokens = session
+		s.pdsDPoP = session
+		s.pdsURL = data.HostURL
+		return
 	}
-	if bidderSpec.MaxConcurrentGuests > 0 {
-		cfg.Provider.MaxConcurrentGuests = bidderSpec.MaxConcurrentGuests
+	log.Warn("the bidder could not restore the oauth session", "err", err.Error())
+	if data.AuthServerURL != "" && data.AuthServerTokenEndpoint != "" {
+		return
 	}
-	cfg.Provider.GuestTLSURL = cfg.Network.GuestTLSURL()
-	if port := portOf(cfg.Network.GuestTLSURL()); port > 0 {
-		cfg.Provider.GuestTLSPort = port
+	authServer, tokenEndpoint, revokeEndpoint, discoverErr := oauthclient.DiscoverAuthServer(context.Background(), opts.HTTPClient, data.HostURL)
+	if discoverErr != nil {
+		log.Warn("the bidder could not discover the oauth auth server", "err", discoverErr.Error())
+		return
 	}
-	cfg.Workspace = cmp.Or(cfg.Workspace, "root")
-	cfg.Namespace = cmp.Or(cfg.Namespace, "default")
-	if cfg.Now == nil {
-		cfg.Now = time.Now
+	data.AuthServerURL = authServer
+	data.AuthServerTokenEndpoint = tokenEndpoint
+	if revokeEndpoint != "" {
+		data.AuthServerRevocationEndpoint = revokeEndpoint
 	}
-	if cfg.PDSDPoP == nil && cfg.PDSAccessTokenRef != nil && deps.Credentials != nil {
-		if credential, err := deps.Credentials.Resolve(context.Background(), *cfg.PDSAccessTokenRef); err == nil {
-			if data, ok := oauthclient.SessionFromSecret(credential.Data); ok {
-				clientID := data.ClientID
-				clientID = cmp.Or(clientID, defaultBidderOAuthClientID)
-				opts := oauthclient.Options{
-					DID:        data.AccountDID,
-					RepoDID:    data.AccountDID,
-					PDSURL:     data.HostURL,
-					ClientID:   clientID,
-					Scopes:     data.Scopes,
-					HTTPClient: deps.ExternalHTTPClient(DefaultCallTimeout),
-				}
-				if writer, ok := deps.Credentials.(component.CredentialWriter); ok {
-					opts.Store = &bidderSessionStore{resolver: deps.Credentials, writer: writer, ref: *cfg.PDSAccessTokenRef}
-				}
-				session, err := oauthclient.New(data, opts)
-				if err == nil {
-					cfg.PDSTokens = session
-					cfg.PDSDPoP = session
-					cfg.PDSURL = cmp.Or(cfg.PDSURL, data.HostURL)
-				} else {
-					if deps.Log != nil {
-						deps.Log.Warn("the bidder could not restore the oauth session", "err", err.Error())
-					}
-					if data.AuthServerURL == "" || data.AuthServerTokenEndpoint == "" {
-						authServer, tokenEndpoint, revokeEndpoint, discoverErr := oauthclient.DiscoverAuthServer(context.Background(), opts.HTTPClient, data.HostURL)
-						if discoverErr == nil {
-							data.AuthServerURL = authServer
-							data.AuthServerTokenEndpoint = tokenEndpoint
-							if revokeEndpoint != "" {
-								data.AuthServerRevocationEndpoint = revokeEndpoint
-							}
-							if opts.Store != nil {
-								_ = opts.Store.Save(context.Background(), data)
-							}
-						} else if deps.Log != nil {
-							deps.Log.Warn("the bidder could not discover the oauth auth server", "err", discoverErr.Error())
-						}
-					}
-				}
-			} else {
-				source, err := pdsclient.DPoPSourceFromData(credential.Data)
-				if err != nil {
-					if deps.Log != nil {
-						deps.Log.Warn("the bidder could not read the session DPoP key", "err", err.Error())
-					}
-				} else {
-					cfg.PDSDPoP = source
-				}
-			}
-		}
+	if opts.Store != nil {
+		_ = opts.Store.Save(context.Background(), data)
 	}
-	return cfg, nil
+}
+
+func (s *Service) stateDir() string {
+	if s.spec.Storage != nil && s.spec.Storage.DataDir != "" {
+		return s.spec.Storage.DataDir
+	}
+	return s.deps.StateDir
+}
+
+func (s *Service) network() v1alpha1.MarketNetworkValue {
+	return ptr.Deref(s.spec.Network, v1alpha1.MarketNetworkValue{})
+}
+
+func (s *Service) identityRef() *commonv1.ObjectRef {
+	if s.spec.Identity != nil {
+		return s.spec.Identity.MarketIdentityRef
+	}
+	return s.spec.PdsRef
+}
+
+func (s *Service) stopGraceSeconds() int32 {
+	if s.spec.Kcp == nil {
+		return 0
+	}
+	return s.spec.Kcp.StopGraceSeconds
 }
 
 type bidderChainedResolver []networkdial.Resolver
@@ -500,18 +311,18 @@ func accessTokenRef(secret *commonv1.SecretRef, vaultRef *commonv1.ObjectRef) *c
 	return ref
 }
 
-func (c Config) checkServiceAuthHost() error {
-	if c.ServiceAuth.Hostname == "" || c.MarketURL == "" {
+func (s *Service) checkServiceAuthHost() error {
+	if s.serviceAuthHost == "" || s.marketURL == "" {
 		return nil
 	}
-	override := c.ServiceAuth.Hostname
+	override := s.serviceAuthHost
 	if !strings.Contains(override, "://") {
 		override = "//" + override
 	}
 	got := strings.ToLower(hostPortOf(override))
-	want := strings.ToLower(hostPortOf(c.MarketURL))
+	want := strings.ToLower(hostPortOf(s.marketURL))
 	if got == "" || want == "" || got != want {
-		return fmt.Errorf("bidder: serviceAuth.hostname %q must match the market URL host %q; the offering and the verifier audience have one source", c.ServiceAuth.Hostname, want)
+		return fmt.Errorf("bidder: serviceAuth.hostname %q must match the market URL host %q; the offering and the verifier audience have one source", s.serviceAuthHost, want)
 	}
 	return nil
 }
@@ -551,26 +362,26 @@ func parsePolicyArgs(raw string) (map[string]string, error) {
 	return out, nil
 }
 
-func (c Config) inboundXRPC() bool {
-	if c.oauthIdentity() {
+func (s *Service) inboundXRPC() bool {
+	if s.oauthIdentity() {
 		return false
 	}
-	if c.Comms == nil {
+	if s.spec.Comms == nil {
 		return true
 	}
-	switch c.Comms.Mode {
+	switch s.spec.Comms.Mode {
 	case "", v1alpha1.MarketCommsModeXRPC, v1alpha1.MarketCommsModeBoth:
 		return true
 	}
 	return false
 }
 
-func (c Config) outboundXRPC() bool {
+func (s *Service) outboundXRPC() bool {
 	return true
 }
 
-func (c Config) oauthIdentity() bool {
-	switch strings.TrimSpace(c.IdentityMode) {
+func (s *Service) oauthIdentity() bool {
+	switch strings.TrimSpace(s.spec.Mode) {
 	case string(v1alpha1.MarketIdentityModeOAuthQr), string(v1alpha1.MarketIdentityModeOAuthBrowser), string(v1alpha1.MarketIdentityModeOAuthDelegated):
 		return true
 	}
@@ -598,95 +409,6 @@ func hostPortOf(raw string) string {
 		return ""
 	}
 	return u.Host
-}
-
-func (c Config) bidTTL() time.Duration {
-	if c.BidTTL > 0 {
-		return c.BidTTL
-	}
-	return DefaultBidTTL
-}
-
-func (c Config) check() error {
-	switch {
-	case c.Handle == "":
-		return errors.New("bidder: the component names no handle")
-	case c.Provider.GuestLoginMount == "":
-		return errors.New("bidder: the provider names no guest login mount")
-	case c.Provider.GuestVaultServer == "":
-		return errors.New("bidder: the provider names no guest vault server")
-	case strings.Trim(c.Provider.GuestVaultMount, "/") == "":
-		return errors.New("bidder: the provider names no guest vault mount")
-	}
-	return nil
-}
-
-func (c Config) withDeps(deps component.Deps) Config {
-	out := c
-	if out.Deps.Log == nil {
-		out.Deps.Log = deps.Log
-	}
-	if out.Deps.Registry == nil {
-		out.Deps.Registry = deps.Registry
-	}
-	if out.Deps.KCP == nil {
-		out.Deps.KCP = deps.KCP
-	}
-	if out.Deps.Credentials == nil {
-		out.Deps.Credentials = deps.Credentials
-	}
-	if out.Deps.Vault == nil {
-		out.Deps.Vault = deps.Vault
-	}
-	if out.Deps.Hosts == nil {
-		out.Deps.Hosts = deps.Hosts
-	}
-	if out.Deps.TLS == nil {
-		out.Deps.TLS = deps.TLS
-	}
-	if out.Deps.Handlers == nil {
-		out.Deps.Handlers = deps.Handlers
-	}
-	out.Deps.StateDir = cmp.Or(out.Deps.StateDir, deps.StateDir)
-	out.StateDir = cmp.Or(out.StateDir, out.Deps.StateDir)
-	return out
-}
-
-func (c *Config) defaults() {
-	c.ServeHost = cmp.Or(c.ServeHost, DefaultServeHost)
-	c.PolicyTimeout = opt.Positive(c.PolicyTimeout, DefaultPolicyTimeout)
-	c.Provider.GuestLoginMount = cmp.Or(c.Provider.GuestLoginMount, DefaultGuestLoginMount)
-	c.Provider.GuestHostAddress = cmp.Or(c.Provider.GuestHostAddress, v1alpha1.GuestHostAddress)
-	c.Provider.GuestVaultServer = cmp.Or(c.Provider.GuestVaultServer, DefaultGuestVaultServer)
-	c.Provider.GuestVaultMount = cmp.Or(c.Provider.GuestVaultMount, DefaultGuestVaultMount)
-	c.Provider.AcceptPath = cmp.Or(c.Provider.AcceptPath, guestseed.AcceptPathVM)
-	c.Provider.BootTimeout = opt.Positive(c.Provider.BootTimeout, DefaultBootTimeout)
-	c.Provider.ReleaseTimeout = opt.Positive(c.Provider.ReleaseTimeout, DefaultReleaseTimeout)
-	c.Provider.Handle = cmp.Or(c.Provider.Handle, c.Handle)
-	c.VaultClient = cmp.Or(c.VaultClient, "bidder")
-	if c.GuestControlRef == nil {
-		c.GuestControlRef = &commonv1.ObjectRef{Kind: "GuestControlPlane", Name: DefaultGuestControlName}
-	}
-	if c.Now == nil {
-		c.Now = time.Now
-	}
-	if c.PolicyArgs == nil {
-		c.PolicyArgs = map[string]string{}
-	}
-	c.Workspace = cmp.Or(c.Workspace, "root")
-	c.StateDir = cmp.Or(c.StateDir, c.Deps.StateDir)
-}
-
-func New(cfg Config) (*Service, error) {
-	cfg.defaults()
-	if err := cfg.check(); err != nil {
-		return nil, err
-	}
-	log := cfg.Deps.Log
-	if log == nil {
-		log = slog.New(slog.DiscardHandler)
-	}
-	return &Service{cfg: cfg, log: log.With("component", "bidder", "handle", cfg.Handle)}, nil
 }
 
 func isAbsoluteURL(raw string) bool {

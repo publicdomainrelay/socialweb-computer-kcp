@@ -83,7 +83,7 @@ func (a *marketInboxAdapter) Observe(ctx context.Context, request statesync.Requ
 		return statesync.Observation{}, err
 	}
 	if a.service != nil && a.service.inbox != nil && isBidCollection(payload.Collection) {
-		if _, err := a.service.inbox.Get(ctx, ref.Ref{LogicalCluster: a.service.cfg.Workspace, Name: bidInboxName(payload.URI, payload.CID)}); err != nil {
+		if _, err := a.service.inbox.Get(ctx, ref.Ref{LogicalCluster: a.service.workspace(), Name: bidInboxName(payload.URI, payload.CID)}); err != nil {
 			if apierrors.IsNotFound(err) {
 				return statesync.Observation{At: time.Now().UTC().Format(time.RFC3339)}, nil
 			}
@@ -148,16 +148,8 @@ func (a *inboxNoopAdapter) Delete(ctx context.Context, request statesync.Request
 	return nil
 }
 
-func (s *Service) inboundXRPC() bool {
-	return s.cfg.inboundXRPC()
-}
-
-func (s *Service) outboundXRPC() bool {
-	return s.cfg.outboundXRPC()
-}
-
 func (s *Service) startStateSync() error {
-	if s.cfg.Deps.KCP == nil {
+	if s.deps.KCP == nil {
 		return errors.New("requester: the component has no kcp clients")
 	}
 	registry := statesync.NewRegistry()
@@ -171,7 +163,7 @@ func (s *Service) startStateSync() error {
 		}
 	}
 	controller, err := statesync.NewController(statesync.Options{
-		Workspace: s.cfg.Workspace,
+		Workspace: s.workspace(),
 		Dynamic:   s.syncDynamic,
 		Registry:  registry,
 		Log:       s.log,
@@ -185,10 +177,10 @@ func (s *Service) startStateSync() error {
 }
 
 func (s *Service) syncDynamic(workspace string) (dynamic.Interface, error) {
-	if s.cfg.Deps.KCP == nil {
+	if s.deps.KCP == nil {
 		return nil, errors.New("requester: the component has no kcp clients")
 	}
-	client, err := s.cfg.Deps.KCP.Client(workspace)
+	client, err := s.deps.KCP.Client(workspace)
 	if err != nil {
 		return nil, err
 	}

@@ -3,6 +3,7 @@ package sshserver
 import (
 	"cmp"
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -14,7 +15,9 @@ import (
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/identity"
+	"k8s.io/utils/ptr"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayhttp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
@@ -23,9 +26,25 @@ import (
 )
 
 type Service struct {
-	cfg Config
+	spec v1alpha1.SshServerSpec
+
+	deps Deps
 
 	log *slog.Logger
+
+	stateDir string
+
+	hostKeyPath string
+
+	did string
+
+	ownerSessions map[string]OwnerSession
+
+	tls *tls.Config
+
+	directory identity.Directory
+
+	trustedHosts []string
 
 	mu sync.Mutex
 
@@ -64,17 +83,6 @@ type denyAuth struct{}
 
 func (denyAuth) Authenticate(r *http.Request) (*gatewayhttp.WebCaller, error) {
 	return nil, nil
-}
-
-type signInAgents struct {
-	signIn gatewayhttp.WebSignIn
-}
-
-func (a signInAgents) AgentFor(caller *gatewayhttp.WebCaller) gatewayhttp.WebAccountAgent {
-	if a.signIn == nil {
-		return unavailableAgent{}
-	}
-	return a.signIn.AgentFor(caller)
 }
 
 type unavailableAgent struct{}
@@ -127,27 +135,11 @@ func (m *memoryCocoreTokens) Set(ctx context.Context, did string, token *sshtran
 	return nil
 }
 
-func New(cfg Config) (*Service, error) {
-	cfg.defaults()
-	if err := cfg.check(); err != nil {
-		return nil, err
-	}
-	log := cfg.Log
-	if log == nil {
-		log = slog.New(slog.DiscardHandler)
-	}
-	return &Service{cfg: cfg, log: log.With("component", "sshserver", "did", cfg.DID)}, nil
-}
-
-func (s *Service) Start(ctx context.Context, deps component.Deps) error {
+func (s *Service) Start(ctx context.Context) error {
 	s.mu.Lock()
 	if s.started {
 		s.mu.Unlock()
 		return errors.New("sshserver: the service is already started")
-	}
-	s.cfg = s.cfg.withDeps(deps)
-	if s.cfg.Log != nil {
-		s.log = s.cfg.Log.With("component", "sshserver", "did", s.cfg.DID)
 	}
 	s.started = true
 	s.ready = false
@@ -166,12 +158,11 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 		close(s.done)
 		return err
 	}
-	key := s.cfg.Key
+	key := s.deps.Key()
 	key.Kind = cmp.Or(key.Kind, Kind)
-	key.Name = cmp.Or(key.Name, s.cfg.ComponentName)
 	key.Name = cmp.Or(key.Name, "default")
-	key.Workspace = cmp.Or(key.Workspace, s.cfg.Workspace)
-	handlers := s.cfg.Deps.Handlers
+	key.Workspace = s.workspace()
+	handlers := s.deps.Bus
 	if handlers == nil {
 		s.shutdown(ctx)
 		s.mu.Lock()
@@ -218,12 +209,12 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 }
 
 func (s *Service) setup(ctx context.Context) error {
-	if s.cfg.StateDir != "" {
-		if err := os.MkdirAll(s.cfg.StateDir, 0o700); err != nil {
+	if s.stateDir != "" {
+		if err := os.MkdirAll(s.stateDir, 0o700); err != nil {
 			return fmt.Errorf("sshserver: state dir: %w", err)
 		}
 	}
-	if dir := filepath.Dir(s.cfg.HostKeyPath); dir != "" && dir != "." {
+	if dir := filepath.Dir(s.hostKeyPath); dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return fmt.Errorf("sshserver: host key dir: %w", err)
 		}
@@ -239,19 +230,18 @@ func (s *Service) setup(ctx context.Context) error {
 	}
 	sshServer, err := sshtransport.NewServer(sshtransport.ServerOptions{
 		Config: sshtransport.Config{
-			Port:               s.cfg.SSHPort,
-			Hostname:           s.cfg.SSHHost,
-			HostKeyPath:        s.cfg.HostKeyPath,
-			MaxConnections:     s.cfg.MaxConnections,
-			MaxSessions:        s.cfg.MaxSessions,
-			SessionsPerAccount: s.cfg.SessionsPerAccount,
-			MaxAuthAttempts:    s.cfg.MaxAuthAttempts,
-			AuthTimeout:        s.cfg.AuthTimeout,
-			SessionMax:         s.cfg.SessionMax,
+			Hostname:           DefaultSSHHost,
+			HostKeyPath:        s.hostKeyPath,
+			MaxConnections:     int(s.spec.MaxConnections),
+			MaxSessions:        int(s.spec.MaxSessions),
+			SessionsPerAccount: int(s.spec.SessionsPerAccount),
+			MaxAuthAttempts:    int(s.spec.MaxAuthAttempts),
+			AuthTimeout:        time.Duration(ptr.Deref(s.spec.AuthTimeoutSeconds, 0)) * time.Second,
+			SessionMax:         time.Duration(ptr.Deref(s.spec.SessionMaxSeconds, 0)) * time.Second,
 		},
 		Authorizer:     authorizer,
 		Runner:         runnerAdapter{runner: runner},
-		DefaultCommand: s.cfg.DefaultCommand,
+		DefaultCommand: DefaultDefaultCommand,
 		Log:            s.log,
 	})
 	if err != nil {
@@ -262,21 +252,18 @@ func (s *Service) setup(ctx context.Context) error {
 }
 
 func (s *Service) resolveRequester(ctx context.Context) (CommandRunner, error) {
-	if s.cfg.Requester != nil {
-		return s.cfg.Requester, nil
-	}
-	if s.cfg.RequesterRef == nil || s.cfg.RequesterRef.Name == "" {
+	ref := s.spec.RequesterRef
+	if ref == nil || ref.Name == "" {
 		return nil, errors.New("sshserver: no Requester is configured")
 	}
-	if s.cfg.Deps.Registry == nil {
+	if s.deps.Registry == nil {
 		return nil, errors.New("sshserver: no component registry is available")
 	}
-	workspace := s.cfg.Workspace
-	kind := s.cfg.RequesterRef.Kind
-	kind = cmp.Or(kind, "Requester")
-	service, ok := s.cfg.Deps.Registry.Service(workspace, kind, s.cfg.RequesterRef.Name)
+	workspace := s.workspace()
+	kind := cmp.Or(ref.Kind, "Requester")
+	service, ok := s.deps.Registry.Service(workspace, kind, ref.Name)
 	if !ok {
-		return nil, fmt.Errorf("sshserver: the Requester %s/%s is not registered", workspace, s.cfg.RequesterRef.Name)
+		return nil, fmt.Errorf("sshserver: the Requester %s/%s is not registered", workspace, ref.Name)
 	}
 	if runner, ok := service.(CommandRunner); ok {
 		return runner, nil
@@ -284,38 +271,24 @@ func (s *Service) resolveRequester(ctx context.Context) (CommandRunner, error) {
 	if runner, ok := service.(sshtransport.ComputeCommandRunner); ok {
 		return legacyCommandRunner{runner: runner}, nil
 	}
-	return nil, fmt.Errorf("sshserver: the Requester %s/%s does not run commands", workspace, s.cfg.RequesterRef.Name)
+	return nil, fmt.Errorf("sshserver: the Requester %s/%s does not run commands", workspace, ref.Name)
 }
 
 func (s *Service) authorizer() (sshtransport.KeyAuthorizer, error) {
-	if s.cfg.KeyAuthorizer != nil {
-		return s.cfg.KeyAuthorizer, nil
-	}
-	directory := s.cfg.Directory
+	directory := s.directory
 	if directory == nil {
 		directory = identity.DefaultDirectory()
 	}
-	resolver := s.cfg.IdentityResolver
-	if resolver == nil {
-		resolver = sshtransport.DirectoryResolver{Directory: directory}
-	}
-	records := s.cfg.RecordSource
-	if records == nil {
-		trusted := append([]string(nil), s.cfg.TrustedHosts...)
-		trusted = append(trusted, internalHosts(s.cfg.Deps)...)
-		records = &sshtransport.HTTPRecordSource{
-			TrustedHosts: trusted,
-			Client:       serviceHTTPClient(s.cfg, 30*time.Second),
-		}
-	}
+	trusted := append([]string(nil), s.trustedHosts...)
+	trusted = append(trusted, internalHosts(s.deps.Registry)...)
 	return sshtransport.NewPDSKeyAuthorizer(sshtransport.KeyAuthorizerOptions{
-		Resolver:         resolver,
-		Records:          records,
-		CacheTTL:         s.cfg.AssociationTTL,
-		NegativeCacheTTL: s.cfg.NegativeCacheTTL,
-		MissRecheck:      s.cfg.MissRecheck,
-		MaxCacheEntries:  s.cfg.CacheEntries,
-		Log:              s.log,
+		Resolver: sshtransport.DirectoryResolver{Directory: directory},
+		Records: &sshtransport.HTTPRecordSource{
+			TrustedHosts: trusted,
+			Client:       s.httpClient(30 * time.Second),
+		},
+		MaxCacheEntries: int(s.spec.CacheEntries),
+		Log:             s.log,
 	})
 }
 
@@ -324,9 +297,6 @@ func (s *Service) handler() http.Handler {
 	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("GET /connect.json", s.connect)
 	mux.HandleFunc("GET /.well-known/cocore-app.json", s.cocoreApp)
-	if s.cfg.SignIn != nil {
-		mux.HandleFunc("GET /oauth-client-metadata.json", s.clientMetadata)
-	}
 	auth := s.authenticator()
 	agents := s.agents()
 	keys, err := sshtransport.NewKeys(sshtransport.KeysOptions{Agents: agents, Auth: auth, Log: s.log})
@@ -344,24 +314,8 @@ func (s *Service) handler() http.Handler {
 }
 
 func (s *Service) authenticator() sshtransport.Authenticator {
-	if s.cfg.Auth != nil {
-		return s.cfg.Auth
-	}
 	var auths multiAuth
-	if s.cfg.SignIn != nil {
-		auth, err := gatewayhttp.NewRequestAuth(gatewayhttp.RequestAuthOptions{
-			SignIn:       s.cfg.SignIn,
-			PublicOrigin: s.cfg.PublicOrigin,
-			CookieName:   s.cfg.SessionCookie,
-			Log:          s.log,
-		})
-		if err != nil {
-			s.log.Warn("sshserver_auth_failed", "err", err)
-		} else {
-			auths = append(auths, auth)
-		}
-	}
-	if sessions := ownerSessionsFrom(s.cfg.OwnerSessions); len(sessions) > 0 {
+	if sessions := ownerSessionsFrom(s.ownerSessions); len(sessions) > 0 {
 		auths = append(auths, ownerSessionAuth{sessions: sessions})
 	}
 	if len(auths) == 0 {
@@ -371,17 +325,11 @@ func (s *Service) authenticator() sshtransport.Authenticator {
 }
 
 func (s *Service) agents() sshtransport.AgentProvider {
-	if s.cfg.Agents != nil {
-		return s.cfg.Agents
-	}
 	var providers combinedAgents
-	if s.cfg.SignIn != nil {
-		providers = append(providers, signInAgents{signIn: s.cfg.SignIn})
-	}
-	if sessions := ownerSessionsFrom(s.cfg.OwnerSessions); len(sessions) > 0 {
+	if sessions := ownerSessionsFrom(s.ownerSessions); len(sessions) > 0 {
 		providers = append(providers, &ownerSessionAgents{
 			sessions: sessions,
-			client:   serviceHTTPClient(s.cfg, ownerSessionRequestTimeout),
+			client:   s.httpClient(ownerSessionRequestTimeout),
 			log:      s.log,
 		})
 	}
@@ -392,23 +340,18 @@ func (s *Service) agents() sshtransport.AgentProvider {
 }
 
 func (s *Service) cocorePairing() (*sshtransport.CocorePairing, error) {
-	tokens := s.cfg.CocoreTokens
-	if tokens == nil {
-		if s.cfg.StateDir == "" {
-			tokens = &memoryCocoreTokens{}
-		} else {
-			tokens = sshtransport.NewFileCocoreTokenStore(filepath.Join(s.cfg.StateDir, "cocore-tokens.json"), s.log)
-		}
+	var tokens sshtransport.CocoreTokenStore = &memoryCocoreTokens{}
+	if s.stateDir != "" {
+		tokens = sshtransport.NewFileCocoreTokenStore(filepath.Join(s.stateDir, "cocore-tokens.json"), s.log)
 	}
 	return sshtransport.NewCocorePairing(sshtransport.CocorePairingOptions{
-		APIBaseURL: s.cfg.CocoreAPIBaseURL,
+		APIBaseURL: DefaultCocoreAPIBaseURL,
 		Tokens:     tokens,
-		AppName:    s.cfg.CocoreAppName,
-		AppDID:     s.cfg.CocoreAppDID,
-		KeyName:    s.cfg.CocoreKeyName,
-		ReturnURL:  s.cfg.CocoreReturnURL,
-		TTL:        s.cfg.CocoreTTL,
-		Client:     serviceHTTPClient(s.cfg, 30*time.Second),
+		AppName:    DefaultCocoreAppName,
+		AppDID:     s.did,
+		KeyName:    DefaultCocoreAppName,
+		TTL:        DefaultCocoreTTL,
+		Client:     s.httpClient(30 * time.Second),
 		Log:        s.log,
 	})
 }
@@ -425,34 +368,15 @@ func (s *Service) health(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) connect(w http.ResponseWriter, r *http.Request) {
-	host := s.cfg.SSHPublicHost
-	host = cmp.Or(host, s.cfg.PublicHostname)
-	host = cmp.Or(host, s.cfg.SSHHost)
-	port := s.cfg.SSHPort
-	if _, _, err := net.SplitHostPort(host); err != nil && port > 0 {
-		host = net.JoinHostPort(host, fmt.Sprintf("%d", port))
-	}
-	httpjson.Write(w, http.StatusOK, map[string]any{"sshHost": host})
+	httpjson.Write(w, http.StatusOK, map[string]any{"sshHost": DefaultSSHHost})
 }
 
 func (s *Service) cocoreApp(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.CocoreAppDID == "" {
+	if s.did == "" {
 		httpjson.Write(w, http.StatusNotFound, map[string]any{"error": "NotFound"})
 		return
 	}
-	httpjson.Write(w, http.StatusOK, map[string]any{"did": s.cfg.CocoreAppDID})
-}
-
-func (s *Service) clientMetadata(w http.ResponseWriter, r *http.Request) {
-	raw, err := s.cfg.SignIn.ClientMetadata(r.Context())
-	if err != nil {
-		httpjson.Write(w, http.StatusServiceUnavailable, map[string]any{"error": "the vault is not answering"})
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "public, max-age=60")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(raw)
+	httpjson.Write(w, http.StatusOK, map[string]any{"did": s.did})
 }
 
 func (s *Service) Ready(ctx context.Context) error {
@@ -461,7 +385,7 @@ func (s *Service) Ready(ctx context.Context) error {
 	ready := s.ready
 	requester := s.requester
 	key := s.key
-	handlers := s.cfg.Deps.Handlers
+	handlers := s.deps.Bus
 	s.mu.Unlock()
 	if !started {
 		return errors.New("sshserver: the service is not started")
@@ -522,7 +446,7 @@ func (s *Service) shutdown(ctx context.Context) {
 	s.stopped = true
 	sshServer := s.sshServer
 	s.mu.Unlock()
-	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.cfg.ShutdownTimeout)
+	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), DefaultShutdownTimeout)
 	defer cancel()
 	if sshServer != nil {
 		if err := sshServer.Shutdown(stopCtx); err != nil {
@@ -535,3 +459,5 @@ func (s *Service) shutdown(ctx context.Context) {
 	s.ready = false
 	s.mu.Unlock()
 }
+
+var _ component.Service = (*Service)(nil)

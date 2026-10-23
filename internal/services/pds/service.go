@@ -14,14 +14,18 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bluesky-social/indigo/atproto/atcrypto"
 	"github.com/bluesky-social/indigo/atproto/identity"
 	"github.com/bluesky-social/indigo/atproto/syntax"
 	"github.com/bluesky-social/indigo/util/ssrf"
+	"k8s.io/utils/ptr"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
 	atpds "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/repo"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
 )
@@ -33,7 +37,16 @@ const (
 )
 
 type Service struct {
-	cfg Config
+	spec v1alpha1.PdsSpec
+	deps Deps
+
+	mode          atpds.Mode
+	stateDir      string
+	publicBaseURL string
+	plcURL        string
+	certFile      string
+	keyFile       string
+	caBundle      string
 
 	mu       sync.Mutex
 	started  bool
@@ -52,24 +65,72 @@ type Service struct {
 
 var _ component.Service = (*Service)(nil)
 
-func New(cfg Config) (*Service, error) {
-	mode := cfg.Mode
-	mode = cmp.Or(mode, atpds.ModeFull)
-	if mode != atpds.ModeFull && mode != atpds.ModeRepo {
-		return nil, fmt.Errorf("pds: unknown mode %q", mode)
+func New(spec v1alpha1.PdsSpec, deps Deps) (*Service, error) {
+	s := &Service{
+		spec:          spec,
+		deps:          deps,
+		mode:          atpds.ModeFull,
+		stateDir:      strings.TrimSpace(deps.StateDir),
+		publicBaseURL: strings.TrimRight(strings.TrimSpace(spec.PublicBaseURL), "/"),
+		plcURL:        strings.TrimRight(strings.TrimSpace(spec.PlcURL), "/"),
 	}
-	if mode == atpds.ModeRepo && cfg.OAuth != nil {
+	if spec.Mode == v1alpha1.PdsModeRepo {
+		s.mode = atpds.ModeRepo
+	}
+	if s.mode == atpds.ModeRepo && spec.OAuth != nil {
 		return nil, errors.New("pds: oauth is not available in read-only repo mode")
 	}
-	cfg.Mode = mode
-	cfg.StateDir = strings.TrimSpace(cfg.StateDir)
-	cfg.PublicBaseURL = strings.TrimRight(strings.TrimSpace(cfg.PublicBaseURL), "/")
-	if cfg.RequireIngress && cfg.PublicBaseURL != "" {
-		if err := publicEndpoint(cfg.PublicBaseURL); err != nil {
+	if spec.Storage != nil {
+		s.stateDir = cmp.Or(strings.TrimSpace(spec.Storage.DataDir), s.stateDir)
+	}
+	if s.plcURL == "" && spec.Network != nil {
+		s.plcURL = strings.TrimRight(strings.TrimSpace(spec.Network.PLCDirectoryURL), "/")
+	}
+	if spec.TLS != nil && spec.TLS.Enabled {
+		s.certFile = filePath(spec.TLS.CertRef)
+		s.keyFile = keyFileFor(s.certFile)
+		s.caBundle = strings.TrimSpace(spec.TLS.CABundle)
+	}
+	if s.caBundle == "" && spec.Network != nil {
+		s.caBundle = strings.TrimSpace(spec.Network.CABundle)
+	}
+	if spec.RequireIngress && s.publicBaseURL != "" {
+		if err := publicEndpoint(s.publicBaseURL); err != nil {
 			return nil, err
 		}
 	}
-	return &Service{cfg: cfg}, nil
+	return s, nil
+}
+
+func (s *Service) componentPath(name string) string {
+	if s.deps.StateDir == "" {
+		return ""
+	}
+	return filepath.Join(s.deps.StateDir, name)
+}
+
+func (s *Service) serviceDID() string {
+	if s.spec.Identity == nil {
+		return ""
+	}
+	return strings.TrimSpace(s.spec.Identity.Did)
+}
+
+func (s *Service) alsoKnownAs() []string {
+	if s.spec.Identity == nil {
+		return nil
+	}
+	if handle := strings.TrimSpace(s.spec.Identity.Handle); handle != "" {
+		return []string{"at://" + handle}
+	}
+	return nil
+}
+
+func (s *Service) serviceAuthAudiences() []string {
+	if s.spec.ServiceAuth == nil {
+		return nil
+	}
+	return append([]string(nil), s.spec.ServiceAuth.Audience...)
 }
 
 func publicEndpoint(raw string) error {
@@ -86,7 +147,7 @@ func publicEndpoint(raw string) error {
 	return nil
 }
 
-func (s *Service) Start(ctx context.Context, deps component.Deps) error {
+func (s *Service) Start(ctx context.Context) error {
 	s.mu.Lock()
 	if s.started {
 		s.mu.Unlock()
@@ -94,34 +155,16 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	}
 	s.mu.Unlock()
 
-	cfg := s.cfg
-	if cfg.Deps.Handlers == nil {
-		cfg.Deps.Handlers = deps.Handlers
-	}
-	if cfg.Deps.Registry == nil {
-		cfg.Deps.Registry = deps.Registry
-	}
-	if cfg.Deps.Hosts == nil {
-		cfg.Deps.Hosts = deps.Hosts
-	}
-	if cfg.Deps.TLS == nil {
-		cfg.Deps.TLS = deps.TLS
-	}
-	if cfg.Deps.Log == nil {
-		cfg.Deps.Log = deps.Log
-	}
-	cfg.StateDir = cmp.Or(cfg.StateDir, deps.StateDir)
-	if cfg.StateDir == "" {
+	stateDir := s.stateDir
+	if stateDir == "" {
 		return errors.New("pds: a state directory is required")
 	}
-	if err := os.MkdirAll(cfg.StateDir, 0o700); err != nil {
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		return fmt.Errorf("pds: creating the state directory: %w", err)
 	}
-	credentials := deps.Credentials
-	if credentials == nil {
-		credentials = cfg.Credentials
-	}
-	if _, err := buildTLSConfig(cfg); err != nil {
+	credentials := s.deps.Credentials
+	log := s.deps.Log
+	if _, err := s.buildTLSConfig(); err != nil {
 		return err
 	}
 	var err error
@@ -144,81 +187,75 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 		}
 	}()
 
-	key := cfg.Key
+	key := s.deps.Key()
 	key.Kind = cmp.Or(key.Kind, Kind)
 	key.Name = cmp.Or(key.Name, "default")
 	logicalURL := "http://" + logicalHost(key)
-	baseURL := cfg.PublicBaseURL
-	baseURL = cmp.Or(baseURL, logicalURL)
-	if cfg.PLCURL != "" && cfg.Deps.Log != nil {
-		cfg.Deps.Log.Info("pds plc directory", "url", cfg.PLCURL, "publicBaseURL", baseURL)
+	baseURL := cmp.Or(s.publicBaseURL, logicalURL)
+	plcURL := s.plcURL
+	if plcURL != "" && log != nil {
+		log.Info("pds plc directory", "url", plcURL, "publicBaseURL", baseURL)
 	}
-	handlers := cfg.Deps.Handlers
-	if cfg.PLCClient == nil && cfg.PLCURL != "" {
-		if handlers != nil && strings.HasPrefix(strings.ToLower(cfg.PLCURL), "http://") && !isLoopbackURL(cfg.PLCURL) {
-			cfg.PLCClient = handlers.HTTPClient()
+	handlers := s.deps.Bus
+	var plcClient *http.Client
+	if plcURL != "" {
+		if handlers != nil && strings.HasPrefix(strings.ToLower(plcURL), "http://") && !isLoopbackURL(plcURL) {
+			plcClient = handlers.HTTPClient()
 		} else {
-			cfg.PLCClient = cfg.Deps.ExternalHTTPClient(directoryTimeout)
+			plcClient = s.deps.Egress.Client(directoryTimeout)
 		}
 	}
 
-	repoStore, err = repo.NewSQLiteStore(filepath.Join(cfg.StateDir, "repos.db"))
+	repoStore, err = repo.NewSQLiteStore(filepath.Join(stateDir, "repos.db"))
 	if err != nil {
 		return fmt.Errorf("pds: opening the repo store: %w", err)
 	}
-	if cfg.Mode == atpds.ModeFull {
-		accountStore, err = atpds.NewStore(filepath.Join(cfg.StateDir, "accounts.db"))
+	if s.mode == atpds.ModeFull {
+		accountStore, err = atpds.NewStore(filepath.Join(stateDir, "accounts.db"))
 		if err != nil {
 			return fmt.Errorf("pds: opening the account store: %w", err)
 		}
 	}
-	blobStore := cfg.Blobs
-	if blobStore == nil {
-		blobDir := cfg.BlobsDir
-		if blobDir == "" {
-			blobDir = filepath.Join(cfg.StateDir, "blobs")
-		}
-		blobStore, err = NewFileBlobStore(blobDir)
-		if err != nil {
-			return err
-		}
+	blobDir := filepath.Join(stateDir, "blobs")
+	if s.spec.Storage != nil {
+		blobDir = cmp.Or(strings.TrimSpace(s.spec.Storage.BlobsDir), blobDir)
 	}
-
-	var sessionSecret []byte
-	if cfg.Mode == atpds.ModeFull {
-		sessionSecret, err = resolveSessionSecret(ctx, cfg.StateDir, cfg.SessionSecret, cfg.SessionSecretPath, cfg.VaultRef, credentials)
-		if err != nil {
-			return err
-		}
-	}
-
-	keyStore, err := resolveRepoKeyStore(ctx, cfg, credentials)
+	blobStore, err := NewFileBlobStore(blobDir)
 	if err != nil {
 		return err
 	}
-	if cfg.Mode == atpds.ModeFull && keyStore == nil {
+
+	var sessionSecret []byte
+	if s.mode == atpds.ModeFull {
+		sessionSecret, err = resolveSessionSecret(ctx, stateDir, s.componentPath(SessionSecretFile), s.spec.VaultRef, credentials)
+		if err != nil {
+			return err
+		}
+	}
+
+	keyStore, err := resolveRepoKeyStore(s.componentPath(RepoKeyDir), s.spec.VaultRef, credentials)
+	if err != nil {
+		return err
+	}
+	if s.mode == atpds.ModeFull && keyStore == nil {
 		return errors.New("pds: full mode needs a repo key store (repoKeyDir or a credential ref)")
 	}
 
-	directory := cfg.Directory
-	var resolver atpds.DIDResolver = cfg.Resolver
-	if directory == nil && resolver == nil {
-		directory = buildDirectory(cfg.PLCURL, cfg.PLCClient, handlers, cfg.Deps)
-	}
+	directory := buildDirectory(plcURL, plcClient, handlers, s.deps.Egress)
 
-	submitter := cfg.PLC
-	rotation := cfg.RotationKey
-	if cfg.Mode == atpds.ModeFull && submitter == nil && cfg.PLCURL != "" {
-		rotation, err = resolveRotationKey(ctx, cfg.StateDir, rotation, cfg.RotationKeyPath, cfg.VaultRef, nil, "", credentials)
+	var submitter atpds.PLCSubmitter
+	var rotation atcrypto.PrivateKey
+	if s.mode == atpds.ModeFull && plcURL != "" {
+		rotation, err = resolveRotationKey(ctx, stateDir, s.componentPath(RotationKeyFile), s.spec.VaultRef, credentials)
 		if err != nil {
 			return err
 		}
-		submitter, err = NewHTTPPLCSubmitter(cfg.PLCURL, rotation, cfg.PLCClient)
+		submitter, err = NewHTTPPLCSubmitter(plcURL, rotation, plcClient)
 		if err != nil {
 			return err
 		}
 	}
-	if cfg.Mode == atpds.ModeFull && submitter == nil && !cfg.AllowExplicitDID {
+	if s.mode == atpds.ModeFull && submitter == nil && !s.spec.AllowExplicitDID {
 		return errors.New("pds: full mode needs a PLC directory URL or submitter")
 	}
 	rotationDID := ""
@@ -230,33 +267,30 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 		rotationDID = pub.DIDKey()
 	}
 
-	oauthConfig, err := s.oauthConfig(ctx, cfg, baseURL, credentials)
+	oauthConfig, err := s.oauthConfig(stateDir, baseURL)
 	if err != nil {
 		return err
 	}
 
 	server, err := atpds.New(atpds.Config{
-		Mode:                 cfg.Mode,
+		Mode:                 s.mode,
 		Repos:                repoStore,
 		Store:                accountStore,
 		KeyStore:             keyStore,
-		Resolver:             resolver,
 		Directory:            directory,
 		PLC:                  submitter,
 		Blobs:                blobStore,
 		OAuth:                oauthConfig,
-		ServiceDID:           cfg.ServiceDID,
+		ServiceDID:           s.serviceDID(),
 		PublicBaseURL:        baseURL,
-		AlsoKnownAs:          append([]string(nil), cfg.AlsoKnownAs...),
+		AlsoKnownAs:          s.alsoKnownAs(),
 		RotationKey:          rotationDID,
-		AvailableUserDomains: append([]string(nil), cfg.AvailableUserDomains...),
-		ContactEmail:         cfg.ContactEmail,
-		Version:              cfg.Version,
+		ContactEmail:         strings.TrimSpace(s.spec.ContactEmail),
 		SessionSecret:        sessionSecret,
-		ServiceAuthAudiences: append([]string(nil), cfg.ServiceAuthAudiences...),
-		MaxBlobSize:          cfg.MaxBlobSize,
-		MaxRequestBytes:      cfg.MaxRequestBytes,
-		AllowExplicitDID:     cfg.AllowExplicitDID,
+		ServiceAuthAudiences: s.serviceAuthAudiences(),
+		MaxBlobSize:          ptr.Deref(s.spec.MaxBlobSize, 0),
+		MaxRequestBytes:      ptr.Deref(s.spec.MaxRequestBytes, 0),
+		AllowExplicitDID:     s.spec.AllowExplicitDID,
 	})
 	if err != nil {
 		return err
@@ -276,7 +310,6 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	}
 
 	s.mu.Lock()
-	s.cfg = cfg
 	s.started = true
 	s.endpoint = endpoint
 	s.key = key
@@ -292,8 +325,8 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	success = true
 	syncCtx, cancelSync := context.WithCancel(ctx)
 	var wg sync.WaitGroup
-	if cfg.RequireIngress && cfg.PublicBaseURL != "" && cfg.Mode == atpds.ModeFull && submitter != nil {
-		wg.Go(func() { s.syncServiceEndpoints(syncCtx, accountStore, submitter, cfg.PublicBaseURL) })
+	if s.spec.RequireIngress && s.publicBaseURL != "" && s.mode == atpds.ModeFull && submitter != nil {
+		wg.Go(func() { s.syncServiceEndpoints(syncCtx, accountStore, submitter, s.publicBaseURL) })
 	}
 	select {
 	case <-ctx.Done():
@@ -320,22 +353,22 @@ func (s *Service) syncServiceEndpoints(ctx context.Context, store *atpds.Store, 
 		if !strings.HasPrefix(string(did), "did:plc:") {
 			continue
 		}
-		if err := submitter.UpdateService(ctx, did, publicURL); err != nil && s.cfg.Deps.Log != nil {
-			s.cfg.Deps.Log.Warn("syncing the PDS service endpoint", "did", did.String(), "err", err.Error())
+		if err := submitter.UpdateService(ctx, did, publicURL); err != nil && s.deps.Log != nil {
+			s.deps.Log.Warn("syncing the PDS service endpoint", "did", did.String(), "err", err.Error())
 		}
 	}
 }
 
-func (s *Service) oauthConfig(ctx context.Context, cfg Config, baseURL string, credentials component.CredentialResolver) (*atpds.OAuthConfig, error) {
-	if cfg.Mode != atpds.ModeFull || cfg.OAuth == nil {
+func (s *Service) oauthConfig(stateDir, baseURL string) (*atpds.OAuthConfig, error) {
+	if s.mode != atpds.ModeFull || s.spec.OAuth == nil {
 		return nil, nil
 	}
-	opts := cfg.OAuth
-	signerKey, err := resolveOAuthSigner(ctx, cfg.StateDir, opts.Signer, opts.SignerRef, opts.SignerField, credentials)
+	opts := s.spec.OAuth
+	signerKey, err := resolveOAuthSigner(stateDir)
 	if err != nil {
 		return nil, err
 	}
-	serviceDID := cfg.ServiceDID
+	serviceDID := s.serviceDID()
 	if serviceDID == "" {
 		parsed, err := url.Parse(baseURL)
 		if err != nil || parsed.Host == "" {
@@ -347,23 +380,18 @@ func (s *Service) oauthConfig(ctx context.Context, cfg Config, baseURL string, c
 	if err != nil {
 		return nil, fmt.Errorf("pds: invalid service DID: %w", err)
 	}
-	issuer := opts.Issuer
-	issuer = cmp.Or(issuer, baseURL)
+	issuer := cmp.Or(strings.TrimRight(strings.TrimSpace(opts.Issuer), "/"), baseURL)
 	return &atpds.OAuthConfig{
 		Issuer:                  issuer,
 		Signer:                  oauth.Signer{DID: signerDID, Key: signerKey},
-		HTTPClient:              opts.HTTPClient,
-		AccessTokenTTL:          opts.AccessTokenTTL,
-		RefreshTokenTTL:         opts.RefreshTokenTTL,
-		AuthorizationCodeTTL:    opts.AuthorizationCodeTTL,
-		PARTTL:                  opts.PARTTL,
-		AllowMissingDPoPNonce:   opts.AllowMissingDPoPNonce,
-		DisableLocalhostClients: opts.DisableLocalhostClients,
+		AccessTokenTTL:          time.Duration(opts.AccessTokenTTLSeconds) * time.Second,
+		RefreshTokenTTL:         time.Duration(opts.RefreshTokenTTLSeconds) * time.Second,
+		DisableLocalhostClients: opts.DisableLocalhostClients || !opts.AllowLocalhostClients,
 		Scopes:                  append([]string(nil), opts.Scopes...),
 	}, nil
 }
 
-func buildDirectory(plcURL string, client *http.Client, handlers *component.HandlerRegistry, deps component.Deps) identity.Directory {
+func buildDirectory(plcURL string, client *http.Client, handlers *bus.Bus, egress component.Egress) identity.Directory {
 	if plcURL == "" {
 		return identity.DefaultDirectory()
 	}
@@ -377,7 +405,7 @@ func buildDirectory(plcURL string, client *http.Client, handlers *component.Hand
 	}
 	plcClient := client
 	if plcClient == nil {
-		plcClient = deps.ExternalHTTPClient(directoryTimeout)
+		plcClient = egress.Client(directoryTimeout)
 	}
 	return &identity.BaseDirectory{
 		PLCURL: plcURL,
@@ -417,7 +445,7 @@ func (s *Service) Ready(ctx context.Context) error {
 	s.mu.Lock()
 	started := s.started
 	rawURL := s.endpoint.URL
-	handlers := s.cfg.Deps.Handlers
+	handlers := s.deps.Bus
 	s.mu.Unlock()
 	if !started || rawURL == "" || handlers == nil {
 		return errors.New("pds: the service is not registered")

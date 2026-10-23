@@ -246,11 +246,8 @@ func (s *JSONFileRepoKeyStore) DeleteRepoKey(_ context.Context, did syntax.DID) 
 	return s.save(keys)
 }
 
-func resolveRepoKeyStore(ctx context.Context, cfg Config, credentials component.CredentialResolver) (atpds.RepoKeyStore, error) {
-	if cfg.RepoKeyStore != nil {
-		return cfg.RepoKeyStore, nil
-	}
-	raw := strings.TrimSpace(cfg.RepoKeyPath)
+func resolveRepoKeyStore(repoKeyPath string, vaultRef *commonv1.ObjectRef, credentials component.CredentialResolver) (atpds.RepoKeyStore, error) {
+	raw := strings.TrimSpace(repoKeyPath)
 	if raw == "" {
 		return nil, nil
 	}
@@ -258,7 +255,7 @@ func resolveRepoKeyStore(ctx context.Context, cfg Config, credentials component.
 		if credentials == nil {
 			return nil, errors.New("pds: the repo key credential needs a credential resolver")
 		}
-		ref := vaultCredentialRef(raw, cfg.VaultRef, nil)
+		ref := vaultCredentialRef(raw, vaultRef, nil)
 		return NewCredentialRepoKeyStore(credentials, ref, "")
 	}
 	path := filePath(raw)
@@ -274,10 +271,7 @@ func resolveRepoKeyStore(ctx context.Context, cfg Config, credentials component.
 	return NewJSONFileRepoKeyStore(path)
 }
 
-func resolveSessionSecret(ctx context.Context, stateDir string, explicit []byte, path string, vaultRef *commonv1.ObjectRef, credentials component.CredentialResolver) ([]byte, error) {
-	if len(explicit) > 0 {
-		return append([]byte(nil), explicit...), nil
-	}
+func resolveSessionSecret(ctx context.Context, stateDir string, path string, vaultRef *commonv1.ObjectRef, credentials component.CredentialResolver) ([]byte, error) {
 	if strings.TrimSpace(path) != "" {
 		data, err := resolvePathData(ctx, credentials, path, vaultRef, []string{"sessionSecret", "session_secret", "value", "secret"})
 		if err != nil {
@@ -307,17 +301,13 @@ func resolveSessionSecret(ctx context.Context, stateDir string, explicit []byte,
 	return secret, nil
 }
 
-func resolveOAuthSigner(ctx context.Context, stateDir string, explicit atcrypto.PrivateKey, ref *component.CredentialRef, field string, credentials component.CredentialResolver) (atcrypto.PrivateKey, error) {
-	field = cmp.Or(field, "signingKey")
-	return resolvePrivateKey(ctx, stateDir, "oauth-signing.key", explicit, ref, field, credentials, func() (atcrypto.PrivateKeyExportable, error) {
+func resolveOAuthSigner(stateDir string) (atcrypto.PrivateKey, error) {
+	return resolvePrivateKey(stateDir, "oauth-signing.key", func() (atcrypto.PrivateKeyExportable, error) {
 		return atcrypto.GeneratePrivateKeyP256()
 	})
 }
 
-func resolveRotationKey(ctx context.Context, stateDir string, explicit atcrypto.PrivateKey, path string, vaultRef *commonv1.ObjectRef, ref *component.CredentialRef, field string, credentials component.CredentialResolver) (atcrypto.PrivateKey, error) {
-	if explicit != nil {
-		return explicit, nil
-	}
+func resolveRotationKey(ctx context.Context, stateDir string, path string, vaultRef *commonv1.ObjectRef, credentials component.CredentialResolver) (atcrypto.PrivateKey, error) {
 	if strings.TrimSpace(path) != "" {
 		data, err := resolvePathData(ctx, credentials, path, vaultRef, []string{"rotationKey", "rotation_key", "value", "key"})
 		if err != nil {
@@ -325,8 +315,7 @@ func resolveRotationKey(ctx context.Context, stateDir string, explicit atcrypto.
 		}
 		return privateKeyFromData(data)
 	}
-	field = cmp.Or(field, "rotationKey")
-	return resolvePrivateKey(ctx, stateDir, "plc-rotation.key", nil, ref, field, credentials, func() (atcrypto.PrivateKeyExportable, error) {
+	return resolvePrivateKey(stateDir, "plc-rotation.key", func() (atcrypto.PrivateKeyExportable, error) {
 		return atcrypto.GeneratePrivateKeyK256()
 	})
 }
@@ -431,31 +420,7 @@ func privateKeyFromData(data map[string]any) (atcrypto.PrivateKey, error) {
 	return nil, errors.New("pds: the path holds no private key")
 }
 
-func resolvePrivateKey(ctx context.Context, stateDir, filename string, explicit atcrypto.PrivateKey, ref *component.CredentialRef, field string, credentials component.CredentialResolver, generate func() (atcrypto.PrivateKeyExportable, error)) (atcrypto.PrivateKey, error) {
-	if explicit != nil {
-		return explicit, nil
-	}
-	if ref != nil {
-		if err := ref.Check(); err != nil {
-			return nil, err
-		}
-		if credentials == nil {
-			return nil, errors.New("pds: the private key credential needs a credential resolver")
-		}
-		cred, err := credentials.Resolve(ctx, *ref)
-		if err != nil {
-			return nil, fmt.Errorf("pds: resolving the private key: %w", err)
-		}
-		raw, ok := cred.Value(field)
-		if !ok || strings.TrimSpace(raw) == "" {
-			return nil, fmt.Errorf("pds: the private key credential has no %s field", field)
-		}
-		key, err := atcrypto.ParsePrivateMultibase(strings.TrimSpace(raw))
-		if err != nil {
-			return nil, fmt.Errorf("pds: parsing the private key: %w", err)
-		}
-		return key, nil
-	}
+func resolvePrivateKey(stateDir, filename string, generate func() (atcrypto.PrivateKeyExportable, error)) (atcrypto.PrivateKey, error) {
 	path := filepath.Join(stateDir, filename)
 	data, err := os.ReadFile(path)
 	if err == nil {

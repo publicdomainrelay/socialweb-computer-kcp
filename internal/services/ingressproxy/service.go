@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/bluesky-social/indigo/atproto/identity"
+	"k8s.io/utils/ptr"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
@@ -28,47 +28,28 @@ import (
 
 const Kind = "IngressProxy"
 
-const DefaultHost = "127.0.0.1"
-
-const DefaultShutdownTimeout = 5 * time.Second
-
-type Config struct {
-	Deps              component.Deps
-	StateDir          string
-	Workspace         string
-	Address           string
-	Host              string
-	Port              int
-	Hostname          string
-	Hostnames         []string
-	IngressProxyHost  string
-	PublicHost        string
-	Network           *v1alpha1.MarketNetworkValue
-	RelayRef          *commonv1.ObjectRef
-	RelayURL          string
-	ServiceID         string
-	AdditionalHosts   []string
-	AllowedDIDs       []string
-	AllowedHosts      []string
-	PLCURL            string
-	Directory         identity.Directory
-	CertFile          string
-	KeyFile           string
-	TLS               *tls.Config
-	RelayTimeout      time.Duration
-	KeepaliveInterval time.Duration
-	KeepaliveTimeout  time.Duration
-	ReconnectGrace    time.Duration
-	NonceTTL          time.Duration
-	ShutdownTimeout   time.Duration
-	Provider          string
-	Iroh              *v1alpha1.IngressProxyIroh
-	OpenTunnel        *v1alpha1.IngressProxyOpenTunnel
-	Identity          exposure.IngressIdentity
+type Deps struct {
+	component.Instance
+	Registry *component.Registry
+	TLS      *tls.Config
+	Identity exposure.IngressIdentity
 }
 
 type Service struct {
-	cfg Config
+	spec v1alpha1.IngressProxySpec
+	deps Deps
+
+	workspace        string
+	ingressProxyHost string
+	publicHost       string
+	hostname         string
+	hostnames        []string
+	relayURL         string
+	plcURL           string
+	additionalHosts  []string
+	allowedDIDs      []string
+	allowedHosts     []string
+	tlsConfig        *tls.Config
 
 	mu sync.Mutex
 
@@ -77,135 +58,85 @@ type Service struct {
 	providerName string
 }
 
-func New(cfg Config) *Service {
-	return &Service{cfg: cfg}
-}
-
-func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, error) {
-	var decoded v1alpha1.IngressProxySpec
-	if err := spec.Spec.Decode(&decoded); err != nil {
-		return Config{}, fmt.Errorf("ingressproxy: decoding the component spec: %w", err)
+func New(spec v1alpha1.IngressProxySpec, deps Deps) (*Service, error) {
+	s := &Service{
+		spec:             spec,
+		deps:             deps,
+		workspace:        cmp.Or(strings.TrimSpace(deps.Self.Workspace), "root"),
+		ingressProxyHost: strings.TrimSpace(spec.IngressProxyHost),
+		publicHost:       strings.TrimSpace(spec.PublicHost),
+		hostnames:        append([]string(nil), spec.Hostnames...),
+		relayURL:         strings.TrimSpace(spec.RelayURL),
 	}
-	stateDir := deps.StateDir
-	if spec.StateDir != "" {
-		stateDir = spec.StateDir
-	}
-	workspace := strings.TrimSpace(spec.Workspace)
-	workspace = cmp.Or(workspace, "root")
-	cfg := Config{
-		Deps:             deps,
-		StateDir:         stateDir,
-		Workspace:        workspace,
-		Host:             DefaultHost,
-		Hostnames:        append([]string(nil), decoded.Hostnames...),
-		IngressProxyHost: strings.TrimSpace(decoded.IngressProxyHost),
-		PublicHost:       strings.TrimSpace(decoded.PublicHost),
-		RelayRef:         decoded.RelayRef,
-		RelayURL:         strings.TrimSpace(decoded.RelayURL),
-		Provider:         decoded.Provider,
-		Iroh:             copyIroh(decoded.Iroh),
-		OpenTunnel:       copyOpenTunnel(decoded.OpenTunnel),
-	}
-	if decoded.RelayTimeoutMilliseconds != nil && *decoded.RelayTimeoutMilliseconds > 0 {
-		cfg.RelayTimeout = time.Duration(*decoded.RelayTimeoutMilliseconds) * time.Millisecond
-	}
-	if decoded.KeepaliveMilliseconds != nil && *decoded.KeepaliveMilliseconds > 0 {
-		cfg.KeepaliveInterval = time.Duration(*decoded.KeepaliveMilliseconds) * time.Millisecond
-	}
-	if decoded.KeepaliveTimeoutMilliseconds != nil && *decoded.KeepaliveTimeoutMilliseconds > 0 {
-		cfg.KeepaliveTimeout = time.Duration(*decoded.KeepaliveTimeoutMilliseconds) * time.Millisecond
-	}
-	if decoded.ReconnectGraceMilliseconds != nil && *decoded.ReconnectGraceMilliseconds > 0 {
-		cfg.ReconnectGrace = time.Duration(*decoded.ReconnectGraceMilliseconds) * time.Millisecond
-	}
-	if decoded.NonceTTLMilliseconds != nil && *decoded.NonceTTLMilliseconds > 0 {
-		cfg.NonceTTL = time.Duration(*decoded.NonceTTLMilliseconds) * time.Millisecond
-	}
-	if decoded.Network != nil {
-		network := *decoded.Network
-		cfg.Network = &network
-		cfg.PLCURL = strings.TrimRight(strings.TrimSpace(decoded.Network.PLCDirectoryURL), "/")
-		if cfg.IngressProxyHost == "" {
-			cfg.IngressProxyHost = strings.TrimSpace(decoded.Network.IngressProxyHost)
+	if spec.Network != nil {
+		s.plcURL = strings.TrimRight(strings.TrimSpace(spec.Network.PLCDirectoryURL), "/")
+		if s.ingressProxyHost == "" {
+			s.ingressProxyHost = strings.TrimSpace(spec.Network.IngressProxyHost)
 		}
-		if cfg.Hostname == "" {
-			cfg.Hostname = hostport.HostnameOnly(strings.TrimSpace(decoded.Network.IngressProxyHost))
-		}
-		if cfg.RelayURL == "" {
-			cfg.RelayURL = decoded.Network.RelayURL()
+		s.hostname = hostport.HostnameOnly(strings.TrimSpace(spec.Network.IngressProxyHost))
+		if s.relayURL == "" {
+			s.relayURL = spec.Network.RelayURL()
 		}
 	}
-	if cfg.Hostname == "" {
-		cfg.Hostname = hostport.HostnameOnly(cfg.IngressProxyHost)
+	if s.hostname == "" {
+		s.hostname = hostport.HostnameOnly(s.ingressProxyHost)
 	}
-	if cfg.Hostname == "" && len(cfg.Hostnames) > 0 {
-		cfg.Hostname = hostport.HostnameOnly(strings.TrimSpace(cfg.Hostnames[0]))
+	if s.hostname == "" && len(s.hostnames) > 0 {
+		s.hostname = hostport.HostnameOnly(strings.TrimSpace(s.hostnames[0]))
 	}
-	if cfg.Hostname == "" && decoded.Identity != nil {
-		cfg.Hostname = hostport.HostnameOnly(strings.TrimSpace(decoded.Identity.Handle))
+	if s.hostname == "" && spec.Identity != nil {
+		s.hostname = hostport.HostnameOnly(strings.TrimSpace(spec.Identity.Handle))
 	}
-	if decoded.Identity != nil && strings.TrimSpace(decoded.Identity.Did) != "" {
-		cfg.AllowedDIDs = strs.AppendUniqueFold(cfg.AllowedDIDs, decoded.Identity.Did)
+	if spec.Identity != nil && strings.TrimSpace(spec.Identity.Did) != "" {
+		s.allowedDIDs = strs.AppendUniqueFold(s.allowedDIDs, spec.Identity.Did)
 	}
-	if host := hostport.HostnameOnly(cfg.IngressProxyHost); host != "" {
-		cfg.AllowedHosts = strs.AppendUniqueFold(cfg.AllowedHosts, host, "*."+host)
+	if host := hostport.HostnameOnly(s.ingressProxyHost); host != "" {
+		s.allowedHosts = strs.AppendUniqueFold(s.allowedHosts, host, "*."+host)
 	}
-	if host := hostport.HostnameOnly(cfg.PublicHost); host != "" {
-		cfg.AllowedHosts = strs.AppendUniqueFold(cfg.AllowedHosts, host)
-		cfg.Hostnames = strs.AppendUniqueFold(cfg.Hostnames, host)
+	if host := hostport.HostnameOnly(s.publicHost); host != "" {
+		s.allowedHosts = strs.AppendUniqueFold(s.allowedHosts, host)
+		s.hostnames = strs.AppendUniqueFold(s.hostnames, host)
 	}
-	if decoded.Storage != nil && decoded.Storage.DataDir != "" {
-		cfg.StateDir = decoded.Storage.DataDir
+	if spec.TLS != nil {
+		s.hostnames = strs.AppendUniqueFold(s.hostnames, spec.TLS.Hostnames...)
 	}
-	if decoded.Serve != nil {
-		if decoded.Serve.Host != "" {
-			cfg.Host = decoded.Serve.Host
-		}
-		cfg.Port = int(decoded.Serve.Port)
+	if spec.Network != nil {
+		s.hostnames = strs.AppendUniqueFold(s.hostnames, hostport.NetworkHostnames(spec.Network, s.servePort())...)
 	}
-	if decoded.TLS != nil {
-		cfg.Hostnames = strs.AppendUniqueFold(cfg.Hostnames, decoded.TLS.Hostnames...)
+	s.additionalHosts = strs.AppendUniqueFold(nil, additionalHosts(hostport.Primary(s.hostname, s.hostnames), s.hostnames)...)
+	if wildcard := wildcardHost(s.hostnames); wildcard != "" {
+		s.allowedHosts = strs.AppendUniqueFold(s.allowedHosts, wildcard)
 	}
-	if decoded.Network != nil {
-		cfg.Hostnames = strs.AppendUniqueFold(cfg.Hostnames, hostport.NetworkHostnames(decoded.Network, cfg.Port)...)
+	if relayURL, ok := relayEndpoint(deps.Registry, s.workspace, spec.RelayRef); ok {
+		s.relayURL = relayURL
 	}
-	cfg.AdditionalHosts = strs.AppendUniqueFold(cfg.AdditionalHosts, additionalHosts(hostport.Primary(cfg.Hostname, cfg.Hostnames), cfg.Hostnames)...)
-	if wildcard := wildcardHost(cfg.Hostnames); wildcard != "" {
-		cfg.AllowedHosts = strs.AppendUniqueFold(cfg.AllowedHosts, wildcard)
-	}
-	if decoded.RelayRef != nil {
-		if relayURL, ok := relayEndpoint(cfg.Deps, cfg.Workspace, decoded.RelayRef); ok {
-			cfg.RelayURL = relayURL
-		}
-	}
-	if decoded.TLS != nil && decoded.TLS.Enabled {
-		certFile, keyFile := servetls.CertificateFiles(decoded.TLS.CertRef, decoded.Storage, cfg.Hostnames)
-		cfg.CertFile = certFile
-		cfg.KeyFile = keyFile
-		tlsConfig, err := servetls.Config(cfg.CertFile, deps.TLS, deps.Log)
+	if spec.TLS != nil && spec.TLS.Enabled {
+		certFile, _ := servetls.CertificateFiles(spec.TLS.CertRef, spec.Storage, s.hostnames)
+		tlsConfig, err := servetls.Config(certFile, deps.TLS, deps.Log)
 		if err != nil {
-			return Config{}, fmt.Errorf("ingressproxy: %w", err)
+			return nil, fmt.Errorf("ingressproxy: %w", err)
 		}
-		cfg.TLS = tlsConfig
+		s.tlsConfig = tlsConfig
 	}
-	return cfg, nil
+	return s, nil
 }
 
-func copyIroh(in *v1alpha1.IngressProxyIroh) *v1alpha1.IngressProxyIroh {
-	if in == nil {
-		return nil
+func (s *Service) servePort() int {
+	if s.spec.Serve == nil {
+		return 0
 	}
-	out := *in
-	return &out
+	return int(s.spec.Serve.Port)
 }
 
-func copyOpenTunnel(in *v1alpha1.IngressProxyOpenTunnel) *v1alpha1.IngressProxyOpenTunnel {
-	if in == nil {
-		return nil
+func (s *Service) serveHost() string {
+	if s.spec.Serve == nil {
+		return ""
 	}
-	out := *in
-	out.Command = append([]string(nil), in.Command...)
-	return &out
+	return s.spec.Serve.Host
+}
+
+func milliseconds(v *int32) time.Duration {
+	return time.Duration(ptr.Deref(v, 0)) * time.Millisecond
 }
 
 func additionalHosts(primary string, hostnames []string) []string {
@@ -229,7 +160,7 @@ func wildcardHost(hostnames []string) string {
 	return ""
 }
 
-func relayEndpoint(deps component.Deps, workspace string, ref *commonv1.ObjectRef) (string, bool) {
+func relayEndpoint(registry *component.Registry, workspace string, ref *commonv1.ObjectRef) (string, bool) {
 	if ref == nil {
 		return "", false
 	}
@@ -239,17 +170,17 @@ func relayEndpoint(deps component.Deps, workspace string, ref *commonv1.ObjectRe
 	if name == "" {
 		return "", false
 	}
-	if deps.Registry == nil {
+	if registry == nil {
 		return "", false
 	}
 	if workspace != "" {
 		for _, wanted := range []string{"http", "relay", "subscribeRepos"} {
-			if endpoint, ok := deps.Registry.Endpoint(workspace, kind, name, wanted); ok {
+			if endpoint, ok := registry.Endpoint(workspace, kind, name, wanted); ok {
 				return hostport.EndpointURL(endpoint)
 			}
 		}
 	}
-	for _, entry := range deps.Registry.List("") {
+	for _, entry := range registry.List("") {
 		if entry.Key.Kind != kind || entry.Key.Name != name {
 			continue
 		}
@@ -267,24 +198,13 @@ func relayEndpoint(deps component.Deps, workspace string, ref *commonv1.ObjectRe
 	return "", false
 }
 
-func Register(runtime *component.Runtime, identity exposure.IngressIdentity) error {
-	return runtime.Register(Kind, func(ctx context.Context, deps component.Deps, spec component.ComponentSpec) (component.Service, error) {
-		cfg, err := ConfigFrom(deps, spec)
-		if err != nil {
-			return nil, err
-		}
-		cfg.Identity = identity
-		return New(cfg), nil
-	})
-}
-
-func buildProvider(cfg Config) (Provider, string, error) {
-	name := strings.ToLower(strings.TrimSpace(cfg.Provider))
+func (s *Service) buildProvider(relayURL string) (Provider, string, error) {
+	name := strings.ToLower(strings.TrimSpace(s.spec.Provider))
 	if name == "" {
 		switch {
-		case cfg.OpenTunnel != nil:
+		case s.spec.OpenTunnel != nil:
 			name = v1alpha1.IngressProviderOpenTunnel
-		case strings.TrimSpace(cfg.IngressProxyHost) != "":
+		case s.ingressProxyHost != "":
 			name = v1alpha1.IngressProviderXRPCSubscription
 		default:
 			return nil, "", errors.New("ingressproxy: no provider selected: set spec.provider, spec.xrpc.ingressProxyHost or spec.opentunnel")
@@ -293,71 +213,67 @@ func buildProvider(cfg Config) (Provider, string, error) {
 	switch name {
 	case v1alpha1.IngressProviderXRPCSubscription:
 		provider := xrpcsubscription.New(xrpcsubscription.Config{
-			Address:           cfg.Address,
-			Host:              cfg.Host,
-			Port:              cfg.Port,
-			Hostname:          cfg.Hostname,
-			Hostnames:         append([]string(nil), cfg.Hostnames...),
-			ServiceID:         cfg.ServiceID,
-			AdditionalHosts:   append([]string(nil), cfg.AdditionalHosts...),
-			AllowedDIDs:       append([]string(nil), cfg.AllowedDIDs...),
-			AllowedHosts:      append([]string(nil), cfg.AllowedHosts...),
-			PLCURL:            cfg.PLCURL,
-			Directory:         cfg.Directory,
-			CertFile:          cfg.CertFile,
-			KeyFile:           cfg.KeyFile,
-			TLS:               cfg.TLS,
-			RelayURL:          cfg.RelayURL,
-			RelayTimeout:      cfg.RelayTimeout,
-			KeepaliveInterval: cfg.KeepaliveInterval,
-			KeepaliveTimeout:  cfg.KeepaliveTimeout,
-			ReconnectGrace:    cfg.ReconnectGrace,
-			NonceTTL:          cfg.NonceTTL,
-			ShutdownTimeout:   cfg.ShutdownTimeout,
-			Identity:          cfg.Identity,
+			Host:              s.serveHost(),
+			Port:              s.servePort(),
+			Hostname:          s.hostname,
+			Hostnames:         append([]string(nil), s.hostnames...),
+			AdditionalHosts:   append([]string(nil), s.additionalHosts...),
+			AllowedDIDs:       append([]string(nil), s.allowedDIDs...),
+			AllowedHosts:      append([]string(nil), s.allowedHosts...),
+			PLCURL:            s.plcURL,
+			TLS:               s.tlsConfig,
+			RelayURL:          relayURL,
+			RelayTimeout:      milliseconds(s.spec.RelayTimeoutMilliseconds),
+			KeepaliveInterval: milliseconds(s.spec.KeepaliveMilliseconds),
+			KeepaliveTimeout:  milliseconds(s.spec.KeepaliveTimeoutMilliseconds),
+			ReconnectGrace:    milliseconds(s.spec.ReconnectGraceMilliseconds),
+			NonceTTL:          milliseconds(s.spec.NonceTTLMilliseconds),
+			Identity:          s.deps.Identity,
+			Log:               s.deps.Log,
+			Registry:          s.deps.Registry,
+			Bus:               s.deps.Bus,
 		})
 		return provider, v1alpha1.IngressProviderXRPCSubscription, nil
 	case v1alpha1.IngressProviderIroh:
 		return nil, "", errors.New("ingressproxy: provider iroh is not supported yet; select xrpc-subscription or opentunnel")
 	case v1alpha1.IngressProviderOpenTunnel:
-		if cfg.OpenTunnel == nil {
+		spec := s.spec.OpenTunnel
+		if spec == nil {
 			return nil, "", errors.New("ingressproxy: provider opentunnel requires spec.opentunnel")
 		}
 		providerCfg := opentunnel.Config{
-			Command:       append([]string(nil), cfg.OpenTunnel.Command...),
-			RouteName:     strings.TrimSpace(cfg.OpenTunnel.RouteName),
-			ProxyProtocol: strings.TrimSpace(cfg.OpenTunnel.ProxyProtocol),
-			LocalHost:     strings.TrimSpace(cfg.OpenTunnel.LocalHost),
+			Command:       append([]string(nil), spec.Command...),
+			RouteName:     strings.TrimSpace(spec.RouteName),
+			ProxyProtocol: strings.TrimSpace(spec.ProxyProtocol),
+			LocalHost:     strings.TrimSpace(spec.LocalHost),
+			StateDir:      s.deps.StateDir,
+			Log:           s.deps.Log,
+			Bus:           s.deps.Bus,
 		}
 		if err := providerCfg.Check(); err != nil {
 			return nil, "", err
 		}
 		return opentunnel.New(providerCfg), v1alpha1.IngressProviderOpenTunnel, nil
 	default:
-		return nil, "", fmt.Errorf("ingressproxy: unknown provider %q (use %s, %s or %s)", cfg.Provider,
+		return nil, "", fmt.Errorf("ingressproxy: unknown provider %q (use %s, %s or %s)", s.spec.Provider,
 			v1alpha1.IngressProviderXRPCSubscription, v1alpha1.IngressProviderIroh, v1alpha1.IngressProviderOpenTunnel)
 	}
 }
 
-func (s *Service) Start(ctx context.Context, deps component.Deps) error {
-	cfg := s.cfg
-	cfg.Deps = cfg.Deps.Or(deps)
-	cfg.Workspace = cmp.Or(cfg.Workspace, "root")
-	if cfg.RelayRef != nil {
-		if relayURL, ok := relayEndpoint(cfg.Deps, cfg.Workspace, cfg.RelayRef); ok {
-			cfg.RelayURL = relayURL
-		}
+func (s *Service) Start(ctx context.Context) error {
+	relayURL := s.relayURL
+	if target, ok := relayEndpoint(s.deps.Registry, s.workspace, s.spec.RelayRef); ok {
+		relayURL = target
 	}
-	provider, name, err := buildProvider(cfg)
+	provider, name, err := s.buildProvider(relayURL)
 	if err != nil {
 		return err
 	}
 	s.mu.Lock()
-	s.cfg = cfg
 	s.provider = provider
 	s.providerName = name
 	s.mu.Unlock()
-	return provider.Start(ctx, cfg.Deps)
+	return provider.Start(ctx)
 }
 
 func (s *Service) Ready(ctx context.Context) error {
@@ -393,13 +309,13 @@ func (s *Service) Endpoints() []component.Endpoint {
 }
 
 func (s *Service) publicURLLocked() string {
-	if value := strings.TrimSpace(s.cfg.PublicHost); value != "" {
+	if value := s.publicHost; value != "" {
 		if parsed, err := url.Parse(value); err == nil && parsed.Host != "" {
 			return parsed.Scheme + "://" + parsed.Host
 		}
 		return "https://" + hostport.HostnameOnly(value)
 	}
-	host := hostport.HostnameOnly(hostport.Primary(s.cfg.Hostname, s.cfg.Hostnames))
+	host := hostport.HostnameOnly(hostport.Primary(s.hostname, s.hostnames))
 	if host == "" || host == "localhost" {
 		return ""
 	}
@@ -437,6 +353,8 @@ func (s *Service) IngressProvider() string {
 	defer s.mu.Unlock()
 	return s.providerName
 }
+
+var _ component.Service = (*Service)(nil)
 
 var _ Provider = (*xrpcsubscription.Provider)(nil)
 

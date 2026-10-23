@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterlink"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/exposure"
@@ -45,6 +46,12 @@ type Config struct {
 	RelayURL string
 
 	ListenHost string
+
+	StateDir string
+
+	Log *slog.Logger
+
+	Bus *bus.Bus
 }
 
 func (c Config) Check() error {
@@ -90,8 +97,6 @@ type Provider struct {
 
 	log *slog.Logger
 
-	deps component.Deps
-
 	ctx context.Context
 
 	cancel context.CancelFunc
@@ -111,11 +116,11 @@ func New(cfg Config) *Provider {
 	return &Provider{cfg: cfg}
 }
 
-func (p *Provider) Start(ctx context.Context, deps component.Deps) error {
+func (p *Provider) Start(ctx context.Context) error {
 	if err := p.cfg.Check(); err != nil {
 		return err
 	}
-	log := deps.Log
+	log := p.cfg.Log
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
@@ -126,7 +131,6 @@ func (p *Provider) Start(ctx context.Context, deps component.Deps) error {
 		cancel()
 		return errors.New("ingressproxy iroh: the provider already started")
 	}
-	p.deps = deps
 	p.log = log
 	p.ctx = runCtx
 	p.cancel = cancel
@@ -189,13 +193,12 @@ func (p *Provider) Register(ctx context.Context, spec exposure.IngressSpec) (exp
 	p.mu.Lock()
 	ready := p.ready
 	root := p.ctx
-	deps := p.deps
 	log := p.log
 	p.mu.Unlock()
 	if !ready || root == nil {
 		return nil, errors.New("ingressproxy iroh: the provider is not started")
 	}
-	if deps.Handlers == nil {
+	if p.cfg.Bus == nil {
 		return nil, errors.New("ingressproxy iroh: the handler registry is not configured")
 	}
 	bridge, err := loopback.Start(loopback.Config{
@@ -203,7 +206,7 @@ func (p *Provider) Register(ctx context.Context, spec exposure.IngressSpec) (exp
 		Protocol: string(spec.Protocol),
 		Target:   spec.Target,
 		Handler:  spec.Handler,
-		Handlers: deps.Handlers,
+		Handlers: p.cfg.Bus,
 		Caller:   spec.Caller(),
 	})
 	if err != nil {
@@ -272,7 +275,7 @@ func (p *Provider) forget(registration *registration) {
 }
 
 func (p *Provider) secret(workspace, exposure string) (string, error) {
-	dir := filepath.Join(p.deps.StateDir, "iroh")
+	dir := filepath.Join(p.cfg.StateDir, "iroh")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("ingressproxy iroh: the secret dir: %w", err)
 	}

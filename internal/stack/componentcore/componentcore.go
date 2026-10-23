@@ -18,6 +18,7 @@ import (
 	"k8s.io/client-go/rest"
 
 	"github.com/bluesky-social/indigo/atproto/identity"
+	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	atprotooauth "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauthclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
@@ -77,8 +78,6 @@ type Config struct {
 
 	CredentialClient string
 
-	VaultClient string
-
 	KCP component.KCPClients
 
 	Store *kcpstore.Store
@@ -119,7 +118,11 @@ type Config struct {
 type Core struct {
 	cfg Config
 
-	deps component.Deps
+	credentials component.CredentialResolver
+
+	tls *tls.Config
+
+	hosts component.NetworkHosts
 
 	runtime *component.Runtime
 
@@ -228,46 +231,25 @@ func New(cfg Config) (*Core, error) {
 	if err != nil {
 		return nil, fmt.Errorf("componentcore: the credential resolver: %w", err)
 	}
-	vaultClient := strings.TrimSpace(cfg.VaultClient)
-	if vaultClient == "" {
-		vaultClient = strings.TrimSpace(cfg.CredentialClient)
-	}
-	if vaultClient == "" && strings.TrimSpace(cfg.CredentialServer) != "" {
-		return nil, errors.New("componentcore: the vault clients need the named client certificate of the credential server")
-	}
-	vault, err := credentials.NewClients(store, base, vaultClient)
-	if err != nil {
-		return nil, fmt.Errorf("componentcore: the vault clients: %w", err)
-	}
 	registry := component.NewRegistry()
 	handlers := cfg.Handlers
 	if handlers == nil {
 		handlers = component.NewHandlerRegistry()
 	}
 	handlers.SetLogger(cfg.Log.With("component", "bus"))
-	deps := component.Deps{
-		KCP:         cfg.KCP,
-		Credentials: resolver,
-		Vault:       vault,
-		TLS:         tlsConfig,
-		Log:         cfg.Log,
-		StateDir:    cfg.StateDir,
-		Hosts:       registryHosts{registry: registry},
-		Registry:    registry,
-		Handlers:    handlers,
-
-		NodeClaimAgent: cfg.NodeClaimAgent,
-	}
 	registrar := cfg.ExposureIngressRegistrar
 	fallbackName := "configured-registrar"
 	if registrar == nil {
-		registrar = exposure.NewSubscriberRegistrar(deps, cfg.ExposureIngressIdentity)
+		registrar = exposure.NewSubscriberRegistrar(registry, handlers, cfg.ExposureIngressIdentity)
 		fallbackName = "xrpc-subscription"
 	}
 	dispatcher := newIngressDispatcher(registry, registrar, fallbackName, cfg.Log)
-	runtime := component.NewRuntime(deps, nil)
+	runtime := component.NewRuntime(component.RuntimeConfig{Log: cfg.Log, StateDir: cfg.StateDir, Registry: registry, Bus: handlers}, nil)
 	runtime.SetStateDirMaker(func(dir string) error { return os.MkdirAll(dir, 0o700) })
-	if err := Register(runtime, cfg.ExposureIngressIdentity); err != nil {
+	core := &Core{cfg: cfg, credentials: resolver, tls: tlsConfig, hosts: registryHosts{registry: registry}, runtime: runtime,
+		registry: registry, ports: ports, store: store, handlers: handlers, linkPolicy: exposure.NewLinkPolicy(handlers),
+		ingressRegistrar: dispatcher}
+	if err := core.register(); err != nil {
 		return nil, err
 	}
 	ctl, err := component.NewController(component.ControllerConfig{Runtime: runtime, Source: newSource(cfg, factory),
@@ -275,31 +257,52 @@ func New(cfg Config) (*Core, error) {
 	if err != nil {
 		return nil, err
 	}
-	core := &Core{cfg: cfg, deps: deps, runtime: runtime, controller: ctl, registry: registry, ports: ports, store: store,
-		handlers: handlers, linkPolicy: exposure.NewLinkPolicy(handlers), ingressRegistrar: dispatcher}
+	core.controller = ctl
 	core.buildControllers()
 	return core, nil
 }
 
-func Register(runtime *component.Runtime, identity exposure.IngressIdentity) error {
-	if err := ingressproxy.Register(runtime, identity); err != nil {
-		return err
+func (c *Core) register() error {
+	kcp, creds, tlsConfig, hosts, registry, identity := c.cfg.KCP, c.credentials, c.tls, c.hosts, c.registry, c.cfg.ExposureIngressIdentity
+	egress := func(in component.Instance) component.Egress {
+		return component.Egress{Hosts: hosts, TLS: tlsConfig, Log: in.Log}
 	}
 	for _, entry := range []struct {
 		kind    string
 		factory component.ServiceFactory
 	}{
-		{plc.Kind, component.FactoryOf(plc.ConfigFrom, plc.New)},
-		{relay.Kind, component.FactoryOf(relay.ConfigFrom, relay.New)},
-		{dispatchertls.Kind, component.FactoryOf(dispatchertls.ConfigFrom, dispatchertls.New)},
-		{gatewayapi.Kind, component.FactoryOf(gatewayapi.ConfigFrom, gatewayapi.New)},
-		{bidder.Kind, component.FallibleFactoryOf(bidder.ConfigFrom, bidder.New)},
-		{guestcontrolplane.Kind, component.FallibleFactoryOf(guestcontrolplane.ConfigFrom, guestcontrolplane.New)},
-		{pds.Kind, component.FallibleFactoryOf(pds.ConfigFrom, pds.New)},
-		{requester.Kind, component.FallibleFactoryOf(requester.ConfigFrom, requester.New)},
-		{sshserver.Kind, component.FallibleFactoryOf(sshserver.ConfigFrom, sshserver.New)},
+		{plc.Kind, component.Typed(func(in component.Instance, spec v1alpha1.PlcSpec) (*plc.Service, error) {
+			return plc.New(spec, in), nil
+		})},
+		{relay.Kind, component.Typed(func(in component.Instance, spec v1alpha1.RelaySpec) (*relay.Service, error) {
+			return relay.New(spec, relay.Deps{Instance: in, Registry: registry, TLS: tlsConfig, Egress: egress(in)})
+		})},
+		{dispatchertls.Kind, component.Typed(func(in component.Instance, spec v1alpha1.DispatcherTLSSpec) (*dispatchertls.Service, error) {
+			return dispatchertls.New(spec, dispatchertls.Deps{Instance: in, Registry: registry, TLS: tlsConfig}), nil
+		})},
+		{ingressproxy.Kind, component.Typed(func(in component.Instance, spec v1alpha1.IngressProxySpec) (*ingressproxy.Service, error) {
+			return ingressproxy.New(spec, ingressproxy.Deps{Instance: in, Registry: registry, TLS: tlsConfig, Identity: identity})
+		})},
+		{gatewayapi.Kind, component.Typed(func(in component.Instance, spec v1alpha1.GatewayAPISpec) (*gatewayapi.Service, error) {
+			return gatewayapi.New(spec, gatewayapi.Deps{Instance: in, KCP: kcp, TLS: tlsConfig, NodeClaimAgent: c.cfg.NodeClaimAgent})
+		})},
+		{bidder.Kind, component.Typed(func(in component.Instance, spec v1alpha1.BidderSpec) (*bidder.Service, error) {
+			return bidder.New(spec, bidder.Deps{Instance: in, KCP: kcp, Credentials: creds, Egress: egress(in)})
+		})},
+		{guestcontrolplane.Kind, component.Typed(func(in component.Instance, spec v1alpha1.GuestControlPlaneSpec) (*guestcontrolplane.Service, error) {
+			return guestcontrolplane.New(spec, guestcontrolplane.Deps{Instance: in, KCP: kcp, Hosts: hosts})
+		})},
+		{pds.Kind, component.Typed(func(in component.Instance, spec v1alpha1.PdsSpec) (*pds.Service, error) {
+			return pds.New(spec, pds.Deps{Instance: in, Credentials: creds, TLS: tlsConfig, Egress: egress(in)})
+		})},
+		{requester.Kind, component.Typed(func(in component.Instance, spec v1alpha1.RequesterSpec) (*requester.Service, error) {
+			return requester.New(spec, requester.Deps{Instance: in, KCP: kcp, Credentials: creds, Egress: egress(in)})
+		})},
+		{sshserver.Kind, component.Typed(func(in component.Instance, spec v1alpha1.SshServerSpec) (*sshserver.Service, error) {
+			return sshserver.New(spec, sshserver.Deps{Instance: in, Registry: registry, Hosts: hosts, TLS: tlsConfig})
+		})},
 	} {
-		if err := runtime.Register(entry.kind, entry.factory); err != nil {
+		if err := c.runtime.Register(entry.kind, entry.factory); err != nil {
 			return err
 		}
 	}
@@ -343,10 +346,6 @@ func (c *Core) Runtime() *component.Runtime {
 
 func (c *Core) Controller() *component.Controller {
 	return c.controller
-}
-
-func (c *Core) Deps() component.Deps {
-	return c.deps
 }
 
 func (c *Core) runIdentity(ctx context.Context) {

@@ -33,12 +33,12 @@ var (
 	PolicyWorkflowRunGVR = policyv1alpha1.PolicyWorkflowRunGVR
 )
 
-func kcpStore(deps component.Deps, workspace string) (*kcpstore.Store, string, error) {
-	if deps.KCP == nil {
+func kcpStore(clients component.KCPClients, workspace string) (*kcpstore.Store, string, error) {
+	if clients == nil {
 		return nil, "", errors.New("bidder: the component has no kcp clients")
 	}
 	workspace = cmp.Or(workspace, "root")
-	client, err := deps.KCP.Client(workspace)
+	client, err := clients.Client(workspace)
 	if err != nil {
 		return nil, "", fmt.Errorf("bidder: kcp client for %s: %w", workspace, err)
 	}

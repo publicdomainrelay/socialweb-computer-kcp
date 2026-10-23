@@ -11,20 +11,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/bluesky-social/indigo/atproto/identity"
-
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/ingress"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/exposure"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
-const DefaultShutdownTimeout = 5 * time.Second
+const shutdownTimeout = 5 * time.Second
 
 type Config struct {
-	Address string
-
 	Host string
 
 	Port int
@@ -33,8 +29,6 @@ type Config struct {
 
 	Hostnames []string
 
-	ServiceID string
-
 	AdditionalHosts []string
 
 	AllowedDIDs []string
@@ -42,12 +36,6 @@ type Config struct {
 	AllowedHosts []string
 
 	PLCURL string
-
-	Directory identity.Directory
-
-	CertFile string
-
-	KeyFile string
 
 	TLS *tls.Config
 
@@ -63,9 +51,13 @@ type Config struct {
 
 	NonceTTL time.Duration
 
-	ShutdownTimeout time.Duration
-
 	Identity exposure.IngressIdentity
+
+	Log *slog.Logger
+
+	Registry *component.Registry
+
+	Bus *bus.Bus
 }
 
 type Provider struct {
@@ -94,16 +86,15 @@ func New(cfg Config) *Provider {
 	return &Provider{cfg: cfg}
 }
 
-func (p *Provider) Start(ctx context.Context, deps component.Deps) error {
+func (p *Provider) Start(ctx context.Context) error {
 	cfg := p.cfg
-	log := deps.Log
+	log := cfg.Log
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
 	hostname := hostport.Primary(cfg.Hostname, cfg.Hostnames)
 	server, err := ingress.NewServer(ingress.Config{
 		Hostname:          hostname,
-		ServiceID:         cfg.ServiceID,
 		RelayTimeout:      cfg.RelayTimeout,
 		KeepaliveInterval: cfg.KeepaliveInterval,
 		KeepaliveTimeout:  cfg.KeepaliveTimeout,
@@ -112,14 +103,13 @@ func (p *Provider) Start(ctx context.Context, deps component.Deps) error {
 		AdditionalHosts:   append([]string(nil), cfg.AdditionalHosts...),
 		AllowedDIDs:       append([]string(nil), cfg.AllowedDIDs...),
 		AllowedHosts:      append([]string(nil), cfg.AllowedHosts...),
-		Directory:         cfg.Directory,
 		PLCURL:            cfg.PLCURL,
 		Logger:            log,
 	})
 	if err != nil {
 		return fmt.Errorf("ingressproxy: building the server: %w", err)
 	}
-	rawListener, err := net.Listen("tcp", hostport.Listen(cfg.Address, cfg.Host, cfg.Port))
+	rawListener, err := net.Listen("tcp", hostport.Listen("", cfg.Host, cfg.Port))
 	if err != nil {
 		server.Close()
 		return fmt.Errorf("ingressproxy: listening: %w", err)
@@ -133,7 +123,7 @@ func (p *Provider) Start(ctx context.Context, deps component.Deps) error {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	stopCh := make(chan struct{})
-	registrar := exposure.NewSubscriberRegistrar(deps, cfg.Identity)
+	registrar := exposure.NewSubscriberRegistrar(cfg.Registry, cfg.Bus, cfg.Identity)
 
 	p.mu.Lock()
 	if p.http != nil {
@@ -142,7 +132,6 @@ func (p *Provider) Start(ctx context.Context, deps component.Deps) error {
 		server.Close()
 		return errors.New("ingressproxy: the service already started")
 	}
-	p.cfg = cfg
 	p.log = log
 	p.server = server
 	p.http = httpServer
@@ -255,13 +244,11 @@ func (p *Provider) IngressRegistrar() exposure.IngressRegistrar {
 func (p *Provider) shutdown(ctx context.Context) {
 	p.mu.Lock()
 	httpServer := p.http
-	timeout := p.cfg.ShutdownTimeout
 	p.mu.Unlock()
 	if httpServer == nil {
 		return
 	}
-	timeout = opt.Positive(timeout, DefaultShutdownTimeout)
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownTimeout)
 	defer cancel()
 	if err := httpServer.Shutdown(ctx); err != nil {
 		_ = httpServer.Close()

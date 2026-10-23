@@ -21,6 +21,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
+	"k8s.io/utils/ptr"
 
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
 	corev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
@@ -29,14 +30,23 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestidentity"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 )
 
 type Service struct {
-	cfg Config
+	spec corev1alpha1.GuestControlPlaneSpec
+
+	deps Deps
 
 	log *slog.Logger
+
+	stateDir string
+
+	vaultServer string
+
+	grantSync time.Duration
+
+	issuerRetry time.Duration
 
 	mu sync.Mutex
 
@@ -78,6 +88,8 @@ type Service struct {
 
 	rbac guestidentity.RBACSource
 
+	openBao OpenBaoSource
+
 	syncer *guestidentity.Syncer
 
 	grantsLoop *grantLoop
@@ -87,11 +99,7 @@ type Service struct {
 	issuer atomic.Value
 }
 
-func (s *Service) Start(ctx context.Context, deps component.Deps) error {
-	s.cfg.Deps = deps
-	if deps.Log != nil {
-		s.log = deps.Log.With("component", "guestcontrolplane", "handle", s.cfg.Handle)
-	}
+func (s *Service) Start(ctx context.Context) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	s.mu.Lock()
 	if s.started {
@@ -172,24 +180,22 @@ func (s *Service) shutdownWith(ctx context.Context) error {
 }
 
 func (s *Service) prepare(ctx context.Context) error {
-	if s.cfg.StateDir != "" {
-		if err := os.MkdirAll(s.cfg.StateDir, 0o700); err != nil {
+	if s.stateDir != "" {
+		if err := os.MkdirAll(s.stateDir, 0o700); err != nil {
 			return fmt.Errorf("guestcontrolplane: creating the state dir: %w", err)
 		}
 	}
-	if s.cfg.VMs == nil || s.cfg.Grants == nil || s.cfg.OpenBao == nil {
-		if err := s.resolveKCP(ctx); err != nil {
-			s.log.Warn("the guest control plane runs without some kcp stores", "err", err)
-		}
+	if err := s.resolveKCP(ctx); err != nil {
+		s.log.Warn("the guest control plane runs without some kcp stores", "err", err)
 	}
-	s.dir = ingress.NewDirectory(s.cfg.Network.PLCDirectoryURL)
+	s.dir = ingress.NewDirectory(s.network().PLCDirectoryURL)
 	if err := s.resolveIdentity(ctx); err != nil {
 		s.log.Warn("the bidder identity is not resolved yet", "err", err)
 	}
 	s.resolveStores()
 	endpoint := s.endpointResolver()
 	identityClient, err := guestidentity.NewClient(guestidentity.Options{
-		Mount:    s.cfg.GuestLoginMount,
+		Mount:    s.spec.GuestLoginMount,
 		Endpoint: endpoint,
 		Timeout:  DefaultOpenBaoTimeout,
 	})
@@ -200,23 +206,20 @@ func (s *Service) prepare(ctx context.Context) error {
 	s.verifier = guestidentity.NewVerifier(guestidentity.IdentityKeys(identityClient), func() string {
 		return guestidentity.OIDCIssuer(s.issuerURL())
 	})
-	if s.cfg.RBAC == nil {
-		s.cfg.RBAC = &guestidentity.RepoRBAC{
-			Reader: reporemote.NewNetwork(reporemote.NetworkConfig{Directory: s.dir,
-				HTTP: networkHTTPClient(s.cfg.Deps, s.cfg.Network, DefaultOpenBaoTimeout)}),
-			Log: s.log,
-		}
+	s.rbac = &guestidentity.RepoRBAC{
+		Reader: reporemote.NewNetwork(reporemote.NetworkConfig{Directory: s.dir,
+			HTTP: networkHTTPClient(s.deps.Hosts, s.network(), DefaultOpenBaoTimeout)}),
+		Log: s.log,
 	}
-	s.rbac = s.cfg.RBAC
-	if s.cfg.Grants == nil {
+	if s.grants == nil {
 		s.log.Warn("the guest identity grants cannot sync without a grant store")
 	} else {
 		syncer, err := guestidentity.NewSyncer(ctx, guestidentity.SyncerOptions{
-			Store:  s.cfg.Grants,
+			Store:  s.grants,
 			RBAC:   s.rbac,
 			Issuer: func() string { return guestidentity.OIDCIssuer(s.issuerURL()) },
 			Log:    s.log,
-			Resync: s.cfg.GrantSync,
+			Resync: s.grantSync,
 		})
 		if err != nil {
 			return err
@@ -224,14 +227,13 @@ func (s *Service) prepare(ctx context.Context) error {
 		s.syncer = syncer
 	}
 	guest, err := guestidentity.NewGuest(ctx, guestidentity.GuestOptions{
-		Handle:          s.cfg.Handle,
+		Handle:          s.handle(),
 		Identity:        identityClient,
 		Verifier:        s.verifier,
 		VMs:             s.vms,
 		Log:             s.log,
-		Now:             s.cfg.Now,
-		HostKeyAttempts: s.cfg.HostKeyAttempts,
-		HostKeyRetry:    s.cfg.HostKeyRetry,
+		Now:             time.Now,
+		HostKeyAttempts: int(ptr.Deref(s.spec.HostKeyAttempts, 0)),
 	})
 	if err != nil {
 		return err
@@ -258,22 +260,22 @@ func (s *Service) prepare(ctx context.Context) error {
 	})
 	if s.syncer != nil {
 		s.grantsLoop = &grantLoop{syncer: s.syncer, vms: s.vms, guest: s.guest, did: s.did, handle: "",
-			interval: s.cfg.GrantSync, log: s.log, known: map[string]string{}}
+			interval: s.grantSync, log: s.log, known: map[string]string{}}
 		s.wg.Go(func() {
 			s.grantsLoop.run(ctx)
 		})
 	}
-	s.log.Info("the guest control plane serves guests", "handler", s.logicalURL(), "handle", s.cfg.Handle,
-		"issuer", s.issuerURL(), "mount", s.cfg.GuestLoginMount)
+	s.log.Info("the guest control plane serves guests", "handler", s.logicalURL(), "handle", s.handle(),
+		"issuer", s.issuerURL(), "mount", s.spec.GuestLoginMount)
 	return nil
 }
 
 func (s *Service) register() error {
-	if s.cfg.Deps.Handlers == nil {
+	if s.deps.Bus == nil {
 		return errors.New("guestcontrolplane: the handler registry is not available")
 	}
-	key := component.Key{Workspace: s.cfg.Workspace, Kind: Kind, Name: s.cfg.ComponentName}
-	if err := s.cfg.Deps.Handlers.RegisterHTTP(key, s.mux); err != nil {
+	key := component.Key{Workspace: s.workspace(), Kind: Kind, Name: s.deps.Self.Name}
+	if err := s.deps.Bus.RegisterHTTP(key, s.mux); err != nil {
 		return err
 	}
 	s.mu.Lock()
@@ -283,14 +285,14 @@ func (s *Service) register() error {
 }
 
 func (s *Service) logicalURL() string {
-	return kcp.HandlerURL(s.cfg.Workspace, Kind, s.cfg.ComponentName)
+	return kcp.HandlerURL(s.workspace(), Kind, s.deps.Self.Name)
 }
 
 func (s *Service) resolveKCP(ctx context.Context) error {
-	if s.cfg.Deps.KCP == nil {
+	if s.deps.KCP == nil {
 		return nil
 	}
-	store, cluster, err := kcpStore(s.cfg.Deps, s.cfg.Workspace)
+	store, cluster, err := kcpStore(s.deps.KCP, s.workspace())
 	if err != nil {
 		return err
 	}
@@ -300,43 +302,35 @@ func (s *Service) resolveKCP(ctx context.Context) error {
 }
 
 func (s *Service) resolveIdentity(ctx context.Context) error {
-	s.did = s.cfg.DID
-	if s.store == nil || s.cfg.IdentityRef == nil || s.cfg.IdentityRef.Name == "" {
+	if s.spec.Identity != nil {
+		s.did = s.spec.Identity.Did
+	}
+	ref := s.identityRef()
+	if s.store == nil || ref == nil || ref.Name == "" {
 		return nil
 	}
 	identities := kcpstore.NewClusterResource[corev1alpha1.MarketIdentity](s.store, MarketIdentityGVR)
-	obj, err := identities.Get(ctx, s.cluster, s.cfg.IdentityRef.Name)
+	obj, err := identities.Get(ctx, s.cluster, ref.Name)
 	if err != nil {
 		return err
 	}
 	s.did = cmp.Or(s.did, obj.Status.Did)
-	s.cfg.Handle = cmp.Or(s.cfg.Handle, obj.Status.Handle)
 	return nil
 }
 
 func (s *Service) resolveStores() {
-	if s.store != nil {
-		if s.cfg.VMs == nil {
-			s.cfg.VMs = NewKCPVMs(s.store, s.cluster, s.cfg.Handle)
-		}
-		if s.cfg.Grants == nil {
-			s.cfg.Grants = NewKCPGrants(s.store, s.cluster)
-		}
-		if s.cfg.OpenBao == nil {
-			s.cfg.OpenBao = &KCPOpenBao{Res: kcpstore.NewClusterResource[corev1alpha1.OpenBaoServer](s.store, OpenBaoServerGVR), Cluster: s.cluster}
-		}
+	if s.store == nil {
+		return
 	}
-	s.vms = s.cfg.VMs
-	s.grants = s.cfg.Grants
+	s.vms = NewKCPVMs(s.store, s.cluster, s.handle())
+	s.grants = NewKCPGrants(s.store, s.cluster)
+	s.openBao = &KCPOpenBao{Res: kcpstore.NewClusterResource[corev1alpha1.OpenBaoServer](s.store, OpenBaoServerGVR), Cluster: s.cluster}
 }
 
 func (s *Service) endpointResolver() func(ctx context.Context) (guestidentity.Endpoint, error) {
-	if s.cfg.Endpoint != nil {
-		return s.cfg.Endpoint
-	}
-	source := s.cfg.OpenBao
-	server := s.cfg.VaultServer
-	client := s.cfg.VaultClient
+	source := s.openBao
+	server := s.vaultServer
+	client := DefaultVaultClient
 	return func(ctx context.Context) (guestidentity.Endpoint, error) {
 		if source == nil {
 			return guestidentity.Endpoint{}, errors.New("guestcontrolplane: no OpenBaoServer source is configured")
@@ -350,10 +344,6 @@ func (s *Service) endpointResolver() func(ctx context.Context) (guestidentity.En
 }
 
 func (s *Service) setIssuer(ctx context.Context) {
-	if s.cfg.Issuer != "" {
-		s.issuer.Store(s.cfg.Issuer)
-		return
-	}
 	if raw := s.exposureIssuerURL(ctx); raw != "" {
 		s.issuer.Store(raw)
 		return
@@ -368,21 +358,21 @@ func (s *Service) setIssuer(ctx context.Context) {
 var exposureGVR = exposurev1alpha1.ExposureGVR
 
 func (s *Service) exposureClient() (dynamic.Interface, error) {
-	if s.cfg.Deps.KCP == nil {
+	if s.deps.KCP == nil {
 		return nil, errors.New("guestcontrolplane: the component has no kcp clients")
 	}
-	client, err := s.cfg.Deps.KCP.Client(s.cfg.Workspace)
+	client, err := s.deps.KCP.Client(s.workspace())
 	if err != nil {
 		return nil, err
 	}
 	cfg := rest.CopyConfig(client.RESTConfig())
 	baseHost, _, _ := strings.Cut(strings.TrimSuffix(cfg.Host, "/"), "/clusters/")
-	cfg.Host = baseHost + "/clusters/" + s.cfg.Workspace
+	cfg.Host = baseHost + "/clusters/" + s.workspace()
 	return dynamic.NewForConfig(cfg)
 }
 
 func (s *Service) exposureIssuerURL(ctx context.Context) string {
-	name := "svc-guestcontrolplane-" + strings.TrimSpace(s.cfg.ComponentName) + "-ingress"
+	name := "svc-guestcontrolplane-" + strings.TrimSpace(s.deps.Self.Name) + "-ingress"
 	client, err := s.exposureClient()
 	if err != nil {
 		return ""
@@ -415,8 +405,7 @@ func (s *Service) configureIssuerLoop(ctx context.Context) {
 	if s.identity == nil {
 		return
 	}
-	delay := s.cfg.IssuerRetry
-	delay = opt.Positive(delay, DefaultIssuerRetry)
+	delay := s.issuerRetry
 	for {
 		issuer := s.issuerURL()
 		if issuer == "" {
