@@ -55,6 +55,8 @@ type Published struct {
 	Provider string
 }
 
+const addrInUseRelease = 12
+
 type Publisher struct {
 	handlers  *component.Handlers
 	ports     *component.PortRegistry
@@ -64,6 +66,7 @@ type Publisher struct {
 
 	mu      sync.Mutex
 	running map[string]*publication
+	busy    map[string]int
 }
 
 type publication struct {
@@ -96,7 +99,7 @@ func NewPublisher(cfg PublisherConfig) *Publisher {
 		log = slog.New(slog.DiscardHandler)
 	}
 	return &Publisher{handlers: cfg.Handlers, ports: cfg.Ports, tls: cfg.TLS, registrar: cfg.Registrar,
-		log: log.With("component", "exposure-publisher"), running: map[string]*publication{}}
+		log: log.With("component", "exposure-publisher"), running: map[string]*publication{}, busy: map[string]int{}}
 }
 
 func (p *Publisher) Handler(ctx context.Context, target component.Key, protocol exposurev1alpha1.ServiceProtocol, name string) (http.Handler, bool, error) {
@@ -127,17 +130,32 @@ func (p *Publisher) Publish(ctx context.Context, b Binding) (Published, error) {
 		err = fmt.Errorf("unknown mode %q", b.Spec.Mode)
 	}
 	if err != nil {
-		if errors.Is(err, syscall.EADDRINUSE) {
+		if errors.Is(err, syscall.EADDRINUSE) && p.addrInUse(key) {
+			p.log.Warn("the kept port of the Exposure stays taken; it takes a new port", "workspace", b.Workspace, "exposure", b.Name)
 			p.release(b.Workspace, b.Name)
 		}
 		return Published{}, err
 	}
+	p.mu.Lock()
+	delete(p.busy, key)
+	p.mu.Unlock()
 	pub.fingerprint = fingerprint
 	pub.caBundle = strings.TrimSpace(b.Spec.TLS.CABundle)
 	p.mu.Lock()
 	p.running[key] = pub
 	p.mu.Unlock()
 	return pub.published, nil
+}
+
+func (p *Publisher) addrInUse(key string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.busy[key]++
+	if p.busy[key] < addrInUseRelease {
+		return false
+	}
+	delete(p.busy, key)
+	return true
 }
 
 func (p *Publisher) Withdraw(workspace, name string) {
