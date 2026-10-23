@@ -274,8 +274,8 @@ func childWorkspace(rec devinstance.Record) string {
 }
 
 func (ctl *Controller) markUnserved(app string) {
-	ctl.mu.Lock()
-	defer ctl.mu.Unlock()
+	ctl.unservedMu.Lock()
+	defer ctl.unservedMu.Unlock()
 	if ctl.unserved == nil {
 		ctl.unserved = map[string]bool{}
 	}
@@ -283,8 +283,8 @@ func (ctl *Controller) markUnserved(app string) {
 }
 
 func (ctl *Controller) takeUnserved() error {
-	ctl.mu.Lock()
-	defer ctl.mu.Unlock()
+	ctl.unservedMu.Lock()
+	defer ctl.unservedMu.Unlock()
 	if len(ctl.unserved) == 0 {
 		return nil
 	}

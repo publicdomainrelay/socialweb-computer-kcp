@@ -79,6 +79,8 @@ type Controller struct {
 
 	valueUID string
 
+	unservedMu sync.Mutex
+
 	unserved map[string]bool
 
 	roots sync.Map
