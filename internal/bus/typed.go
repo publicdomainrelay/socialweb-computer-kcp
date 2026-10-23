@@ -41,6 +41,21 @@ func Provide[T any](b *Bus, gk schema.GroupKind, capability string, open func(ct
 	b.mu.Unlock()
 }
 
+func (b *Bus) Provides(group, kind string) bool {
+	if b == nil {
+		return false
+	}
+	kind = strings.ToLower(strings.TrimSpace(kind))
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	for key, p := range b.providers {
+		if key.kind == kind && groupMatches(p.group, group) {
+			return true
+		}
+	}
+	return false
+}
+
 func Resolve[T any](ctx context.Context, b *Bus, from commonv1.ObjectRef, to commonv1.ObjectRef, c Capability) (T, error) {
 	var zero T
 	if b == nil {
