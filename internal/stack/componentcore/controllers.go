@@ -421,7 +421,7 @@ func (c *Core) buildManager(caBundle remotepdsctl.CABundleFunc) {
 		log.Warn("the controller manager is not wired", "err", err.Error())
 		return
 	}
-	mgr, err := ctlruntime.NewManager(ctlruntime.Config{Rest: restCfg, AddToScheme: []func(*runtime.Scheme) error{remotepdsctl.AddToScheme},
+	mgr, err := ctlruntime.NewManager(ctlruntime.Config{Rest: restCfg, AddToScheme: []func(*runtime.Scheme) error{pdsv1alpha1.AddToScheme},
 		Log: log})
 	if err != nil {
 		log.Warn("the controller manager is not wired", "err", err.Error())

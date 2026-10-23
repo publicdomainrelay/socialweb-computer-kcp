@@ -21,7 +21,7 @@ func (m *Model) RegisterGo() ([]byte, error) {
 	var b bytes.Buffer
 	b.WriteString(generatedHeader)
 	fmt.Fprintf(&b, "package %s\n\n", m.Package)
-	b.WriteString("import (\n\t\"k8s.io/apimachinery/pkg/runtime\"\n)\n\n")
+	b.WriteString("import (\n\tmetav1 \"k8s.io/apimachinery/pkg/apis/meta/v1\"\n\t\"k8s.io/apimachinery/pkg/runtime\"\n)\n\n")
 	b.WriteString("var (\n\tSchemeBuilder = runtime.NewSchemeBuilder(addKnownTypes)\n\tAddToScheme = SchemeBuilder.AddToScheme\n)\n\n")
 	b.WriteString("const (\n")
 	for _, r := range m.Resources {
@@ -37,7 +37,7 @@ func (m *Model) RegisterGo() ([]byte, error) {
 	for _, r := range m.Resources {
 		fmt.Fprintf(&b, "\t\t&%s{},\n\t\t&%s{},\n", r.Kind, r.ListKind)
 	}
-	b.WriteString("\t)\n\treturn nil\n}\n")
+	b.WriteString("\t)\n\tmetav1.AddToGroupVersion(scheme, GroupVersion)\n\treturn nil\n}\n")
 	for _, r := range m.Resources {
 		for _, name := range []string{r.Kind, r.ListKind} {
 			fmt.Fprintf(&b, "\nfunc (in *%s) DeepCopyObject() runtime.Object {\n\tif c := in.DeepCopy(); c != nil {\n\t\treturn c\n\t}\n\treturn nil\n}\n", name)

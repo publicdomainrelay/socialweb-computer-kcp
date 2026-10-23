@@ -3,6 +3,7 @@
 package v1alpha1
 
 import (
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
@@ -25,6 +26,7 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&RemotePDS{},
 		&RemotePDSList{},
 	)
+	metav1.AddToGroupVersion(scheme, GroupVersion)
 	return nil
 }
 

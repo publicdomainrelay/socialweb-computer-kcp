@@ -14,7 +14,6 @@ import (
 	"github.com/bluesky-social/indigo/atproto/syntax"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
@@ -86,14 +85,6 @@ func New(opts Options) *Controller {
 	}
 	return &Controller{log: log.With("component", "remotepds-controller"), caBundle: opts.CABundle, secrets: opts.Secrets,
 		timeout: timeout, checkInterval: checkInterval}
-}
-
-func AddToScheme(s *runtime.Scheme) error {
-	if err := pdsv1alpha1.AddToScheme(s); err != nil {
-		return err
-	}
-	metav1.AddToGroupVersion(s, pdsv1alpha1.GroupVersion)
-	return nil
 }
 
 func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
