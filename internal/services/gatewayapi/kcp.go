@@ -39,17 +39,17 @@ var (
 	exposureServiceGVR = exposurev1alpha1.ServiceGVR
 )
 
-func gatewayServerFor(deps component.Deps, workspace string, certs *clientcert.Issuer, publicHost, clusterStateDir string) (*gateway.Server, error) {
+func gatewayServerFor(kcpClients component.KCPClients, nodeClaimAgent *kcpclient.ServiceAccountRef, workspace string, certs *clientcert.Issuer, publicHost, clusterStateDir string) (*gateway.Server, error) {
 	server := &gateway.Server{}
 	tenant, err := newTenantAPI(clusterStateDir)
 	if err != nil {
 		return nil, fmt.Errorf("gatewayapi: the tenant API client: %w", err)
 	}
 	server.Tenant = tenant
-	if deps.KCP == nil {
+	if kcpClients == nil {
 		return server, nil
 	}
-	client, err := deps.KCP.Client(workspace)
+	client, err := kcpClients.Client(workspace)
 	if err != nil {
 		return nil, fmt.Errorf("gatewayapi: the gateway kcp client: %w", err)
 	}
@@ -57,7 +57,7 @@ func gatewayServerFor(deps component.Deps, workspace string, certs *clientcert.I
 	if restConfig == nil || restConfig.Host == "" {
 		return server, nil
 	}
-	agent := deps.NodeClaimAgent
+	agent := nodeClaimAgent
 	if agent == nil {
 		agent, _ = kcpclient.ParseServiceAccountRef(appctl.WebAppAccountRef(workspace))
 	}
@@ -83,11 +83,11 @@ func gatewayServerFor(deps component.Deps, workspace string, certs *clientcert.I
 	return server, nil
 }
 
-func kcpStoreFor(deps component.Deps, workspace string) (*kcpstore.Store, error) {
-	if deps.KCP == nil {
+func kcpStoreFor(kcpClients component.KCPClients, workspace string) (*kcpstore.Store, error) {
+	if kcpClients == nil {
 		return nil, errors.New("gatewayapi: no kcp client")
 	}
-	client, err := deps.KCP.Client(workspace)
+	client, err := kcpClients.Client(workspace)
 	if err != nil {
 		return nil, fmt.Errorf("gatewayapi: kcp client for %s: %w", workspace, err)
 	}

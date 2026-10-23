@@ -29,43 +29,31 @@ type vaultRuntime struct {
 	endpoint custodyEndpoint
 }
 
-func resolveVault(ctx context.Context, cfg Config, deps component.Deps) (*vaultRuntime, error) {
-	if !cfg.Vault.configured() {
+func (s *Service) resolveVault(ctx context.Context) (*vaultRuntime, error) {
+	if !s.vaultConfigured() {
 		return nil, nil
 	}
-	if cfg.Vault.Client != nil {
-		endpoint := custodyFromConfig(cfg.Vault)
-		endpoint.Mount = cfg.Session.CustodyMount
-		return &vaultRuntime{client: cfg.Vault.Client, mount: strings.Trim(cfg.Vault.Mount, "/"), endpoint: endpoint}, nil
+	name := s.spec.VaultRef.Name
+	workspace := s.workspace
+	if strings.EqualFold(s.spec.VaultRef.Kind, "RemoteOpenBao") {
+		return nil, fmt.Errorf("%w: %s/%s", component.ErrRemoteVaultDisabled, workspace, name)
 	}
-	if cfg.Vault.Address != "" {
-		return buildVault(ctx, cfg, cfg.Vault.Address, cfg.Vault.Token, cfg.Vault.CACert, cfg.Vault.ClientCert, cfg.Vault.ClientKey,
-			cfg.Vault.CertAuthMount, cfg.Vault.CertAuthRole, cfg.Vault.Mount)
-	}
-	workspace := cfg.Vault.Ref.Workspace
-	workspace = cmp.Or(workspace, cfg.Workspace)
-	if strings.EqualFold(cfg.Vault.Ref.Kind, "RemoteOpenBao") {
-		return nil, fmt.Errorf("%w: %s/%s", component.ErrRemoteVaultDisabled, workspace, cfg.Vault.Ref.Name)
-	}
-	if workspace == "" {
-		return nil, errors.New("gatewayapi: the vault ref has no workspace")
-	}
-	store, err := kcpStoreFor(deps, workspace)
+	store, err := kcpStoreFor(s.deps.KCP, workspace)
 	if err != nil {
 		return nil, fmt.Errorf("gatewayapi: the vault store: %w", err)
 	}
 	servers := kcpstore.OfClusterScoped[v1alpha1.OpenBaoServer](store, openBaoServerGVR)
-	server, err := servers.Get(ctx, ref.New(workspace, "", cfg.Vault.Ref.Name))
+	server, err := servers.Get(ctx, ref.New(workspace, "", name))
 	if err != nil {
-		return nil, fmt.Errorf("gatewayapi: reading OpenBaoServer %s/%s: %w", workspace, cfg.Vault.Ref.Name, err)
+		return nil, fmt.Errorf("gatewayapi: reading OpenBaoServer %s/%s: %w", workspace, name, err)
 	}
 	status := server.Status
 	if status.Phase != v1alpha1.OpenBaoServerPhaseReady || status.Address == "" || status.Refs == nil {
-		return nil, fmt.Errorf("gatewayapi: OpenBaoServer %s/%s is %s, not Ready", workspace, cfg.Vault.Ref.Name, status.Phase)
+		return nil, fmt.Errorf("gatewayapi: OpenBaoServer %s/%s is %s, not Ready", workspace, name, status.Phase)
 	}
-	client := pickVaultClient(status.Clients, cfg.Vault.ClientName)
+	client := pickVaultClient(status.Clients, DefaultVaultClient)
 	if client == nil {
-		return nil, fmt.Errorf("gatewayapi: OpenBaoServer %s/%s reports no client %q", workspace, cfg.Vault.Ref.Name, cfg.Vault.ClientName)
+		return nil, fmt.Errorf("gatewayapi: OpenBaoServer %s/%s reports no client %q", workspace, name, DefaultVaultClient)
 	}
 	ca, err := readRef(status.Refs.CA)
 	if err != nil {
@@ -79,14 +67,8 @@ func resolveVault(ctx context.Context, cfg Config, deps component.Deps) (*vaultR
 	if err != nil {
 		return nil, fmt.Errorf("gatewayapi: the OpenBao client key: %w", err)
 	}
-	certMount := cfg.Vault.CertAuthMount
-	certMount = cmp.Or(certMount, client.CertAuthMount)
-	certRole := cfg.Vault.CertAuthRole
-	certRole = cmp.Or(certRole, client.CertAuthRole)
-	mount := cfg.Vault.Mount
-	mount = cmp.Or(mount, client.KVMount)
-	mount = cmp.Or(mount, status.Refs.KVMount)
-	return buildVault(ctx, cfg, status.Address, cfg.Vault.Token, ca, cert, key, certMount, certRole, mount)
+	mount := cmp.Or(client.KVMount, status.Refs.KVMount)
+	return buildVault(ctx, status.Address, ca, cert, key, client.CertAuthMount, client.CertAuthRole, mount)
 }
 
 func pickVaultClient(clients []v1alpha1.OpenBaoServerClientRefs, name string) *v1alpha1.OpenBaoServerClientRefs {
@@ -111,24 +93,17 @@ func readRef(path string) ([]byte, error) {
 	return os.ReadFile(strings.TrimPrefix(path, "file:"))
 }
 
-func buildVault(ctx context.Context, cfg Config, address, token string, ca, cert, key []byte, certMount, certRole, mount string) (*vaultRuntime, error) {
+func buildVault(ctx context.Context, address string, ca, cert, key []byte, certMount, certRole, mount string) (*vaultRuntime, error) {
 	anonymous, err := newOpenBaoClient(address, "", ca, cert, key)
 	if err != nil {
 		return nil, err
 	}
 	client := anonymous
 	authed := false
-	switch {
-	case token == "" && certMount != "" && certRole != "":
+	if certMount != "" && certRole != "" {
 		client, err = anonymous.LoginCert(ctx, certMount, certRole)
 		if err != nil {
 			return nil, fmt.Errorf("gatewayapi: logging in to the vault as %s/%s: %w", certMount, certRole, err)
-		}
-		authed = true
-	case token != "":
-		client, err = newOpenBaoClient(address, token, ca, cert, key)
-		if err != nil {
-			return nil, err
 		}
 		authed = true
 	}
@@ -143,22 +118,10 @@ func buildVault(ctx context.Context, cfg Config, address, token string, ca, cert
 			ClientKey:  append([]byte(nil), key...),
 			CertMount:  certMount,
 			CertRole:   certRole,
-			Mount:      cfg.Session.CustodyMount,
-			Timeout:    cfg.Vault.Timeout,
+			Mount:      DefaultAtprotoMount,
+			Timeout:    DefaultCustodyTimeout,
 		},
 	}, nil
-}
-
-func custodyFromConfig(v VaultConfig) custodyEndpoint {
-	return custodyEndpoint{
-		Address:    v.Address,
-		CACert:     append([]byte(nil), v.CACert...),
-		ClientCert: append([]byte(nil), v.ClientCert...),
-		ClientKey:  append([]byte(nil), v.ClientKey...),
-		CertMount:  v.CertAuthMount,
-		CertRole:   v.CertAuthRole,
-		Timeout:    v.Timeout,
-	}
 }
 
 func newOpenBaoClient(address, token string, ca, cert, key []byte) (*openbao.Client, error) {
