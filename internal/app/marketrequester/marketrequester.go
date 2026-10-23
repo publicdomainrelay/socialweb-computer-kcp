@@ -429,14 +429,13 @@ func (p *pass) local(ctx context.Context, plan compose.AccountPlan, id *v1alpha1
 	if err != nil {
 		return p.retry("its app Pds account", err)
 	}
-	repoLinks, err := c.ApplyLocalAccount(ctx, r, ws, compose.LocalAccount{DID: did, Handle: pdsHandle,
-		SessionID: RequesterVaultServer + ":" + account.Path, PLC: o.Spec.Network != nil})
-	if err != nil {
-		return ctlruntime.Result{}, err
-	}
-	repoLinks = append(repoLinks, compose.RepoWriteLink(p.self(), compose.RepoRefIn(did, ws), compose.ScopeAll),
+	acct := compose.LocalAccount{DID: did, Handle: pdsHandle, SessionID: RequesterVaultServer + ":" + account.Path, PLC: o.Spec.Network != nil}
+	repoLinks := append(compose.LocalAccountLinks(ws, acct), compose.RepoWriteLink(p.self(), compose.RepoRefIn(did, ws), compose.ScopeAll),
 		compose.RecordWriteLink(ws, r.Owner(), compose.RepoRefIn(did, ws), compose.ScopeAll))
 	if err := c.ApplyLinks(ctx, r, "repo", repoLinks); err != nil {
+		return ctlruntime.Result{}, err
+	}
+	if err := c.ApplyLocalAccount(ctx, r, ws, acct); err != nil {
 		return ctlruntime.Result{}, err
 	}
 	requesterDir := compose.ComponentCRStateDir(c.StateRoot(), compose.ComponentKindRequester, RequesterComponent)

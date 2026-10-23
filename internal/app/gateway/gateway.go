@@ -576,15 +576,15 @@ func (p *pass) localAccount(ctx context.Context, plan compose.AccountPlan, id *v
 	if err != nil {
 		return nil, nil, "", false, fmt.Errorf("its app Pds account: %w", err)
 	}
-	repoLinks, err := c.ApplyLocalAccount(ctx, r, rws, compose.LocalAccount{DID: did, Handle: in.pdsHandle,
-		SessionID: vaultlayout.RootServerName + ":" + account.Path, PLC: o.Spec.Network != nil})
-	if err != nil {
-		return nil, nil, "", false, err
-	}
+	acct := compose.LocalAccount{DID: did, Handle: in.pdsHandle, SessionID: vaultlayout.RootServerName + ":" + account.Path, PLC: o.Spec.Network != nil}
 	repo := compose.RepoRefIn(did, rws)
-	repoLinks = append(repoLinks, compose.RepoWriteLink(p.self(compose.ComponentKindRequester, marketrequester.RequesterComponent), repo, compose.ScopeAll),
+	repoLinks := append(compose.LocalAccountLinks(rws, acct),
+		compose.RepoWriteLink(p.self(compose.ComponentKindRequester, marketrequester.RequesterComponent), repo, compose.ScopeAll),
 		compose.RecordWriteLink(p.ws, r.Owner(), repo, compose.ScopeAll))
 	if err := c.ApplyLinks(ctx, r, "repo", repoLinks, p.ws); err != nil {
+		return nil, nil, "", false, err
+	}
+	if err := c.ApplyLocalAccount(ctx, r, rws, acct); err != nil {
 		return nil, nil, "", false, err
 	}
 	if err := c.ApplyAssociationRecord(ctx, r, p.ws, repo, marketrequester.RequesterIdentity, RequesterAssociate); err != nil {
