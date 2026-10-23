@@ -19,6 +19,7 @@ import (
 
 	"github.com/bluesky-social/indigo/atproto/identity"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/appctl"
+	atprotooauth "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauthclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
@@ -108,6 +109,8 @@ type Config struct {
 	RelayURLs []string
 
 	NodeClaimAgent *kcpclient.ServiceAccountRef
+
+	OAuthScopes []string
 }
 
 type Core struct {
@@ -349,7 +352,8 @@ func (c *Core) runIdentity(ctx context.Context) {
 			vault = store
 		}
 		oauth := identitycontroller.OAuthOptions{Directory: identity.DefaultDirectory(), HTTPClient: &http.Client{Timeout: 20 * time.Second},
-			States: &oauthclient.MemoryStateStore{}}
+			States: &oauthclient.MemoryStateStore{}, Scopes: append([]string(nil), c.cfg.OAuthScopes...),
+			QRScopes: atprotooauth.DIDKeyAssociatorOAuthScope}
 		if key, err := loadOAuthCLIKey(c.cfg.StateDir); err == nil {
 			oauth.CLIKey = key
 			oauth.QROrigin = strings.TrimSpace(os.Getenv("SOCIALWEB_QR_ORIGIN"))

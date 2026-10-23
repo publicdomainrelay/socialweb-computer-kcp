@@ -106,8 +106,11 @@ current_gaps: |
       (types_component.go:300-310) but no root sets them. Blob and request
       limits are not in PdsSpec at all (pds/config.go:77-81,
       atproto/pds/server.go:24-25, :107-113). OAuth scope is only atproto
-      (atproto/oauth/server.go:194); Requester default scope
-      "atproto transition:generic" is a constant (requester/config.go:96).
+      (atproto/oauth/server.go:194). The authoritative role registry is
+      typescript-helpers/lib/oauth-scope/mod.ts (the source of
+      did-key-associator's generated/oauth-scope.js); port it to
+      internal/atproto/oauth/scope.go and use the Requester, Bidder and
+      DIDKeyAssociator sets instead of a blanket transition:generic.
   12. SshServer limits and timeouts are hardcoded. MaxConnections,
       MaxSessions, SessionsPerAccount, MaxAuthAttempts, AuthTimeout,
       SessionMax and association cache settings are constants
@@ -192,7 +195,7 @@ target_model:
               directoryKeys: 10000
               policyPollMilliseconds: 250
               policyTimeoutSeconds: 120
-              oauthScopes: [atproto, "transition:generic"]
+              oauthScopes: []                # defaults to the RequesterOAuthScope role set
             guestControlPlane:
               guestLoginMount: sshsig
               role: kcp

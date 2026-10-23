@@ -21,6 +21,7 @@ import (
 
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	atprotooauth "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauthclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
@@ -112,8 +113,6 @@ const (
 	FinalizerReleased = "requester.socialweb.computer/released"
 
 	DefaultOAuthSessionFile = "oauth-session.json"
-
-	DefaultOAuthScope = "atproto transition:generic"
 )
 
 type Config struct {
@@ -705,7 +704,7 @@ func (c *Config) defaults() {
 		c.OAuthSessionPath = filepath.Join(c.StateDir, DefaultOAuthSessionFile)
 	}
 	if len(c.OAuthScopes) == 0 {
-		c.OAuthScopes = strings.Fields(DefaultOAuthScope)
+		c.OAuthScopes = append([]string(nil), atprotooauth.RequesterOAuthScope...)
 	}
 	if c.IdentityMode == IdentityModeOAuth {
 		if c.OAuthClientID == "" && c.PublicOrigin != "" {

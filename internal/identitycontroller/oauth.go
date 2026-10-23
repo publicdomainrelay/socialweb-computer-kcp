@@ -36,6 +36,8 @@ type OAuthOptions struct {
 
 	Scopes []string
 
+	QRScopes []string
+
 	QROrigin string
 
 	Directory identity.Directory
@@ -80,6 +82,20 @@ func (c *Controller) oauthScopes() []string {
 		return append([]string(nil), c.oauth.Scopes...)
 	}
 	return []string{DefaultOAuthScope}
+}
+
+func (c *Controller) qrScopes() []string {
+	if len(c.oauth.QRScopes) > 0 {
+		return append([]string(nil), c.oauth.QRScopes...)
+	}
+	return c.oauthScopes()
+}
+
+func (c *Controller) scopesFor(mode v1alpha1.MarketIdentityMode) []string {
+	if mode == v1alpha1.MarketIdentityModeOAuthQr {
+		return c.qrScopes()
+	}
+	return c.oauthScopes()
 }
 
 func (c *Controller) reconcileOAuthBrowser(ctx context.Context, dyn dynamic.Interface, id *v1alpha1.MarketIdentity, generation int64, status v1alpha1.MarketIdentityStatus) {
@@ -188,7 +204,7 @@ func (c *Controller) reconcileOAuthQr(ctx context.Context, dyn dynamic.Interface
 		c.writeQrPending(ctx, dyn, id, generation, status, qr)
 		return
 	}
-	data, err := sessionQr.SessionData(c.oauth.ClientID, c.oauthScopes())
+	data, err := sessionQr.SessionData(c.oauth.ClientID, c.qrScopes())
 	if err != nil {
 		c.failed(ctx, dyn, id, generation, status, "QRSessionInvalid", err.Error())
 		return
@@ -378,7 +394,7 @@ func (c *Controller) openSessionDataRef(ctx context.Context, id *v1alpha1.Market
 		RepoDID:    did,
 		PDSURL:     id.Spec.PdsUrl,
 		ClientID:   c.oauthClientID(id),
-		Scopes:     c.oauthScopes(),
+		Scopes:     c.scopesFor(id.Spec.Mode),
 		Directory:  c.oauth.Directory,
 		HTTPClient: c.oauthHTTP(),
 		Store:      store,
@@ -398,7 +414,7 @@ func (c *Controller) openSessionData(ctx context.Context, id *v1alpha1.MarketIde
 		RepoDID:    data.AccountDID,
 		PDSURL:     data.HostURL,
 		ClientID:   c.oauthClientID(id),
-		Scopes:     c.oauthScopes(),
+		Scopes:     c.scopesFor(id.Spec.Mode),
 		Directory:  c.oauth.Directory,
 		HTTPClient: c.oauthHTTP(),
 	}

@@ -13,6 +13,7 @@ import (
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/appctl"
+	atprotooauth "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap/table"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
@@ -323,22 +324,27 @@ func ComponentCoreConfig(ctx context.Context, cfg Config, rec devinstance.Record
 		out.CredentialClient = appctl.BidderVaultClient
 		out.CredentialServer = appctl.BidderVaultServer
 		out.VaultClient = appctl.BidderVaultClient
+		out.OAuthScopes = atprotooauth.BidderOAuthScope
 	case cfg.Application != nil && cfg.Application.Role == table.RoleGateway:
 		out.CredentialClient = appctl.RequesterVaultClient
 		out.CredentialServer = vaultlayout.RootServerName
 		out.VaultClient = appctl.RequesterVaultClient
+		out.OAuthScopes = atprotooauth.RequesterOAuthScope
 	case strings.Contains(rec.BaseWorkspace, ":gateway"), strings.Contains(rec.BaseWorkspace, ":ssh"):
 		out.CredentialClient = appctl.RequesterVaultClient
 		out.CredentialServer = vaultlayout.RootServerName
 		out.VaultClient = appctl.RequesterVaultClient
+		out.OAuthScopes = atprotooauth.RequesterOAuthScope
 	case strings.Contains(rec.BaseWorkspace, ":bidder"), strings.HasPrefix(rec.BaseWorkspace, "b-"), strings.HasPrefix(rec.Layout.ID, "b-"):
 		out.CredentialClient = appctl.BidderVaultClient
 		out.CredentialServer = appctl.BidderVaultServer
 		out.VaultClient = appctl.BidderVaultClient
+		out.OAuthScopes = atprotooauth.BidderOAuthScope
 	case strings.HasPrefix(rec.BaseWorkspace, "r-"), strings.HasPrefix(rec.Layout.ID, "r-"):
 		out.CredentialClient = appctl.RequesterVaultClient
 		out.CredentialServer = vaultlayout.RootServerName
 		out.VaultClient = appctl.RequesterVaultClient
+		out.OAuthScopes = atprotooauth.RequesterOAuthScope
 	}
 	if rec.Profile == bootstrap.ProfileQuick {
 		out.InstallAccount = install.AccountBidder

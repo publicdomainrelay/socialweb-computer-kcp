@@ -31,6 +31,7 @@ import (
 	policyv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/policy/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
+	atprotooauth "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
@@ -996,7 +997,7 @@ func (s *Service) oauthClientMetadata(w http.ResponseWriter, r *http.Request) {
 		"redirect_uris":              []string{base + "/oauth/callback/requester"},
 		"grant_types":                []string{"authorization_code", "refresh_token"},
 		"response_types":             []string{"code"},
-		"scope":                      "atproto transition:generic",
+		"scope":                      atprotooauth.ScopeString(atprotooauth.RequesterOAuthScope),
 		"token_endpoint_auth_method": "none",
 		"application_type":           "web",
 		"dpop_bound_access_tokens":   true,
