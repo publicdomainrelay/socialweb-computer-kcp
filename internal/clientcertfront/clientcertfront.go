@@ -31,6 +31,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterprovider"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gateway"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/materialiser"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/revocation"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/tlsfront"
@@ -111,7 +112,6 @@ type trust struct {
 	front     string
 	transport *http.Transport
 	bearer    *http.Transport
-	loaded    time.Time
 }
 
 type gateEntry struct {
@@ -131,10 +131,10 @@ type server struct {
 	log        *slog.Logger
 	edgePin    [32]byte
 	mu         sync.Mutex
-	trusts     map[string]*trust
+	trusts     *ttlcache.Cache[string, *trust]
 	revoked    map[string]*revokedEntry
 	refreshing map[string]bool
-	denies     map[string]time.Time
+	admitted   *ttlcache.Cache[string, struct{}]
 	gates      map[string]*gateEntry
 	open       map[string]map[*openRequest]struct{}
 	wake       chan struct{}
@@ -165,8 +165,13 @@ func Run(ctx context.Context, c Config) error {
 		return fmt.Errorf("clientcertfront: the certificate %s and key %s: %w", c.CertFile, c.KeyFile, err)
 	}
 	s := &server{c: c, log: log, edgePin: sha256.Sum256(edgeDER),
-		trusts: map[string]*trust{}, revoked: map[string]*revokedEntry{}, refreshing: map[string]bool{},
-		denies: map[string]time.Time{}, gates: map[string]*gateEntry{}, open: map[string]map[*openRequest]struct{}{},
+		trusts: ttlcache.New[string, *trust](ttlcache.Options{TTL: trustTTL}).OnEvict(func(_ string, t *trust) {
+			t.transport.CloseIdleConnections()
+			t.bearer.CloseIdleConnections()
+		}),
+		revoked: map[string]*revokedEntry{}, refreshing: map[string]bool{},
+		admitted: ttlcache.New[string, struct{}](ttlcache.Options{TTL: denyTTL}),
+		gates:    map[string]*gateEntry{}, open: map[string]map[*openRequest]struct{}{},
 		wake: make(chan struct{}, 1)}
 	ln, err := net.Listen("tcp", c.Address)
 	if err != nil {
@@ -287,7 +292,7 @@ func (s *server) serveBearer(w http.ResponseWriter, r *http.Request, account, ho
 		s.refuse(w, r, http.StatusNotFound, did, cluster, "", "cluster key")
 		return
 	}
-	t, err := s.trustFor(dir)
+	t, err := s.trustFor(r.Context(), dir)
 	if err != nil {
 		s.refuse(w, r, http.StatusServiceUnavailable, did, cluster, "", "cluster not reachable: "+err.Error())
 		return
@@ -335,7 +340,7 @@ func (s *server) serveCertificate(w http.ResponseWriter, r *http.Request, user *
 		s.refuse(w, r, http.StatusNotFound, cn, cluster, serial, "cluster key")
 		return
 	}
-	t, err := s.trustFor(dir)
+	t, err := s.trustFor(r.Context(), dir)
 	if err != nil {
 		s.refuse(w, r, http.StatusServiceUnavailable, cn, cluster, serial, "cluster not reachable: "+err.Error())
 		return
@@ -498,10 +503,7 @@ func (s *server) recheckGates(ctx context.Context) {
 }
 
 func (s *server) admit(ctx context.Context, did string) (int, string) {
-	s.mu.Lock()
-	until, ok := s.denies[did]
-	s.mu.Unlock()
-	if ok && time.Now().Before(until) {
+	if _, ok := s.admitted.Get(did); ok {
 		return 0, ""
 	}
 	if _, err := revocation.Admit(ctx, s.c.Deny, did); err != nil {
@@ -513,9 +515,7 @@ func (s *server) admit(ctx context.Context, did string) (int, string) {
 		}
 		return http.StatusServiceUnavailable, "deny lookup: " + err.Error()
 	}
-	s.mu.Lock()
-	s.denies[did] = time.Now().Add(denyTTL)
-	s.mu.Unlock()
+	s.admitted.Set(did, struct{}{})
 	return 0, ""
 }
 
@@ -613,26 +613,11 @@ type frontState struct {
 	Address string `json:"address"`
 }
 
-func (s *server) trustFor(dir string) (*trust, error) {
-	s.mu.Lock()
-	t := s.trusts[dir]
-	s.mu.Unlock()
-	if t != nil && time.Since(t.loaded) < trustTTL {
-		return t, nil
-	}
-	fresh, err := loadTrust(dir)
-	if err != nil {
-		return nil, err
-	}
-	s.mu.Lock()
-	old := s.trusts[dir]
-	s.trusts[dir] = fresh
-	s.mu.Unlock()
-	if old != nil {
-		old.transport.CloseIdleConnections()
-		old.bearer.CloseIdleConnections()
-	}
-	return fresh, nil
+func (s *server) trustFor(ctx context.Context, dir string) (*trust, error) {
+	return s.trusts.GetOrLoad(ctx, dir, func(context.Context) (*trust, time.Duration, error) {
+		t, err := loadTrust(dir)
+		return t, 0, err
+	})
 }
 
 func loadTrust(dir string) (*trust, error) {
@@ -660,7 +645,7 @@ func loadTrust(dir string) (*trust, error) {
 	if _, _, err := net.SplitHostPort(st.Address); err != nil {
 		return nil, err
 	}
-	return &trust{clientCA: clientCA, front: st.Address, loaded: time.Now(), transport: &http.Transport{
+	return &trust{clientCA: clientCA, front: st.Address, transport: &http.Transport{
 		TLSClientConfig:   &tls.Config{RootCAs: serverCA, Certificates: []tls.Certificate{proxy}, MinVersion: tls.VersionTLS12},
 		ForceAttemptHTTP2: false,
 		DialContext:       (&net.Dialer{Timeout: upstreamDialWait}).DialContext,
