@@ -21,7 +21,7 @@ type Task struct {
 }
 
 type Engine interface {
-	Submit(ctx context.Context, endpoint string, workflow []byte, inputs map[string]string) (string, error)
+	Submit(ctx context.Context, workflow []byte, inputs map[string]string) (string, error)
 
-	Status(ctx context.Context, endpoint, taskID string) (Task, error)
+	Status(ctx context.Context, taskID string) (Task, error)
 }
