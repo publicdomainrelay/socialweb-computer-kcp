@@ -450,7 +450,7 @@ items:
     track: contracts
     parallel_with: []
     depends_on: [W0-ABSTRACT]
-    status: todo
+    status: done
     decision: >
       Create the packages in target_model.go_contracts. They import only
       api/** and the standard library. Move pure types out of
@@ -475,7 +475,7 @@ items:
     track: bus
     parallel_with: []
     depends_on: [W0-CONTRACTS]
-    status: todo
+    status: done
     decision: >
       Move internal/component/handlers.go and caller.go into internal/bus.
       Add Provide/Resolve from target_model.bus_api with capability and
