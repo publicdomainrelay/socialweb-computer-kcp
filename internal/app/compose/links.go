@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -51,8 +52,29 @@ func Cap(name string, scope ...string) exposurev1alpha1.LinkCapability {
 
 func RefLink(from, to commonv1.ObjectRef, caps ...exposurev1alpha1.LinkCapability) Link {
 	f := from
-	return Link{Name: LinkName(from.Kind, from.Name, to.Kind, to.Name), Spec: exposurev1alpha1.ComponentLinkSpec{
+	parts := []string{from.Kind, from.Name, to.Kind, to.Name}
+	if suffix := capabilitySuffix(caps); suffix != "" {
+		parts = append(parts, suffix)
+	}
+	return Link{Name: LinkName(parts...), Spec: exposurev1alpha1.ComponentLinkSpec{
 		From: exposurev1alpha1.ComponentLinkFrom{Ref: &f}, To: to, Capabilities: caps}}
+}
+
+func capabilitySuffix(caps []exposurev1alpha1.LinkCapability) string {
+	var names []string
+	for _, c := range caps {
+		name := strings.ToLower(strings.TrimSpace(c.Name))
+		if name == bus.CapabilityXRPC || name == bus.CapabilityStream || slices.Contains(names, name) {
+			continue
+		}
+		names = append(names, name)
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	slices.Sort(names)
+	sum := sha256.Sum256([]byte(strings.Join(names, ",")))
+	return hex.EncodeToString(sum[:3])
 }
 
 func SelectorLink(name string, from exposurev1alpha1.ComponentLinkSelector, to commonv1.ObjectRef, caps ...exposurev1alpha1.LinkCapability) Link {
