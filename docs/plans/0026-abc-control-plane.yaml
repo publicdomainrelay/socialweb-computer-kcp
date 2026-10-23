@@ -291,7 +291,7 @@ items:
     track: tests
     parallel_with: []
     depends_on: []
-    status: doing
+    status: done
     decision: >
       First write docs/spec/integration-catalog.yaml: one entry per
       integration test in test/integration and per soak lane in test/soak,
@@ -346,7 +346,7 @@ items:
     track: codegen
     parallel_with: []
     depends_on: [W0-RULES]
-    status: doing
+    status: done
     closes: [D22]
     decision: >
       Add api/<group>/v1alpha1/doc.go with the deepcopy-gen package marker
