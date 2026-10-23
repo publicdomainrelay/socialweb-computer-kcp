@@ -37,9 +37,12 @@ func (r Request) ApplyStatus(ctx context.Context, obj Object) error {
 		return err
 	}
 	u := r.skeleton(full, obj)
-	status, ok := full.Object["status"]
-	if !ok || status == nil {
+	status, _ := full.Object["status"].(map[string]any)
+	if status == nil {
 		status = map[string]any{}
+	}
+	if live, err := r.liveStatus(ctx, obj); err == nil {
+		dropped(live, status)
 	}
 	u.Object["status"] = status
 	if err := r.scope.client.Status().Apply(ctx, client.ApplyConfigurationFromUnstructured(u),
@@ -121,6 +124,45 @@ func (r Request) skeleton(full *unstructured.Unstructured, obj Object) *unstruct
 		"kind":       full.GetKind(),
 		"metadata":   meta,
 	}}
+}
+
+func (r Request) liveStatus(ctx context.Context, obj Object) (map[string]any, error) {
+	gvk, err := apiutil.GVKForObject(obj, r.scope.scheme)
+	if err != nil {
+		return nil, err
+	}
+	fresh, err := r.scope.scheme.New(gvk)
+	if err != nil {
+		return nil, err
+	}
+	live, ok := fresh.(client.Object)
+	if !ok {
+		return nil, fmt.Errorf("runtime: %T is not an object", fresh)
+	}
+	if err := r.scope.client.Get(ctx, types.NamespacedName{Namespace: obj.GetNamespace(), Name: obj.GetName()}, live); err != nil {
+		return nil, err
+	}
+	m, err := kruntime.DefaultUnstructuredConverter.ToUnstructured(live)
+	if err != nil {
+		return nil, err
+	}
+	status, _ := m["status"].(map[string]any)
+	return status, nil
+}
+
+func dropped(live, desired map[string]any) {
+	for k, v := range live {
+		next, ok := desired[k]
+		if !ok {
+			desired[k] = nil
+			continue
+		}
+		liveMap, liveIsMap := v.(map[string]any)
+		nextMap, nextIsMap := next.(map[string]any)
+		if liveIsMap && nextIsMap {
+			dropped(liveMap, nextMap)
+		}
+	}
 }
 
 func toAny(in map[string]string) map[string]any {

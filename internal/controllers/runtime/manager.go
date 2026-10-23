@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -68,6 +69,8 @@ type Manager struct {
 	mu sync.Mutex
 
 	exports map[string]bool
+
+	ctx context.Context
 
 	paths sync.Map
 }
@@ -137,27 +140,55 @@ func NewManager(cfg Config) (*Manager, error) {
 }
 
 func (m *Manager) Start(ctx context.Context) error {
+	m.mu.Lock()
+	m.ctx = ctx
+	var names []string
+	for name := range m.exports {
+		names = append(names, name)
+	}
+	m.mu.Unlock()
 	m.log.Info("the controller manager starts", "exportWorkspace", m.exportWorkspace)
+	for _, name := range names {
+		go m.serveExport(ctx, name)
+	}
 	return m.mgr.Start(ctx)
 }
 
-func (m *Manager) addExport(name string) error {
+func (m *Manager) addExport(name string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.exports[name] {
-		return nil
-	}
-	logger := m.logr.WithValues("export", name)
-	p, err := apiexport.New(clusterConfig(m.base, m.exportWorkspace), name, apiexport.Options{Scheme: m.scheme, Log: &logger})
-	if err != nil {
-		return fmt.Errorf("runtime: the provider of APIExport %s: %w", name, err)
-	}
-	if err := m.providers.AddProvider(name, p); err != nil {
-		return fmt.Errorf("runtime: adding the provider of APIExport %s: %w", name, err)
+		return
 	}
 	m.exports[name] = true
-	m.log.Info("the controller manager serves an APIExport", "export", name, "endpointSlice", m.exportWorkspace+":"+name)
-	return nil
+	if m.ctx != nil {
+		go m.serveExport(m.ctx, name)
+	}
+}
+
+func (m *Manager) serveExport(ctx context.Context, name string) {
+	logger := m.logr.WithValues("export", name)
+	retry := newBackoff(DefaultBackoffBase, DefaultBackoffMax)
+	for failures := 0; ctx.Err() == nil; failures++ {
+		p, err := apiexport.New(clusterConfig(m.base, m.exportWorkspace), name, apiexport.Options{Scheme: m.scheme, Log: &logger})
+		if err == nil {
+			err = m.providers.AddProvider(name, p)
+		}
+		if err == nil {
+			m.log.Info("the controller manager serves an APIExport", "export", name, "endpointSlice", m.exportWorkspace+":"+name)
+			return
+		}
+		retryIn := retry.delay(failures)
+		m.log.Warn("the APIExport provider does not start yet; it retries with backoff", "export", name,
+			"workspace", m.exportWorkspace, "failures", failures+1, "retryIn", retryIn.String(), "err", err.Error())
+		timer := time.NewTimer(retryIn)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+	}
 }
 
 func (m *Manager) path(ctx context.Context, cluster string) string {

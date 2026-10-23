@@ -181,9 +181,7 @@ func For[T Object](m *Manager, name string, r Reconciler[T], opts ...Option) err
 	if err != nil {
 		return fmt.Errorf("runtime: the controller %s: %w", name, err)
 	}
-	if err := m.addExport(o.export); err != nil {
-		return err
-	}
+	m.addExport(o.export)
 	prefix := o.export + clusterSeparator
 	inExport := mcbuilder.WithClusterFilter(func(cn multicluster.ClusterName, _ cluster.Cluster) bool {
 		return strings.HasPrefix(string(cn), prefix)
