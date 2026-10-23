@@ -478,6 +478,8 @@ func (r *Runtime) supervise(inst *instance, spec ComponentSpec, deps Deps, svc S
 		inst.mu.Unlock()
 		close(done)
 	}()
+	var probes sync.WaitGroup
+	defer probes.Wait()
 	restarts := inst.restartsOf()
 	for {
 		if svc == nil {
@@ -523,7 +525,7 @@ func (r *Runtime) supervise(inst *instance, spec ComponentSpec, deps Deps, svc S
 			return
 		}
 		started := make(chan struct{})
-		ready := r.launchReady(inst, svc, runCtx, attempt, started)
+		ready := r.launchReady(&probes, inst, svc, runCtx, attempt, started)
 		close(started)
 		err := r.callStart(runCtx, svc, deps, spec)
 		if runCtx.Err() != nil || inst.isStopping() {
@@ -603,9 +605,9 @@ func (r *Runtime) waitRestart(ctx context.Context, restarts int32) bool {
 	}
 }
 
-func (r *Runtime) launchReady(inst *instance, svc Service, ctx context.Context, attempt uint64, started <-chan struct{}) chan struct{} {
+func (r *Runtime) launchReady(probes *sync.WaitGroup, inst *instance, svc Service, ctx context.Context, attempt uint64, started <-chan struct{}) chan struct{} {
 	ready := make(chan struct{})
-	go r.awaitReady(inst, svc, ctx, attempt, started, ready)
+	probes.Go(func() { r.awaitReady(inst, svc, ctx, attempt, started, ready) })
 	return ready
 }
 

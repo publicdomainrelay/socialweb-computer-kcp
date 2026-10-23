@@ -105,24 +105,20 @@ func (c *Controller) Run(ctx context.Context) error {
 
 	events, err := c.source.Watch(runCtx)
 	if err != nil {
-		stopErr := c.shutdown()
+		stopErr := c.shutdown(ctx)
 		return errors.Join(fmt.Errorf("component: watching components: %w", err), stopErr)
 	}
 
 	var wg sync.WaitGroup
-	wg.Add(c.workers)
-	for i := 0; i < c.workers; i++ {
-		go func() {
-			defer wg.Done()
-			c.worker(runCtx)
-		}()
+	for range c.workers {
+		wg.Go(func() { c.worker(runCtx) })
 	}
 
 	specs, err := c.source.List(runCtx)
 	if err != nil {
 		cancel()
 		wg.Wait()
-		stopErr := c.shutdown()
+		stopErr := c.shutdown(ctx)
 		return errors.Join(fmt.Errorf("component: listing components: %w", err), stopErr)
 	}
 	for _, spec := range specs {
@@ -134,7 +130,7 @@ func (c *Controller) Run(ctx context.Context) error {
 	ticker.Stop()
 	cancel()
 	wg.Wait()
-	stopErr := c.shutdown()
+	stopErr := c.shutdown(ctx)
 	if runErr != nil {
 		return runErr
 	}
@@ -248,8 +244,8 @@ func (c *Controller) writeStatus(ctx context.Context, spec ComponentSpec, status
 	return nil
 }
 
-func (c *Controller) shutdown() error {
-	ctx, cancel := context.WithTimeout(context.Background(), DefaultStopTimeout)
+func (c *Controller) shutdown(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), DefaultStopTimeout)
 	defer cancel()
 	return c.runtime.Stop(ctx)
 }
