@@ -48,18 +48,14 @@ func TerminationStateSync(o *v1alpha1.ComputeVM, workspace, reason, observedAt s
 	if reason == "" || observedAt == "" {
 		return nil, errors.New("computevm: a termination StateSync needs a reason and an observed time")
 	}
-	marker := terminationMarker(o)
-	if request == nil && marker != nil {
-		request = marker.Request
+	if request == nil {
+		request = ReleaseRequestRef(o)
 	}
 	record := map[string]any{
 		"$type":      market.ComputeEventsVMTerminatedNSID,
 		"reason":     reason,
 		"observedAt": observedAt,
 		"createdAt":  observedAt,
-	}
-	if marker != nil && marker.ExitCode != nil {
-		record["exitCode"] = *marker.ExitCode
 	}
 	if request != nil && request.URI != "" {
 		record["request"] = market.NewStrongRef(request.URI, request.CID).Map()
@@ -123,28 +119,26 @@ func TerminationStateSync(o *v1alpha1.ComputeVM, workspace, reason, observedAt s
 	return &unstructured.Unstructured{Object: object}, nil
 }
 
-func terminationMarker(o *v1alpha1.ComputeVM) *v1alpha1.ComputeVMTermination {
-	if o == nil || o.Status.Market == nil {
-		return nil
-	}
-	return o.Status.Market.Termination
+func TerminationReportable(o v1alpha1.ComputeVM) bool {
+	contract := o.Spec.Contract
+	return contract != nil && contract.Receipt.URI != "" && contract.Receipt.CID != ""
 }
 
-func (ct *Controller) ensureTerminationSync(ctx context.Context, o v1alpha1.ComputeVM, reason, observedAt string, request *commonv1.StrongRef) error {
-	if !terminationReportable(o) {
+func (h *Host) EnsureTerminationSync(ctx context.Context, o v1alpha1.ComputeVM, reason, observedAt string, request *commonv1.StrongRef) error {
+	if !TerminationReportable(o) {
 		return nil
 	}
-	object, err := TerminationStateSync(&o, ct.c.Workspace, reason, observedAt, request)
+	object, err := TerminationStateSync(&o, h.c.Workspace, reason, observedAt, request)
 	if err != nil {
 		return err
 	}
 	name := object.GetName()
-	if _, err := ct.syncs.Create(ctx, object, metav1.CreateOptions{}); err != nil {
+	if _, err := h.syncs.Create(ctx, object, metav1.CreateOptions{}); err != nil {
 		if apierrors.IsAlreadyExists(err) {
 			return nil
 		}
 		return fmt.Errorf("computevm: creating the termination StateSync %s: %w", name, err)
 	}
-	ct.c.log().Info("a termination StateSync is created", "computevm", o.Name, "statesync", name)
+	h.c.log().Info("a termination StateSync is created", "computevm", o.Name, "statesync", name)
 	return nil
 }

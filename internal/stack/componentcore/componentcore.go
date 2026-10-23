@@ -23,6 +23,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component/kcpclients"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/credentials"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/eventstream"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/exposure"
@@ -112,6 +113,8 @@ type Config struct {
 	NodeClaimAgent *kcpclient.ServiceAccountRef
 
 	OAuthScopes []string
+
+	Compute *computevm.Config
 }
 
 type Core struct {
