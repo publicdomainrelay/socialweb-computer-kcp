@@ -118,6 +118,7 @@ func (c *Controller) Run(ctx context.Context) error {
 	if err != nil {
 		cancel()
 		wg.Wait()
+		drain(events)
 		stopErr := c.shutdown(ctx)
 		return errors.Join(fmt.Errorf("component: listing components: %w", err), stopErr)
 	}
@@ -130,11 +131,17 @@ func (c *Controller) Run(ctx context.Context) error {
 	ticker.Stop()
 	cancel()
 	wg.Wait()
+	drain(events)
 	stopErr := c.shutdown(ctx)
 	if runErr != nil {
 		return runErr
 	}
 	return stopErr
+}
+
+func drain(events <-chan Event) {
+	for range events {
+	}
 }
 
 func (c *Controller) Reconcile(ctx context.Context, spec ComponentSpec) error {
