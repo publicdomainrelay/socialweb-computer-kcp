@@ -1,1 +1,9 @@
 ticker	owner	period	reason
+relay-crawl-refresh	internal/relay/local (Relay)	spec.crawlIntervalSeconds; none when unset	re-request a crawl of the upstream PDS hosts an operator names
+relay-ws-ping	internal/atproto/relay (Relay)	30s	websocket ping to each subscribed PDS
+ingress-keepalive	internal/atproto/ingress (IngressProxy)	spec.keepaliveMilliseconds	keepalive to connected subscription clients
+ingress-synthetic-events	internal/atproto/ingress (IngressProxy)	5s	synthetic subscription events to connected ingress clients
+guest-sshd-probe	internal/sshtransport (Requester)	5s until the session timeout	probe a guest sshd over SSH; a guest offers no watch
+guest-rbac-resync	internal/guestidentity (GuestControlPlane)	spec.grantSyncSeconds, 30s when 0	resync requester RBAC records held in a remote repo with no watch
+guest-oidc-refresh	internal/guestidentity (GuestControlPlane)	5m	refresh the OIDC discovery and keys OpenBao publishes with no watch
+custody-renew	internal/gateway/custody (GatewayAPI)	per session: renew below 30m left, by 1h	renew the custody sessions of signed-in web users
