@@ -61,3 +61,16 @@ func SecretValue(data map[string]any, key string, fallbacks ...string) string {
 	}
 	return ""
 }
+
+func WriteSecret(ctx context.Context, b *bus.Bus, from commonv1.ObjectRef, ref commonv1.SecretRef, data map[string]any) error {
+	to, mount, path, err := secretTarget(from, ref)
+	if err != nil {
+		return err
+	}
+	kv, err := bus.Resolve[contractvault.KV](ctx, b, from, to,
+		bus.Capability{Name: contractvault.CapabilityWrite, Scope: []string{mount + "/" + path}})
+	if err != nil {
+		return fmt.Errorf("vault: %s writing %s/%s to %s: %w", from.String(), mount, path, to.String(), err)
+	}
+	return kv.Write(ctx, mount, path, data)
+}

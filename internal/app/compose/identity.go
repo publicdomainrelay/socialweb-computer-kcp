@@ -132,7 +132,9 @@ func (p AccountPlan) binding(did, pdsURL string) (accountBinding, error) {
 	}
 	if binding.RemotePDS != nil {
 		if binding.AuthRef != nil && binding.RemotePDS.Spec.Auth == (pdsv1alpha1.RemotePDSAuth{}) {
+			refresh := *binding.AuthRef
 			binding.RemotePDS.Spec.Auth.AccessTokenRef = binding.AuthRef
+			binding.RemotePDS.Spec.Auth.RefreshTokenRef = &refresh
 			binding.OwnsAuth = true
 		}
 		binding.PDSRef = &commonv1.ObjectRef{Kind: KindRemotePDS, Name: binding.RemotePDS.Name}

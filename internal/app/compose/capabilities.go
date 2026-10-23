@@ -133,11 +133,19 @@ func EventSourceRefIn(kind, name, ws string) commonv1.ObjectRef {
 	return Ref(eventsv1alpha1.GroupName, kind, name, ws)
 }
 
-func SecretReadLinks(from commonv1.ObjectRef, refs ...*commonv1.SecretRef) []Link {
-	scopes := map[string][]string{}
+type SecretUse struct {
+	Ref *commonv1.SecretRef
+
+	Write bool
+}
+
+func SecretLinks(from commonv1.ObjectRef, uses ...SecretUse) []Link {
+	reads := map[string][]string{}
+	writes := map[string][]string{}
 	vaults := map[string]commonv1.ObjectRef{}
 	var order []string
-	for _, ref := range refs {
+	for _, use := range uses {
+		ref := use.Ref
 		if ref == nil || ref.Vault == nil || strings.TrimSpace(ref.Vault.Name) == "" {
 			continue
 		}
@@ -147,17 +155,26 @@ func SecretReadLinks(from commonv1.ObjectRef, refs ...*commonv1.SecretRef) []Lin
 			vaults[key] = to
 			order = append(order, key)
 		}
-		scopes[key] = append(scopes[key], strings.Trim(strings.TrimSpace(ref.Mount), "/")+"/"+strings.Trim(strings.TrimSpace(ref.Path), "/"))
+		scope := strings.Trim(strings.TrimSpace(ref.Mount), "/") + "/" + strings.Trim(strings.TrimSpace(ref.Path), "/")
+		reads[key] = append(reads[key], scope)
+		if use.Write {
+			writes[key] = append(writes[key], scope)
+		}
 	}
 	out := make([]Link, 0, len(order))
 	for _, key := range order {
-		out = append(out, RefLink(from, vaults[key], Cap(vault.CapabilityRead, cleanPrefixes(scopes[key])...)))
+		caps := []exposurev1alpha1.LinkCapability{Cap(vault.CapabilityRead, cleanPrefixes(reads[key])...)}
+		if len(writes[key]) > 0 {
+			caps = append(caps, Cap(vault.CapabilityWrite, cleanPrefixes(writes[key])...))
+		}
+		out = append(out, RefLink(from, vaults[key], caps...))
 	}
 	return out
 }
 
 func RemotePDSAuthLinks(from commonv1.ObjectRef, auth pdsv1alpha1.RemotePDSAuth) []Link {
-	return SecretReadLinks(from, auth.AccessTokenRef, auth.RefreshTokenRef, auth.DPoPKeyRef)
+	return SecretLinks(from, SecretUse{Ref: auth.AccessTokenRef, Write: true}, SecretUse{Ref: auth.RefreshTokenRef, Write: true},
+		SecretUse{Ref: auth.DPoPKeyRef})
 }
 
 func RemotePDSRefIn(name, ws string) commonv1.ObjectRef {
