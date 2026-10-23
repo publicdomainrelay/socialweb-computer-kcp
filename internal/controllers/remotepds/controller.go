@@ -14,9 +14,11 @@ import (
 	"github.com/bluesky-social/indigo/atproto/syntax"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
+	vaultctl "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/vault"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/binding"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
@@ -39,8 +41,6 @@ const (
 
 type CABundleFunc func(ref string) ([]byte, error)
 
-type SecretsFunc func(workspace string) remote.Resolve
-
 type SecretRefsFunc func(workspace string) remote.Secrets
 
 type Options struct {
@@ -49,8 +49,6 @@ type Options struct {
 	CABundle CABundleFunc
 
 	Bus *bus.Bus
-
-	Secrets SecretsFunc
 
 	SecretRefs SecretRefsFunc
 
@@ -65,8 +63,6 @@ type Controller struct {
 	caBundle CABundleFunc
 
 	bus *bus.Bus
-
-	secrets SecretsFunc
 
 	secretRefs SecretRefsFunc
 
@@ -94,7 +90,7 @@ func New(opts Options) *Controller {
 	timeout = opt.Positive(timeout, DefaultTimeout)
 	checkInterval := opts.CheckInterval
 	checkInterval = ctlruntime.Period(checkInterval, DefaultCheckInterval)
-	return &Controller{log: log.With("component", "remotepds-controller"), caBundle: opts.CABundle, bus: opts.Bus, secrets: opts.Secrets,
+	return &Controller{log: log.With("component", "remotepds-controller"), caBundle: opts.CABundle, bus: opts.Bus,
 		secretRefs: opts.SecretRefs, timeout: timeout, checkInterval: checkInterval, hosts: binding.New[*remote.Host]()}
 }
 
@@ -189,17 +185,13 @@ func (c *Controller) connect(ctx context.Context, req ctlruntime.Request, object
 	if err != nil {
 		return nil, "", "InvalidTLS", transientError{err: err}
 	}
-	var resolve remote.Resolve
-	if c.secrets != nil {
-		resolve = c.secrets(req.Workspace)
-	}
-	auth, err := remote.Credentials(ctx, object.Spec.Auth, resolve)
-	if err != nil {
-		return nil, "", "InvalidAuth", transientError{err: err}
-	}
 	var secrets remote.Secrets
 	if c.secretRefs != nil {
 		secrets = c.secretRefs(req.Workspace)
+	}
+	auth, err := remote.Credentials(ctx, object.Spec.Auth, c.vaultSecrets(self(req, object)))
+	if err != nil {
+		return nil, "", "InvalidAuth", transientError{err: err}
 	}
 	endpoint := strings.TrimRight(baseURL.String(), "/")
 	host, err := remote.New(remote.Config{URL: endpoint, DID: didText, TLS: tlsConfig, Auth: auth, Secrets: secrets, Timeout: c.timeout})
@@ -265,4 +257,17 @@ func (c *Controller) tlsConfig(spec pdsv1alpha1.RemotePDSTLS, baseURL *url.URL) 
 		config.ServerName = serverName
 	}
 	return config, nil
+}
+
+func self(req ctlruntime.Request, object *pdsv1alpha1.RemotePDS) commonv1.ObjectRef {
+	return commonv1.ObjectRef{Group: pdsv1alpha1.GroupName, Kind: Kind, Name: object.Name, Workspace: req.Workspace}
+}
+
+func (c *Controller) vaultSecrets(from commonv1.ObjectRef) remote.Secrets {
+	if c.bus == nil {
+		return nil
+	}
+	return func(ctx context.Context, ref commonv1.SecretRef) (map[string]any, error) {
+		return vaultctl.ReadSecret(ctx, c.bus, from, ref)
+	}
 }

@@ -133,6 +133,33 @@ func EventSourceRefIn(kind, name, ws string) commonv1.ObjectRef {
 	return Ref(eventsv1alpha1.GroupName, kind, name, ws)
 }
 
+func SecretReadLinks(from commonv1.ObjectRef, refs ...*commonv1.SecretRef) []Link {
+	scopes := map[string][]string{}
+	vaults := map[string]commonv1.ObjectRef{}
+	var order []string
+	for _, ref := range refs {
+		if ref == nil || ref.Vault == nil || strings.TrimSpace(ref.Vault.Name) == "" {
+			continue
+		}
+		to := AppRef(KindVault, strings.TrimSpace(ref.Vault.Name), workspaceOr(ref.Vault.Workspace, from.Workspace))
+		key := to.String()
+		if _, ok := vaults[key]; !ok {
+			vaults[key] = to
+			order = append(order, key)
+		}
+		scopes[key] = append(scopes[key], strings.Trim(strings.TrimSpace(ref.Mount), "/")+"/"+strings.Trim(strings.TrimSpace(ref.Path), "/"))
+	}
+	out := make([]Link, 0, len(order))
+	for _, key := range order {
+		out = append(out, RefLink(from, vaults[key], Cap(vault.CapabilityRead, cleanPrefixes(scopes[key])...)))
+	}
+	return out
+}
+
+func RemotePDSAuthLinks(from commonv1.ObjectRef, auth pdsv1alpha1.RemotePDSAuth) []Link {
+	return SecretReadLinks(from, auth.AccessTokenRef, auth.RefreshTokenRef, auth.DPoPKeyRef)
+}
+
 func RemotePDSRefIn(name, ws string) commonv1.ObjectRef {
 	return Ref(pdsv1alpha1.GroupName, KindRemotePDS, name, ws)
 }

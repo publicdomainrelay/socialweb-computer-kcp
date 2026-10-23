@@ -20,7 +20,6 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/credentials"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/pds/identity"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/pds/remote"
 )
 
 const networkReadTimeout = 30 * time.Second
@@ -55,9 +54,6 @@ func (c *Core) repoOptions(caBundle remotepds.CABundleFunc) repos.Options {
 				return nil, err
 			}
 			return credential.Data, nil
-		},
-		SecretStrings: func(workspace string) remote.Resolve {
-			return coreSecretResolver(c.store, workspace, cfg.CredentialClient, cfg.CredentialServer)
 		},
 		CABundle: caBundle,
 		Identities: func(ctx context.Context, workspace, name string) (*v1alpha1.MarketIdentity, error) {

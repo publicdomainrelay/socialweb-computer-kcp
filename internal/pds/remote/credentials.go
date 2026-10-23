@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
@@ -18,8 +19,6 @@ var (
 
 	refreshKeys = []string{"refreshJwt", "refreshToken", "refresh_token", "jwt", "token", "value"}
 )
-
-type Resolve func(ctx context.Context, ref string) (map[string]any, error)
 
 type leaseTokens struct {
 	source *lease.Source[string]
@@ -37,23 +36,18 @@ func (t leaseTokens) RefreshAccessToken(ctx context.Context) (string, error) {
 	return t.source.Get(ctx)
 }
 
-func Credentials(ctx context.Context, auth pdsv1alpha1.RemotePDSAuth, resolve Resolve) (xrpc.Auth, error) {
-	accessRef := strings.TrimSpace(auth.AccessTokenRef)
-	refreshRef := strings.TrimSpace(auth.RefreshTokenRef)
-	if accessRef == "" && refreshRef == "" {
-		accessRef = strings.TrimSpace(auth.AccountRef)
-	}
-	keyRef := strings.TrimSpace(auth.DPoPKeyRef)
-	if accessRef == "" && refreshRef == "" && keyRef == "" {
+func Credentials(ctx context.Context, auth pdsv1alpha1.RemotePDSAuth, secrets Secrets) (xrpc.Auth, error) {
+	accessRef, refreshRef, keyRef := usable(auth.AccessTokenRef), usable(auth.RefreshTokenRef), usable(auth.DPoPKeyRef)
+	if accessRef == nil && refreshRef == nil && keyRef == nil {
 		return nil, nil
 	}
-	if resolve == nil {
+	if secrets == nil {
 		return nil, errors.New("remote: the RemotePDS auth names refs but no secret resolver is configured")
 	}
 	tokens := leaseTokens{source: lease.New(func(ctx context.Context) (string, time.Time, error) {
-		token, err := firstToken(ctx, resolve, accessRef, accessKeys)
+		token, err := firstToken(ctx, secrets, accessRef, accessKeys)
 		if err == nil && token == "" {
-			token, err = firstToken(ctx, resolve, refreshRef, refreshKeys)
+			token, err = firstToken(ctx, secrets, refreshRef, refreshKeys)
 		}
 		if err != nil {
 			return "", time.Time{}, err
@@ -68,10 +62,10 @@ func Credentials(ctx context.Context, auth pdsv1alpha1.RemotePDSAuth, resolve Re
 		return token, expires.Add(-pdsclient.TokenExpirySkew), nil
 	})}
 	var dpop pdsclient.DPoPSource
-	if keyRef != "" {
-		data, err := resolve(ctx, keyRef)
+	if keyRef != nil {
+		data, err := secrets(ctx, *keyRef)
 		if err != nil {
-			return nil, fmt.Errorf("remote: resolving the dpop key ref %s: %w", keyRef, err)
+			return nil, fmt.Errorf("remote: resolving the dpop key ref %s: %w", refName(*keyRef), err)
 		}
 		if dpop, err = pdsclient.DPoPSourceFromData(data); err != nil {
 			return nil, err
@@ -80,13 +74,27 @@ func Credentials(ctx context.Context, auth pdsv1alpha1.RemotePDSAuth, resolve Re
 	return pdsclient.TokenAuth(tokens, dpop), nil
 }
 
-func firstToken(ctx context.Context, resolve Resolve, ref string, keys []string) (string, error) {
-	if ref == "" {
+func usable(ref *commonv1.SecretRef) *commonv1.SecretRef {
+	if ref == nil || strings.Trim(strings.TrimSpace(ref.Path), "/") == "" {
+		return nil
+	}
+	return ref
+}
+
+func refName(ref commonv1.SecretRef) string {
+	return strings.Trim(strings.TrimSpace(ref.Mount)+"/"+strings.TrimSpace(ref.Path), "/")
+}
+
+func firstToken(ctx context.Context, secrets Secrets, ref *commonv1.SecretRef, keys []string) (string, error) {
+	if ref == nil {
 		return "", nil
 	}
-	data, err := resolve(ctx, ref)
+	data, err := secrets(ctx, *ref)
 	if err != nil {
-		return "", fmt.Errorf("remote: resolving the token ref %s: %w", ref, err)
+		return "", fmt.Errorf("remote: resolving the token ref %s: %w", refName(*ref), err)
+	}
+	if key := strings.TrimSpace(ref.Key); key != "" {
+		keys = []string{key}
 	}
 	for _, key := range keys {
 		if value, ok := data[key].(string); ok && strings.TrimSpace(value) != "" {

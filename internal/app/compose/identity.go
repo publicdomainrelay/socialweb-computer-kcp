@@ -81,6 +81,16 @@ func (p AccountPlan) AccessToken() *commonv1.SecretRef {
 	return &commonv1.SecretRef{Path: p.SessionPath}
 }
 
+func (p AccountPlan) sessionSecret() *commonv1.SecretRef {
+	if p.Identity.SessionRef == nil || strings.TrimSpace(p.Vault.Server) == "" {
+		return nil
+	}
+	ref := *p.Identity.SessionRef
+	vault := AppRef(KindVault, strings.TrimSpace(p.Vault.Server), "")
+	ref.Vault = &vault
+	return &ref
+}
+
 func (p AccountPlan) ComponentPdsRef() *commonv1.ObjectRef {
 	if p.Local {
 		return ComponentRefFor(ComponentKindPds, PdsComponent)
@@ -100,6 +110,8 @@ type accountBinding struct {
 	AuthRef *commonv1.SecretRef
 
 	RemotePDS *pdsv1alpha1.RemotePDS
+
+	OwnsAuth bool
 }
 
 func (p AccountPlan) binding(did, pdsURL string) (accountBinding, error) {
@@ -108,7 +120,7 @@ func (p AccountPlan) binding(did, pdsURL string) (accountBinding, error) {
 		binding.PDSRef = &commonv1.ObjectRef{Kind: ComponentKindPds, Name: PdsComponent}
 		return binding, nil
 	}
-	binding.AuthRef = p.AccessToken()
+	binding.AuthRef = p.sessionSecret()
 	if p.RemotePDS != nil && p.RemotePDS.Name != "" {
 		binding.RemotePDS = p.RemotePDS
 	} else if p.PdsRef != nil && strings.EqualFold(p.PdsRef.Kind, KindRemotePDS) && p.PdsRef.Name != "" {
@@ -120,7 +132,8 @@ func (p AccountPlan) binding(did, pdsURL string) (accountBinding, error) {
 	}
 	if binding.RemotePDS != nil {
 		if binding.AuthRef != nil && binding.RemotePDS.Spec.Auth == (pdsv1alpha1.RemotePDSAuth{}) {
-			binding.RemotePDS.Spec.Auth.DPoPKeyRef = SecretRefString(binding.AuthRef)
+			binding.RemotePDS.Spec.Auth.AccessTokenRef = binding.AuthRef
+			binding.OwnsAuth = true
 		}
 		binding.PDSRef = &commonv1.ObjectRef{Kind: KindRemotePDS, Name: binding.RemotePDS.Name}
 		return binding, nil
@@ -272,23 +285,6 @@ func pdsServiceDID(raw string) string {
 		return ""
 	}
 	return "did:web:" + strings.ReplaceAll(strings.ToLower(parsed.Host), ":", "%3A")
-}
-
-func SecretRefString(ref *commonv1.SecretRef) string {
-	if ref == nil {
-		return ""
-	}
-	path := strings.Trim(strings.TrimSpace(ref.Path), "/")
-	if mount := strings.Trim(strings.TrimSpace(ref.Mount), "/"); mount != "" {
-		path = mount + "/" + path
-	}
-	if path == "" {
-		return ""
-	}
-	if server := v1alpha1.VaultServer(ref.Vault, ""); server != "" {
-		return "openbao:" + server + ":" + path
-	}
-	return "openbao:" + path
 }
 
 func (c *Composer) Identity(ctx context.Context, ws, name string) (*v1alpha1.MarketIdentity, error) {
@@ -463,5 +459,8 @@ func (c *Composer) AccountRepo(ctx context.Context, r Root, ws, identityName str
 	remote := AppRef(KindRemoteRepo, name, ws)
 	links := []Link{RepoBackendLink(AppRef(KindAtprotoRepo, name, ws), remote)}
 	links = append(links, RemoteRepoLinks(remote, RemotePDSRefIn(binding.PDSRef.Name, ws), identity, binding.DID)...)
+	if binding.OwnsAuth {
+		links = append(links, RemotePDSAuthLinks(RemotePDSRefIn(binding.PDSRef.Name, ws), binding.RemotePDS.Spec.Auth)...)
+	}
 	return links, nil
 }
