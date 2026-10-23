@@ -29,6 +29,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 )
 
@@ -81,6 +82,7 @@ type Controller struct {
 
 	mu       sync.Mutex
 	streams  map[string]*streamRuntime
+	running  sync.WaitGroup
 	pdsCache *ttlcache.Cache[syntax.DID, pdsclient.PDS]
 	verifyAt *ttlcache.Cache[string, struct{}]
 }
@@ -90,7 +92,6 @@ type streamRuntime struct {
 	generation  int64
 	fingerprint string
 	cancel      context.CancelFunc
-	done        chan struct{}
 }
 
 func Register(opts Options) (*Controller, error) {
@@ -174,18 +175,15 @@ func (c *Controller) Run(ctx context.Context) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var workers sync.WaitGroup
-	workers.Add(2)
-	go func() {
-		defer workers.Done()
+	workers.Go(func() {
 		c.runEventStreams(runCtx)
-	}()
-	go func() {
-		defer workers.Done()
+	})
+	workers.Go(func() {
 		c.runRecordWatches(runCtx)
-	}()
+	})
 	<-runCtx.Done()
-	c.stopAll()
 	workers.Wait()
+	c.stopAll(ctx)
 	return nil
 }
 
@@ -277,14 +275,13 @@ func (c *Controller) reconcile(ctx context.Context, dyn dynamic.Interface, u *un
 		current.cancel()
 	}
 	streamCtx, cancel := context.WithCancel(ctx)
-	state := &streamRuntime{uid: es.UID, generation: es.Generation, fingerprint: fingerprint, cancel: cancel, done: make(chan struct{})}
+	state := &streamRuntime{uid: es.UID, generation: es.Generation, fingerprint: fingerprint, cancel: cancel}
 	c.streams[es.Name] = state
 	stream := newEventStream(c, es, dyn)
 	c.mu.Unlock()
-	go func() {
-		defer close(state.done)
+	c.running.Go(func() {
 		stream.run(streamCtx)
-	}()
+	})
 	return nil
 }
 
@@ -298,7 +295,7 @@ func (c *Controller) forget(name string) {
 	}
 }
 
-func (c *Controller) stopAll() {
+func (c *Controller) stopAll(ctx context.Context) {
 	c.mu.Lock()
 	streams := c.streams
 	c.streams = map[string]*streamRuntime{}
@@ -306,14 +303,9 @@ func (c *Controller) stopAll() {
 	for _, runtime := range streams {
 		runtime.cancel()
 	}
-	deadline := time.After(DefaultStatusInterval)
-	for _, runtime := range streams {
-		select {
-		case <-runtime.done:
-		case <-deadline:
-			return
-		}
-	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), DefaultStatusInterval)
+	defer cancel()
+	_ = supervise.Join(ctx, c.running.Wait)
 }
 
 func specFingerprint(spec eventsv1alpha1.EventStreamSpec) (string, error) {
