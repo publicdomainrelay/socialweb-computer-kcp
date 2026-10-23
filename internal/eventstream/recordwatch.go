@@ -192,11 +192,8 @@ func (c *Controller) reconcileRecordWatch(ctx context.Context, dyn dynamic.Inter
 func (c *Controller) verifyWatchRecords(ctx context.Context, dyn dynamic.Interface, name string, generation int64,
 	status recordWatchStatus, matches []resolvedMatch) (bool, string) {
 	key := name + "/" + fmt.Sprint(generation)
-	c.mu.Lock()
-	next, seen := c.verifyAt[key]
-	c.verifyAt[key] = time.Now().Add(watchVerifyInterval)
-	c.mu.Unlock()
-	if seen && time.Now().Before(next) {
+	if !c.verifyAt.Add(key, struct{}{}, 0) {
+		c.verifyAt.Set(key, struct{}{})
 		if existing := meta.FindStatusCondition(status.Conditions, RecordWatchConditionVerified); existing != nil {
 			return existing.Status == metav1.ConditionTrue, existing.Message
 		}
@@ -254,9 +251,7 @@ func (c *Controller) verifyWatchRecords(ctx context.Context, dyn dynamic.Interfa
 		}
 	}
 	if len(problems) > 0 {
-		c.mu.Lock()
-		c.verifyAt[key] = time.Now().Add(watchVerifyRetry)
-		c.mu.Unlock()
+		c.verifyAt.SetTTL(key, struct{}{}, watchVerifyRetry)
 		return false, "the watched records could not be verified: " + strings.Join(problems, "; ")
 	}
 	return true, fmt.Sprintf("%d watched record(s) verified from their author PDS", len(records))
