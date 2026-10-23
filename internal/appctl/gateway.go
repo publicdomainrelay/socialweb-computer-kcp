@@ -486,7 +486,7 @@ func (ctl *Controller) reconcileGateway(ctx context.Context, u *unstructured.Uns
 			st.Message = "its account password: " + err.Error()
 			return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
 		}
-		if err := ctl.ensureIdentitySpec(ctx, ws, owner, RequesterIdentity, OperatorWatched(plan.Identity, o.Spec.Operator)); err != nil {
+		if err := ctl.ensureIdentitySpec(ctx, ws, owner, RequesterIdentity, OperatorWatched(plan.Identity, o.Spec.Operator, RequesterAssociate)); err != nil {
 			st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, "the requester's MarketIdentity: "+err.Error()
 			return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
 		}
@@ -647,7 +647,7 @@ func (ctl *Controller) reconcileGateway(ctx context.Context, u *unstructured.Uns
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, err.Error()
 		return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
 	}
-	if err := ctl.ensureMarketStreams(ctx, ws, "requester", o.Spec.Comms, o.Spec.Network); err != nil {
+	if err := ctl.ensureMarketStreams(ctx, ws, "requester", o.Spec.Comms, o.Spec.Network, oauthReceiveOnly(plan.Mode)); err != nil {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
 		return ctl.writeStatus(ctx, GatewayGVR, o.Name, st)
 	}

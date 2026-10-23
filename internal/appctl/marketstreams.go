@@ -48,6 +48,14 @@ func marketCommsMode(comms *v1alpha1.MarketComms) v1alpha1.MarketCommsMode {
 	return comms.Mode
 }
 
+func oauthReceiveOnly(mode v1alpha1.MarketIdentityMode) bool {
+	switch mode {
+	case v1alpha1.MarketIdentityModeOAuthQr, v1alpha1.MarketIdentityModeOAuthBrowser, v1alpha1.MarketIdentityModeOAuthDelegated:
+		return true
+	}
+	return false
+}
+
 func marketTransportURLs(comms *v1alpha1.MarketComms, network *v1alpha1.MarketNetworkValue) []string {
 	seen := map[string]bool{}
 	out := []string{}
@@ -77,8 +85,11 @@ func marketStreamName(role, url string) string {
 	return statusObjectName("market-"+role, hex.EncodeToString(sum[:8]))
 }
 
-func (ctl *Controller) ensureMarketStreams(ctx context.Context, ws, role string, comms *v1alpha1.MarketComms, network *v1alpha1.MarketNetworkValue) error {
+func (ctl *Controller) ensureMarketStreams(ctx context.Context, ws, role string, comms *v1alpha1.MarketComms, network *v1alpha1.MarketNetworkValue, forceFirehose bool) error {
 	mode := marketCommsMode(comms)
+	if forceFirehose {
+		mode = v1alpha1.MarketCommsModeFirehose
+	}
 	if mode != v1alpha1.MarketCommsModeFirehose && mode != v1alpha1.MarketCommsModeBoth {
 		return ctl.deleteMarketStreams(ctx, ws, role)
 	}

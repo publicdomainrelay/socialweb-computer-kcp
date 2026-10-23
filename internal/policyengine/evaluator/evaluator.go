@@ -238,6 +238,9 @@ func (e *Evaluator) runScope(ctx context.Context, record executor.PolicyRecord, 
 	if e.host != nil {
 		input.ResolveOperatorDid = e.host.ResolveOperatorDid
 		input.GetVouchedDids = e.host.GetVouchedDids
+		if resolver, ok := e.host.(trust.ServiceOperatorResolver); ok {
+			input.ResolveOperatorDidFor = resolver.ResolveOperatorDidFor
+		}
 	}
 	if err := e.acquire(ctx); err != nil {
 		return executor.Verdict{}, err

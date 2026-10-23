@@ -31,7 +31,7 @@ func (ctl *Controller) associateNetworkOperator(ctx context.Context, spec v1alph
 	if err != nil {
 		return err
 	}
-	operator, err := ctl.writeClaim(ctx, id, spec.Identity.PdsUrl, spec.Network.CaBundleRef, spec.Identity.Handle, password, "bidder-")
+	operator, err := ctl.writeClaim(ctx, id, spec.Identity.PdsUrl, spec.Network.CaBundleRef, spec.Identity.Handle, password, "bidder-", BidderAssociate)
 	if err != nil || operator == "" {
 		return err
 	}
@@ -58,10 +58,13 @@ func claimOf(rawURL string) (nonce, service string) {
 	return q.Get("n"), q.Get("s")
 }
 
-func (ctl *Controller) writeClaim(ctx context.Context, id *v1alpha1.MarketIdentity, operatorPds, ca, identifier, password, namePrefix string) (string, error) {
-	nonce, service := claimOf(id.Status.PendingAction.Url)
-	if nonce == "" || service == "" {
+func (ctl *Controller) writeClaim(ctx context.Context, id *v1alpha1.MarketIdentity, operatorPds, ca, identifier, password, namePrefix, service string) (string, error) {
+	nonce, pendingService := claimOf(id.Status.PendingAction.Url)
+	if nonce == "" || strings.TrimSpace(service) == "" {
 		return "", nil
+	}
+	if pendingService != "" && pendingService != service {
+		return "", fmt.Errorf("the pending association names service %q, not %q", pendingService, service)
 	}
 	didText := strings.TrimSpace(id.Status.Did)
 	if _, err := syntax.ParseDID(didText); err != nil {
@@ -99,12 +102,15 @@ func heldClaimMatches(value map[string]any, nonce, operator, subject string) boo
 	if value == nil {
 		return false
 	}
-	if got, _ := value["nonce"].(string); got != "" && got == nonce {
-		return true
-	}
 	challenge, _ := value["challenge"].(string)
 	keyID, _ := value["keyId"].(string)
-	return challenge == operator && keyID == subject || challenge == subject && keyID == operator
+	if challenge != operator || keyID != subject {
+		return false
+	}
+	if got, _ := value["nonce"].(string); got != "" && got != nonce {
+		return false
+	}
+	return true
 }
 
 func (ctl *Controller) identityIn(ctx context.Context, ws, name string) (*v1alpha1.MarketIdentity, error) {
@@ -131,7 +137,7 @@ func (ctl *Controller) associateGatewayOperator(ctx context.Context, id *v1alpha
 	if err != nil {
 		return err
 	}
-	operator, err := ctl.writeClaim(ctx, id, s.Service, n.CaBundleRef, s.Identifier, s.Password, "requester-")
+	operator, err := ctl.writeClaim(ctx, id, s.Service, n.CaBundleRef, s.Identifier, s.Password, "requester-", RequesterAssociate)
 	if err != nil || operator == "" {
 		return err
 	}

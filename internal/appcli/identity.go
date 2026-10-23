@@ -85,7 +85,7 @@ func (r IdentityRenderer) render(ctx context.Context, name string, a *v1alpha1.M
 			who = fmt.Sprintf("%s (%s)", a.Handle, a.CallerDid)
 		}
 		if in == nil {
-			fmt.Fprintf(r.Out, "%s asks to associate; approve by adding %s to spec.approvedAssociations of marketidentity %s\n", who, a.CallerDid, name)
+			fmt.Fprintf(r.Out, "%s asks to associate; the accepted path is the operator's verified badgeBlueKeys claim naming %s with the role service; adding the caller to spec.approvedAssociations is a manual workaround only\n", who, a.CallerDid)
 			return nil
 		}
 		fmt.Fprintf(r.Out, "Associate with %s? [y/N] ", who)

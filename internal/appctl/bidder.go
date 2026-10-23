@@ -592,6 +592,7 @@ func bidderDesired(o v1alpha1.MarketBidder, plan accountPlan, id *v1alpha1.Marke
 	bidder := desiredComponent{Kind: ComponentKindBidder, Name: BidderComponent, Spec: v1alpha1.BidderSpec{
 		ComponentSpec:      NewComponentSpec(ComponentCRStateDir(stateRoot, ComponentKindBidder, BidderComponent), network, suspend),
 		MarketURL:          plan.MarketURL,
+		Mode:               string(plan.Mode),
 		Identity:           ident,
 		PdsRef:             plan.componentPdsRef(),
 		PDSAccessTokenPath: pdsAccessTokenPathValue,
@@ -787,7 +788,7 @@ func (ctl *Controller) reconcileBidder(ctx context.Context, u *unstructured.Unst
 			st.Message = "its account password: " + err.Error()
 			return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
 		}
-		if err := ctl.ensureIdentitySpec(ctx, ctl.c.workspace(), owner, BidderIdentity, OperatorWatched(plan.Identity, o.Spec.Operator)); err != nil {
+		if err := ctl.ensureIdentitySpec(ctx, ctl.c.workspace(), owner, BidderIdentity, OperatorWatched(plan.Identity, o.Spec.Operator, BidderAssociate)); err != nil {
 			st.Message = "its MarketIdentity: " + err.Error()
 			return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
 		}
@@ -925,7 +926,7 @@ func (ctl *Controller) reconcileBidder(ctx context.Context, u *unstructured.Unst
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, err.Error()
 		return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
 	}
-	if err := ctl.ensureMarketStreams(ctx, ctl.c.workspace(), "bidder", o.Spec.Comms, o.Spec.Network); err != nil {
+	if err := ctl.ensureMarketStreams(ctx, ctl.c.workspace(), "bidder", o.Spec.Comms, o.Spec.Network, oauthReceiveOnly(plan.Mode)); err != nil {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
 		return ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
 	}

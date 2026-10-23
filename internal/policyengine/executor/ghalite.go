@@ -64,7 +64,8 @@ func (g *GhaLite) Execute(ctx context.Context, record PolicyRecord, eval *EvalCo
 	}
 	var snapshot *trust.Snapshot
 	if eval.Host != nil {
-		built, snapshotErr := trust.BuildSnapshot(ctx, eval.Host, eval.SelfDid, eval.CounterpartyDid)
+		selfService, counterpartyService := snapshotServices(eval.Perspective)
+		built, snapshotErr := trust.BuildSnapshotFor(ctx, eval.Host, eval.SelfDid, eval.CounterpartyDid, selfService, counterpartyService)
 		if snapshotErr != nil {
 			if ctx.Err() != nil {
 				return Verdict{}, ctx.Err()
@@ -96,13 +97,15 @@ func (g *GhaLite) Scope(ctx context.Context, record PolicyRecord, input ScopeInp
 	var host trust.Host
 	if input.ResolveOperatorDid != nil || input.GetVouchedDids != nil {
 		host = scopeHost{
-			resolveOperatorDid: input.ResolveOperatorDid,
-			getVouchedDids:     input.GetVouchedDids,
+			resolveOperatorDid:    input.ResolveOperatorDid,
+			resolveOperatorDidFor: input.ResolveOperatorDidFor,
+			getVouchedDids:        input.GetVouchedDids,
 		}
 	}
 	var snapshot *trust.Snapshot
 	if host != nil {
-		built, snapshotErr := trust.BuildSnapshot(ctx, host, input.SelfDid, input.CounterpartyDid)
+		selfService, counterpartyService := snapshotServices(input.Perspective)
+		built, snapshotErr := trust.BuildSnapshotFor(ctx, host, input.SelfDid, input.CounterpartyDid, selfService, counterpartyService)
 		if snapshotErr != nil {
 			if ctx.Err() != nil {
 				return Verdict{}, false, ctx.Err()
@@ -350,8 +353,9 @@ func mustJSONString(value string) json.RawMessage {
 }
 
 type scopeHost struct {
-	resolveOperatorDid func(context.Context, string) (string, bool, error)
-	getVouchedDids     func(context.Context, string) (map[string]bool, error)
+	resolveOperatorDid    func(context.Context, string) (string, bool, error)
+	resolveOperatorDidFor func(context.Context, string, string) (string, bool, error)
+	getVouchedDids        func(context.Context, string) (map[string]bool, error)
 }
 
 func (h scopeHost) Resolve(ctx context.Context, ref atproto.StrongRef) (map[string]any, error) {
@@ -363,6 +367,20 @@ func (h scopeHost) ResolveOperatorDid(ctx context.Context, did string) (string, 
 		return "", false, nil
 	}
 	return h.resolveOperatorDid(ctx, did)
+}
+
+func (h scopeHost) ResolveOperatorDidFor(ctx context.Context, did, service string) (string, bool, error) {
+	if h.resolveOperatorDidFor == nil {
+		return h.ResolveOperatorDid(ctx, did)
+	}
+	return h.resolveOperatorDidFor(ctx, did, service)
+}
+
+func snapshotServices(perspective Perspective) (string, string) {
+	if perspective == PerspectiveRequester {
+		return trust.RequesterAssociate, trust.BidderAssociate
+	}
+	return trust.BidderAssociate, trust.RequesterAssociate
 }
 
 func (h scopeHost) GetVouchedDids(ctx context.Context, did string) (map[string]bool, error) {

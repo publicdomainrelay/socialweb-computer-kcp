@@ -286,7 +286,11 @@ func (r *RunReconciler) requestContext(ctx context.Context, run *policyv1alpha1.
 	}
 	if r.Host != nil && selfDid != "" && counterpartyDid != "" {
 		if _, seeded := cache["trust/"+counterpartyDid]; !seeded {
-			snapshot, err := trust.BuildSnapshot(ctx, r.Host, selfDid, counterpartyDid)
+			selfService, counterpartyService := trust.BidderAssociate, trust.RequesterAssociate
+			if stringInput(inputs, "perspective") == perspectiveRequester {
+				selfService, counterpartyService = trust.RequesterAssociate, trust.BidderAssociate
+			}
+			snapshot, err := trust.BuildSnapshotFor(ctx, r.Host, selfDid, counterpartyDid, selfService, counterpartyService)
 			if err != nil {
 				return nil, err
 			}

@@ -124,15 +124,17 @@ func (r *tangledGraphVouchResolver) IsVouched(ctx context.Context, voucher, vouc
 type OperatorDiscoveryOptions struct {
 	ListRecordsOwn    OwnLister
 	ListRecordsPublic Lister
+	Service           string
 	Log               market.LogFunc
 }
 
 type badgeBlueKeysOperatorDiscovery struct {
-	own    OwnLister
-	public Lister
-	log    market.LogFunc
-	mu     sync.Mutex
-	cache  map[string][]string
+	own     OwnLister
+	public  Lister
+	service string
+	log     market.LogFunc
+	mu      sync.Mutex
+	cache   map[string][]string
 }
 
 func NewBadgeBlueKeysOperatorDiscovery(opts OperatorDiscoveryOptions) OperatorDiscovery {
@@ -141,22 +143,22 @@ func NewBadgeBlueKeysOperatorDiscovery(opts OperatorDiscoveryOptions) OperatorDi
 		logf = market.NoopLog
 	}
 	return &badgeBlueKeysOperatorDiscovery{
-		own:    opts.ListRecordsOwn,
-		public: opts.ListRecordsPublic,
-		log:    logf,
-		cache:  map[string][]string{},
+		own:     opts.ListRecordsOwn,
+		public:  opts.ListRecordsPublic,
+		service: opts.Service,
+		log:     logf,
+		cache:   map[string][]string{},
 	}
 }
 
-func operatorOf(value map[string]any, subjectDID string) string {
-	if value == nil {
+func operatorOf(value map[string]any, subjectDID, service string) string {
+	if value == nil || strings.TrimSpace(service) == "" {
 		return ""
 	}
 	if keyID, _ := value["keyId"].(string); keyID != subjectDID {
 		return ""
 	}
-	service, _ := value["service"].(string)
-	if service != "bidder_associate" && service != "requester_associate" {
+	if svc, _ := value["service"].(string); svc != service {
 		return ""
 	}
 	challenge, _ := value["challenge"].(string)
@@ -177,7 +179,7 @@ func (d *badgeBlueKeysOperatorDiscovery) DiscoverOperatorDIDs(ctx context.Contex
 	if d.own != nil {
 		if records, err := d.own.ListRecordsOwn(ctx, market.BadgeBlueKeysNSID); err == nil {
 			for _, rec := range records {
-				if op := operatorOf(rec.Value, atprotoDID); op != "" {
+				if op := operatorOf(rec.Value, atprotoDID, d.service); op != "" {
 					dids = append(dids, op)
 				}
 			}
@@ -186,7 +188,7 @@ func (d *badgeBlueKeysOperatorDiscovery) DiscoverOperatorDIDs(ctx context.Contex
 	if len(dids) == 0 && d.public != nil {
 		if records, err := d.public.ListRecords(ctx, atprotoDID, market.BadgeBlueKeysNSID); err == nil {
 			for _, rec := range records {
-				if op := operatorOf(rec.Value, atprotoDID); op != "" {
+				if op := operatorOf(rec.Value, atprotoDID, d.service); op != "" {
 					dids = append(dids, op)
 				}
 			}
@@ -276,13 +278,15 @@ func DiscoverOperatedDIDs(ctx context.Context, opts OperatedDiscoveryOptions) []
 type DelegatedTrustOptions struct {
 	VouchResolver  VouchResolver
 	ListOwnRecords OwnLister
+	Service        string
 	Log            market.LogFunc
 }
 
 type badgeBlueKeysDelegatedTrust struct {
-	vouch VouchResolver
-	own   OwnLister
-	log   market.LogFunc
+	vouch   VouchResolver
+	own     OwnLister
+	service string
+	log     market.LogFunc
 }
 
 func NewBadgeBlueKeysDelegatedTrustResolver(opts DelegatedTrustOptions) DelegatedTrustResolver {
@@ -290,7 +294,7 @@ func NewBadgeBlueKeysDelegatedTrustResolver(opts DelegatedTrustOptions) Delegate
 	if logf == nil {
 		logf = market.NoopLog
 	}
-	return &badgeBlueKeysDelegatedTrust{vouch: opts.VouchResolver, own: opts.ListOwnRecords, log: logf}
+	return &badgeBlueKeysDelegatedTrust{vouch: opts.VouchResolver, own: opts.ListOwnRecords, service: opts.Service, log: logf}
 }
 
 func (d *badgeBlueKeysDelegatedTrust) GetDelegatedTrustedDIDs(ctx context.Context, selfDID string) (map[string]struct{}, error) {
@@ -325,16 +329,13 @@ func (d *badgeBlueKeysDelegatedTrust) GetDelegatedTrustedDIDs(ctx context.Contex
 		}
 		d.log("info", "delegated trust scanning badgeBlueKeys", map[string]any{"challenge": value["challenge"], "service": value["service"], "keyId": value["keyId"], "selfDid": selfDID})
 		service, _ := value["service"].(string)
-		if service != "requester_associate" && service != "bidder_associate" {
+		if strings.TrimSpace(d.service) == "" || service != d.service {
 			continue
 		}
 		challenge, _ := value["challenge"].(string)
 		keyID, _ := value["keyId"].(string)
-		if keyID == selfDID {
+		if keyID == selfDID && strings.HasPrefix(challenge, "did:") {
 			add(challenge)
-		}
-		if challenge == selfDID {
-			add(keyID)
 		}
 	}
 	if d.vouch == nil {

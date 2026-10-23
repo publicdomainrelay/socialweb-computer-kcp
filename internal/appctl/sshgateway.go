@@ -413,7 +413,7 @@ func (ctl *Controller) reconcileSshGateway(ctx context.Context, u *unstructured.
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, err.Error()
 		return ctl.writeStatus(ctx, SshGatewayGVR, o.Name, st)
 	}
-	if err := ctl.ensureMarketStreams(ctx, ctl.c.workspace(), "requester", o.Spec.Comms, o.Spec.Network); err != nil {
+	if err := ctl.ensureMarketStreams(ctx, ctl.c.workspace(), "requester", o.Spec.Comms, o.Spec.Network, oauthReceiveOnly(plan.Mode)); err != nil {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
 		return ctl.writeStatus(ctx, SshGatewayGVR, o.Name, st)
 	}

@@ -336,7 +336,7 @@ func (c *Controller) reconcileVerifiedAssociation(ctx context.Context, dyn dynam
 	}
 	approved := map[string]bool{}
 	for _, record := range watchObject.Status.Records {
-		did := associationClaimDid(record, subject)
+		did := associationClaimDid(record, subject, id.Spec.AssociationService)
 		if did == "" {
 			continue
 		}
@@ -376,21 +376,22 @@ func (c *Controller) reconcileVerifiedAssociation(ctx context.Context, dyn dynam
 	setAssociated(status, generation, id.Spec)
 }
 
-func associationClaimDid(record v1alpha1.WatchedRecord, subject string) string {
+func associationClaimDid(record v1alpha1.WatchedRecord, subject, service string) string {
 	var value struct {
 		Challenge string `json:"challenge"`
 		KeyID     string `json:"keyId"`
+		Service   string `json:"service"`
 	}
 	if err := json.Unmarshal(record.Value, &value); err != nil {
 		return ""
 	}
 	challenge := strings.TrimSpace(value.Challenge)
 	keyID := strings.TrimSpace(value.KeyID)
-	switch {
-	case strings.HasPrefix(challenge, "did:") && keyID == subject && record.Did == challenge:
+	if strings.TrimSpace(service) == "" || strings.TrimSpace(value.Service) != service {
+		return ""
+	}
+	if strings.HasPrefix(challenge, "did:") && keyID == subject && record.Did == challenge {
 		return challenge
-	case strings.HasPrefix(keyID, "did:") && challenge == subject && record.Did == subject:
-		return keyID
 	}
 	return ""
 }

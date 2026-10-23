@@ -82,12 +82,13 @@ type EvalContext struct {
 }
 
 type ScopeInput struct {
-	Perspective        Perspective
-	SelfDid            string
-	CounterpartyDid    string
-	Args               map[string]any
-	ResolveOperatorDid func(context.Context, string) (string, bool, error)
-	GetVouchedDids     func(context.Context, string) (map[string]bool, error)
+	Perspective           Perspective
+	SelfDid               string
+	CounterpartyDid       string
+	Args                  map[string]any
+	ResolveOperatorDid    func(context.Context, string) (string, bool, error)
+	ResolveOperatorDidFor func(context.Context, string, string) (string, bool, error)
+	GetVouchedDids        func(context.Context, string) (map[string]bool, error)
 }
 
 type Executor interface {

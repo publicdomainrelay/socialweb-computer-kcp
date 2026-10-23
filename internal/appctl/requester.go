@@ -145,9 +145,10 @@ func RequesterValues(spec v1alpha1.MarketRequesterSpec, stateDir string) (manife
 	return v, nil
 }
 
-func OperatorWatched(s v1alpha1.MarketIdentitySpec, operator string) v1alpha1.MarketIdentitySpec {
+func OperatorWatched(s v1alpha1.MarketIdentitySpec, operator, service string) v1alpha1.MarketIdentitySpec {
 	if s.Mode == v1alpha1.MarketIdentityModeLocalRepo && s.Association != v1alpha1.AssociationSkip {
 		s.AssociateWith, s.AssociationWatch = operator, AssociationWatch
+		s.AssociationService = service
 	}
 	return s
 }
@@ -547,7 +548,7 @@ func (ctl *Controller) reconcileRequester(ctx context.Context, u *unstructured.U
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, err.Error()
 		return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
 	}
-	if err := ctl.ensureMarketStreams(ctx, ctl.c.workspace(), "requester", o.Spec.Comms, o.Spec.Network); err != nil {
+	if err := ctl.ensureMarketStreams(ctx, ctl.c.workspace(), "requester", o.Spec.Comms, o.Spec.Network, oauthReceiveOnly(plan.Mode)); err != nil {
 		st.Phase, st.Message = v1alpha1.ApplicationPhaseFailed, err.Error()
 		return ctl.writeStatus(ctx, MarketRequesterGVR, o.Name, st)
 	}

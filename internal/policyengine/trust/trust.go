@@ -101,12 +101,18 @@ func (r *Resolver) Resolve(ctx context.Context, ref atproto.StrongRef) (map[stri
 }
 
 func (r *Resolver) ResolveOperatorDid(ctx context.Context, did string) (string, bool, error) {
+	return r.ResolveOperatorDidFor(ctx, did, "")
+}
+
+func (r *Resolver) ResolveOperatorDidFor(ctx context.Context, did, service string) (string, bool, error) {
 	did = strings.TrimSpace(did)
+	service = strings.TrimSpace(service)
 	if did == "" {
 		return "", false, nil
 	}
+	key := did + "\x00" + service
 	r.mu.Lock()
-	entry, ok := r.ops[did]
+	entry, ok := r.ops[key]
 	r.mu.Unlock()
 	if ok && time.Since(entry.at) < r.ttl {
 		return entry.value, entry.found, nil
@@ -121,8 +127,8 @@ func (r *Resolver) ResolveOperatorDid(ctx context.Context, did string) (string, 
 		r.log("warn", "resolveOperatorDid failed", map[string]any{"did": did, "error": err.Error()})
 	} else {
 		for _, record := range records {
-			service, _ := record.Value["service"].(string)
-			if service != BidderAssociate && service != RequesterAssociate {
+			recordService, _ := record.Value["service"].(string)
+			if !associationService(recordService, service) {
 				continue
 			}
 			keyID, _ := record.Value["keyId"].(string)
@@ -132,20 +138,19 @@ func (r *Resolver) ResolveOperatorDid(ctx context.Context, did string) (string, 
 				found = true
 				break
 			}
-			if challenge != did {
-				continue
-			}
-			if strings.HasPrefix(keyID, "did:") {
-				operator = keyID
-				found = true
-				break
-			}
 		}
 	}
 	r.mu.Lock()
-	r.ops[did] = operatorEntry{value: operator, found: found, at: time.Now()}
+	r.ops[key] = operatorEntry{value: operator, found: found, at: time.Now()}
 	r.mu.Unlock()
 	return operator, found, nil
+}
+
+func associationService(recordService, want string) bool {
+	if recordService != BidderAssociate && recordService != RequesterAssociate {
+		return false
+	}
+	return want == "" || recordService == want
 }
 
 func (r *Resolver) GetVouchedDids(ctx context.Context, did string) (map[string]bool, error) {
@@ -202,11 +207,15 @@ func (r *Resolver) Log(level, msg string, meta map[string]any) {
 
 func (r *Resolver) ApplyEvent(did, rkey string) {
 	r.mu.Lock()
+	for key := range r.ops {
+		if key == did || strings.HasPrefix(key, did+"\x00") {
+			delete(r.ops, key)
+		}
+	}
 	for _, other := range []string{did, rkey} {
 		if other == "" {
 			continue
 		}
-		delete(r.ops, other)
 		delete(r.vouch, other)
 	}
 	r.mu.Unlock()
@@ -232,7 +241,15 @@ type vouchResult struct {
 	err     error
 }
 
+type ServiceOperatorResolver interface {
+	ResolveOperatorDidFor(ctx context.Context, did, service string) (string, bool, error)
+}
+
 func BuildSnapshot(ctx context.Context, host Host, selfDid, counterpartyDid string) (Snapshot, error) {
+	return BuildSnapshotFor(ctx, host, selfDid, counterpartyDid, "", "")
+}
+
+func BuildSnapshotFor(ctx context.Context, host Host, selfDid, counterpartyDid, selfService, counterpartyService string) (Snapshot, error) {
 	snapshot := Snapshot{
 		OperatorOf:       make(map[string]string),
 		VouchedBy:        make(map[string][]string),
@@ -241,16 +258,27 @@ func BuildSnapshot(ctx context.Context, host Host, selfDid, counterpartyDid stri
 	if host == nil {
 		return snapshot, nil
 	}
+	roleResolver, _ := host.(ServiceOperatorResolver)
+	resolve := func(did, service string) (string, bool, error) {
+		if roleResolver != nil {
+			return roleResolver.ResolveOperatorDidFor(ctx, did, service)
+		}
+		return host.ResolveOperatorDid(ctx, did)
+	}
 	dids := []string{selfDid}
 	if counterpartyDid != "" && counterpartyDid != selfDid {
 		dids = append(dids, counterpartyDid)
 	}
 	results := make(chan opResult, len(dids))
 	for _, did := range dids {
-		go func(value string) {
-			operator, found, err := host.ResolveOperatorDid(ctx, value)
+		service := selfService
+		if did == counterpartyDid {
+			service = counterpartyService
+		}
+		go func(value, roleService string) {
+			operator, found, err := resolve(value, roleService)
 			results <- opResult{did: value, operator: operator, found: found, err: err}
-		}(did)
+		}(did, service)
 	}
 	operators := make(map[string]string, len(dids))
 	for range dids {
