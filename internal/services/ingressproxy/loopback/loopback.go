@@ -46,6 +46,8 @@ type Bridge struct {
 	done chan struct{}
 
 	closeOnce sync.Once
+
+	conns sync.WaitGroup
 }
 
 func Start(cfg Config) (*Bridge, error) {
@@ -101,12 +103,14 @@ func (b *Bridge) serveStreams() {
 		if err != nil {
 			return
 		}
-		go b.bridge(conn)
+		b.conns.Go(func() { b.bridge(conn) })
 	}
 }
 
 func (b *Bridge) bridge(conn net.Conn) {
 	defer conn.Close()
+	stop := context.AfterFunc(b.ctx, func() { _ = conn.Close() })
+	defer stop()
 	stream, err := b.cfg.Handlers.DialStream(b.ctx, b.cfg.Target, b.cfg.Handler)
 	if err != nil {
 		return
@@ -137,5 +141,6 @@ func (b *Bridge) Close() error {
 		_ = b.listener.Close()
 	})
 	<-b.done
+	b.conns.Wait()
 	return nil
 }
