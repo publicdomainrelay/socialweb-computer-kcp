@@ -1,0 +1,1027 @@
+plan: "0026"
+title: "ABC control plane: contracts, abstract kinds, a declared bus and watch-only controllers"
+status: todo
+source: >
+  The 2026-10-22 architecture audit found that the tree has 197k non-test Go
+  LOC, 203 packages, 57 kinds and about 25 controllers, and that only one
+  controller (internal/cloudprovider) uses an informer and a workqueue. The
+  rest poll on 2s, 5s or 60s tickers or run hand-written List+Watch loops
+  (17 copies). There is no contract layer: OpenBao access has 5 to 9
+  implementations, PDS access 5, TTL caches about 20, setCondition 14 to 18,
+  and 89 groups of byte-identical helpers. Bidder and Requester share 85
+  function names and 18 identical bodies. There are 10 ref types (pdsRef
+  alone has 4 shapes) and URLs and host paths sit in spec. ComputeVM
+  status.market has 4 writers and Bid status 2; annotations carry control
+  signals. appctl (12k LOC) replaces child specs wholesale. The in-process
+  handler registry and ComponentLink already form a default-deny call bus,
+  but the core's run context makes every controller the System caller
+  (internal/stack/componentcore/componentcore.go:317), so controllers bypass
+  links; the AtprotoRecord controller then writes a local PDS with no token
+  (docs/plans/0025-defect-register.yaml D01). The deepcopy file is kept by
+  hand and 11 kinds are missing from the scheme (D22).
+
+  The old TypeScript tree had a clean ABC layering
+  (old tree: CLAUDE.md:123-181): common -> abc -> impl -> factory -> CLI,
+  one-way imports, and a new transport as a sibling package, never a flag.
+  The compute-provider concept is the model: one ComputeProvider interface
+  (old tree: hono-compute-provider/lib/abc/compute-provider/mod.ts:69-88)
+  with digitalocean, firecracker, kcp and local siblings. This plan applies
+  that layering to the Go tree and to the CRD surface, removes polling, and
+  makes every component-to-component and controller-to-component
+  interaction a declared, capability-scoped link.
+principle: >
+  Every effectful reference carries a capability, every capability is
+  granted by a declared link, every credential is held by the callee as a
+  lease, every mutable field has one writer, and every controller is driven
+  by watches. Spec flows down from the composing root; status flows up from
+  the owning controller. An abstract kind is a written contract; each
+  implementation is a concrete kind, a controller and a sibling package.
+  Polling is a bug.
+
+decisions:
+  runtime: >
+    Controllers run on sigs.k8s.io/multicluster-runtime with the kcp
+    github.com/kcp-dev/multicluster-provider apiexport provider, reading
+    through the APIExport virtual workspaces. Versions are pinned in go.mod.
+    The tree wraps it in internal/controllers/runtime so no controller
+    imports multicluster-runtime directly. If the W0-RUNTIME pilot hits a
+    blocker in the experimental provider, the fallback is client-go typed
+    informers and workqueue behind the same internal/controllers/runtime
+    interface; the fallback is decided once, in W0, and recorded here by
+    flipping W0-RUNTIME to done with the chosen backend in the commit
+    message.
+  codegen: >
+    deepcopy-gen through k8s.io/code-generator kube_codegen.sh gen_helpers
+    writes zz_generated.deepcopy.go. internal/apigen additionally writes
+    zz_generated.register.go per group (AddKnownTypes for every kind in
+    APIResources, GroupVersionResource vars, resource name consts) and
+    zz_generated.conditions.go (GetConditions/SetConditions for every kind
+    whose status has Conditions). No client-gen, lister-gen, informer-gen,
+    applyconfiguration-gen, kcp cluster-* generators or controller-gen.
+    internal/apigen and its revision lock stay the schema source.
+  comment_exception: >
+    AGENTS.md gains one exception to the no-comments rule: k8s code
+    generator markers ("// +k8s:deepcopy-gen=package" and
+    "// +groupName=") in api/**/doc.go only. Approved by the user on
+    2026-10-22.
+  abstract_kinds: >
+    A concept with two or more implementations is an abstract kind plus
+    concrete kinds. Consumers ref only the abstract kind. The abstract kind
+    has spec.backendRef (an ObjectRef to a concrete kind) and a contract
+    status that its controller mirrors from the backend. Concrete kinds
+    carry the label contracts.socialweb.computer/<abstract-resource>:
+    v1alpha1. This is the Cluster API infrastructureRef pattern.
+  abstract_kind_set: |
+    AtprotoRepo -> LocalRepo (backed by the Pds component) | RemoteRepo
+      (backed by RemotePDS plus a credentialsRef). The abstract kind keeps
+      the name AtprotoRepo.
+    Vault -> OpenBaoServer (local) | RemoteOpenBao.
+    ComputeVM -> FirecrackerVM now; HcsVM and VzVM when plans 0011 and 0012
+      land.
+    EventSource -> PdsEventSource (subscribeRepos through an AtprotoRepo) |
+      RelayEventSource | JetstreamEventSource; EventStream refs an
+      EventSource.
+  bus: >
+    The in-process handler registry becomes internal/bus. Components and
+    controllers obtain typed contract handles with
+    bus.Resolve[T](ctx, from, to, capability). The caller identity is the
+    object being reconciled or the component instance, never a controller
+    and never System; System stays only for core bootstrap callers listed in
+    deploy/bus-bootstrap-callers.txt. The callee holds credentials and signs
+    or authenticates; a handle never exposes a token. A call with no
+    accepted ComponentLink fails with ErrLinkDenied.
+  links: >
+    ComponentLink v2 (exposure.socialweb.computer) names from (ObjectRef or
+    a label selector), to (ObjectRef), and capabilities (name plus scope).
+    The producer side owns the link: the app root that composes the
+    producer writes links for its own children; a cross-app or
+    cross-workspace link is written in the producer's workspace by the
+    producer's root, or comes from a kcp permission claim. Status has
+    Accepted and ResolvedRefs conditions. Consumers list their resolved
+    links in status.links. Default deny.
+  capabilities: |
+    repo.read, repo.write {collections}, repo.subscribe {collections}
+    pds.account {did}, pds.session {did}
+    vault.read {mount/path prefix}, vault.write {mount/path prefix},
+      vault.lease {role}, vault.pki.issue {role}
+    policy.run {workflows}
+    compute.provision, compute.release
+    events.subscribe {collections, dids}, events.deliver {sink}
+    xrpc.call {nsids}
+    exposure.publish {hostnames}
+  refs: >
+    One ref package, api/common/v1alpha1: ObjectRef {group, kind, name,
+    workspace}, LocalObjectRef {name}, StrongRef {uri, cid},
+    SecretRef {vault ObjectRef, mount, path, key}, CredentialsRef
+    {ObjectRef to a credentials provider object}. All 10 existing ref types
+    are replaced. No URL, endpoint, host path or file path in spec unless it
+    is genuine user input; such a field carries the apigen tag
+    apigen:"userEndpoint". Addresses a consumer needs are published in the
+    producer's status.address.
+  writers: >
+    Every write is server-side apply with field manager
+    socialweb.computer/<controller>. A spec is written only by its composer
+    (the root for children, the creating component for intent objects). A
+    status is written only by the controller of that kind; a field that a
+    second controller must report becomes its own status subfield with its
+    own field manager, listed in the kind's Go type as a const. Every child
+    and intent object has an ownerReference to its composer or creator.
+  suspend: >
+    spec.suspend stops participation: no new RFPs, bids, accepts, offerings
+    or heartbeats, and no new outbound calls that create obligations. It
+    never stops obligations already taken: release of running VMs,
+    termination StateSync acks, withdrawal of published offers, credential
+    renewal for held leases. ApplicationPhase gains Suspended. A root
+    suspend cascades; a component override can only add suspension. One
+    writer per suspend field.
+  no_polling: >
+    Controllers are driven by watches on their own kind and every kind they
+    ref. Deadlines use delayed requeue. Errors use the runtime's rate-limited
+    backoff. A ticker is allowed only for an outbound obligation (market
+    heartbeat, lease renewal against a system with no watch, relay crawl)
+    and must be listed in deploy/obligations.txt with its owner and period.
+    systemd units are followed through D-Bus signals, processes through
+    wait, PDS and relay through subscribeRepos/firehose/JetStream.
+  config: >
+    ConfigFrom and the appctl override type switch are deleted. Services
+    receive their typed Spec; defaults and validation live in the schema via
+    new apigen tags (default, minimum, maximum, maxLength, pattern,
+    listType, listMapKey, enum). Per-kind settings structs are the same
+    types embedded in the component specs. component.Typed[S] registers a
+    service from its Spec type.
+  layout: |
+    api/<group>/v1alpha1          common: types, contract status, refs
+    internal/contract/<concept>   abc: small Go interfaces and pure types;
+                                  imports api and stdlib only
+    internal/<concept>/<impl>     impl: one sibling package per backend
+    internal/controllers/<kind>   one reconciler per kind on
+                                  internal/controllers/runtime
+    internal/app/<root>           factory: one composition controller per
+                                  app root
+    cmd/                          CLI
+    Imports point down the list only. scripts/check-architecture.sh
+    enforces it.
+  cutover: >
+    Hard cutover and fresh deploy, per AGENTS.md. No migration, carry-over
+    or rollback for a change of shape.
+
+target_model:
+  repo_example: |
+    AtprotoRecord(spec.repoRef -> AtprotoRepo/alice)
+      bus.Resolve[atprotorepo.RecordWriter](ctx, from=AtprotoRecord/x,
+        to=AtprotoRepo/alice, repo.write{collections:[...]})
+    AtprotoRepo/alice spec.backendRef -> LocalRepo/alice
+      status: did, head, rev, writable, address, conditions
+    LocalRepo/alice spec.pdsRef -> Pds/main
+      writes through the Pds signer handle, no token
+    RemoteRepo/bob spec.pdsRef -> RemotePDS/bsky,
+      spec.credentialsRef -> MarketIdentity/bob
+      writes through a lease.Source from the credentials provider
+    ComponentLink/record-alice-write (written by the composing root)
+      from: {selector: owner=<root>, kind: AtprotoRecord}
+      to: AtprotoRepo/alice
+      capabilities: [{name: repo.write, scope: [<collections>]}]
+  go_contracts: |
+    internal/contract/atprotorepo: Repo, RecordReader, RecordWriter,
+      Subscriber
+    internal/contract/pds: Accounts, Sessions, Sync
+    internal/contract/vault: KV, Leases, PKI
+    internal/contract/policy: Runner
+    internal/contract/compute: Provider
+    internal/contract/events: Source, Sink
+    internal/contract/market: Participant, Offers, Contracts
+  bus_api: |
+    type Capability struct { Name string; Scope []string }
+    func Provide[T any](b *Bus, gk schema.GroupKind, capability string,
+      open func(ctx context.Context, to commonv1.ObjectRef,
+        scope []string) (T, error))
+    func Resolve[T any](ctx context.Context, b *Bus, from commonv1.ObjectRef,
+      to commonv1.ObjectRef, c Capability) (T, error)
+  runtime_api: |
+    type Reconciler[T runtime.Object] interface {
+      Reconcile(ctx context.Context, req Request, obj T) (Result, error)
+    }
+    func For[T runtime.Object](m *Manager, name string, r Reconciler[T],
+      opts ...Option) error
+    Options: Owns[C], Watches[R](mapFunc), RequeueAfter for deadlines,
+    field manager name, finalizer name.
+
+state_rules:
+  - Read AGENTS.md first. status is todo, doing, done or blocked; the lead
+    flips statuses here and in docs/plans/0025-defect-register.yaml. One
+    writer per directory; tracks that touch the same file are serialized
+    even in a parallel wave.
+  - Every item ends with gofmt, go build ./..., go vet ./...,
+    deploy/check.sh --fast and scripts/check-architecture.sh once it
+    exists. No unit tests and no test-first work. Integration tests are
+    written only in W7, after the live proof. No push.
+  - Dev builds are tested before an rc build. Only the lead runs prod and
+    cuts rc tags; task agents never touch prod.
+  - Never put a secret, token, password, private key or credential value in
+    any spec, status, link or plan. Refs only.
+  - Never use /tmp; use ~/.tmp.
+  - Regenerate with go generate ./api/...; record schema revisions in
+    deploy/apiresourceschema-revisions.txt.
+  - An item that removes a ticker, an annotation signal or a System caller
+    deletes it; it does not leave a fallback path.
+
+waves:
+  - id: W0
+    title: "Contracts, codegen, refs, bus and runtime"
+    status: todo
+    serial: true
+    tracks: [W0-RULES, W0-CODEGEN, W0-REFS, W0-ABSTRACT, W0-CONTRACTS, W0-BUS, W0-RUNTIME]
+    gate: "all kinds registered; refs unified; contract packages pure; bus denies an unlinked call; the pilot controller runs on the runtime across root and a later-created root:<app> workspace with no ticker."
+  - id: W1
+    title: "Shared kit"
+    status: todo
+    parallel: true
+    tracks: [W1-MODERNIZE, W1-CACHE-LEASE, W1-XRPC, W1-LIFECYCLE]
+    depends_on: [W0]
+    gate: "no duplicate helper groups remain; one TTL cache, one lease source, one auth retry, one XRPC call path; no nil-context guards."
+  - id: W2
+    title: "Concept implementations"
+    status: todo
+    parallel: true
+    tracks: [W2-REPO, W2-PDS, W2-VAULT, W2-EVENTS, W2-COMPUTE, W2-POLICY]
+    depends_on: [W1]
+    gate: "each abstract kind resolves to a concrete backend; every consumer reaches it through a bus handle; no credentials outside the callee."
+  - id: W3
+    title: "Composition roots"
+    status: todo
+    parallel: true
+    tracks: [W3-ROOTS, W3-CONFIG, W3-STATUS]
+    depends_on: [W2]
+    gate: "one composition controller per root; SSA single writer; ownerRefs on every child and intent object; links written by roots; ConfigFrom gone."
+  - id: W4
+    title: "Services"
+    status: todo
+    parallel: true
+    tracks: [W4-MARKET, W4-SERVICES]
+    depends_on: [W3]
+    gate: "bidder and requester share one participant core; services create intent objects only through bus handles; no service lists kcp objects."
+  - id: W5
+    title: "No polling, no signals, architecture gates"
+    status: todo
+    serial: true
+    tracks: [W5-NO-POLL, W5-GATES]
+    depends_on: [W4]
+    gate: "scripts/check-architecture.sh passes with an empty ticker allowlist outside deploy/obligations.txt and no System caller outside deploy/bus-bootstrap-callers.txt."
+  - id: W6
+    title: "Market lexicons"
+    status: todo
+    serial: true
+    tracks: [W6-LEXICONS]
+    depends_on: [W4]
+    gate: "generated record types produce byte-identical CIDs for every fixture record."
+  - id: W7
+    title: "Live proof and integration"
+    status: todo
+    serial: true
+    tracks: [W7-PROOF]
+    depends_on: [W5, W6]
+    gate: "rc build deployed to this host, hat-9, hat-7 and prod gateway passes the acceptance matrix."
+
+items:
+  - id: W0-RULES
+    title: "Record the codegen marker exception and the architecture rules"
+    wave: W0
+    track: rules
+    parallel_with: []
+    depends_on: []
+    status: todo
+    decision: >
+      Add the comment exception from decisions.comment_exception to
+      AGENTS.md. Add the layout, no_polling, bus and writers rules from this
+      plan to AGENTS.md as short rules. Create deploy/obligations.txt and
+      deploy/bus-bootstrap-callers.txt (empty headers only).
+    files:
+      - AGENTS.md
+      - deploy/obligations.txt
+      - deploy/bus-bootstrap-callers.txt
+    done_when: >
+      AGENTS.md states the exception and the four rules; both lists exist.
+
+  - id: W0-CODEGEN
+    title: "Generate deepcopy, scheme registration, GVRs and condition accessors"
+    wave: W0
+    track: codegen
+    parallel_with: []
+    depends_on: [W0-RULES]
+    status: todo
+    closes: [D22]
+    decision: >
+      Add api/<group>/v1alpha1/doc.go with the deepcopy-gen package marker
+      for all five groups. Run deepcopy-gen through kube_codegen.sh
+      gen_helpers from go generate ./api/.... Extend internal/apigen to
+      write zz_generated.register.go (AddKnownTypes for every kind and list
+      in APIResources, GroupVersionResource vars, resource name consts) and
+      zz_generated.conditions.go. Delete every hand-written
+      schema.GroupVersionResource literal outside api/ and the hand-kept
+      deepcopy file. Add a drift check to deploy/check.sh and teach
+      scripts/regen-after-rebase.sh to rerun the generators.
+    files:
+      - api/**/doc.go
+      - api/**/zz_generated.*.go
+      - api/**/groupversion_info.go
+      - internal/apigen/**
+      - deploy/check.sh
+      - scripts/regen-after-rebase.sh
+      - hack/codegen.sh
+    done_when: >
+      The scheme registers 57 kinds plus lists; go generate ./api/... is
+      clean twice in a row; no GVR literal exists outside api/.
+
+  - id: W0-REFS
+    title: "One ref package and no endpoints in spec"
+    wave: W0
+    track: refs
+    parallel_with: []
+    depends_on: [W0-CODEGEN]
+    status: todo
+    closes: [D02, D19]
+    decision: >
+      Create api/common/v1alpha1 with ObjectRef, LocalObjectRef, StrongRef,
+      SecretRef and CredentialsRef. Replace ComponentRef, RepoRef,
+      EventStreamRef, ServiceTargetRef, MarketPresenceBidderRef, VaultRef,
+      ComputeVMVaultRef, RecordRef, BidRecordRef and PolicyStrongRef, and
+      every plain-string name ref listed in the audit (cluster, computevm,
+      network, app, server, account, repo). Remove pdsAccessTokenPath,
+      marketURL, submitEventUrl, firehoseUrls, relayUrls, pdsUrl and
+      caBundleRef from spec; consumers read producer status.address or a
+      ref. Fields that stay as user input carry apigen:"userEndpoint".
+      Normalize Url/URL/Uri casing to URL/URI. Add the apigen tags for
+      default, minimum, maximum, maxLength, pattern, listType, listMapKey
+      and enum.
+    files:
+      - api/common/v1alpha1/**
+      - api/v1alpha1/types_*.go
+      - api/exposure/v1alpha1/**
+      - api/events/v1alpha1/**
+      - api/pds/v1alpha1/**
+      - api/policy/v1alpha1/**
+      - internal/apigen/**
+    done_when: >
+      api/ has exactly the ref types in api/common/v1alpha1; apigen fails on
+      a spec field named *URL, *Url, *Path or *File without
+      apigen:"userEndpoint"; schemas carry the new validation keywords.
+
+  - id: W0-ABSTRACT
+    title: "Abstract kinds and their concrete backends"
+    wave: W0
+    track: abstract
+    parallel_with: []
+    depends_on: [W0-REFS]
+    status: todo
+    decision: >
+      Define the kinds in decisions.abstract_kind_set. AtprotoRepo becomes
+      abstract with spec.backendRef and contract status (did, head, rev,
+      writable, address, conditions Ready and BackendBound). Add LocalRepo
+      (spec.pdsRef to Pds) and RemoteRepo (spec.pdsRef to RemotePDS,
+      spec.credentialsRef). Add abstract Vault over OpenBaoServer and
+      RemoteOpenBao. Make ComputeVM abstract over FirecrackerVM; move the
+      backend-specific spec and status out of ComputeVM. Add EventSource
+      over PdsEventSource, RelayEventSource and JetstreamEventSource. Each
+      concrete kind carries the contract label. Write the contract for each
+      abstract kind in docs/ARCHITECTURE.md as MUST rules (fields, meaning,
+      who writes them).
+    files:
+      - api/v1alpha1/types_atprotorepo.go
+      - api/v1alpha1/types_localrepo.go
+      - api/v1alpha1/types_remoterepo.go
+      - api/v1alpha1/types_vault.go
+      - api/v1alpha1/types_computevm.go
+      - api/v1alpha1/types_firecrackervm.go
+      - api/events/v1alpha1/**
+      - api/v1alpha1/resources.go
+      - deploy/*-apiresourceschema.yaml
+      - deploy/*-apiexport.yaml
+      - docs/ARCHITECTURE.md
+    done_when: >
+      Every abstract kind has a written contract; every concrete kind has
+      the contract label; exports and bindings include the new kinds.
+
+  - id: W0-CONTRACTS
+    title: "Pure Go contract packages"
+    wave: W0
+    track: contracts
+    parallel_with: []
+    depends_on: [W0-ABSTRACT]
+    status: todo
+    decision: >
+      Create the packages in target_model.go_contracts. They import only
+      api/** and the standard library. Move pure types out of
+      internal/component (Service, Key, Endpoint) into
+      internal/contract/component; move the concrete OpenBao clients out of
+      internal/component/credentials.go. internal/kcplibs/abc is folded into
+      internal/contract or deleted. Write scripts/check-architecture.sh with
+      the import-direction rule from decisions.layout using go list.
+    files:
+      - internal/contract/**
+      - internal/component/**
+      - internal/kcplibs/abc/**
+      - scripts/check-architecture.sh
+    done_when: >
+      scripts/check-architecture.sh passes for internal/contract and api;
+      internal/component no longer imports kcpserver, kcpstore,
+      openbaosession, networkdial or os.
+
+  - id: W0-BUS
+    title: "Typed bus, ComponentLink v2 and per-object caller identity"
+    wave: W0
+    track: bus
+    parallel_with: []
+    depends_on: [W0-CONTRACTS]
+    status: todo
+    decision: >
+      Move internal/component/handlers.go and caller.go into internal/bus.
+      Add Provide/Resolve from target_model.bus_api with capability and
+      scope checks; HTTP and stream dialing stay for real XRPC and edge
+      surfaces only. ComponentLink v2 per decisions.links with selector
+      support, Accepted and ResolvedRefs conditions, and status.links on
+      consumers. The core run context no longer carries System; each
+      reconcile carries the reconciled object as caller. System is allowed
+      only for callers listed in deploy/bus-bootstrap-callers.txt. Deny
+      counts are exported as a metric and a log line with from, to and
+      capability.
+    files:
+      - internal/bus/**
+      - internal/component/handlers.go
+      - internal/component/caller.go
+      - api/exposure/v1alpha1/types_componentlink.go
+      - internal/exposure/links.go
+      - internal/stack/componentcore/componentcore.go
+      - deploy/bus-bootstrap-callers.txt
+    done_when: >
+      A dev core denies an unlinked typed call and an unlinked HTTP call,
+      allows them after a link is applied, and reports both in
+      ComponentLink status; componentcore.go:317 no longer sets System.
+
+  - id: W0-RUNTIME
+    title: "Watch-driven controller runtime on multicluster-runtime"
+    wave: W0
+    track: runtime
+    parallel_with: []
+    depends_on: [W0-CODEGEN, W0-BUS]
+    status: todo
+    decision: >
+      Add sigs.k8s.io/multicluster-runtime and
+      github.com/kcp-dev/multicluster-provider (apiexport provider), pinned.
+      Serve the provider exports through APIExport virtual workspaces;
+      add permission claims with identityHash where an export references
+      another export's kinds. Build internal/controllers/runtime per
+      target_model.runtime_api: typed reconcilers, Owns/Watches mapping,
+      SSA status with a field manager, finalizers, rate-limited backoff and
+      RequeueAfter. Port the RemotePDS controller as the pilot. If the
+      provider blocks the pilot, implement the same interface on client-go
+      typed informers and workqueue and record the choice in the commit.
+    files:
+      - go.mod
+      - go.sum
+      - internal/controllers/runtime/**
+      - internal/controllers/remotepds/**
+      - internal/remotepds/**
+      - deploy/*-apiexport.yaml
+      - deploy/*-binding.yaml
+      - internal/stack/componentcore/controllers.go
+    done_when: >
+      The pilot reconciles RemotePDS in root and in a root:<app> workspace
+      created after the core started, retries a failing reconcile with
+      backoff, writes status by SSA, and contains no ticker.
+
+  - id: W1-MODERNIZE
+    title: "go fix, stdlib idioms and shared helpers"
+    wave: W1
+    track: modernize
+    parallel_with: [W1-CACHE-LEASE, W1-XRPC, W1-LIFECYCLE]
+    depends_on: [W0-RUNTIME]
+    status: todo
+    decision: >
+      Run go fix ./.... Replace option default blocks with cmp.Or or a
+      Positive helper. Move the 89 byte-identical helper groups into shared
+      packages (internal/kit/hostport, internal/kit/servetls,
+      internal/kit/httpjson, internal/kit/policyrun, internal/kit/conds).
+      Delete every local setCondition, writeJSON, hostnameOnly, sleep,
+      containsString, mergeDeps, fileSHA256 and serverTLS copy. Rename
+      colliding packages (two kcpstore, two gatewayapi).
+    files:
+      - internal/kit/**
+      - "every file that holds a deleted helper copy (serialized per directory with other W1 tracks)"
+    done_when: >
+      A duplicate-function scan finds no byte-identical group of two or more
+      across packages; go fix -diff is empty.
+
+  - id: W1-CACHE-LEASE
+    title: "One TTL cache, one lease source, one auth retry"
+    wave: W1
+    track: cache-lease
+    parallel_with: [W1-MODERNIZE, W1-XRPC, W1-LIFECYCLE]
+    depends_on: [W0-RUNTIME]
+    status: todo
+    closes: [D14]
+    decision: >
+      internal/kit/ttlcache.Cache[K,V] with GetOrLoad (single-flight,
+      per-entry TTL). internal/kit/lease.Source[T] (Get, Invalidate, renew at
+      2/3 of lifetime, concurrent-safe). internal/kit/authretry.Do[T]
+      (retry once on 401 or expired 403 after Invalidate). Replace
+      kcplibs/common/expiringmap, policyengine/cache.Scope and the about 20
+      hand-written caches; replace every for attempt < 2 auth loop and every
+      hand-written refresh-on-expiry path.
+    files:
+      - internal/kit/ttlcache/**
+      - internal/kit/lease/**
+      - internal/kit/authretry/**
+      - internal/kcplibs/common/expiringmap/**
+      - internal/policyengine/cache/**
+    done_when: >
+      No map plus mutex plus expiry cache remains outside internal/kit; the
+      OpenBao token cache dedupes concurrent logins.
+
+  - id: W1-XRPC
+    title: "One XRPC and JSON call path"
+    wave: W1
+    track: xrpc
+    parallel_with: [W1-MODERNIZE, W1-CACHE-LEASE, W1-LIFECYCLE]
+    depends_on: [W0-RUNTIME]
+    status: todo
+    decision: >
+      internal/atproto/xrpc: Query[Out], Procedure[In,Out] with an Auth hook
+      (Bearer, DPoP, service auth) built on lease.Source, a response size
+      limit and typed errors. internal/kit/httpjson.Do[Out]. Collapse the
+      three getServiceAuth copies and the five vault do helpers onto them.
+      One externalHTTPClient and one TLS client builder.
+    files:
+      - internal/atproto/xrpc/**
+      - internal/kit/httpjson/**
+      - internal/kit/httpclient/**
+    done_when: >
+      getServiceAuth exists once; no hand-built XRPC request remains in
+      internal/services.
+
+  - id: W1-LIFECYCLE
+    title: "Goroutine ownership, contexts and globals"
+    wave: W1
+    track: lifecycle
+    parallel_with: [W1-MODERNIZE, W1-CACHE-LEASE, W1-XRPC]
+    depends_on: [W0-RUNTIME]
+    status: todo
+    closes: [D15, D16, D17]
+    decision: >
+      Every goroutine is started by an errgroup or a supervisor that is
+      joined on stop. Remove every nil-context guard; shutdown uses the
+      caller's context with WithoutCancel plus a deadline. Remove mutable
+      package globals (appPdsPublicURLs, the appctl sync.Map, the jwt
+      ES256 swap); state lives on a struct passed by the composer.
+    files:
+      - internal/kit/supervise/**
+      - "files listed under D15, D16 and D17"
+    done_when: >
+      No "ctx == nil" guard remains; every go statement is inside an
+      errgroup or supervisor; no init() mutates another package.
+
+  - id: W2-REPO
+    title: "AtprotoRepo over LocalRepo and RemoteRepo; records through the bus"
+    wave: W2
+    track: repo
+    parallel_with: [W2-PDS, W2-VAULT, W2-EVENTS, W2-COMPUTE, W2-POLICY]
+    depends_on: [W1-CACHE-LEASE, W1-XRPC]
+    status: todo
+    closes: [D01]
+    decision: >
+      Controllers for AtprotoRepo (binds the backend, mirrors contract
+      status), LocalRepo (Provides atprotorepo.Repo through the Pds signer
+      handle) and RemoteRepo (Provides atprotorepo.Repo through RemotePDS
+      and a lease from its credentialsRef). AtprotoRecord and
+      AtprotoRecordWatch controllers resolve RecordWriter and Subscriber
+      through the bus with the record as caller; they hold no token, DPoP
+      key or session. The requester and bidder stop writing records through
+      their own LocalRepo handles and use the same contract.
+    files:
+      - internal/contract/atprotorepo/**
+      - internal/atprotorepo/local/**
+      - internal/atprotorepo/remote/**
+      - internal/controllers/atprotorepo/**
+      - internal/controllers/localrepo/**
+      - internal/controllers/remoterepo/**
+      - internal/controllers/atprotorecord/**
+      - internal/atproto/recordcontroller/**
+    done_when: >
+      On the prod gateway the association AtprotoRecord is Ready and its
+      CID matches the PDS record; an AtprotoRecord without a link is denied
+      with a named condition.
+
+  - id: W2-PDS
+    title: "One PDS contract over Pds and RemotePDS"
+    wave: W2
+    track: pds
+    parallel_with: [W2-REPO, W2-VAULT, W2-EVENTS, W2-COMPUTE, W2-POLICY]
+    depends_on: [W1-CACHE-LEASE, W1-XRPC]
+    status: todo
+    decision: >
+      internal/pds/local Provides the pds contracts from the in-process Pds
+      component; internal/pds/remote from RemotePDS. Delete bidder
+      RecordStore/PDSStore/PDSOptions, requester RecordStore/PDSStore/
+      LocalRepo, guestidentity DirectoryPDS, appctl pdsclient and the three
+      PDSResolver interfaces; their callers use bus handles.
+    files:
+      - internal/contract/pds/**
+      - internal/pds/**
+      - internal/atproto/pdsclient/**
+      - internal/services/bidder/records.go
+      - internal/services/requester/repo.go
+      - internal/guestidentity/pds.go
+      - internal/appctl/pdsclient.go
+    done_when: >
+      Exactly one PDS client implementation exists; no service constructs a
+      PDS client.
+
+  - id: W2-VAULT
+    title: "One OpenBao client behind the Vault contract"
+    wave: W2
+    track: vault
+    parallel_with: [W2-REPO, W2-PDS, W2-EVENTS, W2-COMPUTE, W2-POLICY]
+    depends_on: [W1-CACHE-LEASE, W1-XRPC]
+    status: todo
+    closes: [D13]
+    decision: >
+      internal/vault/openbao implements contract/vault on
+      github.com/openbao/openbao/api/v2 with lease.Source tokens. The Vault
+      controller binds OpenBaoServer or RemoteOpenBao. Delete
+      internal/openbao, kcplibs/impl/openbaoclient, credentials/
+      openbaosession, vaultaccess, the raw X-Vault-Token callers and the
+      per-package vault login caches. CA pools and certificates are leases
+      that reload on rotation, including the dispatchertls upstream pool
+      and the exposure and PDS client verification pools.
+    files:
+      - internal/contract/vault/**
+      - internal/vault/**
+      - internal/controllers/vault/**
+      - internal/openbao/**
+      - internal/kcplibs/impl/openbaoclient/**
+      - internal/credentials/**
+      - internal/vaultaccess/**
+      - internal/vaultcert/**
+      - internal/tlsreload/**
+    done_when: >
+      One OpenBao client package exists; no X-Vault-Token header is set
+      outside it; a rotated CA is used without a restart.
+
+  - id: W2-EVENTS
+    title: "EventSource backends and sinks through the bus"
+    wave: W2
+    track: events
+    parallel_with: [W2-REPO, W2-PDS, W2-VAULT, W2-COMPUTE, W2-POLICY]
+    depends_on: [W1-CACHE-LEASE, W1-XRPC]
+    status: todo
+    closes: [D03]
+    decision: >
+      Controllers for EventSource and its three backends. PdsEventSource
+      subscribes through an AtprotoRepo Subscriber handle. Relay and
+      Jetstream sources ref a Relay component or a user endpoint.
+      EventStream delivers to sinks through events.deliver links. Market
+      comms reference EventSources instead of firehoseUrls and relayUrls.
+    files:
+      - internal/contract/events/**
+      - internal/eventstream/**
+      - internal/controllers/eventsource/**
+      - internal/controllers/eventstream/**
+    done_when: >
+      A bidder restart keeps its event sources; no firehoseUrls or
+      relayUrls field exists.
+
+  - id: W2-COMPUTE
+    title: "ComputeVM over FirecrackerVM; release as spec, not annotation"
+    wave: W2
+    track: compute
+    parallel_with: [W2-REPO, W2-PDS, W2-VAULT, W2-EVENTS, W2-POLICY]
+    depends_on: [W1-CACHE-LEASE, W1-XRPC]
+    status: todo
+    closes: [D08, D09]
+    decision: >
+      contract/compute.Provider with internal/compute/firecracker as the
+      first sibling. ComputeVM controller binds the backend and mirrors
+      contract status. Release is spec.release on ComputeVM written by its
+      creator; accept is a spec field on Bid. status.market splits into
+      subfields with one field manager each; Bid status has one writer.
+      Host process state follows systemd D-Bus signals and process wait.
+    files:
+      - internal/contract/compute/**
+      - internal/compute/**
+      - internal/computevm/**
+      - internal/controllers/computevm/**
+      - internal/controllers/firecrackervm/**
+      - internal/vmruntime/**
+      - internal/hostprocess/**
+      - internal/policyaction/computevm.go
+    done_when: >
+      No release or accept annotation exists; each ComputeVM status field
+      has one field manager; no ticker in computevm or hostprocess.
+
+  - id: W2-POLICY
+    title: "Policy runs through the bus and the runtime"
+    wave: W2
+    track: policy
+    parallel_with: [W2-REPO, W2-PDS, W2-VAULT, W2-EVENTS, W2-COMPUTE]
+    depends_on: [W1-CACHE-LEASE, W1-XRPC]
+    status: todo
+    decision: >
+      contract/policy.Runner Provided by the PolicyEngine component.
+      PolicyEngine, PolicyWorkflow, PolicyWorkflowRun and PolicyTrigger
+      controllers move to the runtime; waiters watch PolicyWorkflowRun
+      status instead of polling. Bidder and requester policy helpers move
+      to one internal/policyengine/runs package.
+    files:
+      - internal/contract/policy/**
+      - internal/policyengine/controller/**
+      - internal/controllers/policy*/**
+    done_when: >
+      No 2s policy loop exists; a run completes and its waiter wakes on the
+      status event.
+
+  - id: W3-ROOTS
+    title: "One composition controller per app root"
+    wave: W3
+    track: roots
+    parallel_with: [W3-CONFIG, W3-STATUS]
+    depends_on: [W2-REPO, W2-PDS, W2-VAULT, W2-EVENTS, W2-COMPUTE, W2-POLICY]
+    status: todo
+    closes: [D04, D05, D06, D07, D10, D12, D21]
+    decision: >
+      Split internal/appctl into internal/app/{marketbidder,marketrequester,
+      gateway,sshgateway,marketnetwork} plus internal/app/compose (shared
+      SSA child apply, ownerRefs, link writing, status summary). Each root
+      applies child specs with its own field manager, writes the
+      ComponentLinks its children need, and owns root status by SSA;
+      component-owned root status subfields have their own field managers.
+      ownerReferences on every child and on StateSync, MarketPresence, Bid
+      and ComputeContract. Suspend per decisions.suspend, with
+      ApplicationPhase Suspended and a single writer. Requester operator
+      associations are composed state on the root, not a manual patch, so a
+      gateway restart keeps them.
+    files:
+      - internal/app/**
+      - internal/appctl/**
+      - api/v1alpha1/types_application.go
+    done_when: >
+      internal/appctl is gone; a direct child edit is reverted by SSA with a
+      conflict event; a paused bidder still releases its running VM; a
+      gateway restart keeps the requester association.
+
+  - id: W3-CONFIG
+    title: "Typed specs instead of ConfigFrom and overrides"
+    wave: W3
+    track: config
+    parallel_with: [W3-ROOTS, W3-STATUS]
+    depends_on: [W2-REPO, W2-PDS, W2-VAULT, W2-EVENTS, W2-COMPUTE, W2-POLICY]
+    status: todo
+    decision: >
+      Delete every ConfigFrom, every service Config struct that copies a
+      spec, the overrides.go type switch and per-kind validation. Services
+      take their Spec plus bus handles. Defaults and limits are schema
+      keywords. component.Typed[S] registers each service. The Deps service
+      locator is removed.
+    files:
+      - internal/services/*/config.go
+      - internal/component/contract.go
+      - internal/component/runtime.go
+      - internal/app/compose/overrides.go
+    done_when: >
+      No ConfigFrom exists; no service Config has more than the fields its
+      Spec lacks (runtime handles only).
+
+  - id: W3-STATUS
+    title: "Status objects on the runtime; dead controllers removed"
+    wave: W3
+    track: status
+    parallel_with: [W3-ROOTS, W3-CONFIG]
+    depends_on: [W2-REPO, W2-PDS, W2-VAULT, W2-EVENTS, W2-COMPUTE, W2-POLICY]
+    status: todo
+    closes: [D11, D20]
+    decision: >
+      Move statusstate, marketpresence, leasecontroller, hostlifecycle,
+      childapplication, exposure, identitycontroller, ttlctl, postgresctl,
+      openbaoctl and remoteopenbao onto the runtime. Delete
+      internal/statusstate/repo.go. Delete the componentcore poll-and-watch
+      runtime.
+    files:
+      - internal/statusstate/**
+      - internal/marketpresence/**
+      - internal/leasecontroller/**
+      - internal/hostlifecycle/**
+      - internal/childapplication/**
+      - internal/exposure/**
+      - internal/identitycontroller/**
+      - internal/ttlctl/**
+      - internal/postgresctl/**
+      - internal/openbaoctl/**
+      - internal/remoteopenbao/**
+      - internal/stack/componentcore/controllers.go
+    done_when: >
+      Every controller is registered through internal/controllers/runtime;
+      componentcore has no List+Watch loop.
+
+  - id: W4-MARKET
+    title: "One market participant core under Bidder and Requester"
+    wave: W4
+    track: market
+    parallel_with: [W4-SERVICES]
+    depends_on: [W3-ROOTS, W3-CONFIG, W3-STATUS]
+    status: todo
+    decision: >
+      internal/market/participant holds the shared market loop pieces:
+      credential sessions, record encode/decode, comms validation, policy
+      run handling, StateSync outbox, service-auth. Bidder and Requester
+      keep only their role logic. Services create Bid, StateSync and
+      ComputeContract through intent handles on the bus; they never list or
+      watch kcp objects; their inputs arrive through runtime watches.
+    files:
+      - internal/market/**
+      - internal/services/bidder/**
+      - internal/services/requester/**
+    done_when: >
+      No function body is shared between bidder and requester; neither
+      service imports a kcp client.
+
+  - id: W4-SERVICES
+    title: "Remaining services on bus handles"
+    wave: W4
+    track: services
+    parallel_with: [W4-MARKET]
+    depends_on: [W3-ROOTS, W3-CONFIG, W3-STATUS]
+    status: todo
+    closes: [D18]
+    decision: >
+      gatewayapi (NodeClaim manager on the runtime), guestcontrolplane,
+      sshserver, ingressproxy, plc, relay, dispatchertls and pds take typed
+      specs and bus handles. bidder-dids, adopt-joined-node,
+      initializer-nudge and restart-at signals become spec fields or
+      conditions.
+    files:
+      - internal/services/gatewayapi/**
+      - internal/gatewayapi/**
+      - internal/services/guestcontrolplane/**
+      - internal/services/sshserver/**
+      - internal/services/ingressproxy/**
+      - internal/services/plc/**
+      - internal/services/relay/**
+      - internal/services/dispatchertls/**
+      - internal/services/pds/**
+      - internal/nodemarket/**
+      - internal/kcpclient/**
+    done_when: >
+      No annotation is read as a control signal; no service has a ticker
+      over kcp objects.
+
+  - id: W5-NO-POLL
+    title: "Remove every remaining poll"
+    wave: W5
+    track: no-poll
+    parallel_with: []
+    depends_on: [W4-MARKET, W4-SERVICES]
+    status: todo
+    decision: >
+      Delete every remaining ticker or time.After loop that reads state.
+      List the remaining outbound obligations in deploy/obligations.txt.
+      clusterprovider, providermain and cloudprovider move to the runtime.
+    files:
+      - internal/clusterprovider/**
+      - internal/providermain/**
+      - internal/cloudprovider/**
+      - deploy/obligations.txt
+    done_when: >
+      Every ticker in the tree is listed in deploy/obligations.txt.
+
+  - id: W5-GATES
+    title: "Architecture gates"
+    wave: W5
+    track: gates
+    parallel_with: []
+    depends_on: [W5-NO-POLL]
+    status: todo
+    decision: >
+      scripts/check-architecture.sh enforces: import direction; no ticker
+      outside deploy/obligations.txt; no System caller outside
+      deploy/bus-bootstrap-callers.txt; no dynamic client or unstructured
+      outside internal/controllers/runtime and internal/apigen; no GVR
+      literal outside api; no annotation constant read as a signal; no
+      endpoint field in spec without apigen:"userEndpoint". deploy/check.sh
+      --fast runs it. socialweb-computer dev links prints the resolved link
+      graph of a workspace.
+    files:
+      - scripts/check-architecture.sh
+      - deploy/check.sh
+      - cmd/socialweb-computer/**
+    done_when: >
+      The gate passes on main and fails on a seeded violation of each rule.
+
+  - id: W6-LEXICONS
+    title: "Market lexicons and generated record types"
+    wave: W6
+    track: lexicons
+    parallel_with: []
+    depends_on: [W4-MARKET]
+    status: todo
+    decision: >
+      Write lexicon JSON for every market and compute NSID in
+      internal/atproto/market/nsid.go. Keep one embedded lexicon copy. A
+      custom go:generate tool writes plain JSON record structs validated
+      through the indigo lexicon catalog; no cbor-gen. Replace the Parse*
+      and Build* map[string]any code in internal/atproto/market/records.go.
+    files:
+      - lexicons/**
+      - internal/xrpcserver/lexicons/**
+      - internal/atproto/market/**
+      - internal/lexgen/**
+    done_when: >
+      Every fixture record taken from the live PDSes re-encodes to the same
+      CID; records.go has no map[string]any.
+
+  - id: W7-PROOF
+    title: "Dev, rc and live proof"
+    wave: W7
+    track: proof
+    parallel_with: []
+    depends_on: [W5-GATES, W6-LEXICONS]
+    status: todo
+    decision: >
+      Fresh deploy from a dev build on this host first, then an rc build to
+      this host, hat-9, hat-7 and the prod gateway. Repeat
+      docs/acceptance/0001-auth-modes.md end to end. Then write integration
+      tests under test/integration for the acceptance rows.
+    files:
+      - docs/acceptance/0001-auth-modes.md
+      - test/integration/**
+    done_when: >
+      Every acceptance row passes on the rc; the lead flips the closed
+      defects in docs/plans/0025-defect-register.yaml; no push.
+
+acceptance_matrix:
+  rule: >
+    Every row names a live host. A row without one is blocked, never
+    skipped.
+  rows:
+    - id: A1
+      check: "Tenant k3s cluster scales from zero to N and back to zero through the prod gateway with the hat-7 oauthQr bidder; firehose and relay events observed live."
+      hosts: [prod gateway, hat-7]
+    - id: A2
+      check: "Pod anti-affinity places one VM per host; pausing each winner moves the next VM to the last unpaused bidder; paused winners still release their VMs at scale to zero."
+      hosts: [this host, hat-9, hat-7, prod gateway]
+    - id: A3
+      check: "Gateway AtprotoRecord association is Ready and its CID matches the PDS record; removing its ComponentLink makes it fail with LinkDenied."
+      hosts: [prod gateway]
+    - id: A4
+      check: "A bidder restart keeps its event sources and the root stays Ready."
+      hosts: [hat-7, hat-9, this host]
+    - id: A5
+      check: "A gateway restart keeps the requester association; requester bids are not denied."
+      hosts: [prod gateway]
+    - id: A6
+      check: "A component created in a root:<app> workspace after core start is reconciled within one watch event; no reconcile waits for a resync."
+      hosts: [this host]
+    - id: A7
+      check: "socialweb-computer dev links prints the full link graph; the bus deny counter stays zero across A1 to A6."
+      hosts: [this host, prod gateway]
+    - id: A8
+      check: "A rotated OpenBao CA and leaf certificate are used without a restart."
+      hosts: [this host]
+
+risks: |
+  multicluster-runtime and the kcp multicluster-provider are marked
+  experimental. The W0 pilot decides the backend before any fan-out; the
+  runtime wrapper keeps the choice out of controller code.
+
+  Serving through APIExport virtual workspaces changes how the core reaches
+  its own kinds. Permission claims and identity hashes must be correct or
+  controllers see nothing. CVE-2025-29922 requires kcp 0.26.3 or 0.27.0 or
+  later; check the pinned kcp.
+
+  Removing the System caller can deny calls the composing roots do not yet
+  link. W0-BUS logs every deny with from, to and capability; W3-ROOTS must
+  write the links before W5 turns the gate on.
+
+  Abstract kinds add objects and a bind step per concept. Status mirroring
+  must not lag the backend by more than one watch event.
+
+  Hard cutover: every host is redeployed fresh. Existing PDS repos, DIDs and
+  OpenBao data are outside kcp and survive; kcp objects are recreated.
+
+  Lexicon-generated types can change record bytes and therefore CIDs and
+  signatures. W6 gates on byte-identical CIDs before any switch.
+
+  The fan-out is wide. One writer per directory and the file lists above
+  are the conflict guard; a track that needs a file outside its list asks
+  the lead first.
+
+do_not_do:
+  - "No polling over kcp or component state; no resync-driven retries."
+  - "No System caller outside deploy/bus-bootstrap-callers.txt."
+  - "No token, session, DPoP key or credential handed to a caller; the callee authenticates."
+  - "No URL, endpoint or file path in spec without apigen:\"userEndpoint\"."
+  - "No annotation as a control signal."
+  - "No second writer on a field; no read-modify-write Update on status."
+  - "No implementation selected by a flag; a new backend is a concrete kind and a sibling package."
+  - "No client-gen, listers, informer-gen, applyconfiguration-gen, kcp cluster-* generators or controller-gen."
+  - "No external message broker; the bus is in-process and the network bus is atproto."
+  - "No Result or Option types."
+  - "No migration code; deploy fresh."
+  - "No secrets in kcp, links, status or plans; no push."
