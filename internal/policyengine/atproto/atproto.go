@@ -142,10 +142,7 @@ func (c *Client) GetRecord(ctx context.Context, ref StrongRef) (map[string]any, 
 }
 
 func (c *Client) ListRecords(ctx context.Context, repo, collection string, limit int) ([]Record, error) {
-	limit = opt.Positive(limit, 100)
-	if limit > 100 {
-		limit = 100
-	}
+	limit = min(opt.Positive(limit, 100), 100)
 	pds, err := c.ResolvePDS(ctx, repo)
 	if err != nil {
 		return nil, err

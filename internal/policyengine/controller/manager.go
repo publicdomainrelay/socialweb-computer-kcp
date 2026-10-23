@@ -235,10 +235,7 @@ func EngineConfigFromCR(engineCR *policyv1alpha1.PolicyEngine, base Config) Conf
 	}
 	config.VerdictTTL = opt.Positive(config.VerdictTTL, 30*time.Second)
 	config.ScopeTTL = opt.Positive(config.ScopeTTL, 5*time.Minute)
-	config.NegativeScopeTTL = opt.Positive(config.NegativeScopeTTL, 30*time.Second)
-	if config.NegativeScopeTTL > config.ScopeTTL {
-		config.NegativeScopeTTL = config.ScopeTTL
-	}
+	config.NegativeScopeTTL = min(opt.Positive(config.NegativeScopeTTL, 30*time.Second), config.ScopeTTL)
 	config.TrustTTL = opt.Positive(config.TrustTTL, 5*time.Minute)
 	config.DisableActions = false
 	return config

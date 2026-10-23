@@ -38,10 +38,7 @@ func (b *Backoff) Next() time.Duration {
 	minimum := b.Min
 	minimum = opt.Positive(minimum, time.Second)
 	maximum := b.Max
-	maximum = opt.Positive(maximum, 30*time.Second)
-	if maximum < minimum {
-		maximum = minimum
-	}
+	maximum = max(opt.Positive(maximum, 30*time.Second), minimum)
 	b.attempt++
 	delay := minimum
 	for i := 1; i < b.attempt && delay < maximum; i++ {
@@ -60,10 +57,7 @@ func RestartDelay(attempt int, minimum, maximum time.Duration) time.Duration {
 		attempt = 1
 	}
 	minimum = opt.Positive(minimum, time.Second)
-	maximum = opt.Positive(maximum, 30*time.Second)
-	if maximum < minimum {
-		maximum = minimum
-	}
+	maximum = max(opt.Positive(maximum, 30*time.Second), minimum)
 	delay := minimum
 	for i := 1; i < attempt && delay < maximum; i++ {
 		delay *= 2

@@ -121,10 +121,7 @@ func New(opts Options) (*Controller, error) {
 	retry := opts.RetryAfter
 	retry = opt.Positive(retry, DefaultRetryAfter)
 	maxRetry := opts.MaxRetryAfter
-	maxRetry = opt.Positive(maxRetry, DefaultMaxRetryAfter)
-	if maxRetry < retry {
-		maxRetry = retry
-	}
+	maxRetry = max(opt.Positive(maxRetry, DefaultMaxRetryAfter), retry)
 	checkInterval := opts.CheckInterval
 	checkInterval = opt.Positive(checkInterval, DefaultCheckInterval)
 	now := opts.Now
