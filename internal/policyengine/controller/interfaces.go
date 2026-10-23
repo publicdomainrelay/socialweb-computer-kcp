@@ -59,3 +59,9 @@ type ActionHandler interface {
 	Kind() string
 	Dispatch(ctx context.Context, spec json.RawMessage, outcome Outcome) error
 }
+
+type WorkflowSourceFunc func(ctx context.Context, name string) (*policyv1alpha1.PolicyWorkflow, error)
+
+func (f WorkflowSourceFunc) GetPolicyWorkflow(ctx context.Context, name string) (*policyv1alpha1.PolicyWorkflow, error) {
+	return f(ctx, name)
+}

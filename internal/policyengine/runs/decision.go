@@ -1,12 +1,14 @@
-package policyrun
+package runs
 
 import (
 	"encoding/json"
 	"fmt"
 	"strings"
 
-	policyv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/policy/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	policyv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/policy/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/executor"
 )
 
 type Decision struct {
@@ -19,16 +21,17 @@ type Decision struct {
 	Run string
 }
 
-func Terminal(phase policyv1alpha1.PolicyWorkflowRunPhase) bool {
-	switch phase {
-	case policyv1alpha1.PolicyWorkflowRunSucceeded, policyv1alpha1.PolicyWorkflowRunFailed, policyv1alpha1.PolicyWorkflowRunCancelled:
-		return true
-	default:
-		return false
-	}
+type Parser struct {
+	Bool func(json.RawMessage) (bool, bool)
+
+	Strings func(json.RawMessage) []string
 }
 
-func Decide(run *policyv1alpha1.PolicyWorkflowRun, boolOf func(json.RawMessage) (bool, bool), stringsOf func(json.RawMessage) []string) Decision {
+var Lenient = Parser{Bool: lenientBool, Strings: splitStrings}
+
+var Strict = Parser{Bool: strictBool, Strings: singleString}
+
+func Decide(run *policyv1alpha1.PolicyWorkflowRun, parser Parser) Decision {
 	if run == nil {
 		return Decision{Reason: "the policy run returned no status"}
 	}
@@ -45,13 +48,13 @@ func Decide(run *policyv1alpha1.PolicyWorkflowRun, boolOf func(json.RawMessage) 
 	if run.Status.ExitStatus != "" && run.Status.ExitStatus != policyv1alpha1.PolicyExitStatusSuccess {
 		return Decision{Reason: "the policy workflow failed", Run: name}
 	}
-	allow, ok := outputBool(run.Status.Outputs, "allow", boolOf)
+	allow, ok := outputBool(run.Status.Outputs, "allow", parser.Bool)
 	if !ok {
 		return Decision{Reason: "the policy run produced no allow output", Run: name}
 	}
-	violations := outputStrings(run.Status.Outputs, "violations", stringsOf)
+	violations := outputStrings(run.Status.Outputs, "violations", parser.Strings)
 	if !allow {
-		reason := "policy rejected"
+		reason := rejection(run.Status.Outputs)
 		if len(violations) > 0 {
 			reason += ": " + strings.Join(violations, ", ")
 		}
@@ -141,4 +144,102 @@ func outputValues(outputs map[string]json.RawMessage, key string) []json.RawMess
 		}
 	}
 	return values
+}
+
+func rejection(outputs map[string]json.RawMessage) string {
+	var verdict executor.Verdict
+	for _, raw := range outputValues(outputs, "violations") {
+		var text string
+		if json.Unmarshal(raw, &text) == nil {
+			raw = json.RawMessage(text)
+		}
+		var violations []executor.Violation
+		if json.Unmarshal(raw, &violations) == nil {
+			verdict.Violations = append(verdict.Violations, violations...)
+		}
+	}
+	return executor.RejectionError(verdict)
+}
+
+func lenientBool(raw json.RawMessage) (bool, bool) {
+	var value bool
+	if json.Unmarshal(raw, &value) == nil {
+		return value, true
+	}
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		switch strings.ToLower(strings.TrimSpace(text)) {
+		case "true", "1", "yes", "allow", "allowed", "success":
+			return true, true
+		case "false", "0", "no", "deny", "denied", "failure":
+			return false, true
+		default:
+			return false, false
+		}
+	}
+	var object struct {
+		Allow *bool `json:"allow"`
+	}
+	if json.Unmarshal(raw, &object) == nil && object.Allow != nil {
+		return *object.Allow, true
+	}
+	return false, false
+}
+
+func strictBool(raw json.RawMessage) (bool, bool) {
+	var value bool
+	if json.Unmarshal(raw, &value) == nil {
+		return value, true
+	}
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		switch strings.ToLower(strings.TrimSpace(text)) {
+		case "true":
+			return true, true
+		case "false":
+			return false, true
+		}
+	}
+	return false, false
+}
+
+func splitStrings(raw json.RawMessage) []string {
+	var list []string
+	if json.Unmarshal(raw, &list) == nil {
+		return list
+	}
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		text = strings.TrimSpace(text)
+		if text == "" {
+			return nil
+		}
+		var nested []string
+		if json.Unmarshal([]byte(text), &nested) == nil {
+			return nested
+		}
+		parts := strings.Split(text, ",")
+		out := make([]string, 0, len(parts))
+		for _, part := range parts {
+			if trimmed := strings.TrimSpace(part); trimmed != "" {
+				out = append(out, trimmed)
+			}
+		}
+		return out
+	}
+	return nil
+}
+
+func singleString(raw json.RawMessage) []string {
+	var list []string
+	if json.Unmarshal(raw, &list) == nil {
+		return list
+	}
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		if trimmed := strings.TrimSpace(text); trimmed != "" && trimmed != "[]" {
+			return []string{trimmed}
+		}
+	}
+	return nil
 }

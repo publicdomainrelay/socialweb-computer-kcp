@@ -20,6 +20,7 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	corev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
@@ -27,12 +28,15 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/policy"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/ref"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/runs"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/statesync"
 )
 
@@ -326,18 +330,7 @@ func (s *Service) prepare(ctx context.Context) error {
 		WaitForRunning: false,
 	}
 	s.provider.Config.Handle = cmp.Or(s.provider.Config.Handle, s.cfg.Handle)
-	s.policy = &PolicyEvaluator{
-		Runs:        s.policyRuns(),
-		Cluster:     s.cluster,
-		EngineRef:   s.engineRef(),
-		ScopePolicy: s.cfg.Policy,
-		Args:        s.cfg.PolicyArgs,
-		Timeout:     s.cfg.PolicyTimeout,
-		Poll:        s.cfg.PolicyPoll,
-		Records:     s.records,
-		Log:         s.log,
-		Now:         s.cfg.Now,
-	}
+	s.policy = &PolicyEvaluator{Runs: s.policyRuns(), ScopePolicy: s.cfg.Policy, Records: s.records}
 	s.mux = s.routes()
 	if err := s.register(ctx); err != nil {
 		return err
@@ -730,21 +723,27 @@ func (s *Service) guestExposureURL(ctx context.Context) string {
 	return raw
 }
 
-func (s *Service) policyRuns() PolicyRunClient {
-	if s.cfg.PolicyRuns != nil {
-		return s.cfg.PolicyRuns
-	}
-	if s.store == nil || s.cfg.PolicyEngineRef == nil || s.cfg.PolicyEngineRef.Name == "" {
-		return nil
-	}
-	return NewKCPPolicyRuns(s.store, s.cluster)
+func (s *Service) resolvePolicyRunner(ctx context.Context, engine commonv1.ObjectRef, workflow string) (policy.Runner, error) {
+	caller := commonv1.ObjectRef{Group: corev1alpha1.GroupName, Kind: Kind, Name: s.cfg.ComponentName, Workspace: s.cfg.Workspace}
+	return bus.Resolve[policy.Runner](ctx, s.cfg.Deps.Handlers, caller, engine, bus.Capability{Name: policy.CapabilityRun, Scope: []string{workflow}})
 }
 
-func (s *Service) engineRef() string {
-	if s.cfg.PolicyEngineRef == nil {
-		return ""
+func (s *Service) policyRuns() *runs.Client {
+	engine := runs.EngineRef(s.cfg.PolicyEngineRef, s.cfg.Workspace)
+	if s.cfg.Deps.Handlers == nil || engine.Name == "" {
+		return nil
 	}
-	return s.cfg.PolicyEngineRef.Name
+	return &runs.Client{
+		Resolve: s.resolvePolicyRunner,
+		Owner:   policy.Owner{APIVersion: corev1alpha1.GroupVersion.String(), Kind: Kind, Name: s.cfg.ComponentName, UID: s.cfg.ComponentUID},
+		Engine:  engine,
+		Role:    "bidder",
+		Prefix:  "policy",
+		Args:    s.cfg.PolicyArgs,
+		Timeout: s.cfg.PolicyTimeout,
+		Parser:  runs.Lenient,
+		Now:     s.cfg.Now,
+	}
 }
 
 func (s *Service) newAuthorizer() Authorizer {

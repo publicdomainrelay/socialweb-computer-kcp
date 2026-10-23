@@ -6,6 +6,8 @@ import (
 	"fmt"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	kruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -80,6 +82,16 @@ func (r Request) Apply(ctx context.Context, obj Object) error {
 	if err := r.scope.client.Apply(ctx, client.ApplyConfigurationFromUnstructured(u),
 		client.FieldOwner(r.scope.fieldManager), client.ForceOwnership); err != nil {
 		return fmt.Errorf("runtime: applying %s: %w", obj.GetName(), err)
+	}
+	return nil
+}
+
+func (r Request) Delete(ctx context.Context, obj Object) error {
+	if r.scope == nil || r.scope.client == nil {
+		return errors.New("runtime: the request has no cluster client")
+	}
+	if err := r.scope.client.Delete(ctx, obj, client.PropagationPolicy(metav1.DeletePropagationBackground)); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("runtime: deleting %s: %w", obj.GetName(), err)
 	}
 	return nil
 }

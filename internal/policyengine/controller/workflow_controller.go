@@ -46,7 +46,7 @@ func (r *WorkflowReconciler) ReconcilePolicyWorkflow(ctx context.Context, workfl
 			if ctx.Err() != nil {
 				return WorkflowReconcileState{Phase: policyv1alpha1.PolicyWorkflowPending}, ctx.Err()
 			}
-			return workflowInvalid(err.Error()), nil
+			return workflowInvalid(err.Error()), err
 		}
 		raw = resolved
 	} else {
