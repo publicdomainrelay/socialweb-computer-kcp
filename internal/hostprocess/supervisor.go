@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -86,7 +87,14 @@ type Supervisor struct {
 	units    map[string]string
 	backoff  map[string]time.Duration
 	pending  map[string]bool
+	pids     map[string]int64
+	outputs  map[string]follower
 	changed  chan string
+}
+
+type follower struct {
+	key  string
+	stop context.CancelFunc
 }
 
 func (s *Supervisor) track(name, unit string, gone bool) {
@@ -116,18 +124,23 @@ func (s *Supervisor) objectOf(unit string) (string, bool) {
 	return name, ok
 }
 
-func (s *Supervisor) settle(ctx context.Context, name string, failed bool) {
+func (s *Supervisor) settle(ctx context.Context, name string, retry bool, pid int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !failed {
+	if !retry {
 		delete(s.backoff, name)
-		return
-	}
-	if s.changed == nil || s.pending[name] {
+		delete(s.pids, name)
 		return
 	}
 	if s.backoff == nil {
-		s.backoff, s.pending = map[string]time.Duration{}, map[string]bool{}
+		s.backoff, s.pending, s.pids = map[string]time.Duration{}, map[string]bool{}, map[string]int64{}
+	}
+	if s.pids[name] != pid {
+		delete(s.backoff, name)
+		s.pids[name] = pid
+	}
+	if s.changed == nil || s.pending[name] {
+		return
 	}
 	d := min(max(2*s.backoff[name], RetryAfter), MaxRetryAfter)
 	s.backoff[name], s.pending[name] = d, true
@@ -205,7 +218,14 @@ func (s *Supervisor) reconcileObject(ctx context.Context, cur *unstructured.Unst
 	if err != nil && !apierrors.IsConflict(err) {
 		s.c.log().Warn("writing status", "name", o.Name, "err", err.Error())
 	}
-	s.settle(ctx, o.Name, failed || r.Unknown || err != nil)
+	s.followOutput(ctx, next)
+	rt := next.Status.Runtime
+	listening := next.Status.Phase == v1alpha1.HostProcessPhaseRunning && rt != nil && rt.Pid > 0 && len(next.Status.Listeners) == 0
+	var pid int64
+	if listening {
+		pid = rt.Pid
+	}
+	s.settle(ctx, o.Name, failed || r.Unknown || err != nil || listening, pid)
 	return o, true
 }
 
@@ -591,21 +611,106 @@ func (s *Supervisor) sweepSlices(ctx context.Context, live []string) {
 	}
 }
 
-func (s *Supervisor) capOutput(o v1alpha1.HostProcess) {
+func outputFiles(o v1alpha1.HostProcess) ([]string, int64) {
 	out := o.Spec.Output
 	if out == nil {
+		return nil, 0
+	}
+	var files []string
+	for _, f := range []string{out.Stdout, out.Stderr} {
+		if f != "" && !slices.Contains(files, f) {
+			files = append(files, f)
+		}
+	}
+	return files, cmp.Or(out.CapBytes, logcap.DefaultCap)
+}
+
+const OutputDebounce = time.Second
+
+func (s *Supervisor) followOutput(ctx context.Context, o v1alpha1.HostProcess) {
+	files, capBytes := outputFiles(o)
+	key := ""
+	if o.DeletionTimestamp == nil && o.Status.Phase == v1alpha1.HostProcessPhaseRunning && len(files) > 0 {
+		key = strings.Join(files, "\n") + "\n" + strconv.FormatInt(capBytes, 10)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if cur, ok := s.outputs[o.Name]; ok {
+		if cur.key == key {
+			return
+		}
+		cur.stop()
+		delete(s.outputs, o.Name)
+	}
+	if key == "" {
 		return
 	}
-	capBytes := out.CapBytes
-	capBytes = cmp.Or(capBytes, logcap.DefaultCap)
-	files := []string{out.Stdout}
-	if out.Stderr != out.Stdout {
-		files = append(files, out.Stderr)
+	w, err := fsnotify.NewWatcher()
+	if err != nil {
+		s.c.log().Warn("output files are capped only at reconcile: no file watch", "name", o.Name, "err", err.Error())
+		return
 	}
 	for _, f := range files {
-		if f == "" {
-			continue
+		if err := w.Add(f); err != nil {
+			w.Close()
+			s.c.log().Warn("output files are capped only at reconcile: watching an output file failed", "name", o.Name, "file", f, "err", err.Error())
+			return
 		}
+	}
+	fctx, cancel := context.WithCancel(ctx)
+	if s.outputs == nil {
+		s.outputs = map[string]follower{}
+	}
+	s.outputs[o.Name] = follower{key: key, stop: cancel}
+	go s.rotateOnWrite(fctx, w, o, key)
+}
+
+func (s *Supervisor) unfollowOutput(name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if cur, ok := s.outputs[name]; ok {
+		cur.stop()
+		delete(s.outputs, name)
+	}
+}
+
+func (s *Supervisor) rotateOnWrite(ctx context.Context, w *fsnotify.Watcher, o v1alpha1.HostProcess, key string) {
+	defer w.Close()
+	defer func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if cur, ok := s.outputs[o.Name]; ok && cur.key == key && ctx.Err() == nil {
+			cur.stop()
+			delete(s.outputs, o.Name)
+		}
+	}()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case _, ok := <-w.Errors:
+			if !ok {
+				return
+			}
+		case ev, ok := <-w.Events:
+			if !ok || ev.Has(fsnotify.Remove) || ev.Has(fsnotify.Rename) {
+				return
+			}
+		}
+		unlock := s.lockObject(o.Name)
+		s.capOutput(o)
+		unlock()
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(OutputDebounce):
+		}
+	}
+}
+
+func (s *Supervisor) capOutput(o v1alpha1.HostProcess) {
+	files, capBytes := outputFiles(o)
+	for _, f := range files {
 		ok, err := logcap.Rotate(f, capBytes)
 		if err != nil {
 			s.c.log().Warn("an output file over its cap was not rotated", "name", o.Name, "file", f, "err", err.Error())
@@ -705,6 +810,9 @@ func (s *Supervisor) watch(ctx context.Context, wake chan<- struct{}, changedCh 
 			name, gen := u.GetName(), u.GetGeneration()
 			unit, _, _ := unstructured.NestedString(u.Object, "spec", "unit")
 			s.track(name, unit, ev.Type == watch.Deleted)
+			if ev.Type == watch.Deleted {
+				s.unfollowOutput(name)
+			}
 			changed := ev.Type != watch.Modified || generations[name] != gen
 			if ev.Type == watch.Deleted {
 				delete(generations, name)
