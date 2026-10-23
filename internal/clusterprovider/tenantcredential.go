@@ -19,8 +19,6 @@ import (
 	"slices"
 	"time"
 
-	"k8s.io/client-go/rest"
-
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterstack"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
@@ -116,6 +114,16 @@ const (
 	CredentialSourceVaultIfSealed CredentialSource = "vault-if-sealed"
 )
 
+type Credential struct {
+	Host string
+
+	CAData []byte
+
+	CertData []byte
+
+	KeyData []byte
+}
+
 type CredentialOptions struct {
 	DataDir string
 
@@ -128,7 +136,7 @@ type CredentialOptions struct {
 	ValidFor time.Duration
 }
 
-func MintTenantCredential(o CredentialOptions) (*rest.Config, error) {
+func MintTenantCredential(o CredentialOptions) (*Credential, error) {
 	if o.DataDir == "" {
 		return nil, ErrNoCredentialDataDir
 	}
@@ -205,17 +213,15 @@ func MintTenantCredential(o CredentialOptions) (*rest.Config, error) {
 		return nil, fmt.Errorf("clusterprovider: marshalling the tenant credential's key: %w", err)
 	}
 
-	return &rest.Config{
-		Host: server.String(),
-		TLSClientConfig: rest.TLSClientConfig{
-			CAData:   serverCA,
-			CertData: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}),
-			KeyData:  pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}),
-		},
+	return &Credential{
+		Host:     server.String(),
+		CAData:   serverCA,
+		CertData: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}),
+		KeyData:  pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}),
 	}, nil
 }
 
-func MintTenantCredentialForCluster(ctx context.Context, stateDir, cluster, server string, source CredentialSource) (*rest.Config, error) {
+func MintTenantCredentialForCluster(ctx context.Context, stateDir, cluster, server string, source CredentialSource) (*Credential, error) {
 	dataDir, err := ClusterDataDir(stateDir, cluster)
 	if err != nil {
 		return nil, err
@@ -223,7 +229,7 @@ func MintTenantCredentialForCluster(ctx context.Context, stateDir, cluster, serv
 	return MintTenantCredentialForDataDir(ctx, dataDir, server, source)
 }
 
-func MintTenantCredentialForDataDir(ctx context.Context, dataDir, server string, source CredentialSource) (*rest.Config, error) {
+func MintTenantCredentialForDataDir(ctx context.Context, dataDir, server string, source CredentialSource) (*Credential, error) {
 	o := CredentialOptions{
 		DataDir:       dataDir,
 		Server:        server,
@@ -243,7 +249,7 @@ func MintTenantCredentialForDataDir(ctx context.Context, dataDir, server string,
 	return nil, fmt.Errorf("%w (got %q)", ErrCredentialSourceUnknown, source)
 }
 
-func MintTenantCredentialForClusterAs(ctx context.Context, stateDir, cluster, server, commonName string, organizations []string, validFor time.Duration) (*rest.Config, error) {
+func MintTenantCredentialForClusterAs(ctx context.Context, stateDir, cluster, server, commonName string, organizations []string, validFor time.Duration) (*Credential, error) {
 	dataDir, err := ClusterDataDir(stateDir, cluster)
 	if err != nil {
 		return nil, err
@@ -251,7 +257,7 @@ func MintTenantCredentialForClusterAs(ctx context.Context, stateDir, cluster, se
 	return MintTenantCredentialForDataDirAs(dataDir, server, commonName, organizations, validFor)
 }
 
-func MintTenantCredentialForDataDirAs(dataDir, server, commonName string, organizations []string, validFor time.Duration) (*rest.Config, error) {
+func MintTenantCredentialForDataDirAs(dataDir, server, commonName string, organizations []string, validFor time.Duration) (*Credential, error) {
 	return MintTenantCredential(CredentialOptions{
 		DataDir:       dataDir,
 		Server:        server,
@@ -261,7 +267,7 @@ func MintTenantCredentialForDataDirAs(dataDir, server, commonName string, organi
 	})
 }
 
-func mintTenantCredentialFromVault(ctx context.Context, o CredentialOptions, client *openbao.Client, addr string) (*rest.Config, error) {
+func mintTenantCredentialFromVault(ctx context.Context, o CredentialOptions, client *openbao.Client, addr string) (*Credential, error) {
 	if o.DataDir == "" {
 		return nil, ErrNoCredentialDataDir
 	}
@@ -329,13 +335,11 @@ func mintTenantCredentialFromVault(ctx context.Context, o CredentialOptions, cli
 	}); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrCredentialDoesNotChain, err)
 	}
-	return &rest.Config{
-		Host: server.String(),
-		TLSClientConfig: rest.TLSClientConfig{
-			CAData:   serverCA,
-			CertData: []byte(issued.Certificate),
-			KeyData:  []byte(issued.PrivateKey),
-		},
+	return &Credential{
+		Host:     server.String(),
+		CAData:   serverCA,
+		CertData: []byte(issued.Certificate),
+		KeyData:  []byte(issued.PrivateKey),
 	}, nil
 }
 

@@ -18,6 +18,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterkcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterprovider"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterstack"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/foldmain"
@@ -139,7 +140,7 @@ func buildInputs(cfg Config) (inputs, error) {
 	}
 	kcpserver.FollowTokenFile(restCfg)
 	kcpserver.Throughput(restCfg)
-	registry, err := clusterprovider.NewRegistry(clusterprovider.RegistryOptions{
+	registry, err := clusterkcp.NewRegistry(clusterkcp.RegistryOptions{
 		Host:       cfg.KCPHost,
 		StateDir:   cfg.StateDir,
 		RestConfig: restCfg,
@@ -208,15 +209,17 @@ func buildDeps(ctx context.Context, cfg Config, log *slog.Logger) (Deps, error) 
 
 	tokens := newTokenStore(cfg.StateDir, log)
 
-	units, err := clusterprovider.NewUnitsHost(clusterprovider.UnitsConfig{
-		RestConfig:    restCfg,
-		Host:          cfg.KCPHost,
-		Workspace:     cfg.HostProcessWorkspace,
-		Prefix:        cfg.UnitPrefix,
-		StateDir:      cfg.StateDir,
-		VaultStateDir: cfg.VaultStateDir,
-		Resolve:       cfg.lookPath,
-		Log:           log,
+	units, err := clusterkcp.NewUnitsHost(clusterkcp.UnitsConfig{
+		RestConfig: restCfg,
+		Host:       cfg.KCPHost,
+		Workspace:  cfg.HostProcessWorkspace,
+		Units: clusterprovider.UnitsConfig{
+			Prefix:        cfg.UnitPrefix,
+			StateDir:      cfg.StateDir,
+			VaultStateDir: cfg.VaultStateDir,
+			Resolve:       cfg.lookPath,
+			Log:           log,
+		},
 	})
 	if err != nil {
 		return Deps{}, err
@@ -249,6 +252,8 @@ func buildDeps(ctx context.Context, cfg Config, log *slog.Logger) (Deps, error) 
 	stackCfg := clusterprovider.StackConfig{
 		Stack:                      stack,
 		Admin:                      adminForCluster(cfg.StateDir),
+		Open:                       clusterkcp.OpenKubeconfig,
+		WriteKubeconfig:            clusterkcp.WriteKubeconfig,
 		StateDir:                   cfg.StateDir,
 		StoreEndpoint:              storeEndpoint(cfg, units),
 		VaultStoreDSN:              vaultStoreDSN(units),
@@ -332,7 +337,7 @@ func buildDeps(ctx context.Context, cfg Config, log *slog.Logger) (Deps, error) 
 
 	tenantConfig := tenantFromClusterCA(alloc, cfg.StateDir, tenantCredentialSource())
 	tenant := tenantClients(registry, tenantConfig)
-	nodeObserver := clusterprovider.NodeObserver{
+	nodeObserver := clusterkcp.NodeObserver{
 		Client:    tenant,
 		Operators: scale.OurOperators,
 		Baseline: func(cluster string) (scale.Baseline, error) {
@@ -453,7 +458,7 @@ type cachedTenant struct {
 	client kubernetes.Interface
 }
 
-func tenantClients(registry clusterprovider.Clusters, mint func(context.Context, clusterprovider.Ref, *v1alpha1.Cluster) (*rest.Config, error)) func(context.Context, string) (kubernetes.Interface, error) {
+func tenantClients(registry clusterprovider.Clusters, mint func(context.Context, clusterprovider.Ref, *v1alpha1.Cluster) (*clusterprovider.Credential, error)) func(context.Context, string) (kubernetes.Interface, error) {
 	var mu sync.Mutex
 	clients := map[string]cachedTenant{}
 	return func(ctx context.Context, cluster string) (kubernetes.Interface, error) {
@@ -477,7 +482,7 @@ func tenantClients(registry clusterprovider.Clusters, mint func(context.Context,
 		if err != nil {
 			return nil, err
 		}
-		client, err := kubernetes.NewForConfig(kcpserver.Throughput(cfg))
+		client, err := kubernetes.NewForConfig(kcpserver.Throughput(clusterkcp.RestConfig(cfg)))
 		if err != nil {
 			return nil, err
 		}
@@ -558,7 +563,7 @@ func bootstrapRowObserved(cfg Config, units *clusterprovider.UnitsHost, log *slo
 }
 
 func adminForCluster(stateDir string) clusterprovider.AdminClient {
-	return func(_ context.Context, cluster, apiserver string) (kubernetes.Interface, error) {
+	return func(_ context.Context, cluster, apiserver string) (clusterprovider.Tenant, error) {
 		dataDir, err := clusterprovider.ClusterDataDir(stateDir, cluster)
 		if err != nil {
 			return nil, err
@@ -574,7 +579,11 @@ func adminForCluster(stateDir string) clusterprovider.AdminClient {
 		if apiserver != "" {
 			cfg.Host = apiserver
 		}
-		return kubernetes.NewForConfig(kcpserver.Throughput(cfg))
+		core, err := kubernetes.NewForConfig(kcpserver.Throughput(cfg))
+		if err != nil {
+			return nil, err
+		}
+		return clusterkcp.NewTenant(core), nil
 	}
 }
 
@@ -590,8 +599,8 @@ func tenantCredentialSource() clusterprovider.CredentialSource {
 	return clusterprovider.CredentialSourceClusterCA
 }
 
-func tenantFromClusterCA(alloc *portallocator.Allocator, stateDir string, source clusterprovider.CredentialSource) func(context.Context, clusterprovider.Ref, *v1alpha1.Cluster) (*rest.Config, error) {
-	return func(ctx context.Context, ref clusterprovider.Ref, cl *v1alpha1.Cluster) (*rest.Config, error) {
+func tenantFromClusterCA(alloc *portallocator.Allocator, stateDir string, source clusterprovider.CredentialSource) func(context.Context, clusterprovider.Ref, *v1alpha1.Cluster) (*clusterprovider.Credential, error) {
+	return func(ctx context.Context, ref clusterprovider.Ref, cl *v1alpha1.Cluster) (*clusterprovider.Credential, error) {
 		key, err := ref.Key()
 		if err != nil {
 			return nil, err

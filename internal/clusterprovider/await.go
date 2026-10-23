@@ -5,67 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"time"
 
 	"github.com/fsnotify/fsnotify"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	kruntime "k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/tools/cache"
 
-	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/unstruct"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/procgroup"
 )
 
-func awaitObject[T any](ctx context.Context, ri dynamic.ResourceInterface, name string, timeout time.Duration, done func(o *T) (bool, error)) (*T, error) {
-	last, err := ctlruntime.Await(ctx, ri, name, timeout, func(u *unstructured.Unstructured) (bool, error) {
-		if u == nil {
-			return done(nil)
-		}
-		o, err := unstruct.From[T](u)
-		if err != nil {
-			return false, err
-		}
-		return done(&o)
-	})
-	if last == nil {
-		return nil, err
-	}
-	o, derr := unstruct.From[T](last)
-	if derr != nil {
-		return nil, errors.Join(err, derr)
-	}
-	return &o, err
-}
-
-func awaitSelected[T any](ctx context.Context, ri dynamic.ResourceInterface, selector string, timeout time.Duration, done func(objs []T) (bool, error)) error {
-	return ctlruntime.AwaitSelected(ctx, ri, selector, timeout, func(items []*unstructured.Unstructured) (bool, error) {
-		objs := make([]T, 0, len(items))
-		for _, u := range items {
-			o, err := unstruct.From[T](u)
-			if err != nil {
-				return false, err
-			}
-			objs = append(objs, o)
-		}
-		return done(objs)
-	})
-}
-
-func awaitTyped[T any](ctx context.Context, lw cache.ListerWatcher, proto kruntime.Object, timeout time.Duration, done func(objs []T) (bool, error)) error {
-	return ctlruntime.AwaitListWatch(ctx, lw, proto, timeout, func(items []any) (bool, error) {
-		objs := make([]T, 0, len(items))
-		for _, item := range items {
-			if o, ok := item.(T); ok {
-				objs = append(objs, o)
-			}
-		}
-		return done(objs)
-	})
-}
-
-func timedOut(err error) bool { return errors.Is(err, ctlruntime.ErrAwaitTimeout) }
+func timedOut(err error) bool { return errors.Is(err, ErrAwaitTimeout) }
 
 type logged interface {
 	LogPath() string

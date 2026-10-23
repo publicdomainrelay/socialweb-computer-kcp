@@ -9,8 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"k8s.io/client-go/kubernetes"
-
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterstack"
@@ -50,12 +48,14 @@ var ErrNoGuardSeam = errors.New(
 		"would return the steps unchanged and the identity guard would SILENTLY NOT RUN -- " +
 		"a skipped guard and a satisfied one look identical from a green suite")
 
-type AdminClient func(ctx context.Context, cluster, apiserver string) (kubernetes.Interface, error)
-
 type StackConfig struct {
 	Stack Stack
 
 	Admin AdminClient
+
+	Open OpenTenant
+
+	WriteKubeconfig KubeconfigWriter
 
 	StateDir string
 
@@ -294,7 +294,7 @@ func StepsFor(cfg StackConfig) materialiser.StepBuilder {
 			spec.OpenBaoPostgresDSN = dsn
 		}
 
-		steps, err := StepsFrom(spec, l, cfg.Stack)
+		steps, err := cfg.StepsFrom(spec, l)
 		if err != nil {
 			return nil, err
 		}

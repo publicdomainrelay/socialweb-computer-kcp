@@ -15,6 +15,7 @@ import (
 	kruntime "k8s.io/apimachinery/pkg/runtime"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterkcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterprovider"
 	clustercontroller "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/cluster"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
@@ -48,11 +49,11 @@ type Deps struct {
 
 	NodeHosts *nodeHosts
 
-	Tenant func(ctx context.Context, ref clusterprovider.Ref, cl *v1alpha1.Cluster) (*rest.Config, error)
+	Tenant func(ctx context.Context, ref clusterprovider.Ref, cl *v1alpha1.Cluster) (*clusterprovider.Credential, error)
 
 	Tenants func(ctx context.Context, cluster string) (kubernetes.Interface, error)
 
-	InstallTenant func(ctx context.Context, cluster string, cfg *rest.Config) error
+	InstallTenant func(ctx context.Context, cluster string, cred *clusterprovider.Credential) error
 
 	MountChild clusterprovider.MountChildWriter
 
@@ -259,6 +260,7 @@ func Build(cfg Config, d Deps, log *slog.Logger) (*Provider, error) {
 	if !cfg.ObserveOnly() {
 		opts.Tenant, opts.GrantPath = d.Tenant, cfg.GrantPath
 		opts.InstallTenant = d.InstallTenant
+		opts.Grant = clusterkcp.Grant
 	}
 	provider, err := clusterprovider.New(opts)
 	if err != nil {
