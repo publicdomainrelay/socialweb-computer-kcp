@@ -3,7 +3,6 @@ package plc
 import (
 	"cmp"
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -18,34 +17,16 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/kcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/servetls"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
 )
 
 const Kind = "Plc"
 
-const DefaultHost = "127.0.0.1"
-
 const DefaultShutdownTimeout = 5 * time.Second
 
-type Config struct {
-	Deps            component.Deps
-	Key             component.Key
-	StateDir        string
-	Address         string
-	Host            string
-	Port            int
-	Hostnames       []string
-	Network         *v1alpha1.MarketNetworkValue
-	CertFile        string
-	KeyFile         string
-	TLS             *tls.Config
-	Version         string
-	ShutdownTimeout time.Duration
-}
-
 type Service struct {
-	cfg Config
+	spec v1alpha1.PlcSpec
+	in   component.Instance
 
 	mu       sync.Mutex
 	log      *slog.Logger
@@ -58,67 +39,41 @@ type Service struct {
 	ready    bool
 }
 
-func New(cfg Config) *Service {
-	return &Service{cfg: cfg}
+func New(spec v1alpha1.PlcSpec, in component.Instance) *Service {
+	return &Service{spec: spec, in: in}
 }
 
-func ConfigFrom(deps component.Deps, spec component.ComponentSpec) (Config, error) {
-	var decoded v1alpha1.PlcSpec
-	if err := spec.Spec.Decode(&decoded); err != nil {
-		return Config{}, fmt.Errorf("plc: decoding the component spec: %w", err)
+func (s *Service) stateDir() string {
+	if s.spec.Storage != nil && s.spec.Storage.DataDir != "" {
+		return s.spec.Storage.DataDir
 	}
-	stateDir := deps.StateDir
-	if spec.StateDir != "" {
-		stateDir = spec.StateDir
-	}
-	cfg := Config{
-		Deps:      deps,
-		Key:       component.Key{Workspace: spec.Workspace, Kind: spec.Kind, Name: spec.Name},
-		StateDir:  stateDir,
-		Host:      DefaultHost,
-		Hostnames: append([]string(nil), decoded.Hostnames...),
-	}
-	if decoded.Network != nil {
-		network := *decoded.Network
-		cfg.Network = &network
-	}
-	if decoded.Storage != nil && decoded.Storage.DataDir != "" {
-		cfg.StateDir = decoded.Storage.DataDir
-	}
-	if decoded.Serve != nil {
-		if decoded.Serve.Host != "" {
-			cfg.Host = decoded.Serve.Host
-		}
-		cfg.Port = int(decoded.Serve.Port)
-	}
-	if decoded.TLS != nil {
-		cfg.Hostnames = strs.AppendUniqueFold(cfg.Hostnames, decoded.TLS.Hostnames...)
-	}
-	if decoded.Network != nil {
-		cfg.Hostnames = strs.AppendUniqueFold(cfg.Hostnames, hostport.NetworkHostnames(decoded.Network, cfg.Port)...)
-	}
-	if decoded.TLS != nil && decoded.TLS.Enabled {
-		certFile, keyFile := servetls.CertificateFiles(decoded.TLS.CertRef, decoded.Storage, cfg.Hostnames)
-		cfg.CertFile = certFile
-		cfg.KeyFile = keyFile
-		tlsConfig, err := servetls.Config(cfg.CertFile, deps.TLS, deps.Log)
-		if err != nil {
-			return Config{}, fmt.Errorf("plc: %w", err)
-		}
-		cfg.TLS = tlsConfig
-	}
-	return cfg, nil
+	return s.in.StateDir
 }
 
-func (s *Service) Start(ctx context.Context, deps component.Deps) error {
-	cfg := s.cfg
-	cfg.Deps = cfg.Deps.Or(deps)
-	log := cfg.Deps.Log
+func (s *Service) hostnames() []string {
+	out := append([]string(nil), s.spec.Hostnames...)
+	if s.spec.TLS != nil {
+		out = strs.AppendUniqueFold(out, s.spec.TLS.Hostnames...)
+	}
+	if s.spec.Serve != nil {
+		out = strs.AppendUniqueFold(out, hostport.NetworkHostnames(s.spec.Network, int(s.spec.Serve.Port))...)
+	}
+	return out
+}
+
+func (s *Service) serveHost() string {
+	if s.spec.Serve == nil {
+		return ""
+	}
+	return s.spec.Serve.Host
+}
+
+func (s *Service) Start(ctx context.Context) error {
+	log := s.in.Log
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	stateDir := cfg.StateDir
-	stateDir = cmp.Or(stateDir, cfg.Deps.StateDir)
+	stateDir := s.stateDir()
 	var store atplc.Store = atplc.NewMemoryStore()
 	if stateDir != "" {
 		fs, err := atplc.NewFileStore(filepath.Join(stateDir, "plc.json"))
@@ -127,11 +82,11 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 		}
 		store = fs
 	}
-	server := atplc.NewServer(atplc.Options{Store: store, Version: cfg.Version})
-	key := cfg.Key
+	server := atplc.NewServer(atplc.Options{Store: store})
+	key := s.in.Key()
 	key.Kind = cmp.Or(key.Kind, Kind)
 	key.Name = cmp.Or(key.Name, "default")
-	handlers := cfg.Deps.Handlers
+	handlers := s.in.Bus
 	if handlers == nil {
 		return errors.New("plc: no handler registry is available")
 	}
@@ -153,7 +108,6 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	}
 
 	s.mu.Lock()
-	s.cfg = cfg
 	s.log = log
 	s.store = store
 	s.server = server
@@ -164,7 +118,7 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 	s.ready = true
 	s.mu.Unlock()
 
-	log.Info("plc_registered", "host", host, "hostname", hostport.Primary(cfg.Host, cfg.Hostnames))
+	log.Info("plc_registered", "host", host, "hostname", hostport.Primary(s.serveHost(), s.hostnames()))
 
 	select {
 	case <-ctx.Done():
@@ -178,7 +132,7 @@ func (s *Service) Ready(ctx context.Context) error {
 	s.mu.Lock()
 	ready := s.ready
 	baseURL := s.baseURL
-	handlers := s.cfg.Deps.Handlers
+	handlers := s.in.Bus
 	s.mu.Unlock()
 	if !ready || baseURL == "" || handlers == nil {
 		return errors.New("plc: the service is not registered")
@@ -247,3 +201,5 @@ func (s *Service) finish() {
 	s.stopCh = nil
 	s.mu.Unlock()
 }
+
+var _ component.Service = (*Service)(nil)
