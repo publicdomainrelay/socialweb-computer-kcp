@@ -17,7 +17,6 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/marketrequester"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/sshgateway"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 )
 
 const manifestRetry = 2 * time.Second
@@ -50,7 +49,7 @@ func Register(ctx context.Context, m *ctlruntime.Manager, cfg Config) error {
 }
 
 func applyManifests(ctx context.Context, c *compose.Composer) {
-	for {
+	for failures := 0; ; failures++ {
 		err := compose.ApplySet(ctx, c)
 		if err == nil {
 			c.Log().Info("the application roots reconcile this instance's root objects", "workspace", c.Workspace())
@@ -59,9 +58,14 @@ func applyManifests(ctx context.Context, c *compose.Composer) {
 		if ctx.Err() != nil {
 			return
 		}
-		c.Log().Warn("applying the applications set; retrying", "err", err.Error())
-		if !clock.Sleep(ctx, manifestRetry) {
+		retryIn := ctlruntime.BackoffDelay(manifestRetry, ctlruntime.DefaultBackoffMax, failures)
+		c.Log().Warn("applying the applications set; retrying with backoff", "failures", failures+1, "retryIn", retryIn.String(), "err", err.Error())
+		timer := time.NewTimer(retryIn)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
 			return
+		case <-timer.C:
 		}
 	}
 }
