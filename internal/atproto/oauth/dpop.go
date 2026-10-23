@@ -1,6 +1,7 @@
 package oauth
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/bluesky-social/indigo/atproto/atcrypto"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 )
 
@@ -82,13 +84,9 @@ func (v *DPoPVerifier) Verify(ctx context.Context, proof, method, requestURL, ac
 	}
 
 	leeway := v.Leeway
-	if leeway <= 0 {
-		leeway = DefaultDPoPLeeway
-	}
+	leeway = opt.Positive(leeway, DefaultDPoPLeeway)
 	replayWindow := v.ReplayWindow
-	if replayWindow <= 0 {
-		replayWindow = DefaultDPoPReplayWindow
-	}
+	replayWindow = opt.Positive(replayWindow, DefaultDPoPReplayWindow)
 
 	headerPart, payloadPart, signaturePart, ok := splitJWT(proof)
 	if !ok {
@@ -264,9 +262,7 @@ func normalizeHTU(raw string) (string, bool) {
 		host = host + ":" + port
 	}
 	path := parsed.EscapedPath()
-	if path == "" {
-		path = "/"
-	}
+	path = cmp.Or(path, "/")
 	return scheme + "://" + host + path, true
 }
 
@@ -348,9 +344,7 @@ func (s *MemoryNonceStore) VerifyNonce(_ context.Context, origin, nonce string) 
 
 func (s *MemoryNonceStore) RecordJTI(_ context.Context, jti string, expiresAt time.Time) (bool, error) {
 	ttl := time.Until(expiresAt)
-	if ttl <= 0 {
-		ttl = -1
-	}
+	ttl = opt.Positive(ttl, -1)
 	return s.jtis.Add(jti, struct{}{}, ttl), nil
 }
 

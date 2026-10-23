@@ -1,6 +1,7 @@
 package pds
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"net"
@@ -290,9 +291,7 @@ func (s *Server) publicURL(r *http.Request) string {
 		scheme = strings.ToLower(proto)
 	}
 	host := r.Host
-	if host == "" {
-		host = "localhost"
-	}
+	host = cmp.Or(host, "localhost")
 	if scheme == "http" && !isLoopbackHost(host) && r.Header.Get("X-Forwarded-Proto") == "" {
 		scheme = "https"
 	}

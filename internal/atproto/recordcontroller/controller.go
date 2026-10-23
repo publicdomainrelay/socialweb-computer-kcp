@@ -1,6 +1,7 @@
 package recordcontroller
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -317,9 +318,7 @@ func (c *Controller) repoBindingForRef(ctx context.Context, dyn dynamic.Interfac
 		return pdsclient.RepoBinding{}, errors.New("the repoRef names no object")
 	}
 	refWorkspace := strings.TrimSpace(ref.Workspace)
-	if refWorkspace == "" {
-		refWorkspace = workspace
-	}
+	refWorkspace = cmp.Or(refWorkspace, workspace)
 	switch strings.ToLower(strings.TrimSpace(ref.Kind)) {
 	case "atprotorepo":
 		client, err := c.clientFor(dyn, workspace, refWorkspace)
@@ -362,9 +361,7 @@ func (c *Controller) repoBindingForRef(ctx context.Context, dyn dynamic.Interfac
 		return pdsclient.RepoBinding{Workspace: refWorkspace, Kind: "RemotePDS", Name: name, DID: strings.TrimSpace(remote.Spec.DID)}, nil
 	case "", "pds", "local", "localpds", "local-pds":
 		kind := strings.TrimSpace(ref.Kind)
-		if kind == "" {
-			kind = "Pds"
-		}
+		kind = cmp.Or(kind, "Pds")
 		if repo, err := localRepoBinding(ctx, dyn, workspace, kind, name); err != nil {
 			return pdsclient.RepoBinding{}, err
 		} else if repo != nil {

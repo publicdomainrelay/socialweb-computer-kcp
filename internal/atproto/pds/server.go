@@ -1,6 +1,7 @@
 package pds
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -18,6 +19,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/repo"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/serviceauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 const (
@@ -52,9 +54,7 @@ type Server struct {
 
 func New(cfg Config) (*Server, error) {
 	mode := cfg.Mode
-	if mode == "" {
-		mode = ModeFull
-	}
+	mode = cmp.Or(mode, ModeFull)
 	if mode != ModeFull && mode != ModeRepo {
 		return nil, fmt.Errorf("pds: unknown mode %q", mode)
 	}
@@ -95,25 +95,15 @@ func New(cfg Config) (*Server, error) {
 	if serviceDID != "" {
 		audience = serviceDID
 	}
-	if audience == "" {
-		audience = "did:web:localhost"
-	}
+	audience = cmp.Or(audience, "did:web:localhost")
 	accessTTL := cfg.AccessTokenTTL
-	if accessTTL <= 0 {
-		accessTTL = DefaultAccessTokenTTL
-	}
+	accessTTL = opt.Positive(accessTTL, DefaultAccessTokenTTL)
 	refreshTTL := cfg.RefreshTokenTTL
-	if refreshTTL <= 0 {
-		refreshTTL = DefaultRefreshTokenTTL
-	}
+	refreshTTL = opt.Positive(refreshTTL, DefaultRefreshTokenTTL)
 	maxRequest := cfg.MaxRequestBytes
-	if maxRequest <= 0 {
-		maxRequest = DefaultMaxRequestBytes
-	}
+	maxRequest = opt.Positive(maxRequest, DefaultMaxRequestBytes)
 	maxBlob := cfg.MaxBlobSize
-	if maxBlob <= 0 {
-		maxBlob = DefaultMaxBlobSize
-	}
+	maxBlob = opt.Positive(maxBlob, DefaultMaxBlobSize)
 	s := &Server{
 		cfg:             cfg,
 		mode:            mode,
@@ -180,9 +170,7 @@ func (s *Server) initOAuth(cfg *OAuthConfig) error {
 		return fmt.Errorf("pds: oauth requires an account store")
 	}
 	issuer := cfg.Issuer
-	if issuer == "" {
-		issuer = s.cfg.PublicBaseURL
-	}
+	issuer = cmp.Or(issuer, s.cfg.PublicBaseURL)
 	if issuer == "" {
 		return fmt.Errorf("pds: oauth issuer is required")
 	}
@@ -334,9 +322,7 @@ func (s *Server) UpdateService(ctx context.Context, did syntax.DID, service stri
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	version := s.cfg.Version
-	if version == "" {
-		version = "socialweb-pds"
-	}
+	version = cmp.Or(version, "socialweb-pds")
 	httpjson.Write(w, http.StatusOK, map[string]string{"version": version})
 }
 

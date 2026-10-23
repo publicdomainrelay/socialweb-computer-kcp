@@ -1,6 +1,7 @@
 package pds
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"io"
@@ -41,9 +42,7 @@ func (s *Server) handleUploadBlob(w http.ResponseWriter, r *http.Request, info *
 		return
 	}
 	mimeType := strings.TrimSpace(r.Header.Get("Content-Type"))
-	if mimeType == "" {
-		mimeType = "application/octet-stream"
-	}
+	mimeType = cmp.Or(mimeType, "application/octet-stream")
 	ref, err := s.blobs.PutBlob(ctx, info.DID, mimeType, data)
 	if err != nil {
 		writeXRPCError(w, http.StatusInternalServerError, "InternalError", "failed to store blob")
@@ -86,9 +85,7 @@ func (s *Server) handleGetBlob(w http.ResponseWriter, r *http.Request) {
 		writeXRPCError(w, http.StatusInternalServerError, "InternalError", "failed to load blob")
 		return
 	}
-	if mimeType == "" {
-		mimeType = "application/octet-stream"
-	}
+	mimeType = cmp.Or(mimeType, "application/octet-stream")
 	w.Header().Set("Content-Type", mimeType)
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
 	w.WriteHeader(http.StatusOK)

@@ -1,10 +1,12 @@
 package cloudinit
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"strings"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/sha256sum"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/nodeagent"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/systemdunit"
@@ -139,51 +141,21 @@ type K3sJoinOptions struct {
 }
 
 func (o K3sJoinOptions) defaults() K3sJoinOptions {
-	if o.NodeDir == "" {
-		o.NodeDir = NodeSecretsDir
-	}
-	if o.K3sDataDir == "" {
-		o.K3sDataDir = nodeagent.DefaultK3sDataDir
-	}
-	if o.KubeletKubeconfig == "" {
-		o.KubeletKubeconfig = o.K3sDataDir + "/agent/kubelet.kubeconfig"
-	}
-	if o.DumbpipePath == "" {
-		o.DumbpipePath = nodeagent.DefaultDumbpipePath
-	}
-	if o.K3sPath == "" {
-		o.K3sPath = nodeagent.DefaultK3sPath
-	}
-	if o.NodeBinaryPath == "" {
-		o.NodeBinaryPath = nodeagent.DefaultNodeBinaryPath
-	}
-	if o.K3sNodePasswordPath == "" {
-		o.K3sNodePasswordPath = K3sNodePasswordPath
-	}
-	if o.DoneStamp == "" {
-		o.DoneStamp = nodeagent.DefaultDoneStamp
-	}
-	if o.OpenBaoAddr == "" {
-		o.OpenBaoAddr = NodeOpenBaoLinkAddress
-	}
-	if o.MeshdPath == "" {
-		o.MeshdPath = MeshdPath
-	}
-	if o.CNIConfDir == "" {
-		o.CNIConfDir = CNIConfDir
-	}
-	if o.CNIBinDir == "" {
-		o.CNIBinDir = CNIBinDir
-	}
-	if o.CNIWaitAttempts <= 0 {
-		o.CNIWaitAttempts = DefaultCNIWaitAttempts
-	}
-	if o.DiagnoseAttempts <= 0 {
-		o.DiagnoseAttempts = DefaultDiagnoseAttempts
-	}
-	if o.LinkWaitAttempts <= 0 {
-		o.LinkWaitAttempts = DefaultLinkWaitAttempts
-	}
+	o.NodeDir = cmp.Or(o.NodeDir, NodeSecretsDir)
+	o.K3sDataDir = cmp.Or(o.K3sDataDir, nodeagent.DefaultK3sDataDir)
+	o.KubeletKubeconfig = cmp.Or(o.KubeletKubeconfig, o.K3sDataDir+"/agent/kubelet.kubeconfig")
+	o.DumbpipePath = cmp.Or(o.DumbpipePath, nodeagent.DefaultDumbpipePath)
+	o.K3sPath = cmp.Or(o.K3sPath, nodeagent.DefaultK3sPath)
+	o.NodeBinaryPath = cmp.Or(o.NodeBinaryPath, nodeagent.DefaultNodeBinaryPath)
+	o.K3sNodePasswordPath = cmp.Or(o.K3sNodePasswordPath, K3sNodePasswordPath)
+	o.DoneStamp = cmp.Or(o.DoneStamp, nodeagent.DefaultDoneStamp)
+	o.OpenBaoAddr = cmp.Or(o.OpenBaoAddr, NodeOpenBaoLinkAddress)
+	o.MeshdPath = cmp.Or(o.MeshdPath, MeshdPath)
+	o.CNIConfDir = cmp.Or(o.CNIConfDir, CNIConfDir)
+	o.CNIBinDir = cmp.Or(o.CNIBinDir, CNIBinDir)
+	o.CNIWaitAttempts = opt.Positive(o.CNIWaitAttempts, DefaultCNIWaitAttempts)
+	o.DiagnoseAttempts = opt.Positive(o.DiagnoseAttempts, DefaultDiagnoseAttempts)
+	o.LinkWaitAttempts = opt.Positive(o.LinkWaitAttempts, DefaultLinkWaitAttempts)
 	return o
 }
 

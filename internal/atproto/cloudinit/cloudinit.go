@@ -1,6 +1,7 @@
 package cloudinit
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -472,12 +473,8 @@ type BuildOptions struct {
 func BuildUserData(opts BuildOptions) (string, error) {
 	ctx := opts.Ctx
 	gateway := opts.DNSGateway
-	if gateway == "" {
-		gateway = ctx.DNSGateway
-	}
-	if gateway == "" {
-		gateway = DefaultDNSGateway
-	}
+	gateway = cmp.Or(gateway, ctx.DNSGateway)
+	gateway = cmp.Or(gateway, DefaultDNSGateway)
 	fallbacks := opts.DNSFallbacks
 	if fallbacks == nil {
 		fallbacks = ctx.DNSFallbacks

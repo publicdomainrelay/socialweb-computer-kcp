@@ -1,6 +1,7 @@
 package oauth
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -65,9 +66,7 @@ func (s *Server) handlePAR(w http.ResponseWriter, r *http.Request) {
 	state := form.Get("state")
 	challenge := form.Get("code_challenge")
 	method := form.Get("code_challenge_method")
-	if method == "" {
-		method = "S256"
-	}
+	method = cmp.Or(method, "S256")
 	if clientID == "" || redirectURI == "" || responseType == "" || state == "" || challenge == "" {
 		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "client_id, code_challenge, redirect_uri, response_type, and state required")
 		return
@@ -254,9 +253,7 @@ func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		redirectURI := form.Get("redirect_uri")
 		challenge := form.Get("code_challenge")
 		method := form.Get("code_challenge_method")
-		if method == "" {
-			method = "S256"
-		}
+		method = cmp.Or(method, "S256")
 		responseType := form.Get("response_type")
 		if clientID == "" || redirectURI == "" || challenge == "" {
 			writeOAuthError(w, http.StatusBadRequest, "invalid_request", "code_challenge and redirect_uri required")
@@ -284,9 +281,7 @@ func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 			writeOAuthError(w, http.StatusBadRequest, "invalid_scope", err.Error())
 			return
 		}
-		if responseType == "" {
-			responseType = "code"
-		}
+		responseType = cmp.Or(responseType, "code")
 		request = PARRequest{
 			ClientID:            clientID,
 			ClientAuthMethod:    metadata.TokenEndpointAuthMethod,
@@ -363,9 +358,7 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 	}
 	formClient := form.Get("client_id")
 	if assertedClient != "" {
-		if formClient == "" {
-			formClient = assertedClient
-		}
+		formClient = cmp.Or(formClient, assertedClient)
 		if formClient != assertedClient {
 			writeOAuthError(w, http.StatusUnauthorized, "invalid_client", "")
 			return

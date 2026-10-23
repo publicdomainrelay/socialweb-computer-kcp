@@ -1,6 +1,7 @@
 package oauth
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/bluesky-social/indigo/util/ssrf"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 )
 
@@ -217,9 +219,7 @@ func (r *ClientMetadataResolver) Resolve(ctx context.Context, clientID string) (
 	}
 
 	ttl := r.CacheTTL
-	if ttl <= 0 {
-		ttl = DefaultClientMetadataTTL
-	}
+	ttl = opt.Positive(ttl, DefaultClientMetadataTTL)
 	r.cache.SetTTL(clientID, metadata, ttl)
 	return metadata, nil
 }
@@ -253,9 +253,7 @@ func localhostClientMetadata(clientID string) (*ClientMetadata, error) {
 		}
 	}
 	scope := query.Get("scope")
-	if scope == "" {
-		scope = ScopeAtproto
-	}
+	scope = cmp.Or(scope, ScopeAtproto)
 	native := "native"
 	metadata := &ClientMetadata{
 		ClientID:                clientID,

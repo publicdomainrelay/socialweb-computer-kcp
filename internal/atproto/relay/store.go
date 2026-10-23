@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"sort"
 	"sync"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 type HostState string
@@ -135,9 +137,7 @@ func (s *MemoryStore) ListCollection(collection, cursor string, limit int) ([]st
 			}
 		}
 	}
-	if limit <= 0 {
-		limit = 50
-	}
+	limit = opt.Positive(limit, 50)
 	end := min(start+limit, len(all))
 	page := append([]string{}, all[start:end]...)
 	next := ""

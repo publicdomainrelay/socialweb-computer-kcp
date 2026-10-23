@@ -1,6 +1,7 @@
 package ingress
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -720,9 +721,7 @@ type TunnelOptions struct {
 
 func TunnelOverRelay(ctx context.Context, opts TunnelOptions, readable io.Reader, writable io.Writer) error {
 	nsid := opts.NSID
-	if nsid == "" {
-		nsid = TunnelNSID
-	}
+	nsid = cmp.Or(nsid, TunnelNSID)
 	host := opts.SubscriberSubdomain + "." + opts.IngressProxyHost
 	scheme := "wss"
 	if opts.InsecureHTTP {
@@ -808,9 +807,7 @@ func NewCaller(ctx context.Context, cfg CallerConfig) (*Caller, error) {
 		return nil, errors.New("ingress: subscriber DID or subdomain required")
 	}
 	cfg.SubscriberSubdomain = subdomain
-	if cfg.NSID == "" {
-		cfg.NSID = "com.atproto.sync.subscribeRepos"
-	}
+	cfg.NSID = cmp.Or(cfg.NSID, "com.atproto.sync.subscribeRepos")
 	c := &Caller{cfg: cfg}
 	c.ctx, c.cancel = context.WithCancel(ctx)
 	if err := c.connect(); err != nil {

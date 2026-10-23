@@ -1,6 +1,7 @@
 package oauthclient
 
 import (
+	"cmp"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -109,8 +110,6 @@ func DPoPHTU(raw string) (string, bool) {
 		host += ":" + port
 	}
 	path := parsed.EscapedPath()
-	if path == "" {
-		path = "/"
-	}
+	path = cmp.Or(path, "/")
 	return scheme + "://" + host + path, true
 }

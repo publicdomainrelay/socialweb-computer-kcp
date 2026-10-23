@@ -1,6 +1,7 @@
 package market
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -590,9 +591,7 @@ func NewDirectoryKeyLister(dir identity.Directory) KeysForDID {
 }
 
 func AttestationVerificationMethod(controller, keypairDID, fragment string) map[string]any {
-	if fragment == "" {
-		fragment = "attestation"
-	}
+	fragment = cmp.Or(fragment, "attestation")
 	return map[string]any{
 		"id":                 controller + "#" + fragment,
 		"type":               "Multikey",

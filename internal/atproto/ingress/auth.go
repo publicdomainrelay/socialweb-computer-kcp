@@ -15,6 +15,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/didkey"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 var serviceAuthMethods = []string{"ES256K", "ES256"}
@@ -130,8 +131,6 @@ func SignServiceAuth(priv atcrypto.PrivateKey, iss, aud, lxm string, ttl time.Du
 	if err != nil {
 		return "", err
 	}
-	if ttl <= 0 {
-		ttl = 5 * time.Minute
-	}
+	ttl = opt.Positive(ttl, 5*time.Minute)
 	return auth.SignServiceAuth(syntax.DID(iss), aud, ttl, &nsid, priv)
 }

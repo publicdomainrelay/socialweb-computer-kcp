@@ -4,6 +4,7 @@ import (
 	"sync"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 const (
@@ -24,9 +25,7 @@ type Sequencer struct {
 }
 
 func NewSequencer(maxBacklog int) *Sequencer {
-	if maxBacklog <= 0 {
-		maxBacklog = DefaultMaxBacklog
-	}
+	maxBacklog = opt.Positive(maxBacklog, DefaultMaxBacklog)
 	return &Sequencer{
 		max:      maxBacklog,
 		maxBytes: DefaultMaxBacklogBytes,

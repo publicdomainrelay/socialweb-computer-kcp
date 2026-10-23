@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -84,12 +85,8 @@ type Relay struct {
 }
 
 func New(cfg Config) *Relay {
-	if cfg.Hostname == "" {
-		cfg.Hostname = "localhost"
-	}
-	if cfg.Version == "" {
-		cfg.Version = "0.0.0"
-	}
+	cfg.Hostname = cmp.Or(cfg.Hostname, "localhost")
+	cfg.Version = cmp.Or(cfg.Version, "0.0.0")
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}

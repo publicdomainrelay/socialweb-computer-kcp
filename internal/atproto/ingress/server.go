@@ -1,6 +1,7 @@
 package ingress
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -17,6 +18,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 var (
@@ -144,21 +146,11 @@ func NewServer(cfg Config) (*Server, error) {
 	if cfg.Hostname == "" {
 		return nil, errors.New("ingress: hostname is required")
 	}
-	if cfg.ServiceID == "" {
-		cfg.ServiceID = DefaultServiceID
-	}
-	if cfg.RelayTimeout <= 0 {
-		cfg.RelayTimeout = 30 * time.Second
-	}
-	if cfg.KeepaliveInterval <= 0 {
-		cfg.KeepaliveInterval = 5 * time.Second
-	}
-	if cfg.KeepaliveTimeout <= 0 {
-		cfg.KeepaliveTimeout = 5 * time.Second
-	}
-	if cfg.NonceTTL <= 0 {
-		cfg.NonceTTL = 60 * time.Second
-	}
+	cfg.ServiceID = cmp.Or(cfg.ServiceID, DefaultServiceID)
+	cfg.RelayTimeout = opt.Positive(cfg.RelayTimeout, 30*time.Second)
+	cfg.KeepaliveInterval = opt.Positive(cfg.KeepaliveInterval, 5*time.Second)
+	cfg.KeepaliveTimeout = opt.Positive(cfg.KeepaliveTimeout, 5*time.Second)
+	cfg.NonceTTL = opt.Positive(cfg.NonceTTL, 60*time.Second)
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
@@ -494,9 +486,7 @@ func (s *Server) handlePeerFrame(p *peer, msg frame) {
 			return
 		}
 		code := msg.Code
-		if code == 0 {
-			code = 1000
-		}
+		code = cmp.Or(code, 1000)
 		sub.closeCaller(code, msg.Reason)
 	}
 }
@@ -830,17 +820,13 @@ func (s *Server) handleForward(w http.ResponseWriter, req *http.Request, subdoma
 	}
 
 	contentType := result.ContentType
-	if contentType == "" {
-		contentType = "application/json"
-	}
+	contentType = cmp.Or(contentType, "application/json")
 	w.Header().Set("Content-Type", contentType)
 	for k, v := range result.Headers {
 		w.Header().Set(k, v)
 	}
 	status := result.Status
-	if status == 0 {
-		status = http.StatusOK
-	}
+	status = cmp.Or(status, http.StatusOK)
 	w.WriteHeader(status)
 	if len(result.Body) > 0 {
 		var str string

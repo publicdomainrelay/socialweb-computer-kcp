@@ -1,6 +1,7 @@
 package pdsclient
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -89,9 +90,7 @@ func openWebSocketStream(ctx context.Context, dialer *websocket.Dialer, rawURL s
 	if err != nil {
 		if response != nil {
 			message := http.StatusText(response.StatusCode)
-			if message == "" {
-				message = "websocket handshake failed"
-			}
+			message = cmp.Or(message, "websocket handshake failed")
 			return nil, &XRPCError{StatusCode: response.StatusCode, Code: "WebSocketHandshake", Message: message}
 		}
 		return nil, fmt.Errorf("pdsclient: websocket dial: %w", err)
@@ -369,12 +368,8 @@ func decodeRepoFrame(data []byte) (RepoEvent, bool, error) {
 		_ = cbor.Unmarshal(rest, &body)
 		code := strings.TrimSpace(body.Error)
 		message := strings.TrimSpace(body.Message)
-		if code == "" {
-			code = "StreamError"
-		}
-		if message == "" {
-			message = "stream error"
-		}
+		code = cmp.Or(code, "StreamError")
+		message = cmp.Or(message, "stream error")
 		return RepoEvent{}, false, &XRPCError{Code: code, Message: message}
 	}
 	if header.T != "" && header.T != "#commit" {

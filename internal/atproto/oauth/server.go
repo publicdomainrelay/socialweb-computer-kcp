@@ -18,6 +18,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/serviceauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 const (
@@ -89,24 +90,12 @@ func New(cfg Config) (*Server, error) {
 	if cfg.Accounts == nil || cfg.Sessions == nil || cfg.Codes == nil || cfg.Tokens == nil || cfg.PARs == nil {
 		return nil, fmt.Errorf("oauth: all stores are required")
 	}
-	if cfg.AccessTokenTTL <= 0 {
-		cfg.AccessTokenTTL = DefaultAccessTokenTTL
-	}
-	if cfg.RefreshTokenTTL <= 0 {
-		cfg.RefreshTokenTTL = DefaultRefreshTokenTTL
-	}
-	if cfg.AuthorizationCodeTTL <= 0 {
-		cfg.AuthorizationCodeTTL = DefaultAuthorizationCodeTTL
-	}
-	if cfg.PARTTL <= 0 {
-		cfg.PARTTL = DefaultPARTTL
-	}
-	if cfg.ClientMetadataTTL <= 0 {
-		cfg.ClientMetadataTTL = DefaultClientMetadataTTL
-	}
-	if cfg.DPoPLeeway <= 0 {
-		cfg.DPoPLeeway = DefaultDPoPLeeway
-	}
+	cfg.AccessTokenTTL = opt.Positive(cfg.AccessTokenTTL, DefaultAccessTokenTTL)
+	cfg.RefreshTokenTTL = opt.Positive(cfg.RefreshTokenTTL, DefaultRefreshTokenTTL)
+	cfg.AuthorizationCodeTTL = opt.Positive(cfg.AuthorizationCodeTTL, DefaultAuthorizationCodeTTL)
+	cfg.PARTTL = opt.Positive(cfg.PARTTL, DefaultPARTTL)
+	cfg.ClientMetadataTTL = opt.Positive(cfg.ClientMetadataTTL, DefaultClientMetadataTTL)
+	cfg.DPoPLeeway = opt.Positive(cfg.DPoPLeeway, DefaultDPoPLeeway)
 	if cfg.Nonces == nil {
 		cfg.Nonces = NewMemoryNonceStore()
 	}

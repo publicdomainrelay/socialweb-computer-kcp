@@ -1,6 +1,7 @@
 package plc
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -48,9 +49,7 @@ func NewServer(opts Options) *Server {
 		store = NewMemoryStore()
 	}
 	version := opts.Version
-	if version == "" {
-		version = "0.1.0"
-	}
+	version = cmp.Or(version, "0.1.0")
 	s := &Server{store: store, version: version, verifySig: opts.VerifySignature}
 	if s.verifySig == nil {
 		s.verifySig = func(ctx context.Context, did string, data, sig []byte) (bool, error) {

@@ -2,6 +2,7 @@ package pdsclient
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"github.com/bluesky-social/indigo/atproto/atdata"
 	"github.com/bluesky-social/indigo/atproto/syntax"
 	"github.com/ipfs/go-cid"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 const (
@@ -82,9 +84,7 @@ type xrpcClient struct {
 }
 
 func newXRPCClient(base *url.URL, httpClient *http.Client, tokens TokenSource, dpop DPoPSource, timeout time.Duration) *xrpcClient {
-	if timeout <= 0 {
-		timeout = defaultCallTimeout
-	}
+	timeout = opt.Positive(timeout, defaultCallTimeout)
 	if dpop == nil {
 		if combined, ok := tokens.(DPoPSource); ok {
 			dpop = combined
@@ -267,9 +267,7 @@ func checkXRPCResponse(response *http.Response) error {
 	_ = json.NewDecoder(io.LimitReader(response.Body, maxErrorBodyBytes)).Decode(&body)
 	code := strings.TrimSpace(body.Error)
 	message := strings.TrimSpace(body.Message)
-	if code == "" {
-		code = "HTTPError"
-	}
+	code = cmp.Or(code, "HTTPError")
 	if message == "" {
 		message = http.StatusText(response.StatusCode)
 	}
