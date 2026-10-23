@@ -138,10 +138,20 @@ func (h *Host) Describe(ctx context.Context) (pds.Info, error) {
 }
 
 func (h *Host) Repo(did string) (*reporemote.Repo, error) {
-	if h.auth == nil {
+	auth := h.auth
+	if auth == nil {
+		if client, ok := h.held(did); ok {
+			held, err := client.Credential()
+			if err != nil {
+				return nil, err
+			}
+			auth = held
+		}
+	}
+	if auth == nil {
 		return nil, fmt.Errorf("%w: the RemotePDS holds no credentials for %s", pdsclient.ErrAuthenticationRequired, did)
 	}
-	return reporemote.New(reporemote.Config{DID: did, Transport: h, Auth: h.auth, Timeout: h.timeout})
+	return reporemote.New(reporemote.Config{DID: did, Transport: h, Auth: auth, Timeout: h.timeout})
 }
 
 func (h *Host) Accounts(scope []string) *Accounts {

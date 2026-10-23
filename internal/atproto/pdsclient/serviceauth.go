@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
 )
 
 func (b *basePDS) ServiceAuth(ctx context.Context, audience, lxm string, expires time.Time) (string, error) {
@@ -35,4 +37,8 @@ func (b *basePDS) ServiceAuth(ctx context.Context, audience, lxm string, expires
 		return "", fmt.Errorf("%w: getServiceAuth returned no token", ErrUnexpectedResponse)
 	}
 	return token, nil
+}
+
+func (b *basePDS) Credential() (xrpc.Auth, error) {
+	return b.client.credential()
 }
