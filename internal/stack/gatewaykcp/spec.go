@@ -122,6 +122,13 @@ func Spec(s v1alpha1.GatewaySpec, profile string, environ []string) v1alpha1.Gat
 			s.WebAppFront = DefaultWebAppFront
 		}
 	}
+	if len(s.Identity.ApprovedAssociations) == 0 {
+		for did := range strings.SplitSeq(e.get("SOCIALWEB_GATEWAY_APPROVED_ASSOCIATIONS"), ",") {
+			if did = strings.TrimSpace(did); did != "" && !slices.Contains(s.Identity.ApprovedAssociations, did) {
+				s.Identity.ApprovedAssociations = append(s.Identity.ApprovedAssociations, did)
+			}
+		}
+	}
 	s.Options = slices.Clone(s.Options)
 	if !hasOption(s, OptionGatewayAudience) {
 		first, _, _ := strings.Cut(e.get("SOCIALWEB_GATEWAY_AUDIENCES"), ",")
