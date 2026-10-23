@@ -27,8 +27,6 @@ import (
 
 const (
 	heldContractTTLSeconds = 691200
-
-	sessionEventPollPeriod = 500 * time.Millisecond
 )
 
 var vmNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`)
@@ -663,7 +661,7 @@ func (q *Requester) provisionSession(ctx context.Context, vmName, policyName str
 	if policyRef != nil {
 		state.Policy = &commonv1.StrongRef{URI: policyRef.URI, CID: policyRef.CID}
 	}
-	address, hostKeys, termination, err := q.sessionGuest(ctx, receipt.URI, winner.DID)
+	address, hostKeys, termination, err := q.sessionGuest(ctx, receipt.URI)
 	if err != nil {
 		return nil, err
 	}
@@ -775,7 +773,7 @@ func (q *Requester) sessionBestBid(ctx context.Context, bids map[string]BidRecor
 	return best
 }
 
-func (q *Requester) sessionGuest(ctx context.Context, receiptURI, bidderDID string) (string, []v1alpha1.ComputeVMHostKey, *v1alpha1.ContractTermination, error) {
+func (q *Requester) sessionGuest(ctx context.Context, receiptURI string) (string, []v1alpha1.ComputeVMHostKey, *v1alpha1.ContractTermination, error) {
 	events, pending, closeEvents := q.registerEventSink(receiptURI)
 	defer closeEvents()
 	seen := map[string]bool{}
@@ -805,8 +803,9 @@ func (q *Requester) sessionGuest(ctx context.Context, receiptURI, bidderDID stri
 	_ = slices.ContainsFunc(pending, handle)
 	deadline := time.NewTimer(DefaultVMReadyTimeout)
 	defer deadline.Stop()
-	poll := time.NewTicker(sessionEventPollPeriod)
-	defer poll.Stop()
+	var retry eventRetry
+	defer retry.stop()
+	retryC := retry.after(q.drainEvents(ctx, "", receiptURI))
 	for {
 		if termination != nil {
 			return "", nil, termination, nil
@@ -821,14 +820,8 @@ func (q *Requester) sessionGuest(ctx context.Context, receiptURI, bidderDID stri
 			return "", nil, nil, errors.New("the guest did not report onNetwork and hostKeys within " + DefaultVMReadyTimeout.String())
 		case event := <-events:
 			handle(event)
-		case <-poll.C:
-			found, err := q.market.FindEvents(ctx, bidderDID, receiptURI)
-			if err != nil {
-				continue
-			}
-			for _, event := range found {
-				handle(event)
-			}
+		case <-retryC:
+			retryC = retry.after(q.drainEvents(ctx, "", receiptURI))
 		}
 	}
 }

@@ -107,11 +107,7 @@ type MarketClient interface {
 
 	SubmitEvent(ctx context.Context, bidder Bidder, event SubmitEventRequest) (int, error)
 
-	FindBids(ctx context.Context, bidderDID, rfpURI string) ([]BidRecord, error)
-
 	FindReceipt(ctx context.Context, bidderDID, acceptURI string) (*market.ResolvedRecord, error)
-
-	FindEvents(ctx context.Context, bidderDID, receiptURI string) ([]MarketEvent, error)
 
 	FindTerminations(ctx context.Context, bidderDID, receiptURI string) ([]MarketEvent, error)
 }
@@ -430,35 +426,6 @@ func (m *HTTPMarket) SubmitEvent(ctx context.Context, bidder Bidder, event Submi
 	return status, err
 }
 
-func (m *HTTPMarket) FindBids(ctx context.Context, bidderDID, rfpURI string) ([]BidRecord, error) {
-	if m == nil || m.Reader == nil {
-		return nil, errors.New("requester: the market has no record reader")
-	}
-	out := []BidRecord{}
-	for _, collection := range []string{market.BidNSID, market.BidsFreeNSID, market.BidsX402NSID} {
-		records, err := listAll(ctx, m.Reader, bidderDID, collection, 100)
-		if err != nil {
-			continue
-		}
-		for _, record := range records {
-			rfp, _ := record.Value["rfp"].(map[string]any)
-			if rfp == nil || stringOf(rfp["uri"]) != rfpURI {
-				continue
-			}
-			bid := BidRecord{DID: bidderDID, URI: record.URI, CID: record.CID, Record: record.Value, ArrivedAt: time.Now()}
-			if collection == market.BidsFreeNSID {
-				bid.Free = true
-				bid.Reason = stringOf(record.Value["reason"])
-			}
-			if collection == market.BidsX402NSID {
-				bid.Cost = numberValue(record.Value["cost"])
-			}
-			out = append(out, bid)
-		}
-	}
-	return dedupeBids(out), nil
-}
-
 func (m *HTTPMarket) FindReceipt(ctx context.Context, bidderDID, acceptURI string) (*market.ResolvedRecord, error) {
 	if m == nil || m.Reader == nil {
 		return nil, errors.New("requester: the market has no record reader")
@@ -476,10 +443,6 @@ func (m *HTTPMarket) FindReceipt(ctx context.Context, bidderDID, acceptURI strin
 		return &found, nil
 	}
 	return nil, nil
-}
-
-func (m *HTTPMarket) FindEvents(ctx context.Context, bidderDID, receiptURI string) ([]MarketEvent, error) {
-	return m.findEvents(ctx, bidderDID, receiptURI, "")
 }
 
 func (m *HTTPMarket) FindTerminations(ctx context.Context, bidderDID, receiptURI string) ([]MarketEvent, error) {
