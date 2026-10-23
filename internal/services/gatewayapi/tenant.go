@@ -22,7 +22,11 @@ func newTenantAPI(stateDir string) (gateway.TenantAPI, error) {
 	if stateDir == "" {
 		return nil, nil
 	}
-	return tenantapply.New(func(_ context.Context, did, cluster string) (*rest.Config, error) {
+	return tenantapply.New(ownerCredentials(stateDir))
+}
+
+func ownerCredentials(stateDir string) func(context.Context, string, string) (*rest.Config, error) {
+	return func(_ context.Context, did, cluster string) (*rest.Config, error) {
 		if did == "" || cluster == "" {
 			return nil, fmt.Errorf("an owner credential is for one cluster of one account, and this lookup names account %q and cluster %q", did, cluster)
 		}
@@ -42,5 +46,5 @@ func newTenantAPI(stateDir string) (gateway.TenantAPI, error) {
 		}
 		return clusterprovider.MintTenantCredentialForDataDirAs(dir, "https://"+front.Address, did,
 			[]string{kcpclient.OwnersGroup}, ownerCredentialValidity)
-	})
+	}
 }

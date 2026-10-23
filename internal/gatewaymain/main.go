@@ -78,7 +78,8 @@ func buildDeps(cfg Config) (Deps, error) {
 		return Deps{}, fmt.Errorf("reading %s: %w", envKCPKubeconfig, err)
 	}
 	kcpserver.FollowTokenFile(kcpRestConfig)
-	tenantAPI, err := tenantapply.New(ownerCredentials(cfg.ClusterStateDir))
+	owners := ownerCredentials(cfg.ClusterStateDir)
+	tenantAPI, err := tenantapply.New(owners)
 	if err != nil {
 		return Deps{}, err
 	}
@@ -90,6 +91,7 @@ func buildDeps(cfg Config) (Deps, error) {
 		PublicHost:     cfg.KCPPublicHost,
 		RestConfig:     kcpRestConfig,
 		Kubeconfigs:    certs,
+		Tenant:         kcpclient.TenantConfig(owners),
 		NodeClaimAgent: cfg.NodeClaimAgent,
 		NodeClaimQuota: cfg.NodeClaimQuota,
 
