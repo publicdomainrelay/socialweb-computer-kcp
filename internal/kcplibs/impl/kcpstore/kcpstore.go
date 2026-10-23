@@ -20,14 +20,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/clientlimit"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/ref"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/statuspatch"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/kcp"
-)
-
-var (
-	mergePatch = types.MergePatchType
-
-	jsonPatch = types.JSONPatchType
 )
 
 func IsNotFound(err error) bool {
@@ -252,32 +245,15 @@ func (r *Resource[T]) Delete(ctx context.Context, target ref.Ref) error {
 	return nil
 }
 
-func (r *Resource[T]) PatchStatus(ctx context.Context, target ref.Ref, patch []byte) error {
+func (r *Resource[T]) ApplyStatus(ctx context.Context, target ref.Ref, body []byte, fieldManager string) error {
 	c, err := r.client(target.LogicalCluster)
 	if err != nil {
 		return err
 	}
-	body, err := statuspatch.WithResourceVersion(patch, target.ResourceVersion)
+	response, err := r.withNamespace(c.Patch(types.ApplyPatchType), target.Namespace).SubResource("status").Resource(r.gvr.Resource).
+		Name(target.Name).Param("fieldManager", fieldManager).Param("force", "true").Body(body).Do(ctx).Raw()
 	if err != nil {
-		return err
-	}
-	response, err := r.withNamespace(c.Patch(mergePatch), target.Namespace).SubResource("status").Resource(r.gvr.Resource).
-		Name(target.Name).Body(body).Do(ctx).Raw()
-	if err != nil {
-		return fmt.Errorf("kcpstore: write %s status for %s in %s: %w%s", r.gvr.Resource, target.Name, target.LogicalCluster, err, ResponseDetail(response))
-	}
-	return nil
-}
-
-func (r *Resource[T]) PatchJSON(ctx context.Context, target ref.Ref, patch []byte) error {
-	c, err := r.client(target.LogicalCluster)
-	if err != nil {
-		return err
-	}
-	response, err := r.withNamespace(c.Patch(jsonPatch), target.Namespace).Resource(r.gvr.Resource).
-		Name(target.Name).Body(patch).Do(ctx).Raw()
-	if err != nil {
-		return fmt.Errorf("kcpstore: patch %s %s in %s: %w%s", r.gvr.Resource, target.Name, target.LogicalCluster, err, ResponseDetail(response))
+		return fmt.Errorf("kcpstore: apply %s status for %s in %s: %w%s", r.gvr.Resource, target.Name, target.LogicalCluster, err, ResponseDetail(response))
 	}
 	return nil
 }
@@ -293,61 +269,6 @@ func (r *Resource[T]) Apply(ctx context.Context, target ref.Ref, body []byte, fi
 		return fmt.Errorf("kcpstore: apply %s %s in %s: %w%s", r.gvr.Resource, target.Name, target.LogicalCluster, err, ResponseDetail(response))
 	}
 	return nil
-}
-
-func (r *Resource[T]) PatchMerge(ctx context.Context, target ref.Ref, patch []byte) error {
-	c, err := r.client(target.LogicalCluster)
-	if err != nil {
-		return err
-	}
-	response, err := r.withNamespace(c.Patch(mergePatch), target.Namespace).Resource(r.gvr.Resource).
-		Name(target.Name).Body(patch).Do(ctx).Raw()
-	if err != nil {
-		return fmt.Errorf("kcpstore: patch %s %s in %s: %w%s", r.gvr.Resource, target.Name, target.LogicalCluster, err, ResponseDetail(response))
-	}
-	return nil
-}
-
-func (r *Resource[T]) Finalizers(ctx context.Context, target ref.Ref) ([]string, error) {
-	raw, err := r.GetRaw(ctx, target)
-	if err != nil {
-		return nil, err
-	}
-	finalizers, err := statuspatch.FinalizersOf(raw)
-	if err != nil {
-		return nil, fmt.Errorf("kcpstore: %w", err)
-	}
-	return finalizers, nil
-}
-
-func (r *Resource[T]) RemoveFinalizer(ctx context.Context, target ref.Ref, finalizer string) error {
-	finalizers, err := r.Finalizers(ctx, target)
-	if err != nil {
-		if IsNotFound(err) {
-			return nil
-		}
-		return err
-	}
-	return r.RemoveKnownFinalizer(ctx, target, finalizers, finalizer)
-}
-
-func (r *Resource[T]) RemoveKnownFinalizer(ctx context.Context, target ref.Ref, current []string, finalizer string) error {
-	patch, err := statuspatch.FinalizerRemove(current, finalizer)
-	if err != nil {
-		return err
-	}
-	if patch == nil {
-		return nil
-	}
-	return r.PatchJSON(ctx, target, patch)
-}
-
-func (r *Resource[T]) AddFinalizer(ctx context.Context, target ref.Ref, finalizers []string) error {
-	patch, err := statuspatch.FinalizerAdd(finalizers)
-	if err != nil {
-		return err
-	}
-	return r.PatchJSON(ctx, target, patch)
 }
 
 func decode[T any](raw []byte) (*T, error) {

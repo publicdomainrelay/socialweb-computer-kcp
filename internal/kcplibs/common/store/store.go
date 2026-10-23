@@ -32,9 +32,7 @@ type Writer[T any] interface {
 
 	Delete(ctx context.Context, r ref.Ref) error
 
-	PatchStatus(ctx context.Context, r ref.Ref, patch []byte) error
-
-	RemoveFinalizer(ctx context.Context, r ref.Ref, finalizer string) error
+	ApplyStatus(ctx context.Context, r ref.Ref, body []byte, fieldManager string) error
 }
 
 type Resource[T any] interface {
