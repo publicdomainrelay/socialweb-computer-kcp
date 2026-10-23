@@ -490,16 +490,12 @@ func (r *contractRunner) requestOnce(ctx context.Context) (bool, error) {
 		return false, ErrParticipationSuspended
 	}
 	if !found {
-		acceptRecord, err := market.BuildAccept(market.AcceptOptions{
+		accept, err = market.CreateAcceptAt(ctx, q.repo, q.repoDID, acceptRKey, market.AcceptOptions{
 			RFP:         market.RecordRef{URI: rfpURI, CID: rfpCID},
 			Bid:         market.RecordRef{URI: winner.URI, CID: winner.CID},
 			SubmitEvent: q.submitEventRef(),
 			CreatedAt:   q.nowISO(),
-		})
-		if err != nil {
-			return false, err
-		}
-		accept, err = market.CreateSignedRecordAt(ctx, q.repo, q.repoDID, market.AcceptNSID, acceptRKey, acceptRecord, q.signer)
+		}, q.signer)
 		if err != nil {
 			return false, fmt.Errorf("create the market.accept record: %w", err)
 		}

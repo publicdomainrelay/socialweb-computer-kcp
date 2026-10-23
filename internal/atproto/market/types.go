@@ -36,12 +36,6 @@ func (e *ContractGraphError) Is(target error) bool {
 	return target == ErrContractGraph
 }
 
-type StrongRef struct {
-	Type string `json:"$type,omitempty"`
-	URI  string `json:"uri"`
-	CID  string `json:"cid"`
-}
-
 func NewStrongRef(uri, cid string) StrongRef {
 	return StrongRef{Type: StrongRefNSID, URI: uri, CID: cid}
 }

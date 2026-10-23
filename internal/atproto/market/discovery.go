@@ -256,8 +256,6 @@ func ListOfferings(ctx context.Context, lister RecordLister, did string) ([]Offe
 			if err != nil {
 				return nil, err
 			}
-			offering.URI = rec.URI
-			offering.CID = rec.CID
 			out = append(out, *offering)
 		}
 		if page.Cursor == "" || len(page.Records) == 0 {

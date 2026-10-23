@@ -103,14 +103,13 @@ func (q *Requester) bindSignerKey(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("requester: the signer key: %w", err)
 	}
-	record := market.BuildBadgeBlueKeysRecord(market.BadgeBlueKeysRecordOptions{
+	rkey := market.BadgeBlueKeysRkey(q.repoDID, key)
+	if _, err := market.CreateBadgeBlueKeysRecord(ctx, q.repo, market.BadgeBlueKeysRecordOptions{
 		DID:       q.repoDID,
 		KeyID:     key,
 		Service:   ownerSessionSigningService,
 		CreatedAt: q.nowISO(),
-	})
-	rkey := market.BadgeBlueKeysRkey(q.repoDID, key)
-	if _, err := q.repo.PutRecord(ctx, q.repoDID, market.BadgeBlueKeysNSID, rkey, record); err != nil {
+	}); err != nil {
 		return fmt.Errorf("requester: publishing the signer key binding: %w", err)
 	}
 	q.log.Info("requester_signer_key_bound", "did", q.repoDID, "key", key, "rkey", rkey)

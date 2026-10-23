@@ -120,7 +120,7 @@ func (b *Bidder) ensureOffering(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if _, err := b.records.PutRecord(ctx, b.cfg.DID, market.OfferingNSID, participant.LastSegment(rec.URI), record); err != nil {
+		if _, err := b.putRecord(ctx, participant.LastSegment(rec.URI), record); err != nil {
 			return err
 		}
 		b.setOffering(rec.URI)
@@ -131,7 +131,7 @@ func (b *Bidder) ensureOffering(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	ref, err := b.records.PutRecord(ctx, b.cfg.DID, market.OfferingNSID, syntax.NewTIDNow(0).String(), record)
+	ref, err := b.putRecord(ctx, syntax.NewTIDNow(0).String(), record)
 	if err != nil {
 		return err
 	}
@@ -166,7 +166,7 @@ func (b *Bidder) touchOffering(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if _, err := b.records.PutRecord(ctx, b.cfg.DID, market.OfferingNSID, participant.LastSegment(rec.URI), record); err != nil {
+	if _, err := b.putRecord(ctx, participant.LastSegment(rec.URI), record); err != nil {
 		return err
 	}
 	b.log.Info("the bidder offering is refreshed for the relay", "offering", rec.URI)
@@ -184,8 +184,16 @@ func (b *Bidder) beat(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	_, err = b.records.PutRecord(ctx, b.cfg.DID, market.HeartbeatNSID, market.HeartbeatRKey, record)
+	_, err = b.putRecord(ctx, market.HeartbeatRKey, record)
 	return err
+}
+
+func (b *Bidder) putRecord(ctx context.Context, rkey string, record market.Record) (market.StrongRef, error) {
+	value, err := market.EncodeRecord(record)
+	if err != nil {
+		return market.StrongRef{}, err
+	}
+	return b.records.PutRecord(ctx, b.cfg.DID, record.NSID(), rkey, value)
 }
 
 func (b *Bidder) verifyVisibility(ctx context.Context) {
