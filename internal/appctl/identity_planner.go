@@ -79,23 +79,43 @@ func (p accountPlan) componentPdsRef() *v1alpha1.ComponentRef {
 	return p.PdsRef
 }
 
-func (p accountPlan) repoRef() *v1alpha1.RepoRef {
+type accountBinding struct {
+	DID string
+
+	PDSRef *v1alpha1.RepoRef
+
+	AuthRef *v1alpha1.RepoRef
+
+	RemotePDS *pdsv1alpha1.RemotePDS
+}
+
+func (p accountPlan) usesAssociation() bool {
+	return p.Local
+}
+
+func (p accountPlan) binding(did, pdsURL string) (accountBinding, error) {
+	binding := accountBinding{DID: strings.TrimSpace(did)}
 	if p.Local {
-		return &v1alpha1.RepoRef{Kind: ComponentKindPds, Name: PdsComponent}
+		binding.PDSRef = &v1alpha1.RepoRef{Kind: ComponentKindPds, Name: PdsComponent}
+		return binding, nil
+	}
+	if token := p.accessTokenPath(); token != "" {
+		binding.AuthRef = &v1alpha1.RepoRef{Kind: "Vault", Name: token}
 	}
 	if p.RemotePDS != nil && p.RemotePDS.Name != "" {
-		return &v1alpha1.RepoRef{Kind: "RemotePDS", Name: p.RemotePDS.Name}
+		binding.RemotePDS = p.RemotePDS
+	} else if p.PdsRef != nil && strings.EqualFold(p.PdsRef.Kind, "RemotePDS") && p.PdsRef.Name != "" {
+		binding.RemotePDS = &pdsv1alpha1.RemotePDS{ObjectMeta: metav1.ObjectMeta{Name: p.PdsRef.Name}}
 	}
-	if p.PdsRef != nil && p.PdsRef.Name != "" {
-		return &v1alpha1.RepoRef{Kind: p.PdsRef.Kind, Name: p.PdsRef.Name}
+	if url := firstNonEmptyString(p.PdsURL, p.Identity.PdsUrl, pdsURL); binding.RemotePDS == nil && url != "" {
+		binding.RemotePDS = &pdsv1alpha1.RemotePDS{ObjectMeta: metav1.ObjectMeta{Name: deterministicPdsName(url)},
+			Spec: pdsv1alpha1.RemotePDSSpec{URL: url, DID: pdsServiceDID(url)}}
 	}
-	if url := strings.TrimSpace(p.PdsURL); url != "" {
-		return &v1alpha1.RepoRef{Kind: "RemotePDS", Name: deterministicPdsName(url)}
+	if binding.RemotePDS != nil {
+		binding.PDSRef = &v1alpha1.RepoRef{Kind: "RemotePDS", Name: binding.RemotePDS.Name}
+		return binding, nil
 	}
-	if url := strings.TrimSpace(p.Identity.PdsUrl); url != "" {
-		return &v1alpha1.RepoRef{Kind: "RemotePDS", Name: deterministicPdsName(url)}
-	}
-	return nil
+	return accountBinding{}, errors.New("appctl: the existing-account repo names no PDS")
 }
 
 func deterministicPdsName(url string) string {
@@ -252,15 +272,6 @@ func (ctl *Controller) remotePDSRef(ctx context.Context, ws string, ref *v1alpha
 	return &object, nil
 }
 
-func oauthAccountMode(mode v1alpha1.MarketIdentityMode) bool {
-	switch mode {
-	case v1alpha1.MarketIdentityModeOAuthBrowser, v1alpha1.MarketIdentityModeOAuthQr, v1alpha1.MarketIdentityModeOAuthDelegated:
-		return true
-	default:
-		return false
-	}
-}
-
 func (ctl *Controller) deleteAssociationObjects(ctx context.Context, ws string) {
 	for _, gvr := range []schema.GroupVersionResource{AtprotoRecordGVR,
 		{Group: v1alpha1.GroupName, Version: v1alpha1.Version, Resource: "atprotorecordwatches"}} {
@@ -300,25 +311,27 @@ func firstNonEmptyString(values ...string) string {
 	return ""
 }
 
-func (ctl *Controller) ensureRemotePDS(ctx context.Context, ws, name, did, pdsURL string) *pdsv1alpha1.RemotePDS {
+func (ctl *Controller) ensureRemotePDS(ctx context.Context, ws string, desired *pdsv1alpha1.RemotePDS) *pdsv1alpha1.RemotePDS {
+	if desired == nil || strings.TrimSpace(desired.Name) == "" {
+		return nil
+	}
+	name := desired.Name
 	ri, err := ctl.client(ws, pdsv1alpha1.GroupVersion.WithResource("remotepds"))
 	if err != nil {
 		ctl.c.log().Warn("creating a RemotePDS", "name", name, "err", err.Error())
 		return nil
 	}
-	object := &pdsv1alpha1.RemotePDS{ObjectMeta: metav1.ObjectMeta{Name: name},
-		Spec: pdsv1alpha1.RemotePDSSpec{URL: pdsURL, DID: did}}
 	existing, err := ri.Get(ctx, name, metav1.GetOptions{})
 	if err == nil {
-		var out pdsv1alpha1.RemotePDS
-		if fromUnstructured(existing, &out) != nil {
+		var current pdsv1alpha1.RemotePDS
+		if fromUnstructured(existing, &current) != nil {
 			return nil
 		}
-		if strings.TrimRight(out.Spec.URL, "/") == strings.TrimRight(pdsURL, "/") && out.Spec.DID == did {
-			return &out
+		if strings.TrimRight(current.Spec.URL, "/") == strings.TrimRight(desired.Spec.URL, "/") && current.Spec.DID == desired.Spec.DID {
+			return &current
 		}
-		out.Spec.URL, out.Spec.DID = pdsURL, did
-		u, err := toUnstructured(&out, "RemotePDS")
+		current.Spec.URL, current.Spec.DID = desired.Spec.URL, desired.Spec.DID
+		u, err := toUnstructured(&current, "RemotePDS")
 		if err != nil {
 			return nil
 		}
@@ -339,7 +352,7 @@ func (ctl *Controller) ensureRemotePDS(ctx context.Context, ws, name, did, pdsUR
 		ctl.c.log().Warn("reading a RemotePDS", "name", name, "err", err.Error())
 		return nil
 	}
-	u, err := toUnstructured(object, "RemotePDS")
+	u, err := toUnstructured(desired, "RemotePDS")
 	if err != nil {
 		ctl.c.log().Warn("encoding a RemotePDS", "name", name, "err", err.Error())
 		return nil
@@ -356,28 +369,31 @@ func (ctl *Controller) ensureRemotePDS(ctx context.Context, ws, name, did, pdsUR
 			return &out
 		}
 	}
-	return object
+	return desired
 }
 
 func (ctl *Controller) ensureAccountRepo(ctx context.Context, ws, identityName string, plan accountPlan, did, pdsURL string) {
 	if plan.Local || strings.TrimSpace(did) == "" {
 		return
 	}
-	pdsURL = firstNonEmptyString(plan.PdsURL, plan.Identity.PdsUrl, pdsURL)
-	if plan.RemotePDS == nil && strings.TrimSpace(pdsURL) != "" {
-		plan.RemotePDS = ctl.ensureRemotePDS(ctx, ws, deterministicPdsName(pdsURL), pdsServiceDID(pdsURL), pdsURL)
-	}
-	plan.PdsURL = pdsURL
-	pdsRef := plan.repoRef()
-	if pdsRef == nil {
-		ctl.c.log().Warn("the existing-account repo has no PDS ref", "identity", identityName)
+	binding, err := plan.binding(did, pdsURL)
+	if err != nil {
+		ctl.c.log().Warn("the existing-account repo has no PDS ref", "identity", identityName, "err", err.Error())
 		return
 	}
-	if oauthAccountMode(plan.Mode) {
+	if binding.RemotePDS != nil {
+		ensured := ctl.ensureRemotePDS(ctx, ws, binding.RemotePDS)
+		if ensured == nil {
+			return
+		}
+		binding.RemotePDS = ensured
+		binding.PDSRef = &v1alpha1.RepoRef{Kind: "RemotePDS", Name: ensured.Name}
+	}
+	if !plan.usesAssociation() {
 		ctl.deleteAssociationObjects(ctx, ws)
 	}
-	spec := v1alpha1.AtprotoRepoSpec{DID: did, PdsRef: pdsRef,
+	spec := v1alpha1.AtprotoRepoSpec{DID: binding.DID, PdsRef: binding.PDSRef,
 		IdentityRef: &v1alpha1.RepoRef{Kind: "MarketIdentity", Name: identityName},
-		AuthRef:     &v1alpha1.RepoRef{Kind: "Vault", Name: plan.accessTokenPath()}}
-	ctl.ensureStatusObject(ctx, ws, statusstate.AtprotoRepoGVR, "AtprotoRepo", statusObjectName("repo", did), spec)
+		AuthRef:     binding.AuthRef}
+	ctl.ensureStatusObject(ctx, ws, statusstate.AtprotoRepoGVR, "AtprotoRepo", statusObjectName("repo", binding.DID), spec)
 }

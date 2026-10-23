@@ -759,7 +759,7 @@ func (ctl *Controller) reconcileBidder(ctx context.Context, u *unstructured.Unst
 		ctl.writeStatus(ctx, MarketBidderGVR, o.Name, st)
 		values := ctl.bidderInfraValues(o, stateRoot)
 		associationPhases := []string{"association-watch"}
-		if oauthAccountMode(plan.Mode) {
+		if !plan.usesAssociation() {
 			associationPhases = nil
 		}
 		if err := ctl.applyInfra(ctx, BidderSet, o.Spec.Profile, owner, values, associationPhases...); err != nil {
