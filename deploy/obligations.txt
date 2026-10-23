@@ -9,7 +9,7 @@ internal/devsup	server_linux.go:server.orphanKiller	ticker	OrphanScanInterval 1s
 internal/install	install.go:installer.wait	ticker	WaitReport constant	print elapsed progress to the operator; reads no state
 internal/install	system_linux.go:liveSystem.User	ticker	100ms constant, bounded by managerSocketWait 30s	wait for /run/user/<uid>/systemd/private after linger; its parent dir may not exist yet, so there is nothing to watch
 internal/market/bidder	offering.go:Bidder.serveMarket	ticker	spec.heartbeatIntervalSeconds; no ticker when <=0	write the market heartbeat record and refresh the offering once spec.offeringRefreshSeconds has elapsed; a liveness write has no event source
-internal/market/participant	crawl.go:Crawl.Run	ticker	participant.CrawlPeriod 10s; <=0 sends one crawl and runs no ticker	requestCrawl of the component PDS (Exposure svc-pds-pds-local) at each network relay; a relay offers no watch
+internal/market/participant	crawl.go:Crawl.Run	ticker	participant.CrawlPeriod 10s until a relay accepts the host, then participant.CrawlRefresh 10m; <=0 sends one crawl and runs no ticker	requestCrawl of the component PDS (Exposure svc-pds-pds-local) at each network relay; a relay offers no watch, and every accepted crawl replays the repo's commits to its subscribers
 internal/plcsweep	plcsweep.go:Sweeper.Run	ticker	DefaultInterval 1h; <=0 is ErrNoInterval and no ticker	resolve each worklist DID at the PLC directory; PLC has no per-DID watch
 internal/relay/local	relay.go:Relay.refresh	ticker	spec.crawlIntervalSeconds; no ticker when <=0	re-request a crawl of the upstream PDS hosts an operator names
 internal/xrpcserver	subscribe.go:Server.stream	ticker	pingEvery 30s constant	websocket ping to subscribeClusters subscribers

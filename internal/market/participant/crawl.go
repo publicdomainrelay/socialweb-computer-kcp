@@ -14,8 +14,16 @@ import (
 const (
 	CrawlPeriod = 10 * time.Second
 
+	CrawlRefresh = 10 * time.Minute
+
 	crawlTimeout = 10 * time.Second
 )
+
+type crawlState struct {
+	announced string
+
+	at time.Time
+}
 
 type Crawl struct {
 	Relays []string
@@ -38,15 +46,15 @@ func (c Crawl) Run(ctx context.Context) {
 		log.Warn("the PDS is not registered with a relay", "relays", len(c.Relays))
 		return
 	}
-	announced := ""
+	state := &crawlState{}
 	if c.Period <= 0 {
-		c.once(ctx, log, &announced)
+		c.once(ctx, log, state)
 		return
 	}
 	ticker := time.NewTicker(c.Period)
 	defer ticker.Stop()
 	for {
-		c.once(ctx, log, &announced)
+		c.once(ctx, log, state)
 		select {
 		case <-ctx.Done():
 			return
@@ -55,7 +63,7 @@ func (c Crawl) Run(ctx context.Context) {
 	}
 }
 
-func (c Crawl) once(ctx context.Context, log *slog.Logger, announced *string) {
+func (c Crawl) once(ctx context.Context, log *slog.Logger, state *crawlState) {
 	raw := strings.TrimSpace(c.Address())
 	if raw == "" {
 		return
@@ -65,6 +73,9 @@ func (c Crawl) once(ctx context.Context, log *slog.Logger, announced *string) {
 		log.Warn("the PDS Exposure has no URL", "url", raw)
 		return
 	}
+	if state.announced == parsed.Host && time.Since(state.at) < CrawlRefresh {
+		return
+	}
 	registered := false
 	for _, relay := range c.Relays {
 		if xrpc.RequestCrawl(ctx, &xrpc.Client{Host: relay, HTTP: &http.Client{Timeout: crawlTimeout}}, parsed.Host) == nil {
@@ -72,12 +83,12 @@ func (c Crawl) once(ctx context.Context, log *slog.Logger, announced *string) {
 		}
 	}
 	if !registered {
-		*announced = ""
+		state.announced = ""
 		return
 	}
-	if *announced == parsed.Host || c.Crawled == nil {
-		return
+	first := state.announced != parsed.Host
+	state.announced, state.at = parsed.Host, time.Now()
+	if first && c.Crawled != nil {
+		c.Crawled(ctx)
 	}
-	*announced = parsed.Host
-	c.Crawled(ctx)
 }
