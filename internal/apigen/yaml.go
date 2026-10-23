@@ -12,6 +12,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
 
 const (
@@ -179,10 +181,18 @@ func (m *Model) APIResourceSchema(r Resource) ([]byte, error) {
 		}
 		version = append(version, "additionalPrinterColumns", sequence(columns...))
 	}
+	metadata := []any{"name", str(r.SchemaName(m.Group, m.Version))}
+	if len(r.Contracts) > 0 {
+		var labels []any
+		for _, c := range r.Contracts {
+			labels = append(labels, commonv1.ContractLabel(c), str(commonv1.ContractVersion))
+		}
+		metadata = append(metadata, "labels", mapping(labels...))
+	}
 	doc := mapping(
 		"apiVersion", str(kcpSchemaAPIVersion),
 		"kind", str("APIResourceSchema"),
-		"metadata", mapping("name", str(r.SchemaName(m.Group, m.Version))),
+		"metadata", mapping(metadata...),
 		"spec", mapping(
 			"group", str(m.Group),
 			"names", mapping(

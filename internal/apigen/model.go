@@ -79,6 +79,7 @@ type Resource struct {
 	Schema         *Schema
 	PrinterColumns []v1alpha1.PrinterColumn
 	Conditions     bool
+	Contracts      []string
 }
 
 func (r Resource) SchemaName(group, version string) string {
@@ -120,7 +121,36 @@ func Build(root string) ([]*Model, error) {
 		}
 		models = append(models, m)
 	}
+	if err := checkContracts(models); err != nil {
+		return nil, err
+	}
 	return models, nil
+}
+
+func checkContracts(models []*Model) error {
+	abstract := map[string]*Schema{}
+	for _, m := range models {
+		for _, r := range m.Resources {
+			abstract[r.Plural] = r.Schema
+		}
+	}
+	var errs []error
+	for _, m := range models {
+		for _, r := range m.Resources {
+			for _, c := range r.Contracts {
+				root, ok := abstract[c]
+				if !ok {
+					errs = append(errs, fmt.Errorf("%s: contract %q names no resource", r.Kind, c))
+					continue
+				}
+				spec := root.property("spec")
+				if spec == nil || spec.Schema == nil || spec.Schema.property("backendRef") == nil {
+					errs = append(errs, fmt.Errorf("%s: contract %q is not an abstract kind: it has no spec.backendRef", r.Kind, c))
+				}
+			}
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func BuildGroup(root string, g Group) (*Model, error) {
@@ -173,6 +203,7 @@ func BuildGroup(root string, g Group) (*Model, error) {
 			Schema:         root,
 			PrinterColumns: r.PrinterColumns,
 			Conditions:     hasStatusConditions(reflect.TypeOf(r.Object)),
+			Contracts:      r.Contracts,
 		})
 	}
 	if err := errors.Join(b.errs...); err != nil {
