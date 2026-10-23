@@ -60,10 +60,10 @@ decisions:
     applyconfiguration-gen, kcp cluster-* generators or controller-gen.
     internal/apigen and its revision lock stay the schema source.
   comment_exception: >
-    AGENTS.md gains one exception to the no-comments rule: k8s code
-    generator markers ("// +k8s:deepcopy-gen=package" and
-    "// +groupName=") in api/**/doc.go only. Approved by the user on
-    2026-10-22.
+    The no-comments rule bans explanation, not function. Functional
+    comments that a tool reads (//go: directives, generated-code headers,
+    k8s code generator markers anywhere they are needed) are allowed and
+    carry no prose. Approved by the user on 2026-10-22.
   abstract_kinds: >
     A concept with two or more implementations is an abstract kind plus
     concrete kinds. Consumers ref only the abstract kind. The abstract kind

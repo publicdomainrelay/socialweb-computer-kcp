@@ -323,10 +323,11 @@ A prod deployment guarantees nothing; the routine path preserves most things.
 
 ## Standing constraints
 
-- No comments in code except the `ponytail:` form naming a ceiling and its upgrade path, and
-  `//go:` directives.
-- One exception to the no-comments rule: the k8s code generator markers `// +k8s:deepcopy-gen=package`
-  and `// +groupName=` in `api/**/doc.go` only (plan 0026, approved 2026-10-22).
+- No explanatory comments in code. The code explains itself through its structure: names, layers,
+  contracts and types. Two kinds of comment are allowed: the `ponytail:` form naming a ceiling and its
+  upgrade path, and functional comments that a tool reads, such as `//go:` directives, generated-code
+  headers and code generator markers (`// +k8s:deepcopy-gen=package`, `// +groupName=`,
+  `// +k8s:deepcopy-gen:interfaces=...`). A functional comment carries no prose.
 - ASCII only, everywhere, including this file and `docs/ARCHITECTURE.md`.
 - Decisions, measurements and invariants live in `docs/ARCHITECTURE.md`, never in code comments.
   An item opens in section 14 and moves to section 15, with its before/after readings, when it
