@@ -16,57 +16,59 @@ import (
 	"sync"
 	"time"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/dynamic"
-
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/servetls"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/tlsreload"
 )
 
-const (
-	DefaultShutdownTimeout = 5 * time.Second
-)
-
-type ExposureOptions struct {
-	Workspace  string
-	Dynamic    DynamicFactory
-	Handlers   *component.Handlers
-	Registry   *component.Registry
-	Ports      *component.PortRegistry
-	TLS        *tls.Config
-	Registrar  IngressRegistrar
-	Log        *slog.Logger
-	RetryAfter time.Duration
+type PublisherConfig struct {
+	Handlers  *component.Handlers
+	Ports     *component.PortRegistry
+	TLS       *tls.Config
+	Registrar IngressRegistrar
+	Log       *slog.Logger
 }
 
-type ExposureController struct {
-	workspace string
-	dynamic   DynamicFactory
+type Binding struct {
+	Workspace string
+
+	Name string
+
+	Spec exposurev1alpha1.ExposureSpec
+
+	Service exposurev1alpha1.ServiceSpec
+
+	ServiceGeneration int64
+
+	Target component.Key
+}
+
+type Published struct {
+	Address string
+
+	Endpoint string
+
+	Provider string
+}
+
+type Publisher struct {
 	handlers  *component.Handlers
-	registry  *component.Registry
 	ports     *component.PortRegistry
 	tls       *tls.Config
 	registrar IngressRegistrar
 	log       *slog.Logger
-	retry     time.Duration
 
 	mu      sync.Mutex
-	running map[string]*exposureRuntime
+	running map[string]*publication
 }
 
-type exposureRuntime struct {
+type publication struct {
 	fingerprint string
 
-	provider string
+	published Published
 
 	caPool   *tlsreload.Pool
 	caBundle string
@@ -76,289 +78,106 @@ type exposureRuntime struct {
 	close func()
 }
 
-func (r *exposureRuntime) shutdown() {
-	if r == nil {
+func (p *publication) shutdown() {
+	if p == nil {
 		return
 	}
-	r.once.Do(func() {
-		if r.close != nil {
-			r.close()
+	p.once.Do(func() {
+		if p.close != nil {
+			p.close()
 		}
 	})
 }
 
-func NewExposureController(opts ExposureOptions) (*ExposureController, error) {
-	workspace := strings.TrimSpace(opts.Workspace)
-	if workspace == "" {
-		return nil, errors.New("exposure: a workspace is required for the Exposure controller")
-	}
-	if opts.Dynamic == nil {
-		return nil, errors.New("exposure: a dynamic client factory is required for the Exposure controller")
-	}
-	log := opts.Log
+func NewPublisher(cfg PublisherConfig) *Publisher {
+	log := cfg.Log
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	opts.RetryAfter = opt.Positive(opts.RetryAfter, DefaultRetryAfter)
-	return &ExposureController{
-		workspace: workspace,
-		dynamic:   opts.Dynamic,
-		handlers:  opts.Handlers,
-		registry:  opts.Registry,
-		ports:     opts.Ports,
-		tls:       opts.TLS,
-		registrar: opts.Registrar,
-		log:       log.With("component", "exposure-controller"),
-		retry:     opts.RetryAfter,
-		running:   map[string]*exposureRuntime{},
-	}, nil
+	return &Publisher{handlers: cfg.Handlers, ports: cfg.Ports, tls: cfg.TLS, registrar: cfg.Registrar,
+		log: log.With("component", "exposure-publisher"), running: map[string]*publication{}}
 }
 
-func (c *ExposureController) Run(ctx context.Context) error {
-	w := &watcher{
-		workspace: c.workspace,
-		dynamic:   c.dynamic,
-		gvr:       ExposureGVR,
-		log:       c.log,
-		retry:     c.retry,
-		reconcile: c.Reconcile,
-		deleted:   c.forget,
-	}
-	defer c.stopAll()
-	return w.Run(ctx)
+func (p *Publisher) Handler(ctx context.Context, target component.Key, protocol exposurev1alpha1.ServiceProtocol, name string) (http.Handler, bool, error) {
+	return FindHandler(ctx, p.handlers, target, protocol, name)
 }
 
-func (c *ExposureController) stopAll() {
-	c.mu.Lock()
-	running := c.running
-	c.running = map[string]*exposureRuntime{}
-	c.mu.Unlock()
-	for _, rt := range running {
-		rt.shutdown()
-	}
-}
-
-func (c *ExposureController) Reconcile(ctx context.Context, dyn dynamic.Interface, u *unstructured.Unstructured) error {
-	if u == nil {
-		return nil
-	}
-	ri := dyn.Resource(ExposureGVR)
-	name := u.GetName()
-	if u.GetDeletionTimestamp() != nil {
-		c.stop(name)
-		c.release(name)
-		return ensureMetadata(ctx, ri, name, ExposureFinalizer, false, nil)
-	}
-	var exp exposurev1alpha1.Exposure
-	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &exp); err != nil {
-		return fmt.Errorf("exposure: decoding Exposure %s: %w", name, err)
-	}
-	labels := map[string]string{}
-	if serviceName := strs.LastSegment(exp.Spec.ServiceRef); serviceName != "" {
-		labels[LabelService] = serviceName
-	}
-	if err := ensureMetadata(ctx, ri, name, ExposureFinalizer, true, labels); err != nil {
-		return err
-	}
-	generation := u.GetGeneration()
-	status := exp.Status
-	status.Conditions = append([]metav1.Condition(nil), status.Conditions...)
-	if exp.Spec.Suspend {
-		c.stop(name)
-		c.release(name)
-		status.Phase = exposurev1alpha1.ExposurePending
-		status.Ready = false
-		status.Address = ""
-		status.Endpoint = ""
-		conds.Set(&status.Conditions, generation, ConditionHandlerRegistered, false, "Suspended", "the Exposure is suspended")
-		conds.Set(&status.Conditions, generation, ConditionReady, false, "Suspended", "the Exposure is suspended")
-		return writeStatus(ctx, ri, name, &status)
-	}
-	if exp.Spec.Mode != exposurev1alpha1.ExposureModeLocal && exp.Spec.Mode != exposurev1alpha1.ExposureModeIngress {
-		c.stop(name)
-		c.release(name)
-		status.Phase = exposurev1alpha1.ExposureFailed
-		status.Ready = false
-		status.Address = ""
-		status.Endpoint = ""
-		message := fmt.Sprintf("unknown mode %q", exp.Spec.Mode)
-		conds.Set(&status.Conditions, generation, ConditionHandlerRegistered, false, "InvalidMode", message)
-		conds.Set(&status.Conditions, generation, ConditionReady, false, "InvalidMode", message)
-		return writeStatus(ctx, ri, name, &status)
-	}
-	serviceName := strs.LastSegment(exp.Spec.ServiceRef)
-	if serviceName == "" {
-		c.stop(name)
-		c.release(name)
-		status.Phase = exposurev1alpha1.ExposurePending
-		status.Ready = false
-		status.Address = ""
-		status.Endpoint = ""
-		message := "the Exposure has no serviceRef"
-		conds.Set(&status.Conditions, generation, ConditionHandlerRegistered, false, "ServiceMissing", message)
-		conds.Set(&status.Conditions, generation, ConditionReady, false, "ServiceMissing", message)
-		return writeStatus(ctx, ri, name, &status)
-	}
-	svc, err := readService(ctx, dyn, serviceName)
+func (p *Publisher) Publish(ctx context.Context, b Binding) (Published, error) {
+	key := publicationKey(b.Workspace, b.Name)
+	fingerprint, err := p.fingerprint(b)
 	if err != nil {
-		if !apierrors.IsNotFound(err) {
-			return err
-		}
-		c.stop(name)
-		c.release(name)
-		status.Phase = exposurev1alpha1.ExposurePending
-		status.Ready = false
-		status.Address = ""
-		status.Endpoint = ""
-		message := "the Service " + serviceName + " is not present in workspace " + c.workspace
-		conds.Set(&status.Conditions, generation, ConditionHandlerRegistered, false, "ServiceMissing", message)
-		conds.Set(&status.Conditions, generation, ConditionReady, false, "ServiceMissing", message)
-		return writeStatus(ctx, ri, name, &status)
+		return Published{}, err
 	}
-	if svc.Spec.Suspend {
-		c.stop(name)
-		c.release(name)
-		status.Phase = exposurev1alpha1.ExposurePending
-		status.Ready = false
-		status.Address = ""
-		status.Endpoint = ""
-		message := "the Service " + serviceName + " is suspended"
-		conds.Set(&status.Conditions, generation, ConditionHandlerRegistered, false, "ServiceSuspended", message)
-		conds.Set(&status.Conditions, generation, ConditionReady, false, "ServiceSuspended", message)
-		return writeStatus(ctx, ri, name, &status)
-	}
-	target, err := targetKey(svc.Spec.TargetRef, c.workspace)
-	if err != nil {
-		c.stop(name)
-		c.release(name)
-		status.Phase = exposurev1alpha1.ExposureFailed
-		status.Ready = false
-		status.Address = ""
-		status.Endpoint = ""
-		conds.Set(&status.Conditions, generation, ConditionHandlerRegistered, false, "InvalidTarget", err.Error())
-		conds.Set(&status.Conditions, generation, ConditionReady, false, "InvalidTarget", err.Error())
-		return writeStatus(ctx, ri, name, &status)
-	}
-	handler, found, err := checkHandler(ctx, c.handlers, target, svc.Spec.Protocol, svc.Spec.Handler)
-	if err != nil {
-		c.stop(name)
-		c.release(name)
-		status.Phase = exposurev1alpha1.ExposureFailed
-		status.Ready = false
-		status.Address = ""
-		status.Endpoint = ""
-		conds.Set(&status.Conditions, generation, ConditionHandlerRegistered, false, "InvalidProtocol", err.Error())
-		conds.Set(&status.Conditions, generation, ConditionReady, false, "InvalidProtocol", err.Error())
-		return writeStatus(ctx, ri, name, &status)
-	}
-	if !found {
-		c.stop(name)
-		c.release(name)
-		status.Phase = exposurev1alpha1.ExposurePending
-		status.Ready = false
-		status.Address = ""
-		status.Endpoint = ""
-		message := fmt.Sprintf("no handler %q is registered for %s/%s in workspace %s", handlerName(svc.Spec.Handler), target.Kind, target.Name, target.Workspace)
-		conds.Set(&status.Conditions, generation, ConditionHandlerRegistered, false, "HandlerMissing", message)
-		conds.Set(&status.Conditions, generation, ConditionReady, false, "HandlerMissing", message)
-		return writeStatus(ctx, ri, name, &status)
-	}
-	fingerprint, err := specFingerprint(&exp, svc, target)
-	if err != nil {
-		return err
-	}
-	handlerRevision := uint64(0)
-	if c.handlers != nil {
-		handlerRevision = c.handlers.HandlerRevision(target, svc.Spec.Handler)
-	}
-	fingerprint += fmt.Sprintf("|handler-%d", handlerRevision)
-	if current := c.current(name); current != nil && current.fingerprint == fingerprint {
-		rotated, err := c.rotateCA(name, current, exp.Spec.TLS.CABundle)
-		if err == nil && !rotated {
-			return nil
-		}
+	if current := p.current(key); current != nil && current.fingerprint == fingerprint {
+		err := p.rotateCA(b.Name, current, b.Spec.TLS.CABundle)
 		if err == nil {
-			conds.Set(&status.Conditions, generation, ConditionHandlerRegistered, true, "HandlerRegistered", "the target handler is registered")
-			if current.provider != "" {
-				conds.Set(&status.Conditions, generation, ConditionIngressProvider, true, "ProviderReady", current.provider)
-			}
-			conds.Set(&status.Conditions, generation, ConditionReady, true, "Ready", readyMessage(current))
-			return writeStatus(ctx, ri, name, &status)
+			return current.published, nil
 		}
-		c.log.Warn("rebuilding the Exposure after a bad CA bundle", "exposure", name, "err", err)
+		p.log.Warn("rebuilding the Exposure after a bad CA bundle", "workspace", b.Workspace, "exposure", b.Name, "err", err)
 	}
-	c.stop(name)
-	c.release(name)
-	var url, endpoint string
-	var rt *exposureRuntime
-	switch exp.Spec.Mode {
+	p.Withdraw(b.Workspace, b.Name)
+	var pub *publication
+	switch b.Spec.Mode {
 	case exposurev1alpha1.ExposureModeLocal:
-		rt, url, endpoint, err = c.startLocal(ctx, &exp, svc, target, handler)
+		pub, err = p.startLocal(ctx, b)
 	case exposurev1alpha1.ExposureModeIngress:
-		rt, url, endpoint, err = c.startIngress(ctx, &exp, svc, target)
+		pub, err = p.startIngress(ctx, b)
+	default:
+		err = fmt.Errorf("unknown mode %q", b.Spec.Mode)
 	}
 	if err != nil {
-		c.release(name)
-		reason := "Pending"
-		status.Phase = exposurev1alpha1.ExposurePending
-		if errors.Is(err, ErrStableHostMismatch) {
-			reason = "StableHostMismatch"
-			status.Phase = exposurev1alpha1.ExposureFailed
-		}
-		status.Ready = false
-		status.Address = ""
-		status.Endpoint = ""
-		conds.Set(&status.Conditions, generation, ConditionHandlerRegistered, true, "HandlerRegistered", "the target handler is registered")
-		conds.Set(&status.Conditions, generation, ConditionReady, false, reason, err.Error())
-		return writeStatus(ctx, ri, name, &status)
+		p.release(b.Workspace, b.Name)
+		return Published{}, err
 	}
-	rt.fingerprint = fingerprint
-	rt.caBundle = strings.TrimSpace(exp.Spec.TLS.CABundle)
-	c.store(name, rt)
-	status.Phase = exposurev1alpha1.ExposureReady
-	status.Ready = true
-	status.Address = url
-	status.Endpoint = endpoint
-	conds.Set(&status.Conditions, generation, ConditionHandlerRegistered, true, "HandlerRegistered", "the target handler is registered")
-	if rt.provider != "" {
-		conds.Set(&status.Conditions, generation, ConditionIngressProvider, true, "ProviderReady", rt.provider)
-	}
-	conds.Set(&status.Conditions, generation, ConditionReady, true, "Ready", readyMessage(rt))
-	return writeStatus(ctx, ri, name, &status)
+	pub.fingerprint = fingerprint
+	pub.caBundle = strings.TrimSpace(b.Spec.TLS.CABundle)
+	p.mu.Lock()
+	p.running[key] = pub
+	p.mu.Unlock()
+	return pub.published, nil
 }
 
-func readyMessage(rt *exposureRuntime) string {
-	if rt != nil && rt.provider != "" {
-		return "the Exposure is bound by the " + rt.provider + " ingress provider"
-	}
-	return "the Exposure is bound"
+func (p *Publisher) Withdraw(workspace, name string) {
+	key := publicationKey(workspace, name)
+	p.mu.Lock()
+	pub := p.running[key]
+	delete(p.running, key)
+	p.mu.Unlock()
+	pub.shutdown()
+	p.release(workspace, name)
 }
 
-func readService(ctx context.Context, dyn dynamic.Interface, name string) (*exposurev1alpha1.Service, error) {
-	u, err := dyn.Resource(ServiceGVR).Get(ctx, name, metav1.GetOptions{})
-	if err != nil {
-		return nil, err
+func (p *Publisher) Close() {
+	p.mu.Lock()
+	running := p.running
+	p.running = map[string]*publication{}
+	p.mu.Unlock()
+	for _, pub := range running {
+		pub.shutdown()
 	}
-	var svc exposurev1alpha1.Service
-	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &svc); err != nil {
-		return nil, fmt.Errorf("exposure: decoding Service %s: %w", name, err)
-	}
-	return &svc, nil
 }
 
-func specFingerprint(exp *exposurev1alpha1.Exposure, svc *exposurev1alpha1.Service, target component.Key) (string, error) {
-	spec := exp.Spec
+func publicationKey(workspace, name string) string {
+	return workspace + "/" + name
+}
+
+func (p *Publisher) fingerprint(b Binding) (string, error) {
+	spec := b.Spec
 	spec.TLS.CABundle = caBundleKey(spec.TLS.CABundle)
 	value := map[string]any{
 		"exposure": map[string]any{"spec": spec},
-		"service":  map[string]any{"spec": svc.Spec, "generation": svc.Generation},
-		"target":   target,
+		"service":  map[string]any{"spec": b.Service, "generation": b.ServiceGeneration},
+		"target":   b.Target,
 	}
 	raw, err := json.Marshal(value)
 	if err != nil {
 		return "", err
 	}
-	return string(raw), nil
+	revision := uint64(0)
+	if p.handlers != nil {
+		revision = p.handlers.HandlerRevision(b.Target, b.Service.Handler)
+	}
+	return fmt.Sprintf("%s|handler-%d", raw, revision), nil
 }
 
 func caBundleKey(bundle string) string {
@@ -373,86 +192,69 @@ func isPEMBundle(bundle string) bool {
 	return strings.Contains(bundle, "-----BEGIN")
 }
 
-func (c *ExposureController) rotateCA(name string, rt *exposureRuntime, bundle string) (bool, error) {
+func (p *Publisher) rotateCA(name string, pub *publication, bundle string) error {
 	bundle = strings.TrimSpace(bundle)
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if bundle == rt.caBundle {
-		return false, nil
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if bundle == pub.caBundle {
+		return nil
 	}
-	if rt.caPool != nil && isPEMBundle(bundle) {
-		if err := rt.caPool.Set([]byte(bundle)); err != nil {
-			return false, err
+	if pub.caPool != nil && isPEMBundle(bundle) {
+		if err := pub.caPool.Set([]byte(bundle)); err != nil {
+			return err
 		}
-		c.log.Info("rotated the Exposure client CA bundle", "exposure", name)
+		p.log.Info("rotated the Exposure client CA bundle", "exposure", name)
 	}
-	rt.caBundle = bundle
-	return true, nil
+	pub.caBundle = bundle
+	return nil
 }
 
-func (c *ExposureController) current(name string) *exposureRuntime {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.running[name]
+func (p *Publisher) current(key string) *publication {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.running[key]
 }
 
-func (c *ExposureController) store(name string, rt *exposureRuntime) {
-	c.mu.Lock()
-	c.running[name] = rt
-	c.mu.Unlock()
-}
-
-func (c *ExposureController) stop(name string) {
-	c.mu.Lock()
-	rt := c.running[name]
-	delete(c.running, name)
-	c.mu.Unlock()
-	rt.shutdown()
-}
-
-func (c *ExposureController) forget(name string) {
-	c.stop(name)
-	c.release(name)
-}
-
-func (c *ExposureController) release(name string) {
-	if c.ports == nil {
+func (p *Publisher) release(workspace, name string) {
+	if p.ports == nil {
 		return
 	}
-	_ = c.ports.Release(leaseName(c.workspace, name))
+	_ = p.ports.Release(leaseName(workspace, name))
 }
 
 func leaseName(workspace, name string) string {
 	return "Exposure/" + workspace + "/" + name
 }
 
-func (c *ExposureController) startLocal(ctx context.Context, exp *exposurev1alpha1.Exposure, svc *exposurev1alpha1.Service, target component.Key, handler http.Handler) (*exposureRuntime, string, string, error) {
-	if c.ports == nil {
-		return nil, "", "", errors.New("the port registry is not configured")
+func (p *Publisher) startLocal(ctx context.Context, b Binding) (*publication, error) {
+	if p.ports == nil {
+		return nil, errors.New("the port registry is not configured")
 	}
-	listener, lease, err := c.ports.Listen(leaseName(c.workspace, exp.Name))
+	listener, lease, err := p.ports.Listen(leaseName(b.Workspace, b.Name))
 	if err != nil {
-		return nil, "", "", err
+		return nil, err
 	}
-	tlsConfig, caPool, err := c.localTLS(exp.Spec.TLS)
+	tlsConfig, caPool, err := p.localTLS(b.Spec.TLS)
 	if err != nil {
 		_ = listener.Close()
-		return nil, "", "", err
+		return nil, err
 	}
 	if tlsConfig != nil {
 		listener = tls.NewListener(listener, tlsConfig)
 	}
-	protocol := protocolKind(svc.Spec.Protocol)
-	path := normalizePath(exp.Spec.Path)
-	rt := &exposureRuntime{caPool: caPool}
+	protocol := protocolKind(b.Service.Protocol)
+	path := normalizePath(b.Spec.Path)
+	target := b.Target
+	pub := &publication{caPool: caPool}
 	switch protocol {
 	case component.ProtocolHTTP, component.ProtocolWS:
-		if handler == nil {
+		if _, ok := p.handlers.Handler(target, b.Service.Handler); !ok {
 			_ = listener.Close()
-			return nil, "", "", errors.New("the target HTTP handler is not registered")
+			return nil, errors.New("the target HTTP handler is not registered")
 		}
+		name := HandlerName(b.Service.Handler)
 		current := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			h, ok := c.handlers.HandlerNamed(target, handlerName(svc.Spec.Handler))
+			h, ok := p.handlers.HandlerNamed(target, name)
 			if !ok {
 				http.Error(w, "the target handler is not registered", http.StatusServiceUnavailable)
 				return
@@ -465,14 +267,15 @@ func (c *ExposureController) startLocal(ctx context.Context, exp *exposurev1alph
 			defer close(done)
 			_ = server.Serve(listener)
 		}()
-		rt.close = func() {
+		pub.close = func() {
 			_ = server.Close()
 			<-done
 		}
 		scheme := httpScheme(protocol, tlsConfig != nil)
-		return rt, scheme + "://" + lease.Address() + path, lease.Address(), nil
+		pub.published = Published{Address: scheme + "://" + lease.Address() + path, Endpoint: lease.Address()}
+		return pub, nil
 	case component.ProtocolTCP, component.ProtocolSSH:
-		runCtx, cancel := context.WithCancel(bus.WithCaller(ctx, ExposureCaller(c.workspace, exp.Name)))
+		runCtx, cancel := context.WithCancel(bus.WithCaller(context.WithoutCancel(ctx), ExposureCaller(b.Workspace, b.Name)))
 		done := make(chan struct{})
 		var conns sync.WaitGroup
 		go func() {
@@ -482,58 +285,68 @@ func (c *ExposureController) startLocal(ctx context.Context, exp *exposurev1alph
 				if err != nil {
 					return
 				}
-				conns.Go(func() { bridge(runCtx, c.handlers, target, svc.Spec.Handler, conn) })
+				conns.Go(func() { bridge(runCtx, p.handlers, target, b.Service.Handler, conn) })
 			}
 		}()
-		rt.close = func() {
+		pub.close = func() {
 			cancel()
 			_ = listener.Close()
 			<-done
 			conns.Wait()
 		}
-		scheme := protocol
-		scheme = cmp.Or(scheme, component.ProtocolTCP)
-		return rt, scheme + "://" + lease.Address(), lease.Address(), nil
+		scheme := cmp.Or(protocol, component.ProtocolTCP)
+		pub.published = Published{Address: scheme + "://" + lease.Address(), Endpoint: lease.Address()}
+		return pub, nil
 	default:
 		_ = listener.Close()
-		return nil, "", "", fmt.Errorf("unknown protocol %q", svc.Spec.Protocol)
+		return nil, fmt.Errorf("unknown protocol %q", b.Service.Protocol)
 	}
 }
 
-func (c *ExposureController) startIngress(ctx context.Context, exp *exposurev1alpha1.Exposure, svc *exposurev1alpha1.Service, target component.Key) (*exposureRuntime, string, string, error) {
-	if c.registrar == nil {
-		return nil, "", "", errors.New("no ingress registrar is configured")
+func (p *Publisher) startIngress(ctx context.Context, b Binding) (*publication, error) {
+	if p.registrar == nil {
+		return nil, errors.New("no ingress registrar is configured")
 	}
-	registration, err := c.registrar.Register(ctx, IngressSpec{
-		Workspace:      c.workspace,
-		Exposure:       exp.Name,
-		Service:        strs.LastSegment(exp.Spec.ServiceRef),
-		Protocol:       svc.Spec.Protocol,
-		Handler:        svc.Spec.Handler,
-		Target:         target,
-		IngressRef:     exp.Spec.IngressRef,
-		Hostname:       exp.Spec.Hostname,
-		IngressAddress: exp.Spec.IngressAddress,
-		IngressDial:    exp.Spec.IngressDial,
-		PublicHost:     exp.Spec.PublicHost,
-		Path:           normalizePath(exp.Spec.Path),
-		TLS:            exp.Spec.TLS.Enabled,
-		AuthRequired:   exp.Spec.Auth.Required,
-		AllowedDIDs:    append([]string(nil), exp.Spec.Auth.AllowedDIDs...),
+	life, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	stop := context.AfterFunc(ctx, cancel)
+	registration, err := p.registrar.Register(life, IngressSpec{
+		Workspace:      b.Workspace,
+		Exposure:       b.Name,
+		Service:        strs.LastSegment(b.Spec.ServiceRef),
+		Protocol:       b.Service.Protocol,
+		Handler:        b.Service.Handler,
+		Target:         b.Target,
+		IngressRef:     b.Spec.IngressRef,
+		Hostname:       b.Spec.Hostname,
+		IngressAddress: b.Spec.IngressAddress,
+		IngressDial:    b.Spec.IngressDial,
+		PublicHost:     b.Spec.PublicHost,
+		Path:           normalizePath(b.Spec.Path),
+		TLS:            b.Spec.TLS.Enabled,
+		AuthRequired:   b.Spec.Auth.Required,
+		AllowedDIDs:    append([]string(nil), b.Spec.Auth.AllowedDIDs...),
 	})
-	if err != nil {
-		return nil, "", "", err
+	if !stop() || err != nil {
+		cancel()
+		if err == nil {
+			_ = registration.Close()
+			err = ctx.Err()
+		}
+		return nil, err
 	}
-	url := registration.URL()
+	address := registration.URL()
 	provider := ""
 	if described, ok := registration.(IngressRegistrationProvider); ok {
 		provider = strings.TrimSpace(described.Provider())
 	}
-	if path := normalizePath(exp.Spec.Path); path == "" || path == "/" {
-		url = originURL(url)
+	if path := normalizePath(b.Spec.Path); path == "" || path == "/" {
+		address = originURL(address)
 	}
-	rt := &exposureRuntime{provider: provider, close: func() { _ = registration.Close() }}
-	return rt, url, url, nil
+	return &publication{published: Published{Address: address, Endpoint: address, Provider: provider},
+		close: func() {
+			_ = registration.Close()
+			cancel()
+		}}, nil
 }
 
 func originURL(raw string) string {
@@ -544,7 +357,7 @@ func originURL(raw string) string {
 	return parsed.Scheme + "://" + parsed.Host
 }
 
-func (c *ExposureController) localTLS(spec exposurev1alpha1.ExposureTLS) (*tls.Config, *tlsreload.Pool, error) {
+func (p *Publisher) localTLS(spec exposurev1alpha1.ExposureTLS) (*tls.Config, *tlsreload.Pool, error) {
 	if !spec.Enabled && strings.TrimSpace(spec.CertRef) == "" {
 		return nil, nil, nil
 	}
@@ -552,13 +365,13 @@ func (c *ExposureController) localTLS(spec exposurev1alpha1.ExposureTLS) (*tls.C
 	switch {
 	case strings.TrimSpace(spec.CertRef) != "":
 		certFile := strings.TrimSpace(spec.CertRef)
-		reloader, err := tlsreload.New(certFile, []string{servetls.KeyFileFor(certFile)}, c.log)
+		reloader, err := tlsreload.New(certFile, []string{servetls.KeyFileFor(certFile)}, p.log)
 		if err != nil {
 			return nil, nil, fmt.Errorf("loading the certificate %s: %w", certFile, err)
 		}
 		config = reloader.TLSConfig(&tls.Config{MinVersion: tls.VersionTLS12})
-	case c.tls != nil:
-		config = c.tls.Clone()
+	case p.tls != nil:
+		config = p.tls.Clone()
 		config.MinVersion = cmp.Or(config.MinVersion, tls.VersionTLS12)
 	default:
 		return nil, nil, errors.New("TLS is enabled but no certificate is available")
@@ -567,7 +380,7 @@ func (c *ExposureController) localTLS(spec exposurev1alpha1.ExposureTLS) (*tls.C
 	if bundle == "" {
 		return config, nil, nil
 	}
-	pool, err := tlsreload.PoolFromBundle(bundle, c.log)
+	pool, err := tlsreload.PoolFromBundle(bundle, p.log)
 	if err != nil {
 		return nil, nil, err
 	}

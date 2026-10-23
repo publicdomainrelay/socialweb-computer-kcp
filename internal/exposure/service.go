@@ -5,141 +5,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"strings"
-	"time"
-
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/dynamic"
-
-	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
+	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 )
 
-type ServiceOptions struct {
-	Workspace  string
-	Dynamic    DynamicFactory
-	Handlers   *component.Handlers
-	Registry   *component.Registry
-	Log        *slog.Logger
-	RetryAfter time.Duration
-}
+var ErrUnknownProtocol = errors.New("unknown protocol")
 
-type ServiceController struct {
-	workspace string
-	dynamic   DynamicFactory
-	handlers  *component.Handlers
-	registry  *component.Registry
-	log       *slog.Logger
-	retry     time.Duration
-}
-
-func NewServiceController(opts ServiceOptions) (*ServiceController, error) {
-	workspace := strings.TrimSpace(opts.Workspace)
-	if workspace == "" {
-		return nil, errors.New("exposure: a workspace is required for the Service controller")
-	}
-	if opts.Dynamic == nil {
-		return nil, errors.New("exposure: a dynamic client factory is required for the Service controller")
-	}
-	log := opts.Log
-	if log == nil {
-		log = slog.New(slog.DiscardHandler)
-	}
-	opts.RetryAfter = opt.Positive(opts.RetryAfter, DefaultRetryAfter)
-	return &ServiceController{
-		workspace: workspace,
-		dynamic:   opts.Dynamic,
-		handlers:  opts.Handlers,
-		registry:  opts.Registry,
-		log:       log.With("component", "service-controller"),
-		retry:     opts.RetryAfter,
-	}, nil
-}
-
-func (c *ServiceController) Run(ctx context.Context) error {
-	w := &watcher{
-		workspace: c.workspace,
-		dynamic:   c.dynamic,
-		gvr:       ServiceGVR,
-		log:       c.log,
-		retry:     c.retry,
-		reconcile: c.Reconcile,
-	}
-	return w.Run(ctx)
-}
-
-func (c *ServiceController) Reconcile(ctx context.Context, dyn dynamic.Interface, u *unstructured.Unstructured) error {
-	if u == nil {
-		return nil
-	}
-	ri := dyn.Resource(ServiceGVR)
-	name := u.GetName()
-	if u.GetDeletionTimestamp() != nil {
-		return ensureMetadata(ctx, ri, name, ServiceFinalizer, false, nil)
-	}
-	if err := ensureMetadata(ctx, ri, name, ServiceFinalizer, true, nil); err != nil {
-		return err
-	}
-	var svc exposurev1alpha1.Service
-	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &svc); err != nil {
-		return fmt.Errorf("exposure: decoding Service %s: %w", name, err)
-	}
-	generation := u.GetGeneration()
-	status := svc.Status
-	status.Conditions = append([]metav1.Condition(nil), status.Conditions...)
-	if svc.Spec.Suspend {
-		status.Phase = exposurev1alpha1.ServicePending
-		status.Ready = false
-		status.Endpoints = nil
-		conds.Set(&status.Conditions, generation, ConditionHandlerRegistered, false, "Suspended", "the Service is suspended")
-		conds.Set(&status.Conditions, generation, ConditionReady, false, "Suspended", "the Service is suspended")
-		return writeStatus(ctx, ri, name, &status)
-	}
-	target, err := targetKey(svc.Spec.TargetRef, c.workspace)
-	if err != nil {
-		status.Phase = exposurev1alpha1.ServiceFailed
-		status.Ready = false
-		status.Endpoints = nil
-		conds.Set(&status.Conditions, generation, ConditionHandlerRegistered, false, "InvalidTarget", err.Error())
-		conds.Set(&status.Conditions, generation, ConditionReady, false, "InvalidTarget", err.Error())
-		return writeStatus(ctx, ri, name, &status)
-	}
-	_, found, err := checkHandler(ctx, c.handlers, target, svc.Spec.Protocol, svc.Spec.Handler)
-	if err != nil {
-		status.Phase = exposurev1alpha1.ServiceFailed
-		status.Ready = false
-		status.Endpoints = nil
-		conds.Set(&status.Conditions, generation, ConditionHandlerRegistered, false, "InvalidProtocol", err.Error())
-		conds.Set(&status.Conditions, generation, ConditionReady, false, "InvalidProtocol", err.Error())
-		return writeStatus(ctx, ri, name, &status)
-	}
-	if !found {
-		status.Phase = exposurev1alpha1.ServicePending
-		status.Ready = false
-		status.Endpoints = nil
-		message := fmt.Sprintf("no handler %q is registered for %s/%s in workspace %s", handlerName(svc.Spec.Handler), target.Kind, target.Name, target.Workspace)
-		conds.Set(&status.Conditions, generation, ConditionHandlerRegistered, false, "HandlerMissing", message)
-		conds.Set(&status.Conditions, generation, ConditionReady, false, "HandlerMissing", message)
-		return writeStatus(ctx, ri, name, &status)
-	}
-	status.Phase = exposurev1alpha1.ServiceReady
-	status.Ready = true
-	status.Endpoints = endpointsFor(c.registry, target)
-	message := fmt.Sprintf("the handler %q is registered for %s/%s", handlerName(svc.Spec.Handler), target.Kind, target.Name)
-	conds.Set(&status.Conditions, generation, ConditionHandlerRegistered, true, "HandlerRegistered", message)
-	conds.Set(&status.Conditions, generation, ConditionReady, true, "Ready", message)
-	return writeStatus(ctx, ri, name, &status)
-}
-
-func targetKey(ref commonv1.ObjectRef, workspace string) (component.Key, error) {
+func Target(ref commonv1.ObjectRef, workspace string) (component.Key, error) {
 	kind := strings.TrimSpace(ref.Kind)
 	name := strings.TrimSpace(ref.Name)
 	if kind == "" {
@@ -148,8 +24,7 @@ func targetKey(ref commonv1.ObjectRef, workspace string) (component.Key, error) 
 	if name == "" {
 		return component.Key{}, errors.New("the targetRef has no name")
 	}
-	targetWorkspace := strings.TrimSpace(ref.Workspace)
-	targetWorkspace = cmp.Or(targetWorkspace, workspace)
+	targetWorkspace := cmp.Or(strings.TrimSpace(ref.Workspace), workspace)
 	return component.Key{Workspace: targetWorkspace, Kind: kind, Name: name}, nil
 }
 
@@ -157,7 +32,7 @@ func protocolKind(value exposurev1alpha1.ServiceProtocol) string {
 	return strings.ToLower(strings.TrimSpace(string(value)))
 }
 
-func handlerName(value string) string {
+func HandlerName(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return component.DefaultHandlerName
@@ -165,7 +40,7 @@ func handlerName(value string) string {
 	return value
 }
 
-func checkHandler(ctx context.Context, handlers *component.Handlers, key component.Key, protocol exposurev1alpha1.ServiceProtocol, name string) (http.Handler, bool, error) {
+func FindHandler(ctx context.Context, handlers *component.Handlers, key component.Key, protocol exposurev1alpha1.ServiceProtocol, name string) (http.Handler, bool, error) {
 	if handlers == nil {
 		return nil, false, nil
 	}
@@ -184,11 +59,11 @@ func checkHandler(ctx context.Context, handlers *component.Handlers, key compone
 		_ = conn.Close()
 		return nil, true, nil
 	default:
-		return nil, false, fmt.Errorf("unknown protocol %q", protocol)
+		return nil, false, fmt.Errorf("%w %q", ErrUnknownProtocol, protocol)
 	}
 }
 
-func endpointsFor(registry *component.Registry, key component.Key) []string {
+func Endpoints(registry *component.Registry, key component.Key) []string {
 	if registry == nil {
 		return nil
 	}
