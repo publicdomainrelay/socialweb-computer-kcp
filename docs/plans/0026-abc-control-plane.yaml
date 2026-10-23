@@ -538,7 +538,7 @@ items:
     track: mounts
     parallel_with: [W0-ABSTRACT]
     depends_on: [W0-RUNTIME]
-    status: doing
+    status: done
     closes: [D25]
     decision: >
       kcp main authenticates mount callers itself and verifies the mount
@@ -952,6 +952,8 @@ items:
     depends_on: [W4-MARKET, W4-SERVICES]
     status: todo
     decision: >
+      Includes the clientcertfront Cluster gate recheck (a 2s cache and
+      recheck from W0-MOUNTS), which becomes a watch on Cluster.
       Delete every remaining ticker or time.After loop that reads state.
       List the remaining outbound obligations in deploy/obligations.txt.
       clusterprovider, providermain and cloudprovider move to the runtime.
@@ -1059,6 +1061,10 @@ acceptance_matrix:
     - id: A8
       check: "A rotated OpenBao CA and leaf certificate are used without a restart."
       hosts: [this host]
+
+    - id: A9
+      check: "Tenant clusters work around the kcp mount on kcp main: a ServiceAccount-token kubeconfig and a client-certificate kubeconfig both get and watch through <public host>/clusters/root:<acct>:<home>:clusters; a revoked certificate gets 401 and a revoked DID bearer 403; caddy validate accepts the @tenant matcher; a stopped or deleted cluster answers 503 within one gate change and cuts open watches; shut and reap follow the Cluster's own state, never a 502; a Ready cluster with its apiserver down is not reaped; revocation deletes the did- ServiceAccount through the direct path and defers a stopped one; kcp mount-proxy logs show no tenant traffic."
+      hosts: [this host, prod gateway]
 
 risks: |
   multicluster-runtime and the kcp multicluster-provider are marked
