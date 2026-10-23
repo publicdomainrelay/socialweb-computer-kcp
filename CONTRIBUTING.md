@@ -707,28 +707,21 @@ Run a bidder as a child application of the market network:
 swc run bidder --host-backend proc --profile market-network --network mn1 --handle b2.mn1.bob.test
 ```
 
-## Gate and integration tests
+## Gate and acceptance
 
 ```bash
 cd "$(git rev-parse --show-toplevel)"
 deploy/check.sh --fast
 ```
 
-The full gate before a release adds the release closure and the live proofs this host can run; read
-[AGENTS.md](AGENTS.md) "How to verify".
+`deploy/check.sh --fast` runs gofmt, go build, go vet, the generated-code drift check
+(`go generate ./...`), the architecture rules (`scripts/check-architecture.sh`), the cross-OS builds
+and the release builds. The full gate before a release adds the release closure and the live proofs
+this host can run; read [AGENTS.md](AGENTS.md) "How to verify".
 
-Integration tests are Go tests under `test/integration` with the `integration` build tag. Run them as
-an account that may `sudo -n -u test-0001`:
-
-```bash
-go test -tags integration -count=1 -v -timeout 60m ./test/integration/
-go test -tags integration -count=1 -v -timeout 60m ./test/integration/ -run TestRequestSecretsReachTheGuestThroughTheRFPFlow
-```
-
-Environment: `SOCIALWEB_IT_ACCOUNT`, `SOCIALWEB_IT_GUEST_IMAGE`,
-`SOCIALWEB_IT_PUBLISH`, `SOCIALWEB_IT_SKIP_BUILD`, `SOCIALWEB_IT_RUN_ROOT`,
-`SOCIALWEB_IT_ARTIFACTS`, `SOCIALWEB_IT_LIVE_SLOT`. Keep the run root short: a tenant
-cluster's front socket path must fit in 107 bytes.
+There are no Go tests until plan 0027. The scenarios the old integration suite covered, and the
+acceptance rows of plan 0026, are in `docs/spec/integration-catalog.yaml`. A release candidate is
+proven live with `docs/acceptance/0001-auth-modes.md`.
 
 ## See also
 
