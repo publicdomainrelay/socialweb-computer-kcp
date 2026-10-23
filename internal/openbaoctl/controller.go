@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -808,8 +809,12 @@ func (c *Controller) Run(ctx context.Context) error {
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	kick := make(chan struct{}, 1)
-	go c.watchSpecs(ctx, kick)
-	go c.watchGrants(ctx, kick)
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	wg.Go(func() { c.watchSpecs(ctx, kick) })
+	wg.Go(func() { c.watchGrants(ctx, kick) })
 	for {
 		if err := c.Pass(ctx); err != nil {
 			return err
