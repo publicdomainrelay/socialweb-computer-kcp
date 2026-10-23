@@ -236,7 +236,7 @@ func (ctl *Controller) ensurePdsAccountInVault(ctx context.Context, server, clie
 	if err != nil {
 		return PdsSession{}, err
 	}
-	defer client.RevokeSelf(context.Background())
+	defer client.RevokeSelf(context.WithoutCancel(ctx))
 	ctl.ensureVaultCredentialStatus(ctx, server, c.KVMount, path)
 	kvPath := c.KVMount + "/data/" + path
 	data, err := client.GetKV(ctx, kvPath)
@@ -505,7 +505,7 @@ func (ctl *Controller) bidderPassword(ctx context.Context) (string, manifests.Bi
 	if err != nil {
 		return "", manifests.BidderVault{}, err
 	}
-	defer client.RevokeSelf(context.Background())
+	defer client.RevokeSelf(context.WithoutCancel(ctx))
 	path := c.KVMount + "/data/" + identityKeysPath
 	data, err := client.GetKV(ctx, path)
 	var re *openbao.ResponseError
@@ -623,7 +623,7 @@ func (ctl *Controller) ensureRepoKey(ctx context.Context, server, clientName, ke
 	if err != nil {
 		return err
 	}
-	defer client.RevokeSelf(context.Background())
+	defer client.RevokeSelf(context.WithoutCancel(ctx))
 	ctl.ensureVaultCredentialStatus(ctx, server, c.KVMount, keysPath)
 	path := c.KVMount + "/data/" + keysPath
 	data, err := client.GetKV(ctx, path)

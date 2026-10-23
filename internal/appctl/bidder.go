@@ -1042,7 +1042,7 @@ func (ctl *Controller) guardSignIn(ctx context.Context, o v1alpha1.MarketBidder,
 			if err := client.Delete(ctx, ref.Mount+"/metadata/"+ref.Path); err != nil {
 				ctl.c.log().Warn("removing the refused sign-in session", "path", ref.Path, "err", err.Error())
 			}
-			client.RevokeSelf(context.Background())
+			client.RevokeSelf(context.WithoutCancel(ctx))
 		} else {
 			ctl.c.log().Warn("opening the bidder's vault to remove the refused session", "err", err.Error())
 		}
