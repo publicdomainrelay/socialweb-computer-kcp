@@ -152,8 +152,6 @@ type BidderSettings struct {
 
 	MaxConcurrentGuests *int32 `json:"maxConcurrentGuests,omitempty"`
 
-	PolicyPollMilliseconds *int32 `json:"policyPollMilliseconds,omitempty"`
-
 	PolicyTimeoutSeconds *int32 `json:"policyTimeoutSeconds,omitempty"`
 }
 
@@ -177,8 +175,6 @@ type RequesterSettings struct {
 	DirectoryTTLSeconds *int32 `json:"directoryTTLSeconds,omitempty"`
 
 	DirectoryKeys *int32 `json:"directoryKeys,omitempty"`
-
-	PolicyPollMilliseconds *int32 `json:"policyPollMilliseconds,omitempty"`
 
 	PolicyTimeoutSeconds *int32 `json:"policyTimeoutSeconds,omitempty"`
 
@@ -306,7 +302,7 @@ type ComponentStorage struct {
 }
 
 type ComponentServe struct {
-	Host string `json:"host,omitempty"`
+	Host string `json:"host,omitempty" apigen:"default=127.0.0.1"`
 
 	Port int32 `json:"port,omitempty" apigen:"minimum=0,maximum=65535"`
 
@@ -391,7 +387,7 @@ type BidderSpec struct {
 
 	Storage *ComponentStorage `json:"storage,omitempty"`
 
-	Serve *ComponentServe `json:"serve,omitempty"`
+	Serve *ComponentServe `json:"serve,omitempty" apigen:"default={}"`
 
 	GuestImageSource string `json:"guestImageSource,omitempty"`
 
@@ -399,17 +395,15 @@ type BidderSpec struct {
 
 	Kcp *KcpProvider `json:"kcp,omitempty"`
 
-	MaxConcurrentGuests int32 `json:"maxConcurrentGuests,omitempty"`
+	MaxConcurrentGuests int32 `json:"maxConcurrentGuests,omitempty" apigen:"minimum=0"`
 
-	HeartbeatIntervalSeconds *int32 `json:"heartbeatIntervalSeconds,omitempty"`
+	HeartbeatIntervalSeconds *int32 `json:"heartbeatIntervalSeconds,omitempty" apigen:"default=60,minimum=1"`
 
-	OfferingRefreshSeconds *int32 `json:"offeringRefreshSeconds,omitempty"`
+	OfferingRefreshSeconds *int32 `json:"offeringRefreshSeconds,omitempty" apigen:"default=300,minimum=0"`
 
-	BidTTLSeconds *int32 `json:"bidTtlSeconds,omitempty"`
+	BidTTLSeconds *int32 `json:"bidTtlSeconds,omitempty" apigen:"default=86400,minimum=1"`
 
-	PolicyPollMilliseconds *int32 `json:"policyPollMilliseconds,omitempty"`
-
-	PolicyTimeoutSeconds *int32 `json:"policyTimeoutSeconds,omitempty"`
+	PolicyTimeoutSeconds *int32 `json:"policyTimeoutSeconds,omitempty" apigen:"default=120,minimum=1"`
 
 	Operator string `json:"operator,omitempty"`
 
@@ -454,19 +448,19 @@ type GuestControlPlaneSpec struct {
 
 	Storage *ComponentStorage `json:"storage,omitempty"`
 
-	Serve *ComponentServe `json:"serve,omitempty"`
+	Serve *ComponentServe `json:"serve,omitempty" apigen:"default={}"`
 
 	HostKeyRef string `json:"hostKeyRef,omitempty"`
 
-	GuestLoginMount string `json:"guestLoginMount,omitempty"`
+	GuestLoginMount string `json:"guestLoginMount,omitempty" apigen:"default=sshsig,pattern=^[a-z0-9][a-z0-9-]{0,62}$"`
 
-	Role string `json:"role,omitempty"`
+	Role string `json:"role,omitempty" apigen:"default=kcp"`
 
-	GrantSyncSeconds *int32 `json:"grantSyncSeconds,omitempty"`
+	GrantSyncSeconds *int32 `json:"grantSyncSeconds,omitempty" apigen:"default=30,minimum=1"`
 
-	IssuerRetrySeconds *int32 `json:"issuerRetrySeconds,omitempty"`
+	IssuerRetrySeconds *int32 `json:"issuerRetrySeconds,omitempty" apigen:"default=30,minimum=1"`
 
-	HostKeyAttempts *int32 `json:"hostKeyAttempts,omitempty"`
+	HostKeyAttempts *int32 `json:"hostKeyAttempts,omitempty" apigen:"minimum=1"`
 
 	RelayEnabled *bool `json:"relayEnabled,omitempty"`
 }
@@ -505,9 +499,9 @@ type PdsSpec struct {
 
 	Storage *ComponentStorage `json:"storage,omitempty"`
 
-	Serve *ComponentServe `json:"serve,omitempty"`
+	Serve *ComponentServe `json:"serve,omitempty" apigen:"default={}"`
 
-	Mode PdsMode `json:"mode,omitempty"`
+	Mode PdsMode `json:"mode,omitempty" apigen:"default=Full"`
 
 	PlcURL string `json:"plcURL,omitempty" apigen:"userEndpoint"`
 
@@ -584,7 +578,7 @@ type RequesterSpec struct {
 
 	Storage *ComponentStorage `json:"storage,omitempty"`
 
-	Serve *ComponentServe `json:"serve,omitempty"`
+	Serve *ComponentServe `json:"serve,omitempty" apigen:"default={}"`
 
 	PublicOrigin string `json:"publicOrigin,omitempty"`
 
@@ -592,7 +586,7 @@ type RequesterSpec struct {
 
 	OAuthRedirectURI string `json:"oauthRedirectURI,omitempty" apigen:"userEndpoint"`
 
-	Mode string `json:"mode,omitempty"`
+	Mode string `json:"mode,omitempty" apigen:"enum=local|localrepo|callback|oauth|oauthbrowser|oauthqr"`
 
 	GuestSSHKeysFile string `json:"guestSSHKeysFile,omitempty" apigen:"userEndpoint"`
 
@@ -604,29 +598,27 @@ type RequesterSpec struct {
 
 	AcceptCopies int32 `json:"acceptCopies,omitempty"`
 
-	MaxConcurrent int32 `json:"maxConcurrent,omitempty"`
+	MaxConcurrent int32 `json:"maxConcurrent,omitempty" apigen:"default=64,minimum=1"`
 
-	PerAccount int32 `json:"perAccount,omitempty"`
+	PerAccount int32 `json:"perAccount,omitempty" apigen:"default=16,minimum=1"`
 
-	ContractPollMilliseconds *int32 `json:"contractPollMilliseconds,omitempty"`
+	ContractPollMilliseconds *int32 `json:"contractPollMilliseconds,omitempty" apigen:"default=2000,minimum=1"`
 
-	BidWindowSeconds *int32 `json:"bidWindowSeconds,omitempty"`
+	BidWindowSeconds *int32 `json:"bidWindowSeconds,omitempty" apigen:"default=30,minimum=1"`
 
-	ReceiptTimeoutSeconds *int32 `json:"receiptTimeoutSeconds,omitempty"`
+	ReceiptTimeoutSeconds *int32 `json:"receiptTimeoutSeconds,omitempty" apigen:"default=300,minimum=1"`
 
-	ReceiptPollMilliseconds *int32 `json:"receiptPollMilliseconds,omitempty"`
+	ReceiptPollMilliseconds *int32 `json:"receiptPollMilliseconds,omitempty" apigen:"default=500,minimum=1"`
 
-	SessionCapSeconds *int32 `json:"sessionCapSeconds,omitempty"`
+	SessionCapSeconds *int32 `json:"sessionCapSeconds,omitempty" apigen:"default=3600,minimum=1"`
 
-	SessionIdleSeconds *int32 `json:"sessionIdleSeconds,omitempty"`
+	SessionIdleSeconds *int32 `json:"sessionIdleSeconds,omitempty" apigen:"default=300,minimum=1"`
 
-	DirectoryTTLSeconds *int32 `json:"directoryTTLSeconds,omitempty"`
+	DirectoryTTLSeconds *int32 `json:"directoryTTLSeconds,omitempty" apigen:"default=60,minimum=1"`
 
-	DirectoryKeys *int32 `json:"directoryKeys,omitempty"`
+	DirectoryKeys *int32 `json:"directoryKeys,omitempty" apigen:"default=10000,minimum=1"`
 
-	PolicyPollMilliseconds *int32 `json:"policyPollMilliseconds,omitempty"`
-
-	PolicyTimeoutSeconds *int32 `json:"policyTimeoutSeconds,omitempty"`
+	PolicyTimeoutSeconds *int32 `json:"policyTimeoutSeconds,omitempty" apigen:"default=120,minimum=1"`
 
 	OAuthScopes []string `json:"oauthScopes,omitempty"`
 
@@ -663,7 +655,7 @@ type GatewayAPISpec struct {
 
 	Storage *ComponentStorage `json:"storage,omitempty"`
 
-	Serve *ComponentServe `json:"serve,omitempty"`
+	Serve *ComponentServe `json:"serve,omitempty" apigen:"default={}"`
 
 	ClusterProvider *GatewayClusterProvider `json:"clusterProvider,omitempty"`
 
@@ -681,7 +673,7 @@ type GatewayAPISpec struct {
 
 	NodeMarket *GatewayNodeMarket `json:"nodeMarket,omitempty"`
 
-	NodePollIntervalSeconds *int32 `json:"nodePollIntervalSeconds,omitempty"`
+	NodePollIntervalSeconds *int32 `json:"nodePollIntervalSeconds,omitempty" apigen:"minimum=0"`
 }
 
 type GatewayNodeMarket struct {
@@ -699,7 +691,7 @@ type GatewayNodeMarket struct {
 
 	ExtraBidderDIDs []string `json:"extraBidderDIDs,omitempty"`
 
-	PollIntervalSeconds int32 `json:"pollIntervalSeconds,omitempty"`
+	PollIntervalSeconds int32 `json:"pollIntervalSeconds,omitempty" apigen:"default=2,minimum=1"`
 }
 
 type SshServer struct {
@@ -730,25 +722,25 @@ type SshServerSpec struct {
 
 	Storage *ComponentStorage `json:"storage,omitempty"`
 
-	Serve *ComponentServe `json:"serve,omitempty"`
+	Serve *ComponentServe `json:"serve,omitempty" apigen:"default={}"`
 
 	HostKeyRef string `json:"hostKeyRef,omitempty"`
 
 	OwnerSessionsFile string `json:"ownerSessionsFile,omitempty" apigen:"userEndpoint"`
 
-	MaxConnections int32 `json:"maxConnections,omitempty"`
+	MaxConnections int32 `json:"maxConnections,omitempty" apigen:"default=10000,minimum=1"`
 
-	MaxSessions int32 `json:"maxSessions,omitempty"`
+	MaxSessions int32 `json:"maxSessions,omitempty" apigen:"default=1000,minimum=1"`
 
-	SessionsPerAccount int32 `json:"sessionsPerAccount,omitempty"`
+	SessionsPerAccount int32 `json:"sessionsPerAccount,omitempty" apigen:"default=1000,minimum=1"`
 
-	MaxAuthAttempts int32 `json:"maxAuthAttempts,omitempty"`
+	MaxAuthAttempts int32 `json:"maxAuthAttempts,omitempty" apigen:"default=6,minimum=1"`
 
-	AuthTimeoutSeconds *int32 `json:"authTimeoutSeconds,omitempty"`
+	AuthTimeoutSeconds *int32 `json:"authTimeoutSeconds,omitempty" apigen:"default=120,minimum=1"`
 
-	SessionMaxSeconds *int32 `json:"sessionMaxSeconds,omitempty"`
+	SessionMaxSeconds *int32 `json:"sessionMaxSeconds,omitempty" apigen:"default=3600,minimum=1"`
 
-	CacheEntries int32 `json:"cacheEntries,omitempty"`
+	CacheEntries int32 `json:"cacheEntries,omitempty" apigen:"default=1024,minimum=1"`
 }
 
 type Plc struct {
@@ -777,7 +769,7 @@ type PlcSpec struct {
 
 	Storage *ComponentStorage `json:"storage,omitempty"`
 
-	Serve *ComponentServe `json:"serve,omitempty"`
+	Serve *ComponentServe `json:"serve,omitempty" apigen:"default={}"`
 }
 
 type Relay struct {
@@ -808,9 +800,9 @@ type RelaySpec struct {
 
 	Storage *ComponentStorage `json:"storage,omitempty"`
 
-	Serve *ComponentServe `json:"serve,omitempty"`
+	Serve *ComponentServe `json:"serve,omitempty" apigen:"default={}"`
 
-	CrawlIntervalSeconds *int32 `json:"crawlIntervalSeconds,omitempty"`
+	CrawlIntervalSeconds *int32 `json:"crawlIntervalSeconds,omitempty" apigen:"minimum=0"`
 }
 
 type IngressProxy struct {
@@ -859,21 +851,21 @@ type IngressProxySpec struct {
 
 	Storage *ComponentStorage `json:"storage,omitempty"`
 
-	Serve *ComponentServe `json:"serve,omitempty"`
+	Serve *ComponentServe `json:"serve,omitempty" apigen:"default={}"`
 
 	Iroh *IngressProxyIroh `json:"iroh,omitempty"`
 
 	OpenTunnel *IngressProxyOpenTunnel `json:"opentunnel,omitempty"`
 
-	RelayTimeoutMilliseconds *int32 `json:"relayTimeoutMilliseconds,omitempty"`
+	RelayTimeoutMilliseconds *int32 `json:"relayTimeoutMilliseconds,omitempty" apigen:"default=30000,minimum=1"`
 
-	KeepaliveMilliseconds *int32 `json:"keepaliveMilliseconds,omitempty"`
+	KeepaliveMilliseconds *int32 `json:"keepaliveMilliseconds,omitempty" apigen:"default=5000,minimum=1"`
 
-	KeepaliveTimeoutMilliseconds *int32 `json:"keepaliveTimeoutMilliseconds,omitempty"`
+	KeepaliveTimeoutMilliseconds *int32 `json:"keepaliveTimeoutMilliseconds,omitempty" apigen:"default=5000,minimum=1"`
 
-	ReconnectGraceMilliseconds *int32 `json:"reconnectGraceMilliseconds,omitempty"`
+	ReconnectGraceMilliseconds *int32 `json:"reconnectGraceMilliseconds,omitempty" apigen:"minimum=0"`
 
-	NonceTTLMilliseconds *int32 `json:"nonceTTLMilliseconds,omitempty"`
+	NonceTTLMilliseconds *int32 `json:"nonceTTLMilliseconds,omitempty" apigen:"default=60000,minimum=1"`
 }
 
 type IngressProxyIroh struct {
@@ -887,9 +879,9 @@ type IngressProxyIroh struct {
 type IngressProxyOpenTunnel struct {
 	Command []string `json:"command,omitempty"`
 
-	RouteName string `json:"routeName,omitempty"`
+	RouteName string `json:"routeName,omitempty" apigen:"maxLength=63,pattern=^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"`
 
-	ProxyProtocol string `json:"proxyProtocol,omitempty"`
+	ProxyProtocol string `json:"proxyProtocol,omitempty" apigen:"enum=v1|v2"`
 
 	LocalHost string `json:"localHost,omitempty"`
 }
@@ -920,5 +912,5 @@ type DispatcherTLSSpec struct {
 
 	Storage *ComponentStorage `json:"storage,omitempty"`
 
-	Serve *ComponentServe `json:"serve,omitempty"`
+	Serve *ComponentServe `json:"serve,omitempty" apigen:"default={}"`
 }

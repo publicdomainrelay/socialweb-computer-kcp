@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-6.pds.socialweb.computer
+  name: v1alpha1-7.pds.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -162,8 +162,13 @@ spec:
                               type: string
                           routeName:
                             type: string
+                            maxLength: 63
+                            pattern: ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$
                           proxyProtocol:
                             type: string
+                            enum:
+                              - v1
+                              - v2
                           localHost:
                             type: string
                 required:
@@ -262,9 +267,11 @@ spec:
                     type: string
               serve:
                 type: object
+                default: {}
                 properties:
                   host:
                     type: string
+                    default: 127.0.0.1
                   port:
                     type: integer
                     format: int32
@@ -277,6 +284,7 @@ spec:
                 enum:
                   - Repo
                   - Full
+                default: Full
               plcURL:
                 type: string
               publicBaseURL:
