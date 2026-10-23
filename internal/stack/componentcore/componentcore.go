@@ -363,6 +363,9 @@ func (c *Core) pdsEndpoint(workspace, kind, name string) (string, bool) {
 	if c.registry == nil {
 		return "", false
 	}
+	if root, ok := strings.CutSuffix(workspace, ":"+ComponentWorkspace); ok && !c.registry.Has(workspace, kind, name) {
+		workspace = root
+	}
 	if endpoint, ok := c.registry.Endpoint(workspace, kind, name, "http"); ok && endpoint.URL != "" {
 		return endpoint.URL, true
 	}

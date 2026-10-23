@@ -281,7 +281,7 @@ var _ contractmarket.Observer = (*Requester)(nil)
 
 func IdentityWorkspaces(workspace string) []string {
 	workspaces := []string{workspace}
-	if !strings.Contains(workspace, ":") {
+	if !strings.HasSuffix(workspace, ":app") {
 		workspaces = append(workspaces, workspace+":app")
 	}
 	return workspaces
