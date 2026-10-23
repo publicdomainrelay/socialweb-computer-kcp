@@ -500,9 +500,6 @@ func (r *Bus) handlerForHost(host string) (http.Handler, Key, string, bool) {
 func (r *Bus) rootContext() context.Context {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	if r.root == nil {
-		return context.Background()
-	}
 	return r.root
 }
 
