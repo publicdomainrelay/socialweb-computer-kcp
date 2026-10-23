@@ -178,9 +178,8 @@ func (s *Syncer) Register(ctx context.Context, subject GrantSubject) error {
 	stateCtx, cancel := context.WithCancel(s.ctx)
 	state := &guestSync{subject: subject, ctx: stateCtx, cancel: cancel, kick: make(chan struct{}, 1)}
 	s.guests[subject.ComputeVM] = state
-	s.wg.Add(1)
+	s.wg.Go(func() { s.run(state) })
 	s.mu.Unlock()
-	go s.run(state)
 	return nil
 }
 
@@ -234,7 +233,6 @@ func (s *Syncer) Close() {
 }
 
 func (s *Syncer) run(state *guestSync) {
-	defer s.wg.Done()
 	failures := 0
 	for {
 		delay := s.opts.Resync
