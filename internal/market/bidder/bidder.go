@@ -235,6 +235,8 @@ type Bidder struct {
 
 	offerMu sync.Mutex
 
+	offerWrite sync.Mutex
+
 	offeringURI string
 
 	wg sync.WaitGroup
