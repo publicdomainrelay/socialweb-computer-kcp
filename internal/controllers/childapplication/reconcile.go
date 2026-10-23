@@ -4,19 +4,16 @@ import (
 	"cmp"
 	"context"
 	"fmt"
-	"reflect"
 	"regexp"
-	"slices"
 	"sort"
 	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/dynamic"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 )
 
@@ -24,6 +21,10 @@ var dnsLabel = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 
 type observed struct {
 	workspace string
+
+	watched []string
+
+	instance string
 
 	workspaceExists bool
 
@@ -60,32 +61,22 @@ type observed struct {
 	orphanMessage string
 }
 
-func (c *Controller) Reconcile(ctx context.Context, dyn dynamic.Interface, u *unstructured.Unstructured) error {
-	if dyn == nil || u == nil {
-		return nil
-	}
-	var ca v1alpha1.ChildApplication
-	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &ca); err != nil {
-		return fmt.Errorf("childapplication: reading %s: %w", u.GetName(), err)
-	}
-	o, err := c.observe(ctx, &ca)
+func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, ca *v1alpha1.ChildApplication) (ctlruntime.Result, error) {
+	o, err := c.observe(ctx, req, ca)
+	c.index(req, refs{network: networkKey{cluster: req.Cluster, name: ca.Spec.NetworkRef.Name}, instance: o.instance, workspaces: o.watched})
 	if err != nil {
-		return err
+		return ctlruntime.Result{}, err
 	}
-	o.deleting = ca.DeletionTimestamp != nil
-	if err := c.writeStatus(ctx, dyn, ca.GetName(), statusOf(&ca, o)); err != nil {
-		return err
+	o.deleting = !ca.DeletionTimestamp.IsZero()
+	next := ca.DeepCopy()
+	next.Status = statusOf(ca, o)
+	if err := req.ApplyStatus(ctx, next); err != nil {
+		return ctlruntime.Result{}, err
 	}
-	if ca.DeletionTimestamp != nil {
-		if o.workspaceExists && o.orphaned {
-			return nil
-		}
-		return c.releaseFinalizer(ctx, dyn, ca.GetName())
-	}
-	return c.ensureFinalizer(ctx, dyn, ca.GetName(), o.workspaceExists)
+	return ctlruntime.Result{Waiting: o.deleting && o.workspaceExists && o.orphaned}, nil
 }
 
-func (c *Controller) observe(ctx context.Context, ca *v1alpha1.ChildApplication) (observed, error) {
+func (c *Controller) observe(ctx context.Context, req ctlruntime.Request, ca *v1alpha1.ChildApplication) (observed, error) {
 	var o observed
 	if ca.Spec.NetworkRef.Name == "" {
 		o.invalid = "spec.network is required"
@@ -111,11 +102,8 @@ func (c *Controller) observe(ctx context.Context, ca *v1alpha1.ChildApplication)
 	}
 
 	var appStatus *v1alpha1.NetworkAppStatus
-	ndyn, err := c.client(c.networkWorkspace)
-	if err != nil {
-		return o, err
-	}
-	nu, err := ndyn.Resource(MarketNetworkGVR).Get(ctx, ca.Spec.NetworkRef.Name, metav1.GetOptions{})
+	var network v1alpha1.MarketNetwork
+	err := req.Get(ctx, "", ca.Spec.NetworkRef.Name, &network)
 	switch {
 	case apierrors.IsNotFound(err):
 		o.orphaned = true
@@ -124,10 +112,6 @@ func (c *Controller) observe(ctx context.Context, ca *v1alpha1.ChildApplication)
 	case err != nil:
 		return o, err
 	default:
-		var network v1alpha1.MarketNetwork
-		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(nu.Object, &network); err != nil {
-			return o, fmt.Errorf("childapplication: reading the MarketNetwork %s: %w", ca.Spec.NetworkRef.Name, err)
-		}
 		listed := false
 		for i := range network.Spec.Apps {
 			if network.Spec.Apps[i].Name == ca.Spec.App {
@@ -153,47 +137,44 @@ func (c *Controller) observe(ctx context.Context, ca *v1alpha1.ChildApplication)
 	if appStatus != nil && appStatus.Workspace != "" {
 		workspace = appStatus.Workspace
 	}
-	workspace = cmp.Or(workspace, c.networkWorkspace+":"+ca.Spec.App)
+	if appStatus != nil {
+		o.instance = appStatus.Instance
+	}
+	workspace = cmp.Or(workspace, req.Workspace+":"+ca.Spec.App)
 	if !logicalCluster(workspace) {
 		o.invalid = fmt.Sprintf("the child workspace %q is not a logical cluster path", workspace)
 		return o, nil
 	}
 	o.workspace = workspace
+	o.watched = []string{workspace}
 	parent, name, ok := splitCluster(workspace)
 	if !ok {
 		o.invalid = fmt.Sprintf("the child workspace %q is not a logical cluster path", workspace)
 		return o, nil
 	}
-	wdyn, err := c.client(parent)
+	ws, found, err := c.workspaces.Get(ctx, parent, name)
 	if err != nil {
 		return o, err
 	}
-	wu, err := wdyn.Resource(WorkspaceGVR).Get(ctx, name, metav1.GetOptions{})
-	if apierrors.IsNotFound(err) {
-		list, lerr := wdyn.Resource(WorkspaceGVR).List(ctx, metav1.ListOptions{LabelSelector: appWorkspaceLabel + "=" + ca.Spec.App})
-		if lerr != nil && !apierrors.IsNotFound(lerr) && !apierrors.IsForbidden(lerr) {
-			return o, lerr
+	if !found {
+		ws, found, err = c.workspaces.ByLabel(ctx, parent, AppWorkspaceLabel, ca.Spec.App)
+		if err != nil && !absent(err) {
+			return o, err
 		}
-		if lerr == nil {
-			for i := range list.Items {
-				wu = &list.Items[i]
-				o.workspace = parent + ":" + wu.GetName()
-				break
-			}
+		if found {
+			o.workspace = parent + ":" + ws.Name
+			o.watched = append(o.watched, o.workspace)
 		}
-	} else if err != nil {
-		return o, err
 	}
-	if wu != nil {
+	if found {
 		o.workspaceExists = true
-		o.workspaceDeleting = wu.GetDeletionTimestamp() != nil
-		phase, _, _ := unstructured.NestedString(wu.Object, "status", "phase")
-		o.workspaceReady = phase == "Ready" && !o.workspaceDeleting
+		o.workspaceDeleting = ws.Deleting
+		o.workspaceReady = ws.Phase == "Ready" && !ws.Deleting
 	}
 
-	if appStatus != nil && appStatus.Instance != "" {
+	if o.instance != "" {
 		o.coreExpected = true
-		ref, ready, failed, err := c.observeCore(ctx, appStatus.Instance)
+		ref, ready, failed, err := c.observeCore(ctx, o.instance)
 		if err != nil {
 			return o, err
 		}
@@ -216,17 +197,16 @@ func (c *Controller) observe(ctx context.Context, ca *v1alpha1.ChildApplication)
 	return o, nil
 }
 
+func absent(err error) bool {
+	return apierrors.IsNotFound(err) || apierrors.IsForbidden(err) || meta.IsNoMatchError(err)
+}
+
 func statusOf(ca *v1alpha1.ChildApplication, o observed) v1alpha1.ChildApplicationStatus {
 	generation := ca.Generation
 	status := v1alpha1.ChildApplicationStatus{ObservedGeneration: generation, Workspace: o.workspace, CoreRef: o.coreRef,
 		Components: append([]v1alpha1.ChildApplicationComponent(nil), o.components...)}
 	status.Conditions = append([]metav1.Condition(nil), ca.Status.Conditions...)
-	sort.Slice(status.Components, func(i, j int) bool {
-		if status.Components[i].Kind != status.Components[j].Kind {
-			return status.Components[i].Kind < status.Components[j].Kind
-		}
-		return status.Components[i].Name < status.Components[j].Name
-	})
+	sortComponents(status.Components)
 	if len(status.Components) == 0 {
 		status.Components = nil
 	}
@@ -270,94 +250,6 @@ func statusOf(ca *v1alpha1.ChildApplication, o observed) v1alpha1.ChildApplicati
 	conds.Set(&status.Conditions, generation, ConditionOrphaned, orphaned, reason, message)
 	sort.Slice(status.Conditions, func(i, j int) bool { return status.Conditions[i].Type < status.Conditions[j].Type })
 	return status
-}
-
-func (c *Controller) writeStatus(ctx context.Context, dyn dynamic.Interface, name string, status v1alpha1.ChildApplicationStatus) error {
-	object, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&status)
-	if err != nil {
-		return fmt.Errorf("childapplication: encoding the status of %s: %w", name, err)
-	}
-	if object == nil {
-		object = map[string]any{}
-	}
-	ri := dyn.Resource(ChildApplicationGVR)
-	for range 5 {
-		cur, err := ri.Get(ctx, name, metav1.GetOptions{})
-		if apierrors.IsNotFound(err) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		existing, _, _ := unstructured.NestedMap(cur.Object, "status")
-		if reflect.DeepEqual(existing, object) {
-			return nil
-		}
-		cur.Object["status"] = object
-		if _, err := ri.UpdateStatus(ctx, cur, metav1.UpdateOptions{FieldManager: c.fieldManager}); err == nil {
-			return nil
-		} else if !apierrors.IsConflict(err) {
-			return err
-		}
-	}
-	return fmt.Errorf("childapplication: the status of %s stayed in conflict", name)
-}
-
-func (c *Controller) ensureFinalizer(ctx context.Context, dyn dynamic.Interface, name string, add bool) error {
-	if !add {
-		return nil
-	}
-	ri := dyn.Resource(ChildApplicationGVR)
-	for range 5 {
-		cur, err := ri.Get(ctx, name, metav1.GetOptions{})
-		if apierrors.IsNotFound(err) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		if cur.GetDeletionTimestamp() != nil || slices.Contains(cur.GetFinalizers(), Finalizer) {
-			return nil
-		}
-		cur.SetFinalizers(append(cur.GetFinalizers(), Finalizer))
-		if _, err := ri.Update(ctx, cur, metav1.UpdateOptions{FieldManager: c.fieldManager}); err == nil {
-			return nil
-		} else if !apierrors.IsConflict(err) {
-			return err
-		}
-	}
-	return fmt.Errorf("childapplication: the finalizer of %s stayed in conflict", name)
-}
-
-func (c *Controller) releaseFinalizer(ctx context.Context, dyn dynamic.Interface, name string) error {
-	ri := dyn.Resource(ChildApplicationGVR)
-	for range 5 {
-		cur, err := ri.Get(ctx, name, metav1.GetOptions{})
-		if apierrors.IsNotFound(err) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		if !slices.Contains(cur.GetFinalizers(), Finalizer) {
-			return nil
-		}
-		finalizers := make([]string, 0, len(cur.GetFinalizers()))
-		for _, f := range cur.GetFinalizers() {
-			if f != Finalizer {
-				finalizers = append(finalizers, f)
-			}
-		}
-		cur.SetFinalizers(finalizers)
-		if _, err := ri.Update(ctx, cur, metav1.UpdateOptions{FieldManager: c.fieldManager}); err == nil {
-			return nil
-		} else if apierrors.IsNotFound(err) {
-			return nil
-		} else if !apierrors.IsConflict(err) {
-			return err
-		}
-	}
-	return fmt.Errorf("childapplication: the finalizer of %s stayed in conflict", name)
 }
 
 func logicalCluster(s string) bool {
