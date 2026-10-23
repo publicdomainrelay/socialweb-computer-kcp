@@ -1,4 +1,4 @@
-package relay
+package local
 
 import (
 	"encoding/json"
@@ -8,10 +8,8 @@ import (
 	"sort"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	atrelay "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/relay"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 type diskState struct {
@@ -27,7 +25,10 @@ type fileStore struct {
 	collections map[string]map[string]struct{}
 	dirty       atomic.Bool
 	writeMu     sync.Mutex
+	changed     func()
 }
+
+var _ atrelay.Store = (*fileStore)(nil)
 
 func openFileStore(path string) (*fileStore, error) {
 	store := &fileStore{
@@ -66,14 +67,21 @@ func openFileStore(path string) (*fileStore, error) {
 	return store, nil
 }
 
+func (s *fileStore) touch() {
+	s.dirty.Store(true)
+	if s.changed != nil {
+		s.changed()
+	}
+}
+
 func (s *fileStore) PutHost(info atrelay.HostInfo) {
 	s.MemoryStore.PutHost(info)
-	s.dirty.Store(true)
+	s.touch()
 }
 
 func (s *fileStore) PutAccount(info atrelay.AccountInfo) {
 	s.MemoryStore.PutAccount(info)
-	s.dirty.Store(true)
+	s.touch()
 }
 
 func (s *fileStore) AddCollection(collection, did string) {
@@ -86,7 +94,7 @@ func (s *fileStore) AddCollection(collection, did string) {
 	}
 	set[did] = struct{}{}
 	s.mu.Unlock()
-	s.dirty.Store(true)
+	s.touch()
 }
 
 func (s *fileStore) flush() error {
@@ -150,20 +158,4 @@ func (s *fileStore) flush() error {
 		return err
 	}
 	return nil
-}
-
-func (s *fileStore) run(interval time.Duration, done <-chan struct{}, stopped chan<- struct{}) {
-	defer close(stopped)
-	interval = opt.Positive(interval, time.Second)
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-done:
-			_ = s.flush()
-			return
-		case <-ticker.C:
-			_ = s.flush()
-		}
-	}
 }

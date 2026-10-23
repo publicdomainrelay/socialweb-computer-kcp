@@ -48,6 +48,7 @@ type Config struct {
 	HTTPClient    *http.Client
 	DialContext   func(ctx context.Context, network, address string) (net.Conn, error)
 	TLSConfig     *tls.Config
+	BaseContext   context.Context
 }
 
 type EventSink interface {
@@ -112,7 +113,11 @@ func New(cfg Config) *Relay {
 			dir = identity.NewCacheDirectory(base, 100_000, time.Hour, 2*time.Minute, 5*time.Minute)
 		}
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	base := cfg.BaseContext
+	if base == nil {
+		base = context.Background()
+	}
+	ctx, cancel := context.WithCancel(context.WithoutCancel(base))
 	r := &Relay{
 		cfg:        cfg,
 		store:      cfg.Store,
