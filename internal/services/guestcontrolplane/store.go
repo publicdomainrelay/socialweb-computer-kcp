@@ -56,7 +56,7 @@ type VMStore interface {
 
 	List(ctx context.Context) ([]v1alpha1.ComputeVM, error)
 
-	RecordMarket(ctx context.Context, name string, patch v1alpha1.ComputeVMMarket) error
+	RecordGuest(ctx context.Context, name string, report v1alpha1.ComputeVMGuestReport) error
 }
 
 type GuestStore = guestidentity.GrantStore
@@ -93,11 +93,11 @@ func (v *KCPVMs) List(ctx context.Context) ([]v1alpha1.ComputeVM, error) {
 	return v.Res.List(ctx, v.Cluster)
 }
 
-func (v *KCPVMs) RecordMarket(ctx context.Context, name string, patch v1alpha1.ComputeVMMarket) error {
+func (v *KCPVMs) RecordGuest(ctx context.Context, name string, report v1alpha1.ComputeVMGuestReport) error {
 	if v == nil || v.Res == nil {
 		return errors.New("guestcontrolplane: the ComputeVM store is not configured")
 	}
-	if patch.Address == "" && len(patch.HostKeys) == 0 && patch.ReportedAt == "" {
+	if report.Address == "" && len(report.HostKeys) == 0 && report.ReportedAt == "" {
 		return nil
 	}
 	current, err := v.Get(ctx, name)
@@ -107,23 +107,15 @@ func (v *KCPVMs) RecordMarket(ctx context.Context, name string, patch v1alpha1.C
 	if current == nil {
 		return apierrors.NewNotFound(ComputeVMGVR.GroupResource(), name)
 	}
-	merged := computevm.MergeMarket(current.Status.Market, patch, computevm.GuestMarketFields())
-	if reflect.DeepEqual(current.Status.Market, &merged) {
+	if held := computevm.GuestReportOf(current); held != nil && reflect.DeepEqual(*held, report) {
 		return nil
 	}
-	if current.Status.Market == nil && merged.OnNetworkURI == "" && merged.Address == "" && len(merged.HostKeys) == 0 &&
-		merged.HostKeysURI == "" && merged.ReportedAt == "" {
-		return nil
-	}
-	status, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&merged)
+	guest, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&report)
 	if err != nil {
 		return err
 	}
-	if err := v.Res.ApplyStatus(ctx, v.Cluster, "ComputeVM", name, v1alpha1.FieldManagerComputeVMGuest,
-		map[string]any{"market": status}); err != nil {
-		return err
-	}
-	return nil
+	return v.Res.ApplyStatus(ctx, v.Cluster, "ComputeVM", name, v1alpha1.FieldManagerComputeVMMarketGuest,
+		map[string]any{"market": map[string]any{"guest": guest}})
 }
 
 type KCPGrants struct {

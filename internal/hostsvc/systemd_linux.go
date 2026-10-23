@@ -19,6 +19,7 @@ import (
 
 	sd "github.com/coreos/go-systemd/v22/dbus"
 	"github.com/godbus/dbus/v5"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/host"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
 )
 
@@ -29,6 +30,8 @@ const (
 	errNoSuchProcess        = "org.freedesktop.systemd1.NoSuchProcess"
 	errUnixProcessIDUnknown = "org.freedesktop.DBus.Error.UnixProcessIdUnknown"
 )
+
+var _ host.Units = (*systemd)(nil)
 
 type systemd struct {
 	dial    func(ctx context.Context) (bus, error)
@@ -117,12 +120,138 @@ func (m *systemd) StopSlice(ctx context.Context, slice string) error {
 	return nil
 }
 
-// ponytail: Watch polls List every WatchPollInterval; upgrade path is Subscribe plus PropertiesChanged signals on the private socket.
+const unitPathPrefix = "/org/freedesktop/systemd1/unit/"
+
+func unitKey(st UnitStatus) string {
+	return string(st.State) + "|" + st.SubState + "|" + st.InvocationID + "|" + st.Result
+}
+
+func unescapeUnitPath(p dbus.ObjectPath) string {
+	s, ok := strings.CutPrefix(string(p), unitPathPrefix)
+	if !ok || strings.Contains(s, "/") {
+		return ""
+	}
+	var out []byte
+	for i := 0; i < len(s); i++ {
+		if s[i] == '_' && i+2 < len(s) {
+			if b, err := hex.DecodeString(s[i+1 : i+3]); err == nil {
+				out = append(out, b[0])
+				i += 2
+				continue
+			}
+		}
+		out = append(out, s[i])
+	}
+	return string(out)
+}
+
+func signalUnit(sig *dbus.Signal) string {
+	switch sig.Name {
+	case managerIfc + ".UnitNew", managerIfc + ".UnitRemoved":
+		if len(sig.Body) > 0 {
+			name, _ := sig.Body[0].(string)
+			return name
+		}
+	case managerIfc + ".JobRemoved":
+		if len(sig.Body) > 2 {
+			name, _ := sig.Body[2].(string)
+			return name
+		}
+	case "org.freedesktop.DBus.Properties.PropertiesChanged":
+		if len(sig.Body) > 0 {
+			if ifc, _ := sig.Body[0].(string); ifc == systemdDest+".Unit" || ifc == systemdDest+".Service" {
+				return unescapeUnitPath(sig.Path)
+			}
+		}
+	}
+	return ""
+}
+
+func (m *systemd) current(ctx context.Context, name string) (UnitStatus, error) {
+	var units []sd.UnitStatus
+	err := m.do(ctx, func(ctx context.Context, b bus) (err error) {
+		units, err = b.ListUnitsByPatterns(ctx, []string{name})
+		return err
+	})
+	if err != nil {
+		return UnitStatus{}, fmt.Errorf("hostsvc: looking up %s: %w", name, err)
+	}
+	for _, u := range units {
+		if u.Name == name && u.LoadState != "not-found" {
+			return m.Inspect(ctx, name)
+		}
+	}
+	return UnitStatus{Name: name, State: NotFound}, nil
+}
+
 func (m *systemd) Watch(ctx context.Context, prefix string) (<-chan UnitEvent, error) {
 	if err := ValidatePrefix(prefix); err != nil {
 		return nil, err
 	}
-	return pollWatch(ctx, prefix, m.List)
+	dctx, cancel := withDeadline(ctx, m.timeout)
+	b, err := m.dial(dctx)
+	cancel()
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrUnreachable, err)
+	}
+	sigs := make(chan *dbus.Signal, 256)
+	sctx, cancel := withDeadline(ctx, m.timeout)
+	err = b.Subscribe(sctx, sigs)
+	cancel()
+	if err != nil {
+		b.Close()
+		if unreachable(err) {
+			return nil, fmt.Errorf("%w: subscribing to unit signals: %w", ErrUnreachable, err)
+		}
+		return nil, fmt.Errorf("hostsvc: subscribing to unit signals: %w", err)
+	}
+	first, err := m.List(ctx, prefix)
+	if err != nil {
+		b.Close()
+		return nil, err
+	}
+	seen := map[string]string{}
+	for _, st := range first {
+		seen[st.Name] = unitKey(st)
+	}
+	ch := make(chan UnitEvent, 64)
+	stop := context.AfterFunc(ctx, b.Close)
+	go func() {
+		defer close(ch)
+		defer stop()
+		defer b.Close()
+		for sig := range sigs {
+			name := signalUnit(sig)
+			if !strings.HasPrefix(name, prefix) || ValidateName(name) != nil {
+				continue
+			}
+			st, err := m.current(ctx, name)
+			if errors.Is(err, ErrUnreachable) || ctx.Err() != nil {
+				return
+			}
+			if err != nil {
+				continue
+			}
+			if st.State == NotFound {
+				if _, ok := seen[name]; !ok {
+					continue
+				}
+				delete(seen, name)
+			} else {
+				k := unitKey(st)
+				if seen[name] == k {
+					continue
+				}
+				seen[name] = k
+			}
+			select {
+			case ch <- UnitEvent{Name: name, Status: st}:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return ch, nil
 }
 
 func withDeadline(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {

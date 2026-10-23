@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-7.computevms.socialweb.computer
+  name: v1alpha1-8.computevms.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -155,8 +155,33 @@ spec:
                 required:
                   - mount
                   - bindSecretSha256
+              accept:
+                type: object
+                properties:
+                  uri:
+                    type: string
+                  cid:
+                    type: string
+                required:
+                  - uri
+                  - cid
               release:
-                type: boolean
+                type: object
+                properties:
+                  requestedAt:
+                    type: string
+                  request:
+                    type: object
+                    properties:
+                      uri:
+                        type: string
+                      cid:
+                        type: string
+                    required:
+                      - uri
+                      - cid
+                required:
+                  - requestedAt
             required:
               - backendRef
               - vm
@@ -207,54 +232,33 @@ spec:
               market:
                 type: object
                 properties:
-                  onNetworkUri:
-                    type: string
-                  address:
-                    type: string
-                  hostKeys:
-                    type: array
-                    items:
-                      type: object
-                      properties:
-                        type:
-                          type: string
-                        publicKey:
-                          type: string
-                        fingerprint:
-                          type: string
-                      required:
-                        - type
-                        - publicKey
-                  hostKeysUri:
-                    type: string
-                  reportedAt:
-                    type: string
-                  termination:
+                  guest:
                     type: object
                     properties:
-                      reason:
+                      address:
                         type: string
-                      observedAt:
+                      reportedAt:
                         type: string
-                      exitCode:
-                        type: integer
-                      request:
-                        type: object
-                        properties:
-                          uri:
-                            type: string
-                          cid:
-                            type: string
-                        required:
-                          - uri
-                          - cid
-                      payloadUri:
+                      hostKeys:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            type:
+                              type: string
+                            publicKey:
+                              type: string
+                            fingerprint:
+                              type: string
+                          required:
+                            - type
+                            - publicKey
+                  published:
+                    type: object
+                    properties:
+                      onNetworkUri:
                         type: string
-                      payloadCid:
-                        type: string
-                      eventUri:
-                        type: string
-                      eventCid:
+                      hostKeysUri:
                         type: string
       additionalPrinterColumns:
         - name: Phase

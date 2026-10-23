@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -34,8 +35,8 @@ const (
 	ManifestSet      = "hostprocesses"
 	ProviderSet      = "provider"
 	DefaultWorkspace = "root"
-	DefaultInterval  = 5 * time.Second
 	RetryAfter       = 2 * time.Second
+	MaxRetryAfter    = time.Minute
 	MirrorPrefix     = "bootstrap-"
 	MirrorLabel      = "socialweb.computer/placement"
 	ConditionReady   = "Ready"
@@ -65,7 +66,6 @@ type Config struct {
 	Bound        bool
 	Resolve      func(v1alpha1.HostProcessAsset) (string, error)
 	Mirrors      func() []Mirror
-	Interval     time.Duration
 	ApplyTimeout time.Duration
 	Selector     string
 	KeepOrphans  bool
@@ -84,6 +84,76 @@ type Supervisor struct {
 	locks    sync.Map
 	placedAt map[string]time.Time
 	slices   map[string]bool
+	units    map[string]string
+	backoff  map[string]time.Duration
+	pending  map[string]bool
+	pids     map[string]int64
+	outputs  map[string]follower
+	changed  chan string
+}
+
+type follower struct {
+	key  string
+	stop context.CancelFunc
+}
+
+func (s *Supervisor) track(name, unit string, gone bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if gone {
+		for u, n := range s.units {
+			if n == name {
+				delete(s.units, u)
+			}
+		}
+		return
+	}
+	if unit == "" {
+		return
+	}
+	if s.units == nil {
+		s.units = map[string]string{}
+	}
+	s.units[unit] = name
+}
+
+func (s *Supervisor) objectOf(unit string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	name, ok := s.units[unit]
+	return name, ok
+}
+
+func (s *Supervisor) settle(ctx context.Context, name string, retry bool, pid int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !retry {
+		delete(s.backoff, name)
+		delete(s.pids, name)
+		return
+	}
+	if s.backoff == nil {
+		s.backoff, s.pending, s.pids = map[string]time.Duration{}, map[string]bool{}, map[string]int64{}
+	}
+	if s.pids[name] != pid {
+		delete(s.backoff, name)
+		s.pids[name] = pid
+	}
+	if s.changed == nil || s.pending[name] {
+		return
+	}
+	d := min(max(2*s.backoff[name], RetryAfter), MaxRetryAfter)
+	s.backoff[name], s.pending[name] = d, true
+	ch := s.changed
+	time.AfterFunc(d, func() {
+		s.mu.Lock()
+		delete(s.pending, name)
+		s.mu.Unlock()
+		select {
+		case ch <- name:
+		case <-ctx.Done():
+		}
+	})
 }
 
 func (s *Supervisor) setPlaced(unit string, on bool) {
@@ -138,13 +208,24 @@ func (s *Supervisor) reconcileObject(ctx context.Context, cur *unstructured.Unst
 		s.c.log().Warn("decoding", "name", cur.GetName(), "err", err.Error())
 		return o, false
 	}
+	s.track(o.Name, o.Spec.Unit, false)
 	s.capOutput(o)
 	obs := s.observe(ctx, o)
 	s.markAdopted(o, obs)
-	next := s.apply(ctx, o, Reconcile(obs))
-	if err := s.writeStatus(ctx, cur, next); err != nil && !apierrors.IsConflict(err) {
+	r := Reconcile(obs)
+	next, failed := s.apply(ctx, o, r)
+	err = s.writeStatus(ctx, cur, next)
+	if err != nil && !apierrors.IsConflict(err) {
 		s.c.log().Warn("writing status", "name", o.Name, "err", err.Error())
 	}
+	s.followOutput(ctx, next)
+	rt := next.Status.Runtime
+	listening := next.Status.Phase == v1alpha1.HostProcessPhaseRunning && rt != nil && rt.Pid > 0 && len(next.Status.Listeners) == 0
+	var pid int64
+	if listening {
+		pid = rt.Pid
+	}
+	s.settle(ctx, o.Name, failed || r.Unknown || err != nil || listening, pid)
 	return o, true
 }
 
@@ -328,10 +409,10 @@ func (s *Supervisor) observe(ctx context.Context, o v1alpha1.HostProcess) Observ
 	return obs
 }
 
-func (s *Supervisor) apply(ctx context.Context, o v1alpha1.HostProcess, r Result) v1alpha1.HostProcess {
+func (s *Supervisor) apply(ctx context.Context, o v1alpha1.HostProcess, r Result) (v1alpha1.HostProcess, bool) {
 	m := s.c.Manager
 	log := s.c.log().With("hostprocess", o.Name, "unit", o.Spec.Unit)
-	started, stopFailed := false, false
+	started, stopFailed, failed := false, false, false
 	for _, op := range r.Ops {
 		if stopFailed {
 			break
@@ -350,6 +431,7 @@ func (s *Supervisor) apply(ctx context.Context, o v1alpha1.HostProcess, r Result
 			}
 			if err != nil {
 				r.Phase, r.Message = v1alpha1.HostProcessPhaseFailed, err.Error()
+				failed = true
 				log.Warn("start", "err", err.Error())
 				if !wasPlaced {
 					s.setPlaced(op.Unit, false)
@@ -362,7 +444,7 @@ func (s *Supervisor) apply(ctx context.Context, o v1alpha1.HostProcess, r Result
 		case OpStop:
 			if err := m.Stop(ctx, op.Unit); err != nil {
 				log.Warn("stop", "err", err.Error())
-				stopFailed = true
+				stopFailed, failed = true, true
 				continue
 			}
 			s.setPlaced(op.Unit, false)
@@ -372,7 +454,7 @@ func (s *Supervisor) apply(ctx context.Context, o v1alpha1.HostProcess, r Result
 	next := o
 	if r.Unknown {
 		next.Status.Message = r.Message
-		return next
+		return next, failed
 	}
 	next.Status.Phase, next.Status.LostReason, next.Status.Message = r.Phase, r.LostReason, r.Message
 	next.Status.ObservedGeneration = o.Generation
@@ -406,7 +488,7 @@ func (s *Supervisor) apply(ctx context.Context, o v1alpha1.HostProcess, r Result
 	conds.SetOn(&next, ConditionReady, next.Status.Phase == v1alpha1.HostProcessPhaseRunning, string(next.Status.Phase), next.Status.Message)
 	caps := m.Capabilities()
 	conds.SetOn(&next, ConditionLimits, caps.EnforcesLimits, string(caps.Backend), "limits are enforced only where the backend has cgroups")
-	return next
+	return next, failed
 }
 
 func (s *Supervisor) writeStatus(ctx context.Context, cur *unstructured.Unstructured, next v1alpha1.HostProcess) error {
@@ -529,21 +611,106 @@ func (s *Supervisor) sweepSlices(ctx context.Context, live []string) {
 	}
 }
 
-func (s *Supervisor) capOutput(o v1alpha1.HostProcess) {
+func outputFiles(o v1alpha1.HostProcess) ([]string, int64) {
 	out := o.Spec.Output
 	if out == nil {
+		return nil, 0
+	}
+	var files []string
+	for _, f := range []string{out.Stdout, out.Stderr} {
+		if f != "" && !slices.Contains(files, f) {
+			files = append(files, f)
+		}
+	}
+	return files, cmp.Or(out.CapBytes, logcap.DefaultCap)
+}
+
+const OutputDebounce = time.Second
+
+func (s *Supervisor) followOutput(ctx context.Context, o v1alpha1.HostProcess) {
+	files, capBytes := outputFiles(o)
+	key := ""
+	if o.DeletionTimestamp == nil && o.Status.Phase == v1alpha1.HostProcessPhaseRunning && len(files) > 0 {
+		key = strings.Join(files, "\n") + "\n" + strconv.FormatInt(capBytes, 10)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if cur, ok := s.outputs[o.Name]; ok {
+		if cur.key == key {
+			return
+		}
+		cur.stop()
+		delete(s.outputs, o.Name)
+	}
+	if key == "" {
 		return
 	}
-	capBytes := out.CapBytes
-	capBytes = cmp.Or(capBytes, logcap.DefaultCap)
-	files := []string{out.Stdout}
-	if out.Stderr != out.Stdout {
-		files = append(files, out.Stderr)
+	w, err := fsnotify.NewWatcher()
+	if err != nil {
+		s.c.log().Warn("output files are capped only at reconcile: no file watch", "name", o.Name, "err", err.Error())
+		return
 	}
 	for _, f := range files {
-		if f == "" {
-			continue
+		if err := w.Add(f); err != nil {
+			w.Close()
+			s.c.log().Warn("output files are capped only at reconcile: watching an output file failed", "name", o.Name, "file", f, "err", err.Error())
+			return
 		}
+	}
+	fctx, cancel := context.WithCancel(ctx)
+	if s.outputs == nil {
+		s.outputs = map[string]follower{}
+	}
+	s.outputs[o.Name] = follower{key: key, stop: cancel}
+	go s.rotateOnWrite(fctx, w, o, key)
+}
+
+func (s *Supervisor) unfollowOutput(name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if cur, ok := s.outputs[name]; ok {
+		cur.stop()
+		delete(s.outputs, name)
+	}
+}
+
+func (s *Supervisor) rotateOnWrite(ctx context.Context, w *fsnotify.Watcher, o v1alpha1.HostProcess, key string) {
+	defer w.Close()
+	defer func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if cur, ok := s.outputs[o.Name]; ok && cur.key == key && ctx.Err() == nil {
+			cur.stop()
+			delete(s.outputs, o.Name)
+		}
+	}()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case _, ok := <-w.Errors:
+			if !ok {
+				return
+			}
+		case ev, ok := <-w.Events:
+			if !ok || ev.Has(fsnotify.Remove) || ev.Has(fsnotify.Rename) {
+				return
+			}
+		}
+		unlock := s.lockObject(o.Name)
+		s.capOutput(o)
+		unlock()
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(OutputDebounce):
+		}
+	}
+}
+
+func (s *Supervisor) capOutput(o v1alpha1.HostProcess) {
+	files, capBytes := outputFiles(o)
+	for _, f := range files {
 		ok, err := logcap.Rotate(f, capBytes)
 		if err != nil {
 			s.c.log().Warn("an output file over its cap was not rotated", "name", o.Name, "file", f, "err", err.Error())
@@ -555,14 +722,13 @@ func (s *Supervisor) capOutput(o v1alpha1.HostProcess) {
 }
 
 func (s *Supervisor) Run(ctx context.Context) error {
-	interval := s.c.Interval
-	interval = cmp.Or(interval, DefaultInterval)
 	s.c.log().Info("the HostProcess supervisor runs in the core", "workspace", s.c.workspace(), "backend", string(s.backend),
 		"prefixes", s.c.prefixes())
-	t := time.NewTicker(interval)
-	defer t.Stop()
 	wake := make(chan struct{}, 1)
 	changed := make(chan string, 1024)
+	s.mu.Lock()
+	s.changed = changed
+	s.mu.Unlock()
 	var wg sync.WaitGroup
 	defer wg.Wait()
 	for range EventWorkers {
@@ -578,14 +744,17 @@ func (s *Supervisor) Run(ctx context.Context) error {
 		})
 	}
 	wg.Go(func() { s.watch(ctx, wake, changed) })
+	for _, prefix := range s.c.prefixes() {
+		wg.Go(func() { s.watchUnits(ctx, prefix, wake, changed) })
+	}
 	for {
 		if err := s.Pass(ctx); err != nil {
-			s.c.log().Warn("a reconcile pass failed; units keep running", "err", err.Error())
+			s.c.log().Warn("a reconcile pass failed; units keep running and the pass retries", "err", err.Error(), "after", RetryAfter.String())
+			time.AfterFunc(RetryAfter, func() { poke(wake) })
 		}
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-t.C:
 		case <-wake:
 			select {
 			case <-ctx.Done():
@@ -604,6 +773,13 @@ const WakeDebounce = 100 * time.Millisecond
 
 const EventWorkers = 4
 
+func poke(wake chan<- struct{}) {
+	select {
+	case wake <- struct{}{}:
+	default:
+	}
+}
+
 func (s *Supervisor) watch(ctx context.Context, wake chan<- struct{}, changedCh chan<- string) {
 	generations := map[string]int64{}
 	failing := false
@@ -611,7 +787,7 @@ func (s *Supervisor) watch(ctx context.Context, wake chan<- struct{}, changedCh 
 		w, err := s.client.Watch(ctx, metav1.ListOptions{LabelSelector: s.c.Selector})
 		if err != nil {
 			if !failing {
-				s.c.log().Warn("watching HostProcess objects failed; the supervisor keeps its interval and retries the watch", "err", err.Error())
+				s.c.log().Warn("watching HostProcess objects failed; the supervisor retries the watch", "err", err.Error(), "after", RetryAfter.String())
 				failing = true
 			}
 			select {
@@ -625,14 +801,19 @@ func (s *Supervisor) watch(ctx context.Context, wake chan<- struct{}, changedCh 
 			s.c.log().Info("watching HostProcess objects again")
 			failing = false
 		}
+		poke(wake)
 		for ev := range w.ResultChan() {
 			u, ok := ev.Object.(*unstructured.Unstructured)
 			if !ok {
 				continue
 			}
 			name, gen := u.GetName(), u.GetGeneration()
+			unit, _, _ := unstructured.NestedString(u.Object, "spec", "unit")
+			s.track(name, unit, ev.Type == watch.Deleted)
+			if ev.Type == watch.Deleted {
+				s.unfollowOutput(name)
+			}
 			changed := ev.Type != watch.Modified || generations[name] != gen
-			changedNames := changedCh
 			if ev.Type == watch.Deleted {
 				delete(generations, name)
 			} else {
@@ -643,17 +824,62 @@ func (s *Supervisor) watch(ctx context.Context, wake chan<- struct{}, changedCh 
 			}
 			if ev.Type != watch.Deleted {
 				select {
-				case changedNames <- name:
+				case changedCh <- name:
 					continue
 				default:
 				}
 			}
-			select {
-			case wake <- struct{}{}:
-			default:
-			}
+			poke(wake)
 		}
 		w.Stop()
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(RetryAfter):
+		}
+	}
+}
+
+func (s *Supervisor) watchUnits(ctx context.Context, prefix string, wake chan<- struct{}, changed chan<- string) {
+	failing := false
+	for ctx.Err() == nil {
+		events, err := s.c.Manager.Watch(ctx, prefix)
+		if err != nil {
+			if !failing {
+				s.c.log().Warn("watching units failed; the supervisor retries the watch", "prefix", prefix, "err", err.Error(), "after", RetryAfter.String())
+				failing = true
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(RetryAfter):
+			}
+			continue
+		}
+		if failing {
+			s.c.log().Info("watching units again", "prefix", prefix)
+			failing = false
+		}
+		poke(wake)
+		for ev := range events {
+			name, ok := s.objectOf(ev.Name)
+			if !ok {
+				if !s.c.KeepOrphans {
+					poke(wake)
+				}
+				continue
+			}
+			select {
+			case changed <- name:
+			default:
+				poke(wake)
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(RetryAfter):
+		}
 	}
 }
 

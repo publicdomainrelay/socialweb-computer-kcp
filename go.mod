@@ -5,6 +5,7 @@ go 1.26.6
 require (
 	github.com/bluesky-social/indigo v0.0.0-20261020053033-bdacece3f80e
 	github.com/coreos/go-systemd/v22 v22.7.0
+	github.com/fsnotify/fsnotify v1.9.0
 	github.com/fxamacker/cbor/v2 v2.9.1
 	github.com/go-logr/logr v1.4.4
 	github.com/godbus/dbus/v5 v5.1.0
@@ -49,7 +50,6 @@ require (
 	github.com/earthboundkid/versioninfo/v2 v2.24.1 // indirect
 	github.com/emicklei/go-restful/v3 v3.13.0 // indirect
 	github.com/evanphx/json-patch/v5 v5.9.11 // indirect
-	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/go-jose/go-jose/v3 v3.0.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-openapi/jsonpointer v1.0.0 // indirect

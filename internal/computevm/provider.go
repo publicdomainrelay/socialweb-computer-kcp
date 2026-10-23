@@ -17,12 +17,6 @@ import (
 )
 
 const (
-	AcceptAnnotation = "socialweb.computer/accept"
-
-	ReleaseRequestedAnnotation = "socialweb.computer/release-requested"
-
-	ReleaseRequestAnnotation = "socialweb.computer/release-request"
-
 	GuestLoginDefaultMount = "sshsig"
 
 	GuestLoginSecretBytes = 32
@@ -75,6 +69,8 @@ type VMInput struct {
 	Accept *AcceptRef
 
 	Contract *v1alpha1.ComputeVMContract
+
+	Owner *metav1.OwnerReference
 }
 
 func UserDataPath(name string) string {
@@ -124,8 +120,11 @@ func ComputeVMFor(in VMInput) (*v1alpha1.ComputeVM, error) {
 			Requester:  v1alpha1.ComputeVMRequester{Did: in.RequesterDID},
 		},
 	}
-	if key := in.Accept.Key(); key != "" {
-		o.Annotations = map[string]string{AcceptAnnotation: key}
+	if in.Accept != nil && in.Accept.Key() != "" {
+		o.Spec.Accept = &commonv1.StrongRef{URI: in.Accept.URI, CID: in.Accept.CID}
+	}
+	if in.Owner != nil {
+		o.OwnerReferences = []metav1.OwnerReference{*in.Owner}
 	}
 	if in.Contract != nil {
 		contract := *in.Contract
@@ -230,39 +229,29 @@ func checkContract(contract *v1alpha1.ComputeVMContract) error {
 }
 
 func AcceptKeyOf(o *v1alpha1.ComputeVM) string {
-	if o == nil {
+	if o == nil || o.Spec.Accept == nil {
 		return ""
 	}
-	return o.Annotations[AcceptAnnotation]
+	return AcceptRef{URI: o.Spec.Accept.URI, CID: o.Spec.Accept.CID}.Key()
 }
 
 func ReleaseRequested(o *v1alpha1.ComputeVM) bool {
-	if o == nil {
-		return false
-	}
-	return strings.TrimSpace(o.Annotations[ReleaseRequestedAnnotation]) != ""
+	return o != nil && o.Spec.Release != nil
 }
 
 func ReleaseRequestedAt(o *v1alpha1.ComputeVM) string {
-	if o == nil {
+	if o == nil || o.Spec.Release == nil {
 		return ""
 	}
-	return strings.TrimSpace(o.Annotations[ReleaseRequestedAnnotation])
+	return strings.TrimSpace(o.Spec.Release.RequestedAt)
 }
 
 func ReleaseRequestRef(o *v1alpha1.ComputeVM) *commonv1.StrongRef {
-	if o == nil {
+	if o == nil || o.Spec.Release == nil || o.Spec.Release.Request == nil || strings.TrimSpace(o.Spec.Release.Request.URI) == "" {
 		return nil
 	}
-	raw := strings.TrimSpace(o.Annotations[ReleaseRequestAnnotation])
-	if raw == "" {
-		return nil
-	}
-	uri, cid, found := strings.Cut(raw, "#")
-	if !found || strings.TrimSpace(uri) == "" {
-		return nil
-	}
-	return &commonv1.StrongRef{URI: strings.TrimSpace(uri), CID: strings.TrimSpace(cid)}
+	request := *o.Spec.Release.Request
+	return &request
 }
 
 func ContractReceipt(o *v1alpha1.ComputeVM) string {

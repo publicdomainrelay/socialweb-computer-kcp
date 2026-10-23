@@ -134,3 +134,5 @@ const (
 
 	BidConditionStalled = "Stalled"
 )
+
+const FieldManagerBid = "socialweb.computer/bidder"

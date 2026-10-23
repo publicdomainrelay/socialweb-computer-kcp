@@ -1,6 +1,7 @@
 package devcore
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -169,14 +170,6 @@ func Run(ctx context.Context, cfg Config, m hostsvc.Manager) error {
 			hostprocess.Supervise(ctx, hpCfg)
 			return nil
 		})
-		if cfg.ComputeVM != nil {
-			c := *cfg.ComputeVM
-			c.Kubeconfig, c.Workspace = rec.AdminKubeconfig, HostProcessConfig(bcfg, rec, m, log).Workspace
-			g.Go("computevm", func(ctx context.Context) error {
-				computevm.Run(ctx, c)
-				return nil
-			})
-		}
 		baoCfg := OpenBaoServerConfig(bcfg, rec, log)
 		g.Go("openbaoctl", func(ctx context.Context) error {
 			openbaoctl.Supervise(ctx, baoCfg)
@@ -356,6 +349,11 @@ func ComponentCoreConfig(ctx context.Context, cfg Config, rec devinstance.Record
 		FrontControl:            rec.Layout.FrontControl(),
 		InstallStateRoot:        install.StateRoot,
 		NodeClaimAgent:          cfg.NodeClaimAgent,
+	}
+	if cfg.ComputeVM != nil {
+		c := *cfg.ComputeVM
+		c.Kubeconfig, c.Workspace = rec.AdminKubeconfig, cmp.Or(rec.BaseWorkspace, hostprocess.DefaultWorkspace)
+		out.Compute = &c
 	}
 	if rec.AdminKubeconfig != "" {
 		if n, err := appctl.ReadNetwork(ctx, rec.AdminKubeconfig); err == nil && n.Status.Network != nil {

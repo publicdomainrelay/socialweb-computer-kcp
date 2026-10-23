@@ -260,7 +260,7 @@ func (g *Guest) RecordBoundHostKey(ctx context.Context, computevmName string) (b
 	if err != nil {
 		return false, err
 	}
-	if held := o.Status.Market; held != nil && len(held.HostKeys) > 0 {
+	if held := computevm.GuestReportOf(o); held != nil && len(held.HostKeys) > 0 {
 		return true, nil
 	}
 	line, err := g.identity.BoundHostKey(ctx, computevmName)

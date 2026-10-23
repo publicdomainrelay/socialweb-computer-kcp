@@ -49,17 +49,21 @@ func (s *Service) reportOnce(ctx context.Context) {
 		if contract == nil || contract.Receipt.URI == "" || contract.Receipt.CID == "" {
 			continue
 		}
-		held := vm.Status.Market
+		held := computevm.GuestReportOf(vm)
 		if held == nil {
 			continue
 		}
-		s.reportOnNetwork(ctx, vm, held)
-		s.reportHostKeys(ctx, vm, held)
+		published := v1alpha1.ComputeVMPublished{}
+		if p := computevm.PublishedOf(vm); p != nil {
+			published = *p
+		}
+		s.reportOnNetwork(ctx, vm, held, published)
+		s.reportHostKeys(ctx, vm, held, published)
 	}
 }
 
-func (s *Service) reportOnNetwork(ctx context.Context, vm *v1alpha1.ComputeVM, held *v1alpha1.ComputeVMMarket) {
-	if held.Address == "" || held.OnNetworkURI != "" {
+func (s *Service) reportOnNetwork(ctx context.Context, vm *v1alpha1.ComputeVM, held *v1alpha1.ComputeVMGuestReport, published v1alpha1.ComputeVMPublished) {
+	if held.Address == "" || published.OnNetworkURI != "" {
 		return
 	}
 	createdAt := held.ReportedAt
@@ -76,11 +80,11 @@ func (s *Service) reportOnNetwork(ctx context.Context, vm *v1alpha1.ComputeVM, h
 		s.log.Warn("ensuring the onNetwork report StateSync failed", "computevm", vm.Name, "err", err)
 		return
 	}
-	s.recordReportURI(ctx, vm, name, market.ComputeEventsVMOnNetworkNSID)
+	s.recordReportURI(ctx, vm, name, market.ComputeEventsVMOnNetworkNSID, published)
 }
 
-func (s *Service) reportHostKeys(ctx context.Context, vm *v1alpha1.ComputeVM, held *v1alpha1.ComputeVMMarket) {
-	if len(held.HostKeys) == 0 || held.HostKeysURI != "" {
+func (s *Service) reportHostKeys(ctx context.Context, vm *v1alpha1.ComputeVM, held *v1alpha1.ComputeVMGuestReport, published v1alpha1.ComputeVMPublished) {
+	if len(held.HostKeys) == 0 || published.HostKeysURI != "" {
 		return
 	}
 	observedAt := held.ReportedAt
@@ -102,21 +106,20 @@ func (s *Service) reportHostKeys(ctx context.Context, vm *v1alpha1.ComputeVM, he
 		s.log.Warn("ensuring the hostKeys report StateSync failed", "computevm", vm.Name, "err", err)
 		return
 	}
-	s.recordReportURI(ctx, vm, name, market.ComputeEventsVMHostKeysNSID)
+	s.recordReportURI(ctx, vm, name, market.ComputeEventsVMHostKeysNSID, published)
 }
 
-func (s *Service) recordReportURI(ctx context.Context, vm *v1alpha1.ComputeVM, name, collection string) {
+func (s *Service) recordReportURI(ctx context.Context, vm *v1alpha1.ComputeVM, name, collection string, report v1alpha1.ComputeVMPublished) {
 	uri := s.observedReportURI(ctx, name)
 	if uri == "" {
 		return
 	}
-	report := v1alpha1.ComputeVMMarket{}
 	if collection == market.ComputeEventsVMOnNetworkNSID {
 		report.OnNetworkURI = uri
 	} else {
 		report.HostKeysURI = uri
 	}
-	if err := s.vms.PatchMarket(ctx, vm.Name, report); err != nil {
+	if err := s.vms.PublishMarket(ctx, vm.Name, report); err != nil {
 		if ctx.Err() == nil {
 			s.log.Warn("recording a ComputeVM market report URI failed", "computevm", vm.Name, "err", err)
 		}

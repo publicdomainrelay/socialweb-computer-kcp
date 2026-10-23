@@ -14,6 +14,8 @@ import (
 	policyv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/policy/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
+
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/ref"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/controller"
@@ -129,10 +131,8 @@ func (h *ComputeVMHandler) Dispatch(ctx context.Context, spec json.RawMessage, _
 			Requester:  v1alpha1.ComputeVMRequester{Did: input.RequesterDID, Plc: strings.TrimSpace(decoded.Requester.Plc)},
 		},
 	}
-	if input.Accept != nil {
-		if key := input.Accept.Key(); key != "" {
-			vm.Annotations = map[string]string{computevm.AcceptAnnotation: key}
-		}
+	if input.Accept != nil && input.Accept.Key() != "" {
+		vm.Spec.Accept = &commonv1.StrongRef{URI: input.Accept.URI, CID: input.Accept.CID}
 	}
 	if input.Contract != nil {
 		contract := *input.Contract

@@ -17,6 +17,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	"sigs.k8s.io/controller-runtime/pkg/cluster"
@@ -26,6 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 	mcbuilder "sigs.k8s.io/multicluster-runtime/pkg/builder"
 	mchandler "sigs.k8s.io/multicluster-runtime/pkg/handler"
 	"sigs.k8s.io/multicluster-runtime/pkg/multicluster"
@@ -39,6 +41,8 @@ type Object interface {
 
 type Result struct {
 	RequeueAfter time.Duration
+
+	Waiting bool
 }
 
 type Reconciler[T Object] interface {
@@ -72,6 +76,8 @@ type scope struct {
 
 	finalizer string
 
+	sharedStatus bool
+
 	log *slog.Logger
 }
 
@@ -87,6 +93,12 @@ type options struct {
 	owns []client.Object
 
 	watches []watchInput
+
+	only func(client.Object) bool
+
+	events []<-chan Request
+
+	sharedStatus bool
 
 	backoffBase time.Duration
 
@@ -121,6 +133,30 @@ func Backoff(base, max time.Duration) Option {
 
 func Workers(n int) Option {
 	return func(o *options) { o.workers = n }
+}
+
+func SharedStatus() Option {
+	return func(o *options) { o.sharedStatus = true }
+}
+
+func Events(ch <-chan Request) Option {
+	return func(o *options) {
+		if ch != nil {
+			o.events = append(o.events, ch)
+		}
+	}
+}
+
+func Only[T Object](keep func(T) bool) Option {
+	return func(o *options) {
+		if keep == nil {
+			return
+		}
+		o.only = func(obj client.Object) bool {
+			typed, ok := obj.(T)
+			return ok && keep(typed)
+		}
+	}
 }
 
 func Owns[C Object]() Option {
@@ -200,8 +236,11 @@ func For[T Object](m *Manager, name string, r Reconciler[T], opts ...Option) err
 	for _, w := range o.watches {
 		b = b.Watches(w.object, m.mapHandler(o.export, w.mapFunc), inExport)
 	}
-	a := &adapter[T]{m: m, name: name, r: r, limiter: limiter, log: log,
-		scope: scope{scheme: m.scheme, fieldManager: o.fieldManager, finalizer: o.finalizer, log: log}}
+	for _, ch := range o.events {
+		b = b.WatchesRawSource(eventSource(o.export, ch))
+	}
+	a := &adapter[T]{m: m, name: name, r: r, limiter: limiter, log: log, only: o.only,
+		scope: scope{scheme: m.scheme, fieldManager: o.fieldManager, finalizer: o.finalizer, sharedStatus: o.sharedStatus, log: log}}
 	if err := b.Complete(a); err != nil {
 		return fmt.Errorf("runtime: building the controller %s: %w", name, err)
 	}
@@ -228,6 +267,22 @@ func (m *Manager) mapHandler(export string, mapFunc func(ctx context.Context, sr
 	}
 }
 
+func eventSource(export string, ch <-chan Request) source.TypedSource[mcreconcile.Request] {
+	events := make(chan event.TypedGenericEvent[mcreconcile.Request])
+	go func() {
+		defer close(events)
+		for r := range ch {
+			events <- event.TypedGenericEvent[mcreconcile.Request]{Object: mcreconcile.Request{
+				ClusterName: multicluster.ClusterName(export + clusterSeparator + r.Cluster),
+				Request:     reconcile.Request{NamespacedName: types.NamespacedName{Namespace: r.Namespace, Name: r.Name}}}}
+		}
+	}()
+	return source.TypedChannel(events, handler.TypedFuncs[mcreconcile.Request, mcreconcile.Request]{
+		GenericFunc: func(_ context.Context, e event.TypedGenericEvent[mcreconcile.Request], q workqueue.TypedRateLimitingInterface[mcreconcile.Request]) {
+			q.Add(e.Object)
+		}})
+}
+
 func specOrDeletion() predicate.Predicate {
 	return predicate.Or(predicate.GenerationChangedPredicate{}, predicate.Funcs{
 		UpdateFunc: func(e event.UpdateEvent) bool {
@@ -250,6 +305,8 @@ type adapter[T Object] struct {
 
 	log *slog.Logger
 
+	only func(client.Object) bool
+
 	scope scope
 }
 
@@ -268,6 +325,9 @@ func (a *adapter[T]) Reconcile(ctx context.Context, mcreq mcreconcile.Request) (
 			return reconcile.Result{}, nil
 		}
 		return reconcile.Result{}, a.failed(mcreq, lc, mcreq.Name, err)
+	}
+	if a.only != nil && !a.only(obj) {
+		return reconcile.Result{}, nil
 	}
 	s := a.scope
 	s.client = cl.GetClient()
@@ -289,7 +349,7 @@ func (a *adapter[T]) Reconcile(ctx context.Context, mcreq mcreconcile.Request) (
 	if err != nil {
 		return reconcile.Result{}, a.failed(mcreq, req.Workspace, req.Name, err)
 	}
-	if s.finalizer != "" && !obj.GetDeletionTimestamp().IsZero() && controllerutil.ContainsFinalizer(obj, s.finalizer) {
+	if s.finalizer != "" && !res.Waiting && !obj.GetDeletionTimestamp().IsZero() && controllerutil.ContainsFinalizer(obj, s.finalizer) {
 		if err := req.applyFinalizer(ctx, obj, false); err != nil {
 			return reconcile.Result{}, a.failed(mcreq, req.Workspace, req.Name, err)
 		}

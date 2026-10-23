@@ -31,7 +31,6 @@ const (
 	DevWorkspace        = "root:dev"
 	ChildWorkspaceType  = "dev-instance"
 	HostInterval        = time.Second
-	ChildInterval       = time.Second
 	HostApplyTimeout    = time.Minute
 	ChildWorkspaceReady = 30 * time.Second
 )
@@ -278,7 +277,7 @@ func (h *host) pass(ctx context.Context, log *slog.Logger) error {
 		cctx, cancel := context.WithCancel(ctx)
 		h.children[id] = cancel
 		childCfg := hostprocess.Config{Kubeconfig: h.c.Kubeconfig, Workspace: ChildWorkspace(id), Manager: h.c.Manager,
-			Prefixes: Prefixes(id), Bound: true, Resolve: h.c.Resolve, Interval: ChildInterval, Log: log.With("child", id)}
+			Prefixes: Prefixes(id), Bound: true, Resolve: h.c.Resolve, Log: log.With("child", id)}
 		h.wg.Go(func() { hostprocess.Supervise(cctx, childCfg) })
 		log.Info("a child instance's workspace is supervised", "child", id, "workspace", ChildWorkspace(id))
 	}

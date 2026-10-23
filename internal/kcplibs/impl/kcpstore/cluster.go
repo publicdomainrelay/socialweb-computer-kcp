@@ -153,3 +153,25 @@ func (r *ClusterResource[T]) ApplyStatus(ctx context.Context, cluster, kind, nam
 	}
 	return nil
 }
+
+func (r *ClusterResource[T]) ApplySpec(ctx context.Context, cluster, kind, name, fieldManager string, spec map[string]any) error {
+	c, err := r.client(cluster)
+	if err != nil {
+		return err
+	}
+	body, err := json.Marshal(map[string]any{
+		"apiVersion": r.gvr.GroupVersion().String(),
+		"kind":       kind,
+		"metadata":   map[string]any{"name": name},
+		"spec":       spec,
+	})
+	if err != nil {
+		return fmt.Errorf("kcpstore: encode %s spec: %w", r.gvr.Resource, err)
+	}
+	response, err := c.Patch(types.ApplyPatchType).Resource(r.gvr.Resource).Name(name).
+		Param("fieldManager", fieldManager).Param("force", "true").Body(body).Do(ctx).Raw()
+	if err != nil {
+		return fmt.Errorf("kcpstore: apply %s spec for %s in %s: %w%s", r.gvr.Resource, name, cluster, err, ResponseDetail(response))
+	}
+	return nil
+}

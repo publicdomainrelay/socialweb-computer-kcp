@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-1.firecrackervms.socialweb.computer
+  name: v1alpha1-2.firecrackervms.socialweb.computer
   labels:
     contracts.socialweb.computer/computevms: v1alpha1
 spec:
@@ -144,18 +144,33 @@ spec:
                 properties:
                   backend:
                     type: string
-                  ref:
+                  hypervisor:
                     type: string
-                  instance:
+                  unit:
+                    type: string
+                  invocationID:
                     type: string
                   pid:
+                    type: integer
+                    format: int64
+                  startTicks:
                     type: integer
                     format: int64
                   startTime:
                     type: string
                   hostBootID:
                     type: string
+                  manager:
+                    type: string
                   vmmID:
+                    type: string
+                  vmmUID:
+                    type: integer
+                    format: int64
+                  slot:
+                    type: integer
+                    format: int32
+                  socket:
                     type: string
               workDir:
                 type: string
@@ -177,7 +192,7 @@ spec:
           jsonPath: .status.network.guestIP
         - name: Unit
           type: string
-          jsonPath: .status.runtime.ref
+          jsonPath: .status.runtime.unit
         - name: PID
           type: integer
           jsonPath: .status.runtime.pid

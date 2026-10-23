@@ -51,8 +51,8 @@ func (c Config) vaultMount() string {
 	return c.VaultMount
 }
 
-func (ct *Controller) server(ctx context.Context, name string) (*v1alpha1.OpenBaoServer, error) {
-	u, err := ct.servers.Get(ctx, name, metav1.GetOptions{})
+func (h *Host) server(ctx context.Context, name string) (*v1alpha1.OpenBaoServer, error) {
+	u, err := h.servers.Get(ctx, name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		return nil, nil
 	}
@@ -66,17 +66,17 @@ func (ct *Controller) server(ctx context.Context, name string) (*v1alpha1.OpenBa
 	return &o, nil
 }
 
-func (ct *Controller) vaultFor(ctx context.Context, server string) (*openbao.Client, error) {
-	o, err := ct.server(ctx, server)
+func (h *Host) vaultFor(ctx context.Context, server string) (*openbao.Client, error) {
+	o, err := h.server(ctx, server)
 	if err != nil {
 		return nil, err
 	}
 	if o == nil {
 		return nil, fmt.Errorf("no OpenBaoServer %s in this workspace", server)
 	}
-	client, _, err := openbaoctl.ClientLogin(ctx, o.Status, ct.c.vaultClient())
+	client, _, err := openbaoctl.ClientLogin(ctx, o.Status, h.c.vaultClient())
 	if err != nil {
-		return nil, fmt.Errorf("the OpenBaoServer %s as client %s: %w", server, ct.c.vaultClient(), err)
+		return nil, fmt.Errorf("the OpenBaoServer %s as client %s: %w", server, h.c.vaultClient(), err)
 	}
 	return client, nil
 }
@@ -89,16 +89,15 @@ func userDataPath(ref commonv1.SecretRef) (string, error) {
 	return mount + "/data/" + path, nil
 }
 
-func (ct *Controller) userData(ctx context.Context, o v1alpha1.ComputeVM) (string, bool, error) {
-	ref := o.Spec.UserData.Vault
+func (h *Host) UserData(ctx context.Context, name string, ref commonv1.SecretRef) (string, bool, error) {
 	path, err := userDataPath(ref)
 	if err != nil {
 		return "", false, err
 	}
 	server := v1alpha1.VaultServer(ref.Vault, "")
-	client, err := ct.vaultFor(ctx, server)
+	client, err := h.vaultFor(ctx, server)
 	if err != nil {
-		ct.c.log().Info("the user data waits for the bidder's vault", "computevm", o.Name, "err", err.Error())
+		h.c.log().Info("the user data waits for the bidder's vault", "computevm", name, "err", err.Error())
 		return "", false, nil
 	}
 	data, err := client.GetKV(ctx, path)
@@ -127,16 +126,13 @@ func guestScope(d *v1alpha1.OpenBaoServerDeclared, mount string) (int, bool) {
 	return 0, false
 }
 
-func (ct *Controller) declareGuests(ctx context.Context, have map[string]bool) error {
-	names := make([]string, 0, len(have))
-	for n := range have {
-		names = append(names, n)
-	}
+func (h *Host) DeclareGuests(ctx context.Context, names []string) error {
+	names = slices.Clone(names)
 	sort.Strings(names)
-	server, mount := ct.c.vaultServer(), ct.c.vaultMount()
+	server, mount := h.c.vaultServer(), h.c.vaultMount()
 	want := v1alpha1.OpenBaoKVScope{Mount: mount, Prefix: v1alpha1.GuestVaultPrefix, Keys: names, Grace: VaultGrace.String()}
 	for attempt := 0; ; attempt++ {
-		u, err := ct.servers.Get(ctx, server, metav1.GetOptions{})
+		u, err := h.servers.Get(ctx, server, metav1.GetOptions{})
 		if apierrors.IsNotFound(err) {
 			return nil
 		}
@@ -171,13 +167,13 @@ func (ct *Controller) declareGuests(ctx context.Context, have map[string]bool) e
 		if err != nil {
 			return err
 		}
-		if _, err := ct.servers.Update(ctx, next, metav1.UpdateOptions{FieldManager: v1alpha1.FieldManagerComputeVMController}); err != nil {
+		if _, err := h.servers.Update(ctx, next, metav1.UpdateOptions{FieldManager: v1alpha1.FieldManagerComputeVMController}); err != nil {
 			if apierrors.IsConflict(err) && attempt < VaultConflictOf {
 				continue
 			}
 			return err
 		}
-		ct.c.log().Info("the bidder's vault declares exactly the live ComputeVMs' guest material", "openbaoserver", server,
+		h.c.log().Info("the bidder's vault declares exactly the live ComputeVMs' guest material", "openbaoserver", server,
 			"scope", mount+"/"+v1alpha1.GuestVaultPrefix, "guests", names)
 		return nil
 	}

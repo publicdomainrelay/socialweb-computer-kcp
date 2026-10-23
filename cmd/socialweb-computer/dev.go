@@ -936,8 +936,7 @@ func runDevCore(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 			return a.fail(exitFailed, "internal dev-core: the instance is a bidder application instance (handle %s) and its VM runtime does not open: %v", rec.VM.Handle, err)
 		}
 		defer vm.Close()
-		cfg.ComputeVM = &computevm.Config{Handle: rec.VM.Handle, Runtime: rt, Manager: vm, Log: a.log,
-			TerminationReportTimeout: computevm.DefaultTerminationReportTimeout}
+		cfg.ComputeVM = &computevm.Config{Handle: rec.VM.Handle, Runtime: rt, Manager: vm, Log: a.log}
 	}
 	if err := devcore.Run(ctx, cfg, m); err != nil {
 		if errors.Is(err, context.Canceled) {

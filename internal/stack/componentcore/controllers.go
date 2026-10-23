@@ -323,6 +323,7 @@ func (c *Core) buildControllers() {
 	if strings.TrimSpace(base) == DefaultWorkspace {
 		c.buildManager(caBundle)
 	}
+	c.buildCompute()
 
 	handlers := c.handlers
 	if handlers == nil {

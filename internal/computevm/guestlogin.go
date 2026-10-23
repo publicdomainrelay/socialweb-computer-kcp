@@ -69,7 +69,7 @@ func GuestLoginRef(o v1alpha1.ComputeVM, scopes []string) (*GuestLoginRefs, erro
 	return ref, nil
 }
 
-func (ct *Controller) ensureGuestLogin(ctx context.Context, o v1alpha1.ComputeVM) error {
+func (h *Host) EnsureGuestLogin(ctx context.Context, o v1alpha1.ComputeVM) error {
 	path, err := guestLoginRole(o)
 	if errors.Is(err, errNoLogin) {
 		return nil
@@ -77,7 +77,7 @@ func (ct *Controller) ensureGuestLogin(ctx context.Context, o v1alpha1.ComputeVM
 	if err != nil {
 		return err
 	}
-	client, err := ct.vaultFor(ctx, v1alpha1.VaultServer(o.Spec.UserData.Vault.Vault, ""))
+	client, err := h.vaultFor(ctx, v1alpha1.VaultServer(o.Spec.UserData.Vault.Vault, ""))
 	if err != nil {
 		return err
 	}
@@ -99,50 +99,50 @@ func (ct *Controller) ensureGuestLogin(ctx context.Context, o v1alpha1.ComputeVM
 	if err := client.Write(ctx, path, body); err != nil {
 		return fmt.Errorf("writing the guest login role %s: %w", path, err)
 	}
-	ct.c.log().Info("the guest's login role is in the bidder's OpenBao; the guest binds its ssh host key to it once",
+	h.c.log().Info("the guest's login role is in the bidder's OpenBao; the guest binds its ssh host key to it once",
 		"computevm", o.Name, "role", path, "alias", GuestAliasPrefix+o.Name)
 	return nil
 }
 
-func (ct *Controller) dropGuestLogin(ctx context.Context, o v1alpha1.ComputeVM) {
+func (h *Host) DropGuestLogin(ctx context.Context, o v1alpha1.ComputeVM) {
 	path, err := guestLoginRole(o)
 	if err != nil {
 		return
 	}
 	server := v1alpha1.VaultServer(o.Spec.UserData.Vault.Vault, "")
-	client, err := ct.vaultFor(ctx, server)
+	client, err := h.vaultFor(ctx, server)
 	if err == nil {
 		err = client.Delete(ctx, path)
 	}
 	if err != nil {
-		ct.c.log().Warn("the guest login role stays in the bidder's OpenBao", "computevm", o.Name, "role", path, "err", err.Error())
+		h.c.log().Warn("the guest login role stays in the bidder's OpenBao", "computevm", o.Name, "role", path, "err", err.Error())
 		return
 	}
-	ct.c.log().Info("the guest login role is gone with its ComputeVM", "computevm", o.Name, "role", path)
+	h.c.log().Info("the guest login role is gone with its ComputeVM", "computevm", o.Name, "role", path)
 }
 
-func (ct *Controller) dropGuestGrants(ctx context.Context, o v1alpha1.ComputeVM) {
-	list, err := ct.grants.List(ctx, metav1.ListOptions{})
+func (h *Host) DropGuestGrants(ctx context.Context, name string) {
+	list, err := h.grants.List(ctx, metav1.ListOptions{})
 	if err != nil {
 		if !apierrors.IsNotFound(err) {
-			ct.c.log().Warn("listing the GuestIdentityGrants of a released ComputeVM", "computevm", o.Name, "err", err.Error())
+			h.c.log().Warn("listing the GuestIdentityGrants of a released ComputeVM", "computevm", name, "err", err.Error())
 		}
 		return
 	}
 	for _, it := range list.Items {
 		spec, _ := it.Object["spec"].(map[string]any)
-		if fmt.Sprint(spec["computevm"]) != o.Name {
+		if fmt.Sprint(spec["computevm"]) != name {
 			continue
 		}
-		if err := ct.grants.Delete(ctx, it.GetName(), metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
-			ct.c.log().Warn("deleting a GuestIdentityGrant of a released ComputeVM", "computevm", o.Name, "grant", it.GetName(), "err", err.Error())
+		if err := h.grants.Delete(ctx, it.GetName(), metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+			h.c.log().Warn("deleting a GuestIdentityGrant of a released ComputeVM", "computevm", name, "grant", it.GetName(), "err", err.Error())
 			continue
 		}
-		ct.c.log().Info("a GuestIdentityGrant goes with its ComputeVM", "computevm", o.Name, "grant", it.GetName())
+		h.c.log().Info("a GuestIdentityGrant goes with its ComputeVM", "computevm", name, "grant", it.GetName())
 	}
 }
 
-func refusedLogin(err error) bool {
+func RefusedLogin(err error) bool {
 	var re *openbao.ResponseError
 	if errors.As(err, &re) {
 		return re.Status >= 400 && re.Status < 500 && re.Status != 403

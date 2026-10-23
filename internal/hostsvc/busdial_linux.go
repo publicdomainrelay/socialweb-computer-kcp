@@ -31,6 +31,7 @@ type bus interface {
 	UnitByPIDFD(ctx context.Context, fd int) (string, string, error)
 	Version(ctx context.Context) (string, error)
 	ManagerStarted(ctx context.Context) (uint64, error)
+	Subscribe(ctx context.Context, ch chan<- *dbus.Signal) error
 	Close()
 }
 
@@ -87,13 +88,14 @@ func dialPrivate(path string) func(ctx context.Context) (bus, error) {
 		if err != nil {
 			return nil, dialError{fmt.Errorf("%s: %w", path, err)}
 		}
-		return &sdBus{conn: conn, raw: conns[0]}, nil
+		return &sdBus{conn: conn, raw: conns[0], sig: conns[1]}, nil
 	}
 }
 
 type sdBus struct {
 	conn *sd.Conn
 	raw  *dbus.Conn
+	sig  *dbus.Conn
 }
 
 func (b *sdBus) StartTransientUnit(ctx context.Context, name string, props []sd.Property, ch chan<- string) error {
@@ -178,6 +180,11 @@ func (b *sdBus) ManagerStarted(ctx context.Context) (uint64, error) {
 		return 0, fmt.Errorf("hostsvc: the manager's UserspaceTimestampMonotonic is a %T, not a uint64", v.Value())
 	}
 	return n, nil
+}
+
+func (b *sdBus) Subscribe(ctx context.Context, ch chan<- *dbus.Signal) error {
+	b.sig.Signal(ch)
+	return b.sig.Object(systemdDest, systemdPath).CallWithContext(ctx, managerIfc+".Subscribe", 0).Err
 }
 
 func (b *sdBus) Close() {

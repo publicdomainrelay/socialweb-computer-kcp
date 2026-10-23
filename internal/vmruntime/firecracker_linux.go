@@ -17,6 +17,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
+
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/fcapi"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestdisk"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestimage"
@@ -256,15 +258,27 @@ func (r *firecracker) Placed(handle, name string) Prepared {
 
 func (r *firecracker) StopGrace() time.Duration { return r.cfg.StopGrace }
 
-func (r *firecracker) Shutdown(ctx context.Context, ref RuntimeRef, grace time.Duration) (bool, error) {
-	live := func(st hostsvc.UnitStatus) bool {
-		return st.State == hostsvc.Active || st.State == hostsvc.Activating || st.State == hostsvc.Deactivating
+func (r *firecracker) awaitDown(ctx context.Context, unit string, grace time.Duration) (bool, error) {
+	gctx, cancel := context.WithTimeout(ctx, grace)
+	defer cancel()
+	_, err := hostsvc.Await(gctx, r.cfg.Manager, unit, func(st hostsvc.UnitStatus) bool { return !hostsvc.Live(st) })
+	switch {
+	case err == nil:
+		return true, nil
+	case ctx.Err() != nil:
+		return false, ctx.Err()
+	case gctx.Err() != nil:
+		return false, nil
 	}
+	return false, err
+}
+
+func (r *firecracker) Shutdown(ctx context.Context, ref RuntimeRef, grace time.Duration) (bool, error) {
 	st, err := r.cfg.Manager.Inspect(ctx, ref.Unit)
 	if err != nil {
 		return false, err
 	}
-	if !live(st) {
+	if !hostsvc.Live(st) {
 		return true, nil
 	}
 	if !GracefulStop() || ref.Socket == "" {
@@ -273,22 +287,7 @@ func (r *firecracker) Shutdown(ctx context.Context, ref RuntimeRef, grace time.D
 	if err := fcapi.NewClient(ref.Socket, 2*time.Second).SendCtrlAltDel(ctx); err != nil {
 		return false, nil
 	}
-	deadline := time.Now().Add(grace)
-	for time.Now().Before(deadline) {
-		select {
-		case <-ctx.Done():
-			return false, ctx.Err()
-		case <-time.After(50 * time.Millisecond):
-		}
-		st, err = r.cfg.Manager.Inspect(ctx, ref.Unit)
-		if err != nil {
-			return false, err
-		}
-		if !live(st) {
-			return true, nil
-		}
-	}
-	return false, nil
+	return r.awaitDown(ctx, ref.Unit, grace)
 }
 
 func (r *firecracker) Reserve(ctx context.Context, p Prepared, place Placer) (int, error) {
@@ -376,32 +375,90 @@ func (r *firecracker) grant(p Prepared, vmmUID int) error {
 	return fsx.WriteJSON(filepath.Join(p.WorkDir, GrantsFile), outside, 0o600)
 }
 
-func (r *firecracker) Await(ctx context.Context, p Prepared, slot int) (RuntimeRef, error) {
+const (
+	DialRetryMin = 10 * time.Millisecond
+	DialRetryMax = time.Second
+)
+
+func (r *firecracker) awaitBoot(ctx context.Context, p Prepared) error {
+	bctx, cancel := context.WithTimeout(ctx, r.cfg.BootTimeout)
+	defer cancel()
+	sock, err := fsnotify.NewWatcher()
+	if err != nil {
+		return fmt.Errorf("vmruntime: watching %s: %w", p.SocketDir, err)
+	}
+	defer sock.Close()
+	if err := sock.Add(p.SocketDir); err != nil {
+		return fmt.Errorf("vmruntime: watching %s: %w", p.SocketDir, err)
+	}
+	units, _ := r.cfg.Manager.Watch(bctx, p.Unit)
+	exited := func(st hostsvc.UnitStatus) error {
+		if st.State != hostsvc.Active && st.State != hostsvc.Activating {
+			return fmt.Errorf("vmruntime: %s went %s (result %s, status %d) before its VMM answered", p.Unit, st.State, st.Result, st.ExecMainStatus)
+		}
+		return nil
+	}
+	if st, err := r.cfg.Manager.Inspect(bctx, p.Unit); err == nil {
+		if err := exited(st); err != nil {
+			return err
+		}
+	}
 	client := fcapi.NewClient(p.Socket, 2*time.Second)
-	deadline := time.Now().Add(r.cfg.BootTimeout)
-	var last error
+	last := fmt.Errorf("the API socket %s is not there", p.Socket)
+	delay := DialRetryMin
+	var again <-chan time.Time
+	check := true
 	for {
-		st, err := r.cfg.Manager.Inspect(ctx, p.Unit)
-		if err == nil && st.State != hostsvc.Active && st.State != hostsvc.Activating {
-			return RuntimeRef{}, fmt.Errorf("vmruntime: %s went %s (result %s, status %d) before its VMM answered", p.Unit, st.State, st.Result, st.ExecMainStatus)
+		if check && fsx.Exists(p.Socket) {
+			in, err := client.Describe(bctx)
+			switch {
+			case err == nil && in.ID == p.VMMID && in.State == fcapi.StateRunning:
+				return nil
+			case err != nil:
+				last = err
+				again = time.After(delay)
+				delay = min(2*delay, DialRetryMax)
+			default:
+				last = fmt.Errorf("the VMM answers id %q state %q", in.ID, in.State)
+			}
 		}
-		in, err := client.Describe(ctx)
-		if err == nil && in.ID == p.VMMID && in.State == fcapi.StateRunning {
-			break
-		}
-		if err != nil {
-			last = err
-		} else {
-			last = fmt.Errorf("the VMM answers id %q state %q", in.ID, in.State)
-		}
-		if time.Now().After(deadline) {
-			return RuntimeRef{}, fmt.Errorf("vmruntime: %s: the VMM was not Running within %s: %v", p.Unit, r.cfg.BootTimeout, last)
-		}
+		check = false
 		select {
-		case <-ctx.Done():
-			return RuntimeRef{}, ctx.Err()
-		case <-time.After(50 * time.Millisecond):
+		case <-bctx.Done():
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return fmt.Errorf("vmruntime: %s: the VMM was not Running within %s: %v", p.Unit, r.cfg.BootTimeout, last)
+		case ev, ok := <-units:
+			if !ok {
+				units = nil
+				continue
+			}
+			if ev.Name == p.Unit {
+				if err := exited(ev.Status); err != nil {
+					return err
+				}
+			}
+			check = true
+		case ev, ok := <-sock.Events:
+			if !ok {
+				return fmt.Errorf("vmruntime: the watch of %s ended", p.SocketDir)
+			}
+			check = filepath.Clean(ev.Name) == filepath.Clean(p.Socket)
+		case err, ok := <-sock.Errors:
+			if !ok {
+				return fmt.Errorf("vmruntime: the watch of %s ended", p.SocketDir)
+			}
+			last, check = err, true
+		case <-again:
+			again, check = nil, true
 		}
+	}
+}
+
+func (r *firecracker) Await(ctx context.Context, p Prepared, slot int) (RuntimeRef, error) {
+	if err := r.awaitBoot(ctx, p); err != nil {
+		return RuntimeRef{}, err
 	}
 	st, err := r.cfg.Manager.Inspect(ctx, p.Unit)
 	if err != nil {
@@ -467,17 +524,8 @@ func (r *firecracker) Stop(ctx context.Context, ref RuntimeRef) (StopResult, err
 	}
 	if GracefulStop() && (st.State == hostsvc.Active || st.State == hostsvc.Activating) {
 		if err := fcapi.NewClient(ref.Socket, 2*time.Second).SendCtrlAltDel(ctx); err == nil {
-			deadline := time.Now().Add(r.cfg.StopGrace)
-			for time.Now().Before(deadline) {
-				st, err = r.cfg.Manager.Inspect(ctx, ref.Unit)
-				if err != nil {
-					return res, err
-				}
-				if st.State != hostsvc.Active && st.State != hostsvc.Activating && st.State != hostsvc.Deactivating {
-					res.Graceful = true
-					break
-				}
-				time.Sleep(50 * time.Millisecond)
+			if res.Graceful, err = r.awaitDown(ctx, ref.Unit, r.cfg.StopGrace); err != nil {
+				return res, err
 			}
 		}
 	}

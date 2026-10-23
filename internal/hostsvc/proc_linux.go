@@ -11,7 +11,11 @@ import (
 	"net"
 	"strings"
 	"time"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/host"
 )
+
+var _ host.Units = (*proc)(nil)
 
 type proc struct {
 	socket    string

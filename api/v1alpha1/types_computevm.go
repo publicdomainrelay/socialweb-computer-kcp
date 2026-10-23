@@ -40,7 +40,15 @@ type ComputeVMSpec struct {
 
 	GuestLogin *ComputeVMGuestLogin `json:"guestLogin,omitempty"`
 
-	Release bool `json:"release,omitempty"`
+	Accept *commonv1.StrongRef `json:"accept,omitempty"`
+
+	Release *ComputeVMRelease `json:"release,omitempty"`
+}
+
+type ComputeVMRelease struct {
+	RequestedAt string `json:"requestedAt"`
+
+	Request *commonv1.StrongRef `json:"request,omitempty"`
 }
 
 type ComputeVMGuestLogin struct {
@@ -136,17 +144,23 @@ type ComputeVMHostKey struct {
 }
 
 type ComputeVMMarket struct {
-	OnNetworkURI string `json:"onNetworkUri,omitempty"`
+	Guest *ComputeVMGuestReport `json:"guest,omitempty"`
 
+	Published *ComputeVMPublished `json:"published,omitempty"`
+}
+
+type ComputeVMGuestReport struct {
 	Address string `json:"address,omitempty"`
-
-	HostKeys []ComputeVMHostKey `json:"hostKeys,omitempty"`
-
-	HostKeysURI string `json:"hostKeysUri,omitempty"`
 
 	ReportedAt string `json:"reportedAt,omitempty"`
 
-	Termination *ComputeVMTermination `json:"termination,omitempty"`
+	HostKeys []ComputeVMHostKey `json:"hostKeys,omitempty"`
+}
+
+type ComputeVMPublished struct {
+	OnNetworkURI string `json:"onNetworkUri,omitempty"`
+
+	HostKeysURI string `json:"hostKeysUri,omitempty"`
 }
 
 type ComputeVMTermination struct {
@@ -191,30 +205,18 @@ const (
 	ComputeVMConditionBackendBound = commonv1.ConditionBackendBound
 )
 
-const (
-	ConditionPrepared = "Prepared"
-
-	ConditionStarted = "Started"
-
-	ConditionRuntimeObserved = "RuntimeObserved"
-
-	ConditionGuestReported = "GuestReported"
-
-	ConditionMarketReported = "MarketReported"
-)
-
 const BackendKindFirecrackerVM = "FirecrackerVM"
 
 const FinalizerComputeVM = "computevm.socialweb.computer/release"
 
 const (
-	FieldManagerComputeVMController = "computevm-controller"
+	FieldManagerComputeVMCreator = "socialweb.computer/bidder"
 
-	FieldManagerComputeVMProvider = "compute-provider-kcp"
+	FieldManagerComputeVMController = "socialweb.computer/computevm"
 
-	FieldManagerComputeVMContract = "compute-provider-kcp-contract"
+	FieldManagerComputeVMMarketGuest = "socialweb.computer/guestcontrolplane"
 
-	FieldManagerComputeVMGuest = "compute-provider-kcp-guest"
+	FieldManagerComputeVMMarketPublished = "socialweb.computer/bidder"
 )
 
 const GuestHostAddress = "192.0.2.1"

@@ -37,7 +37,21 @@ var (
 type GuestStore interface {
 	Get(ctx context.Context, name string) (*v1alpha1.ComputeVM, error)
 
-	RecordMarket(ctx context.Context, name string, patch v1alpha1.ComputeVMMarket) error
+	RecordGuest(ctx context.Context, name string, report v1alpha1.ComputeVMGuestReport) error
+}
+
+func GuestReportOf(o *v1alpha1.ComputeVM) *v1alpha1.ComputeVMGuestReport {
+	if o == nil || o.Status.Market == nil {
+		return nil
+	}
+	return o.Status.Market.Guest
+}
+
+func PublishedOf(o *v1alpha1.ComputeVM) *v1alpha1.ComputeVMPublished {
+	if o == nil || o.Status.Market == nil {
+		return nil
+	}
+	return o.Status.Market.Published
 }
 
 type GuestRecord struct {
@@ -110,14 +124,19 @@ func (g *GuestRecord) OnNetwork(ctx context.Context, name, acceptURI, acceptCID,
 	if c := o.Spec.Contract; c != nil && c.Accept.URI != "" && (c.Accept.URI != acceptURI || c.Accept.CID != acceptCID) {
 		return ErrUnknownAccept
 	}
-	if m := o.Status.Market; m != nil && m.Address == address && m.ReportedAt != "" {
+	held := GuestReportOf(o)
+	if held != nil && held.Address == address && held.ReportedAt != "" {
 		return nil
 	}
 	reportedAt := strings.TrimSpace(createdAt)
 	if reportedAt == "" {
 		reportedAt = g.now().UTC().Format(time.RFC3339)
 	}
-	if err := g.Store.RecordMarket(ctx, name, v1alpha1.ComputeVMMarket{Address: address, ReportedAt: reportedAt}); err != nil {
+	next := v1alpha1.ComputeVMGuestReport{Address: address, ReportedAt: reportedAt}
+	if held != nil {
+		next.HostKeys = append([]v1alpha1.ComputeVMHostKey(nil), held.HostKeys...)
+	}
+	if err := g.Store.RecordGuest(ctx, name, next); err != nil {
 		if apierrors.IsNotFound(err) {
 			return ErrUnknownGuest
 		}
@@ -139,13 +158,18 @@ func (g *GuestRecord) HostKeys(ctx context.Context, name string, keys []v1alpha1
 	if err := RequireEd25519(checked); err != nil {
 		return fmt.Errorf("%w: %v", ErrReportRefused, err)
 	}
-	if held := o.Status.Market; held != nil && len(held.HostKeys) > 0 {
+	held := GuestReportOf(o)
+	if held != nil && len(held.HostKeys) > 0 {
 		if SameHostKeys(held.HostKeys, checked) {
 			return nil
 		}
 		return fmt.Errorf("%w: host keys are already reported for this guest", ErrReportRefused)
 	}
-	if err := g.Store.RecordMarket(ctx, name, v1alpha1.ComputeVMMarket{HostKeys: checked}); err != nil {
+	next := v1alpha1.ComputeVMGuestReport{HostKeys: checked}
+	if held != nil {
+		next.Address, next.ReportedAt = held.Address, held.ReportedAt
+	}
+	if err := g.Store.RecordGuest(ctx, name, next); err != nil {
 		if apierrors.IsNotFound(err) {
 			return ErrUnknownGuest
 		}
