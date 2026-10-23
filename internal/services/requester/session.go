@@ -128,7 +128,7 @@ func (s *Service) runTransientCommand(ctx context.Context, account sshtransport.
 	}
 	defer func() {
 		if !truthy(lc["LC_KEEP_VM"]) {
-			releaseCtx, releaseCancel := context.WithTimeout(context.Background(), s.cfg.ReleaseTimeout)
+			releaseCtx, releaseCancel := context.WithTimeout(context.WithoutCancel(ctx), s.cfg.ReleaseTimeout)
 			defer releaseCancel()
 			if err := s.releaseSession(releaseCtx, target); err != nil {
 				s.log.Warn("requester_session_release_failed", "vm", target.VMName, "err", err)
