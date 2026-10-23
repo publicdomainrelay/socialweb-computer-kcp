@@ -128,9 +128,6 @@ func Register(reg Registrar, o Options) (*Controller, error) {
 }
 
 func (c *Controller) Run(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	for ctx.Err() == nil {
 		if err := c.round(ctx); err != nil && ctx.Err() == nil {
 			c.log.Warn("watching child applications", "workspace", c.workspace, "err", err.Error())

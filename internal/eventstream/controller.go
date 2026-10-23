@@ -171,9 +171,6 @@ func (c *Controller) Handlers() *HandlerRegistry {
 }
 
 func (c *Controller) Run(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var workers sync.WaitGroup

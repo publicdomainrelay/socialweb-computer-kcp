@@ -88,9 +88,6 @@ func publicEndpoint(raw string) error {
 }
 
 func (s *Service) Start(ctx context.Context, deps component.Deps) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	s.mu.Lock()
 	if s.started {
 		s.mu.Unlock()
@@ -432,9 +429,6 @@ func (s *Service) Ready(ctx context.Context) error {
 	if !started || rawURL == "" || handlers == nil {
 		return errors.New("pds: the service is not registered")
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	probeCtx, cancel := context.WithTimeout(ctx, healthTimeout)
 	defer cancel()
 	if err := xrpc.Health(probeCtx, &xrpc.Client{Host: rawURL, HTTP: handlers.HTTPClient()}); err != nil {
@@ -453,9 +447,6 @@ func (s *Service) Endpoints() []component.Endpoint {
 }
 
 func (s *Service) Stop(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	s.mu.Lock()
 	stopCh := s.stopCh
 	s.mu.Unlock()

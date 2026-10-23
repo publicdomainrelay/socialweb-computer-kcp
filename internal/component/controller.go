@@ -97,9 +97,6 @@ func NewController(cfg ControllerConfig) (*Controller, error) {
 }
 
 func (c *Controller) Run(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	if err := c.runtime.Start(ctx); err != nil {
 		return err
 	}
@@ -238,9 +235,6 @@ func (c *Controller) worker(ctx context.Context) {
 func (c *Controller) writeStatus(ctx context.Context, spec ComponentSpec, status ComponentStatus) error {
 	if c.status == nil {
 		return nil
-	}
-	if ctx == nil {
-		ctx = context.Background()
 	}
 	if err := c.status.WriteStatus(ctx, spec, status); err != nil {
 		c.log.Warn("component: writing status failed",

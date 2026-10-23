@@ -43,13 +43,6 @@ func NewSystem(ctx context.Context, out io.Writer) (System, error) {
 	return liveSystem{out: out, ctx: ctx}, nil
 }
 
-func (s liveSystem) cancelling() <-chan struct{} {
-	if s.ctx == nil {
-		return nil
-	}
-	return s.ctx.Done()
-}
-
 func (s liveSystem) run(cmd *exec.Cmd) error {
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
@@ -62,7 +55,7 @@ func (s liveSystem) run(cmd *exec.Cmd) error {
 	select {
 	case err := <-done:
 		return ranError(cmd, err, out.Bytes())
-	case <-s.cancelling():
+	case <-s.ctx.Done():
 		_ = cmd.Process.Kill()
 		<-done
 		return fmt.Errorf("%s: %w while it ran", filepath.Base(cmd.Path), s.ctx.Err())
@@ -127,7 +120,7 @@ func ranError(cmd *exec.Cmd, err error, out []byte) error {
 }
 
 func (s liveSystem) LookupAccount(name string) (Account, bool, error) {
-	u, err := lookupWithin(s.cancelling(), name, func() (*user.User, error) { return user.Lookup(name) })
+	u, err := lookupWithin(s.ctx.Done(), name, func() (*user.User, error) { return user.Lookup(name) })
 	if err != nil {
 		var unknown user.UnknownUserError
 		if errors.As(err, &unknown) {
@@ -416,7 +409,7 @@ func SelfCheck(ctx context.Context, exe string, role hostcontract.Role, stateDir
 }
 
 func RestartOwnUnits(ctx context.Context, units []string) error {
-	um, err := liveSystem{}.User(ctx, Account{UID: os.Getuid()})
+	um, err := liveSystem{ctx: ctx}.User(ctx, Account{UID: os.Getuid()})
 	if err != nil {
 		return err
 	}

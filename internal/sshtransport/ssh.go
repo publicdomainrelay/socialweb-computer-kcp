@@ -299,9 +299,6 @@ func (s *Server) ServeConn(ctx context.Context, conn net.Conn) error {
 	if conn == nil {
 		return errors.New("sshtransport: no connection")
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	s.mu.Lock()
 	if len(s.conns) >= s.opts.Config.MaxConnections {
 		s.mu.Unlock()

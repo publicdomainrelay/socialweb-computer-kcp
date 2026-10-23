@@ -77,9 +77,6 @@ func (c *Clients) Client(ctx context.Context, server string) (component.VaultCli
 	if c == nil || c.Source == nil {
 		return nil, errors.New("openbao: the OpenBao vault clients have no source")
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	workspace, name := openbaosession.ParseServer(server, c.Workspace)
 	if name == "" {
 		return nil, openbaosession.ErrNoServer

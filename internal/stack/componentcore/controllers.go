@@ -105,9 +105,6 @@ func (r *controllerRuntime) add(entry controllerEntry) error {
 }
 
 func (r *controllerRuntime) Run(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	r.mu.Lock()
 	entries := append([]controllerEntry(nil), r.entries...)
 	r.mu.Unlock()

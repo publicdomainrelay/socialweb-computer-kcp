@@ -99,9 +99,6 @@ func (r *Resolver) Resolve(ctx context.Context, ref Ref) (Session, error) {
 	if r == nil {
 		return nil, fmt.Errorf("%w: the resolver is nil", ErrInvalidConfig)
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	switch value := ref.(type) {
 	case LocalRef:
 		return r.ResolveLocal(ctx, value)
@@ -118,9 +115,6 @@ func (r *Resolver) ResolveLocal(ctx context.Context, ref LocalRef) (Session, err
 	}
 	if r.Store == nil {
 		return nil, ErrNoStore
-	}
-	if ctx == nil {
-		ctx = context.Background()
 	}
 	source := &openbaosession.KCPStoreSource{Store: r.Store}
 	srv, err := source.Server(ctx, ref.Workspace, ref.Name)
@@ -146,9 +140,6 @@ func (r *Resolver) ResolveRemote(ctx context.Context, ref RemoteRef) (Session, e
 	}
 	if remote.Spec.Suspend {
 		return nil, fmt.Errorf("%w: RemoteOpenBao %s", ErrSuspended, remote.Name)
-	}
-	if ctx == nil {
-		ctx = context.Background()
 	}
 	target, err := r.RemoteTarget(remote)
 	if err != nil {

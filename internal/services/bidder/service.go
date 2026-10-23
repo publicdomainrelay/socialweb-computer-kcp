@@ -191,9 +191,6 @@ func (s *Service) lockAccept(uri string) func() {
 }
 
 func (s *Service) Start(ctx context.Context, deps component.Deps) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	s.cfg = s.cfg.withDeps(deps)
 	if deps.Log != nil {
 		s.log = deps.Log.With("component", "bidder", "handle", s.cfg.Handle)
@@ -238,9 +235,6 @@ func (s *Service) Endpoints() []component.Endpoint {
 }
 
 func (s *Service) Stop(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	return s.shutdownWith(ctx)
 }
 

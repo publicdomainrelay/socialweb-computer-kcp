@@ -315,9 +315,6 @@ func (r *Bus) DialStream(ctx context.Context, key Key, name ...string) (net.Conn
 		server.Close()
 		return nil, err
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	streamCtx, cancel := context.WithCancel(ctx)
 	stopRoot := context.AfterFunc(root, cancel)
 	clientConn.addHook(func() {

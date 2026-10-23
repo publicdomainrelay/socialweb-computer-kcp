@@ -97,9 +97,6 @@ func NewGuest(ctx context.Context, opts GuestOptions) (*Guest, error) {
 	case opts.VMs == nil:
 		return nil, errors.New("guestidentity: the guest control plane has no ComputeVM store")
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	if opts.Log == nil {
 		opts.Log = slog.New(slog.DiscardHandler)
 	}

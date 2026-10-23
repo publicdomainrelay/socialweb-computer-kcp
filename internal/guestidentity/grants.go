@@ -144,9 +144,6 @@ func NewSyncer(ctx context.Context, opts SyncerOptions) (*Syncer, error) {
 	if opts.RBAC == nil {
 		return nil, errors.New("guestidentity: the grant syncer has no RBAC source")
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	if opts.Log == nil {
 		opts.Log = slog.New(slog.DiscardHandler)
 	}

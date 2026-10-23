@@ -195,9 +195,6 @@ func Register(ctx context.Context, opts Options) error {
 }
 
 func (c *Controller) Run(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	kinds := []struct {
 		gvr       schema.GroupVersionResource
 		reconcile reconciler

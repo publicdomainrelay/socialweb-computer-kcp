@@ -315,9 +315,6 @@ func policyActionHandlers(store *kcpstore.Store, workspace string) (map[string]p
 }
 
 func (c *Core) Run(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	if !c.cfg.DisablePolicy {
@@ -532,9 +529,6 @@ func (h registryHosts) Hosts() map[string]string {
 }
 
 func Supervise(ctx context.Context, cfg Config) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	log := cfg.Log
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)

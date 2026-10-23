@@ -95,9 +95,6 @@ func New(cfg Config) *Provider {
 }
 
 func (p *Provider) Start(ctx context.Context, deps component.Deps) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	cfg := p.cfg
 	log := deps.Log
 	if log == nil {
@@ -185,9 +182,6 @@ func (p *Provider) Start(ctx context.Context, deps component.Deps) error {
 }
 
 func (p *Provider) Ready(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	p.mu.Lock()
 	ready := p.ready
 	address := ""

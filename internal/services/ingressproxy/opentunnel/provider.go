@@ -192,9 +192,6 @@ func New(cfg Config) *Provider {
 }
 
 func (p *Provider) Start(ctx context.Context, deps component.Deps) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	log := deps.Log
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)

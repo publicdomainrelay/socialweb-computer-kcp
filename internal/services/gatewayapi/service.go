@@ -46,9 +46,6 @@ func New(cfg Config) *Service {
 }
 
 func (s *Service) Start(ctx context.Context, deps component.Deps) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	cfg := s.cfg.withDefaults()
 	cfg.Deps = mergeDeps(cfg.Deps, deps)
 	if err := cfg.Check(); err != nil {
@@ -166,9 +163,6 @@ func (s *Service) Start(ctx context.Context, deps component.Deps) error {
 }
 
 func (s *Service) Ready(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	s.mu.Lock()
 	ready := s.ready
 	s.mu.Unlock()
@@ -190,9 +184,6 @@ func (s *Service) Endpoints() []component.Endpoint {
 }
 
 func (s *Service) Stop(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	s.mu.Lock()
 	stopCh := s.stopCh
 	stopOnce := s.stopOnce

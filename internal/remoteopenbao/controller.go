@@ -166,9 +166,6 @@ func Register(reg Registrar, opts Options) (*Controller, error) {
 }
 
 func (c *Controller) Run(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	for ctx.Err() == nil {
 		if err := c.watch(ctx); err != nil && ctx.Err() == nil {
 			c.log.Warn("watching RemoteOpenBao objects", "workspace", c.workspace, "err", err.Error())

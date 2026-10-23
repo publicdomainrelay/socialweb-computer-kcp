@@ -111,9 +111,6 @@ type wsEventStream struct {
 }
 
 func (s *wsEventStream) Next(ctx context.Context) (RepoEvent, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	if err := ctx.Err(); err != nil {
 		return RepoEvent{}, err
 	}
@@ -198,9 +195,6 @@ func newRepoEventStream(parent context.Context, cursor *int64, open func(context
 }
 
 func (s *repoEventStream) Next(ctx context.Context) (RepoEvent, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	for {
 		s.mu.Lock()
 		if s.closed {

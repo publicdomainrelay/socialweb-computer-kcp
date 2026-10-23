@@ -140,9 +140,6 @@ func New(cfg Config) (*Service, error) {
 }
 
 func (s *Service) Start(ctx context.Context, deps component.Deps) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	s.mu.Lock()
 	if s.started {
 		s.mu.Unlock()
@@ -511,9 +508,6 @@ func (s *Service) Endpoints() []component.Endpoint {
 }
 
 func (s *Service) Stop(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	s.mu.Lock()
 	cancel := s.cancel
 	done := s.done
