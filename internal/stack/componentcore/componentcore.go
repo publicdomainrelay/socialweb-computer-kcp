@@ -33,6 +33,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/oauthcallback"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyaction"
 	policycontroller "github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/controller"
@@ -538,20 +539,18 @@ func Supervise(ctx context.Context, cfg Config) {
 		log = slog.New(slog.DiscardHandler)
 	}
 	log = log.With("component", "component-controller")
-	for ctx.Err() == nil {
-		core, err := New(cfg)
-		if err == nil {
-			log.Info("the component controller reconciles the application workspaces", "workspaces", strings.Join(cfg.Workspaces, ", "))
-			err = core.Run(ctx)
-		}
-		if ctx.Err() != nil {
-			return
-		}
+	supervise.Restart(ctx, "componentcore", supervise.Backoff{Min: RetryAfter, Max: RetryAfter, OnError: func(err error, _ time.Duration) {
 		if err != nil {
 			log.Warn("the component controller stopped; starting it again", "err", fmt.Sprint(err))
 		}
-		sleep(ctx, RetryAfter)
-	}
+	}}, func(ctx context.Context) error {
+		core, err := New(cfg)
+		if err != nil {
+			return err
+		}
+		log.Info("the component controller reconciles the application workspaces", "workspaces", strings.Join(cfg.Workspaces, ", "))
+		return core.Run(ctx)
+	})
 }
 
 func sleep(ctx context.Context, d time.Duration) {
