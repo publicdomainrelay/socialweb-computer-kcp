@@ -959,7 +959,7 @@ items:
     track: services
     parallel_with: [W4-MARKET]
     depends_on: [W3-ROOTS, W3-CONFIG, W3-STATUS]
-    status: doing
+    status: done
     closes: [D18]
     decision: >
       Same core and adapter split as W4-MARKET for every service below.
