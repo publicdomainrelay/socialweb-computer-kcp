@@ -296,7 +296,7 @@ waves:
     gate: "one composition controller per root; SSA single writer; ownerRefs on every child and intent object; links written by roots; ConfigFrom gone."
   - id: W4
     title: "Services"
-    status: todo
+    status: doing
     parallel: true
     tracks: [W4-MARKET, W4-SERVICES]
     depends_on: [W3]
@@ -932,7 +932,7 @@ items:
     track: market
     parallel_with: [W4-SERVICES]
     depends_on: [W3-ROOTS, W3-CONFIG, W3-STATUS]
-    status: todo
+    status: doing
     decision: >
       The core of each service moves out of internal/services: role logic
       lives in impl packages (internal/market/participant,
@@ -959,7 +959,7 @@ items:
     track: services
     parallel_with: [W4-MARKET]
     depends_on: [W3-ROOTS, W3-CONFIG, W3-STATUS]
-    status: todo
+    status: doing
     closes: [D18]
     decision: >
       Same core and adapter split as W4-MARKET for every service below.
