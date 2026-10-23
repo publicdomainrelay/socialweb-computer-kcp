@@ -133,6 +133,10 @@ func (o *Outbox) Reconcile(ctx context.Context, obj *v1alpha1.StateSync) (time.D
 	if !ok {
 		return 0, nil
 	}
+	if obj.DeletionTimestamp == nil && obj.Status.Phase == v1alpha1.StateSyncPhaseAcked && obj.Status.ObservedGeneration == obj.Generation &&
+		obj.Status.DesiredHash == hashPayload(obj.Spec.Payload) {
+		return 0, nil
+	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	r := &outboxRun{o: o, obj: obj, adapter: adapter, generation: obj.Generation}
