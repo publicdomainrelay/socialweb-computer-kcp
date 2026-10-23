@@ -32,8 +32,6 @@ const (
 	ApplyTimeout       = time.Minute
 	ComponentsDir      = "components"
 	AppsDir            = "apps"
-
-	WaitAfter = 10 * time.Second
 )
 
 type Config struct {

@@ -59,6 +59,8 @@ type Controller struct {
 func Register(m *ctlruntime.Manager, c *compose.Composer, guard SignInGuard) error {
 	ctl := &Controller{c: c, guard: guard, rotated: map[string]int64{}}
 	opts := append([]ctlruntime.Option{ctlruntime.Export(compose.ExportApplications), ctlruntime.Finalizer(compose.Finalizer)}, c.Watches(Kind)...)
+	opts = append(opts, compose.DrainWatch[*v1alpha1.ComputeVM](c, compose.ExportComputeVMs, Kind),
+		compose.DrainWatch[*v1alpha1.AtprotoRecord](c, compose.ExportMarketIdentities, Kind))
 	if err := ctlruntime.For[*v1alpha1.MarketBidder](m, Name, ctl, opts...); err != nil {
 		return fmt.Errorf("marketbidder: registering the MarketBidder controller: %w", err)
 	}
@@ -159,7 +161,7 @@ func (ctl *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, o 
 
 func (p *pass) deleting(msg string) (ctlruntime.Result, error) {
 	p.st.Phase, p.st.Message = v1alpha1.ApplicationPhaseDeleting, msg
-	return ctlruntime.Result{Waiting: true, RequeueAfter: compose.WaitAfter}, p.c.WriteStatus(p.ctx, p.r, compose.MarketBidderGVR, p.st)
+	return ctlruntime.Result{Waiting: true}, p.c.WriteStatus(p.ctx, p.r, compose.MarketBidderGVR, p.st)
 }
 
 func (p *pass) delete(ctx context.Context) (ctlruntime.Result, error) {

@@ -59,6 +59,7 @@ type Controller struct {
 func Register(m *ctlruntime.Manager, c *compose.Composer, web *WebApp) error {
 	ctl := &Controller{c: c, web: web}
 	opts := append([]ctlruntime.Option{ctlruntime.Export(compose.ExportApplications), ctlruntime.Finalizer(compose.Finalizer)}, c.Watches(Kind)...)
+	opts = append(opts, compose.DrainWatch[*v1alpha1.AtprotoRecord](c, compose.ExportMarketIdentities, Kind))
 	if err := ctlruntime.For[*v1alpha1.Gateway](m, Name, ctl, opts...); err != nil {
 		return fmt.Errorf("gateway: registering the Gateway controller: %w", err)
 	}
@@ -141,7 +142,7 @@ func (ctl *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, o 
 
 func (p *pass) deleting(msg string) (ctlruntime.Result, error) {
 	p.st.Phase, p.st.Message = v1alpha1.ApplicationPhaseDeleting, msg
-	return ctlruntime.Result{Waiting: true, RequeueAfter: compose.WaitAfter}, p.c.WriteStatus(p.ctx, p.r, compose.GatewayGVR, p.st)
+	return ctlruntime.Result{Waiting: true}, p.c.WriteStatus(p.ctx, p.r, compose.GatewayGVR, p.st)
 }
 
 func (p *pass) delete(ctx context.Context) (ctlruntime.Result, error) {
