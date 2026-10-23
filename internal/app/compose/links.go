@@ -53,6 +53,9 @@ func Cap(name string, scope ...string) exposurev1alpha1.LinkCapability {
 func RefLink(from, to commonv1.ObjectRef, caps ...exposurev1alpha1.LinkCapability) Link {
 	f := from
 	parts := []string{from.Kind, from.Name, to.Kind, to.Name}
+	if from.Workspace != "" && to.Workspace != "" && from.Workspace != to.Workspace {
+		parts = append([]string{from.Workspace}, parts...)
+	}
 	if suffix := capabilitySuffix(caps); suffix != "" {
 		parts = append(parts, suffix)
 	}
@@ -100,7 +103,8 @@ func SpecRefLinks(ws string, desired []Desired) []Link {
 			if strings.EqualFold(d.Kind, ref.Kind) && strings.EqualFold(d.Name, ref.Name) {
 				continue
 			}
-			link := RefLink(commonv1.ObjectRef{Workspace: ws, Kind: d.Kind, Name: d.Name}, commonv1.ObjectRef{Workspace: ws, Kind: ref.Kind, Name: ref.Name},
+			link := RefLink(commonv1.ObjectRef{Workspace: ws, Kind: d.Kind, Name: d.Name},
+				commonv1.ObjectRef{Workspace: workspaceOr(ref.Workspace, ws), Kind: ref.Kind, Name: ref.Name},
 				Cap(bus.CapabilityXRPC), Cap(bus.CapabilityStream))
 			out[link.Name] = link
 		}
@@ -150,6 +154,8 @@ type specRef struct {
 	Kind string
 
 	Name string
+
+	Workspace string
 }
 
 func specRefs(spec any) []specRef {
@@ -187,11 +193,12 @@ func appendSpecRefs(value any, out *[]specRef) {
 	case map[string]any:
 		kind, _ := typed["kind"].(string)
 		name, _ := typed["name"].(string)
+		workspace, _ := typed["workspace"].(string)
 		kind, name = strings.TrimSpace(kind), strings.TrimSpace(name)
 		if kind == "" || name == "" {
 			return
 		}
-		*out = append(*out, specRef{Kind: kind, Name: name})
+		*out = append(*out, specRef{Kind: kind, Name: name, Workspace: strings.TrimSpace(workspace)})
 	case []any:
 		for _, entry := range typed {
 			appendSpecRefs(entry, out)
@@ -222,7 +229,11 @@ func (c *Composer) ApplyLinks(ctx context.Context, r Root, set string, links []L
 	}
 	selector := OwnerLabel + "=" + r.Owner() + "," + LinkSetLabel + "=" + set
 	for ws := range workspaces {
-		if err := c.Prune(ctx, ws, ComponentLinkGVR, selector, keep[ws]); err != nil {
+		scoped := selector
+		if ws != r.Workspace && r.Cluster != "" {
+			scoped += "," + RootClusterLabel + "=" + r.Cluster
+		}
+		if err := c.Prune(ctx, ws, ComponentLinkGVR, scoped, keep[ws]); err != nil {
 			return err
 		}
 	}

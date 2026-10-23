@@ -269,7 +269,7 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 	if ctl.value != nil && ctl.valueUID == string(r.UID) {
 		value = *ctl.value
 	}
-	netIngress := compose.NetworkIngressConfig(o.Spec.Ingress)
+	netIngress := compose.NetworkIngressConfig(o.Spec.Ingress, ws)
 	value.Ingress = netIngress
 	if err := compose.NetworkIngressSelection(netIngress); err != nil {
 		compose.SetPdsIngressCondition(&p.st.Conditions, o.Generation, NetworkAlicePdsName, true, err)
