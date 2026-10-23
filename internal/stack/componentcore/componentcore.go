@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -142,6 +143,8 @@ type Core struct {
 	runners []controllerRunner
 
 	eventHandlers *eventstream.HandlerRegistry
+
+	wg sync.WaitGroup
 }
 
 func AppWorkspaces(base string) []string {
@@ -316,11 +319,12 @@ func policyActionHandlers(store *kcpstore.Store, workspace string) (map[string]p
 
 func (c *Core) Run(ctx context.Context) error {
 	runCtx, cancel := context.WithCancel(ctx)
+	defer c.wg.Wait()
 	defer cancel()
 	if !c.cfg.DisablePolicy {
-		go c.runPolicy(runCtx)
+		c.runPolicy(runCtx)
 	}
-	go c.runExposure(runCtx)
+	c.wg.Go(func() { c.runExposure(runCtx) })
 	c.runIdentity(runCtx)
 	stopControllers := c.startControllers(runCtx)
 	defer stopControllers()
@@ -384,12 +388,12 @@ func (c *Core) runIdentity(ctx context.Context) {
 				})
 			}
 		}
-		go func() {
+		c.wg.Go(func() {
 			log.Info("the MarketIdentity controller writes its status in process", "workspace", workspace)
 			if err := ctl.Run(ctx); err != nil && ctx.Err() == nil {
 				log.Warn("the MarketIdentity controller stopped", "workspace", workspace, "err", err.Error())
 			}
-		}()
+		})
 	}
 }
 
@@ -416,7 +420,7 @@ func (c *Core) pdsEndpoint(workspace, kind, name string) (string, bool) {
 func (c *Core) runPolicy(ctx context.Context) {
 	log := c.cfg.Log.With("component", "policy-controller")
 	for _, workspace := range c.cfg.Workspaces {
-		go c.supervisePolicy(ctx, workspace, log.With("workspace", workspace))
+		c.wg.Go(func() { c.supervisePolicy(ctx, workspace, log.With("workspace", workspace)) })
 	}
 }
 

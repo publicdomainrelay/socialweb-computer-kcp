@@ -121,11 +121,9 @@ func (r *controllerRuntime) Run(ctx context.Context) error {
 				continue
 			}
 			seen[workspace] = true
-			workers.Add(1)
-			go func(entry controllerEntry, workspace string) {
-				defer workers.Done()
+			workers.Go(func() {
 				r.watch(ctx, entry, workspace)
-			}(entry, workspace)
+			})
 		}
 	}
 	workers.Wait()
