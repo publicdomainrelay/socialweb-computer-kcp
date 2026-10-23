@@ -235,7 +235,7 @@ state_rules:
 waves:
   - id: W0
     title: "Contracts, codegen, refs, bus and runtime"
-    status: doing
+    status: done
     serial: true
     tracks: [W0-TESTS, W0-RULES, W0-CODEGEN, W0-REFS, W0-ABSTRACT, W0-CONTRACTS, W0-BUS, W0-RUNTIME, W0-MOUNTS]
     gate: "all kinds registered; refs unified; contract packages pure; bus denies an unlinked call; the pilot controller runs on the runtime across root and a later-created root:<app> workspace with no ticker."
@@ -415,7 +415,7 @@ items:
     track: abstract
     parallel_with: []
     depends_on: [W0-REFS]
-    status: doing
+    status: done
     decision: >
       Define the kinds in decisions.abstract_kind_set. AtprotoRepo becomes
       abstract with spec.backendRef and contract status (did, head, rev,
