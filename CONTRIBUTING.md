@@ -238,6 +238,37 @@ sudo kubectl --kubeconfig "$K" get marketidentity bidder \
   -o jsonpath='{.status.phase}{" "}{range .status.conditions[*]}{.type}={.status} {.reason}{"\n"}{end}'
 ```
 
+### Bidder on a real account (oauthQr)
+
+Run the bidder as an existing atproto account instead of its own local PDS. The account's repo holds
+the market records; the bidder keeps no local Pds. Add a systemd drop-in so the mode survives
+`install bidder` and `upgrade`:
+
+```bash
+STATE=/var/lib/socialweb-computer/swc-bidder
+HANDLE=bobvmbuilder.bsky.social
+DROP=$STATE/.config/systemd/user/socialweb-computer-bidder@$HANDLE.service.d/10-oauth-qr.conf
+sudo -u swc-bidder mkdir -p "$(dirname "$DROP")"
+sudo -u swc-bidder tee "$DROP" >/dev/null <<EOF
+[Service]
+ExecStart=
+ExecStart=$STATE/bin/current/socialweb-computer run bidder --handle $HANDLE --fg -- --atproto-oauth-qr
+EOF
+sudo runuser -u swc-bidder -- env XDG_RUNTIME_DIR=/run/user/$(id -u swc-bidder) \
+  systemctl --user daemon-reload
+sudo runuser -u swc-bidder -- env XDG_RUNTIME_DIR=/run/user/$(id -u swc-bidder) \
+  systemctl --user restart socialweb-computer-bidder@$HANDLE.service
+K=$(sudo sh -c "ls $STATE/handles/*/kcp/admin.kubeconfig" | head -1)
+until sudo kubectl --kubeconfig "$K" get marketidentity bidder -o jsonpath='{.status.pendingAction.url}' 2>/dev/null | grep -q .; do sleep 3; done
+U=$(sudo kubectl --kubeconfig "$K" get marketidentity bidder -o jsonpath='{.status.pendingAction.url}')
+deno run -A --no-lock scripts/oauth-signin.ts --creds ~/.bobvmbuilder_bsky_social_source --account BOB --url "$U"
+sudo kubectl --kubeconfig "$K" get marketidentity bidder \
+  -o jsonpath='{.spec.mode}{" "}{.status.phase}{" "}{.status.did}{" "}{.status.pdsUrl}{"\n"}'
+```
+
+Expect `oauthQr Ready <the account DID> <the account PDS>` and `kubectl get pds` to return no
+resources. The QR url expires after 5 minutes.
+
 ### Upgrade, reinstall, uninstall
 
 Upgrade an installed bidder as its account, then install again:

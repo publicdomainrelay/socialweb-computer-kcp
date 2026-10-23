@@ -744,13 +744,15 @@ items:
     evidence: []
     decision: >
       Install/upgrade this host, hat-9 and hat-7. Keep this host and hat-9 in
-      association mode and hat-7 in non-association mode. Verify DIDs, records,
-      association conditions and component readiness.
+      association mode; run hat-7 in oauthQr against the bobvmbuilder account
+      so it authors as that real account and runs no local PDS. Verify DIDs,
+      records, association conditions and component readiness.
     files:
       - BIDDER_ARCH.md
     done_when: >
-      all three bidders Ready; this host and hat-9 Associated; hat-7
-      AssociationSkipped; association records present where expected.
+      all three bidders Ready; this host and hat-9 Associated; hat-7 Ready in
+      oauthQr with status.did equal to the bobvmbuilder account DID and no local
+      Pds component; association records present where expected.
 
   - id: W5-PROD
     title: "Prove the prod gateway"
@@ -813,7 +815,7 @@ test_matrix:
   live:
     - this host: associated
     - hat-9: associated
-    - hat-7: unassociated
+    - hat-7: oauthQr, bobvmbuilder account
     - socialweb.computer: prod gateway, Alice sign-in and tenant kubeconfig
 
 acceptance_matrix:
@@ -852,7 +854,7 @@ acceptance_matrix:
       roles: [bidder, requester]
       transports: [XRPC, Firehose subscribeRepos, JetStream, Both]
       fixtures: [local-pds, relay-subscribeRepos, jetstream, duplicate-injector]
-      proof: [test/integration, this host, hat-7, dev market network w3comms]
+      proof: [test/integration, this host, dev market network w3comms]
       test: TestMarketAccountAndTransportMatrix/managed-unassociated
     - account: existing-pds-account
       identity: pdsAccount
@@ -876,7 +878,7 @@ acceptance_matrix:
       roles: [bidder, requester]
       transports: [XRPC, Firehose subscribeRepos, JetStream, Both]
       fixtures: [remote-pds, qr-transfer, oauth-store, relay-subscribeRepos, jetstream]
-      proof: [test/integration, this host, prod gateway]
+      proof: [test/integration, this host, hat-7, prod gateway]
       test: TestMarketAccountAndTransportMatrix/existing-oauth-qr
     - account: existing-oauth-delegated
       identity: oauthDelegated
