@@ -338,7 +338,7 @@ items:
       - internal/app/gateway/gateway.go
       - deploy/market-network/README.md
     done_when: "ACC31-REC9-DEFAULT-OFF, ACC31-REC9-PUBLISH, ACC31-REC9-EDIT-OVERWRITTEN, ACC31-REC9-OPT-OUT-KEEPS and ACC31-REC9-SCALE-IN-RECORD pass."
-    status: todo
+    status: done
 
   - id: REC9-PROD-OWNER-SESSION
     title: "A prod tenant owner's repo through the web app session the atproto auth plugin holds"
@@ -438,7 +438,7 @@ items:
       On an own market network with the gateway (instance rec31), a tenant cluster scaled to one node
       has an Infra with no spec.record, and listRecords of computer.socialweb.infra on the owner's
       repo returns no record of it; the owner's repo-<did> AtprotoRepo is Ready.
-    status: todo
+    status: done
 
   - id: ACC31-REC9-PUBLISH
     title: "Opting in publishes the node entry and its state to the owner's repo, and nothing kcp-only"
@@ -449,7 +449,7 @@ items:
       computer.socialweb.infra/<infra name> on the owner's PDS returns the node entry with its name,
       state requested, vmName and bidderDids and status phase deployed with the winner, and no
       nodeJoin, ownerDid, nodeClaimRef, secretsRef, userData, policy or policyArgs.
-    status: todo
+    status: done
 
   - id: ACC31-REC9-EDIT-OVERWRITTEN
     title: "An owner's edit of the cluster record cannot scale the cluster; kcp writes it back"
@@ -459,7 +459,7 @@ items:
       leaves the Infra spec, the NodeClaim and the node unchanged; the core logs
       infra_record_overwritten and getRecord returns the kcp projection again; a deleteRecord straight
       to the PDS is followed by the record written again, and the Infra stays.
-    status: todo
+    status: done
 
   - id: ACC31-REC9-OPT-OUT-KEEPS
     title: "Opting out unbinds and keeps the record (plan 0029 U1)"
@@ -468,7 +468,7 @@ items:
       setPublishInfra {publish: false} removes spec.record; the AtprotoRecord child goes; the Infra
       reports status.record.direction Retained and Synced False Unbound and stays Deployed; getRecord
       still returns the record. Opting in again rebinds and the record is pushed again.
-    status: todo
+    status: done
 
   - id: ACC31-REC9-SCALE-IN-RECORD
     title: "Scaling in shows in the record; the last node takes the record with the Infra"
@@ -478,4 +478,4 @@ items:
       in: the AtprotoRecord writes the released entry and getRecord then returns the record with only
       the remaining entry, still deployed; scaling to zero deletes the Infra with its last entry and
       getRecord answers RecordNotFound; no guest is left on the bidder.
-    status: todo
+    status: done
