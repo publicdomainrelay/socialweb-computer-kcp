@@ -180,6 +180,8 @@ func (r *requestRun) passthrough(args []string, network bool) error {
 					nv.Hosts = append(nv.Hosts, v1alpha1.NetworkHost{Name: name, Address: addr})
 				}
 			}
+		case p.To == "contract.bidderDids":
+			r.contract.BidderDids = append(r.contract.BidderDids, splitList(p.Value)...)
 		case p.To == "contract.denyBidderDids":
 			r.contract.DenyBidderDids = append(r.contract.DenyBidderDids, splitList(p.Value)...)
 		case p.To == "contract.vmName":

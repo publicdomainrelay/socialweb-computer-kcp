@@ -209,6 +209,7 @@ apps:
       - {name: oauth-redirect-uri, to: options}
       - {name: oauth-session-client-id, to: options}
       - {name: bidder-dids, to: spec.bidderDids}
+      - {name: contract-bidder-dids, to: contract.bidderDids}
       - {name: deny-bidder-dids, to: contract.denyBidderDids}
       - {name: vm-name, to: contract.vmName}
       - {name: user-data, to: contract.userData}
