@@ -80,6 +80,7 @@ type Supervisor struct {
 	locks    sync.Map
 	placedAt map[string]time.Time
 	keys     map[string]string
+	rekeyed  map[string]string
 	slices   map[string]bool
 	units    map[string]string
 	backoff  map[string]time.Duration
@@ -168,6 +169,7 @@ func (s *Supervisor) setPlaced(unit string, on bool) {
 		delete(s.placed, unit)
 		delete(s.placedAt, unit)
 		delete(s.keys, unit)
+		delete(s.rekeyed, unit)
 	}
 }
 
@@ -178,6 +180,25 @@ func (s *Supervisor) setStartedKey(unit, key string) {
 		s.keys = map[string]string{}
 	}
 	s.keys[unit] = key
+}
+
+func (s *Supervisor) setRekeyed(unit, key string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.rekeyed == nil {
+		s.rekeyed = map[string]string{}
+	}
+	if key == "" {
+		delete(s.rekeyed, unit)
+		return
+	}
+	s.rekeyed[unit] = key
+}
+
+func (s *Supervisor) rekeyedFor(unit string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.rekeyed[unit]
 }
 
 func (s *Supervisor) startedKey(unit string) (string, bool) {
@@ -387,9 +408,9 @@ func (s *Supervisor) observe(ctx context.Context, o v1alpha1.HostProcess) Observ
 	rt := o.Status.Runtime
 	if rt != nil && rt.InvocationID != "" && rt.Backend == string(s.backend) && o.Spec.Placement != v1alpha1.HostProcessPlacementBootstrap &&
 		o.Status.Phase != v1alpha1.HostProcessPhaseLost {
+		obs.StartedKey = s.rekeyedFor(o.Spec.Unit)
 		if RestartedInPlace(o, obs.Unit) {
 			obs.Restarted = true
-			obs.StartedKey, _ = s.startedKey(o.Spec.Unit)
 			return obs
 		}
 		want := hostsvc.Identity{Unit: o.Spec.Unit, InvocationID: rt.InvocationID, PID: int(rt.Pid), StartTicks: uint64(rt.StartTicks),
@@ -408,6 +429,7 @@ func (s *Supervisor) apply(ctx context.Context, o v1alpha1.HostProcess, r Result
 	m := s.c.Manager
 	log := s.c.log().With("hostprocess", o.Name, "unit", o.Spec.Unit)
 	started, stopFailed, failed := false, false, false
+	stopped := map[string]bool{}
 	for _, op := range r.Ops {
 		if stopFailed {
 			break
@@ -435,6 +457,11 @@ func (s *Supervisor) apply(ctx context.Context, o v1alpha1.HostProcess, r Result
 			}
 			s.setPlaced(op.Unit, true)
 			s.setStartedKey(op.Unit, o.Spec.RestartKey)
+			if stopped[op.Unit] {
+				s.setRekeyed(op.Unit, o.Spec.RestartKey)
+			} else {
+				s.setRekeyed(op.Unit, "")
+			}
 			started = true
 			log.Info("placed", "state", string(st.State), "adopted", st.Adopted, "restartKey", o.Spec.RestartKey)
 		case OpStop:
@@ -444,6 +471,7 @@ func (s *Supervisor) apply(ctx context.Context, o v1alpha1.HostProcess, r Result
 				continue
 			}
 			s.setPlaced(op.Unit, false)
+			stopped[op.Unit] = true
 			log.Info("stopped")
 		}
 	}

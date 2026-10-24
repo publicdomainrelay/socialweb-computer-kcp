@@ -181,7 +181,7 @@ func Reconcile(o Observed) Result {
 		if o.Restarted {
 			message := fmt.Sprintf("restarted in place by its manager (restartPolicy %s, invocation %s, recorded %s)",
 				obj.Spec.RestartPolicy, o.Unit.InvocationID, rt.InvocationID)
-			if o.StartedKey != "" && o.StartedKey == obj.Spec.RestartKey && obj.Spec.RestartKey != "" {
+			if o.StartedKey != "" && o.StartedKey == obj.Spec.RestartKey {
 				message = fmt.Sprintf("restarted in place for spec.restartKey %q (invocation %s, recorded %s)",
 					obj.Spec.RestartKey, o.Unit.InvocationID, rt.InvocationID)
 			}
@@ -204,8 +204,12 @@ func Reconcile(o Observed) Result {
 					Message: fmt.Sprintf("restarted in place: spec.restartKey is %q and the running process started under %q",
 						obj.Spec.RestartKey, obj.Status.RestartKey)}
 			}
+			message := "adopted by unit name and InvocationID"
+			if o.StartedKey != "" && o.StartedKey == obj.Spec.RestartKey {
+				message = fmt.Sprintf("restarted in place for spec.restartKey %q (invocation %s)", obj.Spec.RestartKey, o.Check.Status.InvocationID)
+			}
 			return Result{Phase: v1alpha1.HostProcessPhaseRunning, Identify: o.Check.Status.InvocationID != rt.InvocationID,
-				Message: "adopted by unit name and InvocationID"}
+				Message: message}
 		}
 		if o.Check.Reason == hostsvc.LostUnitExited && o.Check.Status.ExecMainStatus == 0 && o.Check.Status.ExecMainCode <= 1 {
 			return Result{Phase: v1alpha1.HostProcessPhaseStopped, Message: "the process exited 0"}
