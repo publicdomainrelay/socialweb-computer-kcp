@@ -157,6 +157,24 @@ func isLoopbackHostname(host string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
+func (s *Server) resourceOrigin(r *http.Request) string {
+	if r.TLS != nil {
+		return s.issuer
+	}
+	host, _, err := net.SplitHostPort(r.Host)
+	if err != nil {
+		host = r.Host
+	}
+	remote, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return s.issuer
+	}
+	if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() || !isLoopbackHostname(remote) {
+		return s.issuer
+	}
+	return "http://" + r.Host
+}
+
 func (s *Server) Issuer() string {
 	return s.issuer
 }
@@ -294,9 +312,11 @@ func (s *Server) ResourceHandler(next http.Handler) http.Handler {
 			return
 		}
 		ctx := r.Context()
+		requestURL := s.resourceOrigin(r) + r.URL.EscapedPath()
+		nonceOrigin, _ := dpopOrigin(requestURL)
 		proofHeader := r.Header.Get(HeaderDPoP)
 		if proofHeader == "" {
-			nonce, err := s.newNonce(ctx)
+			nonce, err := s.nonces.IssueNonce(ctx, nonceOrigin)
 			if err != nil {
 				writeOAuthError(w, http.StatusInternalServerError, "server_error", "")
 				return
@@ -305,10 +325,9 @@ func (s *Server) ResourceHandler(next http.Handler) http.Handler {
 			writeResourceError(w, http.StatusUnauthorized, "use_dpop_nonce", "", nonce)
 			return
 		}
-		requestURL := s.issuer + r.URL.EscapedPath()
 		proof, err := s.dpop.Verify(ctx, proofHeader, r.Method, requestURL, token)
 		if err != nil {
-			nonce, nonceErr := s.newNonce(ctx)
+			nonce, nonceErr := s.nonces.IssueNonce(ctx, nonceOrigin)
 			if nonceErr != nil {
 				writeOAuthError(w, http.StatusInternalServerError, "server_error", "")
 				return
@@ -330,7 +349,7 @@ func (s *Server) ResourceHandler(next http.Handler) http.Handler {
 			writeResourceError(w, http.StatusUnauthorized, "invalid_token", "token not bound to this DPoP key", "")
 			return
 		}
-		nonce, err := s.newNonce(ctx)
+		nonce, err := s.nonces.IssueNonce(ctx, nonceOrigin)
 		if err != nil {
 			writeOAuthError(w, http.StatusInternalServerError, "server_error", "")
 			return
