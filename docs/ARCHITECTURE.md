@@ -10578,4 +10578,4 @@ to `exec.LookPath("deno")`. The integration hosts hat-7 and hat-9 were prepared 
 | **key** | the name a cluster has INSIDE a provider: `kcpclient.ClusterKey(home)` = `<accountHash>-<name>`, derived from its home workspace path. Unique across accounts; the bare name is not |
 | **seam** | the interface where a substrate plugs in: `ComputeProvider`, `scale.Nodes`, `processrunner` |
 | **the door** | the socialweb-computer-k8s web app, `socialweb-computer-k8s/hono-socialweb-computer-k8s`: it signs users in through the OpenBao atproto plugin and holds no session, maps the `NodeClaim`s this repo writes to ComputeContracts, and is the only writer of a claim's status. The short name comes from the plans (AGENTS.md maps it) |
-| **the core** | the `socialweb-computer` binary process that runs kcp and supervises the DenoPods and HostProcesses. The short name comes from the plans (AGENTS.md maps it) |
+| **the core** | the `socialweb-computer` process of an instance that runs the controllers (`internal/stack/componentcore`) and supervises the components and HostProcesses. The short name comes from the plans (AGENTS.md maps it) |
