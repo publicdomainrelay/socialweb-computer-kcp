@@ -44,7 +44,7 @@ type SubscriberConfig struct {
 	TunnelHandler             func(ctx context.Context, conn net.Conn) error
 	WSTarget                  func() *Target
 	WSTargetDialer            *websocket.Dialer
-	DirectSubscriptionHandler func(subscriptionID, nsid string, params map[string]string, onEvent func(json.RawMessage), onData func([]byte)) (func(), error)
+	DirectSubscriptionHandler func(subscriptionID, nsid string, params, headers map[string]string, onEvent func(json.RawMessage), onData func([]byte)) (func(), error)
 	Synthetic                 bool
 	Dialer                    *websocket.Dialer
 	HTTPClient                *http.Client
@@ -402,6 +402,7 @@ func (s *Subscriber) handleSubscribe(msg frame) {
 			id,
 			msg.NSID,
 			params,
+			msg.Headers,
 			func(event json.RawMessage) {
 				_ = s.send(map[string]any{
 					"$type":          frameType("subscriptionEvent"),

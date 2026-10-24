@@ -48,7 +48,7 @@ type Config struct {
 type Deps struct {
 	Handler http.Handler
 
-	Subscribe func(subscriptionID, nsid string, params map[string]string, onEvent func(json.RawMessage), onData func([]byte)) (func(), error)
+	Subscribe func(subscriptionID, nsid string, params, headers map[string]string, onEvent func(json.RawMessage), onData func([]byte)) (func(), error)
 
 	ServiceAuth pds.ServiceAuth
 

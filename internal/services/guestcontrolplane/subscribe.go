@@ -22,8 +22,6 @@ const (
 
 	SubscribeKeepalive = 25 * time.Second
 
-	subscribeTokenParam = "token"
-
 	subscribeWriteTimeout = 10 * time.Second
 )
 
@@ -57,15 +55,13 @@ func (s *Service) openStream(ctx context.Context, authorization string, cursor *
 	return name, stream, err
 }
 
-func subscribeAuthorization(header string, params func(string) string) string {
-	if strings.TrimSpace(header) != "" {
-		return header
+func relayedAuthorization(headers map[string]string) string {
+	for name, value := range headers {
+		if strings.EqualFold(name, "Authorization") {
+			return value
+		}
 	}
-	token := strings.TrimSpace(params(subscribeTokenParam))
-	if token == "" || strings.HasPrefix(token, "Bearer ") {
-		return token
-	}
-	return "Bearer " + token
+	return ""
 }
 
 func parseCursor(raw string) (*int64, error) {
@@ -103,8 +99,7 @@ func (s *Service) handleSubscribeEvents(w http.ResponseWriter, r *http.Request) 
 		writeGuestError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	authorization := subscribeAuthorization(r.Header.Get("Authorization"), r.URL.Query().Get)
-	name, stream, err := s.openStream(r.Context(), authorization, cursor)
+	name, stream, err := s.openStream(r.Context(), r.Header.Get("Authorization"), cursor)
 	if err != nil && !errors.Is(err, guestcp.ErrFutureCursor) {
 		status, code := subscribeErrorStatus(err)
 		httpjson.Write(w, status, errorFrame{Error: code, Message: err.Error()})
@@ -149,8 +144,8 @@ func (s *Service) handleSubscribeEvents(w http.ResponseWriter, r *http.Request) 
 	s.log.Info("a guest event subscription ends", "computevm", name, "reason", errString(err))
 }
 
-func (s *Service) subscribeDirect(ctx context.Context) func(string, string, map[string]string, func(json.RawMessage), func([]byte)) (func(), error) {
-	return func(_, nsid string, params map[string]string, onEvent func(json.RawMessage), onData func([]byte)) (func(), error) {
+func (s *Service) subscribeDirect(ctx context.Context) func(string, string, map[string]string, map[string]string, func(json.RawMessage), func([]byte)) (func(), error) {
+	return func(_, nsid string, params, headers map[string]string, onEvent func(json.RawMessage), onData func([]byte)) (func(), error) {
 		if nsid != market.ComputeGuestSubscribeEventsNSID {
 			return nil, fmt.Errorf("guestcontrolplane: no subscription %s", nsid)
 		}
@@ -158,8 +153,7 @@ func (s *Service) subscribeDirect(ctx context.Context) func(string, string, map[
 		if err != nil {
 			return nil, err
 		}
-		authorization := subscribeAuthorization(params["authorization"], func(key string) string { return params[key] })
-		name, stream, err := s.openStream(ctx, authorization, cursor)
+		name, stream, err := s.openStream(ctx, relayedAuthorization(headers), cursor)
 		if err != nil {
 			_, code := subscribeErrorStatus(err)
 			return nil, fmt.Errorf("%s: %v", code, err)
