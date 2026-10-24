@@ -500,8 +500,8 @@ listeners (the gateway XRPC, its TLS front, the web app) are down while the core
 Each cluster has two links, one to the k3s apiserver and one to the cluster vault.
 
 - **What runs.** Per cluster, `dumbpipe listen-tcp --host 127.0.0.1:<target> --ipv4-addr
-  0.0.0.0:<link port>` twice: target = the k3s secure port (k3s binds loopback) for
-  `apiserver-link`, the vault's leased port for `openbao-link`. dumbpipe v0.39.0, the same release
+  0.0.0.0:0` twice (`clusterlink.Argv`): target = the cluster's apiserver front port for
+  `apiserver-link`, the vault's held port for `openbao-link`. dumbpipe v0.39.0, the same release
   the guests install (the `dumbpipe` asset in `internal/versions/versions.json`).
 - **On or off.** On when `SOCIALWEB_CLUSTERPROVIDER_DUMBPIPE` names the binary; the gateway sets
   it to the extracted `dumbpipe` asset (`internal/stack/gatewaykcp`). Unset leaves every cluster without
@@ -512,12 +512,14 @@ Each cluster has two links, one to the k3s apiserver and one to the cluster vaul
   mount `socialweb-links`, path `<service>` (`apiserver`, `openbao`), fields `secret` (64 hex, the
   32-byte seed -- exactly the form dumbpipe reads from `IROH_SECRET`; measured: dumbpipe prints
   `using secret key <hex>` when it generates one, and the ticket it prints for a given seed names
-  `ed25519.NewKeyFromSeed(seed).Public()`), `endpointId`, `did`. The mount is enabled if absent with
-  the root token from `unseal.json`. The first write is check-and-set 0, so two writers can never both
+  `ed25519.NewKeyFromSeed(seed).Public()`), `endpointId`, `did`. The mount and the provider's policy on
+  it are part of the cluster's OpenBaoServer declaration (`internal/clusterprovider/vaultdeclared.go`).
+  The first write is check-and-set 0, so two writers can never both
   mint a key; a stored record that does not parse, or whose `endpointId` disagrees with its secret,
   is an error and is NEVER regenerated over (a new key is a new endpoint id and strands every node
   holding the old ticket). The key is read in the step's `procgroup.Step.Prepare`, which runs once
-  the steps before it passed their gates, so the vault is up; the secret rides `Spec.Env` only.
+  the steps before it passed their gates, so the vault is up; the secret reaches dumbpipe only through
+  a 0600 env file named in the HostProcess `spec.envFiles`.
 - **Identity encodings.** `internal/didkey`: endpoint id = lowercase hex of the 32-byte public key
   (what iroh prints); did:key = `did:key:z` + base58btc(0xed 0x01 + key). Both matched the did:key
   spec vector and a dumbpipe-printed ticket when they were built.
@@ -533,11 +535,9 @@ Each cluster has two links, one to the k3s apiserver and one to the cluster vaul
   and addresses by discovery; measured live against a real dumbpipe (connect-tcp with the published
   ticket echoes before and after a restart, and the ticket is byte-identical). Decided by Claude, user may veto: the cost is that a dialer with no discovery
   (no DNS to the n0 discovery service) cannot use the ticket; guests reach the internet anyway.
-- **The link port.** Leased (`apiserver-link`, `openbao-link`, width 1, section 8) and bound as the
-  endpoint's IPv4 UDP socket, so the direct address in a ticket is stable and a dumbpipe a dead
-  provider left running is found by the restart sweep: `portscan` reads `/proc/net/udp{,6}` (state
-  07) for a datagram purpose and the TCP tables for every other, and attributes the socket to the
-  cluster by the argv.
+- **The link port.** Not held: dumbpipe binds UDP port 0, and a node dials the link by its ticket,
+  so the port number is in no ticket that is published (section 8). The `apiserver-link` and
+  `openbao-link` port purposes are retired (`portallocator` `retiredPurposes`).
 - **Status.** The link's readiness gate writes the `ClusterLink` `Listening` (spec
   cluster/service/targetPort, status endpointId/did/ticket) with retries, so a kcp outage never reaps
   a cluster. A dead link is a member unit with Restart=always; while it is down or not yet re-verified
@@ -545,13 +545,11 @@ Each cluster has two links, one to the k3s apiserver and one to the cluster vaul
 - **Teardown.** A deleted cluster's two ClusterLinks are deleted after its group is reaped (both the
   all-clusters path and a pass that removes the finalizer). An OFF cluster keeps them: it comes back as
   the same endpoints. The keys stay in the vault's data and go with it.
-- **Replacement without a gap.** Each link holds two UDP leases
-  (`apiserver-link` and `apiserver-link-b`, `openbao-link` and `openbao-link-b`); `controlplane.json`
-  `links.<service>` names the slot (`a` or `b`), the dumbpipe it runs and its port, and `StepsFor`
+- **Replacement without a gap.** Each link has two slots; `controlplane.json`
+  `links.<service>` names the slot (`a` or `b`) and the dumbpipe it runs, and `StepsFor`
   builds the link from it (member `link-<service>` for slot a, `link-<service>@b` for slot b). `units
-  roll link <key> --service apiserver|openbao [--dumbpipe-path]` is carried out by the provider's roller:
-  the other UDP lease is re-leased if another process holds it (UDP probe), the new listener starts with
-  the same `IROH_SECRET` env file, its gate waits for the ticket it prints naming the vault's key (and
+  roll link <key> --service apiserver|openbao [--dumbpipe-path]` is carried out by the provider's roller
+  (`Roller.RollLink`): the new listener starts in the other slot with the same `IROH_SECRET` env file, its gate waits for the ticket it prints naming the vault's key (and
   records the ClusterLink, whose `status.ticket` is `StableTicket(key)` and so byte-identical), the
   record is switched, then the old listener's object is deleted. A link is never re-pointed for a k3s
   swap: its target is the front. Measured with the pinned dumbpipe v0.39.0 (iroh 1.0.0, sha256
@@ -566,10 +564,8 @@ Each cluster has two links, one to the k3s apiserver and one to the cluster vaul
   SIGKILL of the link (Restart=always, a new process 0.19 s later, cluster Initializing for 4.2 s while
   the restarted invocation was re-verified) each lost 0 of ~260 kubectl polls through a connect-tcp
   client on the published ticket.
-- **Stated limits.** The materialiser's allocator probes a link port for TCP, not UDP (only the roller
-  re-leases with a UDP probe), so a foreign UDP holder of a leased port makes dumbpipe exit at bind and
-  the bring-up fail with dumbpipe's bind error in the gate message. The IPv6 socket takes a random
-  port.
+- **Stated limits.** A ticket carries no direct address, so a dialer reaches the link only through
+  discovery and the relay; the IPv4 and IPv6 sockets both take a random port.
 
 ### The vault's config is rendered, not shipped
 
@@ -1504,7 +1500,7 @@ open ones. `AssertMarketAdvertiseInvariant` takes a `portallocator.Advertisement
 front lease, link target == front lease, no slot listen port inside the front lease.
 
 **The vault's lease is ONE port.**
-`purposeWidth[PurposeOpenBao]` is 1. The config the vault is given
+Every known purpose is one port wide (`Purpose.Width`), `openbao` included. The config the vault is given
 (`clusterstack.OpenBaoServerConfig`, section 5) sets `disable_clustering = true`, which removes the
 cluster listener and makes "one vault per cluster, no HA" a property of the file. Both the listener
 stanza and `api_addr` take the same `Lease.Port`, and no code in the tree reads `Lease.Port + 1`. The
@@ -1519,8 +1515,8 @@ listener (measured: `127.0.0.1:41000`, `[::1]:41000` and `127.0.0.1:41500` with 
 IS the bound port: `K3sAPIPorts` answers both questions from the `k3s-secure` lease, and the invariant
 refuses an `--advertise-port` that is not the port the apiserver holds. `kubelet` is not leased: a node
 is not a process in THIS host's kernel and network namespace, so the port is the guest's own. Both are
-in `retiredPurposes`: leases for them are dropped from an existing
-lease file on open, `Allocate` refuses them, and their ports return to the carve. Section 15 holds both
+in `retiredPurposes` (with the ssh and link purposes): leases for them are dropped from an existing
+lease file on open, and `Allocate` refuses them as unknown purposes. Section 15 holds both
 arguments in full, including what the kubelet lease was for.
 
 **The invariant that matters:** an unleased or colliding advertise **port** routes a node's tunnel to
@@ -1561,7 +1557,10 @@ the member listens; the member binds again after it restarts; 998 port-0 binds e
 and none got a held port; 200 outgoing connects took none. A cluster link's dumbpipe binds UDP port 0
 (`--ipv4-addr 0.0.0.0:0`); a node dials it by its ticket, so its port is not held.
 
-**The bind probe.** The probe binds the WILDCARD with `SO_REUSEADDR` cleared. A probe that relies on
+**The bind probe (before the holds).** Before the front held every port, the allocator chose a port
+from a range and probed it; the holds replaced the probe. Its lesson is why a hold binds the
+WILDCARD and sets `SO_REUSEADDR` only after the bind (`internal/apiserverfront/fdstore_linux.go`; the
+one exception re-binds a known port over a TIME_WAIT socket). A probe that relies on
 Go's `SO_REUSEADDR` does not coexist with a wildcard binder: a LISTEN socket conflicts with a wildcard
 or a specific bind whatever the prober's `SO_REUSEADDR` is. The fault is the ADDRESS, not the flag:
 
@@ -1572,12 +1571,9 @@ holder bound 0.0.0.0:P with SO_REUSEADDR, not yet LISTENing
 holder bound [::]:P, ipv6-only, LISTENing      -> old probe said FREE   (a wildcard bind is blocked)
 ```
 
-The probe now binds the WILDCARD with `SO_REUSEADDR` cleared; both halves are load-bearing, and the
-old probe leased `35167` while it was already bound. The measured cost: a port whose only occupant is
-a TCP TIME_WAIT socket reads held where a reuse-enabled listener could in fact bind. That over-report
-is accepted - it skips a port for the life of the TIME_WAIT, while the under-report hands a cluster a
-port it cannot bind. `/proc`'s LISTEN table is deliberately not consulted: `internal/portscan` imports
-this package, and it has no row at all for the bound-not-listening holder.
+The later probe bound the WILDCARD with `SO_REUSEADDR` cleared; both halves were load-bearing, and the
+old probe leased `35167` while it was already bound. `/proc`'s LISTEN table was not a substitute: it
+has no row at all for a bound-not-listening holder.
 
 **Unleased per-node ports.** `127.0.0.1:6444` (k3s agent supervisor), `:10248` (healthz) and `:10010`
 (containerd) are unleased, and `6444` is host-fixed, so two agents on one host collide on it.
