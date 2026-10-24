@@ -46,6 +46,8 @@ const (
 	ReasonRepoNotReady = "RepoNotReady"
 
 	ReasonInvalidSpec = "InvalidSpec"
+
+	ReasonSwapMismatch = "SwapMismatch"
 )
 
 var OwnKinds = []string{MarketIdentityKind, Kind, RecordWatchKind}

@@ -109,6 +109,18 @@ func Apply(ctx context.Context, repo atprotorepo.Repo, object *v1alpha1.AtprotoR
 		return failed(object, "ObserveFailed", err), err
 	}
 	out := Outcome{Phase: v1alpha1.AtprotoRecordPhaseApplied, Did: did, URI: held.URI, CID: held.CID, Reason: "InSync"}
+	if swap := strings.TrimSpace(spec.SwapCid); swap != "" && (absent || held.CID != swap) && (absent || !recordsEqual(held.Value, resolved)) {
+		message := "the repo holds cid " + held.CID + ", not the swapCid " + swap + "; the record is not written"
+		if absent {
+			message = "the repo holds no record, not the swapCid " + swap + "; the record is not written"
+		}
+		out.Phase, out.Reason, out.Message = v1alpha1.AtprotoRecordPhasePending, ReasonSwapMismatch, message
+		out.Conditions = []metav1.Condition{
+			conds.New(ConditionReferencesResolved, true, "Resolved", "every reference is resolved", generation),
+			conds.New(ConditionInSync, false, ReasonSwapMismatch, message, generation),
+		}
+		return out, nil
+	}
 	switch {
 	case absent:
 		out.Reason = "Created"
