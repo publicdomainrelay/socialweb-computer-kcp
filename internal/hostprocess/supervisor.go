@@ -455,7 +455,7 @@ func (s *Supervisor) apply(ctx context.Context, o v1alpha1.HostProcess, r Result
 	next.Status.ObservedGeneration = o.Generation
 	if started {
 		next.Status.RestartKey = o.Spec.RestartKey
-	} else if key, ok := s.startedKey(o.Spec.Unit); ok && next.Status.RestartKey == "" {
+	} else if key, ok := s.startedKey(o.Spec.Unit); ok {
 		next.Status.RestartKey = key
 	}
 	if r.Identify {
