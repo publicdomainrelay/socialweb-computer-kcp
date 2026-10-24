@@ -431,6 +431,10 @@ func ComponentCoreConfig(ctx context.Context, cfg Config, rec devinstance.Record
 			out.Relays = n.Status.Network.Relays()
 			network := *n.Status.Network
 			out.Network = &network
+		} else if joined, err := marketnetwork.ReadJoinedNetwork(ctx, rec.AdminKubeconfig); err == nil && joined != nil {
+			out.PLCBaseURL = joined.PLCDirectoryURL
+			out.Relays = joined.Relays()
+			out.Network = joined
 		}
 	}
 	switch {

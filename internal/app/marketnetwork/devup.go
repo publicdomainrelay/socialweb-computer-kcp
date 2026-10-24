@@ -205,6 +205,18 @@ func ReadNetwork(ctx context.Context, kubeconfig string) (v1alpha1.MarketNetwork
 	return *o, nil
 }
 
+func ReadJoinedNetwork(ctx context.Context, kubeconfig string) (*v1alpha1.MarketNetworkValue, error) {
+	dc, err := rootClient(kubeconfig)
+	if err != nil {
+		return nil, err
+	}
+	o, err := kube.Get[v1alpha1.MarketBidder](ctx, dc.Resource(compose.MarketBidderGVR), compose.ChildRootName)
+	if err != nil {
+		return nil, err
+	}
+	return o.Spec.Network, nil
+}
+
 func WaitNetwork(ctx context.Context, kubeconfig string, timeout time.Duration, progress func(v1alpha1.MarketNetworkStatus)) (v1alpha1.MarketNetwork, error) {
 	ri, err := networkClient(kubeconfig)
 	if err != nil {

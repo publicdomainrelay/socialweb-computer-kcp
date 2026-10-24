@@ -191,7 +191,7 @@ func (c *Core) registerExposure(mgr *ctlruntime.Manager, scope func(string) bool
 
 func (c *Core) registerIdentity(mgr *ctlruntime.Manager, scope func(string) bool) error {
 	cfg := c.cfg
-	oauth := atproto.OAuthOptions{Directory: identity.DefaultDirectory(), HTTPClient: &http.Client{Timeout: identityHTTPTimeout},
+	oauth := atproto.OAuthOptions{Directory: identity.DefaultDirectory(), HTTPClient: c.networkClient(identityHTTPTimeout),
 		States: &oauthclient.MemoryStateStore{}, Scopes: append([]string(nil), cfg.OAuthScopes...), QRScopes: atprotooauth.DIDKeyAssociatorOAuthScope}
 	if key, err := loadOAuthCLIKey(cfg.StateDir); err == nil {
 		oauth.CLIKey = key
