@@ -235,14 +235,23 @@ func parseTunnels(value string) ([]v1alpha1.ComputeContractTunnel, error) {
 	var out []v1alpha1.ComputeContractTunnel
 	for _, item := range splitList(value) {
 		parts := strings.Split(item, ":")
-		if len(parts) != 2 {
-			return nil, fmt.Errorf("%q: want <tag>:<port>", item)
+		if len(parts) != 2 && len(parts) != 3 {
+			return nil, fmt.Errorf("%q: want <tag>:<port>[:<transport>]", item)
 		}
 		port, err := strconv.Atoi(parts[1])
 		if err != nil {
 			return nil, fmt.Errorf("%q: port: %w", item, err)
 		}
-		out = append(out, v1alpha1.ComputeContractTunnel{Tag: parts[0], Port: port})
+		tunnel := v1alpha1.ComputeContractTunnel{Tag: parts[0], Port: port}
+		if len(parts) == 3 {
+			switch transport := v1alpha1.TunnelTransport(parts[2]); transport {
+			case v1alpha1.TunnelTransportOpenTunnel, v1alpha1.TunnelTransportWebRTC:
+				tunnel.Transport = transport
+			default:
+				return nil, fmt.Errorf("%q: transport %q is not %s or %s", item, parts[2], v1alpha1.TunnelTransportOpenTunnel, v1alpha1.TunnelTransportWebRTC)
+			}
+		}
+		out = append(out, tunnel)
 	}
 	return out, nil
 }

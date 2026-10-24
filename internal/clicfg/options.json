@@ -574,7 +574,7 @@
     },
     "tunnel": {
       "type": "string",
-      "description": "run request: guest tunnels to open, a comma list of <tag>:<port> (spec.tunnels): opentunnel serves the guest's 127.0.0.1:<port> at an https URL that comes back in status.contract.networks"
+      "description": "run request: guest tunnels to open, a comma list of <tag>:<port>[:<transport>] (spec.tunnels; transport opentunnel, the default, or webrtc): opentunnel serves the guest's 127.0.0.1:<port> at an https URL that comes back in status.contract.networks"
     },
     "hold": {
       "type": "boolean",
