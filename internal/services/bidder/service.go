@@ -421,14 +421,14 @@ func (s *Service) checkServiceAuthHost() error {
 func ingressConnectHost(n v1alpha1.MarketNetworkValue) string {
 	_, port, err := net.SplitHostPort(n.IngressProxyHost)
 	if err != nil || port == "" {
-		return n.IngressProxyHost
+		return ""
 	}
 	for _, host := range n.Hosts {
 		if _, candidate, splitErr := net.SplitHostPort(host.Address); splitErr == nil && candidate == port {
 			return host.Address
 		}
 	}
-	return n.IngressProxyHost
+	return ""
 }
 
 func accessTokenRef(secret *commonv1.SecretRef, vaultRef *commonv1.ObjectRef) *component.CredentialRef {
