@@ -720,6 +720,12 @@ func (s *Server) handleDataWS(w http.ResponseWriter, req *http.Request, subdomai
 	path := req.URL.Path
 	nsid := strings.TrimPrefix(path, "/xrpc/")
 	params := lastQueryValues(req.URL.Query())
+	headers := map[string]string{}
+	for _, name := range subscriptionHeaders {
+		if v := req.Header.Get(name); v != "" {
+			headers[name] = v
+		}
+	}
 
 	s.mu.Lock()
 	p := s.peers[subdomain]
@@ -740,6 +746,7 @@ func (s *Server) handleDataWS(w http.ResponseWriter, req *http.Request, subdomai
 		"subscriptionId": id,
 		"nsid":           nsid,
 		"params":         params,
+		"headers":        headers,
 	})
 
 	for {

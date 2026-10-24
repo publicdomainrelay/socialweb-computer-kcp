@@ -27,6 +27,8 @@ var relayedResponseHeaders = map[string]struct{}{
 	"retry-after":      {},
 }
 
+var subscriptionHeaders = []string{"authorization", "atproto-proxy"}
+
 type Signature struct {
 	Key       string `json:"key"`
 	Signature string `json:"signature"`

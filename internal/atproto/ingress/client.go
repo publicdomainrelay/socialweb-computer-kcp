@@ -395,7 +395,7 @@ func (s *Subscriber) handleSubscribe(msg frame) {
 	case (s.cfg.TunnelTarget != nil || s.cfg.TunnelHandler != nil) && msg.NSID == TunnelNSID:
 		s.startTunnel(msg.SubscriptionID)
 	case s.cfg.WSTarget != nil && msg.NSID != TunnelNSID && msg.NSID != "":
-		s.startWSSubscription(msg.SubscriptionID, msg.NSID, params)
+		s.startWSSubscription(msg.SubscriptionID, msg.NSID, params, msg.Headers)
 	case s.cfg.DirectSubscriptionHandler != nil && msg.NSID != TunnelNSID && msg.NSID != "":
 		id := msg.SubscriptionID
 		unsub, err := s.cfg.DirectSubscriptionHandler(
@@ -589,7 +589,7 @@ func (t *tunnel) markClosed() {
 	}
 }
 
-func (s *Subscriber) startWSSubscription(id, nsid string, params map[string]string) {
+func (s *Subscriber) startWSSubscription(id, nsid string, params, headers map[string]string) {
 	target := s.cfg.WSTarget()
 	if target == nil {
 		return
@@ -609,7 +609,16 @@ func (s *Subscriber) startWSSubscription(id, nsid string, params map[string]stri
 	if dialer == nil {
 		dialer = websocket.DefaultDialer
 	}
-	conn, _, err := dialer.DialContext(s.ctx, u, nil)
+	var header http.Header
+	for _, name := range subscriptionHeaders {
+		if v := headers[name]; v != "" {
+			if header == nil {
+				header = http.Header{}
+			}
+			header.Set(name, v)
+		}
+	}
+	conn, _, err := dialer.DialContext(s.ctx, u, header)
 	if err != nil {
 		_ = s.send(map[string]any{
 			"$type":          frameType("subscriptionClose"),
