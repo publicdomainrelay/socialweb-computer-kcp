@@ -190,6 +190,12 @@ func (c *Controller) resolveFailed(ctx context.Context, req ctlruntime.Request, 
 	if errors.Is(err, bus.ErrLinkDenied) {
 		return errors.Join(err, c.fail(ctx, req, object, ReasonLinkDenied, err))
 	}
+	if errors.Is(err, atprotorepo.ErrNotBound) {
+		c.log.Info("an AtprotoRecord waits for its repo binding", "workspace", req.Workspace, "name", object.Name, "err", err.Error())
+		next := object.DeepCopy()
+		next.Status = failed(object, ReasonRepoNotReady, err).Status(object)
+		return req.ApplyStatus(ctx, next)
+	}
 	return errors.Join(err, c.fail(ctx, req, object, ReasonRepoNotReady, err))
 }
 
