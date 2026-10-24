@@ -216,7 +216,16 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 		}
 	} else {
 		r.c.forget(string(v.kind), req)
-		status.Record = nil
+		if v.status.Record != nil {
+			gone, err := r.deleteRecord(ctx, req, v)
+			if err != nil {
+				return ctlruntime.Result{}, err
+			}
+			if gone {
+				status.Record = nil
+				conds.Set(&status.Conditions, status.ObservedGeneration, v1alpha1.InfraConditionSynced, false, "Unbound", "spec.record is not set")
+			}
+		}
 	}
 	var ephemeral *v1alpha1.EphemeralInfraStatus
 	var end infra.End
