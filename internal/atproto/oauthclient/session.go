@@ -582,7 +582,7 @@ func (s *Session) refreshOnceLocked(ctx context.Context) error {
 	if nextNonce := resp.Header.Get("DPoP-Nonce"); nextNonce != "" {
 		s.data.DPoPAuthServerNonce = nextNonce
 	}
-	return s.persistLocked(ctx)
+	return s.saveRotatedLocked(ctx)
 }
 
 func (s *Session) Sync(ctx context.Context) error {
@@ -599,6 +599,17 @@ func (s *Session) persist(ctx context.Context) error {
 }
 
 func (s *Session) persistLocked(ctx context.Context) error {
+	if s.store == nil {
+		return nil
+	}
+	shared := refreshLock(s.data.SessionID)
+	shared.Lock()
+	defer shared.Unlock()
+	s.reloadLocked(ctx)
+	return s.store.Save(ctx, s.data)
+}
+
+func (s *Session) saveRotatedLocked(ctx context.Context) error {
 	if s.store == nil {
 		return nil
 	}
