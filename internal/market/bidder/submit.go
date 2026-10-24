@@ -130,6 +130,9 @@ func (b *Bidder) applyMarketEvent(ctx context.Context, uri, cid string, record m
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrEventInvalid, err)
 	}
+	if market.IsGuestEventNSID(market.NSIDFromURI(event.Payload.URI)) && market.ATURIAuthority(event.Receipt.URI) == b.cfg.DID {
+		return b.applyGuestEvent(ctx, uri, cid, record, event, issuer)
+	}
 	if market.NSIDFromURI(event.Payload.URI) != market.ComputeEventsVMDeleteNSID || market.ATURIAuthority(event.Receipt.URI) != b.cfg.DID {
 		return nil
 	}

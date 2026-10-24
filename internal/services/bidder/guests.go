@@ -104,3 +104,7 @@ func (guests) SyncLabels(vm *v1alpha1.ComputeVM) map[string]string {
 func (guests) SyncVM(sync *v1alpha1.StateSync) string {
 	return sync.Labels[computevm.TerminationSyncVMNameLabel]
 }
+
+func (guests) CheckGuestEvent(record map[string]any) (string, error) {
+	return guestidentity.CheckGuestEvent(record)
+}

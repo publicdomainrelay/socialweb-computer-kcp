@@ -16,6 +16,7 @@ import (
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/guestcp"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 )
 
@@ -220,6 +221,7 @@ func (p *pass) baseLinks(mount string) []compose.Link {
 		compose.VaultLink(self, BidderVaultServer, true, mount+"/guests/*"),
 		compose.ComputeVMVaultLink(ws, BidderVaultServer, mount+"/guests/*"),
 		compose.RootVaultLink(p.r, BidderVaultServer, mount+"/identity/*", mount+"/oidc-rotation/*", guestOIDCKeyPath),
+		compose.RefLink(self, p.guest(), compose.Cap(guestcp.CapabilityEvents)),
 	}
 }
 

@@ -19,6 +19,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/guestcp"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestcp/queue"
 )
 
 const (
@@ -74,6 +75,8 @@ type Controller struct {
 
 	feeds map[string]*feed
 
+	hubs map[string]*queue.Hub
+
 	planes map[string]map[string]bool
 }
 
@@ -86,7 +89,7 @@ func New(opts Options) (*Controller, error) {
 		log = slog.New(slog.DiscardHandler)
 	}
 	return &Controller{bus: opts.Bus, store: opts.Store, log: log.With("component", "guestcontrolplane-controller"),
-		feeds: map[string]*feed{}, planes: map[string]map[string]bool{}}, nil
+		feeds: map[string]*feed{}, hubs: map[string]*queue.Hub{}, planes: map[string]map[string]bool{}}, nil
 }
 
 func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {

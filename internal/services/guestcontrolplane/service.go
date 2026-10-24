@@ -66,6 +66,10 @@ type Service struct {
 	plane *guestplane.Plane
 
 	relay *guestrelay.Relay
+
+	queue guestcp.Queue
+
+	unwatchQueue func()
 }
 
 func (s *Service) Start(ctx context.Context) error {
@@ -149,11 +153,15 @@ func (s *Service) shutdownWith(ctx context.Context) error {
 		cancel := s.cancel
 		relay := s.relay
 		plane := s.plane
+		unwatchQueue := s.unwatchQueue
 		s.started = false
 		s.registered = false
 		s.mu.Unlock()
 		if cancel != nil {
 			cancel()
+		}
+		if unwatchQueue != nil {
+			unwatchQueue()
 		}
 		if relay != nil {
 			relay.Close()
@@ -207,6 +215,9 @@ func (s *Service) prepare(ctx context.Context) error {
 	s.mu.Lock()
 	s.plane = plane
 	s.mu.Unlock()
+	if err := s.openQueue(ctx, inputs); err != nil {
+		s.log.Warn("the guest event queue is not open; guest events are refused", "err", err)
+	}
 	s.mux = s.routes()
 	if err := s.register(); err != nil {
 		return err

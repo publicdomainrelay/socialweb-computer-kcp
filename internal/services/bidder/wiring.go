@@ -129,16 +129,17 @@ func (s *Service) newBidder(intents contract.Intents) (*core.Bidder, error) {
 		cfg.StopGraceSeconds = s.spec.Kcp.StopGraceSeconds
 	}
 	return core.New(cfg, core.Deps{
-		Intents:   intents,
-		Records:   records,
-		Signer:    signer,
-		Vault:     s.guestVault(),
-		Guests:    guests{},
-		Tokens:    participant.NewTokens(s.minter(), DefaultCallTimeout),
-		HTTP:      s.egress.Client(DefaultCallTimeout),
-		Directory: s.dir,
-		Policy:    s.policyRuns(),
-		Log:       s.log,
+		Intents:     intents,
+		Records:     records,
+		Signer:      signer,
+		Vault:       s.guestVault(),
+		Guests:      guests{},
+		GuestEvents: s.guestEvents(),
+		Tokens:      participant.NewTokens(s.minter(), DefaultCallTimeout),
+		HTTP:        s.egress.Client(DefaultCallTimeout),
+		Directory:   s.dir,
+		Policy:      s.policyRuns(),
+		Log:         s.log,
 	})
 }
 

@@ -15,6 +15,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/guestcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestcp/queue"
 )
 
 func (c *Controller) Provide() {
@@ -39,6 +40,32 @@ func (c *Controller) Provide() {
 		}
 		return grants{store: c.store, workspace: workspace}, nil
 	})
+	bus.Provide(c.bus, GroupKind, guestcp.CapabilityEvents, func(_ context.Context, to commonv1.ObjectRef, _ []string) (guestcp.Events, error) {
+		workspace, name, err := target(to)
+		if err != nil {
+			return nil, err
+		}
+		return c.hubFor(workspace, name), nil
+	})
+	bus.Provide(c.bus, GroupKind, guestcp.CapabilityQueue, func(_ context.Context, to commonv1.ObjectRef, _ []string) (guestcp.Queue, error) {
+		workspace, name, err := target(to)
+		if err != nil {
+			return nil, err
+		}
+		return c.hubFor(workspace, name), nil
+	})
+}
+
+func (c *Controller) hubFor(workspace, name string) *queue.Hub {
+	key := feedKey(workspace, name)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	h := c.hubs[key]
+	if h == nil {
+		h = queue.New()
+		c.hubs[key] = h
+	}
+	return h
 }
 
 func target(to commonv1.ObjectRef) (string, string, error) {

@@ -17,6 +17,7 @@ import (
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/guestcp"
 	contract "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/vault"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/participant"
@@ -165,6 +166,8 @@ type Guests interface {
 	SyncLabels(vm *v1alpha1.ComputeVM) map[string]string
 
 	SyncVM(sync *v1alpha1.StateSync) string
+
+	CheckGuestEvent(record map[string]any) (string, error)
 }
 
 type Deps struct {
@@ -177,6 +180,8 @@ type Deps struct {
 	Vault vault.KV
 
 	Guests Guests
+
+	GuestEvents guestcp.Events
 
 	Tokens *participant.Tokens
 
@@ -203,6 +208,8 @@ type Bidder struct {
 	vault vault.KV
 
 	guests Guests
+
+	guestEvents guestcp.Events
 
 	outbound *participant.Outbound
 
@@ -279,23 +286,24 @@ func New(cfg Config, deps Deps) (*Bidder, error) {
 		now = time.Now
 	}
 	b := &Bidder{
-		cfg:       cfg,
-		intents:   deps.Intents,
-		records:   deps.Records,
-		signer:    deps.Signer,
-		vault:     deps.Vault,
-		guests:    deps.Guests,
-		outbound:  &participant.Outbound{HTTP: deps.HTTP, Tokens: deps.Tokens, Log: log},
-		verifier:  participant.Verifier{Directory: deps.Directory, Records: deps.Records},
-		directory: deps.Directory,
-		policy:    &policyEvaluator{runs: deps.Policy, scope: cfg.ScopePolicy, records: deps.Records},
-		log:       log,
-		now:       now,
-		bids:      participant.NewIndex[v1alpha1.Bid](),
-		vms:       participant.NewIndex[v1alpha1.ComputeVM](),
-		syncs:     participant.NewIndex[v1alpha1.StateSync](),
-		locks:     map[string]*sync.Mutex{},
-		retryAt:   map[string]time.Time{},
+		cfg:         cfg,
+		intents:     deps.Intents,
+		records:     deps.Records,
+		signer:      deps.Signer,
+		vault:       deps.Vault,
+		guests:      deps.Guests,
+		guestEvents: deps.GuestEvents,
+		outbound:    &participant.Outbound{HTTP: deps.HTTP, Tokens: deps.Tokens, Log: log},
+		verifier:    participant.Verifier{Directory: deps.Directory, Records: deps.Records},
+		directory:   deps.Directory,
+		policy:      &policyEvaluator{runs: deps.Policy, scope: cfg.ScopePolicy, records: deps.Records},
+		log:         log,
+		now:         now,
+		bids:        participant.NewIndex[v1alpha1.Bid](),
+		vms:         participant.NewIndex[v1alpha1.ComputeVM](),
+		syncs:       participant.NewIndex[v1alpha1.StateSync](),
+		locks:       map[string]*sync.Mutex{},
+		retryAt:     map[string]time.Time{},
 	}
 	outbox, err := participant.NewOutbox(deps.Intents, now, b.eventAdapter(), b.provisionAdapter(), b.releaseAdapter(), b.inboxAdapter())
 	if err != nil {

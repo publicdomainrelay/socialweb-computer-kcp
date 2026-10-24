@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -14,9 +15,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bluesky-social/indigo/atproto/syntax"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 )
 
 const MaxVMHostKeys = 8
@@ -305,4 +308,83 @@ func keyTypes(keys []v1alpha1.ComputeVMHostKey) []string {
 		out[i] = keys[i].Type
 	}
 	return out
+}
+
+const (
+	MaxGuestEventTag = 32
+
+	MaxGuestKeyKind = 32
+
+	MaxGuestKey = 256
+
+	MaxGuestSignalKind = 16
+
+	MaxGuestCiphertext = 16384
+
+	MaxGuestEventBytes = 24 << 10
+
+	ageArmorHeader = "-----BEGIN AGE ENCRYPTED FILE-----"
+)
+
+func CheckGuestEvent(record map[string]any) (string, error) {
+	nsid, _ := record["$type"].(string)
+	raw, err := json.Marshal(record)
+	switch {
+	case err != nil:
+		return "", fmt.Errorf("%w: the guest event is not JSON: %v", ErrReportRefused, err)
+	case len(raw) > MaxGuestEventBytes:
+		return "", fmt.Errorf("%w: the guest event is larger than %d bytes", ErrReportRefused, MaxGuestEventBytes)
+	}
+	switch nsid {
+	case market.ComputeEventsGuestPublicKeyNSID:
+		r, err := market.ParseComputeEventsGuestPublicKey(record)
+		if err != nil {
+			return "", fmt.Errorf("%w: %v", ErrReportRefused, err)
+		}
+		if err := checkGuestEventFields(r.Tag, r.Kind, MaxGuestKeyKind, r.CreatedAt); err != nil {
+			return "", err
+		}
+		if r.Key == "" || len(r.Key) > MaxGuestKey || !printableASCII(r.Key) {
+			return "", fmt.Errorf("%w: key is one printable token of at most %d bytes", ErrReportRefused, MaxGuestKey)
+		}
+	case market.ComputeEventsGuestSignalWebRTCNSID:
+		r, err := market.ParseComputeEventsGuestSignalWebRTC(record)
+		if err != nil {
+			return "", fmt.Errorf("%w: %v", ErrReportRefused, err)
+		}
+		if err := checkGuestEventFields(r.Tag, r.Kind, MaxGuestSignalKind, r.CreatedAt); err != nil {
+			return "", err
+		}
+		if err := r.Recipient.Validate(); err != nil || market.NSIDFromURI(r.Recipient.URI) != market.ComputeEventsGuestPublicKeyNSID {
+			return "", fmt.Errorf("%w: recipient is not a strongRef to a %s record", ErrReportRefused, market.ComputeEventsGuestPublicKeyNSID)
+		}
+		if len(r.Ciphertext) > MaxGuestCiphertext || !strings.HasPrefix(strings.TrimSpace(r.Ciphertext), ageArmorHeader) {
+			return "", fmt.Errorf("%w: ciphertext is age armored ciphertext of at most %d bytes", ErrReportRefused, MaxGuestCiphertext)
+		}
+	default:
+		return "", fmt.Errorf("%w: %q is not a guest event", ErrReportRefused, nsid)
+	}
+	return nsid, nil
+}
+
+func checkGuestEventFields(tag, kind string, maxKind int, createdAt string) error {
+	switch {
+	case tag == "" || len(tag) > MaxGuestEventTag || !printableASCII(tag):
+		return fmt.Errorf("%w: tag is printable ASCII of 1 to %d bytes", ErrReportRefused, MaxGuestEventTag)
+	case kind == "" || len(kind) > maxKind || !printableASCII(kind):
+		return fmt.Errorf("%w: kind is printable ASCII of 1 to %d bytes", ErrReportRefused, maxKind)
+	}
+	if _, err := syntax.ParseDatetime(createdAt); err != nil {
+		return fmt.Errorf("%w: createdAt is not an atproto datetime", ErrReportRefused)
+	}
+	return nil
+}
+
+func printableASCII(value string) bool {
+	for i := 0; i < len(value); i++ {
+		if value[i] < 0x21 || value[i] > 0x7e {
+			return false
+		}
+	}
+	return true
 }
