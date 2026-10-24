@@ -4286,7 +4286,8 @@ fail, rather than the code read against this document alone.
   requester's own, and keeps it while an infra AtprotoRecord names its repo; once the identity is Ready it
   adds the RemotePDS of the session's PDS, the RemoteRepo and the AtprotoRepo `repo-<did>`. The web app
   scope carries `repo:computer.socialweb.infra` (create, update, delete), so owners sign in again once.
-  Open: the prod reading of done_when (a market network gateway has no public-origin, so no web sign-in).
+  A signed-in owner opts in through the web app too: `POST /api/clusters/publish` {name, publish} calls
+  the same SetPublishInfra as the XRPC procedure. Open: the prod reading of done_when (a market network gateway has no public-origin, so no web sign-in).
 - **The market network runs its applications in one kcp: what is left (plan 0019).** The design as built and
   its readings are in section 15, "The market network is one kcp (plan 0019, 2026-10-18)". Open: the web
   app's account and home workspaces (`root:<account>:<home>`, the tenant clusters) still sit at the root of
