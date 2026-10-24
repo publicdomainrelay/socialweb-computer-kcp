@@ -163,6 +163,10 @@ func (p *Publisher) Withdraw(workspace, name string) {
 	p.release(workspace, name)
 }
 
+func (p *Publisher) Pause(workspace, name string) {
+	p.stop(publicationKey(workspace, name))
+}
+
 func (p *Publisher) stop(key string) {
 	p.mu.Lock()
 	pub := p.running[key]

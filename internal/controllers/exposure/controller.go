@@ -230,7 +230,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 
 func (c *Controller) withdraw(ctx context.Context, req ctlruntime.Request, object *exposurev1alpha1.Exposure, phase exposurev1alpha1.ExposurePhase,
 	reason, message string) (ctlruntime.Result, error) {
-	c.publisher.Withdraw(req.Workspace, req.Name)
+	c.publisher.Pause(req.Workspace, req.Name)
 	generation := object.Generation
 	status := object.Status
 	status.Phase = phase
