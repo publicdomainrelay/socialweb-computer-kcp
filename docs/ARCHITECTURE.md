@@ -1784,7 +1784,7 @@ restarts** 44.5 s after instance start and held for **1 m 47 s**, the node repor
 endpoint as `{"Port":10250}`, `kubectl top nodes` reads it through that port (`215m` CPU, `169Mi`),
 and the guest console is clean on every firewall signature. What that run also needed, and what
 nothing enforces: the image had to be REBUILT first. The guest's kubelet argv is decided by the agent
-inside the image, and the image's recorded inputs do not include that agent (section 14), so a boot on
+inside the image, and the image's recorded inputs did not include that agent at the time, so a boot on
 the previous image passed `--kubelet-arg port=0` - the removed field read back as Go's zero value -
 and the kubelet refused to start with `port (--port) 0 must be between 1 and 65535`. The rule
 underneath the lease survives it, restated as invariant 8.
@@ -3954,6 +3954,25 @@ A change must not break any of these. Each exists because something failed.
 
 ## 14. Open architectural gaps
 
+These are the things the architecture does not yet answer, and this list is the work. What is settled - a
+decision taken, a defect closed, a measurement recorded - is in section 15 instead, and the two are
+separated deliberately: a work list padded with history reads as complete, which is how a bullet that was
+already closed, or one whose subject the design has since deleted, survives re-reading. On 2026-10-23
+every item was read again against the plan 0026 tree: the items that existed only because of the removed
+TypeScript runtime, and the items that later work had closed, moved to section 15 ("Gaps of the removed
+TypeScript runtime" and "Items closed by later work"). The items of the earlier batches, from 2026-09-24
+to 2026-10-12, are closed; section 15 holds their readings (REL-7, PASTA-1, CHK-1, VAULT-1, VAULT-2,
+ESO-2, ESO-4, FLAKE-1, GL-1, GL-2 and MARKET-2 by name), and each plan's decisions are in its file under
+`docs/plans/`.
+
+**The live backlog is `NEXT.yaml`, which this section mirrors: an item is written here when it is opened
+and moves to section 15, with its readings, when it is closed.** An entry belongs here when the design
+does not answer a question the code already asks, when a reading the architecture depends on has no
+instrument, or when a settled decision turns out to have been recorded only in a comment. Every entry
+closed so far was found by reading the code against this document, or by running it, rather than by
+reading the document. The practice worth keeping: the artefact was run and each guard was watched to
+fail, rather than the code read against this document alone.
+
 - **Plan 0013 soak paused 2026-10-19 06:28Z (third reading, partial).** `dev-soak-3` ran rc18 code
   1 h warm-up + 2 h 43 min of the fit window at ~1.1 RFP/s: 15,311 RFPs created, 0 failed; 227 tenant
   cycles, 0 failed; 286 VM contracts, 21 failed around chaos; host OOM 0, MemAvailable 82 GB, swap 0.
@@ -3965,104 +3984,24 @@ A change must not break any of these. Each exists because something failed.
   1,474 MB, its OpenBao HostProcess 63 -> 71 MB, and the guest-kcp pod 76 -> 80 MB. Three series the
   fit called NO are cumulative counters, not gauges: Bids Expired, Bids Lost and gc objects; the fit
   script needs counter differencing. Logs dirs and the host journal grow under their rotation caps.
-  A full 3 h reading and the counter-differencing fix are needed before 0013 can close.
-- **`scripts/validate-candidate.sh` lane c does not pass yet.** On rc21 the install, association-less
-  boot and upgrade all succeed (unit active on the candidate, slot rolled), but the lane reports
-  FAIL: the replacement line is absent because lanes need the candidate's TypeScript tree to differ
-  from the base release and the assertion reads the wrong journal in that case; fix and re-run.
-  Lanes a and b were fixed (sha prefix, go test result line) but not re-run green together.
-
-These are the things the architecture does not yet answer, and this list is the work. What is settled - a
-decision taken, a defect closed, a measurement recorded - is in section 15 instead, and the two are
-separated deliberately: a work list padded with history reads as complete, which is how a bullet that was
-already closed, or one whose subject the design has since deleted, survives re-reading.
-
+  These are pre-plan-0026 readings: guest-kcp is now the GuestControlPlane component and runs in the
+  bidder core's process, so its series is part of the core's memory. A full 3 h reading on a
+  post-0026 build and the counter-differencing fix are needed before 0013 can close.
+- **`scripts/validate-candidate.sh` lanes b and c cannot pass at HEAD.** Lane c installs the base
+  release (v0.0.0-rc15), upgrades to the candidate and asserts that the journal holds at least one
+  `runs other assets` line. That line was the log of the removed pod replacement (section 15, "Gaps of
+  the removed TypeScript runtime"), and no Go code at HEAD prints it, so the lane reports FAIL even when
+  the install and the upgrade succeed (on rc21: unit active on the candidate, slot rolled). Since plan
+  0026 an upgrade restarts every component with the core, so the assertion to write is that each
+  component object reports a start on the candidate binary. Lane b waits for a `go test` result line of
+  the integration suite on gl-runner-1, and plan 0026 deleted every Go test, so lane b has no suite to
+  run until plan 0027. Lane a (the GitHub gate, the apigen diff and the cross-OS builds) is unchanged.
 - **Which bidders get a direct submitRfp (no plan attached; user, 2026-10-18).** A requester posts its
   market.rfp record, and relay/firehose watchers see it; the direct `submitRfp` XRPC is only a faster path and
   the path to bidders that do not watch the firehose. There is no recipient cap and no fill order today. A
   future policy-engine plan decides which bidders get a direct submitRfp and in what priority; plan 0017 no
   longer carries a cap (its M2 was removed).
 
-On 2026-09-24 this section listed eleven open items and the batch closed every one of them. Ten went to
-section 15 with their before-and-after readings; the eleventh, REL-7, closed by an experiment whose
-answer split a narrower window out of it, and that window was PASTA-1, now closed in section 15 with the
-rest. On 2026-09-25 a privileged rig run and the vault and ESO work opened five more. One of the five,
-CHK-1, was refuted by measurement before any code changed -- the check reads HOLDS on the host and in
-the product image, and the MISSING line came from a build stage that needs no qemu -- so four were
-listed below, and a claim is not an item until it has been run. VAULT-3 has since closed and moved to
-section 15, leaving three: the vault's own store line was the one the design already answered, so it
-was implemented rather than left open. VAULT-2 has since closed too: both vaults now speak TLS, and the
-root vault's listener authenticates its clients by certificate. VAULT-1 closed with it, having found
-that its own premise named a file `kcp` does not write. RIG-6 was opened and closed in the same window,
-by a rig run that tested a tree moving under it. On 2026-10-05 five more were opened by the GitLab and
-cloud-controller-manager work: CCM-1 and AUTO-1 were opened and CLOSED inside the same window and are
-in section 15 with their readings, while ESO-2 remained and FLAKE-1 joined it. GL-1, GL-2, ESO-2 and
-FLAKE-1 have all since closed and are in section 15 too, which leaves this section's open list with no
-item that is not a stated limit. Each was
-written from the code rather than from the request that produced it, and each names its instrument.
-On 2026-10-06 MARKET-2 was opened and CLOSED inside the same window, by the k8s door's tenant
-credential work, and is in section 15 with its readings. On 2026-10-07 ESO-4 was opened by the
-baseline work, and plan 0005 (`docs/plans/0005-zero-ssh-market-nodes.yaml`) opened P5-M1 through
-P5-M6: the vendored deno-kcp market network and a market-only node path, an event-driven requester whose
-contracts outlive the door, guests that join without ssh through cluster links and the cluster's
-OpenBao, per-node scale-in with ESO beside the control plane, a pod mesh with per-node DNS, and the
-old stated limits fixed. The plan file holds each item's decision and evidence; `NEXT.yaml` names
-each milestone's instrument. ESO-4 closed the same day with M4-ESO-BESIDE and is in section 15 with
-its readings. Also on 2026-10-07 three plans were QUEUED behind plan 0005, and none of them starts
-until plan 0005 is complete and its acceptance checks ACC-ZERO, ACC-MESH and ACC-NOSSH pass on prod:
-plan 0006 (`docs/plans/0006-socialweb-computer-unified-binary.yaml`, P6-M0 through P6-M5) makes one Go
-binary, `socialweb-computer`, the entrypoint of the whole stack, with kcp run out of process as
-slot units of the unpatched release binary behind our own front - blue/green slots on kine -> postgres on
-the gateway, one slot on kine-sqlite per bidder handle - every slot on port 0 with the bound port read
-from its listening socket (decided by the user 2026-10-12 after the M0 spike measured both the
-in-process fork and this route; the bidder shape decided by the user the same day),
-every manifest in an embed.FS it templates and server-side applies from Go, no container at runtime
-(postgres and the OpenBao servers embedded and driven by CRDs, long-lived children in their own systemd
-units so an upgrade of the binary leaves them running), so `serve gateway kcp` on the host replaces
-`deploy/container-entrypoint.sh`; plan 0008 (`docs/plans/0008-embedded-deno-and-typescript-denopods.yaml`,
-P8-M1 through P8-M4) carries a pinned deno and the TypeScript closure inside that binary (the org root
-in non-production builds), forks deno-kcp and kcp-libs into this repo, and runs every long-lived
-TypeScript service as a DenoPod, adding `run gateway ssh` and `run request` with its contracts held in
-kcp; plan 0007 (`docs/plans/0007-compute-provider-kcp.yaml`, P7-M1 through P7-M6) adds
-compute-provider-kcp beside the firecracker provider, whose learnings it backports with parity tests:
-VMs are ComputeVM objects in the bidder's own kcp, booted unprivileged through the kvm group with no
-docker, each in its own systemd unit, and the bidder's keys live in an OpenBao beside it, so a bidder
-or a gateway can be upgraded while its VMs keep running and each re-populates what it owns afterwards,
-with no change to any market record. On 2026-10-11 the three plans were revised to the VM-lifecycle
-decisions in section 5 ("Host processes and the VM lifecycle"): Linux execution with cross-OS seams, and
-the Windows and macOS bidders moved to plan 0011 (`docs/plans/0011-windows-bidder-hcs.yaml`, P11-M0
-through P11-M3) and plan 0012 (`docs/plans/0012-macos-bidder-vz.yaml`, P12-M0 through P12-M3), both
-QUEUED behind 0006 and 0007; the user has paused 0006-0008 while they are refined. Each plan file holds
-its items' decisions, dependencies and the questions left for the user. On 2026-10-12 the dev run mode
-was folded as kcp-native now (section 5, "Host processes and the VM lifecycle"), with new items for the
-proc backend, the contract suite, dev instances, the bootstrap layer and the HostProcess kind, and
-`NEXT.yaml` gained an `execution_order` block (critical path, startable waves, parallel worktrees, live
-hat-8 needs) and the early market network item P8-M1-MARKET-NETWORK. Later on 2026-10-12 the user's paradigm correction became
-the plans' organizing principle (section 0): one kcp per application instance, never per machine;
-modes as profiles over one manifest set; applications meeting only over the atproto market protocol;
-port 0 behind the edge with addresses held in kcp (new check item 0006 M1-NO-FIXED-PORTS); every
-workstream testing in its own market network; the virtual clusters project the one traditional use. Later
-the same day the decomposition of today's multi-server processes into application instances was folded
-(section 0; `multi-server-to-kcp.md` with the user's answers): one root object per application (0006
-M2-APP-CONTROLLER), strict kcp per application inside a market network too, sign-in as a MarketIdentity (0007
-M1-MARKET-IDENTITY, early), kcp only, a fresh kcp per requester invocation with a durable state dir (0008
-M4-RUN-REQUEST), secrets only in each application's OpenBao, listener reports in DenoPod status (0008
-M2-DENOPOD-LISTENERS), one network value and fetch adapter (0008 M2-MARKET-NETWORK), and iroh as the only
-guest transport - the ssh gateway ported first (0008 M1-SSH-GATEWAY-IROH, early), then every other
-transport stripped (0008 M1-STRIP-LEGACY-TRANSPORTS); also 0007 M3-BIDDER-ACCOUNT-PDS,
-M3-OIDC-ISSUER-INSTANCE, M3-BIDDER-COMPOSER, M5-BIDDER-COMPONENTS and 0008 M3-DOOR-STATE-VAULT.
-**The live backlog is `NEXT.yaml`, which this section mirrors:
-an item is written here when it is opened and moves to section 15, with its readings, when it is
-closed.** The practice that produced the batch is the one worth keeping: the artefact was run and each
-guard was watched to fail, rather than the code read against this document alone.
-
-An entry belongs here when the design does not answer a question the code already asks, when a reading
-the architecture depends on has no instrument, or when a settled decision turns out to have been
-recorded only in a comment. Every entry closed so far was found by reading the code against this
-document, or by running it, rather than by reading the document. What remains at the end, after the
-open list, are two stated LIMITS rather than open work: each marks where a behaviour that passes stops
-being true, which is a fact about the design rather than a question left in it, and each sits here
-because it bounds a mechanism the rest of this document leans on.
 
 - **The kcp store keeps a bounded history by mechanism; the plateau reading is open (plan 0013
   M3-STORE-COMPACTION, plateau read by M4-SOAK-READING on 2026-10-18).** Four mechanisms, each read live on
@@ -4107,26 +4046,22 @@ because it bounds a mechanism the rest of this document leans on.
     rows 1685, `vacuums` 1.
   - kcp starts with `--event-ttl=1h` (`kcpserver.EventTTLFlag`; `CheckArgv` refuses a slot without it).
     Reading: the running `kcp start` command line carried it. The flag is accepted, hidden from `--help`.
-    No Go controller and no TypeScript package in this tree creates an Event object (searched for
-    EventRecorder, `events.k8s.io` and core/v1 Events), so every controller already writes status only.
+    No controller or component in this tree creates an Event object (searched again at the plan 0026
+    tree for EventRecorder, `events.k8s.io` and a record broadcaster), so every controller writes status only.
   - Not read: the plateau of file size, kine rows and kine table size under M4-SOAK-READING load. This
     item's `done_when` is that reading, so the plan item stays `todo`. A child kcp of a market network is
     covered because its core also runs `devcore.Run`.
 
 - **Disk use of a long-running instance is bounded by rule; the soak reading is open (plan 0013
-  M3-DISK-RETENTION; the 2026-10-18 soak found the kcp audit logs and the PDS kv files unbounded, see the open items below).** The rules, by owner:
-  - Run directories (`<state>/denokcp/runs/<pod|engine>-<id>`). The deno-kcp provider removes the
-    run directory of a DenoPod, DenoRun or PolicyEngine when it removes the object's finalizer. Once a
-    minute it sweeps the directories that no DenoPod, DenoRun or PolicyEngine status names and whose
-    process is not alive: at provider start every such directory last active before the start goes,
-    after that every such directory idle for `RunDirKeep` (1 h), so the run a DenoPod restart replaced
-    stays an hour for diagnosis. `stdout.txt` and `stderr.txt` open with O_APPEND and are rotated over
-    `RunLogCap` (16 MiB).
+  M3-DISK-RETENTION; the kcp audit logs that the 2026-10-18 soak found unbounded are bounded now, section 15).** The
+  rules, by owner (the run directory rule of the removed runtime is in section 15, "Gaps of the removed TypeScript
+  runtime"):
   - File logs. Rotation is copytruncate with one `.1` copy that keeps the newest `cap` bytes
-    (`internal/logcap`), safe because every writer opens with O_APPEND (devsup, systemd `append:`, the
-    run logs). The core rotates every `*.log` in its logs dir and the devsup logs over 64 MiB once a
-    minute. The HostProcess supervisor enforces `spec.output.capBytes` (64 MiB when unset) on every
-    pass; before this the field was declared and nothing enforced it.
+    (`internal/logcap`), safe because every writer opens with O_APPEND (devsup, systemd `append:`). The
+    core rotates every `*.log` in its logs dir and the devsup logs over 64 MiB (`logcap.DefaultCap`):
+    `logcap.Keep` makes one pass at start and then a pass on file-system events, debounced to one a
+    minute (`logcap.DefaultEvery`). The HostProcess supervisor enforces `spec.output.capBytes` (64 MiB
+    when unset) on its watched output files.
   - The journal. A user manager cannot get its own journald size limit: journald keeps user units in
     `user-<uid>.journal` files that share the host's SystemMaxUse pool (default 10% of the file system,
     at most 4 GiB), and LogNamespace= is refused for units of a user manager. So `install` does not
@@ -4134,16 +4069,18 @@ because it bounds a mechanism the rest of this document leans on.
     and `LogRateLimitBurst=10000` into the core unit templates, which caps the message rate of each
     core whatever the host's journald.conf says (journald still scales a burst by free disk space). Units that write
     to a file (kcp, kine, the front, postgres, OpenBao, the VMM) are under the file rules above.
-  - Guest images (`<state>/images/<hypervisor>/<arch>/<manifest sha256>`). Every 10 minutes the
-    ComputeVM controller asks the VM runtime to collect the store. An image stays when a ComputeVM
-    status names it, a VM work dir under `<state>/handles/*/vms/*` boots it, this binary's
-    versions.json pins it, or `bin/current` or `bin/previous` names it (`version --json` lists
-    `guestImages`). Everything else goes, and `.fetch-` scratch dirs older than an hour go too.
-  - Unchanged: the DENO_DIR closure keys, the asset cache GC and the VM work dir collection (an orphan
-    work dir goes after `OrphanGrace`).
-  - The reading. Each application's appctl samples its state dir every 3 minutes (bytes on disk from
-    st_blocks, file count) and writes the last sample into `status.stateDir` of its root object with
-    the next status write. M4-SOAK-READING records the series; the item closes when it is flat.
+  - Guest images (`<state>/images/<hypervisor>/<arch>/<manifest sha256>`). After it tears a VM down, the
+    FirecrackerVM controller (`internal/controllers/firecrackervm`) asks the VM runtime to collect the
+    store (`vmruntime` `CollectImages`). An image stays when a FirecrackerVM status names it, a VM work
+    dir under `<state>/handles/*/vms/*` boots it, this binary's versions.json pins it, or `bin/current`
+    or `bin/previous` names it (`version --json` lists `guestImages`). Everything else goes, and
+    `.fetch-` scratch dirs older than an hour go too. No VM teardown means no collection.
+  - Unchanged: the asset cache GC and the VM work dir collection (an orphan work dir goes after
+    `OrphanGrace`).
+  - The reading. Each application's appctl (`internal/app/compose`) samples its state dir at most every
+    3 minutes (`StateDirSampleEvery`; bytes on disk from st_blocks, file count) and writes the last
+    sample into `status.stateDir` of its root object with the next status write. M4-SOAK-READING
+    records the series; the item closes when it is flat.
 
 - **PORT-1: the kcp process piles up loopback connections to the fixed-port front of an old tenant
   cluster until the gateway host has no ephemeral port left (opened 2026-10-15 from a live reading on the
@@ -4220,21 +4157,24 @@ because it bounds a mechanism the rest of this document leans on.
   bid config and payload PDS writes. If it holds, this item closes into section 15.
 
 - **The Windows bidder: the seams as they landed (plan 0011 M0-REVISIT, 2026-10-16, read at 79f40adb;
-  hono-compute-provider and atproto-market are `ts/` in the same tree).** `GOOS=windows GOARCH=amd64 go
-  build ./...` and `go vet ./...` are green. The plan was written against names that did not land:
-  - The VM seam is `vmruntime.Runtime` (Prepare, Reserve with a `Placer`, Await, Start, Inspect returning
-    an `Observation`, Shutdown, Stop, List, Cleanup, Watch, Load, CollectImages). The verdict type is
-    `hostsvc.Verdict`. The service-manager seam is `hostsvc.Manager`; its `UnitSpec` is an argv plus
-    cgroup limits, so it cannot describe an HCS system. The ComputeVM controller (`internal/computevm`)
-    does not call the runtime alone: `Reserve` hands a `Placer` that creates a `HostProcess` child, the
-    supervisor starts the unit through `Manager`, and the controller reads liveness, orphans, exits and
-    events from `Manager`. A Windows VM backend therefore needs the controller to ask the runtime, not
-    the manager (item M1-CONTROLLER-RUNTIME-OWNED).
+  re-read against the plan 0026 tree on 2026-10-23).** `GOOS=windows GOARCH=amd64 go build ./...` and
+  `go vet ./...` are green (`deploy/check.sh --fast` builds windows/amd64 and windows/arm64). The plan was
+  written against names that did not land:
+  - The VM seam is `vmruntime.Runtime` (Prepare, Placed, Reserve with a `Placer`, Await, Start, Inspect
+    returning an `Observation`, Shutdown, Stop, List, Cleanup, Watch, Load, CollectImages). The verdict
+    type is `hostsvc.Verdict` (an alias of `internal/contract/host`'s). The service-manager seam is
+    `hostsvc.Manager`; its `UnitSpec` is an argv plus cgroup limits, so it cannot describe an HCS system.
+    The FirecrackerVM backend (`internal/compute/firecracker`, driven by
+    `internal/controllers/firecrackervm`) does not call the runtime alone: `Reserve` hands a `Placer`
+    that creates a `HostProcess` child, the supervisor starts the unit through `Manager`, and the backend
+    reads liveness, orphans, exits and events from `Manager`. A Windows VM backend therefore needs the
+    backend to ask the runtime, not the manager (item M1-CONTROLLER-RUNTIME-OWNED).
   - `status.runtime` is `{backend, ref (the unit name), instance (the InvocationID), pid, startTime (start
     ticks as a string), hostBootID, vmmID}`; `Backend` is a free string in the API, but `hostsvc.ParseBackend`
     accepts only `systemd-user` and `proc`.
-  - kcp is the unpatched release asset kcp v0.33.0 in its own unit behind kine on sqlite (cgo) and our
-    front, not in-process. The assets table has no windows/amd64 kcp, kine or any other entry
+  - kcp is a pinned asset (at HEAD built here from kcp-dev/kcp main at 74e9fb9c, version
+    `v1.36.0+kcp-v0.33.0-162-g74e9fb9c03f778` in `internal/versions/versions.json`) in its own unit
+    behind kine on sqlite (cgo) and our front, not in-process. The assets table has no windows/amd64 kcp, kine or any other entry
     (`platforms["windows/amd64"]` is status seam with zero assets). The `proc` backend is `devsup`, which
     is Linux-only. The bootstrap layer is installed systemd units.
   - The guest image is a `guestImages` target built by `scripts/build-guest-image.sh`, never embedded, fetched
@@ -4250,63 +4190,44 @@ because it bounds a mechanism the rest of this document leans on.
     assets are `runtime/<sha256>/`, collected when unreferenced. `install` is behind `install.System` and
     `UserManager`, which are systemd and account shaped (`system_other.go` refuses on !linux). The bidder
     core is `Type=notify` with a watchdog (`internal/notify`).
-  - The DenoPod runner is `internal/kcplibs/impl/execrunner` with an `osProcessHost` seam (prepare,
-    killGroup, termGroup, alive, startTicks); `runner_windows.go` is a refusing stub.
+  - The components run in the core's process (`internal/component`), so they need no process seam on
+    Windows. Plan 0011 names a runner that no longer exists. The policy engine still starts its embedded
+    deno as a child process to run the policy actions (`internal/policyengine/workflow`), outside the
+    HostProcess units.
   - Windows stubs today: `hostsvc.Open`, `OpenProcClient`, `ListenPort(s)`; `vmruntime.ForHost`;
-    `hostos.BootID`; `execrunner.osProcessHost`; `install.NewSystem`, `SelfCheck`, `RestartOwnUnits`,
-    `NewStagedSystem`; `hostcontract.Gather`; `guestnet.Wire`; `devsup`; `nsexec`; `apiserverfront` hold;
+    `hostos.BootID`; `install.NewSystem`, `SelfCheck`, `RestartOwnUnits`, `NewStagedSystem`;
+    `hostcontract.Gather`; `guestnet.Wire`; `devsup`; `nsexec`; `apiserverfront` hold;
     `cmd/socialweb-vmexec`; the release asset blobs (`assets_release_unsupported.go`). `hostos` process
     identity, lock, port range and `DieWithParent` (empty) have Windows bodies.
   - Decision (decided by Claude, user may veto): on Windows every non-VM host process of a bidder (kine,
-    kcp slot, front, OpenBao, deno) is a child of the bidder service inside a kill-on-close job object. Only
-    VMs outlive the core, and HCS owns them. This replaces the plan's pre-installed vault service.
+    kcp slot, front, OpenBao, the policy engine's deno) is a child of the bidder service inside a
+    kill-on-close job object. Only VMs outlive the core, and HCS owns them. This replaces the plan's
+    pre-installed vault service.
   - Decision from the user (2026-10-16): the Windows desktop is never rebooted, shut down or signed out. A
     reboot-only proof is `blocked` and its closest no-reboot equivalent is measured and labelled.
-- **An application owns its PDS: the PDS is a DenoPod in its own kcp (plan 0018, opened 2026-10-17).**
-  Bob's bsky.social account hit the hosted cap of 35000 write points per 24 hours because the prod bidder
-  (MarketIdentity mode oauthQr) wrote every market record into Bob's own repo. Every MarketBidder profile is
-  now mode localRepo, and the market-bidder set renders `pds@<profile>` from `deploy/apps/repo-pds`
-  (manifests.RepoPds, field Pds, so the gateway set can render the same DenoPod for alice). The core writes
-  the repo key once into the application's OpenBao (`identity/bidder/keys`, field repoKeyHex); the DenoPod
-  pds (`hono-repo-pds`) reads it with its own client `pds`, registers the did:plc of the key, serves the
-  repo on port 0 (`pds.default.app.svc.kcp.local`) and on the did-key-ingress-proxy subdomain of its key
-  (the DID document's `atproto_pds` endpoint), and accepts a repo write only with a service-auth token
-  signed by the repo key (aud and iss the repo DID); createAccount and getServiceAuth are off. The bidder
-  DenoPod holds the same key, signs its records and service-auth tokens with it, and reads and writes its
-  repo only through the pds DenoPod. Records the application declares are AtprotoRecord objects (kind in
-  export marketidentities) in git, in its manifest set (`deploy/apps/market-bidder/records.yaml`), applied
-  with the profile: spec {repo, collection, rkey, record}, record an open object. Two substitutions only:
-  the render-time template values of the root object, and runtime references, a value that is exactly
-  `{valueFrom: {kind | resource, name, fieldPath, workspace?, namespace?, apiVersion?}}` (fieldPath dotted
-  with `[n]`; workspace absent is the record's own, set it is read through `/clusters/<workspace>`). The
-  pds DenoPod keeps a record Pending with condition ReferencesResolved False, reason MissingReference,
-  naming each missing or unreadable (404, 403) reference, writes it once all resolve, rewrites it when a
-  referenced value changes, reports uri and cid, and deletes it with the object (finalizer
-  atprotorecord.socialweb.computer/repo). The association is dynamic (see "The operator comes from the
-  event stream" below): no operator is configured; the operator writes one claim record into its own repo
-  (one putRecord, 3 points, once per bidder DID) and the application learns it from the event stream.
-  The requester's policy reads the bidder's own repo for the operator (`resolveOperatorDid`). In a market
-  network the bidder's core plays the operator's atproto client once with the bidder account on the bob
-  PDS: it reads the nonce from the MarketIdentity status and writes the claim record, nothing else.
-  The gateway requester side (M2): before, the gateway's requester DenoPod carried every ComputeContract
-  with the OAuth session of its spec.ownerDid account (accounts mode, the atproto auth mount), so every
-  rfp, compute.vm, accept and rbac record of every node went into alice's bsky.social repo, and a gateway
-  with no web app session for alice failed every claim. Now the gateway set renders the same `pds` DenoPod
-  in root:app for the MarketIdentity `requester` (mode localRepo, AtprotoRecordWatch `association`);
-  the core writes its key once at `requester/identity/requester/keys` of the root vault. The requester
-  DenoPod writes and reads only through `--repo-pds-url http://pds.default.app.svc.kcp.local` and answers
-  bids and events on a callback DID of its own key; spec.ownerDid stays the account of a contract for the
-  per-account limits, and the orphan scan reads the one repo. People still sign in to the web app through
-  the atproto auth mount; only the identity that posts RFPs changed. The operator claims the requester DID
-  once with the nonce of `<qrOrigin>/#plc=<requester DID>&n=<nonce>&s=requester_associate` (the Gateway
-  status message names the link while it waits). In a market network the gateway's core writes that claim
-  with the tenant cluster's owner account on the alice PDS (the owner sessions file). A requester_associate
-  record has the shape {challenge: operator, keyId: requester}.
-  Open: the readings of the live proof; whether prod requesters find the
-  new bidder DID through the relay index or need it in the Gateway's bidderDids (the operator's vouches name
-  Bob, not the bidder DID). The pds writes the canonical association shape {challenge: operator, keyId:
-  the application's DID} for every service; the policy context and the MarketIdentity read it first and
-  the old inverted shape second.
+- **An application owns its PDS: the PDS is the Pds component in its own kcp (plan 0018, opened
+  2026-10-17; rewritten for plan 0026 on 2026-10-23).** Bob's bsky.social account hit the hosted cap of
+  35000 write points per 24 hours because the prod bidder (MarketIdentity mode oauthQr) wrote every market
+  record into Bob's own repo. Since plan 0018 the bidder's MarketIdentity is mode localRepo and its repo is
+  a LocalRepo on the application's own Pds component (`internal/services/pds` over `internal/pds/local`;
+  the repo kinds are in section 12). appctl writes the repo key once into the application's OpenBao
+  (`identity/bidder/keys`, field `repoKeyHex`, `internal/app/marketbidder` and `internal/app/compose/vault.go`);
+  the Pds component serves the repo on port 0 and, through the app's IngressProxy, on the public URL in
+  the DID document's `atproto_pds` endpoint. Records the application declares are AtprotoRecord objects
+  that appctl composes in Go (`internal/app/compose/records.go`: the operator vouch, the association
+  record, `OnMissingReference: Delete`); `internal/controllers/atprotorecord` writes each to its repo,
+  keeps it Pending with condition ReferencesResolved False, reason MissingReference, while a runtime
+  reference is unresolved, rewrites it when a referenced value changes, and deletes it with the object
+  (finalizer `atprotorecord.socialweb.computer/repo`). The association is dynamic (see "The operator
+  comes from the event stream" below). The gateway requester side: the Gateway root composes the same
+  Pds component for the MarketIdentity `requester` (mode localRepo, AtprotoRecordWatch `association`
+  from `deploy/apps/repo-pds/association-watch.<profile>.yaml`), with its key at
+  `identity/requester/keys` (`internal/app/gateway/vault.go`), so rfp, compute.vm, accept and rbac
+  records no longer go into alice's bsky.social repo; spec.ownerDid stays the account of a contract for
+  the per-account limits. People still sign in to the web app through the atproto auth mount; only the
+  identity that posts RFPs changed. Plan 0018 is marked done. Open: the live proof's readings were not
+  written here, and it is not read whether prod requesters find the bidder DID through the relay index
+  or need it in the Gateway's `bidderDids` (the operator's vouches name Bob, not the bidder DID).
 - **The operator comes from the event stream, not from the config (plan 0018 M4-DYNAMIC-ASSOCIATION,
   opened 2026-10-17).** Neither the Gateway spec nor the MarketBidder spec names an operator; `operator`
   (handle or DID) is an optional allow-list on both. Records are public and a new DID is visible on
@@ -4318,14 +4239,16 @@ because it bounds a mechanism the rest of this document leans on.
   requester_associate, nonce, createdAt}. The kind AtprotoRecordWatch (export marketidentities) is the
   mirror of AtprotoRecord: spec {repo, collection, match: [{fieldPath, value | valueFrom}], source:
   {eventSourceRefs}}, status {records: [{did, handle, uri, cid, value, verifiedAt}], cursors:
-  [{source, cursor}], conditions: Verified}. The pds DenoPod reconciles the watches whose spec.repo is pds:
-  it subscribes to every source with the collection filter (relay subscribeRepos with a client-side
-  filter, Jetstream `wantedCollections`), takes each event only as a trigger, and fetches the record with
-  com.atproto.repo.getRecord from the author's PDS (from its DID document); only a fetched record that
-  matches enters status. A delete event, a refetch that finds nothing (404, RecordNotFound,
-  RepoNotFound) or a record that no longer matches removes it; a fetch error keeps it. On a start the
-  pds re-verifies every entry of status (Verified False, reason Reverifying, until done), resumes each
-  source from its cursor, and re-verifies every 5 minutes. `deploy/apps/repo-pds/association-watch.<profile>.yaml`
+  [{source, cursor}], conditions: Verified}. The AtprotoRecordWatch controller
+  (`internal/controllers/atprotorecordwatch`, in the core since plan 0026) reconciles each watch: it
+  writes an EventStream child per source (`internal/eventstream` plans them; relay subscribeRepos with a
+  client-side filter, Jetstream `wantedCollections` in `internal/events/jetstream`), takes the matches
+  the streams report only as triggers, and verifies the records through its backend's `Verify`, which
+  fetches each with com.atproto.repo.getRecord from the author's PDS; only a verified record stays in
+  status. The condition Verified is False with reason MatchPending or StreamNotReady until the streams
+  are ready, and VerifyFailed after a failed pass, which is retried after 30 s (`VerifyRetry`); a passing
+  watch is verified again every 5 minutes (`VerifyInterval`; both listed in `deploy/obligations.txt`).
+  Each source resumes from its cursor in status. `deploy/apps/repo-pds/association-watch.<profile>.yaml`
   declares `association`: keyId equals valueFrom MarketIdentity status.did, service equals the
   application's service; its sources are the EventSources the root composes: the network relay
   (`relay-network`, from the network value's relay host) or, with no relay host, two public Jetstream
@@ -4346,9 +4269,13 @@ because it bounds a mechanism the rest of this document leans on.
   the network's kcp, not under root:gateway (kcpclient, the clusterprovider registry, sweepkcp and the
   tenant credential paths take `root` as their base); the composer still copies the network value and the
   bidder DIDs onto the root objects (no record carries them); the per-child core holds the network's admin
-  kubeconfig (the shared kcp isolates components by workspace RBAC, not the cores); the DNS table of the one
-  deno runtime holds every workspace's names. ACC19-ONE-KCP (the integration tests on the one-kcp network)
-  is open.
+  kubeconfig (the shared kcp isolates components by workspace RBAC, not the cores); the host map of a core's
+  component runtime (`component.NetworkHostMap` in `internal/component/network.go`, built from the
+  component registry) holds the names of every workspace whose components that core runs, each name
+  carrying its workspace; its lookup (`Address`) takes no caller, so a component can resolve another
+  workspace's names.
+  ACC19-ONE-KCP is marked done in plan 0019, but the integration tests it named were deleted by plan 0026,
+  so the one-kcp network has no standing check until plan 0027.
 
 ## 15. Settled decisions, and the defects they closed
 
@@ -6833,9 +6760,10 @@ postgres                     "initdb: error: cannot be run as root" -- fatal
   narrower grant set are stated as measurements to make, not as assumptions.
 - **Consequence of the one-container shape, stated rather than discovered.** The container's network
   namespace is its own, so the subnet allocator sees fewer networks than the host does and its
-  host-network overlap refusal is narrower than the host's (section 14's first limit); the allocator's
-  `HostNetworks` seam is where a real collision would be handed in. `liveports.LockDir()` is likewise
-  per-container (section 14's second limit). Neither has a production path that depends on it. The node
+  host-network overlap refusal is narrower than the host's (a stated limit, closed with the container,
+  "Items closed by later work" above); the allocator's `HostNetworks` seam is where a real collision
+  would be handed in. `liveports.LockDir()` is likewise per-container (the second limit, closed the
+  same way). Neither has a production path that depends on it. The node
   image is built inside the image, so the host needs no `/lib/modules`, no kernel and no firecracker
   binary at run time; the build still reads this host's kernel and module tree, which is what makes the
   guest's module set measured rather than assumed.
@@ -9671,7 +9599,7 @@ postgres                     "initdb: error: cannot be run as root" -- fatal
   ComputeContract marked Complete with TTL `15s` in a requester kcp was gone;
   no load Bid was left.
 - **Object counts are capped per workspace, and a cap hit declines or waits with a reason (plan 0013
-  M2-QUOTAS, 2026-10-15; the defaults stay provisional, section 14).** kcp enforces `ResourceQuota` for
+  M2-QUOTAS, 2026-10-15; the defaults were retuned on 2026-10-18, "Items closed by later work" above).** kcp enforces `ResourceQuota` for
   resources bound through an APIBinding, cluster-scoped ones included: a quota `count/bids.socialweb.computer:
   1` refused the second Bid with `exceeded quota`, and `count/denoruns.deno.computer: 1` refused the second
   DenoRun. The quota's `used` is not trustworthy, though: it is raised at admission and lowered only by a
