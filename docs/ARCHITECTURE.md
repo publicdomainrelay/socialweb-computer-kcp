@@ -1595,9 +1595,9 @@ keeps them removed:
 
 | | |
 |---|---|
-| **a market guest** | **THE node path.** The node is a VM rented from the COMPUTE MARKET through a `NodeClaim` the clusterprovider writes and the market door fulfils under the cluster owner's own atproto OAuth session. **`internal/nodemarket`**, `SOCIALWEB_CLUSTERPROVIDER_SUBSTRATE=market`. NOT a guest of this host: no subnet lease, no pasta, no VMM, no node image and no `/dev/kvm` is involved. The clusterprovider's whole part in the node is the claim; the door bids, wins, boots the guest from the winning bidder's cloud-init and writes the phase back; the guest itself dials the cluster's OpenBao and apiserver through the cluster's ClusterLinks and binds the advertised address (`SOCIALWEB_CLUSTERPROVIDER_MARKET_ADVERTISE_ADDRESS`, default `198.18.255.254`) on its own loopback (section 9, "A market node joins through its cluster's OpenBao, never through ssh"). Confirming is the tenant Node appearing for a claim the door left `Joining`, not a local process being alive |
-| **a guest of this host** | RETIRED. A VM this host started itself -- `firecracker` or `qemu` behind the same `scale.Nodes` seam, each a VMM in its own network namespace, booting a node image built here and joining through an agent the image carried. Both values were refused and deleted: the market path with a local bidder covers the same market network, so a second way to place a node was a second way to be wrong about where a node is. What the guest half still needs survives where the bidder uses it -- `internal/nodevm`, `internal/nodefirecracker`'s image, manifest and namespace halves, `socialweb-nodeboot`, `socialweb-nodeimage` -- because that is what boots the guest the MARKET rents, on the bidder's host |
-| **local process** | a `k3s agent` child process, `internal/nodelocal`, behind the same `scale.Nodes` seam. REFUTED as the substrate, three ways, all measured: `k3s agent` is fatal as a non-root user (`agent requires additional privilege if not run with --rootless`); it needs root for `/run/k3s/containerd`, `/var/lib/kubelet/device-plugins`, `127.0.0.1:6444` and the host `KUBE-*` chains, none of which `--data-dir` moves; and postgres is fatal AS root (`initdb: cannot be run as root`), so a host that runs the store cannot run a node |
+| **a market guest** | **THE node path.** The node is a VM rented from the COMPUTE MARKET through a `NodeClaim` the clusterprovider writes and the NodeClaim controller (`internal/controllers/nodeclaim`, bound by the GatewayAPI component) fulfils under the cluster owner's own atproto OAuth session. **`internal/nodemarket`**, `SOCIALWEB_CLUSTERPROVIDER_SUBSTRATE=market`. NOT a guest of this host: no subnet lease, no pasta, no VMM, no node image and no `/dev/kvm` is involved. The clusterprovider's whole part in the node is the claim; the gateway's Requester runs the RFP flow, the winning bidder boots the guest from its cloud-init, and the NodeClaim controller writes the phase back; the guest itself dials the cluster's OpenBao and apiserver through the cluster's ClusterLinks and binds the advertised address (`SOCIALWEB_CLUSTERPROVIDER_MARKET_ADVERTISE_ADDRESS`, default `198.18.255.254`) on its own loopback (section 9, "A market node joins through its cluster's OpenBao, never through ssh"). Confirming is the tenant Node appearing for a claim the NodeClaim controller left `Joining`, not a local process being alive |
+| **a guest of this host** | RETIRED. A VM this host started itself -- `firecracker` or `qemu` behind the same `scale.Nodes` seam, each a VMM in its own network namespace, booting a node image built here and joining through an agent the image carried. Both values were refused and deleted: the market path with a local bidder covers the same market network, so a second way to place a node was a second way to be wrong about where a node is. The guest the MARKET rents is booted on the bidder's host by the bidder's own path (`internal/compute/firecracker`, `internal/vmruntime`, `internal/guestimage`, `internal/guestrootfs`, `internal/nodeimagemain`), not by any code of the retired substrate |
+| **local process** | DELETED. A `k3s agent` child process, the deleted `internal/nodelocal`, behind the same `scale.Nodes` seam. REFUTED as the substrate, three ways, all measured: `k3s agent` is fatal as a non-root user (`agent requires additional privilege if not run with --rootless`); it needs root for `/run/k3s/containerd`, `/var/lib/kubelet/device-plugins`, `127.0.0.1:6444` and the host `KUBE-*` chains, none of which `--data-dir` moves; and postgres is fatal AS root (`initdb: cannot be run as root`), so a host that runs the store cannot run a node |
 
 **`SOCIALWEB_CLUSTERPROVIDER_SUBSTRATE` accepts exactly one value, `market`, and every other name is
 refused at startup.** `checkPlacement` names `market` as the only placement implemented; the two
@@ -1615,6 +1615,12 @@ configured into it. The `scale.Nodes` seam stays, with one implementation behind
 the seam is what made a second substrate cheap and a third possible. The measurements that refuted the
 local-process mechanism are in the git history: `git log` on the deleted `experiments/process-substrate/`
 carries them, with the commit messages that say what each one established.
+
+**History.** The paragraphs from here to "`k3s server` is deliberately NOT a node" record what was
+measured on the retired guest-of-this-host substrate: its node images (the host's own kernel and
+modules), the image builder, pasta namespaces and snapshots. That code is gone, and "now" in them
+means at the time. The market guest's image is built from `deploy/guest-image` with a kernel from
+`deploy/guest-kernel` that has no loadable modules (`CONFIG_MODULES=n`, section 12).
 
 **A guest kernel is obtainable with no privileges at all, and this was measured.** Firecracker boots
 a kernel YOU supply, and the CI kernels cannot run a k3s node: all three fail `k3s check-config` with
@@ -1700,7 +1706,7 @@ the rootfs did not have.** The guest boots the build host's Fedora kernel, built
 whose modprobe is `/usr/sbin/modprobe` only. Every `request_module()` the kernel makes -- the
 autoload of an nf_tables expression, an xt match, a logger -- exec'd a path that did not exist, so the
 only modules a guest ever had were the ones `systemd-modules-load` or a userspace `modprobe` on PATH
-loaded. Measured on the local market network (`internal/marketnetwork` live M3 gate):
+loaded. Measured on the local market network (the plan 0005 M3 live gate):
 `/proc/sys/kernel/modprobe` read `/usr/bin/modprobe` from a pod, `nft_limit` and `nft_log` were not
 in `/proc/modules`, and kube-router's network policy controller aborted every sync with
 `iptables-restore v1.8.10 (nf_tables): line 61: RULE_APPEND failed (No such file or directory): rule
@@ -1714,7 +1720,7 @@ blind to the nf_tables one, and a deny-all NetworkPolicy left a pod reachable. T
 `CONFIG_MODPROBE_PATH` from the kernel config it stages and, when that path does not resolve inside
 the stage (symlinks resolved within the stage, never on the build host), links it to the rootfs's own
 modprobe (`/usr/bin/modprobe -> /usr/sbin/modprobe`), and refuses a rootfs with no modprobe at all
-(`cmd/socialweb-nodeimage/modprobe.go`, `linkKernelModprobe`). With it, the same gate on a rebuilt
+(`linkKernelModprobe` of the retired `cmd/socialweb-nodeimage`). With it, the same gate on a rebuilt
 image: `nft_limit` and `nft_log` loaded on demand, no aborted sync on the console, and a deny-all
 ingress policy refused the client 9 s after it was applied. The module list stays as a preload, not
 as the only way a module gets in. `nft-expr-counter` still fails k3s's own modprobe and is harmless:
@@ -1799,8 +1805,7 @@ staged and 62.0 MiB of rootfs, against a 1500 MiB headroom. Three of the resolve
 verbatim as blob names inside upstream's own air-gap tarball for this version, which is independent
 confirmation that the same images were resolved. One trap the verification caught: containerd
 normalizes seeded names through docker's `ParseDockerRef`, so emitting `index.docker.io/rancher/...`
-imports under a name no pod asks for - a silent `ImagePullBackOff`, and a test now pins that for every
-docker-hub spelling.
+imports under a name no pod asks for - a silent `ImagePullBackOff`.
 
 Two things this does not cover, both named rather than implied: the `svclb` image for a LoadBalancer
 Service is created by the service controller on demand and cannot be found by reading manifests, so
@@ -2039,7 +2044,7 @@ that suits it cannot be separated by an operator choosing two paths. The builder
 fails in seconds instead of after a boot.
 
 **The record's identity is supplied by the substrate, and it is not a local-process idea.**
-`internal/noderecord` matches a token SUBSET against `/proc/<pid>/cmdline` after confirming the pid's
+The retired `internal/noderecord` matched a token SUBSET against `/proc/<pid>/cmdline` after confirming the pid's
 start time, and a record whose identity does not match is NOT OURS and is never signalled - a pid
 reuse must stay a refusal, not a kill. A local agent is `{"agent", nodeName}`; a VMM is
 `{"firecracker", "--api-sock", <sock>}`, and the socket path is per node, so one node's record can
@@ -2081,23 +2086,25 @@ binding.
 
 ### A market node joins through its cluster's OpenBao, never through ssh
 
-Plan 0005 M3-SECRETS-TICKET, M3-UNITS and the door half of M3-NODE-LOSS, built to the plan's
-`m3_contract`. The door holds no connection to a market guest and opens no ssh session to one; the
+Plan 0005 M3-SECRETS-TICKET, M3-UNITS and the gateway half of M3-NODE-LOSS, built to the plan's
+`m3_contract`. The gateway holds no connection to a market guest and opens no ssh session to one; the
 guest dials its cluster through the cluster's ClusterLinks and reads its join secrets from the
 cluster's OpenBao. Decisions not in the contract are marked "decided by Claude, user may veto".
 
-**What the web app and the requester controller do per claim** (`lib/socialweb-computer-k8s-node-market`,
-`lib/socialweb-computer-k8s-node-contract`, `request-vm-ssh` with `lib/requester-controller-kcp`):
+**What the NodeClaim controller and the Requester do per claim** (`internal/controllers/nodeclaim`
+with the mapper of `internal/gateway/nodeclaim`, bound by the GatewayAPI component; the Requester
+component, `internal/services/requester` over `internal/market/requester`):
 
-The web app maps. It runs no market flow, holds no PDS session, no claim key and no secrets key. For
-each NodeClaim it writes one ComputeContract in the Gateway application's own workspace and maps the
-contract's status back onto the claim. The requester DenoPod of the same application carries the flow.
+The NodeClaim controller maps. It runs no market flow, holds no PDS session, no claim key and no
+secrets key. For each NodeClaim it writes one ComputeContract in the Gateway application's own
+workspace and maps the contract's status back onto the claim. The Requester component of the same
+application carries the flow.
 
-- *Web app, per claim.* It names the contract `nodeclaim-<first 20 hex of sha256(claim uid)>`, puts the
+- *NodeClaim controller, per claim.* It names the contract `nodeclaim-<first 20 hex of sha256(claim uid)>`, puts the
   finalizer on the claim, reads the ClusterLink `<clusterKey>-openbao` from the claim's own workspace
-  (`createKcpClusterLinkReader`; a link with no `status.ticket` fails the claim before any market
+  (a link with no `status.ticket` fails the claim before any market
   round) and the cluster OpenBao CA (`<dirname(spec.tokenFile)>/openbao/tls/ca.crt`, or the path the
-  provider publishes in `--cluster-ca-dir`), and writes the join bundle as one KV entry
+  provider publishes), and writes the join bundle as one KV entry
   `contracts/<contract>/bundle` in its own vault mount. The bundle holds the files
   `/etc/socialweb/node/openbao-ticket`, `openbao-ca.pem` and, when the `<clusterKey>-apiserver` link
   is listening, `apiserver.env` (`NODE_NAME`, `ADVERTISE_ADDRESS`, `APISERVER_PORT`,
@@ -2105,13 +2112,11 @@ contract's status back onto the claim. The requester DenoPod of the same applica
   public. The contract carries `spec.vmName` (the node name), `spec.ownerDid`, `spec.secretsRef` (the
   bundle), `spec.nodeJoin` (the cluster key and the pinned socialweb-meshd build), the bidders to
   admit and deny, the policy and `spec.vmReadyTimeoutSec`.
-- *Requester controller, per contract.* `createRequesterController` lists and watches ComputeContracts,
-  admits at most `--max-concurrent` of them and `--per-account-max` of one account, and runs
-  `requestCompute` for each under the owner account's delegated session (`--account-session-vault-mount`
-  names the web app's mount; the controller reads `oauth-sessions/<did>` and writes a refreshed session
-  back, and reads `contracts/*` there; its own client `requester` has a KV mount of its own for the
-  requester key and each contract's secrets-server key). The node-join profile adds the `k3s` and
-  k3s-join user-data modules and wraps the secrets capability: on the grant it writes `status.grant`
+- *Requester, per contract.* The Requester watches ComputeContracts, admits at most
+  `maxConcurrent` of them and `perAccount` of one account (`RequesterSettings`), and runs the RFP flow
+  for each under the owner account's delegated session; it reaches the owner's repo and the vault
+  only through bus handles (`internal/services/requester/wiring.go`). The node-join contract adds the `k3s` and k3s-join user-data
+  modules and wraps the secrets capability: on the grant it writes `status.grant`
   = `{issuer, subject, audience: api://socialweb-node?actx=<clusterKey>/<node>, role: <node>}` and
   appends `claim.json` = `{node, cluster, jwtMount, role, audience, kvMount, kvPath}` to the bundle
   (`jwtMount` = `jwt-<first 12 hex of sha256(issuer)>` needs the winning bid's issuer). The wrapped
@@ -2121,7 +2126,7 @@ contract's status back onto the claim. The requester DenoPod of the same applica
   binds `wid_sub` (the user claim) with `bound_claims`, because the `sub` of an OpenBao identity token is
   the entity id. A grant write
   that fails leaves the inner capability unauthorized and the contract `Failed`, releasable from its
-  receipt. The controller waits up to `vmReadyTimeoutSec` from the accept for the guest to fetch its
+  receipt. The Requester waits up to `vmReadyTimeoutSec` (default 120) from the accept for the guest to fetch its
   bundle (`status.secretsFetchedAt`), then writes phase `Held`; a guest that never fetches ends
   `Failed` with the reason and keeps its receipt.
 - *Mapping.* `Requesting` is claim phase `Bidding` until the accept, then `Provisioning`; `Held` with
@@ -2129,26 +2134,24 @@ contract's status back onto the claim. The requester DenoPod of the same applica
   `Lost`; `Failed` is `Failed` with the contract's message. `status.grant` and `status.contract` are
   copied on every transition; a claim in `Joining` or `Running` changes only on `Lost`, `Failed` or
   `Released`, so the provider's `Running` is never overwritten.
-- *Release.* When a claim is deleted the web app sets `spec.release` on its contract, waits until the
-  contract is `Released` or `Failed`, then deletes the contract and the bundle and removes the claim's
-  finalizer (claim phase `Released` when the VM was released or none was held, else `Failed`). A
-  contract that is deleted while it holds a VM releases the VM first. A contract the controller never
-  admitted is settled `Released` at once.
+- *Release.* When a claim is deleted the NodeClaim controller sets `spec.release` on its contract
+  (`Mapper.Settle`), waits until the contract is `Released` or `Failed`, then deletes the contract and
+  the bundle and removes the claim's finalizer (claim phase `Released` when the VM was released or
+  none was held, else `Failed`). A contract that is deleted while it holds a VM releases the VM first.
+  A contract whose claim is gone is released or deleted as an orphan (`Mapper.Orphan`).
 - *Adoption.* A claim the provider recreates for a node that already joined (`Adopting`) becomes a
-  contract with `spec.adopt`: no RFP; the controller finds the receipt and the bidder-signed
-  `vm.hostKeys` in the owner's records and holds it `Held`, which the web app maps to `Running`.
-- *Unclaimed receipts.* The controller lists the VM records of every account that owns a contract (and
-  the test owners) and releases, once, a receipt that no contract names after
-  `--unclaimed-grace-ms`.
+  contract with `spec.adopt`: no RFP; the Requester finds the receipt and the bidder-signed
+  `vm.hostKeys` in the owner's records and holds it `Held` (`contractRunner.runAdopt`), which the
+  NodeClaim controller maps to `Running`.
 
-**A restarted web app or requester loses nothing.** Every step the controller takes is in
-`status.contract` of its contract; a restarted controller resumes each contract from it (no second
-RFP) and a contract that already fetched its bundle is only watched for the bidder's
-`vm.terminated`. A restarted web app finds each claim's contract by name and maps it again.
+**A restarted gateway loses nothing.** Every step the Requester takes is in `status.contract` of its
+contract; a restarted Requester resumes each contract from it (no second RFP) and a contract that
+already fetched its bundle is only watched for the bidder's `vm.terminated`. A restarted NodeClaim
+controller finds each claim's contract by name and maps it again.
 
 **A restarted provider never reaps; it adopts** (M3-NODE-LOSS, provider half). Decided by Claude,
 user may veto. Before this, the provider's shutdown reap (`nodeHosts.reap`) called the market host's
-`Reap`, which DELETES the claim, so every provider stop (every deploy) made the door destroy every
+`Reap`, which DELETES the claim, so every provider stop (every deploy) made the gateway destroy every
 market machine; and a provider that started held nothing, so a node that survived anyway was never
 confirmed, lost, scaled in, torn down or counted in flight, and its name could be claimed again.
 Now:
@@ -2171,7 +2174,7 @@ Now:
   switched off while the provider was down still releases its machines.
 - *What is adopted.* A claim whose `spec.cluster` is the cluster key, whose name carries the
   `<cluster>-node<N>` ordinal, whose phase has not ended (not `Failed`, not `Released`) and which
-  is not being deleted. Pending, `Bidding` and `Provisioning` claims are adopted too: the door owns
+  is not being deleted. Pending, `Bidding` and `Provisioning` claims are adopted too: the NodeClaim controller owns
   their end, and the given-up rule tears them down when it writes `Failed`. An ended claim is never
   adopted; the `Released` rule still deletes its Node.
 - *How.* A `nodemarket.Host` is built for that name exactly as `Provision` would build it, then
@@ -2192,24 +2195,12 @@ Now:
   re-registering within the 90 s the loss rule allows after the cluster's group comes back (the
   node lifecycle controller starts the NotReady clock when the group restarts, not when it stopped).
 
-With the door half above, both the door and the provider can restart without reaping a live
-market node. The instruments are in `internal/providermain/adopt_test.go` (a first process
-provisions through the real path; a second `nodeHosts` over the same claim store and state dir is
-the restarted provider): `TestARestartedProviderAdoptsItsJoiningAndRunningNodesOnceEach` (held
-once each across repeated passes, counted 2, no claim write, no policy or secret write, snapshot
-names both), `TestAnAdoptedNodeNotReadyFor90sIsReleased`, `TestAnAdoptedIdleNodeIsScaledIn`,
-`TestTeardownToZeroReleasesAdoptedNodes`, `TestAProvisionAfterARestartSkipsAdoptedNames`,
-`TestAnEndedClaimIsNotAdopted` (Failed, Released, deleting, another cluster's),
-`TestAProviderShutdownLeavesItsMarketNodesForTheNextOne`,
-`TestTheFirstScalePassAfterARestartAdoptsBeforeItCounts`,
-`TestAClusterSwitchedOffAfterARestartReleasesItsAdoptedNodes`; and in `internal/nodemarket`
-`TestAnAdoptedJoinedHostRewritesNoSecretAndLogsInFromTheGrant`,
-`TestAnAdoptedClaimTheGuestHasNotFetchedYetGetsItsSecretWritten`,
-`TestAnEndedOrDeletingClaimIsNotAdopted`.
+With the gateway half above, both the gateway and the provider can restart without reaping a live
+market node (`internal/providermain/adopt.go`, `internal/nodemarket`).
 
 **What the guest runs** (`internal/atproto/cloudinit`, `K3sJoinModule`, built in Go). The module writes
 the resolver, the sysctl file, `/etc/socialweb/node/join.json`, the unit files and one pinned-download
-bootstrap shell. The bootstrap fetches `/downloads/<sha256>/socialweb-node-<arch>` from the door,
+bootstrap shell. The bootstrap fetches `/downloads/<sha256>/socialweb-node-<arch>` from the gateway's web app,
 checks the sha256, installs it 0755 and execs `socialweb-node units start`; everything after that is
 the one Go binary `cmd/socialweb-node` (`internal/nodeagent`), built on the shared
 `internal/systemdunit` library that HostProcess/hostsvc also use. The pin is the contract's
@@ -2225,7 +2216,7 @@ the one Go binary `cmd/socialweb-node` (`internal/nodeagent`), built on the shar
 | `socialweb-pod-masquerade` | prep | `net.ipv4.ip_forward=1` and the cluster-CIDR-only SNAT rule |
 | `socialweb-pod-cni` | prep | poll the Node's podCIDR, link the CNI plugins, write the bridge conflist with `encoding/json` through a rename |
 | `socialweb-node-diagnose` | prep | print containerd's CNI status to the console |
-| `socialweb-meshd-install` | prep | fetch the pinned meshd from the door, verify and install it 0755 |
+| `socialweb-meshd-install` | prep | fetch the pinned meshd from the gateway's web app, verify and install it 0755 |
 | `socialweb-meshd` | install, prep | run meshd with the kubelet kubeconfig and secret |
 | `socialweb-k3s-agent` | prep, DNS link, masquerade | `k3s agent` as before |
 
@@ -2243,7 +2234,7 @@ The separate `setup-secrets`, k3s-install and iroh modules remain cloud-init she
 join path's own logic is the Go binary.
 
 **MEASURED locally end to end, 2026-10-07** (this reading predates the Go node agent; section 15 records
-the rewrite's reading; `internal/marketnetwork/TestAMarketNodeJoinsATenantClusterThroughItsOpenBaoWithNoSsh`,
+the rewrite's reading; the plan 0005 M3 live gate, a Go test that plan 0026 deleted,
 PASS 753.57s, finished 23:55:13Z; the vendored market network held up by `accept.sh`'s `ACCEPT_HOLD_DIR`,
 and the deployed control-plane container `socialweb-k8s:m3live` built from the tree running against it, so
 prod's own entrypoint and provider are what was measured). One Deployment on a tenant cluster took the
@@ -2254,10 +2245,10 @@ openbao link and the KV read 23:49:37Z, the tenant Node Ready with the workload 
 claim `Joining` 23:49:47Z - 29s after the Deployment was applied - then a control-plane restart with the
 node up, which adopted the claim (same uid, node Ready, guest up, no `vm.delete`) for 2m30s, and then the
 workload's deletion, the claim's deletion, `vm.delete` accepted at 23:55:11.733Z, the guest gone 1s later
-and the cluster back to zero with the control plane Ready. Zero ssh sessions: no line of the door's log
+and the cluster back to zero with the control plane Ready. Zero ssh sessions: no line of the web app's log
 names one, and the guest's sshd records only the compute provider's own unauthenticated pre-auth TCP
 probe of port 22. Three defects, all found by this gate and all closed with tests watched to fail first:
-the door re-derived a claim's cluster key instead of taking `spec.cluster` from the provider (87562e8,
+the web app of the time re-derived a claim's cluster key instead of taking `spec.cluster` from the provider (87562e8,
 main 657a915); the requester waited out its firehose when a bidder that had already dispatched the accept
 answered `submitAccept` with no receipt, ending `receipt_invalid` with a VM nobody could release
 (atproto-market a1b467e: the winner's repo is asked for the `market.receipt` naming this accept); and
@@ -2269,7 +2260,7 @@ carry cloud-init and refuses to run when none does); and a node's bridge conflis
 `/etc/cni/net.d` with the plugins linked into `/opt/cni/bin`, because under `--flannel-backend=none`
 containerd reads the stock directories rather than k3s's agent directory (3919df6).
 
-**What the door needs from the provider** (interface needs, open until the Go side lands):
+**What the NodeClaim controller needs from the provider** (the interface, as built):
 
 1. The ClusterLink `<clusterKey>-openbao` in the claim's home workspace with `status.ticket` set
    (a bare dumbpipe ticket) BEFORE the claim is written; otherwise the claim fails at once.
@@ -2278,18 +2269,15 @@ containerd reads the stock directories rather than k3s's agent directory (3919df
    when it does not, the guest reads that ticket from the KV entry below instead, and joins serially.
 2. A published path for the cluster OpenBao CA (a `NodeClaim` spec field such as `openBaoCAFile`, or
    a ClusterLink status field), or the guarantee that `<dirname(tokenFile)>/openbao/tls/ca.crt` is it
-   and is readable by the door process.
+   and is readable by the gateway's core.
 3. KV `socialweb-nodes/<node>` with `token` (bare, or the full `K10` form), `nodePassword`, `serverCA`
    (the exact bytes of `server-ca.crt`, since k3s pins its hash), `apiserverTicket` (bare),
    `advertiseAddress` (IPv4) and `apiserverPort` (number or digit string).
 4. JWT mount `jwt-<sha12(status.grant.issuer)>` and role `<node>` bound to `status.grant.subject` and
    `status.grant.audience`, as the contract says, and an OpenBao serving certificate valid for
    `127.0.0.1`.
-5. `nodemarket.ConfirmJoined` must accept a claim in `Joining`; today it refuses everything but
-   `Running`, and the door no longer writes `Running`.
-6. Legacy ssh-joined claims at the first deploy: their agent ran inside the old door's ssh session,
-   so they go NotReady, and the new door does not reap them. They are released only when the provider
-   deletes their claims (M3-NODE-LOSS's provider half), and until then they hold their VMs.
+5. `nodemarket.ConfirmJoined` accepts a claim in `Joining` or `Running`; the NodeClaim controller
+   writes `Joining`, and the provider confirms the join from the tenant Node.
 
 ### Pods reach pods on other market nodes through socialweb-meshd
 
@@ -2298,7 +2286,7 @@ overlay has nothing to run over (the limit "A node cannot reach another node" in
 user's decision: QUIC datagrams over iroh, a tun device, each peer Node's podCIDR routed to that
 Node's iroh endpoint id, k3s with `--flannel-backend=none` and a bridge CNI for the node-local half.
 `rust/socialweb-meshd` (a cargo workspace at `rust/`, the first Rust in this repo) is that daemon.
-It is built and proved on hat-8, and the door's guest module installs it (the integration, below).
+It is built and proved on hat-8, and the Go cloud-init module installs it on every market guest (the integration, below).
 A mesh probe
 scaled `test-cluster-alice-0001` from 0 to 2 market nodes, pods reached pods across the nodes both ways,
 and the node without CoreDNS resolved through 169.254.20.10; a NetworkPolicy denied cross-node traffic.
@@ -2414,17 +2402,15 @@ written by the Go cloud-init module (`internal/atproto/cloudinit`, `K3sJoinModul
 marked "decided by Claude, user may veto".
 
 1. *Server.* `clusterstack.Spec.ServerArgv` adds `--flannel-backend=none --cluster-cidr=10.42.0.0/16`
-   when `MarketDialled` (a market cluster), and only then: the guest substrates keep flannel until
-   M1-MARKET-ONLY retires them. Decided by Claude, user may veto: the cluster CIDR is named
+   when `MarketDialled` (a market cluster, the only kind since the guest substrates were retired).
+   Decided by Claude, user may veto: the cluster CIDR is named
    explicitly, at k3s's own default (so a running cluster's CIDR does not change), because the
    guest's masquerade rule names it and must not depend on a k3s default; kube-router's network
    policy controller is KEPT (no `--disable-network-policy`), since it works on pod IPs over any
-   bridge and the meshd inbound check keeps pod source addresses. Tests
-   `TestAMarketClusterRunsNoFlannelAndNamesItsPodNetwork`, `TestOnlyAMarketClusterDropsFlannel`,
-   `TestK3sAcceptsTheMarketPodNetworkFlags` (the real k3s v1.36.4 binary accepts them). Live:
-   `TestAZeroNodeMarketClusterAllocatesPodCIDRsAndTakesTheNodeNetworkAddOnsAsBaseline` reads
-   `--allocate-node-cidrs=true --cluster-cidr=10.42.0.0/16` on the controller manager k3s runs, so a
-   Node gets the `spec.podCIDR` the bridge waits for.
+   bridge and the meshd inbound check keeps pod source addresses. The real k3s v1.36.4 binary accepts
+   the flags, and a live zero-node market cluster read `--allocate-node-cidrs=true
+   --cluster-cidr=10.42.0.0/16` on the controller manager k3s runs, so a Node gets the `spec.podCIDR`
+   the bridge waits for.
 2. *Bridge CNI on the Node's pod CIDR.* host-local has no "range from the Node" mode (that is
    Calico's IPAM; flannel feeds host-local through its own `subnet.env`), so decided by Claude, user
    may veto: `socialweb-pod-cni` (after `socialweb-node-prep`, whose `join` writes `NODE_NAME`) polls
@@ -2443,8 +2429,7 @@ marked "decided by Claude, user may veto".
    (`-C` before `-A`), `iptables -w -t nat -A POSTROUTING -s 10.42.0.0/16 ! -d 10.42.0.0/16 -m comment
    --comment socialweb-pod-egress -j MASQUERADE`; `iptables` joins the module's packages.
 4. *Node reader RBAC in every tenant.* `internal/tenantnet` embeds a byte-identical copy of
-   `rust/socialweb-meshd/deploy/node-reader-rbac.yaml` (held equal by
-   `TestTheNodeReaderRBACIsTheOneMeshdShips`) and the provider's tenant add-on pass
+   `rust/socialweb-meshd/deploy/node-reader-rbac.yaml`, and the provider's tenant add-on pass
    (`internal/providermain/eso.go` `tenantAddOns`, run by the bootstrap on every provider
    process's first Ready of each cluster) server-side applies it under the `socialweb-addons` field
    manager BEFORE it needs the cluster vault, then measures the baseline. Live: a
@@ -2454,37 +2439,35 @@ marked "decided by Claude, user may veto".
 5. *meshd itself.* With a pin, the module writes `socialweb-meshd-install` (oneshot, after
    `network-online`, `Restart=on-failure`): it picks the pin for `uname -m` (x86_64/amd64 or
    aarch64/arm64), keeps `/usr/local/bin/socialweb-meshd` if a node image already put a binary with
-   that sha256 there, and otherwise downloads `<door>/downloads/<sha256>/socialweb-meshd-<arch>` into
+   that sha256 there, and otherwise downloads `<download base>/downloads/<sha256>/socialweb-meshd-<arch>` into
    a temporary file beside the target, refuses bytes whose sha256 is not the pin, and renames it in
-   0755. The unit is `rust/socialweb-meshd/deploy/socialweb-meshd.service` byte for byte (a test
-   reads the file), plus the drop-in `socialweb-meshd.service.d/10-socialweb-node.conf`:
+   0755. The unit is `rust/socialweb-meshd/deploy/socialweb-meshd.service` byte for byte, plus the drop-in `socialweb-meshd.service.d/10-socialweb-node.conf`:
    `After=`/`Wants=` the install and `socialweb-node-prep`, `StartLimitIntervalSec=0`.
    The `join` process in `socialweb-node-prep` writes `/etc/socialweb/node/meshd.env`
    (`SOCIALWEB_MESHD_NODE_NAME=<node>`, `SOCIALWEB_MESHD_KUBECONFIG=<the kubelet kubeconfig>`), since
    it is the process that learns the node name. `socialweb-k3s-agent` is ordered after
    `socialweb-node-dns-link` and `socialweb-pod-masquerade` and NEVER after meshd, its install or
    `socialweb-pod-cni`: all three wait for the agent's Node, so ordering the agent after any of them
-   is a deadlock. A test asserts it on every `After`/`Wants`/`Requires`/`BindsTo`/`Requisite` line
-   (watched to fail with meshd added to the agent's `After`).
-6. *Where the binary comes from.* The door serves pinned downloads at `/downloads/<sha256>/<name>`
+   is a deadlock (`internal/nodeagent/units.go`).
+6. *Where the binary comes from.* The gateway's web app serves pinned downloads at `/downloads/<sha256>/<name>`
    (`internal/gatewayhttp/downloads.go`, `LoadPinnedDownloads`):
    every file in its downloads dir with a `sha256sum`-format `<name>.sha256` sidecar, held in memory,
    served only at its own hash and name with `cache-control: public, max-age=31536000, immutable`
    and `etag "<sha256>"`; a sidecar that names another file, or bytes that do not hash to it, stop
    the gateway at startup. The meshd pin is the sidecar hash of the shipped `socialweb-meshd-x86_64` and
-   `socialweb-meshd-aarch64` at the node download origin (`MeshdPinOf`): `public-origin`, or in a
-   market network `http://192.0.2.1:<the web app's bound port>` (`test-node-download-host`, the
-   address at which a guest reaches this host's loopback through pasta). The downloads come from the
+   `socialweb-meshd-aarch64` (`MeshdPinsOf`), and the download base is the GatewayAPI component's
+   `publicOrigin`, or in a market network the web app's local address as a guest reaches it
+   (`guestnet.HostAddress`, `192.0.2.1`, the address at which a guest reaches its host's loopback
+   through pasta). The downloads come from the
    socialweb-computer binary: its asset `socialweb-computer-k8s-downloads` (versions.json, built by
    `scripts/build-web-app-downloads.sh` in the release build and pinned by its tree sha256) holds both
-   meshd builds and both `socialweb-node` builds, each with its sidecar, and the gateway passes the
-   extracted tree as `--downloads-dir` (and as a read path of the gateway component). The NodeClaim
-   mapper writes the node-agent pin into the contract's `spec.nodeJoin.nodeAgent`; the bootstrap
-   fetches them by the same hash. Both gateway profiles pass `--required-downloads` with those two names, so a
-   gateway that would offer
-   no meshd refuses to start with `required_downloads_missing` (or
-   `node_download_origin_missing`) instead of logging `meshd_not_offered`. The node images do not embed meshd yet; the install path that
-   keeps an embedded binary is ready for when they do.
+   meshd builds and both `socialweb-node` builds, each with its sidecar, and the Gateway root hands the
+   extracted tree to the GatewayAPI component as its downloads dir. The NodeClaim mapper writes the
+   node-agent pin into the contract's `spec.nodeJoin.nodeAgent`; the bootstrap fetches them by the
+   same hash. The Gateway root names the two meshd builds as required downloads
+   (`gateway.GatewayRequiredDownloads`), so a GatewayAPI component that would offer no meshd, or has
+   no download base, fails to start (`internal/services/gatewayapi/config.go`). The guest image does
+   not embed meshd; the install path that keeps an embedded binary is ready for when it does.
 
 Not carried by the mesh: node addresses. Traffic to another node's InternalIP (NodePort on another
 node, hostNetwork pods, kubelet ports) has no route; apiserver-to-kubelet and apiserver-to-pod
@@ -2515,8 +2498,7 @@ Pod's own node, so it needs no cross-node path at all, the mesh included.
   endpointslices), binding and Corefile ConfigMap `socialweb-node-dns` in `kube-system`, and a
   DaemonSet of the same name: host network, `dnsPolicy: Default`, `priorityClassName:
   system-node-critical`, tolerating every taint, selected by `socialweb.computer/node-local-dns=true`,
-  image `rancher/mirrored-coredns-coredns:1.14.6@sha256:1ba6f472...` (the one the node images seed,
-  held by `TestTheDNSImageIsOneTheNodeImageSeeds`), k3s's CoreDNS security context, probes on
+  image `rancher/mirrored-coredns-coredns:1.14.6@sha256:1ba6f472...`, k3s's CoreDNS security context, probes on
   `169.254.20.10:8080/health` and `:8181/ready`. The Corefile binds only `169.254.20.10`, serves
   `cluster.local` and the reverse zones from the apiserver through the `kubernetes` plugin (in-cluster
   config: the `kubernetes` Service's ClusterIP, which kube-proxy on the node DNATs to the advertise
@@ -2524,9 +2506,10 @@ Pod's own node, so it needs no cross-node path at all, the mesh included.
 - *Why the label.* Decided by Claude, user may veto: the DaemonSet is applied in EVERY tenant
   regardless of substrate, and the label is what keeps it off a node that has no `169.254.20.10`
   (a guest-substrate node, a node that joined with an older user_data): there it would crash-loop on
-  `bind`. The address, the label and the cluster CIDR must stay equal across Go and TypeScript.
+  `bind`. The address, the label and the cluster CIDR must stay equal across the cloud-init module,
+  `internal/nodeagent` and `internal/tenantnet`.
 - *Baseline, never intent.* The DaemonSet is applied by `socialweb-addons`, so the baseline measures
-  it (`TestThePodNetworkAddOnsAreBaselineAndNeverIntent`, and live at zero nodes), and a DaemonSet is
+  it (read live at zero nodes), and a DaemonSet is
   never intent anyway (section 10); its pod leaves its node idle for scale-in.
 - *k3s's own CoreDNS stays.* Decided by Claude, user may veto: `--disable=coredns` is not passed. The
   `kube-dns` Service (`10.43.0.10`) keeps answering anything that names it explicitly, and its pod is
@@ -2536,7 +2519,8 @@ Pod's own node, so it needs no cross-node path at all, the mesh included.
   usually wins, but nothing orders the two). The fix is a startup taint the node lifts once its DNS
   answers; open. No live multi-node reading yet (ACC-MESH).
 
-**What changes on prod at the next deploy** (not deployed by this work). The provider builds each
+**What changed on prod at the deploy after 2026-10-07** (history: the gateway then ran as a container
+and the web app was TypeScript). The provider builds each
 cluster's argv when it spawns the group, and a deploy restarts the container, so every market
 cluster's k3s server comes back with `--flannel-backend=none --cluster-cidr=10.42.0.0/16`, and the
 first Ready of each cluster in the new process re-runs the bootstrap, which applies the node reader
@@ -2572,19 +2556,20 @@ Image size: 1,711,865,393 bytes, +17.2 MB for the two binaries.
                                        host, which is the mechanism this design refuted
 --tls-san <the address a node dials>   repeated; carries the gateway address, so the certificate
                                        covers what the node actually connects to
---advertise-port <the apiserver lease's port>
---https-listen-port <the same port>    ONE lease answers both. A separate advertise lease existed
-                                       for a forward that this cluster does not have, and it is
-                                       retired: dropped from an old lease file on open, refused on
-                                       allocate, its ports returned to the carve. Measured with the
-                                       two split: the EndpointSlice reads <gateway>:<a port nothing
-                                       binds> -- 63014, connection refused, while the listen port
-                                       answers 401 -- coredns sits 0/1 for five minutes,
-                                       local-path-provisioner and metrics-server exit 2 into
-                                       CrashLoopBackOff, and kubectl logs answers
-                                       `proxy error ... code 502`. With one lease: three system
-                                       pods 1/1 with zero restarts, and kubectl logs arrives through
-                                       the apiserver's own tunnel
+--advertise-port <the front's port>    the `k3s-secure` hold the apiserver front owns (section 8).
+                                       A separate advertise lease once existed for a forward that
+                                       this cluster does not have, and it is retired: dropped from
+                                       an old lease file on open, refused on allocate. Measured with
+                                       the two split, before the front: the EndpointSlice reads
+                                       <gateway>:<a port nothing binds> -- 63014, connection
+                                       refused, while the listen port answers 401 -- coredns sits
+                                       0/1 for five minutes, local-path-provisioner and
+                                       metrics-server exit 2 into CrashLoopBackOff, and kubectl
+                                       logs answers `proxy error ... code 502`. With one port:
+                                       three system pods 1/1 with zero restarts, and kubectl logs
+                                       arrives through the apiserver's own tunnel
+--https-listen-port <the slot's hold>  `k3s-slot-<s>`, behind the front; never advertised
+--apiserver-port <the slot's hold>     `k3s-apiserver-<s>`, the slot's loopback apiserver listener
 --token-file <0600 path>
 --write-kubeconfig <DataDir>/server/cred/admin.kubeconfig
 --flannel-backend=none                 market clusters only: pods cross nodes through socialweb-meshd
@@ -2606,6 +2591,10 @@ Image size: 1,711,865,393 bytes, +17.2 MB for the two binaries.
 A direct `--audit-policy-file` on the server is SKIPPED by k3s with only a warning, which leaves the
 cluster SILENTLY UNAUDITED and starting normally. The audit flags must ride `--kube-apiserver-arg`.
 An unarmed kcp is the failure mode nobody sees from a green suite.
+
+The next three paragraphs were written for the retired local substrates (a local process and a guest
+of this host); a market node dials the advertise address on its own loopback through the apiserver
+link (section 9). The rules they state still hold.
 
 **The address a node DIALS belongs to the substrate, and it is not the same address for both.** A
 node that is a local process reaches an address this host carries. A node that is a guest reaches
@@ -2765,7 +2754,7 @@ darwin/amd64, windows/amd64, windows/arm64 and linux/arm64 on every run (default
 blob is needed). The OS-neutral packages (`api/...`, `clusterprovider`, `cloudprovider`,
 `nodeprovider`, `nodemarket`, `materialiser`, `kcpclient`, `gateway`; the `vmruntime`
 and `hostsvc` interfaces, `kcpapply` and the ComputeVM controller core) import no go-systemd, netlink,
-firecracker SDK, `internal/nodefirecracker` or `internal/fcapi`. An untagged OS-specific file fails the
+firecracker SDK or `internal/fcapi`. An untagged OS-specific file fails the
 cross-OS build on the commit that adds it.
 
 `internal/hostos` is primitives only. Every darwin body that has no portable answer returns
@@ -2781,9 +2770,8 @@ macOS or Windows VM behaviour.
 | `hostos` process attributes (`sysproc_*.go`) | `DieWithParent` is `Pdeathsig: SIGKILL`; `NewProcessGroup` is `Setpgid` | `Setpgid`; `DieWithParent` is empty (ponytail: no Pdeathsig) | `CREATE_NEW_PROCESS_GROUP`; `DieWithParent` is empty (ponytail: a job object) |
 | `apiserverfront` hold (`fdstore_*.go`) | `[::]:0` dual-stack, `SO_REUSEADDR` set after bind | refuses (no hold) | refuses (no hold) |
 | `portscan` (`scan_*.go`) | `/proc/net` and `/proc/<pid>/cmdline` | refuses | `netstat -ano` and the command line via CIM |
-| `nodevm` rootfs clone (`clone_linux.go`, `clone_other.go`) | `FICLONE` reflink, else a `SEEK_DATA`/`SEEK_HOLE` sparse copy | plain copy | plain copy |
-| `socialweb-nodeimage` stage lock (`buildlock_*.go`) | `flock` | refuses | refuses |
-| `check-host` VM runtime (`vmruntime_*.go`) | firecracker | "no VM runtime compiled", the Linux-only checks NOT APPLICABLE | the same |
+| `guestdisk` rootfs clone (`clone_linux.go`, `clone_other.go`) | `FICLONE` reflink, else a `SEEK_DATA`/`SEEK_HOLE` sparse copy | plain copy | plain copy |
+| `check-host` facts (`internal/hostcontract`, `gather_linux.go`, `gather_other.go`) | the full host contract, firecracker included | the portable facts only | the same |
 
 The capability predicates `Firecracker`, `QEMU`, `NetworkMode`, `Accel` and `AccelWHPX` are gone from
 the tree: nothing declares or reads them.
@@ -2792,23 +2780,22 @@ guest-network seams (`hostsvc`,
 `vmruntime`, `guestnet`) are Linux-only bodies behind interfaces; the Windows (HCS, HNS, SCM) backends are
 plan 0011 and macOS (vfkit, launchd) is plan 0012. See section 5, "Host processes and the VM lifecycle".
 
-What follows is the measurement of the four-step proof.
+What follows is the measurement of the four-step proof, on the local substrates retired since.
 
 **What was observed, and what was not.** On 2026-09-24 the four-step proof was run on this Linux host
-as the capability matrix: `TestTheFourStepProofRunsThroughTheCompositionRoot` ran both substrates in
-one process, and both passed in 210.86 s -- firecracker `INSTANCE_START_TO_READY_S=5.423` and qemu
+as the capability matrix: a Go test that plan 0026 deleted ran both substrates in one process, and both passed in 210.86 s -- firecracker `INSTANCE_START_TO_READY_S=5.423` and qemu
 `INSTANCE_START_TO_READY_S=6.915` (host-timed from each VMM's instance record to the Node's Ready
 condition, 250 ms resolution), each through all four transitions. The second substrate's run exposed
 a test-harness defect rather than a substrate one: `liveports.TakeForProcess` opened a slot lock and
 did not retain the handle, so a second subtest in the same process could take the first's slot and
-the two runs collided on ports. The handle is now retained for the process, and the runs use
-separate slots. A second, deeper defect turned a failed placement into an unbounded hang:
-`processrunner.Process.Wait` waited for the goroutines copying the child's stdout and stderr to
+the two runs collided on ports. The handle was then retained for the process, and the runs used
+separate slots. A second, deeper defect turned a failed placement into an unbounded hang: the
+in-process child runner of the time (`processrunner.Process.Wait`) waited for the goroutines copying the child's stdout and stderr to
 reach EOF, not only for the direct child to exit, and a node's VMM is a descendant of pasta that
 inherits those pipes. Signalling pasta alone left the guest holding the write end, and the proof
 blocked for 37 minutes in `sync.Once.Do` inside `Wait` -- past its own context, which `Wait` does
-not observe. `WaitDelay` now bounds the drain to five seconds after the child exits, and a reaped
-process is not an error. MEASURED after both fixes: the matrix ran clean twice, both substrates in
+not observe. `WaitDelay` then bounded the drain to five seconds after the child exits, and a reaped
+process was not an error. MEASURED after both fixes: the matrix ran clean twice, both substrates in
 one process -- 210.86 s (firecracker 5.423 s, qemu 6.915 s) and 205.33 s (firecracker 5.166 s, qemu
 13.489 s). Everything in this document that is measured was measured on Linux, and the Windows
 column above is **design and cross-compilation only**: no Windows binary
