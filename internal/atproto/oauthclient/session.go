@@ -472,9 +472,22 @@ func DrainAndClose(body io.ReadCloser) {
 	_ = body.Close()
 }
 
+var refreshLocks sync.Map
+
+func refreshLock(sessionID string) *sync.Mutex {
+	lock, _ := refreshLocks.LoadOrStore(sessionID, &sync.Mutex{})
+	return lock.(*sync.Mutex)
+}
+
 func (s *Session) refresh(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	shared := refreshLock(s.data.SessionID)
+	shared.Lock()
+	defer shared.Unlock()
+	if s.reloadLocked(ctx) && AccessTokenLive(s.data.AccessToken) {
+		return nil
+	}
 	for round := range 2 {
 		if s.data.RefreshToken == "" {
 			return ErrNoRefreshToken
