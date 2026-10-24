@@ -150,8 +150,9 @@ The market is reached through a NodeClaim. A tenant cluster's nodes are rented f
 CLUSTER'S OWNER, through that owner's atproto OAuth session, which the gateway holds. The cluster
 provider reaches past the `ComputeProvider` seam: `internal/nodemarket` writes a `NodeClaim` into the
 cluster's home workspace, and the NodeClaim controller (`internal/controllers/nodeclaim`, bound by the
-GatewayAPI component with the mapper of `internal/gateway/nodeclaim`) turns it into a ComputeContract
-that the gateway's Requester runs through the RFP flow with the owner's session. The winning bidder
+GatewayAPI component with the mapper of `internal/gateway/nodeclaim`) turns it into one contract entry
+of the cluster's Infra (plan 0031), whose controller applies the ComputeContract that the gateway's
+Requester runs through the RFP flow with the owner's session. The winning bidder
 boots the guest from cloud-init, the guest joins over the cluster's apiserver ClusterLink, and the
 controller writes the claim's status. The `internal/scale` decision that says WHEN a node is needed
 is separate.
@@ -980,8 +981,9 @@ the flow moves on, so the receipt is on the contract before the guest boots, and
 resumes from the recorded stage. The NodeClaim controller copies `status.contract` onto the claim's
 `status.contract` on every transition (`internal/gateway/nodeclaim` `Mapper.Status`), with the legacy
 `receiptUri|receiptCid` filled from the receipt strongRef, so the provider's no_bids back-off is
-unchanged. A node is released when its claim is DELETED: the NodeClaim controller sets `spec.release`
-on the contract and the Requester releases it with the state read FROM THE CONTRACT, never from its
+unchanged. A node is released when its claim is DELETED: the NodeClaim controller sets the claim's
+Infra entry to Released, the Infra controller sets `spec.release` on the contract, and the Requester
+releases it with the state read FROM THE CONTRACT, never from its
 memory (section 9, "A market node joins through its cluster's OpenBao, never through ssh").
 Decisions, made by Claude, user may veto. The two marked SUPERSEDED are kept for the record:
 
@@ -2096,11 +2098,20 @@ with the mapper of `internal/gateway/nodeclaim`, bound by the GatewayAPI compone
 component, `internal/services/requester` over `internal/market/requester`):
 
 The NodeClaim controller maps. It runs no market flow, holds no PDS session, no claim key and no
-secrets key. For each NodeClaim it writes one ComputeContract in the Gateway application's own
-workspace and maps the contract's status back onto the claim. The Requester component of the same
-application carries the flow.
+secrets key, and since plan 0031 it writes no ComputeContract. Each Cluster with a NodeClaim has one
+Infra `nodes-<first 20 hex of sha256(<home workspace>/<cluster>)>` in the Gateway application's own
+workspace (`spec.clusterRef` names the Cluster, label `infra.socialweb.computer/cluster`; no
+ownerReference, because kcp garbage collection is per logical cluster). The NodeClaim controller is the
+only writer of its spec: one entry `node-<first 12 hex of sha256(claim uid)>` per claim, Staged while
+the join bundle is not written, Requested once it is, Released when the claim is deleting or ended,
+with the node fields (`ownerDid`, `adopt`, `nodeJoin`, `nodeClaimRef`) in `spec.nodes` and the bundle
+in `spec.secrets`, both kcp-only. The Infra controller applies the entry's ComputeContract
+`infra-<infra>-<entry>` and runs its lifecycle; the NodeClaim controller reads that contract by name,
+maps its status back onto the claim and names the entry in `status.infra`. A claim that is gone drops
+its entry; an Infra with no entry left, or whose Cluster is deleting, is deleted, and its finalizer
+releases every node. The Requester component of the same application carries the flow.
 
-- *NodeClaim controller, per claim.* It names the contract `nodeclaim-<first 20 hex of sha256(claim uid)>`, puts the
+- *NodeClaim controller, per claim.* It names the entry's contract `infra-nodes-<20 hex>-node-<12 hex>`, puts the
   finalizer on the claim, reads the ClusterLink `<clusterKey>-openbao` from the claim's own workspace
   (a link with no `status.ticket` fails the claim before any market
   round) and the cluster OpenBao CA (`<dirname(spec.tokenFile)>/openbao/tls/ca.crt`, or the path the
@@ -2109,7 +2120,7 @@ application carries the flow.
   `/etc/socialweb/node/openbao-ticket`, `openbao-ca.pem` and, when the `<clusterKey>-apiserver` link
   is listening, `apiserver.env` (`NODE_NAME`, `ADVERTISE_ADDRESS`, `APISERVER_PORT`,
   `APISERVER_TICKET`). None is a credential: the tickets are the links' public halves and the CA is
-  public. The contract carries `spec.vmName` (the node name), `spec.ownerDid`, `spec.secretsRef` (the
+  public. The entry, and so the contract, carries `spec.vmName` (the node name), `spec.ownerDid`, `spec.secretsRef` (the
   bundle), `spec.nodeJoin` (the cluster key and the pinned socialweb-meshd build), the bidders to
   admit and deny, the policy and `spec.vmReadyTimeoutSec`.
 - *Requester, per contract.* The Requester watches ComputeContracts, admits at most
@@ -3298,7 +3309,7 @@ internal/contract/host/          host effects: unit backend, unit spec, status, 
 internal/contract/ingress/       ingress Provider, Registrar, registration
 internal/contract/lease/         Slots, Rolls
 internal/contract/market/        market roles: identity, peers, offers, contracts, intents and their observer
-internal/contract/nodeclaim/     NodeClaim: claim, links, settlement, mapper, binder
+internal/contract/nodeclaim/     NodeClaim: claim, links, settlement, mapper (infra and entry names, entry state and fields), binder
 internal/contract/pds/           Accounts, Sessions, Sync, ServiceAuth, Authenticator
 internal/contract/policy/        Engine, Evaluator, Runner, verdicts
 internal/contract/relay/         Relay, Crawler
@@ -3389,7 +3400,7 @@ internal/marketidentity/atproto/  the MarketIdentity backend: accounts, associat
 internal/marketpresence/          bidder presence heartbeats and MarketPresence names
 internal/gateway/                 the gateway's tenant API: cluster view, feed, store, revoker
 internal/gateway/custody/         the custodial web sign-in client
-internal/gateway/nodeclaim/       maps a NodeClaim to a market contract: secrets policy, pins, lost messages
+internal/gateway/nodeclaim/       maps a NodeClaim to an entry of its Cluster's Infra: secrets policy, pins, lost messages
 internal/policyengine/runs/       the policy run backend: run client and decision parser
 ```
 
@@ -3589,7 +3600,7 @@ internal/controllers/localrepo/             LocalRepo: a repo on a local Pds com
 internal/controllers/marketidentity/        MarketIdentity: account, OAuth sign-in endpoints, verified associations
 internal/controllers/marketintents/         forwards Bid, ComputeVM, StateSync, ComputeContract, Exposure and MarketIdentity changes to the market roles as intents on the bus
 internal/controllers/marketpresence/        MarketPresence
-internal/controllers/nodeclaim/             NodeClaim: its ComputeContract, links and Exposure
+internal/controllers/nodeclaim/             NodeClaim: its entry of the Cluster's Infra (the Infra's only spec writer), its bundle, links and Exposure
 internal/controllers/openbaoserver/         OpenBaoServer
 internal/controllers/pds/                   provides the Pds component's handles on the bus
 internal/controllers/pdsaccount/            PdsAccount
@@ -4261,6 +4272,54 @@ fail, rather than the code read against this document alone.
   so the one-kcp network has no standing check until plan 0027.
 
 ## 15. Settled decisions, and the defects they closed
+
+- **A tenant cluster's nodes are one Infra (plan 0031, 2026-10-24).**
+  Before: every NodeClaim got a ComputeContract `nodeclaim-<20 hex>` that the NodeClaim controller
+  applied, released (spec.release), deleted and orphan-swept itself, listing every ComputeContract of
+  the gateway workspace on each reconcile and mapping contracts back through `spec.nodeClaimRef`; the
+  Gateway root's teardown was DeleteAccountClusters, then a wait on `compose.HeldContracts`. After: the
+  NodeClaim controller is the only spec writer of one Infra per Cluster with a claim (`nodes-<hex>` in
+  the gateway workspace, `spec.clusterRef` from the claim's Cluster ownerReference, because the claim's
+  `spec.clusterRef.name` is the cluster key), one entry `node-<hex of the claim uid>` per claim (Staged
+  until the bundle is written, Requested, Released on the claim's deletion), the node fields in the
+  kcp-only `spec.nodes`; the Infra controller runs the ComputeContract `infra-<infra>-<entry>`;
+  `status.infra` names the entry; `ComputeContract.spec.nodeClaimRef` is gone. A Cluster that is
+  deleting gets its Infra deleted at once, and a root deletes its deployments (`compose.DeleteDeployments`)
+  before its contracts and components: the Gateway after DeleteAccountClusters, the MarketRequester
+  first (plan 0029 R8). An unbound Infra keeps its record (AtprotoRecord `deletionPolicy: Retain`,
+  `status.record.direction: Retained`; plan 0029 U1). Readings (own network nodes31, `--bidders 1
+  --with-gateway`, dev builds of the branch over f8da10c9, 2026-10-24 UTC):
+  - ACC31-SCALE-UP-TWO: a 2-replica Deployment with hostname anti-affinity (applied 05:32:12) made two
+    claims; their entries went Requested at 05:36:12.55 and 05:36:12.59, both contracts Held and the
+    Infra `nodes-bbba9dd001a611921f2f` Deployed "2 deployed" at 05:38:21.859, the claims Running at
+    05:38:32.752 and 05:38:36.814 with `status.infra` naming their entries, both tenant nodes Ready, each
+    contract owned by the Infra with nodeJoin, ownerDid and the bundle secretsRef; no `nodeclaim-*`
+    contract was written.
+  - ACC31-SCALE-IN-ONE: replicas 1 at 05:42:15; after the hold the entry `node-8b685c737dff` went
+    Released (05:44:15.725), its contract Released 05:44:15.819, the claim went 05:44:15.884, the entry
+    was dropped 05:44:15.912 and the contract deleted 05:44:15.935; its guest was gone by 05:44:32; the
+    other entry, contract (uid e6edc9eb), claim (uid b6f9ef8a) and node stayed Requested, Held, Running
+    and Ready.
+  - ACC31-CLUSTER-DELETE: Cluster `tenant` deleted 05:47:31.394; `node_claim_infra_deleted` 05:47:31.475,
+    contract Released 05:47:31.528, Infra gone 05:47:31.567, claim gone 05:47:41.515, Cluster gone
+    05:47:42.741, the guest gone at 05:49:04 after its graceful stop.
+  - ACC31-GATEWAY-ROOT-DELETE: cluster `busy` with a Running node and pod; Gateway root deleted
+    05:51:51.694; Deleting "1 Cluster(s) tearing down" 05:51:54.908, its Infra deleted and the contract
+    Released 05:51:55.042, Infra gone 05:51:55.119, "13 component(s) stopping" 05:52:06.551, Requester
+    deleted 05:52:06.727, root gone 05:52:07.712 (16.0 s; plan 0028 M4 read 17.7 s); the guest went at
+    05:53:26; no Gateway, Infra or ComputeContract was left.
+  - ACC31-R8-ROOT-DELETE: MarketRequester root `root:infra-r` with Deployed Infras r8 (bound) and u1
+    (unbound) deleted 05:41:52.538; Deleting "2 deployment(s) releasing" 05:41:52.759, both contracts
+    `requester_released` by 05:41:52.775, both Infras gone by 05:41:52.864, then "8 component(s)
+    stopping" 05:41:53.319, root gone 05:41:55.482; the guests were gone at 05:41:56; the repo then held
+    the u1 record only (r8's was deleted).
+  - ACC31-U1-UNBIND: `spec.record` removed from the Deployed Infra u1 at 05:39:19.356 (and u3 at
+    05:47:01.413 on the final build): `infra_record_unbound` and `atprotorecord_retained` within 0.1 s,
+    the AtprotoRecord, its watch and deliver link gone, the Infra Deployed with its guest Running, the
+    record still listed by listRecords, `status.record.direction: Retained`.
+  Open: a status apply that sets a field to null (`internal/controllers/runtime` `dropped`) left
+  `status.record` in place on this kcp (the field's managedFields entry is an Update operation of the
+  same manager), so a status field another pass removes may not go; read before relying on it.
 
 - **A deleted ComputeContract releases its guest (plan 0028, moved from section 14, 2026-10-24).**
   Before: a ComputeContract carried no finalizer, so a delete removed it at once and the requester saw

@@ -108,8 +108,9 @@ items:
       beside the ComputeContracts it owns and the Requester that runs them; the Infra controller
       applies and lists its contracts only in its own workspace, and the tenant's home workspace
       must not hold an object that declares contracts on the gateway's account. It is named
-      nodes-<20 hex of sha256(<home workspace>/<cluster name>)>, with spec.clusterRef naming the
-      Cluster, the label infra.socialweb.computer/cluster=<cluster name> and a description naming the
+      nodes-<20 hex of sha256(<home workspace>/<claim spec.clusterRef.name>)> (that name is the
+      cluster key <account>-<label>, not the Cluster object's name), with spec.clusterRef naming the
+      Cluster object by the claim's Cluster ownerReference, the label infra.socialweb.computer/cluster=<cluster name> and a description naming the
       cluster. It carries no ownerReference: kcp garbage collection is per logical cluster, and an
       owner in another workspace reads as a missing owner, so the dependent would be collected at
       once. The Cluster owns it through spec.clusterRef and the delete rule of N4-CLUSTER-DELETE.
@@ -234,7 +235,9 @@ items:
       EphemeralInfra) re-applies its AtprotoRecord child with the child's current spec plus
       deletionPolicy Retain (the same field manager, so it stays the one writer), then deletes the
       child, its AtprotoRecordWatch and the watch's deliver ComponentLink, and reports Synced False
-      Unbound once they are gone. Deleting a bound Infra still deletes the record (Delete). Rebinding
+      Unbound once they are gone. status.record keeps the uri and cid of the record left in the repo
+      with direction Retained (a new InfraSyncDirection), and the unbind step does not run again
+      while it reads Retained; a status apply of record: null does not clear the field in this kcp. Deleting a bound Infra still deletes the record (Delete). Rebinding
       later to the same repo finds the record present and follows the plan 0029 first-sync rule.
     files:
       - api/v1alpha1/types_atprotorecord.go
