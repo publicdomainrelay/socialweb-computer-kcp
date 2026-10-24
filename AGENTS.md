@@ -83,8 +83,12 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
   `market.rfp`, bidders bid, the requester accepts, and the winner boots the guest from cloud-init
   `user_data` (`BuildUserData` and the module registry in `internal/atproto/cloudinit`).
   The requester reaches the guest only through the relay. Never start a container or VM by hand in
-  code or in a test, never install a guest agent outside cloud-init, never add a transport that the
-  RFP cloud-init does not install. A live run that needs a guest brings up its own market network,
+  code or in a test, and never install a guest agent outside cloud-init. iroh is the default and
+  required guest transport: every guest gets the iroh module, and the requester's ssh and
+  `status.contract.vmAddress` are iroh. The one other transport is the opt-in opentunnel + wootty
+  module of `internal/atproto/cloudinit` (`tunnels.go`), which the requester's user_data installs
+  only when a ComputeContract asks for it in `spec.tunnels` (plan 0032); its URL comes back as a
+  tagged `vm.onNetwork` into `status.contract.networks`. Never add any other transport. A live run that needs a guest brings up its own market network,
   and `socialweb-computer run request` or a tenant cluster of the network's gateway rents the guest.
   `run request` composes a MarketRequester root (`internal/app/marketrequester`), and its Requester
   component (`internal/services/requester` over `internal/market/requester`) runs the RFP, the

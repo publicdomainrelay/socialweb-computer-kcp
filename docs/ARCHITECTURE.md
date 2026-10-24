@@ -94,9 +94,11 @@ only), `install`, the host contract, and the bootstrap layer that runs an instan
 - **Every listener reports into status** (a component's `status.endpoints`, a Service's
   `status.endpoints`, an Exposure's `status.address`, a HostProcess's `status.listeners`), so no peer
   scrapes stdout for a DID, a port or readiness.
-- **iroh is the only guest transport.** The ssh gateway moves to iroh; the tunnel, fedproxy-ssh,
-  fedproxy-web and wootty modules, websocat ProxyCommand paths, the relay-FQDN guest addresses and the
-  guest package registry are removed.
+- **iroh is the default and required guest transport.** The ssh gateway moves to iroh; the tunnel,
+  fedproxy-ssh, fedproxy-web and old wootty modules, websocat ProxyCommand paths, the relay-FQDN guest
+  addresses and the guest package registry are removed. The one other transport is opt-in per
+  contract: `spec.tunnels` asks the requester's user_data for the opentunnel + wootty module (a
+  browser shell), whose URL comes back as a tagged `vm.onNetwork` (plan 0032, invariant 36).
 - **Components:** the bidder's guest-facing endpoints (an allow-list proxy to the bidder's OpenBao for the guest's bind, login and identity token, and `/v1/on-network`)
   are the GuestControlPlane component of the bidder; the NodeClaim fulfiller is the NodeClaim
   controller (`internal/controllers/nodeclaim`) bound by the gateway's GatewayAPI component.
@@ -875,15 +877,18 @@ subsection above. The TypeScript provider that came before plan 0026 is gone.
 - **Guest images from a build-host script (user).** Kernel + rootfs per
   hypervisor x arch, built by a script on any Linux host (CI shells out to it), pinned by sha256 and
   fetched; a bidder needs no root, chroot, apt or Go toolchain.
-- **iroh is the only guest transport (user).** The bidder installs no guest package registry,
-  websocat path, tunnel or fedproxy module. Guest SSH host
+- **iroh is the default and required guest transport (user; relaxed 2026-10-24).** The bidder installs
+  no guest package registry, websocat path, tunnel or fedproxy module. The requester may ask, per
+  contract, for the opt-in opentunnel + wootty module (`spec.tunnels`, plan 0032); its user_data
+  installs it, and iroh stays on every guest. Guest SSH host
   keys are guest-reported in `vm.hostKeys` and verified with `StrictHostKeyChecking=yes`.
 - **vm.terminated (user).** The bidder reports why and when a guest ended in a signed
   `com.publicdomainrelay.temp.compute.events.vm.terminated` inside the existing market.event envelope
   (5.6 s
   from guest poweroff to the requester's session end, measured live). The ComputeVM controller emits it
   from every Lost verdict and every release through a termination StateSync (`internal/computevm/termination.go`,
-  reasons as above); an ended ComputeVM answers a late `vm.delete` 200. vm.terminated and vm.hostKeys are the only protocol additions.
+  reasons as above); an ended ComputeVM answers a late `vm.delete` 200. vm.terminated and vm.hostKeys are the only protocol additions, with the optional `tag` of
+  vm.onNetwork (plan 0032).
 
 ## 6. CRDs and the API surface
 
@@ -3954,6 +3959,15 @@ A change must not break any of these. Each exists because something failed.
     the counterpart record names one: the bidder from the Accept record's `submitEvent`, the
     requester from the bidder Receipt record's `submitEvent`; with no ref the firehose carries the
     event. A timeout does not make a remote call a request-path operation (section 15).
+36. **iroh is the default and required guest transport; a tunnel is an opt-in per contract.** Every
+    guest gets the iroh module, the requester's ssh dials the iroh ticket in `status.contract.vmAddress`,
+    and a contract is Held on the iroh address and the host keys alone. The one other transport is
+    the opentunnel + wootty module of `internal/atproto/cloudinit/tunnels.go`, installed by the
+    requester's user_data only for the entries of `spec.tunnels`, from pinned downloads checked by
+    sha256. Its URL comes back as a `vm.onNetwork` with a `tag`, signed by the bidder, into
+    `status.contract.networks`. The wootty token is the only auth to the shell: it is only in the
+    secrets bundle (the requester's OpenBao, a 0600 guest file), never in user_data, a kcp object, a
+    record or a log, and wootty does not start without it (plan 0032).
 
 ## 14. Open architectural gaps
 
@@ -4179,7 +4193,8 @@ fail, rather than the code read against this document alone.
     address 192.0.2.1 (`internal/guestnet`, pasta maps 192.0.2.1 to the host loopback). There is no network
     index allocator. An HNS NAT network per host cannot give every guest this plan; M0-HNS-NETWORK measures
     what Windows can do with it.
-  - iroh is the only guest transport; guests have no JSR registry, websocat or tunnel module.
+  - iroh is the default and required guest transport; guests have no JSR registry or websocat, and a
+    tunnel module only when the contract's `spec.tunnels` asks for it (plan 0032).
   - The core binary installs to `bin/<sha>/` with `bin/current` and `bin/previous` (not `versions/<sha256>/`);
     assets are `runtime/<sha256>/`, collected when unreferenced. `install` is behind `install.System` and
     `UserManager`, which are systemd and account shaped (`system_other.go` refuses on !linux). The bidder
