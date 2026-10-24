@@ -346,17 +346,12 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 		f.VmruntimeCommand = append([]string(nil), f.VmruntimeCommand...)
 		firecracker = &f
 	}
-	var accessToken *commonv1.SecretRef
-	if !plan.Local {
-		accessToken = plan.AccessToken()
-	}
 	bidder := compose.Desired{Kind: compose.ComponentKindBidder, Name: BidderComponent, Spec: v1alpha1.BidderSpec{
 		ComponentSpec:        p.c.NetworkComponentSpec(p.r, compose.ComponentCRStateDir(stateRoot, compose.ComponentKindBidder, BidderComponent), network),
 		MarketExposureRef:    &commonv1.LocalObjectRef{Name: compose.ServiceNameFor(compose.ComponentKindBidder, BidderComponent) + compose.ExposureIngressSuffix},
 		Mode:                 string(plan.Mode),
 		Identity:             ident,
 		PdsRef:               plan.ComponentPdsRef(),
-		PDSAccessToken:       accessToken,
 		PolicyEngineRef:      compose.ComponentRefFor(compose.ComponentKindPolicyEngine, compose.PolicyEngineComponent),
 		VaultRef:             vault,
 		Hostnames:            hostnames,
@@ -482,7 +477,8 @@ func (p *pass) account(ctx context.Context, plan compose.AccountPlan, id *v1alph
 	if err != nil {
 		p.log().Warn("the existing-account repo", "err", err.Error())
 	}
-	repoLinks = append(repoLinks, compose.RepoWriteLink(p.self(), compose.RepoRefIn(id.Status.Did, ws), compose.ScopeAll))
+	repoLinks = append(repoLinks, compose.RepoWriteLink(p.self(), compose.RepoRefIn(id.Status.Did, ws), compose.ScopeAll),
+		compose.ServiceAuthLink(p.self(), compose.AppRef(compose.KindMarketIdentity, BidderIdentity, ws), id.Status.Did))
 	if ref := plan.ComponentPdsRef(); ref != nil && strings.EqualFold(ref.Kind, compose.KindRemotePDS) && strings.TrimSpace(ref.Name) != "" {
 		repoLinks = append(repoLinks, compose.ServiceAuthLink(p.guest(), compose.RemotePDSRefIn(strings.TrimSpace(ref.Name), ws), id.Status.Did))
 	}

@@ -77,12 +77,8 @@ func (s *Service) resolveIdentity(ctx context.Context) {
 	if s.spec.Identity != nil {
 		s.did = s.spec.Identity.Did
 	}
-	if s.pdsURL == "" && s.spec.PdsRef != nil {
-		s.pdsURL = kcp.HandlerURL(s.workspace, cmp.Or(s.spec.PdsRef.Kind, "Pds"), s.spec.PdsRef.Name)
-		s.pdsInternal = s.pdsURL != ""
-	}
 	ref := s.identityRef()
-	if (s.did != "" && s.pdsURL != "") || ref == nil || ref.Name == "" {
+	if s.did != "" || ref == nil || ref.Name == "" {
 		return
 	}
 	found, ok := s.inputs.AwaitIdentity(ctx, []string{s.workspace}, ref.Name, inputWait)
@@ -90,8 +86,7 @@ func (s *Service) resolveIdentity(ctx context.Context) {
 		s.log.Warn("the bidder identity is not resolved yet", "marketIdentity", ref.Name)
 		return
 	}
-	s.did = cmp.Or(s.did, found.Status.Did)
-	s.pdsURL = cmp.Or(s.pdsURL, found.Status.PdsURL)
+	s.did = found.Status.Did
 }
 
 func (s *Service) newBidder(intents contract.Intents) (*core.Bidder, error) {
@@ -160,26 +155,25 @@ func seconds(value *int32) time.Duration {
 }
 
 func (s *Service) minter() xrpc.Minter {
-	if strings.TrimSpace(s.pdsURL) == "" {
-		return nil
-	}
-	if s.pdsTokens == nil {
-		s.pdsTokens = s.credentialTokens()
-	}
-	if minter, ok := s.pdsTokens.(xrpc.Minter); ok {
-		return minter
-	}
-	if s.pdsTokens != nil {
-		return participant.SessionServiceAuth{Endpoint: s.pdsEndpoint(), HTTP: s.pdsHTTPClient(), Auth: s.pdsAuth()}
-	}
-	if s.deps.Bus == nil || s.spec.PdsRef == nil || !strings.EqualFold(strings.TrimSpace(s.spec.PdsRef.Kind), "Pds") {
+	target, ok := s.serviceAuthSigner()
+	if s.deps.Bus == nil || s.did == "" || !ok {
 		return nil
 	}
 	handlers, self, did := s.deps.Bus, s.self(), s.did
-	target := commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: "Pds", Name: s.spec.PdsRef.Name, Workspace: s.workspace}
 	return participant.PDSServiceAuth{DID: did, Open: func(ctx context.Context) (pds.ServiceAuth, error) {
 		return bus.Resolve[pds.ServiceAuth](ctx, handlers, self, target, bus.Capability{Name: pds.CapabilityServiceAuth, Scope: []string{did}})
 	}}
+}
+
+func (s *Service) serviceAuthSigner() (commonv1.ObjectRef, bool) {
+	if ref := s.spec.PdsRef; ref != nil && strings.EqualFold(strings.TrimSpace(ref.Kind), "Pds") && strings.TrimSpace(ref.Name) != "" {
+		return commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: "Pds", Name: ref.Name, Workspace: s.workspace}, true
+	}
+	if s.spec.Identity != nil && s.spec.Identity.MarketIdentityRef != nil && strings.TrimSpace(s.spec.Identity.MarketIdentityRef.Name) != "" {
+		ref := s.spec.Identity.MarketIdentityRef
+		return commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: "MarketIdentity", Name: ref.Name, Workspace: cmp.Or(ref.Workspace, s.workspace)}, true
+	}
+	return commonv1.ObjectRef{}, false
 }
 
 type guestVault struct {

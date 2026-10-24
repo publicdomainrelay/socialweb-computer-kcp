@@ -20,7 +20,6 @@ import (
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/ingress"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
@@ -66,8 +65,6 @@ const (
 type Deps struct {
 	component.Instance
 
-	Credentials component.CredentialResolver
-
 	Egress component.Egress
 
 	OAuthCallbacks *oauthcallback.Registry
@@ -92,19 +89,7 @@ type Service struct {
 
 	guestVaultServer string
 
-	tokenRef *component.CredentialRef
-
-	credentials participant.Credentials
-
 	policyArgs map[string]string
-
-	pdsURL string
-
-	pdsInternal bool
-
-	pdsTokens pdsclient.TokenSource
-
-	pdsDPoP pdsclient.DPoPSource
 
 	serviceAuthHost string
 
@@ -187,16 +172,11 @@ func New(ctx context.Context, spec v1alpha1.BidderSpec, deps Deps) (*Service, er
 		handle:           handle,
 		providerHandle:   providerHandle,
 		guestVaultServer: v1alpha1.VaultServer(spec.VaultRef, DefaultGuestVaultServer),
-		tokenRef:         accessTokenRef(spec.PDSAccessToken, spec.VaultRef),
 		policyArgs:       policyArgs,
-	}
-	if s.tokenRef != nil && deps.Credentials != nil {
-		s.credentials = component.CredentialStore{Resolver: deps.Credentials, Ref: *s.tokenRef}
 	}
 	if spec.ServiceAuth != nil {
 		s.serviceAuthHost = strings.TrimSpace(spec.ServiceAuth.Hostname)
 	}
-	s.restoreSession(ctx, base, log)
 	switch {
 	case s.handle == "":
 		return nil, errors.New("bidder: the component names no handle")
@@ -431,23 +411,6 @@ func ingressConnectHost(n v1alpha1.MarketNetworkValue) string {
 		}
 	}
 	return ""
-}
-
-func accessTokenRef(secret *commonv1.SecretRef, vaultRef *commonv1.ObjectRef) *component.CredentialRef {
-	if secret == nil || strings.Trim(strings.TrimSpace(secret.Path), "/") == "" {
-		return nil
-	}
-	ref := &component.CredentialRef{Mount: strings.Trim(strings.TrimSpace(secret.Mount), "/"), Path: strings.Trim(strings.TrimSpace(secret.Path), "/"),
-		Keys: []string{"session", "accessJwt", "accessToken", "access_token", "token", "value",
-			"dpop_privatekey_multibase", "dpopPrivateKeyMultibase"}}
-	if key := strings.TrimSpace(secret.Key); key != "" {
-		ref.Keys = []string{key}
-	}
-	ref.Server = v1alpha1.VaultServer(secret.Vault, "")
-	if ref.Server == "" && vaultRef != nil {
-		ref.Server = strings.TrimSpace(vaultRef.Name)
-	}
-	return ref
 }
 
 func portOf(raw string) int {
