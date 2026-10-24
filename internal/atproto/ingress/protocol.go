@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/gorilla/websocket"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
 )
 
@@ -16,7 +17,13 @@ const (
 	TunnelNSID       = "com.fedproxy.temp.xrpc.tunnel"
 	RegistrationType = "com.fedproxy.temp.xrpc.registration"
 	KeepalivePath    = "/xrpc/com.publicdomainrelay.temp.keepalive.ping"
+	HealthPath       = "/xrpc/_health"
 	DefaultServiceID = "xrpc_relay"
+
+	MaxFrameBytes       = 64 << 20
+	DefaultMaxBodyBytes = 32 << 20
+	callerQueueDepth    = 4096
+	maxCloseReasonBytes = 123
 )
 
 var relayedResponseHeaders = map[string]struct{}{
@@ -128,6 +135,18 @@ func splitDataHost(host string, bases []string) (string, string, bool) {
 		}
 	}
 	return "", "", false
+}
+
+func closeFrame(code int, reason string) []byte {
+	switch {
+	case code >= 1000 && code <= 1003, code >= 1007 && code <= 1014, code >= 3000 && code <= 4999:
+	default:
+		code = 1000
+	}
+	if len(reason) > maxCloseReasonBytes {
+		reason = reason[:maxCloseReasonBytes]
+	}
+	return websocket.FormatCloseMessage(code, reason)
 }
 
 func frameType(kind string) string {

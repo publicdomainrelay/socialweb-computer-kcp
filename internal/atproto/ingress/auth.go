@@ -76,6 +76,7 @@ func VerifyServiceAuth(ctx context.Context, token, aud, lxm string, dir identity
 		insecure := jwt.MapClaims{}
 		if _, _, uerr := jwt.NewParser().ParseUnverified(token, insecure); uerr == nil {
 			if iss, ierr := insecure.GetIssuer(); ierr == nil && dir != nil {
+				iss, _, _ = strings.Cut(iss, "#")
 				if did, derr := syntax.ParseDID(iss); derr == nil {
 					_ = dir.Purge(ctx, did.AtIdentifier())
 				}
@@ -109,6 +110,7 @@ func VerifyServiceAuth(ctx context.Context, token, aud, lxm string, dir identity
 }
 
 func resolveSigningKey(ctx context.Context, did string, dir identity.Directory) (atcrypto.PublicKey, error) {
+	did, _, _ = strings.Cut(did, "#")
 	if strings.HasPrefix(did, didkey.Prefix) {
 		return didkey.ParsePublic(did)
 	}

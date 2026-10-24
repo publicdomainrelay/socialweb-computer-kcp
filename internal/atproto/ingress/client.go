@@ -202,7 +202,7 @@ func (s *Subscriber) openOnce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	conn.SetReadLimit(8_000_000)
+	conn.SetReadLimit(MaxFrameBytes)
 	_ = conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 	registered := false
 	for !registered {

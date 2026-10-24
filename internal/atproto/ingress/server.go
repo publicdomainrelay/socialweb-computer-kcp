@@ -40,6 +40,10 @@ type Config struct {
 	Directory         identity.Directory
 	PLCURL            string
 	Logger            *slog.Logger
+	Version           string
+	AccessLog         bool
+	OutliveToken      bool
+	MaxBodyBytes      int64
 }
 
 type Server struct {
@@ -90,36 +94,97 @@ func (p *peer) writeJSON(v any) error {
 
 func (p *peer) close(code int, reason string) {
 	p.closeOnce.Do(func() {
-		_ = p.conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(code, reason), time.Now().Add(time.Second))
+		_ = p.conn.WriteControl(websocket.CloseMessage, closeFrame(code, reason), time.Now().Add(time.Second))
 		_ = p.conn.Close()
 	})
+}
+
+func closeConn(conn *websocket.Conn, code int, reason string) {
+	_ = conn.WriteControl(websocket.CloseMessage, closeFrame(code, reason), time.Now().Add(time.Second))
+	_ = conn.Close()
+}
+
+type callerMessage struct {
+	messageType int
+	data        []byte
+	code        int
+	reason      string
 }
 
 type activeSubscription struct {
 	peer      *peer
 	caller    *websocket.Conn
-	callerMu  sync.Mutex
 	subdomain string
 	nsid      string
+	out       chan callerMessage
+	done      chan struct{}
+	closing   sync.Once
 }
 
-func (a *activeSubscription) writeText(data []byte) error {
-	a.callerMu.Lock()
-	defer a.callerMu.Unlock()
-	_ = a.caller.SetWriteDeadline(time.Now().Add(10 * time.Second))
-	return a.caller.WriteMessage(websocket.TextMessage, data)
+func newActiveSubscription(p *peer, caller *websocket.Conn, subdomain, nsid string) *activeSubscription {
+	return &activeSubscription{
+		peer:      p,
+		caller:    caller,
+		subdomain: subdomain,
+		nsid:      nsid,
+		out:       make(chan callerMessage, callerQueueDepth),
+		done:      make(chan struct{}),
+	}
 }
 
-func (a *activeSubscription) writeBinary(data []byte) error {
-	a.callerMu.Lock()
-	defer a.callerMu.Unlock()
-	_ = a.caller.SetWriteDeadline(time.Now().Add(10 * time.Second))
-	return a.caller.WriteMessage(websocket.BinaryMessage, data)
+func (a *activeSubscription) enqueue(m callerMessage) bool {
+	select {
+	case <-a.done:
+		return true
+	default:
+	}
+	select {
+	case a.out <- m:
+		return true
+	default:
+		return false
+	}
+}
+
+func (a *activeSubscription) writeText(data []byte) {
+	if !a.enqueue(callerMessage{messageType: websocket.TextMessage, data: data}) {
+		a.closeCaller(1008, "consumer too slow")
+	}
+}
+
+func (a *activeSubscription) writeBinary(data []byte) {
+	if !a.enqueue(callerMessage{messageType: websocket.BinaryMessage, data: data}) {
+		a.closeCaller(1008, "consumer too slow")
+	}
+}
+
+func (a *activeSubscription) finish(code int, reason string) {
+	if !a.enqueue(callerMessage{code: code, reason: reason}) {
+		a.closeCaller(code, reason)
+	}
 }
 
 func (a *activeSubscription) closeCaller(code int, reason string) {
-	_ = a.caller.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(code, reason), time.Now().Add(time.Second))
-	_ = a.caller.Close()
+	a.closing.Do(func() { closeConn(a.caller, code, reason) })
+}
+
+func (a *activeSubscription) pump() {
+	for {
+		select {
+		case <-a.done:
+			return
+		case m := <-a.out:
+			if m.messageType == 0 {
+				a.closeCaller(m.code, m.reason)
+				return
+			}
+			_ = a.caller.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			if err := a.caller.WriteMessage(m.messageType, m.data); err != nil {
+				a.closeCaller(1011, "subscription write failed")
+				return
+			}
+		}
+	}
 }
 
 type dispatchResult struct {
@@ -151,6 +216,7 @@ func NewServer(cfg Config) (*Server, error) {
 	cfg.KeepaliveInterval = opt.Positive(cfg.KeepaliveInterval, 5*time.Second)
 	cfg.KeepaliveTimeout = opt.Positive(cfg.KeepaliveTimeout, 5*time.Second)
 	cfg.NonceTTL = opt.Positive(cfg.NonceTTL, 60*time.Second)
+	cfg.MaxBodyBytes = opt.Positive(cfg.MaxBodyBytes, DefaultMaxBodyBytes)
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
@@ -224,11 +290,50 @@ func (s *Server) Close() {
 	s.wg.Wait()
 }
 
+type statusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusWriter) WriteHeader(status int) {
+	if w.status == 0 {
+		w.status = status
+	}
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *statusWriter) Write(b []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	return w.ResponseWriter.Write(b)
+}
+
+func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
 func (s *Server) serveHTTP(w http.ResponseWriter, req *http.Request) {
+	if !s.cfg.AccessLog {
+		s.route(w, req)
+		return
+	}
+	host := hostport.HostnameOnly(hostport.FromRequest(req, s.cfg.Hostname))
+	path := req.URL.EscapedPath()
+	s.log.Info("request", "method", req.Method, "host", host, "path", path)
+	sw := &statusWriter{ResponseWriter: w}
+	s.route(sw, req)
+	if sw.status >= http.StatusBadRequest {
+		s.log.Error("response_error", "method", req.Method, "host", host, "path", path, "status", sw.status)
+	}
+}
+
+func (s *Server) route(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "*")
 	if req.Method == http.MethodOptions {
+		w.Header().Set("Access-Control-Allow-Methods", "GET,HEAD,PUT,POST,DELETE,PATCH")
+		if requested := req.Header.Get("Access-Control-Request-Headers"); requested != "" {
+			w.Header().Set("Access-Control-Allow-Headers", requested)
+			w.Header().Add("Vary", "Access-Control-Request-Headers")
+		}
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -237,6 +342,10 @@ func (s *Server) serveHTTP(w http.ResponseWriter, req *http.Request) {
 	path := req.URL.Path
 	control := s.isControlHost(host)
 
+	if control && req.Method == http.MethodGet && path == HealthPath {
+		httpjson.Write(w, http.StatusOK, map[string]string{"version": s.cfg.Version})
+		return
+	}
 	if control && req.Method == http.MethodGet && path == "/.well-known/did.json" {
 		httpjson.Write(w, http.StatusOK, map[string]any{
 			"@context": []string{"https://www.w3.org/ns/did/v1"},
@@ -332,6 +441,7 @@ func (s *Server) handleNonce(w http.ResponseWriter, req *http.Request) {
 	}
 	token, err := BearerToken(req.Header.Get("Authorization"), "")
 	if err != nil {
+		s.log.Warn("auth_denied", "nsid", GetNonceNSID, "err", err)
 		httpjson.Write(w, http.StatusUnauthorized, map[string]string{"error": "AuthenticationRequired", "message": err.Error()})
 		return
 	}
@@ -362,6 +472,7 @@ func (s *Server) handleSubscribe(w http.ResponseWriter, req *http.Request) {
 	authHeader := req.Header.Get("Authorization")
 	token, err := BearerToken(authHeader, req.URL.Query().Get("service_auth"))
 	if err != nil {
+		s.log.Warn("auth_denied", "nsid", SubscribeNSID, "err", err)
 		httpjson.Write(w, http.StatusUnauthorized, map[string]string{"error": "AuthenticationRequired", "message": err.Error()})
 		return
 	}
@@ -376,39 +487,34 @@ func (s *Server) handleSubscribe(w http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		return
 	}
-	conn.SetReadLimit(8_000_000)
+	conn.SetReadLimit(MaxFrameBytes)
 	clientDID := req.URL.Query().Get("did")
 	subdomain := hostport.DIDLabel(clientDID)
 	if !strings.HasPrefix(clientDID, "did:") {
 		s.log.Warn("missing_did")
-		_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(1008, "did query param must be a DID"), time.Now().Add(time.Second))
-		_ = conn.Close()
+		closeConn(conn, 1008, "did query param must be a DID")
 		return
 	}
 	var reg Registration
 	if err := json.Unmarshal([]byte(req.URL.Query().Get("registration")), &reg); err != nil {
 		s.log.Warn("registration_malformed", "did", clientDID)
-		_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(1008, "malformed registration"), time.Now().Add(time.Second))
-		_ = conn.Close()
+		closeConn(conn, 1008, "malformed registration")
 		return
 	}
 	result := s.nonces.Verify(req.Context(), reg)
 	if !result.OK {
 		s.log.Warn("registration_rejected", "did", clientDID, "reason", result.Reason)
-		_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(1008, "registration rejected: "+result.Reason), time.Now().Add(time.Second))
-		_ = conn.Close()
+		closeConn(conn, 1008, "registration rejected: "+result.Reason)
 		return
 	}
 	if result.Key != clientDID {
 		s.log.Warn("did_mismatch", "did", clientDID, "registration_key", result.Key)
-		_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(1008, "did does not match registration key"), time.Now().Add(time.Second))
-		_ = conn.Close()
+		closeConn(conn, 1008, "did does not match registration key")
 		return
 	}
 	if !s.didAllowed(clientDID) {
 		s.log.Warn("did_not_allowed", "did", clientDID)
-		_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(1008, "DID not in allowlist"), time.Now().Add(time.Second))
-		_ = conn.Close()
+		closeConn(conn, 1008, "DID not in allowlist")
 		return
 	}
 
@@ -422,7 +528,9 @@ func (s *Server) handleSubscribe(w http.ResponseWriter, req *http.Request) {
 	s.peers[subdomain] = p
 	s.mu.Unlock()
 	s.startKeepalive(req.Context(), p)
-	s.spawn(func() { s.watchPeerExpiry(p) })
+	if !s.cfg.OutliveToken {
+		s.spawn(func() { s.watchPeerExpiry(p) })
+	}
 	s.log.Info("subscriber_connected", "subdomain", subdomain, "key", result.Key)
 	_ = p.writeJSON(map[string]any{
 		"$type":      frameType("registered"),
@@ -460,9 +568,7 @@ func (s *Server) handlePeerFrame(p *peer, msg frame) {
 		if sub == nil || len(msg.Message) == 0 {
 			return
 		}
-		if err := sub.writeText(msg.Message); err != nil {
-			sub.closeCaller(1011, "subscription write failed")
-		}
+		sub.writeText(msg.Message)
 	case "subscriptionData":
 		s.mu.Lock()
 		sub := s.subscriptions[msg.SubscriptionID]
@@ -474,9 +580,7 @@ func (s *Server) handlePeerFrame(p *peer, msg frame) {
 		if err != nil {
 			return
 		}
-		if err := sub.writeBinary(data); err != nil {
-			sub.closeCaller(1011, "subscription write failed")
-		}
+		sub.writeBinary(data)
 	case "subscriptionClose", "subscriptionCancel":
 		s.mu.Lock()
 		sub := s.subscriptions[msg.SubscriptionID]
@@ -485,9 +589,7 @@ func (s *Server) handlePeerFrame(p *peer, msg frame) {
 		if sub == nil {
 			return
 		}
-		code := msg.Code
-		code = cmp.Or(code, 1000)
-		sub.closeCaller(code, msg.Reason)
+		sub.finish(cmp.Or(msg.Code, 1000), msg.Reason)
 	}
 }
 
@@ -509,9 +611,13 @@ func (s *Server) handleResponse(p *peer, msg frame) {
 			headers[strings.ToLower(k)] = v
 		}
 	}
+	body := msg.Body
+	if (len(body) == 0 || string(body) == "null") && msg.RawBody != nil {
+		body, _ = json.Marshal(*msg.RawBody)
+	}
 	pr.ch <- dispatchResult{resp: Response{
 		Status:      msg.Status,
-		Body:        msg.Body,
+		Body:        body,
 		ContentType: msg.ContentType,
 		Headers:     headers,
 	}}
@@ -584,7 +690,7 @@ func (s *Server) dropPeer(p *peer) {
 		ka.close()
 	}
 	for _, sub := range subs {
-		sub.closeCaller(4004, "subscriber disconnected")
+		sub.finish(4004, "subscriber disconnected")
 	}
 }
 
@@ -716,8 +822,8 @@ func (s *Server) handleDataWS(w http.ResponseWriter, req *http.Request, subdomai
 	if err != nil {
 		return
 	}
-	conn.SetReadLimit(8_000_000)
-	path := req.URL.Path
+	conn.SetReadLimit(MaxFrameBytes)
+	path := req.URL.EscapedPath()
 	nsid := strings.TrimPrefix(path, "/xrpc/")
 	params := lastQueryValues(req.URL.Query())
 	headers := map[string]string{}
@@ -731,13 +837,18 @@ func (s *Server) handleDataWS(w http.ResponseWriter, req *http.Request, subdomai
 	p := s.peers[subdomain]
 	s.mu.Unlock()
 	if p == nil {
-		_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(4004, fmt.Sprintf("no active subscriber for subdomain %s", subdomain)), time.Now().Add(time.Second))
-		_ = conn.Close()
+		closeConn(conn, 4004, fmt.Sprintf("no active subscriber for subdomain %s", subdomain))
 		return
 	}
 
 	id := newID()
-	sub := &activeSubscription{peer: p, caller: conn, subdomain: subdomain, nsid: nsid}
+	sub := newActiveSubscription(p, conn, subdomain, nsid)
+	var pump sync.WaitGroup
+	pump.Go(sub.pump)
+	defer func() {
+		close(sub.done)
+		pump.Wait()
+	}()
 	s.mu.Lock()
 	s.subscriptions[id] = sub
 	s.mu.Unlock()
@@ -783,7 +894,11 @@ func (s *Server) handleForward(w http.ResponseWriter, req *http.Request, subdoma
 	var body any
 	var rawBody *string
 	if req.Method != http.MethodGet && req.Method != http.MethodHead {
-		b, _ := io.ReadAll(io.LimitReader(req.Body, 8<<20))
+		b, _ := io.ReadAll(io.LimitReader(req.Body, s.cfg.MaxBodyBytes+1))
+		if int64(len(b)) > s.cfg.MaxBodyBytes {
+			httpjson.Write(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "PayloadTooLarge", "message": fmt.Sprintf("request body exceeds %d bytes", s.cfg.MaxBodyBytes)})
+			return
+		}
 		raw := string(b)
 		rawBody = &raw
 		var parsed any
@@ -803,7 +918,7 @@ func (s *Server) handleForward(w http.ResponseWriter, req *http.Request, subdoma
 		"$type":     frameType("request"),
 		"requestId": requestID,
 		"method":    req.Method,
-		"path":      req.URL.Path,
+		"path":      req.URL.EscapedPath(),
 		"params":    lastQueryValues(req.URL.Query()),
 		"headers":   headers,
 	}
@@ -835,14 +950,17 @@ func (s *Server) handleForward(w http.ResponseWriter, req *http.Request, subdoma
 	status := result.Status
 	status = cmp.Or(status, http.StatusOK)
 	w.WriteHeader(status)
-	if len(result.Body) > 0 {
+	if len(result.Body) == 0 {
+		return
+	}
+	if result.Body[0] == '"' {
 		var str string
 		if err := json.Unmarshal(result.Body, &str); err == nil {
 			_, _ = w.Write([]byte(str))
 			return
 		}
-		_, _ = w.Write(result.Body)
 	}
+	_, _ = w.Write(result.Body)
 }
 
 func (s *Server) didAllowed(did string) bool {
