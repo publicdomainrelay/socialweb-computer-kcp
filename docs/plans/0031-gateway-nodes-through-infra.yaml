@@ -1,0 +1,334 @@
+plan: "0031"
+title: "Gateway tenant-cluster nodes are managed through one Infra per Cluster; a NodeClaim keeps the join, the grant and the secrets"
+status: todo
+source: >
+  2026-10-23, the user's request (gateway tenant-cluster nodes are managed through Infra), read
+  against main at 1dc14655 (plans 0028 and 0029 merged). Today every node of a tenant cluster is one
+  NodeClaim and one ComputeContract that the NodeClaim controller writes itself. The clusterprovider's
+  node host writes the NodeClaim into the cluster's home workspace (internal/nodemarket/nodemarket.go:
+  167-216 Provision, claimLocked 218-237 with the Cluster ownerReference of 239-244) and deletes it to
+  release the node (release 393-422, which waits for the claim to be gone). The NodeClaim controller
+  ("the door", internal/controllers/nodeclaim/controller.go) lists every ComputeContract of the
+  contract workspace on each reconcile (Reconcile 192-232), writes the join bundle into the gateway
+  vault and applies a ComputeContract named nodeclaim-<20 hex of the claim uid> with
+  spec.nodeClaimRef (ensure 234-274, mapper Contract internal/gateway/nodeclaim/nodeclaim.go:274-327),
+  writes spec.release and deletes the contract on the claim's deletion (settle 276-312, mapper
+  Settle 461-496), and releases or deletes contracts whose claim is gone or was recreated (orphan
+  314-337, gone 339-355, mapper Orphan 440-459). It maps contract events back to claims through
+  spec.nodeClaimRef (contractClaims 523-538, resync 635-650). The contract workspace is the gateway
+  root workspace (internal/app/gateway/gateway.go:482 gatewayNodeMarket(o, p.ws, p.r.Workspace);
+  internal/services/gatewayapi/config.go:88). compose.Adopt and the GC report skip a contract with
+  spec.nodeClaimRef (internal/app/compose/infra.go:175 and 558).
+
+  Plan 0029 built Infra: a deployment object that owns its ComputeContracts in its own workspace
+  (internal/controllers/infra/contracts.go:349-355 owned by labels, 437-448 create), with the
+  Staged, Requested, Released states, the release finalizer and the plan 0028 order (controller.go
+  298-332 finalize), and a ComputeContract spec built only from the publishable contract fields and
+  spec.secrets (internal/infra/lifecycle.go:98-107 ContractSpec), so a node's nodeJoin, ownerDid and
+  adopt have no place in it yet. The Infra and NodeClaim controllers run in the same core
+  (internal/stack/componentcore/controllers.go:145 and 149). The Gateway root's delete pass
+  (internal/app/gateway/gateway.go:150-194) deletes every account Cluster
+  (compose.DeleteAccountClusters, internal/app/compose/infra.go:678-716) and then waits while a
+  ComputeContract still holds a guest (compose.HeldContracts, internal/app/compose/apply.go:408-428).
+  The MarketRequester root's delete pass deletes its ComputeContracts first and has no step for
+  Infra or EphemeralInfra (internal/app/marketrequester/marketrequester.go:121-142), plan 0029
+  R8-ROOT-DELETE-ORDER. Removing spec.record from an Infra deletes its AtprotoRecord child
+  (internal/controllers/infra/controller.go:221-233, record.go:243-264), whose finalizer deletes the
+  record from the repo (internal/controllers/atprotorecord/controller.go:204-224), plan 0029
+  U1-UNBIND-KEEPS-RECORD.
+principle: >
+  A tenant cluster's nodes are one deployment. Each Cluster that has a NodeClaim has one Infra in
+  the gateway's contract workspace, and each node is one contract entry of it. The Infra controller
+  is the only writer of a node's ComputeContract and runs its whole lifecycle (Requesting, Deployed,
+  Releasing, Released, Failed, the release finalizer and the plan 0028 order). The NodeClaim keeps
+  what only a tenant cluster has: the guest grant, the join secrets, the apiserver ClusterLink
+  ticket, adoption, and the loss and join graces of the clusterprovider. Deleting a Cluster deletes
+  its Infra, which releases every node; deleting a root deletes its deployments before it stops the
+  component that sends the releases.
+state_rules:
+  - Read AGENTS.md first. status is one of todo, doing, done, blocked. The lead flips statuses.
+  - No Go tests (AGENTS.md, plan 0027). Proof is the build gates and the ACC31 live rows below.
+  - Fresh deploy (AGENTS.md, Prod deployments). No migration code for NodeClaims or ComputeContracts
+    written before this plan; a contract named nodeclaim-<hex> left by an older core is not adopted.
+  - Plan 0030 is rewiring the account identity and credentials code now. This plan edits none of
+    internal/pds/identity, internal/services/bidder/credentials.go,
+    internal/market/requester/identity.go, internal/pds/remote or internal/marketidentity.
+  - This plan owns plan 0029's R8-ROOT-DELETE-ORDER and U1-UNBIND-KEEPS-RECORD and executes them
+    against their done_when in plan 0029; their statuses stay in plan 0029.
+items:
+  - id: A1-API
+    title: "Infra carries the node fields and its Cluster; a NodeClaim names its entry; ComputeContract loses nodeClaimRef"
+    depends_on: []
+    decision: >
+      InfraSpec gains two kcp-only fields that are never written to a record, like spec.secrets:
+      clusterRef (an ObjectRef to the tenant Cluster, kind Cluster, with its home workspace), and
+      nodes (listType=map keyed by contract), one InfraContractNode per node entry with ownerDid,
+      adopt, nodeJoin (the ComputeContractNodeJoin type) and nodeClaimRef (the NodeClaim the entry
+      serves). NodeClaimStatus gains infra (workspace, name, contract, computeContract), written by
+      the NodeClaim controller: this is how a NodeClaim refers to its Infra entry. It is status, not
+      spec, because the NodeClaim controller chooses the entry and the clusterprovider writes the
+      claim's spec. ComputeContractSpec.nodeClaimRef is removed rather than kept: a node's contract
+      is now named by its ownerReference to the Infra and the labels infra.socialweb.computer/name
+      and infra.socialweb.computer/contract, and the claim is named by the entry's
+      spec.nodes[].nodeClaimRef; nothing in the requester reads nodeClaimRef. The constant
+      InfraClusterLabel = "infra.socialweb.computer/cluster" (the Cluster's name) marks a cluster's
+      Infra for kubectl. go generate ./api/... writes the schemas; a Revision bump follows if the
+      generator asks.
+    files:
+      - api/v1alpha1/types_infra.go
+      - api/v1alpha1/types_nodeclaim.go
+      - api/v1alpha1/types_computecontract.go
+      - api/v1alpha1/zz_generated.deepcopy.go
+      - api/v1alpha1/resources.go
+      - deploy/
+    done_when: "go generate ./api/... leaves no diff on a second run; go build ./... passes."
+    status: todo
+
+  - id: I2-INFRA-NODE-FIELDS
+    title: "The Infra controller puts a node entry's fields on its ComputeContract"
+    depends_on: [A1-API]
+    decision: >
+      infra.ContractSpec takes the entry's InfraContractNode (nil for an ordinary entry) and sets
+      ownerDid, adopt and nodeJoin on the ComputeContract spec, beside the publishable fields and
+      spec.secrets. The Infra controller passes spec.nodes by contract name, as it passes
+      spec.secrets. The record render and the declaration hash stay description plus contracts, so
+      clusterRef, nodes and secrets never reach a record. ttlSecondsAfterFinished is not set: the
+      schema default (691200) equals the NodeClaim mapper's ContractTTLSeconds.
+    files:
+      - internal/infra/lifecycle.go
+      - internal/controllers/infra/contracts.go
+    done_when: "ACC31-SCALE-UP-TWO passes: each node's ComputeContract carries nodeJoin, ownerDid and the bundle secretsRef."
+    status: todo
+
+  - id: N3-CLAIM-ENTRY
+    title: "The NodeClaim controller composes its Cluster's Infra and writes no ComputeContract"
+    depends_on: [A1-API, I2-INFRA-NODE-FIELDS]
+    decision: >
+      Where. The Infra lives in the contract workspace of the binding (the gateway root workspace),
+      beside the ComputeContracts it owns and the Requester that runs them; the Infra controller
+      applies and lists its contracts only in its own workspace, and the tenant's home workspace
+      must not hold an object that declares contracts on the gateway's account. It is named
+      nodes-<20 hex of sha256(<home workspace>/<cluster name>)>, with spec.clusterRef naming the
+      Cluster, the label infra.socialweb.computer/cluster=<cluster name> and a description naming the
+      cluster. It carries no ownerReference: kcp garbage collection is per logical cluster, and an
+      owner in another workspace reads as a missing owner, so the dependent would be collected at
+      once. The Cluster owns it through spec.clusterRef and the delete rule of N4-CLUSTER-DELETE.
+
+      One writer. The NodeClaim controller is the Infra's composer and the only writer of its spec
+      (field manager socialweb.computer/nodeclaim): it holds every input of a node's contract (the
+      join bundle in the gateway vault, the pinned meshd and node agent downloads and their resolved
+      download base, the node policy, the extra bidder DIDs, the user data base), which the
+      clusterprovider does not have. The scale decision stays where it is: internal/scale decides,
+      and the node host internal/nodemarket expresses a scale up by writing a NodeClaim and a scale in
+      by deleting it, as today. The controller turns that one to one into the entry: a new claim
+      adds the entry, and a deleting claim sets it to Released. So the scale decision adds a
+      Requested entry and sets an entry to Released through the claim it already writes, and no
+      second writer touches the Infra's atomic spec.contracts. Every write reads the Infra, changes
+      only this claim's entry (contracts, secrets and nodes by entry name) and applies the whole
+      spec, under one in-process lock, so two claims of one cluster never lose each other's entry.
+
+      The entry. Its name is node-<12 hex of sha256(claim uid)>, so a claim recreated under the same
+      node name gets a new entry while the old one releases. Its ComputeContract is
+      infra-<infra name>-<entry name> (50 characters), and the join bundle stays at
+      <web app vault mount>/contracts/<that name>/bundle, so the requester's vault link is unchanged.
+      Its state follows the claim: deleting, or ended (Failed, Lost, Released), is Released; phase
+      empty or Pending with no bundle written yet (the download base or the cluster's OpenBao link
+      ticket is not ready) is Staged; Bidding, Provisioning, Joining, Running and Adopting are
+      Requested. The controller writes the bundle and the Bidding (or Adopting) status before it moves
+      the entry to Requested, which keeps today's order: the RFP is sent only once the bundle is in
+      the vault. Staged is used only for that wait. A warm pool of pre-provisioned nodes is not
+      built: a Staged entry holds no guest, so it would save only the bundle write; a pool would
+      need Requested guests that have not joined, and is a later item.
+
+      Status. The controller reads the entry's ComputeContract by name (a GET, not a list of the
+      workspace) and maps it onto the claim with the mapper's Status as today, and writes
+      status.infra. Contract events reach the claim through an index from the contract name to the
+      claim, learned on reconcile; Infra events reach the claims of that Infra the same way. The
+      deletion of a claim (finalizer nodeclaim.socialweb.computer/release) sets its entry to
+      Released and waits, woken by the contract watch, until the contract is Released, Failed or
+      gone; then it writes Released (or Failed) on the claim, removes the bundle and lets go. A claim
+      that was Failed or Lost and whose release still retries lets go at once, as Settle does today;
+      the Infra keeps the release going. The gone hook drops the claim's entry; the Infra controller
+      then deletes the finished contract (a dropped entry is released and deleted once finished,
+      plan 0029 D4). When the last entry is dropped the controller deletes the Infra, so a cluster
+      at zero nodes has none. On bind, the resync sweeps the cluster Infras of the contract workspace
+      and drops entries whose claim is gone or has a different uid, which covers a claim deleted
+      while the core was down.
+
+      Removed. From internal/controllers/nodeclaim: the ComputeContract list per reconcile, ensure's
+      contract apply, settle's spec.release and contract delete, orphan, the contract part of the
+      gone hook, the nodeClaimRef contract mapping and the resync over contracts. From
+      internal/gateway/nodeclaim: ContractNamePrefix, ContractName, Contract, Orphan and the release
+      and delete parts of Settle. From internal/contract/nodeclaim: UIDLabel, ContractTTLSeconds,
+      Orphaned and Settlement.Release and DeleteContract. Kept: Wants, Bases, LinkNames, Bundle,
+      BundleRef, Requested, Failed, Status, LostMessage, the bundle write and removal, the ClusterLink
+      reads, the exposure wake-up, the home index and the join report.
+    files:
+      - internal/contract/nodeclaim/nodeclaim.go
+      - internal/gateway/nodeclaim/nodeclaim.go
+      - internal/controllers/nodeclaim/controller.go
+      - internal/controllers/nodeclaim/infra.go
+    done_when: "ACC31-SCALE-UP-TWO and ACC31-SCALE-IN-ONE pass; no ComputeContract named nodeclaim-* is written."
+    status: todo
+
+  - id: N4-CLUSTER-DELETE
+    title: "Deleting a Cluster deletes its Infra, which releases every node"
+    depends_on: [N3-CLAIM-ENTRY]
+    decision: >
+      The NodeClaim controller watches Cluster objects in the home workspaces and maps a deleting
+      Cluster to its claims. A claim whose Cluster is deleting or gone deletes the cluster's Infra
+      and never applies it again; its finalizer then releases every node at once, in the plan 0028
+      order, while the clusterprovider's teardown still deletes the claims one by one and waits for
+      each to be gone (nodemarket release). A claim's deletion then finds its contract finished or
+      gone and lets go. A cluster with no claim has no Infra, so a Cluster deleted at zero nodes has
+      nothing to release. The resync on bind deletes a cluster Infra whose Cluster is gone.
+    files:
+      - internal/controllers/nodeclaim/controller.go
+      - internal/controllers/nodeclaim/infra.go
+    done_when: "ACC31-CLUSTER-DELETE passes."
+    status: todo
+
+  - id: G5-GATEWAY-ROOT-DELETE
+    title: "The Gateway root's teardown is the cluster delete path, then the deployments, then the held-contract guard"
+    depends_on: [N4-CLUSTER-DELETE]
+    decision: >
+      compose gains DeleteDeployments(ctx, ws): it deletes every Infra and EphemeralInfra of the
+      workspace that is not deleting yet and returns how many are left, the same shape as
+      DeleteAll. The Gateway root's delete pass keeps its order and gains one step: delete the
+      account Clusters and wait (each Cluster deletes its Infra, N4-CLUSTER-DELETE), then
+      DeleteDeployments on the root workspace and report Deleting "<n> deployment(s) releasing" while
+      any is left (an Infra whose Cluster was already gone), then the HeldContracts guard as today,
+      with a message that no longer names NodeClaims, then the records and the components. So the
+      plan 0028 M4 teardown is the cluster delete path applied to every Cluster, and the Requester
+      stops only after every node is released. compose drops its nodeClaimRef checks in adoptable and
+      ownedByLink: a node's contract has an ownerReference to its Infra, which both already honour.
+    files:
+      - internal/app/compose/apply.go
+      - internal/app/compose/infra.go
+      - internal/app/gateway/gateway.go
+    done_when: "ACC31-GATEWAY-ROOT-DELETE passes."
+    status: todo
+
+  - id: R8-ROOT-DELETE-ORDER
+    title: "Plan 0029 R8: a MarketRequester root deletes its deployments before it stops the Requester"
+    depends_on: [G5-GATEWAY-ROOT-DELETE]
+    decision: >
+      The delete pass of internal/app/marketrequester calls compose.DeleteDeployments on the root
+      workspace first and reports Deleting "<n> deployment(s) releasing" while any is left; then the
+      plan 0028 M3 step (its ComputeContracts), then the components and the vaults. The Infra
+      finalizers release their contracts and delete their records while the Requester and the Pds
+      still run. An InfraCollection is not deleted by this step: its children are Infras and go with
+      it; the collection goes by garbage collection when the root's workspace goes.
+    files:
+      - internal/app/marketrequester/marketrequester.go
+    done_when: "Plan 0029 R8-ROOT-DELETE-ORDER done_when: ACC31-R8-ROOT-DELETE passes."
+    status: todo
+
+  - id: U1-UNBIND-KEEPS-RECORD
+    title: "Plan 0029 U1: removing spec.record stops the sync and keeps the record"
+    depends_on: []
+    decision: >
+      AtprotoRecordSpec gains deletionPolicy (Delete, the default, or Retain). The AtprotoRecord
+      finalizer deletes the repo record only under Delete; under Retain it lets go and logs
+      atprotorecord_retained. The Infra controller's unbind (spec.record removed from a bound Infra or
+      EphemeralInfra) re-applies its AtprotoRecord child with the child's current spec plus
+      deletionPolicy Retain (the same field manager, so it stays the one writer), then deletes the
+      child, its AtprotoRecordWatch and the watch's deliver ComponentLink, and reports Synced False
+      Unbound once they are gone. Deleting a bound Infra still deletes the record (Delete). Rebinding
+      later to the same repo finds the record present and follows the plan 0029 first-sync rule.
+    files:
+      - api/v1alpha1/types_atprotorecord.go
+      - internal/controllers/atprotorecord/controller.go
+      - internal/controllers/infra/controller.go
+      - internal/controllers/infra/record.go
+    done_when: "Plan 0029 U1-UNBIND-KEEPS-RECORD done_when: ACC31-U1-UNBIND passes."
+    status: todo
+
+  - id: REC9-RECORD-OPT-IN
+    title: "A cluster's Infra may publish its record to the cluster owner's repo (later)"
+    depends_on: [N3-CLAIM-ENTRY]
+    decision: >
+      Default: a cluster's Infra has no spec.record and publishes nothing. The opt-in is a later item
+      and is not built here: a Cluster field asks for it, and the NodeClaim controller sets
+      spec.record to an AtprotoRepo of the owner's account (the plan 0029 RemoteRepo path, with the
+      account's credentials held by the callee and the infra links of compose.InfraLinks for that
+      account). It waits because the account identity and credentials code is being rewired by plan
+      0030, and because a node entry's record would publish only vmName, the bidder DIDs and the
+      states: spec.nodes and spec.secrets stay kcp-only.
+    files: []
+    done_when: "A later plan builds it."
+    status: todo
+
+  - id: DOCS
+    title: "Code map and the gateway section"
+    depends_on: [G5-GATEWAY-ROOT-DELETE]
+    decision: >
+      docs/ARCHITECTURE.md section 12 says the NodeClaim controller composes one Infra per Cluster
+      and writes no ComputeContract; section 15 records this plan's before (a ComputeContract per
+      NodeClaim, written and released by the NodeClaim controller) and after (the ACC31 rows).
+      deploy/market-network/README.md's cluster gateway section names the cluster Infra and how to
+      read it with kubectl.
+    files:
+      - docs/ARCHITECTURE.md
+      - deploy/market-network/README.md
+    done_when: "Both documents name the cluster Infra, spec.nodes and status.infra."
+    status: todo
+
+  - id: ACC31-SCALE-UP-TWO
+    title: "A tenant cluster scales from 0 to 2 nodes through its Infra"
+    depends_on: [N3-CLAIM-ENTRY]
+    done_when: >
+      On an own market network with the gateway (instance nodes31), two pods that need a node each
+      make the clusterprovider write two NodeClaims; the cluster's Infra nodes-<hex> in root:gateway
+      holds two entries that go Requested, then Deployed; each entry's ComputeContract
+      infra-nodes-<hex>-node-<hex> is owned by the Infra and carries nodeJoin and the bundle
+      secretsRef; both NodeClaims reach Running with status.infra naming their entry; both tenant
+      nodes are Ready; no ComputeContract named nodeclaim-* exists.
+    status: todo
+
+  - id: ACC31-SCALE-IN-ONE
+    title: "Scaling in to 1 releases one entry and leaves the other node untouched"
+    depends_on: [ACC31-SCALE-UP-TWO]
+    done_when: >
+      Deleting one pod lets the clusterprovider scale in after its hold: one NodeClaim is deleted, its
+      entry goes Released, its ComputeContract is Released and then deleted and its entry dropped, its
+      guest is gone on the bidder; the other entry stays Deployed, its contract, claim and node keep
+      their uid and stay Running and Ready.
+    status: todo
+
+  - id: ACC31-CLUSTER-DELETE
+    title: "Deleting the Cluster releases its Infra and leaves no guest"
+    depends_on: [ACC31-SCALE-IN-ONE]
+    done_when: >
+      kubectl delete of the tenant Cluster deletes its Infra (Terminating with
+      infra.socialweb.computer/release, its contracts Released, then gone), the NodeClaims go, the
+      Cluster goes, and no ComputeVM is left on the bidder.
+    status: todo
+
+  - id: ACC31-GATEWAY-ROOT-DELETE
+    title: "Deleting the Gateway root with a busy tenant cluster is bounded as in plan 0028 M4"
+    depends_on: [G5-GATEWAY-ROOT-DELETE]
+    done_when: >
+      With a tenant cluster holding a node (a pod running on it), kubectl delete of the Gateway root
+      reports Deleting "<n> Cluster(s) tearing down", the cluster's Infra is released and deleted, no
+      ComputeContract holds a guest before the Requester component is deleted, the root is gone
+      within the plan 0028 M4 bound, and no guest is left on the bidder.
+    status: todo
+
+  - id: ACC31-R8-ROOT-DELETE
+    title: "Plan 0029 R8 row: a MarketRequester root deleted with a Deployed Infra"
+    depends_on: [R8-ROOT-DELETE-ORDER]
+    done_when: >
+      A MarketRequester root with one Deployed Infra bound to its repo is deleted; its status reads
+      Deleting "1 deployment(s) releasing" before "component(s) stopping"; the guest is gone on the
+      bidder; the computer.socialweb.infra record is gone from the repo; the root is gone.
+    status: todo
+
+  - id: ACC31-U1-UNBIND
+    title: "Plan 0029 U1 row: an unbound Infra keeps running and its record stays"
+    depends_on: [U1-UNBIND-KEEPS-RECORD]
+    done_when: >
+      Removing spec.record from a bound, Deployed Infra deletes its AtprotoRecord child (which had
+      deletionPolicy Retain), its watch and its deliver link; the Infra stays Deployed with its
+      guest; getRecord on the repo still returns the record.
+    status: todo
