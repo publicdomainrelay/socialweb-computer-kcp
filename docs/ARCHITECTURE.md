@@ -4372,7 +4372,7 @@ fail, rather than the code read against this document alone.
   bidder outside the network by `run bidder --market-network-file` in mode oauthBrowser for an account
   on bob's PDS, signed in by a scripted POST to `/oauth/authorize` with an atproto localhost client_id
   because the PDS cannot fetch metadata behind the network ingress, UTC 2026-10-24): signed in 04:59:15;
-  `oauth_session_refreshed` every 30 s from 04:59:45, one line per rotation, every line from the
+  `oauth_session_refreshed` every 30 s from 04:59:45 to 05:19:15 (40 lines, one session id), one line per rotation, every line from the
   marketidentity-controller, no invalid_grant or SessionExpired; the offering was written at 04:59:18;
   `run request --network oauth30 --hold` got the oauth bidder's bid and accept at 05:07:54, the receipt
   at 05:08:11 and Held at 05:08:13; `run request release` reached Released at 05:08:51 and the bidder
