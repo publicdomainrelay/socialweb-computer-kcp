@@ -84,11 +84,50 @@ jobs:
     timeout-minutes: 120
     env:
       TARGET: firecracker-x86_64
+    outputs:
+      published: ${{ steps.published.outputs.published }}
+      key: ${{ steps.published.outputs.key }}
+      target: ${{ steps.published.outputs.target }}
     steps:
       - uses: actions/checkout@v7
-      - uses: ./.github/actions/toolchain
-      - uses: ./.github/actions/containers
+      - name: is the pinned guest image published
+        id: published
+        env:
+          SPACES_BUCKET: ${{ vars.SPACES_BUCKET }}
+          SPACES_REGION: ${{ vars.SPACES_REGION }}
+        run: |
+          set -euo pipefail
+          pin="$(jq -er --arg t "$TARGET" '.guestImages.targets[$t].outputs["image.json"].sha256' internal/versions/versions.json)"
+          key="guest-images/$TARGET/$pin"
+          img="$RUNNER_TEMP/ci/out/$GITHUB_SHA/guest-image"
+          echo "key=$key" >>"$GITHUB_OUTPUT"
+          echo "target=$TARGET" >>"$GITHUB_OUTPUT"
+          build() {
+            echo "guest-image: building $TARGET: $*"
+            rm -rf "$img"
+            echo "published=false" >>"$GITHUB_OUTPUT"
+            exit 0
+          }
+          { [ -n "$SPACES_BUCKET" ] && [ -n "$SPACES_REGION" ]; } || build "no SPACES_BUCKET or SPACES_REGION to look $key up in"
+          url="https://${SPACES_BUCKET}.${SPACES_REGION}.digitaloceanspaces.com/$key"
+          code="$(curl -s -o /dev/null -I -w '%{http_code}' --max-time 60 "$url/image.json" || true)"
+          [ "$code" = 200 ] || build "$url/image.json answered ${code:-nothing}, so the image of these pins is not published"
+          rm -rf "$img" && mkdir -p "$img/$TARGET"
+          for f in image.json vmlinux rootfs.ext4; do
+            curl -sSfL --retry 3 --max-time 1800 -o "$img/$TARGET/$f" "$url/$f" || build "fetching $url/$f failed"
+            want="$(jq -er --arg t "$TARGET" --arg f "$f" '.guestImages.targets[$t].outputs[$f].sha256' internal/versions/versions.json)"
+            got="$(sha256sum "$img/$TARGET/$f" | cut -d' ' -f1)"
+            echo "$TARGET/$f sha256 $got (pinned $want) from $url/$f"
+            [ "$got" = "$want" ] || build "$url/$f hashes to $got, not its pin $want"
+          done
+          echo "guest-image: not building $TARGET: every output is published at $url and matches its pin"
+          echo "published=true" >>"$GITHUB_OUTPUT"
+      - if: steps.published.outputs.published != 'true'
+        uses: ./.github/actions/toolchain
+      - if: steps.published.outputs.published != 'true'
+        uses: ./.github/actions/containers
       - name: guest-image
+        if: steps.published.outputs.published != 'true'
         run: |
           set -euo pipefail
           work="$CI_STATE/guest-image-work" && img="$OUT/guest-image"
@@ -100,7 +139,8 @@ jobs:
             echo "$TARGET/$f sha256 $got (pinned $want)"
             test "$got" = "$want"
           done
-      - uses: actions/upload-artifact@v7
+      - if: steps.published.outputs.published != 'true'
+        uses: actions/upload-artifact@v7
         with:
           name: guest-image
           path: ${{ runner.temp }}/ci/out/${{ github.sha }}/guest-image/
@@ -119,10 +159,37 @@ jobs:
         with:
           name: binaries
           path: ${{ runner.temp }}/ci/out/${{ github.sha }}/binaries
-      - uses: actions/download-artifact@v8
+      - if: needs.guest-image.outputs.published != 'true'
+        uses: actions/download-artifact@v8
         with:
           name: guest-image
-          path: ${{ runner.temp }}/ci/out/${{ github.sha }}/guest-image
+          path: ${{ runner.temp }}/ci/guest-image
+      - name: publish the guest image
+        env:
+          SPACES_ACCESS_KEY_ID: ${{ secrets.SPACES_ACCESS_KEY_ID }}
+          SPACES_SECRET_ACCESS_KEY: ${{ secrets.SPACES_SECRET_ACCESS_KEY }}
+          SPACES_BUCKET: ${{ vars.SPACES_BUCKET }}
+          SPACES_REGION: ${{ vars.SPACES_REGION }}
+          PUBLISHED: ${{ needs.guest-image.outputs.published }}
+          KEY: ${{ needs.guest-image.outputs.key }}
+          TARGET: ${{ needs.guest-image.outputs.target }}
+        run: |
+          set -euo pipefail
+          test -n "$KEY" && test -n "$TARGET"
+          if [ "$PUBLISHED" = true ]; then
+            echo "guest-image: $KEY is already published and the guest-image job verified it against the pins, so nothing is uploaded"
+            exit 0
+          fi
+          test -n "$SPACES_ACCESS_KEY_ID" && test -n "$SPACES_SECRET_ACCESS_KEY"
+          gi="$RUNNER_TEMP/ci/guest-image/$TARGET"
+          for f in vmlinux rootfs.ext4 image.json; do
+            want="$(jq -er --arg t "$TARGET" --arg f "$f" '.guestImages.targets[$t].outputs[$f].sha256' internal/versions/versions.json)"
+            got="$(sha256sum "$gi/$f" | cut -d' ' -f1)"
+            echo "$TARGET/$f sha256 $got (pinned $want)"
+            test "$got" = "$want"
+          done
+          echo "guest-image: uploading the built $TARGET to $KEY"
+          timeout -k 10 4800 deno run -A --no-lock scripts/publish-spaces.ts --dir "$gi" --prefix "$KEY" --content-addressed
       - name: publish
         env:
           SPACES_ACCESS_KEY_ID: ${{ secrets.SPACES_ACCESS_KEY_ID }}
@@ -142,14 +209,21 @@ jobs:
         env:
           SPACES_BUCKET: ${{ vars.SPACES_BUCKET }}
           SPACES_REGION: ${{ vars.SPACES_REGION }}
+          KEY: ${{ needs.guest-image.outputs.key }}
+          TARGET: ${{ needs.guest-image.outputs.target }}
         run: |
           set -euo pipefail
-          if [ "$GITHUB_REF_TYPE" = tag ]; then ref="releases/$GITHUB_REF_NAME"; else ref="main/$GITHUB_SHA"; fi
           base="https://${SPACES_BUCKET}.${SPACES_REGION}.digitaloceanspaces.com"
-          url="$base/${ref}/guest-image/firecracker-x86_64/image.json"
-          code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 60 "$url")"
-          echo "$code $url (readable without credentials: a bidder fetches its own image from here)"
-          test "$code" = 200
+          for f in image.json vmlinux rootfs.ext4; do
+            url="$base/$KEY/$f"
+            want="$(jq -er --arg t "$TARGET" --arg f "$f" '.guestImages.targets[$t].outputs[$f].bytes' internal/versions/versions.json)"
+            head="$(curl -sS -I --max-time 60 "$url")"
+            code="$(printf '%s\n' "$head" | awk 'NR==1 {print $2}')"
+            size="$(printf '%s\n' "$head" | tr -d '\r' | awk 'tolower($1)=="content-length:" {print $2}')"
+            echo "$code $url $size bytes (pinned $want; readable without credentials: a bidder fetches its own image from here)"
+            test "$code" = 200
+            test "$size" = "$want"
+          done
           if [ "$GITHUB_REF_TYPE" != tag ]; then
             latest="$base/main/latest/binaries/socialweb-computer-linux-amd64"
             code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 60 -r 0-0 "$latest")"
