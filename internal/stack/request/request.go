@@ -199,6 +199,17 @@ type Kcp struct {
 	rest      *rest.Config
 	dyn       *kube.Client
 	workspace string
+	contract  string
+}
+
+func (k *Kcp) ForContract(name string) *Kcp {
+	out := *k
+	out.contract = name
+	return &out
+}
+
+func (k *Kcp) ContractName() string {
+	return cmp.Or(k.contract, marketrequester.RequesterContract)
 }
 
 func OpenKcp(kubeconfig, workspace string) (*Kcp, error) {
@@ -265,7 +276,7 @@ func (k *Kcp) WaitReady(ctx context.Context, timeout time.Duration, progress fun
 }
 
 func (k *Kcp) Contract(ctx context.Context) (*v1alpha1.ComputeContract, error) {
-	return kube.Get[v1alpha1.ComputeContract](ctx, k.dyn.Resource(compose.ComputeContractGVR), marketrequester.RequesterContract)
+	return kube.Get[v1alpha1.ComputeContract](ctx, k.dyn.Resource(compose.ComputeContractGVR), k.ContractName())
 }
 
 func await[T any](ctx context.Context, r kube.Resource, gr schema.GroupResource, name string, timeout time.Duration, what string, done func(*T) bool) error {
@@ -378,10 +389,10 @@ func (k *Kcp) WaitContract(ctx context.Context, timeout time.Duration, done func
 	var cur *v1alpha1.ComputeContract
 	var missing error
 	last := ""
-	_, err := kube.Await(wctx, k.dyn.Resource(compose.ComputeContractGVR), marketrequester.RequesterContract, timeout,
+	_, err := kube.Await(wctx, k.dyn.Resource(compose.ComputeContractGVR), k.ContractName(), timeout,
 		func(c *v1alpha1.ComputeContract) (bool, error) {
 			if c == nil {
-				missing = apierrors.NewNotFound(compose.ComputeContractGVR.GroupResource(), marketrequester.RequesterContract)
+				missing = apierrors.NewNotFound(compose.ComputeContractGVR.GroupResource(), k.ContractName())
 				return false, nil
 			}
 			cur = c
@@ -479,7 +490,7 @@ func (k *Kcp) AwaitIdentity(ctx context.Context, name string, each func(*v1alpha
 }
 
 func (k *Kcp) AwaitContract(ctx context.Context, timeout time.Duration, done func(*v1alpha1.ComputeContract) bool) (*v1alpha1.ComputeContract, error) {
-	return kube.Await(ctx, k.dyn.Resource(compose.ComputeContractGVR), marketrequester.RequesterContract, timeout,
+	return kube.Await(ctx, k.dyn.Resource(compose.ComputeContractGVR), k.ContractName(), timeout,
 		func(c *v1alpha1.ComputeContract) (bool, error) { return c != nil && done(c), nil })
 }
 

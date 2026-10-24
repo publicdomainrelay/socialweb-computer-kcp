@@ -56,6 +56,7 @@ type requestRun struct {
 	secrets         string
 	transport       string
 	tag             string
+	target          string
 	root            v1alpha1.MarketRequesterSpec
 	contract        v1alpha1.ComputeContractSpec
 	appOptions      []v1alpha1.ApplicationOption
@@ -89,7 +90,8 @@ func newRequestRun(a *app, vals clicfg.Values) (*requestRun, error) {
 		return nil, err
 	}
 	r := &requestRun{a: a, vals: vals, stateRoot: root, hold: vals.Bool("hold"), skipSSH: vals.Bool("skip-ssh"),
-		exec: vals.String("exec"), secrets: vals.String("secrets"), tag: strings.TrimSpace(vals.String("tag"))}
+		exec: vals.String("exec"), secrets: vals.String("secrets"), tag: strings.TrimSpace(vals.String("tag")),
+		target: strings.TrimSpace(vals.String("contract"))}
 	switch r.transport = strings.ToLower(strings.TrimSpace(vals.String("transport"))); r.transport {
 	case "", transportIroh:
 		r.transport = transportIroh
@@ -390,7 +392,7 @@ func (r *requestRun) start(ctx context.Context, fresh bool) error {
 	if err != nil {
 		return err
 	}
-	r.kcp = k
+	r.kcp = k.ForContract(r.target)
 	if r.inv.Mode == request.ModeStandalone && fresh {
 		if err := k.ApplyRoot(ctx, r.root); err != nil {
 			return fmt.Errorf("applying the MarketRequester root object: %w", err)
@@ -533,6 +535,9 @@ func (r *requestRun) proxyCommand() (string, error) {
 		return "", fmt.Errorf("resolving this binary's own path for the ProxyCommand: %w", err)
 	}
 	words := []string{exe, "run", "request", "proxy", r.inv.Name, "--tag", r.tag, "--state-dir", r.stateRoot}
+	if r.target != "" {
+		words = append(words, "--contract", r.target)
+	}
 	for i, w := range words {
 		words[i] = "'" + strings.ReplaceAll(w, "'", `'"'"'`) + "'"
 	}
@@ -950,7 +955,7 @@ func (r *requestRun) attach(ctx context.Context) error {
 	if st.Phase != v1alpha1.ApplicationPhaseReady {
 		return fmt.Errorf("the MarketRequester is %s", st.Phase)
 	}
-	r.kcp = k
+	r.kcp = k.ForContract(r.target)
 	return nil
 }
 

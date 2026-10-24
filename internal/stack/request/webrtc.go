@@ -12,7 +12,6 @@ import (
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/marketrequester"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/webrtcproxy"
@@ -33,7 +32,7 @@ type ContractSignaling struct {
 func (k *Kcp) Signaling() *ContractSignaling {
 	var b [6]byte
 	_, _ = rand.Read(b[:])
-	return &ContractSignaling{k: k, contract: marketrequester.RequesterContract, session: hex.EncodeToString(b[:])}
+	return &ContractSignaling{k: k, contract: k.ContractName(), session: hex.EncodeToString(b[:])}
 }
 
 func (s *ContractSignaling) create(ctx context.Context, suffix string, spec v1alpha1.ContractEventSpec) error {
