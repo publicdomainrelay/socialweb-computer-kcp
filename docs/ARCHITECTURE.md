@@ -4255,6 +4255,24 @@ fail, rather than the code read against this document alone.
   workspace's names.
   ACC19-ONE-KCP is marked done in plan 0019, but the integration tests it named were deleted by plan 0026,
   so the one-kcp network has no standing check until plan 0027.
+- **A deleted ComputeContract leaves its guest running (plan 0028, opened 2026-10-24).** A
+  ComputeContract carries no finalizer, so a delete removes it at once and the requester sees only Gone:
+  `Requester.Observe` drops its caches and never starts a release, the runner keeps holding in
+  `waitForRelease`, and no vm.delete is sent. A won Bid never expires, so the guest holds a host core
+  until someone removes it by hand. Two deleters reach this path: a direct delete of a held contract,
+  and the deletion of a MarketRequester root, whose delete pass stops the Requester before kcp garbage
+  collection deletes the contracts it owns. R0-REPRO reading (own market network p28, `--bidders 1`,
+  test-0001, dev build of c30c3dab): run 1 held `root:r0a` contract `contract` at 03:42:13Z and deleted
+  it directly at 03:43:38Z; the object was gone at once, the requester logged nothing after the delete,
+  and at 03:48:46Z (5 min 8 s later) the requester repo held 0 vm.delete records, Bid
+  `bid-80d63ec51b896211ef8b` was Won, ComputeVM and FirecrackerVM `fc-xxyudiphteqt-d5414751` were
+  Running and unit `socialweb-vm-20b17a6d47-fc-xxyudiphteqt-d5414751.service` active. Run 2 held
+  `root:r0b` at 03:45:03Z and deleted its MarketRequester root `app` at 03:46:17Z; the Requester logged
+  `requester_contract_left_for_restart` at 03:46:18Z, the contract went by garbage collection at
+  03:46:19Z, and at 03:51:21Z (5 min 4 s later) the repo held 0 vm.delete records, the Bid was Won and
+  ComputeVM `fc-6hawypma76qe-46183fe5` Running. The market network applied a new root `app` in
+  `root:r0b` within seconds; its Requester found no contract. Both guests were removed by hand
+  (ComputeVM delete) at 03:51:33Z.
 
 ## 15. Settled decisions, and the defects they closed
 
