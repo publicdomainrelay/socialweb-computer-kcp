@@ -1134,11 +1134,21 @@ func (r *contractRunner) releaseContract(ctx context.Context, state *v1alpha1.No
 	r.writeStatus(ctx, v1alpha1.ComputeContractReleasing, "destroying the guest", state, r.currentBids(), r.currentChosen(), "releasing", int32(release.Attempts))
 
 	eventRef, eventRecord, err := r.releaseEnvelope(ctx, state)
-	if err != nil {
+	for err != nil {
+		release.Attempts++
 		release.LastError = err.Error()
 		r.setRelease(release)
-		r.writeStatus(ctx, v1alpha1.ComputeContractReleasing, "the destroy event could not be recorded: "+err.Error(), state, r.currentBids(), r.currentChosen(), "releaseFailed", int32(release.Attempts))
-		return err
+		r.log().Info("requester_release_retry", "attempt", release.Attempts, "stage", "record", "err", release.LastError)
+		message := fmt.Sprintf("the destroy event could not be recorded on attempt %d: %s", release.Attempts, release.LastError)
+		if q.now().After(deadline) {
+			r.writeStatus(ctx, v1alpha1.ComputeContractReleasing, message+"; the deadline passed, the release intent stays recorded", state, r.currentBids(), r.currentChosen(), "releaseFailed", int32(release.Attempts))
+			return fmt.Errorf("the destroy event was not recorded by %s: %w", deadline.UTC().Format(time.RFC3339), err)
+		}
+		r.writeStatus(ctx, v1alpha1.ComputeContractReleasing, message+"; retrying", state, r.currentBids(), r.currentChosen(), "releaseFailed", int32(release.Attempts))
+		if err := sleepCtx(ctx, releaseRetryDelay(release.Attempts)); err != nil {
+			return err
+		}
+		eventRef, eventRecord, err = r.releaseEnvelope(ctx, state)
 	}
 	r.writeStatus(ctx, v1alpha1.ComputeContractReleasing, "the destroy is recorded; sending it", state, r.currentBids(), r.currentChosen(), "releasing", int32(release.Attempts))
 
