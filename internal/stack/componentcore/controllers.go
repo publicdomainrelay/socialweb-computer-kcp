@@ -396,9 +396,16 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
 
+const PublicPLCDirectoryURL = "https://plc.directory"
+
 func (c *Core) plcBaseURL() string {
-	return cmp.Or(strings.TrimSpace(c.cfg.PLCBaseURL),
-		"http://"+kcp.ServiceFQDN(compose.NetworkPLCName, "default", c.cfg.Workspaces[0], kcp.DefaultServiceDomain))
+	if url := strings.TrimSpace(c.cfg.PLCBaseURL); url != "" {
+		return url
+	}
+	if c.cfg.Network == nil {
+		return PublicPLCDirectoryURL
+	}
+	return "http://" + kcp.ServiceFQDN(compose.NetworkPLCName, "default", c.cfg.Workspaces[0], kcp.DefaultServiceDomain)
 }
 
 func (c *Core) managerRestConfig() (*rest.Config, error) {
