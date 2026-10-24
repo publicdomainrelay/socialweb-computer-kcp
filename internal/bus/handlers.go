@@ -43,6 +43,10 @@ type Bus struct {
 	changed   chan struct{}
 	providers map[providerKey]provider
 
+	subMu   sync.Mutex
+	subs    map[uint64]func(Key)
+	nextSub uint64
+
 	denials denials
 
 	root   context.Context
@@ -96,6 +100,40 @@ func New(ctx context.Context) *Bus {
 
 func NewHandlerRegistry(ctx context.Context) *Bus {
 	return New(ctx)
+}
+
+func (r *Bus) Subscribe(fn func(Key)) (cancel func()) {
+	if r == nil || fn == nil {
+		return func() {}
+	}
+	r.subMu.Lock()
+	if r.subs == nil {
+		r.subs = map[uint64]func(Key){}
+	}
+	r.nextSub++
+	id := r.nextSub
+	r.subs[id] = fn
+	r.subMu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			r.subMu.Lock()
+			delete(r.subs, id)
+			r.subMu.Unlock()
+		})
+	}
+}
+
+func (r *Bus) notify(key Key) {
+	r.subMu.Lock()
+	fns := make([]func(Key), 0, len(r.subs))
+	for _, fn := range r.subs {
+		fns = append(fns, fn)
+	}
+	r.subMu.Unlock()
+	for _, fn := range fns {
+		fn(key)
+	}
 }
 
 func NewHandlers(ctx context.Context) *Bus {
@@ -228,6 +266,7 @@ func (r *Bus) RegisterHTTPNamed(key Key, name string, handler http.Handler) erro
 	stale := r.takeConnsLocked(key)
 	r.mu.Unlock()
 	closeTracked(stale)
+	r.notify(key)
 	return nil
 }
 
@@ -290,6 +329,9 @@ func (r *Bus) Remove(key Key) bool {
 	stale := r.takeConnsLocked(key)
 	r.mu.Unlock()
 	closeTracked(stale)
+	if removed {
+		r.notify(key)
+	}
 	return removed
 }
 
@@ -316,6 +358,7 @@ func (r *Bus) RegisterStream(key Key, handler StreamHandler, name ...string) err
 	stale := r.takeConnsLocked(key)
 	r.mu.Unlock()
 	closeTracked(stale)
+	r.notify(key)
 	return nil
 }
 
@@ -388,6 +431,9 @@ func (r *Bus) RemoveStream(key Key, name ...string) bool {
 	stale := r.takeConnsLocked(key)
 	r.mu.Unlock()
 	closeTracked(stale)
+	if ok {
+		r.notify(key)
+	}
 	return ok
 }
 
