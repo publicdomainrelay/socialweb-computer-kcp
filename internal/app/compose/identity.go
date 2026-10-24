@@ -158,9 +158,9 @@ func (c *Composer) PlanAccount(ctx context.Context, ws string, id v1alpha1.Appli
 	keysPath := "identity/" + suffix + "/keys"
 	plan := AccountPlan{Mode: mode, SessionPath: sessionPath, KeysPath: keysPath, Vault: vault}
 	approved := slices.Clone(id.ApprovedAssociations)
+	association := cmp.Or(id.Association, defaultAssociation, v1alpha1.AssociationRequireApproval)
 	switch mode {
 	case v1alpha1.MarketIdentityModeLocalRepo:
-		association := cmp.Or(id.Association, defaultAssociation, v1alpha1.AssociationRequireApproval)
 		plan.Local = true
 		plan.ComponentMode = "local"
 		plan.Identity = v1alpha1.MarketIdentitySpec{Mode: mode, Handle: id.Handle, PdsURL: id.PdsURL, Association: association,
@@ -173,6 +173,7 @@ func (c *Composer) PlanAccount(ctx context.Context, ws string, id v1alpha1.Appli
 		plan.Identity = v1alpha1.MarketIdentitySpec{Mode: mode, Handle: id.Handle, PdsURL: id.PdsURL,
 			KeysRef:              &commonv1.SecretRef{Mount: mount, Path: keysPath},
 			SessionRef:           &commonv1.SecretRef{Mount: mount, Path: sessionPath},
+			Association:          association,
 			ApprovedAssociations: approved}
 		u, remote, err := c.resolveAccountPds(ctx, ws, id)
 		if err != nil {
@@ -188,7 +189,7 @@ func (c *Composer) PlanAccount(ctx context.Context, ws string, id v1alpha1.Appli
 	case v1alpha1.MarketIdentityModeOAuthBrowser, v1alpha1.MarketIdentityModeOAuthQr, v1alpha1.MarketIdentityModeOAuthDelegated:
 		plan.ComponentMode = "oauth"
 		plan.Identity = v1alpha1.MarketIdentitySpec{Mode: mode, Handle: id.Handle, PdsURL: id.PdsURL,
-			SessionRef: &commonv1.SecretRef{Mount: mount, Path: sessionPath}, ApprovedAssociations: approved}
+			SessionRef: &commonv1.SecretRef{Mount: mount, Path: sessionPath}, Association: association, ApprovedAssociations: approved}
 		plan.PdsURL = strings.TrimSpace(id.PdsURL)
 		remote, err := c.remotePDSRef(ctx, ws, id.PdsRef)
 		if err != nil {
@@ -459,6 +460,9 @@ func (c *Composer) AccountRepo(ctx context.Context, r Root, ws, identityName str
 	}
 	if !plan.UsesAssociation() {
 		c.DeleteAssociationObjects(ctx, ws)
+	}
+	if err := c.PruneLocalAccounts(ctx, r, ws, LocalAccount{}); err != nil {
+		return nil, err
 	}
 	name := atprotorepo.RepoName(binding.DID)
 	identity := AppRef(KindMarketIdentity, identityName, ws)

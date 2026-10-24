@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/atprotorepo"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 )
 
 func (c *Composer) ApplyRepo(ctx context.Context, r Root, ws, name, backendKind string, backendGVR schema.GroupVersionResource, backend any) error {
@@ -51,9 +53,62 @@ func LocalAccountLinks(ws string, acct LocalAccount) []Link {
 	return links
 }
 
+func (c *Composer) PruneLocalAccounts(ctx context.Context, r Root, ws string, keep LocalAccount) error {
+	ws = workspaceOr(ws, r.Workspace)
+	keepRepo, keepAccount, keepSession, keepPLC := "", "", "", ""
+	if strings.TrimSpace(keep.DID) != "" {
+		keepRepo, keepAccount, keepSession = localAccountNames(keep)
+		keepPLC = ObjectName("plc", keep.DID)
+	}
+	selector := func(kind string) string { return OwnerLabel + "=" + r.Owner() + "," + ComponentLabel + "=" + kind }
+	repos, err := c.Client(ws, v1alpha1.LocalRepoGVR)
+	if err != nil {
+		return err
+	}
+	items, err := kube.List[metav1.PartialObjectMetadata](ctx, repos, metav1.ListOptions{LabelSelector: selector(KindLocalRepo)})
+	if err != nil && !apierrors.IsNotFound(err) && !apierrors.IsForbidden(err) {
+		return err
+	}
+	abstract := map[string]bool{}
+	for i := range items {
+		if items[i].Name != keepRepo {
+			abstract[items[i].Name] = true
+		}
+	}
+	if len(abstract) > 0 {
+		ri, err := c.Client(ws, v1alpha1.AtprotoRepoGVR)
+		if err != nil {
+			return err
+		}
+		for name := range abstract {
+			if err := ri.Delete(ctx, name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+				return err
+			}
+		}
+	}
+	for _, p := range []struct {
+		gvr  schema.GroupVersionResource
+		kind string
+		keep string
+	}{
+		{v1alpha1.LocalRepoGVR, KindLocalRepo, keepRepo},
+		{v1alpha1.PdsAccountGVR, "PdsAccount", keepAccount},
+		{v1alpha1.AtprotoSessionGVR, "AtprotoSession", keepSession},
+		{v1alpha1.PlcIdentityGVR, "PlcIdentity", keepPLC},
+	} {
+		if err := c.Prune(ctx, ws, p.gvr, selector(p.kind), map[string]bool{p.keep: p.keep != ""}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (c *Composer) ApplyLocalAccount(ctx context.Context, r Root, ws string, acct LocalAccount) error {
 	if strings.TrimSpace(acct.DID) == "" {
 		return nil
+	}
+	if err := c.PruneLocalAccounts(ctx, r, ws, acct); err != nil {
+		return err
 	}
 	pdsRef := commonv1.ObjectRef{Kind: ComponentKindPds, Name: PdsComponent}
 	name, accountName, sessionName := localAccountNames(acct)
