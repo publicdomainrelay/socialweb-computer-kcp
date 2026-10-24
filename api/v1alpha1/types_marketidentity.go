@@ -33,6 +33,8 @@ const (
 	MarketIdentityModeLocalRepo MarketIdentityMode = "localRepo"
 
 	MarketIdentityModeOAuthDelegated MarketIdentityMode = "oauthDelegated"
+
+	MarketIdentityModeOAuthSessionProxy MarketIdentityMode = "oauthSessionProxy"
 )
 
 type AssociationMode string

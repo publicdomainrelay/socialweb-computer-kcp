@@ -43,7 +43,17 @@ type Authenticator struct {
 
 	bearer *Bearer
 
+	proxy *Proxy
+
 	auth xrpc.Auth
+}
+
+type Proxy struct {
+	PdsURL string
+
+	HTTP *http.Client
+
+	Prover xrpc.DPoPProver
 }
 
 var (
@@ -58,6 +68,12 @@ func NewOAuth() *Authenticator {
 	return a
 }
 
+func NewProxied() *Authenticator {
+	a := &Authenticator{}
+	a.auth = &xrpc.DPoP{Prover: proxySource{a: a}}
+	return a
+}
+
 func NewBearer() *Authenticator {
 	a := &Authenticator{}
 	a.auth = pdsclient.TokenAuth(bearerSource{a: a}, nil)
@@ -67,19 +83,31 @@ func NewBearer() *Authenticator {
 func (a *Authenticator) Hold(session *oauthclient.Session) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.session, a.bearer, a.did = session, nil, session.DID()
+	a.session, a.bearer, a.proxy, a.did = session, nil, nil, session.DID()
 }
 
 func (a *Authenticator) HoldBearer(did string, bearer *Bearer) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.session, a.bearer, a.did = nil, bearer, did
+	a.session, a.bearer, a.proxy, a.did = nil, bearer, nil, did
+}
+
+func (a *Authenticator) HoldProxy(did string, proxy *Proxy) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.session, a.bearer, a.proxy, a.did = nil, nil, proxy, did
 }
 
 func (a *Authenticator) Drop() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.session, a.bearer = nil, nil
+	a.session, a.bearer, a.proxy = nil, nil, nil
+}
+
+func (a *Authenticator) Proxied() *Proxy {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.proxy
 }
 
 func (a *Authenticator) Session() *oauthclient.Session {
@@ -122,7 +150,7 @@ func (a *Authenticator) Challenge(resp *http.Response) pds.Verdict {
 
 func (a *Authenticator) ServiceAuth(ctx context.Context, did, audience, lxm string, expires time.Time) (string, error) {
 	a.mu.Lock()
-	held, session, bearer := a.did, a.session, a.bearer
+	held, session, bearer, proxy := a.did, a.session, a.bearer, a.proxy
 	a.mu.Unlock()
 	if did != held {
 		return "", fmt.Errorf("identity: the held session signs for %q, not %s", held, did)
@@ -132,6 +160,9 @@ func (a *Authenticator) ServiceAuth(ctx context.Context, did, audience, lxm stri
 		return session.ServiceAuth(ctx, audience, lxm, expires)
 	case bearer != nil:
 		client := &xrpc.Client{Host: bearer.pdsURL, HTTP: bearer.http, Auth: a.auth}
+		return xrpc.GetServiceAuth(ctx, client, audience, lxm, expires)
+	case proxy != nil:
+		client := &xrpc.Client{Host: strings.TrimRight(proxy.PdsURL, "/"), HTTP: proxy.HTTP, Auth: a.auth}
 		return xrpc.GetServiceAuth(ctx, client, audience, lxm, expires)
 	}
 	return "", fmt.Errorf("%w for %s", ErrNotHeld, did)
@@ -196,6 +227,22 @@ func (s oauthSource) SetDPoPNonce(ctx context.Context, host, nonce string) error
 		return err
 	}
 	return session.SetDPoPNonce(ctx, host, nonce)
+}
+
+type proxySource struct {
+	a *Authenticator
+}
+
+var _ xrpc.DPoPProver = proxySource{}
+
+func (s proxySource) ProveDPoP(ctx context.Context, method, target, accessToken, nonce string) (xrpc.DPoPProof, error) {
+	s.a.mu.Lock()
+	proxy := s.a.proxy
+	s.a.mu.Unlock()
+	if proxy == nil || proxy.Prover == nil {
+		return xrpc.DPoPProof{}, fmt.Errorf("%w: %w", pdsclient.ErrAuthenticationRequired, ErrNotHeld)
+	}
+	return proxy.Prover.ProveDPoP(ctx, method, target, accessToken, nonce)
 }
 
 type bearerSource struct {

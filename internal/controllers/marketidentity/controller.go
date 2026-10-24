@@ -84,7 +84,7 @@ func New(opts Options) *Controller {
 		return pool.PublicClientConfig(nil), nil
 	}
 	accounts := atproto.New(atproto.Config{Endpoints: opts.Endpoints, Vault: opts.Vault, Resolver: opts.Resolver, HTTPClient: opts.HTTPClient,
-		TLS: trust, OAuth: opts.OAuth, Log: log})
+		TLS: trust, Sessions: sessions(opts.Bus), OAuth: opts.OAuth, Log: log})
 	return &Controller{accounts: accounts, roots: roots, log: log, identities: binding.New[known](), events: make(chan ctlruntime.Request, eventBuffer)}
 }
 

@@ -1,6 +1,7 @@
 package marketidentity
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"strings"
@@ -11,6 +12,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/pds"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/vault"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/marketidentity/atproto"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/pds/identity"
 )
 
@@ -42,4 +45,22 @@ func (c *Controller) authenticator(ctx context.Context, to commonv1.ObjectRef, s
 		return nil, fmt.Errorf("%w: the session of the MarketIdentity %s: %v", pds.ErrNotFound, to.String(), err)
 	}
 	return auth, nil
+}
+
+var vaultKind = schema.GroupKind{Group: v1alpha1.GroupName, Kind: "Vault"}
+
+func sessions(b *bus.Bus) atproto.SessionsFunc {
+	return func(ctx context.Context, workspace string, id *v1alpha1.MarketIdentity) (vault.AtprotoSessions, error) {
+		ref := id.Spec.SessionRef
+		if ref == nil || ref.Vault == nil {
+			return nil, fmt.Errorf("marketidentity: the MarketIdentity %s/%s names no session vault", workspace, id.Name)
+		}
+		to := *ref.Vault
+		to.Group = cmp.Or(strings.TrimSpace(to.Group), vaultKind.Group)
+		to.Kind = cmp.Or(strings.TrimSpace(to.Kind), vaultKind.Kind)
+		to.Workspace = to.InWorkspace(workspace)
+		scope := strings.Trim(strings.TrimSpace(ref.Mount), "/") + "/" + strings.Trim(strings.TrimSpace(ref.Path), "/")
+		return bus.Resolve[vault.AtprotoSessions](ctx, b, Self(workspace, id.Name), to,
+			bus.Capability{Name: vault.CapabilityAtprotoSession, Scope: []string{scope}})
+	}
 }

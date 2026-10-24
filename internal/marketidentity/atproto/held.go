@@ -41,9 +41,12 @@ func (h *heldAccounts) get(workspace string, id *v1alpha1.MarketIdentity) *heldA
 		return held
 	}
 	held := &heldAccount{mode: id.Spec.Mode}
-	if id.Spec.Mode == v1alpha1.MarketIdentityModePdsAccount {
+	switch id.Spec.Mode {
+	case v1alpha1.MarketIdentityModePdsAccount:
 		held.auth = identity.NewBearer()
-	} else {
+	case v1alpha1.MarketIdentityModeOAuthSessionProxy:
+		held.auth = identity.NewProxied()
+	default:
 		held.auth = identity.NewOAuth()
 	}
 	if previous, ok := h.accounts[key]; ok {
@@ -80,6 +83,10 @@ func (a *Accounts) Authenticator(ctx context.Context, workspace string, id *v1al
 				firstNonEmpty(id.Status.PdsURL, id.Spec.PdsURL)); err != nil {
 				return nil, err
 			}
+		}
+	case v1alpha1.MarketIdentityModeOAuthSessionProxy:
+		if err := a.holdProxy(ctx, workspace, id, held); err != nil {
+			return nil, err
 		}
 	default:
 		return nil, fmt.Errorf("marketidentity: mode %q holds no account session", id.Spec.Mode)

@@ -50,6 +50,8 @@ type Config struct {
 
 	TLS TLSFunc
 
+	Sessions SessionsFunc
+
 	OAuth OAuthOptions
 
 	Log *slog.Logger
@@ -73,6 +75,8 @@ type Accounts struct {
 	resolver *pdsclient.Resolver
 
 	tls TLSFunc
+
+	sessions SessionsFunc
 
 	oauth OAuthOptions
 
@@ -100,7 +104,7 @@ func New(cfg Config) *Accounts {
 	if states == nil {
 		states = &oauthclient.MemoryStateStore{}
 	}
-	return &Accounts{endpoints: cfg.Endpoints, vault: cfg.Vault, log: log, http: client, resolver: resolver, tls: cfg.TLS, oauth: cfg.OAuth,
+	return &Accounts{endpoints: cfg.Endpoints, vault: cfg.Vault, log: log, http: client, resolver: resolver, tls: cfg.TLS, sessions: cfg.Sessions, oauth: cfg.OAuth,
 		states: states, qr: ttlcache.New[string, *qrTransfer](ttlcache.Options{})}
 }
 
@@ -124,6 +128,8 @@ func (a *Accounts) Reconcile(ctx context.Context, workspace string, id *v1alpha1
 		return a.oauthQr(ctx, workspace, id, generation, status)
 	case v1alpha1.MarketIdentityModeOAuthDelegated:
 		return a.oauthDelegated(ctx, workspace, id, generation, status)
+	case v1alpha1.MarketIdentityModeOAuthSessionProxy:
+		return a.sessionProxy(ctx, workspace, id, generation, status)
 	case "":
 		return pending(status, generation, "UnknownMode", "the MarketIdentity has no mode; no DID is recorded"), nil
 	default:
