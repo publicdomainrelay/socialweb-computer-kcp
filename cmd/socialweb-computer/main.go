@@ -95,6 +95,7 @@ func builtVerbs() map[string]builtVerb {
 		"units roll link":        {[]string{"cluster-state-dir", "service", "dumbpipe-path", "ready-timeout"}, runUnitsRoll("link")},
 		"internal ns-exec":       {[]string{"private-hostname", "bind", "inside"}, runNsExec},
 		"internal iroh-dial":     {[]string{"socket", "dumbpipe-path"}, runIrohDial},
+		"internal ingress-relay": {ingressRelayOptions, runIngressRelay},
 		"internal devsup":        {[]string{"state", "socket", "die-with", "instance"}, runDevsup},
 		"internal dev-core":      {[]string{"instance-dir", "ready-timeout"}, runDevCore},
 		"internal hostprocesses": {[]string{backendOpt, "instance", "state-dir", "kcp-kubeconfig", "kcp-base-workspace", "bao-path"}, runHostProcesses},

@@ -476,12 +476,12 @@
     },
     "tls-cert-file": {
       "type": "string",
-      "description": "serve gateway kcp: the TLS front's certificate (with tls-key-file; unset, a self-signed one under <state>/tls)",
+      "description": "serve gateway kcp: the TLS front's certificate (with tls-key-file; unset, a self-signed one under <state>/tls); internal ingress-relay: serve TLS on --listen with this certificate (with tls-key-file; ignored with --unix-socket)",
       "env": "SOCIALWEB_TLS_CERT_FILE"
     },
     "tls-key-file": {
       "type": "string",
-      "description": "serve gateway kcp: the TLS front's key (with tls-cert-file)",
+      "description": "serve gateway kcp: the TLS front's key (with tls-cert-file); internal ingress-relay: the key of tls-cert-file",
       "env": "SOCIALWEB_TLS_KEY_FILE"
     },
     "bidder-policy": {
@@ -602,6 +602,80 @@
       "type": "string",
       "description": "run request: how long the CLI waits for the contract to reach the guest's onNetwork and host keys, and for a release (Go duration)",
       "default": "3m"
+    },
+    "hostname": {
+      "type": "string",
+      "description": "internal ingress-relay: the relay's control host; its did:web is did:web:<hostname> and <did label>.<hostname> are its data hosts",
+      "env": "SOCIALWEB_INGRESS_RELAY_HOSTNAME",
+      "default": "xrpc.fedproxy.com"
+    },
+    "unix-socket": {
+      "type": "string",
+      "description": "internal ingress-relay: serve on this unix socket (mode 0755, an old socket file is replaced) instead of --listen (under 108 bytes)",
+      "env": "SOCIALWEB_INGRESS_RELAY_UNIX_SOCKET"
+    },
+    "listen": {
+      "type": "string",
+      "description": "internal ingress-relay: the TCP listen address when --unix-socket is unset",
+      "env": "SOCIALWEB_INGRESS_RELAY_LISTEN",
+      "default": "127.0.0.1:8080"
+    },
+    "ingress-relay-service-id": {
+      "type": "string",
+      "description": "internal ingress-relay: the service id of the relay's did.json (#<id>, type XrpcRelay)",
+      "env": "SOCIALWEB_INGRESS_RELAY_SERVICE_ID",
+      "default": "xrpc_relay"
+    },
+    "ingress-relay-timeout": {
+      "type": "string",
+      "description": "internal ingress-relay: how long a forwarded request waits for its subscriber's response; a subscriber that answers nothing for this long is evicted (Go duration)",
+      "env": "SOCIALWEB_INGRESS_RELAY_TIMEOUT",
+      "default": "30s"
+    },
+    "ingress-relay-keepalive": {
+      "type": "string",
+      "description": "internal ingress-relay: how often each registered subscriber is probed with a keepalive request (Go duration)",
+      "env": "SOCIALWEB_INGRESS_RELAY_KEEPALIVE",
+      "default": "5s"
+    },
+    "ingress-relay-keepalive-timeout": {
+      "type": "string",
+      "description": "internal ingress-relay: how long a keepalive probe may take before its subscriber is evicted (Go duration)",
+      "env": "SOCIALWEB_INGRESS_RELAY_KEEPALIVE_TIMEOUT",
+      "default": "5s"
+    },
+    "ingress-relay-nonce-ttl": {
+      "type": "string",
+      "description": "internal ingress-relay: how long a registration nonce stays valid (Go duration)",
+      "env": "SOCIALWEB_INGRESS_RELAY_NONCE_TTL",
+      "default": "60s"
+    },
+    "ingress-relay-additional-hosts": {
+      "type": "string",
+      "description": "internal ingress-relay: comma-separated extra hosts accepted as control hosts and data host bases besides --hostname (127.0.0.1 is always one; * accepts every host)",
+      "env": "SOCIALWEB_INGRESS_RELAY_ADDITIONAL_HOSTS"
+    },
+    "ingress-relay-allowed-dids": {
+      "type": "string",
+      "description": "internal ingress-relay: comma-separated DIDs allowed to register as subscribers (unset: every DID with a valid registration)",
+      "env": "SOCIALWEB_INGRESS_RELAY_ALLOWED_DIDS"
+    },
+    "ingress-relay-plc-url": {
+      "type": "string",
+      "description": "internal ingress-relay: the PLC directory that resolves did:plc service-auth issuers and registration keys",
+      "env": "SOCIALWEB_INGRESS_RELAY_PLC_URL",
+      "default": "https://plc.directory"
+    },
+    "ingress-relay-max-body-mib": {
+      "type": "number",
+      "description": "internal ingress-relay: the largest forwarded request body in MiB; a larger one is answered 413",
+      "env": "SOCIALWEB_INGRESS_RELAY_MAX_BODY_MIB",
+      "default": 32
+    },
+    "ingress-relay-expire-sessions": {
+      "type": "boolean",
+      "description": "internal ingress-relay: close a subscriber's registration when its subscribe service-auth token expires, as the market network's IngressProxy does (unset: a registration lives as long as its websocket)",
+      "env": "SOCIALWEB_INGRESS_RELAY_EXPIRE_SESSIONS"
     }
   }
 }

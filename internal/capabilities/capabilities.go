@@ -110,6 +110,7 @@ func Tree() []Verb {
 		{Path: "internal devsup", Summary: "the per-instance proc backend supervisor", Needs: []Need{NeedProc}, Hidden: true},
 		{Path: "internal dev-core", Summary: "the dev instance's core: adopts the bootstrap units and records them", Needs: []Need{NeedProc}, Hidden: true},
 		{Path: "internal iroh-dial", Summary: "listen on a unix socket and, per connection, run dumbpipe connect to the iroh ticket the connection names (the ssh gateway application's HostProcess)", Hidden: true},
+		{Path: "internal ingress-relay", Summary: "the did-key ingress relay of xrpc.fedproxy.com (com.fedproxy.temp.xrpc): subscribers register a DID over a websocket and <did label>.<hostname> forwards HTTP XRPC, subscriptions and tunnels to them; serves on --unix-socket behind caddy or on --listen", Hidden: true},
 		{Path: "internal ns-exec", Summary: "run a command under a private hostname in its own user+UTS+mount namespace (one-shot exec, no resident code)", Hidden: true},
 		{Path: "internal vm start", Summary: "prepare and start one VM unit (spec JSON on stdin; prints its runtime record)", Needs: []Need{NeedHostBackend, NeedVMRuntime}, Hidden: true},
 		{Path: "internal vm inspect", Summary: "the verdict of one VM: Running, Lost (a mismatch is stopped now) or Unknown", Needs: []Need{NeedHostBackend, NeedVMRuntime}, Hidden: true},
