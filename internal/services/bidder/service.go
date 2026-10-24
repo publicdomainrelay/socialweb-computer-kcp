@@ -286,7 +286,9 @@ func (s *Service) prepare(ctx context.Context) error {
 	if _, err := intents.Subscribe(ctx, inputsSubscription(s.inputs)); err != nil {
 		return fmt.Errorf("bidder: subscribing to the market inputs: %w", err)
 	}
-	s.awaitInputs(ctx)
+	if err := s.awaitInputs(ctx); err != nil {
+		return err
+	}
 	if err := s.checkServiceAuthHost(); err != nil {
 		return err
 	}
@@ -377,7 +379,7 @@ func (s *Service) publicMarketURL() string {
 	if endpoint, ok := s.relayEndpoint(); ok {
 		return strings.TrimRight(endpoint.URL, "/")
 	}
-	return strings.TrimRight(s.guestURL, "/")
+	return ""
 }
 
 func (s *Service) inboundMarketURL() string {
