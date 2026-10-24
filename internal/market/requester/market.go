@@ -38,6 +38,8 @@ const (
 
 var ErrBidderUnreachable = errors.New("requester: the bidder's market endpoint is not reachable yet")
 
+const bidderSuspendedError = "Suspended"
+
 type Bidder struct {
 	DID string
 
@@ -500,6 +502,9 @@ func (m *HTTPMarket) SubmitRFP(ctx context.Context, bidder Bidder, rfp SubmitRFP
 		err := fmt.Errorf("requester: submitRfp to %s answered HTTP %d", bidder.Endpoint, status)
 		if detail != "" {
 			err = fmt.Errorf("requester: submitRfp to %s answered HTTP %d: %s", bidder.Endpoint, status, detail)
+		}
+		if stringOf(body["error"]) == bidderSuspendedError {
+			return nil, err
 		}
 		if status == http.StatusNotFound || status == http.StatusTooManyRequests || status >= 500 {
 			return nil, fmt.Errorf("%w: %w", ErrBidderUnreachable, err)

@@ -415,10 +415,10 @@ func (r *contractRunner) requestOnce(ctx context.Context) error {
 		r.writeStatus(ctx, v1alpha1.ComputeContractRequesting, "the RFP is submitted; "+noBidders+"; waiting for bids", state, nil, nil, "collectingBids", 1)
 	}
 	q.rememberBidders(bidders)
-	responseBids := r.solicitBids(ctx, bidders, rfpURI, rfpCID)
+	r.solicitBids(ctx, bidders, rfpURI, rfpCID)
 
 	usePolicy := policyRef != nil
-	winner, allBids, err := r.collectBids(ctx, rfpURI, responseBids, usePolicy, policyWorkflow, only)
+	winner, allBids, err := r.collectBids(ctx, rfpURI, nil, usePolicy, policyWorkflow, only)
 	if err != nil {
 		return err
 	}
@@ -559,15 +559,12 @@ func submitRFPWithin(ctx context.Context, m MarketClient, bidder Bidder, req Sub
 	}
 }
 
-func (r *contractRunner) solicitBids(ctx context.Context, bidders []Bidder, rfpURI, rfpCID string) []BidRecord {
-	responseBids := []BidRecord{}
-	var submitWG sync.WaitGroup
-	var submitMu sync.Mutex
+func (r *contractRunner) solicitBids(ctx context.Context, bidders []Bidder, rfpURI, rfpCID string) {
 	for _, bidder := range bidders {
 		if bidder.Endpoint == "" {
 			continue
 		}
-		submitWG.Go(func() {
+		r.q.wg.Go(func() {
 			cctx, cancel := context.WithTimeout(ctx, max(r.q.cfg.BidWindow, 5*time.Second))
 			defer cancel()
 			bids, err := submitRFPWithin(cctx, r.q.market, bidder, SubmitRFPRequest{URI: rfpURI, CID: rfpCID})
@@ -575,13 +572,11 @@ func (r *contractRunner) solicitBids(ctx context.Context, bidders []Bidder, rfpU
 				r.log().Warn("requester_submit_rfp_failed", "bidder", bidder.DID, "err", err)
 				return
 			}
-			submitMu.Lock()
-			responseBids = append(responseBids, bids...)
-			submitMu.Unlock()
+			for _, bid := range bids {
+				r.q.queueBid(rfpURI, bid)
+			}
 		})
 	}
-	submitWG.Wait()
-	return responseBids
 }
 
 func (r *contractRunner) runGuestAndHold(ctx context.Context, state *v1alpha1.NodeClaimContract, receiptURI, bidderDID string) error {
