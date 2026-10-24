@@ -59,12 +59,14 @@ missing.
 
 The requester MarketIdentity lives in `root:app`; the gateway's components
 (`Pds/pds`, `Requester/requester`, `GatewayAPI/gateway-api`) live in `root`.
-The root composes the approved association into the identity's
-`spec.approvedAssociations` from `SOCIALWEB_GATEWAY_APPROVED_ASSOCIATIONS`
-(comma-separated DIDs in the gateway env). Do not patch the MarketIdentity
-spec: the Gateway root owns that field and server-side apply reverts the edit.
-The identity controller reports the result in `status.associations` and the
-`Associated` condition.
+The identity controller associates the requester from the operator's verified
+claim record: `scripts/associate-bidder.ts` writes it from the Alice account and
+the requester's association watch reads it from the bsky JetStream. The identity
+controller reports the result in `status.associations` and the `Associated`
+condition. `SOCIALWEB_GATEWAY_APPROVED_ASSOCIATIONS` (comma-separated DIDs in the
+gateway env) pre-approves operators in `spec.approvedAssociations`; it is not
+needed when the claim is verified. Do not patch the MarketIdentity spec: the
+Gateway root owns it and server-side apply reverts the edit.
 
 ```bash
 ID_ARGS="--kubeconfig $PROD_K --server https://127.0.0.1:6443/clusters/root:app"
@@ -75,19 +77,15 @@ printf 'requester=%s associated=%s\n' "$RI_DID" "$ASSOC"
 if [ "$ASSOC" != True ]; then
   OP_DID=$(deno run -A --no-lock scripts/associate-bidder.ts --creds ~/.aliceoa_bsky_social_source \
     --account ALICE --requester-did "$RI_DID" | jq -r .operatorDid)
-  GWENV=/var/lib/socialweb-computer/socialweb/gateway.env
-  ssh socialweb.computer "sudo -n -u socialweb sed -i '/^SOCIALWEB_GATEWAY_APPROVED_ASSOCIATIONS=/d' $GWENV && echo 'SOCIALWEB_GATEWAY_APPROVED_ASSOCIATIONS=$OP_DID' | sudo -n -u socialweb tee -a $GWENV >/dev/null"
-  ssh socialweb.computer "sudo systemctl --user -M socialweb@ restart socialweb-computer-gateway.service"
+  printf 'operator=%s\n' "$OP_DID"
 fi
 ssh socialweb.computer "sudo -n -u socialweb env HOME=/var/lib/socialweb-computer/socialweb kubectl $ID_ARGS get $MI requester -o jsonpath='{.spec.approvedAssociations}{\"\n\"}{.status.associations}{\"\n\"}{.status.phase}{\"\n\"}'"
 ```
 
-`gateway.env` is the env file `scripts/deploy.sh` ships (`GATEWAY_ENV_FILE`;
-`deploy/socialweb-gateway.env.example` names the variable); put the DID there
-for the next deploy too. Wait until the identity phase is `Ready`,
-`status.associations` names `$OP_DID` and the `Requester` child reports
-`spec.operatorDID=$OP_DID`. Without that, every bid is denied by
-`requester-tangled-vouch` even though bidder policy runs succeed.
+Wait until the identity phase is `Ready`, `status.associations` names the
+operator DID and the `Requester` child reports `spec.operatorDID` with it.
+Without that, every bid is denied by `requester-tangled-vouch` even though
+bidder policy runs succeed.
 
 ## Service auth for the gateway
 
