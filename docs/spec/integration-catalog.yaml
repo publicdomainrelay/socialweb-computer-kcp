@@ -1305,6 +1305,44 @@ entries:
       body; requestCrawl bodies are accepted by the relay; an expired ingress nonce is refused;
       OpenBao logins are shared by concurrent callers and renew before expiry.
 
+  - id: TestADeletedContractReleasesItsGuest
+    kind: integration
+    source: docs/plans/0028-computecontract-delete-releases.yaml ACC28-DIRECT-DELETE, ACC28-DELETE-BEFORE-ACCEPT, ACC28-DELETE-WHILE-STOPPED, ACC28-BOUND, ACC28-FORCED-REMOVAL
+    actors: [requester, bidder, kcp, pds, relay, VM host systemd user units]
+    setup: >
+      Own network: --bidders 1, no gateway. `run request --network <inst> --name dd<6 hex> --hold
+      --exec 'sleep 3000'` until the contract in root:<name> is Held (the requester keeps running
+      while the ssh session lasts). Each case then deletes the ComputeContract with `kubectl delete
+      --wait=false` and reads the contract, the requester core log, the requester repo
+      (com.atproto.repo.listRecords of com.publicdomainrelay.temp.compute.events.vm.delete), the
+      bidder's Bid, ComputeVM and FirecrackerVM, the VM user unit and the VM work dir.
+    asserts: >
+      Every ComputeContract the requester runs carries the finalizer
+      computecontract.socialweb.computer/release; no Bid or ComputeVM does.
+    cleanup: Interrupt the run request; standard teardown; no guest, VM unit or VM work dir remains.
+    cases:
+      - "direct delete of a Held contract: it stays Terminating with the finalizer, goes Releasing, then Released; the repo holds exactly one vm.delete record for it; within 3m the ComputeVM, FirecrackerVM, VM unit and VM work dir are gone and the Bid is Terminated; then the contract object is gone"
+      - "delete while the contract collects bids (spec.denyBidderDids names every bidder): the object is gone within one watch event of the delete; no accept and no vm.delete record exists for it; no ComputeVM appears on any bidder in the next 60s"
+      - "delete while the requester is down (spec.apps[].stopped of the MarketNetwork): the contract stays Terminating with the finalizer; once the requester runs again it sends exactly one vm.delete, the guest is gone within 3m, then the object is gone"
+      - "release bound: the winning bidder is stopped and spec.ttlSecondsAfterFinished puts the release deadline a few minutes ahead; the deleted contract retries the vm.delete (Releasing with a growing attempt count), ends Failed with \"vm.delete was not acknowledged by <deadline> (the contract TTL): <last error>\" at the deadline, then the object is gone"
+      - "forced removal: a Held contract is deleted and its finalizer removed by a JSON merge patch before the release ends; the requester logs requester_contract_gone_unreleased once and no further line for the contract"
+
+  - id: TestADeletedRequesterRootReleasesItsGuests
+    kind: integration
+    source: docs/plans/0028-computecontract-delete-releases.yaml ACC28-ROOT-DELETE
+    actors: [requester, bidder, kcp, pds, relay, VM host systemd user units]
+    setup: >
+      Own network: --bidders 1, no gateway. `run request --network <inst> --name rd<6 hex> --hold
+      --exec 'sleep 3000'` until Held, then a second ComputeContract with the same spec is created in
+      root:<name> and held. Then `kubectl delete marketrequester app --wait=false` in root:<name>.
+    asserts: >
+      The root's status reads Deleting "2 ComputeContract(s) releasing", then Deleting "<n>
+      component(s) stopping"; both contracts are Released and both guests (ComputeVM, FirecrackerVM,
+      VM unit, VM work dir) are gone on the bidder before the Requester component is deleted; the
+      requester repo holds exactly one vm.delete record per contract; the root object (by uid) is
+      gone; no guest is left.
+    cleanup: Interrupt the run request; standard teardown.
+
 deleted_fixtures:
   - internal/eso/testdata/bundle-v2.11.0-subset.yaml (read only by internal/eso tests)
   - testdata/apiresourceschema/v1alpha1-1.nodeclaims.socialweb.computer.yaml (read only by internal/apigen tests)
