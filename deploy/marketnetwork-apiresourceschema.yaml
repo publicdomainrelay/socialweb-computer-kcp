@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-19.marketnetworks.socialweb.computer
+  name: v1alpha1-20.marketnetworks.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -935,6 +935,9 @@ spec:
                     - name
                     - kind
                     - profile
+                x-kubernetes-list-type: map
+                x-kubernetes-list-map-keys:
+                  - name
             required:
               - profile
           status:

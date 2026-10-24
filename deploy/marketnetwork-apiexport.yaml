@@ -6,7 +6,7 @@ spec:
   resources:
     - group: socialweb.computer
       name: marketnetworks
-      schema: v1alpha1-19.marketnetworks.socialweb.computer
+      schema: v1alpha1-20.marketnetworks.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer
