@@ -873,11 +873,6 @@ paused_2026_10_19:
       docs/ARCHITECTURE.md section 14. Resume: recreate a droplet, rebuild from main, re-run the
       same setup (one-kcp network + installed bidder + chaos) and finish a full 3 h window; fix
       the fit script to difference cumulative counters first.
-  - id: VALIDATE-GATE
-    text: >
-      scripts/validate-candidate.sh lanes a and b were fixed but not re-run green together; lane c
-      still reports FAIL while its upgrade works. Make the gate green on a candidate before the
-      next release.
   - id: GITLAB-RC21
     text: >
       GitLab pipeline 255 (rc21) was running (job 635, ~20 min in) when gl-runner-1 was deleted at

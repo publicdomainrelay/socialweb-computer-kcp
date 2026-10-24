@@ -3975,15 +3975,6 @@ fail, rather than the code read against this document alone.
   These are pre-plan-0026 readings: guest-kcp is now the GuestControlPlane component and runs in the
   bidder core's process, so its series is part of the core's memory. A full 3 h reading on a
   post-0026 build and the counter-differencing fix are needed before 0013 can close.
-- **`scripts/validate-candidate.sh` lanes b and c cannot pass at HEAD.** Lane c installs the base
-  release (v0.0.0-rc15), upgrades to the candidate and asserts that the journal holds at least one
-  `runs other assets` line. That line was the log of the removed pod replacement (section 15, "Gaps of
-  the removed TypeScript runtime"), and no Go code at HEAD prints it, so the lane reports FAIL even when
-  the install and the upgrade succeed (on rc21: unit active on the candidate, slot rolled). Since plan
-  0026 an upgrade restarts every component with the core, so the assertion to write is that each
-  component object reports a start on the candidate binary. Lane b waits for a `go test` result line of
-  the integration suite on gl-runner-1, and plan 0026 deleted every Go test, so lane b has no suite to
-  run until plan 0027. Lane a (the GitHub gate, the apigen diff and the cross-OS builds) is unchanged.
 - **Which bidders get a direct submitRfp (no plan attached; user, 2026-10-18).** A requester posts its
   market.rfp record, and relay/firehose watchers see it; the direct `submitRfp` XRPC is only a faster path and
   the path to bidders that do not watch the firehose. There is no recipient cap and no fill order today. A
@@ -4278,8 +4269,7 @@ fail, rather than the code read against this document alone.
     pod and an upgrade changed neither the spec generation nor the restart annotation). The fix recorded
     the TypeScript tree in each run and replaced a run whose tree differed; its prod reading was pending.
     Now a component is a goroutine of the core, so the core that an upgrade restarts runs every component
-    from the new binary. `scripts/validate-candidate.sh` lane c still asserts that fix's log line (section
-    14).
+    from the new binary.
   - A pod's spec change (its args or memory) did not restart it; only the restart annotation did. Now
     `Runtime` in `internal/component/runtime.go` stops and starts a component when its spec generation
     changes, and `dev restart` writes `spec.restartedAt` (`internal/stack/componentcore/source.go`,
@@ -4306,6 +4296,11 @@ fail, rather than the code read against this document alone.
 
 - **Items closed by later work (moved from section 14, 2026-10-23).** Each was still listed as open in
   section 14 after the work that closed it landed.
+  - `scripts/validate-candidate.sh` could not pass. Before: lane b waited for the Go integration suite
+    that plan 0026 deleted, and lane c upgraded from v0.0.0-rc15 across a change of shape and asserted a
+    `runs other assets` log line that no code prints any more. Nothing called the script. Now it is
+    deleted (2026-10-24, user decision): a candidate is validated by the CI run on its tag and by the
+    acceptance runbook `docs/acceptance/0001-auth-modes.md` on prod and every bidder host.
   - PDS ingress per app (plan 0022). Before: the API carried `spec.ingress` and `Pds.spec.requireIngress`,
     but no app root created the IngressProxy and nothing gated account creation on a Ready ingress, so an
     app PDS could have a loopback service endpoint. Now plan 0022 is done (W1 and W2 items done, closed by
