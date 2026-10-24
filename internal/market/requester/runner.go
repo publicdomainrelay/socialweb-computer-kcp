@@ -418,7 +418,7 @@ func (r *contractRunner) requestOnce(ctx context.Context) error {
 	r.solicitBids(ctx, bidders, rfpURI, rfpCID)
 
 	usePolicy := policyRef != nil
-	winner, allBids, err := r.collectBids(ctx, rfpURI, nil, usePolicy, policyWorkflow, only)
+	winner, allBids, err := r.collectBids(ctx, rfpURI, usePolicy, policyWorkflow, only)
 	if err != nil {
 		return err
 	}
@@ -789,7 +789,7 @@ func (r *contractRunner) verifyRecordedReceipt(ctx context.Context, state *v1alp
 	return verification.OK, nil
 }
 
-func (r *contractRunner) collectBids(ctx context.Context, rfpURI string, response []BidRecord, usePolicy bool, workflow string, only []string) (*BidRecord, []v1alpha1.ContractBid, error) {
+func (r *contractRunner) collectBids(ctx context.Context, rfpURI string, usePolicy bool, workflow string, only []string) (*BidRecord, []v1alpha1.ContractBid, error) {
 	q := r.q
 	window := time.NewTimer(max(q.cfg.BidWindow, 0))
 	defer window.Stop()
@@ -807,7 +807,6 @@ func (r *contractRunner) collectBids(ctx context.Context, rfpURI string, respons
 			byURI[bid.URI] = bid
 		}
 	}
-	add(response)
 	var selected *BidRecord
 	open := q.cfg.BidWindow > 0
 	for selected == nil {
