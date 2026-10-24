@@ -150,6 +150,16 @@ learnings:
       8 days, and a bidder keeps a guest whose requester has gone for good. A fleet view must list
       every Running guest per bidder with its requester, age and last requester contact; a guest with
       no requester contact past a lease is an alert, and see F5.
+  - id: L15-ERROR-LINES-THAT-ARE-NOT-ERRORS
+    text: >
+      Until rc108 every core start and stop wrote 'Reconciler error' lines that were not failures:
+      reconciles cut by the shutdown context (about 22 per bidder stop), and controllers that reached a
+      repo, Pds, EventSource or sink before its provider registered (one error per race, then a backoff
+      retry). They buried the real ones; a lost release on an unbound repo (fixed 29ed308e) looked like
+      the same noise. Since rc108 such waits are status reasons with a bind or registration requeue,
+      shutdown cancels are Debug, and an rc108 core logged 0 'Reconciler error' lines from start
+      through a full acceptance run on every host (2026-10-24 15:18-15:32Z). A fleet view can now alert
+      on any 'Reconciler error' at all.
 items:
   - id: F1-INVENTORY
     title: "A fleet inventory object: which bidders exist, where, on which version"
