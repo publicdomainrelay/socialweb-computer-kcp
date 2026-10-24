@@ -19,7 +19,9 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/pds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/policy"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/vault"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestseed"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/kcp"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/pinneddownloads"
 	core "github.com/johnandersen777/socialweb-computer-kcp/internal/market/bidder"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/participant"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/runs"
@@ -115,6 +117,8 @@ func (s *Service) newBidder(intents contract.Intents) (*core.Bidder, error) {
 		InboundXRPC:         s.inboundXRPC(),
 		ScopePolicy:         s.spec.Policy,
 		GuestTLSPort:        portOf(s.spec.Network.GuestTLSURL()),
+		GuestLocalAddress:   func() string { return s.inputs.Address(guestLocalExposure) },
+		GuestDownloads:      s.guestDownloads(),
 		GuestVaultServer:    s.guestVaultServer,
 		GuestVaultMount:     DefaultGuestVaultMount,
 		GuestLoginMount:     DefaultGuestLoginMount,
@@ -141,6 +145,30 @@ func (s *Service) newBidder(intents contract.Intents) (*core.Bidder, error) {
 		Policy:      s.policyRuns(),
 		Log:         s.log,
 	})
+}
+
+func (s *Service) guestDownloads() map[string]string {
+	dir := ""
+	if s.spec.Storage != nil {
+		dir = strings.TrimSpace(s.spec.Storage.BlobsDir)
+	}
+	if dir == "" {
+		s.log.Warn("the bidder names no guest downloads dir; a contract with a tunnel fails to provision")
+		return nil
+	}
+	var required []string
+	for _, name := range []string{guestseed.GuestBinaryOpenTunnel, guestseed.GuestBinaryAgent} {
+		for _, arch := range guestseed.GuestArches {
+			required = append(required, guestseed.GuestDownloadName(name, arch))
+		}
+	}
+	pins, err := pinneddownloads.LoadPins(dir, required)
+	if err != nil {
+		s.log.Warn("the bidder cannot read its guest download pins; a contract with a tunnel fails to provision", "dir", dir, "err", err)
+		return nil
+	}
+	s.log.Info("the bidder pins the guest binaries it serves", "dir", dir, "downloads", len(pins))
+	return pins
 }
 
 func (s *Service) repoRef() commonv1.ObjectRef {

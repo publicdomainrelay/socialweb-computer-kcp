@@ -87,6 +87,10 @@ type Config struct {
 
 	GuestTLSPort int
 
+	GuestLocalAddress func() string
+
+	GuestDownloads map[string]string
+
 	GuestVaultServer string
 
 	GuestVaultMount string
@@ -126,6 +130,8 @@ type GuestVM struct {
 	Login *v1alpha1.ComputeVMGuestLogin
 
 	Accept commonv1.StrongRef
+
+	HostPorts []int32
 
 	Owner *metav1.OwnerReference
 }

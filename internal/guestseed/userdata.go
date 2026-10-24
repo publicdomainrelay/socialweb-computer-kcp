@@ -88,6 +88,10 @@ type ProvisionOptions struct {
 	HostAddress string
 
 	TLSPort int
+
+	HostURL string
+
+	Downloads map[string]string
 }
 
 func GuestLoginModule(opts GuestLoginOptions) (cloudinit.UserDataModule, error) {
@@ -164,7 +168,7 @@ func AcceptBundle(acceptPath string, bundle map[string]any) (cloudinit.UserDataM
 	return cloudinit.AcceptBundleModule(acceptPath, bundle), nil
 }
 
-func OnNetworkReporterModule(userData, fallbackURL, acceptPath, bearerAudience string) (cloudinit.UserDataModule, bool, error) {
+func OnNetworkReporterModule(userData, fallbackURL, acceptPath, bearerAudience, hostURL string) (cloudinit.UserDataModule, bool, error) {
 	if strings.Contains(userData, OnNetworkUnit) {
 		return nil, false, nil
 	}
@@ -175,6 +179,9 @@ func OnNetworkReporterModule(userData, fallbackURL, acceptPath, bearerAudience s
 	targets := guestnet.RelayTargets(userData, fallbackURL)
 	if len(targets) == 0 || targets[0].URL == "" {
 		return nil, false, fmt.Errorf("guestseed: the guest reports on-network to no URL; the fallback %q is not one", fallbackURL)
+	}
+	if hostURL = strings.TrimRight(strings.TrimSpace(hostURL), "/"); hostURL != "" {
+		targets = append([]guestnet.RelayTarget{{URL: hostURL + guestnet.EventsPath}}, targets...)
 	}
 	for _, target := range targets {
 		if err := checkURLLike(target.URL, "on-network URL"); err != nil {
@@ -367,7 +374,7 @@ func WithGuestLogin(userData string, opts GuestLoginOptions) (string, error) {
 }
 
 func WithOnNetworkReporter(userData, fallbackURL, acceptPath, bearerAudience string) (string, error) {
-	module, add, err := OnNetworkReporterModule(userData, fallbackURL, acceptPath, bearerAudience)
+	module, add, err := OnNetworkReporterModule(userData, fallbackURL, acceptPath, bearerAudience, "")
 	if err != nil || !add {
 		return userData, err
 	}
@@ -405,7 +412,7 @@ func Provision(opts ProvisionOptions) (string, error) {
 		modules = append(modules, module)
 	}
 	if opts.Reporter {
-		module, add, err := OnNetworkReporterModule(opts.UserData, opts.FallbackURL, acceptPath, opts.BearerAudience)
+		module, add, err := OnNetworkReporterModule(opts.UserData, opts.FallbackURL, acceptPath, opts.BearerAudience, opts.HostURL)
 		if err != nil {
 			return "", err
 		}
@@ -429,10 +436,42 @@ func Provision(opts ProvisionOptions) (string, error) {
 	for _, module := range hostModules {
 		modules = append(modules, module)
 	}
+	binaries, err := guestBinaryModules(opts, acceptPath)
+	if err != nil {
+		return "", err
+	}
+	modules = append(modules, binaries...)
 	if len(modules) == 0 {
 		return rewritten, nil
 	}
 	return cloudinit.BuildUserData(cloudinit.BuildOptions{Base: rewritten, Modules: modules, Ctx: ctx})
+}
+
+func guestBinaryModules(opts ProvisionOptions, acceptPath string) ([]any, error) {
+	needs := GuestBinariesNeeded(opts.UserData)
+	if !needs.Any() {
+		return nil, nil
+	}
+	if strings.TrimSpace(opts.HostURL) == "" {
+		return nil, fmt.Errorf("guestseed: the guest asks for %s, and the bidder has no host URL to serve them from", strings.Join(needs.Names(), ", "))
+	}
+	pins, err := GuestBinaryPins(opts.Downloads, needs.Names())
+	if err != nil {
+		return nil, err
+	}
+	var out []any
+	if needs.Agent {
+		agent, err := GuestAgentModule(opts.HostURL, opts.BearerAudience, acceptPath)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, agent)
+	}
+	install, err := GuestBinariesModule(opts.HostURL, pins, needs.Units)
+	if err != nil {
+		return nil, err
+	}
+	return append(out, install), nil
 }
 
 func validateGuestLogin(opts GuestLoginOptions) error {

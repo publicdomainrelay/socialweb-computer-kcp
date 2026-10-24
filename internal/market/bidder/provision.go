@@ -9,6 +9,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -142,6 +146,7 @@ func (b *Bidder) provision(ctx context.Context, req provisionRequest) (string, e
 	if err != nil {
 		return "", err
 	}
+	hostURL, hostPort := b.GuestHostURL()
 	userData, err := guestseed.Provision(guestseed.ProvisionOptions{
 		UserData: withBundle,
 		Login: &guestseed.GuestLoginOptions{
@@ -157,6 +162,8 @@ func (b *Bidder) provision(ctx context.Context, req provisionRequest) (string, e
 		BaseURL:        true,
 		HostAddress:    v1alpha1.GuestHostAddress,
 		TLSPort:        b.cfg.GuestTLSPort,
+		HostURL:        hostURL,
+		Downloads:      b.cfg.GuestDownloads,
 	})
 	if err != nil {
 		return "", err
@@ -175,6 +182,7 @@ func (b *Bidder) provision(ctx context.Context, req provisionRequest) (string, e
 		StopGraceSeconds: b.cfg.StopGraceSeconds,
 		Login:            &v1alpha1.ComputeVMGuestLogin{Mount: b.cfg.GuestLoginMount, BindSecretSha256: secretHash},
 		Accept:           commonv1.StrongRef{URI: req.acceptURI, CID: req.acceptCID},
+		HostPorts:        b.guestHostPorts(hostPort),
 		Owner:            req.owner,
 	})
 	if err != nil {
@@ -199,6 +207,35 @@ func (b *Bidder) provision(ctx context.Context, req provisionRequest) (string, e
 	}
 	b.log.Info("a guest ComputeVM is applied", "computevm", name, "cpus", record.CPUs, "role", record.Role, "requester", req.requesterDID)
 	return name, nil
+}
+
+func (b *Bidder) GuestHostURL() (string, int) {
+	if b.cfg.GuestLocalAddress == nil {
+		return "", 0
+	}
+	raw := strings.TrimSpace(b.cfg.GuestLocalAddress())
+	if raw == "" {
+		return "", 0
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "http" {
+		return "", 0
+	}
+	port, err := strconv.Atoi(u.Port())
+	if err != nil || port < 1 || port > 65535 {
+		return "", 0
+	}
+	return "http://" + net.JoinHostPort(guestnet.HostAddress, strconv.Itoa(port)), port
+}
+
+func (b *Bidder) guestHostPorts(hostPort int) []int32 {
+	var out []int32
+	for _, port := range []int{b.cfg.GuestTLSPort, hostPort} {
+		if port > 0 && port <= 65535 && !slices.Contains(out, int32(port)) {
+			out = append(out, int32(port))
+		}
+	}
+	return out
 }
 
 func (b *Bidder) awaitVM(ctx context.Context, name string) (v1alpha1.ComputeVM, bool) {

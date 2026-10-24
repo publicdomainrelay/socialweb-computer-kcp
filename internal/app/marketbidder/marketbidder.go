@@ -388,6 +388,7 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 		BidderDIDs:           append([]string(nil), o.Spec.BidderDids...),
 		Comms:                o.Spec.Comms,
 		SuspendParticipation: o.Spec.Suspend,
+		Storage:              guestSpec.Storage,
 	}}
 	out := []compose.Desired{compose.PolicyEngineDesired(), guest, bidder}
 	if plan.Local {
@@ -398,7 +399,7 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 		out = append([]compose.Desired{{Kind: compose.ComponentKindPds, Name: compose.PdsComponent, Spec: pdsSpec}}, out...)
 	}
 	out = append(out, compose.HTTPServiceExposures(ws, compose.ComponentKindBidder, BidderComponent, "market", network, hostnames, false, true)...)
-	out = append(out, compose.HTTPServiceExposures(ws, compose.ComponentKindGuestControlPlane, GuestComponent, "http", network, hostnames, false, true)...)
+	out = append(out, compose.HTTPServiceExposures(ws, compose.ComponentKindGuestControlPlane, GuestComponent, "http", network, hostnames, true, true)...)
 	if plan.Local {
 		out = append(out, compose.PdsExposures(ws, compose.PdsComponent, network, hostnames, in.config)...)
 	}

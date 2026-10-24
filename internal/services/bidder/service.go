@@ -55,6 +55,8 @@ const (
 
 	guestExposure = "svc-guestcontrolplane-guest-kcp-ingress"
 
+	guestLocalExposure = "svc-guestcontrolplane-guest-kcp-local"
+
 	pdsExposure = "svc-pds-pds-local"
 
 	guestExposureWait = 60 * time.Second

@@ -54,28 +54,17 @@ func Load(dir string) (*Set, error) {
 		if !strings.HasSuffix(sidecar, SidecarSuffix) {
 			continue
 		}
-		name := strings.TrimSuffix(sidecar, SidecarSuffix)
-		if !namePattern.MatchString(name) {
-			return nil, fmt.Errorf("%s: pins %q, which is not a download name", filepath.Join(dir, sidecar), name)
-		}
-		lineBytes, err := os.ReadFile(filepath.Join(dir, sidecar))
+		name, pinned, err := readSidecar(dir, sidecar)
 		if err != nil {
 			return nil, err
-		}
-		match := sha256sumLinePattern.FindStringSubmatch(strings.TrimSpace(string(lineBytes)))
-		if match == nil {
-			return nil, fmt.Errorf("%s is not one sha256sum line", filepath.Join(dir, sidecar))
-		}
-		if match[2] != name {
-			return nil, fmt.Errorf("%s names %s, not %s", filepath.Join(dir, sidecar), match[2], name)
 		}
 		bytes, err := os.ReadFile(filepath.Join(dir, name))
 		if err != nil {
 			return nil, err
 		}
 		got := sha256sum.Hex(bytes)
-		if got != match[1] {
-			return nil, fmt.Errorf("%s has sha256 %s, but %s pins %s", filepath.Join(dir, name), got, sidecar, match[1])
+		if got != pinned {
+			return nil, fmt.Errorf("%s has sha256 %s, but %s pins %s", filepath.Join(dir, name), got, sidecar, pinned)
 		}
 		idx := len(out.entries)
 		out.entries = append(out.entries, entry{
@@ -86,6 +75,53 @@ func Load(dir string) (*Set, error) {
 			out.index[got] = map[string]int{}
 		}
 		out.index[got][name] = idx
+	}
+	return out, nil
+}
+
+func readSidecar(dir, sidecar string) (string, string, error) {
+	name := strings.TrimSuffix(sidecar, SidecarSuffix)
+	if !namePattern.MatchString(name) {
+		return "", "", fmt.Errorf("%s: pins %q, which is not a download name", filepath.Join(dir, sidecar), name)
+	}
+	lineBytes, err := os.ReadFile(filepath.Join(dir, sidecar))
+	if err != nil {
+		return "", "", err
+	}
+	match := sha256sumLinePattern.FindStringSubmatch(strings.TrimSpace(string(lineBytes)))
+	if match == nil {
+		return "", "", fmt.Errorf("%s is not one sha256sum line", filepath.Join(dir, sidecar))
+	}
+	if match[2] != name {
+		return "", "", fmt.Errorf("%s names %s, not %s", filepath.Join(dir, sidecar), match[2], name)
+	}
+	return name, match[1], nil
+}
+
+func LoadPins(dir string, required []string) (map[string]string, error) {
+	names, err := fileNames(dir)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]string{}
+	for _, sidecar := range names {
+		if !strings.HasSuffix(sidecar, SidecarSuffix) {
+			continue
+		}
+		name, pinned, err := readSidecar(dir, sidecar)
+		if err != nil {
+			return nil, err
+		}
+		out[name] = pinned
+	}
+	var missing []string
+	for _, name := range required {
+		if _, ok := out[name]; !ok {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) > 0 {
+		return nil, fmt.Errorf("required pinned downloads are missing from %s: %s", dir, strings.Join(missing, ", "))
 	}
 	return out, nil
 }

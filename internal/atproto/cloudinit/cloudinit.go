@@ -382,6 +382,16 @@ func parseBase(base string) map[string]any {
 	return parsed
 }
 
+func WriteFilePaths(userData string) []string {
+	var out []string
+	for _, v := range asArray(parseBase(userData)["write_files"]) {
+		if p, ok := asObj(v)["path"].(string); ok && p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 var nameserverRE = regexp.MustCompile(`^\s*nameserver\s+(\S+)`)
 
 func nameserversIn(content string) []string {
