@@ -27,6 +27,7 @@ const (
 	NSIDControlPlaneUp   = xrpcserver.NSIDPrefix + "controlPlaneUp"
 	NSIDControlPlaneDown = xrpcserver.NSIDPrefix + "controlPlaneDown"
 	NSIDDeleteCluster    = xrpcserver.NSIDPrefix + "deleteCluster"
+	NSIDSetPublishInfra  = xrpcserver.NSIDPrefix + "setPublishInfra"
 
 	ClusterNameMax = 63
 
@@ -93,6 +94,13 @@ type ClusterGateway interface {
 	Up(ctx context.Context, caller ClusterCaller, name string) (ClusterPhaseResult, error)
 	Down(ctx context.Context, caller ClusterCaller, name string) (ClusterPhaseResult, error)
 	Delete(ctx context.Context, caller ClusterCaller, name string) (ClusterPhaseResult, error)
+	Publish(ctx context.Context, caller ClusterCaller, name string, publish bool) (PublishResult, error)
+}
+
+type PublishResult struct {
+	Phase string `json:"phase"`
+
+	PublishInfra bool `json:"publishInfra"`
 }
 
 type ClusterGatewayError struct {
@@ -187,6 +195,18 @@ func (d DirectClusterGateway) Delete(ctx context.Context, c ClusterCaller, name 
 	}
 	view, err := server.DeleteCluster(ctx, gateway.Caller(c.DID()), gateway.NameRequest{Name: name})
 	return ClusterPhaseResult{Phase: view.Phase}, err
+}
+
+func (d DirectClusterGateway) Publish(ctx context.Context, c ClusterCaller, name string, publish bool) (PublishResult, error) {
+	server, err := d.server()
+	if err != nil {
+		return PublishResult{}, err
+	}
+	out, err := server.SetPublishInfra(ctx, gateway.Caller(c.DID()), gateway.PublishInfraRequest{Name: name, Publish: publish})
+	if err != nil {
+		return PublishResult{}, err
+	}
+	return PublishResult{Phase: out.Phase, PublishInfra: out.PublishInfra}, nil
 }
 
 type XRPCClusterGateway struct {
@@ -328,6 +348,12 @@ func (x *XRPCClusterGateway) Delete(ctx context.Context, c ClusterCaller, name s
 	return x.name(ctx, c, NSIDDeleteCluster, name)
 }
 
+func (x *XRPCClusterGateway) Publish(ctx context.Context, c ClusterCaller, name string, publish bool) (PublishResult, error) {
+	var out PublishResult
+	err := x.call(ctx, c, NSIDSetPublishInfra, false, map[string]any{"name": name, "publish": publish}, &out)
+	return out, err
+}
+
 func (x *XRPCClusterGateway) Kubeconfig(ctx context.Context, c ClusterCaller, name string, ttlSeconds *int64, noExpiry bool) (KubeconfigGrant, error) {
 	body := map[string]any{"name": name}
 	if ttlSeconds != nil {
@@ -398,6 +424,30 @@ func (a *ClusterAPI) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/clusters/down", a.nameAction("down"))
 	mux.HandleFunc("POST /api/clusters/delete", a.nameAction("delete"))
 	mux.HandleFunc("POST /api/clusters/kubeconfig", a.kubeconfig)
+	mux.HandleFunc("POST /api/clusters/publish", a.publish)
+}
+
+func (a *ClusterAPI) publish(w http.ResponseWriter, r *http.Request) {
+	req, ok := a.named(w, r)
+	if !ok {
+		return
+	}
+	publish, isBool := req.Input["publish"].(bool)
+	if !isBool {
+		writeFailure(w, &apiFailure{Status: http.StatusBadRequest, Error: "InvalidRequest", Message: "publish must be a boolean"})
+		return
+	}
+	out, err := a.opts.Gateway.Publish(r.Context(), req.Caller, req.Name, publish)
+	if err != nil {
+		a.failure(w, req.Caller.DID(), "publish", err)
+		return
+	}
+	a.log().Info("cluster_api_ok", "did", req.Caller.DID(), "action", "publish", "name", req.Name, "phase", out.Phase, "publishInfra", out.PublishInfra)
+	httpjson.Write(w, http.StatusOK, struct {
+		Name         string `json:"name"`
+		Phase        string `json:"phase"`
+		PublishInfra bool   `json:"publishInfra"`
+	}{req.Name, out.Phase, out.PublishInfra})
 }
 
 func (a *ClusterAPI) Handler() http.Handler {
