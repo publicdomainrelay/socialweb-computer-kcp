@@ -180,9 +180,6 @@ func (c *Composer) SeedPdsAccountPassword(ctx context.Context, r Root, plan Acco
 		return nil
 	}
 	password := strings.TrimSpace(os.Getenv(EnvPdsAccountPassword))
-	if password == "" {
-		return ErrMissingPdsAccountPassword
-	}
 	if plan.Identity.KeysRef == nil || strings.TrimSpace(plan.KeysPath) == "" {
 		return errors.New("compose: mode pdsAccount names no keysRef for its password")
 	}
@@ -198,7 +195,13 @@ func (c *Composer) SeedPdsAccountPassword(ctx context.Context, r Root, plan Acco
 	if err != nil {
 		return err
 	}
-	if existing, _ := data["password"].(string); existing == password {
+	existing, _ := data["password"].(string)
+	switch {
+	case password == "" && strings.TrimSpace(existing) != "":
+		return nil
+	case password == "":
+		return ErrMissingPdsAccountPassword
+	case existing == password:
 		return nil
 	}
 	data["password"] = password
