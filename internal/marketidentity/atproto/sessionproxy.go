@@ -43,6 +43,17 @@ func (a *Accounts) sessionProxy(ctx context.Context, workspace string, id *v1alp
 	case strings.TrimSpace(session.PDS) == "":
 		return pending(status, generation, "SessionProxyUnavailable", "the web app session of "+did+" names no PDS"), nil
 	}
+	held := a.held.get(workspace, id)
+	held.open.Lock()
+	err = a.scopeCheck(workspace, id, held, strings.Fields(session.Scope))
+	held.open.Unlock()
+	if changed := (*scopeChangedError)(nil); errors.As(err, &changed) {
+		held.auth.Drop()
+		status.Did, status.PdsURL = did, strings.TrimRight(session.PDS, "/")
+		return a.signInAgain(status, generation, id, "ScopeChanged",
+			fmt.Sprintf("the web app session of %s lacks scopes the gateway web app now requests (%s); sign in to the web app again",
+				did, strings.Join(changed.subjects(), ", "))), ErrSignInAgain
+	}
 	status.Phase = v1alpha1.MarketIdentityPhaseReady
 	status.ObservedGeneration = generation
 	status.Did = did

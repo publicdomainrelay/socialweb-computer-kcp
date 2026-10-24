@@ -4299,11 +4299,23 @@ fail, rather than the code read against this document alone.
   path the ComponentLink grants); its pds.Authenticator asks the plugin's proof endpoint for one access
   token and one DPoP proof per request, and only the plugin refreshes the session. No session, or an
   expired or revoked one, is phase SessionExpired with reason NoSession or SessionInactive and
-  pendingAction signInAgain. The Gateway root composes it, as `owner-<stamp>` in `root:<gateway>:app`
+  pendingAction signInAgain. A session must hold the scope that the sign-in which produced it requests
+  today: for this mode that is the gateway web app sign-in, whose scope (`compose.GatewayAtprotoScope`,
+  the same value the atproto plugin config requests) the Gateway root writes into `spec.sessionScope`;
+  the plugin's recorded granted scope is compared with it (`oauth.MissingScopes`), and a session that
+  lacks part of it is SessionExpired with reason ScopeChanged ("the web app session of <did> lacks
+  scopes the gateway web app now requests (...); sign in to the web app again"). The other OAuth modes
+  compare with the scope their own flow requests (the core's role scope; for oauthQr the bidder scope
+  the associator grants, not the QR page's union). A stale owner pauses only its own Infra writes: its
+  RemoteRepo is not Ready with the identity's message, its Infra records are not Synced, and the
+  Gateway root stays Ready with condition SessionOwnersReady False naming the owner. The identity
+  returns ErrSignInAgain, so the runtime's rate-limited backoff (at most 5 minutes) reads the plugin
+  again; a new sign-in makes it Ready with no other step (the plugin pushes no session change).
+  The Gateway root composes it, as `owner-<stamp>` in `root:<gateway>:app`
   with label `apps.socialweb.computer/session-owner`, for each DID that opted a Cluster in
   (`spec.publishInfra`, not deleting) and is not in the market network owner sessions file nor the
-  requester's own, and keeps it while an infra AtprotoRecord names its repo; once the identity is Ready it
-  adds the RemotePDS of the session's PDS, the RemoteRepo and the AtprotoRepo `repo-<did>`. The web app
+  requester's own, and keeps it while an infra AtprotoRecord names its repo; once the identity has reported
+  the session's PDS (Ready, or SessionExpired after that) it adds the RemotePDS of the session's PDS, the RemoteRepo and the AtprotoRepo `repo-<did>`. The web app
   scope carries `repo:computer.socialweb.infra` (create, update, delete), so owners sign in again once.
   A signed-in owner opts in through the web app too: `POST /api/clusters/publish` {name, publish} calls
   the same SetPublishInfra as the XRPC procedure. Open: the prod reading of done_when (a market network gateway has no public-origin, so no web sign-in).

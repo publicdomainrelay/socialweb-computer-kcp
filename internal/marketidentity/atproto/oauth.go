@@ -461,11 +461,18 @@ func (e *scopeChangedError) subjects() []string {
 	return subjects
 }
 
+func (a *Accounts) requiredScopes(id *v1alpha1.MarketIdentity) []string {
+	if id.Spec.Mode == v1alpha1.MarketIdentityModeOAuthSessionProxy {
+		return strings.Fields(id.Spec.SessionScope)
+	}
+	return a.oauthScopes()
+}
+
 func (a *Accounts) scopeCheck(workspace string, id *v1alpha1.MarketIdentity, held *heldAccount, granted []string) error {
 	if len(granted) == 0 {
 		return nil
 	}
-	missing := atprotooauth.MissingScopes(a.oauthScopes(), granted)
+	missing := atprotooauth.MissingScopes(a.requiredScopes(id), granted)
 	if lacking := strings.Join(missing, " "); lacking != held.lacking {
 		held.lacking = lacking
 		if lacking != "" {

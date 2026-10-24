@@ -1,11 +1,16 @@
 package compose
 
 import (
+	"cmp"
 	"context"
+	"fmt"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
@@ -22,6 +27,16 @@ type SessionOwner struct {
 	DID string
 
 	Vault string
+
+	Scope string
+}
+
+type SessionOwnerState struct {
+	PdsURL string
+
+	Ready bool
+
+	Message string
 }
 
 func (o SessionOwner) did() string { return strings.TrimSpace(o.DID) }
@@ -58,26 +73,63 @@ func SessionOwnerLinks(r Root, ws, contracts string, o SessionOwner, pdsURL stri
 	return append(links, InfraLinks(contracts, repo)...)
 }
 
-func (c *Composer) SessionOwnerPds(ctx context.Context, ws, did string) (string, error) {
-	id, err := c.Identity(ctx, ws, OwnerIdentityName(did))
+func (c *Composer) SessionOwnerState(ctx context.Context, ws, did string) (SessionOwnerState, error) {
+	name := OwnerIdentityName(did)
+	id, err := c.Identity(ctx, ws, name)
 	if apierrors.IsNotFound(err) {
-		return "", nil
+		return SessionOwnerState{Message: "the MarketIdentity " + name + " is not applied yet"}, nil
 	}
 	if err != nil {
-		return "", err
+		return SessionOwnerState{}, err
 	}
-	if id.Spec.Mode != v1alpha1.MarketIdentityModeOAuthSessionProxy || id.Status.Phase != v1alpha1.MarketIdentityPhaseReady ||
-		strings.TrimSpace(id.Status.Did) != strings.TrimSpace(did) {
-		return "", nil
+	return SessionOwnerStateOf(id, did), nil
+}
+
+func SessionOwnerStateOf(id *v1alpha1.MarketIdentity, did string) SessionOwnerState {
+	name := OwnerIdentityName(did)
+	if id.Spec.Mode != v1alpha1.MarketIdentityModeOAuthSessionProxy || strings.TrimSpace(id.Status.Did) != strings.TrimSpace(did) {
+		return SessionOwnerState{Message: "the MarketIdentity " + name + " has not reported " + did + " yet"}
 	}
-	return strings.TrimRight(strings.TrimSpace(id.Status.PdsURL), "/"), nil
+	st := SessionOwnerState{Message: cmp.Or(id.Status.Message, string(id.Status.Phase)),
+		Ready: id.Status.Phase == v1alpha1.MarketIdentityPhaseReady && id.Status.ObservedGeneration >= id.Generation}
+	switch id.Status.Phase {
+	case v1alpha1.MarketIdentityPhaseReady, v1alpha1.MarketIdentityPhaseSessionExpired:
+		st.PdsURL = strings.TrimRight(strings.TrimSpace(id.Status.PdsURL), "/")
+	}
+	return st
+}
+
+const (
+	ConditionSessionOwnersReady = "SessionOwnersReady"
+
+	ReasonSessionOwnersReady = "Ready"
+
+	ReasonSessionOwnerNotReady = "OwnerNotReady"
+)
+
+func SetSessionOwnersCondition(conditions *[]metav1.Condition, gen int64, states map[string]SessionOwnerState) {
+	var waiting []string
+	for _, did := range slices.Sorted(maps.Keys(states)) {
+		if st := states[did]; !st.Ready {
+			waiting = append(waiting, did+": "+st.Message)
+		}
+	}
+	if len(waiting) == 0 {
+		meta.SetStatusCondition(conditions, metav1.Condition{Type: ConditionSessionOwnersReady, Status: metav1.ConditionTrue,
+			Reason: ReasonSessionOwnersReady, Message: fmt.Sprintf("%d tenant owner(s) publish Infra through the web app session", len(states)),
+			ObservedGeneration: gen})
+		return
+	}
+	meta.SetStatusCondition(conditions, metav1.Condition{Type: ConditionSessionOwnersReady, Status: metav1.ConditionFalse,
+		Reason: ReasonSessionOwnerNotReady, Message: strings.Join(waiting, "; "), ObservedGeneration: gen})
 }
 
 func (c *Composer) ApplySessionOwner(ctx context.Context, r Root, ws string, o SessionOwner, pdsURL string) error {
 	ref := o.SessionRef(r)
 	name := OwnerIdentityName(o.did())
 	identity := &v1alpha1.MarketIdentity{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: sessionOwnerLabels()},
-		Spec: v1alpha1.MarketIdentitySpec{Mode: v1alpha1.MarketIdentityModeOAuthSessionProxy, Did: o.did(), Association: v1alpha1.AssociationSkip, SessionRef: &ref}}
+		Spec: v1alpha1.MarketIdentitySpec{Mode: v1alpha1.MarketIdentityModeOAuthSessionProxy, Did: o.did(), Association: v1alpha1.AssociationSkip, SessionRef: &ref,
+			SessionScope: strings.TrimSpace(o.Scope)}}
 	if err := c.ApplyTyped(ctx, r, ws, MarketIdentityGVR, v1alpha1.GroupVersion.String(), KindMarketIdentity, identity); err != nil {
 		return err
 	}

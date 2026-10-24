@@ -773,12 +773,16 @@ func (p *pass) ownerRepos(ctx context.Context, id *v1alpha1.MarketIdentity, sess
 		return err
 	}
 	pdsURLs := map[string]string{}
+	states := map[string]compose.SessionOwnerState{}
 	for _, owner := range proxied {
-		if pdsURLs[owner.DID], err = c.SessionOwnerPds(ctx, ws, owner.DID); err != nil {
+		st, err := c.SessionOwnerState(ctx, ws, owner.DID)
+		if err != nil {
 			return err
 		}
+		states[owner.DID], pdsURLs[owner.DID] = st, st.PdsURL
 		links = append(links, compose.SessionOwnerLinks(r, ws, r.Workspace, owner, pdsURLs[owner.DID])...)
 	}
+	compose.SetSessionOwnersCondition(&p.st.Conditions, o.Generation, states)
 	if err := c.ApplyLinks(ctx, r, ownerRepoLinkSet, links, ws); err != nil {
 		return fmt.Errorf("the links of the tenant owners' repos: %w", err)
 	}
@@ -828,7 +832,7 @@ func (p *pass) sessionOwners(ctx context.Context, sessions map[string]compose.Ow
 	}
 	out := make([]compose.SessionOwner, 0, len(dids))
 	for _, did := range dids {
-		out = append(out, compose.SessionOwner{DID: did, Vault: vaultlayout.RootServerName})
+		out = append(out, compose.SessionOwner{DID: did, Vault: vaultlayout.RootServerName, Scope: compose.GatewayAtprotoScope()})
 	}
 	return out, nil
 }

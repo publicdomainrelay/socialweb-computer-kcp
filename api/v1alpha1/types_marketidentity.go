@@ -70,6 +70,8 @@ type MarketIdentitySpec struct {
 
 	SessionRef *commonv1.SecretRef `json:"sessionRef,omitempty"`
 
+	SessionScope string `json:"sessionScope,omitempty"`
+
 	OAuthClientID string `json:"oauthClientID,omitempty"`
 
 	OAuthRedirectURI string `json:"oauthRedirectURI,omitempty" apigen:"userEndpoint"`
