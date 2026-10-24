@@ -921,9 +921,9 @@ The Go types in `api/v1alpha1` are the ONLY source of every CRD's shape. `go gen
 | Output | What |
 |---|---|
 | `deploy/<kind>-apiresourceschema.yaml` | one kcp `APIResourceSchema` per entry of `v1alpha1.APIResources` |
-| `deploy/cluster-apiexport.yaml`, `deploy/atprotoidentity-apiexport.yaml` | one `APIExport` per distinct `Export`, resources in registry order |
+| `deploy/<export>-apiexport.yaml` | one `APIExport` per distinct `Export` (cluster, atprotoidentity, computecontract, computevm, hostprocess, marketidentity, ...), resources in registry order |
 | `deploy/apiresourceschema-revisions.txt` | the revision lock: every schema name ever generated and the sha256 of its `spec`, one `<name> sha256:<hex>` line each, in the order they were added (the generator keeps the file order and appends new names); `.gitattributes` merges it with `merge=union`, so two branches that each add a revision never conflict and the merged order needs no regeneration, and a name recorded twice with two hashes is a generator error |
-| `socialweb-computer-k8s/lib/common/socialweb-computer-k8s-api/mod.ts` | `@publicdomainrelay/socialweb-computer-k8s-api`: TS interfaces, enum tuples and their literal unions, finalizer and condition constants, `*_RESOURCE` descriptors, and a validator (`validateX`, `isX`, `assertX`, `parseX`, `ApiValidationError`) for every generated type |
+| `api/<group>/v1alpha1/zz_generated.register.go`, `zz_generated.conditions.go` | the scheme registration and the condition helpers of each API group |
 
 How the Go type maps, decided by Claude (user may veto):
 
@@ -933,15 +933,13 @@ How the Go type maps, decided by Claude (user may veto):
   required). Struct tags, because the no-comments rule forbids kubebuilder markers and so rules out
   controller-gen.
 - Enums are read from SOURCE (`go/parser`): a named string type's enum is its typed string
-  constants in declaration order. Untyped exported string constants (`GroupName`, `Version`,
-  `Finalizer*`, `Condition*`) become UPPER_SNAKE TS constants. A named string type with no constants
+  constants in declaration order. A named string type with no constants
   is a generator error, so an enum cannot silently become a free string.
 - `metav1.ObjectMeta` is `type: object`; `[]metav1.Condition` items are `type: object` with
-  `x-kubernetes-preserve-unknown-fields`; `int` is `integer`, `int64` adds `format: int64`. Anything
-  else outside `api/v1alpha1` is a generator error.
-- The validator is the same rules as the schema plus one kube does not apply: an UNKNOWN field is an
-  error, not pruned. `metadata` and conditions stay open. A key whose TS value is `undefined` counts as
-  absent, as JSON would send it.
+  `x-kubernetes-preserve-unknown-fields`; `int` is `integer`, `int64` adds `format: int64`. A named
+  type outside the group's own package is a generator error.
+- `apigen.Model.Validate` checks a value by the same rules as the schema plus one kube does not apply:
+  an UNKNOWN field is an error, not pruned. `metadata` and conditions stay open.
 
 The first generation reproduced the hand-written Cluster, Node and AtprotoIdentity schemas and both
 exports BYTE FOR BYTE; NodeClaim differs only by its name and the added `status.contract` fields.
@@ -968,26 +966,27 @@ schema and then the re-pointed export, in that order. Without the re-point the b
 
 **NodeClaim `status.contract`** carries, beside the original
 `vmUri|rfpUri|acceptUri|receiptUri|receiptCid|submitEventRef` (kept: prod claims hold them and the
-no_bids back-off keys on `Failed` + `rfpUri` without `acceptUri`), every field of atproto-market's
-`ContractState` (`lib/abc/compute-request`): `version`, `phase`
+no_bids back-off keys on `Failed` + `rfpUri` without `acceptUri`), every field of the contract
+state (`v1alpha1.NodeClaimContract`): `version`, `phase`
 (`requested|rfp_submitted|winner_selected|accepted|receipt|network|released`), `vmName`,
 `requesterDid`, `marketDid`, strongRefs `{uri, cid}` `payload|rfp|policy|bid|accept|receipt`,
-`winner {did, submitAccept?}`, `receiptOk`, `vmAddress` (relay FQDN or `iroh://` ticket), `bids`,
-`release {event, payload, ok, status?}`, `outcome`, `error` and `timestamps` keyed by contract phase.
+`winner {did, submitAccept?}`, `acceptPending`, `receiptOk`, `vmAddress` (relay FQDN or `iroh://`
+ticket), `bids`, `release`, `termination`, `hostKeys`, `outcome`, `error` and `timestamps` keyed by
+contract phase.
 All optional, so every existing claim stays valid. None of it is secret: records are public repo
 records, `submitAccept`/`submitEventRef` are bidder endpoints.
 
 **The claim is the durable record a node is released from; the contract carries the flow.** The
-requester controller (`lib/requester-controller-kcp`) calls atproto-market's `requestCompute` (not
-`runComputeContract`) with handlers that write the evolving `ContractState` into the
-ComputeContract's `status.contract` at `onRfpSubmitted`, `onAccepted`, `onReceipt` and `onNetwork`;
-each handler awaits its status write before the flow moves on, so the receipt is on the contract
-before the guest boots. The web app copies `status.contract` onto the claim's `status.contract` on
-every transition, with the legacy `vmUri|rfpUri|acceptUri|receiptUri|receiptCid` mirrored from the
-strongRefs, so the provider's no_bids back-off is unchanged. A node is released when its claim is
-DELETED: the web app sets `spec.release` on the contract and the controller calls `releaseCompute`
-with the state parsed FROM THE CONTRACT, never from its memory (section 9, "A market node joins
-through its cluster's OpenBao, never through ssh").
+Requester component runs a ComputeContract through the RFP flow (`internal/market/requester`, the
+contract runner of `runner.go`) and writes the evolving contract state into the ComputeContract's
+`status.contract` at each stage (RFP submitted, accepted, receipt, network); each write lands before
+the flow moves on, so the receipt is on the contract before the guest boots, and a restarted runner
+resumes from the recorded stage. The NodeClaim controller copies `status.contract` onto the claim's
+`status.contract` on every transition (`internal/gateway/nodeclaim` `Mapper.Status`), with the legacy
+`receiptUri|receiptCid` filled from the receipt strongRef, so the provider's no_bids back-off is
+unchanged. A node is released when its claim is DELETED: the NodeClaim controller sets `spec.release`
+on the contract and the Requester releases it with the state read FROM THE CONTRACT, never from its
+memory (section 9, "A market node joins through its cluster's OpenBao, never through ssh").
 Decisions, made by Claude, user may veto. The two marked SUPERSEDED are kept for the record:
 
 - A claim needs releasing iff its contract has receipt refs (`receipt` + `submitEventRef`) and its
@@ -995,7 +994,7 @@ Decisions, made by Claude, user may veto. The two marked SUPERSEDED are kept for
   ok}`; the legacy receipt fields are no longer cleared, the contract phase is what says "done".
 - SUPERSEDED (M3): a claim with no live session in this process (startup, or a live claim this
   process did not start) was released with `releaseCompute` from its saved state, reason
-  `requester_restarted`. A restarted door now adopts a `Joining` or `Running` claim without a write or
+  `requester_restarted`. A restarted gateway now adopts a `Joining` or `Running` claim without a write or
   a release, and marks a `Bidding` or `Provisioning` claim `Failed`; the release waits for deletion. A pre-upgrade claim carrying only the legacy fields is released from a
   `ContractState` synthesised from them.
 - `Released` only when `release.ok`; an unconfirmed release is `Failed`. A release that threw leaves
@@ -1003,16 +1002,16 @@ Decisions, made by Claude, user may veto. The two marked SUPERSEDED are kept for
 - SUPERSEDED (M3): an unreadable claim at the end of a run deferred the release to the next pass.
   A run no longer releases at its end; an unreadable claim at DELETION defers the release, the
   finalizer stays, and the next pass reads the deleted claim again.
-- A deleted claim aborts its run; the abort turns into a `return` from `onRfpSubmitted`, `onReceipt`
-  or `onNetwork`, but never from `onAccepted`, because returning there would end the flow before the
-  receipt is known and leave a VM nothing can release.
+- A deleted claim, or a contract whose `spec.release` is set, asks its run to release
+  (`contractRunner.Update`), and the run releases from the state recorded on the contract. The
+  decision behind it stays: a flow must not end between the accept and the receipt, because that
+  would leave a VM nothing can release.
 
-**Door layering.** The generated package is a `lib/common` leaf with no imports. The store's claim
-VIEW (`workspace`, `name`, `finalizers`, `spec`, `status`) is `NodeClaim` in
-`lib/abc/socialweb-computer-k8s`, beside `NodeClaimStore`, typed by the generated spec and status.
-`socialweb-computer-k8s-nodeclaim-kcp` parses every claim kcp serves with `parseNodeClaim` and runs
-`assertNodeClaimStatus` before every status PATCH, so a status kcp would prune or refuse never leaves
-the door.
+**Claim layering.** The claim's shape is the Go type `v1alpha1.NodeClaim`, the source of its
+schema; the NodeClaim controller (`internal/controllers/nodeclaim`) reads and writes it through the
+typed kcp client, and the mapper (`internal/gateway/nodeclaim`) turns a claim and its ComputeContract
+into the values of `internal/contract/nodeclaim`. A status write is always of the schema's shape. The
+TypeScript claim store that came before plan 0026 is gone.
 
 ### Abstract kinds and their contracts
 
@@ -1159,14 +1158,15 @@ Auth is a service-auth token whose `aud` is the service and whose `lxm` is the m
 verifier on this path MUST be passed a real NSID: it compares against the token's `lxm`, and a nil
 there skips the check.
 
-**A door that wants a usable cluster gets it in ONE call.** `createCluster` exists because the only
+**A caller that wants a usable cluster gets it in ONE call.** `createCluster` exists because the only
 other way to a live cluster was two round trips through two different verbs - `getKubeconfig`, whose
 kubeconfig a caller that is provisioning has no use for, and then `controlPlaneUp` - and because a
 caller had to know that order. It is not a new path: it calls the same `revocation.CreateOnRead`
 around `Store.Ensure` that `getKubeconfig` does, and then records `spec.running = true` itself, so the
 deny is consulted before anything is created. THE ORDERING IS THE CONTRACT: the running write comes
 first and reads nothing back, and it is made on a context the caller's cancellation cannot reach
-(`context.WithoutCancel`), because the door abandons a call at 30 s and an abort on that call must not
+(`context.WithoutCancel`, `internal/gateway/gateway.go`), because the gateway's web app abandons a
+call at 30 s (`internal/gatewayhttp/cluster.go`) and an abort on that call must not
 land before this write, which would leave a cluster whose tree exists and whose `spec.running` is
 false, which no pass ever brings up. The phase is the ANSWER, not a refusal: a cluster whose control plane is still coming
 up is a 200 carrying `Initializing` (a market join is minutes away by construction), and only a
@@ -1175,16 +1175,15 @@ reading - 429 + Retry-After while Initializing - because a caller that asks the 
 name is asking about the control plane. `getKubeconfig` keeps its create-on-read, which is what makes
 a first login work at all.
 
-**`getKubeconfig` is served by a granter the composition root must be handed.** It renders an exec
-credential whose helper is named by configuration, so a gateway that is not configured for it refuses
-to START rather than routing a verb that can never answer. A caller may also ask for a chosen
-credential lifetime; the settings and the reasoning behind each are in section 15.
+**`getKubeconfig` is served by a granter the composition root must be handed.** The granter
+(`kcpclient.KubeconfigGranter`) is the client certificate issuer `clientcert.Issuer`, which
+`internal/gatewaymain` hands the kcp client. A caller may also ask for a chosen credential lifetime;
+the settings and the reasoning behind each are in section 15.
 
-**A routed verb is not a working verb.** A verb can be on this surface, routed, documented and
-unit-tested while the composition root hands its client no granter, so it answers `ErrNoDeviceKey` to
-every caller that reaches it. It fails CLOSED, which reads as a gap rather than a hole. The
-answerability check in `cmd/socialweb-gateway` therefore drives every verb the lexicons declare past
-authentication and requires its ANSWER rather than its presence.
+**A routed verb is not a working verb.** A verb can be on this surface, routed and documented while
+the composition root hands its client no granter, so it answers `ErrNoKubeconfigGranter` to every
+caller that reaches it. It fails CLOSED, which reads as a gap rather than a hole, and only a live
+call that reads the ANSWER, not the route, shows it.
 
 **The tenant path is gated on `status.phase == "Ready"`, and our front owns that gate.** kcp's
 mount controller reads the referenced object's PHASE, not its conditions, before it will serve
@@ -1195,7 +1194,7 @@ MUST rules:
 - The client certificate front MUST admit a tenant request only while the `Cluster`'s
   `status.phase` is `Ready` and it has no `deletionTimestamp` (`kcpclient.ClusterGate`), answering
   503 otherwise and 404 when the `Cluster` is absent or its `spec.account` hashes to another account.
-- The front MUST read that gate at most `materialiser.PathGateGrace / 5` old (`gateTTL`), MUST fail
+- The front MUST follow that gate by a watch on the `Cluster` (`kcpclient.FollowClusterGate`), MUST fail
   closed on a read error, and MUST close every open request (watches included) for a cluster whose
   gate it observes closed.
 - The tenant path is SHUT when, and only when, the `Cluster`'s own state has closed the gate for at
@@ -1272,17 +1271,16 @@ trusts is its own `client-auth-proxy`, held by the front.
   `[a-z2-7]` and never a hyphen or a digit outside that range. The deployed grant carries it as the
   subject of the `socialweb-owner` ClusterRoleBinding, so the spelling cannot be changed later without
   a migration.
-- **The grant is rendered for the cluster's OWNER, and the owner can act in it.** The name in those
-  `resourceNames` is not a literal in the deployed file: `deploy/tenant-grant.yaml` carries
+- **The grant is rendered for the cluster's OWNER, and the owner can act in it.** The subject's name
+  is not a literal in the deployed file: `deploy/tenant-grant.yaml` carries
   `__SOCIALWEB_OWNER_SERVICE_ACCOUNT__` and the bootstrap substitutes `ServiceAccountName` of the
   `Cluster`'s `spec.account` - the same DID the mount path is derived from - before it parses the
   document. `RenderTenantGrant` REFUSES a document with no placeholder rather than applying it, so a
   grant scoped to a name nobody owns cannot be applied by accident. The file also carries a
-  `ClusterRoleBinding` `socialweb-owner` binding that ServiceAccount to `cluster-admin`: it is the
-  owner's own cluster, and until this existed a real user's minted token authenticated and was
-  authorized for NOTHING, because no `did-*` ServiceAccount had any RBAC. The `gwmint` Role stays
-  scoped by `resourceNames` and is NOT widened by this - it still reaches exactly one name, and the
-  owner's power comes from its own binding rather than from the mint's.
+  `ClusterRoleBinding` `socialweb-owner` binding that ServiceAccount, and the group
+  `socialweb.computer:cluster-owners`, to `cluster-admin`: it is the owner's own cluster, and until
+  this existed a real user's minted token authenticated and was authorized for NOTHING, because no
+  `did-*` ServiceAccount had any RBAC.
 - **A revocation that only deletes objects does not revoke.** Deleting a ServiceAccount is a ~10 s
   interruption, not a revocation: a stale, name-keyed RoleBinding resumes grants the moment the
   object is recreated. Revocation needs a consultable deny record, and it is per-DID.
@@ -1344,8 +1342,8 @@ before RBAC is consulted - measured both directions, with a real TokenRequest to
 token is denied in a tenant workspace even with a matching ClusterRoleBinding there, and a tenant
 token is denied in the provider workspace. `--as=` impersonation does NOT reproduce it (it sets the
 username and not the scope extra), so an impersonation probe cannot answer the question and an RBAC
-probe that uses one is not evidence. And the refusal is not RBAC at all: a token is refused at the
-door of a workspace it was not minted in, which no subject string can spell.
+probe that uses one is not evidence. And the refusal is not RBAC at all: a token is refused by
+every workspace it was not minted in, which no subject string can spell.
 
 The consequence is load-bearing: `internal/kcpclient` addresses root, the account workspace, the home
 workspace and the mount from ONE `rest.Config`, so **the runtime cannot be any of the four provider
@@ -1373,17 +1371,18 @@ tls/service.key        cred/passwd        cred/ipsec.psk
 the instance token, which is per-instance state.
 
 **Pre-seeding a list without request-header-ca and all four etcd CAs makes k3s REGENERATE those and
-INVALIDATE every kubeconfig and SA token.** The count is load-bearing; the
-bundle's own test asserts it against the data.
+INVALIDATE every kubeconfig and SA token.** The count is load-bearing: `internal/identitybundle` refuses a bundle
+whose size is not `len(identitybundle.Paths)` (`ErrIncomplete`).
 
 ### A market node's secrets live in its cluster's OpenBao, behind a JWT role
 
 This subsection describes how a market node's secrets are stored and read. Names are in
 `internal/vaultlayout/nodejwt.go`, the vault writes in `clusterprovider.NodeVault`
-(`internal/clusterprovider/nodesecrets.go`, root token and CA from the cluster data dir, the same
-`ReadVaultSeal` + `vaultClient` every other cluster-vault write uses), the order in
+(`internal/clusterprovider/nodesecrets.go`: the policy, the JWT mount and the role go into the
+cluster's OpenBaoServer declaration, `internal/clusterprovider/vaultdeclared.go`, and the core's sync
+writes them; the secret itself is written as the vault client `clusterprovider`), the order in
 `internal/nodemarket/secrets.go`. Only the market substrate wires it (`nodeHostsOptions.NodeSecrets`,
-set in `main.go`); a firecracker or qemu guest keeps its cert-auth path (`node-secret-<node>`,
+set in `internal/providermain/main.go`); a firecracker or qemu guest keeps its cert-auth path (`node-secret-<node>`,
 `secret/data/k3s/node/<node>`), which is a different policy namespace and a different mount.
 
 | what | name | written | removed |
@@ -1392,12 +1391,12 @@ set in `main.go`); a firecracker or qemu guest keeps its cert-auth path (`node-s
 | node secret | `socialweb-nodes/data/<node>` | before the claim, once `ClusterLink <clusterKey>-apiserver` reads `Listening` with a ticket; else by the first later pass that sees one | release (`DELETE socialweb-nodes/metadata/<node>`, every version) |
 | policy | `node-<node>`: `path "socialweb-nodes/data/<node>" { capabilities = ["read"] }` | before the claim, always | release |
 | JWT auth mount | `jwt-<first 12 hex of sha256(issuer)>`, type `jwt`, `oidc_discovery_url` = `bound_issuer` = issuer | when a claim first carries `status.grant` with that issuer | disabled by the reconcile once no live claim's grant names it and it has no role left |
-| JWT role | `<node>` under that mount: `role_type jwt`, `bound_subject` = grant subject, `bound_audiences` = [grant audience], `user_claim sub`, `token_ttl 5m`, `token_policies [node-<node>]` | the first pass after the door writes `status.grant` | release, under every `jwt-<12 hex>` mount |
+| JWT role | `<node>` under that mount: `role_type jwt`, `bound_subject` = grant subject, `bound_audiences` = [grant audience], `user_claim sub`, `token_ttl 5m`, `token_policies [node-<node>]` | the first pass after the NodeClaim controller writes `status.grant` | release, under every `jwt-<12 hex>` mount |
 
 The secret's fields are `token` (the pinned join token `K10<sha256 hex of serverCA>::server:<k3s
-token file, trimmed>`, byte-for-byte what the door's `pinnedJoinToken` composed for the ssh join, so
+token file, trimmed>`, composed by `nodemarket.PinnedJoinToken`, so
 `k3s agent --token` takes it verbatim), `nodePassword` (the per-node password
-`nodevm.MintOrReadNodePassword` minted at Provision, trimmed), `serverCA` (the PEM of
+`nodemarket.MintOrReadNodePassword` minted at Provision, trimmed), `serverCA` (the PEM of
 `<data dir>/server/tls/server-ca.crt`, verbatim), `apiserverTicket` (the link's `status.ticket`),
 `advertiseAddress` and `apiserverPort` (an integer; the claim's own `spec` values). A secret exists
 only when it is whole: the guest may read "present" as "complete".
@@ -1410,31 +1409,27 @@ Decisions, made by Claude, user may veto:
   the secret once a ticket exists (logged once per distinct reason, not per pass). A policy that
   cannot be written fails the Provision before the claim, so nothing is rented that could never
   read its join material.
-- **The grant is the door's; the role name is not recorded in status.** The provider never writes
-  `status.grant.role`; the role name is deterministic (the node name), and it is logged with the
-  mount and policy when written. One `EnsureLogin` per distinct grant per host; a pass over an
-  unchanged grant costs nothing. The mount's config is re-written only when its discovery URL or
-  bound issuer differ, because writing it makes OpenBao fetch the issuer's discovery document.
-- **The mount outlives its last role until the reconcile reads the vault.** Deleting an emptied
-  `jwt-*` mount eagerly races a concurrent grant of the same issuer in the same cluster (list empty,
-  role written, mount deleted), and mounts are bounded by the number of distinct bidder issuers, which
-  is small. The reconcile below disables one, never inside that race: it is rate-limited, and a mount
-  a live claim's grant names is never disabled.
+- **The grant is the NodeClaim controller's; the role name is not recorded in status.** The provider
+  never writes `status.grant.role`; the role name is deterministic (the node name). `EnsureLogin`
+  declares the grant on the cluster's OpenBaoServer, and a pass over an unchanged grant changes
+  nothing in the declaration.
+- **A mount goes with its last live grant.** The declaration names a `jwt-<12 hex>` mount while a
+  live node's grant names its issuer, so the sync removes a mount only once no live grant names it.
 - **Revocation is best-effort and bounded** (`nodemarket.RevokeTimeout`, 10 s), runs right after the
-  claim delete is accepted and before the wait for the door, and only logs a failure: the machine is
+  claim delete is accepted and before the wait for the NodeClaim controller, and only logs a failure: the machine is
   what costs, and a leftover role binds one workload subject the released machine no longer runs.
 - **The issuer must answer from this host.** OpenBao fetches `<issuer>/.well-known/openid-configuration`
   when the config is written and the JWKS at login; a bidder issuer the cluster vault cannot reach
   is an `EnsureLogin` error in the pass log, retried every pass.
 
-How a guest logs in, which is the door's and the guest's half (`claim.json` carries `jwtMount`,
+How a guest logs in, which is the requester's and the guest's half (`claim.json`, written by the
+guest's cloud-init from `internal/atproto/cloudinit/k3sjoin.go`, carries `jwtMount`,
 `role`, `audience`, `kvMount`, `kvPath`): ask `guest-login.sh token <audience>` for a token of the
 bidder's OpenBao identity/oidc whose `aud` is the grant's audience (`api://socialweb-node?actx=<clusterKey>/<node>`)
 and whose `wid_sub` claim is the grant's subject, then `POST /v1/auth/jwt-<12 hex>/login` with `{"role": "<node>", "jwt": "<token>"}`, then
-`GET /v1/socialweb-nodes/data/<node>` with the returned `client_token` in `X-Vault-Token`. The
-instrument is `TestANodeLogsInWithItsWorkloadTokenAndReadsOnlyItsOwnSecret`
-(`internal/clusterprovider/nodesecrets_test.go`) against a real OpenBao v2.6.2 (`bao server -dev`)
-and an in-test ES256 OIDC issuer: the node's own token logs in and reads its path; a token for another
+`GET /v1/socialweb-nodes/data/<node>` with the returned `client_token` in `X-Vault-Token`
+(`internal/nodeagent`). Measured against a real OpenBao v2.6.2 (`bao server -dev`) and an ES256 OIDC
+issuer when it was built: the node's own token logs in and reads its path; a token for another
 subject or audience is refused; the node's token gets 403 on another node's path; after `Revoke` the
 role, policy and secret are gone, the login is refused, the other node's policy and the mount remain.
 
@@ -1449,37 +1444,20 @@ away and its `Revoke` leaves a role, a policy and a secret behind, a bidder's is
 `did:key` per restart, so every issuer a cluster has ever seen would otherwise leave its `jwt-*` mount
 forever (read live: 5 `jwt-*` mounts, 1 live node).
 `(*clusterprovider.NodeVault).Reconcile` (`internal/clusterprovider/nodesecrets.go`) takes
-`live map[string]*v1alpha1.NodeClaimGrant` for ONE cluster's OpenBao and makes actual equal desired:
-for every live node it keeps the policy `node-<node>`, the KV entry `socialweb-nodes/<node>` and, when
-the claim carries a grant, the mount `jwt-<12 hex of sha256(grant.Issuer)>` with the role `<node>`
-under it; it deletes every role under a `jwt-<12 hex>` mount whose name is not a live node or whose
-mount is not that node's grant mount, every policy named `node-<node>` that names no live node, every
-`socialweb-nodes/metadata/<node>` entry naming no live node, and disables a `jwt-<12 hex>` mount left
-with no role and named by no live grant. It never creates and never writes outside those deletions,
-never touches a mount, policy or path outside those naming patterns (a `jwt-` mount whose suffix is
-not 12 hex, an `approle` mount and `postgres`/`default`/`root` all survive it), and it deletes nothing
-on a failed read: the three listings that decide a deletion - the roles under each node mount,
-`sys/policies/acl`, and `socialweb-nodes/metadata` - each report their own failure out of `Reconcile`,
-because an unreadable list read as "nothing is declared" deletes every live node's login and join
-material. The method is declared as `nodemarket.NodeSecretsReconciler`, a sibling of `NodeSecrets`
-rather than a fourth method on it, so a substrate's secrets implementation still has one method per
-verb and the provider type-asserts it the way `confirmHeld` asserts `secretSyncer`
-(`internal/providermain/vaultsync.go`); the provider calls it with `live` = the claims it
-holds plus the `Adoptable` claims in the cluster's home workspace (`liveNodeGrants`), after
-`adoptClaims` at adoption and on every pass, rate-limited to at most once per cluster per
-`VaultSyncInterval` (30 s), and every deletion is logged at INFO with its reason.
-`TestReconcileLeavesOnlyTheLiveNodesMaterialInTheClusterVault`,
-`TestReconcileWithNoLiveNodeRemovesEveryNode`,
-`TestReconcileKeepsTheMountALiveNodesGrantNamesBeforeItsRoleIsWritten` and
-`TestReconcileDeletesNothingWhenAListFails` (`internal/clusterprovider/nodesecrets_sync_test.go`) run
-it against a real `bao server -dev` seeded with four stale mounts (one with a stale role, one holding
-a live node's role under a stale issuer, two empty), a stale policy and a stale KV entry, plus one
-live node's full set; the failure case puts a proxy in front of the dev vault that answers every
-`LIST` with 500. `internal/providermain/vaultsync_test.go` proves adoption reconciles with
-the live grants, that a claim the door released is not live, that a node the provider still holds with
-no claim left in the workspace stays live, and that a second pass inside the interval does not read
-the vault again. The live reading (`bao auth list`, `bao list auth/<m>/role` after a release and after
-a provider restart) is not taken yet; it is the lead's.
+`live map[string]*v1alpha1.NodeClaimGrant` for ONE cluster's OpenBao and rewrites the node part of
+that cluster's OpenBaoServer declaration to it (`setVaultNodes` in
+`internal/clusterprovider/vaultdeclared.go`): for every live node the policy `node-<node>`, the KV
+entry `socialweb-nodes/<node>` and, when the claim carries a usable grant, the mount
+`jwt-<12 hex of sha256(grant.Issuer)>` with the role `<node>` under it. It touches only the
+declaration's entries of those naming patterns (`vaultlayout.NodeFromJWTPolicy`,
+`vaultlayout.IsNodeJWTMount`, the `socialweb-nodes` KV mount); every other policy, mount and entry
+of the declaration stays. The core's sync of the OpenBaoServer then makes the vault equal the
+declaration. The method is declared as `nodemarket.NodeSecretsReconciler`, a sibling of
+`NodeSecrets` rather than a fourth method on it, so a substrate's secrets implementation still has
+one method per verb and the provider type-asserts it the way `confirmHeld` asserts `secretSyncer`
+(`internal/providermain/vaultsync.go`); the provider calls it with `live` = the claims it holds plus
+the `Adoptable` claims in the cluster's home workspace (`liveNodeGrants`), after `adoptClaims` at
+adoption and on every pass, rate-limited to at most once per cluster per `VaultSyncInterval` (30 s).
 
 ## 8. Ports
 
