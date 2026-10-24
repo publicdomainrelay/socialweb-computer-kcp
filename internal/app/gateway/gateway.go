@@ -501,7 +501,7 @@ func (p *pass) suspended(ctx context.Context, plan compose.AccountPlan, in desir
 		p.st.Did = id.Status.Did
 	}
 	compose.FillApplicationStatus(&p.st, o.Generation, true, o.Spec.Components, held, snap, nil)
-	p.st = compose.Suspended(p.st)
+	p.st = compose.SuspendedOnceApplied(p.st, snap, held)
 	return ctlruntime.Result{}, c.WriteStatus(ctx, r, compose.GatewayGVR, p.st)
 }
 

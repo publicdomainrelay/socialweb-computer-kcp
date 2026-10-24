@@ -31,6 +31,8 @@ const (
 	ReasonActive                  = "Active"
 
 	SuspendedMessage = "suspended: no new participation; obligations already taken (running VMs, StateSync acks, offer withdrawal, credential renewal) continue"
+
+	SuspendingMessage = "suspending: waiting for every component to apply the suspend"
 )
 
 var componentOwnedStatus = []string{"market"}
@@ -119,6 +121,9 @@ func (s Snapshot) Satisfied(desired []Desired) bool {
 		if !ok {
 			return false
 		}
+		if v.Status.ObservedGeneration != 0 && v.Status.ObservedGeneration < v.Generation {
+			return false
+		}
 		if DesiredSuspended(d) {
 			if v.Status.Phase != v1alpha1.ComponentPhaseSuspended {
 				return false
@@ -139,6 +144,14 @@ func Ready(st v1alpha1.ApplicationStatus, msg string) v1alpha1.ApplicationStatus
 
 func Suspended(st v1alpha1.ApplicationStatus) v1alpha1.ApplicationStatus {
 	st.Phase, st.Message = v1alpha1.ApplicationPhaseSuspended, SuspendedMessage
+	return st
+}
+
+func SuspendedOnceApplied(st v1alpha1.ApplicationStatus, snap Snapshot, held []Desired) v1alpha1.ApplicationStatus {
+	if len(held) == 0 || snap.Satisfied(held) {
+		return Suspended(st)
+	}
+	st.Phase, st.Message = v1alpha1.ApplicationPhaseProvisioning, SuspendingMessage
 	return st
 }
 

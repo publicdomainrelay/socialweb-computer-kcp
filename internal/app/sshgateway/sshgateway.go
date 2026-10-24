@@ -604,6 +604,6 @@ func (p *pass) suspended(ctx context.Context, plan compose.AccountPlan) (ctlrunt
 	}
 	p.st.Did = ident.Did
 	compose.FillApplicationStatus(&p.st, o.Generation, true, o.Spec.Components, held, snap, nil)
-	p.st = compose.Suspended(p.st)
+	p.st = compose.SuspendedOnceApplied(p.st, snap, held)
 	return ctlruntime.Result{}, c.WriteStatus(ctx, r, compose.SshGatewayGVR, p.st)
 }
