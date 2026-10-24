@@ -210,6 +210,9 @@ func (h *nodeHosts) claimJoinedOrphans(ctx context.Context, cluster string, clai
 		claimed[claims[i].Name] = true
 	}
 	client, err := h.opts.Tenant(ctx, cluster)
+	if errors.Is(err, clusterprovider.ErrNoApiserverFront) {
+		return claims, nil
+	}
 	if err != nil {
 		return claims, fmt.Errorf("clusterprovider: the tenant client of %s, to find joined Nodes with no claim: %w", cluster, err)
 	}

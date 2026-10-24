@@ -2,6 +2,7 @@ package clusterprovider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"strconv"
@@ -69,6 +70,8 @@ func (h *UnitsHost) Hold(ctx context.Context, key string, p portallocator.Purpos
 	return port, nil
 }
 
+var ErrNoApiserverFront = errors.New("clusterprovider: the cluster has no apiserver front HostProcess")
+
 func (h *UnitsHost) frontPort(ctx context.Context, key string) (int, error) {
 	member := MemberName(procgroup.ComponentApiserverFront)
 	last := "no answer"
@@ -76,7 +79,7 @@ func (h *UnitsHost) frontPort(ctx context.Context, key string) (int, error) {
 	_, err := h.hps.Await(ctx, ObjectName(key, member), 0, func(o *v1alpha1.HostProcess) (bool, error) {
 		switch {
 		case o == nil:
-			return false, fmt.Errorf("clusterprovider: %s has no apiserver front HostProcess, so nothing holds a port for its apiserver", key)
+			return false, fmt.Errorf("%w: %s, so nothing holds a port for its apiserver", ErrNoApiserverFront, key)
 		case o.DeletionTimestamp != nil:
 			return false, fmt.Errorf("clusterprovider: the apiserver front of %s is being deleted", key)
 		case o.Status.Phase == v1alpha1.HostProcessPhaseFailed || o.Status.Phase == v1alpha1.HostProcessPhaseLost ||
