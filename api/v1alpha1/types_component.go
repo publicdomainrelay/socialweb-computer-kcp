@@ -691,6 +691,8 @@ type GatewayNodeMarket struct {
 	NodePolicyArgs string `json:"nodePolicyArgs,omitempty"`
 
 	ExtraBidderDIDs []string `json:"extraBidderDIDs,omitempty"`
+
+	InfraRecordSources []commonv1.ObjectRef `json:"infraRecordSources,omitempty"`
 }
 
 type SshServer struct {

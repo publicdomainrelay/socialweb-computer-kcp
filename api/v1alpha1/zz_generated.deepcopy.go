@@ -3496,6 +3496,11 @@ func (in *GatewayNodeMarket) DeepCopyInto(out *GatewayNodeMarket) {
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
+	if in.InfraRecordSources != nil {
+		in, out := &in.InfraRecordSources, &out.InfraRecordSources
+		*out = make([]commonv1alpha1.ObjectRef, len(*in))
+		copy(*out, *in)
+	}
 	return
 }
 

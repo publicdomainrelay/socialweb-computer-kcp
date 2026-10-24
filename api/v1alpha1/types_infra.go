@@ -100,8 +100,18 @@ type InfraContractNode struct {
 	NodeClaimRef commonv1.ObjectRef `json:"nodeClaimRef"`
 }
 
+type InfraRecordSync string
+
+const (
+	InfraRecordSyncBoth InfraRecordSync = "Both"
+
+	InfraRecordSyncPublish InfraRecordSync = "Publish"
+)
+
 type InfraRecordBinding struct {
 	RepoRef commonv1.ObjectRef `json:"repoRef"`
+
+	Sync InfraRecordSync `json:"sync,omitempty" apigen:"default=Both,enum=Both|Publish"`
 
 	URI string `json:"uri,omitempty" apigen:"userEndpoint"`
 

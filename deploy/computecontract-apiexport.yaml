@@ -11,12 +11,12 @@ spec:
         crd: {}
     - group: socialweb.computer
       name: infras
-      schema: v1alpha1-3.infras.socialweb.computer
+      schema: v1alpha1-4.infras.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer
       name: ephemeralinfras
-      schema: v1alpha1-3.ephemeralinfras.socialweb.computer
+      schema: v1alpha1-4.ephemeralinfras.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer

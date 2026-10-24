@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-3.ephemeralinfras.socialweb.computer
+  name: v1alpha1-4.ephemeralinfras.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -233,6 +233,12 @@ spec:
                     required:
                       - kind
                       - name
+                  sync:
+                    type: string
+                    enum:
+                      - Both
+                      - Publish
+                    default: Both
                   uri:
                     type: string
                   eventSourceRefs:

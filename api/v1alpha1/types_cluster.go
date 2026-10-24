@@ -23,6 +23,8 @@ type ClusterSpec struct {
 	Account string `json:"account"`
 
 	Running bool `json:"running" apigen:"optional"`
+
+	PublishInfra bool `json:"publishInfra" apigen:"optional"`
 }
 
 type ClusterPhase string
