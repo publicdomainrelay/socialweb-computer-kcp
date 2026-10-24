@@ -1018,6 +1018,16 @@ func (r *contractRunner) waitForRelease(ctx context.Context, state *v1alpha1.Nod
 	}
 }
 
+func receiptURIOf(state *v1alpha1.NodeClaimContract) string {
+	if state == nil {
+		return ""
+	}
+	if state.Receipt != nil && state.Receipt.URI != "" {
+		return state.Receipt.URI
+	}
+	return state.ReceiptURI
+}
+
 func (r *contractRunner) finishRelease(ctx context.Context, state *v1alpha1.NodeClaimContract, release *v1alpha1.ComputeContractRelease, message string) {
 	state.Release.OK = true
 	state.Phase = v1alpha1.ContractReleased
@@ -1026,6 +1036,7 @@ func (r *contractRunner) finishRelease(ctx context.Context, state *v1alpha1.Node
 	}
 	release.LastError = ""
 	r.setRelease(release)
+	r.log().Info("requester_released", "receipt", receiptURIOf(state), "attempts", release.Attempts, "message", message)
 	r.writeStatus(ctx, v1alpha1.ComputeContractReleased, message, state, r.currentBids(), r.currentChosen(), "released", int32(release.Attempts))
 	r.deleteRBAC(ctx)
 }
@@ -1082,6 +1093,7 @@ func (r *contractRunner) releaseContract(ctx context.Context, state *v1alpha1.No
 		bidder = Bidder{}
 	}
 
+	r.log().Info("requester_release", "receipt", receiptURIOf(state), "bidder", bidderDID, "deadline", release.Deadline, "attempts", release.Attempts)
 	r.writeStatus(ctx, v1alpha1.ComputeContractReleasing, "destroying the guest", state, r.currentBids(), r.currentChosen(), "releasing", int32(release.Attempts))
 
 	eventRef, eventRecord, err := r.releaseEnvelope(ctx, state)
@@ -1118,6 +1130,7 @@ func (r *contractRunner) releaseContract(ctx context.Context, state *v1alpha1.No
 		}
 		release.LastError = detail
 		r.setRelease(release)
+		r.log().Info("requester_release_retry", "attempt", release.Attempts, "err", detail)
 		message := fmt.Sprintf("the destroy failed on attempt %d: %s", release.Attempts, detail)
 		if q.now().After(deadline) {
 			r.writeStatus(ctx, v1alpha1.ComputeContractReleasing, message+"; the deadline passed, the release intent stays recorded", state, r.currentBids(), r.currentChosen(), "releaseFailed", int32(release.Attempts))

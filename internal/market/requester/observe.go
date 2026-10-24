@@ -92,14 +92,7 @@ func (q *Requester) contractGone(name string) {
 		runner.stop()
 	}
 	if known && !settled && contractAccepted(last) && last.Status.Phase != v1alpha1.ComputeContractReleased {
-		receipt := ""
-		if state := last.Status.Contract; state != nil {
-			receipt = state.ReceiptURI
-			if receipt == "" && state.Receipt != nil {
-				receipt = state.Receipt.URI
-			}
-		}
-		q.log.Warn("requester_contract_gone_unreleased", "contract", name, "phase", string(last.Status.Phase), "receipt", receipt)
+		q.log.Warn("requester_contract_gone_unreleased", "contract", name, "phase", string(last.Status.Phase), "receipt", receiptURIOf(last.Status.Contract))
 	}
 }
 
