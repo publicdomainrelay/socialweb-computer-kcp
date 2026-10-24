@@ -140,6 +140,16 @@ learnings:
       backend') and the 60 s refresh corrected it, so for a minute a restarted OAuth bidder advertises
       a stale offering. A fleet view should list per bidder its identity mode, comms mode, the offering's
       endpoint and the offering's age, and flag a bidder whose offering has no endpoint.
+  - id: L14-ABANDONED-GUESTS
+    text: >
+      A browser requester tab closed one second after it began a release (the lead's driver, run 15,
+      2026-10-24 10:51Z) left its guest Running on hat-7 for 20 minutes, until the lead deleted the
+      ComputeVM by hand; the prod acceptance that followed waited 11.5 minutes in its scale-to-0
+      section on that unrelated VM (A2 'vms=1'). Nothing in the market protocol bounds a guest's life:
+      the compute.vm and RFP records carry no lease, the release deadline in the requester's status is
+      8 days, and a bidder keeps a guest whose requester has gone for good. A fleet view must list
+      every Running guest per bidder with its requester, age and last requester contact; a guest with
+      no requester contact past a lease is an alert, and see F5.
 items:
   - id: F1-INVENTORY
     title: "A fleet inventory object: which bidders exist, where, on which version"
@@ -178,6 +188,18 @@ items:
       To be designed. rollout-ci.sh and the acceptance script become a declared rollout of a version
       to the inventory, executed from the lead's machine (no CI access to hosts), recording per host
       the installed sha256, the Ready time and the acceptance rows.
+    files: []
+    done_when: "To be written when designed."
+    status: todo
+  - id: F5-GUEST-LEASE
+    title: "A guest's life is bounded by a lease the requester renews"
+    depends_on: []
+    decision: >
+      To be designed, and a market protocol change, so the user decides it. Candidate: the compute.vm
+      (or RFP) record carries a lease (seconds); the requester renews it while it holds the guest (a
+      renewal record or an XRPC to the bidder's ingress), and the bidder releases a guest whose lease
+      ran out, writing vm.terminated as for a release. Today an abandoned guest lives until someone
+      deletes its ComputeVM (L14).
     files: []
     done_when: "To be written when designed."
     status: todo
