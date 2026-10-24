@@ -200,7 +200,7 @@ func GatewayRequesterIdentity(g v1alpha1.GatewaySpec) v1alpha1.ApplicationIdenti
 func gatewayNodeMarket(o *v1alpha1.Gateway, workspace, contracts string) *v1alpha1.GatewayNodeMarket {
 	m := o.Spec.MarketNetwork
 	if m == nil {
-		return nil
+		m = &v1alpha1.GatewayMarketNetwork{}
 	}
 	out := &v1alpha1.GatewayNodeMarket{OwnerSessionsFile: m.OwnerSessionsFile, UserDataBaseFile: m.NodeUserDataBaseFile,
 		HomeWorkspace: workspace, ContractWorkspace: contracts,
