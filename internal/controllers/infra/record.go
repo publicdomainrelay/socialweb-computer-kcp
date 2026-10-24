@@ -166,13 +166,14 @@ func (r *reconciler[T]) syncRecord(ctx context.Context, req ctlruntime.Request, 
 		out.status = &keep
 		out.conditions = []metav1.Condition{valid, conds.New(v1alpha1.InfraConditionSynced, true, "InSync", "the record holds the declaration", gen)}
 		note, pulled := r.c.takePull(string(v.kind), req, observed.Hash)
-		if keep.CID != got.CID || keep.DeclarationHash != observed.Hash {
+		rebound := keep.Direction == v1alpha1.InfraSyncRetained
+		if keep.CID != got.CID || keep.DeclarationHash != observed.Hash || rebound {
 			direction := keep.Direction
 			if pulled {
 				direction = v1alpha1.InfraSyncPulled
 			}
 			out.status = synced(direction)
-			if out.status.Direction == "" {
+			if out.status.Direction == "" || rebound {
 				out.status.Direction = v1alpha1.InfraSyncInSync
 			}
 		}
