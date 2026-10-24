@@ -692,7 +692,13 @@ type GatewayNodeMarket struct {
 
 	ExtraBidderDIDs []string `json:"extraBidderDIDs,omitempty"`
 
-	InfraRecordSources []commonv1.ObjectRef `json:"infraRecordSources,omitempty"`
+	InfraRecord *GatewayInfraRecord `json:"infraRecord,omitempty"`
+}
+
+type GatewayInfraRecord struct {
+	RepoWorkspace string `json:"repoWorkspace"`
+
+	EventSourceRefs []commonv1.ObjectRef `json:"eventSourceRefs,omitempty"`
 }
 
 type SshServer struct {

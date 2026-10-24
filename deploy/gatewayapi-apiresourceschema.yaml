@@ -373,24 +373,31 @@ spec:
                     type: array
                     items:
                       type: string
-                  infraRecordSources:
-                    type: array
-                    items:
-                      type: object
-                      properties:
-                        group:
-                          type: string
-                        kind:
-                          type: string
-                          maxLength: 63
-                        name:
-                          type: string
-                          maxLength: 253
-                        workspace:
-                          type: string
-                      required:
-                        - kind
-                        - name
+                  infraRecord:
+                    type: object
+                    properties:
+                      repoWorkspace:
+                        type: string
+                      eventSourceRefs:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            group:
+                              type: string
+                            kind:
+                              type: string
+                              maxLength: 63
+                            name:
+                              type: string
+                              maxLength: 253
+                            workspace:
+                              type: string
+                          required:
+                            - kind
+                            - name
+                    required:
+                      - repoWorkspace
           status:
             type: object
             properties:
