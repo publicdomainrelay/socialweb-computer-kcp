@@ -186,7 +186,7 @@ func (a *Accounts) oauthQr(ctx context.Context, workspace string, id *v1alpha1.M
 		return Result{Status: qrPending(status, generation, qr), RequeueAfter: QRPollInterval}, nil
 	}
 	a.qr.Delete(key)
-	data, err := sessionQr.SessionData(a.oauth.ClientID, a.qrScopes())
+	data, err := sessionQr.SessionData(a.sessionClientID(id), a.qrScopes())
 	if err != nil {
 		return failed(status, generation, "QRSessionInvalid", err.Error()), err
 	}
@@ -231,6 +231,15 @@ func (a *Accounts) oauthDelegated(ctx context.Context, workspace string, id *v1a
 		return Result{Status: status}, nil
 	}
 	return pending(status, generation, "SessionError", "restoring the oauth session: "+err.Error()), err
+}
+
+func (a *Accounts) sessionClientID(id *v1alpha1.MarketIdentity) string {
+	if id != nil && id.Spec.Mode == v1alpha1.MarketIdentityModeOAuthQr {
+		if clientID := oauthclient.QRClientID(a.oauth.QROrigin); clientID != "" {
+			return clientID
+		}
+	}
+	return a.oauthClientID(id)
 }
 
 func (a *Accounts) oauthClientID(id *v1alpha1.MarketIdentity) string {
@@ -386,7 +395,7 @@ func (a *Accounts) restoreOAuthSession(ctx context.Context, workspace string, id
 		Handle:     id.Spec.Handle,
 		RepoDID:    status.Did,
 		PDSURL:     id.Spec.PdsURL,
-		ClientID:   a.oauthClientID(id),
+		ClientID:   a.sessionClientID(id),
 		Scopes:     a.scopesFor(id.Spec.Mode),
 		Directory:  a.oauth.Directory,
 		HTTPClient: a.oauthHTTP(),
@@ -423,7 +432,7 @@ func (a *Accounts) openSessionData(ctx context.Context, vault SecretStore, id *v
 		Handle:     id.Spec.Handle,
 		RepoDID:    data.AccountDID,
 		PDSURL:     data.HostURL,
-		ClientID:   a.oauthClientID(id),
+		ClientID:   a.sessionClientID(id),
 		Scopes:     a.scopesFor(id.Spec.Mode),
 		Directory:  a.oauth.Directory,
 		HTTPClient: a.oauthHTTP(),

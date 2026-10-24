@@ -1,7 +1,6 @@
 package bidder
 
 import (
-	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -18,8 +17,6 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/participant"
 )
-
-const defaultBidderOAuthClientID = "https://socialweb.computer/oauth-client-metadata.json"
 
 func (s *Service) restoreSession(ctx context.Context, egress component.Egress, log *slog.Logger) {
 	if s.credentials == nil {
@@ -43,7 +40,7 @@ func (s *Service) restoreSession(ctx context.Context, egress component.Egress, l
 		DID:        session.AccountDID,
 		RepoDID:    session.AccountDID,
 		PDSURL:     session.HostURL,
-		ClientID:   cmp.Or(session.ClientID, defaultBidderOAuthClientID),
+		ClientID:   session.ClientID,
 		Scopes:     session.Scopes,
 		HTTPClient: egress.Client(DefaultCallTimeout),
 	}

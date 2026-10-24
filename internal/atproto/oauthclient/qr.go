@@ -72,6 +72,14 @@ type QRSession struct {
 	DPoPPrivateJWK map[string]any `json:"dpopPrivateJwk"`
 }
 
+func QRClientID(origin string) string {
+	origin = strings.TrimRight(strings.TrimSpace(origin), "/")
+	if origin == "" {
+		return ""
+	}
+	return origin + "/oauth-client-metadata.json"
+}
+
 func jwkString(jwk map[string]any, name string) string {
 	value, _ := jwk[name].(string)
 	return value
