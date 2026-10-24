@@ -436,6 +436,95 @@ func (v *BidsX402) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+type ComputeEventsGuestPublicKey struct {
+	Type       string                     `json:"$type"`
+	CreatedAt  string                     `json:"createdAt"`
+	Key        string                     `json:"key"`
+	Kind       string                     `json:"kind"`
+	Signatures Signatures                 `json:"signatures,omitempty"`
+	Tag        string                     `json:"tag"`
+	Extra      map[string]json.RawMessage `json:"-"`
+	absent     map[string]json.RawMessage
+}
+
+func (ComputeEventsGuestPublicKey) NSID() string {
+	return "com.publicdomainrelay.temp.compute.events.guest.publicKey"
+}
+
+func ParseComputeEventsGuestPublicKey(value map[string]any) (*ComputeEventsGuestPublicKey, error) {
+	var out ComputeEventsGuestPublicKey
+	if err := decodeRecord(value, "com.publicdomainrelay.temp.compute.events.guest.publicKey", &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (v ComputeEventsGuestPublicKey) MarshalJSON() ([]byte, error) {
+	type plain ComputeEventsGuestPublicKey
+	if v.Type == "" {
+		v.Type = "com.publicdomainrelay.temp.compute.events.guest.publicKey"
+	}
+	return marshalOpen(plain(v), v.Extra, v.absent)
+}
+
+func (v *ComputeEventsGuestPublicKey) UnmarshalJSON(b []byte) error {
+	type plain ComputeEventsGuestPublicKey
+	var p plain
+	extra, absent, err := unmarshalOpen(b, &p)
+	if err != nil {
+		return err
+	}
+	*v = ComputeEventsGuestPublicKey(p)
+	v.Extra = extra
+	v.absent = absent
+	return nil
+}
+
+type ComputeEventsGuestSignalWebRTC struct {
+	Type       string                     `json:"$type"`
+	Ciphertext string                     `json:"ciphertext"`
+	CreatedAt  string                     `json:"createdAt"`
+	Kind       string                     `json:"kind"`
+	Recipient  StrongRef                  `json:"recipient"`
+	Signatures Signatures                 `json:"signatures,omitempty"`
+	Tag        string                     `json:"tag"`
+	Extra      map[string]json.RawMessage `json:"-"`
+	absent     map[string]json.RawMessage
+}
+
+func (ComputeEventsGuestSignalWebRTC) NSID() string {
+	return "com.publicdomainrelay.temp.compute.events.guest.signalWebRTC"
+}
+
+func ParseComputeEventsGuestSignalWebRTC(value map[string]any) (*ComputeEventsGuestSignalWebRTC, error) {
+	var out ComputeEventsGuestSignalWebRTC
+	if err := decodeRecord(value, "com.publicdomainrelay.temp.compute.events.guest.signalWebRTC", &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (v ComputeEventsGuestSignalWebRTC) MarshalJSON() ([]byte, error) {
+	type plain ComputeEventsGuestSignalWebRTC
+	if v.Type == "" {
+		v.Type = "com.publicdomainrelay.temp.compute.events.guest.signalWebRTC"
+	}
+	return marshalOpen(plain(v), v.Extra, v.absent)
+}
+
+func (v *ComputeEventsGuestSignalWebRTC) UnmarshalJSON(b []byte) error {
+	type plain ComputeEventsGuestSignalWebRTC
+	var p plain
+	extra, absent, err := unmarshalOpen(b, &p)
+	if err != nil {
+		return err
+	}
+	*v = ComputeEventsGuestSignalWebRTC(p)
+	v.Extra = extra
+	v.absent = absent
+	return nil
+}
+
 type ComputeEventsVMDelete struct {
 	Type       string                     `json:"$type"`
 	CreatedAt  string                     `json:"createdAt"`
@@ -525,6 +614,7 @@ type ComputeEventsVMOnNetwork struct {
 	Type       string                     `json:"$type"`
 	Address    string                     `json:"address,omitempty"`
 	CreatedAt  string                     `json:"createdAt"`
+	Kind       string                     `json:"kind,omitempty"`
 	Signatures Signatures                 `json:"signatures,omitempty"`
 	Tag        string                     `json:"tag,omitempty"`
 	Extra      map[string]json.RawMessage `json:"-"`
@@ -687,6 +777,33 @@ func (v *ComputeEventsVMTerminated) UnmarshalJSON(b []byte) error {
 		return err
 	}
 	*v = ComputeEventsVMTerminated(p)
+	v.Extra = extra
+	v.absent = absent
+	return nil
+}
+
+type ComputeGuestSubscribeEventsEvent struct {
+	CID    string                     `json:"cid"`
+	Record json.RawMessage            `json:"record,omitempty"`
+	Seq    int64                      `json:"seq"`
+	URI    string                     `json:"uri"`
+	Extra  map[string]json.RawMessage `json:"-"`
+	absent map[string]json.RawMessage
+}
+
+func (v ComputeGuestSubscribeEventsEvent) MarshalJSON() ([]byte, error) {
+	type plain ComputeGuestSubscribeEventsEvent
+	return marshalOpen(plain(v), v.Extra, v.absent)
+}
+
+func (v *ComputeGuestSubscribeEventsEvent) UnmarshalJSON(b []byte) error {
+	type plain ComputeGuestSubscribeEventsEvent
+	var p plain
+	extra, absent, err := unmarshalOpen(b, &p)
+	if err != nil {
+		return err
+	}
+	*v = ComputeGuestSubscribeEventsEvent(p)
 	v.Extra = extra
 	v.absent = absent
 	return nil

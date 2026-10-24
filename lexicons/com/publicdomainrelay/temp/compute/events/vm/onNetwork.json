@@ -10,7 +10,13 @@
         "type": "object",
         "required": ["createdAt"],
         "properties": {
-          "address": { "type": "string", "description": "The VM's address on the tenant network: the iroh ticket when tag is absent, else the URL of the tagged tunnel." },
+          "kind": {
+            "type": "string",
+            "knownValues": ["iroh", "https", "webrtc"],
+            "maxLength": 16,
+            "description": "What address is. Absent, it reads as iroh when tag is absent and https when tag is present. iroh: address is the VM's iroh ticket. https: tag names the tunnel and address is its https URL. webrtc: tag names the tunnel and address is the guest agent's DTLS certificate fingerprint (\"sha-256 AB:CD:...\"), which the requester checks against the a=fingerprint of the guest's answer."
+          },
+          "address": { "type": "string", "description": "The VM's address for kind: the iroh ticket (iroh), the URL of the tagged tunnel (https), or the guest agent's DTLS certificate fingerprint \"sha-256 AB:CD:...\" (webrtc)." },
           "tag": { "type": "string", "maxLength": 32, "description": "Names one of the VM's tunnels (spec.tunnels of the contract); absent, address is the VM's iroh ticket." },
           "createdAt": { "type": "string", "format": "datetime" },
           "signatures": { "type": "ref", "ref": "network.attested.signature#signatures" }

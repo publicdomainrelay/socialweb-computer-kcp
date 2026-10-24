@@ -20,6 +20,8 @@ const (
 	CollectionVMOnNetwork       = "com.publicdomainrelay.temp.compute.events.vm.onNetwork"
 	CollectionVMTerminated      = "com.publicdomainrelay.temp.compute.events.vm.terminated"
 	CollectionVMHostKeys        = "com.publicdomainrelay.temp.compute.events.vm.hostKeys"
+	CollectionGuestPublicKey    = "com.publicdomainrelay.temp.compute.events.guest.publicKey"
+	CollectionGuestSignalWebRTC = "com.publicdomainrelay.temp.compute.events.guest.signalWebRTC"
 	CollectionBadgeBlueKeys     = "com.publicdomainrelay.temp.badgeBlueKeys"
 	CollectionHeartbeat         = "com.publicdomainrelay.temp.market.heartbeat"
 	CollectionFedproxyRBAC      = "com.fedproxy.rbac"
@@ -46,7 +48,8 @@ var (
 		[]string{ScopeAtproto},
 		collectionScopes([]string{"create", "update"},
 			CollectionComputeVM, CollectionRFP, CollectionAccept, CollectionEvent, CollectionVMDelete,
-			CollectionVMOnNetwork, CollectionPolicyGhaLite, CollectionPolicyTypeScript),
+			CollectionVMOnNetwork, CollectionGuestPublicKey, CollectionGuestSignalWebRTC,
+			CollectionPolicyGhaLite, CollectionPolicyTypeScript),
 		[]string{collectionScope(CollectionFedproxyRBAC, "create", "update", "delete")},
 		[]string{collectionScope(CollectionBadgeBlueKeys, "create", "update", "delete")},
 		[]string{RPCSubmitRFP, RPCSubmitAccept, RPCSubmitBid, RPCSubmitEvent},
@@ -58,6 +61,7 @@ var (
 			CollectionRBACDID, CollectionBid, CollectionBidsFree, CollectionReceipt, CollectionEvent,
 			CollectionConfigWIFSimple, CollectionComputeVM, CollectionRFP, CollectionAccept,
 			CollectionVMDelete, CollectionVMOnNetwork, CollectionVMTerminated, CollectionVMHostKeys,
+			CollectionGuestPublicKey, CollectionGuestSignalWebRTC,
 			CollectionFedproxyRBAC, CollectionBidderAssociation, CollectionPolicyGhaLite,
 			CollectionPolicyTypeScript),
 		[]string{collectionScope(CollectionOffering, "create", "update")},

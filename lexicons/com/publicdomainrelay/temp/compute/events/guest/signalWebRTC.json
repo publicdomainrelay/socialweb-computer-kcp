@@ -1,0 +1,28 @@
+{
+  "lexicon": 1,
+  "id": "com.publicdomainrelay.temp.compute.events.guest.signalWebRTC",
+  "description": "A sealed WebRTC session description for one tunnel; sent as the payload of a market.event. Non-trickle ICE: the requester offers once with all candidates, the guest answers once. Direction comes from the author: a requester-authored one is forwarded by the bidder to the guest's subscription; a bidder-authored one carries what the guest said. The bidder never opens the ciphertext.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["kind", "tag", "recipient", "ciphertext", "createdAt"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "knownValues": ["offer", "answer"],
+            "maxLength": 16,
+            "description": "The SDP type of the sealed session description."
+          },
+          "tag": { "type": "string", "maxLength": 32, "description": "Names the webrtc tunnel of the contract (spec.tunnels)." },
+          "recipient": { "type": "ref", "ref": "com.atproto.repo.strongRef", "description": "The compute.events.guest.publicKey record the ciphertext is sealed to." },
+          "ciphertext": { "type": "string", "maxLength": 16384, "description": "The session description, age armored ciphertext sealed to recipient." },
+          "createdAt": { "type": "string", "format": "datetime" },
+          "signatures": { "type": "ref", "ref": "network.attested.signature#signatures" }
+        }
+      }
+    }
+  }
+}

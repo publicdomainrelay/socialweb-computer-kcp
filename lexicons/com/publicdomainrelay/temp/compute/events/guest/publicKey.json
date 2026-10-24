@@ -1,0 +1,27 @@
+{
+  "lexicon": 1,
+  "id": "com.publicdomainrelay.temp.compute.events.guest.publicKey",
+  "description": "A party to a contract publishes an encryption public key for one tag; sent as the payload of a market.event. Anything sealed under that tag is sealed to the latest publicKey of the other side. Direction comes from the author: a requester-authored one is forwarded by the bidder to the guest's subscription; a bidder-authored one carries what the guest said.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["kind", "tag", "key", "createdAt"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "knownValues": ["age-x25519"],
+            "maxLength": 32,
+            "description": "The key type. age-x25519: key is an age X25519 recipient (age1...)."
+          },
+          "tag": { "type": "string", "maxLength": 32, "description": "Names the tunnel of the contract (spec.tunnels) or another purpose the key is for." },
+          "key": { "type": "string", "maxLength": 256, "description": "The public key in the text form of kind." },
+          "createdAt": { "type": "string", "format": "datetime" },
+          "signatures": { "type": "ref", "ref": "network.attested.signature#signatures" }
+        }
+      }
+    }
+  }
+}

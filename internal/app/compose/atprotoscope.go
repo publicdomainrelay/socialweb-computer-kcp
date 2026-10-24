@@ -33,6 +33,8 @@ var requesterScope = []string{
 	"repo:com.publicdomainrelay.temp.market.event?action=create&action=update",
 	"repo:com.publicdomainrelay.temp.compute.events.vm.delete?action=create&action=update",
 	"repo:com.publicdomainrelay.temp.compute.events.vm.onNetwork?action=create&action=update",
+	"repo:com.publicdomainrelay.temp.compute.events.guest.publicKey?action=create&action=update",
+	"repo:com.publicdomainrelay.temp.compute.events.guest.signalWebRTC?action=create&action=update",
 	"repo:com.fedproxy.rbac?action=create&action=update&action=delete",
 	"repo:computer.socialweb.temp.policy.ghalite?action=create&action=update",
 	"repo:computer.socialweb.temp.policy.typescript?action=create&action=update",

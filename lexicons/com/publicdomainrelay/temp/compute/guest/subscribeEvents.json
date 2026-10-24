@@ -1,0 +1,35 @@
+{
+  "lexicon": 1,
+  "id": "com.publicdomainrelay.temp.compute.guest.subscribeEvents",
+  "defs": {
+    "main": {
+      "type": "subscription",
+      "description": "Served by the bidder's GuestControlPlane to a guest holding a workload identity token. Streams the requester-authored compute.events.guest.* payloads for that guest's contract, in order, after cursor.",
+      "parameters": {
+        "type": "params",
+        "properties": {
+          "cursor": { "type": "integer", "description": "The last seq the guest received; entries after it are replayed, then new ones streamed. Absent, the stream starts at the oldest entry kept." }
+        }
+      },
+      "message": {
+        "schema": {
+          "type": "union",
+          "refs": ["#event"]
+        }
+      },
+      "errors": [
+        { "name": "FutureCursor" }
+      ]
+    },
+    "event": {
+      "type": "object",
+      "required": ["seq", "uri", "cid", "record"],
+      "properties": {
+        "seq": { "type": "integer" },
+        "uri": { "type": "string", "format": "at-uri", "description": "The compute.events.guest.* payload record." },
+        "cid": { "type": "string", "format": "cid" },
+        "record": { "type": "unknown", "description": "The payload record value; its $type is a compute.events.guest.* NSID." }
+      }
+    }
+  }
+}
