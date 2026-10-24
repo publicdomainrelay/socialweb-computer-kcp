@@ -85,7 +85,7 @@ func (c *Composer) ApplySessionOwner(ctx context.Context, r Root, ws string, o S
 		return nil
 	}
 	remote := pdsv1alpha1.RemotePDSSpec{URL: pdsURL, DID: pdsServiceDID(pdsURL)}
-	if _, err := c.ApplyRemotePDS(ctx, r, ws, &pdsv1alpha1.RemotePDS{ObjectMeta: metav1.ObjectMeta{Name: ownerPdsName(pdsURL)}, Spec: remote}); err != nil {
+	if _, err := c.ApplyRemotePDS(ctx, r, ws, &pdsv1alpha1.RemotePDS{ObjectMeta: metav1.ObjectMeta{Name: ownerPdsName(pdsURL), Labels: sessionOwnerLabels()}, Spec: remote}); err != nil {
 		return err
 	}
 	repo := RepoRefIn(o.did(), ws).Name
@@ -151,5 +151,33 @@ func (c *Composer) PruneSessionOwners(ctx context.Context, ws string, keep []str
 	if err := c.Prune(ctx, ws, v1alpha1.RemoteRepoGVR, selector, repos); err != nil {
 		return err
 	}
+	pdses, err := c.sessionOwnerPDSes(ctx, ws, selector)
+	if err != nil {
+		return err
+	}
+	if err := c.Prune(ctx, ws, RemotePDSGVR, selector, pdses); err != nil {
+		return err
+	}
 	return c.Prune(ctx, ws, MarketIdentityGVR, selector, identities)
+}
+
+func (c *Composer) sessionOwnerPDSes(ctx context.Context, ws, selector string) (map[string]bool, error) {
+	ri, err := c.Client(ws, v1alpha1.RemoteRepoGVR)
+	if err != nil {
+		return nil, err
+	}
+	items, err := kube.List[v1alpha1.RemoteRepo](ctx, ri, metav1.ListOptions{LabelSelector: selector})
+	if apierrors.IsNotFound(err) {
+		return map[string]bool{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]bool{}
+	for _, repo := range items {
+		if repo.DeletionTimestamp == nil && strings.TrimSpace(repo.Spec.PdsRef.Name) != "" {
+			out[strings.TrimSpace(repo.Spec.PdsRef.Name)] = true
+		}
+	}
+	return out, nil
 }

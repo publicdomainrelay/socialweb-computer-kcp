@@ -406,7 +406,7 @@ func (c *Composer) ApplyRemotePDS(ctx context.Context, r Root, ws string, desire
 	if desired == nil || strings.TrimSpace(desired.Name) == "" {
 		return nil, nil
 	}
-	obj := &pdsv1alpha1.RemotePDS{ObjectMeta: metav1.ObjectMeta{Name: desired.Name}, Spec: desired.Spec}
+	obj := &pdsv1alpha1.RemotePDS{ObjectMeta: metav1.ObjectMeta{Name: desired.Name, Labels: desired.Labels}, Spec: desired.Spec}
 	if err := c.ApplyTyped(ctx, r, ws, RemotePDSGVR, pdsv1alpha1.GroupVersion.String(), KindRemotePDS, obj); err != nil {
 		return nil, err
 	}
