@@ -28,6 +28,7 @@ const (
 	ExportComputeContracts = "computecontracts"
 	ExportEvents           = "events"
 	ExportPDS              = "pds"
+	ExportClusters         = "clusters"
 )
 
 type Root struct {
@@ -168,6 +169,24 @@ func DrainWatch[C ctlruntime.Object](c *Composer, export, rootKind string) ctlru
 	return ctlruntime.WatchesIn(export, func(_ context.Context, src ctlruntime.Request, _ C) []ctlruntime.Request {
 		return c.deletingIn(rootKind, src.Workspace)
 	})
+}
+
+func TeardownWatch[C ctlruntime.Object](c *Composer, export, rootKind string) ctlruntime.Option {
+	return ctlruntime.WatchesIn(export, func(_ context.Context, _ ctlruntime.Request, _ C) []ctlruntime.Request {
+		return c.deletingOf(rootKind)
+	})
+}
+
+func (c *Composer) deletingOf(rootKind string) []ctlruntime.Request {
+	c.roots.mu.Lock()
+	defer c.roots.mu.Unlock()
+	var out []ctlruntime.Request
+	for _, r := range c.roots.deleting {
+		if r.Kind == rootKind {
+			out = append(out, ctlruntime.Request{Cluster: r.Cluster, Name: r.Name})
+		}
+	}
+	return out
 }
 
 func (c *Composer) Mine(req ctlruntime.Request) bool {

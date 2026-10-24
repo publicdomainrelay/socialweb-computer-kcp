@@ -59,7 +59,8 @@ type Controller struct {
 func Register(m *ctlruntime.Manager, c *compose.Composer, web *WebApp) error {
 	ctl := &Controller{c: c, web: web}
 	c.ProvideTrust(schema.GroupKind{Group: v1alpha1.GroupName, Kind: Kind})
-	opts := append([]ctlruntime.Option{ctlruntime.Export(compose.ExportApplications), ctlruntime.Finalizer(compose.Finalizer)}, c.Watches(Kind)...)
+	opts := append([]ctlruntime.Option{ctlruntime.Export(compose.ExportApplications), ctlruntime.Finalizer(compose.Finalizer),
+		compose.TeardownWatch[*v1alpha1.Cluster](c, compose.ExportClusters, Kind)}, c.Watches(Kind)...)
 	opts = append(opts, compose.DrainWatch[*v1alpha1.AtprotoRecord](c, compose.ExportMarketIdentities, Kind))
 	if err := ctlruntime.For[*v1alpha1.Gateway](m, Name, ctl, opts...); err != nil {
 		return fmt.Errorf("gateway: registering the Gateway controller: %w", err)
@@ -148,6 +149,13 @@ func (p *pass) deleting(msg string) (ctlruntime.Result, error) {
 
 func (p *pass) delete(ctx context.Context) (ctlruntime.Result, error) {
 	c, r := p.c, p.r
+	clusters, err := c.DeleteAccountClusters(ctx)
+	if err != nil {
+		return ctlruntime.Result{}, err
+	}
+	if clusters > 0 {
+		return p.deleting(fmt.Sprintf("%d Cluster(s) tearing down", clusters))
+	}
 	held, err := c.HeldContracts(ctx, r.Workspace)
 	if err != nil {
 		return ctlruntime.Result{}, err

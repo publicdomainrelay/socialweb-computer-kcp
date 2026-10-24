@@ -22,6 +22,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/kcpgvr"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/clusterhome"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kcpapply"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/manifests"
@@ -670,6 +671,48 @@ func componentRank(kind string) int {
 		return 5
 	}
 	return 6
+}
+
+const AccountWorkspaceType = "account"
+
+func (c *Composer) DeleteAccountClusters(ctx context.Context) (int, error) {
+	ri, err := c.Client(clusterhome.RootWorkspace, WorkspaceGVR)
+	if err != nil {
+		return 0, err
+	}
+	accounts, err := kube.List[tenancyv1alpha1.Workspace](ctx, ri, metav1.ListOptions{})
+	if err != nil {
+		return 0, err
+	}
+	left := 0
+	for _, account := range accounts {
+		if account.Spec.Type == nil || account.Spec.Type.Name != AccountWorkspaceType {
+			continue
+		}
+		path := clusterhome.RootWorkspace + ":" + account.Name
+		hri, err := c.Client(path, WorkspaceGVR)
+		if err != nil {
+			return left, err
+		}
+		homes, err := kube.List[tenancyv1alpha1.Workspace](ctx, hri, metav1.ListOptions{})
+		if apierrors.IsNotFound(err) {
+			continue
+		}
+		if err != nil {
+			return left, err
+		}
+		for _, home := range homes {
+			if home.Spec.Mount != nil {
+				continue
+			}
+			n, err := c.DeleteAll(ctx, path+":"+home.Name, v1alpha1.ClusterGVR)
+			if err != nil && home.DeletionTimestamp == nil {
+				return left, err
+			}
+			left += n
+		}
+	}
+	return left, nil
 }
 
 func (c *Composer) StopComponents(ctx context.Context, r Root, ws string) (int, error) {
