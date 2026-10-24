@@ -148,6 +148,13 @@ func (p *pass) deleting(msg string) (ctlruntime.Result, error) {
 
 func (p *pass) delete(ctx context.Context) (ctlruntime.Result, error) {
 	c, r := p.c, p.r
+	held, err := c.HeldContracts(ctx, r.Workspace)
+	if err != nil {
+		return ctlruntime.Result{}, err
+	}
+	if held > 0 {
+		return p.deleting(fmt.Sprintf("%d ComputeContract(s) still hold a guest; the Requester stays until their NodeClaims release them", held))
+	}
 	pdsUp := false
 	if v, ok, err := c.GetComponent(ctx, r.Workspace, compose.ComponentKindPds, compose.PdsComponent); err == nil && ok && v.Status.Ready {
 		pdsUp = true

@@ -16,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 )
 
@@ -402,6 +403,27 @@ func (c *Composer) DeleteAll(ctx context.Context, ws string, gvr schema.GroupVer
 		}
 	}
 	return len(items), nil
+}
+
+func (c *Composer) HeldContracts(ctx context.Context, ws string) (int, error) {
+	ri, err := c.Client(ws, ComputeContractGVR)
+	if err != nil {
+		return 0, err
+	}
+	items, err := kube.List[v1alpha1.ComputeContract](ctx, ri, metav1.ListOptions{})
+	if apierrors.IsNotFound(err) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	held := 0
+	for i := range items {
+		if items[i].HoldsGuest() {
+			held++
+		}
+	}
+	return held, nil
 }
 
 func (c *Composer) SetSpecField(ctx context.Context, r Root, ws string, gvr schema.GroupVersionResource, apiVersion, kind, name string, spec map[string]any) error {
