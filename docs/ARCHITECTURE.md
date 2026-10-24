@@ -3434,7 +3434,7 @@ internal/vmruntime/               the Linux VM runtime: prep and one transient V
 internal/fcapi/                   the firecracker API config and client
 internal/guestdisk/               clones and grows the guest rootfs and writes the seed
 internal/guestimage/              the pinned guest image store: names, pins, fetch and verify by sha256, GC
-internal/guestimagerelease/       picks the guest image source under the release base (releases/<version>, then main/<commit>)
+internal/guestimagerelease/       picks the guest image source under the release base (guest-images/<target>/<pinned image.json sha256>, then releases/<version>, then main/<commit>)
 internal/guestnet/                guest network wiring: pasta argv, MAC, relay targets, the onNetwork URL
 internal/guestrootfs/             the guest rootfs build spec (bakes, preinstalls) behind `nodeimage guest-rootfs`
 internal/guestseed/               the guest seed image and its user_data modules: guest login, iroh transport, onNetwork reporter, accept bundle
@@ -4257,6 +4257,22 @@ fail, rather than the code read against this document alone.
   so the one-kcp network has no standing check until plan 0027.
 
 ## 15. Settled decisions, and the defects they closed
+
+- **The guest image is published once, under the key of its pins, on 2026-10-23.** Every tag and
+  `main` push rebuilt `firecracker-x86_64` from source (about 15 minutes of the `guest-image` job) and
+  uploaded the same 1.5 GiB rootfs again under `releases/<version>` or `main/<commit>`, although the
+  build is reproducible and the pins rarely move. The image now lives at
+  `guest-images/<target>/<sha256 of the pinned image.json>/`; `image.json` names the sha256 of the
+  kernel and the rootfs, so its own sha256 names the whole image. The `guest-image` job reads that key
+  without credentials: present, it fetches the three files and checks each against its pin, and neither
+  builds nor hands publish an artifact; absent, or when a fetch or a hash fails, it builds as before and
+  publish uploads to the key with `publish-spaces.ts --content-addressed`, which writes only what the key
+  does not already hold. `guestimagerelease.Source` tries the key first and keeps `releases/<version>`,
+  `main/<commit>`, `main/latest` and the newest release after it, so a binary published before the key
+  and every image already under those prefixes still resolve; no consumer was found that needs a new
+  per-release copy. Reading taken before the first CI run: the key answered 404, the three files under
+  `main/fd1a644/guest-image/firecracker-x86_64` hashed to their pins, and a build of this commit resolved
+  its image from a local server holding only the key, then from the public bucket through `main/latest`.
 
 - **Gaps of the removed TypeScript runtime, closed by plan 0026 removing it (moved from section 14,
   2026-10-23).** Each was open in section 14 because of a mechanism that plan 0026 deleted: the TypeScript

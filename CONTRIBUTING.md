@@ -91,6 +91,8 @@ If `make` changed `internal/versions/versions.json`, commit it with the source c
 
 `B` and `SHA` are what `install` and `upgrade --binary --sha256` take. CI publishes the same names to
 the public bucket: `releases/<tag>/` on a `v*` tag, `main/<commit>/` and `main/latest/` on `main`.
+The guest image is published once per pin, to `guest-images/<target>/<sha256 of the pinned image.json>/`,
+and CI fetches it from there instead of rebuilding it when its pins did not change.
 
 Copy a release to another host:
 

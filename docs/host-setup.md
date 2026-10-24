@@ -44,10 +44,10 @@ Every tagged release publishes Linux binaries and the guest image to a public bu
 | `releases/<version>/binaries/SHA256SUMS` | The sha256 of both binaries. |
 | `releases/<version>/binaries/release.json` | The commit, the build mode and one entry per platform. |
 | `releases/<version>/binaries/version-linux-<arch>.txt` | The pinned version and sha256 of every asset in that binary. |
-| `releases/<version>/guest-image/firecracker-x86_64/` | `vmlinux`, `rootfs.ext4` and `image.json`: the guest image a bidder's VMs boot. |
 | `releases/<version>/manifest.json` | Every file under the version, with its size and sha256. |
+| `guest-images/firecracker-x86_64/<sha256>/` | `vmlinux`, `rootfs.ext4` and `image.json`: the guest image a bidder's VMs boot. `<sha256>` is the sha256 of `image.json` pinned in `internal/versions/versions.json`, which pins the other two files. |
 
-`<version>` is a git tag, for example `v0.0.0-rc3`. Everything in the bucket is readable without credentials: `releases/<version>/` holds one tag's build, `main/<commit>/` holds the build of each commit on `main`, and `main/latest/` is a copy of the newest one.
+`<version>` is a git tag, for example `v0.0.0-rc3`. Everything in the bucket is readable without credentials: `releases/<version>/` holds one tag's build, `main/<commit>/` holds the build of each commit on `main`, and `main/latest/` is a copy of the newest one. A guest image is uploaded once, under the key of its pins; releases before the content-addressed key also hold one under `releases/<version>/guest-image/`.
 
 ## See also
 

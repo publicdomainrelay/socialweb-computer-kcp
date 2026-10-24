@@ -14,11 +14,12 @@ Tagged releases publish Linux binaries and the guest image to a public bucket. N
 | `releases/<version>/binaries/SHA256SUMS` | sha256 of both binaries. |
 | `releases/<version>/binaries/release.json` | Commit, build mode, one entry per platform. |
 | `releases/<version>/binaries/version-linux-<arch>.txt` | Pinned version and sha256 of every embedded asset. |
-| `releases/<version>/guest-image/firecracker-x86_64/` | `vmlinux`, `rootfs.ext4`, `image.json`. |
 | `releases/<version>/manifest.json` | Every file under the version, with size and sha256. |
+| `guest-images/firecracker-x86_64/<sha256>/` | `vmlinux`, `rootfs.ext4`, `image.json`; `<sha256>` is the pinned sha256 of `image.json`. |
 
 `<version>` is a git tag such as `v0.0.0-rc3`. `main/<commit>/` holds commit builds and
-`main/latest/` is the newest.
+`main/latest/` is the newest. A guest image is uploaded once, under the key of its pins, and
+every release with the same pins uses it.
 
 ## Install
 
@@ -55,12 +56,15 @@ binary needs `--allow-dev-binary`. `--ready-timeout` (default `1m`) bounds the f
 ```bash
 # variables carry over: BUCKET, V
 HANDLE=<handle>
+PIN=$(curl -fsSL "https://raw.githubusercontent.com/publicdomainrelay/socialweb-computer-kcp/$V/internal/versions/versions.json" \
+  | jq -r '.guestImages.targets["firecracker-x86_64"].outputs["image.json"].sha256')
 sudo /usr/local/bin/socialweb-computer install bidder --handle "$HANDLE" \
-  --guest-image-source "$BUCKET/releases/$V/guest-image/firecracker-x86_64"
+  --guest-image-source "$BUCKET/guest-images/firecracker-x86_64/$PIN"
 ```
 
 Without a source, the binary resolves the image pinned into its own build from
-`releases/<its version>`, then `main/<its commit>`, then the newest published release. Every candidate
+`guest-images/<target>/<its pinned image.json sha256>`, then `releases/<its version>`, then
+`main/<its commit>`, then `main/latest`, then the newest published release. Every candidate
 is verified; only when all differ is the image refused. A stored image is re-verified.
 
 Only `firecracker-x86_64` is published. An arm64 host builds one with `scripts/build-guest-image.sh`.

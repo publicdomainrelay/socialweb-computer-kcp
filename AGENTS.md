@@ -28,7 +28,7 @@ needs the argument behind it. Do not read it end to end.
 | What a host must provide | `socialweb-computer check-host -role gateway` or `-role bidder`, `docs/host-contract.md` |
 | The market network | `deploy/market-network/README.md` |
 | The operator handoff | `handoff.yaml` |
-| What CI runs on a push, and its runners | `.github/workflows/ci.yml`: the gate, the guest image and the Spaces publish on GitHub-hosted runners; the pin check (`pins`) and the release builds (`binaries`) on the self-hosted runner of `scripts/gh-runner-install.sh` (account socialweb-ci) |
+| What CI runs on a push, and its runners | `.github/workflows/ci.yml`: the gate, the guest image (fetched from `guest-images/<target>/<pinned image.json sha256>` in the bucket when it is there, built otherwise) and the Spaces publish on GitHub-hosted runners; the pin check (`pins`) and the release builds (`binaries`) on the self-hosted runner of `scripts/gh-runner-install.sh` (account socialweb-ci) |
 | The integration scenarios (no Go tests until plan 0027) | `docs/spec/integration-catalog.yaml` |
 
 ## Layout
@@ -137,8 +137,9 @@ A prod deployment guarantees nothing; the routine path preserves most things.
   `--url https://k8s.socialweb.computer/`.
 - A bidder's guest image comes from `--guest-image-source` (a `file://` or `https://` base that
   `install bidder` writes to config.json), or, when that is unset, from the published artifacts:
-  `run bidder` reads `releases/<version>` and then `main/<commit>` under
-  `--guest-image-release-base`, the public Spaces bucket by default. On hat-8 the pinned image is in
+  `run bidder` reads `guest-images/<target>/<pinned image.json sha256>`, then `releases/<version>` and
+  `main/<commit>` under `--guest-image-release-base`, the public Spaces bucket by default. CI uploads a
+  guest image once, to that content-addressed key, and only when the key does not hold it yet. On hat-8 the pinned image is in
   `/var/lib/socialweb-computer/guest-image` (root-owned; the bidder verifies every file by the sha256
   pinned in internal/versions/versions.json).
 - Only the lead runs a prod deployment (plan 0006 M5-FRESH-DEPLOY). Task agents never touch prod.
