@@ -86,7 +86,7 @@ func (c *Composer) ApplyAssociationRecord(ctx context.Context, r Root, ws string
 	from := func(path string) map[string]any {
 		return map[string]any{"valueFrom": map[string]any{"kind": KindMarketIdentity, "name": identity, "fieldPath": path}}
 	}
-	record, err := json.Marshal(map[string]any{"challenge": from("spec.approvedAssociations[0]"), "keyId": from("status.did"),
+	record, err := json.Marshal(map[string]any{"challenge": from("status.associations[0]"), "keyId": from("status.did"),
 		"service": service, "name": identity, "createdAt": from("metadata.creationTimestamp")})
 	if err != nil {
 		return err
