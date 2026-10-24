@@ -256,34 +256,12 @@ func newRawClient(addr, token string, hc *http.Client) *rawClient {
 	return &rawClient{addr: strings.TrimRight(addr, "/"), token: token, http: hc}
 }
 
-func adminHTTPClient(pool *x509.CertPool) *http.Client {
-	client, _ := httpclient.TLSClient(httpclient.TLSOptions{Pool: pool, IdleConnTimeout: openbao.IdleConnTimeout})
-	return client
-}
-
 func (c *rawClient) do(ctx context.Context, method, path string, in any) (int, []byte, error) {
 	status, body, err := openbao.New(c.addr, c.token, openbao.WithHTTPClient(c.http)).Raw(ctx, method, strings.Trim(path, "/"), in)
 	if err != nil {
 		return 0, nil, fmt.Errorf("vaultcert: %s /v1/%s: %w", method, path, err)
 	}
 	return status, body, nil
-}
-
-func (c *rawClient) listData(ctx context.Context, path string) (map[string]json.RawMessage, error) {
-	status, body, err := c.do(ctx, http.MethodGet, path, nil)
-	if err != nil {
-		return nil, err
-	}
-	if status < 200 || status > 299 {
-		return nil, fmt.Errorf("vaultcert: GET /v1/%s -> HTTP %d: %s", path, status, strings.TrimSpace(string(body)))
-	}
-	var env struct {
-		Data map[string]json.RawMessage `json:"data"`
-	}
-	if err := json.Unmarshal(body, &env); err != nil {
-		return nil, fmt.Errorf("vaultcert: GET /v1/%s was not JSON: %v", path, err)
-	}
-	return env.Data, nil
 }
 
 func vaultTTLString(d time.Duration) string {

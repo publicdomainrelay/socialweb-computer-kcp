@@ -48,14 +48,6 @@ func (e *env) dflt(k, v string) {
 	}
 }
 
-func (e *env) list() []string {
-	out := make([]string, 0, len(e.m))
-	for k, v := range e.m {
-		out = append(out, k+"="+v)
-	}
-	return out
-}
-
 func materialize(dir string) (string, string, string, error) {
 	grant, audit, eso := filepath.Join(dir, tenantGrantFile), filepath.Join(dir, auditPolicyFile), filepath.Join(dir, esoDir)
 	if err := os.MkdirAll(eso, 0o700); err != nil {

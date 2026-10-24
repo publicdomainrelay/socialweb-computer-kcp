@@ -938,12 +938,6 @@ func (i *instance) name() string {
 	return i.key.Kind + "/" + i.key.Name
 }
 
-func (i *instance) keyOf() Key {
-	i.mu.Lock()
-	defer i.mu.Unlock()
-	return i.key
-}
-
 func (i *instance) restartsOf() int32 {
 	i.mu.Lock()
 	defer i.mu.Unlock()

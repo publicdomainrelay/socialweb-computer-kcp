@@ -472,4 +472,3 @@ func nameOf(d kube.Doc) string { return docString(d, "metadata", "name") }
 func namespaceOf(d kube.Doc) string { return docString(d, "metadata", "namespace") }
 
 //go:fix inline
-func ptr[T any](v T) *T { return new(v) }

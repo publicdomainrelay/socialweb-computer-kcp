@@ -1174,31 +1174,6 @@ func newNodeHost(ctx context.Context, opts nodeHostsOptions, log *slog.Logger, c
 	}, nil
 }
 
-func nodeOrdinal(nodeID string) (int, error) {
-	digits, ok := strings.CutPrefix(nodeID, "node")
-	if !ok || digits == "" {
-		return 0, fmt.Errorf("clusterprovider: the node id %q does not name which node of its "+
-			"cluster it is, and that number is what picks the node's address out of the cluster's "+
-			"range: the range holds one address per node, numbered from the gateway, so an id with "+
-			"no ordinal in it leaves the node with no address to take. The id is composed with the "+
-			"cluster into the node's name, and this host already builds ids as \"node<N>\"; reading "+
-			"the number off the id rather than carrying a second constant beside it is what keeps "+
-			"an address and a name from disagreeing", nodeID)
-	}
-	ordinal, err := strconv.Atoi(digits)
-	if err != nil {
-		return 0, fmt.Errorf("clusterprovider: the node id %q ends in %q, which is not the number "+
-			"of the node within its cluster: %w", nodeID, digits, err)
-	}
-	if ordinal < 1 {
-		return 0, fmt.Errorf("clusterprovider: the node id %q names node %d of its cluster, and "+
-			"nodes are numbered from 1: the addresses in a cluster's range are numbered from 1 as "+
-			"well, and address 1 is the gateway the guests dial, so there is no node 0 to give one "+
-			"to", nodeID, ordinal)
-	}
-	return ordinal, nil
-}
-
 func nodeIDFor(ordinal int) string {
 	return fmt.Sprintf("node%d", ordinal)
 }
@@ -1330,9 +1305,4 @@ func readTenantNode(ctx context.Context, tenant tenantClient, cluster, nodeName 
 			"back a node that is already serving", nodeName, cluster, err)
 	}
 	return node, nil
-}
-
-func nodeReported(ctx context.Context, tenant tenantClient, cluster, nodeName string) (bool, error) {
-	node, err := readTenantNode(ctx, tenant, cluster, nodeName)
-	return node != nil, err
 }

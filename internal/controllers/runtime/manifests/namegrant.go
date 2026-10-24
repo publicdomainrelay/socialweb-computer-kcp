@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"strings"
 )
 
 type NameGrant struct {
@@ -41,23 +39,4 @@ func (g *NameGrant) UnmarshalJSON(b []byte) error {
 	}
 	*g = NameGrant{Names: names}
 	return nil
-}
-
-func (g NameGrant) check() error {
-	for _, n := range g.Names {
-		if n == "" || strings.ContainsAny(n, ",= \t\n") {
-			return fmt.Errorf("a granted name is empty or holds a comma, an equals sign or a space: %q", n)
-		}
-	}
-	return nil
-}
-
-func (g NameGrant) wire() any {
-	if g.All {
-		return true
-	}
-	if len(g.Names) == 0 {
-		return nil
-	}
-	return g.Names
 }

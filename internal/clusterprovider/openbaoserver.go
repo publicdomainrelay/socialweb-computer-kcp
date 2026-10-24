@@ -28,7 +28,6 @@ const (
 	VaultClient      = "clusterprovider"
 	VaultAccessFile  = "access.json"
 	VaultSyncTimeout = time.Minute
-	vaultTokenReuse  = 10 * time.Minute
 	vaultAccessMode  = 0o600
 )
 

@@ -175,10 +175,6 @@ type Config struct {
 	LogLevel slog.Level
 }
 
-func load(get func(string) string) (Config, error) {
-	return loadFor(get, foldmain.Invocation{})
-}
-
 func loadFor(get func(string) string, inv foldmain.Invocation) (Config, error) {
 	cfg := Config{
 		KCPHost:                strings.TrimSpace(get(envKCPHost)),
