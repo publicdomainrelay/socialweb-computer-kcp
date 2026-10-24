@@ -1,6 +1,6 @@
 plan: "0029"
 title: "Infra and EphemeralInfra: kcp deployments of ComputeContracts, synced both ways with computer.socialweb.infra and computer.socialweb.ephemeralInfra records"
-status: doing
+status: done
 source: >
   2026-10-23, the user's request, read against the code at baf155f6. A deployment today is one
   ComputeContract per run request invocation, or a NodeClaim of a tenant cluster. There is no kcp
@@ -285,7 +285,7 @@ items:
     files:
       - internal/app/marketrequester/marketrequester.go
     done_when: "A MarketRequester root deleted with one Deployed Infra leaves no guest on the bidder and the record is gone."
-    status: todo
+    status: done
 
   - id: U1-UNBIND-KEEPS-RECORD
     title: "Removing spec.record stops the sync and keeps the record"
@@ -297,7 +297,7 @@ items:
       - api/v1alpha1/types_atprotorecord.go
       - internal/controllers/atprotorecord/controller.go
     done_when: "An Infra whose spec.record is removed keeps running and its record stays in the repo."
-    status: todo
+    status: done
 
   - id: DOCS
     title: "Code map and a user section with kubectl examples"

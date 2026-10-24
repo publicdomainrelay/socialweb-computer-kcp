@@ -1,6 +1,6 @@
 plan: "0031"
 title: "Gateway tenant-cluster nodes are managed through one Infra per Cluster; a NodeClaim keeps the join, the grant and the secrets"
-status: todo
+status: doing
 source: >
   2026-10-23, the user's request (gateway tenant-cluster nodes are managed through Infra), read
   against main at 1dc14655 (plans 0028 and 0029 merged). Today every node of a tenant cluster is one
@@ -82,7 +82,7 @@ items:
       - api/v1alpha1/resources.go
       - deploy/
     done_when: "go generate ./api/... leaves no diff on a second run; go build ./... passes."
-    status: todo
+    status: done
 
   - id: I2-INFRA-NODE-FIELDS
     title: "The Infra controller puts a node entry's fields on its ComputeContract"
@@ -98,7 +98,7 @@ items:
       - internal/infra/lifecycle.go
       - internal/controllers/infra/contracts.go
     done_when: "ACC31-SCALE-UP-TWO passes: each node's ComputeContract carries nodeJoin, ownerDid and the bundle secretsRef."
-    status: todo
+    status: done
 
   - id: N3-CLAIM-ENTRY
     title: "The NodeClaim controller composes its Cluster's Infra and writes no ComputeContract"
@@ -170,7 +170,7 @@ items:
       - internal/controllers/nodeclaim/controller.go
       - internal/controllers/nodeclaim/infra.go
     done_when: "ACC31-SCALE-UP-TWO and ACC31-SCALE-IN-ONE pass; no ComputeContract named nodeclaim-* is written."
-    status: todo
+    status: done
 
   - id: N4-CLUSTER-DELETE
     title: "Deleting a Cluster deletes its Infra, which releases every node"
@@ -187,7 +187,7 @@ items:
       - internal/controllers/nodeclaim/controller.go
       - internal/controllers/nodeclaim/infra.go
     done_when: "ACC31-CLUSTER-DELETE passes."
-    status: todo
+    status: done
 
   - id: G5-GATEWAY-ROOT-DELETE
     title: "The Gateway root's teardown is the cluster delete path, then the deployments, then the held-contract guard"
@@ -208,7 +208,7 @@ items:
       - internal/app/compose/infra.go
       - internal/app/gateway/gateway.go
     done_when: "ACC31-GATEWAY-ROOT-DELETE passes."
-    status: todo
+    status: done
 
   - id: R8-ROOT-DELETE-ORDER
     title: "Plan 0029 R8: a MarketRequester root deletes its deployments before it stops the Requester"
@@ -223,7 +223,7 @@ items:
     files:
       - internal/app/marketrequester/marketrequester.go
     done_when: "Plan 0029 R8-ROOT-DELETE-ORDER done_when: ACC31-R8-ROOT-DELETE passes."
-    status: todo
+    status: done
 
   - id: U1-UNBIND-KEEPS-RECORD
     title: "Plan 0029 U1: removing spec.record stops the sync and keeps the record"
@@ -245,7 +245,7 @@ items:
       - internal/controllers/infra/controller.go
       - internal/controllers/infra/record.go
     done_when: "Plan 0029 U1-UNBIND-KEEPS-RECORD done_when: ACC31-U1-UNBIND passes."
-    status: todo
+    status: done
 
   - id: REC9-RECORD-OPT-IN
     title: "A cluster's Infra may publish its record to the cluster owner's repo (later)"
@@ -275,7 +275,7 @@ items:
       - docs/ARCHITECTURE.md
       - deploy/market-network/README.md
     done_when: "Both documents name the cluster Infra, spec.nodes and status.infra."
-    status: todo
+    status: done
 
   - id: ACC31-SCALE-UP-TWO
     title: "A tenant cluster scales from 0 to 2 nodes through its Infra"
@@ -287,7 +287,7 @@ items:
       infra-nodes-<hex>-node-<hex> is owned by the Infra and carries nodeJoin and the bundle
       secretsRef; both NodeClaims reach Running with status.infra naming their entry; both tenant
       nodes are Ready; no ComputeContract named nodeclaim-* exists.
-    status: todo
+    status: done
 
   - id: ACC31-SCALE-IN-ONE
     title: "Scaling in to 1 releases one entry and leaves the other node untouched"
@@ -297,7 +297,7 @@ items:
       entry goes Released, its ComputeContract is Released and then deleted and its entry dropped, its
       guest is gone on the bidder; the other entry stays Deployed, its contract, claim and node keep
       their uid and stay Running and Ready.
-    status: todo
+    status: done
 
   - id: ACC31-CLUSTER-DELETE
     title: "Deleting the Cluster releases its Infra and leaves no guest"
@@ -306,7 +306,7 @@ items:
       kubectl delete of the tenant Cluster deletes its Infra (Terminating with
       infra.socialweb.computer/release, its contracts Released, then gone), the NodeClaims go, the
       Cluster goes, and no ComputeVM is left on the bidder.
-    status: todo
+    status: done
 
   - id: ACC31-GATEWAY-ROOT-DELETE
     title: "Deleting the Gateway root with a busy tenant cluster is bounded as in plan 0028 M4"
@@ -316,7 +316,7 @@ items:
       reports Deleting "<n> Cluster(s) tearing down", the cluster's Infra is released and deleted, no
       ComputeContract holds a guest before the Requester component is deleted, the root is gone
       within the plan 0028 M4 bound, and no guest is left on the bidder.
-    status: todo
+    status: done
 
   - id: ACC31-R8-ROOT-DELETE
     title: "Plan 0029 R8 row: a MarketRequester root deleted with a Deployed Infra"
@@ -325,7 +325,7 @@ items:
       A MarketRequester root with one Deployed Infra bound to its repo is deleted; its status reads
       Deleting "1 deployment(s) releasing" before "component(s) stopping"; the guest is gone on the
       bidder; the computer.socialweb.infra record is gone from the repo; the root is gone.
-    status: todo
+    status: done
 
   - id: ACC31-U1-UNBIND
     title: "Plan 0029 U1 row: an unbound Infra keeps running and its record stays"
@@ -334,4 +334,4 @@ items:
       Removing spec.record from a bound, Deployed Infra deletes its AtprotoRecord child (which had
       deletionPolicy Retain), its watch and its deliver link; the Infra stays Deployed with its
       guest; getRecord on the repo still returns the record.
-    status: todo
+    status: done

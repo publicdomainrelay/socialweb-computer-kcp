@@ -1,6 +1,6 @@
 plan: "0030"
 title: "One live atproto session per account: the MarketIdentity controller owns it, every other consumer reaches it over the bus"
-status: doing
+status: done
 source: >
   2026-10-24, read from the code at baf155f6. Prod (hat-7, the oauthQr bidder bobvmbuilder) lost its
   OAuth session at 2026-10-24T03:19:38Z: the next refresh got invalid_grant "Invalid refresh token".
@@ -315,7 +315,7 @@ items:
     done_when: >
       The network's default bidder (MarketIdentity mode pdsAccount on bob's PDS) is Ready, its RemoteRepo
       Ready and it publishes its offering record after the core restart with the new binary.
-    status: todo
+    status: done
 
   - id: ACC30-NO-OTHER-READER
     title: "No component other than the owner reads the session secret"
@@ -334,4 +334,4 @@ items:
       alice): the MarketIdentity Ready, oauth_session_refreshed lines only from the core's
       MarketIdentity controller, no invalid_grant over 24 hours, the bidder bidding and the gateway
       claims renting nodes.
-    status: todo
+    status: done
