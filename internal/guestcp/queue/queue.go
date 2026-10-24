@@ -38,6 +38,10 @@ type Hub struct {
 	seen map[string]bool
 
 	retained bool
+
+	publish guestcp.Publish
+
+	publisher int
 }
 
 type vmQueue struct {
@@ -119,6 +123,31 @@ func (h *Hub) Append(_ context.Context, computeVM string, event guestcp.QueuedEv
 	q.last = entry.Seq
 	q.notify()
 	return true, nil
+}
+
+func (h *Hub) Serve(publish guestcp.Publish) func() {
+	h.mu.Lock()
+	h.publisher++
+	id := h.publisher
+	h.publish = publish
+	h.mu.Unlock()
+	return func() {
+		h.mu.Lock()
+		if h.publisher == id {
+			h.publish = nil
+		}
+		h.mu.Unlock()
+	}
+}
+
+func (h *Hub) Publish(ctx context.Context, event guestcp.GuestEvent) error {
+	h.mu.Lock()
+	publish := h.publish
+	h.mu.Unlock()
+	if publish == nil {
+		return guestcp.ErrNoPublisher
+	}
+	return publish(ctx, event)
 }
 
 func (h *Hub) Subscribe(computeVM string, cursor *int64) (guestcp.EventStream, error) {

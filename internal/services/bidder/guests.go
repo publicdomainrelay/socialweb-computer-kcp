@@ -108,3 +108,7 @@ func (guests) SyncVM(sync *v1alpha1.StateSync) string {
 func (guests) CheckGuestEvent(record map[string]any) (string, error) {
 	return guestidentity.CheckGuestEvent(record)
 }
+
+func (guests) NetworkKind(tag, address string) string {
+	return guestidentity.NetworkKind(tag, address)
+}

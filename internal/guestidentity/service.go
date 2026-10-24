@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
@@ -36,6 +37,28 @@ type OnNetworkReport struct {
 	CreatedAt string
 
 	Tag string
+
+	Kind string
+}
+
+type GuestEvent struct {
+	ComputeVM string
+
+	Collection string
+
+	Tag string
+
+	Kind string
+
+	Record map[string]any
+}
+
+type EventsRequest struct {
+	AcceptURI string
+
+	AcceptCID string
+
+	Record map[string]any
 }
 
 type GuestOptions struct {
@@ -60,6 +83,8 @@ type GuestOptions struct {
 	HostKeyAttempts int
 
 	HostKeyRetry time.Duration
+
+	Publish func(ctx context.Context, event GuestEvent) error
 }
 
 type Guest struct {
@@ -67,6 +92,7 @@ type Guest struct {
 	identity *Client
 	verifier *Verifier
 	recorder *guestRecord
+	publish  func(ctx context.Context, event GuestEvent) error
 	log      *slog.Logger
 	now      func() time.Time
 
@@ -118,6 +144,7 @@ func NewGuest(ctx context.Context, opts GuestOptions) (*Guest, error) {
 	g := &Guest{
 		handle: opts.Handle, identity: opts.Identity, verifier: opts.Verifier,
 		recorder: &guestRecord{store: opts.VMs, log: opts.Log, now: opts.Now},
+		publish:  opts.Publish,
 		log:      opts.Log, now: opts.Now,
 		loginLimits: opts.LoginLimits, tokenLimits: opts.TokenLimits, publicLimits: opts.PublicLimits,
 		hostKeyAttempts: opts.HostKeyAttempts, hostKeyRetry: opts.HostKeyRetry,
@@ -236,37 +263,82 @@ func (g *Guest) Authenticate(ctx context.Context, authorization string) (string,
 	return claims.ComputeVM, nil
 }
 
-func (g *Guest) OnNetwork(ctx context.Context, authorization string, report OnNetworkReport) Reply {
+func (g *Guest) Events(ctx context.Context, authorization string, request EventsRequest) Reply {
 	token, ok := strings.CutPrefix(strings.TrimSpace(authorization), "Bearer ")
 	if !ok || strings.TrimSpace(token) == "" {
 		return jsonReply(401, map[string]any{"error": "AuthenticationRequired"})
 	}
 	claims, err := g.verifier.Verify(ctx, strings.TrimSpace(token))
 	if err != nil {
-		g.log.Warn("guest.onNetwork: the token is refused", "err", err.Error())
+		g.log.Warn("guest.events: the token is refused", "err", err.Error())
 		return jsonReply(401, map[string]any{"error": "InvalidToken"})
 	}
-	if report.AcceptURI == "" || report.AcceptCID == "" || strings.TrimSpace(report.Address) == "" {
-		return jsonReply(400, map[string]any{"error": "InvalidRequest", "message": "acceptUri, acceptCid and address are required"})
+	acceptURI, acceptCID := strings.TrimSpace(request.AcceptURI), strings.TrimSpace(request.AcceptCID)
+	if acceptURI == "" || acceptCID == "" || request.Record == nil {
+		return jsonReply(400, map[string]any{"error": "InvalidRequest", "message": "acceptUri, acceptCid and record are required"})
 	}
-	err = g.recorder.OnNetwork(ctx, claims.ComputeVM, report)
+	nsid, _ := request.Record["$type"].(string)
+	name := claims.ComputeVM
+	if nsid == market.ComputeEventsVMOnNetworkNSID {
+		err = g.onNetwork(ctx, name, acceptURI, acceptCID, request.Record)
+	} else {
+		err = g.guestEvent(ctx, name, acceptURI, acceptCID, request.Record)
+	}
 	switch {
 	case err == nil:
-		g.log.Info("guest.onNetwork recorded on the ComputeVM", "computevm", claims.ComputeVM,
-			"tag", strings.TrimSpace(report.Tag), "address", strings.TrimSpace(report.Address))
-		return jsonReply(200, map[string]any{"ok": true, "name": claims.ComputeVM})
+		return jsonReply(200, map[string]any{"ok": true, "name": name})
 	case errors.Is(err, ErrUnknownGuest):
-		g.log.Warn("guest.onNetwork: no live ComputeVM holds this token", "computevm", claims.ComputeVM, "acceptUri", report.AcceptURI)
+		g.log.Warn("guest.events: no live ComputeVM holds this token", "computevm", name, "collection", nsid, "acceptUri", acceptURI)
 		return jsonReply(404, map[string]any{"error": "UnknownGuest"})
 	case errors.Is(err, ErrUnknownAccept):
-		g.log.Warn("guest.onNetwork: the accept is not this guest's", "computevm", claims.ComputeVM, "acceptUri", report.AcceptURI)
+		g.log.Warn("guest.events: the accept is not this guest's", "computevm", name, "collection", nsid, "acceptUri", acceptURI)
 		return jsonReply(404, map[string]any{"error": "UnknownAccept"})
 	case errors.Is(err, ErrReportRefused):
 		return jsonReply(400, map[string]any{"error": "InvalidRequest", "message": err.Error()})
 	default:
-		g.log.Warn("guest.onNetwork: the report could not be recorded", "computevm", claims.ComputeVM, "err", err.Error())
-		return jsonReply(503, map[string]any{"error": "Unavailable", "message": "the report could not be recorded on the ComputeVM"})
+		g.log.Warn("guest.events: the event could not be recorded", "computevm", name, "collection", nsid, "err", err.Error())
+		return jsonReply(503, map[string]any{"error": "Unavailable", "message": "the event could not be recorded"})
 	}
+}
+
+func (g *Guest) onNetwork(ctx context.Context, name, acceptURI, acceptCID string, record map[string]any) error {
+	r, err := market.ParseComputeEventsVMOnNetwork(record)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrReportRefused, err)
+	}
+	report := OnNetworkReport{AcceptURI: acceptURI, AcceptCID: acceptCID, Address: r.Address, CreatedAt: r.CreatedAt, Tag: r.Tag, Kind: r.Kind}
+	if err := g.recorder.OnNetwork(ctx, name, report); err != nil {
+		return err
+	}
+	g.log.Info("guest.onNetwork recorded on the ComputeVM", "computevm", name,
+		"tag", strings.TrimSpace(report.Tag), "kind", market.OnNetworkKind(*r), "address", strings.TrimSpace(report.Address))
+	return nil
+}
+
+func (g *Guest) guestEvent(ctx context.Context, name, acceptURI, acceptCID string, record map[string]any) error {
+	unsigned := make(map[string]any, len(record))
+	for key, value := range record {
+		if key != "signatures" {
+			unsigned[key] = value
+		}
+	}
+	nsid, err := CheckGuestEvent(unsigned)
+	if err != nil {
+		return err
+	}
+	if err := g.recorder.Accept(ctx, name, acceptURI, acceptCID); err != nil {
+		return err
+	}
+	if g.publish == nil {
+		return errors.New("guestidentity: the guest control plane publishes no guest events")
+	}
+	tag, _ := unsigned["tag"].(string)
+	kind, _ := unsigned["kind"].(string)
+	if err := g.publish(ctx, GuestEvent{ComputeVM: name, Collection: nsid, Tag: tag, Kind: kind, Record: unsigned}); err != nil {
+		return err
+	}
+	g.log.Info("a guest event is handed to the bidder to publish", "computevm", name, "collection", nsid, "tag", tag, "kind", kind)
+	return nil
 }
 
 func (g *Guest) RecordBoundHostKey(ctx context.Context, computevmName string) (bool, error) {

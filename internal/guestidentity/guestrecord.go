@@ -32,6 +32,8 @@ var (
 	hostKeyBlobRE = regexp.MustCompile(`^[A-Za-z0-9+/]+={0,2}$`)
 
 	networkTagRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$`)
+
+	dtlsFingerprintRE = regexp.MustCompile(`^sha-256 [0-9A-F]{2}(:[0-9A-F]{2}){31}$`)
 )
 
 var (
@@ -115,8 +117,9 @@ func (g *guestRecord) OnNetwork(ctx context.Context, name string, report OnNetwo
 		return fmt.Errorf("%w: the report's createdAt is too long", ErrReportRefused)
 	case tag != "" && !networkTagRE.MatchString(tag):
 		return fmt.Errorf("%w: the tag %q is not a DNS label of at most 32 characters", ErrReportRefused, tag)
-	case tag != "" && (len(address) > 2048 || !strings.HasPrefix(address, "https://")):
-		return fmt.Errorf("%w: a tagged address is an https URL of at most 2048 bytes", ErrReportRefused)
+	}
+	if err := checkNetworkKind(strings.TrimSpace(report.Kind), tag, address); err != nil {
+		return err
 	}
 	o, err := g.Live(ctx, name)
 	if err != nil {
@@ -157,6 +160,58 @@ func (g *guestRecord) OnNetwork(ctx context.Context, name string, report OnNetwo
 		return err
 	}
 	g.log.Info("the guest's on-network address is recorded", "computevm", name, "tag", tag, "address", address, "reportedAt", reportedAt)
+	return nil
+}
+
+func checkNetworkKind(kind, tag, address string) error {
+	if kind == "" {
+		kind = market.OnNetworkKindIroh
+		if tag != "" {
+			kind = market.OnNetworkKindHTTPS
+		}
+	}
+	switch kind {
+	case market.OnNetworkKindIroh:
+		if tag != "" {
+			return fmt.Errorf("%w: an iroh address carries no tag", ErrReportRefused)
+		}
+	case market.OnNetworkKindHTTPS:
+		if tag == "" || len(address) > 2048 || !strings.HasPrefix(address, "https://") {
+			return fmt.Errorf("%w: an https network is tagged and its address is an https URL of at most 2048 bytes", ErrReportRefused)
+		}
+	case market.OnNetworkKindWebRTC:
+		if tag == "" || !dtlsFingerprintRE.MatchString(address) {
+			return fmt.Errorf("%w: a webrtc network is tagged and its address is a DTLS fingerprint \"sha-256 AB:CD:...\"", ErrReportRefused)
+		}
+	default:
+		return fmt.Errorf("%w: the network kind %q is not iroh, https or webrtc", ErrReportRefused, kind)
+	}
+	return nil
+}
+
+func NetworkKind(tag, address string) string {
+	switch {
+	case tag == "":
+		return market.OnNetworkKindIroh
+	case dtlsFingerprintRE.MatchString(address):
+		return market.OnNetworkKindWebRTC
+	default:
+		return market.OnNetworkKindHTTPS
+	}
+}
+
+func (g *guestRecord) Accept(ctx context.Context, name, acceptURI, acceptCID string) error {
+	o, err := g.Live(ctx, name)
+	if err != nil {
+		return err
+	}
+	c := o.Spec.Contract
+	if c == nil || c.Accept.URI == "" || c.Accept.URI != acceptURI || c.Accept.CID != acceptCID {
+		return ErrUnknownAccept
+	}
+	if c.Receipt.URI == "" || c.Receipt.CID == "" {
+		return fmt.Errorf("computevm: the ComputeVM %s holds no receipt yet", name)
+	}
 	return nil
 }
 

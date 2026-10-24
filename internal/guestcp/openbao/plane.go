@@ -3,6 +3,7 @@ package openbao
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -57,6 +58,8 @@ type Deps struct {
 	RBAC atprotorepo.RecordReader
 
 	FallbackIssuer func() string
+
+	Publish guestcp.Publish
 
 	Clock host.Clock
 
@@ -172,6 +175,7 @@ func (p *Plane) Start(ctx context.Context) error {
 		Log:             p.log,
 		Now:             p.clock.Now,
 		HostKeyAttempts: p.cfg.HostKeyAttempts,
+		Publish:         p.publish,
 	})
 	if err != nil {
 		p.Close()
@@ -253,9 +257,20 @@ func (p *Plane) Keys(ctx context.Context) guestcp.Reply {
 	return guestcp.Reply(p.guest.Keys(ctx))
 }
 
-func (p *Plane) OnNetwork(ctx context.Context, authorization string, report guestcp.OnNetworkReport) guestcp.Reply {
-	reply := p.guest.OnNetwork(ctx, authorization, guestidentity.OnNetworkReport(report))
+func (p *Plane) Events(ctx context.Context, authorization string, request guestcp.EventsRequest) guestcp.Reply {
+	reply := p.guest.Events(ctx, authorization, guestidentity.EventsRequest(request))
 	return guestcp.Reply(p.withGuestLogin(reply))
+}
+
+func (p *Plane) publish(ctx context.Context, event guestidentity.GuestEvent) error {
+	if p.deps.Publish == nil {
+		return guestcp.ErrNoPublisher
+	}
+	record, err := json.Marshal(event.Record)
+	if err != nil {
+		return err
+	}
+	return p.deps.Publish(ctx, guestcp.GuestEvent{ComputeVM: event.ComputeVM, Collection: event.Collection, Tag: event.Tag, Kind: event.Kind, Record: record})
 }
 
 func (p *Plane) Authenticate(ctx context.Context, authorization string) (string, error) {

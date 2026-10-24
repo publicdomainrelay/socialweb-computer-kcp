@@ -133,7 +133,7 @@ func (b *Bidder) provision(ctx context.Context, req provisionRequest) (string, e
 		"bid":                 nil,
 		"bid_config":          map[string]any{"uri": req.bidConfig.URI, "cid": req.bidConfig.CID, "value": req.bidConfigValue},
 		"vm":                  map[string]any{"uri": req.vmURI, "cid": req.vmCID, "value": req.vmPayload.Value},
-		"guest_onnetwork_url": issuer + guestnet.OnNetworkPath,
+		"guest_onnetwork_url": issuer + guestnet.EventsPath,
 	}
 	if req.bidURI != "" {
 		bundle["bid"] = market.NewStrongRef(req.bidURI, req.bidCID).Map()

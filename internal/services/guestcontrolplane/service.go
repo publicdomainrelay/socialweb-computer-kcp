@@ -204,6 +204,7 @@ func (s *Service) prepare(ctx context.Context) error {
 		RBAC: reporemote.NewNetwork(reporemote.NetworkConfig{Directory: ingress.NewDirectory(s.network().PLCDirectoryURL),
 			HTTP: networkHTTPClient(s.deps.Hosts, s.network(), s.trust, DefaultOpenBaoTimeout)}),
 		FallbackIssuer: s.relayURL,
+		Publish:        s.publishGuestEvent,
 		Log:            s.log,
 	})
 	if err != nil {

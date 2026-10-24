@@ -8,12 +8,15 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/guestcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestidentity"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestnet"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/pinneddownloads"
 )
 
 const (
 	HealthPath = "/healthz"
+
+	EventsPath = guestnet.EventsPath
 
 	MaxGuestBody = 1 << 20
 )
@@ -24,7 +27,7 @@ func (s *Service) routes() *http.ServeMux {
 	mux.HandleFunc("GET /v1/identity/oidc/token/{role}", s.handleOIDCToken)
 	mux.HandleFunc("GET /v1/identity/oidc/.well-known/openid-configuration", s.handleDiscovery)
 	mux.HandleFunc("GET /v1/identity/oidc/.well-known/keys", s.handleKeys)
-	mux.HandleFunc("POST /v1/on-network", s.handleOnNetwork)
+	mux.HandleFunc("POST "+EventsPath, s.handleEvents)
 	pinneddownloads.NewHandler(s.downloads, s.log).Register(mux, DownloadsRoute)
 	mux.HandleFunc("GET "+SubscribeEventsPath, s.handleSubscribeEvents)
 	mux.HandleFunc("GET "+HealthPath, func(w http.ResponseWriter, r *http.Request) {
@@ -125,29 +128,25 @@ func (s *Service) handleKeys(w http.ResponseWriter, r *http.Request) {
 	writeReply(w, guest.Keys(r.Context()))
 }
 
-func (s *Service) handleOnNetwork(w http.ResponseWriter, r *http.Request) {
+func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 	guest := s.guest()
 	if guest == nil {
 		writeGuestError(w, http.StatusServiceUnavailable, "the guest control plane is not ready")
 		return
 	}
 	var body struct {
-		AcceptURI string `json:"acceptUri"`
-		AcceptCID string `json:"acceptCid"`
-		Address   string `json:"address"`
-		CreatedAt string `json:"createdAt"`
-		Tag       string `json:"tag"`
+		AcceptURI string         `json:"acceptUri"`
+		AcceptCID string         `json:"acceptCid"`
+		Record    map[string]any `json:"record"`
 	}
 	dec := json.NewDecoder(io.LimitReader(r.Body, MaxGuestBody+1))
 	if err := dec.Decode(&body); err != nil {
 		httpjson.Write(w, http.StatusBadRequest, map[string]any{"error": "InvalidRequest"})
 		return
 	}
-	writeReply(w, guest.OnNetwork(r.Context(), r.Header.Get("Authorization"), guestcp.OnNetworkReport{
+	writeReply(w, guest.Events(r.Context(), r.Header.Get("Authorization"), guestcp.EventsRequest{
 		AcceptURI: body.AcceptURI,
 		AcceptCID: body.AcceptCID,
-		Address:   body.Address,
-		CreatedAt: body.CreatedAt,
-		Tag:       body.Tag,
+		Record:    body.Record,
 	}))
 }

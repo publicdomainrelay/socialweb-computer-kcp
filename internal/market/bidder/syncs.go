@@ -25,6 +25,10 @@ const (
 	releaseSyncPrefix = "release-"
 
 	reportSyncPrefix = "report-"
+
+	guestEventSyncPrefix = "guest-"
+
+	guestEventSyncKeyPrefix = "guest:"
 )
 
 type marketEventRequest struct {
@@ -121,16 +125,44 @@ func reportSyncKey(collection, tag, receiptURI string) string {
 	}
 }
 
+func guestEventSyncName(uid, collection, tag, kind, recordSum string) string {
+	sum := sha256.Sum256([]byte(collection + "\x00" + tag + "\x00" + kind + "\x00" + recordSum + "\x00" + uid))
+	return guestEventSyncPrefix + hex.EncodeToString(sum[:8])
+}
+
+func guestEventSyncKey(collection, tag, kind, recordSum, receiptURI string) string {
+	return guestEventSyncKeyPrefix + collection + ":" + tag + ":" + kind + ":" + recordSum + ":" + receiptURI
+}
+
+func (b *Bidder) ensureGuestEventSync(ctx context.Context, vm *v1alpha1.ComputeVM, collection, tag, kind string, record map[string]any) (string, error) {
+	raw, err := json.Marshal(record)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(raw)
+	recordSum := hex.EncodeToString(sum[:])
+	name := guestEventSyncName(string(vm.UID), collection, tag, kind, recordSum)
+	key := func(receiptURI string) string { return guestEventSyncKey(collection, tag, kind, recordSum, receiptURI) }
+	return name, b.ensureEventSync(ctx, vm, name, key, collection, record, "guest event")
+}
+
 func (b *Bidder) ensureReportSync(ctx context.Context, vm *v1alpha1.ComputeVM, collection, tag string, record map[string]any) (string, error) {
+	name := reportSyncName(string(vm.UID), collection, tag)
+	key := func(receiptURI string) string { return reportSyncKey(collection, tag, receiptURI) }
+	return name, b.ensureEventSync(ctx, vm, name, key, collection, record, "market report")
+}
+
+func (b *Bidder) ensureEventSync(ctx context.Context, vm *v1alpha1.ComputeVM, name string, key func(receiptURI string) string, collection string,
+	record map[string]any, kind string) error {
 	terms := vm.Spec.Contract
 	if terms == nil {
-		return "", errors.New("bidder: a report StateSync needs a contract")
+		return fmt.Errorf("bidder: a %s StateSync needs a contract", kind)
 	}
 	if terms.Receipt.URI == "" || terms.Receipt.CID == "" {
-		return "", errors.New("bidder: a report StateSync needs a receipt")
+		return fmt.Errorf("bidder: a %s StateSync needs a receipt", kind)
 	}
 	if vm.UID == "" {
-		return "", errors.New("bidder: a report StateSync needs a ComputeVM UID")
+		return fmt.Errorf("bidder: a %s StateSync needs a ComputeVM UID", kind)
 	}
 	envelope := map[string]any{
 		"collection": collection,
@@ -142,16 +174,12 @@ func (b *Bidder) ensureReportSync(ctx context.Context, vm *v1alpha1.ComputeVM, c
 	}
 	payload, err := normalizedPayload(envelope)
 	if err != nil {
-		return "", err
+		return err
 	}
-	name := reportSyncName(string(vm.UID), collection, tag)
 	owners := []metav1.OwnerReference{{APIVersion: v1alpha1.GroupVersion.String(), Kind: "ComputeVM", Name: vm.Name, UID: vm.UID}}
 	sync := outboundSync(name, b.guests.SyncLabels(vm), owners, vmSource(b.cfg.Workspace, vm), b.guests.EventAdapter(),
-		reportSyncKey(collection, tag, terms.Receipt.URI), payload)
-	if err := b.createSync(ctx, sync, "market report", "computevm", vm.Name, "collection", collection); err != nil {
-		return "", err
-	}
-	return name, nil
+		key(terms.Receipt.URI), payload)
+	return b.createSync(ctx, sync, kind, "computevm", vm.Name, "collection", collection)
 }
 
 func (b *Bidder) ensureTerminationSync(ctx context.Context, info contractInfo, observedAt string, request *commonv1.StrongRef) (string, error) {

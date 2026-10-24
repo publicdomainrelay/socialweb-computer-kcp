@@ -34,7 +34,8 @@ func (b *Bidder) report(ctx context.Context, vm *v1alpha1.ComputeVM) {
 		if network.Tag == "" || network.Address == "" || publishedNetwork(published, network.Tag) != "" {
 			continue
 		}
-		record := market.ComputeEventsVMOnNetwork{Tag: network.Tag, Address: network.Address, CreatedAt: firstOf(network.ReportedAt, now)}
+		record := market.ComputeEventsVMOnNetwork{Tag: network.Tag, Address: network.Address, Kind: b.publishedKind(network.Tag, network.Address),
+			CreatedAt: firstOf(network.ReportedAt, now)}
 		published = b.publishReport(ctx, vm, record, published)
 	}
 	if len(held.HostKeys) > 0 && published.HostKeysURI == "" {
@@ -45,6 +46,14 @@ func (b *Bidder) report(ctx context.Context, vm *v1alpha1.ComputeVM) {
 		record := market.ComputeEventsVMHostKeys{Keys: keys, ObservedAt: firstOf(held.ReportedAt, now), CreatedAt: now}
 		b.publishReport(ctx, vm, record, published)
 	}
+}
+
+// ponytail: the kind of a reported network is read back from its address form until the ComputeVM guest report carries kind (plan 0034 W1-API); then publish ComputeVMGuestNetwork.Kind.
+func (b *Bidder) publishedKind(tag, address string) string {
+	if kind := b.guests.NetworkKind(tag, address); kind == market.OnNetworkKindWebRTC {
+		return kind
+	}
+	return ""
 }
 
 func publishedNetwork(published v1alpha1.ComputeVMPublished, tag string) string {

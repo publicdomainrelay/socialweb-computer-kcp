@@ -581,7 +581,7 @@ func (b *Bidder) terminationForVM(vmName string) *v1alpha1.ComputeVMTermination 
 		return nil
 	}
 	for _, sync := range b.syncs.List() {
-		if b.guests.SyncVM(&sync) != vmName {
+		if b.guests.SyncVM(&sync) != vmName || strings.HasPrefix(sync.Spec.IdempotencyKey, guestEventSyncKeyPrefix) {
 			continue
 		}
 		if acked, ok := terminationOf(&sync); ok {

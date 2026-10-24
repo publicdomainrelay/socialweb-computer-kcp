@@ -168,6 +168,12 @@ type Guests interface {
 	SyncVM(sync *v1alpha1.StateSync) string
 
 	CheckGuestEvent(record map[string]any) (string, error)
+
+	NetworkKind(tag, address string) string
+}
+
+type GuestQueue interface {
+	Append(ctx context.Context, computeVM string, event guestcp.QueuedEvent) (bool, error)
 }
 
 type Deps struct {
@@ -181,7 +187,7 @@ type Deps struct {
 
 	Guests Guests
 
-	GuestEvents guestcp.Events
+	GuestEvents GuestQueue
 
 	Tokens *participant.Tokens
 
@@ -209,7 +215,7 @@ type Bidder struct {
 
 	guests Guests
 
-	guestEvents guestcp.Events
+	guestEvents GuestQueue
 
 	outbound *participant.Outbound
 

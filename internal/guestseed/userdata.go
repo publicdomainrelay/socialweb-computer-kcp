@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/cloudinit"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestnet"
 )
 
@@ -229,7 +230,8 @@ ACCEPT_URI="$(jq -r '.accept.uri // empty' "${ACCEPT_JSON}")"
 ACCEPT_CID="$(jq -r '.accept.cid // empty' "${ACCEPT_JSON}")"
 if [ -z "${ACCEPT_URI}" ] || [ -z "${ACCEPT_CID}" ]; then echo "guest-onnetwork: accept.json has no accept ref"; exit 0; fi
 PAYLOAD="$(jq -nc --arg au "${ACCEPT_URI}" --arg ac "${ACCEPT_CID}" --arg addr "${FQDN}" --arg tag "${TAG}" \
-  '{acceptUri: $au, acceptCid: $ac, address: $addr} + (if $tag == "" then {} else {tag: $tag} end)')"
+  --arg nsid "` + market.ComputeEventsVMOnNetworkNSID + `" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  '{acceptUri: $au, acceptCid: $ac, record: ({"$type": $nsid, address: $addr, createdAt: $at} + (if $tag == "" then {} else {tag: $tag} end))}')"
 echo "guest-onnetwork: reporting ${TAG:+${TAG} }${FQDN}"
 for _ in 1 2 3 4 5; do
 ` + bearerLines(bearerAudience) + attempts.String() + `  sleep 6

@@ -24,6 +24,8 @@ var (
 	ErrUnauthenticated = errors.New("guestcp: the guest bearer token is missing or refused")
 
 	ErrUnknownGuest = errors.New("guestcp: no live ComputeVM holds this guest")
+
+	ErrNoPublisher = errors.New("guestcp: the bidder does not publish guest events yet")
 )
 
 type QueuedEvent struct {
@@ -36,8 +38,24 @@ type QueuedEvent struct {
 	Record json.RawMessage `json:"record,omitempty"`
 }
 
+type GuestEvent struct {
+	ComputeVM string
+
+	Collection string
+
+	Tag string
+
+	Kind string
+
+	Record json.RawMessage
+}
+
+type Publish func(ctx context.Context, event GuestEvent) error
+
 type Events interface {
 	Append(ctx context.Context, computeVM string, event QueuedEvent) (bool, error)
+
+	Serve(publish Publish) (cancel func())
 }
 
 type EventStream interface {
@@ -52,4 +70,6 @@ type Queue interface {
 	Retain(computeVMs []string)
 
 	Subscribe(computeVM string, cursor *int64) (EventStream, error)
+
+	Publish(ctx context.Context, event GuestEvent) error
 }

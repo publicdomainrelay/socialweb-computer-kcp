@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	OnNetworkPath = "/v1/on-network"
+	EventsPath = "/v1/events"
 
 	RelayHost = "relay.localhost"
 )
@@ -38,7 +38,7 @@ func GuestOnNetworkURL(ingressURL string) (string, error) {
 	if u.User != nil || u.RawQuery != "" || u.Fragment != "" {
 		return "", fmt.Errorf("guestnet: ingress URL %q carries a user, query or fragment", ingressURL)
 	}
-	return trimmed + OnNetworkPath, nil
+	return trimmed + EventsPath, nil
 }
 
 func OnNetworkURLFromBundle(userData, fallback string) string {

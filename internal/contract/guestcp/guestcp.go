@@ -49,16 +49,12 @@ type Reply struct {
 	Body json.RawMessage
 }
 
-type OnNetworkReport struct {
+type EventsRequest struct {
 	AcceptURI string
 
 	AcceptCID string
 
-	Address string
-
-	CreatedAt string
-
-	Tag string
+	Record map[string]any
 }
 
 type Plane interface {
@@ -70,7 +66,7 @@ type Plane interface {
 
 	Keys(ctx context.Context) Reply
 
-	OnNetwork(ctx context.Context, authorization string, report OnNetworkReport) Reply
+	Events(ctx context.Context, authorization string, request EventsRequest) Reply
 
 	Authenticate(ctx context.Context, authorization string) (string, error)
 }

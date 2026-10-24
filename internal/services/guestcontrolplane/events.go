@@ -34,3 +34,13 @@ func (s *Service) openQueue(ctx context.Context, inputs guestcp.Source) error {
 	s.mu.Unlock()
 	return nil
 }
+
+func (s *Service) publishGuestEvent(ctx context.Context, event guestcp.GuestEvent) error {
+	s.mu.Lock()
+	queue := s.queue
+	s.mu.Unlock()
+	if queue == nil {
+		return guestcp.ErrQueueNotOpen
+	}
+	return queue.Publish(ctx, event)
+}

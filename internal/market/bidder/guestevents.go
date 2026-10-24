@@ -12,6 +12,34 @@ import (
 
 var errGuestEventsUnavailable = errors.New("bidder: the guest event queue is not available")
 
+func (b *Bidder) PublishGuestEvent(ctx context.Context, event guestcp.GuestEvent) error {
+	if !market.IsGuestEventNSID(event.Collection) {
+		return fmt.Errorf("bidder: %q is not a guest event collection", event.Collection)
+	}
+	held, ok := b.vms.Get(event.ComputeVM)
+	if !ok {
+		return fmt.Errorf("bidder: the ComputeVM %s is not known", event.ComputeVM)
+	}
+	vm := &held
+	if vm.Spec.Owner.Handle != b.cfg.ProviderHandle || vm.DeletionTimestamp != nil || b.guests.Ended(vm) || b.guests.Releasing(vm) {
+		return fmt.Errorf("bidder: the ComputeVM %s is not a live guest of this bidder", vm.Name)
+	}
+	record := map[string]any{}
+	if err := json.Unmarshal(event.Record, &record); err != nil {
+		return fmt.Errorf("bidder: the guest event record is not JSON: %w", err)
+	}
+	if kind, _ := record["$type"].(string); kind != event.Collection {
+		return fmt.Errorf("bidder: the guest event record $type %q is not %s", kind, event.Collection)
+	}
+	name, err := b.ensureGuestEventSync(ctx, vm, event.Collection, event.Tag, event.Kind, record)
+	if err != nil {
+		return err
+	}
+	b.log.Info("a guest event is published to the requester", "computevm", vm.Name, "collection", event.Collection,
+		"tag", event.Tag, "kind", event.Kind, "stateSync", name)
+	return nil
+}
+
 func (b *Bidder) applyGuestEvent(ctx context.Context, uri, cid string, record map[string]any, event *market.Event, issuer string) error {
 	if b.releasedByReceipt(event.Receipt.URI) {
 		return nil
