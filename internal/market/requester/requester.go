@@ -158,6 +158,8 @@ type Deps struct {
 
 	OpenRepo func(ctx context.Context, did string) (atprotorepo.Repo, error)
 
+	AwaitRepo func(ctx context.Context, did string)
+
 	Policy runs.ResolveFunc
 
 	Vault func(ctx context.Context, ref commonv1.SecretRef) (vault.KV, error)
@@ -505,6 +507,12 @@ func (q *Requester) Start(ctx context.Context) error {
 		return fmt.Errorf("requester: the record store: %w", err)
 	}
 	q.repo = repo
+	if q.deps.AwaitRepo != nil {
+		q.deps.AwaitRepo(ctx, q.repoDID)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+	}
 	if len(q.cfg.OwnerSessions) > 0 || q.cfg.IdentityMode == IdentityModeOAuth {
 		if err := q.bindSignerKey(ctx); err != nil {
 			return err

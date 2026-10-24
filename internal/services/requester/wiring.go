@@ -3,6 +3,7 @@ package requester
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -99,6 +100,7 @@ func (s *Service) setup(ctx context.Context) (*role.Requester, error) {
 		Intents:     intents,
 		Inputs:      inputs,
 		OpenRepo:    s.openRepo,
+		AwaitRepo:   s.awaitRepo,
 		Policy:      runner,
 		Vault:       s.secretsVault,
 		ServiceAuth: s.openServiceAuth,
@@ -133,9 +135,46 @@ func (s *Service) identityRef() bool {
 	return identity != nil && identity.MarketIdentityRef != nil && identity.MarketIdentityRef.Name != ""
 }
 
+func (s *Service) repoRef(did string) commonv1.ObjectRef {
+	return commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: "AtprotoRepo", Name: atprotorepo.RepoName(did), Workspace: s.cfg.Workspace}
+}
+
 func (s *Service) openRepo(ctx context.Context, did string) (atprotorepo.Repo, error) {
-	repo := commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: "AtprotoRepo", Name: atprotorepo.RepoName(did), Workspace: s.cfg.Workspace}
-	return bus.Resolve[atprotorepo.Repo](ctx, s.deps.Bus, s.self(), repo, bus.Capability{Name: atprotorepo.CapabilityWrite})
+	return bus.Resolve[atprotorepo.Repo](ctx, s.deps.Bus, s.self(), s.repoRef(did), bus.Capability{Name: atprotorepo.CapabilityWrite})
+}
+
+func (s *Service) awaitRepo(ctx context.Context, did string) {
+	repo := s.repoRef(did)
+	bound := make(chan struct{}, 1)
+	cancel := s.deps.Bus.Subscribe(func(key bus.Key) {
+		if key.Workspace != repo.Workspace || key.Name != repo.Name {
+			return
+		}
+		select {
+		case bound <- struct{}{}:
+		default:
+		}
+	})
+	defer cancel()
+	waited := false
+	for {
+		_, err := s.openRepo(ctx, did)
+		if !errors.Is(err, atprotorepo.ErrNotBound) && !errors.Is(err, pds.ErrNotFound) {
+			if waited {
+				s.log.Info("the requester repo is bound; the requester runs its contracts and releases", "repo", repo.Name)
+			}
+			return
+		}
+		if !waited {
+			s.log.Info("the requester waits for its repo binding before it runs contracts or releases", "repo", repo.Name, "err", err.Error())
+			waited = true
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-bound:
+		}
+	}
 }
 
 func (s *Service) openServiceAuth(ctx context.Context, identity commonv1.ObjectRef, did string) (pds.ServiceAuth, error) {
