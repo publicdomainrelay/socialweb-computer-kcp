@@ -339,6 +339,21 @@ case "$HOST" in
 esac
 ```
 
+Wait until that root reports `Suspended` before the next scale-up. The pause is
+asynchronous: the root reports `Suspended` only once its Bidder runs the new
+generation with `suspendParticipation`; scaling up earlier lets the paused
+bidder still bid on the next RFP, and an accept of a bid it already published
+is honoured.
+
+```bash
+case "$HOST" in
+  hat-7) ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl wait --for=jsonpath='{.status.phase}'=Suspended marketbidders.socialweb.computer/app --timeout=300s" ;;
+  hat-9) ssh hat-9 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H9_K kubectl wait --for=jsonpath='{.status.phase}'=Suspended marketbidders.socialweb.computer/app --timeout=300s" ;;
+  local) sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$LOCAL_K \
+           kubectl wait --for=jsonpath='{.status.phase}'=Suspended marketbidders.socialweb.computer/app --timeout=300s ;;
+esac
+```
+
 Scale to two; wait, read the second winner, and pause it too:
 
 ```bash
