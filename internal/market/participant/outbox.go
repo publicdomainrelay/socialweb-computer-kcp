@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
+
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 )
@@ -26,12 +28,22 @@ const (
 	outboxStallRetry = 5 * time.Minute
 
 	outboxMaxBackoff = 5 * time.Minute
+
+	OutboxUnreachableRetry = 2 * time.Second
+
+	OutboxUnreachableRetryCap = time.Minute
+
+	reasonUnreachable = "Unreachable"
 )
 
 var (
 	ErrRemoteNotFound = errors.New("participant: the remote object does not exist")
 
 	ErrRejected = errors.New("participant: the target rejected the update")
+
+	ErrUnreachable = errors.New("participant: the target is unreachable")
+
+	ErrObsolete = errors.New("participant: the update is no longer wanted")
 )
 
 type OutboxRequest struct {
@@ -346,12 +358,21 @@ func (r *outboxRun) fail(ctx context.Context, retryMax int, cause error) (time.D
 	if r.status.LastAttemptAt == "" {
 		r.status.LastAttemptAt = r.stamp()
 	}
-	if errors.Is(cause, ErrRejected) {
+	if reason := terminalReason(cause); reason != "" {
 		r.status.Attempts = retryMax
 		r.status.Phase = v1alpha1.StateSyncPhaseFailed
-		r.set(v1alpha1.StateSyncConditionAcked, false, "Rejected", cause.Error())
-		r.set(v1alpha1.StateSyncConditionStalled, false, "Rejected", cause.Error())
+		r.set(v1alpha1.StateSyncConditionAcked, false, reason, cause.Error())
+		r.set(v1alpha1.StateSyncConditionStalled, false, reason, cause.Error())
 		return 0, r.write(ctx)
+	}
+	if errors.Is(cause, ErrUnreachable) {
+		r.status.Phase = v1alpha1.StateSyncPhasePending
+		r.set(v1alpha1.StateSyncConditionAcked, false, reasonUnreachable, cause.Error())
+		r.set(v1alpha1.StateSyncConditionStalled, false, "Retrying", cause.Error())
+		if err := r.write(ctx); err != nil {
+			return 0, err
+		}
+		return unreachableBackoff(r.status.Attempts), nil
 	}
 	if r.status.Attempts >= retryMax {
 		r.status.Phase = v1alpha1.StateSyncPhaseStalled
@@ -396,7 +417,29 @@ func (r *outboxRun) attemptWait() time.Duration {
 	if err != nil {
 		return 0
 	}
+	if r.unreachable() {
+		return at.Add(unreachableBackoff(r.status.Attempts)).Sub(r.o.now().UTC())
+	}
 	return at.Add(backoffFor(r.status.Attempts, r.obj.Spec.Retry)).Sub(r.o.now().UTC())
+}
+
+func (r *outboxRun) unreachable() bool {
+	condition := apimeta.FindStatusCondition(r.status.Conditions, v1alpha1.StateSyncConditionAcked)
+	return r.status.Phase == v1alpha1.StateSyncPhasePending && condition != nil && condition.Reason == reasonUnreachable
+}
+
+func terminalReason(cause error) string {
+	switch {
+	case errors.Is(cause, ErrRejected):
+		return "Rejected"
+	case errors.Is(cause, ErrObsolete):
+		return "Obsolete"
+	}
+	return ""
+}
+
+func unreachableBackoff(attempts int) time.Duration {
+	return min(OutboxUnreachableRetry<<min(max(attempts-1, 0), 5), OutboxUnreachableRetryCap)
 }
 
 func stallWait(lastAttemptAt string, now time.Time) time.Duration {

@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"net/http"
 	"reflect"
 	"strings"
 	"time"
@@ -160,7 +159,7 @@ func (b *Bidder) sendBid(ctx context.Context, bid *v1alpha1.Bid, now time.Time) 
 		conds.SetStatus(&status.Conditions, bid.Generation, v1alpha1.BidConditionSubmitted, metav1.ConditionFalse, "Unresolvable", next.LastError)
 		b.applyBidStatus(ctx, bid, status)
 		return wait
-	case submitRefused(err):
+	case participant.Refused(err):
 		b.log.Warn("the requester refused the bid", "bid", bid.Name, "url", submit.Endpoint, "err", err)
 		next.LastError = statusError(err)
 		conds.SetStatus(&status.Conditions, bid.Generation, v1alpha1.BidConditionSubmitted, metav1.ConditionFalse, "Refused", next.LastError)
@@ -175,11 +174,6 @@ func (b *Bidder) sendBid(ctx context.Context, bid *v1alpha1.Bid, now time.Time) 
 	conds.SetStatus(&status.Conditions, bid.Generation, v1alpha1.BidConditionSubmitted, metav1.ConditionFalse, "Retrying", next.LastError)
 	b.applyBidStatus(ctx, bid, status)
 	return earliest(wait, submitBackoff(&next, at))
-}
-
-func submitRefused(err error) bool {
-	var callErr *participant.CallError
-	return participant.Rejected(err) && errors.As(err, &callErr) && callErr.Status != http.StatusNotFound
 }
 
 func setSubmitEndpoint(status *v1alpha1.BidStatus, generation int64, rfp *market.RFP) {

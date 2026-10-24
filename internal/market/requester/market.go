@@ -24,6 +24,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/participant"
 )
 
 const (
@@ -575,11 +576,14 @@ func (m *HTTPMarket) SubmitAccept(ctx context.Context, bidder Bidder, acceptURI,
 }
 
 func (m *HTTPMarket) SubmitEvent(ctx context.Context, bidder Bidder, event SubmitEventRequest) (int, error) {
-	status, _, err := m.post(ctx, bidder.Endpoint, market.SubmitEventNSID, bidder.Audience, map[string]any{
+	status, body, err := m.post(ctx, bidder.Endpoint, market.SubmitEventNSID, bidder.Audience, map[string]any{
 		"uri":    event.URI,
 		"cid":    event.CID,
 		"record": event.Record,
 	}, m.Timeout)
+	if err == nil && (status < 200 || status > 299) {
+		err = &participant.CallError{Status: status, Err: &xrpc.Error{Status: status, Name: stringOf(body["error"]), Message: stringOf(body["message"])}}
+	}
 	return status, err
 }
 

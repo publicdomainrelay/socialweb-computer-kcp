@@ -7,11 +7,16 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
 )
 
-const OutboundReplyLimit = 4096
+const (
+	OutboundReplyLimit = 4096
+
+	relayNoSubscriber = "no active subscriber"
+)
 
 type CallError struct {
 	Status int
@@ -38,10 +43,26 @@ func (e *CallError) Unwrap() error {
 	return e.Err
 }
 
-func Rejected(err error) bool {
-	var callErr *CallError
-	return errors.As(err, &callErr) && callErr.Status >= 400 && callErr.Status <= 499 && callErr.Status != http.StatusRequestTimeout &&
-		callErr.Status != http.StatusTooManyRequests
+func Refused(err error) bool {
+	callErr, ok := errors.AsType[*CallError](err)
+	if !ok {
+		return false
+	}
+	name, message := "", ""
+	if xerr, ok := errors.AsType[*xrpc.Error](err); ok {
+		name, message = xerr.Name, xerr.Message
+	}
+	return RefusedReply(callErr.Status, name, message)
+}
+
+func RefusedReply(status int, name, message string) bool {
+	switch {
+	case status < 400 || status > 499 || status == http.StatusRequestTimeout || status == http.StatusTooManyRequests:
+		return false
+	case status == http.StatusNotFound:
+		return strings.TrimSpace(name) != "" && !strings.Contains(message, relayNoSubscriber)
+	}
+	return true
 }
 
 type Outbound struct {

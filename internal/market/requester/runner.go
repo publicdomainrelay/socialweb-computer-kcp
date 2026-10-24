@@ -1168,11 +1168,12 @@ func (r *contractRunner) releaseContract(ctx context.Context, state *v1alpha1.No
 			return nil
 		}
 		detail := "no answer"
-		if err != nil {
-			detail = err.Error()
-		} else {
+		if status != 0 {
 			detail = fmt.Sprintf("HTTP %d", status)
 			state.Release.Status = &status
+		}
+		if err != nil {
+			detail = err.Error()
 		}
 		release.LastError = detail
 		r.setRelease(release)

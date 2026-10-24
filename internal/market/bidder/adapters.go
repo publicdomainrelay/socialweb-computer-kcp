@@ -206,7 +206,7 @@ func (b *Bidder) observeEvent(ctx context.Context, request participant.OutboxReq
 		return participant.Observation{}, err
 	}
 	return participant.Observation{
-		Exists: true,
+		Exists: payload.submitTarget(request) == "" || b.eventDelivered(request),
 		Ref:    payloadRec.URI,
 		CID:    payloadRec.CID,
 		Hash:   hash,
@@ -220,26 +220,67 @@ func (b *Bidder) observeEvent(ctx context.Context, request participant.OutboxReq
 	}, nil
 }
 
+func (p marketEventPayload) submitTarget(request participant.OutboxRequest) string {
+	return cmp.Or(strings.TrimSpace(p.SubmitEventURL), strings.TrimSpace(request.Sink.SubmitEventURL))
+}
+
+func deliveredKey(uid string, payload json.RawMessage) string {
+	return uid + "#" + payloadHash(payload)
+}
+
+func (b *Bidder) eventDelivered(request participant.OutboxRequest) bool {
+	_, ok := b.delivered.Load(deliveredKey(request.UID, request.Payload))
+	return ok
+}
+
 func (b *Bidder) applyEvent(ctx context.Context, request participant.OutboxRequest) (participant.Observation, error) {
 	payload, _, err := decodeMarketEventPayload(request.Payload)
 	if err != nil {
 		return participant.Observation{}, err
 	}
+	payloadRKey, eventRKey := payload.recordKeys(request.Key)
+	event, err := b.writeMarketEvent(ctx, request, payload, payloadRKey, eventRKey)
+	if err != nil {
+		return participant.Observation{}, err
+	}
+	if target := payload.submitTarget(request); target != "" {
+		body := map[string]any{"uri": event.URI, "cid": event.CID, "record": event.Record}
+		postCtx, cancel := context.WithTimeout(ctx, EventSubmitTimeout)
+		err := b.outbound.Post(postCtx, target, market.SubmitEventNSID, body)
+		cancel()
+		if err != nil {
+			if ctx.Err() != nil {
+				return participant.Observation{}, ctx.Err()
+			}
+			return participant.Observation{}, b.eventSubmitFailed(request, payload, target, err)
+		}
+		b.delivered.Store(deliveredKey(request.UID, request.Payload), true)
+	}
+	return b.observeEvent(ctx, request)
+}
+
+func (b *Bidder) writeMarketEvent(ctx context.Context, request participant.OutboxRequest, payload marketEventPayload, payloadRKey, eventRKey string) (market.SignedRecord, error) {
+	stored, err := b.records.GetRecord(ctx, b.cfg.DID, market.EventNSID, eventRKey)
+	if err == nil {
+		return market.SignedRecord{URI: stored.URI, CID: stored.CID, Record: stored.Value}, nil
+	}
+	if !errors.Is(err, market.ErrNotFound) {
+		return market.SignedRecord{}, fmt.Errorf("bidder: reading the market event: %w", err)
+	}
 	if payload.RequestEvent != nil {
 		if err := b.applyInboundEvent(ctx, request, payload); err != nil {
-			return participant.Observation{}, err
+			return market.SignedRecord{}, err
 		}
 	}
-	payloadRKey, eventRKey := payload.recordKeys(request.Key)
 	record := unsignedRecord(payload.Record)
 	signed, err := market.SignRecord(record, b.cfg.DID, b.signer)
 	if err != nil {
-		return participant.Observation{}, fmt.Errorf("bidder: signing the market event payload: %w", err)
+		return market.SignedRecord{}, fmt.Errorf("bidder: signing the market event payload: %w", err)
 	}
 	writer := participant.CreateOnly{Records: b.records}
 	written, err := writer.PutRecord(ctx, b.cfg.DID, payload.Collection, payloadRKey, signed)
 	if err != nil {
-		return participant.Observation{}, fmt.Errorf("bidder: writing the market event payload: %w", err)
+		return market.SignedRecord{}, fmt.Errorf("bidder: writing the market event payload: %w", err)
 	}
 	event, err := market.PutEvent(ctx, writer, b.cfg.DID, eventRKey, market.EventOptions{
 		Receipt:   market.RecordRef{URI: payload.Receipt.URI, CID: payload.Receipt.CID},
@@ -247,20 +288,42 @@ func (b *Bidder) applyEvent(ctx context.Context, request participant.OutboxReque
 		CreatedAt: recordObservedAt(record),
 	}, b.signer)
 	if err != nil {
-		return participant.Observation{}, fmt.Errorf("bidder: writing the market event: %w", err)
+		return market.SignedRecord{}, fmt.Errorf("bidder: writing the market event: %w", err)
 	}
-	if target := cmp.Or(strings.TrimSpace(payload.SubmitEventURL), strings.TrimSpace(request.Sink.SubmitEventURL)); target != "" {
-		body := map[string]any{"uri": event.URI, "cid": event.CID, "record": event.Record}
-		if err := b.outbound.Post(ctx, target, market.SubmitEventNSID, body); err != nil {
-			if participant.Rejected(err) {
-				var callErr *participant.CallError
-				errors.As(err, &callErr)
-				return participant.Observation{}, fmt.Errorf("bidder: the requester rejected the market event (HTTP %d): %w", callErr.Status, participant.ErrRejected)
-			}
-			return participant.Observation{}, err
-		}
+	return event, nil
+}
+
+func (b *Bidder) eventSubmitFailed(request participant.OutboxRequest, payload marketEventPayload, target string, err error) error {
+	if participant.Refused(err) {
+		b.log.Warn("the requester refused the market event", "collection", payload.Collection, "url", target, "err", err)
+		return fmt.Errorf("bidder: the requester refused the market event: %w: %w", err, participant.ErrRejected)
 	}
-	return b.observeEvent(ctx, request)
+	sync, known := b.syncs.Find(func(sync v1alpha1.StateSync) bool { return string(sync.UID) == request.UID })
+	if !b.eventWanted(request, payload) {
+		b.log.Info("the market event is no longer sent: its ComputeVM is released", "collection", payload.Collection, "url", target,
+			"stateSync", sync.Name, "err", err)
+		return fmt.Errorf("bidder: the ComputeVM is released; the market event is no longer sent: %w: %w", err, participant.ErrObsolete)
+	}
+	wrapped := fmt.Errorf("bidder: submitting the market event to the requester: %w: %w", err, participant.ErrUnreachable)
+	if !known || sync.Status.LastError != wrapped.Error() {
+		b.log.Warn("submitting the market event to the requester failed; it is retried while the ComputeVM lives", "collection", payload.Collection,
+			"url", target, "stateSync", sync.Name, "attempts", sync.Status.Attempts+1, "err", err)
+	}
+	return wrapped
+}
+
+func (b *Bidder) eventWanted(request participant.OutboxRequest, payload marketEventPayload) bool {
+	if request.Source == nil {
+		return false
+	}
+	vm, ok := b.vms.Get(request.Source.Name)
+	if !ok || (request.Source.UID != "" && string(vm.UID) != request.Source.UID) {
+		return false
+	}
+	if payload.Collection == market.ComputeEventsVMTerminatedNSID {
+		return true
+	}
+	return vm.DeletionTimestamp == nil && !b.guests.Ended(&vm) && !b.guests.Releasing(&vm)
 }
 
 func (b *Bidder) deleteEvent(ctx context.Context, request participant.OutboxRequest) error {

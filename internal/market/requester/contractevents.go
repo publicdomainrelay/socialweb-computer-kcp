@@ -7,12 +7,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"net/http"
 	"strings"
 	"time"
 
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
@@ -20,14 +18,13 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	contractmarket "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/participant"
 )
 
 const (
 	ContractEventSubmitRetry = 2 * time.Second
 
 	ContractEventSubmitRetryCap = time.Minute
-
-	ContractEventSubmitWindow = 10 * time.Minute
 
 	ContractEventSubmitTimeout = 10 * time.Second
 
@@ -355,15 +352,6 @@ func (q *Requester) submitContractEvent(ctx context.Context, event *v1alpha1.Con
 	if submit.SubmittedAt != "" {
 		return 0, nil
 	}
-	published := apimetaPublishedAt(status)
-	if !published.IsZero() && !now.Before(published.Add(ContractEventSubmitWindow)) {
-		status.Phase = v1alpha1.ContractEventFailed
-		status.Message = fmt.Sprintf("the event was not submitted to the bidder within %s of its publish: %s", ContractEventSubmitWindow, submit.LastError)
-		conds.SetStatusAt(&status.Conditions, event.Generation, v1alpha1.ContractEventConditionSubmitted, metav1.ConditionFalse, "WindowOver", status.Message, now)
-		q.log.Warn("requester_contract_event_window_over", "contractEvent", event.Name, "endpoint", submit.Endpoint, "attempts", submit.Attempts,
-			"err", submit.LastError)
-		return 0, q.writeContractEventStatus(ctx, event, status)
-	}
 	if submit.Attempts > 0 {
 		if last, err := time.Parse(time.RFC3339, submit.LastAttemptAt); err == nil {
 			if left := last.Add(contractEventSubmitDelay(submit.Attempts)).Sub(now); left > 0 {
@@ -406,12 +394,13 @@ func (q *Requester) submitContractEvent(ctx context.Context, event *v1alpha1.Con
 		q.log.Info("requester_contract_event_submitted", "contractEvent", event.Name, "endpoint", bidder.Endpoint, "attempts", submit.Attempts,
 			"event", envelope.URI)
 		return 0, nil
-	case err == nil && code >= 400 && code <= 499 && code != http.StatusNotFound && code != http.StatusRequestTimeout && code != http.StatusTooManyRequests:
-		submit.LastError = fmt.Sprintf("HTTP %d", code)
+	case participant.Refused(err):
+		submit.LastError = err.Error()
 		status.Phase = v1alpha1.ContractEventFailed
 		status.Message = "the bidder refused the event: " + submit.LastError
 		conds.SetStatusAt(&status.Conditions, event.Generation, v1alpha1.ContractEventConditionSubmitted, metav1.ConditionFalse, "Refused", status.Message, now)
-		q.log.Warn("requester_contract_event_refused_by_bidder", "contractEvent", event.Name, "endpoint", bidder.Endpoint, "status", code)
+		q.log.Warn("requester_contract_event_refused_by_bidder", "contractEvent", event.Name, "endpoint", bidder.Endpoint, "status", code,
+			"err", err)
 		return 0, q.writeContractEventStatus(ctx, event, status)
 	case err == nil:
 		submit.LastError = fmt.Sprintf("HTTP %d", code)
@@ -429,14 +418,6 @@ func (q *Requester) submitContractEvent(ctx context.Context, event *v1alpha1.Con
 		return 0, err
 	}
 	return delay, nil
-}
-
-func apimetaPublishedAt(status v1alpha1.ContractEventStatus) time.Time {
-	condition := meta.FindStatusCondition(status.Conditions, v1alpha1.ContractEventConditionPublished)
-	if condition == nil || condition.Status != metav1.ConditionTrue {
-		return time.Time{}
-	}
-	return condition.LastTransitionTime.Time
 }
 
 func (q *Requester) recordInboundContractEvent(ctx context.Context, contract v1alpha1.ComputeContract, parsed *GuestEvent) error {

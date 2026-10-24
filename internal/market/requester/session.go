@@ -865,11 +865,12 @@ func (q *Requester) releaseSession(ctx context.Context, target *SessionTarget) e
 			}
 			return nil
 		}
-		if err != nil {
-			lastErr = err
-		} else {
-			lastErr = fmt.Errorf("vm.delete answered HTTP %d", status)
+		if status != 0 {
 			release.Status = &status
+		}
+		lastErr = err
+		if err == nil {
+			lastErr = fmt.Errorf("vm.delete answered HTTP %d", status)
 		}
 		if sleepCtx(ctx, releaseRetryDelay(attempt)) != nil {
 			return lastErr

@@ -53,6 +53,8 @@ const (
 
 	BidSubmitTimeout = 10 * time.Second
 
+	EventSubmitTimeout = 10 * time.Second
+
 	AwaitTimeout = 5 * time.Second
 
 	adapterLabel = "statesync.socialweb.computer/adapter"
@@ -261,6 +263,8 @@ type Bidder struct {
 
 	inboxed sync.Map
 
+	delivered sync.Map
+
 	offerMu sync.Mutex
 
 	offerWrite sync.Mutex
@@ -341,6 +345,7 @@ func (b *Bidder) Observe(ctx context.Context, change contract.Change) (time.Dura
 		if change.Gone || change.StateSync == nil {
 			if old, ok := b.syncs.Get(change.Name); ok {
 				b.inboxed.Delete(string(old.UID) + "#" + old.Spec.IdempotencyKey)
+				b.delivered.Delete(deliveredKey(string(old.UID), old.Spec.Payload))
 			}
 			b.syncs.Remove(change.Name)
 		} else {
