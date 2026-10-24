@@ -105,6 +105,9 @@ func (q QRSession) SessionData(clientID string, scopes []string) (SessionData, e
 	if err != nil {
 		return SessionData{}, err
 	}
+	if granted := TokenScopes(q.AccessJWT); len(granted) > 0 {
+		scopes = granted
+	}
 	return SessionData{
 		AccountDID:              did.String(),
 		SessionID:               SessionID(did.String(), host),

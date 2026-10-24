@@ -80,7 +80,7 @@ func (r IdentityRenderer) render(ctx context.Context, name string, a *v1alpha1.M
 	case v1alpha1.PendingActionVisitUrl:
 		r.showUrl("Open this URL in a browser to sign in:", a)
 	case v1alpha1.PendingActionSignInAgain:
-		r.showUrl("The sign-in session expired. Scan again to sign in:", a)
+		r.showUrl("The sign-in session expired or lacks new scopes. Scan again to sign in:", a)
 	case v1alpha1.PendingActionApproveAssociation:
 		who := a.CallerDid
 		if a.Handle != "" && a.Handle != a.CallerDid {

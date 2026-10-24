@@ -22,6 +22,8 @@ type heldAccount struct {
 	ref commonv1.SecretRef
 
 	auth *identity.Authenticator
+
+	lacking string
 }
 
 type heldAccounts struct {

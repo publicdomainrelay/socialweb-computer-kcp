@@ -15,6 +15,7 @@ import (
 	"github.com/bluesky-social/indigo/atproto/syntax"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	atprotooauth "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauthclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
@@ -112,22 +113,22 @@ func (a *Accounts) oauthBrowser(ctx context.Context, workspace string, id *v1alp
 	if errors.Is(err, errNoSessionRef) || ref == nil {
 		return failed(status, generation, "MissingSessionRef", "mode oauthBrowser needs spec.sessionRef for the oauth session; no secret is written to status"), nil
 	}
-	expired := oauthExpired(err)
-	if !errors.Is(err, oauthclient.ErrNoSession) && !expired {
+	reason, message, again := signInAgainReason(err)
+	if !errors.Is(err, oauthclient.ErrNoSession) && !again {
 		return pending(status, generation, "SessionError", "restoring the oauth session: "+err.Error()), err
 	}
 	kind := v1alpha1.PendingActionVisitUrl
-	phase := v1alpha1.MarketIdentityPhaseAwaitingAuthorization
-	if expired {
-		kind = v1alpha1.PendingActionSignInAgain
-		phase = v1alpha1.MarketIdentityPhaseSessionExpired
-	}
 	now := time.Now()
-	status.Phase = phase
-	status.ObservedGeneration = generation
 	status.SessionRef = ref
-	status.Message = pendingMessage(phase)
-	setReady(&status, generation, false, string(phase), status.Message)
+	if again {
+		kind = v1alpha1.PendingActionSignInAgain
+		signInAgainStatus(&status, generation, reason, message)
+	} else {
+		status.Phase = v1alpha1.MarketIdentityPhaseAwaitingAuthorization
+		status.ObservedGeneration = generation
+		status.Message = pendingMessage(status.Phase)
+		setReady(&status, generation, false, string(status.Phase), status.Message)
+	}
 	if expires, ok := pendingExpiry(id.Status.PendingAction, kind, now); ok {
 		return Result{Status: status, RequeueAfter: untilOrZero(expires, now)}, nil
 	}
@@ -150,8 +151,8 @@ func (a *Accounts) oauthQr(ctx context.Context, workspace string, id *v1alpha1.M
 	if errors.Is(err, errNoSessionRef) || ref == nil {
 		return failed(status, generation, "MissingSessionRef", "mode oauthQr needs spec.sessionRef for the oauth session; no secret is written to status"), nil
 	}
-	expired := oauthExpired(err)
-	if !errors.Is(err, oauthclient.ErrNoSession) && !expired {
+	reason, message, again := signInAgainReason(err)
+	if !errors.Is(err, oauthclient.ErrNoSession) && !again {
 		return pending(status, generation, "SessionError", "restoring the oauth session: "+err.Error()), err
 	}
 	status.SessionRef = ref
@@ -161,20 +162,7 @@ func (a *Accounts) oauthQr(ctx context.Context, workspace string, id *v1alpha1.M
 		if err != nil {
 			return failed(status, generation, "OAuthBeginFailed", err.Error()), nil
 		}
-		status.PendingAction = &v1alpha1.MarketIdentityPendingAction{Kind: v1alpha1.PendingActionScanQr, URL: qr.url,
-			ExpiresAt: qr.expires.UTC().Format(time.RFC3339)}
-		if expired {
-			status.Phase = v1alpha1.MarketIdentityPhaseSessionExpired
-			status.PendingAction.Kind = v1alpha1.PendingActionSignInAgain
-			status.Message = pendingMessage(status.Phase)
-			setReady(&status, generation, false, string(status.Phase), status.Message)
-		} else {
-			status.Phase = v1alpha1.MarketIdentityPhaseAwaitingScan
-			status.Message = pendingMessage(status.Phase)
-			setReady(&status, generation, false, "AwaitingScan", status.Message)
-		}
-		status.ObservedGeneration = generation
-		return Result{Status: status, RequeueAfter: QRPollInterval}, nil
+		return Result{Status: qrPending(status, generation, qr, reason, message), RequeueAfter: QRPollInterval}, nil
 	}
 	sessionQr, done, err := qr.transfer.PollOnce(ctx)
 	if err != nil {
@@ -184,7 +172,7 @@ func (a *Accounts) oauthQr(ctx context.Context, workspace string, id *v1alpha1.M
 		return pending(status, generation, "QRPollFailed", err.Error()), err
 	}
 	if !done {
-		return Result{Status: qrPending(status, generation, qr), RequeueAfter: QRPollInterval}, nil
+		return Result{Status: qrPending(status, generation, qr, reason, message), RequeueAfter: QRPollInterval}, nil
 	}
 	a.qr.Delete(key)
 	data, err := sessionQr.SessionData(a.sessionClientID(id), a.qrScopes())
@@ -193,17 +181,28 @@ func (a *Accounts) oauthQr(ctx context.Context, workspace string, id *v1alpha1.M
 	}
 	data = a.sessionWithEndpoints(ctx, data)
 	session, err = a.openSessionData(ctx, workspace, id, data, ref)
+	if reason, message, again = signInAgainReason(err); again {
+		if qr, err = a.newQrState(key); err != nil {
+			return failed(status, generation, "OAuthBeginFailed", err.Error()), nil
+		}
+		return Result{Status: qrPending(status, generation, qr, reason, message), RequeueAfter: QRPollInterval}, nil
+	}
 	if err != nil {
 		return pending(status, generation, "SessionRestoreFailed", err.Error()), err
 	}
 	return a.sessionSignedIn(ctx, status, generation, id, session, firstNonEmpty(sessionQr.Handle, id.Spec.Handle), ref), nil
 }
 
-func qrPending(status v1alpha1.MarketIdentityStatus, generation int64, qr *qrTransfer) v1alpha1.MarketIdentityStatus {
-	status.Phase = v1alpha1.MarketIdentityPhaseAwaitingScan
-	status.ObservedGeneration = generation
+func qrPending(status v1alpha1.MarketIdentityStatus, generation int64, qr *qrTransfer, reason, message string) v1alpha1.MarketIdentityStatus {
 	status.PendingAction = &v1alpha1.MarketIdentityPendingAction{Kind: v1alpha1.PendingActionScanQr, URL: qr.url,
 		ExpiresAt: qr.expires.UTC().Format(time.RFC3339)}
+	if reason != "" {
+		status.PendingAction.Kind = v1alpha1.PendingActionSignInAgain
+		signInAgainStatus(&status, generation, reason, message)
+		return status
+	}
+	status.Phase = v1alpha1.MarketIdentityPhaseAwaitingScan
+	status.ObservedGeneration = generation
 	status.Message = pendingMessage(status.Phase)
 	setReady(&status, generation, false, "AwaitingScan", status.Message)
 	return status
@@ -218,13 +217,10 @@ func (a *Accounts) oauthDelegated(ctx context.Context, workspace string, id *v1a
 	if errors.Is(err, errNoSessionRef) {
 		return pending(status, generation, "AwaitingSession", "mode oauthDelegated waits for spec.sessionRef"), nil
 	}
-	if oauthExpired(err) {
-		status.Phase = v1alpha1.MarketIdentityPhaseSessionExpired
-		status.ObservedGeneration = generation
+	if reason, message, again := signInAgainReason(err); again {
 		status.SessionRef = ref
 		status.PendingAction = &v1alpha1.MarketIdentityPendingAction{Kind: v1alpha1.PendingActionSignInAgain, Handle: id.Spec.Handle}
-		status.Message = pendingMessage(status.Phase)
-		setReady(&status, generation, false, "SessionExpired", status.Message)
+		signInAgainStatus(&status, generation, reason, message)
 		return Result{Status: status}, nil
 	}
 	return pending(status, generation, "SessionError", "restoring the oauth session: "+err.Error()), err
@@ -403,6 +399,10 @@ func (a *Accounts) restoreOAuthSession(ctx context.Context, workspace string, id
 			}
 			return nil, ref, err
 		}
+		if err := a.scopeCheck(workspace, id, held, session.Scopes()); err != nil {
+			held.auth.Drop()
+			return nil, ref, err
+		}
 		return session, ref, nil
 	}
 	vault := a.vaultFor(workspace)
@@ -433,9 +433,68 @@ func (a *Accounts) restoreOAuthSession(ctx context.Context, workspace string, id
 	if err != nil {
 		return nil, ref, err
 	}
+	if err := a.scopeCheck(workspace, id, held, session.Scopes()); err != nil {
+		return nil, ref, err
+	}
 	held.ref = *ref
 	held.auth.Hold(session)
 	return session, ref, nil
+}
+
+type scopeChangedError struct {
+	missing []string
+}
+
+func (e *scopeChangedError) Error() string {
+	return "marketidentity: " + e.message()
+}
+
+func (e *scopeChangedError) message() string {
+	return "the oauth session lacks scopes the identity now needs (" + strings.Join(e.subjects(), ", ") + "); sign in again"
+}
+
+func (e *scopeChangedError) subjects() []string {
+	subjects := make([]string, 0, len(e.missing))
+	for _, scope := range e.missing {
+		subjects = append(subjects, atprotooauth.ScopeSubject(scope))
+	}
+	return subjects
+}
+
+func (a *Accounts) scopeCheck(workspace string, id *v1alpha1.MarketIdentity, held *heldAccount, granted []string) error {
+	if len(granted) == 0 {
+		return nil
+	}
+	missing := atprotooauth.MissingScopes(a.oauthScopes(), granted)
+	if lacking := strings.Join(missing, " "); lacking != held.lacking {
+		held.lacking = lacking
+		if lacking != "" {
+			a.log.Info("the oauth session lacks scopes the identity now needs", "workspace", workspace, "identity", id.Name, "missing", missing)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	return &scopeChangedError{missing: missing}
+}
+
+func signInAgainReason(err error) (string, string, bool) {
+	var changed *scopeChangedError
+	switch {
+	case errors.As(err, &changed):
+		return "ScopeChanged", changed.message(), true
+	case oauthExpired(err):
+		return string(v1alpha1.MarketIdentityPhaseSessionExpired), pendingMessage(v1alpha1.MarketIdentityPhaseSessionExpired), true
+	}
+	return "", "", false
+}
+
+func signInAgainStatus(status *v1alpha1.MarketIdentityStatus, generation int64, reason, message string) {
+	status.Phase = v1alpha1.MarketIdentityPhaseSessionExpired
+	status.ObservedGeneration = generation
+	status.Message = message
+	conds.Set(&status.Conditions, generation, v1alpha1.ConditionSignedIn, false, reason, message)
+	setReady(status, generation, false, reason, message)
 }
 
 func (a *Accounts) sessionWithEndpoints(ctx context.Context, data oauthclient.SessionData) oauthclient.SessionData {
@@ -489,6 +548,9 @@ func (a *Accounts) openSessionData(ctx context.Context, workspace string, id *v1
 	}
 	_ = session.EnsureEndpoints(ctx)
 	if _, err := session.AccessToken(ctx); err != nil {
+		return nil, err
+	}
+	if err := a.scopeCheck(workspace, id, held, session.Scopes()); err != nil {
 		return nil, err
 	}
 	held.ref = *ref

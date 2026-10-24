@@ -1,6 +1,9 @@
 package oauth
 
-import "strings"
+import (
+	"net/url"
+	"strings"
+)
 
 const (
 	CollectionRBACDID           = "com.publicdomainrelay.temp.auth.allowlist.rbacDid"
@@ -113,6 +116,93 @@ const OAuthScopeLocalhost = "atproto repo:com.publicdomainrelay.temp.badgeBlueKe
 
 func ScopeString(scopes []string) string {
 	return strings.Join(scopes, " ")
+}
+
+const ScopeTransitionGeneric = "transition:generic"
+
+var repoActions = []string{"create", "update", "delete"}
+
+func MissingScopes(required, granted []string) []string {
+	have := map[string]bool{}
+	for _, scope := range granted {
+		have[scope] = true
+	}
+	missing := []string{}
+	for _, want := range required {
+		if have[want] || grantedBy(want, granted, have) {
+			continue
+		}
+		missing = append(missing, want)
+	}
+	return missing
+}
+
+func ScopeSubject(scope string) string {
+	resource, subject, _ := parsePermission(scope)
+	if subject == "" || (resource != "repo" && resource != "rpc") {
+		return scope
+	}
+	return subject
+}
+
+func grantedBy(want string, granted []string, have map[string]bool) bool {
+	resource, subject, params := parsePermission(want)
+	if resource != "repo" && resource != "rpc" {
+		return false
+	}
+	if have[ScopeTransitionGeneric] {
+		return true
+	}
+	needed := map[string]bool{}
+	if resource == "repo" {
+		for _, action := range orAll(params["action"]) {
+			needed[action] = true
+		}
+	}
+	for _, scope := range granted {
+		gotResource, gotSubject, got := parsePermission(scope)
+		if gotResource != resource || (gotSubject != subject && gotSubject != "*") {
+			continue
+		}
+		if resource == "rpc" {
+			if aud := got.Get("aud"); aud == "*" || aud == params.Get("aud") {
+				return true
+			}
+			continue
+		}
+		for _, action := range orAll(got["action"]) {
+			delete(needed, action)
+		}
+		if len(needed) == 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func parsePermission(scope string) (string, string, url.Values) {
+	head, query, _ := strings.Cut(strings.TrimSpace(scope), "?")
+	resource, subject, _ := strings.Cut(head, ":")
+	params, err := url.ParseQuery(query)
+	if err != nil {
+		params = url.Values{}
+	}
+	if subject == "" {
+		switch resource {
+		case "repo":
+			subject = params.Get("collection")
+		case "rpc":
+			subject = params.Get("lxm")
+		}
+	}
+	return resource, subject, params
+}
+
+func orAll(actions []string) []string {
+	if len(actions) == 0 {
+		return repoActions
+	}
+	return actions
 }
 
 func collectionScope(nsid string, verbs ...string) string {

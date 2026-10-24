@@ -247,6 +247,36 @@ func (s *Session) HostURL() string {
 	return s.hostURL
 }
 
+func (s *Session) Scopes() []string {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if scopes := TokenScopes(s.data.AccessToken); len(scopes) > 0 {
+		return scopes
+	}
+	return append([]string(nil), s.data.Scopes...)
+}
+
+func TokenScopes(token string) []string {
+	parts := strings.Split(token, ".")
+	if len(parts) < 2 {
+		return nil
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return nil
+	}
+	var claims struct {
+		Scope string `json:"scope"`
+	}
+	if json.Unmarshal(raw, &claims) != nil {
+		return nil
+	}
+	return strings.Fields(claims.Scope)
+}
+
 func (s *Session) AccessToken(ctx context.Context) (string, error) {
 	if s == nil {
 		return "", errors.New("oauthclient: no oauth session")
