@@ -1,6 +1,6 @@
 plan: "0025"
 title: "Defect register from the rc81 live proof and the architecture audit"
-status: doing
+status: done
 source: >
   Defects observed during the rc81 live proof of plans 0023 and 0024 and
   found by the 2026-10-22 architecture audit. Each item records the defect
@@ -9,7 +9,7 @@ source: >
 items:
   - id: D01-RECORD-WRITE-AUTH
     title: "AtprotoRecord writes to a local PDS have no token"
-    status: todo
+    status: done
     defect: >
       The gateway AtprotoRecord named association stays Failed with
       "pdsclient: authentication required: no access token is available".
@@ -179,7 +179,7 @@ items:
       Run (:113), so workspaces created later are not watched.
   - id: D21-REQUESTER-ASSOCIATION-LOST
     title: "Requester MarketIdentity loses its operator association after a gateway restart"
-    status: todo
+    status: done
     defect: >
       After a gateway restart, requester bids were denied with "not vouched"
       and "scope denied" until scripts/associate-bidder.ts was rerun and
@@ -213,7 +213,7 @@ items:
       W0-RUNTIME live run (instance w0rt).
   - id: D25-MOUNT-BEARER-KCP-MAIN
     title: "Tenant bearer requests through the kcp mount fail on kcp main"
-    status: todo
+    status: done
     defect: >
       kcp main (#4427, pkg/server/mountproxy.go) verifies the mount target's
       TLS certificate against the system roots plus
