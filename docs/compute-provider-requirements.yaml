@@ -150,7 +150,9 @@ requirements:
       detail: >-
         The route stays TypeScript (compute-provider-kcp, M4-ONNETWORK; a guest-facing DenoPod after
         M4-BIDDER-VAULT). The port derivation from the tunnel subscriber's --ingress-proxy-host flag in
-        guestOnNetworkUrl is legacy (FC-LEGACY-TUNNEL-MODULE).
+        guestOnNetworkUrl is legacy (FC-LEGACY-TUNNEL-MODULE). As built in Go (plan 0034): the guest posts
+        to the bidder GuestControlPlane's POST /v1/events at http://192.0.2.1:<port>, with the ingress URL as
+        fallback; /v1/on-network is gone.
     parity_test:
       - ts/hono-compute-provider/test/firecracker_onnetwork_reporter_test.ts::"the bundle's guest_onnetwork_url is what the guest reports to"
       - TestParityTheSeedUserDataEqualsTheProvidersByteForByte
@@ -693,7 +695,9 @@ requirements:
       meets: not-applicable
       detail: >-
         Kept by compute-provider-kcp, which also applies status.market {onNetworkUri, address, reportedAt}
-        (M4-ONNETWORK).
+        (M4-ONNETWORK). As built in Go (plan 0034): GuestControlPlane POST /v1/events {acceptUri, acceptCid,
+        record} replaces /v1/on-network; record.$type is vm.onNetwork (with kind), guest.publicKey or
+        guest.signalWebRTC.
     parity_test:
       - ts/hono-compute-provider/test/compute_provider_kcp_onnetwork_test.ts
     status: port

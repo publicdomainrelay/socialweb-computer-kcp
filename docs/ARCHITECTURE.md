@@ -96,11 +96,11 @@ only), `install`, the host contract, and the bootstrap layer that runs an instan
   scrapes stdout for a DID, a port or readiness.
 - **iroh is the default and required guest transport.** The ssh gateway moves to iroh; the tunnel,
   fedproxy-ssh, fedproxy-web and old browser-terminal modules, websocat ProxyCommand paths, the
-  relay-FQDN guest addresses and the guest package registry are removed. The one other transport is
-  opt-in per contract: `spec.tunnels` asks the requester's user_data for the opentunnel module (an
-  https URL to a guest port), whose URL comes back as a tagged `vm.onNetwork` (plan 0032, invariant
-  36).
-- **Components:** the bidder's guest-facing endpoints (an allow-list proxy to the bidder's OpenBao for the guest's bind, login and identity token, and `/v1/on-network`)
+  relay-FQDN guest addresses and the guest package registry are removed. Two other transports are
+  opt-in per entry of `spec.tunnels`: transport `opentunnel` (an https URL to a guest port) and
+  transport `webrtc` (a datachannel to a guest port through socialweb-guest-agent); each comes back
+  as a tagged `vm.onNetwork` with its kind (plans 0032 and 0034, invariant 36).
+- **Components:** the bidder's guest-facing endpoints (an allow-list proxy to the bidder's OpenBao for the guest's bind, login and identity token, `POST /v1/events`, `GET /v1/downloads` and the `compute.guest.subscribeEvents` subscription)
   are the GuestControlPlane component of the bidder; the NodeClaim fulfiller is the NodeClaim
   controller (`internal/controllers/nodeclaim`) bound by the gateway's GatewayAPI component.
 
@@ -832,7 +832,8 @@ subsection above. The TypeScript provider that came before plan 0026 is gone.
   (`computevm.EnsureTerminationSync`, reason `computevm.GoneReason`: HostRebooted -> host_reboot,
   OOMKilled -> oom, IdentityMismatch -> identity_mismatch, GuestPoweroff -> guest_poweroff, every
   other -> vmm_exited; `deleted_on_request` for a release). The guest-facing endpoints (the allow-list
-  proxy to the bidder's OpenBao and `POST /v1/on-network`) are the GuestControlPlane component
+  proxy to the bidder's OpenBao, `POST /v1/events`, `GET /v1/downloads` and the guest event
+  subscription) are the GuestControlPlane component
   (`internal/services/guestcontrolplane`).
 - **A process per VM under a generic runner was rejected, on evidence.** Before plan 0026 a runner of
   the deno runtime SIGKILLed a deleted pod's process group with no release step, and its 5-minute pod
@@ -3962,14 +3963,22 @@ A change must not break any of these. Each exists because something failed.
     requester from the bidder Receipt record's `submitEvent`; with no ref the firehose carries the
     event. A timeout does not make a remote call a request-path operation (section 15).
 36. **iroh is the default and required guest transport; a tunnel is an opt-in per contract.** Every
-    guest gets the iroh module, the requester's ssh dials the iroh ticket in `status.contract.vmAddress`,
-    and a contract is Held on the iroh address and the host keys alone. The one other transport is
-    the opentunnel module of `internal/atproto/cloudinit/tunnels.go`, installed by the requester's
-    user_data only for the entries of `spec.tunnels`, from a pinned download checked by sha256. It
-    serves the guest's `127.0.0.1:<port>` at an https URL, which comes back as a `vm.onNetwork`
-    with a `tag`, signed by the bidder, into `status.contract.networks` (plan 0032). The browser
-    shell that plan 0032 put behind it was removed in plan 0034 W0; the guest shell
-    moves to WebRTC (plan 0034).
+    guest gets the iroh module, the requester's ssh dials the iroh ticket in `status.contract.vmAddress`
+    by default, and a contract is Held on the iroh address and the host keys alone. The other two
+    transports exist only for the entries of `spec.tunnels`: transport `opentunnel` serves the
+    guest's `127.0.0.1:<port>` at an https URL (a `vm.onNetwork` kind `https`), and transport
+    `webrtc` bridges a datachannel to it through socialweb-guest-agent (a `vm.onNetwork` kind
+    `webrtc` whose address is the agent's DTLS fingerprint). Each comes back signed by the bidder into
+    `status.contract.networks` with its tag and kind (plans 0032 and 0034). The requester's tunnel
+    module carries config only; the bidder installs opentunnel and socialweb-guest-agent from its own
+    GuestControlPlane `/v1/downloads` over the host-loopback map, checked by sha256, and a guest
+    fetches no binary from the internet. WebRTC signaling is age ciphertext in
+    `compute.events.guest.signalWebRTC`, sealed to a `compute.events.guest.publicKey` of the other side;
+    no SDP, ICE candidate, IP address or private key is in a record, kcp object or log, and the only
+    STUN server is `stun:stun.cloudflare.com:3478`.
+37. **A guest reaches its host's loopback only on its ComputeVM's `spec.hostPorts`.** socialweb-vmexec
+    loads the nf_tables bridge table `swcguest` in the guest's namespace before it wires the tap; a VM
+    whose table does not load does not start (plan 0034).
 
 ## 14. Open architectural gaps
 
@@ -4203,7 +4212,8 @@ fail, rather than the code read against this document alone.
     index allocator. An HNS NAT network per host cannot give every guest this plan; M0-HNS-NETWORK measures
     what Windows can do with it.
   - iroh is the default and required guest transport; guests have no JSR registry or websocat, and a
-    tunnel module only when the contract's `spec.tunnels` asks for it (plan 0032).
+    tunnel module (opentunnel or socialweb-guest-agent, installed by the bidder from its own
+    `/v1/downloads`) only when the contract's `spec.tunnels` asks for it (plans 0032 and 0034).
   - The core binary installs to `bin/<sha>/` with `bin/current` and `bin/previous` (not `versions/<sha256>/`);
     assets are `runtime/<sha256>/`, collected when unreferenced. `install` is behind `install.System` and
     `UserManager`, which are systemd and account shaped (`system_other.go` refuses on !linux). The bidder
@@ -10744,6 +10754,90 @@ to `exec.LookPath("deno")`. The integration hosts hat-7 and hat-9 were prepared 
   opentunnel.xyz's ACME DNS-01 issuance (server side, 108 to 164 s here, 72 s on prod), which only
   an identity made before the guest boots could take off the critical path. The URL answered as in
   plan 0032 (health 200, bootstrap 204 with the token, sessions 200 with the cookie).
+- **Changed (plan 0034).** The guest no longer fetches opentunnel from its GitHub release: the
+  bidder's `setup-guest-binaries.service` installs it from the bidder's own `/v1/downloads`; the
+  certificate wait is unchanged and is why a webrtc transport exists.
+
+### A guest is reached over WebRTC, with sealed signaling through the bidder (2026-10-24, plan 0034)
+
+- **Before.** A requester reached its guest over ssh on iroh, or over an opentunnel https URL that
+  cost 70 to 165 s of opentunnel.xyz ACME DNS-01 per tunnel before its first byte (the entry
+  above; 72 s on prod). The guest fetched opentunnel from GitHub and the browser shell from GHCR, and
+  reported its address to `POST /v1/on-network`. The bidder acted on `vm.delete` only and dropped
+  every other market.event payload; there was no way to say anything to a guest after boot. Every
+  guest reached the whole bidder host loopback at 192.0.2.1 through pasta `--map-host-loopback`: the
+  kcp front, OpenBao and every local Exposure.
+- **The decisions, as built.**
+  - Three transports: iroh (default, required), `spec.tunnels[].transport` `opentunnel` (default for a
+    tunnel) and `webrtc`. `vm.onNetwork` gains `kind` (`iroh`, `https`, `webrtc`; absent reads iroh
+    without a tag and https with one); a webrtc address is the guest agent's DTLS fingerprint
+    `sha-256 <hex>`. `run request --tunnel <tag>:<port>[:<transport>]`.
+  - A guest namespace `com.publicdomainrelay.temp.compute.events.guest.*` in the unchanged market.event
+    envelope: `guest.publicKey` {kind `age-x25519`, tag, key} and `guest.signalWebRTC` {kind
+    `offer`|`answer`, tag, ciphertext}. A signal names no recipient (the user's decision): the offer's
+    sealed plaintext is `{sdp, replyTo}`, the answer is sealed to `replyTo`, and each reader trial-opens
+    every signal for its tag, so no public record links a signal to a session key. Non-trickle ICE,
+    `stun:stun.cloudflare.com:3478` only, no TURN; a symmetric NAT fails and is reported.
+  - Guest to requester: GuestControlPlane `POST /v1/events {acceptUri, acceptCid, record}` replaces
+    `/v1/on-network`. vm.onNetwork keeps the ComputeVM guest report path; guest.publicKey and
+    guest.signalWebRTC are checked for shape and size only and published by the bidder as signed
+    market.events through a StateSync per (collection, tag, kind, sha256 of the record).
+  - Requester to guest: `applyMarketEvent` takes a guest.* payload bound to this bidder's receipt from
+    the accept author, verifies it and appends it, fsynced, to the ComputeVM's NDJSON queue in the
+    GuestControlPlane state dir before the 200 (duplicates by uri#cid dropped; the queue goes with the
+    ComputeVM). The guest reads it on the XRPC subscription `compute.guest.subscribeEvents` (WebSocket,
+    `cursor`; JSON text frames `{$type: ...#event, seq, uri, cid, record}`; `FutureCursor`; a cursor
+    prunes entries at or below it; an empty binary keepalive every 25 s, in `deploy/obligations.txt`),
+    on the local handler and as a DirectSubscriptionHandler of the guest relay. The bearer is the
+    `Authorization` header only: the Go ingress and the deployed relay forward `authorization` and
+    `atproto-proxy` on subscriptions, so the earlier `token` query fallback is gone.
+  - Retries: a market event StateSync and the requester's ContractEvent submit classify a reply with
+    `participant.Refused`: a handler 4xx (400, 401, 403, a 404 with an XRPC error name) is terminal; the
+    relay's 404 "no active subscriber", a bare 404, 408, 429, 5xx, timeouts and connection errors retry
+    (2 s doubling to 1 m, no attempt limit while the contract is Held or Releasing, or the ComputeVM
+    lives).
+  - ContractEvent (`socialweb.computer/v1alpha1`, cluster-scoped, ownerRef to its ComputeContract): an
+    outbound one (made with kubectl by the CLI or the browser page) is written as the payload and its
+    market.event and submitted to the bidder; an inbound one (`in-<sha256(uri)[:10]>`, phase Received)
+    is made by the requester from a verified guest.* event of the contract's bidder.
+  - socialweb-guest-agent (`internal/guestagent`, pion/webrtc v4, filippo.io/age; 11 MB for
+    linux/amd64): an in-memory age identity and DTLS certificate per run; per webrtc tunnel it posts
+    guest.publicKey and vm.onNetwork kind webrtc, streams the subscription (cursor in
+    `/run/socialweb-guest-agent/cursor`, 2 to 30 s reconnect backoff), answers each offer it can open
+    and bridges each datachannel labelled with the tag to `127.0.0.1:<port>` with buffered-amount
+    backpressure; a session that does not connect in 2 minutes is dropped. The CLI side is
+    `internal/webrtcproxy`: `run request proxy <name> --tag <tag>` checks every `a=fingerprint` of the
+    answer against the onNetwork address and pipes stdin and stdout; `run request ssh --transport
+    webrtc` uses it as the ProxyCommand against the reported host keys (logs at warn, plain text).
+  - Binaries come from the bidder. The did:key ingress cannot carry them (a response body crosses as a
+    JSON string, so non-UTF-8 bytes become U+FFFD, and frames were capped at 8 MB), so
+    GuestControlPlane serves `GET /v1/downloads/{sha256}/{name}` (`internal/kit/pinneddownloads`, moved
+    out of the gateway) from the release asset `socialweb-guest-downloads` on a local Exposure, and the
+    guest fetches from `http://192.0.2.1:<port>`. The bidder adds `setup-guest-binaries.service` with
+    pins from its own sidecars whenever user_data has an opentunnel unit or the guest agent's
+    `tunnels.json`; the requester's tunnel module carries config only. wootty and
+    `spec.tunnels[].shell` are gone (W0).
+  - The host-loopback fence (invariant 37): socialweb-vmexec loads an nf_tables bridge table in the
+    guest's namespace before it creates the tap; TCP to 192.0.2.1 is accepted only on the ComputeVM's
+    `spec.hostPorts` and reset otherwise, everything else to 192.0.2.1, to 127.0.0.0/8 and to the
+    namespace itself is dropped, and pasta runs with `--no-map-gw` and no port forwards. The bidder
+    lists the local GuestControlPlane port, and in a market network the guest TLS port and the ports
+    of the user_data's 192.0.2.1 URLs.
+  - The xrpc.fedproxy.com relay is the Go relay `socialweb-computer internal ingress-relay`, deployed by
+    `scripts/deploy-xrpc-relay.sh` (`--rollback` returns to the deno relay). It took parity fixes with
+    the TypeScript relay: CORS preflight reflecting Access-Control-Request-Headers, a send queue per
+    subscription (a caller 4096 messages behind is closed 1008), 64 MiB frames, escaped paths, 413
+    for an oversized body, binary frames from subscribers.
+  - `tlsreload.Pool.Current` waits (up to 10 s) for the first CA pool instead of failing, which took a
+    5 s submit backoff off the first signal after a restart.
+- **After (live, market networks p34cli and p34tls, CLI requester, local bidder).** `run request
+  --hold --tunnel ssh:22:webrtc --transport webrtc --exec "uname -a; id"` reached Held and ran the
+  command over WebRTC with host key checking on. Held to shell: 2.16 s on a fresh invocation; after
+  the invocation's kcp had stopped and started again, 10.09 s before the tlsreload change and 6.99 s
+  after it (offer to answer 8.49 s to 5.56 s). The guest's own part of an answer is 0.2 s; the rest
+  is the two market.event round trips through the bidder. An opentunnel https tunnel still needs 70
+  to 165 s for its certificate, so webrtc is the interactive path. iroh ssh is unchanged (0.73 s on a
+  held invocation).
 
 ## 16. Vocabulary
 

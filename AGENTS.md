@@ -37,7 +37,7 @@ Go:
 
 | Directory | What it holds |
 | --- | --- |
-| `cmd/` | one directory per binary (`socialweb-computer`, `socialweb-node`, `socialweb-vmexec`, `socialweb-apigen`, the two OpenBao auth plugins) |
+| `cmd/` | one directory per binary (`socialweb-computer`, `socialweb-node`, `socialweb-vmexec`, `socialweb-guest-agent`, `socialweb-apigen`, the two OpenBao auth plugins) |
 | `internal/` | the Go packages, in the plan 0026 layers (`docs/ARCHITECTURE.md` section 12) |
 | `api/` | the kcp API types; `go generate ./api/...` writes the schemas, the APIExports and the generated Go |
 | `deploy/` | manifests, sets, the generated schemas and exports, `check.sh` |
@@ -82,18 +82,60 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
 - The RFP flow is the only way a guest comes up: the requester posts a `compute.vm` record and a signed
   `market.rfp`, bidders bid, the requester accepts, and the winner boots the guest from cloud-init
   `user_data` (`BuildUserData` and the module registry in `internal/atproto/cloudinit`).
-  The requester reaches the guest only through the relay. Never start a container or VM by hand in
-  code or in a test, and never install a guest agent outside cloud-init. iroh is the default and
-  required guest transport: every guest gets the iroh module, and the requester's ssh and
-  `status.contract.vmAddress` are iroh. The one other transport is the opt-in opentunnel https
-  module of `internal/atproto/cloudinit` (`tunnels.go`), which the requester's user_data installs
-  only when a ComputeContract asks for it in `spec.tunnels` (plan 0032); its URL comes back as a
-  tagged `vm.onNetwork` into `status.contract.networks`. Never add any other transport. A live run that needs a guest brings up its own market network,
+  The requester reaches the guest only through the guest transports below. Never start a container or VM by hand in
+  code or in a test, and never install a guest agent outside cloud-init. A live run that needs a
+  guest brings up its own market network,
   and `socialweb-computer run request` or a tenant cluster of the network's gateway rents the guest.
   `run request` composes a MarketRequester root (`internal/app/marketrequester`), and its Requester
   component (`internal/services/requester` over `internal/market/requester`) runs the RFP, the
   accept and the release; `run request list`, `run request release` and `run request resume` manage
   the invocations it recorded.
+
+## Guest transports, guest events and the host-loopback fence
+
+- Three guest transports, and no other. Never add one.
+  - iroh is the default and required transport: every guest gets the iroh module, the requester's
+    ssh and `status.contract.vmAddress` are iroh, and a contract is Held on the iroh address and the
+    host keys alone.
+  - opentunnel https, opt-in per entry of the ComputeContract's `spec.tunnels` with transport
+    `opentunnel` (the default): one https URL per tag for the guest's `127.0.0.1:<port>`, back as a
+    `vm.onNetwork` kind `https` in `status.contract.networks` (plans 0032, 0034).
+  - webrtc, opt-in per entry with transport `webrtc`: socialweb-guest-agent (`cmd/socialweb-guest-agent`,
+    `internal/guestagent`, pion and age) bridges each datachannel labelled with the tag to
+    `127.0.0.1:<port>`; its DTLS fingerprint comes back as a `vm.onNetwork` kind `webrtc`. The CLI
+    side is `run request proxy <name> --tag <tag>` (`internal/webrtcproxy`), and `run request ssh
+    --transport webrtc` uses it as the ssh ProxyCommand; `run request --tunnel <tag>:<port>[:<transport>]`
+    asks for tunnels. STUN is `stun:stun.cloudflare.com:3478` only; no TURN (plan 0034).
+- The bidder installs the guest binaries, never the requester and never the internet. The requester's
+  tunnel module carries config only; the bidder adds `setup-guest-binaries.service`
+  (`internal/guestseed`), which fetches opentunnel or socialweb-guest-agent from its own
+  GuestControlPlane `GET /v1/downloads/<sha256>/<name>` at `http://192.0.2.1:<port>` (a local
+  Exposure), checks the sha256 and installs to `/usr/local/bin`. The binaries are the release asset
+  `socialweb-guest-downloads` (`scripts/build-guest-downloads.sh`). A guest never fetches from GitHub or
+  GHCR. The did:key ingress cannot carry binaries (JSON string bodies, a frame cap).
+- Guest events live under `com.publicdomainrelay.temp.compute.events.guest.*` in the market.event
+  envelope. The guest holds no repo key: it POSTs `{acceptUri, acceptCid, record}` to GuestControlPlane
+  `POST /v1/events` (vm.onNetwork, guest.publicKey, guest.signalWebRTC) and the bidder signs and
+  publishes them; requester events to the guest reach it through the bidder's per-ComputeVM queue
+  and the XRPC subscription `com.publicdomainrelay.temp.compute.guest.subscribeEvents` (WebSocket,
+  `cursor`, JSON text frames, an empty binary keepalive every 25 s). The guest bearer is the
+  `Authorization` header only. The bidder routes by NSID prefix and never opens a sealed body.
+- Signaling is sealed. Each side publishes a `guest.publicKey` (kind `age-x25519`) per tag; an offer
+  is age ciphertext sealed to the guest's latest key, with plaintext `{sdp, replyTo}`; the answer is
+  sealed to `replyTo`. A signal names no recipient: a reader trial-opens every signal for its tag.
+  No private key, SDP, ICE candidate or IP address is ever in a record, a ContractEvent, a StateSync,
+  kcp or a log. The requester side of each event is a cluster-scoped `ContractEvent`
+  (`socialweb.computer/v1alpha1`, outbound ones made by the CLI or the browser, inbound ones by the
+  requester), owned by its ComputeContract.
+- The host-loopback fence. A guest reaches its host's loopback at `192.0.2.1` only on the TCP ports of
+  its ComputeVM's `spec.hostPorts`; socialweb-vmexec loads an nf_tables bridge table in the guest's
+  namespace that resets every other TCP connection to 192.0.2.1 and drops everything else to it and
+  to 127.0.0.0/8, and the VM does not start without it. A guest-facing local listener the bidder
+  hands to a guest goes into `spec.hostPorts` (`GuestHostPorts`, `guestseed.HostPortsOf`); never
+  widen the fence to all ports.
+- After a change to `cmd/socialweb-vmexec` or `internal/guestnet`, run `make pins` and commit the
+  `socialweb-vmexec` pin with the change, then `dev down` and `dev up` the network instead of a
+  `dev restart ... core`.
 
 ## Tests: none until plan 0027
 
@@ -147,6 +189,13 @@ A prod deployment guarantees nothing; the routine path preserves most things.
   guest image once, to that content-addressed key, and only when the key does not hold it yet. On hat-8 the pinned image is in
   `/var/lib/socialweb-computer/guest-image` (root-owned; the bidder verifies every file by the sha256
   pinned in internal/versions/versions.json).
+- The did:key ingress relay at xrpc.fedproxy.com is the Go relay `socialweb-computer internal
+  ingress-relay` (`internal/atproto/ingress`), behind caddy on a unix socket as the
+  `30-go.conf` drop-in of `xrpc-relay-server.service`. Deploy it only with
+  `scripts/deploy-xrpc-relay.sh` (build, ship, restart, health check, rollback on a failed check);
+  `--rollback` removes the drop-in and goes back to the deno relay, `--status` only reads. Never run
+  `atproto-reverse-proxy/scripts/deploy.sh`: it prints `CF_API_TOKEN`. A change to the ingress
+  protocol (`internal/atproto/ingress`) ships to both ends: the core and this relay.
 - Only the lead runs a prod deployment (plan 0006 M5-FRESH-DEPLOY). Task agents never touch prod.
 
 ## How to verify

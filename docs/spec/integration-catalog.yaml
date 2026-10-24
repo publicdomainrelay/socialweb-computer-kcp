@@ -1354,16 +1354,93 @@ entries:
       names web.
     asserts: >
       The contract is Held with an iroh vmAddress before any tunnel is up. On the guest
-      setup-guest-opentunnel and guest-tunnel-web are active and no other setup-guest unit exists. The
-      bidder's repo holds a signed market.event whose vm.onNetwork payload has tag web and an https
-      address; the contract's status.contract.networks holds {tag: web, address, at, event}. Over
-      HTTPS the address answers GET / with 200 and the nonce body.
+      setup-guest-binaries and guest-tunnel-web are active; the journal of setup-guest-binaries names
+      opentunnel installed with the sha256 of the bidder's socialweb-guest-downloads sidecar, fetched
+      from http://192.0.2.1:<port>/v1/downloads, and the guest made no request to github.com or
+      ghcr.io. The bidder's repo holds a signed market.event whose vm.onNetwork payload has tag web,
+      kind https and an https address; the contract's status.contract.networks holds {tag: web, kind:
+      https, address, at, event}. Over HTTPS the address answers GET / with 200 and the nonce body.
     cases:
-      - "a --tunnel entry other than <tag>:<port>: run request fails before any RFP"
-      - "a contract without spec.tunnels: Held as before, no networks, no tunnel unit in its user_data"
+      - "a --tunnel entry other than <tag>:<port>[:<transport>] or a transport other than opentunnel|webrtc: run request fails before any RFP"
+      - "a contract without spec.tunnels: Held as before, no networks, no tunnel unit and no setup-guest-binaries in its user_data"
     cleanup: >
       run request release <name>; the ComputeVM, FirecrackerVM and VM unit are gone and the address
       no longer answers; standard teardown.
+
+  - id: TestAGuestWebRTCSSH
+    kind: integration
+    source: docs/plans/0034-webrtc-guest-transport.yaml ACC34-CLI-SSH, ACC34-HANDSHAKE, ACC34-DOWNLOADS
+    actors: [requester, bidder, kcp, pds, relay, VM host systemd user units, socialweb-guest-agent, stun.cloudflare.com]
+    setup: >
+      Own network: --bidders 1, no gateway; the guest and the host reach stun.cloudflare.com:3478 over
+      UDP. `run request --network <inst> --name wr<6 hex> --hold --tunnel ssh:22:webrtc --transport
+      webrtc --exec 'uname -a; id'` until it exits, then `run request ssh <name> --transport webrtc
+      --exec 'uname -a; id'` twice: once while the invocation's kcp still runs and once after it
+      stopped.
+    asserts: >
+      The contract is Held on its iroh vmAddress and host keys. On the guest setup-guest-binaries
+      installed socialweb-guest-agent from http://192.0.2.1:<port>/v1/downloads with the sidecar's
+      sha256, and socialweb-guest-agent is active. The requester holds an inbound ContractEvent for
+      the guest's guest.publicKey of tag ssh and status.contract.networks holds {tag: ssh, kind:
+      webrtc, address: "sha-256 <hex>"}. Every ssh run prints Linux and uid= with
+      StrictHostKeyChecking=yes against the reported host keys and exits 0; the proxy logs the
+      datachannel open. Every guest.signalWebRTC record in the requester's and the bidder's repo,
+      and every signal ContractEvent, holds only age armored ciphertext and names no recipient; no
+      record, ContractEvent, StateSync or log line of either side holds "a=candidate", an
+      a=fingerprint next to an IP address, or AGE-SECRET-KEY. The Held to shell time is recorded
+      (2.16 s fresh and about 7 s after a kcp restart on the local bidder, 2026-10-24).
+    cases:
+      - "an answer whose a=fingerprint differs from the onNetwork address: the proxy closes the session and ssh fails; no bytes reach the guest port"
+      - "two proxy sessions on one tag at once: each opens only its own answer and both shells work"
+      - "--transport iroh on the same contract: ssh over iroh works as before"
+    cleanup: >
+      run request release <name>; the contract is Released, the inbound and outbound ContractEvents
+      are gone with it, and no ComputeVM, FirecrackerVM or VM unit is left; standard teardown.
+
+  - id: TestAGuestEventSubscription
+    kind: integration
+    source: docs/plans/0034-webrtc-guest-transport.yaml W2-GUEST-EVENTS-IN, W2-GUEST-SUBSCRIBE, W2-GUEST-EVENTS-OUT
+    actors: [requester, bidder, kcp, pds, relay, VM host systemd user units, a guest-side WebSocket client]
+    setup: >
+      Own network: --bidders 1, no gateway. A held contract with a webrtc tunnel. Before the client
+      connects, an outbound guest.publicKey ContractEvent is created in the requester workspace and
+      reaches Submitted. Then a client on the guest, with the bearer of guest-login.sh token
+      <audience>, opens GET /xrpc/com.publicdomainrelay.temp.compute.guest.subscribeEvents?cursor=0 on
+      the bidder's local GuestControlPlane base, and a second outbound ContractEvent is created.
+    asserts: >
+      The client receives both events as JSON text frames {$type:
+      com.publicdomainrelay.temp.compute.guest.subscribeEvents#event, seq, uri, cid, record}, in seq
+      order, and an empty binary keepalive within 30 s of silence. A replayed submitEvent of the same
+      market.event answers 200 and adds no entry. Reconnecting with the last seq receives nothing old;
+      a cursor past the last seq gets a FutureCursor error frame and a close. A guest.publicKey the
+      guest POSTs to /v1/events {acceptUri, acceptCid, record} answers 2xx and appears in the bidder's
+      repo as a signed market.event bound to the receipt and in the requester as an inbound
+      ContractEvent.
+    cases:
+      - "no Authorization header (a bearer in a token query parameter only): the upgrade is refused 401 AuthenticationRequired"
+      - "the bearer of another ComputeVM: it sees only its own queue"
+      - "a guest.* payload from a DID other than the accept author: refused, nothing queued"
+      - "the ComputeVM is released: the stream closes going away and the queue file is gone"
+      - "POST /v1/on-network: 404"
+    cleanup: run request release <name>; standard teardown.
+
+  - id: TestAGuestHostLoopbackFence
+    kind: integration
+    source: docs/plans/0034-webrtc-guest-transport.yaml (guestnet host-loopback fence, 17945ac8)
+    actors: [bidder, VM host systemd user units, socialweb-vmexec, pasta]
+    setup: >
+      Own network: --bidders 1, no gateway. A held guest whose ComputeVM spec.hostPorts lists the
+      local GuestControlPlane port. From the guest, TCP connects to 192.0.2.1 on that port, on the kcp
+      front port, on the bidder OpenBao port and on another local Exposure port; a UDP send and a ping
+      to 192.0.2.1; a TCP connect to the namespace's own gateway address.
+    asserts: >
+      Only the listed port connects; every other TCP connect to 192.0.2.1 is reset at once; UDP, ICMP
+      and the namespace's own address get nothing; outbound internet (stun.cloudflare.com, the
+      opentunnel server) still works.
+    cases:
+      - "the nf_tables table cannot load in the guest namespace: the VM does not start"
+      - "a ComputeVM with no spec.hostPorts: no TCP port of 192.0.2.1 connects"
+    cleanup: run request release <name>; standard teardown.
 
 deleted_fixtures:
   - internal/eso/testdata/bundle-v2.11.0-subset.yaml (read only by internal/eso tests)

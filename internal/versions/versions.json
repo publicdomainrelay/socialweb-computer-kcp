@@ -413,7 +413,7 @@
     "measured": "2026-10-12, 0007 M6-BIDDER-UPGRADE, market network, installed bidder (test-0003), guests rented through the RFP flow running k3s v1.36.4+k3s1 (node Ready, 8 pods Running), SendCtrlAltDel to unit inactive over six releases: 5.46, 5.57 and 5.65 s when every pod's PID 1 exits on SIGTERM; 90.78, 90.85 and 90.88 s when a pod's PID 1 ignores SIGTERM, which the guest's systemd ends at its DefaultTimeoutStopSec of 90 s; the grace is a cap (a stop returns once the unit is inactive), set to the 90 s guest bound plus 10 s"
   },
   "guestDownloads": {
-    "note": "files a guest fetches itself in the requester-built user_data, never staged or embedded here (plan 0032): each pin is checked by sha256 on the guest; the opentunnel the guest runs is the assets.opentunnel fetch pin, one pin per upstream",
+    "note": "files a guest fetches itself from the internet in the requester-built user_data; none since plan 0034: the bidder serves opentunnel and socialweb-guest-agent to its guests from the socialweb-guest-downloads asset at /v1/downloads, checked by sha256 on the guest",
     "files": {}
   },
   "guestImages": {

@@ -8,7 +8,9 @@ This is the runnable acceptance used for plans 0023 and 0024. It exercises:
 - per-component suspend without stopping the GuestControlPlane or the shared IngressProxy;
 - typed Bidder settings and fail-closed overrides;
 - a tenant k3s cluster that scales from zero to three market VMs and back to zero,
-  placing one VM on each bidder host.
+  placing one VM on each bidder host;
+- ssh over WebRTC from the CLI requester to a guest on each bidder host (section 9, plan 0034
+  ACC34-CLI-SSH).
 
 Run it from a host with `goat`, `kubectl`, `ssh` to `socialweb.computer`, `hat-7`
 and `hat-9`, and the credential files named below. It changes the prod gateway
@@ -509,3 +511,91 @@ generation changed. Remove the typo and the test settings when done:
 ```bash
 ssh "$HOST" "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$K kubectl patch marketbidders.socialweb.computer app --type merge -p '{\"spec\":{\"components\":null}}'"
 ```
+
+## 9. ACC34: ssh over WebRTC from the CLI on each bidder
+
+Plan 0034 ACC34-CLI-SSH. Each bidder runs a release with plan 0034: its
+`socialweb-guest-downloads` asset serves `socialweb-guest-agent` to its guests
+at `http://192.0.2.1:<port>/v1/downloads`, and its guest event queue and
+`compute.guest.subscribeEvents` are up. The requester is the CLI of the same
+release, on this host, against the prod market. The guest reaches
+`stun:stun.cloudflare.com:3478` and nothing else is used for ICE.
+
+### hat-7 signs in again after a scope change
+
+An oauthQr session keeps the scope it was granted at sign-in. Plan 0034 added
+`com.publicdomainrelay.temp.compute.events.guest.publicKey` and
+`com.publicdomainrelay.temp.compute.events.guest.signalWebRTC` to the bidder
+and requester role scopes (`internal/atproto/oauth/scope.go`). hat-7's identity
+stays `Ready` on its old session after the upgrade, and nothing asks for a new
+QR on its own; its PDS then refuses the bidder's writes of those records, so
+the guest's publicKey and answer never reach the requester and ACC34 times out
+waiting for the guest's publicKey on hat-7. After any release that changes a
+role scope, before this section:
+
+1. Check that the qr.fedfork.com client metadata scope covers every bidder and
+   requester scope token of the release.
+2. End hat-7's old session so the identity reports `AwaitingScan` or
+   `SessionExpired` with a `pendingAction.url`.
+3. Sign bob in again with the commands of section 2 (read the current QR url
+   right before `scripts/oauth-signin.ts`; it expires after 5 minutes), and
+   wait for `Ready`.
+
+hat-9 and local are localRepo bidders; their records go to their own PDS and
+need no sign-in.
+
+### Per bidder
+
+Run the block once per host, with the other two bidders paused as in section 1
+so that only `$HOST` bids. Wait until both paused roots report `Suspended`
+before the request.
+
+```bash
+SWC=socialweb-computer
+R=~/.tmp/acc34
+mkdir -p "$R"
+chmod 700 "$R"
+HOST=hat-7
+NAME=acc34-$HOST-$(date +%s)
+$SWC run request --state-dir "$R" --name "$NAME" --hold \
+  --tunnel ssh:22:webrtc --transport webrtc --exec "uname -a; id" 2>&1 | tee "$R/$NAME-request.log"
+$SWC run request ssh "$NAME" --state-dir "$R" --transport webrtc \
+  --exec "uname -a; id" 2>&1 | tee "$R/$NAME-ssh.log"
+```
+
+Pass conditions for each host:
+
+- `run request` reaches `Held` and the command's output shows `Linux` and
+  `uid=`; ssh ran with `StrictHostKeyChecking=yes` against the host keys the
+  guest reported (a host key error fails the run).
+- The second `run request ssh` (the invocation's kcp started again from its
+  state dir) also prints `uid=`.
+- Record the Held to shell time: the `seconds` of the `ssh returned` line with
+  `"transport":"webrtc"`. On the local bidder in a market network it was 2.16 s
+  on a fresh invocation and about 7 s after the invocation's kcp restarted
+  (2026-10-24).
+- The winner is `$HOST`: the `winnerDid` of `run request list --state-dir "$R"
+  --json` for `$NAME` is `$D7`, `$D9` or `$DL` of section 4 for that host.
+- No log line holds signaling plaintext or a private key:
+
+```bash
+command grep -c -E 'a=candidate|AGE-SECRET-KEY' "$R/$NAME-request.log" "$R/$NAME-ssh.log"
+```
+
+  Both counts are 0.
+
+Release, then check the host holds no ComputeVM for it:
+
+```bash
+$SWC run request release "$NAME" --state-dir "$R"
+```
+
+`run request release` ends `Released`. Read `computevms.socialweb.computer -o
+wide` on `$HOST` as in section 6; no ComputeVM of this contract is left. Resume
+the two paused bidders as in section 6 and repeat for the next host. ACC34
+passes when all three hosts (local, hat-9, hat-7) pass.
+
+When the requester waits for the guest's publicKey or answer and times out, read
+the winning bidder's core journal for "the requester refused the market event"
+and "submitting the market event to the requester failed" before retrying, and
+on hat-7 recheck the scope note above.
