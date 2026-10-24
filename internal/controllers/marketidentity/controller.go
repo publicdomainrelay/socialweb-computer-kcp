@@ -54,6 +54,8 @@ type Options struct {
 type known struct {
 	cluster string
 
+	req ctlruntime.Request
+
 	identity *v1alpha1.MarketIdentity
 }
 
@@ -145,6 +147,27 @@ func (c *Controller) CompleteBrowserAuthorization(ctx context.Context, workspace
 	return err
 }
 
+func (c *Controller) SignOut(ctx context.Context, workspace, name string) error {
+	entry, ok := c.identities.Get(workspace, name)
+	if !ok || entry.identity == nil {
+		return fmt.Errorf("marketidentity: the MarketIdentity %s in %s is not reconciled", name, workspace)
+	}
+	var live v1alpha1.MarketIdentity
+	if err := entry.req.Get(ctx, "", name, &live); err != nil {
+		return fmt.Errorf("marketidentity: reading the MarketIdentity %s in %s: %w", name, workspace, err)
+	}
+	if err := atproto.SignOutRefusal(live.Spec.Mode); err != nil {
+		return err
+	}
+	next := max(live.Spec.SignOutGeneration, live.Status.SignedOutGeneration) + 1
+	if err := entry.req.ApplyFieldsAs(ctx, v1alpha1.FieldManagerMarketIdentitySignOut, &live,
+		map[string]any{"spec": map[string]any{"signOutGeneration": next}}); err != nil {
+		return fmt.Errorf("marketidentity: requesting the sign out of %s in %s: %w", name, workspace, err)
+	}
+	c.log.Info("sign out requested", "workspace", workspace, "identity", name, "signOutGeneration", next)
+	return nil
+}
+
 func (c *Controller) ComponentChanged(workspace, kind, name string) {
 	for _, r := range c.users(binding.Key(workspace, kind, name)) {
 		c.enqueue(r)
@@ -176,7 +199,7 @@ func (c *Controller) remember(req ctlruntime.Request, object *v1alpha1.MarketIde
 	if object.Spec.Mode == v1alpha1.MarketIdentityModeLocalRepo {
 		refs = append(refs, binding.Key(req.Workspace, atproto.ComponentKind, atproto.ComponentName))
 	}
-	c.identities.Set(binding.Target{Cluster: req.Cluster, Workspace: req.Workspace, Name: req.Name}, &known{cluster: req.Cluster, identity: identity}, refs...)
+	c.identities.Set(binding.Target{Cluster: req.Cluster, Workspace: req.Workspace, Name: req.Name}, &known{cluster: req.Cluster, req: req, identity: identity}, refs...)
 }
 
 func (c *Controller) gone(_ context.Context, req ctlruntime.Request) {

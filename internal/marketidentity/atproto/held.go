@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauthclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/pds/identity"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
@@ -77,6 +78,16 @@ func (h *heldAccounts) forget(workspace, name string) {
 	if ok {
 		held.auth.Drop()
 	}
+}
+
+func (h *heldAccounts) session(workspace, name string) *oauthclient.Session {
+	h.mu.Lock()
+	held, ok := h.accounts[qrKey(workspace, name)]
+	h.mu.Unlock()
+	if !ok {
+		return nil
+	}
+	return held.auth.Session()
 }
 
 func (a *Accounts) Authenticator(ctx context.Context, workspace string, id *v1alpha1.MarketIdentity) (*identity.Authenticator, error) {

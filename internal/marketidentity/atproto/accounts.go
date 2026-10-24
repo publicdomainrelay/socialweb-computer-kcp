@@ -110,7 +110,7 @@ func New(cfg Config) *Accounts {
 		states: states, qr: ttlcache.New[string, *qrTransfer](ttlcache.Options{}), browser: ttlcache.New[string, browserIssue](ttlcache.Options{})}
 }
 
-func (a *Accounts) Reconcile(ctx context.Context, workspace string, id *v1alpha1.MarketIdentity, status v1alpha1.MarketIdentityStatus) (Result, error) {
+func (a *Accounts) reconcile(ctx context.Context, workspace string, id *v1alpha1.MarketIdentity, status v1alpha1.MarketIdentityStatus) (Result, error) {
 	generation := id.Generation
 	if id.Spec.Mode == v1alpha1.MarketIdentityModeLocalRepo && strings.TrimSpace(status.Did) != "" && status.ObservedGeneration >= generation &&
 		status.Phase != "" && status.Phase != v1alpha1.MarketIdentityPhasePending {

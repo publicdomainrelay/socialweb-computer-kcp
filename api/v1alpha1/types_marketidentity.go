@@ -77,6 +77,8 @@ type MarketIdentitySpec struct {
 	OAuthRedirectURI string `json:"oauthRedirectURI,omitempty" apigen:"userEndpoint"`
 
 	CARef *commonv1.ObjectRef `json:"caRef,omitempty"`
+
+	SignOutGeneration int64 `json:"signOutGeneration,omitempty"`
 }
 
 type MarketIdentityPhase string
@@ -98,6 +100,8 @@ const (
 )
 
 const FieldManagerMarketIdentityApproval = "socialweb.computer/approve"
+
+const FieldManagerMarketIdentitySignOut = "socialweb.computer/signout"
 
 type PendingActionKind string
 
@@ -148,6 +152,10 @@ type MarketIdentityStatus struct {
 
 	Message string `json:"message,omitempty"`
 
+	SignedOutGeneration int64 `json:"signedOutGeneration,omitempty"`
+
+	SignedOutAt string `json:"signedOutAt,omitempty"`
+
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
@@ -155,4 +163,6 @@ const (
 	ConditionSignedIn = "SignedIn"
 
 	ConditionAssociated = "Associated"
+
+	ReasonSignedOut = "SignedOut"
 )

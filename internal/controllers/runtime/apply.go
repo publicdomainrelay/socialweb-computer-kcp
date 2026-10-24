@@ -100,6 +100,30 @@ func (r Request) Apply(ctx context.Context, obj Object) error {
 	return nil
 }
 
+func (r Request) ApplyFieldsAs(ctx context.Context, manager string, obj Object, fields map[string]any) error {
+	if r.scope == nil || r.scope.client == nil {
+		return errors.New("runtime: the request has no cluster client")
+	}
+	if manager == "" || manager == r.scope.fieldManager {
+		return fmt.Errorf("runtime: applying fields of %s needs a field manager of its own, not %q", obj.GetName(), manager)
+	}
+	full, err := r.unstructured(obj)
+	if err != nil {
+		return err
+	}
+	u := r.skeleton(full, obj)
+	for k, v := range fields {
+		if k != "apiVersion" && k != "kind" && k != "metadata" && k != "status" {
+			u.Object[k] = v
+		}
+	}
+	if err := r.scope.client.Apply(ctx, client.ApplyConfigurationFromUnstructured(u),
+		client.FieldOwner(manager), client.ForceOwnership); err != nil {
+		return fmt.Errorf("runtime: applying fields of %s as %s: %w", obj.GetName(), manager, err)
+	}
+	return nil
+}
+
 func (r Request) Delete(ctx context.Context, obj Object) error {
 	if r.scope == nil || r.scope.client == nil {
 		return errors.New("runtime: the request has no cluster client")

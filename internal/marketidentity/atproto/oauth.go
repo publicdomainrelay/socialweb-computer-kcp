@@ -213,7 +213,13 @@ func signInNeeded(status *v1alpha1.MarketIdentityStatus, err error) (signInNeed,
 	if reason, message, again := signInAgainReason(err); again {
 		return signInNeed{again: true, reason: reason, message: message}, true
 	}
-	return signInNeed{}, errors.Is(err, oauthclient.ErrNoSession)
+	if !errors.Is(err, oauthclient.ErrNoSession) {
+		return signInNeed{}, false
+	}
+	if signedOut(status) {
+		return signInNeed{reason: v1alpha1.ReasonSignedOut, message: signedOutMessage}, true
+	}
+	return signInNeed{}, true
 }
 
 func sessionErrorReason(err error) string {
