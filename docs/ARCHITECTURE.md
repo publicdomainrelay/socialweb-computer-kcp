@@ -2530,8 +2530,8 @@ started again on the same datastore with `--flannel-backend=none --cluster-cidr=
 answered `/readyz` `ok` in 2.1 s, logged no `critical configuration` and no fatal line, and still
 held the ConfigMap written before the switch; at zero nodes there is no flannel state anywhere (the
 backend lives only in the agent and its Node annotations). A cluster with flannel nodes still up
-would keep them on vxlan with no path to new nodes; prod read zero nodes at its last check. The door
-must ship in the same deploy: its image carries the meshd pair (`build.sh k8s` now builds it, which
+would keep them on vxlan with no path to new nodes; prod read zero nodes at its last check. The web app
+had to ship in the same deploy: its image carried the meshd pair (`build.sh k8s` built it then, which
 needs cargo, rustup's `x86_64-unknown-linux-musl` and `aarch64-unknown-linux-musl` targets and clang
 on the build host, or `KCP_MESHD_DIST`), and `PUBLIC_ORIGIN` is already set by `scripts/deploy.sh`.
 Image size: 1,711,865,393 bytes, +17.2 MB for the two binaries.
@@ -3822,8 +3822,7 @@ A change must not break any of these. Each exists because something failed.
 8. **A node's ports are its own, and no lease of the process group covers one.** The kubelet's is
    bound inside the guest's own network namespace, under its own kernel, and no port it binds is
    published on this host. So a node holds no lease to give back: a node's teardown releases nothing,
-   and the cluster's own leases - its `k3s-secure` port and the range its guests are addressed in -
-   outlive it, because `status.URL` stays live after OFF. This replaces "the kubelet lease is released
+   and the cluster's own leases - its `k3s-secure` port first - outlive it, because `status.URL` stays live after OFF. This replaces "the kubelet lease is released
    on the NODE's stop, and is not in `DefaultPurposes`", whose purpose is retired: there is nothing
    left to release and nothing left to keep out of a list.
 9. **Absent `nodeExpiry` refuses teardown; explicit `0` proceeds.**
@@ -3832,8 +3831,8 @@ A change must not break any of these. Each exists because something failed.
     requests go through the client certificate front to the cluster's own front.
 12. **A revocation needs a consultable deny record**, not just a deleted object.
 13. **Secrets never ride argv or `user_data`, and a market node's credentials cross only OpenBao JWT over
-    the cluster link.** `user_data` is readable from inside the guest. The door hands a market guest
-    through the `--secrets` capability the material a guest may hold before it has authenticated to
+    the cluster link.** `user_data` is readable from inside the guest. The NodeClaim controller's join bundle hands a
+    market guest through the `--secrets` capability the material a guest may hold before it has authenticated to
     anything: the cluster OpenBao's CA, `claim.json`, and the two capability tickets - the OpenBao
     link's ticket, and the apiserver link's ticket with the node's advertise address and port. A
     capability ticket is one that is useless on its own: the cluster's apiserver still refuses a
@@ -3843,30 +3842,33 @@ A change must not break any of these. Each exists because something failed.
     out through the OpenBao it is still dialing. The join token, the node password and the server CA
     are credentials, and they are read by the guest itself from the cluster's OpenBao, after a JWT
     login bound to its workload subject and its claim's audience, over its own dumbpipe link to that
-    OpenBao. The apiserver ticket is read from that same KV entry when the door's bundle does not
-    carry one, so a guest whose door predates the bundle keeps joining the serial way. Nothing reaches
-    a guest over ssh: the door opens no session to any guest.
+    OpenBao. The apiserver ticket is read from that same KV entry when the bundle does not carry one,
+    and the guest then joins the serial way. Nothing reaches a guest over ssh: the gateway opens no
+    session to any guest.
     The provider half (KV, policy, mount, role, revoke at release) is in section 7; the guest login is
     `auth/jwt-<12 hex>/login` as role `<node>`, reading `socialweb-nodes/data/<node>`.
 14. **A list failure is an error, never an empty observation.**
 15. **The state advances only on success.**
-16. **No comments in code.** Reasoning belongs in this document. The only comments are `//go:`
-    directives and `ponytail:` groups, and every byte is ASCII. This is a written rule; no test
-    enforces it.
+16. **No comments in code.** Reasoning belongs in this document. The only comments are the
+    `ponytail:` form and functional comments a tool reads (`//go:` directives, generated-code headers,
+    code generator markers), and every byte is ASCII. This is a written rule; nothing enforces it.
 17. **A gate must be able to fail.** A check whose failure and success look alike is not a check, and
     a probe that cannot fail proves nothing.
 18. **The substrate seam does not own the lifecycle.** Closing a node must not be the same act as
     destroying it, or the teardown semantics stop being observable.
-19. **A child's output is drained by the runner, never through a pipe a caller may forget.** A pipe
-    whose reader never reads blocks the child once the kernel buffer fills, and the symptom is a
-    readiness timeout over a healthy process. Keep a bounded, evicting tail, never an open stream.
+19. **A child's output goes to a file, never through a pipe a caller may forget.** A pipe whose
+    reader never reads blocks the child once the kernel buffer fills, and the symptom is a readiness
+    timeout over a healthy process. A cluster member's output is its HostProcess log file, capped and
+    read as a bounded tail (section 5).
 20. **The provider's tenant credential is minted, never copied.** It is a client certificate signed
     by that cluster's ClientCA and valid only against that cluster. The k3s-written admin kubeconfig
     is never read: it is shared state on a multi-cluster host, and its server name is unverified
     against the address a node dials.
-21. **A process group is not killed by its spawn context.** Teardown is the explicit reap, in reverse
-    order, and it is what stops the guest and deletes the tenant-side Node object. A group killed by
-    the gateway's own SIGTERM bypasses both and leaves a store needing crash recovery.
+21. **A cluster's members are not stopped by the provider's own stop.** They are HostProcess units
+    that outlive the core and the provider, and the next provider adopts them. Teardown is the
+    explicit deletion of the member objects, and it is what stops the units and deletes the
+    tenant-side Node object. A member stopped by the gateway's own SIGTERM would bypass both and leave
+    a store needing crash recovery.
 22. **A workspace ServiceAccount does not leave its workspace.** Its token's scope confines it to the
     logical cluster it was minted in and kcp refuses it everywhere else before RBAC is consulted, so a
     ClusterRoleBinding naming it elsewhere grants nothing and no subject string changes that. Any
@@ -3880,11 +3882,13 @@ A change must not break any of these. Each exists because something failed.
     as a corrupted image rather than as shared state; two live VMs on one file corrupt each other.
 25. **A boot command line is a console.** Anything on it is written to the guest's console at least
     twice - firecracker logs the body of its own boot-source request, and the kernel prints
-    `Kernel command line:` - so no secret may ride it. The per-node secret travels on a per-node
-    read-only disk that exists for one node and is destroyed with it.
-26. **The record's identity is supplied by the substrate, and an empty identity matches nothing.**
-    Matching every token present, read literally, would match every process on the host. A pid whose
-    identity does not match is NOT OURS: a reuse stays a refusal and never becomes a kill.
+    `Kernel command line:` - so no secret may ride it. A market guest's secrets come from OpenBao
+    (invariant 13).
+26. **A process's identity is read from the service manager and the kernel, and an empty identity
+    matches nothing.** A unit is matched by its name and InvocationID, a VMM by its pidfd start ticks
+    and its own id (section 5, "Adoption is a tri-state verdict"). Matching every token present, read
+    literally, would match every process on the host. A pid whose identity does not match is NOT OURS:
+    a reuse stays a refusal and never becomes a kill.
 27. **A guest's own account of its own elapsed time is not evidence.** Time a guest by the host's
     clock. A reported 332-second boot was a literal `echo` in an init script, printed 0.29 s after
     the VM started, and it sent this work after a 30x non-issue.
@@ -3892,13 +3896,13 @@ A change must not break any of these. Each exists because something failed.
     wait immediately, with the guest's own words. A timeout that runs to its end over a host that
     died at its first step reports the timeout instead of the cause, and the two are indistinguishable
     until the clock runs out.
-29. **A market node's credentials never ride the claim or the door.** The join token, the per-node
+29. **A market node's credentials never ride the claim or the join bundle.** The join token, the per-node
     password, the cluster's server CA and the apiserver ticket live in the cluster's OpenBao at
     `socialweb-nodes/<node>`, and the guest fetches them itself (invariant 13). A `NodeClaim` is a
     cluster-scoped object in the owner's home workspace, readable by anything that can read that
     workspace, so it carries only what is not secret: the PATHS the provider reads and the grant that
-    authorizes the guest's fetch (`issuer`, `subject`, `audience`, `role`). The door carries the two
-    capability tickets and nothing else: an OpenBao ticket alone buys a dial to OpenBao, and that still
+    authorizes the guest's fetch (`issuer`, `subject`, `audience`, `role`). The join bundle carries the
+    two capability tickets and nothing else: an OpenBao ticket alone buys a dial to OpenBao, and that still
     needs the JWT login, and an apiserver ticket alone buys a dial to the apiserver, and that still
     needs the k3s token, which only OpenBao holds. They also never ride argv, `user_data` or a boot
     command line, for the reasons invariants 13 and 25 already give. This replaces "a market node's
@@ -3919,18 +3923,17 @@ A change must not break any of these. Each exists because something failed.
 32. **A node is counted by the cluster that has it, never by the claim that asked for it.** The count a
     scale decision reads is the tenant cluster's own node list, plus - under a substrate whose
     `Provision` returns before the machine exists - the claims this process holds whose nodes that list
-    does not name. A claim's phase is not a count: the door writes `Joining` when the guest has
+    does not name. A claim's phase is not a count: the NodeClaim controller writes `Joining` when the guest has
     fetched its join secrets, and the Node object it is registering appears in the cluster's list only
     after its agent's connection through the apiserver link is served, so a phase-keyed count has a
     gap with a duration in it and every claim that crosses the gap together is counted nowhere at all
     (section 15).
 
-33. **A node image's rootfs holds the modprobe its kernel execs.** The kernel and the rootfs come from
-    different distributions, and the kernel's `CONFIG_MODPROBE_PATH` is the only way a module gets
-    loaded on demand; the builder resolves that path inside the stage and links it to the rootfs's own
-    modprobe, or refuses the build. Without it no nf_tables expression autoloads, iptables-nft's
-    native `log` and `limit` rules fail with ENOENT, and NetworkPolicies are silently not enforced
-    (section 15, plan 0005 M5-NETPOL).
+33. **A guest kernel loads no module on demand.** The market guest's kernel is built with every
+    feature the node needs built in (`deploy/guest-kernel`, `CONFIG_MODULES=n`). On the node images
+    before it, a module the kernel could not autoload left iptables-nft's native `log` and `limit`
+    rules failing with ENOENT and NetworkPolicies silently not enforced (section 15, plan 0005
+    M5-NETPOL).
 34. **An ingress provider selected by `spec.provider` fails closed.** `xrpc-subscription`, `iroh` and
     `opentunnel` are distinct packages; a missing or non-executable dumbpipe, a missing opentunnel
     command, a missing `spec.iroh` or `spec.opentunnel` block for the selected provider, or an unknown
@@ -3942,7 +3945,8 @@ A change must not break any of these. Each exists because something failed.
     status field, or the requester's inbox - under an idempotency key, and answers. It resolves no DID
     or service, calls no PDS, relay, OpenBao or VM, provisions nothing, verifies no signature and
     delivers no event in the request path. A worker or controller
-    (`internal/services/bidder/statesync.go`, `internal/services/requester/inbox.go`) owns that work
+    (the StateSync outbox of `internal/market/participant/outbox.go`, the requester inbox of
+    `internal/market/requester/inbox.go`) owns that work
     and retries it under the same key. The worker calls the counterpart's `submitEvent` XRPC only when
     the counterpart record names one: the bidder from the Accept record's `submitEvent`, the
     requester from the bidder Receipt record's `submitEvent`; with no ref the firehose carries the
