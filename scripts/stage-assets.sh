@@ -69,7 +69,7 @@ die() { echo "stage-assets: $*" >&2; exit 1; }
 say() { echo "stage-assets: $*" >&2; }
 
 sha_of() { sha256sum "$1" | cut -d' ' -f1; }
-dl_args=(-fSL --retry 3 --connect-timeout 10 --speed-limit 10000 --speed-time 20 --progress-bar)
+dl_args=(-fSL --retry 5 --retry-all-errors --retry-delay 3 --connect-timeout 10 --speed-limit 10000 --speed-time 20 --progress-bar)
 api_args=(-fsSL --retry 3 --connect-timeout 10 --speed-limit 10000 --speed-time 20)
 
 fetch_pinned() {
