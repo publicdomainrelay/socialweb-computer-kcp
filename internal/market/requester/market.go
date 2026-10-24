@@ -349,6 +349,9 @@ func (m *HTTPMarket) discover(ctx context.Context, now time.Time, only []string)
 
 func (m *HTTPMarket) offeredBidders(ctx context.Context, did string) ([]Bidder, string) {
 	offerings, err := market.ListOfferings(ctx, m.Reader, did)
+	if errors.Is(err, market.ErrNotFound) {
+		return nil, dropNoOffering
+	}
 	if err != nil {
 		m.log().Warn("requester_offerings_failed", "did", did, "err", err)
 		return nil, dropOfferingsRead + err.Error()
