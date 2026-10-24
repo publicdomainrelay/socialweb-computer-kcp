@@ -1,6 +1,6 @@
 plan: "0030"
 title: "One live atproto session per account: the MarketIdentity controller owns it, every other consumer reaches it over the bus"
-status: todo
+status: doing
 source: >
   2026-10-24, read from the code at baf155f6. Prod (hat-7, the oauthQr bidder bobvmbuilder) lost its
   OAuth session at 2026-10-24T03:19:38Z: the next refresh got invalid_grant "Invalid refresh token".
@@ -101,7 +101,7 @@ items:
       is deploy fresh (AGENTS.md). The per-process reload of e671cd9e is removed with the copies.
     files: []
     done_when: "The decisions are in this plan before M1 starts."
-    status: todo
+    status: done
 
   - id: M1-OWNER-HOLDS-ONE-SESSION
     title: "Accounts holds one live session per MarketIdentity; only it refreshes; the refresh is logged"
@@ -126,7 +126,7 @@ items:
     done_when: >
       go build ./internal/... passes; grep finds oauthclient.Open and oauthclient.New outside
       internal/atproto/oauthclient only in internal/marketidentity/atproto.
-    status: todo
+    status: done
 
   - id: M2-OWNER-PROVIDES-HANDLES
     title: "The MarketIdentity controller provides pds.Authenticator and pds.ServiceAuth from the held session"
@@ -151,7 +151,7 @@ items:
     done_when: >
       go build passes; scripts/check-architecture.sh passes; a RemoteRepo of an existing-account
       identity reports Ready on the live network (ACC30-PDSACCOUNT-BIDDER, ACC30-OAUTH-BIDDER).
-    status: todo
+    status: done
 
   - id: M3-BIDDER-RESOLVES
     title: "The Bidder mints service auth through its MarketIdentity and holds no session"
@@ -175,7 +175,7 @@ items:
     done_when: >
       ACC30-OAUTH-BIDDER and ACC30-PDSACCOUNT-BIDDER pass; grep finds no oauthclient,
       DPoPSourceFromData or participant.SessionStore in internal/services/bidder.
-    status: todo
+    status: done
 
   - id: M4-REQUESTER-RESOLVES
     title: "The Requester mints service auth through its MarketIdentity and holds no session"
@@ -204,7 +204,7 @@ items:
       go build passes; ACC30-E2E passes with the requester's localRepo identity; grep finds no
       oauthclient session construction in internal/market/requester or internal/services/requester.
       The oauth requester (the gateway's alice) is proven by the lead on prod (ACC30-PROD-LEAD).
-    status: todo
+    status: done
 
   - id: M5-REMOTEPDS-HOLDS-NO-IDENTITY-SESSION
     title: "The RemotePDS no longer opens the identity's session"
@@ -224,7 +224,7 @@ items:
     done_when: >
       On the live network the composed RemotePDS objects have an empty spec.auth and report Ready; grep
       finds no oauthclient in internal/pds/remote.
-    status: todo
+    status: done
 
   - id: M6-DEAD-CODE
     title: "Delete what only the copies used"
@@ -241,7 +241,7 @@ items:
       - internal/atproto/pdsclient/dpop.go
       - internal/component/credentialstore.go
     done_when: "go build ./... and go vet ./... pass; the deleted symbols have no caller."
-    status: todo
+    status: done
 
   - id: M7-NETWORK-OAUTH-PATH
     title: "An oauth identity on a market network PDS can sign in and write (defects found by ACC30-OAUTH-BIDDER)"
@@ -267,7 +267,7 @@ items:
       - internal/devcore/devcore.go
       - internal/app/marketnetwork/devup.go
     done_when: "ACC30-OAUTH-BIDDER passes."
-    status: todo
+    status: done
 
   - id: ARCH-SECTION-15
     title: "Record the decision in docs/ARCHITECTURE.md section 15"
@@ -277,7 +277,7 @@ items:
     files:
       - docs/ARCHITECTURE.md
     done_when: "Section 15 holds the entry with the ACC30 readings."
-    status: todo
+    status: done
 
   - id: ACC30-ONE-OWNER-GREP
     title: "Only the owner builds a session from the secret"
@@ -286,7 +286,7 @@ items:
       git grep of oauthclient.Open, oauthclient.New, SessionFromSecret, DPoPSourceFromData,
       participant.SessionStore, component.CredentialStore and PDSAccessToken over internal and cmd finds
       session construction only in internal/marketidentity/atproto and the oauthclient package itself.
-    status: todo
+    status: done
 
   - id: ACC30-OAUTH-BIDDER
     title: "An oauthBrowser bidder on the network's PDS signs in, bids and is refreshed only by the owner"
@@ -298,7 +298,7 @@ items:
       minutes the core logs one oauth_session_refreshed per rotation for that session id, every one
       from the MarketIdentity controller, and no invalid_grant or SessionExpired; its RemoteRepo and
       RemotePDS are Ready and the RemotePDS spec.auth is empty.
-    status: todo
+    status: done
 
   - id: ACC30-E2E
     title: "The oauth bidder and a requester still bid, accept and write records"
@@ -307,7 +307,7 @@ items:
       With the oauth bidder the only bidder taking part, run request --network oauth30 --hold reaches
       Held on it with its bid, the accept and the receipt records written, during the short-TTL window;
       then run request release releases it and the guest is gone.
-    status: todo
+    status: done
 
   - id: ACC30-PDSACCOUNT-BIDDER
     title: "The default pdsAccount bidder keeps working through the same owner"
@@ -324,7 +324,7 @@ items:
       The Bidder and Requester specs carry no pdsAccessToken and their Deps no credential resolver; the
       RemotePDS spec.auth is empty; the OpenBao audit log or, failing that, the core's log shows the
       session path read only by the MarketIdentity controller's credential client.
-    status: todo
+    status: done
 
   - id: ACC30-PROD-LEAD
     title: "The lead's prod proof after merge"
