@@ -3,7 +3,6 @@ package remote
 import (
 	"context"
 	"crypto/tls"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -14,7 +13,6 @@ import (
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauthclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/lease"
@@ -56,11 +54,7 @@ type Session struct {
 
 	auth xrpc.Auth
 
-	oauthMode bool
-
 	mu sync.Mutex
-
-	oauth *oauthclient.Session
 
 	rejected string
 
@@ -68,11 +62,8 @@ type Session struct {
 }
 
 var (
-	_ pdsclient.TokenSource     = (*Session)(nil)
-	_ pdsclient.TokenRefresher  = (*Session)(nil)
-	_ pdsclient.DPoPSource      = oauthDPoP{}
-	_ pdsclient.DPoPNonceSetter = oauthDPoP{}
-	_ oauthclient.SessionStore  = sessionStore{}
+	_ pdsclient.TokenSource    = (*Session)(nil)
+	_ pdsclient.TokenRefresher = (*Session)(nil)
 )
 
 func NewSession(ctx context.Context, cfg SessionConfig) (*Session, error) {
@@ -96,10 +87,10 @@ func NewSession(ctx context.Context, cfg SessionConfig) (*Session, error) {
 		return nil, fmt.Errorf("remote: reading the session ref %s: %w", refName(*access), err)
 	}
 	var dpop pdsclient.DPoPSource
-	if _, ok := oauthclient.SessionFromSecret(data); ok {
-		s.oauthMode = true
-		dpop = oauthDPoP{s: s}
-	} else if keyRef != nil {
+	if _, ok := data["session"]; ok {
+		return nil, errors.New("remote: an atproto OAuth session belongs to its MarketIdentity; name the MarketIdentity in the RemoteRepo credentialsRef, not in RemotePDS spec.auth")
+	}
+	if keyRef != nil {
 		keyData, err := cfg.Read(ctx, *keyRef)
 		if err != nil {
 			return nil, fmt.Errorf("remote: resolving the dpop key ref %s: %w", refName(*keyRef), err)
@@ -142,13 +133,7 @@ func (s *Session) fetch(ctx context.Context) (string, time.Time, error) {
 	s.mu.Lock()
 	rejected := s.rejected
 	s.mu.Unlock()
-	var token string
-	var err error
-	if s.oauthMode {
-		token, err = s.fetchOAuth(ctx, rejected)
-	} else {
-		token, err = s.fetchBearer(ctx, rejected)
-	}
+	token, err := s.fetchBearer(ctx, rejected)
 	if err != nil {
 		return "", time.Time{}, err
 	}
@@ -213,60 +198,6 @@ func (s *Session) fetchBearer(ctx context.Context, rejected string) (string, err
 	return session.AccessJWT, nil
 }
 
-func (s *Session) fetchOAuth(ctx context.Context, rejected string) (string, error) {
-	data, err := s.cfg.Read(ctx, *s.access)
-	if err != nil {
-		return "", fmt.Errorf("remote: resolving the session ref %s: %w", refName(*s.access), err)
-	}
-	stored, _ := oauthclient.SessionFromSecret(data)
-	if stored.RefreshToken != "" && s.isDead(stored.RefreshToken) {
-		return "", ErrSessionExpired
-	}
-	session, err := s.oauthSession(ctx)
-	var token string
-	if err == nil {
-		if rejected != "" {
-			token, err = session.RefreshAccessToken(ctx)
-		} else {
-			token, err = session.AccessToken(ctx)
-		}
-	}
-	if err != nil {
-		if errors.Is(err, oauthclient.ErrSessionExpired) || errors.Is(err, oauthclient.ErrNoRefreshToken) {
-			s.markDead(stored.RefreshToken)
-			s.mu.Lock()
-			s.oauth = nil
-			s.mu.Unlock()
-			return "", fmt.Errorf("%w: %v", ErrSessionExpired, err)
-		}
-		return "", err
-	}
-	return token, nil
-}
-
-func (s *Session) oauthSession(ctx context.Context) (*oauthclient.Session, error) {
-	s.mu.Lock()
-	held := s.oauth
-	s.mu.Unlock()
-	if held != nil {
-		return held, nil
-	}
-	client := &http.Client{Timeout: refreshTimeout}
-	if s.cfg.TLS != nil {
-		config := s.cfg.TLS.Clone()
-		config.ServerName = ""
-		client.Transport = &http.Transport{TLSClientConfig: config}
-	}
-	opened, err := oauthclient.Open(ctx, oauthclient.Options{HTTPClient: client, Store: sessionStore{s: s}})
-	if err != nil {
-		return nil, err
-	}
-	s.mu.Lock()
-	s.oauth = opened
-	s.mu.Unlock()
-	return opened, nil
-}
-
 func (s *Session) isDead(refresh string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -277,58 +208,6 @@ func (s *Session) markDead(refresh string) {
 	s.mu.Lock()
 	s.dead = refresh
 	s.mu.Unlock()
-}
-
-type oauthDPoP struct {
-	s *Session
-}
-
-func (d oauthDPoP) DPoPProof(ctx context.Context, method, url, accessToken string) (string, error) {
-	session, err := d.s.oauthSession(ctx)
-	if err != nil {
-		return "", err
-	}
-	return session.DPoPProof(ctx, method, url, accessToken)
-}
-
-func (d oauthDPoP) SetDPoPNonce(ctx context.Context, host, nonce string) error {
-	session, err := d.s.oauthSession(ctx)
-	if err != nil {
-		return err
-	}
-	return session.SetDPoPNonce(ctx, host, nonce)
-}
-
-type sessionStore struct {
-	s *Session
-}
-
-func (st sessionStore) List(ctx context.Context) ([]oauthclient.SessionData, error) {
-	data, err := st.s.cfg.Read(ctx, *st.s.access)
-	if err != nil {
-		return nil, err
-	}
-	session, ok := oauthclient.SessionFromSecret(data)
-	if !ok {
-		return nil, nil
-	}
-	return []oauthclient.SessionData{session}, nil
-}
-
-func (st sessionStore) Save(ctx context.Context, session oauthclient.SessionData) error {
-	if st.s.cfg.Write == nil {
-		return errors.New("remote: the RemotePDS oauth session has no secret writer")
-	}
-	data := map[string]any{}
-	if held, err := st.s.cfg.Read(ctx, *st.s.access); err == nil {
-		maps.Copy(data, held)
-	}
-	maps.Copy(data, oauthclient.SessionSecret(session))
-	return st.s.cfg.Write(ctx, *st.s.access, data)
-}
-
-func (sessionStore) Delete(context.Context, string, string) error {
-	return nil
 }
 
 func refused(err error) bool {
@@ -357,16 +236,6 @@ func withTokens(data map[string]any, key, primary string, session pdsclient.Sess
 			out[key] = session.RefreshJWT
 		} else {
 			out[key] = session.AccessJWT
-		}
-	}
-	if raw := strs.Lookup(data, "session"); raw != "" {
-		var stored oauthclient.SessionData
-		if json.Unmarshal([]byte(raw), &stored) == nil {
-			stored.AccessToken = session.AccessJWT
-			stored.RefreshToken = session.RefreshJWT
-			if encoded, err := json.Marshal(stored); err == nil {
-				out["session"] = string(encoded)
-			}
 		}
 	}
 	return out

@@ -63,8 +63,6 @@ type AccountPlan struct {
 
 	PdsURL string
 
-	SessionPath string
-
 	KeysPath string
 
 	ComponentMode string
@@ -74,23 +72,6 @@ type AccountPlan struct {
 	PdsDID string
 
 	Vault AccountVault
-}
-
-func (p AccountPlan) AccessToken() *commonv1.SecretRef {
-	if p.SessionPath == "" {
-		return nil
-	}
-	return &commonv1.SecretRef{Path: p.SessionPath}
-}
-
-func (p AccountPlan) sessionSecret() *commonv1.SecretRef {
-	if p.Identity.SessionRef == nil || strings.TrimSpace(p.Vault.Server) == "" {
-		return nil
-	}
-	ref := *p.Identity.SessionRef
-	vault := AppRef(KindVault, strings.TrimSpace(p.Vault.Server), "")
-	ref.Vault = &vault
-	return &ref
 }
 
 func (p AccountPlan) ComponentPdsRef() *commonv1.ObjectRef {
@@ -109,11 +90,7 @@ type accountBinding struct {
 
 	PDSRef *commonv1.ObjectRef
 
-	AuthRef *commonv1.SecretRef
-
 	RemotePDS *pdsv1alpha1.RemotePDS
-
-	OwnsAuth bool
 }
 
 func (p AccountPlan) binding(did, pdsURL string) (accountBinding, error) {
@@ -122,7 +99,6 @@ func (p AccountPlan) binding(did, pdsURL string) (accountBinding, error) {
 		binding.PDSRef = &commonv1.ObjectRef{Kind: ComponentKindPds, Name: PdsComponent}
 		return binding, nil
 	}
-	binding.AuthRef = p.sessionSecret()
 	if p.RemotePDS != nil && p.RemotePDS.Name != "" {
 		binding.RemotePDS = p.RemotePDS
 	} else if p.PdsRef != nil && strings.EqualFold(p.PdsRef.Kind, KindRemotePDS) && p.PdsRef.Name != "" {
@@ -133,12 +109,6 @@ func (p AccountPlan) binding(did, pdsURL string) (accountBinding, error) {
 			Spec: pdsv1alpha1.RemotePDSSpec{URL: u, DID: pdsServiceDID(u)}}
 	}
 	if binding.RemotePDS != nil {
-		if binding.AuthRef != nil && binding.RemotePDS.Spec.Auth == (pdsv1alpha1.RemotePDSAuth{}) {
-			refresh := *binding.AuthRef
-			binding.RemotePDS.Spec.Auth.AccessTokenRef = binding.AuthRef
-			binding.RemotePDS.Spec.Auth.RefreshTokenRef = &refresh
-			binding.OwnsAuth = true
-		}
 		binding.PDSRef = &commonv1.ObjectRef{Kind: KindRemotePDS, Name: binding.RemotePDS.Name}
 		return binding, nil
 	}
@@ -156,7 +126,7 @@ func (c *Composer) PlanAccount(ctx context.Context, ws string, id v1alpha1.Appli
 	mount := vault.MountOr(suffix)
 	sessionPath := "identity/" + suffix + "/pds-session"
 	keysPath := "identity/" + suffix + "/keys"
-	plan := AccountPlan{Mode: mode, SessionPath: sessionPath, KeysPath: keysPath, Vault: vault}
+	plan := AccountPlan{Mode: mode, KeysPath: keysPath, Vault: vault}
 	approved := slices.Clone(id.ApprovedAssociations)
 	association := cmp.Or(id.Association, defaultAssociation, v1alpha1.AssociationRequireApproval)
 	switch mode {
@@ -165,7 +135,6 @@ func (c *Composer) PlanAccount(ctx context.Context, ws string, id v1alpha1.Appli
 		plan.ComponentMode = "local"
 		plan.Identity = v1alpha1.MarketIdentitySpec{Mode: mode, Handle: id.Handle, PdsURL: id.PdsURL, Association: association,
 			ApprovedAssociations: approved}
-		plan.SessionPath = ""
 		plan.KeysPath = ""
 		return plan, nil
 	case v1alpha1.MarketIdentityModePdsAccount:
@@ -474,8 +443,5 @@ func (c *Composer) AccountRepo(ctx context.Context, r Root, ws, identityName str
 	remote := AppRef(KindRemoteRepo, name, ws)
 	links := []Link{RepoBackendLink(AppRef(KindAtprotoRepo, name, ws), remote)}
 	links = append(links, RemoteRepoLinks(remote, RemotePDSRefIn(binding.PDSRef.Name, ws), identity, binding.DID)...)
-	if binding.OwnsAuth {
-		links = append(links, RemotePDSAuthLinks(RemotePDSRefIn(binding.PDSRef.Name, ws), binding.RemotePDS.Spec.Auth)...)
-	}
 	return links, nil
 }

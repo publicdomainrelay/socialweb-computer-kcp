@@ -187,11 +187,6 @@ func SecretLinks(from commonv1.ObjectRef, uses ...SecretUse) []Link {
 	return out
 }
 
-func RemotePDSAuthLinks(from commonv1.ObjectRef, auth pdsv1alpha1.RemotePDSAuth) []Link {
-	return SecretLinks(from, SecretUse{Ref: auth.AccessTokenRef, Write: true}, SecretUse{Ref: auth.RefreshTokenRef, Write: true},
-		SecretUse{Ref: auth.DPoPKeyRef})
-}
-
 func RemotePDSRefIn(name, ws string) commonv1.ObjectRef {
 	return Ref(pdsv1alpha1.GroupName, KindRemotePDS, name, ws)
 }
