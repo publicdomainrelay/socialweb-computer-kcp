@@ -218,6 +218,24 @@ func (g *Guest) Keys(ctx context.Context) Reply {
 	return g.serveOIDCDocument(ctx, "keys", &g.keys, g.identity.Keys)
 }
 
+var ErrUnauthenticated = errors.New("guestidentity: the guest bearer token is missing or refused")
+
+func (g *Guest) Authenticate(ctx context.Context, authorization string) (string, error) {
+	token, ok := strings.CutPrefix(strings.TrimSpace(authorization), "Bearer ")
+	if !ok || strings.TrimSpace(token) == "" {
+		return "", ErrUnauthenticated
+	}
+	claims, err := g.verifier.Verify(ctx, strings.TrimSpace(token))
+	if err != nil {
+		g.log.Warn("guest: the token is refused", "err", err.Error())
+		return "", ErrUnauthenticated
+	}
+	if _, err := g.recorder.Live(ctx, claims.ComputeVM); err != nil {
+		return "", err
+	}
+	return claims.ComputeVM, nil
+}
+
 func (g *Guest) OnNetwork(ctx context.Context, authorization string, report OnNetworkReport) Reply {
 	token, ok := strings.CutPrefix(strings.TrimSpace(authorization), "Bearer ")
 	if !ok || strings.TrimSpace(token) == "" {

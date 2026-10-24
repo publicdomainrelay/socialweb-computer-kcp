@@ -258,6 +258,17 @@ func (p *Plane) OnNetwork(ctx context.Context, authorization string, report gues
 	return guestcp.Reply(p.withGuestLogin(reply))
 }
 
+func (p *Plane) Authenticate(ctx context.Context, authorization string) (string, error) {
+	name, err := p.guest.Authenticate(ctx, authorization)
+	switch {
+	case errors.Is(err, guestidentity.ErrUnauthenticated):
+		return "", fmt.Errorf("%w: %v", guestcp.ErrUnauthenticated, err)
+	case errors.Is(err, guestidentity.ErrUnknownGuest):
+		return "", fmt.Errorf("%w: %v", guestcp.ErrUnknownGuest, err)
+	}
+	return name, err
+}
+
 func (p *Plane) update(in guestcp.Inputs) {
 	p.mu.Lock()
 	p.inputs = in

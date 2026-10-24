@@ -26,6 +26,7 @@ func (s *Service) routes() *http.ServeMux {
 	mux.HandleFunc("GET /v1/identity/oidc/.well-known/keys", s.handleKeys)
 	mux.HandleFunc("POST /v1/on-network", s.handleOnNetwork)
 	pinneddownloads.NewHandler(s.downloads, s.log).Register(mux, DownloadsRoute)
+	mux.HandleFunc("GET "+SubscribeEventsPath, s.handleSubscribeEvents)
 	mux.HandleFunc("GET "+HealthPath, func(w http.ResponseWriter, r *http.Request) {
 		httpjson.Write(w, http.StatusOK, map[string]any{"ok": true})
 	})

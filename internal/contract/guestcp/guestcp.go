@@ -71,6 +71,8 @@ type Plane interface {
 	Keys(ctx context.Context) Reply
 
 	OnNetwork(ctx context.Context, authorization string, report OnNetworkReport) Reply
+
+	Authenticate(ctx context.Context, authorization string) (string, error)
 }
 
 type Relay interface {

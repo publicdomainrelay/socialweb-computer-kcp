@@ -48,6 +48,8 @@ type Config struct {
 type Deps struct {
 	Handler http.Handler
 
+	Subscribe func(subscriptionID, nsid string, params map[string]string, onEvent func(json.RawMessage), onData func([]byte)) (func(), error)
+
 	ServiceAuth pds.ServiceAuth
 
 	DID func() string
@@ -119,6 +121,8 @@ func (r *Relay) Run(ctx context.Context, connected func()) error {
 			IngressProxyHost:    r.cfg.IngressProxyHost,
 			TLS:                 r.cfg.TLS,
 			HandleRequest:       r.forward,
+
+			DirectSubscriptionHandler: r.deps.Subscribe,
 		})
 		if err == nil {
 			if !r.hold(subscriber) {

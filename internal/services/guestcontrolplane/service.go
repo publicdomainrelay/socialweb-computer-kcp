@@ -267,6 +267,7 @@ func (s *Service) startRelay(ctx context.Context, plane *guestplane.Plane) error
 		TLS:              s.relayTLS(),
 	}, guestrelay.Deps{
 		Handler:     s.mux,
+		Subscribe:   s.subscribeDirect(ctx),
 		ServiceAuth: busServiceAuth{bus: s.deps.Bus, self: s.self(), labels: s.deps.Labels, pds: target},
 		DID:         plane.DID,
 		Log:         s.log,

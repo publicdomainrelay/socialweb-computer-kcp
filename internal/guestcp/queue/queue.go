@@ -121,6 +121,82 @@ func (h *Hub) Append(_ context.Context, computeVM string, event guestcp.QueuedEv
 	return true, nil
 }
 
+func (h *Hub) Subscribe(computeVM string, cursor *int64) (guestcp.EventStream, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	q, err := h.queueLocked(computeVM)
+	if err != nil {
+		return nil, err
+	}
+	after := int64(0)
+	if cursor != nil {
+		if *cursor > q.last {
+			return nil, fmt.Errorf("%w: cursor %d, last seq %d", guestcp.ErrFutureCursor, *cursor, q.last)
+		}
+		if err := q.prune(*cursor); err != nil {
+			return nil, err
+		}
+		after = *cursor
+	}
+	return &stream{hub: h, q: q, after: after, closed: make(chan struct{})}, nil
+}
+
+type stream struct {
+	hub *Hub
+
+	q *vmQueue
+
+	after int64
+
+	once sync.Once
+
+	closed chan struct{}
+}
+
+func (s *stream) Next(ctx context.Context) (guestcp.QueuedEvent, error) {
+	for {
+		s.hub.mu.Lock()
+		if s.q.gone {
+			s.hub.mu.Unlock()
+			return guestcp.QueuedEvent{}, guestcp.ErrQueueGone
+		}
+		for _, entry := range s.q.entries {
+			if entry.Seq > s.after && len(entry.Record) > 0 {
+				s.after = entry.Seq
+				s.hub.mu.Unlock()
+				return entry, nil
+			}
+		}
+		wake := s.q.wake
+		s.hub.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return guestcp.QueuedEvent{}, ctx.Err()
+		case <-s.closed:
+			return guestcp.QueuedEvent{}, guestcp.ErrQueueGone
+		case <-wake:
+		}
+	}
+}
+
+func (s *stream) Close() {
+	s.once.Do(func() { close(s.closed) })
+}
+
+func (q *vmQueue) prune(through int64) error {
+	changed := false
+	for i := range q.entries {
+		if q.entries[i].Seq <= through && len(q.entries[i].Record) > 0 {
+			q.entries[i].Record = nil
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	return q.rewrite()
+}
+
 func (h *Hub) Retain(computeVMs []string) {
 	live := make(map[string]bool, len(computeVMs))
 	for _, name := range computeVMs {
