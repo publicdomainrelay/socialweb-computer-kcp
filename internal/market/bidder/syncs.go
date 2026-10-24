@@ -99,23 +99,29 @@ func vmSource(workspace string, vm *v1alpha1.ComputeVM) *v1alpha1.StateSyncSourc
 	return &v1alpha1.StateSyncSource{Workspace: workspace, ApiVersion: v1alpha1.GroupVersion.String(), Kind: "ComputeVM", Name: vm.Name, UID: string(vm.UID)}
 }
 
-func reportSyncName(uid, collection string) string {
-	sum := sha256.Sum256([]byte(collection + "\x00" + uid))
+func reportSyncName(uid, collection, tag string) string {
+	key := collection
+	if tag != "" {
+		key += "#" + tag
+	}
+	sum := sha256.Sum256([]byte(key + "\x00" + uid))
 	return reportSyncPrefix + hex.EncodeToString(sum[:8])
 }
 
-func reportSyncKey(collection, receiptURI string) string {
-	switch collection {
-	case market.ComputeEventsVMOnNetworkNSID:
+func reportSyncKey(collection, tag, receiptURI string) string {
+	switch {
+	case collection == market.ComputeEventsVMOnNetworkNSID && tag != "":
+		return "onNetwork:" + tag + ":" + receiptURI
+	case collection == market.ComputeEventsVMOnNetworkNSID:
 		return "onNetwork:" + receiptURI
-	case market.ComputeEventsVMHostKeysNSID:
+	case collection == market.ComputeEventsVMHostKeysNSID:
 		return "hostKeys:" + receiptURI
 	default:
 		return collection + ":" + receiptURI
 	}
 }
 
-func (b *Bidder) ensureReportSync(ctx context.Context, vm *v1alpha1.ComputeVM, collection string, record map[string]any) (string, error) {
+func (b *Bidder) ensureReportSync(ctx context.Context, vm *v1alpha1.ComputeVM, collection, tag string, record map[string]any) (string, error) {
 	terms := vm.Spec.Contract
 	if terms == nil {
 		return "", errors.New("bidder: a report StateSync needs a contract")
@@ -138,10 +144,10 @@ func (b *Bidder) ensureReportSync(ctx context.Context, vm *v1alpha1.ComputeVM, c
 	if err != nil {
 		return "", err
 	}
-	name := reportSyncName(string(vm.UID), collection)
+	name := reportSyncName(string(vm.UID), collection, tag)
 	owners := []metav1.OwnerReference{{APIVersion: v1alpha1.GroupVersion.String(), Kind: "ComputeVM", Name: vm.Name, UID: vm.UID}}
 	sync := outboundSync(name, b.guests.SyncLabels(vm), owners, vmSource(b.cfg.Workspace, vm), b.guests.EventAdapter(),
-		reportSyncKey(collection, terms.Receipt.URI), payload)
+		reportSyncKey(collection, tag, terms.Receipt.URI), payload)
 	if err := b.createSync(ctx, sync, "market report", "computevm", vm.Name, "collection", collection); err != nil {
 		return "", err
 	}

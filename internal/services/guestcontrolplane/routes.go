@@ -133,6 +133,7 @@ func (s *Service) handleOnNetwork(w http.ResponseWriter, r *http.Request) {
 		AcceptCID string `json:"acceptCid"`
 		Address   string `json:"address"`
 		CreatedAt string `json:"createdAt"`
+		Tag       string `json:"tag"`
 	}
 	dec := json.NewDecoder(io.LimitReader(r.Body, MaxGuestBody+1))
 	if err := dec.Decode(&body); err != nil {
@@ -144,5 +145,6 @@ func (s *Service) handleOnNetwork(w http.ResponseWriter, r *http.Request) {
 		AcceptCID: body.AcceptCID,
 		Address:   body.Address,
 		CreatedAt: body.CreatedAt,
+		Tag:       body.Tag,
 	}))
 }

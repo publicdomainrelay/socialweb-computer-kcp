@@ -34,6 +34,8 @@ type OnNetworkReport struct {
 	Address string
 
 	CreatedAt string
+
+	Tag string
 }
 
 type GuestOptions struct {
@@ -229,11 +231,11 @@ func (g *Guest) OnNetwork(ctx context.Context, authorization string, report OnNe
 	if report.AcceptURI == "" || report.AcceptCID == "" || strings.TrimSpace(report.Address) == "" {
 		return jsonReply(400, map[string]any{"error": "InvalidRequest", "message": "acceptUri, acceptCid and address are required"})
 	}
-	err = g.recorder.OnNetwork(ctx, claims.ComputeVM, report.AcceptURI, report.AcceptCID, report.Address, report.CreatedAt)
+	err = g.recorder.OnNetwork(ctx, claims.ComputeVM, report)
 	switch {
 	case err == nil:
 		g.log.Info("guest.onNetwork recorded on the ComputeVM", "computevm", claims.ComputeVM,
-			"address", strings.TrimSpace(report.Address))
+			"tag", strings.TrimSpace(report.Tag), "address", strings.TrimSpace(report.Address))
 		return jsonReply(200, map[string]any{"ok": true, "name": claims.ComputeVM})
 	case errors.Is(err, ErrUnknownGuest):
 		g.log.Warn("guest.onNetwork: no live ComputeVM holds this token", "computevm", claims.ComputeVM, "acceptUri", report.AcceptURI)

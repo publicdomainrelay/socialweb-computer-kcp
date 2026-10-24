@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -26,6 +27,8 @@ var (
 	hostKeyTypeRE = regexp.MustCompile(`^[a-z0-9][a-z0-9.@-]{0,63}$`)
 
 	hostKeyBlobRE = regexp.MustCompile(`^[A-Za-z0-9+/]+={0,2}$`)
+
+	networkTagRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$`)
 )
 
 var (
@@ -94,9 +97,10 @@ func (g *guestRecord) Live(ctx context.Context, name string) (*v1alpha1.ComputeV
 	return o, nil
 }
 
-func (g *guestRecord) OnNetwork(ctx context.Context, name, acceptURI, acceptCID, address, createdAt string) error {
-	acceptURI, acceptCID = strings.TrimSpace(acceptURI), strings.TrimSpace(acceptCID)
-	address = strings.TrimSpace(address)
+func (g *guestRecord) OnNetwork(ctx context.Context, name string, report OnNetworkReport) error {
+	acceptURI, acceptCID := strings.TrimSpace(report.AcceptURI), strings.TrimSpace(report.AcceptCID)
+	address, tag := strings.TrimSpace(report.Address), strings.TrimSpace(report.Tag)
+	createdAt := report.CreatedAt
 	switch {
 	case acceptURI == "" || acceptCID == "":
 		return fmt.Errorf("%w: the report names no accept", ErrReportRefused)
@@ -106,6 +110,10 @@ func (g *guestRecord) OnNetwork(ctx context.Context, name, acceptURI, acceptCID,
 		return fmt.Errorf("%w: the report names no address", ErrReportRefused)
 	case len(createdAt) > 64:
 		return fmt.Errorf("%w: the report's createdAt is too long", ErrReportRefused)
+	case tag != "" && !networkTagRE.MatchString(tag):
+		return fmt.Errorf("%w: the tag %q is not a DNS label of at most 32 characters", ErrReportRefused, tag)
+	case tag != "" && (len(address) > 2048 || !strings.HasPrefix(address, "https://")):
+		return fmt.Errorf("%w: a tagged address is an https URL of at most 2048 bytes", ErrReportRefused)
 	}
 	o, err := g.Live(ctx, name)
 	if err != nil {
@@ -115,16 +123,29 @@ func (g *guestRecord) OnNetwork(ctx context.Context, name, acceptURI, acceptCID,
 		return ErrUnknownAccept
 	}
 	held := GuestReportOf(o)
-	if held != nil && held.Address == address && held.ReportedAt != "" {
-		return nil
-	}
 	reportedAt := strings.TrimSpace(createdAt)
 	if reportedAt == "" {
 		reportedAt = g.now().UTC().Format(time.RFC3339)
 	}
-	next := v1alpha1.ComputeVMGuestReport{Address: address, ReportedAt: reportedAt}
+	next := v1alpha1.ComputeVMGuestReport{}
 	if held != nil {
-		next.HostKeys = append([]v1alpha1.ComputeVMHostKey(nil), held.HostKeys...)
+		next = *held.DeepCopy()
+	}
+	if tag == "" {
+		if held != nil && held.Address == address && held.ReportedAt != "" {
+			return nil
+		}
+		next.Address, next.ReportedAt = address, reportedAt
+	} else {
+		i := slices.IndexFunc(next.Networks, func(n v1alpha1.ComputeVMGuestNetwork) bool { return n.Tag == tag })
+		switch {
+		case i >= 0 && next.Networks[i].Address == address:
+			return nil
+		case i >= 0:
+			next.Networks[i] = v1alpha1.ComputeVMGuestNetwork{Tag: tag, Address: address, ReportedAt: reportedAt}
+		default:
+			next.Networks = append(next.Networks, v1alpha1.ComputeVMGuestNetwork{Tag: tag, Address: address, ReportedAt: reportedAt})
+		}
 	}
 	if err := g.store.RecordGuest(ctx, name, next); err != nil {
 		if apierrors.IsNotFound(err) {
@@ -132,7 +153,7 @@ func (g *guestRecord) OnNetwork(ctx context.Context, name, acceptURI, acceptCID,
 		}
 		return err
 	}
-	g.log.Info("the guest's on-network address is recorded", "computevm", name, "address", address, "reportedAt", reportedAt)
+	g.log.Info("the guest's on-network address is recorded", "computevm", name, "tag", tag, "address", address, "reportedAt", reportedAt)
 	return nil
 }
 
@@ -158,6 +179,7 @@ func (g *guestRecord) HostKeys(ctx context.Context, name string, keys []v1alpha1
 	next := v1alpha1.ComputeVMGuestReport{HostKeys: checked}
 	if held != nil {
 		next.Address, next.ReportedAt = held.Address, held.ReportedAt
+		next.Networks = append([]v1alpha1.ComputeVMGuestNetwork(nil), held.Networks...)
 	}
 	if err := g.store.RecordGuest(ctx, name, next); err != nil {
 		if apierrors.IsNotFound(err) {

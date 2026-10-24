@@ -57,6 +57,8 @@ type OnNetworkReport struct {
 	Address string
 
 	CreatedAt string
+
+	Tag string
 }
 
 type Plane interface {

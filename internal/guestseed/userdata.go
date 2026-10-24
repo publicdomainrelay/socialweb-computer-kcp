@@ -36,7 +36,7 @@ const (
 
 	GuestLoginRoute = "/v1"
 
-	OnNetworkScript = "/usr/local/bin/send-onnetwork.sh"
+	OnNetworkScript = cloudinit.OnNetworkScriptPath
 
 	OnNetworkUnit = "guest-onnetwork.service"
 
@@ -194,9 +194,9 @@ func OnNetworkReporterModule(userData, fallbackURL, acceptPath, bearerAudience s
 		if target.Resolve != "" {
 			resolve = `--resolve ` + strconv.Quote(target.Resolve) + ` `
 		}
-		fmt.Fprintf(&attempts, "  %s=\"$(curl -sS -m 20 -o /tmp/guest-onnetwork.out -w '%%{http_code}' %s\\\n", code, resolve)
+		fmt.Fprintf(&attempts, "  %s=\"$(curl -sS -m 20 -o \"${OUT}\" -w '%%{http_code}' %s\\\n", code, resolve)
 		fmt.Fprintf(&attempts, "    -X POST %s -H 'Content-Type: application/json'%s -d \"${PAYLOAD}\" \\\n", strconv.Quote(target.URL), auth)
-		attempts.WriteString("    2>>/tmp/guest-onnetwork.err || echo 000)\"\n")
+		attempts.WriteString("    2>>\"${ERR}\" || echo 000)\"\n")
 		fmt.Fprintf(&attempts, "  echo \"guest-onnetwork: http ${%s} %s\"\n", code, target.URL)
 		fmt.Fprintf(&attempts, "  if [ \"${%s}\" = \"200\" ]; then echo \"guest-onnetwork: reported ${FQDN}\"; exit 0; fi\n", code)
 	}
@@ -204,29 +204,38 @@ func OnNetworkReporterModule(userData, fallbackURL, acceptPath, bearerAudience s
 set -uo pipefail
 ACCEPT_JSON="` + acceptPath + `"
 if [ ! -f "${ACCEPT_JSON}" ]; then echo "guest-onnetwork: no ${ACCEPT_JSON}"; exit 0; fi
+TAG="${1:-}"
+OUT="/tmp/guest-onnetwork${TAG:+-${TAG}}.out"
+ERR="/tmp/guest-onnetwork${TAG:+-${TAG}}.err"
 FQDN=""
-for _ in $(seq 1 45); do
-  FQDN="$(cat /run/guest-fqdn 2>/dev/null || true)"
-  [ -n "${FQDN}" ] && break
-  systemctl is-failed --quiet iroh.service && { echo "guest-onnetwork: iroh.service failed"; break; }
-  sleep 2
-done
-if [ -z "${FQDN}" ]; then
-  echo "guest-onnetwork: no /run/guest-fqdn"
-  echo "guest-onnetwork: iroh is $(systemctl is-active iroh.service 2>&1), restarts=$(systemctl show -p NRestarts --value iroh.service 2>&1)"
-  journalctl -u iroh.service --no-pager -n 40 2>&1 | tail -40
-  exit 0
+if [ -n "${TAG}" ]; then
+  FQDN="${2:-}"
+  if [ -z "${FQDN}" ]; then echo "guest-onnetwork: no address for the tag ${TAG}"; exit 1; fi
+else
+  for _ in $(seq 1 45); do
+    FQDN="$(cat /run/guest-fqdn 2>/dev/null || true)"
+    [ -n "${FQDN}" ] && break
+    systemctl is-failed --quiet iroh.service && { echo "guest-onnetwork: iroh.service failed"; break; }
+    sleep 2
+  done
+  if [ -z "${FQDN}" ]; then
+    echo "guest-onnetwork: no /run/guest-fqdn"
+    echo "guest-onnetwork: iroh is $(systemctl is-active iroh.service 2>&1), restarts=$(systemctl show -p NRestarts --value iroh.service 2>&1)"
+    journalctl -u iroh.service --no-pager -n 40 2>&1 | tail -40
+    exit 0
+  fi
 fi
 ACCEPT_URI="$(jq -r '.accept.uri // empty' "${ACCEPT_JSON}")"
 ACCEPT_CID="$(jq -r '.accept.cid // empty' "${ACCEPT_JSON}")"
 if [ -z "${ACCEPT_URI}" ] || [ -z "${ACCEPT_CID}" ]; then echo "guest-onnetwork: accept.json has no accept ref"; exit 0; fi
-PAYLOAD="$(jq -nc --arg au "${ACCEPT_URI}" --arg ac "${ACCEPT_CID}" --arg addr "${FQDN}" \
-  '{acceptUri: $au, acceptCid: $ac, address: $addr}')"
-echo "guest-onnetwork: reporting ${FQDN}"
+PAYLOAD="$(jq -nc --arg au "${ACCEPT_URI}" --arg ac "${ACCEPT_CID}" --arg addr "${FQDN}" --arg tag "${TAG}" \
+  '{acceptUri: $au, acceptCid: $ac, address: $addr} + (if $tag == "" then {} else {tag: $tag} end)')"
+echo "guest-onnetwork: reporting ${TAG:+${TAG} }${FQDN}"
 for _ in 1 2 3 4 5; do
 ` + bearerLines(bearerAudience) + attempts.String() + `  sleep 6
 done
-echo "guest-onnetwork: gave up; last response: $(cat /tmp/guest-onnetwork.out 2>/dev/null)"
+echo "guest-onnetwork: gave up; last response: $(cat "${OUT}" 2>/dev/null)"
+if [ -n "${TAG}" ]; then exit 1; fi
 `
 	after := "iroh.service"
 	wants := "iroh.service"
