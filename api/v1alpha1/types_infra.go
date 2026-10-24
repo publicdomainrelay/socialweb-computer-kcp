@@ -217,6 +217,8 @@ const (
 
 	InfraNameLabel = "infra.socialweb.computer/name"
 
+	InfraContractLabel = "infra.socialweb.computer/contract"
+
 	InfraCollectionLabel = "infra.socialweb.computer/collection"
 
 	InfraConditionSynced = "Synced"
