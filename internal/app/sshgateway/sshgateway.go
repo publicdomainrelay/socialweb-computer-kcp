@@ -599,6 +599,9 @@ func (p *pass) suspended(ctx context.Context, plan compose.AccountPlan) (ctlrunt
 	if err := p.ensure(ctx, held); err != nil {
 		return p.retry("", err)
 	}
+	if snap, err = p.snapshot(ctx); err != nil {
+		return ctlruntime.Result{}, err
+	}
 	if _, err := p.hostProcesses(ctx); err != nil {
 		return ctlruntime.Result{}, err
 	}

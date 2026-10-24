@@ -401,6 +401,9 @@ func (p *pass) suspended(ctx context.Context, plan compose.AccountPlan, pdsHandl
 	if err := p.ensure(ctx, held); err != nil {
 		return p.retry("", err)
 	}
+	if snap, err = p.snapshot(ctx); err != nil {
+		return ctlruntime.Result{}, err
+	}
 	if id != nil {
 		p.st.Did = id.Status.Did
 	}
