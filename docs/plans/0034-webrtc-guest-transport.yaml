@@ -1,0 +1,407 @@
+plan: "0034"
+title: "WebRTC guest transport: a kind on vm.onNetwork, compute.events.guest.* with an age publicKey handshake, a guest event subscription on GuestControlPlane, a pion guest agent served from the bidder, ContractEvent, and wootty removed"
+status: in_progress
+source: >
+  2026-10-24, the user's decisions (binding), read against main at 0c8eed53.
+
+  Goal. A requester (the CLI, and the kcp-wasm browser page) reaches its guest over a WebRTC
+  datachannel instead of an opentunnel URL, which costs 70-165 s of ACME DNS-01 per tunnel
+  (plan 0033 L-learnings). The guest runs a pion agent; the browser uses RTCPeerConnection; the CLI
+  uses pion. Signaling rides the existing market.event path, sealed with age so no SDP, ICE
+  candidate or IP address is ever readable in a public record.
+
+  The gateway's binaries route today. internal/gatewayhttp/downloads.go serves
+  GET /downloads/{sha256}/{name} (line 156) from PinnedDownloads: LoadPinnedDownloads(dir) reads
+  every <name> with a sha256sum-format <name>.sha256 sidecar, verifies the hash at load and keeps
+  the bytes in memory; responses are immutable. The dir is the release asset
+  socialweb-computer-k8s-downloads (internal/stack/gatewaykcp/gatewaykcp.go:73, built by
+  scripts/build-web-app-downloads.sh), handed to GatewayAPI as ComponentStorage.BlobsDir
+  (internal/app/gateway/gateway.go:431-437); GatewayRequiredDownloads (gateway.go:53) are the meshd
+  binaries; k3s join cloud-init fetches $BASE/downloads/<sha>/socialweb-node-<arch>
+  (internal/atproto/cloudinit/k3sjoin.go:252).
+
+  The bidder side today has no downloads. GuestControlPlane serves /v1/auth/{mount}/{step},
+  /v1/identity/oidc/token/{role}, OIDC discovery and keys, POST /v1/on-network and health
+  (internal/services/guestcontrolplane/routes.go:22-27). Guests fetch opentunnel from its GitHub
+  release (versions.AssetFetches, internal/market/requester/tunnels.go:50-62) and wootty as a GHCR
+  OCI layer (versions.GuestDownloadPins, tunnels.go:63-75; cloudinit/tunnels.go:325-366); the
+  requester puts those pins into user_data.
+
+  onNetwork today. lexicons/com/publicdomainrelay/temp/compute/events/vm/onNetwork.json is
+  {address, tag?, createdAt, signatures}: no tag means address is the iroh ticket, a tag names an
+  entry of ComputeContract spec.tunnels (types_computecontract.go:51, listMapKey tag) and address is
+  its https URL. The guest's guest-onnetwork.service (internal/guestseed/userdata.go:166-266, one per
+  tag) takes a token through guest-login.sh and POSTs {acceptUri, acceptCid, address, tag} to
+  /v1/on-network; guestidentity.Guest.OnNetwork (internal/guestidentity/service.go:221) verifies the
+  bearer with g.verifier.Verify into claims.ComputeVM, the recorder
+  (internal/guestidentity/guestrecord.go:100-150) refuses a tagged address that is not https and
+  keeps it on the ComputeVM guest report; the bidder publishes each through a StateSync
+  (internal/market/bidder/report.go, syncs.go reportSyncName/reportSyncKey "onNetwork:<tag>:<receipt>")
+  as a signed market.event; the requester parses it (internal/market/requester/events.go:75-134,
+  isGuestEventNSID at 46) and upserts status.contract.networks (tunnels.go:108-130,
+  runner.go:916-1016). A tag is a name, not a type.
+
+  The event NSIDs today, all under com.publicdomainrelay.temp.: market.{rfp,bid,bids.*,accept,
+  accepts.*,receipt,receipts.*,event,heartbeat,offering,relays,submitRfp,submitBid,submitAccept,
+  submitEvent}, compute.vm, compute.events.vm.{delete,hostKeys,onNetwork,registerIdentity,started,
+  terminated}, cluster.*. market.event is an envelope {receipt, payload strongRef, signatures}; the
+  payload NSID is the event type. The bidder's applyMarketEvent (internal/market/bidder/submit.go:128-155)
+  acts on vm.delete only and drops every other payload. There is no guest namespace.
+
+  The ingress constraint. The did:key ingress proxy carries an HTTP request as one buffered
+  request/response frame pair (internal/atproto/ingress/client.go responseBody), so an SSE response
+  through the guest relay would not stream; subscriptions stream natively as subscriptionEvent
+  frames (client.go:389-420, DirectSubscriptionHandler). Hence a WebSocket XRPC subscription, not SSE.
+
+principle: >
+  The guest is a party to signaling but holds no repo key: everything it says goes through the
+  bidder, which signs it, and everything said to it comes from the requester through the bidder. The
+  bidder routes by payload NSID prefix and never reads a sealed body. No private key, and no
+  plaintext SDP, enters kcp, a PDS, a log or a plan. Every signal is sealed to a publicKey the
+  recipient published under the same contract.
+
+decisions:
+  - id: D1-GUEST-NAMESPACE
+    text: >
+      New payload NSIDs under com.publicdomainrelay.temp.compute.events.guest.*. Direction comes
+      from the author: a requester-authored event under this prefix is forwarded by the bidder to the
+      guest's subscription; a guest-originated one is signed and published by the bidder to the
+      requester. The market.event envelope is unchanged; vm.* stays the bidder's own.
+  - id: D2-PUBLICKEY-HANDSHAKE
+    text: >
+      A generic encryption handshake: compute.events.guest.publicKey {kind, tag, key, createdAt,
+      signatures}. kind knownValues ["age-x25519"]; tag names the tunnel (or another purpose) the key
+      is for. Both sides publish one per tag; anything sealed under that tag is sealed to the latest
+      publicKey of the other side. Reusable beyond WebRTC.
+  - id: D3-AGE
+    text: >
+      age (filippo.io/age, X25519 recipients) in the guest agent and the CLI; typage
+      (github.com/FiloSottile/typage) in the browser. Sealed bodies are age armored ciphertext.
+  - id: D4-SIGNAL
+    text: >
+      compute.events.guest.signalWebRTC {kind, tag, recipient (strongRef to the publicKey it is sealed
+      to), ciphertext, createdAt, signatures}. kind knownValues ["offer", "answer"]. Non-trickle ICE:
+      the requester offers once with all candidates, the guest answers once.
+  - id: D5-ONNETWORK-KIND
+    text: >
+      vm.onNetwork gains kind, knownValues ["iroh", "https", "webrtc"]. Absent kind reads as iroh
+      when tag is absent and https when tag is present, so old records stay valid. kind webrtc: tag
+      names the tunnel and address is the guest agent's DTLS certificate fingerprint
+      ("sha-256 AB:CD:..."), which the requester checks against the answer's a=fingerprint.
+  - id: D6-STUN
+    text: >
+      Public STUN only, and only stun:stun.cloudflare.com:3478 (no Google, no TURN). A
+      symmetric-NAT failure is reported, not worked around.
+  - id: D7-SSHD
+    text: >
+      A webrtc tunnel carries raw TCP to a guest port; the shell is the guest's sshd on 22. The
+      browser runs golang.org/x/crypto/ssh in wasm over the datachannel; the CLI is an ssh
+      ProxyCommand. Host keys come from vm.hostKeys as today; the requester's ssh key is in
+      spec.sshAuthorizedKeys at RFP time.
+  - id: D8-TRANSPORT
+    text: "spec.tunnels[].transport: opentunnel (default) | webrtc."
+  - id: D9-GUEST-STREAM
+    text: >
+      GuestControlPlane serves the XRPC subscription com.publicdomainrelay.temp.compute.guest.subscribeEvents
+      (WebSocket, cursor param), streamed through the ingress DirectSubscriptionHandler and the local
+      handler registry, authenticated by the guest bearer (the same verifier as /v1/on-network).
+  - id: D10-GUEST-EVENTS-OUT
+    text: >
+      POST /v1/on-network becomes POST /v1/events {acceptUri, acceptCid, record}: record.$type is
+      vm.onNetwork, guest.publicKey or guest.signalWebRTC. /v1/on-network is removed in the same change; the
+      guestseed reporter moves to /v1/events.
+  - id: D11-BIDDER-BINARIES
+    text: >
+      GuestControlPlane serves GET /v1/downloads/{sha256}/{name} from a bidder downloads asset
+      (opentunnel and socialweb-guest-agent, x86_64 and aarch64). The bidder injects the install
+      module with its own pins, like the guest-onnetwork module, so pins always match what it serves;
+      the requester only asks for tunnels and transports. Guests stop fetching from GitHub or GHCR.
+  - id: D12-CONTRACTEVENT
+    text: >
+      New cluster-scoped socialweb.computer/v1alpha1 ContractEvent: spec {contractRef, direction
+      (outbound|inbound), nsid, kind, tag, key or ciphertext}, status {record, event, submit
+      {endpoint, attempts, lastAttemptAt, submittedAt, lastError}, conditions Published, Submitted}.
+      The browser and the CLI create outbound ones with kubectl; the requester creates inbound ones
+      from submitEvent or Jetstream (oauth-browser). ownerRef to the ComputeContract.
+  - id: D13-WOOTTY-GONE
+    text: >
+      wootty is removed in the first wave: spec.tunnels[].shell, ComputeContractShell, its pins,
+      units and scripts, and its docs. opentunnel https tunnels stay.
+  - id: D14-CLI-AND-BROWSER
+    text: >
+      Both the CLI requester (pion) and the browser requester (kcp-wasm peer) are built and accepted.
+      The browser side is the peer's, through a subagent it launches; the lead briefs it only after
+      this plan is approved.
+  - id: D15-SAFARI
+    text: "The Safari indigo atproto/syntax stack issue stays with the peer's build-time patch; not in this plan."
+
+state_rules:
+  - "Private age identities live only in process memory (guest agent: /run tmpfs 0600 at most; browser and CLI: memory). Never in kcp, a PDS, a log or a StateSync."
+  - "ContractEvent and StateSync hold only public material: publicKeys and age ciphertext."
+  - "The bidder's per-VM guest queue lives in the GuestControlPlane state dir, not kcp; it is dropped when the ComputeVM goes."
+  - "No polling: the subscription keepalive is an outbound obligation listed in deploy/obligations.txt; the guest reconnects with backoff on close."
+
+items:
+  - id: W0-WOOTTY-REMOVE
+    title: "Remove wootty"
+    depends_on: []
+    decision: >
+      Delete ComputeContractShell and spec.tunnels[].shell, the wootty guestDownloads pin, the wootty
+      parts of cloudinit/tunnels.go (WoottyBinary, WoottyRunPath, DefaultShellEnvFile,
+      ShellTokenMinLength, the shell units) and requester tunnels.go (errShellWithoutSecrets, the
+      wootty pins), the --tunnel shell form in clicfg, and the wootty text in AGENTS.md,
+      docs/ARCHITECTURE.md, docs/compute-provider-requirements.yaml, NEXT.yaml and the catalog row
+      TestAGuestShellTunnel (rewritten for https only). Plan 0032 stays as history.
+    files:
+      - api/v1alpha1/types_computecontract.go
+      - deploy/computecontract-apiresourceschema.yaml
+      - internal/versions/versions.json
+      - internal/atproto/cloudinit/{cloudinit.go,tunnels.go}
+      - internal/market/requester/tunnels.go
+      - internal/clicfg/options.json
+      - AGENTS.md
+      - docs/ARCHITECTURE.md
+      - docs/spec/integration-catalog.yaml
+    done_when: "rg -i wootty outside docs/plans and docs/research is empty; go generate ./... leaves no diff; go build ./... and go vet ./... pass; make check-pins passes."
+    status: todo
+
+  - id: W1-LEXICONS
+    title: "onNetwork kind, compute.events.guest.{publicKey,signalWebRTC}, compute.guest.subscribeEvents"
+    depends_on: []
+    decision: >
+      Add kind to vm.onNetwork (D5). New records guest.publicKey (D2) and guest.signalWebRTC (D4) with
+      maxLength bounds (key 256, ciphertext 16384). New subscription compute.guest.subscribeEvents
+      {params: cursor integer; message #event {seq, uri, cid, record}; errors FutureCursor}.
+      Regenerate internal/atproto/market (lexgen include list gains compute.guest.).
+    files:
+      - lexicons/com/publicdomainrelay/temp/compute/events/vm/onNetwork.json
+      - lexicons/com/publicdomainrelay/temp/compute/events/guest/{publicKey,signalWebRTC}.json
+      - lexicons/com/publicdomainrelay/temp/compute/guest/subscribeEvents.json
+      - internal/atproto/market/{nsid.go,zz_generated.lexicons.go}
+    done_when: "go generate ./internal/atproto/market/... leaves no diff after the commit; old onNetwork records parse with the D5 defaults."
+    status: todo
+
+  - id: W1-API
+    title: "ContractEvent CRD, spec.tunnels[].transport, network kinds"
+    depends_on: [W0-WOOTTY-REMOVE]
+    decision: >
+      ContractEvent per D12 with printer columns (contract, direction, nsid, tag, phase). transport
+      on ComputeContractTunnel (D8). kind on ContractNetworkAddress, ComputeVMGuestNetwork and
+      ComputeVMPublishedNetwork. Export contractevents in the applications APIExport and binding so
+      the browser kcp and the CLI can kubectl it.
+    files:
+      - api/v1alpha1/types_contractevent.go
+      - api/v1alpha1/{types_computecontract.go,types_computevm.go,types_nodeclaim.go,resources.go,zz_generated.deepcopy.go}
+      - deploy/*apiresourceschema.yaml
+      - deploy/*apiexport*.yaml
+    done_when: "go generate ./... leaves no diff; kubectl create of a ContractEvent in a dev requester workspace succeeds; go build ./... passes."
+    status: todo
+
+  - id: W2-BIDDER-DOWNLOADS
+    title: "GuestControlPlane /v1/downloads and the bidder downloads asset"
+    depends_on: []
+    decision: >
+      Move PinnedDownloads out of internal/gatewayhttp into internal/kit/pinneddownloads (the gateway
+      keeps its route); GuestControlPlane registers GET /v1/downloads/{sha256}/{name} from its
+      ComponentStorage.BlobsDir. New release asset socialweb-guest-downloads built by
+      scripts/build-guest-downloads.sh: opentunnel (from its pinned release tarball, verified) and
+      socialweb-guest-agent-{x86_64,aarch64} (CGO off), each with a sidecar. The bidder app hands the
+      dir to GuestControlPlane; a missing asset fails the bidder's config validation.
+    files:
+      - internal/kit/pinneddownloads/
+      - internal/gatewayhttp/downloads.go
+      - internal/services/guestcontrolplane/{routes.go,config.go}
+      - internal/app/compose/ (bidder GuestControlPlane storage)
+      - scripts/build-guest-downloads.sh
+      - internal/versions/versions.json
+      - .github/workflows (binaries job stages the asset)
+    done_when: "From a guest: GET <issuer>/v1/downloads/<sha>/socialweb-guest-agent-x86_64 returns bytes whose sha256 is <sha>; a wrong sha answers 404."
+    status: todo
+
+  - id: W2-BIDDER-INSTALL-MODULE
+    title: "The bidder injects the guest binary install module"
+    depends_on: [W2-BIDDER-DOWNLOADS]
+    decision: >
+      guestseed gains GuestBinariesModule(issuer, pins): one setup unit per binary at the front of
+      runcmd, fetching <issuer>/v1/downloads/<sha>/<name>, verifying sha256 and installing to
+      /usr/local/bin. The bidder adds it when the contract has any tunnel (opentunnel for
+      transport opentunnel, socialweb-guest-agent for transport webrtc) and drops the requester's
+      internet pins: the requester's tunnel module carries only tunnel config.
+    files:
+      - internal/guestseed/userdata.go
+      - internal/market/bidder/provision.go
+      - internal/atproto/cloudinit/tunnels.go
+      - internal/market/requester/tunnels.go
+    done_when: "A tunnel contract's rendered user_data fetches only from the bidder issuer; the guest's journal shows each binary installed with its sha256."
+    status: todo
+
+  - id: W2-GUEST-EVENTS-OUT
+    title: "POST /v1/events replaces /v1/on-network"
+    depends_on: [W1-LEXICONS]
+    decision: >
+      GuestControlPlane POST /v1/events {acceptUri, acceptCid, record}, the same bearer check.
+      record.$type vm.onNetwork keeps the ComputeVM guest report path (now with kind); guest.publicKey
+      and guest.signalWebRTC go to a StateSync per (collection, tag, kind, sha256 of the record) and are
+      published by the bidder as signed market.events to the requester with the durable submit of
+      plan 0026 (backoff, window). The bidder validates shape and size only; it never opens a
+      ciphertext. The guestseed reporter posts to /v1/events.
+    files:
+      - internal/services/guestcontrolplane/routes.go
+      - internal/guestidentity/{service.go,guestrecord.go}
+      - internal/guestcp/
+      - internal/market/bidder/{report.go,syncs.go,submit.go}
+      - internal/guestseed/userdata.go
+    done_when: "The bidder's repo holds a guest.publicKey payload in a signed market.event bound to the receipt, and the requester's ingress received it through submitEvent."
+    status: todo
+
+  - id: W2-GUEST-EVENTS-IN
+    title: "The bidder forwards requester guest.* events into a per-VM queue"
+    depends_on: [W1-LEXICONS]
+    decision: >
+      applyMarketEvent: a payload under compute.events.guest. whose receipt is this bidder's and
+      whose issuer is the accept author is verified (signature, receipt, size) and appended to the
+      VM's queue (seq, uri, cid, record) in the GuestControlPlane state dir before 200; duplicates by
+      uri#cid are dropped; vm.delete handling is unchanged; any other payload is still ignored.
+    files:
+      - internal/market/bidder/submit.go
+      - internal/guestcp/ (queue)
+    done_when: "A requester guest.publicKey submitEvent answers 200 and lands once in the VM's queue file; a replay of it does not append."
+    status: todo
+
+  - id: W2-GUEST-SUBSCRIBE
+    title: "compute.guest.subscribeEvents on GuestControlPlane"
+    depends_on: [W2-GUEST-EVENTS-IN]
+    decision: >
+      A DirectSubscriptionHandler on the guest relay Exposure and a WebSocket route on the local
+      handler. Auth: the guest bearer in the first frame or Authorization, verified to a ComputeVM.
+      Replays queue entries after cursor, then streams new ones; the guest's next cursor acknowledges
+      and prunes. Keepalive every 25 s, listed in deploy/obligations.txt. The queue is removed when
+      the ComputeVM is deleted.
+    files:
+      - internal/services/guestcontrolplane/
+      - internal/exposure/registrar.go (only if the subscription handler needs a hook)
+      - deploy/obligations.txt
+    done_when: "A guest subscription with cursor 0 receives a requester publicKey sent before it connected and one sent after; reconnecting with the last seq receives nothing old."
+    status: todo
+
+  - id: W3-GUEST-AGENT
+    title: "cmd/socialweb-guest-agent (pion + age)"
+    depends_on: [W1-LEXICONS, W2-GUEST-EVENTS-OUT, W2-GUEST-SUBSCRIBE]
+    decision: >
+      One binary and one unit, started when any tunnel has transport webrtc. At start: generate an
+      age X25519 identity (memory) and one DTLS certificate (memory, stable for the agent's life);
+      take a token with guest-login.sh token <audience>; for each webrtc tunnel POST guest.publicKey
+      and vm.onNetwork {kind webrtc, tag, address <fingerprint>}; open subscribeEvents. On a
+      requester publicKey: remember it per tag. On a signal offer sealed to our key: open, build a
+      pion PeerConnection with public STUN (D6), wait for gathering, seal the answer to the
+      requester's key, POST guest.signalWebRTC answer. Each datachannel bridges to 127.0.0.1:<port> of its
+      tunnel; many sessions per tag. pion/webrtc v4 and filippo.io/age pinned in go.mod.
+    files:
+      - cmd/socialweb-guest-agent/
+      - internal/guestagent/
+      - internal/atproto/cloudinit/tunnels.go (agent unit and config)
+      - go.mod
+    done_when: "On a webrtc contract guest, socialweb-guest-agent is active, the requester sees guest.publicKey and onNetwork kind webrtc for the tag, and journal shows the subscription open."
+    status: todo
+
+  - id: W4-REQUESTER-CONTRACTEVENT
+    title: "The requester publishes and receives ContractEvents"
+    depends_on: [W1-API, W1-LEXICONS]
+    decision: >
+      A ContractEvent controller in the requester: an outbound one writes its payload record and a
+      market.event bound to the contract's receipt, then submitEvent to the bidder with the durable
+      submit (status.submit, Submitted). Inbound guest.* events (the requester ingress submitEvent,
+      or Jetstream for oauth-browser) become inbound ContractEvents named from the event uri, ownerRef
+      to the contract, SSA writer requester. events.go accepts the new NSIDs and onNetwork kind;
+      status.contract.networks carries kind.
+    files:
+      - internal/controllers/contractevent/
+      - internal/market/requester/{events.go,tunnels.go,runner.go}
+      - internal/services/requester/
+    done_when: "kubectl create of an outbound publicKey ContractEvent reaches Submitted; the guest's publicKey appears as an inbound ContractEvent; both are gone after the contract is deleted."
+    status: todo
+
+  - id: W4-CLI-WEBRTC
+    title: "run request proxy and ssh over WebRTC from the CLI"
+    depends_on: [W3-GUEST-AGENT, W4-REQUESTER-CONTRACTEVENT]
+    decision: >
+      socialweb-computer run request proxy <invocation> --tag <tag>: an in-memory age identity;
+      create the outbound publicKey ContractEvent; wait (watch) for the guest's publicKey and the
+      onNetwork kind webrtc; pion offer with public STUN, sealed, as an outbound signal; wait for the
+      inbound answer, open it, check a=fingerprint against the onNetwork address, open one datachannel
+      and pipe stdin/stdout. run request ssh --transport webrtc uses it as ProxyCommand with the
+      contract's host keys as known_hosts. Done by subagents and accepted on local, hat-9 and hat-7.
+    files:
+      - cmd/socialweb-computer/request.go
+      - internal/market/requester/session.go
+      - internal/webrtcproxy/
+    done_when: "ACC34-CLI-SSH passes on all three bidders."
+    status: todo
+
+  - id: W5-BROWSER-PEER
+    title: "Browser requester over WebRTC (kcp-wasm peer)"
+    depends_on: [W4-REQUESTER-CONTRACTEVENT, W3-GUEST-AGENT]
+    decision: >
+      The peer launches a subagent for the browser side: typage identity in memory; kubectl in the
+      browser kcp creates the outbound publicKey and signal ContractEvents; watch inbound
+      ContractEvents (Jetstream in oauth-browser); RTCPeerConnection with public STUN; fingerprint
+      check; x/crypto/ssh in wasm over the datachannel with an in-memory ed25519 key put in
+      spec.sshAuthorizedKeys at request time; xterm.js. The lead briefs the peer over the :7720/:7721
+      link after approval and answers its questions.
+    files:
+      - "peer branch origin/kcp-wasm-memory-storage"
+    done_when: "ACC34-BROWSER-SSH passes from the peer's page against all three bidders."
+    status: todo
+
+  - id: W6-DOCS
+    title: "AGENTS.md transport rule, ARCHITECTURE section, catalog rows"
+    depends_on: [W4-CLI-WEBRTC]
+    decision: >
+      AGENTS.md and ARCHITECTURE: guest transports are iroh, opentunnel https and webrtc; the guest
+      namespace and the handshake; sealed signaling. Catalog rows TestAGuestWebRTCSSH and
+      TestAGuestEventSubscription for plan 0027. No Go test here.
+    files:
+      - AGENTS.md
+      - docs/ARCHITECTURE.md
+      - docs/spec/integration-catalog.yaml
+    done_when: "The files state the rule; the catalog holds both rows."
+    status: todo
+
+  - id: ACC34-DOWNLOADS
+    title: "Guests install from the bidder only"
+    depends_on: [W2-BIDDER-INSTALL-MODULE]
+    done_when: "A webrtc contract guest installs socialweb-guest-agent and an https contract guest installs opentunnel from <issuer>/v1/downloads; the guest makes no request to github.com or ghcr.io (journal and bidder logs)."
+    status: todo
+
+  - id: ACC34-HANDSHAKE
+    title: "publicKeys cross both ways and signals stay sealed"
+    depends_on: [W3-GUEST-AGENT, W4-REQUESTER-CONTRACTEVENT]
+    done_when: >
+      Both publicKeys arrive as market.events; every guest.signalWebRTC record in the requester's and the
+      bidder's repo is age armored ciphertext; no record, ContractEvent, StateSync or log line holds
+      "a=candidate", "a=fingerprint" with an IP, or an AGE-SECRET-KEY.
+    status: todo
+
+  - id: ACC34-CLI-SSH
+    title: "CLI ssh over WebRTC"
+    depends_on: [W4-CLI-WEBRTC]
+    done_when: >
+      run request --hold with a webrtc tunnel {tag ssh, port 22} reaches Held on local, hat-9 and
+      hat-7; run request ssh --transport webrtc runs "uname -a; id" with host key checking on; time
+      from Held to shell is recorded; release ends Released and leaves no ComputeVM.
+    status: todo
+
+  - id: ACC34-BROWSER-SSH
+    title: "Browser ssh over WebRTC"
+    depends_on: [W5-BROWSER-PEER]
+    done_when: "From the peer's page: sign in, request with Bidders all three, shell over WebRTC shows uid=, release confirmed by requester_released."
+    status: todo
+
+  - id: ACC34-UNCHANGED
+    title: "iroh and https paths unchanged"
+    depends_on: [W2-GUEST-EVENTS-OUT, W2-BIDDER-INSTALL-MODULE]
+    done_when: "A plain run request reaches Held with an iroh vmAddress; an https tunnel contract gets its opentunnel URL as onNetwork kind https; the rc acceptance doc passes with 0 FAIL."
+    status: todo
+
+open_questions:
+  - "None blocking. Defaults taken: requester offers and guest answers; CLI age identity in memory per proxy session (not OpenBao); ContractEvent outbound is the only direction users create."
