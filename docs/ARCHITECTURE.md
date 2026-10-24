@@ -17,11 +17,14 @@ the traditional way. This section states the principle and the rules that follow
   `run request`, the gateway, a market network, a dev instance. kcp belongs to the application
   instance, never to a machine; a host is only where instances run, and any number run on one host.
 - **Application state = kcp objects** in that instance's kcp: ComputeVM, ComputeContract, NodeClaim,
-  OpenBaoServer, Postgres, DenoPod, HostProcess.
-- **Application components** (the servers that would otherwise sit inside one deno or Go process) =
-  DenoPods and HostProcesses reconciled from those objects.
+  OpenBaoServer, Postgres, HostProcess, the component kinds (Pds, Plc, Relay, Bidder, GuestControlPlane,
+  Requester, GatewayAPI, SshServer, IngressProxy, DispatcherTLS, PolicyEngine) and their Service and
+  Exposure objects.
+- **Application components** (the servers that would otherwise sit inside one process) = component
+  instances that run in process in the core, in the component runtime of `internal/component`, and
+  HostProcesses for third-party binaries; both are reconciled from those objects.
 - **Modes = profiles over one manifest set.** A bidder in OAuth QR mode against a real account has no
-  PDS pod; a bidder in the market network has its own PDS pod.
+  Pds component; a bidder in the market network has a Pds component of its own.
 - **Composition = applying manifest sets, or nesting instances as workspaces** (a parent's workspace
   holds a child instance's HostProcess objects; in a market network the child application itself is a
   workspace of the parent's kcp).
@@ -37,18 +40,22 @@ the traditional way. This section states the principle and the rules that follow
   application instance's kcp.
 
 **Port 0 rule.** Every listener behind the edge binds port 0 and reports its bound address into its
-own kcp object's status (a DenoPod's runner reads the pod's port file and records `status.address`; a
-HostProcess, kcp slot, kine or front is read back from its single listening socket). Peers resolve each
+own kcp object's status (a HostProcess, kcp slot, kine or front is read back from its single listening
+socket). An in-process component does not listen itself: it registers handlers, a Service names the
+component and a handler, and an Exposure publishes the Service (`internal/exposure`). A local Exposure
+listens on a port the core keeps in its port registry (`<state>/ports/ports.json`, a 64-port block of
+20000-29999 chosen by the state dir, `internal/stack/componentcore`), so the number survives a core
+restart, and records it in `status.address`. Peers resolve each
 other by service name through kcp: an address is application state in kcp, not config. Why: N instances
 per machine; no allocator and no bind-close-rebind race; nesting; blue/green slots; isolation (an
 application learns addresses only from its own kcp, so it can never reach another instance's components
 by accident). Exception: only stable public edge entry points keep known addresses - caddy on 443 and an
-application's front that caddy proxies to (the gateway's kcp front on 127.0.0.1:6443, the door's 8788).
+application's front that caddy proxies to (the gateway's kcp front on 127.0.0.1:6443, the GatewayAPI web
+app front on 127.0.0.1:8788, `internal/stack/gatewaykcp` `DefaultWebAppFront`).
 A tenant cluster's members are third-party binaries that take a port number on their command line; for
 them the cluster's apiserver front binds port 0 and holds the socket for the life of the cluster, and the
 member binds that number beside the hold (section 8), so the number is stable across member restarts
-and no other process on the host can take it. A check test fails on any fixed port in a manifest or
-default behind the edge.
+and no other process on the host can take it.
 
 What stays about the machine: `/dev/kvm`, the systemd user manager and its units (production placement
 only), `install`, the host contract, and the bootstrap layer that runs an instance's kcp itself.
@@ -61,7 +68,7 @@ only), `install`, the host contract, and the bootstrap layer that runs an instan
 - **Which kcp, by profile (user decision 2026-10-17, amending the strict rule of 2026-10-12).** The prod
   profiles keep a strict kcp per application: the gateway on its host, a bidder handle on its host, a
   `run request` without `--network`. The market network profile (dev, CI, soak) runs every application in
-  ONE kcp, each application in its own workspace, as in the deno-kcp market example: the network's own
+  ONE kcp, each application in its own workspace: the network's own
   services in root:global (PLC), root:relay (relay, dispatchers), root:alice and root:bob (PDSes), and each
   child application (a bidder, the gateway, a requester invocation, an ssh gateway) in root:<app>, its
   components in root:<app>:app. One manifest set serves both shapes: in prod it is applied into the
@@ -69,25 +76,27 @@ only), `install`, the host contract, and the bootstrap layer that runs an instan
   (kcpapply.Options.Base; root:*-provider and the sets of scope kcp stay shared) and service names come
   from the phase workspace (`<name>.default.{{.ServiceSuffix}}`). The child keeps its own core (the
   network's dev host places it, as a HostProcess in root:dev:<instance>), scoped to its workspace, with no
-  kcp, kine or deno runtime of its own: the network's one deno runtime runs every DenoPod. Children learn
+  kcp or kine of its own; its components run in process in that core. Children learn
   the network from values the composer copies onto their root objects and from valueFrom references that
   name another workspace of the same kcp (plan 0019).
-- **Every CLI option stays, kcp-native.** Each hono-bidder and request-vm-ssh option becomes a root-object
-  field or a profile (only legacy guest transports are removed). Sign-in is an object, MarketIdentity:
-  the URL to visit, the association to approve and an expired session are
-  status that the foreground CLI renders; tests complete it through hono-pds's session minting. The
-  ephemeral-PDS mode (in-process repo + association records) stays for bidder and requester.
-- **kcp only.** No standalone `deno run hono-bidder` or `request-vm-ssh`; every run goes through
-  `socialweb-computer` and kcp.
+- **Every CLI option is kcp-native.** Each option is a root-object field or a profile (the TypeScript
+  hono-bidder and request-vm-ssh CLIs that came before plan 0026 are gone, and only legacy guest
+  transports were dropped). Sign-in is an object, MarketIdentity: the URL to visit, the association to
+  approve and an expired session are status that the foreground CLI renders (`internal/appcli`). A
+  bidder or requester without a real account keeps its repo in a Pds component of its own (a LocalRepo,
+  `internal/pds/local`).
+- **kcp only.** No component runs as a standalone process; every run goes through `socialweb-computer`
+  and kcp.
 - **The requester is a fresh kcp per invocation** whose state dir (kcp root + vault) persists;
   `run request release|resume <name>` restarts that kcp to finish the contract.
 - **Secrets only in the application's own OpenBao** - OAuth sessions, repo key, relay keypairs, the OIDC signing key (the identity engine of the bidder's own OpenBao),
-  requester key, door keys; kcp objects hold references.
-- **Every listener reports into status** (DenoPod `status.listeners`: tcp, unix, relay ingress URL), so no
-  peer or test scrapes stdout for a DID, a port or readiness.
+  requester key, the gateway's keys; kcp objects hold references.
+- **Every listener reports into status** (a component's `status.endpoints`, a Service's
+  `status.endpoints`, an Exposure's `status.address`, a HostProcess's `status.listeners`), so no peer
+  scrapes stdout for a DID, a port or readiness.
 - **iroh is the only guest transport.** The ssh gateway moves to iroh; the tunnel, fedproxy-ssh,
   fedproxy-web and wootty modules, websocat ProxyCommand paths, the relay-FQDN guest addresses and the
-  guest JSR registry are removed.
+  guest package registry are removed.
 - **Components:** the bidder's guest-facing endpoints (an allow-list proxy to the bidder's OpenBao for the guest's bind, login and identity token, and `/v1/on-network`)
   are the GuestControlPlane component of the bidder; the NodeClaim fulfiller is the NodeClaim
   controller (`internal/controllers/nodeclaim`) bound by the gateway's GatewayAPI component.
@@ -214,8 +223,8 @@ start its OWN kine against the bucket instead of dialing ours - two writers on o
 
 **A central store is not used.** `kine` plus `t4` over a central `rustfs` (bucket per tenant, prefix
 per cluster) is not built. The store is the per-cluster postgres above, and k3s is never pointed at a
-bucket. `internal/versions` `TestNoRustfsOrT4NameOutsideTheStoreMeasurement` keeps the `rustfs` and
-`t4` names out of non-test Go and the pins, allowing only `stack.go`'s `ErrNoStore` measurement.
+bucket. No `rustfs` name is in the Go code or the pins; the only `t4` is in `stack.go`'s `ErrNoStore`
+measurement.
 
 **Several kine over one database are the k3s HA shape.** Measured on
 stand-ins (`docs/research/2026-10-11-vm-lifecycle/control-plane-handover.md` 2-3): two k3s servers, each
@@ -245,8 +254,9 @@ Everything is either a controller-runtime reconcile loop or a deploy config. No 
 
 This section lists the components. The table below is the virtual-clusters project, section 0's
 traditional exception. It and the component subsections that follow are organized by section 0: each
-application instance has its own kcp, manifest set and profile, its components are DenoPods and
-HostProcesses, and listeners behind the edge bind port 0.
+application instance has its own kcp, manifest set and profile, its components run in process in the
+core's component runtime (`internal/component`) and its third-party binaries are HostProcesses, and
+listeners behind the edge bind port 0.
 
 | # | Component | Layer | Why it exists |
 |---|---|---|---|
@@ -257,10 +267,10 @@ HostProcesses, and listeners behind the edge bind port 0.
 | 5 | kcp provider workspace | YAML | `APIResourceSchema` plus `APIExport` for our CRDs; tenants `APIBinding` |
 | 6 | k3s cloud-init module | Go `internal/atproto/cloudinit`, `UserDataModule` | Writes the k3s, secrets, iroh and node modules cloud-init runs in a market guest. The only sanctioned way a guest-side component arrives |
 | 7 | OpenBao plus ESO | deploy config | The vault, at two levels: a root vault one per deployment and a cluster vault one per ON cluster, both in the production stack. OpenBao holds the per-cluster 13-entry identity bundle and is its AUTHORITATIVE store - the wake reads it out of the vault and materialises the file tree at `<DataDir>/server/tls`+`cred/`, because k3s has no vault plugin and must read files at runtime (sections 9, 14 and 15). ESO materialises vault-backed Secrets into the tenant cluster (row 9); the bundle is custody and wake-time restore, not the runtime location |
-| 8 | Cluster links | Go, `internal/clusterlink` + `internal/clusterprovider/links.go` | Two `dumbpipe listen-tcp` members of every cluster's process group, one in front of the k3s apiserver and one in front of the cluster vault, each an iroh endpoint whose key lives in that cluster's vault. A node dials the cluster through them; the door holds no per-node connection. Recorded as `ClusterLink` objects |
+| 8 | Cluster links | Go, `internal/clusterlink` + `internal/clusterprovider/links.go` | Two `dumbpipe listen-tcp` members of every cluster's process group, one in front of the k3s apiserver and one in front of the cluster vault, each an iroh endpoint whose key lives in that cluster's vault. A node dials the cluster through them; the gateway holds no per-node connection. Recorded as `ClusterLink` objects |
 | 9 | External Secrets pair | pinned upstream binary, `internal/eso` + `internal/clusterprovider/externalsecrets.go` | The External Secrets Operator v2.11.0 run as TWO members of every cluster's process group, beside the control plane: the controller (`external-secrets`) and its admission webhook (`external-secrets webhook`), one digest-pinned binary the release embeds as its `external-secrets` asset. They dial the tenant apiserver with a minted credential and reach the cluster vault on loopback, so an ExternalSecret syncs at ZERO nodes. The tenant keeps only the bundle's CRDs, ClusterRoles and a URL webhook registration; no ESO pod runs in it |
 
-| 10 | Node network | Rust `rust/socialweb-meshd`, Go `internal/tenantnet` + `internal/atproto/cloudinit` + `internal/nodeagent` | Market clusters run `--flannel-backend=none`; each market node gets, from its `user_data`, a bridge CNI conflist on its Node's pod CIDR, cluster-CIDR-external SNAT, the sha256-pinned `socialweb-meshd` (downloaded from the door by hash) carrying pod traffic to other nodes over iroh, and `169.254.20.10` for its own CoreDNS; every tenant gets the meshd node reader RBAC and the per-node DNS DaemonSet as baseline (section 9) |
+| 10 | Node network | Rust `rust/socialweb-meshd`, Go `internal/tenantnet` + `internal/atproto/cloudinit` + `internal/nodeagent` | Market clusters run `--flannel-backend=none`; each market node gets, from its `user_data`, a bridge CNI conflist on its Node's pod CIDR, cluster-CIDR-external SNAT, the sha256-pinned `socialweb-meshd` (downloaded from the gateway's web app by hash, `internal/nodeagent/host.go`) carrying pod traffic to other nodes over iroh, and `169.254.20.10` for its own CoreDNS; every tenant gets the meshd node reader RBAC and the per-node DNS DaemonSet as baseline (section 9) |
 
 **Not building**, each rejected on evidence: a CNI plugin (the market path writes a conflist for
 k3s's bundled `bridge`/`host-local`/`portmap`; the cross-node half is component 10), a CAPI provider, an OIDC issuer, an ATProto
@@ -367,7 +377,7 @@ The External Secrets Operator runs beside the control plane, not inside the tena
 into the tenant cluster as three Deployments (controller, cert-controller, webhook), it does not work:
 at zero nodes, the resting state, their pods are Pending so nothing syncs, and on the market
 substrate the store cannot reach the cluster vault at all. Running the operator in the process group
-avoids both. The decisions, each held by a test:
+avoids both. The decisions:
 
 - **Two members, one binary.** `procgroup.ComponentExternalSecretsWebhook` then
   `procgroup.ComponentExternalSecrets`, after the cloud controller manager in `StackOrder`. The
@@ -494,8 +504,8 @@ Each cluster has two links, one to the k3s apiserver and one to the cluster vaul
   `apiserver-link`, the vault's leased port for `openbao-link`. dumbpipe v0.39.0, the same release
   the guests install (the `dumbpipe` asset in `internal/versions/versions.json`).
 - **On or off.** On when `SOCIALWEB_CLUSTERPROVIDER_DUMBPIPE` names the binary; the gateway sets
-  it to the extracted `dumbpipe` asset (`internal/stack/gatewaykcp`). Unset leaves every cluster without links
-  (the live rigs and tests that build their own env), and the provider logs `cluster links on=false`
+  it to the extracted `dumbpipe` asset (`internal/stack/gatewaykcp`). Unset leaves every cluster without
+  links, and the provider logs `cluster links on=false`
   once at start. Links need the vault in the Stack (`ErrNoLinkSeam`) and a recorder
   (`ErrNoLinkRecorder`).
 - **The key.** One ed25519 key per link, generated once and kept in the cluster's OWN vault at KV v2
@@ -509,28 +519,25 @@ Each cluster has two links, one to the k3s apiserver and one to the cluster vaul
   holding the old ticket). The key is read in the step's `procgroup.Step.Prepare`, which runs once
   the steps before it passed their gates, so the vault is up; the secret rides `Spec.Env` only.
 - **Identity encodings.** `internal/didkey`: endpoint id = lowercase hex of the 32-byte public key
-  (what iroh prints); did:key = `did:key:z` + base58btc(0xed 0x01 + key). Fixture-tested against the
-  did:key spec vector and a dumbpipe-printed ticket.
+  (what iroh prints); did:key = `did:key:z` + base58btc(0xed 0x01 + key). Both matched the did:key
+  spec vector and a dumbpipe-printed ticket when they were built.
 - **The ticket.** dumbpipe prints `dumbpipe connect-tcp <ticket>`: `endpoint` + lowercase unpadded
   base32 of a postcard-encoded `EndpointTicket` (byte 0 the variant 0x00, bytes 1..32 the endpoint
   id, then the relay URL and direct addresses). `clusterlink.ParseTicket` reads the id back, and the
   gate opens only when the printed ticket names the vault-held key. The printed ticket's BYTES change
   per bring-up (the relay chosen and the addresses are in it), so it is NOT what is published:
   `status.ticket` is `clusterlink.StableTicket(key)`, the id-only ticket (variant 0x00, the id, zero
-  addresses) -- byte for byte what `IROH_SECRET=<seed> dumbpipe generate-ticket` prints, fixture-tested
-  -- so it is a function of the key alone and never changes while the key lives in the vault. A node
+  addresses) -- byte for byte what `IROH_SECRET=<seed> dumbpipe generate-ticket` prints -- so it is a
+  function of the key alone and never changes while the key lives in the vault. A node
   secret may hold it written once. dumbpipe resolves the id's current relay
-  and addresses by discovery; measured live in
-  `TestARealDumbpipeLinkCarriesTCPThroughItsPublishedTicketWhichARestartLeavesByteIdentical`
-  (connect-tcp with the published ticket echoes before and after a restart, and the ticket is
-  byte-identical). Decided by Claude, user may veto: the cost is that a dialer with no discovery
+  and addresses by discovery; measured live against a real dumbpipe (connect-tcp with the published
+  ticket echoes before and after a restart, and the ticket is byte-identical). Decided by Claude, user may veto: the cost is that a dialer with no discovery
   (no DNS to the n0 discovery service) cannot use the ticket; guests reach the internet anyway.
 - **The link port.** Leased (`apiserver-link`, `openbao-link`, width 1, section 8) and bound as the
   endpoint's IPv4 UDP socket, so the direct address in a ticket is stable and a dumbpipe a dead
   provider left running is found by the restart sweep: `portscan` reads `/proc/net/udp{,6}` (state
   07) for a datagram purpose and the TCP tables for every other, and attributes the socket to the
-  cluster by the argv. A lease file written before links existed derives its restart argv without
-  them (`StackConfig.WithoutUnleasedLinks`); the next bring-up leases them.
+  cluster by the argv.
 - **Status.** The link's readiness gate writes the `ClusterLink` `Listening` (spec
   cluster/service/targetPort, status endpointId/did/ticket) with retries, so a kcp outage never reaps
   a cluster. A dead link is a member unit with Restart=always; while it is down or not yet re-verified
@@ -567,9 +574,10 @@ Each cluster has two links, one to the k3s apiserver and one to the cluster vaul
 ### The vault's config is rendered, not shipped
 
 `internal/openbaoctl` renders the config from the cluster's OpenBaoServer spec (`rootvault.ServerConfigWith`:
-the same listener and postgres storage, client certificates optional) into its own state dir.
-`clusterstack.OpenBaoServerConfig` renders it and `clusterprovider.WriteOpenBaoConfig` writes it -
-0600, idempotent, before the step that runs `bao server -config=...`. Each line is measured on v2.6.2:
+the same listener and postgres storage, client certificates optional) into its own state dir, mode
+0600, rewritten only when it changed, before it ensures the HostProcess that runs `bao server
+-config=...`. `clusterstack.Spec.OpenBaoServerConfig` states the same rules for a cluster spec. Each
+line is measured on v2.6.2:
 
 ```hcl
 ui = false
@@ -579,7 +587,7 @@ listener "tcp" { address       = "127.0.0.1:<leased openbao port>"
                tls_cert_file = "<data dir>/server/tls/openbao.crt"
                tls_key_file  = "<data dir>/server/tls/openbao.key" }
 storage "postgresql" {
-  connection_url = "postgres://postgres:<generated>@127.0.0.1:<leased postgres port>/openbao?sslmode=disable"
+  connection_url = "postgres://<user>@localhost/openbao?host=<the pg unit's socket dir>&sslmode=disable"
 }
 ```
 
@@ -597,42 +605,41 @@ cluster reconciles last, so its port becomes that cluster's.
 Storage is the **postgres backend**, and each word of that stanza was read off the bundled `bao`
 rather than remembered: `storage "postgres"` answers `unknown storage type postgres`, `storage
 "postgresql"` with the cluster's DSN answers, and the health body's own `Storage Type` field then
-reads `postgresql`. The key is `connection_url`. The URL is ALWAYS this cluster's own DSN -- loopback
-host, the port its lease covers, the password `postgres.pw` generated for this cluster -- and NEVER a
-defaulted one, because two clusters' DSNs are otherwise byte-identical. It names the vault's OWN
+reads `postgresql`. The key is `connection_url`. The URL is ALWAYS this cluster's own DSN -- the unix
+socket directory of the cluster's Postgres object (`pgunit.DSN`) -- and NEVER a defaulted one,
+because two clusters' DSNs are otherwise byte-identical. It names the vault's OWN
 database, `openbao` (`clusterstack.OpenBaoDatabase`); kine's objects go to the database `k3s`, so the
 vault's tables and the objects kine writes never share one database. `OpenBaoServerConfig` refuses a
-DSN that is empty, names no host:port, carries no user or password, is not a postgres URL, or names
-any database but `openbao`. The database itself is created empty by `StartPostgres` before the vault
-step (bao creates its own tables); measured on 2.6.2, the first vault write creates
+DSN that is empty, names no unix socket directory, carries no user, is not a postgres URL, or names
+any database but `openbao`; `openbaoctl` refuses a `spec.storage.postgres` without an absolute
+socketDir, a user and a database. The database itself is created empty (`internal/pgunit`) before the
+vault starts (bao creates its own tables); measured on 2.6.2, the first vault write creates
 `openbao_kv_store` in `openbao` and nothing in `k3s`. The file backend is not used: 2.6.2 logs it
 as deprecated (`storage.file: the file physical backend is deprecated; use bao operator
 migrate ... by v2.7.0`) and section 6 decides against it.
 
 ### A child's output is drained, never left in a pipe
 
-`processrunner.Start` hands a child an `io.Writer` for BOTH stdout and stderr, never a pipe. `exec`
-drains a writer itself: it copies on its own goroutine and `Wait` returns only after the child has
-exited AND its output has been copied, so a child may write without bound and still reach its exit.
+Every cluster member is a HostProcess unit. Its stdout and stderr go to one log file,
+`procgroup.Spec.Log`, set as the HostProcess `spec.output` (`internal/clusterprovider/units.go`):
+systemd-user appends to it (`StandardOutput=append:`), devsup opens it itself. No member writes into
+a pipe, so a member may write without bound and still reach its exit.
 
-`cmd.StdoutPipe()` is forbidden here. A pipe makes the READING the caller's job, and nothing in this
-tree ever read one, so the child blocked inside `write(2)` the moment the kernel's 64 KiB buffer
+The rule dates from the in-process child runner that came before the HostProcess units, where a
+pipe nobody read made the child block inside `write(2)` the moment the kernel's 64 KiB buffer
 filled. `k3s server` and `k3s agent` both emit far more than that during startup, so the block lands
 mid-boot and the readiness gate reports `k3s server at https://...: no answer` - a readiness fault over
 a child that was alive, healthy, and had nowhere to put its log. The failure is also load-dependent
 and therefore intermittent, which is the worst property a startup fault can have. Measured: a child
 writing 500 KB never finished under a pipe; with a writer it finishes immediately.
 
-What outlives the child is bounded and named: `OutputTailBytes`, 256 KiB, a ring over the LAST bytes
-written, read through `Process.Output()`. **The bound is the point** - a cluster's k3s logs for the
-life of the cluster, and a tail that grows with it is a leak in the gateway, so the ring EVICTS rather
-than accumulating. Four children per cluster, so a whole process group costs at most 1 MiB. The tail
-is also what a positive assertion about a node reads: `AssertAgentDialledOurPort` needs the agent's
-own dial line, and a tail that has already evicted it fails loudly rather than passing on an absence.
-
-`Spec.Output` is optional and independent: when set, the output goes there as well, and that sink is
-BEST-EFFORT with its errors dropped, because returning them would make `exec` stop copying and close
-the child's stdout - a full log disk must not SIGPIPE the apiserver.
+The log is bounded: the HostProcess output cap is `MemberOutputCap` (64 MiB, enforced by
+`internal/hostprocess` through `internal/logcap`), and a new HostProcess object for the member moves
+the old log to `<log>.prev`. **The bound is the point** - a cluster's k3s logs for the life of the
+cluster, and a log that grows with it is a leak on the gateway host. A readiness gate reads only the
+last 1 MiB of the file (`unitMember.Output`, `memberOutputTail`). The tail is also what a positive
+assertion about a node reads: `portallocator.AssertAgentDialledOurPort` needs the agent's own dial
+line, and a tail that no longer holds it fails loudly rather than passing on an absence.
 
 ### A market bidder is an application instance of one installed account
 
@@ -647,9 +654,10 @@ template unit per handle, no docker group account and no runner containers.
 
 ### Host processes and the VM lifecycle
 
-NOT BUILT. This subsection describes the planned design for host processes and the VM lifecycle. The
-subsections above describe the code as it stands. Lines marked "user" are the user's decisions; the
-rest are Claude's, open to the user's veto in the plan files.
+This subsection describes the design for host processes and the VM lifecycle. It is built
+(`internal/hostprocess`, `internal/hostsvc`, `internal/devsup`, `internal/vmruntime`, `internal/install`),
+except where a line says it is not. Lines marked "user" are the user's decisions; the rest are
+Claude's, open to the user's veto in the plan files.
 
 **Invariant: no socialweb-computer code in a running VM's process tree (user).** The service manager
 launches the VMM; our code only does one-shot prep before the unit starts, and the tiny `socialweb-vmexec`
@@ -682,7 +690,7 @@ the user decided 2026-10-22, plan 0026 W0-RUNTIME, to run kcp off main), each on
 127.0.0.1:6443); on a bidder as ONE slot per handle
 (`socialweb-kcp-<hid>@a`) on one kine over sqlite behind a port-0 front, upgraded by a short restart that
 VMs never notice, after which the controller re-adopts them. Postgres and OpenBaoServer
-stay CRDs (user). Deno processes stay plain children of the core unit and die with it. The core unit
+stay CRDs (user). Components run inside the core process and stop with it. The core unit
 uses the default `KillMode=control-group`; transient units are separate cgroups, so no KillMode reaches
 them (proved: a unit survives restart, kill -9 and stop of its starter). Only cpu, memory and pids
 delegation is relied on (user); `AllowedCPUs` and `IOWeight` are not enforced in a user manager and are
@@ -724,9 +732,9 @@ the account is the invoking user and the units run in that user's own manager; `
 unit of the installed application, the core included (`<prefix>computer-gateway.service`).
 
 **Each application instance's kcp as its service manager; dev run mode (user).** Long-lived
-host processes are `HostProcess` objects in their application instance's own kcp (section 0) (a kind that generalises DenoPod's reconciler shape) reconciled by a
-supervisor inside the binary onto a placement backend: `systemd-user` (transient units in the account's
-user manager, production installs only) or `proc` (dev and tests: a plain supervised process tree under
+host processes are `HostProcess` objects in their application instance's own kcp (section 0) reconciled by a
+supervisor inside the core (`internal/hostprocess`) onto a placement backend: `systemd-user` (transient units in the account's
+user manager, production installs only) or `proc` (dev: a plain supervised process tree under
 a per-instance `devsup` that is every unit's parent and child subreaper). Postgres, OpenBaoServer, each
 cluster member and each ComputeVM own HostProcess children. Below kcp sits the BOOTSTRAP LAYER - kcp's
 store, kine, slot(s), front and the core - which kcp cannot supervise: installed systemd units in
@@ -758,8 +766,8 @@ verifies them with `StrictHostKeyChecking=yes`, and no host scans a guest. The g
 the VM's work dir and is deleted with it; tenant data never enters the host journal. Stop is graceful
 first: `SendCtrlAltDel` over the API socket, a grace window measured live through the RFP flow, then
 `KillSignal=SIGKILL` (firecracker, PID 1 of pasta's PID namespace, ignores SIGTERM); arm64 goes straight
-to SIGKILL. The bidder's deno runs with an explicit permission list, no `-A`, `/dev/kvm` and the user bus
-denied, which is the only boundary between it and the user manager it shares a uid with.
+to SIGKILL. The Bidder component runs inside the bidder's core, which shares a uid with the user
+manager it places units in; the VM units are what is isolated (below).
 
 **VM isolation without on-demand accounts (user).** The bidder account is shared by every
 handle, but each VM unit runs pasta and firecracker in its own user namespace mapped to a distinct 65536-id
@@ -767,8 +775,9 @@ sub-range of the account's reserved subuid/subgid range (the rootless-podman pat
 with access to exactly its own work files by ACL, so a VMM escape lands in an unprivileged uid that owns no
 bidder file.
 
-**Stated limits.** Handles on one bidder host still share a uid for their cores and deno processes;
-deno's permission sandbox is the boundary between a bidder's deno and its user manager. Restarting
+**Stated limits.** Handles on one bidder host share a uid for their cores, and nothing but that uid
+separates a bidder's core from its user manager (the deno permission sandbox of the TypeScript bidder
+before plan 0026 is gone with it). Restarting
 `user@<uid>`, removing linger or `loginctl terminate-user` stops every unit and is treated as a reboot.
 
 **Control-plane continuity across upgrades (user).** There is no cutover and no container path: the
@@ -780,7 +789,7 @@ a per-cluster TCP front owns the existing apiserver port (guest tickets, node se
 the front swaps, the old stops, idle clusters first; the market
 kube-scheduler elects a leader with a short lease and each slot has its own hostname so k3s's own leader
 lease never has two holders; a cluster link keeps its iroh key across restarts; a
-restarted door resumes Bidding and Provisioning claims from a per-claim secrets-server key in the cluster
+restarted gateway (the NodeClaim controller, `internal/controllers/nodeclaim`) resumes Bidding and Provisioning claims from a per-claim secrets-server key in the cluster
 OpenBao; and NODE-LOSS counts only time when our own path was up. Design and measurements:
 `docs/research/2026-10-11-vm-lifecycle/control-plane-handover.md`.
 The gateway's kcp upgrades follow the same pattern behind our own front, not caddy (a
@@ -795,11 +804,12 @@ swap, and any caddy config we render pins `install_trust false`.
 
 ### compute-provider-kcp: a ComputeVM per guest, reconciled by a Go controller
 
-This subsection describes the compute-provider-kcp design. The ComputeVM API and the TypeScript provider
-(hono-compute-provider `lib/compute-provider-kcp`) exist; the VM runtime and the Go controller are not
-built. The host mechanics it relies on are the subsection above. The `file:line` citations below were
-taken at socialweb-computer-kcp d439c1f, hono-compute-provider 54d1b8f, atproto-market cd09af4 and
-kcp-libs f6911d2; a citation that no longer resolves points at code removed since.
+This subsection describes the compute-provider-kcp design. It is built in Go: the Bidder component
+(`internal/services/bidder`) writes a ComputeVM per guest (`computevm.ComputeVMFor`), the ComputeVM
+controller (`internal/controllers/computevm`) and the FirecrackerVM controller
+(`internal/controllers/firecrackervm`) reconcile it over `internal/computevm`,
+`internal/compute/firecracker` and `internal/vmruntime`. The host mechanics it relies on are the
+subsection above. The TypeScript provider that came before plan 0026 is gone.
 
 - **The bidder is an application instance with its own kcp (user).** A bidder
   handle = one kcp (one slot on kine-sqlite behind a port-0 front) + the bidder manifest set + a profile,
@@ -807,61 +817,47 @@ kcp-libs f6911d2; a citation that no longer resolves points at code removed sinc
   share a kcp. Requesters and the gateway never read a ComputeVM: what crosses applications is a market record
   (RFP, bid, accept, receipt, onNetwork, vm.hostKeys, vm.terminated). A bidder kcp upgrade is a short restart
   of its one slot that VMs never notice; the controller re-adopts every VM afterwards.
-- **ComputeVM plus a Go controller (user).** The TypeScript compute-provider-kcp (a
-  `ComputeProvider`, hono-compute-provider `lib/abc/compute-provider/mod.ts`) writes a ComputeVM;
-  `internal/computevm`, a client-go informer loop over the bidder's kcp, prepares, places, adopts and
-  releases it. Spec: vm, owner.handle, userDataSecret, requester, contract {receipt and accept uri+cid,
-  submitEventUrl, acceptedAt}, image, stopGraceSeconds; no network index. Status is OS-neutral (phase,
-  lostReason, runtime {backend as a free string, ref, instance, pid, startTime, hostBootID, vmmID}, network,
-  image, conditions, market) so the Windows and macOS backends need no schema revision.
-- **What the TypeScript provider writes and reads.** Packages `compute-provider-kcp-abc` (pure: the objects, the reason map, the cache),
-  `compute-provider-kcp` (kcp REST, no Hono) and `hono-factory-compute-provider-kcp` (the guest proxy to the bidder's OpenBao and
-  `POST /v1/on-network` mounted in `serve.onConnected`). provision enriches user_data once with the constant
-  guest host address, server-side applies the ComputeVM (field manager `compute-provider-kcp`), then applies
-  its user_data Secret once: namespace `default`, key `user-data` (`UserDataSecretNamespace`,
-  `UserDataSecretKey` in `api/v1alpha1`), ownerReference to the ComputeVM so kcp's garbage collector removes
-  it with the VM. It resolves on phase Running and fails on Lost, Failed, deletion or the boot timeout,
-  deleting what it applied. destroy deletes and returns only once kcp answers 404 (the controller's finalizer
-  held until the work dir is gone), then drops the Secret. State is one list+watch of the bidder's
-  ComputeVMs filtered by `spec.owner.handle`, filled by `setup()`; when kcp refuses or drops the watch it
-  re-lists every `resyncBackoffMs` (logged as `computevm_sync_mode`). A ComputeVM moving to Lost or Failed
-  (or vanishing) that the provider did not delete fires `onGuestGone` once, reason HostRebooted ->
-  host_reboot, OOMKilled -> oom, IdentityMismatch -> identity_mismatch, every other -> vmm_exited,
-  and the provider then deletes it so the finalizer releases the work dir. adopt
-  answers from the same cache. The kcp token is read from `tokenFile` on every request so the Go side can
-  rotate it; the rotation itself lands with the bidder DenoPod stack.
-- **DenoPod-per-VM was rejected, on evidence.** Deleting a DenoPod SIGKILLs its process group with no
-  release step (kcp-libs `impl/execrunner/supervisor.go:322`, also `:156`); the runner's 5-minute
-  `DefaultPodTimeout` (`impl/execrunner/pod.go:17`, enforced in `Observe` `:101-104`) killed the market network's bidder
-  mid-contract (run 4), and a VM lives as long as its contract; DenoPod status is `State`, `ExitCode`,
-  `Message`, `Outputs` (`abc/runner/runner.go:40-48`), with no typed guest fields; booting needs `/dev/kvm`
-  (today a privileged runner container per guest, hono-compute-provider
-  `lib/microvm-firecracker/mod.ts:170-180`), which the bidder's deno sandbox must never hold (no `-A`, no
-  `/dev/kvm`, no user bus).
-- **ContractStore over ComputeVM is the source of truth.** The firecracker provider holds guests and the network
-  index in memory (`lib/compute-provider-firecracker/mod.ts:606`, `:610`), so a restarted bidder loses its
-  receipts and leaks guests. The `ContractStore` ABC
-  (atproto-market `lib/abc/market-bidder/mod.ts:109`) and its file store exist for the firecracker provider;
-  compute-provider-kcp
-  implements the same ABC over ComputeVM `spec.contract`, with tombstones from Lost or released ComputeVMs.
-  A restarted bidder re-populates from ComputeVMs plus live VMM state.
-- **No socialweb-computer code in a running VM's process tree (user).** Currently it is resident:
-  `runVMM` waits on firecracker (`internal/nodefirecracker/namespace.go:19-56`) and nodeboot re-execs
-  `os.Executable()` (`cmd/socialweb-nodeboot/main.go:306`; a rename-over upgrade changes code mid-boot).
-  Planned: prep is one-shot in the controller; each ComputeVM owns exactly one HostProcess placed as a
+- **ComputeVM plus a Go controller (user).** The Bidder component writes a ComputeVM
+  (`computevm.ComputeVMFor`, from `internal/market/bidder` through `internal/services/bidder`); the
+  ComputeVM controller prepares, places, adopts and releases it through its backend, a FirecrackerVM
+  named in `spec.backendRef`. Spec: backendRef, vm, owner.handle, userData (a SecretRef into the
+  bidder's vault at `guests/<name>/user-data`), requester, contract, accept, image, stopGraceSeconds,
+  guestLogin, release; no network index. Status is OS-neutral (phase, lostReason, runtime {backend as a
+  free string, ref, instance, pid, startTime, hostBootID, vmmID}, network, image, conditions, market) so
+  the Windows and macOS backends need no schema revision.
+- **What the bidder reads back.** The bidder keeps no guest state of its own: it reads its ComputeVMs
+  and Bid objects from its kcp, and a restarted bidder carries on from them. A release is the
+  ComputeVM's `spec.release`, written by the bidder from the requester's `vm.delete`. A ComputeVM that
+  ends is reported by the ComputeVM controller as a `vm.terminated` StateSync
+  (`computevm.EnsureTerminationSync`, reason `computevm.GoneReason`: HostRebooted -> host_reboot,
+  OOMKilled -> oom, IdentityMismatch -> identity_mismatch, GuestPoweroff -> guest_poweroff, every
+  other -> vmm_exited; `deleted_on_request` for a release). The guest-facing endpoints (the allow-list
+  proxy to the bidder's OpenBao and `POST /v1/on-network`) are the GuestControlPlane component
+  (`internal/services/guestcontrolplane`).
+- **A process per VM under a generic runner was rejected, on evidence.** Before plan 0026 a runner of
+  the deno runtime SIGKILLed a deleted pod's process group with no release step, and its 5-minute pod
+  timeout killed the market network's bidder mid-contract (run 4), while a VM lives as long as its
+  contract and needs typed guest fields and `/dev/kvm`. A VM is a ComputeVM with its own controller.
+- **ComputeVM is the source of truth.** A bidder that held guests and the network index in memory
+  lost its receipts and leaked guests on a restart (the TypeScript firecracker provider before plan
+  0026). Now the contract is ComputeVM `spec.contract`, and a restarted bidder re-populates from its
+  ComputeVMs plus live VMM state.
+- **No socialweb-computer code in a running VM's process tree (user).** Prep is one-shot in the
+  controller; each ComputeVM owns exactly one HostProcess (`computevm.ChildName`, `vm-<name>`) placed as a
   transient unit `socialweb-vm-<hid>-<name>` whose tree after start is pasta -> firecracker only:
   on `systemd-user` in production, in the user manager of the one shared lingering `swc-bidder`
-  account, surviving core crash, upgrade and logout; on `proc` in dev and tests, as a unit of
-  the per-instance `devsup`, the parent and child subreaper of every unit (`internal/devsup/server_linux.go:105`).
+  account, surviving core crash, upgrade and logout; on `proc` in dev, as a unit of
+  the per-instance `devsup`, the parent and child subreaper of every unit (`internal/devsup/server_linux.go`).
   devsup in a dev tree is the dev backend by design,
-  never production. Both backends satisfy `hostsvc.Manager` (`internal/hostsvc/hostsvc.go:203`). Reboot = Lost.
+  never production. Both backends satisfy `hostsvc.Manager` (`internal/hostsvc/hostsvc.go`, the
+  `internal/contract/host` Units interface). Reboot = Lost.
 - **Tri-state verdict: Running | Lost | Unknown (user).** `hostsvc.Verdict` and `LostReason`
-  (`internal/hostsvc/hostsvc.go:156-181`). Bus dial, auth or timeout and an unreachable API socket are
+  (`internal/hostsvc/hostsvc.go`, from `internal/contract/host`). Bus dial, auth or timeout and an unreachable API socket are
   Unknown: a condition, phase unchanged, retried, never Lost. A changed boot id is Lost(HostRebooted); a missing
   unit Lost(UnitGone); a failed or inactive unit Lost(UnitFailed | OOMKilled | VMMExited); an identity mismatch
   on an active unit (InvocationID, pidfd + start ticks, `GetUnitByPIDFD`, firecracker `GET /` id) is
-  Lost(IdentityMismatch) and the unit is stopped at once (lp:304); a unit placed by another backend is Lost,
-  never adopted (`hostsvc.go:294-303`). Why: a false Lost costs a tenant a VM.
+  Lost(IdentityMismatch) and the unit is stopped at once; a unit placed by another backend is Lost,
+  never adopted. Why: a false Lost costs a tenant a VM.
   A Lost guest is never booted again; the requester replaces it through a new RFP (user).
 - **Stop is CtrlAltDel, then SIGKILL (user).** firecracker is PID 1 of pasta's PID namespace and
   ignores SIGTERM, so a plain stop hangs 45 s. Releasing sends `PUT /actions SendCtrlAltDel`,
@@ -877,21 +873,20 @@ kcp-libs f6911d2; a citation that no longer resolves points at code removed sinc
   debugfs, e2fsck or resize2fs.
 - **Identical guest network per pasta namespace (user).** Every guest gets the same address plan
   inside its own pasta user+net namespace and dials a constant host address (pasta's gateway), so the
-  network-index allocator (`lib/compute-provider-firecracker/mod.ts:610`, `:688`) is deleted and user_data is
-  final at create.
+  network-index allocator of the TypeScript firecracker provider before plan 0026 is gone and user_data
+  is final at create.
 - **Guest images from a build-host script (user).** Kernel + rootfs per
   hypervisor x arch, built by a script on any Linux host (CI shells out to it), pinned by sha256 and
   fetched; a bidder needs no root, chroot, apt or Go toolchain.
-- **iroh is the only guest transport (user).** compute-provider-kcp inherits no guest JSR
-  registry, websocat path, tunnel or fedproxy module. Guest SSH host
+- **iroh is the only guest transport (user).** The bidder installs no guest package registry,
+  websocat path, tunnel or fedproxy module. Guest SSH host
   keys are guest-reported in `vm.hostKeys` and verified with `StrictHostKeyChecking=yes`.
 - **vm.terminated (user).** The bidder reports why and when a guest ended in a signed
   `com.publicdomainrelay.temp.compute.events.vm.terminated` inside the existing market.event envelope
   (5.6 s
-  from guest poweroff to the requester's session end, measured live). The Go side emits it from every Lost verdict through
-  compute-provider-kcp's `onGuestGone` (HostRebooted -> host_reboot, UnitGone | UnitFailed | VMMExited ->
-  vmm_exited, OOMKilled -> oom, IdentityMismatch -> identity_mismatch); tombstones answer a late `vm.delete`
-  200. vm.terminated and vm.hostKeys are the only protocol additions.
+  from guest poweroff to the requester's session end, measured live). The ComputeVM controller emits it
+  from every Lost verdict and every release through a termination StateSync (`internal/computevm/termination.go`,
+  reasons as above); an ended ComputeVM answers a late `vm.delete` 200. vm.terminated and vm.hostKeys are the only protocol additions.
 
 ## 6. CRDs and the API surface
 
