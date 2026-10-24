@@ -58,7 +58,6 @@ const (
 	OpReleaseSubnet  Op = "release-subnet"
 	OpDropFinalizer  Op = "remove-finalizer"
 	OpBlocked        Op = "teardown-blocked-nothing-destroyed"
-	OpInstanceBumped Op = "instance-bumped"
 )
 
 type PathProbe struct {
@@ -358,7 +357,7 @@ func (r *Reconciler) on(ctx context.Context, o Observed) (Result, error) {
 			if readyTrue(o) {
 				return r.degraded(o, sick)
 			}
-			return r.bringUp(ctx, o, false)
+			return r.bringUp(ctx, o)
 		}
 	}
 	if live && o.Reachable {
@@ -383,7 +382,7 @@ func (r *Reconciler) on(ctx context.Context, o Observed) (Result, error) {
 	if r.opts.Host.Live(ctx, o.Cluster.Name) {
 		return r.pending(o, "the process group is up and the apiserver has not answered yet")
 	}
-	return r.bringUp(ctx, o, false)
+	return r.bringUp(ctx, o)
 }
 
 func (r *Reconciler) claimReady(res Result, o Observed) (Result, error) {
@@ -434,7 +433,7 @@ var settledReadyPhase = func() v1alpha1.ClusterPhase {
 	return phase
 }()
 
-func (r *Reconciler) bringUp(ctx context.Context, o Observed, bump bool) (Result, error) {
+func (r *Reconciler) bringUp(ctx context.Context, o Observed) (Result, error) {
 	res := Result{
 		Phase:      v1alpha1.ClusterInitializing,
 		URL:        o.Cluster.Status.URL,
@@ -462,12 +461,9 @@ func (r *Reconciler) bringUp(ctx context.Context, o Observed, bump bool) (Result
 	}
 
 	instance := res.Instance
-	if bump || instance == "" {
+	if instance == "" {
 		instance = r.opts.NewInstance()
 		res.Instance = instance
-		if bump {
-			res.Ops = append(res.Ops, OpInstanceBumped)
-		}
 	}
 
 	if r.opts.Front != nil {
