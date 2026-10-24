@@ -97,7 +97,7 @@ func GuardFor(d GuardDeps) materialiser.IdentityGuard {
 			if d.SeedBundle == nil {
 				return fmt.Errorf("%w (cluster %s)", ErrNoBundleSeeder, cluster)
 			}
-			if err := d.SeedBundle(ctx, cluster); err != nil {
+			if err := d.SeedBundle(ctx, cluster); err != nil && !errors.Is(err, ErrNoBundleYet) {
 				return fmt.Errorf("clusterprovider: seeding the identity bundle for %s: %w", cluster, err)
 			}
 		}

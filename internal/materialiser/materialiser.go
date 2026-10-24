@@ -441,7 +441,8 @@ func (r *Reconciler) bringUp(ctx context.Context, o Observed, bump bool) (Result
 		Instance:   o.Cluster.Status.Instance,
 		Conditions: carry(o.Cluster.Status.Conditions),
 	}
-	if c := meta.FindStatusCondition(res.Conditions, ConditionReady); c != nil && c.Reason == ReasonStopped {
+	fresh := newInitWindow(o)
+	if fresh {
 		meta.RemoveStatusCondition(&res.Conditions, ConditionReady)
 	}
 	meta.RemoveStatusCondition(&res.Conditions, v1alpha1.ConditionTenantPathShut)
@@ -454,7 +455,7 @@ func (r *Reconciler) bringUp(ctx context.Context, o Observed, bump bool) (Result
 		ObservedGeneration: o.Cluster.Generation,
 	})
 
-	if o.Cluster.Status.Phase == v1alpha1.ClusterInitializing {
+	if !fresh && o.Cluster.Status.Phase == v1alpha1.ClusterInitializing {
 		if since := o.Now.Sub(readySince(o, o.Now)); since >= r.opts.InitTimeout {
 			return r.park(res, o, fmt.Sprintf("still Initializing after %s; parking in Unavailable", since))
 		}
@@ -561,7 +562,10 @@ func (r *Reconciler) pending(o Observed, msg string) (Result, error) {
 		Instance:   o.Cluster.Status.Instance,
 		Conditions: carry(o.Cluster.Status.Conditions),
 	}
-	if o.Cluster.Status.Phase == v1alpha1.ClusterInitializing {
+	fresh := newInitWindow(o)
+	if fresh {
+		meta.RemoveStatusCondition(&res.Conditions, ConditionReady)
+	} else if o.Cluster.Status.Phase == v1alpha1.ClusterInitializing {
 		if since := o.Now.Sub(readySince(o, o.Now)); since >= r.opts.InitTimeout {
 			return r.park(res, o, fmt.Sprintf("still Initializing after %s; parking in Unavailable", since))
 		}
@@ -655,6 +659,14 @@ func gateClosedSince(o Observed) (time.Time, bool) {
 		return c.LastTransitionTime.Time, true
 	}
 	return since, closed
+}
+
+func newInitWindow(o Observed) bool {
+	c := meta.FindStatusCondition(o.Cluster.Status.Conditions, ConditionReady)
+	if c == nil || c.Status == metav1.ConditionTrue {
+		return false
+	}
+	return c.Reason == ReasonStopped || c.ObservedGeneration != o.Cluster.Generation
 }
 
 func readySince(o Observed, fallback time.Time) time.Time {
