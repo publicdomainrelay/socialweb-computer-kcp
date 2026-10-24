@@ -211,15 +211,18 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obj 
 	claim := contract.Claim{Workspace: req.Workspace, Object: *obj}
 	at := entryOf(b, claim)
 	openBao, apiserver := b.Mapper.LinkNames(claim)
-	c.learn(req, known{workspace: req.Workspace, links: []string{openBao, apiserver}, cluster: obj.Spec.ClusterRef.Name,
+	cluster, owned := clusterRef(claim)
+	c.learn(req, known{workspace: req.Workspace, links: []string{openBao, apiserver}, cluster: cluster.Name,
 		infra: at.Name, entry: at.Contract, contract: at.ComputeContract})
 	cc, err := readContract(ctx, store, at)
 	if err != nil {
 		return ctlruntime.Result{}, err
 	}
-	alive, err := clusterAlive(ctx, store, clusterRef(claim))
-	if err != nil {
-		return ctlruntime.Result{}, err
+	alive := true
+	if owned {
+		if alive, err = clusterAlive(ctx, store, cluster); err != nil {
+			return ctlruntime.Result{}, err
+		}
 	}
 	if !alive {
 		if err := c.deleteInfra(ctx, store, at.Workspace, at.Name, "the cluster is deleting"); err != nil {

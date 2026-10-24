@@ -36,8 +36,13 @@ func entryOf(b *contract.Binding, claim contract.Claim) v1alpha1.NodeClaimInfra 
 		ComputeContract: infra.ChildName(infra.KindInfra, name, entry)}
 }
 
-func clusterRef(claim contract.Claim) commonv1.ObjectRef {
-	return commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: ClusterKind, Name: claim.Object.Spec.ClusterRef.Name, Workspace: claim.Workspace}
+func clusterRef(claim contract.Claim) (commonv1.ObjectRef, bool) {
+	for _, o := range claim.Object.OwnerReferences {
+		if o.Kind == ClusterKind && o.Name != "" {
+			return commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: ClusterKind, Name: o.Name, Workspace: claim.Workspace}, true
+		}
+	}
+	return commonv1.ObjectRef{}, false
 }
 
 func infras(store *kcpstore.Store) *kcpstore.Resource[v1alpha1.Infra] {
@@ -124,13 +129,15 @@ func (c *Controller) declare(ctx context.Context, store *kcpstore.Store, claim c
 		spec.Secrets = putSecret(spec.Secrets, at.Contract, e.secrets)
 	}
 	spec.Contracts[i].State = state
-	cluster := clusterRef(claim)
-	spec.ClusterRef = &cluster
-	spec.Description = fmt.Sprintf("the nodes of the tenant cluster %s in %s", cluster.Name, cluster.Workspace)
+	label := ""
+	if cluster, ok := clusterRef(claim); ok {
+		spec.ClusterRef, label = &cluster, cluster.Name
+	}
+	spec.Description = fmt.Sprintf("the nodes of the tenant cluster %s in %s", claim.Object.Spec.ClusterRef.Name, claim.Workspace)
 	if cur != nil && equality.Semantic.DeepEqual(cur.Spec, spec) {
 		return nil
 	}
-	if err := applyInfra(ctx, store, at.Workspace, at.Name, cluster.Name, spec); err != nil {
+	if err := applyInfra(ctx, store, at.Workspace, at.Name, label, spec); err != nil {
 		return err
 	}
 	c.log.Info("node_claim_entry_declared", "claim", claim.Key(), "infra", at.Name, "entry", at.Contract, "state", state, "created", cur == nil)
@@ -222,19 +229,21 @@ func (c *Controller) sweep(ctx context.Context, store *kcpstore.Store, b contrac
 	claims := kcpstore.OfClusterScoped[v1alpha1.NodeClaim](store, v1alpha1.NodeClaimGVR)
 	for i := range items {
 		in := &items[i]
-		if in.Spec.ClusterRef == nil || !in.DeletionTimestamp.IsZero() {
+		if len(in.Spec.Nodes) == 0 || !in.DeletionTimestamp.IsZero() {
 			continue
 		}
-		alive, err := clusterAlive(ctx, store, *in.Spec.ClusterRef)
-		if err != nil {
-			c.log.Warn("node_claim_cluster_unread", "infra", in.Name, "err", err)
-			continue
-		}
-		if !alive {
-			if err := c.deleteInfra(ctx, store, b.ContractWorkspace, in.Name, "the cluster is gone"); err != nil {
-				c.log.Warn("node_claim_infra_delete_failed", "infra", in.Name, "err", err)
+		if in.Spec.ClusterRef != nil {
+			alive, err := clusterAlive(ctx, store, *in.Spec.ClusterRef)
+			if err != nil {
+				c.log.Warn("node_claim_cluster_unread", "infra", in.Name, "err", err)
+				continue
 			}
-			continue
+			if !alive {
+				if err := c.deleteInfra(ctx, store, b.ContractWorkspace, in.Name, "the cluster is gone"); err != nil {
+					c.log.Warn("node_claim_infra_delete_failed", "infra", in.Name, "err", err)
+				}
+				continue
+			}
 		}
 		for _, n := range in.Spec.Nodes {
 			r := n.NodeClaimRef
