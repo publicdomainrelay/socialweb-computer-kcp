@@ -119,6 +119,7 @@ func (r *Relay) resolvePDSIdentity(ctx context.Context, hostname string) (string
 	if err != nil {
 		return "", err
 	}
+	req.Header.Set("Accept", "application/json")
 	resp, err := r.httpClient.Do(req)
 	if err != nil {
 		return "", err

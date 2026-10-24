@@ -57,6 +57,7 @@ func relayGET(ctx context.Context, client HTTPDoer, rawURL string) (int, []byte,
 	if err != nil {
 		return 0, nil, err
 	}
+	req.Header.Set("Accept", "application/json")
 	res, err := client.Do(req)
 	if err != nil {
 		return 0, nil, err

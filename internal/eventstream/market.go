@@ -249,6 +249,7 @@ func (h *marketHandler) fetchMarketRecord(ctx context.Context, source string, re
 		if err != nil {
 			return nil, "", err
 		}
+		req.Header.Set("Accept", "application/json")
 		resp, err := h.httpClient().Do(req)
 		if err != nil {
 			continue
@@ -284,6 +285,7 @@ func (h *marketHandler) relayHost(ctx context.Context, source, did string) (stri
 	if err != nil {
 		return "", err
 	}
+	req.Header.Set("Accept", "application/json")
 	resp, err := h.httpClient().Do(req)
 	if err != nil {
 		return "", err

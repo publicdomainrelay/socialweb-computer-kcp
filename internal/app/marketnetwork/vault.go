@@ -151,6 +151,7 @@ func (ctl *Controller) verify(ctx context.Context, snap compose.Snapshot, apps [
 		if err != nil {
 			return err
 		}
+		req.Header.Set("Accept", "application/json")
 		if check.kind == compose.ComponentKindIngressProxy {
 			host := GuestTLSHost
 			if ctl.value != nil && ctl.value.IngressProxyHost != "" {

@@ -44,6 +44,7 @@ func (s *HTTPRelayHealthSource) RelayStatus(ctx context.Context, ref string) (Re
 	if err != nil {
 		return RelayObservation{}, err
 	}
+	request.Header.Set("Accept", "application/json")
 	response, err := s.client.Do(request)
 	if err != nil {
 		return RelayObservation{}, err

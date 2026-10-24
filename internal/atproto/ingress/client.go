@@ -150,6 +150,7 @@ func (s *Subscriber) openOnce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+nonceToken)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := s.cfg.HTTPClient.Do(req)

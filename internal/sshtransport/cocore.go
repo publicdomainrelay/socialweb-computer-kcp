@@ -223,6 +223,7 @@ func (p *CocorePairing) do(ctx context.Context, method, target string, body any)
 	if err != nil {
 		return nil, 0, err
 	}
+	req.Header.Set("Accept", "application/json")
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
