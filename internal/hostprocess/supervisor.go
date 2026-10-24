@@ -24,6 +24,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fswatch"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/logcap"
 )
@@ -86,6 +87,7 @@ type Supervisor struct {
 	pids     map[string]int64
 	outputs  map[string]follower
 	follows  sync.WaitGroup
+	files    *fswatch.Watcher
 	changed  chan string
 }
 
@@ -328,7 +330,8 @@ func New(ctx context.Context, c Config) (*Supervisor, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Supervisor{c: c, client: kc.Resource(GVR), placed: map[string]bool{}, backend: c.Manager.Capabilities().Backend}, nil
+	return &Supervisor{c: c, client: kc.Resource(GVR), placed: map[string]bool{}, backend: c.Manager.Capabilities().Backend,
+		files: fswatch.New()}, nil
 }
 
 func MirrorName(role string) string { return MirrorPrefix + role }
@@ -643,17 +646,10 @@ func (s *Supervisor) followOutput(ctx context.Context, o v1alpha1.HostProcess) {
 	if key == "" {
 		return
 	}
-	w, err := fsnotify.NewWatcher()
+	w, err := s.files.Subscribe(files...)
 	if err != nil {
-		s.c.log().Warn("output files are capped only at reconcile: no file watch", "name", o.Name, "err", err.Error())
+		s.c.log().Warn("output files are capped only at reconcile: watching an output file failed", "name", o.Name, "files", strings.Join(files, ", "), "err", err.Error())
 		return
-	}
-	for _, f := range files {
-		if err := w.Add(f); err != nil {
-			w.Close()
-			s.c.log().Warn("output files are capped only at reconcile: watching an output file failed", "name", o.Name, "file", f, "err", err.Error())
-			return
-		}
 	}
 	fctx, cancel := context.WithCancel(ctx)
 	if s.outputs == nil {
@@ -672,7 +668,7 @@ func (s *Supervisor) unfollowOutput(name string) {
 	}
 }
 
-func (s *Supervisor) rotateOnWrite(ctx context.Context, w *fsnotify.Watcher, o v1alpha1.HostProcess, key string) {
+func (s *Supervisor) rotateOnWrite(ctx context.Context, w *fswatch.Sub, o v1alpha1.HostProcess, key string) {
 	defer w.Close()
 	defer func() {
 		s.mu.Lock()
@@ -686,11 +682,11 @@ func (s *Supervisor) rotateOnWrite(ctx context.Context, w *fsnotify.Watcher, o v
 		select {
 		case <-ctx.Done():
 			return
-		case _, ok := <-w.Errors:
+		case _, ok := <-w.Errors():
 			if !ok {
 				return
 			}
-		case ev, ok := <-w.Events:
+		case ev, ok := <-w.Events():
 			if !ok || ev.Has(fsnotify.Remove) || ev.Has(fsnotify.Rename) {
 				return
 			}
@@ -722,6 +718,7 @@ func (s *Supervisor) capOutput(o v1alpha1.HostProcess) {
 func (s *Supervisor) Run(ctx context.Context) error {
 	s.c.log().Info("the HostProcess supervisor runs in the core", "workspace", s.c.workspace(), "backend", string(s.backend),
 		"prefixes", s.c.prefixes())
+	defer s.files.Close()
 	defer s.follows.Wait()
 	wake := make(chan struct{}, 1)
 	changed := make(chan string, 1024)
