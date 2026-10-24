@@ -50,6 +50,7 @@ const (
 	nsidDeleteCluster    = NSIDPrefix + "deleteCluster"
 	nsidListClusters     = NSIDPrefix + "listClusters"
 	nsidRevokeIdentity   = NSIDPrefix + "revokeIdentity"
+	nsidSetPublishInfra  = NSIDPrefix + "setPublishInfra"
 
 	nsidKubectlApplyServerSide = K8sNSIDPrefix + "kubectlApplyServerSide"
 	nsidGetJob                 = K8sNSIDPrefix + "getJob"
@@ -147,6 +148,10 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		{nsid: nsidListClusters, call: func(ctx context.Context, c gateway.Caller, _ any) (any, error) {
 			return s.gateway.ListClusters(ctx, c)
 		}},
+		{nsid: nsidSetPublishInfra, input: &gateway.PublishInfraRequest{},
+			call: func(ctx context.Context, c gateway.Caller, in any) (any, error) {
+				return s.gateway.SetPublishInfra(ctx, c, *(in.(*gateway.PublishInfraRequest)))
+			}},
 		{nsid: nsidRevokeIdentity, input: &gateway.RevokeRequest{},
 			call: func(ctx context.Context, c gateway.Caller, in any) (any, error) {
 				return s.gateway.RevokeIdentity(ctx, c, *(in.(*gateway.RevokeRequest)))
@@ -341,6 +346,8 @@ func checkClusterName(out any) error {
 		return labelOrInvalidRequest(t.Name)
 	case *gateway.KubeconfigRequest:
 		return labelOrInvalidRequest(t.Name)
+	case *gateway.PublishInfraRequest:
+		return labelOrInvalidRequest(t.Name)
 	case *gateway.ApplyRequest:
 		return labelOrInvalidRequest(t.Cluster)
 	case *gateway.JobRequest:
@@ -432,6 +439,8 @@ func shape(nsid string, out any) any {
 		return phaseOutput{Phase: v.Phase}
 	case *gateway.RevokeResponse:
 		return revokeIdentityOutput{Revoked: v.Revoked}
+	case *gateway.PublishInfraResponse:
+		return publishInfraOutput{Phase: v.Phase, PublishInfra: v.PublishInfra}
 	case []gateway.ClusterView:
 		items := make([]clusterItem, 0, len(v))
 		for _, c := range v {
@@ -457,6 +466,11 @@ type getKubeconfigOutput struct {
 
 type phaseOutput struct {
 	Phase string `json:"phase"`
+}
+
+type publishInfraOutput struct {
+	Phase        string `json:"phase"`
+	PublishInfra bool   `json:"publishInfra"`
 }
 
 type revokeIdentityOutput struct {

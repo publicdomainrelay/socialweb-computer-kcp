@@ -105,6 +105,8 @@ type ClusterView struct {
 	Instance string
 	Running  bool
 
+	PublishInfra bool
+
 	TeardownBlocked bool
 
 	NodeCount int
@@ -118,6 +120,7 @@ type Store interface {
 	Get(ctx context.Context, caller Caller, name string) (ClusterView, bool, error)
 	List(ctx context.Context, caller Caller) ([]ClusterView, error)
 	SetRunning(ctx context.Context, caller Caller, name string, running bool) (ClusterView, error)
+	SetPublishInfra(ctx context.Context, caller Caller, name string, publish bool) (ClusterView, error)
 	Delete(ctx context.Context, caller Caller, name string) (ClusterView, error)
 }
 
@@ -282,6 +285,39 @@ func (s *Server) ControlPlaneDown(ctx context.Context, caller Caller, req NameRe
 		return ClusterView{}, err
 	}
 	return s.Store.SetRunning(ctx, caller, req.Name, false)
+}
+
+type PublishInfraRequest struct {
+	Name string
+
+	Publish bool
+}
+
+type PublishInfraResponse struct {
+	Phase string
+
+	PublishInfra bool
+}
+
+func (s *Server) SetPublishInfra(ctx context.Context, caller Caller, req PublishInfraRequest) (*PublishInfraResponse, error) {
+	view, err := s.lookup(ctx, caller, NameRequest{Name: req.Name})
+	if err != nil {
+		return nil, err
+	}
+	if _, err := revocation.Admit(ctx, s.Deny, string(caller)); err != nil {
+		slog.Warn("setPublishInfra: the deny refused the caller", "caller", string(caller), "name", req.Name, "err", err)
+		return nil, errForDeny(err)
+	}
+	if view.Phase == "Draining" {
+		return nil, ErrClusterDraining
+	}
+	if view.PublishInfra != req.Publish {
+		if view, err = s.Store.SetPublishInfra(ctx, caller, req.Name, req.Publish); err != nil {
+			return nil, err
+		}
+		slog.Info("setPublishInfra: the cluster's infra record opt-in changed", "caller", string(caller), "name", req.Name, "publish", req.Publish)
+	}
+	return &PublishInfraResponse{Phase: view.Phase, PublishInfra: view.PublishInfra}, nil
 }
 
 func (s *Server) DeleteCluster(ctx context.Context, caller Caller, req NameRequest) (ClusterView, error) {

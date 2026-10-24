@@ -1,0 +1,52 @@
+{
+  "lexicon": 1,
+  "id": "com.publicdomainrelay.temp.cluster.setPublishInfra",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "Opt the named cluster in or out of publishing its computer.socialweb.infra record to the CALLER's own repo. While publish is true the record carries the cluster's node entries (name, state, vmName and the bidder DIDs) and their observed phases, and nothing else of the cluster: no join material, no secrets. The record is written by the gateway only; an edit made to it elsewhere is written over, because the node count follows the cluster's pods and never the record. Turning it off stops the sync and leaves the record in the repo with its last content. Default off. Requires a service-auth JWT from the CALLER's own PDS; the account is the VERIFIED token's iss and never read from this input. Idempotent.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["name", "publish"],
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "The cluster label, unique within the calling account."
+            },
+            "publish": {
+              "type": "boolean",
+              "description": "True to publish the cluster's infra record to the caller's repo, false to stop."
+            }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["phase", "publishInfra"],
+          "properties": {
+            "phase": {
+              "type": "string",
+              "knownValues": ["Unavailable", "Initializing", "Ready", "Draining"],
+              "description": "The cluster's phase as of this call."
+            },
+            "publishInfra": {
+              "type": "boolean",
+              "description": "The opt-in as of this call."
+            }
+          }
+        }
+      },
+      "errors": [
+        { "name": "InvalidRequest", "description": "Name absent, or not a legal RFC-1123 label within 63 characters." },
+        { "name": "Unauthorized", "description": "Missing or invalid service-auth token. Also returned when the token's aud is not this service or its lxm is not this method." },
+        { "name": "IdentityRevoked", "description": "The caller's identity carries a deny record for this account." },
+        { "name": "ClusterNotFound", "description": "This account has no cluster of that name. Deliberately indistinguishable from a name that belongs to another account." },
+        { "name": "ClusterDraining", "description": "The cluster is being torn down and its desired state is frozen." }
+      ]
+    }
+  }
+}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"sort"
 	"strings"
@@ -582,6 +583,10 @@ func (c *Client) clusterLabels(ctx context.Context, did string) ([]string, error
 }
 
 func (c *Client) SetRunning(ctx context.Context, caller gateway.Caller, name string, running bool) (gateway.ClusterView, error) {
+	return c.applySpec(ctx, caller, name, "set running", map[string]any{"running": running})
+}
+
+func (c *Client) applySpec(ctx context.Context, caller gateway.Caller, name, verb string, spec map[string]any) (gateway.ClusterView, error) {
 	home, err := c.homePath(caller, name)
 	if err != nil {
 		return gateway.ClusterView{}, err
@@ -590,23 +595,30 @@ func (c *Client) SetRunning(ctx context.Context, caller gateway.Caller, name str
 	if err != nil {
 		return gateway.ClusterView{}, err
 	}
-	if _, err := c.readCluster(ctx, home, name); err != nil {
-		return gateway.ClusterView{}, fmt.Errorf("kcpclient: set running %s: %w", name, err)
+	have, err := c.readCluster(ctx, home, name)
+	if err != nil {
+		return gateway.ClusterView{}, fmt.Errorf("kcpclient: %s %s: %w", verb, name, err)
 	}
+	owned := map[string]any{"running": have.Spec.Running, "publishInfra": have.Spec.PublishInfra}
+	maps.Copy(owned, spec)
 	doc := map[string]any{"apiVersion": socialwebResource.String(), "kind": "Cluster", "metadata": map[string]any{"name": name},
-		"spec": map[string]any{"running": running}}
+		"spec": owned}
 	if err := applyDoc(ctx, r.Patch(types.ApplyPatchType).Resource("clusters").Name(name), fieldManagerGateway, true, doc, false); err != nil {
-		return gateway.ClusterView{}, fmt.Errorf("kcpclient: set running %s: %w", name, err)
+		return gateway.ClusterView{}, fmt.Errorf("kcpclient: %s %s: %w", verb, name, err)
 	}
 	out, err := c.readCluster(ctx, home, name)
 	if err != nil {
-		return gateway.ClusterView{}, fmt.Errorf("kcpclient: set running %s: %w", name, err)
+		return gateway.ClusterView{}, fmt.Errorf("kcpclient: %s %s: %w", verb, name, err)
 	}
 	n, err := c.liveNodes(ctx, home, name)
 	if err != nil {
 		return gateway.ClusterView{}, err
 	}
 	return viewOf(out, n), nil
+}
+
+func (c *Client) SetPublishInfra(ctx context.Context, caller gateway.Caller, name string, publish bool) (gateway.ClusterView, error) {
+	return c.applySpec(ctx, caller, name, "set publishInfra", map[string]any{"publishInfra": publish})
 }
 
 func (c *Client) Delete(ctx context.Context, caller gateway.Caller, name string) (gateway.ClusterView, error) {
@@ -865,6 +877,8 @@ func viewOf(cl *v1alpha1.Cluster, nodes int) gateway.ClusterView {
 		Instance:  cl.Status.Instance,
 		Running:   cl.Spec.Running,
 		NodeCount: nodes,
+
+		PublishInfra: cl.Spec.PublishInfra,
 
 		TeardownBlocked: conditionTrue(cl.Status.Conditions, v1alpha1.ConditionTeardownBlocked),
 	}
