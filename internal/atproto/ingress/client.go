@@ -368,7 +368,7 @@ func (s *Subscriber) handleRequest(msg frame) {
 			"$type":       frameType("response"),
 			"requestId":   req.RequestID,
 			"status":      result.Status,
-			"body":        json.RawMessage(result.Body),
+			"body":        responseBody(result.Body),
 			"contentType": result.ContentType,
 		}
 		if len(result.Headers) > 0 {
@@ -376,6 +376,13 @@ func (s *Subscriber) handleRequest(msg frame) {
 		}
 		_ = s.send(out)
 	})
+}
+
+func responseBody(body []byte) any {
+	if len(body) > 0 && json.Valid(body) {
+		return json.RawMessage(body)
+	}
+	return string(body)
 }
 
 func (s *Subscriber) handleSubscribe(msg frame) {
