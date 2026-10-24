@@ -395,16 +395,30 @@ func (r *contractRunner) requestOnce(ctx context.Context) error {
 		return r.resumeAccepted(ctx, state)
 	}
 
-	bidders, err := q.market.Discover(ctx, q.now())
+	spec := r.snapshot().Spec
+	only := BidderDIDList(spec.BidderDids)
+	discovery, err := q.market.Discover(ctx, q.now(), only)
 	if err != nil {
 		r.log().Warn("requester_bidder_discovery_failed", "err", err)
 	}
-	bidders = withoutDeniedBidders(bidders, r.snapshot().Spec.DenyBidderDids)
+	discovery = discovery.Without(spec.DenyBidderDids)
+	bidders := discovery.Bidders
+	noBidders := ""
+	if len(bidders) == 0 {
+		noBidders = "requester_no_bidders: " + discovery.Why()
+		r.log().Warn("requester_no_bidders", "restricted", discovery.Restricted, "candidates", discovery.Candidates, "dropped", discovery.DroppedText())
+		if discovery.Restricted {
+			state.Outcome = v1alpha1.ContractOutcomeNoBids
+			state.Error = noBidders
+			return errors.New(state.Error)
+		}
+		r.writeStatus(ctx, v1alpha1.ComputeContractRequesting, "the RFP is submitted; "+noBidders+"; waiting for bids", state, nil, nil, "collectingBids", 1)
+	}
 	q.rememberBidders(bidders)
 	responseBids := r.solicitBids(ctx, bidders, rfpURI, rfpCID)
 
 	usePolicy := policyRef != nil
-	winner, allBids, err := r.collectBids(ctx, rfpURI, responseBids, usePolicy, policyWorkflow)
+	winner, allBids, err := r.collectBids(ctx, rfpURI, responseBids, usePolicy, policyWorkflow, only)
 	if err != nil {
 		return err
 	}
@@ -419,6 +433,9 @@ func (r *contractRunner) requestOnce(ctx context.Context) error {
 		if len(allBids) == 0 {
 			state.Outcome = v1alpha1.ContractOutcomeNoBids
 			state.Error = fmt.Sprintf("no bids received within %s", q.cfg.BidWindow)
+			if noBidders != "" {
+				state.Error += "; " + noBidders
+			}
 			return errors.New(state.Error)
 		}
 		state.Outcome = v1alpha1.ContractOutcomeBidsDenied
@@ -777,7 +794,7 @@ func (r *contractRunner) verifyRecordedReceipt(ctx context.Context, state *v1alp
 	return verification.OK, nil
 }
 
-func (r *contractRunner) collectBids(ctx context.Context, rfpURI string, response []BidRecord, usePolicy bool, workflow string) (*BidRecord, []v1alpha1.ContractBid, error) {
+func (r *contractRunner) collectBids(ctx context.Context, rfpURI string, response []BidRecord, usePolicy bool, workflow string, only []string) (*BidRecord, []v1alpha1.ContractBid, error) {
 	q := r.q
 	window := time.NewTimer(max(q.cfg.BidWindow, 0))
 	defer window.Stop()
@@ -786,6 +803,10 @@ func (r *contractRunner) collectBids(ctx context.Context, rfpURI string, respons
 	add := func(bids []BidRecord) {
 		for _, bid := range bids {
 			if bid.URI == "" || slices.Contains(deny, bid.DID) {
+				continue
+			}
+			if len(only) > 0 && !slices.Contains(only, bid.DID) {
+				r.log().Info("requester_bid_outside_contract_bidders", "bidder", bid.DID, "bid", bid.URI)
 				continue
 			}
 			byURI[bid.URI] = bid

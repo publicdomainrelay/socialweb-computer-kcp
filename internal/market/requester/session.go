@@ -598,13 +598,21 @@ func (q *Requester) provisionSession(ctx context.Context, vmName, policyName str
 			return nil, err
 		}
 	}
-	bidders, err := q.market.Discover(ctx, q.now())
+	discovery, err := q.market.Discover(ctx, q.now(), nil)
 	if err != nil {
 		q.log.Warn("requester_session_discovery_failed", "err", err)
 	}
-	q.rememberBidders(bidders)
-	winner, winnerBidder, err := q.sessionWinner(ctx, rfp, bidders, usePolicy, PolicyWorkflowName(policyName))
+	noBidders := ""
+	if len(discovery.Bidders) == 0 {
+		noBidders = "requester_no_bidders: " + discovery.Why()
+		q.log.Warn("requester_no_bidders", "session", vmName, "candidates", discovery.Candidates, "dropped", discovery.DroppedText())
+	}
+	q.rememberBidders(discovery.Bidders)
+	winner, winnerBidder, err := q.sessionWinner(ctx, rfp, discovery.Bidders, usePolicy, PolicyWorkflowName(policyName))
 	if err != nil {
+		if noBidders != "" {
+			return nil, fmt.Errorf("%w; %s", err, noBidders)
+		}
 		return nil, err
 	}
 	acceptRKey := sessionRKey("accept", q.repoDID, vmName, rfp.URI, rfp.CID, winner.URI, winner.CID)

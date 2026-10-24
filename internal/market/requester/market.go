@@ -96,12 +96,106 @@ type MarketEvent struct {
 	Payload market.ResolvedRecord
 }
 
+const (
+	dropDenied         = "denied by the requester"
+	dropContractDenied = "denied by the contract"
+	dropNoHeartbeat    = "no fresh heartbeat"
+	dropNoOffering     = "no compute.vm offering"
+	dropNoEndpoint     = "the offering names no endpoint"
+	dropOfferingsRead  = "offerings read failed: "
+	dropEndpoint       = "offering endpoint refused: "
+
+	maxDropsInMessage = 5
+)
+
+type BidderDrop struct {
+	DID string
+
+	Reason string
+}
+
+type Discovery struct {
+	Restricted bool
+
+	Candidates []string
+
+	Bidders []Bidder
+
+	Dropped []BidderDrop
+}
+
+func (d Discovery) clone() Discovery {
+	d.Candidates = slices.Clone(d.Candidates)
+	d.Bidders = slices.Clone(d.Bidders)
+	d.Dropped = slices.Clone(d.Dropped)
+	return d
+}
+
+func (d Discovery) Without(deny []string) Discovery {
+	if len(deny) == 0 {
+		return d
+	}
+	out := d.clone()
+	out.Bidders = out.Bidders[:0]
+	denied := map[string]bool{}
+	for _, bidder := range d.Bidders {
+		if !slices.Contains(deny, bidder.DID) {
+			out.Bidders = append(out.Bidders, bidder)
+			continue
+		}
+		if !denied[bidder.DID] {
+			denied[bidder.DID] = true
+			out.Dropped = append(out.Dropped, BidderDrop{DID: bidder.DID, Reason: dropContractDenied})
+		}
+	}
+	return out
+}
+
+func (d Discovery) DroppedText() []string {
+	out := make([]string, 0, len(d.Dropped))
+	for _, drop := range d.Dropped {
+		out = append(out, drop.DID+": "+drop.Reason)
+	}
+	return out
+}
+
+func (d Discovery) Why() string {
+	if len(d.Dropped) == 0 {
+		if d.Restricted {
+			return "the contract's bidderDids name no bidder"
+		}
+		return "no candidate bidder DIDs: the requester has no bidderDids and no relay found an offering"
+	}
+	parts := d.DroppedText()
+	more := ""
+	if len(parts) > maxDropsInMessage {
+		more = fmt.Sprintf(" and %d more", len(parts)-maxDropsInMessage)
+		parts = parts[:maxDropsInMessage]
+	}
+	return "no bidder with a market endpoint among " + strconv.Itoa(len(d.Dropped)) + " candidates: " + strings.Join(parts, "; ") + more
+}
+
+func BidderDIDList(dids []string) []string {
+	out := make([]string, 0, len(dids))
+	for _, did := range dids {
+		if did = strings.TrimSpace(did); did != "" {
+			out = append(out, did)
+		}
+	}
+	slices.Sort(out)
+	return slices.Compact(out)
+}
+
+type discoveryKey struct {
+	only string
+}
+
 type ServiceAuthSource interface {
 	ServiceAuth(ctx context.Context, audience, lxm string) (string, error)
 }
 
 type MarketClient interface {
-	Discover(ctx context.Context, now time.Time) ([]Bidder, error)
+	Discover(ctx context.Context, now time.Time, only []string) (Discovery, error)
 
 	SubmitRFP(ctx context.Context, bidder Bidder, rfp SubmitRFPRequest) ([]BidRecord, error)
 
@@ -141,7 +235,7 @@ type HTTPMarket struct {
 
 	discoveryOnce sync.Once
 
-	discovered *ttlcache.Cache[struct{}, []Bidder]
+	discovered *ttlcache.Cache[discoveryKey, Discovery]
 }
 
 var _ MarketClient = (*HTTPMarket)(nil)
@@ -160,80 +254,126 @@ func (m *HTTPMarket) log() *slog.Logger {
 	return slog.New(slog.DiscardHandler)
 }
 
-func (m *HTTPMarket) Discover(ctx context.Context, now time.Time) ([]Bidder, error) {
+func (m *HTTPMarket) Discover(ctx context.Context, now time.Time, only []string) (Discovery, error) {
 	if m == nil || m.Reader == nil {
-		return nil, errors.New("requester: the market has no record reader")
+		return Discovery{}, errors.New("requester: the market has no record reader")
 	}
+	only = BidderDIDList(only)
 	m.discoveryOnce.Do(func() {
-		m.discovered = ttlcache.New[struct{}, []Bidder](ttlcache.Options{TTL: 20 * time.Second})
+		m.discovered = ttlcache.New[discoveryKey, Discovery](ttlcache.Options{TTL: 20 * time.Second, MaxEntries: 256})
 	})
-	bidders, err := m.discovered.GetOrLoad(ctx, struct{}{}, func(ctx context.Context) ([]Bidder, time.Duration, error) {
-		bidders := m.discover(ctx, now)
-		if len(bidders) == 0 {
-			return bidders, -1, nil
+	found, err := m.discovered.GetOrLoad(ctx, discoveryKey{only: strings.Join(only, ",")}, func(ctx context.Context) (Discovery, time.Duration, error) {
+		found := m.discover(ctx, now, only)
+		if len(found.Bidders) == 0 {
+			return found, -1, nil
 		}
-		return bidders, 0, nil
+		return found, 0, nil
 	})
 	if err != nil {
-		return nil, err
+		return Discovery{}, err
 	}
-	return append(make([]Bidder, 0, len(bidders)), bidders...), nil
+	return found.clone(), nil
 }
 
-func (m *HTTPMarket) discover(ctx context.Context, now time.Time) []Bidder {
+func (m *HTTPMarket) discover(ctx context.Context, now time.Time, only []string) Discovery {
+	found := Discovery{Restricted: len(only) > 0}
 	seen := map[string]bool{}
-	candidates := []string{}
-	add := func(did string) {
+	explicit := map[string]bool{}
+	add := func(did string, named bool) {
 		did = strings.TrimSpace(did)
-		if did == "" || seen[did] || slices.Contains(m.DenyBidderDIDs, did) {
+		if did == "" || seen[did] {
 			return
 		}
 		seen[did] = true
-		candidates = append(candidates, did)
+		if slices.Contains(m.DenyBidderDIDs, did) {
+			found.Dropped = append(found.Dropped, BidderDrop{DID: did, Reason: dropDenied})
+			return
+		}
+		explicit[did] = named
+		found.Candidates = append(found.Candidates, did)
 	}
-	explicit := map[string]bool{}
-	for _, did := range m.BidderDIDs {
-		add(did)
-		explicit[strings.TrimSpace(did)] = true
-	}
-	if len(m.RelayURLs) > 0 {
-		for _, did := range market.DiscoverBiddersFromRelays(ctx, m.RelayURLs, market.OfferingNSID, bidderDiscoveryTimeout, m.client(), market.NoopLog) {
-			add(did)
+	source := "contract"
+	if found.Restricted {
+		for _, did := range only {
+			add(did, true)
+		}
+	} else {
+		source = "requester"
+		for _, did := range m.BidderDIDs {
+			add(did, true)
+		}
+		if len(m.RelayURLs) > 0 {
+			for _, did := range market.DiscoverBiddersFromRelays(ctx, m.RelayURLs, market.OfferingNSID, bidderDiscoveryTimeout, m.client(), market.NoopLog) {
+				add(did, false)
+			}
 		}
 	}
-	heartbeat := market.NewHeartbeatCache(m.Reader)
-	fresh := heartbeat.FreshDIDs(ctx, candidates, now)
-	for _, did := range candidates {
-		if explicit[did] && !slices.Contains(fresh, did) {
-			fresh = append(fresh, did)
+	unnamed := []string{}
+	for _, did := range found.Candidates {
+		if !explicit[did] {
+			unnamed = append(unnamed, did)
 		}
 	}
-	bidders := make([]Bidder, 0, len(fresh))
+	fresh := []string{}
+	if len(unnamed) > 0 {
+		fresh = market.NewHeartbeatCache(m.Reader).FreshDIDs(ctx, unnamed, now)
+	}
 	seenEndpoint := map[string]bool{}
-	for _, did := range fresh {
-		offerings, err := market.ListOfferings(ctx, m.Reader, did)
-		if err != nil {
-			m.log().Warn("requester_offerings_failed", "did", did, "err", err)
+	for _, did := range found.Candidates {
+		if !explicit[did] && !slices.Contains(fresh, did) {
+			found.Dropped = append(found.Dropped, BidderDrop{DID: did, Reason: dropNoHeartbeat})
 			continue
 		}
-		for _, offering := range offerings {
-			if !market.OfferingApplies(offering, market.ComputeVMNSID) {
-				continue
-			}
-			endpoint, audience, err := resolveBidderEndpoint(ctx, m.Directory, offering.EndpointURL)
-			if err != nil {
-				m.log().Warn("requester_bidder_endpoint_refused", "did", did, "endpoint", offering.EndpointURL, "err", err)
-				continue
-			}
-			key := did + "::" + endpoint
+		bidders, reason := m.offeredBidders(ctx, did)
+		added := 0
+		for _, bidder := range bidders {
+			key := did + "::" + bidder.Endpoint
 			if seenEndpoint[key] {
 				continue
 			}
 			seenEndpoint[key] = true
-			bidders = append(bidders, Bidder{DID: did, Endpoint: endpoint, Audience: audience})
+			found.Bidders = append(found.Bidders, bidder)
+			added++
+		}
+		if added == 0 {
+			found.Dropped = append(found.Dropped, BidderDrop{DID: did, Reason: reason})
 		}
 	}
-	return bidders
+	bidderDIDs := make([]string, 0, len(found.Bidders))
+	for _, bidder := range found.Bidders {
+		bidderDIDs = append(bidderDIDs, bidder.DID)
+	}
+	m.log().Info("requester_bidder_discovery", "source", source, "candidates", len(found.Candidates), "bidders", bidderDIDs, "dropped", len(found.Dropped))
+	return found
+}
+
+func (m *HTTPMarket) offeredBidders(ctx context.Context, did string) ([]Bidder, string) {
+	offerings, err := market.ListOfferings(ctx, m.Reader, did)
+	if err != nil {
+		m.log().Warn("requester_offerings_failed", "did", did, "err", err)
+		return nil, dropOfferingsRead + err.Error()
+	}
+	reason := dropNoOffering
+	var out []Bidder
+	for _, offering := range offerings {
+		if !market.OfferingApplies(offering, market.ComputeVMNSID) {
+			continue
+		}
+		endpoint, audience, err := resolveBidderEndpoint(ctx, m.Directory, offering.EndpointURL)
+		if err != nil {
+			m.log().Warn("requester_bidder_endpoint_refused", "did", did, "endpoint", offering.EndpointURL, "err", err)
+			reason = dropEndpoint + err.Error()
+			continue
+		}
+		if endpoint == "" {
+			if reason == dropNoOffering {
+				reason = dropNoEndpoint
+			}
+			continue
+		}
+		out = append(out, Bidder{DID: did, Endpoint: endpoint, Audience: audience})
+	}
+	return out, reason
 }
 
 func resolveBidderEndpoint(ctx context.Context, dir identity.Directory, raw string) (string, string, error) {
@@ -565,20 +705,6 @@ func numberValue(value any) float64 {
 		}
 	}
 	return 0
-}
-
-func withoutDeniedBidders(bidders []Bidder, deny []string) []Bidder {
-	if len(deny) == 0 {
-		return bidders
-	}
-	out := bidders[:0]
-	for _, bidder := range bidders {
-		if slices.Contains(deny, bidder.DID) {
-			continue
-		}
-		out = append(out, bidder)
-	}
-	return out
 }
 
 func payloadRef(value map[string]any) market.RecordRef {

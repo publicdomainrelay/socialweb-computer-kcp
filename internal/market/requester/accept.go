@@ -262,8 +262,8 @@ func (q *Requester) bidderForDID(ctx context.Context, did string) (Bidder, bool)
 	if bidder, ok := q.bidderFor(did); ok && bidder.Endpoint != "" {
 		return bidder, true
 	}
-	if discovered, err := q.market.Discover(ctx, q.now()); err == nil {
-		q.rememberBidders(discovered)
+	if discovered, err := q.market.Discover(ctx, q.now(), []string{did}); err == nil {
+		q.rememberBidders(discovered.Bidders)
 		if bidder, ok := q.bidderFor(did); ok && bidder.Endpoint != "" {
 			return bidder, true
 		}
