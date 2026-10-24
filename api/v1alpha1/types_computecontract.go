@@ -48,6 +48,8 @@ type ComputeContractSpec struct {
 
 	NodeJoin *ComputeContractNodeJoin `json:"nodeJoin,omitempty"`
 
+	Tunnels []ComputeContractTunnel `json:"tunnels,omitempty" apigen:"listType=map,listMapKey=tag"`
+
 	TTLSecondsAfterFinished *int32 `json:"ttlSecondsAfterFinished,omitempty" apigen:"default=691200,minimum=0"`
 }
 
@@ -107,6 +109,20 @@ type ComputeContractNodeJoin struct {
 	Meshd *ComputeContractMeshd `json:"meshd,omitempty"`
 
 	NodeAgent *ComputeContractNodeAgent `json:"nodeAgent,omitempty"`
+}
+
+type ComputeContractTunnel struct {
+	Tag string `json:"tag" apigen:"pattern=^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$"`
+
+	Port int `json:"port" apigen:"minimum=1,maximum=65535"`
+
+	Server string `json:"server,omitempty" apigen:"userEndpoint"`
+
+	Shell *ComputeContractShell `json:"shell,omitempty"`
+}
+
+type ComputeContractShell struct {
+	EnvFile string `json:"envFile,omitempty" apigen:"userEndpoint,default=/etc/wootty/wootty.env"`
 }
 
 type ComputeContractNodeAgent struct {

@@ -108,6 +108,8 @@ type NodeClaimContract struct {
 
 	VMAddress string `json:"vmAddress,omitempty"`
 
+	Networks []ContractNetworkAddress `json:"networks,omitempty"`
+
 	Bids *int `json:"bids,omitempty"`
 
 	Release *ContractRelease `json:"release,omitempty"`
@@ -121,6 +123,16 @@ type NodeClaimContract struct {
 	Error string `json:"error,omitempty"`
 
 	Timestamps *ContractTimestamps `json:"timestamps,omitempty"`
+}
+
+type ContractNetworkAddress struct {
+	Tag string `json:"tag"`
+
+	Address string `json:"address"`
+
+	At string `json:"at,omitempty"`
+
+	Event commonv1.StrongRef `json:"event"`
 }
 
 type ContractPhase string

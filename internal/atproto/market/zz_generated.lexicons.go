@@ -526,6 +526,7 @@ type ComputeEventsVMOnNetwork struct {
 	Address    string                     `json:"address,omitempty"`
 	CreatedAt  string                     `json:"createdAt"`
 	Signatures Signatures                 `json:"signatures,omitempty"`
+	Tag        string                     `json:"tag,omitempty"`
 	Extra      map[string]json.RawMessage `json:"-"`
 	absent     map[string]json.RawMessage
 }

@@ -157,12 +157,30 @@ type ComputeVMGuestReport struct {
 	ReportedAt string `json:"reportedAt,omitempty"`
 
 	HostKeys []ComputeVMHostKey `json:"hostKeys,omitempty"`
+
+	Networks []ComputeVMGuestNetwork `json:"networks,omitempty"`
+}
+
+type ComputeVMGuestNetwork struct {
+	Tag string `json:"tag"`
+
+	Address string `json:"address"`
+
+	ReportedAt string `json:"reportedAt,omitempty"`
 }
 
 type ComputeVMPublished struct {
 	OnNetworkURI string `json:"onNetworkUri,omitempty"`
 
 	HostKeysURI string `json:"hostKeysUri,omitempty"`
+
+	Networks []ComputeVMPublishedNetwork `json:"networks,omitempty"`
+}
+
+type ComputeVMPublishedNetwork struct {
+	Tag string `json:"tag"`
+
+	URI string `json:"uri"`
 }
 
 type ComputeVMTermination struct {

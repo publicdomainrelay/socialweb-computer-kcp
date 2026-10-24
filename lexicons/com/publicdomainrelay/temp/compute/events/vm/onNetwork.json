@@ -1,7 +1,7 @@
 {
   "lexicon": 1,
   "id": "com.publicdomainrelay.temp.compute.events.vm.onNetwork",
-  "description": "The bidder reports the VM's network address; sent as the payload of a market.event.",
+  "description": "The bidder reports a network address of the VM; sent as the payload of a market.event.",
   "defs": {
     "main": {
       "type": "record",
@@ -10,7 +10,8 @@
         "type": "object",
         "required": ["createdAt"],
         "properties": {
-          "address": { "type": "string", "description": "The VM's address on the tenant network." },
+          "address": { "type": "string", "description": "The VM's address on the tenant network: the iroh ticket when tag is absent, else the URL of the tagged tunnel." },
+          "tag": { "type": "string", "maxLength": 32, "description": "Names one of the VM's tunnels (spec.tunnels of the contract); absent, address is the VM's iroh ticket." },
           "createdAt": { "type": "string", "format": "datetime" },
           "signatures": { "type": "ref", "ref": "network.attested.signature#signatures" }
         }
