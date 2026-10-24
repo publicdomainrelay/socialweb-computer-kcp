@@ -234,19 +234,15 @@ func (r *requestRun) passthrough(args []string, network bool) error {
 func parseTunnels(value string) ([]v1alpha1.ComputeContractTunnel, error) {
 	var out []v1alpha1.ComputeContractTunnel
 	for _, item := range splitList(value) {
-		parts := strings.SplitN(item, ":", 3)
-		if len(parts) < 2 {
-			return nil, fmt.Errorf("%q: want <tag>:<port>[:<envFile>]", item)
+		parts := strings.Split(item, ":")
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("%q: want <tag>:<port>", item)
 		}
 		port, err := strconv.Atoi(parts[1])
 		if err != nil {
 			return nil, fmt.Errorf("%q: port: %w", item, err)
 		}
-		t := v1alpha1.ComputeContractTunnel{Tag: parts[0], Port: port}
-		if len(parts) == 3 {
-			t.Shell = &v1alpha1.ComputeContractShell{EnvFile: parts[2]}
-		}
-		out = append(out, t)
+		out = append(out, v1alpha1.ComputeContractTunnel{Tag: parts[0], Port: port})
 	}
 	return out, nil
 }

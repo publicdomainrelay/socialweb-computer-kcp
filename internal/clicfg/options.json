@@ -574,7 +574,7 @@
     },
     "tunnel": {
       "type": "string",
-      "description": "run request: guest tunnels to open, a comma list of <tag>:<port>[:<envFile>] (spec.tunnels): opentunnel serves the guest's 127.0.0.1:<port> at an https URL that comes back in status.contract.networks; an envFile makes it a wootty browser shell whose WOOTTY_AUTH_TOKEN the --secrets bundle writes to that file"
+      "description": "run request: guest tunnels to open, a comma list of <tag>:<port> (spec.tunnels): opentunnel serves the guest's 127.0.0.1:<port> at an https URL that comes back in status.contract.networks"
     },
     "hold": {
       "type": "boolean",

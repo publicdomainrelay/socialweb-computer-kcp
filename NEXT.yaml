@@ -545,14 +545,14 @@ open:
       Decided by the user 2026-10-12, in this order. Plan 0008 M1-SSH-GATEWAY-IROH (no dependency, startable
       now): socialweb-computer-ssh lib/socialweb-computer-requester-inproc asks for the `tunnel` transport
       (mod.ts:268) and runs sessions over the websocket tunnel; it moves to iroh like request-vm-ssh. Then
-      M1-STRIP-LEGACY-TRANSPORTS: the cloud-init-common tunnel, fedproxy-ssh, fedproxy-web and wootty modules,
+      M1-STRIP-LEGACY-TRANSPORTS: the cloud-init-common tunnel, fedproxy-ssh, fedproxy-web and web-terminal modules,
       websocat ProxyCommand paths, relay-fqdn guest addresses and the guest JSR registry are deleted across
       atproto-market, hono-compute-provider and socialweb-computer-ssh (request-vm-ssh --user-data-transport
       removed as a legacy transport). The ssh gateway's Live market CI (socialweb-computer-ssh live.yml) stays
       green throughout. Its broader kcp-native move stays M4-RUN-GATEWAY-SSH.
     instrument: >
-      The scan tests find no tunnel, fedproxy-ssh, fedproxy-web or wootty module, no websocat, fedproxy-client,
-      wootty or JSR_URL in source and no transport other than iroh requested; the Live market workflow green
+      The scan tests find no tunnel, fedproxy-ssh, fedproxy-web or web-terminal module, no websocat, fedproxy-client,
+      web-terminal or JSR_URL in source and no transport other than iroh requested; the Live market workflow green
       after each of the two changes; a market network guest reached over iroh.
   - id: P8-M2
     title: OPEN - deno-kcp and kcp-libs forked into this repo (runner build-tagged) and run in-process; one service DenoPod template with explicit permissions.
@@ -796,7 +796,7 @@ execution_order:
   open_notes:
     - "Plan 0010 G4-SCHED-SINGLE-SERVER (refuse leaderElect false for more than one k3s server; GAP-7) conflicts with 0006 M3-CP-SLOTS (scheduler leaderElect true for every market cluster, user 2026-10-12). Not edited in 0010; R0-REASSESS must resolve it (see P10)."
     - "Plans 0011 and 0012 reference no renamed id (none renamed); their M0-REVISIT items must re-read the HostProcess kind and the proc backend (Windows Job Objects, darwin kqueue) when they start."
-    - "Fifth fold (2026-10-12): no id renamed, so 0011 and 0012 were not edited. Their text predates the strip: 0012 lists the tunnel, fedproxy-ssh, fedproxy-web and wootty modules and forwards the guest JSR registry per VM, and 0011 names the requester's tunnel; after 0008 M1-STRIP-LEGACY-TRANSPORTS iroh is the only guest transport and there is no guest JSR registry, which their M0-REVISIT items must take in. They also must read the application model (root objects, MarketIdentity, per-application kcp)."
+    - "Fifth fold (2026-10-12): no id renamed, so 0011 and 0012 were not edited. Their text predates the strip: 0012 lists the tunnel, fedproxy-ssh, fedproxy-web and web-terminal modules and forwards the guest JSR registry per VM, and 0011 names the requester's tunnel; after 0008 M1-STRIP-LEGACY-TRANSPORTS iroh is the only guest transport and there is no guest JSR registry, which their M0-REVISIT items must take in. They also must read the application model (root objects, MarketIdentity, per-application kcp)."
     - "The ssh gateway's Live market CI (socialweb-computer-ssh .github/workflows/live.yml) must stay green through 0008 M1-SSH-GATEWAY-IROH and M1-STRIP-LEGACY-TRANSPORTS (user 2026-10-12)."
 
 limits:

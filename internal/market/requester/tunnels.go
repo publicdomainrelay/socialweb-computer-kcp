@@ -1,12 +1,10 @@
 package requester
 
 import (
-	"errors"
 	"fmt"
 	"net/url"
 	"regexp"
 	"slices"
-	"strings"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
@@ -17,8 +15,6 @@ import (
 const (
 	opentunnelAsset = "opentunnel"
 
-	woottyDownload = "wootty"
-
 	maxNetworkAddress = 2048
 )
 
@@ -26,26 +22,12 @@ var (
 	networkTagRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$`)
 
 	guestArch = map[string]string{"linux/amd64": "x86_64", "linux/arm64": "aarch64"}
-
-	errShellWithoutSecrets = errors.New("a shell needs its token in spec.secretsRef: the secrets bundle writes the shell's envFile on the guest")
 )
 
 func tunnelsOptions(contract v1alpha1.ComputeContract) (cloudinit.TunnelsOptions, error) {
 	opts := cloudinit.TunnelsOptions{}
-	shell := false
 	for _, t := range contract.Spec.Tunnels {
-		tunnel := cloudinit.Tunnel{Tag: t.Tag, Port: t.Port, Server: t.Server}
-		if t.Shell != nil {
-			tunnel.ShellEnvFile = strings.TrimSpace(t.Shell.EnvFile)
-			if tunnel.ShellEnvFile == "" {
-				tunnel.ShellEnvFile = cloudinit.DefaultShellEnvFile
-			}
-			shell = true
-		}
-		opts.Tunnels = append(opts.Tunnels, tunnel)
-	}
-	if shell && contract.Spec.SecretsRef == nil {
-		return opts, errShellWithoutSecrets
+		opts.Tunnels = append(opts.Tunnels, cloudinit.Tunnel{Tag: t.Tag, Port: t.Port, Server: t.Server})
 	}
 	fetches, err := versions.AssetFetches(opentunnelAsset)
 	if err != nil {
@@ -59,21 +41,6 @@ func tunnelsOptions(contract v1alpha1.ComputeContract) (cloudinit.TunnelsOptions
 		}
 		opts.OpenTunnel = append(opts.OpenTunnel, cloudinit.GuestBinaryPin{Arch: arch, URL: f.URL, SHA256: f.SHA256,
 			Member: f.Members[opentunnelAsset]})
-	}
-	if shell {
-		wootty, err := versions.GuestDownloadPins(woottyDownload)
-		if err != nil {
-			return opts, err
-		}
-		for _, platform := range sortedPlatforms(wootty.Fetch) {
-			f := wootty.Fetch[platform]
-			arch, ok := guestArch[platform]
-			if !ok || f.Kind != "oci-layer" {
-				continue
-			}
-			opts.Wootty = append(opts.Wootty, cloudinit.GuestBinaryPin{Arch: arch, Registry: f.Registry,
-				Repository: f.Repository, SHA256: f.SHA256, Member: f.Member})
-		}
 	}
 	if err := opts.Validate(); err != nil {
 		return opts, err

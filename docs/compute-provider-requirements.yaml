@@ -27,7 +27,7 @@ fields:
 legacy_decision: >-
   docs/research/2026-10-11-vm-lifecycle/user-decisions.md (2026-10-12, multi-server-to-kcp section 7 cont.):
   STRIP ALL NON-IROH GUEST TRANSPORTS as legacy (cloud-init-common tunnel / fedproxy-ssh / fedproxy-web /
-  wootty modules, websocat ProxyCommand paths, relay-fqdn guest addresses); this removes the guest JSR
+  web-terminal modules, websocat ProxyCommand paths, relay-fqdn guest addresses); this removes the guest JSR
   registry. Entries with status removed-legacy are not ported; entries with status removed are also gone from
   the TypeScript (0008 M1-STRIP-LEGACY-TRANSPORTS; atproto-market b78adc1 and hono-compute-provider 54d1b8f
   carry them).
@@ -1001,7 +1001,7 @@ requirements:
       detail: Removed, not ported.
     parity_test:
       - TestParityTheSeedNamesNoJsrUrlAndNoTunnelSubscriber
-      - ts/atproto-market/test/no_legacy_guest_transport_test.ts::"the user_data registry holds no tunnel, fedproxy-ssh, fedproxy-web or wootty module"
+      - ts/atproto-market/test/no_legacy_guest_transport_test.ts::"the user_data registry holds no tunnel, fedproxy-ssh, fedproxy-web or web-terminal module"
       - ts/atproto-market/test/market_bidder_guest_onnetwork_url_test.ts::"a guest reports to the relay's own /v1/on-network"
     status: removed
 
@@ -1028,10 +1028,10 @@ requirements:
       - ts/atproto-market/test/cloud_init_snapshot_test.ts::"the registry holds only iroh, secrets and k3s"
     status: removed
 
-  - id: FC-LEGACY-WOOTTY
+  - id: FC-LEGACY-WEB-TERMINAL
     source:
       - ts/atproto-market/lib/common/cloud-init-common/mod.ts@d5b75305c3ba:649-844
-    behaviour: The wootty terminal module (web terminal reached through fedproxy).
+    behaviour: The browser web-terminal module (a web terminal reached through fedproxy).
     go_side:
       meets: not-applicable
       detail: Removed, not ported.

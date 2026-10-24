@@ -95,10 +95,11 @@ only), `install`, the host contract, and the bootstrap layer that runs an instan
   `status.endpoints`, an Exposure's `status.address`, a HostProcess's `status.listeners`), so no peer
   scrapes stdout for a DID, a port or readiness.
 - **iroh is the default and required guest transport.** The ssh gateway moves to iroh; the tunnel,
-  fedproxy-ssh, fedproxy-web and old wootty modules, websocat ProxyCommand paths, the relay-FQDN guest
-  addresses and the guest package registry are removed. The one other transport is opt-in per
-  contract: `spec.tunnels` asks the requester's user_data for the opentunnel + wootty module (a
-  browser shell), whose URL comes back as a tagged `vm.onNetwork` (plan 0032, invariant 36).
+  fedproxy-ssh, fedproxy-web and old browser-terminal modules, websocat ProxyCommand paths, the
+  relay-FQDN guest addresses and the guest package registry are removed. The one other transport is
+  opt-in per contract: `spec.tunnels` asks the requester's user_data for the opentunnel module (an
+  https URL to a guest port), whose URL comes back as a tagged `vm.onNetwork` (plan 0032, invariant
+  36).
 - **Components:** the bidder's guest-facing endpoints (an allow-list proxy to the bidder's OpenBao for the guest's bind, login and identity token, and `/v1/on-network`)
   are the GuestControlPlane component of the bidder; the NodeClaim fulfiller is the NodeClaim
   controller (`internal/controllers/nodeclaim`) bound by the gateway's GatewayAPI component.
@@ -879,7 +880,7 @@ subsection above. The TypeScript provider that came before plan 0026 is gone.
   fetched; a bidder needs no root, chroot, apt or Go toolchain.
 - **iroh is the default and required guest transport (user; relaxed 2026-10-24).** The bidder installs
   no guest package registry, websocat path, tunnel or fedproxy module. The requester may ask, per
-  contract, for the opt-in opentunnel + wootty module (`spec.tunnels`, plan 0032); its user_data
+  contract, for the opt-in opentunnel module (`spec.tunnels`, plan 0032); its user_data
   installs it, and iroh stays on every guest. Guest SSH host
   keys are guest-reported in `vm.hostKeys` and verified with `StrictHostKeyChecking=yes`.
 - **vm.terminated (user).** The bidder reports why and when a guest ended in a signed
@@ -3962,12 +3963,12 @@ A change must not break any of these. Each exists because something failed.
 36. **iroh is the default and required guest transport; a tunnel is an opt-in per contract.** Every
     guest gets the iroh module, the requester's ssh dials the iroh ticket in `status.contract.vmAddress`,
     and a contract is Held on the iroh address and the host keys alone. The one other transport is
-    the opentunnel + wootty module of `internal/atproto/cloudinit/tunnels.go`, installed by the
-    requester's user_data only for the entries of `spec.tunnels`, from pinned downloads checked by
-    sha256. Its URL comes back as a `vm.onNetwork` with a `tag`, signed by the bidder, into
-    `status.contract.networks`. The wootty token is the only auth to the shell: it is only in the
-    secrets bundle (the requester's OpenBao, a 0600 guest file), never in user_data, a kcp object, a
-    record or a log, and wootty does not start without it (plan 0032).
+    the opentunnel module of `internal/atproto/cloudinit/tunnels.go`, installed by the requester's
+    user_data only for the entries of `spec.tunnels`, from a pinned download checked by sha256. It
+    serves the guest's `127.0.0.1:<port>` at an https URL, which comes back as a `vm.onNetwork`
+    with a `tag`, signed by the bidder, into `status.contract.networks` (plan 0032). The browser
+    shell that plan 0032 put behind it was removed in plan 0034 W0; the guest shell
+    moves to WebRTC (plan 0034).
 
 ## 14. Open architectural gaps
 
@@ -10681,30 +10682,34 @@ to `exec.LookPath("deno")`. The integration hosts hat-7 and hat-9 were prepared 
 
 ### A browser shell on a guest is an opt-in tunnel (2026-10-24, plan 0032)
 
-- **Before.** iroh was the only guest transport; the old wootty module was removed and a string
-  module id "wootty" fails with LegacyTransportError. A requester could reach its guest only over
+- **Before.** iroh was the only guest transport; the old browser-terminal module was removed and
+  its string module id failed with LegacyTransportError. A requester could reach its guest only over
   ssh through the iroh ticket in `status.contract.vmAddress`; vm.onNetwork carried one address.
 - **The decision (user, 2026-10-24).** iroh stays the default and required transport. A
   ComputeContract may list `spec.tunnels` (`{tag, port, server, shell: {envFile}}`); the requester's
   user_data then installs the module of `internal/atproto/cloudinit/tunnels.go`: opentunnel from the
-  `assets.opentunnel` fetch pin, wootty with its web UI from the pinned image layer of
-  `guestDownloads.wootty` in `internal/versions/versions.json`, both checked by sha256 on the guest.
+  `assets.opentunnel` fetch pin, and a browser-shell binary with its web UI from a pinned image
+  layer in `guestDownloads` of `internal/versions/versions.json`, both checked by sha256 on the
+  guest.
   One opentunnel profile per tag gives `https://<16 hex route>.<12 char id>.opentunnel.xyz`. The
   guest reports it through the bidder (`send-onnetwork.sh <tag> <url>`, `POST /v1/on-network` with
   `tag`, ComputeVM `status.market.guest.networks`), the bidder signs one vm.onNetwork with `tag` per
   tunnel, and the requester records `status.contract.networks[] {tag, address, at, event}` without
-  touching vmAddress or the Held transition. The wootty token comes only in the secrets bundle
-  (`/etc/wootty/wootty.env`, `WOOTTY_AUTH_TOKEN=<32 base64url>`, root:root 0600); `wootty-run.sh`
-  refuses to start without at least 32 characters, because wootty asks for no auth on a loopback
-  bind without a token. A bidder older than this records no tagged address.
+  touching vmAddress or the Held transition. The shell token came only in the secrets bundle (a
+  root:root 0600 env file, 32 base64url characters); the shell's run script refused to start with
+  fewer, because the shell asks for no auth on a loopback bind without a token. A bidder older than
+  this records no tagged address.
 - **After (live, market network sh32, --bidders 1).** Held at 07:41:58Z on the iroh address with the
   secrets fetched at 07:41:57Z; the opentunnel certificate came at 07:43:59Z and the tagged
   vm.onNetwork (bidder repo, signed market.event bound to the receipt) and
   `status.contract.networks` followed the same second; over HTTPS `/api/sessions` answered 401
   without the cookie, the bootstrap 401 with a wrong bearer and 204 with the token, `/api/sessions`
-  200 with the cookie, `/` 200 with the WooTTY page; the token was in no log, kcp object or
+  200 with the cookie, `/` 200 with the shell page; the token was in no log, kcp object or
   cidata. A shell without spec.secretsRef was Failed before the RFP; a contract without tunnels was
   unchanged; release removed the guest and the URL stopped answering.
+- **Removed (plan 0034 W0, 2026-10-24).** The browser shell, `spec.tunnels[].shell`,
+  its pin, units and scripts are gone; the guest shell moves to the guest's sshd over a WebRTC
+  datachannel (plan 0034). opentunnel https tunnels stay as they were.
 
 ### The tunnel's bring-up time is the opentunnel certificate (2026-10-24)
 
@@ -10712,13 +10717,13 @@ to `exec.LookPath("deno")`. The integration hosts hat-7 and hat-9 were prepared 
   stage 3.6 to 5.8, final stage 8.5 to 11.9, of which runcmd 2.8); the package guard installs nothing
   (jq, curl and ca-certificates are in the image from `deploy/bidder/preinstall-market.json`); the
   iroh vm.onNetwork goes out at 12.1. One setup-guest-tunnels.service started at 11.8, after every
-  other module's `systemctl enable`, and fetched opentunnel (0.4) then wootty (0.8); the tunnel unit
+  other module's `systemctl enable`, and fetched opentunnel (0.4) then the shell binary (0.8); the tunnel unit
   waited for both and started at 13.0, and opentunnel asked for its certificate at 13.75. The
   certificate came at 177.3 (163.5 s); the tagged vm.onNetwork went out at 177.5. Requester:
   iroh network 10:00:12.8Z, tagged network 10:02:58Z, 165 s apart.
-- **The decision.** One setup unit per binary (`setup-guest-opentunnel.service`,
-  `setup-guest-wootty.service`, stamp `/var/lib/setup-guest-<name>.done`), started in parallel; the
-  tunnel unit requires only the opentunnel one, the shell unit only the wootty one; the tunnels
+- **The decision.** One setup unit per binary (`setup-guest-opentunnel.service` and one for the
+  shell binary, stamp `/var/lib/setup-guest-<name>.done`), started in parallel; the tunnel unit
+  requires only the opentunnel one, the shell unit only its own; the tunnels
   module starts its setup and tunnel units from the front of runcmd (`RuncmdPrepend`) and enables
   them after; a failed fetch retries after 1, 2, 3 and 4 s instead of 5 s each. Starting them from
   `bootcmd` through a `systemd-run` path unit hung boot twice: cloud-init.service is

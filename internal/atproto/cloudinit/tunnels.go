@@ -17,10 +17,6 @@ const (
 
 	DefaultTunnelServer = "https://opentunnel.xyz"
 
-	DefaultShellEnvFile = "/etc/wootty/wootty.env"
-
-	ShellTokenMinLength = 32
-
 	GuestTunnelsSetupPath = "/usr/local/bin/setup-guest-tunnels.sh"
 
 	GuestTunnelScriptPath = "/usr/local/bin/guest-tunnel.sh"
@@ -31,19 +27,13 @@ const (
 
 	GuestTunnelStateDir = "/var/lib/guest-tunnels"
 
-	WoottyRunPath = "/usr/local/bin/wootty-run.sh"
-
 	OpenTunnelBinary = "/usr/local/bin/opentunnel"
-
-	WoottyBinary = "/usr/local/bin/wootty"
 )
 
 var (
 	tunnelTagRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$`)
 
 	tunnelServerRE = regexp.MustCompile(`^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?$`)
-
-	tunnelPathRE = regexp.MustCompile(`^/[A-Za-z0-9._/-]+$`)
 
 	pinURLRE = regexp.MustCompile(`^https://[A-Za-z0-9._~:/?=&%+-]+$`)
 
@@ -58,18 +48,12 @@ type Tunnel struct {
 	Port int
 
 	Server string
-
-	ShellEnvFile string
 }
 
 type GuestBinaryPin struct {
 	Arch string
 
 	URL string
-
-	Registry string
-
-	Repository string
 
 	SHA256 string
 
@@ -80,8 +64,6 @@ type TunnelsOptions struct {
 	Tunnels []Tunnel
 
 	OpenTunnel []GuestBinaryPin
-
-	Wootty []GuestBinaryPin
 }
 
 func TunnelURLPath(tag string) string {
@@ -104,21 +86,8 @@ func TunnelReportUnit(tag string) string {
 	return "guest-tunnel-report-" + tag + ".service"
 }
 
-func ShellUnit(tag string) string {
-	return "wootty-" + tag + ".service"
-}
-
 func (t Tunnel) server() string {
 	return strings.TrimRight(cmp.Or(strings.TrimSpace(t.Server), DefaultTunnelServer), "/")
-}
-
-func (opts TunnelsOptions) shells() bool {
-	for _, t := range opts.Tunnels {
-		if t.ShellEnvFile != "" {
-			return true
-		}
-	}
-	return false
 }
 
 func (opts TunnelsOptions) Validate() error {
@@ -126,7 +95,6 @@ func (opts TunnelsOptions) Validate() error {
 		return errors.New("cloudinit tunnels: no tunnel is asked for")
 	}
 	tags := map[string]bool{}
-	shellPorts := map[int]string{}
 	for _, t := range opts.Tunnels {
 		if !tunnelTagRE.MatchString(t.Tag) {
 			return fmt.Errorf("cloudinit tunnels: tag %q is not a DNS label of at most 32 characters", t.Tag)
@@ -141,29 +109,11 @@ func (opts TunnelsOptions) Validate() error {
 		if !tunnelServerRE.MatchString(t.server()) {
 			return fmt.Errorf("cloudinit tunnels: tunnel %s server %q is not an http(s) origin", t.Tag, t.Server)
 		}
-		if t.ShellEnvFile == "" {
-			continue
-		}
-		if !tunnelPathRE.MatchString(t.ShellEnvFile) || strings.Contains(t.ShellEnvFile, "..") {
-			return fmt.Errorf("cloudinit tunnels: tunnel %s envFile %q is not an absolute path", t.Tag, t.ShellEnvFile)
-		}
-		if other, ok := shellPorts[t.Port]; ok {
-			return fmt.Errorf("cloudinit tunnels: shells %s and %s both ask for port %d", other, t.Tag, t.Port)
-		}
-		shellPorts[t.Port] = t.Tag
 	}
-	if err := checkPins("opentunnel", opts.OpenTunnel, false); err != nil {
-		return err
-	}
-	if opts.shells() {
-		if err := checkPins("wootty", opts.Wootty, true); err != nil {
-			return err
-		}
-	}
-	return nil
+	return checkPins("opentunnel", opts.OpenTunnel)
 }
 
-func checkPins(name string, pins []GuestBinaryPin, layer bool) error {
+func checkPins(name string, pins []GuestBinaryPin) error {
 	if len(pins) == 0 {
 		return fmt.Errorf("cloudinit tunnels: no %s pin", name)
 	}
@@ -175,9 +125,7 @@ func checkPins(name string, pins []GuestBinaryPin, layer bool) error {
 			return fmt.Errorf("cloudinit tunnels: %s pin for %s has no sha256", name, p.Arch)
 		case !pinNameRE.MatchString(p.Member) || strings.Contains(p.Member, ".."):
 			return fmt.Errorf("cloudinit tunnels: %s pin for %s member %q is not a path", name, p.Arch, p.Member)
-		case layer && (!pinNameRE.MatchString(p.Registry) || !pinNameRE.MatchString(p.Repository)):
-			return fmt.Errorf("cloudinit tunnels: %s pin for %s names no registry repository", name, p.Arch)
-		case !layer && !pinURLRE.MatchString(p.URL):
+		case !pinURLRE.MatchString(p.URL):
 			return fmt.Errorf("cloudinit tunnels: %s pin for %s url %q is not an https URL", name, p.Arch, p.URL)
 		}
 	}
@@ -202,9 +150,6 @@ func tunnelsPatch(opts TunnelsOptions) (UserDataPatch, error) {
 		return UserDataPatch{}, err
 	}
 	binaries := []string{"opentunnel"}
-	if opts.shells() {
-		binaries = append(binaries, "wootty")
-	}
 	files := []WriteFileEntry{
 		{Path: GuestTunnelsSetupPath, Owner: "root:root", Permissions: "0700", Content: tunnelsSetupScript(opts)},
 	}
@@ -235,11 +180,7 @@ func tunnelsPatch(opts TunnelsOptions) (UserDataPatch, error) {
 		early = append(early, GuestBinarySetupUnit(name))
 	}
 	units := slices.Clone(early)
-	if opts.shells() {
-		files = append(files, WriteFileEntry{Path: WoottyRunPath, Owner: "root:root", Permissions: "0700", Content: woottyRunScript})
-	}
 	openTunnelSetup := GuestBinarySetupUnit("opentunnel")
-	woottySetup := GuestBinarySetupUnit("wootty")
 	for _, t := range opts.Tunnels {
 		port := strconv.Itoa(t.Port)
 		files = append(files,
@@ -274,29 +215,6 @@ func tunnelsPatch(opts TunnelsOptions) (UserDataPatch, error) {
 		)
 		early = append(early, TunnelUnit(t.Tag))
 		units = append(units, TunnelUnit(t.Tag))
-		if t.ShellEnvFile == "" {
-			continue
-		}
-		files = append(files, WriteFileEntry{Path: "/etc/systemd/system/" + ShellUnit(t.Tag), Owner: "root:root", Permissions: "0644", Content: unitFile(
-			[]string{
-				"Description=wootty browser shell of guest tunnel " + t.Tag + " on 127.0.0.1:" + port,
-				"After=network-online.target setup-secrets.service " + woottySetup,
-				"Wants=setup-secrets.service",
-				"Requires=" + woottySetup,
-				"StartLimitIntervalSec=0",
-			},
-			[]string{
-				"Type=simple",
-				"EnvironmentFile=" + t.ShellEnvFile,
-				"Environment=HOME=/root TERM=xterm-256color",
-				"WorkingDirectory=/root",
-				"ExecStart=" + WoottyRunPath + " " + port,
-				"Restart=always",
-				"RestartSec=5",
-				"StandardOutput=journal",
-				"StandardError=journal",
-			})})
-		units = append(units, ShellUnit(t.Tag))
 	}
 	list := strings.Join(units, " ")
 	return UserDataPatch{
@@ -329,14 +247,6 @@ func tunnelsSetupScript(opts TunnelsOptions) string {
 				fmt.Fprintf(&arches, "  %s:opentunnel) fetch opentunnel %q %q %q ;;\n", arch, p.URL, p.SHA256, p.Member)
 			}
 		}
-		if opts.shells() {
-			for _, p := range opts.Wootty {
-				if p.Arch == arch {
-					fmt.Fprintf(&arches, "  %s:wootty) fetch wootty %q %q %q %q %q ;;\n", arch,
-						"https://"+p.Registry+"/v2/"+p.Repository+"/blobs/sha256:"+p.SHA256, p.SHA256, p.Member, p.Registry, p.Repository)
-				}
-			}
-		}
 	}
 	return `#!/usr/bin/env bash
 set -euo pipefail
@@ -349,14 +259,10 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "${TMP}"' EXIT
 
 fetch() {
-  local name="$1" url="$2" sum="$3" member="$4" registry="${5:-}" repository="${6:-}"
-  local args token
+  local name="$1" url="$2" sum="$3" member="$4"
+  local args
   for attempt in 1 2 3 4 5; do
     args=(-fsSL --connect-timeout 20 --max-time 300)
-    if [ -n "${registry}" ]; then
-      token="$(curl -fsS --connect-timeout 20 --max-time 60 "https://${registry}/token?scope=repository:${repository}:pull" | jq -r '.token // empty')" || token=""
-      if [ -n "${token}" ]; then args+=(-H "Authorization: Bearer ${token}"); fi
-    fi
     rm -rf "${TMP:?}/${name}" "${TMP}/${name}.tar.gz"
     if curl "${args[@]}" -o "${TMP}/${name}.tar.gz" "${url}" \
         && printf '%s  %s\n' "${sum}" "${TMP}/${name}.tar.gz" | sha256sum -c --quiet - \
@@ -435,19 +341,4 @@ if [ ! -x "` + OnNetworkScriptPath + `" ]; then
   exit 0
 fi
 exec "` + OnNetworkScriptPath + `" "${TAG}" "${URL}"
-`
-
-var woottyRunScript = `#!/usr/bin/env bash
-set -euo pipefail
-PORT="$1"
-TOKEN="${WOOTTY_AUTH_TOKEN:-}"
-if [ "${#TOKEN}" -lt ` + strconv.Itoa(ShellTokenMinLength) + ` ]; then
-  echo "wootty: WOOTTY_AUTH_TOKEN from the secrets bundle is missing or shorter than ` + strconv.Itoa(ShellTokenMinLength) + ` characters; no shell starts without auth" >&2
-  exit 1
-fi
-unset TOKEN
-export WOOTTY_HOST=127.0.0.1
-export WOOTTY_PORT="${PORT}"
-unset WOOTTY_ALLOW_INSECURE_NO_AUTH
-exec ` + WoottyBinary + ` run /bin/bash -l
 `

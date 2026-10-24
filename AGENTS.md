@@ -85,7 +85,7 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
   The requester reaches the guest only through the relay. Never start a container or VM by hand in
   code or in a test, and never install a guest agent outside cloud-init. iroh is the default and
   required guest transport: every guest gets the iroh module, and the requester's ssh and
-  `status.contract.vmAddress` are iroh. The one other transport is the opt-in opentunnel + wootty
+  `status.contract.vmAddress` are iroh. The one other transport is the opt-in opentunnel https
   module of `internal/atproto/cloudinit` (`tunnels.go`), which the requester's user_data installs
   only when a ComputeContract asks for it in `spec.tunnels` (plan 0032); its URL comes back as a
   tagged `vm.onNetwork` into `status.contract.networks`. Never add any other transport. A live run that needs a guest brings up its own market network,

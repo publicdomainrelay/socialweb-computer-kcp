@@ -117,12 +117,6 @@ type ComputeContractTunnel struct {
 	Port int `json:"port" apigen:"minimum=1,maximum=65535"`
 
 	Server string `json:"server,omitempty" apigen:"userEndpoint"`
-
-	Shell *ComputeContractShell `json:"shell,omitempty"`
-}
-
-type ComputeContractShell struct {
-	EnvFile string `json:"envFile,omitempty" apigen:"userEndpoint,default=/etc/wootty/wootty.env"`
 }
 
 type ComputeContractNodeAgent struct {
