@@ -3,6 +3,7 @@ package guestnet
 import (
 	"fmt"
 	"net/netip"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -25,6 +26,7 @@ type Wiring struct {
 	Bridge       string `json:"bridge"`
 	GuestAddress string `json:"guestAddress"`
 	GuestMAC     string `json:"guestMAC"`
+	HostPorts    []int  `json:"hostPorts,omitempty"`
 }
 
 type VMExec struct {
@@ -34,8 +36,19 @@ type VMExec struct {
 	Console string   `json:"console"`
 }
 
-func Plan() Wiring {
-	return Wiring{Tap: Tap, Bridge: Bridge, GuestAddress: GuestAddress, GuestMAC: GuestMAC}
+func Plan(hostPorts []int) Wiring {
+	return Wiring{Tap: Tap, Bridge: Bridge, GuestAddress: GuestAddress, GuestMAC: GuestMAC, HostPorts: HostPorts(hostPorts)}
+}
+
+func HostPorts(ports []int) []int {
+	var out []int
+	for _, p := range ports {
+		if p > 0 && p <= 65535 && !slices.Contains(out, p) {
+			out = append(out, p)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 func Netmask(prefix int) string {
@@ -54,6 +67,8 @@ func PastaArgv(pasta string, child ...string) []string {
 		"-g", Gateway,
 		"--dns-forward", Gateway,
 		"--map-host-loopback", HostAddress,
+		"--no-map-gw",
+		"-t", "none", "-u", "none", "-T", "none", "-U", "none",
 		"--",
 		Shell, "-c", `exec "$0" "$@"`,
 	}
@@ -89,6 +104,11 @@ func (w Wiring) Validate() error {
 	}
 	if _, err := ParseMAC(w.GuestMAC); err != nil {
 		return err
+	}
+	for _, p := range w.HostPorts {
+		if p <= 0 || p > 65535 {
+			return fmt.Errorf("guestnet: host port %d is not a TCP port", p)
+		}
 	}
 	return nil
 }

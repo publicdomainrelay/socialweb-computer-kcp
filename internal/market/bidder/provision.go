@@ -182,7 +182,7 @@ func (b *Bidder) provision(ctx context.Context, req provisionRequest) (string, e
 		StopGraceSeconds: b.cfg.StopGraceSeconds,
 		Login:            &v1alpha1.ComputeVMGuestLogin{Mount: b.cfg.GuestLoginMount, BindSecretSha256: secretHash},
 		Accept:           commonv1.StrongRef{URI: req.acceptURI, CID: req.acceptCID},
-		HostPorts:        b.guestHostPorts(hostPort),
+		HostPorts:        b.guestHostPorts(userData, hostPort),
 		Owner:            req.owner,
 	})
 	if err != nil {
@@ -226,16 +226,6 @@ func (b *Bidder) GuestHostURL() (string, int) {
 		return "", 0
 	}
 	return "http://" + net.JoinHostPort(guestnet.HostAddress, strconv.Itoa(port)), port
-}
-
-func (b *Bidder) guestHostPorts(hostPort int) []int32 {
-	var out []int32
-	for _, port := range []int{b.cfg.GuestTLSPort, hostPort} {
-		if port > 0 && port <= 65535 && !slices.Contains(out, int32(port)) {
-			out = append(out, int32(port))
-		}
-	}
-	return out
 }
 
 func (b *Bidder) awaitVM(ctx context.Context, name string) (v1alpha1.ComputeVM, bool) {
@@ -310,4 +300,13 @@ func vmNamePrefix(requesterDID string) string {
 		text = text[:12]
 	}
 	return "fc-" + cmp.Or(text, "guest")
+}
+
+func (b *Bidder) guestHostPorts(userData string, hostPort int) []int32 {
+	ports := guestnet.HostPorts(append(append(slices.Clone(b.cfg.GuestHostPorts), hostPort), guestseed.HostPortsOf(userData, b.cfg.GuestTLSPort)...))
+	out := make([]int32, 0, len(ports))
+	for _, p := range ports {
+		out = append(out, int32(p))
+	}
+	return out
 }

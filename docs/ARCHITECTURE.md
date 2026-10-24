@@ -4191,7 +4191,14 @@ fail, rather than the code read against this document alone.
     the kernel boots `root=/dev/vda` from the rootfs ext4 and cloud-init reads a pure-Go NoCloud cidata
     drive (`internal/guestseed`). There is no `socialweb-nodeinit` in the VM path.
   - The guest network is constant: guest 172.30.0.2/30, gateway 172.30.0.1, MAC 06:00:ac:1e:00:02, host
-    address 192.0.2.1 (`internal/guestnet`, pasta maps 192.0.2.1 to the host loopback). There is no network
+    address 192.0.2.1 (`internal/guestnet`, pasta maps 192.0.2.1 to the host loopback). A guest reaches the
+    host loopback only on the TCP ports of its ComputeVM's `spec.hostPorts` (default none): socialweb-vmexec
+    loads an nf_tables bridge table `swcguest` in the guest's namespace before it wires the tap, which accepts
+    those ports to 192.0.2.1, resets every other TCP connection to it, drops all else to 192.0.2.1 and
+    127.0.0.0/8, and drops every frame from the tap to the namespace's own stack; pasta runs with
+    `--no-map-gw` and no port forwards. The bidder sets `spec.hostPorts` from its `GuestHostPorts`, and in a
+    market network adds the guest TLS port and the ports of the user_data's 192.0.2.1 and `*.localhost`
+    URLs (`guestseed.HostPortsOf`). There is no network
     index allocator. An HNS NAT network per host cannot give every guest this plan; M0-HNS-NETWORK measures
     what Windows can do with it.
   - iroh is the default and required guest transport; guests have no JSR registry or websocat, and a

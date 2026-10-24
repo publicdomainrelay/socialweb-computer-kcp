@@ -66,6 +66,8 @@ var (
 	guestLocalhostURL = regexp.MustCompile(`(?i)https://([a-z0-9.-]+\.localhost)`)
 
 	guestAnyLocalhostURL = regexp.MustCompile(`(?i)https?://([a-z0-9.-]+\.localhost)`)
+
+	guestHostURL = regexp.MustCompile(`(?i)(https?)://(?:[a-z0-9.-]+\.localhost|` + regexp.QuoteMeta(guestnet.HostAddress) + `)(?::([0-9]{1,5}))?`)
 )
 
 type GuestLoginOptions = cloudinit.GuestLoginOptions
@@ -530,6 +532,27 @@ func addGuestTLSPort(userData string, port int) string {
 	}
 	b.WriteString(userData[last:])
 	return b.String()
+}
+
+func HostPortsOf(userData string, tlsPort int) []int {
+	if tlsPort <= 0 || tlsPort > 65535 {
+		return nil
+	}
+	ports := []int{tlsPort}
+	for _, m := range guestHostURL.FindAllStringSubmatchIndex(userData, -1) {
+		if m[1] < len(userData) && hostContinuation(rune(userData[m[1]])) {
+			continue
+		}
+		port := 80
+		if strings.EqualFold(userData[m[2]:m[3]], "https") {
+			port = 443
+		}
+		if m[4] >= 0 {
+			port, _ = strconv.Atoi(userData[m[4]:m[5]])
+		}
+		ports = append(ports, port)
+	}
+	return guestnet.HostPorts(ports)
 }
 
 func hostContinuation(r rune) bool {

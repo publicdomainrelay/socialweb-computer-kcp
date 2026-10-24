@@ -134,6 +134,14 @@ func CapMessage(s string) string {
 	return s[:MessageCap/2] + "\n...\n" + s[len(s)-MessageCap/2:]
 }
 
+func hostPorts(ports []int32) []int {
+	out := make([]int, 0, len(ports))
+	for _, p := range ports {
+		out = append(out, int(p))
+	}
+	return out
+}
+
 func ParseMiB(s string) (int, error) {
 	if strings.TrimSpace(s) == "" {
 		return 0, nil
@@ -363,7 +371,8 @@ func (p *Provider) Boot(ctx context.Context, vm *v1alpha1.FirecrackerVM, write f
 			return st, err
 		}
 		started := time.Now()
-		prep, err := p.rt.Prepare(ctx, vmruntime.VMSpec{Handle: h, Name: vm.Name, UserData: userData, Vcpu: int(vm.Spec.Vcpu), MemMiB: mem, DiskMiB: disk})
+		prep, err := p.rt.Prepare(ctx, vmruntime.VMSpec{Handle: h, Name: vm.Name, UserData: userData, Vcpu: int(vm.Spec.Vcpu), MemMiB: mem, DiskMiB: disk,
+			HostPorts: hostPorts(vm.Spec.HostPorts)})
 		if err != nil {
 			return p.fail(ctx, vm, st, err), nil
 		}

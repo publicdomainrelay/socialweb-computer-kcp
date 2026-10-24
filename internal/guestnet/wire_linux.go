@@ -18,6 +18,9 @@ func Wire(w Wiring) error {
 	if err := w.Validate(); err != nil {
 		return err
 	}
+	if err := Fence(w); err != nil {
+		return err
+	}
 	uplink, err := pastaLink()
 	if err != nil {
 		return err

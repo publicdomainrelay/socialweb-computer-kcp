@@ -2603,6 +2603,11 @@ func (in *ComputeVMSpec) DeepCopyInto(out *ComputeVMSpec) {
 		*out = new(ComputeVMRelease)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.HostPorts != nil {
+		in, out := &in.HostPorts, &out.HostPorts
+		*out = make([]int32, len(*in))
+		copy(*out, *in)
+	}
 	return
 }
 
@@ -3367,6 +3372,11 @@ func (in *FirecrackerVMSpec) DeepCopyInto(out *FirecrackerVMSpec) {
 		**out = **in
 	}
 	in.UserData.DeepCopyInto(&out.UserData)
+	if in.HostPorts != nil {
+		in, out := &in.HostPorts, &out.HostPorts
+		*out = make([]int32, len(*in))
+		copy(*out, *in)
+	}
 	return
 }
 

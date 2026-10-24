@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -70,6 +71,8 @@ type VMInput struct {
 	Accept *AcceptRef
 
 	Contract *v1alpha1.ComputeVMContract
+
+	HostPorts []int32
 
 	Owner *metav1.OwnerReference
 }
@@ -144,6 +147,15 @@ func ComputeVMFor(in VMInput) (*v1alpha1.ComputeVM, error) {
 		login := *in.GuestLogin
 		o.Spec.GuestLogin = &login
 	}
+	for _, p := range in.HostPorts {
+		if p <= 0 || p > 65535 {
+			return nil, fmt.Errorf("computevm: host port %d is not a TCP port", p)
+		}
+		if !slices.Contains(o.Spec.HostPorts, p) {
+			o.Spec.HostPorts = append(o.Spec.HostPorts, p)
+		}
+	}
+	slices.Sort(o.Spec.HostPorts)
 	return o, nil
 }
 

@@ -3,6 +3,7 @@ package firecracker
 import (
 	"context"
 	"errors"
+	"slices"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -16,7 +17,7 @@ var _ compute.Provider = (*Provider)(nil)
 
 func SpecFor(handle string, vm v1alpha1.ComputeVMSpec) v1alpha1.FirecrackerVMSpec {
 	return v1alpha1.FirecrackerVMSpec{Owner: v1alpha1.ComputeVMOwner{Handle: handle}, Vcpu: vm.VM.Cpus, Mem: vm.VM.Mem, Disk: vm.VM.Disk,
-		Image: vm.Image, UserData: vm.UserData, StopGraceSeconds: vm.StopGraceSeconds}
+		Image: vm.Image, UserData: vm.UserData, StopGraceSeconds: vm.StopGraceSeconds, HostPorts: slices.Clone(vm.HostPorts)}
 }
 
 func (p *Provider) ref(name string) commonv1.ObjectRef {

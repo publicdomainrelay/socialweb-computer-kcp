@@ -43,6 +43,8 @@ type ComputeVMSpec struct {
 	Accept *commonv1.StrongRef `json:"accept,omitempty"`
 
 	Release *ComputeVMRelease `json:"release,omitempty"`
+
+	HostPorts []int32 `json:"hostPorts,omitempty" apigen:"listType=set"`
 }
 
 type ComputeVMRelease struct {

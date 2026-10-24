@@ -91,6 +91,8 @@ type Config struct {
 
 	GuestDownloads map[string]string
 
+	GuestHostPorts []int
+
 	GuestVaultServer string
 
 	GuestVaultMount string

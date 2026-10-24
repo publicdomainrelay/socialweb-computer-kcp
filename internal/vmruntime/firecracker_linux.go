@@ -175,7 +175,7 @@ func (r *firecracker) Prepare(ctx context.Context, spec VMSpec) (Prepared, error
 	}
 	console := filepath.Join(p.WorkDir, ConsoleFile)
 	params := guestnet.VMExec{
-		Wiring:  guestnet.Plan(),
+		Wiring:  guestnet.Plan(spec.HostPorts),
 		VMM:     r.cfg.Exec.Firecracker,
 		Argv:    fcapi.Argv("firecracker", p.VMMID, filepath.Join(p.WorkDir, ConfigFile), p.Socket),
 		Console: console,

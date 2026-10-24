@@ -80,6 +80,8 @@ type VMSpec struct {
 	Vcpu     int    `json:"vcpu,omitempty"`
 	MemMiB   int    `json:"memMiB,omitempty"`
 	DiskMiB  int    `json:"diskMiB,omitempty"`
+
+	HostPorts []int `json:"hostPorts,omitempty"`
 }
 
 type Prepared struct {
@@ -172,6 +174,11 @@ func ValidateSpec(s VMSpec) error {
 	}
 	if s.Vcpu < 0 || s.MemMiB < 0 || s.DiskMiB < 0 {
 		return fmt.Errorf("vmruntime: VM %s asks for a negative size", s.Name)
+	}
+	for _, p := range s.HostPorts {
+		if p <= 0 || p > 65535 {
+			return fmt.Errorf("vmruntime: VM %s names host port %d, which is not a TCP port", s.Name, p)
+		}
 	}
 	return nil
 }

@@ -35,6 +35,8 @@ type FirecrackerVMSpec struct {
 	UserData ComputeVMUserData `json:"userData"`
 
 	StopGraceSeconds int32 `json:"stopGraceSeconds,omitempty"`
+
+	HostPorts []int32 `json:"hostPorts,omitempty" apigen:"listType=set"`
 }
 
 type FirecrackerVMNetwork struct {

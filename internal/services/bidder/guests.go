@@ -45,6 +45,7 @@ func (guests) ComputeVM(in core.GuestVM) (*v1alpha1.ComputeVM, error) {
 		Vault:            computevm.GuestVaultRef{Server: in.VaultServer, Mount: in.VaultMount},
 		StopGraceSeconds: in.StopGraceSeconds,
 		GuestLogin:       in.Login,
+		HostPorts:        in.HostPorts,
 		Owner:            in.Owner,
 	}
 	if in.Accept.URI != "" || in.Accept.CID != "" {
