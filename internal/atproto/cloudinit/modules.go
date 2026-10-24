@@ -481,5 +481,6 @@ var registry = map[string]UserDataModule{
 	"secrets":            secretsModule,
 	"k3s":                k3sModule,
 	"iroh":               irohModule,
+	TunnelsModuleID:      tunnelsModule,
 	PoweroffEndsVMModule: poweroffEndsVmModule,
 }

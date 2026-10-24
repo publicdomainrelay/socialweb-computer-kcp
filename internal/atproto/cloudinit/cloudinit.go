@@ -26,6 +26,7 @@ type Context struct {
 	DNSGateway        string
 	DNSFallbacks      []string
 	DumbpipeVersion   string
+	Tunnels           *TunnelsOptions
 }
 
 type WriteFileEntry struct {
@@ -71,7 +72,7 @@ type LegacyTransportError struct {
 }
 
 func (e *LegacyTransportError) Error() string {
-	return fmt.Sprintf("guest transport %q was removed (legacy-transport): %s is the only guest transport", e.Transport, GuestTransportModule)
+	return fmt.Sprintf("guest transport %q was removed (legacy-transport): %s is the guest transport, and a browser shell is a ComputeContract's spec.tunnels", e.Transport, GuestTransportModule)
 }
 
 type RemovedTransportFlagError struct {
@@ -79,7 +80,7 @@ type RemovedTransportFlagError struct {
 }
 
 func (e *RemovedTransportFlagError) Error() string {
-	return fmt.Sprintf("--%s was removed (legacy-transport): %s is the only guest transport", e.Flag, GuestTransportModule)
+	return fmt.Sprintf("--%s was removed (legacy-transport): %s is the guest transport, and a browser shell is a ComputeContract's spec.tunnels", e.Flag, GuestTransportModule)
 }
 
 type UnknownModuleError struct {
