@@ -26,15 +26,16 @@ type Op struct {
 }
 
 type Observed struct {
-	Object    v1alpha1.HostProcess
-	Backend   hostsvc.Backend
-	Unit      hostsvc.UnitStatus
-	Inspect   error
-	Check     *hostsvc.Observation
-	Exec      string
-	Prefix    string
-	Deleting  bool
-	Restarted bool
+	Object     v1alpha1.HostProcess
+	Backend    hostsvc.Backend
+	Unit       hostsvc.UnitStatus
+	Inspect    error
+	Check      *hostsvc.Observation
+	Exec       string
+	Prefix     string
+	Deleting   bool
+	Restarted  bool
+	StartedKey string
 }
 
 func RestartedInPlace(o v1alpha1.HostProcess, st hostsvc.UnitStatus) bool {
@@ -178,9 +179,13 @@ func Reconcile(o Observed) Result {
 			return Result{Phase: v1alpha1.HostProcessPhaseLost, LostReason: obj.Status.LostReason, Message: obj.Status.Message}
 		}
 		if o.Restarted {
-			return Result{Phase: phaseOf(o.Unit), Identify: o.Unit.State == hostsvc.Active,
-				Message: fmt.Sprintf("restarted in place by its manager (restartPolicy %s, invocation %s, recorded %s)",
-					obj.Spec.RestartPolicy, o.Unit.InvocationID, rt.InvocationID)}
+			message := fmt.Sprintf("restarted in place by its manager (restartPolicy %s, invocation %s, recorded %s)",
+				obj.Spec.RestartPolicy, o.Unit.InvocationID, rt.InvocationID)
+			if o.StartedKey != "" && o.StartedKey == obj.Spec.RestartKey && obj.Spec.RestartKey != "" {
+				message = fmt.Sprintf("restarted in place for spec.restartKey %q (invocation %s, recorded %s)",
+					obj.Spec.RestartKey, o.Unit.InvocationID, rt.InvocationID)
+			}
+			return Result{Phase: phaseOf(o.Unit), Identify: o.Unit.State == hostsvc.Active, Message: message}
 		}
 		if o.Check == nil {
 			return Result{Phase: obj.Status.Phase, Unknown: true, Message: "the recorded identity was not checked"}

@@ -389,6 +389,7 @@ func (s *Supervisor) observe(ctx context.Context, o v1alpha1.HostProcess) Observ
 		o.Status.Phase != v1alpha1.HostProcessPhaseLost {
 		if RestartedInPlace(o, obs.Unit) {
 			obs.Restarted = true
+			obs.StartedKey, _ = s.startedKey(o.Spec.Unit)
 			return obs
 		}
 		want := hostsvc.Identity{Unit: o.Spec.Unit, InvocationID: rt.InvocationID, PID: int(rt.Pid), StartTicks: uint64(rt.StartTicks),
