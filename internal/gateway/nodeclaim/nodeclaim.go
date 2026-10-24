@@ -24,7 +24,9 @@ import (
 )
 
 const (
-	ContractNamePrefix = "nodeclaim-"
+	InfraNamePrefix = "nodes-"
+
+	EntryNamePrefix = "node-"
 
 	NodeSecretsDir = "/etc/socialweb/node"
 
@@ -153,13 +155,17 @@ func checkPin(what string, pin *Pin, resolved bool) error {
 	return nil
 }
 
-func (m *Mapper) ContractName(claim contract.Claim) string {
-	basis := string(claim.Object.UID)
-	if basis == "" {
-		basis = claim.Key()
-	}
+func (m *Mapper) InfraName(claim contract.Claim) string {
+	return InfraNamePrefix + digest(claim.Workspace+"/"+claim.Object.Spec.ClusterRef.Name, 20)
+}
+
+func (m *Mapper) EntryName(claim contract.Claim) string {
+	return EntryNamePrefix + digest(cmp.Or(string(claim.Object.UID), claim.Key()), 12)
+}
+
+func digest(basis string, n int) string {
 	sum := sha256.Sum256([]byte(basis))
-	return ContractNamePrefix + hex.EncodeToString(sum[:])[:20]
+	return hex.EncodeToString(sum[:])[:n]
 }
 
 func (m *Mapper) BundleRef(name string) commonv1.SecretRef {
@@ -175,6 +181,18 @@ func (m *Mapper) Wants(claim contract.Claim) (bool, bool) {
 		return true, false
 	}
 	return false, false
+}
+
+func (m *Mapper) State(claim contract.Claim) v1alpha1.InfraContractState {
+	phase := claim.Object.Status.Phase
+	switch {
+	case !claim.Object.DeletionTimestamp.IsZero(), phase == v1alpha1.NodeClaimFailed, phase == v1alpha1.NodeClaimLost,
+		phase == v1alpha1.NodeClaimReleased:
+		return v1alpha1.InfraContractReleased
+	case phase == "", phase == v1alpha1.NodeClaimPending:
+		return v1alpha1.InfraContractStaged
+	}
+	return v1alpha1.InfraContractRequested
 }
 
 func (m *Mapper) Bases(ctx context.Context, adopt bool) (contract.Bases, bool) {
@@ -271,42 +289,33 @@ func (m *Mapper) Bundle(claim contract.Claim, links contract.Links) (map[string]
 	return map[string]any{bundleKey: string(raw)}, nil
 }
 
-func (m *Mapper) Contract(claim contract.Claim, name string, adopt bool, bases contract.Bases) v1alpha1.ComputeContractSpec {
+func (m *Mapper) Entry(claim contract.Claim, adopt bool, bases contract.Bases) (v1alpha1.InfraContract, v1alpha1.InfraContractNode) {
 	spec := claim.Object.Spec
-	ttl := contract.ContractTTLSeconds
-	ref := claim.Ref()
-	out := v1alpha1.ComputeContractSpec{
-		VMName:                  spec.NodeName,
-		OwnerDid:                spec.OwnerDid,
-		VMReadyTimeoutSec:       m.cfg.VMReadyTimeoutSec,
-		TTLSecondsAfterFinished: &ttl,
-		NodeClaimRef:            &ref,
-	}
+	entry := v1alpha1.InfraContract{VMName: spec.NodeName, VMReadyTimeoutSec: m.cfg.VMReadyTimeoutSec}
+	node := v1alpha1.InfraContractNode{OwnerDid: spec.OwnerDid, NodeClaimRef: claim.Ref()}
 	if len(spec.DenyBidderDids) > 0 {
-		out.DenyBidderDids = append([]string(nil), spec.DenyBidderDids...)
+		entry.DenyBidderDids = append([]string(nil), spec.DenyBidderDids...)
 	}
 	if len(m.cfg.ExtraBidderDIDs) > 0 {
-		out.BidderDids = append([]string(nil), m.cfg.ExtraBidderDIDs...)
+		entry.BidderDids = append([]string(nil), m.cfg.ExtraBidderDIDs...)
 	}
 	if m.cfg.UserDataBase != "" {
-		out.UserData = m.cfg.UserDataBase
+		entry.UserData = m.cfg.UserDataBase
 	}
 	if m.cfg.Policy != nil {
-		out.Policy = m.cfg.Policy.Name
+		entry.Policy = m.cfg.Policy.Name
 		args := m.cfg.Policy.Args
 		if args == nil {
 			args = map[string]any{}
 		}
 		if raw, err := json.Marshal(args); err == nil {
-			out.PolicyArgs = string(raw)
+			entry.PolicyArgs = string(raw)
 		}
 	}
 	if adopt {
-		out.Adopt = true
-		return out
+		node.Adopt = true
+		return entry, node
 	}
-	secrets := m.BundleRef(name)
-	out.SecretsRef = &secrets
 	join := &v1alpha1.ComputeContractNodeJoin{ClusterRef: spec.ClusterRef}
 	if m.cfg.Meshd != nil {
 		mesh := &v1alpha1.ComputeContractMeshd{DownloadBase: bases.Meshd}
@@ -322,8 +331,8 @@ func (m *Mapper) Contract(claim contract.Claim, name string, adopt bool, bases c
 		}
 		join.NodeAgent = agent
 	}
-	out.NodeJoin = join
-	return out
+	node.NodeJoin = join
+	return entry, node
 }
 
 func (m *Mapper) Requested(status v1alpha1.NodeClaimStatus, adopt bool) v1alpha1.NodeClaimStatus {
@@ -437,31 +446,7 @@ func LostMessage(state *v1alpha1.NodeClaimContract) string {
 		"released without a vm.delete and replaced through a new claim and RFP", t.Reason, exit, t.ObservedAt)
 }
 
-func (m *Mapper) Orphan(claim *contract.Claim, cc v1alpha1.ComputeContract) (contract.Orphaned, bool) {
-	orphan := claim == nil
-	if !orphan {
-		if uid := cc.Labels[contract.UIDLabel]; uid != "" {
-			orphan = uid != string(claim.Object.UID)
-		} else {
-			orphan = m.ContractName(*claim) != cc.Name
-		}
-	}
-	if !orphan {
-		return contract.Orphaned{}, false
-	}
-	switch cc.Status.Phase {
-	case v1alpha1.ComputeContractReleased, v1alpha1.ComputeContractFailed:
-		return contract.Orphaned{Delete: true}, true
-	case v1alpha1.ComputeContractReleasing:
-		return contract.Orphaned{}, true
-	}
-	return contract.Orphaned{Release: !cc.Spec.Release}, true
-}
-
 func (m *Mapper) Settle(claim contract.Claim, cc *v1alpha1.ComputeContract) contract.Settlement {
-	if cc != nil && !cc.Spec.Release {
-		return contract.Settlement{Release: true}
-	}
 	finished := cc == nil || cc.Status.Phase == v1alpha1.ComputeContractReleased || cc.Status.Phase == v1alpha1.ComputeContractFailed
 	phase := claim.Object.Status.Phase
 	abandoned := phase == v1alpha1.NodeClaimFailed || phase == v1alpha1.NodeClaimLost
@@ -492,7 +477,7 @@ func (m *Mapper) Settle(claim contract.Claim, cc *v1alpha1.ComputeContract) cont
 		state.DeepCopyInto(&copyOf)
 		next.Contract = copyOf
 	}
-	return contract.Settlement{Status: &next, DeleteContract: cc != nil, RemoveBundle: true, Done: true}
+	return contract.Settlement{Status: &next, RemoveBundle: true, Done: true}
 }
 
 func statusCopy(status v1alpha1.NodeClaimStatus) v1alpha1.NodeClaimStatus {

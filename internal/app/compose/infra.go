@@ -172,8 +172,7 @@ func adoptable(rootKind, kind string, u *Generic, owner string) bool {
 	case KindBid, KindStateSync, KindMarketPresence:
 		return rootKind == string(v1alpha1.ApplicationKindMarketBidder) || (kind != KindBid && rootKind == string(v1alpha1.ApplicationKindMarketRequester))
 	case KindComputeContract:
-		linked := specField(u, "nodeClaimRef")
-		return rootKind == string(v1alpha1.ApplicationKindMarketRequester) && !linked
+		return rootKind == string(v1alpha1.ApplicationKindMarketRequester)
 	}
 	return false
 }
@@ -555,7 +554,7 @@ func ownedByLink(u *Generic) bool {
 	if len(u.OwnerReferences) > 0 {
 		return true
 	}
-	if specField(u, "ttlSecondsAfterFinished") || specField(u, "nodeClaimRef") {
+	if specField(u, "ttlSecondsAfterFinished") {
 		return true
 	}
 	labels := u.Labels

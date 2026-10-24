@@ -49,8 +49,6 @@ type ComputeContractSpec struct {
 	NodeJoin *ComputeContractNodeJoin `json:"nodeJoin,omitempty"`
 
 	TTLSecondsAfterFinished *int32 `json:"ttlSecondsAfterFinished,omitempty" apigen:"default=691200,minimum=0"`
-
-	NodeClaimRef *commonv1.ObjectRef `json:"nodeClaimRef,omitempty"`
 }
 
 type ContractBidVerdict string

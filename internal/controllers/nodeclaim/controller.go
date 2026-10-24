@@ -2,7 +2,6 @@ package nodeclaim
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -60,6 +59,14 @@ type known struct {
 	workspace string
 
 	links []string
+
+	cluster string
+
+	infra string
+
+	entry string
+
+	contract string
 }
 
 type Controller struct {
@@ -81,6 +88,10 @@ type Controller struct {
 
 	claims map[ctlruntime.Request]known
 
+	byContract map[string]ctlruntime.Request
+
+	infraMu sync.Mutex
+
 	waiting map[ctlruntime.Request]bool
 
 	homes map[string]bool
@@ -94,7 +105,8 @@ func New(opts Options) *Controller {
 		log = slog.New(slog.DiscardHandler)
 	}
 	return &Controller{bus: opts.Bus, log: log.With("controller", Name), events: make(chan ctlruntime.Request, 64), resyncs: make(chan struct{}, 1),
-		clusters: map[string]string{}, claims: map[ctlruntime.Request]known{}, waiting: map[ctlruntime.Request]bool{}}
+		clusters: map[string]string{}, claims: map[ctlruntime.Request]known{}, byContract: map[string]ctlruntime.Request{},
+		waiting: map[ctlruntime.Request]bool{}}
 }
 
 func Register(m *ctlruntime.Manager, c *Controller, cfg *rest.Config) error {
@@ -126,6 +138,8 @@ func Register(m *ctlruntime.Manager, c *Controller, cfg *rest.Config) error {
 		ctlruntime.Gone(c.gone),
 		ctlruntime.Events(c.events),
 		ctlruntime.WatchesIn(ContractExport, c.contractClaims),
+		ctlruntime.WatchesIn(ContractExport, c.infraClaims),
+		ctlruntime.Watches(c.clusterClaims),
 		ctlruntime.Watches(c.linkClaims),
 		ctlruntime.Watches(joinedClaims),
 		ctlruntime.WatchesIn(ExposureExport, c.exposureClaims),
@@ -195,166 +209,157 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obj 
 		return ctlruntime.Result{Waiting: true}, nil
 	}
 	claim := contract.Claim{Workspace: req.Workspace, Object: *obj}
+	at := entryOf(b, claim)
 	openBao, apiserver := b.Mapper.LinkNames(claim)
-	c.learn(req, known{workspace: req.Workspace, links: []string{openBao, apiserver}})
-	name := b.Mapper.ContractName(claim)
-	contracts, err := c.contracts(ctx, store, b)
+	c.learn(req, known{workspace: req.Workspace, links: []string{openBao, apiserver}, cluster: obj.Spec.ClusterRef.Name,
+		infra: at.Name, entry: at.Contract, contract: at.ComputeContract})
+	cc, err := readContract(ctx, store, at)
 	if err != nil {
 		return ctlruntime.Result{}, err
 	}
-	var own *v1alpha1.ComputeContract
-	for i := range contracts {
-		cc := &contracts[i]
-		if cc.Name == name {
-			own = cc
-			continue
-		}
-		if refersTo(cc, claim) {
-			c.orphan(ctx, store, b, &claim, *cc)
+	alive, err := clusterAlive(ctx, store, clusterRef(claim))
+	if err != nil {
+		return ctlruntime.Result{}, err
+	}
+	if !alive {
+		if err := c.deleteInfra(ctx, store, at.Workspace, at.Name, "the cluster is deleting"); err != nil {
+			return ctlruntime.Result{}, err
 		}
 	}
 	if !obj.DeletionTimestamp.IsZero() {
-		return c.settle(ctx, req, store, b, claim, own)
+		return c.settle(ctx, req, store, b, &claim, at, cc, alive)
 	}
-	if own == nil {
-		return c.ensure(ctx, req, store, b, claim, name)
+	if cc == nil {
+		if !alive {
+			c.wait(req, false)
+			return ctlruntime.Result{}, nil
+		}
+		return c.ensure(ctx, req, store, b, &claim, at)
 	}
 	c.wait(req, false)
-	next := b.Mapper.Status(claim, *own)
-	if next == nil {
-		return ctlruntime.Result{}, nil
+	if alive {
+		if err := c.declare(ctx, store, claim, at, nil); err != nil && !errors.Is(err, errInfraDeleting) {
+			return ctlruntime.Result{}, err
+		}
 	}
-	if err := c.status(ctx, req, obj, *next); err != nil {
+	next := b.Mapper.Status(claim, *cc)
+	if next == nil {
+		if claim.Object.Status.Infra != nil {
+			return ctlruntime.Result{}, nil
+		}
+		same := statusCopy(claim.Object.Status)
+		next = &same
+	}
+	if err := c.status(ctx, req, &claim.Object, at, *next); err != nil {
 		return ctlruntime.Result{}, err
 	}
-	c.log.Info("node_claim_mapped", "claim", claim.Key(), "contract", name, "phase", next.Phase)
+	c.log.Info("node_claim_mapped", "claim", claim.Key(), "infra", at.Name, "entry", at.Contract, "contract", at.ComputeContract, "phase", next.Phase)
 	return ctlruntime.Result{}, nil
 }
 
-func (c *Controller) ensure(ctx context.Context, req ctlruntime.Request, store *kcpstore.Store, b *contract.Binding, claim contract.Claim, name string) (ctlruntime.Result, error) {
+func (c *Controller) ensure(ctx context.Context, req ctlruntime.Request, store *kcpstore.Store, b *contract.Binding, claim *contract.Claim,
+	at v1alpha1.NodeClaimInfra) (ctlruntime.Result, error) {
 	obj := &claim.Object
-	ensure, adopt := b.Mapper.Wants(claim)
+	ensure, adopt := b.Mapper.Wants(*claim)
 	if !ensure {
 		c.wait(req, false)
-		return ctlruntime.Result{}, nil
+		return ctlruntime.Result{}, c.waitable(c.declare(ctx, store, *claim, at, nil))
 	}
 	bases, ok := b.Mapper.Bases(ctx, adopt)
 	if !ok {
 		c.wait(req, true)
-		return ctlruntime.Result{}, nil
+		staged := c.entry(b, *claim, at, adopt, contract.Bases{})
+		return ctlruntime.Result{}, c.waitable(c.declare(ctx, store, *claim, at, &staged))
 	}
 	c.wait(req, false)
 	key := claim.Key()
 	if !adopt {
-		data, err := b.Mapper.Bundle(claim, c.links(ctx, req, b, claim))
+		data, err := b.Mapper.Bundle(*claim, c.links(ctx, req, b, *claim))
+		if err == nil {
+			secrets := b.Mapper.BundleRef(at.ComputeContract)
+			var kv vault.KV
+			if kv, err = c.kv(ctx, b, claim.Ref(), secrets); err != nil {
+				return ctlruntime.Result{}, err
+			}
+			err = kv.Write(ctx, secrets.Mount, secrets.Path, data)
+		}
 		if err != nil {
-			c.log.Error("node_claim_contract_failed", "claim", key, "err", err)
-			return ctlruntime.Result{}, c.status(ctx, req, obj, b.Mapper.Failed(obj.Status, err))
-		}
-		secrets := b.Mapper.BundleRef(name)
-		kv, err := c.kv(ctx, b, claim.Ref(), secrets)
-		if err != nil {
-			return ctlruntime.Result{}, err
-		}
-		if err := kv.Write(ctx, secrets.Mount, secrets.Path, data); err != nil {
-			c.log.Error("node_claim_contract_failed", "claim", key, "err", err)
-			return ctlruntime.Result{}, c.status(ctx, req, obj, b.Mapper.Failed(obj.Status, err))
+			c.log.Error("node_claim_bundle_failed", "claim", key, "err", err)
+			return ctlruntime.Result{}, c.status(ctx, req, obj, at, b.Mapper.Failed(obj.Status, err))
 		}
 	}
-	cc := v1alpha1.ComputeContract{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: b.Mapper.Contract(claim, name, adopt, bases)}
-	if obj.UID != "" {
-		cc.Labels = map[string]string{contract.UIDLabel: string(obj.UID)}
+	if err := c.status(ctx, req, obj, at, b.Mapper.Requested(obj.Status, adopt)); err != nil {
+		return ctlruntime.Result{}, err
 	}
-	if err := applyContract(ctx, store, b.ContractWorkspace, cc); err != nil {
-		c.log.Error("node_claim_contract_failed", "claim", key, "err", err)
-		return ctlruntime.Result{}, c.status(ctx, req, obj, b.Mapper.Failed(obj.Status, err))
+	requested := c.entry(b, *claim, at, adopt, bases)
+	if err := c.declare(ctx, store, *claim, at, &requested); err != nil {
+		if errors.Is(err, errInfraDeleting) {
+			c.log.Info("node_claim_infra_deleting", "claim", key, "infra", at.Name)
+			return ctlruntime.Result{}, nil
+		}
+		c.log.Error("node_claim_entry_failed", "claim", key, "infra", at.Name, "entry", at.Contract, "err", err)
+		return ctlruntime.Result{}, err
 	}
-	c.log.Info("node_claim_contract_created", "claim", key, "contract", name, "adopt", adopt, "workspace", b.ContractWorkspace)
-	return ctlruntime.Result{}, c.status(ctx, req, obj, b.Mapper.Requested(obj.Status, adopt))
+	c.log.Info("node_claim_entry_requested", "claim", key, "infra", at.Name, "entry", at.Contract, "contract", at.ComputeContract,
+		"adopt", adopt, "workspace", at.Workspace)
+	return ctlruntime.Result{}, nil
 }
 
-func (c *Controller) settle(ctx context.Context, req ctlruntime.Request, store *kcpstore.Store, b *contract.Binding, claim contract.Claim, own *v1alpha1.ComputeContract) (ctlruntime.Result, error) {
+func (c *Controller) waitable(err error) error {
+	if errors.Is(err, errInfraDeleting) {
+		return nil
+	}
+	return err
+}
+
+func (c *Controller) settle(ctx context.Context, req ctlruntime.Request, store *kcpstore.Store, b *contract.Binding, claim *contract.Claim,
+	at v1alpha1.NodeClaimInfra, cc *v1alpha1.ComputeContract, alive bool) (ctlruntime.Result, error) {
 	obj := &claim.Object
 	c.wait(req, false)
 	if !controllerutil.ContainsFinalizer(obj, v1alpha1.FinalizerNodeClaim) {
 		return ctlruntime.Result{}, nil
 	}
 	key := claim.Key()
-	s := b.Mapper.Settle(claim, own)
-	if s.Release && own != nil {
-		if err := applyRelease(ctx, store, b.ContractWorkspace, *own); err != nil {
+	if alive {
+		if err := c.declare(ctx, store, *claim, at, nil); c.waitable(err) != nil {
 			return ctlruntime.Result{Waiting: true}, err
 		}
-		c.log.Info("node_claim_release_requested", "claim", key, "contract", own.Name)
-		return ctlruntime.Result{Waiting: true}, nil
 	}
+	s := b.Mapper.Settle(*claim, cc)
 	if s.Status != nil {
-		if err := c.status(ctx, req, obj, *s.Status); err != nil {
+		if err := c.status(ctx, req, obj, at, *s.Status); err != nil {
 			c.log.Warn("node_claim_status_write_failed", "claim", key, "err", err)
 		}
 	}
 	if !s.Done {
 		return ctlruntime.Result{Waiting: true}, nil
 	}
-	name := b.Mapper.ContractName(claim)
-	if s.DeleteContract {
-		if err := deleteContract(ctx, store, b.ContractWorkspace, name); err != nil {
-			c.log.Warn("node_claim_contract_delete_failed", "claim", key, "err", err)
-		}
-	}
 	if s.RemoveBundle {
-		if err := c.removeBundle(ctx, b, claim.Ref(), name); err != nil {
+		if err := c.removeBundle(ctx, b, claim.Ref(), at.ComputeContract); err != nil {
 			c.log.Warn("node_claim_bundle_remove_failed", "claim", key, "err", err)
 		}
 	}
-	c.log.Info("node_claim_released", "claim", key, "contract", name, "phase", phaseOf(s.Status))
+	c.log.Info("node_claim_released", "claim", key, "infra", at.Name, "entry", at.Contract, "contract", at.ComputeContract, "phase", phaseOf(s.Status))
 	return ctlruntime.Result{}, nil
 }
 
-func (c *Controller) orphan(ctx context.Context, store *kcpstore.Store, b *contract.Binding, claim *contract.Claim, cc v1alpha1.ComputeContract) {
-	action, orphan := b.Mapper.Orphan(claim, cc)
-	if !orphan {
+func (c *Controller) gone(ctx context.Context, req ctlruntime.Request) {
+	k, ok := c.forget(req)
+	if !ok || k.infra == "" {
 		return
 	}
-	owner := refKey(cc.Spec.NodeClaimRef)
-	switch {
-	case action.Delete:
-		if err := deleteContract(ctx, store, b.ContractWorkspace, cc.Name); err != nil {
-			c.log.Error("node_claim_contract_delete_failed", "claim", owner, "err", err)
-			return
-		}
-		if err := c.removeBundle(ctx, b, *cc.Spec.NodeClaimRef, cc.Name); err != nil {
-			c.log.Error("node_claim_bundle_remove_failed", "claim", owner, "err", err)
-		}
-		c.log.Info("node_claim_orphan_contract_removed", "claim", owner, "contract", cc.Name, "phase", cc.Status.Phase)
-	case action.Release:
-		if err := applyRelease(ctx, store, b.ContractWorkspace, cc); err != nil {
-			c.log.Error("node_claim_orphan_release_failed", "claim", owner, "contract", cc.Name, "err", err)
-			return
-		}
-		c.log.Info("node_claim_orphan_release_requested", "claim", owner, "contract", cc.Name, "phase", cc.Status.Phase)
-	}
-}
-
-func (c *Controller) gone(ctx context.Context, req ctlruntime.Request) {
-	c.forget(req)
 	b, store := c.current()
 	if b == nil || store == nil {
 		return
 	}
-	contracts, err := c.contracts(ctx, store, b)
-	if err != nil {
-		c.log.Warn("node_claim_orphan_lookup_failed", "claim", req.Workspace+"/"+req.Name, "err", err)
-		return
-	}
-	for _, cc := range contracts {
-		if r := cc.Spec.NodeClaimRef; r != nil && r.Workspace == req.Workspace && r.Name == req.Name {
-			c.orphan(ctx, store, b, nil, cc)
-		}
+	if err := c.dropEntry(ctx, store, b.ContractWorkspace, k.infra, k.entry); err != nil {
+		c.log.Warn("node_claim_entry_drop_failed", "claim", req.Workspace+"/"+req.Name, "infra", k.infra, "entry", k.entry, "err", err)
 	}
 }
 
-func (c *Controller) status(ctx context.Context, req ctlruntime.Request, obj *v1alpha1.NodeClaim, next v1alpha1.NodeClaimStatus) error {
+func (c *Controller) status(ctx context.Context, req ctlruntime.Request, obj *v1alpha1.NodeClaim, at v1alpha1.NodeClaimInfra,
+	next v1alpha1.NodeClaimStatus) error {
+	next.Infra = &at
 	if reflect.DeepEqual(obj.Status, next) {
 		return nil
 	}
@@ -400,44 +405,6 @@ func (c *Controller) removeBundle(ctx context.Context, b *contract.Binding, from
 		return err
 	}
 	return kv.Delete(ctx, secrets.Mount, secrets.Path)
-}
-
-func (c *Controller) contracts(ctx context.Context, store *kcpstore.Store, b *contract.Binding) ([]v1alpha1.ComputeContract, error) {
-	items, err := kcpstore.OfClusterScoped[v1alpha1.ComputeContract](store, v1alpha1.ComputeContractGVR).List(ctx, b.ContractWorkspace)
-	if err != nil {
-		return nil, fmt.Errorf("nodeclaim: listing the ComputeContracts of %s: %w", b.ContractWorkspace, err)
-	}
-	return items, nil
-}
-
-func refersTo(cc *v1alpha1.ComputeContract, claim contract.Claim) bool {
-	r := cc.Spec.NodeClaimRef
-	return r != nil && r.Workspace == claim.Workspace && r.Name == claim.Object.Name
-}
-
-func applyContract(ctx context.Context, store *kcpstore.Store, workspace string, cc v1alpha1.ComputeContract) error {
-	meta := map[string]any{"name": cc.Name}
-	if len(cc.Labels) > 0 {
-		meta["labels"] = cc.Labels
-	}
-	body, err := json.Marshal(map[string]any{"apiVersion": v1alpha1.GroupVersion.String(), "kind": "ComputeContract",
-		"metadata": meta, "spec": cc.Spec})
-	if err != nil {
-		return fmt.Errorf("nodeclaim: encoding ComputeContract %s: %w", cc.Name, err)
-	}
-	return kcpstore.OfClusterScoped[v1alpha1.ComputeContract](store, v1alpha1.ComputeContractGVR).
-		Apply(ctx, ref.New(workspace, "", cc.Name), body, contract.FieldManager)
-}
-
-func applyRelease(ctx context.Context, store *kcpstore.Store, workspace string, cc v1alpha1.ComputeContract) error {
-	next := v1alpha1.ComputeContract{ObjectMeta: metav1.ObjectMeta{Name: cc.Name, Labels: cc.Labels}}
-	cc.Spec.DeepCopyInto(&next.Spec)
-	next.Spec.Release = true
-	return applyContract(ctx, store, workspace, next)
-}
-
-func deleteContract(ctx context.Context, store *kcpstore.Store, workspace, name string) error {
-	return kcpstore.OfClusterScoped[v1alpha1.ComputeContract](store, v1alpha1.ComputeContractGVR).Delete(ctx, ref.New(workspace, "", name))
 }
 
 func (c *Controller) inScope(ctx context.Context, workspace string) bool {
@@ -498,15 +465,26 @@ func (c *Controller) learn(req ctlruntime.Request, k known) {
 	if req.Workspace != "" && req.Cluster != "" {
 		c.clusters[req.Workspace] = req.Cluster
 	}
+	if old, ok := c.claims[key]; ok && old.contract != k.contract {
+		delete(c.byContract, old.contract)
+	}
 	c.claims[key] = k
+	if k.contract != "" {
+		c.byContract[k.contract] = key
+	}
 }
 
-func (c *Controller) forget(req ctlruntime.Request) {
+func (c *Controller) forget(req ctlruntime.Request) (known, bool) {
 	key := ctlruntime.Request{Cluster: req.Cluster, Name: req.Name}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	k, ok := c.claims[key]
 	delete(c.claims, key)
 	delete(c.waiting, key)
+	if ok && c.byContract[k.contract] == key {
+		delete(c.byContract, k.contract)
+	}
+	return k, ok
 }
 
 func (c *Controller) wait(req ctlruntime.Request, waiting bool) {
@@ -520,21 +498,41 @@ func (c *Controller) wait(req ctlruntime.Request, waiting bool) {
 	delete(c.waiting, key)
 }
 
-func (c *Controller) contractClaims(ctx context.Context, src ctlruntime.Request, obj *v1alpha1.ComputeContract) []ctlruntime.Request {
-	r := obj.Spec.NodeClaimRef
-	if r == nil || r.Name == "" || r.Workspace == "" || !strings.EqualFold(r.Kind, contract.Kind) {
-		return nil
-	}
+func (c *Controller) contractClaims(_ context.Context, src ctlruntime.Request, obj *v1alpha1.ComputeContract) []ctlruntime.Request {
 	b, _ := c.current()
 	if b == nil || src.Workspace != b.ContractWorkspace {
 		return nil
 	}
-	cluster, err := c.clusterOf(ctx, r.Workspace)
-	if err != nil {
-		c.log.Warn("node_claim_workspace_unresolved", "claim", refKey(r), "contract", obj.Name, "err", err)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if key, ok := c.byContract[obj.Name]; ok {
+		return []ctlruntime.Request{key}
+	}
+	return nil
+}
+
+func (c *Controller) infraClaims(_ context.Context, src ctlruntime.Request, obj *v1alpha1.Infra) []ctlruntime.Request {
+	b, _ := c.current()
+	if b == nil || src.Workspace != b.ContractWorkspace {
 		return nil
 	}
-	return []ctlruntime.Request{{Cluster: cluster, Name: r.Name}}
+	return c.claimsWhere(func(_ ctlruntime.Request, k known) bool { return k.infra == obj.Name })
+}
+
+func (c *Controller) clusterClaims(_ context.Context, src ctlruntime.Request, obj *v1alpha1.Cluster) []ctlruntime.Request {
+	return c.claimsWhere(func(key ctlruntime.Request, k known) bool { return key.Cluster == src.Cluster && k.cluster == obj.Name })
+}
+
+func (c *Controller) claimsWhere(match func(ctlruntime.Request, known) bool) []ctlruntime.Request {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var out []ctlruntime.Request
+	for key, k := range c.claims {
+		if match(key, k) {
+			out = append(out, key)
+		}
+	}
+	return out
 }
 
 func (c *Controller) linkClaims(_ context.Context, src ctlruntime.Request, obj *v1alpha1.ClusterLink) []ctlruntime.Request {
@@ -632,22 +630,7 @@ func (c *Controller) resync(ctx context.Context, b contract.Binding) {
 			out = append(out, ctlruntime.Request{Cluster: cluster, Name: items[i].Name})
 		}
 	}
-	if contracts, err := c.contracts(ctx, store, &b); err == nil {
-		for i := range contracts {
-			r := contracts[i].Spec.NodeClaimRef
-			if r == nil || r.Workspace == "" || r.Name == "" {
-				continue
-			}
-			cluster, err := c.clusterOf(ctx, r.Workspace)
-			if err != nil {
-				c.log.Warn("node_claim_workspace_unresolved", "claim", refKey(r), "err", err)
-				continue
-			}
-			out = append(out, ctlruntime.Request{Cluster: cluster, Name: r.Name})
-		}
-	} else {
-		c.log.Warn("node_claim_contracts_unlisted", "workspace", b.ContractWorkspace, "err", err)
-	}
+	c.sweep(ctx, store, b)
 	for _, r := range out {
 		select {
 		case c.events <- r:

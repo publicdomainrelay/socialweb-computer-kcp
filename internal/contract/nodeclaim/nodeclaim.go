@@ -12,10 +12,6 @@ const (
 
 	FieldManager = "socialweb.computer/nodeclaim"
 
-	UIDLabel = "socialweb.computer/nodeclaim-uid"
-
-	ContractTTLSeconds int32 = 691200
-
 	AgentAccount = "socialweb-computer-k8s"
 
 	AgentNamespace = "default"
@@ -60,29 +56,23 @@ type Bases struct {
 }
 
 type Settlement struct {
-	Release bool
-
 	Status *v1alpha1.NodeClaimStatus
-
-	DeleteContract bool
 
 	RemoveBundle bool
 
 	Done bool
 }
 
-type Orphaned struct {
-	Release bool
-
-	Delete bool
-}
-
 type Mapper interface {
-	ContractName(claim Claim) string
+	InfraName(claim Claim) string
+
+	EntryName(claim Claim) string
 
 	BundleRef(contract string) commonv1.SecretRef
 
 	Wants(claim Claim) (ensure, adopt bool)
+
+	State(claim Claim) v1alpha1.InfraContractState
 
 	Bases(ctx context.Context, adopt bool) (Bases, bool)
 
@@ -90,15 +80,13 @@ type Mapper interface {
 
 	Bundle(claim Claim, links Links) (map[string]any, error)
 
-	Contract(claim Claim, name string, adopt bool, bases Bases) v1alpha1.ComputeContractSpec
+	Entry(claim Claim, adopt bool, bases Bases) (v1alpha1.InfraContract, v1alpha1.InfraContractNode)
 
 	Requested(status v1alpha1.NodeClaimStatus, adopt bool) v1alpha1.NodeClaimStatus
 
 	Failed(status v1alpha1.NodeClaimStatus, cause error) v1alpha1.NodeClaimStatus
 
 	Status(claim Claim, contract v1alpha1.ComputeContract) *v1alpha1.NodeClaimStatus
-
-	Orphan(claim *Claim, contract v1alpha1.ComputeContract) (Orphaned, bool)
 
 	Settle(claim Claim, contract *v1alpha1.ComputeContract) Settlement
 }
