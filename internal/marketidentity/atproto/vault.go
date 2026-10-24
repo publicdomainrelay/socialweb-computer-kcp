@@ -106,8 +106,11 @@ func (s *vaultSessionStore) List(ctx context.Context) ([]oauthclient.SessionData
 	if !ok {
 		return nil, nil
 	}
-	if s.clientID != "" {
+	if s.clientID != "" && session.ClientID != s.clientID {
 		session.ClientID = s.clientID
+		if err := s.Save(ctx, session); err != nil {
+			return nil, err
+		}
 	}
 	return []oauthclient.SessionData{session}, nil
 }

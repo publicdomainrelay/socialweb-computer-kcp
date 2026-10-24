@@ -425,6 +425,9 @@ func (s *Session) reloadLocked(ctx context.Context) bool {
 			continue
 		}
 		if stored.RefreshToken == "" || stored.RefreshToken == s.data.RefreshToken {
+			if stored.ClientID != "" {
+				s.data.ClientID = stored.ClientID
+			}
 			return false
 		}
 		s.data.AccessToken = stored.AccessToken
