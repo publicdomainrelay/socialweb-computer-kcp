@@ -410,9 +410,6 @@ func CheckGuestEvent(record map[string]any) (string, error) {
 		if err := checkGuestEventFields(r.Tag, r.Kind, MaxGuestSignalKind, r.CreatedAt); err != nil {
 			return "", err
 		}
-		if err := r.Recipient.Validate(); err != nil || market.NSIDFromURI(r.Recipient.URI) != market.ComputeEventsGuestPublicKeyNSID {
-			return "", fmt.Errorf("%w: recipient is not a strongRef to a %s record", ErrReportRefused, market.ComputeEventsGuestPublicKeyNSID)
-		}
 		if len(r.Ciphertext) > MaxGuestCiphertext || !strings.HasPrefix(strings.TrimSpace(r.Ciphertext), ageArmorHeader) {
 			return "", fmt.Errorf("%w: ciphertext is age armored ciphertext of at most %d bytes", ErrReportRefused, MaxGuestCiphertext)
 		}
