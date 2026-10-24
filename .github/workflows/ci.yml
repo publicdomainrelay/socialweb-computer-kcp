@@ -119,6 +119,19 @@ jobs:
             got="$(sha256sum "$img/$TARGET/$f" | cut -d' ' -f1)"
             echo "$TARGET/$f sha256 $got (pinned $want) from $url/$f"
             [ "$got" = "$want" ] || build "$url/$f hashes to $got, not its pin $want"
+            [ "$f" = image.json ] || continue
+            while read -r name recorded current; do
+              echo "$TARGET input $name sha256 $current (recorded in the published image.json $recorded)"
+              [ "$recorded" = "$current" ] || build "input $name changed since $key was built and its pins did not, so it is built to check them"
+            done < <(jq -r --slurpfile v internal/versions/versions.json --arg t "$TARGET" '
+              .inputs.kernelSource.sha256 as $ks | .inputs.base.sha256 as $bs |
+              "kernelSource \($ks) \($v[0].guestImages.kernel.source.sha256)",
+              "base \($bs) \($v[0].guestImages.targets[$t].base.sha256)",
+              (.inputs[] | select(.path != null) | "\(.path) \(.sha256) PATH")' "$img/$TARGET/image.json" |
+              while read -r name recorded current; do
+                if [ "$current" = PATH ]; then current="$(sha256sum "$name" 2>/dev/null | cut -d' ' -f1 || true)"; fi
+                echo "$name $recorded ${current:-absent}"
+              done)
           done
           echo "guest-image: not building $TARGET: every output is published at $url and matches its pin"
           echo "published=true" >>"$GITHUB_OUTPUT"
