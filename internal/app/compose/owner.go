@@ -48,7 +48,7 @@ func (o Owner) sessionPath() string {
 }
 
 func (o Owner) pdsName() string {
-	return "owner-" + Stamp(o.pdsURL())
+	return ownerPdsName(o.pdsURL())
 }
 
 func (o Owner) tls() bool {

@@ -16,10 +16,15 @@ import (
 )
 
 func (c *Composer) ApplyRepo(ctx context.Context, r Root, ws, name, backendKind string, backendGVR schema.GroupVersionResource, backend any) error {
+	return c.applyRepo(ctx, r, ws, name, backendKind, backendGVR, backend, nil)
+}
+
+func (c *Composer) applyRepo(ctx context.Context, r Root, ws, name, backendKind string, backendGVR schema.GroupVersionResource, backend any,
+	labels map[string]string) error {
 	if err := c.ApplyTyped(ctx, r, ws, backendGVR, v1alpha1.GroupVersion.String(), backendKind, backend); err != nil {
 		return err
 	}
-	repo := &v1alpha1.AtprotoRepo{ObjectMeta: metav1.ObjectMeta{Name: name},
+	repo := &v1alpha1.AtprotoRepo{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels},
 		Spec: v1alpha1.AtprotoRepoSpec{BackendRef: commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: backendKind, Name: name}}}
 	return c.ApplyTyped(ctx, r, ws, v1alpha1.AtprotoRepoGVR, v1alpha1.GroupVersion.String(), KindAtprotoRepo, repo)
 }

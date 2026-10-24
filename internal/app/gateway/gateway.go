@@ -17,6 +17,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/marketrequester"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/atprotorepo"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/manifests"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
@@ -55,14 +56,17 @@ type Controller struct {
 	c *compose.Composer
 
 	web *WebApp
+
+	publishers *publishers
 }
 
 func Register(m *ctlruntime.Manager, c *compose.Composer, web *WebApp) error {
-	ctl := &Controller{c: c, web: web}
+	ctl := &Controller{c: c, web: web, publishers: newPublishers()}
 	c.ProvideTrust(schema.GroupKind{Group: v1alpha1.GroupName, Kind: Kind})
 	opts := append([]ctlruntime.Option{ctlruntime.Export(compose.ExportApplications), ctlruntime.Finalizer(compose.Finalizer),
 		compose.TeardownWatch[*v1alpha1.Cluster](c, compose.ExportClusters, Kind)}, c.Watches(Kind)...)
 	opts = append(opts, compose.DrainWatch[*v1alpha1.AtprotoRecord](c, compose.ExportMarketIdentities, Kind))
+	opts = append(opts, ctl.publishWatches()...)
 	if err := ctlruntime.For[*v1alpha1.Gateway](m, Name, ctl, opts...); err != nil {
 		return fmt.Errorf("gateway: registering the Gateway controller: %w", err)
 	}
@@ -129,11 +133,16 @@ func (ctl *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, o 
 	}
 	r := compose.RootOf(req, Kind, o, o.Spec.Suspend)
 	c.Observe(r)
+	ctl.publishers.root(req)
 	st := compose.NewStatus(o.Generation, o.Spec.Profile, o.Status)
 	st.Components = []v1alpha1.ApplicationComponent{}
 	p := &pass{ctx: ctx, ctl: ctl, c: c, r: r, o: o, ws: r.Workspace + ":" + compose.ComponentWorkspace, st: st}
 	if r.Deleting {
-		return p.delete(ctx)
+		res, err := p.delete(ctx)
+		if err == nil && !res.Waiting {
+			ctl.publishers.forget(req)
+		}
+		return res, err
 	}
 	res, err := p.reconcile(ctx)
 	if err == nil {
@@ -710,10 +719,12 @@ func (p *pass) run(ctx context.Context, plan compose.AccountPlan, id *v1alpha1.M
 	if a := id.Status.PendingAction; a != nil && id.Status.Phase == v1alpha1.MarketIdentityPhaseAwaitingScan {
 		awaitingOperator = "waiting for the operator's claim record (badgeBlueKeys keyId " + id.Status.Did + " with the nonce n of " + a.URL + ")"
 	}
+	sessionsFile := ""
 	if m := o.Spec.MarketNetwork; o.Spec.Profile == ProfileGatewayNetwork && m != nil && m.OwnerSessionsFile != "" {
 		p.operatorWrites(ctx, id, m.OwnerSessionsFile)
-		p.ownerRepos(ctx, id, m.OwnerSessionsFile)
-	} else if err := c.ApplyLinks(ctx, r, ownerRepoLinkSet, compose.RecordWatchStreamLinks(r.Workspace, compose.OwnerRecordSources(ws, o.Spec.Network)), ws); err != nil {
+		sessionsFile = m.OwnerSessionsFile
+	}
+	if err := p.ownerRepos(ctx, id, sessionsFile); err != nil {
 		return ctlruntime.Result{}, err
 	}
 	if fn := c.Config().OnComponents; fn != nil {
@@ -733,13 +744,17 @@ func (p *pass) run(ctx context.Context, plan compose.AccountPlan, id *v1alpha1.M
 
 const ownerRepoLinkSet = "owner-repos"
 
-func (p *pass) ownerRepos(ctx context.Context, id *v1alpha1.MarketIdentity, sessionsFile string) {
+func (p *pass) ownerRepos(ctx context.Context, id *v1alpha1.MarketIdentity, sessionsFile string) error {
 	c, r, o, ws := p.c, p.r, p.o, p.ws
 	log := c.Log().With("root", r.Owner())
-	sessions, err := compose.ReadOwnerSessions(sessionsFile)
-	if err != nil {
-		log.Warn("reading the market network owner sessions", "err", err.Error())
-		return
+	sessions := map[string]compose.OwnerSession{}
+	if sessionsFile != "" {
+		read, err := compose.ReadOwnerSessions(sessionsFile)
+		if err != nil {
+			log.Warn("reading the market network owner sessions", "err", err.Error())
+			return nil
+		}
+		sessions = read
 	}
 	links := compose.RecordWatchStreamLinks(r.Workspace, compose.OwnerRecordSources(ws, o.Spec.Network))
 	var owners []compose.Owner
@@ -753,15 +768,69 @@ func (p *pass) ownerRepos(ctx context.Context, id *v1alpha1.MarketIdentity, sess
 		owners = append(owners, owner)
 		links = append(links, compose.OwnerRepoLinks(ws, r.Workspace, owner)...)
 	}
+	proxied, err := p.sessionOwners(ctx, sessions, strings.TrimSpace(id.Status.Did))
+	if err != nil {
+		return err
+	}
+	pdsURLs := map[string]string{}
+	for _, owner := range proxied {
+		if pdsURLs[owner.DID], err = c.SessionOwnerPds(ctx, ws, owner.DID); err != nil {
+			return err
+		}
+		links = append(links, compose.SessionOwnerLinks(r, ws, r.Workspace, owner, pdsURLs[owner.DID])...)
+	}
 	if err := c.ApplyLinks(ctx, r, ownerRepoLinkSet, links, ws); err != nil {
-		log.Warn("the links of the tenant owners' repos", "err", err.Error())
-		return
+		return fmt.Errorf("the links of the tenant owners' repos: %w", err)
 	}
 	for _, owner := range owners {
 		if err := c.ApplyOwnerRepo(ctx, r, ws, owner); err != nil {
 			log.Warn("composing a tenant owner's repo", "did", owner.DID, "err", err.Error())
 		}
 	}
+	for _, owner := range proxied {
+		if err := c.ApplySessionOwner(ctx, r, ws, owner, pdsURLs[owner.DID]); err != nil {
+			return fmt.Errorf("composing the repo of the tenant owner %s through the web app session: %w", owner.DID, err)
+		}
+		if pdsURLs[owner.DID] == "" {
+			log.Info("a tenant owner opted a cluster in; its repo waits for the web app session", "did", owner.DID,
+				"identity", compose.OwnerIdentityName(owner.DID))
+		}
+	}
+	return nil
+}
+
+func (p *pass) sessionOwners(ctx context.Context, sessions map[string]compose.OwnerSession, self string) ([]compose.SessionOwner, error) {
+	c, r, ws := p.c, p.r, p.ws
+	want := map[string]bool{}
+	for _, did := range p.ctl.publishers.owners() {
+		want[did] = true
+	}
+	existing, err := c.SessionOwners(ctx, ws)
+	if err != nil {
+		return nil, err
+	}
+	inUse, err := c.InfraRecordRepos(ctx, r.Workspace)
+	if err != nil {
+		return nil, err
+	}
+	for _, did := range existing {
+		if inUse[atprotorepo.RepoName(did)] {
+			want[did] = true
+		}
+	}
+	delete(want, self)
+	for did := range sessions {
+		delete(want, did)
+	}
+	dids := slices.Sorted(maps.Keys(want))
+	if err := c.PruneSessionOwners(ctx, ws, dids); err != nil {
+		return nil, err
+	}
+	out := make([]compose.SessionOwner, 0, len(dids))
+	for _, did := range dids {
+		out = append(out, compose.SessionOwner{DID: did, Vault: vaultlayout.RootServerName})
+	}
+	return out, nil
 }
 
 func (p *pass) operatorWrites(ctx context.Context, id *v1alpha1.MarketIdentity, sessionsFile string) {

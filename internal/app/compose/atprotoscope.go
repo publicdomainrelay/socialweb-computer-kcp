@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	infrarecord "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/infra"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
 )
 
@@ -51,6 +52,7 @@ var clusterScope = []string{
 	"rpc:com.publicdomainrelay.temp.cluster.controlPlaneDown?aud=*",
 	"rpc:com.publicdomainrelay.temp.cluster.deleteCluster?aud=*",
 	"rpc:com.publicdomainrelay.temp.cluster.setPublishInfra?aud=*",
+	"repo:" + infrarecord.InfraNSID + "?action=create&action=update&action=delete",
 }
 
 func GatewayAtprotoScope() string {

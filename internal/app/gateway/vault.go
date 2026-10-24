@@ -11,6 +11,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/marketrequester"
+	contractvault "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/vault"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/manifests"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
@@ -111,7 +112,8 @@ func RootVaultSpec(g v1alpha1.GatewaySpec) (v1alpha1.OpenBaoServerSpec, error) {
 		Clients: []v1alpha1.OpenBaoServerClient{{Name: vaultlayout.RootClient, Policies: []string{vaultlayout.PolicyRootWriter}},
 			{Name: WebAppVaultClient, KVMount: WebAppVaultMount},
 			{Name: marketrequester.RequesterVaultClient, KVMount: RequesterVaultMount, Policies: []string{GatewayRequesterPolicy}},
-			{Name: compose.PdsVaultClient, Policies: []string{GatewayPdsPolicy}}},
+			{Name: compose.PdsVaultClient, Policies: []string{GatewayPdsPolicy}},
+			{Name: contractvault.AtprotoSessionClient, Policies: []string{compose.AtprotoSessionProxyPolicy}}},
 		Declared: declared, Plugins: []v1alpha1.OpenBaoPlugin{plugin}}, nil
 }
 
