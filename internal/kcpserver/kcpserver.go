@@ -129,9 +129,6 @@ func CheckArgv(argv []string, shape Shape) error {
 	if !has("--secure-port=0") {
 		return errors.New("kcpserver: kcp refused on a fixed port: behind the edge every listener binds port 0")
 	}
-	if !hasPrefix(MountProxyCertFlag) {
-		return fmt.Errorf("kcpserver: kcp refused without %s: kcp then proxies every request to a mounted workspace through a new transport and never closes its connection", MountProxyCertFlag)
-	}
 	if !hasPrefix(ShardBaseURLFlag) {
 		return fmt.Errorf("kcpserver: kcp refused without %s<front>: a slot that advertises its own port is cut by the next swap", ShardBaseURLFlag)
 	}

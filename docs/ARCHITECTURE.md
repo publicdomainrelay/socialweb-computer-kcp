@@ -1253,6 +1253,15 @@ k3s token at kcp). The rules:
   `status.URL`) MAY stay for kcp-side listing and discovery only; nothing may depend on kcp forwarding
   through it.
 
+Why kcp changed: GHSA-c8w2-fgvx-vhv4 (CVE-2026-61682) let a client-supplied `X-Remote-Group`
+through the front proxy; the fix strips it, #4238 added the mount proxy client certificate, and
+#4427 makes kcp authenticate every caller before it forwards to a mount (v0.33.1 fell back to
+`InsecureSkipVerify` and forwarded an unauthenticated caller's `Authorization`). The supported
+contract is a target that trusts kcp's identity headers; it cannot serve tenant credentials that only
+the tenant k3s can verify, so tenant traffic stays off the mount. Plan 0015's reason ("kcp's local
+proxy runs before authentication and forwards every client header") described v0.33.1 and is
+superseded by this section.
+
 **The negative rule, which is a design invariant:** never configure a cluster's apiserver to
 trust request-header identities from the kcp mount proxy. The only request-header client a tenant
 trusts is its own `client-auth-proxy`, held by the front.
