@@ -8,6 +8,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fswatch"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/procgroup"
 )
 
@@ -27,15 +28,12 @@ func untilOutput(ctx context.Context, m procgroup.Member, done func(out string) 
 	var events <-chan fsnotify.Event
 	var errs <-chan error
 	if path != "" && path != "." {
-		w, err := fsnotify.NewWatcher()
+		w, err := fswatch.Shared().Subscribe(filepath.Dir(path))
 		if err != nil {
 			return fmt.Errorf("clusterprovider: watching the output of %s: %w", path, err)
 		}
 		defer w.Close()
-		if err := w.Add(filepath.Dir(path)); err != nil {
-			return fmt.Errorf("clusterprovider: watching the output of %s: %w", path, err)
-		}
-		events, errs = w.Events, w.Errors
+		events, errs = w.Events(), w.Errors()
 	}
 	for {
 		ok, err := done(m.Output())

@@ -28,6 +28,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterlink"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterstack"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fswatch"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/sha256sum"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/materialiser"
@@ -224,7 +225,7 @@ func (r *Roller) take() []string {
 
 func (r *Roller) Run(ctx context.Context) {
 	r.init()
-	w, err := fsnotify.NewWatcher()
+	w, err := fswatch.Shared().Subscribe()
 	if err != nil {
 		r.log().Error("cluster provider: the roller cannot watch for roll requests", "err", err.Error())
 		r.noteStatus(nil, err)
@@ -243,7 +244,7 @@ func (r *Roller) Run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case ev, ok := <-w.Events:
+		case ev, ok := <-w.Events():
 			if !ok {
 				return
 			}
@@ -254,7 +255,7 @@ func (r *Roller) Run(ctx context.Context) {
 				r.Note(key)
 			}
 			continue
-		case _, ok := <-w.Errors:
+		case _, ok := <-w.Errors():
 			if !ok {
 				return
 			}
