@@ -365,9 +365,6 @@ func (c Config) Relays() []string {
 }
 
 func (c Config) InboundXRPC() bool {
-	if c.IdentityMode == IdentityModeOAuth {
-		return false
-	}
 	if c.Spec.Comms == nil {
 		return true
 	}
@@ -699,7 +696,7 @@ func (q *Requester) callbackRef(fragment string) string {
 			return strings.TrimRight(address, "/")
 		}
 	}
-	if q.callbackDID() == "" {
+	if q.cfg.IdentityMode == IdentityModeOAuth || q.callbackDID() == "" {
 		return ""
 	}
 	return q.callbackDID() + "#" + fragment
