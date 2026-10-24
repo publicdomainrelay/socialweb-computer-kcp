@@ -1,0 +1,220 @@
+plan: "0028"
+title: "A deleted ComputeContract releases its guest: a requester finalizer, a runner that stops on Gone, and roots that release before they stop"
+status: todo
+source: >
+  2026-10-23, read from the code at ba5d120f; not yet seen live. A ComputeContract carries no
+  finalizer. The marketintents forwarder registers the ComputeContract kind without
+  ctlruntime.Finalizer (internal/controllers/marketintents/controller.go:182-186), so a delete
+  removes the object at once and the requester sees only Gone. Requester.Observe handles Gone by
+  dropping its caches (internal/market/requester/observe.go:20-25: contracts.Remove,
+  forgetContract, forgetPending) and never calls contractRunner.Update, which is the only place a
+  release starts on deletion (internal/market/requester/runner.go:103-110: DeletionTimestamp or
+  spec.release). The runner stays in q.runners and keeps holding in waitForRelease
+  (runner.go:976-988), whose only exits are ctx done, releaseCh and a vm.terminated event; there is
+  no hold bound. Its writeStatus calls get NotFound and are dropped (runner.go:1266). After a
+  requester restart nothing resumes it, because the object is gone, so no vm.delete is ever sent.
+  On the bidder a won Bid never expires (internal/market/bidder/bids.go:220-222 expires only
+  Deciding and Published), so the guest keeps running and holds a host core until someone removes
+  it by hand.
+
+  Two deleters reach this path. A direct delete of a held contract (kubectl, an operator script).
+  And the deletion of a MarketRequester root: compose.Adopt puts the root's ownerReference on every
+  ComputeContract without spec.nodeClaimRef (internal/app/compose/infra.go:147-175), and the root's
+  delete pass (internal/app/marketrequester/marketrequester.go:121-137) stops the components and
+  deletes the vaults without releasing anything, so kcp garbage collection deletes the held
+  contracts after the Requester component has already stopped. The MarketBidder root does it in
+  the right order: it deletes its ComputeVMs and waits for them before it stops a component
+  (internal/app/marketbidder/marketbidder.go:169-177).
+
+  Deleters that are already safe: the NodeClaim controller writes spec.release first and deletes
+  only after Settle reports Done (internal/controllers/nodeclaim/controller.go:276-310); the TTL
+  controller deletes only a finished contract (internal/controllers/ttl/controller.go:108-131);
+  run request release and its cleanup remove a contract only once it is Released
+  (cmd/socialweb-computer/request.go:561-567). Not read: whether the Gateway root's delete pass
+  (internal/app/gateway/gateway.go:149-179) stops the Requester before the NodeClaim-linked
+  contracts of its tenant clusters are released.
+principle: >
+  Deleting a ComputeContract is a request to release it. The requester holds a finalizer on every
+  ComputeContract it runs and lets go only when there is nothing left to release: the contract is
+  Released, it never reached an accept, or the release bound of plan 0020 has passed (then it is
+  Failed with the reason). A root releases the contracts it owns before it stops the component that
+  sends the release. The RFP flow and the release delivery of plan 0020 are unchanged; only the
+  trigger and the ordering change.
+state_rules:
+  - Read AGENTS.md first. status is one of todo, doing, done, blocked. The lead flips statuses.
+  - No Go tests (AGENTS.md, plan 0027). Proof is the build gates and the live runs below.
+items:
+  - id: R0-REPRO
+    title: "Reproduce the orphan on a market network before any change"
+    depends_on: []
+    decision: >
+      On an own market network (--bidders 1), run request --hold until the contract is Held, then
+      delete the ComputeContract directly. In a second run, delete the MarketRequester root of a
+      held invocation instead. Read the requester log, the bidder's Bid and ComputeVM objects, the
+      FirecrackerVM and its unit, and the requester repo's vm.delete records. If either run sends a
+      vm.delete or the guest goes, record what released it and revise this plan before M1.
+    files: []
+    done_when: >
+      Both runs are read: after each delete no vm.delete record exists for the contract, the
+      bidder's Bid stays Won, its ComputeVM and FirecrackerVM stay Running for at least 5m, and the
+      requester logs no requester_release line for the contract.
+    status: todo
+
+  - id: M1-CONTRACT-FINALIZER
+    title: "The requester holds a release finalizer on every ComputeContract it runs"
+    depends_on: [R0-REPRO]
+    decision: >
+      Add FinalizerComputeContract = "computecontract.socialweb.computer/release" in
+      api/v1alpha1/types_computecontract.go, beside the other release finalizers. The ComputeContract
+      forwarder of internal/controllers/marketintents registers with ctlruntime.Finalizer of that
+      name in the requester's scope only, so the runtime adds it before the first Reconcile and
+      removes it only when Reconcile returns without Waiting on a deleting object
+      (internal/controllers/runtime/controller.go:405-423). contractmarket.Change gains no new
+      field: the observer's returned wait already reaches the forwarder, and a deleting contract
+      that still has something to release returns Waiting. Requester.Observe on a deleting
+      contract calls runner.Update (the existing DeletionTimestamp branch starts releaseContract)
+      and answers done only when one of these holds: the phase is Released; the contract never
+      wrote an accept (no status.contract.acceptUri, so no bidder holds a guest for it; the runner is
+      stopped); or status.release.deadline has passed (the contract is written Failed with the
+      plan 0020 bound message, then the finalizer goes). A requester that starts and finds a
+      deleting contract with the finalizer rehydrates the runner as today and takes the same
+      branch, so a delete while the requester is down is released when it comes back. If the
+      deadline wait is a requeue site, add its line to deploy/obligations.txt (kind deadline,
+      owner internal/controllers/marketintents, period status.release.deadline minus now).
+      Contracts created before this change have no finalizer; deploy fresh (AGENTS.md).
+    files:
+      - api/v1alpha1/types_computecontract.go
+      - internal/controllers/marketintents/controller.go
+      - internal/market/requester/observe.go
+      - internal/market/requester/runner.go
+      - deploy/obligations.txt
+    done_when: >
+      ACC28-DIRECT-DELETE, ACC28-DELETE-BEFORE-ACCEPT and ACC28-DELETE-WHILE-STOPPED pass; go
+      generate ./api/... leaves no diff; the bidder's forwarders carry no ComputeContract finalizer.
+    status: todo
+
+  - id: M2-GONE-STOPS-RUNNER
+    title: "Gone stops and removes the contract's runner"
+    depends_on: [M1-CONTRACT-FINALIZER]
+    decision: >
+      The Gone branch of Requester.Observe cancels the runner's context and removes it from
+      q.runners through the path a finished runner takes (Requester.runnerDone, observe.go:193-196), so no goroutine
+      keeps holding a contract that no longer exists. When the last status the requester saw had an
+      accept and was not Released, it logs requester_contract_gone_unreleased with the contract,
+      the phase and the receipt uri; after M1 that line means the finalizer was removed by hand.
+    files:
+      - internal/market/requester/observe.go
+      - internal/market/requester/runner.go
+    done_when: >
+      After ACC28-FORCED-REMOVAL the requester's goroutine count for the contract is zero (no
+      further requester_contract lines for it) and requester_contract_gone_unreleased is logged once.
+    status: todo
+
+  - id: M3-ROOT-RELEASES-FIRST
+    title: "A MarketRequester root releases its contracts before it stops its components"
+    depends_on: [M1-CONTRACT-FINALIZER]
+    decision: >
+      The delete pass of internal/app/marketrequester first deletes the ComputeContracts the root
+      owns in its workspace (c.DeleteAll or c.DeleteOwned on ComputeContractGVR) and reports
+      Deleting "<n> ComputeContract(s) releasing" while any is left, the same order as
+      marketbidder.go:169-177. The finalizer of M1 turns each delete into a release, so the root
+      writes no ComputeContract spec and the one-writer rule holds. Only when no contract is left
+      does it stop the components and delete the vaults. A contract whose release ends at the bound
+      is Failed and goes, so the root's deletion is bounded by the plan 0020 release deadline.
+    files:
+      - internal/app/marketrequester/marketrequester.go
+    done_when: "ACC28-ROOT-DELETE passes."
+    status: todo
+
+  - id: M4-GATEWAY-ORDER
+    title: "Read the Gateway root's delete order for NodeClaim-linked contracts"
+    depends_on: [M1-CONTRACT-FINALIZER]
+    decision: >
+      Read internal/app/gateway/gateway.go:149-179 against the NodeClaim release path: the
+      NodeClaim finalizer writes spec.release and waits for Settle, which needs a running Requester.
+      If the Gateway root can stop its Requester while a tenant cluster's NodeClaims still hold
+      contracts, apply the M3 order there (release the contracts, or wait for the NodeClaims, before
+      StopComponents). If it cannot, record why in this item's decision and flip it done.
+    files:
+      - internal/app/gateway/gateway.go
+    done_when: >
+      Either the read shows the order is safe, or a Gateway root deleted on a market network with a
+      tenant cluster holding one node leaves no guest on the bidder within the release bound.
+    status: todo
+
+  - id: ARCH-SECTION-14
+    title: "Open the defect in docs/ARCHITECTURE.md section 14 and move it to section 15 when it closes"
+    depends_on: [R0-REPRO]
+    decision: >
+      An item opens in section 14 with the R0-REPRO reading and moves to section 15 with the before
+      and after readings of the ACC28 rows (AGENTS.md, Standing constraints).
+    files:
+      - docs/ARCHITECTURE.md
+    done_when: "Section 15 holds the entry with R0-REPRO as before and the ACC28 rows as after."
+    status: todo
+
+  - id: CATALOG-ROWS
+    title: "Add the ACC28 scenarios to docs/spec/integration-catalog.yaml for plan 0027"
+    depends_on: [M1-CONTRACT-FINALIZER, M3-ROOT-RELEASES-FIRST]
+    decision: >
+      One catalog entry per ACC28 row, written as actors, setup, asserts and cleanup in the
+      catalog's existing shape, so plan 0027 writes them as specification tests. No Go test here.
+    files:
+      - docs/spec/integration-catalog.yaml
+    done_when: "The catalog holds TestADeletedContractReleasesItsGuest and TestADeletedRequesterRootReleasesItsGuests."
+    status: todo
+
+  - id: ACC28-DIRECT-DELETE
+    title: "A directly deleted held contract is released"
+    depends_on: [M1-CONTRACT-FINALIZER]
+    done_when: >
+      On an own market network: run request --hold reaches Held; kubectl delete of the
+      ComputeContract leaves it Terminating with the release finalizer; the requester logs the
+      release; the requester repo holds exactly one vm.delete record for the contract; within 3m the
+      bidder's ComputeVM, FirecrackerVM, VM unit and VM work dir are gone and the Bid is terminated;
+      then the ComputeContract object is gone.
+    status: todo
+
+  - id: ACC28-DELETE-BEFORE-ACCEPT
+    title: "A contract deleted before any accept goes at once and sends nothing"
+    depends_on: [M1-CONTRACT-FINALIZER]
+    done_when: >
+      A contract deleted while it is collecting bids is gone within one watch event; no accept and no
+      vm.delete record exists for it; no ComputeVM appears on any bidder in the next 60s.
+    status: todo
+
+  - id: ACC28-DELETE-WHILE-STOPPED
+    title: "A contract deleted while the requester is down is released when it comes back"
+    depends_on: [M1-CONTRACT-FINALIZER]
+    done_when: >
+      With a contract Held, the requester component is stopped, the contract is deleted (it stays
+      Terminating), the requester is started again; it sends the one vm.delete, the guest is gone
+      within 3m, then the contract object is gone.
+    status: todo
+
+  - id: ACC28-ROOT-DELETE
+    title: "Deleting a MarketRequester root releases its held contracts before it stops"
+    depends_on: [M3-ROOT-RELEASES-FIRST]
+    done_when: >
+      A MarketRequester root with two Held contracts is deleted; its status reads Deleting
+      "2 ComputeContract(s) releasing", then "component(s) stopping"; both guests are gone on their
+      bidders before the Requester component stops; the root is gone; no guest is left.
+    status: todo
+
+  - id: ACC28-BOUND
+    title: "A release that is never acknowledged ends at the bound and lets the object go"
+    depends_on: [M1-CONTRACT-FINALIZER]
+    done_when: >
+      With the winning bidder stopped and a short release bound, a deleted Held contract retries the
+      vm.delete as in plan 0020, ends Failed with the bound message at the deadline, and then the
+      object is gone.
+    status: todo
+
+  - id: ACC28-FORCED-REMOVAL
+    title: "A finalizer removed by hand leaves no runner behind"
+    depends_on: [M2-GONE-STOPS-RUNNER]
+    done_when: >
+      A Held contract is deleted and its finalizer is removed by a merge patch before the release
+      ends; the requester logs requester_contract_gone_unreleased once and no further line for the
+      contract.
+    status: todo
