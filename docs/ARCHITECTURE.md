@@ -10690,6 +10690,32 @@ to `exec.LookPath("deno")`. The integration hosts hat-7 and hat-9 were prepared 
   cidata. A shell without spec.secretsRef was Failed before the RFP; a contract without tunnels was
   unchanged; release removed the guest and the URL stopped answering.
 
+### The tunnel's bring-up time is the opentunnel certificate (2026-10-24)
+
+- **Before (live, market network tn13, guest monotonic seconds).** cloud-init 1.0 to 11.9 (network
+  stage 3.6 to 5.8, final stage 8.5 to 11.9, of which runcmd 2.8); the package guard installs nothing
+  (jq, curl and ca-certificates are in the image from `deploy/bidder/preinstall-market.json`); the
+  iroh vm.onNetwork goes out at 12.1. One setup-guest-tunnels.service started at 11.8, after every
+  other module's `systemctl enable`, and fetched opentunnel (0.4) then wootty (0.8); the tunnel unit
+  waited for both and started at 13.0, and opentunnel asked for its certificate at 13.75. The
+  certificate came at 177.3 (163.5 s); the tagged vm.onNetwork went out at 177.5. Requester:
+  iroh network 10:00:12.8Z, tagged network 10:02:58Z, 165 s apart.
+- **The decision.** One setup unit per binary (`setup-guest-opentunnel.service`,
+  `setup-guest-wootty.service`, stamp `/var/lib/setup-guest-<name>.done`), started in parallel; the
+  tunnel unit requires only the opentunnel one, the shell unit only the wootty one; the tunnels
+  module starts its setup and tunnel units from the front of runcmd (`RuncmdPrepend`) and enables
+  them after; a failed fetch retries after 1, 2, 3 and 4 s instead of 5 s each. Starting them from
+  `bootcmd` through a `systemd-run` path unit hung boot twice: cloud-init.service is
+  `DefaultDependencies=no` and `Before=sysinit.target`. The binaries stay downloads: both take 1.2 s
+  and now finish before the iroh report, so baking them into the guest image would gain nothing.
+- **After (live, tn13).** Both setups 10.5 to 11.2 in parallel, the tunnel unit at 11.0, the
+  certificate request at 11.9, before the iroh report at 12.1; the certificate came at 119.5
+  (107.6 s); the tagged vm.onNetwork at 119.8. Requester: iroh network 10:21:08.2Z, tagged network
+  10:22:55Z, 107 s apart. The guest's own share of the gap went from 1.9 s to none; the rest is
+  opentunnel.xyz's ACME DNS-01 issuance (server side, 108 to 164 s here, 72 s on prod), which only
+  an identity made before the guest boots could take off the critical path. The URL answered as in
+  plan 0032 (health 200, bootstrap 204 with the token, sessions 200 with the cookie).
+
 ## 16. Vocabulary
 
 | | |

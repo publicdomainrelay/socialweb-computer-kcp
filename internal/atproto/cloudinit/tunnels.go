@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -21,10 +22,6 @@ const (
 	ShellTokenMinLength = 32
 
 	GuestTunnelsSetupPath = "/usr/local/bin/setup-guest-tunnels.sh"
-
-	GuestTunnelsSetupUnit = "setup-guest-tunnels.service"
-
-	GuestTunnelsStamp = "/var/lib/setup-guest-tunnels.done"
 
 	GuestTunnelScriptPath = "/usr/local/bin/guest-tunnel.sh"
 
@@ -89,6 +86,14 @@ type TunnelsOptions struct {
 
 func TunnelURLPath(tag string) string {
 	return GuestTunnelRunDir + "/" + tag + ".url"
+}
+
+func GuestBinarySetupUnit(name string) string {
+	return "setup-guest-" + name + ".service"
+}
+
+func GuestBinaryStamp(name string) string {
+	return "/var/lib/setup-guest-" + name + ".done"
 }
 
 func TunnelUnit(tag string) string {
@@ -196,11 +201,17 @@ func tunnelsPatch(opts TunnelsOptions) (UserDataPatch, error) {
 	if err := opts.Validate(); err != nil {
 		return UserDataPatch{}, err
 	}
+	binaries := []string{"opentunnel"}
+	if opts.shells() {
+		binaries = append(binaries, "wootty")
+	}
 	files := []WriteFileEntry{
 		{Path: GuestTunnelsSetupPath, Owner: "root:root", Permissions: "0700", Content: tunnelsSetupScript(opts)},
-		{Path: "/etc/systemd/system/" + GuestTunnelsSetupUnit, Owner: "root:root", Permissions: "0644", Content: unitFile(
+	}
+	for _, name := range binaries {
+		files = append(files, WriteFileEntry{Path: "/etc/systemd/system/" + GuestBinarySetupUnit(name), Owner: "root:root", Permissions: "0644", Content: unitFile(
 			[]string{
-				"Description=Install the pinned opentunnel and wootty binaries of the contract's tunnels",
+				"Description=Install the pinned " + name + " binary of the contract's tunnels",
 				"After=network-online.target",
 				"Wants=network-online.target",
 			},
@@ -209,27 +220,35 @@ func tunnelsPatch(opts TunnelsOptions) (UserDataPatch, error) {
 				"RemainAfterExit=yes",
 				"TimeoutStartSec=900",
 				"Restart=on-failure",
-				"RestartSec=15",
-				"ExecStart=" + GuestTunnelsSetupPath,
+				"RestartSec=5",
+				"ExecStart=" + GuestTunnelsSetupPath + " " + name,
 				"StandardOutput=journal+console",
 				"StandardError=journal+console",
-			})},
-		{Path: GuestTunnelScriptPath, Owner: "root:root", Permissions: "0700", Content: guestTunnelScript},
-		{Path: GuestTunnelReportPath, Owner: "root:root", Permissions: "0700", Content: guestTunnelReportScript},
+			})})
 	}
-	units := []string{GuestTunnelsSetupUnit}
+	files = append(files,
+		WriteFileEntry{Path: GuestTunnelScriptPath, Owner: "root:root", Permissions: "0700", Content: guestTunnelScript},
+		WriteFileEntry{Path: GuestTunnelReportPath, Owner: "root:root", Permissions: "0700", Content: guestTunnelReportScript},
+	)
+	early := []string{}
+	for _, name := range binaries {
+		early = append(early, GuestBinarySetupUnit(name))
+	}
+	units := slices.Clone(early)
 	if opts.shells() {
 		files = append(files, WriteFileEntry{Path: WoottyRunPath, Owner: "root:root", Permissions: "0700", Content: woottyRunScript})
 	}
+	openTunnelSetup := GuestBinarySetupUnit("opentunnel")
+	woottySetup := GuestBinarySetupUnit("wootty")
 	for _, t := range opts.Tunnels {
 		port := strconv.Itoa(t.Port)
 		files = append(files,
 			WriteFileEntry{Path: "/etc/systemd/system/" + TunnelUnit(t.Tag), Owner: "root:root", Permissions: "0644", Content: unitFile(
 				[]string{
 					"Description=opentunnel route of guest tunnel " + t.Tag + " to 127.0.0.1:" + port,
-					"After=network-online.target " + GuestTunnelsSetupUnit,
+					"After=network-online.target " + openTunnelSetup,
 					"Wants=network-online.target",
-					"Requires=" + GuestTunnelsSetupUnit,
+					"Requires=" + openTunnelSetup,
 					"StartLimitIntervalSec=0",
 				},
 				[]string{
@@ -253,6 +272,7 @@ func tunnelsPatch(opts TunnelsOptions) (UserDataPatch, error) {
 					"StandardError=journal+console",
 				})},
 		)
+		early = append(early, TunnelUnit(t.Tag))
 		units = append(units, TunnelUnit(t.Tag))
 		if t.ShellEnvFile == "" {
 			continue
@@ -260,9 +280,9 @@ func tunnelsPatch(opts TunnelsOptions) (UserDataPatch, error) {
 		files = append(files, WriteFileEntry{Path: "/etc/systemd/system/" + ShellUnit(t.Tag), Owner: "root:root", Permissions: "0644", Content: unitFile(
 			[]string{
 				"Description=wootty browser shell of guest tunnel " + t.Tag + " on 127.0.0.1:" + port,
-				"After=network-online.target setup-secrets.service " + GuestTunnelsSetupUnit,
+				"After=network-online.target setup-secrets.service " + woottySetup,
 				"Wants=setup-secrets.service",
-				"Requires=" + GuestTunnelsSetupUnit,
+				"Requires=" + woottySetup,
 				"StartLimitIntervalSec=0",
 			},
 			[]string{
@@ -282,8 +302,11 @@ func tunnelsPatch(opts TunnelsOptions) (UserDataPatch, error) {
 	return UserDataPatch{
 		Packages:   []string{"jq", "curl", "ca-certificates"},
 		WriteFiles: files,
-		Runcmd: []any{
+		RuncmdPrepend: []any{
 			"systemctl daemon-reload",
+			"systemctl start --no-block " + strings.Join(early, " "),
+		},
+		Runcmd: []any{
 			"systemctl enable " + list,
 			"systemctl start --no-block " + list,
 		},
@@ -301,31 +324,26 @@ func unitFile(unit, service []string) string {
 func tunnelsSetupScript(opts TunnelsOptions) string {
 	var arches strings.Builder
 	for _, arch := range []string{"x86_64", "aarch64"} {
-		fmt.Fprintf(&arches, "  %s)\n", arch)
-		found := false
 		for _, p := range opts.OpenTunnel {
 			if p.Arch == arch {
-				fmt.Fprintf(&arches, "    fetch opentunnel %q %q %q\n", p.URL, p.SHA256, p.Member)
-				found = true
+				fmt.Fprintf(&arches, "  %s:opentunnel) fetch opentunnel %q %q %q ;;\n", arch, p.URL, p.SHA256, p.Member)
 			}
 		}
 		if opts.shells() {
 			for _, p := range opts.Wootty {
 				if p.Arch == arch {
-					fmt.Fprintf(&arches, "    fetch wootty %q %q %q %q %q\n",
+					fmt.Fprintf(&arches, "  %s:wootty) fetch wootty %q %q %q %q %q ;;\n", arch,
 						"https://"+p.Registry+"/v2/"+p.Repository+"/blobs/sha256:"+p.SHA256, p.SHA256, p.Member, p.Registry, p.Repository)
 				}
 			}
 		}
-		if !found {
-			fmt.Fprintf(&arches, "    echo \"setup-guest-tunnels: no opentunnel pin for %s\" >&2; exit 1\n", arch)
-		}
-		arches.WriteString("    ;;\n")
 	}
 	return `#!/usr/bin/env bash
 set -euo pipefail
 
-[ -f "` + GuestTunnelsStamp + `" ] && exit 0
+NAME="$1"
+STAMP="` + GuestBinaryStamp("${NAME}") + `"
+[ -f "${STAMP}" ] && exit 0
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "${TMP}"' EXIT
@@ -349,7 +367,7 @@ fetch() {
       return 0
     fi
     echo "setup-guest-tunnels: ${name} fetch or check failed (attempt ${attempt}): ${url}" >&2
-    sleep 5
+    if [ "${attempt}" -lt 5 ]; then sleep "${attempt}"; fi
   done
   echo "setup-guest-tunnels: ${name} failed after 5 attempts: ${url}" >&2
   exit 1
@@ -361,11 +379,11 @@ case "$(uname -m)" in
   *) ARCH="$(uname -m)" ;;
 esac
 
-case "${ARCH}" in
-` + arches.String() + `  *) echo "setup-guest-tunnels: unsupported machine type ${ARCH}" >&2; exit 1 ;;
+case "${ARCH}:${NAME}" in
+` + arches.String() + `  *) echo "setup-guest-tunnels: no ${NAME} pin for machine type ${ARCH}" >&2; exit 1 ;;
 esac
 
-touch "` + GuestTunnelsStamp + `"
+touch "${STAMP}"
 `
 }
 

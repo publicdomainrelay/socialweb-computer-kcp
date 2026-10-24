@@ -1355,8 +1355,8 @@ entries:
       status.contract.networks names wootty.
     asserts: >
       The contract is Held with an iroh vmAddress before any tunnel is up. On the guest
-      /var/lib/setup-secrets.done exists, the env file is root:root 0600, and setup-guest-tunnels,
-      guest-tunnel-wootty and wootty-wootty are active. The bidder's repo holds a signed
+      /var/lib/setup-secrets.done exists, the env file is root:root 0600, and setup-guest-opentunnel,
+      setup-guest-wootty, guest-tunnel-wootty and wootty-wootty are active. The bidder's repo holds a signed
       market.event whose vm.onNetwork payload has tag wootty and an https address; the contract's
       status.contract.networks holds {tag: wootty, address, at, event}. Over HTTPS the address
       answers 401 on /api/sessions without the cookie and on /api/auth/bootstrap with a wrong
