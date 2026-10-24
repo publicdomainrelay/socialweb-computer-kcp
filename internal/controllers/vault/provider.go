@@ -136,6 +136,10 @@ func (p *Provider) binding(ref commonv1.ObjectRef) (Binding, bool) {
 }
 
 func (p *Provider) clientFor(to commonv1.ObjectRef) openbao.ClientFor {
+	return p.clientAs(to, clientName)
+}
+
+func (p *Provider) clientAs(to commonv1.ObjectRef, pick func(clients []v1alpha1.OpenBaoServerClientRefs, mount string) string) openbao.ClientFor {
 	return func(ctx context.Context, mount string) (*openbao.Client, error) {
 		b, ok := p.binding(to)
 		if !ok {
@@ -143,7 +147,7 @@ func (p *Provider) clientFor(to commonv1.ObjectRef) openbao.ClientFor {
 		}
 		switch {
 		case b.Server != nil:
-			srv, err := openbao.ServerOf(b.Backend.Workspace, b.Backend.Name, *b.Server, clientName(b.Server.Clients, mount))
+			srv, err := openbao.ServerOf(b.Backend.Workspace, b.Backend.Name, *b.Server, pick(b.Server.Clients, mount))
 			if err != nil {
 				return nil, err
 			}
@@ -172,6 +176,10 @@ func clientName(clients []v1alpha1.OpenBaoServerClientRefs, mount string) string
 		name = c.Name
 	}
 	return name
+}
+
+func sessionClient([]v1alpha1.OpenBaoServerClientRefs, string) string {
+	return contractvault.AtprotoSessionClient
 }
 
 func (p *Provider) remoteClient(ctx context.Context, key vaultKey, b Binding) (*openbao.Client, error) {
@@ -227,6 +235,12 @@ func (p *Provider) Register(b *bus.Bus) {
 	})
 	bus.Provide(b, VaultGroupKind, contractvault.CapabilityWrite, func(ctx context.Context, to commonv1.ObjectRef, scope []string) (contractvault.Keys, error) {
 		return p.open(ctx, to, scope)
+	})
+	bus.Provide(b, VaultGroupKind, contractvault.CapabilityAtprotoSession, func(ctx context.Context, to commonv1.ObjectRef, scope []string) (contractvault.AtprotoSessions, error) {
+		if _, ok := p.binding(to); !ok {
+			return nil, fmt.Errorf("%w: %s/%s", ErrUnbound, to.Workspace, to.Name)
+		}
+		return openbao.NewHandle(p.clientAs(to, sessionClient), "", scope)
 	})
 	bus.Provide(b, VaultGroupKind, contractvault.CapabilityPKIIssue, func(ctx context.Context, to commonv1.ObjectRef, scope []string) (contractvault.PKI, error) {
 		return p.open(ctx, to, scope)
