@@ -10663,6 +10663,33 @@ to `exec.LookPath("deno")`. The integration hosts hat-7 and hat-9 were prepared 
   mount", "The tenant path is gated") and section 7. The live proof at the end of plan 0026 is the
   instrument.
 
+### A browser shell on a guest is an opt-in tunnel (2026-10-24, plan 0032)
+
+- **Before.** iroh was the only guest transport; the old wootty module was removed and a string
+  module id "wootty" fails with LegacyTransportError. A requester could reach its guest only over
+  ssh through the iroh ticket in `status.contract.vmAddress`; vm.onNetwork carried one address.
+- **The decision (user, 2026-10-24).** iroh stays the default and required transport. A
+  ComputeContract may list `spec.tunnels` (`{tag, port, server, shell: {envFile}}`); the requester's
+  user_data then installs the module of `internal/atproto/cloudinit/tunnels.go`: opentunnel from the
+  `assets.opentunnel` fetch pin, wootty with its web UI from the pinned image layer of
+  `guestDownloads.wootty` in `internal/versions/versions.json`, both checked by sha256 on the guest.
+  One opentunnel profile per tag gives `https://<16 hex route>.<12 char id>.opentunnel.xyz`. The
+  guest reports it through the bidder (`send-onnetwork.sh <tag> <url>`, `POST /v1/on-network` with
+  `tag`, ComputeVM `status.market.guest.networks`), the bidder signs one vm.onNetwork with `tag` per
+  tunnel, and the requester records `status.contract.networks[] {tag, address, at, event}` without
+  touching vmAddress or the Held transition. The wootty token comes only in the secrets bundle
+  (`/etc/wootty/wootty.env`, `WOOTTY_AUTH_TOKEN=<32 base64url>`, root:root 0600); `wootty-run.sh`
+  refuses to start without at least 32 characters, because wootty asks for no auth on a loopback
+  bind without a token. A bidder older than this records no tagged address.
+- **After (live, market network sh32, --bidders 1).** Held at 07:41:58Z on the iroh address with the
+  secrets fetched at 07:41:57Z; the opentunnel certificate came at 07:43:59Z and the tagged
+  vm.onNetwork (bidder repo, signed market.event bound to the receipt) and
+  `status.contract.networks` followed the same second; over HTTPS `/api/sessions` answered 401
+  without the cookie, the bootstrap 401 with a wrong bearer and 204 with the token, `/api/sessions`
+  200 with the cookie, `/` 200 with the WooTTY page; the token was in no log, kcp object or
+  cidata. A shell without spec.secretsRef was Failed before the RFP; a contract without tunnels was
+  unchanged; release removed the guest and the URL stopped answering.
+
 ## 16. Vocabulary
 
 | | |
