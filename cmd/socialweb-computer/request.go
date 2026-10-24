@@ -32,7 +32,7 @@ const (
 	requestSummaryRead  = 10 * time.Second
 )
 
-var requestOptions = []string{"network", "name", "secrets", "hold", "exec", "skip-ssh", "contract-timeout", "state-dir",
+var requestOptions = []string{"network", "name", "secrets", "tunnel", "hold", "exec", "skip-ssh", "contract-timeout", "state-dir",
 	"ready-timeout", "network-timeout", "kcp-path", "kine-path", "bao-path", "dumbpipe-path", "asset-cache"}
 
 type requestRun struct {
@@ -78,6 +78,9 @@ func newRequestRun(a *app, vals clicfg.Values) (*requestRun, error) {
 	}
 	r := &requestRun{a: a, vals: vals, stateRoot: root, hold: vals.Bool("hold"), skipSSH: vals.Bool("skip-ssh"),
 		exec: vals.String("exec"), secrets: vals.String("secrets")}
+	if r.contract.Tunnels, err = parseTunnels(vals.String("tunnel")); err != nil {
+		return nil, fmt.Errorf("tunnel: %w", err)
+	}
 	if r.contractTimeout, err = time.ParseDuration(vals.String("contract-timeout")); err != nil {
 		return nil, fmt.Errorf("contract-timeout: %w", err)
 	}
