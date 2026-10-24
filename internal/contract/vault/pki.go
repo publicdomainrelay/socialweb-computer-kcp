@@ -7,20 +7,6 @@ import (
 
 var ErrNoAuthority = errors.New("vault: the namespace holds no authority yet")
 
-const (
-	DefaultPKIMount = "pki"
-
-	DefaultPKIRole = "denopod"
-
-	DefaultRootCommonName = "kcp-mesh-root"
-
-	DefaultRootTTL = "87600h"
-
-	DefaultIntermediateTTL = "43800h"
-
-	DefaultLeafTTL = "720h"
-)
-
 type Cert struct {
 	Certificate string `json:"certificate"`
 
@@ -73,16 +59,6 @@ type CertRequest struct {
 	TTL string
 }
 
-type Authority struct {
-	Namespace string
-
-	CommonName string
-
-	Serial string
-
-	Chain string
-}
-
 type Health struct {
 	Initialized bool `json:"initialized"`
 
@@ -115,16 +91,4 @@ type PKIBackend interface {
 	Issue(ctx context.Context, namespace, mount, role string, req CertRequest) (Cert, error)
 
 	DeleteNamespace(ctx context.Context, path string) error
-}
-
-type PKIProvisioner interface {
-	EnsureRoot(ctx context.Context) (RootCA, error)
-
-	EnsureAuthority(ctx context.Context, path string) (Authority, error)
-
-	Issue(ctx context.Context, path, commonName string, altNames, ips []string) (Cert, error)
-
-	Delete(ctx context.Context, path string) error
-
-	CachedRootPEM() []byte
 }

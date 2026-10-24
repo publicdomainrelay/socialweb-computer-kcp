@@ -3409,7 +3409,6 @@ internal/atproto/plc/             the PLC directory: documents, signed operation
 internal/atproto/relay/           the relay: slurper, sequencer, frames, store, verify
 internal/atproto/repo/            the atproto repository: MST, CAR, commits, codec, block store, sqlite record store
 internal/atproto/serviceauth/     service-auth tokens: sign, verify, admin, lxm from the path
-internal/atproto/trust/           trust listers and vouch resolvers (Tangled graph, badge.blue operator discovery)
 internal/atproto/xrpc/            the XRPC client: bearer, service-auth and DPoP auth, errors, sync
 internal/atprotoauth/             verifies an atproto service-auth token for one XRPC method: signature, audience, method, admitted DID methods, a 5-minute lifetime cap
 internal/didkey/                  did:key encode, parse and verify (ed25519, secp256k1)
@@ -3425,7 +3424,6 @@ internal/exposure/                the Exposure publisher, the ComponentLink link
 internal/eventstream/             EventStream matching, dial, the market sink, record watch sources
 internal/statusstate/             status sources: PLC identity, relay health, vault credentials and certificates
 internal/statesync/               the StateSync GVR; the outbox is in internal/market/participant
-internal/remotepds/               the RemotePDS GVR
 ```
 
 impl, compute, guests and nodes:
@@ -3510,7 +3508,6 @@ internal/materialiser/            the per-cluster process reconciler: reap, allo
 internal/procgroup/               a process group: spec, members, steps
 internal/portallocator/           port ranges, purposes and leases, and the advertise address checks
 internal/portscan/                finds listener pids (procnet, lsof)
-internal/liveports/               port blocks for live runs, locked under /var/tmp/socialweb-liveports
 internal/subnetallocator/         allocates guest subnets from a pool and checks host collisions
 internal/nsexec/                  `internal ns-exec`: a private hostname and bind mounts
 internal/irohdial/                `internal iroh-dial`: dials an iroh ticket through dumbpipe
@@ -3539,17 +3536,8 @@ impl, the Go port of kcp-libs:
 
 ```
 internal/kcplibs/common/clientlimit/   client rate limits on a rest config
-internal/kcplibs/common/denospec/      pod spec types: permissions, probes, restart policy
-internal/kcplibs/common/listeners/     listener names and the tables reported in status
-internal/kcplibs/common/queue/         the run queue: leases, admission, capacity, order
 internal/kcplibs/common/ref/           a cluster ref: key, base host, cluster URL
-internal/kcplibs/common/runner/        pod and engine runner interfaces
-internal/kcplibs/common/store/         token minter and unchanged check
-internal/kcplibs/factory/admission/    the admitter
 internal/kcplibs/impl/kcpstore/        the kcp object store client used across the code
-internal/kcplibs/impl/memoryrunner/    in-memory pod and engine runners
-internal/kcplibs/impl/metrics/         a metrics registry and server
-internal/kcplibs/impl/pkiprovisioner/  a PKI provisioner on the vault contract
 ```
 
 impl, the policy engine:
