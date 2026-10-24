@@ -30,7 +30,7 @@ var backendPrefixes = []string{
 	"internal/vmruntime", "internal/hostsvc", "internal/fcapi", "internal/guestnet", "internal/guestdisk", "internal/guestimage",
 	"internal/policyengine/runs", "internal/relay", "internal/ingress", "internal/ssh", "internal/dispatcher",
 	"internal/gateway", "internal/guestcp", "internal/market", "internal/lease", "internal/postgresctl", "internal/ttlctl",
-	"internal/clusterprovider",
+	"internal/clusterprovider", "internal/tenantstore",
 }
 
 var hostLibraries = []string{
