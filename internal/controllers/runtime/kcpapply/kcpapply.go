@@ -406,8 +406,8 @@ func (a *Applier) applyOne(ctx context.Context, ri dynamic.ResourceInterface, u 
 		maps.Copy(labels, a.opts.Labels)
 		u.SetLabels(labels)
 	}
-	if live == nil && u.GroupVersionKind().Group == tenancyv1alpha1.SchemeGroupVersion.Group && u.GetKind() == "Workspace" {
-		stamped, err := a.stampOwner(ctx, u)
+	if u.GroupVersionKind().Group == tenancyv1alpha1.SchemeGroupVersion.Group && u.GetKind() == "Workspace" {
+		stamped, err := a.stampOwner(ctx, u, live)
 		if err != nil {
 			return c, err
 		}
@@ -435,13 +435,21 @@ func (a *Applier) applyOne(ctx context.Context, ri dynamic.ResourceInterface, u 
 	return c, nil
 }
 
-func (a *Applier) stampOwner(ctx context.Context, u *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+func (a *Applier) stampOwner(ctx context.Context, u, live *unstructured.Unstructured) (*unstructured.Unstructured, error) {
 	if _, set := u.GetAnnotations()[tenancyv1alpha1.ExperimentalWorkspaceOwnerAnnotationKey]; set {
 		return u, nil
 	}
-	owner, err := a.workspaceOwner(ctx)
-	if err != nil {
-		return nil, err
+	var owner string
+	if live != nil {
+		var held bool
+		if owner, held = live.GetAnnotations()[tenancyv1alpha1.ExperimentalWorkspaceOwnerAnnotationKey]; !held {
+			return u, nil
+		}
+	} else {
+		var err error
+		if owner, err = a.workspaceOwner(ctx); err != nil {
+			return nil, err
+		}
 	}
 	out := u.DeepCopy()
 	ann := out.GetAnnotations()
