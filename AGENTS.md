@@ -22,8 +22,7 @@ needs the argument behind it. Do not read it end to end.
 | Why a decision was made, and what it closed | `docs/ARCHITECTURE.md` section 15 |
 | The plans and the status of each item | `docs/plans/*.yaml` |
 | The live backlog (what is open now) | `NEXT.yaml` |
-| Which TypeScript entries ship | `deploy/ts-entries.yaml` |
-| The TypeScript workspace, its tasks and versions | `deno.json`, `deno.lock` |
+| The TypeScript that is left | `scripts/*.ts`, and the policy actions in `internal/policyengine/bundled-actions/tangy/` |
 | Env the clusterprovider reads | `internal/providermain/config.go`; the gateway's defaults for it in `internal/stack/gatewaykcp/env.go` |
 | Env the gateway reads | `internal/gatewaymain/config.go`, `deploy/socialweb-gateway.env.example` |
 | How prod is installed and upgraded | `scripts/deploy.sh` (gateway: `install gateway`, then `upgrade`), `socialweb-computer install bidder` |
@@ -39,10 +38,10 @@ Go:
 
 | Directory | What it holds |
 | --- | --- |
-| `cmd/` | one directory per binary (`socialweb-computer`, `socialweb-gateway`, `socialweb-tsbundle`, ...) |
-| `internal/` | the Go packages; `internal/tsbundle` finds and embeds the TypeScript |
-| `api/` | the kcp API types; `go generate ./api/...` writes the schemas and the TypeScript wire types |
-| `deploy/` | manifests, sets, scripts, `check.sh`, `ts-entries.yaml` |
+| `cmd/` | one directory per binary (`socialweb-computer`, `socialweb-node`, `socialweb-vmexec`, `socialweb-apigen`, the two OpenBao auth plugins) |
+| `internal/` | the Go packages, in the plan 0026 layers (`docs/ARCHITECTURE.md` section 12) |
+| `api/` | the kcp API types; `go generate ./api/...` writes the schemas, the APIExports and the generated Go |
+| `deploy/` | manifests, sets, the generated schemas and exports, `check.sh` |
 | `docs/` | `ARCHITECTURE.md`, `plans/`, inventories, research notes |
 | `rust/` | socialweb-meshd |
 
@@ -50,20 +49,11 @@ TypeScript:
 
 | Directory | What it holds |
 | --- | --- |
-| `deno.json` | the one workspace: every package below, the shared npm and jsr versions, the tasks |
-| `deno.lock` | the one lockfile for the whole workspace |
-| `socialweb-computer-k8s/` | the socialweb-computer-k8s web app: `hono-socialweb-computer-k8s/` (CLI), `lib/`, `web/`, `test/` |
-| `ts/<repository>/` | the vendored code of one original repository, at its original path |
+| `scripts/*.ts` | one-off operator scripts (`oauth-signin.ts`, `associate-bidder.ts`, `publish-spaces.ts`), run with `deno run` |
+| `internal/policyengine/bundled-actions/tangy/<action>/` | one policy action: `index.ts` and its built `dist/index.js`, embedded by the policy engine |
 
-The vendored repositories are atproto-market, atproto-relay, deno-worker-sandbox, did-key-associator
-(hono-backend only), did-key-ingress-proxy, hono-compute-provider, hono-pds, policy-engine,
-socialweb-computer-ssh and typescript-helpers. Only the packages that the entries in
-`deploy/ts-entries.yaml` reach came in, plus the tests of those packages and the files they read at run
-time. TypeScript that is not in that set stays in its own repository (digitalocean-bidder,
-deno-macos-runner-desktop, the did-key-associator frontend, open-architecture).
-
-One package name exists once. The packages that socialweb-computer-ssh and socialweb-computer-k8s
-shared have one copy, in `socialweb-computer-k8s/lib/`.
+The vendored TypeScript repositories (`ts/`), the socialweb-computer-k8s web app, `deno.json`,
+`deno.lock` and `deploy/ts-entries.yaml` are gone from this repository.
 
 ## The deno workspace and the lockfile
 

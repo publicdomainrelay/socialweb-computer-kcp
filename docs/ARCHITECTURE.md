@@ -3300,48 +3300,506 @@ confirm inline, unchanged.
 
 ## 12. Code layout
 
-```
-api/v1alpha1/          wire types only. No logic, no I/O
-internal/${concept}/   one package per concern; the interface declared where consumed
-internal/atprotoauth/  verifies an atproto service-auth token for one XRPC method: signature, audience, method, admitted DID methods and a 5-minute lifetime cap
-internal/atproto/cloudinit/ the Go cloud-init modules: the k3s-join module writes the node config, the unit files and one pinned-download bootstrap shell; the secrets, k3s and iroh modules are siblings
-internal/nodeagent/    the guest node agent behind `cmd/socialweb-node`: join secrets, dumbpipe links, k3s ordering, CNI, diagnose, hostname, DNS link, masquerade and meshd install
-internal/systemdunit/  the one unit-file model and writer shared by HostProcess/hostsvc and the node agent
-internal/services/ingressproxy/ one IngressProxy component with providers xrpc-subscription, iroh and opentunnel; each provider is its own package
-internal/exposure/     resolves an Exposure's `ingressRef` through the component registry and uses the provider's optional `IngressRegistrar`
-internal/nodeprovider/ derives a node's DNS-1123 name from the (cluster label, node id) pair
-internal/vmruntime/    the Linux VM runtime: one-shot prep and one transient VM unit per guest (swc-userns-stage -> pasta -> socialweb-vmexec -> firecracker); `socialweb-computer internal vm start|inspect|stop|list` is its CLI, and the bidder's firecracker provider drives it
-internal/nodeimagemain/ the two Go steps of scripts/build-guest-image.sh, `socialweb-computer nodeimage guest-rootfs|guest-manifest`, compiled only into a dev build
-internal/nodemarket/   places a node as a claim on the COMPUTE MARKET: it writes a NodeClaim into the cluster's home workspace and returns, reads the claim's status for the join wait and its fatal message, and closes the node by deleting the claim and waiting for the door to destroy the machine; it also keeps each node's own k3s node-password file
-internal/hostos/       the one platform seam, primitives only (locking, process identity, liveness, termination, command line, boot id, port range, SysProcAttr) with Linux, darwin and Windows files; darwin refuses with ErrUnsupported
-internal/denorun/      builds every deno argv: --no-code-cache and --node-modules-dir=none always, DENO_DIR = <state>/deno/<closure sha256>, production adds --cached-only --frozen and DENO_NO_UPDATE_CHECK=1
-internal/tsbundle/     where the TypeScript comes from: the embedded closure (tar.zst + manifest, extracted read-only to <state>/ts/<sha256>/) in a release build, this checkout (SOCIALWEB_COMPUTER_SOURCE_ROOT, or the walk up to the directory that holds deno.json and deploy/ts-entries.yaml) in a dev build; internal/tsbundle/tsbuild (behind cmd/socialweb-tsbundle, never linked into the core) builds the closure from deploy/ts-entries.yaml
-internal/stack/denoruntime/ the owned deno-kcp provider (internal/denokcp) in-process in the core: the pinned deno, <state>/denokcp/runs, runner timeout disabled, the front kubeconfig with the shard-admin token, the denoruntime set applied first, SOCIALWEB_TS_ROOT/SOCIALWEB_TS_KEY and the closure-keyed DENO_DIR on every DenoPod; deno processes are plain children of the core unit
-internal/plcresolver/  resolves a did:plc or did:web to its key IDs for the revocation sweep; NXDOMAIN is an outage, not an absence
-internal/plcsweep/     the periodic pass that lists DIDs, resolves them and revokes those whose keys are gone
-internal/sweepkcp/     the kcp side of that sweep: build the account worklist from workspaces and AtprotoIdentity records, write the deny, plan the fan-out
-internal/foldmain/     the Invocation a verb body runs with (args, env, stdio, the resolved bin/<sha>/ path, the verb words) and the re-exec argv it builds
-internal/${binary}main/ the body of a host verb (gatewaymain, providermain, vaultmain, checkhostmain, ccmmain, tenantcredentialmain) behind Main(ctx, Invocation) int; socialweb-computer dispatches its verb to it with the raw args, and the clusterprovider re-execs the CCM as `<bin/sha path> internal cloud-controller-manager` with the CCM's three-variable env rebuilt explicitly
-cmd/socialweb-computer/ the multi-call CLI; every host verb lives here
-cmd/${binary}/         standalone binaries only: socialweb-node (the guest agent), socialweb-vmexec (VM-unit asset), socialweb-tsbundle and socialweb-apigen (build tools), openbao-plugin-auth-sshsig and openbao-plugin-auth-atproto (each its own module); socialweb-nodeboot, socialweb-nodeimage and socialweb-nodeinit no longer exist
-deploy/                manifests and manifest sets, the audit policy, check.sh, ts-entries.yaml
-rust/                  a cargo workspace; rust/socialweb-meshd is the per-node pod mesh daemon that runs INSIDE a market guest (section 9), rust/build.sh its static musl build
-```
-
-Dependencies flow one way: `api` <- `internal` <- `cmd`. A new transport is a NEW PACKAGE, not a
+This section maps the code as it is. Every directory under `api/`, `internal/` and `cmd/` appears
+once in the blocks below. The layout is the plan 0026 layers (`docs/plans/0026-abc-control-plane.yaml`,
+and "Architecture rules (plan 0026)" in AGENTS.md). A new transport is a new sibling package, not a
 branch inside an existing one.
 
-**A cluster's key is derived once, from its home workspace.** `kcpclient.ClusterKey` is the only
-spelling: it takes a home workspace path `root:<accountHash>:<name>` - `HomePath` builds the one the
-door's `Ensure` creates - and returns `<accountHash>-<name>`, which is a DNS-1123 subdomain. Every
+### The layers, and how the checker assigns them
+
+`scripts/check-architecture.sh` runs `go run ./hack/archcheck`. The checker gives every package one
+layer from its path alone (`hack/archcheck/layers.go`). An import may only point down this order:
+
+```
+api <- contract <- kit <- transport <- impl <- controllers <- app <- cmd
+```
+
+| Path | Layer | Notes |
+| --- | --- | --- |
+| `api/**` | api (common) | types, contract status, refs; no logic, no I/O |
+| `internal/contract/**` | contract (abc) | imports api, other contracts and the standard library only; no third-party import |
+| `internal/kit/**` | kit (common helpers) | no concept |
+| `internal/controllers/runtime/<pkg>` | transport | the dynamic client and unstructured objects are allowed only here and in `internal/apigen` |
+| `internal/controllers/**`, and the package `internal/controllers/runtime` itself | controllers (adapters) | one reconciler per kind |
+| `internal/app/**`, `internal/stack/**`, `internal/devcore/**`, `internal/<x>main` | app (factory) | `<x>main` is a package directly under `internal/` whose name ends in `main` |
+| `cmd/**`, `hack/**`, `internal/apigen/**`, `internal/lexgen/**` | cmd (CLI and tools) | |
+| every other `internal/**` | impl | this includes `internal/bus`, the component runtime and the adapters under `internal/services/**` |
+| a directory with no Go package | assets | rank 0, so any layer may embed it |
+
+The backend rule. A package under one of the backend prefixes of `hack/archcheck/layers.go`
+(`internal/compute`, `internal/vault`, `internal/pds`, `internal/atprotorepo`, `internal/events`,
+`internal/vmruntime`, `internal/hostsvc`, `internal/fcapi`, `internal/guestnet`, `internal/guestdisk`,
+`internal/guestimage`, `internal/policyengine/runs`, `internal/relay`, `internal/ingress`,
+`internal/ssh`, `internal/dispatcher`, `internal/gateway`, `internal/guestcp`, `internal/market`,
+`internal/lease`, `internal/postgresctl`, `internal/ttlctl`, `internal/clusterprovider`) must not
+reach, directly or through any import, client-go, controller-runtime, multicluster-runtime, kcp-dev,
+unstructured objects, `internal/bus`, `internal/controllers`, `internal/app`, `internal/kcpserver`,
+`internal/kcpclient`, `internal/kcpdatastore` or `internal/stack`. Every backend package at the depth
+`internal/<concept>/<impl>` must hold a compile-time assertion against an `internal/contract`
+interface (`var _ compute.Provider = (*Provider)(nil)`). The host libraries (`internal/vmruntime`,
+`internal/hostsvc`, `internal/fcapi`, `internal/guestnet`, `internal/guestdisk`, `internal/guestimage`,
+`internal/postgresctl`, `internal/ttlctl`, `internal/clusterprovider`) are exempt from the assertion.
+
+### Abstract kinds, and where each lives
+
+A consumer refs only the abstract kind. The abstract kind names its concrete kind in
+`spec.backendRef`, and its controller mirrors the backend's contract status.
+
+| Abstract kind | Concrete kinds | Controllers | Backends | Contract |
+| --- | --- | --- | --- | --- |
+| AtprotoRepo | LocalRepo (on the Pds component), RemoteRepo (on a RemotePDS plus a credentialsRef) | `internal/controllers/atprotorepo`, `internal/controllers/localrepo`, `internal/controllers/remoterepo`, `internal/controllers/remotepds`; `internal/controllers/repos` registers them with `internal/controllers/pds` | `internal/pds/local`, `internal/atprotorepo/remote`, `internal/atprotorepo/scoped`, `internal/pds/remote` | `internal/contract/atprotorepo`, `internal/contract/pds` |
+| Vault | OpenBaoServer (local), RemoteOpenBao | `internal/controllers/vault`, `internal/controllers/openbaoserver`, `internal/controllers/remoteopenbao` | `internal/vault/openbao`, `internal/openbaoctl`, `internal/remoteopenbao` | `internal/contract/vault` |
+| ComputeVM | FirecrackerVM (HcsVM and VzVM wait for plans 0011 and 0012) | `internal/controllers/computevm`, `internal/controllers/firecrackervm` | `internal/compute/firecracker`, `internal/computevm`, `internal/vmruntime` | `internal/contract/compute` |
+| EventSource | PdsEventSource, RelayEventSource, JetstreamEventSource; an EventStream refs an EventSource | `internal/controllers/eventsource`, `internal/controllers/pdseventsource`, `internal/controllers/relayeventsource`, `internal/controllers/jetstreameventsource`, `internal/controllers/eventstream`; `internal/controllers/events` registers them | `internal/events/pds`, `internal/events/relay`, `internal/events/jetstream`, `internal/events/delivery` | `internal/contract/events` |
+
+The types are in `api/v1alpha1` (AtprotoRepo, LocalRepo, RemoteRepo, Vault, OpenBaoServer,
+RemoteOpenBao, ComputeVM, FirecrackerVM), `api/pds/v1alpha1` (RemotePDS) and `api/events/v1alpha1`
+(EventSource, its three backends, EventStream).
+
+### The bus and the component runtime
+
+`internal/bus` is the declared bus. `bus.Resolve[T](ctx, b, from, to, capability)` returns a typed
+contract handle. The caller is the reconciled object or the component instance; System is allowed only
+for the callers in `deploy/bus-bootstrap-callers.txt`. A call that no accepted ComponentLink allows
+fails with `ErrLinkDenied` (`internal/bus/links.go`). `internal/component` is the component runtime: a
+running component instance, its Service, readiness and endpoints, and the registry of running
+components by workspace, kind and name. `internal/controllers/component` reconciles a Component object
+into it, and `internal/stack/componentcore` runs it with the controller manager in every core.
+
+### The map
+
+api (common):
+
+```
+api/apiresource/             the APIResource and PrinterColumn metadata that each group's resources.go fills for apigen
+api/common/v1alpha1/         shared types: ObjectRef, LocalObjectRef, StrongRef, SecretRef, CredentialsRef, the contract labels
+api/v1alpha1/                the socialweb.computer group: application roots, components, market, identity, records, VM, vault, cluster, node and host kinds
+api/events/v1alpha1/         events.socialweb.computer: EventSource, PdsEventSource, RelayEventSource, JetstreamEventSource, EventStream
+api/exposure/v1alpha1/       exposure.socialweb.computer: ComponentLink, Exposure, Service
+api/pds/v1alpha1/            pds.socialweb.computer: RemotePDS
+api/policy/v1alpha1/         policy.socialweb.computer: PolicyEngine, PolicyTrigger, PolicyWorkflow, PolicyWorkflowRun
+api/kcpgvr/                  GroupVersionResource vars for the foreign groups (kcp tenancy, apis and core; Kubernetes coordination, authentication, rbac)
+```
+
+contract (abc):
+
+```
+internal/contract/atprotorepo/   Repo: record reader, writer and subscriber; commits, list pages
+internal/contract/clusterhome/   the account hash, home path, mount path and cluster key of a cluster's home workspace
+internal/contract/component/     component key, endpoints, Service, readiness, restart policy, phase
+internal/contract/compute/       Provider: shape, provision request, instance
+internal/contract/dispatcher/    Proxy
+internal/contract/events/        Source, Stream, Sink, Event, Filter
+internal/contract/gateway/       the web user, sign-in, sign-out, records and account agent of the gateway
+internal/contract/guestcp/       the guest control plane: inputs, guests, grants, onNetwork report, relay
+internal/contract/host/          host effects: unit backend, unit spec, status, events, identity, observation, limits
+internal/contract/ingress/       ingress Provider, Registrar, registration
+internal/contract/lease/         Slots, Rolls
+internal/contract/market/        market roles: identity, peers, offers, contracts, intents and their observer
+internal/contract/nodeclaim/     NodeClaim: claim, links, settlement, mapper, binder
+internal/contract/pds/           Accounts, Sessions, Sync, ServiceAuth, Authenticator
+internal/contract/policy/        Engine, Evaluator, Runner, verdicts
+internal/contract/relay/         Relay, Crawler
+internal/contract/ssh/           ssh Server, Runner, account, PTY
+internal/contract/vault/         KV, Leases, PKI, PKI backend and provisioner, health
+```
+
+kit (common helpers):
+
+```
+internal/kit/authretry/      retries a call once after an auth error and invalidates the credential
+internal/kit/b64/            loose base64 and JSON normalisation
+internal/kit/binding/        an APIBinding target and its key
+internal/kit/childproc/      child process tail, secret filter, kill, backoff
+internal/kit/clock/          sleeps and time formatting
+internal/kit/conds/          condition set and status helpers
+internal/kit/debounce/       a debouncer
+internal/kit/fsx/            JSON file read and write, exists
+internal/kit/hostport/       host, port, URL and did:web helpers; listen on a host and port
+internal/kit/httpclient/     external HTTP and TLS clients
+internal/kit/httpjson/       JSON requests and responses with size and status errors
+internal/kit/jsonx/          JSON equality
+internal/kit/kcp/            service labels, service FQDN and handler URL in kcp
+internal/kit/kcprest/        a rest config for one logical cluster
+internal/kit/lease/          a renewing value source that fetches once per expiry
+internal/kit/logx/           log level parsing
+internal/kit/loopback/       a loopback bridge
+internal/kit/networkdial/    dialers and HTTP transports that resolve through a host map; TLS; websocket
+internal/kit/opt/            positive-or-fallback option values
+internal/kit/servetls/       serving TLS from files and refs
+internal/kit/sha256sum/      file and byte sha256
+internal/kit/strs/           string helpers
+internal/kit/supervise/      a supervised goroutine group with restart backoff
+internal/kit/tlsreload/      reloading certificate pools and key pairs
+internal/kit/ttlcache/       a TTL cache with single-flight fetch
+internal/kit/wsconn/         websocket URL parsing and dial
+```
+
+transport:
+
+```
+internal/controllers/runtime/            the controller runtime every reconciler runs on: manager, workspaces, server-side apply under a field manager, finalizers, rate-limited backoff, shared status, events (ranks as controllers)
+internal/controllers/runtime/kube/       the typed kcp client: workspace clients, apply, get, list-watch awaits, the scheme
+internal/controllers/runtime/kcpapply/   applies a manifest set to kcp and reports each change, wait and phase
+internal/controllers/runtime/manifests/  loads, renders and rebases manifest sets: values, service suffix, name grants, waits
+```
+
+impl, the bus and the component runtime:
+
+```
+internal/bus/                     the declared bus: typed handles, caller identity, the handler registry, the ComponentLink check
+internal/component/               the component runtime: instance, Service, readiness, endpoints, registry, credentials, HTTP client, trust
+internal/component/kcpclients/    the kcp client set a component gets, from the store or a kubeconfig
+internal/component/ports/         the port lease registry that a component's listeners bind through
+```
+
+impl, the backends of the abstract kinds and the contracts:
+
+```
+internal/atprotorepo/remote/      RemoteRepo: a repo on a remote PDS with its credentials
+internal/atprotorepo/scoped/      narrows a repo to the record routes it covers
+internal/pds/identity/            the Pds identity store and authenticator
+internal/pds/local/               the Pds component backend: accounts, sessions, sync, repo and service auth on internal/atproto/pds
+internal/pds/remote/              the RemotePDS backend: session, accounts, sync, service auth, credentials
+internal/vault/openbao/           the Vault backend: the OpenBao client, admin, PKI, the local server and RemoteOpenBao access
+internal/remoteopenbao/           probes a RemoteOpenBao (health, seal status, auth, mounts) and writes Reachable, Unsealed, Authenticated and Authorized
+internal/compute/firecracker/     the compute.Provider for FirecrackerVM
+internal/events/delivery/         the delivery loop, progress tracker and cursor store the event sources share
+internal/events/jetstream/        the JetstreamEventSource backend
+internal/events/pds/              the PdsEventSource backend: subscribeRepos through an AtprotoRepo
+internal/events/relay/            the RelayEventSource backend
+internal/relay/local/             the Relay component backend on internal/atproto/relay
+internal/ingress/iroh/            the iroh ingress provider
+internal/ingress/opentunnel/      the opentunnel ingress provider
+internal/ingress/xrpcsubscription/  the xrpc-subscription ingress provider
+internal/dispatcher/tlsproxy/     the DispatcherTLS backend: a TLS front that proxies a guest to the dispatcher by allowed host
+internal/guestcp/openbao/         the guest control plane on OpenBao: grants, issuer, store
+internal/guestcp/relay/           the guest control plane's relay
+internal/ssh/gateway/             the SshServer backend: the ssh gateway
+internal/ssh/ownersession/        owner ssh sessions into a guest
+internal/lease/local/             the lease contract on local files: slots, ports, subnets, front, rolls, holders
+internal/market/bidder/           the bidder role: offering, policy, bids, provision, guest report, submit, StateSyncs
+internal/market/participant/      what both roles share: inputs, crawl, comms, credentials, records, policy, service auth, and the StateSync outbox
+internal/market/requester/        the requester role: RFP, accept, inbox, events, sessions, secrets, runner
+internal/marketidentity/atproto/  the MarketIdentity backend: accounts, association, OAuth, vault state store
+internal/marketpresence/          bidder presence heartbeats and MarketPresence names
+internal/gateway/                 the gateway's tenant API: cluster view, feed, store, revoker
+internal/gateway/custody/         the custodial web sign-in client
+internal/gateway/nodeclaim/       maps a NodeClaim to a market contract: secrets policy, pins, lost messages
+internal/policyengine/runs/       the policy run backend: run client and decision parser
+```
+
+impl, atproto:
+
+```
+internal/atproto/cloudinit/       the Go cloud-init modules and BuildUserData: k3s join, secrets, k3s and iroh modules, the module registry
+internal/atproto/ingress/         the XRPC ingress protocol: service auth, directory, subscriber, tunnel over the relay, caller
+internal/atproto/market/          the market lexicon types (generated by lexgen), records, signer and attestations, discovery, heartbeat, comms, repo store
+internal/atproto/oauth/           the atproto OAuth server side: client metadata, DPoP, JWT, scopes, server metadata, store
+internal/atproto/oauthclient/     the atproto OAuth client: PKCE, callback, discovery, DPoP, QR session transfer, session store
+internal/atproto/pds/             the PDS server: accounts, auth, blobs, repo handlers, sequencer, subscribeRepos, sync, well-known, service auth
+internal/atproto/pds/files/       the file-backed blob, key and secret stores of a PDS
+internal/atproto/pds/plcsubmit/   submits PLC operations over HTTP
+internal/atproto/pdsclient/       the PDS client: local and remote PDS, token and DPoP sources, resolver, service auth, subscribe
+internal/atproto/plc/             the PLC directory: documents, signed operations, genesis and tombstone, the server
+internal/atproto/relay/           the relay: slurper, sequencer, frames, store, verify
+internal/atproto/repo/            the atproto repository: MST, CAR, commits, codec, block store, sqlite record store
+internal/atproto/serviceauth/     service-auth tokens: sign, verify, admin, lxm from the path
+internal/atproto/trust/           trust listers and vouch resolvers (Tangled graph, badge.blue operator discovery)
+internal/atproto/xrpc/            the XRPC client: bearer, service-auth and DPoP auth, errors, sync
+internal/atprotoauth/             verifies an atproto service-auth token for one XRPC method: signature, audience, method, admitted DID methods, a 5-minute lifetime cap
+internal/didkey/                  did:key encode, parse and verify (ed25519, secp256k1)
+internal/xrpcserver/              the XRPC server: lexicon routes and subscriptions
+internal/oauthcallback/           the registry of OAuth callback handlers
+internal/sshtransport/            ssh transport: key authorizer from PDS records, identity resolution, guest and owner sessions
+```
+
+impl, exposure, events and status:
+
+```
+internal/exposure/                the Exposure publisher, the ComponentLink link policy, the ingress registrar
+internal/eventstream/             EventStream matching, dial, the market sink, record watch sources
+internal/statusstate/             status sources: PLC identity, relay health, vault credentials and certificates
+internal/statesync/               the StateSync GVR; the outbox is in internal/market/participant
+internal/remotepds/               the RemotePDS GVR
+```
+
+impl, compute, guests and nodes:
+
+```
+internal/computevm/               the ComputeVM host side: guest report, published state, host keys, guest login, termination, vault refs, supervisor
+internal/vmruntime/               the Linux VM runtime: prep and one transient VM unit per guest (swc-userns-stage -> pasta -> socialweb-vmexec -> firecracker); `internal vm start|inspect|stop|list` is its CLI
+internal/fcapi/                   the firecracker API config and client
+internal/guestdisk/               clones and grows the guest rootfs and writes the seed
+internal/guestimage/              the pinned guest image store: names, pins, fetch and verify by sha256, GC
+internal/guestimagerelease/       picks the guest image source under the release base (releases/<version>, then main/<commit>)
+internal/guestnet/                guest network wiring: pasta argv, MAC, relay targets, the onNetwork URL
+internal/guestrootfs/             the guest rootfs build spec (bakes, preinstalls) behind `nodeimage guest-rootfs`
+internal/guestseed/               the guest seed image and its user_data modules: guest login, iroh transport, onNetwork reporter, accept bundle
+internal/guestidentity/           guest identity: bid config, grants, OIDC, guest login, RBAC sync, rate limit
+internal/nodeagent/               the guest node agent behind cmd/socialweb-node: join, CNI, diagnose, hostname, DNS link, masquerade, meshd install
+internal/policyaction/            the ComputeVM policy action: writes the ComputeVM that a policy run asks for
+```
+
+impl, clusters:
+
+```
+internal/clusterprovider/         the tenant cluster backend: per-cluster stack and units, bundle, front, holds, links, roll, scheduler, tenant API and credential, vault, postgres, ESO
+internal/clusterkcp/              the kcp and tenant API side of a cluster: grants, kubeconfig, CCM grant, ESO install, hardening, node observer, add-on baseline
+internal/clusterstack/            the file layout and spec of one tenant cluster stack: TLS, credentials, kubeconfigs, OpenBao, scheduler
+internal/clusterlink/             ClusterLink keys and dumbpipe tickets
+internal/cloudprovider/           the cloud-controller-manager logic: node patches from the instance snapshot, provider IDs, pressure
+internal/scale/                   the scale decision: baseline, backoff, operators, scale-in, unschedulable pods
+internal/scaledriver/             performs the scale decision and keeps its state
+internal/nodemarket/              places a node as a NodeClaim in the cluster's home workspace, reads its status for the join wait, closes it by deleting the claim, keeps the k3s node-password file
+internal/nodeprovider/            derives a node's DNS-1123 name from the cluster key and the node id
+internal/tenantapply/             applies objects to a tenant cluster as its owner
+internal/tenantnet/               the tenant node network objects: node-local DNS, node reader RBAC
+internal/tenantnet/manifests/     their manifests
+internal/identitybundle/          the cluster identity bundle: harvest, sum, cluster-uid
+internal/kubeconfig/              builds a client-certificate kubeconfig
+internal/eso/                     the External Secrets Operator: bundle, webhook TLS, install beside a cluster
+internal/esovault/                the ESO SecretStore for a cluster's vault
+internal/clientcert/              records and revokes tenant client certificates, named by the cluster key
+internal/clientcertfront/         the edge front that admits tenant client certificates to kcp
+internal/revocation/              the revocation plan: effects per cluster, deny, permit, settle
+internal/plcresolver/             resolves a did:plc or did:web to its key IDs for the revocation sweep; NXDOMAIN is an outage, not an absence
+internal/plcsweep/                the periodic pass that lists DIDs, resolves them and revokes those whose keys are gone
+internal/sweepkcp/                the kcp side of that sweep: the worklist from workspaces and AtprotoIdentity records, the deny, the fan-out
+```
+
+impl, vault:
+
+```
+internal/openbaoctl/              an OpenBaoServer's config, unseal keys, plugins, grants, atproto auth and client policies
+internal/baosync/                 diffs and applies the desired OpenBao mounts, auth, policies and plugins
+internal/rootvault/               the root vault's paths: storage, config, TLS, client certificates
+internal/vaultcert/               vault TLS: the clients CA, client certificates, root and served vault TLS, reload
+internal/vaultlayout/             node secret paths, roles and policies (cert auth, node JWT)
+internal/credentials/             resolves a credential ref through vault clients built from the kcp store
+```
+
+impl, kcp, the store and the host:
+
+```
+internal/kcpserver/               runs kcp slots: admin and front kubeconfig, member tokens, roll, kcp version pairs
+internal/kcpclient/               the kcp client for homes, clusters, agents, client certificates, cluster links, MarketIdentity and the feed
+internal/kcpdatastore/            the kine and postgres datastore of kcp: argv, unit specs, backup retention
+internal/storemaint/              store maintenance in the core: kine autovacuum, sqlite and postgres readings
+internal/pgunit/                  a postgres install and server: data dir, HBA, DSN, wire readiness
+internal/postgresctl/             runs the server of a Postgres object
+internal/apiserverfront/          the L4 front that holds kcp's listener fds across slot rolls, and its control socket
+internal/tlsfront/                a TLS front with a self-signed or given key pair
+internal/bootstrap/               the units that run before kcp exists: profile, observe, ensure, roll, drift
+internal/bootstrap/table/         the table of those units per app (gateway, bidder, dev)
+internal/hostcontract/            the host contract that check-host evaluates: facts and roles
+internal/hostlifecycle/           the file authority behind KcpInstallation, HostInstall and HostRelease
+internal/hostos/                  the one platform seam (locking, process identity, liveness, termination, command line, boot id, port range, SysProcAttr); darwin refuses with ErrUnsupported
+internal/hostprocess/             reconciles a HostProcess into a unit spec, adopts it by name, mirrors remote objects
+internal/hostsvc/                 the systemd user unit backend over D-Bus: units, identity, probes, listen ports, env files
+internal/hostsvc/treeaudit/       audits the process tree against the units
+internal/systemdunit/             the one unit-file model and writer, restart policy and backoff
+internal/systemdunit/notify/      sd_notify: ready, status, stopping
+internal/notify/                  the core's sd_notify ready and watchdog
+internal/materialiser/            the per-cluster process reconciler: reap, allocate ports, spawn, identity guard
+internal/procgroup/               a process group: spec, members, steps
+internal/portallocator/           port ranges, purposes and leases, and the advertise address checks
+internal/portscan/                finds listener pids (procnet, lsof)
+internal/liveports/               port blocks for live runs, locked under /var/tmp/socialweb-liveports
+internal/subnetallocator/         allocates guest subnets from a pool and checks host collisions
+internal/nsexec/                  `internal ns-exec`: a private hostname and bind mounts
+internal/irohdial/                `internal iroh-dial`: dials an iroh ticket through dumbpipe
+internal/ttlctl/                  the TTL expiry of finished objects
+internal/logcap/                  log rotation caps
+internal/diskusage/               disk usage of a path
+internal/install/                 install, upgrade, uninstall and GC of a gateway or bidder host
+internal/install/templates/       the unit, slice and drop-in templates it writes
+internal/instance/                the instance token and the datastore plan it implies
+internal/assets/                  the release assets: embedded blobs, store, extract, GC, dev cache
+internal/assets/assetpack/        packs the asset blobs (a package main)
+internal/assets/blobs/            the per-platform blobs: linux_amd64/, linux_arm64/
+internal/versions/                versions.json: component versions, release assets, guest image inputs
+internal/buildstamp/              the build identity: dev or release, commit, dirty state
+internal/capabilities/            the verb tree of socialweb-computer and what a platform lacks for a verb
+internal/clicfg/                  the declarative CLI options: spec, env, config.json
+internal/progress/                progress lines and bars for a TTY
+internal/devcheck/                checks of a dev host
+internal/devinstance/             a dev instance: id, state and runtime roots, layout, units, stand-ins, gateway child
+internal/devsup/                  `internal devsup`: the per-instance subreaper of every dev unit, and the offline sweep
+internal/gatewayhttp/             the gateway's HTTP: cluster API, downloads, OAuth, pins
+internal/appcli/                  the CLI's MarketIdentity client, watch and prompt renderer
+```
+
+impl, the Go port of kcp-libs:
+
+```
+internal/kcplibs/common/clientlimit/   client rate limits on a rest config
+internal/kcplibs/common/denospec/      pod spec types: permissions, probes, restart policy
+internal/kcplibs/common/listeners/     listener names and the tables reported in status
+internal/kcplibs/common/queue/         the run queue: leases, admission, capacity, order
+internal/kcplibs/common/ref/           a cluster ref: key, base host, cluster URL
+internal/kcplibs/common/runner/        pod and engine runner interfaces
+internal/kcplibs/common/store/         token minter and unchanged check
+internal/kcplibs/factory/admission/    the admitter
+internal/kcplibs/impl/kcpstore/        the kcp object store client used across the code
+internal/kcplibs/impl/memoryrunner/    in-memory pod and engine runners
+internal/kcplibs/impl/metrics/         a metrics registry and server
+internal/kcplibs/impl/pkiprovisioner/  a PKI provisioner on the vault contract
+```
+
+impl, the policy engine:
+
+```
+internal/policyengine/atproto/          the policy record client
+internal/policyengine/bundled-actions/  the embedded policy actions and workflows: tangy/<action>/ (TypeScript index.ts and its built dist/index.js) and workflows/
+internal/policyengine/cache/            the record and verdict cache
+internal/policyengine/controller/       engine, workflow, run and trigger reconcile logic
+internal/policyengine/deno/             resolves the deno that runs the actions; deno_embedded/ holds its zip in an embed_deno build
+internal/policyengine/executor/         the executor: gha-lite and deny
+internal/policyengine/models/           requests, results, annotations, cache files, workflows
+internal/policyengine/registry/         the action registry
+internal/policyengine/status/           phases and conditions
+internal/policyengine/trust/            the trust snapshot and resolver
+internal/policyengine/workflow/         parses and runs a gha-lite workflow
+```
+
+controllers (adapters: kcp objects to contract calls):
+
+```
+internal/controllers/atprotorecord/         AtprotoRecord: writes the record to its repo and tracks the objects it references
+internal/controllers/atprotorecordwatch/    AtprotoRecordWatch: watches repos for matching records and writes the children
+internal/controllers/atprotorepo/           AtprotoRepo: binds the backendRef (LocalRepo or RemoteRepo) and mirrors its contract status
+internal/controllers/atprotosession/        AtprotoSession
+internal/controllers/childapplication/      ChildApplication: the child workspace and its components
+internal/controllers/cluster/               Cluster: the cluster pass, and the provider controller on internal/clusterprovider
+internal/controllers/clusterroll/           ClusterRoll
+internal/controllers/component/             Component: runs it in the component runtime and reports phase and endpoints
+internal/controllers/componentlink/         ComponentLink: reports Accepted and ResolvedRefs and puts an accepted link into the bus
+internal/controllers/computevm/             ComputeVM: the FirecrackerVM backend, the termination StateSync, the guest report
+internal/controllers/events/                registers the event source, event stream and record watch controllers together
+internal/controllers/eventsource/           EventSource: binds the backend kind; the helpers the three backend controllers share
+internal/controllers/eventstream/           EventStream: connects an EventSource to a sink
+internal/controllers/exposure/              Exposure: publishes a service through its ingress
+internal/controllers/firecrackervm/         FirecrackerVM: places and runs the guest through internal/compute/firecracker
+internal/controllers/guestcontrolplane/     GuestControlPlane: its inputs from ComputeVM, GuestIdentityGrant, MarketIdentity, OpenBaoServer and Exposure
+internal/controllers/guestidentitygrant/    GuestIdentityGrant
+internal/controllers/hostinstall/           HostInstall
+internal/controllers/hostrelease/           HostRelease
+internal/controllers/jetstreameventsource/  JetstreamEventSource
+internal/controllers/kcpinstallation/       KcpInstallation
+internal/controllers/localrepo/             LocalRepo: a repo on a local Pds component
+internal/controllers/marketidentity/        MarketIdentity: account, OAuth sign-in endpoints, verified associations
+internal/controllers/marketintents/         forwards Bid, ComputeVM, StateSync, ComputeContract, Exposure and MarketIdentity changes to the market roles as intents on the bus
+internal/controllers/marketpresence/        MarketPresence
+internal/controllers/nodeclaim/             NodeClaim: its ComputeContract, links and Exposure
+internal/controllers/openbaoserver/         OpenBaoServer
+internal/controllers/pds/                   provides the Pds component's handles on the bus
+internal/controllers/pdsaccount/            PdsAccount
+internal/controllers/pdseventsource/        PdsEventSource
+internal/controllers/plcidentity/           PlcIdentity
+internal/controllers/policy/                registers the policy engine, trigger, workflow and run controllers together
+internal/controllers/policyengine/          PolicyEngine and its runner
+internal/controllers/policytrigger/         PolicyTrigger
+internal/controllers/policyworkflow/        PolicyWorkflow
+internal/controllers/policyworkflowrun/     PolicyWorkflowRun
+internal/controllers/portlease/             PortLease
+internal/controllers/postgres/              Postgres
+internal/controllers/relayeventsource/      RelayEventSource
+internal/controllers/relaystatus/           RelayStatus
+internal/controllers/remoteopenbao/         RemoteOpenBao: status only; it never writes the remote vault
+internal/controllers/remotepds/             RemotePDS, and its handles on the bus
+internal/controllers/remoterepo/            RemoteRepo, and the credentials it provides
+internal/controllers/repos/                 registers the repo controllers (AtprotoRepo, LocalRepo, RemoteRepo, RemotePDS) together
+internal/controllers/service/               Service
+internal/controllers/subnetlease/           SubnetLease
+internal/controllers/tenantnode/            a tenant cluster's Node objects, through internal/cloudprovider
+internal/controllers/ttl/                   deletes expired objects and reports what it deleted per kind
+internal/controllers/vault/                 Vault: binds the backendRef (OpenBaoServer or RemoteOpenBao); roots and secrets on the bus
+internal/controllers/vaultcertificate/      VaultCertificate
+internal/controllers/vaultcredential/       VaultCredential
+```
+
+adapters, XRPC and HTTP routes to contract calls (impl by the checker's path rule):
+
+```
+internal/services/bidder/              the Bidder component: routes over internal/market/bidder
+internal/services/dispatchertls/       the DispatcherTLS component over internal/dispatcher/tlsproxy
+internal/services/gatewayapi/          the GatewayAPI component: the gateway's tenant XRPC API over internal/gateway
+internal/services/guestcontrolplane/   the GuestControlPlane component's routes over internal/guestcp
+internal/services/ingressproxy/        the IngressProxy component over the internal/ingress providers
+internal/services/pds/                 the Pds component over internal/pds/local
+internal/services/plc/                 the Plc component over internal/atproto/plc
+internal/services/relay/               the Relay component over internal/relay/local
+internal/services/requester/           the Requester component: routes over internal/market/requester
+internal/services/sshserver/           the SshServer component over internal/ssh/gateway and internal/ssh/ownersession
+```
+
+app (factory): the roots and the composition code:
+
+```
+internal/app/                     Register: the five root controllers on the controller manager (componentcore calls it once)
+internal/app/compose/             what the roots share: desired child specs, apply and drift, ownership and adopt, ComponentLinks, vault, repo, pds, records, streams, operator associations
+internal/app/gateway/             the Gateway root: web app account, requester identity, root vault
+internal/app/marketbidder/        the MarketBidder root
+internal/app/marketnetwork/       the MarketNetwork root: child roots, workspaces, vault, guest TLS, vouches, child VMs; dev up applies, waits for and deletes it
+internal/app/marketrequester/     the MarketRequester root
+internal/app/sshgateway/          the SshGateway root
+internal/stack/bidder/            `run bidder`: the bidder's spec, kcp and core
+internal/stack/componentcore/     the component core: the controller manager, every controller registration, providers, component supervision
+internal/stack/gatewaykcp/        `serve gateway kcp`: the gateway's kcp, the bootstrap cluster, the clusterprovider env
+internal/stack/gatewayssh/        `run gateway ssh`: the ssh gateway's spec, kcp and listener
+internal/stack/request/           `run request`: invocations, contract summaries, the requester's kcp
+internal/devcore/                 `internal dev-core`: one dev instance's core: components, host processes, postgres, OpenBao, store maintenance, log caps, TTL scope
+internal/foldmain/                the Invocation a verb body runs with (args, env, stdio, the resolved bin/<sha>/ path, the verb words) and the re-exec argv it builds
+internal/ccmmain/                 `internal cloud-controller-manager`; the clusterprovider re-execs it as `<bin/sha path> internal cloud-controller-manager` with its env rebuilt
+internal/checkhostmain/           `check-host`
+internal/gatewaymain/             `serve gateway xrpc`: the gateway's config and wiring
+internal/nodeimagemain/           `nodeimage guest-rootfs|guest-manifest`, the two Go steps of scripts/build-guest-image.sh, compiled only into a dev build
+internal/providermain/            `serve provider` and `migrate`: the clusterprovider's config, wiring, startup, adopt, roll, scale-in, teardown
+internal/tenantcredentialmain/    `internal tenantcredential`
+internal/vaultmain/               `vault apply-root`
+```
+
+Each `internal/<x>main` is the body of a host verb behind `Main(ctx, foldmain.Invocation) int`;
+`cmd/socialweb-computer` dispatches the verb to it with the raw args.
+
+cmd (CLI) and tools:
+
+```
+cmd/socialweb-computer/           the multi-call CLI; every host verb lives here (dev, run, apply, install, upgrade, units, serve, vault, check-host, internal)
+cmd/socialweb-node/               the guest node agent (internal/nodeagent), built by scripts/build-web-app-downloads.sh
+cmd/socialweb-vmexec/             the VM-unit exec asset
+cmd/socialweb-apigen/             runs internal/apigen (`go generate ./api/...`)
+cmd/openbao-plugin-auth-atproto/  the OpenBao auth plugin for atproto OAuth login (its own module)
+cmd/openbao-plugin-auth-sshsig/   the OpenBao auth plugin for ssh signature login (its own module)
+internal/apigen/                  generates the APIResourceSchemas and APIExports under deploy/ and the zz_generated Go files from api/
+internal/lexgen/                  generates the Go lexicon types (internal/atproto/market/zz_generated.lexicons.go) from lexicons/ (a package main)
+hack/archcheck/                   the architecture checker behind scripts/check-architecture.sh
+```
+
+Outside Go:
+
+```
+deploy/                manifests and manifest sets (apps/, market-network/, eso/), the generated schemas and exports, the audit policies, obligations.txt, bus-bootstrap-callers.txt, check.sh, the guest image and kernel inputs (guest-image/, guest-kernel/), swc-userns-stage/
+rust/                  a cargo workspace; rust/socialweb-meshd is the per-node pod mesh daemon that runs INSIDE a market guest (section 9), rust/build.sh its static musl build, rust/zig its cc and ar wrappers
+scripts/               the build, deploy and stage scripts; the only TypeScript left in the repository is scripts/*.ts (oauth-signin.ts, associate-bidder.ts, publish-spaces.ts) and the policy actions under internal/policyengine/bundled-actions/tangy/
+```
+
+`internal/assets/blobs/.work/` is a scratch directory of the asset build, not tracked by git.
+
+**A cluster's key is derived once, from its home workspace.** `clusterhome.Key`
+(`internal/contract/clusterhome`) is the only spelling: it takes a home workspace path
+`root:<accountHash>:<name>` - `clusterhome.HomePath` builds it from the account DID and the cluster
+name - and returns `<accountHash>-<name>`, which is a DNS-1123 subdomain. Every
 place a cluster is identified INSIDE a provider uses it and nothing else: the state dir
 (`pdr-<key>`), the node data dir (`<key>/nodes/<node>`), the `Cluster` field of every port and subnet
 lease, the node name `nodeprovider.NodeName` derives, the `nodes.json` instance snapshot, the
 `scaledriver` state map, the tenant-credential mint file, the `NodeClaim` name and the process-group
-attribution in the startup sweep. Both binaries reach it through `internal/kcpclient`: the
-clusterprovider from a `Ref` (`Ref.Key()`), the gateway from the `(did, cluster)` pair a mint binding
-carries (`ClusterKey(HomePath(did, cluster))`), so the file the clusterprovider writes and the file
-the gateway reads are named by one function. The bare name is still what a `Cluster` CR, a `Node`
+attribution in the startup sweep. Both sides reach it through `internal/contract/clusterhome`: the
+clusterprovider from a `Ref` (`Ref.Key()` in `internal/clusterprovider/registry.go`), the gateway from
+the `(did, cluster)` pair a mint binding carries (`clusterhome.Key(clusterhome.HomePath(did, cluster))`
+in `internal/clientcert`), so the file the clusterprovider writes and the file the gateway reads are
+named by one function. The bare name is still what a `Cluster` CR, a `Node`
 CR's `spec.cluster` and a `NodeClaim`'s `spec.cluster` carry, because those live inside one home
 workspace and are unique there; what the key keeps apart is everything OUTSIDE it.
 
@@ -3380,110 +3838,27 @@ Each output is pinned by its sha256, never embedded in the binary, and fetched a
 `root=/dev/vda` with no initramfs init. The bidder's VM runtime boots it; the gateway places no image,
 because its node is a claim.
 
-The live gate takes a live cluster: `SOCIALWEB_REQUIRE_LIVE=1 go test ./...`, where a skip is a
-failure, and a
-guest comes up only through the RFP flow on a market network (`deploy/market-network`,
-`internal/marketnetwork`).
+The live gate is a live run. A guest comes up only through the RFP flow on a market network
+(`deploy/market-network`, `internal/app/marketnetwork`).
 
-### The market network (vendored deno-kcp)
+### The market network
 
-**The live market network is deno-kcp's AT Protocol market example, vendored into this repository
-and run on kcp, with a firecracker bidder on our nodeimage.** The user
-chose vendoring over building in deno-kcp. `deploy/denokcp/` holds deno-kcp's APIResourceSchemas,
-APIExports and WorkspaceTypes (DenoPod, OpenBao and the rest of the `denoruntime` and
-`policyworkflowruns` exports the `denoruntime` workspace type binds) and its kcp, OpenBao and
-install scripts; `deploy/market-network/` holds the market example as of deno-kcp PR 2
-(branch `pr-2`, commit `f5b7c10c`), which added bob's PDS and the bidder. `deploy/denokcp/vendor.json`
-records that commit, the kcp-libs commit the provider is built against (`f6911d23`), the upstream
-path and sha256 of every vendored file, why each adapted file differs, and why each file of ours
-lives beside them. `internal/marketnetwork` checks it offline: every file in the two directories is
-either vendored or ours and recorded, a verbatim file is byte-identical to its recorded upstream,
-every file is ASCII, every manifest decodes strictly into the kcp and Kubernetes types and every
-`deno.computer` object validates against the vendored schema (a field kube would prune is a failure),
-and, when a deno-kcp checkout is found above the repository (or named by `DENO_KCP_DIR`), the record
-matches `git show <commit>:<path>` for every file.
-
-**What runs.** `accept.sh` brings up its own kine, kcp and OpenBao (dev mode) under a throwaway
-`$ACCEPT_ROOT` on kernel-chosen ports, installs the provider's schemas, creates the four workspaces,
-waits for the APIExport endpoints, starts the deno-kcp provider, runs `apply.sh`, and then checks every
-DenoPod, the verifier, each service on its cluster-local name and from the host, and one market
-contract. The provider binary is a test dependency: `deploy/denokcp/build-provider.sh` extracts
-deno-kcp and kcp-libs at the recorded commits with `git archive` (neither checkout is touched),
-applies `kcp-libs-*.patch`, and builds `cmd/deno-kcp-provider`; `DENO_KCP_PROVIDER` names a prebuilt
-one instead. The topology, by workspace:
-
-```
-root:global  plc             hono-plc                       https 127.0.0.1:2587
-root:relay   relay           hono-atproto-relay             https 127.0.0.1:2584
-root:relay   dispatcher      hono-did-key-ingress-proxy     http  0.0.0.0:2588  relay.localhost
-root:relay   dispatcher-tls  TLS front for guests           https 0.0.0.0:2589  *.relay.localhost
-root:alice   pds, verifier   hono-pds                       https 127.0.0.1:2583
-root:bob     pds             hono-pds                       https 127.0.0.1:2585
-root:bob     bidder          hono-bidder, firecracker       http  0.0.0.0:2586
-host         market-requester/mod.ts (runComputeContract)
-```
-
-**Which PLC and which dispatcher (decided by Claude, user may veto).** Upstream pr-2's bidder
-used `plc.directory` and `xrpc.fedproxy.com`, so every run registered a fresh did:plc in the public
-directory (run 2 below registered `did:plc:lm4cljto7fyrug2xgjvsefh3`). The market network's bidder and
-requester use the in-cluster PLC instead, by the loopback address its OpenBao leaf carries
-(`https://127.0.0.1:2587`), because the requester runs on the host where cluster-local names do not
-resolve, and both trust the market CA through `DENO_CERT`. They share a dispatcher of the test
-market network's own, `35-relay-dispatcher.yaml`, named `relay.localhost:2588`, which is the shape the bidder's
-and requester's local-dev paths already understand (`https://*.localhost` downgraded to the plain
-port). Nothing in a run reaches a public market service. A guest reaches the dispatcher only over
-https, for its OIDC proof and its onNetwork report, so the bidder runs `--guest-tls-port 2589` and
-`36-relay-dispatcher-tls.yaml` terminates TLS there with a leaf for `relay.localhost` and
-`*.relay.localhost` from a CA `apply.sh` generates per run, proxying to the plain dispatcher by name.
-The requester's own user_data, composed through `runComputeContract` and carried by the RFP, makes the
-guest trust that CA (`ca_certs`), names the host for `relay.localhost` (`guestHostAliases`), and sets
-`CURL_HOME=/root` for every unit: curl resolves `*.localhost` to loopback itself unless a
-`--resolve` entry says otherwise, the firecracker provider writes that entry to `/root/.curlrc`, and a
-systemd unit has no `HOME`, so without it the guest's `provisioning-token.service` dialled its own
-loopback (runs 5 to 7). The bidder runs `--policy open`: the vendored policy engine's own default, `only-me`, refuses an RFP from a
-requester with no operator association (run 3, HTTP 403 `scope filter declined`), and every identity
-in the market network is minted per run. This repository's implemented default is `open`
-(`internal/appctl/bidder.go`), not `only-me`, so a production bidder must name its policy in
-`config.json` to be gated at all.
-
-**The market contract, with no session to the guest.** `market-requester/mod.ts` creates a
-requester PDS, runs `runComputeContract` against the bidder's DID (read from the bidder's own
-`localPDS plc registered` line), and hands it an SSH provider whose `pollReady` records the address
-the guest reported and returns false, so the flow goes straight to release: no ssh session is ever
-opened. The checks are `market guest onNetwork` (the guest's own report arrived, an iroh ticket),
-`market contract released` (vm.delete accepted) and `market guest gone` (the container named by the
-guest's work directory under this run's own `FC_WORK_ROOT` is not running). The cleanup trap stops
-only containers named under that work root, never another run's guests.
-
-**What the vendored example needed to run here, and what it replaces.** Three defects surfaced:
-OpenBao 2.6 and 2.7 answer `GET pki/cert/ca` on an empty mount with HTTP 400 `no default issuer
-currently configured`, which kcp-libs `f6911d2` reads as an error rather than "no authority yet", so
-no root or intermediate was ever generated (run 1: 0 of 17 checks; carried as
-`kcp-libs-no-default-issuer.patch` until kcp-libs takes it); the provider's `--pod-timeout` (5m
-default) stops every deno process, long-running DenoPods included, so the bidder restarted mid-contract
-and forgot it (run 4); and a provider started before any workspace binds its exports reconciles
-nothing, so `accept.sh` now creates the workspaces before starting it, while the upstream restart
-remains for the race that is left. The market network replaces the in-process local dispatcher plus fake PLC
-of `socialweb-computer-k8s/test/live_market_node_test.ts` as the market harness for live tests; that
-test still owns the loopback-k3s join through the door's reverse forward until M3 moves the join off
-ssh, and is retired with it. `internal/marketnetwork`'s
-`TestTheMarketNetworkRentsAFirecrackerGuestThroughTheRFPFlow` drives `accept.sh` behind livegate: it
-skips without `SOCIALWEB_LOCAL`/`SOCIALWEB_REQUIRE_LIVE`, skips under `--local` and fails under
-`--full` when the firecracker inputs (`SOCIALWEB_FIRECRACKER_NODEIMAGE`, `_CONFIG`, `_REPO_DIR`,
-`_RUNNER_IMAGE`), `/dev/kvm`, a deno-kcp checkout (DENO_KCP_DIR) or ports 2583 to 2589 are
-missing, and needs `go test -timeout 60m`, which `deploy/check.sh --local`/`--full` now pass. Its guests'
-work root is a short directory under `/var/tmp` (`MARKET_NETWORK_WORK_ROOT_BASE`), not the test's temp
-dir: each guest's firecracker API socket lives in its work directory, a unix socket path cannot exceed
-107 bytes, and under `t.TempDir()` the first run's guest died at boot, its work directory was removed,
-and the run read as a bidder that never provisioned. `apply.sh` refuses such a work root up front.
+A market network is one `MarketNetwork` application in its own kcp: the shared atproto services of a
+local market plus child application roots (bidders, requesters, gateways) that find each other over
+the atproto market protocol. `socialweb-computer dev up --profile market-network` brings one up.
+`internal/app/marketnetwork` is its root: it composes the network's own components (Plc, Relay, Pds,
+IngressProxy, DispatcherTLS, OpenBaoServer), the child roots in their `root:<app>` workspaces, the
+network vault, the guest TLS and the vouches. `deploy/market-network/` holds the network's workspace,
+vault and RBAC manifests and the README for its operator. The vendored deno-kcp market example that
+this subsection once described, with its TypeScript services, is gone from the repository.
 
 ### Access links, state syncs and remote vaults
 
-**A `ComponentLink` is the rule that admits a component call** (`api/exposure/v1alpha1/types_componentlink.go`, `internal/exposure/links.go`, `internal/app/compose/links.go`). It is cluster-scoped and lives in the target's workspace; `spec.from` and `spec.to` name a workspace, kind and name, and an optional `handlers` list narrows it to named handlers. The handler registry denies a caller with no identity, allows a System caller, allows a call inside one workspace, and allows a cross-workspace call only through a matching link. `LinkController` compiles a valid link into the registry and reports `TargetRegistered` and `Ready`; a link whose target is not registered, is suspended or is invalid stays out of the registry. appctl generates links from the concrete component refs in an application's desired specs only: wildcard refs are skipped, and `OpenBaoServer` and `PolicyEngine` are excluded because they are not handler-registry targets.
+**A `ComponentLink` is the rule that admits a component call** (`api/exposure/v1alpha1/types_componentlink.go`, `internal/bus/links.go`, `internal/exposure/links.go`, `internal/app/compose/links.go`). It lives in the workspace of its target. `spec.from` names a caller by ObjectRef or by a label selector, `spec.to` names the target, and `spec.capabilities` lists the calls it admits, each a name plus an optional scope; `spec.suspend` takes it out. `internal/controllers/componentlink` reports `Accepted` and `ResolvedRefs`, and only an accepted link admits a call on the bus; a call that no accepted link allows fails with `ErrLinkDenied`. `internal/app/compose/links.go` generates links from the concrete component refs in a root's desired specs: wildcard refs (`*`) are skipped, only component kinds are targets, and `PolicyEngine` is excluded.
 
-**A `StateSync` is the durable runtime outbox** (`api/v1alpha1/types_statesync.go`, `internal/statesync`). Its spec names the source, sink, direction, payload, `idempotencyKey`, conflict and deletion policies, optional ack paths, retry limits and suspend; its status carries the phase, observation, ack, cursor, attempts and conditions. Observe is the authority: the controller applies only when the observation differs, `Apply` is idempotent under the key, and the object becomes Acked only after an observation matches the desired hash. Deletion is `Retain`, `DeleteRemote` or `AckThenDelete`. The status holds refs, CIDs, hashes and metadata, never secrets or payload bytes. The bidder runs the controller with the `atproto.market.event` adapter. The ComputeVM controller creates a `vm.terminated` sync before teardown; its finalizer waits for Acked, then drops after the timeout so the sync outlives the VM. The adapter writes a deterministic payload and `market.event` rkeys. The bidder also writes the `onNetwork` and `hostKeys` report syncs.
+**A `StateSync` is the durable runtime outbox** (`api/v1alpha1/types_statesync.go`, the outbox in `internal/market/participant/outbox.go`). Its spec names the source, sink, direction, payload, `idempotencyKey`, conflict and deletion policies, optional ack paths, retry limits and suspend; its status carries the phase, observation, ack, cursor, attempts and conditions. Observe is the authority: the controller applies only when the observation differs, `Apply` is idempotent under the key, and the object becomes Acked only after an observation matches the desired hash. Deletion is `Retain`, `DeleteRemote` or `AckThenDelete`. The status holds refs, CIDs, hashes and metadata, never secrets or payload bytes. The bidder runs the controller with the `atproto.market.event` adapter. The ComputeVM controller creates a `vm.terminated` sync before teardown; its finalizer waits for Acked, then drops after the timeout so the sync outlives the VM. The adapter writes a deterministic payload and `market.event` rkeys. The bidder also writes the `onNetwork` and `hostKeys` report syncs.
 
-**A `RemoteOpenBao` is vault access separate from an `OpenBaoServer`'s lifecycle** (`api/v1alpha1/types_remoteopenbao.go`, `internal/vaultaccess`, `internal/remoteopenbao`). A local ref resolves through `openbaosession` and `KCPStoreSource`; a remote ref is refused unless `Resolver.RemoteEnabled` is set, uses token or AppRole auth, requires https unless the explicit insecure flag allows http, and reads its refs from files only. The controller probes `sys/health` and `sys/seal-status`, authenticates, checks the declared mounts and capabilities, and writes only status and the conditions `Reachable`, `Unsealed`, `Authenticated` and `Authorized`; it never writes the remote vault. `Component.spec.vaultRef` does not use the object yet, so local `OpenBaoServer` access remains the default.
+**A `RemoteOpenBao` is vault access separate from an `OpenBaoServer`'s lifecycle** (`api/v1alpha1/types_remoteopenbao.go`, `internal/vault/openbao/remote.go`, `internal/remoteopenbao`, `internal/controllers/remoteopenbao`). Both are concrete kinds of the abstract `Vault` (`internal/controllers/vault`). A remote ref is refused with `ErrRemoteDisabled` unless remote access is enabled, uses token or AppRole auth, requires https unless `AllowInsecureHTTP` allows http, and reads its credentials and CA through SecretRefs. The controller probes `sys/health` and `sys/seal-status`, authenticates, checks the declared mounts and capabilities, and writes only status and the conditions `Reachable`, `Unsealed`, `Authenticated` and `Authorized`; it never writes the remote vault. The roots compose a `Vault` whose `spec.backendRef` names their own OpenBaoServer (`internal/app/compose/vault.go`), so local OpenBao access remains the default.
 
 ### Composition roots: internal/app (plan 0026 W3-ROOTS)
 
