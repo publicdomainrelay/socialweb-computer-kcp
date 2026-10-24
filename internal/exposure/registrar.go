@@ -302,8 +302,8 @@ func (r *SubscriberRegistrar) handler(target component.Key, name string) func(co
 			return nil, err
 		}
 		headers := map[string]string{}
-		if contentType := result.Header.Get("Content-Type"); contentType != "" {
-			headers["content-type"] = contentType
+		for key := range result.Header {
+			headers[strings.ToLower(key)] = result.Header.Get(key)
 		}
 		return &ingress.Response{Status: result.StatusCode, Body: json.RawMessage(raw), ContentType: result.Header.Get("Content-Type"), Headers: headers}, nil
 	}
