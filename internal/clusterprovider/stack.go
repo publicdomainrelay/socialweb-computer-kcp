@@ -103,6 +103,8 @@ type StackConfig struct {
 	GuardRides bool
 
 	Links *Links
+
+	Revoked *RevokedServiceAccounts
 }
 
 type SlotState struct {
@@ -298,6 +300,7 @@ func StepsFor(cfg StackConfig) materialiser.StepBuilder {
 		if err != nil {
 			return nil, err
 		}
+		steps = cfg.Revoked.beforeK3s(steps, o, spec)
 		if cfg.GuardRides && !hasStepBeforeK3s(steps) {
 			return nil, fmt.Errorf("%w (stack %v, cluster %s)", ErrNoGuardSeam, cfg.Stack, cluster)
 		}

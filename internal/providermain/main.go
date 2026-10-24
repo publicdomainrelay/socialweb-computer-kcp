@@ -21,6 +21,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterkcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterprovider"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterstack"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/clusterhome"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/tenantstore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/foldmain"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
@@ -31,6 +33,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/scale"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/scaledriver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/subnetallocator"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/tenantstore/kineetcd"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vaultcert"
 )
@@ -297,6 +300,7 @@ func buildDeps(ctx context.Context, cfg Config, log *slog.Logger) (Deps, error) 
 		},
 		GuardRides: true,
 		Links:      links,
+		Revoked:    revokedServiceAccounts(registry, log),
 	}
 	decider, err := materialiser.New(materialiser.Options{
 		Host:     units,
@@ -517,6 +521,19 @@ func tenantCluster(ctx context.Context, reg clusterprovider.Clusters, key string
 		return r, cl, nil
 	}
 	return clusterprovider.Ref{}, nil, fmt.Errorf("clusterprovider: no Cluster CR with the key %s", key)
+}
+
+func revokedServiceAccounts(registry clusterprovider.Clusters, log *slog.Logger) *clusterprovider.RevokedServiceAccounts {
+	return &clusterprovider.RevokedServiceAccounts{
+		State: func(ctx context.Context, did string) (v1alpha1.IdentityState, error) {
+			return registry.IdentityState(ctx, clusterprovider.Ref{Account: clusterhome.AccountPath(did), DID: did})
+		},
+		Account: func(did string) tenantstore.ServiceAccount {
+			return tenantstore.ServiceAccount{Namespace: kcpclient.TenantNamespace, Name: kcpclient.ServiceAccountName(did)}
+		},
+		Store: kineetcd.New(kineetcd.Config{}),
+		Log:   log,
+	}
 }
 
 func guardDeps(cfg Config, tokens *tokenStore, units *clusterprovider.UnitsHost, logins *openbao.Logins, log *slog.Logger) clusterprovider.GuardDeps {
