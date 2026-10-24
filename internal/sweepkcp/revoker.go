@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/revocation"
 )
 
@@ -16,14 +15,6 @@ type DenyWriter interface {
 type FanOut interface {
 	FanOut(ctx context.Context, did string) ([]revocation.ClusterView, error)
 }
-
-type Eraser interface {
-	DeleteServiceAccount(ctx context.Context, did, cluster string) error
-}
-
-var errNoEraser = errors.New(
-	"the deny IS written, but no Eraser is wired: the ServiceAccount cannot be removed in this " +
-		"build, so every cluster that still holds one stays RevocationPending")
 
 type Plan struct {
 	DID string
@@ -40,7 +31,9 @@ type Revoker struct {
 
 	FanOut FanOut
 
-	Erase Eraser
+	Erase revocation.Eraser
+
+	State revocation.StateWriter
 
 	OnPlan func(Plan)
 }
@@ -64,40 +57,21 @@ func (r *Revoker) Revoke(ctx context.Context, did, why string) error {
 		views, err := r.FanOut.FanOut(ctx, did)
 		if err != nil {
 			plan.Err = fmt.Errorf("the deny IS written; the fan-out could not be observed: %w", err)
-		} else {
-			effects, err := r.erase(ctx, did, revocation.Plan(views))
-			if err != nil {
-				plan.Err = err
+			break
+		}
+		effects, err := revocation.Erase(ctx, r.Erase, did, revocation.Plan(views))
+		if err != nil {
+			plan.Err = err
+		}
+		plan.Entries = revocation.Reply(effects)
+		if r.State != nil {
+			if err := r.State.WriteIdentityState(ctx, did, revocation.AccountState(effects), revocation.Detail(effects)); err != nil {
+				plan.Err = errors.Join(plan.Err, err)
 			}
-			plan.Entries = revocation.Reply(effects)
 		}
 	}
 	if r.OnPlan != nil {
 		r.OnPlan(plan)
 	}
 	return nil
-}
-
-func (r *Revoker) erase(ctx context.Context, did string, effects []revocation.Effect) ([]revocation.Effect, error) {
-	if r.Erase == nil {
-		for _, e := range effects {
-			if e.DeleteSA {
-				return effects, errNoEraser
-			}
-		}
-		return effects, nil
-	}
-	applied := make([]revocation.Effect, 0, len(effects))
-	for _, e := range effects {
-		if e.DeleteSA {
-			if err := r.Erase.DeleteServiceAccount(ctx, did, e.Cluster); err != nil {
-				applied = append(applied, e)
-				continue
-			}
-			e.DeleteSA = false
-			e.State = v1alpha1.IdentityRevoked
-		}
-		applied = append(applied, e)
-	}
-	return applied, nil
 }

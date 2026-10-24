@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -124,6 +125,10 @@ type Revoker interface {
 	WriteDeny(ctx context.Context, did string) error
 
 	FanOut(ctx context.Context, did string) ([]revocation.ClusterView, error)
+
+	revocation.Eraser
+
+	revocation.StateWriter
 }
 
 type CertRevoker interface {
@@ -327,25 +332,28 @@ func (s *Server) RevokeIdentity(ctx context.Context, caller Caller, req RevokeRe
 	if err != nil {
 		return nil, fmt.Errorf("revokeIdentity: %w", err)
 	}
-	if req.Name != "" {
-		scoped := make([]revocation.ClusterView, 0, 1)
-		for _, c := range observed {
-			if c.Name == req.Name {
-				scoped = append(scoped, c)
-			}
-		}
-		if len(scoped) == 0 {
-			return nil, ErrClusterNotFound
-		}
-		observed = scoped
+	if req.Name != "" && !slices.ContainsFunc(observed, func(c revocation.ClusterView) bool { return c.Name == req.Name }) {
+		return nil, ErrClusterNotFound
 	}
-	for _, c := range observed {
-		if c.Name != "" {
-			s.revokeCerts(ctx, "revokeIdentity", caller, c.Name)
+	effects, err := revocation.Erase(ctx, s.Revoker, string(caller), revocation.Plan(observed))
+	if err != nil {
+		slog.Warn("revokeIdentity: a ServiceAccount delete failed; that cluster stays RevocationPending", "caller", string(caller), "err", err)
+	}
+	state := revocation.AccountState(effects)
+	if err := s.Revoker.WriteIdentityState(ctx, string(caller), state, revocation.Detail(effects)); err != nil {
+		return nil, fmt.Errorf("revokeIdentity: %w", err)
+	}
+	slog.Info("revokeIdentity: the deny is written", "caller", string(caller), "state", string(state), "clusters", revocation.Detail(effects))
+	if req.Name != "" {
+		effects = slices.DeleteFunc(effects, func(e revocation.Effect) bool { return e.Cluster != req.Name })
+	}
+	for _, e := range effects {
+		if e.Cluster != "" {
+			s.revokeCerts(ctx, "revokeIdentity", caller, e.Cluster)
 		}
 	}
 
-	return &RevokeResponse{Revoked: revocation.Reply(revocation.Plan(observed))}, nil
+	return &RevokeResponse{Revoked: revocation.Reply(effects)}, nil
 }
 
 func (s *Server) lookup(ctx context.Context, caller Caller, req NameRequest) (ClusterView, error) {
