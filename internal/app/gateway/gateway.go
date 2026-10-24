@@ -33,7 +33,6 @@ const (
 	GatewaySet              = "gateway"
 	GatewayApp              = "gateway"
 	WebAppComponent         = "socialweb-computer-k8s"
-	WebAppWebDir            = "socialweb-computer-k8s/web"
 	WebAppVaultClient       = "socialweb-computer-k8s"
 	WebAppVaultMount        = "socialweb-computer-k8s"
 	RequesterVaultMount     = "requester"

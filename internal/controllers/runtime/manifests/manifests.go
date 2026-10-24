@@ -65,13 +65,10 @@ func ServiceSuffix(ws string) string {
 }
 
 const (
-	TLSServe  = "serve"
-	TLSTrust  = "trust"
-	TLSNone   = "none"
-	TSRootRef = "${SOCIALWEB_TS_ROOT}"
+	TLSServe = "serve"
+	TLSTrust = "trust"
+	TLSNone  = "none"
 )
-
-func UnderTSRoot(rel string) string { return TSRootRef + "/" + strings.TrimPrefix(rel, "/") }
 
 type Phase struct {
 	Name      string `json:"name"`

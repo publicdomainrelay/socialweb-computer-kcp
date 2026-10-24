@@ -39,7 +39,6 @@ const (
 	SshGatewayAccount        = "ssh-gateway"
 	SshGatewayIrohDial       = "iroh-dial"
 	SshGatewayIrohSocket     = "iroh-dial.sock"
-	SshGatewayWebDir         = "ts/socialweb-computer-ssh/web"
 	SshGatewayProfileNetwork = "market-network"
 	SshGatewayProfileDefault = "default"
 	DumbpipeExecutable       = "dumbpipe"
@@ -93,7 +92,6 @@ func SshGatewayValues(spec v1alpha1.SshGatewaySpec, stateDir string, l devinstan
 	if !slices.Contains(SshGatewayProfiles, spec.Profile) {
 		return v, fmt.Errorf("sshgateway: SshGateway profile %q: want one of %s", spec.Profile, strings.Join(SshGatewayProfiles, ", "))
 	}
-	v.WebDir = manifests.UnderTSRoot(SshGatewayWebDir)
 	dumbpipe := rec.Executables[DumbpipeExecutable].Path
 	if dumbpipe == "" {
 		return v, errors.New("sshgateway: the instance has no dumbpipe executable for the iroh dialer (dev up --dumbpipe-path in a dev build)")

@@ -103,7 +103,6 @@ type MarketRequester struct {
 
 type SshGateway struct {
 	StateDir   string `json:",omitempty"`
-	WebDir     string `json:",omitempty"`
 	CABundle   string `json:",omitempty"`
 	EnvAllow   string `json:",omitempty"`
 	Kcp        KcpRef
@@ -138,7 +137,6 @@ var valueTypes = map[string]func() reflect.Type{
 
 type Gateway struct {
 	StateDir          string `json:",omitempty"`
-	WebDir            string `json:",omitempty"`
 	KcpServer         string `json:",omitempty"`
 	ExtraProjected    string
 	GatewayWorkspace  string `json:",omitempty"`
