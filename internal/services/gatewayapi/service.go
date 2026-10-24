@@ -23,6 +23,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayhttp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/kcp"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/pinneddownloads"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/xrpcserver"
 )
@@ -196,7 +197,7 @@ func (s *Service) OAuth() *gatewayhttp.OAuth {
 	return s.oauth
 }
 
-func (s *Service) buildHandler(ctx context.Context, signIn gatewayhttp.WebSignIn, pinned *gatewayhttp.PinnedDownloads, tasks *supervise.Group) (http.Handler, *gatewayhttp.OAuth, *xrpcserver.Server, error) {
+func (s *Service) buildHandler(ctx context.Context, signIn gatewayhttp.WebSignIn, pinned *pinneddownloads.Set, tasks *supervise.Group) (http.Handler, *gatewayhttp.OAuth, *xrpcserver.Server, error) {
 	log := s.log
 	oauth, err := gatewayhttp.NewOAuth(gatewayhttp.OAuthOptions{
 		SignIn:        signIn,
@@ -245,34 +246,22 @@ func (s *Service) buildHandler(ctx context.Context, signIn gatewayhttp.WebSignIn
 	return securityHeaders(mux), oauth, surface, nil
 }
 
-func (s *Service) loadDownloads() (*gatewayhttp.PinnedDownloads, error) {
+func (s *Service) loadDownloads() (*pinneddownloads.Set, error) {
 	dir := s.downloadsDir()
 	if dir == "" {
 		return nil, nil
 	}
-	pinned, err := gatewayhttp.LoadPinnedDownloads(dir)
+	pinned, err := pinneddownloads.Load(dir)
 	if err != nil {
 		return nil, fmt.Errorf("gatewayapi: the downloads dir: %w", err)
 	}
-	if len(s.spec.RequiredDownloads) > 0 {
-		have := map[string]bool{}
-		for _, download := range pinned.List() {
-			have[download.Name] = true
-		}
-		missing := []string{}
-		for _, name := range s.spec.RequiredDownloads {
-			if !have[name] {
-				missing = append(missing, name)
-			}
-		}
-		if len(missing) > 0 {
-			return nil, fmt.Errorf("gatewayapi: required pinned downloads are missing from %s: %s", dir, strings.Join(missing, ", "))
-		}
+	if missing := pinned.Missing(s.spec.RequiredDownloads); len(missing) > 0 {
+		return nil, fmt.Errorf("gatewayapi: required pinned downloads are missing from %s: %s", dir, strings.Join(missing, ", "))
 	}
 	return pinned, nil
 }
 
-func (s *Service) buildNodeClaims(vault *vaultRuntime, pinned *gatewayhttp.PinnedDownloads) (*contractnodeclaim.Binding, error) {
+func (s *Service) buildNodeClaims(vault *vaultRuntime, pinned *pinneddownloads.Set) (*contractnodeclaim.Binding, error) {
 	nodeMarket := s.spec.NodeMarket
 	if nodeMarket == nil {
 		return nil, nil
@@ -310,7 +299,7 @@ func (s *Service) buildNodeClaims(vault *vaultRuntime, pinned *gatewayhttp.Pinne
 	if dir := s.clusterCADir(); dir != "" {
 		deps.CAFileOf = nodeclaim.PublishedOpenBaoCAFile(dir)
 	}
-	var downloads []gatewayhttp.PinnedDownload
+	var downloads []pinneddownloads.PinnedDownload
 	if pinned != nil {
 		downloads = pinned.List()
 	}
