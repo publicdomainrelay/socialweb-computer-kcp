@@ -119,6 +119,14 @@ func (ctl *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, o 
 }
 
 func (p *pass) delete(ctx context.Context) (ctlruntime.Result, error) {
+	contracts, err := p.c.DeleteAll(ctx, p.r.Workspace, compose.ComputeContractGVR)
+	if err != nil {
+		return ctlruntime.Result{}, err
+	}
+	if contracts > 0 {
+		p.st.Phase, p.st.Message = v1alpha1.ApplicationPhaseDeleting, fmt.Sprintf("%d ComputeContract(s) releasing", contracts)
+		return ctlruntime.Result{Waiting: true}, p.c.WriteStatus(ctx, p.r, compose.MarketRequesterGVR, p.st)
+	}
 	left, err := p.c.StopComponents(ctx, p.r, "")
 	if err != nil {
 		return ctlruntime.Result{}, err

@@ -202,7 +202,7 @@ func intentWatch[C ctlruntime.Object](c *Composer, export, rootKind string) ctlr
 		if out := mapByLabel(rootKind, src, obj.GetLabels()); len(out) > 0 {
 			return out
 		}
-		if len(obj.GetOwnerReferences()) > 0 || !obj.GetDeletionTimestamp().IsZero() {
+		if len(obj.GetOwnerReferences()) > 0 && obj.GetDeletionTimestamp().IsZero() {
 			return nil
 		}
 		var out []ctlruntime.Request
