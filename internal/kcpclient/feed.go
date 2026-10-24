@@ -20,6 +20,7 @@ import (
 	kcpv1alpha1 "github.com/kcp-dev/sdk/apis/tenancy/v1alpha1"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/clusterhome"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gateway"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/clock"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/revocation"
@@ -223,12 +224,12 @@ func (f *feed) keysUnder(prefix string) []string {
 var errAccountReady = errors.New("kcpclient: the account workspace is ready")
 
 func (c *Client) waitForAccount(ctx context.Context, did string) error {
-	rRoot, err := c.resource(RootWorkspace, tenancyResource)
+	rRoot, err := c.resource(clusterhome.RootWorkspace, tenancyResource)
 	if err != nil {
 		return err
 	}
 	spaces := source[kcpv1alpha1.Workspace]{r: rRoot, resource: "workspaces",
-		field: "metadata.name=" + AccountHash(did), where: RootWorkspace}
+		field: "metadata.name=" + clusterhome.AccountHash(did), where: clusterhome.RootWorkspace}
 	ready := func(ws kcpv1alpha1.Workspace) bool {
 		return ws.DeletionTimestamp == nil && ws.Status.Phase == corev1alpha1.LogicalClusterPhaseReady
 	}
@@ -300,7 +301,7 @@ func (c *Client) Follow(ctx context.Context, caller gateway.Caller, name string,
 		f.wg.Wait()
 	}()
 
-	account := AccountPath(did)
+	account := clusterhome.AccountPath(did)
 	rTenancy, err := c.resource(account, tenancyResource)
 	if err != nil {
 		return err
@@ -515,8 +516,8 @@ func labelOr(labels map[string]string, fallback string) string {
 }
 
 func (f *feed) open(ctx context.Context, cluster string, snapshot bool) (func(), error) {
-	home := HomePath(f.did, cluster)
-	key, err := ClusterKey(home)
+	home := clusterhome.HomePath(f.did, cluster)
+	key, err := clusterhome.Key(home)
 	if err != nil {
 		return nil, err
 	}

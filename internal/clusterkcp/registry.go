@@ -19,6 +19,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterprovider"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/clusterhome"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/materialiser"
 )
@@ -78,13 +79,13 @@ func NewRegistry(opts RegistryOptions) (*Registry, error) {
 }
 
 func (r *Registry) Refs(ctx context.Context) ([]clusterprovider.Ref, error) {
-	accounts, _, err := r.workspaces(ctx, kcpclient.RootWorkspace)
+	accounts, _, err := r.workspaces(ctx, clusterhome.RootWorkspace)
 	if err != nil {
 		return nil, err
 	}
 	var out []clusterprovider.Ref
 	for _, account := range accounts {
-		path := kcpclient.RootWorkspace + ":" + account
+		path := clusterhome.RootWorkspace + ":" + account
 		homes, deleting, err := r.workspaces(ctx, path)
 		if apierrors.IsNotFound(err) {
 			continue
