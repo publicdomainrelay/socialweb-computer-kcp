@@ -100,7 +100,23 @@ learnings:
       each core came back Ready within seconds and every acceptance row reads state, not uptime. Only a
       Go stack dump in a journal watch for something else showed it. A fleet view must report per host
       the unit's NRestarts, its last result (watchdog, signal, exit) and the core's uptime; any restart
-      the lead did not cause is an alert.
+      the lead did not cause is an alert. After rc101 (installed 09:27-09:28Z) no host logged a watchdog kill
+      through 09:37:39Z, past the 7-minute window; the last kills were 09:26:55 (local), 09:27:09 (hat-9)
+      and 09:27:32 (hat-7), each just before its install.
+  - id: L11-BROWSER-REQUESTER-BID-PATH
+    text: >
+      Runs 6-9 of the browser-hosted requester (2026-10-24) each stopped one link further along the bid
+      path, and none of the stops raised anything on the bidder side: run 6 no bidder candidates (the
+      contract's spec.bidderDids was never read; fixed 267ae116, requester_no_bidders now names each
+      dropped candidate and why); run 8 the bid published but never delivered, because an OAuth
+      requester published no submitBid and took bids only from the firehose, which the browser build
+      lacks (fixed d6937f50: OAuth requesters take bids over their ingress); run 9 the bid POSTed
+      into the tab and answered 503 every 2 s for minutes, because the browser's Exposure kept the
+      stopped first Requester's handler (fixed on the browser side). The bidder retried that 503 at a
+      fixed 2 s until the bid's 24 h expiry, and a bid not yet delivered was held only in memory, lost
+      on a core restart. A fleet view should show per bid: published, delivered (or the last delivery
+      error and attempt count), accepted; a bid published but undelivered for more than the bid window
+      is the signal that a requester cannot be reached.
 items:
   - id: F1-INVENTORY
     title: "A fleet inventory object: which bidders exist, where, on which version"
