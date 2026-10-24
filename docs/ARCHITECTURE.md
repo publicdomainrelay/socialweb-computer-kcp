@@ -89,8 +89,8 @@ only), `install`, the host contract, and the bootstrap layer that runs an instan
   fedproxy-web and wootty modules, websocat ProxyCommand paths, the relay-FQDN guest addresses and the
   guest JSR registry are removed.
 - **Components:** the bidder's guest-facing endpoints (an allow-list proxy to the bidder's OpenBao for the guest's bind, login and identity token, and `/v1/on-network`)
-  become one DenoPod per provider once its keys are in the vault; the
-  door's node fulfiller stays inside the door.
+  are the GuestControlPlane component of the bidder; the NodeClaim fulfiller is the NodeClaim
+  controller (`internal/controllers/nodeclaim`) bound by the gateway's GatewayAPI component.
 
 ## 1. The objective, stated once
 
@@ -138,24 +138,27 @@ CLOUD; it never supplies the CONNECTION SEMANTICS.
 says "market VM", read it as the substrate a provider made, wherever it came from.
 
 The market is reached through a NodeClaim. A tenant cluster's nodes are rented from the market as the
-CLUSTER'S OWNER, through that owner's single atproto OAuth session, which is held in a separate Deno
-process (the k8s door) and not in this repository. The Go side therefore reaches past the
-`ComputeProvider` seam: it writes a `NodeClaim` into the cluster's home workspace, and the door reads
-it, runs the RFP flow with the owner's session, boots the winning bidder's guest from cloud-init,
-reverse-forwards the advertised address to this host's loopback apiserver and writes the claim's
-status back. `internal/nodemarket` is the node host that does the writing; the `internal/scale`
-decision that says WHEN a node is needed is separate.
+CLUSTER'S OWNER, through that owner's atproto OAuth session, which the gateway holds. The cluster
+provider reaches past the `ComputeProvider` seam: `internal/nodemarket` writes a `NodeClaim` into the
+cluster's home workspace, and the NodeClaim controller (`internal/controllers/nodeclaim`, bound by the
+GatewayAPI component with the mapper of `internal/gateway/nodeclaim`) turns it into a ComputeContract
+that the gateway's Requester runs through the RFP flow with the owner's session. The winning bidder
+boots the guest from cloud-init, the guest joins over the cluster's apiserver ClusterLink, and the
+controller writes the claim's status. The `internal/scale` decision that says WHEN a node is needed
+is separate.
 
 This does not change:
 
-- The cloud-init is the real composer's (`buildUserData` plus the module registry, sibling repo).
+- The cloud-init is the real composer's (`BuildUserData` plus the module registry in
+  `internal/atproto/cloudinit`).
   The substitution is who won the bid, never what the guest is told to install.
 - A guest is born from cloud-init `user_data`, never hand-assembled. Provisioning goes through the
   declared path, never a shell. The market substrate adds no provisioning path of its own: it writes
   a record and waits.
-- The claim carries PATHS, never secrets. The join token, the per-node password and the server CA are
-  read out of the cluster's data dir by the door and handed to the guest on the SSH session's own
-  standard input (invariant 29).
+- The claim carries PATHS, never secrets. The node host reads the join token, the per-node password
+  and the server CA out of the cluster's data dir (files k3s writes), stores them in the cluster's
+  OpenBao at `socialweb-nodes/<node>`, and the guest fetches them itself with a JWT login (invariant
+  29).
 
 ## 3. The zero state - the mechanism
 
@@ -903,7 +906,7 @@ compatibility promise.
 | **Postgres** | embedded-postgres - the vault's store and the one per-cluster local state | system | no |
 | **Kine** | not a CRD today: kine is a member of each cluster's process group over that cluster's own postgres (section 4; the "kine plus t4 to central S3" row was the unbuilt rustfs design) | system | no |
 | **Node** | one node. The only bound on leaks | node provider | no |
-| **NodeClaim** | one node RENTED FROM THE COMPUTE MARKET for a cluster, as that cluster's owner. Carries paths (`tokenFile`, `nodePasswordFile`, `serverCAFile`) and never a secret; the door in the sibling Deno process is the only writer of its `status` | cluster provider, spec and metadata only | no |
+| **NodeClaim** | one node RENTED FROM THE COMPUTE MARKET for a cluster, as that cluster's owner. Carries paths (`tokenFile`, `nodePasswordFile`, `serverCAFile`) and never a secret; the NodeClaim controller is the only writer of its `status` | cluster provider, spec and metadata only | no |
 | **ClusterLink** | one iroh listener in front of a cluster's apiserver or vault, named `<clusterKey>-apiserver` / `<clusterKey>-openbao` in the cluster's home workspace. `spec` {cluster (the key), service, targetPort}; `status` {phase `Pending`/`Listening`/`Failed`, endpointId (64 hex), did (did:key), ticket (id-only, a function of the key: byte-stable), message}. Never carries the secret | cluster provider, spec and status | no |
 | **AtprotoIdentity** | the DID to identity mapping, in the home workspace | us | no |
 | **Account** | the DID to shard map. Not a CRD - a real kcp `Workspace` of an account `WorkspaceType` in root | us | no |
@@ -959,24 +962,14 @@ a spec that differs from what it recorded under that name: changing a Go type wi
 `Revision` fails generation, and so `check.sh`, before any host sees a schema it cannot apply. Old
 names stay in the lock forever; old `APIResourceSchema` objects stay in kcp and are harmless.
 
-**What the re-point does to tenants, MEASURED** (`internal/apigen`
-`TestAnAlreadyBoundWorkspaceKeepsTheNewContractFieldsAfterTheSchemaUpgrade`, kcp v0.33.0 over kine,
-runs under `check.sh --local`): a workspace that bound the export while it named `v1alpha1-1` PRUNES
+**What the re-point does to tenants, MEASURED** (kcp v0.33.0 over kine, by an `internal/apigen`
+test that plan 0026 deleted with every Go test): a workspace that bound the export while it named `v1alpha1-1` PRUNES
 the new fields (a write returns `unknown field` warnings and drops them). Creating `v1alpha1-2` and
 re-pointing the export moves that ALREADY-BOUND `APIBinding`'s `boundResources` to `v1alpha1-2` within
 seconds, with the identity hash unchanged (so the etcd prefix and every stored claim are untouched),
 the pre-upgrade claim intact, and the new fields then persisting. No binding is deleted or recreated:
 the migration IS the manifest set (`deploy/sets.yaml`, `socialweb-computer apply`) applying the new
 schema and then the re-pointed export, in that order. Without the re-point the binding stays on `v1alpha1-1` and the proof fails.
-The deployed `v1alpha1-1` NodeClaim schema is kept at
-`testdata/apiresourceschema/v1alpha1-1.nodeclaims.socialweb.computer.yaml`, checked against the lock.
-
-**Shared fixtures.** `testdata/nodeclaim/valid-*.json` are claims the Go suite decodes STRICTLY
-(`DisallowUnknownFields`) into `v1alpha1.NodeClaim`, re-encodes without losing a leaf, and validates
-against the generated schema; the Deno suite (`socialweb-computer-k8s/test/k8s_api_fixtures_test.ts`)
-parses the same files. `invalid-*.json` wrap an object with `expectError` (the issue path BOTH
-validators must report) and `goDecodeRejects` (whether the strict Go decode alone already refuses
-it: wrong types and unknown fields yes, unknown enums and missing required fields no).
 
 **NodeClaim `status.contract`** carries, beside the original
 `vmUri|rfpUri|acceptUri|receiptUri|receiptCid|submitEventRef` (kept: prod claims hold them and the
