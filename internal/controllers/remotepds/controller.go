@@ -112,6 +112,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 		return ctlruntime.Result{}, nil
 	}
 	generation := object.Generation
+	wasReady := object.Status.Ready && object.Status.Phase == pdsv1alpha1.RemotePDSReady
 	status := object.Status
 	status.Phase = pdsv1alpha1.RemotePDSPending
 	status.Ready = false
@@ -143,8 +144,10 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 	if err := c.apply(ctx, req, object, status); err != nil {
 		return ctlruntime.Result{}, err
 	}
-	c.log.Info("the RemotePDS is ready", "cluster", req.Cluster, "workspace", req.Workspace, "name", req.Name,
-		"endpoint", endpoint, "fieldManager", req.FieldManager())
+	if !wasReady {
+		c.log.Info("the RemotePDS is ready", "cluster", req.Cluster, "workspace", req.Workspace, "name", req.Name,
+			"endpoint", endpoint, "fieldManager", req.FieldManager())
+	}
 	return ctlruntime.RefreshAfter(c.checkInterval), nil
 }
 
