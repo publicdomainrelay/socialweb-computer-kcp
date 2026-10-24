@@ -105,10 +105,13 @@ func (s *Service) Start(ctx context.Context) error {
 		return err
 	}
 	defer stopTrust()
-	core, err := s.setup(runCtx)
-	if err == nil {
-		err = s.deps.Bus.RegisterHTTP(component.Key{Workspace: s.cfg.Workspace, Kind: Kind, Name: s.deps.Self.Name}, s.handler())
+	if err := s.register(); err != nil {
+		cancel()
+		s.finish(ctx, nil)
+		return err
 	}
+	s.log.Info("requester_registered", "workspace", s.cfg.Workspace, "name", s.deps.Self.Name)
+	core, err := s.setup(runCtx)
 	if err != nil {
 		cancel()
 		s.finish(ctx, core)
@@ -126,6 +129,13 @@ func (s *Service) Start(ctx context.Context) error {
 	<-runCtx.Done()
 	s.finish(ctx, core)
 	return nil
+}
+
+func (s *Service) register() error {
+	if s.deps.Bus == nil {
+		return errors.New("requester: the handler registry is not available")
+	}
+	return s.deps.Bus.RegisterHTTP(component.Key{Workspace: s.cfg.Workspace, Kind: Kind, Name: s.deps.Self.Name}, s.handler())
 }
 
 func (s *Service) finish(ctx context.Context, core *role.Requester) {
