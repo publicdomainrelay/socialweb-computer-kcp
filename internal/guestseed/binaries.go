@@ -24,6 +24,8 @@ const (
 
 	GuestAgentUnit = "socialweb-guest-agent.service"
 
+	GuestSecretsUnit = cloudinit.GuestSecretsUnit
+
 	GuestAgentBinary = GuestBinariesDir + "/" + GuestBinaryAgent
 
 	GuestAgentBidderPath = cloudinit.GuestAgentConfigDir + "/bidder.json"
@@ -55,6 +57,8 @@ type GuestBinaryNeeds struct {
 	OpenTunnel bool
 
 	Agent bool
+
+	Secrets bool
 
 	Units []string
 }
@@ -93,6 +97,9 @@ func GuestBinariesNeeded(userData string) GuestBinaryNeeds {
 		switch {
 		case p == cloudinit.GuestAgentTunnelsPath:
 			out.Agent = true
+		case p == cloudinit.GuestAgentSecretsPath:
+			out.Agent = true
+			out.Secrets = true
 		case strings.HasPrefix(p, unitDir+"guest-tunnel-") && !strings.HasPrefix(p, unitDir+"guest-tunnel-report-") && strings.HasSuffix(p, ".service"):
 			out.OpenTunnel = true
 			out.Units = append(out.Units, strings.TrimPrefix(p, unitDir))
@@ -100,6 +107,9 @@ func GuestBinariesNeeded(userData string) GuestBinaryNeeds {
 	}
 	if out.Agent {
 		out.Units = append(out.Units, GuestAgentUnit)
+	}
+	if out.Secrets {
+		out.Units = append(out.Units, GuestSecretsUnit)
 	}
 	sort.Strings(out.Units)
 	return out
@@ -232,7 +242,7 @@ want() {
 	}, nil
 }
 
-func GuestAgentModule(base, audience, acceptPath string) (cloudinit.UserDataModule, error) {
+func GuestAgentModule(base, audience, acceptPath string, secrets bool) (cloudinit.UserDataModule, error) {
 	base = strings.TrimRight(strings.TrimSpace(base), "/")
 	if err := checkURLLike(base, "guest agent base"); err != nil {
 		return nil, err
@@ -246,11 +256,12 @@ func GuestAgentModule(base, audience, acceptPath string) (cloudinit.UserDataModu
 	}
 	unit := strings.Join([]string{
 		"[Unit]",
-		"Description=socialweb guest agent: the webrtc tunnels of the guest",
+		"Description=socialweb guest agent: the webrtc tunnels and the sealed secrets fallback of the guest",
 		"After=network-online.target " + GuestBinariesUnit,
 		"Wants=network-online.target",
 		"Requires=" + GuestBinariesUnit,
-		"ConditionPathExists=" + cloudinit.GuestAgentTunnelsPath,
+		"ConditionPathExists=|" + cloudinit.GuestAgentTunnelsPath,
+		"ConditionPathExists=|" + cloudinit.GuestAgentSecretsPath,
 		"StartLimitIntervalSec=0",
 		"",
 		"[Service]",
@@ -265,17 +276,40 @@ func GuestAgentModule(base, audience, acceptPath string) (cloudinit.UserDataModu
 		"WantedBy=multi-user.target",
 		"",
 	}, "\n")
+	files := []cloudinit.WriteFileEntry{
+		{Path: GuestAgentBidderPath, Owner: "root:root", Permissions: "0644", Content: string(raw) + "\n"},
+		{Path: "/etc/systemd/system/" + GuestAgentUnit, Owner: "root:root", Permissions: "0644", Content: unit},
+	}
+	runcmd := []any{
+		"systemctl daemon-reload",
+		"systemctl enable --no-block " + GuestAgentUnit,
+		"systemctl start --no-block " + GuestAgentUnit,
+	}
+	if secrets {
+		files = append(files, cloudinit.WriteFileEntry{Path: "/etc/systemd/system/" + GuestSecretsUnit, Owner: "root:root", Permissions: "0644", Content: guestSecretsUnit})
+		runcmd = append(runcmd, "systemctl enable --no-block "+GuestSecretsUnit, "systemctl start --no-block "+GuestSecretsUnit)
+	}
 	return func(cloudinit.Context) (cloudinit.UserDataPatch, error) {
-		return cloudinit.UserDataPatch{
-			WriteFiles: []cloudinit.WriteFileEntry{
-				{Path: GuestAgentBidderPath, Owner: "root:root", Permissions: "0644", Content: string(raw) + "\n"},
-				{Path: "/etc/systemd/system/" + GuestAgentUnit, Owner: "root:root", Permissions: "0644", Content: unit},
-			},
-			RuncmdPrepend: []any{
-				"systemctl daemon-reload",
-				"systemctl enable --no-block " + GuestAgentUnit,
-				"systemctl start --no-block " + GuestAgentUnit,
-			},
-		}, nil
+		return cloudinit.UserDataPatch{WriteFiles: files, RuncmdPrepend: runcmd}, nil
 	}, nil
 }
+
+var guestSecretsUnit = strings.Join([]string{
+	"[Unit]",
+	"Description=socialweb guest secrets: wait until the bundle is written, by setup-secrets.service (getSecrets) or by the guest agent (the sealed fallback)",
+	"After=" + GuestBinariesUnit,
+	"Requires=" + GuestBinariesUnit,
+	"ConditionPathExists=" + cloudinit.GuestAgentSecretsPath,
+	"",
+	"[Service]",
+	"Type=oneshot",
+	"RemainAfterExit=yes",
+	"TimeoutStartSec=infinity",
+	"ExecStart=" + GuestAgentBinary + " wait-secrets",
+	"StandardOutput=journal+console",
+	"StandardError=journal+console",
+	"",
+	"[Install]",
+	"WantedBy=multi-user.target",
+	"",
+}, "\n")

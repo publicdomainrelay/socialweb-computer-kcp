@@ -16,6 +16,8 @@ import (
 	"sync"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/meta"
+
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/marketnetwork"
@@ -134,7 +136,8 @@ func (r *requestRun) passthrough(args []string, network bool) error {
 	var nv v1alpha1.MarketNetworkValue
 	nvSet := false
 	for _, p := range parsed {
-		if network && (strings.HasPrefix(p.To, compose.MapToSpec) || strings.HasPrefix(p.To, compose.MapToNetwork)) {
+		perApp := p.To == "spec.secretsFallback" || p.To == "spec.comms.mode" || p.To == "spec.comms.eventSourceRefs"
+		if network && !perApp && (strings.HasPrefix(p.To, compose.MapToSpec) || strings.HasPrefix(p.To, compose.MapToNetwork)) {
 			return fmt.Errorf("--%s maps to %s, which the market network sets for its child applications", p.Name, p.To)
 		}
 		switch {
@@ -176,6 +179,13 @@ func (r *requestRun) passthrough(args []string, network bool) error {
 			}
 			if !applied {
 				return fmt.Errorf("--%s maps to %s, which run request does not take", p.Name, p.To)
+			}
+		case p.To == "spec.secretsFallback":
+			switch fallback := v1alpha1.SecretsFallback(strings.TrimSpace(p.Value)); fallback {
+			case v1alpha1.SecretsFallbackNone, v1alpha1.SecretsFallbackSealed:
+				r.root.SecretsFallback = fallback
+			default:
+				return fmt.Errorf("--secrets-fallback %q: want None or Sealed", p.Value)
 			}
 		case strings.HasPrefix(p.To, "spec.comms"):
 			var applied bool
@@ -296,6 +306,10 @@ func (r *requestRun) webrtcTunnel() error {
 	return nil
 }
 
+func secretsApplied(c *v1alpha1.ComputeContract) bool {
+	return c.Status.SecretsFetchedAt != "" || meta.IsStatusConditionTrue(c.Status.Conditions, v1alpha1.ComputeContractConditionSecretsApplied)
+}
+
 func readSecrets(path string) ([]byte, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -354,7 +368,10 @@ func (r *requestRun) start(ctx context.Context, fresh bool) error {
 		}
 		if fresh {
 			app := v1alpha1.NetworkApp{Name: r.inv.Name, Kind: v1alpha1.ApplicationKindMarketRequester,
-				Profile: marketrequester.RequesterProfileNetwork, Options: r.appOptions}
+				Profile: marketrequester.RequesterProfileNetwork, Options: r.appOptions, SecretsFallback: r.root.SecretsFallback}
+			if r.root.Comms != nil {
+				app.Components = v1alpha1.ComponentOverrides{compose.ComponentKindRequester: {Comms: r.root.Comms}}
+			}
 			if err := request.AddToNetwork(ctx, netRec.AdminKubeconfig, app); err != nil {
 				return err
 			}
@@ -667,15 +684,20 @@ func (r *requestRun) carryOn(ctx context.Context) int {
 		r.a.printJSON(r.summary)
 		return exitFailed
 	}
-	if c.Status.Phase == v1alpha1.ComputeContractHeld && c.Spec.SecretsRef != nil && c.Status.SecretsFetchedAt == "" {
-		r.log("waiting for the guest to fetch its secrets from the requester's secrets server")
+	if c.Status.Phase == v1alpha1.ComputeContractHeld && c.Spec.SecretsRef != nil && !secretsApplied(c) {
+		r.log("waiting for the guest to write its secrets (getSecrets, or the sealed fallback when enabled)")
 		if fc, err := r.kcp.WaitContract(ctx, r.contractTimeout, func(c *v1alpha1.ComputeContract) bool {
-			return c.Status.SecretsFetchedAt != "" || c.Status.Phase != v1alpha1.ComputeContractHeld
+			return secretsApplied(c) || c.Status.Phase != v1alpha1.ComputeContractHeld
 		}, r.progress); err != nil {
-			r.a.log.Error("the guest did not fetch its secrets", "err", err.Error())
+			r.a.log.Error("the guest did not write its secrets", "err", err.Error())
 		} else {
 			c = fc
-			r.log("the guest fetched its secrets", "at", c.Status.SecretsFetchedAt)
+			cond := meta.FindStatusCondition(c.Status.Conditions, v1alpha1.ComputeContractConditionSecretsApplied)
+			reason := ""
+			if cond != nil {
+				reason = cond.Reason
+			}
+			r.log("the guest wrote its secrets", "via", reason, "fetchedAt", c.Status.SecretsFetchedAt)
 		}
 	}
 	code := exitOK

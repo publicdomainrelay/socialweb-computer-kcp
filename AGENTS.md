@@ -115,7 +115,8 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
   GHCR. The did:key ingress cannot carry binaries (JSON string bodies, a frame cap).
 - Guest events live under `com.publicdomainrelay.temp.compute.events.guest.*` in the market.event
   envelope. The guest holds no repo key: it POSTs `{acceptUri, acceptCid, record}` to GuestControlPlane
-  `POST /v1/events` (vm.onNetwork, guest.publicKey, guest.signalWebRTC) and the bidder signs and
+  `POST /v1/events` (vm.onNetwork, guest.publicKey, guest.signalWebRTC, guest.secretsRequested,
+  guest.secretsApplied; never guest.secrets) and the bidder signs and
   publishes them; requester events to the guest reach it through the bidder's per-ComputeVM queue
   and the XRPC subscription `com.publicdomainrelay.temp.compute.guest.subscribeEvents` (WebSocket,
   `cursor`, JSON text frames, an empty binary keepalive every 25 s). The guest bearer is the
@@ -127,6 +128,29 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
   kcp or a log. The requester side of each event is a cluster-scoped `ContractEvent`
   (`socialweb.computer/v1alpha1`, outbound ones made by the CLI or the browser, inbound ones by the
   requester), owned by its ComputeContract.
+- Secrets. `spec.secretsRef` names a bundle in the requester's OpenBao (`[{path, value, mode?}]`,
+  mode octal and at most 0600). The primary path is getSecrets: the guest's `setup-secrets.service`
+  exchanges its workload identity token and GETs `/xrpc/com.publicdomainrelay.temp.compute.secrets.getSecrets/<contract>`
+  from the requester's ingress. A sealed fallback exists for a requester whose ingress may not work
+  (the browser page): it runs only when the requester's `spec.secretsFallback` is `Sealed`
+  (MarketRequester, Requester; default `None`; `run request -- --secrets-fallback Sealed`), and only
+  on demand. With `Sealed`, user_data also writes `/etc/socialweb-guest-agent/secrets.json`
+  `{"fallback": "sealed", "getSecrets": <bool>}`, so the bidder installs socialweb-guest-agent and
+  `socialweb-guest-secrets.service`. setup-secrets gives getSecrets 90 s
+  (`cloudinit.SecretsFetchFallbackDeadlineSec`), then touches `/run/socialweb-guest-agent/secrets.request`
+  and exits 0; without an inbound endpoint (comms mode Firehose) setup-secrets is not in user_data and
+  the agent asks at once. The agent publishes a `guest.publicKey` with tag `secrets` and posts
+  `guest.secretsRequested`; the requester then, and only then, seals the bundle to that key as a
+  controller-owned outbound ContractEvent `secrets-<contract>` (`guest.secrets`, reseals for a newer
+  key while the request is unanswered). The agent writes each file atomically (root:root, 0600 or
+  the bundle's mode, missing parents 0700) and posts `guest.secretsApplied {via}`. Either path ends in
+  `/run/socialweb-guest-agent/secrets.ready`; a unit that consumes secrets orders itself
+  `After=setup-secrets.service socialweb-guest-secrets.service` with `Wants=socialweb-guest-secrets.service`
+  (`cloudinit.SecretsReadyUnits`). The ComputeContract shows `status.contract.secretsRequested`,
+  `status.contract.secretsApplied` and the condition `SecretsApplied` (reason `GetSecrets` or
+  `SealedFallback`). Never send a sealed bundle unasked: published ciphertext stays on the protocol
+  and can be broken later. A Firehose requester with `None` and a secretsRef fails the contract
+  ("secrets need the requester ingress (getSecrets) or secretsFallback: Sealed").
 - The guest fence. socialweb-vmexec loads the nf_tables bridge table `swcguest` in the guest's
   namespace before the tap exists, and the VM does not start without it (`internal/guestnet`,
   `fence_linux.go`). On frames from the guest's tap it keeps, in order: TCP to the host's loopback at

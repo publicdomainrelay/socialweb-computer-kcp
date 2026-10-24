@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-23.marketnetworks.socialweb.computer
+  name: v1alpha1-24.marketnetworks.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -584,6 +584,11 @@ spec:
                         scalePodsPerNode:
                           type: integer
                           format: int32
+                    secretsFallback:
+                      type: string
+                      enum:
+                        - None
+                        - Sealed
                     components:
                       type: object
                       additionalProperties:

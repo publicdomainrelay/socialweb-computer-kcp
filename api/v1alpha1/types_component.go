@@ -437,6 +437,14 @@ type BidderSpec struct {
 	SuspendParticipation bool `json:"suspendParticipation,omitempty"`
 }
 
+type SecretsFallback string
+
+const (
+	SecretsFallbackNone SecretsFallback = "None"
+
+	SecretsFallbackSealed SecretsFallback = "Sealed"
+)
+
 type GuestControlPlane struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -632,6 +640,8 @@ type RequesterSpec struct {
 	OAuthScopes []string `json:"oauthScopes,omitempty"`
 
 	Comms *MarketComms `json:"comms,omitempty"`
+
+	SecretsFallback SecretsFallback `json:"secretsFallback,omitempty" apigen:"enum=None|Sealed"`
 
 	SuspendParticipation bool `json:"suspendParticipation,omitempty"`
 }

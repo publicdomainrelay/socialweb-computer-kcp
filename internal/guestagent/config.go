@@ -19,6 +19,16 @@ const (
 
 	TunnelsFile = "tunnels.json"
 
+	SecretsFile = "secrets.json"
+
+	SecretsReadyFile = "secrets.ready"
+
+	SecretsRequestFile = "secrets.request"
+
+	secretsTag = "secrets"
+
+	secretsFallbackSealed = "sealed"
+
 	BidderFile = "bidder.json"
 
 	CursorFile = "cursor"
@@ -44,6 +54,12 @@ type Bidder struct {
 	AcceptPath string `json:"acceptPath"`
 }
 
+type Secrets struct {
+	Fallback string `json:"fallback"`
+
+	GetSecrets bool `json:"getSecrets"`
+}
+
 type AcceptRef struct {
 	URI string
 
@@ -52,6 +68,8 @@ type AcceptRef struct {
 
 type Config struct {
 	Tunnels []Tunnel
+
+	Secrets *Secrets
 
 	Bidder Bidder
 
@@ -76,8 +94,17 @@ func LoadConfig(configDir, stateDir, loginHelper string) (Config, error) {
 	var tunnels struct {
 		Tunnels []Tunnel `json:"tunnels"`
 	}
-	if err := readJSON(filepath.Join(configDir, TunnelsFile), &tunnels); err != nil {
+	if err := readOptionalJSON(filepath.Join(configDir, TunnelsFile), &tunnels); err != nil {
 		return cfg, err
+	}
+	var secrets Secrets
+	switch err := readOptionalJSON(filepath.Join(configDir, SecretsFile), &secrets); {
+	case err != nil:
+		return cfg, err
+	case secrets.Fallback == secretsFallbackSealed:
+		cfg.Secrets = &secrets
+	case secrets.Fallback != "":
+		return cfg, fmt.Errorf("%w: %s fallback %q is not %s", ErrConfig, SecretsFile, secrets.Fallback, secretsFallbackSealed)
 	}
 	seen := map[string]bool{}
 	for _, t := range tunnels.Tunnels {
@@ -88,12 +115,14 @@ func LoadConfig(configDir, stateDir, loginHelper string) (Config, error) {
 			return cfg, fmt.Errorf("%w: tunnel %s port %d is not a TCP port", ErrConfig, t.Tag, t.Port)
 		case seen[t.Tag]:
 			return cfg, fmt.Errorf("%w: tunnel tag %s appears twice", ErrConfig, t.Tag)
+		case t.Tag == secretsTag:
+			return cfg, fmt.Errorf("%w: tunnel tag %s names the secrets key", ErrConfig, t.Tag)
 		}
 		seen[t.Tag] = true
 		cfg.Tunnels = append(cfg.Tunnels, t)
 	}
-	if len(cfg.Tunnels) == 0 {
-		return cfg, fmt.Errorf("%w: %s names no tunnel", ErrConfig, TunnelsFile)
+	if len(cfg.Tunnels) == 0 && cfg.Secrets == nil {
+		return cfg, fmt.Errorf("%w: neither %s names a tunnel nor %s asks for the sealed secrets fallback", ErrConfig, TunnelsFile, SecretsFile)
 	}
 	if err := readJSON(filepath.Join(configDir, BidderFile), &cfg.Bidder); err != nil {
 		return cfg, err
@@ -127,6 +156,13 @@ func LoadConfig(configDir, stateDir, loginHelper string) (Config, error) {
 		return cfg, fmt.Errorf("%w: a state dir and a login helper are required", ErrConfig)
 	}
 	return cfg, nil
+}
+
+func readOptionalJSON(path string, into any) error {
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return readJSON(path, into)
 }
 
 func readJSON(path string, into any) error {

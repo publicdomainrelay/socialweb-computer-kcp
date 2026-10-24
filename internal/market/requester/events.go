@@ -32,6 +32,10 @@ type GuestEvent struct {
 
 	Ciphertext string
 
+	SecretsVia string
+
+	SecretsCount *int64
+
 	HostKeys []v1alpha1.ComputeVMHostKey
 
 	Termination *v1alpha1.ContractTermination
@@ -53,7 +57,8 @@ func ValidateTicket(address string) (string, error) {
 
 func isGuestEventNSID(nsid string) bool {
 	switch nsid {
-	case market.ComputeEventsVMOnNetworkNSID, market.ComputeEventsVMHostKeysNSID, market.ComputeEventsVMTerminatedNSID:
+	case market.ComputeEventsVMOnNetworkNSID, market.ComputeEventsVMHostKeysNSID, market.ComputeEventsVMTerminatedNSID,
+		market.ComputeEventsGuestSecretsRequestedNSID, market.ComputeEventsGuestSecretsAppliedNSID:
 		return true
 	}
 	return isContractEventNSID(nsid)
@@ -150,6 +155,28 @@ func (q *Requester) parseGuestEvent(ctx context.Context, event MarketEvent, rece
 		}
 		out.Tag, out.GuestKind, out.Key, out.Ciphertext = guest.Tag, guest.Kind, guest.Key, guest.Ciphertext
 		out.ObservedAt = guest.CreatedAt
+	case market.ComputeEventsGuestSecretsRequestedNSID:
+		record, err := market.ParseComputeEventsGuestSecretsRequested(event.Payload.Value)
+		if err != nil {
+			return nil, fmt.Errorf("requester: payload %s: %w", event.Payload.URI, err)
+		}
+		out.ObservedAt = record.CreatedAt
+	case market.ComputeEventsGuestSecretsAppliedNSID:
+		record, err := market.ParseComputeEventsGuestSecretsApplied(event.Payload.Value)
+		if err != nil {
+			return nil, fmt.Errorf("requester: payload %s: %w", event.Payload.URI, err)
+		}
+		switch record.Via {
+		case market.GuestSecretsViaGetSecrets, market.GuestSecretsViaSealed:
+		default:
+			return nil, fmt.Errorf("requester: payload %s names via %q", event.Payload.URI, record.Via)
+		}
+		out.SecretsVia = record.Via
+		if _, ok := event.Payload.Value["count"]; ok && record.Count >= 0 {
+			count := record.Count
+			out.SecretsCount = &count
+		}
+		out.ObservedAt = record.CreatedAt
 	case market.ComputeEventsVMHostKeysNSID:
 		keys, err := q.reportedHostKeys(event.Payload.Value)
 		if err != nil {
@@ -286,6 +313,14 @@ func seedGuestEventSeen(seen map[string]bool, state *v1alpha1.NodeClaimContract)
 	for _, n := range state.Networks {
 		rememberGuestEvent(seen, n.Event.URI)
 	}
+	if state.SecretsRequested != nil {
+		rememberGuestEvent(seen, state.SecretsRequested.Event.URI)
+		rememberGuestEvent(seen, state.SecretsRequested.Payload.URI)
+	}
+	if state.SecretsApplied != nil {
+		rememberGuestEvent(seen, state.SecretsApplied.Event.URI)
+		rememberGuestEvent(seen, state.SecretsApplied.Payload.URI)
+	}
 }
 
 func guestEventSeen(seen map[string]bool, event MarketEvent) bool {
@@ -324,8 +359,50 @@ func guestEventApplied(state *v1alpha1.NodeClaimContract, parsed *GuestEvent) bo
 		return state.HostKeys != nil && guestEventRecorded(state.HostKeys.Event, state.HostKeys.Payload, parsed)
 	case market.ComputeEventsVMTerminatedNSID:
 		return terminationRecorded(state, parsed.Termination)
+	case market.ComputeEventsGuestSecretsRequestedNSID:
+		return state.SecretsRequested != nil && guestEventRecorded(state.SecretsRequested.Event, state.SecretsRequested.Payload, parsed)
+	case market.ComputeEventsGuestSecretsAppliedNSID:
+		return state.SecretsApplied != nil && guestEventRecorded(state.SecretsApplied.Event, state.SecretsApplied.Payload, parsed)
 	}
 	return false
+}
+
+func laterTime(a, b string) bool {
+	ta, errA := market.ParseTime(a)
+	tb, errB := market.ParseTime(b)
+	if errA != nil || errB != nil {
+		return a > b
+	}
+	return ta.After(tb)
+}
+
+func applySecretsEvent(state *v1alpha1.NodeClaimContract, parsed *GuestEvent) bool {
+	event := commonv1.StrongRef{URI: parsed.Event.URI, CID: parsed.Event.CID}
+	payload := commonv1.StrongRef{URI: parsed.Payload.URI, CID: parsed.Payload.CID}
+	switch parsed.Kind {
+	case market.ComputeEventsGuestSecretsRequestedNSID:
+		if prev := state.SecretsRequested; prev != nil && (guestEventRecorded(prev.Event, prev.Payload, parsed) || laterTime(prev.RequestedAt, parsed.ObservedAt)) {
+			return false
+		}
+		state.SecretsRequested = &v1alpha1.ContractSecretsRequested{RequestedAt: parsed.ObservedAt, Event: event, Payload: payload}
+		return true
+	case market.ComputeEventsGuestSecretsAppliedNSID:
+		if prev := state.SecretsApplied; prev != nil && (guestEventRecorded(prev.Event, prev.Payload, parsed) || laterTime(prev.AppliedAt, parsed.ObservedAt)) {
+			return false
+		}
+		state.SecretsApplied = &v1alpha1.ContractSecretsApplied{AppliedAt: parsed.ObservedAt, Via: parsed.SecretsVia, Count: parsed.SecretsCount,
+			Event: event, Payload: payload}
+		return true
+	}
+	return false
+}
+
+func secretsRequestPending(state *v1alpha1.NodeClaimContract) bool {
+	if state == nil || state.SecretsRequested == nil {
+		return false
+	}
+	applied := state.SecretsApplied
+	return applied == nil || laterTime(state.SecretsRequested.RequestedAt, applied.AppliedAt)
 }
 
 func hostKeyLines(keys []v1alpha1.ComputeVMHostKey) []string {

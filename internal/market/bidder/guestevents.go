@@ -77,6 +77,9 @@ func (b *Bidder) applyGuestEvent(ctx context.Context, uri, cid string, record ma
 	if nsid != market.NSIDFromURI(event.Payload.URI) {
 		return fmt.Errorf("%w: the payload $type %s is not its collection", ErrEventInvalid, nsid)
 	}
+	if !market.IsRequesterGuestEventNSID(nsid) {
+		return fmt.Errorf("%w: %s is the guest's to send, not the requester's", ErrEventInvalid, nsid)
+	}
 	if err := b.verifier.VerifyRecord(ctx, resolved); err != nil {
 		return fmt.Errorf("%w: the payload is not signed: %v", ErrEventInvalid, err)
 	}

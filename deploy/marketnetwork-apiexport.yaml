@@ -6,7 +6,7 @@ spec:
   resources:
     - group: socialweb.computer
       name: marketnetworks
-      schema: v1alpha1-23.marketnetworks.socialweb.computer
+      schema: v1alpha1-24.marketnetworks.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer
@@ -16,7 +16,7 @@ spec:
         crd: {}
     - group: socialweb.computer
       name: marketrequesters
-      schema: v1alpha1-22.marketrequesters.socialweb.computer
+      schema: v1alpha1-23.marketrequesters.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer
@@ -46,7 +46,7 @@ spec:
         crd: {}
     - group: socialweb.computer
       name: requesters
-      schema: v1alpha1-18.requesters.socialweb.computer
+      schema: v1alpha1-19.requesters.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer

@@ -118,6 +118,10 @@ type NodeClaimContract struct {
 
 	HostKeys *ContractHostKeys `json:"hostKeys,omitempty"`
 
+	SecretsRequested *ContractSecretsRequested `json:"secretsRequested,omitempty"`
+
+	SecretsApplied *ContractSecretsApplied `json:"secretsApplied,omitempty"`
+
 	Outcome ContractOutcome `json:"outcome,omitempty"`
 
 	Error string `json:"error,omitempty"`
@@ -219,6 +223,26 @@ type ContractHostKeys struct {
 	Keys []ContractHostKey `json:"keys"`
 
 	ObservedAt string `json:"observedAt"`
+
+	Event commonv1.StrongRef `json:"event"`
+
+	Payload commonv1.StrongRef `json:"payload"`
+}
+
+type ContractSecretsRequested struct {
+	RequestedAt string `json:"requestedAt"`
+
+	Event commonv1.StrongRef `json:"event"`
+
+	Payload commonv1.StrongRef `json:"payload"`
+}
+
+type ContractSecretsApplied struct {
+	AppliedAt string `json:"appliedAt"`
+
+	Via string `json:"via,omitempty"`
+
+	Count *int64 `json:"count,omitempty"`
 
 	Event commonv1.StrongRef `json:"event"`
 

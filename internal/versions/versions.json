@@ -383,8 +383,8 @@
         "linux/arm64": {"kind": "script", "script": "scripts/build-web-app-downloads.sh", "members": {"socialweb-meshd-x86_64": "socialweb-meshd-x86_64", "socialweb-meshd-x86_64.sha256": "socialweb-meshd-x86_64.sha256", "socialweb-meshd-aarch64": "socialweb-meshd-aarch64", "socialweb-meshd-aarch64.sha256": "socialweb-meshd-aarch64.sha256", "socialweb-node-x86_64": "socialweb-node-x86_64", "socialweb-node-x86_64.sha256": "socialweb-node-x86_64.sha256", "socialweb-node-aarch64": "socialweb-node-aarch64", "socialweb-node-aarch64.sha256": "socialweb-node-aarch64.sha256"}}
       },
       "platforms": {
-        "linux/amd64": {"treeSha256": "4cb5d8d402194cc91663a370b2cbc650dd8b0f30d05d7ec1b8c8654265f62812", "rawBytes": 40518032, "zstdBytes": 12283566},
-        "linux/arm64": {"treeSha256": "4cb5d8d402194cc91663a370b2cbc650dd8b0f30d05d7ec1b8c8654265f62812", "rawBytes": 40518032, "zstdBytes": 12283566}
+        "linux/amd64": {"treeSha256": "0499d265d744337d6d4caf5ba317a8cc4f2a4f74f4badec81e9cd66531b800c7", "rawBytes": 40526224, "zstdBytes": 12285001},
+        "linux/arm64": {"treeSha256": "0499d265d744337d6d4caf5ba317a8cc4f2a4f74f4badec81e9cd66531b800c7", "rawBytes": 40526224, "zstdBytes": 12285001}
       }
     },
     "socialweb-guest-downloads": {
@@ -397,8 +397,8 @@
         "linux/arm64": {"kind": "script", "script": "scripts/build-guest-downloads.sh", "members": {"opentunnel-x86_64": "opentunnel-x86_64", "opentunnel-x86_64.sha256": "opentunnel-x86_64.sha256", "opentunnel-aarch64": "opentunnel-aarch64", "opentunnel-aarch64.sha256": "opentunnel-aarch64.sha256", "socialweb-guest-agent-x86_64": "socialweb-guest-agent-x86_64", "socialweb-guest-agent-x86_64.sha256": "socialweb-guest-agent-x86_64.sha256", "socialweb-guest-agent-aarch64": "socialweb-guest-agent-aarch64", "socialweb-guest-agent-aarch64.sha256": "socialweb-guest-agent-aarch64.sha256"}}
       },
       "platforms": {
-        "linux/amd64": {"treeSha256": "230ad2e8b7c3292eb2c0664814a699cc31f497bbaa70a9153b3a6cf956091b89", "rawBytes": 34366740, "zstdBytes": 11328067},
-        "linux/arm64": {"treeSha256": "230ad2e8b7c3292eb2c0664814a699cc31f497bbaa70a9153b3a6cf956091b89", "rawBytes": 34366740, "zstdBytes": 11328067}
+        "linux/amd64": {"treeSha256": "97d96a8bcb4311eda531c8ac654a86d17fcd566e5572e84e3825667e5a65deed", "rawBytes": 34518292, "zstdBytes": 11378225},
+        "linux/arm64": {"treeSha256": "97d96a8bcb4311eda531c8ac654a86d17fcd566e5572e84e3825667e5a65deed", "rawBytes": 34518292, "zstdBytes": 11378225}
       }
     }
   },

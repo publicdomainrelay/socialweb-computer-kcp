@@ -51,7 +51,7 @@ const (
 
 	NodeScriptBootstrap = "/usr/local/bin/socialweb-node-bootstrap"
 
-	NodeSecretsFetchUnit = "setup-secrets.service"
+	NodeSecretsFetchUnit = SecretsFetchUnit
 
 	K3sNodePasswordPath = "/etc/rancher/node/password"
 

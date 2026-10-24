@@ -100,6 +100,9 @@ func (opts TunnelsOptions) Validate() error {
 		if tags[t.Tag] {
 			return fmt.Errorf("cloudinit tunnels: tag %q is asked for twice", t.Tag)
 		}
+		if t.Tag == GuestSecretsTag {
+			return fmt.Errorf("cloudinit tunnels: tag %q names the guest's secrets key, not a tunnel", t.Tag)
+		}
 		tags[t.Tag] = true
 		if t.Port < 1 || t.Port > 65535 {
 			return fmt.Errorf("cloudinit tunnels: tunnel %s port %d is not a port", t.Tag, t.Port)

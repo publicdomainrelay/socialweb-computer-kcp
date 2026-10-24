@@ -33,6 +33,8 @@ const (
 	ContractEventNSIDGuestPublicKey = "com.publicdomainrelay.temp.compute.events.guest.publicKey"
 
 	ContractEventNSIDGuestSignalWebRTC = "com.publicdomainrelay.temp.compute.events.guest.signalWebRTC"
+
+	ContractEventNSIDGuestSecrets = "com.publicdomainrelay.temp.compute.events.guest.secrets"
 )
 
 type ContractEventSpec struct {
@@ -40,7 +42,7 @@ type ContractEventSpec struct {
 
 	Direction ContractEventDirection `json:"direction,omitempty" apigen:"default=outbound,enum=outbound|inbound"`
 
-	NSID string `json:"nsid" apigen:"enum=com.publicdomainrelay.temp.compute.events.guest.publicKey|com.publicdomainrelay.temp.compute.events.guest.signalWebRTC"`
+	NSID string `json:"nsid" apigen:"enum=com.publicdomainrelay.temp.compute.events.guest.publicKey|com.publicdomainrelay.temp.compute.events.guest.signalWebRTC|com.publicdomainrelay.temp.compute.events.guest.secrets"`
 
 	Kind string `json:"kind,omitempty" apigen:"maxLength=32"`
 
@@ -48,7 +50,11 @@ type ContractEventSpec struct {
 
 	Key string `json:"key,omitempty" apigen:"maxLength=256"`
 
-	Ciphertext string `json:"ciphertext,omitempty" apigen:"maxLength=16384"`
+	Ciphertext string `json:"ciphertext,omitempty" apigen:"maxLength=65536"`
+
+	RecipientRef *commonv1.LocalObjectRef `json:"recipientRef,omitempty"`
+
+	InReplyTo *commonv1.StrongRef `json:"inReplyTo,omitempty"`
 }
 
 type ContractEventPhase string
@@ -98,3 +104,5 @@ const (
 
 	ContractEventConditionSubmitted = "Submitted"
 )
+
+const ComputeContractConditionSecretsApplied = "SecretsApplied"

@@ -12,6 +12,10 @@ const (
 	UnitBootstrap = "socialweb-node-bootstrap.service"
 	UnitPrep      = "socialweb-node-prep.service"
 
+	UnitSecretsFetch = "setup-secrets.service"
+
+	UnitGuestSecrets = "socialweb-guest-secrets.service"
+
 	UnitK3sAgent = "socialweb-k3s-agent.service"
 
 	UnitDNSLink = "socialweb-node-dns-link.service"
@@ -31,8 +35,8 @@ func Units(cfg Config) []systemdunit.Unit {
 	prep := systemdunit.Unit{Name: UnitPrep, Sections: []systemdunit.Section{
 		{Name: "Unit", Entries: []systemdunit.KeyValue{
 			systemdunit.KV("Description", "socialweb node: fetch the join secrets and supervise the cluster links"),
-			systemdunit.KV("After", "network-online.target setup-secrets.service"),
-			systemdunit.KV("Wants", "network-online.target"),
+			systemdunit.KV("After", "network-online.target "+UnitSecretsFetch+" "+UnitGuestSecrets),
+			systemdunit.KV("Wants", "network-online.target "+UnitGuestSecrets),
 			systemdunit.KV("StartLimitIntervalSec", "0"),
 		}},
 		{Name: "Service", Entries: []systemdunit.KeyValue{

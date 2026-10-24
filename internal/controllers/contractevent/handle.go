@@ -85,6 +85,14 @@ func (h *handle) CreateContractEvent(ctx context.Context, event v1alpha1.Contrac
 	case !apierrors.IsNotFound(err):
 		return err
 	}
+	return h.ApplyContractEvent(ctx, event)
+}
+
+func (h *handle) ApplyContractEvent(ctx context.Context, event v1alpha1.ContractEvent) error {
+	name := strings.TrimSpace(event.Name)
+	if name == "" {
+		return fmt.Errorf("contractevent: the ContractEvent names no object")
+	}
 	doc := skeleton(name)
 	meta := doc["metadata"].(map[string]any)
 	if len(event.Labels) > 0 {
@@ -111,7 +119,7 @@ func (h *handle) CreateContractEvent(ctx context.Context, event v1alpha1.Contrac
 	}
 	doc["spec"] = spec
 	if err := h.apply(ctx, doc, false); err != nil {
-		return fmt.Errorf("contractevent: creating %s: %w", name, err)
+		return fmt.Errorf("contractevent: applying %s: %w", name, err)
 	}
 	return nil
 }

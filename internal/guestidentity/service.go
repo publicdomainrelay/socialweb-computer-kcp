@@ -326,6 +326,9 @@ func (g *Guest) guestEvent(ctx context.Context, name, acceptURI, acceptCID strin
 	if err != nil {
 		return err
 	}
+	if !market.IsGuestOriginatedEventNSID(nsid) {
+		return fmt.Errorf("%w: %s is the requester's to send, not the guest's", ErrReportRefused, nsid)
+	}
 	if err := g.recorder.Accept(ctx, name, acceptURI, acceptCID); err != nil {
 		return err
 	}

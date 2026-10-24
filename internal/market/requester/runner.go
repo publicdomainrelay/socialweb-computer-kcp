@@ -589,7 +589,7 @@ func (r *contractRunner) runGuestAndHold(ctx context.Context, state *v1alpha1.No
 	if state.Termination != nil {
 		return nil
 	}
-	if r.secrets != nil && r.secretsFetched() == "" {
+	if r.secrets != nil && r.secretsFetched() == "" && !r.q.cfg.SealedSecrets() {
 		timer := time.NewTimer(DefaultVMReadyTimeout)
 		defer timer.Stop()
 		select {
@@ -945,8 +945,16 @@ func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClai
 			applyTermination(state, parsed.Termination, r.q.nowISO())
 			r.writeStatus(ctx, v1alpha1.ComputeContractReleased, terminationMessage(parsed.Termination), state, r.currentBids(), r.currentChosen(), "terminated", 1)
 			return true
+		case market.ComputeEventsGuestSecretsRequestedNSID, market.ComputeEventsGuestSecretsAppliedNSID:
+			if !applySecretsEvent(state, parsed) {
+				return false
+			}
+			r.log().Info("requester_guest_secrets", "event", payloadKind(parsed.Kind), "via", parsed.SecretsVia)
 		}
 		r.writeStatus(ctx, v1alpha1.ComputeContractRequesting, "the guest reported "+payloadKind(parsed.Kind), state, r.currentBids(), r.currentChosen(), "awaitingGuestOnNetwork", 1)
+		if parsed.Kind == market.ComputeEventsGuestSecretsRequestedNSID {
+			r.sealSecrets(ctx, state)
+		}
 		return false
 	}
 	if slices.ContainsFunc(pending, handle) {
@@ -1001,7 +1009,10 @@ func (r *contractRunner) waitForRelease(ctx context.Context, state *v1alpha1.Nod
 			return false
 		}
 		nsid := market.NSIDFromURI(event.Payload.URI)
-		if nsid != market.ComputeEventsVMTerminatedNSID && nsid != market.ComputeEventsVMOnNetworkNSID {
+		switch nsid {
+		case market.ComputeEventsVMTerminatedNSID, market.ComputeEventsVMOnNetworkNSID,
+			market.ComputeEventsGuestSecretsRequestedNSID, market.ComputeEventsGuestSecretsAppliedNSID:
+		default:
 			return false
 		}
 		parsed, err := r.q.parseGuestEvent(ctx, event, receiptURI)
@@ -1015,6 +1026,16 @@ func (r *contractRunner) waitForRelease(ctx context.Context, state *v1alpha1.Nod
 			if parsed.Tag != "" && recordNetwork(state, parsed) {
 				r.log().Info("requester_guest_network", "tag", parsed.Tag, "address", parsed.Address)
 				r.writeStatus(ctx, v1alpha1.ComputeContractHeld, "held: the guest is on the network; set spec.release to release it", state, r.currentBids(), r.currentChosen(), "held", 1)
+			}
+			return false
+		}
+		if parsed.Kind == market.ComputeEventsGuestSecretsRequestedNSID || parsed.Kind == market.ComputeEventsGuestSecretsAppliedNSID {
+			if applySecretsEvent(state, parsed) {
+				r.log().Info("requester_guest_secrets", "event", payloadKind(parsed.Kind), "via", parsed.SecretsVia)
+				r.writeStatus(ctx, v1alpha1.ComputeContractHeld, "held: the guest is on the network; set spec.release to release it", state, r.currentBids(), r.currentChosen(), "held", 1)
+				if parsed.Kind == market.ComputeEventsGuestSecretsRequestedNSID {
+					r.sealSecrets(ctx, state)
+				}
 			}
 			return false
 		}
@@ -1375,6 +1396,20 @@ func (r *contractRunner) applyConditions(status *v1alpha1.ComputeContractStatus,
 			conds.SetStatusAt(&status.Conditions, generation, v1alpha1.ComputeContractConditionReleaseFailed, metav1.ConditionFalse, "Acknowledged", message, now)
 		}
 	}
+	switch {
+	case state != nil && state.SecretsApplied != nil && state.SecretsApplied.Via == market.GuestSecretsViaSealed:
+		conds.SetStatusAt(&status.Conditions, generation, v1alpha1.ComputeContractConditionSecretsApplied, metav1.ConditionTrue, "SealedFallback",
+			"the guest wrote its secrets from the sealed fallback (compute.events.guest.secrets)", now)
+	case state != nil && state.SecretsApplied != nil:
+		conds.SetStatusAt(&status.Conditions, generation, v1alpha1.ComputeContractConditionSecretsApplied, metav1.ConditionTrue, "GetSecrets",
+			"the guest wrote its secrets from the requester's getSecrets route", now)
+	case r.secretsFetched() != "":
+		conds.SetStatusAt(&status.Conditions, generation, v1alpha1.ComputeContractConditionSecretsApplied, metav1.ConditionTrue, "GetSecrets",
+			"the guest fetched its secrets from the requester's getSecrets route", now)
+	case secretsRequestPending(state):
+		conds.SetStatusAt(&status.Conditions, generation, v1alpha1.ComputeContractConditionSecretsApplied, metav1.ConditionFalse, "SealedFallbackRequested",
+			"the guest asked for its secrets sealed to its key; getSecrets did not answer", now)
+	}
 	if state != nil && state.Termination != nil {
 		conds.SetStatusAt(&status.Conditions, generation, v1alpha1.ComputeContractConditionTerminated, metav1.ConditionTrue, "BidderTerminated", terminationMessage(state.Termination), now)
 	}
@@ -1442,6 +1477,17 @@ func contractHostKeys(keys []v1alpha1.ComputeVMHostKey) []v1alpha1.ContractHostK
 	return out
 }
 
+func (r *contractRunner) sealSecrets(ctx context.Context, state *v1alpha1.NodeClaimContract) {
+	contract := r.snapshot()
+	contract.Status.Contract = cloneNodeClaimContract(state)
+	if grant := r.grantValue(); grant != nil {
+		contract.Status.Grant = grant
+	}
+	if err := r.q.sealGuestSecrets(ctx, contract); err != nil && ctx.Err() == nil {
+		r.log().Warn("requester_guest_secrets_seal_failed", "err", err)
+	}
+}
+
 func payloadKind(nsid string) string {
 	switch nsid {
 	case market.ComputeEventsVMOnNetworkNSID:
@@ -1450,6 +1496,10 @@ func payloadKind(nsid string) string {
 		return "hostKeys"
 	case market.ComputeEventsVMTerminatedNSID:
 		return "terminated"
+	case market.ComputeEventsGuestSecretsRequestedNSID:
+		return "secretsRequested"
+	case market.ComputeEventsGuestSecretsAppliedNSID:
+		return "secretsApplied"
 	default:
 		return nsid
 	}

@@ -20,6 +20,9 @@ func main() {
 }
 
 func run(args []string) int {
+	if len(args) > 0 && args[0] == "wait-secrets" {
+		return waitSecrets(args[1:])
+	}
 	fs := flag.NewFlagSet("socialweb-guest-agent", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	configDir := fs.String("config-dir", guestagent.DefaultConfigDir, "the directory of tunnels.json and bidder.json")
@@ -59,5 +62,26 @@ func run(args []string) int {
 		log.Error("the guest agent failed", "err", err.Error())
 		return 1
 	}
+	return 0
+}
+
+func waitSecrets(args []string) int {
+	fs := flag.NewFlagSet("socialweb-guest-agent wait-secrets", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	stateDir := fs.String("state-dir", guestagent.DefaultStateDir, "the directory of secrets.ready")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	fmt.Fprintf(os.Stderr, "socialweb-guest-agent: waiting for %s/%s\n", *stateDir, guestagent.SecretsReadyFile)
+	if err := guestagent.WaitSecrets(ctx, *stateDir); err != nil {
+		fmt.Fprintf(os.Stderr, "socialweb-guest-agent: wait-secrets: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(os.Stderr, "socialweb-guest-agent: the secrets are written\n")
 	return 0
 }

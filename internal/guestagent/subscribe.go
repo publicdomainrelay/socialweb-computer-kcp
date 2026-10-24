@@ -166,6 +166,8 @@ func (a *Agent) receive(frame eventFrame) {
 	a.seen[id] = true
 	_, known := a.cfg.Port(record.Tag)
 	switch {
+	case record.Type == SecretsNSID:
+		a.sealedSecrets(a.ctx, frame.Seq, record.Ciphertext)
 	case record.Type == PublicKeyNSID:
 		a.log.Debug("requester publicKey for tag "+record.Tag, "seq", frame.Seq, "tag", record.Tag, "known", known)
 	case record.Type != SignalWebRTCNSID:

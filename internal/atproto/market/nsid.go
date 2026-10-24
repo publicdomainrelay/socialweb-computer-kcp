@@ -40,10 +40,13 @@ const (
 	ComputeEventsVMHostKeysNSID         = "com.publicdomainrelay.temp.compute.events.vm.hostKeys"
 	ComputeEventsVMRegisterIdentityNSID = "com.publicdomainrelay.temp.compute.events.vm.registerIdentity"
 
-	GuestEventNSIDPrefix               = "com.publicdomainrelay.temp.compute.events.guest."
-	ComputeEventsGuestPublicKeyNSID    = GuestEventNSIDPrefix + "publicKey"
-	ComputeEventsGuestSignalWebRTCNSID = GuestEventNSIDPrefix + "signalWebRTC"
-	ComputeGuestSubscribeEventsNSID    = "com.publicdomainrelay.temp.compute.guest.subscribeEvents"
+	GuestEventNSIDPrefix                   = "com.publicdomainrelay.temp.compute.events.guest."
+	ComputeEventsGuestPublicKeyNSID        = GuestEventNSIDPrefix + "publicKey"
+	ComputeEventsGuestSignalWebRTCNSID     = GuestEventNSIDPrefix + "signalWebRTC"
+	ComputeEventsGuestSecretsNSID          = GuestEventNSIDPrefix + "secrets"
+	ComputeEventsGuestSecretsAppliedNSID   = GuestEventNSIDPrefix + "secretsApplied"
+	ComputeEventsGuestSecretsRequestedNSID = GuestEventNSIDPrefix + "secretsRequested"
+	ComputeGuestSubscribeEventsNSID        = "com.publicdomainrelay.temp.compute.guest.subscribeEvents"
 
 	BadgeBlueKeysNSID = "com.publicdomainrelay.temp.badgeBlueKeys"
 	VouchNSID         = "sh.tangled.graph.vouch"

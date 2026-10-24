@@ -378,17 +378,25 @@ const (
 
 	MaxGuestEventBytes = 24 << 10
 
+	MaxGuestSecretsEventBytes = market.MaxGuestSecretsCiphertext + 4<<10
+
+	MaxGuestSecretsVia = 16
+
 	ageArmorHeader = "-----BEGIN AGE ENCRYPTED FILE-----"
 )
 
 func CheckGuestEvent(record map[string]any) (string, error) {
 	nsid, _ := record["$type"].(string)
 	raw, err := json.Marshal(record)
+	limit := MaxGuestEventBytes
+	if nsid == market.ComputeEventsGuestSecretsNSID {
+		limit = MaxGuestSecretsEventBytes
+	}
 	switch {
 	case err != nil:
 		return "", fmt.Errorf("%w: the guest event is not JSON: %v", ErrReportRefused, err)
-	case len(raw) > MaxGuestEventBytes:
-		return "", fmt.Errorf("%w: the guest event is larger than %d bytes", ErrReportRefused, MaxGuestEventBytes)
+	case len(raw) > limit:
+		return "", fmt.Errorf("%w: the guest event is larger than %d bytes", ErrReportRefused, limit)
 	}
 	switch nsid {
 	case market.ComputeEventsGuestPublicKeyNSID:
@@ -412,6 +420,36 @@ func CheckGuestEvent(record map[string]any) (string, error) {
 		}
 		if len(r.Ciphertext) > MaxGuestCiphertext || !strings.HasPrefix(strings.TrimSpace(r.Ciphertext), ageArmorHeader) {
 			return "", fmt.Errorf("%w: ciphertext is age armored ciphertext of at most %d bytes", ErrReportRefused, MaxGuestCiphertext)
+		}
+	case market.ComputeEventsGuestSecretsNSID:
+		r, err := market.ParseComputeEventsGuestSecrets(record)
+		if err != nil {
+			return "", fmt.Errorf("%w: %v", ErrReportRefused, err)
+		}
+		if _, err := syntax.ParseDatetime(r.CreatedAt); err != nil {
+			return "", fmt.Errorf("%w: createdAt is not an atproto datetime", ErrReportRefused)
+		}
+		if len(r.Ciphertext) > market.MaxGuestSecretsCiphertext || !strings.HasPrefix(strings.TrimSpace(r.Ciphertext), ageArmorHeader) {
+			return "", fmt.Errorf("%w: ciphertext is age armored ciphertext of at most %d bytes", ErrReportRefused, market.MaxGuestSecretsCiphertext)
+		}
+	case market.ComputeEventsGuestSecretsRequestedNSID:
+		r, err := market.ParseComputeEventsGuestSecretsRequested(record)
+		if err != nil {
+			return "", fmt.Errorf("%w: %v", ErrReportRefused, err)
+		}
+		if _, err := syntax.ParseDatetime(r.CreatedAt); err != nil {
+			return "", fmt.Errorf("%w: createdAt is not an atproto datetime", ErrReportRefused)
+		}
+	case market.ComputeEventsGuestSecretsAppliedNSID:
+		r, err := market.ParseComputeEventsGuestSecretsApplied(record)
+		if err != nil {
+			return "", fmt.Errorf("%w: %v", ErrReportRefused, err)
+		}
+		if _, err := syntax.ParseDatetime(r.CreatedAt); err != nil {
+			return "", fmt.Errorf("%w: createdAt is not an atproto datetime", ErrReportRefused)
+		}
+		if r.Via == "" || len(r.Via) > MaxGuestSecretsVia || !printableASCII(r.Via) || r.Count < 0 {
+			return "", fmt.Errorf("%w: via is printable ASCII of 1 to %d bytes and count is not negative", ErrReportRefused, MaxGuestSecretsVia)
 		}
 	default:
 		return "", fmt.Errorf("%w: %q is not a guest event", ErrReportRefused, nsid)

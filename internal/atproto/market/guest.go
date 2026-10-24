@@ -13,6 +13,13 @@ const (
 	GuestSignalKindAnswer = "answer"
 
 	GuestSubscribeEventsErrFutureCursor = "FutureCursor"
+
+	GuestSecretsTag = "secrets"
+
+	MaxGuestSecretsCiphertext = 65536
+
+	GuestSecretsViaGetSecrets = "getSecrets"
+	GuestSecretsViaSealed     = "sealed"
 )
 
 func OnNetworkKind(r ComputeEventsVMOnNetwork) string {
@@ -28,4 +35,21 @@ func OnNetworkKind(r ComputeEventsVMOnNetwork) string {
 
 func IsGuestEventNSID(nsid string) bool {
 	return strings.HasPrefix(nsid, GuestEventNSIDPrefix) && len(nsid) > len(GuestEventNSIDPrefix)
+}
+
+func IsRequesterGuestEventNSID(nsid string) bool {
+	switch nsid {
+	case ComputeEventsGuestPublicKeyNSID, ComputeEventsGuestSignalWebRTCNSID, ComputeEventsGuestSecretsNSID:
+		return true
+	}
+	return false
+}
+
+func IsGuestOriginatedEventNSID(nsid string) bool {
+	switch nsid {
+	case ComputeEventsGuestPublicKeyNSID, ComputeEventsGuestSignalWebRTCNSID, ComputeEventsGuestSecretsAppliedNSID,
+		ComputeEventsGuestSecretsRequestedNSID:
+		return true
+	}
+	return false
 }

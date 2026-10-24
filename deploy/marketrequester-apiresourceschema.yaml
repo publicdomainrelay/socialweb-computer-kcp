@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-22.marketrequesters.socialweb.computer
+  name: v1alpha1-23.marketrequesters.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -240,6 +240,11 @@ spec:
                       required:
                         - kind
                         - name
+              secretsFallback:
+                type: string
+                enum:
+                  - None
+                  - Sealed
               ingress:
                 type: object
                 properties:

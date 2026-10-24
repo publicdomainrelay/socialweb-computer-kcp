@@ -23,7 +23,38 @@ var secretsModule UserDataModule = func(ctx Context) (UserDataPatch, error) {
 set -euo pipefail
 
 STAMP=/var/lib/setup-secrets.done
-[ -f "${STAMP}" ] && exit 0
+MARKER="` + GuestAgentSecretsPath + `"
+READY="` + GuestSecretsReadyPath + `"
+REQUEST="` + GuestSecretsRequestPath + `"
+FALLBACK=""
+[ -f "${MARKER}" ] && FALLBACK=sealed
+DEADLINE=$((SECONDS + ` + strconv.Itoa(SecretsFetchFallbackDeadlineSec) + `))
+
+mark_ready() {
+  install -d -m 0700 -o root -g root "$(dirname "${READY}")"
+  printf 'getSecrets %s\n' "$1" > "${READY}.part"
+  mv -f "${READY}.part" "${READY}"
+}
+
+give_up() {
+  echo "$1" >&2
+  if [ -n "${FALLBACK}" ]; then
+    install -d -m 0700 -o root -g root "$(dirname "${REQUEST}")"
+    : > "${REQUEST}"
+    echo "getSecrets gave no bundle; the guest agent asks the requester for the sealed fallback" >&2
+    exit 0
+  fi
+  exit 1
+}
+
+late() {
+  [ -n "${FALLBACK}" ] && [ "${SECONDS}" -ge "${DEADLINE}" ]
+}
+
+if [ -f "${STAMP}" ]; then
+  mark_ready "$(cat "${STAMP}" 2>/dev/null || echo 0)"
+  exit 0
+fi
 
 SECRETS_URL="` + ctx.SecretsURL + `"
 SECRETS_ROUTE="` + ctx.SecretsRoute + `"
@@ -31,33 +62,35 @@ SECRETS_AUD="` + ctx.SecretsAud + `"
 GUEST_LOGIN="` + GuestLoginScriptPath + `"
 
 if [ -z "${SECRETS_URL}" ] || [ -z "${SECRETS_AUD}" ]; then
-  echo "secrets module misconfigured: missing url or aud" >&2
-  exit 1
+  give_up "secrets module misconfigured: missing url or aud"
 fi
 
 for _ in $(seq 1 60); do
   [ -x "${GUEST_LOGIN}" ] && break
+  late && break
   sleep 2
 done
-[ -x "${GUEST_LOGIN}" ] || { echo "the guest login helper ${GUEST_LOGIN} never appeared" >&2; exit 1; }
+[ -x "${GUEST_LOGIN}" ] || give_up "the guest login helper ${GUEST_LOGIN} never appeared"
 
 EXCHANGED=""
 for attempt in $(seq 1 10); do
   EXCHANGED="$("${GUEST_LOGIN}" token "${SECRETS_AUD}")" || true
   [ -n "${EXCHANGED}" ] && break
+  late && break
   echo "workload identity token exchange failed (attempt ${attempt}); retrying" >&2
   sleep 5
 done
-[ -n "${EXCHANGED}" ] || { echo "no workload identity token from the bidder's OpenBao for ${SECRETS_AUD}" >&2; exit 1; }
+[ -n "${EXCHANGED}" ] || give_up "no workload identity token from the bidder's OpenBao for ${SECRETS_AUD}"
 
 BUNDLE=""
 for attempt in $(seq 1 10); do
-  BUNDLE="$(curl -sf -H "Authorization: Bearer ${EXCHANGED}" "${SECRETS_URL}${SECRETS_ROUTE}")" || true
+  BUNDLE="$(curl -sf -m 20 -H "Authorization: Bearer ${EXCHANGED}" "${SECRETS_URL}${SECRETS_ROUTE}")" || true
   [ -n "${BUNDLE}" ] && break
+  late && break
   echo "secrets fetch failed (attempt ${attempt}); retrying" >&2
   sleep 5
 done
-[ -n "${BUNDLE}" ] || { echo "secrets fetch failed against ${SECRETS_URL}${SECRETS_ROUTE}" >&2; exit 1; }
+[ -n "${BUNDLE}" ] || give_up "secrets fetch failed against ${SECRETS_URL}${SECRETS_ROUTE}"
 
 umask 077
 COUNT="$(printf '%s' "${BUNDLE}" | jq 'length')"
@@ -72,7 +105,8 @@ while [ "${i}" -lt "${COUNT}" ]; do
 done
 
 echo "wrote ${COUNT} secrets"
-touch "${STAMP}"
+printf '%s\n' "${COUNT}" > "${STAMP}"
+mark_ready "${COUNT}"
 `,
 			},
 			{
@@ -84,7 +118,6 @@ touch "${STAMP}"
 					"Description=Fetch compute contract secrets via workload identity exchange",
 					"After=network-online.target guest-login.service",
 					"Wants=network-online.target guest-login.service",
-					"ConditionPathExists=!/var/lib/setup-secrets.done",
 					"",
 					"[Service]",
 					"Type=oneshot",

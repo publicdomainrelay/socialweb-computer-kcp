@@ -9,6 +9,16 @@ const (
 
 	SignalWebRTCNSID = nsidPrefix + "events.guest.signalWebRTC"
 
+	SecretsNSID = nsidPrefix + "events.guest.secrets"
+
+	SecretsAppliedNSID = nsidPrefix + "events.guest.secretsApplied"
+
+	SecretsRequestedNSID = nsidPrefix + "events.guest.secretsRequested"
+
+	secretsViaGetSecrets = "getSecrets"
+
+	secretsViaSealed = "sealed"
+
 	SubscribeEventsNSID = nsidPrefix + "guest.subscribeEvents"
 
 	SubscribeEventsPath = "/xrpc/" + SubscribeEventsNSID

@@ -272,6 +272,8 @@ type Requester struct {
 
 	secrets map[string]*secretsState
 
+	sealMu sync.Mutex
+
 	heldMu sync.Mutex
 
 	heldSessions map[string]*heldSession
@@ -370,6 +372,10 @@ func (c Config) Network() v1alpha1.MarketNetworkValue {
 
 func (c Config) Relays() []string {
 	return append([]string(nil), c.Spec.Network.Relays()...)
+}
+
+func (c Config) SealedSecrets() bool {
+	return c.Spec.SecretsFallback == v1alpha1.SecretsFallbackSealed
 }
 
 func (c Config) InboundXRPC() bool {

@@ -10872,6 +10872,71 @@ to `exec.LookPath("deno")`. The integration hosts hat-7 and hat-9 were prepared 
   to 165 s for its certificate, so webrtc is the interactive path. iroh ssh is unchanged (0.73 s on a
   held invocation).
 
+### Secrets: getSecrets stays primary; a sealed fallback runs only when enabled and asked for (2026-10-24, plan 0034)
+
+- **Before.** A contract's `spec.secretsRef` bundle reached the guest one way (plan 0032):
+  `setup-secrets.service` exchanged the guest's workload identity token (guest-login.sh, audience
+  `api://ATProto?actx=<requester did>`) and GETs
+  `/xrpc/com.publicdomainrelay.temp.compute.secrets.getSecrets/<contract>` on the requester's ingress.
+  A requester without an inbound endpoint (comms mode Firehose, the browser page when the ingress
+  proxy does not work) could not deliver secrets at all, and nothing ordered a unit after the bundle.
+- **The decisions (the user's).** getSecrets stays the default and the primary path. Publishing a
+  bundle on the protocol, even sealed, leaves ciphertext in public repos to be broken later, so the
+  sealed path is a fallback that is explicit and on demand:
+  - Opt-in: `spec.secretsFallback` `None` (default) or `Sealed` on the MarketRequester, passed to its
+    Requester component (`run request -- --secrets-fallback Sealed`). With `None` no sealed record is
+    ever made; a Firehose requester with `None` and a secretsRef fails the contract before the RFP
+    ("secrets need the requester ingress (getSecrets) or secretsFallback: Sealed").
+  - With `Sealed`, user_data carries the agent marker `/etc/socialweb-guest-agent/secrets.json`
+    `{"fallback": "sealed", "getSecrets": <the requester has an inbound endpoint>}` beside the
+    unchanged setup-secrets module (inbound) or alone (Firehose). The bidder sees the marker and
+    installs socialweb-guest-agent and `socialweb-guest-secrets.service`. setup-secrets gives getSecrets
+    `cloudinit.SecretsFetchFallbackDeadlineSec` (90 s) when the marker is present, then touches
+    `/run/socialweb-guest-agent/secrets.request` and exits 0; without the marker it fails as before.
+  - The agent publishes a `guest.publicKey` with tag `secrets` (one tag, a reserved tunnel tag) and,
+    on the request file or at once when `getSecrets` is false, posts
+    `com.publicdomainrelay.temp.compute.events.guest.secretsRequested {createdAt}` (no secret). The
+    requester records it as `status.contract.secretsRequested` and only then, with `Sealed`, seals the
+    bundle (the getSecrets JSON array, `[{path, value, mode?}]`, plus the node claim document of a
+    node join) to the latest inbound publicKey of tag `secrets` and applies the controller-owned
+    outbound ContractEvent `secrets-<contract>` (`guest.secrets {ciphertext <= 65536, createdAt}`,
+    `spec.recipientRef` the key's ContractEvent, `spec.inReplyTo` the request), which publishes and
+    submits like any outbound event. A new key or a new request while the request is unanswered
+    reseals (a new generation: a new payload rkey). The plaintext is only in the requester's memory.
+  - The agent trial-opens every `guest.secrets`, writes each entry atomically (temp file, fsync,
+    rename; root:root; 0600 or the bundle's octal mode when it is at most 0600; missing parents 0700;
+    an absolute clean path; at most 256 entries), writes `secrets.ready` and posts
+    `guest.secretsApplied {via: "sealed", count}`. When setup-secrets wrote the bundle it writes
+    `secrets.ready` itself (`getSecrets <count>`, also on a later boot from its stamp) and the agent
+    posts `via: "getSecrets"`.
+  - One ready signal. `socialweb-guest-secrets.service` is a oneshot that blocks on
+    `socialweb-guest-agent wait-secrets` (inotify on `/run/socialweb-guest-agent`, no polling) until
+    `secrets.ready` exists. A consumer orders itself after both paths (`cloudinit.SecretsReadyUnits`):
+    socialweb-node-prep has `After=setup-secrets.service socialweb-guest-secrets.service` and
+    `Wants=socialweb-guest-secrets.service`.
+  - Status. `status.contract.secretsApplied {appliedAt, via, count, event, payload}` and the
+    ComputeContract condition `SecretsApplied` (reason `GetSecrets` or `SealedFallback`; False with
+    `SealedFallbackRequested` while a request is open). A Held contract does not wait for secrets
+    when the fallback is `Sealed` (the sealed reply needs Held to publish).
+  - Directions are enforced at the bidder: `POST /v1/events` takes secretsRequested and
+    secretsApplied and refuses guest.secrets; a requester event under `compute.events.guest.` must be
+    publicKey, signalWebRTC or secrets. Scopes: requester create and update `guest.secrets`; bidder
+    create `guest.secretsApplied` and `guest.secretsRequested`; all three are in the market stream
+    collections.
+- **After (live, market network p34sec, CLI requester, local bidder, a bundle with one entry
+  `/etc/p34/test.env`).** `Sealed` with the ingress working: setup-secrets wrote the file through
+  getSecrets, `status.contract.secretsApplied.via` getSecrets, condition `SecretsApplied` reason
+  `GetSecrets`, and no guest.secrets ContractEvent or record exists. `Sealed` with comms mode
+  Firehose: user_data had no setup-secrets; the agent asked at boot and the file was written 2.9 s
+  after the request (reason `SealedFallback`). `Sealed`, comms mode Both, getSecrets refused on the
+  guest: setup-secrets gave up after its 10 attempts (50 s; the 90 s deadline bounds a slow failure),
+  touched the request file, and the sealed bundle was written 0.18 s after the request. `None` with
+  Firehose failed before the RFP with the message above; `None` with getSecrets refused failed as
+  before ("the guest did not fetch its join secrets within 2m0s") with no sealed record. In every
+  case the file was `600 root:root` under a `700` directory and `socialweb-guest-secrets.service`
+  finished on the ready file; no file under the network's state dir (kine, logs, PDS stores) and no
+  journal line held the test value; the ContractEvent and the records held 442 bytes of age armor.
+
 ## 16. Vocabulary
 
 | | |

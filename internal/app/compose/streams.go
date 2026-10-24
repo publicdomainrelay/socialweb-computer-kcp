@@ -62,6 +62,9 @@ var MarketStreamCollections = []string{
 	market.ComputeEventsVMRegisterIdentityNSID,
 	market.ComputeEventsGuestPublicKeyNSID,
 	market.ComputeEventsGuestSignalWebRTCNSID,
+	market.ComputeEventsGuestSecretsNSID,
+	market.ComputeEventsGuestSecretsAppliedNSID,
+	market.ComputeEventsGuestSecretsRequestedNSID,
 }
 
 type SourceInput struct {

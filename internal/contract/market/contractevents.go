@@ -32,6 +32,8 @@ type ContractEvents interface {
 
 	CreateContractEvent(ctx context.Context, event v1alpha1.ContractEvent) error
 
+	ApplyContractEvent(ctx context.Context, event v1alpha1.ContractEvent) error
+
 	DeleteContractEvent(ctx context.Context, name string) error
 
 	ApplyContractEventOwner(ctx context.Context, name string, contract v1alpha1.ComputeContract) error

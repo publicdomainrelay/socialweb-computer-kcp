@@ -634,7 +634,8 @@ func (ctl *Controller) ensureApp(ctx context.Context, r compose.Root, app v1alph
 	case v1alpha1.ApplicationKindMarketRequester:
 		root = &v1alpha1.MarketRequester{ObjectMeta: meta, Spec: v1alpha1.MarketRequesterSpec{Profile: app.Profile, Suspend: suspend, Network: &value,
 			Identity:   v1alpha1.ApplicationIdentity{Association: v1alpha1.AssociationSkip},
-			BidderDids: bidderDids, Options: app.Options, Quota: app.Quota, Comms: comms, Components: app.Components}}
+			BidderDids: bidderDids, Options: app.Options, Quota: app.Quota, Comms: comms, Components: app.Components,
+			SecretsFallback: app.SecretsFallback}}
 	case v1alpha1.ApplicationKindSshGateway:
 		root = &v1alpha1.SshGateway{ObjectMeta: meta, Spec: v1alpha1.SshGatewaySpec{Profile: app.Profile, Suspend: suspend, Network: &value,
 			BidderDids: bidderDids, Options: app.Options, Quota: app.Quota, OwnerSessionsFile: app.OwnerSessionsFile, Comms: comms, Components: app.Components}}

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -57,6 +58,15 @@ func InboundContractEventName(eventURI string) string {
 }
 
 func validateGuestFields(nsid, kind, tag, key, ciphertext string) error {
+	if nsid == market.ComputeEventsGuestSecretsNSID {
+		switch {
+		case kind != "" || tag != "" || key != "":
+			return errors.New("a secrets event carries only a ciphertext")
+		case len(ciphertext) > market.MaxGuestSecretsCiphertext || !strings.HasPrefix(strings.TrimSpace(ciphertext), ageArmorHeader):
+			return fmt.Errorf("ciphertext is not age armored ciphertext of at most %d bytes", market.MaxGuestSecretsCiphertext)
+		}
+		return nil
+	}
 	if !networkTagRE.MatchString(tag) {
 		return fmt.Errorf("tag %q is not a DNS label of at most 32 characters", tag)
 	}
@@ -140,7 +150,13 @@ func (q *Requester) ObserveContractEvent(ctx context.Context, change contractmar
 		q.contractEvents.Put(event.Name, event)
 	}
 	if event.Spec.Direction == v1alpha1.ContractEventInbound {
-		return 0, q.observeInboundContractEvent(ctx, event)
+		if err := q.observeInboundContractEvent(ctx, event); err != nil {
+			return 0, err
+		}
+		if contract := change.Contract; contract != nil && guestSecretsKey(event) {
+			return 0, q.sealGuestSecrets(ctx, *contract)
+		}
+		return 0, nil
 	}
 	return q.observeOutboundContractEvent(ctx, event, change.Contract)
 }
@@ -166,6 +182,9 @@ func submitAttempts(status v1alpha1.ContractEventStatus) int32 {
 }
 
 func statusAhead(known, seen v1alpha1.ContractEventStatus) bool {
+	if known.ObservedGeneration != seen.ObservedGeneration {
+		return known.ObservedGeneration > seen.ObservedGeneration
+	}
 	if a, b := contractEventRank(known), contractEventRank(seen); a != b {
 		return a > b
 	}
@@ -200,11 +219,15 @@ func (q *Requester) observeInboundContractEvent(ctx context.Context, event v1alp
 }
 
 func (q *Requester) observeOutboundContractEvent(ctx context.Context, event v1alpha1.ContractEvent, contract *v1alpha1.ComputeContract) (time.Duration, error) {
-	if event.Status.Phase == v1alpha1.ContractEventFailed || event.Status.Phase == v1alpha1.ContractEventSubmitted {
+	respec := event.Status.ObservedGeneration != 0 && event.Status.ObservedGeneration != event.Generation
+	if !respec && (event.Status.Phase == v1alpha1.ContractEventFailed || event.Status.Phase == v1alpha1.ContractEventSubmitted) {
 		return 0, nil
 	}
 	now := q.now()
 	status := *event.Status.DeepCopy()
+	if respec {
+		status = v1alpha1.ContractEventStatus{Conditions: status.Conditions}
+	}
 	fail := func(message string) (time.Duration, error) {
 		status.Phase = v1alpha1.ContractEventFailed
 		status.Message = message
@@ -293,6 +316,9 @@ func (q *Requester) publishContractEvent(ctx context.Context, event v1alpha1.Con
 		return out, errors.New("the ContractEvent has no UID")
 	}
 	nsid := event.Spec.NSID
+	if event.Generation > 1 {
+		uid += "-g" + strconv.FormatInt(event.Generation, 10)
+	}
 	payloadRKey := sessionRKey("contract-event", uid)
 	payload, found, err := q.existingSignedRecord(ctx, nsid, payloadRKey)
 	if err != nil {
@@ -333,6 +359,8 @@ func (q *Requester) contractEventRecord(event v1alpha1.ContractEvent) (map[strin
 		return market.EncodeRecord(market.ComputeEventsGuestPublicKey{Kind: outboundKind(spec), Tag: spec.Tag, Key: spec.Key, CreatedAt: q.nowISO()})
 	case market.ComputeEventsGuestSignalWebRTCNSID:
 		return market.EncodeRecord(market.ComputeEventsGuestSignalWebRTC{Kind: spec.Kind, Tag: spec.Tag, Ciphertext: spec.Ciphertext, CreatedAt: q.nowISO()})
+	case market.ComputeEventsGuestSecretsNSID:
+		return market.EncodeRecord(market.ComputeEventsGuestSecrets{Ciphertext: spec.Ciphertext, CreatedAt: q.nowISO()})
 	}
 	return nil, fmt.Errorf("nsid %q is not a guest event", spec.NSID)
 }

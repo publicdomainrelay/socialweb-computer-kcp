@@ -8,6 +8,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -32,7 +34,11 @@ type SecretEntry struct {
 	Path string `json:"path"`
 
 	Value string `json:"value"`
+
+	Mode string `json:"mode,omitempty"`
 }
+
+var secretModeRE = regexp.MustCompile(`^0?[0-6]?[0-7]?[0-7]?$`)
 
 type secretsState struct {
 	mu sync.Mutex
@@ -184,8 +190,22 @@ func (q *Requester) readSecretsBundle(ctx context.Context, ref commonv1.SecretRe
 		if entries[i].Path == "" || !strings.HasPrefix(entries[i].Path, "/") {
 			return nil, fmt.Errorf("requester: the secrets bundle names the path %q", entries[i].Path)
 		}
+		if err := checkSecretMode(entries[i].Mode); err != nil {
+			return nil, fmt.Errorf("requester: the secrets bundle entry %d: %w", i, err)
+		}
 	}
 	return entries, nil
+}
+
+func checkSecretMode(raw string) error {
+	if raw == "" {
+		return nil
+	}
+	value, err := strconv.ParseUint(raw, 8, 32)
+	if err != nil || !secretModeRE.MatchString(raw) || value&^0o600 != 0 {
+		return fmt.Errorf("mode %q is not an octal file mode of at most 0600", raw)
+	}
+	return nil
 }
 
 func (q *Requester) ingressExposureURL(ctx context.Context) (string, error) {
@@ -219,6 +239,8 @@ func (q *Requester) issuerVerifier(issuer string) TokenVerifier {
 		return io.ReadAll(io.LimitReader(res.Body, 1<<20))
 	})
 }
+
+var errSecretsNeedIngress = errors.New("secrets need the requester ingress (getSecrets) or secretsFallback: Sealed")
 
 func secretsAudience(requesterDID string) string {
 	return "api://" + SecretsAPIAudience + "?actx=" + requesterDID
@@ -360,17 +382,23 @@ func (r *contractRunner) ensureSecrets(ctx context.Context, contract v1alpha1.Co
 	if contract.Spec.SecretsRef == nil || r.secrets != nil {
 		return nil
 	}
-	entries, err := r.q.readSecretsBundle(ctx, *contract.Spec.SecretsRef)
-	if err != nil {
-		return err
+	inbound, sealed := r.q.cfg.InboundXRPC(), r.q.cfg.SealedSecrets()
+	if !inbound && !sealed {
+		return errSecretsNeedIngress
 	}
-	url, err := r.q.ingressExposureURL(ctx)
+	entries, err := r.q.readSecretsBundle(ctx, *contract.Spec.SecretsRef)
 	if err != nil {
 		return err
 	}
 	state := newSecretsState(r.name, r.q.log)
 	state.addEntries(entries...)
-	r.q.registerSecrets(r.name, state)
+	url := ""
+	if inbound {
+		if url, err = r.q.ingressExposureURL(ctx); err != nil {
+			return err
+		}
+		r.q.registerSecrets(r.name, state)
+	}
 	r.mu.Lock()
 	r.secrets = state
 	r.secretsURL = url
@@ -411,11 +439,17 @@ func (r *contractRunner) contractModules(userData string, contract v1alpha1.Comp
 		modules = append(modules, cloudinit.TunnelsModule(opts))
 	}
 	if r.secrets != nil {
-		modules = append(modules, "secrets")
-		values.SecretsURL = r.secretsURLValue()
-		values.SecretsRoute = secretsRouteOf(r.name)
-		values.SecretsAud = secretsAudience(r.q.callbackDID())
-		values.SecretsAcceptPath = contractAcceptPath(contract)
+		inbound := r.q.cfg.InboundXRPC()
+		if inbound {
+			modules = append(modules, "secrets")
+			values.SecretsURL = r.secretsURLValue()
+			values.SecretsRoute = secretsRouteOf(r.name)
+			values.SecretsAud = secretsAudience(r.q.callbackDID())
+			values.SecretsAcceptPath = contractAcceptPath(contract)
+		}
+		if r.q.cfg.SealedSecrets() {
+			modules = append(modules, cloudinit.GuestSecretsModule(inbound))
+		}
 	}
 	if len(modules) == 0 {
 		return userData, nil

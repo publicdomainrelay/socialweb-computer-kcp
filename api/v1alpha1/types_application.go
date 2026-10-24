@@ -576,6 +576,8 @@ type MarketRequesterSpec struct {
 
 	Comms *MarketComms `json:"comms,omitempty"`
 
+	SecretsFallback SecretsFallback `json:"secretsFallback,omitempty" apigen:"enum=None|Sealed"`
+
 	Ingress *IngressConfig `json:"ingress,omitempty"`
 
 	BidderDids []string `json:"bidderDids,omitempty"`
@@ -740,6 +742,8 @@ type NetworkApp struct {
 	OwnerSessionsFile string `json:"ownerSessionsFile,omitempty" apigen:"userEndpoint"`
 
 	ClusterProvider *GatewayClusterProvider `json:"clusterProvider,omitempty"`
+
+	SecretsFallback SecretsFallback `json:"secretsFallback,omitempty" apigen:"enum=None|Sealed"`
 
 	Components ComponentOverrides `json:"components,omitempty"`
 

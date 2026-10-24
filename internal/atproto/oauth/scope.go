@@ -6,34 +6,37 @@ import (
 )
 
 const (
-	CollectionRBACDID           = "com.publicdomainrelay.temp.auth.allowlist.rbacDid"
-	CollectionOffering          = "com.publicdomainrelay.temp.market.offering"
-	CollectionBid               = "com.publicdomainrelay.temp.market.bid"
-	CollectionBidsFree          = "com.publicdomainrelay.temp.market.bids.free"
-	CollectionBidsX402          = "com.publicdomainrelay.temp.market.bids.x402"
-	CollectionReceipt           = "com.publicdomainrelay.temp.market.receipt"
-	CollectionReceiptsFree      = "com.publicdomainrelay.temp.market.receipts.free"
-	CollectionReceiptsX402      = "com.publicdomainrelay.temp.market.receipts.x402"
-	CollectionEvent             = "com.publicdomainrelay.temp.market.event"
-	CollectionConfigWIFSimple   = "com.publicdomainrelay.temp.compute.config.wif.simple"
-	CollectionComputeVM         = "com.publicdomainrelay.temp.compute.vm"
-	CollectionRFP               = "com.publicdomainrelay.temp.market.rfp"
-	CollectionAccept            = "com.publicdomainrelay.temp.market.accept"
-	CollectionVMDelete          = "com.publicdomainrelay.temp.compute.events.vm.delete"
-	CollectionVMOnNetwork       = "com.publicdomainrelay.temp.compute.events.vm.onNetwork"
-	CollectionVMTerminated      = "com.publicdomainrelay.temp.compute.events.vm.terminated"
-	CollectionVMHostKeys        = "com.publicdomainrelay.temp.compute.events.vm.hostKeys"
-	CollectionGuestPublicKey    = "com.publicdomainrelay.temp.compute.events.guest.publicKey"
-	CollectionGuestSignalWebRTC = "com.publicdomainrelay.temp.compute.events.guest.signalWebRTC"
-	CollectionBadgeBlueKeys     = "com.publicdomainrelay.temp.badgeBlueKeys"
-	CollectionHeartbeat         = "com.publicdomainrelay.temp.market.heartbeat"
-	CollectionFedproxyRBAC      = "com.fedproxy.rbac"
-	CollectionFedproxySSHKey    = "com.fedproxy.sshPublicKey"
-	CollectionBidderAssociation = "com.publicdomainrelay.temp.market.bidderAssociation"
-	CollectionPolicyGhaLite     = "computer.socialweb.temp.policy.ghalite"
-	CollectionPolicyTypeScript  = "computer.socialweb.temp.policy.typescript"
-	CollectionInfra             = "computer.socialweb.infra"
-	CollectionEphemeralInfra    = "computer.socialweb.ephemeralInfra"
+	CollectionRBACDID               = "com.publicdomainrelay.temp.auth.allowlist.rbacDid"
+	CollectionOffering              = "com.publicdomainrelay.temp.market.offering"
+	CollectionBid                   = "com.publicdomainrelay.temp.market.bid"
+	CollectionBidsFree              = "com.publicdomainrelay.temp.market.bids.free"
+	CollectionBidsX402              = "com.publicdomainrelay.temp.market.bids.x402"
+	CollectionReceipt               = "com.publicdomainrelay.temp.market.receipt"
+	CollectionReceiptsFree          = "com.publicdomainrelay.temp.market.receipts.free"
+	CollectionReceiptsX402          = "com.publicdomainrelay.temp.market.receipts.x402"
+	CollectionEvent                 = "com.publicdomainrelay.temp.market.event"
+	CollectionConfigWIFSimple       = "com.publicdomainrelay.temp.compute.config.wif.simple"
+	CollectionComputeVM             = "com.publicdomainrelay.temp.compute.vm"
+	CollectionRFP                   = "com.publicdomainrelay.temp.market.rfp"
+	CollectionAccept                = "com.publicdomainrelay.temp.market.accept"
+	CollectionVMDelete              = "com.publicdomainrelay.temp.compute.events.vm.delete"
+	CollectionVMOnNetwork           = "com.publicdomainrelay.temp.compute.events.vm.onNetwork"
+	CollectionVMTerminated          = "com.publicdomainrelay.temp.compute.events.vm.terminated"
+	CollectionVMHostKeys            = "com.publicdomainrelay.temp.compute.events.vm.hostKeys"
+	CollectionGuestPublicKey        = "com.publicdomainrelay.temp.compute.events.guest.publicKey"
+	CollectionGuestSignalWebRTC     = "com.publicdomainrelay.temp.compute.events.guest.signalWebRTC"
+	CollectionGuestSecrets          = "com.publicdomainrelay.temp.compute.events.guest.secrets"
+	CollectionGuestSecretsApplied   = "com.publicdomainrelay.temp.compute.events.guest.secretsApplied"
+	CollectionGuestSecretsRequested = "com.publicdomainrelay.temp.compute.events.guest.secretsRequested"
+	CollectionBadgeBlueKeys         = "com.publicdomainrelay.temp.badgeBlueKeys"
+	CollectionHeartbeat             = "com.publicdomainrelay.temp.market.heartbeat"
+	CollectionFedproxyRBAC          = "com.fedproxy.rbac"
+	CollectionFedproxySSHKey        = "com.fedproxy.sshPublicKey"
+	CollectionBidderAssociation     = "com.publicdomainrelay.temp.market.bidderAssociation"
+	CollectionPolicyGhaLite         = "computer.socialweb.temp.policy.ghalite"
+	CollectionPolicyTypeScript      = "computer.socialweb.temp.policy.typescript"
+	CollectionInfra                 = "computer.socialweb.infra"
+	CollectionEphemeralInfra        = "computer.socialweb.ephemeralInfra"
 
 	RPCSubmitRFP         = "rpc:com.publicdomainrelay.temp.market.submitRfp?aud=*"
 	RPCSubmitAccept      = "rpc:com.publicdomainrelay.temp.market.submitAccept?aud=*"
@@ -53,7 +56,7 @@ var (
 		[]string{ScopeAtproto},
 		collectionScopes([]string{"create", "update"},
 			CollectionComputeVM, CollectionRFP, CollectionAccept, CollectionEvent, CollectionVMDelete,
-			CollectionVMOnNetwork, CollectionGuestPublicKey, CollectionGuestSignalWebRTC,
+			CollectionVMOnNetwork, CollectionGuestPublicKey, CollectionGuestSignalWebRTC, CollectionGuestSecrets,
 			CollectionPolicyGhaLite, CollectionPolicyTypeScript),
 		[]string{collectionScope(CollectionFedproxyRBAC, "create", "update", "delete")},
 		[]string{collectionScope(CollectionBadgeBlueKeys, "create", "update", "delete")},
@@ -67,7 +70,8 @@ var (
 			CollectionRBACDID, CollectionBid, CollectionBidsFree, CollectionReceipt, CollectionEvent,
 			CollectionConfigWIFSimple, CollectionComputeVM, CollectionRFP, CollectionAccept,
 			CollectionVMDelete, CollectionVMOnNetwork, CollectionVMTerminated, CollectionVMHostKeys,
-			CollectionGuestPublicKey, CollectionGuestSignalWebRTC,
+			CollectionGuestPublicKey, CollectionGuestSignalWebRTC, CollectionGuestSecretsApplied,
+			CollectionGuestSecretsRequested,
 			CollectionFedproxyRBAC, CollectionBidderAssociation, CollectionPolicyGhaLite,
 			CollectionPolicyTypeScript),
 		[]string{collectionScope(CollectionOffering, "create", "update")},
