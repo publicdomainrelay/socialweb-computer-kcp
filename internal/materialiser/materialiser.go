@@ -28,6 +28,7 @@ const (
 	ReasonBundleFailed  = "IdentityBundleVerifyFailed"
 	ReasonBundleHalted  = "IdentityVerificationFailed"
 	ReasonAwaitPathShut = "AwaitTenantPathShut"
+	ReasonStopped       = "Stopped"
 	ReasonTeardownStuck = "TeardownGateTimeout"
 	ReasonSessionCap    = "SessionCapRefuses"
 	ReasonUp            = "ProcessGroupServing"
@@ -213,6 +214,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, o Observed) (Result, error) 
 		return r.teardown(ctx, o)
 	}
 
+	if !o.Cluster.Spec.Running {
+		return r.off(ctx, o)
+	}
+
 	if halted(o.Cluster.Status.Conditions) {
 		return Result{
 			Phase:      v1alpha1.ClusterUnavailable,
@@ -221,10 +226,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, o Observed) (Result, error) 
 			Conditions: carry(o.Cluster.Status.Conditions),
 			Ops:        []Op{OpIdentityHalted},
 		}, nil
-	}
-
-	if !o.Cluster.Spec.Running {
-		return r.off(ctx, o)
 	}
 	return r.on(ctx, o)
 }
@@ -264,6 +265,13 @@ func (r *Reconciler) off(ctx context.Context, o Observed) (Result, error) {
 	if err := r.opts.Host.Reap(ctx, o.Cluster.Name); err != nil {
 		return res, err
 	}
+	meta.SetStatusCondition(&res.Conditions, metav1.Condition{
+		Type:               ConditionReady,
+		Status:             metav1.ConditionFalse,
+		Reason:             ReasonStopped,
+		Message:            "spec.running is false; the front admits no tenant request and the members are reaped",
+		ObservedGeneration: o.Cluster.Generation,
+	})
 	return res, nil
 }
 
@@ -440,6 +448,9 @@ func (r *Reconciler) bringUp(ctx context.Context, o Observed, bump bool) (Result
 		URL:        o.Cluster.Status.URL,
 		Instance:   o.Cluster.Status.Instance,
 		Conditions: carry(o.Cluster.Status.Conditions),
+	}
+	if c := meta.FindStatusCondition(res.Conditions, ConditionReady); c != nil && c.Reason == ReasonStopped {
+		meta.RemoveStatusCondition(&res.Conditions, ConditionReady)
 	}
 	meta.SetStatusCondition(&res.Conditions, metav1.Condition{
 		Type:               ConditionReady,
