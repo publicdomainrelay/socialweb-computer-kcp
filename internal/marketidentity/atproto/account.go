@@ -45,7 +45,7 @@ func (a *Accounts) pdsAccount(ctx context.Context, workspace string, id *v1alpha
 	if ref != nil {
 		if session, ok := a.storedPdsSession(ctx, vault, *ref, credential.pdsURL, tlsConfig); ok {
 			a.holdPdsAccount(ctx, workspace, id, ref, session.DID.String(), credential.pdsURL)
-			return signedIn(status, generation, id, session.DID.String(), firstNonEmpty(session.Handle, credential.handle), credential.pdsURL, ref,
+			return signedIn(status, generation, session.DID.String(), firstNonEmpty(session.Handle, credential.handle), credential.pdsURL, ref,
 				session.AccessJWT), nil
 		}
 	}
@@ -65,7 +65,7 @@ func (a *Accounts) pdsAccount(ctx context.Context, workspace string, id *v1alpha
 		}
 		a.holdPdsAccount(ctx, workspace, id, ref, session.DID.String(), credential.pdsURL)
 	}
-	return signedIn(status, generation, id, session.DID.String(), firstNonEmpty(session.Handle, credential.handle), credential.pdsURL, ref,
+	return signedIn(status, generation, session.DID.String(), firstNonEmpty(session.Handle, credential.handle), credential.pdsURL, ref,
 		session.AccessJWT), nil
 }
 

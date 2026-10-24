@@ -140,11 +140,9 @@ func (c *Controller) CompleteBrowserAuthorization(ctx context.Context, workspace
 	if !ok || entry.identity == nil {
 		return fmt.Errorf("marketidentity: the MarketIdentity %s in %s is not reconciled", name, workspace)
 	}
-	if err := c.accounts.CompleteBrowserAuthorization(ctx, workspace, entry.identity, r); err != nil {
-		return err
-	}
+	err := c.accounts.CompleteBrowserAuthorization(ctx, workspace, entry.identity, r)
 	c.enqueue(ctlruntime.Request{Cluster: entry.cluster, Workspace: workspace, Name: name})
-	return nil
+	return err
 }
 
 func (c *Controller) ComponentChanged(workspace, kind, name string) {

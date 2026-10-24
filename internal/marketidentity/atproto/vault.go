@@ -74,6 +74,24 @@ func (s *VaultStateStore) Take(ctx context.Context, state string) (oauthclient.P
 	return oauthclient.PendingAuth{}, false, nil
 }
 
+func (s *VaultStateStore) Has(ctx context.Context, state string) (bool, error) {
+	if s == nil || s.Vault == nil {
+		return false, errors.New("marketidentity: no vault for the oauth callback state")
+	}
+	data, err := s.Vault.Get(ctx, s.ref(state))
+	if errors.Is(err, ErrSecretNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if firstString(data, "state") == "" {
+		return false, nil
+	}
+	expires, err := time.Parse(time.RFC3339, firstString(data, "expiresAt"))
+	return err != nil || time.Now().Before(expires), nil
+}
+
 func (s *VaultStateStore) ref(state string) commonv1.SecretRef {
 	return commonv1.SecretRef{Mount: s.Ref.Mount, Path: strings.Trim(s.Ref.Path, "/") + "/pending/" + state}
 }

@@ -106,54 +106,138 @@ func (a *Accounts) statesFor(workspace string) oauthclient.StateStore {
 
 func (a *Accounts) oauthBrowser(ctx context.Context, workspace string, id *v1alpha1.MarketIdentity, generation int64,
 	status v1alpha1.MarketIdentityStatus) (Result, error) {
-	session, ref, err := a.restoreOAuthSession(ctx, workspace, id, &status)
+	key := qrKey(workspace, id.Name)
+	session, handle, ref, err := a.restoreOAuthSession(ctx, workspace, id, &status)
 	if err == nil {
-		return a.sessionSignedIn(ctx, status, generation, id, session, id.Spec.Handle, ref), nil
+		a.browser.Delete(key)
+		return a.sessionSignedIn(ctx, status, generation, session, handle, ref), nil
 	}
 	if errors.Is(err, errNoSessionRef) || ref == nil {
 		return failed(status, generation, "MissingSessionRef", "mode oauthBrowser needs spec.sessionRef for the oauth session; no secret is written to status"), nil
 	}
-	reason, message, again := signInAgainReason(err)
-	if !errors.Is(err, oauthclient.ErrNoSession) && !again {
-		return pending(status, generation, "SessionError", "restoring the oauth session: "+err.Error()), err
+	need, ok := signInNeeded(&status, err)
+	if !ok {
+		return pending(status, generation, sessionErrorReason(err), "restoring the oauth session: "+err.Error()), err
 	}
 	kind := v1alpha1.PendingActionVisitUrl
 	now := time.Now()
 	status.SessionRef = ref
-	if again {
+	issue, issued := a.browser.Get(key)
+	if issued && issue.failure != "" && !strings.Contains(need.message, issue.failure) {
+		need.message = cmp.Or(need.message, pendingMessage(v1alpha1.MarketIdentityPhaseAwaitingAuthorization)) + "; the last sign-in did not complete: " + issue.failure
+	}
+	if need.again {
 		kind = v1alpha1.PendingActionSignInAgain
-		signInAgainStatus(&status, generation, reason, message)
+		signInAgainStatus(&status, generation, need.reason, need.message)
 	} else {
 		status.Phase = v1alpha1.MarketIdentityPhaseAwaitingAuthorization
 		status.ObservedGeneration = generation
-		status.Message = pendingMessage(status.Phase)
-		setReady(&status, generation, false, string(status.Phase), status.Message)
+		status.Message = cmp.Or(need.message, pendingMessage(status.Phase))
+		reason := cmp.Or(need.reason, string(status.Phase))
+		conds.Set(&status.Conditions, generation, v1alpha1.ConditionSignedIn, false, reason, status.Message)
+		setReady(&status, generation, false, reason, status.Message)
 	}
-	if expires, ok := pendingExpiry(id.Status.PendingAction, kind, now); ok {
+	if expires, ok := pendingExpiry(id.Status.PendingAction, kind, now); ok && a.browserIssueLive(ctx, workspace, id, generation, issue, issued) {
 		return Result{Status: status, RequeueAfter: untilOrZero(expires, now)}, nil
 	}
-	visit, expires, err := a.beginBrowserAuthorization(ctx, workspace, id)
+	if issued && !issue.spent {
+		a.spendBrowserIssue(ctx, workspace, id, issue.state, nil)
+	}
+	visit, state, expires, err := a.beginBrowserAuthorization(ctx, workspace, id)
 	if err != nil {
 		return failed(status, generation, "OAuthBeginFailed", err.Error()), err
 	}
-	status.PendingAction = &v1alpha1.MarketIdentityPendingAction{Kind: kind, URL: visit, ExpiresAt: expires.UTC().Format(time.RFC3339)}
+	a.browser.SetTTL(key, browserIssue{state: state, url: visit, generation: generation, account: accountKey(id), failure: issue.failure}, browserPendingTTL)
+	status.PendingAction = &v1alpha1.MarketIdentityPendingAction{Kind: kind, URL: visit, Handle: strings.TrimSpace(id.Spec.Handle),
+		ExpiresAt: expires.UTC().Format(time.RFC3339)}
 	return Result{Status: status, RequeueAfter: time.Until(expires)}, nil
+}
+
+type browserIssue struct {
+	state string
+
+	url string
+
+	generation int64
+
+	account string
+
+	failure string
+
+	spent bool
+}
+
+func (a *Accounts) browserIssueLive(ctx context.Context, workspace string, id *v1alpha1.MarketIdentity, generation int64, issue browserIssue, issued bool) bool {
+	action := id.Status.PendingAction
+	if !issued || issue.spent || action == nil || issue.url != action.URL || issue.generation != generation || issue.account != accountKey(id) {
+		return false
+	}
+	live, err := a.statesFor(workspace).Has(ctx, issue.state)
+	if err != nil {
+		a.log.Warn("the oauth callback state is not readable; the visit url stays", "workspace", workspace, "identity", id.Name, "err", err.Error())
+		return true
+	}
+	return live
+}
+
+func (a *Accounts) spendBrowserIssue(ctx context.Context, workspace string, id *v1alpha1.MarketIdentity, state string, failure error) {
+	key := qrKey(workspace, id.Name)
+	issue, ok := a.browser.Get(key)
+	if !ok || (state != "" && state != issue.state) {
+		return
+	}
+	if _, _, err := a.statesFor(workspace).Take(ctx, issue.state); err != nil {
+		a.log.Warn("the spent oauth callback state is not removed", "workspace", workspace, "identity", id.Name, "err", err.Error())
+	}
+	issue.spent = true
+	if failure != nil {
+		issue.failure = strings.TrimPrefix(strings.TrimPrefix(failure.Error(), "marketidentity: "), "oauthclient: ")
+	}
+	a.browser.SetTTL(key, issue, browserPendingTTL)
+}
+
+type signInNeed struct {
+	again bool
+
+	reason string
+
+	message string
+}
+
+func signInNeeded(status *v1alpha1.MarketIdentityStatus, err error) (signInNeed, bool) {
+	var mismatch *accountMismatchError
+	if errors.As(err, &mismatch) {
+		status.Did, status.Handle, status.PdsURL = "", "", ""
+		return signInNeed{reason: "AccountMismatch", message: mismatch.text}, true
+	}
+	if reason, message, again := signInAgainReason(err); again {
+		return signInNeed{again: true, reason: reason, message: message}, true
+	}
+	return signInNeed{}, errors.Is(err, oauthclient.ErrNoSession)
+}
+
+func sessionErrorReason(err error) string {
+	var unverified *accountUnverifiedError
+	if errors.As(err, &unverified) {
+		return "AccountUnverified"
+	}
+	return "SessionError"
 }
 
 func (a *Accounts) oauthQr(ctx context.Context, workspace string, id *v1alpha1.MarketIdentity, generation int64,
 	status v1alpha1.MarketIdentityStatus) (Result, error) {
 	key := qrKey(workspace, id.Name)
-	session, ref, err := a.restoreOAuthSession(ctx, workspace, id, &status)
+	session, handle, ref, err := a.restoreOAuthSession(ctx, workspace, id, &status)
 	if err == nil {
 		a.qr.Delete(key)
-		return a.sessionSignedIn(ctx, status, generation, id, session, id.Spec.Handle, ref), nil
+		return a.sessionSignedIn(ctx, status, generation, session, handle, ref), nil
 	}
 	if errors.Is(err, errNoSessionRef) || ref == nil {
 		return failed(status, generation, "MissingSessionRef", "mode oauthQr needs spec.sessionRef for the oauth session; no secret is written to status"), nil
 	}
-	reason, message, again := signInAgainReason(err)
-	if !errors.Is(err, oauthclient.ErrNoSession) && !again {
-		return pending(status, generation, "SessionError", "restoring the oauth session: "+err.Error()), err
+	need, ok := signInNeeded(&status, err)
+	if !ok {
+		return pending(status, generation, sessionErrorReason(err), "restoring the oauth session: "+err.Error()), err
 	}
 	status.SessionRef = ref
 	qr, ok := a.qr.Get(key)
@@ -162,7 +246,7 @@ func (a *Accounts) oauthQr(ctx context.Context, workspace string, id *v1alpha1.M
 		if err != nil {
 			return failed(status, generation, "OAuthBeginFailed", err.Error()), nil
 		}
-		return Result{Status: qrPending(status, generation, qr, reason, message), RequeueAfter: QRPollInterval}, nil
+		return Result{Status: qrPending(status, generation, qr, need), RequeueAfter: QRPollInterval}, nil
 	}
 	sessionQr, done, err := qr.transfer.PollOnce(ctx)
 	if err != nil {
@@ -172,7 +256,7 @@ func (a *Accounts) oauthQr(ctx context.Context, workspace string, id *v1alpha1.M
 		return pending(status, generation, "QRPollFailed", err.Error()), err
 	}
 	if !done {
-		return Result{Status: qrPending(status, generation, qr, reason, message), RequeueAfter: QRPollInterval}, nil
+		return Result{Status: qrPending(status, generation, qr, need), RequeueAfter: QRPollInterval}, nil
 	}
 	a.qr.Delete(key)
 	data, err := sessionQr.SessionData(a.sessionClientID(id), a.qrScopes())
@@ -180,50 +264,54 @@ func (a *Accounts) oauthQr(ctx context.Context, workspace string, id *v1alpha1.M
 		return failed(status, generation, "QRSessionInvalid", err.Error()), err
 	}
 	data = a.sessionWithEndpoints(ctx, data)
-	session, err = a.openSessionData(ctx, workspace, id, data, ref)
-	if reason, message, again = signInAgainReason(err); again {
+	session, handle, err = a.openSessionData(ctx, workspace, id, data, ref, sessionQr.Handle)
+	if need, ok := signInNeeded(&status, err); ok && err != nil {
 		if qr, err = a.newQrState(key); err != nil {
 			return failed(status, generation, "OAuthBeginFailed", err.Error()), nil
 		}
-		return Result{Status: qrPending(status, generation, qr, reason, message), RequeueAfter: QRPollInterval}, nil
+		return Result{Status: qrPending(status, generation, qr, need), RequeueAfter: QRPollInterval}, nil
 	}
 	if err != nil {
 		return pending(status, generation, "SessionRestoreFailed", err.Error()), err
 	}
-	return a.sessionSignedIn(ctx, status, generation, id, session, firstNonEmpty(sessionQr.Handle, id.Spec.Handle), ref), nil
+	return a.sessionSignedIn(ctx, status, generation, session, handle, ref), nil
 }
 
-func qrPending(status v1alpha1.MarketIdentityStatus, generation int64, qr *qrTransfer, reason, message string) v1alpha1.MarketIdentityStatus {
+func qrPending(status v1alpha1.MarketIdentityStatus, generation int64, qr *qrTransfer, need signInNeed) v1alpha1.MarketIdentityStatus {
 	status.PendingAction = &v1alpha1.MarketIdentityPendingAction{Kind: v1alpha1.PendingActionScanQr, URL: qr.url,
 		ExpiresAt: qr.expires.UTC().Format(time.RFC3339)}
-	if reason != "" {
+	if need.again {
 		status.PendingAction.Kind = v1alpha1.PendingActionSignInAgain
-		signInAgainStatus(&status, generation, reason, message)
+		signInAgainStatus(&status, generation, need.reason, need.message)
 		return status
 	}
 	status.Phase = v1alpha1.MarketIdentityPhaseAwaitingScan
 	status.ObservedGeneration = generation
-	status.Message = pendingMessage(status.Phase)
-	setReady(&status, generation, false, "AwaitingScan", status.Message)
+	status.Message = cmp.Or(need.message, pendingMessage(status.Phase))
+	reason := cmp.Or(need.reason, "AwaitingScan")
+	if need.reason != "" {
+		conds.Set(&status.Conditions, generation, v1alpha1.ConditionSignedIn, false, reason, status.Message)
+	}
+	setReady(&status, generation, false, reason, status.Message)
 	return status
 }
 
 func (a *Accounts) oauthDelegated(ctx context.Context, workspace string, id *v1alpha1.MarketIdentity, generation int64,
 	status v1alpha1.MarketIdentityStatus) (Result, error) {
-	session, ref, err := a.restoreOAuthSession(ctx, workspace, id, &status)
+	session, handle, ref, err := a.restoreOAuthSession(ctx, workspace, id, &status)
 	if err == nil {
-		return a.sessionSignedIn(ctx, status, generation, id, session, id.Spec.Handle, ref), nil
+		return a.sessionSignedIn(ctx, status, generation, session, handle, ref), nil
 	}
 	if errors.Is(err, errNoSessionRef) {
 		return pending(status, generation, "AwaitingSession", "mode oauthDelegated waits for spec.sessionRef"), nil
 	}
-	if reason, message, again := signInAgainReason(err); again {
+	if need, ok := signInNeeded(&status, err); ok && need.reason != "" {
 		status.SessionRef = ref
 		status.PendingAction = &v1alpha1.MarketIdentityPendingAction{Kind: v1alpha1.PendingActionSignInAgain, Handle: id.Spec.Handle}
-		signInAgainStatus(&status, generation, reason, message)
+		signInAgainStatus(&status, generation, need.reason, need.message)
 		return Result{Status: status}, nil
 	}
-	return pending(status, generation, "SessionError", "restoring the oauth session: "+err.Error()), err
+	return pending(status, generation, sessionErrorReason(err), "restoring the oauth session: "+err.Error()), err
 }
 
 func (a *Accounts) pinnedClientID(id *v1alpha1.MarketIdentity) string {
@@ -256,52 +344,52 @@ func (a *Accounts) oauthRedirectURI(id *v1alpha1.MarketIdentity) string {
 	return strings.TrimSpace(a.oauth.RedirectURI)
 }
 
-func (a *Accounts) beginBrowserAuthorization(ctx context.Context, workspace string, id *v1alpha1.MarketIdentity) (string, time.Time, error) {
+func (a *Accounts) beginBrowserAuthorization(ctx context.Context, workspace string, id *v1alpha1.MarketIdentity) (string, string, time.Time, error) {
 	clientID := a.oauthClientID(id)
 	redirectURI := a.oauthRedirectURI(id)
 	if clientID == "" {
-		return "", time.Time{}, errors.New("marketidentity: mode oauthBrowser needs an oauth clientID")
+		return "", "", time.Time{}, errors.New("marketidentity: mode oauthBrowser needs an oauth clientID")
 	}
 	if redirectURI == "" {
-		return "", time.Time{}, errors.New("marketidentity: mode oauthBrowser needs an oauth redirectURI")
+		return "", "", time.Time{}, errors.New("marketidentity: mode oauthBrowser needs an oauth redirectURI")
 	}
 	pdsURL, err := a.oauthPDSURL(ctx, id)
 	if err != nil {
-		return "", time.Time{}, err
+		return "", "", time.Time{}, err
 	}
 	client, err := a.sessionHTTP(ctx, workspace, id)
 	if err != nil {
-		return "", time.Time{}, err
+		return "", "", time.Time{}, err
 	}
 	authServer, tokenEndpoint, _, err := oauthclient.DiscoverAuthServer(ctx, client, pdsURL)
 	if err != nil {
-		return "", time.Time{}, err
+		return "", "", time.Time{}, err
 	}
 	var metadata struct {
 		Issuer                string `json:"issuer"`
 		AuthorizationEndpoint string `json:"authorization_endpoint"`
 	}
 	if err := oauthclient.GetJSON(ctx, client, authServer+"/.well-known/oauth-authorization-server", &metadata); err != nil {
-		return "", time.Time{}, fmt.Errorf("marketidentity: the auth server authorization metadata: %w", err)
+		return "", "", time.Time{}, fmt.Errorf("marketidentity: the auth server authorization metadata: %w", err)
 	}
 	if strings.TrimSpace(metadata.AuthorizationEndpoint) == "" {
-		return "", time.Time{}, errors.New("marketidentity: the auth server metadata names no authorization endpoint")
+		return "", "", time.Time{}, errors.New("marketidentity: the auth server metadata names no authorization endpoint")
 	}
 	authorize, err := oauthclient.EndpointURL(authServer, metadata.AuthorizationEndpoint)
 	if err != nil {
-		return "", time.Time{}, err
+		return "", "", time.Time{}, err
 	}
 	state, err := oauthclient.NewCallbackState()
 	if err != nil {
-		return "", time.Time{}, err
+		return "", "", time.Time{}, err
 	}
 	verifier, challenge, err := oauthclient.GeneratePKCE()
 	if err != nil {
-		return "", time.Time{}, err
+		return "", "", time.Time{}, err
 	}
 	key, err := atcrypto.GeneratePrivateKeyP256()
 	if err != nil {
-		return "", time.Time{}, err
+		return "", "", time.Time{}, err
 	}
 	scopes := a.oauthScopes()
 	pendingAuth := oauthclient.PendingAuth{
@@ -317,7 +405,7 @@ func (a *Accounts) beginBrowserAuthorization(ctx context.Context, workspace stri
 		DPoPPrivateKeyMultibase: key.Multibase(),
 	}
 	if err := a.statesFor(workspace).Put(ctx, pendingAuth); err != nil {
-		return "", time.Time{}, err
+		return "", "", time.Time{}, err
 	}
 	query := url.Values{
 		"response_type":         {"code"},
@@ -333,16 +421,29 @@ func (a *Accounts) beginBrowserAuthorization(ctx context.Context, workspace stri
 	}
 	parsed, err := url.Parse(authorize)
 	if err != nil {
-		return "", time.Time{}, err
+		return "", "", time.Time{}, err
 	}
 	parsed.RawQuery = query.Encode()
-	return parsed.String(), time.Now().Add(browserPendingTTL), nil
+	return parsed.String(), state, time.Now().Add(browserPendingTTL), nil
 }
 
 func (a *Accounts) CompleteBrowserAuthorization(ctx context.Context, workspace string, id *v1alpha1.MarketIdentity, r *http.Request) error {
 	if id.Spec.Mode != v1alpha1.MarketIdentityModeOAuthBrowser {
 		return fmt.Errorf("marketidentity: MarketIdentity %s is mode %s, not oauthBrowser", id.Name, id.Spec.Mode)
 	}
+	err := a.completeBrowserAuthorization(ctx, workspace, id, r)
+	if err != nil {
+		a.log.Info("the oauth callback failed; the visit url is reissued", "workspace", workspace, "identity", id.Name, "err", err.Error())
+		state := ""
+		if r != nil && r.URL != nil {
+			state = r.URL.Query().Get("state")
+		}
+		a.spendBrowserIssue(ctx, workspace, id, state, err)
+	}
+	return err
+}
+
+func (a *Accounts) completeBrowserAuthorization(ctx context.Context, workspace string, id *v1alpha1.MarketIdentity, r *http.Request) error {
 	ref := oauthSessionRef(id, &id.Status)
 	if ref == nil {
 		return errNoSessionRef
@@ -353,10 +454,9 @@ func (a *Accounts) CompleteBrowserAuthorization(ctx context.Context, workspace s
 	}
 	data, err := oauthclient.ExchangeCallback(ctx, a.statesFor(workspace), r, client)
 	if err != nil {
-		a.log.Info("oauth callback exchange failed", "workspace", workspace, "identity", id.Name, "err", err.Error())
 		return err
 	}
-	_, err = a.openSessionData(ctx, workspace, id, a.sessionWithEndpoints(ctx, data), ref)
+	_, _, err = a.openSessionData(ctx, workspace, id, a.sessionWithEndpoints(ctx, data), ref, "")
 	return err
 }
 
@@ -384,41 +484,60 @@ func (a *Accounts) oauthPDSURL(ctx context.Context, id *v1alpha1.MarketIdentity)
 }
 
 func (a *Accounts) restoreOAuthSession(ctx context.Context, workspace string, id *v1alpha1.MarketIdentity,
-	status *v1alpha1.MarketIdentityStatus) (*oauthclient.Session, *commonv1.SecretRef, error) {
+	status *v1alpha1.MarketIdentityStatus) (*oauthclient.Session, string, *commonv1.SecretRef, error) {
 	ref := oauthSessionRef(id, status)
 	if ref == nil {
-		return nil, nil, errNoSessionRef
+		return nil, "", nil, errNoSessionRef
 	}
 	held := a.held.get(workspace, id)
 	held.open.Lock()
 	defer held.open.Unlock()
 	if session := held.auth.Session(); session != nil && held.ref == *ref {
+		if account := accountKey(id); held.account != account {
+			handle, err := a.checkAccount(ctx, id, session.DID(), session.HostURL(), "")
+			if err != nil {
+				held.auth.Drop()
+				held.account = ""
+				return nil, "", ref, err
+			}
+			held.account, held.handle = account, handle
+		}
 		if _, err := session.AccessToken(ctx); err != nil {
 			if oauthExpired(err) {
 				held.auth.Drop()
 			}
-			return nil, ref, err
+			return nil, "", ref, err
 		}
 		if err := a.scopeCheck(workspace, id, held, session.Scopes()); err != nil {
 			held.auth.Drop()
-			return nil, ref, err
+			return nil, "", ref, err
 		}
-		return session, ref, nil
+		return session, held.handle, ref, nil
 	}
 	vault := a.vaultFor(workspace)
 	if vault == nil {
-		return nil, ref, errors.New("marketidentity: no vault reads the oauth session")
+		return nil, "", ref, errors.New("marketidentity: no vault reads the oauth session")
 	}
 	client, err := a.sessionHTTP(ctx, workspace, id)
 	if err != nil {
-		return nil, ref, err
+		return nil, "", ref, err
 	}
 	store := &vaultSessionStore{vault: vault, ref: *ref, clientID: a.pinnedClientID(id)}
+	stored, err := store.List(ctx)
+	if err != nil {
+		return nil, "", ref, err
+	}
+	if len(stored) == 0 {
+		return nil, "", ref, oauthclient.ErrNoSession
+	}
+	handle, err := a.checkAccount(ctx, id, stored[0].AccountDID, stored[0].HostURL, "")
+	if err != nil {
+		return nil, "", ref, err
+	}
 	session, err := oauthclient.Open(ctx, oauthclient.Options{
-		DID:        status.Did,
-		Handle:     id.Spec.Handle,
-		RepoDID:    status.Did,
-		PDSURL:     id.Spec.PdsURL,
+		DID:        stored[0].AccountDID,
+		Handle:     handle,
+		RepoDID:    stored[0].AccountDID,
 		ClientID:   a.sessionClientID(id),
 		Scopes:     a.scopesFor(id.Spec.Mode),
 		Directory:  a.oauth.Directory,
@@ -428,17 +547,18 @@ func (a *Accounts) restoreOAuthSession(ctx context.Context, workspace string, id
 	})
 	if errors.Is(err, oauthclient.ErrInvalidSession) {
 		_ = vault.Delete(ctx, *ref)
-		return nil, ref, oauthclient.ErrNoSession
+		return nil, "", ref, oauthclient.ErrNoSession
 	}
 	if err != nil {
-		return nil, ref, err
+		return nil, "", ref, err
 	}
 	if err := a.scopeCheck(workspace, id, held, session.Scopes()); err != nil {
-		return nil, ref, err
+		return nil, "", ref, err
 	}
 	held.ref = *ref
+	held.account, held.handle = accountKey(id), handle
 	held.auth.Hold(session)
-	return session, ref, nil
+	return session, handle, ref, nil
 }
 
 type scopeChangedError struct {
@@ -522,25 +642,30 @@ func (a *Accounts) sessionWithEndpoints(ctx context.Context, data oauthclient.Se
 }
 
 func (a *Accounts) openSessionData(ctx context.Context, workspace string, id *v1alpha1.MarketIdentity, data oauthclient.SessionData,
-	ref *commonv1.SecretRef) (*oauthclient.Session, error) {
+	ref *commonv1.SecretRef, claimed string) (*oauthclient.Session, string, error) {
 	vault := a.vaultFor(workspace)
 	if vault == nil {
-		return nil, errors.New("marketidentity: no vault writes the oauth session")
+		return nil, "", errors.New("marketidentity: no vault writes the oauth session")
 	}
 	client, err := a.sessionHTTP(ctx, workspace, id)
 	if err != nil {
-		return nil, err
+		return nil, "", err
+	}
+	handle, err := a.checkAccount(ctx, id, data.AccountDID, data.HostURL, claimed)
+	if err != nil {
+		return nil, "", err
 	}
 	held := a.held.get(workspace, id)
 	held.open.Lock()
 	defer held.open.Unlock()
 	held.auth.Drop()
+	held.account = ""
 	if err := saveSession(ctx, vault, ref, data); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	session, err := oauthclient.New(data, oauthclient.Options{
 		DID:        data.AccountDID,
-		Handle:     id.Spec.Handle,
+		Handle:     handle,
 		RepoDID:    data.AccountDID,
 		PDSURL:     data.HostURL,
 		ClientID:   a.sessionClientID(id),
@@ -551,18 +676,19 @@ func (a *Accounts) openSessionData(ctx context.Context, workspace string, id *v1
 		Log:        a.log,
 	})
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	_ = session.EnsureEndpoints(ctx)
 	if _, err := session.AccessToken(ctx); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if err := a.scopeCheck(workspace, id, held, session.Scopes()); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	held.ref = *ref
+	held.account, held.handle = accountKey(id), handle
 	held.auth.Hold(session)
-	return session, nil
+	return session, handle, nil
 }
 
 func saveSession(ctx context.Context, vault SecretStore, ref *commonv1.SecretRef, data oauthclient.SessionData) error {
@@ -575,22 +701,18 @@ func saveSession(ctx context.Context, vault SecretStore, ref *commonv1.SecretRef
 	return (&vaultSessionStore{vault: vault, ref: *ref}).Save(ctx, data)
 }
 
-func (a *Accounts) sessionSignedIn(ctx context.Context, status v1alpha1.MarketIdentityStatus, generation int64, id *v1alpha1.MarketIdentity,
+func (a *Accounts) sessionSignedIn(ctx context.Context, status v1alpha1.MarketIdentityStatus, generation int64,
 	session *oauthclient.Session, handle string, ref *commonv1.SecretRef) Result {
-	if want := strings.TrimSpace(id.Spec.Did); want != "" && session.DID() != want {
-		return failed(status, generation, "SubjectMismatch",
-			fmt.Sprintf("the oauth session is for %s, not the configured did %s; sign in with that account", session.DID(), want))
-	}
 	token, _ := session.AccessToken(ctx)
-	return signedIn(status, generation, id, session.DID(), handle, session.HostURL(), ref, token)
+	return signedIn(status, generation, session.DID(), handle, session.HostURL(), ref, token)
 }
 
-func signedIn(status v1alpha1.MarketIdentityStatus, generation int64, id *v1alpha1.MarketIdentity, did, handle, pdsURL string,
+func signedIn(status v1alpha1.MarketIdentityStatus, generation int64, did, handle, pdsURL string,
 	ref *commonv1.SecretRef, token string) Result {
 	status.Phase = v1alpha1.MarketIdentityPhaseReady
 	status.ObservedGeneration = generation
 	status.Did = strings.TrimSpace(did)
-	status.Handle = firstNonEmpty(handle, id.Spec.Handle)
+	status.Handle = strings.TrimSpace(handle)
 	status.PdsURL = strings.TrimSpace(pdsURL)
 	status.SessionRef = ref
 	status.Associations = nil

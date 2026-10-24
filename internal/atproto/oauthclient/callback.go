@@ -44,6 +44,8 @@ type StateStore interface {
 	Put(ctx context.Context, pending PendingAuth) error
 
 	Take(ctx context.Context, state string) (PendingAuth, bool, error)
+
+	Has(ctx context.Context, state string) (bool, error)
 }
 
 type MemoryStateStore struct {
@@ -79,6 +81,16 @@ func (m *MemoryStateStore) Take(ctx context.Context, state string) (PendingAuth,
 		delete(m.pending, state)
 	}
 	return pending, ok, nil
+}
+
+func (m *MemoryStateStore) Has(ctx context.Context, state string) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	_, ok := m.pending[state]
+	return ok, nil
 }
 
 type CallbackRequest struct {

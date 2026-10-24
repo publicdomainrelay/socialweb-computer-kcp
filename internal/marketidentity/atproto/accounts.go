@@ -84,6 +84,8 @@ type Accounts struct {
 
 	qr *ttlcache.Cache[string, *qrTransfer]
 
+	browser *ttlcache.Cache[string, browserIssue]
+
 	held heldAccounts
 }
 
@@ -105,7 +107,7 @@ func New(cfg Config) *Accounts {
 		states = &oauthclient.MemoryStateStore{}
 	}
 	return &Accounts{endpoints: cfg.Endpoints, vault: cfg.Vault, log: log, http: client, resolver: resolver, tls: cfg.TLS, sessions: cfg.Sessions, oauth: cfg.OAuth,
-		states: states, qr: ttlcache.New[string, *qrTransfer](ttlcache.Options{})}
+		states: states, qr: ttlcache.New[string, *qrTransfer](ttlcache.Options{}), browser: ttlcache.New[string, browserIssue](ttlcache.Options{})}
 }
 
 func (a *Accounts) Reconcile(ctx context.Context, workspace string, id *v1alpha1.MarketIdentity, status v1alpha1.MarketIdentityStatus) (Result, error) {
@@ -139,6 +141,7 @@ func (a *Accounts) Reconcile(ctx context.Context, workspace string, id *v1alpha1
 
 func (a *Accounts) Forget(workspace, name string) {
 	a.qr.Delete(qrKey(workspace, name))
+	a.browser.Delete(qrKey(workspace, name))
 	a.held.forget(workspace, name)
 }
 

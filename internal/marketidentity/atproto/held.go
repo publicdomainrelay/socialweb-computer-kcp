@@ -24,6 +24,16 @@ type heldAccount struct {
 	auth *identity.Authenticator
 
 	lacking string
+
+	account string
+
+	handle string
+}
+
+func (h *heldAccount) heldFor(account string) bool {
+	h.open.Lock()
+	defer h.open.Unlock()
+	return h.auth.Session() != nil && h.account == account
 }
 
 type heldAccounts struct {
@@ -73,9 +83,9 @@ func (a *Accounts) Authenticator(ctx context.Context, workspace string, id *v1al
 	held := a.held.get(workspace, id)
 	switch id.Spec.Mode {
 	case v1alpha1.MarketIdentityModeOAuthBrowser, v1alpha1.MarketIdentityModeOAuthQr, v1alpha1.MarketIdentityModeOAuthDelegated:
-		if held.auth.Session() == nil {
+		if !held.heldFor(accountKey(id)) {
 			status := id.Status
-			if _, _, err := a.restoreOAuthSession(ctx, workspace, id, &status); err != nil {
+			if _, _, _, err := a.restoreOAuthSession(ctx, workspace, id, &status); err != nil {
 				return nil, err
 			}
 		}
