@@ -46,7 +46,8 @@ var (
 		[]string{ScopeAtproto},
 		collectionScopes([]string{"create"},
 			CollectionComputeVM, CollectionRFP, CollectionAccept, CollectionEvent, CollectionVMDelete,
-			CollectionVMOnNetwork, CollectionFedproxyRBAC, CollectionPolicyGhaLite, CollectionPolicyTypeScript),
+			CollectionVMOnNetwork, CollectionPolicyGhaLite, CollectionPolicyTypeScript),
+		[]string{collectionScope(CollectionFedproxyRBAC, "create", "update", "delete")},
 		[]string{collectionScope(CollectionBadgeBlueKeys, "create", "update", "delete")},
 		[]string{RPCSubmitRFP, RPCSubmitAccept, RPCSubmitBid, RPCSubmitEvent},
 	)
