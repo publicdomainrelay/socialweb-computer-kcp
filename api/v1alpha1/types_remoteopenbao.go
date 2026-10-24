@@ -108,8 +108,6 @@ type RemoteOpenBaoStatus struct {
 
 	Initialized bool `json:"initialized,omitempty"`
 
-	CABundle string `json:"caBundle,omitempty"`
-
 	Version string `json:"version,omitempty"`
 
 	Sealed bool `json:"sealed,omitempty"`

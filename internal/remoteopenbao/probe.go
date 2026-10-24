@@ -96,7 +96,6 @@ func (p *Prober) Check(ctx context.Context, workspace string, object *v1alpha1.R
 	status.Endpoint = ""
 	status.Address = ""
 	status.Initialized = false
-	status.CABundle = ""
 	status.Version = ""
 	status.Sealed = false
 	status.Message = ""
