@@ -243,6 +243,32 @@ items:
     done_when: "go build ./... and go vet ./... pass; the deleted symbols have no caller."
     status: todo
 
+  - id: M7-NETWORK-OAUTH-PATH
+    title: "An oauth identity on a market network PDS can sign in and write (defects found by ACC30-OAUTH-BIDDER)"
+    depends_on: [M2-OWNER-PROVIDES-HANDLES]
+    decision: >
+      Three defects kept any atproto OAuth session against a market network PDS from working, at main
+      too. The ingress tunnel registrar returned only Content-Type, so DPoP-Nonce never reached a client
+      behind the network ingress: it now hands every response header to the tunnel, which forwards the
+      ones it relays. The in-tree resource server checked DPoP htu and issued nonces only for its issuer
+      URL, so a client on the PDS's loopback listener (a RemoteRepo whose pdsUrl is the network's
+      bidderPdsUrl) always got invalid_dpop_proof: a plain HTTP request whose Host is a loopback IP from a
+      loopback peer is now checked against that origin. The MarketIdentity controller used a bare HTTP
+      client: it now uses the core's network client, and a dev core of a bidder that joined a network
+      with --market-network-file reads the network value from its MarketBidder root. Not fixed and left
+      to the lead: the network PDS cannot fetch the client metadata of a client behind the network
+      ingress (*.relay.localhost resolves to loopback port 443), so the live run signs in with an
+      atproto localhost client_id; and dev restart of a market network core leases new ports for the
+      network services, so a bidder that joined by --market-network-file keeps stale addresses.
+    files:
+      - internal/exposure/registrar.go
+      - internal/atproto/oauth/server.go
+      - internal/stack/componentcore/controllers.go
+      - internal/devcore/devcore.go
+      - internal/app/marketnetwork/devup.go
+    done_when: "ACC30-OAUTH-BIDDER passes."
+    status: todo
+
   - id: ARCH-SECTION-15
     title: "Record the decision in docs/ARCHITECTURE.md section 15"
     depends_on: [M6-DEAD-CODE]
