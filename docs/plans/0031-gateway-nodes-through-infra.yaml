@@ -474,7 +474,8 @@ items:
     title: "Scaling in shows in the record; the last node takes the record with the Infra"
     depends_on: [ACC31-REC9-OPT-OUT-KEEPS]
     done_when: >
-      With the cluster opted in, deleting the pod lets the clusterprovider scale in: the record shows
-      the entry state released (and its phase releasing or released), then the Infra is deleted with
-      its last entry and getRecord answers RecordNotFound; no guest is left on the bidder.
+      With the cluster opted in at two nodes, scaling the pods to one lets the clusterprovider scale
+      in: the AtprotoRecord writes the released entry and getRecord then returns the record with only
+      the remaining entry, still deployed; scaling to zero deletes the Infra with its last entry and
+      getRecord answers RecordNotFound; no guest is left on the bidder.
     status: todo
