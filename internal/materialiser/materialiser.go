@@ -452,6 +452,7 @@ func (r *Reconciler) bringUp(ctx context.Context, o Observed, bump bool) (Result
 	if c := meta.FindStatusCondition(res.Conditions, ConditionReady); c != nil && c.Reason == ReasonStopped {
 		meta.RemoveStatusCondition(&res.Conditions, ConditionReady)
 	}
+	meta.RemoveStatusCondition(&res.Conditions, v1alpha1.ConditionTenantPathShut)
 	meta.SetStatusCondition(&res.Conditions, metav1.Condition{
 		Type:               ConditionReady,
 		Status:             metav1.ConditionFalse,
