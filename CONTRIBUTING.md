@@ -333,7 +333,10 @@ result. `--account NAME` selects another account.
 
 A fresh install over an old-shape workspace must purge first: the `app` WorkspaceType name is
 immutable. Back up the state dir and Caddy sites before a purge. After a purge the DID is new and the
-association is needed again.
+association is needed again. A purge keeps an account that install did not create (an adopted
+account) but removes the install record, so the next `install bidder` on that host needs
+`--adopt-account`. A shape change of the kcp storage (a new kcp build) also needs a purge: the new
+kcp does not read the old store.
 
 ### Dev build on a bidder host
 
