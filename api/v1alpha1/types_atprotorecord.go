@@ -33,6 +33,8 @@ type AtprotoRecordSpec struct {
 	Record json.RawMessage `json:"record"`
 
 	OnMissingReference MissingReferencePolicy `json:"onMissingReference,omitempty"`
+
+	SwapCid string `json:"swapCid,omitempty"`
 }
 
 type MissingReferencePolicy string

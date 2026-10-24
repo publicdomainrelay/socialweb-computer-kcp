@@ -28,7 +28,7 @@ var APIResources = []APIResource{
 	}},
 	{Kind: "AtprotoIdentity", Plural: "atprotoidentities", Revision: 2, Export: "atprotoidentities", Object: AtprotoIdentity{}},
 	{Kind: "MarketIdentity", Plural: "marketidentities", Revision: 8, Export: "marketidentities", Object: MarketIdentity{}},
-	{Kind: "AtprotoRecord", Plural: "atprotorecords", Revision: 5, Export: "marketidentities", Object: AtprotoRecord{}, PrinterColumns: []PrinterColumn{
+	{Kind: "AtprotoRecord", Plural: "atprotorecords", Revision: 6, Export: "marketidentities", Object: AtprotoRecord{}, PrinterColumns: []PrinterColumn{
 		{Name: "Repo", Type: "string", JSONPath: ".spec.repoRef.name"},
 		{Name: "Collection", Type: "string", JSONPath: ".spec.collection"},
 		{Name: "Rkey", Type: "string", JSONPath: ".spec.rkey"},
@@ -131,6 +131,16 @@ var APIResources = []APIResource{
 		{Name: "Winner", Type: "string", JSONPath: ".status.contract.winner.did"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
+	{Kind: "Infra", Plural: "infras", Revision: 1, Export: "computecontracts", Object: Infra{}, PrinterColumns: infraPrinterColumns},
+	{Kind: "EphemeralInfra", Plural: "ephemeralinfras", Revision: 1, Export: "computecontracts", Object: EphemeralInfra{}, PrinterColumns: []PrinterColumn{
+		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
+		{Name: "Record", Type: "string", JSONPath: ".status.record.uri"},
+		{Name: "Sync", Type: "string", JSONPath: ".status.record.direction"},
+		{Name: "Expires", Type: "string", JSONPath: ".status.expiresAt"},
+		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
+	}},
+	{Kind: "InfraCollection", Plural: "infracollections", Revision: 1, Export: "computecontracts", Object: InfraCollection{}, PrinterColumns: infraCollectionPrinterColumns},
+	{Kind: "EphemeralInfraCollection", Plural: "ephemeralinfracollections", Revision: 1, Export: "computecontracts", Object: EphemeralInfraCollection{}, PrinterColumns: infraCollectionPrinterColumns},
 	{Kind: "Gateway", Plural: "gateways", Revision: 24, Export: "applications", Object: Gateway{}, PrinterColumns: []PrinterColumn{
 		{Name: "Profile", Type: "string", JSONPath: ".spec.profile"},
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
@@ -266,6 +276,20 @@ var APIResources = []APIResource{
 		{Name: "Key", Type: "string", JSONPath: ".spec.idempotencyKey"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
+}
+
+var infraPrinterColumns = []PrinterColumn{
+	{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
+	{Name: "Record", Type: "string", JSONPath: ".status.record.uri"},
+	{Name: "Sync", Type: "string", JSONPath: ".status.record.direction"},
+	{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
+}
+
+var infraCollectionPrinterColumns = []PrinterColumn{
+	{Name: "Repo", Type: "string", JSONPath: ".spec.repoRef.name"},
+	{Name: "Records", Type: "integer", JSONPath: ".status.records"},
+	{Name: "Message", Type: "string", JSONPath: ".status.message"},
+	{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 }
 
 var componentPrinterColumns = []PrinterColumn{

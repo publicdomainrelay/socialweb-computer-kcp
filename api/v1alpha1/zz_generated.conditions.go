@@ -158,6 +158,38 @@ func (in *ComputeContract) SetConditions(conditions []metav1.Condition) {
 	in.Status.Conditions = conditions
 }
 
+func (in *Infra) GetConditions() []metav1.Condition {
+	return in.Status.Conditions
+}
+
+func (in *Infra) SetConditions(conditions []metav1.Condition) {
+	in.Status.Conditions = conditions
+}
+
+func (in *EphemeralInfra) GetConditions() []metav1.Condition {
+	return in.Status.Conditions
+}
+
+func (in *EphemeralInfra) SetConditions(conditions []metav1.Condition) {
+	in.Status.Conditions = conditions
+}
+
+func (in *InfraCollection) GetConditions() []metav1.Condition {
+	return in.Status.Conditions
+}
+
+func (in *InfraCollection) SetConditions(conditions []metav1.Condition) {
+	in.Status.Conditions = conditions
+}
+
+func (in *EphemeralInfraCollection) GetConditions() []metav1.Condition {
+	return in.Status.Conditions
+}
+
+func (in *EphemeralInfraCollection) SetConditions(conditions []metav1.Condition) {
+	in.Status.Conditions = conditions
+}
+
 func (in *Gateway) GetConditions() []metav1.Condition {
 	return in.Status.Conditions
 }

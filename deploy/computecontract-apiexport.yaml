@@ -9,3 +9,23 @@ spec:
       schema: v1alpha1-10.computecontracts.socialweb.computer
       storage:
         crd: {}
+    - group: socialweb.computer
+      name: infras
+      schema: v1alpha1-1.infras.socialweb.computer
+      storage:
+        crd: {}
+    - group: socialweb.computer
+      name: ephemeralinfras
+      schema: v1alpha1-1.ephemeralinfras.socialweb.computer
+      storage:
+        crd: {}
+    - group: socialweb.computer
+      name: infracollections
+      schema: v1alpha1-1.infracollections.socialweb.computer
+      storage:
+        crd: {}
+    - group: socialweb.computer
+      name: ephemeralinfracollections
+      schema: v1alpha1-1.ephemeralinfracollections.socialweb.computer
+      storage:
+        crd: {}

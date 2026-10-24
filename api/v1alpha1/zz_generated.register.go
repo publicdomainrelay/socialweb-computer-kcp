@@ -35,6 +35,10 @@ const (
 	MarketBidderResource             = "marketbidders"
 	MarketRequesterResource          = "marketrequesters"
 	ComputeContractResource          = "computecontracts"
+	InfraResource                    = "infras"
+	EphemeralInfraResource           = "ephemeralinfras"
+	InfraCollectionResource          = "infracollections"
+	EphemeralInfraCollectionResource = "ephemeralinfracollections"
 	GatewayResource                  = "gateways"
 	SshGatewayResource               = "sshgateways"
 	BidderResource                   = "bidders"
@@ -90,6 +94,10 @@ var (
 	MarketBidderGVR             = GroupVersion.WithResource(MarketBidderResource)
 	MarketRequesterGVR          = GroupVersion.WithResource(MarketRequesterResource)
 	ComputeContractGVR          = GroupVersion.WithResource(ComputeContractResource)
+	InfraGVR                    = GroupVersion.WithResource(InfraResource)
+	EphemeralInfraGVR           = GroupVersion.WithResource(EphemeralInfraResource)
+	InfraCollectionGVR          = GroupVersion.WithResource(InfraCollectionResource)
+	EphemeralInfraCollectionGVR = GroupVersion.WithResource(EphemeralInfraCollectionResource)
 	GatewayGVR                  = GroupVersion.WithResource(GatewayResource)
 	SshGatewayGVR               = GroupVersion.WithResource(SshGatewayResource)
 	BidderGVR                   = GroupVersion.WithResource(BidderResource)
@@ -169,6 +177,14 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&MarketRequesterList{},
 		&ComputeContract{},
 		&ComputeContractList{},
+		&Infra{},
+		&InfraList{},
+		&EphemeralInfra{},
+		&EphemeralInfraList{},
+		&InfraCollection{},
+		&InfraCollectionList{},
+		&EphemeralInfraCollection{},
+		&EphemeralInfraCollectionList{},
 		&Gateway{},
 		&GatewayList{},
 		&SshGateway{},
@@ -536,6 +552,62 @@ func (in *ComputeContract) DeepCopyObject() runtime.Object {
 }
 
 func (in *ComputeContractList) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *Infra) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *InfraList) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *EphemeralInfra) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *EphemeralInfraList) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *InfraCollection) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *InfraCollectionList) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *EphemeralInfraCollection) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *EphemeralInfraCollectionList) DeepCopyObject() runtime.Object {
 	if c := in.DeepCopy(); c != nil {
 		return c
 	}
