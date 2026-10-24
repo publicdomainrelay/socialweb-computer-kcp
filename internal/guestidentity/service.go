@@ -372,7 +372,7 @@ func (g *Guest) refreshOIDCDocuments() {
 		}
 		discoveryErr := g.refreshOIDCDocument(g.ctx, "discovery", &g.discovery, g.identity.Discovery)
 		keysErr := g.refreshOIDCDocument(g.ctx, "keys", &g.keys, g.identity.Keys)
-		if discoveryErr == nil && keysErr == nil {
+		if discoveryErr == nil && (keysErr == nil || errors.Is(keysErr, errOIDCKeysNotPublished)) {
 			delay = oidcDocumentRefresh
 			continue
 		}
@@ -390,6 +390,8 @@ func (g *Guest) refreshOIDCDocuments() {
 	}
 }
 
+var errOIDCKeysNotPublished = errors.New("guestidentity: no guest has exchanged a token, so OpenBao publishes no OIDC keys yet")
+
 func (g *Guest) refreshOIDCDocument(ctx context.Context, name string, cache *oidcCache, fetch func(context.Context) (Reply, error)) error {
 	reply, err := fetch(ctx)
 	if err != nil {
@@ -402,6 +404,9 @@ func (g *Guest) refreshOIDCDocument(ctx context.Context, name string, cache *oid
 		return err
 	}
 	if name == "keys" && !oidcKeysPublished(reply) {
+		if _, held := cache.get(); !held {
+			return errOIDCKeysNotPublished
+		}
 		err := errors.New("the guest OIDC keys document is empty")
 		g.oidcRefreshWarning(name, cache, err)
 		return err
