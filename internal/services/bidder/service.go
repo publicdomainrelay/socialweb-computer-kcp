@@ -118,7 +118,7 @@ type Service struct {
 
 	inputs *participant.Inputs
 
-	authorizer *participant.Authorizer
+	authorizer atomic.Pointer[participant.Authorizer]
 
 	relay *ingress.Subscriber
 
@@ -286,21 +286,23 @@ func (s *Service) prepare(ctx context.Context) error {
 	if _, err := intents.Subscribe(ctx, inputsSubscription(s.inputs)); err != nil {
 		return fmt.Errorf("bidder: subscribing to the market inputs: %w", err)
 	}
-	s.awaitInputs(ctx)
+	s.mux = s.routes()
+	if err := s.register(); err != nil {
+		return err
+	}
+	if err := s.awaitInputs(ctx); err != nil {
+		return err
+	}
 	if err := s.checkServiceAuthHost(); err != nil {
 		return err
 	}
-	s.mux = s.routes()
 	if err := s.startRelay(ctx); err != nil {
 		s.log.Warn("the bidder market relay did not start", "err", err)
 	}
-	s.authorizer = s.newAuthorizer()
+	s.authorizer.Store(s.newAuthorizer())
 	bidder, err := s.newBidder(intents)
 	if err != nil {
 		s.log.Warn("the bidder does not serve the market", "err", err)
-	}
-	if err := s.register(); err != nil {
-		return err
 	}
 	s.addEndpoint(component.Endpoint{Name: "http", Protocol: component.ProtocolHTTP})
 	s.addEndpoint(component.Endpoint{Name: "market", Protocol: component.ProtocolHTTP})
@@ -377,7 +379,7 @@ func (s *Service) publicMarketURL() string {
 	if endpoint, ok := s.relayEndpoint(); ok {
 		return strings.TrimRight(endpoint.URL, "/")
 	}
-	return strings.TrimRight(s.guestURL, "/")
+	return ""
 }
 
 func (s *Service) inboundMarketURL() string {

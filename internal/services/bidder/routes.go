@@ -63,7 +63,12 @@ func (s *Service) routes() *http.ServeMux {
 }
 
 func (s *Service) admit(w http.ResponseWriter, r *http.Request, lxm, recordURI string) (string, bool) {
-	issuer, ok, status := s.authorizer.AuthorizeRequest(r, lxm, recordURI)
+	authorizer := s.authorizer.Load()
+	if authorizer == nil {
+		participant.WriteXRPCError(w, http.StatusServiceUnavailable, "Unavailable", "the bidder is not ready to authorize requests")
+		return "", false
+	}
+	issuer, ok, status := authorizer.AuthorizeRequest(r, lxm, recordURI)
 	if !ok {
 		participant.WriteXRPCError(w, status, participant.AuthCode(status), "invalid service-auth token")
 	}
