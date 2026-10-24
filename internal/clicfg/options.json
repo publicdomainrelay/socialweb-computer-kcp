@@ -41,7 +41,7 @@
     },
     "profile": {
       "type": "string",
-      "description": "Dev profile: quick (kine on sqlite + one kcp slot), prodlike (the gateway shape: a postgres unit, one kine per kcp slot on it, blue/green slots a and b behind the front) or market-network (a quick-shaped instance whose MarketNetwork root object runs the shared atproto services and composes child applications, each with its own kcp). run bidder: the MarketBidder profile, prod-qr (QR sign-in into the handle's real account, no PDS), market-network (the bidder's own account on the market network's PDS; needs --network) or dev-local (a local repo, the ephemeral-PDS mode)",
+      "description": "Dev profile: quick (kine on sqlite + one kcp slot), prodlike (the gateway shape: a postgres unit, one kine per kcp slot on it, blue/green slots a and b behind the front) or market-network (a quick-shaped instance whose MarketNetwork root object runs the shared atproto services and composes child applications, each in its own workspace root:<app> of the one kcp). run bidder: the MarketBidder profile, prod-qr (QR sign-in into the handle's real account, no PDS), market-network (the bidder's own account on the market network's PDS; needs --network) or dev-local (a local repo, the ephemeral-PDS mode)",
       "env": "SOCIALWEB_DEV_PROFILE"
     },
     "bidders": {
@@ -52,7 +52,7 @@
     },
     "with-gateway": {
       "type": "boolean",
-      "description": "dev up --profile market-network: also compose a Gateway child application with its own kcp"
+      "description": "dev up --profile market-network: also compose a Gateway child application in its own workspace of the network's kcp"
     },
     "app-values": {
       "type": "string",
@@ -561,7 +561,7 @@
     },
     "market-network-file": {
       "type": "string",
-      "description": "run bidder --profile market-network without --network (an installed bidder account joining a market network over the atproto market protocol only): a JSON file holding the MarketNetwork status (`dev status --instance <n> | jq .network.status`): its network value and bidderPdsUrl. The CA bundle it names must be readable by the bidder account",
+      "description": "run bidder --profile market-network without --network (an installed bidder account joining a market network over the atproto market protocol only): a JSON file holding the MarketNetwork status (`dev status --instance <n> | jq .network.status`): its network value (with the CA bundle inline as PEM) and bidderPdsUrl",
       "env": "SOCIALWEB_MARKET_NETWORK_FILE"
     },
     "name": {
