@@ -379,7 +379,7 @@
     },
     "guest-image-release-base": {
       "type": "string",
-      "description": "The base the published guest image is searched under by run bidder and by install bidder when neither --guest-image-source nor a stored source names one; install bidder refuses an empty base, when nothing else names an image, rather than installing a bidder that can provision nothing",
+      "description": "The base the published guest image is searched under (guest-images/<target>/<pinned image.json sha256> first, then releases/<version>, main/<commit>, main/latest and the newest releases/v*) by run bidder and by install bidder when neither --guest-image-source nor a stored source names one; install bidder refuses an empty base, when nothing else names an image, rather than installing a bidder that can provision nothing",
       "env": "SOCIALWEB_GUEST_IMAGE_RELEASE_BASE",
       "default": "https://socialweb-computer-kcp.sfo3.digitaloceanspaces.com"
     },

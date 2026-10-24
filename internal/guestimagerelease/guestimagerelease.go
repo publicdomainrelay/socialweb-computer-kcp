@@ -31,7 +31,14 @@ type Options struct {
 	Client         *http.Client
 }
 
-const LatestRef = "main/latest"
+const (
+	LatestRef     = "main/latest"
+	ContentPrefix = "guest-images"
+)
+
+func ContentKey(target, manifestSHA256 string) string {
+	return ContentPrefix + "/" + target + "/" + manifestSHA256
+}
 
 var (
 	ErrNotPublished = errors.New("guestimagerelease: no published guest image")
@@ -71,8 +78,10 @@ func Source(ctx context.Context, o Options) (string, error) {
 	tried := make([]string, 0, len(refs)+1)
 	mismatched := make([]string, 0, len(refs)+1)
 	unreadable := make([]string, 0, len(refs)+1)
-	try := func(ref string) (string, bool, error) {
-		src := base + "/" + ref + "/guest-image/" + o.Target
+	refSource := func(ref string) string {
+		return base + "/" + ref + "/guest-image/" + o.Target
+	}
+	try := func(src string) (string, bool, error) {
 		manifest := src + "/" + guestimage.ManifestName
 		ok, err := published(ctx, client, manifest)
 		if err != nil {
@@ -100,8 +109,15 @@ func Source(ctx context.Context, o Options) (string, error) {
 		}
 		return src, true, nil
 	}
+	src, matched, err := try(base + "/" + ContentKey(o.Target, o.ManifestSHA256))
+	if err != nil {
+		return "", err
+	}
+	if matched {
+		return src, nil
+	}
 	for _, ref := range refs {
-		src, matched, err := try(ref)
+		src, matched, err := try(refSource(ref))
 		if err != nil {
 			return "", err
 		}
@@ -112,7 +128,7 @@ func Source(ctx context.Context, o Options) (string, error) {
 	newest, listErr := newestRelease(ctx, client, base)
 	if listErr == nil && newest != "" {
 		if ref := "releases/" + newest; !slices.Contains(refs, ref) {
-			src, matched, err := try(ref)
+			src, matched, err := try(refSource(ref))
 			if err != nil {
 				return "", err
 			}
