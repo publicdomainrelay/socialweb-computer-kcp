@@ -116,6 +116,28 @@ func (r *Registry) Refs(ctx context.Context) ([]clusterprovider.Ref, error) {
 	return out, nil
 }
 
+func (r *Registry) AccountClusters(ctx context.Context, account string) ([]v1alpha1.Cluster, error) {
+	homes, deleting, err := r.workspaces(ctx, account)
+	if apierrors.IsNotFound(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var out []v1alpha1.Cluster
+	for _, home := range homes {
+		list, err := r.listClusters(ctx, account+":"+home)
+		if apierrors.IsNotFound(err) || (err != nil && (deleting[home] || r.goneOrDeleting(ctx, account, home))) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, list.Items...)
+	}
+	return out, nil
+}
+
 func (r *Registry) listClusters(ctx context.Context, home string) (*v1alpha1.ClusterList, error) {
 	c, err := r.clusters(ctx, home)
 	if err != nil {
