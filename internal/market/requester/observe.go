@@ -32,6 +32,9 @@ func (q *Requester) Observe(ctx context.Context, change contractmarket.Change) (
 		return 0, errors.Join(mergeErr, q.processPendingEvents(ctx, change.Name))
 	case contractmarket.KindStateSync:
 		if change.Gone || change.StateSync == nil {
+			if old, ok := q.syncs.Get(change.Name); ok {
+				q.inboxed.Delete(string(old.UID) + "#" + old.Spec.IdempotencyKey)
+			}
 			q.syncs.Remove(change.Name)
 			return 0, nil
 		}

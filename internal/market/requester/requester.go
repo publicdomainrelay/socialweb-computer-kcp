@@ -188,6 +188,8 @@ type Deps struct {
 type Requester struct {
 	cfg Config
 
+	inboxed sync.Map
+
 	deps Deps
 
 	log *slog.Logger
