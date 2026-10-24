@@ -43,11 +43,6 @@ var ErrNoStore = errors.New(
 		"at startup with 'unknown driver' and a t4 endpoint makes k3s start its OWN kine against the " +
 		"same bucket instead of dialing ours, which is two writers on one store")
 
-var ErrNoGuardSeam = errors.New(
-	"clusterprovider: this Stack puts no step before k3s, so materialiser.guardBeforeK3s " +
-		"would return the steps unchanged and the identity guard would SILENTLY NOT RUN -- " +
-		"a skipped guard and a satisfied one look identical from a green suite")
-
 type StackConfig struct {
 	Stack Stack
 
@@ -301,9 +296,6 @@ func StepsFor(cfg StackConfig) materialiser.StepBuilder {
 			return nil, err
 		}
 		steps = cfg.Revoked.beforeK3s(steps, o, spec)
-		if cfg.GuardRides && !hasStepBeforeK3s(steps) {
-			return nil, fmt.Errorf("%w (stack %v, cluster %s)", ErrNoGuardSeam, cfg.Stack, cluster)
-		}
 		if cfg.GuardRides {
 			steps, err = HarvestAfterK3s(steps, cfg.Harvest, cluster)
 			if err != nil {
@@ -338,15 +330,6 @@ func StepsFor(cfg StackConfig) materialiser.StepBuilder {
 
 func (cfg StackConfig) announced() (string, []string) {
 	return cfg.AdvertiseAddress, []string{cfg.AdvertiseAddress}
-}
-
-func hasStepBeforeK3s(steps []procgroup.Step) bool {
-	for i, s := range steps {
-		if s.Name == procgroup.ComponentK3s {
-			return i >= 1
-		}
-	}
-	return false
 }
 
 func K3sAPIPorts(l materialiser.Leases, cluster, slot string) (advertisePort, listenPort int, err error) {

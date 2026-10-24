@@ -693,27 +693,23 @@ func mountURL(advertisePort int) string {
 }
 
 func guardBeforeK3s(steps []procgroup.Step, guard IdentityGuard, o Observed) []procgroup.Step {
-	if guard == nil || len(steps) < 2 {
+	if guard == nil {
 		return steps
 	}
-	idx := -1
-	for i, s := range steps {
-		if s.Name == procgroup.ComponentK3s {
-			idx = i
-			break
+	for i := range steps {
+		if steps[i].Name != procgroup.ComponentK3s {
+			continue
+		}
+		inner := steps[i].Prepare
+		steps[i].Prepare = func(ctx context.Context, ps procgroup.Spec) (procgroup.Spec, error) {
+			if err := guard(ctx, o); err != nil {
+				return ps, err
+			}
+			if inner == nil {
+				return ps, nil
+			}
+			return inner(ctx, ps)
 		}
 	}
-	if idx < 1 {
-		return steps
-	}
-	prev := steps[idx-1]
-	inner := prev.Ready
-	prev.Ready = func(ctx context.Context, p procgroup.Member) error {
-		if err := inner(ctx, p); err != nil {
-			return err
-		}
-		return guard(ctx, o)
-	}
-	steps[idx-1] = prev
 	return steps
 }
