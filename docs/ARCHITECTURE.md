@@ -3340,8 +3340,8 @@ The backend rule. A package under one of the backend prefixes of `hack/archcheck
 `internal/vmruntime`, `internal/hostsvc`, `internal/fcapi`, `internal/guestnet`, `internal/guestdisk`,
 `internal/guestimage`, `internal/policyengine/runs`, `internal/relay`, `internal/ingress`,
 `internal/ssh`, `internal/dispatcher`, `internal/gateway`, `internal/guestcp`, `internal/market`,
-`internal/lease`, `internal/postgresctl`, `internal/ttlctl`, `internal/clusterprovider`) must not
-reach, directly or through any import, client-go, controller-runtime, multicluster-runtime, kcp-dev,
+`internal/lease`, `internal/postgresctl`, `internal/ttlctl`, `internal/clusterprovider`,
+`internal/tenantstore`) must not reach, directly or through any import, client-go, controller-runtime, multicluster-runtime, kcp-dev,
 unstructured objects, `internal/bus`, `internal/controllers`, `internal/app`, `internal/kcpserver`,
 `internal/kcpclient`, `internal/kcpdatastore` or `internal/stack`. Every backend package at the depth
 `internal/<concept>/<impl>` must hold a compile-time assertion against an `internal/contract`
@@ -3410,6 +3410,7 @@ internal/contract/pds/           Accounts, Sessions, Sync, ServiceAuth, Authenti
 internal/contract/policy/        Engine, Evaluator, Runner, verdicts
 internal/contract/relay/         Relay, Crawler
 internal/contract/ssh/           ssh Server, Runner, account, PTY
+internal/contract/tenantstore/   Eraser: removes one ServiceAccount and its token Secrets from a tenant cluster's datastore
 internal/contract/vault/         KV, Leases, PKI, PKI backend and provisioner, health
 ```
 
@@ -3557,6 +3558,7 @@ impl, clusters:
 internal/clusterprovider/         the tenant cluster backend: per-cluster stack and units, bundle, front, holds, links, roll, scheduler, tenant API and credential, vault, postgres, ESO
 internal/clusterkcp/              the kcp and tenant API side of a cluster: grants, kubeconfig, CCM grant, ESO install, hardening, node observer, add-on baseline
 internal/clusterstack/            the file layout and spec of one tenant cluster stack: TLS, credentials, kubeconfigs, OpenBao, scheduler
+internal/tenantstore/kineetcd/    tenantstore.Eraser over kine's etcd v3 API: the pre-start erase of a revoked identity's ServiceAccount
 internal/clusterlink/             ClusterLink keys and dumbpipe tickets
 internal/cloudprovider/           the cloud-controller-manager logic: node patches from the instance snapshot, provider IDs, pressure
 internal/scale/                   the scale decision: baseline, backoff, operators, scale-in, unschedulable pods
@@ -4054,17 +4056,6 @@ A change must not break any of these. Each exists because something failed.
     event. A timeout does not make a remote call a request-path operation (section 15).
 
 ## 14. Open architectural gaps
-
-- **A revoked identity's ServiceAccount token works directly at a waking tenant apiserver for a few
-  seconds (plan 0026 A9, opened 2026-10-23).** revokeIdentity deletes the did- ServiceAccount at
-  once in every running cluster; a stopped cluster records ColdDeferred and the cluster provider
-  deletes the account at wake, before the Cluster is Ready, then writes RevocationSettled and the
-  atprotoidentity controller moves the identity to Revoked. The delete needs the tenant apiserver to
-  answer, so from the first answer to the delete (about 5 s in the live run) the stale token gets 200
-  directly at the loopback apiserver. The tenant front answers 503 until Ready, so no public request
-  gets through; only a caller on the gateway host or on a node's ClusterLink could use the window.
-  Closing it needs the account removed before k3s serves (for example from the datastore at
-  bring-up).
 
 - **PDS ingress is contracted but not yet planned per app (plan 0022, 2026-10-22).** The API now
   carries `spec.ingress` on `MarketBidder`, `MarketRequester`, `Gateway`, `SshGateway` and
@@ -4577,6 +4568,32 @@ because it bounds a mechanism the rest of this document leans on.
   in Releasing resends the stored event. Open until ACC20-BIDDER-BACK and ACC20-ONE-EVENT have their
   market network reading.
 ## 15. Settled decisions, and the defects they closed
+
+- **A revoked identity's ServiceAccount is erased from the datastore before k3s starts (plan 0026
+  A9, opened and closed 2026-10-23).** Before: revokeIdentity deleted the did- ServiceAccount at once
+  in a running cluster, and a stopped cluster recorded ColdDeferred; the cluster provider deleted the
+  account at wake through the tenant apiserver, so from the apiserver's first answer to that delete
+  (about 5 s in the live run, 20:16:50Z to 20:16:56Z) the stale token got 200 directly at the
+  loopback apiserver. Now the k3s step's Prepare, after kine is ready and before the k3s unit is
+  placed, reads the owner's identity state and, when it is revoked, deletes
+  `/registry/serviceaccounts/<ns>/<name>` and every `/registry/secrets/<ns>/<name>-token-*` key over
+  kine's etcd v3 API (`internal/tenantstore/kineetcd` behind `internal/contract/tenantstore`, wired
+  in `internal/providermain` as `StackConfig.Revoked`), each with a mod-revision compare. A failed
+  read or delete fails the step, so bring-up retries on the runtime's backoff and k3s never starts
+  with the account present. The at-wake API delete and RevocationSettled stay the confirmation: the
+  provider then reads the account absent (reason ServiceAccountAbsent) and the atprotoidentity
+  controller moves the identity to Revoked. A cluster that was running at revoke time and restarts
+  later runs the same erase, which finds nothing. After, read live on this host (market network
+  `fixwindow`, one gateway, two non-exempt accounts; probes every 150 ms with the stale token at the
+  front's advertise port, the k3s slot port and the kube-apiserver port): cluster b stopped, revoked
+  (ColdDeferred), woken by `spec.running`; kine ready 22:21:09.045Z, the erase 22:21:09.096Z (8.6 ms,
+  deleted true), k3s placed 22:21:09.098Z, first answer 22:21:09.253Z (503), 401 from 22:21:09.972Z,
+  RevocationSettled ServiceAccountAbsent and identity Revoked 22:21:16Z, Ready 22:21:17.6Z; 2538
+  probes from 22:21:02Z to the teardown at 22:23:17Z, no 200 (connection refused, a failed TLS
+  handshake at the front, 503 from the k3s supervisor, then 401). Cluster a, revoked while running
+  and restarted: erase deleted false, 401 from the first answer, no 200 in 1055 probes.
+  The non-revoked account's cluster k woke in the same minute with no erase, its ServiceAccount the
+  same uid, and its token 200 from the first apiserver answer (22:21:30.6Z).
 
 - **Per-component suspend and typed overrides on the app roots (plan 0024 W0-W3, 2026-10-22).** The
   five app roots and `NetworkApp` accept `spec.components`, keyed by `Kind` for a singleton or
