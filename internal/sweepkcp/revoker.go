@@ -33,8 +33,6 @@ type Revoker struct {
 
 	Erase revocation.Eraser
 
-	State revocation.StateWriter
-
 	OnPlan func(Plan)
 }
 
@@ -64,11 +62,6 @@ func (r *Revoker) Revoke(ctx context.Context, did, why string) error {
 			plan.Err = err
 		}
 		plan.Entries = revocation.Reply(effects)
-		if r.State != nil {
-			if err := r.State.WriteIdentityState(ctx, did, revocation.AccountState(effects), revocation.Detail(effects)); err != nil {
-				plan.Err = errors.Join(plan.Err, err)
-			}
-		}
 	}
 	if r.OnPlan != nil {
 		r.OnPlan(plan)

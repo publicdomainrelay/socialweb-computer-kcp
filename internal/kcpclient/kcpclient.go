@@ -713,31 +713,6 @@ func (c *Client) WriteDeny(ctx context.Context, did string) error {
 	return nil
 }
 
-func (c *Client) WriteIdentityState(ctx context.Context, did string, state v1alpha1.IdentityState, detail string) error {
-	if did == "" {
-		return revocation.ErrNoDID
-	}
-	r, err := c.resource(clusterhome.AccountPath(did), socialwebResource)
-	if err != nil {
-		return err
-	}
-	name := IdentityRecordName(did)
-	settled := metav1.ConditionFalse
-	if state == v1alpha1.IdentityRevoked {
-		settled = metav1.ConditionTrue
-	}
-	doc := map[string]any{"apiVersion": v1alpha1.GroupVersion.String(), "kind": "AtprotoIdentity", "metadata": map[string]any{"name": name},
-		"status": map[string]any{"state": string(state), "conditions": []any{map[string]any{
-			"type": ConditionServiceAccountsErased, "status": string(settled), "reason": string(state),
-			"message": detail, "lastTransitionTime": time.Now().UTC().Format(time.RFC3339),
-		}}}}
-	if err := applyDoc(ctx, r.Patch(types.ApplyPatchType).SubResource("status").Resource("atprotoidentities").Name(name),
-		fieldManagerIdentityState, true, doc, true); err != nil {
-		return fmt.Errorf("kcpclient: the revocation state of %s: %w", name, err)
-	}
-	return nil
-}
-
 func (c *Client) FanOut(ctx context.Context, did string) ([]revocation.ClusterView, error) {
 	if did == "" {
 		return nil, revocation.ErrNoDID

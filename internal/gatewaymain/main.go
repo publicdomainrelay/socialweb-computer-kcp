@@ -117,7 +117,7 @@ func buildDeps(cfg Config) (Deps, error) {
 		return Deps{}, fmt.Errorf("the sweep's resolver: %w", err)
 	}
 
-	revoker := &sweepkcp.Revoker{Deny: client, FanOut: client, Erase: client, State: client}
+	revoker := &sweepkcp.Revoker{Deny: client, FanOut: client, Erase: client}
 
 	return Deps{
 		Store:     client,

@@ -127,8 +127,6 @@ type Revoker interface {
 	FanOut(ctx context.Context, did string) ([]revocation.ClusterView, error)
 
 	revocation.Eraser
-
-	revocation.StateWriter
 }
 
 type CertRevoker interface {
@@ -346,11 +344,7 @@ func (s *Server) RevokeIdentity(ctx context.Context, caller Caller, req RevokeRe
 	if err != nil {
 		slog.Warn("revokeIdentity: a ServiceAccount delete failed; that cluster stays RevocationPending", "caller", string(caller), "err", err)
 	}
-	state := revocation.AccountState(effects)
-	if err := s.Revoker.WriteIdentityState(ctx, string(caller), state, revocation.Detail(effects)); err != nil {
-		return nil, fmt.Errorf("revokeIdentity: %w", err)
-	}
-	slog.Info("revokeIdentity: the deny is written", "caller", string(caller), "state", string(state), "clusters", revocation.Detail(effects))
+	slog.Info("revokeIdentity: the deny is written", "caller", string(caller), "plan", string(revocation.AccountState(effects)), "clusters", revocation.Detail(effects))
 	if req.Name != "" {
 		effects = slices.DeleteFunc(effects, func(e revocation.Effect) bool { return e.Cluster != req.Name })
 	}

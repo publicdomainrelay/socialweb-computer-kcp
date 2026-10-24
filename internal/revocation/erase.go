@@ -13,10 +13,6 @@ type Eraser interface {
 	DeleteServiceAccount(ctx context.Context, did, cluster string) error
 }
 
-type StateWriter interface {
-	WriteIdentityState(ctx context.Context, did string, state v1alpha1.IdentityState, detail string) error
-}
-
 var ErrNoEraser = errors.New(
 	"revocation: the deny IS written, but no Eraser is wired: the ServiceAccount cannot be removed in this " +
 		"build, so every cluster that still holds one stays RevocationPending")
@@ -45,6 +41,29 @@ func Erase(ctx context.Context, er Eraser, did string, effects []Effect) ([]Effe
 		applied = append(applied, e)
 	}
 	return applied, errors.Join(errs...)
+}
+
+type SettleView struct {
+	Name string
+
+	Settled bool
+
+	Serving bool
+}
+
+func Settle(views []SettleView) []Effect {
+	out := make([]Effect, 0, len(views))
+	for _, v := range views {
+		switch {
+		case v.Settled:
+			out = append(out, Effect{Cluster: v.Name, State: v1alpha1.IdentityRevoked})
+		case v.Serving:
+			out = append(out, Effect{Cluster: v.Name, State: v1alpha1.IdentityRevocationPending, DeleteSA: true})
+		default:
+			out = append(out, Effect{Cluster: v.Name, State: v1alpha1.IdentityColdDeferred})
+		}
+	}
+	return out
 }
 
 func AccountState(effects []Effect) v1alpha1.IdentityState {

@@ -18,11 +18,7 @@ const (
 	fieldManagerGateway = "socialweb.computer/gateway"
 
 	fieldManagerRevocation = "socialweb.computer/revocation"
-
-	fieldManagerIdentityState = "socialweb.computer/atprotoidentity"
 )
-
-const ConditionServiceAccountsErased = "ServiceAccountsErased"
 
 func IdentityRecordName(did string) string {
 	return clusterhome.AccountHash(did)

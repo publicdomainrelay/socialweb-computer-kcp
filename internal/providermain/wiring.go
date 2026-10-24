@@ -17,6 +17,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterkcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterprovider"
+	identitycontroller "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/atprotoidentity"
 	clustercontroller "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/cluster"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
@@ -327,6 +328,11 @@ func (p *Provider) Run(ctx context.Context) error {
 	}
 	if _, err := clustercontroller.RegisterProvider(mgr, opts); err != nil {
 		return err
+	}
+	if !p.cfg.ObserveOnly() {
+		if _, err := identitycontroller.Register(mgr, p.registry); err != nil {
+			return err
+		}
 	}
 	var wg sync.WaitGroup
 	defer wg.Wait()
