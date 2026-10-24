@@ -91,6 +91,16 @@ learnings:
       or requester view should show, per contract, which dependency the requester is waiting on
       (handler, Exposure address, repo provider, identity) instead of a bare Pending; the component's
       restarts count and last error are already in its status and are the fastest signal.
+  - id: L10-SILENT-WATCHDOG-RESTARTS
+    text: >
+      From 2026-10-23 17:06Z to the rc101 rollout every bidder core (local, hat-9, hat-7) was aborted by
+      systemd's watchdog every ~7 minutes (WatchdogSec=7min; "Failed with result 'watchdog'"): the core
+      fed the watchdog only from devcore's OnTick, which stops once the stack settles (fixed 81c172f9,
+      notify.KeepAlive). It ran unnoticed for about 16 hours through several acceptance runs, because
+      each core came back Ready within seconds and every acceptance row reads state, not uptime. Only a
+      Go stack dump in a journal watch for something else showed it. A fleet view must report per host
+      the unit's NRestarts, its last result (watchdog, signal, exit) and the core's uptime; any restart
+      the lead did not cause is an alert.
 items:
   - id: F1-INVENTORY
     title: "A fleet inventory object: which bidders exist, where, on which version"
