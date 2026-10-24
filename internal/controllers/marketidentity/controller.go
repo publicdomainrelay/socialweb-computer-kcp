@@ -93,6 +93,7 @@ func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
 		return nil, err
 	}
 	ctl := New(opts)
+	ctl.Provide(opts.Bus)
 	options := []ctlruntime.Option{ctlruntime.Export(Export), ctlruntime.Events(ctl.events), ctlruntime.Gone(ctl.gone),
 		ctlruntime.Watches(func(_ context.Context, src ctlruntime.Request, obj *v1alpha1.AtprotoRecordWatch) []ctlruntime.Request {
 			return ctl.users(binding.Key(src.Workspace, RecordWatchKind, obj.Name))

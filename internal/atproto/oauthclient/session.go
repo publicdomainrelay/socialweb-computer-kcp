@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"sort"
@@ -48,6 +49,8 @@ type Options struct {
 	HTTPClient *http.Client
 
 	Store SessionStore
+
+	Log *slog.Logger
 }
 
 type Session struct {
@@ -61,6 +64,8 @@ type Session struct {
 
 	store SessionStore
 
+	log *slog.Logger
+
 	did string
 
 	hostURL string
@@ -69,14 +74,6 @@ type Session struct {
 var _ pdsclient.TokenSource = (*Session)(nil)
 
 var _ pdsclient.DPoPSource = (*Session)(nil)
-
-func OpenFile(ctx context.Context, path string, opts Options) (*Session, error) {
-	if path == "" {
-		return nil, errors.New("oauthclient: oauth identity mode has no token store path")
-	}
-	opts.Store = &FileStore{Path: path}
-	return Open(ctx, opts)
-}
 
 func Open(ctx context.Context, opts Options) (*Session, error) {
 	if opts.Store == nil {
@@ -115,7 +112,7 @@ func Open(ctx context.Context, opts Options) (*Session, error) {
 		_ = instance.persist(ctx)
 	}
 	if !AccessTokenLive(session.AccessToken) {
-		if err := instance.refresh(ctx); err != nil {
+		if err := instance.refreshStale(ctx); err != nil {
 			return nil, fmt.Errorf("oauthclient: refreshing the oauth session for %s: %w", did, err)
 		}
 	}
@@ -166,11 +163,16 @@ func New(data SessionData, opts Options) (*Session, error) {
 	if client == nil {
 		client = &http.Client{Timeout: DefaultHTTPTimeout}
 	}
+	log := opts.Log
+	if log == nil {
+		log = slog.New(slog.DiscardHandler)
+	}
 	return &Session{
 		data:    data,
 		key:     key,
 		client:  client,
 		store:   opts.Store,
+		log:     log,
 		did:     did.String(),
 		hostURL: strings.TrimRight(data.HostURL, "/"),
 	}, nil
@@ -255,7 +257,7 @@ func (s *Session) AccessToken(ctx context.Context) (string, error) {
 	if AccessTokenLive(token) {
 		return token, nil
 	}
-	if err := s.refresh(ctx); err != nil {
+	if err := s.refreshStale(ctx); err != nil {
 		return "", fmt.Errorf("oauthclient: refreshing the oauth session: %w", err)
 	}
 	s.mu.Lock()
@@ -339,7 +341,7 @@ func (t *httpTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return t.session.doAuthorized(req.Context(), &http.Client{Transport: base}, req)
 }
 
-func (s *Session) ServiceAuth(ctx context.Context, audience, lxm string) (string, error) {
+func (s *Session) ServiceAuth(ctx context.Context, audience, lxm string, expires time.Time) (string, error) {
 	if s == nil {
 		return "", errors.New("oauthclient: no oauth session")
 	}
@@ -347,7 +349,7 @@ func (s *Session) ServiceAuth(ctx context.Context, audience, lxm string) (string
 		return "", errors.New("oauthclient: no service auth audience")
 	}
 	client := &xrpc.Client{Host: s.hostURL, HTTP: s.HTTPClient(s.client), Limit: ReplyLimit}
-	token, err := xrpc.GetServiceAuth(ctx, client, audience, lxm, time.Time{})
+	token, err := xrpc.GetServiceAuth(ctx, client, audience, lxm, expires)
 	if err != nil {
 		return "", fmt.Errorf("oauthclient: service auth: %w", err)
 	}
@@ -412,46 +414,6 @@ func (s *Session) doAuthorized(ctx context.Context, client *http.Client, req *ht
 	return nil, errors.New("oauthclient: the oauth session kept asking for a new DPoP nonce")
 }
 
-func (s *Session) reloadLocked(ctx context.Context) bool {
-	if s.store == nil {
-		return false
-	}
-	sessions, err := s.store.List(ctx)
-	if err != nil {
-		return false
-	}
-	for _, stored := range sessions {
-		if stored.AccountDID != s.data.AccountDID || stored.SessionID != s.data.SessionID {
-			continue
-		}
-		if stored.RefreshToken == "" || stored.RefreshToken == s.data.RefreshToken {
-			if stored.ClientID != "" {
-				s.data.ClientID = stored.ClientID
-			}
-			return false
-		}
-		s.data.AccessToken = stored.AccessToken
-		s.data.RefreshToken = stored.RefreshToken
-		if stored.ClientID != "" {
-			s.data.ClientID = stored.ClientID
-		}
-		if stored.AuthServerURL != "" {
-			s.data.AuthServerURL = stored.AuthServerURL
-		}
-		if stored.AuthServerTokenEndpoint != "" {
-			s.data.AuthServerTokenEndpoint = stored.AuthServerTokenEndpoint
-		}
-		if stored.DPoPAuthServerNonce != "" {
-			s.data.DPoPAuthServerNonce = stored.DPoPAuthServerNonce
-		}
-		if len(stored.Scopes) > 0 {
-			s.data.Scopes = append([]string(nil), stored.Scopes...)
-		}
-		return true
-	}
-	return false
-}
-
 func cloneRequest(req *http.Request) (*http.Request, error) {
 	clone := req.Clone(req.Context())
 	if req.GetBody != nil {
@@ -472,36 +434,27 @@ func DrainAndClose(body io.ReadCloser) {
 	_ = body.Close()
 }
 
-var refreshLocks sync.Map
-
-func refreshLock(sessionID string) *sync.Mutex {
-	lock, _ := refreshLocks.LoadOrStore(sessionID, &sync.Mutex{})
-	return lock.(*sync.Mutex)
-}
-
 func (s *Session) refresh(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	shared := refreshLock(s.data.SessionID)
-	shared.Lock()
-	defer shared.Unlock()
-	if s.reloadLocked(ctx) && AccessTokenLive(s.data.AccessToken) {
+	return s.refreshLocked(ctx)
+}
+
+func (s *Session) refreshStale(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if AccessTokenLive(s.data.AccessToken) {
 		return nil
 	}
-	for round := range 2 {
-		if s.data.RefreshToken == "" {
-			return ErrNoRefreshToken
-		}
-		err := s.refreshOnceLocked(ctx)
-		if err == nil {
-			return nil
-		}
-		if errors.Is(err, ErrSessionExpired) && round == 0 && s.reloadLocked(ctx) {
-			continue
-		}
+	return s.refreshLocked(ctx)
+}
+
+func (s *Session) refreshLocked(ctx context.Context) error {
+	if err := s.refreshOnceLocked(ctx); err != nil {
 		return err
 	}
-	return ErrSessionExpired
+	s.log.Info("oauth_session_refreshed", "did", s.did, "session_id", s.data.SessionID)
+	return nil
 }
 
 func (s *Session) refreshOnceLocked(ctx context.Context) error {
@@ -582,14 +535,7 @@ func (s *Session) refreshOnceLocked(ctx context.Context) error {
 	if nextNonce := resp.Header.Get("DPoP-Nonce"); nextNonce != "" {
 		s.data.DPoPAuthServerNonce = nextNonce
 	}
-	return s.saveRotatedLocked(ctx)
-}
-
-func (s *Session) Sync(ctx context.Context) error {
-	if s == nil {
-		return errors.New("oauthclient: no oauth session")
-	}
-	return s.persist(ctx)
+	return s.persistLocked(ctx)
 }
 
 func (s *Session) persist(ctx context.Context) error {
@@ -599,17 +545,6 @@ func (s *Session) persist(ctx context.Context) error {
 }
 
 func (s *Session) persistLocked(ctx context.Context) error {
-	if s.store == nil {
-		return nil
-	}
-	shared := refreshLock(s.data.SessionID)
-	shared.Lock()
-	defer shared.Unlock()
-	s.reloadLocked(ctx)
-	return s.store.Save(ctx, s.data)
-}
-
-func (s *Session) saveRotatedLocked(ctx context.Context) error {
 	if s.store == nil {
 		return nil
 	}

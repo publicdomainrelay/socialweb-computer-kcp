@@ -79,6 +79,8 @@ type Accounts struct {
 	states oauthclient.StateStore
 
 	qr *ttlcache.Cache[string, *qrTransfer]
+
+	held heldAccounts
 }
 
 func New(cfg Config) *Accounts {
@@ -131,6 +133,7 @@ func (a *Accounts) Reconcile(ctx context.Context, workspace string, id *v1alpha1
 
 func (a *Accounts) Forget(workspace, name string) {
 	a.qr.Delete(qrKey(workspace, name))
+	a.held.forget(workspace, name)
 }
 
 func (a *Accounts) localRepo(ctx context.Context, workspace string, id *v1alpha1.MarketIdentity, generation int64, status v1alpha1.MarketIdentityStatus) (Result, error) {

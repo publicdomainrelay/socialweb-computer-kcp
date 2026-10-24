@@ -16,9 +16,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/atprotorecord"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/repos"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/credentials"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/pds/identity"
 )
 
 const networkReadTimeout = 30 * time.Second
@@ -54,17 +52,6 @@ func (c *Core) repoOptions() repos.Options {
 			}
 			return credential.Data, nil
 		},
-		Identities: func(ctx context.Context, workspace, name string) (*v1alpha1.MarketIdentity, error) {
-			dyn, err := cfg.DynamicFactory(workspace)
-			if err != nil {
-				return nil, err
-			}
-			return kube.Get[v1alpha1.MarketIdentity](ctx, dyn.Resource(v1alpha1.MarketIdentityGVR), name)
-		},
-		Vault: func(workspace string, ref commonv1.SecretRef) identity.Store {
-			return vaultStore{core: c, workspace: workspace, ref: ref}
-		},
-		HTTP: external,
 	}
 }
 
@@ -89,34 +76,4 @@ func vaultServerIn(r *commonv1.ObjectRef) string {
 		return ws + "/" + server
 	}
 	return server
-}
-
-type vaultStore struct {
-	core *Core
-
-	workspace string
-
-	ref commonv1.SecretRef
-}
-
-var _ identity.Store = vaultStore{}
-
-func (v vaultStore) Read(ctx context.Context) (map[string]any, error) {
-	resolver, err := v.core.credentialResolver(v.workspace)
-	if err != nil {
-		return nil, err
-	}
-	credential, err := resolver.Resolve(ctx, credentialRef(v.ref))
-	if err != nil {
-		return nil, err
-	}
-	return credential.Data, nil
-}
-
-func (v vaultStore) Write(ctx context.Context, data map[string]any) error {
-	resolver, err := v.core.credentialResolver(v.workspace)
-	if err != nil {
-		return err
-	}
-	return resolver.WriteCredential(ctx, credentialRef(v.ref), data)
 }

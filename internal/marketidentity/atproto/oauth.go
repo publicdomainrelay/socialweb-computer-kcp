@@ -191,11 +191,7 @@ func (a *Accounts) oauthQr(ctx context.Context, workspace string, id *v1alpha1.M
 		return failed(status, generation, "QRSessionInvalid", err.Error()), err
 	}
 	data = a.sessionWithEndpoints(ctx, data)
-	vault := a.vaultFor(workspace)
-	if err := saveSession(ctx, vault, ref, data); err != nil {
-		return pending(status, generation, "SessionStoreFailed", err.Error()), err
-	}
-	session, err = a.openSessionData(ctx, vault, id, data, ref)
+	session, err = a.openSessionData(ctx, workspace, id, data, ref)
 	if err != nil {
 		return pending(status, generation, "SessionRestoreFailed", err.Error()), err
 	}
@@ -276,7 +272,10 @@ func (a *Accounts) beginBrowserAuthorization(ctx context.Context, workspace stri
 	if err != nil {
 		return "", time.Time{}, err
 	}
-	client := a.oauthHTTP()
+	client, err := a.sessionHTTP(ctx, workspace, id)
+	if err != nil {
+		return "", time.Time{}, err
+	}
 	authServer, tokenEndpoint, _, err := oauthclient.DiscoverAuthServer(ctx, client, pdsURL)
 	if err != nil {
 		return "", time.Time{}, err
@@ -351,16 +350,17 @@ func (a *Accounts) CompleteBrowserAuthorization(ctx context.Context, workspace s
 	if ref == nil {
 		return errNoSessionRef
 	}
-	vault := a.vaultFor(workspace)
-	if vault == nil {
-		return errors.New("marketidentity: no vault writes the oauth session")
+	client, err := a.sessionHTTP(ctx, workspace, id)
+	if err != nil {
+		return err
 	}
-	data, err := oauthclient.ExchangeCallback(ctx, a.statesFor(workspace), r, a.oauthHTTP())
+	data, err := oauthclient.ExchangeCallback(ctx, a.statesFor(workspace), r, client)
 	if err != nil {
 		a.log.Info("oauth callback exchange failed", "workspace", workspace, "identity", id.Name, "err", err.Error())
 		return err
 	}
-	return saveSession(ctx, vault, ref, data)
+	_, err = a.openSessionData(ctx, workspace, id, a.sessionWithEndpoints(ctx, data), ref)
+	return err
 }
 
 func (a *Accounts) oauthPDSURL(ctx context.Context, id *v1alpha1.MarketIdentity) (string, error) {
@@ -392,9 +392,25 @@ func (a *Accounts) restoreOAuthSession(ctx context.Context, workspace string, id
 	if ref == nil {
 		return nil, nil, errNoSessionRef
 	}
+	held := a.held.get(workspace, id)
+	held.open.Lock()
+	defer held.open.Unlock()
+	if session := held.auth.Session(); session != nil && held.ref == *ref {
+		if _, err := session.AccessToken(ctx); err != nil {
+			if oauthExpired(err) {
+				held.auth.Drop()
+			}
+			return nil, ref, err
+		}
+		return session, ref, nil
+	}
 	vault := a.vaultFor(workspace)
 	if vault == nil {
 		return nil, ref, errors.New("marketidentity: no vault reads the oauth session")
+	}
+	client, err := a.sessionHTTP(ctx, workspace, id)
+	if err != nil {
+		return nil, ref, err
 	}
 	store := &vaultSessionStore{vault: vault, ref: *ref, clientID: a.pinnedClientID(id)}
 	session, err := oauthclient.Open(ctx, oauthclient.Options{
@@ -405,14 +421,20 @@ func (a *Accounts) restoreOAuthSession(ctx context.Context, workspace string, id
 		ClientID:   a.sessionClientID(id),
 		Scopes:     a.scopesFor(id.Spec.Mode),
 		Directory:  a.oauth.Directory,
-		HTTPClient: a.oauthHTTP(),
+		HTTPClient: client,
 		Store:      store,
+		Log:        a.log,
 	})
 	if errors.Is(err, oauthclient.ErrInvalidSession) {
 		_ = vault.Delete(ctx, *ref)
 		return nil, ref, oauthclient.ErrNoSession
 	}
-	return session, ref, err
+	if err != nil {
+		return nil, ref, err
+	}
+	held.ref = *ref
+	held.auth.Hold(session)
+	return session, ref, nil
 }
 
 func (a *Accounts) sessionWithEndpoints(ctx context.Context, data oauthclient.SessionData) oauthclient.SessionData {
@@ -432,8 +454,23 @@ func (a *Accounts) sessionWithEndpoints(ctx context.Context, data oauthclient.Se
 	return data
 }
 
-func (a *Accounts) openSessionData(ctx context.Context, vault SecretStore, id *v1alpha1.MarketIdentity, data oauthclient.SessionData,
+func (a *Accounts) openSessionData(ctx context.Context, workspace string, id *v1alpha1.MarketIdentity, data oauthclient.SessionData,
 	ref *commonv1.SecretRef) (*oauthclient.Session, error) {
+	vault := a.vaultFor(workspace)
+	if vault == nil {
+		return nil, errors.New("marketidentity: no vault writes the oauth session")
+	}
+	client, err := a.sessionHTTP(ctx, workspace, id)
+	if err != nil {
+		return nil, err
+	}
+	held := a.held.get(workspace, id)
+	held.open.Lock()
+	defer held.open.Unlock()
+	held.auth.Drop()
+	if err := saveSession(ctx, vault, ref, data); err != nil {
+		return nil, err
+	}
 	session, err := oauthclient.New(data, oauthclient.Options{
 		DID:        data.AccountDID,
 		Handle:     id.Spec.Handle,
@@ -442,8 +479,9 @@ func (a *Accounts) openSessionData(ctx context.Context, vault SecretStore, id *v
 		ClientID:   a.sessionClientID(id),
 		Scopes:     a.scopesFor(id.Spec.Mode),
 		Directory:  a.oauth.Directory,
-		HTTPClient: a.oauthHTTP(),
+		HTTPClient: client,
 		Store:      &vaultSessionStore{vault: vault, ref: *ref, clientID: a.pinnedClientID(id)},
+		Log:        a.log,
 	})
 	if err != nil {
 		return nil, err
@@ -452,6 +490,8 @@ func (a *Accounts) openSessionData(ctx context.Context, vault SecretStore, id *v
 	if _, err := session.AccessToken(ctx); err != nil {
 		return nil, err
 	}
+	held.ref = *ref
+	held.auth.Hold(session)
 	return session, nil
 }
 
