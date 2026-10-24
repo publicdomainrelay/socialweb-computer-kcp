@@ -136,6 +136,13 @@ func (r *Bus) notify(key Key) {
 	}
 }
 
+func (r *Bus) NotifyBound(key Key) {
+	if r == nil {
+		return
+	}
+	r.notify(key)
+}
+
 func NewHandlers(ctx context.Context) *Bus {
 	return New(ctx)
 }

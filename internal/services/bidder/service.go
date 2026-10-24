@@ -297,7 +297,11 @@ func (s *Service) prepare(ctx context.Context) error {
 			return fmt.Errorf("bidder: subscribing to the market objects: %w", err)
 		}
 		s.bidder.Store(bidder)
-		s.wg.Go(func() { bidder.Run(ctx) })
+		s.wg.Go(func() {
+			if s.awaitRepo(ctx); ctx.Err() == nil {
+				bidder.Run(ctx)
+			}
+		})
 	}
 	s.wg.Go(func() { s.crawl().Run(ctx) })
 	s.log.Info("the bidder serves the market", "did", s.did, "guest", s.guestURL, "offering", s.inboundMarketURL(),

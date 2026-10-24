@@ -197,6 +197,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 		Labels: maps.Clone(object.Labels), Pds: pdsRef, DID: status.DID}
 	pdsKey := binding.Key(pdsRef.Workspace, PdsKind, pdsRef.Name)
 	c.backends.Set(target, &repo, pdsKey)
+	c.bus.NotifyBound(bus.Key{Workspace: req.Workspace, Kind: Kind, Name: req.Name})
 	c.follow(pdsKey, pdsRef)
 	c.prune()
 	handle, err := accounts(ctx, c.bus, repo)

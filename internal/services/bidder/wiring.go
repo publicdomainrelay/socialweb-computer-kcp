@@ -93,13 +93,8 @@ func (s *Service) newBidder(intents contract.Intents) (*core.Bidder, error) {
 	if s.did == "" {
 		return nil, errors.New("bidder: the record store needs the bidder DID")
 	}
-	self := s.self()
-	repo := commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: "AtprotoRepo", Name: atprotorepo.RepoName(s.did), Workspace: s.workspace}
-	handlers := s.deps.Bus
 	records, err := participant.NewRepoStore(participant.RepoConfig{DID: s.did, Directory: s.dir, HTTP: s.egress.Client(RecordRequestTimeout),
-		Open: func(ctx context.Context) (atprotorepo.Repo, error) {
-			return bus.Resolve[atprotorepo.Repo](ctx, handlers, self, repo, bus.Capability{Name: atprotorepo.CapabilityWrite})
-		}})
+		Open: s.openRepo})
 	if err != nil {
 		return nil, err
 	}
@@ -145,6 +140,48 @@ func (s *Service) newBidder(intents contract.Intents) (*core.Bidder, error) {
 		Policy:    s.policyRuns(),
 		Log:       s.log,
 	})
+}
+
+func (s *Service) repoRef() commonv1.ObjectRef {
+	return commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: "AtprotoRepo", Name: atprotorepo.RepoName(s.did), Workspace: s.workspace}
+}
+
+func (s *Service) openRepo(ctx context.Context) (atprotorepo.Repo, error) {
+	return bus.Resolve[atprotorepo.Repo](ctx, s.deps.Bus, s.self(), s.repoRef(), bus.Capability{Name: atprotorepo.CapabilityWrite})
+}
+
+func (s *Service) awaitRepo(ctx context.Context) {
+	repo := s.repoRef()
+	bound := make(chan struct{}, 1)
+	cancel := s.deps.Bus.Subscribe(func(key bus.Key) {
+		if key.Workspace != repo.Workspace || key.Name != repo.Name {
+			return
+		}
+		select {
+		case bound <- struct{}{}:
+		default:
+		}
+	})
+	defer cancel()
+	waited := false
+	for {
+		_, err := s.openRepo(ctx)
+		if !errors.Is(err, atprotorepo.ErrNotBound) {
+			if waited {
+				s.log.Info("the bidder repo is bound; the bidder writes its offering", "repo", repo.Name)
+			}
+			return
+		}
+		if !waited {
+			s.log.Info("the bidder waits for its repo binding before it writes its offering", "repo", repo.Name, "err", err)
+			waited = true
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-bound:
+		}
+	}
 }
 
 func seconds(value *int32) time.Duration {

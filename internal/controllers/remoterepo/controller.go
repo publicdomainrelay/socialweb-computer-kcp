@@ -206,6 +206,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 		labels: maps.Clone(object.Labels), pds: pdsRef, credentials: credentials, did: status.DID}
 	c.backends.Set(target, &b, binding.Key(pdsRef.Workspace, RemotePDSKind, pdsRef.Name),
 		binding.Key(credentials.Workspace, credentials.Kind, credentials.Name))
+	c.bus.NotifyBound(bus.Key{Workspace: req.Workspace, Kind: Kind, Name: req.Name})
 	transport, err := c.transport(ctx, b)
 	if err != nil {
 		return c.resolveFailed(ctx, req, object, status, ReasonPDSUnavailable, err)
