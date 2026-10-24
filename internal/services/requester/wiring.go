@@ -11,45 +11,18 @@ import (
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauthclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/atprotorepo"
 	contractmarket "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/market"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/pds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/policy"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/vault"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestidentity"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/participant"
 	role "github.com/johnandersen777/socialweb-computer-kcp/internal/market/requester"
 )
-
-func sessionCredential(spec v1alpha1.RequesterSpec) *component.CredentialRef {
-	secret := spec.PDSAccessToken
-	if secret == nil {
-		return nil
-	}
-	path := strings.Trim(strings.TrimSpace(secret.Path), "/")
-	if path == "" {
-		return nil
-	}
-	keys := []string{"session", "accessJwt", "accessToken", "access_token", "token", "value"}
-	if key := strings.TrimSpace(secret.Key); key != "" {
-		keys = []string{key}
-	}
-	server := v1alpha1.VaultServer(secret.Vault, "")
-	if server == "" && spec.VaultRef != nil {
-		server = strings.TrimSpace(spec.VaultRef.Name)
-	}
-	return &component.CredentialRef{Server: server, Mount: strings.Trim(strings.TrimSpace(secret.Mount), "/"), Path: path, Keys: keys}
-}
-
-func (s *Service) sessionStore() oauthclient.SessionStore {
-	if s.sessions == nil {
-		return nil
-	}
-	return s.sessions
-}
 
 func egressFor(spec v1alpha1.RequesterSpec, deps Deps, trust *component.Trust) component.Egress {
 	egress := deps.Egress
@@ -123,18 +96,17 @@ func (s *Service) setup(ctx context.Context) (*role.Requester, error) {
 		return bus.Resolve[policy.Runner](ctx, handlers, self, engine, bus.Capability{Name: policy.CapabilityRun, Scope: []string{workflow}})
 	}
 	core, err := role.New(s.cfg, role.Deps{
-		Intents:      intents,
-		Inputs:       inputs,
-		OpenRepo:     s.openRepo,
-		Policy:       runner,
-		Vault:        s.secretsVault,
-		Sessions:     s.sessionStore(),
-		SaveSessions: s.saveSessions,
-		Guests:       guests{},
-		Directory:    s.directory,
-		HTTP:         s.client,
-		Now:          time.Now,
-		Log:          s.deps.Log,
+		Intents:     intents,
+		Inputs:      inputs,
+		OpenRepo:    s.openRepo,
+		Policy:      runner,
+		Vault:       s.secretsVault,
+		ServiceAuth: s.openServiceAuth,
+		Guests:      guests{},
+		Directory:   s.directory,
+		HTTP:        s.client,
+		Now:         time.Now,
+		Log:         s.deps.Log,
 	})
 	if err != nil {
 		return nil, err
@@ -164,6 +136,11 @@ func (s *Service) identityRef() bool {
 func (s *Service) openRepo(ctx context.Context, did string) (atprotorepo.Repo, error) {
 	repo := commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: "AtprotoRepo", Name: atprotorepo.RepoName(did), Workspace: s.cfg.Workspace}
 	return bus.Resolve[atprotorepo.Repo](ctx, s.deps.Bus, s.self(), repo, bus.Capability{Name: atprotorepo.CapabilityWrite})
+}
+
+func (s *Service) openServiceAuth(ctx context.Context, identity commonv1.ObjectRef, did string) (pds.ServiceAuth, error) {
+	identity.Group, identity.Kind = v1alpha1.GroupName, "MarketIdentity"
+	return bus.Resolve[pds.ServiceAuth](ctx, s.deps.Bus, s.self(), identity, bus.Capability{Name: pds.CapabilityServiceAuth, Scope: []string{did}})
 }
 
 func (s *Service) secretsVault(ctx context.Context, ref commonv1.SecretRef) (vault.KV, error) {

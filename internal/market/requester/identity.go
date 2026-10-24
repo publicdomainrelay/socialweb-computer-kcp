@@ -1,72 +1,56 @@
 package requester
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/syntax"
 
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauthclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/pds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/lease"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/participant"
 )
 
-func (q *Requester) openOAuthSession(ctx context.Context) (*oauthclient.Session, error) {
-	if stored := q.cfg.OAuthSession; stored != nil {
-		data := *stored
-		if data.ClientID == "" {
-			data.ClientID = strings.TrimSpace(q.cfg.OAuthClientID)
-		}
-		opts := oauthclient.Options{
-			DID:        data.AccountDID,
-			RepoDID:    data.AccountDID,
-			PDSURL:     data.HostURL,
-			ClientID:   q.cfg.OAuthClientID,
-			Scopes:     q.cfg.OAuthScopes,
-			Directory:  q.deps.Directory,
-			HTTPClient: q.deps.HTTP,
-		}
-		if q.deps.SaveSessions && q.deps.Sessions != nil {
-			opts.Store = q.deps.Sessions
-		}
-		session, err := oauthclient.New(data, opts)
-		if err != nil {
-			return nil, fmt.Errorf("requester: the stored oauth session: %w", err)
-		}
-		_ = session.EnsureEndpoints(ctx)
-		if opts.Store != nil {
-			_ = session.Sync(ctx)
-		}
-		return session, nil
+func (q *Requester) resolveOAuthIdentity(ctx context.Context) error {
+	ref := q.cfg.Spec.Identity.MarketIdentityRef
+	workspaces := IdentityWorkspaces(q.cfg.Workspace)
+	found, ok := q.deps.Inputs.AwaitIdentity(ctx, workspaces, ref.Name, IdentityWait)
+	if !ok {
+		return fmt.Errorf("requester: reading its MarketIdentity %s: not found", ref.Name)
 	}
-	path := q.cfg.stateFile(DefaultOAuthSessionFile)
-	if path == "" {
-		return nil, errors.New("requester: oauth identity mode has no token store path")
+	did := strings.TrimSpace(found.Status.Did)
+	if did == "" {
+		return fmt.Errorf("requester: its MarketIdentity %s is not signed in (phase %s)", ref.Name, found.Status.Phase)
 	}
-	session, err := oauthclient.OpenFile(ctx, path, oauthclient.Options{
-		DID:        q.did,
-		Handle:     q.handle,
-		RepoDID:    q.repoDID,
-		PDSURL:     q.pdsURL,
-		ClientID:   q.cfg.OAuthClientID,
-		Scopes:     q.cfg.OAuthScopes,
-		Directory:  q.deps.Directory,
-		HTTPClient: q.deps.HTTP,
-	})
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, fmt.Errorf("requester: no oauth token store at %s", path)
+	for _, ws := range workspaces {
+		if _, has := q.deps.Inputs.Identity(ws, ref.Name); has {
+			q.identityRef = commonv1.ObjectRef{Name: ref.Name, Workspace: ws}
+			break
 		}
-		return nil, err
 	}
-	return session, nil
+	q.did, q.repoDID, q.marketDID = did, did, did
+	q.pdsURL = cmp.Or(q.pdsURL, strings.TrimSpace(found.Status.PdsURL))
+	q.handle = cmp.Or(q.handle, found.Status.Handle)
+	return nil
+}
+
+func (q *Requester) oauthServiceAuth() ServiceAuthSource {
+	if q.deps.ServiceAuth == nil {
+		return nil
+	}
+	identity, did, open := q.identityRef, q.did, q.deps.ServiceAuth
+	return participant.PDSServiceAuth{DID: did, Open: func(ctx context.Context) (pds.ServiceAuth, error) {
+		return open(ctx, identity, did)
+	}}
 }
 
 func (q *Requester) authenticateOwnerSession(ctx context.Context) error {
@@ -120,7 +104,7 @@ func serviceAuthName(source ServiceAuthSource) string {
 	switch source.(type) {
 	case nil:
 		return "local"
-	case *oauthclient.Session:
+	case participant.PDSServiceAuth:
 		return "oauth"
 	case *ownerSessionServiceAuth:
 		return "owner-session"
@@ -134,7 +118,7 @@ type ownerSessionServiceAuth struct {
 
 var (
 	_ ServiceAuthSource        = (*ownerSessionServiceAuth)(nil)
-	_ ServiceAuthSource        = (*oauthclient.Session)(nil)
+	_ ServiceAuthSource        = participant.PDSServiceAuth{}
 	_ pdsclient.TokenRefresher = (*pdsAccountTokens)(nil)
 )
 

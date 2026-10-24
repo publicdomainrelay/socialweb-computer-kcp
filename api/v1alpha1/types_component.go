@@ -386,8 +386,6 @@ type BidderSpec struct {
 
 	PdsRef *commonv1.ObjectRef `json:"pdsRef,omitempty"`
 
-	PDSAccessToken *commonv1.SecretRef `json:"pdsAccessToken,omitempty"`
-
 	PolicyEngineRef *commonv1.ObjectRef `json:"policyEngineRef,omitempty"`
 
 	VaultRef *commonv1.ObjectRef `json:"vaultRef,omitempty"`
@@ -574,8 +572,6 @@ type RequesterSpec struct {
 	PdsRef *commonv1.ObjectRef `json:"pdsRef,omitempty"`
 
 	PdsDID string `json:"pdsDID,omitempty"`
-
-	PDSAccessToken *commonv1.SecretRef `json:"pdsAccessToken,omitempty"`
 
 	MarketExposureRef *commonv1.LocalObjectRef `json:"marketExposureRef,omitempty"`
 

@@ -374,7 +374,6 @@ func (p *pass) desired(plan compose.AccountPlan, ident *v1alpha1.ComponentIdenti
 		Identity:             ident,
 		PdsRef:               requesterPdsRef,
 		PdsDID:               plan.PdsDID,
-		PDSAccessToken:       plan.AccessToken(),
 		OperatorDID:          compose.OperatorDID(o.Spec.Identity.ApprovedAssociations, id),
 		PolicyEngineRef:      compose.ComponentRefFor(compose.ComponentKindPolicyEngine, compose.PolicyEngineComponent),
 		Hostnames:            hostnames,
@@ -512,6 +511,8 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 				c.Log().Warn("the existing-account repo", "root", r.Owner(), "err", err.Error())
 			}
 			repoLinks = append(repoLinks, accountLinks...)
+			repoLinks = append(repoLinks, compose.ServiceAuthLink(compose.AppRef(compose.ComponentKindRequester, marketrequester.RequesterComponent, ws),
+				compose.AppRef(compose.KindMarketIdentity, marketrequester.RequesterIdentity, ws), id.Status.Did))
 		}
 		requester := compose.AppRef(compose.ComponentKindRequester, marketrequester.RequesterComponent, ws)
 		repoLinks = append(repoLinks, compose.RepoWriteLink(requester, compose.RepoRefIn(ident.Did, ws), compose.ScopeAll))

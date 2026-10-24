@@ -22,7 +22,6 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
 	nodeclaimctl "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/nodeclaim"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/credentials"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/exposure"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostlifecycle"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
@@ -128,8 +127,6 @@ type Config struct {
 
 type Core struct {
 	cfg Config
-
-	credentials component.CredentialResolver
 
 	tls *tls.Config
 
@@ -248,11 +245,6 @@ func New(ctx context.Context, cfg Config) (*Core, error) {
 	if err != nil {
 		return nil, err
 	}
-	resolver, err := credentials.New(credentials.Options{Store: store, Workspace: base, Client: cfg.CredentialClient,
-		Server: cfg.CredentialServer})
-	if err != nil {
-		return nil, fmt.Errorf("componentcore: the credential resolver: %w", err)
-	}
 	registry := component.NewRegistry()
 	handlers := cfg.Handlers
 	if handlers == nil {
@@ -268,7 +260,7 @@ func New(ctx context.Context, cfg Config) (*Core, error) {
 	dispatcher := newIngressDispatcher(registry, registrar, fallbackName, cfg.Log)
 	runtime := component.NewRuntime(component.RuntimeConfig{Log: cfg.Log, StateDir: cfg.StateDir, Registry: registry, Bus: handlers}, nil)
 	runtime.SetStateDirMaker(func(dir string) error { return os.MkdirAll(dir, 0o700) })
-	core := &Core{cfg: cfg, credentials: resolver, tls: tlsConfig, hosts: registryHosts{registry: registry}, runtime: runtime,
+	core := &Core{cfg: cfg, tls: tlsConfig, hosts: registryHosts{registry: registry}, runtime: runtime,
 		logins: openbao.NewLogins(nil), oauthCallbacks: oauthcallback.NewRegistry(),
 		registry: registry, ports: ports, store: store, handlers: handlers, linkPolicy: exposure.NewLinkPolicy(handlers),
 		ingressRegistrar: dispatcher, scope: newWorkspaceScope(cfg.Workspaces, cfg.WorkspacesFunc), nodeClaims: newNodeClaims(handlers, cfg.Log)}
@@ -280,7 +272,7 @@ func New(ctx context.Context, cfg Config) (*Core, error) {
 
 func (c *Core) register() error {
 	c.provideComponents()
-	kcp, creds, tlsConfig, hosts, registry, identity := c.cfg.KCP, c.credentials, c.tls, c.hosts, c.registry, c.cfg.ExposureIngressIdentity
+	kcp, tlsConfig, hosts, registry, identity := c.cfg.KCP, c.tls, c.hosts, c.registry, c.cfg.ExposureIngressIdentity
 	egress := func(in component.Instance) component.Egress {
 		return component.Egress{Hosts: hosts, TLS: tlsConfig, Log: in.Log}
 	}
@@ -304,7 +296,7 @@ func (c *Core) register() error {
 			return gatewayapi.New(spec, gatewayapi.Deps{Instance: in, KCP: kcp, TLS: tlsConfig, NodeClaimAgent: c.cfg.NodeClaimAgent, NodeClaims: c.nodeClaims, Logins: c.logins})
 		})},
 		{bidder.Kind, component.Typed(func(ctx context.Context, in component.Instance, spec v1alpha1.BidderSpec) (*bidder.Service, error) {
-			return bidder.New(ctx, spec, bidder.Deps{Instance: in, Credentials: creds, Egress: egress(in), OAuthCallbacks: c.oauthCallbacks})
+			return bidder.New(ctx, spec, bidder.Deps{Instance: in, Egress: egress(in), OAuthCallbacks: c.oauthCallbacks})
 		})},
 		{guestcontrolplane.Kind, component.Typed(func(_ context.Context, in component.Instance, spec v1alpha1.GuestControlPlaneSpec) (*guestcontrolplane.Service, error) {
 			return guestcontrolplane.New(spec, guestcontrolplane.Deps{Instance: in, Hosts: hosts})
@@ -313,7 +305,7 @@ func (c *Core) register() error {
 			return pds.New(spec, pds.Deps{Instance: in, Egress: egress(in)})
 		})},
 		{requester.Kind, component.Typed(func(ctx context.Context, in component.Instance, spec v1alpha1.RequesterSpec) (*requester.Service, error) {
-			return requester.New(ctx, spec, requester.Deps{Instance: in, Credentials: creds, Egress: egress(in), OAuthCallbacks: c.oauthCallbacks})
+			return requester.New(ctx, spec, requester.Deps{Instance: in, Egress: egress(in), OAuthCallbacks: c.oauthCallbacks})
 		})},
 		{sshserver.Kind, component.Typed(func(_ context.Context, in component.Instance, spec v1alpha1.SshServerSpec) (*sshserver.Service, error) {
 			return sshserver.New(spec, sshserver.Deps{Instance: in, Hosts: hosts, TLS: tlsConfig})

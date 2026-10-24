@@ -1017,11 +1017,6 @@ func (in *BidderSpec) DeepCopyInto(out *BidderSpec) {
 		*out = new(commonv1alpha1.ObjectRef)
 		**out = **in
 	}
-	if in.PDSAccessToken != nil {
-		in, out := &in.PDSAccessToken, &out.PDSAccessToken
-		*out = new(commonv1alpha1.SecretRef)
-		(*in).DeepCopyInto(*out)
-	}
 	if in.PolicyEngineRef != nil {
 		in, out := &in.PolicyEngineRef, &out.PolicyEngineRef
 		*out = new(commonv1alpha1.ObjectRef)
@@ -8571,11 +8566,6 @@ func (in *RequesterSpec) DeepCopyInto(out *RequesterSpec) {
 		in, out := &in.PdsRef, &out.PdsRef
 		*out = new(commonv1alpha1.ObjectRef)
 		**out = **in
-	}
-	if in.PDSAccessToken != nil {
-		in, out := &in.PDSAccessToken, &out.PDSAccessToken
-		*out = new(commonv1alpha1.SecretRef)
-		(*in).DeepCopyInto(*out)
 	}
 	if in.MarketExposureRef != nil {
 		in, out := &in.MarketExposureRef, &out.MarketExposureRef

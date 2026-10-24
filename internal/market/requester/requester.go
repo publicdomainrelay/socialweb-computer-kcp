@@ -21,9 +21,9 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	atprotooauth "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauthclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/atprotorepo"
 	contractmarket "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/market"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/pds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/policy"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/vault"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
@@ -76,8 +76,6 @@ const (
 
 	DefaultComputeMem = "4G"
 
-	DefaultOAuthSessionFile = "oauth-session.json"
-
 	DefaultExposureWait = 60 * time.Second
 
 	IdentityWait = 60 * time.Second
@@ -126,8 +124,6 @@ type Config struct {
 
 	OAuthScopes []string
 
-	OAuthSession *oauthclient.SessionData
-
 	OwnerSessions map[string]sshtransport.OwnerSession
 
 	PolicyWorkflow string
@@ -170,9 +166,7 @@ type Deps struct {
 
 	Vault func(ctx context.Context, ref commonv1.SecretRef) (vault.KV, error)
 
-	Sessions oauthclient.SessionStore
-
-	SaveSessions bool
+	ServiceAuth func(ctx context.Context, identity commonv1.ObjectRef, did string) (pds.ServiceAuth, error)
 
 	Guests Guests
 
@@ -214,7 +208,7 @@ type Requester struct {
 
 	signer *market.Signer
 
-	oauth *oauthclient.Session
+	identityRef commonv1.ObjectRef
 
 	ownerServiceAuth ServiceAuthSource
 
@@ -289,10 +283,7 @@ func IdentityWorkspaces(workspace string) []string {
 	return workspaces
 }
 
-func Configure(ctx context.Context, spec v1alpha1.RequesterSpec, at Placement, sessions oauthclient.SessionStore, log *slog.Logger) (Config, error) {
-	if log == nil {
-		log = slog.New(slog.DiscardHandler)
-	}
+func Configure(spec v1alpha1.RequesterSpec, at Placement) (Config, error) {
 	at.Workspace = cmp.Or(at.Workspace, "root")
 	cfg := Config{Spec: spec, Placement: at, IdentityMode: IdentityModeLocal}
 	if spec.Identity != nil {
@@ -320,16 +311,6 @@ func Configure(ctx context.Context, spec v1alpha1.RequesterSpec, at Placement, s
 	}
 	if cfg.IdentityMode == IdentityModeOAuth {
 		cfg.RepoDID, cfg.MarketDID = cfg.DID, cfg.DID
-		if sessions != nil {
-			found, err := sessions.List(ctx)
-			if err != nil {
-				log.Warn("requester_could_not_read_the_oauth_session", "err", err)
-			} else if len(found) > 0 {
-				data := found[0]
-				cfg.OAuthSession = &data
-				cfg.DID, cfg.RepoDID, cfg.MarketDID = data.AccountDID, data.AccountDID, data.AccountDID
-			}
-		}
 	}
 	cfg.PolicyWorkflow = DefaultPolicyWorkflow
 	if spec.OwnerSessionsFile != "" {
@@ -397,8 +378,8 @@ func (c Config) check(publicOrigin string) error {
 		return fmt.Errorf("requester: oauth redirect uri %q is not an absolute http or https URL", c.OAuthRedirectURI)
 	case publicOrigin != "" && !participant.AbsoluteHTTPURL(publicOrigin):
 		return fmt.Errorf("requester: oauth public origin %q is not an absolute http or https URL", publicOrigin)
-	case c.stateFile(DefaultOAuthSessionFile) == "" && c.OAuthSession == nil:
-		return errors.New("requester: oauth identity mode needs a state dir or an OAuthSessionPath")
+	case c.Spec.Identity == nil || c.Spec.Identity.MarketIdentityRef == nil || strings.TrimSpace(c.Spec.Identity.MarketIdentityRef.Name) == "":
+		return errors.New("requester: oauth identity mode needs spec.identity.marketIdentityRef; its MarketIdentity holds the session")
 	}
 	return nil
 }
@@ -531,13 +512,9 @@ func (q *Requester) Start(ctx context.Context) error {
 		}
 	}
 	if q.cfg.IdentityMode == IdentityModeOAuth {
-		session, err := q.openOAuthSession(ctx)
-		if err != nil {
+		if err := q.resolveOAuthIdentity(ctx); err != nil {
 			return err
 		}
-		q.oauth = session
-		q.did, q.repoDID, q.marketDID = session.DID(), session.DID(), session.DID()
-		q.pdsURL = cmp.Or(q.pdsURL, session.HostURL())
 		q.log = q.deps.Log.With("component", "requester", "did", q.did)
 	}
 	if err := q.resolveIdentity(ctx); err != nil {
@@ -565,7 +542,7 @@ func (q *Requester) Start(ctx context.Context) error {
 	var serviceAuth ServiceAuthSource
 	switch {
 	case q.cfg.IdentityMode == IdentityModeOAuth:
-		serviceAuth = q.oauth
+		serviceAuth = q.oauthServiceAuth()
 	case !q.cfg.LocalSigner && q.ownerServiceAuth != nil:
 		serviceAuth = q.ownerServiceAuth
 	}

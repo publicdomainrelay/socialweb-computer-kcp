@@ -452,7 +452,7 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 	if plan.Local {
 		requesterSpec.PdsRef = compose.ComponentRefFor(compose.ComponentKindPds, compose.PdsComponent)
 	} else {
-		requesterSpec.PdsRef, requesterSpec.PdsDID, requesterSpec.PDSAccessToken = plan.PdsRef, plan.PdsDID, plan.AccessToken()
+		requesterSpec.PdsRef, requesterSpec.PdsDID = plan.PdsRef, plan.PdsDID
 	}
 	gatewayBase := compose.NewComponentSpec(compose.ComponentCRStateDir(stateRoot, compose.ComponentKindGatewayAPI, GatewayAPIComponent), network)
 	gatewayBase.TLS = tlsSpec
@@ -679,7 +679,9 @@ func (p *pass) run(ctx context.Context, plan compose.AccountPlan, id *v1alpha1.M
 			c.Log().Warn("the requester's existing-account repo", "root", r.Owner(), "err", err.Error())
 		}
 		repoLinks = append(repoLinks, compose.RepoWriteLink(p.self(compose.ComponentKindRequester, marketrequester.RequesterComponent),
-			compose.RepoRefIn(id.Status.Did, ws), compose.ScopeAll))
+			compose.RepoRefIn(id.Status.Did, ws), compose.ScopeAll),
+			compose.ServiceAuthLink(p.self(compose.ComponentKindRequester, marketrequester.RequesterComponent),
+				compose.AppRef(compose.KindMarketIdentity, marketrequester.RequesterIdentity, ws), id.Status.Did))
 		if err := c.ApplyLinks(ctx, r, "repo", repoLinks, ws); err != nil {
 			return ctlruntime.Result{}, err
 		}

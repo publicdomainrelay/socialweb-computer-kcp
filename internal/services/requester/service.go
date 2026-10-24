@@ -16,7 +16,6 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	sshcontract "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/ssh"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/participant"
 	role "github.com/johnandersen777/socialweb-computer-kcp/internal/market/requester"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/oauthcallback"
 )
@@ -27,8 +26,6 @@ const requestTimeout = role.DefaultHTTPTimeout
 
 type Deps struct {
 	component.Instance
-
-	Credentials component.CredentialResolver
 
 	Egress component.Egress
 
@@ -49,10 +46,6 @@ type Service struct {
 	trust *component.Trust
 
 	directory identity.Directory
-
-	sessions *participant.SessionStore
-
-	saveSessions bool
 
 	mu sync.Mutex
 
@@ -79,13 +72,8 @@ var (
 func New(ctx context.Context, spec v1alpha1.RequesterSpec, deps Deps) (*Service, error) {
 	log := cmp.Or(deps.Log, slog.New(slog.DiscardHandler))
 	s := &Service{spec: spec, deps: deps, log: log}
-	if ref := sessionCredential(spec); ref != nil && deps.Credentials != nil {
-		store := component.CredentialStore{Resolver: deps.Credentials, Ref: *ref}
-		s.sessions = &participant.SessionStore{Credentials: store, Merge: false}
-		s.saveSessions = store.Writable()
-	}
 	placement := role.Placement{Workspace: deps.Self.Workspace, Name: deps.Self.Name, UID: string(deps.UID), StateDir: deps.StateDir}
-	cfg, err := role.Configure(ctx, spec, placement, s.sessionStore(), log)
+	cfg, err := role.Configure(spec, placement)
 	if err != nil {
 		return nil, err
 	}

@@ -258,7 +258,6 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 	} else {
 		spec.PdsRef = plan.PdsRef
 		spec.PdsDID = plan.PdsDID
-		spec.PDSAccessToken = plan.AccessToken()
 	}
 	out = append(out, compose.Desired{Kind: compose.ComponentKindRequester, Name: RequesterComponent, Spec: spec})
 	out = append(out, compose.HTTPServiceExposures(ws, compose.ComponentKindRequester, RequesterComponent, "http", network, hostnames, false, true)...)
@@ -346,7 +345,8 @@ func (p *pass) account(ctx context.Context, plan compose.AccountPlan, id *v1alph
 	if err != nil {
 		c.Log().Warn("the existing-account repo", "root", r.Owner(), "err", err.Error())
 	}
-	repoLinks = append(repoLinks, compose.RepoWriteLink(p.self(), compose.RepoRefIn(id.Status.Did, ws), compose.ScopeAll))
+	repoLinks = append(repoLinks, compose.RepoWriteLink(p.self(), compose.RepoRefIn(id.Status.Did, ws), compose.ScopeAll),
+		compose.ServiceAuthLink(p.self(), compose.AppRef(compose.KindMarketIdentity, RequesterIdentity, ws), id.Status.Did))
 	repoLinks = append(repoLinks, compose.InfraLinks(ws, compose.RepoRefIn(id.Status.Did, ws))...)
 	if err := c.ApplyLinks(ctx, r, "repo", repoLinks); err != nil {
 		return ctlruntime.Result{}, err
