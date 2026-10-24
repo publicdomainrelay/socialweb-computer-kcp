@@ -161,8 +161,12 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, es *
 	ref.Workspace = ref.InWorkspace(req.Workspace)
 	c.index(key, ref, es.Name)
 	c.mu.Lock()
+	prior, held := c.sources[key]
 	c.sources[key] = sourceEntry{req: req, backend: ref}
 	c.mu.Unlock()
+	if !held || prior.backend != ref {
+		c.bus.NotifyBound(bus.Key{Workspace: req.Workspace, Kind: eventsv1.EventSourceKind, Name: es.Name})
+	}
 	generation := es.Generation
 	status := eventsv1.EventSourceStatus{ObservedGeneration: generation, Conditions: append([]metav1.Condition(nil), es.Status.Conditions...)}
 	bound := func(ok bool, reason, message string) {
@@ -211,7 +215,7 @@ func (c *Controller) open(ctx context.Context, to commonv1.ObjectRef, scope []st
 	entry, ok := c.sources[key]
 	c.mu.Unlock()
 	if !ok {
-		return nil, fmt.Errorf("%w: %s", ErrNotReady, to.String())
+		return nil, fmt.Errorf("%w: %s", ErrNotReconciled, to.String())
 	}
 	var live eventsv1.EventSource
 	if err := entry.req.Get(ctx, "", to.Name, &live); err != nil {

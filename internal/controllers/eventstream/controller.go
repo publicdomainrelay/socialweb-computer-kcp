@@ -22,6 +22,8 @@ import (
 	v1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/events"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/atprotorecordwatch"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/eventsource"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/events/delivery"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
@@ -44,9 +46,15 @@ const (
 
 	ReasonResolveFailed = "ResolveFailed"
 
+	ReasonSourceNotReady = "SourceNotReady"
+
+	ReasonSinkNotReady = "SinkNotReady"
+
 	ReasonSuspended = "Suspended"
 
 	statusTimeout = 10 * time.Second
+
+	boundQueue = 64
 )
 
 type Options struct {
@@ -76,9 +84,47 @@ type Controller struct {
 
 	streams map[string]*stream
 
-	bySource map[string]map[string]ctlruntime.Request
+	sources refIndex
 
-	sourceOf map[string]string
+	sinks refIndex
+
+	bound chan ctlruntime.Request
+}
+
+type refIndex struct {
+	by map[string]map[string]ctlruntime.Request
+
+	of map[string]string
+}
+
+func newRefIndex() refIndex {
+	return refIndex{by: map[string]map[string]ctlruntime.Request{}, of: map[string]string{}}
+}
+
+func (x refIndex) users(target string) []ctlruntime.Request {
+	out := make([]ctlruntime.Request, 0, len(x.by[target]))
+	for _, r := range x.by[target] {
+		out = append(out, r)
+	}
+	return out
+}
+
+func (x refIndex) set(streamKey, target string, req ctlruntime.Request) {
+	if prior, ok := x.of[streamKey]; ok {
+		delete(x.by[prior], streamKey)
+		if len(x.by[prior]) == 0 {
+			delete(x.by, prior)
+		}
+		delete(x.of, streamKey)
+	}
+	if target == "" {
+		return
+	}
+	if x.by[target] == nil {
+		x.by[target] = map[string]ctlruntime.Request{}
+	}
+	x.by[target][streamKey] = ctlruntime.Request{Cluster: req.Cluster, Namespace: req.Namespace, Name: req.Name}
+	x.of[streamKey] = target
 }
 
 func Register(ctx context.Context, m *ctlruntime.Manager, opts Options) (*Controller, error) {
@@ -88,8 +134,10 @@ func Register(ctx context.Context, m *ctlruntime.Manager, opts Options) (*Contro
 	}
 	root, cancel := context.WithCancel(ctx)
 	c := &Controller{bus: opts.Bus, cursors: opts.Cursors, flushDelay: opts.FlushDelay, log: log.With("component", "eventstream-controller"),
-		root: root, cancelRoot: cancel, streams: map[string]*stream{}, bySource: map[string]map[string]ctlruntime.Request{}, sourceOf: map[string]string{}}
-	err := ctlruntime.For[*eventsv1.EventStream](m, Name, c, ctlruntime.Export(Export), ctlruntime.Finalizer(Finalizer),
+		root: root, cancelRoot: cancel, streams: map[string]*stream{}, sources: newRefIndex(), sinks: newRefIndex(),
+		bound: make(chan ctlruntime.Request, boundQueue)}
+	c.wakeOnBind()
+	err := ctlruntime.For[*eventsv1.EventStream](m, Name, c, ctlruntime.Export(Export), ctlruntime.Finalizer(Finalizer), ctlruntime.Events(c.bound),
 		ctlruntime.Watches[*eventsv1.EventSource](func(_ context.Context, src ctlruntime.Request, _ *eventsv1.EventSource) []ctlruntime.Request {
 			return c.streamsOf(key(src.Workspace, src.Name))
 		}))
@@ -98,6 +146,24 @@ func Register(ctx context.Context, m *ctlruntime.Manager, opts Options) (*Contro
 		return nil, fmt.Errorf("eventstream: registering the EventStream controller: %w", err)
 	}
 	return c, nil
+}
+
+func (c *Controller) wakeOnBind() {
+	c.bus.Subscribe(func(k bus.Key) {
+		var reqs []ctlruntime.Request
+		switch k.Kind {
+		case eventsv1.EventSourceKind:
+			reqs = c.streamsOf(key(k.Workspace, k.Name))
+		case events.RecordWatchKind:
+			reqs = c.streamsTo(key(k.Workspace, k.Name))
+		}
+		for _, req := range reqs {
+			select {
+			case c.bound <- req:
+			default:
+			}
+		}
+	})
 }
 
 func (c *Controller) Run(ctx context.Context) error {
@@ -123,31 +189,25 @@ func key(workspace, name string) string {
 func (c *Controller) streamsOf(source string) []ctlruntime.Request {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	out := make([]ctlruntime.Request, 0, len(c.bySource[source]))
-	for _, r := range c.bySource[source] {
-		out = append(out, r)
-	}
-	return out
+	return c.sources.users(source)
+}
+
+func (c *Controller) streamsTo(sink string) []ctlruntime.Request {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.sinks.users(sink)
 }
 
 func (c *Controller) indexSource(streamKey, source string, req ctlruntime.Request) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if prior, ok := c.sourceOf[streamKey]; ok {
-		delete(c.bySource[prior], streamKey)
-		if len(c.bySource[prior]) == 0 {
-			delete(c.bySource, prior)
-		}
-		delete(c.sourceOf, streamKey)
-	}
-	if source == "" {
-		return
-	}
-	if c.bySource[source] == nil {
-		c.bySource[source] = map[string]ctlruntime.Request{}
-	}
-	c.bySource[source][streamKey] = ctlruntime.Request{Cluster: req.Cluster, Namespace: req.Namespace, Name: req.Name}
-	c.sourceOf[streamKey] = source
+	c.sources.set(streamKey, source, req)
+}
+
+func (c *Controller) indexSink(streamKey, sink string, req ctlruntime.Request) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.sinks.set(streamKey, sink, req)
 }
 
 func SourceRef(workspace string, ref commonv1.ObjectRef) commonv1.ObjectRef {
@@ -174,6 +234,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, es *
 	k := key(req.Workspace, es.Name)
 	if !es.DeletionTimestamp.IsZero() {
 		c.indexSource(k, "", req)
+		c.indexSink(k, "", req)
 		c.stop(k, false)
 		return ctlruntime.Result{}, nil
 	}
@@ -227,11 +288,22 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, es *
 	self := commonv1.ObjectRef{Group: eventsv1.GroupName, Kind: "EventStream", Name: es.Name, Workspace: req.Workspace}
 	filter := events.Filter{Collections: es.Spec.Filter.Collections, DIDs: es.Spec.Filter.DIDs}
 	source, err := bus.Resolve[events.Source](ctx, c.bus, self, src, bus.Capability{Name: events.CapabilitySubscribe, Scope: filter.Scope()})
+	if errors.Is(err, eventsource.ErrNotReconciled) {
+		c.log.Info("an EventStream waits for its EventSource", "workspace", req.Workspace, "name", es.Name, "err", err.Error())
+		return ctlruntime.Result{}, c.applyStatus(ctx, req, es, eventsv1.EventStreamPhasePending, false, false, ReasonSourceNotReady,
+			"the EventSource "+src.String()+" is not reconciled yet")
+	}
 	if err != nil {
 		return ctlruntime.Result{}, errors.Join(err, c.applyStatus(ctx, req, es, eventsv1.EventStreamPhaseFailed, false, true, ReasonResolveFailed,
 			"resolving the EventSource "+src.String()+": "+err.Error()))
 	}
+	c.indexSink(k, key(sinkRef.Workspace, sinkRef.Name), req)
 	sink, err := bus.Resolve[events.Sink](ctx, c.bus, self, sinkRef, bus.Capability{Name: events.CapabilityDeliver, Scope: []string{sinkRef.Name}})
+	if errors.Is(err, atprotorecordwatch.ErrNotReconciled) {
+		c.log.Info("an EventStream waits for its sink", "workspace", req.Workspace, "name", es.Name, "err", err.Error())
+		return ctlruntime.Result{}, c.applyStatus(ctx, req, es, eventsv1.EventStreamPhasePending, false, false, ReasonSinkNotReady,
+			"the sink "+sinkRef.String()+" is not reconciled yet")
+	}
 	if err != nil {
 		return ctlruntime.Result{}, errors.Join(err, c.applyStatus(ctx, req, es, eventsv1.EventStreamPhaseFailed, false, true, ReasonResolveFailed,
 			"resolving the sink "+sinkRef.String()+": "+err.Error()))

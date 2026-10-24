@@ -42,6 +42,8 @@ const (
 
 var ErrNotReady = errors.New("eventsource: the source is not reconciled yet")
 
+var ErrNotReconciled = fmt.Errorf("%w", ErrNotReady)
+
 type Upstream struct {
 	Address string
 

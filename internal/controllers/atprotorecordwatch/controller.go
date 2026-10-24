@@ -56,6 +56,8 @@ const (
 	requestQueue = 256
 )
 
+var ErrNotReconciled = fmt.Errorf("%w", bus.ErrNoProvider)
+
 type Children interface {
 	ApplyEventStream(ctx context.Context, workspace string, obj *eventsv1.EventStream) error
 
@@ -203,7 +205,7 @@ func (c *Controller) open(_ context.Context, to commonv1.ObjectRef, _ []string) 
 	defer c.mu.Unlock()
 	w := c.watches[binding.Key(to.Workspace, to.Name)]
 	if w == nil {
-		return nil, fmt.Errorf("%w: the AtprotoRecordWatch %s is not reconciled", bus.ErrNoProvider, to.String())
+		return nil, fmt.Errorf("%w: the AtprotoRecordWatch %s is not reconciled", ErrNotReconciled, to.String())
 	}
 	return w.sink, nil
 }
@@ -231,9 +233,9 @@ func (c *Controller) users(workspace, kind, name string) []ctlruntime.Request {
 func (c *Controller) bind(req ctlruntime.Request, obj *v1alpha1.AtprotoRecordWatch) *watch {
 	key := binding.Key(req.Workspace, req.Name)
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	w := c.watches[key]
-	if w == nil {
+	created := w == nil
+	if created {
 		w = &watch{name: req.Name, cluster: req.Cluster}
 		w.sink = c.backend.NewSink(req.Name, func() ([]eventstream.Match, bool) {
 			c.mu.Lock()
@@ -255,6 +257,10 @@ func (c *Controller) bind(req ctlruntime.Request, obj *v1alpha1.AtprotoRecordWat
 		w.matches, w.matched = nil, false
 		w.verifiedGeneration, w.verifyAt = 0, time.Time{}
 		w.sink.Take()
+	}
+	c.mu.Unlock()
+	if created {
+		c.bus.NotifyBound(bus.Key{Workspace: req.Workspace, Kind: Kind, Name: req.Name})
 	}
 	return w
 }
