@@ -4264,7 +4264,9 @@ fail, rather than the code read against this document alone.
   build is reproducible and the pins rarely move. The image now lives at
   `guest-images/<target>/<sha256 of the pinned image.json>/`; `image.json` names the sha256 of the
   kernel and the rootfs, so its own sha256 names the whole image. The `guest-image` job reads that key
-  without credentials: present, it fetches the three files and checks each against its pin, and neither
+  without credentials: present, it fetches the three files, checks each against its pin and checks the
+  input sha256s the published `image.json` records (kernel source, base, kernel config, builder
+  Dockerfile, `deploy/guest-image/rootfs.json`) against the tree, and neither
   builds nor hands publish an artifact; absent, or when a fetch or a hash fails, it builds as before and
   publish uploads to the key with `publish-spaces.ts --content-addressed`, which writes only what the key
   does not already hold. `guestimagerelease.Source` tries the key first and keeps `releases/<version>`,
