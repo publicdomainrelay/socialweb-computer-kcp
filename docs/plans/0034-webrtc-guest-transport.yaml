@@ -222,17 +222,25 @@ items:
     title: "The bidder injects the guest binary install module"
     depends_on: [W2-BIDDER-DOWNLOADS]
     decision: >
-      guestseed gains GuestBinariesModule(issuer, pins): one setup unit per binary at the front of
-      runcmd, fetching <issuer>/v1/downloads/<sha>/<name>, verifying sha256 and installing to
-      /usr/local/bin. The bidder adds it when the contract has any tunnel (opentunnel for
-      transport opentunnel, socialweb-guest-agent for transport webrtc) and drops the requester's
-      internet pins: the requester's tunnel module carries only tunnel config.
+      W2-BIDDER-DOWNLOADS found that the did:key ingress cannot carry binaries: the relay wraps a
+      response body as a JSON string (non-UTF-8 bytes become U+FFFD, headers drop) and frames are
+      capped at 8 MB (opentunnel overflows and drops the subscriber). Guests run on the bidder's
+      own host and already reach its loopback at guestnet.HostAddress 192.0.2.1 (pasta
+      --map-host-loopback), so downloads go there: a local Exposure of the GuestControlPlane
+      download handler on a PortRegistry loopback lease, and the guest fetches
+      http://192.0.2.1:<port>/v1/downloads/<sha>/<name>; sha256 is the integrity check.
+      guestseed gains GuestBinariesModule(base, pins): setup-guest-binaries.service, a oneshot at the
+      front of runcmd that fetches each binary, verifies sha256 and installs to /usr/local/bin. The
+      bidder adds it when the contract has any tunnel (opentunnel for transport opentunnel,
+      socialweb-guest-agent plus socialweb-guest-agent.service, ConditionPathExists
+      /etc/socialweb-guest-agent/tunnels.json, for transport webrtc). The requester's tunnel module
+      carries only config (W4).
     files:
       - internal/guestseed/userdata.go
       - internal/market/bidder/provision.go
-      - internal/atproto/cloudinit/tunnels.go
-      - internal/market/requester/tunnels.go
-    done_when: "A tunnel contract's rendered user_data fetches only from the bidder issuer; the guest's journal shows each binary installed with its sha256."
+      - internal/services/guestcontrolplane/
+      - internal/app/compose/ (the downloads Exposure)
+    done_when: "A tunnel contract's rendered user_data fetches only from http://192.0.2.1:<port>/v1/downloads; the guest's journal shows each binary installed with its sha256."
     status: todo
 
   - id: W2-GUEST-EVENTS-OUT
@@ -370,7 +378,7 @@ items:
   - id: ACC34-DOWNLOADS
     title: "Guests install from the bidder only"
     depends_on: [W2-BIDDER-INSTALL-MODULE]
-    done_when: "A webrtc contract guest installs socialweb-guest-agent and an https contract guest installs opentunnel from <issuer>/v1/downloads; the guest makes no request to github.com or ghcr.io (journal and bidder logs)."
+    done_when: "A webrtc contract guest installs socialweb-guest-agent and an https contract guest installs opentunnel from http://192.0.2.1:<port>/v1/downloads; the guest makes no request to github.com or ghcr.io (journal and bidder logs)."
     status: todo
 
   - id: ACC34-HANDSHAKE
