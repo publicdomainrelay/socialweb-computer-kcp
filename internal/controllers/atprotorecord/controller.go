@@ -33,6 +33,8 @@ const (
 
 	RepoKind = "AtprotoRepo"
 
+	boundQueue = 64
+
 	MarketIdentityKind = "MarketIdentity"
 
 	RecordWatchKind = "AtprotoRecordWatch"
@@ -72,6 +74,8 @@ type Controller struct {
 	log *slog.Logger
 
 	repos *binding.Table[commonv1.ObjectRef]
+
+	bound chan ctlruntime.Request
 }
 
 func New(opts Options) *Controller {
@@ -80,7 +84,21 @@ func New(opts Options) *Controller {
 		log = slog.New(slog.DiscardHandler)
 	}
 	return &Controller{bus: opts.Bus, dynamic: opts.Dynamic, log: log.With("component", "atprotorecord-controller"),
-		repos: binding.New[commonv1.ObjectRef]()}
+		repos: binding.New[commonv1.ObjectRef](), bound: make(chan ctlruntime.Request, boundQueue)}
+}
+
+func (c *Controller) wakeOnBind() {
+	c.bus.Subscribe(func(key bus.Key) {
+		if key.Kind != RepoKind {
+			return
+		}
+		for _, req := range c.users(key.Workspace, RepoKind, key.Name) {
+			select {
+			case c.bound <- req:
+			default:
+			}
+		}
+	})
 }
 
 func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
@@ -88,7 +106,8 @@ func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
 		return nil, err
 	}
 	ctl := New(opts)
-	options := []ctlruntime.Option{ctlruntime.Export(Export),
+	ctl.wakeOnBind()
+	options := []ctlruntime.Option{ctlruntime.Export(Export), ctlruntime.Events(ctl.bound),
 		ctlruntime.Finalizer(v1alpha1.FinalizerAtprotoRecord),
 		ctlruntime.WatchesIn(RepoExport, func(_ context.Context, src ctlruntime.Request, obj *v1alpha1.AtprotoRepo) []ctlruntime.Request {
 			return ctl.users(src.Workspace, RepoKind, obj.Name)

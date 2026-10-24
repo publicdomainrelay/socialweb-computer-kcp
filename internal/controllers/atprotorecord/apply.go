@@ -105,6 +105,9 @@ func Apply(ctx context.Context, repo atprotorepo.Repo, object *v1alpha1.AtprotoR
 	}
 	held, err := repo.GetRecord(ctx, did, collection, rkey)
 	absent := errors.Is(err, atprotorepo.ErrNotFound)
+	if errors.Is(err, atprotorepo.ErrNotBound) {
+		return failed(object, ReasonRepoNotReady, err), nil
+	}
 	if err != nil && !absent {
 		return failed(object, "ObserveFailed", err), err
 	}
