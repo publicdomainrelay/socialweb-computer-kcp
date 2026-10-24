@@ -4345,6 +4345,43 @@ fail, rather than the code read against this document alone.
   runs again; a root waits for the bidder's release answer, not for the guest's stop, so a ComputeVM can
   outlive the root by its graceful stop.
 
+- **One live atproto session per account, owned by the MarketIdentity controller (plan 0030,
+  2026-10-24).** The bobvmbuilder oauthQr bidder on hat-7 lost its OAuth session at
+  2026-10-24T03:19:38Z (invalid_grant "Invalid refresh token"). The session secret at the
+  MarketIdentity `spec.sessionRef` had five readers that each built their own live
+  `oauthclient.Session` and could refresh and save it: the MarketIdentity controller (a new Open on
+  every reconcile), the RemoteRepo credentials provider (a second Open in the same core), the Bidder
+  (`spec.pdsAccessToken`), the RemotePDS (compose copied the ref into `spec.auth`) and the Requester
+  (`spec.pdsAccessToken`, or `oauth-session.json`). The refresh token rotates on every refresh, so a
+  copy holding a spent token that saved its data put the spent token back. Now
+  `internal/marketidentity/atproto.Accounts` holds one `internal/pds/identity.Authenticator` per
+  MarketIdentity; a reconcile, a sign-in and every bus resolver use that one session, and only it
+  refreshes (`oauth_session_refreshed`, did and session id, no token). The controller provides
+  `pds.Authenticator` (`pds.session`) and `pds.ServiceAuth` (`pds.serviceauth`) on MarketIdentity;
+  the RemoteRepo signs its PDS requests through the first, the Bidder and the Requester mint service
+  auth through the second (`participant.PDSServiceAuth`), each admitted by a ComponentLink its root
+  composes. `pdsAccessToken` left the Bidder and Requester specs, RemotePDS `spec.auth` holds no
+  identity session, and the per-process reload of e671cd9e went with the copies. The stored format did
+  not change. The gateway web app session was not a copy: openbao-plugin-auth-atproto holds it and is
+  its only refresher. Three defects of the market network surfaced in the live run and were fixed: the
+  ingress tunnel dropped every response header but Content-Type (an OAuth token request never saw its
+  DPoP nonce), the in-tree resource server checked DPoP proofs only against its issuer URL (a client on
+  the PDS's loopback listener always got invalid_dpop_proof), and the MarketIdentity controller used a
+  bare HTTP client that could not reach an authorization server behind the network ingress.
+  Readings (market network oauth30, `--bidders 0`, bob's PDS `spec.oauth.accessTokenTTLSeconds` 60, a
+  bidder outside the network by `run bidder --market-network-file` in mode oauthBrowser for an account
+  on bob's PDS, signed in by a scripted POST to `/oauth/authorize` with an atproto localhost client_id
+  because the PDS cannot fetch metadata behind the network ingress, UTC 2026-10-24): signed in 04:59:15;
+  `oauth_session_refreshed` every 30 s from 04:59:45, one line per rotation, every line from the
+  marketidentity-controller, no invalid_grant or SessionExpired; the offering was written at 04:59:18;
+  `run request --network oauth30 --hold` got the oauth bidder's bid and accept at 05:07:54, the receipt
+  at 05:08:11 and Held at 05:08:13; `run request release` reached Released at 05:08:51 and the bidder
+  deleted the guest the same second. An earlier run logged 26 refreshes, two of its bidder core restarts
+  reopening the one stored session, with no invalid_grant. The Bidder and Requester specs
+  carry no `pdsAccessToken`, the composed RemotePDS has an empty `spec.auth`, and the only ComponentLinks
+  to the MarketIdentity are the Bidder's `pds.serviceauth` and the RemoteRepo's `pds.session`. The
+  bidder's OpenBao has no audit device, so who reads the path is shown by code, not by an audit log.
+
 - **The guest image is published once, under the key of its pins, on 2026-10-23.** Every tag and
   `main` push rebuilt `firecracker-x86_64` from source (about 15 minutes of the `guest-image` job) and
   uploaded the same 1.5 GiB rootfs again under `releases/<version>` or `main/<commit>`, although the
