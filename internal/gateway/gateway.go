@@ -267,6 +267,12 @@ func (s *Server) ControlPlaneUp(ctx context.Context, caller Caller, req NameRequ
 		return ClusterView{}, ErrClusterDraining
 	case "Initializing":
 		return ClusterView{}, ErrClusterInitializing
+	case "Unavailable":
+		if view.Running {
+			if _, err := s.Store.SetRunning(ctx, caller, req.Name, false); err != nil {
+				return ClusterView{}, err
+			}
+		}
 	}
 	return s.Store.SetRunning(ctx, caller, req.Name, true)
 }
