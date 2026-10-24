@@ -35,6 +35,40 @@ type manifestShape struct {
 	Guest      GuestImageSet        `json:"guestImages"`
 	KcpCompat  []KcpCompat          `json:"kcpCompat"`
 	VMStop     VMStop               `json:"vmStop"`
+	Downloads  GuestDownloadSet     `json:"guestDownloads"`
+}
+
+type GuestDownloadSet struct {
+	Note  string                   `json:"note"`
+	Files map[string]GuestDownload `json:"files"`
+}
+
+type GuestDownload struct {
+	Version string                        `json:"version"`
+	Source  string                        `json:"source"`
+	Verify  string                        `json:"verify"`
+	Fetch   map[string]GuestDownloadFetch `json:"fetch"`
+}
+
+type GuestDownloadFetch struct {
+	Kind       string `json:"kind"`
+	Registry   string `json:"registry"`
+	Repository string `json:"repository"`
+	SHA256     string `json:"sha256"`
+	Bytes      int64  `json:"bytes"`
+	Member     string `json:"member"`
+}
+
+func GuestDownloadPins(name string) (GuestDownload, error) {
+	m, err := load()
+	if err != nil {
+		return GuestDownload{}, err
+	}
+	d, ok := m.Downloads.Files[name]
+	if !ok || len(d.Fetch) == 0 {
+		return GuestDownload{}, fmt.Errorf("versions: no guest download %s", name)
+	}
+	return d, nil
 }
 
 type VMStop struct {
@@ -136,7 +170,22 @@ type Asset struct {
 }
 
 type AssetFetch struct {
-	SHA256 string `json:"sha256"`
+	URL     string            `json:"url,omitempty"`
+	SHA256  string            `json:"sha256"`
+	Archive string            `json:"archive,omitempty"`
+	Members map[string]string `json:"members,omitempty"`
+}
+
+func AssetFetches(asset string) (map[string]AssetFetch, error) {
+	m, err := load()
+	if err != nil {
+		return nil, err
+	}
+	a, ok := m.Assets[asset]
+	if !ok || len(a.Fetch) == 0 {
+		return nil, fmt.Errorf("versions: no fetch pins for asset %s", asset)
+	}
+	return a.Fetch, nil
 }
 
 func FetchSHA256(asset, platform string) (string, error) {
