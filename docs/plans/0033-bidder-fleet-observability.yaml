@@ -117,6 +117,18 @@ learnings:
       on a core restart. A fleet view should show per bid: published, delivered (or the last delivery
       error and attempt count), accepted; a bid published but undelivered for more than the bid window
       is the signal that a requester cannot be reached.
+  - id: L12-BROWSER-REQUESTER-END-TO-END
+    text: >
+      Run 12 (2026-10-24, alice in a browser-hosted kcp, Bidders=local, spec.tunnels wootty) passed
+      end to end on rc101 bidders: click 09:51:35Z, discovery from the contract's bidderDids 16 s,
+      bid in the tab 17 s, accept 20 s, receipt verified 30 s, secrets fetched 36 s, iroh onNetwork
+      38 s, Held 40 s; the tagged wootty onNetwork came 72 s after the iroh one (opentunnel bring-up
+      in the guest, the longest step), the shell answered uname/id/hostname as root, and release
+      took 3 s with nothing left on the host. Runs 10 and 11 had failed on OAuth scopes: bsky.social
+      asks for the update action on every putRecord, so a requester scope must grant create and
+      update on each collection it writes at a fixed rkey (fixed ca681018, 5f31bd25). A fleet view
+      should keep per contract these step times; a step that is suddenly slower on one host (the
+      tunnel step above all) is the first sign of trouble there.
 items:
   - id: F1-INVENTORY
     title: "A fleet inventory object: which bidders exist, where, on which version"
