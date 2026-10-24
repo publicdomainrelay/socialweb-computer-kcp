@@ -108,15 +108,11 @@ func OAuthReceiveOnly(mode v1alpha1.MarketIdentityMode) bool {
 	return false
 }
 
-func rootSources(in SourceInput) []rootSource {
-	if in.Network != nil {
-		if relay := in.Network.RelayURL(); relay != "" {
+func watchSources(network *v1alpha1.MarketNetworkValue) []rootSource {
+	if network != nil {
+		if relay := network.RelayURL(); relay != "" {
 			return []rootSource{{Name: NetworkRelaySourceName, Relay: &eventsv1alpha1.RelayEventSourceSpec{URL: relay}}}
 		}
-	}
-	if did := strings.TrimSpace(in.LocalDID); did != "" {
-		return []rootSource{{Name: LocalRepoSourceName, Pds: &eventsv1alpha1.PdsEventSourceSpec{
-			RepoRef: commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: KindAtprotoRepo, Name: atprotorepo.RepoName(did)}}}}
 	}
 	return []rootSource{
 		{Name: JetstreamEastSourceName, Jetstream: &eventsv1alpha1.JetstreamEventSourceSpec{URL: PublicJetstreamEastURL}},
@@ -124,9 +120,18 @@ func rootSources(in SourceInput) []rootSource {
 	}
 }
 
+func rootSources(in SourceInput) []rootSource {
+	out := watchSources(in.Network)
+	if did := strings.TrimSpace(in.LocalDID); did != "" {
+		out = append(out, rootSource{Name: LocalRepoSourceName, Pds: &eventsv1alpha1.PdsEventSourceSpec{
+			RepoRef: commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: KindAtprotoRepo, Name: atprotorepo.RepoName(did)}}})
+	}
+	return out
+}
+
 func WatchEventSources(in SourceInput) []commonv1.ObjectRef {
 	var out []commonv1.ObjectRef
-	for _, s := range rootSources(in) {
+	for _, s := range watchSources(in.Network) {
 		out = append(out, EventSourceRef(s.Name))
 	}
 	return out
