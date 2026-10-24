@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterprovider"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/materialiser"
 )
 
 const (
@@ -50,6 +52,7 @@ func (p *Provider) deleteDone(key string) {
 	p.busyMu.Lock()
 	defer p.busyMu.Unlock()
 	delete(p.deletes, key)
+	delete(p.draining, key)
 }
 
 func (p *Provider) deleteFailed(key string) (attempts int, since, next time.Time) {
@@ -75,9 +78,61 @@ func (p *Provider) deleteFailed(key string) (attempts int, since, next time.Time
 	return b.attempts, b.since, b.next
 }
 
+func (p *Provider) drainSince(key string) time.Time {
+	p.busyMu.Lock()
+	defer p.busyMu.Unlock()
+	if p.draining == nil {
+		p.draining = map[string]time.Time{}
+	}
+	since, ok := p.draining[key]
+	if !ok {
+		since = time.Now()
+		p.draining[key] = since
+	}
+	return since
+}
+
+func (p *Provider) drain(ctx context.Context, ref clusterprovider.Ref, key string, cl *v1alpha1.Cluster) (time.Duration, error) {
+	since := p.drainSince(key)
+	left := time.Until(since.Add(materialiser.PathGateGrace))
+	st := cl.Status
+	conds := append([]metav1.Condition(nil), st.Conditions...)
+	st.Phase = v1alpha1.ClusterDraining
+	meta.SetStatusCondition(&conds, metav1.Condition{
+		Type:               materialiser.ConditionReady,
+		Status:             metav1.ConditionFalse,
+		Reason:             materialiser.ReasonDraining,
+		Message:            "the cluster is being deleted; the front admits no tenant request and the members are reaped after the path gate grace",
+		ObservedGeneration: cl.Generation,
+	})
+	if left <= 0 {
+		meta.SetStatusCondition(&conds, metav1.Condition{
+			Type:               v1alpha1.ConditionTenantPathShut,
+			Status:             metav1.ConditionTrue,
+			Reason:             materialiser.ReasonDraining,
+			Message:            fmt.Sprintf("the front has admitted no tenant request since %s", since.UTC().Format(time.RFC3339Nano)),
+			ObservedGeneration: cl.Generation,
+		})
+	}
+	st.Conditions = conds
+	if !equality.Semantic.DeepEqual(st, cl.Status) {
+		if err := p.registry.WriteStatus(ctx, ref, st); err != nil {
+			return 0, err
+		}
+	}
+	if left > 0 {
+		p.log.Info("cluster provider: this cluster is being deleted; its tenant path is shut and its group is reaped after the path gate grace",
+			"cluster", ref.Name, "key", key, "home", ref.Home, "reapIn", left.String())
+	}
+	return max(left, 0), nil
+}
+
 func (p *Provider) teardown(ctx context.Context, ref clusterprovider.Ref, key string, cl *v1alpha1.Cluster) (time.Duration, error) {
 	if !p.deleteDue(key) {
 		return until(p.deleteNext(key)), nil
+	}
+	if wait, err := p.drain(ctx, ref, key, cl); err != nil || wait > 0 {
+		return wait, err
 	}
 	p.log.Info("cluster provider: this cluster is being deleted, so its group is reaped and its store removed",
 		"cluster", ref.Name, "key", key, "home", ref.Home)

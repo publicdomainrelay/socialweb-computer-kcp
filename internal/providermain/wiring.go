@@ -117,6 +117,9 @@ type Provider struct {
 
 	busyMu  sync.Mutex
 	deletes map[string]*deleteBackoff
+
+	draining map[string]time.Time
+
 	bringUp chan struct{}
 }
 
@@ -385,6 +388,7 @@ func (p *Provider) Gone(ctx context.Context, ref clusterprovider.Ref) {
 			p.tenants.stop(key)
 		}
 		p.provider.ForgetAddOns(key)
+		p.deleteDone(key)
 	}
 	p.log.Info("cluster provider: the Cluster CR is gone", "cluster", ref.Name, "home", ref.Home, "key", key)
 	p.reclaimAll(ctx)
