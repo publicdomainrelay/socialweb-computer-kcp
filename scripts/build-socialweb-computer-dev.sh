@@ -58,6 +58,7 @@ export TMPDIR="$build_root/tmp"
 export GOTMPDIR="$build_root/tmp"
 export GOMODCACHE="$cache/gomod"
 export GOCACHE="$cache/gocache"
+export GUEST_DOWNLOADS_CACHE="$cache/assets"
 export GOFLAGS=-mod=readonly
 export CGO_ENABLED=0
 unset GOOS GOARCH GOPATH GOROOT SOURCE_DATE_EPOCH

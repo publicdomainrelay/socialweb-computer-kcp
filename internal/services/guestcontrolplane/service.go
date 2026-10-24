@@ -22,6 +22,7 @@ import (
 	guestplane "github.com/johnandersen777/socialweb-computer-kcp/internal/guestcp/openbao"
 	guestrelay "github.com/johnandersen777/socialweb-computer-kcp/internal/guestcp/relay"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/kcp"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/pinneddownloads"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 )
 
@@ -39,6 +40,8 @@ type Service struct {
 	grantSync time.Duration
 
 	issuerRetry time.Duration
+
+	downloads *pinneddownloads.Set
 
 	mu sync.Mutex
 
@@ -212,7 +215,7 @@ func (s *Service) prepare(ctx context.Context) error {
 		s.log.Warn("the guest relay did not start", "err", err)
 	}
 	s.log.Info("the guest control plane serves guests", "handler", s.logicalURL(), "handle", s.handle(),
-		"issuer", plane.IssuerURL(), "mount", s.spec.GuestLoginMount)
+		"issuer", plane.IssuerURL(), "mount", s.spec.GuestLoginMount, "downloads", len(s.downloads.List()))
 	return nil
 }
 

@@ -15,7 +15,7 @@ build:
 	scripts/build-socialweb-computer.sh --update-pins $(PLATFORM_FLAGS) --build-root "$(BUILD_ROOT)"
 
 pins:
-	MESHD_CACHE="$(BUILD_ROOT)/cache/meshd" scripts/stage-assets.sh --update-pins $(PLATFORM_FLAGS) $(ASSET_FLAGS) --cache "$(BUILD_ROOT)/cache/assets" --blob-cache "$(BUILD_ROOT)/cache/blobs"
+	MESHD_CACHE="$(BUILD_ROOT)/cache/meshd" GUEST_DOWNLOADS_CACHE="$(BUILD_ROOT)/cache/assets" scripts/stage-assets.sh --update-pins $(PLATFORM_FLAGS) $(ASSET_FLAGS) --cache "$(BUILD_ROOT)/cache/assets" --blob-cache "$(BUILD_ROOT)/cache/blobs"
 
 check-pins: pins
 	git diff --exit-code -- internal/versions/versions.json

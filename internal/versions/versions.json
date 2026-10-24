@@ -53,12 +53,12 @@
     "linux/amd64": {
       "status": "release",
       "owner": "plan 0006 M1-ASSETS",
-            "assets": ["bao", "deno", "dumbpipe", "external-secrets", "external-secrets-bundle", "firecracker", "k3s", "kcp", "kine", "openbao-plugin-auth-atproto", "openbao-plugin-auth-sshsig", "opentunnel", "pasta", "postgres", "socialweb-computer-k8s-downloads", "socialweb-vmexec", "swc-userns-stage"]
+            "assets": ["bao", "deno", "dumbpipe", "external-secrets", "external-secrets-bundle", "firecracker", "k3s", "kcp", "kine", "openbao-plugin-auth-atproto", "openbao-plugin-auth-sshsig", "opentunnel", "pasta", "postgres", "socialweb-computer-k8s-downloads", "socialweb-guest-downloads", "socialweb-vmexec", "swc-userns-stage"]
     },
     "linux/arm64": {
       "status": "release",
       "owner": "plan 0006 M1-ASSETS",
-            "assets": ["bao", "deno", "dumbpipe", "external-secrets", "external-secrets-bundle", "firecracker", "k3s", "kcp", "kine", "openbao-plugin-auth-atproto", "openbao-plugin-auth-sshsig", "opentunnel", "pasta", "postgres", "socialweb-computer-k8s-downloads", "socialweb-vmexec"]
+            "assets": ["bao", "deno", "dumbpipe", "external-secrets", "external-secrets-bundle", "firecracker", "k3s", "kcp", "kine", "openbao-plugin-auth-atproto", "openbao-plugin-auth-sshsig", "opentunnel", "pasta", "postgres", "socialweb-computer-k8s-downloads", "socialweb-guest-downloads", "socialweb-vmexec"]
     },
     "darwin/arm64": {"status": "seam", "owner": "plan 0012", "note": "seam: builds and vets, owned by plan 0012; vfkit is pinned, the other assets follow with the plan's M1 and M2 items", "assets": ["vfkit"]},
     "darwin/amd64": {"status": "seam", "owner": "plan 0012", "note": "seam: builds and vets, no assets, owned by plan 0012", "assets": []},
@@ -385,6 +385,20 @@
       "platforms": {
         "linux/amd64": {"treeSha256": "156ac020d8687ec9c4c330044bc05ab5541814f09ac917be830261826b846a4f", "rawBytes": 40513936, "zstdBytes": 12281273},
         "linux/arm64": {"treeSha256": "156ac020d8687ec9c4c330044bc05ab5541814f09ac917be830261826b846a4f", "rawBytes": 40513936, "zstdBytes": 12281273}
+      }
+    },
+    "socialweb-guest-downloads": {
+      "version": "this module",
+      "source": "the pinned downloads a bidder's GuestControlPlane serves at /v1/downloads/<sha256>/<name> (plan 0034 D11), built by scripts/build-guest-downloads.sh: opentunnel-x86_64 and opentunnel-aarch64, the opentunnel member of the assets.opentunnel release tarballs (each tarball checked against its fetch sha256 pin before tar extracts the member), and socialweb-guest-agent-x86_64 and socialweb-guest-agent-aarch64 by go build from cmd/socialweb-guest-agent for linux with CGO disabled, each with a sha256sum-format <name>.sha256 sidecar; the same tree on every platform, since the guests are not the bidder's platform",
+      "verify": "rebuilt from this commit; the unpacked tree must equal the treeSha256 pin, so a change to cmd/socialweb-guest-agent or to the assets.opentunnel pins re-pins it; the GuestControlPlane refuses a sidecar that does not hash its file",
+      "executables": {"socialweb-guest-downloads": "."},
+      "fetch": {
+        "linux/amd64": {"kind": "script", "script": "scripts/build-guest-downloads.sh", "members": {"opentunnel-x86_64": "opentunnel-x86_64", "opentunnel-x86_64.sha256": "opentunnel-x86_64.sha256", "opentunnel-aarch64": "opentunnel-aarch64", "opentunnel-aarch64.sha256": "opentunnel-aarch64.sha256", "socialweb-guest-agent-x86_64": "socialweb-guest-agent-x86_64", "socialweb-guest-agent-x86_64.sha256": "socialweb-guest-agent-x86_64.sha256", "socialweb-guest-agent-aarch64": "socialweb-guest-agent-aarch64", "socialweb-guest-agent-aarch64.sha256": "socialweb-guest-agent-aarch64.sha256"}},
+        "linux/arm64": {"kind": "script", "script": "scripts/build-guest-downloads.sh", "members": {"opentunnel-x86_64": "opentunnel-x86_64", "opentunnel-x86_64.sha256": "opentunnel-x86_64.sha256", "opentunnel-aarch64": "opentunnel-aarch64", "opentunnel-aarch64.sha256": "opentunnel-aarch64.sha256", "socialweb-guest-agent-x86_64": "socialweb-guest-agent-x86_64", "socialweb-guest-agent-x86_64.sha256": "socialweb-guest-agent-x86_64.sha256", "socialweb-guest-agent-aarch64": "socialweb-guest-agent-aarch64", "socialweb-guest-agent-aarch64.sha256": "socialweb-guest-agent-aarch64.sha256"}}
+      },
+      "platforms": {
+        "linux/amd64": {"treeSha256": "9b25df321daed1f3f53c576e862c53970dca718c97ce1d6e7afb89969648ba72", "rawBytes": 15463700, "zstdBytes": 5691981},
+        "linux/arm64": {"treeSha256": "9b25df321daed1f3f53c576e862c53970dca718c97ce1d6e7afb89969648ba72", "rawBytes": 15463700, "zstdBytes": 5691981}
       }
     }
   },

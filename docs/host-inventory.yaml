@@ -388,6 +388,13 @@ entries:
     why: two sha256-pinned builds (x86_64, aarch64) the door serves to market nodes
     from:
       - "versions.json asset socialweb-computer-k8s-downloads (scripts/build-web-app-downloads.sh)"
+  - name: socialweb-guest-agent
+    kind: executable
+    fate: download-asset
+    owner: 0034 W2-BIDDER-DOWNLOADS
+    why: two sha256-pinned builds (x86_64, aarch64), with the opentunnel binaries, that a bidder's GuestControlPlane serves to its guests at /v1/downloads
+    from:
+      - "versions.json asset socialweb-guest-downloads (scripts/build-guest-downloads.sh)"
   - name: socialweb-nodeinit
     kind: executable
     fate: removed-legacy

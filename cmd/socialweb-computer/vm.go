@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/marketbidder"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/assets"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clicfg"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
@@ -114,7 +115,29 @@ func (a *app) devVMExecutables(vals clicfg.Values) (map[string]devinstance.Execu
 		}
 		out[x.name] = devinstance.Executable{Path: p}
 	}
+	downloads, err := a.guestDownloads(vals)
+	switch {
+	case err != nil && a.log != nil:
+		a.log.Warn("the guest downloads asset does not resolve; the GuestControlPlane serves no /v1/downloads", "asset", marketbidder.GuestDownloadsExecutable, "err", err.Error())
+	case downloads.Path != "":
+		out[marketbidder.GuestDownloadsExecutable] = downloads
+	}
 	return out, nil
+}
+
+func (a *app) guestDownloads(vals clicfg.Values) (devinstance.Executable, error) {
+	if !assets.Release() {
+		return devinstance.Executable{}, nil
+	}
+	cache, err := a.assetCache(vals)
+	if err != nil {
+		return devinstance.Executable{}, err
+	}
+	e, err := assets.Resolve(assets.Options{Cache: cache, Log: a.log}, marketbidder.GuestDownloadsExecutable)
+	if err != nil {
+		return devinstance.Executable{}, err
+	}
+	return devinstance.Executable{Path: e.Path, Version: e.Version}, nil
 }
 
 func (a *app) devVM(vals clicfg.Values, l devinstance.Layout) (*devinstance.VMRuntime, error) {

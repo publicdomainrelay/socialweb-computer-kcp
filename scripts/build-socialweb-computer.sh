@@ -149,7 +149,7 @@ export GOMODCACHE="$cache/gomod"
 export GOCACHE="$cache/gocache"
 export GOFLAGS=-mod=readonly
 export CGO_ENABLED=0
-unset GOOS GOARCH GOPATH GOROOT SOURCE_DATE_EPOCH MESHD_CACHE CARGO_TARGET_DIR
+unset GOOS GOARCH GOPATH GOROOT SOURCE_DATE_EPOCH MESHD_CACHE GUEST_DOWNLOADS_CACHE CARGO_TARGET_DIR
 
 goroot="$(GOTOOLCHAIN="$want_go" go env GOROOT)" || die "cannot get the pinned toolchain $want_go"
 export PATH="$goroot/bin:$PATH"
@@ -232,6 +232,7 @@ build_once() {
   local stage_cache=() jobs_n
   export CARGO_TARGET_DIR="$cache/cargo-target"
   export MESHD_CACHE="$cache/meshd"
+  export GUEST_DOWNLOADS_CACHE="$cache/assets"
   stage_cache=(--blob-cache "$cache/blobs")
   chmod -R u+w "$work" 2>/dev/null || true
   rm -rf "$work"

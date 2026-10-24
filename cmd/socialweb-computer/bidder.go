@@ -548,6 +548,13 @@ func (r *bidderRun) installedCore(ctx context.Context) int {
 		return r.a.fail(exitRefused, "%s: %v", verb, err)
 	}
 	maps.Copy(exes, plugins)
+	downloads, err := r.a.guestDownloads(r.vals)
+	if err != nil {
+		return r.a.fail(exitRefused, "%s: the guest downloads asset %s: %v", verb, marketbidder.GuestDownloadsExecutable, err)
+	}
+	if downloads.Path != "" {
+		exes[marketbidder.GuestDownloadsExecutable] = downloads
+	}
 	exe, err := selfExe()
 	if err != nil {
 		return r.a.fail(exitFailed, "%s: %v", verb, err)

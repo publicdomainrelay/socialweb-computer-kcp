@@ -40,6 +40,8 @@ const (
 	GuestAccount          = "guest-kcp"
 	MarketRootNameArg     = "--market-root-name"
 
+	GuestDownloadsExecutable = "socialweb-guest-downloads"
+
 	identityKeysPath = "identity/bidder/keys"
 )
 
@@ -338,13 +340,21 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 		hostnames = []string{ident.Handle}
 	}
 	guestPdsRef := plan.ComponentPdsRef()
-	guest := compose.Desired{Kind: compose.ComponentKindGuestControlPlane, Name: GuestComponent, Spec: v1alpha1.GuestControlPlaneSpec{
+	guestSpec := v1alpha1.GuestControlPlaneSpec{
 		ComponentSpec: p.c.NetworkComponentSpec(p.r, compose.ComponentCRStateDir(stateRoot, compose.ComponentKindGuestControlPlane, GuestComponent), network),
 		Identity:      ident,
 		PdsRef:        guestPdsRef,
 		VaultRef:      vault,
 		Hostnames:     hostnames,
-	}}
+	}
+	downloads, err := p.guestDownloadsDir()
+	if err != nil {
+		return nil, err
+	}
+	if downloads != "" {
+		guestSpec.Storage = &v1alpha1.ComponentStorage{BlobsDir: downloads}
+	}
+	guest := compose.Desired{Kind: compose.ComponentKindGuestControlPlane, Name: GuestComponent, Spec: guestSpec}
 	var image string
 	var firecracker *v1alpha1.FirecrackerProvider
 	var kcp *v1alpha1.KcpProvider
@@ -391,6 +401,18 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 		out = append(out, compose.PdsExposures(ws, compose.PdsComponent, network, hostnames, in.config)...)
 	}
 	return compose.ApplyOverrides(o.Spec.Components, out)
+}
+
+func (p *pass) guestDownloadsDir() (string, error) {
+	record := p.c.Config().Record
+	if record == nil {
+		return "", nil
+	}
+	rec, err := record()
+	if err != nil {
+		return "", fmt.Errorf("marketbidder: reading the instance record for the guest downloads: %w", err)
+	}
+	return rec.Executables[GuestDownloadsExecutable].Path, nil
 }
 
 func (p *pass) suspended(ctx context.Context, plan compose.AccountPlan, pdsHandle, pdsPublicURL string, in ingress) (ctlruntime.Result, error) {

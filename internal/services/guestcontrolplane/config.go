@@ -3,6 +3,7 @@ package guestcontrolplane
 import (
 	"cmp"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/pinneddownloads"
 )
 
 const Kind = "GuestControlPlane"
@@ -23,7 +25,18 @@ const (
 	kindPds = "Pds"
 
 	kindRemotePDS = "RemotePDS"
+
+	DownloadsRoute = "GET /v1/downloads/{sha256}/{name}"
+
+	GuestAgentDownloadPrefix = "socialweb-guest-agent-"
+
+	OpentunnelDownloadPrefix = "opentunnel-"
 )
+
+var RequiredDownloads = []string{
+	GuestAgentDownloadPrefix + "x86_64", GuestAgentDownloadPrefix + "aarch64",
+	OpentunnelDownloadPrefix + "x86_64", OpentunnelDownloadPrefix + "aarch64",
+}
 
 type Deps struct {
 	component.Instance
@@ -51,7 +64,21 @@ func New(spec v1alpha1.GuestControlPlaneSpec, deps Deps) (*Service, error) {
 		log = slog.New(slog.DiscardHandler)
 	}
 	s.log = log.With("component", "guestcontrolplane", "handle", s.handle())
+	if dir := s.downloadsDir(); dir != "" {
+		set, err := pinneddownloads.LoadRequired(dir, RequiredDownloads)
+		if err != nil {
+			return nil, fmt.Errorf("guestcontrolplane: the downloads dir: %w", err)
+		}
+		s.downloads = set
+	}
 	return s, nil
+}
+
+func (s *Service) downloadsDir() string {
+	if s.spec.Storage == nil {
+		return ""
+	}
+	return strings.TrimSpace(s.spec.Storage.BlobsDir)
 }
 
 func (s *Service) network() v1alpha1.MarketNetworkValue {
