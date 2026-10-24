@@ -206,6 +206,10 @@ func (c *Controller) finalize(ctx context.Context, req ctlruntime.Request, objec
 	if strings.TrimSpace(object.Status.URI) == "" && strings.TrimSpace(object.Status.Cid) == "" {
 		return nil
 	}
+	if object.Spec.DeletionPolicy == v1alpha1.RecordDeletionRetain {
+		c.log.Info("atprotorecord_retained", "workspace", req.Workspace, "name", object.Name, "uri", object.Status.URI)
+		return nil
+	}
 	ref, err := repoRef(req.Workspace, object.Spec)
 	if err != nil {
 		return nil

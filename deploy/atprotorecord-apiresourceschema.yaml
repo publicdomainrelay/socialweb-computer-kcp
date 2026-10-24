@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-6.atprotorecords.socialweb.computer
+  name: v1alpha1-7.atprotorecords.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -58,6 +58,12 @@ spec:
                   - Delete
               swapCid:
                 type: string
+              deletionPolicy:
+                type: string
+                enum:
+                  - Delete
+                  - Retain
+                default: Delete
             required:
               - collection
               - rkey

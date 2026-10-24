@@ -28,7 +28,7 @@ var APIResources = []APIResource{
 	}},
 	{Kind: "AtprotoIdentity", Plural: "atprotoidentities", Revision: 2, Export: "atprotoidentities", Object: AtprotoIdentity{}},
 	{Kind: "MarketIdentity", Plural: "marketidentities", Revision: 8, Export: "marketidentities", Object: MarketIdentity{}},
-	{Kind: "AtprotoRecord", Plural: "atprotorecords", Revision: 6, Export: "marketidentities", Object: AtprotoRecord{}, PrinterColumns: []PrinterColumn{
+	{Kind: "AtprotoRecord", Plural: "atprotorecords", Revision: 7, Export: "marketidentities", Object: AtprotoRecord{}, PrinterColumns: []PrinterColumn{
 		{Name: "Repo", Type: "string", JSONPath: ".spec.repoRef.name"},
 		{Name: "Collection", Type: "string", JSONPath: ".spec.collection"},
 		{Name: "Rkey", Type: "string", JSONPath: ".spec.rkey"},

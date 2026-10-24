@@ -35,7 +35,17 @@ type AtprotoRecordSpec struct {
 	OnMissingReference MissingReferencePolicy `json:"onMissingReference,omitempty"`
 
 	SwapCid string `json:"swapCid,omitempty"`
+
+	DeletionPolicy RecordDeletionPolicy `json:"deletionPolicy,omitempty" apigen:"default=Delete,enum=Delete|Retain"`
 }
+
+type RecordDeletionPolicy string
+
+const (
+	RecordDeletionDelete RecordDeletionPolicy = "Delete"
+
+	RecordDeletionRetain RecordDeletionPolicy = "Retain"
+)
 
 type MissingReferencePolicy string
 

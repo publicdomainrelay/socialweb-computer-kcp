@@ -221,7 +221,7 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 	} else {
 		r.c.forget(string(v.kind), req)
 		if v.status.Record != nil {
-			gone, err := r.deleteRecord(ctx, req, v)
+			gone, err := r.unbindRecord(ctx, req, v)
 			if err != nil {
 				return ctlruntime.Result{}, err
 			}

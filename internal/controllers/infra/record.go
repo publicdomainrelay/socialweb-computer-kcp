@@ -11,6 +11,7 @@ import (
 	"github.com/bluesky-social/indigo/atproto/syntax"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	eventsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/events/v1alpha1"
@@ -261,6 +262,49 @@ func (r *reconciler[T]) deleteRecord(ctx context.Context, req ctlruntime.Request
 	}
 	r.c.log.Info("infra_record_deleting", "kind", v.kind, "workspace", req.Workspace, "name", req.Name, "atprotoRecord", name)
 	return false, nil
+}
+
+func (r *reconciler[T]) unbindRecord(ctx context.Context, req ctlruntime.Request, v view) (bool, error) {
+	dyn, err := r.c.dynamic(req.Workspace)
+	if err != nil {
+		return false, err
+	}
+	name := infra.ChildName(v.kind, v.object.GetName())
+	records := dyn.Resource(v1alpha1.AtprotoRecordGVR)
+	ar, err := kube.Get[v1alpha1.AtprotoRecord](ctx, records, name)
+	switch {
+	case apierrors.IsNotFound(err):
+		return true, r.dropWatch(ctx, dyn, name)
+	case err != nil:
+		return false, err
+	case !ar.DeletionTimestamp.IsZero():
+		return false, nil
+	}
+	if ar.Spec.DeletionPolicy != v1alpha1.RecordDeletionRetain {
+		retained := &v1alpha1.AtprotoRecord{TypeMeta: metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: "AtprotoRecord"},
+			ObjectMeta: metav1.ObjectMeta{Name: name, Labels: ar.Labels, OwnerReferences: ar.OwnerReferences}, Spec: ar.Spec}
+		retained.Spec.DeletionPolicy = v1alpha1.RecordDeletionRetain
+		if _, err := kube.Apply[v1alpha1.AtprotoRecord](ctx, records, retained, kube.ApplyOptions{FieldManager: r.manager, Force: true}); err != nil {
+			return false, fmt.Errorf("infra: retaining the record of the AtprotoRecord %s: %w", name, err)
+		}
+	}
+	if err := records.Delete(ctx, name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+		return false, err
+	}
+	r.c.log.Info("infra_record_unbound", "kind", v.kind, "workspace", req.Workspace, "name", req.Name, "atprotoRecord", name, "uri", ar.Status.URI)
+	return false, nil
+}
+
+func (r *reconciler[T]) dropWatch(ctx context.Context, dyn *kube.Client, name string) error {
+	for _, child := range []struct {
+		gvr  schema.GroupVersionResource
+		name string
+	}{{v1alpha1.AtprotoRecordWatchGVR, name}, {exposurev1alpha1.ComponentLinkGVR, name + "-deliver"}} {
+		if err := dyn.Resource(child.gvr).Delete(ctx, child.name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *reconciler[T]) ensureWatch(ctx context.Context, req ctlruntime.Request, v view, repo commonv1.ObjectRef, sources []commonv1.ObjectRef) error {
