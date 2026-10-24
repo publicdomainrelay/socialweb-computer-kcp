@@ -4044,6 +4044,17 @@ A change must not break any of these. Each exists because something failed.
 
 ## 14. Open architectural gaps
 
+- **A revoked identity's ServiceAccount token works directly at a waking tenant apiserver for a few
+  seconds (plan 0026 A9, opened 2026-10-23).** revokeIdentity deletes the did- ServiceAccount at
+  once in every running cluster; a stopped cluster records ColdDeferred and the cluster provider
+  deletes the account at wake, before the Cluster is Ready, then writes RevocationSettled and the
+  atprotoidentity controller moves the identity to Revoked. The delete needs the tenant apiserver to
+  answer, so from the first answer to the delete (about 5 s in the live run) the stale token gets 200
+  directly at the loopback apiserver. The tenant front answers 503 until Ready, so no public request
+  gets through; only a caller on the gateway host or on a node's ClusterLink could use the window.
+  Closing it needs the account removed before k3s serves (for example from the datastore at
+  bring-up).
+
 - **PDS ingress is contracted but not yet planned per app (plan 0022, 2026-10-22).** The API now
   carries `spec.ingress` on `MarketBidder`, `MarketRequester`, `Gateway`, `SshGateway` and
   `MarketNetwork`, `Pds.spec.requireIngress`, `ingressRef`, `publicURL` and `stableHost`, and the
