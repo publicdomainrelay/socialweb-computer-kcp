@@ -13,6 +13,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clicfg"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devcheck"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 )
 
@@ -135,11 +136,56 @@ func runDevCheck(ctx context.Context, a *app, vals clicfg.Values, rest []string)
 
 type coreRestartReport struct {
 	Instance       string                 `json:"instance"`
+	Parent         string                 `json:"parent,omitempty"`
 	Binary         devinstance.Executable `json:"binary"`
 	Before         devinstance.Core       `json:"before"`
 	After          devinstance.Core       `json:"after"`
 	UnitsUnchanged bool                   `json:"unitsUnchanged"`
 	Seconds        float64                `json:"seconds"`
+}
+
+func coreTarget(target string) (string, bool) {
+	if target == "core" {
+		return "", true
+	}
+	app, ok := strings.CutSuffix(target, "/core")
+	if !ok || app == "" || strings.ContainsAny(app, "/:") {
+		return "", false
+	}
+	if _, isKind := canonicalComponentKind(app); isKind {
+		return "", false
+	}
+	return app, true
+}
+
+func (a *app) coreRecord(ctx context.Context, vals clicfg.Values, childApp string) (devinstance.Layout, devinstance.Record, int) {
+	l, err := a.layout(vals)
+	if err != nil {
+		return l, devinstance.Record{}, a.fail(exitRefused, "dev restart: %v", err)
+	}
+	var rec devinstance.Record
+	if err := fsx.ReadJSON(l.Record, &rec); err != nil {
+		root, rerr := devinstance.StateRoot(vals.String("state-dir"), a.env)
+		if rerr != nil {
+			return l, rec, a.fail(exitRefused, "dev restart: %v", rerr)
+		}
+		cl, crec, ok := findNetworkChild(root, l.ID)
+		if !ok {
+			return l, rec, a.fail(exitFailed, "dev restart: instance %s has no record at %s and is no child application of a market network under %s; dev up first", l.ID, l.Record, root)
+		}
+		l, rec = cl, crec
+	}
+	if childApp != "" {
+		cl, crec, err := networkChild(ctx, l, rec, childApp)
+		if err != nil {
+			return l, rec, a.fail(exitRefused, "dev restart: %v", err)
+		}
+		l, rec = cl, crec
+	}
+	if rec.Parent != nil {
+		l = rec.Layout
+	}
+	return l, rec, exitOK
 }
 
 func runDevRestart(ctx context.Context, a *app, vals clicfg.Values, rest []string) int {
@@ -149,16 +195,17 @@ func runDevRestart(ctx context.Context, a *app, vals clicfg.Values, rest []strin
 		rest = rest[1:]
 	}
 	if len(rest) != 1 {
-		return a.fail(exitRefused, "dev restart: dev restart [<instance>] core [--binary path] | dev restart [<instance>] [<app>/][<workspace>:][<kind>/]<component>; the PolicyEngine is the component controller and restarts with core; kcp and cluster rolls are dev roll (M3-KCP-ROLL)")
+		return a.fail(exitRefused, "dev restart: dev restart [<instance>] [<app>/]core [--binary path] | dev restart [<instance>] [<app>/][<workspace>:][<kind>/]<component>; the PolicyEngine is the component controller and restarts with core; kcp and cluster rolls are dev roll (M3-KCP-ROLL)")
 	}
-	if rest[0] != "core" {
+	childApp, isCore := coreTarget(rest[0])
+	if !isCore {
 		return runDevRestartComponent(ctx, a, vals, rest[0])
 	}
 	readyTimeout, err := time.ParseDuration(vals.String("ready-timeout"))
 	if err != nil {
 		return a.fail(exitRefused, "dev restart: ready-timeout: %v", err)
 	}
-	l, rec, code := a.record("dev restart", vals)
+	l, rec, code := a.coreRecord(ctx, vals, childApp)
 	if code != exitOK {
 		return code
 	}
@@ -172,12 +219,17 @@ func runDevRestart(ctx context.Context, a *app, vals clicfg.Values, rest []strin
 	if err != nil {
 		return a.fail(exitRefused, "dev restart: %v", err)
 	}
-	m, _, err := helloDevsup(ctx, l)
-	if err != nil {
+	r := coreRestartReport{Instance: l.ID, Binary: bin}
+	var m hostsvc.Manager
+	if rec.Parent != nil {
+		r.Parent = rec.Parent.ID
+		if m, err = a.instanceManager(ctx, rec); err != nil {
+			return a.fail(exitFailed, "dev restart: the supervisor of %s, which places the core of %s, is unreachable (%v)", rec.Parent.ID, l.ID, err)
+		}
+	} else if m, _, err = helloDevsup(ctx, l); err != nil {
 		return a.fail(exitFailed, "dev restart: devsup of %s is unreachable (%v); dev up places a new core", l.ID, err)
 	}
 	defer m.Close()
-	r := coreRestartReport{Instance: l.ID, Binary: bin}
 	fsx.ReadJSON(l.CoreRecord, &r.Before)
 	lock, err := lockFile(ctx, l.Lock, 30*time.Second)
 	if err != nil {
@@ -204,6 +256,10 @@ func runDevRestart(ctx context.Context, a *app, vals clicfg.Values, rest []strin
 	st, err := m.Start(ctx, cspec)
 	if err != nil {
 		return a.fail(exitFailed, "dev restart: placing the core: %v", err)
+	}
+	if st.Adopted && rec.Parent != nil {
+		return a.fail(exitFailed, "dev restart: the supervisor of %s placed the core of %s again (invocation %s) before this restart did; run dev restart again",
+			rec.Parent.ID, l.ID, st.InvocationID)
 	}
 	if r.After, err = waitCore(ctx, l, m, cspec.Name, st.InvocationID, readyTimeout); err != nil {
 		return a.fail(exitFailed, "dev restart: %v", err)

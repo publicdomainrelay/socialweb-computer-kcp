@@ -84,39 +84,11 @@ func (a *app) resolveComponentTarget(ctx context.Context, l devinstance.Layout, 
 	}
 	switch {
 	case t.App != "":
-		if rec.Profile != bootstrap.ProfileMarketNetwork || rec.AdminKubeconfig == "" {
-			return t, fmt.Errorf("instance %s is not a market network; name the component as [<workspace>:][<kind>/]<component>", l.ID)
-		}
-		n, err := marketnetwork.ReadNetwork(ctx, rec.AdminKubeconfig)
+		cl, crec, err := networkChild(ctx, l, rec, t.App)
 		if err != nil {
-			return t, fmt.Errorf("reading the MarketNetwork of %s: %w", l.ID, err)
+			return t, err
 		}
-		var found bool
-		for _, ap := range n.Status.Apps {
-			if ap.Name != t.App {
-				continue
-			}
-			found = true
-			if ap.Instance == "" {
-				return t, fmt.Errorf("network child %s has no instance yet (phase %s)", t.App, ap.Phase)
-			}
-			cl, err := devinstance.NewLayout(ap.Instance, filepath.Join(l.StateDir, compose.AppsDir), filepath.Join(l.RuntimeDir, compose.AppsDir))
-			if err != nil {
-				return t, err
-			}
-			var crec devinstance.Record
-			if err := fsx.ReadJSON(cl.Record, &crec); err != nil {
-				return t, fmt.Errorf("network child %s (instance %s) has no record: %w", t.App, ap.Instance, err)
-			}
-			t.Instance, t.Kubeconfig, t.Base = ap.Instance, crec.AdminKubeconfig, baseWorkspace(crec)
-		}
-		if !found {
-			var names []string
-			for _, ap := range n.Status.Apps {
-				names = append(names, ap.Name)
-			}
-			return t, fmt.Errorf("market network %s has no child application %s (it has: %s)", l.ID, t.App, strings.Join(names, ", "))
-		}
+		t.Instance, t.Kubeconfig, t.Base = cl.ID, crec.AdminKubeconfig, baseWorkspace(crec)
 	default:
 		t.Workspaces = networkWorkspaces(ctx, rec)
 	}
@@ -133,6 +105,61 @@ func (a *app) resolveComponentTarget(ctx context.Context, l devinstance.Layout, 
 		return t, fmt.Errorf("instance %s records no admin kubeconfig; dev up first", t.Instance)
 	}
 	return t, nil
+}
+
+func childLayout(network devinstance.Layout, id string) (devinstance.Layout, error) {
+	return devinstance.NewLayout(id, filepath.Join(network.StateDir, compose.AppsDir), filepath.Join(network.RuntimeDir, compose.AppsDir))
+}
+
+func networkChild(ctx context.Context, l devinstance.Layout, rec devinstance.Record, app string) (devinstance.Layout, devinstance.Record, error) {
+	if rec.Profile != bootstrap.ProfileMarketNetwork || rec.AdminKubeconfig == "" {
+		return l, rec, fmt.Errorf("instance %s is not a market network; it has no child application %s", l.ID, app)
+	}
+	n, err := marketnetwork.ReadNetwork(ctx, rec.AdminKubeconfig)
+	if err != nil {
+		return l, rec, fmt.Errorf("reading the MarketNetwork of %s: %w", l.ID, err)
+	}
+	var names []string
+	for _, ap := range n.Status.Apps {
+		names = append(names, ap.Name)
+		if ap.Name != app {
+			continue
+		}
+		if ap.Instance == "" {
+			return l, rec, fmt.Errorf("network child %s has no instance yet (phase %s)", app, ap.Phase)
+		}
+		cl, err := childLayout(l, ap.Instance)
+		if err != nil {
+			return l, rec, err
+		}
+		var crec devinstance.Record
+		if err := fsx.ReadJSON(cl.Record, &crec); err != nil {
+			return l, rec, fmt.Errorf("network child %s (instance %s) has no record: %w", app, ap.Instance, err)
+		}
+		return cl, crec, nil
+	}
+	return l, rec, fmt.Errorf("market network %s has no child application %s (it has: %s)", l.ID, app, strings.Join(names, ", "))
+}
+
+func findNetworkChild(root, id string) (devinstance.Layout, devinstance.Record, bool) {
+	recs, err := devinstance.List(root)
+	if err != nil {
+		return devinstance.Layout{}, devinstance.Record{}, false
+	}
+	for _, nrec := range recs {
+		if nrec.Profile != bootstrap.ProfileMarketNetwork {
+			continue
+		}
+		cl, err := childLayout(nrec.Layout, id)
+		if err != nil {
+			continue
+		}
+		var crec devinstance.Record
+		if fsx.ReadJSON(cl.Record, &crec) == nil {
+			return cl, crec, true
+		}
+	}
+	return devinstance.Layout{}, devinstance.Record{}, false
 }
 
 func networkWorkspaces(ctx context.Context, rec devinstance.Record) []string {

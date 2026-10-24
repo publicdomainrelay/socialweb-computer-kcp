@@ -73,7 +73,7 @@ func Tree() []Verb {
 		{Path: "dev logs", Summary: "a unit's log: dev logs <kine-a|front|kcp-a|kcp-b|core|devsup> [--tail N]", Needs: []Need{NeedProc}},
 		{Path: "dev env", Summary: "exports for shells and TS tools (KUBECONFIG, kcp URL, ports, leases; --json)", Needs: []Need{NeedProc}},
 		{Path: "dev check", Summary: "report the dev host prerequisites; never fixes them", Needs: []Need{NeedProc}},
-		{Path: "dev restart", Summary: "dev restart [<instance>] core [--binary path]: replace the dev core, adopting every other unit; dev restart [<instance>] [<app>/][<workspace>:][<kind>/]<component>: restart one component through its kcp object, wait until it is Ready, print the old and new state", Needs: []Need{NeedProc}},
+		{Path: "dev restart", Summary: "dev restart [<instance>] [<app>/]core [--binary path]: replace the dev core (of a market network child application with <app>/), adopting every other unit; dev restart [<instance>] [<app>/][<workspace>:][<kind>/]<component>: restart one component through its kcp object, wait until it is Ready, print the old and new state", Needs: []Need{NeedProc}},
 		{Path: "dev links", Summary: "dev links [<instance>] [<workspace>]: every ComponentLink in the instance's workspaces (or one workspace): from, to, capabilities, Accepted, ResolvedRefs and the message of each condition that is not True, then the bus deny count of each core of the instance (--json)", Needs: []Need{NeedProc}},
 		{Path: "dev roll", Summary: "roll a dev instance's kcp (a tenant cluster rolls with units roll cluster)", Needs: []Need{NeedProc}},
 		{Path: "dev roll kcp", Summary: "blue/green kcp slot swap behind the instance's front", Needs: []Need{NeedProc}},

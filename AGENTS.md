@@ -179,7 +179,9 @@ A prod deployment guarantees nothing; the routine path preserves most things.
   `socialweb-computer dev restart <instance> core --binary /var/tmp/<work>/bin/socialweb-computer`
   (as the account that runs the instance). It stops the core unit, places it again with the new
   binary, waits until it is ready, prints a JSON report and fails unless every unit was adopted
-  unchanged. Then rerun `run request`. Do not `dev down`/`dev up` for a code change.
+  unchanged. A child application of a market network takes `dev restart <network> <app>/core` (or
+  `dev restart <network>-<app> core`); the network's supervisor places that core through its
+  HostProcess object. Then rerun `run request`. Do not `dev down`/`dev up` for a code change.
 - One component: `socialweb-computer dev restart <instance> [<app>/][<workspace>:][<kind>/]<component>`.
   It writes `spec.restartedAt` on that component's kcp object and waits until the component reports
   the restart. The PolicyEngine restarts only with `core`. A kcp roll is `dev roll kcp`; on an installed host,
