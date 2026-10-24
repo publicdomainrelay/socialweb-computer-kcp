@@ -343,6 +343,9 @@ func (m *HTTPMarket) SubmitRFP(ctx context.Context, bidder Bidder, rfp SubmitRFP
 		"rfpUri": rfp.URI,
 		"rfpCid": rfp.CID,
 	}, m.Timeout)
+	if errors.Is(err, xrpc.ErrTooLarge) {
+		return nil, err
+	}
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrBidderUnreachable, err)
 	}
