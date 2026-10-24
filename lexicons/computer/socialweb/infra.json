@@ -1,0 +1,71 @@
+{
+  "lexicon": 1,
+  "id": "computer.socialweb.infra",
+  "description": "A long-lived deployment: a set of compute contracts, each declared with the state its author wants. Any client of the account may change the declaration; the socialweb-computer requester that runs the deployment writes the status.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["createdAt"],
+        "properties": {
+          "description": { "type": "string", "maxLength": 1024 },
+          "contracts": {
+            "type": "array",
+            "maxLength": 64,
+            "items": { "type": "ref", "ref": "#contract" },
+            "description": "The declared contracts. Names are unique within the record."
+          },
+          "status": { "type": "ref", "ref": "#status" },
+          "createdAt": { "type": "string", "format": "datetime" }
+        }
+      }
+    },
+    "contract": {
+      "type": "object",
+      "required": ["name", "state"],
+      "properties": {
+        "name": { "type": "string", "maxLength": 63, "description": "A DNS-1123 label, unique within the deployment." },
+        "state": {
+          "type": "string",
+          "knownValues": ["staged", "requested", "released"],
+          "description": "staged: declared, no RFP is sent. requested: the requester runs the RFP flow and holds the guest. released: the guest is released."
+        },
+        "vmName": { "type": "string", "maxLength": 253 },
+        "bidderDids": { "type": "array", "items": { "type": "string", "format": "did" } },
+        "denyBidderDids": { "type": "array", "items": { "type": "string", "format": "did" } },
+        "sshAuthorizedKeys": { "type": "array", "items": { "type": "string" } },
+        "userData": { "type": "string", "maxLength": 65536, "description": "cloud-init user_data; never a secret, it is public here." },
+        "policy": { "type": "string" },
+        "policyArgs": { "type": "string" },
+        "vmReadyTimeoutSec": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "status": {
+      "type": "object",
+      "required": ["phase"],
+      "properties": {
+        "phase": {
+          "type": "string",
+          "knownValues": ["pending", "staged", "deploying", "deployed", "releasing", "released", "degraded", "ending", "deleting"]
+        },
+        "contracts": { "type": "array", "items": { "type": "ref", "ref": "#contractStatus" } }
+      }
+    },
+    "contractStatus": {
+      "type": "object",
+      "required": ["name", "phase"],
+      "properties": {
+        "name": { "type": "string" },
+        "phase": {
+          "type": "string",
+          "knownValues": ["staged", "requesting", "deployed", "releasing", "released", "failed"]
+        },
+        "winner": { "type": "string", "format": "did" },
+        "receipt": { "type": "string", "format": "at-uri" },
+        "message": { "type": "string", "maxLength": 1024 }
+      }
+    }
+  }
+}

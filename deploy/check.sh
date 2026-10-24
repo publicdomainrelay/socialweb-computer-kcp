@@ -52,7 +52,7 @@ if [ "$drift" -ne 0 ]; then
 fi
 echo "check.sh: ok apigen ($compared generated files, no drift from api/v1alpha1)"
 
-generated="api internal/atproto/market deploy"
+generated="api internal/atproto/market internal/atproto/infra deploy"
 gensnap() { git ls-files -co --exclude-standard -- $generated | LC_ALL=C sort | xargs sha256sum 2>&1; }
 genbefore="$(gensnap)"
 go generate ./... >/dev/null || fail "go generate ./..."
