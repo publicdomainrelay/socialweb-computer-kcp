@@ -65,7 +65,7 @@ func New(cfg Config, log *slog.Logger) (*Agent, error) {
 	if err != nil {
 		return nil, err
 	}
-	var settings webrtc.SettingEngine
+	settings := webrtc.SettingEngine{LoggerFactory: pionLogs{log: log}}
 	settings.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4, webrtc.NetworkTypeUDP6})
 	tokens := newTokenSource(cfg.LoginHelper, cfg.Bidder.Audience, log)
 	return &Agent{

@@ -397,8 +397,8 @@
         "linux/arm64": {"kind": "script", "script": "scripts/build-guest-downloads.sh", "members": {"opentunnel-x86_64": "opentunnel-x86_64", "opentunnel-x86_64.sha256": "opentunnel-x86_64.sha256", "opentunnel-aarch64": "opentunnel-aarch64", "opentunnel-aarch64.sha256": "opentunnel-aarch64.sha256", "socialweb-guest-agent-x86_64": "socialweb-guest-agent-x86_64", "socialweb-guest-agent-x86_64.sha256": "socialweb-guest-agent-x86_64.sha256", "socialweb-guest-agent-aarch64": "socialweb-guest-agent-aarch64", "socialweb-guest-agent-aarch64.sha256": "socialweb-guest-agent-aarch64.sha256"}}
       },
       "platforms": {
-        "linux/amd64": {"treeSha256": "9c08f6447066d80e5d8a1fb65bfc85c55cedb3c6b6f0346866cae4a86facd25d", "rawBytes": 34358548, "zstdBytes": 11325519},
-        "linux/arm64": {"treeSha256": "9c08f6447066d80e5d8a1fb65bfc85c55cedb3c6b6f0346866cae4a86facd25d", "rawBytes": 34358548, "zstdBytes": 11325519}
+        "linux/amd64": {"treeSha256": "230ad2e8b7c3292eb2c0664814a699cc31f497bbaa70a9153b3a6cf956091b89", "rawBytes": 34366740, "zstdBytes": 11328067},
+        "linux/arm64": {"treeSha256": "230ad2e8b7c3292eb2c0664814a699cc31f497bbaa70a9153b3a6cf956091b89", "rawBytes": 34366740, "zstdBytes": 11328067}
       }
     }
   },

@@ -25,6 +25,7 @@ require (
 	github.com/mr-tron/base58 v1.3.0
 	github.com/multiformats/go-multihash v0.2.3
 	github.com/openbao/openbao/api/v2 v2.3.0
+	github.com/pion/logging v0.2.4
 	github.com/pion/webrtc/v4 v4.2.25
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/whyrusleeping/cbor-gen v0.2.1-0.20241030202151-b7a6831be65e
@@ -51,7 +52,6 @@ require (
 	github.com/pion/dtls/v3 v3.1.15 // indirect
 	github.com/pion/ice/v4 v4.4.8 // indirect
 	github.com/pion/interceptor v0.1.49 // indirect
-	github.com/pion/logging v0.2.4 // indirect
 	github.com/pion/mdns/v2 v2.2.2 // indirect
 	github.com/pion/randutil v0.1.0 // indirect
 	github.com/pion/rtcp v1.2.20 // indirect
