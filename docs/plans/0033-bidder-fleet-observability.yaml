@@ -81,6 +81,16 @@ learnings:
       10 s timeout let it limp on, so only a stricter host exposed it. Signals worth a fleet alert: a
       component in phase Starting for more than a minute, an Exposure Ready=False with reason
       HandlerMissing, and a contract Pending with no RFP record.
+  - id: L9-BROWSER-REQUESTER-CHAIN
+    text: >
+      The browser-hosted requester test (2026-10-24, peer page on kcpwasm, alice, local bidder) has
+      exposed one link of the requester's dependency chain per run: run 2 the ingress Exposure (wait
+      cycle, fixed c69d7325); run 3 the AtprotoRepo repo.write provider missing from the browser core
+      ("bus: no provider serves this kind and capability"), with the Requester restarting under
+      backoff (7 restarts in 70 s) while the contract stayed Pending and no bidder saw an RFP. A fleet
+      or requester view should show, per contract, which dependency the requester is waiting on
+      (handler, Exposure address, repo provider, identity) instead of a bare Pending; the component's
+      restarts count and last error are already in its status and are the fastest signal.
 items:
   - id: F1-INVENTORY
     title: "A fleet inventory object: which bidders exist, where, on which version"
