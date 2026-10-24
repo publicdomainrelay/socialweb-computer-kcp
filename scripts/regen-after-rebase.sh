@@ -13,8 +13,7 @@ that a generator writes, it takes one side (ours: during a rebase that is the br
 onto), reruns the generators and stages the result:
 
   go generate ./api/...    deploy/*-apiresourceschema.yaml, deploy/*-apiexport.yaml,
-                           deploy/apiresourceschema-revisions.txt, the TypeScript wire types and
-                           fixtures, api/**/zz_generated.register.go and
+                           deploy/apiresourceschema-revisions.txt, api/**/zz_generated.register.go and
                            api/**/zz_generated.conditions.go (cmd/socialweb-apigen -list names
                            them all), and api/**/zz_generated.deepcopy.go (deepcopy-gen through
                            hack/codegen.sh)
