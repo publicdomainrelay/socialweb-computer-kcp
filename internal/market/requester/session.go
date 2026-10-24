@@ -785,7 +785,9 @@ func (q *Requester) sessionGuest(ctx context.Context, receiptURI string) (string
 		}
 		switch parsed.Kind {
 		case market.ComputeEventsVMOnNetworkNSID:
-			address = cmp.Or(address, parsed.Address)
+			if parsed.Tag == "" {
+				address = cmp.Or(address, parsed.Address)
+			}
 		case market.ComputeEventsVMHostKeysNSID:
 			hostKeys = parsed.HostKeys
 		case market.ComputeEventsVMTerminatedNSID:

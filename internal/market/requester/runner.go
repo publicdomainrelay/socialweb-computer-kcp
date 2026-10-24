@@ -898,6 +898,13 @@ func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClai
 		}
 		switch parsed.Kind {
 		case market.ComputeEventsVMOnNetworkNSID:
+			if parsed.Tag != "" {
+				if !recordNetwork(state, parsed) {
+					return false
+				}
+				r.log().Info("requester_guest_network", "tag", parsed.Tag, "address", parsed.Address)
+				break
+			}
 			if state.VMAddress != "" {
 				return false
 			}
@@ -978,11 +985,25 @@ func (r *contractRunner) waitForRelease(ctx context.Context, state *v1alpha1.Nod
 		if guestEventSeen(seen, event) {
 			return false
 		}
-		if market.NSIDFromURI(event.Payload.URI) != market.ComputeEventsVMTerminatedNSID {
+		nsid := market.NSIDFromURI(event.Payload.URI)
+		if nsid != market.ComputeEventsVMTerminatedNSID && nsid != market.ComputeEventsVMOnNetworkNSID {
 			return false
 		}
 		parsed, err := r.q.parseGuestEvent(ctx, event, receiptURI)
-		if err != nil || parsed.Kind != market.ComputeEventsVMTerminatedNSID {
+		if err != nil {
+			if nsid == market.ComputeEventsVMOnNetworkNSID {
+				r.log().Warn("requester_guest_event_refused", "uri", event.Event.URI, "err", err)
+			}
+			return false
+		}
+		if parsed.Kind == market.ComputeEventsVMOnNetworkNSID {
+			if parsed.Tag != "" && recordNetwork(state, parsed) {
+				r.log().Info("requester_guest_network", "tag", parsed.Tag, "address", parsed.Address)
+				r.writeStatus(ctx, v1alpha1.ComputeContractHeld, "held: the guest is on the network; set spec.release to release it", state, r.currentBids(), r.currentChosen(), "held", 1)
+			}
+			return false
+		}
+		if parsed.Kind != market.ComputeEventsVMTerminatedNSID {
 			return false
 		}
 		applyTermination(state, parsed.Termination, r.q.nowISO())

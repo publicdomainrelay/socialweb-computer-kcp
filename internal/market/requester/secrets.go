@@ -403,6 +403,13 @@ func (r *contractRunner) contractModules(userData string, contract v1alpha1.Comp
 			NodeAgent: nodeAgentPinFromJoin(contract.Spec.NodeJoin)}
 		modules = append(modules, "k3s", cloudinit.K3sJoinModule(opts))
 	}
+	if len(contract.Spec.Tunnels) > 0 {
+		opts, err := tunnelsOptions(contract)
+		if err != nil {
+			return "", fmt.Errorf("the contract's tunnels: %w", err)
+		}
+		modules = append(modules, cloudinit.TunnelsModule(opts))
+	}
 	if r.secrets != nil {
 		modules = append(modules, "secrets")
 		values.SecretsURL = r.secretsURLValue()

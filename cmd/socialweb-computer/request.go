@@ -201,6 +201,12 @@ func (r *requestRun) passthrough(args []string, network bool) error {
 			r.contract.VMReadyTimeoutSec = n
 		case p.To == "contract.secretsRef":
 			r.secrets = p.Value
+		case p.To == "contract.tunnels":
+			tunnels, err := parseTunnels(p.Value)
+			if err != nil {
+				return fmt.Errorf("--tunnel: %w", err)
+			}
+			r.contract.Tunnels = append(r.contract.Tunnels, tunnels...)
 		default:
 			return fmt.Errorf("--%s maps to %s, which run request does not take", p.Name, p.To)
 		}
@@ -218,6 +224,26 @@ func (r *requestRun) passthrough(args []string, network bool) error {
 	}
 	r.root.Options = r.appOptions
 	return nil
+}
+
+func parseTunnels(value string) ([]v1alpha1.ComputeContractTunnel, error) {
+	var out []v1alpha1.ComputeContractTunnel
+	for _, item := range splitList(value) {
+		parts := strings.SplitN(item, ":", 3)
+		if len(parts) < 2 {
+			return nil, fmt.Errorf("%q: want <tag>:<port>[:<envFile>]", item)
+		}
+		port, err := strconv.Atoi(parts[1])
+		if err != nil {
+			return nil, fmt.Errorf("%q: port: %w", item, err)
+		}
+		t := v1alpha1.ComputeContractTunnel{Tag: parts[0], Port: port}
+		if len(parts) == 3 {
+			t.Shell = &v1alpha1.ComputeContractShell{EnvFile: parts[2]}
+		}
+		out = append(out, t)
+	}
+	return out, nil
 }
 
 func readSecrets(path string) ([]byte, error) {

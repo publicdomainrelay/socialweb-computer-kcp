@@ -217,6 +217,7 @@ apps:
       - {name: policy-args, to: contract.policyArgs}
       - {name: vm-ready-timeout-sec, to: contract.vmReadyTimeoutSec}
       - {name: secrets, to: contract.secretsRef}
+      - {name: tunnel, to: contract.tunnels}
       - {name: guest-host-aliases, to: options}
       - {name: guest-ca-file, to: profile}
       - {name: guest-curl-home, to: profile}

@@ -22,6 +22,8 @@ type GuestEvent struct {
 
 	Address string
 
+	Tag string
+
 	HostKeys []v1alpha1.ComputeVMHostKey
 
 	Termination *v1alpha1.ContractTermination
@@ -104,11 +106,19 @@ func (q *Requester) parseGuestEvent(ctx context.Context, event MarketEvent, rece
 	switch payloadNSID {
 	case market.ComputeEventsVMOnNetworkNSID:
 		address := stringOf(event.Payload.Value["address"])
-		if _, err := ValidateTicket(address); err != nil {
-			return nil, err
+		if tag := stringOf(event.Payload.Value["tag"]); tag != "" {
+			if err := ValidateNetworkAddress(tag, address); err != nil {
+				return nil, err
+			}
+			out.Tag = tag
+			out.ObservedAt = stringOf(event.Payload.Value["createdAt"])
+		} else {
+			if _, err := ValidateTicket(address); err != nil {
+				return nil, err
+			}
+			out.ObservedAt = stringOf(event.Payload.Value["observedAt"])
 		}
 		out.Address = address
-		out.ObservedAt = stringOf(event.Payload.Value["observedAt"])
 	case market.ComputeEventsVMHostKeysNSID:
 		keys, err := q.reportedHostKeys(event.Payload.Value)
 		if err != nil {
@@ -242,6 +252,9 @@ func seedGuestEventSeen(seen map[string]bool, state *v1alpha1.NodeClaimContract)
 		rememberGuestEvent(seen, state.HostKeys.Event.URI)
 		rememberGuestEvent(seen, state.HostKeys.Payload.URI)
 	}
+	for _, n := range state.Networks {
+		rememberGuestEvent(seen, n.Event.URI)
+	}
 }
 
 func guestEventSeen(seen map[string]bool, event MarketEvent) bool {
@@ -272,6 +285,9 @@ func guestEventApplied(state *v1alpha1.NodeClaimContract, parsed *GuestEvent) bo
 	}
 	switch parsed.Kind {
 	case market.ComputeEventsVMOnNetworkNSID:
+		if parsed.Tag != "" {
+			return networkRecorded(state, parsed)
+		}
 		return state.VMAddress != ""
 	case market.ComputeEventsVMHostKeysNSID:
 		return state.HostKeys != nil && guestEventRecorded(state.HostKeys.Event, state.HostKeys.Payload, parsed)

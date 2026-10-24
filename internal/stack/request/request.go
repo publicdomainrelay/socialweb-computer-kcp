@@ -80,6 +80,7 @@ type ContractSummary struct {
 	Bids          int      `json:"bids,omitempty"`
 	ReceiptUri    string   `json:"receiptUri,omitempty"`
 	VMAddress     string   `json:"vmAddress,omitempty"`
+	Networks      []string `json:"networks,omitempty"`
 	HostKeys      []string `json:"hostKeys,omitempty"`
 	ReleaseOK     *bool    `json:"releaseOk,omitempty"`
 	ReleaseStatus int      `json:"releaseStatus,omitempty"`
@@ -164,6 +165,9 @@ func SummaryOf(c *v1alpha1.ComputeContract) *ContractSummary {
 	}
 	k := c.Status.Contract
 	s := &ContractSummary{Phase: string(k.Phase), VMAddress: k.VMAddress}
+	for _, n := range k.Networks {
+		s.Networks = append(s.Networks, n.Tag+"="+n.Address)
+	}
 	if k.Winner != nil {
 		s.WinnerDid = k.Winner.DID
 	}

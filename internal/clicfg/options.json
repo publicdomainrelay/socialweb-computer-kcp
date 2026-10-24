@@ -572,6 +572,10 @@
       "type": "string",
       "description": "run request: a secrets bundle file ([{\"path\": \"/abs/path\", \"value\": ...}]); it is written only into the invocation's own OpenBao, the guest fetches it at boot and it never enters a kcp object"
     },
+    "tunnel": {
+      "type": "string",
+      "description": "run request: guest tunnels to open, a comma list of <tag>:<port>[:<envFile>] (spec.tunnels): opentunnel serves the guest's 127.0.0.1:<port> at an https URL that comes back in status.contract.networks; an envFile makes it a wootty browser shell whose WOOTTY_AUTH_TOKEN the --secrets bundle writes to that file"
+    },
     "hold": {
       "type": "boolean",
       "description": "run request, resume: keep the contract held when this process ends; its kcp stops and run request release|resume <name> starts it again from its state dir"
