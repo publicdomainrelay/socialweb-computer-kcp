@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -24,6 +25,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clicfg"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/logx"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/request"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/webrtcproxy"
 )
@@ -995,8 +997,13 @@ func runRequestSSH(ctx context.Context, a *app, vals clicfg.Values, rest []strin
 }
 
 func runRequestProxy(ctx context.Context, a *app, vals clicfg.Values, rest []string) int {
+	level, err := logx.ParseLevel(vals.String("log-level"))
+	if err != nil {
+		return a.fail(exitRefused, "run request proxy: --log-level: %v", err)
+	}
 	quiet := *a
 	quiet.stdout = a.stderr
+	quiet.log = slog.New(slog.NewTextHandler(a.stderr, &slog.HandlerOptions{Level: level, ReplaceAttr: dropTime})).With("service", serviceName)
 	r, started, code := quiet.openRequest(ctx, vals, rest, "proxy")
 	if r == nil {
 		return code
@@ -1007,10 +1014,10 @@ func runRequestProxy(ctx context.Context, a *app, vals clicfg.Values, rest []str
 	if r.tag == "" {
 		return a.fail(exitRefused, "run request proxy: --tag names the webrtc tunnel")
 	}
-	log := a.log.With("request", r.inv.Name)
+	log := quiet.log.With("request", r.inv.Name)
 	conn, timings, err := webrtcproxy.Dial(ctx, r.kcp.Signaling(), webrtcproxy.Options{Tag: r.tag, Log: log})
 	if err != nil {
-		return a.fail(exitFailed, "run request proxy: %v", err)
+		return a.fail(exitFailed, "run request proxy: %s", strings.Join(strings.Fields(err.Error()), " "))
 	}
 	defer conn.Close()
 	log.Info("the proxy pipes stdin and stdout through the datachannel", "tag", r.tag, "guestSeconds", timings.Guest.Seconds(),
@@ -1019,4 +1026,11 @@ func runRequestProxy(ctx context.Context, a *app, vals clicfg.Values, rest []str
 		log.Warn("the proxy ends", "err", err.Error())
 	}
 	return exitOK
+}
+
+func dropTime(groups []string, attr slog.Attr) slog.Attr {
+	if len(groups) == 0 && attr.Key == slog.TimeKey {
+		return slog.Attr{}
+	}
+	return attr
 }
