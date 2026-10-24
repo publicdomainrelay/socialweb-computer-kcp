@@ -60,26 +60,13 @@ const (
 	InfraContractReleased InfraContractState = "Released"
 )
 
+// +socialweb:lexicon=computer.socialweb.infra#contract
 type InfraContract struct {
 	Name string `json:"name" apigen:"maxLength=63,pattern=^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"`
 
 	State InfraContractState `json:"state,omitempty" apigen:"default=Staged,enum=Staged|Requested|Released"`
 
-	VMName string `json:"vmName,omitempty"`
-
-	BidderDids []string `json:"bidderDids,omitempty"`
-
-	DenyBidderDids []string `json:"denyBidderDids,omitempty"`
-
-	SshAuthorizedKeys []string `json:"sshAuthorizedKeys,omitempty"`
-
-	UserData string `json:"userData,omitempty"`
-
-	Policy string `json:"policy,omitempty"`
-
-	PolicyArgs string `json:"policyArgs,omitempty"`
-
-	VMReadyTimeoutSec int `json:"vmReadyTimeoutSec,omitempty"`
+	ComputeContractTemplate `json:",inline"`
 }
 
 type InfraContractSecret struct {

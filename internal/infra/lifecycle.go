@@ -96,9 +96,7 @@ func Orphan(cc *v1alpha1.ComputeContract) Step {
 }
 
 func ContractSpec(c v1alpha1.InfraContract, secrets *commonv1.SecretRef, node *v1alpha1.InfraContractNode) v1alpha1.ComputeContractSpec {
-	spec := v1alpha1.ComputeContractSpec{VMName: c.VMName, BidderDids: c.BidderDids, DenyBidderDids: c.DenyBidderDids,
-		SshAuthorizedKeys: c.SshAuthorizedKeys, UserData: c.UserData, Policy: c.Policy, PolicyArgs: c.PolicyArgs,
-		VMReadyTimeoutSec: c.VMReadyTimeoutSec}
+	spec := v1alpha1.ComputeContractSpec{ComputeContractTemplate: *c.ComputeContractTemplate.DeepCopy()}
 	if secrets != nil {
 		ref := *secrets
 		spec.SecretsRef = &ref

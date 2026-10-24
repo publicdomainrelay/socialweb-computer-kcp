@@ -21,7 +21,7 @@ type ComputeContractList struct {
 	Items []ComputeContract `json:"items"`
 }
 
-type ComputeContractSpec struct {
+type ComputeContractTemplate struct {
 	VMName string `json:"vmName,omitempty"`
 
 	BidderDids []string `json:"bidderDids,omitempty"`
@@ -38,6 +38,12 @@ type ComputeContractSpec struct {
 
 	VMReadyTimeoutSec int `json:"vmReadyTimeoutSec,omitempty"`
 
+	Tunnels []ComputeContractTunnel `json:"tunnels,omitempty" apigen:"listType=map,listMapKey=tag"`
+}
+
+type ComputeContractSpec struct {
+	ComputeContractTemplate `json:",inline"`
+
 	SecretsRef *commonv1.SecretRef `json:"secretsRef,omitempty"`
 
 	Release bool `json:"release,omitempty"`
@@ -47,8 +53,6 @@ type ComputeContractSpec struct {
 	Adopt bool `json:"adopt,omitempty"`
 
 	NodeJoin *ComputeContractNodeJoin `json:"nodeJoin,omitempty"`
-
-	Tunnels []ComputeContractTunnel `json:"tunnels,omitempty" apigen:"listType=map,listMapKey=tag"`
 
 	TTLSecondsAfterFinished *int32 `json:"ttlSecondsAfterFinished,omitempty" apigen:"default=691200,minimum=0"`
 }
@@ -118,7 +122,13 @@ type ComputeContractTunnel struct {
 
 	Server string `json:"server,omitempty" apigen:"userEndpoint"`
 
+	Shell *ComputeContractShell `json:"shell,omitempty"`
+
 	Transport TunnelTransport `json:"transport,omitempty" apigen:"default=opentunnel,enum=opentunnel|webrtc"`
+}
+
+type ComputeContractShell struct {
+	EnvFile string `json:"envFile,omitempty" apigen:"userEndpoint,default=/etc/wootty/wootty.env"`
 }
 
 type TunnelTransport string

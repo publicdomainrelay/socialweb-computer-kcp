@@ -206,6 +206,9 @@ func BuildGroup(root string, g Group) (*Model, error) {
 			Contracts:      r.Contracts,
 		})
 	}
+	if err := checkLexicons(root, g.Dir, b.model.Named); err != nil {
+		b.errs = append(b.errs, err)
+	}
 	if err := errors.Join(b.errs...); err != nil {
 		return nil, err
 	}

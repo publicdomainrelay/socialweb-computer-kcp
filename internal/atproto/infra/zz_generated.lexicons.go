@@ -220,6 +220,7 @@ type InfraContract struct {
 	PolicyArgs        string                     `json:"policyArgs,omitempty"`
 	SSHAuthorizedKeys []string                   `json:"sshAuthorizedKeys,omitempty"`
 	State             string                     `json:"state"`
+	Tunnels           []InfraTunnel              `json:"tunnels,omitempty"`
 	UserData          string                     `json:"userData,omitempty"`
 	VMName            string                     `json:"vmName,omitempty"`
 	VMReadyTimeoutSec int64                      `json:"vmReadyTimeoutSec,omitempty"`
@@ -273,6 +274,30 @@ func (v *InfraContractStatus) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+type InfraShell struct {
+	EnvFile string                     `json:"envFile,omitempty"`
+	Extra   map[string]json.RawMessage `json:"-"`
+	absent  map[string]json.RawMessage
+}
+
+func (v InfraShell) MarshalJSON() ([]byte, error) {
+	type plain InfraShell
+	return marshalOpen(plain(v), v.Extra, v.absent)
+}
+
+func (v *InfraShell) UnmarshalJSON(b []byte) error {
+	type plain InfraShell
+	var p plain
+	extra, absent, err := unmarshalOpen(b, &p)
+	if err != nil {
+		return err
+	}
+	*v = InfraShell(p)
+	v.Extra = extra
+	v.absent = absent
+	return nil
+}
+
 type InfraStatus struct {
 	Contracts []InfraContractStatus      `json:"contracts,omitempty"`
 	Phase     string                     `json:"phase"`
@@ -293,6 +318,34 @@ func (v *InfraStatus) UnmarshalJSON(b []byte) error {
 		return err
 	}
 	*v = InfraStatus(p)
+	v.Extra = extra
+	v.absent = absent
+	return nil
+}
+
+type InfraTunnel struct {
+	Port      int64                      `json:"port"`
+	Server    string                     `json:"server,omitempty"`
+	Shell     *InfraShell                `json:"shell,omitempty"`
+	Tag       string                     `json:"tag"`
+	Transport string                     `json:"transport,omitempty"`
+	Extra     map[string]json.RawMessage `json:"-"`
+	absent    map[string]json.RawMessage
+}
+
+func (v InfraTunnel) MarshalJSON() ([]byte, error) {
+	type plain InfraTunnel
+	return marshalOpen(plain(v), v.Extra, v.absent)
+}
+
+func (v *InfraTunnel) UnmarshalJSON(b []byte) error {
+	type plain InfraTunnel
+	var p plain
+	extra, absent, err := unmarshalOpen(b, &p)
+	if err != nil {
+		return err
+	}
+	*v = InfraTunnel(p)
 	v.Extra = extra
 	v.absent = absent
 	return nil

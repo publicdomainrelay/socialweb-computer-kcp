@@ -289,7 +289,7 @@ func (m *Mapper) Bundle(claim contract.Claim, links contract.Links) (map[string]
 
 func (m *Mapper) Entry(claim contract.Claim, adopt bool, bases contract.Bases) (v1alpha1.InfraContract, v1alpha1.InfraContractNode) {
 	spec := claim.Object.Spec
-	entry := v1alpha1.InfraContract{VMName: spec.NodeName, VMReadyTimeoutSec: m.cfg.VMReadyTimeoutSec}
+	entry := v1alpha1.InfraContract{ComputeContractTemplate: v1alpha1.ComputeContractTemplate{VMName: spec.NodeName, VMReadyTimeoutSec: m.cfg.VMReadyTimeoutSec}}
 	node := v1alpha1.InfraContractNode{OwnerDid: spec.OwnerDid, NodeClaimRef: claim.Ref()}
 	if len(spec.DenyBidderDids) > 0 {
 		entry.DenyBidderDids = append([]string(nil), spec.DenyBidderDids...)

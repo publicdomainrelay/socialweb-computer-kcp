@@ -437,10 +437,8 @@ func (q *Requester) provisionHeldContract(ctx context.Context, name, vmName, did
 		TypeMeta:   metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: contractmarket.KindComputeContract},
 		ObjectMeta: metav1.ObjectMeta{Name: name},
 		Spec: v1alpha1.ComputeContractSpec{
-			VMName:                  vmName,
-			SshAuthorizedKeys:       []string{publicKey},
-			Policy:                  policyName,
-			PolicyArgs:              args,
+			ComputeContractTemplate: v1alpha1.ComputeContractTemplate{VMName: vmName, SshAuthorizedKeys: []string{publicKey},
+				Policy: policyName, PolicyArgs: args},
 			OwnerDid:                did,
 			TTLSecondsAfterFinished: new(int32(heldContractTTLSeconds)),
 		},

@@ -39,7 +39,34 @@
         "userData": { "type": "string", "maxLength": 65536, "description": "cloud-init user_data; never a secret, it is public here." },
         "policy": { "type": "string" },
         "policyArgs": { "type": "string" },
-        "vmReadyTimeoutSec": { "type": "integer", "minimum": 0 }
+        "vmReadyTimeoutSec": { "type": "integer", "minimum": 0 },
+        "tunnels": {
+          "type": "array",
+          "items": { "type": "ref", "ref": "#tunnel" },
+          "description": "Guest ports the requester reaches over a tunnel transport. Tags are unique within the contract."
+        }
+      }
+    },
+    "tunnel": {
+      "type": "object",
+      "required": ["tag", "port"],
+      "properties": {
+        "tag": { "type": "string", "maxLength": 32, "description": "A DNS-1123 label naming the tunnel." },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535, "description": "The guest port, on 127.0.0.1." },
+        "server": { "type": "string", "format": "uri", "description": "The opentunnel server; absent means the requester's default." },
+        "shell": { "type": "ref", "ref": "#shell" },
+        "transport": {
+          "type": "string",
+          "knownValues": ["opentunnel", "webrtc"],
+          "description": "opentunnel (the default) gives an https URL; webrtc gives a datachannel to the guest agent."
+        }
+      }
+    },
+    "shell": {
+      "type": "object",
+      "description": "A web shell served on the tunnel's port; its token arrives through the contract's secrets bundle, never here.",
+      "properties": {
+        "envFile": { "type": "string", "maxLength": 256, "description": "The guest path of the shell's env file; absent means /etc/wootty/wootty.env." }
       }
     },
     "status": {

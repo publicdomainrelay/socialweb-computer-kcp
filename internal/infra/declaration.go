@@ -74,6 +74,7 @@ func normalize(d Declaration) Declaration {
 		c.BidderDids = nonEmpty(c.BidderDids)
 		c.DenyBidderDids = nonEmpty(c.DenyBidderDids)
 		c.SshAuthorizedKeys = nonEmpty(c.SshAuthorizedKeys)
+		c.Tunnels = normalTunnels(c.Tunnels)
 		out.Contracts = append(out.Contracts, c)
 	}
 	if out.TTLSeconds != 0 && out.EndWhen == "" {
@@ -89,6 +90,29 @@ func StateOrStaged(s v1alpha1.InfraContractState) v1alpha1.InfraContractState {
 	return s
 }
 
+func normalTunnels(in []v1alpha1.ComputeContractTunnel) []v1alpha1.ComputeContractTunnel {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]v1alpha1.ComputeContractTunnel, 0, len(in))
+	for _, t := range in {
+		if t.Transport == "" {
+			t.Transport = v1alpha1.TunnelTransportOpenTunnel
+		}
+		if t.Shell != nil {
+			shell := *t.Shell
+			if shell.EnvFile == "" {
+				shell.EnvFile = DefaultShellEnvFile
+			}
+			t.Shell = &shell
+		}
+		out = append(out, t)
+	}
+	return out
+}
+
+const DefaultShellEnvFile = "/etc/wootty/wootty.env"
+
 func nonEmpty(in []string) []string {
 	if len(in) == 0 {
 		return nil
@@ -99,8 +123,9 @@ func nonEmpty(in []string) []string {
 func (d Declaration) Published() Declaration {
 	out := Declaration{Description: d.Description, TTLSeconds: d.TTLSeconds, EndWhen: d.EndWhen}
 	for _, c := range d.Contracts {
-		out.Contracts = append(out.Contracts, v1alpha1.InfraContract{Name: c.Name, State: c.State, VMName: c.VMName,
-			BidderDids: c.BidderDids, DenyBidderDids: c.DenyBidderDids})
+		out.Contracts = append(out.Contracts, v1alpha1.InfraContract{Name: c.Name, State: c.State,
+			ComputeContractTemplate: v1alpha1.ComputeContractTemplate{VMName: c.VMName, BidderDids: c.BidderDids,
+				DenyBidderDids: c.DenyBidderDids, Tunnels: c.Tunnels}})
 	}
 	return normalize(out)
 }
@@ -125,6 +150,9 @@ func (d Declaration) Validate() error {
 		case v1alpha1.InfraContractStaged, v1alpha1.InfraContractRequested, v1alpha1.InfraContractReleased:
 		default:
 			return fmt.Errorf("%w: the contract %s has the state %q", ErrInvalidDeclaration, c.Name, c.State)
+		}
+		if err := validTunnels(c); err != nil {
+			return err
 		}
 	}
 	if d.TTLSeconds != 0 && d.TTLSeconds < 60 {
@@ -165,10 +193,17 @@ var recordStates = map[v1alpha1.InfraContractState]string{
 	v1alpha1.InfraContractReleased:  "released",
 }
 
-func toRecordContract(c v1alpha1.InfraContract) record.InfraContract {
-	return record.InfraContract{Name: c.Name, State: recordStates[StateOrStaged(c.State)], VMName: c.VMName, BidderDids: c.BidderDids,
-		DenyBidderDids: c.DenyBidderDids, SSHAuthorizedKeys: c.SshAuthorizedKeys, UserData: c.UserData, Policy: c.Policy,
-		PolicyArgs: c.PolicyArgs, VMReadyTimeoutSec: int64(c.VMReadyTimeoutSec)}
+func toRecordContract(c v1alpha1.InfraContract) (record.InfraContract, error) {
+	c.State = v1alpha1.InfraContractState(recordStates[StateOrStaged(c.State)])
+	var out record.InfraContract
+	b, err := json.Marshal(c)
+	if err == nil {
+		err = json.Unmarshal(b, &out)
+	}
+	if err != nil {
+		return record.InfraContract{}, fmt.Errorf("infra: rendering the contract %s: %w", c.Name, err)
+	}
+	return out, nil
 }
 
 func fromRecordContract(c record.InfraContract) (v1alpha1.InfraContract, error) {
@@ -181,9 +216,38 @@ func fromRecordContract(c record.InfraContract) (v1alpha1.InfraContract, error) 
 	if state == "" {
 		return v1alpha1.InfraContract{}, fmt.Errorf("%w: the contract %s has the record state %q", ErrInvalidDeclaration, c.Name, c.State)
 	}
-	return v1alpha1.InfraContract{Name: c.Name, State: state, VMName: c.VMName, BidderDids: c.BidderDids, DenyBidderDids: c.DenyBidderDids,
-		SshAuthorizedKeys: c.SSHAuthorizedKeys, UserData: c.UserData, Policy: c.Policy, PolicyArgs: c.PolicyArgs,
-		VMReadyTimeoutSec: int(c.VMReadyTimeoutSec)}, nil
+	var out v1alpha1.InfraContract
+	b, err := json.Marshal(c)
+	if err == nil {
+		err = json.Unmarshal(b, &out)
+	}
+	if err != nil {
+		return v1alpha1.InfraContract{}, fmt.Errorf("%w: the contract %s: %v", ErrInvalidDeclaration, c.Name, err)
+	}
+	out.State = state
+	return out, nil
+}
+
+func validTunnels(c v1alpha1.InfraContract) error {
+	seen := map[string]bool{}
+	for _, t := range c.Tunnels {
+		if len(t.Tag) > 32 || !labelPattern.MatchString(t.Tag) {
+			return fmt.Errorf("%w: the contract %s has the tunnel tag %q, not a DNS-1123 label of at most 32", ErrInvalidDeclaration, c.Name, t.Tag)
+		}
+		if seen[t.Tag] {
+			return fmt.Errorf("%w: the contract %s declares the tunnel %s twice", ErrInvalidDeclaration, c.Name, t.Tag)
+		}
+		seen[t.Tag] = true
+		if t.Port < 1 || t.Port > 65535 {
+			return fmt.Errorf("%w: the contract %s has the tunnel %s on port %d", ErrInvalidDeclaration, c.Name, t.Tag, t.Port)
+		}
+		switch t.Transport {
+		case "", v1alpha1.TunnelTransportOpenTunnel, v1alpha1.TunnelTransportWebRTC:
+		default:
+			return fmt.Errorf("%w: the contract %s has the tunnel %s with transport %q", ErrInvalidDeclaration, c.Name, t.Tag, t.Transport)
+		}
+	}
+	return nil
 }
 
 func toRecordStatus(o Observed) record.InfraStatus {
@@ -199,7 +263,11 @@ func Render(kind Kind, d Declaration, o Observed, createdAt time.Time) (json.Raw
 	d = normalize(d)
 	var contracts []record.InfraContract
 	for _, c := range d.Contracts {
-		contracts = append(contracts, toRecordContract(c))
+		rc, err := toRecordContract(c)
+		if err != nil {
+			return nil, err
+		}
+		contracts = append(contracts, rc)
 	}
 	created := createdAt.UTC().Format(time.RFC3339)
 	status := toRecordStatus(o)
