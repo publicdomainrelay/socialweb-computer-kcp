@@ -473,16 +473,9 @@ ssh "$HOST" "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidd
 
 The override entry must show `"applied":true` and the child generation. Sample
 the heartbeat twice, 10 s apart; `createdAt` advances about every 5 s. Read the
-offering record `cid` twice, 25 s apart: it changes, because every refresh
-writes a new `refreshedAt`. Then turn the refresh off:
-
-```bash
-ssh "$HOST" "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$K kubectl patch marketbidders.socialweb.computer app --type merge -p '{\"spec\":{\"components\":{\"Bidder\":{\"settings\":{\"bidder\":{\"offeringRefreshSeconds\":0}}}}}}'"
-ssh "$HOST" "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$K kubectl wait --for=jsonpath='{.status.phase}'=Ready marketbidders.socialweb.computer/app --timeout=180s"
-```
-
-The offering `cid` must not change over 60 s (four periods of the 15 s refresh
-the bidder ran before).
+offering record `cid` twice, 60 s apart: it must not change. A refresh re-reads
+the offering, corrects it only when it drifted and checks relay visibility; four
+refreshes of a correct offering write nothing to the PDS.
 
 A direct child edit is reverted and reported:
 
