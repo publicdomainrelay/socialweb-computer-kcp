@@ -1,9 +1,10 @@
-import { CopyObjectCommand, PutObjectCommand, S3Client } from "npm:@aws-sdk/client-s3@3.700.0";
+import { CopyObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from "npm:@aws-sdk/client-s3@3.700.0";
 import { parseArgs } from "jsr:@std/cli@1/parse-args";
 import { walk } from "jsr:@std/fs@1/walk";
 import { relative } from "jsr:@std/path@1";
 
-const args = parseArgs(Deno.args, { string: ["dir", "prefix", "also"] });
+const args = parseArgs(Deno.args, { string: ["dir", "prefix", "also"], boolean: ["content-addressed"] });
+const contentAddressed = args["content-addressed"];
 const need = (name: string): string => {
   const v = Deno.env.get(name);
   if (!v) {
@@ -13,7 +14,7 @@ const need = (name: string): string => {
   return v;
 };
 if (!args.dir || !args.prefix) {
-  console.error("usage: publish-spaces.ts --dir <local dir> --prefix <bucket prefix> [--also <second prefix>]");
+  console.error("usage: publish-spaces.ts --dir <local dir> --prefix <bucket prefix> [--also <second prefix>] [--content-addressed]");
   Deno.exit(2);
 }
 const bucket = need("SPACES_BUCKET");
@@ -60,12 +61,30 @@ const attempt = async <T>(key: string, fn: () => Promise<T>): Promise<T> => {
   }
 };
 
+const held = async (key: string): Promise<{ sha256?: string; size?: number } | undefined> => {
+  try {
+    const h = await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+    return { sha256: h.Metadata?.sha256, size: h.ContentLength };
+  } catch (err) {
+    if ((err as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode === 404) return undefined;
+    throw err;
+  }
+};
+
 const put = async (prefix: string, copyFrom?: string) => {
   const queue = [...files];
   const workers = Array.from({ length: Math.min(4, queue.length) }, async () => {
     for (let f = queue.shift(); f; f = queue.shift()) {
       const started = Date.now();
       const key = `${prefix}/${f.rel}`;
+      if (contentAddressed) {
+        const h = await attempt(`${key} head`, () => held(key));
+        if (h?.sha256 === f.sha256 && h.size === f.size) {
+          console.log(`${key} ${f.size} bytes sha256 ${f.sha256} already published, not uploaded`);
+          continue;
+        }
+        console.log(`${key} ${h ? `holds sha256 ${h.sha256} ${h.size} bytes` : "is absent"}, uploading sha256 ${f.sha256}`);
+      }
       if (copyFrom) {
         await attempt(key, () =>
           s3.send(new CopyObjectCommand({
@@ -91,6 +110,7 @@ const put = async (prefix: string, copyFrom?: string) => {
     }
   });
   await Promise.all(workers);
+  if (contentAddressed) return;
   await s3.send(new PutObjectCommand({
     Bucket: bucket,
     Key: `${prefix}/manifest.json`,
