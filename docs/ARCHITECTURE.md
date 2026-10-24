@@ -3415,6 +3415,7 @@ internal/kit/clock/          sleeps and time formatting
 internal/kit/conds/          condition set and status helpers
 internal/kit/debounce/       a debouncer
 internal/kit/fsx/            JSON file read and write, exists
+internal/kit/fswatch/        one inotify watcher per process, multiplexed across subscribers
 internal/kit/hostport/       host, port, URL and did:web helpers; listen on a host and port
 internal/kit/httpclient/     external HTTP and TLS clients
 internal/kit/httpjson/       JSON requests and responses with size and status errors
@@ -3666,6 +3667,7 @@ internal/policyengine/workflow/         parses and runs a gha-lite workflow
 controllers (adapters: kcp objects to contract calls):
 
 ```
+internal/controllers/atprotoidentity/       AtprotoIdentity: status.state from the account's Clusters (RevocationPending, ColdDeferred, Revoked)
 internal/controllers/atprotorecord/         AtprotoRecord: writes the record to its repo and tracks the objects it references
 internal/controllers/atprotorecordwatch/    AtprotoRecordWatch: watches repos for matching records and writes the children
 internal/controllers/atprotorepo/           AtprotoRepo: binds the backendRef (LocalRepo or RemoteRepo) and mirrors its contract status
