@@ -80,7 +80,7 @@ user_systemctl() { sudo systemctl --user -M "$account@" "$@"; }
 if [ "$remove" = 1 ]; then
   if id "$account" >/dev/null 2>&1; then
     user_systemctl disable --now "$unit" >/dev/null 2>&1 || true
-    runner_id="$(sudo sed -n 's/^ *id *= *\([0-9][0-9]*\)$/\1/p' "$config" 2>/dev/null | head -1)"
+    runner_id="$(sudo sed -n 's/^ *id *= *\([0-9][0-9]*\)$/\1/p' "$config" 2>/dev/null | awk 'NR==1')"
     if [ -n "$runner_id" ]; then
       gl DELETE "/runners/$runner_id" >/dev/null
       say "deleted runner $runner_id on $server_host"

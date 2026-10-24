@@ -130,7 +130,7 @@ copy_members() {
   while IFS=$'\t' read -r src dst; do
     [ -n "$src" ] || continue
     if [ ! -e "$from/$src" ]; then
-      (cd "$from" && find . | head -40) >&2
+      (cd "$from" && find . | awk 'NR<=40') >&2
       die "member $src is not in the unpacked archive (listing above)"
     fi
     mkdir -p "$(dirname "$to/$dst")"
@@ -294,7 +294,7 @@ repo_index() {
       gpg_verify "$ring" "$fpr" "$x/$suite.InRelease" "" "$x/$suite.Release"
       for ext in xz gz; do
         idx="$comp/binary-$arch/Packages.$ext"
-        sum="$(awk -v f="$idx" '/^SHA256:/{s=1;next} /^[^ ]/{s=0} s && $3==f {print $1}' "$x/$suite.Release" | head -1)"
+        sum="$(awk -v f="$idx" '/^SHA256:/{s=1;next} /^[^ ]/{s=0} s && $3==f {print $1}' "$x/$suite.Release" | awk 'NR==1')"
         [ -n "$sum" ] || continue
         if pf="$(fetch_index "${base}dists/$suite/$comp/binary-$arch/" "${idx##*/}" "$sum")"; then
           case "$ext" in xz) xz -dc "$pf" >>"$x/$repo.packages" ;; gz) gzip -dc "$pf" >>"$x/$repo.packages" ;; esac

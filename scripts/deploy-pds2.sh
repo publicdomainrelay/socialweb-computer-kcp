@@ -304,7 +304,7 @@ fi
 
 if ! grep -qE '^[[:space:]]*skip_install_trust[[:space:]]*\$' "\${CADDYFILE}"; then
   cp "\${CADDYFILE}" "\${CADDYFILE}.bak.\$(date +%s).trust"
-  if [ "\$(grep -vE '^[[:space:]]*(#|\$)' "\${CADDYFILE}" | head -n1 | tr -d '[:space:]')" = "{" ]; then
+  if [ "\$(grep -vE '^[[:space:]]*(#|\$)' "\${CADDYFILE}" | awk 'NR==1' | tr -d '[:space:]')" = "{" ]; then
     awk '!done && /^[[:space:]]*\{[[:space:]]*\$/ { print; print "\tskip_install_trust"; done = 1; next } { print }' "\${CADDYFILE}" > "\${CADDYFILE}.trust"
   else
     { printf '{\n\tskip_install_trust\n}\n\n'; cat "\${CADDYFILE}"; } > "\${CADDYFILE}.trust"

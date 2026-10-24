@@ -78,7 +78,7 @@ fi
 rm -rf "$state"
 mkdir -p "$secrets"
 chmod 0700 "$state" "$secrets"
-random() { head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c "$1"; }
+random() { head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | cut -c1-"$1"; }
 (umask 077; random 32 >"$secrets/root-password"; printf 'glpat-%s' "$(random 26)" >"$secrets/api-token")
 
 for vol in config logs data; do
@@ -105,7 +105,7 @@ docker run -d --name "$container" --label "$label" --hostname "gitlab-fixture-$n
   -v "$container-config:/etc/gitlab" -v "$container-logs:/var/log/gitlab" -v "$container-data:/var/opt/gitlab" \
   -e GITLAB_OMNIBUS_CONFIG="$omnibus" \
   "$image" >/dev/null
-port="$(docker port "$container" 80/tcp | head -1 | sed 's/.*://')"
+port="$(docker port "$container" 80/tcp | awk 'NR==1' | sed 's/.*://')"
 [ -n "$port" ] || { down; die "docker published no port for 80/tcp"; }
 url="http://$address:$port"
 printf '%s\n' "$url" | docker exec -i "$container" sh -c 'cat >/etc/gitlab/fixture_external_url'

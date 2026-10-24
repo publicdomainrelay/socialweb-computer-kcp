@@ -29,7 +29,7 @@ lane_a() {
   local ok=1
   for i in $(seq 1 60); do
     read -r run status concl < <(cd "$root" && gh run list --limit 40 --json headSha,databaseId,status,conclusion \
-      --jq ".[]|select(.headSha|startswith(\"$sha\"))|select(.status==\"completed\")|\"\(.databaseId) \(.status) \(.conclusion)\"" | head -1)
+      --jq ".[]|select(.headSha|startswith(\"$sha\"))|select(.status==\"completed\")|\"\(.databaseId) \(.status) \(.conclusion)\"" | awk 'NR==1')
     [ -n "${run:-}" ] && break
     sleep 30
   done
