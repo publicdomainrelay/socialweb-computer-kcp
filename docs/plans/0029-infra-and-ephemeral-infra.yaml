@@ -1,6 +1,6 @@
 plan: "0029"
 title: "Infra and EphemeralInfra: kcp deployments of ComputeContracts, synced both ways with computer.socialweb.infra and computer.socialweb.ephemeralInfra records"
-status: todo
+status: doing
 source: >
   2026-10-23, the user's request, read against the code at baf155f6. A deployment today is one
   ComputeContract per run request invocation, or a NodeClaim of a tenant cluster. There is no kcp
@@ -64,7 +64,7 @@ items:
       - api/v1alpha1/zz_generated.register.go
       - deploy/
     done_when: "go generate ./api/... writes the four schemas into the computecontracts export and leaves no diff on a second run; go build ./... passes."
-    status: todo
+    status: done
 
   - id: D2-LEXICONS
     title: "The computer.socialweb.infra and computer.socialweb.ephemeralInfra record lexicons, and their generated Go types"
@@ -90,7 +90,7 @@ items:
       - internal/atproto/infra/zz_generated.lexicons.go
       - deploy/check.sh
     done_when: "go generate ./internal/atproto/infra/... writes the types and a second run leaves no diff."
-    status: todo
+    status: done
 
   - id: D3-SYNC-RULES
     title: "The record binding, the AT URI, the conflict rule and deletion in both directions"
@@ -147,7 +147,7 @@ items:
       - api/v1alpha1/types_atprotorecord.go
       - internal/controllers/atprotorecord/apply.go
     done_when: "ACC29-RECORD-EDIT-PULL, ACC29-KCP-EDIT-PUSH, ACC29-DELETE-RELEASES and ACC29-REMOTE-DELETE pass."
-    status: todo
+    status: done
 
   - id: D4-CONTRACT-LIFECYCLE
     title: "Staged, Requesting, Deployed, Releasing, Released, Failed for each declared contract"
@@ -185,7 +185,7 @@ items:
       - internal/controllers/infra/controller.go
       - internal/controllers/infra/contracts.go
     done_when: "ACC29-STAGED-NO-RFP, ACC29-REQUEST-DEPLOY and ACC29-DELETE-RELEASES pass."
-    status: todo
+    status: done
 
   - id: D5-EPHEMERAL
     title: "An EphemeralInfra ends by its deadline or by completion, releases, and deletes itself"
@@ -204,7 +204,7 @@ items:
       - internal/controllers/infra/controller.go
       - deploy/obligations.txt
     done_when: "ACC29-EPHEMERAL-END passes."
-    status: todo
+    status: done
 
   - id: D6-COLLECTIONS
     title: "InfraCollection and EphemeralInfraCollection enumerate an account's records into objects"
@@ -230,7 +230,7 @@ items:
     files:
       - internal/controllers/infracollection/controller.go
     done_when: "ACC29-COLLECTION-ENUMERATE and ACC29-REMOTE-DELETE pass."
-    status: todo
+    status: done
 
   - id: D7-EVENT-STREAMS
     title: "Record changes made elsewhere reach kcp through an AtprotoRecordWatch"
@@ -254,7 +254,7 @@ items:
       - internal/controllers/infra/record.go
       - internal/controllers/infracollection/controller.go
     done_when: "ACC29-RECORD-EDIT-PULL passes with the change arriving by the watch's EventStream."
-    status: todo
+    status: done
 
   - id: M7-ROOT-LINKS
     title: "Wire the controllers into the core, and the links into a MarketRequester root"
@@ -272,7 +272,7 @@ items:
       - internal/app/compose/capabilities.go
       - internal/app/marketrequester/marketrequester.go
     done_when: "A MarketRequester root on a market network reports its infra links Accepted and the ACC29 rows run in its workspace."
-    status: todo
+    status: done
 
   - id: R8-ROOT-DELETE-ORDER
     title: "A MarketRequester root deletes its deployments before it stops the Requester"
@@ -312,7 +312,7 @@ items:
       - docs/ARCHITECTURE.md
       - deploy/market-network/README.md
     done_when: "Both documents name every new package and kind."
-    status: todo
+    status: done
 
   - id: ACC29-STAGED-NO-RFP
     title: "A staged contract sends no RFP and its record says so"
@@ -322,7 +322,7 @@ items:
       Staged reports phase Staged; no ComputeContract object exists for it; the requester repo holds
       no new market.rfp record; the computer.socialweb.infra record exists with that contract's state
       staged and status phase staged.
-    status: todo
+    status: done
 
   - id: ACC29-REQUEST-DEPLOY
     title: "Moving the contract to Requested deploys a guest and the record follows"
@@ -331,7 +331,7 @@ items:
       kubectl patch sets the contract's state to Requested; the ComputeContract appears, owned by the
       Infra; it reaches Held; the bidder's ComputeVM is Running; the Infra contract phase is Deployed;
       the record's status shows the contract deployed with the winner's did.
-    status: todo
+    status: done
 
   - id: ACC29-RECORD-EDIT-PULL
     title: "A record edited on the PDS outside kcp changes the kcp object"
@@ -341,13 +341,13 @@ items:
       description and adds a staged contract; within the watch's flush delay plus one reconcile the
       Infra spec carries both, status.record.direction is Pulled, and the record's cid equals
       status.record.cid after kcp re-writes the status part.
-    status: todo
+    status: done
 
   - id: ACC29-KCP-EDIT-PUSH
     title: "A kcp-side edit is written to the record"
     depends_on: [ACC29-STAGED-NO-RFP]
     done_when: "kubectl patch of spec.description shows up in the record read with getRecord; status.record.direction is Pushed then InSync."
-    status: todo
+    status: done
 
   - id: ACC29-COLLECTION-ENUMERATE
     title: "An InfraCollection enumerates existing records into objects"
@@ -357,7 +357,7 @@ items:
       one written straight to the PDS), an InfraCollection for the repo lists both in status.children,
       creates one child Infra for the record no object binds, reports the other as boundBy, and the
       child's spec carries the record's declaration.
-    status: todo
+    status: done
 
   - id: ACC29-DELETE-RELEASES
     title: "Deleting a deployed Infra releases its guest and removes its record"
@@ -366,13 +366,13 @@ items:
       kubectl delete of the deployed Infra leaves it Terminating with infra.socialweb.computer/release;
       its ComputeContract gets spec.release and reaches Released; the bidder's ComputeVM is gone; the
       ComputeContract and the record are deleted; then the Infra is gone.
-    status: todo
+    status: done
 
   - id: ACC29-REMOTE-DELETE
     title: "A record deleted on the PDS deletes the kcp object"
     depends_on: [ACC29-COLLECTION-ENUMERATE]
     done_when: "com.atproto.repo.deleteRecord sent straight to the PDS for a collection child's record makes that child go, and the collection does not recreate it."
-    status: todo
+    status: done
 
   - id: ACC29-EPHEMERAL-END
     title: "An EphemeralInfra ends at its deadline, releases and goes"
@@ -381,13 +381,15 @@ items:
       An EphemeralInfra with ttlSeconds 120 and one Requested contract reaches Deployed; at expiresAt
       it reports Ending with endReason Deadline, its contract is released and the guest is gone on
       the bidder, then the EphemeralInfra and its computer.socialweb.ephemeralInfra record are gone.
-    status: todo
+    status: done
 
   - id: ACC29-CONFLICT
     title: "Simultaneous edits: the record wins"
     depends_on: [ACC29-RECORD-EDIT-PULL, ACC29-KCP-EDIT-PUSH]
     done_when: >
-      With the core stopped, the Infra spec is patched and the record is edited on the PDS; after the
-      core starts, the Infra spec equals the record's declaration and condition SyncConflict is True
-      with reason RecordWon.
-    status: todo
+      With the Infra's repo.read ComponentLink removed (the controller cannot read or write the
+      record; the account's Pds runs in the requester core, so stopping the core would stop the PDS
+      too), the Infra spec is patched and the record is edited on the PDS; after the link is restored,
+      the Infra spec equals the record's declaration and condition SyncConflict is True with reason
+      RecordWon.
+    status: done

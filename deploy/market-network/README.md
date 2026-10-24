@@ -224,6 +224,133 @@ At the end of a held invocation the entry is marked `stopped`: its core and its
 components stop, and its workspace and state dir are kept until `release` or
 `resume` starts them again.
 
+### Deploy with Infra and EphemeralInfra
+
+A deployment is a kcp object in a requester's workspace that owns its
+`ComputeContract` objects (plan `docs/plans/0029-infra-and-ephemeral-infra.yaml`).
+An `Infra` lives until it is deleted; an `EphemeralInfra` ends at
+`creationTimestamp + spec.ttlSeconds` or, with `endWhen: Complete` (the
+default), once every requested contract is Released or Failed; then it releases
+its contracts and deletes itself. Each contract has a desired `state` that you
+write and a `phase` that the controller reports:
+
+| state | what happens | phase |
+| --- | --- | --- |
+| `Staged` (default) | nothing: no ComputeContract, no RFP | `Staged` |
+| `Requested` | the controller applies the ComputeContract and the Requester runs the RFP flow | `Requesting`, then `Deployed` (Held) or `Failed` |
+| `Released` | the controller writes `spec.release` on the ComputeContract | `Releasing`, then `Released` |
+
+Deleting a deployment releases every contract first (finalizer
+`infra.socialweb.computer/release`), then deletes the ComputeContracts and the
+record, then the object goes.
+
+A requester app for deployments that stays up (no held guest, no CLI) is one
+`spec.apps[]` entry of the network:
+
+```bash
+kubectl --server "$KCP/clusters/root" apply --server-side --field-manager socialweb.computer/network-app/infra-r -f - <<'EOF'
+apiVersion: socialweb.computer/v1alpha1
+kind: MarketNetwork
+metadata: {name: network}
+spec:
+  apps:
+  - {name: infra-r, kind: MarketRequester, profile: market-network}
+EOF
+```
+
+Its workspace is `root:infra-r`. The root links its own account's repo
+(`repo-did-plc-...`, the `AtprotoRepo` named in `status.did` of the
+MarketRequester) to the deployment kinds: repo.read for the four kinds and
+repo.write for their AtprotoRecords, both scoped to `computer.socialweb.infra` and
+`computer.socialweb.ephemeralInfra`.
+
+A staged Infra, bound to the requester's own repo:
+
+```bash
+kubectl --server "$KCP/clusters/root:infra-r" apply -f - <<'EOF'
+apiVersion: socialweb.computer/v1alpha1
+kind: Infra
+metadata: {name: web}
+spec:
+  description: one guest
+  contracts:
+  - {name: vm1, state: Staged}
+  record:
+    repoRef: {kind: AtprotoRepo, name: repo-did-plc-REPLACE}
+    eventSourceRefs: [{kind: EventSource, name: relay-network}]
+EOF
+kubectl --server "$KCP/clusters/root:infra-r" get infra web -o yaml
+```
+
+The record is `at://<did>/computer.socialweb.infra/web` (`status.record.uri`). Request
+the guest:
+
+```bash
+kubectl --server "$KCP/clusters/root:infra-r" patch infra web --type merge \
+  -p '{"spec":{"contracts":[{"name":"vm1","state":"Requested"}]}}'
+kubectl --server "$KCP/clusters/root:infra-r" get computecontracts -l infra.socialweb.computer/name=web
+```
+
+`spec.contracts` is replaced whole by a patch or a pull, so a patch names every
+contract. `spec.secrets` (`[{contract: vm1, secretsRef: {...}}]`) becomes the
+ComputeContract's `secretsRef` and is never written to the record.
+
+Two-way sync. Any client of the account may edit the record (for example
+`com.atproto.repo.putRecord` to its PDS). The `AtprotoRecordWatch` the Infra owns
+sees the commit on the event source, the controller reads the record, and when
+only the record changed since the last sync it applies the record's
+`description` and `contracts` to the spec (field manager
+`socialweb.computer/infra-record`; `status.record.direction: Pulled`). When only
+the spec changed it writes the record (`Pushed`), compare-and-swap on the cid it
+read. When both changed the record wins and `SyncConflict` is True with reason
+`RecordWon`. A record deleted elsewhere deletes the object. A following object
+names an existing record with `spec.record.uri` instead of publishing its own.
+
+An account's whole collection, enumerated into child objects (one per record,
+named by the rkey):
+
+```bash
+kubectl --server "$KCP/clusters/root:infra-r" apply -f - <<'EOF'
+apiVersion: socialweb.computer/v1alpha1
+kind: InfraCollection
+metadata: {name: mine}
+spec:
+  repoRef: {kind: AtprotoRepo, name: repo-did-plc-REPLACE}
+  eventSourceRefs: [{kind: EventSource, name: relay-network}]
+EOF
+kubectl --server "$KCP/clusters/root:infra-r" get infracollection mine -o jsonpath='{.status.children}'
+```
+
+A record that another object already binds is listed with `boundBy` and gets no
+child. Deleting the collection deletes its children, so it releases their
+contracts and deletes their records; `kubectl delete --cascade=orphan` keeps
+both. `EphemeralInfraCollection` is the same for
+`computer.socialweb.ephemeralInfra`.
+
+An EphemeralInfra that rents one guest for ten minutes:
+
+```bash
+kubectl --server "$KCP/clusters/root:infra-r" apply -f - <<'EOF'
+apiVersion: socialweb.computer/v1alpha1
+kind: EphemeralInfra
+metadata: {name: burst}
+spec:
+  ttlSeconds: 600
+  contracts:
+  - {name: vm1, state: Requested}
+  record:
+    repoRef: {kind: AtprotoRepo, name: repo-did-plc-REPLACE}
+    eventSourceRefs: [{kind: EventSource, name: relay-network}]
+EOF
+```
+
+For an account other than the root's, write the links the root writes for its
+own: an `AtprotoRepo` for the account (a `LocalRepo` on a Pds component, or a
+`RemoteRepo` with its credentials), then ComponentLinks in the workspace from
+the four kinds (selector `kind: Infra`, and so on) to that AtprotoRepo with
+`repo.read` and from `AtprotoRecord` objects with the label
+`infra.socialweb.computer/kind` with `repo.write`, both scoped to the two NSIDs.
+
 ### Add a bidder
 
 `run bidder --network` adds a `MarketBidder` entry to `spec.apps[]`. Its name is
