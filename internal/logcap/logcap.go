@@ -14,6 +14,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/debounce"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fswatch"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
@@ -123,7 +124,7 @@ func Keep(ctx context.Context, c Config) {
 		}
 	}
 	pass()
-	w, err := fsnotify.NewWatcher()
+	w, err := fswatch.Shared().Subscribe()
 	if err != nil {
 		c.warn("log files are not watched; they are capped only at start", "err", err.Error())
 		return
@@ -140,14 +141,14 @@ func Keep(ctx context.Context, c Config) {
 		select {
 		case <-ctx.Done():
 			return
-		case ev, ok := <-w.Events:
+		case ev, ok := <-w.Events():
 			if !ok {
 				return
 			}
 			if ev.Has(fsnotify.Write|fsnotify.Create) && c.tracked(ev.Name) {
 				d.Mark()
 			}
-		case err, ok := <-w.Errors:
+		case err, ok := <-w.Errors():
 			if !ok {
 				return
 			}

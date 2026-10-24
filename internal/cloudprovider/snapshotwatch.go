@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 
 	"github.com/fsnotify/fsnotify"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fswatch"
 )
 
 func WatchSnapshot(ctx context.Context, path string) (<-chan struct{}, error) {
@@ -14,12 +16,8 @@ func WatchSnapshot(ctx context.Context, path string) (<-chan struct{}, error) {
 	}
 	path = filepath.Clean(path)
 	dir := filepath.Dir(path)
-	w, err := fsnotify.NewWatcher()
+	w, err := fswatch.Shared().Subscribe(dir)
 	if err != nil {
-		return nil, fmt.Errorf("cloudprovider: opening a watch on the instance snapshot %s: %w", path, err)
-	}
-	if err := w.Add(dir); err != nil {
-		_ = w.Close()
 		return nil, fmt.Errorf("cloudprovider: watching %s, the directory of the instance snapshot: %w", dir, err)
 	}
 	out := make(chan struct{}, 1)
@@ -31,12 +29,12 @@ func WatchSnapshot(ctx context.Context, path string) (<-chan struct{}, error) {
 	}
 	go func() {
 		defer close(out)
-		defer func() { _ = w.Close() }()
+		defer w.Close()
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case ev, ok := <-w.Events:
+			case ev, ok := <-w.Events():
 				if !ok {
 					return
 				}
@@ -49,7 +47,7 @@ func WatchSnapshot(ctx context.Context, path string) (<-chan struct{}, error) {
 					continue
 				}
 				signal()
-			case _, ok := <-w.Errors:
+			case _, ok := <-w.Errors():
 				if !ok {
 					return
 				}

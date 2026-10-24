@@ -17,14 +17,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/fsnotify/fsnotify"
-
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/fcapi"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestdisk"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestimage"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestnet"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostcontract"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fswatch"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 )
 
@@ -383,14 +382,11 @@ const (
 func (r *firecracker) awaitBoot(ctx context.Context, p Prepared) error {
 	bctx, cancel := context.WithTimeout(ctx, r.cfg.BootTimeout)
 	defer cancel()
-	sock, err := fsnotify.NewWatcher()
+	sock, err := fswatch.Shared().Subscribe(p.SocketDir)
 	if err != nil {
 		return fmt.Errorf("vmruntime: watching %s: %w", p.SocketDir, err)
 	}
 	defer sock.Close()
-	if err := sock.Add(p.SocketDir); err != nil {
-		return fmt.Errorf("vmruntime: watching %s: %w", p.SocketDir, err)
-	}
 	units, _ := r.cfg.Manager.Watch(bctx, p.Unit)
 	exited := func(st hostsvc.UnitStatus) error {
 		if st.State != hostsvc.Active && st.State != hostsvc.Activating {
@@ -440,12 +436,12 @@ func (r *firecracker) awaitBoot(ctx context.Context, p Prepared) error {
 				}
 			}
 			check = true
-		case ev, ok := <-sock.Events:
+		case ev, ok := <-sock.Events():
 			if !ok {
 				return fmt.Errorf("vmruntime: the watch of %s ended", p.SocketDir)
 			}
 			check = filepath.Clean(ev.Name) == filepath.Clean(p.Socket)
-		case err, ok := <-sock.Errors:
+		case err, ok := <-sock.Errors():
 			if !ok {
 				return fmt.Errorf("vmruntime: the watch of %s ended", p.SocketDir)
 			}

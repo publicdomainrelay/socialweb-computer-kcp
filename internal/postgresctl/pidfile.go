@@ -10,6 +10,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fswatch"
 )
 
 const (
@@ -35,12 +36,8 @@ func (h *Host) Accepting(o v1alpha1.Postgres) bool {
 
 func (h *Host) PidChanges(ctx context.Context, o v1alpha1.Postgres) (<-chan struct{}, error) {
 	file := filepath.Clean(h.PidFile(o))
-	w, err := fsnotify.NewWatcher()
+	w, err := fswatch.Shared().Subscribe(filepath.Dir(file))
 	if err != nil {
-		return nil, fmt.Errorf("postgresctl: opening a watch on %s: %w", file, err)
-	}
-	if err := w.Add(filepath.Dir(file)); err != nil {
-		_ = w.Close()
 		return nil, fmt.Errorf("postgresctl: watching %s: %w", filepath.Dir(file), err)
 	}
 	out := make(chan struct{}, 1)
@@ -51,7 +48,7 @@ func (h *Host) PidChanges(ctx context.Context, o v1alpha1.Postgres) (<-chan stru
 			select {
 			case <-ctx.Done():
 				return
-			case ev, ok := <-w.Events:
+			case ev, ok := <-w.Events():
 				if !ok {
 					return
 				}
@@ -62,7 +59,7 @@ func (h *Host) PidChanges(ctx context.Context, o v1alpha1.Postgres) (<-chan stru
 				case out <- struct{}{}:
 				default:
 				}
-			case _, ok := <-w.Errors:
+			case _, ok := <-w.Errors():
 				if !ok {
 					return
 				}

@@ -7,30 +7,26 @@ import (
 	"path/filepath"
 
 	"github.com/fsnotify/fsnotify"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fswatch"
 )
 
 func Watch(ctx context.Context, paths ...string) (<-chan struct{}, error) {
 	if len(paths) == 0 {
 		return nil, errors.New("local: a watch needs at least one file")
 	}
-	w, err := fsnotify.NewWatcher()
+	w, err := fswatch.Shared().Subscribe()
 	if err != nil {
 		return nil, fmt.Errorf("local: opening a file watch: %w", err)
 	}
 	files := make(map[string]bool, len(paths))
-	dirs := make(map[string]bool, len(paths))
 	for _, p := range paths {
 		p = filepath.Clean(p)
 		files[p] = true
-		dir := filepath.Dir(p)
-		if dirs[dir] {
-			continue
+		if err := w.Add(filepath.Dir(p)); err != nil {
+			w.Close()
+			return nil, fmt.Errorf("local: watching %s: %w", filepath.Dir(p), err)
 		}
-		if err := w.Add(dir); err != nil {
-			_ = w.Close()
-			return nil, fmt.Errorf("local: watching %s: %w", dir, err)
-		}
-		dirs[dir] = true
 	}
 	out := make(chan struct{}, 1)
 	go func() {
@@ -40,7 +36,7 @@ func Watch(ctx context.Context, paths ...string) (<-chan struct{}, error) {
 			select {
 			case <-ctx.Done():
 				return
-			case ev, ok := <-w.Events:
+			case ev, ok := <-w.Events():
 				if !ok {
 					return
 				}
@@ -51,7 +47,7 @@ func Watch(ctx context.Context, paths ...string) (<-chan struct{}, error) {
 				case out <- struct{}{}:
 				default:
 				}
-			case _, ok := <-w.Errors:
+			case _, ok := <-w.Errors():
 				if !ok {
 					return
 				}

@@ -15,6 +15,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clicfg"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterprovider"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fswatch"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/nsexec"
 )
 
@@ -153,26 +154,22 @@ func runUnitsRoll(kind string) verbFunc {
 				return a.fail(exitFailed, "%s: no report for %s after %s; the request at %s stays for the provider", verb, req.ID, wait, path)
 			case <-stall.C:
 				stall.Reset(rollStallCheck(state, key, req, wait))
-			case ev, open := <-rolls.Events:
+			case ev, open := <-rolls.Events():
 				if !open {
 					return a.fail(exitFailed, "%s: the watch of %s closed", verb, path)
 				}
 				if ev.Has(fsnotify.Create) && filepath.Base(ev.Name) == clusterprovider.RollsDirName {
 					_ = rolls.Add(ev.Name)
 				}
-			case <-rolls.Errors:
+			case <-rolls.Errors():
 			}
 		}
 	}
 }
 
-func rollWatch(request, state, key, id string) (*fsnotify.Watcher, error) {
-	w, err := fsnotify.NewWatcher()
+func rollWatch(request, state, key, id string) (*fswatch.Sub, error) {
+	w, err := fswatch.Shared().Subscribe(filepath.Dir(request))
 	if err != nil {
-		return nil, err
-	}
-	if err := w.Add(filepath.Dir(request)); err != nil {
-		w.Close()
 		return nil, err
 	}
 	if report, err := clusterprovider.RollReportPath(state, key, id); err == nil {
