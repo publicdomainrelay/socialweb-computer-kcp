@@ -247,6 +247,15 @@ func (s *Session) HostURL() string {
 	return s.hostURL
 }
 
+func (s *Session) AuthServerURL() string {
+	if s == nil {
+		return ""
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.data.AuthServerURL
+}
+
 func (s *Session) Scopes() []string {
 	if s == nil {
 		return nil

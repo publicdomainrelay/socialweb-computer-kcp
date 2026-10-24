@@ -15,6 +15,7 @@ import (
 	"sync"
 
 	"github.com/bluesky-social/indigo/atproto/atcrypto"
+	"github.com/bluesky-social/indigo/atproto/identity"
 	"github.com/bluesky-social/indigo/atproto/syntax"
 )
 
@@ -38,6 +39,8 @@ type PendingAuth struct {
 	Scopes []string
 
 	DPoPPrivateKeyMultibase string
+
+	Entryway bool
 }
 
 type StateStore interface {
@@ -150,7 +153,7 @@ func GeneratePKCE() (string, string, error) {
 	return verifier, base64.RawURLEncoding.EncodeToString(sum[:]), nil
 }
 
-func ExchangeCallback(ctx context.Context, store StateStore, r *http.Request, client *http.Client) (SessionData, error) {
+func ExchangeCallback(ctx context.Context, store StateStore, r *http.Request, client *http.Client, directory identity.Directory) (SessionData, error) {
 	callback, err := ParseCallback(r)
 	if err != nil {
 		return SessionData{}, err
@@ -168,7 +171,11 @@ func ExchangeCallback(ctx context.Context, store StateStore, r *http.Request, cl
 	if pending.Issuer != "" && callback.Issuer != "" && pending.Issuer != callback.Issuer {
 		return SessionData{}, fmt.Errorf("oauthclient: the oauth callback issuer %q is not %q", callback.Issuer, pending.Issuer)
 	}
-	return ExchangeCode(ctx, client, pending, callback.Code)
+	data, err := ExchangeCode(ctx, client, pending, callback.Code)
+	if err != nil || !pending.Entryway {
+		return data, err
+	}
+	return BindEntrywayAccount(ctx, client, directory, data)
 }
 
 func ExchangeCode(ctx context.Context, client *http.Client, pending PendingAuth, code string) (SessionData, error) {

@@ -367,23 +367,12 @@ func (a *Accounts) beginBrowserAuthorization(ctx context.Context, workspace stri
 	if err != nil {
 		return "", "", time.Time{}, err
 	}
-	authServer, tokenEndpoint, _, err := oauthclient.DiscoverAuthServer(ctx, client, pdsURL)
+	as, err := oauthclient.DiscoverAuthorization(ctx, client, pdsURL)
 	if err != nil {
 		return "", "", time.Time{}, err
 	}
-	var metadata struct {
-		Issuer                string `json:"issuer"`
-		AuthorizationEndpoint string `json:"authorization_endpoint"`
-	}
-	if err := oauthclient.GetJSON(ctx, client, authServer+"/.well-known/oauth-authorization-server", &metadata); err != nil {
-		return "", "", time.Time{}, fmt.Errorf("marketidentity: the auth server authorization metadata: %w", err)
-	}
-	if strings.TrimSpace(metadata.AuthorizationEndpoint) == "" {
+	if as.AuthorizationEndpoint == "" {
 		return "", "", time.Time{}, errors.New("marketidentity: the auth server metadata names no authorization endpoint")
-	}
-	authorize, err := oauthclient.EndpointURL(authServer, metadata.AuthorizationEndpoint)
-	if err != nil {
-		return "", "", time.Time{}, err
 	}
 	state, err := oauthclient.NewCallbackState()
 	if err != nil {
@@ -404,11 +393,12 @@ func (a *Accounts) beginBrowserAuthorization(ctx context.Context, workspace stri
 		RedirectURI:             redirectURI,
 		ClientID:                clientID,
 		HostURL:                 pdsURL,
-		Issuer:                  metadata.Issuer,
-		AuthServerURL:           authServer,
-		TokenEndpoint:           tokenEndpoint,
+		Issuer:                  as.Issuer,
+		AuthServerURL:           as.URL,
+		TokenEndpoint:           as.TokenEndpoint,
 		Scopes:                  scopes,
 		DPoPPrivateKeyMultibase: key.Multibase(),
+		Entryway:                as.Entryway,
 	}
 	if err := a.statesFor(workspace).Put(ctx, pendingAuth); err != nil {
 		return "", "", time.Time{}, err
@@ -425,7 +415,7 @@ func (a *Accounts) beginBrowserAuthorization(ctx context.Context, workspace stri
 	if hint := cmp.Or(strings.TrimSpace(id.Spec.Did), strings.TrimSpace(id.Spec.Handle)); hint != "" {
 		query.Set("login_hint", hint)
 	}
-	parsed, err := url.Parse(authorize)
+	parsed, err := url.Parse(as.AuthorizationEndpoint)
 	if err != nil {
 		return "", "", time.Time{}, err
 	}
@@ -458,7 +448,7 @@ func (a *Accounts) completeBrowserAuthorization(ctx context.Context, workspace s
 	if err != nil {
 		return err
 	}
-	data, err := oauthclient.ExchangeCallback(ctx, a.statesFor(workspace), r, client)
+	data, err := oauthclient.ExchangeCallback(ctx, a.statesFor(workspace), r, client, a.oauth.Directory)
 	if err != nil {
 		return err
 	}
@@ -500,7 +490,7 @@ func (a *Accounts) restoreOAuthSession(ctx context.Context, workspace string, id
 	defer held.open.Unlock()
 	if session := held.auth.Session(); session != nil && held.ref == *ref {
 		if account := accountKey(id); held.account != account {
-			handle, err := a.checkAccount(ctx, id, session.DID(), session.HostURL(), "")
+			handle, err := a.checkAccount(ctx, id, session.DID(), session.HostURL(), session.AuthServerURL(), "")
 			if err != nil {
 				held.auth.Drop()
 				held.account = ""
@@ -536,7 +526,7 @@ func (a *Accounts) restoreOAuthSession(ctx context.Context, workspace string, id
 	if len(stored) == 0 {
 		return nil, "", ref, oauthclient.ErrNoSession
 	}
-	handle, err := a.checkAccount(ctx, id, stored[0].AccountDID, stored[0].HostURL, "")
+	handle, err := a.checkAccount(ctx, id, stored[0].AccountDID, stored[0].HostURL, stored[0].AuthServerURL, "")
 	if err != nil {
 		return nil, "", ref, err
 	}
@@ -657,7 +647,7 @@ func (a *Accounts) openSessionData(ctx context.Context, workspace string, id *v1
 	if err != nil {
 		return nil, "", err
 	}
-	handle, err := a.checkAccount(ctx, id, data.AccountDID, data.HostURL, claimed)
+	handle, err := a.checkAccount(ctx, id, data.AccountDID, data.HostURL, data.AuthServerURL, claimed)
 	if err != nil {
 		return nil, "", err
 	}
