@@ -15,7 +15,7 @@ type APIResource = apiresource.APIResource
 var APIResources = []APIResource{
 	{Kind: "Cluster", Plural: "clusters", Revision: 3, Export: "clusters", Object: Cluster{}},
 	{Kind: "Node", Plural: "nodes", Revision: 2, Export: "clusters", Object: Node{}},
-	{Kind: "NodeClaim", Plural: "nodeclaims", Revision: 8, Export: "clusters", Object: NodeClaim{}},
+	{Kind: "NodeClaim", Plural: "nodeclaims", Revision: 9, Export: "clusters", Object: NodeClaim{}},
 	{Kind: "ClusterLink", Plural: "clusterlinks", Revision: 2, Export: "clusters", Object: ClusterLink{}},
 	{Kind: "ClusterClientCertificate", Plural: "clusterclientcertificates", Revision: 2, Export: "clusters", Object: ClusterClientCertificate{}, PrinterColumns: []PrinterColumn{
 		{Name: "Cluster", Type: "string", JSONPath: ".spec.clusterRef.name"},
@@ -131,8 +131,8 @@ var APIResources = []APIResource{
 		{Name: "Winner", Type: "string", JSONPath: ".status.contract.winner.did"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "Infra", Plural: "infras", Revision: 1, Export: "computecontracts", Object: Infra{}, PrinterColumns: infraPrinterColumns},
-	{Kind: "EphemeralInfra", Plural: "ephemeralinfras", Revision: 1, Export: "computecontracts", Object: EphemeralInfra{}, PrinterColumns: []PrinterColumn{
+	{Kind: "Infra", Plural: "infras", Revision: 2, Export: "computecontracts", Object: Infra{}, PrinterColumns: infraPrinterColumns},
+	{Kind: "EphemeralInfra", Plural: "ephemeralinfras", Revision: 2, Export: "computecontracts", Object: EphemeralInfra{}, PrinterColumns: []PrinterColumn{
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "Record", Type: "string", JSONPath: ".status.record.uri"},
 		{Name: "Sync", Type: "string", JSONPath: ".status.record.direction"},

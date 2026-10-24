@@ -241,6 +241,18 @@ type NodeClaimStatus struct {
 	Secrets *NodeClaimSecrets `json:"secrets,omitempty"`
 
 	JoinedAt string `json:"joinedAt,omitempty"`
+
+	Infra *NodeClaimInfra `json:"infra,omitempty"`
+}
+
+type NodeClaimInfra struct {
+	Workspace string `json:"workspace"`
+
+	Name string `json:"name"`
+
+	Contract string `json:"contract"`
+
+	ComputeContract string `json:"computeContract"`
 }
 
 type NodeClaimSecrets struct {

@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-1.infras.socialweb.computer
+  name: v1alpha1-2.infras.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -112,6 +112,108 @@ spec:
                 x-kubernetes-list-type: map
                 x-kubernetes-list-map-keys:
                   - contract
+              nodes:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    contract:
+                      type: string
+                    ownerDid:
+                      type: string
+                    adopt:
+                      type: boolean
+                    nodeJoin:
+                      type: object
+                      properties:
+                        clusterRef:
+                          type: object
+                          properties:
+                            name:
+                              type: string
+                              maxLength: 253
+                          required:
+                            - name
+                        meshd:
+                          type: object
+                          properties:
+                            downloadBase:
+                              type: string
+                            pins:
+                              type: array
+                              items:
+                                type: object
+                                properties:
+                                  arch:
+                                    type: string
+                                  sha256:
+                                    type: string
+                                required:
+                                  - arch
+                                  - sha256
+                          required:
+                            - downloadBase
+                            - pins
+                        nodeAgent:
+                          type: object
+                          properties:
+                            downloadBase:
+                              type: string
+                            pins:
+                              type: array
+                              items:
+                                type: object
+                                properties:
+                                  arch:
+                                    type: string
+                                  sha256:
+                                    type: string
+                                required:
+                                  - arch
+                                  - sha256
+                          required:
+                            - downloadBase
+                            - pins
+                      required:
+                        - clusterRef
+                    nodeClaimRef:
+                      type: object
+                      properties:
+                        group:
+                          type: string
+                        kind:
+                          type: string
+                          maxLength: 63
+                        name:
+                          type: string
+                          maxLength: 253
+                        workspace:
+                          type: string
+                      required:
+                        - kind
+                        - name
+                  required:
+                    - contract
+                    - nodeClaimRef
+                x-kubernetes-list-type: map
+                x-kubernetes-list-map-keys:
+                  - contract
+              clusterRef:
+                type: object
+                properties:
+                  group:
+                    type: string
+                  kind:
+                    type: string
+                    maxLength: 63
+                  name:
+                    type: string
+                    maxLength: 253
+                  workspace:
+                    type: string
+                required:
+                  - kind
+                  - name
               record:
                 type: object
                 properties:

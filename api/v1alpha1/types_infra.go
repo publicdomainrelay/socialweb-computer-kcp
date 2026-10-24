@@ -43,6 +43,10 @@ type InfraSpec struct {
 
 	Secrets []InfraContractSecret `json:"secrets,omitempty" apigen:"listType=map,listMapKey=contract"`
 
+	Nodes []InfraContractNode `json:"nodes,omitempty" apigen:"listType=map,listMapKey=contract"`
+
+	ClusterRef *commonv1.ObjectRef `json:"clusterRef,omitempty"`
+
 	Record *InfraRecordBinding `json:"record,omitempty"`
 }
 
@@ -82,6 +86,18 @@ type InfraContractSecret struct {
 	Contract string `json:"contract"`
 
 	SecretsRef commonv1.SecretRef `json:"secretsRef"`
+}
+
+type InfraContractNode struct {
+	Contract string `json:"contract"`
+
+	OwnerDid string `json:"ownerDid,omitempty"`
+
+	Adopt bool `json:"adopt,omitempty"`
+
+	NodeJoin *ComputeContractNodeJoin `json:"nodeJoin,omitempty"`
+
+	NodeClaimRef commonv1.ObjectRef `json:"nodeClaimRef"`
 }
 
 type InfraRecordBinding struct {
@@ -220,6 +236,8 @@ const (
 	InfraContractLabel = "infra.socialweb.computer/contract"
 
 	InfraCollectionLabel = "infra.socialweb.computer/collection"
+
+	InfraClusterLabel = "infra.socialweb.computer/cluster"
 
 	InfraConditionSynced = "Synced"
 
