@@ -101,6 +101,18 @@ type BidTerminated struct {
 	EventCid string `json:"eventCid,omitempty"`
 }
 
+type BidSubmit struct {
+	Endpoint string `json:"endpoint,omitempty"`
+
+	Attempts int32 `json:"attempts,omitempty"`
+
+	LastAttemptAt string `json:"lastAttemptAt,omitempty"`
+
+	SubmittedAt string `json:"submittedAt,omitempty"`
+
+	LastError string `json:"lastError,omitempty"`
+}
+
 type BidStatus struct {
 	Phase BidPhase `json:"phase,omitempty"`
 
@@ -117,6 +129,8 @@ type BidStatus struct {
 	Timings BidTimings `json:"timings,omitempty"`
 
 	Terminated *BidTerminated `json:"terminated,omitempty"`
+
+	Submit *BidSubmit `json:"submit,omitempty"`
 
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
@@ -135,6 +149,8 @@ const (
 	BidConditionExpired = "Expired"
 
 	BidConditionStalled = "Stalled"
+
+	BidConditionSubmitted = "Submitted"
 )
 
 const FieldManagerBid = "socialweb.computer/bidder"

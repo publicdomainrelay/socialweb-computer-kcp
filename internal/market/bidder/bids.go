@@ -52,12 +52,10 @@ func (b *Bidder) stepBid(ctx context.Context, bid *v1alpha1.Bid, now time.Time) 
 	switch bid.Status.Phase {
 	case v1alpha1.BidPhaseDeciding, v1alpha1.BidPhasePublished:
 	default:
-		b.unsent.Delete(bid.Name)
 		b.bindWonBid(ctx, bid)
 		return b.finishBid(ctx, bid, now), nil
 	}
 	if bidExpired(bid, now) {
-		b.unsent.Delete(bid.Name)
 		b.expireBid(ctx, bid, now)
 		return 0, nil
 	}
@@ -85,7 +83,7 @@ func (b *Bidder) stepBid(ctx context.Context, bid *v1alpha1.Bid, now time.Time) 
 			return 0, fmt.Errorf("reading the published bid record: %w", err)
 		}
 		if found {
-			b.recordPublishedBid(ctx, bid, ref, now)
+			b.recordPublishedBid(ctx, bid, ref, nil, now)
 			b.verified.Store(bid.Name, true)
 			return b.sendBid(ctx, bid, now), nil
 		}
@@ -101,21 +99,102 @@ func (b *Bidder) stepBid(ctx context.Context, bid *v1alpha1.Bid, now time.Time) 
 
 func (b *Bidder) sendBid(ctx context.Context, bid *v1alpha1.Bid, now time.Time) time.Duration {
 	wait := untilExpiry(bid, now)
-	value, ok := b.unsent.Load(bid.Name)
-	if !ok {
+	if bid.Status.Phase != v1alpha1.BidPhasePublished || bid.Status.Bid == nil || bid.Status.Bid.URI == "" {
 		return wait
 	}
-	pending := value.(unsentBid)
-	err := b.submitBid(ctx, pending.endpoint, pending.ref)
-	if err != nil && !participant.Rejected(err) {
-		b.log.Warn("submitting the bid to the requester failed; it is retried", "bid", bid.Name, "url", pending.endpoint, "err", err)
-		return earliest(wait, BidSubmitRetry)
+	if bid.Status.Submit == nil {
+		rfp := b.rfpForBid(ctx, bid)
+		if rfp == nil {
+			return earliest(wait, BidSubmitRetry)
+		}
+		status := cloneBidStatus(bid.Status)
+		setSubmitEndpoint(&status, bid.Generation, rfp)
+		b.applyBidStatus(ctx, bid, status)
+		if bid.Status.Submit == nil {
+			return wait
+		}
 	}
+	submit := bid.Status.Submit
+	if !submitPending(bid) {
+		return wait
+	}
+	if next := submitBackoff(submit, now); next > 0 {
+		return earliest(wait, next)
+	}
+	ref := market.NewStrongRef(bid.Status.Bid.URI, bid.Status.Bid.CID)
+	submitCtx, cancel := context.WithTimeout(ctx, BidSubmitTimeout)
+	err := b.submitBid(submitCtx, submit.Endpoint, ref)
+	cancel()
+	if ctx.Err() != nil {
+		return wait
+	}
+	at := b.now().UTC()
+	status := cloneBidStatus(bid.Status)
+	next := *submit
+	next.Attempts++
+	next.LastAttemptAt = at.Format(time.RFC3339)
+	status.Submit = &next
+	switch {
+	case err == nil:
+		next.SubmittedAt = at.Format(time.RFC3339)
+		next.LastError = ""
+		conds.SetStatus(&status.Conditions, bid.Generation, v1alpha1.BidConditionSubmitted, metav1.ConditionTrue, "Submitted",
+			"the bid is submitted to "+submit.Endpoint)
+		if b.applyBidStatus(ctx, bid, status) {
+			b.log.Info("the bid is submitted to the requester", "bid", bid.Name, "url", submit.Endpoint, "attempts", next.Attempts)
+		}
+		return wait
+	case errors.Is(err, errSubmitUnresolvable):
+		next.LastError = statusError(err)
+		conds.SetStatus(&status.Conditions, bid.Generation, v1alpha1.BidConditionSubmitted, metav1.ConditionFalse, "Unresolvable", next.LastError)
+		b.applyBidStatus(ctx, bid, status)
+		return wait
+	case participant.Rejected(err):
+		b.log.Warn("the requester refused the bid", "bid", bid.Name, "url", submit.Endpoint, "err", err)
+		next.LastError = statusError(err)
+		conds.SetStatus(&status.Conditions, bid.Generation, v1alpha1.BidConditionSubmitted, metav1.ConditionFalse, "Refused", next.LastError)
+		b.applyBidStatus(ctx, bid, status)
+		return wait
+	}
+	b.log.Warn("submitting the bid to the requester failed; it is retried", "bid", bid.Name, "url", submit.Endpoint, "err", err)
+	next.LastError = statusError(err)
+	conds.SetStatus(&status.Conditions, bid.Generation, v1alpha1.BidConditionSubmitted, metav1.ConditionFalse, "Retrying", next.LastError)
+	b.applyBidStatus(ctx, bid, status)
+	return earliest(wait, submitBackoff(&next, at))
+}
+
+func setSubmitEndpoint(status *v1alpha1.BidStatus, generation int64, rfp *market.RFP) {
+	if status.Submit != nil || rfp == nil {
+		return
+	}
+	endpoint := strings.TrimSpace(rfp.SubmitBid)
+	status.Submit = &v1alpha1.BidSubmit{Endpoint: endpoint}
+	if endpoint == "" {
+		return
+	}
+	conds.SetStatus(&status.Conditions, generation, v1alpha1.BidConditionSubmitted, metav1.ConditionFalse, "Pending",
+		"the bid is to be submitted to "+endpoint)
+}
+
+func submitPending(bid *v1alpha1.Bid) bool {
+	submit := bid.Status.Submit
+	if submit == nil || submit.Endpoint == "" || submit.SubmittedAt != "" {
+		return false
+	}
+	condition := apimeta.FindStatusCondition(bid.Status.Conditions, v1alpha1.BidConditionSubmitted)
+	return condition == nil || (condition.Reason != "Refused" && condition.Reason != "Unresolvable")
+}
+
+func submitBackoff(submit *v1alpha1.BidSubmit, now time.Time) time.Duration {
+	if submit.Attempts == 0 {
+		return 0
+	}
+	last, err := time.Parse(time.RFC3339, submit.LastAttemptAt)
 	if err != nil {
-		b.log.Warn("the requester refused the bid", "bid", bid.Name, "url", pending.endpoint, "err", err)
+		return 0
 	}
-	b.unsent.Delete(bid.Name)
-	return wait
+	delay := min(BidSubmitRetry<<min(submit.Attempts-1, 4), DefaultRetry)
+	return max(last.Add(delay).Sub(now), 0)
 }
 
 func untilExpiry(bid *v1alpha1.Bid, now time.Time) time.Duration {
@@ -249,11 +328,8 @@ func (b *Bidder) publishBidRecord(ctx context.Context, bid *v1alpha1.Bid, rfp *m
 		}
 		ref = published
 	}
-	changed := b.recordPublishedBid(ctx, bid, ref, now)
+	b.recordPublishedBid(ctx, bid, ref, rfp, now)
 	b.verified.Store(bid.Name, true)
-	if changed && rfp != nil && rfp.SubmitBid != "" {
-		b.unsent.Store(bid.Name, unsentBid{endpoint: rfp.SubmitBid, ref: ref})
-	}
 	return nil
 }
 
@@ -267,10 +343,11 @@ func (b *Bidder) recordPublishFailure(ctx context.Context, bid *v1alpha1.Bid, er
 	b.applyBidStatus(ctx, bid, status)
 }
 
-func (b *Bidder) recordPublishedBid(ctx context.Context, bid *v1alpha1.Bid, ref market.StrongRef, now time.Time) bool {
+func (b *Bidder) recordPublishedBid(ctx context.Context, bid *v1alpha1.Bid, ref market.StrongRef, rfp *market.RFP, now time.Time) bool {
 	status := cloneBidStatus(bid.Status)
+	setSubmitEndpoint(&status, bid.Generation, rfp)
 	if status.Phase == v1alpha1.BidPhasePublished && status.Bid != nil && status.Bid.URI == ref.URI && status.Bid.CID == ref.CID && status.LastError == "" {
-		return false
+		return b.applyBidStatus(ctx, bid, status)
 	}
 	status.Phase = v1alpha1.BidPhasePublished
 	status.Bid = &commonv1.StrongRef{URI: ref.URI, CID: ref.CID}

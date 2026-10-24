@@ -153,18 +153,14 @@ func (b *Bidder) applyMarketEvent(ctx context.Context, uri, cid string, record m
 	return nil
 }
 
-type unsentBid struct {
-	endpoint string
-
-	ref market.StrongRef
-}
+var errSubmitUnresolvable = errors.New("bidder: the submit endpoint does not resolve")
 
 func (b *Bidder) submitBid(ctx context.Context, endpoint string, ref market.StrongRef) error {
 	raw := strings.TrimSpace(endpoint)
 	endpoint = b.submitEventURL(ctx, raw)
 	if endpoint == "" {
 		b.log.Warn("submitting the bid failed: the endpoint does not resolve", "url", raw, "bid", ref.URI)
-		return nil
+		return fmt.Errorf("%w: %s", errSubmitUnresolvable, raw)
 	}
 	record, err := b.records.GetRecord(ctx, market.ATURIAuthority(ref.URI), market.NSIDFromURI(ref.URI), participant.LastSegment(ref.URI))
 	if err != nil {

@@ -45,6 +45,8 @@ const (
 
 	BidSubmitRetry = 2 * time.Second
 
+	BidSubmitTimeout = 10 * time.Second
+
 	AwaitTimeout = 5 * time.Second
 
 	adapterLabel = "statesync.socialweb.computer/adapter"
@@ -213,8 +215,6 @@ type Bidder struct {
 
 	synced atomic.Bool
 
-	unsent sync.Map
-
 	bids *participant.Index[v1alpha1.Bid]
 
 	vms *participant.Index[v1alpha1.ComputeVM]
@@ -342,7 +342,6 @@ func (b *Bidder) indexBid(change contract.Change) {
 	if change.Gone || change.Bid == nil {
 		b.bids.Remove(change.Name)
 		b.verified.Delete(change.Name)
-		b.unsent.Delete(change.Name)
 		b.retryMu.Lock()
 		delete(b.retryAt, change.Name)
 		b.retryMu.Unlock()

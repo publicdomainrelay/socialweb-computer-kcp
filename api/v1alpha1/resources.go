@@ -55,7 +55,7 @@ var APIResources = []APIResource{
 		{Name: "PID", Type: "integer", JSONPath: ".status.runtime.pid"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "Bid", Plural: "bids", Revision: 8, Export: "computevms", Object: Bid{}, PrinterColumns: []PrinterColumn{
+	{Kind: "Bid", Plural: "bids", Revision: 9, Export: "computevms", Object: Bid{}, PrinterColumns: []PrinterColumn{
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "Requester", Type: "string", JSONPath: ".spec.requester"},
 		{Name: "Verdict", Type: "string", JSONPath: ".spec.policy.verdict"},
