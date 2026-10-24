@@ -119,7 +119,7 @@ func (s *Service) Endpoints() []component.Endpoint {
 	if !registered {
 		return nil
 	}
-	out := []component.Endpoint{{Name: "http", Protocol: component.ProtocolHTTP}}
+	out := []component.Endpoint{{Name: "http", Protocol: component.ProtocolHTTP, URL: s.logicalURL()}}
 	if raw := s.relayURL(); raw != "" {
 		protocol := component.ProtocolHTTPS
 		if strings.HasPrefix(raw, "http://") {
