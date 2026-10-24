@@ -2187,12 +2187,12 @@ Now:
   its ordinal, marked live, counted in `started` (so `Provision` never takes the primary path over
   an adopted `node1`), and the snapshot is rewritten. A never-provisioned primary host is dropped
   when adoption creates or meets the cluster's entry, so it cannot be counted in flight.
-- *Then every rule applies unchanged.* confirm (`ConfirmJoined`, `markJoined`), the 90 s loss rule,
+- *Then every rule applies unchanged.* confirm (`ConfirmJoined`, `markJoined`), the node loss rule,
   per-node scale-in (`Held` is set from the held names), teardown to zero, `inFlight` (an adopted
   `Joining` claim with no Node is in flight, a reported one is not, so each adopted node counts once)
   and `nextOrdinal` (held names are present, so the next claim is named past them).
 - *Not proven live:* a prod deploy restarting the provider with market nodes up, the guests
-  re-registering within the 90 s the loss rule allows after the cluster's group comes back (the
+  re-registering within the minute the loss rule allows after the cluster's group comes back (the
   node lifecycle controller starts the NotReady clock when the group restarts, not when it stopped).
 
 With the gateway half above, both the gateway and the provider can restart without reaping a live
@@ -2947,8 +2947,8 @@ effect half:
   and if the node took work between the decision's read and the cordon (Busy or Incoming) it
   uncordons and keeps it. Otherwise it evicts, through the Eviction API so disruption budgets hold,
   every live pod bound to the node that does not follow the nodes; a refused eviction uncordons and
-  keeps the node. Then the release is `teardownHeld`, the path the 90 s loss rule and the giving-up
-  rule already use: claim deleted, the door releases with `vm.delete`, the node's vault role, policy
+  keeps the node. Then the release is `teardownHeld`, the path the node loss rule and the giving-up
+  rule already use: claim deleted, the gateway's Requester releases with `vm.delete`, the node's vault role, policy
   and secret revoked, the tenant Node deleted. A node the provider uncordons is only one it cordoned
   itself; an operator's cordon is left alone. Evicted pods are not waited on: the tenant Node is
   deleted and their controllers recreate them elsewhere.
@@ -2982,56 +2982,49 @@ namespaces, RBAC and ConfigMaps never hold nodes. `NodeObserver` lists each in-c
 its `CustomResources` lister and refuses to observe at all when the registry names an in-cluster kind
 and no lister was supplied, so a future entry cannot silently never count.
 
-The ceiling also interacts with the cluster's own `/24`: every node takes an address from the range
-`subnetallocator` leased, so a ceiling the range cannot address is a boot failure at the third node
-rather than a scheduling one.
+On the retired guest substrates the ceiling also met the cluster's own `/24`: every node took an
+address from the range `subnetallocator` leased. A market node takes no address of this host's.
 
-The instruments: `internal/scale` `TestThreeIdleNodesWithDemandForOneReleaseTwoOverTwoHoldsAndKeepOne`,
-`TestANodeWithARunningNonBaselinePodIsNeverReleased`, `TestANodeThatBecameIdleLessThanTheHoldAgoIsKept`,
-`TestADaemonSetOnlyClusterScalesToZero`, `TestACustomResourceCountsOnlyWhileItsInClusterOperatorHasNotReconciledIt`;
-`cmd/socialweb-clusterprovider` `TestIdleMarketNodesAreCordonedDrainedAndReleasedOnePerHold` (three
-held market nodes over a fake tenant through the real driver and observer: the DaemonSet-only node
-goes at 2 m, the node holding a k3s add-on pod at 4 m with that pod evicted, the node running work
-is kept), `TestANodeThatTakesWorkBeforeTheCordonIsUncordonedAndKept`, `TestARefusedEvictionKeepsTheNode`.
-NOT yet read: a live market cluster releasing a node.
+Plan 0026 deleted the Go tests that held these rules (three held market nodes over a fake tenant:
+the DaemonSet-only node went at 2 m, the node holding a k3s add-on pod at 4 m with that pod evicted,
+the node running work was kept). NOT yet read: a live market cluster releasing a node.
 
 The reading for this is a table case: the same observation that decided `Provision, Nodes: 1`
 before now decides `Provision, Nodes: <target>` with `MaxNodes` raised, and every existing case at
 `MaxNodes == 1` is byte-for-byte what it was. What is NOT yet read is a live cluster holding more
-than one node at once - `NEXT.yaml` AUTO-1 stays open for that, and `docs/plans/0002` names the
+than one node at once - `NEXT.yaml` AUTO-1 stays open for that, and `docs/plans/0002-scale-to-n-nodes.md` names the
 instrument: three concurrent pods, three joined nodes, and a return to zero.
 
 **A market that takes no bid backs the cluster off, exponentially, capped at ten minutes (decided by
 Claude, user may veto).** MEASURED on prod: with
-no bidder answering, the provider wrote a NodeClaim, the door's fulfiller got `no_bids` after its
+no bidder answering, the provider wrote a NodeClaim, the gateway's fulfiller got `no_bids` after its
 30 s bid window, the claim ended Failed, `confirmHeld` gave the node up, and the next scale pass
 claimed again -- a new public `market.rfp` about every 50 s per missing node, 49 RFPs and 86
 `no_bids` in one hour. The rule:
 
 - *What counts.* A claim that ends `Failed` with `status.contract.rfpUri` set and
-  `status.contract.acceptUri` empty (`nodemarket.MarketDeclined`): the door asked the market and no
+  `status.contract.acceptUri` empty (`nodemarket.MarketDeclined`): the Requester asked the market and no
   bid was taken. That is the requester's whole `NO_CONTRACT_OUTCOMES` class -- `no_bids`,
   `bids_denied` and `policy_rejected` -- and all three loop identically, each re-ask a fresh public
   RFP, so all three back off. A claim that failed after an accept (the guest died, the join never
   forwarded) keeps today's behaviour: the market did answer, and the next pass asks again at once.
   So does every non-market substrate, which never reports a declined end.
 - *Why that shape and not a reason field.* The claim is classified from structured record URIs the
-  door already writes, never from `status.message` text. A new `status.reason` was rejected because
+  NodeClaim controller already writes, never from `status.message` text. A new `status.reason` was rejected because
   `APIResourceSchema.spec` is immutable and, MEASURED (`internal/versions/versions.json`), a schema
   change does not reach existing APIBindings: every cluster home bound before the bump would prune
-  the field and silently never back off. The door keeps `rfpUri` and writes no `acceptUri` on a
-  `no_bids` end; `socialweb-computer-k8s/test/node_market_test.ts` "a no-bids end keeps the rfp it
-  asked with and names no accept" pins that, so the cross-process contract is guarded on both sides.
-  Status stays one writer per half: the door writes the claim's status, the provider only reads it.
+  the field and silently never back off. The Requester keeps `rfpUri` and writes no `acceptUri` on a
+  `no_bids` end, and the NodeClaim controller copies both onto the claim. Status stays one writer per
+  half: the NodeClaim controller writes the claim's status, the provider only reads it.
 - *The wait.* `scale.BackoffDelay(n) = 15 s * 2^(n-1)` for the n-th declined or failed end in a row, capped
   at `scale.DefaultBackoffCap = 5m`: 15 s, 30 s, 1 m, 2 m, 4 m, 5 m, 5 m ... One confirm pass that
   sees several declined claims counts ONE end, because they are one answer from one market at one
-  moment. The wait runs from the pass that saw the end. `Options.BackoffBase` / `BackoffCap` exist
-  for tests; production uses the defaults.
+  moment. The wait runs from the pass that saw the end. `Options.BackoffBase` / `BackoffCap` default
+  to `scale.DefaultBackoffBase` and `DefaultBackoffCap`.
 - *Where it lives.* `scale.State.Backoff` is pure state; `scale.Decide` returns `None` with
   `Decision.BackoffUntil` set while `st.Nodes < target` and the wait holds. The decision's reason
-  says the cluster is backing off, until when (RFC 3339 UTC), how many ends in a row, and the door's
-  own words, and the provider's `cluster provider: node scale` line carries `backoffUntil`.
+  says the cluster is backing off, until when (RFC 3339 UTC), how many ends in a row, and the claim's
+  own message, and the provider's `cluster provider: node scale` line carries `backoffUntil`.
   `scaledriver.Driver.Declined(cluster, reason)` records an end (and logs `backing off market
   provisions for this cluster` with `until`, `wait`, `why`); `Driver.Joined(cluster)` clears it. The
   composition root (`wiring.go` `scale`) feeds both from `nodeHosts.confirm`'s outcome before the
@@ -3045,25 +3038,24 @@ claimed again -- a new public `market.rfp` about every 50 s per missing node, 49
   cluster from no back-off, so the first pass after a restart may post one RFP at once; that costs
   one RFP per restart, not one per pass.
 
-`tenantNodes.retain` restores the primary slot when it is empty
-(`TestAFirstNodeClaimedAgainAfterItWasGivenUpIsHeld`): dropping ordinal 1 unconditionally would leave a
+`tenantNodes.retain` restores the primary slot when it is empty: dropping ordinal 1 unconditionally would leave a
 first node claimed again after the first was given up unheld, so its claim would then never be
 confirmed, never released, never counted in flight and never seen ending, and it could not back
 anything off.
 
-**A market node NotReady for 90 s is released, and its Node deleted (provider half; 90 s is the
-user's number).** In `tenantNodes.confirmHeld`, after the given-up rule
+**A market node NotReady for `NodeLossGrace` is released, and its Node deleted (provider half; the
+user's number was 90 s, and 76c4c864 shortened it to 1 minute).** In `tenantNodes.confirmHeld`, after the given-up rule
 and the per-pass `SyncSecrets`, each held market node's tenant Node is read (`readTenantNode`). If
-its `Ready` condition is `False` or `Unknown` and `now - lastTransitionTime >= NodeLossGrace` (90 s),
+its `Ready` condition is `False` or `Unknown` and `now - lastTransitionTime >= NodeLossGrace` (1 minute, `internal/providermain/nodes.go`),
 the node goes through `teardownHeld`, the same path a scale-down takes: the claim is deleted, its
-vault role, policy and secret are revoked, the door releases the machine with `vm.delete` and drops
-its finalizer, then the tenant Node is deleted so the scheduler stops binding pods to it and evicted
+vault role, policy and secret are revoked, the NodeClaim controller has the Requester release the
+machine with `vm.delete` and drops its finalizer, then the tenant Node is deleted so the scheduler stops binding pods to it and evicted
 pods reschedule; the node is reported in `confirmOutcome.lost`, and the scale pass that follows in
 the same tick counts one node fewer and claims a replacement if the work still needs one. Decisions,
 made by Claude, user may veto:
 
 - *The clock is the Node's own `lastTransitionTime`*, written by the tenant cluster's node-lifecycle
-  controller on the same host, so a provider restart does not restart the 90 s. A condition with a
+  controller on the same host, so a provider restart does not restart the grace. A condition with a
   zero transition time falls back to the first pass that saw it not Ready, held in memory.
 - *Not covered:* a node the tenant cluster never reported (no Node object) -- the confirm and
   giving-up rules own it, however long it has been -- and a Node with no `Ready` condition yet (its
@@ -3071,14 +3063,8 @@ made by Claude, user may veto:
 - *Held nodes only.* The rule acts on nodes this provider process holds. A market node that outlived
   a provider restart is held again by adoption at startup and on every pass (section 9, "A restarted
   provider never reaps; it adopts"), so the rule covers it from the first pass after a restart.
-- *It blocks the cluster's pass* for as long as `teardownHeld` waits for the door
+- *It blocks the cluster's pass* for as long as `teardownHeld` waits for the NodeClaim controller
   (`ClaimReleaseTimeout`), exactly as the giving-up rule and the scale-down already do.
-
-The instruments are in `internal/providermain/nodeloss_test.go`:
-`TestAMarketNodeNotReadyFor89sIsKeptAndAt90sIsReleased` (False and Unknown; 89 s keeps claim and
-Node, 90 s deletes both, revokes the vault state and reports the node lost),
-`TestANodeTheClusterNeverReportedIsNotTouchedByTheLossRule` (an hour on, no Node, claim kept) and
-`TestAReadyNodeIsNotLostHoweverOldItsTransition`.
 
 **A market cluster's kube-scheduler runs with a 1 s pod backoff, written into the cluster's data dir
 before the server starts.** The scale-from-zero path has one
@@ -3110,11 +3096,9 @@ kube-scheduler's own `--help` (which lists `--config` and the deprecated
 so the flag form is not a flag this binary defines. The file form is read: an unreadable config
 (garbage bytes) makes the scheduler exit -- k3s's log records `scheduler exited` while the server
 itself stays up, so the failure an operator sees is a cluster whose pods are never placed, not one
-that failed to start. Both halves are pinned against the real binary by
-`TestK3sPlacesAZeroNodePodWithTheMarketSchedulerConfig` (a pod created at zero nodes is placed on
-the node that arrives, MEASURED 7.7 s end to end including the cluster's start) and
-`TestK3sPlacesNoPodWhenTheSchedulerConfigIsUnreadable` in `internal/clusterstack`, which run under
-`SOCIALWEB_LOCAL=1`. What this does NOT claim: on this host a pod waiting for a node was requeued
+that failed to start. Both halves were measured against the real binary (a pod created at zero nodes
+was placed on the node that arrived, 7.7 s end to end including the cluster's start). What this does
+NOT claim: on this host a pod waiting for a node was requeued
 ~50 ms after the node became schedulable with the DEFAULT backoff in every shape tried (a node
 becoming Ready, a taint leaving it, a label arriving), so the 16 s read on prod is not reproduced
 here and this change bounds the worst case rather than an observed wait.
@@ -3134,16 +3118,15 @@ non-zero reachable   -> refuse if the gate would outlive it
 
 **Conflating absent with `0` makes a deliberately-unlimited cluster undeletable.**
 
-`0` means UNLIMITED. The trade: it removes the only automatic bound on an ORPHAN. Containment then
-rests on token-per-instance, the door's session accounting, and our own teardown path - **there is no
-timer backstop**. On the local-process mechanism there is no door and no session accounting, so
-containment is the teardown path, plus the node record below.
+`0` means UNLIMITED (`clusterprovider.NodeExpiryUnlimited`). The trade: it removes the only automatic
+bound on an ORPHAN. Containment then rests on token-per-instance, the Requester's session accounting
+(`RequesterSettings.sessionCapSeconds`), and our own teardown path - **there is no timer backstop**.
 
 **A producer reports; it never guesses.** The producer surface cannot express an estimate: it returns
 a value *and whether it has one*, so "nothing to report" is a bit rather than a sentinel, and a
 source that forgets to report errs toward refusing rather than toward proceeding. `0` is the report of
-a substrate with NO DOOR and therefore no session cap at all - the local-process mechanism - and it is
-a fact about that substrate, not a guess about a door it does not have. That is why absent and `0` are
+a node with no session cap at all (the local-process mechanism was one, before it was deleted), and it
+is a fact about that node, not a guess. That is why absent and `0` are
 both reachable and mean opposite things. A guessed deadline that is late reproduces exactly the silent
 loss the gate exists to prevent, and a guess is indistinguishable from a report in the schema, so it
 would remove the refusal the gate is. The report is written **only when the object carries no value**:
@@ -3151,56 +3134,29 @@ the settled shape of the `Cluster` value is a roll-up over the node CRs, and a s
 revises a report is the one direction that loses data. A stale earlier value can only refuse a
 teardown; it can never permit one that outlives the truth.
 
-**A gateway restart with live children: reap, never adopt.** Adoption is refused because an adopted
-process has two owners, and a node that dies under one of them looks alive to the other. Both seams
-enforce it with a record rather than a convention, and neither can mistake a stranger for its own:
+**A gateway restart with live children: adopt by record, never by guess.** Every cluster member is a
+HostProcess unit, and its record is the HostProcess object, not a process scan: a restarted provider
+lists each cluster's member objects, adopts a Running one whose invocation matches the label
+`socialweb.computer/verified-invocation`, and re-places or re-gates the rest (section 5, "The
+per-cluster slice of member units"; `UnitsHost.Adoption`). An adopted unit has one owner, the object,
+so it cannot look alive to one owner and dead to another. Before the HostProcess units, a gateway
+restart reaped its children instead: a process group was found by its leased ports through
+`internal/portscan`, and a node by a `node.json` pid record; that path is gone with the local
+substrates.
 
-```
-process group   a group is found by its LEASED PORTS. portscan reads /proc for the processes
-                LISTENING on leased ports, attributes one to a cluster only when its command line
-                contains every token of a component that cluster's own stack spawns, and reports
-                every unattributed holder as a Drop. Survivors is keyed by (cluster, port), so a
-                handle can never be filed under a cluster whose argv it never matched, and an empty
-                stack set is ErrNoAttribution rather than an empty observation
-node            a node is found by its own record. Provision writes <node data dir>/node.json
-                (0600) naming the pid, the process start time from /proc/<pid>/stat field 22,
-                and the node name; liveness requires BOTH that the start time matches and that
-                /proc/<pid>/cmdline names the agent subcommand and this node name
-```
+A market node is adopted the same way: its machine is the bidder's, its guest needs no session of
+ours, and its owner of record is the `NodeClaim` in the cluster's home workspace, which the NodeClaim
+controller alone releases and only on deletion. The claim is the single record, and a restarted
+provider holds it again from that record without writing it (section 9, "A restarted provider never
+reaps; it adopts").
 
-The rule is for children of THIS host. A market node is not one: its machine is the bidder's, its
-guest needs no session of ours, and its owner of record is the `NodeClaim` in the cluster's home
-workspace, which the door alone releases and only on deletion. So a market node is the one thing a
-restart ADOPTS rather than reaps, and it cannot have two owners: the claim is the single record, and
-a restarted provider holds it again from that record without writing it (section 9, "A restarted
-provider never reaps; it adopts").
+A deleted or switched-off cluster is reaped by deleting its member objects (`UnitsHost.Reap`), and
+the HostProcess supervisor stops each unit; the provider waits until every member is Stopped before
+it drops the finalizers. Its Postgres object stays for an OFF cluster and goes with a deleted one.
 
-A pid-reuse mismatch is reported as NOT OURS and is never signalled. The 0600 mode is not hygiene: the
-record names a pid this gateway will signal, and a record another user can write is a record that aims
-our reap at a pid of their choosing.
-
-The expected argv is read off the steps `StepsFor` returns - the SAME derivation the spawn path uses,
-never a second one, so a stack the running path would not spawn is not one the reap may kill. The
-survivors are recorded on the `LocalHost` itself, so the reap and the lifecycle that follows share one
-object, and a host that reports live handles it cannot forget is refused: a handle that outlives its
-own kill becomes a kill target again the moment the kernel recycles that pid.
-
-The order inside a restart is fixed: reap the recorded survivors, then the group, then bump
-`status.instance`, then spawn. The bump is the durable name of the token a group was started with, so
-a pass that names the new token before it has taken the group holding the old one is describing a
-group that is still running. The bring-up's init timeout parks AFTER the reap, so a parked cluster
-cannot leave the owner of its own ports running.
-
-Two cases are handled by name, not by a fallthrough: a cluster whose CR is gone - deleting, OFF or
-halted - with a group still running is reaped by the startup pass and logged with the reason it is not
-being brought up; a cluster with a running CR and no survivor is brought up from nothing. There is no
-third case, because the only alternative to refusing is to spawn over a process that may still be
-writing to the store.
-
-**Reap does not reach the store.** `embedded-postgres` is a library child of the gateway, so a restart
-leaves a postmaster holding its leased port and `StartPostgres` ADOPTS a serving one - `Drop` reports
-it and nothing kills it, by design. The purposes the process group binds are `PurposesFor`'s, and no
-purpose in that list is a node's, because a node binds no port of this host's.
+**Reap does not reach the store.** The cluster's store is its Postgres object (`<prefix>pg-<store>`),
+a unit of its own: deleting a cluster's members leaves it, and the purposes the members hold are the
+front's (section 8), none of them a node's, because a node binds no port of this host's.
 
 **One Host per cluster, for the life of the process.** A node actuator built fresh on each call cannot
 scale to zero: `Provision` in one pass and `Teardown` in a later pass act on different objects, so the
@@ -3210,51 +3166,39 @@ Memoisation also holds the cluster's `k3s-secure` lease for the process lifetime
 `status.URL` meaningful after OFF: a port re-leased to another cluster is a silent misroute on this
 cluster's next ON.
 
-**A shutdown reaps; it does not kill.** A process group is spawned with `context.WithoutCancel`, so a
-gateway's SIGTERM does not `exec`-kill k3s, kine and postgres - which would leave the store needing
-crash recovery and bypass the reverse-order teardown and the tenant-side Node delete entirely. The CLI
-reaps explicitly on the way out, with a fresh context; what it does not finish is reaped by the next
-start, which is the same rule as above. The shutdown's node-host reap skips the market substrate
-entirely: deleting a market claim is what makes the door destroy the machine, so a shutdown that
-reaped market hosts would release every rented node on every deploy (watched in
-`TestAProviderShutdownLeavesItsMarketNodesForTheNextOne`: 2 claims deleted and both nodes' vault state
-revoked before the change, none after). A cluster switched OFF or deleted still releases its
-market nodes through `reapCluster`.
+**A shutdown leaves the members running.** `Provider.Shutdown` (`internal/providermain/wiring.go`)
+stops no member unit and no Postgres object: the next provider adopts them. Its node-host reap skips
+the market substrate entirely: deleting a market claim is what makes the gateway destroy the machine,
+so a shutdown that reaped market hosts would release every rented node on every deploy (watched
+before the change: 2 claims deleted and both nodes' vault state revoked; none after). A cluster
+switched OFF or deleted still releases its market nodes through `reapCluster`.
 
 **Every cluster, not the one this process was told to join.** `SOCIALWEB_CLUSTERPROVIDER_JOIN` names
 a single cluster by its bare name and keeps working exactly as it did. `SOCIALWEB_CLUSTERPROVIDER_JOIN=*`
-is the mode the k8s door needs, because that door lets any atproto user create a cluster and NOTHING
-materialises one unless a process joins it: the provider lists `registry.Refs` - which already walks
-root, the accounts, the homes and the clusters - and reconciles EVERY cluster each pass, in SERIES and
-one at a time. Serial rather than parallel is the v1 answer and it is stated rather than implied: the
-pass is bounded by the interval, the interval is 2 s, and the passes this process runs per cluster are
-the same ones the single-cluster loop runs, so what a wider tree costs is latency and not correctness.
-A failure in one cluster is caught, logged with the cluster's name, home and error, and the pass moves
-on to the next: one cluster that cannot come up must not hold back the others, and an all-clusters pass
-that returns on the first error is a tree where every cluster behind the broken one is frozen. The
-startup reap and the shutdown reap cover the same set. Startup walks every `Cluster` CR and
-every lease to decide which group to adopt, reap or bring up, tree-wide; the JOIN-scoped state dir and
-the single `Host.Reap` on the way out are the only per-join parts. Shutdown asks the
-`LocalHost` which groups it holds (`Clusters()`) and reaps each, so `*` gets the same reverse-order
-teardown, the same node-host reap and the same store stop that a single join gets, and the node hosts
-are reaped per cluster rather than only for the joined one.
+is the mode the gateway needs, because its web app lets any atproto user create a cluster and NOTHING
+materialises one unless a process joins it: the provider lists `registry.Refs` - which walks root,
+the accounts, the homes and the clusters - and the Cluster controller (`internal/controllers/cluster`)
+reconciles EVERY cluster, each on its own watch and deadlines (`deploy/obligations.txt`), with at most
+`MaxConcurrentBringUps` (4) bring-ups at once (`internal/providermain/wiring.go`). A failure in one
+cluster is logged with the cluster's name, home and error and requeued on its own: one cluster that
+cannot come up must not hold back the others. Startup walks every `Cluster` CR to decide which members
+to adopt or bring up, tree-wide; shutdown leaves every member running for the next provider.
 
-**One process per host still holds ONE apiserver per store (invariant 1).** Every cluster in the pass
-gets its own state dir, its own port leases, its own postgres, its own process group and its own
+**One process per host still holds ONE apiserver per store (invariant 1).** Every cluster gets its own
+state dir, its own port leases, its own Postgres object, its own slice of member units and its own
 `Host` entry, and the `Host` is memoised by the same key the state dir is named by, so a pass in one
 cluster and a teardown in a later pass act on the same object. Two clusters named `ci` by two
 different accounts are two entries in every one of those maps.
 
 **A market claim does not stall the pass.** `tenantNodes.Provision` writes the `NodeClaim` and returns.
 It does NOT poll the tenant cluster for the node first, and the distinction is the whole reason the
-all-clusters mode is usable: a market machine is absent for minutes, the join wait is 30 s, and one new
+all-clusters mode is usable: a market machine is absent for minutes, and one new
 claim would otherwise block every other cluster in the tree for the whole timeout, once per cluster,
 serially. Joining is confirmed on a LATER pass, by `nodeHosts.confirm`, which runs before that
 cluster's scale pass: a node whose tenant Node object has appeared is confirmed through the same
-`ConfirmJoined` the guest substrates call inline, and a node whose claim reads `Failed` is torn down
-there - the claim released and the tenant Node deleted - so the failure is reported and the cluster may
-ask the market again rather than counting a machine it will never get. The guest substrates still
-confirm inline, unchanged.
+`ConfirmJoined`, and a node whose claim reads `Failed` is torn down there - the claim released and the
+tenant Node deleted - so the failure is reported and the cluster may ask the market again rather than
+counting a machine it will never get.
 
 ## 12. Code layout
 
