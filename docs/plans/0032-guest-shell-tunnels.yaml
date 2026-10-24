@@ -1,6 +1,6 @@
 plan: "0032"
 title: "A requester can ask for a browser shell on its guest: an opt-in opentunnel + wootty cloud-init module, a tagged vm.onNetwork, and status.contract.networks"
-status: todo
+status: done
 source: >
   2026-10-24, the user's decisions (binding): relax "iroh is the only guest transport" for an opt-in
   opentunnel + wootty module the requester asks for per contract; the tunnel URL comes back through
@@ -168,7 +168,7 @@ items:
       - AGENTS.md
       - docs/ARCHITECTURE.md
     done_when: "Both files state the rule; grep finds no unqualified 'iroh is the only guest transport'."
-    status: todo
+    status: done
 
   - id: M1-API
     title: "spec.tunnels, status.contract.networks, ComputeVM guest and published networks, the tag in the lexicon"
@@ -189,7 +189,7 @@ items:
       - api/v1alpha1/resources.go
       - lexicons/com/publicdomainrelay/temp/compute/events/vm/onNetwork.json
     done_when: "go generate ./... leaves no diff after the commit; go build ./... passes."
-    status: todo
+    status: done
 
   - id: M2-PINS
     title: "Pin the wootty image layer in versions.json and expose the guest download pins"
@@ -204,7 +204,7 @@ items:
       - internal/versions/versions.json
       - internal/versions/versions.go
     done_when: "make check-pins passes; versions.json is unchanged by make pins."
-    status: todo
+    status: done
 
   - id: M3-MODULE
     title: "The opentunnel + wootty module in internal/atproto/cloudinit"
@@ -221,7 +221,7 @@ items:
       - internal/atproto/cloudinit/modules.go
       - internal/atproto/cloudinit/cloudinit.go
     done_when: "go build ./internal/atproto/cloudinit/... passes; the rendered user_data of ACC32-SHELL holds the units."
-    status: todo
+    status: done
 
   - id: M4-BIDDER-TAG
     title: "The bidder records and publishes a tagged on-network address"
@@ -246,7 +246,7 @@ items:
       - internal/market/bidder/report.go
       - internal/market/bidder/syncs.go
     done_when: "ACC32-TAGGED-EVENT passes."
-    status: todo
+    status: done
 
   - id: M5-REQUESTER
     title: "The requester composes the module and records tagged addresses"
@@ -269,7 +269,7 @@ items:
       - internal/clicfg/options.json
       - internal/stack/request/request.go
     done_when: "ACC32-STATUS-NETWORKS and ACC32-HELD-UNCHANGED pass."
-    status: todo
+    status: done
 
   - id: ARCH-SECTION-15
     title: "Record the decision in docs/ARCHITECTURE.md section 15"
@@ -278,7 +278,7 @@ items:
     files:
       - docs/ARCHITECTURE.md
     done_when: "Section 15 holds the entry."
-    status: todo
+    status: done
 
   - id: CATALOG-ROWS
     title: "Add the ACC32 scenario to docs/spec/integration-catalog.yaml for plan 0027"
@@ -287,7 +287,7 @@ items:
     files:
       - docs/spec/integration-catalog.yaml
     done_when: "The catalog holds TestAGuestShellTunnel."
-    status: todo
+    status: done
 
   - id: ACC32-SHELL
     title: "A contract that asks for a shell brings up wootty and opentunnel on its guest"
@@ -298,7 +298,7 @@ items:
       reaches Held; on the guest /var/lib/setup-secrets.done exists, /etc/wootty/wootty.env is
       root:root 0600, and setup-guest-tunnels, guest-tunnel-wootty and wootty-wootty are active;
       the token appears in no kcp object and no requester or bidder log.
-    status: todo
+    status: done
 
   - id: ACC32-TAGGED-EVENT
     title: "The guest's tunnel URL arrives as a tagged vm.onNetwork"
@@ -307,7 +307,7 @@ items:
       The bidder's repo holds a vm.onNetwork payload with tag wootty and an https address under
       opentunnel.xyz, inside a signed market.event bound to the contract's receipt, besides the
       untagged iroh one.
-    status: todo
+    status: done
 
   - id: ACC32-STATUS-NETWORKS
     title: "status.contract.networks holds the tagged address"
@@ -315,7 +315,7 @@ items:
     done_when: >
       The ComputeContract's status.contract.networks has {tag: wootty, address: <the URL>, at,
       event}; status.contract.vmAddress is still the iroh ticket.
-    status: todo
+    status: done
 
   - id: ACC32-HTTPS-AUTH
     title: "The URL answers and the token is the only way in"
@@ -325,7 +325,7 @@ items:
       <url>/api/auth/bootstrap with a wrong bearer answers 401; with the token it answers 204 and a
       wootty_auth cookie; GET <url>/api/sessions with that cookie answers 200; GET <url>/ answers 200
       with the wootty page.
-    status: todo
+    status: done
 
   - id: ACC32-HELD-UNCHANGED
     title: "A contract without spec.tunnels is unchanged"
@@ -333,7 +333,7 @@ items:
     done_when: >
       The same network's plain run request reaches Held with an iroh vmAddress, no networks, and
       user_data without a tunnel unit; the ssh session works as before.
-    status: todo
+    status: done
 
   - id: ACC32-RELEASE
     title: "Release takes the shell guest down"
@@ -341,4 +341,4 @@ items:
     done_when: >
       run request release of the shell invocation ends Released; the bidder's ComputeVM,
       FirecrackerVM and VM unit are gone; the URL no longer answers 200 on /api/health.
-    status: todo
+    status: done
