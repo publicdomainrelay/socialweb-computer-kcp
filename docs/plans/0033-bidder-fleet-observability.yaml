@@ -71,6 +71,16 @@ learnings:
       core is Ready 8-9 s after it starts and a gateway core about 18 s (local network as25,
       2026-10-24). A fleet view should report time-to-Ready per host after each restart; a slow one is
       the first sign of an ordering race like this one.
+  - id: L8-START-ORDER-CYCLES
+    text: >
+      A component that waits for its own Exposure before registering its handler waits forever,
+      because the Exposure needs the handler to become Ready (condition HandlerMissing). The Bidder
+      had it (fixed 46eada60); on 2026-10-24 a browser-hosted kcp renting a VM through our Requester
+      showed the same cycle in the Requester (phase Starting, "the requester market URL is not
+      resolved yet" every ~11 s, no RFP ever sent; contract vmshell-apv725). On our own networks the
+      10 s timeout let it limp on, so only a stricter host exposed it. Signals worth a fleet alert: a
+      component in phase Starting for more than a minute, an Exposure Ready=False with reason
+      HandlerMissing, and a contract Pending with no RFP record.
 items:
   - id: F1-INVENTORY
     title: "A fleet inventory object: which bidders exist, where, on which version"
