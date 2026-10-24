@@ -1,6 +1,6 @@
 plan: "0028"
 title: "A deleted ComputeContract releases its guest: a requester finalizer, a runner that stops on Gone, and roots that release before they stop"
-status: doing
+status: done
 source: >
   2026-10-23, read from the code at ba5d120f; not yet seen live. A ComputeContract carries no
   finalizer. The marketintents forwarder registers the ComputeContract kind without
@@ -140,7 +140,7 @@ items:
     done_when: >
       Either the read shows the order is safe, or a Gateway root deleted on a market network with a
       tenant cluster holding one node leaves no guest on the bidder within the release bound.
-    status: doing
+    status: done
 
   - id: ARCH-SECTION-14
     title: "Open the defect in docs/ARCHITECTURE.md section 14 and move it to section 15 when it closes"
