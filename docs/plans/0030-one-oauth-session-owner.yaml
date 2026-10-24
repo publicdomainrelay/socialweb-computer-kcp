@@ -1,0 +1,311 @@
+plan: "0030"
+title: "One live atproto session per account: the MarketIdentity controller owns it, every other consumer reaches it over the bus"
+status: todo
+source: >
+  2026-10-24, read from the code at baf155f6. Prod (hat-7, the oauthQr bidder bobvmbuilder) lost its
+  OAuth session at 2026-10-24T03:19:38Z: the next refresh got invalid_grant "Invalid refresh token".
+  The account session (access token, rotating refresh token, DPoP key, nonces) is stored once, at the
+  MarketIdentity spec.sessionRef in the app's OpenBao (internal/app/compose/identity.go:189-192,
+  path identity/<role>/pds-session), but the same secret is handed to five readers and each builds its
+  own live oauthclient.Session that can refresh and write the secret back:
+  (1) the MarketIdentity controller, internal/marketidentity/atproto/oauth.go:399-410
+  (restoreOAuthSession, oauthclient.Open on every reconcile) and :437-447 (openSessionData,
+  oauthclient.New after a QR or browser sign-in);
+  (2) the MarketIdentity credentials provider of the RemoteRepo, internal/controllers/remoterepo/credentials.go:49-101
+  (bus.Provide on MarketIdentity pds.session), which calls internal/pds/identity/identity.go:57-77
+  (identity.New: oauthclient.Open over its own sessionStore, :102-134) and holds that Session per key,
+  in the same core process as (1);
+  (3) the Bidder component, internal/services/bidder/credentials.go:21-74 (restoreSession:
+  SessionFromSecret of its component credentials, oauthclient.New with participant.SessionStore
+  Merge true, kept as pdsTokens/pdsDPoP), plus credentialPDSTokens (:87-161) which refreshes a bearer
+  pair on its own; the secret reaches it through BidderSpec.PDSAccessToken
+  (internal/app/marketbidder/marketbidder.go:349-359, service.go:190-195);
+  (4) the RemotePDS controller, internal/pds/remote/credentials.go:78-113 (NewSession) and :247-268
+  (oauthSession: oauthclient.Open with its sessionStore), because compose copies the identity's
+  session ref into RemotePDS spec.auth accessTokenRef and refreshTokenRef
+  (internal/app/compose/identity.go:135-141, OwnsAuth, links at :477-479); its bearer path
+  fetchBearer (:165-214) refreshes a pdsAccount pair on its own too;
+  (5) the Requester component, internal/market/requester/identity.go:21-70 (openOAuthSession:
+  oauthclient.New from cfg.OAuthSession with participant.SessionStore, or OpenFile of
+  <stateDir>/oauth-session.json), the data read in requester.go:319-330 (Configure) from
+  RequesterSpec.PDSAccessToken (internal/services/requester/service.go:82-86, wiring.go:27-45), set by
+  internal/app/marketrequester/marketrequester.go:253, internal/app/gateway/gateway.go:440 and
+  internal/app/sshgateway/sshgateway.go:377.
+  The refresh token rotates on every refresh (the in-tree authorization server revokes the old jti,
+  internal/atproto/oauth/endpoints.go:510-516), so a copy that still holds a spent refresh token and
+  saves its whole SessionData on a nonce or endpoint write puts the spent token back, and the next
+  refresh fails. Commit e671cd9e (oauthclient/session.go persistLocked: reload under a per-session
+  process-wide refreshLock before saving) patches the symptom inside one process only.
+  Read and not a copy: the gateway web app session (internal/gateway/custody) is held by the
+  openbao-plugin-auth-atproto mount (cmd/openbao-plugin-auth-atproto/session_paths.go:69-158): the
+  plugin alone refreshes, under a per-DID lock, and hands the web app one access token and one DPoP
+  proof per request, never the refresh token or the key; it already has one owner and is out of this
+  plan. internal/services/sshserver/ownersession.go and internal/market/requester/identity.go:72-96
+  (owner sessions file) sign in with a password and store no refresh token; internal/eventstream and
+  internal/atprotorepo/remote/network.go read without auth; internal/marketidentity/atproto/account.go:120-142
+  (storedPdsSession) reads the stored pdsAccount access token once for getSession and writes nothing.
+  internal/services/guestcontrolplane resolves pds.ServiceAuth from the bidder's spec.pdsRef (a
+  RemotePDS for an existing account), which holds no OAuth session; it is not a copy.
+principle: >
+  Exactly one live session per account session, held by the owner of that identity's credentials,
+  which is the only code that refreshes it or writes it. Every other consumer resolves an existing
+  internal/contract/pds handle of the owner over the bus with bus.Resolve (pds.Authenticator for
+  signed PDS requests, pds.ServiceAuth for service-auth tokens) and never receives the refresh token
+  or the DPoP private key; the handle signs a request (Apply) or mints a service-auth token, and the
+  owner refreshes. A call without an accepted ComponentLink fails with ErrLinkDenied. The stored
+  session format does not change and nothing is migrated.
+state_rules:
+  - Read AGENTS.md first. status is one of todo, doing, done, blocked. The lead flips statuses.
+  - No Go tests (AGENTS.md, plan 0027). Proof is the build gates and the live runs below.
+  - Do not touch prod. The prod proof (hat-7 oauthQr bidder, the gateway's requester alice) is the lead's, after merge.
+items:
+  - id: D0-DECISIONS
+    title: "The owner, the handles, the links and the storage"
+    depends_on: []
+    decision: >
+      Owner: the MarketIdentity controller (internal/controllers/marketidentity over
+      internal/marketidentity/atproto.Accounts). It is the only code that signs an account in (QR,
+      browser callback, pdsAccount password) and so the first writer of the secret; it knows the
+      mode, the client_id and the scopes; it already reconciles the refresh deadline (signedIn
+      requeues at refreshAfter(token), oauth.go:487) and reports SessionExpired; and the
+      MarketIdentity is the kcp object that names spec.sessionRef, so ComponentLinks point at it.
+      It runs in the core, in the same process and bus as the Bidder, Requester, RemoteRepo and
+      RemotePDS of its workspaces. Accounts keeps one held entry per (workspace, MarketIdentity
+      name): the live *oauthclient.Session (oauth modes) or the bearer pair source (pdsAccount),
+      wrapped in one internal/pds/identity Authenticator. A reconcile, the bus provider and every
+      resolver get that one entry; a new sign-in replaces it; a deleted identity drops it.
+      Handles: no new contract. The controller provides on GroupKind MarketIdentity
+      pds.CapabilitySession -> pds.Authenticator (DID, Apply signs the request with the access token
+      and a DPoP proof, Challenge returns the nonce and auth verdicts, Invalidate makes the next Apply
+      refresh through the owner) and pds.CapabilityServiceAuth -> pds.ServiceAuth (getServiceAuth on
+      the account's PDS, signed by the same held session). Both check pds.AccountDID(scope) equals the
+      identity's status.did. The provider of internal/controllers/remoterepo/credentials.go, whose
+      identity.New was a second Open, is deleted. The RemoteRepo keeps resolving pds.Transport from
+      the RemotePDS and pds.Authenticator from the MarketIdentity through the existing adapter
+      internal/atprotorepo/remote/auth.go (NewAuth), so pdsclient needs no new Authenticator-backed
+      variant. Bidder and Requester resolve pds.ServiceAuth from their MarketIdentity through the
+      existing participant.PDSServiceAuth (internal/market/participant/serviceauth.go:25-46), the same
+      shape the bidder already uses for a local Pds (internal/services/bidder/wiring.go:175-182).
+      Links: compose adds compose.ServiceAuthLink(<Bidder or Requester>, <its MarketIdentity>, did) next
+      to the existing RemoteRepoLinks (remote repo -> MarketIdentity pds.session) in
+      compose.AccountRepo callers, so each call is admitted by an accepted ComponentLink.
+      Request semantics stay those of pdsclient.TokenAuth over the one Session: the DPoP nonce retry
+      (xrpc.DPoP Challenge RetryNonce plus Session.SetDPoPNonce), one refresh and retry on 401
+      invalid_token (authretry plus Invalidate), the Accept header and ReplyLimit/ErrTooLarge of the
+      xrpc.Client the caller builds.
+      Storage: the secret stays at MarketIdentity spec.sessionRef in the app's OpenBao, in today's
+      vaultSessionStore format; only the owner reads or writes it. BidderSpec.PDSAccessToken and
+      RequesterSpec.PDSAccessToken go (no component reads the session), the identity's ref is no
+      longer copied into RemotePDS spec.auth, and the copies' code goes. Migration: none; a deploy
+      over an existing install keeps the stored session (same path, same format), and anything else
+      is deploy fresh (AGENTS.md). The per-process reload of e671cd9e is removed with the copies.
+    files: []
+    done_when: "The decisions are in this plan before M1 starts."
+    status: todo
+
+  - id: M1-OWNER-HOLDS-ONE-SESSION
+    title: "Accounts holds one live session per MarketIdentity; only it refreshes; the refresh is logged"
+    depends_on: [D0-DECISIONS]
+    decision: >
+      internal/marketidentity/atproto gains the held-session table (key workspace/name, value the
+      sessionRef it was opened from, the *oauthclient.Session and its Authenticator).
+      restoreOAuthSession returns the held session when its ref matches and opens it (Open with the
+      vaultSessionStore, the CA-aware HTTP client of spec.caRef through Accounts.tls) only when none is
+      held; openSessionData (after a QR or browser sign-in) replaces the held entry; an expired or
+      invalid session drops it; Forget drops it. The reconcile keeps calling AccessToken, so the owner
+      refreshes once per access-token lifetime even with no traffic. oauthclient.Options gains Log; a
+      successful refresh logs INFO oauth_session_refreshed with did and session_id and no token
+      material. The process-wide refreshLocks and reloadLocked of e671cd9e go: with one Session per
+      account, persist saves the Session's own data. pdsAccount: the held entry is the bearer source
+      of internal/pds/identity over the same SecretStore and ref.
+    files:
+      - internal/atproto/oauthclient/session.go
+      - internal/marketidentity/atproto/accounts.go
+      - internal/marketidentity/atproto/oauth.go
+      - internal/marketidentity/atproto/held.go
+    done_when: >
+      go build ./internal/... passes; grep finds oauthclient.Open and oauthclient.New outside
+      internal/atproto/oauthclient only in internal/marketidentity/atproto.
+    status: todo
+
+  - id: M2-OWNER-PROVIDES-HANDLES
+    title: "The MarketIdentity controller provides pds.Authenticator and pds.ServiceAuth from the held session"
+    depends_on: [M1-OWNER-HOLDS-ONE-SESSION]
+    decision: >
+      internal/pds/identity becomes the Authenticator over a given source: OAuth(session) and
+      Bearer(store, pdsURL, http) constructors replace New's Open; Authenticator also implements
+      pds.ServiceAuth (getServiceAuth through its own xrpc.Auth on the session's PDS). The
+      MarketIdentity controller calls bus.Provide for MarketIdentity pds.session (pds.Authenticator)
+      and pds.serviceauth (pds.ServiceAuth), looks the identity up in its own reconciled table, checks
+      the scope DID against status.did and returns Accounts' held Authenticator. Delete
+      remoterepo.ProvideCredentials and its options (repos.Options Identities, Vault; the
+      componentcore vaultStore of internal/stack/componentcore/repos.go).
+    files:
+      - internal/pds/identity/identity.go
+      - internal/controllers/marketidentity/controller.go
+      - internal/controllers/marketidentity/provide.go
+      - internal/controllers/remoterepo/credentials.go
+      - internal/controllers/repos/repos.go
+      - internal/stack/componentcore/repos.go
+      - internal/stack/componentcore/controllers.go
+    done_when: >
+      go build passes; scripts/check-architecture.sh passes; a RemoteRepo of an existing-account
+      identity reports Ready on the live network (ACC30-PDSACCOUNT-BIDDER, ACC30-OAUTH-BIDDER).
+    status: todo
+
+  - id: M3-BIDDER-RESOLVES
+    title: "The Bidder mints service auth through its MarketIdentity and holds no session"
+    depends_on: [M2-OWNER-PROVIDES-HANDLES]
+    decision: >
+      Delete restoreSession, credentialTokens, credentialPDSTokens and pdsAuth
+      (internal/services/bidder/credentials.go) and the fields pdsTokens, pdsDPoP, tokenRef and
+      credentials of the Service; bidder.Deps loses Credentials. minter() keeps the local Pds path and,
+      for an existing-account identity (spec.identity.marketIdentityRef, mode not localRepo), returns
+      participant.PDSServiceAuth{DID: s.did, Open: bus.Resolve[pds.ServiceAuth](self -> MarketIdentity,
+      scope did)}. BidderSpec.PDSAccessToken goes (api/v1alpha1, go generate ./api/...);
+      internal/app/marketbidder stops setting it and adds ServiceAuthLink(bidder -> MarketIdentity,
+      did).
+    files:
+      - internal/services/bidder/credentials.go
+      - internal/services/bidder/service.go
+      - internal/services/bidder/wiring.go
+      - internal/stack/componentcore/componentcore.go
+      - internal/app/marketbidder/marketbidder.go
+      - api/v1alpha1/types_component.go
+    done_when: >
+      ACC30-OAUTH-BIDDER and ACC30-PDSACCOUNT-BIDDER pass; grep finds no oauthclient,
+      DPoPSourceFromData or participant.SessionStore in internal/services/bidder.
+    status: todo
+
+  - id: M4-REQUESTER-RESOLVES
+    title: "The Requester mints service auth through its MarketIdentity and holds no session"
+    depends_on: [M2-OWNER-PROVIDES-HANDLES]
+    decision: >
+      Delete openOAuthSession, Config.OAuthSession, Deps.Sessions and Deps.SaveSessions, the
+      oauth-session.json file store and the sessions of internal/services/requester. In oauth mode the
+      DID and the PDS URL come from the requester's MarketIdentity status (resolveIdentity, which
+      already awaits it in IdentityWorkspaces) and the ServiceAuthSource is participant.PDSServiceAuth
+      over Deps.ServiceAuth, which the service resolves as bus.Resolve[pds.ServiceAuth](self ->
+      MarketIdentity in the workspace it was found in, scope did). Configure's check asks for
+      spec.identity.marketIdentityRef in oauth mode instead of a state file. RequesterSpec.PDSAccessToken
+      goes; internal/app/marketrequester, internal/app/gateway and internal/app/sshgateway stop setting
+      it and add ServiceAuthLink(requester -> MarketIdentity, did) beside their AccountRepo links. The
+      plan 0028 files internal/market/requester/observe.go and runner.go are not touched.
+    files:
+      - internal/market/requester/identity.go
+      - internal/market/requester/requester.go
+      - internal/services/requester/service.go
+      - internal/services/requester/wiring.go
+      - internal/app/marketrequester/marketrequester.go
+      - internal/app/gateway/gateway.go
+      - internal/app/sshgateway/sshgateway.go
+      - api/v1alpha1/types_component.go
+    done_when: >
+      go build passes; ACC30-E2E passes with the requester's localRepo identity; grep finds no
+      oauthclient session construction in internal/market/requester or internal/services/requester.
+      The oauth requester (the gateway's alice) is proven by the lead on prod (ACC30-PROD-LEAD).
+    status: todo
+
+  - id: M5-REMOTEPDS-HOLDS-NO-IDENTITY-SESSION
+    title: "The RemotePDS no longer opens the identity's session"
+    depends_on: [M2-OWNER-PROVIDES-HANDLES]
+    decision: >
+      compose.AccountPlan.binding stops copying the identity's sessionRef into RemotePDS spec.auth
+      (OwnsAuth and the RemotePDSAuthLinks call go): the RemoteRepo authenticates through the
+      MarketIdentity, so the RemotePDS needs no copy, for oauth and pdsAccount alike.
+      remote.NewSession refuses auth refs that hold an atproto OAuth session ("an atproto OAuth
+      session belongs to its MarketIdentity; name the MarketIdentity in the RemoteRepo
+      credentialsRef") and the oauth branch (oauthMode, oauthDPoP, sessionStore, fetchOAuth,
+      oauthSession) goes; an operator-supplied bearer credential of a RemotePDS that no MarketIdentity
+      holds keeps working.
+    files:
+      - internal/app/compose/identity.go
+      - internal/pds/remote/credentials.go
+    done_when: >
+      On the live network the composed RemotePDS objects have an empty spec.auth and report Ready; grep
+      finds no oauthclient in internal/pds/remote.
+    status: todo
+
+  - id: M6-DEAD-CODE
+    title: "Delete what only the copies used"
+    depends_on: [M3-BIDDER-RESOLVES, M4-REQUESTER-RESOLVES, M5-REMOTEPDS-HOLDS-NO-IDENTITY-SESSION]
+    decision: >
+      Delete participant.SessionStore and participant.Credentials, oauthclient.SessionFromSecret and
+      SessionSecret, OpenFile and FileStore with the TS session import, pdsclient.DPoPSourceFromData,
+      and component.CredentialStore, each only when no caller is left. Keep everything the owner still
+      uses.
+    files:
+      - internal/market/participant/credentials.go
+      - internal/atproto/oauthclient/secret.go
+      - internal/atproto/oauthclient/store.go
+      - internal/atproto/pdsclient/dpop.go
+      - internal/component/credentialstore.go
+    done_when: "go build ./... and go vet ./... pass; the deleted symbols have no caller."
+    status: todo
+
+  - id: ARCH-SECTION-15
+    title: "Record the decision in docs/ARCHITECTURE.md section 15"
+    depends_on: [M6-DEAD-CODE]
+    decision: >
+      One entry: the five copies, the owner, the handles, the links, and the ACC30 readings as after.
+    files:
+      - docs/ARCHITECTURE.md
+    done_when: "Section 15 holds the entry with the ACC30 readings."
+    status: todo
+
+  - id: ACC30-ONE-OWNER-GREP
+    title: "Only the owner builds a session from the secret"
+    depends_on: [M6-DEAD-CODE]
+    done_when: >
+      git grep of oauthclient.Open, oauthclient.New, SessionFromSecret, DPoPSourceFromData,
+      participant.SessionStore, component.CredentialStore and PDSAccessToken over internal and cmd finds
+      session construction only in internal/marketidentity/atproto and the oauthclient package itself.
+    status: todo
+
+  - id: ACC30-OAUTH-BIDDER
+    title: "An oauthBrowser bidder on the network's PDS signs in, bids and is refreshed only by the owner"
+    depends_on: [M3-BIDDER-RESOLVES, M5-REMOTEPDS-HOLDS-NO-IDENTITY-SESSION]
+    done_when: >
+      On market network oauth30: bob's Pds gets spec.oauth.accessTokenTTLSeconds 60; run bidder --network
+      with --atproto-oauth for an account on bob's PDS; a scripted authorize (POST /oauth/authorize with
+      identifier and password, then the callback) brings its MarketIdentity Ready; over at least 20
+      minutes the core logs one oauth_session_refreshed per rotation for that session id, every one
+      from the MarketIdentity controller, and no invalid_grant or SessionExpired; its RemoteRepo and
+      RemotePDS are Ready and the RemotePDS spec.auth is empty.
+    status: todo
+
+  - id: ACC30-E2E
+    title: "The oauth bidder and a requester still bid, accept and write records"
+    depends_on: [ACC30-OAUTH-BIDDER, M4-REQUESTER-RESOLVES]
+    done_when: >
+      With the oauth bidder the only bidder taking part, run request --network oauth30 --hold reaches
+      Held on it with its bid, the accept and the receipt records written, during the short-TTL window;
+      then run request release releases it and the guest is gone.
+    status: todo
+
+  - id: ACC30-PDSACCOUNT-BIDDER
+    title: "The default pdsAccount bidder keeps working through the same owner"
+    depends_on: [M3-BIDDER-RESOLVES]
+    done_when: >
+      The network's default bidder (MarketIdentity mode pdsAccount on bob's PDS) is Ready, its RemoteRepo
+      Ready and it publishes its offering record after the core restart with the new binary.
+    status: todo
+
+  - id: ACC30-NO-OTHER-READER
+    title: "No component other than the owner reads the session secret"
+    depends_on: [ACC30-OAUTH-BIDDER]
+    done_when: >
+      The Bidder and Requester specs carry no pdsAccessToken and their Deps no credential resolver; the
+      RemotePDS spec.auth is empty; the OpenBao audit log or, failing that, the core's log shows the
+      session path read only by the MarketIdentity controller's credential client.
+    status: todo
+
+  - id: ACC30-PROD-LEAD
+    title: "The lead's prod proof after merge"
+    depends_on: [ACC30-E2E]
+    done_when: >
+      The lead deploys and reads, on hat-7 (oauthQr bidder bobvmbuilder) and on the gateway (requester
+      alice): the MarketIdentity Ready, oauth_session_refreshed lines only from the core's
+      MarketIdentity controller, no invalid_grant over 24 hours, the bidder bidding and the gateway
+      claims renting nodes.
+    status: todo
