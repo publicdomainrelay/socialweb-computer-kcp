@@ -1,0 +1,344 @@
+plan: "0032"
+title: "A requester can ask for a browser shell on its guest: an opt-in opentunnel + wootty cloud-init module, a tagged vm.onNetwork, and status.contract.networks"
+status: todo
+source: >
+  2026-10-24, the user's decisions (binding): relax "iroh is the only guest transport" for an opt-in
+  opentunnel + wootty module the requester asks for per contract; the tunnel URL comes back through
+  the onNetwork flow as one more vm.onNetwork carrying a new optional tag; the wootty token is made
+  by the requester's user (a browser page) and reaches the guest only in the secrets bundle. Read
+  against main at 25ee9d70.
+
+  The rule today. AGENTS.md (The kcp paradigm, port 0, and the RFP flow) says "never add a transport
+  that the RFP cloud-init does not install"; docs/ARCHITECTURE.md section 0 (line 97) and the
+  decision at line 878 say iroh is the only guest transport and list wootty among the removed
+  modules; section 14 (line 4182) repeats it. internal/atproto/cloudinit/cloudinit.go:109 keeps
+  "wootty" in RemovedTransportModules, so a string module id "wootty" fails with
+  LegacyTransportError; internal/stack/request/request.go:663-668 refuses a non-iroh vmAddress.
+
+  The module registry. internal/atproto/cloudinit/modules.go:480-485 maps secrets, k3s, iroh and
+  poweroff-ends-vm; a module with options is a constructor (cloudinit.K3sJoinModule,
+  GuestLoginModule at modules.go:432). The requester composes its modules in
+  internal/market/requester/secrets.go:398-417 (contractModules: k3s and the k3s join when
+  spec.nodeJoin, secrets when spec.secretsRef). The secrets module (modules.go:14-109) is
+  setup-secrets.service, a oneshot with RemainAfterExit and the stamp /var/lib/setup-secrets.done;
+  setup-secrets.sh creates each parent dir 0700 root:root and writes each bundle entry root:root
+  0600 (modules.go:62-72). The bundle comes from spec.secretsRef (types_computecontract.go:41), read
+  by the requester (secrets.go:359-372) and served to the guest only after a workload identity
+  exchange; run request takes it as --secrets (cmd/socialweb-computer/request.go:202 and 610-645,
+  deploy/apps/option-map.yaml:219).
+
+  The onNetwork path. The guest's reporter is bidder-built user_data: guestseed
+  OnNetworkReporterModule (internal/guestseed/userdata.go:166-254) writes
+  /usr/local/bin/send-onnetwork.sh and guest-onnetwork.service, which wait for /run/guest-fqdn (the
+  iroh ticket), take a token from the bidder's OpenBao through guest-login.sh and POST
+  {acceptUri, acceptCid, address} to the bidder. The bidder's GuestControlPlane serves
+  POST /v1/on-network (internal/services/guestcontrolplane/routes.go:26 and 125-148) into
+  guestidentity.Guest.OnNetwork (internal/guestidentity/service.go:219-247) and the recorder
+  (internal/guestidentity/guestrecord.go:97-137), which keeps one address per ComputeVM and
+  overwrites it. The bidder publishes it once (internal/market/bidder/report.go:29-31,
+  ComputeVMPublished.OnNetworkURI) through one StateSync per collection
+  (internal/market/bidder/syncs.go:103-113 reportSyncName and reportSyncKey "onNetwork:<receipt>")
+  as a signed market.event with a com.publicdomainrelay.temp.compute.events.vm.onNetwork payload in
+  the bidder's repo (lexicons/com/publicdomainrelay/temp/compute/events/vm/onNetwork.json: address,
+  createdAt). The guest holds no repo key, so only the bidder can sign the event. The requester
+  parses it in internal/market/requester/events.go:73-134 and refuses an address that is not an
+  iroh ticket (105-110); waitGuest takes the first one into status.contract.vmAddress
+  (runner.go:900-907) and returns once vmAddress and host keys are in (runner.go:940-941); the
+  contract is then Held and waitForRelease (runner.go:972-1019) handles only vm.terminated.
+  session.go:787-788 takes the first onNetwork address for an ssh session.
+
+  The binaries. internal/versions/versions.json already pins opentunnel v0.5.5 for the host's
+  opentunnel ingress provider (internal/ingress/opentunnel), with fetch.linux/amd64 and
+  fetch.linux/arm64 {url, sha256} of the GitHub release tarballs; internal/versions/versions.go
+  reads only fetch.sha256 (FetchSHA256). opentunnel (github.com/anomalyco/opentunnel, CLI README and
+  crates/opentunnel-cli/src): `up` creates the tunnel (POST /api/tunnel, then a certificate by ACME
+  DNS-01, "a few minutes") and starts the service; `serve` runs the service in the foreground but
+  only resumes a pending identity, it never creates one; one profile is one tunnel with hostname
+  <id>.opentunnel.xyz (id 12 random base32 characters); a route <name> is served at
+  https://<name>.<id>.opentunnel.xyz; identity in $XDG_DATA_HOME/opentunnel/<profile>/tunnel.json
+  {id, hostname}, routes in $XDG_CONFIG_HOME/opentunnel/<profile>.toml; --api (OPENTUNNEL_API)
+  names the server. wootty (github.com/icoretech/wootty): the woottyd_<v>_linux_<arch>.tar.gz
+  release binaries carry no web UI (server.go registerFallbackRoute answers "Web app is not built
+  yet"); the image ghcr.io/icoretech/wootty:0.2.22 builds the UI into the binary
+  (Dockerfile: apps/web/dist copied into apps/server/internal/webassets/dist before go build) and
+  its 4th layer holds only usr/local/bin/wootty (measured 2026-10-24: amd64 layer
+  sha256:4ad99ee7b9ad99e59b61e84493b02c14027329a73029b8414422f3335a21ef27, 6354988 bytes, an
+  11489153-byte static binary embedding dist/index.html and dist/assets/index-*.js; arm64 layer
+  sha256:9111f13dfe48d49f0df703f9a5bf9806549c20d58eee423469ab1b229388ec1a, 5826987 bytes). wootty
+  checks WOOTTY_AUTH_TOKEN on /api/sessions and /api/terminal whenever it is set (cookie
+  wootty_auth, bootstrapped by POST /api/auth/bootstrap with Authorization: Bearer <token> from the
+  page's #token=); with no token on a loopback bind it requires none (config.go
+  requiresAuthToken), so behind a tunnel an empty token is an open root shell.
+principle: >
+  iroh stays the default and required guest transport: every guest gets the iroh module, the
+  requester's ssh and the vmAddress stay iroh, and a contract is Held when it is Held today. A
+  tunnel is an opt-in the requester names per contract in spec.tunnels; the requester-built
+  user_data installs it from pinned downloads, nothing outside cloud-init. The tunnel's URL comes
+  back as a signed vm.onNetwork with a tag, through the bidder exactly like the iroh address, and
+  lands in status.contract.networks. The wootty token is the only auth to the shell; it lives only
+  in the requester's OpenBao and the guest file the secrets bundle writes, never in user_data, a kcp
+  object, a record or a log.
+decisions:
+  how_a_contract_asks: >
+    A typed list spec.tunnels on ComputeContract (listType=map, key tag): each entry {tag, port,
+    server, shell}. tag is a DNS label (^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$) naming the tunnel and
+    its tagged vm.onNetwork; port (1-65535) is the guest loopback port the tunnel serves; server is
+    the opentunnel API base (apigen userEndpoint; empty means https://opentunnel.xyz); shell, when
+    present, makes the module run wootty on 127.0.0.1:<port> with shell.envFile (default
+    /etc/wootty/wootty.env) as its systemd EnvironmentFile. A contract with a shell entry and no
+    spec.secretsRef is Failed before the RFP ("a shell needs its token in spec.secretsRef"). One VM
+    opens several tunnels by listing several entries; each tag is its own opentunnel profile, so
+    its own hostname.
+  token_file: >
+    The page generates 24 random bytes, base64url without padding (32 characters), puts it in the
+    link as #token=<token>, and adds one secrets bundle entry {"path": "/etc/wootty/wootty.env",
+    "value": "WOOTTY_AUTH_TOKEN=<token>\n"}. setup-secrets.service writes it root:root 0600 in a
+    0700 /etc/wootty. The wootty unit reads it as EnvironmentFile and its wrapper refuses to start
+    (exit 1, restart in 5s) unless WOOTTY_AUTH_TOKEN has at least 32 characters, so the shell never
+    runs without auth.
+  status_shape: >
+    status.contract.networks: a list of {tag, address, at, event: {uri, cid}}, one entry per tag,
+    written by the requester runner (the one writer of status.contract): tag and address from the
+    tagged vm.onNetwork payload, at its createdAt, event the market.event that carried it. A later
+    event for the same tag replaces the entry. vmAddress keeps the untagged iroh ticket; the Held
+    transition is unchanged. The NodeClaim status shares the NodeClaimContract type and gains the
+    same field.
+  url_form: >
+    https://<route>.<id>.opentunnel.xyz, where <id> is the 12-character tunnel id the server assigns
+    (one tunnel per tag) and <route> is a 16-character random [a-z0-9] route name the guest draws
+    once and keeps in the profile config, so the URL is not in certificate logs (the certificate is
+    for <id>.opentunnel.xyz and *.<id>.opentunnel.xyz). For another server the suffix is that
+    server's tunnel domain. The address in the event is that https URL.
+  web_ui: >
+    The guest fetches the wootty binary that embeds the UI from the pinned image layer: an anonymous
+    pull token from https://ghcr.io/token?scope=repository:icoretech/wootty:pull, then
+    https://ghcr.io/v2/icoretech/wootty/blobs/<layer digest>; the layer digest is its sha256 pin,
+    checked before extracting usr/local/bin/wootty. The pin is a new versions.json section
+    guestDownloads (version 0.2.22, per platform {registry, repository, digest, member}); it is not
+    an asset, so nothing is staged or embedded in socialweb-computer. opentunnel reuses the existing
+    assets.opentunnel fetch pin (v0.5.5, GitHub release tarball url and sha256), one pin per upstream.
+    The requester writes those values into the module; the contract names no download URL.
+  bidder_upgrade: >
+    Yes, bidders need an upgrade. The guest cannot sign a market event, so the tagged address goes
+    the way the iroh address goes: the bidder-built send-onnetwork.sh takes optional arguments
+    <tag> <address> and POSTs {acceptUri, acceptCid, tag, address} to the bidder's GuestControlPlane
+    POST /v1/on-network; the recorder keeps it in ComputeVM status.guest.networks; the bidder
+    publishes one signed vm.onNetwork {tag, address} per tag (status.published.networks, one
+    StateSync per tag). With an older bidder the requester's tunnel and shell still come up, but
+    the old send-onnetwork.sh ignores the arguments and re-reports the iroh ticket (a no-op), so no
+    tagged event arrives and status.contract.networks stays empty; the URL is then only in the
+    guest's /run/guest-tunnels/<tag>.url.
+  guest_units: >
+    Requester-built user_data, per contract: setup-guest-tunnels.service (oneshot, stamp
+    /var/lib/setup-guest-tunnels.done) installs /usr/local/bin/opentunnel and, when a shell is
+    asked, /usr/local/bin/wootty, each checked against its sha256. Per tag:
+    guest-tunnel-<tag>.service runs /usr/local/bin/guest-tunnel.sh <tag> <port> <server> with XDG
+    dirs under /var/lib/guest-tunnels/<tag> and /run/guest-tunnels/<tag>; the first start runs
+    `opentunnel up` (create and wait for the certificate) and `opentunnel down`, writes
+    /run/guest-tunnels/<tag>.url, starts guest-tunnel-report-<tag>.service and then execs
+    `opentunnel serve` in the foreground (Restart=always). guest-tunnel-report-<tag>.service
+    (oneshot) runs /usr/local/bin/send-onnetwork.sh <tag> <url>. wootty-<tag>.service
+    (Wants and After setup-secrets.service, Requires and After setup-guest-tunnels.service,
+    EnvironmentFile=<envFile>, WOOTTY_HOST=127.0.0.1, WOOTTY_PORT=<port>) runs
+    /usr/local/bin/wootty-run.sh, which checks the token and execs `wootty run /bin/bash -l` as root.
+  security: >
+    The token is long random (192 bits), only in the secrets bundle (the requester's OpenBao, the
+    guest file 0600) and the user's link fragment; never in user_data, spec, status, a record or a
+    log line. The tagged address in a public atproto event is a URL and that is fine. wootty binds
+    loopback only; the tunnel is the only way in, and every API and websocket call needs the cookie
+    the token bootstraps.
+state_rules:
+  - Read AGENTS.md first. status is one of todo, doing, done, blocked. The lead flips statuses.
+  - No Go tests (AGENTS.md, plan 0027). Proof is the build gates and the live runs below.
+  - Schema changes bump the Revision in api/v1alpha1/resources.go and run go generate; generated
+    output is never hand-merged.
+items:
+  - id: R1-RULE
+    title: "State the relaxed transport rule in AGENTS.md and docs/ARCHITECTURE.md"
+    depends_on: []
+    decision: >
+      AGENTS.md (The kcp paradigm, port 0, and the RFP flow): iroh is the default and required guest
+      transport; the only other transport is the opt-in opentunnel + wootty module of
+      internal/atproto/cloudinit that a contract asks for in spec.tunnels; never add any other, and
+      never install anything outside cloud-init. docs/ARCHITECTURE.md section 0 (line 97), the
+      decision at line 878, section 14 (line 4182) and a new invariant in section 13 say the same,
+      and the decision that names vm.terminated and vm.hostKeys as the only protocol additions adds
+      the optional tag of vm.onNetwork.
+    files:
+      - AGENTS.md
+      - docs/ARCHITECTURE.md
+    done_when: "Both files state the rule; grep finds no unqualified 'iroh is the only guest transport'."
+    status: todo
+
+  - id: M1-API
+    title: "spec.tunnels, status.contract.networks, ComputeVM guest and published networks, the tag in the lexicon"
+    depends_on: []
+    decision: >
+      api/v1alpha1/types_computecontract.go: ComputeContractSpec.Tunnels []ComputeContractTunnel
+      (listType=map, listMapKey=tag) with ComputeContractTunnel {Tag, Port, Server (userEndpoint),
+      Shell *ComputeContractShell {EnvFile, default /etc/wootty/wootty.env}}.
+      api/v1alpha1/types_nodeclaim.go: NodeClaimContract.Networks []ContractNetwork {Tag, Address,
+      At, Event commonv1.StrongRef}. api/v1alpha1/types_computevm.go: ComputeVMGuestReport.Networks
+      []ComputeVMGuestNetwork {Tag, Address, ReportedAt}; ComputeVMPublished.Networks
+      []ComputeVMPublishedNetwork {Tag, URI}. The lexicon vm.onNetwork gains an optional tag
+      (string, maxLength 32). Bump the Revision of every schema the generator names; go generate.
+    files:
+      - api/v1alpha1/types_computecontract.go
+      - api/v1alpha1/types_nodeclaim.go
+      - api/v1alpha1/types_computevm.go
+      - api/v1alpha1/resources.go
+      - lexicons/com/publicdomainrelay/temp/compute/events/vm/onNetwork.json
+    done_when: "go generate ./... leaves no diff after the commit; go build ./... passes."
+    status: todo
+
+  - id: M2-PINS
+    title: "Pin the wootty image layer in versions.json and expose the guest download pins"
+    depends_on: []
+    decision: >
+      versions.json gains guestDownloads.wootty {version 0.2.22, source, verify, fetch per platform
+      {kind oci-layer, registry ghcr.io, repository icoretech/wootty, digest, member
+      usr/local/bin/wootty}}. internal/versions gains AssetFetch.URL and a reader for guest
+      downloads, so the requester gets the opentunnel tarball url and sha256 from
+      assets.opentunnel.fetch and the wootty layer from guestDownloads. make check-pins stays clean.
+    files:
+      - internal/versions/versions.json
+      - internal/versions/versions.go
+    done_when: "make check-pins passes; versions.json is unchanged by make pins."
+    status: todo
+
+  - id: M3-MODULE
+    title: "The opentunnel + wootty module in internal/atproto/cloudinit"
+    depends_on: [M2-PINS]
+    decision: >
+      internal/atproto/cloudinit/tunnels.go: TunnelsOptions {Tunnels, OpenTunnel, Wootty pins} and
+      TunnelsModule(opts) writing the units and scripts of decisions.guest_units; the registry gets
+      the id "tunnels" read from Context.Tunnels, so a string id works too. Values that reach a
+      shell or a unit line are checked (tag pattern, port range, server an https URL of safe
+      characters, envFile an absolute path of safe characters). "wootty" stays a removed string id
+      (the old transport module); its error text names spec.tunnels.
+    files:
+      - internal/atproto/cloudinit/tunnels.go
+      - internal/atproto/cloudinit/modules.go
+      - internal/atproto/cloudinit/cloudinit.go
+    done_when: "go build ./internal/atproto/cloudinit/... passes; the rendered user_data of ACC32-SHELL holds the units."
+    status: todo
+
+  - id: M4-BIDDER-TAG
+    title: "The bidder records and publishes a tagged on-network address"
+    depends_on: [M1-API]
+    decision: >
+      guestseed send-onnetwork.sh takes optional <tag> <address>: with them it skips the iroh wait
+      and sends {acceptUri, acceptCid, tag, address}; its scratch files are per tag. The
+      GuestControlPlane route and guestcp.OnNetworkReport carry Tag; guestidentity.OnNetworkReport
+      and the recorder take it: an untagged report keeps today's meaning (the iroh address), a
+      tagged one (tag pattern of M1, address an https URL up to 2048 bytes) upserts
+      status.guest.networks and keeps Address and HostKeys; the host keys path keeps Networks. The
+      bidder's report publishes one vm.onNetwork {tag, address, createdAt} per network entry without
+      a published URI, through its own StateSync (name and key include the tag), and records it in
+      status.published.networks.
+    files:
+      - internal/guestseed/userdata.go
+      - internal/contract/guestcp/guestcp.go
+      - internal/services/guestcontrolplane/routes.go
+      - internal/guestcp/openbao/plane.go
+      - internal/guestidentity/service.go
+      - internal/guestidentity/guestrecord.go
+      - internal/market/bidder/report.go
+      - internal/market/bidder/syncs.go
+    done_when: "ACC32-TAGGED-EVENT passes."
+    status: todo
+
+  - id: M5-REQUESTER
+    title: "The requester composes the module and records tagged addresses"
+    depends_on: [M1-API, M3-MODULE]
+    decision: >
+      contractModules adds TunnelsModule when spec.tunnels is set (with the pins of M2); a shell
+      without spec.secretsRef fails the contract before the RFP. parseGuestEvent reads tag: tagged,
+      the address must be an https URL; untagged, it must be an iroh ticket as today. waitGuest and
+      waitForRelease upsert status.contract.networks for a tagged event and never touch vmAddress
+      or the Held transition; session.go ignores tagged events. run request takes
+      --tunnel <tag>:<port>[:<envFile>] (comma list; an envFile makes it a shell) mapped to
+      contract.tunnels, and its summary prints the networks.
+    files:
+      - internal/market/requester/secrets.go
+      - internal/market/requester/events.go
+      - internal/market/requester/runner.go
+      - internal/market/requester/session.go
+      - cmd/socialweb-computer/request.go
+      - deploy/apps/option-map.yaml
+      - internal/clicfg/options.json
+      - internal/stack/request/request.go
+    done_when: "ACC32-STATUS-NETWORKS and ACC32-HELD-UNCHANGED pass."
+    status: todo
+
+  - id: ARCH-SECTION-15
+    title: "Record the decision in docs/ARCHITECTURE.md section 15"
+    depends_on: [M4-BIDDER-TAG, M5-REQUESTER]
+    decision: "One section 15 entry with the decisions above and the ACC32 readings."
+    files:
+      - docs/ARCHITECTURE.md
+    done_when: "Section 15 holds the entry."
+    status: todo
+
+  - id: CATALOG-ROWS
+    title: "Add the ACC32 scenario to docs/spec/integration-catalog.yaml for plan 0027"
+    depends_on: [M5-REQUESTER]
+    decision: "One catalog entry TestAGuestShellTunnel in the catalog's shape. No Go test here."
+    files:
+      - docs/spec/integration-catalog.yaml
+    done_when: "The catalog holds TestAGuestShellTunnel."
+    status: todo
+
+  - id: ACC32-SHELL
+    title: "A contract that asks for a shell brings up wootty and opentunnel on its guest"
+    depends_on: [M3-MODULE, M5-REQUESTER]
+    done_when: >
+      On an own market network (instance sh32, --bidders 1): run request --network sh32 --hold
+      --tunnel wootty:7681:/etc/wootty/wootty.env --secrets <bundle with /etc/wootty/wootty.env>
+      reaches Held; on the guest /var/lib/setup-secrets.done exists, /etc/wootty/wootty.env is
+      root:root 0600, and setup-guest-tunnels, guest-tunnel-wootty and wootty-wootty are active;
+      the token appears in no kcp object and no requester or bidder log.
+    status: todo
+
+  - id: ACC32-TAGGED-EVENT
+    title: "The guest's tunnel URL arrives as a tagged vm.onNetwork"
+    depends_on: [M4-BIDDER-TAG]
+    done_when: >
+      The bidder's repo holds a vm.onNetwork payload with tag wootty and an https address under
+      opentunnel.xyz, inside a signed market.event bound to the contract's receipt, besides the
+      untagged iroh one.
+    status: todo
+
+  - id: ACC32-STATUS-NETWORKS
+    title: "status.contract.networks holds the tagged address"
+    depends_on: [M5-REQUESTER]
+    done_when: >
+      The ComputeContract's status.contract.networks has {tag: wootty, address: <the URL>, at,
+      event}; status.contract.vmAddress is still the iroh ticket.
+    status: todo
+
+  - id: ACC32-HTTPS-AUTH
+    title: "The URL answers and the token is the only way in"
+    depends_on: [ACC32-STATUS-NETWORKS]
+    done_when: >
+      From the host: GET <url>/api/sessions without a cookie answers 401; POST
+      <url>/api/auth/bootstrap with a wrong bearer answers 401; with the token it answers 204 and a
+      wootty_auth cookie; GET <url>/api/sessions with that cookie answers 200; GET <url>/ answers 200
+      with the wootty page.
+    status: todo
+
+  - id: ACC32-HELD-UNCHANGED
+    title: "A contract without spec.tunnels is unchanged"
+    depends_on: [M5-REQUESTER]
+    done_when: >
+      The same network's plain run request reaches Held with an iroh vmAddress, no networks, and
+      user_data without a tunnel unit; the ssh session works as before.
+    status: todo
+
+  - id: ACC32-RELEASE
+    title: "Release takes the shell guest down"
+    depends_on: [ACC32-SHELL]
+    done_when: >
+      run request release of the shell invocation ends Released; the bidder's ComputeVM,
+      FirecrackerVM and VM unit are gone; the URL no longer answers 200 on /api/health.
+    status: todo
