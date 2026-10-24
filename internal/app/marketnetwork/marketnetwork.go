@@ -54,9 +54,10 @@ const (
 	NetworkPortAlicePds   = "AlicePds/http"
 	NetworkPortBobPds     = "BobPds/http"
 
-	ConditionServicesReady  = "ServicesReady"
-	ConditionVerifierPassed = "VerifierPassed"
-	ConditionOneKcp         = "OneKcp"
+	ConditionServicesReady   = "ServicesReady"
+	ConditionVerifierPassed  = "VerifierPassed"
+	ConditionOneKcp          = "OneKcp"
+	ConditionChildrenApplied = "ChildrenApplied"
 
 	VerifierProbeTimeout = 5 * time.Second
 
@@ -81,7 +82,7 @@ type Controller struct {
 
 	unservedMu sync.Mutex
 
-	unserved map[string]bool
+	unserved map[string]string
 
 	roots sync.Map
 }
@@ -411,16 +412,24 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 	} else {
 		conds.Set(&p.st.Conditions, o.Generation, ConditionOneKcp, true, "Workspaces", "every child application runs in its own workspace of the network's kcp")
 	}
-	if err := ctl.verify(ctx, snap, apps); err != nil {
-		conds.Set(&p.st.Conditions, o.Generation, ConditionVerifierPassed, false, "Probe", err.Error())
-		if unserved != nil {
-			return p.retry(v1alpha1.ApplicationPhaseProvisioning, "the network verifier: "+err.Error(), unserved)
-		}
-		return p.write(v1alpha1.ApplicationPhaseProvisioning, "the network verifier: "+err.Error())
+	if unserved != nil {
+		conds.Set(&p.st.Conditions, o.Generation, ConditionChildrenApplied, false, "RootNotServed", unserved.Error())
+	} else {
+		conds.Set(&p.st.Conditions, o.Generation, ConditionChildrenApplied, true, "Applied", "every child application's root object is applied in its workspace")
+	}
+	verr := ctl.verify(ctx, snap, apps)
+	if verr != nil {
+		conds.Set(&p.st.Conditions, o.Generation, ConditionVerifierPassed, false, "Probe", verr.Error())
+	}
+	if unserved != nil {
+		return p.retry(v1alpha1.ApplicationPhaseProvisioning, "the child applications", unserved)
+	}
+	if verr != nil {
+		return p.write(v1alpha1.ApplicationPhaseProvisioning, "the network verifier: "+verr.Error())
 	}
 	conds.Set(&p.st.Conditions, o.Generation, ConditionVerifierPassed, true, "Verified",
 		"the PLC, relay, PDS, ingress and child application endpoints answer")
-	for _, t := range []string{ConditionServicesReady, ConditionOneKcp, ConditionVerifierPassed} {
+	for _, t := range []string{ConditionServicesReady, ConditionOneKcp, ConditionChildrenApplied, ConditionVerifierPassed} {
 		if cond := meta.FindStatusCondition(p.st.Conditions, t); cond == nil || cond.Status != metav1.ConditionTrue {
 			return p.write(v1alpha1.ApplicationPhaseProvisioning, "the child applications are ready; waiting for condition "+t)
 		}

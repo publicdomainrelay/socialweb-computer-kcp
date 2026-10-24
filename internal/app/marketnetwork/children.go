@@ -273,13 +273,17 @@ func childWorkspace(rec devinstance.Record) string {
 	return cmp.Or(rec.BaseWorkspace, compose.DefaultWorkspace)
 }
 
-func (ctl *Controller) markUnserved(app string) {
+func notServed(err error) bool {
+	return apierrors.IsNotFound(err) || apimeta.IsNoMatchError(err)
+}
+
+func (ctl *Controller) markUnserved(app, msg string) {
 	ctl.unservedMu.Lock()
 	defer ctl.unservedMu.Unlock()
 	if ctl.unserved == nil {
-		ctl.unserved = map[string]bool{}
+		ctl.unserved = map[string]string{}
 	}
-	ctl.unserved[app] = true
+	ctl.unserved[app] = msg
 }
 
 func (ctl *Controller) takeUnserved() error {
@@ -292,9 +296,13 @@ func (ctl *Controller) takeUnserved() error {
 	for name := range ctl.unserved {
 		names = append(names, name)
 	}
-	ctl.unserved = nil
 	slices.Sort(names)
-	return fmt.Errorf("the root API of %s is not served in its workspace yet", strings.Join(names, ", "))
+	parts := make([]string, 0, len(names))
+	for _, name := range names {
+		parts = append(parts, name+": "+ctl.unserved[name])
+	}
+	ctl.unserved = nil
+	return fmt.Errorf("the workspace of %s does not serve its root API yet; retried with backoff (%s)", strings.Join(names, ", "), strings.Join(parts, "; "))
 }
 
 func (ctl *Controller) applyRoot(ctx context.Context, r compose.Root, rec devinstance.Record, kind v1alpha1.ApplicationKind, obj any) error {
@@ -562,6 +570,9 @@ func (ctl *Controller) ensureApp(ctx context.Context, r compose.Root, app v1alph
 	out := v1alpha1.NetworkAppStatus{Name: app.Name, Kind: app.Kind, Phase: v1alpha1.ApplicationPhaseProvisioning}
 	fail := func(err error) v1alpha1.NetworkAppStatus {
 		out.Message = err.Error()
+		if notServed(err) {
+			ctl.markUnserved(app.Name, err.Error())
+		}
 		ctl.log().Warn("a child application is not ready yet", "app", app.Name, "err", err.Error())
 		return out
 	}
@@ -630,9 +641,6 @@ func (ctl *Controller) ensureApp(ctx context.Context, r compose.Root, app v1alph
 	}
 	if root != nil {
 		if err := ctl.applyRoot(ctx, r, rec, app.Kind, root); err != nil {
-			if apierrors.IsNotFound(err) || apimeta.IsNoMatchError(err) {
-				ctl.markUnserved(app.Name)
-			}
 			return fail(fmt.Errorf("applying the root object into %s's workspace %s: %w", ch.id, rec.BaseWorkspace, err))
 		}
 	}
@@ -641,6 +649,7 @@ func (ctl *Controller) ensureApp(ctx context.Context, r compose.Root, app v1alph
 		return fail(err)
 	}
 	if !found {
+		ctl.markUnserved(app.Name, fmt.Sprintf("the root object of %s is not readable yet", ch.id))
 		return fail(fmt.Errorf("the root object of %s is not readable yet", ch.id))
 	}
 	out.Phase, out.Message, out.Did, out.Components, out.Listeners = rs.Phase, rs.Message, rs.Did, rs.Components, rs.Listeners
