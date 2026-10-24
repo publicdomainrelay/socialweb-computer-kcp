@@ -340,7 +340,7 @@ func (s *Service) buildNodeClaims(vault *vaultRuntime, pinned *gatewayhttp.Pinne
 		return nil, fmt.Errorf("gatewayapi: %w", err)
 	}
 	return &contractnodeclaim.Binding{Owner: s.selfRef(), Mapper: mapper, Vault: s.vaultRef(), ContractWorkspace: s.contractWorkspace,
-		IndexWorkspace: indexWorkspace, IndexNamespace: indexNamespace, Homes: homes, Workspace: s.workspace}, nil
+		IndexWorkspace: indexWorkspace, IndexNamespace: indexNamespace, Homes: homes, Workspace: s.workspace, Record: nodeMarket.InfraRecord.DeepCopy()}, nil
 }
 
 func (s *Service) cachedDownloadBase() func(context.Context) (string, bool) {

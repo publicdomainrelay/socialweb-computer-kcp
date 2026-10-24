@@ -219,10 +219,12 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obj 
 		return ctlruntime.Result{}, err
 	}
 	alive := true
+	var cl *v1alpha1.Cluster
 	if owned {
-		if alive, err = clusterAlive(ctx, store, cluster); err != nil {
+		if cl, err = readCluster(ctx, store, cluster); err != nil {
 			return ctlruntime.Result{}, err
 		}
+		alive = cl != nil && cl.DeletionTimestamp.IsZero()
 	}
 	if !alive {
 		if err := c.deleteInfra(ctx, store, at.Workspace, at.Name, "the cluster is deleting"); err != nil {
@@ -230,18 +232,18 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obj 
 		}
 	}
 	if !obj.DeletionTimestamp.IsZero() {
-		return c.settle(ctx, req, store, b, &claim, at, cc, alive)
+		return c.settle(ctx, req, store, b, &claim, at, cc, cl, alive)
 	}
 	if cc == nil {
 		if !alive {
 			c.wait(req, false)
 			return ctlruntime.Result{}, nil
 		}
-		return c.ensure(ctx, req, store, b, &claim, at)
+		return c.ensure(ctx, req, store, b, &claim, at, cl)
 	}
 	c.wait(req, false)
 	if alive {
-		if err := c.declare(ctx, store, claim, at, nil); err != nil && !errors.Is(err, errInfraDeleting) {
+		if err := c.declare(ctx, store, claim, at, nil, cl); err != nil && !errors.Is(err, errInfraDeleting) {
 			return ctlruntime.Result{}, err
 		}
 	}
@@ -261,18 +263,18 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obj 
 }
 
 func (c *Controller) ensure(ctx context.Context, req ctlruntime.Request, store *kcpstore.Store, b *contract.Binding, claim *contract.Claim,
-	at v1alpha1.NodeClaimInfra) (ctlruntime.Result, error) {
+	at v1alpha1.NodeClaimInfra, cl *v1alpha1.Cluster) (ctlruntime.Result, error) {
 	obj := &claim.Object
 	ensure, adopt := b.Mapper.Wants(*claim)
 	if !ensure {
 		c.wait(req, false)
-		return ctlruntime.Result{}, c.waitable(c.declare(ctx, store, *claim, at, nil))
+		return ctlruntime.Result{}, c.waitable(c.declare(ctx, store, *claim, at, nil, cl))
 	}
 	bases, ok := b.Mapper.Bases(ctx, adopt)
 	if !ok {
 		c.wait(req, true)
 		staged := c.entry(b, *claim, at, adopt, contract.Bases{})
-		return ctlruntime.Result{}, c.waitable(c.declare(ctx, store, *claim, at, &staged))
+		return ctlruntime.Result{}, c.waitable(c.declare(ctx, store, *claim, at, &staged, cl))
 	}
 	c.wait(req, false)
 	key := claim.Key()
@@ -295,7 +297,7 @@ func (c *Controller) ensure(ctx context.Context, req ctlruntime.Request, store *
 		return ctlruntime.Result{}, err
 	}
 	requested := c.entry(b, *claim, at, adopt, bases)
-	if err := c.declare(ctx, store, *claim, at, &requested); err != nil {
+	if err := c.declare(ctx, store, *claim, at, &requested, cl); err != nil {
 		if errors.Is(err, errInfraDeleting) {
 			c.log.Info("node_claim_infra_deleting", "claim", key, "infra", at.Name)
 			return ctlruntime.Result{}, nil
@@ -316,7 +318,7 @@ func (c *Controller) waitable(err error) error {
 }
 
 func (c *Controller) settle(ctx context.Context, req ctlruntime.Request, store *kcpstore.Store, b *contract.Binding, claim *contract.Claim,
-	at v1alpha1.NodeClaimInfra, cc *v1alpha1.ComputeContract, alive bool) (ctlruntime.Result, error) {
+	at v1alpha1.NodeClaimInfra, cc *v1alpha1.ComputeContract, cl *v1alpha1.Cluster, alive bool) (ctlruntime.Result, error) {
 	obj := &claim.Object
 	c.wait(req, false)
 	if !controllerutil.ContainsFinalizer(obj, v1alpha1.FinalizerNodeClaim) {
@@ -324,7 +326,7 @@ func (c *Controller) settle(ctx context.Context, req ctlruntime.Request, store *
 	}
 	key := claim.Key()
 	if alive {
-		if err := c.declare(ctx, store, *claim, at, nil); c.waitable(err) != nil {
+		if err := c.declare(ctx, store, *claim, at, nil, cl); c.waitable(err) != nil {
 			return ctlruntime.Result{Waiting: true}, err
 		}
 	}

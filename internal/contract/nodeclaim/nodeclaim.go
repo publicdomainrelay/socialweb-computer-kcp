@@ -107,6 +107,8 @@ type Binding struct {
 	Homes []string
 
 	Workspace string
+
+	Record *v1alpha1.GatewayInfraRecord
 }
 
 type Binder interface {

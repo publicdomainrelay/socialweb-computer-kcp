@@ -6,19 +6,25 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/util/validation"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/atprotorepo"
 	contract "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/nodeclaim"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/infra"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/ref"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
 )
 
-const ClusterKind = "Cluster"
+const (
+	ClusterKind = "Cluster"
+
+	RepoKind = "AtprotoRepo"
+)
 
 var errInfraDeleting = errors.New("nodeclaim: the cluster's Infra is being deleted")
 
@@ -60,15 +66,29 @@ func readContract(ctx context.Context, store *kcpstore.Store, at v1alpha1.NodeCl
 	return cc, nil
 }
 
-func clusterAlive(ctx context.Context, store *kcpstore.Store, cluster commonv1.ObjectRef) (bool, error) {
+func readCluster(ctx context.Context, store *kcpstore.Store, cluster commonv1.ObjectRef) (*v1alpha1.Cluster, error) {
 	cl, err := kcpstore.OfClusterScoped[v1alpha1.Cluster](store, v1alpha1.ClusterGVR).Get(ctx, ref.New(cluster.Workspace, "", cluster.Name))
 	if kcpstore.IsNotFound(err) {
-		return false, nil
+		return nil, nil
 	}
 	if err != nil {
-		return false, fmt.Errorf("nodeclaim: reading the Cluster %s of %s: %w", cluster.Name, cluster.Workspace, err)
+		return nil, fmt.Errorf("nodeclaim: reading the Cluster %s of %s: %w", cluster.Name, cluster.Workspace, err)
 	}
-	return cl.DeletionTimestamp.IsZero(), nil
+	return cl, nil
+}
+
+func clusterAlive(ctx context.Context, store *kcpstore.Store, cluster commonv1.ObjectRef) (bool, error) {
+	cl, err := readCluster(ctx, store, cluster)
+	return cl != nil && cl.DeletionTimestamp.IsZero(), err
+}
+
+func recordFor(b *contract.Binding, cl *v1alpha1.Cluster) *v1alpha1.InfraRecordBinding {
+	if b.Record == nil || cl == nil || !cl.Spec.PublishInfra || !cl.DeletionTimestamp.IsZero() || strings.TrimSpace(cl.Spec.Account) == "" {
+		return nil
+	}
+	return &v1alpha1.InfraRecordBinding{RepoRef: commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: RepoKind,
+		Name: atprotorepo.RepoName(strings.TrimSpace(cl.Spec.Account)), Workspace: b.Record.RepoWorkspace},
+		Sync: v1alpha1.InfraRecordSyncPublish, EventSourceRefs: slices.Clone(b.Record.EventSourceRefs)}
 }
 
 func readInfra(ctx context.Context, store *kcpstore.Store, workspace, name string) (*v1alpha1.Infra, error) {
@@ -93,7 +113,8 @@ func (c *Controller) entry(b *contract.Binding, claim contract.Claim, at v1alpha
 	return out
 }
 
-func (c *Controller) declare(ctx context.Context, store *kcpstore.Store, claim contract.Claim, at v1alpha1.NodeClaimInfra, e *entry) error {
+func (c *Controller) declare(ctx context.Context, store *kcpstore.Store, claim contract.Claim, at v1alpha1.NodeClaimInfra, e *entry,
+	cl *v1alpha1.Cluster) error {
 	b, _ := c.current()
 	if b == nil {
 		return nil
@@ -129,11 +150,12 @@ func (c *Controller) declare(ctx context.Context, store *kcpstore.Store, claim c
 		spec.Secrets = putSecret(spec.Secrets, at.Contract, e.secrets)
 	}
 	spec.Contracts[i].State = state
-	label := ""
+	label, name := "", claim.Object.Spec.ClusterRef.Name
 	if cluster, ok := clusterRef(claim); ok {
-		spec.ClusterRef, label = &cluster, cluster.Name
+		spec.ClusterRef, label, name = &cluster, cluster.Name, cluster.Name
 	}
-	spec.Description = fmt.Sprintf("the nodes of the tenant cluster %s in %s", claim.Object.Spec.ClusterRef.Name, claim.Workspace)
+	spec.Description = "the nodes of the tenant cluster " + name
+	spec.Record = recordFor(b, cl)
 	if cur != nil && equality.Semantic.DeepEqual(cur.Spec, spec) {
 		return nil
 	}
