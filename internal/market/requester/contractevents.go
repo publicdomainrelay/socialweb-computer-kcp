@@ -128,18 +128,51 @@ func (q *Requester) ObserveContractEvent(ctx context.Context, change contractmar
 		return 0, nil
 	}
 	event := *change.Event
-	if prev, ok := q.contractEvents.Get(event.Name); ok && event.Status.Record == nil && prev.Status.Record != nil &&
-		(prev.UID == "" || prev.UID == event.UID) {
+	if prev, ok := q.contractEvents.Get(event.Name); ok && (prev.UID == "" || prev.UID == event.UID) && statusAhead(prev.Status, event.Status) {
 		event.Status = *prev.Status.DeepCopy()
 	}
 	q.contractEvents.Put(event.Name, event)
 	if q.stopping() || q.deps.ContractEvents == nil || event.DeletionTimestamp != nil {
 		return 0, nil
 	}
+	if contract := change.Contract; contract != nil && contract.UID != "" && !ownedBy(event, *contract) {
+		if err := q.deps.ContractEvents.ApplyContractEventOwner(ctx, event.Name, *contract); err != nil {
+			return 0, err
+		}
+		event.OwnerReferences = append(event.OwnerReferences, contractOwnerReference(*contract))
+		q.contractEvents.Put(event.Name, event)
+	}
 	if event.Spec.Direction == v1alpha1.ContractEventInbound {
 		return 0, q.observeInboundContractEvent(ctx, event)
 	}
 	return q.observeOutboundContractEvent(ctx, event, change.Contract)
+}
+
+func contractEventRank(status v1alpha1.ContractEventStatus) int {
+	switch status.Phase {
+	case v1alpha1.ContractEventSubmitted, v1alpha1.ContractEventReceived, v1alpha1.ContractEventFailed:
+		return 3
+	case v1alpha1.ContractEventPublished:
+		return 2
+	}
+	if status.Record != nil {
+		return 2
+	}
+	return 1
+}
+
+func submitAttempts(status v1alpha1.ContractEventStatus) int32 {
+	if status.Submit == nil {
+		return 0
+	}
+	return status.Submit.Attempts
+}
+
+func statusAhead(known, seen v1alpha1.ContractEventStatus) bool {
+	if a, b := contractEventRank(known), contractEventRank(seen); a != b {
+		return a > b
+	}
+	return submitAttempts(known) > submitAttempts(seen)
 }
 
 func (q *Requester) writeContractEventStatus(ctx context.Context, event *v1alpha1.ContractEvent, status v1alpha1.ContractEventStatus) error {
@@ -204,13 +237,6 @@ func (q *Requester) observeOutboundContractEvent(ctx context.Context, event v1al
 	}
 	if contract.DeletionTimestamp != nil {
 		return fail("the ComputeContract " + name + " is being deleted")
-	}
-	if !ownedBy(event, *contract) {
-		if err := q.deps.ContractEvents.ApplyContractEventOwner(ctx, event.Name, *contract); err != nil {
-			return 0, err
-		}
-		event.OwnerReferences = append(event.OwnerReferences, contractOwnerReference(*contract))
-		q.contractEvents.Put(event.Name, event)
 	}
 	state := contract.Status.Contract
 	switch contract.Status.Phase {
