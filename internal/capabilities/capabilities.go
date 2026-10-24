@@ -87,6 +87,8 @@ func Tree() []Verb {
 		{Path: "run request list", Summary: "every invocation's summary.json; starts no kcp", Needs: []Need{NeedProc}},
 		{Path: "run request release", Summary: "run request release <name>: start the invocation's kcp again from its state dir, send vm.delete, then remove the invocation", Needs: []Need{NeedProc}},
 		{Path: "run request resume", Summary: "run request resume <name>: start the invocation's kcp again from its state dir and carry its contract on (ssh, then release unless --hold)", Needs: []Need{NeedProc}},
+		{Path: "run request ssh", Summary: "run request ssh <name>: ssh to the held guest (--transport iroh|webrtc, --tag), StrictHostKeyChecking=yes against its reported host keys; the contract stays held", Needs: []Need{NeedProc}},
+		{Path: "run request proxy", Summary: "run request proxy <name> --tag <tag>: pipe stdin and stdout through one WebRTC datachannel to the guest's tunnel port (an ssh ProxyCommand)", Needs: []Need{NeedProc}},
 		{Path: "vault apply-root", Summary: "generate the root vault PKI root and write its KV entries as its client gateway (the OpenBaoServer root-vault declares the rest)"},
 		{Path: "migrate", Summary: "apply the clusterprovider migrations"},
 		{Path: "apply", Summary: "server-side apply manifest sets into kcp workspaces (--set a,b --values file --dry-run; --instance or --kcp-kubeconfig)"},

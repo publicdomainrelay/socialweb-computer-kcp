@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -24,16 +25,23 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/request"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/webrtcproxy"
 )
 
 const (
 	requestSSHReady     = time.Minute
 	requestIdentityWait = 5 * time.Minute
 	requestSummaryRead  = 10 * time.Second
+	requestAttachProbe  = 10 * time.Second
+	requestSSHRetryRun  = 20 * time.Second
+	transportIroh       = "iroh"
+	transportWebRTC     = "webrtc"
+	sshPort             = 22
+	sshConnectionFailed = 255
 )
 
 var requestOptions = []string{"network", "name", "secrets", "tunnel", "hold", "exec", "skip-ssh", "contract-timeout", "state-dir",
-	"ready-timeout", "network-timeout", "kcp-path", "kine-path", "bao-path", "dumbpipe-path", "asset-cache"}
+	"ready-timeout", "network-timeout", "kcp-path", "kine-path", "bao-path", "dumbpipe-path", "asset-cache", "transport", "tag"}
 
 type requestRun struct {
 	a               *app
@@ -44,6 +52,8 @@ type requestRun struct {
 	skipSSH         bool
 	exec            string
 	secrets         string
+	transport       string
+	tag             string
 	root            v1alpha1.MarketRequesterSpec
 	contract        v1alpha1.ComputeContractSpec
 	appOptions      []v1alpha1.ApplicationOption
@@ -77,7 +87,17 @@ func newRequestRun(a *app, vals clicfg.Values) (*requestRun, error) {
 		return nil, err
 	}
 	r := &requestRun{a: a, vals: vals, stateRoot: root, hold: vals.Bool("hold"), skipSSH: vals.Bool("skip-ssh"),
-		exec: vals.String("exec"), secrets: vals.String("secrets")}
+		exec: vals.String("exec"), secrets: vals.String("secrets"), tag: strings.TrimSpace(vals.String("tag"))}
+	switch r.transport = strings.ToLower(strings.TrimSpace(vals.String("transport"))); r.transport {
+	case "", transportIroh:
+		r.transport = transportIroh
+	case transportWebRTC:
+		if r.tag == "" {
+			return nil, errors.New("transport webrtc: --tag names the webrtc tunnel")
+		}
+	default:
+		return nil, fmt.Errorf("transport %q: want iroh or webrtc", r.transport)
+	}
 	if r.contract.Tunnels, err = parseTunnels(vals.String("tunnel")); err != nil {
 		return nil, fmt.Errorf("tunnel: %w", err)
 	}
@@ -254,6 +274,22 @@ func parseTunnels(value string) ([]v1alpha1.ComputeContractTunnel, error) {
 		out = append(out, tunnel)
 	}
 	return out, nil
+}
+
+func (r *requestRun) webrtcTunnel() error {
+	if r.transport != transportWebRTC {
+		return nil
+	}
+	for _, t := range r.contract.Tunnels {
+		if t.Tag == r.tag {
+			if t.Transport != v1alpha1.TunnelTransportWebRTC {
+				return fmt.Errorf("--transport webrtc: the tunnel %s has transport %s, not webrtc", t.Tag, cmp.Or(string(t.Transport), string(v1alpha1.TunnelTransportOpenTunnel)))
+			}
+			return nil
+		}
+	}
+	r.contract.Tunnels = append(r.contract.Tunnels, v1alpha1.ComputeContractTunnel{Tag: r.tag, Port: sshPort, Transport: v1alpha1.TunnelTransportWebRTC})
+	return nil
 }
 
 func readSecrets(path string) ([]byte, error) {
@@ -471,23 +507,59 @@ func (r *requestRun) progress(c *v1alpha1.ComputeContract) {
 	r.log("contract", "phase", string(c.Status.Phase), "contractPhase", phase, "message", c.Status.Message)
 }
 
-func (r *requestRun) ssh(ctx context.Context, c *v1alpha1.ComputeContract) (int, error) {
+func (r *requestRun) sshClient(ctx context.Context) (request.SSH, error) {
+	s := request.SSH{Dir: filepath.Join(request.Dir(r.stateRoot, r.inv.Name), request.SSHDir)}
+	if r.transport == transportWebRTC {
+		proxy, err := r.proxyCommand()
+		if err != nil {
+			return s, err
+		}
+		s.ProxyCommand = proxy
+		return s, nil
+	}
 	dp, err := r.a.devExe(ctx, r.vals, "dumbpipe", "dumbpipe-path")
+	if err != nil {
+		return s, err
+	}
+	s.Dumbpipe = dp.Path
+	return s, nil
+}
+
+func (r *requestRun) proxyCommand() (string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("resolving this binary's own path for the ProxyCommand: %w", err)
+	}
+	words := []string{exe, "run", "request", "proxy", r.inv.Name, "--tag", r.tag, "--state-dir", r.stateRoot}
+	for i, w := range words {
+		words[i] = "'" + strings.ReplaceAll(w, "'", `'"'"'`) + "'"
+	}
+	return strings.Join(words, " "), nil
+}
+
+func (r *requestRun) ssh(ctx context.Context, c *v1alpha1.ComputeContract) (int, error) {
+	started := time.Now()
+	s, err := r.sshClient(ctx)
 	if err != nil {
 		return -1, err
 	}
-	s := request.SSH{Dumbpipe: dp.Path, Dir: filepath.Join(request.Dir(r.stateRoot, r.inv.Name), request.SSHDir)}
 	t, err := s.Target(c)
 	if err != nil {
 		return -1, err
 	}
-	r.log("ssh to the guest over its iroh ticket, StrictHostKeyChecking=yes against its reported host keys", "alias", t.Alias,
+	how := "its iroh ticket"
+	if r.transport == transportWebRTC {
+		how = "a WebRTC datachannel of tunnel " + r.tag + " (run request proxy)"
+	}
+	r.log("ssh to the guest over "+how+", StrictHostKeyChecking=yes against its reported host keys", "alias", t.Alias,
 		"hostKeys", strings.Join(request.SummaryOf(c).HostKeys, ", "))
 	held, stop := r.whileHeld(ctx)
 	defer stop()
-	err = s.WaitReady(held, t, requestSSHReady, func(attempt int, msg string) {
-		r.log("ssh not ready yet", "attempt", attempt, "err", msg)
-	})
+	if r.transport != transportWebRTC {
+		err = s.WaitReady(held, t, requestSSHReady, func(attempt int, msg string) {
+			r.log("ssh not ready yet", "attempt", attempt, "err", msg)
+		})
+	}
 	if cause := context.Cause(held); err != nil && cause != nil && ctx.Err() == nil {
 		return -1, cause
 	}
@@ -503,7 +575,8 @@ func (r *requestRun) ssh(ctx context.Context, c *v1alpha1.ComputeContract) (int,
 		}
 		interactive = true
 	}
-	code, err := s.Run(held, t, r.exec, interactive, os.Stdin, r.a.stdout, r.a.stderr)
+	code, err := r.runSSH(held, s, t, interactive)
+	r.log("ssh returned", "transport", r.transport, "exit", code, "seconds", time.Since(started).Seconds())
 	if cause := context.Cause(held); cause != nil && ctx.Err() == nil {
 		r.log("ssh session ended because the contract left Held", "err", cause)
 		return 0, nil
@@ -526,6 +599,24 @@ func (r *requestRun) ssh(ctx context.Context, c *v1alpha1.ComputeContract) (int,
 	}
 	r.log("ssh session ended", "exit", code)
 	return code, err
+}
+
+func (r *requestRun) runSSH(ctx context.Context, s request.SSH, t request.Target, interactive bool) (int, error) {
+	deadline := time.Now().Add(requestSSHReady)
+	for attempt := 1; ; attempt++ {
+		began := time.Now()
+		code, err := s.Run(ctx, t, r.exec, interactive, os.Stdin, r.a.stdout, r.a.stderr)
+		if r.transport != transportWebRTC || err != nil || code != sshConnectionFailed || time.Since(began) > requestSSHRetryRun ||
+			time.Now().After(deadline) || ctx.Err() != nil {
+			return code, err
+		}
+		r.log("ssh over webrtc did not connect; trying again", "attempt", attempt, "seconds", time.Since(began).Seconds())
+		select {
+		case <-ctx.Done():
+			return code, nil
+		case <-time.After(request.SSHPollInterval):
+		}
+	}
 }
 
 func (r *requestRun) whileHeld(ctx context.Context) (context.Context, func()) {
@@ -642,6 +733,9 @@ func runRequest(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 	if err := r.passthrough(pass, network != ""); err != nil {
 		return a.fail(exitRefused, "run request: %v", err)
 	}
+	if err := r.webrtcTunnel(); err != nil {
+		return a.fail(exitRefused, "run request: %v", err)
+	}
 	var bundle []byte
 	if r.secrets != "" {
 		if bundle, err = readSecrets(r.secrets); err != nil {
@@ -691,7 +785,7 @@ func (r *requestRun) writeSummaryQuiet() {
 	}
 }
 
-func (a *app) reopenRequest(ctx context.Context, vals clicfg.Values, rest []string, verb string) (*requestRun, int) {
+func (a *app) loadRequest(vals clicfg.Values, rest []string, verb string) (*requestRun, int) {
 	pos, pass := splitWords(rest)
 	if len(pos) != 1 || len(pass) > 0 {
 		return nil, a.fail(exitRefused, "run request %s <name>: one invocation name, no request-vm-ssh options", verb)
@@ -709,6 +803,14 @@ func (a *app) reopenRequest(ctx context.Context, vals clicfg.Values, rest []stri
 		r.summary = s
 	} else {
 		r.summary = request.Summary{Name: inv.Name, Mode: inv.Mode, Network: inv.Network, Instance: inv.Instance, CreatedAt: inv.CreatedAt}
+	}
+	return r, exitOK
+}
+
+func (a *app) reopenRequest(ctx context.Context, vals clicfg.Values, rest []string, verb string) (*requestRun, int) {
+	r, code := a.loadRequest(vals, rest, verb)
+	if r == nil {
+		return nil, code
 	}
 	r.log("starting the invocation's kcp again from its state dir", "verb", verb)
 	if err := r.start(ctx, false); err != nil {
@@ -795,4 +897,126 @@ func (r *requestRun) keepLogs() {
 		return
 	}
 	os.WriteFile(filepath.Join(out, "core.log"), b, 0o600)
+}
+
+func (r *requestRun) attach(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, requestAttachProbe)
+	defer cancel()
+	var kubeconfig, workspace string
+	switch r.inv.Mode {
+	case request.ModeNetwork:
+		netLayout, netRec, err := r.networkLayout()
+		if err != nil {
+			return err
+		}
+		app, ok, err := request.NetworkApp(ctx, netRec.AdminKubeconfig, r.inv.Name)
+		if err != nil {
+			return err
+		}
+		if !ok || app.Instance == "" || app.Message == marketnetwork.StoppedMessage {
+			return errors.New("the market network does not run the invocation")
+		}
+		rec, err := r.childRecord(netLayout, app.Instance)
+		if err != nil {
+			return err
+		}
+		r.instanceDir = rec.Layout.StateDir
+		kubeconfig, workspace = rec.AdminKubeconfig, rec.BaseWorkspace
+	default:
+		l, err := r.a.layoutOf(r.inv.Name, r.vals.With("instance", r.inv.Name).With("state-dir", request.Dir(r.stateRoot, r.inv.Name)))
+		if err != nil {
+			return err
+		}
+		var rec devinstance.Record
+		if err := fsx.ReadJSON(l.Record, &rec); err != nil {
+			return err
+		}
+		if rec.AdminKubeconfig == "" {
+			return errors.New("the invocation's kcp has no admin kubeconfig")
+		}
+		r.standalone, r.instanceDir = l, l.StateDir
+		kubeconfig = rec.AdminKubeconfig
+	}
+	k, err := request.OpenKcp(kubeconfig, workspace)
+	if err != nil {
+		return err
+	}
+	st, err := k.Root(ctx)
+	if err != nil {
+		return err
+	}
+	if st.Phase != v1alpha1.ApplicationPhaseReady {
+		return fmt.Errorf("the MarketRequester is %s", st.Phase)
+	}
+	r.kcp = k
+	return nil
+}
+
+func (a *app) openRequest(ctx context.Context, vals clicfg.Values, rest []string, verb string) (*requestRun, bool, int) {
+	r, code := a.loadRequest(vals, rest, verb)
+	if r == nil {
+		return nil, false, code
+	}
+	err := r.attach(ctx)
+	if err == nil {
+		return r, false, exitOK
+	}
+	r.log("the invocation's kcp does not answer; starting it again from its state dir", "verb", verb, "why", err.Error())
+	if err := r.start(ctx, false); err != nil {
+		r.stop(context.WithoutCancel(ctx), false)
+		return nil, false, a.fail(exitFailed, "run request %s: %v", verb, err)
+	}
+	return r, true, exitOK
+}
+
+func runRequestSSH(ctx context.Context, a *app, vals clicfg.Values, rest []string) int {
+	r, started, code := a.openRequest(ctx, vals, rest, "ssh")
+	if r == nil {
+		return code
+	}
+	if started {
+		defer r.stop(context.WithoutCancel(ctx), false)
+	}
+	c, err := r.kcp.WaitContract(ctx, r.contractTimeout, contractSettled, r.progress)
+	if err != nil {
+		return a.fail(exitFailed, "run request ssh: %v", err)
+	}
+	if c.Status.Phase != v1alpha1.ComputeContractHeld {
+		return a.fail(exitFailed, "run request ssh: the contract is %s, not Held: %s", c.Status.Phase, c.Status.Message)
+	}
+	ec, err := r.ssh(ctx, c)
+	if err != nil {
+		return a.fail(exitFailed, "run request ssh: %v", err)
+	}
+	if ec != 0 {
+		return exitFailed
+	}
+	return exitOK
+}
+
+func runRequestProxy(ctx context.Context, a *app, vals clicfg.Values, rest []string) int {
+	quiet := *a
+	quiet.stdout = a.stderr
+	r, started, code := quiet.openRequest(ctx, vals, rest, "proxy")
+	if r == nil {
+		return code
+	}
+	if started {
+		defer r.stop(context.WithoutCancel(ctx), false)
+	}
+	if r.tag == "" {
+		return a.fail(exitRefused, "run request proxy: --tag names the webrtc tunnel")
+	}
+	log := a.log.With("request", r.inv.Name)
+	conn, timings, err := webrtcproxy.Dial(ctx, r.kcp.Signaling(), webrtcproxy.Options{Tag: r.tag, Log: log})
+	if err != nil {
+		return a.fail(exitFailed, "run request proxy: %v", err)
+	}
+	defer conn.Close()
+	log.Info("the proxy pipes stdin and stdout through the datachannel", "tag", r.tag, "guestSeconds", timings.Guest.Seconds(),
+		"offerToAnswerSeconds", timings.Answer.Seconds(), "offerToOpenSeconds", timings.Open.Seconds())
+	if err := webrtcproxy.Pipe(ctx, conn, os.Stdin, a.stdout); err != nil && ctx.Err() == nil {
+		log.Warn("the proxy ends", "err", err.Error())
+	}
+	return exitOK
 }

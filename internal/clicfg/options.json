@@ -576,6 +576,16 @@
       "type": "string",
       "description": "run request: guest tunnels to open, a comma list of <tag>:<port>[:<transport>] (spec.tunnels; transport opentunnel, the default, or webrtc): opentunnel serves the guest's 127.0.0.1:<port> at an https URL that comes back in status.contract.networks"
     },
+    "transport": {
+      "type": "string",
+      "description": "run request, resume, ssh: how ssh reaches the guest: iroh (its iroh ticket) or webrtc (a datachannel to the --tag tunnel through run request proxy as the ProxyCommand; run request adds the tunnel <tag>:22:webrtc when the contract has none)",
+      "default": "iroh"
+    },
+    "tag": {
+      "type": "string",
+      "description": "run request proxy, and ssh with --transport webrtc: the webrtc tunnel tag of the contract (spec.tunnels[].tag)",
+      "default": "ssh"
+    },
     "hold": {
       "type": "boolean",
       "description": "run request, resume: keep the contract held when this process ends; its kcp stops and run request release|resume <name> starts it again from its state dir"

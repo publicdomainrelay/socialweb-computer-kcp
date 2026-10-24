@@ -48,8 +48,9 @@ func EnsureKey(ctx context.Context, dir string) (string, string, error) {
 }
 
 type SSH struct {
-	Dumbpipe string
-	Dir      string
+	Dumbpipe     string
+	ProxyCommand string
+	Dir          string
 }
 
 type Target struct {
@@ -60,7 +61,7 @@ type Target struct {
 
 func (s SSH) Target(c *v1alpha1.ComputeContract) (Target, error) {
 	k := c.Status.Contract
-	if k == nil || k.VMAddress == "" {
+	if k == nil || (k.VMAddress == "" && s.ProxyCommand == "") {
 		return Target{}, errors.New("request: the contract reports no guest address (onNetwork)")
 	}
 	if k.HostKeys == nil || len(k.HostKeys.Keys) == 0 {
@@ -69,9 +70,12 @@ func (s SSH) Target(c *v1alpha1.ComputeContract) (Target, error) {
 	if k.Receipt == nil || k.Receipt.URI == "" {
 		return Target{}, errors.New("request: the contract has no receipt")
 	}
-	ticket, err := Ticket(k.VMAddress)
-	if err != nil {
-		return Target{}, err
+	ticket := ""
+	if s.ProxyCommand == "" {
+		var err error
+		if ticket, err = Ticket(k.VMAddress); err != nil {
+			return Target{}, err
+		}
 	}
 	alias := HostKeyAlias(k.Receipt.URI)
 	var b strings.Builder
@@ -86,8 +90,12 @@ func (s SSH) Target(c *v1alpha1.ComputeContract) (Target, error) {
 }
 
 func (s SSH) args(t Target) []string {
+	proxy := s.ProxyCommand
+	if proxy == "" {
+		proxy = s.Dumbpipe + " connect " + t.Ticket
+	}
 	return []string{
-		"-o", "ProxyCommand=" + s.Dumbpipe + " connect " + t.Ticket,
+		"-o", "ProxyCommand=" + proxy,
 		"-o", "IdentityFile=" + filepath.Join(s.Dir, KeyFile),
 		"-o", "IdentitiesOnly=yes",
 		"-o", "StrictHostKeyChecking=yes",
