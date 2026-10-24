@@ -188,16 +188,24 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 	}
 	p.links = append(p.links, p.baseLinks(mount)...)
 	if !c.Applied(r) {
-		if _, err := p.write(v1alpha1.ApplicationPhaseProvisioning, "applying its schemas, its own OpenBaoServer and its workspace"); err != nil {
-			return ctlruntime.Result{}, err
+		digest, digestErr := compose.InfraDigest(RequesterSet, o.Spec.Profile, &manifests.MarketRequester{}, plan.Identity)
+		if digestErr == nil && c.AppliedBefore(r, o.Status.AppliedSet, digest) {
+			c.MarkApplied(r)
+		} else {
+			if _, err := p.write(v1alpha1.ApplicationPhaseProvisioning, "applying its schemas, its own OpenBaoServer and its workspace"); err != nil {
+				return ctlruntime.Result{}, err
+			}
+			if err := c.ApplyInfra(ctx, r, RequesterSet, o.Spec.Profile, &manifests.MarketRequester{}); err != nil {
+				return p.retry("", err)
+			}
+			if err := c.ApplyIdentitySpec(ctx, r, ws, RequesterIdentity, plan.Identity); err != nil {
+				return p.retry("its MarketIdentity", err)
+			}
+			c.MarkApplied(r)
+			if digestErr == nil {
+				p.st.AppliedSet = &v1alpha1.AppliedSet{Generation: o.Generation, Digest: digest}
+			}
 		}
-		if err := c.ApplyInfra(ctx, r, RequesterSet, o.Spec.Profile, &manifests.MarketRequester{}); err != nil {
-			return p.retry("", err)
-		}
-		if err := c.ApplyIdentitySpec(ctx, r, ws, RequesterIdentity, plan.Identity); err != nil {
-			return p.retry("its MarketIdentity", err)
-		}
-		c.MarkApplied(r)
 	}
 	if err := c.ApplyLinks(ctx, r, "root", p.links); err != nil {
 		return ctlruntime.Result{}, err

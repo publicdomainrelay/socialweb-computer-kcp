@@ -323,22 +323,31 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 		return ctlruntime.Result{}, err
 	}
 	if !c.Applied(r) {
-		if _, err := p.write(v1alpha1.ApplicationPhaseProvisioning, "applying its workspace, its records and its requester identity"); err != nil {
-			return ctlruntime.Result{}, err
-		}
 		values := &manifests.Gateway{}
 		if o.Spec.Network != nil {
 			if pds, err := GatewayPds(*values, c.StateRoot(), o.Spec.Network); err == nil {
 				values.Pds = pds
 			}
 		}
-		if err := c.ApplyInfra(ctx, r, GatewaySet, o.Spec.Profile, values, "association-watch"); err != nil {
-			return p.retry("its workspace", err)
+		identity := p.identitySpec(plan)
+		digest, digestErr := compose.InfraDigest(GatewaySet, o.Spec.Profile, values, identity, "association-watch")
+		if digestErr == nil && c.AppliedBefore(r, o.Status.AppliedSet, digest) {
+			c.MarkApplied(r)
+		} else {
+			if _, err := p.write(v1alpha1.ApplicationPhaseProvisioning, "applying its workspace, its records and its requester identity"); err != nil {
+				return ctlruntime.Result{}, err
+			}
+			if err := c.ApplyInfra(ctx, r, GatewaySet, o.Spec.Profile, values, "association-watch"); err != nil {
+				return p.retry("its workspace", err)
+			}
+			if err := c.ApplyIdentitySpec(ctx, r, ws, marketrequester.RequesterIdentity, identity); err != nil {
+				return p.retry("the requester's MarketIdentity", err)
+			}
+			c.MarkApplied(r)
+			if digestErr == nil {
+				p.st.AppliedSet = &v1alpha1.AppliedSet{Generation: o.Generation, Digest: digest}
+			}
 		}
-		if err := c.ApplyIdentitySpec(ctx, r, ws, marketrequester.RequesterIdentity, p.identitySpec(plan)); err != nil {
-			return p.retry("the requester's MarketIdentity", err)
-		}
-		c.MarkApplied(r)
 	}
 	if ok, msg := c.LinksAccepted(ctx, r, links); !ok {
 		return p.wait(msg)

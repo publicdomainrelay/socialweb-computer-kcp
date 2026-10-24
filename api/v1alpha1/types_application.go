@@ -231,8 +231,16 @@ type ComponentOverrideStatus struct {
 	Message string `json:"message,omitempty"`
 }
 
+type AppliedSet struct {
+	Generation int64 `json:"generation,omitempty"`
+
+	Digest string `json:"digest,omitempty"`
+}
+
 type ApplicationStatus struct {
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
+	AppliedSet *AppliedSet `json:"appliedSet,omitempty"`
 
 	Phase ApplicationPhase `json:"phase,omitempty"`
 
@@ -760,6 +768,8 @@ type NetworkAppStatus struct {
 
 type MarketNetworkStatus struct {
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
+	AppliedSet *AppliedSet `json:"appliedSet,omitempty"`
 
 	Phase ApplicationPhase `json:"phase,omitempty"`
 

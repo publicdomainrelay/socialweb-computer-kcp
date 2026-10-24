@@ -160,7 +160,7 @@ func (ctl *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, o 
 	r := compose.RootOf(req, Kind, o, o.Spec.Suspend)
 	c.Observe(r)
 	ctl.roots.Store(string(r.UID), ctlruntime.Request{Cluster: req.Cluster, Name: req.Name})
-	p := &pass{ctx: ctx, ctl: ctl, c: c, r: r, o: o, st: v1alpha1.MarketNetworkStatus{ObservedGeneration: o.Generation, Network: o.Status.Network,
+	p := &pass{ctx: ctx, ctl: ctl, c: c, r: r, o: o, st: v1alpha1.MarketNetworkStatus{ObservedGeneration: o.Generation, AppliedSet: o.Status.AppliedSet, Network: o.Status.Network,
 		BidderPdsURL: o.Status.BidderPdsURL, Apps: o.Status.Apps, Conditions: append([]metav1.Condition(nil), o.Status.Conditions...)}}
 	if r.Deleting {
 		return p.delete(ctx)
@@ -236,14 +236,22 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 		return ctlruntime.Result{}, err
 	}
 	if !c.Applied(r) {
-		if _, err := p.write(v1alpha1.ApplicationPhaseProvisioning, "applying the network's OpenBaoServer"); err != nil {
-			return ctlruntime.Result{}, err
+		digest, digestErr := compose.PhasesDigest(NetworkSet, &manifests.MarketNetwork{}, nil, "vault")
+		if digestErr == nil && c.AppliedBefore(r, o.Status.AppliedSet, digest) {
+			c.MarkApplied(r)
+		} else {
+			if _, err := p.write(v1alpha1.ApplicationPhaseProvisioning, "applying the network's OpenBaoServer"); err != nil {
+				return ctlruntime.Result{}, err
+			}
+			if err := c.ApplySetPhases(ctx, r, NetworkSet, &manifests.MarketNetwork{}, "vault"); err != nil {
+				return p.retry(v1alpha1.ApplicationPhaseProvisioning, "the network's OpenBaoServer", err)
+			}
+			c.MarkApplied(r)
+			if digestErr == nil {
+				p.st.AppliedSet = &v1alpha1.AppliedSet{Generation: o.Generation, Digest: digest}
+			}
+			ctl.log().Info("applied the market network's OpenBaoServer", "set", NetworkSet)
 		}
-		if err := c.ApplySetPhases(ctx, r, NetworkSet, &manifests.MarketNetwork{}, "vault"); err != nil {
-			return p.retry(v1alpha1.ApplicationPhaseProvisioning, "the network's OpenBaoServer", err)
-		}
-		c.MarkApplied(r)
-		ctl.log().Info("applied the market network's OpenBaoServer", "set", NetworkSet)
 	}
 	if err := ctl.vaultReady(ctx, ws); err != nil {
 		return p.write(v1alpha1.ApplicationPhaseProvisioning, "waiting for the network's OpenBaoServer: "+err.Error())

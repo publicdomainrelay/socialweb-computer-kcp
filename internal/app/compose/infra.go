@@ -63,14 +63,14 @@ var FinalizerControllers = map[string]string{
 	"atprotoidentity.socialweb.computer/revocation": "socialweb-computer-k8s web app: the revocation sweep",
 }
 
-func (c *Composer) ApplyInfra(ctx context.Context, r Root, setName, profile string, values any, include ...string) error {
+func infraSet(setName, profile string, include []string) (manifests.Set, error) {
 	ix, err := manifests.Load()
 	if err != nil {
-		return err
+		return manifests.Set{}, err
 	}
 	set, ok := ix.Set(setName)
 	if !ok {
-		return fmt.Errorf("compose: deploy/sets.yaml names no %s set", setName)
+		return manifests.Set{}, fmt.Errorf("compose: deploy/sets.yaml names no %s set", setName)
 	}
 	out := set
 	out.Phases = nil
@@ -84,17 +84,17 @@ func (c *Composer) ApplyInfra(ctx context.Context, r Root, setName, profile stri
 			out.Phases = append(out.Phases, p)
 		}
 	}
-	return c.applySet(ctx, r, out, values)
+	return out, nil
 }
 
-func (c *Composer) ApplySetPhases(ctx context.Context, r Root, setName string, values any, phases ...string) error {
+func phaseSet(setName string, phases []string) (manifests.Set, error) {
 	ix, err := manifests.Load()
 	if err != nil {
-		return err
+		return manifests.Set{}, err
 	}
 	set, ok := ix.Set(setName)
 	if !ok {
-		return fmt.Errorf("compose: deploy/sets.yaml names no %s set", setName)
+		return manifests.Set{}, fmt.Errorf("compose: deploy/sets.yaml names no %s set", setName)
 	}
 	var keep []manifests.Phase
 	for _, p := range set.Phases {
@@ -103,9 +103,57 @@ func (c *Composer) ApplySetPhases(ctx context.Context, r Root, setName string, v
 		}
 	}
 	if len(keep) == 0 {
-		return fmt.Errorf("compose: the %s set names none of the phases %v", setName, phases)
+		return manifests.Set{}, fmt.Errorf("compose: the %s set names none of the phases %v", setName, phases)
 	}
 	set.Phases = keep
+	return set, nil
+}
+
+func setDigest(set manifests.Set, values, extra any) (string, error) {
+	rendered, err := set.Render(values)
+	if err != nil {
+		return "", err
+	}
+	raw, err := json.Marshal(struct {
+		Rendered []manifests.Rendered
+		Extra    any
+	}{rendered, extra})
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func InfraDigest(setName, profile string, values, extra any, include ...string) (string, error) {
+	set, err := infraSet(setName, profile, include)
+	if err != nil {
+		return "", err
+	}
+	return setDigest(set, values, extra)
+}
+
+func PhasesDigest(setName string, values, extra any, phases ...string) (string, error) {
+	set, err := phaseSet(setName, phases)
+	if err != nil {
+		return "", err
+	}
+	return setDigest(set, values, extra)
+}
+
+func (c *Composer) ApplyInfra(ctx context.Context, r Root, setName, profile string, values any, include ...string) error {
+	set, err := infraSet(setName, profile, include)
+	if err != nil {
+		return err
+	}
+	return c.applySet(ctx, r, set, values)
+}
+
+func (c *Composer) ApplySetPhases(ctx context.Context, r Root, setName string, values any, phases ...string) error {
+	set, err := phaseSet(setName, phases)
+	if err != nil {
+		return err
+	}
 	return c.applySet(ctx, r, set, values)
 }
 

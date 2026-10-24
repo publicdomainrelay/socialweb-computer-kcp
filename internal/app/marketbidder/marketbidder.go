@@ -271,20 +271,30 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 		return ctlruntime.Result{}, err
 	}
 	if !c.Applied(r) {
-		if _, err := p.write(v1alpha1.ApplicationPhaseProvisioning, "applying its own OpenBaoServer and workspace"); err != nil {
-			return ctlruntime.Result{}, err
-		}
 		var phases []string
 		if plan.UsesAssociation() {
 			phases = []string{"association-watch"}
 		}
-		if err := c.ApplyInfra(ctx, r, BidderSet, o.Spec.Profile, p.infraValues(), phases...); err != nil {
-			return p.retry("", err)
+		identity := compose.OperatorWatched(plan.Identity, o.Spec.Operator, compose.BidderAssociate)
+		values := p.infraValues()
+		digest, digestErr := compose.InfraDigest(BidderSet, o.Spec.Profile, values, identity, phases...)
+		if digestErr == nil && c.AppliedBefore(r, o.Status.AppliedSet, digest) {
+			c.MarkApplied(r)
+		} else {
+			if _, err := p.write(v1alpha1.ApplicationPhaseProvisioning, "applying its own OpenBaoServer and workspace"); err != nil {
+				return ctlruntime.Result{}, err
+			}
+			if err := c.ApplyInfra(ctx, r, BidderSet, o.Spec.Profile, values, phases...); err != nil {
+				return p.retry("", err)
+			}
+			if err := c.ApplyIdentitySpec(ctx, r, ws, BidderIdentity, identity); err != nil {
+				return p.retry("its MarketIdentity", err)
+			}
+			c.MarkApplied(r)
+			if digestErr == nil {
+				p.st.AppliedSet = &v1alpha1.AppliedSet{Generation: o.Generation, Digest: digest}
+			}
 		}
-		if err := c.ApplyIdentitySpec(ctx, r, ws, BidderIdentity, compose.OperatorWatched(plan.Identity, o.Spec.Operator, compose.BidderAssociate)); err != nil {
-			return p.retry("its MarketIdentity", err)
-		}
-		c.MarkApplied(r)
 		p.log().Warn("no ComputeVM PolicyTrigger action handler is registered; ComputeVM triggers stay fail-closed")
 	}
 	if _, _, err := c.VaultRefs(ctx, ws, BidderVaultServer, BidderVaultClient); err != nil {

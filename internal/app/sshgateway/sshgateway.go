@@ -460,13 +460,21 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 		if err != nil {
 			return p.fail(err)
 		}
-		if _, err := p.wait("applying its own OpenBaoServer, its iroh dialer and its workspace"); err != nil {
-			return ctlruntime.Result{}, err
+		digest, digestErr := compose.InfraDigest(SshGatewaySet, o.Spec.Profile, &values, nil)
+		if digestErr == nil && c.AppliedBefore(r, o.Status.AppliedSet, digest) {
+			c.MarkApplied(r)
+		} else {
+			if _, err := p.wait("applying its own OpenBaoServer, its iroh dialer and its workspace"); err != nil {
+				return ctlruntime.Result{}, err
+			}
+			if err := c.ApplyInfra(ctx, r, SshGatewaySet, o.Spec.Profile, &values); err != nil {
+				return p.retry("", err)
+			}
+			c.MarkApplied(r)
+			if digestErr == nil {
+				p.st.AppliedSet = &v1alpha1.AppliedSet{Generation: o.Generation, Digest: digest}
+			}
 		}
-		if err := c.ApplyInfra(ctx, r, SshGatewaySet, o.Spec.Profile, &values); err != nil {
-			return p.retry("", err)
-		}
-		c.MarkApplied(r)
 	}
 	if _, _, err := c.VaultRefs(ctx, ws, SshGatewayVaultServer, SshGatewayVaultClient); err != nil {
 		return p.retry("its vault", err)

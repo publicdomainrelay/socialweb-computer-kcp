@@ -107,19 +107,19 @@ var APIResources = []APIResource{
 		{Name: "Sealed", Type: "boolean", JSONPath: ".status.sealed"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "MarketNetwork", Plural: "marketnetworks", Revision: 20, Export: "applications", Object: MarketNetwork{}, PrinterColumns: []PrinterColumn{
+	{Kind: "MarketNetwork", Plural: "marketnetworks", Revision: 21, Export: "applications", Object: MarketNetwork{}, PrinterColumns: []PrinterColumn{
 		{Name: "Profile", Type: "string", JSONPath: ".spec.profile"},
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "PLC", Type: "string", JSONPath: ".status.network.plcDirectoryUrl"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "MarketBidder", Plural: "marketbidders", Revision: 23, Export: "applications", Object: MarketBidder{}, PrinterColumns: []PrinterColumn{
+	{Kind: "MarketBidder", Plural: "marketbidders", Revision: 24, Export: "applications", Object: MarketBidder{}, PrinterColumns: []PrinterColumn{
 		{Name: "Profile", Type: "string", JSONPath: ".spec.profile"},
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "DID", Type: "string", JSONPath: ".status.did"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "MarketRequester", Plural: "marketrequesters", Revision: 20, Export: "applications", Object: MarketRequester{}, PrinterColumns: []PrinterColumn{
+	{Kind: "MarketRequester", Plural: "marketrequesters", Revision: 21, Export: "applications", Object: MarketRequester{}, PrinterColumns: []PrinterColumn{
 		{Name: "Profile", Type: "string", JSONPath: ".spec.profile"},
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "DID", Type: "string", JSONPath: ".status.did"},
@@ -141,12 +141,12 @@ var APIResources = []APIResource{
 	}},
 	{Kind: "InfraCollection", Plural: "infracollections", Revision: 1, Export: "computecontracts", Object: InfraCollection{}, PrinterColumns: infraCollectionPrinterColumns},
 	{Kind: "EphemeralInfraCollection", Plural: "ephemeralinfracollections", Revision: 1, Export: "computecontracts", Object: EphemeralInfraCollection{}, PrinterColumns: infraCollectionPrinterColumns},
-	{Kind: "Gateway", Plural: "gateways", Revision: 25, Export: "applications", Object: Gateway{}, PrinterColumns: []PrinterColumn{
+	{Kind: "Gateway", Plural: "gateways", Revision: 26, Export: "applications", Object: Gateway{}, PrinterColumns: []PrinterColumn{
 		{Name: "Profile", Type: "string", JSONPath: ".spec.profile"},
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "SshGateway", Plural: "sshgateways", Revision: 19, Export: "applications", Object: SshGateway{}, PrinterColumns: []PrinterColumn{
+	{Kind: "SshGateway", Plural: "sshgateways", Revision: 20, Export: "applications", Object: SshGateway{}, PrinterColumns: []PrinterColumn{
 		{Name: "Profile", Type: "string", JSONPath: ".spec.profile"},
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
