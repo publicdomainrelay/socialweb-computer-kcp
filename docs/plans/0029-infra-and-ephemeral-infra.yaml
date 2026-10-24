@@ -1,0 +1,393 @@
+plan: "0029"
+title: "Infra and EphemeralInfra: kcp deployments of ComputeContracts, synced both ways with computer.socialweb.infra and computer.socialweb.ephemeralInfra records"
+status: todo
+source: >
+  2026-10-23, the user's request, read against the code at baf155f6. A deployment today is one
+  ComputeContract per run request invocation, or a NodeClaim of a tenant cluster. There is no kcp
+  object that groups several ComputeContracts into one deployment, no way to declare a contract
+  without sending its RFP at once (the Requester runs every ComputeContract in its workspace as soon
+  as it observes it: internal/market/requester/observe.go Observe, reconcileContract), and no
+  atproto record that describes a deployment so another client can read or change it. The
+  machinery to reuse is in place: AtprotoRecord writes one record and repairs drift
+  (internal/controllers/atprotorecord/apply.go Apply); AtprotoRecordWatch follows a collection of a
+  repo through EventStreams and lists what it saw in status.records and status.deleted
+  (internal/controllers/atprotorecordwatch, internal/eventstream/watchsink.go); AtprotoRepo hands a
+  repo.read and repo.write handle over the bus, with the account's credentials held by the callee
+  (LocalRepo on a Pds component, RemoteRepo with a credentialsRef or a MarketIdentity session); the
+  NodeClaim controller is the model of a composer that creates ComputeContracts, writes
+  spec.release and deletes a contract only after it is Released or Failed
+  (internal/controllers/nodeclaim/controller.go settle, internal/gateway/nodeclaim Settle).
+principle: >
+  A deployment is a kcp object that owns its ComputeContracts. Each contract it declares has a
+  desired state that its composer writes (Staged, Requested, Released) and an observed phase that
+  the controller reports (Staged, Requesting, Deployed, Releasing, Released, Failed). A Staged
+  contract has no ComputeContract object, so no RFP is sent; the RFP flow starts only when the
+  composer moves the contract to Requested. A deployment may be bound to one atproto record; the
+  record carries the declaration, which either side may change, and the observed status, which only
+  kcp writes. The repo is the point of agreement: kcp reads the record before it writes, writes with
+  a compare-and-swap on the CID it read, and a record change made elsewhere wins over an unwritten
+  kcp change. Deleting either side deletes the other, and a deleted deployment releases its
+  contracts before it goes.
+state_rules:
+  - Read AGENTS.md first. status is one of todo, doing, done, blocked. The lead flips statuses.
+  - No Go tests (AGENTS.md, plan 0027). Proof is the build gates and the ACC29 live rows below.
+  - Plan 0028 is in flight on api/v1alpha1/types_computecontract.go, internal/controllers/marketintents,
+    internal/market/requester/{observe,runner}.go and the delete pass of internal/app/marketrequester.
+    This plan adds no ComputeContract field and edits none of those files, except the additive link
+    call in internal/app/marketrequester named in M7-ROOT-LINKS.
+items:
+  - id: D1-KINDS
+    title: "Four kinds in the socialweb.computer group, served by the computecontracts APIExport"
+    depends_on: []
+    decision: >
+      Infra, EphemeralInfra, InfraCollection and EphemeralInfraCollection are cluster-scoped kinds in
+      api/v1alpha1 (types_infra.go, types_infracollection.go), group socialweb.computer, version
+      v1alpha1, listed in api/v1alpha1/resources.go with Export "computecontracts". They live in the
+      workspace of the ComputeContracts they own: the workspace of a Requester component (a
+      MarketRequester root's workspace, or a Gateway's requester workspace). That export is already
+      bound wherever ComputeContracts are, so no APIBinding, WorkspaceType or permission claim
+      changes; go generate ./api/... writes their APIResourceSchemas into the computecontracts
+      APIExport. An InfraSpec is the declaration (description, contracts, kcp-only secrets) plus an
+      optional record binding; an EphemeralInfraSpec inlines InfraSpec and adds ttlSeconds (default
+      3600, minimum 60) and endWhen (Complete, the default, or Deadline). spec.contracts is an atomic
+      list (each item: name, state, and the publishable ComputeContract fields vmName, bidderDids,
+      denyBidderDids, sshAuthorizedKeys, userData, policy, policyArgs, vmReadyTimeoutSec), so one
+      apply replaces it whole. spec.secrets (listType=map keyed by contract) carries a SecretRef per
+      contract that becomes ComputeContract spec.secretsRef; it is never written to a record, because
+      a record is public. A collection spec names repoRef (an AtprotoRepo) and optional
+      eventSourceRefs.
+    files:
+      - api/v1alpha1/types_infra.go
+      - api/v1alpha1/types_infracollection.go
+      - api/v1alpha1/resources.go
+      - api/v1alpha1/zz_generated.deepcopy.go
+      - api/v1alpha1/zz_generated.register.go
+      - deploy/
+    done_when: "go generate ./api/... writes the four schemas into the computecontracts export and leaves no diff on a second run; go build ./... passes."
+    status: todo
+
+  - id: D2-LEXICONS
+    title: "The computer.socialweb.infra and computer.socialweb.ephemeralInfra record lexicons, and their generated Go types"
+    depends_on: []
+    decision: >
+      lexicons/computer/socialweb/infra.json and ephemeralInfra.json, records with key any. infra:
+      description (string), contracts (array of #contract, required), status (#status, written only
+      by kcp), createdAt (datetime, the kcp object's creationTimestamp, so a render is stable).
+      #contract: name (required), state (required, knownValues staged, requested, released) and the
+      publishable fields above. #status: phase and contracts (array of #contractStatus: name, phase
+      with knownValues staged, requesting, deployed, releasing, released, failed, winner did,
+      receipt at-uri, message). ephemeralInfra refs computer.socialweb.infra#contract and #status and
+      adds ttlSeconds, endWhen (knownValues complete, deadline) and, in its status, expiresAt. The Go
+      types are generated by internal/lexgen into a new package internal/atproto/infra
+      (zz_generated.lexicons.go, with //go:generate in its nsid.go the same way
+      internal/atproto/market/nsid.go does it, -trim computer.socialweb.), so the market package does
+      not grow a non-market concept. deploy/check.sh adds internal/atproto/infra to the paths that go
+      generate must leave unchanged.
+    files:
+      - lexicons/computer/socialweb/infra.json
+      - lexicons/computer/socialweb/ephemeralInfra.json
+      - internal/atproto/infra/nsid.go
+      - internal/atproto/infra/zz_generated.lexicons.go
+      - deploy/check.sh
+    done_when: "go generate ./internal/atproto/infra/... writes the types and a second run leaves no diff."
+    status: todo
+
+  - id: D3-SYNC-RULES
+    title: "The record binding, the AT URI, the conflict rule and deletion in both directions"
+    depends_on: [D1-KINDS, D2-LEXICONS]
+    decision: >
+      Binding. spec.record names repoRef (an AtprotoRepo in the workspace, or another workspace by
+      repoRef.workspace) and optionally uri and eventSourceRefs. Without uri the object publishes
+      itself: the AT URI is at://<repo did>/<collection>/<metadata.name> (a DNS-1123 name is a valid
+      record key), and kcp creates the record when it is absent on the first sync. With uri the
+      object follows an existing record: the uri's DID must be the repo's DID and its collection the
+      kind's NSID, and the first sync pulls. status.record holds uri, cid, declarationHash (sha256 of
+      the canonical JSON of description plus contracts, the part both sides may change),
+      syncedGeneration, syncedAt and the last direction (Created, Pushed, Pulled, InSync).
+
+      Reads. On every reconcile of a bound object the controller reads the record with repo.read
+      GetRecord (the authoritative current value, not the watch's copy), so a lagging watch never
+      looks like an edit. The trigger is the AtprotoRecordWatch (below), never a timer.
+
+      Conflict rule, with hs the stored declarationHash, hk the hash of the spec and hr the hash of
+      the record: hr == hk is in sync (store hr and the cid); hk != hs and hr == hs is a kcp change,
+      pushed; hr != hs and hk == hs is a record change, pulled; hr != hs and hk != hs with hr != hk is
+      a conflict and the record wins, because the record's change is committed in the repo and the
+      kcp change was not; the controller pulls, sets condition SyncConflict True (reason RecordWon,
+      message naming the kcp generation that lost and the record cid that won) and emits nothing
+      else. The first sync of a publishing object whose record already exists is a conflict by the
+      same rule. A record that does not decode into the declaration (bad $type, a contract without a
+      name, a duplicate name) is neither pulled nor overwritten: condition RecordValid False, and the
+      contracts keep their last declaration.
+
+      Writes. kcp writes the record only through an AtprotoRecord child named infra-<name> or
+      einfra-<name> (field manager socialweb.computer/infra or .../ephemeralinfra), whose
+      spec.record is the declaration from spec plus the observed status. AtprotoRecord gains one
+      additive field, spec.swapCid: when set, the AtprotoRecord controller writes only while the repo
+      holds that cid, and otherwise reports InSync False with reason SwapMismatch and does not write.
+      The Infra controller sets swapCid to the cid it just read and decided on (empty when the record
+      is absent). That closes the window in which the AtprotoRecord controller's drift repair (for
+      example on a core restart) would overwrite a record change kcp has not pulled yet. A pull
+      applies spec.description and spec.contracts with the field manager
+      socialweb.computer/infra-record (or .../ephemeralinfra-record) and force. This is the one
+      deliberate second writer of those two spec fields: bidirectional sync means two writers, and
+      the rule above decides between them. spec.contracts is atomic, so a pull that drops a contract
+      drops it, whoever wrote it before. A kubectl apply --server-side after a pull needs
+      --force-conflicts; a client-side apply, edit or patch does not.
+
+      Deletion. A kcp-side delete releases the contracts (below), then deletes the AtprotoRecord
+      child, whose finalizer deletes the record; the object goes when the child is gone. A record
+      deleted elsewhere (GetRecord answers RecordNotFound after the object had synced, or a following
+      object whose record is absent) deletes the kcp object, which then releases its contracts the
+      same way. Removing spec.record from a bound object deletes the AtprotoRecord child, and with
+      it the record, in this first version; U1-UNBIND-KEEPS-RECORD makes an unbind keep the record.
+    files:
+      - internal/infra/declaration.go
+      - internal/infra/sync.go
+      - api/v1alpha1/types_atprotorecord.go
+      - internal/controllers/atprotorecord/apply.go
+    done_when: "ACC29-RECORD-EDIT-PULL, ACC29-KCP-EDIT-PUSH, ACC29-DELETE-RELEASES and ACC29-REMOTE-DELETE pass."
+    status: todo
+
+  - id: D4-CONTRACT-LIFECYCLE
+    title: "Staged, Requesting, Deployed, Releasing, Released, Failed for each declared contract"
+    depends_on: [D1-KINDS]
+    decision: >
+      The trigger. A contract's spec state is written by the composer: Staged (the default) means
+      declared, with no ComputeContract object and so no RFP; Requested means the controller applies
+      the ComputeContract; Released means the controller writes spec.release on it. Moving Staged to
+      Requested (kubectl patch or edit of the Infra, or an edit of the record's contract state to
+      requested) is the only staged-to-requesting trigger. The ComputeContract is named
+      infra-<infra>-<contract> (einfra- for an EphemeralInfra; hashed when longer than 253), carries a
+      controller ownerReference to the deployment and the labels infra.socialweb.computer/kind and
+      infra.socialweb.computer/name, and is applied with the controller's field manager, which is the
+      only writer of its spec (one writer). compose.Adopt skips it because it has an owner.
+
+      The phase is read from the ComputeContract: no object and state Staged is Staged; Pending or
+      Requesting is Requesting; Held is Deployed; Releasing is Releasing; Released is Released;
+      Failed is Failed. A contract whose ComputeContract is gone after it existed (the TTL controller
+      removed a finished one) is Released. A terminal contract (Released or Failed) is not requested
+      again while its state stays Requested; moving it back to Staged deletes the finished
+      ComputeContract, and Requested then sends a new RFP. A contract dropped from spec.contracts is
+      released and its ComputeContract deleted once it is Released or Failed, the NodeClaim settle
+      order. The deployment's phase is Staged (every contract staged), Deploying (any Requesting),
+      Deployed (every requested contract Deployed), Releasing, Released, Degraded (any Failed),
+      Ending and Deleting.
+
+      Deleting a deployment: a finalizer infra.socialweb.computer/release writes spec.release on every
+      owned ComputeContract that is not finished, waits (Result Waiting, woken by the ComputeContract
+      watch) until each is Released or Failed, deletes them, deletes the AtprotoRecord child, and
+      lets go. This is the plan 0028 root order (release, then stop): with plan 0028 a deleted
+      ComputeContract is also released by its own finalizer, so the delete after Released finds
+      nothing left to release and goes at once.
+    files:
+      - internal/infra/lifecycle.go
+      - internal/controllers/infra/controller.go
+      - internal/controllers/infra/contracts.go
+    done_when: "ACC29-STAGED-NO-RFP, ACC29-REQUEST-DEPLOY and ACC29-DELETE-RELEASES pass."
+    status: todo
+
+  - id: D5-EPHEMERAL
+    title: "An EphemeralInfra ends by its deadline or by completion, releases, and deletes itself"
+    depends_on: [D4-CONTRACT-LIFECYCLE]
+    decision: >
+      status.expiresAt is creationTimestamp plus spec.ttlSeconds. The EphemeralInfra ends at the first
+      of: the deadline; or, with endWhen Complete, completion, meaning at least one contract was
+      requested and every requested contract is Released or Failed (the guest powered off, the
+      bidder released it, or the composer set every contract to Released). An ended EphemeralInfra
+      reports phase Ending with status.endedAt and status.endReason (Deadline or Complete), treats
+      every contract as Released, and when every ComputeContract is finished it deletes itself;
+      deletion runs the D4 finalizer, which deletes its record. The deadline is a delayed requeue at
+      expiresAt, listed in deploy/obligations.txt (kind deadline); nothing else is timed.
+    files:
+      - internal/infra/lifecycle.go
+      - internal/controllers/infra/controller.go
+      - deploy/obligations.txt
+    done_when: "ACC29-EPHEMERAL-END passes."
+    status: todo
+
+  - id: D6-COLLECTIONS
+    title: "InfraCollection and EphemeralInfraCollection enumerate an account's records into objects"
+    depends_on: [D3-SYNC-RULES]
+    decision: >
+      A collection object names an AtprotoRepo. Its controller pages listRecords of the kind's NSID
+      through repo.read on every reconcile, and is triggered by its own AtprotoRecordWatch (named
+      infracoll-<name> or einfracoll-<name>), by its children and by its own generation, never by a
+      timer. For each record it ensures a child Infra (or EphemeralInfra) named by the rkey when the
+      rkey is a DNS-1123 name, otherwise r-<12 hex of sha256(rkey)>, with a controller ownerReference
+      to the collection, the label infra.socialweb.computer/collection, and only spec.record written
+      (repoRef, uri, eventSourceRefs from the collection), with the collection's field manager. The
+      child's first sync pulls the declaration, so the collection never writes a declaration field
+      and the D3 writers stay two. A record whose URI another object in the workspace already binds
+      (a publishing Infra) is reported in status.children as boundBy and gets no child; a name taken
+      by an unbound object is reported as a NameConflict. A child whose record is gone deletes itself
+      by the D3 rule, so the collection deletes nothing. Deleting a collection deletes its children
+      by garbage collection, and so releases their contracts and deletes their records; kubectl
+      delete --cascade=orphan stops the mirror and keeps both. Children of a collection do not create
+      their own AtprotoRecordWatch: the Infra controller maps every AtprotoRecordWatch event to the
+      objects bound to the URIs in its status.records and status.deleted whose cid differs from their
+      status.record.cid.
+    files:
+      - internal/controllers/infracollection/controller.go
+    done_when: "ACC29-COLLECTION-ENUMERATE and ACC29-REMOTE-DELETE pass."
+    status: todo
+
+  - id: D7-EVENT-STREAMS
+    title: "Record changes made elsewhere reach kcp through an AtprotoRecordWatch"
+    depends_on: [D3-SYNC-RULES]
+    decision: >
+      A bound object that no collection owns, and every collection, owns one AtprotoRecordWatch on
+      its repo and collection (spec.repoRef, spec.collection, spec.source.eventSourceRefs from
+      spec.record.eventSourceRefs; with none, the watch controller makes its own PdsEventSource on the
+      AtprotoRepo). The watch controller already runs the EventStreams, the cursors and the coarse
+      status. The composer of the watch also writes the one ComponentLink the watch's streams need to
+      deliver into it (from EventStreams labelled events.socialweb.computer/atprotorecordwatch=<watch>
+      to that AtprotoRecordWatch, events.deliver scoped to its name), with an ownerReference, because
+      a composer writes the links its children use. The links that reach the account (repo.read for
+      the four kinds, repo.write for AtprotoRecords labelled infra.socialweb.computer/kind, and
+      events.subscribe to the workspace's event sources) are the operator's: a MarketRequester root
+      composes them for its own account (M7-ROOT-LINKS); for another account the user writes them
+      (docs). Which identity writes: the account behind the AtprotoRepo, through the callee that holds
+      its credentials (the Pds component for a LocalRepo, the RemoteRepo credentials or the
+      MarketIdentity session for a RemoteRepo); no controller here holds a token.
+    files:
+      - internal/controllers/infra/record.go
+      - internal/controllers/infracollection/controller.go
+    done_when: "ACC29-RECORD-EDIT-PULL passes with the change arriving by the watch's EventStream."
+    status: todo
+
+  - id: M7-ROOT-LINKS
+    title: "Wire the controllers into the core, and the links into a MarketRequester root"
+    depends_on: [D6-COLLECTIONS, D7-EVENT-STREAMS]
+    decision: >
+      internal/stack/componentcore registers internal/controllers/infra (Infra and EphemeralInfra)
+      and internal/controllers/infracollection in registerLocal, with the bus, the dynamic factory
+      and the local scope. internal/app/compose gains InfraLinks(ws, repo): the repo.read links for
+      the four kinds and the repo.write link for AtprotoRecords labelled infra.socialweb.computer/kind,
+      scoped to the two NSIDs. internal/app/marketrequester appends them to the repo links of its
+      local and existing-account passes (an additive call next to RecordWriteLink, away from the delete
+      pass plan 0028 changes).
+    files:
+      - internal/stack/componentcore/controllers.go
+      - internal/app/compose/capabilities.go
+      - internal/app/marketrequester/marketrequester.go
+    done_when: "A MarketRequester root on a market network reports its infra links Accepted and the ACC29 rows run in its workspace."
+    status: todo
+
+  - id: R8-ROOT-DELETE-ORDER
+    title: "A MarketRequester root deletes its deployments before it stops the Requester"
+    depends_on: [M7-ROOT-LINKS]
+    decision: >
+      After plan 0028 M3-ROOT-RELEASES-FIRST lands, extend its delete pass: delete the Infra and
+      EphemeralInfra objects of the root's workspace first and report Deleting "<n> deployment(s)
+      releasing" while any is left; their finalizers release the contracts while the Requester still
+      runs. Not done here because plan 0028 is rewriting that delete pass now.
+    files:
+      - internal/app/marketrequester/marketrequester.go
+    done_when: "A MarketRequester root deleted with one Deployed Infra leaves no guest on the bidder and the record is gone."
+    status: todo
+
+  - id: U1-UNBIND-KEEPS-RECORD
+    title: "Removing spec.record stops the sync and keeps the record"
+    depends_on: [D3-SYNC-RULES]
+    decision: >
+      Today removing spec.record deletes the AtprotoRecord child and so the record. A later item gives
+      AtprotoRecord a deletion policy (Delete, the default, or Retain) so an unbind keeps the record.
+    files:
+      - api/v1alpha1/types_atprotorecord.go
+      - internal/controllers/atprotorecord/controller.go
+    done_when: "An Infra whose spec.record is removed keeps running and its record stays in the repo."
+    status: todo
+
+  - id: DOCS
+    title: "Code map and a user section with kubectl examples"
+    depends_on: [M7-ROOT-LINKS]
+    decision: >
+      docs/ARCHITECTURE.md section 12 lists api types, internal/atproto/infra, internal/infra and the two
+      controller packages. deploy/market-network/README.md gains a section "Deployments: Infra and
+      EphemeralInfra" with the kubectl examples: a staged Infra bound to the requester's repo, the
+      patch that requests it, a direct record edit, an InfraCollection, an EphemeralInfra, and the
+      ComponentLinks for an account that is not the root's.
+    files:
+      - docs/ARCHITECTURE.md
+      - deploy/market-network/README.md
+    done_when: "Both documents name every new package and kind."
+    status: todo
+
+  - id: ACC29-STAGED-NO-RFP
+    title: "A staged contract sends no RFP and its record says so"
+    depends_on: [D4-CONTRACT-LIFECYCLE, M7-ROOT-LINKS]
+    done_when: >
+      On an own market network, an Infra bound to the requester's repo with one contract in state
+      Staged reports phase Staged; no ComputeContract object exists for it; the requester repo holds
+      no new market.rfp record; the computer.socialweb.infra record exists with that contract's state
+      staged and status phase staged.
+    status: todo
+
+  - id: ACC29-REQUEST-DEPLOY
+    title: "Moving the contract to Requested deploys a guest and the record follows"
+    depends_on: [ACC29-STAGED-NO-RFP]
+    done_when: >
+      kubectl patch sets the contract's state to Requested; the ComputeContract appears, owned by the
+      Infra; it reaches Held; the bidder's ComputeVM is Running; the Infra contract phase is Deployed;
+      the record's status shows the contract deployed with the winner's did.
+    status: todo
+
+  - id: ACC29-RECORD-EDIT-PULL
+    title: "A record edited on the PDS outside kcp changes the kcp object"
+    depends_on: [ACC29-STAGED-NO-RFP]
+    done_when: >
+      A com.atproto.repo.putRecord sent straight to the account's PDS (not through kcp) changes the
+      description and adds a staged contract; within the watch's flush delay plus one reconcile the
+      Infra spec carries both, status.record.direction is Pulled, and the record's cid equals
+      status.record.cid after kcp re-writes the status part.
+    status: todo
+
+  - id: ACC29-KCP-EDIT-PUSH
+    title: "A kcp-side edit is written to the record"
+    depends_on: [ACC29-STAGED-NO-RFP]
+    done_when: "kubectl patch of spec.description shows up in the record read with getRecord; status.record.direction is Pushed then InSync."
+    status: todo
+
+  - id: ACC29-COLLECTION-ENUMERATE
+    title: "An InfraCollection enumerates existing records into objects"
+    depends_on: [D6-COLLECTIONS, M7-ROOT-LINKS]
+    done_when: >
+      With two computer.socialweb.infra records in the account (one written by a publishing Infra,
+      one written straight to the PDS), an InfraCollection for the repo lists both in status.children,
+      creates one child Infra for the record no object binds, reports the other as boundBy, and the
+      child's spec carries the record's declaration.
+    status: todo
+
+  - id: ACC29-DELETE-RELEASES
+    title: "Deleting a deployed Infra releases its guest and removes its record"
+    depends_on: [ACC29-REQUEST-DEPLOY]
+    done_when: >
+      kubectl delete of the deployed Infra leaves it Terminating with infra.socialweb.computer/release;
+      its ComputeContract gets spec.release and reaches Released; the bidder's ComputeVM is gone; the
+      ComputeContract and the record are deleted; then the Infra is gone.
+    status: todo
+
+  - id: ACC29-REMOTE-DELETE
+    title: "A record deleted on the PDS deletes the kcp object"
+    depends_on: [ACC29-COLLECTION-ENUMERATE]
+    done_when: "com.atproto.repo.deleteRecord sent straight to the PDS for a collection child's record makes that child go, and the collection does not recreate it."
+    status: todo
+
+  - id: ACC29-EPHEMERAL-END
+    title: "An EphemeralInfra ends at its deadline, releases and goes"
+    depends_on: [D5-EPHEMERAL]
+    done_when: >
+      An EphemeralInfra with ttlSeconds 120 and one Requested contract reaches Deployed; at expiresAt
+      it reports Ending with endReason Deadline, its contract is released and the guest is gone on
+      the bidder, then the EphemeralInfra and its computer.socialweb.ephemeralInfra record are gone.
+    status: todo
+
+  - id: ACC29-CONFLICT
+    title: "Simultaneous edits: the record wins"
+    depends_on: [ACC29-RECORD-EDIT-PULL, ACC29-KCP-EDIT-PUSH]
+    done_when: >
+      With the core stopped, the Infra spec is patched and the record is edited on the PDS; after the
+      core starts, the Infra spec equals the record's declaration and condition SyncConflict is True
+      with reason RecordWon.
+    status: todo
