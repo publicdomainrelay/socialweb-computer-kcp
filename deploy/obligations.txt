@@ -62,7 +62,6 @@ internal/storemaint	storemaint.go:Monitor.Run	loop	cfg.Interval 5m after cfg.Fir
 internal/guestidentity	grants.go:Syncer.run	loop	spec.grantSyncSeconds (opts.Resync); <=0 uses 30s	resync requester RBAC records held in a remote repo with no watch
 internal/guestidentity	service.go:Guest.refreshOIDCDocuments	loop	oidcDocumentRefresh 5m constant	refresh the OIDC discovery and keys OpenBao publishes with no watch
 internal/gateway/custody	signin.go:SignIn.refreshLoop	loop	per session: renew below 30m left, by 1h	renew the custody sessions of signed-in web users
-internal/market/requester	runner.go:contractRunner.awaitCapacityRetry	loop	CapacityRetryDelay 60s constant	re-send the RFP after every bidder declined with reason capacity; bidders publish no capacity event
 internal/market/requester	accept.go:Requester.submitAcceptAndWait	bounded	spec.receiptPollMilliseconds (<=0 uses a 500ms floor) doubling to 2s, bounded by receiptTimeoutSeconds (default 5m)	re-send submitAccept and read the bidder's market.receipt with listRecords; in XRPC mode nothing delivers the receipt (the submitAccept reply carries none, the bidder pushes none, submitEvent accepts only guest-event envelopes); firehose comms wake it from the market inbox
 internal/sshtransport	guest.go:GuestSessionProvider.PollReady	bounded	GuestPollInterval 5s until the session timeout	probe a guest sshd over SSH; a guest offers no watch
 internal/stack/request	ssh.go:SSH.WaitReady	bounded	SSHPollInterval 5s until the timeout	ssh over dumbpipe/iroh to the guest sshd; a guest sshd offers no watch

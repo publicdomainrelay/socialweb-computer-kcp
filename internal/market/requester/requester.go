@@ -68,8 +68,6 @@ const (
 
 	MaxRecordBids = 20
 
-	CapacityRetryDelay = 60 * time.Second
-
 	PolicyGhaLiteNSID = "computer.socialweb.temp.policy.ghalite"
 
 	DefaultComputeDisk = "50G"
