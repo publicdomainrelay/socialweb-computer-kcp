@@ -79,9 +79,13 @@ decisions:
       (github.com/FiloSottile/typage) in the browser. Sealed bodies are age armored ciphertext.
   - id: D4-SIGNAL
     text: >
-      compute.events.guest.signalWebRTC {kind, tag, recipient (strongRef to the publicKey it is sealed
-      to), ciphertext, createdAt, signatures}. kind knownValues ["offer", "answer"]. Non-trickle ICE:
-      the requester offers once with all candidates, the guest answers once.
+      compute.events.guest.signalWebRTC {kind, tag, ciphertext, createdAt, signatures}. kind
+      knownValues ["offer", "answer"]. Non-trickle ICE: the requester offers once with all
+      candidates, the guest answers once. The sealed plaintext is {sdp, replyTo}: an offer is sealed
+      to the guest's latest publicKey for the tag and carries in replyTo the age recipient the answer
+      is sealed to. No record names the key it is sealed to (2026-10-24, the user's decision): a
+      reader opens every signal for its tag with its identity and keeps those that open, so public
+      records never link a signal to a session key and two sessions on one tag cannot mix answers.
   - id: D5-ONNETWORK-KIND
     text: >
       vm.onNetwork gains kind, knownValues ["iroh", "https", "webrtc"]. Absent kind reads as iroh

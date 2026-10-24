@@ -8,19 +8,40 @@
       "key": "any",
       "record": {
         "type": "object",
-        "required": ["kind", "tag", "recipient", "ciphertext", "createdAt"],
+        "required": [
+          "kind",
+          "tag",
+          "ciphertext",
+          "createdAt"
+        ],
         "properties": {
           "kind": {
             "type": "string",
-            "knownValues": ["offer", "answer"],
+            "knownValues": [
+              "offer",
+              "answer"
+            ],
             "maxLength": 16,
             "description": "The SDP type of the sealed session description."
           },
-          "tag": { "type": "string", "maxLength": 32, "description": "Names the webrtc tunnel of the contract (spec.tunnels)." },
-          "recipient": { "type": "ref", "ref": "com.atproto.repo.strongRef", "description": "The compute.events.guest.publicKey record the ciphertext is sealed to." },
-          "ciphertext": { "type": "string", "maxLength": 16384, "description": "The session description, age armored ciphertext sealed to recipient." },
-          "createdAt": { "type": "string", "format": "datetime" },
-          "signatures": { "type": "ref", "ref": "network.attested.signature#signatures" }
+          "tag": {
+            "type": "string",
+            "maxLength": 32,
+            "description": "Names the webrtc tunnel of the contract (spec.tunnels)."
+          },
+          "ciphertext": {
+            "type": "string",
+            "maxLength": 16384,
+            "description": "The session description, age armored ciphertext. The plaintext is the JSON object {\"sdp\": <session description>, \"replyTo\": <age recipient, offers only>}: an offer is sealed to the guest's latest compute.events.guest.publicKey for the tag and names in replyTo the age recipient the answer must be sealed to; an answer is sealed to that replyTo. No record names the key, so a reader opens every signal for the tag with its identity and keeps the ones that open."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime"
+          },
+          "signatures": {
+            "type": "ref",
+            "ref": "network.attested.signature#signatures"
+          }
         }
       }
     }

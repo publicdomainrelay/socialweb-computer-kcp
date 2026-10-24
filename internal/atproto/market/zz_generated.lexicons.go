@@ -485,7 +485,6 @@ type ComputeEventsGuestSignalWebRTC struct {
 	Ciphertext string                     `json:"ciphertext"`
 	CreatedAt  string                     `json:"createdAt"`
 	Kind       string                     `json:"kind"`
-	Recipient  StrongRef                  `json:"recipient"`
 	Signatures Signatures                 `json:"signatures,omitempty"`
 	Tag        string                     `json:"tag"`
 	Extra      map[string]json.RawMessage `json:"-"`
