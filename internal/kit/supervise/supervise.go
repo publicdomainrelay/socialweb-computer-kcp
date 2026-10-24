@@ -1,5 +1,3 @@
-// Package supervise owns goroutines: each runs under a name, a panic turns
-// into an error that carries the name, and Stop cancels and joins them all.
 package supervise
 
 import (
@@ -18,8 +16,6 @@ type Group struct {
 	cancel context.CancelFunc
 }
 
-// New returns a Group whose context is derived from parent. The first
-// goroutine that returns a non-nil error cancels the context of all others.
 func New(parent context.Context) *Group {
 	ctx, cancel := context.WithCancel(parent)
 	eg, ctx := errgroup.WithContext(ctx)
@@ -32,15 +28,12 @@ func (g *Group) Go(name string, fn func(context.Context) error) {
 	g.eg.Go(func() error { return Run(g.ctx, name, fn) })
 }
 
-// Wait blocks until every goroutine returned and returns the first error.
 func (g *Group) Wait() error {
 	err := g.eg.Wait()
 	g.cancel()
 	return err
 }
 
-// Stop cancels the group context and waits. A context.Canceled error that
-// the cancel caused is not returned.
 func (g *Group) Stop() error {
 	g.cancel()
 	err := g.Wait()
@@ -50,8 +43,6 @@ func (g *Group) Stop() error {
 	return err
 }
 
-// Run calls fn on the current goroutine, turns a panic into an error and
-// prefixes a returned error with name.
 func Run(ctx context.Context, name string, fn func(context.Context) error) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -64,8 +55,6 @@ func Run(ctx context.Context, name string, fn func(context.Context) error) (err 
 	return nil
 }
 
-// Join calls wait and returns nil when it returns, or the context error when
-// ctx ends first. A wait that outlives ctx still returns on its own.
 func Join(ctx context.Context, wait func()) error {
 	done := make(chan struct{})
 	go func() {
@@ -86,8 +75,6 @@ type Backoff struct {
 	OnError func(err error, delay time.Duration)
 }
 
-// Restart runs fn again after each return until ctx ends. The delay starts
-// at Min, doubles up to Max, and resets when fn ran for longer than Max.
 func Restart(ctx context.Context, name string, b Backoff, fn func(context.Context) error) {
 	delay := b.Min
 	for {

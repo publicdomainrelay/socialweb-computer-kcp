@@ -27,25 +27,16 @@ func (b *Bidder) report(ctx context.Context, vm *v1alpha1.ComputeVM) {
 	}
 	now := b.now().UTC().Format(time.RFC3339)
 	if held.Address != "" && published.OnNetworkURI == "" {
-		record := map[string]any{
-			"$type":     market.ComputeEventsVMOnNetworkNSID,
-			"address":   held.Address,
-			"createdAt": firstOf(held.ReportedAt, now),
-		}
-		published = b.publishReport(ctx, vm, market.ComputeEventsVMOnNetworkNSID, record, published)
+		record := market.ComputeEventsVMOnNetwork{Address: held.Address, CreatedAt: firstOf(held.ReportedAt, now)}
+		published = b.publishReport(ctx, vm, record, published)
 	}
 	if len(held.HostKeys) > 0 && published.HostKeysURI == "" {
-		keys := make([]any, 0, len(held.HostKeys))
+		keys := make([]market.HostKey, 0, len(held.HostKeys))
 		for _, key := range held.HostKeys {
-			keys = append(keys, map[string]any{"type": key.Type, "publicKey": key.PublicKey, "fingerprint": key.Fingerprint})
+			keys = append(keys, market.HostKey{Type: key.Type, PublicKey: key.PublicKey, Fingerprint: key.Fingerprint})
 		}
-		record := map[string]any{
-			"$type":      market.ComputeEventsVMHostKeysNSID,
-			"keys":       keys,
-			"observedAt": firstOf(held.ReportedAt, now),
-			"createdAt":  now,
-		}
-		b.publishReport(ctx, vm, market.ComputeEventsVMHostKeysNSID, record, published)
+		record := market.ComputeEventsVMHostKeys{Keys: keys, ObservedAt: firstOf(held.ReportedAt, now), CreatedAt: now}
+		b.publishReport(ctx, vm, record, published)
 	}
 }
 
@@ -56,7 +47,13 @@ func firstOf(value, fallback string) string {
 	return fallback
 }
 
-func (b *Bidder) publishReport(ctx context.Context, vm *v1alpha1.ComputeVM, collection string, record map[string]any, report v1alpha1.ComputeVMPublished) v1alpha1.ComputeVMPublished {
+func (b *Bidder) publishReport(ctx context.Context, vm *v1alpha1.ComputeVM, typed market.Record, report v1alpha1.ComputeVMPublished) v1alpha1.ComputeVMPublished {
+	collection := typed.NSID()
+	record, err := market.EncodeRecord(typed)
+	if err != nil {
+		b.log.Warn("encoding a market report failed", "computevm", vm.Name, "collection", collection, "err", err)
+		return report
+	}
 	name, err := b.ensureReportSync(ctx, vm, collection, record)
 	if err != nil {
 		b.log.Warn("ensuring a market report StateSync failed", "computevm", vm.Name, "collection", collection, "err", err)

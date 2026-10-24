@@ -703,7 +703,7 @@ type MarketNetworkSpec struct {
 
 	Components ComponentOverrides `json:"components,omitempty"`
 
-	Apps []NetworkApp `json:"apps,omitempty"`
+	Apps []NetworkApp `json:"apps,omitempty" apigen:"listType=map,listMapKey=name"`
 }
 
 type NetworkApp struct {

@@ -578,9 +578,6 @@ func refuseKubectl(u *unstructured.Unstructured) error {
 	return nil
 }
 
-// annotationsOnly reports whether a field manager's ownership is confined to
-// annotations: a kubectl annotate writes nothing else, and a restart request or
-// an operator's note must not lock the object out of its own applier.
 func annotationsOnly(m metav1.ManagedFieldsEntry) bool {
 	if m.FieldsV1 == nil || len(m.FieldsV1.Raw) == 0 {
 		return false

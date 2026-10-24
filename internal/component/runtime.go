@@ -35,13 +35,13 @@ var (
 
 type ServiceFactory func(ctx context.Context, in Instance, spec ComponentSpec) (Service, error)
 
-func Typed[S any, T Service](build func(in Instance, spec S) (T, error)) ServiceFactory {
-	return func(_ context.Context, in Instance, raw ComponentSpec) (Service, error) {
+func Typed[S any, T Service](build func(ctx context.Context, in Instance, spec S) (T, error)) ServiceFactory {
+	return func(ctx context.Context, in Instance, raw ComponentSpec) (Service, error) {
 		var spec S
 		if err := raw.Spec.Decode(&spec); err != nil {
 			return nil, fmt.Errorf("component: decoding the %s spec: %w", raw.Kind, err)
 		}
-		svc, err := build(in, spec)
+		svc, err := build(ctx, in, spec)
 		if err != nil {
 			return nil, err
 		}

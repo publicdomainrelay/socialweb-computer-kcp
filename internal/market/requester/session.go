@@ -551,13 +551,11 @@ func (q *Requester) provisionSession(ctx context.Context, vmName, policyName str
 		return nil, err
 	}
 	if !found {
-		payload, err = market.CreateSignedRecordAt(ctx, q.repo, q.repoDID, market.ComputeVMNSID, vmRKey, map[string]any{
-			"$type":     market.ComputeVMNSID,
-			"role":      vmName,
-			"disk":      DefaultComputeDisk,
-			"user_data": userData,
-			"createdAt": q.nowISO(),
-		}, q.signer)
+		record, err := market.EncodeRecord(market.ComputeVM{Role: vmName, Disk: DefaultComputeDisk, UserData: userData, CreatedAt: q.nowISO()})
+		if err != nil {
+			return nil, err
+		}
+		payload, err = market.CreateSignedRecordAt(ctx, q.repo, q.repoDID, market.ComputeVMNSID, vmRKey, record, q.signer)
 		if err != nil {
 			return nil, err
 		}

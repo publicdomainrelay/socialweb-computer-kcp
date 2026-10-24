@@ -288,34 +288,34 @@ func (c *Core) register() error {
 		kind    string
 		factory component.ServiceFactory
 	}{
-		{plc.Kind, component.Typed(func(in component.Instance, spec v1alpha1.PlcSpec) (*plc.Service, error) {
+		{plc.Kind, component.Typed(func(_ context.Context, in component.Instance, spec v1alpha1.PlcSpec) (*plc.Service, error) {
 			return plc.New(spec, in), nil
 		})},
-		{relay.Kind, component.Typed(func(in component.Instance, spec v1alpha1.RelaySpec) (*relay.Service, error) {
+		{relay.Kind, component.Typed(func(_ context.Context, in component.Instance, spec v1alpha1.RelaySpec) (*relay.Service, error) {
 			return relay.New(spec, relay.Deps{Instance: in, Registry: registry, TLS: tlsConfig, Egress: egress(in)})
 		})},
-		{dispatchertls.Kind, component.Typed(func(in component.Instance, spec v1alpha1.DispatcherTLSSpec) (*dispatchertls.Service, error) {
+		{dispatchertls.Kind, component.Typed(func(_ context.Context, in component.Instance, spec v1alpha1.DispatcherTLSSpec) (*dispatchertls.Service, error) {
 			return dispatchertls.New(spec, dispatchertls.Deps{Instance: in, Registry: registry, TLS: tlsConfig}), nil
 		})},
-		{ingressproxy.Kind, component.Typed(func(in component.Instance, spec v1alpha1.IngressProxySpec) (*ingressproxy.Service, error) {
+		{ingressproxy.Kind, component.Typed(func(_ context.Context, in component.Instance, spec v1alpha1.IngressProxySpec) (*ingressproxy.Service, error) {
 			return ingressproxy.New(spec, ingressproxy.Deps{Instance: in, Registry: registry, TLS: tlsConfig, Identity: identity})
 		})},
-		{gatewayapi.Kind, component.Typed(func(in component.Instance, spec v1alpha1.GatewayAPISpec) (*gatewayapi.Service, error) {
+		{gatewayapi.Kind, component.Typed(func(_ context.Context, in component.Instance, spec v1alpha1.GatewayAPISpec) (*gatewayapi.Service, error) {
 			return gatewayapi.New(spec, gatewayapi.Deps{Instance: in, KCP: kcp, TLS: tlsConfig, NodeClaimAgent: c.cfg.NodeClaimAgent, NodeClaims: c.nodeClaims, Logins: c.logins})
 		})},
-		{bidder.Kind, component.Typed(func(in component.Instance, spec v1alpha1.BidderSpec) (*bidder.Service, error) {
-			return bidder.New(spec, bidder.Deps{Instance: in, Credentials: creds, Egress: egress(in), OAuthCallbacks: c.oauthCallbacks})
+		{bidder.Kind, component.Typed(func(ctx context.Context, in component.Instance, spec v1alpha1.BidderSpec) (*bidder.Service, error) {
+			return bidder.New(ctx, spec, bidder.Deps{Instance: in, Credentials: creds, Egress: egress(in), OAuthCallbacks: c.oauthCallbacks})
 		})},
-		{guestcontrolplane.Kind, component.Typed(func(in component.Instance, spec v1alpha1.GuestControlPlaneSpec) (*guestcontrolplane.Service, error) {
+		{guestcontrolplane.Kind, component.Typed(func(_ context.Context, in component.Instance, spec v1alpha1.GuestControlPlaneSpec) (*guestcontrolplane.Service, error) {
 			return guestcontrolplane.New(spec, guestcontrolplane.Deps{Instance: in, Hosts: hosts})
 		})},
-		{pds.Kind, component.Typed(func(in component.Instance, spec v1alpha1.PdsSpec) (*pds.Service, error) {
+		{pds.Kind, component.Typed(func(_ context.Context, in component.Instance, spec v1alpha1.PdsSpec) (*pds.Service, error) {
 			return pds.New(spec, pds.Deps{Instance: in, Egress: egress(in)})
 		})},
-		{requester.Kind, component.Typed(func(in component.Instance, spec v1alpha1.RequesterSpec) (*requester.Service, error) {
-			return requester.New(spec, requester.Deps{Instance: in, Credentials: creds, Egress: egress(in), OAuthCallbacks: c.oauthCallbacks})
+		{requester.Kind, component.Typed(func(ctx context.Context, in component.Instance, spec v1alpha1.RequesterSpec) (*requester.Service, error) {
+			return requester.New(ctx, spec, requester.Deps{Instance: in, Credentials: creds, Egress: egress(in), OAuthCallbacks: c.oauthCallbacks})
 		})},
-		{sshserver.Kind, component.Typed(func(in component.Instance, spec v1alpha1.SshServerSpec) (*sshserver.Service, error) {
+		{sshserver.Kind, component.Typed(func(_ context.Context, in component.Instance, spec v1alpha1.SshServerSpec) (*sshserver.Service, error) {
 			return sshserver.New(spec, sshserver.Deps{Instance: in, Hosts: hosts, TLS: tlsConfig})
 		})},
 	} {

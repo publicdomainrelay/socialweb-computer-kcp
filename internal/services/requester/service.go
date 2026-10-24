@@ -76,7 +76,7 @@ var (
 	_ sshcontract.Runner = (*Service)(nil)
 )
 
-func New(spec v1alpha1.RequesterSpec, deps Deps) (*Service, error) {
+func New(ctx context.Context, spec v1alpha1.RequesterSpec, deps Deps) (*Service, error) {
 	log := cmp.Or(deps.Log, slog.New(slog.DiscardHandler))
 	s := &Service{spec: spec, deps: deps, log: log}
 	if ref := sessionCredential(spec); ref != nil && deps.Credentials != nil {
@@ -85,7 +85,7 @@ func New(spec v1alpha1.RequesterSpec, deps Deps) (*Service, error) {
 		s.saveSessions = store.Writable()
 	}
 	placement := role.Placement{Workspace: deps.Self.Workspace, Name: deps.Self.Name, UID: string(deps.UID), StateDir: deps.StateDir}
-	cfg, err := role.Configure(spec, placement, s.sessionStore(), log)
+	cfg, err := role.Configure(ctx, spec, placement, s.sessionStore(), log)
 	if err != nil {
 		return nil, err
 	}

@@ -51,14 +51,14 @@ func TerminationStateSync(o *v1alpha1.ComputeVM, workspace, reason, observedAt s
 	if request == nil {
 		request = ReleaseRequestRef(o)
 	}
-	record := map[string]any{
-		"$type":      market.ComputeEventsVMTerminatedNSID,
-		"reason":     reason,
-		"observedAt": observedAt,
-		"createdAt":  observedAt,
-	}
+	terminated := market.ComputeEventsVMTerminated{Reason: reason, ObservedAt: observedAt, CreatedAt: observedAt}
 	if request != nil && request.URI != "" {
-		record["request"] = market.NewStrongRef(request.URI, request.CID).Map()
+		ref := market.NewStrongRef(request.URI, request.CID)
+		terminated.Request = &ref
+	}
+	record, err := market.EncodeRecord(terminated)
+	if err != nil {
+		return nil, err
 	}
 	payload := map[string]any{
 		"collection": market.ComputeEventsVMTerminatedNSID,

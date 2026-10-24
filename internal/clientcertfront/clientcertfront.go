@@ -29,6 +29,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clientcert"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterprovider"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/clusterhome"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gateway"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
@@ -286,7 +287,7 @@ func (s *server) serve(w http.ResponseWriter, r *http.Request) {
 	if rest == "" {
 		rest = "/"
 	}
-	home := kcpclient.RootWorkspace + ":" + account + ":" + cluster
+	home := clusterhome.RootWorkspace + ":" + account + ":" + cluster
 	if user == nil {
 		s.serveBearer(w, r, account, home, cluster, rest)
 		return
@@ -304,7 +305,7 @@ func (s *server) serveBearer(w http.ResponseWriter, r *http.Request, account, ho
 		s.refuse(w, r, status, did, cluster, "", reason)
 		return
 	}
-	key, err := kcpclient.ClusterKey(home)
+	key, err := clusterhome.Key(home)
 	if err != nil {
 		s.refuse(w, r, http.StatusNotFound, did, cluster, "", "cluster key")
 		return
@@ -345,10 +346,10 @@ func (s *server) serveCertificate(w http.ResponseWriter, r *http.Request, user *
 	case !strings.HasPrefix(cn, "did:"):
 		s.refuse(w, r, http.StatusForbidden, cn, cluster, serial, "common name is not a DID")
 		return
-	case kcpclient.AccountHash(cn) != account:
+	case clusterhome.AccountHash(cn) != account:
 		s.refuse(w, r, http.StatusForbidden, cn, cluster, serial, "another account")
 		return
-	case !slices.Equal(user.Subject.Organization, []string{kcpclient.OwnersGroup}):
+	case !slices.Equal(user.Subject.Organization, []string{clusterhome.OwnersGroup}):
 		s.refuse(w, r, http.StatusForbidden, cn, cluster, serial, "organization")
 		return
 	case user.NotAfter.Sub(user.NotBefore) > gateway.MaxClientCertTTL+lifetimeSlack &&
@@ -414,7 +415,7 @@ func (s *server) serveCertificate(w http.ResponseWriter, r *http.Request, user *
 			rewrite(pr, t.front, rest)
 			pr.Out.Header.Del("Authorization")
 			pr.Out.Header.Set("X-Remote-User", cn)
-			pr.Out.Header.Set("X-Remote-Group", kcpclient.OwnersGroup)
+			pr.Out.Header.Set("X-Remote-Group", clusterhome.OwnersGroup)
 		},
 		FlushInterval: -1,
 		Transport:     t.transport,
@@ -444,7 +445,7 @@ func (s *server) admitGate(ctx context.Context, account, home, cluster string) (
 	switch {
 	case err != nil:
 		return "", http.StatusServiceUnavailable, "cluster state: " + err.Error()
-	case g.Account == "" || kcpclient.AccountHash(g.Account) != account:
+	case g.Account == "" || clusterhome.AccountHash(g.Account) != account:
 		return "", http.StatusNotFound, "no such cluster in this account"
 	case !g.Serving:
 		return g.Account, http.StatusServiceUnavailable, "the cluster is not serving"

@@ -17,7 +17,7 @@ import (
 	"k8s.io/client-go/rest"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/clusterhome"
 )
 
 var (
@@ -76,7 +76,7 @@ func (w *Worklist) DIDs(ctx context.Context) ([]string, error) {
 	seen := make(map[string]bool, len(names))
 	out := make([]string, 0, len(names))
 	for _, name := range names {
-		dids, err := w.accountDIDs(ctx, kcpclient.RootWorkspace+":"+name)
+		dids, err := w.accountDIDs(ctx, clusterhome.RootWorkspace+":"+name)
 		if apierrors.IsNotFound(err) {
 			continue
 		}
@@ -96,13 +96,13 @@ func (w *Worklist) DIDs(ctx context.Context) ([]string, error) {
 }
 
 func (w *Worklist) accountWorkspaces(ctx context.Context) ([]string, error) {
-	r, err := w.resource(kcpclient.RootWorkspace, tenancyResource)
+	r, err := w.resource(clusterhome.RootWorkspace, tenancyResource)
 	if err != nil {
 		return nil, err
 	}
 	var list kcpv1alpha1.WorkspaceList
 	if err := r.Get().Resource("workspaces").Do(ctx).Into(&list); err != nil {
-		return nil, fmt.Errorf("sweepkcp: list workspaces in %s: %w", kcpclient.RootWorkspace, err)
+		return nil, fmt.Errorf("sweepkcp: list workspaces in %s: %w", clusterhome.RootWorkspace, err)
 	}
 	names := make([]string, 0, len(list.Items))
 	for _, ws := range list.Items {

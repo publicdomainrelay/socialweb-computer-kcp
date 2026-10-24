@@ -84,14 +84,38 @@ type Controller struct {
 
 	owners map[string]ownerUID
 
-	statusLocks sync.Map
+	locksMu sync.Mutex
+
+	statusLocks map[string]*statusLock
+}
+
+type statusLock struct {
+	mu sync.Mutex
+
+	users int
 }
 
 func (c *Controller) lockStatus(key string) func() {
-	held, _ := c.statusLocks.LoadOrStore(key, &sync.Mutex{})
-	lock := held.(*sync.Mutex)
-	lock.Lock()
-	return lock.Unlock
+	c.locksMu.Lock()
+	if c.statusLocks == nil {
+		c.statusLocks = map[string]*statusLock{}
+	}
+	lock := c.statusLocks[key]
+	if lock == nil {
+		lock = &statusLock{}
+		c.statusLocks[key] = lock
+	}
+	lock.users++
+	c.locksMu.Unlock()
+	lock.mu.Lock()
+	return func() {
+		lock.mu.Unlock()
+		c.locksMu.Lock()
+		if lock.users--; lock.users == 0 {
+			delete(c.statusLocks, key)
+		}
+		c.locksMu.Unlock()
+	}
 }
 
 type ownerUID struct {

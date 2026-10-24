@@ -68,8 +68,6 @@ const (
 
 	MaxRecordBids = 20
 
-	CapacityRetryDelay = 60 * time.Second
-
 	PolicyGhaLiteNSID = "computer.socialweb.temp.policy.ghalite"
 
 	DefaultComputeDisk = "50G"
@@ -190,6 +188,8 @@ type Deps struct {
 type Requester struct {
 	cfg Config
 
+	inboxed sync.Map
+
 	deps Deps
 
 	log *slog.Logger
@@ -287,7 +287,7 @@ func IdentityWorkspaces(workspace string) []string {
 	return workspaces
 }
 
-func Configure(spec v1alpha1.RequesterSpec, at Placement, sessions oauthclient.SessionStore, log *slog.Logger) (Config, error) {
+func Configure(ctx context.Context, spec v1alpha1.RequesterSpec, at Placement, sessions oauthclient.SessionStore, log *slog.Logger) (Config, error) {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
@@ -319,7 +319,7 @@ func Configure(spec v1alpha1.RequesterSpec, at Placement, sessions oauthclient.S
 	if cfg.IdentityMode == IdentityModeOAuth {
 		cfg.RepoDID, cfg.MarketDID = cfg.DID, cfg.DID
 		if sessions != nil {
-			found, err := sessions.List(context.Background())
+			found, err := sessions.List(ctx)
 			if err != nil {
 				log.Warn("requester_could_not_read_the_oauth_session", "err", err)
 			} else if len(found) > 0 {

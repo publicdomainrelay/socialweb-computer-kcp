@@ -34,22 +34,22 @@ import (
 )
 
 const (
-	RequestsDir               = "requests"
-	InvocationFile            = "invocation.json"
-	SummaryFile               = "summary.json"
-	SSHDir                    = "ssh"
-	ModeNetwork               = "network"
-	ModeStandalone            = "standalone"
-	RootName                  = "app"
-	FieldManager              = "socialweb-computer-run-request"
-	ReleaseFieldManager       = "socialweb.computer/run-request"
-	ContractTTLSeconds  int32 = 8 * 24 * 60 * 60
-	SecretsPath               = "contracts/" + marketrequester.RequesterContract + "/secrets"
-	Poll                      = time.Second
-	RetryMax                  = 5 * time.Second
-	irohScheme                = "iroh://"
-	maxNameLength             = 30
-	networkConflicts          = 10
+	RequestsDir                  = "requests"
+	InvocationFile               = "invocation.json"
+	SummaryFile                  = "summary.json"
+	SSHDir                       = "ssh"
+	ModeNetwork                  = "network"
+	ModeStandalone               = "standalone"
+	RootName                     = "app"
+	FieldManager                 = "socialweb-computer-run-request"
+	ReleaseFieldManager          = "socialweb.computer/run-request"
+	NetworkAppFieldManager       = "socialweb.computer/network-app"
+	ContractTTLSeconds     int32 = 8 * 24 * 60 * 60
+	SecretsPath                  = "contracts/" + marketrequester.RequesterContract + "/secrets"
+	Poll                         = time.Second
+	RetryMax                     = 5 * time.Second
+	irohScheme                   = "iroh://"
+	maxNameLength                = 30
 )
 
 var nameRE = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
@@ -492,74 +492,84 @@ func networkClient(kubeconfig string) (kube.Resource, error) {
 	return dc.Resource(compose.MarketNetworkGVR), nil
 }
 
-func editNetwork(ctx context.Context, kubeconfig string, edit func(*v1alpha1.MarketNetworkSpec) error) error {
+func networkApps(ctx context.Context, ri kube.Resource) ([]v1alpha1.NetworkApp, error) {
+	o, err := kube.Get[v1alpha1.MarketNetwork](ctx, ri, marketnetwork.NetworkName)
+	if err != nil {
+		return nil, fmt.Errorf("request: the market network's MarketNetwork: %w", err)
+	}
+	return o.Spec.Apps, nil
+}
+
+func applyNetworkApp(ctx context.Context, ri kube.Resource, name string, app *v1alpha1.NetworkApp) error {
+	spec := map[string]any{}
+	if app != nil {
+		entry, err := runtime.DefaultUnstructuredConverter.ToUnstructured(app)
+		if err != nil {
+			return err
+		}
+		spec["apps"] = []any{entry}
+	}
+	doc := kube.Doc{"apiVersion": v1alpha1.GroupVersion.String(), "kind": "MarketNetwork",
+		"metadata": map[string]any{"name": marketnetwork.NetworkName}, "spec": spec}
+	if _, err := kube.Apply[kube.Doc](ctx, ri, doc, kube.ApplyOptions{FieldManager: NetworkAppFieldManager + "/" + name}); err != nil {
+		return fmt.Errorf("request: applying the market network's application %s: %w", name, err)
+	}
+	return nil
+}
+
+func AddToNetwork(ctx context.Context, kubeconfig string, app v1alpha1.NetworkApp) error {
 	ri, err := networkClient(kubeconfig)
 	if err != nil {
 		return err
 	}
-	for range networkConflicts {
-		u, err := kube.Get[kube.Doc](ctx, ri, marketnetwork.NetworkName)
-		if err != nil {
-			return fmt.Errorf("request: the market network's MarketNetwork: %w", err)
-		}
-		o, err := kube.Decode[v1alpha1.MarketNetwork](*u)
-		if err != nil {
-			return err
-		}
-		if err := edit(&o.Spec); err != nil {
-			return err
-		}
-		apps, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&o.Spec)
-		if err != nil {
-			return err
-		}
-		(*u)["spec"] = apps
-		_, err = kube.Update[kube.Doc](ctx, ri, *u, metav1.UpdateOptions{FieldManager: FieldManager})
-		if err == nil {
-			return nil
-		}
-		if !apierrors.IsConflict(err) {
-			return err
+	apps, err := networkApps(ctx, ri)
+	if err != nil {
+		return err
+	}
+	for _, a := range apps {
+		if a.Name == app.Name {
+			return fmt.Errorf("request: the market network already has an application %s", app.Name)
 		}
 	}
-	return errors.New("request: the MarketNetwork stayed in conflict")
-}
-
-func AddToNetwork(ctx context.Context, kubeconfig string, app v1alpha1.NetworkApp) error {
-	return editNetwork(ctx, kubeconfig, func(s *v1alpha1.MarketNetworkSpec) error {
-		for _, a := range s.Apps {
-			if a.Name == app.Name {
-				return fmt.Errorf("request: the market network already has an application %s", app.Name)
-			}
-		}
-		s.Apps = append(s.Apps, app)
-		return nil
-	})
+	return applyNetworkApp(ctx, ri, app.Name, &app)
 }
 
 func SetStopped(ctx context.Context, kubeconfig, name string, stopped bool) error {
-	return editNetwork(ctx, kubeconfig, func(s *v1alpha1.MarketNetworkSpec) error {
-		for i := range s.Apps {
-			if s.Apps[i].Name == name {
-				s.Apps[i].Stopped = stopped
-				return nil
-			}
+	ri, err := networkClient(kubeconfig)
+	if err != nil {
+		return err
+	}
+	apps, err := networkApps(ctx, ri)
+	if err != nil {
+		return err
+	}
+	for _, a := range apps {
+		if a.Name == name {
+			a.Stopped = stopped
+			return applyNetworkApp(ctx, ri, name, &a)
 		}
-		return fmt.Errorf("request: the market network has no application %s", name)
-	})
+	}
+	return fmt.Errorf("request: the market network has no application %s", name)
 }
 
 func RemoveFromNetwork(ctx context.Context, kubeconfig, name string) error {
-	return editNetwork(ctx, kubeconfig, func(s *v1alpha1.MarketNetworkSpec) error {
-		var keep []v1alpha1.NetworkApp
-		for _, a := range s.Apps {
-			if a.Name != name {
-				keep = append(keep, a)
-			}
+	ri, err := networkClient(kubeconfig)
+	if err != nil {
+		return err
+	}
+	if err := applyNetworkApp(ctx, ri, name, nil); err != nil {
+		return err
+	}
+	apps, err := networkApps(ctx, ri)
+	if err != nil {
+		return err
+	}
+	for _, a := range apps {
+		if a.Name == name {
+			return fmt.Errorf("request: another writer of the MarketNetwork still applies its application %s", name)
 		}
-		s.Apps = keep
-		return nil
-	})
+	}
+	return nil
 }
 
 func NetworkApp(ctx context.Context, kubeconfig, name string) (v1alpha1.NetworkAppStatus, bool, error) {

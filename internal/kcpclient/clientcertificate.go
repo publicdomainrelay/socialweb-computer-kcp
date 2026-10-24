@@ -15,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/clusterhome"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -49,7 +50,7 @@ type CertificateState struct {
 }
 
 func (c *Client) RecordCertificate(ctx context.Context, rec CertificateRecord) error {
-	home := HomePath(rec.DID, rec.Cluster)
+	home := clusterhome.HomePath(rec.DID, rec.Cluster)
 	cluster, err := c.readCluster(ctx, home, rec.Cluster)
 	if err != nil {
 		return fmt.Errorf("kcpclient: the cluster %s that owns the certificate record: %w", home, err)
@@ -80,7 +81,7 @@ func (c *Client) RecordCertificate(ctx context.Context, rec CertificateRecord) e
 }
 
 func (c *Client) MarkCertificateRevoked(ctx context.Context, did, cluster, serial string) error {
-	home := HomePath(did, cluster)
+	home := clusterhome.HomePath(did, cluster)
 	r, err := c.resource(home, socialwebResource)
 	if err != nil {
 		return err
@@ -193,7 +194,7 @@ func (w *certWatch) fail(err error) {
 }
 
 func (c *Client) certWatcher(did, cluster string) *certWatch {
-	home := HomePath(did, cluster)
+	home := clusterhome.HomePath(did, cluster)
 	c.certMu.Lock()
 	defer c.certMu.Unlock()
 	if w := c.certWatches[home]; w != nil {

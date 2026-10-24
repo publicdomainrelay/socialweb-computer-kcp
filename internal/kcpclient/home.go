@@ -9,10 +9,12 @@ import (
 
 	kcpv1alpha1 "github.com/kcp-dev/sdk/apis/tenancy/v1alpha1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/clusterhome"
 )
 
 func (c *Client) RemoveHome(ctx context.Context, home string) (bool, error) {
-	if _, err := ClusterKey(home); err != nil {
+	if _, err := clusterhome.Key(home); err != nil {
 		return false, err
 	}
 	i := strings.LastIndex(home, ":")
@@ -50,7 +52,7 @@ func (c *Client) SweepHomes(ctx context.Context, live map[string]bool, grace tim
 	if c == nil {
 		return nil, nil
 	}
-	r, err := c.resource(RootWorkspace, tenancyResource)
+	r, err := c.resource(clusterhome.RootWorkspace, tenancyResource)
 	if err != nil {
 		return nil, err
 	}
@@ -64,7 +66,7 @@ func (c *Client) SweepHomes(ctx context.Context, live map[string]bool, grace tim
 		if account.Spec.Type == nil || account.Spec.Type.Name != AccountWorkspaceType || account.DeletionTimestamp != nil {
 			continue
 		}
-		path := RootWorkspace + ":" + account.Name
+		path := clusterhome.RootWorkspace + ":" + account.Name
 		ar, err := c.resource(path, tenancyResource)
 		if err != nil {
 			return removed, err
@@ -76,7 +78,7 @@ func (c *Client) SweepHomes(ctx context.Context, live map[string]bool, grace tim
 		}
 		for _, ws := range homes.Items {
 			home := path + ":" + ws.Name
-			key, err := ClusterKey(home)
+			key, err := clusterhome.Key(home)
 			if err != nil || live[key] || ws.Spec.Type == nil || ws.Spec.Type.Name != HomeWorkspaceType ||
 				ws.DeletionTimestamp != nil || time.Since(ws.CreationTimestamp.Time) < grace {
 				continue

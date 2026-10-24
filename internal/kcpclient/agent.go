@@ -15,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/clusterhome"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 )
 
@@ -126,7 +127,7 @@ func (c *Client) grantAgentHome(ctx context.Context, home string) error {
 	if err := apply(ctx, r.Patch(types.ApplyPatchType).Resource("clusterrolebindings").Name(NodeClaimAgentGrant), home, binding); err != nil {
 		return err
 	}
-	key, err := ClusterKey(home)
+	key, err := clusterhome.Key(home)
 	if err != nil {
 		return err
 	}
@@ -149,7 +150,7 @@ func (c *Client) DropAgentHome(ctx context.Context, home string) (bool, error) {
 	if c == nil || c.agent == nil {
 		return false, nil
 	}
-	key, err := ClusterKey(home)
+	key, err := clusterhome.Key(home)
 	if err != nil {
 		return false, err
 	}

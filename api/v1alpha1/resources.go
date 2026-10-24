@@ -94,7 +94,7 @@ var APIResources = []APIResource{
 		{Name: "Instance", Type: "string", JSONPath: ".status.runtime.instance"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "RemoteOpenBao", Plural: "remoteopenbaos", Revision: 3, Export: "hostprocesses", Object: RemoteOpenBao{}, Contracts: []string{commonv1.ContractVaults}, PrinterColumns: []PrinterColumn{
+	{Kind: "RemoteOpenBao", Plural: "remoteopenbaos", Revision: 4, Export: "hostprocesses", Object: RemoteOpenBao{}, Contracts: []string{commonv1.ContractVaults}, PrinterColumns: []PrinterColumn{
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "Ready", Type: "boolean", JSONPath: ".status.ready"},
 		{Name: "Endpoint", Type: "string", JSONPath: ".status.endpoint"},
@@ -107,7 +107,7 @@ var APIResources = []APIResource{
 		{Name: "Sealed", Type: "boolean", JSONPath: ".status.sealed"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "MarketNetwork", Plural: "marketnetworks", Revision: 19, Export: "applications", Object: MarketNetwork{}, PrinterColumns: []PrinterColumn{
+	{Kind: "MarketNetwork", Plural: "marketnetworks", Revision: 20, Export: "applications", Object: MarketNetwork{}, PrinterColumns: []PrinterColumn{
 		{Name: "Profile", Type: "string", JSONPath: ".spec.profile"},
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "PLC", Type: "string", JSONPath: ".status.network.plcDirectoryUrl"},

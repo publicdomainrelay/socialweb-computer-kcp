@@ -16,6 +16,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
 	appgateway "github.com/johnandersen777/socialweb-computer-kcp/internal/app/gateway"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/clusterhome"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kcpapply"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/manifests"
@@ -42,7 +43,7 @@ func ssa(ctx context.Context, r kube.Resource, obj kube.Doc) error {
 
 func workspace(name, typ string) kube.Doc {
 	return kube.Doc{"apiVersion": "tenancy.kcp.io/v1alpha1", "kind": "Workspace", "metadata": map[string]any{"name": name},
-		"spec": map[string]any{"type": map[string]any{"name": typ, "path": kcpclient.RootWorkspace}}}
+		"spec": map[string]any{"type": map[string]any{"name": typ, "path": clusterhome.RootWorkspace}}}
 }
 
 func applyWorkspace(ctx context.Context, ap *kcpapply.Applier, parent, name, typ string) error {
@@ -111,20 +112,20 @@ func bootstrapCluster(ctx context.Context, kubeconfig, base, did, cluster string
 	if err != nil {
 		return err
 	}
-	account := kcpclient.AccountHash(did)
-	root, err := client(kcpclient.RootWorkspace)
+	account := clusterhome.AccountHash(did)
+	root, err := client(clusterhome.RootWorkspace)
 	if err != nil {
 		return err
 	}
 	if err := retry(ctx, "account workspace", func() error {
-		return applyWorkspace(ctx, ap, kcpclient.RootWorkspace, account, string(kcpclient.AccountWorkspaceType))
+		return applyWorkspace(ctx, ap, clusterhome.RootWorkspace, account, string(kcpclient.AccountWorkspaceType))
 	}); err != nil {
 		return err
 	}
 	if err := waitReady(ctx, root.Resource(workspaceGVR), account); err != nil {
 		return err
 	}
-	acct, err := client(kcpclient.AccountPath(did))
+	acct, err := client(clusterhome.AccountPath(did))
 	if err != nil {
 		return err
 	}
@@ -136,14 +137,14 @@ func bootstrapCluster(ctx context.Context, kubeconfig, base, did, cluster string
 		return err
 	}
 	if err := retry(ctx, "home workspace", func() error {
-		return applyWorkspace(ctx, ap, kcpclient.AccountPath(did), cluster, string(kcpclient.HomeWorkspaceType))
+		return applyWorkspace(ctx, ap, clusterhome.AccountPath(did), cluster, string(kcpclient.HomeWorkspaceType))
 	}); err != nil {
 		return err
 	}
 	if err := waitReady(ctx, acct.Resource(workspaceGVR), cluster); err != nil {
 		return err
 	}
-	home, err := client(kcpclient.HomePath(did, cluster))
+	home, err := client(clusterhome.HomePath(did, cluster))
 	if err != nil {
 		return err
 	}
@@ -161,10 +162,10 @@ func bootstrapCluster(ctx context.Context, kubeconfig, base, did, cluster string
 	if err != nil {
 		return err
 	}
-	if err := retry(ctx, "web app grant on the home", func() error { return kc.GrantAgentHome(ctx, kcpclient.HomePath(did, cluster)) }); err != nil {
+	if err := retry(ctx, "web app grant on the home", func() error { return kc.GrantAgentHome(ctx, clusterhome.HomePath(did, cluster)) }); err != nil {
 		return err
 	}
-	log.Info("the bootstrap cluster exists", "cluster", cluster, "account", did, "home", kcpclient.HomePath(did, cluster))
+	log.Info("the bootstrap cluster exists", "cluster", cluster, "account", did, "home", clusterhome.HomePath(did, cluster))
 	return nil
 }
 

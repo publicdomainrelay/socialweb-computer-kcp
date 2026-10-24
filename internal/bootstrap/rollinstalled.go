@@ -218,10 +218,6 @@ func RollInstalled(ctx context.Context, m hostsvc.Manager, p Params, o Installed
 	return out, rerr
 }
 
-// pruneInactiveAuditLogs removes the audit logs of a slot that has just been
-// retired. They are the largest files a slot holds (100 MiB each, rotated), and
-// an upgrade that is rolled back and forth otherwise leaves every generation's
-// logs on disk.
 func pruneInactiveAuditLogs(root string, log *slog.Logger) {
 	entries, err := os.ReadDir(root)
 	if err != nil {

@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"math/big"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -53,41 +52,4 @@ func NodesDir(stateDir, cluster string) string {
 
 func NodeDataDir(stateDir, cluster, nodeName string) string {
 	return filepath.Join(NodesDir(stateDir, cluster), nodeName)
-}
-
-const (
-	rootWorkspace = "root"
-
-	childLabel = "clusters"
-
-	ownersGroup = "socialweb.computer:cluster-owners"
-)
-
-func accountHash(did string) string {
-	sum := sha256.Sum256([]byte(did))
-	return new(big.Int).SetBytes(sum[:]).Text(36)[:8]
-}
-
-func mountPath(did, cluster string) string {
-	return rootWorkspace + ":" + accountHash(did) + ":" + cluster + ":" + childLabel
-}
-
-var clusterKeyShape = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
-
-func clusterKey(home string) (string, error) {
-	parts := strings.Split(home, ":")
-	if len(parts) != 3 || parts[0] != rootWorkspace || parts[1] == "" || parts[2] == "" {
-		return "", fmt.Errorf(
-			"kcpclient: %q is not a home workspace path of the form %s:<account>:<cluster>, so the "+
-				"key a cluster is known by inside a provider cannot be derived from it",
-			home, rootWorkspace)
-	}
-	key := parts[1] + "-" + parts[2]
-	if !clusterKeyShape.MatchString(key) {
-		return "", fmt.Errorf(
-			"kcpclient: the home workspace path %q resolves to %q, which is not a DNS-1123 label: "+
-				"the key names a state dir, a port lease, a node and a mint credential, so a "+
-				"character outside [a-z0-9-] would make it name nothing those can hold", home, key)
-	}
-	return key, nil
 }

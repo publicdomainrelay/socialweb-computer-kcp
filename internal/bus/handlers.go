@@ -3,6 +3,7 @@ package bus
 import (
 	"context"
 	"errors"
+	"expvar"
 	"fmt"
 	"io"
 	"log"
@@ -71,8 +72,6 @@ type streamKey struct {
 	name string
 }
 
-// New returns a bus that serves until Stop. Its root keeps the values of ctx
-// but not its cancel, so calls made while the caller shuts down still run.
 func New(ctx context.Context) *Bus {
 	root, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	r := &Bus{
@@ -85,6 +84,7 @@ func New(ctx context.Context) *Bus {
 		root:      root,
 		cancel:    cancel,
 	}
+	r.denials.changed = make(chan struct{}, 1)
 	r.transport = &http.Transport{
 		Proxy: nil,
 		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
@@ -114,6 +114,26 @@ func (r *Bus) Denied() uint64 {
 		return 0
 	}
 	return r.denials.count.Load()
+}
+
+func (r *Bus) DeniedByCapability() map[string]uint64 {
+	out := map[string]uint64{}
+	if r == nil {
+		return out
+	}
+	r.denials.byCapability.Do(func(kv expvar.KeyValue) {
+		if n, ok := kv.Value.(*expvar.Int); ok {
+			out[kv.Key] = uint64(n.Value())
+		}
+	})
+	return out
+}
+
+func (r *Bus) DeniedChanged() <-chan struct{} {
+	if r == nil {
+		return nil
+	}
+	return r.denials.changed
 }
 
 func (r *Bus) Client() *http.Client {

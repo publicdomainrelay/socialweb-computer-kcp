@@ -235,11 +235,18 @@ func Run(ctx context.Context, cfg Config, m hostsvc.Manager) error {
 	defer func() { unwatch() }()
 	retry := time.NewTimer(0)
 	defer retry.Stop()
+	denied := handlers.DeniedChanged()
 	for {
 		select {
 		case <-ctx.Done():
 			log.Info("core stopping", "generation", core.Generation)
 			return g.Stop()
+		case <-denied:
+			core.BusDenied, core.BusDeniedBy = handlers.Denied(), handlers.DeniedByCapability()
+			if err := fsx.WriteJSON(l.CoreRecord, core, 0o600); err != nil {
+				log.Warn("recording the bus deny count", "err", err.Error())
+			}
+			continue
 		case err := <-members:
 			if ctx.Err() != nil {
 				return nil

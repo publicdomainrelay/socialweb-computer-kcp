@@ -163,7 +163,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 			return ctlruntime.Result{}, err
 		}
 		st := remote.Status
-		status.Address, status.Initialized, status.Sealed, status.CABundle, status.Version = st.Address, st.Initialized, st.Sealed, st.CABundle, st.Version
+		status.Address, status.Initialized, status.Sealed, status.Version = st.Address, st.Initialized, st.Sealed, st.Version
 		status.Ready = st.Ready && observedAt(st.Conditions, remote.Generation)
 		c.provider.Bind(Binding{Vault: self, Backend: backend, Remote: remote.DeepCopy()})
 	default:

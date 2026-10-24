@@ -145,7 +145,7 @@ type Service struct {
 
 var _ component.Service = (*Service)(nil)
 
-func New(spec v1alpha1.BidderSpec, deps Deps) (*Service, error) {
+func New(ctx context.Context, spec v1alpha1.BidderSpec, deps Deps) (*Service, error) {
 	policyArgs, err := participant.ParsePolicyArgs(spec.PolicyArgs)
 	if err != nil {
 		return nil, err
@@ -196,7 +196,7 @@ func New(spec v1alpha1.BidderSpec, deps Deps) (*Service, error) {
 	if spec.ServiceAuth != nil {
 		s.serviceAuthHost = strings.TrimSpace(spec.ServiceAuth.Hostname)
 	}
-	s.restoreSession(base, log)
+	s.restoreSession(ctx, base, log)
 	switch {
 	case s.handle == "":
 		return nil, errors.New("bidder: the component names no handle")

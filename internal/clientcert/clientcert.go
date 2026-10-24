@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterprovider"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/clusterhome"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gateway"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kubeconfig"
@@ -51,7 +52,7 @@ type Issuer struct {
 }
 
 func DataDir(stateDir, did, cluster string) (string, error) {
-	key, err := kcpclient.ClusterKey(kcpclient.HomePath(did, cluster))
+	key, err := clusterhome.Key(clusterhome.HomePath(did, cluster))
 	if err != nil {
 		return "", err
 	}
@@ -115,7 +116,7 @@ func (i *Issuer) Grant(ctx context.Context, in kcpclient.GrantInput) (string, er
 	switch {
 	case leaf.Subject.CommonName != string(in.Caller):
 		return "", errors.New("clientcert: the issued certificate has the wrong common name")
-	case !slices.Equal(leaf.Subject.Organization, []string{kcpclient.OwnersGroup}):
+	case !slices.Equal(leaf.Subject.Organization, []string{clusterhome.OwnersGroup}):
 		return "", errors.New("clientcert: the issued certificate has the wrong organization")
 	case !in.NoExpiry && leaf.NotAfter.Sub(leaf.NotBefore) > gateway.MaxClientCertTTL+lifetimeSlack:
 		return "", errors.New("clientcert: the issued certificate lives too long")
@@ -224,7 +225,7 @@ func signFromClientCA(dir, did string, ttl time.Duration, noExpiry bool) (string
 		ou = []string{clusterprovider.NoExpiryOrganizationalUnit}
 	}
 	tmpl := &x509.Certificate{SerialNumber: serial,
-		Subject:   pkix.Name{CommonName: did, Organization: []string{kcpclient.OwnersGroup}, OrganizationalUnit: ou},
+		Subject:   pkix.Name{CommonName: did, Organization: []string{clusterhome.OwnersGroup}, OrganizationalUnit: ou},
 		NotBefore: now.Add(-time.Minute), NotAfter: notAfter,
 		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
 		BasicConstraintsValid: true}
@@ -279,7 +280,7 @@ func (i *Issuer) Revoke(ctx context.Context, did, cluster string) (int, error) {
 		if err != nil {
 			continue
 		}
-		if leaf.Subject.CommonName != did || !slices.Equal(leaf.Subject.Organization, []string{kcpclient.OwnersGroup}) || !leaf.NotAfter.After(now) {
+		if leaf.Subject.CommonName != did || !slices.Equal(leaf.Subject.Organization, []string{clusterhome.OwnersGroup}) || !leaf.NotAfter.After(now) {
 			continue
 		}
 		if err := client.Write(ctx, "pki/revoke", map[string]any{"serial_number": serial}); err != nil {

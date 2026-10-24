@@ -25,6 +25,7 @@ import (
 	kcpv1alpha1 "github.com/kcp-dev/sdk/apis/tenancy/v1alpha1"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/clusterhome"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kcpapply"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/manifests"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gateway"
@@ -163,7 +164,7 @@ func New(opts Options) (*Client, error) {
 	}
 	c.applier = applier
 	if c.hostProcessWorkspace == "" {
-		c.hostProcessWorkspace = RootWorkspace
+		c.hostProcessWorkspace = clusterhome.RootWorkspace
 	}
 	if opts.NodeClaimAgent != nil {
 		c.agent = &agent{ref: opts.NodeClaimAgent}
@@ -244,7 +245,7 @@ func (c *Client) homePath(caller gateway.Caller, name string) (string, error) {
 	if name == "" {
 		return "", errors.New("kcpclient: no cluster name")
 	}
-	return HomePath(string(caller), name), nil
+	return clusterhome.HomePath(string(caller), name), nil
 }
 
 func (c *Client) Ensure(ctx context.Context, caller gateway.Caller, name string) error {
@@ -260,18 +261,18 @@ func (c *Client) ensure(ctx context.Context, permit revocation.Permit, name stri
 		return errors.New("kcpclient: no cluster name")
 	}
 	did := permit.Admitted()
-	home := HomePath(did, name)
+	home := clusterhome.HomePath(did, name)
 
-	if err := c.ensureWorkspace(ctx, RootWorkspace, AccountHash(did), kcpv1alpha1.WorkspaceSpec{
-		Type: &kcpv1alpha1.WorkspaceTypeReference{Name: AccountWorkspaceType, Path: RootWorkspace},
+	if err := c.ensureWorkspace(ctx, clusterhome.RootWorkspace, clusterhome.AccountHash(did), kcpv1alpha1.WorkspaceSpec{
+		Type: &kcpv1alpha1.WorkspaceTypeReference{Name: AccountWorkspaceType, Path: clusterhome.RootWorkspace},
 	}); err != nil {
-		return fmt.Errorf("kcpclient: account workspace %s: %w", AccountHash(did), err)
+		return fmt.Errorf("kcpclient: account workspace %s: %w", clusterhome.AccountHash(did), err)
 	}
-	if err := c.createGrant(ctx, AccountPath(did), IdentityRecordName(did), did); err != nil {
+	if err := c.createGrant(ctx, clusterhome.AccountPath(did), IdentityRecordName(did), did); err != nil {
 		return fmt.Errorf("kcpclient: account identity record %s: %w", IdentityRecordName(did), err)
 	}
-	if err := c.ensureWorkspace(ctx, AccountPath(did), name, kcpv1alpha1.WorkspaceSpec{
-		Type: &kcpv1alpha1.WorkspaceTypeReference{Name: HomeWorkspaceType, Path: RootWorkspace},
+	if err := c.ensureWorkspace(ctx, clusterhome.AccountPath(did), name, kcpv1alpha1.WorkspaceSpec{
+		Type: &kcpv1alpha1.WorkspaceTypeReference{Name: HomeWorkspaceType, Path: clusterhome.RootWorkspace},
 	}); err != nil {
 		return fmt.Errorf("kcpclient: home workspace %s: %w", home, err)
 	}
@@ -345,14 +346,14 @@ func (m *MountChild) EnsureMountChild(ctx context.Context, home, name, url strin
 	if url == "" {
 		return ErrNoMountURL
 	}
-	child, err := m.c.readWorkspace(ctx, home, ChildLabel)
+	child, err := m.c.readWorkspace(ctx, home, clusterhome.ChildLabel)
 	switch {
 	case apierrors.IsNotFound(err):
-		return m.c.createWorkspace(ctx, home, ChildLabel, mountChildSpec(name, url))
+		return m.c.createWorkspace(ctx, home, clusterhome.ChildLabel, mountChildSpec(name, url))
 	case err != nil:
 		return err
 	case child.Spec.URL == "":
-		return m.c.patchWorkspaceURL(ctx, home, ChildLabel, url)
+		return m.c.patchWorkspaceURL(ctx, home, clusterhome.ChildLabel, url)
 	}
 	return nil
 }
@@ -559,16 +560,16 @@ func (c *Client) List(ctx context.Context, caller gateway.Caller) ([]gateway.Clu
 }
 
 func (c *Client) clusterLabels(ctx context.Context, did string) ([]string, error) {
-	r, err := c.resource(AccountPath(did), tenancyResource)
+	r, err := c.resource(clusterhome.AccountPath(did), tenancyResource)
 	if err != nil {
 		return nil, err
 	}
 	var list kcpv1alpha1.WorkspaceList
 	if err := r.Get().Resource("workspaces").Do(ctx).Into(&list); err != nil {
-		if _, rerr := c.readWorkspace(ctx, RootWorkspace, AccountHash(did)); apierrors.IsNotFound(rerr) {
+		if _, rerr := c.readWorkspace(ctx, clusterhome.RootWorkspace, clusterhome.AccountHash(did)); apierrors.IsNotFound(rerr) {
 			return []string{}, nil
 		}
-		return nil, fmt.Errorf("kcpclient: list clusters for %s: %w", AccountPath(did), err)
+		return nil, fmt.Errorf("kcpclient: list clusters for %s: %w", clusterhome.AccountPath(did), err)
 	}
 	names := make([]string, 0, len(list.Items))
 	for _, ws := range list.Items {
@@ -645,7 +646,7 @@ func (c *Client) Kubeconfig(ctx context.Context, caller gateway.Caller, name str
 	return c.kubeconfigs.Grant(ctx, GrantInput{
 		Caller:   caller,
 		Cluster:  name,
-		Server:   host + "/clusters/" + MountPath(string(caller), name),
+		Server:   host + "/clusters/" + clusterhome.MountPath(string(caller), name),
 		TTL:      ttl,
 		NoExpiry: noExpiry,
 	})
@@ -655,16 +656,16 @@ func (c *Client) Lookup(ctx context.Context, did string) (revocation.DenyState, 
 	if did == "" {
 		return "", revocation.ErrNoDID
 	}
-	ws, err := c.readWorkspace(ctx, RootWorkspace, AccountHash(did))
+	ws, err := c.readWorkspace(ctx, clusterhome.RootWorkspace, clusterhome.AccountHash(did))
 	switch {
 	case apierrors.IsNotFound(err):
 		return revocation.DenyFirstLogin, nil
 	case err != nil:
-		return "", fmt.Errorf("kcpclient: deny: account workspace %s: %w", AccountPath(did), err)
+		return "", fmt.Errorf("kcpclient: deny: account workspace %s: %w", clusterhome.AccountPath(did), err)
 	case ws.DeletionTimestamp != nil:
-		return "", fmt.Errorf("kcpclient: deny: account workspace %s is terminating", AccountPath(did))
+		return "", fmt.Errorf("kcpclient: deny: account workspace %s is terminating", clusterhome.AccountPath(did))
 	}
-	rec, err := c.readIdentity(ctx, AccountPath(did), IdentityRecordName(did))
+	rec, err := c.readIdentity(ctx, clusterhome.AccountPath(did), IdentityRecordName(did))
 	switch {
 	case apierrors.IsNotFound(err):
 		return revocation.DenyRecordMissing, nil
@@ -684,17 +685,17 @@ func (c *Client) WriteDeny(ctx context.Context, did string) error {
 	if did == "" {
 		return revocation.ErrNoDID
 	}
-	if _, err := c.readWorkspace(ctx, RootWorkspace, AccountHash(did)); err != nil {
-		return fmt.Errorf("kcpclient: deny: account workspace %s: %w", AccountPath(did), err)
+	if _, err := c.readWorkspace(ctx, clusterhome.RootWorkspace, clusterhome.AccountHash(did)); err != nil {
+		return fmt.Errorf("kcpclient: deny: account workspace %s: %w", clusterhome.AccountPath(did), err)
 	}
-	r, err := c.resource(AccountPath(did), socialwebResource)
+	r, err := c.resource(clusterhome.AccountPath(did), socialwebResource)
 	if err != nil {
 		return err
 	}
 
 	name := IdentityRecordName(did)
 	scope := v1alpha1.IdentityScopeAccount
-	rec, err := c.readIdentity(ctx, AccountPath(did), name)
+	rec, err := c.readIdentity(ctx, clusterhome.AccountPath(did), name)
 	switch {
 	case apierrors.IsNotFound(err):
 	case err != nil:

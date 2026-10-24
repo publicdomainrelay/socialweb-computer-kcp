@@ -51,7 +51,23 @@ type appStatusView struct {
 	Instance  string               `json:"instance"`
 	Roots     []rootStatusView     `json:"roots,omitempty"`
 	Contracts []contractStatusView `json:"contracts,omitempty"`
+	BusDenies busDenies            `json:"busDenies"`
 	Error     string               `json:"error,omitempty"`
+}
+
+type busDenies struct {
+	Instance     string            `json:"instance"`
+	Denied       uint64            `json:"denied"`
+	ByCapability map[string]uint64 `json:"byCapability,omitempty"`
+	Error        string            `json:"error,omitempty"`
+}
+
+func readBusDenies(instance, coreRecord string) busDenies {
+	var core devinstance.Core
+	if err := fsx.ReadJSON(coreRecord, &core); err != nil {
+		return busDenies{Instance: instance, Error: err.Error()}
+	}
+	return busDenies{Instance: instance, Denied: core.BusDenied, ByCapability: core.BusDeniedBy}
 }
 
 type rootStatusObject struct {
@@ -60,7 +76,7 @@ type rootStatusObject struct {
 }
 
 type appKcp struct {
-	app, instance, kubeconfig, workspace string
+	app, instance, kubeconfig, workspace, coreRecord string
 }
 
 func runStatus(ctx context.Context, a *app, vals clicfg.Values, rest []string) int {
@@ -102,7 +118,7 @@ func runStatus(ctx context.Context, a *app, vals clicfg.Values, rest []string) i
 
 func appKcps(ctx context.Context, l devinstance.Layout, rec devinstance.Record) ([]appKcp, error) {
 	if rec.Profile != bootstrap.ProfileMarketNetwork || rec.AdminKubeconfig == "" {
-		return []appKcp{{app: l.ID, instance: l.ID, kubeconfig: rec.AdminKubeconfig, workspace: baseWorkspace(rec)}}, nil
+		return []appKcp{{app: l.ID, instance: l.ID, kubeconfig: rec.AdminKubeconfig, workspace: baseWorkspace(rec), coreRecord: l.CoreRecord}}, nil
 	}
 	n, err := marketnetwork.ReadNetwork(ctx, rec.AdminKubeconfig)
 	if err != nil {
@@ -121,7 +137,7 @@ func appKcps(ctx context.Context, l devinstance.Layout, rec devinstance.Record) 
 		if err := fsx.ReadJSON(cl.Record, &crec); err != nil {
 			continue
 		}
-		out = append(out, appKcp{app: ap.Name, instance: ap.Instance, kubeconfig: crec.AdminKubeconfig, workspace: baseWorkspace(crec)})
+		out = append(out, appKcp{app: ap.Name, instance: ap.Instance, kubeconfig: crec.AdminKubeconfig, workspace: baseWorkspace(crec), coreRecord: cl.CoreRecord})
 	}
 	return out, nil
 }
@@ -134,7 +150,7 @@ func baseWorkspace(rec devinstance.Record) string {
 }
 
 func readAppStatus(ctx context.Context, ak appKcp) appStatusView {
-	v := appStatusView{App: ak.app, Instance: ak.instance}
+	v := appStatusView{App: ak.app, Instance: ak.instance, BusDenies: readBusDenies(ak.instance, ak.coreRecord)}
 	ctx, cancel := context.WithTimeout(ctx, appStatusTimeout)
 	defer cancel()
 	dc, err := workspaceClient(ak.kubeconfig, ak.workspace)

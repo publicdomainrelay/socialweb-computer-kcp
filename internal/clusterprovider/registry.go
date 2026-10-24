@@ -14,6 +14,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/apiserverfront"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterstack"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/clusterhome"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/materialiser"
 )
 
@@ -26,9 +27,9 @@ type Ref struct {
 	Name    string
 }
 
-func (r Ref) MountPath() string { return mountPath(r.DID, r.Name) }
+func (r Ref) MountPath() string { return clusterhome.MountPath(r.DID, r.Name) }
 
-func (r Ref) Key() (string, error) { return clusterKey(r.Home) }
+func (r Ref) Key() (string, error) { return clusterhome.Key(r.Home) }
 
 func ProbeTenantFront(ctx context.Context, dataDir string) materialiser.PathProbe {
 	addr, err := tenantFrontAddress(dataDir)

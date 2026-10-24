@@ -562,16 +562,19 @@ func (a *marketInbox) Observe(ctx context.Context, request participant.OutboxReq
 	if err != nil {
 		return participant.Observation{}, err
 	}
-	if isBidCollection(payload.Collection) {
-		if _, ok := a.q.syncs.Get(bidInboxName(payload.URI, payload.CID)); !ok {
-			return participant.Observation{At: time.Now().UTC().Format(time.RFC3339)}, nil
-		}
+	if _, ok := a.q.inboxed.Load(inboxKey(request)); ok {
 		return participant.InboxObservation(request, payload.URI), nil
 	}
-	if payload.Collection == market.ReceiptNSID {
-		a.q.noteReceipt(market.ResolvedRecord{URI: payload.URI, CID: payload.CID, Value: payload.Record})
+	if isBidCollection(payload.Collection) {
+		if _, ok := a.q.syncs.Get(bidInboxName(payload.URI, payload.CID)); ok {
+			return participant.InboxObservation(request, payload.URI), nil
+		}
 	}
-	return participant.InboxObservation(request, request.Key), nil
+	return participant.Observation{At: time.Now().UTC().Format(time.RFC3339)}, nil
+}
+
+func inboxKey(request participant.OutboxRequest) string {
+	return request.UID + "#" + request.Key
 }
 
 func (a *marketInbox) Apply(ctx context.Context, request participant.OutboxRequest) (participant.Observation, error) {
@@ -587,10 +590,6 @@ func (a *marketInbox) Apply(ctx context.Context, request participant.OutboxReque
 		}
 	case payload.Collection == market.ReceiptNSID:
 		q.noteReceipt(market.ResolvedRecord{URI: payload.URI, CID: payload.CID, Value: payload.Record})
-		event := v1alpha1.ComputeContractEvent{URI: payload.URI, CID: payload.CID, ReceiptURI: payload.URI, ReceivedAt: q.nowISO()}
-		if err := q.storeInboxEvent(ctx, event); err != nil {
-			return participant.Observation{}, err
-		}
 	case payload.Collection == market.EventNSID:
 		envelope, err := market.ParseEvent(payload.Record)
 		if err != nil {
@@ -601,6 +600,7 @@ func (a *marketInbox) Apply(ctx context.Context, request participant.OutboxReque
 			return participant.Observation{}, err
 		}
 	}
+	q.inboxed.Store(inboxKey(request), true)
 	return participant.InboxObservation(request, payload.URI), nil
 }
 

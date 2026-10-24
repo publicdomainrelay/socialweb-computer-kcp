@@ -73,9 +73,13 @@ func (c *Composer) applyOperatorPDS(ctx context.Context, r Root, o Operator) err
 		ca := *o.CARef
 		spec.TLS = pdsv1alpha1.RemotePDSTLS{Enabled: true, CARef: &ca}
 	}
-	remote := &pdsv1alpha1.RemotePDS{ObjectMeta: metav1.ObjectMeta{Name: o.remoteName()}, Spec: spec}
-	_, err := c.ApplyRemotePDS(ctx, r, r.Workspace, remote)
-	return err
+	name := o.remoteName()
+	remote := &pdsv1alpha1.RemotePDS{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{OperatorRecordLabel: OperatorRepoName}}, Spec: spec}
+	if err := c.ApplyTyped(ctx, r, r.Workspace, RemotePDSGVR, pdsv1alpha1.GroupVersion.String(), KindRemotePDS, remote); err != nil {
+		return err
+	}
+	selector := OwnerLabel + "=" + r.Owner() + "," + OperatorRecordLabel + "=" + OperatorRepoName
+	return c.Prune(ctx, r.Workspace, RemotePDSGVR, selector, map[string]bool{name: true})
 }
 
 func (c *Composer) OperatorRepo(ctx context.Context, r Root, o Operator) (atprotorepo.Repo, string, error) {

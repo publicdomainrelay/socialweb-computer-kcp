@@ -10,8 +10,8 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterprovider"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/clusterhome"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 )
 
 const (
@@ -107,20 +107,20 @@ func (c *ProviderController) Reconcile(ctx context.Context, req ctlruntime.Reque
 
 func refOf(req ctlruntime.Request, object *v1alpha1.Cluster) (clusterprovider.Ref, error) {
 	home := strings.TrimSpace(req.Workspace)
-	account, _, ok := strings.Cut(strings.TrimPrefix(home, kcpclient.RootWorkspace+":"), ":")
+	account, _, ok := strings.Cut(strings.TrimPrefix(home, clusterhome.RootWorkspace+":"), ":")
 	if !isHome(home) || !ok {
 		return clusterprovider.Ref{}, fmt.Errorf("cluster: the workspace path of cluster %s (logical cluster %s) is not resolved to a home %s:<account>:<cluster> yet: %q",
-			req.Name, req.Cluster, kcpclient.RootWorkspace, home)
+			req.Name, req.Cluster, clusterhome.RootWorkspace, home)
 	}
 	if object.Spec.Account == "" {
 		return clusterprovider.Ref{}, fmt.Errorf("cluster: Cluster %s in %s has no spec.account, so no mount path can be derived for it", req.Name, home)
 	}
-	return clusterprovider.Ref{Account: kcpclient.RootWorkspace + ":" + account, DID: object.Spec.Account, Home: home, Name: req.Name}, nil
+	return clusterprovider.Ref{Account: clusterhome.RootWorkspace + ":" + account, DID: object.Spec.Account, Home: home, Name: req.Name}, nil
 }
 
 func isHome(workspace string) bool {
 	parts := strings.Split(workspace, ":")
-	return len(parts) == 3 && parts[0] == kcpclient.RootWorkspace && parts[1] != "" && parts[2] != ""
+	return len(parts) == 3 && parts[0] == clusterhome.RootWorkspace && parts[1] != "" && parts[2] != ""
 }
 
 func homeOrUnresolved(workspace string) bool {
