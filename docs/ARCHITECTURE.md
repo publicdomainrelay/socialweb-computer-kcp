@@ -3954,14 +3954,6 @@ A change must not break any of these. Each exists because something failed.
 
 ## 14. Open architectural gaps
 
-- **PDS ingress is contracted but not yet planned per app (plan 0022, 2026-10-22).** The API now
-  carries `spec.ingress` on `MarketBidder`, `MarketRequester`, `Gateway`, `SshGateway` and
-  `MarketNetwork`, `Pds.spec.requireIngress`, `ingressRef`, `publicURL` and `stableHost`, and the
-  extra `IngressProxy` fields. No app root creates the `IngressProxy` component yet and no lifecycle
-  gates account creation on a Ready ingress. Until W1 and W2 land, a standalone app PDS can still
-  have a loopback service endpoint. The policy itself is fixed: see `public_url_policy` in
-  `docs/plans/0022-pds-ingress-proxy.yaml`.
-
 - **Plan 0013 soak paused 2026-10-19 06:28Z (third reading, partial).** `dev-soak-3` ran rc18 code
   1 h warm-up + 2 h 43 min of the fit window at ~1.1 RFP/s: 15,311 RFPs created, 0 failed; 227 tenant
   cycles, 0 failed; 286 VM contracts, 21 failed around chaos; host OOM 0, MemAvailable 82 GB, swap 0.
@@ -3979,20 +3971,6 @@ A change must not break any of these. Each exists because something failed.
   FAIL: the replacement line is absent because lanes need the candidate's TypeScript tree to differ
   from the base release and the assertion reads the wrong journal in that case; fix and re-run.
   Lanes a and b were fixed (sha prefix, go test result line) but not re-run green together.
-
-- **A retired kcp slot's audit logs are never removed (fixed 2026-10-19).** Prod's state dir held 62 GB, 46 GB of
-  it `kcp/slot-a/audit-*.log` from the slot that rc14's roll retired; the rotation caps only bound the active slot.
-  A roll now removes the retired slot's audit logs. The remaining prod series worth watching: `deno/` 6 GB and
-  `ts/` 4.2 GB of per-closure trees that old builds seeded and nothing prunes; 26,645 exited `denokcp/runs` dirs
-  (2.4 MB of inodes, no disk). Both are bounded by upgrade count, not by load.
-
-- **An upgrade does not restart the DenoPods that run the old assets (fix in, prod reading pending).**
-  2026-10-19: after deploying rc19 the gateway's requester still logged the rc17 `bidder_discovery` shape; a core
-  restart adopts every running DenoPod (plan 0019 M3C), and a binary upgrade changes neither the spec generation
-  nor the `deno.computer/restart` annotation, so pods keep running the previous build's TypeScript. Fix in this
-  commit: each run records the TypeScript tree it started from (`SOCIALWEB_TS_ROOT` in its `state.json`), and the
-  provider replaces a run whose tree differs from the one the core embeds (a release build's `Closure.Key` is the
-  tree sha). Pending: the prod reading of the replacement line on the next deploy.
 
 These are the things the architecture does not yet answer, and this list is the work. What is settled - a
 decision taken, a defect closed, a measurement recorded - is in section 15 instead, and the two are
@@ -4184,90 +4162,24 @@ because it bounds a mechanism the rest of this document leans on.
   stays flat across one hour with the cluster idle, for a healthy cluster and for a cluster whose
   apiserver is stopped, and the count of sockets in the ephemeral range shows headroom while a cluster is
   deleted and recreated.
-- **Whether the node half may ever run inside the control-plane container was answered by reading where
-  the refusal lives, and the answer is a STATED LIMIT rather than an open question.** The allocator's
-  refusal to lease a range overlapping the host's networks is a property of the NETWORK NAMESPACE the
-  process runs in - the host enumerates 15 networks, the container 3 (`127.0.0.0/8`, `172.17.0.0/16`,
-  `::1`) - so a containerized allocator would lease a colliding range without refusing. What bounds it
-  is that the allocator is a property of the PROCESS it runs in. Since the local substrates were
-  retired (plan 0005 M1-MARKET-ONLY) the allocator has one reach site left - the materialiser's
-  teardown release, `OpReleaseSubnet`, which drops a cluster's leased range beside its ports - because
-  a market node is not addressed inside this host's ranges at all: the guest gateway, the per-node
-  address and the code that installed them are deleted, and a control plane that places no nodes never
-  ALLOCATES a range, only releases one. Two things are recorded with it rather than
-  left latent: the limit is CONDITIONAL, costing nothing only because this host's LAN and bridges sit
-  outside `10.100.0.0/16`, so a host network or docker network carrying part of the pool would let a
-  containerized allocator lease a colliding range and the collision lands on the HOST; and the seam to
-  state it already exists, since `subnetallocator.Config.HostNetworks` is injectable, so a
-  containerized deployment can be handed the host's enumeration without touching the package.
-- **Two concurrent proofs in two containers are not protected from each other, and no production path
-  depends on that.** `liveports.LockDir()` is `/var/tmp/socialweb-liveports` inside each container's own
-  filesystem, so a slot one run claims is invisible to a run in another container and both would take
-  the same ports. The bound is the same shape as the one above: `internal/liveports` has NO production
-  user - it is imported only by `*_test.go` files and by the host-contract binary's probe - so the
-  container is a place two proofs collide only when the suite runs there, which is what
-  `deploy/control-plane-container/validate.sh` does. Two runs inside ONE container see each other,
-  because they share one `/var/tmp`. Two containers must share that path or be serialized, and nothing
-  outside the test suite turns on which.
-- **Every process has a memory limit and a breach restarts that process alone (plan 0013
-  M3-DENOPOD-LIMITS; the installed-core reading is open until the prod deploy).** A DenoPod has
-  `spec.resources.memory` (a quantity, at least 64 Mi; schema revision v1alpha1-7). The provider hands
-  `execrunner` the byte count; the runner starts the pod's deno with `--v8-flags=--max-old-space-size`
-  at 80% of it (and `DENO_V8_FLAGS` for the service wrapper's child) and, where the host enforces limits
-  (`systemd-user`: `denoruntime.Config.EnforceMemory`), in its own cgroup `pod-<run id>` under the core
-  unit's cgroup, with `memory.max` = the limit, `memory.swap.max` = 0 and `memory.oom.group` = 1. The
-  core unit needs `Delegate=yes` and `OOMPolicy=continue`: the installed core templates and the dev
-  core spec carry both; without `OOMPolicy=continue` systemd stops the whole core when the kernel kills
-  one pod. At first use the core moves every process of its unit cgroup (itself and any helper it forked
-  earlier) into a `supervisor` leaf, and only then enables the memory controller for the unit's subtree
-  (no-internal-process rule: the enable write returns EBUSY while any process is left in the unit cgroup,
-  so it is retried after another move). A failure is not remembered: the next pod start tries again.
-  A core that ends by a signal it handles (`main` calls `execrunner.ReleaseCgroups` after the verb
-  returns) kills and removes every `pod-*` cgroup, writes `-memory` to the unit cgroup's
-  `cgroup.subtree_control`, moves itself back into the unit cgroup and removes the `supervisor` leaf, so
-  the unit cgroup is empty and has no controller enabled when the unit goes inactive. Reason: systemd
-  cannot start a main process in a cgroup whose `cgroup.subtree_control` is non-empty (the attach is
-  EBUSY: exit 219/CGROUP on systemd 255, "Failed to spawn executor: Device or resource busy" on 259), and
-  DelegateSubgroup= does not help (read on 259 with injected residue: the executor is spawned into the
-  unit cgroup before it moves to the subgroup), and an ExecStartPre or ExecStopPost is spawned into the
-  same cgroup, so no unit setting can clear the residue. systemd itself clears the controller and
-  removes the tree when it stops a unit (read on systemd 259 on the dev host and on systemd 255.4 with
-  Ubuntu kernel 6.8.0-147 in a qemu VM: 3 restarts and 3 `kill -9` cycles of a Delegate=yes unit running
-  the pod limiter came back on the first start with `memory.max` set on both pods), but the prod
-  gateway and the hat-10 bidder logged `Failed to kill control group ..., ignoring: Invalid argument`
-  and then 219/CGROUP on the first start after an upgrade, which no harness reproduced; the cleanup in
-  the core means a stopped unit no longer depends on systemd getting it right. A core that dies without
-  running it (SIGKILL, a crash) leaves the residue to systemd, and `Restart=always` starts the unit
-  again; `internal/install` (`liveUser.Restart`) and `scripts/deploy.sh` treat a restart job that ended
-  `failed` as done when the unit is active (or activating, not auto-restart) within 60 s. Reading
-  (systemd 259, real user unit, harness running `execrunner.Pod` with two pods): the old core at SIGTERM
-  exit has `subtree_control=[memory] children=[pod-... pod-... supervisor]`; the core with
-  `ReleaseCgroups` has `subtree_control=[] children=[]`. A pod that cannot get its
-  cgroup under an enforcing host does not start. The `dev` backend (devsup, `proc`) enforces no limit by
-  design (the same as for units), so a pod there runs with the V8 heap flag alone. The breach is
-  classified at exit and written into `status.restartReasons` (a count per reason): `OOMKilled` (the
-  cgroup's `memory.events` oom_kill, kept in the run's `done.json`) or `HeapLimitExceeded` (V8's fatal
-  out-of-memory line in the run's stderr). Every service values file, `50-verifier.yaml` and
-  `36-relay-dispatcher-tls.yaml` set `memory`; the service template requires it. Unit limits (every
-  HostProcess unit gets a `MemoryMax` and `MemorySwapMax=0`): postgres 1 GiB, kine 512 MiB, a kcp slot
-  3 GiB, the front 256 MiB, OpenBao 512 MiB, iroh-dial 128 MiB, a stand-in 1 GiB, VM units already
-  carry the VM's memory plus overhead, and a HostProcess object that sets none gets 2 GiB
-  (`hostprocess.DefaultMemoryMax`). The core itself carries none: its cgroup holds every pod, so a core
-  limit would be a sum cap that no breach could be traced to. The scope verdict cache of
-  policy-engine is an LRU of 10000 verdicts (was 1024) on top of its TTLs, and the event-stream dedup
-  maps of `atproto-event-streams-client` are capped at 10000 entries. Readings (hat-8, account
-  test-0001, 2026-10-15): a `dev up --profile quick` instance with a DenoPod `hog` (128 Mi, allocates
-  JS arrays) and a DenoPod `calm` (128 Mi): `hog` restarted 6 times in 40 s with
-  `restartReasons: {HeapLimitExceeded: 6}` (V8 stopped at 102 MB), `calm` kept its run id and
-  `restarts: 0`, the core stayed up. A real systemd-user unit started through `hostsvc` with
-  `Delegate`, `OOMPolicy=continue` and `MemoryMax` 1 GiB, running `execrunner.Pod` with
-  `EnforceMemory`: both pods got `memory.max=134217728 memory.swap.max=0 oom.group=1` in their own
-  cgroups; the pod that allocated off-heap buffers was killed alone (`reason OOMKilled, exit -1`, its
-  cgroup removed), the other pod kept its pid and the core kept its pid. The same unit with the
-  default `OOMPolicy=stop` was stopped by systemd (`oom-kill`) when the pod breached: that is why the
-  templates set `continue`. `bootstrap.ProcSpecs` for the quick and prodlike tables lists a nonzero
-  `MemoryMax` on every unit except the core. Open: a breach inside an installed bidder or gateway core
-  (the templates are rendered by `install`, which no agent runs here) is read at the prod deploy.
+- **A HostProcess has a memory limit; a component has none, so one component's leak takes the whole core
+  (plan 0013 M3-DENOPOD-LIMITS, rewritten for plan 0026 on 2026-10-23).** Every HostProcess unit gets a
+  `MemoryMax` and `MemorySwapMax=0`: postgres 1 GiB (`pgunit.MemoryMax`), kine 512 MiB
+  (`kcpdatastore.KineMemoryMax`), a kcp slot 3 GiB (`kcpserver.SlotMemoryMax`), the front 256 MiB
+  (`kcpserver.FrontMemoryMax`), OpenBao 512 MiB (`openbaoctl.MemoryMax`), a stand-in 1 GiB
+  (`bootstrap.StandInMemoryMax`); VM units carry the VM's memory plus overhead, and a HostProcess object
+  that sets none gets 2 GiB (`hostprocess.DefaultMemoryMax`). The `dev` backend (devsup, `proc`) enforces
+  no unit limit by design. The components (Pds, Plc, Relay, Bidder, Requester and the rest) run in the
+  core's own process, in the component runtime of `internal/component`, and the core unit carries no
+  `MemoryMax` (the installed templates set `Delegate=yes` and `OOMPolicy=continue` and no limit). A
+  root's `spec.components` may carry `ComponentLimits`; appctl resolves and reports them, and writes
+  `LimitsEnforced=False` (reason `ReasonComponentLimitsInactive` in `internal/app/compose/status.go`)
+  because the in-process runtime cannot enforce them. So a component that leaks grows the core until the
+  kernel or systemd stops it, and every component of that core restarts with it; nothing names the
+  component that breached. The per-process limits that the removed runtime enforced, and their readings,
+  are in section 15 ("Gaps of the removed TypeScript runtime"). What would close it: a per-component
+  bound the runtime can enforce in process (a heap budget or a bounded queue per component), or a
+  component kind that runs as its own HostProcess unit, and a reading of a breach on an installed core.
 - **Open after the 3 h soak (plan 0013 M4-SOAK-READING, 2026-10-18; the readings are in section 15).** Each is a series that
   kept growing, with its measurement and the smallest fix named.
   - The hono-pds block store, the requester's vm.delete and market.event records, the requester's orphan records, the bidder's
@@ -4275,44 +4187,30 @@ because it bounds a mechanism the rest of this document leans on.
     unreachable blocks" and "The requester's orphan records, the bidder's bid sweep, the requester heap and the gateway
     requester's retention"). Left open from the dev-bound-1 reading and the second 3 h soak on dev-soak-2 (2026-10-18, section 15,
     "Plan 0013 M4-SOAK-READING: second 3 h soak, systemd-user"); each is named with its slope over 20:35Z to 23:36Z:
-  - Requester native memory (the bursts of ESTAB connections to the dispatcher) and the bidder's pds DenoPod growing to its
-    limit are closed (section 15, "The contract watch's getRecord bursts", read on gl-runner-1 after this soak). Left from that
-    reading: the soak requester's DenoPod RSS read +75.6 MB an hour (300 to 362 MB) with its fds flat and its heapUsed at 75 to
-    119 MB while its ComputeContracts still rose (2441 to 2702); it needs a window past the contract TTL.
-  - The web app's node claim index kept one ConfigMap per home ever created (201 at 22:33Z, +55 an hour in the network kine);
-    closed on main after rc17 by 6768644f, not re-read.
-  - The pod cgroup of an exited DenoPod is left: `release` writes `cgroup.kill` and removes the directory at once, before the killed
-    processes are reaped, so every restart leaves an empty `pod-<run id>` cgroup (62 after the 60-restart breach). Only a core
-    start clears them (`removeIdlePodCgroups`), so the count read 1 to 5 in the window with two installed core restarts.
-  - A DenoPod spec change (its args or `resources.memory`) does not restart the running pod; only `deno.computer/restart` does.
-  - An installed bidder takes no `bid-ttl-sec` from its config.json: the app values reach only a market network's children, so the
-    second bidder ran with the 86400 s default until a unit drop-in passed `-- --bid-ttl-sec 1800` to `run bidder` (19:27Z).
-  - The relay backlog fell to 10000 frames and the relay got 1Gi: the relay RSS read 253 to 316 MB (414 at most, +15 MB an hour,
-    flat by the fit rule).
+  - Requester native memory (the bursts of ESTAB connections to the dispatcher) and the bidder PDS growing to its limit are
+    closed (section 15, "The contract watch's getRecord bursts", read on gl-runner-1 after this soak). Left from that reading,
+    taken before plan 0026: the soak requester's RSS read +75.6 MB an hour (300 to 362 MB) with its fds flat and its heapUsed
+    at 75 to 119 MB while its ComputeContracts still rose (2441 to 2702). The Requester component
+    (`internal/services/requester` over `internal/market/requester`) now runs in the core's process, so the series to read is
+    the core's RSS over a window past the contract TTL.
   - Deleting a tenant cluster takes more than 4 minutes in some cycles under 8 lanes (the driver's 4-minute wait timed out 30
     times; the clusters were gone later; the gateway core logged "a step of deleting this cluster has not completed" 67 times).
   - Every status write logs `Warning: unknown field "status.store"` (1063 of 3000 lines of the network core log): some root kind
-    lacks `status.store` in its schema.
+    lacks `status.store` in its schema. At HEAD the MarketBidder, MarketRequester, Gateway and SshGateway schemas carry it and
+    `deploy/marketnetwork-apiresourceschema.yaml` does not, nor does `MarketNetworkStatus`; not re-read since plan 0026.
+  - The node claim index, the pod cgroups, the spec-change restart, the bidder's bid TTL and the relay backlog are closed
+    (section 15, "Gaps of the removed TypeScript runtime" and "Items closed by later work").
 
 - **A market network's children cannot run under the systemd-user backend (plan 0013 ACC13-NO-HOST-OOM, read on dev-soak-2,
-  2026-10-18).** `dev up` refuses `--host-backend systemd-user` (`bringUp` in `cmd/socialweb-computer/dev.go`: "dev places every
-  unit under devsup (proc); systemd-user is for install"), and a child core of a market network sets
-  `denoruntime.Config.EnforceMemory` only when its record's backend is systemd-user (`cmd/socialweb-computer/denoruntime.go`),
-  which a dev record never is. So no DenoPod of a market network gets a pod cgroup or a `memory.max`; only the VM units go to the
-  user manager (`--vm-host-backend systemd-user`). `run bidder --host-backend systemd-user` runs only for an account that
-  `install bidder` made (`bidder.CheckAccount`). The second soak therefore read the breach on a second bidder made with
-  `install bidder` and pointed at the network with `--market-network-file`. The change that closes it lets `dev up` place its
-  children's cores as user units (Delegate=yes, OOMPolicy=continue) and carries the backend into the child records.
-- **kcpapply refuses an object that `kubectl patch` touched (fixed 2026-10-19).** It refused after a bare
-  `kubectl annotate deno.computer/restart=...`, which is how an operator restarts one DenoPod: prod's gateway
-  apply failed ("the object was applied by kubectl and is never adopted") and the web app went 502 until the
-  kubectl managed-fields entries were cleared by hand. A foreign manager whose ownership is confined to
-  annotations and labels is now tolerated; one that owns spec or status is still refused.
-- **The object-count quota defaults were retuned by the soak (plan 0013 M2-QUOTAS, 2026-10-18).** `appctl.QuotaDefaults` is
-  Bids 10000 (was 20000), ComputeVMs 64, ComputeContracts 1024 on a gateway and 64 on a requester, NodeClaims 64 per home
-  workspace, DenoRuns 200 and PolicyWorkflowRuns 500 per application workspace. 10000 Bids put the bidder kcp at about 2.1 GiB of
-  its 3 GiB limit (0.14 to 0.15 MB of RSS per Bid on a base of 610 to 680 MB); the others are unchanged because the soak read no
-  figure above them (section 15, M4-SOAK-READING). The root's `spec.quota` overrides each (`-1` removes the limit).
+  2026-10-18; rewritten for plan 0026 on 2026-10-23).** `dev up` refuses `--host-backend systemd-user` (`bringUp` in
+  `cmd/socialweb-computer/dev.go`: "dev places every unit under devsup (proc); systemd-user is for install"). So every
+  HostProcess of a market network (kcp slots, kine, OpenBao, the fronts) runs under devsup with no `memory.max`, and only the VM
+  units go to the user manager (`--vm-host-backend systemd-user`). `run bidder --host-backend systemd-user` runs only for an
+  account that `install bidder` made (`bidder.CheckAccount` in `internal/stack/bidder`). The second soak therefore read a breach
+  on a second bidder made with `install bidder` and pointed at the network with `--market-network-file`. The components of a
+  market network run in its cores' processes and have no limit on any backend (see the item above). The change that closes it
+  lets `dev up` place its children's cores and HostProcesses as user units (Delegate=yes, OOMPolicy=continue) and carries the
+  backend into the child records.
 
 - **The bidder's kcp wait on the hot path: the prod reading is open (plan 0009 ACC9-LATENCY, 2026-10-17).**
   The cuts and the readings on dev-linux-1 are in section 15 (M4-LATENCY-READINGS item 10): the kcp wait
@@ -4452,19 +4350,94 @@ because it bounds a mechanism the rest of this document leans on.
   deno runtime holds every workspace's names. ACC19-ONE-KCP (the integration tests on the one-kcp network)
   is open.
 
-- **The requester retries the release with the same signed event (plan 0020, opened 2026-10-17).**
-  Before: one non-2xx answer to the direct submitEvent of a vm.delete (a 404 from the
-  did-key-ingress-proxy while the winning bidder was away, job 618) made the runner write releaseFailed
-  and stop watching, so the guest outlived its contract; and every releaseCompute call wrote a new
-  vm.delete and a new market.event record. Now: releaseCompute stores the event's refs in the contract
-  state before it submits, and a later call resends that event after re-reading it by uri and checking
-  its cid; the state reaches released only on a 2xx. holdUntilEnded retries after 5 s, doubling to 5 min,
-  until a 2xx or the bidder's terminated event, writing Releasing with the attempt and the last answer;
-  the bound is the contract's creationTimestamp plus its ttl-after-finished (8d for a NodeClaim's
-  contract, 24 h without the annotation), after which the contract is Failed with the reason. A restart
-  in Releasing resends the stored event. Open until ACC20-BIDDER-BACK and ACC20-ONE-EVENT have their
-  market network reading.
 ## 15. Settled decisions, and the defects they closed
+
+- **Gaps of the removed TypeScript runtime, closed by plan 0026 removing it (moved from section 14,
+  2026-10-23).** Each was open in section 14 because of a mechanism that plan 0026 deleted: the TypeScript
+  services ran as pods of a deno runtime in the core, each pod in its own run directory and, on an
+  enforcing host, its own cgroup. Since plan 0026 the components run in the core's process, in the
+  component runtime of `internal/component`, and host processes are HostProcess units. No Go code at
+  HEAD names the run directories, the TypeScript tree variable or the restart annotation.
+  - An upgrade did not restart the pods that ran the old assets (2026-10-19: after rc19 the gateway's
+    requester still logged the rc17 `bidder_discovery` shape, because a core restart adopted every running
+    pod and an upgrade changed neither the spec generation nor the restart annotation). The fix recorded
+    the TypeScript tree in each run and replaced a run whose tree differed; its prod reading was pending.
+    Now a component is a goroutine of the core, so the core that an upgrade restarts runs every component
+    from the new binary. `scripts/validate-candidate.sh` lane c still asserts that fix's log line (section
+    14).
+  - A pod's spec change (its args or memory) did not restart it; only the restart annotation did. Now
+    `Runtime` in `internal/component/runtime.go` stops and starts a component when its spec generation
+    changes, and `dev restart` writes `spec.restartedAt` (`internal/stack/componentcore/source.go`,
+    `internal/app/compose/apply.go`), which is a spec change and so a new generation.
+  - The cgroup of an exited pod was left behind (62 empty `pod-<run id>` cgroups after the 60-restart
+    breach; only a core start cleared them). Components get no cgroup of their own, so there is none to
+    leave. The core's cleanup of the pod cgroups at exit and its `supervisor` leaf went with them.
+  - The per-pod memory limit (plan 0013 M3-DENOPOD-LIMITS). Before: a pod had `spec.resources.memory`, ran
+    with the V8 heap flag at 80% of it and, on systemd-user, in its own cgroup with `memory.max`; a breach
+    restarted that pod alone and was counted in `status.restartReasons` (read on hat-8, 2026-10-15: a 128 Mi
+    pod `hog` restarted 6 times in 40 s with `HeapLimitExceeded: 6` while its neighbour kept its run id and
+    the core stayed up; on a real user unit the pod that allocated off-heap buffers was killed alone with
+    `OOMKilled`). The mechanism is gone with the pods. The HostProcess unit limits stay, and the missing
+    per-component limit is open again in section 14 in its current form.
+  - Disk: the run directories under the state dir (removed with their object, swept after an hour,
+    stdout and stderr rotated over 16 MiB), the per-closure `deno/` (6 GB on prod) and `ts/` (4.2 GB) trees
+    that old builds seeded, and 26,645 exited run dirs on prod. Nothing at HEAD writes them. The one deno
+    left is the policy engine's, which runs the policy actions: `internal/policyengine/deno` extracts its
+    embedded binary once per deno version into `policy_engine/deno-embedded/<version>` under the user cache
+    dir.
+  - The relay backlog fell to 10000 frames and the relay pod got 1Gi; the relay RSS read 253 to 316 MB (414
+    at most, +15 MB an hour), flat by the fit rule. That was a reading of the relay pod. The Relay is now a
+    component in its core and has not been re-read.
+
+- **Items closed by later work (moved from section 14, 2026-10-23).** Each was still listed as open in
+  section 14 after the work that closed it landed.
+  - PDS ingress per app (plan 0022). Before: the API carried `spec.ingress` and `Pds.spec.requireIngress`,
+    but no app root created the IngressProxy and nothing gated account creation on a Ready ingress, so an
+    app PDS could have a loopback service endpoint. Now plan 0022 is done (W1 and W2 items done, closed by
+    1ab24182 on 2026-10-22 with live PDS proofs on prod and every bidder host): the app roots compose the
+    `ingress` IngressProxy (`compose.AppIngressName`), the PDS spec takes its public URL from it
+    (`compose.AppPdsSpec`), and the Gateway root keeps the PDS waiting while `requireIngress` is set and no
+    public URL is known (`internal/app/gateway/gateway.go`), with reason IngressProviderNotReady while the
+    IngressProxy is not Ready (`internal/app/compose/pds.go`).
+  - A retired kcp slot's audit logs were never removed (prod's state dir held 62 GB, 46 GB of it
+    `kcp/slot-a/audit-*.log` of the slot that rc14's roll retired). Fixed 2026-10-18 by 1810e4a3: a roll
+    removes the retired slot's `audit-*.log` files (`internal/bootstrap/rollinstalled.go`, log line "removed
+    the audit logs of the retired kcp slot").
+  - kcpapply refused an object that `kubectl annotate` had touched, which was how an operator restarted one
+    pod: prod's gateway apply failed ("the object was applied by kubectl and is never adopted") and the web
+    app went 502 until the managed-fields entries were cleared by hand. Fixed by 8623a675 (2026-10-18):
+    `refuseKubectl` in `internal/controllers/runtime/kcpapply` tolerates a kubectl manager that owns only
+    metadata (`annotationsOnly`) and still refuses one that owns spec or status. A component restart is now
+    `spec.restartedAt`, written by `dev restart`, not an annotation.
+  - The object-count quota defaults were retuned by the soak (plan 0013 M2-QUOTAS, 2026-10-18): Bids 10000
+    (was 20000), because 10000 Bids put the bidder kcp at about 2.1 GiB of its 3 GiB limit (0.14 to 0.15 MB of
+    RSS per Bid on a base of 610 to 680 MB). At HEAD `compose.QuotaDefaults` (`internal/app/compose/infra.go`)
+    is Bids 10000 and ComputeVMs 64 on a MarketBidder, ComputeContracts 1024 on a Gateway and on a
+    MarketRequester, PolicyWorkflowRuns 500 per application workspace, and Components 16 per component kind;
+    the DenoRuns quota went with the DenoRun kind, and `NodeClaims` 64 is declared but no quota entry uses
+    it. The root's `spec.quota` overrides each (`-1` removes the limit).
+  - The web app's node claim index kept one ConfigMap per home ever created (201 at 22:33Z on 2026-10-18,
+    +55 an hour in the network kine). Closed by 6768644f (2026-10-18): a deleted cluster's index ConfigMap
+    is removed and a sweep removes entries whose cluster is gone. Not re-read.
+  - An installed bidder took no bid TTL from its config.json (the second soak bidder ran with the 86400 s
+    default until a unit drop-in passed one). Now the TTL is `Bidder.spec.bidTtlSeconds` (default 86400),
+    and a MarketBidder root sets it through `spec.components`, key `Bidder`, `settings.bidder.bidTtlSeconds`
+    (plan 0024 W0-W3, below), so no flag or config.json field is needed.
+  - The requester retried the release with a new event (plan 0020). Before: one non-2xx answer to the
+    direct submitEvent of a vm.delete (a 404 from the did-key-ingress-proxy while the winning bidder was
+    away, job 618) made the runner write releaseFailed and stop, so the guest outlived its contract, and
+    every release wrote a new vm.delete and a new market.event record. Now the release loop of
+    `contractRunner` (`internal/market/requester/runner.go`) records the event once and resends the same
+    uri and cid until a 2xx, writing Releasing with the attempt and the last answer, up to the contract's
+    deadline. ACC20-BIDDER-BACK and ACC20-ONE-EVENT were marked done on 2026-10-17 (1526b2e9) and the plan
+    closed (752df79d); their readings were not written here.
+  - The node half inside the control-plane container (a STATED LIMIT: a containerized subnet allocator
+    sees only the container's networks and would lease a range that collides with the host's), and two
+    concurrent proofs in two containers taking the same ports (`liveports.LockDir()` is per container).
+    Both bounded a container that no longer exists: 0006 M5-RETIRE deleted the container path and
+    `deploy/control-plane-container/` (cd68b0ae, 2026-10-13). The allocator's one reach site is still the
+    materialiser's teardown release (`OpReleaseSubnet`), and `subnetallocator.Config.HostNetworks` is still
+    injectable. `internal/liveports` has no importer at HEAD, since plan 0026 deleted the Go tests.
 
 - **A revoked identity's ServiceAccount is erased from the datastore before k3s starts (plan 0026
   A9, opened and closed 2026-10-23).** Before: revokeIdentity deleted the did- ServiceAccount at once
