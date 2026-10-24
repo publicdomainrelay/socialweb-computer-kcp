@@ -12,9 +12,12 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/lease"
 )
+
+const LoadWait = 10 * time.Second
 
 type Pool struct {
 	log *slog.Logger
@@ -24,6 +27,7 @@ type Pool struct {
 	path   string
 	stamp  stamp
 	pool   *x509.CertPool
+	loaded chan struct{}
 }
 
 func NewPool(fetch lease.Fetch[*x509.CertPool], log *slog.Logger) *Pool {
@@ -80,8 +84,21 @@ func (p *Pool) Set(data []byte) error {
 	p.source = nil
 	p.path = ""
 	p.stamp = stamp{}
+	loaded := p.loadedLocked()
+	select {
+	case <-loaded:
+	default:
+		close(loaded)
+	}
 	p.mu.Unlock()
 	return nil
+}
+
+func (p *Pool) loadedLocked() chan struct{} {
+	if p.loaded == nil {
+		p.loaded = make(chan struct{})
+	}
+	return p.loaded
 }
 
 func (p *Pool) Current(ctx context.Context) (*x509.CertPool, error) {
@@ -91,6 +108,10 @@ func (p *Pool) Current(ctx context.Context) (*x509.CertPool, error) {
 		p.refreshLocked()
 	}
 	pool := p.pool
+	var loaded chan struct{}
+	if source == nil && pool == nil {
+		loaded = p.loadedLocked()
+	}
 	p.mu.Unlock()
 	if source != nil {
 		fetched, err := source.Get(ctx)
@@ -99,10 +120,26 @@ func (p *Pool) Current(ctx context.Context) (*x509.CertPool, error) {
 		}
 		pool = fetched
 	}
+	if loaded != nil {
+		pool = p.awaitLoaded(ctx, loaded)
+	}
 	if pool == nil {
 		return nil, errors.New("tlsreload: no CA pool is loaded")
 	}
 	return pool, nil
+}
+
+func (p *Pool) awaitLoaded(ctx context.Context, loaded <-chan struct{}) *x509.CertPool {
+	timer := time.NewTimer(LoadWait)
+	defer timer.Stop()
+	select {
+	case <-loaded:
+	case <-ctx.Done():
+	case <-timer.C:
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.pool
 }
 
 func (p *Pool) ServerConfig(base *tls.Config, auth tls.ClientAuthType) *tls.Config {
