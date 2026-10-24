@@ -7,6 +7,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
@@ -110,13 +111,17 @@ func RunCore(ctx context.Context, c CoreConfig, m hostsvc.Manager) error {
 	log.Info("the bidder application instance starts: kcp store, kine, front, its slot, then its MarketBidder root object",
 		"state", l.StateDir, "units", app.Names().UnitPrefix(), "profile", c.Spec.Profile)
 	cvm := c.ComputeVM
-	watchdogLogged := false
+	var watchdogLogged atomic.Bool
+	go notify.KeepAlive(ctx, func(err error) {
+		if watchdogLogged.CompareAndSwap(false, true) {
+			log.Warn("telling systemd's watchdog the core is alive", "err", err.Error())
+		}
+	})
 	return devcore.Run(ctx, devcore.Config{Layout: l, ReadyTimeout: c.ReadyTimeout, Log: c.Log, Application: &app,
 		FrontAddress: c.FrontAddress, ComputeVM: &cvm, SignInGuard: CheckSignIn,
 		OnStep: func(step string) { log.Info("the core brings up the stack", "step", step) },
 		OnTick: func() {
-			if err := notify.Watchdog(); err != nil && !watchdogLogged {
-				watchdogLogged = true
+			if err := notify.Watchdog(); err != nil && watchdogLogged.CompareAndSwap(false, true) {
 				log.Warn("telling systemd's watchdog the core is alive", "err", err.Error())
 			}
 		},

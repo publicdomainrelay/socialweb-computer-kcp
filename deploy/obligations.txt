@@ -103,3 +103,4 @@ internal/app/marketnetwork	workspaces.go:Controller.stopAppComponents	blocking	k
 internal/app/marketnetwork	children.go:waitChildCore	blocking	fsnotify on the child core record within the child ReadyTimeout	the child core adopts its units; the core record is a host file, not a kcp object the controller watches
 internal/app/marketnetwork	children.go:Controller.awaitUnitsDown	blocking	hostsvc unit watch within ChildDeleteTimeout 2m	the child's systemd units stop; host units are D-Bus signals, not kcp objects the controller watches
 internal/app/marketnetwork	children.go:lockChild	blocking	flock wait within ChildLockTimeout 2m	the child instance lock that a dev verb on the same child holds; a flock release has no event the controller can watch
+internal/notify	notify.go:KeepAlive	ticker	WATCHDOG_USEC/2; none when systemd sets no watchdog	systemd watchdog keepalive of the bidder core; systemd aborts a core that sends none for WatchdogSec
