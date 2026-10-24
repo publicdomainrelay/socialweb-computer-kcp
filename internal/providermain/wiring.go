@@ -581,9 +581,7 @@ func (p *Provider) one(ctx context.Context, ref clusterprovider.Ref, key string)
 		if p.tenants != nil {
 			p.tenants.stop(key)
 		}
-		p.log.Info("cluster provider: this cluster is not running, so its group is reaped and "+
-			"nothing is brought up for it", "cluster", ref.Name, "key", key, "home", ref.Home)
-		return 0, p.reapOne(ctx, key)
+		return p.stopped(ctx, ref, key)
 	}
 	if p.units != nil {
 		if err := p.units.StartStore(ctx, key); err != nil {
@@ -599,10 +597,22 @@ func (p *Provider) one(ctx context.Context, ref clusterprovider.Ref, key string)
 	return soonest(res.wake, p.scaled(ctx, key, ref.Name, res.phase)), err
 }
 
+func (p *Provider) stopped(ctx context.Context, ref clusterprovider.Ref, key string) (time.Duration, error) {
+	out, err := p.passes(ctx, ref, key)
+	if err != nil || !out.reaped {
+		return out.wake, err
+	}
+	p.log.Info("cluster provider: this cluster is not running; its tenant path is shut and its group is reaped",
+		"cluster", ref.Name, "key", key, "home", ref.Home, "phase", out.phase)
+	return out.wake, p.reapNodes(ctx, key)
+}
+
 type passOutcome struct {
 	wake time.Duration
 
 	phase v1alpha1.ClusterPhase
+
+	reaped bool
 }
 
 func (p *Provider) passes(ctx context.Context, ref clusterprovider.Ref, key string) (passOutcome, error) {
@@ -634,16 +644,21 @@ func until(at time.Time) time.Duration {
 }
 
 func (p *Provider) reapOne(ctx context.Context, key string) error {
-	if p.nodes != nil {
-		if err := p.nodes.adoptOnce(ctx, key); err != nil {
-			return fmt.Errorf("clusterprovider: adopting the live market nodes of %s before reaping it: "+
-				"%w -- a claim nothing holds is a machine nothing releases", key, err)
-		}
-		if err := p.nodes.reapCluster(ctx, key); err != nil {
-			return err
-		}
+	if err := p.reapNodes(ctx, key); err != nil {
+		return err
 	}
 	return p.host.Reap(ctx, key)
+}
+
+func (p *Provider) reapNodes(ctx context.Context, key string) error {
+	if p.nodes == nil {
+		return nil
+	}
+	if err := p.nodes.adoptOnce(ctx, key); err != nil {
+		return fmt.Errorf("clusterprovider: adopting the live market nodes of %s before reaping it: "+
+			"%w -- a claim nothing holds is a machine nothing releases", key, err)
+	}
+	return p.nodes.reapCluster(ctx, key)
 }
 
 func (p *Provider) scale(ctx context.Context, key, name string, running bool) (time.Duration, bool) {
@@ -711,7 +726,8 @@ func (p *Provider) pass(ctx context.Context, ref clusterprovider.Ref, key string
 				"cluster", ref.Name, "key", key, "error", err.Error())
 		}
 	}
-	out := passOutcome{wake: pass.Result.RequeueAfter, phase: pass.Result.Phase}
+	out := passOutcome{wake: pass.Result.RequeueAfter, phase: pass.Result.Phase,
+		reaped: slices.Contains(pass.Result.Ops, materialiser.OpReap)}
 	if due, ok := p.provider.AddOnsDueIn(ref); ok && pass.Result.Phase == v1alpha1.ClusterReady {
 		out.wake = soonest(out.wake, due)
 	}
