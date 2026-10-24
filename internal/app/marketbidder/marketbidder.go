@@ -303,8 +303,10 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 	}
 	id, err := c.Identity(ctx, ws, BidderIdentity)
 	if apierrors.IsNotFound(err) {
-		c.Forget(r)
-		return p.wait("waiting for its MarketIdentity")
+		if err := c.ApplyIdentitySpec(ctx, r, ws, BidderIdentity, compose.OperatorWatched(plan.Identity, o.Spec.Operator, compose.BidderAssociate)); err != nil {
+			return p.retry("its MarketIdentity", err)
+		}
+		return p.wait("its MarketIdentity was missing and is applied again")
 	}
 	if err != nil {
 		return ctlruntime.Result{}, err

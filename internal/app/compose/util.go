@@ -139,13 +139,12 @@ func RequesterMode(mode v1alpha1.MarketIdentityMode) string {
 	return "local"
 }
 
-func RequesterComponentFields(opts []v1alpha1.ApplicationOption, mode v1alpha1.MarketIdentityMode) (string, string, string, string, string) {
+func RequesterComponentFields(opts []v1alpha1.ApplicationOption, mode v1alpha1.MarketIdentityMode) (string, string) {
 	keys := OptionValue(opts, "guest-ssh-keys-file")
 	if keys == "" {
 		keys = OptionValue(opts, "ssh-keys-file")
 	}
-	return RequesterMode(mode), OptionValue(opts, PublicOriginOption), OptionValue(opts, "oauth-client-id"),
-		OptionValue(opts, "oauth-redirect-uri"), keys
+	return RequesterMode(mode), keys
 }
 
 func WriteSecret(path string, data []byte) error {

@@ -112,6 +112,8 @@ type ApplicationIdentity struct {
 
 	Handle string `json:"handle,omitempty"`
 
+	Did string `json:"did,omitempty"`
+
 	PdsURL string `json:"pdsUrl,omitempty" apigen:"userEndpoint"`
 
 	PdsRef *commonv1.ObjectRef `json:"pdsRef,omitempty"`

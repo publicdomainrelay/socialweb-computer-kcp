@@ -118,10 +118,6 @@ type Config struct {
 
 	PDSURL string
 
-	OAuthClientID string
-
-	OAuthRedirectURI string
-
 	OAuthScopes []string
 
 	OwnerSessions map[string]sshtransport.OwnerSession
@@ -298,9 +294,6 @@ func Configure(spec v1alpha1.RequesterSpec, at Placement) (Config, error) {
 			cfg.RepoDID, cfg.MarketDID = did, did
 		}
 	}
-	publicOrigin := strings.TrimRight(strings.TrimSpace(spec.PublicOrigin), "/")
-	cfg.OAuthClientID = strings.TrimSpace(spec.OAuthClientID)
-	cfg.OAuthRedirectURI = strings.TrimSpace(spec.OAuthRedirectURI)
 	modeText := strings.ToLower(strings.TrimSpace(spec.Mode))
 	cfg.LocalSigner = modeText == "local" || modeText == "localrepo" || (modeText == "" && !callback)
 	switch modeText {
@@ -349,37 +342,16 @@ func Configure(spec v1alpha1.RequesterSpec, at Placement) (Config, error) {
 		}
 		cfg.GuestAuthorizedKeys = keys
 	}
-	if cfg.IdentityMode == IdentityModeOAuth && publicOrigin != "" {
-		cfg.OAuthClientID = cmp.Or(cfg.OAuthClientID, publicOrigin+"/oauth-client-metadata.json")
-		cfg.OAuthRedirectURI = cmp.Or(cfg.OAuthRedirectURI, publicOrigin+"/oauth/callback")
-	}
-	return cfg, cfg.check(publicOrigin)
+	return cfg, cfg.check()
 }
 
 func seconds(value *int32) time.Duration {
 	return time.Duration(ptr.Deref(value, 0)) * time.Second
 }
 
-func (c Config) check(publicOrigin string) error {
+func (c Config) check() error {
 	if c.DID == "" && c.Handle == "" && c.IdentityMode != IdentityModeOAuth {
 		return errors.New("requester: the component names no identity DID or handle")
-	}
-	if c.IdentityMode != IdentityModeOAuth {
-		return nil
-	}
-	switch {
-	case c.OAuthClientID == "":
-		return errors.New("requester: oauth identity mode names no OAuthClientID and no PublicOrigin")
-	case c.OAuthRedirectURI == "":
-		return errors.New("requester: oauth identity mode names no OAuthRedirectURI and no PublicOrigin")
-	case !participant.AbsoluteHTTPURL(c.OAuthClientID):
-		return fmt.Errorf("requester: oauth client id %q is not an absolute http or https URL", c.OAuthClientID)
-	case !participant.AbsoluteHTTPURL(c.OAuthRedirectURI):
-		return fmt.Errorf("requester: oauth redirect uri %q is not an absolute http or https URL", c.OAuthRedirectURI)
-	case publicOrigin != "" && !participant.AbsoluteHTTPURL(publicOrigin):
-		return fmt.Errorf("requester: oauth public origin %q is not an absolute http or https URL", publicOrigin)
-	case c.Spec.Identity == nil || c.Spec.Identity.MarketIdentityRef == nil || strings.TrimSpace(c.Spec.Identity.MarketIdentityRef.Name) == "":
-		return errors.New("requester: oauth identity mode needs spec.identity.marketIdentityRef; its MarketIdentity holds the session")
 	}
 	return nil
 }

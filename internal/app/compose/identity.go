@@ -133,13 +133,13 @@ func (c *Composer) PlanAccount(ctx context.Context, ws string, id v1alpha1.Appli
 	case v1alpha1.MarketIdentityModeLocalRepo:
 		plan.Local = true
 		plan.ComponentMode = "local"
-		plan.Identity = v1alpha1.MarketIdentitySpec{Mode: mode, Handle: id.Handle, PdsURL: id.PdsURL, Association: association,
+		plan.Identity = v1alpha1.MarketIdentitySpec{Mode: mode, Handle: id.Handle, Did: id.Did, PdsURL: id.PdsURL, Association: association,
 			ApprovedAssociations: approved}
 		plan.KeysPath = ""
 		return plan, nil
 	case v1alpha1.MarketIdentityModePdsAccount:
 		plan.ComponentMode = "callback"
-		plan.Identity = v1alpha1.MarketIdentitySpec{Mode: mode, Handle: id.Handle, PdsURL: id.PdsURL,
+		plan.Identity = v1alpha1.MarketIdentitySpec{Mode: mode, Handle: id.Handle, Did: id.Did, PdsURL: id.PdsURL,
 			KeysRef:              &commonv1.SecretRef{Mount: mount, Path: keysPath},
 			SessionRef:           &commonv1.SecretRef{Mount: mount, Path: sessionPath},
 			Association:          association,
@@ -157,7 +157,7 @@ func (c *Composer) PlanAccount(ctx context.Context, ws string, id v1alpha1.Appli
 		return plan, nil
 	case v1alpha1.MarketIdentityModeOAuthBrowser, v1alpha1.MarketIdentityModeOAuthQr, v1alpha1.MarketIdentityModeOAuthDelegated:
 		plan.ComponentMode = "oauth"
-		plan.Identity = v1alpha1.MarketIdentitySpec{Mode: mode, Handle: id.Handle, PdsURL: id.PdsURL,
+		plan.Identity = v1alpha1.MarketIdentitySpec{Mode: mode, Handle: id.Handle, Did: id.Did, PdsURL: id.PdsURL,
 			SessionRef: &commonv1.SecretRef{Mount: mount, Path: sessionPath}, Association: association, ApprovedAssociations: approved}
 		plan.PdsURL = strings.TrimSpace(id.PdsURL)
 		remote, err := c.remotePDSRef(ctx, ws, id.PdsRef)

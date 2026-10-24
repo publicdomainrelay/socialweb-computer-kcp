@@ -205,8 +205,10 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 	}
 	id, err := c.Identity(ctx, ws, RequesterIdentity)
 	if apierrors.IsNotFound(err) {
-		c.Forget(r)
-		return p.wait("waiting for its MarketIdentity")
+		if err := c.ApplyIdentitySpec(ctx, r, ws, RequesterIdentity, plan.Identity); err != nil {
+			return p.retry("its MarketIdentity", err)
+		}
+		return p.wait("its MarketIdentity was missing and is applied again")
 	}
 	if err != nil {
 		return ctlruntime.Result{}, err
@@ -228,7 +230,7 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 	if ident.Handle != "" {
 		hostnames = []string{ident.Handle}
 	}
-	mode, publicOrigin, oauthClientID, oauthRedirectURI, guestSSHKeysFile := compose.RequesterComponentFields(o.Spec.Options, plan.Mode)
+	mode, guestSSHKeysFile := compose.RequesterComponentFields(o.Spec.Options, plan.Mode)
 	spec := v1alpha1.RequesterSpec{
 		ComponentSpec:        p.c.NetworkComponentSpec(p.r, compose.ComponentCRStateDir(stateRoot, compose.ComponentKindRequester, RequesterComponent), network),
 		Identity:             ident,
@@ -236,11 +238,8 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 		VaultRef:             vault,
 		Hostnames:            hostnames,
 		Mode:                 mode,
-		PublicOrigin:         publicOrigin,
 		MarketExposureRef:    &commonv1.LocalObjectRef{Name: compose.ServiceNameFor(compose.ComponentKindRequester, RequesterComponent) + compose.ExposureIngressSuffix},
 		OperatorDID:          compose.OperatorDID(o.Spec.Identity.ApprovedAssociations, id),
-		OAuthClientID:        oauthClientID,
-		OAuthRedirectURI:     oauthRedirectURI,
 		GuestSSHKeysFile:     guestSSHKeysFile,
 		BidderDIDs:           append([]string(nil), o.Spec.BidderDids...),
 		AcceptCopies:         int32(compose.OptionInt(o.Spec.Options, "accept-copies")),

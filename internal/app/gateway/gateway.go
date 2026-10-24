@@ -346,8 +346,10 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 	}
 	id, err := c.Identity(ctx, ws, marketrequester.RequesterIdentity)
 	if apierrors.IsNotFound(err) {
-		c.Forget(r)
-		return p.wait("waiting for the requester's MarketIdentity")
+		if err := c.ApplyIdentitySpec(ctx, r, ws, marketrequester.RequesterIdentity, p.identitySpec(plan)); err != nil {
+			return p.retry("the requester's MarketIdentity", err)
+		}
+		return p.wait("the requester's MarketIdentity was missing and is applied again")
 	}
 	if err != nil {
 		return ctlruntime.Result{}, err
@@ -422,7 +424,7 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 	if downloadsDir != "" && (publicOrigin != "" || (tlsSpec != nil && len(hostnames) > 0)) {
 		requiredDownloads = slices.Clone(GatewayRequiredDownloads)
 	}
-	mode, requesterOrigin, oauthClientID, oauthRedirectURI, guestSSHKeysFile := compose.RequesterComponentFields(o.Spec.Options, plan.Mode)
+	mode, guestSSHKeysFile := compose.RequesterComponentFields(o.Spec.Options, plan.Mode)
 	var pds compose.Desired
 	if plan.Local {
 		pdsSpec, err := compose.AppPdsSpec(stateRoot, network, in.pdsHandle, vault, hostnames, in.pdsPublicURL, in.requireIngress, in.ingressRef)
@@ -438,11 +440,8 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 		VaultRef:             vault,
 		Hostnames:            hostnames,
 		Mode:                 mode,
-		PublicOrigin:         requesterOrigin,
 		MarketExposureRef:    &commonv1.LocalObjectRef{Name: compose.ServiceNameFor(compose.ComponentKindRequester, marketrequester.RequesterComponent) + compose.ExposureIngressSuffix},
 		OperatorDID:          compose.OperatorDID(o.Spec.Identity.ApprovedAssociations, id),
-		OAuthClientID:        oauthClientID,
-		OAuthRedirectURI:     oauthRedirectURI,
 		GuestSSHKeysFile:     guestSSHKeysFile,
 		BidderDIDs:           slices.Clone(o.Spec.BidderDids),
 		AcceptCopies:         int32(compose.OptionInt(o.Spec.Options, "accept-copies")),
@@ -669,6 +668,10 @@ func (p *pass) run(ctx context.Context, plan compose.AccountPlan, id *v1alpha1.M
 	}
 	snap, err := p.snapshot(ctx)
 	if err != nil {
+		return ctlruntime.Result{}, err
+	}
+	if err := c.ApplyOAuthIdentityEndpoints(ctx, r, snap, ws, marketrequester.RequesterIdentity,
+		compose.ServiceNameFor(compose.ComponentKindRequester, marketrequester.RequesterComponent)+compose.ExposureIngressSuffix, "requester"); err != nil {
 		return ctlruntime.Result{}, err
 	}
 	p.st.Did = id.Status.Did

@@ -364,7 +364,7 @@ func (p *pass) desired(plan compose.AccountPlan, ident *v1alpha1.ComponentIdenti
 	if ident.Handle != "" {
 		hostnames = []string{ident.Handle}
 	}
-	mode, publicOrigin, oauthClientID, oauthRedirectURI, guestSSHKeysFile := compose.RequesterComponentFields(o.Spec.Options, plan.Mode)
+	mode, guestSSHKeysFile := compose.RequesterComponentFields(o.Spec.Options, plan.Mode)
 	var requesterPdsRef *commonv1.ObjectRef
 	if !plan.Local {
 		requesterPdsRef = plan.PdsRef
@@ -378,9 +378,6 @@ func (p *pass) desired(plan compose.AccountPlan, ident *v1alpha1.ComponentIdenti
 		PolicyEngineRef:      compose.ComponentRefFor(compose.ComponentKindPolicyEngine, compose.PolicyEngineComponent),
 		Hostnames:            hostnames,
 		Mode:                 mode,
-		PublicOrigin:         publicOrigin,
-		OAuthClientID:        oauthClientID,
-		OAuthRedirectURI:     oauthRedirectURI,
 		GuestSSHKeysFile:     guestSSHKeysFile,
 		OwnerSessionsFile:    o.Spec.OwnerSessionsFile,
 		IrohSocket:           irohSocket(stateRoot),
@@ -522,6 +519,10 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 	}
 	snap, err := p.snapshot(ctx)
 	if err != nil {
+		return ctlruntime.Result{}, err
+	}
+	if err := c.ApplyOAuthIdentityEndpoints(ctx, r, snap, r.Workspace, marketrequester.RequesterIdentity,
+		compose.ServiceNameFor(compose.ComponentKindRequester, marketrequester.RequesterComponent)+compose.ExposureIngressSuffix, "requester"); err != nil {
 		return ctlruntime.Result{}, err
 	}
 	p.st.Did = ident.Did

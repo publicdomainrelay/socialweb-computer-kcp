@@ -1,6 +1,7 @@
 package atproto
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -331,8 +332,8 @@ func (a *Accounts) beginBrowserAuthorization(ctx context.Context, workspace stri
 		"code_challenge":        {challenge},
 		"code_challenge_method": {"S256"},
 	}
-	if handle := strings.TrimSpace(id.Spec.Handle); handle != "" {
-		query.Set("login_hint", handle)
+	if hint := cmp.Or(strings.TrimSpace(id.Spec.Did), strings.TrimSpace(id.Spec.Handle)); hint != "" {
+		query.Set("login_hint", hint)
 	}
 	parsed, err := url.Parse(authorize)
 	if err != nil {
@@ -367,17 +368,17 @@ func (a *Accounts) oauthPDSURL(ctx context.Context, id *v1alpha1.MarketIdentity)
 	if raw := strings.TrimSpace(id.Spec.PdsURL); raw != "" {
 		return raw, nil
 	}
-	handle := strings.TrimSpace(id.Spec.Handle)
-	if handle == "" || a.oauth.Directory == nil {
-		return "", errors.New("marketidentity: the oauth mode names neither pdsUrl nor a resolvable handle")
+	account := cmp.Or(strings.TrimSpace(id.Spec.Did), strings.TrimSpace(id.Spec.Handle))
+	if account == "" || a.oauth.Directory == nil {
+		return "", errors.New("marketidentity: the oauth mode names neither pdsUrl nor a resolvable did or handle")
 	}
-	atid, err := syntax.ParseAtIdentifier(handle)
+	atid, err := syntax.ParseAtIdentifier(account)
 	if err != nil {
-		return "", fmt.Errorf("marketidentity: the oauth handle %q: %w", handle, err)
+		return "", fmt.Errorf("marketidentity: the oauth account %q: %w", account, err)
 	}
 	ident, err := a.oauth.Directory.Lookup(ctx, atid)
 	if err != nil {
-		return "", fmt.Errorf("marketidentity: resolving the oauth handle %q: %w", handle, err)
+		return "", fmt.Errorf("marketidentity: resolving the oauth account %q: %w", account, err)
 	}
 	pds := strings.TrimSpace(ident.PDSEndpoint())
 	if pds == "" {
@@ -507,6 +508,10 @@ func saveSession(ctx context.Context, vault SecretStore, ref *commonv1.SecretRef
 
 func (a *Accounts) sessionSignedIn(ctx context.Context, status v1alpha1.MarketIdentityStatus, generation int64, id *v1alpha1.MarketIdentity,
 	session *oauthclient.Session, handle string, ref *commonv1.SecretRef) Result {
+	if want := strings.TrimSpace(id.Spec.Did); want != "" && session.DID() != want {
+		return failed(status, generation, "SubjectMismatch",
+			fmt.Sprintf("the oauth session is for %s, not the configured did %s; sign in with that account", session.DID(), want))
+	}
 	token, _ := session.AccessToken(ctx)
 	return signedIn(status, generation, id, session.DID(), handle, session.HostURL(), ref, token)
 }

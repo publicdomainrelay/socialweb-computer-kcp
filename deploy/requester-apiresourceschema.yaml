@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-17.requesters.socialweb.computer
+  name: v1alpha1-18.requesters.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -341,12 +341,6 @@ spec:
                     maximum: 65535
                   healthPath:
                     type: string
-              publicOrigin:
-                type: string
-              oauthClientID:
-                type: string
-              oauthRedirectURI:
-                type: string
               mode:
                 type: string
                 enum:

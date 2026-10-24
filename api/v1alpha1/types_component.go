@@ -587,12 +587,6 @@ type RequesterSpec struct {
 
 	Serve *ComponentServe `json:"serve,omitempty" apigen:"default={}"`
 
-	PublicOrigin string `json:"publicOrigin,omitempty"`
-
-	OAuthClientID string `json:"oauthClientID,omitempty"`
-
-	OAuthRedirectURI string `json:"oauthRedirectURI,omitempty" apigen:"userEndpoint"`
-
 	Mode string `json:"mode,omitempty" apigen:"enum=local|localrepo|callback|oauth|oauthbrowser|oauthqr"`
 
 	GuestSSHKeysFile string `json:"guestSSHKeysFile,omitempty" apigen:"userEndpoint"`
