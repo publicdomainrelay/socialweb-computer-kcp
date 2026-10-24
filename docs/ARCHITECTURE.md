@@ -4255,12 +4255,15 @@ fail, rather than the code read against this document alone.
   workspace's names.
   ACC19-ONE-KCP is marked done in plan 0019, but the integration tests it named were deleted by plan 0026,
   so the one-kcp network has no standing check until plan 0027.
-- **A deleted ComputeContract leaves its guest running (plan 0028, opened 2026-10-24).** A
-  ComputeContract carries no finalizer, so a delete removes it at once and the requester sees only Gone:
-  `Requester.Observe` drops its caches and never starts a release, the runner keeps holding in
-  `waitForRelease`, and no vm.delete is sent. A won Bid never expires, so the guest holds a host core
-  until someone removes it by hand. Two deleters reach this path: a direct delete of a held contract,
-  and the deletion of a MarketRequester root, whose delete pass stops the Requester before kcp garbage
+
+## 15. Settled decisions, and the defects they closed
+
+- **A deleted ComputeContract releases its guest (plan 0028, moved from section 14, 2026-10-24).**
+  Before: a ComputeContract carried no finalizer, so a delete removed it at once and the requester saw
+  only Gone: `Requester.Observe` dropped its caches and never started a release, the runner kept holding
+  in `waitForRelease`, and no vm.delete was sent. A won Bid never expires, so the guest held a host core
+  until someone removed it by hand. Two deleters reached this path: a direct delete of a held contract,
+  and the deletion of a MarketRequester root, whose delete pass stopped the Requester before kcp garbage
   collection deletes the contracts it owns. R0-REPRO reading (own market network p28, `--bidders 1`,
   test-0001, dev build of c30c3dab): run 1 held `root:r0a` contract `contract` at 03:42:13Z and deleted
   it directly at 03:43:38Z; the object was gone at once, the requester logged nothing after the delete,
@@ -4273,8 +4276,51 @@ fail, rather than the code read against this document alone.
   ComputeVM `fc-6hawypma76qe-46183fe5` Running. The market network applied a new root `app` in
   `root:r0b` within seconds; its Requester found no contract. Both guests were removed by hand
   (ComputeVM delete) at 03:51:33Z.
-
-## 15. Settled decisions, and the defects they closed
+  After: the ComputeContract forwarder of `internal/controllers/marketintents` holds the finalizer
+  `computecontract.socialweb.computer/release` (`v1alpha1.FinalizerComputeContract`) and returns Waiting on
+  a deleting contract while the requester's `Requester.releaseWait` answers a wait: the requester lets go
+  when the contract is Released, never wrote an accept and has no runner, or its `status.release.deadline`
+  passed after at least one attempt, when it writes Failed "vm.delete was not acknowledged by <deadline>
+  (the contract TTL): <last error>" (the plan 0020 bound, which the Go port had left as Releasing). With
+  no requester subscribed the finalizer stays only while `ComputeContract.HoldsGuest` is true, so a
+  Released or never-accepted contract never blocks a workspace delete. Gone stops the runner (its context
+  is cancelled and it writes and logs nothing more) and logs `requester_contract_gone_unreleased` when the
+  finalizer was removed by hand. The MarketRequester delete pass deletes the root's ComputeContracts and
+  reports Deleting "<n> ComputeContract(s) releasing" before it stops a component; a deleting intent
+  object now requeues the roots of its workspace (`intentWatch` in `internal/app/compose/root.go`), which
+  it did not for an owned object. The Gateway delete pass stopped its Requester with no look at the
+  NodeClaim contracts of its tenant clusters (M4 read: unsafe for a direct delete of the Gateway root;
+  the network's teardown deletes the account workspaces first); it now waits while
+  `compose.HeldContracts` counts a contract that holds a guest. The requester logs `requester_release`,
+  `requester_release_retry`, `requester_released` and `requester_release_bound`. Readings (same network,
+  dev builds of this branch, 2026-10-24 UTC):
+  - ACC28-DIRECT-DELETE: `root:a1` Held 03:58:25; delete 03:58:37.628; Terminating with the finalizer
+    03:58:37.738, Releasing 03:58:37.763, Released 03:58:38.000, object gone 03:58:38.036; exactly one
+    vm.delete record; ComputeVM `fc-cz5yawblk7nf-d871c971` gone 03:58:39.801 with its unit and work dir;
+    the Bid has `status.termination` (03:58:38Z) and Complete=True ComputeVMGone.
+  - ACC28-DELETE-BEFORE-ACCEPT: `root:a5b` (denyBidderDids names the one bidder) "collecting bids"
+    04:02:53; delete 04:02:59.813, gone 04:02:59.950; the repo holds one rfp, 0 accept and 0 vm.delete
+    records; no ComputeVM of that requester appeared.
+  - ACC28-DELETE-WHILE-STOPPED: `root:a2` Held with its core stopped (spec.apps[].stopped); delete
+    03:59:35, Terminating with the finalizer for 61 s while the guest ran; requester started 04:00:20;
+    `requester_release` 04:00:36.244, Released 04:00:36.324, object gone 04:00:36.336, one vm.delete
+    record, ComputeVM gone 04:00:37.647.
+  - ACC28-ROOT-DELETE: `root:r1` with `contract` and `contract2` Held on bidder-1; root (uid 5265cb66)
+    deleted 04:04:49.441; Deleting "2 ComputeContract(s) releasing" 04:04:52.028, "1 ..." 04:04:52.065,
+    both Released by 04:04:52.041, "8 component(s) stopping" 04:04:52.466; both FirecrackerVM backends
+    released (04:04:52.344, 04:04:52.442) before the Requester was deleted (04:04:52.785); the ComputeVM
+    objects went 04:04:53.477 and 04:04:53.773; the root was gone 04:04:54.368; two vm.delete records.
+  - ACC28-BOUND: bidder-1 stopped 04:06:30; `root:b1` deadline 04:09:49 by spec.ttlSecondsAfterFinished;
+    delete 04:06:46; attempts 1 to 6 each HTTP 404 (`requester_release_retry`), attempt 4 after a
+    requester restart; Failed "vm.delete was not acknowledged by 2026-10-24T04:09:49Z (the contract TTL):
+    HTTP 404" 04:09:49.047, object gone 04:09:49.054.
+  - ACC28-FORCED-REMOVAL: `root:f1` with bidder-1 stopped; delete 04:06:50.218 and a merge patch of
+    `metadata.finalizers: null`; one `requester_release_retry` 04:06:50.324, then
+    `requester_contract_gone_unreleased` (phase Releasing, its receipt) once at 04:06:50.353 and no
+    further line for the contract until its core stopped at 04:07:05 (the 5 s retry did not run).
+  Open: `run request --exec` ends its ssh session and stops the requester's core as soon as the contract
+  leaves Held, so a contract deleted under a running `run request` is released only when the invocation
+  runs again; the Gateway order (M4) has no live reading with a tenant cluster node.
 
 - **The guest image is published once, under the key of its pins, on 2026-10-23.** Every tag and
   `main` push rebuilt `firecracker-x86_64` from source (about 15 minutes of the `guest-image` job) and
@@ -4293,7 +4339,6 @@ fail, rather than the code read against this document alone.
   per-release copy. Reading taken before the first CI run: the key answered 404, the three files under
   `main/fd1a644/guest-image/firecracker-x86_64` hashed to their pins, and a build of this commit resolved
   its image from a local server holding only the key, then from the public bucket through `main/latest`.
-
 - **Gaps of the removed TypeScript runtime, closed by plan 0026 removing it (moved from section 14,
   2026-10-23).** Each was open in section 14 because of a mechanism that plan 0026 deleted: the TypeScript
   services ran as pods of a deno runtime in the core, each pod in its own run directory and, on an
