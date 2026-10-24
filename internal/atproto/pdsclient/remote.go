@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/nettransport"
 
 	"github.com/bluesky-social/indigo/atproto/syntax"
 )
@@ -93,16 +94,15 @@ func (p *RemotePDS) RefreshSession(ctx context.Context, refreshToken string) (Se
 }
 
 func newRemoteHTTPClient(tlsConfig *tls.Config) *http.Client {
-	transport := &http.Transport{
+	transport := nettransport.WithDial(&http.Transport{
 		Proxy:                 nil,
-		DialContext:           (&net.Dialer{Timeout: remoteDialTimeout, KeepAlive: remoteKeepAlive}).DialContext,
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          remoteMaxIdleConns,
 		IdleConnTimeout:       remoteIdleConnTimeout,
 		TLSHandshakeTimeout:   remoteTLSHandshake,
 		ExpectContinueTimeout: time.Second,
 		TLSClientConfig:       tlsConfig,
-	}
+	}, (&net.Dialer{Timeout: remoteDialTimeout, KeepAlive: remoteKeepAlive}).DialContext)
 	return &http.Client{
 		Transport: transport,
 		CheckRedirect: func(*http.Request, []*http.Request) error {

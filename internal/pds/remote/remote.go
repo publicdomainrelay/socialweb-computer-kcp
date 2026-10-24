@@ -19,6 +19,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
 	reporemote "github.com/johnandersen777/socialweb-computer-kcp/internal/atprotorepo/remote"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/pds"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/nettransport"
 )
 
 const (
@@ -105,15 +106,14 @@ func New(cfg Config) (*Host, error) {
 
 func httpClient(tlsConfig *tls.Config) *http.Client {
 	return &http.Client{
-		Transport: &http.Transport{
-			DialContext:           (&net.Dialer{Timeout: dialTimeout, KeepAlive: keepAlive}).DialContext,
+		Transport: nettransport.WithDial(&http.Transport{
 			ForceAttemptHTTP2:     true,
 			MaxIdleConns:          maxIdleConns,
 			IdleConnTimeout:       idleTimeout,
 			TLSHandshakeTimeout:   handshakeTimeout,
 			ExpectContinueTimeout: time.Second,
 			TLSClientConfig:       tlsConfig,
-		},
+		}, (&net.Dialer{Timeout: dialTimeout, KeepAlive: keepAlive}).DialContext),
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
 }

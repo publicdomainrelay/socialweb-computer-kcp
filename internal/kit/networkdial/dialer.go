@@ -8,6 +8,8 @@ import (
 	"net"
 	"net/http"
 	"time"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/nettransport"
 )
 
 const (
@@ -106,8 +108,7 @@ func NewHTTPTransportWithOptions(opts DialOptions) (*http.Transport, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &http.Transport{
-		DialContext:           d.DialContext,
+	return nettransport.WithDial(&http.Transport{
 		TLSClientConfig:       d.TLSConfig(),
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          DefaultMaxIdleConns,
@@ -115,7 +116,7 @@ func NewHTTPTransportWithOptions(opts DialOptions) (*http.Transport, error) {
 		IdleConnTimeout:       DefaultIdleConnTimeout,
 		TLSHandshakeTimeout:   DefaultHandshakeTimeout,
 		ExpectContinueTimeout: time.Second,
-	}, nil
+	}, d.DialContext), nil
 }
 
 func NewHTTPClient(hosts Resolver, tlsConfig *tls.Config) (*http.Client, error) {
