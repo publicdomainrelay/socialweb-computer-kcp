@@ -32,6 +32,8 @@ const (
 	CollectionBidderAssociation = "com.publicdomainrelay.temp.market.bidderAssociation"
 	CollectionPolicyGhaLite     = "computer.socialweb.temp.policy.ghalite"
 	CollectionPolicyTypeScript  = "computer.socialweb.temp.policy.typescript"
+	CollectionInfra             = "computer.socialweb.infra"
+	CollectionEphemeralInfra    = "computer.socialweb.ephemeralInfra"
 
 	RPCSubmitRFP         = "rpc:com.publicdomainrelay.temp.market.submitRfp?aud=*"
 	RPCSubmitAccept      = "rpc:com.publicdomainrelay.temp.market.submitAccept?aud=*"
@@ -55,6 +57,7 @@ var (
 			CollectionPolicyGhaLite, CollectionPolicyTypeScript),
 		[]string{collectionScope(CollectionFedproxyRBAC, "create", "update", "delete")},
 		[]string{collectionScope(CollectionBadgeBlueKeys, "create", "update", "delete")},
+		collectionScopes([]string{"create", "update", "delete"}, CollectionInfra, CollectionEphemeralInfra),
 		[]string{RPCSubmitRFP, RPCSubmitAccept, RPCSubmitBid, RPCSubmitEvent},
 	)
 

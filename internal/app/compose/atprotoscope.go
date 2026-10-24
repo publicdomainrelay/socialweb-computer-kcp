@@ -40,6 +40,8 @@ var requesterScope = []string{
 	"repo:computer.socialweb.temp.policy.typescript?action=create&action=update",
 	"repo:com.publicdomainrelay.temp.badgeBlueKeys?action=create&action=update&action=delete",
 	"repo:com.publicdomainrelay.temp.market.heartbeat?action=create&action=update",
+	"repo:" + infrarecord.InfraNSID + "?action=create&action=update&action=delete",
+	"repo:" + infrarecord.EphemeralInfraNSID + "?action=create&action=update&action=delete",
 	"rpc:com.publicdomainrelay.temp.market.submitRfp?aud=*",
 	"rpc:com.publicdomainrelay.temp.market.submitAccept?aud=*",
 	"rpc:com.publicdomainrelay.temp.market.submitBid?aud=*",
@@ -57,7 +59,13 @@ var clusterScope = []string{
 }
 
 func GatewayAtprotoScope() string {
-	return strings.Join(append(slices.Clone(requesterScope), clusterScope...), " ")
+	var out []string
+	for _, scope := range append(slices.Clone(requesterScope), clusterScope...) {
+		if !slices.Contains(out, scope) {
+			out = append(out, scope)
+		}
+	}
+	return strings.Join(out, " ")
 }
 
 func SshGatewayAtprotoScope() string {
