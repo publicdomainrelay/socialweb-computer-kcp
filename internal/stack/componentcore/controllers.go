@@ -33,6 +33,7 @@ import (
 	componentctl "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/componentlink"
 	computevmctl "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/computevm"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/contractevent"
 	eventsctl "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/events"
 	exposurectl "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/exposure"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/guestidentitygrant"
@@ -145,6 +146,8 @@ func (c *Core) registerLocal(ctx context.Context, mgr *ctlruntime.Manager, clien
 	warn("NodeClaim", c.registerNodeClaims(mgr, c.nodeClaims))
 	_, err = marketintents.Register(mgr, marketintents.Options{Bus: c.handlers, Clients: clients.client, Scope: local, Log: cfg.Log})
 	warn("market intents", err)
+	_, err = contractevent.Register(mgr, contractevent.Options{Bus: c.handlers, Clients: clients.client, Scope: local, Log: cfg.Log})
+	warn("ContractEvent", err)
 	if cfg.DynamicFactory != nil {
 		_, err = infractl.Register(mgr, infractl.Options{Bus: c.handlers, Dynamic: cfg.DynamicFactory, Scope: local, Log: cfg.Log})
 		warn("Infra, EphemeralInfra", err)

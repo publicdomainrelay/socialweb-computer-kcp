@@ -783,7 +783,7 @@ func (q *Requester) sessionGuest(ctx context.Context, receiptURI string) (string
 	var hostKeys []v1alpha1.ComputeVMHostKey
 	var termination *v1alpha1.ContractTermination
 	handle := func(event MarketEvent) bool {
-		if guestEventSeen(seen, event) {
+		if guestEventSeen(seen, event) || isContractEventNSID(market.NSIDFromURI(event.Payload.URI)) {
 			return false
 		}
 		parsed, err := q.parseGuestEvent(ctx, event, receiptURI)

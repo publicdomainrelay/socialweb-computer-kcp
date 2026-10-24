@@ -92,23 +92,28 @@ func (s *Service) setup(ctx context.Context) (*role.Requester, error) {
 			return nil, fmt.Errorf("requester: subscribing to the market identity: %w", err)
 		}
 	}
+	events, err := bus.Resolve[contractmarket.ContractEvents](ctx, s.deps.Bus, self, self, bus.Capability{Name: contractmarket.CapabilityContractEvents})
+	if err != nil {
+		return nil, fmt.Errorf("requester: the contract events handle: %w", err)
+	}
 	handlers := s.deps.Bus
 	runner := func(ctx context.Context, engine commonv1.ObjectRef, workflow string) (policy.Runner, error) {
 		return bus.Resolve[policy.Runner](ctx, handlers, self, engine, bus.Capability{Name: policy.CapabilityRun, Scope: []string{workflow}})
 	}
 	core, err := role.New(s.cfg, role.Deps{
-		Intents:     intents,
-		Inputs:      inputs,
-		OpenRepo:    s.openRepo,
-		AwaitRepo:   s.awaitRepo,
-		Policy:      runner,
-		Vault:       s.secretsVault,
-		ServiceAuth: s.openServiceAuth,
-		Guests:      guests{},
-		Directory:   s.directory,
-		HTTP:        s.client,
-		Now:         time.Now,
-		Log:         s.deps.Log,
+		Intents:        intents,
+		Inputs:         inputs,
+		OpenRepo:       s.openRepo,
+		AwaitRepo:      s.awaitRepo,
+		Policy:         runner,
+		Vault:          s.secretsVault,
+		ServiceAuth:    s.openServiceAuth,
+		Guests:         guests{},
+		ContractEvents: events,
+		Directory:      s.directory,
+		HTTP:           s.client,
+		Now:            time.Now,
+		Log:            s.deps.Log,
 	})
 	if err != nil {
 		return nil, err
@@ -122,6 +127,9 @@ func (s *Service) setup(ctx context.Context) (*role.Requester, error) {
 	if _, err := intents.Subscribe(ctx, contractmarket.Subscription{
 		Kinds: []string{contractmarket.KindComputeContract, contractmarket.KindStateSync}, Observer: core}); err != nil {
 		return core, fmt.Errorf("requester: subscribing to the contracts: %w", err)
+	}
+	if _, err := events.SubscribeContractEvents(ctx, core); err != nil {
+		return core, fmt.Errorf("requester: subscribing to the contract events: %w", err)
 	}
 	if relays := s.cfg.Relays(); len(relays) > 0 {
 		crawl := participant.Crawl{Relays: relays, Address: func() string { return inputs.Address(role.PDSExposure) }, Period: participant.CrawlPeriod, Log: s.log}

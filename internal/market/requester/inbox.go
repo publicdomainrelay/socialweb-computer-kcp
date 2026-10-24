@@ -465,6 +465,17 @@ func (q *Requester) processPendingEvents(ctx context.Context, name string) error
 			q.log.Warn("requester_event_refused", "contract", contract.Name, "event", entry.URI, "err", err)
 			continue
 		}
+		if isContractEventNSID(parsed.Kind) {
+			if err := q.recordInboundContractEvent(ctx, contract, parsed); err != nil {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				q.log.Warn("requester_contract_event_inbound_failed", "contract", contract.Name, "event", entry.URI, "err", err)
+				unavailable = append(unavailable, err)
+				remaining = append(remaining, entry)
+			}
+			continue
+		}
 		if guestEventApplied(contract.Status.Contract, parsed) {
 			continue
 		}

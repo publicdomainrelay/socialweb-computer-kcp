@@ -903,7 +903,7 @@ func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClai
 	seen := map[string]bool{}
 	seedGuestEventSeen(seen, state)
 	handle := func(event MarketEvent) bool {
-		if guestEventSeen(seen, event) {
+		if guestEventSeen(seen, event) || isContractEventNSID(market.NSIDFromURI(event.Payload.URI)) {
 			return false
 		}
 		parsed, err := r.q.parseGuestEvent(ctx, event, receiptURI)

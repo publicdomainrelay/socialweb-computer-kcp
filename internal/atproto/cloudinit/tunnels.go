@@ -2,10 +2,10 @@ package cloudinit
 
 import (
 	"cmp"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 )
@@ -17,8 +17,6 @@ const (
 
 	DefaultTunnelServer = "https://opentunnel.xyz"
 
-	GuestTunnelsSetupPath = "/usr/local/bin/setup-guest-tunnels.sh"
-
 	GuestTunnelScriptPath = "/usr/local/bin/guest-tunnel.sh"
 
 	GuestTunnelReportPath = "/usr/local/bin/guest-tunnel-report.sh"
@@ -28,18 +26,22 @@ const (
 	GuestTunnelStateDir = "/var/lib/guest-tunnels"
 
 	OpenTunnelBinary = "/usr/local/bin/opentunnel"
+
+	GuestBinariesUnit = "setup-guest-binaries.service"
+
+	GuestAgentConfigDir = "/etc/socialweb-guest-agent"
+
+	GuestAgentTunnelsPath = GuestAgentConfigDir + "/tunnels.json"
+
+	TunnelTransportOpenTunnel = "opentunnel"
+
+	TunnelTransportWebRTC = "webrtc"
 )
 
 var (
 	tunnelTagRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$`)
 
 	tunnelServerRE = regexp.MustCompile(`^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?$`)
-
-	pinURLRE = regexp.MustCompile(`^https://[A-Za-z0-9._~:/?=&%+-]+$`)
-
-	pinNameRE = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
-
-	sha256RE = regexp.MustCompile(`^[0-9a-f]{64}$`)
 )
 
 type Tunnel struct {
@@ -48,34 +50,26 @@ type Tunnel struct {
 	Port int
 
 	Server string
-}
 
-type GuestBinaryPin struct {
-	Arch string
-
-	URL string
-
-	SHA256 string
-
-	Member string
+	Transport string
 }
 
 type TunnelsOptions struct {
 	Tunnels []Tunnel
+}
 
-	OpenTunnel []GuestBinaryPin
+type guestAgentTunnel struct {
+	Tag string `json:"tag"`
+
+	Port int `json:"port"`
+}
+
+type guestAgentTunnels struct {
+	Tunnels []guestAgentTunnel `json:"tunnels"`
 }
 
 func TunnelURLPath(tag string) string {
 	return GuestTunnelRunDir + "/" + tag + ".url"
-}
-
-func GuestBinarySetupUnit(name string) string {
-	return "setup-guest-" + name + ".service"
-}
-
-func GuestBinaryStamp(name string) string {
-	return "/var/lib/setup-guest-" + name + ".done"
 }
 
 func TunnelUnit(tag string) string {
@@ -88,6 +82,10 @@ func TunnelReportUnit(tag string) string {
 
 func (t Tunnel) server() string {
 	return strings.TrimRight(cmp.Or(strings.TrimSpace(t.Server), DefaultTunnelServer), "/")
+}
+
+func (t Tunnel) transport() string {
+	return cmp.Or(strings.TrimSpace(t.Transport), TunnelTransportOpenTunnel)
 }
 
 func (opts TunnelsOptions) Validate() error {
@@ -106,27 +104,17 @@ func (opts TunnelsOptions) Validate() error {
 		if t.Port < 1 || t.Port > 65535 {
 			return fmt.Errorf("cloudinit tunnels: tunnel %s port %d is not a port", t.Tag, t.Port)
 		}
-		if !tunnelServerRE.MatchString(t.server()) {
-			return fmt.Errorf("cloudinit tunnels: tunnel %s server %q is not an http(s) origin", t.Tag, t.Server)
-		}
-	}
-	return checkPins("opentunnel", opts.OpenTunnel)
-}
-
-func checkPins(name string, pins []GuestBinaryPin) error {
-	if len(pins) == 0 {
-		return fmt.Errorf("cloudinit tunnels: no %s pin", name)
-	}
-	for _, p := range pins {
-		switch {
-		case p.Arch != "x86_64" && p.Arch != "aarch64":
-			return fmt.Errorf("cloudinit tunnels: %s pin arch %q is not x86_64 or aarch64", name, p.Arch)
-		case !sha256RE.MatchString(p.SHA256):
-			return fmt.Errorf("cloudinit tunnels: %s pin for %s has no sha256", name, p.Arch)
-		case !pinNameRE.MatchString(p.Member) || strings.Contains(p.Member, ".."):
-			return fmt.Errorf("cloudinit tunnels: %s pin for %s member %q is not a path", name, p.Arch, p.Member)
-		case !pinURLRE.MatchString(p.URL):
-			return fmt.Errorf("cloudinit tunnels: %s pin for %s url %q is not an https URL", name, p.Arch, p.URL)
+		switch t.transport() {
+		case TunnelTransportOpenTunnel:
+			if !tunnelServerRE.MatchString(t.server()) {
+				return fmt.Errorf("cloudinit tunnels: tunnel %s server %q is not an http(s) origin", t.Tag, t.Server)
+			}
+		case TunnelTransportWebRTC:
+			if strings.TrimSpace(t.Server) != "" {
+				return fmt.Errorf("cloudinit tunnels: tunnel %s names a server; only an opentunnel tunnel has one", t.Tag)
+			}
+		default:
+			return fmt.Errorf("cloudinit tunnels: tunnel %s transport %q is not opentunnel or webrtc", t.Tag, t.Transport)
 		}
 	}
 	return nil
@@ -149,47 +137,21 @@ func tunnelsPatch(opts TunnelsOptions) (UserDataPatch, error) {
 	if err := opts.Validate(); err != nil {
 		return UserDataPatch{}, err
 	}
-	binaries := []string{"opentunnel"}
-	files := []WriteFileEntry{
-		{Path: GuestTunnelsSetupPath, Owner: "root:root", Permissions: "0700", Content: tunnelsSetupScript(opts)},
-	}
-	for _, name := range binaries {
-		files = append(files, WriteFileEntry{Path: "/etc/systemd/system/" + GuestBinarySetupUnit(name), Owner: "root:root", Permissions: "0644", Content: unitFile(
-			[]string{
-				"Description=Install the pinned " + name + " binary of the contract's tunnels",
-				"After=network-online.target",
-				"Wants=network-online.target",
-			},
-			[]string{
-				"Type=oneshot",
-				"RemainAfterExit=yes",
-				"TimeoutStartSec=900",
-				"Restart=on-failure",
-				"RestartSec=5",
-				"ExecStart=" + GuestTunnelsSetupPath + " " + name,
-				"StandardOutput=journal+console",
-				"StandardError=journal+console",
-			})})
-	}
-	files = append(files,
-		WriteFileEntry{Path: GuestTunnelScriptPath, Owner: "root:root", Permissions: "0700", Content: guestTunnelScript},
-		WriteFileEntry{Path: GuestTunnelReportPath, Owner: "root:root", Permissions: "0700", Content: guestTunnelReportScript},
-	)
-	early := []string{}
-	for _, name := range binaries {
-		early = append(early, GuestBinarySetupUnit(name))
-	}
-	units := slices.Clone(early)
-	openTunnelSetup := GuestBinarySetupUnit("opentunnel")
+	patch := UserDataPatch{}
+	webrtc := guestAgentTunnels{Tunnels: []guestAgentTunnel{}}
+	units := []string{}
 	for _, t := range opts.Tunnels {
+		if t.transport() == TunnelTransportWebRTC {
+			webrtc.Tunnels = append(webrtc.Tunnels, guestAgentTunnel{Tag: t.Tag, Port: t.Port})
+			continue
+		}
 		port := strconv.Itoa(t.Port)
-		files = append(files,
+		patch.WriteFiles = append(patch.WriteFiles,
 			WriteFileEntry{Path: "/etc/systemd/system/" + TunnelUnit(t.Tag), Owner: "root:root", Permissions: "0644", Content: unitFile(
 				[]string{
 					"Description=opentunnel route of guest tunnel " + t.Tag + " to 127.0.0.1:" + port,
-					"After=network-online.target " + openTunnelSetup,
-					"Wants=network-online.target",
-					"Requires=" + openTunnelSetup,
+					"After=network-online.target " + GuestBinariesUnit,
+					"Wants=network-online.target " + GuestBinariesUnit,
 					"StartLimitIntervalSec=0",
 				},
 				[]string{
@@ -213,22 +175,34 @@ func tunnelsPatch(opts TunnelsOptions) (UserDataPatch, error) {
 					"StandardError=journal+console",
 				})},
 		)
-		early = append(early, TunnelUnit(t.Tag))
 		units = append(units, TunnelUnit(t.Tag))
 	}
+	if len(webrtc.Tunnels) > 0 {
+		raw, err := json.Marshal(webrtc)
+		if err != nil {
+			return UserDataPatch{}, fmt.Errorf("cloudinit tunnels: encoding %s: %w", GuestAgentTunnelsPath, err)
+		}
+		patch.WriteFiles = append(patch.WriteFiles,
+			WriteFileEntry{Path: GuestAgentTunnelsPath, Owner: "root:root", Permissions: "0644", Content: string(raw) + "\n"})
+	}
+	if len(units) == 0 {
+		return patch, nil
+	}
+	patch.Packages = []string{"jq", "curl", "ca-certificates"}
+	patch.WriteFiles = append(patch.WriteFiles,
+		WriteFileEntry{Path: GuestTunnelScriptPath, Owner: "root:root", Permissions: "0700", Content: guestTunnelScript},
+		WriteFileEntry{Path: GuestTunnelReportPath, Owner: "root:root", Permissions: "0700", Content: guestTunnelReportScript},
+	)
 	list := strings.Join(units, " ")
-	return UserDataPatch{
-		Packages:   []string{"jq", "curl", "ca-certificates"},
-		WriteFiles: files,
-		RuncmdPrepend: []any{
-			"systemctl daemon-reload",
-			"systemctl start --no-block " + strings.Join(early, " "),
-		},
-		Runcmd: []any{
-			"systemctl enable " + list,
-			"systemctl start --no-block " + list,
-		},
-	}, nil
+	patch.RuncmdPrepend = []any{
+		"systemctl daemon-reload",
+		"systemctl start --no-block " + list,
+	}
+	patch.Runcmd = []any{
+		"systemctl enable " + list,
+		"systemctl start --no-block " + list,
+	}
+	return patch, nil
 }
 
 func unitFile(unit, service []string) string {
@@ -239,65 +213,15 @@ func unitFile(unit, service []string) string {
 	return strings.Join(lines, "\n")
 }
 
-func tunnelsSetupScript(opts TunnelsOptions) string {
-	var arches strings.Builder
-	for _, arch := range []string{"x86_64", "aarch64"} {
-		for _, p := range opts.OpenTunnel {
-			if p.Arch == arch {
-				fmt.Fprintf(&arches, "  %s:opentunnel) fetch opentunnel %q %q %q ;;\n", arch, p.URL, p.SHA256, p.Member)
-			}
-		}
-	}
-	return `#!/usr/bin/env bash
-set -euo pipefail
-
-NAME="$1"
-STAMP="` + GuestBinaryStamp("${NAME}") + `"
-[ -f "${STAMP}" ] && exit 0
-
-TMP="$(mktemp -d)"
-trap 'rm -rf "${TMP}"' EXIT
-
-fetch() {
-  local name="$1" url="$2" sum="$3" member="$4"
-  local args
-  for attempt in 1 2 3 4 5; do
-    args=(-fsSL --connect-timeout 20 --max-time 300)
-    rm -rf "${TMP:?}/${name}" "${TMP}/${name}.tar.gz"
-    if curl "${args[@]}" -o "${TMP}/${name}.tar.gz" "${url}" \
-        && printf '%s  %s\n' "${sum}" "${TMP}/${name}.tar.gz" | sha256sum -c --quiet - \
-        && mkdir -p "${TMP}/${name}" \
-        && tar -xzf "${TMP}/${name}.tar.gz" -C "${TMP}/${name}" "${member}"; then
-      install -m 0755 "${TMP}/${name}/${member}" "/usr/local/bin/${name}"
-      echo "setup-guest-tunnels: installed /usr/local/bin/${name} from ${url} (sha256 ${sum})"
-      return 0
-    fi
-    echo "setup-guest-tunnels: ${name} fetch or check failed (attempt ${attempt}): ${url}" >&2
-    if [ "${attempt}" -lt 5 ]; then sleep "${attempt}"; fi
-  done
-  echo "setup-guest-tunnels: ${name} failed after 5 attempts: ${url}" >&2
-  exit 1
-}
-
-case "$(uname -m)" in
-  amd64) ARCH=x86_64 ;;
-  arm64) ARCH=aarch64 ;;
-  *) ARCH="$(uname -m)" ;;
-esac
-
-case "${ARCH}:${NAME}" in
-` + arches.String() + `  *) echo "setup-guest-tunnels: no ${NAME} pin for machine type ${ARCH}" >&2; exit 1 ;;
-esac
-
-touch "${STAMP}"
-`
-}
-
 const guestTunnelScript = `#!/usr/bin/env bash
 set -euo pipefail
 TAG="$1"
 PORT="$2"
 API="$3"
+if [ ! -x "` + OpenTunnelBinary + `" ]; then
+  echo "guest-tunnel: ` + OpenTunnelBinary + ` is not installed yet (` + GuestBinariesUnit + `); ${TAG} retries" >&2
+  exit 1
+fi
 BASE="` + GuestTunnelStateDir + `/${TAG}"
 export HOME=/root
 export XDG_CONFIG_HOME="${BASE}/config"

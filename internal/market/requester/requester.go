@@ -168,6 +168,8 @@ type Deps struct {
 
 	Guests Guests
 
+	ContractEvents contractmarket.ContractEvents
+
 	Directory identity.Directory
 
 	HTTP *http.Client
@@ -221,6 +223,10 @@ type Requester struct {
 	syncs *participant.Index[v1alpha1.StateSync]
 
 	receipts *participant.Index[market.ResolvedRecord]
+
+	contractEvents *participant.Index[v1alpha1.ContractEvent]
+
+	creatingInbound sync.Map
 
 	bids *bidQueue
 
@@ -430,29 +436,30 @@ func New(cfg Config, deps Deps) (*Requester, error) {
 		deps.Log = slog.New(slog.DiscardHandler)
 	}
 	q := &Requester{
-		cfg:          cfg,
-		deps:         deps,
-		did:          cfg.DID,
-		handle:       cfg.Handle,
-		repoDID:      cfg.RepoDID,
-		marketDID:    cfg.MarketDID,
-		pdsURL:       cfg.PDSURL,
-		contracts:    participant.NewIndex[v1alpha1.ComputeContract](),
-		syncs:        participant.NewIndex[v1alpha1.StateSync](),
-		receipts:     participant.NewIndex[market.ResolvedRecord](),
-		bids:         newBidQueue(),
-		runners:      map[string]*contractRunner{},
-		finished:     map[string]bool{},
-		waiting:      map[string]bool{},
-		settled:      map[string]bool{},
-		perAccount:   map[string]int{},
-		written:      map[string][]v1alpha1.ComputeContractEvent{},
-		eventSinks:   map[string]chan MarketEvent{},
-		undelivered:  map[string][]MarketEvent{},
-		bidders:      map[string]Bidder{},
-		scopeCache:   ttlcache.New[string, PolicyDecision](ttlcache.Options{TTL: 30 * time.Second}),
-		secrets:      map[string]*secretsState{},
-		heldSessions: map[string]*heldSession{},
+		cfg:            cfg,
+		deps:           deps,
+		did:            cfg.DID,
+		handle:         cfg.Handle,
+		repoDID:        cfg.RepoDID,
+		marketDID:      cfg.MarketDID,
+		pdsURL:         cfg.PDSURL,
+		contracts:      participant.NewIndex[v1alpha1.ComputeContract](),
+		syncs:          participant.NewIndex[v1alpha1.StateSync](),
+		receipts:       participant.NewIndex[market.ResolvedRecord](),
+		contractEvents: participant.NewIndex[v1alpha1.ContractEvent](),
+		bids:           newBidQueue(),
+		runners:        map[string]*contractRunner{},
+		finished:       map[string]bool{},
+		waiting:        map[string]bool{},
+		settled:        map[string]bool{},
+		perAccount:     map[string]int{},
+		written:        map[string][]v1alpha1.ComputeContractEvent{},
+		eventSinks:     map[string]chan MarketEvent{},
+		undelivered:    map[string][]MarketEvent{},
+		bidders:        map[string]Bidder{},
+		scopeCache:     ttlcache.New[string, PolicyDecision](ttlcache.Options{TTL: 30 * time.Second}),
+		secrets:        map[string]*secretsState{},
+		heldSessions:   map[string]*heldSession{},
 	}
 	q.log = deps.Log.With("component", "requester", "did", q.did)
 	return q, nil

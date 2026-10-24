@@ -24,6 +24,14 @@ type GuestEvent struct {
 
 	Tag string
 
+	NetworkKind string
+
+	GuestKind string
+
+	Key string
+
+	Ciphertext string
+
 	HostKeys []v1alpha1.ComputeVMHostKey
 
 	Termination *v1alpha1.ContractTermination
@@ -46,6 +54,14 @@ func ValidateTicket(address string) (string, error) {
 func isGuestEventNSID(nsid string) bool {
 	switch nsid {
 	case market.ComputeEventsVMOnNetworkNSID, market.ComputeEventsVMHostKeysNSID, market.ComputeEventsVMTerminatedNSID:
+		return true
+	}
+	return isContractEventNSID(nsid)
+}
+
+func isContractEventNSID(nsid string) bool {
+	switch nsid {
+	case market.ComputeEventsGuestPublicKeyNSID, market.ComputeEventsGuestSignalWebRTCNSID:
 		return true
 	}
 	return false
@@ -106,19 +122,34 @@ func (q *Requester) parseGuestEvent(ctx context.Context, event MarketEvent, rece
 	switch payloadNSID {
 	case market.ComputeEventsVMOnNetworkNSID:
 		address := stringOf(event.Payload.Value["address"])
-		if tag := stringOf(event.Payload.Value["tag"]); tag != "" {
-			if err := ValidateNetworkAddress(tag, address); err != nil {
-				return nil, err
-			}
-			out.Tag = tag
-			out.ObservedAt = stringOf(event.Payload.Value["createdAt"])
-		} else {
+		tag := stringOf(event.Payload.Value["tag"])
+		kind := market.OnNetworkKind(market.ComputeEventsVMOnNetwork{Kind: stringOf(event.Payload.Value["kind"]), Tag: tag})
+		switch {
+		case kind == market.OnNetworkKindIroh && tag == "":
 			if _, err := ValidateTicket(address); err != nil {
 				return nil, err
 			}
 			out.ObservedAt = stringOf(event.Payload.Value["observedAt"])
+		case kind == market.OnNetworkKindIroh:
+			return nil, fmt.Errorf("requester: the iroh address of %s names tag %q", event.Payload.URI, tag)
+		case tag == "":
+			return nil, fmt.Errorf("requester: the %s address of %s names no tag", kind, event.Payload.URI)
+		default:
+			if err := ValidateNetworkAddress(kind, tag, address); err != nil {
+				return nil, err
+			}
+			out.Tag = tag
+			out.ObservedAt = stringOf(event.Payload.Value["createdAt"])
 		}
+		out.NetworkKind = kind
 		out.Address = address
+	case market.ComputeEventsGuestPublicKeyNSID, market.ComputeEventsGuestSignalWebRTCNSID:
+		guest, err := parseGuestPayload(payloadNSID, event.Payload.Value)
+		if err != nil {
+			return nil, fmt.Errorf("requester: payload %s: %w", event.Payload.URI, err)
+		}
+		out.Tag, out.GuestKind, out.Key, out.Ciphertext = guest.Tag, guest.Kind, guest.Key, guest.Ciphertext
+		out.ObservedAt = guest.CreatedAt
 	case market.ComputeEventsVMHostKeysNSID:
 		keys, err := q.reportedHostKeys(event.Payload.Value)
 		if err != nil {
