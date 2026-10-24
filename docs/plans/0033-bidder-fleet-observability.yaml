@@ -1,0 +1,105 @@
+plan: "0033"
+title: "Observe and manage a fleet of bidders: what the lead does by hand today, and the objects that should do it"
+status: todo
+source: >
+  2026-10-24, written by the lead while running prod (the gateway socialweb.computer and the bidders
+  local, hat-9 and hat-7) through rc83..rc98 and while a browser-hosted kcp rents VMs from those
+  bidders. The user asked for every lesson to be written down for the observability story and for a
+  plan to manage a fleet of bidders, grown as the work goes. This file is that record: the
+  learnings section is appended as they come, and the items turn the manual steps into objects.
+principle: >
+  A fleet is observed through objects and records that already exist (each bidder's MarketBidder
+  root status, its market heartbeat and offering records, its MarketIdentity, its ComputeVMs and
+  Bids), read from one place, not by ssh into each host. Nothing new runs on a bidder host to be
+  observed; nothing reaches a host from CI (prod installs stay on the lead's machine, user decision
+  2026-10-24). Secrets never enter a fleet view.
+state_rules:
+  - Read AGENTS.md first. status is one of todo, doing, done, blocked. The lead flips statuses.
+  - No Go tests (AGENTS.md, plan 0027). Proof is the build gates and the live runs below.
+learnings:
+  - id: L1-HOW-THE-LEAD-SEES-THE-FLEET
+    text: >
+      Today the lead sees each host through ssh: ~/.tmp/0026/w7/b.sh runs kubectl against the
+      bidder's own kcp as root on local, hat-9 and hat-7 (and the gateway's root and account
+      workspaces), and journalctl _UID=<swc-bidder> reads the core's log. There is no single view;
+      every check in the acceptance script (docs/acceptance/0001-auth-modes.md) is an ssh per host.
+  - id: L2-HEALTH-SIGNALS-THAT-WORKED
+    text: >
+      The signals that answered "is this bidder healthy" during the rc runs: the MarketBidder root
+      phase and message (Ready, or the exact wait); status.componentSummary
+      {desired, notReady, ready, suspended}; the market heartbeat record
+      com.publicdomainrelay.temp.market.heartbeat/self createdAt (every 60 s; stale means not
+      bidding); the offering record com.publicdomainrelay.temp.market.offering (its cid must not
+      churn); the MarketIdentity phase (Ready, AwaitingScan for a lost oauthQr session); the event
+      streams' and sources' Ready conditions; the deny count in the journal (A7: 0 on every host).
+  - id: L3-FAILURES-THE-FLEET-HAD
+    text: >
+      Failures seen on the real fleet and what showed them: hat-7 lost its oauthQr session twice
+      (refresh-token rotation race between several in-memory session copies; journal
+      "invalid_grant: Invalid refresh token", MarketIdentity AwaitingScan; fixed e671cd9e, plan
+      0030); a paused winner still won the next VM (root Suspended written before the Bidder ran the
+      paused generation; A2 distinct winners 2; fixed 3f47b6bd/a9f18ce0); a heartbeat sent 1 s after
+      a pause patch looked like a pause failure (the check sampled before the Bidder ran the paused
+      generation; runbook fixed 351852b1); a stuck root after its MarketIdentity was deleted (no
+      requeue; a5936dfe). None of these raised anything by itself; each was found by a scripted check.
+  - id: L4-DEPLOY-FACTS
+    text: >
+      A release is CI-built (tag run about 16-30 min; the guest image is fetched by its pin instead
+      of rebuilt when the pins are unchanged) and installed from this machine: download from the
+      public bucket, sha256 against SHA256SUMS, README install commands over ssh on each hat,
+      scripts/deploy.sh for the gateway. The local release build of the same commit is byte-identical
+      to CI's (rc93). A CI flake (one failed apt download) was fixed by retrying all download errors
+      (a86026a6). Install order local, hat-9, hat-7, gateway; each bidder is Ready again within
+      about 1 min and keeps its DID, association and (since plan 0030) its OAuth session.
+  - id: L5-TIMINGS
+    text: >
+      From the acceptance runs (UTC 2026-10-24): RFP to a Running VM 41-53 s on local, hat-9 and
+      hat-7; tenant cluster stop to restart Ready 32-59 s; a Gateway root delete with a busy tenant
+      cluster 16-18 s; scale to 0 releases 3 VMs in about 2.5 min (the k3s graceful stop of the
+      guest is about 90 s and is not visible to the requester).
+  - id: L6-TOOLING-TRAPS
+    text: >
+      In the lead's Bash tool, grep is a ugrep shell function that holds each line in a pipe until
+      the next one: watches through it looked like 38-100 s event lag. Use command grep in streaming
+      pipelines. Editing a running acceptance script garbles bash's read of it: run a frozen copy.
+items:
+  - id: F1-INVENTORY
+    title: "A fleet inventory object: which bidders exist, where, on which version"
+    depends_on: []
+    decision: >
+      To be designed. Candidate: a cluster-scoped BidderHost (or Fleet with spec.hosts) in the lead's
+      own kcp naming each host (ssh target, bidder DID, expected version, role) so the rollout and
+      the acceptance scripts read one list instead of a hard-coded host set.
+    files: []
+    done_when: "To be written when designed."
+    status: todo
+  - id: F2-HEALTH-FROM-RECORDS
+    title: "Fleet health read from public records, with no access to the host"
+    depends_on: []
+    decision: >
+      To be designed. Every bidder already publishes its heartbeat and offering records in its repo
+      and on the relay; a fleet view can subscribe (EventStream, plan 0026 W10) to those collections
+      for the fleet's DIDs and report per bidder: last heartbeat, offering cid, and staleness.
+    files: []
+    done_when: "To be written when designed."
+    status: todo
+  - id: F3-SESSION-AND-IDENTITY-ALERTS
+    title: "Raise a lost account session instead of finding it in a journal"
+    depends_on: []
+    decision: >
+      To be designed. A MarketIdentity leaving Ready (AwaitingScan, Failed SubjectMismatch,
+      oauth_session_expired) should surface in the fleet view with the reason; today it is visible
+      only on the host.
+    files: []
+    done_when: "To be written when designed."
+    status: todo
+  - id: F4-ROLLOUT-AS-OBJECT
+    title: "A rollout the lead declares, with per-host steps and readings"
+    depends_on: [F1-INVENTORY]
+    decision: >
+      To be designed. rollout-ci.sh and the acceptance script become a declared rollout of a version
+      to the inventory, executed from the lead's machine (no CI access to hosts), recording per host
+      the installed sha256, the Ready time and the acceptance rows.
+    files: []
+    done_when: "To be written when designed."
+    status: todo
