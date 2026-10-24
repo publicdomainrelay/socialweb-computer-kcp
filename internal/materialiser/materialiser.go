@@ -416,18 +416,10 @@ func (r *Reconciler) claimReady(res Result, o Observed) (Result, error) {
 }
 
 func wakeEffect(o Observed) revocation.Effect {
-	state := o.IdentityState
-	if state == "" {
-		state = v1alpha1.IdentityRevoked
+	if revocation.Revoked(o.IdentityState) && o.ServiceAccountPresent {
+		return revocation.Effect{Cluster: o.Cluster.Name, State: v1alpha1.IdentityRevocationPending, DeleteSA: true}
 	}
-	if state == v1alpha1.IdentityRevoked && o.ServiceAccountPresent {
-		state = v1alpha1.IdentityRevocationPending
-	}
-	return revocation.Effect{
-		Cluster:  o.Cluster.Name,
-		State:    state,
-		DeleteSA: state == v1alpha1.IdentityRevocationPending,
-	}
+	return revocation.Effect{Cluster: o.Cluster.Name, State: v1alpha1.IdentityRevoked}
 }
 
 var settledReadyPhase = func() v1alpha1.ClusterPhase {

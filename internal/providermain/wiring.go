@@ -264,6 +264,7 @@ func Build(cfg Config, d Deps, log *slog.Logger) (*Provider, error) {
 		opts.Tenant, opts.GrantPath = d.Tenant, cfg.GrantPath
 		opts.InstallTenant = d.InstallTenant
 		opts.Grant = clusterkcp.Grant
+		opts.ServiceAccounts = clusterkcp.IdentityServiceAccounts{}
 	}
 	provider, err := clusterprovider.New(opts)
 	if err != nil {

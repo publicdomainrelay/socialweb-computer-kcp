@@ -255,9 +255,13 @@ func (r *Registry) IdentityState(ctx context.Context, ref clusterprovider.Ref) (
 		return "", fmt.Errorf("clusterprovider: list identities in %s: %w", ref.Account, err)
 	}
 	for i := range list.Items {
-		if list.Items[i].Spec.Scope == v1alpha1.IdentityScopeAccount {
-			return list.Items[i].Status.State, nil
+		if list.Items[i].Spec.Scope != v1alpha1.IdentityScopeAccount {
+			continue
 		}
+		if list.Items[i].Spec.Revoked && list.Items[i].Status.State == "" {
+			return v1alpha1.IdentityRevocationPending, nil
+		}
+		return list.Items[i].Status.State, nil
 	}
 	return "", nil
 }

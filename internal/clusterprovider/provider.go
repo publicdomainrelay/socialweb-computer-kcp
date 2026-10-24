@@ -54,6 +54,18 @@ type Clusters interface {
 	RemoveFinalizer(ctx context.Context, ref Ref) error
 }
 
+type ServiceAccounts interface {
+	Present(ctx context.Context, ref Ref, cred *Credential) (bool, error)
+
+	Delete(ctx context.Context, ref Ref, cred *Credential) error
+}
+
+const (
+	ConditionRevocationSettled = "RevocationSettled"
+
+	ReasonServiceAccountErasedAtWake = "ServiceAccountErasedAtWake"
+)
+
 type MountChildWriter interface {
 	EnsureMountChild(ctx context.Context, home, name, url string) error
 }
@@ -111,6 +123,8 @@ type Options struct {
 	Grant func(ctx context.Context, ref Ref, cred *Credential, doc []byte) (int, error)
 
 	GrantPath string
+
+	ServiceAccounts ServiceAccounts
 
 	Probe func(ctx context.Context, url string) (int, bool)
 
@@ -288,6 +302,10 @@ func (p *Provider) reconcile(ctx context.Context, ref Ref, with func(*materialis
 	if with != nil {
 		with(&o)
 	}
+	erased, err := p.settleRevocation(ctx, ref, cl, &o)
+	if err != nil {
+		return Pass{Ref: ref, Cluster: cl}, err
+	}
 	pass := Pass{Ref: ref, Cluster: cl, Observed: o}
 
 	if cl.Status.Phase == v1alpha1.ClusterDraining && cl.DeletionTimestamp == nil {
@@ -324,6 +342,16 @@ func (p *Provider) reconcile(ctx context.Context, ref Ref, with func(*materialis
 		return pass, err
 	}
 	res.Conditions = p.withNodeBackoff(o.Cluster.Name, res.Conditions, cl.Generation)
+	if erased {
+		meta.SetStatusCondition(&res.Conditions, metav1.Condition{
+			Type:               ConditionRevocationSettled,
+			Status:             metav1.ConditionTrue,
+			Reason:             ReasonServiceAccountErasedAtWake,
+			Message:            fmt.Sprintf("the ServiceAccount of revoked identity %s was deleted at wake, before Ready", ref.DID),
+			LastTransitionTime: metav1.NewTime(o.Now),
+			ObservedGeneration: cl.Generation,
+		})
+	}
 	pass.Result = res
 	if !p.opts.WriteStatus {
 		return pass, nil
@@ -483,7 +511,12 @@ func (p *Provider) Observe(ctx context.Context, ref Ref) (materialiser.Observed,
 	if err != nil {
 		return materialiser.Observed{}, err
 	}
-	return p.observe(ctx, ref, cl)
+	o, err := p.observe(ctx, ref, cl)
+	if err != nil {
+		return o, err
+	}
+	_, err = p.observeServiceAccount(ctx, ref, cl, &o)
+	return o, err
 }
 
 func (p *Provider) observe(ctx context.Context, ref Ref, cl *v1alpha1.Cluster) (materialiser.Observed, error) {
@@ -505,15 +538,51 @@ func (p *Provider) observe(ctx context.Context, ref Ref, cl *v1alpha1.Cluster) (
 		return o, err
 	}
 	o.IdentityState = state
-
-	if state == v1alpha1.IdentityRevocationPending {
-		return o, errors.New(
-			"clusterprovider: the account's identity is RevocationPending and whether its " +
-				"ServiceAccount still exists is only observable through the tenant cluster's " +
-				"credential, which this build does not have; refusing to claim Ready over a " +
-				"deny that may not have landed")
-	}
 	return o, nil
+}
+
+func (p *Provider) observeServiceAccount(ctx context.Context, ref Ref, cl *v1alpha1.Cluster, o *materialiser.Observed) (*Credential, error) {
+	if !revocation.Revoked(o.IdentityState) || !o.Reachable || o.Cluster.Status.URL == "" {
+		return nil, nil
+	}
+	if p.opts.Tenant == nil || p.opts.ServiceAccounts == nil {
+		if !p.opts.WriteStatus {
+			return nil, nil
+		}
+		return nil, fmt.Errorf(
+			"clusterprovider: the identity of %s is %s and whether its ServiceAccount still exists is only "+
+				"observable through the tenant cluster's credential, which this build does not have; "+
+				"refusing to claim Ready over a deny that may not have landed", ref.Name, o.IdentityState)
+	}
+	cred, err := p.opts.Tenant(ctx, ref, cl)
+	if err != nil {
+		return nil, fmt.Errorf("clusterprovider: no tenant credential to observe the ServiceAccount of revoked %s in %s: %w", ref.DID, ref.Name, err)
+	}
+	present, err := p.opts.ServiceAccounts.Present(ctx, ref, cred)
+	if err != nil {
+		return nil, err
+	}
+	o.ServiceAccountPresent = present
+	return cred, nil
+}
+
+func (p *Provider) settleRevocation(ctx context.Context, ref Ref, cl *v1alpha1.Cluster, o *materialiser.Observed) (bool, error) {
+	cred, err := p.observeServiceAccount(ctx, ref, cl, o)
+	if err != nil || !o.ServiceAccountPresent {
+		return false, err
+	}
+	if !p.opts.WriteStatus || cl.DeletionTimestamp != nil {
+		return false, nil
+	}
+	if err := p.opts.ServiceAccounts.Delete(ctx, ref, cred); err != nil {
+		p.opts.Log.Warn("cluster provider: the deferred ServiceAccount delete of a revoked identity failed; the cluster stays short of Ready",
+			"cluster", ref.Name, "did", ref.DID, "state", string(o.IdentityState), "error", err.Error())
+		return false, nil
+	}
+	o.ServiceAccountPresent = false
+	p.opts.Log.Info("cluster provider: deleted the ServiceAccount of a revoked identity at wake, before Ready",
+		"cluster", ref.Name, "did", ref.DID, "state", string(o.IdentityState), "phase", string(cl.Status.Phase))
+	return true, nil
 }
 
 func (p *Provider) Reclaim(refs []Ref) { p.reclaim(refs) }
