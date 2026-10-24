@@ -266,6 +266,13 @@ func (c *Composer) WriteStatus(ctx context.Context, r Root, gvr schema.GroupVers
 		delete(m, k)
 	}
 	c.samples.into(ctx, c, m, jsonFields(status))
+	if _, ok := m["conditions"]; ok {
+		gen, _ := m["observedGeneration"].(int64)
+		if f, ok := m["observedGeneration"].(float64); ok {
+			gen = int64(f)
+		}
+		withDriftCondition(m, c.driftCondition(r, gen))
+	}
 	u := NewDoc(r.APIVersion, r.Kind, r.Name)
 	u["status"] = m
 	ri, err := c.Client(r.Workspace, gvr)

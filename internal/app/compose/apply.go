@@ -126,7 +126,10 @@ func (c *Composer) ApplyComponent(ctx context.Context, r Root, ws string, d Desi
 	if spec != nil {
 		u["spec"] = spec
 	}
-	return c.Apply(ctx, r, ws, ct.GVR, u)
+	if err := c.Apply(ctx, r, ws, ct.GVR, u); err != nil {
+		return err
+	}
+	return c.revertForeignSpec(ctx, r, ws, ct.GVR, u)
 }
 
 func (c *Composer) EnsureComponents(ctx context.Context, r Root, desired []Desired) error {

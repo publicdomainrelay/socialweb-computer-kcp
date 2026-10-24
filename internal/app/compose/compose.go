@@ -80,6 +80,8 @@ type Composer struct {
 
 	roots rootIndex
 
+	drift map[string]*driftState
+
 	trusts Trusts
 }
 
