@@ -310,7 +310,7 @@ func (c *Client) exchange(ctx context.Context, client *openbao.Client, method, p
 		return Reply{}, fmt.Errorf("guestidentity: %s %s: %w", method, path, err)
 	}
 	if len(raw) > maximumReplyBody {
-		raw = raw[:maximumReplyBody]
+		return Reply{}, fmt.Errorf("guestidentity: %s %s answered more than %d bytes", method, path, maximumReplyBody)
 	}
 	reply := Reply{Status: status}
 	if len(bytes.TrimSpace(raw)) > 0 {

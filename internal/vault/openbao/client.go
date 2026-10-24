@@ -29,6 +29,8 @@ var (
 	ErrTransport = errors.New("openbao: transport failure")
 
 	ErrNoCA = errors.New("openbao: the supplied CA carries no CERTIFICATE PEM block")
+
+	ErrBodyTooLarge = errors.New("openbao: the response body is too large")
 )
 
 const (
@@ -353,9 +355,12 @@ func (c *Client) send(ctx context.Context, method, path string, in any, token st
 		return 0, nil, fmt.Errorf("%w: %s /v1/%s: %v", ErrTransport, method, path, err)
 	}
 	defer resp.Body.Close()
-	body, rerr := io.ReadAll(io.LimitReader(resp.Body, maxBody))
+	body, rerr := io.ReadAll(io.LimitReader(resp.Body, maxBody+1))
 	if rerr != nil {
 		return 0, nil, fmt.Errorf("%w: reading %s /v1/%s: %v", ErrTransport, method, path, rerr)
+	}
+	if len(body) > maxBody {
+		return resp.StatusCode, nil, fmt.Errorf("%w: %s /v1/%s answered more than %d bytes", ErrBodyTooLarge, method, path, maxBody)
 	}
 	return resp.StatusCode, body, nil
 }
