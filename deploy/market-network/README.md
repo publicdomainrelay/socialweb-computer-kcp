@@ -448,10 +448,26 @@ cluster's home workspace is one entry `node-<12 hex>` of it: `spec.contracts`
 holds its state (Staged until the join bundle is written, Requested, Released
 when the claim is deleted), `spec.nodes` its ownerDid, nodeJoin and
 nodeClaimRef, and `spec.secrets` the bundle; the claim's `status.infra` names the
-entry and its ComputeContract `infra-nodes-<hex>-node-<hex>`. The Infra has no
-`spec.record`, so nothing is published. Read it with
+entry and its ComputeContract `infra-nodes-<hex>-node-<hex>`. By default the
+Infra has no `spec.record`, so nothing is published. Read it with
 `kubectl get infras -l infra.socialweb.computer/cluster=tenant -o yaml` in
 `root:gateway`. Deleting the Cluster deletes its Infra, which releases every node.
+
+The owner may publish the cluster's nodes to their own repo (plan 0031
+REC9-RECORD-OPT-IN): the procedure `com.publicdomainrelay.temp.cluster.setPublishInfra`
+`{"name": "tenant", "publish": true}`, called with a service-auth token of the
+owner's PDS, sets the Cluster's `spec.publishInfra`. The NodeClaim controller
+then gives the Infra `spec.record` (`repoRef: AtprotoRepo/repo-<owner did>` in
+`root:gateway:app`, `sync: Publish`), and the record
+`at://<owner did>/computer.socialweb.infra/nodes-<hex>` carries each node entry's
+name, state, vmName and bidder DIDs and the observed phases, never `spec.nodes`,
+`spec.secrets`, user data or the node policy. The gateway composes that repo for
+the owner of `owner-sessions.json`: a `pdsAccount` MarketIdentity
+`owner-<16 hex>`, a RemoteRepo and the AtprotoRepo, in `root:gateway:app`. The
+record is push-only: an edit or a delete made on the PDS is written over. With
+`"publish": false` the Infra unbinds and the record stays with its last content
+(`status.record.direction: Retained`); the record goes with the Infra when the
+cluster's last node goes.
 
 The gateway's requester trusts a bidder through its operator's vouches. The
 network declares, in the gateway's `root:gateway:app`, one AtprotoRecord

@@ -336,6 +336,7 @@ items:
       - internal/controllers/nodeclaim/infra.go
       - internal/app/compose/owner.go
       - internal/app/gateway/gateway.go
+      - deploy/market-network/README.md
     done_when: "ACC31-REC9-DEFAULT-OFF, ACC31-REC9-PUBLISH, ACC31-REC9-EDIT-OVERWRITTEN, ACC31-REC9-OPT-OUT-KEEPS and ACC31-REC9-SCALE-IN-RECORD pass."
     status: todo
 
