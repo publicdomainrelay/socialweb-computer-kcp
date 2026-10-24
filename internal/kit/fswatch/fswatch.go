@@ -236,6 +236,15 @@ func (s *Sub) pump() {
 			}
 		}
 		it := s.queue[0]
+		s.queue = s.queue[1:]
+		if len(s.queue) == 0 {
+			s.queue = nil
+		}
+		if it.err != nil {
+			s.failed = false
+		} else {
+			delete(s.pending, it.ev)
+		}
 		s.mu.Unlock()
 		if it.err != nil {
 			select {
@@ -243,20 +252,12 @@ func (s *Sub) pump() {
 			case <-s.done:
 				return
 			}
-		} else {
-			select {
-			case s.events <- it.ev:
-			case <-s.done:
-				return
-			}
+			continue
 		}
-		s.mu.Lock()
-		s.queue = s.queue[1:]
-		if it.err != nil {
-			s.failed = false
-		} else {
-			delete(s.pending, it.ev)
+		select {
+		case s.events <- it.ev:
+		case <-s.done:
+			return
 		}
-		s.mu.Unlock()
 	}
 }
