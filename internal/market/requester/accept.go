@@ -3,6 +3,7 @@ package requester
 import (
 	"context"
 	"errors"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -186,10 +187,17 @@ func (q *Requester) submitAcceptAndWait(ctx context.Context, bidder Bidder, acce
 		}
 		q.log.Warn("submitAccept_retry", "bidder", bidder.DID, "accept", acceptURI, "acceptCid", acceptCID)
 		attemptCtx, cancel := context.WithTimeout(ctx, provisionTimeout)
-		_, err := q.market.SubmitAccept(attemptCtx, bidder, acceptURI, acceptCID)
+		reply, err := q.market.SubmitAccept(attemptCtx, bidder, acceptURI, acceptCID)
 		cancel()
 		if err != nil {
 			q.log.Warn("requester_submit_accept_failed", "bidder", bidder.DID, "err", err)
+		}
+		if err == nil && reply != nil && acceptDeclined(reply.Status) {
+			q.log.Warn("requester_submit_accept_declined", "bidder", bidder.DID, "accept", acceptURI, "status", reply.Status, "body", reply.Body)
+			if receipt, err := q.readReceipt(ctx, winnerDID, acceptURI); err == nil && receipt != nil {
+				return receipt, nil
+			}
+			return nil, nil
 		}
 		if receipt, err := q.readReceipt(ctx, winnerDID, acceptURI); err == nil && receipt != nil {
 			return receipt, nil
@@ -200,6 +208,13 @@ func (q *Requester) submitAcceptAndWait(ctx context.Context, bidder Bidder, acce
 		}
 		delay = min(delay*2, acceptRetryCeiling)
 	}
+}
+
+func acceptDeclined(status int) bool {
+	if status < 400 || status >= 500 {
+		return false
+	}
+	return status != http.StatusRequestTimeout && status != http.StatusTooEarly && status != http.StatusTooManyRequests
 }
 
 func (q *Requester) rememberBidders(bidders []Bidder) {
