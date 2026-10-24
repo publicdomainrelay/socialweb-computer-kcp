@@ -3,9 +3,8 @@
 Read this file first. It is the one guide for agents in this repository. `CLAUDE.md` imports it.
 
 This repository (socialweb-computer-kcp) is the monorepo of the socialweb-computer project. It is the
-single source of truth for its Go code and for all of its TypeScript. The TypeScript of ten
-repositories lives here with its git history, under `ts/<repository>/`. Those ten repositories are
-frozen. Never edit them for a path that is under `ts/`. Make the change here.
+single source of truth for its Go code. The only TypeScript left is `scripts/*.ts` and the policy
+actions under `internal/policyengine/bundled-actions/tangy/`.
 
 `docs/ARCHITECTURE.md` holds the decisions, the measurements and the invariants. This file points at it
 and states the working rules. Open a section of `docs/ARCHITECTURE.md` by its heading when a change
@@ -52,51 +51,25 @@ TypeScript:
 | `scripts/*.ts` | one-off operator scripts (`oauth-signin.ts`, `associate-bidder.ts`, `publish-spaces.ts`), run with `deno run` |
 | `internal/policyengine/bundled-actions/tangy/<action>/` | one policy action: `index.ts` and its built `dist/index.js`, embedded by the policy engine |
 
-The vendored TypeScript repositories (`ts/`), the socialweb-computer-k8s web app, `deno.json`,
-`deno.lock` and `deploy/ts-entries.yaml` are gone from this repository.
+There is no deno workspace, no lockfile and no vendored TypeScript repository here any more.
 
-## The deno workspace and the lockfile
+## The TypeScript that is left
 
-- Every package is a member of the root `deno.json` workspace. A package keeps its own `deno.json`
-  (name, version, `exports: "./mod.ts"`, its own imports). No `deno.json` under `ts/` has a
-  `workspace` field.
-- Import another package as `jsr:@publicdomainrelay/<name>@^0`, through a bare `@publicdomainrelay/<name>`
-  in the package's `imports`. The workspace resolves it to the member. Never import a relative path
-  into another package.
-- A new package: add its directory to `workspace` in the root `deno.json`, in its layer group
-  (common, abc, implementation, hono-factory, CLI).
-- Change a dependency, then refresh the lock at the root (`deno install --node-modules-dir=none`) and
-  commit `deno.lock` in the same commit. The release build of `cmd/socialweb-tsbundle` refuses a
-  lockfile that the fill created or changed, and `deploy/check.sh` runs `deno install --frozen`.
-- Run deno with `--node-modules-dir=none`, as `internal/denorun` does. The root tasks pass it.
-
-## TypeScript rules
-
-These rules come from the org-root CLAUDE.md. They apply to all TypeScript here.
-
-- ABC layering. One concept has up to five packages, and the path tells the layer:
-  `lib/common/<concept>-common` (types, constants, pure helpers, external imports only),
-  `lib/abc/<concept>` (`-abc`: interfaces and pure state, no I/O),
-  `lib/<concept>-<transport>` (the implementation: timers, crypto, fetch, sockets, `Deno.*`),
-  `lib/hono-factory-<concept>-<transport>` (the Hono factory, composed and never subclassed),
-  `hono-<concept>` (the thin CLI). Imports go one way: common, abc, implementation, factory, CLI.
-- A new transport is a sibling package, never a flag or an if-branch in an existing one.
-- No cross-concept imports. Shared code goes to a common package. Cross-repository helpers are in
-  `ts/typescript-helpers/lib/`; look there before you write a new common package.
-- One package, one `mod.ts` export. No sub-module exports. Never name a package bare `common`.
-- CLI: one `new Command(...)` from `@publicdomainrelay/cli-args-env` with `cli-args-env.json` and an
-  optional `config.json`. No `Deno.env.get()` in a CLI. No hard-coded port, host or path in a CLI.
-- `createLogger` and `createServe` from typescript-helpers; no raw `Deno.serve()`. Read the bound port
-  from `onListen`; never listen on port 0, read the port, close and listen again.
-- Signal handlers only in a CLI, never in a library.
+- `scripts/*.ts` are one-off operator scripts, run with `deno run -A`. No Go code runs them; the
+  `publish` job of `.github/workflows/ci.yml` runs `scripts/publish-spaces.ts`.
+- The policy actions under `internal/policyengine/bundled-actions/tangy/<action>/` are gha-lite assets
+  that the policy engine embeds: `action.yml`, `index.ts` and its built `dist/index.js`. Edit them as
+  such assets, with the workflows beside them in `internal/policyengine/bundled-actions/workflows/`.
 - No comments in code. ASCII only.
 
 ## The kcp paradigm, port 0, and the RFP flow
 
 - kcp is part of each application, not infrastructure. An application instance is a kcp of its own (or,
   in a market network, a workspace of the network's one kcp), a manifest set and a profile. State is kcp
-  objects. Components are DenoPods and HostProcesses reconciled from those objects. Only the virtual
-  Kubernetes clusters project uses kcp in the traditional way.
+  objects. Components (Pds, Plc, Relay, Bidder, Requester and the other component kinds) run in
+  process in the core, in the component runtime of `internal/component`, and host processes are
+  HostProcess units; both are reconciled from those objects. Only the virtual Kubernetes clusters
+  project uses kcp in the traditional way.
 - Which kcp, by profile: a prod profile (the gateway, `run bidder`, `run request` without `--network`)
   runs a strict kcp per application. The market network profile (dev, CI, soak) runs every application
   in one kcp, each in its own workspace `root:<app>` (components in `root:<app>:app`), from the same
@@ -108,12 +81,15 @@ These rules come from the org-root CLAUDE.md. They apply to all TypeScript here.
   (caddy on 443, an application's front) keep a known address.
 - The RFP flow is the only way a guest comes up: the requester posts a `compute.vm` record and a signed
   `market.rfp`, bidders bid, the requester accepts, and the winner boots the guest from cloud-init
-  `user_data` (`buildUserData` and the module registry in `ts/atproto-market/lib/common/cloud-init-common`).
+  `user_data` (`BuildUserData` and the module registry in `internal/atproto/cloudinit`).
   The requester reaches the guest only through the relay. Never start a container or VM by hand in
   code or in a test, never install a guest agent outside cloud-init, never add a transport that the
   RFP cloud-init does not install. A live run that needs a guest brings up its own market network,
-  and `socialweb-computer run request` (which keeps `runComputeContract`) or a tenant cluster of the
-  network's gateway rents the guest.
+  and `socialweb-computer run request` or a tenant cluster of the network's gateway rents the guest.
+  `run request` composes a MarketRequester root (`internal/app/marketrequester`), and its Requester
+  component (`internal/services/requester` over `internal/market/requester`) runs the RFP, the
+  accept and the release; `run request list`, `run request release` and `run request resume` manage
+  the invocations it recorded.
 
 ## Tests: none until plan 0027
 
@@ -134,7 +110,8 @@ A prod deployment guarantees nothing; the routine path preserves most things.
 
 - The routine deploy (`scripts/deploy.sh` on an installed gateway) upgrades in place: state dir, kcp
   objects, OpenBao contents, the requester's and bidder's DIDs, association records, web sessions and
-  adopted DenoPods all survive (read on prod: web session across rc8 to rc9, DIDs and association
+  running HostProcess units, which the new core adopts by unit name and InvocationID, all survive
+  (read on prod: web session across rc8 to rc9, DIDs and association
   across rc11 to rc21). A fresh install, or a lost or purged state dir, preserves nothing and needs
   one association per identity again.
 - Losing sessions, VMs, clusters, claims, receipts or any other prod state during a deploy is
@@ -145,7 +122,7 @@ A prod deployment guarantees nothing; the routine path preserves most things.
   `ALICE_ATPROTO_PASSWORD`) and `~/.bobvmbuilder_bsky_social_source` (bidder account bobvmbuilder;
   exports `BOB_ATPROTO_HANDLE`, `BOB_ATPROTO_PASSWORD`). When a deploy loses a session, sign in again
   from these files. Source them into the one command that needs them; never print, log, commit or
-  copy their values, and never put them in a kcp object, a DenoPod argument or a plan.
+  copy their values, and never put them in a kcp object, a HostProcess argument or a plan.
 - OAuth sign-ins are scripted; never hand a sign-in link to the user. `scripts/oauth-signin.ts` drives
   a headless Chrome (`/usr/bin/google-chrome`, puppeteer-core) through the atproto OAuth flow with the
   handle and password from a credential file: the QR session-transfer page (qr.fedfork.com, a bidder's
@@ -168,50 +145,54 @@ A prod deployment guarantees nothing; the routine path preserves most things.
 
 ## How to verify
 
-- While iterating, build only what you touched: `go build ./internal/<pkg>/... ./cmd/socialweb-computer`
-  and `deno check <the entry you changed>` (`deploy/ts-entries.yaml`). Do not run the full gate per
-  change.
-- The full gate runs ONCE, right before "ready": `go build ./...`, `go vet ./...`, `deno task check`,
-  `deploy/check.sh --fast` and the release closure. GitHub CI runs the same gate on every push to
-  `main` and `task/*` (`.github/workflows/ci.yml`); read the branch's run on GitHub.
-  - `deploy/check.sh --fast`: gofmt, go build, apigen generate and its diff (generated code must
-    match its source), go vet, `deno task check`, `deno install --frozen`, the cross-OS builds and the
-    release builds. `--local` and `--full` run the live proofs this host can run.
-  - `deno task check` type-checks every entry of `deploy/ts-entries.yaml` from the root workspace.
-  - The release closure: `go run ./cmd/socialweb-tsbundle -release -deno ~/.deno/bin/deno -out <dir>`.
-    It needs a committed, clean tree and a current `deno.lock`, and it starts every entry offline.
-- The binary for live runs: `scripts/build-socialweb-computer.sh --dev --publish /var/tmp/<work>`.
-  One build of the working tree (uncommitted changes included), host platform, warm caches: about
-  8 s after a one-line Go change or a one-line TypeScript change. It embeds every asset, so a live run
-  needs no `SOCIALWEB_*_PATH` and no `--source-root`. `socialweb-computer version` says "dev build,
-  not reproducible" with the commit and the dirty state. The binary runs the TypeScript live from
-  `<publish>/src` (the mirror of the working tree that test-0001 can read; without `--publish`, the
-  checkout itself). Output: `~/.tmp/socialweb-computer-build/dev/<worktree>/`. The first `--dev`
-  build on a host stages every asset once (about 3.5 minutes); later builds stage only an asset whose
-  `versions.json` entry changed.
-- A TypeScript change in a running market network: `scripts/build-socialweb-computer.sh --dev
-  --publish /var/tmp/<work> --sync-only` (mirrors the tree, about 1 s), then
-  `socialweb-computer dev restart <instance> [<app>/][<workspace>:]<denopod>` (as the account that
-  runs the network). It restarts that one DenoPod through its kcp object, waits until it is Running
-  with its listeners reported, and prints the old and new pid and run directory (`stdout.txt` and
-  `stderr.txt` are the pod's log). Then rerun `run request`. Do not `dev down`/`dev up` for a
-  TypeScript change, and do not rebuild the binary for one. The PLC directory keeps its operation
-  log and the network's PDSes their accounts, keys and sessions on disk (`--state-path`, `--kv-path`), so
-  `dev restart` of plc or a PDS keeps them.
+- While iterating, build only what you touched: `go build ./internal/<pkg>/... ./cmd/socialweb-computer`.
+  Do not run the full gate per change.
+- The full gate runs ONCE, right before "ready": `go build ./...`, `go vet ./...` and
+  `deploy/check.sh --fast`. GitHub CI runs the same three on every push to `main` and `task/**`
+  (`.github/workflows/ci.yml`); read the branch's run on GitHub.
+  - `deploy/check.sh --fast`, in order: `gofmt -l` of `api`, `internal`, `cmd`, `hack` and `lexicons`;
+    `go build ./...`; apigen into a scratch directory and a diff against every file
+    `go run ./cmd/socialweb-apigen -root . -list` names (generated code must match its source);
+    `go generate ./...` must leave `api`, `internal/atproto/market` and `deploy` unchanged;
+    `go vet ./...`; `scripts/check-architecture.sh`; `go build` and `go vet` of each Go asset module
+    in `internal/versions/versions.json`; `go build` and `go vet` for darwin/arm64, darwin/amd64,
+    windows/amd64, windows/arm64 and linux/arm64, each with a `-tags release` build of
+    `cmd/socialweb-computer`; and the `-tags release` build of every release platform.
+  - `deploy/check.sh --local` adds `cargo fmt --check` and `cargo test` of `rust/`, and
+    `socialweb-computer dev verify-assets` on a release build when the host's blobs are staged; it
+    lists what it skipped. `deploy/check.sh --full` makes a skip a failure.
+- The binary for live runs: `scripts/build-socialweb-computer.sh --dev --publish /var/tmp/<work>`
+  (`make dev` is the same with `/var/tmp/swc`). It builds one socialweb-computer of the working tree
+  (uncommitted changes included) for the host platform, or for each `--platform`. It embeds every
+  pinned asset, staged once per `versions.json` entry; the first `--dev` build on a host stages every
+  asset (about 3.5 minutes), later builds only an asset whose entry changed. `socialweb-computer
+  version` says "dev build, not reproducible" with the commit and the dirty state. `--publish`
+  copies the host binary to `<publish>/bin/socialweb-computer` and mirrors the working tree to
+  `<publish>/src`, both readable by test-0001. Output: `~/.tmp/socialweb-computer-build/dev/<worktree>/`.
+- A Go change in a running dev instance or market network: rebuild with `--dev --publish`, then
+  `socialweb-computer dev restart <instance> core --binary /var/tmp/<work>/bin/socialweb-computer`
+  (as the account that runs the instance). It stops the core unit, places it again with the new
+  binary, waits until it is ready, prints a JSON report and fails unless every unit was adopted
+  unchanged. Then rerun `run request`. Do not `dev down`/`dev up` for a code change.
+- One component: `socialweb-computer dev restart <instance> [<app>/][<workspace>:][<kind>/]<component>`.
+  It writes `spec.restartedAt` on that component's kcp object and waits until the component reports
+  the restart. The PolicyEngine restarts only with `core`. A kcp roll is `dev roll kcp`; on an installed host,
+  `units roll kcp`, `units roll cluster` and `units roll link`.
 - The release binary (prod only; the lead builds it): `scripts/build-socialweb-computer.sh` without
-  `--dev` builds one commit once per linux release platform from a clean checkout (owned assets
-  staged and re-pinned, downloaded assets checked against their pin, the closure, `-tags release`).
-  Each step is keyed by its
-  inputs and does not run again when they did not change: asset blobs by their pinned inputs (assets
-  built here by their tar bytes), socialweb-meshd by rust/ and the toolchain, the closure by its
-  TypeScript trees and the last commit that touched them, plus the go build cache and the cargo
-  target dir. Tens of seconds warm; minutes with empty caches. Every phase prints
-  a `timing` line. `make` builds with `--update-pins`: assets built from this repository are rebuilt
-  and their new pins written to `internal/versions/versions.json`; downloaded assets still verify
-  their pins and never move. Commit the pin change with the source change. The `pins` CI job runs
-  `make check-pins` and fails when `versions.json` differs from HEAD. Checkouts, caches and outputs
-  stay under `~/.tmp/socialweb-computer-build`; `release/<commit>/` holds the binaries and
-  `SHA256SUMS` that `install` and `upgrade --binary --sha256` take. Never build it in the inner loop.
+  `--dev` builds one commit once per release platform of `versions.json` from a clean checkout:
+  every pinned asset staged by `scripts/stage-assets.sh` and checked against its pin, the embedded
+  Deno of the policy engine, then `go build -tags "release embed_deno"` with `CGO_ENABLED=0`.
+  Each step is keyed by its inputs and does not run again when they did not change: asset blobs by
+  their pinned inputs (assets built here by their tar bytes), socialweb-meshd by rust/ and the
+  toolchain, plus the go build cache and the cargo target dir. Tens of seconds warm; minutes with
+  empty caches. Every phase prints a `timing` line. `make` builds with `--update-pins`: assets built
+  from this repository or from pinned upstream source are rebuilt and their new pins written to
+  `internal/versions/versions.json`; downloaded assets still verify their pins and never move.
+  `make pins` re-stages and re-pins only the owned assets. Commit the pin change with the source
+  change. The `pins` CI job runs `make check-pins`, which runs `make pins` and fails when
+  `versions.json` differs from HEAD. Checkouts, caches and outputs stay under
+  `~/.tmp/socialweb-computer-build`; `release/<commit>/` holds the binaries and `SHA256SUMS` that
+  `install` and `upgrade --binary --sha256` take. Never build it in the inner loop.
 
 ## Where and how to work
 
@@ -229,25 +210,28 @@ A prod deployment guarantees nothing; the routine path preserves most things.
   and go. Keep each shell call to one plain command.
 - Plans live in `docs/plans`. Flip an item's status only. Do not add evidence lists; the git history is
   the evidence.
-- The original repositories in the org root are frozen. Never edit them for a path under `ts/`.
 - Rebase on `origin/main` often (`git fetch && git rebase origin/main`). When a rebase stops on
-  conflicts, run `scripts/regen-after-rebase.sh`: it takes one side of every conflicted generated
-  file (the apigen outputs: schemas and exports under `deploy/`, the TypeScript wire types and
-  fixtures; and `deno.lock`), reruns `go generate ./api/...` (and `deno install`), stages them and
-  prints the hand-written conflicts left. Never hand-merge generated output. Resolve a conflict in
-  `api/v1alpha1` first; the script says so. `deploy/apiresourceschema-revisions.txt` merges itself
-  (`merge=union`); when two branches changed one schema under one revision, the script keeps the
-  upstream line and the generator asks for a Revision bump.
+  conflicts, run `scripts/regen-after-rebase.sh` (no arguments). It stops first when a generator
+  input is conflicted (`api/*.go`, `internal/apigen`, `cmd/socialweb-apigen`, `hack/codegen.sh`):
+  resolve those by hand, `git add` them and run it again. Otherwise it drops the conflicted
+  `api/**/zz_generated.*.go` files, reruns `hack/codegen.sh`, takes one side of every conflicted file
+  that `go run ./cmd/socialweb-apigen -root . -list` names (the schemas and exports under `deploy/`,
+  the zz_generated register and conditions files), reruns `go generate ./api/...`, stages the
+  outputs and prints the hand-written conflicts left, or the command to continue. Never hand-merge
+  generated output. `deploy/apiresourceschema-revisions.txt` merges itself (`merge=union`); when it
+  names one schema twice, the script keeps the HEAD line, and the generator may ask for a Revision
+  bump in `api/v1alpha1/resources.go`.
 - Live runs: your own market network only, run as the VM account (test-0001) from the binary and the
   mirror that `--dev --publish /var/tmp/<work>` wrote, with an instance name and bidder handle unique to
   your work. Keep the network up for the whole item; clean up only your own units and VMs.
 
 ## The fast loop for one item
 
-- Compile and type-check: `go build ./cmd/socialweb-computer` (about 4 s in a new worktree, the Go caches
-  are shared) and `deno check <entry>` or `deno task check` (about 4 s).
+- Compile: `go build ./cmd/socialweb-computer` (about 4 s in a new worktree, the Go caches are
+  shared).
 - Binary and mirror: `scripts/build-socialweb-computer.sh --dev --publish /var/tmp/<work>` (about 21 s the
-  first time in a worktree, about 6.5 s after). Later TypeScript changes: `--sync-only`, then `dev restart`.
+  first time in a worktree, about 6.5 s after). Later changes: build again, then
+  `dev restart <instance> core --binary /var/tmp/<work>/bin/socialweb-computer`.
 - One network for the whole item: `dev up` once (80 to 95 s, mostly waiting, about one core), then every
   proof is a `run request --network <instance>` (80 to 90 s each, 35 s of it the requester's own kcp).
   `dev down` costs 70 to 95 s (one-kcp network with a gateway). Do not `dev up` per proof.
@@ -358,9 +342,9 @@ and older notes use the short names below; read them as the real names.
 
 | Short name in the plans | Real name |
 | --- | --- |
-| the door | the socialweb-computer-k8s web app, `socialweb-computer-k8s/hono-socialweb-computer-k8s` |
-| the ssh door | `ts/socialweb-computer-ssh/hono-socialweb-computer-ssh` |
-| the core | the `socialweb-computer` binary process that runs kcp and supervises the DenoPods and HostProcesses |
+| the door | the gateway's web app and tenant API: the GatewayAPI component (`internal/services/gatewayapi`) and `internal/gatewayhttp`, served by `socialweb-computer serve gateway xrpc` |
+| the ssh door | the SshServer component (`internal/services/sshserver`) of the SshGateway root (`internal/app/sshgateway`), run by `socialweb-computer run gateway ssh` |
+| the core | the `socialweb-computer` process of an instance that runs the controllers (`internal/stack/componentcore`) and supervises the components and HostProcesses; `internal dev-core` in a dev instance |
 | a fold, folded | one pass that merged a set of decisions into the plans |
 | the spine | the RFP flow: requester, RFP, bid, accept, cloud-init `user_data` |
 | the front | the stable entry point in front of a service: the kcp front before the kcp slots (0006 M2-KCP-SLOTS), the TLS front of the market network |
