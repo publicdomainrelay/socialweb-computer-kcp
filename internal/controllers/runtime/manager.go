@@ -156,6 +156,16 @@ func (m *Manager) Start(ctx context.Context) error {
 	return err
 }
 
+func (m *Manager) stopping(ctx context.Context) bool {
+	if ctx.Err() != nil {
+		return true
+	}
+	m.mu.Lock()
+	run := m.ctx
+	m.mu.Unlock()
+	return run != nil && run.Err() != nil
+}
+
 func (m *Manager) addExport(name string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

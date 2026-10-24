@@ -369,6 +369,15 @@ type adapter[T Object] struct {
 }
 
 func (a *adapter[T]) Reconcile(ctx context.Context, mcreq mcreconcile.Request) (reconcile.Result, error) {
+	res, err := a.reconcile(ctx, mcreq)
+	if err != nil && a.m.stopping(ctx) {
+		a.log.Debug("the reconcile ended with the shutdown", "cluster", mcreq.ClusterName, "name", mcreq.Name, "err", err.Error())
+		return reconcile.Result{}, nil
+	}
+	return res, err
+}
+
+func (a *adapter[T]) reconcile(ctx context.Context, mcreq mcreconcile.Request) (reconcile.Result, error) {
 	_, lc := splitCluster(string(mcreq.ClusterName))
 	cl, err := a.m.mgr.GetCluster(ctx, mcreq.ClusterName)
 	if err != nil {
@@ -376,7 +385,7 @@ func (a *adapter[T]) Reconcile(ctx context.Context, mcreq mcreconcile.Request) (
 	}
 	workspace, err := a.m.path(ctx, lc)
 	if err != nil {
-		return reconcile.Result{}, a.failed(mcreq, lc, mcreq.Name, err)
+		return reconcile.Result{}, a.failed(ctx, mcreq, lc, mcreq.Name, err)
 	}
 	if a.inWorkspace != nil && !a.inWorkspace(ctx, workspace) {
 		return a.outOfScope(mcreq, workspace), nil
@@ -395,7 +404,7 @@ func (a *adapter[T]) Reconcile(ctx context.Context, mcreq mcreconcile.Request) (
 			}
 			return reconcile.Result{}, nil
 		}
-		return reconcile.Result{}, a.failed(mcreq, lc, mcreq.Name, err)
+		return reconcile.Result{}, a.failed(ctx, mcreq, lc, mcreq.Name, err)
 	}
 	if a.only != nil && !a.only(obj) {
 		return reconcile.Result{}, nil
@@ -404,7 +413,7 @@ func (a *adapter[T]) Reconcile(ctx context.Context, mcreq mcreconcile.Request) (
 	s.log = log
 	if s.finalizer != "" && obj.GetDeletionTimestamp().IsZero() && !controllerutil.ContainsFinalizer(obj, s.finalizer) {
 		if err := req.applyFinalizer(ctx, obj, true); err != nil {
-			return reconcile.Result{}, a.failed(mcreq, lc, req.Name, err)
+			return reconcile.Result{}, a.failed(ctx, mcreq, lc, req.Name, err)
 		}
 	}
 	gvk, err := apiutil.GVKForObject(obj, cl.GetScheme())
@@ -415,11 +424,11 @@ func (a *adapter[T]) Reconcile(ctx context.Context, mcreq mcreconcile.Request) (
 	log.Debug("reconciling")
 	res, err := a.r.Reconcile(ctx, req, obj)
 	if err != nil {
-		return reconcile.Result{}, a.failed(mcreq, req.Workspace, req.Name, err)
+		return reconcile.Result{}, a.failed(ctx, mcreq, req.Workspace, req.Name, err)
 	}
 	if s.finalizer != "" && !res.Waiting && !obj.GetDeletionTimestamp().IsZero() && controllerutil.ContainsFinalizer(obj, s.finalizer) {
 		if err := req.applyFinalizer(ctx, obj, false); err != nil {
-			return reconcile.Result{}, a.failed(mcreq, req.Workspace, req.Name, err)
+			return reconcile.Result{}, a.failed(ctx, mcreq, req.Workspace, req.Name, err)
 		}
 	}
 	return reconcile.Result{RequeueAfter: res.RequeueAfter}, nil
@@ -437,7 +446,10 @@ func (a *adapter[T]) outOfScope(item mcreconcile.Request, workspace string) reco
 	return reconcile.Result{Requeue: true} //nolint:staticcheck
 }
 
-func (a *adapter[T]) failed(item mcreconcile.Request, workspace, name string, err error) error {
+func (a *adapter[T]) failed(ctx context.Context, item mcreconcile.Request, workspace, name string, err error) error {
+	if a.m.stopping(ctx) {
+		return err
+	}
 	failures, retryIn := a.limiter.peek(item)
 	a.log.Warn("the reconcile failed; it retries with backoff", "workspace", workspace, "name", name,
 		"failures", failures, "retryIn", retryIn.String(), "err", err.Error())
