@@ -98,7 +98,7 @@ type options struct {
 
 	only func(client.Object) bool
 
-	inWorkspace func(string) bool
+	inWorkspace func(context.Context, string) bool
 
 	gone func(context.Context, Request)
 
@@ -156,7 +156,18 @@ func Events(ch <-chan Request) Option {
 }
 
 func InWorkspaces(keep func(workspace string) bool) Option {
+	return func(o *options) { o.inWorkspace = inWorkspaces(keep) }
+}
+
+func InWorkspacesContext(keep func(ctx context.Context, workspace string) bool) Option {
 	return func(o *options) { o.inWorkspace = keep }
+}
+
+func inWorkspaces(keep func(workspace string) bool) func(context.Context, string) bool {
+	if keep == nil {
+		return nil
+	}
+	return func(_ context.Context, workspace string) bool { return keep(workspace) }
 }
 
 func Gone(fn func(ctx context.Context, req Request)) Option {
@@ -236,7 +247,7 @@ func For[T Object](m *Manager, name string, r Reconciler[T], opts ...Option) err
 	}
 	o.workers = opt.Positive(o.workers, 1)
 	if o.inWorkspace == nil {
-		o.inWorkspace = m.workspaces
+		o.inWorkspace = inWorkspaces(m.workspaces)
 	}
 	proto, err := newObject[T]()
 	if err != nil {
@@ -350,7 +361,7 @@ type adapter[T Object] struct {
 
 	only func(client.Object) bool
 
-	inWorkspace func(string) bool
+	inWorkspace func(context.Context, string) bool
 
 	gone func(context.Context, Request)
 
@@ -367,7 +378,7 @@ func (a *adapter[T]) Reconcile(ctx context.Context, mcreq mcreconcile.Request) (
 	if err != nil {
 		return reconcile.Result{}, a.failed(mcreq, lc, mcreq.Name, err)
 	}
-	if a.inWorkspace != nil && !a.inWorkspace(workspace) {
+	if a.inWorkspace != nil && !a.inWorkspace(ctx, workspace) {
 		return a.outOfScope(mcreq, workspace), nil
 	}
 	obj, err := newObject[T]()

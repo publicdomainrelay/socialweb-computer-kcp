@@ -122,7 +122,7 @@ func Register(m *ctlruntime.Manager, c *Controller, cfg *rest.Config) error {
 		ctlruntime.FieldManager(contract.FieldManager),
 		ctlruntime.SharedStatus(),
 		ctlruntime.Finalizer(v1alpha1.FinalizerNodeClaim),
-		ctlruntime.InWorkspaces(c.inScope),
+		ctlruntime.InWorkspacesContext(c.inScope),
 		ctlruntime.Gone(c.gone),
 		ctlruntime.Events(c.events),
 		ctlruntime.WatchesIn(ContractExport, c.contractClaims),
@@ -440,7 +440,7 @@ func deleteContract(ctx context.Context, store *kcpstore.Store, workspace, name 
 	return kcpstore.OfClusterScoped[v1alpha1.ComputeContract](store, v1alpha1.ComputeContractGVR).Delete(ctx, ref.New(workspace, "", name))
 }
 
-func (c *Controller) inScope(workspace string) bool {
+func (c *Controller) inScope(ctx context.Context, workspace string) bool {
 	c.mu.Lock()
 	b, store := c.binding, c.store
 	if b == nil || store == nil {
@@ -453,7 +453,7 @@ func (c *Controller) inScope(workspace string) bool {
 		return in
 	}
 	c.mu.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), lookupTimeout)
+	ctx, cancel := context.WithTimeout(ctx, lookupTimeout)
 	defer cancel()
 	homes := c.listHomes(ctx, store, *b)
 	set := make(map[string]bool, len(homes))

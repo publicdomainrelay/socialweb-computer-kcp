@@ -21,11 +21,11 @@ import (
 
 const defaultBidderOAuthClientID = "https://socialweb.computer/oauth-client-metadata.json"
 
-func (s *Service) restoreSession(egress component.Egress, log *slog.Logger) {
+func (s *Service) restoreSession(ctx context.Context, egress component.Egress, log *slog.Logger) {
 	if s.credentials == nil {
 		return
 	}
-	data, err := s.credentials.Read(context.Background(), false)
+	data, err := s.credentials.Read(ctx, false)
 	if err != nil {
 		return
 	}
@@ -61,7 +61,7 @@ func (s *Service) restoreSession(egress component.Egress, log *slog.Logger) {
 	if session.AuthServerURL != "" && session.AuthServerTokenEndpoint != "" {
 		return
 	}
-	authServer, tokenEndpoint, revokeEndpoint, discoverErr := oauthclient.DiscoverAuthServer(context.Background(), opts.HTTPClient, session.HostURL)
+	authServer, tokenEndpoint, revokeEndpoint, discoverErr := oauthclient.DiscoverAuthServer(ctx, opts.HTTPClient, session.HostURL)
 	if discoverErr != nil {
 		log.Warn("the bidder could not discover the oauth auth server", "err", discoverErr.Error())
 		return
@@ -72,7 +72,7 @@ func (s *Service) restoreSession(egress component.Egress, log *slog.Logger) {
 		session.AuthServerRevocationEndpoint = revokeEndpoint
 	}
 	if opts.Store != nil {
-		_ = opts.Store.Save(context.Background(), session)
+		_ = opts.Store.Save(ctx, session)
 	}
 }
 
