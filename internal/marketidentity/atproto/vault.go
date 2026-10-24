@@ -82,6 +82,8 @@ type vaultSessionStore struct {
 	vault SecretStore
 
 	ref commonv1.SecretRef
+
+	clientID string
 }
 
 var _ oauthclient.SessionStore = (*vaultSessionStore)(nil)
@@ -103,6 +105,9 @@ func (s *vaultSessionStore) List(ctx context.Context) ([]oauthclient.SessionData
 	}
 	if !ok {
 		return nil, nil
+	}
+	if s.clientID != "" {
+		session.ClientID = s.clientID
 	}
 	return []oauthclient.SessionData{session}, nil
 }

@@ -233,6 +233,13 @@ func (a *Accounts) oauthDelegated(ctx context.Context, workspace string, id *v1a
 	return pending(status, generation, "SessionError", "restoring the oauth session: "+err.Error()), err
 }
 
+func (a *Accounts) pinnedClientID(id *v1alpha1.MarketIdentity) string {
+	if id != nil && id.Spec.Mode == v1alpha1.MarketIdentityModeOAuthQr {
+		return oauthclient.QRClientID(a.oauth.QROrigin)
+	}
+	return ""
+}
+
 func (a *Accounts) sessionClientID(id *v1alpha1.MarketIdentity) string {
 	if id != nil && id.Spec.Mode == v1alpha1.MarketIdentityModeOAuthQr {
 		if clientID := oauthclient.QRClientID(a.oauth.QROrigin); clientID != "" {
@@ -389,7 +396,7 @@ func (a *Accounts) restoreOAuthSession(ctx context.Context, workspace string, id
 	if vault == nil {
 		return nil, ref, errors.New("marketidentity: no vault reads the oauth session")
 	}
-	store := &vaultSessionStore{vault: vault, ref: *ref}
+	store := &vaultSessionStore{vault: vault, ref: *ref, clientID: a.pinnedClientID(id)}
 	session, err := oauthclient.Open(ctx, oauthclient.Options{
 		DID:        status.Did,
 		Handle:     id.Spec.Handle,
@@ -436,7 +443,7 @@ func (a *Accounts) openSessionData(ctx context.Context, vault SecretStore, id *v
 		Scopes:     a.scopesFor(id.Spec.Mode),
 		Directory:  a.oauth.Directory,
 		HTTPClient: a.oauthHTTP(),
-		Store:      &vaultSessionStore{vault: vault, ref: *ref},
+		Store:      &vaultSessionStore{vault: vault, ref: *ref, clientID: a.pinnedClientID(id)},
 	})
 	if err != nil {
 		return nil, err
