@@ -9,6 +9,7 @@ import (
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	policyv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/policy/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	infrarecord "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/infra"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/atprotorepo"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/pds"
@@ -117,6 +118,20 @@ func RecordWriteLink(ws, owner string, repo commonv1.ObjectRef, collections ...s
 	sel := exposurev1alpha1.ComponentLinkSelector{Group: v1alpha1.GroupName, Kind: "AtprotoRecord", Workspace: ws,
 		MatchLabels: map[string]string{OwnerLabel: owner}}
 	return SelectorLink(LinkName("records", owner, repo.Name), sel, repo, Cap(atprotorepo.CapabilityWrite, cleanPrefixes(collections)...))
+}
+
+var InfraKinds = []string{"Infra", "EphemeralInfra", "InfraCollection", "EphemeralInfraCollection"}
+
+func InfraLinks(ws string, repo commonv1.ObjectRef) []Link {
+	collections := []string{infrarecord.InfraNSID, infrarecord.EphemeralInfraNSID}
+	var out []Link
+	for _, kind := range InfraKinds {
+		sel := exposurev1alpha1.ComponentLinkSelector{Group: v1alpha1.GroupName, Kind: kind, Workspace: ws}
+		out = append(out, SelectorLink(LinkName("infra-read", kind, repo.Name), sel, repo, Cap(atprotorepo.CapabilityRead, collections...)))
+	}
+	sel := exposurev1alpha1.ComponentLinkSelector{Group: v1alpha1.GroupName, Kind: "AtprotoRecord", Workspace: ws,
+		MatchExpressions: []exposurev1alpha1.ComponentLinkSelectorRequirement{{Key: v1alpha1.InfraKindLabel, Operator: exposurev1alpha1.ComponentLinkSelectorExists}}}
+	return append(out, SelectorLink(LinkName("infra-records", repo.Name), sel, repo, Cap(atprotorepo.CapabilityWrite, collections...)))
 }
 
 func ComputeVMVaultLink(ws, vaultName string, prefixes ...string) Link {

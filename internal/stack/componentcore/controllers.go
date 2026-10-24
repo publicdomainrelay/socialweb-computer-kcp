@@ -38,6 +38,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/guestidentitygrant"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/hostinstall"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/hostrelease"
+	infractl "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/infra"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/infracollection"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/kcpinstallation"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/marketidentity"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/marketintents"
@@ -143,6 +145,12 @@ func (c *Core) registerLocal(ctx context.Context, mgr *ctlruntime.Manager, clien
 	warn("NodeClaim", c.registerNodeClaims(mgr, c.nodeClaims))
 	_, err = marketintents.Register(mgr, marketintents.Options{Bus: c.handlers, Clients: clients.client, Scope: local, Log: cfg.Log})
 	warn("market intents", err)
+	if cfg.DynamicFactory != nil {
+		_, err = infractl.Register(mgr, infractl.Options{Bus: c.handlers, Dynamic: cfg.DynamicFactory, Scope: local, Log: cfg.Log})
+		warn("Infra, EphemeralInfra", err)
+		_, err = infracollection.Register(mgr, infracollection.Options{Bus: c.handlers, Dynamic: cfg.DynamicFactory, Scope: local, Log: cfg.Log})
+		warn("InfraCollection, EphemeralInfraCollection", err)
+	}
 	_, err = marketpresencectl.Register(mgr, marketpresencectl.Options{Heartbeats: presence.New(presence.Config{HTTPClient: c.handlers.Client()}),
 		Bidders: bidders{clients: clients}, Scope: local, Log: cfg.Log})
 	warn("MarketPresence", err)

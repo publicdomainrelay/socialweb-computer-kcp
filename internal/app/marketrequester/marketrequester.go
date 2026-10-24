@@ -347,6 +347,7 @@ func (p *pass) account(ctx context.Context, plan compose.AccountPlan, id *v1alph
 		c.Log().Warn("the existing-account repo", "root", r.Owner(), "err", err.Error())
 	}
 	repoLinks = append(repoLinks, compose.RepoWriteLink(p.self(), compose.RepoRefIn(id.Status.Did, ws), compose.ScopeAll))
+	repoLinks = append(repoLinks, compose.InfraLinks(ws, compose.RepoRefIn(id.Status.Did, ws))...)
 	if err := c.ApplyLinks(ctx, r, "repo", repoLinks); err != nil {
 		return ctlruntime.Result{}, err
 	}
@@ -440,6 +441,7 @@ func (p *pass) local(ctx context.Context, plan compose.AccountPlan, id *v1alpha1
 	acct := compose.LocalAccount{DID: did, Handle: pdsHandle, SessionID: RequesterVaultServer + ":" + account.Path, PLC: o.Spec.Network != nil}
 	repoLinks := append(compose.LocalAccountLinks(ws, acct), compose.RepoWriteLink(p.self(), compose.RepoRefIn(did, ws), compose.ScopeAll),
 		compose.RecordWriteLink(ws, r.Owner(), compose.RepoRefIn(did, ws), compose.ScopeAll))
+	repoLinks = append(repoLinks, compose.InfraLinks(ws, compose.RepoRefIn(did, ws))...)
 	if err := c.ApplyLinks(ctx, r, "repo", repoLinks); err != nil {
 		return ctlruntime.Result{}, err
 	}
