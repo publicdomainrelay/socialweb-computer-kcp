@@ -201,6 +201,9 @@ func (c *Controller) sync(ctx context.Context, req ctlruntime.Request, object *v
 
 func (c *Controller) finalize(ctx context.Context, req ctlruntime.Request, object *v1alpha1.AtprotoRecord, target binding.Target) error {
 	defer c.repos.Set(target, nil)
+	if strings.TrimSpace(object.Status.URI) == "" && strings.TrimSpace(object.Status.Cid) == "" {
+		return nil
+	}
 	ref, err := repoRef(req.Workspace, object.Spec)
 	if err != nil {
 		return nil
