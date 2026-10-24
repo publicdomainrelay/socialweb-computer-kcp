@@ -84,7 +84,7 @@ type Config struct {
 
 func LogCapConfig(l devinstance.Layout, log *slog.Logger) logcap.Config {
 	c := logcap.Config{Dirs: []string{l.Logs}, Log: log}
-	if l.SupState != "" {
+	if info, err := os.Stat(l.SupState); l.SupState != "" && err == nil && info.IsDir() {
 		c.Dirs = append(c.Dirs, filepath.Join(l.SupState, "logs"))
 		c.Files = append(c.Files, filepath.Join(l.SupState, "devsup.log"))
 	}
