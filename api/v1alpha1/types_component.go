@@ -690,8 +690,6 @@ type GatewayNodeMarket struct {
 
 	NodePolicyArgs string `json:"nodePolicyArgs,omitempty"`
 
-	ExtraBidderDIDs []string `json:"extraBidderDIDs,omitempty"`
-
 	InfraRecord *GatewayInfraRecord `json:"infraRecord,omitempty"`
 }
 

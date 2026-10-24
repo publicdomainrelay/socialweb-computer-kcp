@@ -155,7 +155,7 @@ var APIResources = []APIResource{
 	{Kind: "GuestControlPlane", Plural: "guestcontrolplanes", Revision: 7, Export: "applications", Object: GuestControlPlane{}, PrinterColumns: componentPrinterColumns},
 	{Kind: "Pds", Plural: "pds", Revision: 8, Export: "applications", Object: Pds{}, PrinterColumns: componentPrinterColumns},
 	{Kind: "Requester", Plural: "requesters", Revision: 18, Export: "applications", Object: Requester{}, PrinterColumns: componentPrinterColumns},
-	{Kind: "GatewayAPI", Plural: "gatewayapis", Revision: 11, Export: "applications", Object: GatewayAPI{}, PrinterColumns: componentPrinterColumns},
+	{Kind: "GatewayAPI", Plural: "gatewayapis", Revision: 12, Export: "applications", Object: GatewayAPI{}, PrinterColumns: componentPrinterColumns},
 	{Kind: "SshServer", Plural: "sshservers", Revision: 8, Export: "applications", Object: SshServer{}, PrinterColumns: componentPrinterColumns},
 	{Kind: "Plc", Plural: "plcs", Revision: 7, Export: "applications", Object: Plc{}, PrinterColumns: componentPrinterColumns},
 	{Kind: "Relay", Plural: "relays", Revision: 7, Export: "applications", Object: Relay{}, PrinterColumns: componentPrinterColumns},

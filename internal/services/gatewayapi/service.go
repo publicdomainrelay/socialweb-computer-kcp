@@ -293,8 +293,7 @@ func (s *Service) buildNodeClaims(vault *vaultRuntime, pinned *gatewayhttp.Pinne
 	}
 	log.Info("gatewayapi node market", "homes", homes, "indexWorkspace", indexWorkspace, "indexNamespace", indexNamespace,
 		"contractWorkspace", s.contractWorkspace)
-	cfg := nodeclaim.Config{VaultMount: vault.mount, VMReadyTimeoutSec: DefaultVMReadySec,
-		ExtraBidderDIDs: append([]string(nil), nodeMarket.ExtraBidderDIDs...)}
+	cfg := nodeclaim.Config{VaultMount: vault.mount, VMReadyTimeoutSec: DefaultVMReadySec}
 	if nodeMarket.NodePolicy != "" {
 		args := map[string]any{}
 		maps.Copy(args, s.policyArgs)

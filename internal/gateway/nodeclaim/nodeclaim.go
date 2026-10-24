@@ -79,8 +79,6 @@ type Config struct {
 
 	Policy *Policy
 
-	ExtraBidderDIDs []string
-
 	UserDataBase string
 
 	Meshd *Pin
@@ -295,9 +293,6 @@ func (m *Mapper) Entry(claim contract.Claim, adopt bool, bases contract.Bases) (
 	node := v1alpha1.InfraContractNode{OwnerDid: spec.OwnerDid, NodeClaimRef: claim.Ref()}
 	if len(spec.DenyBidderDids) > 0 {
 		entry.DenyBidderDids = append([]string(nil), spec.DenyBidderDids...)
-	}
-	if len(m.cfg.ExtraBidderDIDs) > 0 {
-		entry.BidderDids = append([]string(nil), m.cfg.ExtraBidderDIDs...)
 	}
 	if m.cfg.UserDataBase != "" {
 		entry.UserData = m.cfg.UserDataBase

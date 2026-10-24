@@ -227,8 +227,7 @@ func gatewayNodeMarket(o *v1alpha1.Gateway, workspace, contracts string) *v1alph
 	out := &v1alpha1.GatewayNodeMarket{OwnerSessionsFile: m.OwnerSessionsFile, UserDataBaseFile: m.NodeUserDataBaseFile,
 		HomeWorkspace: workspace, ContractWorkspace: contracts,
 		NodePolicy: compose.OptionValue(o.Spec.Options, GatewayNodePolicy), NodePolicyArgs: compose.OptionValue(o.Spec.Options, GatewayNodePolicyArgs),
-		ExtraBidderDIDs: slices.Clone(o.Spec.BidderDids),
-		InfraRecord:     &v1alpha1.GatewayInfraRecord{RepoWorkspace: workspace, EventSourceRefs: compose.OwnerRecordSources(workspace, o.Spec.Network)}}
+		InfraRecord: &v1alpha1.GatewayInfraRecord{RepoWorkspace: workspace, EventSourceRefs: compose.OwnerRecordSources(workspace, o.Spec.Network)}}
 	return out
 }
 
