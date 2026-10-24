@@ -479,6 +479,8 @@ func (q *Requester) Start(ctx context.Context) error {
 	if name := q.marketExposure(); name != "" && q.marketURL == "" {
 		if raw := q.deps.Inputs.AwaitAddress(ctx, name, MarketExposureWait, nil); raw != "" {
 			q.marketURL = raw
+		} else if err := ctx.Err(); err != nil {
+			return err
 		} else {
 			q.log.Warn("the requester market URL is not resolved yet", "exposure", name)
 		}
