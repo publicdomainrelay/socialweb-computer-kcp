@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -41,23 +40,18 @@ func (s *Service) resolveIntents(ctx context.Context) (contract.Intents, error) 
 	return bus.Resolve[contract.Intents](s.deps.Caller(ctx), s.deps.Bus, self, self, bus.Capability{Name: contract.CapabilityIntents})
 }
 
-func (s *Service) awaitInputs(ctx context.Context) error {
+func (s *Service) awaitInputs(ctx context.Context) {
 	var wg sync.WaitGroup
-	ref := s.spec.MarketExposureRef
-	exposure := ""
-	if ref != nil {
-		exposure = strings.TrimSpace(ref.Name)
-	}
-	if exposure != "" {
-		wg.Go(func() { s.marketURL = s.inputs.AwaitAddress(ctx, exposure, inputWait, nil) })
+	if ref := s.spec.MarketExposureRef; ref != nil && strings.TrimSpace(ref.Name) != "" {
+		wg.Go(func() {
+			if s.marketURL = s.inputs.AwaitAddress(ctx, ref.Name, inputWait, nil); s.marketURL == "" {
+				s.log.Warn("the bidder market URL is not resolved yet", "exposure", ref.Name)
+			}
+		})
 	}
 	wg.Go(func() { s.guestURL = s.resolveGuestURL(ctx) })
 	wg.Go(func() { s.resolveIdentity(ctx) })
 	wg.Wait()
-	if exposure != "" && s.marketURL == "" && s.inboundXRPC() {
-		return fmt.Errorf("bidder: the market Exposure %s reports no address yet; the offering and the service-auth audience have one source, so the bidder does not advertise another host", exposure)
-	}
-	return nil
 }
 
 func (s *Service) resolveGuestURL(ctx context.Context) string {
