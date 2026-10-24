@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/http"
 	"reflect"
 	"strings"
 	"time"
@@ -118,6 +119,16 @@ func (b *Bidder) sendBid(ctx context.Context, bid *v1alpha1.Bid, now time.Time) 
 	if !submitPending(bid) {
 		return wait
 	}
+	if submitWindowOver(bid, now) {
+		status := cloneBidStatus(bid.Status)
+		conds.SetStatus(&status.Conditions, bid.Generation, v1alpha1.BidConditionSubmitted, metav1.ConditionFalse, "WindowOver",
+			"the bid was not submitted to "+submit.Endpoint+" within "+BidSubmitWindow.String()+" of its publish")
+		if b.applyBidStatus(ctx, bid, status) {
+			b.log.Warn("the bid is no longer resent to the requester: its submit window is over", "bid", bid.Name, "url", submit.Endpoint,
+				"attempts", submit.Attempts, "window", BidSubmitWindow, "err", submit.LastError)
+		}
+		return wait
+	}
 	if next := submitBackoff(submit, now); next > 0 {
 		return earliest(wait, next)
 	}
@@ -149,18 +160,26 @@ func (b *Bidder) sendBid(ctx context.Context, bid *v1alpha1.Bid, now time.Time) 
 		conds.SetStatus(&status.Conditions, bid.Generation, v1alpha1.BidConditionSubmitted, metav1.ConditionFalse, "Unresolvable", next.LastError)
 		b.applyBidStatus(ctx, bid, status)
 		return wait
-	case participant.Rejected(err):
+	case submitRefused(err):
 		b.log.Warn("the requester refused the bid", "bid", bid.Name, "url", submit.Endpoint, "err", err)
 		next.LastError = statusError(err)
 		conds.SetStatus(&status.Conditions, bid.Generation, v1alpha1.BidConditionSubmitted, metav1.ConditionFalse, "Refused", next.LastError)
 		b.applyBidStatus(ctx, bid, status)
 		return wait
 	}
-	b.log.Warn("submitting the bid to the requester failed; it is retried", "bid", bid.Name, "url", submit.Endpoint, "err", err)
 	next.LastError = statusError(err)
+	if next.LastError != submit.LastError {
+		b.log.Warn("submitting the bid to the requester failed; it is retried", "bid", bid.Name, "url", submit.Endpoint, "err", err,
+			"attempts", next.Attempts, "retryIn", submitDelay(next.Attempts))
+	}
 	conds.SetStatus(&status.Conditions, bid.Generation, v1alpha1.BidConditionSubmitted, metav1.ConditionFalse, "Retrying", next.LastError)
 	b.applyBidStatus(ctx, bid, status)
 	return earliest(wait, submitBackoff(&next, at))
+}
+
+func submitRefused(err error) bool {
+	var callErr *participant.CallError
+	return participant.Rejected(err) && errors.As(err, &callErr) && callErr.Status != http.StatusNotFound
 }
 
 func setSubmitEndpoint(status *v1alpha1.BidStatus, generation int64, rfp *market.RFP) {
@@ -182,7 +201,16 @@ func submitPending(bid *v1alpha1.Bid) bool {
 		return false
 	}
 	condition := apimeta.FindStatusCondition(bid.Status.Conditions, v1alpha1.BidConditionSubmitted)
-	return condition == nil || (condition.Reason != "Refused" && condition.Reason != "Unresolvable")
+	return condition == nil || (condition.Reason != "Refused" && condition.Reason != "Unresolvable" && condition.Reason != "WindowOver")
+}
+
+func submitWindowOver(bid *v1alpha1.Bid, now time.Time) bool {
+	published, err := time.Parse(time.RFC3339, bid.Status.Timings.PublishedAt)
+	return err == nil && !now.Before(published.Add(BidSubmitWindow))
+}
+
+func submitDelay(attempts int32) time.Duration {
+	return min(BidSubmitRetry<<min(max(attempts-1, 0), 5), BidSubmitRetryCap)
 }
 
 func submitBackoff(submit *v1alpha1.BidSubmit, now time.Time) time.Duration {
@@ -193,8 +221,7 @@ func submitBackoff(submit *v1alpha1.BidSubmit, now time.Time) time.Duration {
 	if err != nil {
 		return 0
 	}
-	delay := min(BidSubmitRetry<<min(submit.Attempts-1, 4), DefaultRetry)
-	return max(last.Add(delay).Sub(now), 0)
+	return max(last.Add(submitDelay(submit.Attempts)).Sub(now), 0)
 }
 
 func untilExpiry(bid *v1alpha1.Bid, now time.Time) time.Duration {

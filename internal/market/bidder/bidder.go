@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/identity"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
@@ -44,6 +45,10 @@ const (
 	DefaultRetry = 30 * time.Second
 
 	BidSubmitRetry = 2 * time.Second
+
+	BidSubmitRetryCap = time.Minute
+
+	BidSubmitWindow = 10 * time.Minute
 
 	BidSubmitTimeout = 10 * time.Second
 
@@ -348,11 +353,30 @@ func (b *Bidder) indexBid(change contract.Change) {
 		return
 	}
 	incoming := *change.Bid
-	if held, ok := b.bids.Get(change.Name); ok && held.UID == incoming.UID && held.Generation > incoming.Generation {
-		incoming.Spec = held.Spec
-		incoming.Generation = held.Generation
+	if held, ok := b.bids.Get(change.Name); ok && held.UID == incoming.UID {
+		if held.Generation > incoming.Generation {
+			incoming.Spec = held.Spec
+			incoming.Generation = held.Generation
+		}
+		if submitAhead(held.Status.Submit, incoming.Status.Submit) {
+			incoming.Status = cloneBidStatus(incoming.Status)
+			incoming.Status.Submit = held.Status.Submit
+			if condition := apimeta.FindStatusCondition(held.Status.Conditions, v1alpha1.BidConditionSubmitted); condition != nil {
+				apimeta.SetStatusCondition(&incoming.Status.Conditions, *condition)
+			}
+		}
 	}
 	b.bids.Put(change.Name, incoming)
+}
+
+func submitAhead(held, incoming *v1alpha1.BidSubmit) bool {
+	if held == nil {
+		return false
+	}
+	if incoming == nil {
+		return true
+	}
+	return held.Attempts > incoming.Attempts || (held.SubmittedAt != "" && incoming.SubmittedAt == "")
 }
 
 func (b *Bidder) Synced() {
