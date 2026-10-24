@@ -22,6 +22,11 @@ func (b *Bidder) Run(ctx context.Context) {
 }
 
 func (b *Bidder) bindBadgeBlueKey(ctx context.Context) {
+	b.badgeMu.Lock()
+	defer b.badgeMu.Unlock()
+	if b.badgeBound.Load() {
+		return
+	}
 	key, err := b.signer.PublicDID()
 	if err != nil {
 		b.log.Warn("reading the attestation key DID failed", "err", err)
@@ -37,6 +42,7 @@ func (b *Bidder) bindBadgeBlueKey(ctx context.Context) {
 		}
 		return
 	}
+	b.badgeBound.Store(true)
 	b.log.Info("the bidder's badge.blue attestation key is bound", "did", b.cfg.DID, "key", key)
 }
 
@@ -60,6 +66,14 @@ func (b *Bidder) serveMarket(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-heartbeat.C:
+		}
+		if !b.badgeBound.Load() {
+			b.bindBadgeBlueKey(ctx)
+		}
+		if b.currentOffering() == "" {
+			if err := b.ensureOffering(ctx); err != nil && ctx.Err() == nil {
+				b.log.Warn("creating the market offering failed", "err", err)
+			}
 		}
 		if err := b.beat(ctx); err != nil && ctx.Err() == nil {
 			b.log.Warn("sending the market heartbeat failed", "err", err)
@@ -191,6 +205,12 @@ func (b *Bidder) dropExtraOfferings(ctx context.Context, extra []market.ListedRe
 		}
 		b.log.Info("a second market offering is deleted; the bidder keeps one", "offering", rec.URI)
 	}
+}
+
+func (b *Bidder) currentOffering() string {
+	b.offerMu.Lock()
+	defer b.offerMu.Unlock()
+	return b.offeringURI
 }
 
 func (b *Bidder) beat(ctx context.Context) error {

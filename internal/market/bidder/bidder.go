@@ -241,6 +241,10 @@ type Bidder struct {
 
 	offeringURI string
 
+	badgeBound atomic.Bool
+
+	badgeMu sync.Mutex
+
 	wg sync.WaitGroup
 }
 
