@@ -153,14 +153,20 @@ func (r *reconciler[T]) syncRecord(ctx context.Context, req ctlruntime.Request, 
 	switch out.action {
 	case infra.ActionInSync:
 		out.status = &keep
+		out.conditions = []metav1.Condition{valid, conds.New(v1alpha1.InfraConditionSynced, true, "InSync", "the record holds the declaration", gen)}
+		note, pulled := r.c.takePull(string(v.kind), req, observed.Hash)
 		if keep.CID != got.CID || keep.DeclarationHash != observed.Hash {
-			out.status = synced(keep.Direction)
+			direction := keep.Direction
+			if pulled {
+				direction = v1alpha1.InfraSyncPulled
+			}
+			out.status = synced(direction)
 			if out.status.Direction == "" {
 				out.status.Direction = v1alpha1.InfraSyncInSync
 			}
 		}
+		out.conditions = append(out.conditions, note...)
 		out.write, out.swapCid = true, got.CID
-		out.conditions = []metav1.Condition{valid, conds.New(v1alpha1.InfraConditionSynced, true, "InSync", "the record holds the declaration", gen)}
 	case infra.ActionCreate:
 		out.status = &v1alpha1.InfraRecordStatus{URI: out.uri, Direction: v1alpha1.InfraSyncCreated}
 		out.write = true
@@ -293,6 +299,36 @@ func EnsureWatch(ctx context.Context, dynamic kube.Factory, manager, workspace, 
 	return nil
 }
 
+type pullNote struct {
+	hash string
+
+	conditions []metav1.Condition
+}
+
+func (c *Controller) notePull(kind string, req ctlruntime.Request, hash string, conditions []metav1.Condition) {
+	var keep []metav1.Condition
+	for _, cond := range conditions {
+		if cond.Type == v1alpha1.InfraConditionSyncConflict {
+			keep = append(keep, cond)
+		}
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.pulls[indexKey{kind: kind, cluster: req.Cluster, name: req.Name}] = pullNote{hash: hash, conditions: keep}
+}
+
+func (c *Controller) takePull(kind string, req ctlruntime.Request, hash string) ([]metav1.Condition, bool) {
+	k := indexKey{kind: kind, cluster: req.Cluster, name: req.Name}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	note, ok := c.pulls[k]
+	if !ok || note.hash != hash {
+		return nil, false
+	}
+	delete(c.pulls, k)
+	return note.conditions, true
+}
+
 type indexKey struct {
 	kind string
 
@@ -317,7 +353,9 @@ func (c *Controller) index(kind string, req ctlruntime.Request, uri, cid string)
 func (c *Controller) forget(kind string, req ctlruntime.Request) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.dropLocked(indexKey{kind: kind, cluster: req.Cluster, name: req.Name})
+	k := indexKey{kind: kind, cluster: req.Cluster, name: req.Name}
+	c.dropLocked(k)
+	delete(c.pulls, k)
 }
 
 func (c *Controller) dropLocked(k indexKey) {

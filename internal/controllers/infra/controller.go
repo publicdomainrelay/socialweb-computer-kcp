@@ -56,6 +56,8 @@ type Controller struct {
 	mu sync.Mutex
 
 	bound map[string]map[indexKey]string
+
+	pulls map[indexKey]pullNote
 }
 
 func New(opts Options) *Controller {
@@ -63,7 +65,8 @@ func New(opts Options) *Controller {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	return &Controller{bus: opts.Bus, dynamic: opts.Dynamic, log: log.With("controller", Name), bound: map[string]map[indexKey]string{}}
+	return &Controller{bus: opts.Bus, dynamic: opts.Dynamic, log: log.With("controller", Name), bound: map[string]map[indexKey]string{},
+		pulls: map[indexKey]pullNote{}}
 }
 
 func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
@@ -209,6 +212,7 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 			if err := r.pull(ctx, req, v, rec.declaration); err != nil {
 				return ctlruntime.Result{}, err
 			}
+			r.c.notePull(string(v.kind), req, rec.status.DeclarationHash, status.Conditions)
 			r.c.log.Info("infra_record_pulled", "kind", v.kind, "workspace", req.Workspace, "name", req.Name, "uri", rec.uri, "cid", rec.cid,
 				"conflict", rec.action == infra.ActionConflict, "generation", v.object.GetGeneration())
 			status.Phase, status.Contracts, status.Message = v.status.Phase, v.status.Contracts, "pulled the record's declaration"
