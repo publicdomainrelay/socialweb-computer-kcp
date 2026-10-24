@@ -96,6 +96,15 @@ func nonEmpty(in []string) []string {
 	return in
 }
 
+func (d Declaration) Published() Declaration {
+	out := Declaration{Description: d.Description, TTLSeconds: d.TTLSeconds, EndWhen: d.EndWhen}
+	for _, c := range d.Contracts {
+		out.Contracts = append(out.Contracts, v1alpha1.InfraContract{Name: c.Name, State: c.State, VMName: c.VMName,
+			BidderDids: c.BidderDids, DenyBidderDids: c.DenyBidderDids})
+	}
+	return normalize(out)
+}
+
 func (d Declaration) Hash() string {
 	b, _ := json.Marshal(normalize(d))
 	sum := sha256.Sum256(b)
@@ -139,6 +148,15 @@ type Observed struct {
 	EndedAt string
 
 	EndReason v1alpha1.EphemeralInfraEnd
+}
+
+func (o Observed) Published() Observed {
+	out := o
+	out.Contracts = nil
+	for _, c := range o.Contracts {
+		out.Contracts = append(out.Contracts, v1alpha1.InfraContractStatus{Name: c.Name, Phase: c.Phase, Winner: c.Winner, ReceiptURI: c.ReceiptURI})
+	}
+	return out
 }
 
 var recordStates = map[v1alpha1.InfraContractState]string{

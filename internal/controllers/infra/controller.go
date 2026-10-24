@@ -193,13 +193,19 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 	status := v1alpha1.InfraStatus{ObservedGeneration: v.object.GetGeneration(), Record: v.status.Record,
 		Conditions: slices.Clone(v.status.Conditions)}
 	var rec *recordSync
+	var recordErr error
 	if v.spec.Record != nil {
 		rec, err = r.syncRecord(ctx, req, v, now)
 		if err != nil {
 			conds.Set(&status.Conditions, status.ObservedGeneration, v1alpha1.InfraConditionSynced, false, "RecordUnavailable", err.Error())
-			status.Phase, status.Contracts, status.Message = v.status.Phase, v.status.Contracts, err.Error()
-			return ctlruntime.Result{}, errors.Join(err, req.ApplyStatus(ctx, r.ops.statusObject(req.Name, status, v.ephemeral)))
+			if !Publishing(v.spec.Record) {
+				status.Phase, status.Contracts, status.Message = v.status.Phase, v.status.Contracts, err.Error()
+				return ctlruntime.Result{}, errors.Join(err, req.ApplyStatus(ctx, r.ops.statusObject(req.Name, status, v.ephemeral)))
+			}
+			recordErr = err
 		}
+	}
+	if rec != nil {
 		for _, cond := range rec.conditions {
 			conds.Set(&status.Conditions, status.ObservedGeneration, cond.Type, cond.Status == metav1.ConditionTrue, cond.Reason, cond.Message)
 		}
@@ -218,7 +224,7 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 			status.Phase, status.Contracts, status.Message = v.status.Phase, v.status.Contracts, "pulled the record's declaration"
 			return ctlruntime.Result{}, req.ApplyStatus(ctx, r.ops.statusObject(req.Name, status, v.ephemeral))
 		}
-	} else {
+	} else if v.spec.Record == nil {
 		r.c.forget(string(v.kind), req)
 		if v.status.Record != nil && v.status.Record.Direction != v1alpha1.InfraSyncRetained {
 			gone, err := r.unbindRecord(ctx, req, v)
@@ -256,6 +262,9 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 	}
 	if err := req.ApplyStatus(ctx, r.ops.statusObject(req.Name, status, ephemeral)); err != nil {
 		return ctlruntime.Result{}, err
+	}
+	if recordErr != nil {
+		return ctlruntime.Result{}, recordErr
 	}
 	if rec != nil && rec.write {
 		observed := infra.Observed{Phase: status.Phase, Contracts: statuses}

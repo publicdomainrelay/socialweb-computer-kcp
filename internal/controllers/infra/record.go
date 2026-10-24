@@ -42,6 +42,10 @@ type recordSync struct {
 
 	declaration infra.Declaration
 
+	render infra.Declaration
+
+	publish bool
+
 	createdAt time.Time
 
 	status *v1alpha1.InfraRecordStatus
@@ -116,7 +120,13 @@ func (r *reconciler[T]) syncRecord(ctx context.Context, req ctlruntime.Request, 
 		}
 		rkey = uri.RecordKey().String()
 	}
-	out := &recordSync{rkey: rkey, repo: repo, uri: "at://" + did + "/" + nsid + "/" + rkey, createdAt: v.object.GetCreationTimestamp().Time}
+	publish := Publishing(b)
+	render := v.declaration
+	if publish {
+		render = render.Published()
+	}
+	out := &recordSync{rkey: rkey, repo: repo, uri: "at://" + did + "/" + nsid + "/" + rkey, createdAt: v.object.GetCreationTimestamp().Time,
+		render: render, publish: publish}
 	if !collectionOwned(v.object) {
 		if err := r.ensureWatch(ctx, req, v, repo, b.EventSourceRefs); err != nil {
 			return nil, err
@@ -138,9 +148,9 @@ func (r *reconciler[T]) syncRecord(ctx context.Context, req ctlruntime.Request, 
 	}
 	out.cid = got.CID
 	r.c.index(string(v.kind), req, out.uri, got.CID)
-	specHash := v.declaration.Hash()
+	specHash := render.Hash()
 	stored := v.status.Record
-	out.action = infra.Decide(infra.SyncInput{Follow: follow, Stored: stored, URI: out.uri, SpecHash: specHash, Record: observed})
+	out.action = infra.Decide(infra.SyncInput{Follow: follow, Publish: publish, Stored: stored, URI: out.uri, SpecHash: specHash, Record: observed})
 	gen := v.object.GetGeneration()
 	keep := v1alpha1.InfraRecordStatus{URI: out.uri}
 	if stored != nil && stored.URI == out.uri {
@@ -169,6 +179,9 @@ func (r *reconciler[T]) syncRecord(ctx context.Context, req ctlruntime.Request, 
 		out.conditions = append(out.conditions, note...)
 		out.write, out.swapCid = true, got.CID
 	case infra.ActionCreate:
+		if publish && keep.CID != "" {
+			r.c.log.Warn("infra_record_rewritten", "kind", v.kind, "workspace", req.Workspace, "name", req.Name, "uri", out.uri, "goneCid", keep.CID)
+		}
 		out.status = &v1alpha1.InfraRecordStatus{URI: out.uri, Direction: v1alpha1.InfraSyncCreated}
 		out.write = true
 		out.conditions = []metav1.Condition{conds.New(v1alpha1.InfraConditionSynced, false, "Creating", "writing the record", gen)}
@@ -177,6 +190,15 @@ func (r *reconciler[T]) syncRecord(ctx context.Context, req ctlruntime.Request, 
 		out.status = &keep
 		out.write, out.swapCid = true, got.CID
 		out.conditions = []metav1.Condition{valid, conds.New(v1alpha1.InfraConditionSynced, false, "Pushing", "writing the kcp declaration to the record", gen)}
+		if publish && (observed.Err != nil || observed.Hash != keep.DeclarationHash) {
+			if observed.Err != nil {
+				out.conditions[0] = conds.New(v1alpha1.InfraConditionRecordValid, false, "Invalid", observed.Err.Error(), gen)
+			}
+			out.conditions[1] = conds.New(v1alpha1.InfraConditionSynced, false, "Overwriting",
+				"the record is published from kcp only; a change made elsewhere is written over", gen)
+			r.c.log.Warn("infra_record_overwritten", "kind", v.kind, "workspace", req.Workspace, "name", req.Name, "uri", out.uri, "cid", got.CID,
+				"invalid", observed.Err != nil)
+		}
 	case infra.ActionPull:
 		out.status = synced(v1alpha1.InfraSyncPulled)
 		out.conditions = []metav1.Condition{valid, conds.New(v1alpha1.InfraConditionSynced, true, "Pulled", "the record's declaration is applied to the spec", gen)}
@@ -218,8 +240,15 @@ func (r *reconciler[T]) pull(ctx context.Context, req ctlruntime.Request, v view
 	return nil
 }
 
+func Publishing(b *v1alpha1.InfraRecordBinding) bool {
+	return b != nil && b.Sync == v1alpha1.InfraRecordSyncPublish
+}
+
 func (r *reconciler[T]) writeRecord(ctx context.Context, req ctlruntime.Request, v view, rec *recordSync, observed infra.Observed) error {
-	value, err := infra.Render(v.kind, v.declaration, observed, rec.createdAt)
+	if rec.publish {
+		observed = observed.Published()
+	}
+	value, err := infra.Render(v.kind, rec.render, observed, rec.createdAt)
 	if err != nil {
 		return err
 	}

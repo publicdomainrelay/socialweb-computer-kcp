@@ -33,6 +33,8 @@ type Record struct {
 type SyncInput struct {
 	Follow bool
 
+	Publish bool
+
 	Stored *v1alpha1.InfraRecordStatus
 
 	URI string
@@ -46,6 +48,15 @@ func Decide(in SyncInput) Action {
 	var stored v1alpha1.InfraRecordStatus
 	if in.Stored != nil && in.Stored.URI == in.URI {
 		stored = *in.Stored
+	}
+	if in.Publish {
+		switch {
+		case !in.Record.Present:
+			return ActionCreate
+		case in.Record.Err == nil && in.Record.Hash == in.SpecHash:
+			return ActionInSync
+		}
+		return ActionPush
 	}
 	if !in.Record.Present {
 		if in.Follow || stored.CID != "" {
