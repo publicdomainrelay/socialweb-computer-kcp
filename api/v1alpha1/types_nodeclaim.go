@@ -125,8 +125,20 @@ type NodeClaimContract struct {
 	Timestamps *ContractTimestamps `json:"timestamps,omitempty"`
 }
 
+type NetworkKind string
+
+const (
+	NetworkKindIroh NetworkKind = "iroh"
+
+	NetworkKindHTTPS NetworkKind = "https"
+
+	NetworkKindWebRTC NetworkKind = "webrtc"
+)
+
 type ContractNetworkAddress struct {
 	Tag string `json:"tag"`
+
+	Kind NetworkKind `json:"kind,omitempty" apigen:"enum=iroh|https|webrtc"`
 
 	Address string `json:"address"`
 

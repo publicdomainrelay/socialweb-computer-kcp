@@ -164,6 +164,8 @@ type ComputeVMGuestReport struct {
 type ComputeVMGuestNetwork struct {
 	Tag string `json:"tag"`
 
+	Kind NetworkKind `json:"kind,omitempty" apigen:"enum=iroh|https|webrtc"`
+
 	Address string `json:"address"`
 
 	ReportedAt string `json:"reportedAt,omitempty"`
@@ -179,6 +181,8 @@ type ComputeVMPublished struct {
 
 type ComputeVMPublishedNetwork struct {
 	Tag string `json:"tag"`
+
+	Kind NetworkKind `json:"kind,omitempty" apigen:"enum=iroh|https|webrtc"`
 
 	URI string `json:"uri"`
 }

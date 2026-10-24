@@ -158,6 +158,14 @@ func (in *ComputeContract) SetConditions(conditions []metav1.Condition) {
 	in.Status.Conditions = conditions
 }
 
+func (in *ContractEvent) GetConditions() []metav1.Condition {
+	return in.Status.Conditions
+}
+
+func (in *ContractEvent) SetConditions(conditions []metav1.Condition) {
+	in.Status.Conditions = conditions
+}
+
 func (in *Infra) GetConditions() []metav1.Condition {
 	return in.Status.Conditions
 }

@@ -35,6 +35,7 @@ const (
 	MarketBidderResource             = "marketbidders"
 	MarketRequesterResource          = "marketrequesters"
 	ComputeContractResource          = "computecontracts"
+	ContractEventResource            = "contractevents"
 	InfraResource                    = "infras"
 	EphemeralInfraResource           = "ephemeralinfras"
 	InfraCollectionResource          = "infracollections"
@@ -94,6 +95,7 @@ var (
 	MarketBidderGVR             = GroupVersion.WithResource(MarketBidderResource)
 	MarketRequesterGVR          = GroupVersion.WithResource(MarketRequesterResource)
 	ComputeContractGVR          = GroupVersion.WithResource(ComputeContractResource)
+	ContractEventGVR            = GroupVersion.WithResource(ContractEventResource)
 	InfraGVR                    = GroupVersion.WithResource(InfraResource)
 	EphemeralInfraGVR           = GroupVersion.WithResource(EphemeralInfraResource)
 	InfraCollectionGVR          = GroupVersion.WithResource(InfraCollectionResource)
@@ -177,6 +179,8 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&MarketRequesterList{},
 		&ComputeContract{},
 		&ComputeContractList{},
+		&ContractEvent{},
+		&ContractEventList{},
 		&Infra{},
 		&InfraList{},
 		&EphemeralInfra{},
@@ -552,6 +556,20 @@ func (in *ComputeContract) DeepCopyObject() runtime.Object {
 }
 
 func (in *ComputeContractList) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *ContractEvent) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *ContractEventList) DeepCopyObject() runtime.Object {
 	if c := in.DeepCopy(); c != nil {
 		return c
 	}

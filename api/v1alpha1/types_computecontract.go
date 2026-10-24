@@ -117,7 +117,17 @@ type ComputeContractTunnel struct {
 	Port int `json:"port" apigen:"minimum=1,maximum=65535"`
 
 	Server string `json:"server,omitempty" apigen:"userEndpoint"`
+
+	Transport TunnelTransport `json:"transport,omitempty" apigen:"default=opentunnel,enum=opentunnel|webrtc"`
 }
+
+type TunnelTransport string
+
+const (
+	TunnelTransportOpenTunnel TunnelTransport = "opentunnel"
+
+	TunnelTransportWebRTC TunnelTransport = "webrtc"
+)
 
 type ComputeContractNodeAgent struct {
 	DownloadBase string `json:"downloadBase"`
