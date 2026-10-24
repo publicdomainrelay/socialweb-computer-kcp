@@ -62,6 +62,15 @@ learnings:
       In the lead's Bash tool, grep is a ugrep shell function that holds each line in a pipe until
       the next one: watches through it looked like 38-100 s event lag. Use command grep in streaming
       pipelines. Editing a running acceptance script garbles bash's read of it: run a frozen copy.
+  - id: L7-RESTART-READINESS
+    text: >
+      A bidder core restart used to leave the bidder Provisioning for about 5 minutes and 7 retries:
+      its ingress Exposure was checked before the Bidder registered its handler, nothing re-triggered
+      the check, and the Bidder waits for that Exposure's address (fixed c8147d96: a bus handler
+      registration re-triggers the checks). After the fix and status.appliedSet (25ee9d70) a bidder
+      core is Ready 8-9 s after it starts and a gateway core about 18 s (local network as25,
+      2026-10-24). A fleet view should report time-to-Ready per host after each restart; a slow one is
+      the first sign of an ordering race like this one.
 items:
   - id: F1-INVENTORY
     title: "A fleet inventory object: which bidders exist, where, on which version"
