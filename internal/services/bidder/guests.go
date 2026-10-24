@@ -46,6 +46,7 @@ func (guests) ComputeVM(in core.GuestVM) (*v1alpha1.ComputeVM, error) {
 		StopGraceSeconds: in.StopGraceSeconds,
 		GuestLogin:       in.Login,
 		HostPorts:        in.HostPorts,
+		LANUDP:           in.LANUDP,
 		Owner:            in.Owner,
 	}
 	if in.Accept.URI != "" || in.Accept.CID != "" {

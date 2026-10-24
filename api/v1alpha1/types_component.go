@@ -418,6 +418,8 @@ type BidderSpec struct {
 
 	PolicyArgs string `json:"policyArgs,omitempty"`
 
+	GuestNetwork *GuestNetworkOptions `json:"guestNetwork,omitempty"`
+
 	BidderDIDs []string `json:"bidderDIDs,omitempty"`
 
 	MarketExposureRef *commonv1.LocalObjectRef `json:"marketExposureRef,omitempty"`

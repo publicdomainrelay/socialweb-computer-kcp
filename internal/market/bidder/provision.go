@@ -183,6 +183,7 @@ func (b *Bidder) provision(ctx context.Context, req provisionRequest) (string, e
 		Login:            &v1alpha1.ComputeVMGuestLogin{Mount: b.cfg.GuestLoginMount, BindSecretSha256: secretHash},
 		Accept:           commonv1.StrongRef{URI: req.acceptURI, CID: req.acceptCID},
 		HostPorts:        b.guestHostPorts(userData, hostPort),
+		LANUDP:           b.cfg.GuestLANUDP,
 		Owner:            req.owner,
 	})
 	if err != nil {

@@ -329,8 +329,8 @@
         "linux/arm64": {"kind": "go", "package": "./cmd/socialweb-vmexec", "members": {"socialweb-vmexec": "socialweb-vmexec"}}
       },
       "platforms": {
-        "linux/amd64": {"treeSha256": "d72a116baaa670c95e27f96e4b7443bc100f6c2cd53a9d876902bc63fb6c9d1a", "rawBytes": 2580606, "zstdBytes": 964255},
-        "linux/arm64": {"treeSha256": "60fd3035ff43a82723ac8ebde5e368b911ee176c3281dcf4f42beaabecdbf22e", "rawBytes": 2490494, "zstdBytes": 863273}
+        "linux/amd64": {"treeSha256": "70d314431078abcb6895e81c7e4075a13fff2c7de6f392ab294e73b3c9d36b18", "rawBytes": 2617470, "zstdBytes": 976220},
+        "linux/arm64": {"treeSha256": "542c60d9d3567d865cbddb235b9212c9b2a429d61727eb4006ee212e485322ec", "rawBytes": 2556030, "zstdBytes": 874437}
       }
     },
     "openbao-plugin-auth-atproto": {
@@ -383,8 +383,8 @@
         "linux/arm64": {"kind": "script", "script": "scripts/build-web-app-downloads.sh", "members": {"socialweb-meshd-x86_64": "socialweb-meshd-x86_64", "socialweb-meshd-x86_64.sha256": "socialweb-meshd-x86_64.sha256", "socialweb-meshd-aarch64": "socialweb-meshd-aarch64", "socialweb-meshd-aarch64.sha256": "socialweb-meshd-aarch64.sha256", "socialweb-node-x86_64": "socialweb-node-x86_64", "socialweb-node-x86_64.sha256": "socialweb-node-x86_64.sha256", "socialweb-node-aarch64": "socialweb-node-aarch64", "socialweb-node-aarch64.sha256": "socialweb-node-aarch64.sha256"}}
       },
       "platforms": {
-        "linux/amd64": {"treeSha256": "98ef58bf32f5b1ebafc21e105be6de8eaca6c4101c249ea57b104fd195d9edab", "rawBytes": 40513936, "zstdBytes": 12279964},
-        "linux/arm64": {"treeSha256": "98ef58bf32f5b1ebafc21e105be6de8eaca6c4101c249ea57b104fd195d9edab", "rawBytes": 40513936, "zstdBytes": 12279964}
+        "linux/amd64": {"treeSha256": "91c8bc3fcf3eea0f0d7abdd033f8d001771b3f05e3048b6ca65ecfcade18ab73", "rawBytes": 40513936, "zstdBytes": 12281321},
+        "linux/arm64": {"treeSha256": "91c8bc3fcf3eea0f0d7abdd033f8d001771b3f05e3048b6ca65ecfcade18ab73", "rawBytes": 40513936, "zstdBytes": 12281321}
       }
     },
     "socialweb-guest-downloads": {

@@ -385,6 +385,7 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 		Operator:             o.Spec.Operator,
 		Policy:               o.Spec.Policy,
 		PolicyArgs:           compose.OptionValue(o.Spec.Options, "policy-args"),
+		GuestNetwork:         o.Spec.GuestNetwork,
 		BidderDIDs:           append([]string(nil), o.Spec.BidderDids...),
 		Comms:                o.Spec.Comms,
 		SuspendParticipation: o.Spec.Suspend,

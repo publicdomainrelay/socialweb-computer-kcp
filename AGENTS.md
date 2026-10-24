@@ -127,12 +127,25 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
   kcp or a log. The requester side of each event is a cluster-scoped `ContractEvent`
   (`socialweb.computer/v1alpha1`, outbound ones made by the CLI or the browser, inbound ones by the
   requester), owned by its ComputeContract.
-- The host-loopback fence. A guest reaches its host's loopback at `192.0.2.1` only on the TCP ports of
-  its ComputeVM's `spec.hostPorts`; socialweb-vmexec loads an nf_tables bridge table in the guest's
-  namespace that resets every other TCP connection to 192.0.2.1 and drops everything else to it and
-  to 127.0.0.0/8, and the VM does not start without it. A guest-facing local listener the bidder
+- The guest fence. socialweb-vmexec loads the nf_tables bridge table `swcguest` in the guest's
+  namespace before the tap exists, and the VM does not start without it (`internal/guestnet`,
+  `fence_linux.go`). On frames from the guest's tap it keeps, in order: TCP to the host's loopback at
+  `192.0.2.1` only on the ports of the ComputeVM's `spec.hostPorts` (every other TCP connection to it
+  is reset, the rest dropped); DNS (udp and tcp 53) to the pasta gateway 172.30.0.1; ICMPv6 router and
+  neighbor discovery. It then drops everything to the bidder host's own addresses (`vmruntime`
+  lists them in the host namespace at Prepare and writes them into the vmexec params) and to the
+  guest link 172.30.0.0/30, and to 0/8, 10/8, 100.64/10, 127/8, 169.254/16, 172.16/12, 192.0.0/24,
+  192.168/16, 198.18/15, 224/4, 255.255.255.255, ::1, fc00::/7, fe80::/10 and ff00::/8, and every
+  ethertype but IPv4, IPv6 and ARP. TCP to the LAN is always closed. One allowance, on by default:
+  UDP to 10/8, 172.16/12, 192.168/16 and fc00::/7 on destination ports 1024 and up, except 1900,
+  5353 and 5355, so same-LAN WebRTC can use a LAN candidate; it never reaches the host's own
+  addresses, 100.64/10, 169.254/16 or 127/8. It is the ComputeVM's and FirecrackerVM's
+  `spec.guestNetwork.lanUDP` (unset: true), which the bidder writes from its own
+  `spec.guestNetwork.lanUDP` (MarketBidder, Bidder, NetworkApp), the bidder operator's choice and
+  never the requester's: `run bidder`, `install bidder` and `dev up` take `--no-guest-lan-udp`, the
+  hono-bidder passthrough takes `--guest-lan-udp=false`. A guest-facing local listener the bidder
   hands to a guest goes into `spec.hostPorts` (`GuestHostPorts`, `guestseed.HostPortsOf`); never
-  widen the fence to all ports.
+  widen the fence to all ports, and never open TCP to the LAN.
 - After a change to `cmd/socialweb-vmexec` or `internal/guestnet`, run `make pins` and commit the
   `socialweb-vmexec` pin with the change, then `dev down` and `dev up` the network instead of a
   `dev restart ... core`.

@@ -45,6 +45,20 @@ type ComputeVMSpec struct {
 	Release *ComputeVMRelease `json:"release,omitempty"`
 
 	HostPorts []int32 `json:"hostPorts,omitempty" apigen:"listType=set"`
+
+	GuestNetwork *GuestNetworkOptions `json:"guestNetwork,omitempty"`
+}
+
+type GuestNetworkOptions struct {
+	LANUDP *bool `json:"lanUDP,omitempty"`
+}
+
+func (g *GuestNetworkOptions) LANUDPAllowed() bool {
+	return g == nil || g.LANUDP == nil || *g.LANUDP
+}
+
+func GuestNetworkWith(lanUDP bool) *GuestNetworkOptions {
+	return &GuestNetworkOptions{LANUDP: &lanUDP}
 }
 
 type ComputeVMRelease struct {

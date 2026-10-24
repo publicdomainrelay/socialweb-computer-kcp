@@ -629,7 +629,7 @@ func (ctl *Controller) ensureApp(ctx context.Context, r compose.Root, app v1alph
 		}
 		root = &v1alpha1.MarketBidder{ObjectMeta: meta, Spec: v1alpha1.MarketBidderSpec{Profile: app.Profile, Suspend: suspend, Network: &value,
 			Identity: v1alpha1.ApplicationIdentity{Handle: app.Name + "." + BidderAccountDomain, PdsURL: pdsURL},
-			Policy:   app.Policy, Firecracker: fc, Kcp: kcp, Options: app.Options, Quota: app.Quota, Comms: comms, Components: app.Components,
+			Policy:   app.Policy, GuestNetwork: app.GuestNetwork, Firecracker: fc, Kcp: kcp, Options: app.Options, Quota: app.Quota, Comms: comms, Components: app.Components,
 			BidderDids: append([]string(nil), bidderDids...)}}
 	case v1alpha1.ApplicationKindMarketRequester:
 		root = &v1alpha1.MarketRequester{ObjectMeta: meta, Spec: v1alpha1.MarketRequesterSpec{Profile: app.Profile, Suspend: suspend, Network: &value,

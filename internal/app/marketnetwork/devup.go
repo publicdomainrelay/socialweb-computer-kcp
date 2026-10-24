@@ -89,6 +89,7 @@ type BidderVMDefaults struct {
 	GuestImageSource string
 	VmHostBackend    string
 	Handle           string
+	GuestNetwork     *v1alpha1.GuestNetworkOptions
 }
 
 func (d BidderVMDefaults) fill(a *v1alpha1.NetworkApp) {
@@ -104,6 +105,10 @@ func (d BidderVMDefaults) fill(a *v1alpha1.NetworkApp) {
 	}
 	if d.Handle != "" {
 		a.Kcp.Handle = d.Handle
+	}
+	if a.GuestNetwork == nil && d.GuestNetwork != nil {
+		g := *d.GuestNetwork
+		a.GuestNetwork = &g
 	}
 }
 

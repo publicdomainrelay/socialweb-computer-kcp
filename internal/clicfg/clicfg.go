@@ -146,8 +146,13 @@ func (v Values) Int(name string) int {
 }
 
 func (v Values) Bool(name string) bool {
-	b, _ := v.vals[name].(bool)
-	return b
+	switch x := v.vals[name].(type) {
+	case bool:
+		return x
+	case string:
+		return x == "true" || x == "1"
+	}
+	return false
 }
 
 type stringFlag struct {

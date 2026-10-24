@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-25.marketbidders.socialweb.computer
+  name: v1alpha1-26.marketbidders.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -322,6 +322,11 @@ spec:
                         type: string
               policy:
                 type: string
+              guestNetwork:
+                type: object
+                properties:
+                  lanUDP:
+                    type: boolean
               firecracker:
                 type: object
                 properties:

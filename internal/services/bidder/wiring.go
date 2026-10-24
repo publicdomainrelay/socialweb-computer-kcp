@@ -122,6 +122,7 @@ func (s *Service) newBidder(intents contract.Intents) (*core.Bidder, error) {
 		GuestVaultServer:    s.guestVaultServer,
 		GuestVaultMount:     DefaultGuestVaultMount,
 		GuestLoginMount:     DefaultGuestLoginMount,
+		GuestLANUDP:         s.spec.GuestNetwork.LANUDPAllowed(),
 		MaxConcurrentGuests: s.spec.MaxConcurrentGuests,
 		Heartbeat:           seconds(s.spec.HeartbeatIntervalSeconds),
 		OfferingRefresh:     seconds(s.spec.OfferingRefreshSeconds),

@@ -153,11 +153,12 @@ const (
 	OptGuestImgBase   = "guest-image-release-base"
 	OptReadyTimeout   = "ready-timeout"
 	OptNetworkTimeout = "network-timeout"
+	OptNoGuestLANUDP  = "no-guest-lan-udp"
 )
 
 var GatewayListen = map[string]string{OptKcpFront: "127.0.0.1:6443", OptTLSFront: "127.0.0.1:8443", OptCertFront: "127.0.0.1:8444"}
 
-var Passed = []string{OptKcpFront, OptTLSFront, OptCertFront, OptSpecFile, OptGuestImg, OptGuestImgBase}
+var Passed = []string{OptKcpFront, OptTLSFront, OptCertFront, OptSpecFile, OptGuestImg, OptGuestImgBase, OptNoGuestLANUDP}
 
 func Rooted(root string) bool { return root != "" && filepath.Clean(root) != "/" }
 

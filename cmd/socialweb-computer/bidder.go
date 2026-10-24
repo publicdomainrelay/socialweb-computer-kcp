@@ -39,7 +39,7 @@ import (
 const bidderIdentityWait = 5 * time.Minute
 
 var bidderOptions = slices.Concat([]string{backendOpt, "profile", "network", "name", "instance", "state-dir", "fg", "ready-timeout",
-	"network-timeout", "market-network-file", "bidder-policy", "bidder-policy-args", "bidder-options", "kcp-path", "kine-path", "bao-path", "openbao-plugin-dir", "asset-cache", "unit-prefix", "kcp-front-address", "guest-image-release-base"},
+	"network-timeout", "market-network-file", "bidder-policy", "bidder-policy-args", "bidder-options", "kcp-path", "kine-path", "bao-path", "openbao-plugin-dir", "asset-cache", "unit-prefix", "kcp-front-address", "guest-image-release-base", "no-guest-lan-udp"},
 	devVMOptions)
 
 type bidderRun struct {
@@ -54,6 +54,7 @@ type bidderRun struct {
 	value          *v1alpha1.MarketNetworkValue
 	ingress        *v1alpha1.IngressConfig
 	comms          *v1alpha1.MarketComms
+	guestNetwork   *v1alpha1.GuestNetworkOptions
 	pdsURL         string
 	identityMode   v1alpha1.MarketIdentityMode
 	password       string
@@ -101,6 +102,12 @@ func (r *bidderRun) passthrough(args []string) error {
 			r.options = append(r.options, v1alpha1.ApplicationOption{Name: p.Name, Value: p.Value})
 		case p.To == "spec.policy":
 			r.policy = p.Value
+		case p.To == "spec.guestNetwork.lanUDP":
+			on, err := strconv.ParseBool(p.Value)
+			if err != nil {
+				return fmt.Errorf("--%s %q: want true or false", p.Name, p.Value)
+			}
+			r.guestNetwork = v1alpha1.GuestNetworkWith(on)
 		case p.To == "spec.identity.mode":
 			r.identityMode = v1alpha1.MarketIdentityMode(p.Value)
 		case p.To == "spec.identity.pdsUrl":
@@ -213,6 +220,9 @@ func runBidder(ctx context.Context, a *app, vals clicfg.Values, rest []string) i
 	}
 	if err := r.configOptions(vals.String("bidder-options")); err != nil {
 		return a.fail(exitRefused, "run bidder: bidder-options: %v", err)
+	}
+	if r.guestNetwork == nil {
+		r.guestNetwork = v1alpha1.GuestNetworkWith(!vals.Bool("no-guest-lan-udp"))
 	}
 	if r.password != "" {
 		if err := os.Setenv(compose.EnvPdsAccountPassword, r.password); err != nil {
@@ -337,7 +347,7 @@ func (r *bidderRun) kcpProvider() *v1alpha1.KcpProvider {
 
 func (r *bidderRun) spec() (v1alpha1.MarketBidderSpec, error) {
 	return bidder.Spec(bidder.SpecInput{Profile: r.profile, Handle: r.handle, Policy: r.policy, Network: r.value, PdsUrl: r.pdsURL,
-		Mode: r.identityMode, Kcp: r.kcpProvider(), Ingress: r.ingress, Comms: r.comms, Options: r.options})
+		Mode: r.identityMode, Kcp: r.kcpProvider(), Ingress: r.ingress, Comms: r.comms, Options: r.options, GuestNetwork: r.guestNetwork})
 }
 
 func (r *bidderRun) marketNetwork() (devinstance.Layout, devinstance.Record, error) {
@@ -376,7 +386,7 @@ func (r *bidderRun) inNetwork(ctx context.Context) int {
 	if err != nil {
 		return r.a.fail(exitRefused, "run bidder: %v", err)
 	}
-	app.Profile, app.Options = r.profile, r.options
+	app.Profile, app.Options, app.GuestNetwork = r.profile, r.options, r.guestNetwork
 	if r.policy != "" {
 		app.Policy = r.policy
 	}

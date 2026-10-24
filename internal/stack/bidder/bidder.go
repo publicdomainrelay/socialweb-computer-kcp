@@ -75,6 +75,8 @@ type SpecInput struct {
 	Ingress *v1alpha1.IngressConfig
 	Comms   *v1alpha1.MarketComms
 	Options []v1alpha1.ApplicationOption
+
+	GuestNetwork *v1alpha1.GuestNetworkOptions
 }
 
 func Spec(in SpecInput) (v1alpha1.MarketBidderSpec, error) {
@@ -108,7 +110,7 @@ func Spec(in SpecInput) (v1alpha1.MarketBidderSpec, error) {
 		}
 	}
 	return v1alpha1.MarketBidderSpec{Profile: in.Profile, Network: n, Ingress: ingress, Comms: in.Comms, Policy: in.Policy, Kcp: in.Kcp, Options: in.Options,
-		Identity: v1alpha1.ApplicationIdentity{Mode: mode, Handle: in.Handle, PdsURL: in.PdsUrl}}, nil
+		GuestNetwork: in.GuestNetwork, Identity: v1alpha1.ApplicationIdentity{Mode: mode, Handle: in.Handle, PdsURL: in.PdsUrl}}, nil
 }
 
 func CheckSignIn(spec v1alpha1.MarketBidderSpec, id *v1alpha1.MarketIdentity) error {

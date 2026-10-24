@@ -372,7 +372,7 @@ func (p *Provider) Boot(ctx context.Context, vm *v1alpha1.FirecrackerVM, write f
 		}
 		started := time.Now()
 		prep, err := p.rt.Prepare(ctx, vmruntime.VMSpec{Handle: h, Name: vm.Name, UserData: userData, Vcpu: int(vm.Spec.Vcpu), MemMiB: mem, DiskMiB: disk,
-			HostPorts: hostPorts(vm.Spec.HostPorts)})
+			HostPorts: hostPorts(vm.Spec.HostPorts), LANUDP: vm.Spec.GuestNetwork.LANUDPAllowed()})
 		if err != nil {
 			return p.fail(ctx, vm, st, err), nil
 		}

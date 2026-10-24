@@ -441,7 +441,8 @@ func bringUp(ctx context.Context, a *app, vals clicfg.Values, host bool) (upRepo
 				return upReport{}, a.fail(exitRefused, "dev up: %v", err)
 			}
 		}
-		vm := marketnetwork.BidderVMDefaults{GuestImageSource: imageSource, VmHostBackend: vals.String("vm-host-backend")}
+		vm := marketnetwork.BidderVMDefaults{GuestImageSource: imageSource, VmHostBackend: vals.String("vm-host-backend"),
+			GuestNetwork: v1alpha1.GuestNetworkWith(!vals.Bool("no-guest-lan-udp"))}
 		if networkSpec, err = marketnetwork.NetworkSpec(l.ID, vals.Int("bidders"), vals.Bool("with-gateway"), networkOverlay, vm); err != nil {
 			return upReport{}, a.fail(exitRefused, "dev up: %v", err)
 		}

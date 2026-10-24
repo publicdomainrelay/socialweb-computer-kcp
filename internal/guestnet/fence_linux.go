@@ -29,7 +29,16 @@ const (
 	verdictAccept = 1
 
 	ethIPv4 = 0x0800
-	ipTCP   = 6
+	ethIPv6 = 0x86dd
+	ethARP  = 0x0806
+
+	ipTCP    = 6
+	ipUDP    = 17
+	ipICMPv6 = 58
+
+	icmpv6RouterSolicit   = 133
+	icmpv6NeighborSolicit = 135
+	icmpv6NeighborAdvert  = 136
 )
 
 type expr struct {
@@ -48,30 +57,92 @@ type nftMessage struct {
 	body  []byte
 }
 
+type ipFamily struct {
+	match  []expr
+	dstOff uint32
+}
+
+func (f ipFamily) to(p netip.Prefix) []expr {
+	return slices.Concat(f.match, prefixIs(unix.NFT_PAYLOAD_NETWORK_HEADER, f.dstOff, p))
+}
+
 func Fence(w Wiring) error {
 	host, err := netip.ParseAddr(HostAddress)
 	if err != nil || !host.Is4() {
 		return fmt.Errorf("guestnet: host address %q is not IPv4", HostAddress)
 	}
+	gateway, err := netip.ParseAddr(Gateway)
+	if err != nil || !gateway.Is4() {
+		return fmt.Errorf("guestnet: gateway %q is not IPv4", Gateway)
+	}
 	ports := HostPorts(w.HostPorts)
 	if len(ports) != len(w.HostPorts) {
 		return fmt.Errorf("guestnet: host ports %v carry a duplicate or a value outside 1-65535", w.HostPorts)
 	}
-	fromGuest := metaIs(unix.NFT_META_IIFNAME, ifname(w.Tap))
-	ipv4 := slices.Concat(fromGuest, metaIs(unix.NFT_META_PROTOCOL, be16(ethIPv4)))
-	toHost := slices.Concat(ipv4, payloadIs(unix.NFT_PAYLOAD_NETWORK_HEADER, 16, host.AsSlice()))
-	tcpToHost := slices.Concat(toHost, metaIs(unix.NFT_META_L4PROTO, []byte{ipTCP}))
-	var rules []fenceRule
-	for _, p := range ports {
-		rules = append(rules, fenceRule{"prerouting", slices.Concat(tcpToHost,
-			payloadIs(unix.NFT_PAYLOAD_TRANSPORT_HEADER, 2, be16(uint16(p))), verdict(verdictAccept))})
+	if len(w.HostAddresses) == 0 {
+		return fmt.Errorf("guestnet: the wiring names none of the host's addresses")
 	}
-	rules = append(rules,
-		fenceRule{"prerouting", slices.Concat(tcpToHost, rejectTCP())},
-		fenceRule{"prerouting", slices.Concat(toHost, verdict(verdictDrop))},
-		fenceRule{"prerouting", slices.Concat(ipv4, payloadIs(unix.NFT_PAYLOAD_NETWORK_HEADER, 16, []byte{127}), verdict(verdictDrop))},
-		fenceRule{"input", slices.Concat(fromGuest, verdict(verdictDrop))},
-	)
+	own, err := ParsePrefixes(w.HostAddresses)
+	if err != nil {
+		return err
+	}
+	link, err := ParsePrefixes([]string{GuestLink})
+	if err != nil {
+		return err
+	}
+	blocked, err := ParsePrefixes(BlockedPrefixes)
+	if err != nil {
+		return err
+	}
+	lan, err := ParsePrefixes(LANUDPPrefixes)
+	if err != nil {
+		return err
+	}
+	fromGuest := metaIs(unix.NFT_META_IIFNAME, ifname(w.Tap))
+	v4 := ipFamily{slices.Concat(fromGuest, metaIs(unix.NFT_META_PROTOCOL, be16(ethIPv4))), 16}
+	v6 := ipFamily{slices.Concat(fromGuest, metaIs(unix.NFT_META_PROTOCOL, be16(ethIPv6))), 24}
+	familyOf := func(p netip.Prefix) ipFamily {
+		if p.Addr().Is4() {
+			return v4
+		}
+		return v6
+	}
+	toHost := v4.to(netip.PrefixFrom(host, 32))
+	var rules []fenceRule
+	pre := func(parts ...[]expr) {
+		rules = append(rules, fenceRule{"prerouting", slices.Concat(parts...)})
+	}
+	pre(fromGuest, metaLoad(unix.NFT_META_PROTOCOL),
+		[]expr{cmpOp(unix.NFT_CMP_NEQ, be16(ethIPv4)), cmpOp(unix.NFT_CMP_NEQ, be16(ethIPv6)), cmpOp(unix.NFT_CMP_NEQ, be16(ethARP))},
+		verdict(verdictDrop))
+	for _, p := range ports {
+		pre(toHost, l4Is(ipTCP), dport(cmpOp(unix.NFT_CMP_EQ, be16(uint16(p)))), verdict(verdictAccept))
+	}
+	pre(toHost, l4Is(ipTCP), rejectTCP())
+	pre(toHost, verdict(verdictDrop))
+	for _, proto := range []byte{ipUDP, ipTCP} {
+		pre(v4.to(netip.PrefixFrom(gateway, 32)), l4Is(proto), dport(cmpOp(unix.NFT_CMP_EQ, be16(DNSPort))), verdict(verdictAccept))
+	}
+	for _, t := range []byte{icmpv6RouterSolicit, icmpv6NeighborSolicit, icmpv6NeighborAdvert} {
+		pre(v6.match, l4Is(ipICMPv6), payloadLoad(unix.NFT_PAYLOAD_TRANSPORT_HEADER, 0, 1), []expr{cmpOp(unix.NFT_CMP_EQ, []byte{t})},
+			verdict(verdictAccept))
+	}
+	for _, p := range slices.Concat(own, link) {
+		pre(familyOf(p).to(p), verdict(verdictDrop))
+	}
+	if w.LANUDP {
+		ports := []expr{cmpOp(unix.NFT_CMP_GTE, be16(LANUDPMinPort))}
+		for _, closed := range LANUDPClosedPorts {
+			ports = append(ports, cmpOp(unix.NFT_CMP_NEQ, be16(uint16(closed))))
+		}
+		for _, p := range lan {
+			pre(familyOf(p).to(p), l4Is(ipUDP), dport(ports...), verdict(verdictAccept))
+		}
+	}
+	for _, p := range blocked {
+		pre(familyOf(p).to(p), verdict(verdictDrop))
+	}
+	rules = append(rules, fenceRule{"input", slices.Concat(fromGuest, verdict(verdictDrop))})
 	msgs := []nftMessage{{typ: unix.NFT_MSG_NEWTABLE, flags: unix.NLM_F_CREATE | unix.NLM_F_EXCL,
 		body: encodeAttrs([]attr{{unix.NFTA_TABLE_NAME, cstr(FenceTable)}})}}
 	for _, c := range []struct {
@@ -102,28 +173,63 @@ func Fence(w Wiring) error {
 		})})
 	}
 	if err := nftBatch(msgs); err != nil {
-		return fmt.Errorf("guestnet: fencing the guest off the host loopback with nf_tables: %w", err)
+		return fmt.Errorf("guestnet: fencing the guest off the host and the LAN with nf_tables: %w", err)
 	}
 	return nil
 }
 
-func metaIs(key uint32, value []byte) []expr {
-	return []expr{{"meta", []attr{{unix.NFTA_META_DREG, be32(unix.NFT_REG_1)}, {unix.NFTA_META_KEY, be32(key)}}}, cmpEq(value)}
+func metaLoad(key uint32) []expr {
+	return []expr{{"meta", []attr{{unix.NFTA_META_DREG, be32(unix.NFT_REG_1)}, {unix.NFTA_META_KEY, be32(key)}}}}
 }
 
-func payloadIs(base, offset uint32, value []byte) []expr {
+func metaIs(key uint32, value []byte) []expr {
+	return append(metaLoad(key), cmpOp(unix.NFT_CMP_EQ, value))
+}
+
+func l4Is(proto byte) []expr {
+	return metaIs(unix.NFT_META_L4PROTO, []byte{proto})
+}
+
+func payloadLoad(base, offset, length uint32) []expr {
 	return []expr{{"payload", []attr{
 		{unix.NFTA_PAYLOAD_DREG, be32(unix.NFT_REG_1)},
 		{unix.NFTA_PAYLOAD_BASE, be32(base)},
 		{unix.NFTA_PAYLOAD_OFFSET, be32(offset)},
-		{unix.NFTA_PAYLOAD_LEN, be32(uint32(len(value)))},
-	}}, cmpEq(value)}
+		{unix.NFTA_PAYLOAD_LEN, be32(length)},
+	}}}
 }
 
-func cmpEq(value []byte) expr {
+func prefixIs(base, offset uint32, p netip.Prefix) []expr {
+	addr := p.Masked().Addr().AsSlice()
+	load := payloadLoad(base, offset, uint32(len(addr)))
+	if p.Bits() == len(addr)*8 {
+		return append(load, cmpOp(unix.NFT_CMP_EQ, addr))
+	}
+	mask := make([]byte, len(addr))
+	for i := 0; i < p.Bits(); i++ {
+		mask[i/8] |= 0x80 >> (i % 8)
+	}
+	return append(load, bitwise(mask), cmpOp(unix.NFT_CMP_EQ, addr))
+}
+
+func dport(cmps ...expr) []expr {
+	return append(payloadLoad(unix.NFT_PAYLOAD_TRANSPORT_HEADER, 2, 2), cmps...)
+}
+
+func bitwise(mask []byte) expr {
+	return expr{"bitwise", []attr{
+		{unix.NFTA_BITWISE_SREG, be32(unix.NFT_REG_1)},
+		{unix.NFTA_BITWISE_DREG, be32(unix.NFT_REG_1)},
+		{unix.NFTA_BITWISE_LEN, be32(uint32(len(mask)))},
+		{unix.NFTA_BITWISE_MASK | unix.NLA_F_NESTED, encodeAttrs([]attr{{unix.NFTA_DATA_VALUE, mask}})},
+		{unix.NFTA_BITWISE_XOR | unix.NLA_F_NESTED, encodeAttrs([]attr{{unix.NFTA_DATA_VALUE, make([]byte, len(mask))}})},
+	}}
+}
+
+func cmpOp(op uint32, value []byte) expr {
 	return expr{"cmp", []attr{
 		{unix.NFTA_CMP_SREG, be32(unix.NFT_REG_1)},
-		{unix.NFTA_CMP_OP, be32(unix.NFT_CMP_EQ)},
+		{unix.NFTA_CMP_OP, be32(op)},
 		{unix.NFTA_CMP_DATA | unix.NLA_F_NESTED, encodeAttrs([]attr{{unix.NFTA_DATA_VALUE, value}})},
 	}}
 }

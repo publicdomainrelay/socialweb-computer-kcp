@@ -531,6 +531,8 @@ type MarketBidderSpec struct {
 
 	Policy string `json:"policy,omitempty"`
 
+	GuestNetwork *GuestNetworkOptions `json:"guestNetwork,omitempty"`
+
 	Firecracker *FirecrackerProvider `json:"firecracker,omitempty"`
 
 	Kcp *KcpProvider `json:"kcp,omitempty"`
@@ -724,6 +726,8 @@ type NetworkApp struct {
 	Profile string `json:"profile"`
 
 	Policy string `json:"policy,omitempty"`
+
+	GuestNetwork *GuestNetworkOptions `json:"guestNetwork,omitempty"`
 
 	Firecracker *FirecrackerProvider `json:"firecracker,omitempty"`
 

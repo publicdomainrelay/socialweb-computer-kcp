@@ -62,6 +62,7 @@ apps:
       - {name: private-key-hex-path, to: state}
       - {name: repo-pds-url, to: profile}
       - {name: policy, to: spec.policy}
+      - {name: guest-lan-udp, to: spec.guestNetwork.lanUDP}
       - {name: policy-args, to: options}
       - {name: ingress-provider, to: spec.ingress.provider}
       - {name: ingress-public-host, to: spec.ingress.publicHost}

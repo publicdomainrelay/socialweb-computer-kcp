@@ -37,6 +37,8 @@ type FirecrackerVMSpec struct {
 	StopGraceSeconds int32 `json:"stopGraceSeconds,omitempty"`
 
 	HostPorts []int32 `json:"hostPorts,omitempty" apigen:"listType=set"`
+
+	GuestNetwork *GuestNetworkOptions `json:"guestNetwork,omitempty"`
 }
 
 type FirecrackerVMNetwork struct {

@@ -2,6 +2,7 @@ package guestnet
 
 import (
 	"fmt"
+	"net"
 	"net/netip"
 	"slices"
 	"strconv"
@@ -19,6 +20,22 @@ const (
 	Bridge       = "br0"
 	Interface    = "eth0"
 	Shell        = "/bin/sh"
+	GuestLink    = "172.30.0.0/30"
+	DNSPort      = 53
+
+	LANUDPMinPort = 1024
+)
+
+var (
+	BlockedPrefixes = []string{
+		"0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12",
+		"192.0.0.0/24", "192.168.0.0/16", "198.18.0.0/15", "224.0.0.0/4", "255.255.255.255/32",
+		"::1/128", "fc00::/7", "fe80::/10", "ff00::/8",
+	}
+
+	LANUDPPrefixes = []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7"}
+
+	LANUDPClosedPorts = []int{1900, 5353, 5355}
 )
 
 type Wiring struct {
@@ -27,6 +44,9 @@ type Wiring struct {
 	GuestAddress string `json:"guestAddress"`
 	GuestMAC     string `json:"guestMAC"`
 	HostPorts    []int  `json:"hostPorts,omitempty"`
+
+	LANUDP        bool     `json:"lanUDP"`
+	HostAddresses []string `json:"hostAddresses"`
 }
 
 type VMExec struct {
@@ -36,8 +56,48 @@ type VMExec struct {
 	Console string   `json:"console"`
 }
 
-func Plan(hostPorts []int) Wiring {
-	return Wiring{Tap: Tap, Bridge: Bridge, GuestAddress: GuestAddress, GuestMAC: GuestMAC, HostPorts: HostPorts(hostPorts)}
+func Plan(hostPorts []int, lanUDP bool, hostAddresses []string) Wiring {
+	return Wiring{Tap: Tap, Bridge: Bridge, GuestAddress: GuestAddress, GuestMAC: GuestMAC, HostPorts: HostPorts(hostPorts),
+		LANUDP: lanUDP, HostAddresses: slices.Clone(hostAddresses)}
+}
+
+func HostAddresses() ([]string, error) {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil, fmt.Errorf("guestnet: listing the host's addresses: %w", err)
+	}
+	var out []string
+	for _, a := range addrs {
+		p, err := netip.ParsePrefix(a.String())
+		if err != nil {
+			return nil, fmt.Errorf("guestnet: the host address %q: %w", a.String(), err)
+		}
+		if s := p.Addr().Unmap().String(); !slices.Contains(out, s) {
+			out = append(out, s)
+		}
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("guestnet: the host has no address to fence the guest off")
+	}
+	slices.Sort(out)
+	return out, nil
+}
+
+func ParsePrefixes(list []string) ([]netip.Prefix, error) {
+	out := make([]netip.Prefix, 0, len(list))
+	for _, s := range list {
+		p, err := netip.ParsePrefix(s)
+		if err != nil {
+			a, aerr := netip.ParseAddr(s)
+			if aerr != nil {
+				return nil, fmt.Errorf("guestnet: %q is neither an address nor a prefix", s)
+			}
+			a = a.Unmap()
+			p = netip.PrefixFrom(a, a.BitLen())
+		}
+		out = append(out, p.Masked())
+	}
+	return out, nil
 }
 
 func HostPorts(ports []int) []int {
@@ -109,6 +169,12 @@ func (w Wiring) Validate() error {
 		if p <= 0 || p > 65535 {
 			return fmt.Errorf("guestnet: host port %d is not a TCP port", p)
 		}
+	}
+	if len(w.HostAddresses) == 0 {
+		return fmt.Errorf("guestnet: the wiring names none of the host's addresses, so the fence could not keep the guest off them")
+	}
+	if _, err := ParsePrefixes(w.HostAddresses); err != nil {
+		return err
 	}
 	return nil
 }

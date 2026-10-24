@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-4.firecrackervms.socialweb.computer
+  name: v1alpha1-5.firecrackervms.socialweb.computer
   labels:
     contracts.socialweb.computer/computevms: v1alpha1
 spec:
@@ -91,6 +91,11 @@ spec:
                   type: integer
                   format: int32
                 x-kubernetes-list-type: set
+              guestNetwork:
+                type: object
+                properties:
+                  lanUDP:
+                    type: boolean
             required:
               - owner
               - vcpu

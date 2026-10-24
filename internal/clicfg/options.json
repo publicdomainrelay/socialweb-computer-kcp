@@ -383,6 +383,11 @@
       "env": "SOCIALWEB_GUEST_IMAGE_RELEASE_BASE",
       "default": "https://socialweb-computer-kcp.sfo3.digitaloceanspaces.com"
     },
+    "no-guest-lan-udp": {
+      "type": "boolean",
+      "description": "run bidder, install bidder (written to config.json) and dev up --profile market-network: the bidder's guests send no UDP to the LAN (spec.guestNetwork.lanUDP false on the MarketBidder, the Bidder and every ComputeVM it provisions); unset, a guest may send UDP to 10/8, 172.16/12, 192.168/16 and fc00::/7 on destination ports 1024 and up except 1900, 5353 and 5355, so same-LAN WebRTC can use a LAN candidate. TCP to the LAN, the host's own addresses, 100.64/10, link-local and loopback stay closed either way",
+      "env": "SOCIALWEB_NO_GUEST_LAN_UDP"
+    },
     "vm-stop-grace": {
       "type": "string",
       "description": "internal vm, dev up --handle and run bidder: how long a stop waits after SendCtrlAltDel before SIGKILL (Go duration; x86_64 only, arm64 kills at once); unset, the vmStop.graceSeconds measured into internal/versions/versions.json",
