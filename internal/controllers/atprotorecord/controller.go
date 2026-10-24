@@ -7,6 +7,9 @@ import (
 	"log/slog"
 	"strings"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
@@ -204,7 +207,7 @@ func (c *Controller) finalize(ctx context.Context, req ctlruntime.Request, objec
 	}
 	repo, err := bus.Resolve[atprotorepo.Repo](ctx, c.bus, self(req, object), ref,
 		bus.Capability{Name: atprotorepo.CapabilityWrite, Scope: scopeOf(object.Spec)})
-	if errors.Is(err, atprotorepo.ErrNotBound) {
+	if errors.Is(err, atprotorepo.ErrNotBound) || (err != nil && c.repoGone(ctx, req.Workspace, ref)) {
 		c.log.Warn("the AtprotoRecord repo is gone; the record is released without a delete", "workspace", req.Workspace,
 			"name", object.Name, "repo", ref.String())
 		return nil
@@ -213,6 +216,15 @@ func (c *Controller) finalize(ctx context.Context, req ctlruntime.Request, objec
 		return err
 	}
 	return deleteRecord(ctx, repo, strings.TrimSpace(object.Spec.Collection), strings.TrimSpace(object.Spec.Rkey))
+}
+
+func (c *Controller) repoGone(ctx context.Context, workspace string, ref commonv1.ObjectRef) bool {
+	cl, err := c.client(ref.InWorkspace(workspace))
+	if err != nil || cl == nil {
+		return false
+	}
+	_, err = kube.Get[metav1.PartialObjectMetadata](ctx, cl.Resource(v1alpha1.AtprotoRepoGVR), ref.Name)
+	return apierrors.IsNotFound(err)
 }
 
 func (c *Controller) client(workspace string) (*kube.Client, error) {

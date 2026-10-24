@@ -156,9 +156,9 @@ say "the web app answers"
 
 CA_DIR="/etc/caddy/socialweb-computer"
 install -d -m 0755 "$CA_DIR"
-admin="$(sed -n 's/.*"adminKubeconfig": *"\([^"]*\)".*/\1/p' "$STATE_DIR/gateway.json" | head -n1)"
+admin="$(sed -n 's/.*"adminKubeconfig": *"\([^"]*\)".*/\1/p' "$STATE_DIR/gateway.json" | awk 'NR==1')"
 [ -n "$admin" ] || { say "gateway.json names no admin kubeconfig"; exit 1; }
-sed -n 's/^ *certificate-authority-data: *//p' "$admin" | head -n1 | base64 -d > "$CA_DIR/kcp.crt"
+sed -n 's/^ *certificate-authority-data: *//p' "$admin" | awk 'NR==1' | base64 -d > "$CA_DIR/kcp.crt"
 [ -s "$CA_DIR/kcp.crt" ] || { say "kcp's serving CA could not be read out of $admin"; exit 1; }
 install -m 0644 "$STATE_DIR/tls/tls.crt" "$CA_DIR/gateway.crt"
 [ -s "$STATE_DIR/tls/edge-client.crt" ] && [ -s "$STATE_DIR/tls/edge-client.key" ] || { say "the gateway made no edge client certificate"; exit 1; }
@@ -227,7 +227,7 @@ if ! grep -qE '^[[:space:]]*import[[:space:]]+/etc/caddy/sites/\*\.caddy' /etc/c
 fi
 if ! grep -qE '^[[:space:]]*skip_install_trust[[:space:]]*$' /etc/caddy/Caddyfile; then
   cp /etc/caddy/Caddyfile "/etc/caddy/Caddyfile.bak.$(date +%s).trust"
-  if [ "$(grep -vE '^[[:space:]]*(#|$)' /etc/caddy/Caddyfile | head -n1 | tr -d '[:space:]')" = "{" ]; then
+  if [ "$(grep -vE '^[[:space:]]*(#|$)' /etc/caddy/Caddyfile | awk 'NR==1' | tr -d '[:space:]')" = "{" ]; then
     awk '!done && /^[[:space:]]*\{[[:space:]]*$/ { print; print "\tskip_install_trust"; done = 1; next } { print }' /etc/caddy/Caddyfile > /etc/caddy/Caddyfile.trust
   else
     { printf '{\n\tskip_install_trust\n}\n\n'; cat /etc/caddy/Caddyfile; } > /etc/caddy/Caddyfile.trust
