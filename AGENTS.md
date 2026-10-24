@@ -197,8 +197,7 @@ A prod deployment guarantees nothing; the routine path preserves most things.
 ## Where and how to work
 
 - Work in a plain git worktree or branch of this repository. Do not put a worktree inside another
-  worktree. The org-root `scripts/task-tree.ts` is for the polyrepo work that is left, not for this
-  repository.
+  worktree.
 - Commit small logical commits and push as you go.
 - Before you mark a goal complete cut a release candidate
   - Babysit CI every time you tag a release candidate. You are only allowed to
