@@ -150,7 +150,7 @@ func (s *Service) handleSubmitAccept(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	issuer, ok := s.admit(w, r, market.SubmitAcceptNSID, body.AcceptURI)
-	if !ok || s.suspended(w) {
+	if !ok {
 		return
 	}
 	bidder := s.ready(w, "accept")

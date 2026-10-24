@@ -111,8 +111,9 @@ xrpc() {
 
 Pause a bidder with the root's `spec.suspend`. The Bidder process keeps
 running with `spec.suspendParticipation=true`: it withdraws its offering,
-declines new RFPs and accepts, and still reads the market inbox, so it still
-releases the VMs it runs (acceptance row A2). The root reports `Suspended`; the
+declines new RFPs, still fulfils an accept of a bid it published before the
+pause, and still reads the market inbox, so it still releases the VMs it runs
+(acceptance row A2). The root reports `Suspended`; the
 GuestControlPlane, Pds, IngressProxy, Services and Exposures stay Ready.
 
 ```bash

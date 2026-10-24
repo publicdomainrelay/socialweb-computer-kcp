@@ -52,9 +52,6 @@ func (b *Bidder) SubmitRFP(ctx context.Context, rfpURI, rfpCID, issuer string) (
 }
 
 func (b *Bidder) SubmitAccept(ctx context.Context, acceptURI, acceptCID, issuer string) (string, error) {
-	if b.cfg.Suspend {
-		return "", ErrSuspended
-	}
 	payload := provisionPayload{RequesterDID: issuer}
 	payload.Accept.URI, payload.Accept.CID = acceptURI, acceptCID
 	return b.ensureProvisionSync(ctx, payload)

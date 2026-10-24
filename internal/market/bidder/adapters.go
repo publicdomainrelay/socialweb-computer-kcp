@@ -812,7 +812,7 @@ func (b *Bidder) applyInbox(ctx context.Context, request participant.OutboxReque
 		return participant.Observation{}, err
 	}
 	b.log.Info("market inbox applied", "collection", payload.Collection, "uri", payload.URI, "did", b.cfg.DID)
-	if b.cfg.Suspend && (payload.Collection == market.RFPNSID || payload.Collection == market.AcceptNSID) {
+	if b.cfg.Suspend && payload.Collection == market.RFPNSID {
 		b.log.Info("market inbox declined: the bidder's participation is suspended", "collection", payload.Collection, "uri", payload.URI)
 		b.inboxed.Store(inboxKey(request), true)
 		return participant.InboxObservation(request, payload.URI), nil
