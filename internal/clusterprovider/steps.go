@@ -137,12 +137,16 @@ func (cfg StackConfig) StepsFrom(spec clusterstack.Spec, leases materialiser.Lea
 		if c == procgroup.ComponentOpenBao {
 			ps.Listen = net.JoinHostPort(portallocator.LoopbackAdvertiseAddress, strconv.Itoa(bao.Port))
 		}
-		steps = append(steps, procgroup.Step{
+		st := procgroup.Step{
 			Name:  c,
 			Slot:  slot,
 			Spec:  ps,
 			Ready: cfg.gate(c, spec, bao, api),
-		})
+		}
+		if c == procgroup.ComponentK3s {
+			st.Prepare = repointApiserverClients(spec)
+		}
+		steps = append(steps, st)
 	}
 	return steps, nil
 }

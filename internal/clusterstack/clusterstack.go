@@ -275,6 +275,22 @@ func (s Spec) serverDir() string {
 
 func (s Spec) ServerAdminKubeconfig() string { return AdminKubeconfig(s.serverDir()) }
 
+var k3sApiserverClients = []string{
+	"supervisor.kubeconfig",
+	"controller.kubeconfig",
+	"scheduler.kubeconfig",
+	"api-server.kubeconfig",
+	"cloud-controller.kubeconfig",
+}
+
+func (s Spec) ApiserverClientKubeconfigs() []string {
+	out := make([]string, 0, len(k3sApiserverClients))
+	for _, name := range k3sApiserverClients {
+		out = append(out, filepath.Join(CredDir(s.serverDir()), name))
+	}
+	return out
+}
+
 const RancherEtc = "/etc/rancher"
 
 func (s Spec) RancherDir() string { return filepath.Join(s.serverDir(), "rancher") }
