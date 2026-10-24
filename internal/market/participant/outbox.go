@@ -214,6 +214,7 @@ func (r *outboxRun) reconcile(ctx context.Context) (time.Duration, error) {
 		}
 	}
 	request := r.request()
+	previousAttempt := r.status.LastAttemptAt
 	r.status.LastAttemptAt = r.stamp()
 	observation, err := r.adapter.Observe(ctx, request)
 	if err != nil {
@@ -266,7 +267,8 @@ func (r *outboxRun) reconcile(ctx context.Context) (time.Duration, error) {
 		r.set(v1alpha1.StateSyncConditionDrifted, false, "NoDrift", "there is no observation to drift")
 	}
 	if r.status.Phase == v1alpha1.StateSyncPhaseStalled && prior == r.generation {
-		if wait := stallWait(r.status.LastAttemptAt, r.o.now()); wait > 0 {
+		if wait := stallWait(previousAttempt, r.o.now()); wait > 0 {
+			r.status.LastAttemptAt = previousAttempt
 			r.set(v1alpha1.StateSyncConditionAcked, false, "Stalled", "the attempts are exhausted")
 			r.set(v1alpha1.StateSyncConditionStalled, true, "AttemptsExhausted", "the attempts are exhausted")
 			return wait, r.write(ctx)
