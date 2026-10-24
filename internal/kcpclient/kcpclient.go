@@ -599,7 +599,7 @@ func (c *Client) applySpec(ctx context.Context, caller gateway.Caller, name, ver
 	if err != nil {
 		return gateway.ClusterView{}, fmt.Errorf("kcpclient: %s %s: %w", verb, name, err)
 	}
-	owned := map[string]any{"running": have.Spec.Running, "publishInfra": have.Spec.PublishInfra}
+	owned := map[string]any{"running": have.Spec.Running}
 	maps.Copy(owned, spec)
 	doc := map[string]any{"apiVersion": socialwebResource.String(), "kind": "Cluster", "metadata": map[string]any{"name": name},
 		"spec": owned}
@@ -615,10 +615,6 @@ func (c *Client) applySpec(ctx context.Context, caller gateway.Caller, name, ver
 		return gateway.ClusterView{}, err
 	}
 	return viewOf(out, n), nil
-}
-
-func (c *Client) SetPublishInfra(ctx context.Context, caller gateway.Caller, name string, publish bool) (gateway.ClusterView, error) {
-	return c.applySpec(ctx, caller, name, "set publishInfra", map[string]any{"publishInfra": publish})
 }
 
 func (c *Client) Delete(ctx context.Context, caller gateway.Caller, name string) (gateway.ClusterView, error) {
@@ -877,8 +873,6 @@ func viewOf(cl *v1alpha1.Cluster, nodes int) gateway.ClusterView {
 		Instance:  cl.Status.Instance,
 		Running:   cl.Spec.Running,
 		NodeCount: nodes,
-
-		PublishInfra: cl.Spec.PublishInfra,
 
 		TeardownBlocked: conditionTrue(cl.Status.Conditions, v1alpha1.ConditionTeardownBlocked),
 	}

@@ -53,7 +53,6 @@ var clusterScope = []string{
 	"rpc:com.publicdomainrelay.temp.cluster.controlPlaneUp?aud=*",
 	"rpc:com.publicdomainrelay.temp.cluster.controlPlaneDown?aud=*",
 	"rpc:com.publicdomainrelay.temp.cluster.deleteCluster?aud=*",
-	"rpc:com.publicdomainrelay.temp.cluster.setPublishInfra?aud=*",
 	"repo:" + infrarecord.InfraNSID + "?action=create&action=update&action=delete",
 }
 

@@ -13,7 +13,7 @@ type PrinterColumn = apiresource.PrinterColumn
 type APIResource = apiresource.APIResource
 
 var APIResources = []APIResource{
-	{Kind: "Cluster", Plural: "clusters", Revision: 4, Export: "clusters", Object: Cluster{}},
+	{Kind: "Cluster", Plural: "clusters", Revision: 5, Export: "clusters", Object: Cluster{}},
 	{Kind: "Node", Plural: "nodes", Revision: 2, Export: "clusters", Object: Node{}},
 	{Kind: "NodeClaim", Plural: "nodeclaims", Revision: 11, Export: "clusters", Object: NodeClaim{}},
 	{Kind: "ClusterLink", Plural: "clusterlinks", Revision: 2, Export: "clusters", Object: ClusterLink{}},

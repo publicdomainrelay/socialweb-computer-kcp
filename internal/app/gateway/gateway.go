@@ -796,7 +796,7 @@ func (p *pass) ownerRepos(ctx context.Context, id *v1alpha1.MarketIdentity, sess
 			return fmt.Errorf("composing the repo of the tenant owner %s through the web app session: %w", owner.DID, err)
 		}
 		if pdsURLs[owner.DID] == "" {
-			log.Debug("a tenant owner opted a cluster in; its repo waits for the web app session", "did", owner.DID,
+			log.Debug("a tenant owner has a cluster; its repo waits for the web app session", "did", owner.DID,
 				"identity", compose.OwnerIdentityName(owner.DID))
 		}
 	}

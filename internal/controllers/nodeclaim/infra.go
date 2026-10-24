@@ -83,7 +83,7 @@ func clusterAlive(ctx context.Context, store *kcpstore.Store, cluster commonv1.O
 }
 
 func recordFor(b *contract.Binding, cl *v1alpha1.Cluster) *v1alpha1.InfraRecordBinding {
-	if b.Record == nil || cl == nil || !cl.Spec.PublishInfra || !cl.DeletionTimestamp.IsZero() || strings.TrimSpace(cl.Spec.Account) == "" {
+	if b.Record == nil || cl == nil || !cl.DeletionTimestamp.IsZero() || strings.TrimSpace(cl.Spec.Account) == "" {
 		return nil
 	}
 	return &v1alpha1.InfraRecordBinding{RepoRef: commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: RepoKind,

@@ -54,7 +54,7 @@ func (s *publishers) requests() []ctlruntime.Request {
 func (s *publishers) observe(workspace string, cl *v1alpha1.Cluster) bool {
 	key := workspace + "|" + cl.Name
 	did := strings.TrimSpace(cl.Spec.Account)
-	want := cl.Spec.PublishInfra && cl.DeletionTimestamp == nil && did != ""
+	want := cl.DeletionTimestamp == nil && did != ""
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	prev, had := s.clusters[key]

@@ -4312,13 +4312,16 @@ fail, rather than the code read against this document alone.
   returns ErrSignInAgain, so the runtime's rate-limited backoff (at most 5 minutes) reads the plugin
   again; a new sign-in makes it Ready with no other step (the plugin pushes no session change).
   The Gateway root composes it, as `owner-<stamp>` in `root:<gateway>:app`
-  with label `apps.socialweb.computer/session-owner`, for each DID that opted a Cluster in
-  (`spec.publishInfra`, not deleting) and is not in the market network owner sessions file nor the
-  requester's own, and keeps it while an infra AtprotoRecord names its repo; once the identity has reported
-  the session's PDS (Ready, or SessionExpired after that) it adds the RemotePDS of the session's PDS, the RemoteRepo and the AtprotoRepo `repo-<did>`. The web app
-  scope carries `repo:computer.socialweb.infra` (create, update, delete), so owners sign in again once.
-  A signed-in owner opts in through the web app too: `POST /api/clusters/publish` {name, publish} calls
-  the same SetPublishInfra as the XRPC procedure. Open: the prod reading of done_when (a market network gateway has no public-origin, so no web sign-in).
+  with label `apps.socialweb.computer/session-owner`, for each DID that owns a Cluster (not deleting)
+  and is not in the market network owner sessions file nor the requester's own, and keeps it while an
+  infra AtprotoRecord names its repo; once the identity has reported the session's PDS (Ready, or
+  SessionExpired after that) it adds the RemotePDS of the session's PDS, the RemoteRepo and the
+  AtprotoRepo `repo-<did>`. The web app scope carries `repo:computer.socialweb.infra` (create, update,
+  delete), so owners sign in again once. Every Cluster's Infra is published to its owner's repo; there is
+  no opt-in (the `spec.publishInfra` field, the setPublishInfra procedure and `POST /api/clusters/publish`
+  are removed, 2026-10-24), because Infra is how the gateway and the web app manage compute contracts.
+  Deleting the Cluster deletes its Infra and so its record. Open: the prod reading of done_when (a
+  market network gateway has no public-origin, so no web sign-in).
 - **The market network runs its applications in one kcp: what is left (plan 0019).** The design as built and
   its readings are in section 15, "The market network is one kcp (plan 0019, 2026-10-18)". Open: the web
   app's account and home workspaces (`root:<account>:<home>`, the tenant clusters) still sit at the root of
