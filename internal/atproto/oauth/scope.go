@@ -44,7 +44,7 @@ const (
 var (
 	RequesterOAuthScope = dedupeScopes(
 		[]string{ScopeAtproto},
-		collectionScopes([]string{"create"},
+		collectionScopes([]string{"create", "update"},
 			CollectionComputeVM, CollectionRFP, CollectionAccept, CollectionEvent, CollectionVMDelete,
 			CollectionVMOnNetwork, CollectionPolicyGhaLite, CollectionPolicyTypeScript),
 		[]string{collectionScope(CollectionFedproxyRBAC, "create", "update", "delete")},
