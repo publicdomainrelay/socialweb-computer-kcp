@@ -4290,8 +4290,13 @@ fail, rather than the code read against this document alone.
   object now requeues the roots of its workspace (`intentWatch` in `internal/app/compose/root.go`), which
   it did not for an owned object. The Gateway delete pass stopped its Requester with no look at the
   NodeClaim contracts of its tenant clusters (M4 read: unsafe for a direct delete of the Gateway root;
-  the network's teardown deletes the account workspaces first); it now waits while
-  `compose.HeldContracts` counts a contract that holds a guest. The requester logs `requester_release`,
+  the network's teardown deletes the account workspaces first). It now first deletes every Cluster in
+  the account workspaces (`compose.DeleteAccountClusters`; it writes no Cluster spec) and reports
+  Deleting "<n> Cluster(s) tearing down" while any is left, a Cluster event requeuing a deleting
+  Gateway root (`compose.TeardownWatch`); each Cluster teardown deletes its NodeClaims, which the
+  still-running Requester releases, each bounded by its release deadline; then it waits while
+  `compose.HeldContracts` counts a contract that holds a guest, and only then releases its records and
+  stops its components. The requester logs `requester_release`,
   `requester_release_retry`, `requester_released` and `requester_release_bound`. Readings (same network,
   dev builds of this branch, 2026-10-24 UTC):
   - ACC28-DIRECT-DELETE: `root:a1` Held 03:58:25; delete 03:58:37.628; Terminating with the finalizer
@@ -4318,9 +4323,23 @@ fail, rather than the code read against this document alone.
     `metadata.finalizers: null`; one `requester_release_retry` 04:06:50.324, then
     `requester_contract_gone_unreleased` (phase Releasing, its receipt) once at 04:06:50.353 and no
     further line for the contract until its core stopped at 04:07:05 (the 5 s retry did not run).
+  - M4-GATEWAY-ORDER, before the Cluster teardown (network p28g, main 93f4de91): with the tenant
+    cluster "tenant" holding one Running node and a running pod, the Gateway root deleted at
+    04:24:44.665 stayed Deleting "1 ComputeContract(s) still hold a guest" for 3 min 15 s (the wait had
+    no bound of its own); it went on only after the pod delete and the scale-in deleted the NodeClaim
+    (04:30:00.424): Released 04:30:00.654, Requester deleted 04:30:01.728, root gone 04:30:03.193.
+  - M4-GATEWAY-ORDER, after (network p28h): the same tenant with a Running node and a running pod; the
+    Gateway root deleted at 04:52:59.216; Deleting "1 Cluster(s) tearing down" 04:53:02.353, the Cluster
+    Draining 04:53:02.348; NodeClaim deleted 04:53:12.526, `requester_release` 04:53:12.556,
+    `requester_released` 04:53:12.742 (one attempt), contract Released 04:53:12.767 and gone
+    04:53:13.006; FirecrackerVM backend released 04:53:12.947; Cluster gone 04:53:15.421; Deleting
+    "2 AtprotoRecord(s) ..." 04:53:15.522, "13 component(s) stopping" 04:53:15.857, Requester deleted
+    04:53:16.146, root gone 04:53:16.894 (17.7 s in all). The ComputeVM went at 04:54:44.847 after the
+    k3s guest's graceful stop; no guest, VM unit or account workspace was left.
   Open: `run request --exec` ends its ssh session and stops the requester's core as soon as the contract
   leaves Held, so a contract deleted under a running `run request` is released only when the invocation
-  runs again; the Gateway order (M4) has no live reading with a tenant cluster node.
+  runs again; a root waits for the bidder's release answer, not for the guest's stop, so a ComputeVM can
+  outlive the root by its graceful stop.
 
 - **The guest image is published once, under the key of its pins, on 2026-10-23.** Every tag and
   `main` push rebuilt `firecracker-x86_64` from source (about 15 minutes of the `guest-image` job) and
