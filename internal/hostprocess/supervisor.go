@@ -227,7 +227,7 @@ func (s *Supervisor) reconcileObject(ctx context.Context, o v1alpha1.HostProcess
 	r := Reconcile(obs)
 	next, failed := s.apply(ctx, o, r)
 	err := s.writeStatus(ctx, cur, next)
-	if err != nil && !apierrors.IsConflict(err) {
+	if err != nil && !apierrors.IsConflict(err) && !apierrors.IsNotFound(err) {
 		s.c.log().Warn("writing status", "name", o.Name, "err", err.Error())
 	}
 	s.followOutput(ctx, next)
