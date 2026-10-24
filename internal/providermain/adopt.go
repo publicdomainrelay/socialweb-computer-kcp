@@ -66,6 +66,14 @@ func (h *nodeHosts) adoptClaims(ctx context.Context, cluster string, claims []v1
 		live = append(live, claim)
 	}
 	if len(live) == 0 {
+		h.mu.Lock()
+		_, holds := h.hosts[cluster]
+		h.mu.Unlock()
+		if !holds {
+			if err := h.resetSnapshot(cluster); err != nil {
+				return err
+			}
+		}
 		h.markAdopted(cluster)
 		return nil
 	}

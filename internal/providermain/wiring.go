@@ -434,29 +434,11 @@ func (p *Provider) startJoin(ctx context.Context) (clusterprovider.Ref, error) {
 	}
 	p.log.Info("cluster provider: joining", "cluster", ref.Name, "key", key, "home", ref.Home,
 		"datastore", dsn)
-	if err := p.resetSnapshots([]string{key}); err != nil {
-		return ref, err
-	}
 	p.adoptNodes(ctx, []string{key})
 	if p.nodeScale == nil {
 		p.log.Warn("cluster provider: no node-scale driver; the cluster will not scale its nodes")
 	}
 	return ref, nil
-}
-
-func (p *Provider) resetSnapshots(keys []string) error {
-	if p.nodes == nil {
-		return nil
-	}
-	for _, key := range keys {
-		if err := p.nodes.resetSnapshot(key); err != nil {
-			return fmt.Errorf("clusterprovider: writing the empty instance snapshot for %s before "+
-				"any node exists: %w. The cloud controller manager reads that file to decide which "+
-				"Nodes still have a guest; the provider always writes the file rather than leaving "+
-				"its absence to mean something", key, err)
-		}
-	}
-	return nil
 }
 
 func (p *Provider) adoptNodes(ctx context.Context, keys []string) {
@@ -488,9 +470,6 @@ func (p *Provider) startAll(ctx context.Context) error {
 			return err
 		}
 		keys = append(keys, key)
-	}
-	if err := p.resetSnapshots(keys); err != nil {
-		return err
 	}
 	p.adoptNodes(ctx, keys)
 	p.provider.Reclaim(refs)
