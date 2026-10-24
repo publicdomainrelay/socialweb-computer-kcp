@@ -210,7 +210,7 @@ in_builder "${kbuild_env[@]}" -e KMAKE="$kmake" -e KIMAGE="$kimage" \
   cmp -s /build/config .config || cp /build/config .config
   make -s CC="$KCC" HOSTCC="$KHOSTCC" olddefconfig
   if ! cmp -s .config /build/config; then
-    diff -u /build/config .config | awk 'NR<=40' >&2
+    diff -u /build/config .config | awk "NR<=40" >&2
     echo "the pinned kernel config is not a resolved config: run --resolve-kernel-config" >&2
     exit 1
   fi
