@@ -370,10 +370,6 @@ func (s *Service) inboundMarketURL() string {
 }
 
 func (s *Service) inboundXRPC() bool {
-	switch strings.TrimSpace(s.spec.Mode) {
-	case string(v1alpha1.MarketIdentityModeOAuthQr), string(v1alpha1.MarketIdentityModeOAuthBrowser), string(v1alpha1.MarketIdentityModeOAuthDelegated):
-		return false
-	}
 	if s.spec.Comms == nil {
 		return true
 	}
