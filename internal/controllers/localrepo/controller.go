@@ -84,6 +84,8 @@ type Controller struct {
 
 	feeds map[string]*commitFeed
 
+	ready map[binding.Target]bool
+
 	closed bool
 
 	relays sync.WaitGroup
@@ -101,7 +103,8 @@ func New(opts Options) *Controller {
 		log = slog.New(slog.DiscardHandler)
 	}
 	return &Controller{bus: opts.Bus, network: opts.Network, pds: opts.Pds, log: log.With("component", "localrepo-controller"),
-		backends: binding.New[backend](), commits: make(chan ctlruntime.Request, commitQueue), feeds: map[string]*commitFeed{}}
+		backends: binding.New[backend](), commits: make(chan ctlruntime.Request, commitQueue), feeds: map[string]*commitFeed{},
+		ready: map[binding.Target]bool{}}
 }
 
 func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
@@ -196,8 +199,11 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 	repo := backend{Self: commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: Kind, Name: object.Name, Workspace: req.Workspace},
 		Labels: maps.Clone(object.Labels), Pds: pdsRef, DID: status.DID}
 	pdsKey := binding.Key(pdsRef.Workspace, PdsKind, pdsRef.Name)
+	prior, held := c.backends.Get(req.Workspace, req.Name)
 	c.backends.Set(target, &repo, pdsKey)
-	c.bus.NotifyBound(bus.Key{Workspace: req.Workspace, Kind: Kind, Name: req.Name})
+	if !held || prior.Self != repo.Self || prior.Pds != repo.Pds || prior.DID != repo.DID || !maps.Equal(prior.Labels, repo.Labels) {
+		c.bus.NotifyBound(bus.Key{Workspace: req.Workspace, Kind: Kind, Name: req.Name})
+	}
 	c.follow(pdsKey, pdsRef)
 	c.prune()
 	handle, err := accounts(ctx, c.bus, repo)
@@ -235,7 +241,26 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 	status.Writable = account.SigningKey != ""
 	conds.Set(&status.Conditions, generation, commonv1.ConditionReady, true, ReasonReady,
 		fmt.Sprintf("the Pds %s signs the repo %s in process", pdsRef.Name, status.DID))
-	return ctlruntime.Result{}, c.apply(ctx, req, object, status)
+	if err := c.apply(ctx, req, object, status); err != nil {
+		return ctlruntime.Result{}, err
+	}
+	c.settle(req, true)
+	return ctlruntime.Result{}, nil
+}
+
+func (c *Controller) settle(req ctlruntime.Request, ready bool) {
+	target := binding.Target{Cluster: req.Cluster, Workspace: req.Workspace, Name: req.Name}
+	c.mu.Lock()
+	was := c.ready[target]
+	if ready {
+		c.ready[target] = true
+	} else {
+		delete(c.ready, target)
+	}
+	c.mu.Unlock()
+	if ready && !was {
+		c.bus.NotifyBound(bus.Key{Workspace: req.Workspace, Kind: Kind, Name: req.Name})
+	}
 }
 
 func (c *Controller) resolveFailed(ctx context.Context, req ctlruntime.Request, object *v1alpha1.LocalRepo,
@@ -251,6 +276,7 @@ func (c *Controller) resolveFailed(ctx context.Context, req ctlruntime.Request, 
 
 func (c *Controller) notReady(ctx context.Context, req ctlruntime.Request, object *v1alpha1.LocalRepo, status v1alpha1.AtprotoRepoBackendStatus,
 	reason, message string, cause error) (ctlruntime.Result, error) {
+	c.settle(req, false)
 	status.Writable = false
 	conds.Set(&status.Conditions, object.Generation, commonv1.ConditionReady, false, reason, message)
 	if err := c.apply(ctx, req, object, status); err != nil {
@@ -304,6 +330,9 @@ func syncer(ctx context.Context, b *bus.Bus, repo backend) (pds.Sync, error) {
 
 func (c *Controller) release(target binding.Target) {
 	c.backends.Set(target, nil)
+	c.mu.Lock()
+	delete(c.ready, target)
+	c.mu.Unlock()
 	c.prune()
 }
 

@@ -15,6 +15,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/atprotorepo"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/pds"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/binding"
@@ -190,7 +191,7 @@ func (c *Controller) resolveFailed(ctx context.Context, req ctlruntime.Request, 
 	if errors.Is(err, bus.ErrLinkDenied) {
 		return errors.Join(err, c.fail(ctx, req, object, ReasonLinkDenied, err))
 	}
-	if errors.Is(err, atprotorepo.ErrNotBound) {
+	if errors.Is(err, atprotorepo.ErrNotBound) || errors.Is(err, pds.ErrNotFound) {
 		c.log.Info("an AtprotoRecord waits for its repo binding", "workspace", req.Workspace, "name", object.Name, "err", err.Error())
 		next := object.DeepCopy()
 		next.Status = failed(object, ReasonRepoNotReady, err).Status(object)

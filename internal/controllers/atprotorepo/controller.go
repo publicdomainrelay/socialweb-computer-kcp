@@ -84,6 +84,7 @@ func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
 	}
 	ctl := New(opts)
 	ctl.Provide()
+	ctl.relayBinds()
 	if err := ctlruntime.For[*v1alpha1.AtprotoRepo](m, Name, ctl, ctlruntime.Export(Export),
 		ctlruntime.Watches(func(_ context.Context, src ctlruntime.Request, obj *v1alpha1.LocalRepo) []ctlruntime.Request {
 			return ctl.users(src.Workspace, LocalRepoKind, obj.Name)
@@ -112,6 +113,17 @@ func provide[T any](c *Controller, capability string) {
 		}
 		return bus.Resolve[T](bus.WithCallerLabels(ctx, b.self, b.labels), c.bus, b.self, b.backend,
 			bus.Capability{Name: capability, Scope: scope})
+	})
+}
+
+func (c *Controller) relayBinds() {
+	c.bus.Subscribe(func(key bus.Key) {
+		if !strings.EqualFold(key.Kind, LocalRepoKind) && !strings.EqualFold(key.Kind, RemoteRepoKind) {
+			return
+		}
+		for _, t := range c.bindings.Users(binding.Key(key.Workspace, key.Kind, key.Name)) {
+			c.bus.NotifyBound(bus.Key{Workspace: t.Workspace, Kind: Kind, Name: t.Name})
+		}
 	})
 }
 
