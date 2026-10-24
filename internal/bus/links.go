@@ -234,11 +234,17 @@ type denials struct {
 	byCapability expvar.Map
 
 	log atomic.Pointer[slog.Logger]
+
+	changed chan struct{}
 }
 
 func (d *denials) deny(from Caller, to commonv1.ObjectRef, c Capability) error {
 	d.count.Add(1)
 	d.byCapability.Add(c.Name, 1)
+	select {
+	case d.changed <- struct{}{}:
+	default:
+	}
 	log := d.log.Load()
 	if log == nil {
 		log = slog.Default()

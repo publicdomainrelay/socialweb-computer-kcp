@@ -290,14 +290,16 @@ type Adoption struct {
 }
 
 type Core struct {
-	Generation   int        `json:"generation"`
-	PID          int        `json:"pid"`
-	InvocationID string     `json:"invocationID"`
-	StartedAt    time.Time  `json:"startedAt"`
-	AdoptedAt    time.Time  `json:"adoptedAt"`
-	Adoptions    []Adoption `json:"adoptions"`
-	LastCheck    time.Time  `json:"lastCheck"`
-	Verdicts     []string   `json:"verdicts"`
+	Generation   int               `json:"generation"`
+	PID          int               `json:"pid"`
+	InvocationID string            `json:"invocationID"`
+	StartedAt    time.Time         `json:"startedAt"`
+	AdoptedAt    time.Time         `json:"adoptedAt"`
+	Adoptions    []Adoption        `json:"adoptions"`
+	LastCheck    time.Time         `json:"lastCheck"`
+	Verdicts     []string          `json:"verdicts"`
+	BusDenied    uint64            `json:"busDenied"`
+	BusDeniedBy  map[string]uint64 `json:"busDeniedBy,omitempty"`
 }
 
 func RefuseRoot(euid int) error {

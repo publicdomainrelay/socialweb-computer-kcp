@@ -12,6 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clicfg"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/componentcore"
@@ -27,6 +28,11 @@ type linkRow struct {
 	Accepted     metav1.ConditionStatus            `json:"accepted,omitempty"`
 	ResolvedRefs metav1.ConditionStatus            `json:"resolvedRefs,omitempty"`
 	Message      string                            `json:"message,omitempty"`
+}
+
+type linksView struct {
+	Links     []linkRow   `json:"links"`
+	BusDenies []busDenies `json:"busDenies"`
 }
 
 func linkFrom(f exposurev1alpha1.ComponentLinkFrom) string {
@@ -132,8 +138,18 @@ func runDevLinks(ctx context.Context, a *app, vals clicfg.Values, rest []string)
 			rows = append(rows, newLinkRow(ws, link))
 		}
 	}
+	denies := []busDenies{readBusDenies(l.ID, l.CoreRecord)}
+	if rec.Profile == bootstrap.ProfileMarketNetwork {
+		apps, err := appKcps(ctx, l, rec)
+		if err != nil {
+			denies = append(denies, busDenies{Instance: l.ID, Error: err.Error()})
+		}
+		for _, ak := range apps {
+			denies = append(denies, readBusDenies(ak.instance, ak.coreRecord))
+		}
+	}
 	if vals.Bool("json") {
-		a.printJSON(rows)
+		a.printJSON(linksView{Links: rows, BusDenies: denies})
 		return exitOK
 	}
 	for _, r := range rows {
@@ -142,6 +158,17 @@ func runDevLinks(ctx context.Context, a *app, vals clicfg.Values, rest []string)
 	}
 	if len(rows) == 0 {
 		fmt.Fprintf(a.stdout, "no ComponentLinks in %s of instance %s\n", strings.Join(workspaces, ", "), l.ID)
+	}
+	for _, d := range denies {
+		if d.Error != "" {
+			fmt.Fprintf(a.stdout, "bus denies %-40s unknown: %s\n", d.Instance, d.Error)
+			continue
+		}
+		var by []string
+		for _, c := range slices.Sorted(maps.Keys(d.ByCapability)) {
+			by = append(by, fmt.Sprintf("%s=%d", c, d.ByCapability[c]))
+		}
+		fmt.Fprintf(a.stdout, "bus denies %-40s %d %s\n", d.Instance, d.Denied, strings.Join(by, ","))
 	}
 	return exitOK
 }
