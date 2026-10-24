@@ -540,9 +540,12 @@ func (s *Server) handleSubscribe(w http.ResponseWriter, req *http.Request) {
 		"ingressRef": "did:web:" + subdomain + "." + hostport.HostnameOnly(s.cfg.Hostname),
 	})
 
+	connectedAt := time.Now()
+	var readErr error
 	for {
 		mt, data, err := conn.ReadMessage()
 		if err != nil {
+			readErr = err
 			break
 		}
 		if mt != websocket.TextMessage && mt != websocket.BinaryMessage {
@@ -555,8 +558,19 @@ func (s *Server) handleSubscribe(w http.ResponseWriter, req *http.Request) {
 		}
 		s.handlePeerFrame(p, msg)
 	}
+	s.mu.Lock()
+	replaced := s.peers[subdomain] != p
+	s.mu.Unlock()
 	s.dropPeer(p)
-	s.log.Info("subscriber_disconnected", "subdomain", subdomain)
+	code, reason, cause := 0, "", ""
+	var closeErr *websocket.CloseError
+	if errors.As(readErr, &closeErr) {
+		code, reason = closeErr.Code, closeErr.Text
+	} else if readErr != nil {
+		cause = readErr.Error()
+	}
+	s.log.Info("subscriber_disconnected", "subdomain", subdomain, "after", time.Since(connectedAt).Round(time.Millisecond).String(),
+		"code", code, "reason", reason, "replaced", replaced, "err", cause)
 }
 
 func (s *Server) handlePeerFrame(p *peer, msg frame) {
