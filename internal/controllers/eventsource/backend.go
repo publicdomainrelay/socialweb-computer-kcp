@@ -135,7 +135,8 @@ func (b *Backend[T]) Reconcile(ctx context.Context, req ctlruntime.Request, obj 
 	}
 	b.mu.Lock()
 	e := b.entries[key]
-	if e == nil {
+	created := e == nil
+	if created {
 		e = &backendEntry[T]{b: b, ref: commonv1.ObjectRef{Group: eventsv1.GroupName, Kind: b.kind, Name: obj.GetName(), Workspace: req.Workspace}}
 		e.flush = debounce.New(b.flushDelay, e.flushNow)
 		b.entries[key] = e
@@ -146,8 +147,12 @@ func (b *Backend[T]) Reconcile(ctx context.Context, req ctlruntime.Request, obj 
 	if e.tracker == nil || e.upstream.CountGaps != upstream.CountGaps || e.upstream.Address != upstream.Address {
 		e.tracker = delivery.NewTracker(delivery.TrackerConfig{CountGaps: upstream.CountGaps, Seed: b.status(obj).Cursor})
 	}
+	recorded := created || e.obj.GetUID() != obj.GetUID() || e.obj.GetGeneration() != obj.GetGeneration()
 	e.req, e.obj, e.upstream, e.invalid = req, obj, upstream, err
 	e.mu.Unlock()
+	if recorded {
+		b.bus.NotifyBound(bus.Key{Workspace: req.Workspace, Kind: b.kind, Name: obj.GetName()})
+	}
 	if err != nil {
 		b.log.Warn("the event source spec is invalid; it waits for a spec change", "workspace", req.Workspace, "name", obj.GetName(), "err", err.Error())
 	}
@@ -225,7 +230,7 @@ func (b *Backend[T]) open(ctx context.Context, to commonv1.ObjectRef, _ []string
 	e := b.entries[entryKey(to.Workspace, to.Name)]
 	b.mu.Unlock()
 	if e == nil {
-		return nil, fmt.Errorf("%w: %s", ErrNotReady, to.String())
+		return nil, fmt.Errorf("%w: %s", ErrNotReconciled, to.String())
 	}
 	e.mu.Lock()
 	req, obj, invalid := e.req, e.obj, e.invalid
@@ -241,7 +246,7 @@ func (b *Backend[T]) open(ctx context.Context, to commonv1.ObjectRef, _ []string
 		return nil, fmt.Errorf("eventsource: reading %s: %w", to.String(), err)
 	}
 	if live.GetUID() != obj.GetUID() || live.GetGeneration() != obj.GetGeneration() {
-		return nil, fmt.Errorf("%w: %s changed since its last reconcile", ErrNotReady, to.String())
+		return nil, fmt.Errorf("%w: %s changed since its last reconcile", ErrNotReconciled, to.String())
 	}
 	return handle[T]{e: e}, nil
 }

@@ -68,6 +68,7 @@ func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
 	c := &Controller{bus: opts.Bus, log: log.With("component", "eventsource-controller"), sources: map[string]sourceEntry{},
 		byBackend: map[string]map[string]bool{}}
 	bus.Provide[events.Source](opts.Bus, schema.GroupKind{Group: eventsv1.GroupName, Kind: eventsv1.EventSourceKind}, events.CapabilitySubscribe, c.open)
+	c.relayBinds()
 	err := ctlruntime.For[*eventsv1.EventSource](m, Name, c, ctlruntime.Export(Export),
 		ctlruntime.Watches[*eventsv1.PdsEventSource](func(_ context.Context, src ctlruntime.Request, _ *eventsv1.PdsEventSource) []ctlruntime.Request {
 			return c.sourcesOf(src, eventsv1.PdsEventSourceKind)
@@ -82,6 +83,23 @@ func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
 		return nil, fmt.Errorf("eventsource: registering the EventSource controller: %w", err)
 	}
 	return c, nil
+}
+
+func (c *Controller) relayBinds() {
+	c.bus.Subscribe(func(k bus.Key) {
+		if obj, _ := backendObject(k.Kind); obj == nil {
+			return
+		}
+		c.mu.Lock()
+		names := make([]string, 0, len(c.byBackend[backendKey(k.Workspace, k.Kind, k.Name)]))
+		for name := range c.byBackend[backendKey(k.Workspace, k.Kind, k.Name)] {
+			names = append(names, name)
+		}
+		c.mu.Unlock()
+		for _, name := range names {
+			c.bus.NotifyBound(bus.Key{Workspace: k.Workspace, Kind: eventsv1.EventSourceKind, Name: name})
+		}
+	})
 }
 
 func backendKey(workspace, kind, name string) string {
@@ -223,7 +241,7 @@ func (c *Controller) open(ctx context.Context, to commonv1.ObjectRef, scope []st
 	}
 	if b := meta.FindStatusCondition(live.Status.Conditions, eventsv1.EventSourceConditionBackendBound); b == nil || b.Status != metav1.ConditionTrue ||
 		b.ObservedGeneration != live.Generation {
-		return nil, fmt.Errorf("%w: %s is not bound to its backend", ErrNotReady, to.String())
+		return nil, fmt.Errorf("%w: %s is not bound to its backend", ErrNotReconciled, to.String())
 	}
 	self := commonv1.ObjectRef{Group: eventsv1.GroupName, Kind: eventsv1.EventSourceKind, Name: live.Name, Workspace: to.Workspace}
 	return bus.Resolve[events.Source](ctx, c.bus, self, entry.backend, bus.Capability{Name: events.CapabilitySubscribe, Scope: scope})
