@@ -32,6 +32,7 @@ type Config struct {
 	RelayTimeout      time.Duration
 	KeepaliveInterval time.Duration
 	KeepaliveTimeout  time.Duration
+	EvictAfter        time.Duration
 	ReconnectGrace    time.Duration
 	NonceTTL          time.Duration
 	AdditionalHosts   []string
@@ -215,6 +216,7 @@ func NewServer(cfg Config) (*Server, error) {
 	cfg.RelayTimeout = opt.Positive(cfg.RelayTimeout, 30*time.Second)
 	cfg.KeepaliveInterval = opt.Positive(cfg.KeepaliveInterval, 5*time.Second)
 	cfg.KeepaliveTimeout = opt.Positive(cfg.KeepaliveTimeout, 5*time.Second)
+	cfg.EvictAfter = max(opt.Positive(cfg.EvictAfter, 90*time.Second), cfg.KeepaliveTimeout)
 	cfg.NonceTTL = opt.Positive(cfg.NonceTTL, 60*time.Second)
 	cfg.MaxBodyBytes = opt.Positive(cfg.MaxBodyBytes, DefaultMaxBodyBytes)
 	if cfg.Logger == nil {
@@ -518,7 +520,7 @@ func (s *Server) handleSubscribe(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	p := &peer{conn: conn, did: clientDID, subdomain: subdomain, expiresAt: auth.ExpiresAt, gone: make(chan struct{})}
+	p := &peer{conn: conn, did: clientDID, subdomain: subdomain, expiresAt: auth.ExpiresAt, gone: make(chan struct{}), lastResponse: time.Now()}
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
@@ -792,10 +794,12 @@ func (s *Server) dispatch(ctx context.Context, subdomain string, f map[string]an
 			delete(s.pending, requestID)
 		}
 		current := s.peers[subdomain]
-		unresponsive := current == p && time.Since(p.lastResponse) >= timeout
+		silent := time.Since(p.lastResponse)
+		unresponsive := current == p && silent >= s.cfg.EvictAfter
 		s.mu.Unlock()
 		if unresponsive {
-			s.evictPeer(p, 1011, fmt.Sprintf("subscriber unresponsive after %dms", timeout.Milliseconds()))
+			s.log.Info("subscriber_evicted", "subdomain", subdomain, "silent", silent.Round(time.Second).String())
+			s.evictPeer(p, 1011, fmt.Sprintf("subscriber unresponsive for %ds", int(silent.Seconds())))
 		}
 		return Response{}, fmt.Errorf("relay timeout after %dms", timeout.Milliseconds())
 	case <-ctx.Done():
