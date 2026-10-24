@@ -1,6 +1,6 @@
 plan: "0031"
 title: "Gateway tenant-cluster nodes are managed through one Infra per Cluster; a NodeClaim keeps the join, the grant and the secrets"
-status: doing
+status: done
 source: >
   2026-10-23, the user's request (gateway tenant-cluster nodes are managed through Infra), read
   against main at 1dc14655 (plans 0028 and 0029 merged). Today every node of a tenant cluster is one
@@ -355,7 +355,7 @@ items:
       the lead.
     files: []
     done_when: "On prod, alice opts a cluster in and getRecord on her repo returns its computer.socialweb.infra record."
-    status: todo
+    status: done
 
   - id: DOCS
     title: "Code map and the gateway section"
