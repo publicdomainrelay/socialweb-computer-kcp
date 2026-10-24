@@ -20,8 +20,6 @@ type StatusError interface {
 	HTTPStatus() int
 }
 
-// Do runs call, and once more after src.Invalidate when isAuthErr reports the
-// first error as an auth failure. A nil isAuthErr means IsAuthErr.
 func Do[T any](ctx context.Context, src Invalidator, call func(context.Context) (T, error), isAuthErr func(error) bool) (T, error) {
 	if isAuthErr == nil {
 		isAuthErr = IsAuthErr
@@ -49,7 +47,6 @@ func Status(err error) int {
 	return 0
 }
 
-// IsAuthErr reports a 401, or a 400 or 403 whose message names an expired or invalid token.
 func IsAuthErr(err error) bool {
 	switch Status(err) {
 	case http.StatusUnauthorized:
@@ -60,7 +57,6 @@ func IsAuthErr(err error) bool {
 	return false
 }
 
-// IsAuthOrForbidden reports a 401 or any 403, for servers such as OpenBao that answer an expired token with 403.
 func IsAuthOrForbidden(err error) bool {
 	switch Status(err) {
 	case http.StatusUnauthorized, http.StatusForbidden:

@@ -11,16 +11,12 @@ import (
 
 const forwardBuffer = 64
 
-// Go runs fn under the manager: it starts with the manager, its context ends
-// when the manager stops, and the manager joins it before Start returns.
 func (m *Manager) Go(name string, fn func(context.Context) error) error {
 	return m.mgr.GetLocalManager().Add(manager.RunnableFunc(func(ctx context.Context) error {
 		return supervise.Run(ctx, name, fn)
 	}))
 }
 
-// Forward sends the requests fan returns for each value of in to the
-// returned channel, until in closes or the manager stops.
 func Forward[V any](m *Manager, name string, in <-chan V, fan func(V) []Request) (<-chan Request, error) {
 	out := make(chan Request, forwardBuffer)
 	err := m.Go(name, func(ctx context.Context) error {
@@ -51,8 +47,6 @@ func Forward[V any](m *Manager, name string, in <-chan V, fan func(V) []Request)
 	return out, nil
 }
 
-// Queue collects requests without blocking the caller; Run drains them to
-// a channel under the manager.
 type Queue struct {
 	mu      sync.Mutex
 	pending []Request

@@ -93,8 +93,6 @@ func lockPath(b Block, i int) string {
 	return filepath.Join(LockDir(), strconv.Itoa(b.First)+"-"+strconv.Itoa(i)+".lock")
 }
 
-// TakeForProcess locks a free slot of b and returns its range with the held
-// lock file; the slot stays taken until the caller closes the file.
 func TakeForProcess(b Block) (portallocator.Range, *os.File, error) {
 	if err := os.MkdirAll(LockDir(), 0o700); err != nil {
 		return portallocator.Range{}, nil, fmt.Errorf("%w: %s: %v", ErrNoLockDir, LockDir(), err)

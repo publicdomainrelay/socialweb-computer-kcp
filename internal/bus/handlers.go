@@ -72,8 +72,6 @@ type streamKey struct {
 	name string
 }
 
-// New returns a bus that serves until Stop. Its root keeps the values of ctx
-// but not its cancel, so calls made while the caller shuts down still run.
 func New(ctx context.Context) *Bus {
 	root, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	r := &Bus{

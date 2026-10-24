@@ -58,7 +58,6 @@ func New[K comparable, V any](opts Options) *Cache[K, V] {
 	}
 }
 
-// OnEvict sets f to run under the cache lock for every value that leaves or is replaced in the cache; f must not call the cache.
 func (c *Cache[K, V]) OnEvict(f func(K, V)) *Cache[K, V] {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -76,14 +75,12 @@ func (c *Cache[K, V]) Set(key K, value V) {
 	c.SetTTL(key, value, 0)
 }
 
-// SetTTL stores value for ttl; zero means the cache TTL, negative drops the key.
 func (c *Cache[K, V]) SetTTL(key K, value V, ttl time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.setLocked(key, value, ttl)
 }
 
-// Add stores value only when key holds no live entry and reports whether it stored.
 func (c *Cache[K, V]) Add(key K, value V, ttl time.Duration) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -122,7 +119,6 @@ func (c *Cache[K, V]) DeleteFunc(drop func(K, V) bool) int {
 	return dropped
 }
 
-// DeleteKeys drops matching entries and marks matching in-flight loads so their results are not stored.
 func (c *Cache[K, V]) DeleteKeys(drop func(K) bool) int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -185,8 +181,6 @@ func (c *Cache[K, V]) Loading() int {
 	return len(c.flights)
 }
 
-// GetOrLoad returns the cached value or runs load once per key for all concurrent callers.
-// The ttl load returns follows SetTTL; a load error is returned and not stored.
 func (c *Cache[K, V]) GetOrLoad(ctx context.Context, key K, load func(context.Context) (V, time.Duration, error)) (V, error) {
 	c.mu.Lock()
 	if value, ok := c.getLocked(key); ok {

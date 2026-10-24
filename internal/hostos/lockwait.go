@@ -15,9 +15,6 @@ const (
 
 var ErrLockHeld = errors.New("hostos: the lock stayed held")
 
-// LockWait takes the lock on f without blocking in the kernel: it retries a
-// non-blocking lock with backoff until it holds the lock, wait passes or ctx
-// ends.
 func LockWait(ctx context.Context, f *os.File, how int, wait time.Duration) error {
 	ctx, cancel := context.WithTimeout(ctx, wait)
 	defer cancel()
