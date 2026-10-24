@@ -423,19 +423,28 @@ rm -rf "$W"
 
 ## 7. Per-component pause checks (A1-A4)
 
-On the oauthQr bidder, record the heartbeat `createdAt` before pausing:
+On the oauthQr bidder, define the heartbeat reader:
 
 ```bash
 BOB=$(ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl get marketidentities.socialweb.computer bidder -o jsonpath='{.status.did}'")
 PDS=$(ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl get marketidentities.socialweb.computer bidder -o jsonpath='{.status.pdsUrl}'")
 hb() { curl -sS "$PDS/xrpc/com.atproto.repo.getRecord?repo=$BOB&collection=com.publicdomainrelay.temp.market.heartbeat&rkey=self" | jq -r .value.createdAt; }
-hb
 ```
 
-Pause only Bidder, wait 180 s, and compare:
+Pause only Bidder and wait until the Bidder runs the paused generation
+(`spec.suspendParticipation` is `true` and `status.observedGeneration` equals
+`metadata.generation`); a heartbeat sent between the patch and that point is
+the old generation's last one:
 
 ```bash
 ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl patch marketbidders.socialweb.computer app --type merge -p '{\"spec\":{\"components\":{\"Bidder\":{\"suspend\":true}}}}'"
+ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl get bidders.socialweb.computer bidder -o jsonpath='{.spec.suspendParticipation} {.metadata.generation} {.status.observedGeneration}{\"\n\"}'"
+```
+
+Then record the heartbeat, wait 180 s, and compare:
+
+```bash
+hb
 sleep 180
 hb
 ```
