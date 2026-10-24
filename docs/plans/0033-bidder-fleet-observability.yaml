@@ -129,6 +129,17 @@ learnings:
       update on each collection it writes at a fixed rkey (fixed ca681018, 5f31bd25). A fleet view
       should keep per contract these step times; a step that is suddenly slower on one host (the
       tunnel step above all) is the first sign of trouble there.
+  - id: L13-IDENTITY-MODE-SHAPES-REACHABILITY
+    text: >
+      The three bidders were not alike: local and hat-9 run identity mode localRepo, hat-7 oauthQr.
+      Until rc103 an OAuth-mode bidder put no endpoint in its offering and heard RFPs only through its
+      firehose sources (gateway-pds on hat-7), so the gateway's RFPs reached it but a requester posting
+      to bsky.social never did (browser run 14, 'requester_no_bidders: the offering names no endpoint',
+      seen at once thanks to 267ae116). On rc103 hat-7 served the browser end to end (run 15: Held 30 s,
+      shell as root). After each install hat-7's first offering write failed ('the repo has no bound
+      backend') and the 60 s refresh corrected it, so for a minute a restarted OAuth bidder advertises
+      a stale offering. A fleet view should list per bidder its identity mode, comms mode, the offering's
+      endpoint and the offering's age, and flag a bidder whose offering has no endpoint.
 items:
   - id: F1-INVENTORY
     title: "A fleet inventory object: which bidders exist, where, on which version"
