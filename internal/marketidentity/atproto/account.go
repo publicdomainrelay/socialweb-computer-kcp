@@ -58,6 +58,7 @@ func (a *Accounts) pdsAccount(ctx context.Context, workspace string, id *v1alpha
 		message := fmt.Sprintf("com.atproto.server.createSession at %s: %v", credential.pdsURL, err)
 		return failed(status, generation, "SignInFailed", message), errors.New(message)
 	}
+	a.log.Info("pds_session_created", "workspace", workspace, "identity", id.Name, "did", session.DID.String(), "pds", credential.pdsURL)
 	if ref != nil {
 		if err := savePdsSession(ctx, vault, *ref, credential.pdsURL, session); err != nil {
 			return pending(status, generation, "SessionStoreFailed", err.Error()), err

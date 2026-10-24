@@ -109,7 +109,8 @@ func (a *Accounts) holdBearer(ctx context.Context, workspace string, id *v1alpha
 		return err
 	}
 	held.ref = *ref
-	held.auth.HoldBearer(did, identity.NewBearerTokens(secretStore{vault: vault, ref: *ref}, pdsURL, client))
+	held.auth.HoldBearer(did, identity.NewBearerTokens(secretStore{vault: vault, ref: *ref}, pdsURL, client,
+		a.log.With("workspace", workspace, "identity", id.Name)))
 	return nil
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"net/http"
 	"strings"
@@ -229,6 +230,8 @@ type Bearer struct {
 
 	http *http.Client
 
+	log *slog.Logger
+
 	mu sync.Mutex
 
 	access string
@@ -239,8 +242,11 @@ var (
 	_ pdsclient.TokenRefresher = (*Bearer)(nil)
 )
 
-func NewBearerTokens(store Store, pdsURL string, client *http.Client) *Bearer {
-	return &Bearer{store: store, pdsURL: strings.TrimRight(strings.TrimSpace(pdsURL), "/"), http: client}
+func NewBearerTokens(store Store, pdsURL string, client *http.Client, log *slog.Logger) *Bearer {
+	if log == nil {
+		log = slog.New(slog.DiscardHandler)
+	}
+	return &Bearer{store: store, pdsURL: strings.TrimRight(strings.TrimSpace(pdsURL), "/"), http: client, log: log}
 }
 
 func (t *Bearer) AccessToken(ctx context.Context) (string, error) {
@@ -293,5 +299,6 @@ func (t *Bearer) renewLocked(ctx context.Context, rejected bool) (string, error)
 	if err := t.store.Write(ctx, updated); err != nil {
 		return "", fmt.Errorf("identity: storing the refreshed session: %w", err)
 	}
+	t.log.Info("pds_session_refreshed", "did", session.DID.String(), "pds", t.pdsURL, "rejected", rejected)
 	return t.access, nil
 }
