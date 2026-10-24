@@ -369,41 +369,25 @@ func (r *Runtime) forget(inst *instance) {
 func (r *Runtime) startLocked(ctx context.Context, inst *instance, spec ComponentSpec) (ComponentStatus, error) {
 	factory, err := r.factoryFor(spec.Kind)
 	if err != nil {
-		st := failedStatus(spec, inst.restartsOf(), err)
-		r.emit(ctx, spec, st)
-		return st, err
+		return r.failLocked(ctx, inst, spec, err)
 	}
 	root, err := r.rootContext()
 	if err != nil {
-		st := failedStatus(spec, inst.restartsOf(), err)
-		r.emit(ctx, spec, st)
-		return st, err
+		return r.failLocked(ctx, inst, spec, err)
 	}
 	in := r.instanceOf(spec)
 	if in.StateDir == "" {
-		err := fmt.Errorf("component: %s/%s has no state dir", spec.Kind, spec.Name)
-		st := failedStatus(spec, inst.restartsOf(), err)
-		r.emit(ctx, spec, st)
-		return st, err
+		return r.failLocked(ctx, inst, spec, fmt.Errorf("component: %s/%s has no state dir", spec.Kind, spec.Name))
 	}
 	if err := r.prepareStateDir(in.StateDir); err != nil {
-		err := fmt.Errorf("component: creating the state dir for %s/%s: %w", spec.Kind, spec.Name, err)
-		st := failedStatus(spec, inst.restartsOf(), err)
-		r.emit(ctx, spec, st)
-		return st, err
+		return r.failLocked(ctx, inst, spec, fmt.Errorf("component: creating the state dir for %s/%s: %w", spec.Kind, spec.Name, err))
 	}
-	svc, err := r.callFactory(ctx, spec, factory, in)
-	if err != nil {
-		err := fmt.Errorf("component: building %s/%s: %w", spec.Kind, spec.Name, err)
-		st := failedStatus(spec, inst.restartsOf(), err)
-		r.emit(ctx, spec, st)
-		return st, err
-	}
-	if svc == nil {
-		err := fmt.Errorf("component: the factory for %s/%s returned no service", spec.Kind, spec.Name)
-		st := failedStatus(spec, inst.restartsOf(), err)
-		r.emit(ctx, spec, st)
-		return st, err
+	svc, buildErr := r.callFactory(ctx, spec, factory, in)
+	switch {
+	case buildErr != nil:
+		svc, buildErr = nil, fmt.Errorf("component: building %s/%s: %w", spec.Kind, spec.Name, buildErr)
+	case svc == nil:
+		buildErr = fmt.Errorf("component: the factory for %s/%s returned no service", spec.Kind, spec.Name)
 	}
 	runCtx, cancel := context.WithCancel(specCaller(root, spec))
 	done := make(chan struct{})
@@ -422,7 +406,7 @@ func (r *Runtime) startLocked(ctx context.Context, inst *instance, spec Componen
 	inst.status = startingStatus(spec, restarts)
 	inst.status.StartedAt = startedAt
 	st := inst.status
-	inst.running = true
+	inst.running = buildErr == nil
 	inst.started = true
 	inst.ended = false
 	inst.stopping = false
@@ -430,9 +414,20 @@ func (r *Runtime) startLocked(ctx context.Context, inst *instance, spec Componen
 	inst.supervising = true
 	inst.mu.Unlock()
 
-	r.emit(ctx, spec, st)
-	go r.supervise(inst, spec, in, svc, runCtx, done, attempt)
+	if buildErr == nil {
+		r.emit(ctx, spec, st)
+	}
+	go r.supervise(inst, spec, in, svc, buildErr, runCtx, done, attempt)
 	return st, nil
+}
+
+func (r *Runtime) failLocked(ctx context.Context, inst *instance, spec ComponentSpec, err error) (ComponentStatus, error) {
+	inst.mu.Lock()
+	st := failedStatus(spec, inst.restarts, err)
+	inst.spec, inst.status, inst.started = spec, cloneStatus(st), true
+	inst.mu.Unlock()
+	r.emit(ctx, spec, st)
+	return st, err
 }
 
 func (r *Runtime) stopInstanceLocked(ctx context.Context, inst *instance) error {
@@ -490,7 +485,7 @@ func (r *Runtime) stopInstanceLocked(ctx context.Context, inst *instance) error 
 	return stopErr
 }
 
-func (r *Runtime) supervise(inst *instance, spec ComponentSpec, in Instance, svc Service, runCtx context.Context, done chan struct{}, attempt uint64) {
+func (r *Runtime) supervise(inst *instance, spec ComponentSpec, in Instance, svc Service, buildErr error, runCtx context.Context, done chan struct{}, attempt uint64) {
 	defer func() {
 		inst.mu.Lock()
 		inst.ended = true
@@ -506,9 +501,16 @@ func (r *Runtime) supervise(inst *instance, spec ComponentSpec, in Instance, svc
 	restarts := inst.restartsOf()
 	for {
 		if svc == nil {
-			next, ferr := r.buildService(runCtx, spec, in)
+			var next Service
+			ferr := buildErr
+			buildErr = nil
+			if ferr == nil {
+				next, ferr = r.buildService(runCtx, spec, in)
+			}
 			if ferr != nil {
 				restarts++
+				r.log.Warn("component: building the service failed", "component", spec.Kind+"/"+spec.Name, "workspace", spec.Workspace,
+					"restarts", restarts, "retryIn", r.backoffFor(restarts).String(), "err", ferr)
 				st := failedStatus(spec, restarts, ferr)
 				st.StartedAt = inst.startedAtOf()
 				inst.updateStatus(attempt, st, restarts, false)

@@ -140,7 +140,7 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 		return ctlruntime.Result{}, err
 	}
 	if err != nil {
-		r.c.log.Warn("the component did not start; the component runtime supervises it", "kind", r.kind, "workspace", req.Workspace,
+		r.c.log.Warn("the component did not start; it waits for a change of its spec", "kind", r.kind, "workspace", req.Workspace,
 			"name", req.Name, "err", err.Error())
 	}
 	if current, ok := r.c.runtime.Status(spec.UID); ok {
