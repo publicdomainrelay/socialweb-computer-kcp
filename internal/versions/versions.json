@@ -383,8 +383,8 @@
         "linux/arm64": {"kind": "script", "script": "scripts/build-web-app-downloads.sh", "members": {"socialweb-meshd-x86_64": "socialweb-meshd-x86_64", "socialweb-meshd-x86_64.sha256": "socialweb-meshd-x86_64.sha256", "socialweb-meshd-aarch64": "socialweb-meshd-aarch64", "socialweb-meshd-aarch64.sha256": "socialweb-meshd-aarch64.sha256", "socialweb-node-x86_64": "socialweb-node-x86_64", "socialweb-node-x86_64.sha256": "socialweb-node-x86_64.sha256", "socialweb-node-aarch64": "socialweb-node-aarch64", "socialweb-node-aarch64.sha256": "socialweb-node-aarch64.sha256"}}
       },
       "platforms": {
-        "linux/amd64": {"treeSha256": "1ca1cd48b03442816ef2faa312258757e294329a6b94ced43d53496096a6f7fd", "rawBytes": 40489360, "zstdBytes": 12277092},
-        "linux/arm64": {"treeSha256": "1ca1cd48b03442816ef2faa312258757e294329a6b94ced43d53496096a6f7fd", "rawBytes": 40489360, "zstdBytes": 12277092}
+        "linux/amd64": {"treeSha256": "74cb4a8900b2adb1f1e69c2542366760e426905b89f4a8c9a9e4b4af520eac50", "rawBytes": 40489360, "zstdBytes": 12275975},
+        "linux/arm64": {"treeSha256": "74cb4a8900b2adb1f1e69c2542366760e426905b89f4a8c9a9e4b4af520eac50", "rawBytes": 40489360, "zstdBytes": 12275975}
       }
     }
   },
