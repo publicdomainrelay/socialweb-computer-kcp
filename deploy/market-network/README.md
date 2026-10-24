@@ -463,8 +463,13 @@ then gives the Infra `spec.record` (`repoRef: AtprotoRepo/repo-<owner did>` in
 name, state, vmName and bidder DIDs and the observed phases, never `spec.nodes`,
 `spec.secrets`, user data or the node policy. The gateway composes that repo for
 the owner of `owner-sessions.json`: a `pdsAccount` MarketIdentity
-`owner-<16 hex>`, a RemoteRepo and the AtprotoRepo, in `root:gateway:app`. The
-record is push-only: an edit or a delete made on the PDS is written over. With
+`owner-<16 hex>`, a RemoteRepo and the AtprotoRepo, in `root:gateway:app`. For
+an owner who opts a cluster in and is not in that file, it composes the
+MarketIdentity `owner-<16 hex>` in mode `oauthSessionProxy` instead (label
+`apps.socialweb.computer/session-owner`): it reads the owner's web app session
+from the root vault's atproto auth mount, and without one it reads
+`SessionExpired` with reason `NoSession`, so no repo is composed and the Infra
+reports Synced False RecordUnavailable. The record is push-only: an edit or a delete made on the PDS is written over. With
 `"publish": false` the Infra unbinds and the record stays with its last content
 (`status.record.direction: Retained`); the record goes with the Infra when the
 cluster's last node goes.

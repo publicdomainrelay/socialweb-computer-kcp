@@ -4272,6 +4272,21 @@ fail, rather than the code read against this document alone.
   the repo, and a fresh nonce is shown. A restart keeps the association because the watch re-verifies
   the operator's record. The associateConfirm call stays a fast path for an allow-listed operator.
   Open: the did-key-associator QR page (qr.fedfork.com) does not yet copy `n` into the record it writes.
+- **A prod tenant owner's repo through the web app session (plan 0031 REC9-PROD-OWNER-SESSION).** Built: the
+  MarketIdentity mode `oauthSessionProxy` (`spec.did`, `spec.sessionRef` {Vault `root-vault`, mount
+  `auth/atproto`, path `session/<did>`}) reads the session the openbao-plugin-auth-atproto mount holds
+  through the bus capability `vault.atproto.session` (contract `vault.AtprotoSessions`, the handle logs in
+  as the root vault client `atproto-session-proxy`, policy `atproto-session-proxy`, scope the one session
+  path the ComponentLink grants); its pds.Authenticator asks the plugin's proof endpoint for one access
+  token and one DPoP proof per request, and only the plugin refreshes the session. No session, or an
+  expired or revoked one, is phase SessionExpired with reason NoSession or SessionInactive and
+  pendingAction signInAgain. The Gateway root composes it, as `owner-<stamp>` in `root:<gateway>:app`
+  with label `apps.socialweb.computer/session-owner`, for each DID that opted a Cluster in
+  (`spec.publishInfra`, not deleting) and is not in the market network owner sessions file nor the
+  requester's own, and keeps it while an infra AtprotoRecord names its repo; once the identity is Ready it
+  adds the RemotePDS of the session's PDS, the RemoteRepo and the AtprotoRepo `repo-<did>`. The web app
+  scope carries `repo:computer.socialweb.infra` (create, update, delete), so owners sign in again once.
+  Open: the prod reading of done_when (a market network gateway has no public-origin, so no web sign-in).
 - **The market network runs its applications in one kcp: what is left (plan 0019).** The design as built and
   its readings are in section 15, "The market network is one kcp (plan 0019, 2026-10-18)". Open: the web
   app's account and home workspaces (`root:<account>:<home>`, the tenant clusters) still sit at the root of
