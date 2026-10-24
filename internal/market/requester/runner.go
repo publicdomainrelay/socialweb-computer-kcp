@@ -327,14 +327,10 @@ func (r *contractRunner) requestOnce(ctx context.Context) (bool, error) {
 	r.step(ctx, "preparing", 1)
 
 	if state.Payload == nil || state.Payload.URI == "" {
-		payloadRecord := map[string]any{
-			"$type":     market.ComputeVMNSID,
-			"role":      vmName,
-			"cpus":      DefaultComputeCPUs,
-			"mem":       DefaultComputeMem,
-			"disk":      DefaultComputeDisk,
-			"user_data": userData,
-			"createdAt": q.nowISO(),
+		payloadRecord, err := market.EncodeRecord(market.ComputeVM{Role: vmName, Cpus: DefaultComputeCPUs, Mem: DefaultComputeMem,
+			Disk: DefaultComputeDisk, UserData: userData, CreatedAt: q.nowISO()})
+		if err != nil {
+			return false, fmt.Errorf("encode the compute.vm record: %w", err)
 		}
 		payload, err := q.repo.CreateRecord(ctx, q.repoDID, market.ComputeVMNSID, payloadRecord)
 		if err != nil {
@@ -1225,10 +1221,9 @@ func (q *Requester) destroyEnvelope(ctx context.Context, receipt *commonv1.Stron
 		return market.SignedRecord{}, market.SignedRecord{}, fmt.Errorf("read the destroy payload: %w", err)
 	}
 	if !foundPayload {
-		payloadRecord := map[string]any{
-			"$type":     market.ComputeEventsVMDeleteNSID,
-			"reason":    reason,
-			"createdAt": q.nowISO(),
+		payloadRecord, err := market.EncodeRecord(market.ComputeEventsVMDelete{Reason: reason, CreatedAt: q.nowISO()})
+		if err != nil {
+			return market.SignedRecord{}, market.SignedRecord{}, fmt.Errorf("encode the destroy payload: %w", err)
 		}
 		payload, err = market.CreateSignedRecordAt(ctx, q.repo, q.repoDID, market.ComputeEventsVMDeleteNSID, payloadRKey, payloadRecord, q.signer)
 		if err != nil {
