@@ -1,6 +1,6 @@
 plan: "0028"
 title: "A deleted ComputeContract releases its guest: a requester finalizer, a runner that stops on Gone, and roots that release before they stop"
-status: todo
+status: doing
 source: >
   2026-10-23, read from the code at ba5d120f; not yet seen live. A ComputeContract carries no
   finalizer. The marketintents forwarder registers the ComputeContract kind without
@@ -58,7 +58,7 @@ items:
       Both runs are read: after each delete no vm.delete record exists for the contract, the
       bidder's Bid stays Won, its ComputeVM and FirecrackerVM stay Running for at least 5m, and the
       requester logs no requester_release line for the contract.
-    status: todo
+    status: done
 
   - id: M1-CONTRACT-FINALIZER
     title: "The requester holds a release finalizer on every ComputeContract it runs"
@@ -91,7 +91,7 @@ items:
     done_when: >
       ACC28-DIRECT-DELETE, ACC28-DELETE-BEFORE-ACCEPT and ACC28-DELETE-WHILE-STOPPED pass; go
       generate ./api/... leaves no diff; the bidder's forwarders carry no ComputeContract finalizer.
-    status: todo
+    status: done
 
   - id: M2-GONE-STOPS-RUNNER
     title: "Gone stops and removes the contract's runner"
@@ -108,7 +108,7 @@ items:
     done_when: >
       After ACC28-FORCED-REMOVAL the requester's goroutine count for the contract is zero (no
       further requester_contract lines for it) and requester_contract_gone_unreleased is logged once.
-    status: todo
+    status: done
 
   - id: M3-ROOT-RELEASES-FIRST
     title: "A MarketRequester root releases its contracts before it stops its components"
@@ -124,7 +124,7 @@ items:
     files:
       - internal/app/marketrequester/marketrequester.go
     done_when: "ACC28-ROOT-DELETE passes."
-    status: todo
+    status: done
 
   - id: M4-GATEWAY-ORDER
     title: "Read the Gateway root's delete order for NodeClaim-linked contracts"
@@ -140,7 +140,7 @@ items:
     done_when: >
       Either the read shows the order is safe, or a Gateway root deleted on a market network with a
       tenant cluster holding one node leaves no guest on the bidder within the release bound.
-    status: todo
+    status: doing
 
   - id: ARCH-SECTION-14
     title: "Open the defect in docs/ARCHITECTURE.md section 14 and move it to section 15 when it closes"
@@ -151,7 +151,7 @@ items:
     files:
       - docs/ARCHITECTURE.md
     done_when: "Section 15 holds the entry with R0-REPRO as before and the ACC28 rows as after."
-    status: todo
+    status: done
 
   - id: CATALOG-ROWS
     title: "Add the ACC28 scenarios to docs/spec/integration-catalog.yaml for plan 0027"
@@ -162,7 +162,7 @@ items:
     files:
       - docs/spec/integration-catalog.yaml
     done_when: "The catalog holds TestADeletedContractReleasesItsGuest and TestADeletedRequesterRootReleasesItsGuests."
-    status: todo
+    status: done
 
   - id: ACC28-DIRECT-DELETE
     title: "A directly deleted held contract is released"
@@ -173,7 +173,7 @@ items:
       release; the requester repo holds exactly one vm.delete record for the contract; within 3m the
       bidder's ComputeVM, FirecrackerVM, VM unit and VM work dir are gone and the Bid is terminated;
       then the ComputeContract object is gone.
-    status: todo
+    status: done
 
   - id: ACC28-DELETE-BEFORE-ACCEPT
     title: "A contract deleted before any accept goes at once and sends nothing"
@@ -181,7 +181,7 @@ items:
     done_when: >
       A contract deleted while it is collecting bids is gone within one watch event; no accept and no
       vm.delete record exists for it; no ComputeVM appears on any bidder in the next 60s.
-    status: todo
+    status: done
 
   - id: ACC28-DELETE-WHILE-STOPPED
     title: "A contract deleted while the requester is down is released when it comes back"
@@ -190,7 +190,7 @@ items:
       With a contract Held, the requester component is stopped, the contract is deleted (it stays
       Terminating), the requester is started again; it sends the one vm.delete, the guest is gone
       within 3m, then the contract object is gone.
-    status: todo
+    status: done
 
   - id: ACC28-ROOT-DELETE
     title: "Deleting a MarketRequester root releases its held contracts before it stops"
@@ -199,7 +199,7 @@ items:
       A MarketRequester root with two Held contracts is deleted; its status reads Deleting
       "2 ComputeContract(s) releasing", then "component(s) stopping"; both guests are gone on their
       bidders before the Requester component stops; the root is gone; no guest is left.
-    status: todo
+    status: done
 
   - id: ACC28-BOUND
     title: "A release that is never acknowledged ends at the bound and lets the object go"
@@ -208,7 +208,7 @@ items:
       With the winning bidder stopped and a short release bound, a deleted Held contract retries the
       vm.delete as in plan 0020, ends Failed with the bound message at the deadline, and then the
       object is gone.
-    status: todo
+    status: done
 
   - id: ACC28-FORCED-REMOVAL
     title: "A finalizer removed by hand leaves no runner behind"
@@ -217,4 +217,4 @@ items:
       A Held contract is deleted and its finalizer is removed by a merge patch before the release
       ends; the requester logs requester_contract_gone_unreleased once and no further line for the
       contract.
-    status: todo
+    status: done
