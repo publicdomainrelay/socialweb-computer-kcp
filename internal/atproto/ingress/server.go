@@ -543,11 +543,12 @@ func (s *Server) handleSubscribe(w http.ResponseWriter, req *http.Request) {
 		if err != nil {
 			break
 		}
-		if mt != websocket.TextMessage {
+		if mt != websocket.TextMessage && mt != websocket.BinaryMessage {
 			continue
 		}
 		var msg frame
 		if err := json.Unmarshal(data, &msg); err != nil {
+			s.log.Warn("subscriber_frame_invalid", "subdomain", subdomain, "binary", mt == websocket.BinaryMessage, "bytes", len(data), "err", err)
 			continue
 		}
 		s.handlePeerFrame(p, msg)
