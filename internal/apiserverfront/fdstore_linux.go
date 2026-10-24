@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
+	"strings"
 
 	"golang.org/x/sys/unix"
 )
@@ -54,6 +56,47 @@ func boundPort(fd int) (int, error) {
 }
 
 func bindHold(name string, port int) (*Held, error) {
+	h, err := bindHoldOnce(name, port, false)
+	if err == nil || port == 0 || !errors.Is(err, unix.EADDRINUSE) || !onlyTimeWait(port) {
+		return h, err
+	}
+	return bindHoldOnce(name, port, true)
+}
+
+func onlyTimeWait(port int) bool {
+	waiting, other := 0, 0
+	for _, table := range []string{"/proc/net/tcp", "/proc/net/tcp6"} {
+		raw, err := os.ReadFile(table)
+		if err != nil {
+			continue
+		}
+		lines := strings.Split(string(raw), "\n")
+		for _, line := range lines[min(1, len(lines)):] {
+			f := strings.Fields(line)
+			if len(f) < 4 {
+				continue
+			}
+			i := strings.LastIndexByte(f[1], ':')
+			if i < 0 {
+				continue
+			}
+			local, err := strconv.ParseUint(f[1][i+1:], 16, 16)
+			if err != nil || int(local) != port {
+				continue
+			}
+			if f[3] == tcpTimeWait {
+				waiting++
+			} else {
+				other++
+			}
+		}
+	}
+	return waiting > 0 && other == 0
+}
+
+const tcpTimeWait = "06"
+
+func bindHoldOnce(name string, port int, reuseFirst bool) (*Held, error) {
 	fd, err := unix.Socket(unix.AF_INET6, unix.SOCK_STREAM|unix.SOCK_CLOEXEC, 0)
 	var sa unix.Sockaddr = &unix.SockaddrInet6{Port: port}
 	if err == nil {
@@ -66,6 +109,12 @@ func bindHold(name string, port int) (*Held, error) {
 			return nil, fmt.Errorf("apiserverfront: hold %q: %w", name, err)
 		}
 		sa = &unix.SockaddrInet4{Port: port}
+	}
+	if reuseFirst {
+		if err := unix.SetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_REUSEADDR, 1); err != nil {
+			unix.Close(fd)
+			return nil, fmt.Errorf("apiserverfront: hold %q: SO_REUSEADDR before bind over TIME_WAIT: %w", name, err)
+		}
 	}
 	if err := unix.Bind(fd, sa); err != nil {
 		unix.Close(fd)
