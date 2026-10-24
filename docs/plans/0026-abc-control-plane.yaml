@@ -1,6 +1,6 @@
 plan: "0026"
 title: "ABC control plane: contracts, abstract kinds, a declared bus and watch-only controllers"
-status: doing
+status: done
 source: >
   The 2026-10-22 architecture audit found that the tree has 197k non-test Go
   LOC, 203 packages, 57 kinds and about 25 controllers, and that only one
@@ -317,7 +317,7 @@ waves:
     gate: "generated record types produce byte-identical CIDs for every fixture record."
   - id: W7
     title: "Live proof and integration"
-    status: doing
+    status: done
     serial: true
     tracks: [W7-PROOF]
     depends_on: [W5, W6]
@@ -1058,7 +1058,7 @@ items:
     track: proof
     parallel_with: []
     depends_on: [W5-GATES, W6-LEXICONS]
-    status: doing
+    status: done
     decision: >
       Fresh deploy from a dev build on this host first, then an rc build to
       this host, hat-9, hat-7 and the prod gateway. Repeat
