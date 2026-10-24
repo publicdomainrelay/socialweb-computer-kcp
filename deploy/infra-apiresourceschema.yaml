@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-2.infras.socialweb.computer
+  name: v1alpha1-3.infras.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -323,6 +323,7 @@ spec:
                       - Pushed
                       - Pulled
                       - InSync
+                      - Retained
               conditions:
                 type: array
                 items:

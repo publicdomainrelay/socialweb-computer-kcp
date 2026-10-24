@@ -220,14 +220,17 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 		}
 	} else {
 		r.c.forget(string(v.kind), req)
-		if v.status.Record != nil {
+		if v.status.Record != nil && v.status.Record.Direction != v1alpha1.InfraSyncRetained {
 			gone, err := r.unbindRecord(ctx, req, v)
 			if err != nil {
 				return ctlruntime.Result{}, err
 			}
 			if gone {
-				status.Record = nil
-				conds.Set(&status.Conditions, status.ObservedGeneration, v1alpha1.InfraConditionSynced, false, "Unbound", "spec.record is not set")
+				kept := *v.status.Record
+				kept.Direction = v1alpha1.InfraSyncRetained
+				status.Record = &kept
+				conds.Set(&status.Conditions, status.ObservedGeneration, v1alpha1.InfraConditionSynced, false, "Unbound",
+					"spec.record is not set; the record stays in the repo")
 			}
 		}
 	}

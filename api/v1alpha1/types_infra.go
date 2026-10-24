@@ -186,6 +186,8 @@ const (
 	InfraSyncPulled InfraSyncDirection = "Pulled"
 
 	InfraSyncInSync InfraSyncDirection = "InSync"
+
+	InfraSyncRetained InfraSyncDirection = "Retained"
 )
 
 type InfraRecordStatus struct {

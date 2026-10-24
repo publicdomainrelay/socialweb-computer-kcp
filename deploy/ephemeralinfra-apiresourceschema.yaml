@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-2.ephemeralinfras.socialweb.computer
+  name: v1alpha1-3.ephemeralinfras.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -334,6 +334,7 @@ spec:
                       - Pushed
                       - Pulled
                       - InSync
+                      - Retained
               conditions:
                 type: array
                 items:

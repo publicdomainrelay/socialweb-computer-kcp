@@ -441,6 +441,18 @@ to it, mode 0600), and the gateway brings up the tenant cluster `tenant` of that
 owner at zero nodes. A pod applied to that cluster gets a node through the RFP
 flow from the network's bidders.
 
+The tenant cluster's nodes are one Infra in `root:gateway`, named
+`nodes-<20 hex>` with the label `infra.socialweb.computer/cluster=tenant` and
+`spec.clusterRef` naming the Cluster (plan 0031). Each NodeClaim in the
+cluster's home workspace is one entry `node-<12 hex>` of it: `spec.contracts`
+holds its state (Staged until the join bundle is written, Requested, Released
+when the claim is deleted), `spec.nodes` its ownerDid, nodeJoin and
+nodeClaimRef, and `spec.secrets` the bundle; the claim's `status.infra` names the
+entry and its ComputeContract `infra-nodes-<hex>-node-<hex>`. The Infra has no
+`spec.record`, so nothing is published. Read it with
+`kubectl get infras -l infra.socialweb.computer/cluster=tenant -o yaml` in
+`root:gateway`. Deleting the Cluster deletes its Infra, which releases every node.
+
 The gateway's requester trusts a bidder through its operator's vouches. The
 network declares, in the gateway's `root:gateway:app`, one AtprotoRecord
 `operator-vouch-<bidder app>` (`spec.repoRef: AtprotoRepo/operator`, label
