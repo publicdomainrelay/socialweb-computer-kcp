@@ -156,12 +156,19 @@ func (p *pass) delete(ctx context.Context) (ctlruntime.Result, error) {
 	if clusters > 0 {
 		return p.deleting(fmt.Sprintf("%d Cluster(s) tearing down", clusters))
 	}
+	deployments, err := c.DeleteDeployments(ctx, r.Workspace)
+	if err != nil {
+		return ctlruntime.Result{}, err
+	}
+	if deployments > 0 {
+		return p.deleting(fmt.Sprintf("%d deployment(s) releasing", deployments))
+	}
 	held, err := c.HeldContracts(ctx, r.Workspace)
 	if err != nil {
 		return ctlruntime.Result{}, err
 	}
 	if held > 0 {
-		return p.deleting(fmt.Sprintf("%d ComputeContract(s) still hold a guest; the Requester stays until their NodeClaims release them", held))
+		return p.deleting(fmt.Sprintf("%d ComputeContract(s) still hold a guest; the Requester stays until they are released", held))
 	}
 	pdsUp := false
 	if v, ok, err := c.GetComponent(ctx, r.Workspace, compose.ComponentKindPds, compose.PdsComponent); err == nil && ok && v.Status.Ready {

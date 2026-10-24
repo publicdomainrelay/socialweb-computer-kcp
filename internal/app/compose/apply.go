@@ -405,6 +405,18 @@ func (c *Composer) DeleteAll(ctx context.Context, ws string, gvr schema.GroupVer
 	return len(items), nil
 }
 
+func (c *Composer) DeleteDeployments(ctx context.Context, ws string) (int, error) {
+	left := 0
+	for _, gvr := range []schema.GroupVersionResource{v1alpha1.InfraGVR, v1alpha1.EphemeralInfraGVR} {
+		n, err := c.DeleteAll(ctx, ws, gvr)
+		if err != nil {
+			return left + n, err
+		}
+		left += n
+	}
+	return left, nil
+}
+
 func (c *Composer) HeldContracts(ctx context.Context, ws string) (int, error) {
 	ri, err := c.Client(ws, ComputeContractGVR)
 	if err != nil {

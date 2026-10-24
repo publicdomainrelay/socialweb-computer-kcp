@@ -259,6 +259,8 @@ func (c *Composer) Watches(rootKind string) []ctlruntime.Option {
 		childWatch[*v1alpha1.AtprotoRecordWatch](ExportMarketIdentities, rootKind),
 		intentWatch[*v1alpha1.Bid](c, ExportComputeVMs, rootKind),
 		intentWatch[*v1alpha1.ComputeContract](c, ExportComputeContracts, rootKind),
+		intentWatch[*v1alpha1.Infra](c, ExportComputeContracts, rootKind),
+		intentWatch[*v1alpha1.EphemeralInfra](c, ExportComputeContracts, rootKind),
 		childWatch[*eventsv1alpha1.EventStream](ExportEvents, rootKind),
 		childWatch[*eventsv1alpha1.EventSource](ExportEvents, rootKind),
 		childWatch[*eventsv1alpha1.PdsEventSource](ExportEvents, rootKind),
