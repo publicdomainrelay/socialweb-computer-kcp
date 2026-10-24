@@ -49,6 +49,10 @@ func (r *reconciler[T]) contracts(ctx context.Context, req ctlruntime.Request, v
 	for i := range v.spec.Secrets {
 		secrets[v.spec.Secrets[i].Contract] = &v.spec.Secrets[i].SecretsRef
 	}
+	nodes := map[string]*v1alpha1.InfraContractNode{}
+	for i := range v.spec.Nodes {
+		nodes[v.spec.Nodes[i].Contract] = &v.spec.Nodes[i]
+	}
 	declared := map[string]bool{}
 	left := 0
 	var out []v1alpha1.InfraContractStatus
@@ -61,7 +65,7 @@ func (r *reconciler[T]) contracts(ctx context.Context, req ctlruntime.Request, v
 		}
 		step := infra.Plan(state, cc, previous[c.Name])
 		if step.Create {
-			created, err := r.create(ctx, req, v, c, secrets[c.Name])
+			created, err := r.create(ctx, req, v, c, secrets[c.Name], nodes[c.Name])
 			if err != nil {
 				return nil, 0, err
 			}
@@ -103,10 +107,10 @@ func contractStatus(name string, cc *v1alpha1.ComputeContract, phase v1alpha1.In
 }
 
 func (r *reconciler[T]) create(ctx context.Context, req ctlruntime.Request, v view, c v1alpha1.InfraContract,
-	secrets *commonv1.SecretRef) (*v1alpha1.ComputeContract, error) {
+	secrets *commonv1.SecretRef, node *v1alpha1.InfraContractNode) (*v1alpha1.ComputeContract, error) {
 	name := infra.ChildName(v.kind, v.object.GetName(), c.Name)
 	cc := &v1alpha1.ComputeContract{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: childLabels(v, v1alpha1.InfraContractLabel, c.Name),
-		OwnerReferences: []metav1.OwnerReference{ownerRef(v)}}, Spec: infra.ContractSpec(c, secrets)}
+		OwnerReferences: []metav1.OwnerReference{ownerRef(v)}}, Spec: infra.ContractSpec(c, secrets, node)}
 	if err := req.Apply(ctx, cc); err != nil {
 		return nil, fmt.Errorf("infra: applying the ComputeContract %s: %w", name, err)
 	}

@@ -95,13 +95,19 @@ func Orphan(cc *v1alpha1.ComputeContract) Step {
 	return Step{Delete: true, Phase: PhaseOf(cc)}
 }
 
-func ContractSpec(c v1alpha1.InfraContract, secrets *commonv1.SecretRef) v1alpha1.ComputeContractSpec {
+func ContractSpec(c v1alpha1.InfraContract, secrets *commonv1.SecretRef, node *v1alpha1.InfraContractNode) v1alpha1.ComputeContractSpec {
 	spec := v1alpha1.ComputeContractSpec{VMName: c.VMName, BidderDids: c.BidderDids, DenyBidderDids: c.DenyBidderDids,
 		SshAuthorizedKeys: c.SshAuthorizedKeys, UserData: c.UserData, Policy: c.Policy, PolicyArgs: c.PolicyArgs,
 		VMReadyTimeoutSec: c.VMReadyTimeoutSec}
 	if secrets != nil {
 		ref := *secrets
 		spec.SecretsRef = &ref
+	}
+	if node != nil {
+		spec.OwnerDid, spec.Adopt = node.OwnerDid, node.Adopt
+		if node.NodeJoin != nil {
+			spec.NodeJoin = node.NodeJoin.DeepCopy()
+		}
 	}
 	return spec
 }
