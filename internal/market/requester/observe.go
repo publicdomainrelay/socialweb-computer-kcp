@@ -113,20 +113,20 @@ func (q *Requester) releaseWait(ctx context.Context, contract v1alpha1.ComputeCo
 		deadline = q.releaseDeadline(contract)
 	}
 	left := deadline.Sub(q.now())
+	attempts := 0
+	if release != nil {
+		attempts = release.Attempts
+	}
 	switch {
 	case contract.Status.Phase == v1alpha1.ComputeContractReleased:
+	case started && left <= 0 && (finished || attempts > 0):
+		q.failAtBound(ctx, contract, deadline)
 	case running:
 		if left > 0 {
 			return left
 		}
-		attempts := 1
-		if release != nil {
-			attempts = max(release.Attempts, 1)
-		}
-		return releaseRetryDelay(attempts)
+		return releaseRetryDelay(max(attempts, 1))
 	case !contractAccepted(contract):
-	case finished && started && left <= 0:
-		q.failAtBound(ctx, contract, deadline)
 	case finished && (!started || contract.Status.Phase == v1alpha1.ComputeContractFailed):
 	case left > 0:
 		return left
