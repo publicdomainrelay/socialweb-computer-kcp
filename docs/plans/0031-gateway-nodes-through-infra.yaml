@@ -248,18 +248,112 @@ items:
     status: done
 
   - id: REC9-RECORD-OPT-IN
-    title: "A cluster's Infra may publish its record to the cluster owner's repo (later)"
+    title: "A cluster's Infra may publish its record to the cluster owner's repo"
     depends_on: [N3-CLAIM-ENTRY]
     decision: >
-      Default: a cluster's Infra has no spec.record and publishes nothing. The opt-in is a later item
-      and is not built here: a Cluster field asks for it, and the NodeClaim controller sets
-      spec.record to an AtprotoRepo of the owner's account (the plan 0029 RemoteRepo path, with the
-      account's credentials held by the callee and the infra links of compose.InfraLinks for that
-      account). It waits because the account identity and credentials code is being rewired by plan
-      0030, and because a node entry's record would publish only vmName, the bidder DIDs and the
-      states: spec.nodes and spec.secrets stay kcp-only.
+      The switch. ClusterSpec gains publishInfra (bool, optional, default false). Default: a
+      cluster's Infra has no spec.record and nothing is published. There is no gateway-level default.
+      Its writer is the cluster owner, through a new procedure of the gateway's cluster XRPC API,
+      com.publicdomainrelay.temp.cluster.setPublishInfra {name, publish}: the account is the verified
+      service-auth token's iss, never an input field, and the tenant API applies spec.publishInfra
+      with its field manager socialweb.computer/gateway, as it applies spec.running. Publishing writes
+      into the owner's own repo, so only the owner asks for it; no other code writes the field. The
+      web app's OAuth scope gains the rpc scope of the new procedure.
+
+      The binding. The NodeClaim controller stays the one writer of the cluster Infra's spec. On each
+      declare it reads the claim's Cluster (it already reads it for N4) and, while publishInfra is
+      true and the Cluster is not deleting, writes spec.record {repoRef: the AtprotoRepo
+      repo-<owner did> (atprotorepo.RepoName of the Cluster's spec.account) in the binding's
+      workspace (the GatewayAPI's workspace, root:<gateway>:app), sync: Publish, eventSourceRefs: the
+      binding's infraRecordSources}; while it is false the spec carries no record. The Cluster watch
+      of N4 maps the flip to the cluster's claims, so the next declare applies it. A cluster at zero
+      nodes has no Infra (N3) and so no record: the record appears with the first node and goes with
+      the Infra when the last node goes, by the plan 0029 D3 delete rule (deleting a bound Infra
+      deletes its record).
+
+      Who writes the repo. The Gateway root composes the owner's repo only from credentials it holds
+      for that DID, and the callee holds them; no session or token is copied into the Infra path.
+      On the market network profile the Gateway spec names the owner sessions file: for each DID in
+      it that is not the gateway requester's own, the root composes in root:<gateway>:app a
+      MarketIdentity owner-<stamp of the did> in mode pdsAccount (the plan 0030 owner of that
+      account's one session; the password from the file is written into the gateway root vault at
+      requester/identity/owner-<stamp>/keys and read there by the MarketIdentity controller), a
+      RemotePDS for the file's service URL with the network CA, a RemoteRepo and an AtprotoRepo
+      repo-<did> whose credentialsRef is that MarketIdentity, and the links: RepoBackendLink,
+      compose.RemoteRepoLinks (the RemoteRepo resolves pds.Authenticator from the MarketIdentity
+      over the bus), the trust links, compose.InfraLinks(<contract workspace>, repo) and the
+      events.subscribe link from the record watches' EventStreams of the contract workspace to the
+      network relay EventSource. They are composed whether or not a cluster opts in, so the switch
+      needs no root pass; nothing is written to the repo until a Cluster opts in. On prod a tenant
+      owner's session is the web app's: the openbao-plugin-auth-atproto mount holds it at
+      auth/atproto/session/<did> and alone refreshes it; the core holds no client with the declared
+      atproto-session-proxy policy that could ask it for a proof. That source is
+      REC9-PROD-OWNER-SESSION, not built here; until it lands no repo-<did> exists for a prod owner,
+      the Infra reports Synced False RecordUnavailable and nothing is published.
+
+      What is published. InfraRecordBinding gains sync (Both, the default and the plan 0029
+      two-way rule, or Publish). Under Publish the record carries the description (which names the
+      cluster only, no workspace path) and, for each entry, name, state, vmName, bidderDids and
+      denyBidderDids, and the observed status (phase; per contract phase, winner and receipt; no
+      message). userData, policy, policyArgs, sshAuthorizedKeys and vmReadyTimeoutSec of the entry and
+      spec.nodes (nodeJoin, ownerDid, adopt, nodeClaimRef), spec.secrets and spec.clusterRef are
+      never rendered (internal/infra Render already leaves the last three out; Published() projects
+      the rest away). The declaration hash compares the projection on both sides.
+
+      Edit rule: the cluster record is push-only. An owner's edit could not scale the cluster
+      safely: the scale decision is internal/scale's, from pending pods, and the node host expresses
+      it as NodeClaims; an entry added on the PDS would be a contract with no nodeJoin, no bundle and
+      no claim (a guest billed to the gateway that never joins), and an entry removed would release a
+      node under a running pod. So under Publish the Infra controller never pulls: a record that
+      differs from the projection (an edit, an invalid record) is overwritten with a compare-and-swap
+      on the cid it read, and logged infra_record_overwritten; a record deleted elsewhere is written
+      again and never deletes the Infra. A record failure under Publish never blocks the contract
+      lifecycle: the contracts are reconciled, Synced False RecordUnavailable is reported, and the
+      error goes back to the rate-limited backoff.
+
+      Off rule: setting publishInfra false removes spec.record, and plan 0029 U1-UNBIND-KEEPS-RECORD
+      applies: the AtprotoRecord child is retained and deleted, the record stays in the owner's repo
+      with its last content, status.record.direction is Retained and Synced is False Unbound.
+      Turning it on again rebinds to the same URI and pushes.
+    files:
+      - api/v1alpha1/types_cluster.go
+      - api/v1alpha1/types_infra.go
+      - api/v1alpha1/types_component.go
+      - api/v1alpha1/resources.go
+      - deploy/
+      - lexicons/com/publicdomainrelay/temp/cluster/setPublishInfra.json
+      - internal/gateway/gateway.go
+      - internal/xrpcserver/xrpcserver.go
+      - internal/kcpclient/kcpclient.go
+      - internal/app/compose/atprotoscope.go
+      - internal/infra/declaration.go
+      - internal/infra/sync.go
+      - internal/controllers/infra/controller.go
+      - internal/controllers/infra/record.go
+      - internal/contract/nodeclaim/nodeclaim.go
+      - internal/services/gatewayapi/service.go
+      - internal/controllers/nodeclaim/controller.go
+      - internal/controllers/nodeclaim/infra.go
+      - internal/app/compose/owner.go
+      - internal/app/gateway/gateway.go
+    done_when: "ACC31-REC9-DEFAULT-OFF, ACC31-REC9-PUBLISH, ACC31-REC9-EDIT-OVERWRITTEN, ACC31-REC9-OPT-OUT-KEEPS and ACC31-REC9-SCALE-IN-RECORD pass."
+    status: todo
+
+  - id: REC9-PROD-OWNER-SESSION
+    title: "A prod tenant owner's repo through the web app session the atproto auth plugin holds"
+    depends_on: [REC9-RECORD-OPT-IN]
+    decision: >
+      Not built in this plan. The source of a web-app owner's credentials is the
+      openbao-plugin-auth-atproto mount (auth/atproto/session/<did>, refreshed only by the plugin
+      under its per-DID lock, the proof endpoint hands one access token and one DPoP proof per
+      request). A MarketIdentity mode whose pds.Authenticator asks that proof endpoint through a
+      vault handle of a client bound to the declared atproto-session-proxy policy, composed per
+      opted-in owner by the Gateway root as repo-<did>; the web app's OAuth scope gains repo scope on
+      computer.socialweb.infra, so owners sign in again once. It cannot be proven on a market network
+      (the network gateway has no public-origin and so no web sign-in), so it is proven on prod by
+      the lead.
     files: []
-    done_when: "A later plan builds it."
+    done_when: "On prod, alice opts a cluster in and getRecord on her repo returns its computer.socialweb.infra record."
     status: todo
 
   - id: DOCS
@@ -335,3 +429,51 @@ items:
       deletionPolicy Retain), its watch and its deliver link; the Infra stays Deployed with its
       guest; getRecord on the repo still returns the record.
     status: done
+
+  - id: ACC31-REC9-DEFAULT-OFF
+    title: "A tenant cluster that did not opt in publishes nothing"
+    depends_on: [REC9-RECORD-OPT-IN]
+    done_when: >
+      On an own market network with the gateway (instance rec31), a tenant cluster scaled to one node
+      has an Infra with no spec.record, and listRecords of computer.socialweb.infra on the owner's
+      repo returns no record of it; the owner's repo-<did> AtprotoRepo is Ready.
+    status: todo
+
+  - id: ACC31-REC9-PUBLISH
+    title: "Opting in publishes the node entry and its state to the owner's repo, and nothing kcp-only"
+    depends_on: [ACC31-REC9-DEFAULT-OFF]
+    done_when: >
+      setPublishInfra {publish: true} by the owner sets Cluster spec.publishInfra; the Infra gets
+      spec.record (repo-<owner did>, sync Publish) and reports Synced True; getRecord of
+      computer.socialweb.infra/<infra name> on the owner's PDS returns the node entry with its name,
+      state requested, vmName and bidderDids and status phase deployed with the winner, and no
+      nodeJoin, ownerDid, nodeClaimRef, secretsRef, userData, policy or policyArgs.
+    status: todo
+
+  - id: ACC31-REC9-EDIT-OVERWRITTEN
+    title: "An owner's edit of the cluster record cannot scale the cluster; kcp writes it back"
+    depends_on: [ACC31-REC9-PUBLISH]
+    done_when: >
+      A putRecord straight to the owner's PDS that adds a second entry and marks the first released
+      leaves the Infra spec, the NodeClaim and the node unchanged; the core logs
+      infra_record_overwritten and getRecord returns the kcp projection again; a deleteRecord straight
+      to the PDS is followed by the record written again, and the Infra stays.
+    status: todo
+
+  - id: ACC31-REC9-OPT-OUT-KEEPS
+    title: "Opting out unbinds and keeps the record (plan 0029 U1)"
+    depends_on: [ACC31-REC9-PUBLISH]
+    done_when: >
+      setPublishInfra {publish: false} removes spec.record; the AtprotoRecord child goes; the Infra
+      reports status.record.direction Retained and Synced False Unbound and stays Deployed; getRecord
+      still returns the record. Opting in again rebinds and the record is pushed again.
+    status: todo
+
+  - id: ACC31-REC9-SCALE-IN-RECORD
+    title: "Scaling in shows in the record; the last node takes the record with the Infra"
+    depends_on: [ACC31-REC9-OPT-OUT-KEEPS]
+    done_when: >
+      With the cluster opted in, deleting the pod lets the clusterprovider scale in: the record shows
+      the entry state released (and its phase releasing or released), then the Infra is deleted with
+      its last entry and getRecord answers RecordNotFound; no guest is left on the bidder.
+    status: todo
