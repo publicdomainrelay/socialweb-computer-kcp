@@ -253,6 +253,13 @@ func (s *Server) create(ctx context.Context, verb string, caller Caller, name st
 }
 
 func (s *Server) ControlPlaneUp(ctx context.Context, caller Caller, req NameRequest) (ClusterView, error) {
+	if caller == "" {
+		return ClusterView{}, ErrUnauthorized
+	}
+	if _, err := revocation.Admit(ctx, s.Deny, string(caller)); err != nil {
+		slog.Warn("controlPlaneUp: the deny refused the caller", "caller", string(caller), "name", req.Name, "err", err)
+		return ClusterView{}, errForDeny(err)
+	}
 	view, err := s.lookup(ctx, caller, req)
 	if err != nil {
 		return ClusterView{}, err
