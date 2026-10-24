@@ -19,9 +19,7 @@ func (q *Requester) Observe(ctx context.Context, change contractmarket.Change) (
 	switch change.Kind {
 	case contractmarket.KindComputeContract:
 		if change.Gone || change.ComputeContract == nil {
-			q.contracts.Remove(change.Name)
-			q.forgetContract(change.Name)
-			q.forgetPending(change.Name)
+			q.contractGone(change.Name)
 			return 0, nil
 		}
 		contract := *change.ComputeContract
@@ -29,7 +27,11 @@ func (q *Requester) Observe(ctx context.Context, change contractmarket.Change) (
 		q.observePending(contract)
 		q.reconcileContract(ctx, contract)
 		mergeErr := q.mergeInboxFor(ctx, contract)
-		return 0, errors.Join(mergeErr, q.processPendingEvents(ctx, change.Name))
+		err := errors.Join(mergeErr, q.processPendingEvents(ctx, change.Name))
+		if contract.DeletionTimestamp == nil {
+			return 0, err
+		}
+		return q.releaseWait(ctx, contract), err
 	case contractmarket.KindStateSync:
 		if change.Gone || change.StateSync == nil {
 			if old, ok := q.syncs.Get(change.Name); ok {
@@ -73,7 +75,100 @@ func (q *Requester) forgetContract(name string) {
 	q.mu.Lock()
 	delete(q.finished, name)
 	delete(q.waiting, name)
+	delete(q.settled, name)
 	q.mu.Unlock()
+}
+
+func (q *Requester) contractGone(name string) {
+	last, known := q.contracts.Get(name)
+	q.mu.Lock()
+	runner := q.runners[name]
+	settled := q.settled[name]
+	q.mu.Unlock()
+	q.contracts.Remove(name)
+	q.forgetContract(name)
+	q.forgetPending(name)
+	if runner != nil {
+		runner.stop()
+	}
+	if known && !settled && contractAccepted(last) && last.Status.Phase != v1alpha1.ComputeContractReleased {
+		receipt := ""
+		if state := last.Status.Contract; state != nil {
+			receipt = state.ReceiptURI
+			if receipt == "" && state.Receipt != nil {
+				receipt = state.Receipt.URI
+			}
+		}
+		q.log.Warn("requester_contract_gone_unreleased", "contract", name, "phase", string(last.Status.Phase), "receipt", receipt)
+	}
+}
+
+func contractAccepted(contract v1alpha1.ComputeContract) bool {
+	state := contract.Status.Contract
+	return state != nil && (state.AcceptURI != "" || (state.Accept != nil && state.Accept.URI != "") || state.Receipt != nil)
+}
+
+func (q *Requester) releaseWait(ctx context.Context, contract v1alpha1.ComputeContract) time.Duration {
+	name := contract.Name
+	q.mu.Lock()
+	running := q.runners[name] != nil
+	finished := q.finished[name]
+	q.mu.Unlock()
+	release := contract.Status.Release
+	deadline, started := releaseDeadlineOf(release)
+	if !started {
+		deadline = q.releaseDeadline(contract)
+	}
+	left := deadline.Sub(q.now())
+	switch {
+	case contract.Status.Phase == v1alpha1.ComputeContractReleased:
+	case running:
+		if left > 0 {
+			return left
+		}
+		attempts := 1
+		if release != nil {
+			attempts = max(release.Attempts, 1)
+		}
+		return releaseRetryDelay(attempts)
+	case !contractAccepted(contract):
+	case finished && started && left <= 0:
+		q.failAtBound(ctx, contract, deadline)
+	case finished && (!started || contract.Status.Phase == v1alpha1.ComputeContractFailed):
+	case left > 0:
+		return left
+	default:
+		return DefaultReleaseRetryFirst
+	}
+	q.mu.Lock()
+	q.settled[name] = true
+	q.mu.Unlock()
+	return 0
+}
+
+func releaseDeadlineOf(release *v1alpha1.ComputeContractRelease) (time.Time, bool) {
+	if release == nil || release.Deadline == "" {
+		return time.Time{}, false
+	}
+	deadline, err := time.Parse(time.RFC3339, release.Deadline)
+	return deadline, err == nil
+}
+
+func (q *Requester) failAtBound(ctx context.Context, contract v1alpha1.ComputeContract, deadline time.Time) {
+	if contract.Status.Phase == v1alpha1.ComputeContractFailed {
+		return
+	}
+	message := fmt.Sprintf("vm.delete was not acknowledged by %s (the contract TTL)", deadline.UTC().Format(time.RFC3339))
+	if last := contract.Status.Release.LastError; last != "" {
+		message += ": " + last
+	}
+	status := contract.Status
+	status.ObservedGeneration = contract.Generation
+	status.Phase = v1alpha1.ComputeContractFailed
+	status.Message = message
+	addContractConditions(&status, contract.Generation, status.Phase, message, q.now(), false)
+	q.log.Warn("requester_release_bound", "contract", contract.Name, "deadline", deadline.UTC().Format(time.RFC3339), "lastError", contract.Status.Release.LastError)
+	q.mergeStatus(ctx, contract.Name, status)
 }
 
 func (q *Requester) runnerFor(name string) *contractRunner {
@@ -159,9 +254,11 @@ func (q *Requester) reconcileContract(ctx context.Context, contract v1alpha1.Com
 		started.requestRelease()
 	}
 	q.runners[contract.Name] = started
-	runCtx := q.ctx
+	runCtx, cancel := context.WithCancel(q.ctx)
+	started.cancel = cancel
 	q.wg.Go(func() {
 		started.Run(runCtx)
+		cancel()
 		q.runnerDone(started, account)
 	})
 	q.mu.Unlock()
@@ -193,6 +290,7 @@ func (q *Requester) admitLocked(account string) (bool, string) {
 func (q *Requester) runnerDone(runner *contractRunner, account string) {
 	q.mu.Lock()
 	if current, ok := q.runners[runner.name]; ok && current == runner {
+		gone := runner.isGone()
 		delete(q.runners, runner.name)
 		if q.running > 0 {
 			q.running--
@@ -204,7 +302,9 @@ func (q *Requester) runnerDone(runner *contractRunner, account string) {
 				q.perAccount[account]--
 			}
 		}
-		q.finished[runner.name] = true
+		if !gone {
+			q.finished[runner.name] = true
+		}
 	}
 	q.mu.Unlock()
 	if q.stopping() {

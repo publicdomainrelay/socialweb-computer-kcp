@@ -145,6 +145,19 @@ const (
 	ComputeContractFailed ComputeContractPhase = "Failed"
 )
 
+const FinalizerComputeContract = "computecontract.socialweb.computer/release"
+
+func (c *ComputeContract) HoldsGuest() bool {
+	state := c.Status.Contract
+	if state == nil || state.Termination != nil {
+		return false
+	}
+	if c.Status.Phase == ComputeContractReleased || c.Status.Phase == ComputeContractFailed {
+		return false
+	}
+	return state.Receipt != nil || state.AcceptURI != "" || (state.Accept != nil && state.Accept.URI != "")
+}
+
 type ComputeContractRelease struct {
 	StartedAt string `json:"startedAt,omitempty"`
 

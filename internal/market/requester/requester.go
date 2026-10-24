@@ -250,6 +250,8 @@ type Requester struct {
 
 	waiting map[string]bool
 
+	settled map[string]bool
+
 	running int
 
 	perAccount map[string]int
@@ -490,6 +492,7 @@ func New(cfg Config, deps Deps) (*Requester, error) {
 		runners:      map[string]*contractRunner{},
 		finished:     map[string]bool{},
 		waiting:      map[string]bool{},
+		settled:      map[string]bool{},
 		perAccount:   map[string]int{},
 		written:      map[string][]v1alpha1.ComputeContractEvent{},
 		eventSinks:   map[string]chan MarketEvent{},

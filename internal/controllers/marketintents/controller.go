@@ -138,13 +138,13 @@ func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
 	c := &Controller{clients: opts.Clients, scope: opts.Scope, log: log.With("component", "marketintents"), clusters: map[key]string{},
 		subs: map[*subscriber]struct{}{}, events: map[string]*ctlruntime.Queue{}, owners: map[string]ownerUID{}}
 	err := errors.Join(
-		forward(m, c, opts.Scope, market.KindBid, ExportComputeVMs, 4, func(ch *market.Change, o *v1alpha1.Bid) { ch.Bid = o }),
-		forward(m, c, opts.Scope, market.KindComputeVM, ExportComputeVMs, 2, func(ch *market.Change, o *v1alpha1.ComputeVM) { ch.ComputeVM = o }),
-		forward(m, c, opts.Scope, market.KindStateSync, ExportApplications, 4, func(ch *market.Change, o *v1alpha1.StateSync) { ch.StateSync = o }),
-		forward(m, c, opts.Scope, market.KindComputeContract, ExportComputeContracts, 4,
+		forward(m, c, opts.Scope, market.KindBid, ExportComputeVMs, "", 4, func(ch *market.Change, o *v1alpha1.Bid) { ch.Bid = o }),
+		forward(m, c, opts.Scope, market.KindComputeVM, ExportComputeVMs, "", 2, func(ch *market.Change, o *v1alpha1.ComputeVM) { ch.ComputeVM = o }),
+		forward(m, c, opts.Scope, market.KindStateSync, ExportApplications, "", 4, func(ch *market.Change, o *v1alpha1.StateSync) { ch.StateSync = o }),
+		forward(m, c, opts.Scope, market.KindComputeContract, ExportComputeContracts, v1alpha1.FinalizerComputeContract, 4,
 			func(ch *market.Change, o *v1alpha1.ComputeContract) { ch.ComputeContract = o }),
-		forward(m, c, opts.Scope, market.KindExposure, ExportExposures, 1, func(ch *market.Change, o *exposurev1alpha1.Exposure) { ch.Exposure = o }),
-		forward(m, c, opts.Scope, market.KindMarketIdentity, ExportMarketIdentities, 1,
+		forward(m, c, opts.Scope, market.KindExposure, ExportExposures, "", 1, func(ch *market.Change, o *exposurev1alpha1.Exposure) { ch.Exposure = o }),
+		forward(m, c, opts.Scope, market.KindMarketIdentity, ExportMarketIdentities, "", 1,
 			func(ch *market.Change, o *v1alpha1.MarketIdentity) { ch.MarketIdentity = o }),
 	)
 	if err != nil {
@@ -166,10 +166,12 @@ type forwarder[T object[T]] struct {
 
 	kind string
 
+	finalizer string
+
 	fill func(*market.Change, T)
 }
 
-func forward[T object[T]](m *ctlruntime.Manager, c *Controller, scope func(string) bool, kind, export string, workers int,
+func forward[T object[T]](m *ctlruntime.Manager, c *Controller, scope func(string) bool, kind, export, finalizer string, workers int,
 	fill func(*market.Change, T)) error {
 	queue := ctlruntime.NewQueue()
 	events, err := queue.Run(m, Name+"-"+strings.ToLower(kind)+": replay")
@@ -179,11 +181,14 @@ func forward[T object[T]](m *ctlruntime.Manager, c *Controller, scope func(strin
 	c.mu.Lock()
 	c.events[kind] = queue
 	c.mu.Unlock()
-	f := &forwarder[T]{c: c, kind: kind, fill: fill}
+	f := &forwarder[T]{c: c, kind: kind, finalizer: finalizer, fill: fill}
 	opts := []ctlruntime.Option{ctlruntime.Export(export), ctlruntime.Events(events), ctlruntime.Gone(f.gone), ctlruntime.Workers(workers),
 		ctlruntime.Watches(func(_ context.Context, src ctlruntime.Request, obj T) []ctlruntime.Request {
 			return []ctlruntime.Request{{Cluster: src.Cluster, Namespace: obj.GetNamespace(), Name: obj.GetName()}}
 		})}
+	if finalizer != "" {
+		opts = append(opts, ctlruntime.Finalizer(finalizer))
+	}
 	if scope != nil {
 		opts = append(opts, ctlruntime.InWorkspaces(scope))
 	}
@@ -200,8 +205,16 @@ func (f *forwarder[T]) Reconcile(ctx context.Context, req ctlruntime.Request, ob
 	f.c.mu.Unlock()
 	change := market.Change{Workspace: req.Workspace, Kind: f.kind, Name: req.Name}
 	f.fill(&change, obj.DeepCopy())
-	wait, err := f.c.deliver(ctx, change)
-	return ctlruntime.Result{RequeueAfter: wait}, err
+	wait, claimed, err := f.c.deliver(ctx, change)
+	waiting := f.finalizer != "" && !obj.GetDeletionTimestamp().IsZero() && (wait > 0 || (claimed == 0 && holdsGuest(obj)))
+	return ctlruntime.Result{RequeueAfter: wait, Waiting: waiting}, err
+}
+
+func holdsGuest(obj any) bool {
+	if h, ok := obj.(interface{ HoldsGuest() bool }); ok {
+		return h.HoldsGuest()
+	}
+	return true
 }
 
 func (f *forwarder[T]) gone(ctx context.Context, req ctlruntime.Request) {
@@ -209,12 +222,12 @@ func (f *forwarder[T]) gone(ctx context.Context, req ctlruntime.Request) {
 	f.c.mu.Lock()
 	delete(f.c.clusters, k)
 	f.c.mu.Unlock()
-	if _, err := f.c.deliver(ctx, market.Change{Workspace: req.Workspace, Kind: f.kind, Name: req.Name, Gone: true}); err != nil {
+	if _, _, err := f.c.deliver(ctx, market.Change{Workspace: req.Workspace, Kind: f.kind, Name: req.Name, Gone: true}); err != nil {
 		f.c.log.Warn("delivering a deletion failed", "kind", f.kind, "workspace", req.Workspace, "name", req.Name, "err", err.Error())
 	}
 }
 
-func (c *Controller) deliver(ctx context.Context, change market.Change) (time.Duration, error) {
+func (c *Controller) deliver(ctx context.Context, change market.Change) (time.Duration, int, error) {
 	k := key{workspace: change.Workspace, kind: change.Kind, name: change.Name}
 	c.mu.Lock()
 	var targets []*subscriber
@@ -225,8 +238,12 @@ func (c *Controller) deliver(ctx context.Context, change market.Change) (time.Du
 	}
 	c.mu.Unlock()
 	var wait time.Duration
+	var claimed int
 	var errs []error
 	for _, s := range targets {
+		if s.kinds[change.Kind] {
+			claimed++
+		}
 		d, err := s.observer.Observe(ctx, change)
 		if err != nil {
 			errs = append(errs, err)
@@ -236,7 +253,7 @@ func (c *Controller) deliver(ctx context.Context, change market.Change) (time.Du
 		}
 		c.observed(s, k)
 	}
-	return wait, errors.Join(errs...)
+	return wait, claimed, errors.Join(errs...)
 }
 
 func (c *Controller) subscribe(ctx context.Context, home string, sub market.Subscription) (func(), error) {

@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -48,6 +49,10 @@ type contractRunner struct {
 	releaseOnce sync.Once
 
 	done chan struct{}
+
+	cancel context.CancelFunc
+
+	gone atomic.Bool
 
 	nodeJoin *v1alpha1.ComputeContractNodeJoin
 
@@ -134,6 +139,17 @@ func (r *contractRunner) requestRelease() {
 	r.releaseOnce.Do(func() { close(r.releaseCh) })
 }
 
+func (r *contractRunner) stop() {
+	r.gone.Store(true)
+	if r.cancel != nil {
+		r.cancel()
+	}
+}
+
+func (r *contractRunner) isGone() bool {
+	return r.gone.Load()
+}
+
 func (r *contractRunner) released() bool {
 	select {
 	case <-r.releaseCh:
@@ -162,6 +178,9 @@ func (r *contractRunner) setState(state *v1alpha1.NodeClaimContract) {
 }
 
 func (r *contractRunner) log() *slog.Logger {
+	if r.isGone() {
+		return slog.New(slog.DiscardHandler)
+	}
 	return r.q.log.With("contract", r.name)
 }
 
@@ -226,6 +245,9 @@ func (r *contractRunner) Run(ctx context.Context) {
 }
 
 func (r *contractRunner) recordFailure(ctx context.Context, state *v1alpha1.NodeClaimContract, err error, attempts int32) {
+	if r.isGone() {
+		return
+	}
 	if state != nil && state.Release != nil && !state.Release.OK {
 		r.writeStatus(ctx, v1alpha1.ComputeContractReleasing, "the release did not finish: "+err.Error(), state, r.currentBids(), r.currentChosen(), "releaseFailed", attempts)
 		return
@@ -1237,6 +1259,9 @@ func (r *contractRunner) runAdopt(ctx context.Context, contract v1alpha1.Compute
 }
 
 func (r *contractRunner) writeStatus(ctx context.Context, phase v1alpha1.ComputeContractPhase, message string, state *v1alpha1.NodeClaimContract, bids []v1alpha1.ContractBid, chosen *v1alpha1.ContractChosen, step string, attempts int32) {
+	if r.isGone() {
+		return
+	}
 	contract := r.snapshot()
 	status := v1alpha1.ComputeContractStatus{
 		ObservedGeneration: contract.Generation,
