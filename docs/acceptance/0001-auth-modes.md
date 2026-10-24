@@ -461,20 +461,28 @@ hb
 
 ## 8. Typed settings, drift and fail-closed overrides
 
-On any Ready bidder, set a 5 s heartbeat and disable offering refresh:
+On any Ready bidder, set a 5 s heartbeat and a 15 s offering refresh:
 
 ```bash
 K=$H7_K
 HOST=hat-7
-ssh "$HOST" "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$K kubectl patch marketbidders.socialweb.computer app --type merge -p '{\"spec\":{\"components\":{\"Bidder\":{\"suspend\":false,\"settings\":{\"bidder\":{\"heartbeatIntervalSeconds\":5,\"offeringRefreshSeconds\":0}}}}}}'"
+ssh "$HOST" "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$K kubectl patch marketbidders.socialweb.computer app --type merge -p '{\"spec\":{\"components\":{\"Bidder\":{\"suspend\":false,\"settings\":{\"bidder\":{\"heartbeatIntervalSeconds\":5,\"offeringRefreshSeconds\":15}}}}}}'"
 ssh "$HOST" "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$K kubectl wait --for=condition=Ready bidders.socialweb.computer/bidder --timeout=120s"
 ssh "$HOST" "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$K kubectl get marketbidders.socialweb.computer app -o jsonpath='{.status.componentOverrides}'"
 ```
 
 The override entry must show `"applied":true` and the child generation. Sample
-the heartbeat twice, 10 s apart; `createdAt` advances about every 5 s. The
-offering record `cid` must not change for 10 minutes while
-`offeringRefreshSeconds=0`.
+the heartbeat twice, 10 s apart; `createdAt` advances about every 5 s. Read the
+offering record `cid` twice, 25 s apart: it changes, because every refresh
+writes a new `refreshedAt`. Then turn the refresh off:
+
+```bash
+ssh "$HOST" "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$K kubectl patch marketbidders.socialweb.computer app --type merge -p '{\"spec\":{\"components\":{\"Bidder\":{\"settings\":{\"bidder\":{\"offeringRefreshSeconds\":0}}}}}}'"
+ssh "$HOST" "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$K kubectl wait --for=jsonpath='{.status.phase}'=Ready marketbidders.socialweb.computer/app --timeout=180s"
+```
+
+The offering `cid` must not change over 60 s (four periods of the 15 s refresh
+the bidder ran before).
 
 A direct child edit is reverted and reported:
 
