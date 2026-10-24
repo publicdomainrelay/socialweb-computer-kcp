@@ -29,7 +29,7 @@ const (
 	heldContractTTLSeconds = 691200
 )
 
-var vmNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`)
+var vmNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
 var localeNames = map[string]bool{
 	"LC_ALL":            true,
@@ -100,7 +100,7 @@ func (q *Requester) sessionVMName(lc map[string]string) (string, error) {
 	if vmName == "" {
 		vmName = q.generatedVMName()
 	}
-	if !vmNamePattern.MatchString(vmName) {
+	if len(vmName) > 63 || !vmNamePattern.MatchString(vmName) {
 		return "", fmt.Errorf("LC_VM_NAME %q is not a DNS-label-shaped name", vmName)
 	}
 	return vmName, nil

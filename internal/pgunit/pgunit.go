@@ -29,7 +29,7 @@ const (
 
 var (
 	ErrOtherMajor = errors.New("pgunit: the data directory was initialised by another postgres major")
-	nameRE        = regexp.MustCompile(`^[a-z_][a-z0-9_]{0,62}$`)
+	nameRE        = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
 )
 
 type Install struct {
@@ -145,7 +145,7 @@ func CheckData(data, major string) (bool, error) {
 }
 
 func (i Install) Initdb(ctx context.Context, s Server) (bool, error) {
-	if s.User == "" || !nameRE.MatchString(s.User) {
+	if s.User == "" || len(s.User) > 63 || !nameRE.MatchString(s.User) {
 		return false, fmt.Errorf("pgunit: user %q: want lower-case letters, digits and underscores", s.User)
 	}
 	exists, err := CheckData(s.Data, i.Major())

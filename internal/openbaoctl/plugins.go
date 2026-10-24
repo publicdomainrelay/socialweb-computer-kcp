@@ -23,7 +23,7 @@ const (
 var (
 	PluginAssets = []string{"openbao-plugin-auth-atproto", "openbao-plugin-auth-sshsig"}
 
-	pluginNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
+	pluginNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 )
 
 var PluginCorePolicyRules = []v1alpha1.OpenBaoPolicyRule{
@@ -42,7 +42,7 @@ type placedPlugin struct {
 func checkPlugins(ps []v1alpha1.OpenBaoPlugin) error {
 	names, mounts := map[string]bool{}, map[string]bool{}
 	for _, p := range ps {
-		if !pluginNamePattern.MatchString(p.Name) {
+		if len(p.Name) > 63 || !pluginNamePattern.MatchString(p.Name) {
 			return fmt.Errorf("plugin name %q: lower case letters, digits and dashes", p.Name)
 		}
 		if p.Type != baosync.PluginAuth {
@@ -66,7 +66,7 @@ func checkPlugins(ps []v1alpha1.OpenBaoPlugin) error {
 				return fmt.Errorf("plugin %s: atproto config names a clientID and redirectURIs together or neither", p.Name)
 			}
 			for _, r := range p.Atproto.Roles {
-				if !pluginNamePattern.MatchString(r.Name) || (len(r.BoundDIDs) == 0 && len(r.BoundHandles) == 0) {
+				if len(r.Name) > 63 || !pluginNamePattern.MatchString(r.Name) || (len(r.BoundDIDs) == 0 && len(r.BoundHandles) == 0) {
 					return fmt.Errorf("plugin %s: atproto role %q needs a lower case name and boundDIDs or boundHandles", p.Name, r.Name)
 				}
 			}

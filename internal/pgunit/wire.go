@@ -204,7 +204,7 @@ func ServerVersion(ctx context.Context, socketDir, user string) (string, error) 
 }
 
 func CreateDatabase(ctx context.Context, socketDir, user, name string) (bool, error) {
-	if !nameRE.MatchString(name) {
+	if len(name) > 63 || !nameRE.MatchString(name) {
 		return false, fmt.Errorf("pgunit: database %q: want lower-case letters, digits and underscores", name)
 	}
 	rows, err := Query(ctx, socketDir, user, "postgres", "SELECT 1 FROM pg_database WHERE datname = '"+name+"'")

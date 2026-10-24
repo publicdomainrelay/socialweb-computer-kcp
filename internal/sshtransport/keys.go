@@ -31,7 +31,7 @@ var (
 
 	keyBase64Pattern = regexp.MustCompile(`^[A-Za-z0-9+/]+=*$`)
 
-	rkeyPattern = regexp.MustCompile(`^[A-Za-z0-9._~-]{1,512}$`)
+	rkeyPattern = regexp.MustCompile(`^[A-Za-z0-9._~-]+$`)
 )
 
 const tidAlphabet = "234567abcdefghijklmnopqrstuvwxyz"
@@ -223,7 +223,7 @@ func (k *Keys) remove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rkey := r.PathValue("rkey")
-	if !rkeyPattern.MatchString(rkey) {
+	if len(rkey) > 512 || !rkeyPattern.MatchString(rkey) {
 		httpjson.Write(w, http.StatusBadRequest, map[string]any{"error": "invalid key id"})
 		return
 	}

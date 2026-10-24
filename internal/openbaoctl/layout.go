@@ -51,7 +51,7 @@ var CorePolicyRules = []v1alpha1.OpenBaoPolicyRule{
 }
 
 var (
-	clientNamePattern  = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
+	clientNamePattern  = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 	reservedMountNames = map[string]bool{KVMount: true, CertAuthMount: true, "sys": true, "auth": true, "identity": true, "cubbyhole": true}
 )
 
@@ -90,13 +90,13 @@ func checkClients(clients []v1alpha1.OpenBaoServerClient, declared *v1alpha1.Ope
 	names, mounts := map[string]bool{}, map[string]bool{}
 	policies := declaredPolicies(declared)
 	for _, c := range clients {
-		if !clientNamePattern.MatchString(c.Name) || c.Name == CertAuthRole {
+		if len(c.Name) > 63 || !clientNamePattern.MatchString(c.Name) || c.Name == CertAuthRole {
 			return fmt.Errorf("client name %q: lower case letters, digits and dashes, and never %s", c.Name, CertAuthRole)
 		}
 		if c.KVMount == "" && len(c.Policies) == 0 {
 			return fmt.Errorf("client %s: names neither a kvMount of its own nor a declared policy, so its token could do nothing", c.Name)
 		}
-		if c.KVMount != "" && (!clientNamePattern.MatchString(c.KVMount) || reservedMountNames[c.KVMount]) {
+		if c.KVMount != "" && (len(c.KVMount) > 63 || !clientNamePattern.MatchString(c.KVMount) || reservedMountNames[c.KVMount]) {
 			return fmt.Errorf("client %s: kvMount %q is not a mount of its own (never %s, %s or a system mount)", c.Name, c.KVMount, KVMount, CertAuthMount)
 		}
 		for _, p := range c.Policies {

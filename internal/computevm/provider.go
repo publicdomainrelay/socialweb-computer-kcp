@@ -24,9 +24,9 @@ const (
 )
 
 var (
-	guestNameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,200}$`)
+	guestNameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
-	guestMountRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
+	guestMountRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
 	bindHashRE = regexp.MustCompile(`^[0-9a-f]{64}$`)
 )
@@ -149,7 +149,7 @@ func ComputeVMFor(in VMInput) (*v1alpha1.ComputeVM, error) {
 
 func ValidateVMInput(in VMInput) error {
 	switch {
-	case !guestNameRE.MatchString(in.Name):
+	case len(in.Name) > 201 || !guestNameRE.MatchString(in.Name):
 		return fmt.Errorf("computevm: %q is not a ComputeVM name", in.Name)
 	case in.Handle == "":
 		return errors.New("computevm: the VM names no owner handle")
@@ -178,7 +178,7 @@ func ValidateComputeVM(o *v1alpha1.ComputeVM) error {
 		return errors.New("computevm: no ComputeVM")
 	}
 	switch {
-	case !guestNameRE.MatchString(o.Name):
+	case len(o.Name) > 201 || !guestNameRE.MatchString(o.Name):
 		return fmt.Errorf("computevm: %q is not a ComputeVM name", o.Name)
 	case o.Spec.Owner.Handle == "":
 		return errors.New("computevm: spec.owner.handle is empty")
@@ -207,7 +207,7 @@ func checkGuestLogin(login *v1alpha1.ComputeVMGuestLogin) error {
 	if login == nil {
 		return nil
 	}
-	if !guestMountRE.MatchString(login.Mount) {
+	if len(login.Mount) > 63 || !guestMountRE.MatchString(login.Mount) {
 		return fmt.Errorf("computevm: guest login mount %q is not an auth mount name", login.Mount)
 	}
 	if !bindHashRE.MatchString(login.BindSecretSha256) {

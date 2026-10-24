@@ -158,13 +158,13 @@ type Runtime interface {
 	CollectImages(ctx context.Context, keep map[string]string) (guestimage.GCReport, error)
 }
 
-var namePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,47}$`)
+var namePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
 func ValidateSpec(s VMSpec) error {
 	if s.Handle == "" {
 		return fmt.Errorf("vmruntime: the VM names no handle, and the handle is what keeps two bidders' VMs apart on one account")
 	}
-	if !namePattern.MatchString(s.Name) {
+	if len(s.Name) > 48 || !namePattern.MatchString(s.Name) {
 		return fmt.Errorf("vmruntime: VM name %q is not [a-z0-9-], 1-48 characters", s.Name)
 	}
 	if s.UserData == "" {

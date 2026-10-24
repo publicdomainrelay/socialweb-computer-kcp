@@ -32,8 +32,8 @@ const (
 var (
 	GrantGVR = v1alpha1.GuestIdentityGrantGVR
 
-	grantNamePattern   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,200}$`)
-	grantClaimPattern  = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.-]{0,63}$`)
+	grantNamePattern   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+	grantClaimPattern  = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.-]*$`)
 	reservedOIDCClaims = map[string]bool{"iat": true, "aud": true, "exp": true, "iss": true, "sub": true, "namespace": true, "nbf": true}
 	IdentityCoreRules  = []v1alpha1.OpenBaoPolicyRule{
 		{Path: "identity/oidc/key/*", Capabilities: []string{"create", "read", "update", "delete", "list"}},
@@ -77,7 +77,7 @@ func keepConditionTimes(next []metav1.Condition, held []metav1.Condition) {
 func grantTemplate(g v1alpha1.GuestIdentityGrant) (string, error) {
 	claims := map[string]string{"computevm": g.Spec.ComputeVMRef.Name, "api": g.Spec.Api, "actx": g.Spec.Actx}
 	for _, c := range g.Spec.Claims {
-		if !grantClaimPattern.MatchString(c.Name) || reservedOIDCClaims[c.Name] {
+		if len(c.Name) > 64 || !grantClaimPattern.MatchString(c.Name) || reservedOIDCClaims[c.Name] {
 			return "", fmt.Errorf("claim %q is not a claim name a grant may set", c.Name)
 		}
 		if strings.Contains(c.Value, "{{") {
@@ -92,7 +92,7 @@ func grantTemplate(g v1alpha1.GuestIdentityGrant) (string, error) {
 func checkGrant(g v1alpha1.GuestIdentityGrant) error {
 	s := g.Spec
 	switch {
-	case !grantNamePattern.MatchString(s.ComputeVMRef.Name):
+	case len(s.ComputeVMRef.Name) > 201 || !grantNamePattern.MatchString(s.ComputeVMRef.Name):
 		return fmt.Errorf("spec.computevm %q is not a ComputeVM name", s.ComputeVMRef.Name)
 	case s.Entity != "guest-"+s.ComputeVMRef.Name:
 		return fmt.Errorf("spec.entity %q is not guest-%s", s.Entity, s.ComputeVMRef.Name)

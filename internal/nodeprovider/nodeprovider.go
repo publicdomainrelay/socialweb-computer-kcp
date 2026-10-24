@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-var dns1123 = regexp.MustCompile(`^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$`)
+var dns1123 = regexp.MustCompile(`^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$`)
 
 const HostnameMaxBytes = 64
 
@@ -18,7 +18,7 @@ func NodeName(clusterLabel, nodeID string) (string, error) {
 		return "", fmt.Errorf("%w: cluster and node id are both required", ErrBadName)
 	}
 	name := strings.ToLower(clusterLabel + "-" + nodeID)
-	if !dns1123.MatchString(name) {
+	if len(name) > 253 || !dns1123.MatchString(name) {
 		return "", fmt.Errorf("%w: %q", ErrBadName, name)
 	}
 	if len(name) > HostnameMaxBytes {

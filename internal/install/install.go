@@ -84,7 +84,7 @@ var (
 	ErrUsage             = errors.New("install: refused the arguments")
 	ErrBinaryMismatch    = errors.New("install: bin/current is not the binary this install was invoked as")
 	ErrUnsupported       = errors.New("install: install and uninstall are Linux root steps; this OS has no backend (plans 0011, 0012)")
-	handleRE             = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$`)
+	handleRE             = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$`)
 	accountRE            = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,30}$`)
 	stateRE              = regexp.MustCompile(`^/[A-Za-z0-9._/-]+$`)
 )
@@ -469,7 +469,7 @@ func validate(o *Options) error {
 			return fmt.Errorf("install bidder needs at least one --handle (the atproto handle each bidder instance runs as)")
 		}
 		for _, h := range o.Handles {
-			if !handleRE.MatchString(h) {
+			if !handleRE.MatchString(h) || slices.ContainsFunc(strings.Split(h, "."), func(l string) bool { return len(l) > 63 }) {
 				return fmt.Errorf("install: handle %q is not a lowercase atproto handle", h)
 			}
 		}

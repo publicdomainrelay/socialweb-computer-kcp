@@ -22,9 +22,9 @@ import (
 const MaxVMHostKeys = 8
 
 var (
-	guestNameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,200}$`)
+	guestNameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
-	hostKeyTypeRE = regexp.MustCompile(`^[a-z0-9][a-z0-9.@-]{0,63}$`)
+	hostKeyTypeRE = regexp.MustCompile(`^[a-z0-9][a-z0-9.@-]*$`)
 
 	hostKeyBlobRE = regexp.MustCompile(`^[A-Za-z0-9+/]+={0,2}$`)
 
@@ -78,7 +78,7 @@ func (g *guestRecord) Live(ctx context.Context, name string) (*v1alpha1.ComputeV
 	if g == nil || g.store == nil {
 		return nil, errors.New("computevm: the guest recorder has no ComputeVM store")
 	}
-	if !guestNameRE.MatchString(name) {
+	if len(name) > 201 || !guestNameRE.MatchString(name) {
 		return nil, ErrUnknownGuest
 	}
 	o, err := g.store.Get(ctx, name)
@@ -213,7 +213,7 @@ func CheckHostKeys(keys []v1alpha1.ComputeVMHostKey) ([]v1alpha1.ComputeVMHostKe
 	out := make([]v1alpha1.ComputeVMHostKey, 0, len(keys))
 	types := map[string]bool{}
 	for _, key := range keys {
-		if !hostKeyTypeRE.MatchString(key.Type) {
+		if len(key.Type) > 64 || !hostKeyTypeRE.MatchString(key.Type) {
 			return nil, fmt.Errorf("computevm: host key type %q is malformed", key.Type)
 		}
 		if len(key.PublicKey) < 16 || len(key.PublicKey) > 4096 || !hostKeyBlobRE.MatchString(key.PublicKey) {

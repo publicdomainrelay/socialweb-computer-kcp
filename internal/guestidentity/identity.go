@@ -24,11 +24,11 @@ const (
 )
 
 var (
-	ComputeVMName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,200}$`)
+	computeVMNameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
-	RoleNamePattern = regexp.MustCompile(`^guest-[A-Za-z0-9][A-Za-z0-9._-]{0,200}-[0-9a-f]{16}$`)
+	roleNameRE = regexp.MustCompile(`^guest-[A-Za-z0-9][A-Za-z0-9._-]*-[0-9a-f]{16}$`)
 
-	authMountName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
+	authMountName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 )
 
 type Audience struct {
@@ -76,9 +76,9 @@ func validActx(actx string) bool {
 	return actx != "" && !strings.ContainsAny(actx, "? #&=\"{}'")
 }
 
-func ValidComputeVM(name string) bool { return ComputeVMName.MatchString(name) }
+func ValidComputeVM(name string) bool { return len(name) <= 201 && computeVMNameRE.MatchString(name) }
 
-func ValidRole(role string) bool { return RoleNamePattern.MatchString(role) }
+func ValidRole(role string) bool { return len(role) <= 224 && roleNameRE.MatchString(role) }
 
 func Entity(computevm string) string { return EntityPrefix + computevm }
 
@@ -86,4 +86,4 @@ func Role(computevm, audience string) string {
 	return openbaoctl.GuestRoleName(Entity(computevm), audience)
 }
 
-func ValidMount(mount string) bool { return authMountName.MatchString(mount) }
+func ValidMount(mount string) bool { return len(mount) <= 63 && authMountName.MatchString(mount) }

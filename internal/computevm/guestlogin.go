@@ -22,7 +22,7 @@ const (
 
 var (
 	sha256Hex  = regexp.MustCompile(`^[0-9a-f]{64}$`)
-	mountName  = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
+	mountName  = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 	errNoLogin = errors.New("no guest login")
 	errBadSpec = errors.New("spec.guestLogin")
 )
@@ -32,7 +32,7 @@ func guestLoginRole(o v1alpha1.ComputeVM) (string, error) {
 	if g == nil {
 		return "", errNoLogin
 	}
-	if !mountName.MatchString(g.Mount) {
+	if len(g.Mount) > 63 || !mountName.MatchString(g.Mount) {
 		return "", fmt.Errorf("%w: mount %q is not an auth mount name", errBadSpec, g.Mount)
 	}
 	if !sha256Hex.MatchString(g.BindSecretSha256) {

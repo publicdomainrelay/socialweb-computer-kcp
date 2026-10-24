@@ -42,7 +42,7 @@ const (
 var (
 	urlPattern = regexp.MustCompile(`https://[^\s"'<>]+`)
 
-	routePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
+	routePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 )
 
 type Config struct {
@@ -91,7 +91,7 @@ func (c Config) Check() error {
 		if strings.ContainsAny(host, ":/[]/ \t") {
 			return fmt.Errorf("ingressproxy opentunnel: localHost %q is a host without a port", host)
 		}
-		if net.ParseIP(host) == nil && !routePattern.MatchString(strings.ToLower(host)) {
+		if lower := strings.ToLower(host); net.ParseIP(host) == nil && (len(lower) > 63 || !routePattern.MatchString(lower)) {
 			return fmt.Errorf("ingressproxy opentunnel: localHost %q is not a host name or IP address", host)
 		}
 	}

@@ -22,7 +22,7 @@ const (
 	PathTokenRevokeSelf = "auth/token/revoke-self"
 )
 
-var certIdentityPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
+var certIdentityPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 
 func NodeSecretPath(node string) string {
 	return NodeSecretPrefix + strings.ToLower(node)
@@ -37,7 +37,7 @@ func NodePolicyName(node string) string {
 }
 
 func ValidateCertIdentity(name string) error {
-	if !certIdentityPattern.MatchString(name) {
+	if len(name) > 63 || !certIdentityPattern.MatchString(name) {
 		return fmt.Errorf(
 			"vaultlayout: %q is not a lower-case DNS-1123 label, and a certificate identity is "+
 				"used at once as a common name, a cert role name and a per-node secret path "+

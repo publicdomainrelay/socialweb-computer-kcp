@@ -39,7 +39,7 @@ func (k Kind) Prefix() string {
 
 var ErrInvalidDeclaration = errors.New("infra: invalid declaration")
 
-var labelPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
+var labelPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 
 type Declaration struct {
 	Description string `json:"description,omitempty"`
@@ -114,7 +114,7 @@ func (d Declaration) Hash() string {
 func (d Declaration) Validate() error {
 	seen := map[string]bool{}
 	for _, c := range d.Contracts {
-		if !labelPattern.MatchString(c.Name) {
+		if len(c.Name) > 63 || !labelPattern.MatchString(c.Name) {
 			return fmt.Errorf("%w: the contract name %q is not a DNS-1123 label", ErrInvalidDeclaration, c.Name)
 		}
 		if seen[c.Name] {

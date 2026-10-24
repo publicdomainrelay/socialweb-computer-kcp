@@ -196,8 +196,8 @@ func ValidServiceRef(value string) error {
 	return fmt.Errorf("%w: service ref %q is neither a DID ref nor an HTTP URL", ErrInvalidRecord, value)
 }
 
-var hostKeyTypeRE = regexp.MustCompile(`^[a-z0-9][a-z0-9.@-]{0,63}$`)
+var hostKeyTypeRE = regexp.MustCompile(`^[a-z0-9][a-z0-9.@-]*$`)
 
 func ValidHostKeyType(value string) bool {
-	return hostKeyTypeRE.MatchString(value)
+	return len(value) <= 64 && hostKeyTypeRE.MatchString(value)
 }

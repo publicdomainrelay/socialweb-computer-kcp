@@ -37,13 +37,13 @@ const (
 )
 
 var (
-	handleRE  = regexp.MustCompile(`^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]([a-z0-9-]{0,61}[a-z0-9])?$`)
+	handleRE  = regexp.MustCompile(`^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]([a-z0-9-]*[a-z0-9])?$`)
 	nonLabel  = regexp.MustCompile(`[^a-z0-9-]+`)
 	ErrNoQrID = errors.New("the bidder became ready without a sign-in naming its account")
 )
 
 func CheckHandle(handle string) error {
-	if !handleRE.MatchString(handle) {
+	if !handleRE.MatchString(handle) || slices.ContainsFunc(strings.Split(handle, "."), func(l string) bool { return len(l) > 63 }) {
 		return fmt.Errorf("bidder: handle %q is not a lowercase atproto handle", handle)
 	}
 	return nil

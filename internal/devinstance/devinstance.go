@@ -20,7 +20,7 @@ const MaxSocketPath = 107
 
 const basenameChars = 16
 
-var namePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,39}$`)
+var namePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
 var ErrRoot = errors.New("devinstance: dev refuses to run as root (uid 0): dev mode needs no root; production uses install")
 
@@ -84,7 +84,7 @@ func readableName(root string, env Env) string {
 
 func ID(name, cwd string, env Env) (string, error) {
 	if name != "" {
-		if !namePattern.MatchString(name) {
+		if len(name) > 40 || !namePattern.MatchString(name) {
 			return "", fmt.Errorf("devinstance: instance %q: want lower-case letters, digits and dashes, at most 40", name)
 		}
 		return name, nil

@@ -56,9 +56,9 @@ const (
 )
 
 var (
-	guestLoginRoleRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,200}$`)
+	guestLoginRoleRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
-	guestLoginMountRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
+	guestLoginMountRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
 	guestBindSecretRE = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
@@ -438,7 +438,7 @@ func validateGuestLogin(opts GuestLoginOptions) error {
 	if err := checkURLLike(url, "guest login URL"); err != nil {
 		return err
 	}
-	if !guestLoginRoleRE.MatchString(opts.Role) {
+	if len(opts.Role) > 201 || !guestLoginRoleRE.MatchString(opts.Role) {
 		return fmt.Errorf("guestseed: guest login role %q is not a ComputeVM name", opts.Role)
 	}
 	if !guestBindSecretRE.MatchString(opts.BindSecret) {
@@ -446,7 +446,7 @@ func validateGuestLogin(opts GuestLoginOptions) error {
 	}
 	mount := opts.Mount
 	mount = cmp.Or(mount, GuestLoginDefaultMount)
-	if !guestLoginMountRE.MatchString(mount) {
+	if len(mount) > 63 || !guestLoginMountRE.MatchString(mount) {
 		return fmt.Errorf("guestseed: guest login mount %q is not an auth mount name", mount)
 	}
 	if opts.SSHDir != "" {
