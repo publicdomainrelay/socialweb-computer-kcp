@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -47,6 +48,8 @@ const (
 
 	ReasonSourceError = "SourceError"
 
+	ReasonPdsNotReady = "PdsNotReady"
+
 	DefaultRefresh = 30 * time.Second
 )
 
@@ -56,10 +59,14 @@ type Options struct {
 	Scope func(workspace string) bool
 
 	Refresh time.Duration
+
+	Log *slog.Logger
 }
 
 type Controller struct {
 	bus *bus.Bus
+
+	log *slog.Logger
 
 	refresh time.Duration
 
@@ -67,7 +74,11 @@ type Controller struct {
 }
 
 func New(opts Options) *Controller {
-	return &Controller{bus: opts.Bus, refresh: ctlruntime.Period(opts.Refresh, DefaultRefresh),
+	log := opts.Log
+	if log == nil {
+		log = slog.New(slog.DiscardHandler)
+	}
+	return &Controller{bus: opts.Bus, log: log.With("component", "atprotosession-controller"), refresh: ctlruntime.Period(opts.Refresh, DefaultRefresh),
 		refs: binding.New[struct{}]()}
 }
 
@@ -127,7 +138,16 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 		return ctlruntime.Result{}, c.apply(ctx, req, object, status)
 	}
 	self := commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: Kind, Name: object.Name, Workspace: req.Workspace}
-	session, err := c.session(ctx, self, to, did.String())
+	sessions, err := bus.Resolve[pds.Sessions](ctx, c.bus, self, to, bus.Capability{Name: pds.CapabilitySession, Scope: []string{did.String()}})
+	if errors.Is(err, pds.ErrNotFound) {
+		c.log.Info("an AtprotoSession waits for its PDS", "workspace", req.Workspace, "name", object.Name, "err", err.Error())
+		conds.Set(&status.Conditions, generation, ConditionReady, false, ReasonPdsNotReady, "the PDS is not ready: "+err.Error())
+		return ctlruntime.Result{}, c.apply(ctx, req, object, status)
+	}
+	var session pds.Session
+	if err == nil {
+		session, err = c.session(ctx, sessions, did.String())
+	}
 	if err != nil {
 		conds.Set(&status.Conditions, generation, ConditionReady, false, ReasonSourceError, "reading the session: "+err.Error())
 		return ctlruntime.Result{}, errors.Join(fmt.Errorf("atprotosession: reading %s from %s: %w", did, to.String(), err), c.apply(ctx, req, object, status))
@@ -143,11 +163,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 	return ctlruntime.RefreshAfter(c.refresh), nil
 }
 
-func (c *Controller) session(ctx context.Context, self, to commonv1.ObjectRef, did string) (pds.Session, error) {
-	sessions, err := bus.Resolve[pds.Sessions](ctx, c.bus, self, to, bus.Capability{Name: pds.CapabilitySession, Scope: []string{did}})
-	if err != nil {
-		return pds.Session{}, err
-	}
+func (c *Controller) session(ctx context.Context, sessions pds.Sessions, did string) (pds.Session, error) {
 	session, err := sessions.Session(ctx, did)
 	if err != nil {
 		return pds.Session{}, err

@@ -270,8 +270,8 @@ func (c *Core) registerStatus(mgr *ctlruntime.Manager, scope func(string) bool) 
 		plc.Directory = directory
 	}
 	vault := openBaoMetadata(c.store, base)
-	_, accountErr := pdsaccount.Register(mgr, pdsaccount.Options{Bus: c.handlers, Scope: scope})
-	_, sessionErr := atprotosession.Register(mgr, atprotosession.Options{Bus: c.handlers, Scope: scope})
+	_, accountErr := pdsaccount.Register(mgr, pdsaccount.Options{Bus: c.handlers, Scope: scope, Log: c.cfg.Log})
+	_, sessionErr := atprotosession.Register(mgr, atprotosession.Options{Bus: c.handlers, Scope: scope, Log: c.cfg.Log})
 	_, plcErr := plcidentity.Register(mgr, plc)
 	_, relayErr := relaystatus.Register(mgr, relaystatus.Options{Source: statusstate.NewHTTPRelayHealthSource(c.relayEndpoint(base), c.busOrNetworkClient()),
 		Scope: scope})

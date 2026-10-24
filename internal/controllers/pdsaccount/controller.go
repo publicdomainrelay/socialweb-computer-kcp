@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -41,6 +42,8 @@ const (
 
 	ReasonSourceError = "SourceError"
 
+	ReasonPdsNotReady = "PdsNotReady"
+
 	DefaultRefresh = 30 * time.Second
 )
 
@@ -50,10 +53,14 @@ type Options struct {
 	Scope func(workspace string) bool
 
 	Refresh time.Duration
+
+	Log *slog.Logger
 }
 
 type Controller struct {
 	bus *bus.Bus
+
+	log *slog.Logger
 
 	refresh time.Duration
 
@@ -61,7 +68,11 @@ type Controller struct {
 }
 
 func New(opts Options) *Controller {
-	return &Controller{bus: opts.Bus, refresh: ctlruntime.Period(opts.Refresh, DefaultRefresh),
+	log := opts.Log
+	if log == nil {
+		log = slog.New(slog.DiscardHandler)
+	}
+	return &Controller{bus: opts.Bus, log: log.With("component", "pdsaccount-controller"), refresh: ctlruntime.Period(opts.Refresh, DefaultRefresh),
 		refs: binding.New[struct{}]()}
 }
 
@@ -110,7 +121,16 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 	}
 	c.refs.Set(target, &struct{}{}, binding.Key(to.Workspace, to.Kind, to.Name))
 	self := commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: Kind, Name: object.Name, Workspace: req.Workspace}
-	account, err := c.account(ctx, self, to, did)
+	accounts, err := bus.Resolve[pds.Accounts](ctx, c.bus, self, to, bus.Capability{Name: pds.CapabilityAccount, Scope: []string{did}})
+	if errors.Is(err, pds.ErrNotFound) {
+		c.log.Info("a PdsAccount waits for its PDS", "workspace", req.Workspace, "name", object.Name, "err", err.Error())
+		conds.Set(&status.Conditions, generation, ConditionReady, false, ReasonPdsNotReady, "the PDS is not ready: "+err.Error())
+		return ctlruntime.Result{}, c.apply(ctx, req, object, status)
+	}
+	var account pds.Account
+	if err == nil {
+		account, err = accounts.Account(ctx, did)
+	}
 	if err != nil {
 		conds.Set(&status.Conditions, generation, ConditionReady, false, ReasonSourceError, "reading the account: "+err.Error())
 		return ctlruntime.Result{}, errors.Join(fmt.Errorf("pdsaccount: reading %s from %s: %w", did, to.String(), err), c.apply(ctx, req, object, status))
@@ -124,14 +144,6 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 		return ctlruntime.Result{}, nil
 	}
 	return ctlruntime.RefreshAfter(c.refresh), nil
-}
-
-func (c *Controller) account(ctx context.Context, self, to commonv1.ObjectRef, did string) (pds.Account, error) {
-	accounts, err := bus.Resolve[pds.Accounts](ctx, c.bus, self, to, bus.Capability{Name: pds.CapabilityAccount, Scope: []string{did}})
-	if err != nil {
-		return pds.Account{}, err
-	}
-	return accounts.Account(ctx, did)
 }
 
 func (c *Controller) apply(ctx context.Context, req ctlruntime.Request, object *v1alpha1.PdsAccount, status v1alpha1.PdsAccountStatus) error {
