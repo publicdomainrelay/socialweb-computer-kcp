@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -226,7 +227,8 @@ func gatewayNodeMarket(o *v1alpha1.Gateway, workspace, contracts string) *v1alph
 	out := &v1alpha1.GatewayNodeMarket{OwnerSessionsFile: m.OwnerSessionsFile, UserDataBaseFile: m.NodeUserDataBaseFile,
 		HomeWorkspace: workspace, ContractWorkspace: contracts,
 		NodePolicy: compose.OptionValue(o.Spec.Options, GatewayNodePolicy), NodePolicyArgs: compose.OptionValue(o.Spec.Options, GatewayNodePolicyArgs),
-		ExtraBidderDIDs: slices.Clone(o.Spec.BidderDids)}
+		ExtraBidderDIDs: slices.Clone(o.Spec.BidderDids),
+		InfraRecord:     &v1alpha1.GatewayInfraRecord{RepoWorkspace: workspace, EventSourceRefs: compose.OwnerRecordSources(workspace, o.Spec.Network)}}
 	return out
 }
 
@@ -711,6 +713,9 @@ func (p *pass) run(ctx context.Context, plan compose.AccountPlan, id *v1alpha1.M
 	}
 	if m := o.Spec.MarketNetwork; o.Spec.Profile == ProfileGatewayNetwork && m != nil && m.OwnerSessionsFile != "" {
 		p.operatorWrites(ctx, id, m.OwnerSessionsFile)
+		p.ownerRepos(ctx, id, m.OwnerSessionsFile)
+	} else if err := c.ApplyLinks(ctx, r, ownerRepoLinkSet, compose.RecordWatchStreamLinks(r.Workspace, compose.OwnerRecordSources(ws, o.Spec.Network)), ws); err != nil {
+		return ctlruntime.Result{}, err
 	}
 	if fn := c.Config().OnComponents; fn != nil {
 		fn(r.Owner(), snap.Listeners)
@@ -725,6 +730,39 @@ func (p *pass) run(ctx context.Context, plan compose.AccountPlan, id *v1alpha1.M
 		return ctlruntime.Result{}, c.WriteStatus(ctx, r, compose.GatewayGVR, p.st)
 	}
 	return p.wait("waiting for every component to be ready and the requester's MarketIdentity for a did")
+}
+
+const ownerRepoLinkSet = "owner-repos"
+
+func (p *pass) ownerRepos(ctx context.Context, id *v1alpha1.MarketIdentity, sessionsFile string) {
+	c, r, o, ws := p.c, p.r, p.o, p.ws
+	log := c.Log().With("root", r.Owner())
+	sessions, err := compose.ReadOwnerSessions(sessionsFile)
+	if err != nil {
+		log.Warn("reading the market network owner sessions", "err", err.Error())
+		return
+	}
+	links := compose.RecordWatchStreamLinks(r.Workspace, compose.OwnerRecordSources(ws, o.Spec.Network))
+	var owners []compose.Owner
+	for _, did := range slices.Sorted(maps.Keys(sessions)) {
+		if did == strings.TrimSpace(id.Status.Did) {
+			continue
+		}
+		s := sessions[did]
+		owner := compose.Owner{DID: did, PdsURL: s.Service, Identifier: s.Identifier, Password: s.Password,
+			CARef: c.PublishNetworkTrust(r, o.Spec.Network), Vault: vaultlayout.RootServerName, Mount: RequesterVaultMount}
+		owners = append(owners, owner)
+		links = append(links, compose.OwnerRepoLinks(ws, r.Workspace, owner)...)
+	}
+	if err := c.ApplyLinks(ctx, r, ownerRepoLinkSet, links, ws); err != nil {
+		log.Warn("the links of the tenant owners' repos", "err", err.Error())
+		return
+	}
+	for _, owner := range owners {
+		if err := c.ApplyOwnerRepo(ctx, r, ws, owner); err != nil {
+			log.Warn("composing a tenant owner's repo", "did", owner.DID, "err", err.Error())
+		}
+	}
 }
 
 func (p *pass) operatorWrites(ctx context.Context, id *v1alpha1.MarketIdentity, sessionsFile string) {
