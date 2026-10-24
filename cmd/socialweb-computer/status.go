@@ -36,6 +36,8 @@ type rootStatusView struct {
 	GC      *v1alpha1.GCStatus         `json:"gc,omitempty"`
 	TTL     *v1alpha1.TTLStatus        `json:"ttl,omitempty"`
 	Quotas  []v1alpha1.QuotaUsage      `json:"quotas,omitempty"`
+
+	BidderStreams []v1alpha1.BidderStreamStatus `json:"bidderStreams,omitempty"`
 }
 
 type contractStatusView struct {
@@ -172,7 +174,8 @@ func readAppStatus(ctx context.Context, ak appKcp) appStatusView {
 		}
 		for _, o := range list {
 			v.Roots = append(v.Roots, rootStatusView{Kind: r.kind, Name: o.Name, Phase: o.Status.Phase, Message: o.Status.Message,
-				Market: o.Status.Market, Store: o.Status.Store, GC: o.Status.GC, TTL: o.Status.TTL, Quotas: o.Status.Quotas})
+				Market: o.Status.Market, Store: o.Status.Store, GC: o.Status.GC, TTL: o.Status.TTL, Quotas: o.Status.Quotas,
+				BidderStreams: o.Status.BidderStreams})
 		}
 	}
 	list, err := kube.List[v1alpha1.ComputeContract](ctx, dc.Resource(compose.ComputeContractGVR), metav1.ListOptions{})

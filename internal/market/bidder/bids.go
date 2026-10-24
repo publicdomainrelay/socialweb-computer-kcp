@@ -3,8 +3,6 @@ package bidder
 import (
 	"cmp"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"reflect"
@@ -727,6 +725,5 @@ func statusError(err error) string {
 }
 
 func bidName(did, rfpURI, rfpCID string) string {
-	sum := sha256.Sum256([]byte(did + "\x00" + rfpURI + "#" + rfpCID))
-	return "bid-" + hex.EncodeToString(sum[:])[:20]
+	return market.BidRKey(did, rfpURI, rfpCID)
 }

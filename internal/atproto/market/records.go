@@ -2,6 +2,8 @@ package market
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -441,6 +443,11 @@ func BuildBid(opts BidOptions) (Bid, error) {
 		return Bid{}, err
 	}
 	return Bid{RFP: rfp, Config: config, Payload: payload, SubmitAccept: opts.SubmitAccept, CreatedAt: isoOrNow(opts.CreatedAt)}, nil
+}
+
+func BidRKey(bidderDID, rfpURI, rfpCID string) string {
+	sum := sha256.Sum256([]byte(bidderDID + "\x00" + rfpURI + "#" + rfpCID))
+	return "bid-" + hex.EncodeToString(sum[:])[:20]
 }
 
 func CreateBid(ctx context.Context, w RecordWriter, repo string, opts BidOptions, signer *Signer) (SignedRecord, error) {

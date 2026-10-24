@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -192,27 +193,70 @@ type Streams struct {
 	ForceFirehose bool
 }
 
-func (c *Composer) ApplyMarketStreams(ctx context.Context, r Root, s Streams) ([]Link, error) {
+type MarketStreams struct {
+	Links []Link
+
+	Bidders []v1alpha1.BidderStreamStatus
+
+	RequeueAfter time.Duration
+}
+
+func streamMode(s Streams) v1alpha1.MarketCommsMode {
+	if s.ForceFirehose {
+		return v1alpha1.MarketCommsModeFirehose
+	}
+	if s.Role == RequesterStreamRole && (s.Comms == nil || strings.TrimSpace(string(s.Comms.Mode)) == "") {
+		return v1alpha1.MarketCommsModeBoth
+	}
+	return MarketCommsMode(s.Comms)
+}
+
+type marketStreamRef struct {
+	ref commonv1.ObjectRef
+
+	dids []string
+
+	derived bool
+}
+
+func (c *Composer) ApplyMarketStreams(ctx context.Context, r Root, s Streams) (MarketStreams, error) {
 	ws := workspaceOr(s.Workspace, r.Workspace)
 	links, err := c.applyRootSources(ctx, r, ws, s.Sources)
 	if err != nil {
-		return nil, err
+		return MarketStreams{}, err
 	}
-	mode := MarketCommsMode(s.Comms)
-	if s.ForceFirehose {
-		mode = v1alpha1.MarketCommsModeFirehose
+	out := MarketStreams{}
+	mode := streamMode(s)
+	derive := s.Role == RequesterStreamRole && (mode == v1alpha1.MarketCommsModeFirehose || mode == v1alpha1.MarketCommsModeBoth)
+	var bidders []bidderStream
+	if derive {
+		if bidders, out.RequeueAfter, err = c.bidderStreams(ctx, ws, time.Now()); err != nil {
+			return MarketStreams{}, err
+		}
+	}
+	derivedRefs, err := c.applyBidderSources(ctx, r, ws, s.Role, bidders)
+	if err != nil {
+		return MarketStreams{}, err
 	}
 	if mode != v1alpha1.MarketCommsModeFirehose && mode != v1alpha1.MarketCommsModeBoth {
-		return links, c.Prune(ctx, ws, eventsv1alpha1.EventStreamGVR, marketStreamLabel+"="+s.Role, nil)
+		out.Links = links
+		return out, c.Prune(ctx, ws, eventsv1alpha1.EventStreamGVR, marketStreamLabel+"="+s.Role, nil)
 	}
-	refs := marketSourceRefs(ws, s.Comms, s.Sources.Network, s.ForceFirehose)
-	if len(refs) == 0 {
-		return nil, fmt.Errorf("compose: comms mode %s names no event source (spec.comms.eventSourceRefs) and the network has no relay; it fails closed instead of using XRPC", mode)
+	var refs []marketStreamRef
+	for _, ref := range marketSourceRefs(ws, s.Comms, s.Sources.Network, s.ForceFirehose) {
+		refs = append(refs, marketStreamRef{ref: ref})
+	}
+	if len(refs) == 0 && !derive {
+		return MarketStreams{}, fmt.Errorf("compose: comms mode %s names no event source (spec.comms.eventSourceRefs) and the network has no relay; it fails closed instead of using XRPC", mode)
+	}
+	for i, ref := range derivedRefs {
+		refs = append(refs, marketStreamRef{ref: ref, dids: bidders[i].dids, derived: true})
 	}
 	streamLabels := map[string]string{marketStreamLabel: s.Role}
 	sink := eventstream.MarketHandlerName(s.Role, ws)
 	keep := map[string]bool{}
-	for _, ref := range refs {
+	for i, entry := range refs {
+		ref := entry.ref
 		name := marketStreamName(s.Role, ref)
 		keep[name] = true
 		sourceRef := ref
@@ -222,30 +266,42 @@ func (c *Composer) ApplyMarketStreams(ctx context.Context, r Root, s Streams) ([
 		stream := &eventsv1alpha1.EventStream{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: streamLabels},
 			Spec: eventsv1alpha1.EventStreamSpec{
 				SourceRef: sourceRef,
-				Filter:    eventsv1alpha1.EventStreamFilter{Collections: slices.Clone(MarketStreamCollections)},
+				Filter:    eventsv1alpha1.EventStreamFilter{Collections: slices.Clone(MarketStreamCollections), DIDs: slices.Clone(entry.dids)},
 				Sink:      eventsv1alpha1.EventStreamSink{Kind: eventsv1alpha1.EventStreamSinkHandler, Name: sink},
 			}}
-		if s.ForceFirehose {
+		if s.ForceFirehose && !entry.derived {
 			stream.Spec.Cursor = new(int64(0))
 		}
 		if err := c.ApplyTyped(ctx, r, ws, eventsv1alpha1.EventStreamGVR, eventsv1alpha1.GroupVersion.String(), "EventStream", stream); err != nil {
-			return nil, err
+			return MarketStreams{}, err
 		}
 		user, err := c.userSourceLink(ctx, s.Role, ref)
 		if err != nil {
-			return nil, err
+			return MarketStreams{}, err
 		}
 		links = append(links, user...)
 		links = append(links, SelectorLink(eventLinkName(s.Role, "subscribe", ref.Workspace, ref.Name), streamSelector(ws, streamLabels, nil), ref,
 			Cap(events.CapabilitySubscribe, MarketStreamCollections...)))
+		if entry.derived {
+			b := bidders[i-(len(refs)-len(derivedRefs))]
+			status := v1alpha1.BidderStreamStatus{EventStream: name, Pds: b.pds, Dids: slices.Clone(b.dids), Active: b.active}
+			if !b.seen.IsZero() {
+				status.SeenAt = b.seen.UTC().Format(time.RFC3339)
+			}
+			out.Bidders = append(out.Bidders, status)
+		}
 	}
 	links = append(links, SelectorLink(eventLinkName(s.Role, "deliver", ws, sink), streamSelector(ws, streamLabels, nil),
 		commonv1.ObjectRef{Group: eventsv1alpha1.GroupName, Kind: events.HandlerKind, Name: sink, Workspace: ws},
 		Cap(events.CapabilityDeliver, sink)))
 	if err := c.Prune(ctx, ws, eventsv1alpha1.EventStreamGVR, marketStreamLabel+"="+s.Role, keep); err != nil {
-		return nil, err
+		return MarketStreams{}, err
 	}
-	return links, nil
+	if derive {
+		c.logBidderStreams(ws, s.Role, out.Bidders)
+	}
+	out.Links = links
+	return out, nil
 }
 
 func (c *Composer) applyRootSources(ctx context.Context, r Root, ws string, in SourceInput) ([]Link, error) {

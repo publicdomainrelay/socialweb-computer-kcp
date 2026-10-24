@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -86,6 +87,8 @@ type pass struct {
 
 	ws string
 
+	requeue time.Duration
+
 	st v1alpha1.ApplicationStatus
 
 	vault []v1alpha1.ApplicationComponent
@@ -149,7 +152,7 @@ func (ctl *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, o 
 		c.Adopt(ctx, r)
 		c.ApplyQuotas(ctx, r, o.Spec.Quota)
 	}
-	return res, err
+	return compose.SoonerRequeue(res, p.requeue), err
 }
 
 func (p *pass) deleting(msg string) (ctlruntime.Result, error) {
@@ -677,13 +680,14 @@ func (p *pass) run(ctx context.Context, plan compose.AccountPlan, id *v1alpha1.M
 	if err := p.c.EnsureLinked(ctx, p.r, all, desired); err != nil {
 		return p.retry("", err)
 	}
-	streamLinks, err := c.ApplyMarketStreams(ctx, r, compose.Streams{Role: "requester", Workspace: ws,
+	streams, err := c.ApplyMarketStreams(ctx, r, compose.Streams{Role: compose.RequesterStreamRole, Workspace: ws,
 		Comms:   compose.OverrideComms(o.Spec.Components, compose.ComponentKindRequester, marketrequester.RequesterComponent, o.Spec.Comms),
 		Sources: compose.SourceInput{Network: o.Spec.Network}, ForceFirehose: compose.OAuthReceiveOnly(plan.Mode)})
 	if err != nil {
 		return p.fail(err)
 	}
-	if err := c.ApplyLinks(ctx, r, "events", streamLinks, ws); err != nil {
+	p.st.BidderStreams, p.requeue = streams.Bidders, streams.RequeueAfter
+	if err := c.ApplyLinks(ctx, r, "events", streams.Links, ws); err != nil {
 		return ctlruntime.Result{}, err
 	}
 	if _, err := c.DeleteComponentsExcept(ctx, r.Workspace, r.Owner(), compose.DesiredKeys(all)); err != nil {

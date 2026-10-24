@@ -85,6 +85,8 @@ type Composer struct {
 	drift map[string]*driftState
 
 	trusts Trusts
+
+	bidderSets sync.Map
 }
 
 func New(cfg Config) (*Composer, error) {

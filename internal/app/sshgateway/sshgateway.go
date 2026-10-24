@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -223,6 +224,8 @@ type pass struct {
 	o *v1alpha1.SshGateway
 
 	st v1alpha1.ApplicationStatus
+
+	requeue time.Duration
 }
 
 func (p *pass) write(phase v1alpha1.ApplicationPhase, msg string) (ctlruntime.Result, error) {
@@ -266,7 +269,7 @@ func (ctl *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, o 
 		c.Adopt(ctx, r)
 		c.ApplyQuotas(ctx, r, o.Spec.Quota)
 	}
-	return res, err
+	return compose.SoonerRequeue(res, p.requeue), err
 }
 
 func (p *pass) delete(ctx context.Context) (ctlruntime.Result, error) {
@@ -496,13 +499,14 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 	if err := p.ensure(ctx, desired); err != nil {
 		return p.retry("", err)
 	}
-	streams, err := c.ApplyMarketStreams(ctx, r, compose.Streams{Role: "requester",
+	streams, err := c.ApplyMarketStreams(ctx, r, compose.Streams{Role: compose.RequesterStreamRole,
 		Comms:   compose.OverrideComms(o.Spec.Components, compose.ComponentKindRequester, marketrequester.RequesterComponent, o.Spec.Comms),
 		Sources: compose.SourceInput{Network: o.Spec.Network}, ForceFirehose: compose.OAuthReceiveOnly(plan.Mode)})
 	if err != nil {
 		return p.fail(err)
 	}
-	if err := c.ApplyLinks(ctx, r, "events", streams); err != nil {
+	p.st.BidderStreams, p.requeue = streams.Bidders, streams.RequeueAfter
+	if err := c.ApplyLinks(ctx, r, "events", streams.Links); err != nil {
 		return ctlruntime.Result{}, err
 	}
 	if _, err := c.DeleteComponentsExcept(ctx, ws, r.Owner(), compose.DesiredKeys(desired)); err != nil {

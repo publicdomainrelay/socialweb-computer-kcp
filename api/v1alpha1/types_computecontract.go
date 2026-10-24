@@ -232,6 +232,16 @@ type ComputeContractStatus struct {
 	Release *ComputeContractRelease `json:"release,omitempty"`
 
 	PendingEvents []ComputeContractEvent `json:"pendingEvents,omitempty"`
+
+	BidderRepos []ContractBidderRepo `json:"bidderRepos,omitempty"`
+}
+
+type ContractBidderRepo struct {
+	Did string `json:"did"`
+
+	Pds string `json:"pds,omitempty"`
+
+	SeenAt string `json:"seenAt,omitempty"`
 }
 
 const (

@@ -415,10 +415,15 @@ func (r *contractRunner) requestOnce(ctx context.Context) error {
 		r.writeStatus(ctx, v1alpha1.ComputeContractRequesting, "the RFP is submitted; "+noBidders+"; waiting for bids", state, nil, nil, "collectingBids", 1)
 	}
 	q.rememberBidders(bidders)
+	considered := consideredBidderDIDs(bidders, only)
+	r.noteBidderRepos(ctx, considered)
+	catchUpCtx, stopCatchUp := context.WithCancel(ctx)
+	r.catchUpBids(catchUpCtx, considered, rfpURI, rfpCID)
 	r.solicitBids(ctx, bidders, rfpURI, rfpCID)
 
 	usePolicy := policyRef != nil
 	winner, allBids, err := r.collectBids(ctx, rfpURI, usePolicy, policyWorkflow, only)
+	stopCatchUp()
 	if err != nil {
 		return err
 	}
