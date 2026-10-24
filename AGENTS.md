@@ -138,7 +138,8 @@ A prod deployment guarantees nothing; the routine path preserves most things.
   current one from the MarketIdentity status right before running it.
 - After a fresh gateway deploy, the requester alice has no web app session: the cluster provider logs
   "no oauth session stored for did:plc:..." on every claim. Sign alice in with the same script and
-  `--url https://k8s.socialweb.computer/`.
+  `--url https://k8s.socialweb.computer/ --start-api` (the gateway is API-only: `--start-api` POSTs
+  `/oauth/start` with the handle and drives the returned authorization URL).
 - A bidder's guest image comes from `--guest-image-source` (a `file://` or `https://` base that
   `install bidder` writes to config.json), or, when that is unset, from the published artifacts:
   `run bidder` reads `guest-images/<target>/<pinned image.json sha256>`, then `releases/<version>` and
