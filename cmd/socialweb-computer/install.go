@@ -17,7 +17,7 @@ import (
 )
 
 var installOptions = []string{backendOpt, "handle", "account", "state-dir", "vm-slots", "dry-run", "adopt-account", "json", "root", "unit-prefix", "allow-dev-binary",
-	install.OptKcpFront, install.OptTLSFront, install.OptCertFront, install.OptSpecFile, install.OptGuestImg, install.OptGuestImgBase, install.OptReadyTimeout, install.OptNetworkTimeout, install.OptNoGuestLANUDP}
+	install.OptKcpFront, install.OptTLSFront, install.OptCertFront, install.OptSpecFile, install.OptGuestImg, install.OptGuestImgBase, install.OptReadyTimeout, install.OptNetworkTimeout, install.OptNoGuestLANUDP, install.OptGuestHostUDP}
 
 var uninstallOptions = []string{"account", "purge", "force", "json", "root"}
 

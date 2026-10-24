@@ -127,16 +127,21 @@ func Fence(w Wiring) error {
 		pre(v6.match, l4Is(ipICMPv6), payloadLoad(unix.NFT_PAYLOAD_TRANSPORT_HEADER, 0, 1), []expr{cmpOp(unix.NFT_CMP_EQ, []byte{t})},
 			verdict(verdictAccept))
 	}
+	highUDP := []expr{cmpOp(unix.NFT_CMP_GTE, be16(HighUDPMinPort))}
+	for _, closed := range HighUDPClosedPorts {
+		highUDP = append(highUDP, cmpOp(unix.NFT_CMP_NEQ, be16(uint16(closed))))
+	}
+	if w.HostUDP {
+		for _, p := range HostUDPPrefixes(own) {
+			pre(familyOf(p).to(p), l4Is(ipUDP), dport(highUDP...), verdict(verdictAccept))
+		}
+	}
 	for _, p := range slices.Concat(own, link) {
 		pre(familyOf(p).to(p), verdict(verdictDrop))
 	}
 	if w.LANUDP {
-		ports := []expr{cmpOp(unix.NFT_CMP_GTE, be16(LANUDPMinPort))}
-		for _, closed := range LANUDPClosedPorts {
-			ports = append(ports, cmpOp(unix.NFT_CMP_NEQ, be16(uint16(closed))))
-		}
 		for _, p := range lan {
-			pre(familyOf(p).to(p), l4Is(ipUDP), dport(ports...), verdict(verdictAccept))
+			pre(familyOf(p).to(p), l4Is(ipUDP), dport(highUDP...), verdict(verdictAccept))
 		}
 	}
 	for _, p := range blocked {

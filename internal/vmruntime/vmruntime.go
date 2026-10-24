@@ -84,6 +84,8 @@ type VMSpec struct {
 	HostPorts []int `json:"hostPorts,omitempty"`
 
 	LANUDP bool `json:"lanUDP,omitempty"`
+
+	HostUDP bool `json:"hostUDP,omitempty"`
 }
 
 type Prepared struct {

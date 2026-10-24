@@ -143,9 +143,18 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
   `spec.guestNetwork.lanUDP` (unset: true), which the bidder writes from its own
   `spec.guestNetwork.lanUDP` (MarketBidder, Bidder, NetworkApp), the bidder operator's choice and
   never the requester's: `run bidder`, `install bidder` and `dev up` take `--no-guest-lan-udp`, the
-  hono-bidder passthrough takes `--guest-lan-udp=false`. A guest-facing local listener the bidder
-  hands to a guest goes into `spec.hostPorts` (`GuestHostPorts`, `guestseed.HostPortsOf`); never
-  widen the fence to all ports, and never open TCP to the LAN.
+  hono-bidder passthrough takes `--guest-lan-udp=false`. A second allowance, `hostUDP`, comes before
+  the drop of the host's own addresses: UDP to those addresses (never loopback or link-local, never
+  TCP) on the same ports, so WebRTC works when the requester runs on the bidder's own host (the
+  router does not hairpin). It is the ComputeVM's and FirecrackerVM's `spec.guestNetwork.hostUDP`
+  (unset: false), which the bidder always writes as its effective value: its own
+  `spec.guestNetwork.hostUDP` (MarketBidder, Bidder, NetworkApp) when set, else on when its
+  `spec.policy` is `bidder-only-me` and off otherwise; the Bidder's `status.guestNetwork` reports
+  `{lanUDP, hostUDP, hostUDPReason}` (`spec`, `policy only-me`, `policy not only-me`). `run bidder`,
+  `install bidder` and `dev up` take `--guest-host-udp true|false|auto`, the hono-bidder passthrough
+  `--guest-host-udp`. A guest-facing local listener the bidder hands to a guest goes into
+  `spec.hostPorts` (`GuestHostPorts`, `guestseed.HostPortsOf`); never widen the fence to all ports,
+  and never open TCP to the LAN or to the host's own addresses.
 - After a change to `cmd/socialweb-vmexec` or `internal/guestnet`, run `make pins` and commit the
   `socialweb-vmexec` pin with the change, then `dev down` and `dev up` the network instead of a
   `dev restart ... core`.

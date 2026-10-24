@@ -69,7 +69,7 @@ func componentState(s v1alpha1.ComponentStatus) (bool, bool) {
 
 var componentKinds = []componentKind{
 	kindOf(Export, "Bidder", func(l *v1alpha1.BidderList) []v1alpha1.Bidder { return l.Items },
-		func(o *v1alpha1.Bidder) (bool, bool) { return componentState(o.Status) }),
+		func(o *v1alpha1.Bidder) (bool, bool) { return componentState(o.Status.ComponentStatus) }),
 	kindOf(Export, "GuestControlPlane", func(l *v1alpha1.GuestControlPlaneList) []v1alpha1.GuestControlPlane { return l.Items },
 		func(o *v1alpha1.GuestControlPlane) (bool, bool) { return componentState(o.Status) }),
 	kindOf(Export, "Pds", func(l *v1alpha1.PdsList) []v1alpha1.Pds { return l.Items },

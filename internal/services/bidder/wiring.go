@@ -107,6 +107,7 @@ func (s *Service) newBidder(intents contract.Intents) (*core.Bidder, error) {
 	if err != nil {
 		return nil, err
 	}
+	guestNetwork := s.spec.GuestNetwork.EffectiveFor(s.spec.Policy)
 	cfg := core.Config{
 		DID:                 s.did,
 		Workspace:           s.workspace,
@@ -122,7 +123,8 @@ func (s *Service) newBidder(intents contract.Intents) (*core.Bidder, error) {
 		GuestVaultServer:    s.guestVaultServer,
 		GuestVaultMount:     DefaultGuestVaultMount,
 		GuestLoginMount:     DefaultGuestLoginMount,
-		GuestLANUDP:         s.spec.GuestNetwork.LANUDPAllowed(),
+		GuestLANUDP:         guestNetwork.LANUDP,
+		GuestHostUDP:        guestNetwork.HostUDP,
 		MaxConcurrentGuests: s.spec.MaxConcurrentGuests,
 		Heartbeat:           seconds(s.spec.HeartbeatIntervalSeconds),
 		OfferingRefresh:     seconds(s.spec.OfferingRefreshSeconds),

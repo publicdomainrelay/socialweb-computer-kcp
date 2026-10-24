@@ -39,7 +39,7 @@ import (
 const bidderIdentityWait = 5 * time.Minute
 
 var bidderOptions = slices.Concat([]string{backendOpt, "profile", "network", "name", "instance", "state-dir", "fg", "ready-timeout",
-	"network-timeout", "market-network-file", "bidder-policy", "bidder-policy-args", "bidder-options", "kcp-path", "kine-path", "bao-path", "openbao-plugin-dir", "asset-cache", "unit-prefix", "kcp-front-address", "guest-image-release-base", "no-guest-lan-udp"},
+	"network-timeout", "market-network-file", "bidder-policy", "bidder-policy-args", "bidder-options", "kcp-path", "kine-path", "bao-path", "openbao-plugin-dir", "asset-cache", "unit-prefix", "kcp-front-address", "guest-image-release-base", "no-guest-lan-udp", "guest-host-udp"},
 	devVMOptions)
 
 type bidderRun struct {
@@ -82,6 +82,36 @@ func (r *bidderRun) log(msg string, args ...any) {
 	r.a.log.Info(msg, append([]any{"verb", "run bidder", "profile", r.profile, "utc", time.Now().UTC().Format(time.RFC3339)}, args...)...)
 }
 
+func (r *bidderRun) guestNet() *v1alpha1.GuestNetworkOptions {
+	if r.guestNetwork == nil {
+		r.guestNetwork = &v1alpha1.GuestNetworkOptions{}
+	}
+	return r.guestNetwork
+}
+
+func hostUDPValue(v string) (*bool, error) {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "", "auto":
+		return nil, nil
+	case "true":
+		on := true
+		return &on, nil
+	case "false":
+		off := false
+		return &off, nil
+	}
+	return nil, fmt.Errorf("%q: want true, false or auto", v)
+}
+
+func guestNetworkFlags(vals clicfg.Values) (*v1alpha1.GuestNetworkOptions, error) {
+	host, err := hostUDPValue(vals.String("guest-host-udp"))
+	if err != nil {
+		return nil, fmt.Errorf("--guest-host-udp %w", err)
+	}
+	lan := !vals.Bool("no-guest-lan-udp")
+	return &v1alpha1.GuestNetworkOptions{LANUDP: &lan, HostUDP: host}, nil
+}
+
 func (r *bidderRun) passthrough(args []string) error {
 	parsed, err := compose.ParseAppArgs(marketbidder.BidderApp, args)
 	if err != nil {
@@ -107,7 +137,13 @@ func (r *bidderRun) passthrough(args []string) error {
 			if err != nil {
 				return fmt.Errorf("--%s %q: want true or false", p.Name, p.Value)
 			}
-			r.guestNetwork = v1alpha1.GuestNetworkWith(on)
+			r.guestNet().LANUDP = &on
+		case p.To == "spec.guestNetwork.hostUDP":
+			on, err := hostUDPValue(p.Value)
+			if err != nil {
+				return fmt.Errorf("--%s: %w", p.Name, err)
+			}
+			r.guestNet().HostUDP = on
 		case p.To == "spec.identity.mode":
 			r.identityMode = v1alpha1.MarketIdentityMode(p.Value)
 		case p.To == "spec.identity.pdsUrl":
@@ -221,9 +257,11 @@ func runBidder(ctx context.Context, a *app, vals clicfg.Values, rest []string) i
 	if err := r.configOptions(vals.String("bidder-options")); err != nil {
 		return a.fail(exitRefused, "run bidder: bidder-options: %v", err)
 	}
-	if r.guestNetwork == nil {
-		r.guestNetwork = v1alpha1.GuestNetworkWith(!vals.Bool("no-guest-lan-udp"))
+	flags, err := guestNetworkFlags(vals)
+	if err != nil {
+		return a.fail(exitRefused, "run bidder: %v", err)
 	}
+	r.guestNetwork = r.guestNetwork.WithDefaults(flags)
 	if r.password != "" {
 		if err := os.Setenv(compose.EnvPdsAccountPassword, r.password); err != nil {
 			return a.fail(exitRefused, "run bidder: --atproto-password: %v", err)

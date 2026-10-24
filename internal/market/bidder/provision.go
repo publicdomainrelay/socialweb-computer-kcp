@@ -184,6 +184,7 @@ func (b *Bidder) provision(ctx context.Context, req provisionRequest) (string, e
 		Accept:           commonv1.StrongRef{URI: req.acceptURI, CID: req.acceptCID},
 		HostPorts:        b.guestHostPorts(userData, hostPort),
 		LANUDP:           b.cfg.GuestLANUDP,
+		HostUDP:          b.cfg.GuestHostUDP,
 		Owner:            req.owner,
 	})
 	if err != nil {

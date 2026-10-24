@@ -3977,7 +3977,8 @@ A change must not break any of these. Each exists because something failed.
     no SDP, ICE candidate, IP address or private key is in a record, kcp object or log, and the only
     STUN server is `stun:stun.cloudflare.com:3478`.
 37. **A guest reaches its host's loopback only on its ComputeVM's `spec.hostPorts`, and reaches no LAN
-    host and none of its host's own addresses but by UDP on high ports.** socialweb-vmexec loads the
+    host and none of its host's own addresses but by UDP on high ports, and the host's own addresses
+    only when `spec.guestNetwork.hostUDP` is on.** socialweb-vmexec loads the
     nf_tables bridge table `swcguest` in the guest's namespace before it wires the tap; a VM whose
     table does not load does not start (plan 0034). Besides TCP to `192.0.2.1` on `spec.hostPorts`,
     DNS to the pasta gateway and ICMPv6 neighbor discovery, the table drops every frame from the guest
@@ -3988,8 +3989,14 @@ A change must not break any of these. Each exists because something failed.
     172.16/12, 192.168/16 and fc00::/7 on destination ports 1024 and up except 1900, 5353 and 5355,
     for same-LAN WebRTC candidates; it is on by default (`spec.guestNetwork.lanUDP` unset or true on
     the ComputeVM), set by the bidder operator (`--no-guest-lan-udp`) and never by the requester, and
-    it never covers the host's own addresses, 100.64/10, 169.254/16 or 127/8. The rules are
-    stateless: no inbound path into a guest exists but replies, which enter from the pasta side.
+    it never covers the host's own addresses, 100.64/10, 169.254/16 or 127/8. The one exception for
+    the host's own addresses is `spec.guestNetwork.hostUDP` on the ComputeVM (unset: false): UDP to
+    them, but not to loopback or link-local, on the same ports, so WebRTC works when the requester
+    runs on the bidder's host. The bidder always writes it as its effective value, its own
+    `spec.guestNetwork.hostUDP` when set, else on exactly when its `spec.policy` is `bidder-only-me`;
+    it is the bidder operator's choice (`--guest-host-udp`), never the requester's, and its Bidder's
+    `status.guestNetwork` reports it with the reason. The rules are stateless: no inbound path into a
+    guest exists but replies, which enter from the pasta side.
 
 ## 14. Open architectural gaps
 

@@ -1,6 +1,9 @@
 package v1alpha1
 
 import (
+	"cmp"
+	"strings"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
@@ -51,14 +54,65 @@ type ComputeVMSpec struct {
 
 type GuestNetworkOptions struct {
 	LANUDP *bool `json:"lanUDP,omitempty"`
+
+	HostUDP *bool `json:"hostUDP,omitempty"`
+}
+
+const (
+	BidderOnlyMePolicy = "bidder-only-me"
+
+	HostUDPReasonSpec      = "spec"
+	HostUDPReasonOnlyMe    = "policy only-me"
+	HostUDPReasonNotOnlyMe = "policy not only-me"
+)
+
+type GuestNetworkStatus struct {
+	LANUDP bool `json:"lanUDP"`
+
+	HostUDP bool `json:"hostUDP"`
+
+	HostUDPReason string `json:"hostUDPReason,omitempty"`
 }
 
 func (g *GuestNetworkOptions) LANUDPAllowed() bool {
 	return g == nil || g.LANUDP == nil || *g.LANUDP
 }
 
-func GuestNetworkWith(lanUDP bool) *GuestNetworkOptions {
-	return &GuestNetworkOptions{LANUDP: &lanUDP}
+func (g *GuestNetworkOptions) HostUDPAllowed() bool {
+	return g != nil && g.HostUDP != nil && *g.HostUDP
+}
+
+func BidderPolicyOnlyMe(policy string) bool {
+	return strings.TrimSpace(policy) == BidderOnlyMePolicy
+}
+
+func (g *GuestNetworkOptions) EffectiveFor(policy string) GuestNetworkStatus {
+	st := GuestNetworkStatus{LANUDP: g.LANUDPAllowed()}
+	switch {
+	case g != nil && g.HostUDP != nil:
+		st.HostUDP, st.HostUDPReason = *g.HostUDP, HostUDPReasonSpec
+	case BidderPolicyOnlyMe(policy):
+		st.HostUDP, st.HostUDPReason = true, HostUDPReasonOnlyMe
+	default:
+		st.HostUDPReason = HostUDPReasonNotOnlyMe
+	}
+	return st
+}
+
+func (g *GuestNetworkOptions) WithDefaults(d *GuestNetworkOptions) *GuestNetworkOptions {
+	out := GuestNetworkOptions{}
+	if g != nil {
+		out = *g
+	}
+	if d != nil {
+		out.LANUDP = cmp.Or(out.LANUDP, d.LANUDP)
+		out.HostUDP = cmp.Or(out.HostUDP, d.HostUDP)
+	}
+	return &out
+}
+
+func GuestNetworkWith(lanUDP, hostUDP bool) *GuestNetworkOptions {
+	return &GuestNetworkOptions{LANUDP: &lanUDP, HostUDP: &hostUDP}
 }
 
 type ComputeVMRelease struct {

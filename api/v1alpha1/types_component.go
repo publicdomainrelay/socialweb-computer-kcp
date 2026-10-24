@@ -368,8 +368,14 @@ type Bidder struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   BidderSpec      `json:"spec,omitempty"`
-	Status ComponentStatus `json:"status,omitempty"`
+	Spec   BidderSpec   `json:"spec,omitempty"`
+	Status BidderStatus `json:"status,omitempty"`
+}
+
+type BidderStatus struct {
+	ComponentStatus `json:",inline"`
+
+	GuestNetwork *GuestNetworkStatus `json:"guestNetwork,omitempty"`
 }
 
 type BidderList struct {

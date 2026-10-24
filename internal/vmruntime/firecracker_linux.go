@@ -179,7 +179,7 @@ func (r *firecracker) Prepare(ctx context.Context, spec VMSpec) (Prepared, error
 		return Prepared{}, fmt.Errorf("vmruntime: %w", err)
 	}
 	params := guestnet.VMExec{
-		Wiring:  guestnet.Plan(spec.HostPorts, spec.LANUDP, hostAddrs),
+		Wiring:  guestnet.Plan(spec.HostPorts, spec.LANUDP, spec.HostUDP, hostAddrs),
 		VMM:     r.cfg.Exec.Firecracker,
 		Argv:    fcapi.Argv("firecracker", p.VMMID, filepath.Join(p.WorkDir, ConfigFile), p.Socket),
 		Console: console,

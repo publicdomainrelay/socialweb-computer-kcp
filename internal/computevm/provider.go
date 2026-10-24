@@ -76,6 +76,8 @@ type VMInput struct {
 
 	LANUDP bool
 
+	HostUDP bool
+
 	Owner *metav1.OwnerReference
 }
 
@@ -158,7 +160,7 @@ func ComputeVMFor(in VMInput) (*v1alpha1.ComputeVM, error) {
 		}
 	}
 	slices.Sort(o.Spec.HostPorts)
-	o.Spec.GuestNetwork = v1alpha1.GuestNetworkWith(in.LANUDP)
+	o.Spec.GuestNetwork = v1alpha1.GuestNetworkWith(in.LANUDP, in.HostUDP)
 	return o, nil
 }
 

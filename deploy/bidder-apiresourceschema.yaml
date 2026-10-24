@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-15.bidders.socialweb.computer
+  name: v1alpha1-16.bidders.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -392,6 +392,8 @@ spec:
                 properties:
                   lanUDP:
                     type: boolean
+                  hostUDP:
+                    type: boolean
               bidderDIDs:
                 type: array
                 items:
@@ -482,6 +484,18 @@ spec:
                 items:
                   type: object
                   x-kubernetes-preserve-unknown-fields: true
+              guestNetwork:
+                type: object
+                properties:
+                  lanUDP:
+                    type: boolean
+                  hostUDP:
+                    type: boolean
+                  hostUDPReason:
+                    type: string
+                required:
+                  - lanUDP
+                  - hostUDP
             required:
               - ready
       additionalPrinterColumns:

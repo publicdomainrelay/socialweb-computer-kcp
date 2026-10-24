@@ -63,6 +63,7 @@ apps:
       - {name: repo-pds-url, to: profile}
       - {name: policy, to: spec.policy}
       - {name: guest-lan-udp, to: spec.guestNetwork.lanUDP}
+      - {name: guest-host-udp, to: spec.guestNetwork.hostUDP}
       - {name: policy-args, to: options}
       - {name: ingress-provider, to: spec.ingress.provider}
       - {name: ingress-public-host, to: spec.ingress.publicHost}

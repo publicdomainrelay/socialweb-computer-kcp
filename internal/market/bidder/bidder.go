@@ -97,6 +97,8 @@ type Config struct {
 
 	GuestLANUDP bool
 
+	GuestHostUDP bool
+
 	GuestVaultServer string
 
 	GuestVaultMount string
@@ -140,6 +142,8 @@ type GuestVM struct {
 	HostPorts []int32
 
 	LANUDP bool
+
+	HostUDP bool
 
 	Owner *metav1.OwnerReference
 }

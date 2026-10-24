@@ -81,7 +81,7 @@ func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
 	}
 	c.runtime.SetStatusCallback(c.statusChanged)
 	errs := []error{
-		register(m, c, opts.Scope, "Bidder", func(o *v1alpha1.Bidder) *v1alpha1.ComponentStatus { return &o.Status }),
+		register(m, c, opts.Scope, "Bidder", func(o *v1alpha1.Bidder) *v1alpha1.ComponentStatus { return &o.Status.ComponentStatus }, bidderStatus),
 		register(m, c, opts.Scope, "GuestControlPlane", func(o *v1alpha1.GuestControlPlane) *v1alpha1.ComponentStatus { return &o.Status }),
 		register(m, c, opts.Scope, "Pds", func(o *v1alpha1.Pds) *v1alpha1.ComponentStatus { return &o.Status }),
 		register(m, c, opts.Scope, "Requester", func(o *v1alpha1.Requester) *v1alpha1.ComponentStatus { return &o.Status }),
@@ -101,12 +101,12 @@ func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
 func register[T interface {
 	ctlruntime.Object
 	DeepCopy() T
-}](m *ctlruntime.Manager, c *Controller, scope func(string) bool, kind string, status func(T) *v1alpha1.ComponentStatus) error {
+}](m *ctlruntime.Manager, c *Controller, scope func(string) bool, kind string, status func(T) *v1alpha1.ComponentStatus, kindStatus ...func(T)) error {
 	events := make(chan ctlruntime.Request, eventBuffer)
 	c.mu.Lock()
 	c.events[kind] = events
 	c.mu.Unlock()
-	r := &reconciler[T]{c: c, kind: kind, status: status}
+	r := &reconciler[T]{c: c, kind: kind, status: status, kindStatus: kindStatus}
 	opts := []ctlruntime.Option{ctlruntime.Export(Export), ctlruntime.Events(events), ctlruntime.Gone(r.gone)}
 	if scope != nil {
 		opts = append(opts, ctlruntime.InWorkspaces(scope))
@@ -126,6 +126,13 @@ type reconciler[T interface {
 	kind string
 
 	status func(T) *v1alpha1.ComponentStatus
+
+	kindStatus []func(T)
+}
+
+func bidderStatus(o *v1alpha1.Bidder) {
+	st := o.Spec.GuestNetwork.EffectiveFor(o.Spec.Policy)
+	o.Status.GuestNetwork = &st
 }
 
 func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, obj T) (ctlruntime.Result, error) {
@@ -152,6 +159,9 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 	}
 	next := obj.DeepCopy()
 	*r.status(next) = st.APIStatus()
+	for _, fn := range r.kindStatus {
+		fn(next)
+	}
 	if err := req.ApplyStatus(ctx, next); err != nil {
 		return ctlruntime.Result{}, err
 	}

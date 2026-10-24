@@ -106,9 +106,8 @@ func (d BidderVMDefaults) fill(a *v1alpha1.NetworkApp) {
 	if d.Handle != "" {
 		a.Kcp.Handle = d.Handle
 	}
-	if a.GuestNetwork == nil && d.GuestNetwork != nil {
-		g := *d.GuestNetwork
-		a.GuestNetwork = &g
+	if d.GuestNetwork != nil {
+		a.GuestNetwork = a.GuestNetwork.WithDefaults(d.GuestNetwork)
 	}
 }
 

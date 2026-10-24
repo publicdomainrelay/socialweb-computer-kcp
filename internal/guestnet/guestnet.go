@@ -23,7 +23,7 @@ const (
 	GuestLink    = "172.30.0.0/30"
 	DNSPort      = 53
 
-	LANUDPMinPort = 1024
+	HighUDPMinPort = 1024
 )
 
 var (
@@ -35,7 +35,7 @@ var (
 
 	LANUDPPrefixes = []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7"}
 
-	LANUDPClosedPorts = []int{1900, 5353, 5355}
+	HighUDPClosedPorts = []int{1900, 5353, 5355}
 )
 
 type Wiring struct {
@@ -46,6 +46,7 @@ type Wiring struct {
 	HostPorts    []int  `json:"hostPorts,omitempty"`
 
 	LANUDP        bool     `json:"lanUDP"`
+	HostUDP       bool     `json:"hostUDP"`
 	HostAddresses []string `json:"hostAddresses"`
 }
 
@@ -56,9 +57,23 @@ type VMExec struct {
 	Console string   `json:"console"`
 }
 
-func Plan(hostPorts []int, lanUDP bool, hostAddresses []string) Wiring {
+func Plan(hostPorts []int, lanUDP, hostUDP bool, hostAddresses []string) Wiring {
 	return Wiring{Tap: Tap, Bridge: Bridge, GuestAddress: GuestAddress, GuestMAC: GuestMAC, HostPorts: HostPorts(hostPorts),
-		LANUDP: lanUDP, HostAddresses: slices.Clone(hostAddresses)}
+		LANUDP: lanUDP, HostUDP: hostUDP, HostAddresses: slices.Clone(hostAddresses)}
+}
+
+func HostUDPPrefixes(own []netip.Prefix) []netip.Prefix {
+	host, _ := netip.ParseAddr(HostAddress)
+	link := netip.MustParsePrefix(GuestLink)
+	var out []netip.Prefix
+	for _, p := range own {
+		a := p.Addr()
+		if a.IsLoopback() || a.IsLinkLocalUnicast() || a.IsMulticast() || a.IsUnspecified() || a == host || link.Contains(a) {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
 }
 
 func HostAddresses() ([]string, error) {
