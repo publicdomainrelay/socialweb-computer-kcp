@@ -126,6 +126,8 @@ const (
 
 	ComputeVMLostVMMExited ComputeVMLostReason = "VMMExited"
 
+	ComputeVMLostGuestPoweroff ComputeVMLostReason = "GuestPoweroff"
+
 	ComputeVMLostIdentityMismatch ComputeVMLostReason = "IdentityMismatch"
 )
 

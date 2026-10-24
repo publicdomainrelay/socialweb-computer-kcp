@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-8.computevms.socialweb.computer
+  name: v1alpha1-9.computevms.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -209,6 +209,7 @@ spec:
                   - UnitFailed
                   - OOMKilled
                   - VMMExited
+                  - GuestPoweroff
                   - IdentityMismatch
               observedGeneration:
                 type: integer

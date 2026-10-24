@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-2.firecrackervms.socialweb.computer
+  name: v1alpha1-3.firecrackervms.socialweb.computer
   labels:
     contracts.socialweb.computer/computevms: v1alpha1
 spec:
@@ -115,6 +115,7 @@ spec:
                   - UnitFailed
                   - OOMKilled
                   - VMMExited
+                  - GuestPoweroff
                   - IdentityMismatch
               network:
                 type: object
