@@ -157,6 +157,13 @@ func ParseMiB(s string) (int, error) {
 	return n, nil
 }
 
+func loggedExit(code string) v1alpha1.ComputeVMLostReason {
+	if code == "0" {
+		return v1alpha1.ComputeVMLostGuestPoweroff
+	}
+	return v1alpha1.ComputeVMLostVMMExited
+}
+
 func lostReason(r hostsvc.LostReason, exit *hostsvc.UnitStatus) v1alpha1.ComputeVMLostReason {
 	if r == hostsvc.LostUnitGone && exit != nil {
 		switch {
@@ -409,13 +416,6 @@ func (p *Provider) Observe(ctx context.Context, vm *v1alpha1.FirecrackerVM) v1al
 		}
 		reason := lostReason(obs.Reason, ex)
 		msg := obs.Detail
-		if reason == v1alpha1.ComputeVMLostUnitGone && ref.WorkDir != "" {
-			logs := tail(filepath.Join(ref.WorkDir, vmruntime.VMMLogFile), 4096) + tail(filepath.Join(ref.WorkDir, vmruntime.ConsoleFile), 4096)
-			if m := vmmExitRE.FindStringSubmatch(logs); m != nil {
-				reason = v1alpha1.ComputeVMLostVMMExited
-				msg = fmt.Sprintf("%s; the VMM logged %q", msg, m[0])
-			}
-		}
 		if ex != nil {
 			msg = fmt.Sprintf("%s; the unit watch saw it %s (result %s, exit code %d status %d)", msg, ex.State, ex.Result, ex.ExecMainCode, ex.ExecMainStatus)
 		}
@@ -423,6 +423,13 @@ func (p *Provider) Observe(ctx context.Context, vm *v1alpha1.FirecrackerVM) v1al
 			msg = fmt.Sprintf("%s; the process wait saw firecracker pid %d exit", msg, ref.PID)
 			if reason == v1alpha1.ComputeVMLostIdentityMismatch {
 				reason = v1alpha1.ComputeVMLostVMMExited
+			}
+		}
+		if (reason == v1alpha1.ComputeVMLostUnitGone || reason == v1alpha1.ComputeVMLostVMMExited) && ref.WorkDir != "" {
+			logs := tail(filepath.Join(ref.WorkDir, vmruntime.VMMLogFile), 4096) + tail(filepath.Join(ref.WorkDir, vmruntime.ConsoleFile), 4096)
+			if m := vmmExitRE.FindStringSubmatch(logs); m != nil {
+				reason = loggedExit(m[1])
+				msg = fmt.Sprintf("%s; the VMM logged %q", msg, m[0])
 			}
 		}
 		if obs.Stopped {

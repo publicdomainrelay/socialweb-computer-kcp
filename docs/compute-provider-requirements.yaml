@@ -932,11 +932,14 @@ requirements:
       the firehose, with a tombstone so a late vm.delete answers 200. Live hat-8 2026-10-12T01:44Z: 5.6 s from
       guest poweroff to the requester's session end, no vm.delete sent.
     go_side:
-      meets: no
+      meets: yes
       detail: >-
         The string heuristic is replaced by explicit Lost reasons (HostRebooted -> host_reboot,
-        UnitGone/UnitFailed/VMMExited -> vmm_exited, OOMKilled -> oom, IdentityMismatch -> identity_mismatch)
-        passed through compute-provider-kcp onGuestGone.
+        GuestPoweroff -> guest_poweroff, UnitGone/UnitFailed/VMMExited -> vmm_exited, OOMKilled -> oom,
+        IdentityMismatch -> identity_mismatch). GuestPoweroff is a VM whose VMM logged "Firecracker exiting
+        successfully. exit_code=0": the guest powered off or reset (reboot=k, the i8042 reset), and
+        firecracker exited by itself. The unit status cannot tell it apart: the unit watch reads a VMM
+        killed by SIGKILL and a clean exit alike as inactive, result success, code 0 status 0.
     parity_test:
       - internal/computevm TestEveryLostVerdictCarriesTheTerminatedReason
       - ts/hono-compute-provider/test/compute_provider_kcp_test.ts::"a ComputeVM going Lost fires onGuestGone with its reason"

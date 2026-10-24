@@ -278,6 +278,8 @@ func GoneReason(lost v1alpha1.ComputeVMLostReason) string {
 		return "oom"
 	case v1alpha1.ComputeVMLostIdentityMismatch:
 		return "identity_mismatch"
+	case v1alpha1.ComputeVMLostGuestPoweroff:
+		return "guest_poweroff"
 	default:
 		return "vmm_exited"
 	}
