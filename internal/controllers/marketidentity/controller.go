@@ -128,6 +128,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 	if err := req.ApplyStatus(ctx, next); err != nil {
 		return ctlruntime.Result{}, errors.Join(reconcileErr, err)
 	}
+	c.remember(req, next)
 	if reconcileErr != nil {
 		return ctlruntime.Result{}, reconcileErr
 	}
