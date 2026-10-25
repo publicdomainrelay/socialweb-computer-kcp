@@ -599,7 +599,7 @@ func (p *pass) local(ctx context.Context, plan compose.AccountPlan, id *v1alpha1
 	}
 	account := compose.PdsAccount{Vault: BidderVaultServer, Mount: mount, Path: compose.PdsSessionPath("bidder"), Handle: pdsHandle}
 	accountLinks := compose.PdsAccountLinks(r, account)
-	if err := c.ApplyLinks(ctx, r, "account", accountLinks); err != nil {
+	if err := c.ApplyLinks(ctx, r, "account", compose.WithoutLinks(accountLinks, p.baseLinks(mount))); err != nil {
 		return ctlruntime.Result{}, err
 	}
 	if ok, msg := c.LinksAccepted(ctx, r, accountLinks); !ok {
