@@ -94,11 +94,20 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
   XRPC|Firehose|Both`). XRPC takes bids and events on the requester ingress only. Both (the requester
   default) adds EventStreams from the network relay, `spec.comms.eventSourceRefs` and one subscribeRepos
   per discovered bidder PDS. Firehose has no inbound endpoint; the requester composer
-  (`internal/app/compose/streams.go`, the same code in the browser build) adds the public firehoses of
-  the old request-vm-ssh: the relays `https://bsky.network` and `https://relay.mini-cloud-0002.chadig.com`
-  (subscribeRepos, client-side collection filter; on a network with a relay host the network relay
-  replaces them) and the Jetstreams `jetstream1` and `jetstream2` of `us-east` and `us-west.bsky.network`
-  (server-side `wantedCollections`). Each is a RelayEventSource or JetstreamEventSource with its
+  (`internal/app/compose/streams.go`, the same code in the browser build) adds the default public
+  firehoses (`api/v1alpha1` `DefaultFirehoseRelayURLs`, `DefaultFirehoseJetstreamURLs`): our relay
+  `https://relay.mini-cloud-0002.chadig.com` (subscribeRepos; on a network with a relay host the network
+  relay replaces it) and the two Jetstream v2 instances Bluesky documents,
+  `wss://jetstream.us-east.bsky.network` and `wss://jetstream.us-west.bsky.network` at
+  `/xrpc/network.bsky.jetstream.subscribeEvents` (`collections`, `dids`, `kinds=commit`). bsky.network
+  is not a default. A Jetstream URL whose path ends in `/subscribe` is spoken as v1 (`wantedCollections`,
+  `wantedDids`); a bare host is v2. Every relay subscribe sends the stream's filter as repeated
+  `wantedCollections` and `wantedDids` (at most 100 and 10000, else that param is left out); our Go relay
+  (`internal/atproto/relay`, the network relay and prod) filters on them, other relays ignore them, and
+  the client filter (`events.Filter.Narrow`) always runs too. Each subscribe logs `relay_subscribe_dial`
+  or `jetstream_subscribe_dial` (endpoint without query, the filter params, the cursor), and the
+  EventStream's `status.serverFilter {collections, dids, supported: true|false|unknown}` is written on
+  connect only. Each is a RelayEventSource or JetstreamEventSource with its
   EventSource (`firehose-relay-<host>`, `firehose-jetstream-<host>`, label
   `socialweb.computer/market-source=public-requester`) and an EventStream with `spec.resume: Live`
   (no stored cursor; a reconnect resumes from the cursor in memory). `spec.comms.relayUrls` and

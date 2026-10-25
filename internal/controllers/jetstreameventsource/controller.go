@@ -16,7 +16,7 @@ func Register(ctx context.Context, m *ctlruntime.Manager, opts eventsource.Backe
 	dial := eventsource.BusDial(opts.Bus)
 	b := eventsource.NewBackend(ctx, eventsv1.JetstreamEventSourceKind, opts,
 		func(_ context.Context, _ ctlruntime.Request, obj *eventsv1.JetstreamEventSource) (eventsource.Upstream, error) {
-			source, err := jetstream.New(jetstream.Config{URL: obj.Spec.URL}, jetstream.Deps{Dial: dial})
+			source, err := jetstream.New(jetstream.Config{URL: obj.Spec.URL}, jetstream.Deps{Dial: dial, Log: opts.Log})
 			if err != nil {
 				return eventsource.Upstream{}, err
 			}

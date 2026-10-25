@@ -44,6 +44,10 @@ const (
 	DefaultDiscoveryRelayURL = "https://relay1.us-east.bsky.network"
 
 	DefaultMarketRelayURL = "https://relay.mini-cloud-0002.chadig.com"
+
+	PublicJetstreamEastURL = "wss://jetstream.us-east.bsky.network/xrpc/network.bsky.jetstream.subscribeEvents"
+
+	PublicJetstreamWestURL = "wss://jetstream.us-west.bsky.network/xrpc/network.bsky.jetstream.subscribeEvents"
 )
 
 func (n *MarketNetworkValue) HostAddress(name string) string {
@@ -173,15 +177,12 @@ type MarketComms struct {
 
 var (
 	DefaultFirehoseRelayURLs = []string{
-		"https://bsky.network",
-		"https://relay.mini-cloud-0002.chadig.com",
+		DefaultMarketRelayURL,
 	}
 
 	DefaultFirehoseJetstreamURLs = []string{
-		"wss://jetstream1.us-east.bsky.network/subscribe",
-		"wss://jetstream2.us-east.bsky.network/subscribe",
-		"wss://jetstream1.us-west.bsky.network/subscribe",
-		"wss://jetstream2.us-west.bsky.network/subscribe",
+		PublicJetstreamEastURL,
+		PublicJetstreamWestURL,
 	}
 )
 

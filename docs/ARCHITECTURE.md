@@ -11079,7 +11079,96 @@ to `exec.LookPath("deno")`. The integration hosts hat-7 and hat-9 were prepared 
   to 222 MB). Measured alone for 60 s (a Go client of `internal/events/relay`, decode and filter
   only): bsky.network 213 to 319 events/s and 1.1 to 1.7 MB/s, 0 market ops, 0.8% of one core, 38 MB
   RSS; both relays 1.6%. A client-side filter on the full relay downloads 4 to 6 GB an hour for no
-  market event; on a phone that is the cost, not the CPU.
+  market event; on a phone that is the cost, not the CPU. The next entry replaces these defaults.
+
+### The Firehose defaults are the v2 Jetstreams and our relay, and our relay filters on the server (2026-10-25)
+
+- **Before.** The Firehose defaults (previous entry) opened bsky.network (the whole network, filtered
+  on the client: 1.1 to 1.7 MB/s for no market event), our relay (no server filter: every connect
+  without a cursor replayed its whole backlog) and four Jetstream v1 hosts, two of which Bluesky no
+  longer lists. No status said which filter a server applied.
+- **The decision (the user's, 2026-10-25).**
+  - Defaults (`api/v1alpha1` `DefaultFirehoseRelayURLs`, `DefaultFirehoseJetstreamURLs`, browser and
+    CLI): our relay `https://relay.mini-cloud-0002.chadig.com` and the Jetstream v2 instances
+    `wss://jetstream.us-east.bsky.network` and `wss://jetstream.us-west.bsky.network` at
+    `/xrpc/network.bsky.jetstream.subscribeEvents`. bsky.network is gone from every default (the
+    discovery relay `relay1.us-east.bsky.network` for listReposByCollection is a different thing and
+    stays). `spec.comms.relayUrls` and `spec.comms.jetstreamUrls` still replace a list, and `[]` turns
+    it off. The record watch's Jetstreams (`jetstream-bsky-us-east`, `jetstream-bsky-us-west`) are the
+    same two v2 URLs.
+  - Why v2 (the evidence, read 2026-10-25): https://bsky.network/docs/jetstream/ (linked from the
+    github.com/bluesky-social/jetstream README, which was rewritten as "Full-network archive, replay,
+    and streaming service") lists two public sets: v2 `jetstream.us-west` and `jetstream.us-east`,
+    v1 `jetstream1.us-west` and `jetstream2.us-east`, and says "Jetstream v2 is recommended for new
+    projects". The old v1 README (now github.com/bluesky-social/jetstream-legacy) listed four v1
+    hosts. The v2 RFD (`docs/README.md` of the jetstream repository, section 5.2) defines the wire:
+    the `xrpc.v1.json` framing (also the default without a negotiated subprotocol), frames
+    `{"$type":"message","payload":{"$type":"network.bsky.jetstream.subscribeEvents#commit",...}}`,
+    terminal `{"$type":"error"}` frames, filters `collections`, `dids` and `kinds` (the v1 names are a
+    400), at most 100 collections and 10000 DIDs (a 400 before the upgrade). On v1 every subscriber
+    gets everyone's `#identity` and `#account` whatever `wantedCollections` says; on v2
+    `kinds=commit` drops them, so v2 is the narrower stream. The cursor is a v2 seq, or a unix
+    microsecond timestamp (at or above 1e15) that the live tail maps to a seq.
+  - The Jetstream client (`internal/events/jetstream`) speaks v2 for a URL whose path is the v2 path
+    or empty, and v1 for any other path (`/subscribe`). On v2 an event's seq is its `witnessedAt` (or
+    `time`) in unix microseconds, so the 30 s rewind and the stored cursor mean the same as on v1.
+    It sends `collections` and `dids` (v1: `wantedCollections`, `wantedDids`) when the stream has them.
+  - Collections: the 22 explicit NSIDs of `compose.MarketStreamCollections`, not the wildcards
+    `com.publicdomainrelay.temp.market.*` and `com.publicdomainrelay.temp.compute.events.*`. The
+    market wildcard widens the stream with `market.heartbeat`, `market.offering` and `market.relays`
+    records that no stream consumes; the compute.events wildcard matches exactly the 11 we consume
+    today but would carry any new NSID under it, and 22 is far under the cap of 100.
+  - Our Go relay (`internal/atproto/relay`, the market network's relay and `socialweb-computer
+    internal atproto-relay` on prod) takes repeated `wantedCollections` (an NSID or `<prefix>.*` with
+    the wildcard after a period; the prefix plus one segment must be an NSID) and `wantedDids` on
+    subscribeRepos, at most 100 and 10000 (Jetstream's rules); a bad value or too many is a 400
+    `InvalidRequest` before the upgrade. A commit frame keeps only its matching ops, and a frame with
+    none is not sent; with `wantedDids` a frame of any other DID is not sent, and the same holds for
+    any non-commit frame (the relay sends only `#commit` today). With either param it logs
+    `subscribe_repos_filter` and sends, before the backlog, one
+    `{"$type":"com.atproto.sync.subscribeRepos#info","name":"ServerFilter","message":...,"wantedCollections":[...],"wantedDids":[...]}`
+    with the filter it applies. A client without the params gets the old stream and no info frame.
+  - Seq and cursor: the relay's seq stays global, so a filtered stream has gaps (seq 10, 14, 15, 31);
+    a gap means only that the frames between did not match. A client resuming with the seq of the
+    last event it took gets every later matching frame still in the backlog, so it misses none. The
+    delivery loop and the source tracker do not count a gap as lag while the server filter is
+    supported (`events.ServerFilter.Gapless`).
+  - Our relay client (`internal/events/relay`) always sends the stream's collections and DIDs as
+    those params; bsky.network and other relays ignore unknown params. It still filters on the
+    client (`events.Filter.Narrow`, which now takes the same `<prefix>.*` patterns).
+  - Observability, for the browser too: every subscribe logs one `relay_subscribe_dial` or
+    `jetstream_subscribe_dial` line (the endpoint without its query, the collections, the DID count
+    and the first 10 DIDs, the cursor). A stream's first `Next` returns a control event
+    (`events.Event.ServerFilter`, no ops, no cursor) that the delivery loop puts in the EventStream's
+    `status.serverFilter {collections, dids, supported}`: Jetstream `true` at once; a relay `unknown`
+    at once, then `true` on the ServerFilter info frame or `false` on any other first frame. These
+    writes happen on connect only, never per event.
+  - Our relay pings every subscribeRepos client every 30 s (`SubscribePingInterval`,
+    `deploy/obligations.txt`): a filtered stream can stay silent past the client's 2 min read
+    timeout (`wsconn.ReadTimeout`), and without the ping the bidder's association watch reconnected
+    every 2 min 1 s.
+- **Readings (2026-10-25, 60 s each from this host, a Go client of `internal/events/relay` and
+  `internal/events/jetstream` counting TCP bytes, our 22 NSIDs).**
+  - Prod relay `relay.mini-cloud-0002.chadig.com` (the old build, no server filter):
+    `serverFilter` went `unknown` then `false`; 4.12 MB in the first 5 s (the cursorless backlog
+    replay, 6515 frames of which 753 carry market ops), then 23 B/s. After the redeploy the replay
+    carries only the matching frames.
+  - Jetstream v2 `jetstream.us-east` and `jetstream.us-west`: 6.8 kB to connect, then 0 B/s with no
+    market event in the window (0.7 B/s over 150 s with a filter that never matches; a 150 s quiet
+    stream stayed open). Over 170 s on us-east: 33 market events, 249 B/s. Unfiltered, v2 us-west
+    carried 1321 events in 5 s (183 kB/s).
+  - Jetstream v1 (all four hosts still answer, two are no longer documented): 7.7 kB to connect,
+    then 55 B/s with our NSIDs and 147 B/s with a never-matching filter, which is everyone's
+    `#identity` and `#account` that v1 always sends.
+  - Market network `rfilt` (1 bidder, network relay on this build): `run request -- --comms-mode
+    Firehose --hold` was Held, `uname` over iroh, release Released. The requester's EventStreams
+    showed `serverFilter.supported` `true` for `relay-network` and both Jetstreams and `false` for the
+    derived `bidder-pds-*` stream (a PDS ignores the params); `relay-network` delivered vm.hostKeys and
+    market.event copies the sink dropped as duplicates of the PDS stream. The relay logged
+    `subscribe_repos_filter` per connection. On the same relay for 60 s: 10.9 kB in 5 s and 211 B/s
+    without the filter (23 frames) against 2.0 kB and 43 B/s with it (2 frames). An invalid
+    `wantedCollections=com.publicdomainrelay.temp.fo*` got a 400; `compute.events.*` with one
+    `wantedDids` was echoed in the info frame.
 
 ## 16. Vocabulary
 

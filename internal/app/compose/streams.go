@@ -39,9 +39,9 @@ const (
 
 	JetstreamWestSourceName = "jetstream-bsky-us-west"
 
-	PublicJetstreamEastURL = "wss://jetstream2.us-east.bsky.network/subscribe"
+	PublicJetstreamEastURL = v1alpha1.PublicJetstreamEastURL
 
-	PublicJetstreamWestURL = "wss://jetstream1.us-west.bsky.network/subscribe"
+	PublicJetstreamWestURL = v1alpha1.PublicJetstreamWestURL
 
 	publicSourcePrefix = "firehose-"
 
