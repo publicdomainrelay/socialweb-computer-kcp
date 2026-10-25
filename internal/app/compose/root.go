@@ -134,6 +134,7 @@ func (c *Composer) Drop(r Root) {
 	c.mu.Lock()
 	delete(c.applied, string(r.UID))
 	c.mu.Unlock()
+	c.adoptions.forget(r)
 }
 
 func (c *Composer) rootsIn(cluster, kind string) []string {
@@ -216,18 +217,29 @@ func childWatch[C ctlruntime.Object](export, rootKind string) ctlruntime.Option 
 	})
 }
 
-func intentWatch[C ctlruntime.Object](c *Composer, export, rootKind string) ctlruntime.Option {
+func adoptWatch[C ctlruntime.Object](c *Composer, export, rootKind, kind string) ctlruntime.Option {
+	return ctlruntime.WatchesIn(export, func(_ context.Context, src ctlruntime.Request, obj C) []ctlruntime.Request {
+		out := mapByLabel(rootKind, src, obj.GetLabels())
+		c.noteAdoptable(rootKind, kind, out, src, obj)
+		return out
+	})
+}
+
+func intentWatch[C ctlruntime.Object](c *Composer, export, rootKind, kind string) ctlruntime.Option {
 	return ctlruntime.WatchesIn(export, func(_ context.Context, src ctlruntime.Request, obj C) []ctlruntime.Request {
 		if out := mapByLabel(rootKind, src, obj.GetLabels()); len(out) > 0 {
+			c.noteAdoptable(rootKind, kind, out, src, obj)
 			return out
 		}
 		if len(obj.GetOwnerReferences()) > 0 && obj.GetDeletionTimestamp().IsZero() {
 			return nil
 		}
+		c.samples.gcDirty.Store(true)
 		var out []ctlruntime.Request
 		for _, name := range c.rootsIn(src.Cluster, rootKind) {
 			out = append(out, ctlruntime.Request{Cluster: src.Cluster, Name: name})
 		}
+		c.noteAdoptable(rootKind, kind, out, src, obj)
 		return out
 	})
 }
@@ -247,20 +259,20 @@ func (c *Composer) Watches(rootKind string) []ctlruntime.Option {
 		childWatch[*v1alpha1.LocalRepo]("", rootKind),
 		childWatch[*v1alpha1.RemoteRepo]("", rootKind),
 		childWatch[*v1alpha1.AtprotoRepo]("", rootKind),
-		intentWatch[*v1alpha1.MarketPresence](c, "", rootKind),
-		intentWatch[*v1alpha1.StateSync](c, "", rootKind),
+		intentWatch[*v1alpha1.MarketPresence](c, "", rootKind, KindMarketPresence),
+		intentWatch[*v1alpha1.StateSync](c, "", rootKind, KindStateSync),
 		childWatch[*policyv1alpha1.PolicyEngine](ExportPolicy, rootKind),
 		childWatch[*exposurev1alpha1.Service](ExportExposures, rootKind),
 		childWatch[*exposurev1alpha1.Exposure](ExportExposures, rootKind),
 		childWatch[*exposurev1alpha1.ComponentLink](ExportExposures, rootKind),
-		childWatch[*v1alpha1.OpenBaoServer](ExportHostProcesses, rootKind),
+		adoptWatch[*v1alpha1.OpenBaoServer](c, ExportHostProcesses, rootKind, KindOpenBaoServer),
 		childWatch[*v1alpha1.Vault](ExportHostProcesses, rootKind),
-		childWatch[*v1alpha1.MarketIdentity](ExportMarketIdentities, rootKind),
-		childWatch[*v1alpha1.AtprotoRecordWatch](ExportMarketIdentities, rootKind),
-		intentWatch[*v1alpha1.Bid](c, ExportComputeVMs, rootKind),
-		intentWatch[*v1alpha1.ComputeContract](c, ExportComputeContracts, rootKind),
-		intentWatch[*v1alpha1.Infra](c, ExportComputeContracts, rootKind),
-		intentWatch[*v1alpha1.EphemeralInfra](c, ExportComputeContracts, rootKind),
+		adoptWatch[*v1alpha1.MarketIdentity](c, ExportMarketIdentities, rootKind, KindMarketIdentity),
+		adoptWatch[*v1alpha1.AtprotoRecordWatch](c, ExportMarketIdentities, rootKind, "AtprotoRecordWatch"),
+		intentWatch[*v1alpha1.Bid](c, ExportComputeVMs, rootKind, KindBid),
+		intentWatch[*v1alpha1.ComputeContract](c, ExportComputeContracts, rootKind, KindComputeContract),
+		intentWatch[*v1alpha1.Infra](c, ExportComputeContracts, rootKind, "Infra"),
+		intentWatch[*v1alpha1.EphemeralInfra](c, ExportComputeContracts, rootKind, "EphemeralInfra"),
 		childWatch[*eventsv1alpha1.EventStream](ExportEvents, rootKind),
 		childWatch[*eventsv1alpha1.EventSource](ExportEvents, rootKind),
 		childWatch[*eventsv1alpha1.PdsEventSource](ExportEvents, rootKind),

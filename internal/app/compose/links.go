@@ -138,6 +138,20 @@ func Dedupe(links []Link) []Link {
 	return sortedLinks(out)
 }
 
+func WithoutLinks(links, held []Link) []Link {
+	names := make(map[string]bool, len(held))
+	for _, l := range held {
+		names[l.Name] = true
+	}
+	out := make([]Link, 0, len(links))
+	for _, l := range links {
+		if !names[l.Name] {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
 func isLinkTargetKind(kind string) bool {
 	if strings.EqualFold(kind, ComponentKindPolicyEngine) {
 		return false

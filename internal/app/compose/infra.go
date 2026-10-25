@@ -1,6 +1,7 @@
 package compose
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -11,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -23,6 +25,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/kcpgvr"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/clusterhome"
+	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kcpapply"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/manifests"
@@ -32,6 +35,8 @@ import (
 
 const (
 	GCSampleEvery       = 30 * time.Second
+	GCRescanEvery       = 5 * time.Minute
+	AdoptRescanEvery    = 5 * time.Minute
 	StateDirSampleEvery = 3 * time.Minute
 	GCStuckAfter        = 10 * time.Minute
 	GCExamples          = 5
@@ -158,6 +163,7 @@ func (c *Composer) ApplySetPhases(ctx context.Context, r Root, setName string, v
 }
 
 func (c *Composer) applySet(ctx context.Context, r Root, set manifests.Set, values any) error {
+	defer c.adoptions.forget(r)
 	ap, err := kcpapply.New(c.restCfg, kcpapply.Options{WaitTimeout: ApplyTimeout, FieldManager: r.Manager(), Base: c.Workspace(),
 		Labels: map[string]string{OwnerLabel: r.Owner(), RootKindLabel: r.Kind, RootClusterLabel: r.Cluster}, Log: c.log})
 	if err != nil {
@@ -206,14 +212,14 @@ var adoptKinds = []adoptKind{
 	{"Workspace", WorkspaceGVR},
 }
 
-func adoptable(rootKind, kind string, u *Generic, owner string) bool {
-	if len(u.OwnerReferences) > 0 || u.DeletionTimestamp != nil {
+func adoptable(rootKind, kind string, u metav1.Object, owner string) bool {
+	if len(u.GetOwnerReferences()) > 0 || u.GetDeletionTimestamp() != nil {
 		return false
 	}
-	if kind == KindHostProcess && strings.HasPrefix(u.Name, hostprocess.MirrorPrefix) {
+	if kind == KindHostProcess && strings.HasPrefix(u.GetName(), hostprocess.MirrorPrefix) {
 		return false
 	}
-	if u.Labels[OwnerLabel] == owner {
+	if u.GetLabels()[OwnerLabel] == owner {
 		return true
 	}
 	switch kind {
@@ -225,11 +231,84 @@ func adoptable(rootKind, kind string, u *Generic, owner string) bool {
 	return false
 }
 
+type adoptState struct {
+	uid types.UID
+
+	generation int64
+
+	scannedAt time.Time
+
+	pending map[string]bool
+}
+
+type adoptions struct {
+	mu sync.Mutex
+
+	roots map[string]*adoptState
+}
+
+func adoptKey(cluster, rootKind, name string) string {
+	return cluster + "/" + rootKind + "/" + name
+}
+
+func (a *adoptions) due(r Root, now time.Time) map[string]bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.roots == nil {
+		a.roots = map[string]*adoptState{}
+	}
+	key := adoptKey(r.Cluster, r.Kind, r.Name)
+	st := a.roots[key]
+	if st == nil || st.uid != r.UID || st.generation != r.Generation || now.Sub(st.scannedAt) >= AdoptRescanEvery {
+		a.roots[key] = &adoptState{uid: r.UID, generation: r.Generation, scannedAt: now}
+		all := make(map[string]bool, len(adoptKinds))
+		for _, k := range adoptKinds {
+			all[k.Kind] = true
+		}
+		return all
+	}
+	kinds := st.pending
+	st.pending = nil
+	return kinds
+}
+
+func (a *adoptions) mark(cluster, rootKind, name, kind string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	st := a.roots[adoptKey(cluster, rootKind, name)]
+	if st == nil {
+		return
+	}
+	if st.pending == nil {
+		st.pending = map[string]bool{}
+	}
+	st.pending[kind] = true
+}
+
+func (a *adoptions) forget(r Root) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	delete(a.roots, adoptKey(r.Cluster, r.Kind, r.Name))
+}
+
+func (c *Composer) noteAdoptable(rootKind, kind string, reqs []ctlruntime.Request, src ctlruntime.Request, obj metav1.Object) {
+	for _, req := range reqs {
+		cluster := cmp.Or(req.Cluster, src.Cluster)
+		if adoptable(rootKind, kind, obj, OwnerName(rootKind, req.Name)) {
+			c.adoptions.mark(cluster, rootKind, req.Name, kind)
+		}
+	}
+}
+
 func (c *Composer) Adopt(ctx context.Context, r Root) {
 	if r.Deleting || r.UID == "" {
 		return
 	}
+	kinds := c.adoptions.due(r, time.Now())
 	for _, k := range adoptKinds {
+		if !kinds[k.Kind] {
+			continue
+		}
 		ri, err := c.Client(r.Workspace, k.GVR)
 		if err != nil {
 			continue
@@ -259,6 +338,7 @@ func (c *Composer) Adopt(ctx context.Context, r Root) {
 				continue
 			}
 			c.log.Info("an intent object hangs from its root", "root", r.Owner(), "kind", k.Kind, "name", u.Name)
+			c.samples.gcDirty.Store(true)
 		}
 	}
 }
@@ -409,6 +489,10 @@ type samples struct {
 
 	gcAt time.Time
 
+	gcDirty atomic.Bool
+
+	quotaAt time.Time
+
 	quotas map[string]rootQuota
 
 	quotaUsage []v1alpha1.QuotaUsage
@@ -439,11 +523,15 @@ func (s *samples) into(ctx context.Context, c *Composer, m map[string]any, decla
 			s.stateDir = &v1alpha1.StateDirUsage{Path: dir, Bytes: u.Bytes, Files: u.Files, SampledAt: now.UTC().Format(time.RFC3339)}
 		}
 	}
-	if now.Sub(s.gcAt) > GCSampleEvery {
+	if s.gcAt.IsZero() || (now.Sub(s.gcAt) > GCSampleEvery && (s.gcDirty.Load() || now.Sub(s.gcAt) > GCRescanEvery)) {
 		s.gcAt = now
+		s.gcDirty.Store(false)
 		if st := c.scanGC(ctx); st != nil {
 			s.gc = st
 		}
+	}
+	if now.Sub(s.quotaAt) > GCSampleEvery {
+		s.quotaAt = now
 		s.quotaUsage = c.readQuotas(ctx, s.quotas)
 	}
 	put := func(key string, v any) {

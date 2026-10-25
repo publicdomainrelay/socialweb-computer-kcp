@@ -458,7 +458,7 @@ func (p *pass) local(ctx context.Context, plan compose.AccountPlan, id *v1alpha1
 		return p.wait("waiting for the app Pds to apply its public URL")
 	}
 	account := compose.PdsAccount{Vault: RequesterVaultServer, Mount: plan.Vault.MountOr(RequesterVaultClient), Path: compose.PdsSessionPath("requester"), Handle: pdsHandle}
-	if err := c.ApplyLinks(ctx, r, "account", compose.PdsAccountLinks(r, account)); err != nil {
+	if err := c.ApplyLinks(ctx, r, "account", compose.WithoutLinks(compose.PdsAccountLinks(r, account), p.links)); err != nil {
 		return ctlruntime.Result{}, err
 	}
 	if ok, msg := c.LinksAccepted(ctx, r, compose.PdsAccountLinks(r, account)); !ok {

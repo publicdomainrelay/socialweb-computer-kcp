@@ -605,7 +605,7 @@ func (p *pass) localAccount(ctx context.Context, plan compose.AccountPlan, id *v
 	}
 	account := compose.PdsAccount{Vault: vaultlayout.RootServerName, Mount: RequesterVaultMount, Path: compose.PdsSessionPath("requester"), Handle: in.pdsHandle}
 	accountLinks := compose.PdsAccountLinks(r, account)
-	if err := c.ApplyLinks(ctx, r, "account", accountLinks); err != nil {
+	if err := c.ApplyLinks(ctx, r, "account", compose.WithoutLinks(accountLinks, p.baseLinks())); err != nil {
 		return nil, nil, "", false, err
 	}
 	if ok, msg := c.LinksAccepted(ctx, r, accountLinks); !ok {
