@@ -5,9 +5,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/bluesky-social/indigo/atproto/syntax"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
@@ -334,10 +337,43 @@ func (s *Service) newAuthorizer() *participant.Authorizer {
 	}
 }
 
+const publicPDSLookupTimeout = 10 * time.Second
+
+func (s *Service) publicCrawlRelays() []string {
+	network := s.spec.Network.Relays()
+	var out []string
+	for _, relay := range s.spec.Network.DiscoveryRelayURLs() {
+		if !slices.Contains(network, relay) {
+			out = append(out, relay)
+		}
+	}
+	return out
+}
+
+func (s *Service) publicPDS(ctx context.Context) string {
+	if s.inputs.Address(pdsExposure) == "" || s.dir == nil {
+		return ""
+	}
+	did, err := syntax.ParseDID(s.did)
+	if err != nil {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(ctx, publicPDSLookupTimeout)
+	defer cancel()
+	ident, err := s.dir.LookupDID(ctx, did)
+	if err != nil || ident == nil {
+		s.log.Warn("participant_request_crawl_unresolved", "did", s.did, "err", err)
+		return ""
+	}
+	return ident.PDSEndpoint()
+}
+
 func (s *Service) crawl() participant.Crawl {
 	return participant.Crawl{
-		Relays:  append([]string(nil), s.spec.Network.Relays()...),
-		Address: func() string { return s.inputs.Address(pdsExposure) },
+		Relays:        append([]string(nil), s.spec.Network.Relays()...),
+		Address:       func() string { return s.inputs.Address(pdsExposure) },
+		PublicRelays:  s.publicCrawlRelays(),
+		PublicAddress: s.publicPDS,
 		Crawled: func(ctx context.Context) {
 			if bidder := s.bidder.Load(); bidder != nil {
 				bidder.TouchOffering(ctx)

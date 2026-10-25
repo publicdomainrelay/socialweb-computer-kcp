@@ -374,6 +374,10 @@ func (c Config) Relays() []string {
 	return append([]string(nil), c.Spec.Network.Relays()...)
 }
 
+func (c Config) DiscoveryRelays() []string {
+	return c.Spec.Network.DiscoveryRelayURLs()
+}
+
 func (c Config) SealedSecrets() bool {
 	return c.Spec.SecretsFallback == v1alpha1.SecretsFallbackSealed
 }
@@ -547,8 +551,9 @@ func (q *Requester) Start(ctx context.Context) error {
 		Signer:      q.signer,
 		ServiceKey:  q.repoKey,
 		ServiceAuth: serviceAuth,
-		RelayURLs:   q.cfg.Relays(),
+		RelayURLs:   q.cfg.DiscoveryRelays(),
 		BidderDIDs:  append([]string(nil), q.cfg.Spec.BidderDIDs...),
+		OperatorDID: strings.TrimSpace(q.cfg.Spec.OperatorDID),
 		HTTPClient:  q.deps.HTTP,
 		Timeout:     q.cfg.BidWindow,
 		Log:         q.log,

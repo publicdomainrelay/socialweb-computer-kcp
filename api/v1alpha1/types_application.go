@@ -2,6 +2,7 @@ package v1alpha1
 
 import (
 	"net"
+	"slices"
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -23,6 +24,8 @@ type MarketNetworkValue struct {
 	Comms *MarketComms `json:"comms,omitempty"`
 
 	Ingress *IngressConfig `json:"ingress,omitempty"`
+
+	DiscoveryRelays []string `json:"discoveryRelays,omitempty" apigen:"userEndpoint"`
 }
 
 type NetworkHost struct {
@@ -37,6 +40,8 @@ const (
 	NetworkRelayHost = "relay.default.relay.svc.kcp.local"
 
 	GuestTLSHost = "relay.localhost"
+
+	DefaultDiscoveryRelayURL = "https://relay1.us-east.bsky.network"
 )
 
 func (n *MarketNetworkValue) HostAddress(name string) string {
@@ -63,6 +68,23 @@ func (n *MarketNetworkValue) Relays() []string {
 		return []string{u}
 	}
 	return nil
+}
+
+func (n *MarketNetworkValue) DiscoveryRelayURLs() []string {
+	out := n.Relays()
+	var extra []string
+	if n != nil {
+		extra = n.DiscoveryRelays
+	}
+	if len(extra) == 0 && len(out) == 0 {
+		extra = []string{DefaultDiscoveryRelayURL}
+	}
+	for _, raw := range extra {
+		if u := strings.TrimRight(strings.TrimSpace(raw), "/"); u != "" && !slices.Contains(out, u) {
+			out = append(out, u)
+		}
+	}
+	return out
 }
 
 func (n *MarketNetworkValue) GuestTLSURL() string {

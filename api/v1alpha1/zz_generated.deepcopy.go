@@ -6165,6 +6165,11 @@ func (in *MarketNetworkValue) DeepCopyInto(out *MarketNetworkValue) {
 		*out = new(IngressConfig)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.DiscoveryRelays != nil {
+		in, out := &in.DiscoveryRelays, &out.DiscoveryRelays
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	return
 }
 

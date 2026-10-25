@@ -228,6 +228,8 @@ type HTTPMarket struct {
 
 	BidderDIDs []string
 
+	OperatorDID string
+
 	DenyBidderDIDs []string
 
 	HTTPClient *http.Client
@@ -295,21 +297,20 @@ func (m *HTTPMarket) discover(ctx context.Context, now time.Time, only []string)
 		explicit[did] = named
 		found.Candidates = append(found.Candidates, did)
 	}
-	source := "contract"
+	source, counts := "contract", ""
 	if found.Restricted {
 		for _, did := range only {
 			add(did, true)
 		}
 	} else {
 		source = "requester"
-		for _, did := range m.BidderDIDs {
-			add(did, true)
-		}
-		if len(m.RelayURLs) > 0 {
-			for _, did := range market.DiscoverBiddersFromRelays(ctx, m.RelayURLs, market.OfferingNSID, bidderDiscoveryTimeout, m.client(), market.NoopLog) {
-				add(did, false)
+		sources, auto := m.candidateSources(ctx)
+		for _, candidates := range sources {
+			for _, did := range candidates.dids {
+				add(did, candidates.named)
 			}
 		}
+		counts = sourceCounts(sources, auto)
 	}
 	unnamed := []string{}
 	for _, did := range found.Candidates {
@@ -346,7 +347,8 @@ func (m *HTTPMarket) discover(ctx context.Context, now time.Time, only []string)
 	for _, bidder := range found.Bidders {
 		bidderDIDs = append(bidderDIDs, bidder.DID)
 	}
-	m.log().Info("requester_bidder_discovery", "source", source, "candidates", len(found.Candidates), "bidders", bidderDIDs, "dropped", len(found.Dropped))
+	m.log().Info("requester_bidder_discovery", "source", source, "sources", counts, "candidates", len(found.Candidates), "bidders", bidderDIDs,
+		"dropped", len(found.Dropped))
 	return found
 }
 
