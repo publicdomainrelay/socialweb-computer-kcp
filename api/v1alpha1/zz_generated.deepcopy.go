@@ -5766,6 +5766,24 @@ func (in *MarketComms) DeepCopyInto(out *MarketComms) {
 		*out = make([]commonv1alpha1.ObjectRef, len(*in))
 		copy(*out, *in)
 	}
+	if in.RelayURLs != nil {
+		in, out := &in.RelayURLs, &out.RelayURLs
+		*out = new([]string)
+		if **in != nil {
+			in, out := *in, *out
+			*out = make([]string, len(*in))
+			copy(*out, *in)
+		}
+	}
+	if in.JetstreamURLs != nil {
+		in, out := &in.JetstreamURLs, &out.JetstreamURLs
+		*out = new([]string)
+		if **in != nil {
+			in, out := *in, *out
+			*out = make([]string, len(*in))
+			copy(*out, *in)
+		}
+	}
 	return
 }
 

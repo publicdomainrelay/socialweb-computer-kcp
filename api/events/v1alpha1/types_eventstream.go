@@ -28,6 +28,8 @@ type EventStreamSpec struct {
 
 	Cursor *int64 `json:"cursor,omitempty"`
 
+	Resume EventStreamResume `json:"resume,omitempty"`
+
 	Sink EventStreamSink `json:"sink"`
 
 	Suspend bool `json:"suspend,omitempty"`
@@ -46,6 +48,14 @@ type EventStreamSink struct {
 
 	Namespace string `json:"namespace,omitempty"`
 }
+
+type EventStreamResume string
+
+const (
+	EventStreamResumePersisted EventStreamResume = "Persisted"
+
+	EventStreamResumeLive EventStreamResume = "Live"
+)
 
 type EventStreamSinkKind string
 

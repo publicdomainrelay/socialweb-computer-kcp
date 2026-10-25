@@ -83,6 +83,8 @@ type backendEntry[T ctlruntime.Object] struct {
 
 	flush *debounce.Debounce
 
+	progress *debounce.Debounce
+
 	mu sync.Mutex
 
 	publishMu sync.Mutex
@@ -130,6 +132,7 @@ func (b *Backend[T]) Reconcile(ctx context.Context, req ctlruntime.Request, obj 
 		b.mu.Unlock()
 		if e != nil {
 			e.flush.Stop()
+			e.progress.Stop()
 		}
 		return ctlruntime.Result{}, nil
 	}
@@ -139,6 +142,7 @@ func (b *Backend[T]) Reconcile(ctx context.Context, req ctlruntime.Request, obj 
 	if created {
 		e = &backendEntry[T]{b: b, ref: commonv1.ObjectRef{Group: eventsv1.GroupName, Kind: b.kind, Name: obj.GetName(), Workspace: req.Workspace}}
 		e.flush = debounce.New(b.flushDelay, e.flushNow)
+		e.progress = debounce.New(delivery.ProgressDelay, e.flushNow)
 		b.entries[key] = e
 	}
 	b.mu.Unlock()
@@ -268,7 +272,7 @@ func (h handle[T]) Subscribe(ctx context.Context, filter events.Filter) (events.
 	}
 	tracker.Recover()
 	h.e.flush.Mark()
-	return delivery.NewTracked(stream, tracker, h.e.flush.Mark), nil
+	return delivery.NewTracked(stream, tracker, h.e.flush.Mark, h.e.progress.Mark), nil
 }
 
 func BusDial(b *bus.Bus) wsconn.DialFunc {

@@ -45,18 +45,20 @@ func NewTracker(cfg TrackerConfig) *Tracker {
 	return t
 }
 
-func (t *Tracker) Observe(e events.Event) {
+func (t *Tracker) Observe(e events.Event) bool {
 	at := e.Time
 	if at.IsZero() {
 		at = time.Now().UTC()
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	transition := !t.s.Started || t.s.Err != nil
 	t.s.Lag = 0
 	if t.gaps && t.s.Started && e.Seq > t.s.Cursor+1 {
 		t.s.Lag = e.Seq - t.s.Cursor - 1
 	}
 	t.s.Started, t.s.Cursor, t.s.LastEventAt, t.s.Err = true, e.Seq, at, nil
+	return transition
 }
 
 func (t *Tracker) Fail(err error) {
@@ -83,12 +85,17 @@ type Tracked struct {
 	tracker *Tracker
 
 	changed func()
+
+	progress func()
 }
 
 var _ events.Stream = (*Tracked)(nil)
 
-func NewTracked(stream events.Stream, tracker *Tracker, changed func()) *Tracked {
-	return &Tracked{stream: stream, tracker: tracker, changed: changed}
+func NewTracked(stream events.Stream, tracker *Tracker, changed, progress func()) *Tracked {
+	if progress == nil {
+		progress = changed
+	}
+	return &Tracked{stream: stream, tracker: tracker, changed: changed, progress: progress}
 }
 
 func (t *Tracked) Next(ctx context.Context) (events.Event, error) {
@@ -100,8 +107,11 @@ func (t *Tracked) Next(ctx context.Context) (events.Event, error) {
 		}
 		return event, err
 	}
-	t.tracker.Observe(event)
-	t.changed()
+	if t.tracker.Observe(event) || len(event.Ops) > 0 {
+		t.changed()
+	} else {
+		t.progress()
+	}
 	return event, nil
 }
 

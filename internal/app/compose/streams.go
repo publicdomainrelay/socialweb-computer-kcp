@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -41,6 +42,10 @@ const (
 	PublicJetstreamEastURL = "wss://jetstream2.us-east.bsky.network/subscribe"
 
 	PublicJetstreamWestURL = "wss://jetstream1.us-west.bsky.network/subscribe"
+
+	publicSourcePrefix = "firehose-"
+
+	publicSourceValue = "public-"
 )
 
 var MarketStreamCollections = []string{
@@ -191,6 +196,47 @@ type Streams struct {
 	Sources SourceInput
 
 	ForceFirehose bool
+
+	Public PublicSources
+}
+
+type PublicSources struct {
+	Relays []string
+
+	Jetstreams []string
+}
+
+func RequesterPublicSources(comms *v1alpha1.MarketComms, network *v1alpha1.MarketNetworkValue, mode v1alpha1.MarketCommsMode) PublicSources {
+	if mode != v1alpha1.MarketCommsModeFirehose {
+		return PublicSources{}
+	}
+	return PublicSources{Relays: comms.FirehoseRelays(network), Jetstreams: comms.FirehoseJetstreams()}
+}
+
+func PublicSourceName(kind, raw string) string {
+	host := raw
+	if u, err := url.Parse(strings.TrimSpace(raw)); err == nil && u.Host != "" {
+		host = u.Host
+	}
+	return ObjectName(publicSourcePrefix+kind, host)
+}
+
+func (p PublicSources) sources() []rootSource {
+	var out []rootSource
+	seen := map[string]bool{}
+	add := func(s rootSource) {
+		if !seen[s.Name] {
+			seen[s.Name] = true
+			out = append(out, s)
+		}
+	}
+	for _, u := range p.Relays {
+		add(rootSource{Name: PublicSourceName("relay", u), Relay: &eventsv1alpha1.RelayEventSourceSpec{URL: u}})
+	}
+	for _, u := range p.Jetstreams {
+		add(rootSource{Name: PublicSourceName("jetstream", u), Jetstream: &eventsv1alpha1.JetstreamEventSourceSpec{URL: u}})
+	}
+	return out
 }
 
 type MarketStreams struct {
@@ -221,6 +267,8 @@ type marketStreamRef struct {
 	dids []string
 
 	derived bool
+
+	public bool
 }
 
 func (c *Composer) ApplyMarketStreams(ctx context.Context, r Root, s Streams) (MarketStreams, error) {
@@ -229,6 +277,11 @@ func (c *Composer) ApplyMarketStreams(ctx context.Context, r Root, s Streams) (M
 	if err != nil {
 		return MarketStreams{}, err
 	}
+	publicRefs, publicLinks, err := c.applyPublicSources(ctx, r, ws, s.Role, s.Public)
+	if err != nil {
+		return MarketStreams{}, err
+	}
+	links = append(links, publicLinks...)
 	out := MarketStreams{}
 	mode := streamMode(s)
 	derive := s.Role == RequesterStreamRole && (mode == v1alpha1.MarketCommsModeFirehose || mode == v1alpha1.MarketCommsModeBoth)
@@ -247,8 +300,11 @@ func (c *Composer) ApplyMarketStreams(ctx context.Context, r Root, s Streams) (M
 		return out, c.Prune(ctx, ws, eventsv1alpha1.EventStreamGVR, marketStreamLabel+"="+s.Role, nil)
 	}
 	var refs []marketStreamRef
-	for _, ref := range marketSourceRefs(ws, s.Comms, s.Sources.Network, s.ForceFirehose) {
+	for _, ref := range marketSourceRefs(ws, s.Comms, s.Sources.Network, s.ForceFirehose && len(publicRefs) == 0) {
 		refs = append(refs, marketStreamRef{ref: ref})
+	}
+	for _, ref := range publicRefs {
+		refs = append(refs, marketStreamRef{ref: ref, public: true})
 	}
 	if len(refs) == 0 && !derive {
 		return MarketStreams{}, fmt.Errorf("compose: comms mode %s names no event source (spec.comms.eventSourceRefs) and the network has no relay; it fails closed instead of using XRPC", mode)
@@ -273,17 +329,22 @@ func (c *Composer) ApplyMarketStreams(ctx context.Context, r Root, s Streams) (M
 				Filter:    eventsv1alpha1.EventStreamFilter{Collections: slices.Clone(MarketStreamCollections), DIDs: slices.Clone(entry.dids)},
 				Sink:      eventsv1alpha1.EventStreamSink{Kind: eventsv1alpha1.EventStreamSinkHandler, Name: sink},
 			}}
-		if s.ForceFirehose && !entry.derived {
+		switch {
+		case entry.public:
+			stream.Spec.Resume = eventsv1alpha1.EventStreamResumeLive
+		case s.ForceFirehose && !entry.derived:
 			stream.Spec.Cursor = new(int64(0))
 		}
 		if err := c.ApplyTyped(ctx, r, ws, eventsv1alpha1.EventStreamGVR, eventsv1alpha1.GroupVersion.String(), "EventStream", stream); err != nil {
 			return MarketStreams{}, err
 		}
-		user, err := c.userSourceLink(ctx, s.Role, ref)
-		if err != nil {
-			return MarketStreams{}, err
+		if !entry.public {
+			user, err := c.userSourceLink(ctx, s.Role, ref)
+			if err != nil {
+				return MarketStreams{}, err
+			}
+			links = append(links, user...)
 		}
-		links = append(links, user...)
 		links = append(links, SelectorLink(eventLinkName(s.Role, "subscribe", ref.Workspace, ref.Name), streamSelector(ws, streamLabels, nil), ref,
 			Cap(events.CapabilitySubscribe, append(slices.Clone(MarketStreamCollections), entry.dids...)...)))
 		if entry.derived {
@@ -353,6 +414,39 @@ func (c *Composer) applyRootSources(ctx context.Context, r Root, ws string, in S
 		}
 	}
 	return links, nil
+}
+
+func (c *Composer) applyPublicSources(ctx context.Context, r Root, ws, role string, p PublicSources) ([]commonv1.ObjectRef, []Link, error) {
+	labels := map[string]string{marketSourceLabel: publicSourceValue + role}
+	keep := map[string]bool{}
+	var refs []commonv1.ObjectRef
+	var links []Link
+	for _, s := range p.sources() {
+		keep[s.Name] = true
+		backendRef, backendGVR, backend := s.backend()
+		if err := c.ApplyTyped(ctx, r, ws, backendGVR, eventsv1alpha1.GroupVersion.String(), backendRef.Kind, withLabels(backend, labels)); err != nil {
+			return nil, nil, err
+		}
+		abstract := &eventsv1alpha1.EventSource{ObjectMeta: metav1.ObjectMeta{Name: s.Name, Labels: labels},
+			Spec: eventsv1alpha1.EventSourceSpec{BackendRef: backendRef}}
+		if err := c.ApplyTyped(ctx, r, ws, eventsv1alpha1.EventSourceGVR, eventsv1alpha1.GroupVersion.String(), eventsv1alpha1.EventSourceKind, abstract); err != nil {
+			return nil, nil, err
+		}
+		source := EventSourceRef(s.Name)
+		source.Workspace = ws
+		backendRef.Workspace = ws
+		refs = append(refs, source)
+		links = append(links, Link{Name: eventLinkName(role, "bind", ws, s.Name), Spec: exposurev1alpha1.ComponentLinkSpec{
+			From: exposurev1alpha1.ComponentLinkFrom{Ref: &source}, To: backendRef,
+			Capabilities: []exposurev1alpha1.LinkCapability{Cap(events.CapabilitySubscribe, events.ScopeAll)}}})
+	}
+	selector := marketSourceLabel + "=" + publicSourceValue + role
+	for _, gvr := range []schema.GroupVersionResource{eventsv1alpha1.EventSourceGVR, eventsv1alpha1.RelayEventSourceGVR, eventsv1alpha1.JetstreamEventSourceGVR} {
+		if err := c.Prune(ctx, ws, gvr, selector, keep); err != nil {
+			return nil, nil, err
+		}
+	}
+	return refs, links, nil
 }
 
 func (c *Composer) userSourceLink(ctx context.Context, role string, ref commonv1.ObjectRef) ([]Link, error) {

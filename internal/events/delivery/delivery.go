@@ -36,6 +36,12 @@ const (
 
 	DefaultMaxReconnectDelay = 30 * time.Second
 
+	RelayRewindEvents = 1000
+
+	JetstreamRewindMicros = int64(30 * time.Second / time.Microsecond)
+
+	ProgressDelay = time.Minute
+
 	gaplessPrefix = "jetstream/"
 )
 
@@ -65,6 +71,10 @@ type Config struct {
 	ReconnectDelay time.Duration
 
 	MaxReconnectDelay time.Duration
+
+	Rewind int64
+
+	Live bool
 }
 
 type Deps struct {
@@ -75,6 +85,8 @@ type Deps struct {
 	Resume func() *int64
 
 	Changed func()
+
+	Progress func()
 }
 
 type Loop struct {
@@ -109,6 +121,14 @@ func (l *Loop) changed() {
 	}
 }
 
+func (l *Loop) progressed() {
+	if l.deps.Progress == nil {
+		l.changed()
+		return
+	}
+	l.deps.Progress()
+}
+
 func (l *Loop) set(phase Phase, ready, failed bool, reason, message string) {
 	l.mu.Lock()
 	l.state.Phase, l.state.Ready, l.state.Failed, l.state.Reason, l.state.Message = phase, ready, failed, reason, message
@@ -120,13 +140,23 @@ func (l *Loop) cursor() *int64 {
 	l.mu.Lock()
 	started, cursor := l.state.Started, l.state.Cursor
 	l.mu.Unlock()
+	if started && cursor <= 0 && l.cfg.Live {
+		return nil
+	}
 	if started {
-		return &cursor
+		return Rewound(cursor, l.cfg.Rewind)
 	}
 	if l.deps.Resume != nil {
 		return l.deps.Resume()
 	}
 	return nil
+}
+
+func Rewound(cursor, rewind int64) *int64 {
+	if cursor > 0 && rewind > 0 {
+		cursor = max(cursor-rewind, 1)
+	}
+	return &cursor
 }
 
 func (l *Loop) Run(ctx context.Context) {
@@ -139,9 +169,10 @@ func (l *Loop) Run(ctx context.Context) {
 		if err != nil {
 			l.set(PhaseFailed, false, true, ReasonSubscribeFailed, err.Error())
 		} else {
-			delay = base
 			l.set(PhaseRunning, true, false, ReasonStreamOpen, "")
-			l.consume(ctx, upstream)
+			if l.consume(ctx, upstream) {
+				delay = base
+			}
 			_ = upstream.Close()
 		}
 		if ctx.Err() != nil {
@@ -158,7 +189,8 @@ func (l *Loop) Run(ctx context.Context) {
 	}
 }
 
-func (l *Loop) consume(ctx context.Context, upstream events.Stream) {
+func (l *Loop) consume(ctx context.Context, upstream events.Stream) bool {
+	received := false
 	for {
 		event, err := upstream.Next(ctx)
 		if err != nil {
@@ -170,16 +202,22 @@ func (l *Loop) consume(ctx context.Context, upstream events.Stream) {
 			if ctx.Err() == nil {
 				l.set(PhaseFailed, false, true, ReasonStreamClosed, err.Error())
 			}
-			return
+			return received
 		}
+		first := !received
+		received = true
 		l.observe(event)
 		if len(event.Ops) == 0 {
-			l.changed()
+			if first {
+				l.changed()
+			} else {
+				l.progressed()
+			}
 			continue
 		}
 		if err := l.deps.Sink.Deliver(ctx, event); err != nil {
 			if ctx.Err() != nil {
-				return
+				return received
 			}
 			l.set(PhaseFailed, true, true, ReasonDeliverFailed, err.Error())
 			continue

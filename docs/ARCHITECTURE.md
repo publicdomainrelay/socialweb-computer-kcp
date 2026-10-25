@@ -10999,6 +10999,64 @@ to `exec.LookPath("deno")`. The integration hosts hat-7 and hat-9 were prepared 
   but the guest's own rootfs, and no journal line. Without `--guest-host-udp true` the same contract
   on the same host failed ICE as invariant 37 says (the router does not hairpin).
 
+### A Firehose requester watches the old default relays and Jetstreams, deduplicated in its sink (2026-10-25)
+
+- **Before.** A MarketRequester in comms mode Firehose (no inbound endpoint) watched only the
+  network relay, `spec.comms.eventSourceRefs` and one subscribeRepos per discovered bidder PDS; an
+  OAuth receive-only requester with none of these got one Jetstream. On prod (no network relay) a
+  bid from a bidder not yet discovered had no path. Every source delivered to the market handler
+  sink, which fetched each record and relied on the StateSync name (`uri#cid`) to absorb duplicates.
+- **The decision (the user's, relayed by the browser peer).** The socialweb default for Firehose is
+  the old `request-vm-ssh --no-ingress-proxy`: all default relays and Jetstreams at once, plus the
+  bidder PDS streams, deduplicated across them. The requester composer applies them, so the browser
+  build runs them through its unchanged eventstream controllers; the page adds nothing.
+  - Defaults (`api/v1alpha1` `DefaultFirehoseRelayURLs`, `DefaultFirehoseJetstreamURLs`): relays
+    `https://bsky.network` and `https://relay.mini-cloud-0002.chadig.com` (subscribeRepos, the
+    collection filter on the client), Jetstreams `wss://jetstream{1,2}.us-{east,west}.bsky.network/subscribe`
+    (`wantedCollections` on the server). With a network relay host the network relay replaces the
+    default relays, as the old code dropped them for `--firehose-url`; the Jetstreams stay.
+  - `spec.comms.relayUrls` and `spec.comms.jetstreamUrls` (also in a component override's comms): an
+    explicit list replaces the default, an explicit empty list turns it off. XRPC and Both are
+    unchanged. The old request-vm-ssh opened the same relays and Jetstreams in every mode, with
+    `--no-ingress-proxy` or without, but only for offering discovery (bidder DIDs) and a log-only
+    watcher of `market.event`; bids came over the ingress. The requester here discovers bidders with
+    listReposByCollection on `spec.network.discoveryRelays` and has no offering consumer, so
+    `market.offering` is not in the filter.
+  - Objects: per URL a RelayEventSource or JetstreamEventSource and its EventSource, named
+    `firehose-relay-<host>` or `firehose-jetstream-<host>`, label
+    `socialweb.computer/market-source=public-requester`, pruned when the list drops them; an
+    EventStream each into the role's market handler, with `spec.resume: Live`
+    (`EventStreamResumeLive`): no cursor file and no status cursor on a restart, so a cold start
+    never replays a full-network relay's retention; a reconnect in the process resumes from the
+    cursor in memory.
+  - Reconnect (`internal/events/delivery`): a RelayEventSource stream resumes 1000 events back, a
+    JetstreamEventSource stream 30 s back (time_us), from the in-memory cursor or a stored one; the
+    backoff starts at 1 s, doubles to 30 s, and is reset only by a stream that delivered an event.
+  - Dedup in one place, the market handler sink (`internal/eventstream/market.go`, `dedup.go`): a
+    `uri|cid` claimed in the last 15 s (`MarketDedupWindow`, at most `MarketDedupCap` 10000 keys,
+    oldest first out, no timer) is dropped before the getRecord fetch. A second copy that arrives while
+    the first is being delivered waits for it and is delivered itself if the first failed.
+    `market_event_duplicate_dropped` is logged once per key with the first source and the running count.
+  - Churn: an event the filter empties marks a slow debounce (`delivery.ProgressDelay`, 1 min) for the
+    EventStream and EventSource status instead of the 5 s one; a state change, the first event of a
+    connection and a delivered event still use 5 s. A full relay costs at most one status write per
+    minute per stream and per backend.
+- **Readings (market network `fhdef`, 1 bidder, 2026-10-25).** `run request -- --comms-mode Firehose
+  --hold`: the root workspace held the four `firehose-jetstream-*` sources (Running, StreamOpen, no
+  event: the network's records are not on the public Jetstreams) beside `relay-network` and
+  `bidder-pds-*`; Held at +35 s, `uname` over iroh, release Released. The sink dropped vm.hostKeys,
+  vm.onNetwork and two market.event copies of `relay-network` that `bidder-pds-*` delivered first,
+  one log line each. With the override relayUrls [bsky.network, chadig] and jetstreamUrls [] on a
+  resume, the Jetstream objects were pruned and both relays connected; bsky.network streamed at the
+  live cursor. The chadig relay is stale: its newest event is from 2026-10-12, and every connection
+  without a cursor replays its 5663-event backlog (55 MB, 1092 market ops of 285 DIDs), whose author
+  PDSes mostly do not answer, so that stream sits in DeliverFailed while it walks the backlog. The
+  requester core used 2.8% of one core with the Jetstreams only and 5.5% with the two relays (RSS 202
+  to 222 MB). Measured alone for 60 s (a Go client of `internal/events/relay`, decode and filter
+  only): bsky.network 213 to 319 events/s and 1.1 to 1.7 MB/s, 0 market ops, 0.8% of one core, 38 MB
+  RSS; both relays 1.6%. A client-side filter on the full relay downloads 4 to 6 GB an hour for no
+  market event; on a phone that is the cost, not the CPU.
+
 ## 16. Vocabulary
 
 | | |

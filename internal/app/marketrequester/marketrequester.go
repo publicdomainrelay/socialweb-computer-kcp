@@ -333,8 +333,11 @@ func (p *pass) suspended(ctx context.Context, plan compose.AccountPlan, pdsHandl
 }
 
 func (p *pass) streams(ctx context.Context, plan compose.AccountPlan, localDID string) error {
-	streams, err := p.c.ApplyMarketStreams(ctx, p.r, compose.Streams{Role: compose.RequesterStreamRole, Comms: compose.OverrideComms(p.o.Spec.Components, compose.ComponentKindRequester, RequesterComponent, p.o.Spec.Comms),
-		Sources: compose.SourceInput{Network: p.o.Spec.Network, LocalDID: localDID}, ForceFirehose: compose.OAuthReceiveOnly(plan.Mode)})
+	comms := compose.OverrideComms(p.o.Spec.Components, compose.ComponentKindRequester, RequesterComponent, p.o.Spec.Comms)
+	force := compose.OAuthReceiveOnly(plan.Mode)
+	streams, err := p.c.ApplyMarketStreams(ctx, p.r, compose.Streams{Role: compose.RequesterStreamRole, Comms: comms,
+		Sources: compose.SourceInput{Network: p.o.Spec.Network, LocalDID: localDID}, ForceFirehose: force,
+		Public: compose.RequesterPublicSources(comms, p.o.Spec.Network, compose.RequesterCommsMode(comms, force))})
 	if err != nil {
 		return err
 	}

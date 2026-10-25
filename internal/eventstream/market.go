@@ -46,6 +46,10 @@ const (
 	marketNamePrefix = "market-"
 
 	computeEventsPrefix = "com.publicdomainrelay.temp.compute.events."
+
+	MarketDedupWindow = 15 * time.Second
+
+	MarketDedupCap = 10000
 )
 
 type DynamicFactory = kube.Factory
@@ -83,6 +87,8 @@ type marketHandler struct {
 
 	mu    sync.Mutex
 	pdses map[syntax.DID]pdsclient.PDS
+
+	seen *seenSet
 }
 
 type marketPayload struct {
@@ -141,6 +147,7 @@ func NewMarketSink(opts MarketOptions) (*MarketSink, error) {
 		directory: newDirectory(httpClient, opts.PLCDirectoryURL, opts.Workspace),
 		client:    httpClient,
 		pdses:     map[syntax.DID]pdsclient.PDS{},
+		seen:      newSeenSet(MarketDedupWindow, MarketDedupCap),
 	}, nil
 }
 
@@ -164,23 +171,58 @@ func (h *marketHandler) Deliver(ctx context.Context, event events.Event) error {
 			continue
 		}
 		uri := "at://" + event.Repo + "/" + collection + "/" + rkey
-		var expected *cid.Cid
-		if op.CID != "" {
-			parsed, err := cid.Decode(op.CID)
-			if err != nil {
-				return fmt.Errorf("eventstream: the market op %s has an invalid cid: %w", uri, err)
+		if op.CID == "" {
+			if err := h.deliverOp(ctx, event, adapter, repo, uri, collection, rkey, op); err != nil {
+				return err
 			}
-			expected = &parsed
+			continue
 		}
-		value, recordCID, err := h.fetchMarketRecord(ctx, event.Source, repo, collection, rkey, expected)
-		if err != nil {
-			return fmt.Errorf("eventstream: fetching the market record %s: %w", uri, err)
-		}
-		if err := h.createSync(ctx, adapter, event.Repo, uri, recordCID, collection, value); err != nil {
+		if err := h.deliverOnce(ctx, event, adapter, repo, uri, collection, rkey, op); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (h *marketHandler) deliverOnce(ctx context.Context, event events.Event, adapter string, repo syntax.DID, uri, collection, rkey string, op events.Op) error {
+	key := uri + "|" + op.CID
+	for {
+		entry, owner := h.seen.claim(key, event.Source, time.Now())
+		if owner {
+			err := h.deliverOp(ctx, event, adapter, repo, uri, collection, rkey, op)
+			h.seen.finish(key, entry, err == nil)
+			return err
+		}
+		select {
+		case <-entry.done:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		if !entry.ok {
+			continue
+		}
+		if dup := h.seen.drop(entry); dup.Drops == 1 {
+			h.log.Info("market_event_duplicate_dropped", "role", h.opts.Role, "workspace", h.opts.Workspace, "uri", uri, "cid", op.CID,
+				"source", event.Source, "first", dup.First, "dropped", dup.Dropped)
+		}
+		return nil
+	}
+}
+
+func (h *marketHandler) deliverOp(ctx context.Context, event events.Event, adapter string, repo syntax.DID, uri, collection, rkey string, op events.Op) error {
+	var expected *cid.Cid
+	if op.CID != "" {
+		parsed, err := cid.Decode(op.CID)
+		if err != nil {
+			return fmt.Errorf("eventstream: the market op %s has an invalid cid: %w", uri, err)
+		}
+		expected = &parsed
+	}
+	value, recordCID, err := h.fetchMarketRecord(ctx, event.Source, repo, collection, rkey, expected)
+	if err != nil {
+		return fmt.Errorf("eventstream: fetching the market record %s: %w", uri, err)
+	}
+	return h.createSync(ctx, adapter, event.Repo, uri, recordCID, collection, value)
 }
 
 func (h *marketHandler) createSync(ctx context.Context, adapter, did, uri, cid, collection string, record map[string]any) error {

@@ -254,6 +254,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, es *
 		return ctlruntime.Result{}, c.applyStatus(ctx, req, es, eventsv1.EventStreamPhaseFailed, false, true, ReasonInvalidSpec, err.Error())
 	}
 	sourceState := ""
+	var rewind int64
 	if src.Workspace == req.Workspace {
 		var live eventsv1.EventSource
 		err := req.Get(ctx, "", src.Name, &live)
@@ -272,6 +273,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, es *
 				"the EventSource "+src.Name+" is not bound to its backend")
 		}
 		sourceState = fmt.Sprintf("%s/%d/%s", live.UID, live.Generation, live.Spec.BackendRef.String())
+		rewind = rewindFor(live.Spec.BackendRef.Kind)
 	}
 	fingerprint, err := fingerprintOf(es.Spec, src, sinkRef, sourceState)
 	if err != nil {
@@ -308,9 +310,19 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, es *
 		return ctlruntime.Result{}, errors.Join(err, c.applyStatus(ctx, req, es, eventsv1.EventStreamPhaseFailed, false, true, ReasonResolveFailed,
 			"resolving the sink "+sinkRef.String()+": "+err.Error()))
 	}
-	s := c.start(ctx, k, req, es, fingerprint, filter, source, sink)
+	s := c.start(ctx, k, req, es, fingerprint, filter, rewind, source, sink)
 	s.flush.Mark()
 	return ctlruntime.Result{}, s.publish(ctx)
+}
+
+func rewindFor(kind string) int64 {
+	switch kind {
+	case eventsv1.RelayEventSourceKind:
+		return delivery.RelayRewindEvents
+	case eventsv1.JetstreamEventSourceKind:
+		return delivery.JetstreamRewindMicros
+	}
+	return 0
 }
 
 func fingerprintOf(spec eventsv1.EventStreamSpec, src, sink commonv1.ObjectRef, sourceState string) (string, error) {
@@ -380,6 +392,10 @@ type stream struct {
 
 	flush *debounce.Debounce
 
+	progress *debounce.Debounce
+
+	rewind int64
+
 	mu sync.Mutex
 
 	req ctlruntime.Request
@@ -392,10 +408,12 @@ type stream struct {
 }
 
 func (c *Controller) start(ctx context.Context, k string, req ctlruntime.Request, es *eventsv1.EventStream, fingerprint string,
-	filter events.Filter, source events.Source, sink events.Sink) *stream {
-	s := &stream{c: c, key: k, uid: string(es.UID), fingerprint: fingerprint, req: req, es: es.DeepCopy()}
+	filter events.Filter, rewind int64, source events.Source, sink events.Sink) *stream {
+	s := &stream{c: c, key: k, uid: string(es.UID), fingerprint: fingerprint, rewind: rewind, req: req, es: es.DeepCopy()}
 	s.flush = debounce.New(c.flushDelay, s.flushNow)
-	s.loop = delivery.New(delivery.Config{Filter: filter}, delivery.Deps{Source: source, Sink: sink, Resume: s.resume, Changed: s.flush.Mark})
+	s.progress = debounce.New(delivery.ProgressDelay, s.flushNow)
+	s.loop = delivery.New(delivery.Config{Filter: filter, Rewind: rewind, Live: es.Spec.Resume == eventsv1.EventStreamResumeLive},
+		delivery.Deps{Source: source, Sink: sink, Resume: s.resume, Changed: s.flush.Mark, Progress: s.progress.Mark})
 	streamCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	stopRoot := context.AfterFunc(c.root, cancel)
 	s.group = supervise.New(streamCtx)
@@ -419,6 +437,7 @@ func (s *stream) update(req ctlruntime.Request, es *eventsv1.EventStream) {
 
 func (s *stream) stop(flush bool) {
 	s.flush.Stop()
+	s.progress.Stop()
 	_ = s.group.Stop()
 	if flush {
 		s.flushNow()
@@ -428,12 +447,14 @@ func (s *stream) stop(flush bool) {
 func (s *stream) resume() *int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.es.Spec.Resume == eventsv1.EventStreamResumeLive {
+		return nil
+	}
 	if v, ok := s.c.cursors.Load(s.req.Workspace, s.es.Name, s.uid); ok {
-		return &v
+		return delivery.Rewound(v, s.rewind)
 	}
 	if s.es.Status.Cursor > 0 {
-		v := s.es.Status.Cursor
-		return &v
+		return delivery.Rewound(s.es.Status.Cursor, s.rewind)
 	}
 	if s.es.Spec.Cursor != nil {
 		v := *s.es.Spec.Cursor
@@ -450,9 +471,9 @@ func (s *stream) flushNow() {
 	}
 	state := s.loop.State()
 	s.mu.Lock()
-	workspace, name := s.req.Workspace, s.es.Name
+	workspace, name, live := s.req.Workspace, s.es.Name, s.es.Spec.Resume == eventsv1.EventStreamResumeLive
 	s.mu.Unlock()
-	if state.Started {
+	if state.Started && !live {
 		if err := s.c.cursors.Save(workspace, name, s.uid, state.Cursor); err != nil {
 			s.c.log.Warn("saving the EventStream cursor", "stream", s.key, "err", err.Error())
 		}

@@ -163,6 +163,51 @@ type MarketComms struct {
 	Mode MarketCommsMode `json:"mode,omitempty"`
 
 	EventSourceRefs []commonv1.ObjectRef `json:"eventSourceRefs,omitempty"`
+
+	RelayURLs *[]string `json:"relayUrls,omitempty" apigen:"userEndpoint"`
+
+	JetstreamURLs *[]string `json:"jetstreamUrls,omitempty" apigen:"userEndpoint"`
+}
+
+var (
+	DefaultFirehoseRelayURLs = []string{
+		"https://bsky.network",
+		"https://relay.mini-cloud-0002.chadig.com",
+	}
+
+	DefaultFirehoseJetstreamURLs = []string{
+		"wss://jetstream1.us-east.bsky.network/subscribe",
+		"wss://jetstream2.us-east.bsky.network/subscribe",
+		"wss://jetstream1.us-west.bsky.network/subscribe",
+		"wss://jetstream2.us-west.bsky.network/subscribe",
+	}
+)
+
+func (c *MarketComms) FirehoseRelays(network *MarketNetworkValue) []string {
+	if c != nil && c.RelayURLs != nil {
+		return trimmedUnique(*c.RelayURLs)
+	}
+	if network.RelayURL() != "" {
+		return nil
+	}
+	return slices.Clone(DefaultFirehoseRelayURLs)
+}
+
+func (c *MarketComms) FirehoseJetstreams() []string {
+	if c != nil && c.JetstreamURLs != nil {
+		return trimmedUnique(*c.JetstreamURLs)
+	}
+	return slices.Clone(DefaultFirehoseJetstreamURLs)
+}
+
+func trimmedUnique(in []string) []string {
+	var out []string
+	for _, raw := range in {
+		if u := strings.TrimRight(strings.TrimSpace(raw), "/"); u != "" && !slices.Contains(out, u) {
+			out = append(out, u)
+		}
+	}
+	return out
 }
 
 type IngressConfig struct {

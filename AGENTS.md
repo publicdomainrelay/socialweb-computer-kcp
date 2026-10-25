@@ -90,6 +90,23 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
   component (`internal/services/requester` over `internal/market/requester`) runs the RFP, the
   accept and the release; `run request list`, `run request release` and `run request resume` manage
   the invocations it recorded.
+- Comms modes (`spec.comms.mode` of the MarketRequester and its Requester; `run request -- --comms-mode
+  XRPC|Firehose|Both`). XRPC takes bids and events on the requester ingress only. Both (the requester
+  default) adds EventStreams from the network relay, `spec.comms.eventSourceRefs` and one subscribeRepos
+  per discovered bidder PDS. Firehose has no inbound endpoint; the requester composer
+  (`internal/app/compose/streams.go`, the same code in the browser build) adds the public firehoses of
+  the old request-vm-ssh: the relays `https://bsky.network` and `https://relay.mini-cloud-0002.chadig.com`
+  (subscribeRepos, client-side collection filter; on a network with a relay host the network relay
+  replaces them) and the Jetstreams `jetstream1` and `jetstream2` of `us-east` and `us-west.bsky.network`
+  (server-side `wantedCollections`). Each is a RelayEventSource or JetstreamEventSource with its
+  EventSource (`firehose-relay-<host>`, `firehose-jetstream-<host>`, label
+  `socialweb.computer/market-source=public-requester`) and an EventStream with `spec.resume: Live`
+  (no stored cursor; a reconnect resumes from the cursor in memory). `spec.comms.relayUrls` and
+  `spec.comms.jetstreamUrls` replace a default list; an empty list turns it off. Every market
+  EventStream of a role delivers to one handler sink (`internal/eventstream/market.go`), which drops a
+  `uri|cid` it took in the last 15 s (at most 10000 keys) and logs `market_event_duplicate_dropped` once
+  per key with the running count. A relay stream reconnects 1000 events back, a Jetstream 30 s back,
+  after a 1 s backoff that doubles to 30 s.
 
 ## Guest transports, guest events and the host-loopback fence
 
