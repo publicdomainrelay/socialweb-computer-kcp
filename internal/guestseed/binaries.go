@@ -64,7 +64,15 @@ type GuestBinaryNeeds struct {
 
 	Secrets bool
 
+	WebRTC bool
+
 	Units []string
+}
+
+type WebRTCOptions struct {
+	UDPPort int `json:"udpPort"`
+
+	HostAddresses []string `json:"hostAddresses"`
 }
 
 type guestAgentBidder struct {
@@ -73,6 +81,8 @@ type guestAgentBidder struct {
 	Audience string `json:"audience"`
 
 	AcceptPath string `json:"acceptPath"`
+
+	WebRTC *WebRTCOptions `json:"webrtc,omitempty"`
 }
 
 func GuestDownloadName(name, arch string) string {
@@ -104,6 +114,7 @@ func GuestBinariesNeeded(userData string) GuestBinaryNeeds {
 		switch {
 		case p == cloudinit.GuestAgentTunnelsPath:
 			out.Agent = true
+			out.WebRTC = true
 		case p == cloudinit.GuestAgentSecretsPath:
 			out.Agent = true
 			out.Secrets = true
@@ -252,7 +263,7 @@ want() {
 	}, nil
 }
 
-func GuestAgentModule(base, audience, acceptPath string, secrets bool) (cloudinit.UserDataModule, error) {
+func GuestAgentModule(base, audience, acceptPath string, secrets bool, webrtc *WebRTCOptions) (cloudinit.UserDataModule, error) {
 	base = strings.TrimRight(strings.TrimSpace(base), "/")
 	if err := checkURLLike(base, "guest agent base"); err != nil {
 		return nil, err
@@ -260,7 +271,10 @@ func GuestAgentModule(base, audience, acceptPath string, secrets bool) (cloudini
 	if err := checkAbsolute(acceptPath); err != nil {
 		return nil, err
 	}
-	raw, err := json.Marshal(guestAgentBidder{Base: base, Audience: audience, AcceptPath: acceptPath})
+	if webrtc != nil && (webrtc.UDPPort < 1 || webrtc.UDPPort > 65535 || len(webrtc.HostAddresses) == 0) {
+		return nil, fmt.Errorf("guestseed: the guest agent webrtc port %d with %d host addresses is not a forwarded LAN port", webrtc.UDPPort, len(webrtc.HostAddresses))
+	}
+	raw, err := json.Marshal(guestAgentBidder{Base: base, Audience: audience, AcceptPath: acceptPath, WebRTC: webrtc})
 	if err != nil {
 		return nil, fmt.Errorf("guestseed: encoding %s: %w", GuestAgentBidderPath, err)
 	}

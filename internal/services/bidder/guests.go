@@ -48,6 +48,7 @@ func (guests) ComputeVM(in core.GuestVM) (*v1alpha1.ComputeVM, error) {
 		HostPorts:        in.HostPorts,
 		LANUDP:           in.LANUDP,
 		HostUDP:          in.HostUDP,
+		WebRTCUDPPort:    in.WebRTCUDPPort,
 		Owner:            in.Owner,
 	}
 	if in.Accept.URI != "" || in.Accept.CID != "" {

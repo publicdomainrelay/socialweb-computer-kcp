@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -52,6 +53,14 @@ type Bidder struct {
 	Audience string `json:"audience"`
 
 	AcceptPath string `json:"acceptPath"`
+
+	WebRTC *WebRTCPort `json:"webrtc,omitempty"`
+}
+
+type WebRTCPort struct {
+	UDPPort int `json:"udpPort"`
+
+	HostAddresses []string `json:"hostAddresses"`
 }
 
 type Secrets struct {
@@ -138,6 +147,16 @@ func LoadConfig(configDir, stateDir, loginHelper string) (Config, error) {
 	}
 	if strings.TrimSpace(cfg.Bidder.AcceptPath) == "" {
 		return cfg, fmt.Errorf("%w: %s has no acceptPath", ErrConfig, BidderFile)
+	}
+	if w := cfg.Bidder.WebRTC; w != nil {
+		if w.UDPPort < 1 || w.UDPPort > 65535 || len(w.HostAddresses) == 0 {
+			return cfg, fmt.Errorf("%w: %s webrtc names port %d and %d host addresses", ErrConfig, BidderFile, w.UDPPort, len(w.HostAddresses))
+		}
+		for _, a := range w.HostAddresses {
+			if _, err := netip.ParseAddr(strings.TrimSpace(a)); err != nil {
+				return cfg, fmt.Errorf("%w: %s webrtc host address %q is not an IP address", ErrConfig, BidderFile, a)
+			}
+		}
 	}
 	var accept struct {
 		Accept struct {

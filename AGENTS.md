@@ -183,7 +183,18 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
   `spec.policy` is `bidder-only-me` and off otherwise; the Bidder's `status.guestNetwork` reports
   `{lanUDP, hostUDP, hostUDPReason}` (`spec`, `policy only-me`, `policy not only-me`). `run bidder`,
   `install bidder` and `dev up` take `--guest-host-udp true|false|auto`, the hono-bidder passthrough
-  `--guest-host-udp`. A guest-facing local listener the bidder hands to a guest goes into
+  `--guest-host-udp`. The one inbound path is the forwarded webrtc UDP port: for a guest with a
+  webrtc tunnel the bidder leases one UDP port per ComputeVM from its `spec.guestNetwork.webrtcUDPPorts
+  {min, max}` (MarketBidder, Bidder, NetworkApp; default 31000-31999; a udp port registry under its
+  state dir, `webrtc-udp-ports`), writes it as the ComputeVM's and FirecrackerVM's
+  `spec.guestNetwork.webrtcUDPPort`, and writes `{"webrtc": {"udpPort", "hostAddresses"}}` (the
+  host's RFC1918 and ULA addresses, `guestnet.HostLANAddresses`) into
+  `/etc/socialweb-guest-agent/bidder.json`. pasta forwards `-u <lan addr>/<port>` to the same guest
+  port, where socialweb-guest-agent listens with one pion UDPMux and rewrites its host candidates to
+  those addresses, so a same-LAN peer (mDNS-only host candidates, no hairpin) reaches the guest. The
+  fence accepts UDP from that source port to the host's own non-loopback addresses and to the LAN
+  prefixes on ports 1024 and up except 1900, 5353 and 5355, with `lanUDP` and `hostUDP` off too; no
+  other UDP port is forwarded, and the addresses never go into kcp. A guest-facing local listener the bidder hands to a guest goes into
   `spec.hostPorts` (`GuestHostPorts`, `guestseed.HostPortsOf`); never widen the fence to all ports,
   and never open TCP to the LAN or to the host's own addresses.
 - After a change to `cmd/socialweb-vmexec` or `internal/guestnet`, run `make pins` and commit the

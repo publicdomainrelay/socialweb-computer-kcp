@@ -94,6 +94,8 @@ type ProvisionOptions struct {
 	HostURL string
 
 	Downloads map[string]string
+
+	WebRTC *WebRTCOptions
 }
 
 func GuestLoginModule(opts GuestLoginOptions) (cloudinit.UserDataModule, error) {
@@ -463,7 +465,7 @@ func guestBinaryModules(opts ProvisionOptions, acceptPath string) ([]any, error)
 	}
 	var out []any
 	if needs.Agent {
-		agent, err := GuestAgentModule(opts.HostURL, opts.BearerAudience, acceptPath, needs.Secrets)
+		agent, err := GuestAgentModule(opts.HostURL, opts.BearerAudience, acceptPath, needs.Secrets, opts.WebRTC)
 		if err != nil {
 			return nil, err
 		}

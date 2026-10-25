@@ -41,14 +41,14 @@ var APIResources = []APIResource{
 		{Name: "Message", Type: "string", JSONPath: ".status.message"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "ComputeVM", Plural: "computevms", Revision: 14, Export: "computevms", Object: ComputeVM{}, PrinterColumns: []PrinterColumn{
+	{Kind: "ComputeVM", Plural: "computevms", Revision: 15, Export: "computevms", Object: ComputeVM{}, PrinterColumns: []PrinterColumn{
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "Backend", Type: "string", JSONPath: ".spec.backendRef.kind"},
 		{Name: "GuestIP", Type: "string", JSONPath: ".status.addresses.guest"},
 		{Name: "Requester", Type: "string", JSONPath: ".spec.requester.did"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "FirecrackerVM", Plural: "firecrackervms", Revision: 6, Export: "computevms", Object: FirecrackerVM{}, Contracts: []string{commonv1.ContractComputeVMs}, PrinterColumns: []PrinterColumn{
+	{Kind: "FirecrackerVM", Plural: "firecrackervms", Revision: 7, Export: "computevms", Object: FirecrackerVM{}, Contracts: []string{commonv1.ContractComputeVMs}, PrinterColumns: []PrinterColumn{
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "GuestIP", Type: "string", JSONPath: ".status.network.guestIP"},
 		{Name: "Unit", Type: "string", JSONPath: ".status.runtime.unit"},
@@ -107,13 +107,13 @@ var APIResources = []APIResource{
 		{Name: "Sealed", Type: "boolean", JSONPath: ".status.sealed"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "MarketNetwork", Plural: "marketnetworks", Revision: 25, Export: "applications", Object: MarketNetwork{}, PrinterColumns: []PrinterColumn{
+	{Kind: "MarketNetwork", Plural: "marketnetworks", Revision: 26, Export: "applications", Object: MarketNetwork{}, PrinterColumns: []PrinterColumn{
 		{Name: "Profile", Type: "string", JSONPath: ".spec.profile"},
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "PLC", Type: "string", JSONPath: ".status.network.plcDirectoryUrl"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "MarketBidder", Plural: "marketbidders", Revision: 30, Export: "applications", Object: MarketBidder{}, PrinterColumns: []PrinterColumn{
+	{Kind: "MarketBidder", Plural: "marketbidders", Revision: 31, Export: "applications", Object: MarketBidder{}, PrinterColumns: []PrinterColumn{
 		{Name: "Profile", Type: "string", JSONPath: ".spec.profile"},
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "DID", Type: "string", JSONPath: ".status.did"},
@@ -159,7 +159,7 @@ var APIResources = []APIResource{
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "Bidder", Plural: "bidders", Revision: 17, Export: "applications", Object: Bidder{}, PrinterColumns: componentPrinterColumns},
+	{Kind: "Bidder", Plural: "bidders", Revision: 18, Export: "applications", Object: Bidder{}, PrinterColumns: componentPrinterColumns},
 	{Kind: "GuestControlPlane", Plural: "guestcontrolplanes", Revision: 8, Export: "applications", Object: GuestControlPlane{}, PrinterColumns: componentPrinterColumns},
 	{Kind: "Pds", Plural: "pds", Revision: 9, Export: "applications", Object: Pds{}, PrinterColumns: componentPrinterColumns},
 	{Kind: "Requester", Plural: "requesters", Revision: 20, Export: "applications", Object: Requester{}, PrinterColumns: componentPrinterColumns},

@@ -7,12 +7,14 @@ import (
 	"crypto/rand"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"strings"
 	"sync"
 
 	"filippo.io/age"
+	"github.com/pion/ice/v4"
 	"github.com/pion/webrtc/v4"
 )
 
@@ -28,6 +30,8 @@ type Agent struct {
 	fingerprint string
 
 	api *webrtc.API
+
+	mux ice.UDPMux
 
 	tokens *tokenSource
 
@@ -71,6 +75,10 @@ func New(cfg Config, log *slog.Logger) (*Agent, error) {
 	}
 	settings := webrtc.SettingEngine{LoggerFactory: pionLogs{log: log}}
 	settings.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4, webrtc.NetworkTypeUDP6})
+	mux, err := forwardedPort(&settings, cfg.Bidder.WebRTC, log)
+	if err != nil {
+		return nil, err
+	}
 	tokens := newTokenSource(cfg.LoginHelper, cfg.Bidder.Audience, log)
 	return &Agent{
 		cfg:         cfg,
@@ -79,6 +87,7 @@ func New(cfg Config, log *slog.Logger) (*Agent, error) {
 		certificate: *certificate,
 		fingerprint: fingerprint,
 		api:         webrtc.NewAPI(webrtc.WithSettingEngine(settings)),
+		mux:         mux,
 		tokens:      tokens,
 		poster: &poster{
 			url:    cfg.Bidder.Base + EventsPath,
@@ -91,6 +100,25 @@ func New(cfg Config, log *slog.Logger) (*Agent, error) {
 		seen:     map[string]bool{},
 		applied:  map[string]bool{},
 	}, nil
+}
+
+func forwardedPort(settings *webrtc.SettingEngine, w *WebRTCPort, log *slog.Logger) (ice.UDPMux, error) {
+	if w == nil {
+		return nil, nil
+	}
+	conn, err := net.ListenUDP("udp", &net.UDPAddr{Port: w.UDPPort})
+	if err != nil {
+		log.Warn("the forwarded webrtc UDP port does not bind; host candidates take ephemeral ports", "port", w.UDPPort, "err", err.Error())
+		return nil, nil
+	}
+	mux := ice.NewUDPMuxDefault(ice.UDPMuxParams{UDPConn: conn, Logger: pionLogs{log: log}.NewLogger("udpmux")})
+	settings.SetICEUDPMux(mux)
+	rule := webrtc.ICEAddressRewriteRule{External: w.HostAddresses, AsCandidateType: webrtc.ICECandidateTypeHost, Mode: webrtc.ICEAddressRewriteReplace}
+	if err := settings.SetICEAddressRewriteRules(rule); err != nil {
+		_ = mux.Close()
+		return nil, fmt.Errorf("guestagent: the host candidate rewrite to the bidder host's LAN addresses: %w", err)
+	}
+	return mux, nil
 }
 
 func Fingerprint(certificate webrtc.Certificate) (string, error) {
@@ -118,7 +146,8 @@ func (a *Agent) Run(ctx context.Context, ready func()) error {
 	for _, t := range a.cfg.Tunnels {
 		tags = append(tags, t.Tag)
 	}
-	a.log.Info("the guest agent starts", "tags", tags, "sealedSecrets", a.cfg.Secrets != nil, "base", a.cfg.Bidder.Base, "fingerprint", a.fingerprint, "cursor", a.cursor)
+	a.log.Info("the guest agent starts", "tags", tags, "sealedSecrets", a.cfg.Secrets != nil, "base", a.cfg.Bidder.Base, "fingerprint", a.fingerprint, "cursor", a.cursor,
+		"forwardedUDPPort", a.mux != nil)
 	for _, t := range a.cfg.Tunnels {
 		a.wg.Go(func() { a.announce(ctx, t.Tag) })
 	}
@@ -140,6 +169,9 @@ func (a *Agent) Run(ctx context.Context, ready func()) error {
 		s.close("the agent is stopping")
 	}
 	a.wg.Wait()
+	if a.mux != nil {
+		_ = a.mux.Close()
+	}
 	a.log.Info("the guest agent stops")
 	return nil
 }

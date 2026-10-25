@@ -4000,7 +4000,22 @@ A change must not break any of these. Each exists because something failed.
     `spec.guestNetwork.hostUDP` when set, else on exactly when its `spec.policy` is `bidder-only-me`;
     it is the bidder operator's choice (`--guest-host-udp`), never the requester's, and its Bidder's
     `status.guestNetwork` reports it with the reason. The rules are stateless: no inbound path into a
-    guest exists but replies, which enter from the pasta side.
+    guest exists but replies, which enter from the pasta side, and the one forwarded webrtc UDP port.
+    That port is the only inbound path: for a guest with a webrtc tunnel the bidder leases one UDP
+    port per ComputeVM (its own `spec.guestNetwork.webrtcUDPPorts {min, max}` on MarketBidder,
+    Bidder and NetworkApp, default 31000-31999, a port registry of kind udp in its state dir) and
+    writes it as the ComputeVM's and FirecrackerVM's `spec.guestNetwork.webrtcUDPPort`; pasta forwards
+    that UDP port on the host's RFC1918 and ULA addresses only (`-u <addr>/<port>`, never loopback,
+    link-local, 100.64/10 or a public address) to the same port in the guest, where only
+    socialweb-guest-agent listens (one pion UDPMux shared by every session, host candidates rewritten
+    to those LAN addresses from `/etc/socialweb-guest-agent/bidder.json` `webrtc {udpPort,
+    hostAddresses}`). The table accepts UDP from that source port to the host's own non-loopback,
+    non-link-local addresses and, after the drop of the host's addresses and the guest link, to 10/8,
+    172.16/12, 192.168/16 and fc00::/7, on destination ports 1024 and up except 1900, 5353 and 5355;
+    it is an explicit per-VM grant and holds with `lanUDP` and `hostUDP` off. It exists because a
+    same-LAN peer (an iPhone offers only mDNS host candidates and the home's public srflx, and the
+    router does not hairpin) can reach no other guest candidate. No address is in kcp: the ComputeVM
+    carries the port only, and the addresses travel in the guest's user_data.
 
 ## 14. Open architectural gaps
 

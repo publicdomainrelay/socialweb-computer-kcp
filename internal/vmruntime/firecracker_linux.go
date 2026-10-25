@@ -178,8 +178,11 @@ func (r *firecracker) Prepare(ctx context.Context, spec VMSpec) (Prepared, error
 	if err != nil {
 		return Prepared{}, fmt.Errorf("vmruntime: %w", err)
 	}
+	if spec.WebRTCUDPPort != 0 {
+		p.WebRTCAddresses = guestnet.LANAddresses(hostAddrs)
+	}
 	params := guestnet.VMExec{
-		Wiring:  guestnet.Plan(spec.HostPorts, spec.LANUDP, spec.HostUDP, hostAddrs),
+		Wiring:  guestnet.Plan(spec.HostPorts, spec.LANUDP, spec.HostUDP, hostAddrs, spec.WebRTCUDPPort),
 		VMM:     r.cfg.Exec.Firecracker,
 		Argv:    fcapi.Argv("firecracker", p.VMMID, filepath.Join(p.WorkDir, ConfigFile), p.Socket),
 		Console: console,
@@ -205,7 +208,7 @@ func (r *firecracker) slotIDs(k int) (uidBase, gidBase, vmmUID int) {
 func (r *firecracker) UnitSpec(p Prepared, slot int) hostsvc.UnitSpec {
 	uidBase, gidBase, _ := r.slotIDs(slot)
 	exec := []string{r.cfg.Exec.Stage, strconv.Itoa(uidBase), strconv.Itoa(gidBase), strconv.Itoa(hostcontract.VMSlotIDs), strconv.Itoa(r.cfg.InnerID)}
-	exec = append(exec, guestnet.PastaArgv(r.cfg.Exec.Pasta, r.cfg.Exec.VMExec, filepath.Join(p.WorkDir, ParamsFile))...)
+	exec = append(exec, guestnet.PastaArgv(r.cfg.Exec.Pasta, guestnet.PastaUDPForwards(p.Spec.WebRTCUDPPort, p.WebRTCAddresses), r.cfg.Exec.VMExec, filepath.Join(p.WorkDir, ParamsFile))...)
 	return hostsvc.UnitSpec{
 		Name:        p.Unit,
 		Description: fmt.Sprintf("socialweb vm %s handle %s slot=%d", p.Spec.Name, HandleID(p.Spec.Handle), slot),

@@ -23,6 +23,10 @@ const (
 	DefaultPortLast = 29999
 
 	DefaultPortHost = "127.0.0.1"
+
+	NetworkTCP = "tcp"
+
+	NetworkUDP = "udp"
 )
 
 type Lease struct {
@@ -47,6 +51,8 @@ type Options struct {
 	Last int
 
 	Host string
+
+	Network string
 }
 
 type portFile struct {
@@ -61,6 +67,8 @@ type Registry struct {
 	path string
 
 	host string
+
+	network string
 
 	first int
 
@@ -95,16 +103,21 @@ func Open(opts Options) (*Registry, error) {
 	}
 	host := strings.TrimSpace(opts.Host)
 	host = cmp.Or(host, DefaultPortHost)
+	network := cmp.Or(strings.TrimSpace(opts.Network), NetworkTCP)
+	if network != NetworkTCP && network != NetworkUDP {
+		return nil, fmt.Errorf("ports: the port registry network %q is not %s or %s", network, NetworkTCP, NetworkUDP)
+	}
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		return nil, fmt.Errorf("ports: creating the port registry state dir: %w", err)
 	}
 	r := &Registry{
-		path:   filepath.Join(stateDir, PortsFile),
-		host:   host,
-		first:  opts.First,
-		last:   opts.Last,
-		now:    time.Now,
-		leases: map[string]Lease{},
+		path:    filepath.Join(stateDir, PortsFile),
+		host:    host,
+		network: network,
+		first:   opts.First,
+		last:    opts.Last,
+		now:     time.Now,
+		leases:  map[string]Lease{},
 	}
 	if err := r.load(); err != nil {
 		return nil, err
@@ -141,11 +154,9 @@ func (r *Registry) Allocate(name string) (Lease, error) {
 		if used[candidate] {
 			continue
 		}
-		probe, err := net.Listen("tcp", net.JoinHostPort(r.host, strconv.Itoa(candidate)))
-		if err != nil {
+		if !r.free(candidate) {
 			continue
 		}
-		_ = probe.Close()
 		port = candidate
 		break
 	}
@@ -159,6 +170,24 @@ func (r *Registry) Allocate(name string) (Lease, error) {
 		return Lease{}, err
 	}
 	return lease, nil
+}
+
+func (r *Registry) free(port int) bool {
+	address := net.JoinHostPort(r.host, strconv.Itoa(port))
+	if r.network == NetworkUDP {
+		probe, err := net.ListenPacket(NetworkUDP, address)
+		if err != nil {
+			return false
+		}
+		_ = probe.Close()
+		return true
+	}
+	probe, err := net.Listen(NetworkTCP, address)
+	if err != nil {
+		return false
+	}
+	_ = probe.Close()
+	return true
 }
 
 func (r *Registry) Listen(name string) (net.Listener, Lease, error) {

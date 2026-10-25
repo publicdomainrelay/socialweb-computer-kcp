@@ -131,13 +131,30 @@ func Fence(w Wiring) error {
 	for _, closed := range HighUDPClosedPorts {
 		highUDP = append(highUDP, cmpOp(unix.NFT_CMP_NEQ, be16(uint16(closed))))
 	}
+	var fromWebRTC []expr
+	if w.WebRTCUDPPort != 0 {
+		if err := ValidWebRTCUDPPort(w.WebRTCUDPPort); err != nil {
+			return err
+		}
+		fromWebRTC = slices.Concat(l4Is(ipUDP), sport(cmpOp(unix.NFT_CMP_EQ, be16(uint16(w.WebRTCUDPPort)))), dport(highUDP...))
+	}
 	if w.HostUDP {
 		for _, p := range HostUDPPrefixes(own) {
 			pre(familyOf(p).to(p), l4Is(ipUDP), dport(highUDP...), verdict(verdictAccept))
 		}
 	}
+	if fromWebRTC != nil {
+		for _, p := range HostUDPPrefixes(own) {
+			pre(familyOf(p).to(p), fromWebRTC, verdict(verdictAccept))
+		}
+	}
 	for _, p := range slices.Concat(own, link) {
 		pre(familyOf(p).to(p), verdict(verdictDrop))
+	}
+	if fromWebRTC != nil {
+		for _, p := range lan {
+			pre(familyOf(p).to(p), fromWebRTC, verdict(verdictAccept))
+		}
 	}
 	if w.LANUDP {
 		for _, p := range lan {
@@ -219,6 +236,10 @@ func prefixIs(base, offset uint32, p netip.Prefix) []expr {
 
 func dport(cmps ...expr) []expr {
 	return append(payloadLoad(unix.NFT_PAYLOAD_TRANSPORT_HEADER, 2, 2), cmps...)
+}
+
+func sport(cmps ...expr) []expr {
+	return append(payloadLoad(unix.NFT_PAYLOAD_TRANSPORT_HEADER, 0, 2), cmps...)
 }
 
 func bitwise(mask []byte) expr {

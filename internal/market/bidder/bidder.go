@@ -99,6 +99,8 @@ type Config struct {
 
 	GuestHostUDP bool
 
+	GuestLANAddresses func() []string
+
 	GuestVaultServer string
 
 	GuestVaultMount string
@@ -145,7 +147,17 @@ type GuestVM struct {
 
 	HostUDP bool
 
+	WebRTCUDPPort int32
+
 	Owner *metav1.OwnerReference
+}
+
+type GuestUDPPorts interface {
+	Allocate(name string) (int, error)
+
+	Release(name string) error
+
+	Held() []string
 }
 
 type Guests interface {
@@ -207,6 +219,8 @@ type Deps struct {
 
 	GuestEvents GuestQueue
 
+	WebRTCPorts GuestUDPPorts
+
 	Tokens *participant.Tokens
 
 	HTTP *http.Client
@@ -234,6 +248,8 @@ type Bidder struct {
 	guests Guests
 
 	guestEvents GuestQueue
+
+	webrtcPorts GuestUDPPorts
 
 	outbound *participant.Outbound
 
@@ -319,6 +335,7 @@ func New(cfg Config, deps Deps) (*Bidder, error) {
 		vault:       deps.Vault,
 		guests:      deps.Guests,
 		guestEvents: deps.GuestEvents,
+		webrtcPorts: deps.WebRTCPorts,
 		outbound:    &participant.Outbound{HTTP: deps.HTTP, Tokens: deps.Tokens, Log: log},
 		verifier:    participant.Verifier{Directory: deps.Directory, Records: deps.Records},
 		directory:   deps.Directory,

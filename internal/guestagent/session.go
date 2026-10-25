@@ -133,6 +133,7 @@ func (a *Agent) newSession(tag string, port int) (*session, error) {
 		switch state {
 		case webrtc.PeerConnectionStateConnected:
 			s.connectedOnce.Do(func() { close(s.connected); s.gc.Stop() })
+			s.log.Info("the selected candidate pair", selectedPair(pc)...)
 		case webrtc.PeerConnectionStateFailed:
 			s.close("the peer connection failed")
 		case webrtc.PeerConnectionStateClosed:
@@ -198,7 +199,7 @@ func (a *Agent) answer(s *session, offerSDP string, replyTo *age.X25519Recipient
 		s.close(fmt.Sprintf("the sealed answer is %d bytes, over %d", len(ciphertext), maxCiphertext))
 		return
 	}
-	s.log.Info("the answer is sealed", "answerBytes", len(local.SDP), "ciphertextBytes", len(ciphertext))
+	s.log.Info("the answer is sealed", append([]any{"answerBytes", len(local.SDP), "ciphertextBytes", len(ciphertext)}, candidateTypes(local.SDP)...)...)
 	record := signalRecord{
 		Type:       SignalWebRTCNSID,
 		Kind:       signalKindAnswer,
@@ -215,4 +216,33 @@ func newID() string {
 	var b [6]byte
 	_, _ = rand.Read(b[:])
 	return hex.EncodeToString(b[:])
+}
+
+func selectedPair(pc *webrtc.PeerConnection) []any {
+	sctp := pc.SCTP()
+	if sctp == nil {
+		return []any{"local", "unknown", "remote", "unknown"}
+	}
+	pair, err := sctp.Transport().ICETransport().GetSelectedCandidatePair()
+	if err != nil || pair == nil || pair.Local == nil || pair.Remote == nil {
+		return []any{"local", "unknown", "remote", "unknown"}
+	}
+	return []any{"local", pair.Local.Typ.String(), "remote", pair.Remote.Typ.String(), "protocol", pair.Local.Protocol.String()}
+}
+
+func candidateTypes(sdp string) []any {
+	counts := map[string]int{}
+	for _, line := range strings.Split(sdp, "\n") {
+		if !strings.HasPrefix(strings.TrimSpace(line), "a=candidate:") {
+			continue
+		}
+		fields := strings.Fields(line)
+		for i := 0; i+1 < len(fields); i++ {
+			if fields[i] == "typ" {
+				counts[fields[i+1]]++
+				break
+			}
+		}
+	}
+	return []any{"hostCandidates", counts["host"], "srflxCandidates", counts["srflx"]}
 }

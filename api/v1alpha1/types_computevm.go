@@ -56,7 +56,23 @@ type GuestNetworkOptions struct {
 	LANUDP *bool `json:"lanUDP,omitempty"`
 
 	HostUDP *bool `json:"hostUDP,omitempty"`
+
+	WebRTCUDPPorts *GuestUDPPortRange `json:"webrtcUDPPorts,omitempty"`
+
+	WebRTCUDPPort int32 `json:"webrtcUDPPort,omitempty" apigen:"minimum=0,maximum=65535"`
 }
+
+type GuestUDPPortRange struct {
+	Min int32 `json:"min" apigen:"minimum=1024,maximum=65535"`
+
+	Max int32 `json:"max" apigen:"minimum=1024,maximum=65535"`
+}
+
+const (
+	DefaultWebRTCUDPPortMin int32 = 31000
+
+	DefaultWebRTCUDPPortMax int32 = 31999
+)
 
 const (
 	BidderOnlyMePolicy = "bidder-only-me"
@@ -72,6 +88,8 @@ type GuestNetworkStatus struct {
 	HostUDP bool `json:"hostUDP"`
 
 	HostUDPReason string `json:"hostUDPReason,omitempty"`
+
+	WebRTCUDPPorts *GuestUDPPortRange `json:"webrtcUDPPorts,omitempty"`
 }
 
 func (g *GuestNetworkOptions) LANUDPAllowed() bool {
@@ -82,12 +100,27 @@ func (g *GuestNetworkOptions) HostUDPAllowed() bool {
 	return g != nil && g.HostUDP != nil && *g.HostUDP
 }
 
+func (g *GuestNetworkOptions) WebRTCUDPPortRange() GuestUDPPortRange {
+	if g == nil || g.WebRTCUDPPorts == nil {
+		return GuestUDPPortRange{Min: DefaultWebRTCUDPPortMin, Max: DefaultWebRTCUDPPortMax}
+	}
+	return *g.WebRTCUDPPorts
+}
+
+func (g *GuestNetworkOptions) WebRTCUDPPortOf() int32 {
+	if g == nil {
+		return 0
+	}
+	return g.WebRTCUDPPort
+}
+
 func BidderPolicyOnlyMe(policy string) bool {
 	return strings.TrimSpace(policy) == BidderOnlyMePolicy
 }
 
 func (g *GuestNetworkOptions) EffectiveFor(policy string) GuestNetworkStatus {
-	st := GuestNetworkStatus{LANUDP: g.LANUDPAllowed()}
+	ports := g.WebRTCUDPPortRange()
+	st := GuestNetworkStatus{LANUDP: g.LANUDPAllowed(), WebRTCUDPPorts: &ports}
 	switch {
 	case g != nil && g.HostUDP != nil:
 		st.HostUDP, st.HostUDPReason = *g.HostUDP, HostUDPReasonSpec
@@ -107,12 +140,13 @@ func (g *GuestNetworkOptions) WithDefaults(d *GuestNetworkOptions) *GuestNetwork
 	if d != nil {
 		out.LANUDP = cmp.Or(out.LANUDP, d.LANUDP)
 		out.HostUDP = cmp.Or(out.HostUDP, d.HostUDP)
+		out.WebRTCUDPPorts = cmp.Or(out.WebRTCUDPPorts, d.WebRTCUDPPorts)
 	}
 	return &out
 }
 
-func GuestNetworkWith(lanUDP, hostUDP bool) *GuestNetworkOptions {
-	return &GuestNetworkOptions{LANUDP: &lanUDP, HostUDP: &hostUDP}
+func GuestNetworkWith(lanUDP, hostUDP bool, webrtcUDPPort int32) *GuestNetworkOptions {
+	return &GuestNetworkOptions{LANUDP: &lanUDP, HostUDP: &hostUDP, WebRTCUDPPort: webrtcUDPPort}
 }
 
 type ComputeVMRelease struct {

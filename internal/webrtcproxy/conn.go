@@ -100,6 +100,8 @@ func newConn(tag string, log *slog.Logger) (*Conn, error) {
 	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
 		log.Info("the peer connection state changed", "state", state.String())
 		switch state {
+		case webrtc.PeerConnectionStateConnected:
+			log.Info("the selected candidate pair", selectedPair(pc)...)
 		case webrtc.PeerConnectionStateFailed:
 			c.finish(fmt.Errorf("webrtcproxy: the peer connection failed (ICE %s)", pc.ICEConnectionState()))
 		case webrtc.PeerConnectionStateClosed:
@@ -221,4 +223,16 @@ func Pipe(ctx context.Context, c *Conn, stdin io.Reader, stdout io.Writer) error
 			local = nil
 		}
 	}
+}
+
+func selectedPair(pc *webrtc.PeerConnection) []any {
+	sctp := pc.SCTP()
+	if sctp == nil {
+		return []any{"local", "unknown", "remote", "unknown"}
+	}
+	pair, err := sctp.Transport().ICETransport().GetSelectedCandidatePair()
+	if err != nil || pair == nil || pair.Local == nil || pair.Remote == nil {
+		return []any{"local", "unknown", "remote", "unknown"}
+	}
+	return []any{"local", pair.Local.Typ.String(), "remote", pair.Remote.Typ.String(), "protocol", pair.Local.Protocol.String()}
 }

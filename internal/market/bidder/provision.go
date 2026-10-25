@@ -146,6 +146,10 @@ func (b *Bidder) provision(ctx context.Context, req provisionRequest) (string, e
 	if err != nil {
 		return "", err
 	}
+	webrtc, err := b.webrtcPort(name, withBundle)
+	if err != nil {
+		return "", err
+	}
 	hostURL, hostPort := b.GuestHostURL()
 	userData, err := guestseed.Provision(guestseed.ProvisionOptions{
 		UserData: withBundle,
@@ -164,6 +168,7 @@ func (b *Bidder) provision(ctx context.Context, req provisionRequest) (string, e
 		TLSPort:        b.cfg.GuestTLSPort,
 		HostURL:        hostURL,
 		Downloads:      b.cfg.GuestDownloads,
+		WebRTC:         webrtc,
 	})
 	if err != nil {
 		return "", err
@@ -185,6 +190,7 @@ func (b *Bidder) provision(ctx context.Context, req provisionRequest) (string, e
 		HostPorts:        b.guestHostPorts(userData, hostPort),
 		LANUDP:           b.cfg.GuestLANUDP,
 		HostUDP:          b.cfg.GuestHostUDP,
+		WebRTCUDPPort:    webrtcUDPPort(webrtc),
 		Owner:            req.owner,
 	})
 	if err != nil {
@@ -209,6 +215,47 @@ func (b *Bidder) provision(ctx context.Context, req provisionRequest) (string, e
 	}
 	b.log.Info("a guest ComputeVM is applied", "computevm", name, "cpus", record.CPUs, "role", record.Role, "requester", req.requesterDID)
 	return name, nil
+}
+
+func (b *Bidder) webrtcPort(name, userData string) (*guestseed.WebRTCOptions, error) {
+	if b.webrtcPorts == nil || b.cfg.GuestLANAddresses == nil || !guestseed.GuestBinariesNeeded(userData).WebRTC {
+		return nil, nil
+	}
+	addresses := b.cfg.GuestLANAddresses()
+	if len(addresses) == 0 {
+		b.log.Info("the bidder host has no LAN address; the guest's webrtc gets no forwarded LAN UDP port", "computevm", name)
+		return nil, nil
+	}
+	if b.synced.Load() {
+		live := map[string]bool{name: true}
+		for _, vm := range b.vms.Filter(func(v1alpha1.ComputeVM) bool { return true }) {
+			live[vm.Name] = true
+		}
+		for _, held := range b.webrtcPorts.Held() {
+			if !live[held] {
+				if err := b.webrtcPorts.Release(held); err != nil {
+					b.log.Warn("releasing the webrtc UDP port of a gone ComputeVM failed", "computevm", held, "err", err)
+				}
+			}
+		}
+	}
+	port, err := b.webrtcPorts.Allocate(name)
+	if err != nil {
+		return nil, fmt.Errorf("bidder: a webrtc UDP port for %s: %w", name, err)
+	}
+	if err := guestnet.ValidWebRTCUDPPort(port); err != nil {
+		_ = b.webrtcPorts.Release(name)
+		return nil, fmt.Errorf("bidder: %w", err)
+	}
+	b.log.Info("the guest's webrtc gets a forwarded LAN UDP port", "computevm", name, "port", port, "lanAddresses", len(addresses))
+	return &guestseed.WebRTCOptions{UDPPort: port, HostAddresses: addresses}, nil
+}
+
+func webrtcUDPPort(w *guestseed.WebRTCOptions) int32 {
+	if w == nil {
+		return 0
+	}
+	return int32(w.UDPPort)
 }
 
 func (b *Bidder) GuestHostURL() (string, int) {

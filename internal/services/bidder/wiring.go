@@ -111,6 +111,10 @@ func (s *Service) newBidder(intents contract.Intents) (*core.Bidder, error) {
 		return nil, err
 	}
 	guestNetwork := s.spec.GuestNetwork.EffectiveFor(s.spec.Policy)
+	ports, err := s.webrtcPorts()
+	if err != nil {
+		return nil, err
+	}
 	cfg := core.Config{
 		DID:                 s.did,
 		Workspace:           s.workspace,
@@ -128,6 +132,7 @@ func (s *Service) newBidder(intents contract.Intents) (*core.Bidder, error) {
 		GuestLoginMount:     DefaultGuestLoginMount,
 		GuestLANUDP:         guestNetwork.LANUDP,
 		GuestHostUDP:        guestNetwork.HostUDP,
+		GuestLANAddresses:   s.lanAddresses,
 		MaxConcurrentGuests: s.spec.MaxConcurrentGuests,
 		Heartbeat:           seconds(s.spec.HeartbeatIntervalSeconds),
 		OfferingRefresh:     seconds(s.spec.OfferingRefreshSeconds),
@@ -145,6 +150,7 @@ func (s *Service) newBidder(intents contract.Intents) (*core.Bidder, error) {
 		Vault:       s.guestVault(),
 		Guests:      guests{},
 		GuestEvents: s.guestEvents(),
+		WebRTCPorts: ports,
 		Tokens:      participant.NewTokens(s.minter(), DefaultCallTimeout),
 		HTTP:        s.egress.Client(DefaultCallTimeout),
 		Directory:   s.dir,

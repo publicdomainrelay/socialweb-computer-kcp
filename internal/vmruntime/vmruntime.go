@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestimage"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestnet"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 )
 
@@ -86,6 +87,8 @@ type VMSpec struct {
 	LANUDP bool `json:"lanUDP,omitempty"`
 
 	HostUDP bool `json:"hostUDP,omitempty"`
+
+	WebRTCUDPPort int `json:"webrtcUDPPort,omitempty"`
 }
 
 type Prepared struct {
@@ -98,6 +101,8 @@ type Prepared struct {
 	ImageDir  string `json:"imageDir"`
 	Vcpu      int    `json:"vcpu"`
 	MemMiB    int    `json:"memMiB"`
+
+	WebRTCAddresses []string `json:"webrtcAddresses,omitempty"`
 }
 
 type RuntimeRef struct {
@@ -182,6 +187,11 @@ func ValidateSpec(s VMSpec) error {
 	for _, p := range s.HostPorts {
 		if p <= 0 || p > 65535 {
 			return fmt.Errorf("vmruntime: VM %s names host port %d, which is not a TCP port", s.Name, p)
+		}
+	}
+	if s.WebRTCUDPPort != 0 {
+		if err := guestnet.ValidWebRTCUDPPort(s.WebRTCUDPPort); err != nil {
+			return fmt.Errorf("vmruntime: VM %s: %w", s.Name, err)
 		}
 	}
 	return nil

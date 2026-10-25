@@ -48,6 +48,8 @@ type Wiring struct {
 	LANUDP        bool     `json:"lanUDP"`
 	HostUDP       bool     `json:"hostUDP"`
 	HostAddresses []string `json:"hostAddresses"`
+
+	WebRTCUDPPort int `json:"webrtcUDPPort,omitempty"`
 }
 
 type VMExec struct {
@@ -57,9 +59,55 @@ type VMExec struct {
 	Console string   `json:"console"`
 }
 
-func Plan(hostPorts []int, lanUDP, hostUDP bool, hostAddresses []string) Wiring {
+func Plan(hostPorts []int, lanUDP, hostUDP bool, hostAddresses []string, webrtcUDPPort int) Wiring {
 	return Wiring{Tap: Tap, Bridge: Bridge, GuestAddress: GuestAddress, GuestMAC: GuestMAC, HostPorts: HostPorts(hostPorts),
-		LANUDP: lanUDP, HostUDP: hostUDP, HostAddresses: slices.Clone(hostAddresses)}
+		LANUDP: lanUDP, HostUDP: hostUDP, HostAddresses: slices.Clone(hostAddresses), WebRTCUDPPort: webrtcUDPPort}
+}
+
+func LANAddresses(hostAddresses []string) []string {
+	lan, err := ParsePrefixes(LANUDPPrefixes)
+	if err != nil {
+		return nil
+	}
+	own, err := ParsePrefixes(hostAddresses)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, p := range HostUDPPrefixes(own) {
+		a := p.Addr()
+		if slices.ContainsFunc(lan, func(l netip.Prefix) bool { return l.Contains(a) }) && !slices.Contains(out, a.String()) {
+			out = append(out, a.String())
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+func HostLANAddresses() ([]string, error) {
+	own, err := HostAddresses()
+	if err != nil {
+		return nil, err
+	}
+	return LANAddresses(own), nil
+}
+
+func ValidWebRTCUDPPort(port int) error {
+	if port < HighUDPMinPort || port > 65535 || slices.Contains(HighUDPClosedPorts, port) {
+		return fmt.Errorf("guestnet: webrtc UDP port %d is not a UDP port from %d to 65535 outside %v", port, HighUDPMinPort, HighUDPClosedPorts)
+	}
+	return nil
+}
+
+func PastaUDPForwards(port int, lanAddresses []string) []string {
+	if port == 0 {
+		return nil
+	}
+	var out []string
+	for _, a := range lanAddresses {
+		out = append(out, "-u", a+"/"+strconv.Itoa(port))
+	}
+	return out
 }
 
 func HostUDPPrefixes(own []netip.Prefix) []netip.Prefix {
@@ -134,7 +182,11 @@ func Netmask(prefix int) string {
 	return fmt.Sprintf("%d.%d.%d.%d", byte(mask>>24), byte(mask>>16), byte(mask>>8), byte(mask))
 }
 
-func PastaArgv(pasta string, child ...string) []string {
+func PastaArgv(pasta string, udpForwards []string, child ...string) []string {
+	udp := []string{"-u", "none"}
+	if len(udpForwards) > 0 {
+		udp = udpForwards
+	}
 	argv := []string{
 		pasta, "--config-net", "-q", "-f",
 		"-a", PastaAddress,
@@ -143,10 +195,10 @@ func PastaArgv(pasta string, child ...string) []string {
 		"--dns-forward", Gateway,
 		"--map-host-loopback", HostAddress,
 		"--no-map-gw",
-		"-t", "none", "-u", "none", "-T", "none", "-U", "none",
-		"--",
-		Shell, "-c", `exec "$0" "$@"`,
+		"-t", "none",
 	}
+	argv = append(argv, udp...)
+	argv = append(argv, "-T", "none", "-U", "none", "--", Shell, "-c", `exec "$0" "$@"`)
 	return append(argv, child...)
 }
 
@@ -187,6 +239,11 @@ func (w Wiring) Validate() error {
 	}
 	if len(w.HostAddresses) == 0 {
 		return fmt.Errorf("guestnet: the wiring names none of the host's addresses, so the fence could not keep the guest off them")
+	}
+	if w.WebRTCUDPPort != 0 {
+		if err := ValidWebRTCUDPPort(w.WebRTCUDPPort); err != nil {
+			return err
+		}
 	}
 	if _, err := ParsePrefixes(w.HostAddresses); err != nil {
 		return err
