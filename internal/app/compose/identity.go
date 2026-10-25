@@ -304,11 +304,15 @@ func (c *Composer) ApplyIdentitySpec(ctx context.Context, r Root, ws, name strin
 	return c.ApplyTyped(ctx, r, ws, MarketIdentityGVR, v1alpha1.GroupVersion.String(), KindMarketIdentity, obj)
 }
 
-func (c *Composer) ApplyOAuthIdentityEndpoints(ctx context.Context, r Root, snap Snapshot, ws, identity, exposure, role string) error {
-	raw, _ := snap.ExposureURL(exposure)
-	base := strings.TrimRight(raw, "/")
-	if base == "" {
-		return nil
+func (c *Composer) ApplyOAuthIdentityEndpoints(ctx context.Context, r Root, snap Snapshot, ws, identity, exposure, role string, configured v1alpha1.ApplicationIdentity) error {
+	clientID, redirectURI := strings.TrimSpace(configured.OAuthClientID), strings.TrimSpace(configured.OAuthRedirectURI)
+	if clientID == "" || redirectURI == "" {
+		raw, _ := snap.ExposureURL(exposure)
+		base := strings.TrimRight(raw, "/")
+		if base == "" {
+			return nil
+		}
+		clientID, redirectURI = cmp.Or(clientID, base+"/oauth-client-metadata.json"), cmp.Or(redirectURI, base+"/oauth/callback/"+role)
 	}
 	id, err := c.Identity(ctx, ws, identity)
 	if err != nil {
@@ -320,7 +324,7 @@ func (c *Composer) ApplyOAuthIdentityEndpoints(ctx context.Context, r Root, snap
 		return nil
 	}
 	u := NewDoc(v1alpha1.GroupVersion.String(), KindMarketIdentity, identity)
-	u["spec"] = map[string]any{"oauthClientID": base + "/oauth-client-metadata.json", "oauthRedirectURI": base + "/oauth/callback/" + role}
+	u["spec"] = map[string]any{"oauthClientID": clientID, "oauthRedirectURI": redirectURI}
 	return c.applyAs(ctx, r, r.IdentityManager(), ws, MarketIdentityGVR, u)
 }
 

@@ -143,6 +143,10 @@ type ApplicationIdentity struct {
 	Association AssociationMode `json:"association,omitempty"`
 
 	ApprovedAssociations []string `json:"approvedAssociations,omitempty" apigen:"listType=set"`
+
+	OAuthClientID string `json:"oauthClientID,omitempty" apigen:"userEndpoint"`
+
+	OAuthRedirectURI string `json:"oauthRedirectURI,omitempty" apigen:"userEndpoint"`
 }
 
 type MarketCommsMode string

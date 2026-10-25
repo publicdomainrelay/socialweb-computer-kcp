@@ -375,7 +375,7 @@ func (p *pass) account(ctx context.Context, plan compose.AccountPlan, id *v1alph
 	if err != nil {
 		return ctlruntime.Result{}, err
 	}
-	if err := c.ApplyOAuthIdentityEndpoints(ctx, r, snap, ws, RequesterIdentity, compose.ServiceNameFor(compose.ComponentKindRequester, RequesterComponent)+compose.ExposureIngressSuffix, "requester"); err != nil {
+	if err := c.ApplyOAuthIdentityEndpoints(ctx, r, snap, ws, RequesterIdentity, compose.ServiceNameFor(compose.ComponentKindRequester, RequesterComponent)+compose.ExposureIngressSuffix, "requester", o.Spec.Identity); err != nil {
 		return ctlruntime.Result{}, err
 	}
 	p.st.Did = id.Status.Did

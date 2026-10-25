@@ -534,7 +534,7 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 		return ctlruntime.Result{}, err
 	}
 	if err := c.ApplyOAuthIdentityEndpoints(ctx, r, snap, r.Workspace, marketrequester.RequesterIdentity,
-		compose.ServiceNameFor(compose.ComponentKindRequester, marketrequester.RequesterComponent)+compose.ExposureIngressSuffix, "requester"); err != nil {
+		compose.ServiceNameFor(compose.ComponentKindRequester, marketrequester.RequesterComponent)+compose.ExposureIngressSuffix, "requester", o.Spec.Identity); err != nil {
 		return ctlruntime.Result{}, err
 	}
 	p.st.Did = ident.Did

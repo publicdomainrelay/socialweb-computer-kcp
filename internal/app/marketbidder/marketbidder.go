@@ -459,7 +459,7 @@ func (p *pass) streams(ctx context.Context, plan compose.AccountPlan, localDID s
 
 func (p *pass) oauthEndpoints(ctx context.Context, snap compose.Snapshot) error {
 	return p.c.ApplyOAuthIdentityEndpoints(ctx, p.r, snap, p.r.Workspace, BidderIdentity,
-		compose.ServiceNameFor(compose.ComponentKindBidder, BidderComponent)+compose.ExposureIngressSuffix, "bidder")
+		compose.ServiceNameFor(compose.ComponentKindBidder, BidderComponent)+compose.ExposureIngressSuffix, "bidder", p.o.Spec.Identity)
 }
 
 func (p *pass) account(ctx context.Context, plan compose.AccountPlan, id *v1alpha1.MarketIdentity, mount string) (ctlruntime.Result, error) {
