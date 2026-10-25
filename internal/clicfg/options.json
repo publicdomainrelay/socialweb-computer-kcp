@@ -696,6 +696,62 @@
       "type": "boolean",
       "description": "internal ingress-relay: close a subscriber's registration when its subscribe service-auth token expires, as the market network's IngressProxy does (unset: a registration lives as long as its websocket)",
       "env": "SOCIALWEB_INGRESS_RELAY_EXPIRE_SESSIONS"
+    },
+    "atproto-relay-listen": {
+      "type": "string",
+      "description": "internal atproto-relay: the TCP listen address of the atproto relay",
+      "env": "SOCIALWEB_ATPROTO_RELAY_LISTEN",
+      "default": "127.0.0.1:2584"
+    },
+    "atproto-relay-public-url": {
+      "type": "string",
+      "description": "internal atproto-relay: the relay's public origin (https://<host>); its host is the relay's did:web and describeServer did",
+      "env": "SOCIALWEB_ATPROTO_RELAY_PUBLIC_URL"
+    },
+    "atproto-relay-plc-url": {
+      "type": "string",
+      "description": "internal atproto-relay: the PLC directory that resolves the signing keys of crawled repos",
+      "env": "SOCIALWEB_ATPROTO_RELAY_PLC_URL",
+      "default": "https://plc.directory"
+    },
+    "atproto-relay-allowed-hosts": {
+      "type": "string",
+      "description": "internal atproto-relay: comma-separated PDS hosts requestCrawl accepts, exact or *.<suffix> (unset or *: every host)",
+      "env": "SOCIALWEB_ATPROTO_RELAY_ALLOWED_HOSTS"
+    },
+    "atproto-relay-seed-hosts": {
+      "type": "string",
+      "description": "internal atproto-relay: a listHosts answer ({hosts: [...]}) whose hosts the relay adds as idle known hosts at start (unset: <state-dir>/seed-hosts.json when it exists)",
+      "env": "SOCIALWEB_ATPROTO_RELAY_SEED_HOSTS"
+    },
+    "atproto-relay-recrawl-window": {
+      "type": "string",
+      "description": "internal atproto-relay: at start the relay crawls again every known host that was active, and every idle host last seen within this window (Go duration; 0: active hosts only)",
+      "env": "SOCIALWEB_ATPROTO_RELAY_RECRAWL_WINDOW",
+      "default": "72h"
+    },
+    "atproto-relay-idle-after": {
+      "type": "string",
+      "description": "internal atproto-relay: a crawled host that fails to connect or drops at once for this long goes idle until its next requestCrawl (Go duration; 0: retry forever)",
+      "env": "SOCIALWEB_ATPROTO_RELAY_IDLE_AFTER",
+      "default": "1h"
+    },
+    "atproto-relay-max-backlog": {
+      "type": "number",
+      "description": "internal atproto-relay: the subscribeRepos frames kept in memory for cursor replay (and at most 64 MiB)",
+      "env": "SOCIALWEB_ATPROTO_RELAY_MAX_BACKLOG",
+      "default": 50000
+    },
+    "atproto-relay-start-seq": {
+      "type": "number",
+      "description": "internal atproto-relay: the lowest seq the relay's firehose continues from, so subscribers of a relay it replaces keep a valid cursor (the persisted seq wins when higher)",
+      "env": "SOCIALWEB_ATPROTO_RELAY_START_SEQ",
+      "default": 0
+    },
+    "atproto-relay-insecure-http": {
+      "type": "boolean",
+      "description": "internal atproto-relay: crawl PDS hosts over http and ws instead of https and wss (local runs only)",
+      "env": "SOCIALWEB_ATPROTO_RELAY_INSECURE_HTTP"
     }
   }
 }

@@ -13,6 +13,7 @@ import (
 )
 
 type diskState struct {
+	Seq         int64                 `json:"seq,omitempty"`
 	Hosts       []atrelay.HostInfo    `json:"hosts"`
 	Accounts    []atrelay.AccountInfo `json:"accounts"`
 	Collections map[string][]string   `json:"collections"`
@@ -26,6 +27,8 @@ type fileStore struct {
 	dirty       atomic.Bool
 	writeMu     sync.Mutex
 	changed     func()
+	seq         int64
+	head        func() int64
 }
 
 var _ atrelay.Store = (*fileStore)(nil)
@@ -50,6 +53,7 @@ func openFileStore(path string) (*fileStore, error) {
 	if err := json.Unmarshal(body, &state); err != nil {
 		return nil, err
 	}
+	store.seq = state.Seq
 	for _, host := range state.Hosts {
 		store.MemoryStore.PutHost(host)
 	}
@@ -104,8 +108,12 @@ func (s *fileStore) flush() error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 	state := diskState{
+		Seq:      s.seq,
 		Hosts:    s.ListHosts(),
 		Accounts: s.ListAccounts(),
+	}
+	if s.head != nil {
+		state.Seq = max(state.Seq, s.head())
 	}
 	s.mu.Lock()
 	if len(s.collections) > 0 {

@@ -2,6 +2,7 @@ package relay
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -20,6 +21,8 @@ import (
 	"github.com/gorilla/websocket"
 	cbg "github.com/whyrusleeping/cbor-gen"
 )
+
+const StableConnection = time.Minute
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin:     func(*http.Request) bool { return true },
@@ -48,6 +51,12 @@ func (s *hostSub) stop() {
 	s.mu.Unlock()
 }
 
+func (s *hostSub) connected() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.ws != nil && s.ctx.Err() == nil
+}
+
 func (s *hostSub) setConn(conn *websocket.Conn) {
 	s.mu.Lock()
 	s.ws = conn
@@ -72,10 +81,23 @@ func (r *Relay) RequestCrawl(ctx context.Context, hostname string) error {
 		return ErrClosed
 	}
 	old := r.subs[hostname]
+	if old != nil && old.did == did && old.connected() {
+		r.mu.Unlock()
+		r.updateHost(hostname, func(h *HostInfo) {
+			h.State = HostActive
+			h.LastSeen = time.Now().UnixMilli()
+		})
+		r.log.Info("crawl_kept", "hostname", hostname, "did", did)
+		return nil
+	}
 	delete(r.subs, hostname)
 	r.mu.Unlock()
 	if old != nil {
 		old.stop()
+	}
+	if known, ok := r.store.GetHost(hostname); ok && known.DID != "" && known.DID != did {
+		r.updateHost(hostname, func(h *HostInfo) { h.Cursor = nil })
+		r.log.Info("crawl_host_did_changed", "hostname", hostname, "was", known.DID, "did", did)
 	}
 
 	subCtx, cancel := context.WithCancel(r.ctx)
@@ -153,51 +175,93 @@ func (r *Relay) updateHost(hostname string, f func(*HostInfo)) {
 }
 
 func (s *hostSub) run() {
-	var cursor int64
-	if account, ok := s.relay.store.GetAccount(s.did); ok && account.Seq != nil {
-		cursor = *account.Seq
-	}
+	cursor := s.startCursor()
 	attempt := 0
+	var failingSince time.Time
 	for {
 		if s.ctx.Err() != nil {
 			return
 		}
 		conn, err := s.dial(cursor)
 		if err != nil {
-			s.relay.log.Warn("pds_connect_failed", "hostname", s.hostname, "err", err)
+			s.relay.log.Warn("pds_connect_failed", "hostname", s.hostname, "cursor", cursor, "err", err)
 			s.recordRetry()
+			failingSince = cmp.Or(failingSince, time.Now())
+			if s.giveUp(failingSince) {
+				return
+			}
 			attempt++
 			s.sleep(attempt)
 			continue
 		}
 		s.setConn(conn)
-		now := time.Now().UnixMilli()
+		connectedAt := time.Now()
 		s.relay.updateHost(s.hostname, func(h *HostInfo) {
 			h.DID = s.did
 			h.State = HostActive
-			h.LastSeen = now
+			h.LastSeen = connectedAt.UnixMilli()
+			h.ConnectedAt = new(connectedAt.UnixMilli())
 			h.RetryCount = 0
 		})
-		s.relay.log.Info("pds_connected", "hostname", s.hostname)
+		s.relay.log.Info("pds_connected", "hostname", s.hostname, "cursor", cursor)
 		err = s.readLoop(conn)
 		_ = conn.Close()
 		s.setConn(nil)
 		if s.ctx.Err() != nil {
 			return
 		}
-		if errors.Is(err, ErrFutureCursor) {
-			s.relay.updateHost(s.hostname, func(h *HostInfo) { h.State = HostIdle })
-			return
+		if errors.Is(err, ErrFutureCursor) && cursor > 0 {
+			s.relay.log.Warn("pds_future_cursor", "hostname", s.hostname, "cursor", cursor)
+			s.relay.updateHost(s.hostname, func(h *HostInfo) { h.Cursor = nil })
+			s.seq.Store(0)
+			cursor, attempt, failingSince = 0, 0, time.Time{}
+			continue
 		}
 		s.relay.log.Info("pds_disconnected", "hostname", s.hostname, "err", err)
 		updated := s.seq.Load()
-		if updated > cursor {
-			cursor = updated
-			attempt = 0
+		if updated > cursor || time.Since(connectedAt) >= StableConnection {
+			failingSince, attempt = time.Now(), 0
+		} else {
+			failingSince = cmp.Or(failingSince, connectedAt)
+		}
+		cursor = max(cursor, updated)
+		if s.giveUp(failingSince) {
+			return
 		}
 		attempt++
 		s.sleep(attempt)
 	}
+}
+
+func (s *hostSub) startCursor() int64 {
+	if h, ok := s.relay.store.GetHost(s.hostname); ok && h.Cursor != nil {
+		return *h.Cursor
+	}
+	return 0
+}
+
+func (s *hostSub) giveUp(failingSince time.Time) bool {
+	after := s.relay.cfg.IdleAfter
+	if after <= 0 || time.Since(failingSince) < after {
+		return false
+	}
+	s.relay.updateHost(s.hostname, func(h *HostInfo) { h.State = HostIdle })
+	s.relay.log.Warn("pds_idle", "hostname", s.hostname, "failingFor", time.Since(failingSince).Round(time.Second).String())
+	s.relay.dropSub(s)
+	return true
+}
+
+func (r *Relay) dropSub(s *hostSub) {
+	r.mu.Lock()
+	if r.subs[s.hostname] == s {
+		delete(r.subs, s.hostname)
+	}
+	r.mu.Unlock()
+	s.cancel()
+}
+
+func (r *Relay) SetHostState(hostname string, state HostState) {
+	r.updateHost(hostname, func(h *HostInfo) { h.State = state })
 }
 
 func (s *hostSub) recordRetry() {

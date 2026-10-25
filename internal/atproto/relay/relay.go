@@ -43,6 +43,8 @@ type Config struct {
 	DisableVerify bool
 	StrictVerify  bool
 	MaxBacklog    int
+	StartSeq      int64
+	IdleAfter     time.Duration
 	AllowedDIDs   []string
 	AllowedHosts  []string
 	HTTPClient    *http.Client
@@ -124,6 +126,7 @@ func New(ctx context.Context, cfg Config) *Relay {
 		cancel:     cancel,
 		subs:       map[string]*hostSub{},
 	}
+	r.seq.Resume(cfg.StartSeq)
 	r.verify = &verifier{dir: dir, log: r.log}
 	r.handler = withCORS(http.HandlerFunc(r.serveHTTP))
 	return r
@@ -330,7 +333,7 @@ func (r *Relay) handleGetRepo(w http.ResponseWriter, req *http.Request) {
 	}
 	account, ok := r.store.GetAccount(did)
 	if !ok {
-		httpjson.Write(w, http.StatusNotFound, map[string]string{"error": "RepoNotFound"})
+		writeError(w, http.StatusNotFound, "RepoNotFound", "unknown DID")
 		return
 	}
 	target := "https://" + account.HostHostname + "/xrpc/com.atproto.sync.getRepo?did=" + url.QueryEscape(did)
@@ -459,8 +462,13 @@ func (r *Relay) hostAllowed(hostname string) bool {
 	if len(r.cfg.AllowedHosts) == 0 {
 		return true
 	}
+	hostname = strings.ToLower(hostname)
 	for _, h := range r.cfg.AllowedHosts {
+		h = strings.ToLower(strings.TrimSpace(h))
 		if h == "*" || h == hostname {
+			return true
+		}
+		if suffix, ok := strings.CutPrefix(h, "*."); ok && strings.HasSuffix(hostname, "."+suffix) {
 			return true
 		}
 	}

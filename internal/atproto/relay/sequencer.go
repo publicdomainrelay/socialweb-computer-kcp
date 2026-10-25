@@ -59,6 +59,14 @@ func (s *Sequencer) Append(frame Frame) Frame {
 	return frame
 }
 
+func (s *Sequencer) Resume(head int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if head > s.seq {
+		s.seq = head
+	}
+}
+
 func (s *Sequencer) Head() int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()

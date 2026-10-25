@@ -26,6 +26,8 @@ const (
 	MinCrawlBackoff = time.Second
 
 	MaxCrawlBackoff = 30 * time.Second
+
+	RecrawlParallel = 8
 )
 
 type Config struct {
@@ -42,6 +44,18 @@ type Config struct {
 	CrawlInterval time.Duration
 
 	TLS *tls.Config
+
+	SeedHostsFile string
+
+	Recrawl bool
+
+	RecrawlWindow time.Duration
+
+	IdleAfter time.Duration
+
+	MaxBacklog int
+
+	StartSeq int64
 }
 
 type Deps struct {
@@ -93,6 +107,17 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Relay, error) {
 		r.flush = debounce.New(FlushDelay, r.flushFile)
 		fs.changed = r.flush.Mark
 	}
+	if path := strings.TrimSpace(cfg.SeedHostsFile); path != "" {
+		added, err := seedHosts(r.store, path)
+		if err != nil {
+			return nil, err
+		}
+		log.Info("relay_seed_hosts", "path", path, "added", added)
+	}
+	startSeq := cfg.StartSeq
+	if r.file != nil {
+		startSeq = max(startSeq, r.file.seq)
+	}
 	var directory identity.Directory
 	plcURL := strings.TrimSuffix(strings.TrimSpace(cfg.PLCURL), "/")
 	if plcURL != "" && deps.HTTPClient != nil {
@@ -115,7 +140,13 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Relay, error) {
 		HTTPClient:   deps.HTTPClient,
 		DialContext:  deps.DialContext,
 		TLSConfig:    cfg.TLS,
+		MaxBacklog:   cfg.MaxBacklog,
+		StartSeq:     startSeq,
+		IdleAfter:    cfg.IdleAfter,
 	})
+	if r.file != nil {
+		r.file.head = r.core.Sequencer().Head
+	}
 	return r, nil
 }
 
@@ -158,6 +189,9 @@ func (r *Relay) Run(ctx context.Context) error {
 		r.startLocked(hostname)
 	}
 	r.mu.Unlock()
+	if r.cfg.Recrawl {
+		r.recrawl(ctx)
+	}
 	if r.cfg.CrawlInterval > 0 {
 		r.refresh(ctx, r.cfg.CrawlInterval)
 	} else {
@@ -229,6 +263,51 @@ func (r *Relay) crawl(ctx context.Context, hostname string) {
 		if !clock.Sleep(ctx, backoff) {
 			return
 		}
+	}
+}
+
+func (r *Relay) recrawl(ctx context.Context) {
+	cutoff := time.Now().Add(-r.cfg.RecrawlWindow).UnixMilli()
+	known := r.store.ListHosts()
+	var due []string
+	r.mu.Lock()
+	for _, h := range known {
+		if _, managed := r.hosts[h.Hostname]; managed {
+			continue
+		}
+		switch h.State {
+		case atrelay.HostTakedown:
+		case atrelay.HostIdle:
+			if r.cfg.RecrawlWindow > 0 && h.LastSeen >= cutoff {
+				due = append(due, h.Hostname)
+			}
+		default:
+			due = append(due, h.Hostname)
+		}
+	}
+	r.mu.Unlock()
+	r.log.Info("relay_recrawl", "known", len(known), "due", len(due), "window", r.cfg.RecrawlWindow.String())
+	slots := make(chan struct{}, RecrawlParallel)
+	for _, hostname := range due {
+		r.crawls.Go(func() {
+			select {
+			case slots <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
+			defer func() { <-slots }()
+			reqCtx, cancel := context.WithTimeout(ctx, CrawlTimeout)
+			err := r.core.RequestCrawl(reqCtx, hostname)
+			cancel()
+			if err != nil {
+				if ctx.Err() == nil {
+					r.core.SetHostState(hostname, atrelay.HostIdle)
+					r.log.Warn("relay_recrawl_failed", "hostname", hostname, "err", err)
+				}
+				return
+			}
+			r.log.Info("relay_recrawl_started", "hostname", hostname)
+		})
 	}
 }
 
