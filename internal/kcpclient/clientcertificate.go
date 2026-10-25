@@ -127,7 +127,57 @@ func (c *Client) CertificateState(ctx context.Context, did, cluster, serial stri
 	case <-ctx.Done():
 		return CertificateState{}, ctx.Err()
 	}
-	return w.state(CertSerialKey(serial)), nil
+	if st := w.state(CertSerialKey(serial)); st.Present {
+		return st, nil
+	}
+	st, err := c.readCertificate(ctx, w.home, serial)
+	if err != nil {
+		return CertificateState{}, err
+	}
+	if st.Present {
+		c.dropCertWatch(w)
+		slog.Info("kcpclient: a certificate record its watch had not seen was read directly; the watch starts again", "home", w.home,
+			"record", ClusterClientCertificateName(serial))
+	}
+	return st, nil
+}
+
+func (c *Client) readCertificate(ctx context.Context, home, serial string) (CertificateState, error) {
+	r, err := c.resource(home, socialwebResource)
+	if err != nil {
+		return CertificateState{}, err
+	}
+	name := ClusterClientCertificateName(serial)
+	raw, err := r.Get().Resource(clusterClientCertificates).Name(name).DoRaw(ctx)
+	switch {
+	case apierrors.IsNotFound(err):
+		return CertificateState{}, nil
+	case err != nil:
+		return CertificateState{}, fmt.Errorf("kcpclient: read the certificate record %s in %s: %w", name, home, err)
+	}
+	var rec v1alpha1.ClusterClientCertificate
+	if err := json.Unmarshal(raw, &rec); err != nil {
+		return CertificateState{}, fmt.Errorf("kcpclient: decode the certificate record %s in %s: %w", name, home, err)
+	}
+	if CertSerialKey(rec.Spec.Serial) != CertSerialKey(serial) {
+		return CertificateState{}, nil
+	}
+	return CertificateState{Present: true, Revoked: rec.Spec.Revoked}, nil
+}
+
+func (c *Client) dropCertWatch(w *certWatch) {
+	c.certMu.Lock()
+	if c.certWatches[w.home] == w {
+		delete(c.certWatches, w.home)
+	}
+	c.certMu.Unlock()
+	w.mu.Lock()
+	idle := w.idle
+	w.mu.Unlock()
+	if idle != nil {
+		idle.Stop()
+	}
+	w.cancel()
 }
 
 type certWatch struct {

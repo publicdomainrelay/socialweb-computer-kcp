@@ -69,6 +69,7 @@ var pathPattern = regexp.MustCompile(`^/clusters/root:([a-z0-9]+):([a-z0-9]([a-z
 type Records interface {
 	CertificateState(ctx context.Context, did, cluster, serial string) (kcpclient.CertificateState, error)
 	FollowClusterGate(ctx context.Context, home, name string, on func(kcpclient.ClusterGate)) error
+	ClusterGate(ctx context.Context, home, name string) (kcpclient.ClusterGate, error)
 }
 
 type Config struct {
@@ -442,6 +443,9 @@ func rewrite(pr *httputil.ProxyRequest, front, rest string) {
 
 func (s *server) admitGate(ctx context.Context, account, home, cluster string) (string, int, string) {
 	g, err := s.gateFor(ctx, home, cluster)
+	if err == nil && g.Account == "" {
+		g = s.gateMissed(ctx, home, cluster)
+	}
 	switch {
 	case err != nil:
 		return "", http.StatusServiceUnavailable, "cluster state: " + err.Error()
@@ -451,6 +455,29 @@ func (s *server) admitGate(ctx context.Context, account, home, cluster string) (
 		return g.Account, http.StatusServiceUnavailable, "the cluster is not serving"
 	}
 	return g.Account, 0, ""
+}
+
+func (s *server) gateMissed(ctx context.Context, home, cluster string) kcpclient.ClusterGate {
+	g, err := s.c.Records.ClusterGate(ctx, home, cluster)
+	if err != nil {
+		s.log.Debug("the Cluster watch names no cluster and the direct read failed", "home", home, "err", err.Error())
+		return kcpclient.ClusterGate{}
+	}
+	if g.Account == "" {
+		return g
+	}
+	s.mu.Lock()
+	w := s.gates[home]
+	if w != nil {
+		delete(s.gates, home)
+	}
+	s.mu.Unlock()
+	if w != nil {
+		w.idle.Stop()
+		w.cancel()
+		s.log.Info("the Cluster watch had not seen a Cluster its home holds; the watch starts again", "home", home)
+	}
+	return g
 }
 
 func (s *server) gateFor(ctx context.Context, home, cluster string) (kcpclient.ClusterGate, error) {

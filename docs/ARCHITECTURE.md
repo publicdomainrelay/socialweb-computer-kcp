@@ -1271,6 +1271,12 @@ trusts is its own `client-auth-proxy`, held by the front.
   `socialweb.computer:cluster-owners`). A bearer MUST be forwarded unchanged to the cluster's own
   front and is authenticated by k3s alone; the front adds only the cluster gate and the deny lookup.
   Both MUST pass the cluster gate of section 6. No JWKS, no `--authentication-config`.
+  The front follows a home's `ClusterClientCertificate` records and its `Cluster` with watches by
+  workspace path. A Cluster deleted and created again under the same name gets a new home logical
+  cluster that those watches never see (read on dev: every certificate of the new cluster was 401 "no
+  ClusterClientCertificate for this serial" until the watch went idle). So a serial the record watch
+  does not hold, and a Cluster the gate watch does not hold, is read once directly; when the read finds
+  it, the answer comes from that read and the watch starts again.
 - **ServiceAccount tokens via TokenRequest** for the machine class.
 - **The DID to ServiceAccount mapping** is the tenancy boundary, and it has exactly ONE spelling: a
   DID's ServiceAccount is `did-` plus the lowercased unpadded base32 of the DID
