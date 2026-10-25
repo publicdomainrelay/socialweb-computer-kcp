@@ -21,6 +21,7 @@ import (
 	cid "github.com/ipfs/go-cid"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	v1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
@@ -239,13 +240,29 @@ func (h *marketHandler) deliverOp(ctx context.Context, event events.Event, adapt
 	if err != nil {
 		return fmt.Errorf("eventstream: fetching the market record %s: %w", uri, err)
 	}
-	if !h.addressees.addressed(ctx, collection, event.Repo, value) {
+	owner, ok := h.addressees.owner(ctx, collection, event.Repo, value, func(ctx context.Context, receiptURI string) (map[string]any, error) {
+		return h.fetchReceipt(ctx, event.Source, receiptURI)
+	})
+	if !ok {
 		return ctx.Err()
 	}
-	return h.createSync(ctx, adapter, event.Repo, uri, recordCID, collection, value)
+	return h.createSync(ctx, adapter, event.Repo, uri, recordCID, collection, value, owner)
 }
 
-func (h *marketHandler) createSync(ctx context.Context, adapter, did, uri, cid, collection string, record map[string]any) error {
+func (h *marketHandler) fetchReceipt(ctx context.Context, source, receiptURI string) (map[string]any, error) {
+	aturi, err := syntax.ParseATURI(receiptURI)
+	if err != nil {
+		return nil, err
+	}
+	repo, err := syntax.ParseDID(aturi.Authority().String())
+	if err != nil {
+		return nil, err
+	}
+	value, _, err := h.fetchMarketRecord(ctx, source, repo, aturi.Collection().String(), aturi.RecordKey().String(), nil)
+	return value, err
+}
+
+func (h *marketHandler) createSync(ctx context.Context, adapter, did, uri, cid, collection string, record map[string]any, owner *market.ContractRef) error {
 	payload, err := json.Marshal(marketPayload{DID: did, URI: uri, CID: cid, Collection: collection, Record: record})
 	if err != nil {
 		return fmt.Errorf("eventstream: encoding the market payload for %s: %w", uri, err)
@@ -258,6 +275,7 @@ func (h *marketHandler) createSync(ctx context.Context, adapter, did, uri, cid, 
 				marketInboxLabel:      "true",
 				marketCollectionLabel: collection,
 			},
+			OwnerReferences: contractOwners(owner),
 		},
 		Spec: v1alpha1.StateSyncSpec{
 			Sink:           v1alpha1.StateSyncSink{Adapter: adapter},
@@ -417,6 +435,13 @@ func (h *marketHandler) httpClient() *http.Client {
 		return h.client
 	}
 	return httpClientWithFallback(nil, nil)
+}
+
+func contractOwners(owner *market.ContractRef) []metav1.OwnerReference {
+	if owner == nil || owner.Name == "" || owner.UID == "" {
+		return nil
+	}
+	return []metav1.OwnerReference{{APIVersion: v1alpha1.GroupVersion.String(), Kind: "ComputeContract", Name: owner.Name, UID: types.UID(owner.UID)}}
 }
 
 func marketSyncName(uri, cid string) string {

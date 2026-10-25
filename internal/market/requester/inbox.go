@@ -92,10 +92,10 @@ func bidInboxName(uri, cid string) string {
 	return bidInboxPrefix + hex.EncodeToString(sum[:16])
 }
 
-func mailbox(name, label, adapter, key string, payload []byte) v1alpha1.StateSync {
+func mailbox(name, label, adapter, key string, payload []byte, owner v1alpha1.ComputeContract) v1alpha1.StateSync {
 	return v1alpha1.StateSync{
 		TypeMeta:   metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: contractmarket.KindStateSync},
-		ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{label: "true"}},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{label: "true"}, OwnerReferences: contractOwners(owner)},
 		Spec: v1alpha1.StateSyncSpec{
 			Sink:           v1alpha1.StateSyncSink{Adapter: adapter},
 			Direction:      v1alpha1.StateSyncDirectionOutbound,
@@ -132,19 +132,24 @@ func (q *Requester) storeBidMailbox(ctx context.Context, did, uri, cid string, r
 	if uri == "" || cid == "" {
 		return errors.New("requester: the bid ref is incomplete")
 	}
+	owner, ok := q.recordOwner(ctx, market.BidNSID, did, record)
+	if !ok {
+		q.log.Debug("requester_bid_not_ours", "bid", uri)
+		return nil
+	}
 	payload, err := json.Marshal(bidInboxPayload{DID: did, URI: uri, CID: cid, Record: record})
 	if err != nil {
 		return err
 	}
-	return q.createMailbox(ctx, mailbox(bidInboxName(uri, cid), bidInboxLabel, BidInboxAdapter, "bid:"+uri+"#"+cid, payload))
+	return q.createMailbox(ctx, mailbox(bidInboxName(uri, cid), bidInboxLabel, BidInboxAdapter, "bid:"+uri+"#"+cid, payload, owner))
 }
 
-func (q *Requester) storeInboxEvent(ctx context.Context, event v1alpha1.ComputeContractEvent) error {
+func (q *Requester) storeInboxEvent(ctx context.Context, event v1alpha1.ComputeContractEvent, owner v1alpha1.ComputeContract) error {
 	payload, err := json.Marshal(inboxEventPayload{Event: event})
 	if err != nil {
 		return err
 	}
-	return q.createMailbox(ctx, mailbox(inboxName(event), inboxLabel, InboxAdapter, "inbox:"+event.URI+"#"+event.CID, payload))
+	return q.createMailbox(ctx, mailbox(inboxName(event), inboxLabel, InboxAdapter, "inbox:"+event.URI+"#"+event.CID, payload, owner))
 }
 
 func (q *Requester) processBidMailbox(ctx context.Context, item v1alpha1.StateSync) time.Duration {
@@ -299,15 +304,20 @@ func (q *Requester) appendPending(ctx context.Context, contract v1alpha1.Compute
 	return true, nil
 }
 
-func (q *Requester) enqueueEvent(ctx context.Context, event v1alpha1.ComputeContractEvent) error {
+func (q *Requester) enqueueEvent(ctx context.Context, event v1alpha1.ComputeContractEvent, author string, record map[string]any) error {
 	if event.URI == "" || event.CID == "" || event.ReceiptURI == "" {
 		return errors.New("requester: the event ref is incomplete")
 	}
 	q.pendingMu.Lock()
 	contract, ok := q.contractForReceiptURI(event.ReceiptURI)
 	if !ok {
-		defer q.pendingMu.Unlock()
-		return q.storeInboxEvent(ctx, event)
+		q.pendingMu.Unlock()
+		owner, ours := q.recordOwner(ctx, market.EventNSID, author, record)
+		if !ours {
+			q.log.Debug("requester_event_not_ours", "event", event.URI, "receipt", event.ReceiptURI)
+			return nil
+		}
+		return q.storeInboxEvent(ctx, event, owner)
 	}
 	_, err := q.appendPending(ctx, contract, event, errors.New("requester: the pending event inbox is full"))
 	q.pendingMu.Unlock()
@@ -607,8 +617,10 @@ func (a *marketInbox) Apply(ctx context.Context, request participant.OutboxReque
 			return participant.Observation{}, fmt.Errorf("requester: the inbox event is invalid: %w", err)
 		}
 		event := v1alpha1.ComputeContractEvent{URI: payload.URI, CID: payload.CID, ReceiptURI: envelope.Receipt.URI, ReceivedAt: q.nowISO()}
-		if err := q.storeInboxEvent(ctx, event); err != nil {
-			return participant.Observation{}, err
+		if owner, ok := q.recordOwner(ctx, market.EventNSID, payload.DID, payload.Record); ok {
+			if err := q.storeInboxEvent(ctx, event, owner); err != nil {
+				return participant.Observation{}, err
+			}
 		}
 	}
 	q.inboxed.Store(inboxKey(request), true)

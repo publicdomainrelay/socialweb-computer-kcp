@@ -4,46 +4,34 @@ import (
 	"cmp"
 	"strings"
 
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
+
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 )
+
+type ContractRef struct {
+	Name string
+
+	UID string
+}
 
 type Addressees struct {
 	DIDs map[string]bool
 
-	OpenRFPs map[string]bool
+	RFPs map[string]ContractRef
 
-	ClosedRFPs map[string]bool
+	Accepts map[string]ContractRef
 
-	Accepts map[string]bool
+	Receipts map[string]ContractRef
 
-	Receipts map[string]bool
-
-	Counterparts map[string]bool
+	Winners map[string]bool
 
 	Awaiting map[string]bool
-
-	Collecting bool
 }
 
-func newAddressees(dids []string) *Addressees {
-	a := &Addressees{DIDs: map[string]bool{}, OpenRFPs: map[string]bool{}, ClosedRFPs: map[string]bool{}, Accepts: map[string]bool{},
-		Receipts: map[string]bool{}, Counterparts: map[string]bool{}, Awaiting: map[string]bool{}}
-	for _, did := range dids {
-		a.addDID(did)
-	}
-	return a
-}
-
-func (a *Addressees) addDID(did string) {
-	if did = strings.TrimSpace(did); strings.HasPrefix(did, "did:") {
-		a.DIDs[did] = true
-	}
-}
-
-func (a *Addressees) addURI(set map[string]bool, uri string) {
-	if uri = strings.TrimSpace(uri); uri != "" {
-		set[uri] = true
-	}
+func newAddressees() *Addressees {
+	return &Addressees{DIDs: map[string]bool{}, RFPs: map[string]ContractRef{}, Accepts: map[string]ContractRef{},
+		Receipts: map[string]ContractRef{}, Winners: map[string]bool{}, Awaiting: map[string]bool{}}
 }
 
 func RequesterContractDone(contract v1alpha1.ComputeContract) bool {
@@ -59,78 +47,92 @@ func RequesterContractDone(contract v1alpha1.ComputeContract) bool {
 	return terminal
 }
 
-func RequesterAddresseesOf(contracts []v1alpha1.ComputeContract, live bool, dids ...string) *Addressees {
-	a := newAddressees(dids)
+type ContractRefs struct {
+	RFP string
+
+	Accept string
+
+	Receipt string
+
+	Winner string
+}
+
+func RefsOfContract(state *v1alpha1.NodeClaimContract) ContractRefs {
+	var refs ContractRefs
+	if state == nil {
+		return refs
+	}
+	refs.RFP = state.RFPURI
+	if state.RFP != nil {
+		refs.RFP = cmp.Or(state.RFP.URI, refs.RFP)
+	}
+	refs.Accept = state.AcceptURI
+	if state.Accept != nil {
+		refs.Accept = cmp.Or(state.Accept.URI, refs.Accept)
+	}
+	refs.Receipt = state.ReceiptURI
+	if state.Receipt != nil {
+		refs.Receipt = cmp.Or(state.Receipt.URI, refs.Receipt)
+	}
+	if state.Bid != nil {
+		refs.Winner = ATURIAuthority(state.Bid.URI)
+	}
+	if refs.Winner == "" && state.Winner != nil {
+		refs.Winner = state.Winner.DID
+	}
+	return refs
+}
+
+func (a *Addressees) Add(ref ContractRef, refs ContractRefs, open bool) {
+	if refs.RFP != "" && open {
+		a.RFPs[refs.RFP] = ref
+	}
+	if refs.Accept != "" {
+		a.Accepts[refs.Accept] = ref
+		if refs.Winner != "" {
+			a.Winners[refs.Winner] = true
+			if refs.Receipt == "" {
+				a.Awaiting[refs.Winner] = true
+			}
+		}
+	}
+	if refs.Receipt != "" {
+		a.Receipts[refs.Receipt] = ref
+	}
+}
+
+func RequesterContractSettled(contract v1alpha1.ComputeContract) bool {
+	if RequesterContractDone(contract) {
+		return true
+	}
+	return contract.Status.Phase == v1alpha1.ComputeContractReleased &&
+		apimeta.IsStatusConditionTrue(contract.Status.Conditions, v1alpha1.ComputeContractConditionReleaseAcknowledged)
+}
+
+func RequesterContractEnded(contract v1alpha1.ComputeContract) bool {
+	return contract.Status.Phase == v1alpha1.ComputeContractReleased || contract.Status.Phase == v1alpha1.ComputeContractFailed
+}
+
+func RequesterAddresseesOf(contracts []v1alpha1.ComputeContract, skip func(v1alpha1.ComputeContract) bool) *Addressees {
+	a := newAddressees()
 	for _, contract := range contracts {
-		done := RequesterContractDone(contract)
-		state := contract.Status.Contract
-		if state == nil {
-			if !done && contract.DeletionTimestamp == nil {
-				a.Collecting = true
-			}
+		if skip != nil && skip(contract) {
 			continue
 		}
-		rfp := state.RFPURI
-		if state.RFP != nil {
-			rfp = cmp.Or(state.RFP.URI, rfp)
-		}
-		if rfp != "" {
-			a.addDID(ATURIAuthority(rfp))
-		}
-		a.addDID(state.RequesterDid)
-		a.addDID(state.MarketDid)
-		accept := state.AcceptURI
-		if state.Accept != nil {
-			accept = cmp.Or(state.Accept.URI, accept)
-		}
-		receipt := state.ReceiptURI
-		if state.Receipt != nil {
-			receipt = cmp.Or(state.Receipt.URI, receipt)
-		}
-		accepted := accept != "" || receipt != ""
-		if live && done {
-			a.addURI(a.ClosedRFPs, rfp)
-			continue
-		}
-		if accepted || done {
-			a.addURI(a.ClosedRFPs, rfp)
-		} else {
-			a.Collecting = true
-			a.addURI(a.OpenRFPs, rfp)
-		}
-		a.addURI(a.Accepts, accept)
-		a.addURI(a.Receipts, receipt)
-		winner := ""
-		if state.Winner != nil {
-			winner = state.Winner.DID
-		}
-		if winner == "" && contract.Status.Chosen != nil {
-			winner = contract.Status.Chosen.Did
-		}
-		if winner == "" && state.Bid != nil {
-			winner = ATURIAuthority(state.Bid.URI)
-		}
-		for _, bid := range contract.Status.Bids {
-			if bid.Did != "" {
-				a.Counterparts[bid.Did] = true
-			}
-		}
-		if winner != "" {
-			a.Counterparts[winner] = true
-			if receipt == "" {
-				a.Awaiting[winner] = true
-			}
-		}
+		refs := RefsOfContract(contract.Status.Contract)
+		a.Add(ContractRef{Name: contract.Name, UID: string(contract.UID)}, refs, skip == nil || refs.Accept == "")
 	}
 	return a
 }
 
 func BidderAddresseesOf(dids ...string) *Addressees {
-	return newAddressees(dids)
-}
-
-func (a *Addressees) own(did string) bool {
-	return did != "" && a.DIDs[did]
+	a := newAddressees()
+	for _, did := range dids {
+		if did = strings.TrimSpace(did); strings.HasPrefix(did, "did:") {
+			a.DIDs[did] = true
+		}
+	}
+	return a
 }
 
 func RequesterConsumes(collection string) bool {
@@ -152,42 +154,55 @@ func BidderConsumes(collection string) bool {
 func (a *Addressees) RequesterWants(collection, author string) bool {
 	switch collection {
 	case BidNSID:
-		return a.Collecting && !a.own(author)
+		return len(a.RFPs) > 0
 	case ReceiptNSID, EventNSID:
-		return a.Counterparts[author] && !a.own(author)
+		return a.Winners[author]
 	}
 	return false
 }
 
-func (a *Addressees) RequesterAddressed(collection, author string, record map[string]any) bool {
+func (a *Addressees) RequesterMatch(collection, author string, record map[string]any) (ContractRef, string, bool) {
 	switch collection {
 	case BidNSID:
 		bid, err := ParseBid(record)
 		if err != nil {
-			return false
+			return ContractRef{}, "", false
 		}
-		rfp := bid.RFP.URI
-		switch {
-		case a.OpenRFPs[rfp]:
-			return true
-		case a.ClosedRFPs[rfp]:
-			return false
-		}
-		return a.Collecting && a.own(ATURIAuthority(rfp))
+		ref, ok := a.RFPs[bid.RFP.URI]
+		return ref, "", ok
 	case ReceiptNSID:
 		receipt, err := ParseReceipt(record)
 		if err != nil {
-			return false
+			return ContractRef{}, "", false
 		}
-		return a.Accepts[receipt.Accept.URI] || (a.Awaiting[author] && a.own(ATURIAuthority(receipt.Accept.URI)))
+		ref, ok := a.Accepts[receipt.Accept.URI]
+		return ref, "", ok
 	case EventNSID:
 		event, err := ParseEvent(record)
 		if err != nil {
-			return false
+			return ContractRef{}, "", false
 		}
-		return a.Receipts[event.Receipt.URI] || (a.Awaiting[author] && ATURIAuthority(event.Receipt.URI) == author)
+		if ref, ok := a.Receipts[event.Receipt.URI]; ok {
+			return ref, "", true
+		}
+		if a.Awaiting[author] && ATURIAuthority(event.Receipt.URI) == author && NSIDFromURI(event.Receipt.URI) == ReceiptNSID {
+			return ContractRef{}, event.Receipt.URI, false
+		}
 	}
-	return false
+	return ContractRef{}, "", false
+}
+
+func (a *Addressees) ReceiptMatch(record map[string]any) (ContractRef, bool) {
+	receipt, err := ParseReceipt(record)
+	if err != nil {
+		return ContractRef{}, false
+	}
+	ref, ok := a.Accepts[receipt.Accept.URI]
+	return ref, ok
+}
+
+func (a *Addressees) own(did string) bool {
+	return did != "" && a.DIDs[did]
 }
 
 func (a *Addressees) BidderAddressed(collection string, record map[string]any) bool {

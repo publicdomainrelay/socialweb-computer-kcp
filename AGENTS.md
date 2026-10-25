@@ -121,18 +121,22 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
   (`bids.free`, `compute.events.*`, ...) are read through the strongRef, never taken as stream input.
   Every market EventStream of a role delivers to one handler sink (`internal/eventstream/market.go`),
   which drops a `uri|cid` it took in the last 15 s (at most 10000 keys) and logs
-  `market_event_duplicate_dropped` once per key with the running count. The sink creates a StateSync
-  only for a record addressed to its role (`internal/atproto/market/addressee.go`, its indexes
-  `internal/eventstream/addressees.go` from a ComputeContract and MarketIdentity watch, no kcp read
-  per record): for the requester a bid whose `rfp` is one of its open RFPs, a receipt whose `accept`
-  is one of its live accepts, an event whose `receipt` is one of its live receipts (or, before the
-  receipt is known, one in the repo of its winner), each from a bidder of a live contract; for the
-  bidder every RFP, an accept whose `bid` is in its repo, an event whose `receipt` is in its repo.
-  The rest is dropped before any fetch or object and counted in `market_foreign_dropped` (every 1000).
-  The roles prune their market inbox StateSyncs (Outbound, Retain: the adapter is the target, and no
-  remote delete): a foreign one at once; the requester's of a contract that is no longer live once
-  Acked and 10 min old (`MarketInboxRetention`), the bidder's every Acked one at 10 min
-  (`requester_inbox_pruned`, `bidder_inbox_pruned`, every 100). A relay stream reconnects 1000 events back, a Jetstream 30 s back,
+  `market_event_duplicate_dropped` once per key with the running count. The requester tracks only the
+  records of its own ComputeContracts (`internal/atproto/market/addressee.go`; the sink's index
+  `internal/eventstream/addressees.go` is fed by a ComputeContract watch, no kcp read per record, and
+  no DID allowlist): a bid whose `rfp` is the RFP of one of its contracts that has no accept yet, a
+  receipt whose `accept` is one of its accepts, an event whose `receipt` is one of its receipts or,
+  before that receipt is in the contract status, whose `receipt` resolves to a receipt of one of its
+  accepts. Before the fetch it drops a bid while no contract takes bids, and a receipt or event whose
+  repo is not the repo of an accepted bid of a contract that is not settled. Every StateSync and
+  inbound ContractEvent it creates has an ownerReference to that ComputeContract, so deleting the
+  contract (or the Infra or EphemeralInfra that owns it) deletes them. The bidder takes every RFP,
+  an accept whose `bid` is in its repo and an event whose `receipt` is in its repo (its MarketIdentity
+  DIDs). The rest is dropped before any object and counted in `market_foreign_dropped` (every 1000).
+  The roles prune their market inbox StateSyncs (Outbound, Retain: the role adapter is the target,
+  and a delete has no remote side): one that matches no own contract at once; the requester's of a
+  Released or Failed contract once Acked and 10 min old (`MarketInboxRetention`); the bidder's
+  every Acked one at 10 min (`requester_inbox_pruned`, `bidder_inbox_pruned`, every 100). A relay stream reconnects 1000 events back, a Jetstream 30 s back,
   but never before the cursor its last connection started at, after a 1 s backoff that doubles to
   30 s and resets only after a connection that stayed up 30 s; each close logs `event_stream_closed`
   (the cursor, `openSeconds`, `retryIn`, the error) and a failed dial `event_stream_subscribe_failed`. Our relay answers a subscribeRepos

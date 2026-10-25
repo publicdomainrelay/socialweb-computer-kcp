@@ -4423,6 +4423,35 @@ fail, rather than the code read against this document alone.
 
 ## 15. Settled decisions, and the defects they closed
 
+- **A role keeps market objects only for its own contracts (2026-10-25).** Before: the requester's
+  market sink turned every record of the collection-filtered public streams into an Outbound,
+  Retain StateSync in its root workspace, also other contracts' bids, payload records
+  (`bids.free`, `compute.events.*`) and guest events; nothing deleted an Acked one, so the phone held
+  759 (+21 a minute), every StateSync LIST decoded all of them (3.4 GB a minute), and a `bids.free`
+  payload reached the bid inbox as a bid (`requester_bid_inbox_invalid`). Now: a requester stream
+  carries `market.bid`, `market.receipt` and `market.event` only, a bidder stream `market.rfp`,
+  `market.accept` and `market.event`; the requester takes a record only when its strongRef names
+  one of its ComputeContracts' RFP, accept or receipt (an event whose receipt is not in the status yet
+  is followed to that receipt's accept), keyed by an in-memory index from the ComputeContract watch,
+  and every object the intake creates is owned by that ComputeContract. Outbound + Retain stays the
+  mode: the role adapter is the target that applies the payload (an Inbound StateSync never calls
+  Apply), and the delete of an inbox entry has no remote side; what was missing was the addressee
+  rule and the end of the entry's life, now the prune of a foreign entry at once and of a Released or
+  Failed contract's Acked entry at 10 min. Compose adopts the object a watch event names instead of
+  listing its kind, and a MarketRequester whose identity is SessionExpired, AwaitingScan or Failed,
+  or which is Failed, parks until its identity or spec changes. Market network `inbox34` (3 bidders,
+  two concurrent `run request --hold`, one Both and one Firehose, ssh over webrtc):
+  - Before (da344ba9): each requester workspace held 37 StateSyncs, 8 of its own contract and 29 of
+    the other one (payload records, events, the other receipt, 7 event mailboxes); 3.1 and 2.8
+    StateSync LIST a minute, 115 and 111 StateSync requests a minute while Held.
+  - After: 6 StateSyncs each, all owned by `ComputeContract/contract`, 0 foreign; 1.9 and 2.2 LIST a
+    minute over 6 objects, 32 and 28 StateSync requests a minute. Both Held, ssh over webrtc, release
+    completed.
+  - Upgrade: a held requester of the old binary resumed with the new one went from 37 to 9
+    StateSyncs, all its own, within seconds of the sync. A long-lived MarketRequester app with an
+    Infra contract: its StateSyncs (ownership Infra, ComputeContract, StateSync) were deleted 10 min
+    after their creation once the contract was Released.
+
 - **The controller runtime lists, then watches; it never asks kcp for a watch-list (plan 0034
   ACC34-CLI-SSH, 2026-10-25).** Before: client-go 0.36 turns on `WatchListClient` by default, so every
   informer synced through a streaming watch with `sendInitialEvents`. On a kcp that just started, kcp

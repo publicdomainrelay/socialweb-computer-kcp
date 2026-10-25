@@ -118,7 +118,7 @@ func (q *Requester) SubmitEvent(ctx context.Context, issuer string, body Submitt
 		return &RequestError{Status: http.StatusBadRequest, Code: "InvalidRequest", Message: "the payload is not a guest event"}
 	}
 	ref := v1alpha1.ComputeContractEvent{URI: body.URI, CID: body.CID, ReceiptURI: event.Receipt.URI, ReceivedAt: q.nowISO()}
-	if err := q.enqueueEvent(ctx, ref); err != nil {
+	if err := q.enqueueEvent(ctx, ref, issuer, body.Record); err != nil {
 		q.log.Warn("requester_event_enqueue_failed", "uri", body.URI, "err", err)
 		return &RequestError{Status: http.StatusServiceUnavailable, Code: "Unavailable", Message: err.Error()}
 	}
