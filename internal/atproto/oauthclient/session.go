@@ -271,7 +271,7 @@ func (s *Session) Scopes() []string {
 
 func GrantedScopes(scope string) ([]string, error) {
 	granted := strings.Fields(scope)
-	if !slices.Contains(granted, atprotooauth.ScopeAtproto) {
+	if atprotooauth.KnownGrant(granted) && !slices.Contains(granted, atprotooauth.ScopeAtproto) {
 		return nil, fmt.Errorf("%w (granted %q)", ErrScopeRejected, scope)
 	}
 	return granted, nil
