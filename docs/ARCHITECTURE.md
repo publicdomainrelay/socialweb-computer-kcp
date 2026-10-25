@@ -3678,6 +3678,7 @@ internal/foldmain/                the Invocation a verb body runs with (args, en
 internal/ccmmain/                 `internal cloud-controller-manager`; the clusterprovider re-execs it as `<bin/sha path> internal cloud-controller-manager` with its env rebuilt
 internal/checkhostmain/           `check-host`
 internal/gatewaymain/             `serve gateway xrpc`: the gateway's config and wiring
+internal/atprotorelaymain/        `internal atproto-relay`: the standalone atproto relay of relay.mini-cloud-0002.chadig.com on internal/relay/local (state dir, known hosts crawled again at start, sd_notify, graceful stop); scripts/deploy-atproto-relay.sh installs it
 internal/ingressrelaymain/        `internal ingress-relay`: the standalone did-key ingress relay of xrpc.fedproxy.com (unix socket behind caddy, sd_notify, graceful stop); scripts/deploy-xrpc-relay.sh installs it
 internal/nodeimagemain/           `nodeimage guest-rootfs|guest-manifest`, the two Go steps of scripts/build-guest-image.sh, compiled only into a dev build
 internal/providermain/            `serve provider` and `migrate`: the clusterprovider's config, wiring, startup, adopt, roll, scale-in, teardown

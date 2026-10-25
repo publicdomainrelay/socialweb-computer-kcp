@@ -277,6 +277,13 @@ A prod deployment guarantees nothing; the routine path preserves most things.
   `--rollback` removes the drop-in and goes back to the deno relay, `--status` only reads. Never run
   `atproto-reverse-proxy/scripts/deploy.sh`: it prints `CF_API_TOKEN`. A change to the ingress
   protocol (`internal/atproto/ingress`) ships to both ends: the core and this relay.
+- The atproto relay at relay.mini-cloud-0002.chadig.com (bidders' requestCrawl, a firehose source) is
+  the Go relay `socialweb-computer internal atproto-relay` (`internal/atprotorelaymain` on
+  `internal/relay/local`), on 127.0.0.1:2584 behind caddy as the `30-go.conf` drop-in of
+  `atproto-relay.service`, state in `/var/lib/atproto-relay-go`. Deploy it only with
+  `scripts/deploy-atproto-relay.sh` (`--dry-run` prints the plan, preflight on 127.0.0.1:2585, rollback
+  on a failed check); `--rollback` removes the drop-in and goes back to the deno relay, `--status` only
+  reads. Caddy is not touched.
 - Only the lead runs a prod deployment (plan 0006 M5-FRESH-DEPLOY). Task agents never touch prod.
 
 ## How to verify
