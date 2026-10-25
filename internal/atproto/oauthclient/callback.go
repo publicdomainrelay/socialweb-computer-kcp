@@ -264,8 +264,8 @@ func ExchangeCode(ctx context.Context, client *http.Client, pending PendingAuth,
 		nonce = nextNonce
 	}
 	scopes := pending.Scopes
-	if out.Scope != "" {
-		scopes = strings.Fields(out.Scope)
+	if granted := ReadableScopes(strings.Fields(out.Scope)); len(granted) > 0 {
+		scopes = granted
 	}
 	return SessionData{
 		AccountDID:              did.String(),

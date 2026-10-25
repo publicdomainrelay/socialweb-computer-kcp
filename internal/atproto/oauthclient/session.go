@@ -265,7 +265,7 @@ func (s *Session) Scopes() []string {
 	if scopes := TokenScopes(s.data.AccessToken); len(scopes) > 0 {
 		return scopes
 	}
-	return append([]string(nil), s.data.Scopes...)
+	return ReadableScopes(s.data.Scopes)
 }
 
 func TokenScopes(token string) []string {
@@ -283,7 +283,20 @@ func TokenScopes(token string) []string {
 	if json.Unmarshal(raw, &claims) != nil {
 		return nil
 	}
-	return strings.Fields(claims.Scope)
+	return ReadableScopes(strings.Fields(claims.Scope))
+}
+
+func ReadableScopes(scopes []string) []string {
+	out := make([]string, 0, len(scopes))
+	for _, scope := range scopes {
+		if !strings.HasPrefix(scope, "ref:") {
+			out = append(out, scope)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func (s *Session) AccessToken(ctx context.Context) (string, error) {
@@ -568,8 +581,8 @@ func (s *Session) refreshOnceLocked(ctx context.Context) error {
 	}
 	s.data.AccessToken = out.AccessToken
 	s.data.RefreshToken = out.RefreshToken
-	if out.Scope != "" {
-		s.data.Scopes = strings.Fields(out.Scope)
+	if granted := ReadableScopes(strings.Fields(out.Scope)); len(granted) > 0 {
+		s.data.Scopes = granted
 	}
 	if nextNonce := resp.Header.Get("DPoP-Nonce"); nextNonce != "" {
 		s.data.DPoPAuthServerNonce = nextNonce

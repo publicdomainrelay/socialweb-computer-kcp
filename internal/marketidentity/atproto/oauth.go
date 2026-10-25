@@ -585,6 +585,7 @@ func (a *Accounts) requiredScopes(id *v1alpha1.MarketIdentity) []string {
 }
 
 func (a *Accounts) scopeCheck(workspace string, id *v1alpha1.MarketIdentity, held *heldAccount, granted []string) error {
+	granted = oauthclient.ReadableScopes(granted)
 	if len(granted) == 0 {
 		return nil
 	}
