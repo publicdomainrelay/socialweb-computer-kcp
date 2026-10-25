@@ -73,13 +73,16 @@ func (s *Sequencer) Head() int64 {
 	return s.seq
 }
 
-func (s *Sequencer) Watch(since int64) ([]Frame, <-chan Frame, func()) {
+func (s *Sequencer) Watch(since *int64) ([]Frame, <-chan Frame, func()) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	backlog := make([]Frame, 0, len(s.backlog))
-	for _, f := range s.backlog {
-		if f.Seq > since {
-			backlog = append(backlog, f)
+	var backlog []Frame
+	if since != nil {
+		backlog = make([]Frame, 0, len(s.backlog))
+		for _, f := range s.backlog {
+			if f.Seq > *since {
+				backlog = append(backlog, f)
+			}
 		}
 	}
 	id := s.nextSub

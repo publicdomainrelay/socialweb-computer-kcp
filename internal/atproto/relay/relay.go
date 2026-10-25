@@ -284,19 +284,19 @@ func (r *Relay) handleSubscribeRepos(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	start := int64(0)
+	var cursor any = "live"
 	if since != nil {
-		start = *since
+		cursor = *since
 	}
 	if filter.Active() {
 		r.log.Info("subscribe_repos_filter", "wantedCollections", filter.Collections, "wantedDidsCount", len(filter.DIDs),
-			"wantedDids", events.LogDIDs(filter.DIDs), "cursor", start)
+			"wantedDids", events.LogDIDs(filter.DIDs), "cursor", cursor)
 		_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 		if err := conn.WriteJSON(filter.info()); err != nil {
 			return
 		}
 	}
-	backlog, live, cancel := r.seq.Watch(start)
+	backlog, live, cancel := r.seq.Watch(since)
 	defer cancel()
 
 	done := make(chan struct{})
