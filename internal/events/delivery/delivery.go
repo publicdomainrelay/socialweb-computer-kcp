@@ -3,6 +3,7 @@ package delivery
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -93,6 +94,8 @@ type Deps struct {
 	Changed func()
 
 	Progress func()
+
+	Log *slog.Logger
 }
 
 type Loop struct {
@@ -108,6 +111,9 @@ type Loop struct {
 func New(cfg Config, deps Deps) *Loop {
 	cfg.ReconnectDelay = opt.Positive(cfg.ReconnectDelay, DefaultReconnectDelay)
 	cfg.MaxReconnectDelay = opt.Positive(cfg.MaxReconnectDelay, DefaultMaxReconnectDelay)
+	if deps.Log == nil {
+		deps.Log = slog.New(slog.DiscardHandler)
+	}
 	return &Loop{cfg: cfg, deps: deps}
 }
 
@@ -188,14 +194,22 @@ func (l *Loop) Run(ctx context.Context) {
 		upstream, err := l.deps.Source.Subscribe(ctx, filter)
 		if err != nil {
 			l.set(PhaseFailed, false, true, ReasonSubscribeFailed, err.Error())
+			if ctx.Err() == nil {
+				l.deps.Log.Warn("event_stream_subscribe_failed", "cursor", logCursor(filter.Cursor), "retryIn", delay.String(), "err", err.Error())
+			}
 		} else {
 			l.mu.Lock()
 			l.state.ServerFilter = nil
 			l.mu.Unlock()
 			l.set(PhaseRunning, true, false, ReasonStreamOpen, "")
 			opened := time.Now()
-			if l.consume(ctx, upstream) && time.Since(opened) >= StableConnection {
+			received, closeErr := l.consume(ctx, upstream)
+			if received && time.Since(opened) >= StableConnection {
 				delay = base
+			}
+			if ctx.Err() == nil && closeErr != nil {
+				l.deps.Log.Warn("event_stream_closed", "cursor", logCursor(filter.Cursor), "openSeconds", int64(time.Since(opened).Seconds()),
+					"received", received, "retryIn", delay.String(), "err", closeErr.Error())
 			}
 			_ = upstream.Close()
 		}
@@ -213,7 +227,14 @@ func (l *Loop) Run(ctx context.Context) {
 	}
 }
 
-func (l *Loop) consume(ctx context.Context, upstream events.Stream) bool {
+func logCursor(cursor *int64) any {
+	if cursor == nil {
+		return "live"
+	}
+	return *cursor
+}
+
+func (l *Loop) consume(ctx context.Context, upstream events.Stream) (bool, error) {
 	received := false
 	for {
 		event, err := upstream.Next(ctx)
@@ -226,7 +247,7 @@ func (l *Loop) consume(ctx context.Context, upstream events.Stream) bool {
 			if ctx.Err() == nil {
 				l.set(PhaseFailed, false, true, ReasonStreamClosed, err.Error())
 			}
-			return received
+			return received, err
 		}
 		if event.ServerFilter != nil {
 			l.mu.Lock()
@@ -248,7 +269,7 @@ func (l *Loop) consume(ctx context.Context, upstream events.Stream) bool {
 		}
 		if err := l.deps.Sink.Deliver(ctx, event); err != nil {
 			if ctx.Err() != nil {
-				return received
+				return received, nil
 			}
 			l.set(PhaseFailed, true, true, ReasonDeliverFailed, err.Error())
 			continue

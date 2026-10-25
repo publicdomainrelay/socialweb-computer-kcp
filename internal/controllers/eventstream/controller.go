@@ -419,7 +419,8 @@ func (c *Controller) start(ctx context.Context, k string, req ctlruntime.Request
 	s.flush = debounce.New(c.flushDelay, s.flushNow)
 	s.progress = debounce.New(delivery.ProgressDelay, s.flushNow)
 	s.loop = delivery.New(delivery.Config{Filter: filter, Rewind: rewind, Live: es.Spec.Resume == eventsv1.EventStreamResumeLive},
-		delivery.Deps{Source: source, Sink: sink, Resume: s.resume, Changed: s.flush.Mark, Progress: s.progress.Mark})
+		delivery.Deps{Source: source, Sink: sink, Resume: s.resume, Changed: s.flush.Mark, Progress: s.progress.Mark,
+			Log: c.log.With("stream", k)})
 	streamCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	stopRoot := context.AfterFunc(c.root, cancel)
 	s.group = supervise.New(streamCtx)
