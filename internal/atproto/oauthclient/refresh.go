@@ -288,6 +288,12 @@ func (s *Session) requestTokens(base context.Context, data SessionData) (Session
 			data.AuthServerRevocationEndpoint = revokeEndpoint
 		}
 	}
+	if refresher := s.tokenRefresher(); refresher != nil {
+		next, err := s.refreshVia(base, refresher, data)
+		if !errors.Is(err, ErrRefreshPassThrough) {
+			return next, err
+		}
+	}
 	key, err := parseDPoPKey(data.DPoPPrivateKeyMultibase)
 	if err != nil {
 		return SessionData{}, err

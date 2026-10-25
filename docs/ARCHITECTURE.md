@@ -1472,6 +1472,47 @@ one method per verb and the provider type-asserts it the way `confirmHeld` asser
 the `Adoptable` claims in the cluster's home workspace (`liveNodeGrants`), after `adoptClaims` at
 adoption and on every pass, rate-limited to at most once per cluster per `VaultSyncInterval` (30 s).
 
+### The browser refreshes OAuth tokens in a JS worker (2026-10-25)
+
+atproto refresh tokens are single-use, and every tab of the browser page runs its own Go wasm. So the
+browser build hands the token request to one plain-JS Worker (no wasm), which runs it single-flight
+across tabs, writes the rotated set to IndexedDB before it answers, and hands it back. The seam is
+`oauthclient.TokenRefresher` (`internal/atproto/oauthclient/refresher.go`):
+`RefreshTokens(ctx, TokenRefreshRequest) (TokenRefreshResponse, error)`.
+
+- Registration. `Options.Refresher` on one Session, or `oauthclient.SetTokenRefresher(r)` (js build
+  only, `refresher_js.go`) as the default for every Session without one, read at each refresh. Unset
+  (every native build) is the Go POST of `refresh.go`, unchanged.
+- The Go side keeps its part. The refresh stays one flight per refresh token in the process; the
+  flight re-reads the session store first and adopts a newer set another tab wrote; only then does it
+  call the refresher. It accepts a set only when `token_type` is DPoP, `sub` is the session DID
+  (else `ErrRefreshWrongSubject`, nothing saved, the old set stays) and `scope` contains `atproto`
+  (else `ErrScopeRejected` under `ErrSessionExpired`). It then saves the set to its own store and
+  uses it. On `invalid_grant` it re-reads the store once and adopts or refreshes the newer set, else
+  the session is `ErrSessionExpired`, as on the Go path.
+- The request (JSON on the bridge, snake_case): `session_id`, `did`, `issuer`, `token_endpoint`,
+  `client_id`, `refresh_token`, `dpop_jwk {kty: EC, crv: P-256, x, y, d}`, `dpop_nonce`. The client
+  is the atproto public client: `token_endpoint_auth_method` none, the form is `grant_type`,
+  `refresh_token`, `client_id`, DPoP-bound.
+- DPoP: the worker signs. The request carries the session's private JWK; the worker imports it as a
+  non-extractable ES256 CryptoKey and signs each proof with WebCrypto (`htm` POST, `htu` the token
+  endpoint, `jti`, `iat`, `nonce`), retrying once on `use_dpop_nonce`. A sign callback into Go would
+  need a round trip per proof to the tab that asked, and a flight shared across tabs must finish
+  after that tab is gone. The key is in the stored session already; it never goes into a log.
+  WebCrypto signatures are high-S as often as not; our authorization server verifies DPoP leniently
+  (`HashAndVerifyLenient`), and other atproto servers take plain ES256.
+- The response: `access_token`, `refresh_token`, `token_type`, `scope`, `sub`, `expires_in`,
+  `expires_at` (unix seconds), `dpop_nonce` (the newest the authorization server sent). The Go side
+  reads the access token expiry from its `exp` claim, as on the Go path. A set the worker rotated is
+  never dropped: when the IndexedDB write fails the worker still answers it.
+- Errors: a `*TokenRefreshError {error, error_description, status}`. `invalid_grant` is
+  `ErrSessionExpired`. `pass_through` (`ErrRefreshPassThrough`) means the worker does not own that
+  `client_id`, and the Go POST runs instead. Any other code (a network error, a timeout, another OAuth
+  error) is a plain refresh error and the session stays.
+- Confidential clients keep the Go path. The gateway web app session is the OpenBao atproto plugin's
+  (private_key_jwt) and never reaches this seam; no native build registers a refresher; a browser
+  worker answers `pass_through` for any `client_id` other than the page's own public client metadata.
+
 ## 8. Ports
 
 Every per-cluster port is chosen by the kernel and held by the cluster's apiserver front (member

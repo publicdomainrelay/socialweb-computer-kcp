@@ -51,6 +51,8 @@ type Options struct {
 
 	Store SessionStore
 
+	Refresher TokenRefresher
+
 	Log *slog.Logger
 }
 
@@ -64,6 +66,8 @@ type Session struct {
 	client *http.Client
 
 	store SessionStore
+
+	refresher TokenRefresher
 
 	log *slog.Logger
 
@@ -170,13 +174,14 @@ func New(data SessionData, opts Options) (*Session, error) {
 		log = slog.New(slog.DiscardHandler)
 	}
 	session := &Session{
-		data:    data,
-		key:     key,
-		client:  client,
-		store:   opts.Store,
-		log:     log,
-		did:     did.String(),
-		hostURL: strings.TrimRight(data.HostURL, "/"),
+		data:      data,
+		key:       key,
+		client:    client,
+		store:     opts.Store,
+		refresher: opts.Refresher,
+		log:       log,
+		did:       did.String(),
+		hostURL:   strings.TrimRight(data.HostURL, "/"),
 	}
 	session.refreshToken.Store(&data.RefreshToken)
 	return session, nil
