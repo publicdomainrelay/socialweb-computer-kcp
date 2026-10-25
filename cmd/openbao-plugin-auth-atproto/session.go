@@ -11,10 +11,11 @@ import (
 )
 
 const (
-	sessionPrefix = "session/"
-	statusActive  = "active"
-	statusExpired = "expired"
-	refreshLeeway = 60 * time.Second
+	sessionPrefix  = "session/"
+	statusActive   = "active"
+	statusExpired  = "expired"
+	refreshLeeway  = 60 * time.Second
+	refreshTimeout = 30 * time.Second
 )
 
 type sessionEntry struct {

@@ -75,15 +75,25 @@ func (b *backend) refreshSession(ctx context.Context, st logical.Storage, cfg *c
 	if err != nil {
 		return err
 	}
-	cctx, cancel := context.WithTimeout(ctx, cfg.LoginTimeout)
+	detached := context.WithoutCancel(ctx)
+	cctx, cancel := context.WithTimeout(detached, refreshTimeout)
 	defer cancel()
+	sctx, scancel := context.WithTimeout(detached, refreshTimeout)
+	defer scancel()
 	oc := &oauthClient{f: f, issuer: s.Issuer, dpop: key, nonces: b.nonces.forDID(s.DID)}
 	tr, err := oc.refresh(cctx, s.TokenEndpoint, s.RefreshToken)
 	if err != nil {
 		var oe *oauthError
 		if errors.As(err, &oe) {
+			if oe.Code == "invalid_grant" {
+				fresh, ferr := getSession(sctx, st, s.DID)
+				if ferr == nil && fresh != nil && fresh.Status == statusActive && fresh.RefreshToken != s.RefreshToken {
+					*s = *fresh
+					return nil
+				}
+			}
 			s.Status, s.StatusReason = statusExpired, err.Error()
-			if perr := putSession(ctx, st, s); perr != nil {
+			if perr := putSession(sctx, st, s); perr != nil {
 				return perr
 			}
 		}
@@ -94,7 +104,7 @@ func (b *backend) refreshSession(ctx context.Context, st logical.Storage, cfg *c
 			_ = oc.revoke(cctx, s.RevocationEndpoint, tr.RefreshToken, "refresh_token")
 		}
 		s.Status, s.StatusReason = statusExpired, "the refreshed grant does not include atproto"
-		if perr := putSession(ctx, st, s); perr != nil {
+		if perr := putSession(sctx, st, s); perr != nil {
 			return perr
 		}
 		return errors.New("the refreshed grant does not include atproto; the session is rejected")
@@ -104,7 +114,7 @@ func (b *backend) refreshSession(ctx context.Context, st logical.Storage, cfg *c
 	if tr.Scope != "" {
 		s.Scope = tr.Scope
 	}
-	return putSession(ctx, st, s)
+	return putSession(sctx, st, s)
 }
 
 func (b *backend) sessionProof(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
