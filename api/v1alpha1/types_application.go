@@ -42,6 +42,8 @@ const (
 	GuestTLSHost = "relay.localhost"
 
 	DefaultDiscoveryRelayURL = "https://relay1.us-east.bsky.network"
+
+	DefaultMarketRelayURL = "https://relay.mini-cloud-0002.chadig.com"
 )
 
 func (n *MarketNetworkValue) HostAddress(name string) string {
@@ -77,7 +79,7 @@ func (n *MarketNetworkValue) DiscoveryRelayURLs() []string {
 		extra = n.DiscoveryRelays
 	}
 	if len(extra) == 0 && len(out) == 0 {
-		extra = []string{DefaultDiscoveryRelayURL}
+		extra = []string{DefaultDiscoveryRelayURL, DefaultMarketRelayURL}
 	}
 	for _, raw := range extra {
 		if u := strings.TrimRight(strings.TrimSpace(raw), "/"); u != "" && !slices.Contains(out, u) {
