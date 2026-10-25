@@ -288,7 +288,8 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 		spec.PdsDID = plan.PdsDID
 	}
 	out = append(out, compose.Desired{Kind: compose.ComponentKindRequester, Name: RequesterComponent, Spec: spec})
-	out = append(out, compose.HTTPServiceExposures(ws, compose.ComponentKindRequester, RequesterComponent, "http", network, hostnames, false, true)...)
+	inbound := o.Spec.Comms == nil || o.Spec.Comms.Mode != v1alpha1.MarketCommsModeFirehose
+	out = append(out, compose.HTTPServiceExposures(ws, compose.ComponentKindRequester, RequesterComponent, "http", network, hostnames, false, inbound)...)
 	if plan.Local {
 		out = append(out, compose.PdsExposures(ws, compose.PdsComponent, network, hostnames, ingress)...)
 	}
