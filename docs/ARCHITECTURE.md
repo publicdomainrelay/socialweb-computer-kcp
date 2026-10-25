@@ -4086,6 +4086,17 @@ closed so far was found by reading the code against this document, or by running
 reading the document. The practice worth keeping: the artefact was run and each guard was watched to
 fail, rather than the code read against this document alone.
 
+- **Opened 2026-10-25 (plan 0034 follow-ups; the text and closing instrument of each is in `NEXT.yaml`).**
+  RELAY-SSH-ROUTE: fedproxy's atprp-ssh-relay lets a dead `-R` session take the Caddy route of a live
+  one and deletes the live route when the dead one is reaped; fix on branch fix/ssh-session-drop.
+  PAGE-CONTRACT-ALLOC: the browser page allocates ~1.3 GB over a contract's two busiest minutes (idle
+  after release 16-36 MiB/min). PAGE-GOROUTINES: ~7,690 goroutines idle in the page. PAGE-PENDING-28S,
+  PAGE-KUBECTL-EARLY, PAGE-REFRESH-E2E: page timing, ordering and the unobserved OAuth refresh through
+  the JS worker. PAGE-STREAM-INGEST: A vs B2 is the user's decision. RELAY-MST-INVERT: our Go relay
+  cannot verify two older hat-9 commits replayed from cursor 0. RFP-WINDOW-RKEY: the bid window reads
+  the rkey before createdAt. RELEASE-NO-CONTRACT-WAIT: releasing a VM-less contract waits 3 m and
+  exits 1.
+
 - **Plan 0013 soak paused 2026-10-19 06:28Z (third reading, partial).** `dev-soak-3` ran rc18 code
   1 h warm-up + 2 h 43 min of the fit window at ~1.1 RFP/s: 15,311 RFPs created, 0 failed; 227 tenant
   cycles, 0 failed; 286 VM contracts, 21 failed around chaos; host OOM 0, MemAvailable 82 GB, swap 0.
