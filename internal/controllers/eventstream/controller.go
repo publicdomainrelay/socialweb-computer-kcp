@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -352,7 +354,7 @@ func (c *Controller) stop(k string, flush bool) {
 func (c *Controller) applyStatus(ctx context.Context, req ctlruntime.Request, es *eventsv1.EventStream, phase eventsv1.EventStreamPhase,
 	ready, failed bool, reason, message string) error {
 	status := eventsv1.EventStreamStatus{ObservedGeneration: es.Generation, Phase: phase, Cursor: es.Status.Cursor, Lag: es.Status.Lag,
-		LastEventAt: es.Status.LastEventAt, Conditions: append([]metav1.Condition(nil), es.Status.Conditions...)}
+		LastEventAt: es.Status.LastEventAt, ServerFilter: es.Status.ServerFilter, Conditions: append([]metav1.Condition(nil), es.Status.Conditions...)}
 	setConditions(&status, es.Generation, ready, false, failed, reason, message)
 	next := es.DeepCopy()
 	next.Status = status
@@ -488,10 +490,14 @@ func (s *stream) publish(ctx context.Context) error {
 	req, es := s.req, s.es
 	s.mu.Unlock()
 	status := eventsv1.EventStreamStatus{ObservedGeneration: es.Generation, Phase: eventsv1.EventStreamPhase(state.Phase), Cursor: es.Status.Cursor,
-		Lag: state.Lag, LastEventAt: es.Status.LastEventAt, Conditions: append([]metav1.Condition(nil), es.Status.Conditions...)}
+		Lag: state.Lag, LastEventAt: es.Status.LastEventAt, ServerFilter: es.Status.ServerFilter, Conditions: append([]metav1.Condition(nil), es.Status.Conditions...)}
 	if s.last != nil {
 		status.Conditions = append([]metav1.Condition(nil), s.last.Conditions...)
-		status.Cursor, status.LastEventAt = s.last.Cursor, s.last.LastEventAt
+		status.Cursor, status.LastEventAt, status.ServerFilter = s.last.Cursor, s.last.LastEventAt, s.last.ServerFilter
+	}
+	if f := state.ServerFilter; f != nil {
+		status.ServerFilter = &eventsv1.EventStreamServerFilter{Collections: slices.Clone(f.Collections), DIDs: slices.Clone(f.DIDs),
+			Supported: eventsv1.EventStreamServerFilterSupport(f.Supported)}
 	}
 	if state.Started {
 		status.Cursor = state.Cursor
@@ -519,6 +525,9 @@ func statusEqual(a, b eventsv1.EventStreamStatus) bool {
 		return false
 	}
 	if (a.LastEventAt == nil) != (b.LastEventAt == nil) || (a.LastEventAt != nil && !a.LastEventAt.Equal(b.LastEventAt)) {
+		return false
+	}
+	if !reflect.DeepEqual(a.ServerFilter, b.ServerFilter) {
 		return false
 	}
 	if len(a.Conditions) != len(b.Conditions) {

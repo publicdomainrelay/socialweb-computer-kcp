@@ -45,7 +45,7 @@ func NewTracker(cfg TrackerConfig) *Tracker {
 	return t
 }
 
-func (t *Tracker) Observe(e events.Event) bool {
+func (t *Tracker) Observe(e events.Event, gapless bool) bool {
 	at := e.Time
 	if at.IsZero() {
 		at = time.Now().UTC()
@@ -54,7 +54,7 @@ func (t *Tracker) Observe(e events.Event) bool {
 	defer t.mu.Unlock()
 	transition := !t.s.Started || t.s.Err != nil
 	t.s.Lag = 0
-	if t.gaps && t.s.Started && e.Seq > t.s.Cursor+1 {
+	if t.gaps && !gapless && t.s.Started && e.Seq > t.s.Cursor+1 {
 		t.s.Lag = e.Seq - t.s.Cursor - 1
 	}
 	t.s.Started, t.s.Cursor, t.s.LastEventAt, t.s.Err = true, e.Seq, at, nil
@@ -87,6 +87,8 @@ type Tracked struct {
 	changed func()
 
 	progress func()
+
+	gapless bool
 }
 
 var _ events.Stream = (*Tracked)(nil)
@@ -107,7 +109,11 @@ func (t *Tracked) Next(ctx context.Context) (events.Event, error) {
 		}
 		return event, err
 	}
-	if t.tracker.Observe(event) || len(event.Ops) > 0 {
+	if event.ServerFilter != nil {
+		t.gapless = event.ServerFilter.Gapless()
+		return event, nil
+	}
+	if t.tracker.Observe(event, t.gapless) || len(event.Ops) > 0 {
 		t.changed()
 	} else {
 		t.progress()

@@ -96,5 +96,25 @@ type EventStreamStatus struct {
 
 	LastEventAt *metav1.Time `json:"lastEventAt,omitempty"`
 
+	ServerFilter *EventStreamServerFilter `json:"serverFilter,omitempty"`
+
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+}
+
+type EventStreamServerFilterSupport string
+
+const (
+	EventStreamServerFilterSupported EventStreamServerFilterSupport = "true"
+
+	EventStreamServerFilterUnsupported EventStreamServerFilterSupport = "false"
+
+	EventStreamServerFilterUnknown EventStreamServerFilterSupport = "unknown"
+)
+
+type EventStreamServerFilter struct {
+	Collections []string `json:"collections,omitempty"`
+
+	DIDs []string `json:"dids,omitempty"`
+
+	Supported EventStreamServerFilterSupport `json:"supported"`
 }

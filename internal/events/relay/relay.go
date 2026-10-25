@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"strconv"
 	"strings"
@@ -21,6 +22,8 @@ const (
 	subscribePath = "/xrpc/com.atproto.sync.subscribeRepos"
 
 	commitType = "com.atproto.sync.subscribeRepos#commit"
+
+	infoType = "com.atproto.sync.subscribeRepos#info"
 
 	SourcePrefix = "relay/"
 )
@@ -46,6 +49,10 @@ type frame struct {
 	Time    string    `json:"time"`
 	Error   string    `json:"error"`
 	Message string    `json:"message"`
+	Name    string    `json:"name"`
+
+	WantedCollections []string `json:"wantedCollections"`
+	WantedDIDs        []string `json:"wantedDids"`
 }
 
 type Config struct {
@@ -54,12 +61,16 @@ type Config struct {
 
 type Deps struct {
 	Dial wsconn.DialFunc
+
+	Log *slog.Logger
 }
 
 type Source struct {
 	base string
 
 	dial wsconn.DialFunc
+
+	log *slog.Logger
 }
 
 var (
@@ -72,7 +83,11 @@ func New(cfg Config, deps Deps) (*Source, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Source{base: base, dial: deps.Dial}, nil
+	log := deps.Log
+	if log == nil {
+		log = slog.New(slog.DiscardHandler)
+	}
+	return &Source{base: base, dial: deps.Dial, log: log}, nil
 }
 
 func (s *Source) Address() string {
@@ -99,14 +114,34 @@ func (s *Source) Subscribe(ctx context.Context, filter events.Filter) (events.St
 	wsconn.WebSocketScheme(parsed)
 	parsed.Path = strings.TrimRight(parsed.Path, "/") + subscribePath
 	parsed.RawPath, parsed.Fragment, parsed.RawQuery = "", "", ""
-	if filter.Cursor != nil {
-		parsed.RawQuery = url.Values{"cursor": {strconv.FormatInt(*filter.Cursor, 10)}}.Encode()
+	endpoint := parsed.String()
+	collections, dids := filter.ServerParams()
+	query := url.Values{}
+	for _, c := range collections {
+		query.Add(events.WantedCollectionsParam, c)
 	}
+	for _, d := range dids {
+		query.Add(events.WantedDIDsParam, d)
+	}
+	var cursor any
+	if filter.Cursor != nil {
+		query.Set("cursor", strconv.FormatInt(*filter.Cursor, 10))
+		cursor = *filter.Cursor
+	}
+	parsed.RawQuery = query.Encode()
+	s.log.Info("relay_subscribe_dial", "url", endpoint, events.WantedCollectionsParam, collections,
+		"wantedDidsCount", len(dids), events.WantedDIDsParam, events.LogDIDs(dids), "cursor", cursor)
 	conn, err := wsconn.Dial(ctx, parsed.String(), s.dial)
 	if err != nil {
 		return nil, fmt.Errorf("relay: %w", err)
 	}
-	return &stream{conn: conn, filter: filter, source: SourcePrefix + s.base}, nil
+	out := &stream{conn: conn, filter: filter, source: SourcePrefix + s.base}
+	if len(collections)+len(dids) > 0 {
+		out.requested = events.ServerFilter{Collections: collections, DIDs: dids}
+		out.announce = &events.ServerFilter{Collections: collections, DIDs: dids, Supported: events.ServerFilterUnknown}
+		out.probing = true
+	}
+	return out, nil
 }
 
 type stream struct {
@@ -115,9 +150,25 @@ type stream struct {
 	filter events.Filter
 
 	source string
+
+	requested events.ServerFilter
+
+	announce *events.ServerFilter
+
+	probing bool
+
+	pending *events.Event
 }
 
 func (s *stream) Next(ctx context.Context) (events.Event, error) {
+	if a := s.announce; a != nil {
+		s.announce = nil
+		return events.Event{Source: s.source, ServerFilter: a}, nil
+	}
+	if p := s.pending; p != nil {
+		s.pending = nil
+		return *p, nil
+	}
 	for {
 		data, err := s.conn.Read(ctx)
 		if err != nil {
@@ -127,10 +178,23 @@ func (s *stream) Next(ctx context.Context) (events.Event, error) {
 		if err != nil {
 			return events.Event{}, err
 		}
-		if !ok {
+		event.Source = s.source
+		if s.probing {
+			s.probing = false
+			if ok && event.ServerFilter != nil {
+				return event, nil
+			}
+			result := s.requested
+			result.Supported = events.ServerFilterUnsupported
+			if ok {
+				narrowed := s.filter.Narrow(event)
+				s.pending = &narrowed
+			}
+			return events.Event{Source: s.source, ServerFilter: &result}, nil
+		}
+		if !ok || event.ServerFilter != nil {
 			continue
 		}
-		event.Source = s.source
 		return s.filter.Narrow(event), nil
 	}
 }
@@ -152,6 +216,10 @@ func decode(data []byte) (events.Event, bool, error) {
 	}
 	if f.Error != "" {
 		return events.Event{}, false, fmt.Errorf("relay: %s: %s", f.Error, cmp.Or(strings.TrimSpace(f.Message), "relay stream error"))
+	}
+	if f.Type == infoType && f.Name == events.ServerFilterInfoName {
+		return events.Event{ServerFilter: &events.ServerFilter{Collections: f.WantedCollections, DIDs: f.WantedDIDs,
+			Supported: events.ServerFilterSupported}}, true, nil
 	}
 	if f.Type != "" && f.Type != commitType {
 		return events.Event{}, false, nil

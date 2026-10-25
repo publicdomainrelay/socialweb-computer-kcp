@@ -46,6 +46,60 @@ type Event struct {
 	Time time.Time
 
 	Ops []Op
+
+	ServerFilter *ServerFilter
+}
+
+type ServerFilterSupport string
+
+const (
+	ServerFilterSupported ServerFilterSupport = "true"
+
+	ServerFilterUnsupported ServerFilterSupport = "false"
+
+	ServerFilterUnknown ServerFilterSupport = "unknown"
+
+	MaxServerFilterCollections = 100
+
+	MaxServerFilterDIDs = 10000
+
+	WantedCollectionsParam = "wantedCollections"
+
+	WantedDIDsParam = "wantedDids"
+
+	ServerFilterInfoName = "ServerFilter"
+
+	collectionWildcard = ".*"
+
+	logDIDs = 10
+)
+
+func MatchCollection(patterns []string, collection string) bool {
+	for _, p := range patterns {
+		p = strings.TrimSpace(p)
+		if prefix, ok := strings.CutSuffix(p, collectionWildcard); ok {
+			if strings.HasPrefix(collection, prefix+".") {
+				return true
+			}
+			continue
+		}
+		if p == collection {
+			return true
+		}
+	}
+	return false
+}
+
+type ServerFilter struct {
+	Collections []string
+
+	DIDs []string
+
+	Supported ServerFilterSupport
+}
+
+func (f *ServerFilter) Gapless() bool {
+	return f != nil && f.Supported == ServerFilterSupported
 }
 
 type Filter struct {
@@ -83,6 +137,36 @@ func (f Filter) Scope() []string {
 	return out
 }
 
+func (f Filter) ServerParams() (collections, dids []string) {
+	collections, dids = trimmedUnique(f.Collections), trimmedUnique(f.DIDs)
+	if len(collections) > MaxServerFilterCollections {
+		collections = nil
+	}
+	if len(dids) > MaxServerFilterDIDs {
+		dids = nil
+	}
+	return collections, dids
+}
+
+func LogDIDs(dids []string) []string {
+	if len(dids) > logDIDs {
+		return dids[:logDIDs]
+	}
+	return dids
+}
+
+func trimmedUnique(in []string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, v := range in {
+		if v = strings.TrimSpace(v); v != "" && !seen[v] {
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
 func (f Filter) Narrow(e Event) Event {
 	if len(f.DIDs) > 0 && !slices.ContainsFunc(f.DIDs, func(d string) bool { return strings.TrimSpace(d) == e.Repo }) {
 		e.Ops = nil
@@ -94,7 +178,7 @@ func (f Filter) Narrow(e Event) Event {
 	kept := make([]Op, 0, len(e.Ops))
 	for _, op := range e.Ops {
 		collection, _, _ := strings.Cut(op.Path, "/")
-		if slices.ContainsFunc(f.Collections, func(c string) bool { return strings.TrimSpace(c) == collection }) {
+		if MatchCollection(f.Collections, collection) {
 			kept = append(kept, op)
 		}
 	}

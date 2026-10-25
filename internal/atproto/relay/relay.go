@@ -20,9 +20,13 @@ import (
 	comatproto "github.com/bluesky-social/indigo/api/atproto"
 	"github.com/bluesky-social/indigo/atproto/identity"
 	"github.com/gorilla/websocket"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/events"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
 )
+
+const SubscribePingInterval = 30 * time.Second
 
 var (
 	ErrInvalidHostname = errors.New("relay: hostname is required")
@@ -252,11 +256,17 @@ func (r *Relay) handleRequestCrawl(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r *Relay) handleSubscribeRepos(w http.ResponseWriter, req *http.Request) {
+	query := req.URL.Query()
 	var since *int64
-	if raw := req.URL.Query().Get("cursor"); raw != "" {
+	if raw := query.Get("cursor"); raw != "" {
 		if n, err := strconv.ParseInt(raw, 10, 64); err == nil {
 			since = &n
 		}
+	}
+	filter, err := ParseSubscribeFilter(query)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "InvalidRequest", err.Error())
+		return
 	}
 	conn, err := upgrader.Upgrade(w, req, nil)
 	if err != nil {
@@ -278,6 +288,14 @@ func (r *Relay) handleSubscribeRepos(w http.ResponseWriter, req *http.Request) {
 	if since != nil {
 		start = *since
 	}
+	if filter.Active() {
+		r.log.Info("subscribe_repos_filter", "wantedCollections", filter.Collections, "wantedDidsCount", len(filter.DIDs),
+			"wantedDids", events.LogDIDs(filter.DIDs), "cursor", start)
+		_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+		if err := conn.WriteJSON(filter.info()); err != nil {
+			return
+		}
+	}
 	backlog, live, cancel := r.seq.Watch(start)
 	defer cancel()
 
@@ -296,6 +314,10 @@ func (r *Relay) handleSubscribeRepos(w http.ResponseWriter, req *http.Request) {
 	}()
 
 	write := func(frame Frame) bool {
+		frame, ok := filter.Apply(frame)
+		if !ok {
+			return true
+		}
 		_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 		if err := conn.WriteJSON(frame); err != nil {
 			return false
@@ -307,8 +329,14 @@ func (r *Relay) handleSubscribeRepos(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 	}
+	ping := time.NewTicker(SubscribePingInterval)
+	defer ping.Stop()
 	for {
 		select {
+		case <-ping.C:
+			if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(10*time.Second)); err != nil {
+				return
+			}
 		case <-done:
 			return
 		case <-r.ctx.Done():

@@ -63,6 +63,8 @@ type State struct {
 	Lag int64
 
 	LastEventAt time.Time
+
+	ServerFilter *events.ServerFilter
 }
 
 type Config struct {
@@ -169,6 +171,9 @@ func (l *Loop) Run(ctx context.Context) {
 		if err != nil {
 			l.set(PhaseFailed, false, true, ReasonSubscribeFailed, err.Error())
 		} else {
+			l.mu.Lock()
+			l.state.ServerFilter = nil
+			l.mu.Unlock()
 			l.set(PhaseRunning, true, false, ReasonStreamOpen, "")
 			if l.consume(ctx, upstream) {
 				delay = base
@@ -203,6 +208,13 @@ func (l *Loop) consume(ctx context.Context, upstream events.Stream) bool {
 				l.set(PhaseFailed, false, true, ReasonStreamClosed, err.Error())
 			}
 			return received
+		}
+		if event.ServerFilter != nil {
+			l.mu.Lock()
+			l.state.ServerFilter = event.ServerFilter
+			l.mu.Unlock()
+			l.changed()
+			continue
 		}
 		first := !received
 		received = true
@@ -241,7 +253,7 @@ func (l *Loop) observe(e events.Event) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.state.Lag = 0
-	if !strings.HasPrefix(e.Source, gaplessPrefix) && l.state.Started && e.Seq > l.state.Cursor+1 {
+	if !strings.HasPrefix(e.Source, gaplessPrefix) && !l.state.ServerFilter.Gapless() && l.state.Started && e.Seq > l.state.Cursor+1 {
 		l.state.Lag = e.Seq - l.state.Cursor - 1
 	}
 	l.state.Started, l.state.Cursor, l.state.LastEventAt = true, e.Seq, at

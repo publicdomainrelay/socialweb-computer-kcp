@@ -5,6 +5,7 @@ internal/atproto/ingress	server.go:Server.startKeepalive	ticker	spec.keepaliveMi
 internal/atproto/market	discovery.go:StartOfferingRefresh	ticker	interval; <=0 uses HeartbeatInterval	rewrite the offering record on the PDS; a liveness write has no event source
 internal/atproto/pds	subscribe.go:Server.handleSubscribeRepos	ticker	subscribePingInterval 30s constant	websocket ping to subscribeRepos clients
 internal/atproto/relay	slurper.go:hostSub.readLoop	ticker	30s constant	websocket ping to each subscribed PDS
+internal/atproto/relay	relay.go:Relay.handleSubscribeRepos	ticker	SubscribePingInterval 30s constant	websocket ping to each subscribeRepos client; a stream with wantedCollections or wantedDids can carry no frame for longer than a client read timeout (wsconn.ReadTimeout 2m)
 internal/devsup	server_linux.go:server.orphanKiller	ticker	OrphanScanInterval 1s; no ticker when <=0	scan /proc for SWC_DEVSUP processes of an inactive unit and SIGKILL them; no unprivileged kernel event for a process appearing or reparenting (the proc connector needs CAP_NET_ADMIN)
 internal/install	install.go:installer.wait	ticker	WaitReport constant	print elapsed progress to the operator; reads no state
 internal/install	system_linux.go:liveSystem.User	ticker	100ms constant, bounded by managerSocketWait 30s	wait for /run/user/<uid>/systemd/private after linger; its parent dir may not exist yet, so there is nothing to watch
