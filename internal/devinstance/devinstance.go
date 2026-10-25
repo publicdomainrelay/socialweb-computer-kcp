@@ -18,6 +18,8 @@ import (
 
 const MaxSocketPath = 107
 
+const RoleRequester = "requester"
+
 const basenameChars = 16
 
 var namePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
@@ -242,6 +244,7 @@ type Record struct {
 	Parent          *Parent               `json:"parent,omitempty"`
 	VM              *VMRuntime            `json:"vm,omitempty"`
 	Gateway         *GatewayChild         `json:"gateway,omitempty"`
+	Role            string                `json:"role,omitempty"`
 }
 
 type GatewayChild struct {

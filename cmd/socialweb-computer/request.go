@@ -68,6 +68,7 @@ type requestRun struct {
 	kcp             *request.Kcp
 	standalone      devinstance.Layout
 	instanceDir     string
+	resuming        bool
 }
 
 func splitWords(rest []string) ([]string, []string) {
@@ -415,7 +416,7 @@ func (r *requestRun) start(ctx context.Context, fresh bool) error {
 		kubeconfig, workspace = rec.AdminKubeconfig, rec.BaseWorkspace
 	default:
 		vals := r.vals.With("instance", r.inv.Name).With("profile", bootstrap.ProfileQuick).
-			With("state-dir", request.Dir(r.stateRoot, r.inv.Name))
+			With("state-dir", request.Dir(r.stateRoot, r.inv.Name)).With(appRoleOpt, devinstance.RoleRequester)
 		up, code := bringUp(ctx, r.a, vals, false)
 		if code != exitOK {
 			return fmt.Errorf("the invocation's kcp did not come up (exit %d)", code)
@@ -437,6 +438,9 @@ func (r *requestRun) start(ctx context.Context, fresh bool) error {
 	r.summary.KcpColdSeconds = time.Since(started).Seconds()
 	r.summary.KcpRunning = true
 	r.log("the invocation's kcp runs", "kcp", r.summary.KcpURL, "workspace", workspace, "instance", r.inv.Instance, "coldSeconds", r.summary.KcpColdSeconds)
+	if err := r.signIn(ctx, fresh || r.resuming); err != nil {
+		return fmt.Errorf("signing in: %w", err)
+	}
 	if err := r.kcp.WaitReady(ctx, r.networkTimeout, func(st v1alpha1.ApplicationStatus) {
 		r.log("requester", "phase", string(st.Phase), "message", st.Message, "components", len(st.Components))
 	}); err != nil {
@@ -509,7 +513,7 @@ func (r *requestRun) writeSummary(ctx context.Context, c *v1alpha1.ComputeContra
 	}
 }
 
-func (r *requestRun) signIn(ctx context.Context) error {
+func (r *requestRun) signIn(ctx context.Context, untilAssociated bool) error {
 	if err := r.kcp.WaitIdentityObject(ctx, r.networkTimeout); err != nil {
 		return err
 	}
@@ -521,10 +525,59 @@ func (r *requestRun) signIn(ctx context.Context) error {
 	if fi, err := os.Stdin.Stat(); err == nil && fi.Mode()&os.ModeCharDevice != 0 {
 		in = os.Stdin
 	}
-	wctx, cancel := context.WithTimeout(ctx, requestIdentityWait)
-	defer cancel()
-	_, err = appcli.IdentityRenderer{Client: ids, Watch: r.kcp.AwaitIdentity, Out: r.a.stderr, In: in}.WaitReady(wctx, marketrequester.RequesterIdentity)
+	wctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	deadline := time.AfterFunc(requestIdentityWait, func() {
+		cancel(fmt.Errorf("the requester identity asked for no sign-in step and was not Ready within %s", requestIdentityWait))
+	})
+	defer deadline.Stop()
+	watch := func(ctx context.Context, name string, each func(*v1alpha1.MarketIdentity) (bool, error)) (*v1alpha1.MarketIdentity, error) {
+		return r.kcp.AwaitIdentity(ctx, name, func(obj *v1alpha1.MarketIdentity) (bool, error) {
+			if !untilAssociated && obj != nil && obj.Status.Phase == v1alpha1.MarketIdentityPhaseAwaitingApproval {
+				return true, nil
+			}
+			if waitsOnPerson(obj) && deadline.Stop() {
+				r.log("run request: the requester identity waits on a person (a QR scan, a browser sign-in or the operator's association); waiting without a deadline until it is Ready, Ctrl-C stops and keeps the invocation's state",
+					"identity", name, "phase", string(obj.Status.Phase))
+			}
+			return each(obj)
+		})
+	}
+	_, err = appcli.IdentityRenderer{Client: ids, Watch: watch, Out: r.a.stderr, In: in, Hint: r.identityHint}.WaitReady(wctx, marketrequester.RequesterIdentity)
+	if cause := context.Cause(wctx); err != nil && cause != nil && ctx.Err() == nil {
+		return fmt.Errorf("%w: %w", cause, err)
+	}
 	return err
+}
+
+func waitsOnPerson(obj *v1alpha1.MarketIdentity) bool {
+	if obj == nil {
+		return false
+	}
+	if obj.Status.PendingAction != nil {
+		return true
+	}
+	switch obj.Status.Phase {
+	case v1alpha1.MarketIdentityPhaseAwaitingScan, v1alpha1.MarketIdentityPhaseAwaitingAuthorization,
+		v1alpha1.MarketIdentityPhaseAwaitingApproval, v1alpha1.MarketIdentityPhaseSessionExpired:
+		return true
+	}
+	return false
+}
+
+func (r *requestRun) identityHint(obj *v1alpha1.MarketIdentity) string {
+	if obj.Status.Phase != v1alpha1.MarketIdentityPhaseAwaitingApproval || obj.Status.PendingAction != nil {
+		return ""
+	}
+	did := cmp.Or(obj.Status.Did, "<the requester DID above>")
+	return strings.Join([]string{
+		"The requester's DID " + did + " is a new localRepo DID with association RequireApproval. No bidder accepts it",
+		"until the operator's verified association claim names it. The operator writes that claim from a checkout",
+		"of socialweb-computer-kcp, with the operator account's credential file:",
+		"  deno run -A --no-lock scripts/associate-bidder.ts --creds <operator credential file> --account <ACCOUNT> --requester-did " + did,
+		"This invocation keeps waiting for it; Ctrl-C stops it before any contract is posted.",
+		"The prod CLI requester signs in with an existing account instead: socialweb-computer run request ... -- --atproto-oauth-qr",
+	}, "\n")
 }
 
 func leftHeld(c *v1alpha1.ComputeContract) bool {
@@ -688,13 +741,6 @@ func (r *requestRun) release(ctx context.Context) (*v1alpha1.ComputeContract, er
 }
 
 func (r *requestRun) carryOn(ctx context.Context) int {
-	if err := r.signIn(ctx); err != nil {
-		r.a.log.Error("signing in", "err", err.Error())
-		c, _ := r.kcp.Contract(context.WithoutCancel(ctx))
-		r.writeSummary(ctx, c)
-		r.stop(context.WithoutCancel(ctx), false)
-		return exitFailed
-	}
 	c, err := r.kcp.WaitContract(ctx, r.contractTimeout, contractSettled, r.progress)
 	if err != nil {
 		r.a.log.Error("the contract did not settle", "err", err.Error())
@@ -809,6 +855,9 @@ func runRequest(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 	if err := r.start(ctx, true); err != nil {
 		r.writeSummaryQuiet()
 		r.stop(context.WithoutCancel(ctx), false)
+		if ctx.Err() != nil {
+			return a.fail(exitFailed, "run request: stopped before the requester was Ready, so no contract was posted; the invocation's kcp is stopped and its state is kept in %s (delete that directory to drop it)", request.Dir(r.stateRoot, name))
+		}
 		return a.fail(exitFailed, "run request: %v", err)
 	}
 	if bundle != nil {
@@ -861,6 +910,7 @@ func (a *app) reopenRequest(ctx context.Context, vals clicfg.Values, rest []stri
 		return nil, code
 	}
 	r.log("starting the invocation's kcp again from its state dir", "verb", verb)
+	r.resuming = verb == "resume"
 	if err := r.start(ctx, false); err != nil {
 		r.stop(context.WithoutCancel(ctx), false)
 		return nil, a.fail(exitFailed, "run request %s: %v", verb, err)

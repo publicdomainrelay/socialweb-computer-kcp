@@ -558,10 +558,26 @@ chmod 700 "$R"
 HOST=hat-7
 NAME=acc34-$HOST-$(date +%s)
 $SWC run request --state-dir "$R" --name "$NAME" --hold \
-  --tunnel ssh:22:webrtc --transport webrtc --exec "uname -a; id" 2>&1 | tee "$R/$NAME-request.log"
+  --tunnel ssh:22:webrtc --transport webrtc --exec "uname -a; id" \
+  -- --atproto-oauth-qr 2>&1 | tee "$R/$NAME-request.log"
 $SWC run request ssh "$NAME" --state-dir "$R" --transport webrtc \
   --exec "uname -a; id" 2>&1 | tee "$R/$NAME-ssh.log"
 ```
+
+The requester is alice, signed in by QR: the CLI requester's identity on the prod market is
+`-- --atproto-oauth-qr` (README, Rent a VM from the CLI). The default `localRepo` makes a new DID
+per invocation that waits in `AwaitingApproval` for alice's association claim, and with
+`-- --skip-qr` it has no operator, so no prod bidder is vouched. While `run request` waits, it
+prints `identity requester pendingAction scanQr url <url> expiresAt <RFC 3339>` on stderr, and
+again for each new URL. From a second shell, sign alice in with the newest one:
+
+```bash
+URL=$(command grep -oE 'pendingAction (scanQr|signInAgain) url [^ ]*' "$R/$NAME-request.log" | tail -1 | cut -d' ' -f4)
+deno run -A --no-lock scripts/oauth-signin.ts --creds ~/.aliceoa_bsky_social_source --account ALICE --url "$URL"
+```
+
+The wait has no deadline while the identity waits on the scan; `run request` goes on once it
+prints `signed in as`.
 
 Pass conditions for each host:
 

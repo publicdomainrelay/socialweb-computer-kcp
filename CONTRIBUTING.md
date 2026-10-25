@@ -569,7 +569,7 @@ creates one object. Switching back to XRPC deletes the root's market EventStream
 | `oauthDelegated` | Existing account signed in by a delegated flow | None |
 
 ```bash
-# Managed, unassociated: patch the root after it exists (or use run request --skip-qr)
+# Managed, unassociated: patch the root after it exists (or use run request -- --skip-qr)
 K=$(sudo sh -c "ls /var/lib/socialweb-computer/swc-bidder/handles/*/kcp/admin.kubeconfig" | head -1)
 sudo kubectl --kubeconfig "$K" patch marketbidder app --type=merge \
   -p '{"spec":{"identity":{"association":"Skip"}}}'
@@ -584,6 +584,19 @@ socialweb-computer run request --name demo \
 
 `pdsAccount` fails closed when it names no PDS. OAuth modes fail closed without a `pdsUrl` or a
 resolvable handle. Tokens stay in OpenBao; `MarketIdentity.status` carries refs only.
+
+The prod CLI requester (`run request` without `--network`) signs in with `-- --atproto-oauth-qr`:
+the MarketIdentity `requester` reads and writes its oauth session in the invocation's own
+OpenBaoServer `requester` (mount `requester`, `identity/requester/pds-session`), asks for the
+requester role scopes (guest.* included) through qr.fedfork.com, and the CLI prints, on stderr,
+`identity requester is AwaitingScan (no DID yet): scan the qr url to sign in` and then
+`identity requester pendingAction scanQr url <url> expiresAt <RFC 3339>`, again for every new URL.
+The operator signs in with `scripts/oauth-signin.ts --url "<url>"` (AGENTS.md, Prod deployments).
+It waits without a deadline once the identity waits on a person; Ctrl-C stops it before any
+contract is posted. The default `localRepo` makes a new DID per invocation and waits in
+`AwaitingApproval` for the operator's claim (`scripts/associate-bidder.ts --requester-did <did>`;
+the CLI prints the command with the DID); `-- --skip-qr` skips it but leaves the requester with no
+operator, so `requester-tangled-vouch` vouches no prod bidder.
 
 
 ### Verify public PDS, DID and requestCrawl

@@ -121,6 +121,29 @@ no cgroup limits on the VMs (the systemd user manager enforces them for an insta
 record, so no `upgrade` or `rollback`: the binary is the one you run. A dev market network join and
 the details: [CONTRIBUTING: foreground bidder](CONTRIBUTING.md#foreground-bidder-no-systemd).
 
+## Rent a VM from the CLI
+
+`run request` without `--network` is the prod CLI requester: a fresh kcp and OpenBao per invocation,
+against the public market (plc.directory, xrpc.fedproxy.com). Its identity on the prod market is an
+existing atproto account signed in by QR:
+
+```bash
+socialweb-computer run request --name demo --hold -- --atproto-oauth-qr
+```
+
+It prints the QR, then one line per sign-in URL on stderr,
+`identity requester pendingAction scanQr url https://qr.fedfork.com/... expiresAt <RFC 3339>`, and
+prints it again when the URL changes (a URL expires after 5 minutes). It waits for the scan without
+a deadline; Ctrl-C stops it before any contract is posted. The session stays in the invocation's
+OpenBao; the account is its own operator, so bidders vouched by it bid.
+
+The default identity (`localRepo`) makes a new did:plc per invocation with association
+`RequireApproval`: it waits in `AwaitingApproval` until the operator's verified association claim
+names that DID (`scripts/associate-bidder.ts --requester-did <did>`, printed with the DID), and no
+bid is accepted before that. `-- --skip-qr` (association `Skip`) skips the wait, but the requester
+then has no operator, so its default policy `requester-tangled-vouch` vouches no prod bidder; a
+market network sets `Skip` for its own requesters and needs neither.
+
 ## Use the hosted gateway
 
 `https://k8s.socialweb.computer` is the production gateway. No account with us, no API key. It is
@@ -218,6 +241,7 @@ Install, build, upgrade, associate, uninstall, PDS ingress, and troubleshooting 
 | --- | --- | --- |
 | Install a bidder from a release | `sudo socialweb-computer install bidder --handle <handle>` | [CONTRIBUTING: release bidder](CONTRIBUTING.md#install-a-release-bidder) |
 | Run a bidder in the foreground | `run bidder --handle <handle> --host-backend proc --fg` | [Run a bidder](#run-in-the-foreground-no-systemd) |
+| Rent a VM from the CLI | `run request -- --atproto-oauth-qr` | [Rent a VM from the CLI](#rent-a-vm-from-the-cli) |
 | Associate or skip association | `scripts/associate-bidder.ts` | [CONTRIBUTING: association](CONTRIBUTING.md#bidder-association) |
 | Upgrade a bidder | `upgrade --binary <path> --sha256 <digest>`, then `install bidder` | [CONTRIBUTING: upgrade](CONTRIBUTING.md#upgrade-reinstall-uninstall) |
 | Install or upgrade the gateway | `scripts/deploy.sh` | [CONTRIBUTING: gateway](CONTRIBUTING.md#deploy-the-gateway) |

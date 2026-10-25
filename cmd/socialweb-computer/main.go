@@ -36,6 +36,7 @@ const (
 	exitRefused = 2
 	serviceName = "socialweb-computer"
 	backendOpt  = "host-backend"
+	appRoleOpt  = "app-role"
 )
 
 type app struct {

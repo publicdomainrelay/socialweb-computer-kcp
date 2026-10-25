@@ -522,6 +522,7 @@ func bringUp(ctx context.Context, a *app, vals clicfg.Values, host bool) (upRepo
 		rec.Worktree = ""
 	}
 	rec.BaseWorkspace = vals.String("kcp-base-workspace")
+	rec.Role = vals.String(appRoleOpt)
 	rec.Executables = map[string]devinstance.Executable{"kcp": kcpExe, "kine": kineExe, "postgres": pgExe, "socialweb-computer": {Path: exe}}
 	if baoExe.Path != "" {
 		rec.Executables["bao"] = baoExe

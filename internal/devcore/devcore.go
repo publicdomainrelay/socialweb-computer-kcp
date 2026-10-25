@@ -446,6 +446,10 @@ func ComponentCoreConfig(ctx context.Context, cfg Config, rec devinstance.Record
 		out.CredentialClient = marketrequester.RequesterVaultClient
 		out.CredentialServer = vaultlayout.RootServerName
 		out.OAuthScopes = atprotooauth.RequesterOAuthScope
+	case rec.Role == devinstance.RoleRequester:
+		out.CredentialClient = marketrequester.RequesterVaultClient
+		out.CredentialServer = marketrequester.RequesterVaultServer
+		out.OAuthScopes = atprotooauth.RequesterOAuthScope
 	case strings.Contains(rec.BaseWorkspace, ":gateway"), strings.Contains(rec.BaseWorkspace, ":ssh"):
 		out.CredentialClient = marketrequester.RequesterVaultClient
 		out.CredentialServer = vaultlayout.RootServerName
