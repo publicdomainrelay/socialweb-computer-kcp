@@ -263,9 +263,9 @@ func ExchangeCode(ctx context.Context, client *http.Client, pending PendingAuth,
 	if nextNonce := resp.Header.Get("DPoP-Nonce"); nextNonce != "" {
 		nonce = nextNonce
 	}
-	scopes := pending.Scopes
-	if granted := ReadableScopes(strings.Fields(out.Scope)); len(granted) > 0 {
-		scopes = granted
+	scopes, err := GrantedScopes(out.Scope)
+	if err != nil {
+		return SessionData{}, fmt.Errorf("oauthclient: the code exchange: %w", err)
 	}
 	return SessionData{
 		AccountDID:              did.String(),
@@ -274,7 +274,7 @@ func ExchangeCode(ctx context.Context, client *http.Client, pending PendingAuth,
 		ClientID:                pending.ClientID,
 		AuthServerURL:           pending.AuthServerURL,
 		AuthServerTokenEndpoint: pending.TokenEndpoint,
-		Scopes:                  append([]string(nil), scopes...),
+		Scopes:                  scopes,
 		AccessToken:             out.AccessToken,
 		RefreshToken:            out.RefreshToken,
 		DPoPAuthServerNonce:     nonce,

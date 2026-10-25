@@ -2,6 +2,7 @@ package oauth
 
 import (
 	"net/url"
+	"slices"
 	"strings"
 )
 
@@ -142,6 +143,35 @@ func MissingScopes(required, granted []string) []string {
 		missing = append(missing, want)
 	}
 	return missing
+}
+
+var transitionScopes = []string{ScopeTransitionGeneric, "transition:email", "transition:chat.bsky"}
+
+var permissionResources = []string{"repo", "rpc", "blob", "identity", "account", "include"}
+
+func ValidScope(scope string) bool {
+	if scope == "" {
+		return false
+	}
+	for _, c := range scope {
+		if c < 0x21 || c > 0x7e {
+			return false
+		}
+	}
+	if scope == ScopeAtproto || slices.Contains(transitionScopes, scope) {
+		return true
+	}
+	head, query, _ := strings.Cut(scope, "?")
+	resource, _, _ := strings.Cut(head, ":")
+	if !slices.Contains(permissionResources, resource) {
+		return false
+	}
+	_, err := url.ParseQuery(query)
+	return err == nil
+}
+
+func KnownGrant(granted []string) bool {
+	return len(granted) > 0 && !slices.ContainsFunc(granted, func(scope string) bool { return !ValidScope(scope) })
 }
 
 func ScopeSubject(scope string) string {

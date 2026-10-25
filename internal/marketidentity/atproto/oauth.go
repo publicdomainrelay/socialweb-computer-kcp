@@ -265,12 +265,17 @@ func (a *Accounts) oauthQr(ctx context.Context, workspace string, id *v1alpha1.M
 		return Result{Status: qrPending(status, generation, qr, need), RequeueAfter: QRPollInterval}, nil
 	}
 	a.qr.Delete(key)
+	if !sessionQr.GrantReported() {
+		a.log.Info("qr_session_grant_unverified", "workspace", workspace, "identity", id.Name, "did", sessionQr.UserDID,
+			"assumed", strings.Join(a.qrScopes(), " "))
+	}
 	data, err := sessionQr.SessionData(a.sessionClientID(id), a.qrScopes())
-	if err != nil {
+	if err == nil {
+		data = a.sessionWithEndpoints(ctx, data)
+		session, handle, err = a.openSessionData(ctx, workspace, id, data, ref, sessionQr.Handle)
+	} else if !errors.Is(err, oauthclient.ErrScopeRejected) {
 		return failed(status, generation, "QRSessionInvalid", err.Error()), err
 	}
-	data = a.sessionWithEndpoints(ctx, data)
-	session, handle, err = a.openSessionData(ctx, workspace, id, data, ref, sessionQr.Handle)
 	if need, ok := signInNeeded(&status, err); ok && err != nil {
 		if qr, err = a.newQrState(key); err != nil {
 			return failed(status, generation, "OAuthBeginFailed", err.Error()), nil
@@ -585,8 +590,7 @@ func (a *Accounts) requiredScopes(id *v1alpha1.MarketIdentity) []string {
 }
 
 func (a *Accounts) scopeCheck(workspace string, id *v1alpha1.MarketIdentity, held *heldAccount, granted []string) error {
-	granted = oauthclient.ReadableScopes(granted)
-	if len(granted) == 0 {
+	if !atprotooauth.KnownGrant(granted) {
 		return nil
 	}
 	missing := atprotooauth.MissingScopes(a.requiredScopes(id), granted)
@@ -607,6 +611,8 @@ func signInAgainReason(err error) (string, string, bool) {
 	switch {
 	case errors.As(err, &changed):
 		return "ScopeChanged", changed.message(), true
+	case errors.Is(err, oauthclient.ErrScopeRejected):
+		return "ScopeRejected", "the authorization server granted no atproto scope; sign in again", true
 	case oauthExpired(err):
 		return string(v1alpha1.MarketIdentityPhaseSessionExpired), pendingMessage(v1alpha1.MarketIdentityPhaseSessionExpired), true
 	}

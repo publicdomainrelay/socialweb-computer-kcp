@@ -70,6 +70,12 @@ type QRSession struct {
 	DPoPPublicJWK map[string]any `json:"dpopPublicJwk"`
 
 	DPoPPrivateJWK map[string]any `json:"dpopPrivateJwk"`
+
+	Scope string `json:"scope,omitempty"`
+}
+
+func (q QRSession) GrantReported() bool {
+	return strings.TrimSpace(q.Scope) != ""
 }
 
 func QRClientID(origin string) string {
@@ -85,7 +91,7 @@ func jwkString(jwk map[string]any, name string) string {
 	return value
 }
 
-func (q QRSession) SessionData(clientID string, scopes []string) (SessionData, error) {
+func (q QRSession) SessionData(clientID string, requested []string) (SessionData, error) {
 	if q.UserDID == "" {
 		return SessionData{}, errors.New("oauthclient: the qr session names no user DID")
 	}
@@ -105,15 +111,18 @@ func (q QRSession) SessionData(clientID string, scopes []string) (SessionData, e
 	if err != nil {
 		return SessionData{}, err
 	}
-	if granted := TokenScopes(q.AccessJWT); len(granted) > 0 {
-		scopes = granted
+	scopes := append([]string(nil), requested...)
+	if q.GrantReported() {
+		if scopes, err = GrantedScopes(q.Scope); err != nil {
+			return SessionData{}, fmt.Errorf("oauthclient: the qr session: %w", err)
+		}
 	}
 	return SessionData{
 		AccountDID:              did.String(),
 		SessionID:               SessionID(did.String(), host),
 		HostURL:                 host,
 		ClientID:                strings.TrimSpace(clientID),
-		Scopes:                  append([]string(nil), scopes...),
+		Scopes:                  scopes,
 		AccessToken:             q.AccessJWT,
 		RefreshToken:            q.RefreshJWT,
 		DPoPPrivateKeyMultibase: key.Multibase(),
@@ -257,6 +266,9 @@ func (q *QRTransfer) Publish(ctx context.Context, session QRSession) error {
 		"pds":            session.PDS,
 		"dpopPublicJwk":  session.DPoPPublicJWK,
 		"dpopPrivateJwk": session.DPoPPrivateJWK,
+	}
+	if session.GrantReported() {
+		body["scope"] = session.Scope
 	}
 	raw, err := json.Marshal(body)
 	if err != nil {

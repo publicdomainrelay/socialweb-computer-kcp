@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -19,6 +20,7 @@ import (
 	"github.com/bluesky-social/indigo/atproto/identity"
 	"github.com/bluesky-social/indigo/atproto/syntax"
 
+	atprotooauth "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
 )
@@ -69,6 +71,8 @@ type Session struct {
 	did string
 
 	hostURL string
+
+	scopeAbsentLogged bool
 }
 
 var _ pdsclient.TokenSource = (*Session)(nil)
@@ -262,41 +266,15 @@ func (s *Session) Scopes() []string {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if scopes := TokenScopes(s.data.AccessToken); len(scopes) > 0 {
-		return scopes
-	}
-	return ReadableScopes(s.data.Scopes)
+	return append([]string(nil), s.data.Scopes...)
 }
 
-func TokenScopes(token string) []string {
-	parts := strings.Split(token, ".")
-	if len(parts) < 2 {
-		return nil
+func GrantedScopes(scope string) ([]string, error) {
+	granted := strings.Fields(scope)
+	if !slices.Contains(granted, atprotooauth.ScopeAtproto) {
+		return nil, fmt.Errorf("%w (granted %q)", ErrScopeRejected, scope)
 	}
-	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return nil
-	}
-	var claims struct {
-		Scope string `json:"scope"`
-	}
-	if json.Unmarshal(raw, &claims) != nil {
-		return nil
-	}
-	return ReadableScopes(strings.Fields(claims.Scope))
-}
-
-func ReadableScopes(scopes []string) []string {
-	out := make([]string, 0, len(scopes))
-	for _, scope := range scopes {
-		if !strings.HasPrefix(scope, "ref:") {
-			out = append(out, scope)
-		}
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
+	return granted, nil
 }
 
 func (s *Session) AccessToken(ctx context.Context) (string, error) {
@@ -579,11 +557,20 @@ func (s *Session) refreshOnceLocked(ctx context.Context) error {
 	if out.AccessToken == "" || out.RefreshToken == "" {
 		return errors.New("oauthclient: the token refresh returned no access or refresh token")
 	}
-	s.data.AccessToken = out.AccessToken
-	s.data.RefreshToken = out.RefreshToken
-	if granted := ReadableScopes(strings.Fields(out.Scope)); len(granted) > 0 {
+	if out.Scope == "" {
+		if !s.scopeAbsentLogged {
+			s.scopeAbsentLogged = true
+			s.log.Info("oauth_refresh_scope_absent", "did", s.did, "session_id", s.data.SessionID, "kept", strings.Join(s.data.Scopes, " "))
+		}
+	} else {
+		granted, err := GrantedScopes(out.Scope)
+		if err != nil {
+			return fmt.Errorf("%w: the token refresh: %w", ErrSessionExpired, err)
+		}
 		s.data.Scopes = granted
 	}
+	s.data.AccessToken = out.AccessToken
+	s.data.RefreshToken = out.RefreshToken
 	if nextNonce := resp.Header.Get("DPoP-Nonce"); nextNonce != "" {
 		s.data.DPoPAuthServerNonce = nextNonce
 	}

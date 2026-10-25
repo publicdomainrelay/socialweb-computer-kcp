@@ -27,6 +27,8 @@ var (
 	ErrQRTimeout = errors.New("oauthclient: the qr session transfer timed out")
 
 	ErrStateNotFound = errors.New("oauthclient: the oauth callback state is unknown")
+
+	ErrScopeRejected = errors.New("oauthclient: the granted scope does not include atproto; the session is rejected")
 )
 
 type SessionData struct {

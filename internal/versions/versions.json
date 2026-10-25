@@ -339,12 +339,12 @@
       "verify": "rebuilt from this commit; the binary must equal the fetch sha256 pin (the sha256 the OpenBao plugin catalog registers) and the unpacked tree the treeSha256 pin, so a change to cmd/openbao-plugin-auth-atproto re-pins it; moves together with the bao asset",
       "executables": {"openbao-plugin-auth-atproto": "openbao-plugin-auth-atproto"},
       "fetch": {
-        "linux/amd64": {"kind": "go", "module": "cmd/openbao-plugin-auth-atproto", "package": ".", "sha256": "51eff050ab94543290c765ad04b7a6b6a9f8c9c7e846c8cecbef81ac8f2dae40", "members": {"openbao-plugin-auth-atproto": "openbao-plugin-auth-atproto"}},
-        "linux/arm64": {"kind": "go", "module": "cmd/openbao-plugin-auth-atproto", "package": ".", "sha256": "e5de7599440868d5af6aaddea3c09ad50e3ac3b6562e4046008183588bd5156b", "members": {"openbao-plugin-auth-atproto": "openbao-plugin-auth-atproto"}}
+        "linux/amd64": {"kind": "go", "module": "cmd/openbao-plugin-auth-atproto", "package": ".", "sha256": "54ae61a0c02ba8dc110024abdd8b8b9afc1a667e4ca385a335e8bde5e650b399", "members": {"openbao-plugin-auth-atproto": "openbao-plugin-auth-atproto"}},
+        "linux/arm64": {"kind": "go", "module": "cmd/openbao-plugin-auth-atproto", "package": ".", "sha256": "a9f08c6a654501824051a9a43165c89aa8bb544328f63bb503852a751b4d2438", "members": {"openbao-plugin-auth-atproto": "openbao-plugin-auth-atproto"}}
       },
       "platforms": {
-        "linux/amd64": {"treeSha256": "de327a163afbd969a964730fe83df6d70ea15135664bc2cf4c4fc0885edde353", "rawBytes": 16425086, "zstdBytes": 5155802},
-        "linux/arm64": {"treeSha256": "879c59e1653c12fd60b3c5779520ccc40b9822e99c0912f28bd07977c650247c", "rawBytes": 15335550, "zstdBytes": 4588048}
+        "linux/amd64": {"treeSha256": "00734beea15d1b10033d67c54630afbcd881aefdbe8c0ffc44779734304b0d98", "rawBytes": 16425086, "zstdBytes": 5157242},
+        "linux/arm64": {"treeSha256": "36a0fba5840279fa6b330cbb06e0c1aa4715e7988ec3c8535bfbbef0bed92ea9", "rawBytes": 15335550, "zstdBytes": 4588599}
       }
     },
     "openbao-plugin-auth-sshsig": {

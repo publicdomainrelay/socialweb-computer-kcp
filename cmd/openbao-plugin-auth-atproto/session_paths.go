@@ -89,6 +89,16 @@ func (b *backend) refreshSession(ctx context.Context, st logical.Storage, cfg *c
 		}
 		return err
 	}
+	if tr.Scope != "" && !strings.Contains(" "+tr.Scope+" ", " atproto ") {
+		if s.RevocationEndpoint != "" {
+			_ = oc.revoke(cctx, s.RevocationEndpoint, tr.RefreshToken, "refresh_token")
+		}
+		s.Status, s.StatusReason = statusExpired, "the refreshed grant does not include atproto"
+		if perr := putSession(ctx, st, s); perr != nil {
+			return perr
+		}
+		return errors.New("the refreshed grant does not include atproto; the session is rejected")
+	}
 	s.AccessToken, s.RefreshToken = tr.AccessToken, tr.RefreshToken
 	s.ExpiresAt = time.Now().UTC().Add(time.Duration(tr.ExpiresIn) * time.Second)
 	if tr.Scope != "" {
